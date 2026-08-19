@@ -3,7 +3,7 @@
 schema_version: 2
 project: backend
 source_commit: 744e3de4
-generated_at: 2026-08-18 01:25:00
+generated_at: 2026-08-19 22:32:00
 generator: sillyspec-scan
 
 modules:
@@ -813,13 +813,22 @@ modules:
       - /api/workspaces/{workspace_id}/runtime/user-inputs
       - /api/workspaces/{workspace_id}/runtime/artifacts
     main_symbols:
-      - RuntimeService
+      - RuntimeLiveService
       - RuntimeProgress
       - StageProgress
       - StageStep
       - UserInputEntry
       - ArtifactEntry
       - runtime_router
+      - RuntimeNotBound
+      - RuntimeDaemonOffline
+      - RuntimeTransferInterrupted
+      - RuntimeRpcTimeout
+      - RuntimeDaemonForbidden
+      - RuntimePathNotFound
+      - RuntimeDaemonTooOld
+      - RuntimeArtifactTooLarge
+      - RuntimeDaemonRemoteError
     depends_on:
       - core
       - auth

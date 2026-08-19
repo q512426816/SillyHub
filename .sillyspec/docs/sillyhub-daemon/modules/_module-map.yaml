@@ -3,7 +3,7 @@
 schema_version: 2
 project: sillyhub-daemon
 source_commit: 744e3de4
-generated_at: 2026-08-18 01:25:00
+generated_at: 2026-08-19 22:30:00
 generator: sillyspec-scan
 
 # 全量重扫（2026-08-18, 基线 6e78b29a/43 模块 → 本版 46 模块）：
@@ -174,7 +174,7 @@ modules:
     aliases: []
     entrypoints: []
     main_symbols: [Daemon, DaemonOptions, RecoveryCoordinator, SessionRecoverStatus, translateSpecRoot, InteractiveCredentialManager, RuntimeLockLike, LEASE_POLL_SKIP_MS]
-    depends_on: [config, protocol, types, agent-detector, client, model-error, ws-client, file-rpc, roots-rpc, host-fs-handler, spawn-env, claude-settings, preflight, skill-manager, build-id, resilience, policy, workspace, interactive, spec-sync, task-runner]
+    depends_on: [config, protocol, types, agent-detector, client, model-error, ws-client, file-rpc, roots-rpc, host-fs-handler, runtime-handler, spawn-env, claude-settings, preflight, skill-manager, build-id, resilience, policy, workspace, interactive, spec-sync, task-runner]
     used_by: [cli, client]
     needs_review: false
     concerns: []
@@ -461,6 +461,21 @@ modules:
     concerns: []
     review_reasons: []
     notes: "宿主文件系统代理 + worktree 隔离（GitWorktreeAdd/Remove/Merge）；daemon 经此操作宿主仓库；实测 import file-rpc（旧版未计）"
+
+  runtime-handler:
+    status: active
+    doc: modules/sillyhub-daemon.md
+    paths: ["sillyhub-daemon/src/runtime-handler.ts"]
+    tags: [runtime, rpc, spec-dump, 实时状态]
+    aliases: []
+    entrypoints: []
+    main_symbols: [RuntimeHandler, RuntimeHandlerOptions, ARTIFACT_MAX_BYTES, SILLYSPEC_TIMEOUT_MS]
+    depends_on: [ws-client, spec-sync]
+    used_by: [daemon]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+    notes: "runtime.* RPC 四方法（read_progress spawn sillyspec progress dump --json + 三方法直读 .runtime/）；workspace_id UUID 白名单 + filename 预检 + containment + 1MB/30s 上限；spawn+shell 替代 execFile（Windows .cmd shim ENOENT）；RpcError 复用 ws-client（2026-08-19-runtime-live-daemon-read）"
 
   resilience:
     status: active

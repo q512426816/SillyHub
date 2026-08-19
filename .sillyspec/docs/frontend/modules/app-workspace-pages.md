@@ -23,8 +23,8 @@ created_at: 2026-08-18 01:45:00
 - `WorkspaceSkillsPage`（`skills`）：技能管理（lib-mcp-skills 视图）。
 - `WorkspaceFilesPage`（`files`，50 行薄壳）：`<BorrowedSolutionFilesPanel>` 拉 owner_type=workspace 的借用方案文件（共享 daemon 产出）。
 - `ComponentsPage` / `TopologyPage`：`listComponents` / `getTopology`，拓扑 @xyflow/react。
-- `RuntimePage`（`runtime`）：`getRuntimeProgress` + `getRuntimeUserInputsRaw` + `getRuntimeArtifacts` 运行时进度三路。
-- 其余：`ScanDocsPage`（+ lib-scan-docs-tree 文档树）、`KnowledgePage`、`ReleasesPage`、`ApprovalsPage`、`AuditPage`、`IncidentsPage` / `IncidentDetailPage`（`[iid]`）、`MissionsPage`、`MembersPage`（成员管理 + `WorkspaceMemberAddDialog`/`Row`）、`WorkspaceMcpPage`（MCP 设置）。
+- `RuntimePage`（`runtime`）：`getRuntimeProgress` + `getRuntimeUserInputsRaw` + `getRuntimeArtifacts` 运行时进度三路。2026-08-19-runtime-live-daemon-read：数据源为绑定 daemon 实时读取，徽标「守护进程运行态」+ 副标题「经绑定守护进程实时读取 .sillyspec/.runtime/」；错误按 ApiError.status 分级行动指引（502 离线/504 超时/422 版本过旧），产物读取失败接红条不静默。
+- 其余：`ScanDocsPage`（+ lib-scan-docs-tree 文档树；树节点徽标 `👤 来源成员` / `🕘 历史N版`=conflict_count 覆盖存档计数，中性 outline 非告警，ql-20260819-003）、`KnowledgePage`、`ReleasesPage`、`ApprovalsPage`、`AuditPage`、`IncidentsPage` / `IncidentDetailPage`（`[iid]`）、`MissionsPage`、`MembersPage`（成员管理 + `WorkspaceMemberAddDialog`/`Row`）、`WorkspaceMcpPage`（MCP 设置）。
 
 ## 关键逻辑
 ```

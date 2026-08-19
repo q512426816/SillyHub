@@ -25,7 +25,7 @@ created_at: 2026-06-24T01:16:42
 ## 关键逻辑
 
 - **Daemon 核心**：`src/daemon.ts` 的 `Daemon` 类 + `RecoveryCoordinator`（崩溃恢复）+ `InteractiveCredentialManager`（凭据管理）+ `translateSpecRoot`（spec 根映射）；`DaemonOptions` 控制运行参数。
-- **本地能力**：agent-detector（探测已装 Agent）、terminal-launcher/observer（终端拉起与观察）、file-rpc（文件操作）、task-runner、spec-sync（规范同步）、spawn-env、credential、config、workspace、ws-client。
+- **本地能力**：agent-detector（探测已装 Agent）、terminal-launcher/observer（终端拉起与观察）、file-rpc（文件操作）、task-runner、spec-sync（规范同步）、spawn-env、credential、config、workspace、ws-client、runtime-handler（runtime.* 只读 RPC：read_progress spawn sillyspec progress dump + 直读 .runtime/，2026-08-19-runtime-live-daemon-read）。
 - **构建发布**：`tsc` 出 `dist/`，`scripts/build-bundle.sh`（bundle 脚本）用 ncc 打成单文件便于分发；engines 锁 Node ≥20。
 
 ## 注意事项
@@ -52,6 +52,7 @@ created_at: 2026-06-24T01:16:42
 - 2026-08-15-init-trigger-sillyspec-init | handleInitLease 5→6 步（pull 后插 runSillyspecInit：spawn sillyspec init 平台模式+--no-skills+60s 超时杀树+3s 版本门控 MIN 3.26.8 fail-safe）+ cli.ts 构造前 AgentDetector 探测注入 tools（兜底 claude）+ UPLOAD_EXCLUDE_TOP_BASE 三处排除统一（projects 不上传+缓存残留防 delete op 误删）+ test_init_lease 改写四组新用例（22 绿）+ run-sillyspec-init.test.ts 新（11 绿）。
 - ql-20260626-001-4a8e | 放宽 complete 事件 result body 截断 slice(3000)→slice(50000)（task-runner.ts `_eventToMessages` complete 分支），避免 daemon 侧砍断 agent 最终总结（backend 侧 content 已同步放宽到 50000）。
 - 2026-06-26-daemon-client-spec-sync-fix | syncSpecTreeIfNeeded 抽离 + scan 终态回灌（FR-05）+ packSpecDir 含 .runtime（FR-06）+ task-runner kind=change-write 分支 + hub-client change-write 方法（FR-08/10）。
+- 2026-08-19-runtime-live-daemon-read | `_registerRuntimeRpcHandler` 注册 `runtime.*` 四只读方法（read_progress/read_user_inputs/list_artifacts/read_artifact，design §6.1 契约）+ `runtime-handler.ts` 业务层：workspace_id UUID 正则白名单（shell 注入防线，spawn+shell:true 替代 execFile——Windows npm .cmd shim ENOENT）+ filename 预检 + containment resolve + 1MB/30s 上限；RpcError 复用 ws-client 导出类（`_dispatchRpc` instanceof 判定）。25 用例。
 - ql-20260702-001-f3c7 | install.sh 生成 .cmd wrapper 改 CRLF（awk）+ REM 英文化（修中文 Windows cmd.exe 下 LF+UTF-8 中文 REM 致注释被当命令执行的噪音报错；daemon 本身正常）。
 - ql-20260703-001-643f | agent-detector normalizeProvider（claude_code/claude-code→claude，其余原样）+ daemon _startInteractiveSession:2338 / reopen:2144 归一化（替换粗暴三元 === 'codex'?'codex':'claude'，防 opencode/cursor/openclaw 误归 claude）+ :2355 early-return 加 notifyRunResult 回传标 run failed（治本：provider 错配/CLI 缺失时不再 lease 永远 claimed/run 永远 pending 无声卡死，主动回传 backend 标 failed）。
 - ql-20260705-004-5e2f | ws-client.ts 加 WS keepalive（30s ping + 10s pong 超时 terminate）：修 import get_spec_bundle RPC 撞 docker NAT idle 断连窗口报 HTTP_504_DAEMON_RUNTIME_OFFLINE mid-rpc（npm ws 库默认不发 ping，Python→TS 移植漏配）+ 顺手修 4 个 daemon_local_id URL query 测试断言（daemon-entity-binding 遗留债）。

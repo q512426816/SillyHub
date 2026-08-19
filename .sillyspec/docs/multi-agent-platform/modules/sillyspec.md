@@ -23,7 +23,7 @@ multi-agent-platform 采用的文档驱动变更管理规范体系，落地在�
 
 ## 关键逻辑
 
-- **状态源**：变更进度存在 `sillyspec.db`（历史曾用 progress.json，已迁移），current_stage + stages + 步骤级进度驱动流程推进；`local.yaml` 的 test_strategy/module_paths 约束 scan 与 verify 行为。
+- **状态源**：变更进度存在 `sillyspec.db`（历史曾用 progress.json，已迁移），current_stage + stages + 步骤级进度驱动流程推进；`local.yaml` 的 test_strategy/module_paths 约束 scan 与 verify 行为。2026-08-19-runtime-live-daemon-read 新增 `sillyspec progress dump --spec-dir <path> --json` 只读导出（ProgressManager.dump：无 DB/无活跃变更返回 null；输出 snake_case + ISO 时间戳契约——消费端 backend pydantic，camelCase 会被静默忽略、斜杠时间戳拒收，跨端契约守护断言已锚定）。
 - **技能编排**：一组 sillyspec-* 技能（init/brainstorm/propose/plan/execute/verify/archive/quick/scan/auto/continue/resume/commit/status/state/doctor/workspace/export/explore）对应流程各阶段，用户经 `sillyspec run <skill>` 或直接调用技能进入。
 - **CLI 直跑平台同步**：`sync()` 成功路径三层上行——进度六表 POST `/api/changes/{name}/progress`（base_ts 乐观锁）→ 四件套文档直推 documents（2026-08-16-auto-sync-from-repo）→ 整树增量 `syncSpecTree()`（2026-08-17-spec-file-incremental-sync，`src/spec-sync.js`）：GET 服务器清单为锚 walk/hash/diff 生成 add/update/delete/rename ops（base_version 乐观锁、rename 按同 hash 配对），POST `/api/changes/-/spec-sync`；无差异短路不发请求，未连接/404/网络失败静默降级（SILLYSPEC_DEBUG_SYNC 可查），conflict 只 warn 不阻塞主流程；排除口径与 daemon 一致（`.runtime`/`runtime`/`projects` 顶层排除 + `worktrees` 剪枝）。
 - **归档蒸馏**：verify 通过后 archive 阶段做模块影响分析（archive-impact.yaml）、生成 module-impact、蒸馏知识到 `knowledge/`、同步 `_module-map.yaml`，再把变更目录移入 archive。
