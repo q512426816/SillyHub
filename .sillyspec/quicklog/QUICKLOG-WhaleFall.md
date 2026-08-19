@@ -36,3 +36,15 @@
 根因：workspace-session-selector 变更已为新建会话增加了工作区选择器，但已有会话列表和会话面板未展示工作区归属。
 方案：session-list-panel.tsx 左栏 chips 区新增工作区 Tag（workspace_id 解析名称）；sessions/page.tsx 右栏面板头部 badge 区显示工作区名称。两个组件通过 listWorkspaces() 获取工作区列表做 id→name 映射。
 结果：tsc 类型检查通过（仅 file-preview 预存错误），lint 通过（无新增 warning），162 测试通过（2 预存失败与本次无关）。
+
+## ql-20260819-002-9167 | 2026-08-19 21:18:43 | /sessions 页移除「结束会话」按钮及前端逻辑
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/sessions/page.tsx（删除结束会话按钮与 handleEnd/endDisabled 及相关导入）
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（断言翻转 结束会话按钮不存在）
+- .sillyspec/docs/SillyHub/modules/frontend_app.md（变更索引追加 ql 条目）
+需求：/sessions 页移除「结束会话」按钮及前端逻辑
+根因：用户要求去掉手动结束入口（误操作终结会话不可逆），会话仍可自然结束且 runtimes 弹窗保留该功能
+方案：page.tsx 删除结束会话 Button/handleEnd/endDisabled 及 Square、endSession 导入（已结束横幅与重新开启保留），page.test.tsx 断言由存在翻转为不存在
+结果：tsc 零错误 + sessions page 测试 11/11 全绿，已 git add 暂存三文件

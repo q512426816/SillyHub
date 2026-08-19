@@ -80,3 +80,7 @@ whoLine: attach 时并发拉 listSessionRuns，按 realRunId??runId 匹配注入
 <!-- MANUAL_NOTES_START -->
 
 <!-- MANUAL_NOTES_END -->
+
+## 变更索引
+
+- ql-20260819-002-9167 | /sessions 页移除「结束会话」按钮（结束走自然超时；runtimes 弹窗入口保留；已结束横幅/重新开启保留）

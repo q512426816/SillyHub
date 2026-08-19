@@ -372,7 +372,9 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟）", () => {
       screen.getByPlaceholderText("继续追问…（Enter 发送 · Shift+Enter 换行）"),
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: /打断本轮/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /结束会话/ })).toBeTruthy();
+    // ql-20260819-002：/sessions 页「结束会话」按钮已移除（会话结束走自然超时；
+    // runtimes 弹窗保留该入口）
+    expect(screen.queryByRole("button", { name: /结束会话/ })).toBeNull();
     // 页头出现「新建会话」入口（回到新建态）
     expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
 

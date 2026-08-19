@@ -43,7 +43,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Ban, Square } from "lucide-react";
+import { Ban } from "lucide-react";
 import { Badge, Button, Spin, message } from "antd";
 
 import { buildErrorLogItem } from "@/components/agent-log/normalize";
@@ -73,7 +73,6 @@ import {
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import { listWorkspaces } from "@/lib/workspaces";
 import {
-  endSession,
   fetchPendingDialogs,
   fetchSessionDialogHistory,
   getAgentSession,
@@ -713,23 +712,6 @@ function SessionPanel({
     }
   }, [session, turnState.currentRunId, sessionId]);
 
-  const handleEnd = useCallback(async () => {
-    if (!session || session.status !== "active") return;
-    try {
-      await endSession(sessionId);
-      streamRef.current?.close();
-      streamRef.current = null;
-      setTurnState((prev) => ({ ...prev, currentRunId: null }));
-      await qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
-      onSessionListRefresh?.();
-    } catch (err) {
-      const apiErr = err as ApiError;
-      setErrorMsg(
-        apiErr instanceof ApiError ? apiErr.message : "结束会话失败，请重试",
-      );
-    }
-  }, [session, sessionId, qc, onSessionListRefresh]);
-
   const handleReopen = useCallback(async () => {
     setReopening(true);
     try {
@@ -892,7 +874,6 @@ function SessionPanel({
 
   const interruptDisabled =
     session.status !== "active" || !turnState.currentRunId || !machineOnline;
-  const endDisabled = session.status !== "active" || !machineOnline;
 
   // ql-20260815-011：无真实标题不渲染占位「未命名会话」，只留 id 短码。
   const title = session.title?.trim() || "";
@@ -983,16 +964,6 @@ function SessionPanel({
             title="打断本轮（session 保持 active）"
           >
             打断本轮
-          </Button>
-          <Button
-            size="small"
-            danger
-            icon={<Square className="h-3 w-3" />}
-            disabled={endDisabled}
-            onClick={() => void handleEnd()}
-            title="结束整个会话"
-          >
-            结束会话
           </Button>
         </div>
       </header>
