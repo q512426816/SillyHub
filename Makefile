@@ -20,7 +20,7 @@ help:
 	@echo "  backend-migrate   alembic upgrade head"
 	@echo "  frontend-install  pnpm install"
 	@echo "  frontend-run      pnpm dev"
-	@echo "  frontend-test     pnpm test --run"
+	@echo "  frontend-test     pnpm test（vitest run）"
 	@echo "  frontend-lint     pnpm lint"
 	@echo "  frontend-typecheck pnpm typecheck"
 	@echo "  frontend-build    pnpm build"

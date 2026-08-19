@@ -89,8 +89,10 @@ pnpm dev                        # http://localhost:3000
 ### 全栈容器化
 
 ```bash
-cp deploy/.env.example deploy/.env   # 至少改 SECRET_KEY
-make up                              # postgres / redis / minio / backend / frontend
+cp deploy/.env.example deploy/.env   # 必改项见下行
+make up                              # postgres / redis / minio / litellm + litellm-db / backend / frontend
+# 部署前必改：SECRET_KEY、POSTGRES_PASSWORD、S3_ACCESS_KEY/SECRET_KEY、
+# LITELLM_MASTER_KEY、LITELLM_DB_PASSWORD、PLATFORM_BOOTSTRAP_ADMIN_PASSWORD
 ```
 
 ## 项目结构
@@ -102,6 +104,8 @@ multi-agent-platform/
 ├── sillyhub-daemon/    # 本地执行守护（task-runner · interactive · mcp · policy · resilience）
 ├── deploy/             # Docker Compose 编排
 ├── docs/               # 设计与文档
+├── scripts/            # 仓库级脚本（scan 漂移检查等）
+├── .github/            # CI（backend / frontend / daemon / scan-drift）
 ├── .sillyspec/         # 规范驱动工作区（changes · docs · knowledge）
 └── Makefile            # 统一开发入口
 ```
@@ -110,8 +114,8 @@ multi-agent-platform/
 
 ```bash
 make help                 # 全部命令
-make test                 # 后端 + 前端测试
-make lint                 # 后端 + 前端 lint
+make test                 # 后端 + 前端 + daemon 测试
+make lint                 # 后端 + 前端 lint + daemon typecheck
 make backend-run          # 后端热重载
 make frontend-run         # 前端 dev
 ```

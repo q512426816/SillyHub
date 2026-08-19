@@ -79,3 +79,4 @@ backend/test_alembic.db
 backend/*.db-journal
 .sillyspec-platform-managed
 .sillyspec-platform-cleaned
+meta.json

@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v6.0.2
+      - uses: actions/checkout@v4
 
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
@@ -47,8 +47,6 @@ jobs:
 
       - name: Pytest
         env:
-          DATABASE_URL: postgresql+asyncpg://platform:platform@localhost:5432/platform_test
-          REDIS_URL: redis://localhost:6379/15
           SECRET_KEY: ci-secret-must-be-at-least-16-chars
           ENVIRONMENT: test
         # --reruns 2 --reruns-delay 1:CI 2 核低资源下 xdist + async fixture + in-memory SQLite

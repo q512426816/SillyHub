@@ -181,7 +181,7 @@ services:
     environment:
       POSTGRES_DB: litellm
       POSTGRES_USER: litellm
-      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:-litellm}
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:?must set LITELLM_DB_PASSWORD}
     volumes:
       - litellm-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -215,7 +215,7 @@ services:
       # auth_token（LiteLLM /v1/messages 接受 master key 鉴权）。
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?must set LITELLM_MASTER_KEY}
       STORE_MODEL_IN_DB: "True"  # admin API 动态注册需 DB 持久化（spike 定稿假设）
-      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:-litellm}@litellm-db:5432/litellm
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:?must set LITELLM_DB_PASSWORD}@litellm-db:5432/litellm
       # 不设 PYTHONUNBUFFERED 时 litellm 崩溃日志被 Python stdout 缓冲吞掉（docker logs 全空），
       # 极难定位。强制 unbuffered，崩溃 traceback 立即 flush，OOM/迁移失败一眼可见。
       PYTHONUNBUFFERED: "1"

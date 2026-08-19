@@ -37,6 +37,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Scan drift check tests（HY-10：本体测试此前无 CI 执行）
+        run: python -m pytest scripts/test_scan_drift_check.py -q
+
       - name: Run scan drift check（warn-only，漂移也 exit 0）
         # tee：::warning 注解照常打到 stdout 让 GitHub 识别，同时落盘给评论步骤解析。
         # 默认 shell 已带 pipefail，脚本自身异常（非 0）会正常失败 job；漂移走 exit 0。

@@ -11,7 +11,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-platform}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-platform}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -25,7 +25,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -42,8 +42,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "127.0.0.1:${MINIO_API_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -59,7 +59,7 @@ services:
     environment:
       POSTGRES_DB: litellm
       POSTGRES_USER: litellm
-      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:-litellm}
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:?must set LITELLM_DB_PASSWORD}
     volumes:
       - litellm-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -81,7 +81,7 @@ services:
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?must set LITELLM_MASTER_KEY}
       STORE_MODEL_IN_DB: "True"
-      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:-litellm}@litellm-db:5432/litellm
+      DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:?must set LITELLM_DB_PASSWORD}@litellm-db:5432/litellm
     volumes:
       - ./litellm-config.yaml:/app/config.yaml
     command: ["--config", "/app/config.yaml", "--port", "4000"]

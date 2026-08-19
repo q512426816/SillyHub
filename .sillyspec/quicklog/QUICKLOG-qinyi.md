@@ -173,3 +173,12 @@
 根因：无（测试同步+死代码清理+小改）
 方案：__setBindingMap 改hoisted状态；placeholder三元；删stage-team-config/workspace-binding-dialog/use-agent-runs及stub断言；审批卡终态停表；formatter去any
 结果：tsc 0错、vitest 1695 passed、lint 0 error
+
+## ql-20260820-005-68e3 | 2026-08-20 03:35:48 | docs/platform-audit-2026-08-20.md 批次E（HY-1/4/5/6/7/8/9/10/11/13/14/15）
+状态：已完成
+关联变更：（无）
+文件：.github/workflows/backend-ci.yml, .github/workflows/scan-drift.yml, .gitignore, .sillyspec-platform-cleaned, Makefile, README.md, deploy/.env.example, deploy/docker-compose.dev.yml, deploy/docker-compose.yml, meta.json, .codex/skills/deploy-to-server/, .codex/skills/sillyhub-docker-deploy/, .codex/skills/verify-per-user/, .github/workflows/daemon-ci.yml
+需求：docs/platform-audit-2026-08-20.md 批次E（HY-1/4/5/6/7/8/9/10/11/13/14/15）
+根因：无（CI补齐+部署收紧+卫生清理）
+方案：daemon-ci.yml新增；compose端口/口令收紧；meta.json等untrack；CI死配置清理；Makefile/README/.codex补齐；本地垃圾物理删除
+结果：YAML全过、释放约400MB、git状态干净

@@ -1,0 +1,47 @@
+name: daemon-ci
+
+# HY-1（2026-08-20 审计）：sillyhub-daemon 有 144 个测试文件、承担宿主文件系统
+# 操作与策略执行（安全敏感组件），此前 backend/frontend CI 齐全而 daemon 无任何
+# CI。骨架复制 frontend-ci.yml，跑 typecheck + vitest（daemon 无独立 lint script）。
+
+on:
+  push:
+    paths:
+      - "sillyhub-daemon/**"
+      - ".github/workflows/daemon-ci.yml"
+  pull_request:
+    paths:
+      - "sillyhub-daemon/**"
+      - ".github/workflows/daemon-ci.yml"
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: sillyhub-daemon
+
+jobs:
+  typecheck-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.6.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+          cache-dependency-path: sillyhub-daemon/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
