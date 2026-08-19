@@ -1165,6 +1165,9 @@ class SpecWorkspaceService:
           （D-010 move 非 copy），清单 exists=False + version+1；机会式修剪该 ws 备份区
           早于 30 天的旧目录（R-06）。
         - rename：``shutil.move`` 旧→新 + 清单 path 迁移（version+1，hash 相同可保留内容）。
+        - 软删行复活（ql-20260819-004）：add 落在 exists=False 行上 → 写盘 + 原地复活
+          （version+1）；rename 目标是软删墓碑 → 不算占用，rename 结果原地复活墓碑
+          （un-archive 愈合方向不再永久 conflict）。
         冲突 op 跳过、其余照常 apply，整体返回 conflict=True；校验失败整体 422 不落盘。
 
         ``change_dirs``（change 2026-08-14-change-center-conversation-driven / D-005@v1）：
@@ -1239,6 +1242,31 @@ class SpecWorkspaceService:
             for op in ops:
                 # 查清单行（workspace_id+path）——task-03 起查预取 dict（miss 即 None）
                 row = manifest_by_path.get(op.path)
+
+                # ql-20260819-004：软删行复活（add）。CLI diff 把 exists=False 行从
+                # serverPaths 过滤（spec-sync.js computeSpecOps），本地文件在即发
+                # add(base_version=0)——原实现落进下方乐观锁分支：同内容豁免 no-op
+                # 提前返回（行永久停在 exists=f 僵尸态，2026-08-19-quick-done-
+                # autoarchive-misfire 实证）或 hash 不符判 conflict。软删行的 version
+                # 对客户端不可见，add 即「客户端树里该文件存在」的权威声明：写盘 +
+                # 原地复活（version+1、exists=True），不进冲突路径。
+                if op.op == "add" and row is not None and row.exists is False:
+                    if op.content is None:
+                        raise _spec_bundle_invalid(
+                            "同步包无效：新增/更新操作缺少文件内容。",
+                            path=op.path,
+                        )
+                    content = base64.b64decode(op.content)
+                    target = spec_root / op.path
+                    await asyncio.to_thread(self._write_op_file, target, content, op.mtime)
+                    ch = hashlib.sha256(content).hexdigest()
+                    row.content_hash = ch
+                    row.version = row.version + 1
+                    row.exists = True
+                    row.updated_at = now
+                    new_versions[op.path] = row.version
+                    await progress.bump()
+                    continue
 
                 # base_version 乐观锁（D-001）：有行且版本不匹配 → conflict，跳过不落盘。
                 # D-008@v2 同内容豁免（FR-05）：init 第二成员推 add(base_version=0)
@@ -1317,15 +1345,22 @@ class SpecWorkspaceService:
                             path=op.path,
                         )
                     # 目标路径已被占用 → conflict（乐观锁对目标也成立）——
-                    # task-03 起查预取 dict
+                    # task-03 起查预取 dict。
+                    # ql-20260819-004：目标行是 exists=False 软删墓碑不算占用——
+                    # un-archive 方向的 rename（archive→active，CLI 对哈希相同的搬回
+                    # 恒发 rename）会命中活跃路径的软删行，原实现判 conflict 跳过 →
+                    # 愈合同步永久卡死（2026-08-19-quick-done-autoarchive-misfire
+                    # 缺陷②）。墓碑的磁盘文件已在备份区，rename 结果原地复活墓碑。
                     target_row = manifest_by_path.get(op.new_path)
-                    if target_row is not None:
+                    if target_row is not None and target_row.exists:
                         conflict = True
                         if server_versions is None:
                             server_versions = {}
                         server_versions[op.new_path] = target_row.version
                         continue
-                    # R-07：无旧行 → 按 add new_path 处理
+                    # R-07：无旧行 → 按 add new_path 处理（目标有墓碑则原地复活，
+                    # 不走 INSERT——SQLAlchemy flush 先 INSERT 后 DELETE/UPDATE，
+                    # 同 path 新行会撞 ux_spec_manifest_ws_path 唯一约束）
                     if row is None:
                         if op.content is None:
                             raise _spec_bundle_invalid(
@@ -1336,17 +1371,24 @@ class SpecWorkspaceService:
                         target = spec_root / op.new_path
                         await asyncio.to_thread(self._write_op_file, target, content, op.mtime)
                         ch = hashlib.sha256(content).hexdigest()
-                        added_row = SpecFileManifest(
-                            workspace_id=workspace_id,
-                            path=op.new_path,
-                            content_hash=ch,
-                            version=1,
-                            exists=True,
-                            updated_at=now,
-                        )
-                        pending_adds.append(added_row)  # ql-20260817-005：循环外统一 add
-                        manifest_by_path[op.new_path] = added_row
-                        new_versions[op.new_path] = 1
+                        if target_row is not None:
+                            target_row.content_hash = ch
+                            target_row.version = target_row.version + 1
+                            target_row.exists = True
+                            target_row.updated_at = now
+                            new_versions[op.new_path] = target_row.version
+                        else:
+                            added_row = SpecFileManifest(
+                                workspace_id=workspace_id,
+                                path=op.new_path,
+                                content_hash=ch,
+                                version=1,
+                                exists=True,
+                                updated_at=now,
+                            )
+                            pending_adds.append(added_row)  # ql-20260817-005：循环外统一 add
+                            new_versions[op.new_path] = 1
+                        manifest_by_path[op.new_path] = target_row
                         continue
                     # 常规 rename：move 文件 + 清单 path 迁移（删旧行 + 插新行）
                     new_version = row.version + 1
@@ -1371,19 +1413,29 @@ class SpecWorkspaceService:
                         await asyncio.to_thread(self._apply_file_mtime, dest, op.mtime)
                     # ql-20260817-005：delete 同样会 autobegin——收集循环外统一删。
                     pending_deletes.append(row)
-                    renamed_row = SpecFileManifest(
-                        workspace_id=workspace_id,
-                        path=op.new_path,
-                        content_hash=new_hash,
-                        version=new_version,
-                        exists=True,
-                        updated_at=now,
-                    )
-                    pending_adds.append(renamed_row)
+                    # ql-20260819-004：目标有软删墓碑 → 原地复活（version 沿目标路径
+                    # 自身谱系 +1），不 INSERT 新行（flush 先 INSERT 后 DELETE，同
+                    # path 撞唯一约束）；无墓碑 → 照旧插迁移行（旧路径行 version+1）。
+                    if target_row is not None:
+                        target_row.content_hash = new_hash
+                        target_row.version = target_row.version + 1
+                        target_row.exists = True
+                        target_row.updated_at = now
+                        renamed_row = target_row
+                    else:
+                        renamed_row = SpecFileManifest(
+                            workspace_id=workspace_id,
+                            path=op.new_path,
+                            content_hash=new_hash,
+                            version=new_version,
+                            exists=True,
+                            updated_at=now,
+                        )
+                        pending_adds.append(renamed_row)
                     # 镜像换 key：旧 path 删、新 path 指向新行
                     manifest_by_path.pop(op.path, None)
                     manifest_by_path[op.new_path] = renamed_row
-                    new_versions[op.new_path] = new_version
+                    new_versions[op.new_path] = renamed_row.version
 
                 # D-004@V2 + task-03：每个成功处理的 op 后记一次进度（conflict op
                 # 已 continue 跳过）——批量回写器内存计数，不再逐 op UPDATE。

@@ -82,3 +82,47 @@
 根因：AppShell 根容器 min-h-screen 高度被内容撑开，页面内 flex-1/overflow-hidden 链条无视口高度锚点全部落空导致整页滚动；树节点标题 truncate 截断长文件名且行宽锁死容器宽导致永不出现横向滚动条。
 方案：page.tsx 给 PageContainer 锚定 h-[calc(100vh-56px)]（TopBar h-14，sessions 页先例）+overflow-hidden，左栏收窄 w-60；file-explorer 节点改 whitespace-nowrap 靠容器 overflow-auto 横向滚动，缩进用任意选择器收 16px/层（antd v6 Tree 已无 indentSize prop），搜索结果同步 nowrap；file-preview 纯文本 pre 统一 whitespace-pre 横向滚动（与代码高亮分支一致），图片 max-h-[540px] 改 max-h-full 自适应容器。
 结果：vitest explorer 相关 3 文件 36 用例全过，tsc --noEmit 0 错，eslint 三文件仅 1 条预存警告（HEAD 基线同位存在，非本次引入）。
+
+## ql-20260819-001-4d85 | 2026-08-19 08:59:41 | explorer 文件树目录节点支持双击展开/收起
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/explorer/file-explorer.tsx（antd Tree 加 expandAction=doubleClick + 头注释同步）
+- frontend/src/components/explorer/__tests__/file-explorer.test.tsx（补 dblClickNode 辅助 + 双击展开/收起/叶子 3 用例）
+需求：explorer 文件树目录节点支持双击展开/收起
+根因：无，纯交互增强——antd Tree 默认 expandAction=false 只能点 switcher 箭头展开，用户习惯 VSCode 式双击目录行切换
+方案：file-explorer.tsx 的 antd Tree 加 expandAction=doubleClick（antd 6.4.4 透传 rc-tree 同名 prop），双击目录行走受控 onExpand+loadData 懒加载链路与 switcher 等价；单击仍只选中，叶子与 Ctrl/Shift 修饰键由 rc-tree 忽略；测试补双击展开/收起不重拉/叶子不触发 3 用例
+结果：vitest file-explorer 17/17 passed，pnpm lint PASS（警告均预存无关文件），tsc --noEmit 0 error
+
+## ql-20260819-002-4c90 | 2026-08-19 10:18:32 | 为跨工作区团队执行变更补可视化原型图
+状态：已完成
+关联变更：2026-08-19-cross-workspace-team-mission
+文件：
+- .sillyspec/changes/2026-08-19-cross-workspace-team-mission/design.md（在 §3 总体方案后插入方案示意图（Mermaid 数据流 + 概念映射表 + ASCII 页面线框））
+需求：为跨工作区团队执行变更补可视化原型图。
+根因：design.md 纯文字描述对 anchor/scope/target/representative binding 概念不够直观。
+方案：在 design.md §3 总体方案后新增 §3.1 方案示意图，含系统数据流 Mermaid 图、核心概念映射表、前端项目团队会话页 ASCII 线框。
+结果：仅改 design.md 一个文档，未触代码与测试，无需跑 test/lint。
+
+## ql-20260819-003-ad54 | 2026-08-19 13:05:55 | 扫描文档树徽标「⚠ 冲突N」语义误导
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx（徽标 destructive 红改 outline 灰，文案改历史N版，加 title 悬浮解释）
+- .sillyspec/docs/frontend/modules/app-workspace-pages.md（ScanDocsPage 条目补文档树徽标语义）
+需求：扫描文档树徽标「⚠ 冲突N」语义误导，改为中性叫法与配色。
+根因：conflict_count 实为 last-write-wins 覆盖存档历史计数（conflict_service D-001@V1），红色 destructive 徽标被误读成待解决冲突。
+方案：page.tsx 徽标改「🕘 历史N版」outline 灰配色加 title 悬浮说明（旧版本存档备查无需处理），模块文档同步徽标语义。
+结果：vitest 全量 1677/1677 通过加 tsc 0 错加 lint 0 错，无 API 字段变更。
+
+## ql-20260819-004-695a | 2026-08-19 13:20:49 | 修复 spec-sync 增量同步的软删行复活缺陷
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/spec_workspace/service.py（apply_ops 软删复活三分支+docstring 同步）
+- backend/app/modules/spec_workspace/tests/test_sync_incremental.py（TestSoftDeleteRevival 4 用例）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（变更索引补 ql-20260819-004 行）
+需求：修复 spec-sync 增量同步的软删行复活缺陷，un-archive 愈合同步不再永久冲突。
+根因：apply_ops 把 rename 目标路径的 exists=false 软删墓碑当占用判 conflict（2026-08-19 quick 误归档事故卡死主因），add 落软删行走同内容豁免 no-op 留僵尸行。
+方案：service.py 三处——add 落软删行原地复活、rename 目标墓碑不算占用且原地复活（避开 flush 先 INSERT 后 DELETE 撞唯一约束）、R-07 无旧行 rename 同款处理；test_sync_incremental.py 增 TestSoftDeleteRevival 4 用例（含事故组合守护，证明 rename 蒸发疑点隔离不可复现）。
+结果：pytest 29 passed+1 skipped（symlink 平台预存），ruff format/check 过，mypy 0 error；backend.md 模块卡补 ql-20260819-004 索引行。

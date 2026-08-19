@@ -12,6 +12,9 @@ Covers design §7 + 关键落盘决策（P2 R-07 hash 兜底 / R-06 备份 30 �
 - 备份目标越界（path 逃出 spec-backups）→ 422
 - 旧 tar apply_sync 后 spec_file_manifest 行清空 + 下一次增量 add 重建（Q7）
 - 无行 op（R-07）：update 无行视为新建 version=1；delete 无行 no-op 成功
+- 软删行复活（ql-20260819-004）：add 落在 exists=False 行复活；rename 目标是软删
+  墓碑不算占用、结果原地复活（un-archive 愈合不再永久 conflict）；事故组合单请求
+  rename+delete+update+add 全落盘守护
 - 备份 30 天机会式修剪（构造早于 30 天的备份目录断言被删）
 
 author: qinyi
@@ -1061,3 +1064,267 @@ class TestLocalYamlExcluded:
             names = {m.name for m in tf.getmembers()}
         assert "docs/T.md" in names
         assert "local.yaml" not in names
+
+
+# ===========================================================================
+# 软删行复活（ql-20260819-004 / 坑 2026-08-19-quick-done-autoarchive-misfire 缺陷②）
+# ===========================================================================
+
+
+class TestSoftDeleteRevival:
+    """rename 目标 / add 落点是 exists=False 软删墓碑时的复活语义。
+
+    事故形态：quick 误归档后本地 ``git mv`` 搬回，此后每次愈合 sync 对哈希相同的
+    文件恒发 rename(archive→active)，活跃路径的软删行被原实现当作占用判 conflict
+    → 永久卡死；哈希有变的文件发 add，同内容豁免走 no-op 提前返回 → 僵尸 exists=f。
+    """
+
+    async def _get_row(self, db_session, ws_id: uuid.UUID, path: str) -> SpecFileManifest | None:
+        return (
+            (
+                await db_session.execute(
+                    select(SpecFileManifest).where(
+                        SpecFileManifest.workspace_id == ws_id,
+                        SpecFileManifest.path == path,
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+
+    async def test_rename_to_soft_deleted_target_revives_not_conflicts(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        """rename 目标路径存在软删墓碑 → 不算占用，rename 结果原地复活墓碑。"""
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+
+        base = f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental"
+        # 活跃路径 tasks.md v1 → 软删（v2 墓碑）；归档路径 tasks.md v1（哈希相同）
+        for op in (
+            _op("add", "changes/x/tasks.md", base_version=0, content=_b64("tasks")),
+            _op("add", "quicklog/Q.md", base_version=0, content=_b64("q")),
+        ):
+            await client.post(base, headers=auth_headers, json={"ops": [op]})
+        await client.post(
+            base,
+            headers=auth_headers,
+            json={"ops": [_op("delete", "changes/x/tasks.md", base_version=1)]},
+        )
+        await client.post(
+            base,
+            headers=auth_headers,
+            json={
+                "ops": [
+                    _op("add", "changes/archive/x/tasks.md", base_version=0, content=_b64("tasks"))
+                ]
+            },
+        )
+
+        # 愈合方向 rename：archive → active（目标 = 软删墓碑）
+        resp = await client.post(
+            base,
+            headers=auth_headers,
+            json={
+                "ops": [
+                    _op(
+                        "rename",
+                        "changes/archive/x/tasks.md",
+                        base_version=1,
+                        new_path="changes/x/tasks.md",
+                    )
+                ]
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["conflict"] is False
+        assert body["server_versions"] is None
+        # 墓碑原地复活：version 沿活跃路径自身谱系 +1（2 → 3）
+        assert body["new_versions"] == {"changes/x/tasks.md": 3}
+
+        active_row = await self._get_row(db_session, ws.id, "changes/x/tasks.md")
+        assert active_row is not None
+        assert active_row.exists is True
+        assert active_row.version == 3
+        assert active_row.content_hash == hashlib.sha256(b"tasks").hexdigest()
+        archive_row = await self._get_row(db_session, ws.id, "changes/archive/x/tasks.md")
+        assert archive_row is None  # 旧路径行照常迁移删除
+
+        assert (spec_root / "changes" / "x" / "tasks.md").read_text(encoding="utf-8") == "tasks"
+        assert not (spec_root / "changes" / "archive" / "x" / "tasks.md").exists()
+
+    async def test_add_same_content_on_soft_deleted_row_revives(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        """add 落在软删行上（同内容）→ 复活而非 no-op 提前返回（原实现留僵尸 exists=f）。"""
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+
+        base = f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental"
+        await client.post(
+            base,
+            headers=auth_headers,
+            json={"ops": [_op("add", "docs/a.md", base_version=0, content=_b64("x"))]},
+        )
+        await client.post(
+            base,
+            headers=auth_headers,
+            json={"ops": [_op("delete", "docs/a.md", base_version=1)]},
+        )
+
+        resp = await client.post(
+            base,
+            headers=auth_headers,
+            json={
+                "ops": [
+                    _op(
+                        "add",
+                        "docs/a.md",
+                        base_version=0,
+                        content=_b64("x"),
+                        hash=hashlib.sha256(b"x").hexdigest(),
+                    )
+                ]
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["conflict"] is False
+        assert resp.json()["new_versions"] == {"docs/a.md": 3}
+
+        row = await self._get_row(db_session, ws.id, "docs/a.md")
+        assert row is not None
+        assert row.exists is True
+        assert row.version == 3
+        assert (spec_root / "docs" / "a.md").read_text(encoding="utf-8") == "x"
+
+    async def test_add_new_content_on_soft_deleted_row_revives(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        """add 落在软删行上（内容已变，原实现判 conflict）→ 复活 + 哈希更新。"""
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+
+        base = f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental"
+        await client.post(
+            base,
+            headers=auth_headers,
+            json={"ops": [_op("add", "docs/a.md", base_version=0, content=_b64("old"))]},
+        )
+        await client.post(
+            base,
+            headers=auth_headers,
+            json={"ops": [_op("delete", "docs/a.md", base_version=1)]},
+        )
+
+        resp = await client.post(
+            base,
+            headers=auth_headers,
+            json={
+                "ops": [
+                    _op(
+                        "add",
+                        "docs/a.md",
+                        base_version=0,
+                        content=_b64("new"),
+                        hash=hashlib.sha256(b"new").hexdigest(),
+                    )
+                ]
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["conflict"] is False
+        assert resp.json()["new_versions"] == {"docs/a.md": 3}
+
+        row = await self._get_row(db_session, ws.id, "docs/a.md")
+        assert row is not None
+        assert row.exists is True
+        assert row.content_hash == hashlib.sha256(b"new").hexdigest()
+        assert (spec_root / "docs" / "a.md").read_text(encoding="utf-8") == "new"
+
+    async def test_incident_combo_rename_delete_update_add_single_request(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        """2026-08-19 事故组合复现：单请求 rename + delete + update + add 全落盘。
+
+        事故现场（02:22:07Z）发的正是这个形状：内容未变文件走 rename（active→archive）、
+        内容有变文件走 delete+add、QUICKLOG 走 update。守护全部 op 落盘且零冲突。
+        """
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+
+        base = f"/api/workspaces/{ws.id}/spec-workspace/sync-incremental"
+        await client.post(
+            base,
+            headers=auth_headers,
+            json={
+                "ops": [
+                    _op("add", "changes/x/tasks.md", base_version=0, content=_b64("unchecked")),
+                    _op("add", "changes/x/decisions.md", base_version=0, content=_b64("dec")),
+                    _op("add", "quicklog/Q.md", base_version=0, content=_b64("q1")),
+                ]
+            },
+        )
+
+        checked = _b64("checked")
+        resp = await client.post(
+            base,
+            headers=auth_headers,
+            json={
+                "ops": [
+                    # 内容未变 → CLI rename 检测命中，发 rename
+                    _op(
+                        "rename",
+                        "changes/x/decisions.md",
+                        base_version=1,
+                        new_path="changes/archive/x/decisions.md",
+                    ),
+                    # 内容有变（勾选翻转）→ delete + add
+                    _op("delete", "changes/x/tasks.md", base_version=1),
+                    _op(
+                        "add",
+                        "changes/archive/x/tasks.md",
+                        base_version=0,
+                        content=checked,
+                        hash=hashlib.sha256(b"checked").hexdigest(),
+                    ),
+                    # QUICKLOG → update
+                    _op("update", "quicklog/Q.md", base_version=1, content=_b64("q2")),
+                ]
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["conflict"] is False, body
+        assert body["new_versions"] == {
+            "changes/archive/x/decisions.md": 2,
+            "changes/x/tasks.md": 2,
+            "changes/archive/x/tasks.md": 1,
+            "quicklog/Q.md": 2,
+        }
+
+        # rename 落盘：清单迁移 + 磁盘文件移动
+        assert await self._get_row(db_session, ws.id, "changes/x/decisions.md") is None
+        archive_dec = await self._get_row(db_session, ws.id, "changes/archive/x/decisions.md")
+        assert archive_dec is not None and archive_dec.exists is True
+        assert (spec_root / "changes" / "archive" / "x" / "decisions.md").read_text(
+            encoding="utf-8"
+        ) == "dec"
+        assert not (spec_root / "changes" / "x" / "decisions.md").exists()
+        # delete + add 落盘
+        active_tasks = await self._get_row(db_session, ws.id, "changes/x/tasks.md")
+        assert active_tasks is not None and active_tasks.exists is False
+        archive_tasks = await self._get_row(db_session, ws.id, "changes/archive/x/tasks.md")
+        assert archive_tasks is not None and archive_tasks.exists is True
+        assert (spec_root / "changes" / "archive" / "x" / "tasks.md").read_text(
+            encoding="utf-8"
+        ) == "checked"
+        # update 落盘
+        quicklog = await self._get_row(db_session, ws.id, "quicklog/Q.md")
+        assert quicklog is not None and quicklog.version == 2
+        assert (spec_root / "quicklog" / "Q.md").read_text(encoding="utf-8") == "q2"
