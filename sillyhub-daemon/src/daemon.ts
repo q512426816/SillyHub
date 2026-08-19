@@ -109,6 +109,7 @@ import {
   bumpLocalSpecVersion,
   resolveSpecDir,
 } from './spec-sync.js';
+import { RuntimeHandler } from './runtime-handler.js';
 import type {
   PersistedSessionRecord,
   SessionStatus,
@@ -777,6 +778,9 @@ export class Daemon {
    */
   private _wsClient: WsClientLike | null = null;
   private readonly _wsClientFactory: WsClientFactory;
+
+  /** runtime.* RPC handler（2026-08-19-runtime-live-daemon-read，无状态只读）。 */
+  private readonly _runtimeHandler = new RuntimeHandler();
 
   /** 运行标志，三循环 while 条件。 */
   private _running = false;
@@ -2336,6 +2340,11 @@ export class Daemon {
     // RPC（工作区文件浏览器，design §7.1）。roots 每次 RPC 现取 _effectiveAllowedRoots()，
     // **不**照抄裸 list_dir 的空 roots 跳校验写法（design §5 关键安全设计 1 警示条）。
     this._registerExplorerRpcHandler(ws);
+    // task-09（2026-08-19-runtime-live-daemon-read）：注册 runtime.* 四方法只读
+    // RPC（运行时状态实时读取，design §6.1）。业务全在 RuntimeHandler（D-005@v1
+    // 独立命名空间，不污染 host_fs 九方法契约）；RpcError code 经 _dispatchRpc
+    // 原样回填，由 backend _map_runtime_remote_error 消费（§6.3 映射表）。
+    this._registerRuntimeRpcHandler(ws);
 
     try {
       ws.connect();
@@ -2597,6 +2606,44 @@ export class Daemon {
           ? EXPLORER_DEFAULT_MAX_RESULTS
           : (params.max_results as number);
       return explorerSearch(root, query, this._effectiveAllowedRoots(), maxResults);
+    });
+  }
+
+  /**
+   * task-09（2026-08-19-runtime-live-daemon-read）：注册 runtime.* 四方法只读 RPC
+   * （design §6.1 契约表）。backend RuntimeLiveService 经 ws_rpc 转发，daemon 在
+   * 宿主侧读 specCacheRoot（~/.sillyhub/daemon/specs/<workspace_id>/）下实时状态：
+   *
+   * - runtime.read_progress：RuntimeHandler spawn sillyspec progress dump --json；
+   * - runtime.read_user_inputs / list_artifacts / read_artifact：直读 .runtime/ 下文件。
+   *
+   * params 归一对齐 explorer handler 写法：workspace_id/filename 非字符串或缺省
+   * 归一为空串，由 RuntimeHandler 入口断言拒 forbidden。handler 不额外 try/catch：
+   * RuntimeHandler 抛 ws-client.RpcError（code 语义化），_dispatchRpc 原样回填
+   * （普通 Error 映射 internal），不冒泡（explorer / host_fs 同约定）。
+   */
+  private _registerRuntimeRpcHandler(ws: WsClientLike): void {
+    if (typeof ws.registerRpcHandler !== 'function') {
+      this._logger.warn('ws_no_rpc_support', { daemon_local_id: this._config.runtime_id });
+      return;
+    }
+    const handler = this._runtimeHandler;
+    ws.registerRpcHandler('runtime.read_progress', async (params) => {
+      const workspaceId = typeof params.workspace_id === 'string' ? params.workspace_id : '';
+      return handler.readProgress(workspaceId);
+    });
+    ws.registerRpcHandler('runtime.read_user_inputs', async (params) => {
+      const workspaceId = typeof params.workspace_id === 'string' ? params.workspace_id : '';
+      return handler.readUserInputs(workspaceId);
+    });
+    ws.registerRpcHandler('runtime.list_artifacts', async (params) => {
+      const workspaceId = typeof params.workspace_id === 'string' ? params.workspace_id : '';
+      return handler.listArtifacts(workspaceId);
+    });
+    ws.registerRpcHandler('runtime.read_artifact', async (params) => {
+      const workspaceId = typeof params.workspace_id === 'string' ? params.workspace_id : '';
+      const filename = typeof params.filename === 'string' ? params.filename : '';
+      return handler.readArtifact(workspaceId, filename);
     });
   }
 

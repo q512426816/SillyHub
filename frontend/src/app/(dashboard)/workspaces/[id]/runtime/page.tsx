@@ -46,6 +46,26 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// 2026-08-19-runtime-live-daemon-read：实时读取链路的错误分级提示（design §6.3
+// 映射表的消费端）。backend 消息已是中文，这里补状态码维度的行动指引；非 ApiError
+// （网络中断等）无状态码，走通用文案。
+function runtimeErrorHint(status: number | null): string | null {
+  switch (status) {
+    case 502:
+      return "守护进程可能离线或连接中断，请确认本机守护进程在线后重试。";
+    case 504:
+      return "实时读取超时，请稍后重试。";
+    case 422:
+      return "本机守护进程版本过旧，请升级守护进程后重试。";
+    case 403:
+      return "守护进程拒绝了本次访问。";
+    case 404:
+      return "未找到对应文件，可能已被移动或删除。";
+    default:
+      return null;
+  }
+}
+
 export default function RuntimePage({ params }: Props) {
   const workspaceId = params.id;
   const [progress, setProgress] = useState<RuntimeProgress | null>(null);
@@ -55,9 +75,10 @@ export default function RuntimePage({ params }: Props) {
   const [artifactContent, setArtifactContent] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
-  // 2026-07-26-ungate-workspace-entry / FR-04：运行时数据经 spec_root（daemon-client 读
-  // 源码 .sillyspec/.runtime），无 binding 时 fetch 失败。门禁后移后，无 binding 主区
-  // 渲染 DaemonRequiredNotice（非阻断），有 binding 走原运行时展示。
+  const [pageErrorStatus, setPageErrorStatus] = useState<number | null>(null);
+  // 2026-07-26-ungate-workspace-entry / FR-04 + 2026-08-19-runtime-live-daemon-read：
+  // 运行时数据经绑定 daemon WS RPC 实时读取（design §4.1），无 binding 时主区渲染
+  // DaemonRequiredNotice（非阻断），有 binding 走实时展示。
   const [myBinding, setMyBinding] = useState<MemberBindingView | null>(null);
   const [bindingReady, setBindingReady] = useState(false);
   const permissions = useSession((s) => s.user?.permissions);
@@ -78,6 +99,7 @@ export default function RuntimePage({ params }: Props) {
       setArtifacts(arts);
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "加载运行时状态失败");
+      setPageErrorStatus(err instanceof ApiError ? err.status : null);
     } finally {
       setLoading(false);
     }
@@ -121,8 +143,16 @@ export default function RuntimePage({ params }: Props) {
       return;
     }
     setSelectedArtifact(filename);
-    const content = await getRuntimeArtifactContent(workspaceId, filename);
-    setArtifactContent(content);
+    try {
+      const content = await getRuntimeArtifactContent(workspaceId, filename);
+      setArtifactContent(content);
+    } catch (err) {
+      // 实时读取链路（design §6.3）：产物读取失败给出分级提示，不静默留空块。
+      setPageError(err instanceof ApiError ? err.message : "读取产物内容失败");
+      setPageErrorStatus(err instanceof ApiError ? err.status : null);
+      setSelectedArtifact(null);
+      setArtifactContent("");
+    }
   };
 
   const stageColumns: TableProps<[string, StageProgress]>["columns"] = [
@@ -180,7 +210,9 @@ export default function RuntimePage({ params }: Props) {
         title={
           <span className="flex items-center gap-3">
             <span>运行时状态</span>
-            <StatusBadge kind="neutral">本地运行态</StatusBadge>
+            {/* 2026-08-19-runtime-live-daemon-read / FR-05：数据源切换为绑定
+                daemon 实时读取（design §6.3），徽标与副标题同步更新。 */}
+            <StatusBadge kind="info">守护进程运行态</StatusBadge>
           </span>
         }
         subtitle={
@@ -192,11 +224,11 @@ export default function RuntimePage({ params }: Props) {
               ← 工作区
             </Link>
             <span className="ml-2">
-              读取{" "}
+              经绑定守护进程实时读取{" "}
               <code className="rounded bg-muted px-1 text-[11px]">
                 .sillyspec/.runtime/
               </code>{" "}
-              展示当前工作流状态。此数据为本地运行态，不作为长期事实源。
+              展示当前工作流状态。
             </span>
           </>
         }
@@ -204,7 +236,12 @@ export default function RuntimePage({ params }: Props) {
 
       {pageError && (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
-          {pageError}
+          <p>{pageError}</p>
+          {runtimeErrorHint(pageErrorStatus) && (
+            <p className="mt-1 text-muted-foreground">
+              {runtimeErrorHint(pageErrorStatus)}
+            </p>
+          )}
         </div>
       )}
 

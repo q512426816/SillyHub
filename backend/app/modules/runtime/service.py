@@ -1,346 +1,326 @@
-"""Runtime service — reads ``.sillyspec/.runtime/`` state files.
+"""Runtime service — 经绑定 daemon 实时读取运行时状态。
 
-SillySpec v4 uses ``sillyspec.db`` (SQLite) as the canonical state source.
+2026-08-19-runtime-live-daemon-read：``RuntimeLiveService`` 经 WS RPC 读当前
+用户绑定 daemon 的实时数据（进度 / 用户输入 / 步骤产物）。旧 ``RuntimeService``
+容器直读 ``spec_ws.spec_root`` 快照路径已删除（design §1：spec 增量同步排除
+``.runtime/``，平台侧只有历史快照，语义不诚实）。
 """
 
 from __future__ import annotations
 
-import asyncio
-import sqlite3
 import uuid
-from datetime import datetime
-from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, Final
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import AppError
 from app.core.logging import get_logger
-from app.core.spec_paths import SpecPathResolver
-from app.modules.runtime.schema import (
-    ArtifactEntry,
-    RuntimeProgress,
-    StageProgress,
-    StageStep,
-    UserInputEntry,
+from app.modules.daemon.runtime.service import (
+    DaemonRpcRemoteError,
+    DaemonRpcTimeout,
+    DaemonRuntimeOffline,
 )
-from app.modules.spec_workspace.model import SpecWorkspace
-from app.modules.workspace.service import WorkspaceService
-
-if TYPE_CHECKING:
-    from app.modules.daemon.host_fs import HostFsDelegate
+from app.modules.runtime.schema import ArtifactEntry, RuntimeProgress
+from app.modules.workspace.member_runtimes.resolver import MemberBindingResolver
 
 log = get_logger(__name__)
 
 
-class RuntimeService:
-    """Read-only service that parses runtime files from spec_root."""
+# =====================================================================
+# RuntimeLiveService — 经绑定 daemon WS RPC 实时读取（2026-08-19-runtime-live-daemon-read）
+# =====================================================================
+#
+# 替代旧 ``RuntimeService`` 的容器直读快照路径（design §1：平台侧 sillyspec.db
+# 只是历史快照，spec 增量同步排除 ``.runtime/``，真实状态在 daemon 宿主）：
+#
+# - 绑定解析复用 ``MemberBindingResolver.resolve_member_binding_or_none``
+#   （D-004@v1，与 explorer 同构：只看当前用户自己的绑定行）；
+# - 四个只读方法经 ``ws_hub.send_rpc`` 转发 ``runtime.*`` RPC（D-005@v1：独立
+#   命名空间，不污染 host_fs 九方法契约）；
+# - 错误映射复用 explorer 的逻辑骨架，但暴露 ``Runtime*`` 错误子类（design §6.3：
+#   避免 HTTP body 泄漏内部 Explorer* 模块名）；
+# - daemon 离线/失败不回退平台快照（D-001@v1），直接按映射表抛错。
+#
+# 设计依据：``.sillyspec/changes/2026-08-19-runtime-live-daemon-read/design.md``
+# （§4.1 链路总览 / §6.1 RPC 契约 / §6.3 错误映射 / §7 只读语义）。
 
-    def __init__(
-        self,
-        session: AsyncSession,
-        *,
-        workspace_service: WorkspaceService | None = None,
-        host_fs: HostFsDelegate | None = None,
-    ) -> None:
-        """Initialize runtime reader.
 
-        Args:
-            session: Active async DB session.
-            workspace_service: Optional injected ``WorkspaceService`` (tests).
-            host_fs: Optional :class:`HostFsDelegate`. When provided, all
-                host-filesystem access (stat / read / list) goes through it so
-                daemon-client workspaces read ``.runtime/`` over WS RPC. When
-                ``None`` (default — server-local / existing tests), the service
-                falls back to direct ``Path`` / ``sqlite3`` access on the
-                resolved container path (D-004 zero-regression).
-        """
+class RuntimeNotBound(AppError):
+    """当前账号无本机绑定（或绑定行 daemon_id IS NULL）→ 404 引导到成员页。"""
+
+    code = "HTTP_404_RUNTIME_NOT_BOUND"
+    http_status = 404
+
+
+class RuntimeDaemonOffline(AppError):
+    """目标 daemon 无活动 WS 连接（或发送失败）→ 502。"""
+
+    code = "HTTP_502_RUNTIME_DAEMON_OFFLINE"
+    http_status = 502
+
+
+class RuntimeTransferInterrupted(AppError):
+    """WS 在 RPC 在途时断连 → 502「传输中断」。"""
+
+    code = "HTTP_502_RUNTIME_TRANSFER_INTERRUPTED"
+    http_status = 502
+
+
+class RuntimeRpcTimeout(AppError):
+    """RPC 往返超时 → 504。"""
+
+    code = "HTTP_504_RUNTIME_RPC_TIMEOUT"
+    http_status = 504
+
+
+class RuntimeDaemonForbidden(AppError):
+    """daemon 返回 code=forbidden → 403。"""
+
+    code = "HTTP_403_RUNTIME_DAEMON_FORBIDDEN"
+    http_status = 403
+
+
+class RuntimePathNotFound(AppError):
+    """daemon 返回 code=not_found（路径不存在），或 filename 预检拒绝 → 404/422。"""
+
+    code = "HTTP_404_RUNTIME_PATH_NOT_FOUND"
+    http_status = 404
+
+
+class RuntimeDaemonTooOld(AppError):
+    """旧 daemon 未注册 runtime.*（method_not_found）→ 422 版本过旧引导。"""
+
+    code = "HTTP_422_RUNTIME_DAEMON_TOO_OLD"
+    http_status = 422
+
+
+class RuntimeArtifactTooLarge(AppError):
+    """产物文件超过 1MB RPC 传输上限（design §8 R-04）→ 413。"""
+
+    code = "HTTP_413_RUNTIME_ARTIFACT_TOO_LARGE"
+    http_status = 413
+
+
+class RuntimeDaemonRemoteError(AppError):
+    """daemon 返回其余业务错误 → 502。"""
+
+    code = "HTTP_502_RUNTIME_DAEMON_REMOTE"
+    http_status = 502
+
+
+# 显式超时（design §8 R-04）：进度读 daemon 会 spawn sillyspec 子进程（子进程
+# timeout 30s），产物读取单文件限 1MB，统一给足 35s（send_rpc 默认 10s 不够）。
+RUNTIME_RPC_TIMEOUT_SECONDS: Final[float] = 35.0
+
+
+class RuntimeLiveService:
+    """经绑定 daemon 实时读取运行时状态的只读 service（design §4.1 方案 A）。"""
+
+    def __init__(self, session: AsyncSession) -> None:
         self._session = session
-        self._ws_service = workspace_service or WorkspaceService(session)
-        self._host_fs = host_fs
 
-    @staticmethod
-    def _resolver_for(workspace, spec_ws) -> SpecPathResolver | None:
-        """构造正确 root + mode 的 resolver。
+    # ── 内部：绑定解析 / RPC 转发 / 错误映射 ──────────────────────────────────
 
-        2026-07-10-remove-server-local-workspace-mode（D-005 / D-007）：
-        ``workspaces.path_source`` 列已删除，所有 workspace 恒为 daemon-client
-        （源码物理位于 daemon 宿主）。root 强制走 ``spec_ws.spec_root``（服务器
-        可读路径，如 ``/data/spec-workspaces/<id>/``），mode 恒为
-        ``platform_managed=True``（扁平布局，daemon spec-sync 产物无
-        ``.sillyspec`` 包裹，``.runtime/`` 直接在其下）。
+    async def _resolve_binding(self, workspace_id: uuid.UUID, user_id: uuid.UUID) -> uuid.UUID:
+        """解析当前用户自己的绑定行 → daemon_id（design §6.1 鉴权与 user_id 来源）。
 
-        无 spec_ws 或 spec_root 时返回 None（调用方降级为「无运行时数据」）。
+        resolver miss / 异常均收敛为 None，或 ``daemon_id IS NULL`` 过渡形态，
+        一律按未绑定处理 404（D-004@v1，与 explorer._resolve_binding 同语义）。
         """
-        if spec_ws and spec_ws.spec_root:
-            root = spec_ws.spec_root
-        else:
-            return None
-        return SpecPathResolver(root, platform_managed=True)
+        binding = await MemberBindingResolver.resolve_member_binding_or_none(
+            self._session,
+            workspace_id,
+            user_id,
+            log_tag="runtime_live_resolve_member_binding_unexpected_error",
+        )
+        if binding is None or binding.daemon_id is None:
+            raise RuntimeNotBound(
+                "当前账号未绑定本机工作区，请先到成员页完成绑定。",
+                details={"workspace_id": str(workspace_id)},
+            )
+        return binding.daemon_id
 
-    def _resolve_runtime_dir(self, workspace_id: uuid.UUID, workspace, spec_ws) -> Path | None:
-        resolver = self._resolver_for(workspace, spec_ws)
-        return resolver.runtime_dir() if resolver else None
+    async def _send_runtime_rpc(
+        self,
+        daemon_id: uuid.UUID,
+        method: str,
+        params: dict[str, Any],
+        *,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """转发 runtime.* RPC 并统一映射错误（design §6.3 全表）。
 
-    async def _get_base(self, workspace_id: uuid.UUID):
-        workspace = await self._ws_service.get(workspace_id)
-        stmt = select(SpecWorkspace).where(SpecWorkspace.workspace_id == workspace_id)
-        spec_ws = (await self._session.execute(stmt)).scalars().first()
-        return workspace, spec_ws
-
-    async def get_progress(self, workspace_id: uuid.UUID) -> RuntimeProgress | None:
-        workspace, spec_ws = await self._get_base(workspace_id)
-        runtime_dir = self._resolve_runtime_dir(workspace_id, workspace, spec_ws)
-        if not runtime_dir:
-            return None
-
-        resolver = self._resolver_for(workspace, spec_ws)
-        assert resolver is not None  # runtime_dir 非 None 蕴含 resolver 非 None
-
-        # --- Read from sillyspec.db (SQLite) ---
-        # task-12：db 读取保持容器 sqlite3.connect 直读（task-16 fix 后 daemon-client
-        # 的 root 强制 spec_ws.spec_root 服务器可读路径，容器可达；HostFsDelegate 的
-        # read_file 返 str 不能传二进制 sqlite db，扩接口超出 task-12 allowed_paths）。
-        db_path = resolver.db_path()
-        if db_path.is_file():
-            # 性能优化 Wave 2 / S1-4:sqlite3 直读是同步阻塞 IO,包 to_thread 避免
-            # 阻塞 event loop(_read_sqlite_progress 纯 sqlite3 读,不碰 async session)。
-            return await asyncio.to_thread(self._read_sqlite_progress, db_path, runtime_dir)
-
-        return None
-
-    # ------------------------------------------------------------------
-    # SQLite reader
-    # ------------------------------------------------------------------
-
-    def _read_sqlite_progress(self, db_path: Path, runtime_dir: Path) -> RuntimeProgress | None:
-        """Read the most recent active change from ``sillyspec.db`` and map to RuntimeProgress."""
-        try:
-            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-            conn.row_factory = sqlite3.Row
-            try:
-                # Get the most recently active change
-                row = conn.execute(
-                    "SELECT name, current_stage, status, last_active, created_at "
-                    "FROM changes ORDER BY last_active DESC LIMIT 1"
-                ).fetchone()
-                if row is None:
-                    return None
-
-                change_name = row["name"]
-                current_stage = row["current_stage"]
-                _change_status = row["status"]
-                last_active = row["last_active"]
-
-                # Get project info
-                project_row = conn.execute("SELECT name FROM project LIMIT 1").fetchone()
-                project_name = project_row["name"] if project_row else None
-
-                # Get stages for this change
-                stages: dict[str, StageProgress] = {}
-                stage_rows = conn.execute(
-                    "SELECT stage, status, started_at, completed_at "
-                    "FROM stages WHERE change_id = "
-                    "(SELECT id FROM changes WHERE name = ?) "
-                    "ORDER BY stage",
-                    (change_name,),
-                ).fetchall()
-
-                for sr in stage_rows:
-                    stage_name = sr["stage"]
-                    stage_progress = StageProgress(
-                        status=sr["status"] or "pending",
-                        started_at=self._parse_dt(sr["started_at"]),
-                        completed_at=self._parse_dt(sr["completed_at"]),
-                    )
-
-                    # Get steps for this stage
-                    step_rows = conn.execute(
-                        "SELECT name, status, output, completed_at "
-                        "FROM steps WHERE stage_id = "
-                        "(SELECT s.id FROM stages s "
-                        " JOIN changes c ON s.change_id = c.id "
-                        " WHERE c.name = ? AND s.stage = ?) "
-                        "ORDER BY ordering",
-                        (change_name, stage_name),
-                    ).fetchall()
-
-                    for stp in step_rows:
-                        stage_progress.steps.append(
-                            StageStep(
-                                name=stp["name"],
-                                status=stp["status"] or "pending",
-                                output=stp["output"],
-                                completed_at=self._parse_dt(stp["completed_at"]),
-                            )
-                        )
-
-                    stages[stage_name] = stage_progress
-
-                return RuntimeProgress(
-                    version=4,
-                    project=project_name,
-                    current_stage=current_stage,
-                    current_change=change_name,
-                    stages=stages,
-                    last_active=self._parse_dt(last_active),
-                )
-
-            finally:
-                conn.close()
-
-        except sqlite3.Error as exc:
-            log.warning("runtime.sqlite_read_failed", error=str(exc), db=str(db_path))
-            return None
-
-    @staticmethod
-    def _parse_dt(value: str | None) -> datetime | None:
-        """Parse ISO-format datetime string."""
-        if not value:
-            return None
-        try:
-            return datetime.fromisoformat(value)
-        except (ValueError, TypeError):
-            return None
-
-    # ------------------------------------------------------------------
-    # User inputs & artifacts (unchanged, file-based)
-    # ------------------------------------------------------------------
-
-    async def get_user_inputs(self, workspace_id: uuid.UUID) -> list[UserInputEntry]:
-        workspace, spec_ws = await self._get_base(workspace_id)
-        runtime_dir = self._resolve_runtime_dir(workspace_id, workspace, spec_ws)
-        if not runtime_dir:
-            return []
-
-        ui_path = runtime_dir / "user-inputs.md"
-        content = await self._read_text(workspace, ui_path)
-        if content is None:
-            return []
-
-        entries: list[UserInputEntry] = []
-        for line in content.splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            entries.append(UserInputEntry(timestamp="", content=line))
-
-        return entries
-
-    async def get_user_inputs_raw(self, workspace_id: uuid.UUID) -> str | None:
-        workspace, spec_ws = await self._get_base(workspace_id)
-        runtime_dir = self._resolve_runtime_dir(workspace_id, workspace, spec_ws)
-        if not runtime_dir:
-            return None
-
-        ui_path = runtime_dir / "user-inputs.md"
-        return await self._read_text(workspace, ui_path)
-
-    async def get_artifacts(self, workspace_id: uuid.UUID) -> list[ArtifactEntry]:
-        workspace, spec_ws = await self._get_base(workspace_id)
-        runtime_dir = self._resolve_runtime_dir(workspace_id, workspace, spec_ws)
-        if not runtime_dir:
-            return []
-
-        artifacts_dir = runtime_dir / "artifacts"
-        entries: list[ArtifactEntry] = []
-
-        if self._host_fs is not None:
-            # daemon-client / 注入 delegate 分支：list_dir + stat 走 RPC（D-006 RPC 失败
-            # delegate 返语义安全空值，不抛）。root=spec_root 已是服务器/宿主侧能解析路径。
-            names = await self._host_fs.list_dir(workspace, str(artifacts_dir))
-            for name in sorted(names):
-                child = str(artifacts_dir / name)
-                st = await self._host_fs.stat(workspace, child)
-                if not st.get("exists") or st.get("is_dir"):
-                    continue
-
-                # delegate.stat 不返 mtime（task-01 契约只 exists/is_dir/size），
-                # last_modified 退化为 None（前端展示 size 仍可用；mtime 需扩接口）。
-                entries.append(
-                    ArtifactEntry(
-                        filename=name,
-                        size_bytes=int(st.get("size", 0)),
-                        last_modified=None,
-                    )
-                )
-            return entries
-
-        # server-local 旧分支（host_fs=None）：容器 Path 直读。Wave C 续：移出事件循环
-        return await asyncio.to_thread(self._list_artifacts_local, artifacts_dir)
-
-    @staticmethod
-    def _list_artifacts_local(artifacts_dir: Path) -> list[ArtifactEntry]:
-        """``get_artifacts`` server-local 同步遍历段（Wave C 续：移出事件循环）。"""
-        if not artifacts_dir.is_dir():
-            return []
-        entries: list[ArtifactEntry] = []
-        for f in sorted(artifacts_dir.iterdir()):
-            if f.is_file():
-                stat = f.stat()
-                from datetime import datetime as dt
-
-                entries.append(
-                    ArtifactEntry(
-                        filename=f.name,
-                        size_bytes=stat.st_size,
-                        last_modified=dt.fromtimestamp(stat.st_mtime).isoformat(),
-                    )
-                )
-        return entries
-
-    async def get_artifact_content(self, workspace_id: uuid.UUID, filename: str) -> str | None:
-        workspace, spec_ws = await self._get_base(workspace_id)
-        runtime_dir = self._resolve_runtime_dir(workspace_id, workspace, spec_ws)
-        if not runtime_dir:
-            return None
-
-        artifact_path = (runtime_dir / "artifacts" / filename).resolve()
-        artifacts_dir = (runtime_dir / "artifacts").resolve()
-        # 越界校验保留本地做（路径规范化不依赖 fs，task-12 constraints）。
-        if not str(artifact_path).startswith(str(artifacts_dir)):
-            return None
-        return await self._read_text(workspace, artifact_path, errors="replace")
-
-    async def _read_text(self, workspace, abs_path: Path, *, errors: str = "strict") -> str | None:
-        """读 UTF-8 文本文件，host_fs 可用时走 delegate RPC，否则容器 Path 直读。
-
-        统一了 user-inputs.md / artifact 内容读取：host_fs=None（server-local 默认 +
-        既有测试）走旧 ``Path.is_file`` + ``read_text``；host_fs 注入时走
-        ``delegate.stat`` + ``delegate.read_file``，daemon-client 经 WS RPC。
-
-        ``errors`` 仅作用于 server-local 容器分支（delegate.read_file 返 daemon
-        侧解码后的 str，无 errors 概念）。默认 ``strict`` 与原 user-inputs 行为一致；
-        artifact 内容传 ``replace`` 与原行为一致。
+        ``get_daemon_ws_hub`` 懒导入（explorer/service.py 同款理由：测试按
+        ``ws_hub.get_daemon_ws_hub`` patch 单例访问器，模块顶层 import 会绑死
+        陈旧引用）。
         """
-        path_str = str(abs_path)
-        if self._host_fs is not None:
-            st = await self._host_fs.stat(workspace, path_str)
-            if not st.get("exists") or st.get("is_dir"):
-                return None
-            try:
-                return await self._host_fs.read_file(workspace, path_str)
-            except Exception:
-                return None
-        # server-local 容器分支（Wave C 续：移出事件循环）。errors 语义见 _read_text_local。
-        return await asyncio.to_thread(self._read_text_local, abs_path, errors)
+        from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
-    @staticmethod
-    def _read_text_local(abs_path: Path, errors: str) -> str | None:
-        """``_read_text`` server-local 同步读段（Wave C 续：移出事件循环）。
-
-        errors="replace" 时 UnicodeDecodeError 被替换字符吞（原 get_artifact_content 行为）；
-        errors="strict" 时坏编码 UnicodeDecodeError 传播（原 get_user_inputs 行为，
-        except OSError 不接 UnicodeDecodeError）。
-        """
-        if not abs_path.is_file():
-            return None
-        if errors == "replace":
-            try:
-                return abs_path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                return None
+        hub = get_daemon_ws_hub()
         try:
-            return abs_path.read_text(encoding="utf-8")
-        except OSError:
+            return await hub.send_rpc(
+                daemon_id, method, params, timeout=RUNTIME_RPC_TIMEOUT_SECONDS
+            )
+        except DaemonRuntimeOffline as exc:
+            # 与 explorer 同判据：「mid-rpc」文案区分在途断连 vs 离线（HTTP 均 502）。
+            details: dict[str, Any] = {
+                "daemon_id": str(daemon_id),
+                "method": method,
+                **(exc.details or {}),
+                **context,
+            }
+            if "mid-rpc" in str(exc):
+                raise RuntimeTransferInterrupted(
+                    "与守护进程的传输中断，请稍后重试。",
+                    details={**details, "reason": "disconnected_mid_rpc"},
+                ) from exc
+            raise RuntimeDaemonOffline(
+                "守护进程当前离线，无法读取运行时状态；请确认守护进程在线后重试。",
+                details={**details, "reason": "offline_or_send_failed"},
+            ) from exc
+        except DaemonRpcTimeout as exc:
+            raise RuntimeRpcTimeout(
+                "读取运行时状态超时，请稍后重试。",
+                details={
+                    "daemon_id": str(daemon_id),
+                    "method": method,
+                    **(exc.details or {}),
+                    **context,
+                },
+            ) from exc
+        except DaemonRpcRemoteError as exc:
+            raise _map_runtime_remote_error(
+                exc, daemon_id=daemon_id, method=method, context=context
+            ) from exc
+
+    # ── 四个服务方法（对齐 design §6.1 RPC 契约表）────────────────────────────
+
+    async def get_progress(
+        self, workspace_id: uuid.UUID, user_id: uuid.UUID
+    ) -> RuntimeProgress | None:
+        """实时读取流水线进度（daemon 调 sillyspec progress dump --json）。"""
+        daemon_id = await self._resolve_binding(workspace_id, user_id)
+        result = await self._send_runtime_rpc(
+            daemon_id,
+            "runtime.read_progress",
+            {"workspace_id": str(workspace_id)},
+            context={"workspace_id": str(workspace_id)},
+        )
+        progress_data = result.get("progress")
+        if progress_data is None:
             return None
+        return RuntimeProgress.model_validate(progress_data)
+
+    async def get_user_inputs(self, workspace_id: uuid.UUID, user_id: uuid.UUID) -> str | None:
+        """实时读取用户输入记录原文（.runtime/user-inputs.md）。"""
+        daemon_id = await self._resolve_binding(workspace_id, user_id)
+        result = await self._send_runtime_rpc(
+            daemon_id,
+            "runtime.read_user_inputs",
+            {"workspace_id": str(workspace_id)},
+            context={"workspace_id": str(workspace_id)},
+        )
+        return result.get("content")
+
+    async def get_artifacts(
+        self, workspace_id: uuid.UUID, user_id: uuid.UUID
+    ) -> list[ArtifactEntry]:
+        """实时列步骤产物（.runtime/artifacts）。"""
+        daemon_id = await self._resolve_binding(workspace_id, user_id)
+        result = await self._send_runtime_rpc(
+            daemon_id,
+            "runtime.list_artifacts",
+            {"workspace_id": str(workspace_id)},
+            context={"workspace_id": str(workspace_id)},
+        )
+        return [ArtifactEntry.model_validate(a) for a in result.get("artifacts", [])]
+
+    async def get_artifact_content(
+        self, workspace_id: uuid.UUID, user_id: uuid.UUID, filename: str
+    ) -> str | None:
+        """实时读单个产物内容；filename 做 ``..``/绝对路径/控制字符预检（design §5）。"""
+        _validate_artifact_filename(filename, workspace_id=workspace_id)
+        daemon_id = await self._resolve_binding(workspace_id, user_id)
+        result = await self._send_runtime_rpc(
+            daemon_id,
+            "runtime.read_artifact",
+            {"workspace_id": str(workspace_id), "filename": filename},
+            context={"workspace_id": str(workspace_id), "filename": filename},
+        )
+        return result.get("content")
+
+
+# ── filename 预检（design §5 关键实现点；daemon 侧仍有 realpath 主防线）────────
+
+
+def _validate_artifact_filename(filename: str, *, workspace_id: uuid.UUID) -> None:
+    """backend 层 filename 预检：空名 / 控制字符 / 绝对路径 / ``..`` 段 / 子路径 → 422。
+
+    与 explorer._join_within_root 同语义但不拼路径——runtime.read_artifact 的
+    落点由 daemon 侧在 specCacheRoot/.runtime/artifacts 下拼接并做 containment
+    主校验；backend 只做尽早拒明显恶意输入的预检。artifacts 只接受平文件名
+    （子路径无语义且增大逃逸面，一并拒）。
+    """
+    reason: str | None = None
+    if not filename:
+        reason = "empty"
+    elif any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in filename):
+        reason = "control_chars"
+    elif filename.startswith(("/", "\\")) or (
+        len(filename) >= 2 and filename[0].isalpha() and filename[1] == ":"
+    ):
+        reason = "absolute_path"
+    elif ".." in filename.replace("\\", "/").split("/"):
+        reason = "parent_escape"
+    elif "/" in filename or "\\" in filename:
+        reason = "nested_path"
+    if reason is not None:
+        raise RuntimePathNotFound(
+            "产物文件名非法：仅允许 artifacts 目录下的平文件名。",
+            details={
+                "workspace_id": str(workspace_id),
+                "filename": filename,
+                "reason": reason,
+            },
+        )
+
+
+def _map_runtime_remote_error(
+    exc: DaemonRpcRemoteError,
+    *,
+    daemon_id: uuid.UUID,
+    method: str,
+    context: dict[str, Any],
+) -> AppError:
+    """daemon 业务错误按 code 分派（design §6.3 映射表，explorer 同骨架）。"""
+    details: dict[str, Any] = {
+        "daemon_id": str(daemon_id),
+        "method": method,
+        "daemon_code": exc.code,
+        "daemon_message": exc.message,
+        **context,
+    }
+    if exc.code == "not_found":
+        return RuntimePathNotFound(
+            "文件或目录不存在，可能已被移动或删除。",
+            details=details,
+        )
+    if exc.code == "forbidden":
+        return RuntimeDaemonForbidden(
+            "守护进程拒绝访问：不在允许的访问范围内。",
+            details=details,
+        )
+    if exc.code == "method_not_found":
+        return RuntimeDaemonTooOld(
+            "本机 daemon 版本过旧，不支持运行时状态读取，请升级 daemon。",
+            details=details,
+        )
+    if exc.code == "artifact_too_large":
+        return RuntimeArtifactTooLarge(
+            "产物过大，请用文件浏览器下载查看。",
+            details=details,
+        )
+    return RuntimeDaemonRemoteError(
+        "守护进程执行运行时读取失败，请稍后重试。",
+        details=details,
+    )
