@@ -93,3 +93,7 @@ SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
 <!-- MANUAL_NOTES_START -->
 
 <!-- MANUAL_NOTES_END -->
+
+## 变更索引
+
+- ql-20260819-001-b742 | 会话列表和面板头部增加工作区信息显示（session-list-panel chips + session header badge）

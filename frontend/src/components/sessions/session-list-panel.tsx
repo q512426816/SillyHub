@@ -29,6 +29,7 @@
 import { useMemo, useRef, useState } from "react";
 import {
   useInfiniteQuery,
+  useQuery,
   type InfiniteData,
 } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -37,6 +38,7 @@ import { SearchOutlined } from "@ant-design/icons";
 import { Trash2 } from "lucide-react";
 import { ApiError } from "@/lib/api";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
+import { listWorkspaces } from "@/lib/workspaces";
 import {
   listAgentSessions,
   type AgentSessionListResponse,
@@ -138,6 +140,21 @@ export function SessionListPanel({
 
   // 机器列表（筛选多选 + chips 机器名回退 / 离线判定共用一份数据源）。
   const { items: machines } = useDaemonMachines({ limit: 100 });
+
+  // 工作区列表（chips 工作区名称解析）。
+  const workspacesQuery = useQuery({
+    queryKey: ["workspaces", "session-list"],
+    queryFn: () => listWorkspaces({ limit: 100 }),
+    staleTime: 60_000,
+  });
+  /** workspace_id → 工作区名称映射。 */
+  const workspaceIdToName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const ws of workspacesQuery.data?.items ?? []) {
+      map.set(ws.id, ws.name);
+    }
+    return map;
+  }, [workspacesQuery.data]);
 
   /** server 侧过滤参数（task-16 契约：runtime_id/machine_id/provider/q/status）。 */
   const serverParams = useMemo(
@@ -418,6 +435,7 @@ export function SessionListPanel({
                   title={title}
                   selected={selected}
                   runtimeToMachine={runtimeToMachine}
+                  workspaceIdToName={workspaceIdToName}
                   virtualStart={virtualRow.start}
                   virtualSize={virtualRow.size}
                   onSelect={onSelect}
@@ -454,6 +472,7 @@ interface SessionRowProps {
   title: string;
   selected: boolean;
   runtimeToMachine: Map<string, { machine: DaemonMachineRead; online: boolean }>;
+  workspaceIdToName: Map<string, string>;
   virtualStart: number;
   virtualSize: number;
   onSelect?: (_session: AgentSessionRead) => void;
@@ -469,6 +488,7 @@ function SessionRow({
   title,
   selected,
   runtimeToMachine,
+  workspaceIdToName,
   virtualStart,
   virtualSize,
   onSelect,
@@ -553,10 +573,19 @@ function SessionRow({
           </button>
         )}
       </div>
-      {/* 第二行：chips（机器/引擎/档案/供应商/轮数）——ql-20260817-002 改
+      {/* 第二行：chips（工作区/机器/引擎/档案/供应商/轮数）——ql-20260817-002 改
           flex-wrap 自动换行 2-3 行（单行压挤更看不清）；Tag 紧凑样式保留、
           长名 max-w+truncate 防单个长名占整行，截断悬停有 title 全名。 */}
       <div className="flex flex-wrap items-center gap-0.5 pl-2.5">
+        {session.workspace_id && workspaceIdToName.has(session.workspace_id) && (
+          <Tag
+            title={workspaceIdToName.get(session.workspace_id)}
+            className="m-0 max-w-[120px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
+            color="cyan"
+          >
+            📂 {workspaceIdToName.get(session.workspace_id)}
+          </Tag>
+        )}
         {machineName && (
           <Tag
             title={machineOffline ? `${machineName}（离线）` : machineName}

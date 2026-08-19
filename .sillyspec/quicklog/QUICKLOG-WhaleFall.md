@@ -25,3 +25,14 @@
 根因：纯新增，后端 DELETE /sessions/{id} 软删端点已有，纯前端 UI。
 方案：SessionListPanel 加批量管理模式（批量管理按钮→条目变勾选框→全选/删除选中）+ hover 单条删除按钮；page.tsx onDeleteSessions 回调调 deleteAgentSession 软删后 invalidate 列表+清选中态。
 结果：列表组件 13 用例全过，前端全量 1632 全绿，eslint 0 error。待 commit+push+rebuild frontend。
+
+## ql-20260819-001-b742 | 2026-08-19 16:35:01 | 会话列表和面板头部增加工作区信息显示
+状态：已完成
+关联变更：2026-08-19-sessions-workspace-selector
+文件：
+- frontend/src/components/sessions/session-list-panel.tsx（新增 workspaceIdToName map + 工作区 Tag chip）
+- frontend/src/app/(dashboard)/sessions/page.tsx（新增 workspaceName 派生 + 头部工作区显示）
+需求：会话列表和面板头部增加工作区信息显示。
+根因：workspace-session-selector 变更已为新建会话增加了工作区选择器，但已有会话列表和会话面板未展示工作区归属。
+方案：session-list-panel.tsx 左栏 chips 区新增工作区 Tag（workspace_id 解析名称）；sessions/page.tsx 右栏面板头部 badge 区显示工作区名称。两个组件通过 listWorkspaces() 获取工作区列表做 id→name 映射。
+结果：tsc 类型检查通过（仅 file-preview 预存错误），lint 通过（无新增 warning），162 测试通过（2 预存失败与本次无关）。

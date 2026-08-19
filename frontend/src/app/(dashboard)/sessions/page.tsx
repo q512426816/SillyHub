@@ -60,6 +60,7 @@ import {
   type LlmProviderRoleMapping,
 } from "@/lib/api/llm-providers";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
+import { listWorkspaces } from "@/lib/workspaces";
 import {
   endSession,
   fetchPendingDialogs,
@@ -194,6 +195,20 @@ function SessionPanel({
     },
   });
   const session = detailQuery.data ?? null;
+
+  // ── 工作区名称解析（面板头部显示）─────────────────────────────────────────
+  const workspacesQuery = useQuery({
+    queryKey: ["workspaces", "session-panel"],
+    queryFn: () => listWorkspaces({ limit: 100 }),
+    staleTime: 60_000,
+  });
+  const workspaceName = useMemo(() => {
+    if (!session?.workspace_id) return null;
+    return (
+      workspacesQuery.data?.items.find((ws) => ws.id === session.workspace_id)
+        ?.name ?? null
+    );
+  }, [session?.workspace_id, workspacesQuery.data]);
 
   // ── 实时 turn 状态机（对齐 interactive-session-panel 的 SSE 处理）───────
   const [turnState, setTurnState] = useState<TurnState>(INITIAL_TURN_STATE);
@@ -839,6 +854,11 @@ function SessionPanel({
           {machineName && (
             <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">
               🖥 {machineName}
+            </span>
+          )}
+          {workspaceName && (
+            <span className="hidden shrink-0 rounded-sm bg-cyan-50 px-1.5 py-0.5 text-[11px] text-cyan-700 sm:inline">
+              📂 {workspaceName}
             </span>
           )}
         </div>
