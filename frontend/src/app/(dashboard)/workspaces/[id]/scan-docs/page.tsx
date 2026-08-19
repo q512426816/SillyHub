@@ -87,8 +87,12 @@ function TreeView({ nodes, workspaceId, onSelect, selectedDoc, depth = 0 }: {
                 </Badge>
               )}
               {doc.conflict_count > 0 && (
-                <Badge variant="destructive" className="text-[10px] px-1.5">
-                  ⚠ 冲突{doc.conflict_count}
+                <Badge
+                  variant="outline"
+                  className="text-[10px] px-1.5"
+                  title={`此文档有 ${doc.conflict_count} 个被覆盖的旧版本存档（同步时后写的版本生效，旧版留存备查），无需处理`}
+                >
+                  🕘 历史{doc.conflict_count}版
                 </Badge>
               )}
               <Badge variant={doc.exists ? "success" : "outline"} className="text-[10px] px-1.5">{doc.doc_type}</Badge>
