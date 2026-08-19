@@ -16969,9 +16969,9 @@ export interface components {
          * UserCreateRequest
          * @description Body of ``POST /api/admin/users`` (and forwarded ``/api/users``).
          *
-         *     ``password`` 可选：不传时由 ``UserService.create_user`` 落库为固定默认初始密码
-         *     （``DEFAULT_INITIAL_PASSWORD``），管理员无需在新建表单中输入密码。显式传入时
-         *     仍按 ``min_length=8`` 校验。
+         *     ``password`` 可选：不传时由 ``UserService.create_user`` 随机生成一次性初始口令
+         *     （BS-1），经 ``UserRead.initial_password`` 字段仅创建响应一次性下发，管理员转发
+         *     给用户。显式传入时仍按 ``min_length=8`` 校验。
          */
         UserCreateRequest: {
             /** Email */
@@ -18011,6 +18011,8 @@ export interface components {
             organizations?: components["schemas"]["OrganizationBrief"][];
             /** Roles */
             roles?: components["schemas"]["RoleBrief"][];
+            /** Initial Password */
+            initial_password?: string | null;
         };
         /**
          * ApproveRequest
