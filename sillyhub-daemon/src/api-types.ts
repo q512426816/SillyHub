@@ -332,6 +332,10 @@ export interface paths {
          *
          *     平台管理员：全量（allowed_workspace_ids=None），可按 user_id 过滤 created_by。
          *     普通账号：allowed_workspace_ids 限制可见集合，user_id 参数被忽略。
+         *
+         *     change 2026-08-18-workspace-role-type：``?type=`` 枚举化（D-002@v1），新增
+         *     ``?unclassified=true``（type IS NULL 谓词，D-005@v1）；两者同传 422——
+         *     ``?type=`` 等值匹配表达不了 NULL，语义互斥。
          */
         get: operations["list_workspaces_api_workspaces_get"];
         put?: never;
@@ -445,6 +449,10 @@ export interface paths {
          *     pulls the latest spec bundle.
          *
          *     Returns the ``lease_id``, ``runtime_id``, and ``claim_token``.
+         *
+         *     鉴权收紧为 workspace-scoped（security-audit-remediation task-09）：非本
+         *     workspace 成员（即便在其它 workspace 有 workspace:write）403，不触达
+         *     ``start_init_dispatch`` 的 actor binding 解析。
          */
         post: operations["init_workspace_api_workspaces__workspace_id__init_post"];
         delete?: never;
@@ -751,7 +759,9 @@ export interface paths {
          * @description 按归属/上传者列文件元数据（task-13 / FR-06）。
          *
          *     业务人员「借用方案」查看：``owner_type=workspace&owner_id=<ws_id>`` 列该工作空间
-         *     借用 daemon 产出的方案文件。无参数则返回全部活跃文件（按 created_at 倒序）。
+         *     借用 daemon 产出的方案文件（需该 workspace 的 WORKSPACE_READ，非成员 404）。
+         *     无参数则返回可见域内活跃文件——本人上传 + 有 WORKSPACE_READ 的 workspace 归属
+         *     （platform_admin 全量），按 created_at 倒序（security-audit-remediation D-002）。
          */
         get: operations["list_files_api_file_list_get"];
         put?: never;
@@ -937,6 +947,86 @@ export interface paths {
          *     时 service 抛 ``MemberBindingNotFound``（409）。
          */
         delete: operations["revoke_shared_endpoint_api_workspaces__workspace_id__members__user_id__shared_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/explorer/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Explorer Tree
+         * @description 列目录（懒加载逐层；design §7.2 GET /tree，RPC 超时 30s）。
+         */
+        get: operations["get_explorer_tree_api_workspaces__workspace_id__explorer_tree_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/explorer/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Explorer File
+         * @description 读文件预览（encoding=utf8；design §7.2 GET /file，RPC 超时 30s）。
+         */
+        get: operations["get_explorer_file_api_workspaces__workspace_id__explorer_file_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/explorer/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Explorer File
+         * @description 下载文件（encoding=base64 强制；design §7.2 GET /download，RPC 超时 60s）。
+         */
+        get: operations["download_explorer_file_api_workspaces__workspace_id__explorer_download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/explorer/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Explorer
+         * @description 按文件名全树搜索（design §7.2 GET /search，RPC 超时 60s；空关键词 422）。
+         */
+        get: operations["search_explorer_api_workspaces__workspace_id__explorer_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1191,6 +1281,29 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/stage-profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Stage Profile
+         * @description task-03（2026-08-13-profile-system-prompt-injection）：存每阶段独立 profile_id。
+         *
+         *     写 ``change.stages[<current_stage>]["profile_id"]``（D-003 每阶段独立）。
+         *     profile_id=None 清除（跟随工作区默认）。
+         */
+        patch: operations["update_stage_profile_api_workspaces__workspace_id__changes__change_id__stage_profile_patch"];
         trace?: never;
     };
     "/api/workspaces/{workspace_id}/changes/{change_id}/files": {
@@ -1569,6 +1682,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/quicklog-entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Quicklog Entries
+         * @description GET 快速修复列表（FR-04：双源合并 → 派生 → 筛选 → 分页）。
+         */
+        get: operations["list_quicklog_entries_api_workspaces__workspace_id__quicklog_entries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/quicklog-entries/{ql_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Quicklog Entry
+         * @description GET 快速修复单条详情（FR-06：四段正文 + raw_block；404 未命中）。
+         */
+        get: operations["get_quicklog_entry_api_workspaces__workspace_id__quicklog_entries__ql_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/scan-docs": {
         parameters: {
             query?: never;
@@ -1838,6 +1991,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/llm-providers/{provider_id}/quota": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Provider Quota
+         * @description 查供应商额度（一期仅 GLM，design §7.1 / FR-08 / D-009）。
+         *
+         *     弱依赖（R-05）：非 GLM 供应商（base_url 判定，复用 ``_detect_usage_provider``
+         *     既有方式，不加新配置）、上游失败 / 无数据 → 200 + ``{"quota": null}``，绝不抛
+         *     5xx；不做缓存，每次实时查（前端低频调用）。owner 校验同 get_provider（跨用户
+         *     404/403 不泄漏，D-008）。
+         *
+         *     GLM 数据链完全复用 usage_handlers.query_zhipu_quota → query_zhipu
+         *     （``_classify_zhipu_window`` / ``_parse_zhipu_tiers``），不新建上游 HTTP 调用。
+         *     响应无 api_key 字段（NFR-02，明文仅局部变量用于鉴权头）。
+         */
+        get: operations["get_provider_quota_api_llm_providers__provider_id__quota_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/llm-providers/{provider_id}": {
         parameters: {
             query?: never;
@@ -2064,10 +2246,14 @@ export interface paths {
         };
         /**
          * List Workspace Agent Sessions
-         * @description scan 真阻塞（改造点 E）：workspace 维度 active AgentSession 列表。
+         * @description 工作区会话列表（2026-08-14-change-center-conversation-driven task-06 / D-002@v1）。
          *
-         *     供 approvals 审批中心页聚合 scan 歧义决策——前端拿 session_id 列表后订阅各自
-         *     SSE（permission_request），实现"在审核页看到 scan 待决策 + 反馈续 turn"。
+         *     include_ended=false（缺省）：现状——仅 active 会话最小字段 dict
+         *     （id/status/mode/provider），供 approvals 审批中心聚合 scan 歧义决策。
+         *     include_ended=true：工作区全量会话（含已结束），完整 AgentSessionListItem
+         *     （id/provider/status/turn_count/author/last_active_at/title，对齐
+         *     daemon/schema.py:71-84），排序 coalesce(last_active_at, created_at) desc。
+         *     权限/过滤保持现状（workspace 成员跨成员可见），不因 include_ended 改变。
          */
         get: operations["list_workspace_agent_sessions_api_workspaces__workspace_id__agent_sessions_get"];
         put?: never;
@@ -2250,6 +2436,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/missions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Project Missions
+         * @description 列出项目下的 mission（按 created_at 倒序，分页，design §7.1 / FR-04）。
+         *
+         *     鉴权同 POST（项目经理/超管）。
+         *     返回 MissionResponse 列表（过滤 mission.project_id == project_id），复用
+         *     _mission_to_response 并扩展 workspace_name / workspace_type / scope 概要字段。
+         */
+        get: operations["list_project_missions_api_projects__project_id__missions_get"];
+        put?: never;
+        /**
+         * Create Project Mission
+         * @description 项目维度创建 mission（design §7.1 / FR-04）。
+         *
+         *     鉴权：项目经理或超管（非项目经理 403）。
+         *     校验：scope_workspace_ids ⊆ ppm_project_workspace(project_id)（越界 422）；
+         *           anchor_workspace_id ∈ scope（越界 422）；
+         *           scope 必填 ≥1 去重（项目维度入口强制）。
+         *     预检：scope 内各 ws 至少一条 binding 带 daemon_id（缺的报清单，不阻断）。
+         *     行为：mode 强制 team；project_id 落列；调 team_mission_entry 传 scope。
+         *     anchor 缺省：scope 第一个或 type=backend 优先。
+         */
+        post: operations["create_project_mission_api_projects__project_id__missions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/missions/{mission_id}/dispatch_worker": {
         parameters: {
             query?: never;
@@ -2267,6 +2489,11 @@ export interface paths {
          *     ``MissionExecutionService.dispatch_worker`` 派 daemon lease。daemon 离线 /
          *     未绑定时 lease 失败但 run 仍建（pending + error_code=no_online_daemon），
          *     主 agent 可读 worker 状态决定重派。
+         *
+         *     task-08（2026-08-19-cross-workspace-team-mission / §7.2 链路A）：
+         *     - 新增 target_workspace_id 参数（payload.target_workspace_id）
+         *     - 服务端校验 target ∈ scope（含 anchor），越界抛 400 mission_target_out_of_scope
+         *     - 有效 target 传 exec_svc.dispatch_worker 的 target_workspace_id 形参
          */
         post: operations["dispatch_worker_api_workspaces__workspace_id__missions__mission_id__dispatch_worker_post"];
         delete?: never;
@@ -2622,8 +2849,11 @@ export interface paths {
          *     slot），事件生成器内部自建独立短 session 做逐次轮询，不在请求级 session 贯穿
          *     整个流生命周期。
          *
-         *     鉴权复用 ``require_permission_any(Permission.TASK_READ)``（与
-         *     stream_agent_run_logs 同款；路由在 /api 前缀天然适用，非成员 403）。
+         *     鉴权收紧为 workspace-scoped ``require_permission(Permission.TASK_READ)``
+         *     （security-audit-remediation task-09）：checker 以路径参数 ``workspace_id``
+         *     为 scope，用户必须在**本** workspace 持有 task:read——此前 ``require_permission_any``
+         *     跨 workspace 并集判定放行了只对其它 workspace 有权限的用户（越权读 mission
+         *     worker 状态）。非成员 403（权限拒绝）；mission 存在性 404 逻辑独立不变。
          */
         get: operations["stream_mission_events_api_workspaces__workspace_id__missions__mission_id__events_get"];
         put?: never;
@@ -2701,6 +2931,32 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/change-writes/{change_write_id}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Report Change Write Progress
+         * @description daemon spec-sync 执行中上报同步进度（FR-05/FR-06，ql-20260813-spec-sync-visibility）。
+         *
+         *     校验与 complete 同款（claim_token + status）：``status == claimed`` 才允许写
+         *     （BL-3：``status ∈ {pending, done, failed}`` 一律 409——progress 语义是「claim 后
+         *     执行中的进度」，pending 未认领 / 终态已完成均拒绝；防重放/篡改）。仅写传入的非 None
+         *     字段（files_total/files_processed），**不改 status/completed_at**（D-004 单一写者：
+         *     终态仍由 complete_change_write 置）。
+         */
+        patch: operations["report_change_write_progress_api_daemon_change_writes__change_write_id__progress_patch"];
         trace?: never;
     };
     "/api/daemon/audit/batch": {
@@ -3170,6 +3426,9 @@ export interface paths {
         /**
          * Claim Lease
          * @description Claim a pending task lease for execution.
+         *
+         *     task-03（security-audit-remediation / FR-02 / D-001@v1）：lease 归属 runtime
+         *     的 user 必须是当前认证 user（服务层校验），他人 → 404 与不存在同语义。
          */
         post: operations["claim_lease_api_daemon_leases__lease_id__claim_post"];
         delete?: never;
@@ -3584,6 +3843,12 @@ export interface paths {
         /**
          * List Sessions
          * @description List the current user's AgentSessions (owner-scoped, stable paging).
+         *
+         *     task-06 / FR-02 / D-003@v1：可选过滤参数 runtime_id / machine_id（经
+         *     daemon_runtimes 关联）/ provider / q（标题模糊，实现为 user_input 内容
+         *     ilike，见 service 层 docstring）；全部可选，不传时查询与现状一致（零回归）。
+         *     过滤在 SQL 层完成，total 为过滤后总数（R-04 真分页），分页 limit/offset
+         *     作用于过滤结果。machine_id 不匹配 runtime 缺失的旧会话（无 runtime 即无机器）。
          */
         get: operations["list_sessions_api_daemon_sessions_get"];
         put?: never;
@@ -3807,6 +4072,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/llm-proxy/{path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Llm Proxy Get */
+        get: operations["llm_proxy_get_api_daemon_llm_proxy__path__get"];
+        put?: never;
+        /** Llm Proxy Post */
+        post: operations["llm_proxy_post_api_daemon_llm_proxy__path__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/runtimes/{runtime_id}/pending-leases": {
         parameters: {
             query?: never;
@@ -3817,6 +4100,12 @@ export interface paths {
         /**
          * Get Pending Leases
          * @description Return all pending leases for a runtime (polled by daemon).
+         *
+         *     task-03（security-audit-remediation / FR-02 / D-001@v1）：查询前归属校验
+         *     ——runtime 的 user 必须是当前认证 user，不匹配/不存在 → 404（owner-only，
+         *     跨用户与不存在同语义）。同时把原 raw SQL 改 ORM 查询：原 text() 直绑
+         *     uuid.UUID 参数在 SQLite（CHAR(32) 存储）下 ProgrammingError，且无法挂
+         *     归属校验；ORM ``col()`` 由 dialect 处理 Uuid 绑定，两库行为一致。
          */
         get: operations["get_pending_leases_api_daemon_runtimes__runtime_id__pending_leases_get"];
         put?: never;
@@ -4090,113 +4379,6 @@ export interface paths {
         get: operations["list_git_operations_api_git_operations_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/changes/create": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create Change */
-        post: operations["create_change_api_workspaces__workspace_id__changes_create_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/changes/proxy-create": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Proxy Create Change
-         * @description daemon-client 变更代写入口 (design §5.3 Phase 3 / D-002@v1)。
-         *
-         *     与 server-local ``/changes/create`` 区分：
-         *     - 不传 ``lease_id`` 也不传 ``runtime_id``（D-002@v1）。
-         *     - 经 ``service.create_change`` 走 proxy 路径（lease-polling 下发
-         *       daemon_change_writes → 等回执 → 落库 Change）；runtime 由后端从 binding +
-         *       workspace.default_agent 现算。
-         *     - **不自动 dispatch brainstorm**（daemon-client change 暂不接 agent 流；agent
-         *       dispatch 由 task-12/后续接，避免与 server-local auto-dispatch 语义混淆）。
-         *
-         *     daemon 离线 / 未绑定 → 400 ``DAEMON_CLIENT_NO_SESSION``（service 层抛）。
-         */
-        post: operations["proxy_create_change_api_workspaces__workspace_id__changes_proxy_create_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/changes/{change_id}/documents/generate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Generate Document */
-        post: operations["generate_document_api_workspaces__workspace_id__changes__change_id__documents_generate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/changes/{change_id}/documents/batch-generate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Batch Generate Documents */
-        post: operations["batch_generate_documents_api_workspaces__workspace_id__changes__change_id__documents_batch_generate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/changes/{change_key}/execute": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Execute Change
-         * @description Trigger change execution — dispatch via unified stage dispatch service.
-         *
-         *     task-09（D-004@v2）：``team_mode=true`` 时把 ``team_mode=True`` 写入
-         *     ``change.stages`` 触发 ``dispatch_next_step`` Step 2.5 分流到主 agent
-         *     OrchestratorService。worker_preset / main_agent_config 从 ``change.stages``
-         *     已有字段读（前端 stage toggle 经 transition 写入；execute 端点不重复接收，
-         *     避免与 transition 入口的双写冲突）。single（team_mode=false 零回归）。
-         */
-        post: operations["execute_change_api_workspaces__workspace_id__changes__change_key__execute_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5882,8 +6064,9 @@ export interface paths {
          *       ``AsyncIterator``, 不能在 sync 段 await);
          *     ② sync 段 (``anyio.to_thread.run_sync``):openpyxl 构造 workbook (18 列表头 +
          *       数据行 + 附件列对每行 images ``add_image`` 锚到该行单元格)。
-         *     单图取流失败 (缺失/已删/底层存储瞬时错误,含非 AppError) 跳过不阻断导出
-         *     (best-effort, 对齐 D-009 口径;P2 捕获面扩到 Exception)。
+         *     单图取流失败 (缺失/已删/越权归属/底层存储瞬时错误,含非 AppError) 跳过不阻断导出
+         *     (best-effort, 对齐 D-009 口径;P2 捕获面扩到 Exception)。越权归属跳过源自
+         *     get_stream 的 IDOR 归属断言 (security-audit-remediation task-05/D-001)。
          */
         get: operations["export_problems_api_ppm_problem_list_export_excel_get"];
         put?: never;
@@ -7372,7 +7555,8 @@ export interface paths {
          *
          *     Body is a raw ``application/x-tar`` stream. The whole tree is overwritten
          *     (no diff/merge). ``.runtime/`` is preserved. Returns the reparse parsed
-         *     count.
+         *     count. ``X-Change-Write-Id`` 头（可选）让后端 apply 循环内逐文件回写
+         *     files_processed（逐文件级进度，D-004@V2）。
          */
         post: operations["sync_spec_workspace_api_workspaces__workspace_id__spec_workspace_sync_post"];
         delete?: never;
@@ -7399,6 +7583,10 @@ export interface paths {
          *     过期 → ``conflict=True`` + ``server_versions``（HTTP 保持 200，daemon 侧据字段
          *     提示人工拍板，design §7 定义）；containment / ``.runtime`` 越界 → 422 AppError
          *     透传（``HTTP_422_SPEC_BUNDLE_INVALID``，对齐旧 tar 端点校验机制）。
+         *     ``X-Change-Write-Id`` 头（可选）让 apply_ops 循环内逐文件回写 files_processed。
+         *     ``change_dirs``（change 2026-08-14-change-center-conversation-driven / D-005@v1）：
+         *     daemon 标注的本次涉及变更目录名集合，透传 apply_ops 落盘后触发 scoped reparse
+         *     （无标注时 apply_ops 扫 ops 路径 ``changes/`` 前缀兜底，行为等价）。
          */
         post: operations["sync_spec_workspace_incremental_api_workspaces__workspace_id__spec_workspace_sync_incremental_post"];
         delete?: never;
@@ -7484,7 +7672,8 @@ export interface paths {
          * Get Progress
          * @description GET 单 change 完整 progress JSON（契约 §6，裸六表 + 顶层 last_pushed_at）。
          *
-         *     不存在/跨 workspace → 404（客户端 fetchJson 返回 null 降级不阻断，契约 §8/§10）。
+         *     不存在/跨 workspace（无 CHANGE_READ）→ 404（客户端 fetchJson 返回 null 降级
+         *     不阻断，契约 §8/§10）。
          */
         get: operations["get_progress_api_changes__name__progress_get"];
         put?: never;
@@ -7497,8 +7686,12 @@ export interface paths {
          *     ``{conflict, platform_progress, last_pushed_at}``，客户端写冲突文件走 resolve）。
          *     body 是裸 ``serializeForSync`` 六表 JSON（NG-6 透传，不强类型校验）。
          *
-         *     workspace_id 从 require_platform_sync 派生（shpsync_ token 绑定工作区；shk_live_/JWT
-         *     过渡期 None 走全局聚合 fallback），透传 service 做收件箱隔离（task-06/07）。
+         *     workspace_id 从 require_platform_sync_write 派生（唯一写通道 shpsync_ token 绑定
+         *     工作区；shk_live_/JWT 一律 403，task-06 / D-004@v1）。
+         *
+         *     Change 2026-08-16-change-owner-from-token task-02（D-001@v1）：鉴权 tuple 的真实
+         *     User id 以 ``user_id`` 透传 service——接受分支把 ux_changes.owner_id 对齐 token
+         *     签发人；三个 ``X-SillySpec-*`` header 读取与 ``last_pusher`` 语义逐字不动（§9）。
          */
         post: operations["push_progress_api_changes__name__progress_post"];
         delete?: never;
@@ -7516,11 +7709,73 @@ export interface paths {
         };
         /**
          * List Changes
-         * @description GET 轻量 change 列表（契约 §5，裸数组形态 D-007，按 token 派生 workspace 过滤）。
+         * @description GET 轻量 change 列表（契约 §5，裸数组形态 D-007，按鉴权 scope 聚合）。
+         *
+         *     shpsync_ → token 绑定 workspace 收件箱；JWT/shk_live_ → CHANGE_READ workspace
+         *     并集 + NULL 桶（task-06 / D-004@v1，全局聚合已关闭）。
          */
         get: operations["list_changes_api_changes_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/changes/-/spec-manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Spec Manifest
+         * @description GET 服务器 spec 文件权威清单（CLI 直跑增量同步锚点，design §5.2/§7）。
+         *
+         *     CLI ``spec-sync.js`` 以此清单为锚 diff 本地 ``.sillyspec/``，算出增量 ops 后
+         *     POST ``/changes/-/spec-sync``（D-004@v1：CLI 无本地缓存，服务器清单即基线）。
+         *
+         *     读清单也收紧为写权限（``require_platform_sync_write``，仅 shpsync_ token，
+         *     JWT/shk_live_ 403）——清单是增量写协议的一部分，避免非同步方探测文件布局。
+         *     workspace_id 从 shpsync_ token 派生；无 workspace 归属 → 403 fail-closed
+         *     （对齐 quicklog-entries 范式）。
+         */
+        get: operations["get_spec_manifest_api_changes___spec_manifest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/changes/-/spec-sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Push Spec Sync
+         * @description POST 增量 spec 文件 ops（CLI 直跑增量同步，design §5.2/§7）。
+         *
+         *     CLI ``spec-sync.js`` 以 spec-manifest 为锚 diff 本地 ``.sillyspec/`` 后把
+         *     FileOp[] 整体一次 POST（空 ops 已在 CLI 短路不发请求，到达即有差异）。透传
+         *     ``apply_spec_ops`` → ``SpecWorkspaceService.apply_ops``（单事务：成功全部落盘 /
+         *     失败全部回滚）。conflict 不改 HTTP 状态（恒 200）：``conflict=true`` +
+         *     ``server_versions`` 由 CLI console.warn 提示人工拍板、不阻塞（design §5.4/§5.5）；
+         *     路径越界 422 由 apply_ops 的 AppError 透传（对齐 daemon 增量端点）。
+         *
+         *     鉴权同 spec-manifest（``require_platform_sync_write``，仅 shpsync_ token，
+         *     design §5.2——shpsync_ 此前只开放 progress/documents/approval 三写端点，本次
+         *     起同 token 复用）；workspace_id 从 token 派生，无归属 → 403 fail-closed。
+         */
+        post: operations["push_spec_sync_api_changes___spec_sync_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -7541,13 +7796,82 @@ export interface paths {
          *     CLI ``sync.js checkApproval`` 在 execute 启动时 GET 此端点，读 ``status``：
          *     rejected/pending 阻断 execute，其他（approved）放行（command.js:1071-1080）。
          *
-         *     **不查库、不因 change 不存在 404**：change 可能尚未上行 progress（execute 前），
-         *     若 404 CLI 会 fetchJson→null→误判 pending 卡死（与本端点放行初衷相悖）。当前后端
-         *     无审批策略 → 所有 change 默认 ``approved`` 放行。鉴权失败仍 401（require_platform_sync）。
+         *     **不因 change 无审批记录 404**：change 可能尚未上行 progress（execute 前），
+         *     若 404 CLI 会 fetchJson→null→误判 pending 卡死（与本端点放行初衷相悖）。
+         *     2026-08-14-platform-sync-docs-approval 起改读 ``approval`` 列（D-001@v1 完整闭环）：
+         *     无记录（行不存在 / approval NULL 含仅 documents 占位行）→ 默认 ``approved`` 放行；
+         *     有记录 → 真实 status/reason（rejected 时 CLI execute 启动 exit(1) 硬阻断，
+         *     run/command.js:1113-1129 现有门控）。鉴权失败仍 401。
+         *
+         *     task-06 / D-004@v1：读 scope 聚合——跨 workspace（无 CHANGE_READ）的 change 行
+         *     不可见，回落默认 approved 放行（不泄漏 status/reason）。
          */
         get: operations["get_approval_api_changes__name__approval_get"];
         put?: never;
-        post?: never;
+        /**
+         * Submit Approval
+         * @description POST 审批决定（CLI ``sync.js _submitApproval`` :944-996 预留契约，过去式 decision）。
+         *
+         *     D-001@v1 完整闭环：落 approval 列（重复提交覆盖，后写赢）。``decided_by`` 取
+         *     ``require_platform_sync_write`` 解包的权威 ``User.username``（唯一写通道 shpsync_
+         *     token 反查真实 User；**不用** ``X-SillySpec-User`` header fallback——客户端可伪造，
+         *     Grill UB-2）。rejected 记录随后被 GET approval 读到 → CLI execute 启动 exit(1)
+         *     硬阻断。task-06 / D-004@v1：JWT/shk_live_ 一律 403。
+         */
+        post: operations["submit_approval_api_changes__name__approval_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/changes/{name}/documents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Push Documents
+         * @description POST 四件套文档全文（CLI ``sync.js syncDocuments`` :442-497 预留契约）。
+         *
+         *     body 是扁平 map（键限四件套白名单，schema 层 422）。定向 upsert ``documents``
+         *     列（D-003@v1 单写者，不触碰 latest_progress/approval）；行不存在 INSERT 占位
+         *     （下行端点由占位行守卫视为「无进度」）。全量替换语义（整列覆盖，与 CLI 全量推一致）。
+         *
+         *     仅 shpsync_ token 可写（task-06 / D-004@v1，workspace_id 由 token 派生）。
+         */
+        post: operations["push_documents_api_changes__name__documents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/quicklog-entries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Push Quicklog Entry
+         * @description POST quicklog 条目推送（design §5.2 / FR-03 / D-003 双链路推送落点）。
+         *
+         *     CLI quicklog.js 两触发点（allocate/complete）best-effort POST；语义恒 200 成功体
+         *     （幂等 upsert，同 ``ql_id`` 整条覆盖 D-004，无 base_ts 乐观锁）。失败由 CLI 静默
+         *     兜底（文件解析链路），平台端无重试语义。
+         *
+         *     workspace_id 从 require_platform_sync_write 派生（仅 shpsync_ 可写，G6/D-004@v1）；
+         *     body 不含也不接受 workspace 字段（extra=ignore 宽松）。payload 裸存原文（D-005）。
+         */
+        post: operations["push_quicklog_entry_api_quicklog_entries_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8006,6 +8330,8 @@ export interface components {
             status: string;
             /** Turn Count */
             turn_count: number;
+            /** Mode */
+            mode?: string | null;
             author: components["schemas"]["ChangeSessionAuthor"];
             /** Last Active At */
             last_active_at: string | null;
@@ -8057,6 +8383,8 @@ export interface components {
             ended_at: string | null;
             /** Change Id */
             change_id: string | null;
+            /** User Id */
+            user_id?: string | null;
             /** Workspace Id */
             workspace_id: string | null;
             /** Title */
@@ -8067,6 +8395,14 @@ export interface components {
             current_run_id?: string | null;
             /** Terminating At */
             terminating_at?: string | null;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
+            /** Config Snapshot */
+            config_snapshot?: {
+                [key: string]: unknown;
+            } | null;
         };
         /** ApiKeyCreateRequest */
         ApiKeyCreateRequest: {
@@ -8142,6 +8478,41 @@ export interface components {
             reason?: string | null;
         };
         /**
+         * ApprovalSubmitOk
+         * @description POST approval 200 响应（CLI fetchJson 读到即成功，字段供人工核对）。
+         */
+        ApprovalSubmitOk: {
+            /**
+             * Status
+             * @default ok
+             */
+            status: string;
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approved" | "rejected";
+            /** Change Name */
+            change_name: string;
+        };
+        /**
+         * ApprovalSubmitRequest
+         * @description POST /changes/{name}/approval 请求。
+         *
+         *     decision 过去式（``"approved"``/``"rejected"``）——CLI ``sync.js _submitApproval``
+         *     （:961-963）字面：rejected 分支带 reason，approved 分支**整个不含 reason 键**，
+         *     故 reason 必须 optional（default None，Grill UB-3）。
+         */
+        ApprovalSubmitRequest: {
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "approved" | "rejected";
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
          * ArchiveCheckItem
          * @description 归档门禁单项检查结果。
          */
@@ -8170,6 +8541,11 @@ export interface components {
              * @description 归档备注（可选）
              */
             comment?: string | null;
+            /**
+             * Notify Session
+             * @default true
+             */
+            notify_session: boolean;
         };
         /**
          * ArchiveGateResponse
@@ -8319,16 +8695,6 @@ export interface components {
             limit: number;
             /** Offset */
             offset: number;
-        };
-        /** BatchGenerateRequest */
-        BatchGenerateRequest: {
-            /** Doc Types */
-            doc_types: string[];
-        };
-        /** BatchGenerateResponse */
-        BatchGenerateResponse: {
-            /** Generated */
-            generated: string[];
         };
         /**
          * BatchMetaRequest
@@ -8501,59 +8867,6 @@ export interface components {
             status: string;
             /** Reason */
             reason?: string | null;
-        };
-        /** ChangeCreateRequest */
-        ChangeCreateRequest: {
-            /** Title */
-            title: string;
-            /**
-             * Description
-             * @default
-             */
-            description: string;
-            /**
-             * Scope
-             * @default full
-             */
-            scope: string;
-            /** Change Type */
-            change_type?: string | null;
-            /** Affected Components */
-            affected_components?: string[];
-            /** Lease Id */
-            lease_id?: string | null;
-        };
-        /** ChangeCreateResponse */
-        ChangeCreateResponse: {
-            /**
-             * Id
-             * Format: uuid
-             */
-            id: string;
-            /**
-             * Workspace Id
-             * Format: uuid
-             */
-            workspace_id: string;
-            /** Change Key */
-            change_key: string;
-            /** Title */
-            title: string | null;
-            /** Status */
-            status: string;
-            /** Current Stage */
-            current_stage: string | null;
-            /** Path */
-            path: string;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /** Agent Dispatch */
-            agent_dispatch?: {
-                [key: string]: unknown;
-            } | null;
         };
         /** ChangeDocMatrix */
         ChangeDocMatrix: {
@@ -8741,6 +9054,11 @@ export interface components {
             updated_at: string;
             /** Archived At */
             archived_at: string | null;
+            step_progress?: components["schemas"]["StepProgressSummary"] | null;
+            /** Steps */
+            steps?: components["schemas"]["StepTimelineEntry"][] | null;
+            /** Owner Name */
+            owner_name?: string | null;
         };
         /**
          * ChangeRejectProcessReq
@@ -8821,6 +9139,9 @@ export interface components {
             /** Current Stage */
             current_stage?: string | null;
             pending_review?: components["schemas"]["PendingReview"] | null;
+            step_progress?: components["schemas"]["StepProgressSummary"] | null;
+            /** Owner Name */
+            owner_name?: string | null;
             /**
              * Updated At
              * Format: date-time
@@ -8903,6 +9224,21 @@ export interface components {
              * @default create
              */
             kind: string;
+        };
+        /**
+         * ChangeWriteProgressRequest
+         * @description PATCH .../change-writes/{id}/progress 请求体（FR-05/FR-06，ql-20260813-spec-sync-visibility）。
+         *
+         *     daemon spec-sync 执行中上报同步进度计数。D-004 单一写者：本端点写 files_total/
+         *     files_processed，complete_change_write 不碰计数列。仅更新传入的非 None 字段。
+         */
+        ChangeWriteProgressRequest: {
+            /** Claim Token */
+            claim_token: string;
+            /** Files Total */
+            files_total?: number | null;
+            /** Files Processed */
+            files_processed?: number | null;
         };
         /**
          * CheckpointResponse
@@ -9004,6 +9340,8 @@ export interface components {
             type?: string | null;
             /** Role */
             role?: string | null;
+            /** Description */
+            description?: string | null;
             /** Tech Stack */
             tech_stack?: string[];
             /**
@@ -9737,13 +10075,21 @@ export interface components {
             branch?: string | null;
             /** Worker Prompt */
             worker_prompt?: string | null;
+            /** Target Workspace Id */
+            target_workspace_id?: string | null;
         };
         /**
-         * DocumentsSyncRequest
-         * @description Key is filename, value is file content.
+         * DocumentsSyncOk
+         * @description POST documents 200 响应（CLI 不读 body，任意 2xx 即可，synced 供人工核对）。
          */
-        DocumentsSyncRequest: {
-            [key: string]: unknown;
+        DocumentsSyncOk: {
+            /**
+             * Synced
+             * @description 本次落库的文档数
+             */
+            synced: number;
+            /** Change Name */
+            change_name: string;
         };
         /** DocumentsSyncResponse */
         DocumentsSyncResponse: {
@@ -9875,6 +10221,77 @@ export interface components {
             provider_config?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /**
+         * ExplorerEntry
+         * @description 目录项（``explorer_list_dir`` result.entries 元素）。
+         */
+        ExplorerEntry: {
+            /** Name */
+            name: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "dir" | "file";
+            /** Size */
+            size: number;
+            /** Mtime */
+            mtime: string;
+        };
+        /**
+         * ExplorerFileResponse
+         * @description GET /api/workspaces/{wid}/explorer/file 响应（encoding=utf8）。
+         *
+         *     ``binary=true`` 时 content 为 daemon 兜底的 base64（utf8 解码失败不报错，
+         *     design §7.1）；``truncated=true`` 表示超 10MB 上限先截断再传输。
+         */
+        ExplorerFileResponse: {
+            /** Name */
+            name: string;
+            /** Size */
+            size: number;
+            /** Mtime */
+            mtime: string;
+            /** Binary */
+            binary: boolean;
+            /** Truncated */
+            truncated: boolean;
+            /** Content */
+            content: string;
+        };
+        /**
+         * ExplorerSearchMatch
+         * @description 搜索命中项（``explorer_search`` result.matches 元素，path 相对 root）。
+         */
+        ExplorerSearchMatch: {
+            /** Path */
+            path: string;
+            /** Name */
+            name: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "dir" | "file";
+        };
+        /**
+         * ExplorerSearchResponse
+         * @description GET /api/workspaces/{wid}/explorer/search 响应（按文件名全树搜索）。
+         */
+        ExplorerSearchResponse: {
+            /** Matches */
+            matches: components["schemas"]["ExplorerSearchMatch"][];
+            /** Truncated */
+            truncated: boolean;
+        };
+        /**
+         * ExplorerTreeResponse
+         * @description GET /api/workspaces/{wid}/explorer/tree 响应（懒加载逐层，空 path = 根）。
+         */
+        ExplorerTreeResponse: {
+            /** Entries */
+            entries: components["schemas"]["ExplorerEntry"][];
         };
         /**
          * FeedbackRequest
@@ -10191,6 +10608,11 @@ export interface components {
             result: string;
             /** Comment */
             comment?: string | null;
+            /**
+             * Notify Session
+             * @default true
+             */
+            notify_session: boolean;
         };
         /**
          * ImportCommitReq
@@ -10676,6 +11098,45 @@ export interface components {
             /** Total */
             total: number;
         };
+        /**
+         * LlmProviderQuotaData
+         * @description quota 非 null 载荷（design §7.1）：``{model, windows[]}``。
+         */
+        LlmProviderQuotaData: {
+            /** Model */
+            model?: string | null;
+            /**
+             * Windows
+             * @default []
+             */
+            windows: components["schemas"]["LlmProviderQuotaWindow"][];
+        };
+        /**
+         * LlmProviderQuotaResponse
+         * @description ``GET /api/llm-providers/{id}/quota`` 响应。
+         *
+         *     - GLM 正常 → ``quota`` 含 ``windows``（5 小时窗 / 周限额，含剩余与重置时间）；
+         *     - 非 GLM / 上游失败 / 无数据 → ``quota=None``（HTTP 200，绝不 5xx，D-009）。
+         */
+        LlmProviderQuotaResponse: {
+            quota?: components["schemas"]["LlmProviderQuotaData"] | null;
+        };
+        /**
+         * LlmProviderQuotaWindow
+         * @description 单个额度窗口（5 小时窗 / 周限额）。
+         *
+         *     - ``label``：窗口名（沿用智谱 tier ``plan_name``，含套餐等级前缀如「Max·5小时窗」）；
+         *     - ``left``：剩余百分比（0-100，口径同 ``UsageData.remaining``）；
+         *     - ``reset``：重置时间 ISO8601（上游缺失则 None）。
+         */
+        LlmProviderQuotaWindow: {
+            /** Label */
+            label?: string | null;
+            /** Left */
+            left?: number | null;
+            /** Reset */
+            reset?: string | null;
+        };
         /** LlmProviderRead */
         LlmProviderRead: {
             /**
@@ -10776,24 +11237,6 @@ export interface components {
             password: string;
             /** Captcha Token */
             captcha_token?: string | null;
-        };
-        /** MarkdownGenerateRequest */
-        MarkdownGenerateRequest: {
-            /** Doc Type */
-            doc_type: string;
-            /** Content */
-            content: string;
-            /** Lease Id */
-            lease_id?: string | null;
-        };
-        /** MarkdownGenerateResponse */
-        MarkdownGenerateResponse: {
-            /** Doc Type */
-            doc_type: string;
-            /** Path */
-            path: string;
-            /** Size */
-            size: number;
         };
         /**
          * McpConfigViewResponse
@@ -11048,6 +11491,10 @@ export interface components {
             main_agent_config?: {
                 [key: string]: unknown;
             } | null;
+            /** Anchor Workspace Id */
+            anchor_workspace_id?: string | null;
+            /** Scope Workspace Ids */
+            scope_workspace_ids?: string[] | null;
         };
         /** MissionResponse */
         MissionResponse: {
@@ -11084,6 +11531,14 @@ export interface components {
             created_at: string;
             /** Workers */
             workers: components["schemas"]["MissionWorkerRunResponse"][];
+            /** Project Id */
+            project_id?: string | null;
+            /** Scope Workspace Ids */
+            scope_workspace_ids?: string[] | null;
+            /** Workspace Name */
+            workspace_name?: string | null;
+            /** Workspace Type */
+            workspace_type?: string | null;
         };
         /** MissionWorkerRunResponse */
         MissionWorkerRunResponse: {
@@ -11109,6 +11564,10 @@ export interface components {
              * @default []
              */
             artifacts: components["schemas"]["MissionArtifactResponse"][];
+            /** Target Workspace Id */
+            target_workspace_id?: string | null;
+            /** Target Workspace Name */
+            target_workspace_name?: string | null;
         };
         /**
          * ModelErrorDTO
@@ -11858,6 +12317,11 @@ export interface components {
             decision: string;
             /** Comment */
             comment?: string | null;
+            /**
+             * Notify Session
+             * @default true
+             */
+            notify_session: boolean;
         };
         /**
          * PlanTaskBrief
@@ -13238,25 +13702,11 @@ export interface components {
             decision: string;
             /** Comment */
             comment?: string | null;
-        };
-        /**
-         * ProxyCreateChangeRequest
-         * @description daemon-client 变更代写入参 (design §7.5 / D-002@v1)。
-         *
-         *     D-002@v1（2026-07-05-daemon-client-change-binding-fix）：删 ``runtime_id`` 字段。
-         *     runtime 由后端 ``resolve_runtime_for_writeback`` 用 binding + workspace.default_agent
-         *     现算（与派发链路共用解析）。daemon_id 亦从 per-member binding 拿，前端无需传。
-         */
-        ProxyCreateChangeRequest: {
-            /** Title */
-            title: string;
             /**
-             * Description
-             * @default
+             * Notify Session
+             * @default true
              */
-            description: string;
-            /** Change Type */
-            change_type?: string | null;
+            notify_session: boolean;
         };
         /** PsPlanNodeCreate */
         PsPlanNodeCreate: {
@@ -13877,12 +14327,186 @@ export interface components {
             /** Last Modified At */
             last_modified_at?: string | null;
         };
+        /** QuicklogEntryList */
+        QuicklogEntryList: {
+            /** Items */
+            items: components["schemas"]["QuicklogEntryListItem"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * QuicklogEntryListItem
+         * @description 快速修复列表行（FR-04；body/raw 不带——详情走 QuicklogEntryRead）。
+         */
+        QuicklogEntryListItem: {
+            /** Ql Id */
+            ql_id: string;
+            /** Timestamp */
+            timestamp?: string | null;
+            /** Title */
+            title: string;
+            /** Status */
+            status: string;
+            /** Status Note */
+            status_note?: string | null;
+            /**
+             * Placeholder
+             * @default false
+             */
+            placeholder: boolean;
+            /** Author Raw */
+            author_raw: string;
+            /** Author Name */
+            author_name?: string | null;
+            /** Owner Name */
+            owner_name?: string | null;
+            /**
+             * Linked Changes
+             * @default []
+             */
+            linked_changes: string[];
+            /**
+             * Files
+             * @default []
+             */
+            files: components["schemas"]["QuicklogFileItem"][];
+            /**
+             * Affected Modules
+             * @default []
+             */
+            affected_modules: string[];
+            /**
+             * Source
+             * @default file
+             */
+            source: string;
+        };
+        /**
+         * QuicklogEntryPushRequest
+         * @description POST /quicklog-entries 请求（CLI quicklog.js 推送，design §5.2 / FR-02）。
+         *
+         *     payload=条目结构化 JSON（QuicklogEntryDTO，snake_case 字段对齐 CLI 落盘形态）。
+         *     **不含也不接受 workspace 字段**——workspace 一律由 shpsync_ token 派生
+         *     （auth.py G6/D-004@v1 通道），body 出现 workspace 键会被 extra 忽略（model_config
+         *     forbid 会 422，取 ignore 保证宽松——CLI 字段演进不破推送）。
+         *     ql_id 必填（幂等 upsert 复合键之一）；其余字段宽松（best-effort 推送语义）。
+         */
+        QuicklogEntryPushRequest: {
+            /** Ql Id */
+            ql_id: string;
+            /** Timestamp */
+            timestamp?: string | null;
+            /** Title */
+            title?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Status Note */
+            status_note?: string | null;
+            /** Author Raw */
+            author_raw?: string | null;
+            /** Linked Changes */
+            linked_changes?: string[];
+            /** Files */
+            files?: {
+                [key: string]: unknown;
+            }[];
+            /** Body Sections */
+            body_sections?: {
+                [key: string]: string;
+            };
+            /** Raw Block */
+            raw_block?: string | null;
+        };
+        /**
+         * QuicklogEntryRead
+         * @description 快速修复详情（FR-06：四段正文 + raw_block 原文切换）。
+         */
+        QuicklogEntryRead: {
+            /** Ql Id */
+            ql_id: string;
+            /** Timestamp */
+            timestamp?: string | null;
+            /** Title */
+            title: string;
+            /** Status */
+            status: string;
+            /** Status Note */
+            status_note?: string | null;
+            /**
+             * Placeholder
+             * @default false
+             */
+            placeholder: boolean;
+            /** Author Raw */
+            author_raw: string;
+            /** Author Name */
+            author_name?: string | null;
+            /** Owner Name */
+            owner_name?: string | null;
+            /**
+             * Linked Changes
+             * @default []
+             */
+            linked_changes: string[];
+            /**
+             * Files
+             * @default []
+             */
+            files: components["schemas"]["QuicklogFileItem"][];
+            /**
+             * Affected Modules
+             * @default []
+             */
+            affected_modules: string[];
+            /**
+             * Source
+             * @default file
+             */
+            source: string;
+            /**
+             * Body Sections
+             * @default {}
+             */
+            body_sections: {
+                [key: string]: string;
+            };
+            /** Raw Block */
+            raw_block?: string | null;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /**
+         * QuicklogFileItem
+         * @description quicklog 条目文件行（path + 可选括注，design §5.1）。
+         */
+        QuicklogFileItem: {
+            /** Path */
+            path: string;
+            /** Note */
+            note?: string | null;
+        };
         /** QuicklogList */
         QuicklogList: {
             /** Items */
             items: components["schemas"]["QuicklogEntry"][];
             /** Total */
             total: number;
+        };
+        /**
+         * QuicklogPushOk
+         * @description POST /quicklog-entries 200 响应（CLI best-effort，任意 2xx 即可）。
+         */
+        QuicklogPushOk: {
+            /**
+             * Status
+             * @default ok
+             */
+            status: string;
+            /** Ql Id */
+            ql_id: string;
         };
         /** RefreshRequest */
         RefreshRequest: {
@@ -14487,6 +15111,8 @@ export interface components {
              * Format: uuid
              */
             agent_run_id: string;
+            /** Session Id */
+            session_id?: string | null;
         };
         /** ScanRequest */
         ScanRequest: {
@@ -14517,25 +15143,36 @@ export interface components {
             /** Current Run Id */
             current_run_id?: string | null;
         };
-        /** SessionCreateRequest */
+        /**
+         * SessionCreateRequest
+         * @description POST /api/daemon/sessions 请求体（FR-01 / design §5 Wave1）。
+         *
+         *     双入口：``runtime_id``（新会话门户页，指定机器+智能体，优先）与 ``provider``
+         *     （/runtimes 弹窗旧路径，零回归保留）二选一，都未传 → 422。
+         *     ``model`` 字段已移除（design §5：由档案/默认派生，继承 D-005/D-004@v2）——
+         *     pydantic 默认忽略多余字段，旧前端继续上送 model 不会 422，仅不再生效。
+         *     ``agent_profile_id``/``llm_provider_id`` 由 service 层解析（task-03），
+         *     本 DTO 只透传 str（llm_provider_id 空串/"none" 语义=切回本机默认，task-05）。
+         */
         SessionCreateRequest: {
-            /**
-             * Provider
-             * @enum {string}
-             */
-            provider: "claude" | "codex";
             /** Prompt */
             prompt: string;
-            /** Model */
-            model?: string | null;
+            /** Runtime Id */
+            runtime_id?: string | null;
+            /** Provider */
+            provider?: ("claude" | "codex") | null;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
             /**
              * Manual Approval
-             * @default false
+             * @default true
              */
             manual_approval: boolean;
             /**
              * Ask User Only
-             * @default false
+             * @default true
              */
             ask_user_only: boolean;
             /** Change Id */
@@ -14624,10 +15261,28 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
-        /** SessionInjectRequest */
+        /**
+         * SessionInjectRequest
+         * @description POST /api/daemon/sessions/{id}/inject 请求体（FR-02 / design §5 Wave1）。
+         *
+         *     ``agent_profile_id`` 非空且 ≠ 会话当前档案 → 切档案；``llm_provider_id``
+         *     非空且 ≠ 当前 → 切供应商（空串/"none" 语义=切回本机默认）。切换校验与
+         *     SESSION_SWITCH_CONFIG 下发归 task-05，本 DTO 只透传。
+         *
+         *     ql-20260817-010：**静默切换**——携带切换字段时 prompt 可为空串（切换轮
+         *     不产生用户消息与模型回应，daemon 只 reload 配置）；纯追问（无切换字段）
+         *     仍要求非空 prompt。
+         */
         SessionInjectRequest: {
-            /** Prompt */
+            /**
+             * Prompt
+             * @default
+             */
             prompt: string;
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
         };
         /** SessionInjectResponse */
         SessionInjectResponse: {
@@ -14711,6 +15366,14 @@ export interface components {
          *     为 None），供前端拉历史与当前 run 错误。``error_code``（调度层 / 系统错误）
          *     与 ``error_detail`` 正交共存（D-009），前端可分别用作系统错误兜底与模型错误
          *     渲染。DTO 内联在此避免触碰 schema.py（非本任务 allowed_path）。
+         *
+         *     gap-fix（FR-07 whoLine / FR-08 历史 usage）：追加轮次配置快照与 usage 三组
+         *     字段，均直映 AgentRun 既有列（查询本就 select 整实体，零查询改动）——
+         *       - ``agent_profile_snapshot`` / ``llm_provider_id``：D-008@v1 轮次快照，供前端
+         *         渲染每轮 whoLine（历史不跟随会话当前配置）；
+         *       - ``input_tokens`` / ``output_tokens``：daemon 关单经 close_interactive_run
+         *         写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）。
+         *     全部 nullable——老 run 行 / 未配置轮为 None，前端如实显示未指定/不累计。
          */
         SessionRunRead: {
             /**
@@ -14732,6 +15395,20 @@ export interface components {
             finished_at?: string | null;
             /** Exit Code */
             exit_code?: number | null;
+            /** User Id */
+            user_id?: string | null;
+            /** Sender Name */
+            sender_name?: string | null;
+            /** Agent Profile Snapshot */
+            agent_profile_snapshot?: {
+                [key: string]: unknown;
+            } | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
+            /** Input Tokens */
+            input_tokens?: number | null;
+            /** Output Tokens */
+            output_tokens?: number | null;
         };
         /**
          * SessionRuntimeRequest
@@ -14930,10 +15607,17 @@ export interface components {
         /**
          * SpecIncrementalSyncRequest
          * @description Request body for the incremental sync endpoint (design §7).
+         *
+         *     ``change_dirs``（change 2026-08-14-change-center-conversation-driven / D-005@v1）：
+         *     daemon 本次增量 ops 涉及的变更目录名集合（``changes/<name>/`` 与
+         *     ``changes/archive/<name>/`` 前缀分组取 name，去重）。缺省 ``[]`` 兼容旧 daemon——
+         *     backend ``apply_ops`` 无标注时扫 ops 路径 ``changes/`` 前缀兜底（design §9）。
          */
         SpecIncrementalSyncRequest: {
             /** Ops */
             ops: components["schemas"]["FileOp"][];
+            /** Change Dirs */
+            change_dirs?: string[];
         };
         /**
          * SpecIncrementalSyncResponse
@@ -14962,19 +15646,57 @@ export interface components {
             } | null;
         };
         /**
-         * SpecSyncResponse
-         * @description Response DTO for the spec sync endpoint (FR-05 / D-003).
+         * SpecManifestFileEntry
+         * @description GET /changes/-/spec-manifest 单文件清单项（design §7）。
+         *
+         *     对齐 ``spec_file_manifest`` 行三字段：``hash``=内容 SHA-256 hex（CLI 与本地
+         *     walk 结果 diff）、``version``=文件级版本（增量 op 的乐观锁基线）、``exists``=
+         *     服务器侧软删标志（false → CLI 下发 delete 对齐）。
          */
-        SpecSyncResponse: {
-            /** Ok */
-            ok: boolean;
-            /** Reparsed */
-            reparsed: number;
+        SpecManifestFileEntry: {
             /**
-             * Reparsed Changes
-             * @default 0
+             * Hash
+             * @description 文件内容 SHA-256 hex
              */
-            reparsed_changes: number;
+            hash: string;
+            /**
+             * Version
+             * @description 文件级版本号（apply_ops 每次成功 op +1）
+             */
+            version: number;
+            /**
+             * Exists
+             * @description false=服务器侧已软删（spec-backups 区）
+             */
+            exists: boolean;
+        };
+        /**
+         * SpecManifestResponse
+         * @description GET /changes/-/spec-manifest 200 响应：服务器权威清单全量 map（design §5.2/§7）。
+         *
+         *     CLI ``spec-sync.js`` 以此为锚 diff 本地 ``.sillyspec/`` 算增量 ops
+         *     （D-004@v1 CLI 无本地缓存，清单即基线）。无清单行（旧 tar 全量同步后失效 /
+         *     全新 workspace）→ 空 ``files``，CLI 走 R-07 兜底全量重算。
+         */
+        SpecManifestResponse: {
+            /** Files */
+            files?: {
+                [key: string]: components["schemas"]["SpecManifestFileEntry"];
+            };
+        };
+        /**
+         * SpecSyncRequest
+         * @description POST /changes/-/spec-sync 请求（design §7，复用 spec_workspace FileOp）。
+         *
+         *     ``ops`` 即 CLI ``spec-sync.js`` 以 spec-manifest 为锚 diff 出的增量操作数组
+         *     （add/update/delete/rename，每文件带 ``base_version`` 乐观锁基准）。与 daemon
+         *     用的 ``SpecIncrementalSyncRequest`` 同构但**不含 ``change_dirs``**——CLI 直跑
+         *     场景由 ``apply_ops`` 扫 ops 路径 ``changes/`` 前缀兜底触发 reparse（行为等价，
+         *     design §5.2）。
+         */
+        SpecSyncRequest: {
+            /** Ops */
+            ops: components["schemas"]["FileOp"][];
         };
         /** SpecWorkspaceRead */
         SpecWorkspaceRead: {
@@ -15022,6 +15744,16 @@ export interface components {
             repo_sillyspec_path?: string | null;
             /** Profile Version */
             profile_version?: string | null;
+        };
+        /**
+         * StageProfileUpdate
+         * @description task-03（2026-08-13-profile-system-prompt-injection）：存每阶段独立 profile_id。
+         *
+         *     profile_id=None 表示清除（跟随工作区默认）。存 change.stages[<current_stage>]["profile_id"]。
+         */
+        StageProfileUpdate: {
+            /** Profile Id */
+            profile_id?: string | null;
         };
         /**
          * StageProgress
@@ -15076,6 +15808,60 @@ export interface components {
             execute_user_id?: string | null;
             /** Actual Start Time */
             actual_start_time?: string | null;
+        };
+        /**
+         * StepProgressSummary
+         * @description step 级进度摘要（计算投影，非 changes 表列，零 migration）。
+         *
+         *     数据源=platform_change_progress.latest_progress 的 steps[]（CLI 六表
+         *     上行已落库，D-002@v1 零上报改动）；由 service._extract_step_progress
+         *     跨全部 stage 提取，enrich_summaries / enrich_with_workspace_ids 填充。
+         *     steps 缺失 / 空数组 / 结构异常时不赋值（None），前端降级现有
+         *     current_stage 展示（D-003@v1）。列表接口只带本摘要（~200B/行）。
+         */
+        StepProgressSummary: {
+            /** Step Total */
+            step_total: number;
+            /** Steps Completed */
+            steps_completed: number;
+            /** Current Step Name */
+            current_step_name: string | null;
+            /** Current Step Status */
+            current_step_status: string | null;
+            /** Current Step Desc */
+            current_step_desc: string | null;
+        };
+        /**
+         * StepTimelineEntry
+         * @description step 级时间线明细项（计算投影，非表列）。
+         *
+         *     数据源同 StepProgressSummary（latest_progress steps[]，service
+         *     _extract_step_progress 填充，enrich_with_workspace_ids 挂到
+         *     ChangeRead.steps）。明细随 ChangeRead 形状出现在所有返回 ChangeRead
+         *     的端点（详情 + transition/review 复用，additive 无害）。
+         */
+        StepTimelineEntry: {
+            /** Name */
+            name: string;
+            /** Stage */
+            stage: string;
+            /** Status */
+            status: string;
+            /** Output */
+            output: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Ordering */
+            ordering: number;
+            /** Wait Reason */
+            wait_reason: string | null;
+            /**
+             * Kind
+             * @default step
+             */
+            kind: string;
+            /** Event Type */
+            event_type?: string | null;
         };
         /**
          * SubmitDetailReq
@@ -16744,7 +17530,10 @@ export interface components {
         };
         /**
          * WorkspaceBrief
-         * @description 项目侧查看关联工作区的摘要(FR-02 展示 name/status/type)。
+         * @description 项目侧查看关联工作区的摘要(展示 name/status/type + role/description 定位信息)。
+         *
+         *     FR-08(change 2026-08-18-workspace-role-type)：补 role 与 description，
+         *     项目侧拿到完整定位信息；type 读路径不校验存量(同 WorkspaceRead)。
          */
         WorkspaceBrief: {
             /**
@@ -16758,6 +17547,10 @@ export interface components {
             status: string;
             /** Type */
             type?: string | null;
+            /** Role */
+            role?: string | null;
+            /** Description */
+            description?: string | null;
         };
         /**
          * WorkspaceCreate
@@ -16775,10 +17568,15 @@ export interface components {
             root_path: string;
             /** Component Key */
             component_key?: string | null;
-            /** Type */
-            type?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "frontend-code" | "backend-code" | "fullstack" | "business-doc" | "submodule" | "deploy-ops" | "design-asset" | "other";
             /** Role */
             role?: string | null;
+            /** Description */
+            description?: string | null;
             /** Repo Url */
             repo_url?: string | null;
             /**
@@ -16940,6 +17738,8 @@ export interface components {
             type: string | null;
             /** Role */
             role: string | null;
+            /** Description */
+            description?: string | null;
             /** Repo Url */
             repo_url: string | null;
             /** Default Branch */
@@ -17027,9 +17827,11 @@ export interface components {
             /** Component Key */
             component_key?: string | null;
             /** Type */
-            type?: string | null;
+            type?: ("frontend-code" | "backend-code" | "fullstack" | "business-doc" | "submodule" | "deploy-ops" | "design-asset" | "other") | null;
             /** Role */
             role?: string | null;
+            /** Description */
+            description?: string | null;
             /** Repo Url */
             repo_url?: string | null;
             /** Default Branch */
@@ -17250,6 +18052,18 @@ export interface components {
             /** Approved By */
             approved_by: string;
         };
+        /**
+         * DocumentsSyncRequest
+         * @description Key is filename, value is file content.
+         *
+         *     security-audit-remediation task-07：``iter_documents`` 前逐键校验单段文件名
+         *     白名单（字母数字点下划线连字符，禁路径分隔符与全点段）。CLI 契约只推四件套
+         *     单段名（platform_sync 侧 DOCUMENT_FILES 已收敛），本层兜底 + service 层
+         *     relative_to 守卫双层防御。非法键 → 422，错误信息只含键名不回显内容。
+         */
+        app__modules__change__schema__DocumentsSyncRequest: {
+            [key: string]: unknown;
+        };
         /** ReviewResponse */
         app__modules__change__schema__ReviewResponse: {
             /** Change */
@@ -17257,6 +18071,13 @@ export interface components {
                 [key: string]: unknown;
             };
             agent_dispatch?: components["schemas"]["TransitionDispatchResponse"] | null;
+            /**
+             * Notified Session
+             * @default false
+             */
+            notified_session: boolean;
+            /** Notify Error */
+            notify_error?: string | null;
         };
         /**
          * AuditLogRead
@@ -17305,6 +18126,58 @@ export interface components {
             email?: string | null;
             /** Display Name */
             display_name?: string | null;
+        };
+        /**
+         * DocumentsSyncRequest
+         * @description POST /changes/{name}/documents 请求——**裸**扁平 map（顶层即文件名）。
+         *
+         *     CLI ``sync.js syncDocuments``（:442-497）把存在的四件套文件读成扁平 map
+         *     直接 ``JSON.stringify(documents)`` 整体 POST——顶层就是 ``{"proposal.md": "全文"}``，
+         *     **不包 documents 键**（task-05 测试实证抓到包装偏差后修正）。RootModel 直接
+         *     映射裸 map。键限白名单、值必须 str；空 map / 白名单外键 / 值非 str → 422。
+         */
+        app__modules__platform_sync__schema__DocumentsSyncRequest: {
+            [key: string]: string;
+        };
+        /**
+         * SpecSyncResponse
+         * @description POST /changes/-/spec-sync 响应（design §7，对齐 SpecIncrementalSyncResponse 语义）。
+         *
+         *     conflict 恒伴随 200（不改 HTTP 状态码）：``conflict=True`` 时
+         *     ``server_versions`` 携带服务器当前版本，CLI 侧 console.warn 提示人工拍板、
+         *     不阻塞（design §5.4/§5.5）。
+         */
+        app__modules__platform_sync__schema__SpecSyncResponse: {
+            /** Ok */
+            ok: boolean;
+            /** New Versions */
+            new_versions: {
+                [key: string]: number;
+            };
+            /**
+             * Conflict
+             * @default false
+             */
+            conflict: boolean;
+            /** Server Versions */
+            server_versions?: {
+                [key: string]: number;
+            } | null;
+        };
+        /**
+         * SpecSyncResponse
+         * @description Response DTO for the spec sync endpoint (FR-05 / D-003).
+         */
+        app__modules__spec_workspace__router__SpecSyncResponse: {
+            /** Ok */
+            ok: boolean;
+            /** Reparsed */
+            reparsed: number;
+            /**
+             * Reparsed Changes
+             * @default 0
+             */
+            reparsed_changes: number;
         };
         /** ReviewResponse */
         app__modules__workflow__schema__ReviewResponse: {
@@ -17752,7 +18625,10 @@ export interface operations {
                 /** @description Admin-only flag */
                 include_deleted?: boolean;
                 q?: string | null;
-                type?: string | null;
+                /** @description 工作区类型（8 值受控词表，非法值/旧值 422） */
+                type?: ("frontend-code" | "backend-code" | "fullstack" | "business-doc" | "submodule" | "deploy-ops" | "design-asset" | "other") | null;
+                /** @description 只列 type 为空（未分类）的工作区；与 type 互斥 */
+                unclassified?: boolean;
                 status?: string | null;
                 user_id?: string | null;
                 limit?: number;
@@ -18861,6 +19737,142 @@ export interface operations {
             };
         };
     };
+    get_explorer_tree_api_workspaces__workspace_id__explorer_tree_get: {
+        parameters: {
+            query?: {
+                /** @description 相对工作区根的目录路径，空 = 根 */
+                path?: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExplorerTreeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_explorer_file_api_workspaces__workspace_id__explorer_file_get: {
+        parameters: {
+            query: {
+                /** @description 相对工作区根的文件路径 */
+                path: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExplorerFileResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    download_explorer_file_api_workspaces__workspace_id__explorer_download_get: {
+        parameters: {
+            query: {
+                /** @description 相对工作区根的文件路径 */
+                path: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_explorer_api_workspaces__workspace_id__explorer_search_get: {
+        parameters: {
+            query: {
+                /** @description 文件名/目录名关键词（大小写不敏感子串） */
+                q: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExplorerSearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     login_api_auth_login_post: {
         parameters: {
             query?: never;
@@ -19280,6 +20292,42 @@ export interface operations {
             };
         };
     };
+    update_stage_profile_api_workspaces__workspace_id__changes__change_id__stage_profile_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StageProfileUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OkResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_change_files_api_workspaces__workspace_id__changes__change_id__files_get: {
         parameters: {
             query?: never;
@@ -19598,7 +20646,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["DocumentsSyncRequest"];
+                "application/json": components["schemas"]["app__modules__change__schema__DocumentsSyncRequest"];
             };
         };
         responses: {
@@ -19993,6 +21041,77 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DispatchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_quicklog_entries_api_workspaces__workspace_id__quicklog_entries_get: {
+        parameters: {
+            query?: {
+                search?: string | null;
+                status?: string | null;
+                author?: string | null;
+                linked_change?: string | null;
+                include_placeholder?: boolean;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuicklogEntryList"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_quicklog_entry_api_workspaces__workspace_id__quicklog_entries__ql_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                ql_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuicklogEntryRead"];
                 };
             };
             /** @description Validation Error */
@@ -20533,6 +21652,37 @@ export interface operations {
             };
         };
     };
+    get_provider_quota_api_llm_providers__provider_id__quota_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LlmProviderQuotaResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_provider_api_llm_providers__provider_id__get: {
         parameters: {
             query?: never;
@@ -20892,6 +22042,8 @@ export interface operations {
             query?: {
                 /** @description 逗号分隔多选工具种类，仅筛 channel=tool_call 行；不传返回全部 */
                 tool_kind?: string | null;
+                /** @description 增量游标（ISO timestamp）：只返回 timestamp 严格更新的日志条目；不传返回全量（perf-remediation task-08 / FR-10） */
+                after?: string | null;
             };
             header?: never;
             path: {
@@ -20958,6 +22110,7 @@ export interface operations {
         parameters: {
             query?: {
                 mode?: string | null;
+                include_ended?: boolean;
             };
             header?: never;
             path: {
@@ -21306,6 +22459,75 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_project_missions_api_projects__project_id__missions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_project_mission_api_projects__project_id__missions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MissionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -22118,6 +23340,43 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ChangeWriteCompleteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_change_write_progress_api_daemon_change_writes__change_write_id__progress_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                change_write_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangeWriteProgressRequest"];
             };
         };
         responses: {
@@ -23431,6 +24690,10 @@ export interface operations {
                 limit?: number;
                 offset?: number;
                 status?: ("pending" | "active" | "reconnecting" | "ended" | "failed") | null;
+                runtime_id?: string | null;
+                machine_id?: string | null;
+                provider?: ("claude" | "codex") | null;
+                q?: string | null;
             };
             header?: never;
             path?: never;
@@ -23765,6 +25028,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    llm_proxy_get_api_daemon_llm_proxy__path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    llm_proxy_post_api_daemon_llm_proxy__path__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -24275,187 +25600,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GitOperationListResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_change_api_workspaces__workspace_id__changes_create_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ChangeCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ChangeCreateResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    proxy_create_change_api_workspaces__workspace_id__changes_proxy_create_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ProxyCreateChangeRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ChangeCreateResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    generate_document_api_workspaces__workspace_id__changes__change_id__documents_generate_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-                change_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MarkdownGenerateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MarkdownGenerateResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    batch_generate_documents_api_workspaces__workspace_id__changes__change_id__documents_batch_generate_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-                change_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["BatchGenerateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BatchGenerateResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    execute_change_api_workspaces__workspace_id__changes__change_key__execute_post: {
-        parameters: {
-            query?: {
-                provider?: string | null;
-                model?: string | null;
-                /** @description execute 团队执行（D-004@v2，默认 single 零回归） */
-                team_mode?: boolean;
-            };
-            header?: never;
-            path: {
-                workspace_id: string;
-                change_key: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
                 };
             };
             /** @description Validation Error */
@@ -31649,7 +32793,9 @@ export interface operations {
     sync_spec_workspace_api_workspaces__workspace_id__spec_workspace_sync_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Change-Write-Id"?: string | null;
+            };
             path: {
                 workspace_id: string;
             };
@@ -31667,7 +32813,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SpecSyncResponse"];
+                    "application/json": components["schemas"]["app__modules__spec_workspace__router__SpecSyncResponse"];
                 };
             };
             /** @description Validation Error */
@@ -31684,7 +32830,9 @@ export interface operations {
     sync_spec_workspace_incremental_api_workspaces__workspace_id__spec_workspace_sync_incremental_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Change-Write-Id"?: string | null;
+            };
             path: {
                 workspace_id: string;
             };
@@ -31906,6 +33054,59 @@ export interface operations {
             };
         };
     };
+    get_spec_manifest_api_changes___spec_manifest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecManifestResponse"];
+                };
+            };
+        };
+    };
+    push_spec_sync_api_changes___spec_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpecSyncRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["app__modules__platform_sync__schema__SpecSyncResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_approval_api_changes__name__approval_get: {
         parameters: {
             query?: never;
@@ -31924,6 +33125,109 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeApprovalResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_approval_api_changes__name__approval_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalSubmitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalSubmitOk"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_documents_api_changes__name__documents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["app__modules__platform_sync__schema__DocumentsSyncRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocumentsSyncOk"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_quicklog_entry_api_quicklog_entries_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QuicklogEntryPushRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QuicklogPushOk"];
                 };
             };
             /** @description Validation Error */

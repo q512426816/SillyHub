@@ -33,6 +33,12 @@ class MissionCreateRequest(BaseModel):
     # 主 agent run 据此绑定 AgentProfile（软约束兜底，design §8）。orchestrator
     # _resolve_main_agent_config 解析并透传 dispatch_to_daemon。缺失/非法 → None 零回归。
     main_agent_config: dict | None = None
+    # 2026-08-19-cross-workspace-team-mission task-05 / D-005@v1：跨工作区支持。
+    # anchor_workspace_id：主 agent 运行所在工作区（anchor）。NULL 按原逻辑使用 workspace_id。
+    # scope_workspace_ids：mission 涉及的工作区范围（含 anchor）。NULL 按单工作区处理。
+    # 两者可选，零回归单工作区 mission（design §7.2）。
+    anchor_workspace_id: uuid.UUID | None = None
+    scope_workspace_ids: list[uuid.UUID] | None = None
 
 
 class MissionArtifactResponse(BaseModel):
@@ -55,6 +61,11 @@ class MissionWorkerRunResponse(BaseModel):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     artifacts: list[MissionArtifactResponse] = []
+    # 2026-08-19-cross-workspace-team-mission task-05 / D-005@v1：跨工作区 worker 概要。
+    # target_workspace_id：worker 实际运行所在工作区。NULL 表示单工作区模式。
+    # target_workspace_name：目标工作区名称（概要字段，非校验）。
+    target_workspace_id: uuid.UUID | None = None
+    target_workspace_name: str | None = None
 
 
 class MissionResponse(BaseModel):
@@ -71,3 +82,11 @@ class MissionResponse(BaseModel):
     cancelled_at: datetime | None
     created_at: datetime
     workers: list[MissionWorkerRunResponse]
+    # 2026-08-19-cross-workspace-team-mission task-05 / D-005@v1：跨工作区 mission 概要。
+    # project_id：关联项目 ID。NULL 表示单工作区 mission。
+    # scope_workspace_ids：mission 涉及的工作区范围。NULL 按单工作区处理。
+    # workspace_name / workspace_type：主工作区名称与类型（概要字段，非校验）。
+    project_id: uuid.UUID | None = None
+    scope_workspace_ids: list[uuid.UUID] | None = None
+    workspace_name: str | None = None
+    workspace_type: str | None = None

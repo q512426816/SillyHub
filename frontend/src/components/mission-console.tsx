@@ -1,5 +1,14 @@
 "use client";
 
+/**
+ * Agent 团队控制台（单工作区维度 + 项目维度，design §7.3）。
+ *
+ * task-15 / 2026-08-19-cross-workspace-team-mission：新增 projectMode——
+ * 创建走 createProjectMission（scope 多选 + anchor 单选面板）、历史走
+ * listProjectMissions、worker 行显示「目标工作区」类型徽标列。非 projectMode
+ * （单工作区）路径零改动零回归。
+ */
+
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { AgentLogViewer } from "@/components/agent-log-viewer";
@@ -10,17 +19,24 @@ import { ApiError } from "@/lib/api";
 import {
   cancelMission,
   createMission,
+  createProjectMission,
   getAgentRunLogs,
   getMission,
   listMissions,
+  listProjectMissions,
   type AgentRunLogEntry,
   type CreateMissionInput,
+  type CreateProjectMissionInput,
   type MainAgentConfig,
   type Mission,
   type MissionArtifact,
   type MissionWorkerRun,
+  type ProjectMissionResponse,
   type WorkerPresetItem,
 } from "@/lib/agent";
+import { STATUS_LABELS, labelOf } from "@/lib/status-labels";
+import type { WorkspaceBrief } from "@/lib/workspace";
+import { workspaceTypeBadge } from "@/lib/workspace-types";
 
 /** 任务级状态徽标配色（STATUS_LABEL 控中文文案）。 */
 const STATUS_BADGE: Record<string, string> = {
@@ -99,6 +115,82 @@ const DEFAULT_MAIN_AGENT_CONFIG: MainAgentConfig = {
 // 默认新增分身模板（高级手动预设用）。
 function makeEmptyWorker(): WorkerPresetItem {
   return { agent_type: "claude_code", model: "", objective: "", role: "impl" };
+}
+
+/* ── task-15 / 2026-08-19-cross-workspace-team-mission / design §7.3 ──────────
+ * 项目维度（projectMode）扩展：worker run 的跨工作区字段 + mission 概要字段。
+ * lib/agent.ts 的本地 Mission/MissionWorkerRun 类型早于跨 ws 扩展（且该文件不在
+ * 本 task 边界内），此处用扩展接口容忍缺字段：单 ws mission / 轮询 getMission 的
+ * 运行时数据已带这些字段（后端 _mission_to_response 统一序列化），读取时兜底。 */
+
+/** worker run 的跨 ws 扩展字段（api-types MissionWorkerRunResponse 已回传）。 */
+interface WorkerRunWithTarget extends MissionWorkerRun {
+  target_workspace_id?: string | null;
+  target_workspace_name?: string | null;
+}
+
+/** mission 的项目维度概要字段（api-types MissionResponse 扩展）。 */
+export interface ProjectMissionView extends Mission {
+  project_id?: string | null;
+  scope_workspace_ids?: string[] | null;
+  workspace_name?: string | null;
+  workspace_type?: string | null;
+}
+
+/**
+ * ProjectMissionResponse → 本地 Mission 兼容视图（归一可选字段为显式 null）。
+ * api-types 的 role/objective 等是可选属性，直接塞进 Mission[] 会因
+ * 「可选 → 必填」不可赋值而报错，故逐字段兜底。
+ */
+function normalizeProjectMission(m: ProjectMissionResponse): ProjectMissionView {
+  return {
+    ...m,
+    workers: (m.workers ?? []).map((w) => ({
+      ...w,
+      // api-types 的 status 是裸 string；后端值域 = AgentRunStatus 五值联合，
+      // 收窄（与本地 Mission 类型对齐，越界值 UI 层 LABEL 兜底显示原值）。
+      status: w.status as MissionWorkerRun["status"],
+      role: w.role ?? null,
+      objective: w.objective ?? null,
+      total_cost_usd: w.total_cost_usd ?? null,
+      started_at: w.started_at ?? null,
+      finished_at: w.finished_at ?? null,
+      artifacts: (w.artifacts ?? []).map((a) => ({
+        ...a,
+        content_ref: a.content_ref ?? null,
+      })),
+    })),
+  };
+}
+
+/**
+ * scope 变更后的默认 anchor：type=backend-code 优先，否则第一个（design §7.1）。
+ * 注意：后端 router.py anchor 缺省分支比对的是 "backend"（词表真值为
+ * "backend-code"，永不命中→退化取第一个），前端按词表真值实现并显式传
+ * anchor_workspace_id，绕开该后端缺陷（已登记遗留，不属本 task 边界）。
+ */
+function pickDefaultAnchor(
+  candidates: WorkspaceBrief[],
+  selectedIds: string[],
+): string | null {
+  const selected = selectedIds
+    .map((id) => candidates.find((c) => c.workspace_id === id))
+    .filter((c): c is WorkspaceBrief => c !== undefined);
+  if (selected.length === 0) return null;
+  const preferred = selected.find((c) => c.type === "backend-code") ?? selected[0];
+  return preferred ? preferred.workspace_id : null;
+}
+
+/** workspaceTypeBadge 徽标渲染（布局类叠加，形态对齐 LinkWorkspaceDialog 既有用法）。 */
+function WsTypeBadgeSpan({ type }: { type: string | null | undefined }) {
+  const view = workspaceTypeBadge(type);
+  return (
+    <span
+      className={`inline-flex h-5 shrink-0 items-center rounded border px-1.5 text-[10px] font-semibold ${view.className}`}
+    >
+      {view.label}
+    </span>
+  );
 }
 
 function readMissionIdFromUrl(): string | null {
@@ -292,12 +384,29 @@ function WorkerLogPanel({
   );
 }
 
+/**
+ * task-15 / design §7.3：worker 行「目标工作区」徽标上下文。
+ * 仅 projectMode 传入（null = 单 ws 模式，不渲染该列）。
+ * crossWorkspace：mission scope 冻结快照 >1 个工作区——此时 target 为空意味着
+ * 落 anchor（design §4.1「NULL = anchor 存量行为」），按 anchor 名补展示；
+ * 单 scope mission 的 worker 全落同一工作区，展示无信息量，省略。
+ */
+interface WorkerTargetContext {
+  wsTypeById: Record<string, string | null | undefined>;
+  wsNameById: Record<string, string | null | undefined>;
+  anchorWorkspaceId: string;
+  anchorName: string | null;
+  crossWorkspace: boolean;
+}
+
 function WorkerRow({
   worker,
   workspaceId,
+  targetContext,
 }: {
   worker: MissionWorkerRun;
   workspaceId: string;
+  targetContext: WorkerTargetContext | null;
 }) {
   const [logOpen, setLogOpen] = useState(false);
   const [objOpen, setObjOpen] = useState(false);
@@ -313,6 +422,22 @@ function WorkerRow({
             : "text-gray-600";
   const workerActive = ACTIVE.has(worker.status) || worker.status === "pending";
   const role = worker.role ?? "worker";
+
+  // 目标工作区徽标（task-15）：显式 target 优先；跨 ws mission 下缺省 = anchor。
+  // 名称解析：target_workspace_name（后端暂未回填）→ page 传入的 wsNameById 兜底
+  // → 原始 id / anchor 名兜底，保证跨 ws worker 的目标机器始终可见。
+  const extended = worker as WorkerRunWithTarget;
+  const explicitTargetId = extended.target_workspace_id ?? null;
+  const targetId =
+    explicitTargetId ??
+    (targetContext?.crossWorkspace ? targetContext.anchorWorkspaceId : null);
+  const targetName = explicitTargetId
+    ? (extended.target_workspace_name ??
+      targetContext?.wsNameById[explicitTargetId] ??
+      explicitTargetId)
+    : (targetContext?.anchorName ?? null);
+  const showTargetBadge = targetContext !== null && targetId !== null;
+
   return (
     <li className="space-y-1 rounded border border-gray-200 p-2 text-sm">
       <div className="flex flex-wrap items-center gap-2">
@@ -329,6 +454,19 @@ function WorkerRow({
         <span className={statusColor}>
           {WORKER_STATUS_LABEL[worker.status] ?? worker.status}
         </span>
+        {showTargetBadge && (
+          <span
+            className="inline-flex min-w-0 items-center gap-1"
+            title="目标工作区（该分身代码落这台机器的工作区）"
+          >
+            <WsTypeBadgeSpan
+              type={targetId ? targetContext.wsTypeById[targetId] : undefined}
+            />
+            <span className="max-w-44 truncate text-xs text-gray-500">
+              {targetName ?? "—"}
+            </span>
+          </span>
+        )}
         <button
           type="button"
           onClick={() => setLogOpen((v) => !v)}
@@ -567,7 +705,212 @@ function TeamConfigPanel({
   );
 }
 
-export function MissionConsole({ workspaceId }: { workspaceId: string }) {
+/**
+ * task-15 / design §7.3：项目维度发起面板——scope 多选 + anchor 单选。
+ * - scope 候选 = 项目关联工作区（page 从 listProjectWorkspaces 加载传入），
+ *   每项显示名称 + 类型徽标（8 值词表）+ 工作区状态 + description；
+ * - anchor 选项 = scope 已选项，radio 单选，默认 type=backend-code 优先否则第一个；
+ * - 越界（scope ⊄ 项目关联 / anchor ∉ scope）由后端 422 拦截，前端展示 detail。
+ */
+function ProjectScopePanel({
+  candidates,
+  scopeIds,
+  onToggleScope,
+  anchorId,
+  onAnchorChange,
+}: {
+  candidates: WorkspaceBrief[];
+  scopeIds: string[];
+  onToggleScope: (id: string) => void;
+  anchorId: string | null;
+  onAnchorChange: (id: string) => void;
+}) {
+  const selected = scopeIds
+    .map((id) => candidates.find((c) => c.workspace_id === id))
+    .filter((c): c is WorkspaceBrief => c !== undefined);
+
+  return (
+    <div className="space-y-3 rounded-md border border-slate-200 bg-white p-3">
+      <div className="space-y-1.5">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+          派发范围（Scope）· 本次会话涉及的工作区（已选 {scopeIds.length}）
+        </div>
+        <ul className="max-h-56 space-y-1 overflow-y-auto">
+          {candidates.map((c) => {
+            const checked = scopeIds.includes(c.workspace_id);
+            return (
+              <li key={c.workspace_id}>
+                <label
+                  className={`flex cursor-pointer items-center gap-2 rounded border px-2 py-1.5 text-sm ${
+                    checked
+                      ? "border-blue-200 bg-blue-50/60"
+                      : "border-slate-200 bg-white hover:bg-slate-50"
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    aria-label={`派发范围勾选 ${c.name}`}
+                    checked={checked}
+                    onChange={() => onToggleScope(c.workspace_id)}
+                    className="h-4 w-4 shrink-0"
+                  />
+                  <span className="shrink-0 font-medium text-gray-800">
+                    {c.name}
+                  </span>
+                  <WsTypeBadgeSpan type={c.type} />
+                  <span className="shrink-0 text-xs text-gray-400">
+                    {labelOf(STATUS_LABELS, c.status)}
+                  </span>
+                  {c.description && (
+                    <span
+                      className="min-w-0 flex-1 truncate text-xs text-gray-400"
+                      title={c.description}
+                    >
+                      {c.description}
+                    </span>
+                  )}
+                </label>
+              </li>
+            );
+          })}
+        </ul>
+        <p className="text-[11px] text-slate-500">
+          候选 = 项目关联的工作区（越界由服务端 422 拦截）。范围创建后冻结为快照；
+          离线工作区仍可勾选，派发到它会失败但不影响整个任务。
+        </p>
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">
+          主工作区（Anchor）· 主控运行位置
+        </div>
+        {selected.length === 0 ? (
+          <p className="rounded-md border border-dashed border-slate-300 px-2.5 py-2 text-xs text-slate-400">
+            先在上方勾选派发范围，再选主工作区。
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {selected.map((c) => {
+              const isAnchor = anchorId === c.workspace_id;
+              return (
+                <label
+                  key={c.workspace_id}
+                  className={`flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs ${
+                    isAnchor
+                      ? "border-teal-300 bg-teal-50 text-teal-800"
+                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="mission-anchor"
+                    aria-label={`主工作区选择 ${c.name}`}
+                    checked={isAnchor}
+                    onChange={() => onAnchorChange(c.workspace_id)}
+                    className="h-3.5 w-3.5 shrink-0"
+                  />
+                  {c.name}
+                  <WsTypeBadgeSpan type={c.type} />
+                </label>
+              );
+            })}
+          </div>
+        )}
+        <p className="text-[11px] text-slate-500">
+          默认「后端代码」类型优先，否则取第一个。主控跑在主工作区，按任务性质把工作派到范围内各工作区的机器上执行。
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * task-15：项目维度详情信息条（design §3.1 线框「项目/Anchor/Scope」行）。
+ * anchor 名优先取 workspace_name（listProjectMissions 回填），轮询 getMission
+ * 后该字段不回填（后端设计如此），用 page 传入的 wsNameById 兜底。
+ */
+function ProjectMissionMeta({
+  mission,
+  wsTypeById,
+  wsNameById,
+}: {
+  mission: ProjectMissionView;
+  wsTypeById: Record<string, string | null | undefined>;
+  wsNameById: Record<string, string | null | undefined>;
+}) {
+  const anchorName =
+    mission.workspace_name ?? wsNameById[mission.workspace_id] ?? null;
+  const scopeIds = mission.scope_workspace_ids ?? [];
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-gray-600">
+      <span className="inline-flex items-center gap-1.5">
+        <span className="text-gray-400">主工作区</span>
+        <WsTypeBadgeSpan type={wsTypeById[mission.workspace_id]} />
+        <span className="font-medium text-gray-800">{anchorName ?? "—"}</span>
+      </span>
+      <span className="inline-flex flex-wrap items-center gap-1.5">
+        <span className="text-gray-400">
+          派发范围（冻结快照 · {Math.max(scopeIds.length, 1)} 个工作区）
+        </span>
+        {scopeIds.map((id) => (
+          <span key={id} className="inline-flex items-center gap-1">
+            <WsTypeBadgeSpan type={wsTypeById[id]} />
+            <span className="max-w-40 truncate text-gray-600">
+              {wsNameById[id] ?? id}
+            </span>
+          </span>
+        ))}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * task-15 / R-04：创建预检回传的 binding 缺失清单（后端塞进 constraints.
+ * missing_bindings，[{id, name}]）。仅提示不阻断——主控可跳过离线工作区。
+ */
+function ScopeMissingBindings({ mission }: { mission: Mission }) {
+  const raw = mission.constraints?.["missing_bindings"];
+  if (!Array.isArray(raw) || raw.length === 0) return null;
+  const names = raw
+    .map((item) =>
+      typeof item === "object" && item !== null && "name" in item
+        ? String((item as { name: unknown }).name)
+        : null,
+    )
+    .filter((n): n is string => n !== null);
+  if (names.length === 0) return null;
+  return (
+    <div className="rounded border border-yellow-200 bg-yellow-50 px-3 py-2 text-xs text-yellow-800">
+      ⚠ 以下范围工作区暂无可用机器绑定，派发到它们会失败（不影响其余工作区）：
+      {names.join("、")}
+    </div>
+  );
+}
+
+export interface MissionConsoleProps {
+  /** 单工作区维度：目标工作区 id（非 projectMode 必填；worker 日志/取消按它调用）。 */
+  workspaceId?: string;
+  /** task-15 / design §7.3：项目维度模式——创建走 createProjectMission、历史走 listProjectMissions、worker 行显示目标工作区徽标。 */
+  projectMode?: boolean;
+  /** 项目维度必填：项目 id（路由 /projects/{id}/missions 的 id 段）。 */
+  projectId?: string;
+  /** 项目维度必填：scope 候选（项目关联工作区，page 从 listProjectWorkspaces 加载）。 */
+  scopeCandidates?: WorkspaceBrief[];
+  /** workspace_id → type 映射（目标工作区徽标配色；page 从候选构建，缺项灰兜底）。 */
+  wsTypeById?: Record<string, string | null | undefined>;
+  /** workspace_id → name 映射（后端暂不回填 target_workspace_name / getMission 不回填 workspace_name 的前端兜底）。 */
+  wsNameById?: Record<string, string | null | undefined>;
+}
+
+export function MissionConsole({
+  workspaceId,
+  projectMode = false,
+  projectId,
+  scopeCandidates = [],
+  wsTypeById = {},
+  wsNameById = {},
+}: MissionConsoleProps) {
   const [objective, setObjective] = useState("");
   const [budget, setBudget] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -579,6 +922,9 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<Mission[]>([]);
+  // task-15 / projectMode：scope 多选 + anchor 单选（design §7.3）。
+  const [scopeIds, setScopeIds] = useState<string[]>([]);
+  const [anchorId, setAnchorId] = useState<string | null>(null);
 
   useEffect(() => {
     const missionId = readMissionIdFromUrl();
@@ -592,11 +938,17 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
 
   const refreshHistory = useCallback(async () => {
     try {
-      setHistory(await listMissions(workspaceId, { limit: 20 }));
+      if (projectMode && projectId) {
+        // 项目维度历史（design §7.1 GET /api/projects/{pid}/missions）。
+        const list = await listProjectMissions(projectId, { limit: 20 });
+        setHistory(list.map(normalizeProjectMission));
+      } else {
+        setHistory(await listMissions(workspaceId ?? "", { limit: 20 }));
+      }
     } catch {
       /* swallow list errors */
     }
-  }, [workspaceId]);
+  }, [projectMode, projectId, workspaceId]);
   useEffect(() => {
     refreshHistory();
   }, [refreshHistory]);
@@ -615,22 +967,48 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
     return () => clearInterval(t);
   }, [mission?.id, mission?.status, refresh]);
 
+  /** task-15 / projectMode：勾/退 scope；退选后 anchor 不在范围时重取默认。 */
+  const toggleScope = (id: string) => {
+    const next = scopeIds.includes(id)
+      ? scopeIds.filter((x) => x !== id)
+      : [...scopeIds, id];
+    setScopeIds(next);
+    if (!anchorId || !next.includes(anchorId)) {
+      setAnchorId(pickDefaultAnchor(scopeCandidates, next));
+    }
+  };
+
   const onCreate = async () => {
     if (!objective.trim()) return;
+    // 项目维度：scope 必填 ≥1（后端 422 兜底，前端先拦省一次请求）。
+    if (projectMode && scopeIds.length === 0) return;
+    if (projectMode && !projectId) return;
     setBusy(true);
     setError(null);
     try {
       const budgetNum = budget.trim() ? Number(budget) : null;
       // 固定 team 模式（D-001@v1）：无条件传 mode="team" + 主控配置（默认值始终传，
       // 即使用户不展开高级 G2）+ 分身预设（默认空数组 → 主控自动拆）。
-      const payload: CreateMissionInput = {
+      const common = {
         objective: objective.trim(),
         budget_usd: budgetNum !== null && budgetNum > 0 ? budgetNum : null,
         mode: "team",
         main_agent_config: mainAgentConfig,
         worker_preset: workers,
-      };
-      const m = await createMission(workspaceId, payload);
+      } satisfies CreateMissionInput;
+      let m: Mission;
+      if (projectMode && projectId) {
+        // task-15 / D-005@v1：项目维度创建，scope/anchor 随 payload 上行；
+        // anchor 前端已按 backend-code 优先预选，显式传值绕开后端缺省比对缺陷。
+        const payload: CreateProjectMissionInput = {
+          ...common,
+          scope_workspace_ids: scopeIds,
+          anchor_workspace_id: anchorId,
+        };
+        m = normalizeProjectMission(await createProjectMission(projectId, payload));
+      } else {
+        m = await createMission(workspaceId ?? "", common);
+      }
       setMission(m);
       writeMissionIdToUrl(m.id);
       refreshHistory();
@@ -639,6 +1017,8 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
       setAdvancedOpen(false);
       setMainAgentConfig(DEFAULT_MAIN_AGENT_CONFIG);
       setWorkers([]);
+      setScopeIds([]);
+      setAnchorId(null);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     } finally {
@@ -649,7 +1029,13 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
   const onCancel = async () => {
     if (!mission) return;
     try {
-      setMission(await cancelMission(workspaceId, mission.id));
+      // projectMode 下 mission.workspace_id = anchor（鉴权锚，design D-006）。
+      setMission(
+        await cancelMission(
+          projectMode ? mission.workspace_id : (workspaceId ?? ""),
+          mission.id,
+        ),
+      );
     } catch (e) {
       setError(e instanceof ApiError ? e.message : String(e));
     }
@@ -695,6 +1081,23 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
                   <span className="min-w-0 flex-1 truncate text-gray-800">
                     {m.objective || "(无目标)"}
                   </span>
+                  {projectMode && (
+                    <span
+                      className="whitespace-nowrap text-xs text-gray-400"
+                      title="主工作区 · 派发范围（冻结快照）"
+                    >
+                      主工作区{" "}
+                      {(m as ProjectMissionView).workspace_name ??
+                        wsNameById[m.workspace_id] ??
+                        "—"}{" "}
+                      · 范围{" "}
+                      {Math.max(
+                        (m as ProjectMissionView).scope_workspace_ids?.length ?? 1,
+                        1,
+                      )}{" "}
+                      个工作区
+                    </span>
+                  )}
                   <span className="whitespace-nowrap text-xs text-gray-400">
                     {new Date(m.created_at).toLocaleString("zh-CN")} · {m.workers.length}{" "}
                     分身
@@ -708,6 +1111,16 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
 
       {!mission && (
         <div className="space-y-2">
+          {/* task-15 / projectMode：scope 多选 + anchor 单选（design §7.3）。 */}
+          {projectMode && (
+            <ProjectScopePanel
+              candidates={scopeCandidates}
+              scopeIds={scopeIds}
+              onToggleScope={toggleScope}
+              anchorId={anchorId}
+              onAnchorChange={setAnchorId}
+            />
+          )}
           <textarea
             className="w-full rounded border p-2 text-sm"
             rows={3}
@@ -753,7 +1166,14 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
                 onChange={(e) => setBudget(e.target.value)}
               />
             </div>
-            <Button onClick={onCreate} disabled={busy || !objective.trim()}>
+            <Button
+              onClick={onCreate}
+              disabled={
+                busy ||
+                !objective.trim() ||
+                (projectMode && scopeIds.length === 0)
+              }
+            >
               {busy ? "启动中…" : "启动"}
             </Button>
           </div>
@@ -770,6 +1190,20 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
             </Button>
           </div>
           <MissionSummaryCard mission={mission} />
+
+          {/* task-15 / projectMode：anchor + scope 概要条（design §3.1 线框）。 */}
+          {projectMode && (
+            <ProjectMissionMeta
+              mission={mission as ProjectMissionView}
+              wsTypeById={wsTypeById}
+              wsNameById={wsNameById}
+            />
+          )}
+
+          {/* task-15 / R-04：创建预检回传的 binding 缺失清单（不阻断，提示可跳过）。 */}
+          {projectMode && ACTIVE.has(mission.status) && (
+            <ScopeMissingBindings mission={mission} />
+          )}
 
           {ACTIVE.has(mission.status) && (
             <div>
@@ -789,6 +1223,25 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
             const workerRuns = mission.workers.filter(
               (w) => w.role !== "orchestrator",
             );
+            // task-15：projectMode 下 worker 日志/取消按 anchor（mission.workspace_id）
+            // 调用（后端 run/日志按 run_id 直查，不校验 ws 归属，anchor 鉴权即可）。
+            const logWorkspaceId = projectMode
+              ? mission.workspace_id
+              : (workspaceId ?? "");
+            const targetContext: WorkerTargetContext | null = projectMode
+              ? {
+                  wsTypeById,
+                  wsNameById,
+                  anchorWorkspaceId: mission.workspace_id,
+                  anchorName:
+                    (mission as ProjectMissionView).workspace_name ??
+                    wsNameById[mission.workspace_id] ??
+                    null,
+                  crossWorkspace:
+                    ((mission as ProjectMissionView).scope_workspace_ids ?? [])
+                      .length > 1,
+                }
+              : null;
             return (
               <>
                 {mainAgent && (
@@ -800,7 +1253,8 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
                       <WorkerRow
                         key={mainAgent.id}
                         worker={mainAgent}
-                        workspaceId={workspaceId}
+                        workspaceId={logWorkspaceId}
+                        targetContext={targetContext}
                       />
                     </ul>
                   </div>
@@ -819,7 +1273,8 @@ export function MissionConsole({ workspaceId }: { workspaceId: string }) {
                         <WorkerRow
                           key={w.id}
                           worker={w}
-                          workspaceId={workspaceId}
+                          workspaceId={logWorkspaceId}
+                          targetContext={targetContext}
                         />
                       ))}
                     </ul>

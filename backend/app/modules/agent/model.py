@@ -337,6 +337,18 @@ class AgentRun(BaseModel, table=True):
             nullable=True,
         ),
     )
+    # ── 目标工作区（2026-08-19-cross-workspace-team-mission design §4.1） ──
+    # worker run 落哪个工作区派发/收敛；NULL = anchor（零回归存量行为）。
+    # target_workspace_id 作为 worktree 建立 / provider 读取 / placement 派发的路由键；
+    # 执行路径按此字段 resolve Workspace 并路由到对应 daemon。
+    target_workspace_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
     parent_run_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(
@@ -633,12 +645,33 @@ class AgentMission(BaseModel, table=True):
         default_factory=uuid.uuid4,
         sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
     )
+    # ── Anchor（主工作区，2026-08-19-cross-workspace-team-mission D-009@v1） ──
+    # workspace_id 保持 NOT NULL 不动，语义收窄为 anchor：主 agent 运行的工作区、
+    # 鉴权锚；单 ws mission 时即原 workspace_id（Grill B-03）。
     workspace_id: uuid.UUID = Field(
         sa_column=Column(
             Uuid(as_uuid=True),
             ForeignKey("workspaces.id", ondelete="CASCADE"),
             nullable=False,
         ),
+    )
+    # ── 项目关联（2026-08-19-cross-workspace-team-mission design §4.1） ──
+    # 跨工作区 mission 必填（圈选 scope 须 ⊆ 项目关联工作区）；单 ws mission 可空
+    # （不强制挂项目）。项目删则 SET NULL，mission 历史保留。
+    project_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("ppm_project_maintenance.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    # ── 派发范围快照（2026-08-19-cross-workspace-team-mission D-007@v1） ──
+    # 创建时冻结的工作区 id 列表（uuid-hex），worker 可按 target 落地；NULL 或缺省
+    # = [workspace_id]（单 ws）。跨 ws mission 必填，scope ⊇ {anchor} 且 ⊆ ppm_project_workspace。
+    scope_workspace_ids: list[str] | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
     )
     change_id: uuid.UUID | None = Field(
         default=None,

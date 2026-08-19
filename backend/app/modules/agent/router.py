@@ -842,6 +842,7 @@ def _mission_to_response(
     cost: float,
     artifacts_by_run: dict[uuid.UUID, list[AgentArtifact]] | None = None,
 ) -> MissionResponse:
+    """把 AgentMission + runs 转换成 MissionResponse（task-07 扩展 project 概要字段）。"""
     artifacts_by_run = artifacts_by_run or {}
     workers: list[MissionWorkerRunResponse] = []
     for r in runs:
@@ -850,6 +851,17 @@ def _mission_to_response(
             MissionArtifactResponse.model_validate(a) for a in artifacts_by_run.get(r.id, [])
         ]
         workers.append(w)
+
+    # 转换 scope_workspace_ids JSON 列 → UUID 列（task-07）
+    scope_uuids: list[uuid.UUID] | None = None
+    if mission.scope_workspace_ids:
+        scope_uuids = []
+        for sid in mission.scope_workspace_ids:
+            try:
+                scope_uuids.append(uuid.UUID(sid))
+            except (ValueError, AttributeError):
+                pass  # 无效 UUID 跳过（防御性编程，理论上不应发生）
+
     return MissionResponse(
         id=mission.id,
         workspace_id=mission.workspace_id,
@@ -862,6 +874,13 @@ def _mission_to_response(
         cancelled_at=mission.cancelled_at,
         created_at=mission.created_at,
         workers=workers,
+        # task-07（2026-08-19-cross-workspace-team-mission）：跨 workspace mission 概要字段
+        project_id=mission.project_id,
+        scope_workspace_ids=scope_uuids,
+        # workspace_name / workspace_type 由调用方按需填充（list_project_missions 批量填充），
+        # 单个 mission 端点（get_mission / create_mission）不填充以保持零回归（设计 §7.1）。
+        workspace_name=None,
+        workspace_type=None,
     )
 
 
@@ -984,6 +1003,8 @@ async def create_mission(
         # external 模式 team_mission_entry 返回 (mission, None)——不 spawn 主 agent run。
         # 下方用 ctrl.worker_runs 重查（source of truth），不读 _main_run，故 None 安全；
         # MissionResponse.workers 自然为空，derive_status([]) → "planning"（design §7.1）。
+        # task-07（2026-08-19-cross-workspace-team-mission）：透传 anchor_workspace_id /
+        # scope_workspace_ids 到 team_mission_entry（存量不传 → 行为不变，零回归）。
         mission, _main_run = await orchestrator.team_mission_entry(
             workspace_id=workspace_id,
             objective=payload.objective,
@@ -994,6 +1015,7 @@ async def create_mission(
             worker_preset=payload.worker_preset,
             main_agent_config=payload.main_agent_config,
             orchestration_mode=orchestration_mode,
+            scope_workspace_ids=getattr(payload, "scope_workspace_ids", None),
         )
         ctrl = MissionControlService(session)
         fresh = await ctrl.worker_runs(mission.id)
@@ -1091,6 +1113,268 @@ async def cancel_mission(
     cost = MissionControlService.cost_from_runs(runs)
     arts = await _load_mission_artifacts(session, mission.id)
     return _mission_to_response(mission, runs, cost, arts)
+
+
+# ---------------------------------------------------------------------------
+# Project-scoped Mission endpoints (task-07, 2026-08-19-cross-workspace-team-mission)
+# POST/GET /api/projects/{pid}/missions — 项目维度创建/查询 mission
+# ---------------------------------------------------------------------------
+
+
+async def _require_project_manager(
+    session: AsyncSession, user: User, project_id: uuid.UUID
+) -> None:
+    """校验当前用户对该 PPM 项目有 manager 权限,否则 403（design §7.1 / FR-05）。
+
+    复用 ppm/common/data_scope 的 is_super_admin + manager_project_ids。
+    """
+    from app.modules.ppm.common.data_scope import is_super_admin, manager_project_ids
+
+    if await is_super_admin(session, user):
+        return
+    if project_id in await manager_project_ids(session, user):
+        return
+    from app.core.errors import PermissionDenied
+
+    raise PermissionDenied(
+        "仅项目经理可创建项目团队会话。",
+        details={"project_id": str(project_id)},
+    )
+
+
+async def _check_scope_bindings(
+    session: AsyncSession, scope_workspace_ids: list[uuid.UUID]
+) -> list[dict]:
+    """预检 scope 内各 workspace 是否至少有一条带 daemon_id 的 member binding。
+
+    返回缺 binding 的 workspace 清单（[{id, name}]），空列表表示全部有 binding。
+    不阻断创建（design §7.1）——仅作 warning 清单提示。
+    """
+    from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+    from app.modules.workspace.model import Workspace
+
+    missing: list[dict] = []
+    for ws_id in scope_workspace_ids:
+        stmt = select(WorkspaceMemberRuntime).where(
+            WorkspaceMemberRuntime.workspace_id == ws_id,
+            WorkspaceMemberRuntime.daemon_id.isnot(None),
+        )
+        binding = (await session.execute(stmt)).first()
+        if binding is None:
+            ws = await session.get(Workspace, ws_id)
+            if ws:
+                missing.append({"id": str(ws_id), "name": ws.name})
+    return missing
+
+
+@router.post(
+    "/projects/{project_id}/missions",
+    response_model=MissionResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_project_mission(
+    project_id: uuid.UUID,
+    payload: MissionCreateRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.TASK_READ))],
+) -> MissionResponse:
+    """项目维度创建 mission（design §7.1 / FR-04）。
+
+    鉴权：项目经理或超管（非项目经理 403）。
+    校验：scope_workspace_ids ⊆ ppm_project_workspace(project_id)（越界 422）；
+          anchor_workspace_id ∈ scope（越界 422）；
+          scope 必填 ≥1 去重（项目维度入口强制）。
+    预检：scope 内各 ws 至少一条 binding 带 daemon_id（缺的报清单，不阻断）。
+    行为：mode 强制 team；project_id 落列；调 team_mission_entry 传 scope。
+    anchor 缺省：scope 第一个或 type=backend 优先。
+    """
+    # 鉴权：项目经理或超管
+    await _require_project_manager(session, user, project_id)
+
+    # 校验 scope_workspace_ids 必填 ≥1
+    scope_ids = getattr(payload, "scope_workspace_ids", None)
+    if not scope_ids or len(scope_ids) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="项目维度创建 mission 必须指定 scope_workspace_ids（至少一个工作区）。",
+        )
+    # 去重（保持顺序）
+    scope_ids = list(dict.fromkeys(scope_ids))
+
+    # 校验 scope ⊆ ppm_project_workspace
+    from app.modules.workspace import link_service
+    from app.modules.workspace.schema import WorkspaceBrief
+
+    bound_workspaces: list[WorkspaceBrief] = await link_service.list_by_project(
+        session, ppm_project_id=project_id
+    )
+    bound_ids = {w.workspace_id for w in bound_workspaces}
+    invalid_ids = set(scope_ids) - bound_ids
+    if invalid_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"指定的工作区不在项目关联范围内：{', '.join(str(i) for i in invalid_ids)}",
+        )
+
+    # 校验 anchor ∈ scope（若指定）
+    anchor_id = getattr(payload, "anchor_workspace_id", None)
+    if anchor_id and anchor_id not in scope_ids:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"anchor_workspace_id({anchor_id}) 必须在 scope_workspace_ids 范围内。",
+        )
+
+    # anchor 缺省：scope 第一个或 type=backend-code 优先
+    if not anchor_id:
+        # 按 type=backend-code 优先排序，否则取第一个。
+        # 逐字对齐词表真值 WORKSPACE_TYPE_VALUES（workspace/constants.py:20，
+        # change 2026-08-18-workspace-role-type）——"backend" 只是旧值归一化的
+        # 来源 key（YAML_TYPE_NORMALIZE_MAP），存量数据里已不存在，比对它永不命中。
+        backend_ws = next(
+            (
+                w
+                for w in bound_workspaces
+                if w.type == "backend-code" and w.workspace_id in scope_ids
+            ),
+            None,
+        )
+        anchor_id = backend_ws.workspace_id if backend_ws else scope_ids[0]
+
+    # 预检 binding（不阻断）
+    missing_bindings = await _check_scope_bindings(session, scope_ids)
+    if missing_bindings:
+        log.warning(
+            "project_mission_bindings_missing",
+            project_id=str(project_id),
+            missing=[m["name"] for m in missing_bindings],
+        )
+
+    # 构造 constraints：mode 强制 team + project_id 落列
+    constraints = dict(payload.constraints or {})
+    constraints["mode"] = "team"  # 项目维度无 single 语义
+    if getattr(payload, "session_id", None) is not None:
+        constraints["session_id"] = str(payload.session_id)
+    if getattr(payload, "orchestration_mode", None) is not None:
+        constraints["orchestration_mode"] = payload.orchestration_mode
+
+    orchestration_mode = payload.orchestration_mode or "team"
+    orchestrator = OrchestratorService(session)
+
+    mission, _main_run = await orchestrator.team_mission_entry(
+        workspace_id=anchor_id,  # anchor 作为主 agent 运行所在 workspace
+        objective=payload.objective,
+        created_by=user.id,
+        change_id=payload.change_id,
+        constraints=constraints,
+        budget_usd=payload.budget_usd,
+        worker_preset=payload.worker_preset,
+        main_agent_config=payload.main_agent_config,
+        orchestration_mode=orchestration_mode,
+        scope_workspace_ids=scope_ids,
+        project_id=project_id,  # 落 project_id 列
+    )
+
+    ctrl = MissionControlService(session)
+    fresh = await ctrl.worker_runs(mission.id)
+    cost = MissionControlService.cost_from_runs(fresh)
+    arts = await _load_mission_artifacts(session, mission.id)
+    response = _mission_to_response(mission, fresh, cost, arts)
+
+    # 附 binding 缺失 warning（若存在）
+    if missing_bindings:
+        response.constraints = response.constraints or {}
+        response.constraints["missing_bindings"] = missing_bindings
+
+    return response
+
+
+@router.get(
+    "/projects/{project_id}/missions",
+    response_model=list[MissionResponse],
+)
+async def list_project_missions(
+    project_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.TASK_READ))],
+    limit: int = Query(20, ge=1),
+    offset: int = Query(0, ge=0),
+) -> list[MissionResponse]:
+    """列出项目下的 mission（按 created_at 倒序，分页，design §7.1 / FR-04）。
+
+    鉴权同 POST（项目经理/超管）。
+    返回 MissionResponse 列表（过滤 mission.project_id == project_id），复用
+    _mission_to_response 并扩展 workspace_name / workspace_type / scope 概要字段。
+    """
+    # 鉴权：项目经理或超管
+    await _require_project_manager(session, user, project_id)
+
+    stmt = (
+        select(AgentMission)
+        .where(AgentMission.project_id == project_id)
+        .order_by(AgentMission.created_at.desc())
+        .limit(min(limit, 50))
+        .offset(offset)
+    )
+    missions = (await session.execute(stmt)).scalars().all()
+    if not missions:
+        return []
+
+    mission_ids = [m.id for m in missions]
+    all_runs = (
+        (await session.execute(select(AgentRun).where(AgentRun.mission_id.in_(mission_ids))))
+        .scalars()
+        .all()
+    )
+    runs_by_mission: dict[uuid.UUID, list[AgentRun]] = {}
+    cost_by_mission: dict[uuid.UUID, float] = {}
+    for r in all_runs:
+        mid = r.mission_id
+        if mid is None:
+            continue
+        runs_by_mission.setdefault(mid, []).append(r)
+        cost_by_mission[mid] = cost_by_mission.get(mid, 0.0) + (r.total_cost_usd or 0.0)
+
+    arts_by_run: dict[uuid.UUID, list[AgentArtifact]] = {}
+    if all_runs:
+        art_stmt = (
+            select(AgentArtifact)
+            .where(AgentArtifact.run_id.in_([r.id for r in all_runs]))
+            .order_by(AgentArtifact.created_at)
+        )
+        for a in (await session.execute(art_stmt)).scalars().all():
+            arts_by_run.setdefault(a.run_id, []).append(a)
+
+    # 批量取 workspace name/type（避免 N+1）
+    from app.modules.workspace.model import Workspace
+
+    ws_ids = {m.workspace_id for m in missions}
+    if missions:
+        for m in missions:
+            if m.scope_workspace_ids:
+                ws_ids.update(uuid.UUID(sid) for sid in m.scope_workspace_ids)
+    workspaces = (
+        (await session.execute(select(Workspace).where(col(Workspace.id).in_(ws_ids))))
+        .scalars()
+        .all()
+    )
+    ws_map: dict[uuid.UUID, Workspace] = {ws.id: ws for ws in workspaces}
+
+    responses: list[MissionResponse] = []
+    for m in missions:
+        resp = _mission_to_response(
+            m,
+            runs_by_mission.get(m.id, []),
+            cost_by_mission.get(m.id, 0.0),
+            arts_by_run,
+        )
+        # 扩展概要字段（design §7.1）
+        anchor_ws = ws_map.get(m.workspace_id)
+        if anchor_ws:
+            resp.workspace_name = anchor_ws.name
+            resp.workspace_type = anchor_ws.type
+        responses.append(resp)
+
+    return responses
 
 
 # Team 主 agent MCP endpoint（2026-07-12-team-main-agent-orchestration task-03 / D-007@v2）：

@@ -17,11 +17,13 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentMission, AgentRun
 from app.modules.agent.placement import NoOnlineDaemonError, RunPlacementService
+from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
 
 log = get_logger(__name__)
 
@@ -67,14 +69,23 @@ def _resolve_main_agent_config(
     }
 
 
-def render_orchestrator_prompt(mission: AgentMission, orchestrator_run: AgentRun) -> str:
-    """渲染主 agent 首轮 prompt（关键标识 + objective + worker_preset + 工具用法）。
+async def render_orchestrator_prompt(
+    mission: AgentMission,
+    orchestrator_run: AgentRun,
+    session: AsyncSession,
+) -> str:
+    """渲染主 agent 首轮 prompt（关键标识 + objective + worker_preset + 项目上下文 + 工具用法）。
 
     主 agent 是真 agent，首轮拿到 mission 目标 + 用户预设 worker 列表 + 关键标识
     （workspace_id / mission_id / orchestrator run_id），自主决定派哪些 worker /
     何时收敛。MCP tool（task-05/06）让主 agent 通过反向 endpoint 派 worker / 读产出 /
     收敛；5 个 tool 的 inputSchema 都要 workspace_id + mission_id（report_progress
     还要 run_id），主 agent 必须从 prompt 拿到这些 id（环境变量里没有，e2e 发现）。
+
+    项目上下文注入（task-06 / design §4.4）：
+    - 项目名：mission.project_id → PpmProjectMaintenance.project_name
+    - scope 清单：各 workspace 的 id/name/type/description/在线状态
+    - dispatch_worker 用法：target_workspace_id 参数说明
     """
     preset_hint = ""
     if mission.worker_preset:
@@ -84,17 +95,82 @@ def render_orchestrator_prompt(mission: AgentMission, orchestrator_run: AgentRun
         preset_hint = (
             f"\n用户预设 worker 角色：{', '.join(roles)}\n按需通过 dispatch_worker MCP 工具派发。"
         )
+
+    # 项目名上下文（task-06）
+    project_context = ""
+    if mission.project_id is not None:
+        from app.modules.ppm.project.model import PpmProjectMaintenance
+
+        result = await session.execute(
+            select(PpmProjectMaintenance.project_name).where(
+                PpmProjectMaintenance.id == mission.project_id
+            )
+        )
+        row = result.first()
+        if row and row[0]:
+            project_context = f"\n项目名：{row[0]}"
+
+    # scope 清单（task-06）
+    scope_context = ""
+    if mission.scope_workspace_ids:
+        from app.modules.workspace.member_runtimes.queries import (
+            query_daemon_online_by_id,
+        )
+        from app.modules.workspace.model import Workspace
+
+        scope_list = []
+        for ws_id_str in mission.scope_workspace_ids:
+            try:
+                ws_id = uuid.UUID(ws_id_str)
+                ws = await session.get(Workspace, ws_id)
+                if ws:
+                    # 查询该 workspace 是否有在线 daemon
+                    online_daemon = None
+                    member_runtimes_result = await session.execute(
+                        select(WorkspaceMemberRuntime).where(
+                            WorkspaceMemberRuntime.workspace_id == ws_id,
+                            WorkspaceMemberRuntime.daemon_id.isnot(None),
+                        )
+                    )
+                    first_runtime = member_runtimes_result.first()
+                    if first_runtime and first_runtime[0].daemon_id:
+                        online_daemon = await query_daemon_online_by_id(
+                            session,
+                            first_runtime[0].daemon_id,
+                            uuid.UUID(
+                                "00000000-0000-0000-0000-000000000000"
+                            ),  # user_id 占位（在线判定不依赖 user_id）
+                        )
+
+                    online_status = "在线" if online_daemon else "离线"
+                    ws_info = f"- {ws.name}（id={ws_id}"
+                    if ws.type:
+                        ws_info += f", type={ws.type}"
+                    if ws.description:
+                        ws_info += f", desc={ws.description}"
+                    ws_info += f", daemon={online_status}）"
+                    scope_list.append(ws_info)
+            except (ValueError, TypeError):
+                # 忽略无效的 workspace id
+                pass
+
+        if scope_list:
+            scope_context = "\n派发范围（可落地的工作区）：\n" + "\n".join(scope_list)
+            scope_context += "\n按任务性质选工作区：前端任务传前端工作区 id，后端任务传后端工作区 id（通过 dispatch_worker 的 target_workspace_id 参数）。"
+
     return (
         f"你是多 Agent 团队的主 agent（项目经理，role=orchestrator）。\n"
         f"关键标识（调用下方 MCP 工具时按需传入）：\n"
         f"- workspace_id：`{mission.workspace_id}`\n"
         f"- mission_id：`{mission.id}`\n"
         f"- 主 agent run_id（report_progress 的 run_id 参数）：`{orchestrator_run.id}`\n"
+        f"{project_context}\n"
         f"团队目标：{mission.objective}\n"
-        f"{preset_hint}\n\n"
+        f"{preset_hint}"
+        f"{scope_context}\n\n"
         "你的职责：拆解目标 → 派 worker → 读 worker 产出 → 判断是否达成 → 收敛。\n"
         "可用 MCP 工具（stdio 注入）：\n"
-        "- dispatch_worker(workspace_id, mission_id, objective, role?, ...)：派一个 worker\n"
+        "- dispatch_worker(workspace_id, mission_id, objective, role?, target_workspace_id?, ...)：派一个 worker（target_workspace_id 指定落地工作区，跨 ws 派发必传）\n"
         "- get_worker_result(workspace_id, mission_id, worker_id)：读指定 worker 产出\n"
         "- list_workers(workspace_id, mission_id)：列 mission 所有 worker 状态\n"
         "- converge_mission(workspace_id, mission_id)：全部 worker 终态后收敛\n"
@@ -139,8 +215,13 @@ class OrchestratorService:
         worker_preset: list[dict] | None,
         main_agent_config: dict[str, Any] | None,
         orchestration_mode: str = "team",
+        scope_workspace_ids: list[uuid.UUID] | None = None,
+        project_id: uuid.UUID | None = None,
     ) -> tuple[AgentMission, AgentRun | None]:
         """建 mission；team 模式还建主 agent run + 派 daemon lease。
+
+        ``project_id``（task-07，2026-08-19-cross-workspace-team-mission）：项目维度 mission
+        关联项目 ID，单 workspace mission 可空（零回归）。跨 ws mission 必填。
 
         ``orchestration_mode`` 取值：
         - ``"team"``（默认，零回归）：复用 ``MissionService.start_mission`` 的持久化
@@ -165,6 +246,11 @@ class OrchestratorService:
         if orchestration_mode == "external":
             merged["orchestration_mode"] = "external"
 
+        # 转换 scope_workspace_ids（uuid → str 存 JSON 列）
+        scope_workspace_ids_str: list[str] | None = None
+        if scope_workspace_ids:
+            scope_workspace_ids_str = [str(sid) for sid in scope_workspace_ids]
+
         mission = AgentMission(
             workspace_id=workspace_id,
             change_id=change_id,
@@ -174,6 +260,8 @@ class OrchestratorService:
             worker_preset=worker_preset,
             main_agent_config=main_agent_config,
             created_by=created_by,
+            scope_workspace_ids=scope_workspace_ids_str,
+            project_id=project_id,  # task-07：跨 workspace mission 项目关联
         )
         self._session.add(mission)
         await self._session.commit()
@@ -223,7 +311,7 @@ class OrchestratorService:
                 workspace_id=workspace_id,
                 provider=cfg["provider"] or None,
                 model=cfg["model"] or None,
-                prompt=render_orchestrator_prompt(mission, main_run),
+                prompt=await render_orchestrator_prompt(mission, main_run, self._session),
                 stage=_ORCHESTRATOR_ROLE,
                 read_only=False,
                 # task-12：透传主 agent profile id（task-05 dispatch_to_daemon 已接参，

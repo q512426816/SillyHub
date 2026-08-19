@@ -152,14 +152,32 @@ async def _resolve_actor_user(session: AsyncSession, auth: McpAuthContext) -> Us
 async def _get_mission(
     session: AsyncSession, workspace_id: uuid.UUID, mission_id: uuid.UUID
 ) -> AgentMission:
-    """取 mission 并校验属于该 workspace（与 mcp_tools.py:145 同语义，MCP error 形态）。"""
+    """取 mission 并校验 anchor 匹配或 workspace ∈ scope（task-09，design §7.2 链路B）。
+
+    跨 workspace mission（scope_workspace_ids 非 NULL）：允许 token 绑定的 workspace
+    在 scope 内。NULL scope 视为 [anchor]（零回归，P2-2）。
+    """
     mission = await session.get(AgentMission, mission_id)
-    if mission is None or mission.workspace_id != workspace_id:
+    if mission is None:
         raise AppError(
             "mission not found",
             code="MCP_404_MISSION_NOT_FOUND",
             http_status=404,
             details={"mission_id": str(mission_id)},
+        )
+    # scope_workspace_ids 为 NULL 时按 [workspace_id] 处理（单 ws mission 零回归）
+    # DB 存储是字符串列表，需转换为 UUID 列表比较
+    scope_uuids = (
+        [uuid.UUID(sid) for sid in mission.scope_workspace_ids]
+        if mission.scope_workspace_ids
+        else [mission.workspace_id]
+    )
+    if workspace_id not in scope_uuids and workspace_id != mission.workspace_id:
+        raise AppError(
+            "mission not found or workspace not in scope",
+            code="MCP_404_MISSION_NOT_FOUND",
+            http_status=404,
+            details={"mission_id": str(mission_id), "workspace_id": str(workspace_id)},
         )
     return mission
 
@@ -193,9 +211,9 @@ async def _resolve_dispatch_profile_mcp(
 
     语义与内部 HTTP endpoint 完全一致，仅错误形态是 MCP ``AppError``（非 HTTPException）：
     ``profile_id`` 为 None → 返 None 走兜底链；非空时经 ``AgentProfileService.get``
-    （自带三级 visibility）取 profile，不存在/不可见统一转 400；再断言 workspace 级
-    profile 须 ``workspace_id == mission.workspace_id``（private/platform 放行），跨
-    workspace 返 400。校验通过返回 profile，由调用方冻结快照落 run。
+    （自带三级 visibility）取 profile，不存在/不可见统一转 400；workspace 级校验放宽为
+    profile.workspace_id ∈ {anchor} ∪ scope（task-09，P2-1：跨 ws worker 可绑 target ws
+    profile）。校验通过返回 profile，由调用方冻结快照落 run。
     """
     if profile_id is None:
         return None
@@ -217,9 +235,12 @@ async def _resolve_dispatch_profile_mcp(
             details={"agent_profile_id": str(profile_id)},
         ) from exc
 
+    # workspace 级校验放宽为 {anchor} ∪ scope（task-09，design §7.2 链路B P2-1）
+    scope = mission.scope_workspace_ids or [str(mission.workspace_id)]
+    allowed_workspace_ids = {mission.workspace_id, *scope}
     if (
         profile.visibility == AgentProfileVisibility.WORKSPACE.value
-        and profile.workspace_id != mission.workspace_id
+        and profile.workspace_id not in allowed_workspace_ids
     ):
         raise AppError(
             "agent_profile_id 属于其它 workspace，不能用于本 mission",
@@ -347,6 +368,9 @@ async def dispatch_worker(
     worktree_path: str | None = None,
     branch: str | None = None,
     worker_prompt: str | None = None,
+    # task-09（2026-08-19-cross-workspace-team-mission）：跨 workspace 派发参数，
+    # target_workspace_id 为可选，默认 None → 派发到 anchor（零回归，design §7.2）。
+    target_workspace_id: uuid.UUID | None = None,
     ctx: Context | None = None,
 ) -> dict:
     """派一个 worker run（需要 dispatch scope）。
@@ -369,12 +393,36 @@ async def dispatch_worker(
     （如 ``sillyspec/<change>``，仅入 lease metadata，**不落 run.worktree_branch**
     防 finalize 误 merge，D-008）；``worker_prompt`` 覆写 worker prompt（含
     "不 commit / 不越界"指令，非空 → 替代 render_worker_prompt）。
+
+    task-09 跨 workspace 派发（design §7.2 链路B）：``target_workspace_id`` 可选，
+    默认 None → 派发到 anchor（零回归）；非空时服务端校验 target ∈ scope（mission
+    的 scope_workspace_ids），越界抛 MCP 错误码
+    ``MCP_400_MISSION_TARGET_OUT_OF_SCOPE``。
     """
     auth = _auth_from_ctx(ctx)
     require_mcp_scope(auth, MCP_SCOPE_DISPATCH)
 
     async with get_session_factory()() as session:
         mission = await _get_mission(session, auth.workspace_id, mission_id)
+
+        # task-09：校验显式 target_workspace_id ∈ scope（越界 400）。
+        # 单 workspace 模式 target_workspace_id 为 None → 不设置显式 target，由
+        # execution.py 回退 anchor 零回归，且 AgentRun.target_workspace_id 保持 NULL
+        # （mission_schema.py:65 契约，task-16 review 追补）。
+        if target_workspace_id is not None:
+            scope = mission.scope_workspace_ids or [str(mission.workspace_id)]
+            if target_workspace_id not in scope and target_workspace_id != mission.workspace_id:
+                raise AppError(
+                    "target_workspace_id not in mission scope",
+                    code="MCP_400_MISSION_TARGET_OUT_OF_SCOPE",
+                    http_status=400,
+                    details={
+                        "target_workspace_id": str(target_workspace_id),
+                        "scope_workspace_ids": [str(sid) for sid in scope],
+                    },
+                )
+        # target_workspace_id 为 None 时默认 anchor 仅在 execution 层回退；本层保持
+        # None 透传，确保 target_workspace_id 列 NULL（零回归）。
         # FR-04：可选绑 AgentProfile（visibility + workspace 归属校验，actor=token.created_by）。
         actor = await _resolve_actor_user(session, auth)
         profile = await _resolve_dispatch_profile_mcp(session, mission, agent_profile_id, actor)
@@ -432,6 +480,7 @@ async def dispatch_worker(
             await exec_svc.dispatch_worker(
                 run,
                 workspace_id=auth.workspace_id,
+                target_workspace_id=target_workspace_id,
                 user_id=await _resolve_actor_user_id(session, auth),
                 read_only=read_only,
                 # task-04 路径A 透传（design §7.3）：caller worktree 三参，默认 None

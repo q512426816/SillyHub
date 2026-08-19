@@ -284,3 +284,200 @@ async def get_daemon_enabled_providers(
             error=str(exc),
         )
         return []
+
+
+async def resolve_representative_binding(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    provider: str | None,
+) -> dict | None:
+    """Resolve a representative binding for cross-workspace worker dispatch.
+
+    Change 2026-08-19-cross-workspace-team-mission task-02（design §4.2）：
+    Worker 的 target≠anchor 派发时，若本人在 target 无 binding，按「owner 优先→
+    任意在线」选该工作区的代表 daemon（placement.py 新增 representative_fallback
+    旗标分支调用本函数）。
+
+    解析顺序（task-02 acceptance）：
+
+    1. **owner 在线优先**：查询 workspace.created_by（owner）的在线 binding。
+    2. **任意在线兜底**：owner 无在线 binding，查该 workspace 任意 member 的在线
+       binding（按 daemon 最近心跳排序，与派发链路同一启发式）。
+    3. **均无在线**：返回 None（调用方抛 NoOnlineDaemonError）。
+
+    在线判定复用派发链路同一标准（daemon_instances.status = 'online'），返回的
+    runtime dict shape 与 query_runtime_by_daemon_and_provider 一致
+    （{id, user_id, provider, status, daemon_instance_id}），兼容 placement 消费方。
+
+    Args:
+        session: 数据库会话。
+        workspace_id: 目标工作区 id（worker 落地的工作区）。
+        user_id: 派发发起人 user_id（用于过滤 owner 在线 binding）。
+        provider: 期望的 provider（claude/codex/...）；None 取任意在线 runtime。
+
+    Returns:
+        runtime dict（{id, user_id, provider, status, daemon_instance_id}），
+        或 None（无在线 binding）。
+    """
+    try:
+        # 分支1：owner 在线优先（created_by = workspace owner）
+        # 关键修复：provider 非空时必须在SQL层过滤 runtime，否则owner的daemon在线
+        # 但无匹配provider的runtime时会错误地走到分支2
+        if provider:
+            # provider 非空：直接查 owner 的匹配 provider 的在线 runtime
+            result = await session.execute(
+                text(
+                    """
+                    SELECT dr.id, dr.user_id, dr.provider, dr.status, dr.daemon_instance_id
+                    FROM workspace_member_runtimes wmr
+                    JOIN daemon_instances di ON di.id = wmr.daemon_id
+                    JOIN workspaces w ON w.id = wmr.workspace_id
+                    JOIN daemon_runtimes dr ON dr.daemon_instance_id = wmr.daemon_id
+                    WHERE wmr.workspace_id = :wid
+                      AND w.created_by = :uid
+                      AND wmr.daemon_id IS NOT NULL
+                      AND di.status = 'online'
+                      AND dr.status = 'online'
+                      AND dr.provider = :prov
+                    LIMIT 1
+                    """
+                ),
+                {"wid": workspace_id.hex, "uid": user_id.hex, "prov": provider},
+            )
+            row = result.mappings().first()
+            if row is not None:
+                runtime = dict(row)
+                log.info(
+                    "representative_binding_owner_hit",
+                    workspace_id=str(workspace_id),
+                    user_id=str(user_id),
+                    provider=provider,
+                    runtime_id=str(runtime["id"]),
+                )
+                return runtime
+        else:
+            # provider 为空：查 owner 的任意在线 daemon，再取任意 runtime
+            result = await session.execute(
+                text(
+                    """
+                    SELECT wmr.daemon_id
+                    FROM workspace_member_runtimes wmr
+                    JOIN daemon_instances di ON di.id = wmr.daemon_id
+                    JOIN workspaces w ON w.id = wmr.workspace_id
+                    WHERE wmr.workspace_id = :wid
+                      AND w.created_by = :uid
+                      AND wmr.daemon_id IS NOT NULL
+                      AND di.status = 'online'
+                    LIMIT 1
+                    """
+                ),
+                {"wid": workspace_id.hex, "uid": user_id.hex},
+            )
+            row = result.mappings().first()
+            if row is not None and row["daemon_id"] is not None:
+                daemon_id_raw = row["daemon_id"]
+                daemon_id = (
+                    daemon_id_raw
+                    if isinstance(daemon_id_raw, uuid.UUID)
+                    else uuid.UUID(str(daemon_id_raw))
+                )
+                # 叠加 provider 解析（与派发链路同一查询）
+                runtime = await query_runtime_by_daemon_and_provider(session, daemon_id, None)
+                if runtime:
+                    log.info(
+                        "representative_binding_owner_hit",
+                        workspace_id=str(workspace_id),
+                        user_id=str(user_id),
+                        provider=provider,
+                        runtime_id=str(runtime["id"]),
+                    )
+                    return runtime
+
+        # 分支2：owner 无在线 binding，查任意 member 在线 binding（按最近心跳排序）
+        # 关键修复：provider 非空时必须在SQL层过滤，否则选出的daemon未必有该provider
+        if provider:
+            # provider 非空：直接查匹配 provider 的在线 runtime，按心跳排序
+            result = await session.execute(
+                text(
+                    """
+                    SELECT dr.id, dr.user_id, dr.provider, dr.status, dr.daemon_instance_id
+                    FROM workspace_member_runtimes wmr
+                    JOIN daemon_instances di ON di.id = wmr.daemon_id
+                    JOIN daemon_runtimes dr ON dr.daemon_instance_id = wmr.daemon_id
+                    WHERE wmr.workspace_id = :wid
+                      AND wmr.daemon_id IS NOT NULL
+                      AND di.status = 'online'
+                      AND dr.status = 'online'
+                      AND dr.provider = :prov
+                    ORDER BY dr.last_heartbeat_at DESC NULLS LAST
+                    LIMIT 1
+                    """
+                ),
+                {"wid": workspace_id.hex, "prov": provider},
+            )
+            row = result.mappings().first()
+            if row is not None:
+                runtime = dict(row)
+                log.info(
+                    "representative_binding_any_online_hit",
+                    workspace_id=str(workspace_id),
+                    provider=provider,
+                    runtime_id=str(runtime["id"]),
+                )
+                return runtime
+        else:
+            # provider 为空：先选 daemon（按最近心跳），再取任意 runtime
+            result = await session.execute(
+                text(
+                    """
+                    SELECT wmr.daemon_id, MAX(dr.last_heartbeat_at) AS max_heartbeat
+                    FROM workspace_member_runtimes wmr
+                    JOIN daemon_instances di ON di.id = wmr.daemon_id
+                    JOIN daemon_runtimes dr ON dr.daemon_instance_id = wmr.daemon_id
+                    WHERE wmr.workspace_id = :wid
+                      AND wmr.daemon_id IS NOT NULL
+                      AND di.status = 'online'
+                      AND dr.status = 'online'
+                    GROUP BY wmr.daemon_id
+                    ORDER BY max_heartbeat DESC NULLS LAST
+                    LIMIT 1
+                    """
+                ),
+                {"wid": workspace_id.hex},
+            )
+            row = result.mappings().first()
+            if row is not None and row["daemon_id"] is not None:
+                daemon_id_raw = row["daemon_id"]
+                daemon_id = (
+                    daemon_id_raw
+                    if isinstance(daemon_id_raw, uuid.UUID)
+                    else uuid.UUID(str(daemon_id_raw))
+                )
+                runtime = await query_runtime_by_daemon_and_provider(session, daemon_id, None)
+                if runtime:
+                    log.info(
+                        "representative_binding_any_online_hit",
+                        workspace_id=str(workspace_id),
+                        provider=provider,
+                        runtime_id=str(runtime["id"]),
+                    )
+                    return runtime
+
+        # 分支3：均无在线 binding，返回 None
+        log.info(
+            "representative_binding_none_online",
+            workspace_id=str(workspace_id),
+            user_id=str(user_id),
+            provider=provider,
+        )
+        return None
+    except Exception as exc:
+        log.warning(
+            "resolve_representative_binding_failed",
+            workspace_id=str(workspace_id),
+            user_id=str(user_id),
+            provider=provider,
+            error=str(exc),
+        )
+        return None

@@ -163,7 +163,8 @@ export function createMcpServer(client: HubClient): {
         'Dispatch a worker run for a mission. Routes via daemon MCP server to ' +
         'backend POST /workspaces/{workspace_id}/missions/{mission_id}/dispatch_worker. ' +
         'Returns worker run status receipt (id, status, lease_id, error_code). ' +
-        'error_code=no_online_daemon means run created but no daemon online (retry later).',
+        'error_code=no_online_daemon means run created but no daemon online (retry later). ' +
+        'Cross-workspace dispatch: set target_workspace_id to dispatch worker to another workspace.',
       inputSchema: {
         workspace_id: z.string().describe('Target workspace UUID'),
         mission_id: z.string().describe('Target mission UUID'),
@@ -198,6 +199,15 @@ export function createMcpServer(client: HubClient): {
               'render_worker_prompt (caller injects no-commit / stay-in-allowedPaths ' +
               'instructions). Unset → backend renders default prompt.',
           ),
+        // task-10：跨工作区派发目标工作区 ID（可选，缺省用主工作区）
+        target_workspace_id: z
+          .string()
+          .optional()
+          .describe(
+            'Cross-workspace dispatch: target workspace UUID. When set, worker runs ' +
+              'in the specified workspace; unset → defaults to anchor workspace (workspace_id). ' +
+              'Requires anchor workspace to have binding with target workspace.',
+          ),
       },
     },
     async (args) => {
@@ -215,6 +225,8 @@ export function createMcpServer(client: HubClient): {
             worktree_path: args.worktree_path,
             branch: args.branch,
             worker_prompt: args.worker_prompt,
+            // task-10：跨工作区派发透传
+            target_workspace_id: args.target_workspace_id,
           },
         );
         return okContent(result);

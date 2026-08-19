@@ -346,6 +346,11 @@ class RunPlacementService:
         # 优先作 target_provider（不改 daemon 选择顺序，binding 仍为唯一真相源）。
         # None = 未绑 profile，**零新增查询**（C-07），走原 workspace.default_agent 路径。
         agent_profile_id: uuid.UUID | None = None,
+        # task-03（2026-08-19-cross-workspace-team-mission / design §4.2）：
+        # representative_fallback 旗标，控制 worker 派发（target≠anchor）时本人无 binding
+        # 的行为。True 走代表 binding（owner 优先→任意在线→None 抛错），False 维持 borrow
+        # 兜底（零回归）。由 execution.py 根据派发场景传入，默认 False 保持向后兼容。
+        representative_fallback: bool = False,
     ) -> uuid.UUID | None:
         """Dispatch an AgentRun to the user's daemon.
 
@@ -367,6 +372,7 @@ class RunPlacementService:
             user_id=user_id,
             provider=provider,
             agent_profile_id=agent_profile_id,
+            representative_fallback=representative_fallback,
         )
         if runtime is None:
             log.warning(
@@ -1005,6 +1011,13 @@ class RunPlacementService:
         user_id: uuid.UUID,
         provider: str | None,
         agent_profile_id: uuid.UUID | None = None,
+        # task-03（2026-08-19-cross-workspace-team-mission / D-001@v2）：
+        # representative_fallback 旗标，控制本人无 binding 时的行为。
+        #   - True：调用 resolve_representative_binding 查代表 binding（owner 优先→任意在线），
+        #           无结果抛 NoOnlineDaemonError（no_binding_for_workspace 语义）。
+        #   - False（默认）：维持现状 borrow 兜底链不动（字节级零回归）。
+        # 旗标由 caller（execution.py，task-04）根据派发场景控制；本函数只加参数与分支。
+        representative_fallback: bool = False,
     ) -> dict | None:
         """Resolve the runtime a dispatch should target.
 
@@ -1057,21 +1070,44 @@ class RunPlacementService:
         )
 
         if binding is None:
-            # D-008@v1（task-06）：无自有 binding → 借用兜底（业务/管理人员场景）。
-            # helper 内部先复检自有（同样 None）→ DAEMON_BORROW 权限闸 → shared lender。
-            # 命中借用 runtime 即返回（dict 上塞 borrowed 标记供 lease metadata）；
-            # 未命中（无权限 / 无 shared lender）→ 抛原 NoOnlineDaemonError 文案不变。
-            borrowed_rt = await _resolve_borrowed_or_own_runtime(
-                self._session, workspace_id, user_id, target_provider
-            )
-            rt, borrowed, lender = borrowed_rt
-            if rt is not None:
-                return _stamp_borrowed_flag(rt, borrowed, lender)
-            raise NoOnlineDaemonError(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                message="工作区未绑定守护进程",
-            )
+            # 分支①（本人无 binding）：根据 representative_fallback 旗标决定路径。
+            # task-03（design §4.2 / D-001@v2）：旗标控制 worker 派发行为——target≠anchor
+            # 时旗标开走代表 binding，旗标关维持 borrow 兜底（零回归）。
+            if representative_fallback:
+                # 分支②（旗标开）：调用 resolve_representative_binding 查代表 binding。
+                # owner 优先→任意在线→None；无结果抛 NoOnlineDaemonError（no_binding_for_workspace
+                # 语义，与 borrow 路的"未绑定守护进程"区分）。
+                from app.modules.workspace.member_runtimes.queries import (
+                    resolve_representative_binding,
+                )
+
+                representative_rt = await resolve_representative_binding(
+                    self._session, workspace_id, user_id, target_provider
+                )
+                if representative_rt is not None:
+                    return representative_rt
+                raise NoOnlineDaemonError(
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    message="工作区无在线绑定（代表 binding 未命中）",
+                )
+            else:
+                # 分支③（旗标关，默认）：维持现状 borrow 兜底链不动（字节级零回归）。
+                # D-008@v1（task-06）：无自有 binding → 借用兜底（业务/管理人员场景）。
+                # helper 内部先复检自有（同样 None）→ DAEMON_BORROW 权限闸 → shared lender。
+                # 命中借用 runtime 即返回（dict 上塞 borrowed 标记供 lease metadata）；
+                # 未命中（无权限 / 无 shared lender）→ 抛原 NoOnlineDaemonError 文案不变。
+                borrowed_rt = await _resolve_borrowed_or_own_runtime(
+                    self._session, workspace_id, user_id, target_provider
+                )
+                rt, borrowed, lender = borrowed_rt
+                if rt is not None:
+                    return _stamp_borrowed_flag(rt, borrowed, lender)
+                raise NoOnlineDaemonError(
+                    workspace_id=workspace_id,
+                    user_id=user_id,
+                    message="工作区未绑定守护进程",
+                )
 
         # task-08: per-member binding now routes via daemon_id + default_agent.
         daemon_id = binding.daemon_id

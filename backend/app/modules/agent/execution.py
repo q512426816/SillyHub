@@ -163,6 +163,11 @@ class MissionExecutionService:
         worktree_path: str | None = None,
         branch: str | None = None,
         worker_prompt: str | None = None,
+        # task-04（2026-08-19-cross-workspace-team-mission / D-001@v2）：
+        # worker 派发到目标工作区（anchor 或 target workspace id）。
+        # NULL = anchor workspace（零回归，单 workspace 模式）；
+        # 非 NULL = 跨 workspace 派发，worktree/provider/placement 全按目标路由。
+        target_workspace_id: uuid.UUID | None = None,
     ) -> uuid.UUID | None:
         """Dispatch a pending mission Worker Run to a daemon.
 
@@ -183,7 +188,16 @@ class MissionExecutionService:
         if run.status != "pending":
             raise ValueError(f"dispatch_worker requires pending Run, got {run.status!r}")
 
-        ws = await self._session.get(Workspace, workspace_id)
+        # task-04（D-001@v2）：effective_target 贯穿 worktree / provider / placement 三段。
+        # NULL = anchor workspace（零回归，单 workspace 模式）；
+        # 非 NULL = 跨 workspace 派发，worktree/provider/placement 全按目标路由。
+        effective_target = target_workspace_id or workspace_id
+        # task-04（D-001@v2 / task-16 review 追补）：把显式 target 落库，供
+        # finalizer.py merge/cleanup 按 (target_workspace_id or anchor) 分组读取。
+        # 单 workspace 模式形参为 None → 列保持 NULL（零回归，mission_schema.py:65）。
+        run.target_workspace_id = target_workspace_id
+
+        ws = await self._session.get(Workspace, effective_target)
         repo_url = ws.repo_url if ws else None
         # task-02（D-009@v1）：caller（路径A）提供 branch 则用其 worktree 分支
         # （作 lease metadata 透传 dispatch_to_daemon，对齐跨仓契约字段名）；
@@ -202,9 +216,9 @@ class MissionExecutionService:
         # ``and not worktree_path``）。⚠️ 路径A 绝不写 run.worktree_branch（D-008，保持 None）。
         if worktree_path:
             root_path = worktree_path
-        # provider must be a daemon-known name ("claude"); fall back when the
-        # workspace hasn't configured default_agent — otherwise daemon rejects
-        # with "unsupported provider: claude_code" (it falls back to agent_type).
+        # task-04（D-001@v2）：provider/model 按目标 workspace（effective_target）的配置。
+        # 非 NULL 目标 → 用目标 workspace 的 default_agent/model；
+        # NULL → 用 anchor workspace 的配置（零回归）。
         provider = (ws.default_agent if ws else None) or "claude"
         model = ws.default_model if ws else None
 
@@ -243,7 +257,7 @@ class MissionExecutionService:
                 log.warning(
                     "mission_worker_worktree_add_failed",
                     run_id=str(run.id),
-                    workspace_id=str(workspace_id),
+                    workspace_id=str(effective_target),
                     sibling_path=sibling_path,
                     error=wt_error,
                 )
@@ -272,10 +286,12 @@ class MissionExecutionService:
         # 约束，team 模式不变）。design §7.4 逐字。
         prompt = worker_prompt if worker_prompt is not None else render_worker_prompt(run)
         try:
+            # task-04（D-001@v2）：dispatch_to_daemon 传 representative_fallback 旗标：
+            # target≠anchor 时旗标开（走代表 binding）；target==anchor 时旗标关（维持 borrow）。
             lease_id = await self._placement.dispatch_to_daemon(
                 run.id,
                 user_id,
-                workspace_id=workspace_id,
+                workspace_id=effective_target,
                 provider=provider,
                 model=model,
                 prompt=prompt,
@@ -285,6 +301,7 @@ class MissionExecutionService:
                 read_only=read_only,
                 tool_config=worker_tool_config(read_only),
                 root_path=root_path,
+                representative_fallback=(effective_target != workspace_id),
             )
         except NoOnlineDaemonError as exc:
             # 诊断 36b9b475：execution 内部统一收敛，不冒泡调用方（原冒泡致

@@ -445,7 +445,7 @@ class TestOrchestratorPromptConstraint:
         await db_session.commit()
         await db_session.refresh(run)
 
-        prompt = render_orchestrator_prompt(mission, run)
+        prompt = await render_orchestrator_prompt(mission, run, db_session)
         # 越权禁令关键词（软约束声明，存在即合规）
         assert "禁止" in prompt, "prompt 必须含越权禁令段"
         assert "dispatch_worker" in prompt

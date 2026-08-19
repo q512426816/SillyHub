@@ -75,6 +75,10 @@ class DispatchWorkerRequest(BaseModel):
     worktree_path: str | None = None
     branch: str | None = None
     worker_prompt: str | None = None
+    # task-08（2026-08-19-cross-workspace-team-mission / §7.2 链路A）：
+    # 跨工作区派发目标工作区。NULL = anchor workspace（零回归单 ws 模式）；
+    # 非 NULL = 指定目标工作区，服务端校验 ∈ scope（含 anchor）。
+    target_workspace_id: uuid.UUID | None = None
 
 
 class WorkerRunResponse(BaseModel):
@@ -156,10 +160,29 @@ class ProgressResponse(BaseModel):
 async def _get_mission(
     session: AsyncSession, workspace_id: uuid.UUID, mission_id: uuid.UUID
 ) -> AgentMission:
-    """取 mission 并校验属于该 workspace。"""
+    """取 mission 并校验属于该 workspace（scope 放宽）。
+
+    task-08（2026-08-19-cross-workspace-team-mission / §7.2 链路A）：
+    - workspace_id == mission.workspace_id（anchor）→ 放行
+    - workspace_id ∈ mission.scope_workspace_ids（scope 包含）→ 放行
+    - scope_workspace_ids 为 NULL/缺省时按 [workspace_id] 处理（P2-2，零回归）
+
+    所有 UUID 比较用 str（scope_workspace_ids 是 JSON 列，存 uuid-hex）。
+    """
     mission = await session.get(AgentMission, mission_id)
-    if mission is None or mission.workspace_id != workspace_id:
+    if mission is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "mission not found")
+
+    # 快速路径：anchor 匹配
+    if mission.workspace_id == workspace_id:
+        return mission
+
+    # scope 校验：workspace_id ∈ scope_workspace_ids（NULL scope 按 [workspace_id]）
+    scope = mission.scope_workspace_ids or [str(mission.workspace_id)]
+    ws_hex = str(workspace_id)
+    if ws_hex not in scope:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "mission not found")
+
     return mission
 
 
@@ -174,10 +197,15 @@ async def _resolve_dispatch_agent_profile(
     ``profile_id`` 为 None（老调用不传）→ 返 None，走兜底链零回归。非空时：
     - 经 ``AgentProfileService.get`` 取 profile（自带三级 visibility 校验；不存在 404 /
       不可见 403 统一转成 400——对主 agent 而言「绑不上」都是请求参数问题）。
-    - 断言可用于本 mission 的 workspace：workspace 级 profile 须
-      ``profile.workspace_id == mission.workspace_id``；private / platform 级放行。
-      不匹配返 400。
+    - 断言可用于本 mission：workspace 级 profile 须
+      ``profile.workspace_id ∈ {anchor} ∪ scope``（P2-1，放宽）；
+      private / platform 级放行。不匹配返 400。
     校验通过返回 profile，由调用方冻结快照落 run。
+
+    task-08（2026-08-19-cross-workspace-team-mission / §7.2 链路A）：
+    - 原 ``== mission.workspace_id`` 在跨 ws worker 绑 target ws profile 时误判 400
+    - 改为 ``profile.workspace_id ∈ {anchor} ∪ scope_workspace_ids``
+    - scope 为 NULL 时按 [workspace_id] 处理（P2-2 零回归）
     """
     if profile_id is None:
         return None
@@ -198,15 +226,15 @@ async def _resolve_dispatch_agent_profile(
             f"agent_profile_id 不可用：{exc.message}",
         ) from exc
 
-    # workspace 级 profile 须属于本 mission 的 workspace；private/platform 级放行。
-    if (
-        profile.visibility == AgentProfileVisibility.WORKSPACE.value
-        and profile.workspace_id != mission.workspace_id
-    ):
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "agent_profile_id 属于其它 workspace，不能用于本 mission",
-        )
+    # workspace 级 profile 须属于 {anchor} ∪ scope（P2-1 放宽）
+    if profile.visibility == AgentProfileVisibility.WORKSPACE.value:
+        scope = mission.scope_workspace_ids or [str(mission.workspace_id)]
+        allowed = {str(mission.workspace_id)} | set(scope)
+        if str(profile.workspace_id) not in allowed:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "agent_profile_id 属于其它 workspace，不能用于本 mission",
+            )
     return profile
 
 
@@ -369,9 +397,29 @@ async def dispatch_worker(
     ``MissionExecutionService.dispatch_worker`` 派 daemon lease。daemon 离线 /
     未绑定时 lease 失败但 run 仍建（pending + error_code=no_online_daemon），
     主 agent 可读 worker 状态决定重派。
+
+    task-08（2026-08-19-cross-workspace-team-mission / §7.2 链路A）：
+    - 新增 target_workspace_id 参数（payload.target_workspace_id）
+    - 服务端校验 target ∈ scope（含 anchor），越界抛 400 mission_target_out_of_scope
+    - 有效 target 传 exec_svc.dispatch_worker 的 target_workspace_id 形参
     """
     mission = await _get_mission(session, workspace_id, mission_id)
     role = payload.role or _DEFAULT_WORKER_ROLE
+
+    # task-08：scope 校验（显式 target_workspace_id ∈ {anchor} ∪ scope）。
+    # 单 workspace 模式 payload.target_workspace_id 为 None → 不传显式 target，
+    # 由 execution.py 使用 anchor workspace 零回归，且 AgentRun.target_workspace_id
+    # 保持 NULL（mission_schema.py:65 契约，task-16 review 追补）。
+    explicit_target = payload.target_workspace_id
+    anchor = mission.workspace_id
+    scope = mission.scope_workspace_ids or [str(anchor)]
+    allowed = {str(anchor)} | set(scope)
+    if explicit_target is not None and str(explicit_target) not in allowed:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "mission_target_out_of_scope: target_workspace_id 不在 mission scope 内",
+        )
+
     # task-10：可选绑 AgentProfile（FR-04）。None → profile=None 走兜底链零回归；
     # 非空 → 校验可见性 + workspace 归属（不可用 / 跨 workspace 返 400，先于建 run）。
     profile = await _resolve_dispatch_agent_profile(
@@ -435,6 +483,9 @@ async def dispatch_worker(
             worktree_path=payload.worktree_path,
             branch=payload.branch,
             worker_prompt=payload.worker_prompt,
+            # task-08：跨工作区派发目标工作区（design §7.2 链路A）。
+            # 单 workspace 模式传 None，保持 target_workspace_id 列 NULL 零回归。
+            target_workspace_id=explicit_target,
         )
     except HostFsDelegateUnavailable:
         # delegate wiring 错误（workspace 无 bound daemon）fail-loud 503

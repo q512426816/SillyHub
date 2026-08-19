@@ -217,13 +217,15 @@ class FinalizerService:
         return found is not None
 
     async def finalize_execute_mission(self, mission_id: uuid.UUID) -> FinalizerMergeResult:
-        """Merge execute Worker worktree branches into workspace root (task-05).
+        """Merge execute Worker worktree branches 按 target_workspace_id 分组（task-11）.
 
-        逐个取 mission 各 worker run 的 ``worktree_branch``（task-03 dispatch 时
-        填值），调 ``HostFsDelegate.git_merge`` 合并到 workspace root（design §5.1
-        步骤5-6）。``ok=True`` → 收 ``merged_branches``；``ok=False`` → 收
-        ``pending_conflicts``（不中断，继续合能合的——design §5.1 步骤6 注释「继续
-        下一个」）。冲突只收集不解决（解决在 task-06 主 agent SDK，design §5.2）。
+        design §4.3 收敛分组公式：
+        1. 取 mission 各 completed worker 的 ``(target_workspace_id, worktree_branch)`` 二元组
+           （target 为 NULL 时回退 mission.workspace_id 即 anchor）。
+        2. 按 target_workspace_id 分组（defaultdict(list)）。
+        3. 每组：resolve Workspace → 逐个 ``git_merge(ws, worker_branch)``；冲突按组独立
+           收集（A 组冲突不挡 B 组合并，pending_conflicts 携带 target_workspace_id）。
+        4. resolve 失败的组 log 跳过不崩其它组（best-effort）。
 
         未注入 delegate 或 worker 无 ``worktree_branch``（老路径 / single mode）→
         返回空结果（``merged_branches=[]`` / ``pending_conflicts=[]``）。caller
@@ -233,6 +235,8 @@ class FinalizerService:
 
         返回 ``FinalizerMergeResult``（task-06 / task-07 消费契约）。
         """
+        from collections import defaultdict
+
         merged_branches: list[str] = []
         pending_conflicts: list[dict[str, Any]] = []
 
@@ -250,20 +254,32 @@ class FinalizerService:
                 pending_conflicts=pending_conflicts,
             )
 
-        # 取 mission 各 completed worker 的 worktree_branch（task-03 填值）。
-        # None（未用 worktree 隔离，老路径）跳过 merge（design §9）。
-        branch_stmt = select(AgentRun.worktree_branch).where(
+        # 取 mission 各 completed worker 的 (target_workspace_id, worktree_branch) 二元组
+        # （task-03 dispatch 时填 worktree_branch，task-01/04 填 target_workspace_id）。
+        # target_workspace_id 为 NULL 时回退到 mission.workspace_id（anchor，零回归）。
+        mission = await self._session.get(AgentMission, mission_id)
+        if mission is None:
+            log.warning(
+                "finalizer_execute_mission_unresolved_skip_merge",
+                mission_id=str(mission_id),
+            )
+            return FinalizerMergeResult(
+                merged_branches=merged_branches,
+                pending_conflicts=pending_conflicts,
+            )
+        anchor_workspace_id = mission.workspace_id
+
+        branch_stmt = select(
+            AgentRun.target_workspace_id,
+            AgentRun.worktree_branch,
+        ).where(
             AgentRun.mission_id == mission_id,
             AgentRun.status == "completed",
             AgentRun.worktree_branch.is_not(None),
         )
-        branches = [
-            b
-            for b in (await self._session.execute(branch_stmt)).scalars().all()
-            if b  # 防御：DB 非空约束外的空字符串
-        ]
+        rows = (await self._session.execute(branch_stmt)).all()
 
-        if not branches:
+        if not rows:
             log.info(
                 "finalizer_execute_no_worktree_branches",
                 mission_id=str(mission_id),
@@ -274,70 +290,97 @@ class FinalizerService:
                 pending_conflicts=pending_conflicts,
             )
 
-        # resolve workspace（git_merge 需要 Workspace 入参走 RPC）。
-        mission = await self._session.get(AgentMission, mission_id)
-        workspace: Workspace | None = None
-        if mission is not None:
-            workspace = await self._session.get(Workspace, mission.workspace_id)
-        if workspace is None:
-            log.warning(
-                "finalizer_execute_workspace_unresolved_skip_merge",
-                mission_id=str(mission_id),
-                branch_count=len(branches),
-            )
-            return FinalizerMergeResult(
-                merged_branches=merged_branches,
-                pending_conflicts=pending_conflicts,
-            )
+        # 按 target_workspace_id 分组：NULL 回退 anchor，各组的 (target_ws, branch) 列表
+        grouped: dict[uuid.UUID, list[tuple[uuid.UUID, str]]] = defaultdict(list)
+        for target_ws, branch in rows:
+            effective_target = target_ws or anchor_workspace_id
+            grouped[effective_target].append((effective_target, branch))
 
-        # 逐个合并：ok=True 收 merged；ok=False（conflict 或 error）收 conflicts，
-        # 不中断继续下一个（design §5.1 步骤6「继续合能合的」）。
-        for branch in branches:
-            try:
-                result = await self._host_fs_delegate.git_merge(workspace, worker_branch=branch)
-            except Exception as exc:  # delegate 异常（非 degraded dict）兜底
+        # 每组独立合并：resolve Workspace → 逐个 git_merge
+        for target_ws_id, branches_tuple in grouped.items():
+            # resolve 该组的 Workspace（失败跳过该组不崩其它组）
+            ws: Workspace | None = await self._session.get(Workspace, target_ws_id)
+            if ws is None or not ws.root_path:
                 log.warning(
-                    "finalizer_execute_git_merge_exception",
+                    "finalizer_execute_workspace_unresolved_skip_group",
                     mission_id=str(mission_id),
-                    worker_branch=branch,
-                    error=str(exc),
+                    target_workspace_id=str(target_ws_id),
+                    branch_count=len(branches_tuple),
                 )
-                pending_conflicts.append(
-                    {"file": None, "marker_lines": [], "branch": branch, "error": str(exc)}
-                )
+                # 该组所有 branch 标记冲突（error 字段说明原因）
+                for _, branch in branches_tuple:
+                    pending_conflicts.append(
+                        {
+                            "file": None,
+                            "marker_lines": [],
+                            "branch": branch,
+                            "error": f"workspace {target_ws_id} unresolved",
+                            "target_workspace_id": str(target_ws_id),
+                        }
+                    )
                 continue
-            if not isinstance(result, dict):
-                log.warning(
-                    "finalizer_execute_git_merge_bad_result",
-                    mission_id=str(mission_id),
-                    worker_branch=branch,
-                    result_type=type(result).__name__,
-                )
-                continue
-            if result.get("ok") is True:
-                merged_branches.append(branch)
-                log.info(
-                    "finalizer_execute_branch_merged",
-                    mission_id=str(mission_id),
-                    worker_branch=branch,
-                    merged_files=result.get("merged_files", []),
-                )
-            else:
-                conflicts = result.get("conflicts") or []
-                pending_conflicts.extend(conflicts)
-                log.info(
-                    "finalizer_execute_branch_conflict",
-                    mission_id=str(mission_id),
-                    worker_branch=branch,
-                    conflict_count=len(conflicts),
-                    error=result.get("error"),
-                )
+
+            # 逐个合并该组的 branch：ok=True 收 merged；ok=False 收 conflicts（携带 target）
+            for _, branch in branches_tuple:
+                try:
+                    result = await self._host_fs_delegate.git_merge(ws, worker_branch=branch)
+                except Exception as exc:  # delegate 异常（非 degraded dict）兜底
+                    log.warning(
+                        "finalizer_execute_git_merge_exception",
+                        mission_id=str(mission_id),
+                        target_workspace_id=str(target_ws_id),
+                        worker_branch=branch,
+                        error=str(exc),
+                    )
+                    pending_conflicts.append(
+                        {
+                            "file": None,
+                            "marker_lines": [],
+                            "branch": branch,
+                            "error": str(exc),
+                            "target_workspace_id": str(target_ws_id),
+                        }
+                    )
+                    continue
+                if not isinstance(result, dict):
+                    log.warning(
+                        "finalizer_execute_git_merge_bad_result",
+                        mission_id=str(mission_id),
+                        target_workspace_id=str(target_ws_id),
+                        worker_branch=branch,
+                        result_type=type(result).__name__,
+                    )
+                    continue
+                if result.get("ok") is True:
+                    merged_branches.append(branch)
+                    log.info(
+                        "finalizer_execute_branch_merged",
+                        mission_id=str(mission_id),
+                        target_workspace_id=str(target_ws_id),
+                        worker_branch=branch,
+                        merged_files=result.get("merged_files", []),
+                    )
+                else:
+                    conflicts = result.get("conflicts") or []
+                    # 每条冲突携带 target_workspace_id（前端分组展示）
+                    for cf in conflicts:
+                        cf["target_workspace_id"] = str(target_ws_id)
+                    pending_conflicts.extend(conflicts)
+                    log.info(
+                        "finalizer_execute_branch_conflict",
+                        mission_id=str(mission_id),
+                        target_workspace_id=str(target_ws_id),
+                        worker_branch=branch,
+                        conflict_count=len(conflicts),
+                        error=result.get("error"),
+                    )
 
         log.info(
             "finalizer_execute_merge_done",
             mission_id=str(mission_id),
             merged=len(merged_branches),
             conflicts=len(pending_conflicts),
+            group_count=len(grouped),
             has_patch=has_patch,
         )
         return FinalizerMergeResult(
@@ -346,45 +389,36 @@ class FinalizerService:
         )
 
     async def cleanup_mission(self, mission_id: uuid.UUID) -> dict[str, Any]:
-        """全合并成功后逐个清各 worker worktree 副本 + 复用既有 patch artifact（task-07）。
+        """全合并成功后按 target_workspace_id 分组清 worktree 副本（task-12）.
 
         仅在 task-06 ``converge_mission`` 判定「全成功」（无 pending_conflicts /
         无 needs_manual）时被调用——失败路径副本保留供人工排查（design §9 / X-003，
-        caller 控制不调本方法）。合并后立即清理，无 GC 机制（D-005）。
+        caller 控制不调本方法）。合并后立即清理，无 GC 机制（D-005）.
 
-        逻辑（design §5.1 步骤7-8）：
+        逻辑（design §4.3 / D-011）：
         1. 未注入 delegate（既有调用方）→ 返回空结果，零回归（design §9）。
-        2. resolve mission / workspace；workspace 缺 → 不崩，返回空。
-        3. 采 patch artifact：**复用 task-04 既有采集**（``collect_completed_artifacts``
+        2. 采 patch artifact：**复用 task-04 既有采集**（``collect_completed_artifacts``
            在 converge 前已把各 worker ``diff_summary`` 采成 ``kind=patch`` artifact），
            取首个 patch artifact id（避免新读 diff 方法，task-07 授权）；无则 None。
-        4. 取 mission 各 completed worker 的 ``worktree_branch``，按 D-001@v2 公式
-           算 ``sibling_path = resolve_root_path_for_daemon(ws.root_path)
-           + /.worktrees/ + run.id[:8]``（与 task-03 ``execution.dispatch_worker``
+        3. 取 mission 各 completed worker 的 ``(run_id, target_workspace_id)`` 二元组
+           （target 为 NULL 时回退 mission.workspace_id 即 anchor）。
+        4. 按 target_workspace_id 分组（defaultdict(list)）——每组共享一个 Workspace。
+        5. 每组：resolve Workspace → 逐个 ``git_worktree_remove(ws, sibling_path)``；
+           sibling_path 按 D-001@v2 公式算（``resolve_root_path_for_daemon(ws.root_path)
+           + /.worktrees/ + run.id[:8]``，与 task-03 ``execution.dispatch_worker``
            一致——否则清不掉副本）。
-        5. 逐个 ``delegate.git_worktree_remove(ws, sibling_path=...)``；``ok=True`` 收
-           ``cleaned``；``ok=False`` / 异常记日志不中断（best-effort，design §5.1
-           步骤8 全清意图；副本残留不阻塞 mission 收尾）。
+        6. resolve 失败的组 log 跳过不崩其它组（best-effort，对齐 task-11）。
+        7. 全 NULL target 退化单组（单 ws 零回归）。
 
         返回 ``{cleaned: [sibling_path...], patch_artifact_id: UUID | None}``
         （task-06 ``converge_mission`` 消费契约）。
         """
+        from collections import defaultdict
+
         # 未注入 delegate → 零回归（既有调用方 / converge_mission_for_completed_run）。
         if self._host_fs_delegate is None:
             log.info(
                 "finalizer_cleanup_no_delegate_skip",
-                mission_id=str(mission_id),
-            )
-            return {"cleaned": [], "patch_artifact_id": None}
-
-        # resolve workspace（git_worktree_remove 需要 Workspace 入参走 RPC）。
-        mission = await self._session.get(AgentMission, mission_id)
-        workspace: Workspace | None = None
-        if mission is not None:
-            workspace = await self._session.get(Workspace, mission.workspace_id)
-        if mission is None or workspace is None or not workspace.root_path:
-            log.warning(
-                "finalizer_cleanup_workspace_unresolved_skip",
                 mission_id=str(mission_id),
             )
             return {"cleaned": [], "patch_artifact_id": None}
@@ -399,17 +433,29 @@ class FinalizerService:
         )
         patch_artifact_id = (await self._session.execute(patch_stmt)).scalars().first()
 
-        # 取 mission 各 completed worker 的 worktree_branch + run.id（算 sibling_path）。
-        # task-03 dispatch_worker 填 worktree_branch = "workers/<run.id[:8]>"，sibling_path
-        # 独立按 run.id 算（不依赖 branch 字符串解析，更鲁棒）。
-        worker_stmt = select(AgentRun.id).where(
+        # 取 mission 各 completed worker 的 (run_id, target_workspace_id) 二元组
+        # （task-03 dispatch 时填 target_workspace_id，task-01 增加列）。
+        # target_workspace_id 为 NULL 时回退到 mission.workspace_id（anchor）。
+        mission = await self._session.get(AgentMission, mission_id)
+        if mission is None:
+            log.warning(
+                "finalizer_cleanup_mission_unresolved_skip",
+                mission_id=str(mission_id),
+            )
+            return {"cleaned": [], "patch_artifact_id": patch_artifact_id}
+        anchor_workspace_id = mission.workspace_id
+
+        worker_stmt = select(
+            AgentRun.id,
+            AgentRun.target_workspace_id,
+        ).where(
             AgentRun.mission_id == mission_id,
             AgentRun.status == "completed",
             AgentRun.worktree_branch.is_not(None),
         )
-        worker_run_ids = list((await self._session.execute(worker_stmt)).scalars().all())
+        rows = (await self._session.execute(worker_stmt)).all()
 
-        if not worker_run_ids:
+        if not rows:
             log.info(
                 "finalizer_cleanup_no_worktree_branches",
                 mission_id=str(mission_id),
@@ -417,52 +463,77 @@ class FinalizerService:
             )
             return {"cleaned": [], "patch_artifact_id": patch_artifact_id}
 
-        # 宿主机原生 base（与 task-03 dispatch_worker 同款容器→宿主改写）。
-        base_root = resolve_root_path_for_daemon(workspace.root_path)
+        # 按 target_workspace_id 分组：NULL 回退 anchor，各组的 [(run_id, target_ws)] 列表
+        grouped: dict[uuid.UUID, list[tuple[uuid.UUID, uuid.UUID | None]]] = defaultdict(list)
+        for run_id, target_ws in rows:
+            effective_target = target_ws or anchor_workspace_id
+            grouped[effective_target].append((run_id, target_ws))
 
+        # 每组独立清理：resolve Workspace → 逐个 git_worktree_remove
         cleaned: list[str] = []
-        for run_id in worker_run_ids:
-            sibling_path = f"{base_root}/.worktrees/{str(run_id)[:8]}"
-            try:
-                result = await self._host_fs_delegate.git_worktree_remove(
-                    workspace, sibling_path=sibling_path
-                )
-            except Exception as exc:
-                # delegate 异常兜底：不崩，该副本不计 cleaned，继续清其他
-                # （design §9 兼容 — cleanup 不阻塞 mission 收尾）。
+        for target_ws_id, run_tuples in grouped.items():
+            # resolve 该组的 Workspace（失败跳过该组不崩其它组）
+            ws: Workspace | None = await self._session.get(Workspace, target_ws_id)
+            if ws is None or not ws.root_path:
                 log.warning(
-                    "finalizer_cleanup_git_worktree_remove_exception",
+                    "finalizer_cleanup_workspace_unresolved_skip_group",
                     mission_id=str(mission_id),
-                    run_id=str(run_id),
-                    sibling_path=sibling_path,
-                    error=str(exc),
+                    target_workspace_id=str(target_ws_id),
+                    run_count=len(run_tuples),
                 )
+                # 该组所有 run 的 worktree 跳过（best-effort，对齐 task-11）
                 continue
-            if isinstance(result, dict) and result.get("ok") is True:
-                cleaned.append(sibling_path)
-                log.info(
-                    "finalizer_cleanup_worktree_removed",
-                    mission_id=str(mission_id),
-                    run_id=str(run_id),
-                    sibling_path=sibling_path,
-                )
-            else:
-                # ok=False（RPC degraded / git 错）→ 记失败，继续清其他（best-effort）。
-                err = result.get("error") if isinstance(result, dict) else "bad_result"
-                log.warning(
-                    "finalizer_cleanup_worktree_remove_failed",
-                    mission_id=str(mission_id),
-                    run_id=str(run_id),
-                    sibling_path=sibling_path,
-                    error=err,
-                )
+
+            # 宿主机原生 base（与 task-03 dispatch_worker 同款容器→宿主改写）。
+            base_root = resolve_root_path_for_daemon(ws.root_path)
+
+            # 逐个清理该组的 worktree
+            for run_id, _ in run_tuples:
+                sibling_path = f"{base_root}/.worktrees/{str(run_id)[:8]}"
+                try:
+                    result = await self._host_fs_delegate.git_worktree_remove(
+                        ws, sibling_path=sibling_path
+                    )
+                except Exception as exc:
+                    # delegate 异常兜底：不崩，该副本不计 cleaned，继续清其他
+                    # （design §9 兼容 — cleanup 不阻塞 mission 收尾）。
+                    log.warning(
+                        "finalizer_cleanup_git_worktree_remove_exception",
+                        mission_id=str(mission_id),
+                        target_workspace_id=str(target_ws_id),
+                        run_id=str(run_id),
+                        sibling_path=sibling_path,
+                        error=str(exc),
+                    )
+                    continue
+                if isinstance(result, dict) and result.get("ok") is True:
+                    cleaned.append(sibling_path)
+                    log.info(
+                        "finalizer_cleanup_worktree_removed",
+                        mission_id=str(mission_id),
+                        target_workspace_id=str(target_ws_id),
+                        run_id=str(run_id),
+                        sibling_path=sibling_path,
+                    )
+                else:
+                    # ok=False（RPC degraded / git 错）→ 记失败，继续清其他（best-effort）。
+                    err = result.get("error") if isinstance(result, dict) else "bad_result"
+                    log.warning(
+                        "finalizer_cleanup_worktree_remove_failed",
+                        mission_id=str(mission_id),
+                        target_workspace_id=str(target_ws_id),
+                        run_id=str(run_id),
+                        sibling_path=sibling_path,
+                        error=err,
+                    )
 
         log.info(
             "finalizer_cleanup_done",
             mission_id=str(mission_id),
             cleaned=len(cleaned),
-            attempted=len(worker_run_ids),
+            attempted=sum(len(runs) for runs in grouped.values()),
             patch_artifact_id=str(patch_artifact_id) if patch_artifact_id else None,
+            group_count=len(grouped),
         )
         return {"cleaned": cleaned, "patch_artifact_id": patch_artifact_id}
 

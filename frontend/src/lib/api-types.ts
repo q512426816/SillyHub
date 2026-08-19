@@ -2436,6 +2436,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/projects/{project_id}/missions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Project Missions
+         * @description 列出项目下的 mission（按 created_at 倒序，分页，design §7.1 / FR-04）。
+         *
+         *     鉴权同 POST（项目经理/超管）。
+         *     返回 MissionResponse 列表（过滤 mission.project_id == project_id），复用
+         *     _mission_to_response 并扩展 workspace_name / workspace_type / scope 概要字段。
+         */
+        get: operations["list_project_missions_api_projects__project_id__missions_get"];
+        put?: never;
+        /**
+         * Create Project Mission
+         * @description 项目维度创建 mission（design §7.1 / FR-04）。
+         *
+         *     鉴权：项目经理或超管（非项目经理 403）。
+         *     校验：scope_workspace_ids ⊆ ppm_project_workspace(project_id)（越界 422）；
+         *           anchor_workspace_id ∈ scope（越界 422）；
+         *           scope 必填 ≥1 去重（项目维度入口强制）。
+         *     预检：scope 内各 ws 至少一条 binding 带 daemon_id（缺的报清单，不阻断）。
+         *     行为：mode 强制 team；project_id 落列；调 team_mission_entry 传 scope。
+         *     anchor 缺省：scope 第一个或 type=backend 优先。
+         */
+        post: operations["create_project_mission_api_projects__project_id__missions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/missions/{mission_id}/dispatch_worker": {
         parameters: {
             query?: never;
@@ -2453,6 +2489,11 @@ export interface paths {
          *     ``MissionExecutionService.dispatch_worker`` 派 daemon lease。daemon 离线 /
          *     未绑定时 lease 失败但 run 仍建（pending + error_code=no_online_daemon），
          *     主 agent 可读 worker 状态决定重派。
+         *
+         *     task-08（2026-08-19-cross-workspace-team-mission / §7.2 链路A）：
+         *     - 新增 target_workspace_id 参数（payload.target_workspace_id）
+         *     - 服务端校验 target ∈ scope（含 anchor），越界抛 400 mission_target_out_of_scope
+         *     - 有效 target 传 exec_svc.dispatch_worker 的 target_workspace_id 形参
          */
         post: operations["dispatch_worker_api_workspaces__workspace_id__missions__mission_id__dispatch_worker_post"];
         delete?: never;
@@ -10034,6 +10075,8 @@ export interface components {
             branch?: string | null;
             /** Worker Prompt */
             worker_prompt?: string | null;
+            /** Target Workspace Id */
+            target_workspace_id?: string | null;
         };
         /**
          * DocumentsSyncOk
@@ -11448,6 +11491,10 @@ export interface components {
             main_agent_config?: {
                 [key: string]: unknown;
             } | null;
+            /** Anchor Workspace Id */
+            anchor_workspace_id?: string | null;
+            /** Scope Workspace Ids */
+            scope_workspace_ids?: string[] | null;
         };
         /** MissionResponse */
         MissionResponse: {
@@ -11484,6 +11531,14 @@ export interface components {
             created_at: string;
             /** Workers */
             workers: components["schemas"]["MissionWorkerRunResponse"][];
+            /** Project Id */
+            project_id?: string | null;
+            /** Scope Workspace Ids */
+            scope_workspace_ids?: string[] | null;
+            /** Workspace Name */
+            workspace_name?: string | null;
+            /** Workspace Type */
+            workspace_type?: string | null;
         };
         /** MissionWorkerRunResponse */
         MissionWorkerRunResponse: {
@@ -11509,6 +11564,10 @@ export interface components {
              * @default []
              */
             artifacts: components["schemas"]["MissionArtifactResponse"][];
+            /** Target Workspace Id */
+            target_workspace_id?: string | null;
+            /** Target Workspace Name */
+            target_workspace_name?: string | null;
         };
         /**
          * ModelErrorDTO
@@ -22400,6 +22459,75 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_project_missions_api_projects__project_id__missions_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_project_mission_api_projects__project_id__missions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MissionCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

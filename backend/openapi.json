@@ -6935,6 +6935,128 @@
         }
       }
     },
+    "/api/projects/{project_id}/missions": {
+      "post": {
+        "tags": [
+          "agent"
+        ],
+        "summary": "Create Project Mission",
+        "description": "项目维度创建 mission（design §7.1 / FR-04）。\n\n鉴权：项目经理或超管（非项目经理 403）。\n校验：scope_workspace_ids ⊆ ppm_project_workspace(project_id)（越界 422）；\n      anchor_workspace_id ∈ scope（越界 422）；\n      scope 必填 ≥1 去重（项目维度入口强制）。\n预检：scope 内各 ws 至少一条 binding 带 daemon_id（缺的报清单，不阻断）。\n行为：mode 强制 team；project_id 落列；调 team_mission_entry 传 scope。\nanchor 缺省：scope 第一个或 type=backend 优先。",
+        "operationId": "create_project_mission_api_projects__project_id__missions_post",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MissionCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MissionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "agent"
+        ],
+        "summary": "List Project Missions",
+        "description": "列出项目下的 mission（按 created_at 倒序，分页，design §7.1 / FR-04）。\n\n鉴权同 POST（项目经理/超管）。\n返回 MissionResponse 列表（过滤 mission.project_id == project_id），复用\n_mission_to_response 并扩展 workspace_name / workspace_type / scope 概要字段。",
+        "operationId": "list_project_missions_api_projects__project_id__missions_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Project Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MissionResponse"
+                  },
+                  "title": "Response List Project Missions Api Projects  Project Id  Missions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/missions/{mission_id}/dispatch_worker": {
       "post": {
         "tags": [
@@ -6942,7 +7064,7 @@
           "agent-mcp"
         ],
         "summary": "Dispatch Worker",
-        "description": "主 agent 动态派一个 worker run（D-002@v2）。\n\n建 AgentRun(role 从 payload 或 preset 对应条目, status=pending) + 调\n``MissionExecutionService.dispatch_worker`` 派 daemon lease。daemon 离线 /\n未绑定时 lease 失败但 run 仍建（pending + error_code=no_online_daemon），\n主 agent 可读 worker 状态决定重派。",
+        "description": "主 agent 动态派一个 worker run（D-002@v2）。\n\n建 AgentRun(role 从 payload 或 preset 对应条目, status=pending) + 调\n``MissionExecutionService.dispatch_worker`` 派 daemon lease。daemon 离线 /\n未绑定时 lease 失败但 run 仍建（pending + error_code=no_online_daemon），\n主 agent 可读 worker 状态决定重派。\n\ntask-08（2026-08-19-cross-workspace-team-mission / §7.2 链路A）：\n- 新增 target_workspace_id 参数（payload.target_workspace_id）\n- 服务端校验 target ∈ scope（含 anchor），越界抛 400 mission_target_out_of_scope\n- 有效 target 传 exec_svc.dispatch_worker 的 target_workspace_id 形参",
         "operationId": "dispatch_worker_api_workspaces__workspace_id__missions__mission_id__dispatch_worker_post",
         "parameters": [
           {
@@ -31286,6 +31408,18 @@
               }
             ],
             "title": "Worker Prompt"
+          },
+          "target_workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Workspace Id"
           }
         },
         "type": "object",
@@ -34894,6 +35028,33 @@
               }
             ],
             "title": "Main Agent Config"
+          },
+          "anchor_workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchor Workspace Id"
+          },
+          "scope_workspace_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Workspace Ids"
           }
         },
         "type": "object",
@@ -34984,6 +35145,55 @@
             },
             "type": "array",
             "title": "Workers"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "scope_workspace_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Workspace Ids"
+          },
+          "workspace_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Name"
+          },
+          "workspace_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Type"
           }
         },
         "type": "object",
@@ -35077,6 +35287,29 @@
             "type": "array",
             "title": "Artifacts",
             "default": []
+          },
+          "target_workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Workspace Id"
+          },
+          "target_workspace_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Workspace Name"
           }
         },
         "type": "object",

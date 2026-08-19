@@ -1167,6 +1167,8 @@ export class HubClient {
       worktree_path?: string;
       branch?: string;
       worker_prompt?: string;
+      // task-10：跨工作区派发目标工作区 ID（可选，缺省用 anchor）
+      target_workspace_id?: string;
     },
   ): Promise<Record<string, unknown>> {
     const payload: Record<string, unknown> = { objective: body.objective };
@@ -1178,6 +1180,8 @@ export class HubClient {
     if (body.worktree_path !== undefined) payload.worktree_path = body.worktree_path;
     if (body.branch !== undefined) payload.branch = body.branch;
     if (body.worker_prompt !== undefined) payload.worker_prompt = body.worker_prompt;
+    // task-10：跨工作区派发，undefined → backend None → 缺省用 anchor workspace
+    if (body.target_workspace_id !== undefined) payload.target_workspace_id = body.target_workspace_id;
     return this._request<Record<string, unknown>>(
       'POST',
       `/api/workspaces/${encodeURIComponent(workspaceId)}/missions/${encodeURIComponent(missionId)}/dispatch_worker`,

@@ -140,6 +140,25 @@ describe('mcp-server: 5 tool 注册', () => {
     }
   });
 
+  it('dispatch_worker inputSchema 含可选 target_workspace_id（task-10）', async () => {
+    const { client } = makeMockClient();
+    const { mcpClient, close } = await connect(client);
+    try {
+      const tools = await mcpClient.listTools();
+      const tool = tools.tools.find((t) => t.name === 'dispatch_worker');
+      expect(tool).toBeDefined();
+      const schema = tool?.inputSchema as {
+        properties?: Record<string, unknown>;
+        required?: string[];
+      };
+      expect(schema?.properties).toHaveProperty('target_workspace_id');
+      // target_workspace_id 是可选字段
+      expect(schema?.required).not.toContain('target_workspace_id');
+    } finally {
+      await close();
+    }
+  });
+
   it('report_progress inputSchema 含必填 run_id/message（非 note）', async () => {
     const { client } = makeMockClient();
     const { mcpClient, close } = await connect(client);
@@ -212,6 +231,7 @@ describe('mcp-server: tool_call 路由到 hub-client 方法', () => {
           agent_type: 'claude_code',
           model: undefined,
           read_only: undefined,
+          target_workspace_id: undefined,
         },
       ]);
       // 回执：backend 响应原样 JSON
@@ -224,6 +244,50 @@ describe('mcp-server: tool_call 路由到 hub-client 方法', () => {
         lease_id: null,
         error_code: null,
       });
+    } finally {
+      await close();
+    }
+  });
+
+  it('dispatch_worker 带 target_workspace_id → body 含 target_workspace_id', async () => {
+    const { client, calls } = makeMockClient();
+    spyMethod(client, calls.dispatchWorker, 'dispatchWorker', {
+      id: 'run-2',
+      status: 'pending',
+      lease_id: null,
+      error_code: null,
+    });
+    const { mcpClient, close } = await connect(client);
+    try {
+      const result = await mcpClient.callTool({
+        name: 'dispatch_worker',
+        arguments: {
+          workspace_id: 'ws-1',
+          mission_id: 'mis-1',
+          objective: 'cross-ws task',
+          target_workspace_id: 'ws-target',
+        },
+      });
+      expect(calls.dispatchWorker).toHaveLength(1);
+      expect(calls.dispatchWorker[0]).toEqual([
+        'ws-1',
+        'mis-1',
+        {
+          objective: 'cross-ws task',
+          role: undefined,
+          agent_type: undefined,
+          model: undefined,
+          read_only: undefined,
+          worktree_path: undefined,
+          branch: undefined,
+          worker_prompt: undefined,
+          target_workspace_id: 'ws-target',
+        },
+      ]);
+      expect(result.isError).toBeFalsy();
+      const block = result.content[0] as { type: string; text: string };
+      const receipt = JSON.parse(block.text);
+      expect(receipt.id).toBe('run-2');
     } finally {
       await close();
     }
