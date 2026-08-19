@@ -9,6 +9,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.modules.workspace.constants import WorkspaceTypeLiteral
+
 WorkspaceStatusLiteral = Literal["pending", "active", "archived", "deleted"]
 # spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy，D-001/D-004）。
 # daemon-client workspace 创建时用户可选；决定源项目已有 .sillyspec 如何进入平台。
@@ -95,10 +97,15 @@ class WorkspaceCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     slug: str | None = Field(default=None, max_length=100)
     root_path: str = Field(min_length=1, max_length=4096)
-    # Component metadata fields (all optional, for parsed workspaces)
+    # Component metadata fields
     component_key: str | None = Field(default=None, max_length=100)
-    type: str | None = Field(default=None, max_length=50)
+    # 工作区类型：8 值受控词表必填（D-002@v1，change 2026-08-18-workspace-role-type）。
+    # Literal 校验让非法值在 Pydantic 层 422，并进 OpenAPI enum（前端 gen:types 消费）。
+    type: WorkspaceTypeLiteral
     role: str | None = Field(default=None, max_length=100)
+    # 工作区用途说明（FR-03）：可空长文本，service.create 透传落 Workspace.description
+    # （列由 task-02 migration 添加）。
+    description: str | None = Field(default=None, max_length=2000)
     repo_url: str | None = Field(default=None)
     default_branch: str | None = Field(default="main", max_length=100)
     # Workspace-level default agent provider (FR-01/FR-02, change
@@ -149,8 +156,11 @@ class WorkspaceUpdate(BaseModel):
     slug: str | None = Field(default=None, max_length=100)
     root_path: str | None = Field(default=None, min_length=1, max_length=4096)
     component_key: str | None = Field(default=None, max_length=100)
-    type: str | None = Field(default=None, max_length=50)
+    # 工作区类型 omit 不改 / null 清空（D-005@v1）；值域 8 值词表，非法值 422。
+    type: WorkspaceTypeLiteral | None = None
     role: str | None = Field(default=None, max_length=100)
+    # description: omit 不改 / null 清空（与 default_agent 同 exclude_unset 模式）。
+    description: str | None = Field(default=None, max_length=2000)
     repo_url: str | None = Field(default=None)
     default_branch: str | None = Field(default=None, max_length=100)
     # default_agent: omit to keep, null to clear, string to set (exclude_unset).
@@ -194,8 +204,13 @@ class WorkspaceRead(BaseModel):
     status: WorkspaceStatusLiteral
     # Component metadata fields
     component_key: str | None
+    # 读路径不校验存量（design §9）：存量非空 type 可能是映射不上的历史值，
+    # 保持 str | None 原样返回；仅写入与查询参数走 Literal 校验。
     type: str | None
     role: str | None
+    # 工作区用途说明（FR-03）：模型列由 task-02 落地；本字段先以 default=None
+    # 兜底，列存在后 from_attributes 自动读到真实值。
+    description: str | None = None
     repo_url: str | None
     default_branch: str | None
     default_agent: str | None
@@ -287,12 +302,18 @@ class BindWorkspaceRequest(BaseModel):
 
 
 class WorkspaceBrief(BaseModel):
-    """项目侧查看关联工作区的摘要(FR-02 展示 name/status/type)。"""
+    """项目侧查看关联工作区的摘要(展示 name/status/type + role/description 定位信息)。
+
+    FR-08(change 2026-08-18-workspace-role-type)：补 role 与 description，
+    项目侧拿到完整定位信息；type 读路径不校验存量(同 WorkspaceRead)。
+    """
 
     workspace_id: uuid.UUID
     name: str
     status: str
     type: str | None = None
+    role: str | None = None
+    description: str | None = None
 
 
 class PpmProjectBrief(BaseModel):

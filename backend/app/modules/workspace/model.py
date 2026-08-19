@@ -11,7 +11,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, String, Uuid, text
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, String, Text, Uuid, text
 from sqlmodel import Field
 
 from app.models.base import BaseModel
@@ -74,6 +74,12 @@ class Workspace(BaseModel, table=True):
     role: str | None = Field(
         default=None,
         sa_column=Column(String(100), nullable=True),
+    )
+    # task-02（2026-08-18-workspace-role-type）：工作区用途说明（FR-03）。
+    # Text 可空，无长度上限约束（schema 层 max 2000，DB 层留宽裕）。
+    description: str | None = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
     )
     repo_url: str | None = Field(
         default=None,

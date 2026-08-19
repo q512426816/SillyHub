@@ -247,3 +247,62 @@ describe("WorkspaceCard daemon 徽标 + 整卡点击 (task-07)", () => {
     expect(onActivate).not.toHaveBeenCalled();
   });
 });
+
+// task-06（2026-08-18-workspace-role-type / FR-04）：卡片名字区渲染工作区类型徽标。
+// NULL→「未分类」灰徽标；8 值词表内→中文标签；未知非空（存量脏数据/废弃旧值）→
+// 原值灰徽标不崩（design §9 兼容策略）。
+describe("WorkspaceCard 工作区类型徽标 (task-06)", () => {
+  it("type=null：渲染「未分类」灰徽标（shrink-0 不被长名挤没）", () => {
+    render(
+      <WorkspaceCard
+        workspace={mkWorkspace({
+          id: "ws-type-null",
+          name: "a-very-long-workspace-name-that-truncates",
+          type: null,
+        })}
+        onChanged={() => {}}
+        onEditAlias={() => {}}
+      />,
+    );
+    const badge = screen.getByText("未分类");
+    expect(badge).toBeInTheDocument();
+    // 徽标与标题同处一行（名字行容器）。
+    const heading = screen.getByRole("heading", { level: 3 });
+    expect(heading.parentElement).toContainElement(badge);
+    // 灰阶兜底配色（区别于已知值的 -700 档）。
+    expect(badge.className).toContain("text-zinc-500");
+    expect(badge.className).toContain("shrink-0");
+  });
+
+  it("type=已知词表值：渲染对应中文标签 + 词表配色", () => {
+    render(
+      <WorkspaceCard
+        workspace={mkWorkspace({ id: "ws-type-known", type: "frontend-code" })}
+        onChanged={() => {}}
+        onEditAlias={() => {}}
+      />,
+    );
+    const badge = screen.getByText("前端代码");
+    expect(badge).toBeInTheDocument();
+    // 词表配色（badgeClass=border-sky-200 bg-sky-50 text-sky-700）。
+    expect(badge.className).toContain("border-sky-200");
+    expect(badge.className).toContain("bg-sky-50");
+    expect(badge.className).toContain("text-sky-700");
+    // 未分类兜底不出现。
+    expect(screen.queryByText("未分类")).not.toBeInTheDocument();
+  });
+
+  it("type=未知非空值：原值灰徽标渲染不崩（存量脏数据/废弃 daemon-client）", () => {
+    render(
+      <WorkspaceCard
+        workspace={mkWorkspace({ id: "ws-type-unknown", type: "daemon-client" })}
+        onChanged={() => {}}
+        onEditAlias={() => {}}
+      />,
+    );
+    // 原值直出 + 灰阶兜底配色。
+    const badge = screen.getByText("daemon-client");
+    expect(badge).toBeInTheDocument();
+    expect(badge.className).toContain("text-zinc-500");
+  });
+});

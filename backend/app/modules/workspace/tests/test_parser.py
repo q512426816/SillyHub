@@ -33,6 +33,7 @@ def test_normal_parse(tmp_path: Path) -> None:
             "name: Backend API\n"
             "type: service\n"
             "role: api\n"
+            "description: 订单域后端服务\n"
             "path: backend\n"
             "repo_url: https://github.com/example/backend\n"
             "default_branch: main\n"
@@ -75,8 +76,13 @@ def test_normal_parse(tmp_path: Path) -> None:
 
     backend = ws_map["backend"]
     assert backend.name == "Backend API"
-    assert backend.type == "service"
+    # task-03 归一语义（D-003@v1）：yaml type=service 经 YAML_TYPE_NORMALIZE_MAP
+    # 归一为词表值 backend-code（原断言 "service" 是归一行为引入前的旧语义）。
+    assert backend.type == "backend-code"
     assert backend.role == "api"
+    assert backend.description == "订单域后端服务"
+    # description 是已知键，不落 extra
+    assert "description" not in backend.extra
     assert backend.path == "backend"
     assert backend.repo_url == "https://github.com/example/backend"
     assert backend.default_branch == "main"
@@ -270,6 +276,7 @@ def test_parsed_workspace_dataclass_fields() -> None:
         name="Test",
         type=None,
         role=None,
+        description=None,
         path=None,
         repo_url=None,
         default_branch=None,
@@ -282,6 +289,45 @@ def test_parsed_workspace_dataclass_fields() -> None:
     )
     assert ws.component_key == "test"
     assert ws.tech_stack == []
+
+
+# ── task-03（2026-08-18-workspace-role-type）：type 归一 + description 透传 ──
+
+
+def test_type_normalization_mapped_unknown_none(tmp_path: Path) -> None:
+    """type 归一（D-003@v1）：明确映射收编、未知值保留原值、缺失保持 None。
+
+    frontend → frontend-code（map 命中）；library 未知原样；（无 type 键）None。
+    """
+    projects = tmp_path / "projects"
+    _write_yaml(projects, "fe.yaml", "id: fe\nname: FE\ntype: frontend\n")
+    _write_yaml(projects, "lib.yaml", "id: lib\nname: Lib\ntype: library\n")
+    _write_yaml(projects, "bare.yaml", "id: bare\nname: Bare\n")
+
+    result = WorkspaceParser().parse(tmp_path)
+
+    ws_map = {w.component_key: w for w in result.workspaces}
+    assert ws_map["fe"].type == "frontend-code"
+    assert ws_map["lib"].type == "library"  # 映射不上保留原值，不强改 other
+    assert ws_map["bare"].type is None  # None 不查表
+
+
+def test_description_passthrough_and_not_in_extra(tmp_path: Path) -> None:
+    """description 透传进 ParsedWorkspace，且不落 extra dict。"""
+    projects = tmp_path / "projects"
+    _write_yaml(
+        projects,
+        "a.yaml",
+        "id: a\nname: A\ntype: docs\ndescription:  业务文档集 \n",
+    )
+
+    result = WorkspaceParser().parse(tmp_path)
+
+    ws = result.workspaces[0]
+    assert ws.description == "业务文档集"  # _opt_str 去首尾空白
+    assert "description" not in ws.extra
+    # 顺手验 docs → business-doc 归一
+    assert ws.type == "business-doc"
 
 
 def test_invalid_relation_entry_not_dict(tmp_path: Path) -> None:

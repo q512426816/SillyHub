@@ -38,6 +38,7 @@ async def test_create_daemon_client_skips_local_scan(db_session) -> None:
         WorkspaceCreate(
             name="Client Project",
             root_path="/remote/client/path/that/does/not/exist",
+            type="other",
             daemon_id=daemon.id,
         ),
         created_by=user_id,
@@ -65,6 +66,7 @@ async def test_create_daemon_client_creates_empty_spec_workspace(db_session) -> 
         WorkspaceCreate(
             name="Client 2",
             root_path="/remote/x",
+            type="other",
             daemon_id=daemon.id,
         ),
         created_by=user_id,
@@ -123,11 +125,11 @@ def test_workspace_create_daemon_id_is_optional() -> None:
     daemon_id 可选（不传时 create 不建 member binding 行，由后续 init / scan 补）。
     """
     # 不传 daemon_id：合法（仅落 workspace + 空 spec）
-    payload = WorkspaceCreate(name="x", root_path="/x")
+    payload = WorkspaceCreate(name="x", root_path="/x", type="other")
     assert payload.daemon_id is None
 
     # 传 daemon_id：合法
-    payload2 = WorkspaceCreate(name="y", root_path="/y", daemon_id=uuid.uuid4())
+    payload2 = WorkspaceCreate(name="y", root_path="/y", type="other", daemon_id=uuid.uuid4())
     assert payload2.daemon_id is not None
 
 
@@ -165,6 +167,7 @@ async def test_create_daemon_client_writes_member_binding_for_daemon_id(db_sessi
         WorkspaceCreate(
             name="Daemon Project",
             root_path="/remote/daemon/proj",
+            type="other",
             daemon_id=daemon.id,
         ),
         created_by=user_id,
@@ -191,7 +194,7 @@ async def test_create_without_daemon_id_skips_member_binding(db_session) -> None
     """
     service = WorkspaceService(db_session)
     ws = await service.create(
-        WorkspaceCreate(name="No Daemon", root_path="/remote/no-daemon"),
+        WorkspaceCreate(name="No Daemon", root_path="/remote/no-daemon", type="other"),
         created_by=None,
     )
     assert ws.status == "active"
@@ -228,6 +231,7 @@ async def test_create_daemon_client_slug_conflict_raises_slug_duplicate(db_sessi
         WorkspaceCreate(
             name="Dup Name",
             root_path="/remote/first",
+            type="other",
             daemon_id=daemon1.id,
         ),
         created_by=user_id,
@@ -242,6 +246,7 @@ async def test_create_daemon_client_slug_conflict_raises_slug_duplicate(db_sessi
             WorkspaceCreate(
                 name="Dup Name",
                 root_path="/remote/second",
+                type="other",
                 daemon_id=daemon2.id,
             ),
             created_by=user_id,
@@ -294,6 +299,7 @@ async def test_create_rejects_daemon_owned_by_other_user(db_session) -> None:
             WorkspaceCreate(
                 name="Hijack",
                 root_path="/remote/hijack",
+                type="other",
                 daemon_id=daemon.id,
             ),
             created_by=owner_id,

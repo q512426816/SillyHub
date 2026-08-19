@@ -26,6 +26,8 @@ class ComponentRead(BaseModel):
     path: str | None = None
     type: str | None = None
     role: str | None = None
+    # task-03（2026-08-18-workspace-role-type FR-07）：yaml description 透传供目录展示。
+    description: str | None = None
     tech_stack: list[str] = Field(default_factory=list)
     status: str = "active"
 
@@ -45,6 +47,7 @@ def _to_component(pw: ParsedWorkspace) -> ComponentRead:
         path=pw.path,
         type=pw.type,
         role=pw.role,
+        description=pw.description,
         tech_stack=list(pw.tech_stack),
         status=pw.status,
     )

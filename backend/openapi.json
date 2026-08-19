@@ -549,7 +549,7 @@
           "workspace"
         ],
         "summary": "List Workspaces",
-        "description": "List workspaces with server-side filter + pagination (task-05 / FR-01/02/04).\n\n平台管理员：全量（allowed_workspace_ids=None），可按 user_id 过滤 created_by。\n普通账号：allowed_workspace_ids 限制可见集合，user_id 参数被忽略。",
+        "description": "List workspaces with server-side filter + pagination (task-05 / FR-01/02/04).\n\n平台管理员：全量（allowed_workspace_ids=None），可按 user_id 过滤 created_by。\n普通账号：allowed_workspace_ids 限制可见集合，user_id 参数被忽略。\n\nchange 2026-08-18-workspace-role-type：``?type=`` 枚举化（D-002@v1），新增\n``?unclassified=true``（type IS NULL 谓词，D-005@v1）；两者同传 422——\n``?type=`` 等值匹配表达不了 NULL，语义互斥。",
         "operationId": "list_workspaces_api_workspaces_get",
         "parameters": [
           {
@@ -588,15 +588,38 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string",
-                  "maxLength": 50
+                  "enum": [
+                    "frontend-code",
+                    "backend-code",
+                    "fullstack",
+                    "business-doc",
+                    "submodule",
+                    "deploy-ops",
+                    "design-asset",
+                    "other"
+                  ],
+                  "type": "string"
                 },
                 {
                   "type": "null"
                 }
               ],
+              "description": "工作区类型（8 值受控词表，非法值/旧值 422）",
               "title": "Type"
-            }
+            },
+            "description": "工作区类型（8 值受控词表，非法值/旧值 422）"
+          },
+          {
+            "name": "unclassified",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "只列 type 为空（未分类）的工作区；与 type 互斥",
+              "default": false,
+              "title": "Unclassified"
+            },
+            "description": "只列 type 为空（未分类）的工作区；与 type 互斥"
           },
           {
             "name": "status",
@@ -27032,6 +27055,17 @@
             "type": "integer",
             "title": "Turn Count"
           },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          },
           "author": {
             "$ref": "#/components/schemas/ChangeSessionAuthor"
           },
@@ -29537,6 +29571,17 @@
               }
             ],
             "title": "Role"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
           },
           "tech_stack": {
             "items": {
@@ -46517,6 +46562,18 @@
             "type": "string",
             "format": "uuid",
             "title": "Agent Run Id"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
           }
         },
         "type": "object",
@@ -52364,6 +52421,28 @@
               }
             ],
             "title": "Type"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
           }
         },
         "type": "object",
@@ -52373,7 +52452,7 @@
           "status"
         ],
         "title": "WorkspaceBrief",
-        "description": "项目侧查看关联工作区的摘要(FR-02 展示 name/status/type)。"
+        "description": "项目侧查看关联工作区的摘要(展示 name/status/type + role/description 定位信息)。\n\nFR-08(change 2026-08-18-workspace-role-type)：补 role 与 description，\n项目侧拿到完整定位信息；type 读路径不校验存量(同 WorkspaceRead)。"
       },
       "WorkspaceCreate": {
         "properties": {
@@ -52414,14 +52493,16 @@
             "title": "Component Key"
           },
           "type": {
-            "anyOf": [
-              {
-                "type": "string",
-                "maxLength": 50
-              },
-              {
-                "type": "null"
-              }
+            "type": "string",
+            "enum": [
+              "frontend-code",
+              "backend-code",
+              "fullstack",
+              "business-doc",
+              "submodule",
+              "deploy-ops",
+              "design-asset",
+              "other"
             ],
             "title": "Type"
           },
@@ -52436,6 +52517,18 @@
               }
             ],
             "title": "Role"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
           },
           "repo_url": {
             "anyOf": [
@@ -52551,7 +52644,8 @@
         "type": "object",
         "required": [
           "name",
-          "root_path"
+          "root_path",
+          "type"
         ],
         "title": "WorkspaceCreate",
         "description": "Request body for ``POST /api/workspaces``.\n\nEither ``slug`` is provided explicitly, or the server derives one from\n``name``. We only validate format here — uniqueness is enforced by the DB."
@@ -52894,6 +52988,17 @@
             ],
             "title": "Role"
           },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
           "repo_url": {
             "anyOf": [
               {
@@ -53212,7 +53317,16 @@
             "anyOf": [
               {
                 "type": "string",
-                "maxLength": 50
+                "enum": [
+                  "frontend-code",
+                  "backend-code",
+                  "fullstack",
+                  "business-doc",
+                  "submodule",
+                  "deploy-ops",
+                  "design-asset",
+                  "other"
+                ]
               },
               {
                 "type": "null"
@@ -53231,6 +53345,18 @@
               }
             ],
             "title": "Role"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 2000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
           },
           "repo_url": {
             "anyOf": [

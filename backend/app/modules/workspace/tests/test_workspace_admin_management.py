@@ -244,7 +244,11 @@ async def test_list_filter_q_type_status_limit_offset(
 ) -> None:
     admin, user_a, _ = await _bootstrap_admin_and_normal_users(db_session)
     await _create_workspace_row(
-        db_session, created_by=user_a.id, name="Alpha-WS", ws_type="web", status="active"
+        db_session,
+        created_by=user_a.id,
+        name="Alpha-WS",
+        ws_type="frontend-code",
+        status="active",
     )
     await _create_workspace_row(
         db_session, created_by=user_a.id, name="beta-ws", ws_type="api", status="active"
@@ -256,16 +260,19 @@ async def test_list_filter_q_type_status_limit_offset(
     assert body["total"] == 1
     assert body["items"][0]["name"] == "Alpha-WS"
 
-    # type=daemon-client 是已删除的 path_source 值（task-01 删 workspace.path_source），
-    # list_with_owner 不再按 path_source 分流；前端旧值传入时静默忽略，无命中（R-06）。
+    # type=daemon-client 是已废弃旧值——2026-08-18-workspace-role-type task-01 起
+    # ``?type=`` 枚举化（WorkspaceTypeLiteral），旧值直接被 Query 校验拒绝 422
+    # （破坏面如实改写：原断言「静默忽略无命中」，现断言 422）。
     resp = await client.get(
         "/api/workspaces?type=daemon-client", headers=_headers(_token_for(admin))
     )
-    body = resp.json()
-    assert body["total"] == 0
+    assert resp.status_code == 422, resp.text
 
-    # type=web matches Workspace.type
-    resp = await client.get("/api/workspaces?type=web", headers=_headers(_token_for(admin)))
+    # type=frontend-code matches Workspace.type（原 web 旧值经 task-02 存量收编映射
+    # 到 frontend-code，语义等价迁移）
+    resp = await client.get(
+        "/api/workspaces?type=frontend-code", headers=_headers(_token_for(admin))
+    )
     body = resp.json()
     assert body["total"] == 1
     assert body["items"][0]["name"] == "Alpha-WS"

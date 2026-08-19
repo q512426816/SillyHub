@@ -25,6 +25,10 @@
  * 点卡片不 router.push('/workspaces/[id]')，任意工作区（含未绑定，门禁后移）一律：
  *   - message.info('请在电脑端打开')，不导航（daemon 绑定降级为概览可选配置）
  *
+ * task-08 / 2026-08-18-workspace-role-type / design §5.6：类型筛选与创建调用点
+ * 最小收口——筛选换 lib/workspace-types 8 值词表 + 「未分类」（unclassified 谓词），
+ * 创建提交体补必填 type（默认 other，不加移动端新 UI，D-006@v1）；非移动端功能改造。
+ *
  * 桌面对照：app/(dashboard)/workspaces/page.tsx（列表/筛选/创建/别名/绑定/daemon 徽标）。
  * 设计依据：.sillyspec/changes/2026-07-22-mobile-app-ui/design.md §5.3 / FR-07 / D-003 / D-006 / D-008。
  *
@@ -52,6 +56,12 @@ import {
   updateWorkspace,
   type Workspace,
 } from "@/lib/workspaces";
+import {
+  UNCLASSIFIED_OPTION,
+  WORKSPACE_TYPE_OPTIONS,
+  workspaceTypeBadge,
+  type WorkspaceType,
+} from "@/lib/workspace-types";
 import { useDaemonStatusMap } from "@/lib/workspace-daemon-status";
 import { STATUS_LABELS, labelOf } from "@/lib/status-labels";
 import { useSession } from "@/stores/session";
@@ -59,15 +69,6 @@ import { cn } from "@/lib/utils";
 
 // task-11 / FR-07：服务端分页页大小（与桌面 page.tsx PAGE_SIZE 一致）。
 const PAGE_SIZE = 12;
-
-// 类型筛选 + 展示标签（对齐桌面 page.tsx 类型筛选项）。
-const TYPE_FILTER_OPTIONS = [
-  { label: "全部类型", value: "" },
-  { label: "Daemon 客户端", value: "daemon-client" },
-];
-const TYPE_LABELS: Record<string, string> = {
-  "daemon-client": "Daemon 客户端",
-};
 
 // 状态筛选（对齐桌面 page.tsx 状态筛选项）。
 const STATUS_FILTER_OPTIONS = [
@@ -105,7 +106,11 @@ export default function WorkspacesMobilePage() {
 
   // 筛选状态（对齐桌面 page.tsx）。
   const [query, setQuery] = useState("");
-  const [typeFilter, setTypeFilter] = useState("");
+  // task-08 / 2026-08-18-workspace-role-type / D-005@v1：类型筛选换 8 值受控词表 +
+  // 「未分类」（UNCLASSIFIED 语义）。null=全部 / "unclassified"=type IS NULL（走
+  // ?unclassified=true，不传 type）/ 8 值词表之一=?type= 等值匹配。旧值 daemon-client
+  // 已废弃删除（破坏面收口，design §5.6）。
+  const [typeFilter, setTypeFilter] = useState<WorkspaceType | "unclassified" | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
   const [ownerUserId, setOwnerUserId] = useState<string | null>(null);
   const [userOptions, setUserOptions] = useState<UserRead[]>([]);
@@ -127,7 +132,10 @@ export default function WorkspacesMobilePage() {
     try {
       const { items: list, total: count } = await listWorkspaces({
         q: query.trim() || undefined,
-        type: typeFilter || undefined,
+        // task-08 / D-005@v1：未分类走 unclassified 谓词且不传 type（互斥，同传 422）；
+        // 具体类型走 type 等值匹配；null=全部（两参都不传）。
+        type: typeFilter && typeFilter !== "unclassified" ? typeFilter : undefined,
+        unclassified: typeFilter === "unclassified" ? true : undefined,
         status: statusFilter || undefined,
         user_id: isPlatformAdmin ? ownerUserId ?? undefined : undefined,
         limit: PAGE_SIZE,
@@ -166,8 +174,8 @@ export default function WorkspacesMobilePage() {
 
   // 改任一筛选 → 回到第 1 页（对齐桌面 updateFilter）。
   const updateFilter = useCallback(
-    <T,>(setter: (v: T) => void) => (v: T) => {
-      setter(v);
+    <T,>(setter: (_val: T) => void) => (next: T) => {
+      setter(next);
       setPage(0);
     },
     [],
@@ -279,15 +287,25 @@ export default function WorkspacesMobilePage() {
             <div className="grid w-full grid-cols-2 gap-2">
               <select
                 aria-label="筛选类型"
-                value={typeFilter}
-                onChange={(e) => updateFilter(setTypeFilter)(e.target.value)}
+                value={typeFilter ?? ""}
+                onChange={(e) =>
+                  updateFilter(setTypeFilter)(
+                    e.target.value === ""
+                      ? null
+                      : e.target.value === "unclassified"
+                        ? "unclassified"
+                        : (e.target.value as WorkspaceType),
+                  )
+                }
                 className={cn(FILTER_CONTROL_CLASS, "px-2")}
               >
-                {TYPE_FILTER_OPTIONS.map((o) => (
+                <option value="">全部类型</option>
+                {WORKSPACE_TYPE_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
                   </option>
                 ))}
+                <option value="unclassified">{UNCLASSIFIED_OPTION.label}</option>
               </select>
               <select
                 aria-label="筛选状态"
@@ -389,7 +407,10 @@ function WorkspaceMobileCard({
   const ownerName = w.owner
     ? (w.owner.display_name ?? w.owner.email ?? null)
     : null;
-  const typeLabel = w.type ? (TYPE_LABELS[w.type] ?? w.type) : null;
+  // task-08 / 2026-08-18-workspace-role-type：类型文案换词表徽标 helper 统一入口
+  // （词表值→中文标签；NULL/未知原值兜底，见 lib/workspace-types.ts）。
+  const typeBadge = workspaceTypeBadge(w.type);
+  const typeLabel = w.type ? typeBadge.label : null;
 
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
@@ -550,6 +571,9 @@ function WorkspaceCreateSheet({
         root_path: normalizedRoot,
         daemon_id: daemonId,
         spec_strategy: specStrategy,
+        // task-08 / 2026-08-18-workspace-role-type / D-006@v1：Create.type 必填
+        // （8 值词表）——移动端不加类型选择 UI，默认 other（破坏面收口最小实现）。
+        type: "other",
       });
       notify.success("工作区已创建");
       reset();

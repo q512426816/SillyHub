@@ -15,6 +15,12 @@ import { errMessage, useNotify } from "@/lib/errors";
 import {
   createWorkspace,
 } from "@/lib/workspaces";
+// task-06 / 2026-08-18-workspace-role-type / FR-02 / D-002@v1：
+// 创建路径接 8 值受控词表（task-05 产物，禁止组件内重复硬编码）。
+import {
+  WORKSPACE_TYPE_OPTIONS,
+  type WorkspaceType,
+} from "@/lib/workspace-types";
 
 type Phase = "idle" | "creating";
 
@@ -27,6 +33,11 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   const [name, setName] = useState("");
   const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState<string | null>(null);
+  // task-06 / FR-02 / D-002@v1：工作区类型必选——默认空=未选择，
+  // 未选时禁提交 + 提交校验拦（acceptance：未选不可触发创建）。
+  const [wsType, setWsType] = useState<WorkspaceType | "">("");
+  // task-06 / FR-03：描述选填（≤2000 字符，全文留详情页展示）。
+  const [description, setDescription] = useState("");
 
   // daemon-entity-binding task-10/11 补遗：创建对话框从 runtime 维度改为 daemon 实体维度。
   // 下拉展示守护进程实体（含全部 provider），value=inst.id；不再按 runtime 一项一条。
@@ -50,7 +61,8 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   }, []);
 
   const handleCreateDaemonClient = async () => {
-    if (!daemonId || !daemonRootPath) return;
+    // task-06 / FR-02：类型必选校验（按钮禁用为第一道，此处兜底拦路径调用）。
+    if (!wsType || !daemonId || !daemonRootPath) return;
     const normalizedRoot = normalizeClientPath(daemonRootPath);
     setError(null);
     setPhase("creating");
@@ -60,6 +72,9 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
         root_path: normalizedRoot,
         daemon_id: daemonId,
         spec_strategy: specStrategy,
+        // task-06 / FR-02/FR-03：提交体带必选 type + 可选 description。
+        type: wsType,
+        description: description.trim() || null,
       });
       // quick ql-20260803-003-cb34：复用/激活/复活时后端返回 creation_notice，必须显式提示。
       if (ws.creation_notice) {
@@ -149,6 +164,44 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
           )}
           {daemonRootPath && (
             <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="ws-type">
+                工作区类型
+              </label>
+              <select
+                id="ws-type"
+                className="w-full rounded border bg-background px-2 py-1.5 text-sm"
+                value={wsType}
+                onChange={(e) => setWsType(e.target.value as WorkspaceType | "")}
+                disabled={phase === "creating"}
+              >
+                <option value="">— 请选择工作区类型 —</option>
+                {WORKSPACE_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+          {daemonRootPath && (
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-muted-foreground" htmlFor="ws-desc">
+                描述（选填）
+              </label>
+              <textarea
+                id="ws-desc"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="工作区用途说明，如「订单模块前端代码」"
+                maxLength={2000}
+                rows={3}
+                disabled={phase === "creating"}
+                className="w-full resize-y rounded border bg-background px-2 py-1.5 text-sm"
+              />
+            </div>
+          )}
+          {daemonRootPath && (
+            <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground">
                 spec 同步策略（源项目已有 .sillyspec 如何进入平台）
               </label>
@@ -183,7 +236,7 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
               <Button
                 size="sm"
                 onClick={handleCreateDaemonClient}
-                disabled={phase === "creating"}
+                disabled={phase === "creating" || !wsType}
               >
                 {phase === "creating" ? "创建中..." : "创建工作区"}
               </Button>

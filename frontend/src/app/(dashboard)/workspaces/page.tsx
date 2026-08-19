@@ -22,6 +22,13 @@ import {
   updateWorkspace,
   type Workspace,
 } from "@/lib/workspaces";
+// task-06 / 2026-08-18-workspace-role-type / FR-04 / D-005@v1：
+// 筛选下拉接 8 值受控词表 + 「未分类」项（null → ?unclassified=true 谓词）。
+import {
+  UNCLASSIFIED_OPTION,
+  WORKSPACE_TYPE_OPTIONS,
+  type WorkspaceType,
+} from "@/lib/workspace-types";
 import { fetchMyBindings } from "@/lib/workspace-binding";
 // task-07 / FR-06 / R-02：daemon 在线状态聚合（task-03 产物），单数据源供徽标消费。
 import { useDaemonStatusMap } from "@/lib/workspace-daemon-status";
@@ -58,7 +65,10 @@ export default function WorkspacesPage() {
     const t = setTimeout(() => setDebouncedQuery(query), 300);
     return () => clearTimeout(t);
   }, [query]);
-  const [typeFilter, setTypeFilter] = useState("");
+  // task-06 / FR-04 / D-005@v1：类型筛选换 8 值词表 + 「未分类」（UNCLASSIFIED 语义）。
+  // null=全部 / "unclassified"=type IS NULL（走 ?unclassified=true，不传 type）/
+  // 8 值词表之一=?type= 等值匹配（后端 Literal 校验）。旧值 daemon-client 已废弃删除。
+  const [typeFilter, setTypeFilter] = useState<WorkspaceType | "unclassified" | null>(null);
   const [statusFilter, setStatusFilter] = useState("");
   const [ownerUserId, setOwnerUserId] = useState<string | null>(null);
   const [userOptions, setUserOptions] = useState<UserRead[]>([]);
@@ -84,7 +94,10 @@ export default function WorkspacesPage() {
       ] = await Promise.all([
         listWorkspaces({
           q: debouncedQuery.trim() || undefined,
-          type: typeFilter || undefined,
+          // task-06 / D-005@v1：未分类走 unclassified 谓词且不传 type（互斥，同传 422）；
+          // 具体类型走 type 等值匹配；null=全部（两参都不传）。
+          type: typeFilter && typeFilter !== "unclassified" ? typeFilter : undefined,
+          unclassified: typeFilter === "unclassified" ? true : undefined,
           status: statusFilter || undefined,
           user_id: isPlatformAdmin ? ownerUserId ?? undefined : undefined,
           limit: PAGE_SIZE,
@@ -249,12 +262,25 @@ export default function WorkspacesPage() {
           />
           <select
             aria-label="筛选类型"
-            value={typeFilter}
-            onChange={(e) => updateFilter(setTypeFilter)(e.target.value)}
+            value={typeFilter ?? ""}
+            onChange={(e) =>
+              updateFilter(setTypeFilter)(
+                e.target.value === ""
+                  ? null
+                  : e.target.value === "unclassified"
+                    ? "unclassified"
+                    : (e.target.value as WorkspaceType),
+              )
+            }
             className="h-8 rounded border bg-card px-2 text-xs"
           >
             <option value="">全部类型</option>
-            <option value="daemon-client">Daemon 客户端</option>
+            {WORKSPACE_TYPE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+            <option value="unclassified">{UNCLASSIFIED_OPTION.label}</option>
           </select>
           <select
             aria-label="筛选状态"

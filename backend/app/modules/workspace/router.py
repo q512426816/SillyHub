@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_user, require_permission, require_permission_any
 from app.core.db import get_session
+from app.core.errors import AppError
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import allowed_workspace_ids
@@ -23,6 +24,7 @@ from app.modules.workspace.component_catalog_service import (
     ComponentCatalogService,
     ComponentListResponse,
 )
+from app.modules.workspace.constants import WorkspaceTypeLiteral
 from app.modules.workspace.member_runtimes.router import MemberBindingView, _to_view
 from app.modules.workspace.member_runtimes.service import list_my_bindings
 from app.modules.workspace.model import Workspace
@@ -200,7 +202,13 @@ async def list_workspaces(
     user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_READ))],
     include_deleted: Annotated[bool, Query(description="Admin-only flag")] = False,
     q: Annotated[str | None, Query(max_length=200)] = None,
-    workspace_type: Annotated[str | None, Query(alias="type", max_length=50)] = None,
+    workspace_type: Annotated[
+        WorkspaceTypeLiteral | None,
+        Query(alias="type", description="工作区类型（8 值受控词表，非法值/旧值 422）"),
+    ] = None,
+    unclassified: Annotated[
+        bool, Query(description="只列 type 为空（未分类）的工作区；与 type 互斥")
+    ] = False,
     status_filter: Annotated[str | None, Query(alias="status", max_length=20)] = None,
     user_id: Annotated[uuid.UUID | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
@@ -210,7 +218,17 @@ async def list_workspaces(
 
     平台管理员：全量（allowed_workspace_ids=None），可按 user_id 过滤 created_by。
     普通账号：allowed_workspace_ids 限制可见集合，user_id 参数被忽略。
+
+    change 2026-08-18-workspace-role-type：``?type=`` 枚举化（D-002@v1），新增
+    ``?unclassified=true``（type IS NULL 谓词，D-005@v1）；两者同传 422——
+    ``?type=`` 等值匹配表达不了 NULL，语义互斥。
     """
+    if unclassified and workspace_type is not None:
+        raise AppError(
+            "「未分类」筛选与具体类型筛选不能同时使用，请只保留其一。",
+            code="HTTP_422_WORKSPACE_TYPE_UNCLASSIFIED_CONFLICT",
+            http_status=422,
+        )
     service = WorkspaceService(session)
     if user.is_platform_admin:
         rows, total = await service.list_with_owner(
@@ -219,6 +237,7 @@ async def list_workspaces(
             offset=offset,
             q=q,
             workspace_type=workspace_type,
+            unclassified=unclassified,
             status=status_filter,
             user_id=user_id,
             allowed_workspace_ids=None,
@@ -233,6 +252,7 @@ async def list_workspaces(
             offset=offset,
             q=q,
             workspace_type=workspace_type,
+            unclassified=unclassified,
             status=status_filter,
             user_id=None,
             allowed_workspace_ids=allowed,

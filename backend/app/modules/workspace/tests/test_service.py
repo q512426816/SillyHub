@@ -56,7 +56,7 @@ async def test_create_persists_workspace(db_session, tmp_path: Path) -> None:
     root = _make_workspace(tmp_path)
     service = WorkspaceService(db_session)
     ws = await service.create(
-        WorkspaceCreate(name="My Workspace", root_path=str(root)),
+        WorkspaceCreate(name="My Workspace", root_path=str(root), type="other"),
         created_by=None,
     )
     assert ws.id is not None
@@ -69,12 +69,12 @@ async def test_create_duplicate_root_path_returns_existing(db_session, tmp_path:
     root = _make_workspace(tmp_path)
     service = WorkspaceService(db_session)
     first = await service.create(
-        WorkspaceCreate(name="first", root_path=str(root)),
+        WorkspaceCreate(name="first", root_path=str(root), type="other"),
         created_by=None,
     )
     # Creating with same root_path returns the existing workspace
     second = await service.create(
-        WorkspaceCreate(name="second", root_path=str(root)),
+        WorkspaceCreate(name="second", root_path=str(root), type="other"),
         created_by=None,
     )
     assert second.id == first.id
@@ -85,12 +85,12 @@ async def test_create_duplicate_slug(db_session, tmp_path: Path) -> None:
     root_b = _make_workspace(tmp_path, "b")
     service = WorkspaceService(db_session)
     await service.create(
-        WorkspaceCreate(name="name", slug="same-slug", root_path=str(root_a)),
+        WorkspaceCreate(name="name", slug="same-slug", root_path=str(root_a), type="other"),
         created_by=None,
     )
     with pytest.raises(WorkspaceSlugDuplicate):
         await service.create(
-            WorkspaceCreate(name="other", slug="same-slug", root_path=str(root_b)),
+            WorkspaceCreate(name="other", slug="same-slug", root_path=str(root_b), type="other"),
             created_by=None,
         )
 
@@ -100,7 +100,7 @@ async def test_soft_delete_by_non_owner_raises(db_session, tmp_path: Path) -> No
     service = WorkspaceService(db_session)
     owner_id = uuid.uuid4()
     ws = await service.create(
-        WorkspaceCreate(name="ws", root_path=str(root)),
+        WorkspaceCreate(name="ws", root_path=str(root), type="other"),
         created_by=owner_id,
     )
     other_id = uuid.uuid4()
@@ -113,7 +113,7 @@ async def test_soft_delete_by_owner_succeeds(db_session, tmp_path: Path) -> None
     service = WorkspaceService(db_session)
     owner_id = uuid.uuid4()
     ws = await service.create(
-        WorkspaceCreate(name="ws", root_path=str(root)),
+        WorkspaceCreate(name="ws", root_path=str(root), type="other"),
         created_by=owner_id,
     )
     deleted = await service.soft_delete(ws.id, deleted_by=owner_id)
@@ -126,7 +126,7 @@ async def test_soft_delete_by_none_created_by_skips_owner_check(db_session, tmp_
     root = _make_workspace(tmp_path)
     service = WorkspaceService(db_session)
     ws = await service.create(
-        WorkspaceCreate(name="ws", root_path=str(root)),
+        WorkspaceCreate(name="ws", root_path=str(root), type="other"),
         created_by=None,
     )
     deleted = await service.soft_delete(ws.id, deleted_by=uuid.uuid4())
@@ -138,10 +138,12 @@ async def test_list_filters_soft_deleted_by_default(db_session, tmp_path: Path) 
     root_b = _make_workspace(tmp_path, "b")
     service = WorkspaceService(db_session)
     ws_a = await service.create(
-        WorkspaceCreate(name="a", root_path=str(root_a)),
+        WorkspaceCreate(name="a", root_path=str(root_a), type="other"),
         created_by=None,
     )
-    await service.create(WorkspaceCreate(name="b", root_path=str(root_b)), created_by=None)
+    await service.create(
+        WorkspaceCreate(name="b", root_path=str(root_b), type="other"), created_by=None
+    )
     await service.soft_delete(ws_a.id)
 
     items, total = await service.list_()
@@ -156,7 +158,7 @@ async def test_rescan_updates_timestamp(db_session, tmp_path: Path) -> None:
     root = _make_workspace(tmp_path)
     service = WorkspaceService(db_session)
     ws = await service.create(
-        WorkspaceCreate(name="ws", root_path=str(root)),
+        WorkspaceCreate(name="ws", root_path=str(root), type="other"),
         created_by=None,
     )
     original = ws.last_scanned_at
@@ -177,7 +179,7 @@ async def test_get_soft_deleted_raises(db_session, tmp_path: Path) -> None:
     root = _make_workspace(tmp_path)
     service = WorkspaceService(db_session)
     ws = await service.create(
-        WorkspaceCreate(name="x", root_path=str(root)),
+        WorkspaceCreate(name="x", root_path=str(root), type="other"),
         created_by=None,
     )
     await service.soft_delete(ws.id)
@@ -248,14 +250,14 @@ async def test_create_resurrects_soft_deleted_workspace(db_session, tmp_path: Pa
     service = WorkspaceService(db_session)
 
     first = await service.create(
-        WorkspaceCreate(name="Original Name", root_path=str(root)),
+        WorkspaceCreate(name="Original Name", root_path=str(root), type="other"),
         created_by=None,
     )
     original_id = first.id
     await service.soft_delete(first.id)
 
     revived = await service.create(
-        WorkspaceCreate(name="New Name", root_path=str(root)),
+        WorkspaceCreate(name="New Name", root_path=str(root), type="other"),
         created_by=None,
     )
 
@@ -281,20 +283,20 @@ async def test_create_resurrect_conflicts_with_active_slug(db_session, tmp_path:
     service = WorkspaceService(db_session)
 
     ws_a = await service.create(
-        WorkspaceCreate(name="A", slug="shared", root_path=str(root_a)),
+        WorkspaceCreate(name="A", slug="shared", root_path=str(root_a), type="other"),
         created_by=None,
     )
     await service.soft_delete(ws_a.id)
 
     # Now register B with the slug we want to reuse.
     _ws_b = await service.create(
-        WorkspaceCreate(name="B", slug="shared", root_path=str(root_b)),
+        WorkspaceCreate(name="B", slug="shared", root_path=str(root_b), type="other"),
         created_by=None,
     )
 
     # Resurrecting A with the same slug should auto-generate a unique slug
     ws_a_revived = await service.create(
-        WorkspaceCreate(name="A again", slug="shared", root_path=str(root_a)),
+        WorkspaceCreate(name="A again", slug="shared", root_path=str(root_a), type="other"),
         created_by=None,
     )
     assert ws_a_revived.slug.startswith("shared-")

@@ -59,6 +59,7 @@ def test_workspace_create_accepts_default_agent():
     dto = WorkspaceCreate(
         name="x",
         root_path="/tmp/x",
+        type="other",
         default_agent="claude",
         default_model="claude-sonnet-4",
     )
@@ -67,7 +68,7 @@ def test_workspace_create_accepts_default_agent():
 
 
 def test_workspace_create_default_agent_optional():
-    dto = WorkspaceCreate(name="x", root_path="/tmp/x")
+    dto = WorkspaceCreate(name="x", root_path="/tmp/x", type="other")
     assert dto.default_agent is None
     assert dto.default_model is None
 

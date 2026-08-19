@@ -143,6 +143,10 @@ async def list_by_project(
             name=w.name,
             status=w.status,
             type=w.type,
+            role=w.role,
+            # description 列由 task-02 migration 落地；列存在前 getattr 兜底 None
+            # （change 2026-08-18-workspace-role-type task-01 先透传读现有列）。
+            description=getattr(w, "description", None),
         )
         for w in workspaces
     ]

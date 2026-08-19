@@ -27,12 +27,17 @@ from typing import Any
 
 import yaml
 
+from app.modules.workspace.constants import YAML_TYPE_NORMALIZE_MAP
+
 KNOWN_COMPONENT_KEYS = frozenset(
     [
         "id",
         "name",
         "type",
         "role",
+        # task-03（2026-08-18-workspace-role-type）：description 透传进
+        # ParsedWorkspace，不落 extra。
+        "description",
         "path",
         "repo_url",
         "default_branch",
@@ -61,6 +66,8 @@ class ParsedWorkspace:
     name: str
     type: str | None
     role: str | None
+    # task-03：yaml description 透传（FR-07，仅供组件目录展示，不落 Workspace 表）。
+    description: str | None
     path: str | None
     repo_url: str | None
     default_branch: str | None
@@ -241,7 +248,12 @@ class WorkspaceParser:
     ) -> ParsedWorkspace:
         name = str(raw.get("name") or component_key)
         type_ = _opt_str(raw.get("type"))
+        # task-03（D-003@v1）：仅明确映射归一到新词表，映射不上保留原值；
+        # None 保持 None 不查表。归一只到组件目录展示层，不落 Workspace 表（D-004@v1）。
+        if type_ is not None:
+            type_ = YAML_TYPE_NORMALIZE_MAP.get(type_, type_)
         role = _opt_str(raw.get("role"))
+        description = _opt_str(raw.get("description"))
         path = _opt_str(raw.get("path"))
         repo_url = _opt_str(raw.get("repo_url"))
         default_branch = _opt_str(raw.get("default_branch")) or "main"
@@ -274,6 +286,7 @@ class WorkspaceParser:
             name=name,
             type=type_,
             role=role,
+            description=description,
             path=path,
             repo_url=repo_url,
             default_branch=default_branch,

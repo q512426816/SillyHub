@@ -1,4 +1,10 @@
-"""HTTP-level tests for the workspace router."""
+"""HTTP-level tests for the workspace router.
+
+2026-08-18-workspace-role-type task-08：``WorkspaceCreate.type`` 收 8 值受控词表
+必填（D-002@v1），本文件 POST /api/workspaces 请求体统一补 ``type: "other"``
+入参；PATCH 的 ``type: "service"`` 旧值换 ``backend-code``（YAML_TYPE_NORMALIZE_MAP
+语义等价迁移）。均为设计内破坏面如实登记，非为通过而改断言语义。
+"""
 
 from __future__ import annotations
 
@@ -101,7 +107,7 @@ async def test_create_then_list(
 ) -> None:
     create = await client.post(
         "/api/workspaces",
-        json={"name": "Test Space", "root_path": str(workspace_root)},
+        json={"name": "Test Space", "root_path": str(workspace_root), "type": "other"},
         headers=auth_headers,
     )
     assert create.status_code == 201, create.text
@@ -121,7 +127,7 @@ async def test_create_duplicate_returns_existing(
 ) -> None:
     first = await client.post(
         "/api/workspaces",
-        json={"name": "A", "root_path": str(workspace_root)},
+        json={"name": "A", "root_path": str(workspace_root), "type": "other"},
         headers=auth_headers,
     )
     assert first.status_code == 201
@@ -130,7 +136,7 @@ async def test_create_duplicate_returns_existing(
     # Same root_path returns the existing workspace
     second = await client.post(
         "/api/workspaces",
-        json={"name": "B", "root_path": str(workspace_root)},
+        json={"name": "B", "root_path": str(workspace_root), "type": "other"},
         headers=auth_headers,
     )
     assert second.status_code == 201
@@ -145,7 +151,7 @@ async def test_rescan_updates_last_scanned_at(
 
     create = await client.post(
         "/api/workspaces",
-        json={"name": "Rescan Target", "root_path": str(workspace_root)},
+        json={"name": "Rescan Target", "root_path": str(workspace_root), "type": "other"},
         headers=auth_headers,
     )
     workspace_id = create.json()["id"]
@@ -180,7 +186,7 @@ async def test_soft_delete_hides_from_default_list(
 ) -> None:
     create = await client.post(
         "/api/workspaces",
-        json={"name": "Doomed", "root_path": str(workspace_root)},
+        json={"name": "Doomed", "root_path": str(workspace_root), "type": "other"},
         headers=auth_headers,
     )
     workspace_id = create.json()["id"]
@@ -210,7 +216,7 @@ async def test_create_validates_slug_format(
 ) -> None:
     resp = await client.post(
         "/api/workspaces",
-        json={"name": "x", "slug": "Bad Slug!", "root_path": str(workspace_root)},
+        json={"name": "x", "slug": "Bad Slug!", "root_path": str(workspace_root), "type": "other"},
         headers=auth_headers,
     )
     assert resp.status_code == 422
@@ -225,7 +231,7 @@ async def _create_workspace(
     """Helper: create a workspace and return the JSON body."""
     resp = await client.post(
         "/api/workspaces",
-        json={"name": "Patch Target", "root_path": str(workspace_root)},
+        json={"name": "Patch Target", "root_path": str(workspace_root), "type": "other"},
         headers=auth_headers,
     )
     assert resp.status_code == 201, resp.text
@@ -262,7 +268,9 @@ async def test_patch_updates_multiple_fields(
         json={
             "name": "Multi Update",
             "component_key": "backend-api",
-            "type": "service",
+            # 2026-08-18-workspace-role-type：type 收 8 值词表，原 "service" 旧值
+            # 经 YAML_TYPE_NORMALIZE_MAP 语义对应 backend-code（破坏面改写）。
+            "type": "backend-code",
             "role": "api-gateway",
             "tech_stack": ["python", "fastapi", "postgresql"],
             "build_command": "make build",
@@ -274,7 +282,7 @@ async def test_patch_updates_multiple_fields(
     body = resp.json()
     assert body["name"] == "Multi Update"
     assert body["component_key"] == "backend-api"
-    assert body["type"] == "service"
+    assert body["type"] == "backend-code"
     assert body["role"] == "api-gateway"
     assert body["tech_stack"] == ["python", "fastapi", "postgresql"]
     assert body["build_command"] == "make build"
@@ -365,7 +373,7 @@ async def test_patch_slug_conflict_returns_409(
     root1 = _make_workspace(tmp_path, "ws-a")
     resp1 = await client.post(
         "/api/workspaces",
-        json={"name": "WS A", "root_path": str(root1)},
+        json={"name": "WS A", "root_path": str(root1), "type": "other"},
         headers=auth_headers,
     )
     assert resp1.status_code == 201
@@ -376,7 +384,7 @@ async def test_patch_slug_conflict_returns_409(
     root2 = _make_workspace(tmp_path, "ws-b")
     resp2 = await client.post(
         "/api/workspaces",
-        json={"name": "WS B", "root_path": str(root2)},
+        json={"name": "WS B", "root_path": str(root2), "type": "other"},
         headers=auth_headers,
     )
     assert resp2.status_code == 201

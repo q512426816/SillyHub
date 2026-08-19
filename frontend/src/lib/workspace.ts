@@ -26,12 +26,17 @@ export interface PpmProjectBrief {
   project_status: string | null;
 }
 
-/** 项目侧列表项:展示关联的工作区摘要(FR-02)。 */
+/** 项目侧列表项:展示关联的工作区摘要(FR-02)。
+ *  task-07 / FR-08 / 2026-08-18-workspace-role-type:补 role/description
+ *  (与 backend WorkspaceBrief / gen:types 生成 schema 1:1),项目侧关联弹窗
+ *  徽标 title 摘要消费。 */
 export interface WorkspaceBrief {
   workspace_id: string;
   name: string;
   status: string;
   type: string | null;
+  role?: string | null;
+  description?: string | null;
 }
 
 // ── Request DTOs ──

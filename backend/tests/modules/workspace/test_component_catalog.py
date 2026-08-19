@@ -160,3 +160,61 @@ async def test_list_components_server_local_fallback(tmp_path):
 
     assert len(components) == 1
     assert components[0].component_key == "daemon"
+
+
+@pytest.mark.asyncio
+async def test_list_components_type_normalization_and_description(tmp_path):
+    """task-03（FR-07/D-003@v1）：type 归一 + description 透传进 ComponentRead。
+
+    - frontend → frontend-code（明确映射收编）；
+    - component 不在 map 内（平台组件类型），保留原值——恰好验证未知值兜底；
+    - description 透传到 ComponentRead。
+    """
+    ws = _make_ws(tmp_path)
+    spec_ws = MagicMock()
+    spec_ws.strategy = "platform-managed"
+    spec_ws.spec_root = str(tmp_path)
+
+    projects = tmp_path / "projects"
+    _write_project(
+        projects,
+        "webapp.yaml",
+        {
+            "id": "webapp",
+            "name": "Web App",
+            "type": "frontend",
+            "description": "面向用户的主站前端",
+            "path": "webapp",
+        },
+    )
+    _write_project(
+        projects,
+        "platform.yaml",
+        {
+            "id": "platform",
+            "name": "Platform",
+            "type": "component",
+            "role": "platform",
+            "path": "platform",
+        },
+    )
+
+    service = ComponentCatalogService(MagicMock())
+    with (
+        patch.object(WorkspaceService, "get", new_callable=AsyncMock, return_value=ws),
+        patch(
+            "app.modules.spec_workspace.service.SpecWorkspaceService.get",
+            new_callable=AsyncMock,
+            return_value=spec_ws,
+        ),
+    ):
+        components = await service.list_components(ws.id)
+
+    by_key = {c.component_key: c for c in components}
+    # 归一：frontend → frontend-code
+    assert by_key["webapp"].type == "frontend-code"
+    # description 透传
+    assert by_key["webapp"].description == "面向用户的主站前端"
+    # 未知值兜底：component 不在 YAML_TYPE_NORMALIZE_MAP，原样保留不崩
+    assert by_key["platform"].type == "component"
+    assert by_key["platform"].description is None

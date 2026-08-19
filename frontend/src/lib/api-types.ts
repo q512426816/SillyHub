@@ -332,6 +332,10 @@ export interface paths {
          *
          *     平台管理员：全量（allowed_workspace_ids=None），可按 user_id 过滤 created_by。
          *     普通账号：allowed_workspace_ids 限制可见集合，user_id 参数被忽略。
+         *
+         *     change 2026-08-18-workspace-role-type：``?type=`` 枚举化（D-002@v1），新增
+         *     ``?unclassified=true``（type IS NULL 谓词，D-005@v1）；两者同传 422——
+         *     ``?type=`` 等值匹配表达不了 NULL，语义互斥。
          */
         get: operations["list_workspaces_api_workspaces_get"];
         put?: never;
@@ -9295,6 +9299,8 @@ export interface components {
             type?: string | null;
             /** Role */
             role?: string | null;
+            /** Description */
+            description?: string | null;
             /** Tech Stack */
             tech_stack?: string[];
             /**
@@ -15046,10 +15052,7 @@ export interface components {
              * Format: uuid
              */
             agent_run_id: string;
-            /**
-             * Session Id
-             * Format: uuid
-             */
+            /** Session Id */
             session_id?: string | null;
         };
         /** ScanRequest */
@@ -17468,7 +17471,10 @@ export interface components {
         };
         /**
          * WorkspaceBrief
-         * @description 项目侧查看关联工作区的摘要(FR-02 展示 name/status/type)。
+         * @description 项目侧查看关联工作区的摘要(展示 name/status/type + role/description 定位信息)。
+         *
+         *     FR-08(change 2026-08-18-workspace-role-type)：补 role 与 description，
+         *     项目侧拿到完整定位信息；type 读路径不校验存量(同 WorkspaceRead)。
          */
         WorkspaceBrief: {
             /**
@@ -17482,6 +17488,10 @@ export interface components {
             status: string;
             /** Type */
             type?: string | null;
+            /** Role */
+            role?: string | null;
+            /** Description */
+            description?: string | null;
         };
         /**
          * WorkspaceCreate
@@ -17499,10 +17509,15 @@ export interface components {
             root_path: string;
             /** Component Key */
             component_key?: string | null;
-            /** Type */
-            type?: string | null;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "frontend-code" | "backend-code" | "fullstack" | "business-doc" | "submodule" | "deploy-ops" | "design-asset" | "other";
             /** Role */
             role?: string | null;
+            /** Description */
+            description?: string | null;
             /** Repo Url */
             repo_url?: string | null;
             /**
@@ -17664,6 +17679,8 @@ export interface components {
             type: string | null;
             /** Role */
             role: string | null;
+            /** Description */
+            description?: string | null;
             /** Repo Url */
             repo_url: string | null;
             /** Default Branch */
@@ -17751,9 +17768,11 @@ export interface components {
             /** Component Key */
             component_key?: string | null;
             /** Type */
-            type?: string | null;
+            type?: ("frontend-code" | "backend-code" | "fullstack" | "business-doc" | "submodule" | "deploy-ops" | "design-asset" | "other") | null;
             /** Role */
             role?: string | null;
+            /** Description */
+            description?: string | null;
             /** Repo Url */
             repo_url?: string | null;
             /** Default Branch */
@@ -18547,7 +18566,10 @@ export interface operations {
                 /** @description Admin-only flag */
                 include_deleted?: boolean;
                 q?: string | null;
-                type?: string | null;
+                /** @description 工作区类型（8 值受控词表，非法值/旧值 422） */
+                type?: ("frontend-code" | "backend-code" | "fullstack" | "business-doc" | "submodule" | "deploy-ops" | "design-asset" | "other") | null;
+                /** @description 只列 type 为空（未分类）的工作区；与 type 互斥 */
+                unclassified?: boolean;
                 status?: string | null;
                 user_id?: string | null;
                 limit?: number;

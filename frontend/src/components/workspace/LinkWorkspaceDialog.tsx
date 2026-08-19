@@ -9,6 +9,10 @@
  *
  * UI 体系:antd(与 ppm/projects 页 PpmResourceTable 一致,CLAUDE.md 规则 19)。
  * 错误反馈用本地 state + errMessage,不依赖 antd message 静态 API 的 App 包裹。
+ *
+ * task-07 / 2026-08-18-workspace-role-type / FR-06:已关联与可选两侧列表的工作区
+ * 类型从原始字符串改为 workspaceTypeBadge 徽标(NULL/未知灰兜底),li title 带
+ * role/description 摘要(Brief 已补字段,空不带),辅助按角色选工作区。
  */
 import { useCallback, useEffect, useState } from "react";
 import { Modal, Spin, Empty, Tag, Button, Input } from "antd";
@@ -21,6 +25,7 @@ import {
   type WorkspaceBrief,
 } from "@/lib/workspace";
 import { listWorkspaces, type Workspace } from "@/lib/workspaces";
+import { workspaceTypeBadge } from "@/lib/workspace-types";
 
 interface Props {
   open: boolean;
@@ -43,6 +48,21 @@ function statusTag(status: string): { color: string; label: string } {
     default:
       return { color: "default", label: status };
   }
+}
+
+// task-07 / FR-06:行 title 摘要——「角色:xxx 描述:yyy」,两段皆空返回 null
+// (title 不挂,避免悬停弹空 tooltip)。描述截 60 字符,全文在详情页(R-06)。
+function summaryTitle(
+  role: string | null | undefined,
+  description: string | null | undefined,
+): string | null {
+  const parts: string[] = [];
+  if (role?.trim()) parts.push(`角色:${role.trim()}`);
+  if (description?.trim()) {
+    const text = description.trim();
+    parts.push(`描述:${text.length > 60 ? `${text.slice(0, 60)}…` : text}`);
+  }
+  return parts.length > 0 ? parts.join(" ") : null;
 }
 
 export function LinkWorkspaceDialog({ open, projectId, projectName, onClose }: Props) {
@@ -146,17 +166,21 @@ export function LinkWorkspaceDialog({ open, projectId, projectName, onClose }: P
             <ul className="divide-y rounded border">
               {linked.map((w) => {
                 const tag = statusTag(w.status);
+                const badge = workspaceTypeBadge(w.type);
                 return (
                   <li
                     key={w.workspace_id}
                     className="flex items-center justify-between px-3 py-2"
+                    title={summaryTitle(w.role, w.description) ?? undefined}
                   >
                     <span className="flex items-center gap-2 text-sm">
                       <span className="font-medium">{w.name}</span>
                       <Tag color={tag.color}>{tag.label}</Tag>
-                      {w.type && (
-                        <span className="text-xs text-muted-foreground">{w.type}</span>
-                      )}
+                      <span
+                        className={`inline-flex h-5 shrink-0 items-center rounded border px-1.5 text-[10px] font-semibold ${badge.className}`}
+                      >
+                        {badge.label}
+                      </span>
                     </span>
                     <Button
                       size="small"
@@ -195,17 +219,21 @@ export function LinkWorkspaceDialog({ open, projectId, projectName, onClose }: P
             <ul className="divide-y overflow-y-auto rounded border max-h-[220px]">
               {available.map((w) => {
                 const tag = statusTag(w.status);
+                const badge = workspaceTypeBadge(w.type);
                 return (
                   <li
                     key={w.id}
                     className="flex items-center justify-between px-3 py-2"
+                    title={summaryTitle(w.role, w.description) ?? undefined}
                   >
                     <span className="flex items-center gap-2 text-sm">
                       <span className="font-medium">{w.name}</span>
                       <Tag color={tag.color}>{tag.label}</Tag>
-                      {w.type && (
-                        <span className="text-xs text-muted-foreground">{w.type}</span>
-                      )}
+                      <span
+                        className={`inline-flex h-5 shrink-0 items-center rounded border px-1.5 text-[10px] font-semibold ${badge.className}`}
+                      >
+                        {badge.label}
+                      </span>
                     </span>
                     <Button
                       size="small"

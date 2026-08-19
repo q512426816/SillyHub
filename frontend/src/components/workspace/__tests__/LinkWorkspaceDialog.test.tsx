@@ -6,6 +6,10 @@
  *  - 点「绑定」→ linkWorkspace(projectId, wsId) → 刷新列表
  *  - 点「解绑」→ unlinkWorkspace(projectId, wsId) → 刷新列表
  * mock task-09 的 API 客户端,验证调用参数 + 列表反映。
+ *
+ * task-07 / 2026-08-18-workspace-role-type / FR-06:补类型徽标断言——
+ * 已关联/可选两侧列表按 workspaceTypeBadge 渲染(词表值→中文标签,如
+ * frontend-code→「前端代码」;null→「未分类」灰兜底),li title 带 role/description 摘要。
  */
 import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -106,6 +110,83 @@ describe("LinkWorkspaceDialog（task-12 / 项目侧关联工作区）", () => {
     expect(await screen.findByText("工作区A")).toBeInTheDocument();
     // 有「绑定」按钮(antd 两字汉字按钮自动插空格「绑 定」→ 用正则容错)
     expect(screen.getByRole("button", { name: /绑\s*定/ })).toBeInTheDocument();
+    // task-07 / FR-06:makeWorkspace 默认 type=null → 可选列表渲染「未分类」灰徽标
+    expect(screen.getByText("未分类")).toBeInTheDocument();
+  });
+
+  // ── task-07 / FR-06:类型徽标 + title 摘要 ───────────────────────────────────
+
+  it("已关联列表:type=frontend-code 渲染「前端代码」徽标,title 带 role/description 摘要", async () => {
+    workspaceApi.listProjectWorkspaces.mockResolvedValue([
+      {
+        workspace_id: "ws-1",
+        name: "工作区A",
+        status: "active",
+        type: "frontend-code",
+        role: "订单模块",
+        description: "订单域前端界面与交互",
+      },
+    ]);
+    workspacesApi.listWorkspaces.mockResolvedValue({ items: [], total: 0 });
+
+    render(
+      <LinkWorkspaceDialog
+        open
+        projectId="proj-1"
+        projectName="项目甲"
+        onClose={() => {}}
+      />,
+    );
+
+    // 词表值 → 中文标签徽标;原始字符串 frontend-code 不再直接出现
+    expect(await screen.findByText("前端代码")).toBeInTheDocument();
+    expect(screen.queryByText("frontend-code")).not.toBeInTheDocument();
+    // li title 摘要(两段拼接)
+    expect(
+      screen.getByTitle("角色:订单模块 描述:订单域前端界面与交互"),
+    ).toBeInTheDocument();
+  });
+
+  it("已关联列表:type=null 渲染「未分类」徽标,role/description 皆空不带 title", async () => {
+    workspaceApi.listProjectWorkspaces.mockResolvedValue([
+      { workspace_id: "ws-1", name: "工作区A", status: "active", type: null },
+    ]);
+    workspacesApi.listWorkspaces.mockResolvedValue({ items: [], total: 0 });
+
+    render(
+      <LinkWorkspaceDialog
+        open
+        projectId="proj-1"
+        projectName="项目甲"
+        onClose={() => {}}
+      />,
+    );
+
+    expect(await screen.findByText("未分类")).toBeInTheDocument();
+    // 已关联行 li:两段摘要皆空 → 不挂 title
+    const unbindBtn = screen.getByRole("button", { name: /解\s*绑/ });
+    const li = unbindBtn.closest("li");
+    expect(li).not.toHaveAttribute("title");
+  });
+
+  it("可选列表:type=backend-code 渲染「后端代码」徽标", async () => {
+    workspaceApi.listProjectWorkspaces.mockResolvedValue([]);
+    workspacesApi.listWorkspaces.mockResolvedValue({
+      items: [makeWorkspace({ id: "ws-1", name: "工作区A", type: "backend-code" })],
+      total: 1,
+    });
+
+    render(
+      <LinkWorkspaceDialog
+        open
+        projectId="proj-1"
+        projectName="项目甲"
+        onClose={() => {}}
+      />,
+    );
+
+    expect(await screen.findByText("后端代码")).toBeInTheDocument();
+    expect(screen.queryByText("未分类")).not.toBeInTheDocument();
   });
 
   it("点「绑定」→ linkWorkspace(proj-1, ws-1) 被调用", async () => {

@@ -16,6 +16,9 @@ import {
   rescanWorkspace,
   type Workspace,
 } from "@/lib/workspaces";
+// task-06 / 2026-08-18-workspace-role-type / FR-04：卡片名区渲染工作区类型徽标
+// （NULL→「未分类」灰、已知值→中文标签、未知非空→原值灰，统一走 badge helper）。
+import { workspaceTypeBadge } from "@/lib/workspace-types";
 import { STATUS_LABELS, labelOf } from "@/lib/status-labels";
 import { cn } from "@/lib/utils";
 
@@ -105,6 +108,9 @@ export function WorkspaceCard({
   // ql-20260702：别名与原名不同时才补显原名，二者同行排版（标题 + 原名）。
   const hasAlias =
     !!workspace.display_alias && workspace.display_alias !== workspace.name;
+  // task-06 / FR-04：类型徽标（布局类 + badgeClass 组合，参照 agent-log-viewer 的
+  // tool-kind 徽标消费惯例——badgeClass 只含配色，布局类由本组件叠加）。
+  const typeBadgeView = workspaceTypeBadge(workspace.type);
   const ownerName = workspace.owner
     ? (workspace.owner.display_name ??
       workspace.owner.email ??
@@ -156,6 +162,16 @@ export function WorkspaceCard({
                 原名 {workspace.name}
               </span>
             ) : null}
+            {/* task-06 / FR-04：类型徽标跟名字同行（shrink-0 防被长名挤没）。 */}
+            <span
+              className={cn(
+                "ml-auto inline-flex h-5 shrink-0 items-center rounded border px-1.5 text-[10px] font-semibold",
+                typeBadgeView.className,
+              )}
+              title={`工作区类型：${typeBadgeView.label}`}
+            >
+              {typeBadgeView.label}
+            </span>
           </div>
           <p className="truncate font-mono text-[11px] text-muted-foreground">
             {workspace.slug}

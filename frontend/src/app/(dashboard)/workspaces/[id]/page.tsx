@@ -13,6 +13,12 @@ import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { WorkspaceDaemonSwitcher } from "@/components/workspace-daemon-switcher";
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { ApiError } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import {
+  WORKSPACE_TYPE_OPTIONS,
+  workspaceTypeBadge,
+  type WorkspaceType,
+} from "@/lib/workspace-types";
 import { listDaemonInstances, listDaemonRuntimes, PROVIDER_META, type DaemonInstanceRead, type DaemonRuntimeRead } from "@/lib/daemon";
 import { listComponents } from "@/lib/components";
 import { listChanges } from "@/lib/changes";
@@ -68,6 +74,50 @@ export default function WorkspaceDetailPage({ params }: Props) {
     return ownerId === currentUserId;
   })();
 
+  // task-07 / 2026-08-18-workspace-role-type / FR-05：基本信息编辑态
+  // （type/role/description，PATCH 保存）。加载回填模式与 default_agent 一致——
+  // load() 成功后从 ws 回填草稿，保存成功 setWorkspace(updated) 刷新本地状态。
+  // typeDraft 存原始 string（WorkspaceRead.type 读路径不校验存量，design §9——
+  // 存量未知旧值要能在下拉里原样显示，词表外值渲染追加「存量值」选项，
+  // 形态对齐本页 default_agent 的离线 provider 追加选项模式）。
+  // role/description 空串即 null（显式清空语义，D-005@v1：omit=不改 / null=清空）。
+  const [typeDraft, setTypeDraft] = useState<string | null>(null);
+  const [roleDraft, setRoleDraft] = useState("");
+  const [descriptionDraft, setDescriptionDraft] = useState("");
+  const [savingInfo, setSavingInfo] = useState(false);
+  // 基本信息编辑态展开开关（默认收起只读展示，点「编辑」展开表单；贴
+  // WorkspaceConfigCard 内联展开的交互形态，页面无独立编辑路由）。
+  const [editingInfo, setEditingInfo] = useState(false);
+
+  const handleSaveBasicInfo = async () => {
+    if (!workspace) return;
+    setSavingInfo(true);
+    setPageError(null);
+    try {
+      const updated = await updateWorkspace(workspaceId, {
+        // type 未变化时省略不发（D-005 omit=不改）——存量未知旧值原样回传会被
+        // 后端 WorkspaceUpdate.type 的 Literal 校验 422 拒收（读不校验/写校验，
+        // design §9），"只改角色/用途"的保存不能被旧 type 拖炸。
+        ...(typeDraft !== (workspace.type ?? null)
+          ? { type: typeDraft as WorkspaceType | null }
+          : {}),
+        role: roleDraft.trim() === "" ? null : roleDraft.trim(),
+        description: descriptionDraft.trim() === "" ? null : descriptionDraft.trim(),
+      });
+      setWorkspace(updated);
+      setEditingInfo(false);
+    } catch (err) {
+      setPageError(err instanceof ApiError ? err.message : "保存基本信息失败");
+    } finally {
+      setSavingInfo(false);
+    }
+  };
+
+  const infoDirty =
+    typeDraft !== (workspace?.type ?? null) ||
+    roleDraft !== (workspace?.role ?? "") ||
+    descriptionDraft !== (workspace?.description ?? "");
+
   const handleSaveDefaultAgent = async () => {
     if (!workspace) return;
     setSavingDefaultAgent(true);
@@ -103,6 +153,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
       setWorkspace(ws);
       setDefaultAgent(ws.default_agent);
       setDefaultModel(ws.default_model);
+      // task-07 / FR-05：基本信息编辑草稿回填（保存后 reload 同样走这里收敛）。
+      setTypeDraft(ws.type ?? null);
+      setRoleDraft(ws.role ?? "");
+      setDescriptionDraft(ws.description ?? "");
       // task-11 / 2026-07-10-remove-server-local-workspace-mode：平台统一
       // daemon-client 语义后，runtime 维度已下沉到 per-member binding，此处
       // boundRuntime 恒 null；runtime 展示由 boundDaemon state 承担
@@ -210,8 +264,41 @@ export default function WorkspaceDetailPage({ params }: Props) {
         </div>
       )}
 
-      {/* Workspace basic info */}
-      <SectionCard title="基本信息">
+      {/* Workspace basic info（task-07 / FR-05：新增类型/角色/用途只读行 + 编辑区） */}
+      <SectionCard
+        title="基本信息"
+        extra={
+          editingInfo ? (
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  // 取消 = 丢弃草稿回填当前值，退回只读态
+                  setTypeDraft(workspace.type ?? null);
+                  setRoleDraft(workspace.role ?? "");
+                  setDescriptionDraft(workspace.description ?? "");
+                  setEditingInfo(false);
+                }}
+                disabled={savingInfo}
+              >
+                取消
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSaveBasicInfo}
+                disabled={savingInfo || !infoDirty}
+              >
+                {savingInfo ? "保存中..." : "保存"}
+              </Button>
+            </div>
+          ) : (
+            <Button size="sm" variant="outline" onClick={() => setEditingInfo(true)}>
+              编辑
+            </Button>
+          )
+        }
+      >
         <dl className="grid grid-cols-[6rem_1fr] gap-y-1 text-xs">
           <WorkspacePathFields
             workspace={workspace}
@@ -223,7 +310,89 @@ export default function WorkspaceDetailPage({ params }: Props) {
           <dd>{formatTs(workspace.created_at)}</dd>
           <dt className="text-muted-foreground">最后扫描</dt>
           <dd>{formatTs(workspace.last_scanned_at)}</dd>
+          {/* 类型/角色/用途：只读态徽标 + 单行截断（R-06），编辑态换下方表单 */}
+          <dt className="text-muted-foreground">类型</dt>
+          <dd>
+            {(() => {
+              const badge = workspaceTypeBadge(workspace.type);
+              return (
+                <span
+                  className={cn(
+                    "inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-semibold",
+                    badge.className,
+                  )}
+                >
+                  {badge.label}
+                </span>
+              );
+            })()}
+          </dd>
+          <dt className="text-muted-foreground">角色</dt>
+          <dd title={workspace.role ?? undefined} className="min-w-0 truncate">
+            {workspace.role || "—"}
+          </dd>
+          <dt className="text-muted-foreground">用途</dt>
+          <dd
+            title={workspace.description ?? undefined}
+            className="min-w-0 truncate"
+          >
+            {workspace.description || "—"}
+          </dd>
         </dl>
+        {editingInfo && (
+          /* 编辑表单：布局类对齐「默认智能体提供方」卡片的 label+控件+保存按钮
+             交互形态（直接可编辑小表单 + 保存，页面无独立编辑路由）。 */
+          <div className="mt-3 space-y-2.5 border-t pt-2.5">
+            <div className="space-y-1">
+              <label className="text-[11px] text-muted-foreground">
+                工作区类型（不选即&ldquo;未分类&rdquo;）
+              </label>
+              <select
+                value={typeDraft ?? ""}
+                onChange={(e) => setTypeDraft(e.target.value === "" ? null : e.target.value)}
+                className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
+              >
+                <option value="">未分类</option>
+                {WORKSPACE_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+                {/* 存量未知旧值：下拉值集合外的当前值,追加原值选项防止 React
+                    select 失配回跳第一项（形态对齐 default_agent 离线追加选项）。 */}
+                {typeDraft && !WORKSPACE_TYPE_OPTIONS.some((o) => o.value === typeDraft) && (
+                  <option value={typeDraft}>{typeDraft}（存量值）</option>
+                )}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] text-muted-foreground">
+                角色（如&ldquo;订单模块&rdquo;，≤100 字符）
+              </label>
+              <input
+                type="text"
+                value={roleDraft}
+                maxLength={100}
+                onChange={(e) => setRoleDraft(e.target.value)}
+                placeholder="描述这个工作区在项目中的角色"
+                className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] text-muted-foreground">
+                用途说明（≤2000 字符）
+              </label>
+              <textarea
+                value={descriptionDraft}
+                maxLength={2000}
+                rows={3}
+                onChange={(e) => setDescriptionDraft(e.target.value)}
+                placeholder="这个工作区的用途说明"
+                className="w-full resize-y rounded border border-input bg-background p-2.5 text-sm focus:border-ring focus:outline-none"
+              />
+            </div>
+          </div>
+        )}
         {/* task-11 / 2026-07-10-remove-server-local-workspace-mode：所有工作区
             均为 daemon-client 语义，WorkspaceDaemonSwitcher 无条件渲染。 */}
         <div className="mt-3 border-t pt-2.5">

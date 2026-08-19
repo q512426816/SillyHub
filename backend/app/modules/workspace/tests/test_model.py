@@ -98,7 +98,9 @@ def test_workspace_create_accepts_component_fields() -> None:
         "name": "test-ws",
         "root_path": "/tmp/test",
         "component_key": "api-gateway",
-        "type": "service",
+        # 2026-08-18-workspace-role-type：type 收 8 值词表（D-002@v1），旧自由值
+        # "service" 已非法；语义等价迁移（yaml 收编映射 service→backend-code）。
+        "type": "backend-code",
         "role": "backend",
         "repo_url": "https://github.com/org/api",
         "default_branch": "develop",
@@ -113,10 +115,14 @@ def test_workspace_create_accepts_component_fields() -> None:
 
 
 def test_workspace_create_component_fields_optional() -> None:
-    """WorkspaceCreate component fields should all be optional. (AC-09)"""
+    """WorkspaceCreate component fields (type 之外) should all be optional. (AC-09)
+
+    2026-08-18-workspace-role-type：type 改必填（D-002@v1），不在可选集合内；
+    其余组件元数据字段（component_key/role/repo_url 等）保持可选。
+    """
     from app.modules.workspace.schema import WorkspaceCreate
 
-    dto = WorkspaceCreate(name="plain-ws", root_path="/tmp/plain")
+    dto = WorkspaceCreate(name="plain-ws", root_path="/tmp/plain", type="other")
     assert dto.component_key is None
     assert dto.tech_stack == []
 

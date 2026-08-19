@@ -500,6 +500,8 @@ async def test_workspace_create_calls_invalidate(
             name="Inv Workspace",
             root_path="/remote/inv/ws",
             daemon_id=daemon.id,
+            # 2026-08-18-workspace-role-type：Create.type 必填（8 值词表，D-002@v1）。
+            type="other",
         ),
         created_by=user_id,
     )

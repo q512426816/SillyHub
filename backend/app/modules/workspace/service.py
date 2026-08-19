@@ -37,6 +37,7 @@ from app.core.logging import get_logger
 from app.core.permission_cache import invalidate_all_permissions
 from app.modules.agent.model import AgentRun
 from app.modules.auth.model import Role, User, UserWorkspaceRole
+from app.modules.workspace.constants import WorkspaceTypeLiteral
 from app.modules.workspace.model import (
     AgentRunWorkspace,
     Workspace,
@@ -209,6 +210,9 @@ class WorkspaceService:
             component_key=payload.component_key,
             type=payload.type,
             role=payload.role,
+            # description 列由 task-02 migration 落地；SQLModel 构造器对未声明
+            # kwarg 静默忽略（列存在前不炸），列落地后自动持久化。
+            description=payload.description,
             repo_url=payload.repo_url,
             default_branch=payload.default_branch,
             default_agent=payload.default_agent,
@@ -355,7 +359,8 @@ class WorkspaceService:
         limit: int = 100,
         offset: int = 0,
         q: str | None = None,
-        workspace_type: str | None = None,
+        workspace_type: WorkspaceTypeLiteral | None = None,
+        unclassified: bool = False,
         status: str | None = None,
         user_id: uuid.UUID | None = None,
         allowed_workspace_ids: list[uuid.UUID] | None = None,
@@ -366,8 +371,10 @@ class WorkspaceService:
         - ``allowed_workspace_ids == []``: 普通账号无可读 workspace，直接返回空。
         - ``user_id``: 精确匹配 created_by（仅平台管理员传入；普通账号不传）。
         - ``q``: 大小写不敏感匹配 display_alias/name/slug/root_path/component_key。
-        - ``workspace_type``: 精确匹配 type（server-local/daemon-client 等 path_source
-          值已不再分流，传入时静默忽略——前端选项已删，R-06）。
+        - ``workspace_type``: 精确匹配 type（8 值词表，router 层已枚举校验；
+          change 2026-08-18-workspace-role-type 起非法值/旧值在 Query 层 422）。
+        - ``unclassified``: type IS NULL 谓词（D-005@v1，"未分类"筛选；与
+          workspace_type 互斥由 router 层 422 保证）。
         - ``status``: 精确匹配 status。
         """
         if allowed_workspace_ids is not None and len(allowed_workspace_ids) == 0:
@@ -393,9 +400,10 @@ class WorkspaceService:
                 )
             )
         if workspace_type:
-            # path_source 分流已删（2026-07-10-remove-server-local-workspace-mode），
-            # 一律按 type 列过滤；前端旧值（server-local/daemon-client）静默忽略无命中。
             filters.append(col(Workspace.type) == workspace_type)
+        if unclassified:
+            # "未分类" = type IS NULL（D-005@v1）；等值匹配表达不了 NULL。
+            filters.append(col(Workspace.type).is_(None))
         if status:
             filters.append(col(Workspace.status) == status)
 
