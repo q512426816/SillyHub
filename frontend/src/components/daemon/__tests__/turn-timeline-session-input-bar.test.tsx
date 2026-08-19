@@ -17,6 +17,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { TurnTimeline, type SessionTurnView } from "../turn-timeline";
 import { SessionInputBar } from "../session-input-bar";
 import type { SessionPermissionRequest } from "@/lib/daemon";
+import type { TurnSegment } from "@/components/daemon/session-log-assembler";
 
 vi.mock("@/components/ui/markdown-text", () => ({
   MarkdownText: ({ content }: { content: string }) => (
@@ -210,6 +211,161 @@ describe("TurnTimeline（task-13 抽取共享子组件）", () => {
     expect(screen.getByText(/上游超时/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /重新发送/ }));
     expect(onResend).toHaveBeenCalledWith("用户提问");
+  });
+});
+
+describe("TurnTimeline v2 段模型渲染（task-06 / 2026-08-19-session-stream-ux）", () => {
+  /** 构造 tool 段（默认 Read/src/a.ts 已完成，overrides 覆盖 running/子代理等场景）。 */
+  function makeToolSegment(
+    id: string,
+    startedAt: number,
+    overrides: Partial<Extract<TurnSegment, { kind: "tool" }>> = {},
+  ): TurnSegment {
+    return {
+      kind: "tool",
+      id,
+      raw: JSON.stringify({
+        tool: "Read",
+        args: { file_path: "src/a.ts" },
+        tool_use_id: id,
+        success: true,
+      }),
+      status: "ok",
+      toolName: "Read",
+      primary: "src/a.ts",
+      startedAt,
+      endedAt: startedAt + 500,
+      children: [],
+      subagentType: null,
+      ...overrides,
+    };
+  }
+
+  it("segments 分段渲染：all（进度）显完整段线，conversation 只显文本段（FR-01）", () => {
+    const segments: TurnSegment[] = [
+      { kind: "text", id: "text:main:m1:1", text: "第一段答复", streaming: false, startedAt: 1_000 },
+      { kind: "thinking", id: "thinking:t1", text: "思考一下", streaming: false, ts: 2_000 },
+      makeToolSegment("tool:call_1", 3_000),
+      { kind: "text", id: "text:main:m1:2", text: "第二段答复", streaming: true, startedAt: 4_000 },
+    ];
+    const turn = makeTurn({ segments, status: "completed", output: "第一段答复第二段答复" });
+
+    // all（进度语义）：完整段时间线（两段文本独立成段 + 思考折叠行 + 工具行）
+    const { unmount } = setupTimeline({ turns: [turn], viewMode: "all" });
+    expect(screen.getByText("第一段答复")).toBeInTheDocument();
+    expect(screen.getByText("第二段答复")).toBeInTheDocument();
+    expect(screen.getByText(/💭 思考过程/)).toBeInTheDocument();
+    expect(screen.getByText("Read")).toBeInTheDocument();
+    expect(screen.getByText("src/a.ts")).toBeInTheDocument();
+    // 流式光标（streaming text 段）
+    expect(document.querySelector(".seg-caret")).not.toBeNull();
+    unmount();
+
+    // conversation：只渲染 text 段，过程段（思考/工具）不挂载
+    setupTimeline({ turns: [turn], viewMode: "conversation" });
+    expect(screen.getByText("第一段答复")).toBeInTheDocument();
+    expect(screen.getByText("第二段答复")).toBeInTheDocument();
+    expect(screen.queryByText(/💭 思考过程/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Read")).not.toBeInTheDocument();
+    // 终态轮不渲染状态条 / 思考占位
+    expect(screen.queryByText("执行中")).not.toBeInTheDocument();
+    expect(screen.queryByText(/正在思考…/)).not.toBeInTheDocument();
+  });
+
+  it("运行中轮显示状态条与思考占位，turn 终态后消失（FR-02）", () => {
+    const runningSegments: TurnSegment[] = [
+      makeToolSegment("tool:call_9", 1_000, {
+        raw: JSON.stringify({ tool: "Bash", args: { command: "npm test" }, tool_use_id: "call_9" }),
+        status: "running",
+        toolName: "Bash",
+        primary: "npm test",
+        endedAt: null,
+      }),
+    ];
+    const { rerender } = setupTimeline({
+      turns: [
+        makeTurn({
+          segments: runningSegments,
+          status: "running",
+          turnStartedAt: Date.now() - 2_000,
+          output: "",
+        }),
+      ],
+      viewMode: "conversation",
+    });
+    // 状态条：运行态标签 + 工具计数（对话视图也显示，FR-02）。计数是嵌套 span
+    // （工具 <b>1</b>），getByText 只匹配直接文本节点——从状态条容器断言 textContent。
+    const bar = screen.getByText("执行中").parentElement;
+    expect(bar).not.toBeNull();
+    expect(bar!.textContent).toMatch(/工具\s*1/);
+    // 运行中且尚无 text 段 → 思考占位（原三点占位行为平移）
+    expect(screen.getByText(/正在思考…/)).toBeInTheDocument();
+
+    // turn 终态：状态条与占位消失
+    rerender(
+      <TurnTimeline
+        turns={[
+          makeTurn({
+            segments: runningSegments,
+            status: "completed",
+            turnStartedAt: 1_000,
+            output: "",
+          }),
+        ]}
+        viewMode="conversation"
+        errorMsg={null}
+        sessionStatus="active"
+        pendingRequests={[]}
+        dialogHistory={[]}
+        onDialogResolved={vi.fn()}
+        onResend={vi.fn()}
+        onSwitchProvider={vi.fn()}
+        hasOnlineProvider
+        emptyProviderLabel="Claude Code"
+      />,
+    );
+    expect(screen.queryByText("执行中")).not.toBeInTheDocument();
+    expect(screen.queryByText(/正在思考…/)).not.toBeInTheDocument();
+  });
+
+  it("all 视图 AskUser 提问按时间戳穿插在段线对应位置（merged 排序平移）", () => {
+    const segments: TurnSegment[] = [
+      { kind: "text", id: "text:main:m1:1", text: "穿插前文本", streaming: false, startedAt: 1_000 },
+      makeToolSegment("tool:call_2", 5_000, {
+        raw: JSON.stringify({ tool: "Grep", args: { pattern: "foo" }, tool_use_id: "call_2" }),
+        toolName: "Grep",
+        primary: "foo",
+      }),
+    ];
+    setupTimeline({
+      turns: [makeTurn({ segments, status: "completed", output: "穿插前文本" })],
+      viewMode: "all",
+      dialogHistory: [
+        {
+          id: "d9",
+          session_id: "sess-1",
+          run_id: "run-1",
+          request_id: "req-9",
+          tool_name: "AskUserQuestion",
+          dialog_kind: "AskUserQuestion",
+          dialog_payload: { questions: [{ question: "穿插问题？", options: [{ label: "是" }] }] },
+          status: "answered",
+          answer: { answers: [{ answer: "是" }] },
+          // ts=3000：落在 text 段（1000）与工具段（5000）之间
+          created_at: new Date(3_000).toISOString(),
+          answered_at: new Date(3_500).toISOString(),
+        },
+      ],
+    });
+    // AskUser 以工具卡片形态出现在段线中
+    expect(screen.getByText("AskUserQuestion")).toBeInTheDocument();
+    expect(screen.getByText(/穿插问题？/)).toBeInTheDocument();
+    // 按 ts 穿插：text 段 → AskUser 卡 → 工具段（文档顺序）
+    const textEl = screen.getByText("穿插前文本");
+    const askEl = screen.getByText("AskUserQuestion");
+    const toolEl = screen.getByText("Grep");
+    expect(textEl.compareDocumentPosition(askEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(askEl.compareDocumentPosition(toolEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 

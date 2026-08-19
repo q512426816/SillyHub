@@ -30,6 +30,7 @@ import {
   screen,
   fireEvent,
   waitFor,
+  act,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type * as React from "react";
@@ -101,6 +102,15 @@ vi.mock("@/lib/agent-profiles", async () => {
 vi.mock("@/lib/api/llm-providers", () => ({
   listProviders: (...args: unknown[]) => mocks.listProviders(...args),
   getProviderQuota: (...args: unknown[]) => mocks.getProviderQuota(...args),
+}));
+
+// 已知坑（对齐 turn-timeline / interactive-session-panel 测试惯例）：MarkdownText
+// 用 next/dynamic ssr:false，jsdom 同步 render 得 null——mock 成纯文本渲染，
+// 供 task-09 段渲染断言（TextSegmentView 文本气泡经 MarkdownText 出正文）。
+vi.mock("@/components/ui/markdown-text", () => ({
+  MarkdownText: ({ content }: { content: string }) => (
+    <div data-testid="markdown-text">{content}</div>
+  ),
 }));
 
 // ── jsdom 虚拟滚动桩：scroll 容器给出非零视口（列表条目才进可视区） ────────
@@ -595,5 +605,128 @@ describe("SessionPanel attach 历史 whoLine + usage 注入（gap-fix）", () =>
     expect(screen.getByLabelText("发送者 张三")).toHaveTextContent("张");
     // 裸时间元素：用户侧 2 + agent 答复侧 2
     expect(screen.getAllByText(new RegExp(`^${timePat}$`))).toHaveLength(4);
+  });
+});
+
+// ── task-09（2026-08-19-session-stream-ux / FR-01 / FR-05）：SSE onLog 装配器接线 ──
+
+describe("SessionPanel SSE 装配器接线（task-09）", () => {
+  /** SSE envelope 固件（run_id=r-live，turn=4；字段缺省对齐 daemon.ts 空值语义）。 */
+  function makeStreamEnvelope(overrides: Record<string, unknown> = {}) {
+    return {
+      event: "log",
+      session_id: "s-1",
+      run_id: "r-live",
+      turn: 4,
+      log_id: null,
+      timestamp: "2026-08-15T10:00:00Z",
+      channel: null,
+      content: null,
+      status: null,
+      exit_code: null,
+      reason: null,
+      input_tokens: null,
+      output_tokens: null,
+      ...overrides,
+    };
+  }
+
+  function getStreamHandlers() {
+    const handlers = mocks.streamSession.mock.calls[0]?.[1] as {
+      onTurnStarted: (_env: Record<string, unknown>) => void;
+      onLog: (_env: Record<string, unknown>, _cursor?: string | null) => void;
+      onTurnCompleted: (_env: Record<string, unknown>) => void;
+    };
+    expect(handlers).toBeTruthy();
+    return handlers;
+  }
+
+  /** 选中 s-1 进面板并等 SSE 建流，返回 mock 捕获的 handlers。 */
+  async function selectSession() {
+    renderPage();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
+    );
+    await waitFor(() => {
+      expect(mocks.streamSession).toHaveBeenCalledWith(
+        "s-1",
+        expect.objectContaining({ onLog: expect.any(Function) }),
+      );
+    });
+    return getStreamHandlers();
+  }
+
+  it("onLog reply/tool_call → turn.segments 落段：对话视图显文本气泡，「进度」视图显工具行（文案改版）", async () => {
+    const handlers = await selectSession();
+
+    act(() => {
+      handlers.onTurnStarted(makeStreamEnvelope({ event: "turn_started" }));
+    });
+    act(() => {
+      handlers.onLog(
+        makeStreamEnvelope({ log_id: "l-1", channel: "stdout", content: "答复正文一段。" }),
+      );
+    });
+
+    // 对话视图（默认）：reply 落文本段气泡（v2 段渲染）；工具行不渲染。
+    expect(await screen.findByText("答复正文一段。")).toBeTruthy();
+
+    // tool_call JSON → 装配器 tool 段（toolName + 主参数摘要）；对话视图仍只见文本。
+    act(() => {
+      handlers.onLog(
+        makeStreamEnvelope({
+          log_id: "l-2",
+          channel: "tool_call",
+          content: JSON.stringify({
+            tool: "Bash",
+            args: { command: "列出目录内容" },
+            tool_use_id: "tu-1",
+            success: true,
+          }),
+        }),
+      );
+    });
+    expect(screen.queryByText("列出目录内容")).toBeNull();
+
+    // task-09 文案改版：「全部」→「进度」；切换后工具行（ToolRowView 主参数）可见。
+    fireEvent.click(screen.getByRole("tab", { name: "进度" }));
+    expect(await screen.findByText("列出目录内容")).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "对话" })).toBeTruthy();
+  });
+
+  it("user_input 不进段 + turn_completed 终态徽标（finishTurn 收尾冒烟）", async () => {
+    const handlers = await selectSession();
+
+    act(() => {
+      handlers.onTurnStarted(makeStreamEnvelope({ event: "turn_started" }));
+    });
+    // user_input 是用户消息：页面跳过（不进段不进 output）。
+    act(() => {
+      handlers.onLog(
+        makeStreamEnvelope({ log_id: "l-u", channel: "user_input", content: "不该出现在答复区" }),
+      );
+    });
+    act(() => {
+      handlers.onLog(
+        makeStreamEnvelope({ log_id: "l-1", channel: "stdout", content: "答复完成。" }),
+      );
+    });
+    act(() => {
+      handlers.onTurnCompleted(
+        makeStreamEnvelope({
+          event: "turn_completed",
+          status: "completed",
+          exit_code: 0,
+          input_tokens: 100,
+          output_tokens: 20,
+        }),
+      );
+    });
+
+    expect(await screen.findByText("答复完成。")).toBeTruthy();
+    expect(screen.queryByText("不该出现在答复区")).toBeNull();
+    // 终态徽标（deriveTurnTerminalStatus + token 写入）：第 4 轮 · 已完成 · ↑100 ↓20。
+    expect(screen.getByText(/第 4 轮 · 已完成/)).toBeTruthy();
+    expect(screen.getByText(/↑100/)).toBeTruthy();
   });
 });

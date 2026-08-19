@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会话流重构原型 — session-stream-ux</title>
+<style>
+/* ══════════ 设计 token（对齐项目 globals.css light 主题）══════════ */
+:root {
+  --background: hsl(210 40% 98%);
+  --foreground: hsl(215 25% 15%);
+  --card: hsl(0 0% 100%);
+  --primary: hsl(221 83% 53%);
+  --primary-fg: hsl(210 40% 98%);
+  --muted: hsl(215 16% 92%);
+  --muted-fg: hsl(215 12% 45%);
+  --border: hsl(215 16% 88%);
+  --destructive: hsl(0 72% 51%);
+  --emerald: hsl(160 84% 30%);
+  --amber: hsl(38 92% 40%);
+  --blue: hsl(221 83% 45%);
+  --indigo-bg: hsl(225 100% 96%);
+  --indigo-border: hsl(226 80% 88%);
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.prototype-note {
+  background: hsl(46 100% 92%); border: 1px solid hsl(46 80% 80%);
+  color: hsl(35 60% 30%); padding: 8px 16px; font-size: 12px;
+}
+.prototype-note b { color: hsl(35 80% 25%); }
+
+/* ══════════ 页面骨架：左列表(示意) + 右会话面板 ══════════ */
+.main-grid {
+  display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 14px;
+  height: calc(100vh - 40px); padding: 12px 16px;
+}
+.list-panel {
+  border: 1px solid var(--border); border-radius: 8px; background: var(--card);
+  overflow-y: auto;
+}
+.list-panel h3 { font-size: 13px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.list-item { padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; opacity: .55; }
+.list-item:hover { background: var(--muted); }
+.list-item.active { opacity: 1; border-left: 3px solid var(--primary); background: hsl(221 83% 53% / .05); }
+.list-item .t { font-size: 12.5px; font-weight: 500; }
+.list-item .c { font-size: 10.5px; color: var(--muted-fg); margin-top: 2px; }
+
+.session-panel {
+  border: 1px solid var(--border); border-radius: 8px; background: var(--card);
+  display: flex; flex-direction: column; overflow: hidden; min-width: 0;
+}
+
+/* ══════════ 会话头部 ══════════ */
+.session-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  border-bottom: 1px solid var(--border); padding: 8px 16px; position: relative;
+}
+.session-header .left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.session-title { font-size: 13.5px; font-weight: 600; }
+.session-id { font-family: ui-monospace, monospace; font-size: 10.5px; color: var(--muted-fg); cursor: pointer; }
+.badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 1px 8px; border-radius: 10px; }
+.badge.processing { background: hsl(221 83% 53% / .1); color: var(--blue); }
+.badge.processing::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--blue); animation: pulse 1.6s infinite; }
+.header-actions { display: flex; align-items: center; gap: 8px; }
+
+/* ── 子代理目录按钮（deepseek SubagentCatalogAction 风格）── */
+.subagent-catalog-btn {
+  position: relative; display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--border); background: var(--card); border-radius: 6px;
+  padding: 3px 10px; font-size: 12px; cursor: pointer;
+}
+.subagent-catalog-btn:hover { background: var(--muted); }
+.subagent-catalog-btn .running-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--blue);
+  animation: pulse 1.4s infinite;
+}
+.subagent-catalog-btn .count { color: var(--muted-fg); font-size: 11px; }
+.subagent-catalog-popover {
+  position: absolute; top: calc(100% + 6px); right: 0; width: 380px; z-index: 30;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / .12); overflow: hidden;
+}
+.popover-title { font-size: 12px; font-weight: 600; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.catalog-row {
+  display: flex; align-items: center; gap: 8px; padding: 7px 12px;
+  border-bottom: 1px solid var(--border); cursor: pointer; font-size: 12px;
+}
+.catalog-row:last-child { border-bottom: none; }
+.catalog-row:hover { background: var(--muted); }
+.catalog-row .st { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.catalog-row .st.running { background: var(--blue); animation: pulse 1.4s infinite; }
+.catalog-row .st.done { background: var(--emerald); }
+.catalog-row .name { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.catalog-row .meta { margin-left: auto; flex-shrink: 0; color: var(--muted-fg); font-size: 11px; font-family: ui-monospace, monospace; display: flex; gap: 8px; }
+
+.view-switch { display: inline-flex; border-radius: 999px; border: 1px solid var(--border); background: var(--muted); padding: 2px; }
+.view-switch button {
+  border: none; background: transparent; font-size: 11px; padding: 3px 12px;
+  border-radius: 999px; cursor: pointer; color: var(--muted-fg);
+}
+.view-switch button.on { background: var(--card); color: var(--foreground); font-weight: 500; box-shadow: 0 1px 2px rgb(0 0 0 / .08); }
+.btn {
+  border: 1px solid var(--border); background: var(--card); border-radius: 6px;
+  padding: 3px 12px; font-size: 12px; cursor: pointer;
+}
+.btn:hover { background: var(--muted); }
+.btn.danger { color: var(--destructive); border-color: hsl(0 72% 51% / .4); }
+
+/* ══════════ 消息流 ══════════ */
+.msg-flow { flex: 1; overflow-y: auto; padding: 20px 20px; background: var(--background); }
+.turn-block { margin-bottom: 24px; }
+
+/* 用户消息气泡 */
+.user-bubble-row { display: flex; justify-content: flex-end; align-items: flex-end; gap: 6px; margin-bottom: 10px; }
+.user-bubble {
+  max-width: 78%; background: var(--primary); color: var(--primary-fg);
+  border-radius: 16px; border-bottom-right-radius: 4px; padding: 9px 16px;
+  font-size: 13px; white-space: pre-wrap; box-shadow: 0 1px 2px rgb(0 0 0 / .1);
+}
+.user-time { font-size: 10.5px; color: var(--muted-fg); padding-bottom: 4px; }
+.user-avatar {
+  width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border);
+  background: var(--muted); display: flex; align-items: center; justify-content: center;
+  font-size: 12px; color: var(--muted-fg); flex-shrink: 0;
+}
+
+/* whoLine */
+.wholine { display: flex; flex-wrap: wrap; gap: 6px; font-size: 11px; color: var(--muted-fg); margin-left: 36px; margin-bottom: 6px; }
+
+/* ══════════ 轮级状态条（TurnStatus 风格，运行中显示）══════════ */
+.turn-status-bar {
+  display: flex; align-items: center; gap: 10px; margin-left: 36px; margin-bottom: 8px;
+  background: hsl(221 83% 53% / .06); border: 1px solid hsl(221 83% 53% / .18);
+  border-radius: 8px; padding: 6px 12px; font-size: 12px;
+}
+.turn-status-bar .spinner {
+  width: 12px; height: 12px; border: 2px solid hsl(221 83% 53% / .25);
+  border-top-color: var(--blue); border-radius: 50%; animation: spin 0.9s linear infinite; flex-shrink: 0;
+}
+.turn-status-bar .elapsed { font-family: ui-monospace, monospace; color: var(--blue); font-weight: 500; }
+.turn-status-bar .sep { color: var(--border); }
+.turn-status-bar .stat { color: var(--muted-fg); }
+.turn-status-bar .current-activity {
+  margin-left: auto; font-size: 11.5px; color: var(--foreground);
+  max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.turn-status-bar .current-activity .live-dot {
+  display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--blue); margin-right: 5px; animation: pulse 1.2s infinite; vertical-align: 1px;
+}
+
+/* ══════════ 结构化时间线（进度视图核心）═══════════ */
+.turn-timeline { margin-left: 36px; border-left: 2px solid var(--border); padding-left: 14px; display: flex; flex-direction: column; gap: 6px; }
+/* 对话视图下隐藏过程段，只留文本段 */
+.msg-flow.conversation .turn-timeline .seg-process { display: none; }
+
+/* 文本段（agent 分段正文） */
+.seg-text {
+  max-width: 86%; background: var(--card); border: 1px solid var(--border);
+  border-radius: 16px; border-top-left-radius: 4px; padding: 9px 16px;
+  font-size: 13px; box-shadow: 0 1px 2px rgb(0 0 0 / .04); align-self: flex-start;
+}
+.seg-text .md-h { font-weight: 600; margin: 6px 0 2px; }
+.seg-text code { background: var(--muted); border-radius: 4px; padding: 1px 5px; font-size: 12px; font-family: ui-monospace, monospace; }
+.seg-text.streaming { position: relative; }
+.streaming-caret {
+  display: inline-block; width: 7px; height: 15px; background: var(--blue);
+  vertical-align: -2px; margin-left: 2px; animation: blink 0.9s step-end infinite; border-radius: 1px;
+}
+
+/* 思考折叠行（ReasoningRow 风格） */
+.seg-thinking { align-self: flex-start; width: 100%; }
+.collapse-head {
+  display: flex; align-items: center; gap: 7px; cursor: pointer;
+  font-size: 11.5px; color: var(--muted-fg); padding: 3px 6px; border-radius: 6px; user-select: none;
+}
+.collapse-head:hover { background: var(--muted); }
+.collapse-head .arrow { font-size: 9px; transition: transform .15s; }
+.seg-thinking.open .collapse-head .arrow { transform: rotate(90deg); }
+.collapse-head .title { font-weight: 500; }
+.collapse-head .summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 65%; opacity: .75; }
+.collapse-head .running-tag { color: var(--blue); font-size: 10.5px; display: inline-flex; align-items: center; gap: 4px; }
+.collapse-head .running-tag::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--blue); animation: pulse 1.2s infinite; }
+.collapse-body { display: none; margin-top: 4px; }
+.seg-thinking.open .collapse-body { display: block; }
+.collapse-body .think-content {
+  background: var(--muted); border-radius: 8px; padding: 8px 12px;
+  font-size: 11.5px; color: var(--muted-fg); line-height: 1.7; max-height: 180px; overflow-y: auto;
+}
+
+/* 工具行（ToolRow 风格：单行摘要 + 展开 + 运行中扫动动画） */
+.seg-tool { align-self: flex-start; width: 100%; position: relative; }
+.tool-row {
+  display: flex; align-items: center; gap: 8px; border: 1px solid hsl(220 60% 90%);
+  background: hsl(220 60% 97%); border-radius: 8px; padding: 5px 12px;
+  cursor: pointer; overflow: hidden; font-size: 12px;
+}
+/* 运行中扫动动画 */
+.tool-row.running::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(100deg, transparent 30%, hsl(220 90% 85% / .5) 50%, transparent 70%);
+  animation: sweep 1.8s infinite; pointer-events: none;
+}
+@keyframes sweep { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
+.tool-row .t-icon { font-size: 12px; flex-shrink: 0; }
+.tool-row .t-name { font-weight: 600; color: var(--blue); flex-shrink: 0; font-size: 11.5px; }
+.tool-row .t-desc {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted-fg); font-family: ui-monospace, monospace; font-size: 11px;
+}
+.tool-row .t-status { margin-left: auto; flex-shrink: 0; font-family: ui-monospace, monospace; font-size: 11px; }
+.tool-row .t-status.ok { color: var(--emerald); }
+.tool-row .t-status.deny { color: var(--destructive); }
+.tool-row .t-status.running { color: var(--blue); }
+.tool-row .t-dur { flex-shrink: 0; color: var(--muted-fg); font-size: 10.5px; font-family: ui-monospace, monospace; }
+.tool-result { display: none; margin-top: 4px; border-radius: 8px; }
+.seg-tool.open .tool-result { display: block; }
+.tool-result pre {
+  background: var(--muted); border-radius: 8px; padding: 10px 14px;
+  font-size: 11px; color: var(--muted-fg); font-family: ui-monospace, monospace;
+  max-height: 200px; overflow-y: auto; white-space: pre-wrap; line-height: 1.65;
+}
+
+/* ══════════ 子代理块（嵌套在时间线，Task 工具展开态）══════════ */
+.seg-subagent {
+  align-self: stretch; border: 1px solid var(--indigo-border); background: var(--indigo-bg);
+  border-radius: 10px; overflow: hidden;
+}
+.subagent-head {
+  display: flex; align-items: center; gap: 8px; padding: 7px 14px; cursor: pointer;
+  font-size: 12px; position: relative; overflow: hidden;
+}
+.seg-subagent.running .subagent-head::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(100deg, transparent 30%, hsl(225 100% 88% / .6) 50%, transparent 70%);
+  animation: sweep 1.8s infinite; pointer-events: none;
+}
+.subagent-head .st { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.subagent-head .st.running { background: var(--blue); animation: pulse 1.4s infinite; }
+.subagent-head .st.done { background: var(--emerald); }
+.subagent-head .sa-name { font-weight: 600; }
+.subagent-head .sa-type {
+  font-size: 10px; color: var(--muted-fg); background: var(--card);
+  border: 1px solid var(--border); padding: 0 6px; border-radius: 8px; flex-shrink: 0;
+}
+.subagent-head .sa-dur { margin-left: auto; font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted-fg); }
+.subagent-head .sa-tokens { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted-fg); }
+.subagent-body {
+  border-top: 1px solid var(--indigo-border); padding: 8px 14px 10px 20px;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.subagent-body .turn-timeline { margin-left: 0; border-left-color: var(--indigo-border); padding-left: 10px; }
+.subagent-latest-hint { font-size: 10.5px; color: var(--blue); display: flex; align-items: center; gap: 5px; }
+.subagent-latest-hint::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--blue); animation: pulse 1.2s infinite; }
+.seg-subagent:not(.open) .subagent-body { display: none; }
+
+/* stderr 行 */
+.seg-stderr { display: flex; gap: 6px; align-items: flex-start; font-size: 11px; color: var(--amber); padding: 2px 4px; }
+
+/* 轮次状态徽标行 */
+.turn-status-line { display: flex; align-items: center; gap: 6px; padding-left: 36px; font-size: 10px; color: var(--muted-fg); font-family: ui-monospace, monospace; }
+.turn-status-line .ok { color: var(--emerald); }
+.turn-status-line .running { color: var(--blue); }
+
+/* ══════════ 底部输入区（示意）══════════ */
+.input-zone { border-top: 1px solid var(--border); background: var(--card); padding: 10px 20px 14px; }
+.ctx-bar { display: flex; gap: 12px; font-size: 11px; color: var(--muted-fg); margin-bottom: 8px; align-items: center; }
+.ctx-bar .ctx-track { flex: 1; max-width: 320px; height: 4px; border-radius: 2px; background: var(--muted); overflow: hidden; }
+.ctx-bar .ctx-fill { height: 100%; background: linear-gradient(90deg, var(--blue), hsl(260 70% 55%)); border-radius: 2px; }
+.input-box {
+  display: flex; gap: 10px; border: 1px solid var(--border); border-radius: 10px;
+  padding: 9px 14px; background: var(--card); align-items: center;
+}
+.input-box .ph { color: var(--muted-fg); font-size: 13px; flex: 1; }
+.send-btn { background: var(--primary); color: var(--primary-fg); border: none; border-radius: 7px; padding: 5px 16px; font-size: 12.5px; cursor: pointer; }
+.send-btn:disabled { opacity: .45; }
+.config-row { display: flex; gap: 8px; margin-top: 8px; font-size: 11px; color: var(--muted-fg); }
+.config-chip { border: 1px solid var(--border); border-radius: 6px; padding: 1px 9px; }
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* 原型说明浮标 */
+.legend {
+  position: fixed; left: 16px; bottom: 16px; z-index: 50; background: var(--card);
+  border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px;
+  font-size: 11px; color: var(--muted-fg); box-shadow: 0 4px 16px rgb(0 0 0 / .1); max-width: 300px;
+}
+.legend b { color: var(--foreground); }
+</style>
+</head>
+<body>
+
+<div class="prototype-note">
+  <b>原型说明</b> — 本页为「会话流重构」高保真原型（方案C）。演示内容：① 轮次 1 = <b>运行中</b>状态（轮级状态条 + 实时进度 + 子代理块运行动画）；② 轮次 2 = <b>已完成</b>状态（结构化分段结果）。可交互：右上「对话 / 进度」视图切换、思考行/工具行/子代理块点击折叠、子代理目录下拉、运行中计时实时跳动。
+</div>
+
+<div class="main-grid">
+
+  <!-- 左栏（示意，非本次改造重点） -->
+  <aside class="list-panel">
+    <h3>会话 <span style="font-weight:400;font-size:11px;color:var(--muted-fg)">共 12 个</span></h3>
+    <div class="list-item active">
+      <div class="t">重构登录模块</div>
+      <div class="c">🖥 本机 · Claude · 5 轮</div>
+    </div>
+    <div class="list-item">
+      <div class="t">调研竞品定价策略</div>
+      <div class="c">🖥 本机 · Codex · 2 轮</div>
+    </div>
+    <div class="list-item">
+      <div class="t">修复导出乱码问题</div>
+      <div class="c">🖥 办公室Mac · Claude · 8 轮</div>
+    </div>
+  </aside>
+
+  <!-- 右侧会话面板 -->
+  <section class="session-panel">
+
+    <!-- 头部：标题 + 子代理目录 + 视图切换 + 操作 -->
+    <header class="session-header">
+      <div class="left">
+        <span class="session-title">重构登录模块</span>
+        <span class="session-id" title="点击复制">#a3f8c92e</span>
+        <span class="badge processing">活跃</span>
+        <span style="font-size:11px;color:var(--muted-fg)">🖥 本机</span>
+        <span style="font-size:11px;color:hsl(190 80% 30%);background:hsl(190 100% 95%);padding:1px 6px;border-radius:4px">📂 SillyHub</span>
+      </div>
+      <div class="header-actions" style="position:relative">
+        <!-- 子代理目录（deepseek SubagentCatalogAction 风格） -->
+        <button class="subagent-catalog-btn" onclick="toggleCatalog(event)">
+          <span class="running-dot"></span>
+          子代理 <span class="count">2</span> ▾
+        </button>
+        <div class="subagent-catalog-popover" id="catalog" style="display:none">
+          <div class="popover-title">子代理目录 — 本轮</div>
+          <div class="catalog-row" onclick="jumpTo('sa-1')">
+            <span class="st running"></span>
+            <span class="name">调研前端会话组件现状</span>
+            <span class="meta"><span>3.2k tok</span><span id="cat-dur-1">01:24</span></span>
+          </div>
+          <div class="catalog-row" onclick="jumpTo('sa-2')">
+            <span class="st done"></span>
+            <span class="name">检索后端归属字段链路</span>
+            <span class="meta"><span>5.8k tok</span><span>00:47</span></span>
+          </div>
+        </div>
+        <div class="view-switch">
+          <button id="vw-conversation" class="on" onclick="setView('conversation')">对话</button>
+          <button id="vw-progress" onclick="setView('progress')">进度</button>
+        </div>
+        <button class="btn">打断本轮</button>
+        <button class="btn danger">结束会话</button>
+      </div>
+    </header>
+
+    <!-- 消息流 -->
+    <div class="msg-flow conversation" id="msgflow">
+
+      <!-- ══════════ 轮次 2（较早，已完成）：展示完成后的分段结构 ══════════ -->
+      <div class="turn-block">
+        <div class="user-bubble-row">
+          <span class="user-time">14:02</span>
+          <div class="user-bubble">帮我分析一下现在的会话流渲染有什么问题，给出优化方向</div>
+          <span class="user-avatar">鲸</span>
+        </div>
+        <div class="wholine">
+          <span>📋 未指定</span><span>·</span><span>Claude Code</span><span>·</span><span>☁ 本机默认</span>
+        </div>
+
+        <div class="turn-timeline">
+          <!-- 文本段1：分析开始 -->
+          <div class="seg-text">
+            我先看一下当前会话流的渲染代码和数据处理链路，然后给你分析。
+          </div>
+
+          <!-- 思考折叠行 -->
+          <div class="seg-thinking seg-process" onclick="this.classList.toggle('open')">
+            <div class="collapse-head">
+              <span class="arrow">▶</span><span class="title">💭 思考过程</span>
+              <span class="summary">当前实现里 processItems 是平铺的，归属字段被丢弃了……</span>
+            </div>
+            <div class="collapse-body"><div class="think-content">当前实现里 processItems 是平铺的，classifySessionLog 只看 content 和 channel，parent_tool_use_id / depth / subagent_type 三个归属字段在 applyLogToTurn 里被直接丢弃。这意味着子代理的消息和主 agent 完全混流。另外 output 是一整条 concat，agent 中间穿插工具调用的多段文本全部粘连……</div></div>
+          </div>
+
+          <!-- 工具行 ×2（已完成） -->
+          <div class="seg-tool seg-process open" onclick="this.classList.toggle('open')">
+            <div class="tool-row">
+              <span class="t-icon">📂</span><span class="t-name">Read</span>
+              <span class="t-desc">frontend/src/components/daemon/turn-timeline.tsx</span>
+              <span class="t-status ok">✓</span><span class="t-dur">0.3s</span>
+            </div>
+            <div class="tool-result"><pre>35 | export type SessionProcessItem =
+36 |   | { kind: "thinking"; text: string; ts?: number }
+37 |   | ({ kind: "tool" } & SessionToolEvent & { ts?: number })
+38 |   | { kind: "stderr"; text: string; ts?: number };
+…（1900 行，已截断）</pre></div>
+          </div>
+          <div class="seg-tool seg-process" onclick="this.classList.toggle('open')">
+            <div class="tool-row">
+              <span class="t-icon">🔧</span><span class="t-name">Grep</span>
+              <span class="t-desc">pattern: parent_tool_use_id  path: sillyhub-daemon/src</span>
+              <span class="t-status ok">✓</span><span class="t-dur">0.5s</span>
+            </div>
+            <div class="tool-result"><pre>claude-sdk-driver.ts:406: 开启子代理（Task/Agent tool spawn）text/thinking 转发…
+session-manager.ts:3245: const rawParent = msgRecord['parent_tool_use_id'];
+…（23 个文件命中）</pre></div>
+          </div>
+
+          <!-- 子代理块（已完成，默认折叠） -->
+          <div class="seg-subagent seg-process" id="sa-2" onclick="this.classList.toggle('open')">
+            <div class="subagent-head">
+              <span class="st done"></span>
+              <span class="sa-name">🤖 检索后端归属字段链路</span>
+              <span class="sa-type">Explore</span>
+              <span class="sa-tokens">5.8k tok</span>
+              <span class="sa-dur">00:47</span>
+            </div>
+            <div class="subagent-body">
+              <div class="turn-timeline">
+                <div class="seg-thinking" onclick="event.stopPropagation();this.classList.toggle('open')">
+                  <div class="collapse-head">
+                    <span class="arrow">▶</span><span class="title">💭 思考</span>
+                    <span class="summary">backend run_sync 里应该有归属透传……</span>
+                  </div>
+                  <div class="collapse-body"><div class="think-content">backend run_sync 的 service.py 里 session channel publish 已经带 parent_tool_use_id / subagent_type / depth 三个字段，落库列也有。链路是完整的。</div></div>
+                </div>
+                <div class="seg-tool" onclick="event.stopPropagation();this.classList.toggle('open')">
+                  <div class="tool-row">
+                    <span class="t-icon">🔧</span><span class="t-name">Grep</span>
+                    <span class="t-desc">pattern: depth  path: backend/app/modules/daemon</span>
+                    <span class="t-status ok">✓</span><span class="t-dur">0.4s</span>
+                  </div>
+                  <div class="tool-result"><pre>run_sync/service.py:174: "depth": log_payload.get("depth"),
+run_sync/service.py:648: depth=msg.get("depth") if isinstance(msg, dict) else None,</pre></div>
+                </div>
+                <div class="seg-text" style="background:transparent;border:none;padding:6px 0;box-shadow:none">结论：数据链路完整（daemon 注入 → backend 落库+SSE 透传），前端 envelope 类型漏声明，消费侧丢弃了归属字段。问题纯在展示层。</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 文本段2：最终答复 -->
+          <div class="seg-text">
+            <span class="md-h">分析结论</span><br>
+            现状三个问题都指向展示层：① <code>output</code> 单串拼接，轮内多段文本粘连；② 过程项平铺且默认不可见，无实时进度；③ 子代理归属字段全链路都有但前端丢弃。<br><br>建议按「结构化分段 + 子代理嵌套块 + 轮级状态条」重构，后端零改动。
+          </div>
+        </div>
+
+        <div class="turn-status-line">
+          <span class="ok">✓ 第 2 轮 · 已完成</span><span>· ↑12.4k ↓1.8k</span>
+        </div>
+      </div>
+
+      <!-- ══════════ 轮次 1（当前，运行中）：展示实时进度 ══════════ -->
+      <div class="turn-block">
+        <div class="user-bubble-row">
+          <span class="user-time">14:31</span>
+          <div class="user-bubble">好，按方案 C 开始设计，先出原型</div>
+          <span class="user-avatar">鲸</span>
+        </div>
+        <div class="wholine">
+          <span>📋 未指定</span><span>·</span><span>Claude Code</span><span>·</span><span>☁ 本机默认</span>
+        </div>
+
+        <!-- 轮级状态条（turn 级信号，跨阶段不闪烁） -->
+        <div class="turn-status-bar">
+          <span class="spinner"></span>
+          <span class="stat">执行中</span>
+          <span class="elapsed" id="elapsed">01:47</span>
+          <span class="sep">|</span>
+          <span class="stat">工具 <b style="color:var(--foreground)">4</b></span>
+          <span class="sep">|</span>
+          <span class="stat">子代理 <b style="color:var(--foreground)">1</b> 运行中</span>
+          <span class="current-activity"><span class="live-dot"></span>子代理「调研前端会话组件现状」正在读取 turn-timeline.tsx…</span>
+        </div>
+
+        <div class="turn-timeline">
+          <!-- 已流出的文本段 -->
+          <div class="seg-text">
+            收到。我先让子代理把前端会话组件的现状摸清，同时自己确认设计系统的 token 约束，然后直接出高保真原型。
+          </div>
+
+          <!-- 思考行（运行中，流式跟随最新一行） -->
+          <div class="seg-thinking seg-process open" onclick="this.classList.toggle('open')">
+            <div class="collapse-head">
+              <span class="arrow">▶</span><span class="title">💭 思考过程</span>
+              <span class="running-tag">思考中</span>
+              <span class="summary">设计要贴 deepseek-harness 的三层节奏……</span>
+            </div>
+            <div class="collapse-body"><div class="think-content">设计要贴 deepseek-harness 的三层节奏：事件应用、视图发布、视觉对齐。SillyHub 的 SSE 已经是事件流，缺的是装配器把事件变成结构化模型。工具行参考 ToolRow 单行摘要+扫动，子代理块用归属字段嵌套……</div></div>
+          </div>
+
+          <!-- 工具行：已完成 -->
+          <div class="seg-tool seg-process" onclick="this.classList.toggle('open')">
+            <div class="tool-row">
+              <span class="t-icon">📂</span><span class="t-name">Read</span>
+              <span class="t-desc">docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md</span>
+              <span class="t-status ok">✓</span><span class="t-dur">0.2s</span>
+            </div>
+            <div class="tool-result"><pre>18 | - **颜色不硬编码 hex**,走 antd token(主题)或 tailwind CSS 变量…
+19 | - **状态用 antd Badge(status)**,**分类用 antd Tag(color)**,空值统一 `—`。</pre></div>
+          </div>
+
+          <!-- 工具行：运行中（扫动动画） -->
+          <div class="seg-tool seg-process running" onclick="this.classList.toggle('open')">
+            <div class="tool-row">
+              <span class="t-icon">🎨</span><span class="t-name">Write</span>
+              <span class="t-desc">prototype-session-stream.html</span>
+              <span class="t-status running">⏳</span><span class="t-dur">12s</span>
+            </div>
+            <div class="tool-result"><pre>（写入中……）</pre></div>
+          </div>
+
+          <!-- 子代理块（运行中，展开，内部进度可见） -->
+          <div class="seg-subagent seg-process running open" id="sa-1" onclick="this.classList.toggle('open')">
+            <div class="subagent-head">
+              <span class="st running"></span>
+              <span class="sa-name">🤖 调研前端会话组件现状</span>
+              <span class="sa-type">Explore</span>
+              <span class="sa-tokens">3.2k tok</span>
+              <span class="sa-dur" id="sa-dur-1">01:24</span>
+            </div>
+            <div class="subagent-body" onclick="event.stopPropagation()">
+              <div class="turn-timeline">
+                <div class="seg-tool" onclick="this.classList.toggle('open')">
+                  <div class="tool-row">
+                    <span class="t-icon">🔧</span><span class="t-name">Glob</span>
+                    <span class="t-desc">frontend/src/components/sessions/**/*.tsx</span>
+                    <span class="t-status ok">✓</span><span class="t-dur">0.3s</span>
+                  </div>
+                </div>
+                <div class="seg-tool running" onclick="this.classList.toggle('open')">
+                  <div class="tool-row">
+                    <span class="t-icon">📂</span><span class="t-name">Read</span>
+                    <span class="t-desc">turn-timeline.tsx (749 行)</span>
+                    <span class="t-status running">⏳</span><span class="t-dur">3s</span>
+                  </div>
+                </div>
+                <div class="subagent-latest-hint">正在读取 turn-timeline.tsx 第 400-749 行…</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 流式中的文本段（光标闪烁） -->
+          <div class="seg-text streaming">
+            原型我会覆盖两个关键状态：运行中（实时进度 + 子代理动画）和已完成（分段结构）。配色直接用项目 token，不引入新色。<span class="streaming-caret"></span>
+          </div>
+        </div>
+
+        <div class="turn-status-line">
+          <span class="running">● 第 3 轮 · 运行中</span><span>· ↑8.2k ↓640</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 底部输入区（示意） -->
+    <div class="input-zone">
+      <div class="ctx-bar">
+        <span>上下文 18.6k / 200k</span>
+        <div class="ctx-track"><div class="ctx-fill" style="width:9%"></div></div>
+        <span style="margin-left:auto">📋 未指定 · Claude Code · ☁ 本机默认</span>
+      </div>
+      <div class="input-box">
+        <span class="ph">等待本轮完成...</span>
+        <button class="send-btn" disabled>发送</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- 原型交互说明 -->
+<div class="legend">
+  <b>▍交互演示点</b><br>
+  ① 头部「子代理 ▾」→ 目录下拉（运行中脉冲 + 点击定位）<br>
+  ② 「对话 / 进度」视图切换<br>
+  ③ 思考行 / 工具行 / 子代理块点击折叠<br>
+  ④ 运行中元素：状态条计时 / 子代理时长 / 工具扫动 / 流式光标
+</div>
+
+<script>
+// 视图切换：conversation = 只显文本段；progress = 完整时间线
+function setView(mode) {
+  document.getElementById('msgflow').className = 'msg-flow ' + mode;
+  document.getElementById('vw-conversation').className = mode === 'conversation' ? 'on' : '';
+  document.getElementById('vw-progress').className = mode === 'progress' ? 'on' : '';
+}
+// 子代理目录下拉
+function toggleCatalog(e) { e.stopPropagation(); const c = document.getElementById('catalog'); c.style.display = c.style.display === 'none' ? 'block' : 'none'; }
+document.addEventListener('click', () => { document.getElementById('catalog').style.display = 'none'; });
+// 点击目录行 → 展开对应子代理块并滚动定位（需切到进度视图）
+function jumpTo(id) {
+  setView('progress');
+  const el = document.getElementById(id);
+  if (el) { el.classList.add('open'); el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+}
+// 运行中计时 tick（模拟后端锚点时间戳 + 前端补秒）
+let elapsedSec = 107, saSec = 84, catSec = 84;
+function pad(n) { return String(n).padStart(2, '0'); }
+setInterval(() => {
+  elapsedSec++; saSec++; catSec++;
+  document.getElementById('elapsed').textContent = pad(Math.floor(elapsedSec / 60)) + ':' + pad(elapsedSec % 60);
+  document.getElementById('sa-dur-1').textContent = pad(Math.floor(saSec / 60)) + ':' + pad(saSec % 60);
+  document.getElementById('cat-dur-1').textContent = pad(Math.floor(catSec / 60)) + ':' + pad(catSec % 60);
+}, 1000);
+</script>
+</body>
+</html>

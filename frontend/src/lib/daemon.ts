@@ -788,6 +788,19 @@ export interface SessionStreamEnvelope {
    * 日志/调试观测，避免与正文日志混淆。
    */
   stale?: boolean;
+  /**
+   * 2026-06-28-daemon-subagent-transcript task-09 / FR-08：归属三字段（backend run_sync
+   * session channel publish 已透传，前端此前漏声明）。主 agent / 旧 backend →
+   * null/undefined，消费方（session-log-assembler）按主 agent 平铺。
+   */
+  parent_tool_use_id?: string | null;
+  subagent_type?: string | null;
+  depth?: number | null;
+  /**
+   * 2026-07-05-agent-log-type-tags：工具种类标签
+   * （与 lib/agent.ts AgentRunLogEntry.tool_kind 同语义）。
+   */
+  tool_kind?: string | null;
 }
 
 export interface SessionStreamHandlers {

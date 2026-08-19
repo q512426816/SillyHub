@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>原型：/sessions 新建会话 · 工作区选择器</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: #f5f5f5; color: #1f1f1f; padding: 24px; font-size: 14px; }
+  h1 { font-size: 18px; margin-bottom: 4px; }
+  .sub { color: #666; font-size: 12px; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+  .card { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 20px; }
+  .card h2 { font-size: 15px; margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 8px; }
+  .sec { margin-bottom: 18px; }
+  .sec-title { display: flex; align-items: baseline; gap: 6px; margin-bottom: 6px; }
+  .sec-title .name { font-weight: 600; font-size: 13px; }
+  .sec-title .hint { color: #888; font-size: 11px; }
+  .req { color: #d4380d; }
+  select, .fake-select { width: 100%; padding: 7px 10px; border: 1px solid #ccc; border-radius: 6px; background: #fff; font-size: 13px; }
+  .machine-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .machine { border: 1px solid #ccc; border-radius: 8px; padding: 8px 10px; cursor: pointer; background: #fff; }
+  .machine.sel { border-color: #1677ff; background: #e6f4ff; }
+  .machine.off { opacity: .5; cursor: not-allowed; }
+  .machine .m-name { font-weight: 600; font-size: 13px; }
+  .machine .m-meta { color: #888; font-size: 11px; margin-top: 2px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { border: 1px solid #ccc; border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 12px; }
+  .chip.sel { border-color: #1677ff; background: #e6f4ff; }
+  .ctx-banner { background: #f6ffed; border: 1px solid #b7eb8f; border-radius: 6px; padding: 8px 10px; font-size: 12px; color: #135200; margin-bottom: 14px; display: none; }
+  textarea { width: 100%; border: 1px solid #ccc; border-radius: 6px; padding: 8px 10px; font-size: 13px; resize: vertical; min-height: 56px; }
+  .btn-row { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 8px; }
+  .btn-primary { background: #1677ff; color: #fff; border: none; border-radius: 6px; padding: 7px 18px; font-size: 13px; cursor: pointer; }
+  .btn-primary:disabled { background: #a0a0a0; cursor: not-allowed; }
+  .new-badge { background: #1677ff; color: #fff; border-radius: 4px; font-size: 10px; padding: 1px 6px; margin-left: 6px; }
+  .flow-step { display: flex; gap: 10px; margin-bottom: 14px; }
+  .flow-num { flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%; background: #1677ff; color: #fff; font-size: 12px; display: flex; align-items: center; justify-content: center; }
+  .flow-body b { font-size: 13px; }
+  .flow-body p { font-size: 12px; color: #555; margin-top: 3px; line-height: 1.5; }
+  .arrow { color: #999; font-size: 12px; margin: 2px 0 10px 5px; }
+  code { background: #f0f0f0; border-radius: 3px; padding: 1px 5px; font-size: 11px; }
+  .empty-ws { color: #999; font-size: 12px; border: 1px dashed #ccc; border-radius: 6px; padding: 8px 10px; }
+  .legend { font-size: 11px; color: #888; margin-top: 16px; border-top: 1px dashed #ddd; padding-top: 10px; }
+</style>
+</head>
+<body>
+<h1>原型：/sessions 新建会话 · 工作区选择器</h1>
+<p class="sub">变更 2026-08-19-sessions-workspace-selector · 左=表单布局（可交互演示联动） · 右=交互流程</p>
+
+<div class="grid">
+  <!-- 左：表单线框（可交互） -->
+  <div class="card">
+    <h2>新建会话表单（改后）</h2>
+    <div class="ctx-banner" id="ctxBanner"></div>
+
+    <div class="sec">
+      <div class="sec-title"><span class="name">⓪ 工作区</span><span class="new-badge">新增</span><span class="hint">可选 · 不选则不挂项目上下文</span></div>
+      <select id="wsSelect" aria-label="工作区选择器">
+        <option value="">不使用工作区（默认）</option>
+        <option value="ws-1">SillyHub（multi-agent-platform）</option>
+        <option value="ws-2"> BSP 管理后台</option>
+        <option value="ws-3"> 个人笔记库</option>
+      </select>
+      <p class="hint" style="color:#888;font-size:11px;margin-top:4px;">选择后，agent 在该工作区的项目目录中运行，并自动加载其 SillySpec 规范文档</p>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title"><span class="name">① 守护进程</span><span class="req">*</span><span class="hint">只能选择在线机器</span></div>
+      <div class="machine-grid">
+        <div class="machine" id="m-A" onclick="pickMachine('m-A')">
+          <div class="m-name">● 我的开发机 <span class="new-badge" style="display:none" id="m-A-bind">绑定</span></div>
+          <div class="m-meta">Windows · 2 个智能体</div>
+        </div>
+        <div class="machine off">
+          <div class="m-name">○ 公司笔记本</div>
+          <div class="m-meta">离线</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title"><span class="name">② 智能体</span><span class="req">*</span><span class="hint">默认 Claude Code</span></div>
+      <div class="chips">
+        <span class="chip sel">⚡ Claude Code [默认]</span>
+        <span class="chip">◎ Codex</span>
+      </div>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title"><span class="name">③ 供应商</span><span class="hint">可选 · 不选则用本机默认</span></div>
+      <select><option>不指定（本机默认）</option></select>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title"><span class="name">④ 智能体档案</span><span class="hint">可选</span></div>
+      <select><option>不指定</option></select>
+    </div>
+
+    <div class="sec">
+      <div class="sec-title"><span class="name">消息</span></div>
+      <textarea id="prompt">帮我看看这个项目的架构</textarea>
+      <div class="btn-row">
+        <span class="hint" style="font-size:11px;color:#888;">选工作区后机器自动联动</span>
+        <button class="btn-primary" id="startBtn">开始会话</button>
+      </div>
+    </div>
+
+    <div class="legend">演示：上方选一个工作区 → 观察绿色上下文提示条 + 机器卡自动选中"绑定"徽标</div>
+  </div>
+
+  <!-- 右：交互流程 -->
+  <div class="card">
+    <h2>交互流程与规则</h2>
+
+    <div class="flow-step">
+      <div class="flow-num">1</div>
+      <div class="flow-body">
+        <b>用户点开工作区下拉（默认「不使用工作区」）</b>
+        <p>选项来自 <code>GET /api/workspaces</code>（后端已按权限过滤——你只能看到自己有权限的工作区）。未加入任何工作区时选择器禁用并提示去创建。</p>
+      </div>
+    </div>
+    <div class="arrow">↓ 选中某工作区</div>
+
+    <div class="flow-step">
+      <div class="flow-num">2</div>
+      <div class="flow-body">
+        <b>机器选择器自动联动</b>
+        <p>查 <code>GET /api/workspaces/my-bindings</code>（批量端点，一次拉全）拿到该工作区绑定的机器；在线则自动选中它 + 显示绿色提示条「会话将在 XXX 的项目目录中运行」。绑定机器离线 / 本人未绑定 / 换绑其它机器 → 不强制，用户可手选任意机器。</p>
+      </div>
+    </div>
+    <div class="arrow">↓ 提交</div>
+
+    <div class="flow-step">
+      <div class="flow-num">3</div>
+      <div class="flow-body">
+        <b>createSession 带上 <code>workspace_id</code></b>
+        <p>后端链路已通：cwd=工作区项目根 + daemon 自动拉取 SillySpec 规范树 + 会话结束回灌。改回「不使用工作区」→ 不带该字段，行为与今天完全一致（零回归）。</p>
+      </div>
+    </div>
+    <div class="arrow">↓ 后端</div>
+
+    <div class="flow-step">
+      <div class="flow-num">4</div>
+      <div class="flow-body">
+        <b>后端补归属校验（本次顺手修的安全缺口）</b>
+        <p><code>create_session</code> 收到 workspace_id 时校验调用者权限（与列表口径一致），无权限/不存在 → 404 拒绝。现状是拿到 ID 直接用，越权可用他人工作区目录。</p>
+      </div>
+    </div>
+
+    <div class="flow-step" style="margin-top:20px;border-top:1px dashed #ddd;padding-top:14px;">
+      <div class="flow-num" style="background:#999">注</div>
+      <div class="flow-body">
+        <b>已知限制（记入 design.md 风险登记）</b>
+        <p>① 工作区项目路径只存在于绑定机器上，选其它机器 agent 会在空目录跑（已用"默认联动绑定机器"缓解，不强制锁定）。</p>
+        <p>② 工作区下拉默认拉前 100 个，超出的用户后续可升级为搜索式（本次不做）。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // 演示联动：选工作区 → 提示条 + 机器选中 + "绑定"徽标
+  const wsNames = { "ws-1": "SillyHub", "ws-2": "BSP 管理后台", "ws-3": "个人笔记库" };
+  const bindMap = { "ws-1": "m-A", "ws-2": "m-A", "ws-3": null }; // 演示：前两个工作区绑定"我的开发机"
+  const sel = document.getElementById("wsSelect");
+  const banner = document.getElementById("ctxBanner");
+  const bindBadge = document.getElementById("m-A-bind");
+  sel.addEventListener("change", () => {
+    const v = sel.value;
+    if (!v) {
+      banner.style.display = "none";
+      bindBadge.style.display = "none";
+      return;
+    }
+    banner.style.display = "block";
+    banner.textContent = "✓ 会话将在「" + wsNames[v] + "」的项目目录中运行，自动加载其规范文档";
+    const bound = bindMap[v];
+    if (bound) {
+      pickMachine(bound);
+      bindBadge.style.display = "inline-block";
+    } else {
+      bindBadge.style.display = "none";
+    }
+  });
+  function pickMachine(id) {
+    document.querySelectorAll(".machine").forEach((el) => el.classList.remove("sel"));
+    document.getElementById(id).classList.add("sel");
+  }
+  pickMachine("m-A");
+</script>
+</body>
+</html>

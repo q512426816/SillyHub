@@ -15,7 +15,27 @@
  *   - channel=tool_call → 不加 🔧 前缀（ql-20260730-001：tool 内容走 classifySessionLog
  *     分流到工具卡片，卡片自带图标；保留正文不再加 emoji 前缀）
  *   - 剥 [ASSISTANT|THINKING|LOG:\w+|TOOL_USE|TOOL_RESULT] 前缀
+ *
+ * 2026-08-19-session-stream-ux / task-01：classifySessionLog / isToolResultDenied /
+ * statusFromToolUseRaw / OVERRIDE_RE / SessionLogSegment(Kind) 已迁入共享装配器
+ * session-log-assembler.ts（design §6：分类函数迁为装配器内部依赖，语义零改动）。
+ * 本文件保留同名导出垫片（下方 re-export）——interactive-session-panel /
+ * runtime-session-helpers / sessions page 与既有单测等既有引用零改动；
+ * 本文件其余 sanitize 函数（sanitizeSessionLogContent / extractDialogQA）不动。
  */
+import { OVERRIDE_RE } from "./session-log-assembler";
+
+// 垫片：分类实现已迁 session-log-assembler.ts，此处仅转出口（对外导出签名零变化）。
+export {
+  classifySessionLog,
+  isToolResultDenied,
+  statusFromToolUseRaw,
+} from "./session-log-assembler";
+export type {
+  SessionLogSegment,
+  SessionLogSegmentKind,
+} from "./session-log-assembler";
+
 export function sanitizeSessionLogContent(content: string, channel?: string | null): string {
   const trimmed = (content ?? "").trim();
   if (!trimmed) return "";
@@ -24,145 +44,11 @@ export function sanitizeSessionLogContent(content: string, channel?: string | nu
   if (/^\[(SYSTEM|RESULT)[^\]]*\]/.test(trimmed)) return "";
   // 2026-08-03-session-stream-partial-revoke / FR-04 / R-04：override 撤回令箭前缀不
   // 泄漏到正文（防御性：attach 历史路径万一收到 override 文本，sanitize 兜底丢弃）。
-  // 与 classifySessionLog 同源 OVERRIDE_RE，仅判命中不取捕获组。
+  // 与 classifySessionLog 同源 OVERRIDE_RE（现于 session-log-assembler.ts），仅判命中
+  // 不取捕获组。
   if (OVERRIDE_RE.test(trimmed)) return "";
   if (channel === "stderr") return `⚠️ ${trimmed}`;
   return trimmed.replace(/^\[(ASSISTANT|THINKING|LOG:\w+|TOOL_USE|TOOL_RESULT)\]\s?/, "");
-}
-
-/**
- * ql-20260729-005：会话日志分类（对话 / 过程信息分流）。
- * ql-20260730-003：tool 拆回 tool_use / tool_result，恢复 use↔result 配对 + 状态徽章。
- *
- * 与 sanitizeSessionLogContent 同一套丢弃规则，但返回结构化分类而非拼接字符串，
- * 供会话面板把「答复正文（reply）」与「过程信息（thinking/tool_use/tool_result/stderr）」分流：
- * 默认对话视图只渲染 reply，过程信息经「对话/全部」切换后再展示。
- *
- * 分类规则：
- *   - 丢弃（返回 null）：AskUserQuestion 卡片协议行 / [TOOL_RESULT] User answered /
- *     [SYSTEM…] / [RESULT…] 与空内容（与原函数完全一致；丢弃优先于 channel 分流）
- *   - kind=thinking：[THINKING] 前缀行（剥前缀）
- *   - kind=tool_use：channel=tool_call（daemon 上报的工具 JSON，含 tool_use_id/success，
- *     权威源）。stdout 的 [TOOL_USE] 文本行与该 JSON 重复 → 丢弃（双发去重，否则 tool_use
- *     翻倍、result 仅够配一半，余下永显「执行中 ⏳」）
- *   - kind=tool_result：[TOOL_RESULT] 前缀的 stdout 文本行（剥前缀，供配对最近 tool_use）
- *   - kind=stderr：channel=stderr
- *   - kind=reply：其余（剥 [ASSISTANT]/[LOG:\w+] 前缀）
- */
-export type SessionLogSegmentKind =
-  | "reply"
-  | "thinking"
-  | "tool_use"
-  | "tool_result"
-  | "stderr"
-  | "override";
-
-export interface SessionLogSegment {
-  kind: SessionLogSegmentKind;
-  text: string;
-  /**
-   * 2026-08-03-session-stream-partial-revoke / FR-04：override kind 专有——
-   * 被撤回的 partial segmentId（取自 [*_OVERRIDE] 前缀后第一段非空白 token，
-   * 形如 "main:msg_abc:1" / "tu_xyz:2"）。供 onLog 查 Map 精确撤回。
-   */
-  segmentId?: string;
-  /**
-   * override kind 专有——区分撤回的是 reply（"assistant"）还是 thinking（"thinking"），
-   * task-06 据此决定截断 turn.output 还是移除 processItems 项。
-   */
-  variant?: "assistant" | "thinking";
-}
-
-/**
- * 2026-08-03-session-stream-partial-revoke / FR-04 / D-002@v1：override 撤回令箭前缀正则。
- * 命中 `[ASSISTANT_OVERRIDE]` / `[THINKING_OVERRIDE]` 前缀，第 1 捕获组是 OVERRIDE 类型
- * （决定 variant），第 2 捕获组是被撤回的 segmentId（\S+，不含空白）。
- *
- * classifySessionLog 用捕获组解析 segmentId + variant；sanitizeSessionLogContent 只判
- * 命中丢弃——同一常量避免两处规则漂移（task-05 constraints）。
- */
-const OVERRIDE_RE = /^\[(ASSISTANT_OVERRIDE|THINKING_OVERRIDE)\]\s+(\S+)/;
-
-export function classifySessionLog(
-  content: string,
-  channel?: string | null,
-): SessionLogSegment | null {
-  const trimmed = (content ?? "").trim();
-  if (!trimmed) return null;
-  if (trimmed.includes("AskUserQuestion")) return null;
-  if (/^\[TOOL_RESULT\]\s*User answered/.test(trimmed)) return null;
-  if (/^\[(SYSTEM|RESULT)[^\]]*\]/.test(trimmed)) return null;
-  // 2026-08-03-session-stream-partial-revoke / FR-04：override 撤回令箭识别。必须在
-  // [THINKING] 分支之前——否则 [THINKING_OVERRIDE] 会被 [THINKING] 前缀正则误吞前缀、
-  // 丢了 _OVERRIDE 语义（task-05 constraints）。text 留空（override 不渲染正文）。
-  const overrideMatch = OVERRIDE_RE.exec(trimmed);
-  if (overrideMatch) {
-    return {
-      kind: "override",
-      segmentId: overrideMatch[2],
-      variant: overrideMatch[1] === "ASSISTANT_OVERRIDE" ? "assistant" : "thinking",
-      text: "",
-    };
-  }
-  if (channel === "stderr") return { kind: "stderr", text: trimmed };
-  if (channel === "tool_call") return { kind: "tool_use", text: trimmed };
-  // ql-20260730-003 修正：stdout [TOOL_USE] 文本行与 channel=tool_call JSON 是同一工具的
-  // 重复记录（daemon 双发），丢弃文本行、以 tool_call JSON 为权威源——否则 tool_use 翻倍、
-  // result 仅够配一半，余下永显「执行中 ⏳」（已结束会话也假运行）。
-  if (/^\[TOOL_USE\]\s?/.test(trimmed)) {
-    return null;
-  }
-  if (/^\[TOOL_RESULT\]\s?/.test(trimmed)) {
-    return { kind: "tool_result", text: trimmed.replace(/^\[TOOL_RESULT\]\s?/, "") };
-  }
-  if (/^\[THINKING\]\s?/.test(trimmed)) {
-    return { kind: "thinking", text: trimmed.replace(/^\[THINKING\]\s?/, "") };
-  }
-  return {
-    kind: "reply",
-    text: trimmed.replace(/^\[(ASSISTANT|THINKING|LOG:\w+)\]\s?/, ""),
-  };
-}
-
-/**
- * ql-20260730-003：判断 tool_result 文本是否表示工具执行失败/被拒（→ deny 状态徽章 ✗）。
- * ql-20260801-004：收紧关键词——去掉 error/fail（成功输出正文常含这些字样会误判，如
- *   grep 命中 "fail"、测试报告 "0 errors"），改为只匹配明确拒绝/失败信号。
- *
- * 配对逻辑让 result 拒绝**覆盖** tool_use 的 success（daemon task-runner.ts:1895 把
- * tool_call JSON 的 success 硬编码为 true，语义是「已放行执行」而非「执行成功」，不可作
- * 最终结果权威；真正的 Runtime Policy 拒绝只体现在 result 文本）。故关键词必须精准，
- * 宁可漏判（success 仍兜底 ok）不可误判成功输出正文。
- *
- * 命中「拒绝|denied|失败|禁止写入|not allowed」任一（大小写不敏感）即判 deny。
- * onLog（实时）与 logsToTurns（attach 历史）共用，避免两处正则不一致。
- */
-export function isToolResultDenied(text: string): boolean {
-  return /拒绝|denied|失败|禁止写入|not allowed/i.test(text ?? "");
-}
-
-/**
- * ql-20260730-003 修正：从 tool_call JSON raw 解析工具执行状态（状态徽章权威源）。
- *
- * daemon 上报的 tool_call JSON 形如
- *   {"tool":"Bash","args":{...},"tool_use_id":"call_xxx","success":true}
- * 含 `success` 布尔字段——工具执行结果真值。以此定状态徽章，不再靠 [TOOL_RESULT] 文本
- * 关键词猜测（避免结果正文里出现 "error"/"fail" 字样误判 ✗）。
- *
- *   - success: true  → "ok"（✓）
- *   - success: false → "deny"（✗）
- *   - 解析失败 / 无 success 字段 → "running"（回退靠后续 result 配对兜底）
- */
-export function statusFromToolUseRaw(raw: string): "ok" | "deny" | "running" {
-  try {
-    const obj = JSON.parse((raw ?? "").trim());
-    if (obj && typeof obj.success === "boolean") {
-      return obj.success ? "ok" : "deny";
-    }
-  } catch {
-    // 非 JSON（人类可读摘要等），回退 running
-  }
-  return "running";
 }
 
 /**

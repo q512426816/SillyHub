@@ -8,7 +8,13 @@ import { MessageSquarePlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { MarkdownText } from "@/components/ui/markdown-text";
 import { InteractiveSessionPanel, type SessionTurnView } from "@/components/daemon/interactive-session-panel";
-import { classifySessionLog, isToolResultDenied, statusFromToolUseRaw } from "@/components/daemon/session-log-sanitize";
+import { classifySessionLog } from "@/components/daemon/session-log-sanitize";
+import {
+  logsToSegments,
+  segmentsToLegacy,
+  type AssemblerLogInput,
+  type TurnSegment,
+} from "@/components/daemon/session-log-assembler";
 import { type AgentRunLogEntry } from "@/lib/agent";
 import {
   type AgentSessionRead,
@@ -162,19 +168,67 @@ export function resumeDisabledTitle(session: AgentSessionRead): string {
 }
 
 /**
+ * task-11 历史 turn 扩展形状：segments（结构化段时间线，FR-01）+ turnStartedAt
+ * （计时锚点，design §7.5——attach 优先 run 快照 started_at，此处兜底组内首条 log
+ * timestamp）。SessionTurnView 本体的这两个可选字段声明归 task-06（渲染层收编）；
+ * 此处以交叉类型先行携带，结构类型兼容（HistoryAttachTurnView 可赋给 SessionTurnView，
+ * 导出签名与既有产出字段零变化）。
+ */
+type HistoryAttachTurnView = SessionTurnView & {
+  segments?: TurnSegment[];
+  turnStartedAt?: number | null;
+};
+
+/** AgentRunLogEntry（历史 DTO）→ AssemblerLogInput（装配器归一形状，字段一一映射）。 */
+function toAssemblerInput(entry: AgentRunLogEntry): AssemblerLogInput {
+  return {
+    logId: entry.id,
+    channel: entry.channel,
+    content: entry.content_redacted,
+    timestamp: entry.timestamp,
+    parentToolUseId: entry.parent_tool_use_id ?? null,
+    subagentType: entry.subagent_type ?? null,
+    depth: entry.depth ?? null,
+    toolKind: entry.tool_kind ?? null,
+  };
+}
+
+/** 计时锚点兜底：组内首条 log timestamp（ms）；缺失 / 非法 → null 容错。 */
+function firstLogTimestampMs(entries: AgentRunLogEntry[]): number | null {
+  const first = entries[0];
+  if (!first?.timestamp) return null;
+  const ms = Date.parse(first.timestamp);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
  * task-11 logsToTurns：把历史日志按 run_id 分组，转成 attach 面板预填的 SessionTurnView。
- * channel==="user" 的 log → prompt；kind=reply 的 log → output（答复正文，拼接保留换行）；
- * thinking/tool/stderr → processItems 过程项（ql-20260730-003，按真实到达顺序，
- * 连续 thinking 合并、被工具打断分段；默认对话视图不展示，切「全部」后渲染在答复气泡之前）。
+ *
+ * 职责划分（design §7 Grill X-05 形状澄清）——turn 级胶水留本函数：run 分组
+ * （turn.runId 用伪 id __attach_history_N__）、user_input 提取 prompt、realRunId、
+ * status completed、token 置空；轮内装配改走共享装配器 logsToSegments（task-01，
+ * FR-05）：AgentRunLogEntry 归一为 AssemblerLogInput 后逐组喂入（段不跨 run），
+ * 连续 thinking 合并、tool_use 状态取 JSON success、tool_result 归属桶位置配对与
+ * 孤儿 deny 判定均由装配器核心承担，本函数不再手写。
  *
  * 2026-07-11-unify-runtime-session-dialog / FR-04: 对每条 content_redacted 先经
  * classifySessionLog 过滤（与 sanitizeSessionLogContent 同源规则），
  * 剥离 SYSTEM/AskUserQuestion 等原始标记。
  *
+ * 2026-07-11 task-12 去重：同内容（kind+文本为键）只保留一次，避免 attach 历史时
+ * 后端 logs 含重复 user_input/agent log 致消息重复显示（防御性，覆盖 logs 内重复
+ * 条目等多种根因）。该 seenText 内容级去重保留在喂入装配器**之前**过滤——与 SSE 的
+ * log_id 去重（seenLogIds）两路语义不合并（design §9.4 / Grill X-08，装配器不去重）。
+ *
  * 2026-08-03-session-stream-partial-revoke / FR-06 / D-003：本函数消费 AgentRunLogEntry
  * （GET /sessions/{id}/logs 返回），其 DTO 不含 segment_id（envelope 新字段仅实时 SSE 通道
  * 有）。历史数据本就干净——partial 已 DELETE（task-14）、override publish-only 不落库
  * （task-02），故历史回显不加撤回逻辑，渲染分支原样保留（design §2.4 / §3 非目标）。
+ *
+ * task-11 兼容投影（design §9.4）：turn.output / turn.processItems 由 segmentsToLegacy
+ * 从段序列投影产出（output = 文本段按序拼接，reply delta 直接 concat；processItems =
+ * 平铺投影，tool.startedAt→ts、thinking/stderr.ts→ts，AskUser 穿插排序依赖），与改前
+ * 手写路径产出等价；segments / turnStartedAt 为本卡新增字段。
  */
 export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
   const map = new Map<string, AgentRunLogEntry[]>();
@@ -183,79 +237,43 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     list.push(log);
     map.set(log.run_id, list);
   }
-  const turns: SessionTurnView[] = [];
+  const turns: HistoryAttachTurnView[] = [];
   let turnIndex = 0;
   for (const [runId, entries] of Array.from(map.entries())) {
     turnIndex += 1;
     const prompts: string[] = [];
-    const outputs: string[] = [];
-    // ql-20260730-003：思考/工具/stderr 按真实到达顺序入 processItems（与实时 onLog 同模型）。
-    const processItems: NonNullable<SessionTurnView["processItems"]> = [];
-    // 2026-07-11-unify-runtime-session-dialog task-12: 去重（同内容只保留一次），
-    // 避免 attach 历史时后端 logs 含重复 user_input/agent log 致消息重复显示
-    //（防御性，覆盖 logs 内重复条目等多种根因）。
     const seenText = new Set<string>();
+    const assemblerInputs: AssemblerLogInput[] = [];
     for (const entry of entries) {
       const seg = classifySessionLog(entry.content_redacted ?? "", entry.channel);
       if (!seg) continue;
-      // ql-20260802-003：保留 log 时间戳（ms），供「全部」视图把 AskUser 提问按 created_at
-      // 穿插进思考/工具时间线（真实顺序）。
-      const ts = entry.timestamp ? Date.parse(entry.timestamp) : undefined;
       const dedupKey = `${seg.kind}:${seg.text}`;
       if (seenText.has(dedupKey)) continue;
       seenText.add(dedupKey);
+      // user_input 是用户消息（prompt）——turn 级胶水，不装配进段（Grill X-05）。
       if (entry.channel === "user_input") {
         prompts.push(seg.text);
-      } else if (seg.kind === "reply") {
-        outputs.push(seg.text);
-      } else if (seg.kind === "tool_use") {
-        // status 从 tool_call JSON 的 success 取（已结束历史会话不假运行）
-        processItems.push({ kind: "tool", raw: seg.text, status: statusFromToolUseRaw(seg.text), ts });
-      } else if (seg.kind === "tool_result") {
-        // 配对最近「尚无 result」的 tool 项补输出文本；status 保留 success 值，仅 running 时兜底
-        let paired = false;
-        for (let i = processItems.length - 1; i >= 0; i -= 1) {
-          const it = processItems[i];
-          if (it && it.kind === "tool" && it.result === undefined) {
-            // ql-20260801-004：result 拒绝优先覆盖 use 的 success（daemon success 恒 true 不可信）
-            const status = isToolResultDenied(seg.text)
-              ? "deny"
-              : it.status === "running"
-                ? "ok"
-                : it.status;
-            processItems[i] = { kind: "tool", raw: it.raw, result: seg.text, status, ts: it.ts };
-            paired = true;
-            break;
-          }
-        }
-        if (!paired) {
-          // ql-20260801-004：孤儿拒绝 result 也判 deny（不硬编码 ok）
-          processItems.push({
-            kind: "tool",
-            raw: "",
-            result: seg.text,
-            status: isToolResultDenied(seg.text) ? "deny" : "ok",
-            ts,
-          });
-        }
-      } else {
-        // thinking/stderr → 保留到达顺序
-        processItems.push(
-          seg.kind === "thinking" ? { kind: "thinking", text: seg.text, ts } : { kind: "stderr", text: seg.text, ts },
-        );
+        continue;
       }
+      assemblerInputs.push(toAssemblerInput(entry));
     }
+    // task-11：按 run 分组后逐组喂入共享装配器（段不跨 run）。
+    const segments = logsToSegments(assemblerInputs);
+    // 兼容投影（§9.4）：output / processItems 形状与改前手写路径等价。
+    const legacy = segmentsToLegacy(segments);
     turns.push({
       runId: `__attach_history_${turnIndex}__`,
       // ql-20260802-001：保留真实 run_id 供 AskUser 提问历史穿插到对应 turn（跟会话顺序）
       realRunId: runId,
       turn: turnIndex,
       prompt: prompts.join("\n"),
-      // ql-20260730-004：reply 流式 delta 直接 concat（同 onLog），换行在 delta 内部。
-      output: outputs.join(""),
+      // ql-20260730-004：reply 流式 delta 直接 concat（投影按序拼接，语义同前）。
+      output: legacy.output,
       status: "completed",
       seenLogIds: new Set(entries.map((e) => e.id)),
-      processItems,
+      processItems: legacy.processItems,
+      segments,
+      turnStartedAt: firstLogTimestampMs(entries),
       // ql-20260621：历史回看无实时 token（logs 接口不含 token），置 null。
       // 若后续 logs 接口补 token 字段可在此填充。
       inputTokens: null,

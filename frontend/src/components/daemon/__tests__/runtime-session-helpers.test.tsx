@@ -2,6 +2,11 @@
  * ql-20260729-005：logsToTurns 对话/过程信息分流单测。
  * user_input → prompt；reply → output（答复正文）；thinking/tool/stderr → details
  * （默认对话视图不展示，切「全部」后渲染）。
+ *
+ * 2026-08-19-session-stream-ux / task-11：logsToTurns 内部改走共享装配器
+ * logsToSegments + segmentsToLegacy 兼容投影——本文件既有断言验证投影与改前手写
+ * 路径等价（output / processItems 逐项一致）；另增 task-11 段模型形状断言
+ * （segments / turnStartedAt / 归属嵌套 / 连续 thinking 数据层合并 / 去重保持）。
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -14,19 +19,38 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { logsToTurns } from "../runtime-session-helpers";
+import type { TurnSegment } from "../session-log-assembler";
 import type { AgentRunLogEntry } from "@/lib/agent";
+
+/**
+ * task-11 测试视角：logsToTurns 产出的 turn 实际携带 segments / turnStartedAt 两个
+ * 新增字段（运行时为真，类型声明归 task-06 收编进 SessionTurnView），此处交叉类型
+ * 断言用。等 task-06 落地后可去掉本垫片直接读字段。
+ */
+type TurnWithSegments = ReturnType<typeof logsToTurns>[number] & {
+  segments?: TurnSegment[];
+  turnStartedAt?: number | null;
+};
+
+/** 便捷封装：logsToTurns + 段字段视角断言（见 TurnWithSegments 注）。 */
+function toSegmentTurns(logs: AgentRunLogEntry[]): TurnWithSegments[] {
+  return logsToTurns(logs) as TurnWithSegments[];
+}
 
 function makeLog(
   id: string,
   runId: string,
   channel: string | null,
   content: string,
+  /** task-11：归属三字段 / tool_kind / timestamp 等可选覆盖（子代理嵌套与计时锚点用例）。 */
+  extra?: Partial<AgentRunLogEntry>,
 ): AgentRunLogEntry {
   return {
     id,
     run_id: runId,
     channel,
     content_redacted: content,
+    ...extra,
   } as unknown as AgentRunLogEntry;
 }
 
@@ -168,9 +192,9 @@ describe("logsToTurns 对话/过程分流（ql-20260730-003 processItems 有序�
     ]);
   });
 
-  it("连续 thinking 各自独立入 processItems（合并由展示层做）；被工具打断的思考保持顺序不混", () => {
-    // 数据层只按序入项（每个 [THINKING] 一个 thinking 项），连续合并是展示层 TurnDetailsList
-    // 的职责。这里验证顺序：思考A → 工具 → 思考B（工具穿插其间，不一股脑合并）。
+  it("被工具打断的思考保持顺序不混（task-11 后连续未打断的思考由装配器合并，见下组用例）", () => {
+    // 工具穿插其间 → 思考A 与 思考B 分属不同思考段（不合并），保持到达顺序：
+    // 思考A → 工具 → 思考B。投影后各自独立入 processItems。
     const turns = logsToTurns([
       makeLog("1", "run-1", null, "[THINKING] 先想想"),
       makeLog("2", "run-1", "tool_call", "Read a.ts"),
@@ -181,5 +205,114 @@ describe("logsToTurns 对话/过程分流（ql-20260730-003 processItems 有序�
       { kind: "tool", raw: "Read a.ts", status: "running" },
       { kind: "thinking", text: "再想想" },
     ]);
+  });
+});
+
+describe("task-11 段模型接入（logsToSegments + 兼容投影）", () => {
+  it("turn 带 segments 与 turnStartedAt（组内首条 log timestamp；缺失容错 null）", () => {
+    const ts0 = "2026-08-19T10:00:00.000Z";
+    const withTs = toSegmentTurns([
+      makeLog("1", "run-1", "user_input", "你好", { timestamp: ts0 }),
+      makeLog("2", "run-1", "stdout", "你好呀", { timestamp: ts0 }),
+    ]);
+    expect(withTs[0]!.turnStartedAt).toBe(Date.parse(ts0));
+    expect(withTs[0]!.segments).toEqual([
+      { kind: "text", id: "text:2", text: "你好呀", streaming: false, startedAt: Date.parse(ts0) },
+    ]);
+    // 旧数据无 timestamp → null 容错，段照常装配
+    const noTs = toSegmentTurns([
+      makeLog("1", "run-1", "user_input", "你好"),
+      makeLog("2", "run-1", "stdout", "你好呀"),
+    ]);
+    expect(noTs[0]!.turnStartedAt).toBeNull();
+    expect(noTs[0]!.segments).toEqual([
+      { kind: "text", id: "text:2", text: "你好呀", streaming: false, startedAt: null },
+    ]);
+  });
+
+  it("连续 thinking 由装配器在数据层合并为一项（\\n 连接，渲染不再需要重复合并）", () => {
+    const turns = toSegmentTurns([
+      makeLog("1", "run-1", null, "[THINKING] 先想想"),
+      makeLog("2", "run-1", null, "[THINKING] 再想想"),
+      makeLog("3", "run-1", null, "[THINKING] 又想想"),
+    ]);
+    expect(turns[0]!.processItems).toEqual([
+      { kind: "thinking", text: "先想想\n再想想\n又想想" },
+    ]);
+    expect(turns[0]!.segments).toEqual([
+      { kind: "thinking", id: "thinking:1", text: "先想想\n再想想\n又想想", streaming: false, ts: null },
+    ]);
+  });
+
+  it("归属字段（parent_tool_use_id）→ 子代理段嵌套进对应 tool 段 children；投影平铺等价（design §9.1）", () => {
+    const turns = toSegmentTurns([
+      makeLog(
+        "1",
+        "run-1",
+        "tool_call",
+        '{"tool":"Task","args":{"description":"调研"},"tool_use_id":"tu_1","success":true}',
+      ),
+      makeLog("2", "run-1", null, "[THINKING] 子思考", { parent_tool_use_id: "tu_1", subagent_type: "researcher" }),
+      makeLog("3", "run-1", "stdout", "子代理结论", { parent_tool_use_id: "tu_1", subagent_type: "researcher" }),
+      makeLog("4", "run-1", "stdout", "[TOOL_RESULT] 子代理完成"),
+      makeLog("5", "run-1", "stdout", "主答复"),
+    ]);
+    const turn = turns[0]!;
+    // 段模型：Task tool 段（id=tool_use_id）内嵌子代理 thinking + text；主答复为顶层 text 段
+    const segs = turn.segments!;
+    expect(segs).toHaveLength(2);
+    const toolSeg = segs[0];
+    expect(toolSeg?.kind).toBe("tool");
+    if (toolSeg?.kind !== "tool") throw new Error("expected tool segment");
+    expect(toolSeg.id).toBe("tu_1");
+    expect(toolSeg.toolName).toBe("Task");
+    expect(toolSeg.status).toBe("ok");
+    expect(toolSeg.result).toBe("子代理完成");
+    expect(toolSeg.children).toEqual([
+      { kind: "thinking", id: "thinking:2", text: "子思考", streaming: false, ts: null },
+      { kind: "text", id: "text:3", text: "子代理结论", streaming: false, startedAt: null },
+    ]);
+    expect(segs[1]).toMatchObject({ kind: "text", text: "主答复" });
+    // 兼容投影等价（§9.4）：output 按序含子代理 reply；processItems 平铺（tool → 子 thinking），
+    // 与改前无归属感知的平铺产出一致（子代理消息本就按到达顺序穿插在主 tool 之后）。
+    expect(turn.output).toBe("子代理结论主答复");
+    expect(turn.processItems).toEqual([
+      {
+        kind: "tool",
+        raw: '{"tool":"Task","args":{"description":"调研"},"tool_use_id":"tu_1","success":true}',
+        result: "子代理完成",
+        status: "ok",
+      },
+      { kind: "thinking", text: "子思考" },
+    ]);
+  });
+
+  it("重复内容条目只保留一次（seenText 内容级去重保持，喂入装配器前过滤）", () => {
+    const turns = toSegmentTurns([
+      makeLog("1", "run-1", "user_input", "帮我查"),
+      makeLog("2", "run-1", "user_input", "帮我查"),
+      makeLog("3", "run-1", "stdout", "答复"),
+      makeLog("4", "run-1", "stdout", "答复"),
+    ]);
+    const turn = turns[0]!;
+    expect(turn.prompt).toBe("帮我查");
+    expect(turn.output).toBe("答复");
+    expect(turn.segments).toEqual([
+      { kind: "text", id: "text:3", text: "答复", streaming: false, startedAt: null },
+    ]);
+  });
+
+  it("多 run 分组：每组独立装配，段不跨 run", () => {
+    const turns = toSegmentTurns([
+      makeLog("1", "run-1", "user_input", "第一问"),
+      makeLog("2", "run-1", "stdout", "第一答"),
+      makeLog("3", "run-2", "user_input", "第二问"),
+      makeLog("4", "run-2", "stdout", "第二答"),
+    ]);
+    expect(turns).toHaveLength(2);
+    expect(turns[0]!.realRunId).toBe("run-1");
+    expect(turns[1]!.realRunId).toBe("run-2");
+    expect(turns[0]!.segments?.map((s) => (s.kind === "text" ? s.text : s.kind))).toEqual(["第一答"]);
+    expect(turns[1]!.segments?.map((s) => (s.kind === "text" ? s.text : s.kind))).toEqual(["第二答"]);
   });
 });

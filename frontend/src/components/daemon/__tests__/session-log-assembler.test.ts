@@ -1,0 +1,711 @@
+/**
+ * 2026-08-19-session-stream-ux / task-03：共享装配器纯函数单测（行为规格）。
+ *
+ * 只走公开 API（applyLogToSegments / logsToSegments / segmentsToLegacy / finishTurn /
+ * createEmptyAssembledTurn）断言段结构形状，不 mock 被测函数、不 mock 网络/React/定时器。
+ * 用例分组（task 卡 acceptance 逐条覆盖）：
+ *   1. 分段（FR-01）：连续 reply 续接同段 / 被非文本段打断开新段 / 连续 thinking \n 合并；
+ *   2. 归属嵌套（FR-03）：parent_tool_use_id 路由进 tool 段 children + depth>1 递归；
+ *   3. override 撤回（R-06 / Grill X-06）：两前缀 × 两 variant + 跨段撤回 + no-op；
+ *   4. 归属桶配对（Grill X-02）：同桶最后未配对配对、主/子交错不误配 + R-07 容错；
+ *   5. 兜底 stub（R-02 / §9.5）：子先到建 stub / tool 段到达迁入合并 / 父缺失保留平铺；
+ *   6. 双路去重（R-01 / Grill X-08）：SSE log_id 与历史 seenText 两路独立不合并；
+ *   7. 历史与实时一致性（§9.1 / §9.4）：增量 vs 批量深度相等 + 投影 ts 映射；
+ *   8. streaming（§5 Phase3）：置位 / 撤回随段清除 / finishTurn 全树清除。
+ */
+
+import { describe, it, expect } from "vitest";
+
+import {
+  applyLogToSegments,
+  createEmptyAssembledTurn,
+  finishTurn,
+  logsToSegments,
+  segmentsToLegacy,
+} from "../session-log-assembler";
+import type {
+  AssembledTurn,
+  AssemblerLogInput,
+  ToolTurnSegment,
+  TurnSegment,
+} from "../session-log-assembler";
+
+type TextTurnSegment = Extract<TurnSegment, { kind: "text" }>;
+type ThinkingTurnSegment = Extract<TurnSegment, { kind: "thinking" }>;
+
+/* ───────── 测试辅助（每个用例独立 fixture；构造器模式对齐 runtime-session-helpers.test） ───────── */
+
+/** 构造归一化日志输入（SSE envelope 与历史 log 的统一形状）。extra 覆盖归属三字段等可选项。 */
+function makeLog(
+  id: string | null,
+  channel: string | null,
+  content: string,
+  extra?: Partial<AssemblerLogInput>,
+): AssemblerLogInput {
+  return { logId: id, channel, content, timestamp: null, ...extra };
+}
+
+/** 逐条应用（实时 SSE 路径）到空 turn。 */
+function applyAll(logs: AssemblerLogInput[]): AssembledTurn {
+  return logs.reduce((turn, log) => applyLogToSegments(turn, log), createEmptyAssembledTurn());
+}
+
+/** DFS 全树找首个命中段（断言真实段结构用，不依赖被测文件内部函数）。 */
+function findSeg(
+  segments: TurnSegment[],
+  pred: (_s: TurnSegment) => boolean,
+): TurnSegment | undefined {
+  for (const s of segments) {
+    if (pred(s)) return s;
+    if (s.kind === "tool" || s.kind === "subagent_stub") {
+      const inner = findSeg(s.children, pred);
+      if (inner) return inner;
+    }
+  }
+  return undefined;
+}
+
+function expectText(s: TurnSegment | undefined): TextTurnSegment {
+  if (!s || s.kind !== "text") throw new Error(`expected text segment, got ${s?.kind ?? "none"}`);
+  return s;
+}
+
+function expectThinking(s: TurnSegment | undefined): ThinkingTurnSegment {
+  if (!s || s.kind !== "thinking") {
+    throw new Error(`expected thinking segment, got ${s?.kind ?? "none"}`);
+  }
+  return s;
+}
+
+function expectTool(s: TurnSegment | undefined): ToolTurnSegment {
+  if (!s || s.kind !== "tool") throw new Error(`expected tool segment, got ${s?.kind ?? "none"}`);
+  return s;
+}
+
+/** DFS 找 id 匹配的 tool 段（嵌套 children 一并搜），找不到即测试失败。 */
+function toolById(segments: TurnSegment[], id: string): ToolTurnSegment {
+  return expectTool(findSeg(segments, (s) => s.kind === "tool" && s.id === id));
+}
+
+/* ───────── 1. 分段（FR-01） ───────── */
+
+describe("分段（FR-01：续接 / 打断 / thinking 合并）", () => {
+  it("连续 reply 续接同段（无分隔符直拼，同 legacy output concat 语义）", () => {
+    const turn = applyAll([
+      makeLog("1", "stdout", "你好"),
+      makeLog("2", "stdout", "，世界"),
+      makeLog("3", "stdout", "！"),
+    ]);
+    expect(turn.segments).toEqual([
+      { kind: "text", id: "text:1", text: "你好，世界！", streaming: false, startedAt: null },
+    ]);
+    expect(turn.output).toBe("你好，世界！");
+  });
+
+  it("reply 被 tool_use 打断开新 text 段；多段文本投影按序拼接等价单串", () => {
+    const raw = '{"tool":"Read","args":{"file_path":"a.ts"},"tool_use_id":"tu_a","success":true}';
+    const turn = applyAll([
+      makeLog("1", "stdout", "前文"),
+      makeLog("2", "tool_call", raw),
+      makeLog("3", "stdout", "后文"),
+    ]);
+    expect(turn.segments.map((s) => s.kind)).toEqual(["text", "tool", "text"]);
+    const first = expectText(turn.segments[0]);
+    const second = expectText(turn.segments[2]);
+    expect(first.text).toBe("前文");
+    expect(second.text).toBe("后文");
+    // 打断后是不同段（段 id 按段唯一，R-06 跨段撤回依赖）
+    expect(first.id).not.toBe(second.id);
+    const tool = expectTool(turn.segments[1]);
+    expect(tool.id).toBe("tu_a");
+    expect(tool.toolName).toBe("Read");
+    expect(tool.primary).toBe("a.ts");
+    expect(tool.status).toBe("ok");
+    // 投影：多段文本按序拼接，与单串 concat 结果等价（§9.4）
+    expect(turn.output).toBe("前文后文");
+  });
+
+  it("reply 被 stderr 打断同样开新段（任何非同类段都打断）", () => {
+    const turn = applyAll([
+      makeLog("1", "stdout", "前"),
+      makeLog("2", "stderr", "warn"),
+      makeLog("3", "stdout", "后"),
+    ]);
+    expect(turn.segments.map((s) => s.kind)).toEqual(["text", "stderr", "text"]);
+    expect(turn.output).toBe("前后");
+    expect(turn.processItems).toEqual([{ kind: "stderr", text: "warn" }]);
+  });
+
+  it("连续 thinking 合并为一项（\\n 连接，同 TurnDetailsList 连续思考合并格式）", () => {
+    const turn = applyAll([
+      makeLog("1", null, "[THINKING] 先想想"),
+      makeLog("2", null, "[THINKING] 再想想"),
+      makeLog("3", null, "[THINKING] 又想想"),
+    ]);
+    expect(turn.segments).toEqual([
+      { kind: "thinking", id: "thinking:1", text: "先想想\n再想想\n又想想", streaming: false, ts: null },
+    ]);
+    expect(turn.processItems).toEqual([{ kind: "thinking", text: "先想想\n再想想\n又想想" }]);
+  });
+
+  it("thinking 被打断分段，投影出两个独立思考项（保持到达顺序不混）", () => {
+    const raw = '{"tool":"Bash","args":{"command":"ls"},"tool_use_id":"tu_b","success":true}';
+    const turn = applyAll([
+      makeLog("1", null, "[THINKING] 思考A"),
+      makeLog("2", "tool_call", raw),
+      makeLog("3", null, "[THINKING] 思考B"),
+    ]);
+    expect(turn.segments.map((s) => s.kind)).toEqual(["thinking", "tool", "thinking"]);
+    expect(turn.processItems).toEqual([
+      { kind: "thinking", text: "思考A" },
+      { kind: "tool", raw, status: "ok" },
+      { kind: "thinking", text: "思考B" },
+    ]);
+  });
+});
+
+/* ───────── 2. 归属嵌套（FR-03） ───────── */
+
+describe("归属嵌套（FR-03：parent_tool_use_id 路由）", () => {
+  it("子代理消息按 parent_tool_use_id 路由进 tool 段 children；主消息仍顶层平铺", () => {
+    const raw = '{"tool":"Task","args":{"description":"调研"},"tool_use_id":"tu_task","success":true}';
+    const turn = applyAll([
+      makeLog("1", "tool_call", raw),
+      makeLog("2", null, "[THINKING] 子思考", { parentToolUseId: "tu_task", subagentType: "researcher" }),
+      makeLog("3", "stdout", "子代理结论", { parentToolUseId: "tu_task", subagentType: "researcher" }),
+      makeLog("4", "stdout", "主答复"),
+    ]);
+    expect(turn.segments).toHaveLength(2);
+    const tool = expectTool(turn.segments[0]);
+    expect(tool.subagentType).toBe("researcher");
+    expect(tool.children).toEqual([
+      { kind: "thinking", id: "thinking:2", text: "子思考", streaming: false, ts: null },
+      { kind: "text", id: "text:3", text: "子代理结论", streaming: false, startedAt: null },
+    ]);
+    expect(expectText(turn.segments[1])).toEqual({
+      kind: "text", id: "text:4", text: "主答复", streaming: false, startedAt: null,
+    });
+    // 投影（§9.1 等价）：output 含子代理 reply（DFS 序），子思考平铺进 processItems
+    expect(turn.output).toBe("子代理结论主答复");
+    expect(turn.processItems).toEqual([
+      { kind: "tool", raw, status: "ok" },
+      { kind: "thinking", text: "子思考" },
+    ]);
+  });
+
+  it("depth>1 递归嵌套：parentToolUseId 指向 children 内 tool 段 id（子内再嵌孙）", () => {
+    const turn = applyAll([
+      makeLog("1", "tool_call", '{"tool":"Task","args":{"description":"父任务"},"tool_use_id":"tu_p","success":true}'),
+      makeLog(
+        "2",
+        "tool_call",
+        '{"tool":"Task","args":{"description":"子任务"},"tool_use_id":"tu_c","success":true}',
+        { parentToolUseId: "tu_p", subagentType: "researcher" },
+      ),
+      makeLog("3", "stdout", "孙辈消息", { parentToolUseId: "tu_c", subagentType: "writer", depth: 2 }),
+    ]);
+    const outer = toolById(turn.segments, "tu_p");
+    expect(outer.subagentType).toBe("researcher");
+    const inner = toolById(outer.children, "tu_c");
+    // 嵌套关系由 parent 链表达（不依赖 depth 字段）；容器补记子代理目录信息
+    expect(inner.subagentType).toBe("writer");
+    expect(inner.children).toEqual([
+      { kind: "text", id: "text:3", text: "孙辈消息", streaming: false, startedAt: null },
+    ]);
+    // 投影 DFS：父 tool → 子 tool（先自身项再 children）
+    expect(turn.processItems.map((p) => p.kind)).toEqual(["tool", "tool"]);
+  });
+});
+
+/* ───────── 3. override 撤回（R-06 / Grill X-06） ───────── */
+
+describe("override 撤回（R-06：前缀路由 × variant × 跨段撤回）", () => {
+  it("main 前缀 × assistant：partial 被工具段打断分裂多段后 override 到达 → 全部派生段移除，output 投影同步", () => {
+    const raw = '{"tool":"Bash","args":{"command":"ls"},"tool_use_id":"tu_x","success":true}';
+    const turn = applyAll([
+      makeLog("1", "stdout", "保留整段"),
+      makeLog("2", "stdout", "partial-A", { segmentId: "main:msg_1:1" }),
+      makeLog("3", "tool_call", raw),
+      makeLog("4", "stdout", "partial-B", { segmentId: "main:msg_1:1" }),
+    ]);
+    // 同一 segmentId 的 partial 被工具段打断 → 分裂为基段 + -2 后缀派生段（R-06 段模型形态）
+    expect(turn.segments.map((s) => s.id)).toEqual([
+      "text:1",
+      "text:main:msg_1:1",
+      "tu_x",
+      "text:main:msg_1:1-2",
+    ]);
+    expect(turn.output).toBe("保留整段partial-Apartial-B");
+    const after = applyLogToSegments(turn, makeLog("5", null, "[ASSISTANT_OVERRIDE] main:msg_1:1"));
+    // 跨段撤回：该 segmentId 的全部派生段一并移除——段模型等价 legacy 单串截断语义
+    // （该 partial 对 output 的全部贡献被截断，前后他段文本保留）
+    expect(after.segments.map((s) => s.id)).toEqual(["text:1", "tu_x"]);
+    expect(after.output).toBe("保留整段");
+    // 未触及段引用稳定（path-copy，FR-06）
+    expect(after.segments[0]).toBe(turn.segments[0]);
+    expect(after.segments[1]).toBe(turn.segments[2]);
+  });
+
+  it("异源段交错：partial 续接纯度（不与其它 segmentId 续接）→ 派生链分裂，撤回只命中本链", () => {
+    const turn = applyAll([
+      makeLog("1", "stdout", "m1-a", { segmentId: "main:m1:1" }),
+      makeLog("2", "stdout", "m2-a", { segmentId: "main:m2:1" }),
+      makeLog("3", "stdout", "m1-b", { segmentId: "main:m1:1" }),
+    ]);
+    // m1 的 partial 不与异源段（m2）续接 → 交错分裂出 m1 的 -2 派生段
+    expect(turn.segments.map((s) => s.id)).toEqual([
+      "text:main:m1:1",
+      "text:main:m2:1",
+      "text:main:m1:1-2",
+    ]);
+    const after = applyLogToSegments(turn, makeLog("4", null, "[ASSISTANT_OVERRIDE] main:m1:1"));
+    // 跨段撤回只命中 m1 的派生链（基段 + -2），m2 保留
+    expect(after.segments.map((s) => s.id)).toEqual(["text:main:m2:1"]);
+    expect(after.output).toBe("m2-a");
+  });
+
+  it("main 前缀 × thinking：撤回思考段（思考项移除语义），跨段派生一并移除", () => {
+    const raw = '{"tool":"Read","args":{"file_path":"a.ts"},"tool_use_id":"tu_y","success":true}';
+    const turn = applyAll([
+      makeLog("1", null, "[THINKING] 撤掉的思考", { segmentId: "main:msg_9:2" }),
+      makeLog("2", "tool_call", raw),
+      makeLog("3", null, "[THINKING] 保留的思考"),
+      makeLog("4", null, "[THINKING] 续接保留"),
+    ]);
+    expect(turn.processItems.map((p) => p.kind)).toEqual(["thinking", "tool", "thinking"]);
+    const after = applyLogToSegments(turn, makeLog("5", null, "[THINKING_OVERRIDE] main:msg_9:2"));
+    expect(after.segments.map((s) => s.kind)).toEqual(["tool", "thinking"]);
+    expect(after.output).toBe("");
+    expect(after.processItems).toEqual([
+      { kind: "tool", raw, status: "ok" },
+      { kind: "thinking", text: "保留的思考\n续接保留" },
+    ]);
+  });
+
+  it("tool_use_id 前缀 × thinking：撤回路由进 tool 段 children 内的 partial 思考", () => {
+    const raw = '{"tool":"Task","args":{"description":"子代理"},"tool_use_id":"tu_t","success":true}';
+    const turn = applyAll([
+      makeLog("1", "tool_call", raw),
+      makeLog("2", null, "[THINKING] 子思考partial", { parentToolUseId: "tu_t", segmentId: "tu_t:2" }),
+      makeLog("3", "stdout", "子正文", { parentToolUseId: "tu_t" }),
+      makeLog("4", null, "[THINKING] 保留子思考", { parentToolUseId: "tu_t" }),
+    ]);
+    // 撤回前：partial 思考段 streaming 已置位（带 segmentId 追加，§5 Phase3）
+    expect(expectThinking(findSeg(turn.segments, (s) => s.id === "thinking:tu_t:2")).streaming).toBe(true);
+    const after = applyLogToSegments(turn, makeLog("5", null, "[THINKING_OVERRIDE] tu_t:2"));
+    const tool = expectTool(after.segments[0]);
+    expect(tool.children.map((s) => s.kind)).toEqual(["text", "thinking"]);
+    expect(after.output).toBe("子正文");
+    expect(after.processItems).toEqual([
+      { kind: "tool", raw, status: "ok" },
+      { kind: "thinking", text: "保留子思考" },
+    ]);
+  });
+
+  it("tool_use_id 前缀 × assistant：撤回 tool 段 children 内分裂的 partial 文本（投影同步）", () => {
+    const raw = '{"tool":"Task","args":{"description":"子代理"},"tool_use_id":"tu_t2","success":true}';
+    const turn = applyAll([
+      makeLog("1", "tool_call", raw),
+      makeLog("2", "stdout", "sub-a", { parentToolUseId: "tu_t2", segmentId: "tu_t2:1" }),
+      makeLog("3", "stderr", "子代理告警", { parentToolUseId: "tu_t2" }),
+      makeLog("4", "stdout", "sub-b", { parentToolUseId: "tu_t2", segmentId: "tu_t2:1" }),
+    ]);
+    expect(turn.output).toBe("sub-asub-b");
+    const after = applyLogToSegments(turn, makeLog("5", null, "[ASSISTANT_OVERRIDE] tu_t2:1"));
+    expect(after.segments).toHaveLength(1);
+    const tool = expectTool(after.segments[0]);
+    expect(tool.children.map((s) => s.kind)).toEqual(["stderr"]);
+    // 子代理 partial 文本贡献从 output 一并截断（投影同步）
+    expect(after.output).toBe("");
+  });
+
+  it("no-op：未知 segmentId / 未知容器前缀 / kind 不匹配 → 原引用返回（对齐 Map 未命中即 return）", () => {
+    const turn = applyAll([makeLog("1", "stdout", "正文")]);
+    // 顶层无该 segmentId 派生段
+    expect(applyLogToSegments(turn, makeLog("2", null, "[ASSISTANT_OVERRIDE] main:ghost:9"))).toBe(turn);
+    // 树内无 tu_none 容器
+    expect(applyLogToSegments(turn, makeLog("3", null, "[THINKING_OVERRIDE] tu_none:1"))).toBe(turn);
+    // 撤 thinking 但只有 text 段（variant 决定撤回 kind）
+    expect(applyLogToSegments(turn, makeLog("4", null, "[THINKING_OVERRIDE] main:1"))).toBe(turn);
+  });
+});
+
+/* ───────── 4. 归属桶配对（Grill X-02）与 tool 段容错（R-07） ───────── */
+
+describe("归属桶配对（Grill X-02：同桶最后未配对，不跨桶误配）", () => {
+  it("tool_result 只配对同桶（parentToolUseId 相同）最后未配对 tool 段；主/子工具交错不误配", () => {
+    const tuARaw = '{"tool":"Read","args":{"file_path":"a.ts"},"tool_use_id":"tu_A","success":true}';
+    const tuPRaw = '{"tool":"Task","args":{"description":"子代理"},"tool_use_id":"tu_P","success":true}';
+    const tuSRaw = '{"tool":"Bash","args":{"command":"ls"},"tool_use_id":"tu_S","success":true}';
+    const ts4 = "2026-08-19T10:00:04.000Z";
+    let turn = createEmptyAssembledTurn();
+    for (const log of [
+      makeLog("1", "tool_call", tuARaw),
+      makeLog("2", "tool_call", tuPRaw),
+      makeLog("3", "tool_call", tuSRaw, { parentToolUseId: "tu_P" }),
+    ]) {
+      turn = applyLogToSegments(turn, log);
+    }
+    // 子桶 result：只配对 tu_P 桶内最后未配对的 tu_S——主级 tu_A / tu_P 不被跨桶误配
+    turn = applyLogToSegments(
+      turn,
+      makeLog("4", "stdout", "[TOOL_RESULT] 子工具结果", { parentToolUseId: "tu_P", timestamp: ts4 }),
+    );
+    expect(toolById(turn.segments, "tu_A").result).toBeUndefined();
+    expect(toolById(turn.segments, "tu_P").result).toBeUndefined();
+    expect(toolById(turn.segments, "tu_S")).toEqual({
+      kind: "tool",
+      id: "tu_S",
+      raw: tuSRaw,
+      result: "子工具结果",
+      status: "ok",
+      toolName: "Bash",
+      primary: "ls",
+      startedAt: null,
+      endedAt: Date.parse(ts4),
+      children: [],
+      subagentType: null,
+    });
+    // 主级 result 交错到达：配对主级最后未配对的 tu_P（不跳配 tu_A、不误入子桶）
+    turn = applyLogToSegments(turn, makeLog("5", "stdout", "[TOOL_RESULT] 任务结果"));
+    expect(toolById(turn.segments, "tu_P").result).toBe("任务结果");
+    expect(toolById(turn.segments, "tu_A").result).toBeUndefined();
+    turn = applyLogToSegments(turn, makeLog("6", "stdout", "[TOOL_RESULT] 文件内容"));
+    expect(toolById(turn.segments, "tu_A").result).toBe("文件内容");
+    // 子桶已配对的 tu_S 不被主级 result 覆盖
+    expect(toolById(turn.segments, "tu_S").result).toBe("子工具结果");
+  });
+
+  it("桶内孤儿 result（桶内无未配对 tool）→ raw 空 tool 段兜底落在桶内，不上浮主级", () => {
+    const raw = '{"tool":"Task","args":{"description":"子代理"},"tool_use_id":"tu_orp","success":true}';
+    const turn = applyAll([
+      makeLog("1", "tool_call", raw),
+      makeLog("2", "stdout", "[TOOL_RESULT] 桶内孤儿", { parentToolUseId: "tu_orp" }),
+    ]);
+    expect(turn.segments).toHaveLength(1);
+    const tool = expectTool(turn.segments[0]);
+    expect(tool.children).toHaveLength(1);
+    expect(tool.children[0]).toEqual({
+      kind: "tool",
+      id: "tool:2",
+      raw: "",
+      result: "桶内孤儿",
+      status: "ok",
+      toolName: null,
+      primary: null,
+      startedAt: null,
+      endedAt: null,
+      children: [],
+      subagentType: null,
+    });
+  });
+
+  it("tool_call 非 JSON（R-07 容错）：id 退 logId 派生、toolName=null 原样 raw、status running 靠 result 配对兜底", () => {
+    const turn = applyAll([
+      makeLog("1", "tool_call", "Read a.ts"),
+      makeLog("2", "stdout", "[TOOL_RESULT] 文件内容"),
+    ]);
+    expect(turn.segments).toEqual([
+      {
+        kind: "tool",
+        id: "tool:1",
+        raw: "Read a.ts",
+        result: "文件内容",
+        status: "ok",
+        toolName: null,
+        primary: null,
+        startedAt: null,
+        endedAt: null,
+        children: [],
+        subagentType: null,
+      },
+    ]);
+  });
+});
+
+/* ───────── 5. 兜底 stub（R-02 / §9.5） ───────── */
+
+describe("兜底 stub（R-02：子先到 / 迁入合并 / 父缺失平铺）", () => {
+  it("子消息先到（无匹配 tool 段）→ 顶层建立 subagent_stub 容纳", () => {
+    const turn = applyAll([
+      makeLog("1", "stdout", "子消息先到", { parentToolUseId: "tu_late", subagentType: "researcher" }),
+    ]);
+    expect(turn.segments).toEqual([
+      {
+        kind: "subagent_stub",
+        id: "tu_late",
+        subagentType: "researcher",
+        children: [
+          { kind: "text", id: "text:1", text: "子消息先到", streaming: false, startedAt: null },
+        ],
+      },
+    ]);
+    // 投影平铺：stub 只展开 children（legacy 无 stub 概念）
+    expect(turn.output).toBe("子消息先到");
+  });
+
+  it("后续 tool_use 到达且 id 匹配 → stub 移除、children / subagentType 随迁 tool 段", () => {
+    const raw = '{"tool":"Task","args":{"description":"调研"},"tool_use_id":"tu_late","success":true}';
+    const turn = applyAll([
+      makeLog("1", "stdout", "子消息先到", { parentToolUseId: "tu_late", subagentType: "researcher" }),
+      makeLog("2", "stdout", "子补充", { parentToolUseId: "tu_late" }),
+      makeLog("3", "tool_call", raw),
+      makeLog("4", "stdout", "主答复"),
+    ]);
+    // stub 已移除（树内只剩 tool + 主文本）；stub 内连续文本已续接合并
+    expect(turn.segments.map((s) => s.kind)).toEqual(["tool", "text"]);
+    const tool = expectTool(turn.segments[0]);
+    expect(tool.id).toBe("tu_late");
+    expect(tool.subagentType).toBe("researcher");
+    expect(tool.children).toEqual([
+      { kind: "text", id: "text:1", text: "子消息先到子补充", streaming: false, startedAt: null },
+    ]);
+    expect(turn.output).toBe("子消息先到子补充主答复");
+  });
+
+  it("父 tool_use 永缺失 → stub 保留顶层平铺位置，后续主消息接在其后", () => {
+    const turn = applyAll([
+      makeLog("1", "stdout", "子消息", { parentToolUseId: "tu_gone", subagentType: "researcher" }),
+      makeLog("2", "stdout", "主答复"),
+    ]);
+    expect(turn.segments).toEqual([
+      {
+        kind: "subagent_stub",
+        id: "tu_gone",
+        subagentType: "researcher",
+        children: [
+          { kind: "text", id: "text:1", text: "子消息", streaming: false, startedAt: null },
+        ],
+      },
+      { kind: "text", id: "text:2", text: "主答复", streaming: false, startedAt: null },
+    ]);
+    expect(turn.output).toBe("子消息主答复");
+  });
+});
+
+/* ───────── 6. 双路去重（R-01 / Grill X-08） ───────── */
+
+describe("双路去重（R-01 log_id 与 Grill X-08 seenText 两路独立不合并）", () => {
+  it("SSE 路径：重复 log_id 原引用返回（R-01 重连 / 事件重放）", () => {
+    const first = applyLogToSegments(
+      createEmptyAssembledTurn(),
+      makeLog("dup-1", "stdout", "正文"),
+    );
+    expect(first.output).toBe("正文");
+    const replayed = applyLogToSegments(first, makeLog("dup-1", "stdout", "重放事件不同内容"));
+    expect(replayed).toBe(first);
+  });
+
+  it("SSE 路径不做内容级去重：同文不同 log_id 照常装配（两路语义不合并，Grill X-08）", () => {
+    const turn = applyAll([
+      makeLog("1", "stdout", "答复"),
+      makeLog("2", "stdout", "答复"),
+    ]);
+    expect(turn.segments).toEqual([
+      { kind: "text", id: "text:1", text: "答复答复", streaming: false, startedAt: null },
+    ]);
+  });
+
+  it("历史路径（默认开启）：重复 kind+文本只保留一条", () => {
+    const segments = logsToSegments([
+      makeLog("1", "stdout", "答复"),
+      makeLog("2", "stdout", "答复"),
+    ]);
+    expect(segments).toEqual([
+      { kind: "text", id: "text:1", text: "答复", streaming: false, startedAt: null },
+    ]);
+  });
+
+  it("历史路径键规则：键含 kind（异 kind 同文本不去重）；user_input 占键；分类丢弃行不产段", () => {
+    // 键含 kind：thinking 与 reply 同文本不同键，都保留
+    const mixed = logsToSegments([
+      makeLog("1", null, "[THINKING] 同文"),
+      makeLog("2", "stdout", "同文"),
+    ]);
+    expect(mixed.map((s) => s.kind)).toEqual(["thinking", "text"]);
+    // user_input 占键（分类键与 reply 同池）：后到的同文 agent 行被滤，防 user/agent 同文重复显示
+    const occupied = [
+      makeLog("1", "user_input", "你好"),
+      makeLog("2", "stdout", "你好"),
+    ];
+    expect(logsToSegments(occupied)).toEqual([]);
+    // 关闭去重时该行正常装配——证明上面是被键命中滤掉，而非 channel 跳过
+    expect(logsToSegments(occupied, { seenTextDedup: false })).toEqual([
+      { kind: "text", id: "text:2", text: "你好", streaming: false, startedAt: null },
+    ]);
+    // 分类丢弃行（SYSTEM 协议行）不产段、重复无副作用，不影响后续行装配
+    expect(
+      logsToSegments([
+        makeLog("1", null, "[SYSTEM:thinking_tokens] 48"),
+        makeLog("2", null, "[SYSTEM:thinking_tokens] 48"),
+        makeLog("3", "stdout", "正文"),
+      ]),
+    ).toEqual([{ kind: "text", id: "text:3", text: "正文", streaming: false, startedAt: null }]);
+  });
+
+  it("options.seenTextDedup:false 关闭内容级去重（保留逐条原文场景）", () => {
+    const segments = logsToSegments(
+      [makeLog("1", "stdout", "答复"), makeLog("2", "stdout", "答复")],
+      { seenTextDedup: false },
+    );
+    expect(segments).toEqual([
+      { kind: "text", id: "text:1", text: "答复答复", streaming: false, startedAt: null },
+    ]);
+  });
+});
+
+/* ───────── 7. 历史与实时一致性（§9.1 / §9.4 投影） ───────── */
+
+describe("历史与实时一致性（§9.1 同一装配语义 / §9.4 投影映射）", () => {
+  it("同一日志序列：逐条 applyLogToSegments 的最终 segments 与 logsToSegments 批量产出深度相等", () => {
+    const ts = "2026-08-19T10:00:00.000Z";
+    const logs: AssemblerLogInput[] = [
+      makeLog("1", "user_input", "帮我调研", { timestamp: ts }),
+      makeLog("2", null, "[THINKING] 先分析", { timestamp: ts }),
+      makeLog(
+        "3",
+        "tool_call",
+        '{"tool":"Task","args":{"description":"调研"},"tool_use_id":"tu_p","success":true}',
+        { timestamp: ts },
+      ),
+      makeLog("4", null, "[THINKING] 子思考", { parentToolUseId: "tu_p", subagentType: "researcher", timestamp: ts }),
+      makeLog(
+        "5",
+        "tool_call",
+        '{"tool":"Bash","args":{"command":"ls"},"tool_use_id":"tu_s","success":true}',
+        { parentToolUseId: "tu_p", timestamp: ts },
+      ),
+      makeLog("6", "stdout", "[TOOL_RESULT] 子工具输出", { parentToolUseId: "tu_p", timestamp: ts }),
+      makeLog("7", "stdout", "子结论", { parentToolUseId: "tu_p", segmentId: "tu_p:3", timestamp: ts }),
+      makeLog("8", "stderr", "子代理告警", { parentToolUseId: "tu_p", timestamp: ts }),
+      makeLog("9", "stdout", "[TOOL_RESULT] 任务完成", { timestamp: ts }),
+      makeLog("10", "stdout", "主答复前半", { segmentId: "main:m1:1", timestamp: ts }),
+      makeLog("11", "stdout", "主答复后半", { segmentId: "main:m1:1", timestamp: ts }),
+    ];
+    let turn = createEmptyAssembledTurn();
+    for (const log of logs) {
+      turn = applyLogToSegments(turn, log);
+    }
+    // 非平凡树（顶层多段 + 嵌套子代理桶），防空等价断言空转
+    expect(turn.segments.length).toBeGreaterThanOrEqual(3);
+    expect(toolById(turn.segments, "tu_p").children.length).toBeGreaterThanOrEqual(3);
+    // 历史与实时两路径产出深度相等（序列无 kind+文本重复、logId 唯一，排除两路去重干扰）
+    expect(logsToSegments(logs)).toEqual(turn.segments);
+  });
+
+  it("segmentsToLegacy 投影：output=文本段按 DFS 序拼接；processItems 的 ts 映射（tool.startedAt→ts）", () => {
+    const t1 = "2026-08-19T10:00:01.000Z";
+    const t2 = "2026-08-19T10:00:02.000Z";
+    const t3 = "2026-08-19T10:00:03.000Z";
+    const t4 = "2026-08-19T10:00:04.000Z";
+    const t5 = "2026-08-19T10:00:05.000Z";
+    const raw = '{"tool":"Task","args":{"description":"调研"},"tool_use_id":"tu_pr","success":true}';
+    const turn = applyAll([
+      makeLog("1", null, "[THINKING] 思考", { timestamp: t1 }),
+      makeLog("2", "tool_call", raw, { timestamp: t2 }),
+      makeLog("3", "stdout", "子结论", { parentToolUseId: "tu_pr", timestamp: t3 }),
+      makeLog("4", "stderr", "告警", { timestamp: t4 }),
+      makeLog("5", "stdout", "主文本", { timestamp: t5 }),
+    ]);
+    const legacy = segmentsToLegacy(turn.segments);
+    // output：文本段按 DFS 序拼接（tool 的 children 文本先于其后顶层文本；无分隔符）
+    expect(legacy.output).toBe("子结论主文本");
+    expect(legacy.processItems).toEqual([
+      { kind: "thinking", text: "思考", ts: Date.parse(t1) },
+      { kind: "tool", raw, status: "ok", ts: Date.parse(t2) },
+      { kind: "stderr", text: "告警", ts: Date.parse(t4) },
+    ]);
+    // applyLogToSegments 维护的投影与显式重算一致（同源投影，过渡期双字段零漂移）
+    expect(turn.output).toBe(legacy.output);
+    expect(turn.processItems).toEqual(legacy.processItems);
+  });
+
+  it("turnStartedAt 锚点：live/attach 均缺时取首条有效 log timestamp；调用方置入后不被覆盖（§7.5）", () => {
+    const t1 = "2026-08-19T10:00:01.000Z";
+    const turn = applyAll([makeLog("1", "stdout", "正文", { timestamp: t1 })]);
+    expect(turn.turnStartedAt).toBe(Date.parse(t1));
+    const live = applyLogToSegments(
+      createEmptyAssembledTurn(12345),
+      makeLog("2", "stdout", "x", { timestamp: t1 }),
+    );
+    expect(live.turnStartedAt).toBe(12345);
+  });
+});
+
+/* ───────── 8. streaming（§5 Phase3） ───────── */
+
+describe("streaming 置位与清除（§5 Phase3）", () => {
+  it("带 segmentId 的 partial 追加置 streaming（新建与续接）；无 segmentId 追加不改变原值", () => {
+    const turn = applyAll([
+      makeLog("1", "stdout", "整段消息"),
+      makeLog("2", "stdout", "partial-1", { segmentId: "main:s1:1" }),
+      makeLog("3", "stdout", "partial-2", { segmentId: "main:s1:1" }),
+      makeLog("4", "stdout", "整段续接"),
+    ]);
+    // log2 的 partial 不与异源整段（text:1）续接 → 开新段置位；log3 续接同派生段保持置位；
+    // log4 无 segmentId 续接 → 保留原值（true）
+    expect(turn.segments).toEqual([
+      { kind: "text", id: "text:1", text: "整段消息", streaming: false, startedAt: null },
+      {
+        kind: "text",
+        id: "text:main:s1:1",
+        text: "partial-1partial-2整段续接",
+        streaming: true,
+        startedAt: null,
+      },
+    ]);
+  });
+
+  it("override 撤回随段清除：被撤 partial 的段移除，其它 partial 的 streaming 不受影响", () => {
+    const turn = applyAll([
+      makeLog("1", "stdout", "p1", { segmentId: "main:a:1" }),
+      makeLog("2", "stdout", "p2", { segmentId: "main:b:1" }),
+    ]);
+    expect(turn.segments.map((s) => s.id)).toEqual(["text:main:a:1", "text:main:b:1"]);
+    expect(turn.segments.every((s) => expectText(s).streaming)).toBe(true);
+    const after = applyLogToSegments(turn, makeLog("3", null, "[ASSISTANT_OVERRIDE] main:a:1"));
+    expect(after.segments.map((s) => s.id)).toEqual(["text:main:b:1"]);
+    expect(expectText(after.segments[0]).streaming).toBe(true);
+    // 未触及段引用稳定（path-copy，FR-06）
+    expect(after.segments[0]).toBe(turn.segments[1]);
+  });
+
+  it("finishTurn 清除全树 streaming（含 tool 段 children 内嵌套段），投影与集合不变", () => {
+    const raw = '{"tool":"Task","args":{"description":"子"},"tool_use_id":"tu_f","success":true}';
+    const turn = applyAll([
+      makeLog("1", "tool_call", raw),
+      makeLog("2", "stdout", "子partial", { parentToolUseId: "tu_f", segmentId: "tu_f:1" }),
+      makeLog("3", "stdout", "主partial", { segmentId: "main:f:1" }),
+    ]);
+    // 撤回前：顶层与嵌套 partial 均置位
+    expect(expectText(toolById(turn.segments, "tu_f").children[0]).streaming).toBe(true);
+    expect(expectText(turn.segments[1]).streaming).toBe(true);
+    const done = finishTurn(turn);
+    expect(done.segments).toEqual([
+      {
+        kind: "tool",
+        id: "tu_f",
+        raw,
+        status: "ok",
+        toolName: "Task",
+        primary: "子",
+        startedAt: null,
+        endedAt: null,
+        children: [
+          { kind: "text", id: "text:tu_f:1", text: "子partial", streaming: false, startedAt: null },
+        ],
+        subagentType: null,
+      },
+      { kind: "text", id: "text:main:f:1", text: "主partial", streaming: false, startedAt: null },
+    ]);
+    // streaming 不入投影：output / processItems / seenLogIds 原样（集合同引用）
+    expect(done.output).toBe(turn.output);
+    expect(done.processItems).toEqual(turn.processItems);
+    expect(done.seenLogIds).toBe(turn.seenLogIds);
+  });
+
+  it("finishTurn 无 streaming 段 → 原引用返回（FR-06 引用稳定）", () => {
+    const turn = applyAll([makeLog("1", "stdout", "整段")]);
+    expect(finishTurn(turn)).toBe(turn);
+  });
+});

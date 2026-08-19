@@ -75,6 +75,7 @@ react-query: makeQueryClient() 每会话一实例；staleTime 15s 治焦点刷�
 - api-types.ts 与 backend/openapi.json 成对提交；gen:types 前确认前端 node_modules 健康（半坏会报假的 CSSProperties/缺模块错误，须 pnpm install --force）。
 - 日期展示必须显式 `toLocaleString("zh-CN")`（CI en-US 红本地不复现）；Number 千分位除外。
 - lib/api/llm-providers.ts 手写类型与 api-types.ts 生成的 LlmProvider* 并存：改后端 schema 两边都要核对（登记的债）。
+- SessionStreamEnvelope（lib/daemon.ts）含子代理归属字段 parent_tool_use_id/subagent_type/depth + tool_kind（2026-08-19-session-stream-ux 补声明；backend session channel 早已透传，消费方为 session-log-assembler）。
 - 领域客户端文件与后端模块一一对应，新增后端域时同步建 lib 文件 + gen:types，不让页面直接 fetch。
 
 ## 人工备注

@@ -11,14 +11,28 @@
  * 「对话/全部」二态视图由 viewMode 控制（ql-20260729-005）；AskUser 提问记录按
  * run_id 穿插到对应 turn（ql-20260802-001/003）。本组件无弹窗上下文依赖，
  * /runtimes 弹窗与 /sessions 新页面均可独立 import 组装。
+ *
+ * task-06（2026-08-19-session-stream-ux / FR-01 / FR-02 / FR-06 / design §5 Phase2
+ * + §9.3）：渲染层 v2 段模型双路径——
+ *   - turn.segments 非 undefined → v2 路径（SegmentedTurnBody）：「对话」视图渲染
+ *     文本段（每段独立气泡）+ 运行中 TurnStatusBar（内置，Grill X-09 两消费方自动
+ *     获得）；「全部（进度语义）」视图渲染完整段时间线（ml-9 竖线容器 + SegmentView
+ *     段组件族），AskUser 记录按 ts 与段合并排序穿插（merged 逻辑平移）；
+ *   - turn.segments === undefined（孤儿 turn 构造 / 旧数据）→ 旧渲染路径回退：
+ *     output 单气泡 + processItems TurnDetailsList（§9.3 过渡期双路径，保留不删）；
+ *   - whoLine / sender / errorDetail / 孤儿 turn 紧凑标记 / TurnStatusBadge / 空态 /
+ *     滚动到底等现有特性两路径共享不动。
  */
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Bot, Wrench } from "lucide-react";
 
 import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
 import { RunErrorItem } from "@/components/agent-log/run-error-item";
 import type { ErrorLogItem } from "@/components/agent-log/normalize";
+import type { TurnSegment } from "@/components/daemon/session-log-assembler";
+import { SegmentView } from "@/components/daemon/turn-segment-views";
+import { TurnStatusBar } from "@/components/daemon/turn-status-bar";
 
 /** ql-20260817-003：轮次发送时间格式化（今天只显 HH:mm，跨天带 MM-DD HH:mm）。 */
 function formatTurnTime(iso: string): string {
@@ -134,6 +148,22 @@ export interface SessionTurnView {
    * 旧数据为 undefined/null → 不显示）。答复气泡右下角显示，与用户消息时间对齐。
    */
   replyAt?: string | null;
+  /**
+   * task-06（2026-08-19-session-stream-ux / FR-01 / design §7）：结构化段
+   * 时间线（session-log-assembler 装配产物，task-01/02/11 产出）。非 undefined
+   * 时渲染走 v2 段模型路径（SegmentedTurnBody：对话=文本段+运行中状态条、
+   * 全部「进度」=完整段线 + AskUser 按 ts 穿插）；undefined（孤儿 turn 构造 /
+   * 旧数据）走旧渲染回退（output 单气泡 + processItems，§9.3）。空数组 = 已装配
+   * 但尚无段（运行初期），仍走 v2 路径（状态条/思考占位生效）。
+   */
+  segments?: TurnSegment[];
+  /**
+   * task-06（FR-02 / Grill X-01）：轮级状态条计时锚点（AssembledTurn 透传）：
+   * live = 本地发送占位时刻；attach = run 快照 started_at；均缺 = 首条 log
+   * timestamp。null/undefined → 运行中轮不渲染状态条（缺锚点，消费方 task-09
+   * 接线后常态有值）。
+   */
+  turnStartedAt?: number | null;
 }
 
 /** 消息视图模式（ql-20260729-005）：对话=只显用户消息+答复正文；全部=追加过程项。 */
@@ -275,8 +305,11 @@ export function TurnTimeline({
               )}
               {/* ql-20260802-003：「全部」视图把过程项（思考/工具/stderr）与 AskUser 提问
                   按 timestamp/created_at 合并排序统一渲染——AskUser 不再固定堆在过程项
-                  之后，而是穿插进真实时间线（思考→工具→提问→工具→…连贯有序）。 */}
+                  之后，而是穿插进真实时间线（思考→工具→提问→工具→…连贯有序）。
+                  task-06（§9.3）：本块为旧渲染回退路径（segments 缺省的 turn）；带
+                  segments 的 turn 的 AskUser 穿插由 SegmentedTurnBody 段线合并排序承担。 */}
               {viewMode === "all" &&
+                turn.segments === undefined &&
                 (() => {
                   const realRunId = turn.realRunId ?? turn.runId;
                   const turnDialogs = dialogHistory.filter((d) => d.run_id === realRunId);
@@ -337,42 +370,45 @@ export function TurnTimeline({
                   <span>☁ {turn.whoLine.providerName ?? "本机默认"}</span>
                 </div>
               )}
-              {/* agent 答复气泡（左，带助手图标）。运行中尚无答复时显示思考占位。 */}
-              {turn.output ? (
-                <div className="flex items-start gap-2.5">
-                  <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-muted text-muted-foreground">
-                    <Bot className="h-3.5 w-3.5" aria-hidden />
-                  </span>
-                  <div className="flex items-end gap-1.5">
-                    <div className="max-w-[82%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
-                      <MarkdownText content={turn.output} />
-                    </div>
-                    {/* ql-20260817-004：答复完成时间（run.finished_at，缺省不渲染）。 */}
-                    {turn.replyAt && (
-                      <span className="shrink-0 pb-1 text-[10.5px] text-muted-foreground">
-                        {formatTurnTime(turn.replyAt)}
-                      </span>
-                    )}
-                  </div>
-                </div>
+              {/* task-06（FR-01 / design §5 Phase2 + §9.3）：渲染主体双路径分支。
+                  segments 非 undefined → v2 段模型（SegmentedTurnBody：对话=文本段
+                  逐段气泡 + 运行中状态条；全部「进度」=完整段时间线 + AskUser 穿插）；
+                  segments undefined（孤儿 turn 构造 / 旧数据）→ 旧渲染路径回退（output
+                  单气泡 + processItems），行为与现状等价（回退不崩不空）。 */}
+              {turn.segments !== undefined ? (
+                <SegmentedTurnBody
+                  segments={turn.segments}
+                  turnStatus={turn.status}
+                  turnStartedAt={turn.turnStartedAt}
+                  viewMode={viewMode}
+                  replyAt={turn.replyAt}
+                  runKey={turn.realRunId ?? turn.runId}
+                  dialogHistory={dialogHistory}
+                />
               ) : (
-                (turn.status === "running" ||
-                  turn.status === "pending" ||
-                  turn.status === "interrupting") && (
-                  <div className="flex items-start gap-2.5">
-                    <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-muted text-muted-foreground">
-                      <Bot className="h-3.5 w-3.5" aria-hidden />
-                    </span>
-                    <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-md border bg-card px-4 py-3 shadow-sm">
-                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/60" />
-                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:150ms]" />
-                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:300ms]" />
-                      <span className="ml-1 text-xs text-muted-foreground">
-                        {viewMode === "all" ? "执行中…" : "正在思考…"}
+                <>
+                  {/* 旧路径（回退）：agent 答复单气泡（左，带助手图标）。运行中尚无答复时显示思考占位。 */}
+                  {turn.output ? (
+                    <div className="flex items-start gap-2.5">
+                      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-muted text-muted-foreground">
+                        <Bot className="h-3.5 w-3.5" aria-hidden />
                       </span>
+                      <div className="flex items-end gap-1.5">
+                        <div className="max-w-[82%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
+                          <MarkdownText content={turn.output} />
+                        </div>
+                        {/* ql-20260817-004：答复完成时间（run.finished_at，缺省不渲染）。 */}
+                        {turn.replyAt && (
+                          <span className="shrink-0 pb-1 text-[10.5px] text-muted-foreground">
+                            {formatTurnTime(turn.replyAt)}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )
+                  ) : (
+                    isLiveTurn(turn.status) && <ThinkingPlaceholder viewMode={viewMode} />
+                  )}
+                </>
               )}
               {turn.errorDetail && (
                 <div className="flex justify-start">
@@ -421,6 +457,163 @@ export function TurnTimeline({
 }
 
 /* ---------- helpers ---------- */
+
+/* ═════════ v2 段模型渲染（task-06 / 2026-08-19-session-stream-ux） ═════════ */
+
+/** task-06：轮处于运行中三态（状态条 / 思考占位的渲染门控）。 */
+function isLiveTurn(status: TurnUiStatus): boolean {
+  return status === "running" || status === "pending" || status === "interrupting";
+}
+
+/**
+ * 运行中尚无答复/文本段的思考占位（三点脉冲 + 文案）——markup 自旧内联渲染抽出
+ * （task-06 双路径共用：旧路径 output 空时、v2 路径无 text 段时）。全部视图文案
+ * 「执行中…」、对话视图「正在思考…」（原语义平移）。
+ */
+function ThinkingPlaceholder({ viewMode }: { viewMode: SessionViewMode }) {
+  return (
+    <div className="flex items-start gap-2.5">
+      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-muted text-muted-foreground">
+        <Bot className="h-3.5 w-3.5" aria-hidden />
+      </span>
+      <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-md border bg-card px-4 py-3 shadow-sm">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/60" />
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:150ms]" />
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:300ms]" />
+        <span className="ml-1 text-xs text-muted-foreground">
+          {viewMode === "all" ? "执行中…" : "正在思考…"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** 段时间戳（AskUser 穿插排序用）：text/tool 用 startedAt、thinking/stderr 用 ts；
+ *  subagent_stub 是临时容器无自身时刻 → null（排序视为 0，同旧路径缺 ts 语义）。 */
+function segmentTsOf(seg: TurnSegment): number | null {
+  switch (seg.kind) {
+    case "text":
+      return seg.startedAt;
+    case "thinking":
+      return seg.ts;
+    case "tool":
+      return seg.startedAt;
+    case "stderr":
+      return seg.ts;
+    case "subagent_stub":
+      return null;
+  }
+}
+
+/** 「全部（进度）」视图合并时间线项：段 或 AskUser 提问记录（按 ts 与段穿插）。 */
+type SegmentTimelineItem =
+  | { kind: "segment"; segment: TurnSegment; ts: number | null }
+  | { kind: "askUser"; dialog: SessionDialogRead; ts: number | null };
+
+/**
+ * task-06（FR-01 / FR-02 / FR-06）：v2 段模型轮渲染主体（segments 非 undefined 的
+ * turn 专用，双视图分支 + 内置轮级状态条）：
+ *
+ *   - 「对话」视图（viewMode=conversation）：只渲染 text 段（每段独立气泡，贴原型
+ *     .seg-text；思考/工具/子代理/stderr 段不挂载——渲染经济，FR-06），轻量 ❓
+ *     AskUser 记录由外层共享逻辑渲染（答复之前）；
+ *   - 「全部（进度）」视图（viewMode=all）：完整段时间线——ml-9 竖线容器（原型
+ *     .turn-timeline：左缩进 36px + 2px 边线 + 14px 内距 + 6px 段距）内按序渲染
+ *     SegmentView 段组件族（key=segment.id，段级 memo 由 task-05 保证）；AskUser
+ *     提问记录按 created_at 与段 ts 合并排序穿插（merged 排序逻辑平移自旧路径，
+ *     渲染复用 AskUserToolCard 工具卡片）；
+ *   - TurnStatusBar 内置（FR-02 / Grill X-09）：轮处于 pending/running/interrupting
+ *     且计时锚点 turnStartedAt 有值时渲染（两视图同显，段序列之前）；终态或锚点
+ *     缺失不挂载；
+ *   - 运行中且尚无 text 段：显示思考占位（ThinkingPlaceholder，同旧路径文案）；
+ *   - replyAt：答复完成时间，段序列之后小字显示（特性保持）。
+ *
+ * 渲染经济性：段合并时间线 / 文本段过滤均 useMemo（segments 引用未变时跳过重算，
+ * 装配器 path-copy 保证未触及段引用稳定）；段组件由 SegmentView 内部 memo。
+ */
+function SegmentedTurnBody({
+  segments,
+  turnStatus,
+  turnStartedAt,
+  viewMode,
+  replyAt,
+  runKey,
+  dialogHistory,
+}: {
+  segments: TurnSegment[];
+  turnStatus: TurnUiStatus;
+  turnStartedAt: number | null | undefined;
+  viewMode: SessionViewMode;
+  replyAt: string | null | undefined;
+  /** AskUser 提问历史按 run_id 过滤键（realRunId ?? runId，同旧路径）。 */
+  runKey: string;
+  dialogHistory: SessionDialogRead[];
+}) {
+  const turnDialogs = useMemo(
+    () => dialogHistory.filter((d) => d.run_id === runKey),
+    [dialogHistory, runKey],
+  );
+  const textSegments = useMemo(
+    () => (viewMode === "all" ? null : segments.filter((s) => s.kind === "text")),
+    [viewMode, segments],
+  );
+  const timeline = useMemo(() => {
+    if (viewMode !== "all") return null;
+    const items: SegmentTimelineItem[] = [
+      ...segments.map((s) => ({ kind: "segment" as const, segment: s, ts: segmentTsOf(s) })),
+      ...turnDialogs.map((d) => ({
+        kind: "askUser" as const,
+        dialog: d,
+        ts: d.created_at ? Date.parse(d.created_at) : null,
+      })),
+    ];
+    // 排序规则平移旧路径：缺 ts（NaN/null）视为 0；稳定排序保文档序。
+    items.sort(
+      (a, b) => (Number.isFinite(a.ts) ? a.ts! : 0) - (Number.isFinite(b.ts) ? b.ts! : 0),
+    );
+    return items;
+  }, [viewMode, segments, turnDialogs]);
+
+  return (
+    <>
+      {/* 轮级状态条（FR-02）：运行中三态 + 计时锚点有值才挂载（终态消失；锚点缺失
+          容错不显示，消费方 task-09 接线后常态有值）。位置贴原型：whoLine 之后、
+          段时间线之前，全宽。 */}
+      {(turnStatus === "pending" || turnStatus === "running" || turnStatus === "interrupting") &&
+        turnStartedAt != null && (
+          <TurnStatusBar turnStartedAt={turnStartedAt} segments={segments} turnStatus={turnStatus} />
+        )}
+      {/* 「全部（进度）」：完整段时间线（段 + AskUser 按时间戳穿插）。空轮不渲染空容器。 */}
+      {timeline != null && timeline.length > 0 && (
+        <div className="ml-9 flex flex-col gap-1.5 border-l-2 border-muted pl-3.5">
+          {timeline.map((item) =>
+            item.kind === "segment" ? (
+              <SegmentView key={item.segment.id} segment={item.segment} />
+            ) : (
+              <AskUserToolCard key={`dialog-${item.dialog.request_id}`} dialog={item.dialog} />
+            ),
+          )}
+        </div>
+      )}
+      {/* 「对话」：只渲染 text 段，每段独立气泡（FR-01 文本不再粘连）。 */}
+      {textSegments != null && textSegments.length > 0 && (
+        <div className="ml-9 flex flex-col gap-1.5">
+          {textSegments.map((s) => (
+            <SegmentView key={s.id} segment={s} />
+          ))}
+        </div>
+      )}
+      {/* 运行中尚无 text 段（两视图同规则）：思考占位。 */}
+      {isLiveTurn(turnStatus) && !segments.some((s) => s.kind === "text") && (
+        <ThinkingPlaceholder viewMode={viewMode} />
+      )}
+      {/* 答复完成时间（run.finished_at，缺省不渲染；特性保持，段序列后小字）。 */}
+      {replyAt && (
+        <div className="ml-9 text-[10.5px] text-muted-foreground">{formatTurnTime(replyAt)}</div>
+      )}
+    </>
+  );
+}
 
 /**
  * ql-20260729-005：「全部」视图的过程项列表，按真实到达顺序渲染。

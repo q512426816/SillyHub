@@ -71,17 +71,22 @@ SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
 → ppm 与主平台菜单互不可见
 → 每组内 visibleMenusBySection(user, section) 按用户权限过滤条目
 ```
-交互会话渲染（/sessions 页与 /runtimes 弹窗共享范式）：
+交互会话渲染（/sessions 页与 /runtimes 弹窗共享范式，2026-08-19-session-stream-ux 起统一走装配器）：
 ```
-历史 turn = getAgentSessionLogs → logsToTurns（SSE attach 前预取防丢事件）
-实时 turn = streamSession SSE → TurnTimeline 渲染（reply 片段直接 concat）
-发送 = injectSession；CtxUsageBar 按实时 turn input_tokens 前端求和
+历史 turn = getAgentSessionLogs → logsToTurns（内部走装配器 logsToSegments + 兼容投影）
+实时 turn = streamSession SSE → envelope 归一 → applyLogToSegments（session-log-assembler.ts
+           纯函数：分段装配/归属路由/override 撤回/双路去重，输出 TurnSegment[] 结构化段模型）
+渲染 = TurnTimeline v2：turn 带 segments 走段渲染（turn-segment-views 五类段组件
+       + 内置 TurnStatusBar 轮级状态条）；segments 缺省回退旧渲染路径（brownfield）
+子代理 = parent_tool_use_id 归属嵌套进 Task 工具段 children（depth>1 递归）+
+         sessions/subagent-catalog 头部目录（仅 /sessions 页）
+发送 = injectSession；计时锚点三源（live 占位 Date.now / attach run.started_at / 首条 log）
 ```
 
 ## 注意事项
 - AppShell / TopBar / antd-providers 是全局组件，改动影响所有 dashboard 页面；菜单条目缺失是 menu-permissions 数据问题，app-shell 只管图标映射。
-- interactive-session-panel 与 sessions 页共享 TurnTimeline / SessionInputBar / 事件处理语义：改会话渲染需两处回归（/runtimes 弹窗零回归是 sessions-portal 的硬约束）。
-- reply 流式 delta 拼接不加 \n（delta 内部已保留换行），加了会破坏 markdown 连续渲染。
+- interactive-session-panel 与 sessions 页共享 TurnTimeline / SessionInputBar / 事件处理语义：日志处理已收敛到 session-log-assembler 单一装配器（2026-08-19-session-stream-ux），改会话流逻辑只改装配器一处；但改 TurnTimeline 渲染仍需两处回归（/runtimes 弹窗零回归是 sessions-portal 的硬约束）。
+- session-log-assembler 是纯函数模块（零 React 依赖），分类函数（classifySessionLog 等）实现已迁入其中，session-log-sanitize.ts 保留 re-export 垫片——新代码 import 分类一律从 assembler 取。
 - ui/ 基础件遵循 shadcn 约定（CLI 添加为主，不手改生成物）；业务组件一律 "use client"。
 - agent-log 归一化（去重 TOOL_USE / 合并 TOOL_RESULT / 识别 thinking）是纯函数，与渲染器分离便于单测；stdout [TOOL_USE]/[TOOL_RESULT] 文本事件也走同一解析。
 - remote-folder-picker 是远程目录选择唯一入口（替代旧 browseFolder 系统弹窗——Web 用户看不到 daemon 宿主机原生弹窗）。
@@ -97,3 +102,4 @@ SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
 ## 变更索引
 
 - ql-20260819-001-b742 | 会话列表和面板头部增加工作区信息显示（session-list-panel chips + session header badge）
+- 2026-08-19-session-stream-ux | 会话流结构化重构：共享装配器 session-log-assembler（分段/归属嵌套/override 撤回收敛两处副本）+ turn-segment-views 段渲染族 + turn-status-bar 轮级状态条 + subagent-catalog 子代理目录 + TurnTimeline v2 段模型渲染（FR-01..06）

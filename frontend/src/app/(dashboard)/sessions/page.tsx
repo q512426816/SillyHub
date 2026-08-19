@@ -21,7 +21,14 @@
  *     切换配置 / 结束 / 重新开启后 invalidate 刷新）；
  *   - 历史 turn = attach 预取 getAgentSessionLogs → logsToTurns（防 SSE 订阅前丢事件）；
  *   - 实时 turn = streamSession 单条 SSE 贯穿（turn_started/log/turn_completed/tokens/
- *     session_ended/permission_*，处理逻辑对齐 interactive-session-panel）；
+ *     session_ended/permission_*）。task-09（2026-08-19-session-stream-ux / FR-05）：
+ *     onLog 统一归一为 AssemblerLogInput 喂共享装配器 applyLogToSegments
+ *     （session-log-assembler），本文件不再保留 applyLogToTurn 副本与
+ *     partialSegmentsRef——分类 / override 撤回 / tool 配对 / 子代理归属一律依赖
+ *     装配器导出；头部挂子代理目录（SubagentCatalog，FR-04，点击切「进度」视图并
+ *     定位对应子代理块）；viewMode「全部」文案改「进度」；计时锚点接线（FR-02）：
+ *     live = 发送占位 Date.now()，displayTurns 按 ?? 链补 run 快照 started_at
+ *     （已有值优先，run 快照次之，首条 log timestamp 由装配器兜底写入）；
  *   - 发送 = injectSession（新会话创建走 NewSessionForm → onCreated 切入选中态）；
  *   - CtxUsageBar 累计 = 实时 turn input_tokens 前端求和（design R-06）；
  *   - whoLine（gap-fix / FR-07 / D-008@v1）：attach 时并发拉 listSessionRuns
@@ -40,18 +47,22 @@ import { Ban, Square } from "lucide-react";
 import { Badge, Button, Spin, message } from "antd";
 
 import { buildErrorLogItem } from "@/components/agent-log/normalize";
+import {
+  applyLogToSegments,
+  createEmptyAssembledTurn,
+  finishTurn,
+  type AssembledTurn,
+  type AssemblerLogInput,
+  type TurnSegment,
+} from "@/components/daemon/session-log-assembler";
 import { TurnTimeline, type SessionTurnView, type TurnUiStatus } from "@/components/daemon/turn-timeline";
 import { SessionInputBar } from "@/components/daemon/session-input-bar";
-import {
-  classifySessionLog,
-  isToolResultDenied,
-  statusFromToolUseRaw,
-} from "@/components/daemon/session-log-sanitize";
 import { logsToTurns } from "@/components/daemon/runtime-session-helpers";
 import { CtxUsageBar } from "@/components/sessions/ctx-usage-bar";
 import { NewSessionForm } from "@/components/sessions/new-session-form";
 import { SessionConfigBar } from "@/components/sessions/session-config-bar";
 import { SessionListPanel } from "@/components/sessions/session-list-panel";
+import { SubagentCatalog } from "@/components/sessions/subagent-catalog";
 import { PageContainer, PageHeader } from "@/components/layout";
 import { ApiError } from "@/lib/api";
 import {
@@ -225,13 +236,8 @@ function SessionPanel({
   const [reopening, setReopening] = useState(false);
 
   const streamRef = useRef<SessionStreamConnection | null>(null);
-  // partial 段起点（reply→outputStart / thinking→itemIndex），override 撤回用。
-  const partialSegmentsRef = useRef<
-    Map<
-      string,
-      { outputStart: number; length: number } | { itemIndex: number }
-    >
-  >(new Map());
+  // 面板根 ref（task-09 / FR-04）：子代理目录跳转的 DOM 定位查询范围（限面板内）。
+  const panelRef = useRef<HTMLElement | null>(null);
   // 已拉取过 error_detail 的 failed run_id 集合（防 SSE 重连重复拉取）。
   const fetchedErrorRunIdsRef = useRef<Set<string>>(new Set());
 
@@ -254,7 +260,6 @@ function SessionPanel({
     setErrorMsg(null);
     setPendingRequests([]);
     setRunsMeta(new Map());
-    partialSegmentsRef.current.clear();
     fetchedErrorRunIdsRef.current.clear();
 
     // 预取历史 logs 回灌（防 SSE 订阅前 daemon publish 丢事件）；已有实时
@@ -295,13 +300,15 @@ function SessionPanel({
         );
       },
       onLog: (env) => {
-        // user_input 是用户消息（attach 历史/占位 turn 已作 prompt），不进 output。
+        // user_input 是用户消息（attach 历史/占位 turn 已作 prompt），不进 output
+        // （装配器内同语义双保险）。task-09（FR-05）：其余日志归一喂共享装配器，
+        // 分类 / override 撤回 / tool 配对 / 子代理归属一律依赖装配器导出。
         if (env.channel === "user_input") return;
         setTurnState((prev) =>
           upsertTurn(
             prev,
             env,
-            (turn) => applyLogToTurn(turn, env, partialSegmentsRef.current),
+            (turn) => applyEnvelopeToTurn(turn, env),
             {},
           ),
         );
@@ -312,17 +319,25 @@ function SessionPanel({
           upsertTurn(
             prev,
             env,
-            (turn) => ({
-              ...turn,
-              status: terminal,
-              inputTokens: env.input_tokens ?? turn.inputTokens,
-              outputTokens: env.output_tokens ?? turn.outputTokens,
-            }),
+            (turn) => {
+              // task-09：finishTurn 清全部 text/thinking 段 streaming 标记
+              // （流式光标收起，段级状态随终态收敛）；终态与 token 照旧页面胶水写入。
+              const finished = finishTurn(asAssembled(turn));
+              return {
+                ...turn,
+                segments: finished.segments,
+                output: finished.output,
+                processItems: finished.processItems,
+                turnStartedAt: finished.turnStartedAt,
+                seenLogIds: finished.seenLogIds,
+                status: terminal,
+                inputTokens: env.input_tokens ?? turn.inputTokens,
+                outputTokens: env.output_tokens ?? turn.outputTokens,
+              };
+            },
             { clearCurrentRun: env.run_id! },
           ),
         );
-        // turn 边界清空 partial 段 Map（防跨 turn segmentId 复用误撤回）。
-        partialSegmentsRef.current.clear();
 
         // gap-fix（D-008@v1）：每轮终态后刷新 run 快照——本轮 whoLine/usage 由
         // run 行（dispatch 冻结）注入，切换配置后的下一轮跟随新快照。
@@ -526,6 +541,10 @@ function SessionPanel({
         outputTokens: t.outputTokens ?? meta.output_tokens ?? null,
         // ql-20260817-004：答复完成时间（finished_at 优先；运行中/旧数据 null 不显示）。
         replyAt: t.replyAt ?? meta.finished_at ?? meta.started_at ?? null,
+        // task-09（FR-02）计时锚点 ?? 链：turn 已有值（live 发送占位 / 首条 log
+        // timestamp 兜底）优先，run 快照 started_at 次之——attach 恢复计时不归零
+        // 不重计（SSE 流中无 run_started 事件，不覆盖已有锚点）。
+        turnStartedAt: t.turnStartedAt ?? parseRunStartedAt(meta.started_at),
       };
     });
     // ql-20260818-011：runsMeta 中的静默切换 run 无 SSE 事件→不在 turnState.turns
@@ -620,6 +639,10 @@ function SessionPanel({
           outputTokens: null,
           errorDetail: null,
           processItems: [],
+          // task-09（FR-02）：live 计时锚点 = 本地发送占位时刻（v2 段渲染 + 空段
+          // 数组 = 状态条/思考占位立即生效，SSE run_id 到达后原位接管不重计）。
+          segments: [],
+          turnStartedAt: Date.now(),
         },
       ],
     }));
@@ -743,6 +766,9 @@ function SessionPanel({
             outputTokens: null,
             errorDetail: null,
             processItems: [],
+            // task-09（FR-02）：同 handleSend——live 锚点 = 本地重发占位时刻。
+            segments: [],
+            turnStartedAt: Date.now(),
           },
         ],
       }));
@@ -772,6 +798,63 @@ function SessionPanel({
   const handleDialogResolved = useCallback((requestId: string) => {
     setPendingRequests((prev) => prev.filter((r) => r.request_id !== requestId));
   }, []);
+
+  // ── task-09（FR-04）：子代理目录跳转定位（原型 jumpTo 的页面侧实现）────────
+  // 三动作：切「进度」视图（子代理块只在 all 视图渲染）→ 展开对应子代理块 →
+  // scrollIntoView 居中。SubagentBlockView（task-05）未暴露 data-segment-id DOM
+  // 锚点且不在本卡允许路径——采用最小侵入方案：双 rAF 等「进度」视图段线提交后，
+  // 在面板根内按子代理块容器类名（rounded-[10px] + indigo 系）圈定候选，头部
+  // 名称归一匹配（规则镜像 SubagentBlockView 名称派生；目录侧 120 字截断按前缀
+  // 容忍）。命中：折叠块模拟点击头部展开 + 滚动居中；未命中只完成视图切换不报错。
+  const handleJumpToSubagent = useCallback(
+    (segmentId: string) => {
+      setViewMode("all");
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const root = panelRef.current;
+          if (!root) return;
+          let expected: string | null = null;
+          for (const t of displayTurns) {
+            const seg = findSegmentById(t.segments, segmentId);
+            if (seg) {
+              expected = subagentBlockNameOf(seg);
+              break;
+            }
+          }
+          if (!expected) return;
+          const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+          const want = norm(expected);
+          const blocks = Array.from(root.querySelectorAll<HTMLElement>("div")).filter(
+            (el) =>
+              el.classList.contains("rounded-[10px]") &&
+              el.classList.contains("border-indigo-200") &&
+              el.classList.contains("bg-indigo-50"),
+          );
+          for (const block of blocks) {
+            const nameEl = block.querySelector<HTMLElement>(".truncate.font-semibold");
+            if (!nameEl) continue;
+            const got = norm(nameEl.textContent ?? "");
+            const nameHit =
+              got === want || (want.length >= 120 && got.startsWith(want));
+            if (!nameHit) continue;
+            // 展开折叠块：子代理块首子元素即头部（运行中默认展开，无 aria-expanded=false）。
+            const header = block.firstElementChild;
+            if (
+              header instanceof HTMLElement &&
+              header.getAttribute("aria-expanded") === "false"
+            ) {
+              header.click();
+            }
+            if (typeof block.scrollIntoView === "function") {
+              block.scrollIntoView({ behavior: "smooth", block: "center" });
+            }
+            return;
+          }
+        });
+      });
+    },
+    [displayTurns],
+  );
 
   // ── 渲染 ───────────────────────────────────────────────────────────────
   if (detailQuery.isError) {
@@ -824,6 +907,7 @@ function SessionPanel({
 
   return (
     <section
+      ref={panelRef}
       className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card"
       aria-label="会话面板"
     >
@@ -863,6 +947,9 @@ function SessionPanel({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {/* task-09（FR-04 / Grill X-09）：子代理目录——仅本页头部挂载（runtimes
+              弹窗不挂）；无子代理段时组件返回 null 不占位。 */}
+          <SubagentCatalog turns={displayTurns} onJumpTo={handleJumpToSubagent} />
           {turnState.turns.length > 0 && (
             <div
               role="tablist"
@@ -882,7 +969,8 @@ function SessionPanel({
                       : "text-muted-foreground hover:text-foreground",
                   )}
                 >
-                  {m === "conversation" ? "对话" : "全部"}
+                  {/* task-09：「全部」改「进度」（段模型语义：完整段时间线）。 */}
+                  {m === "conversation" ? "对话" : "进度"}
                 </button>
               ))}
             </div>
@@ -1008,7 +1096,7 @@ function SessionPanel({
   );
 }
 
-/* ────────────────────── SSE turn 状态机辅助（对齐 interactive-session-panel） ────────────────────── */
+/* ────────────────────── SSE turn 状态机辅助（task-09：只留页面胶水，日志内容处理走装配器） ────────────────────── */
 
 const TERMINAL_TURN_STATUSES: ReadonlySet<TurnUiStatus> = new Set([
   "completed",
@@ -1042,17 +1130,23 @@ function upsertTurn(
   );
   let turns: SessionTurnView[];
   if (idx === -1) {
+    // task-09：新建 turn 用装配器空产物初始化（segments/output/processItems/
+    // seenLogIds 同源一致）；turnStartedAt 起始 null，由首条 log timestamp 兜底
+    // 写入、displayTurns 再按 run 快照 started_at 补（attach 恢复锚点）。
+    const empty = createEmptyAssembledTurn();
     const newTurn: SessionTurnView = {
       runId,
       turn: env.turn ?? null,
       prompt: "",
-      output: "",
+      output: empty.output,
       status: "running",
-      seenLogIds: new Set(),
+      seenLogIds: empty.seenLogIds,
       inputTokens: env.input_tokens ?? null,
       outputTokens: env.output_tokens ?? null,
       errorDetail: null,
-      processItems: [],
+      processItems: empty.processItems,
+      segments: empty.segments,
+      turnStartedAt: empty.turnStartedAt,
     };
     turns = [...prev.turns, apply(newTurn)];
   } else {
@@ -1071,124 +1165,83 @@ function upsertTurn(
 }
 
 /**
- * 单条 log 事件落到 turn：分类分流（thinking/tool/stderr/reply/override），
- * log_id 去重、tool use/result 配对、partial 段起点记录与 override 撤回
- * （2026-08-03-session-stream-partial-revoke 语义，对齐 interactive-session-panel onLog）。
+ * task-09（FR-05）：SessionTurnView → AssembledTurn 收窄视图（页面胶水）。
+ * SessionTurnView 的段模型字段可选（task-06 过渡期双路径），装配器要求全量形状
+ * ——缺失按空值兜底；装配产物字段与 SessionTurnView 同名，调用方经
+ * `{ ...turn, ...next }` 回填（其余 turn 级字段不动）。
  */
-function applyLogToTurn(
+function asAssembled(turn: SessionTurnView): AssembledTurn {
+  return {
+    segments: turn.segments ?? [],
+    output: turn.output,
+    processItems: turn.processItems ?? [],
+    turnStartedAt: turn.turnStartedAt ?? null,
+    seenLogIds: turn.seenLogIds,
+  };
+}
+
+/**
+ * task-09（FR-05）：单条 SSE log envelope 归一为 AssemblerLogInput 喂共享装配器
+ * applyLogToSegments（替代原 applyLogToTurn 副本——分类 / override 撤回 / tool
+ * 配对 / 子代理归属一律依赖装配器导出，本文件不重写；partial 段起点 Map 随副本
+ * 一并删除，装配器按段 id 前缀路由撤回）。产出段序列 + 兼容投影（output /
+ * processItems）+ 计时锚点兜底（首条 log timestamp）+ log_id 去重集合。
+ */
+function applyEnvelopeToTurn(
   turn: SessionTurnView,
   env: SessionStreamEnvelope,
-  partialSegments: Map<
-    string,
-    { outputStart: number; length: number } | { itemIndex: number }
-  >,
 ): SessionTurnView {
-  if (env.log_id && turn.seenLogIds.has(env.log_id)) return turn;
-  const nextSeen = new Set(turn.seenLogIds);
-  if (env.log_id) nextSeen.add(env.log_id);
-
-  const seg = classifySessionLog(env.content ?? "", env.channel);
-  if (!seg) return turn;
-
-  // override 撤回令箭：按 segmentId 精确撤回已渲染的半截（Map 无此 id 静默 no-op）。
-  if (seg.kind === "override" && seg.segmentId) {
-    const start = partialSegments.get(seg.segmentId);
-    if (!start) return turn;
-    partialSegments.delete(seg.segmentId);
-    if (seg.variant === "assistant" && "outputStart" in start) {
-      const end = start.outputStart + (start.length ?? 0);
-      return {
-        ...turn,
-        seenLogIds: nextSeen,
-        output: turn.output.slice(0, start.outputStart) + turn.output.slice(end),
-      };
-    }
-    if (seg.variant === "thinking" && "itemIndex" in start) {
-      return {
-        ...turn,
-        seenLogIds: nextSeen,
-        processItems: (turn.processItems ?? []).filter(
-          (_, i) => i !== start.itemIndex,
-        ),
-      };
-    }
-    return turn;
-  }
-
-  const ts = env.timestamp ? Date.parse(env.timestamp) : undefined;
-  if (seg.kind === "tool_use") {
-    return {
-      ...turn,
-      seenLogIds: nextSeen,
-      processItems: [
-        ...(turn.processItems ?? []),
-        { kind: "tool", raw: seg.text, status: statusFromToolUseRaw(seg.text), ts },
-      ],
-    };
-  }
-  if (seg.kind === "tool_result") {
-    const items = [...(turn.processItems ?? [])];
-    let paired = false;
-    for (let i = items.length - 1; i >= 0; i -= 1) {
-      const it = items[i];
-      if (it && it.kind === "tool" && it.result === undefined) {
-        const status = isToolResultDenied(seg.text)
-          ? "deny"
-          : it.status === "running"
-            ? "ok"
-            : it.status;
-        items[i] = { kind: "tool", raw: it.raw, result: seg.text, status, ts: it.ts };
-        paired = true;
-        break;
-      }
-    }
-    if (!paired) {
-      items.push({
-        kind: "tool",
-        raw: "",
-        result: seg.text,
-        status: isToolResultDenied(seg.text) ? "deny" : "ok",
-        ts,
-      });
-    }
-    return { ...turn, seenLogIds: nextSeen, processItems: items };
-  }
-  if (seg.kind === "reply") {
-    // partial reply 先记半截起点（concat 前 output 长度），override 到达时截断撤回。
-    if (env.segment_id) {
-      const existing = partialSegments.get(env.segment_id);
-      if (existing && "outputStart" in existing) {
-        existing.length += seg.text.length;
-      } else {
-        partialSegments.set(env.segment_id, {
-          outputStart: turn.output.length,
-          length: seg.text.length,
-        });
-      }
-    }
-    return {
-      ...turn,
-      seenLogIds: nextSeen,
-      // 流式 delta 直接 concat（不加 \n，保留 markdown 连续结构）。
-      output: turn.output + seg.text,
-    };
-  }
-  // partial thinking 先记即将 append 的项索引，override 到达时按索引移除。
-  if (seg.kind === "thinking" && env.segment_id) {
-    partialSegments.set(env.segment_id, {
-      itemIndex: (turn.processItems ?? []).length,
-    });
-  }
-  return {
-    ...turn,
-    seenLogIds: nextSeen,
-    processItems: [
-      ...(turn.processItems ?? []),
-      seg.kind === "thinking"
-        ? { kind: "thinking", text: seg.text, ts }
-        : { kind: "stderr", text: seg.text, ts },
-    ],
+  const input: AssemblerLogInput = {
+    logId: env.log_id,
+    channel: env.channel,
+    content: env.content,
+    timestamp: env.timestamp,
+    segmentId: env.segment_id ?? null,
+    stale: env.stale ?? null,
+    parentToolUseId: env.parent_tool_use_id ?? null,
+    subagentType: env.subagent_type ?? null,
+    depth: env.depth ?? null,
+    toolKind: env.tool_kind ?? null,
   };
+  return { ...turn, ...applyLogToSegments(asAssembled(turn), input) };
+}
+
+/** run 快照 started_at（ISO）→ ms；缺失 / 非法 → null（displayTurns 计时锚点 ?? 链次优源）。 */
+function parseRunStartedAt(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** DFS 全 turn 段树找 id 匹配段（子代理目录跳转的名称定位用，嵌套 children 递归）。 */
+function findSegmentById(
+  segments: TurnSegment[] | undefined,
+  id: string,
+): TurnSegment | null {
+  if (!segments) return null;
+  for (const s of segments) {
+    if (s.id === id) return s;
+    if (s.kind === "tool" || s.kind === "subagent_stub") {
+      const inner = findSegmentById(s.children, id);
+      if (inner) return inner;
+    }
+  }
+  return null;
+}
+
+/**
+ * 子代理块头部展示名（DOM 名称匹配用）——规则镜像 turn-segment-views
+ * SubagentBlockView：tool 段 primary ?? subagentType ?? 「子代理」；stub 段
+ * subagentType ?? 「子代理」（stub 无 primary）。
+ */
+function subagentBlockNameOf(seg: TurnSegment): string | null {
+  if (seg.kind === "tool") {
+    return seg.primary?.trim() || seg.subagentType || "子代理";
+  }
+  if (seg.kind === "subagent_stub") {
+    return seg.subagentType || "子代理";
+  }
+  return null;
 }
 
 /** turn_completed 的 status/exit_code → TurnUiStatus 终态。 */

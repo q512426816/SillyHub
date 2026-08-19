@@ -672,7 +672,7 @@ describe("InteractiveSessionPanel", () => {
     expect(screen.queryByText(/提问记录/)).not.toBeInTheDocument();
   });
 
-  it("AC-10-01c 「全部」视图 AskUser 工具卡片显全部选项（选中✓ + 未选可见）(ql-20260802-003)", async () => {
+  it("AC-10-01c 「进度」视图 AskUser 工具卡片显全部选项（选中✓ + 未选可见）(ql-20260802-003)", async () => {
     const stream = makeStreamMock();
     sessionApi.streamSession.mockImplementation(stream.factory);
     sessionApi.getAgentSession.mockResolvedValue({
@@ -707,8 +707,8 @@ describe("InteractiveSessionPanel", () => {
     expect(screen.queryByText(/AskUserQuestion/)).not.toBeInTheDocument();
     expect(screen.queryByText(/用户主目录/)).not.toBeInTheDocument();
 
-    // 切「全部」：AskUser 工具卡片显全部选项——选中项「用户桌面」(✓) + 未选项「用户主目录」均可见
-    fireEvent.click(screen.getByRole("tab", { name: "全部" }));
+    // 切「进度」：AskUser 工具卡片显全部选项——选中项「用户桌面」(✓) + 未选项「用户主目录」均可见
+    fireEvent.click(screen.getByRole("tab", { name: "进度" }));
     await waitFor(() => expect(screen.getByText(/AskUserQuestion/)).toBeInTheDocument());
     expect(screen.getByText(/用户桌面/)).toBeInTheDocument();
     expect(screen.getByText(/用户主目录/)).toBeInTheDocument();
@@ -1408,19 +1408,20 @@ describe("InteractiveSessionPanel", () => {
 });
 
 /**
- * ql-20260729-005：对话/全部二态切换 + 过程信息分流。
+ * ql-20260729-005：对话/进度二态切换 + 过程信息分流。
  * - 默认「对话」：只显用户消息 + agent 答复正文；thinking/tool/stderr 不渲染
- * - 切「全部」：过程项（思考折叠块 / 工具行 / stderr 行）出现在答复气泡前
+ * - 切「进度」：过程项（思考折叠块 / 工具行 / stderr 行）出现在答复气泡前
  * - 运行中无答复：对话模式显示「正在思考…」占位
+ * （task-10 / 2026-08-19-session-stream-ux：「全部」更名「进度」，段模型 v2 渲染）
  */
-describe("InteractiveSessionPanel 对话/全部视图切换（ql-20260729-005）", () => {
+describe("InteractiveSessionPanel 对话/进度视图切换（ql-20260729-005）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);
     sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
   });
 
-  it("默认对话视图：tool_call/thinking 不展示，reply 正常展示；切全部后过程项出现", async () => {
+  it("默认对话视图：tool_call/thinking 不展示，reply 正常展示；切进度后过程项出现", async () => {
     const stream = makeStreamMock();
     sessionApi.streamSession.mockImplementation(stream.factory);
     sessionApi.createSession.mockResolvedValue({
@@ -1451,22 +1452,26 @@ describe("InteractiveSessionPanel 对话/全部视图切换（ql-20260729-005）
       );
     });
 
-    // 对话视图：答复可见，过程项不可见
+    // 对话视图：答复可见，过程项不可见（task-10 段模型：tool 原文只出现在进度视图的
+    // 工具行 desc；对话视图的状态条当前活动摘要是「工具 Read src/a.ts」前缀形式，
+    // 与工具行 desc（恰为 raw 原文）用精确匹配区分）
     await waitFor(() => expect(screen.getByText(/文件内容如下/)).toBeInTheDocument());
-    expect(screen.queryByText(/Read src\/a\.ts/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Read src/a.ts")).not.toBeInTheDocument();
     expect(screen.queryByText(/先想想怎么读/)).not.toBeInTheDocument();
     expect(screen.queryByText("思考过程")).not.toBeInTheDocument();
 
-    // 切「全部」：过程项出现（thinking 折叠块标题 + 摘要，tool 行）
-    fireEvent.click(screen.getByRole("tab", { name: "全部" }));
-    await waitFor(() => expect(screen.getByText(/Read src\/a\.ts/)).toBeInTheDocument());
-    expect(screen.getByText("思考过程")).toBeInTheDocument();
+    // 切「进度」：过程项出现（thinking 折叠块标题 + 摘要，tool 行）
+    fireEvent.click(screen.getByRole("tab", { name: "进度" }));
+    await waitFor(() => expect(screen.getByText("Read src/a.ts")).toBeInTheDocument());
+    // task-10 段模型适配：ThinkingRowView 折叠头渲染「💭 思考过程」（旧路径是纯
+    // 「思考过程」精确文案），断言改子串匹配
+    expect(screen.getByText(/思考过程/)).toBeInTheDocument();
     // thinking 默认折叠：摘要（截断文本）可见
     expect(screen.getByText(/先想想怎么读/)).toBeInTheDocument();
 
     // 切回「对话」：过程项再次隐藏，答复仍在
     fireEvent.click(screen.getByRole("tab", { name: "对话" }));
-    await waitFor(() => expect(screen.queryByText(/Read src\/a\.ts/)).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText("Read src/a.ts")).not.toBeInTheDocument());
     expect(screen.getByText(/文件内容如下/)).toBeInTheDocument();
   });
 
@@ -1500,7 +1505,7 @@ describe("InteractiveSessionPanel 对话/全部视图切换（ql-20260729-005）
     await waitFor(() => expect(screen.queryByText(/正在思考…/)).not.toBeInTheDocument());
   });
 
-  it("attach 历史 turn 的 details：对话默认隐藏，切全部展示", async () => {
+  it("attach 历史 turn 的 details：对话默认隐藏，切进度展示", async () => {
     const stream = makeStreamMock();
     sessionApi.streamSession.mockImplementation(stream.factory);
     sessionApi.getAgentSession.mockResolvedValue({
@@ -1533,8 +1538,8 @@ describe("InteractiveSessionPanel 对话/全部视图切换（ql-20260729-005）
     expect(screen.queryByText(/Bash ls -la/)).not.toBeInTheDocument();
     expect(screen.queryByText(/历史思考内容/)).not.toBeInTheDocument();
 
-    // 切「全部」：details 出现
-    fireEvent.click(screen.getByRole("tab", { name: "全部" }));
+    // 切「进度」：details 出现
+    fireEvent.click(screen.getByRole("tab", { name: "进度" }));
     await waitFor(() => expect(screen.getByText(/Bash ls -la/)).toBeInTheDocument());
     expect(screen.getByText(/历史思考内容/)).toBeInTheDocument();
   });
@@ -1612,7 +1617,7 @@ describe("InteractiveSessionPanel partial override 撤回（task-06/08）", () =
     expect(screen.queryByText(/半截/)).not.toBeInTheDocument();
   });
 
-  it("AC-05 thinking 撤回：override 到达后 processItems 中该项移除（切全部不见）", async () => {
+  it("AC-05 thinking 撤回：override 到达后 processItems 中该项移除（切进度不见）", async () => {
     const stream = await startSession();
     const conn = stream.conn;
 
@@ -1620,14 +1625,17 @@ describe("InteractiveSessionPanel partial override 撤回（task-06/08）", () =
       conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-1", turn: 1 }));
       conn.handlers.route(
         makeEnvelope("log", {
+          // task-10 段模型适配：顶层 thinking partial 的 segmentId 用 main: 前缀
+          // （真实协议三段格式 main:<id>:<seq>；<tool_use_id>:<seq> 前缀按装配器
+          // 契约路由进对应工具容器 children，无 parent 归属字段时为 no-op）
           run_id: "run-1", channel: null, content: "[THINKING] 半截思考",
-          segment_id: "tu:2",
+          segment_id: "main:t2:1",
         }),
         "L1",
       );
     });
-    // 切「全部」确认思考项在
-    fireEvent.click(screen.getByRole("tab", { name: "全部" }));
+    // 切「进度」确认思考项在
+    fireEvent.click(screen.getByRole("tab", { name: "进度" }));
     await waitFor(() => expect(screen.getByText(/半截思考/)).toBeInTheDocument());
 
     // override 到达 → 移除
@@ -1635,8 +1643,8 @@ describe("InteractiveSessionPanel partial override 撤回（task-06/08）", () =
       conn.handlers.route(
         makeEnvelope("log", {
           run_id: "run-1", channel: null,
-          content: "[THINKING_OVERRIDE] tu:2",
-          segment_id: "tu:2", stale: true, log_id: null,
+          content: "[THINKING_OVERRIDE] main:t2:1",
+          segment_id: "main:t2:1", stale: true, log_id: null,
         }),
         null,
       );
@@ -1673,7 +1681,7 @@ describe("InteractiveSessionPanel partial override 撤回（task-06/08）", () =
         "L2",
       );
     });
-    fireEvent.click(screen.getByRole("tab", { name: "全部" }));
+    fireEvent.click(screen.getByRole("tab", { name: "进度" }));
     await waitFor(() => expect(screen.getByText(/主思考/)).toBeInTheDocument());
     expect(screen.getByText(/子思考/)).toBeInTheDocument();
 

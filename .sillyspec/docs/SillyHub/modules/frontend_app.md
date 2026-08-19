@@ -18,7 +18,7 @@ SillyHub 前端的 Next.js App Router 页面路由层（frontend/src/app/** + mi
   - `(dashboard)/workspaces` — 工作区列表（选择器页）+ `[id]` 详情（列表带类型徽标+词表筛选/未分类；
     详情含 type/role/description 基本信息编辑区，2026-08-18-workspace-role-type）
   - `(dashboard)/runtimes` — daemon 运行时管理（列表 + `[id]` 详情/审计）
-  - `(dashboard)/sessions` — 智能体会话总入口（平台级跨工作区，两栏布局）
+  - `(dashboard)/sessions` — 智能体会话总入口（平台级跨工作区，两栏布局；2026-08-19-session-stream-ux：SSE 走装配器 + 头部子代理目录 + viewMode「进度」视图）
   - `(dashboard)/agent-profiles` — 智能体档案全局页（跨工作区聚合，独立一级菜单）
   - `(dashboard)/settings` / `admin` / `account` / `ppm` — 设置 / 管理台 / 个人中心 / 独立项目管理系统（/ppm redirect 到 /ppm/projects）
 - `workspaces/[id]/` 嵌套布局（含 layout.tsx + error.tsx），子路由按域分组：

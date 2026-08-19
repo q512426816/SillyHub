@@ -17,6 +17,16 @@
  *
  * turn 级串行（D-002@v3 spike S1）：currentRun 运行中禁用发送。
  *
+ * task-10（2026-08-19-session-stream-ux / FR-05 / D-002@v1）：onLog 日志处理副本
+ * （原 265-398 行内联：分类分流 / 工具配对 / override 撤回 / log_id 去重，与 /sessions
+ * 页 applyLogToTurn 同源副本）收敛为共享装配器调用（session-log-assembler，
+ * applyLogToSegments）+ 少量胶水（upsertTurn / 终态推导 / error_detail 拉取保留）。
+ * turn 对象本体即装配状态容器（segments / output / processItems / turnStartedAt /
+ * seenLogIds 五字段与 AssembledTurn 同形）——带 segments 的 turn 经 TurnTimeline v2
+ * 段模型渲染 + 内置轮级状态条（Grill X-09，FR-02），viewMode「全部」更名「进度」。
+ * partialSegmentsRef 删除：撤回状态已段化（per-turn 段树天然隔离，原 R-02 turn 边界
+ * 清 Map 职责由段模型承担）。
+ *
  * 状态不变量：
  *   - currentRunId 只指向 pending/running/interrupting turn；收到同 run 的
  *     turn_completed 后清空。
@@ -61,10 +71,20 @@ import {
   type SessionStreamEnvelope,
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
-import { classifySessionLog, isToolResultDenied, statusFromToolUseRaw } from "@/components/daemon/session-log-sanitize";
+// task-10（2026-08-19-session-stream-ux / FR-05）：classifySessionLog /
+// isToolResultDenied / statusFromToolUseRaw 等分类逻辑已收敛进装配器内部，本文件
+// 不再直接引用（logsToTurns 历史路径仍经 runtime-session-helpers 使用）。
+import {
+  applyLogToSegments,
+  finishTurn,
+  type AssembledTurn,
+  type AssemblerLogInput,
+  type TurnSegment,
+} from "@/components/daemon/session-log-assembler";
 import { logsToTurns } from "@/components/daemon/runtime-session-helpers";
 import {
   TurnTimeline,
+  type SessionProcessItem,
   type SessionTurnView,
   type SessionUiStatus,
   type TurnUiStatus,
@@ -127,6 +147,98 @@ function deriveTurnTerminalStatus(env: SessionStreamEnvelope): TurnUiStatus {
     return env.exit_code === 130 || env.exit_code === 143 ? "killed" : "failed";
   }
   return "completed";
+}
+
+/**
+ * task-10（2026-08-19-session-stream-ux / FR-05 / D-002@v1）：SSE envelope → 装配器
+ * 归一输入（design §7 AssemblerLogInput）。归属字段（parent_tool_use_id 等，task-04
+ * 已在 SessionStreamEnvelope 声明）映射为驼峰；可选字段缺省（旧 backend 不下发）
+ * 归一为 null → 装配器按主 agent 平铺（§9.1）。
+ */
+function toAssemblerLogInput(env: SessionStreamEnvelope): AssemblerLogInput {
+  return {
+    logId: env.log_id,
+    channel: env.channel,
+    content: env.content,
+    timestamp: env.timestamp,
+    segmentId: env.segment_id ?? null,
+    stale: env.stale ?? null,
+    parentToolUseId: env.parent_tool_use_id ?? null,
+    subagentType: env.subagent_type ?? null,
+    depth: env.depth ?? null,
+    toolKind: env.tool_kind ?? null,
+  };
+}
+
+/**
+ * task-10：turn → 装配器视角。turn 对象本体即装配状态容器——segments / output /
+ * processItems / turnStartedAt / seenLogIds 五字段与 AssembledTurn 结构同形
+ * （design §7），无独立 ref。
+ *
+ * segments 缺省（第三方构造的 initialTurns 等旧形状 turn，§9.3 brownfield）时先把
+ * legacy 字段反投影为段序列再入装配器——装配器的 output / processItems 投影从段树
+ * 重算，不反投影会把既有 output 清空（「不崩不空」承诺的增量版）。反投影内容等价：
+ * processItems 依序映射 + output 尾挂单一 text 段（同旧渲染顺序：过程项在前、答复
+ * 正文在后）。正常路径（本面板占位 turn / logsToTurns 历史 turn，task-11）segments
+ * 均有值，反投影分支不触发。
+ */
+function assembledViewOf(turn: SessionTurnView): AssembledTurn {
+  return {
+    segments:
+      turn.segments ?? bootstrapLegacySegments(turn.output, turn.processItems ?? []),
+    output: turn.output,
+    processItems: turn.processItems ?? [],
+    turnStartedAt: turn.turnStartedAt ?? null,
+    seenLogIds: turn.seenLogIds,
+  };
+}
+
+/**
+ * task-10：legacy 字段反投影（assembledViewOf 的 segments 缺省分支专用）。tool 项的
+ * toolName / primary 无源置 null——渲染按 R-07 原样显示 raw（内容保全优先，死路径
+ * 防御，不追求解析精度）。id 用 legacy: 前缀防与装配器派生 id 撞车。
+ */
+function bootstrapLegacySegments(
+  output: string,
+  items: SessionProcessItem[],
+): TurnSegment[] {
+  const segments: TurnSegment[] = items.map((item, i): TurnSegment => {
+    if (item.kind === "thinking") {
+      return {
+        kind: "thinking",
+        id: `legacy:thinking:${i}`,
+        text: item.text,
+        streaming: false,
+        ts: item.ts ?? null,
+      };
+    }
+    if (item.kind === "stderr") {
+      return { kind: "stderr", id: `legacy:stderr:${i}`, text: item.text, ts: item.ts ?? null };
+    }
+    return {
+      kind: "tool",
+      id: `legacy:tool:${i}`,
+      raw: item.raw,
+      result: item.result,
+      status: item.status,
+      toolName: null,
+      primary: null,
+      startedAt: item.ts ?? null,
+      endedAt: null,
+      children: [],
+      subagentType: null,
+    };
+  });
+  if (output) {
+    segments.push({
+      kind: "text",
+      id: "legacy:text",
+      text: output,
+      streaming: false,
+      startedAt: null,
+    });
+  }
+  return segments;
 }
 
 export interface InteractiveSessionPanelProps {
@@ -201,8 +313,9 @@ export function InteractiveSessionPanel({
   // 卡片回答后即移除、failed/ended 会话不渲染卡片，历史靠 GET /dialogs/history 恢复展示。
   const [dialogHistory, setDialogHistory] = useState<SessionDialogRead[]>([]);
   // ql-20260729-005：消息视图模式。「对话」（默认）只显用户消息 + agent 答复正文；
-  // 「全部」追加 thinking/工具调用/stderr 过程项。参考 agent-log-viewer 的
-  // 对话/全部二态 tab（ql-20260626-001），但不做二级筛选按钮组。
+  // 「进度」（原「全部」，2026-08-19-session-stream-ux task-10 更名，design §5
+  // Phase2）追加 thinking/工具调用/stderr 过程项（v2 段模型下为完整段时间线）。
+  // 参考 agent-log-viewer 的对话/全部二态 tab（ql-20260626-001），但不做二级筛选按钮组。
   const [viewMode, setViewMode] = useState<"conversation" | "all">("conversation");
   const streamConnRef = useRef<SessionStreamConnection | null>(null);
   // task-10 attach 模式轮询句柄（unmount / 转出 attach 模式时清理）
@@ -210,12 +323,10 @@ export function InteractiveSessionPanel({
   // 2026-07-29-model-error-visibility：已拉取过 error_detail 的 failed run_id 集合，
   // 防 SSE 重连重发 turn_completed 触发重复 listSessionRuns（同一 failed run 只拉一次）。
   const fetchedErrorRunIdsRef = useRef<Set<string>>(new Set());
-  // 2026-08-03-session-stream-partial-revoke / FR-05 / design §5 Phase2 / §7.2：
-  // partial segment 起点（reply→outputStart / thinking→itemIndex），按 segmentId 索引。
-  // 挂 useRef 不驱动渲染——撤回的渲染由 setView/upsertTurn 触发，Map 仅作 segmentId→起点
-  // 查表。收到 override 令箭时按 segmentId 截断 turn.output(slice(0, outputStart)) 或移除
-  // processItems 项。turn 边界（onTurnCompleted/clearCurrentRun）清空防跨 turn 串扰（R-02）。
-  const partialSegmentsRef = useRef<Map<string, { outputStart: number; length: number } | { itemIndex: number }>>(new Map());
+  // task-10（2026-08-19-session-stream-ux / FR-05）：原 partialSegmentsRef（override
+  // 撤回的 segmentId→起点查表）删除——撤回状态已段化进装配器（revokePartialSegments
+  // 按 segmentId 前缀路由撤段），段树 per-turn 天然隔离（原 R-02 turn 边界清 Map 职责
+  // 由段模型承担）。
 
   // 当在线 provider 变化且当前选中的不再可用，回退到默认。
   useEffect(() => {
@@ -268,152 +379,41 @@ export function InteractiveSessionPanel({
           // 避免 attach 时 user_input 同时出现在 prompt 气泡和 output 气泡（重复）。
           if (env.channel === "user_input") return;
           setView((prev) => {
-            // log 以 log_id 去重
+            // task-10（2026-08-19-session-stream-ux / FR-05 / D-002@v1）：原内联日志
+            // 处理副本（分类分流 / 工具 use↔result 配对 / override 撤回 / log_id 去重）
+            // 全套收敛进共享装配器（session-log-assembler），此处只做归一 + 增量回写。
+            // 无内容变化（重复 log_id / 分类丢弃 / override 无匹配段）时装配器原引用
+            // 返回 → turn 原样（segments 缺省的旧形状 turn 不被切到 v2 渲染路径）。
             return upsertTurn(prev, env, (turn) => {
-              if (env.log_id && turn.seenLogIds.has(env.log_id)) {
-                return turn;
-              }
-              const nextSeen = new Set(turn.seenLogIds);
-              if (env.log_id) nextSeen.add(env.log_id);
-              // ql-20260730-003：分类分流 + 工具 use/result 配对，按真实到达顺序入 processItems
-              // （思考/工具/stderr 混在同一有序序列，渲染时连续 thinking 才合并、被工具打断分段）。
-              // - tool_use → 追加 tool 项（status 从 tool_call JSON 的 success 取，已结束会话不假运行）
-              // - tool_result → 配对最近「尚无 result」的 tool 项补输出文本（status 保留 success 值）；
-              //   找不到配对（孤儿 result）降级为 raw 空的 tool 项兜底，不丢数据
-              // - thinking/stderr → 追加过程项（保留到达顺序）
-              // - reply → 答复正文（对话视图默认展示）
-              const seg = classifySessionLog(env.content ?? "", env.channel);
-              if (!seg) return turn;
-              // 2026-08-03-session-stream-partial-revoke / FR-05：override 撤回令箭——按
-              // segmentId 精确撤回已渲染的半截。override 是信号非日志（log_id=None，
-              // task-02 design §7.1），不写 seenLogIds、不渲染正文。Map 无该 segmentId
-              // （迟到 override / complete 已替换）静默 no-op。
-              if (seg.kind === "override" && seg.segmentId) {
-                const start = partialSegmentsRef.current.get(seg.segmentId);
-                if (!start) return turn;
-                partialSegmentsRef.current.delete(seg.segmentId);
-                if (seg.variant === "assistant" && "outputStart" in start) {
-                  const end = start.outputStart + (start.length ?? 0);
-                  return { ...turn, output: turn.output.slice(0, start.outputStart) + turn.output.slice(end) };
-                }
-                if (seg.variant === "thinking" && "itemIndex" in start) {
-                  return {
-                    ...turn,
-                    processItems: (turn.processItems ?? []).filter((_, i) => i !== start.itemIndex),
-                  };
-                }
-                return turn;
-              }
-              // ql-20260802-003：保留 log 时间戳（ms），供「全部」视图把 AskUser 提问按
-              // created_at 穿插进思考/工具时间线（真实顺序，而非固定堆末尾）。
-              const ts = env.timestamp ? Date.parse(env.timestamp) : undefined;
-              if (seg.kind === "tool_use") {
-                // status 从 tool_call JSON 的 success 字段取（权威源，避免已结束会话假运行）
-                return {
-                  ...turn,
-                  seenLogIds: nextSeen,
-                  processItems: [
-                    ...(turn.processItems ?? []),
-                    { kind: "tool", raw: seg.text, status: statusFromToolUseRaw(seg.text), ts },
-                  ],
-                };
-              }
-              if (seg.kind === "tool_result") {
-                // 配对最近「尚无 result」的 tool 项（补输出文本）：status 优先保留 success 已定
-                // 的值；仅当仍 running（success 未解析出）才用 result 文本关键词兜底。
-                const items = [...(turn.processItems ?? [])];
-                let paired = false;
-                for (let i = items.length - 1; i >= 0; i -= 1) {
-                  const it = items[i];
-                  if (it && it.kind === "tool" && it.result === undefined) {
-                    // ql-20260801-004：result 拒绝优先覆盖 use 的 success。daemon tool_call
-                    // JSON 硬编码 success:true（表「已放行」非「执行成功」），Runtime Policy 拒绝
-                    // 只在 result 文本——result 含明确拒绝/失败 → deny（覆盖已 ok）；否则 success
-                    // 权威（成功输出含 fail/error 字样不误判，isToolResultDenied 已收紧关键词）。
-                    const status = isToolResultDenied(seg.text)
-                      ? "deny"
-                      : it.status === "running"
-                        ? "ok"
-                        : it.status;
-                    items[i] = { kind: "tool", raw: it.raw, result: seg.text, status, ts: it.ts };
-                    paired = true;
-                    break;
-                  }
-                }
-                if (!paired) {
-                  // ql-20260801-004：孤儿拒绝 result 也判 deny（不硬编码 ok）
-                  items.push({
-                    kind: "tool",
-                    raw: "",
-                    result: seg.text,
-                    status: isToolResultDenied(seg.text) ? "deny" : "ok",
-                    ts,
-                  });
-                }
-                return { ...turn, seenLogIds: nextSeen, processItems: items };
-              }
-              if (seg.kind === "reply") {
-                // 2026-08-03-session-stream-partial-revoke / FR-05：partial reply（带
-                // segment_id）先记半截起点（concat 前 output 长度），再 concat。收到对应
-                // override 时按此起点 slice(0, outputStart) 截断撤回。complete（segment_id
-                // 为 null/undefined）不记 Map——design §9 兼容：旧 backend 缺字段 undefined 空转。
-                if (env.segment_id) {
-                  const existing = partialSegmentsRef.current.get(env.segment_id);
-                    if (existing && "outputStart" in existing) {
-                      existing.length += seg.text.length;
-                    } else {
-                      partialSegmentsRef.current.set(env.segment_id, { outputStart: turn.output.length, length: seg.text.length });
-                    }
-                }
-                return {
-                  ...turn,
-                  seenLogIds: nextSeen,
-                  // ql-20260730-004：reply 流式 delta 直接 concat（不加 \n）——
-                  // 它们是同一段流式输出的连续片段，换行保留在各 delta 内部，
-                  // 在 token 边界插 \n 会破坏 markdown 连续结构（实测 7fb9227d 确诊）。
-                  output: turn.output + seg.text,
-                };
-              }
-              // 2026-08-03-session-stream-partial-revoke / FR-05：partial thinking 先记
-              // 即将 append 的项索引（concat 前 processItems 长度），收到 override 时按此
-              // itemIndex filter 移除。stderr 不记（无撤回）。
-              if (seg.kind === "thinking" && env.segment_id) {
-                partialSegmentsRef.current.set(env.segment_id, {
-                  itemIndex: (turn.processItems ?? []).length,
-                });
-              }
-              // thinking / stderr → 追加过程项（保留到达顺序，渲染时连续 thinking 才合并）
-              return {
-                ...turn,
-                seenLogIds: nextSeen,
-                processItems: [
-                  ...(turn.processItems ?? []),
-                  seg.kind === "thinking"
-                    ? { kind: "thinking", text: seg.text, ts }
-                    : { kind: "stderr", text: seg.text, ts },
-                ],
-              };
+              const assembled = assembledViewOf(turn);
+              const next = applyLogToSegments(assembled, toAssemblerLogInput(env));
+              if (next === assembled) return turn;
+              return { ...turn, ...next };
             }, {});
           });
         },
         onTurnCompleted: (env) => {
           const terminal = deriveTurnTerminalStatus(env);
-          setView((prev) => upsertTurn(prev, env, (turn) => ({
-            ...turn,
-            // turn_completed 收敛到终态。无论 prior 是 running 还是 interrupting，
-            // 都收敛到 deriveTurnTerminalStatus 推导的真实终态（completed/failed/killed）。
-            status: terminal,
-            // ql-20260621：终态 token 同步写入（backend turn_completed payload 带
-            // input_tokens/output_tokens）。null 不覆盖执行中已收到的累积值。
-            inputTokens: env.input_tokens ?? turn.inputTokens,
-            outputTokens: env.output_tokens ?? turn.outputTokens,
-          }), { clearCurrentRun: env.run_id! }));
-
-          // 2026-08-03-session-stream-partial-revoke / FR-05 / R-02：turn 边界清空 partial
-          // segment Map——防跨 turn segmentId 复用导致误撤回。在 setView 回调外层直接清 ref，
-          // 不依赖渲染时机（task-06 constraints）。clearCurrentRun 已把 currentRunId 置 null，
-          // 此 turn 的 partial 历史不再需要。
-          partialSegmentsRef.current.clear();
+          setView((prev) => upsertTurn(prev, env, (turn) => {
+            // task-10（FR-05 / design §5 Phase3）：终态清全部 text/thinking 段的
+            // streaming 标记（finishTurn）——流式光标与轮级状态条随之收起。segments
+            // 缺省的旧形状 turn 无 streaming 标记，不经装配器（保持旧渲染路径，§9.3）。
+            // 原 R-02 turn 边界清 partialSegmentsRef 的职责由段模型天然承担（段树
+            // per-turn 隔离，跨 turn 的迟到 override 在新段树上无匹配段即 no-op）。
+            const finished =
+              turn.segments !== undefined ? finishTurn(assembledViewOf(turn)) : null;
+            return {
+              ...turn,
+              ...(finished ?? {}),
+              // turn_completed 收敛到终态。无论 prior 是 running 还是 interrupting，
+              // 都收敛到 deriveTurnTerminalStatus 推导的真实终态（completed/failed/killed）。
+              status: terminal,
+              // ql-20260621：终态 token 同步写入（backend turn_completed payload 带
+              // input_tokens/output_tokens）。null 不覆盖执行中已收到的累积值。
+              inputTokens: env.input_tokens ?? turn.inputTokens,
+              outputTokens: env.output_tokens ?? turn.outputTokens,
+            };
+          }, { clearCurrentRun: env.run_id! }));
 
           // 2026-07-29-model-error-visibility / FR-04：turn 终态=failed 时拉取该 run 的
           // 结构化错误详情（AgentRun.error_detail，GET /sessions/{id}/runs），用
@@ -719,6 +719,11 @@ export function InteractiveSessionPanel({
             outputTokens: null,
             errorDetail: null,
             processItems: [],
+            // task-10（FR-05 / Grill X-01）：装配化初始形状——live 轮计时锚点取本地
+            // 发送占位时刻（backend 无 turn_started 事件，design §7.5），带 segments
+            // 即走 TurnTimeline v2 段模型渲染 + 内置轮级状态条。
+            segments: [],
+            turnStartedAt: Date.now(),
           },
         ],
       }));
@@ -776,7 +781,22 @@ export function InteractiveSessionPanel({
         ...INITIAL_VIEW,
         status: "creating",
         turns: [
-          { runId: "__pending_create__", turn: null, prompt, output: "", status: "pending", seenLogIds: new Set(), inputTokens: null, outputTokens: null, errorDetail: null, processItems: [] },
+          {
+            runId: "__pending_create__",
+            turn: null,
+            prompt,
+            output: "",
+            status: "pending",
+            seenLogIds: new Set(),
+            inputTokens: null,
+            outputTokens: null,
+            errorDetail: null,
+            processItems: [],
+            // task-10（FR-05 / Grill X-01）：同 submitFollowup——装配化初始形状 +
+            // live 计时锚点（本地发送占位时刻，design §7.5）。
+            segments: [],
+            turnStartedAt: Date.now(),
+          },
         ],
       });
       try {
@@ -1063,8 +1083,10 @@ export function InteractiveSessionPanel({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            {/* ql-20260729-005：对话/全部二态切换（仅在有消息时出现）。对话=只显
-                用户消息与 agent 答复；全部=追加思考/工具/ stderr 过程项。 */}
+            {/* ql-20260729-005：对话/进度二态切换（仅在有消息时出现）。对话=只显
+                用户消息与 agent 答复；进度（原「全部」，2026-08-19-session-stream-ux
+                task-10 更名，design §5 Phase2）=追加思考/工具/stderr 过程项（v2 段
+                模型完整段时间线）。 */}
             {view.turns.length > 0 && (
               <div
                 role="tablist"
@@ -1084,7 +1106,7 @@ export function InteractiveSessionPanel({
                         : "text-muted-foreground hover:text-foreground",
                     )}
                   >
-                    {m === "conversation" ? "对话" : "全部"}
+                    {m === "conversation" ? "对话" : "进度"}
                   </button>
                 ))}
               </div>
@@ -1265,6 +1287,10 @@ function upsertTurn(
       outputTokens: env.output_tokens ?? null,
       errorDetail: null,
       processItems: [],
+      // task-10（FR-05）：装配化初始形状（走 v2 渲染路径）；turnStartedAt 无本地
+      // 发送时刻（attach 未知 run），留空由首条 log timestamp 兜底（design §7.5）。
+      segments: [],
+      turnStartedAt: null,
     };
     turns = [...prev.turns, apply(newTurn)];
   } else {

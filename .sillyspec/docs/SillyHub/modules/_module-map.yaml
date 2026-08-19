@@ -725,6 +725,9 @@ modules:
       - components/app-shell.tsx / top-bar.tsx / antd-providers.tsx
       - components/agent / agent-log / agent-profile / changes / charts / daemon / layout / llm-providers / mobile / permissions / ppm / sessions / ui / workspace 目录
       - components/agent-run-panel / mission-console / agent-log-viewer
+      - components/daemon/session-log-assembler（会话流共享装配器，2026-08-19-session-stream-ux）
+      - components/daemon/turn-segment-views / turn-status-bar（段渲染族 + 轮级状态条）
+      - components/sessions/subagent-catalog（子代理目录）
       - components/workspace-* / ppm-* / mcp-token-create-dialog / file-upload / file-viewer
       - components/permission-approval-card / error-boundary
     depends_on: [frontend_lib, frontend_stores]
