@@ -191,3 +191,21 @@
 - 根因：`--done` 边界审计比对 step1 baseline 与当前 git status，凡 `.sillyspec/` 下非关联变更的脏文件都可能被判危险。CONCERNS.md 在 quick 启动时已是 24 个 baseline 脏文件之一（来源 change 流程）。审计说明「并发其他会话的 `.sillyspec/changes/<非关联变更>/` 放行」，但对 `docs/scan/` 这类共享路径无并发豁免。
 - 处置：确认归属（`git diff` 看是审计报告，含本 quick 的 3 个洞，是任务**来源**而非代码改动）后，重跑 `--done --force-baseline --allow-new` 仅压制危险路径判定让流程过；**绝不 `git add` 该文件**，也不删——留给那个 change/审计流程自己处理。
 - 通用坑：① 遇到 --done 危险文件拦截，先 `git diff <file>` 判归属：是本流程产物（force-baseline）还是他人/并发产物（force-baseline 但**别提交它**）。force-baseline 只解锁流程，不等于把该文件纳入本 quick 提交集。② `--allow-new` 与 `--force-baseline` 解耦：新建测试文件用前者，压制危险判定用后者，别为一个目的滥开另一个。
+
+## 2026-08-19 — 跨端 mock 各自绿但契约断裂：字段命名/时间戳形态三端对不齐（待确认）
+
+> 来源：2026-08-19-runtime-live-daemon-read execute acceptance review 抓到的 P0。
+
+- 现象：runtime 进度链路（sillyspec CLI dump → daemon 透传 → backend pydantic）三端测试全绿，端到端却断链——dump 输出 camelCase（currentStage/startedAt/sizeBytes），backend `RuntimeProgress` 是 snake_case；pydantic 默认**静默忽略未知字段**，model_validate 通过但核心字段全落 None，前端进度页成空壳。第二层坑：DB 内历史斜杠时间戳（`2026/7/22 13:38:35`）pydantic datetime 直接拒收。
+- 根因：三端测试各自 mock 了「自以为对」的数据形态（backend mock snake_case、daemon mock snake_case、sillyspec 断言 camelCase），没有一侧用**真实对端输出**做契约测试。task review 铁律「只看当前 task 的 diff」天然覆盖不到跨 task 交界——这正是 stage acceptance review 的兜底价值。
+- 修复范式（sillyspec 9a63466）：生产端（dump）转 snake_case + 时间戳规范化（ISO 与斜杠统一 ISO）；测试加**跨端契约守护断言**（camelCase 残留检测 + ISO 形态检测）；验收必做端到端（真实 DB → CLI 输出 → pydantic model_validate 全字段断言，不能只看「校验通过」——要看字段值非空）。
+- 通用坑：① pydantic 忽略未知字段是静默降级，`model_validate` 不报错 ≠ 数据进了模型，跨端契约测试必须断言**字段值**而非仅校验成功。② 多端链路的「mock 契约」要有一侧锚定真实输出形态（fixture 从真实 CLI 输出固化），否则三端各绿 = 三端各错。
+
+## 2026-08-19 — Windows 下 execFile 调 npm 全局 CLI 必 ENOENT，须 spawn+shell 或 cmd-shim 解析（待确认）
+
+> 来源：同上 task-11 实现期实测 + 仓内先例交叉验证。
+
+- 现象：`execFile('sillyspec', [...])` 在 Windows 返回 ENOENT——npm 全局 bin 是 `.cmd` shim（`C:\nvm4w\nodejs\sillyspec.cmd`），execFile 无 PATHEXT 解析；Node ≥18.20 同时因 CVE-2024-27980 拒绝无 shell 调 `.cmd`/.bat。
+- 仓内范式：① `spec-sync.ts runInitCmd`（X-06 注释）`spawn(cmd, {shell:true})` + 超时 taskkill /T /F 杀树；② `cmd-shim.ts resolveWindowsCmdShim` 读 `.cmd` 提取真实 exe + target 直接 spawn（重任务用）；③ `preflight.ts runWithTreeKill` 同范式。
+- 注入防线：shell:true 时命令串拼接是注入面，入参必须白名单（本例 workspace_id UUID 正则先于拼接，`; rm -rf` / `&& calc` / `$(whoami)` / 反引号全拒）。
+- 通用坑：task 卡/设计文档写「execFile 非 shell 防注入」在 Windows 调 npm bin 场景是**纸上方案**——落地前先实测平台行为，防注入诉求改为入参白名单 + shell 隔离双层。
