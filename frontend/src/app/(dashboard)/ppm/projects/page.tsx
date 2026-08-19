@@ -161,6 +161,13 @@ export default function PpmProjectsPage() {
             >
               关联工作区
             </Button>
+            <Button
+              size="small"
+              type="link"
+              onClick={() => router.push(`/projects/${row.id}/missions`)}
+            >
+              Agent 团队
+            </Button>
           </>
         )}
         list={(params) => pageProjects(params)}
