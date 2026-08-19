@@ -472,7 +472,7 @@ async def create_user(
     user: Annotated[User, Depends(get_current_user)],
 ) -> UserRead:
     svc = UserService(session, user.id)
-    target = await svc.create_user(
+    target, generated_password = await svc.create_user(
         email=payload.email,
         password=payload.password,
         username=payload.username,
@@ -482,7 +482,10 @@ async def create_user(
         organization_ids=payload.organization_ids or None,
         role_ids=payload.role_ids or None,
     )
-    return await _user_with_relations(session, target)
+    resp = await _user_with_relations(session, target)
+    # BS-1：未显式传密码时，随机初始口令仅此一次下发，管理员转发给用户后不再可见。
+    resp.initial_password = generated_password
+    return resp
 
 
 @router.patch(

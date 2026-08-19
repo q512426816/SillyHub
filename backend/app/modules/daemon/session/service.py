@@ -29,6 +29,10 @@ from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
+from app.modules.auth.permissions import Permission
+
+# D-001@v1：create_session workspace 归属校验（口径与前端 listWorkspaces 一致）。
+from app.modules.auth.rbac import allowed_workspace_ids
 from app.modules.daemon.model import (
     DaemonInstance,
     DaemonRuntime,
@@ -42,10 +46,6 @@ from app.modules.daemon.protocol import (
 )
 from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 from app.modules.daemon.schema import SessionReopenResponse
-
-# D-001@v1：create_session workspace 归属校验（口径与前端 listWorkspaces 一致）。
-from app.modules.auth.rbac import allowed_workspace_ids
-from app.modules.auth.permissions import Permission
 
 log = get_logger(__name__)
 
@@ -720,10 +720,28 @@ class SessionService:
         if workspace_id is not None:
             # D-001@v1：workspace 归属校验，口径与前端 listWorkspaces 一致。
             # 无权限与工作区不存在同语义（404），不泄露存在性。
-            _allowed = await allowed_workspace_ids(
-                self._session, user_id=user_id, permission=Permission.WORKSPACE_READ
+            # 平台管理员旁路权限判定（口径对齐 rbac.allowed_workspace_ids docstring
+            # 「Platform admin bypasses at the dependency layer」），但仍要求工作区
+            # 真实存在（保持 404 语义）。2026-08-20 审计顺手修：管理员建会话 404。
+            from app.modules.auth.model import User as _User
+
+            _actor = await self._session.get(_User, user_id)
+            _is_admin = bool(_actor and _actor.is_platform_admin)
+            _allowed = (
+                []
+                if _is_admin
+                else await allowed_workspace_ids(
+                    self._session, user_id=user_id, permission=Permission.WORKSPACE_READ
+                )
             )
-            if workspace_id not in _allowed:
+            if not _is_admin and workspace_id not in _allowed:
+                raise DaemonSessionWorkspaceNotFound(
+                    f"Workspace '{workspace_id}' not found or you have no access.",
+                    details={"workspace_id": str(workspace_id)},
+                )
+            from app.modules.workspace.model import Workspace as _Workspace
+
+            if _is_admin and await self._session.get(_Workspace, workspace_id) is None:
                 raise DaemonSessionWorkspaceNotFound(
                     f"Workspace '{workspace_id}' not found or you have no access.",
                     details={"workspace_id": str(workspace_id)},

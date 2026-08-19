@@ -48,7 +48,7 @@ async def workspace_with_knowledge(
 
     ws_resp = await client.post(
         "/api/workspaces",
-        json={"name": "knowledge-test", "root_path": str(root)},
+        json={"name": "knowledge-test", "root_path": str(root), "type": "other"},
         headers=auth_headers,
     )
     assert ws_resp.status_code == 201, ws_resp.text
@@ -196,7 +196,7 @@ async def test_empty_knowledge_directory(
 
     ws_resp = await client.post(
         "/api/workspaces",
-        json={"name": "empty-k", "root_path": str(root)},
+        json={"name": "empty-k", "root_path": str(root), "type": "other"},
         headers=auth_headers,
     )
     ws_id = ws_resp.json()["id"]

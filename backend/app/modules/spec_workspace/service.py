@@ -710,13 +710,22 @@ class SpecWorkspaceService:
                     "同步包无效：包含越界路径的成员，已拒绝落盘。",
                     member=m.name,
                 ) from None
+            # 2026-08-20 审计 BS-2：符号/硬链接成员一律拒绝。词法预检发生在解包前
+            # （链接尚未落盘，resolve 识不破），「先链接成员→再经其写文件」可逃逸
+            # staging 实现任意文件写；spec 树同步语义本就只需普通文件/目录。
+            if m.issym() or m.islnk():
+                raise _spec_bundle_invalid(
+                    "同步包无效：不允许包含符号链接或硬链接成员。",
+                    member=m.name,
+                )
             # ql-20260818-002 过滤点②：local.yaml 成员不落 staging（整包覆盖语义下
             # 即从服务器树移除）；越界校验仍全量跑（坏成员照旧 422 拒整体）。
             if PurePosixPath(name).name in SERVER_EXCLUDED_FILENAMES:
                 continue
             members.append(m)
 
-        tf.extractall(staging, members=members, filter="fully_trusted")
+        # filter="data"：拒绝链接/设备/绝对路径等危险成员（与上方预检双保险）。
+        tf.extractall(staging, members=members, filter="data")
         return tf, staging
 
     async def _write_spec_root(

@@ -53,4 +53,5 @@ async def test_upsert_idempotent_same_ql(db_session: AsyncSession) -> None:
 
     rows = (await db_session.execute(select(QuicklogEntryORM))).scalars().all()
     assert len(rows) == 1
+    assert rows[0].payload is not None  # mypy 收窄（payload 为 dict|None 列）
     assert rows[0].payload["title"] == "v2"

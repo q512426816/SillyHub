@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from pathlib import Path
 
@@ -47,14 +48,16 @@ class KnowledgeService:
     async def list_knowledge(self, workspace_id: uuid.UUID) -> KnowledgeList:
         workspace = await self._ws_service.get(workspace_id)
         root = await self._spec_content_root(workspace)
-        entries = self._parser.parse_knowledge(root)
+        # BQ-2（2026-08-20 审计）：同步 rglob+read 移线程池，别占事件循环
+        # （对齐 scan_docs task-01 范式）。
+        entries = await asyncio.to_thread(self._parser.parse_knowledge, root)
         items = [self._to_knowledge_entry(e, include_content=False) for e in entries]
         return KnowledgeList(items=items, total=len(items))
 
     async def get_knowledge(self, workspace_id: uuid.UUID, filename: str) -> KnowledgeEntry:
         workspace = await self._ws_service.get(workspace_id)
         root = await self._spec_content_root(workspace)
-        entries = self._parser.parse_knowledge(root)
+        entries = await asyncio.to_thread(self._parser.parse_knowledge, root)
         for e in entries:
             if e.filename == filename:
                 return self._to_knowledge_entry(e, include_content=True)
@@ -69,14 +72,14 @@ class KnowledgeService:
     async def list_quicklog(self, workspace_id: uuid.UUID) -> QuicklogList:
         workspace = await self._ws_service.get(workspace_id)
         root = await self._spec_content_root(workspace)
-        entries = self._parser.parse_quicklog(root)
+        entries = await asyncio.to_thread(self._parser.parse_quicklog, root)
         items = [self._to_quicklog_entry(e, include_content=False) for e in entries]
         return QuicklogList(items=items, total=len(items))
 
     async def get_quicklog(self, workspace_id: uuid.UUID, filename: str) -> QuicklogEntry:
         workspace = await self._ws_service.get(workspace_id)
         root = await self._spec_content_root(workspace)
-        entries = self._parser.parse_quicklog(root)
+        entries = await asyncio.to_thread(self._parser.parse_quicklog, root)
         for e in entries:
             if e.filename == filename:
                 return self._to_quicklog_entry(e, include_content=True)

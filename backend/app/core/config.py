@@ -7,13 +7,14 @@ from feature code.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import sys
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, ValidationInfo, field_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from app.core.paths import resolve_spec_data_root
@@ -341,6 +342,28 @@ class Settings(BaseSettings):
                 return json.loads(stripped)
             return [item.strip() for item in stripped.split(",") if item.strip()]
         return raw
+
+    @model_validator(mode="after")
+    def _warn_default_s3_credentials(self) -> "Settings":
+        """BS-7（2026-08-20 审计）：非 dev 环境沿用 minioadmin 默认凭证时启动即报错。
+
+        默认值仅服务本地开箱体验；生产/测试环境漏配 S3_* 等于对象存储全开，
+        在配置加载期 fail-fast（同 bootstrap 弱口令范式），错误信息给出修复指引。
+        """
+        using_default = self.s3_access_key == "minioadmin" or self.s3_secret_key == "minioadmin"
+        if not using_default:
+            return self
+        if self.environment == "prod":
+            raise ValueError(
+                "生产环境不允许使用 MinIO 默认凭证 minioadmin："
+                "请在环境变量或 .env 中显式配置 S3_ACCESS_KEY / S3_SECRET_KEY。"
+            )
+        if self.environment == "test":
+            # 测试环境不连真实对象存储，仅提醒；硬拒会让全部 CI 红灯。
+            logging.getLogger(__name__).warning(
+                "test 环境使用 MinIO 默认凭证（测试不连真实 S3，仅提醒）。"
+            )
+        return self
 
     @field_validator("platform_bootstrap_admin_password")
     @classmethod

@@ -202,6 +202,47 @@ class PlanTaskService:
         await self._enrich_module_name(items)
         return Page[PlanTask].build(items=items, total=total, req=page_req)
 
+    async def list_for_export(
+        self, req: PlanTaskPageReq, *, user: User | None = None, limit: int = 5000
+    ) -> list[PlanTask]:
+        """导出用（BQ-1，2026-08-20 审计）：忽略分页返回过滤后全量，硬上限防内存爆。
+
+        过滤条件与 ``page`` 完全同源（逐 where 镜像），排序一致；导出端点原走
+        ``page(page_size=200)`` 会静默截断超 200 行的数据。
+        """
+        stmt = select(PlanTask)
+        user_id = _parse_uuid_optional(req.user_id)
+        project_id = _parse_uuid_optional(req.project_id)
+        module_id = _parse_uuid_optional(req.module_id)
+        if user_id is not None:
+            stmt = stmt.where(PlanTask.user_id == user_id)
+        if project_id is not None:
+            stmt = stmt.where(PlanTask.project_id == project_id)
+        if module_id is not None:
+            stmt = stmt.where(PlanTask.module_id == module_id)
+        if req.status:
+            stmt = stmt.where(PlanTask.status.in_(req.status))
+        if req.month is not None:
+            stmt = stmt.where(PlanTask.month == req.month)
+        if req.year is not None:
+            stmt = stmt.where(PlanTask.year == req.year)
+        if req.start_time is not None:
+            stmt = stmt.where(PlanTask.start_time >= req.start_time)
+        if req.end_time is not None:
+            stmt = stmt.where(PlanTask.start_time <= req.end_time)
+        if req.work_partner:
+            stmt = stmt.where(PlanTask.work_partner.ilike(f"%{req.work_partner}%"))
+        if user is not None:
+            scope = await task_scope_clause(self._session, user)
+            if scope is not None:
+                stmt = stmt.where(scope)
+        stmt = apply_sort(stmt, PlanTask, req.order_by, PLAN_SORT_FIELDS, req.order)
+        stmt = stmt.limit(limit)
+        result = await self._session.execute(stmt)
+        items = list(result.scalars().all())
+        await self._enrich_module_name(items)
+        return items
+
     async def _enrich_module_name(self, items: list[PlanTask]) -> None:
         """补 module_name:``ppm_plan_task.module_name`` 冗余字段历史从未填
         (迁移脚本/各创建入口均不写),但 ``module_id`` 多数有值。按 module_id

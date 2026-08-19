@@ -81,6 +81,25 @@ class _PasswordHasher:
 password_hasher = _PasswordHasher()
 
 
+# ── 口令强度（BS-12，2026-08-20 审计）───────────────────────────────────────
+
+
+def assert_password_strength(password: str) -> str:
+    """口令复杂度校验：至少 8 位、含字母与数字、不在常见弱口令黑名单。
+
+    供用户侧口令入口（自助改密 / 管理员建户 / 重置密码）复用；命中抛
+    ``ValueError``，Pydantic field_validator 会转 422。黑名单复用 bootstrap
+    的 ``_WEAK_BOOTSTRAP_PASSWORDS``（config 加载期 fail-fast 同源），不重不漏。
+    """
+    from app.core.config import _WEAK_BOOTSTRAP_PASSWORDS
+
+    if password.lower() in _WEAK_BOOTSTRAP_PASSWORDS:
+        raise ValueError("密码过于简单：命中常见弱口令黑名单，请更换。")
+    if not any(c.isalpha() for c in password) or not any(c.isdigit() for c in password):
+        raise ValueError("密码必须同时包含字母和数字。")
+    return password
+
+
 # ── JWT helpers ─────────────────────────────────────────────────────────────
 
 

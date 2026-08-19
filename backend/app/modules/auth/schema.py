@@ -5,7 +5,9 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.core.security import assert_password_strength
 
 
 class LoginRequest(BaseModel):
@@ -49,6 +51,11 @@ class ChangePasswordRequest(BaseModel):
 
     old_password: str = Field(min_length=1)
     new_password: str = Field(min_length=8)
+
+    @field_validator("new_password")
+    @classmethod
+    def _check_strength(cls, v: str) -> str:
+        return assert_password_strength(v)
 
 
 class TokenPair(BaseModel):

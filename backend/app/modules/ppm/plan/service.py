@@ -698,6 +698,26 @@ class PlanService:
                 details={"plan_id": str(plan.id)},
             )
 
+    async def _assert_node_operable(self, node: PsPlanNode, user: User) -> None:
+        """里程碑上溯所属计划做同款断言（2026-08-20 审计 BS-4：子域写接口漏授权）。"""
+        plan = await self._session.get(PsProjectPlan, node.ps_project_plan_id)
+        if plan is None:
+            raise PlanNotFound(
+                "项目计划不存在或已被删除。",
+                details={"plan_id": str(node.ps_project_plan_id)},
+            )
+        await self._assert_can_operate(plan, user)
+
+    async def _assert_detail_operable(self, detail: PsPlanNodeDetail, user: User) -> None:
+        """里程碑明细上溯:明细 → 里程碑 → 计划,同款断言（2026-08-20 审计 BS-4）。"""
+        if detail.plan_node_id is None:
+            # 数据异常(明细必挂里程碑);宁拒勿放。
+            raise PlanNotFound("里程碑明细缺少所属里程碑,拒绝操作。")
+        node = await self._session.get(PsPlanNode, detail.plan_node_id)
+        if node is None:
+            raise PlanNotFound("里程碑不存在或已被删除。")
+        await self._assert_node_operable(node, user)
+
     # ---------- 里程碑 (ps_plan_node) CRUD ----------
     async def list_ps_plan_nodes_by_plan(self, ps_project_plan_id: str) -> list[PsPlanNode]:
         stmt = select(PsPlanNode).where(
@@ -734,10 +754,16 @@ class PlanService:
     async def get_ps_plan_node(self, item_id: uuid.UUID) -> PsPlanNode:
         return await _Crud(self._session, PsPlanNode).get(item_id)
 
-    async def update_ps_plan_node(self, item_id: uuid.UUID, data: dict[str, Any]) -> PsPlanNode:
+    async def update_ps_plan_node(
+        self, item_id: uuid.UUID, data: dict[str, Any], *, user: User
+    ) -> PsPlanNode:
+        obj = await _Crud(self._session, PsPlanNode).get(item_id)
+        await self._assert_node_operable(obj, user)
         return await _Crud(self._session, PsPlanNode).update(item_id, data)
 
-    async def delete_ps_plan_node(self, item_id: uuid.UUID) -> None:
+    async def delete_ps_plan_node(self, item_id: uuid.UUID, *, user: User) -> None:
+        obj = await _Crud(self._session, PsPlanNode).get(item_id)
+        await self._assert_node_operable(obj, user)
         await _Crud(self._session, PsPlanNode).delete(item_id)
 
     # ---------- 里程碑明细 (核心表) CRUD ----------
@@ -862,9 +888,12 @@ class PlanService:
         await self._session.refresh(obj)
         return obj
 
-    async def update_detail(self, item_id: uuid.UUID, data: dict[str, Any]) -> PsPlanNodeDetail:
+    async def update_detail(
+        self, item_id: uuid.UUID, data: dict[str, Any], *, user: User
+    ) -> PsPlanNodeDetail:
         # 重构为原子事务：更新明细字段 + 同事务同步关联任务字段 (FR-03, D-007)。
         obj = await self.get_detail(item_id)
+        await self._assert_detail_operable(obj, user)
         for k, v in data.items():
             setattr(obj, k, v)
         obj.updated_at = _now()
@@ -873,10 +902,11 @@ class PlanService:
         await self._session.refresh(obj)
         return obj
 
-    async def delete_detail(self, item_id: uuid.UUID) -> None:
+    async def delete_detail(self, item_id: uuid.UUID, *, user: User) -> None:
         # 原子事务：先级联处理关联任务 (非[已完成]删除含执行记录/[已完成]保留解关联)
         # 再删明细 (FR-05 v2)。
         obj = await self.get_detail(item_id)
+        await self._assert_detail_operable(obj, user)
         await self._cascade_task_on_detail_removal(item_id)
         await self._session.delete(obj)
         await self._session.commit()

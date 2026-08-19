@@ -968,7 +968,10 @@ class ProblemService:
         对照源 problemchange 导出列:项目名 / 变更内容 / 变更原因 /
         责任人 / 当前处理人 / 状态。
         """
-        rows = (await self._session.execute(select(PpmProblemChange))).scalars().all()
+        # BQ-9（2026-08-20 审计）：加 5000 硬上限 + created_at 排序，对齐工时导出，
+        # 防全表物化进 Excel 内存爆。
+        stmt = select(PpmProblemChange).order_by(PpmProblemChange.created_at.desc()).limit(5000)
+        rows = (await self._session.execute(stmt)).scalars().all()
         return [
             {
                 "project_name": r.project_name,

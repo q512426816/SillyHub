@@ -11,8 +11,9 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.core.security import assert_password_strength
 from app.modules.auth.permissions import Permission
 
 # ── Role DTOs (task-04) ──────────────────────────────────────────────────────
@@ -190,15 +191,21 @@ class RoleBrief(BaseModel):
 class UserCreateRequest(BaseModel):
     """Body of ``POST /api/admin/users`` (and forwarded ``/api/users``).
 
-    ``password`` 可选：不传时由 ``UserService.create_user`` 落库为固定默认初始密码
-    （``DEFAULT_INITIAL_PASSWORD``），管理员无需在新建表单中输入密码。显式传入时
-    仍按 ``min_length=8`` 校验。
+    ``password`` 可选：不传时由 ``UserService.create_user`` 随机生成一次性初始口令
+    （BS-1），经 ``UserRead.initial_password`` 字段仅创建响应一次性下发，管理员转发
+    给用户。显式传入时仍按 ``min_length=8`` 校验。
     """
 
     model_config = ConfigDict(extra="forbid")
 
     email: str | None = None
     password: str | None = Field(default=None, min_length=8)
+
+    @field_validator("password")
+    @classmethod
+    def _check_strength(cls, v: str | None) -> str | None:
+        return assert_password_strength(v) if v is not None else None
+
     username: str = Field(min_length=3)
     display_name: str | None = None
     is_platform_admin: bool = False
@@ -245,6 +252,9 @@ class UserRead(BaseModel):
     created_at: datetime
     organizations: list[OrganizationBrief] = Field(default_factory=list)
     roles: list[RoleBrief] = Field(default_factory=list)
+    # BS-1（2026-08-20 审计）：仅创建用户且未显式传密码时非空——随机初始口令一次性
+    # 下发；其余查询/列表场景恒为 None（不回显任何口令）。
+    initial_password: str | None = None
 
 
 class UserListResponse(BaseModel):
@@ -299,6 +309,12 @@ class UserWorkspaceRead(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     new_password: str | None = Field(default=None, min_length=8)
+
+    @field_validator("new_password")
+    @classmethod
+    def _check_strength(cls, v: str | None) -> str | None:
+        return assert_password_strength(v) if v is not None else None
+
     force_change_on_next_login: bool = False
 
 

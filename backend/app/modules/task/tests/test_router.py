@@ -32,7 +32,7 @@ async def workspace_with_tasks(
     # Create workspace first
     ws_resp = await client.post(
         "/api/workspaces",
-        json={"name": "task-test", "root_path": str(root)},
+        json={"name": "task-test", "root_path": str(root), "type": "other"},
         headers=auth_headers,
     )
     assert ws_resp.status_code == 201, ws_resp.text

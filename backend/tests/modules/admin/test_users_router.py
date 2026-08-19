@@ -1085,3 +1085,28 @@ async def test_list_users_filter_by_ids(client: AsyncClient, auth_headers, db_se
     returned_ids = {it["id"] for it in resp.json()["items"]}
     assert returned_ids == {str(u_a.id), str(u_c.id)}
     assert str(u_b.id) not in returned_ids
+
+
+async def test_create_user_without_password_returns_random_initial(
+    client: AsyncClient, auth_headers: dict
+) -> None:
+    """BS-1：不传密码建户 → 响应含一次性随机 initial_password，且两次生成不相等。"""
+    resp1 = await client.post(
+        "/api/admin/users",
+        json={"username": f"randpw{uuid.uuid4().hex[:6]}"},
+        headers=auth_headers,
+    )
+    assert resp1.status_code == 201, resp1.text
+    body1 = resp1.json()
+    assert body1["initial_password"]
+    assert body1["initial_password"] != "SillyHub@123"
+    assert any(c.isalpha() for c in body1["initial_password"])
+    assert any(c.isdigit() for c in body1["initial_password"])
+
+    resp2 = await client.post(
+        "/api/admin/users",
+        json={"username": f"randpw{uuid.uuid4().hex[:6]}"},
+        headers=auth_headers,
+    )
+    assert resp2.status_code == 201
+    assert resp2.json()["initial_password"] != body1["initial_password"]

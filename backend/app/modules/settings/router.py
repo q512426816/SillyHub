@@ -315,7 +315,7 @@ async def create_user(
     user: AdminUser,
 ) -> UserRead:
     svc = _svc(session, user.id)
-    target = await svc.create_user(
+    target, _generated = await svc.create_user(
         email=payload.email,
         password=payload.password,
         username=payload.username,
@@ -325,7 +325,10 @@ async def create_user(
         organization_ids=payload.organization_ids or None,
         role_ids=payload.role_ids or None,
     )
-    return await _enrich(session, target)
+    resp = await _enrich(session, target)
+    # BS-1：转发路由同样一次性下发随机初始口令。
+    resp.initial_password = _generated
+    return resp
 
 
 @router.patch("/users/{user_id}", response_model=UserRead)

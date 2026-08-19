@@ -1246,11 +1246,22 @@ class SillySpecStageDispatchService:
         # _resolve_gate_workspace_id 的稳定来源）。
         run_sync = RunSyncService(session)
         enqueued = 0
+        # BQ-7（2026-08-20 审计）：先 in_ 批量取 Change 建映射，孤儿多时不再逐行
+        # session.get 线性放大查询数。
+        wanted_change_ids = {r.change_id for r in orphans if r.change_id is not None}
+        change_map: dict = {}
+        if wanted_change_ids:
+            found = (
+                (await session.execute(select(Change).where(Change.id.in_(wanted_change_ids))))
+                .scalars()
+                .all()
+            )
+            change_map = {c.id: c for c in found}
         for run in orphans:
             change_id = run.change_id
             if change_id is None:
                 continue
-            change = await session.get(Change, change_id)
+            change = change_map.get(change_id)
             workspace_id = change.workspace_id if change else None
             if workspace_id is None:
                 log.warning(

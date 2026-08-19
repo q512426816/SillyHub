@@ -65,6 +65,7 @@ async def test_push_shpsync_ok_and_persisted(
     assert len(rows) == 1
     row = rows[0]
     assert row.ql_id == "ql-20260817-001-abcd"
+    assert row.payload is not None  # mypy 收窄（payload 为 dict|None 列）
     assert row.payload["title"] == "修侧栏宽度塌陷"
     assert row.payload["body_sections"]["结果"] == "绿"
     assert row.payload["linked_changes"] == ["2026-08-16-change-center-quick-tab"]
@@ -89,6 +90,7 @@ async def test_push_idempotent_same_ql_overwrites(
     stmt = select(QuicklogEntryORM)
     rows = (await db_session.execute(stmt)).scalars().all()
     assert len(rows) == 1
+    assert rows[0].payload is not None  # mypy 收窄（payload 为 dict|None 列）
     assert rows[0].payload["status"] == "completed"
     assert rows[0].payload["title"] == "完成态标题"
 

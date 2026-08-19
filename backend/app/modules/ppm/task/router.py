@@ -250,7 +250,7 @@ async def export_plan_task_excel(
 
     req = PlanTaskPageReq(
         page=1,
-        page_size=200,
+        page_size=1,  # 占位：list_for_export 忽略分页（BQ-1）
         user_id=user_id,
         project_id=project_id,
         status=plan_status,
@@ -263,7 +263,9 @@ async def export_plan_task_excel(
         order=order,
     )
     svc = PlanTaskService(session)
-    result = await svc.page(req, user=user)
+    # BQ-1（2026-08-20 审计）：原走 page(page_size=200) 静默截断超 200 行导出，
+    # 改走 list_for_export（过滤同源、limit=5000 硬上限，对齐工时导出）。
+    rows_orm = await svc.list_for_export(req, user=user)
     columns = [
         ColumnDef("user_name", "姓名", width=15),
         ColumnDef("project_name", "项目", width=20),
@@ -275,7 +277,7 @@ async def export_plan_task_excel(
         ColumnDef("time_spent", "耗时(人天)", width=12),
         ColumnDef("remarks", "备注", width=30),
     ]
-    rows = [PlanTaskResponse.model_validate(p).model_dump(mode="json") for p in result.items]
+    rows = [PlanTaskResponse.model_validate(p).model_dump(mode="json") for p in rows_orm]
     content = await anyio.to_thread.run_sync(_build_workbook_bytes, columns, rows, "任务计划")
     filename = f"任务计划_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
     return excel_response(content, filename=filename)
@@ -630,8 +632,7 @@ async def export_work_hour_excel(
     import anyio
 
     req = WorkHourPageReq(
-        page=1,
-        page_size=20,
+        # BQ-14：list_for_export 忽略分页（独立 limit=5000），不传死分页参数。
         user_id=filter_user_id,
         project_id=filter_project_id,
         work_date_start=work_date_start,

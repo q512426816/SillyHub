@@ -104,6 +104,7 @@ async def download_file(
     disposition = "inline" if row.mime_type in _INLINE_IMAGE_TYPES else "attachment"
     # RFC 5987：filename* 承载中文名，filename 给 ASCII 回退。
     ascii_name = row.original_name.encode("ascii", "ignore").decode() or "file"
+    ascii_name = ascii_name.replace('"', "").strip() or "file"  # BS-9:去引号防注入
     cd = f"{disposition}; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(row.original_name)}"
     return StreamingResponse(
         stream,

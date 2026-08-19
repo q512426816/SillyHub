@@ -18,6 +18,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.auth.model import User
 from app.modules.ppm.plan.model import (
     PlanNodeModule,
     PsPlanNode,
@@ -100,6 +101,21 @@ async def _seed_member(
     await session.commit()
     await session.refresh(member)
     return member
+
+
+async def _seed_admin(session: AsyncSession) -> User:
+    """平台管理员（BS-4 授权断言的合法操作者；is_platform_admin 短路免查库）。"""
+    admin = User(
+        id=uuid.uuid4(),
+        username="tasklink-admin",
+        password_hash="x",
+        display_name="admin",
+        status="active",
+        is_platform_admin=True,
+    )
+    session.add(admin)
+    await session.commit()
+    return admin
 
 
 async def _count_tasks(session: AsyncSession) -> int:
@@ -378,6 +394,7 @@ class TestFR03EditSyncsTaskFields:
         m2 = await _seed_member(db_session, user_id=uuid.uuid4(), user_name="新执行人")
 
         svc = PlanService(db_session)
+        admin = await _seed_admin(db_session)
         detail = await svc.create_detail(
             {
                 "plan_node_id": node.id,
@@ -401,6 +418,7 @@ class TestFR03EditSyncsTaskFields:
                 "plan_workload": "12",
                 "execute_user_id": m2.user_id,
             },
+            user=admin,
         )
 
         task_after = await _get_task_by_id(db_session, task_id)
@@ -422,6 +440,7 @@ class TestFR03EditSyncsTaskFields:
         member = await _seed_member(db_session, user_id=uuid.uuid4(), user_name="描述员")
 
         svc = PlanService(db_session)
+        admin = await _seed_admin(db_session)
         detail = await svc.create_detail(
             {
                 "plan_node_id": node.id,
@@ -436,7 +455,7 @@ class TestFR03EditSyncsTaskFields:
         assert task is not None
         assert task.task_description == "原始描述"
 
-        await svc.update_detail(detail.id, {"task_description": "更新后的描述"})
+        await svc.update_detail(detail.id, {"task_description": "更新后的描述"}, user=admin)
 
         task_after = await _get_task_by_detail(db_session, detail.id)
         assert task_after is not None
@@ -509,6 +528,7 @@ class TestFR05DeleteCascadesTask:
         member = await _seed_member(db_session, user_id=uuid.uuid4(), user_name="删除员")
 
         svc = PlanService(db_session)
+        admin = await _seed_admin(db_session)
         detail = await svc.create_detail(
             {
                 "plan_node_id": node.id,
@@ -521,7 +541,7 @@ class TestFR05DeleteCascadesTask:
         task = await _get_task_by_detail(db_session, detail.id)
         assert task is not None  # 未开始 (create 默认态)
 
-        await svc.delete_detail(detail.id)
+        await svc.delete_detail(detail.id, user=admin)
 
         # 任务连同明细一起删除
         assert await _count_tasks(db_session) == 0
@@ -536,6 +556,7 @@ class TestFR05DeleteCascadesTask:
         member = await _seed_member(db_session, user_id=uuid.uuid4(), user_name="执行员")
 
         svc = PlanService(db_session)
+        admin = await _seed_admin(db_session)
         detail = await svc.create_detail(
             {
                 "plan_node_id": node.id,
@@ -561,7 +582,7 @@ class TestFR05DeleteCascadesTask:
         await db_session.commit()
         assert await _count_executes(db_session) == 1
 
-        await svc.delete_detail(detail.id)
+        await svc.delete_detail(detail.id, user=admin)
 
         # 任务 + 执行记录均删除
         assert await _count_tasks(db_session) == 0
@@ -576,6 +597,7 @@ class TestFR05DeleteCascadesTask:
         member = await _seed_member(db_session, user_id=uuid.uuid4(), user_name="完成员")
 
         svc = PlanService(db_session)
+        admin = await _seed_admin(db_session)
         detail = await svc.create_detail(
             {
                 "plan_node_id": node.id,
@@ -590,7 +612,7 @@ class TestFR05DeleteCascadesTask:
         task.status = "已完成"
         await db_session.commit()
 
-        await svc.delete_detail(detail.id)
+        await svc.delete_detail(detail.id, user=admin)
 
         # 任务保留, 解除关联
         task_after = await _get_task_by_id(db_session, task.id)

@@ -35,7 +35,7 @@ from app.modules.auth.model import User
 from app.modules.file.service import FileService
 from app.modules.ppm.common.crud import Page, PageReq
 from app.modules.ppm.common.data_scope import is_super_admin, manager_project_ids
-from app.modules.ppm.common.export import ColumnDef
+from app.modules.ppm.common.export import ColumnDef, build_excel_response
 from app.modules.ppm.common.upload import validate_xlsx_upload
 from app.modules.ppm.plan.model import PlanNodeModule, PsPlanNode, PsProjectPlan
 from app.modules.ppm.problem.importer import ImageExtracted, parse_problem_workbook
@@ -560,7 +560,7 @@ async def export_problem_changes(
     columns = _PROBLEM_CHANGE_COLUMNS
     filename = f"问题变更_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
     return await anyio.to_thread.run_sync(
-        lambda: _build_excel_response(columns, rows, "问题变更", filename=filename)
+        lambda: build_excel_response(columns, rows, "问题变更", filename=filename)
     )
 
 
@@ -667,19 +667,6 @@ async def list_change_logs(
 # 解析返回 422(同 ql-020 project-plan 修过的同款问题)。export_problems /
 # export_problem_changes 实际声明位置见各自 list 端点紧邻之后。
 # ---------------------------------------------------------------------------
-
-
-def _build_excel_response(
-    columns: list[ColumnDef],
-    rows: list[dict[str, Any]],
-    sheet_name: str,
-    filename: str = "problem_list.xlsx",
-) -> Any:
-    """线程池内构造 Excel 下载响应 (X-002)。"""
-    from app.modules.ppm.common.export import excel_response, rows_to_workbook
-
-    content = rows_to_workbook(columns, rows, sheet_name=sheet_name)
-    return excel_response(content, filename=filename)
 
 
 # ---------------------------------------------------------------------------

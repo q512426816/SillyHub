@@ -109,6 +109,22 @@ def rows_to_workbook(
     return buf.getvalue()
 
 
+def build_excel_response(
+    columns: list[ColumnDef],
+    rows: list[dict[str, Any]],
+    sheet_name: str,
+    *,
+    filename: str = "export.xlsx",
+) -> Any:
+    """线程池内构造 Excel 下载响应 (X-002)。
+
+    BQ-12（2026-08-20 审计）：收敛 plan/problem 两个 router 里逐行相同的本地
+    ``_build_excel_response``，单实现防漂移。
+    """
+    content = rows_to_workbook(columns, rows, sheet_name=sheet_name)
+    return excel_response(content, filename=filename)
+
+
 def grouped_report_to_workbook(
     columns: list[ColumnDef],
     sections: Iterable[Mapping[str, Any]],

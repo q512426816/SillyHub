@@ -30,7 +30,7 @@ from app.modules.ppm.plan.model import (
     PsProjectPlan,
 )
 from app.modules.ppm.plan.schema import PsProjectPlanListReq
-from app.modules.ppm.plan.service import PlanError, PlanNotFound, PlanService
+from app.modules.ppm.plan.service import PlanError, PlanForbidden, PlanNotFound, PlanService
 from app.modules.ppm.project.model import PpmProjectMaintenance
 
 FULL_SCOPE = DataScope(is_full=True)
@@ -315,7 +315,7 @@ class TestPsProjectPlan:
         nodes = await svc.list_ps_plan_nodes_by_plan(str(plan.id))
         assert len(nodes) == 1
         assert nodes[0].id == node.id
-        await svc.delete_ps_plan_node(node.id)
+        await svc.delete_ps_plan_node(node.id, user=admin)
         assert await svc.list_ps_plan_nodes_by_plan(str(plan.id)) == []
 
     async def test_create_ps_plan_node_copies_template_details_when_stage_matches(
@@ -1069,10 +1069,32 @@ class TestUpdateDetailClearsField:
     async def test_update_detail_clears_nullable_field(self, db_session: AsyncSession) -> None:
         """清空:update_detail 传 task_theme=None → 返回值 + 库中 task_theme is None。"""
         svc = PlanService(db_session)
-        detail = await _create_detail(svc)  # task_theme="里程碑明细1"
+        # BS-4:update_detail 上溯「明细→里程碑→计划」做归属断言,需真实链 + 合法操作者。
+        proj = PpmProjectMaintenance(
+            id=uuid.uuid4(), project_code="PP-CLR", project_name="清空字段测试"
+        )
+        db_session.add(proj)
+        await db_session.commit()
+        plan = await svc.create_ps_project_plan(
+            {"project_id": str(proj.id), "project_name": "清空字段测试", "status": "draft"}
+        )
+        node = await svc.create_ps_plan_node(
+            {"ps_project_plan_id": str(plan.id), "no": "1", "task_theme": "里程碑1"}
+        )
+        admin = User(
+            id=uuid.uuid4(),
+            username="clear-field-admin",
+            password_hash="x",
+            display_name="admin",
+            status="active",
+            is_platform_admin=True,
+        )
+        db_session.add(admin)
+        await db_session.commit()
+        detail = await _create_detail(svc, plan_node_id=str(node.id))  # task_theme="里程碑明细1"
         assert detail.task_theme == "里程碑明细1"
 
-        updated = await svc.update_detail(detail.id, {"task_theme": None})
+        updated = await svc.update_detail(detail.id, {"task_theme": None}, user=admin)
         assert updated.task_theme is None
 
         # 再从库取一次,确认持久化 (非仅返回值)。
@@ -1168,6 +1190,71 @@ class TestProjectPlanInitFromTemplate:
         assert node.template_plan_node_id is None
         await svc.create_module({"plan_node_id": str(node.id), "module_name": "手模块"})
         assert await svc.list_details_by_node(str(node.id)) == []  # 不复制
+
+
+class TestSubDomainAuthorization:
+    """BS-4（2026-08-20 审计）：里程碑/明细写操作上溯所属计划做 can_operate 断言。"""
+
+    async def test_update_ps_plan_node_forbidden_for_outsider(
+        self, db_session: AsyncSession
+    ) -> None:
+        """无归属关系的普通用户改里程碑 → PlanForbidden (403)。"""
+        svc = PlanService(db_session)
+        proj = PpmProjectMaintenance(
+            id=uuid.uuid4(), project_code="PP-AUTH", project_name="授权测试"
+        )
+        db_session.add(proj)
+        await db_session.commit()
+        plan = await svc.create_ps_project_plan(
+            {"project_id": str(proj.id), "project_name": "授权测试", "status": "draft"}
+        )
+        node = await svc.create_ps_plan_node(
+            {"ps_project_plan_id": str(plan.id), "no": "1", "task_theme": "里程碑1"}
+        )
+        outsider = User(
+            id=uuid.uuid4(),
+            username="outsider",
+            password_hash="x",
+            display_name="路人",
+            status="active",
+            is_platform_admin=False,
+        )
+        db_session.add(outsider)
+        await db_session.commit()
+
+        with pytest.raises(PlanForbidden):
+            await svc.update_ps_plan_node(node.id, {"task_theme": "越权改"}, user=outsider)
+
+    async def test_delete_detail_forbidden_for_outsider(self, db_session: AsyncSession) -> None:
+        """无归属关系的普通用户删明细 → PlanForbidden (403)。"""
+        svc = PlanService(db_session)
+        proj = PpmProjectMaintenance(
+            id=uuid.uuid4(), project_code="PP-AUTH2", project_name="授权测试2"
+        )
+        db_session.add(proj)
+        await db_session.commit()
+        plan = await svc.create_ps_project_plan(
+            {"project_id": str(proj.id), "project_name": "授权测试2", "status": "draft"}
+        )
+        node = await svc.create_ps_plan_node(
+            {"ps_project_plan_id": str(plan.id), "no": "1", "task_theme": "里程碑1"}
+        )
+        detail = await svc.create_detail(
+            {"plan_node_id": node.id, "no": "1", "task_theme": "明细1", "plan_workload": "5"}
+        )
+        outsider = User(
+            id=uuid.uuid4(),
+            username="outsider2",
+            password_hash="x",
+            display_name="路人",
+            status="active",
+            is_platform_admin=False,
+        )
+        db_session.add(outsider)
+        await db_session.commit()
+
+        with pytest.raises(PlanForbidden):
+            await svc.delete_detail(detail.id, user=outsider)
 
 
 if __name__ == "__main__":

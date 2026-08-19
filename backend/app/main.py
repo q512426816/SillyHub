@@ -186,12 +186,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     settings = get_settings()
 
+    # BS-5（2026-08-20 审计）：非 dev 环境关闭交互式文档与 openapi.json，避免向
+    # 匿名访客完整枚举含 admin/daemon 内部端点的攻击面；类型生成走本地 dev 跑
+    # ``pnpm gen:types``（其 openapi.json 产物入库，不依赖线上端点）。
+    docs_enabled = settings.environment == "dev"
     app = FastAPI(
         title="Multi-Agent Platform API",
         version=__version__,
-        docs_url="/api/docs",
-        redoc_url="/api/redoc",
-        openapi_url="/api/openapi.json",
+        docs_url="/api/docs" if docs_enabled else None,
+        redoc_url="/api/redoc" if docs_enabled else None,
+        openapi_url="/api/openapi.json" if docs_enabled else None,
         lifespan=lifespan,
     )
 

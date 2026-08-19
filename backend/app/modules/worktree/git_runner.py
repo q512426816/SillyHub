@@ -85,9 +85,14 @@ class GitRunner:
                 timeout=CLONE_TIMEOUT,
             )
         except GitCommandError as exc:
+            # BS-10（2026-08-20 审计）：repo_url 可内嵌 https://user:token@host，
+            # 失败 stderr 常回显完整 URL，回传前先套 redact_output 再截断。
+            # 延迟导入：模块级 import 会与 git_gateway → worktree 成环。
+            from app.modules.git_gateway.service import redact_output
+
             raise WorktreeAcquireFailed(
                 "代码仓库克隆失败，请检查仓库地址与网络后重试。",
-                details={"stderr": exc.stderr[:500]},
+                details={"stderr": redact_output(exc.stderr)[:500]},
             ) from exc
 
     async def worktree_add(

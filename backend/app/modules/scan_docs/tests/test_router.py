@@ -25,7 +25,7 @@ async def workspace_for_scan_docs(client, tmp_path: Path, auth_headers: dict[str
     # Create workspace
     ws_resp = await client.post(
         "/api/workspaces",
-        json={"name": "scan-docs-test", "root_path": str(root)},
+        json={"name": "scan-docs-test", "root_path": str(root), "type": "other"},
         headers=auth_headers,
     )
     assert ws_resp.status_code == 201, ws_resp.text
@@ -104,7 +104,7 @@ async def _seed_scan_doc_with_conflict(
 
     ws_resp = await client.post(
         "/api/workspaces",
-        json={"name": "scan-docs-conflict-test", "root_path": str(base)},
+        json={"name": "scan-docs-conflict-test", "root_path": str(base), "type": "other"},
         headers=auth_headers,
     )
     assert ws_resp.status_code == 201, ws_resp.text

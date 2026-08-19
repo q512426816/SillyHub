@@ -90,6 +90,7 @@ async def download_explorer_file(
         ) from exc
     # RFC 5987：filename* 承载中文名，filename 给 ASCII 回退（file/router.py 同款）。
     ascii_name = dl.filename.encode("ascii", "ignore").decode() or "file"
+    ascii_name = ascii_name.replace('"', "").strip() or "file"  # BS-9:去引号防注入
     disposition = f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(dl.filename)}"
     headers = {
         "Content-Disposition": disposition,

@@ -20,6 +20,7 @@ every active session so the user is forced out immediately.
 from __future__ import annotations
 
 import json
+import secrets
 import uuid
 from datetime import UTC, datetime
 
@@ -45,9 +46,15 @@ from app.modules.workspace.model import Workspace
 
 log = get_logger(__name__)
 
-# 新建用户的默认初始密码：管理员在 /admin/users 新建时无需输入密码，
-# 落库时统一用该值。内部平台便利项，建议用户登录后尽快修改。
-DEFAULT_INITIAL_PASSWORD = "SillyHub@123"
+# 新建用户/重置密码缺省口令的生成器（2026-08-20 审计 BS-1）：保留「管理员免输密码」
+# 的便利，但每个初始口令独立随机、仅经创建/重置响应一次性下发，不再全局共享同一
+# 明文（旧 DEFAULT_INITIAL_PASSWORD="SillyHub@123" 知道源码即可接管任意新账号）。
+# 前缀/后缀保证同时含字母与数字，满足复杂度校验；不落日志、不落审计明细。
+
+
+def generate_initial_password() -> str:
+    """随机生成一次性初始口令（约 16 位，urlsafe 无歧义字符）。"""
+    return f"Sh-{secrets.token_urlsafe(9)}-1a"
 
 
 class UserService:
@@ -212,15 +219,18 @@ class UserService:
         login_enabled: bool = True,
         organization_ids: list[uuid.UUID] | None = None,
         role_ids: list[uuid.UUID] | None = None,
-    ) -> User:
+    ) -> tuple[User, str | None]:
         self._set_audit_context()
         # 支配权(纵深防御):授 is_platform_admin 或绑定 platform:admin 角色前校验调用者。
         await self._assert_actor_may_grant_platform_admin(
             granting_admin=is_platform_admin, role_ids=role_ids
         )
-        # password 缺省 → 固定默认初始密码（管理员表单不再输入密码）
+        # password 缺省 → 随机生成一次性初始密码（管理员表单不输入密码，明文经
+        # 响应 initial_password 字段一次性下发，管理员转发给用户；BS-1）。
+        generated_initial_password: str | None = None
         if password is None:
-            password = DEFAULT_INITIAL_PASSWORD
+            password = generate_initial_password()
+            generated_initial_password = password
         pw_hash = password_hasher.hash(password)
         now = datetime.now(UTC)
         # username 必填且由用户明确指定,撞库应直接 409 报错让用户改,
@@ -280,7 +290,7 @@ class UserService:
         await invalidate_all_permissions()
         await self.session.refresh(user)
         log.info("user.created", email=user.email, user_id=str(user.id))
-        return user
+        return user, generated_initial_password
 
     async def _resolve_username(
         self,
@@ -779,9 +789,9 @@ class UserService:
         if target is None or target.deleted_at is not None:
             raise HTTPException(status_code=404, detail="用户不存在或已被删除。")
 
-        # 不显式传密码 → 统一用模块默认初始密码（与 create_user 一致），管理员
-        # 无需记忆/转交随机串；用户用默认密码登录后可自行修改（change-password）。
-        plaintext = new_password or DEFAULT_INITIAL_PASSWORD
+        # 不显式传密码 → 随机生成一次性口令（BS-1），经响应 plaintext_password
+        # 字段下发给管理员转发；用户登录后可自行修改（change-password）。
+        plaintext = new_password or generate_initial_password()
 
         self._set_audit_context()
         target.password_hash = password_hasher.hash(plaintext)

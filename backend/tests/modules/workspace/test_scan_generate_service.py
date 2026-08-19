@@ -39,7 +39,7 @@ async def test_scan_generate_creates_workspace_and_spec(
     mock_agent_service.start_scan_dispatch.return_value = fake_run
 
     svc = WorkspaceService(db_session)
-    ws_id, run_id = await svc.scan_generate(
+    ws_id, run_id, _sid = await svc.scan_generate(
         root_path=str(project_dir),
         user_id=uuid.uuid4(),
         agent_service=mock_agent_service,
@@ -70,12 +70,12 @@ async def test_scan_generate_idempotent_reuse(
     mock_agent_service.start_scan_dispatch.side_effect = [fake_run_1, fake_run_2]
 
     svc = WorkspaceService(db_session)
-    ws_id_1, run_id_1 = await svc.scan_generate(
+    ws_id_1, run_id_1, _sid = await svc.scan_generate(
         root_path=str(project_dir),
         user_id=uuid.uuid4(),
         agent_service=mock_agent_service,
     )
-    ws_id_2, run_id_2 = await svc.scan_generate(
+    ws_id_2, run_id_2, _sid = await svc.scan_generate(
         root_path=str(project_dir),
         user_id=uuid.uuid4(),
         agent_service=mock_agent_service,
@@ -103,12 +103,12 @@ async def test_scan_generate_slug_conflict(db_session: AsyncSession, mock_agent_
     mock_agent_service.start_scan_dispatch.return_value = fake_run
 
     svc = WorkspaceService(db_session)
-    ws_id_a, _ = await svc.scan_generate(
+    ws_id_a, _, _sid = await svc.scan_generate(
         root_path=str(dir_a),
         user_id=uuid.uuid4(),
         agent_service=mock_agent_service,
     )
-    ws_id_b, _ = await svc.scan_generate(
+    ws_id_b, _, _sid = await svc.scan_generate(
         root_path=str(dir_b),
         user_id=uuid.uuid4(),
         agent_service=mock_agent_service,
@@ -138,7 +138,7 @@ async def test_scan_generate_name_from_path(db_session: AsyncSession, mock_agent
     mock_agent_service.start_scan_dispatch.return_value = fake_run
 
     svc = WorkspaceService(db_session)
-    ws_id, _ = await svc.scan_generate(
+    ws_id, _, _sid = await svc.scan_generate(
         root_path=str(project_dir),
         user_id=uuid.uuid4(),
         agent_service=mock_agent_service,
@@ -168,7 +168,7 @@ async def test_scan_generate_passes_correct_args_to_agent(
     mock_agent_service.start_scan_dispatch.return_value = fake_run
 
     svc = WorkspaceService(db_session)
-    ws_id, _ = await svc.scan_generate(
+    ws_id, _, _sid = await svc.scan_generate(
         root_path=str(project_dir),
         user_id=user_id,
         agent_service=mock_agent_service,
@@ -214,7 +214,7 @@ async def _bootstrap_workspace(svc: WorkspaceService, mock_agent_service, projec
     fake_run = MagicMock()
     fake_run.id = uuid.uuid4()
     mock_agent_service.start_scan_dispatch.return_value = fake_run
-    ws_id, _ = await svc.scan_generate(
+    ws_id, _, _sid = await svc.scan_generate(
         root_path=str(project_dir),
         user_id=uuid.uuid4(),
         agent_service=mock_agent_service,
@@ -235,7 +235,7 @@ async def test_scan_generate_no_active_run_creates_and_dispatches(
     mock_agent_service.start_scan_dispatch.return_value = fake_run
 
     svc = WorkspaceService(db_session)
-    _ws_id, run_id = await svc.scan_generate(
+    _ws_id, run_id, _sid = await svc.scan_generate(
         root_path=str(project_dir),
         user_id=uuid.uuid4(),
         agent_service=mock_agent_service,
@@ -260,7 +260,7 @@ async def test_scan_generate_idempotent_active_run(
     existing = await _make_scan_run(db_session, ws_id, status=status)
     mock_agent_service.start_scan_dispatch.reset_mock()
 
-    ws_id_2, run_id_2 = await svc.scan_generate(
+    ws_id_2, run_id_2, _sid = await svc.scan_generate(
         root_path=str(project_dir),
         user_id=uuid.uuid4(),
         agent_service=mock_agent_service,
@@ -290,7 +290,7 @@ async def test_scan_generate_ignores_terminal_run(
     mock_agent_service.start_scan_dispatch.reset_mock()
     mock_agent_service.start_scan_dispatch.return_value = fake_run_new
 
-    _ws_id, run_id = await svc.scan_generate(
+    _ws_id, run_id, _sid = await svc.scan_generate(
         root_path=str(project_dir),
         user_id=uuid.uuid4(),
         agent_service=mock_agent_service,
@@ -316,7 +316,7 @@ async def test_scan_generate_returns_most_recent_active_run(
     newer = await _make_scan_run(db_session, ws_id, status="running", started_at=now)
     mock_agent_service.start_scan_dispatch.reset_mock()
 
-    _ws_id, run_id = await svc.scan_generate(
+    _ws_id, run_id, _sid = await svc.scan_generate(
         root_path=str(project_dir),
         user_id=uuid.uuid4(),
         agent_service=mock_agent_service,
@@ -347,7 +347,7 @@ async def test_scan_generate_ignores_run_on_other_workspace(
     mock_agent_service.start_scan_dispatch.reset_mock()
     mock_agent_service.start_scan_dispatch.return_value = fake_run_new
 
-    _ws_id, run_id = await svc.scan_generate(
+    _ws_id, run_id, _sid = await svc.scan_generate(
         root_path=str(project_dir),
         user_id=uuid.uuid4(),
         agent_service=mock_agent_service,
@@ -377,7 +377,7 @@ async def test_scan_generate_ignores_change_bound_run(
     mock_agent_service.start_scan_dispatch.reset_mock()
     mock_agent_service.start_scan_dispatch.return_value = fake_run_new
 
-    _ws_id, run_id = await svc.scan_generate(
+    _ws_id, run_id, _sid = await svc.scan_generate(
         root_path=str(project_dir),
         user_id=uuid.uuid4(),
         agent_service=mock_agent_service,

@@ -224,7 +224,7 @@ class TestCreateSession:
                 provider="claude",
                 prompt="test",
                 runtime_id=str(rt.id),
-                workspace_id=str(ws.id),
+                workspace_id=ws.id,  # create_session 签名是 uuid.UUID
             )
 
         assert result.agent_session is not None

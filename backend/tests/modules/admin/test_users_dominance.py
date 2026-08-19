@@ -81,7 +81,7 @@ async def test_admin_can_grant_is_platform_admin_on_create(db_session):
     db_session.add(actor)
     await db_session.commit()
     svc = UserService(db_session, actor.id)
-    user = await svc.create_user(
+    user, _ = await svc.create_user(
         username=f"t{uuid.uuid4().hex[:6]}",
         email=f"{uuid.uuid4().hex[:6]}@example.com",
         is_platform_admin=True,
@@ -111,7 +111,7 @@ async def test_non_admin_can_bind_plain_role_and_normal_user_on_create(db_sessio
     db_session.add(actor)
     await db_session.commit()
     svc = UserService(db_session, actor.id)
-    user = await svc.create_user(
+    user, _ = await svc.create_user(
         username=f"t{uuid.uuid4().hex[:6]}",
         email=f"{uuid.uuid4().hex[:6]}@example.com",
         role_ids=[role.id],

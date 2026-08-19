@@ -16,7 +16,7 @@ async def test_scan_generate_success(client: AsyncClient, auth_headers):
     with patch(
         "app.modules.workspace.service.WorkspaceService.scan_generate",
         new_callable=AsyncMock,
-        return_value=(ws_id, run_id),
+        return_value=(ws_id, run_id, None),  # scan_generate 三元返回（含 session_id）
     ):
         resp = await client.post(
             "/api/workspaces/scan-generate",
@@ -120,7 +120,7 @@ async def test_scan_generate_with_daemon_id(client: AsyncClient, auth_headers):
     with patch(
         "app.modules.workspace.service.WorkspaceService.scan_generate",
         new_callable=AsyncMock,
-        return_value=(ws_id, run_id),
+        return_value=(ws_id, run_id, None),  # scan_generate 三元返回（含 session_id）
     ):
         resp = await client.post(
             "/api/workspaces/scan-generate",

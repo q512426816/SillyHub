@@ -131,7 +131,6 @@ class ChangeWriterService:
         # v4 layout: .sillyspec/changes/<change_key>/  (no intermediate change/ dir)
         resolver = SpecPathResolver(repo_dir)
         change_dir = resolver.change_dir(change_key)
-        change_dir.mkdir(parents=True, exist_ok=True)
 
         now = datetime.now(UTC)
         author = str(user_id)
@@ -143,19 +142,30 @@ class ChangeWriterService:
             affected_components=affected_components,
         )
         master_content = self._ensure_frontmatter(master_content, author, now)
-        (change_dir / "MASTER.md").write_text(master_content, encoding="utf-8")
 
         # Write proposal.md with user description (with frontmatter)
+        proposal_content = None
         if description:
             proposal_content = f"# {title}\n\n## 需求描述\n\n{description}\n"
             proposal_content = self._ensure_frontmatter(proposal_content, author, now)
-            (change_dir / "proposal.md").write_text(proposal_content, encoding="utf-8")
 
         # Write request.md with user's original requirement (with frontmatter)
+        request_content = None
         if description:
             request_content = f"# {title}\n\n{description}\n"
             request_content = self._ensure_frontmatter(request_content, author, now)
-            (change_dir / "request.md").write_text(request_content, encoding="utf-8")
+
+        # BQ-3（2026-08-20 审计）：mkdir + 3 次写盘合并成一个同步闭包丢线程池
+        # （同文件 _write_and_stat 已按 task-02/D-002 范式，此处对齐，别占事件循环）。
+        def _persist_change_files() -> None:
+            change_dir.mkdir(parents=True, exist_ok=True)
+            (change_dir / "MASTER.md").write_text(master_content, encoding="utf-8")
+            if proposal_content is not None:
+                (change_dir / "proposal.md").write_text(proposal_content, encoding="utf-8")
+            if request_content is not None:
+                (change_dir / "request.md").write_text(request_content, encoding="utf-8")
+
+        await asyncio.to_thread(_persist_change_files)
 
         # Create DB record
         # ql-20260812-006：current_stage 从 draft 改 brainstorm（对齐 SillySpec 标准流程，

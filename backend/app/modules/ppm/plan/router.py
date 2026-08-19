@@ -23,11 +23,11 @@ import anyio
 from fastapi import APIRouter, Depends, File, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_deps import get_current_principal
+from app.core.auth_deps import get_current_principal, require_platform_admin
 from app.core.db import get_session
 from app.modules.auth.model import User
 from app.modules.ppm.common.crud import Page, PageReq
-from app.modules.ppm.common.export import ColumnDef, timestamped_filename
+from app.modules.ppm.common.export import ColumnDef, build_excel_response, timestamped_filename
 from app.modules.ppm.data_scope import (
     DataScope,
     compute_plan_can_operate,
@@ -204,7 +204,7 @@ async def export_plan_nodes(
     columns = _PLAN_NODE_COLUMNS
     # openpyxl 序列化丢线程池,X-002
     return await anyio.to_thread.run_sync(
-        lambda: _build_excel_response(
+        lambda: build_excel_response(
             columns, rows, "计划节点模板", filename=timestamped_filename("计划节点模板")
         )
     )
@@ -220,12 +220,17 @@ async def get_plan_node(
     return PlanNodeResp.model_validate(obj)
 
 
+# 2026-08-20 审计 BS-4：模板（计划节点/模板明细/模块）是全平台共享配置，写操作
+# 从「仅认证」收紧为平台管理员；项目数据（里程碑/明细）在 service 层按计划归属断言。
+TplAdmin = Annotated[User, Depends(require_platform_admin)]
+
+
 @router.put("/plan-node/{item_id}", response_model=PlanNodeResp)
 async def update_plan_node(
     item_id: uuid.UUID,
     body: PlanNodeUpdate,
     session: SessionDep,
-    user: AuthUser,
+    user: TplAdmin,
 ) -> PlanNodeResp:
     obj = await PlanService(session).update_plan_node(item_id, body.model_dump(exclude_unset=True))
     return PlanNodeResp.model_validate(obj)
@@ -235,7 +240,7 @@ async def update_plan_node(
 async def delete_plan_node(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: AuthUser,
+    user: TplAdmin,
 ) -> None:
     await PlanService(session).delete_plan_node(item_id)
 
@@ -279,7 +284,7 @@ async def update_plan_node_detail_tpl(
     item_id: uuid.UUID,
     body: PlanNodeDetailUpdate,
     session: SessionDep,
-    user: AuthUser,
+    user: TplAdmin,
 ) -> PlanNodeDetailResp:
     obj = await PlanService(session).update_plan_node_detail(
         item_id, body.model_dump(exclude_unset=True)
@@ -291,7 +296,7 @@ async def update_plan_node_detail_tpl(
 async def delete_plan_node_detail_tpl(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: AuthUser,
+    user: TplAdmin,
 ) -> None:
     await PlanService(session).delete_plan_node_detail(item_id)
 
@@ -399,7 +404,7 @@ async def update_module(
     item_id: uuid.UUID,
     body: PlanNodeModuleUpdate,
     session: SessionDep,
-    user: AuthUser,
+    user: TplAdmin,
 ) -> PlanNodeModuleResp:
     obj = await PlanService(session).update_module(item_id, body.model_dump(exclude_unset=True))
     return PlanNodeModuleResp.model_validate(obj)
@@ -409,7 +414,7 @@ async def update_module(
 async def delete_module(
     item_id: uuid.UUID,
     session: SessionDep,
-    user: AuthUser,
+    user: TplAdmin,
 ) -> None:
     await PlanService(session).delete_module(item_id)
 
@@ -490,7 +495,7 @@ async def export_project_plans(
     columns = _PROJECT_PLAN_COLUMNS
     filename = timestamped_filename("项目计划")
     return await anyio.to_thread.run_sync(
-        lambda: _build_excel_response(columns, rows, "项目计划", filename=filename)
+        lambda: build_excel_response(columns, rows, "项目计划", filename=filename)
     )
 
 
@@ -600,7 +605,7 @@ async def update_ps_plan_node(
     user: AuthUser,
 ) -> PsPlanNodeResp:
     obj = await PlanService(session).update_ps_plan_node(
-        item_id, body.model_dump(exclude_unset=True)
+        item_id, body.model_dump(exclude_unset=True), user=user
     )
     return PsPlanNodeResp.model_validate(obj)
 
@@ -611,7 +616,7 @@ async def delete_ps_plan_node(
     session: SessionDep,
     user: AuthUser,
 ) -> None:
-    await PlanService(session).delete_ps_plan_node(item_id)
+    await PlanService(session).delete_ps_plan_node(item_id, user=user)
 
 
 # ===========================================================================
@@ -711,7 +716,9 @@ async def update_detail(
     session: SessionDep,
     user: AuthUser,
 ) -> PsPlanNodeDetailResp:
-    obj = await PlanService(session).update_detail(item_id, body.model_dump(exclude_unset=True))
+    obj = await PlanService(session).update_detail(
+        item_id, body.model_dump(exclude_unset=True), user=user
+    )
     return PsPlanNodeDetailResp.model_validate(obj)
 
 
@@ -721,7 +728,7 @@ async def delete_detail(
     session: SessionDep,
     user: AuthUser,
 ) -> None:
-    await PlanService(session).delete_detail(item_id)
+    await PlanService(session).delete_detail(item_id, user=user)
 
 
 # ---------- 版本链 ----------
@@ -917,7 +924,12 @@ def _build_weekly_plan_workbook(rows: list[dict[str, Any]]) -> bytes:
     from openpyxl import load_workbook
     from openpyxl.styles import Alignment, Border, Font, Side
 
-    template_path = Path("templates/weekly-plan-template.xlsx")
+    template_path = (
+        # BQ-4（2026-08-20 审计）：原 Path("templates/...") 按 CWD 解析，仅 Docker
+        # WORKDIR=/app 下成立；锚定 __file__（app/modules/ppm/plan → 上溯 4 级 =
+        # backend/ 或镜像内 /app），仓库根/任意目录启动均可命中（规则 13 跨平台）。
+        Path(__file__).resolve().parents[4] / "templates" / "weekly-plan-template.xlsx"
+    )
     wb = load_workbook(template_path)
     ws = wb.active
 
@@ -1017,20 +1029,6 @@ def _validate_upload(file: UploadFile, file_bytes: bytes) -> None:
     is_xlsx = name.endswith(".xlsx") or "spreadsheetml" in ctype or "xlsx" in ctype
     if not is_xlsx:
         raise PlanError("仅支持 .xlsx 文件导入", http_status=415)
-
-
-def _build_excel_response(
-    columns: list[ColumnDef],
-    rows: list[dict[str, Any]],
-    sheet_name: str,
-    *,
-    filename: str = "plan_nodes.xlsx",
-) -> Any:
-    """线程池内构造 Excel 下载响应 (X-002)。"""
-    from app.modules.ppm.common.export import excel_response, rows_to_workbook
-
-    content = rows_to_workbook(columns, rows, sheet_name=sheet_name)
-    return excel_response(content, filename=filename)
 
 
 def _build_grouped_excel_response(
