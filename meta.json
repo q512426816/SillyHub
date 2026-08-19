@@ -1,0 +1,11 @@
+{
+  "name_zh": "worktree 元数据",
+  "changeName": "2026-08-19-sessions-workspace-selector",
+  "branch": "sillyspec/2026-08-19-sessions-workspace-selector",
+  "baseBranch": "main",
+  "baseHash": "6453d9ca0eec4063edd1cef2d7a1ec39c9a07d18",
+  "worktreePath": "F:\\WorkNew\\SillyHub\\.sillyspec\\.runtime\\worktrees\\2026-08-19-sessions-workspace-selector",
+  "mode": "worktree",
+  "createdAt": "2026-08-19T06:44:53.873Z",
+  "provisioning": true
+}
