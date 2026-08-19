@@ -30,7 +30,7 @@ SillyHub 前端 API 客户端层与基础设施库（frontend/src/lib/**）。�
   - `query-client.ts` `makeQueryClient()` — freshness-first 默认：staleTime 15s + refetchOnWindowFocus（仅对 >15s 数据重取）；retry 仅 ApiError 5xx ≤3 次（4xx 含 401/403/404 不重试）；全局不设 refetchInterval。
   - `providers.tsx` `AppProviders` — QueryClientProvider 用 useState 工厂建每会话实例（禁模块级单例，防 SSR 跨请求泄漏缓存）；DevTools 仅 dev。
 - 领域客户端（每后端域一文件，约 40 个）：
-  - 工作区族：workspaces / workspace.ts / workspace-binding / workspace-members / workspace-skills-view / workspace-path / workspace-daemon-status
+  - 工作区族：workspaces / workspace.ts / workspace-binding / workspace-members / workspace-skills-view / workspace-path / workspace-daemon-status / workspace-types
   - 会话与运行：agent / daemon / runtime / changes / change-files / tasks / quicklog / approvals / audit / daemon-audit
   - 平台管理：admin / settings / api-keys / mcp-tokens / mcp-settings / menu-permissions / permission / agent-profiles / custom-skills
   - spec 域：scan-docs / scan-docs-tree / spec-workspaces / knowledge / incidents / releases / health / git-identities / file/ / auth(+auth/ 子目录) / ppm/*（含 format / types / kanban）/ api/llm-providers（拆分客户端首例）
@@ -46,6 +46,11 @@ SillyHub 前端 API 客户端层与基础设施库（frontend/src/lib/**）。�
   - `status-labels` — 状态值→中文标签映射
   - `query-keys` — react-query 查询键常量
   - `client-path` / `workspace-path` — 客户端与工作区路径处理
+  - `workspace-types` — 工作区类型 8 值受控词表前端单一事实源
+    （WorkspaceType 从 api-types WorkspaceCreate.type 派生禁手抄 +
+    WORKSPACE_TYPE_OPTIONS 中文标签/徽标配色 + workspaceTypeBadge
+    三态兜底：NULL=未分类灰 / 词表值=中文徽标 / 未知值=原值灰；
+    2026-08-18-workspace-role-type）
   - `utils.ts` — cn（clsx + tailwind-merge）
 
 ## 关键逻辑

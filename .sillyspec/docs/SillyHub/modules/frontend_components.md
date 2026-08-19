@@ -35,9 +35,12 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
   - `quicklog-drawer` / `quicklog-table` — quicklog 条目查看
 - 工作区域：
   - 入口件：`workspace-card` / `workspace-scan-dialog` / `workspace-switcher` / `workspace-tabs`
+    （workspace-card 带类型徽标、workspace-scan-dialog 带类型必选下拉+描述
+    textarea，均消费 lib/workspace-types，2026-08-18-workspace-role-type）
   - 绑定与成员：`workspace-binding-dialog` / `workspace-binding-guard` / `workspace-member-row` / `workspace-member-add-dialog`
   - 配置与路径：`workspace-config-card` / `workspace-path-picker` / `workspace-path-fields` / `workspace-daemon-switcher` / `workspace-access-guide` / `workspace-session-section`
-  - workspace/ 目录：`LinkWorkspaceDialog` / `LinkedProjectsSection`（PPM 项目链接）、`shared-daemon-manager` / `shared-daemon-toggle`（共享 daemon 管理与成员视图）
+  - workspace/ 目录：`LinkWorkspaceDialog` / `LinkedProjectsSection`（PPM 项目链接）、`shared-daemon-manager` / `shared-daemon-toggle`（共享 daemon 管理与成员视图）；LinkWorkspaceDialog 已关联/可选两侧均按词表徽标渲染
+    工作区类型（title 带 role/description 摘要）
 - 供应商域（llm-providers/）：
   - `llm-provider-form` — CRUD 表单（agent_kind / auth_field / api_format / 模型角色映射编辑）
   - `llm-provider-list` — 启停（set/unset-default）与列表

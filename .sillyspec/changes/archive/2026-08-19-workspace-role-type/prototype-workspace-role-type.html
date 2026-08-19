@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>工作区角色类型 · 设计原型</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:"Segoe UI","Microsoft YaHei",sans-serif; background:#f5f6f8; color:#1f2329; padding:24px; }
+  h1 { font-size:20px; margin-bottom:6px; }
+  .sub { color:#86909c; font-size:13px; margin-bottom:20px; }
+  h2 { font-size:15px; margin:26px 0 10px; }
+  .card { background:#fff; border:1px solid #e5e6eb; border-radius:8px; padding:16px; margin-bottom:14px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:#4e5969; font-weight:500; padding:8px 10px; border-bottom:1px solid #e5e6eb; background:#fafbfc;}
+  td { padding:9px 10px; border-bottom:1px solid #f2f3f5; }
+  .badge { display:inline-block; padding:2px 10px; border-radius:10px; font-size:12px; white-space:nowrap; }
+  .b-frontend { background:#e8f3ff; color:#165dff; }
+  .b-backend  { background:#e8ffea; color:#00b42a; }
+  .b-full     { background:#fff3e0; color:#f77234; }
+  .b-doc      { background:#f4f0ff; color:#722ed1; }
+  .b-sub      { background:#fff7e0; color:#d48806; }
+  .b-deploy   { background:#ffece8; color:#f53f3f; }
+  .b-design   { background:#e0f7fa; color:#08979c; }
+  .b-other    { background:#f2f3f5; color:#86909c; }
+  .b-none     { background:#f2f3f5; color:#c9cdd4; }
+  .row { display:flex; gap:16px; flex-wrap:wrap; }
+  .col { flex:1; min-width:340px; }
+  label { display:block; font-size:13px; color:#4e5969; margin:12px 0 5px; }
+  label .req { color:#f53f3f; margin-left:2px; }
+  input[type=text], select, textarea { width:100%; padding:8px 10px; border:1px solid #e5e6eb; border-radius:6px; font-size:13px; background:#fff; }
+  textarea { height:60px; resize:vertical; font-family:inherit; }
+  .btn { display:inline-block; padding:7px 18px; border-radius:6px; border:1px solid #165dff; background:#165dff; color:#fff; font-size:13px; margin-top:14px; cursor:pointer; }
+  .btn.ghost { background:#fff; color:#165dff; }
+  .hint { font-size:12px; color:#86909c; margin-top:4px; }
+  .muted { color:#86909c; }
+  select.filter { width:auto; padding:6px 10px; }
+  .toolbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+</style>
+</head>
+<body>
+<h1>工作区角色类型 — 界面原型</h1>
+<div class="sub">三个改动面：添加工作区弹窗（新字段）· 工作区列表（类型徽标+筛选）· PPM 项目关联工作区（类型列）</div>
+
+<h2>① 添加工作区 · 弹窗（新增两个字段）</h2>
+<div class="card">
+  <label>在线守护进程</label>
+  <select><option>DESKTOP-A1B2（在线）</option><option>aliyun-server（在线）</option></select>
+  <label>项目路径</label>
+  <input type="text" value="D:\code\sillyhub-frontend">
+  <label>工作区名称</label>
+  <input type="text" value="sillyhub-frontend" class="muted">
+  <label>工作区类型 <span class="req">*</span></label>
+  <select>
+    <option selected>前端代码</option><option>后端代码</option><option>全栈代码</option>
+    <option>业务文档</option><option>子模块</option><option>部署运维</option>
+    <option>设计资产</option><option>其他</option>
+  </select>
+  <div class="hint">类型说明这个工作区在项目里承担什么角色，供会话按项目定位工作区使用</div>
+  <label>描述（选填）</label>
+  <textarea placeholder="例：SillyHub 前端仓库，Next.js，含变更中心与会话界面">SillyHub 前端仓库：Next.js + antd，变更中心 / 会话 / 工作台所在仓</textarea>
+  <label>spec 同步策略</label>
+  <select><option>平台托管（推荐）</option><option>仓库镜像</option><option>仓库原生</option></select>
+  <div>
+    <span class="btn ghost" style="margin-right:8px">取消</span><span class="btn">添加</span>
+  </div>
+</div>
+
+<h2>② 工作区列表 · 类型徽标 + 筛选（修掉废弃旧值）</h2>
+<div class="card">
+  <div class="toolbar">
+    <div><input type="text" placeholder="搜索工作区…" style="width:220px"></div>
+    <select class="filter">
+      <option selected>全部类型</option><option>前端代码</option><option>后端代码</option>
+      <option>全栈代码</option><option>业务文档</option><option>子模块</option>
+      <option>部署运维</option><option>设计资产</option><option>其他</option><option>未分类</option>
+    </select>
+  </div>
+  <table>
+    <tr><th>名称</th><th>类型</th><th>角色 / 描述</th><th>状态</th></tr>
+    <tr><td>multi-agent-platform</td><td><span class="badge b-backend">后端代码</span></td><td class="muted">FastAPI 主仓 backend 目录独立成区</td><td>active</td></tr>
+    <tr><td>sillyhub-frontend</td><td><span class="badge b-frontend">前端代码</span></td><td class="muted">Next.js + antd，变更中心 / 会话所在仓</td><td>active</td></tr>
+    <tr><td>sillyhub-deploy</td><td><span class="badge b-deploy">部署运维</span></td><td class="muted">docker-compose 与服务器部署脚本</td><td>active</td></tr>
+    <tr><td>业务需求文档库</td><td><span class="badge b-doc">业务文档</span></td><td class="muted">PPM 项目需求与验收文档</td><td>active</td></tr>
+    <tr><td>legacy-spa</td><td><span class="badge b-none">未分类</span></td><td class="muted">（存量数据，未设置类型）</td><td>archived</td></tr>
+  </table>
+</div>
+
+<h2>③ PPM 项目详情 · 关联工作区（加类型列 → 按项目定位工作区的入口）</h2>
+<div class="card">
+  <table>
+    <tr><th>工作区</th><th>类型</th><th>角色</th><th>项目状态</th></tr>
+    <tr><td>sillyhub-frontend</td><td><span class="badge b-frontend">前端代码</span></td><td>变更中心 / 会话界面</td><td>进行中</td></tr>
+    <tr><td>multi-agent-platform</td><td><span class="badge b-backend">后端代码</span></td><td>API 服务</td><td>进行中</td></tr>
+    <tr><td>业务需求文档库</td><td><span class="badge b-doc">业务文档</span></td><td>需求与验收</td><td>进行中</td></tr>
+    <tr><td>sillyhub-deploy</td><td><span class="badge b-deploy">部署运维</span></td><td>发布流水线</td><td>进行中</td></tr>
+  </table>
+  <div class="hint">后续"项目会话选工作区"将直接复用这一列做选择依据（本变更不实现会话入口，属下一个变更）</div>
+</div>
+
+<h2>④ 8 值词表与徽标配色</h2>
+<div class="card">
+  <span class="badge b-frontend">前端代码 frontend-code</span>&nbsp;
+  <span class="badge b-backend">后端代码 backend-code</span>&nbsp;
+  <span class="badge b-full">全栈代码 fullstack</span>&nbsp;
+  <span class="badge b-doc">业务文档 business-doc</span>&nbsp;
+  <span class="badge b-sub">子模块 submodule</span>&nbsp;
+  <span class="badge b-deploy">部署运维 deploy-ops</span>&nbsp;
+  <span class="badge b-design">设计资产 design-asset</span>&nbsp;
+  <span class="badge b-other">其他 other</span>&nbsp;
+  <span class="badge b-none">未分类（type 为空）</span>
+  <div class="hint">词表值=后端常量 WORKSPACE_TYPE_VALUES，经 OpenAPI 枚举生成前端类型，前端不再手写</div>
+</div>
+</body>
+</html>

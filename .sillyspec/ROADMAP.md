@@ -4,7 +4,7 @@
 > 维护规则：每次 `sillyspec-archive` 归档变更时同步更新「已完成里程碑」与「当前活跃」两节。
 > 详细变更规格见 `.sillyspec/changes/`（活跃）与 `.sillyspec/changes/archive/`（历史）。
 
-最近更新：2026-08-17
+最近更新：2026-08-19
 
 ---
 
@@ -44,6 +44,10 @@
 - workspace-config-card、daemon-client-spec-sync-strategy、daemon-filesystem-policy（FilesystemPolicyEngine）
 - spec-import-async-and-change-reparse、runtime-allowed-roots-config、scan-docs-tree-search
 - **2026-07-12-team-main-agent-orchestration**（v2，接管 v1 `2026-06-19-multi-agent-orchestration`）：team 主 agent 真 agent 动态编排（daemon interactive lease + MCP tool 反向调 backend）+ worker 用户预设 + 三重收敛（worker 全终态/主 agent 自主/budget 硬截断 OR）+ GLM fallback + mode=single 零回归。daemon 内置 stdio MCP server 5 tool（P0 鉴权 apiKey X-API-Key）+ backend OrchestratorService/mcp_tools 5 endpoint + frontend TeamConfigPanel/team-progress。12 commit main（c41608be~79417e53 + P1 7369903b）。遗留：AC-9 e2e 真部署验证 + task-04b per-worker worktree 拆新变更
+
+### 2026-08-18 · 工作区角色类型
+
+- **workspace-role-type**：Workspace.type 收成 8 值受控词表（frontend-code/backend-code/fullstack/business-doc/submodule/deploy-ops/design-asset/other）+ role 自由文本 + 新增 description(Text) 列——「这个工作区是项目里的什么」落进工作区本体（D-001 不动 ppm_project_workspace 关联表，同一工作区跨项目同类型）。backend constants.py 单一事实源（WorkspaceTypeLiteral + YAML_TYPE_NORMALIZE_MAP 18 键）；Create.type 必填枚举（缺/非法 422）、Update omit=不改/null=清空、读不校验存量（NULL=未分类）；`GET /workspaces` 加 `?unclassified=true`（type IS NULL，与 ?type= 互斥同传 422）；migration 20260818150000 加列+存量 CASE 收编（幂等）；parser 组件目录展示层归一+description 透传进 ComponentRead（不落 Workspace 表，D-004）。前端 lib/workspace-types.ts 镜像词表（从 api-types 派生禁手抄，tsc 防漂移）：添加弹窗类型必选下拉+描述 textarea、列表徽标+词表筛选/未分类（删废弃 daemon-client 旧值）、详情页 type/role/description 编辑区（type 未变 omit 不发防存量 422）、PPM 关联弹窗双侧徽标+title 摘要、移动端最小收口（D-006）。36 文件，pytest 245+15 预存/vitest 1674/tsc 0/mypy 无新增。消费方：后续「跨工作区团队执行」按项目定位工作区的地基。
 
 ### 2026-08 · AgentProfile 配置层
 

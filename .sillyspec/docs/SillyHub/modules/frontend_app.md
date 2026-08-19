@@ -15,7 +15,8 @@ SillyHub 前端的 Next.js App Router 页面路由层（frontend/src/app/** + mi
 - 根级装配：`layout.tsx`（RootLayout，lang=zh-CN + suppressHydrationWarning + 全局 CSS + AntdProviders + AppProviders）、`error.tsx` / `global-error.tsx` / `loading.tsx`、首页 `page.tsx`。
 - 桌面路由组：
   - `(auth)/login` — 登录页（无 dashboard 守卫）
-  - `(dashboard)/workspaces` — 工作区列表（选择器页）+ `[id]` 详情
+  - `(dashboard)/workspaces` — 工作区列表（选择器页）+ `[id]` 详情（列表带类型徽标+词表筛选/未分类；
+    详情含 type/role/description 基本信息编辑区，2026-08-18-workspace-role-type）
   - `(dashboard)/runtimes` — daemon 运行时管理（列表 + `[id]` 详情/审计）
   - `(dashboard)/sessions` — 智能体会话总入口（平台级跨工作区，两栏布局）
   - `(dashboard)/agent-profiles` — 智能体档案全局页（跨工作区聚合，独立一级菜单）
@@ -26,6 +27,7 @@ SillyHub 前端的 Next.js App Router 页面路由层（frontend/src/app/** + mi
   - spec 域：`components`、`scan-docs`、`knowledge`、`skills`
   - 平台配置：`agent-profiles`、`members`、`mcp`、`mcp-tokens`、`files`、`incidents`、`releases`
 - 移动端 `m/`：`login` / `account` / `workspaces`（列表）
+  （workspaces 筛选换词表+未分类、创建提交体补 type:other，最小收口）
   - `ppm/{workbench, project-plans, milestone-details, task-plans, problem-list}` — ppm 移动五页。
 - `app/api/` 三个 SSE 透传 route handler（防 Next.js 代理缓冲）：
   - `api/daemon/sessions/[sessionId]/stream` — 交互会话事件流

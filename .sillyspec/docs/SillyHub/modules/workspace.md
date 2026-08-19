@@ -24,14 +24,19 @@ workspace_id 是全平台跨组件协作主轴；daemon-client 唯一模式下�
     `POST /{id}/generate-projects`、`GET /topology`、`GET /my-bindings`、
     `POST /{id}/init`（转调 AgentService.start_init_dispatch，
     鉴权 workspace-scoped，非本区成员 403）、
-    `GET /{id}/components`、`GET /{id}/skills`、`GET /{id}/mcp-config`
+    `GET /{id}/components`、`GET /{id}/skills`、`GET /{id}/mcp-config`；
+    `GET ""` 列表（分页，`?type=` 枚举 / `?unclassified=true` 互斥，
+    2026-08-18-workspace-role-type）
   - `members_router`：成员列表 / 邀请搜索 / 添加 / 改角色 / 移除 / 转让所有权
   - `link_router tag=workspace-ppm-links`：PPM 项目绑定 / 解绑 / 列表（PpmProjectBrief）
   - `member_runtimes.router`：`GET/PUT /my-binding`、`PUT /my-binding/shared`、
     `GET /members/bindings`、`GET /shared-daemons`、`DELETE /members/{user_id}/shared`
 - 数据（model.py）：
   - `Workspace`：吸收组件元数据（component_key / type / role / repo_url /
-    default_branch，ADR-07）、default_agent / default_model +
+    default_branch，ADR-07）、**type 为 8 值受控词表**（constants.py
+    WORKSPACE_TYPE_VALUES + WorkspaceTypeLiteral，2026-08-18-workspace-role-type：
+    Create 必填枚举、Update Literal、读路径不校验存量）、**description(Text)**
+    用途说明列、default_agent / default_model +
     `default_agent_profile_id`（档案软约束兜底：run 未显式指定时回退，
     档案删则 SET NULL 回退 default_agent，D-014）、
     tech_stack / build_command / test_command、status、deleted_at。
@@ -43,7 +48,10 @@ workspace_id 是全平台跨组件协作主轴；daemon-client 唯一模式下�
   （活跃且 component_key IS NULL，过滤兼容 brownfield 残留组件行），
   edges 恒空（D-001@V1：组件不再是 workspace 行）
 - 组件目录：`ComponentCatalogService` 从 spec 树 `projects/*.yaml` **只读派生**组件
-  （无 workspace 身份，写端点天然不可作用，2026-07-06-component-readonly-split）
+  （无 workspace 身份，写端点天然不可作用，2026-07-06-component-readonly-split）；
+  组件 type 经 YAML_TYPE_NORMALIZE_MAP（18 键）**展示层归一**到词表值、
+  description 随 ParsedWorkspace 透传进 ComponentRead（2026-08-18-workspace-role-type，
+  不落 Workspace 表）
 - skills / mcp-config：`SkillsViewService` 经 SpecPathResolver 定位 specDir，
   只读列 skills/ 名录与 mcp 配置；daemon-client 经 HostFsDelegate RPC 读
   （server-local 直接 Path 读）；无 skills/ 目录返回空列表不报错
@@ -84,6 +92,12 @@ create: 软删可复活（_resurrect_soft_deleted）→ slug 去重
   `.sillyspec-platform.json` + pull bundle + 触发 sillyspec init），
   权限收紧到 workspace 成员（security-audit-remediation task-09）
 - 组件视图只读派生自 projects/*.yaml：改组件信息改 yaml，平台侧不写库
+- **类型词表语义**（2026-08-18-workspace-role-type）：
+  Create.type 必填 8 值枚举（缺/非法 422）；Update omit=不改/null=清空
+  （exclude_unset）；读路径不校验存量（NULL=未分类、未知值原样返回不 422）；
+  `GET ""` 支持 `?type=`（枚举校验）与 `?unclassified=true`（type IS NULL，
+  两者同传 422）；migration 20260818150000 加 description 列+存量 type CASE
+  收编（幂等，18 键与 YAML_TYPE_NORMALIZE_MAP 同步义务）
 - my-binding / shared-daemons 是成员运行时会话绑定（daemon 会话归属与共享），
   与 members（RBAC 成员）是两套概念，勿混
 - slug 规则 URL 友好（`^[a-z0-9][a-z0-9-]*[a-z0-9]$`），
