@@ -32,8 +32,9 @@ import {
   type InfiniteData,
 } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Badge, Button, Input, Segmented, Select, Spin, Tag } from "antd";
+import { Badge, Button, Input, Modal, Segmented, Select, Spin, Tag } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
+import { Trash2 } from "lucide-react";
 import { ApiError } from "@/lib/api";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import {
@@ -71,6 +72,8 @@ export interface SessionListPanelProps {
   selectedSessionId?: string | null;
   /** 点击条目回调。 */
   onSelect?: (_session: AgentSessionRead) => void;
+  /** ql-20260818-012：删除会话回调（单条/批量共用，软删后 invalidate 列表）。 */
+  onDeleteSessions?: (_ids: string[]) => Promise<void>;
 }
 
 /* ────────────────────── 纯辅助（组件外便于单测推理） ────────────────────── */
@@ -119,6 +122,7 @@ function statusDotClass(status: AgentSessionStatus): string {
 export function SessionListPanel({
   selectedSessionId,
   onSelect,
+  onDeleteSessions,
 }: SessionListPanelProps) {
   // 四维筛选状态（选择型即查：setState → queryKey 变化 → react-query 停旧启新）。
   const [engine, setEngine] = useState<string>("");
@@ -127,6 +131,10 @@ export function SessionListPanel({
   // 文本型：输入态 vs 已应用态分离，回车才把 q 应用进查询（不每键触发）。
   const [searchInput, setSearchInput] = useState("");
   const [appliedQuery, setAppliedQuery] = useState("");
+  // ql-20260818-012：批量选择模式 + 已勾选 id 集合 + 删除进行中。
+  const [batchMode, setBatchMode] = useState(false);
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
 
   // 机器列表（筛选多选 + chips 机器名回退 / 离线判定共用一份数据源）。
   const { items: machines } = useDaemonMachines({ limit: 100 });
@@ -199,6 +207,54 @@ export function SessionListPanel({
   }, [loadedItems, machineIds, runtimeToMachine]);
 
   const total = sessionsQuery.data?.pages.at(-1)?.total ?? 0;
+
+  // ql-20260818-012：删除处理（单条/批量共用 onDeleteSessions 回调）。
+  // ql-20260818-013：加二次确认（Modal.confirm）。
+  const handleSingleDelete = (id: string, title: string) => {
+    if (!onDeleteSessions || deleting) return;
+    Modal.confirm({
+      title: "删除会话",
+      content: `确定要删除「${title}」吗？删除后将从列表中移除。`,
+      okText: "删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        setDeleting(true);
+        try {
+          await onDeleteSessions([id]);
+        } finally {
+          setDeleting(false);
+        }
+      },
+    });
+  };
+  const handleBatchDelete = () => {
+    if (!onDeleteSessions || deleting || checkedIds.size === 0) return;
+    Modal.confirm({
+      title: "批量删除会话",
+      content: `确定要删除选中的 ${checkedIds.size} 个会话吗？删除后将从列表中移除。`,
+      okText: `删除 ${checkedIds.size} 个`,
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        setDeleting(true);
+        try {
+          await onDeleteSessions([...checkedIds]);
+          setCheckedIds(new Set());
+        } finally {
+          setDeleting(false);
+        }
+      },
+    });
+  };
+  const toggleChecked = (id: string) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   // 虚拟滚动（D-003）：固定行高（estimateSize），jsdom/真实环境行为一致。
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -277,6 +333,45 @@ export function SessionListPanel({
         />
       </div>
 
+      {/* ql-20260818-012：批量选择模式切换 + 批量删除/单条删除操作栏 */}
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border">
+        <Button
+          size="small"
+          type={batchMode ? "primary" : "default"}
+          onClick={() => {
+            setBatchMode(!batchMode);
+            setCheckedIds(new Set());
+          }}
+        >
+          {batchMode ? "退出批量" : "批量管理"}
+        </Button>
+        {batchMode && (
+          <>
+            <Button
+              size="small"
+              disabled={checkedIds.size === 0 || deleting}
+              loading={deleting}
+              onClick={handleBatchDelete}
+            >
+              删除选中（{checkedIds.size}）
+            </Button>
+            <Button
+              size="small"
+              onClick={() => {
+                const allIds = new Set(loadedItems.map((s) => s.id));
+                setCheckedIds(
+                  checkedIds.size === allIds.size ? new Set() : allIds,
+                );
+              }}
+            >
+              {checkedIds.size === loadedItems.length && checkedIds.size > 0
+                ? "取消全选"
+                : "全选"}
+            </Button>
+          </>
+        )}
+      </div>
+
       {/* 列表区 */}
       {sessionsQuery.isError ? (
         <div className="m-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
@@ -326,6 +421,10 @@ export function SessionListPanel({
                   virtualStart={virtualRow.start}
                   virtualSize={virtualRow.size}
                   onSelect={onSelect}
+                  batchMode={batchMode}
+                  checked={checkedIds.has(session.id)}
+                  onToggleCheck={() => toggleChecked(session.id)}
+                  onDelete={onDeleteSessions ? () => handleSingleDelete(session.id, title) : undefined}
                 />,
               ];
             })}
@@ -358,6 +457,11 @@ interface SessionRowProps {
   virtualStart: number;
   virtualSize: number;
   onSelect?: (_session: AgentSessionRead) => void;
+  /** ql-20260818-012：批量模式/勾选/删除 */
+  batchMode?: boolean;
+  checked?: boolean;
+  onToggleCheck?: () => void;
+  onDelete?: () => void;
 }
 
 function SessionRow({
@@ -368,6 +472,10 @@ function SessionRow({
   virtualStart,
   virtualSize,
   onSelect,
+  batchMode,
+  checked,
+  onToggleCheck,
+  onDelete,
 }: SessionRowProps) {
   // chips 数据源：config_snapshot 直显免二次查询；快照缺省回退基础信息。
   const snapshot = session.config_snapshot;
@@ -389,9 +497,9 @@ function SessionRow({
       tabIndex={0}
       aria-pressed={selected}
       aria-label={`会话 ${title}`}
-      onClick={() => onSelect?.(session)}
+      onClick={() => (batchMode ? onToggleCheck?.() : onSelect?.(session))}
       onKeyDown={(e) => {
-        if (e.key === "Enter") onSelect?.(session);
+        if (e.key === "Enter") batchMode ? onToggleCheck?.() : onSelect?.(session);
       }}
       style={{
         position: "absolute",
@@ -407,18 +515,43 @@ function SessionRow({
           : "border-l-2 border-l-transparent hover:bg-muted/40"
       }`}
     >
-      {/* 第一行：状态点 + 标题截断 + 相对时间 */}
-      <div className="flex items-center gap-1.5">
-        <span
-          className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(session.status)}`}
-          aria-label={`状态 ${session.status}`}
-        />
+      {/* 第一行：状态点 + 标题截断 + 相对时间 + 删除按钮（hover） */}
+      <div className="group flex items-center gap-1.5">
+        {/* ql-20260818-012：批量模式 → 勾选框替代点击选会话 */}
+        {batchMode ? (
+          <input
+            type="checkbox"
+            checked={checked ?? false}
+            onChange={onToggleCheck}
+            aria-label={`勾选 ${title}`}
+            className="h-3.5 w-3.5 shrink-0 accent-blue-600"
+          />
+        ) : (
+          <span
+            className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(session.status)}`}
+            aria-label={`状态 ${session.status}`}
+          />
+        )}
         <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
           {title}
         </span>
         <span className="shrink-0 text-[11px] text-muted-foreground">
           {formatRelativeTime(session.last_active_at ?? session.created_at)}
         </span>
+        {/* 单条删除按钮：hover 显示，阻止行点击冒泡 */}
+        {onDelete && !batchMode && (
+          <button
+            type="button"
+            aria-label={`删除 ${title}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="ml-1 hidden h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:flex"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        )}
       </div>
       {/* 第二行：chips（机器/引擎/档案/供应商/轮数）——ql-20260817-002 改
           flex-wrap 自动换行 2-3 行（单行压挤更看不清）；Tag 紧凑样式保留、

@@ -16,3 +16,12 @@
 根因：inject 契约仅非空 agent_profile_id，「不指定」纯展示。
 方案：空串=取消（与供应商对称）——后端取消分支（列/run NULL+快照 None+metadata 三键删+空载荷）；daemon 空提示词归一 null（preset-only 无人格）+档案切换（含取消）fork；前端「不指定（无人格）」可点。
 结果：后端 804/daemon 43/前端 1613 全绿；E2E 取消后模型自报无人格。backend+daemon 已部署，待 commit+push+rebuild frontend。
+
+## ql-20260818-010-90db | 2026-08-18 22:47:48 | 左侧会话列表加单条删除和批量删除
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/sessions/page.tsx, frontend/src/components/sessions/session-list-panel.tsx
+需求：左侧会话列表加单条删除和批量删除。
+根因：纯新增，后端 DELETE /sessions/{id} 软删端点已有，纯前端 UI。
+方案：SessionListPanel 加批量管理模式（批量管理按钮→条目变勾选框→全选/删除选中）+ hover 单条删除按钮；page.tsx onDeleteSessions 回调调 deleteAgentSession 软删后 invalidate 列表+清选中态。
+结果：列表组件 13 用例全过，前端全量 1632 全绿，eslint 0 error。待 commit+push+rebuild frontend。
