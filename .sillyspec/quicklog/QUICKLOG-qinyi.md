@@ -126,3 +126,23 @@
 根因：apply_ops 把 rename 目标路径的 exists=false 软删墓碑当占用判 conflict（2026-08-19 quick 误归档事故卡死主因），add 落软删行走同内容豁免 no-op 留僵尸行。
 方案：service.py 三处——add 落软删行原地复活、rename 目标墓碑不算占用且原地复活（避开 flush 先 INSERT 后 DELETE 撞唯一约束）、R-07 无旧行 rename 同款处理；test_sync_incremental.py 增 TestSoftDeleteRevival 4 用例（含事故组合守护，证明 rename 蒸发疑点隔离不可复现）。
 结果：pytest 29 passed+1 skipped（symlink 平台预存），ruff format/check 过，mypy 0 error；backend.md 模块卡补 ql-20260819-004 索引行。
+
+## ql-20260819-005-4950 | 2026-08-19 16:57:47 | 在 /ppm/projects 项目维护页行操作加「Agent 团队」入口
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/projects/__tests__/projects-page.test.tsx, frontend/src/app/(dashboard)/ppm/projects/page.tsx
+需求：在 /ppm/projects 项目维护页行操作加「Agent 团队」入口，从项目数据进入 /projects/{id}/missions。
+根因：无，纯新增入口（原页面仅支持 URL 直达）。
+方案：在 page.tsx 的 extraActions 新增 Button，点击 router.push(`/projects/${row.id}/missions`)；新建 __tests__/projects-page.test.tsx 用 Testing Library + vitest 覆盖按钮渲染与跳转。
+结果：新增测试 2 passed；pnpm exec tsc --noEmit 0 错误；改动文件已 git add。
+
+## ql-20260820-001-579d | 2026-08-20 01:05:34 | 修复 change 模块 test_router.py 等 26 个 fixture ERROR（基线旧债
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/change/tests/test_router.py, backend/app/modules/change/tests/test_sync_documents_traversal.py
+需求：修复 change 模块 test_router.py 等 26 个 fixture ERROR（基线旧债，与 spec-mirror-tombstone-sync 无关）
+根因：2026-08-19-workspace-role-type 把 Workspace Create.type 收成必填枚举后，4 个测试文件的 POST /api/workspaces fixture payload 未带 type → 422 建档失败 → 后续全部断言 ERROR
+方案：test_router / test_dispatch / test_files_router / test_sync_documents_traversal 四文件 payload 补 type=other（受控词表最中性值）
+结果：change 模块 388 passed / 2 skipped（26 ERROR→0）；spec_workspace 106 passed 交叉无影响；ruff check + format 全过
+审计：📝 文档欠账（D-8）：4 个源码文件改动未同步任何模块文档（涉及模块：backend）
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/change/tests/test_dispatch.py, backend/app/modules/change/tests/test_files_router.py

@@ -27,7 +27,7 @@ async def workspace_with_changes(
     root = _copy_fixtures(COMPONENT_FIXTURES, tmp_path)
     ws_resp = await client.post(
         "/api/workspaces",
-        json={"name": "files-test", "root_path": str(root)},
+        json={"name": "files-test", "type": "other", "root_path": str(root)},
         headers=auth_headers,
     )
     assert ws_resp.status_code == 201, ws_resp.text

@@ -538,7 +538,7 @@ async def workspace_with_changes(
 
     ws_resp = await client.post(
         "/api/workspaces",
-        json={"name": "dispatch-test", "root_path": str(root)},
+        json={"name": "dispatch-test", "type": "other", "root_path": str(root)},
         headers=auth_headers,
     )
     assert ws_resp.status_code == 201, ws_resp.text
