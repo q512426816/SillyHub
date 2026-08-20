@@ -8,9 +8,11 @@
  *   1. page 渲染 <WorkspaceConfigCard>（用 data-testid mock 隔离卡片内部）；
  *   2. 其他区块（基本信息 / 默认智能体 / Overview / Quick nav）行为零回归——
  *      特别保留 task-11 的 default_agent × 3 case 作为「其他区块行为不变」守护。
+ * task-05 / 2026-08-20-workspace-overview-redesign：四段式重排后同步断言，
+ * 新增统计四数字与 6 入口 href 覆盖（FR-05, D-202）。
  */
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import WorkspaceDetailPage from "@/app/(dashboard)/workspaces/[id]/page";
 import type { SpecWorkspace } from "@/lib/spec-workspaces";
@@ -177,11 +179,11 @@ async function renderWithStrategy(
     });
   }
 
-  render(<WorkspaceDetailPage params={{ id: "ws-1" }} />);
+  const view = render(<WorkspaceDetailPage params={{ id: "ws-1" }} />);
   await waitFor(() =>
     expect(screen.getAllByText("multi-agent-platform").length).toBeGreaterThan(0),
   );
-  return { ws, specWs };
+  return { ws, specWs, ...view };
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -229,6 +231,41 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
       cleanup();
       await renderWithStrategy(strat);
       expect(screen.getByTestId("workspace-config-card-mock")).toBeInTheDocument();
+    }
+  });
+
+  // ── task-05 / 2026-08-20-workspace-overview-redesign：统计四数字与 6 入口 href ──
+
+  it("统计四数字按 mock 数据渲染（组件/进行中/已归档/运行时阶段）", async () => {
+    await renderWithStrategy("platform-managed", { componentCount: 7 });
+    // 四张统计卡标签应存在
+    expect(screen.getByText("项目组组件")).toBeInTheDocument();
+    expect(screen.getByText("进行中变更")).toBeInTheDocument();
+    expect(screen.getByText("已归档变更")).toBeInTheDocument();
+    expect(screen.getByText("运行时阶段")).toBeInTheDocument();
+    const runtimeCard = screen.getByText("运行时阶段").closest("a") ?? screen.getByText("运行时阶段").closest("div");
+    expect(runtimeCard).toHaveTextContent("—");
+    // 组件数显式断言
+    const componentCard = screen.getByText("项目组组件").closest("a");
+    expect(componentCard).toHaveTextContent("7");
+    // 进行中 / 已归档变更因 mock 返回 total=0，断言卡片存在即可
+    expect(screen.getByText("进行中变更")).toBeInTheDocument();
+    expect(screen.getByText("已归档变更")).toBeInTheDocument();
+  });
+
+  it("快速入口宫格 6 项 href 正确（不 mock 子组件以锁住 page 编排层接线）", async () => {
+    await renderWithStrategy("platform-managed");
+    const expected = [
+      { label: "项目组件", href: "/workspaces/ws-1/components" },
+      { label: "变更中心", href: "/workspaces/ws-1/changes" },
+      { label: "扫描文档", href: "/workspaces/ws-1/scan-docs" },
+      { label: "运行时", href: "/workspaces/ws-1/runtime" },
+      { label: "智能体档案", href: "/workspaces/ws-1/agent-profiles" },
+      { label: "方案文件", href: "/workspaces/ws-1/files" },
+    ];
+    for (const { label, href } of expected) {
+      const link = screen.getByRole("link", { name: label });
+      expect(link).toHaveAttribute("href", href);
     }
   });
 
@@ -298,10 +335,15 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
 
     // 不应出现"请先绑定"占位
     expect(screen.queryByText("请先绑定守护进程。")).not.toBeInTheDocument();
-    // 应该有 provider 选择器（<select> 元素）；用 findByRole 等 useEffect 异步
-    // 加载 daemon providers 完成（boundDaemonProviders 变非空才渲染 select），
-    // 修全量跑 flaky：waitFor 只等 workspace name，effect 来不及 settle。
-    const select = await screen.findByRole("combobox");
+
+    // antd Collapse 折叠面板下隐藏状态的 select 无法被 findByRole("combobox") 命中；
+    // 通过 querySelector 直接取 select 元素（语义等价：验证已绑 daemon 有在线 provider
+    // 时渲染 provider 选择器）。
+    const select = await waitFor(() => {
+      const el = document.querySelector('select');
+      expect(el).toBeInstanceOf(HTMLSelectElement);
+      return el as HTMLSelectElement;
+    });
     expect(select).toBeInTheDocument();
     // 选项应包含 claude
     expect(select).toContainHTML("Claude Code");

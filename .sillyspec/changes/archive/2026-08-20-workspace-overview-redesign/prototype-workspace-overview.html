@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>工作区详情页 · 工作台式重构原型（评审稿）</title>
+<style>
+:root {
+  /* 与 themes.ts / globals.css 同源的双主题 token */
+  --primary: #7C3AED; --primary-hover: #6D28D9; --accent: #0891B2;
+  --bg: #FAF5FF; --card: #FFFFFF; --border: #DDD6FE; --border-weak: #EEE9F8;
+  --fg: #1E1B4B; --muted: #ECEEF9; --muted-fg: #475569; --faint: #94A3B8;
+  --brand-50: #f5f3ff; --brand-100: #ede9fe; --brand-300: #c4b5fd;
+  --brand-600: #7c3aed; --brand-700: #6d28d9; --brand-800: #5b21b6;
+  --shadow-sm: 0 1px 2px 0 rgba(30,27,75,.06);
+  --shadow-md: 0 4px 14px rgba(30,27,75,.08);
+  --shadow-lg: 0 16px 40px rgba(109,40,217,.16);
+  --success: #059669; --success-soft: #D1FAE5; --success-text: #065F46;
+  --warning: #D97706; --warning-soft: #FEF3C7; --warning-text: #92400E;
+  --hero-from: var(--brand-700); --hero-via: var(--brand-800); --hero-to: #0f172a;
+}
+[data-theme="blue"] {
+  --primary: #2563EB; --primary-hover: #1d4ed8; --accent: #06b6d4;
+  --bg: #f8fafc; --card: #FFFFFF; --border: #e2e8f0; --border-weak: #eef2f7;
+  --fg: #1e293b; --muted: #ECEEF9; --muted-fg: #475569; --faint: #94a3b8;
+  --brand-50: #eff6ff; --brand-100: #dbeafe; --brand-300: #93c5fd;
+  --brand-600: #2563eb; --brand-700: #1d4ed8; --brand-800: #1e40af;
+  --shadow-sm: 0 1px 2px 0 rgba(15,23,42,.05);
+  --shadow-md: 0 2px 8px -1px rgba(15,23,42,.08), 0 1px 3px 0 rgba(15,23,42,.04);
+  --shadow-lg: 0 8px 24px -4px rgba(15,23,42,.10), 0 4px 8px -2px rgba(15,23,42,.05);
+  --hero-to: #0f172a;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Inter, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--fg); font-size: 14px; line-height: 1.6; }
+.ic { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ic-lg { width: 20px; height: 20px; }
+.wrap { max-width: 1200px; margin: 0 auto; padding: 20px 24px 48px; }
+
+/* 评审工具条 */
+.review-bar { position: sticky; top: 0; z-index: 50; background: var(--card); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; padding: 10px 24px; font-size: 12px; color: var(--muted-fg); }
+.review-bar b { font-size: 13px; color: var(--fg); }
+.theme-btn { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--brand-50); color: var(--primary); font-size: 12px; font-weight: 600; cursor: pointer; }
+.theme-btn:hover { border-color: var(--brand-300); }
+
+/* ── 段① 头部横幅 ── */
+.hero { position: relative; overflow: hidden; background: linear-gradient(135deg, var(--hero-from), var(--hero-via) 55%, var(--hero-to)); color: #fff; border-radius: 16px; padding: 28px 28px 24px; box-shadow: var(--shadow-lg); }
+.hero::after { content: ""; position: absolute; width: 420px; height: 220px; right: -80px; top: -120px; background: radial-gradient(closest-side, rgba(255,255,255,.14), transparent); }
+.hero-top { display: flex; align-items: flex-start; gap: 16px; }
+.hero-icon { width: 46px; height: 46px; border-radius: 12px; background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.25); display: flex; align-items: center; justify-content: center; }
+.hero-name { font-size: 24px; font-weight: 800; letter-spacing: -.01em; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.status-pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px; background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.3); font-size: 12px; font-weight: 500; }
+.status-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: #34d399; box-shadow: 0 0 0 3px rgba(52,211,153,.25); }
+.hero-slug { font-family: ui-monospace, Consolas, monospace; font-size: 12px; color: rgba(255,255,255,.75); margin-top: 4px; }
+.hero-meta { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; font-size: 12px; color: rgba(255,255,255,.82); }
+.hero-meta span { display: inline-flex; align-items: center; gap: 5px; }
+.hero-actions { margin-left: auto; display: flex; gap: 8px; }
+.hbtn { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 8px; font-size: 13px; cursor: pointer; border: 1px solid rgba(255,255,255,.3); background: rgba(255,255,255,.12); color: #fff; }
+.hbtn:hover { background: rgba(255,255,255,.22); }
+.hbtn.primary { background: #fff; color: var(--primary); border-color: #fff; font-weight: 600; }
+.hbtn.primary:hover { box-shadow: 0 4px 14px rgba(255,255,255,.35); }
+
+/* ── 段② 统计卡行 ── */
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 16px; }
+.stat { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; display: flex; align-items: center; gap: 12px; box-shadow: var(--shadow-sm); transition: transform .2s cubic-bezier(.2,0,0,1), box-shadow .2s, border-color .2s; text-decoration: none; color: inherit; }
+a.stat:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); border-color: var(--brand-300); }
+.stat-icon { width: 40px; height: 40px; border-radius: 10px; background: var(--brand-50); color: var(--primary); display: flex; align-items: center; justify-content: center; flex: none; }
+.stat .k { font-size: 12px; color: var(--muted-fg); }
+.stat .v { font-size: 21px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.25; }
+.stat .hint { font-size: 10px; color: var(--faint); }
+
+/* ── 段③ 快速入口宫格 ── */
+.section-title { display: flex; align-items: baseline; gap: 8px; margin: 22px 0 10px; font-size: 15px; font-weight: 700; }
+.section-title small { font-size: 12px; color: var(--muted-fg); font-weight: 400; }
+.grid6 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.entry { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; display: flex; align-items: center; gap: 12px; text-decoration: none; color: inherit; box-shadow: var(--shadow-sm); transition: transform .2s cubic-bezier(.2,0,0,1), box-shadow .2s, border-color .2s; }
+.entry:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); border-color: var(--brand-300); }
+.entry-icon { width: 38px; height: 38px; border-radius: 10px; background: var(--brand-50); color: var(--primary); display: flex; align-items: center; justify-content: center; flex: none; }
+.entry .t { font-size: 14px; font-weight: 600; }
+.entry .d { font-size: 11px; color: var(--muted-fg); }
+.entry .arrow { margin-left: auto; color: var(--faint); }
+
+/* ── 段④ 分组信息（ghost Collapse） ── */
+.collapse { margin-top: 22px; border: 1px solid var(--border); border-radius: 12px; background: var(--card); overflow: hidden; box-shadow: var(--shadow-sm); }
+.panel + .panel { border-top: 1px solid var(--border-weak); }
+.panel-head { display: flex; align-items: center; gap: 10px; padding: 13px 18px; cursor: pointer; font-size: 14px; font-weight: 600; user-select: none; }
+.panel-head .chev { margin-left: auto; color: var(--faint); transition: transform .2s; }
+.panel.open .panel-head .chev { transform: rotate(90deg); }
+.panel-head .badge-count { font-size: 11px; color: var(--muted-fg); background: var(--muted); border-radius: 999px; padding: 1px 8px; font-weight: 500; }
+.panel-head .ic { color: var(--primary); }
+.panel-body { display: none; padding: 4px 18px 16px; }
+.panel.open .panel-body { display: block; }
+.info-grid { display: grid; grid-template-columns: 7rem 1fr; gap: 6px 12px; font-size: 13px; }
+.info-grid dt { color: var(--muted-fg); }
+.info-grid dd { font-variant-numeric: tabular-nums; }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+.tagline { display: flex; flex-wrap: wrap; gap: 6px; }
+.mini-tag { font-size: 11px; padding: 1px 8px; border-radius: 6px; background: var(--brand-50); color: var(--primary); border: 1px solid var(--border); }
+.daemon-strip { display: flex; align-items: center; gap: 10px; margin-top: 14px; padding: 10px 12px; border: 1px dashed var(--brand-300); background: var(--brand-50); border-radius: 10px; font-size: 12px; }
+.daemon-strip .ok { color: var(--success-text); font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
+.cfg-item { display: flex; align-items: center; gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--border-weak); font-size: 13px; }
+.cfg-item:last-child { border-bottom: none; }
+.cfg-item .desc { color: var(--muted-fg); font-size: 12px; }
+.cfg-item .ic { color: var(--muted-fg); }
+.switch { margin-left: auto; width: 34px; height: 19px; border-radius: 999px; background: var(--brand-600); position: relative; }
+.switch::after { content: ""; position: absolute; right: 2px; top: 2px; width: 15px; height: 15px; border-radius: 50%; background: #fff; }
+
+/* 说明脚注 */
+.legend { margin-top: 28px; padding: 14px 16px; border: 1px dashed var(--border); border-radius: 10px; font-size: 12px; color: var(--muted-fg); background: var(--card); }
+.legend b { color: var(--fg); }
+@media (max-width: 900px) { .stats { grid-template-columns: 1fr 1fr; } .grid6 { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-spark" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M12 2c.8 5.2 4.8 9.2 10 10-5.2.8-9.2 4.8-10 10-.8-5.2-4.8-9.2-10-10 5.2-.8 9.2-4.8 10-10z"/></symbol>
+  <symbol id="i-boxes" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M17.5 14v7M14 17.5h7"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.4"/><circle cx="6" cy="18" r="2.4"/><circle cx="18" cy="8" r="2.4"/><path d="M6 8.4v7.2M8.3 7 15.7 7.6M18 10.4c0 4-4.6 4.6-9.6 5.4"/></symbol>
+  <symbol id="i-archive" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 4 12L16 12h5"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></symbol>
+  <symbol id="i-id" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="8.5" cy="10.5" r="2"/><path d="M5.8 15.6c.7-1.3 1.6-1.9 2.7-1.9s2 .6 2.7 1.9M14 9.5h4M14 13.5h4"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M19 12H5m6 6-6-6 6-6"/></symbol>
+  <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9 7V3M15 7V3"/><path d="M6 7h12v4a6 6 0 0 1-12 0V7z"/><path d="M12 17v4"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1.5 1.5"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1.5-1.5"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19V5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zm0 0a2 2 0 0 0 2 2h13"/><path d="M9 7h7"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.3M8.2 13.2l7.6 4.3"/></symbol>
+</svg>
+
+<!-- 评审工具条：双主题切换演示 -->
+<div class="review-bar">
+  <svg class="ic" style="color:var(--primary)"><use href="#i-spark"/></svg>
+  <b>工作区详情页 · 工作台式重构原型</b>
+  <span>评审稿 2026-08-20 · 四段式：横幅 → 统计 → 宫格 → 分组信息</span>
+  <button class="theme-btn" id="themeToggle" onclick="toggleTheme()"><svg class="ic"><use href="#i-spark"/></svg><span id="themeLabel">AI 紫（点击切明亮蓝）</span></button>
+</div>
+
+<div class="wrap">
+
+  <!-- ── 段① 头部横幅 ── -->
+  <section class="hero">
+    <div class="hero-top">
+      <div class="hero-icon"><svg class="ic" style="width:24px;height:24px"><use href="#i-spark"/></svg></div>
+      <div>
+        <div class="hero-name">
+          multi-agent-platform
+          <span class="status-pill"><span class="dot"></span>活跃</span>
+        </div>
+        <div class="hero-slug">multi-agent-platform</div>
+        <div class="hero-meta">
+          <span><svg class="ic"><use href="#i-clock"/></svg>创建于 2026-06-24 15:08</span>
+          <span><svg class="ic"><use href="#i-activity"/></svg>最后扫描 2026-08-20 11:32</span>
+          <span><svg class="ic"><use href="#i-plug"/></svg>守护进程：QINYI-PC（在线）</span>
+        </div>
+      </div>
+      <div class="hero-actions">
+        <a class="hbtn"><svg class="ic"><use href="#i-back"/></svg>返回列表</a>
+        <a class="hbtn primary"><svg class="ic"><use href="#i-edit"/></svg>编辑信息</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 段② 统计卡行 ── -->
+  <section class="stats">
+    <a class="stat" href="#"><span class="stat-icon"><svg class="ic ic-lg"><use href="#i-boxes"/></svg></span><div><div class="k">项目组组件</div><div class="v">12</div><div class="hint">点击查看 →</div></div></a>
+    <a class="stat" href="#"><span class="stat-icon"><svg class="ic ic-lg"><use href="#i-branch"/></svg></span><div><div class="k">进行中变更</div><div class="v">5</div><div class="hint">点击查看 →</div></div></a>
+    <div class="stat"><span class="stat-icon"><svg class="ic ic-lg"><use href="#i-archive"/></svg></span><div><div class="k">已归档变更</div><div class="v">23</div><div class="hint">（不可点，同现状）</div></div></div>
+    <a class="stat" href="#"><span class="stat-icon"><svg class="ic ic-lg"><use href="#i-activity"/></svg></span><div><div class="k">运行时阶段</div><div class="v" style="font-size:16px;line-height:21px">⚡ 波次执行</div><div class="hint">点击查看 →</div></div></a>
+  </section>
+
+  <!-- ── 段③ 快速入口宫格 ── -->
+  <div class="section-title">快速入口 <small>6 项（与现状一致，宫格化）</small></div>
+  <section class="grid6">
+    <a class="entry" href="#"><span class="entry-icon"><svg class="ic ic-lg"><use href="#i-boxes"/></svg></span><div><div class="t">项目组件</div><div class="d">组件与依赖关系</div></div><svg class="ic arrow"><use href="#i-chev-r"/></svg></a>
+    <a class="entry" href="#"><span class="entry-icon"><svg class="ic ic-lg"><use href="#i-branch"/></svg></span><div><div class="t">变更中心</div><div class="d">SillySpec 变更流</div></div><svg class="ic arrow"><use href="#i-chev-r"/></svg></a>
+    <a class="entry" href="#"><span class="entry-icon"><svg class="ic ic-lg"><use href="#i-file"/></svg></span><div><div class="t">扫描文档</div><div class="d">规范文档树</div></div><svg class="ic arrow"><use href="#i-chev-r"/></svg></a>
+    <a class="entry" href="#"><span class="entry-icon"><svg class="ic ic-lg"><use href="#i-activity"/></svg></span><div><div class="t">运行时</div><div class="d">会话与实时状态</div></div><svg class="ic arrow"><use href="#i-chev-r"/></svg></a>
+    <a class="entry" href="#"><span class="entry-icon"><svg class="ic ic-lg"><use href="#i-id"/></svg></span><div><div class="t">智能体档案</div><div class="d">角色人设管理</div></div><svg class="ic arrow"><use href="#i-chev-r"/></svg></a>
+    <a class="entry" href="#"><span class="entry-icon"><svg class="ic ic-lg"><use href="#i-folder"/></svg></span><div><div class="t">方案文件</div><div class="d">文件中心</div></div><svg class="ic arrow"><use href="#i-chev-r"/></svg></a>
+  </section>
+
+  <!-- ── 段④ 分组信息（ghost Collapse：基本信息展开 / 配置折叠） ── -->
+  <div class="section-title">信息与配置 <small>基本信息默认展开 · 配置默认折叠</small></div>
+  <section class="collapse">
+    <div class="panel open">
+      <div class="panel-head" onclick="this.parentElement.classList.toggle('open')">
+        <svg class="ic"><use href="#i-id"/></svg>基本信息
+        <svg class="ic chev"><use href="#i-chev-r"/></svg>
+      </div>
+      <div class="panel-body">
+        <dl class="info-grid">
+          <dt>工作区路径</dt><dd class="mono">C:/Users/qinyi/IdeaProjects/multi-agent-platform</dd>
+          <dt>规范根</dt><dd class="mono">.sillyspec</dd>
+          <dt>类型 / 角色</dt><dd><span class="tagline"><span class="mini-tag">app 应用</span><span class="mini-tag">workspace</span></span></dd>
+          <dt>用途说明</dt><dd>多智能体平台主仓（backend + frontend + daemon）</dd>
+          <dt>创建 / 扫描</dt><dd>2026-06-24 15:08 · 2026-08-20 11:32</dd>
+        </dl>
+        <div class="daemon-strip">
+          <svg class="ic" style="color:var(--primary)"><use href="#i-plug"/></svg>
+          <span class="ok"><svg class="ic"><use href="#i-check"/></svg>守护在线</span>
+          <span style="color:var(--muted-fg)">QINYI-PC · 绑定成员 3 · 共享中</span>
+          <a style="margin-left:auto;color:var(--primary);font-weight:600;cursor:pointer">管理绑定 →</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head" onclick="this.parentElement.classList.toggle('open')">
+        <svg class="ic"><use href="#i-spark"/></svg>默认智能体提供方
+        <span class="badge-count">低频</span>
+        <svg class="ic chev"><use href="#i-chev-r"/></svg>
+      </div>
+      <div class="panel-body">
+        <div class="cfg-item"><svg class="ic"><use href="#i-spark"/></svg>智能体提供方<span class="desc">claude-code（未显式指定时自动派发用）</span></div>
+        <div class="cfg-item"><svg class="ic"><use href="#i-branch"/></svg>智能体模型<span class="desc">留空 = 提供方默认</span></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head" onclick="this.parentElement.classList.toggle('open')">
+        <svg class="ic"><use href="#i-link"/></svg>关联 PPM 项目
+        <svg class="ic chev"><use href="#i-chev-r"/></svg>
+      </div>
+      <div class="panel-body"><div class="cfg-item"><span class="desc">（LinkedProjectsSection 原样迁入，展开后为项目绑定/解绑列表）</span></div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head" onclick="this.parentElement.classList.toggle('open')">
+        <svg class="ic"><use href="#i-book"/></svg>规范工作区配置
+        <svg class="ic chev"><use href="#i-chev-r"/></svg>
+      </div>
+      <div class="panel-body"><div class="cfg-item"><span class="desc">（WorkspaceConfigCard 原样迁入：spec 工作区/三策略/重扫等）</span></div></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head" onclick="this.parentElement.classList.toggle('open')">
+        <svg class="ic"><use href="#i-share"/></svg>守护进程共享
+        <span class="badge-count">仅绑定时显示</span>
+        <svg class="ic chev"><use href="#i-chev-r"/></svg>
+      </div>
+      <div class="panel-body">
+        <div class="cfg-item"><svg class="ic"><use href="#i-share"/></svg>共享我的守护进程给工作区成员<span class="desc">关闭后成员需自行绑定</span><span class="switch"></span></div>
+      </div>
+    </div>
+  </section>
+
+  <div class="legend">
+    <b>评审要点</b>：①四段式顺序=横幅→统计→宫格→分组信息，统计卡与宫格悬浮有三件套（抬升+大阴影+边框加深）可悬停体验；
+    ②右上角按钮可切换 <b>AI 紫 / 明亮蓝</b> 双主题（渐变/图标底/边框全跟随，对应 themes.ts 双套取值）；
+    ③统计卡可点击性与现状一致（归档卡不可点）；④配置四个面板默认折叠、基本信息默认展开（可点面板头体验折叠）；
+    ⑤业务逻辑零改动——路径/类型/编辑/绑定等全部保留只是重新分组。通过后按此实现。
+  </div>
+</div>
+
+<script>
+function toggleTheme() {
+  const html = document.documentElement;
+  const next = html.dataset.theme === "ai-native" ? "blue" : "ai-native";
+  html.dataset.theme = next;
+  document.getElementById("themeLabel").textContent =
+    next === "ai-native" ? "AI 紫（点击切明亮蓝）" : "明亮蓝（点击切 AI 紫）";
+}
+</script>
+</body>
+</html>

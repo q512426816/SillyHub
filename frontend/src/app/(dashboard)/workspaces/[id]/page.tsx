@@ -1,17 +1,19 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useState } from "react";
 
+import { Collapse, type CollapseProps } from "antd";
 import { AgentModelInput } from "@/components/AgentModelInput";
 import { SharedDaemonToggle } from "@/components/workspace/shared-daemon-toggle";
 import { LinkedProjectsSection } from "@/components/workspace/LinkedProjectsSection";
 import { WorkspaceConfigCard } from "@/components/workspace-config-card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
+import { PageContainer } from "@/components/layout";
 import { WorkspaceDaemonSwitcher } from "@/components/workspace-daemon-switcher";
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
+import { WorkspaceHeroHeader } from "@/components/workspace/hero-header";
+import { WorkspaceStatsRow } from "@/components/workspace/stats-row";
+import { QuickEntryGrid } from "@/components/workspace/quick-entry-grid";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
@@ -239,173 +241,158 @@ export default function WorkspaceDetailPage({ params }: Props) {
     );
   }
 
-  return (
-    <PageContainer size="full">
-      <PageHeader
-        title={
-          <span className="flex items-center gap-3">
-            {workspace.name}
-            <Badge variant={workspace.status === "active" ? "success" : "outline"}>
-              {workspace.status}
-            </Badge>
-          </span>
-        }
-        subtitle={<span className="font-mono">{workspace.slug}</span>}
-        actions={
-          <Link href="/workspaces" className="text-[11px] text-muted-foreground hover:underline">
-            &larr; 工作区
-          </Link>
-        }
-      />
-
-      {pageError && (
-        <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
-          {pageError}
-        </div>
-      )}
-
-      {/* Workspace basic info（task-07 / FR-05：新增类型/角色/用途只读行 + 编辑区） */}
-      <SectionCard
-        title="基本信息"
-        extra={
-          editingInfo ? (
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  // 取消 = 丢弃草稿回填当前值，退回只读态
-                  setTypeDraft(workspace.type ?? null);
-                  setRoleDraft(workspace.role ?? "");
-                  setDescriptionDraft(workspace.description ?? "");
-                  setEditingInfo(false);
-                }}
-                disabled={savingInfo}
-              >
-                取消
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleSaveBasicInfo}
-                disabled={savingInfo || !infoDirty}
-              >
-                {savingInfo ? "保存中..." : "保存"}
-              </Button>
-            </div>
-          ) : (
-            <Button size="sm" variant="outline" onClick={() => setEditingInfo(true)}>
-              编辑
-            </Button>
-          )
-        }
+  const basicInfoExtra = editingInfo ? (
+    <div className="flex gap-2">
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={() => {
+          // 取消 = 丢弃草稿回填当前值，退回只读态
+          setTypeDraft(workspace.type ?? null);
+          setRoleDraft(workspace.role ?? "");
+          setDescriptionDraft(workspace.description ?? "");
+          setEditingInfo(false);
+        }}
+        disabled={savingInfo}
       >
-        <dl className="grid grid-cols-[6rem_1fr] gap-y-1 text-xs">
-          <WorkspacePathFields
-            workspace={workspace}
-            runtime={boundRuntime}
-            daemon={boundDaemon}
-            linkRuntime
-          />
-          <dt className="text-muted-foreground">创建于</dt>
-          <dd>{formatTs(workspace.created_at)}</dd>
-          <dt className="text-muted-foreground">最后扫描</dt>
-          <dd>{formatTs(workspace.last_scanned_at)}</dd>
-          {/* 类型/角色/用途：只读态徽标 + 单行截断（R-06），编辑态换下方表单 */}
-          <dt className="text-muted-foreground">类型</dt>
-          <dd>
-            {(() => {
-              const badge = workspaceTypeBadge(workspace.type);
-              return (
-                <span
-                  className={cn(
-                    "inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-semibold",
-                    badge.className,
-                  )}
-                >
-                  {badge.label}
-                </span>
-              );
-            })()}
-          </dd>
-          <dt className="text-muted-foreground">角色</dt>
-          <dd title={workspace.role ?? undefined} className="min-w-0 truncate">
-            {workspace.role || "—"}
-          </dd>
-          <dt className="text-muted-foreground">用途</dt>
-          <dd
-            title={workspace.description ?? undefined}
-            className="min-w-0 truncate"
-          >
-            {workspace.description || "—"}
-          </dd>
-        </dl>
-        {editingInfo && (
-          /* 编辑表单：布局类对齐「默认智能体提供方」卡片的 label+控件+保存按钮
-             交互形态（直接可编辑小表单 + 保存，页面无独立编辑路由）。 */
-          <div className="mt-3 space-y-2.5 border-t pt-2.5">
-            <div className="space-y-1">
-              <label className="text-[11px] text-muted-foreground">
-                工作区类型（不选即&ldquo;未分类&rdquo;）
-              </label>
-              <select
-                value={typeDraft ?? ""}
-                onChange={(e) => setTypeDraft(e.target.value === "" ? null : e.target.value)}
-                className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
-              >
-                <option value="">未分类</option>
-                {WORKSPACE_TYPE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-                {/* 存量未知旧值：下拉值集合外的当前值,追加原值选项防止 React
-                    select 失配回跳第一项（形态对齐 default_agent 离线追加选项）。 */}
-                {typeDraft && !WORKSPACE_TYPE_OPTIONS.some((o) => o.value === typeDraft) && (
-                  <option value={typeDraft}>{typeDraft}（存量值）</option>
-                )}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="text-[11px] text-muted-foreground">
-                角色（如&ldquo;订单模块&rdquo;，≤100 字符）
-              </label>
-              <input
-                type="text"
-                value={roleDraft}
-                maxLength={100}
-                onChange={(e) => setRoleDraft(e.target.value)}
-                placeholder="描述这个工作区在项目中的角色"
-                className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[11px] text-muted-foreground">
-                用途说明（≤2000 字符）
-              </label>
-              <textarea
-                value={descriptionDraft}
-                maxLength={2000}
-                rows={3}
-                onChange={(e) => setDescriptionDraft(e.target.value)}
-                placeholder="这个工作区的用途说明"
-                className="w-full resize-y rounded border border-input bg-background p-2.5 text-sm focus:border-ring focus:outline-none"
-              />
-            </div>
-          </div>
-        )}
-        {/* task-11 / 2026-07-10-remove-server-local-workspace-mode：所有工作区
-            均为 daemon-client 语义，WorkspaceDaemonSwitcher 无条件渲染。 */}
-        <div className="mt-3 border-t pt-2.5">
-          <WorkspaceDaemonSwitcher
-            workspaceId={workspaceId}
-            currentBinding={myBinding}
-            onChanged={() => void load()}
-          />
-        </div>
-      </SectionCard>
+        取消
+      </Button>
+      <Button
+        size="sm"
+        onClick={handleSaveBasicInfo}
+        disabled={savingInfo || !infoDirty}
+      >
+        {savingInfo ? "保存中..." : "保存"}
+      </Button>
+    </div>
+  ) : (
+    <Button size="sm" variant="outline" onClick={() => setEditingInfo(true)}>
+      编辑
+    </Button>
+  );
 
-      {/* Default Agent provider（FR-01/FR-02 / daemon-entity-binding task-11）*/}
-      <SectionCard title="默认智能体提供方">
+  const basicInfoItems: CollapseProps["items"] = [
+    {
+      key: "basic-info",
+      label: "基本信息",
+      extra: basicInfoExtra,
+      forceRender: true,
+      children: (
+        <>
+          <dl className="grid grid-cols-[6rem_1fr] gap-y-1 text-xs">
+            <WorkspacePathFields
+              workspace={workspace}
+              runtime={boundRuntime}
+              daemon={boundDaemon}
+              linkRuntime
+            />
+            <dt className="text-muted-foreground">创建于</dt>
+            <dd>{formatTs(workspace.created_at)}</dd>
+            <dt className="text-muted-foreground">最后扫描</dt>
+            <dd>{formatTs(workspace.last_scanned_at)}</dd>
+            {/* 类型/角色/用途：只读态徽标 + 单行截断（R-06），编辑态换下方表单 */}
+            <dt className="text-muted-foreground">类型</dt>
+            <dd>
+              {(() => {
+                const badge = workspaceTypeBadge(workspace.type);
+                return (
+                  <span
+                    className={cn(
+                      "inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-semibold",
+                      badge.className,
+                    )}
+                  >
+                    {badge.label}
+                  </span>
+                );
+              })()}
+            </dd>
+            <dt className="text-muted-foreground">角色</dt>
+            <dd title={workspace.role ?? undefined} className="min-w-0 truncate">
+              {workspace.role || "—"}
+            </dd>
+            <dt className="text-muted-foreground">用途</dt>
+            <dd
+              title={workspace.description ?? undefined}
+              className="min-w-0 truncate"
+            >
+              {workspace.description || "—"}
+            </dd>
+          </dl>
+          {editingInfo && (
+            /* 编辑表单：布局类对齐「默认智能体提供方」卡片的 label+控件+保存按钮
+               交互形态（直接可编辑小表单 + 保存，页面无独立编辑路由）。 */
+            <div className="mt-3 space-y-2.5 border-t pt-2.5">
+              <div className="space-y-1">
+                <label className="text-[11px] text-muted-foreground">
+                  工作区类型（不选即&ldquo;未分类&rdquo;）
+                </label>
+                <select
+                  value={typeDraft ?? ""}
+                  onChange={(e) => setTypeDraft(e.target.value === "" ? null : e.target.value)}
+                  className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
+                >
+                  <option value="">未分类</option>
+                  {WORKSPACE_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                  {/* 存量未知旧值：下拉值集合外的当前值,追加原值选项防止 React
+                      select 失配回跳第一项（形态对齐 default_agent 离线追加选项）。 */}
+                  {typeDraft && !WORKSPACE_TYPE_OPTIONS.some((o) => o.value === typeDraft) && (
+                    <option value={typeDraft}>{typeDraft}（存量值）</option>
+                  )}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] text-muted-foreground">
+                  角色（如&ldquo;订单模块&rdquo;，≤100 字符）
+                </label>
+                <input
+                  type="text"
+                  value={roleDraft}
+                  maxLength={100}
+                  onChange={(e) => setRoleDraft(e.target.value)}
+                  placeholder="描述这个工作区在项目中的角色"
+                  className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[11px] text-muted-foreground">
+                  用途说明（≤2000 字符）
+                </label>
+                <textarea
+                  value={descriptionDraft}
+                  maxLength={2000}
+                  rows={3}
+                  onChange={(e) => setDescriptionDraft(e.target.value)}
+                  placeholder="这个工作区的用途说明"
+                  className="w-full resize-y rounded border border-input bg-background p-2.5 text-sm focus:border-ring focus:outline-none"
+                />
+              </div>
+            </div>
+          )}
+          {/* task-11 / 2026-07-10-remove-server-local-workspace-mode：所有工作区
+              均为 daemon-client 语义，WorkspaceDaemonSwitcher 无条件渲染。 */}
+          <div className="mt-3 border-t pt-2.5">
+            <WorkspaceDaemonSwitcher
+              workspaceId={workspaceId}
+              currentBinding={myBinding}
+              onChanged={() => void load()}
+            />
+          </div>
+        </>
+      ),
+    },
+  ];
+
+  const configItems: CollapseProps["items"] = [
+    {
+      key: "default-agent",
+      label: "默认智能体提供方",
+      forceRender: true,
+      children: (
         <div className="space-y-2.5">
           <p className="text-xs text-muted-foreground">
             自动派发（阶段流转、scan-generate）且未显式指定 provider 时使用。留空则由守护进程默认决定。
@@ -464,80 +451,89 @@ export default function WorkspaceDetailPage({ params }: Props) {
             </p>
           )}
         </div>
-      </SectionCard>
+      ),
+    },
+    {
+      key: "linked-projects",
+      label: "关联 PPM 项目",
+      forceRender: true,
+      children: <LinkedProjectsSection workspaceId={workspaceId} />,
+    },
+    {
+      key: "workspace-config",
+      label: "规范工作区配置",
+      forceRender: true,
+      children: (
+        <WorkspaceConfigCard
+          workspace={workspace}
+          specWs={specWs}
+          myBinding={myBinding}
+          boundDaemon={boundDaemon}
+          isOwner={isOwner}
+          onRefresh={load}
+          componentCount={componentCount}
+        />
+      ),
+    },
+  ];
 
-      {/* Overview cards */}
-      <section className="grid grid-cols-2 gap-px rounded-md border bg-border lg:grid-cols-4">
-        <Link href={`/workspaces/${workspaceId}/components`} className="bg-card px-3 py-2.5 hover:bg-muted/50 transition-colors">
-          <p className="text-[11px] text-muted-foreground">项目组组件</p>
-          <p className="text-sm font-semibold">{componentCount}</p>
-        </Link>
-        <Link href={`/workspaces/${workspaceId}/changes`} className="bg-card px-3 py-2.5 hover:bg-muted/50 transition-colors">
-          <p className="text-[11px] text-muted-foreground">进行中变更</p>
-          <p className="text-sm font-semibold">{activeChanges}</p>
-        </Link>
-        <div className="bg-card px-3 py-2.5">
-          <p className="text-[11px] text-muted-foreground">已归档变更</p>
-          <p className="text-sm font-semibold">{archivedChanges}</p>
-        </div>
-        <Link href={`/workspaces/${workspaceId}/runtime`} className="bg-card px-3 py-2.5 hover:bg-muted/50 transition-colors">
-          <p className="text-[11px] text-muted-foreground">运行时阶段</p>
-          <p className="text-sm font-semibold">{currentStage ?? "—"}</p>
-        </Link>
-      </section>
+  if (myBinding) {
+    configItems.push({
+      key: "shared-daemon",
+      label: "守护进程共享",
+      forceRender: true,
+      children: (
+        <SharedDaemonToggle
+          workspaceId={workspaceId}
+          shared={myBinding?.shared}
+          daemonLabel={
+            boundDaemon?.display_alias ?? boundDaemon?.hostname ?? null
+          }
+          onChanged={() => void load()}
+        />
+      ),
+    });
+  }
 
-      {/* 关联 PPM 项目(change 2026-07-28-ppm-project-link-workspace task-11 / FR-03):
-          工作区维度绑定/解绑项目,与项目维护页「关联工作区」操作同一张表。 */}
-      <LinkedProjectsSection workspaceId={workspaceId} />
+  return (
+    <PageContainer size="full">
+      <div className="space-y-4">
+        {/* 段①：头部横幅 */}
+        <WorkspaceHeroHeader
+          workspace={workspace}
+          onEditInfo={() => setEditingInfo(true)}
+          editing={editingInfo}
+        />
 
-      {/* Spec workspace config card（task-07 / D-003@V1，原规范管理区迁入） */}
-      <WorkspaceConfigCard
-        workspace={workspace}
-        specWs={specWs}
-        myBinding={myBinding}
-        boundDaemon={boundDaemon}
-        isOwner={isOwner}
-        onRefresh={load}
-        componentCount={componentCount}
-      />
+        {pageError && (
+          <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
+            {pageError}
+          </div>
+        )}
 
-      {/* task-12 / FR-01 / D-003@v1：lender「共享我的 daemon」开关。
-          仅当当前用户已绑定 daemon（myBinding 存在）时渲染 —— 业务/管理人员无自有
-          binding，不渲染此区段。shared 字段生成类型已含（model 默认 false）。 */}
-      {myBinding && (
-        <SectionCard title="守护进程共享">
-          <SharedDaemonToggle
-            workspaceId={workspaceId}
-            shared={myBinding?.shared}
-            daemonLabel={
-              boundDaemon?.display_alias ?? boundDaemon?.hostname ?? null
-            }
-            onChanged={() => void load()}
-          />
-        </SectionCard>
-      )}
+        {/* 段②：统计卡行 */}
+        <WorkspaceStatsRow
+          workspaceId={workspaceId}
+          componentCount={componentCount}
+          activeChanges={activeChanges}
+          archivedChanges={archivedChanges}
+          currentStage={currentStage}
+        />
 
-      {/* Quick nav */}
-      <section className="flex flex-wrap gap-2">
-        {[
-          { href: `/workspaces/${workspaceId}/components`, label: "项目组件" },
-          { href: `/workspaces/${workspaceId}/changes`, label: "变更中心" },
-          { href: `/workspaces/${workspaceId}/scan-docs`, label: "扫描文档" },
-          { href: `/workspaces/${workspaceId}/runtime`, label: "运行时" },
-          // task-12 / 2026-08-02-agent-profile-layer：智能体档案管理入口。
-          { href: `/workspaces/${workspaceId}/agent-profiles`, label: "智能体档案" },
-          // task-13 / FR-06：业务人员借用方案查看入口（workspace 作用域，守卫放行）。
-          { href: `/workspaces/${workspaceId}/files`, label: "方案文件" },
-        ].map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className="inline-flex h-7 items-center rounded border border-border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            {item.label}
-          </Link>
-        ))}
-      </section>
+        {/* 段③：快速入口宫格 */}
+        <QuickEntryGrid workspaceId={workspaceId} />
+
+        {/* 段④-1：基本信息（默认展开） */}
+        <Collapse
+          ghost
+          bordered={false}
+          defaultActiveKey={["basic-info"]}
+          items={basicInfoItems}
+        />
+
+        {/* 段④-2：配置分组（默认折叠） */}
+        <Collapse ghost bordered={false} items={configItems} />
+      </div>
     </PageContainer>
   );
 }
