@@ -37,6 +37,8 @@ export function QuicklogLinkedCard({
     queryFn: () =>
       listQuicklogEntries(workspaceId, {
         linked_change: changeKey,
+        // 含空壳占位（ql-20260820-008）：进行中关联 quick 任务也可见
+        include_placeholder: true,
         page_size: 20,
       }),
     retry: false,

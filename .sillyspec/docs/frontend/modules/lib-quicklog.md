@@ -29,11 +29,13 @@ refetchInterval: (q) => quicklogPollInterval(q.state.data?.items ?? [])
 ## 注意事项
 - `status` 是后端字符串，前端 `QuicklogStatus` 是派生视图类型——传参时以列表项实际返回为准，勿假设枚举穷尽。
 - 列表行不带 body/raw（详情走 `QuicklogEntryRead`），抽屉按需拉取。
-- `placeholder` 条目默认不出现在列表（需显式 `include_placeholder: true`）。
+- `placeholder` 条目后端默认不返回（API 需显式 `include_placeholder: true`）；平台三
+  消费点自 ql-20260820-008-fcb7 起默认显式传 true——进行中 quick 会话 CLI 只落
+  「(quick 任务)」占位标题（真实标题 step3 `--done` 才回填），不传则会话全程不可见。
 - 已核实的消费点：
-  - `changes/page.tsx` — 计数 pill 用 `page_size: 1` 只取 total；
-  - `quicklog-table.tsx` — `refetchInterval: (q) => quicklogPollInterval(q.state.data?.items ?? [])`；
-  - `quicklog-drawer.tsx` / `detail/quicklog-linked-card.tsx` — 详情与 linked_change 过滤。
+  - `changes/page.tsx` — 计数 pill 用 `page_size: 1` 只取 total（含空壳占位，与表格口径一致）；
+  - `quicklog-table.tsx` — `refetchInterval: (q) => quicklogPollInterval(q.state.data?.items ?? [])`；`showPlaceholder` 默认 true（复选框取消=收窄筛选）；
+  - `quicklog-drawer.tsx` / `detail/quicklog-linked-card.tsx` — 详情与 linked_change 过滤（linked-card 同样含空壳占位）。
 - 消费方全终态自动停轮，勿另设定时器。
 
 ## 人工备注
