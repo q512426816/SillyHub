@@ -25,7 +25,7 @@ import { DEFAULT_THEME, themes, type ThemeName } from "@/styles/themes";
 export interface ThemeState {
   /** 当前主题名；初始与兜底均为 DEFAULT_THEME（ai-native）。 */
   theme: ThemeName;
-  setTheme: (theme: ThemeName) => void;
+  setTheme: (_theme: ThemeName) => void;
 }
 
 /**
