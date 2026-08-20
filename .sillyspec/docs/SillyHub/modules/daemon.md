@@ -23,6 +23,7 @@ backend 与 daemon 经 WebSocket + REST 双向通信，支持三种执行形态�
   - 供应商热切换：默认供应商变更 → 按 daemon 分组推 `DAEMON_MSG_PROVIDER_CONFIG_CHANGED`，daemon 在 turn 边界 reload（close 旧 query + resume agentSessionId 保留历史），停止推 null 回退本机凭证。
 - **session**：
   - create/inject/interrupt/end/reopen/recover/confirm-reconnected/mark-recovery-failed/ready 上报 + SSE stream + logs。
+  - create_session workspace 归属校验（2026-08-19-sessions-workspace-selector）：workspace_id 非空时先经 `allowed_workspace_ids(user, WORKSPACE_READ)` 校验可见性，不可见抛 404 `HTTP_404_DAEMON_SESSION_WORKSPACE_NOT_FOUND`（校验在读 Workspace 行之前，不在事务内，失败不落库）。
   - `SessionReadiness` 模块级单例（mark_ready/wait/clear）：daemon create/recover 完成后 POST /ready 上报，backend 发 SESSION_INJECT 前 await wait(30s)，超时 fallback 仍发兼容旧 daemon——防 inject 早到 daemon 丢消息。
   - permission_service：权限请求落 dialog 行、pending/history/workspace 级聚合、响应下发、超时收敛。
 - **run_sync**：

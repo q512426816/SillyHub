@@ -26,7 +26,8 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
   - `session-list-layout.tsx` / `session-log-sanitize.ts` / `daemon-required-notice.tsx`
 - sessions/（总入口配套）：
   - `session-list-panel` — 筛选 + 虚拟滚动 + 紧凑两行条目
-  - `new-session-form` — 新会话四选择器（runtime / profile / 供应商 / 会话名）
+  - `workspace-session-picker` — 新建会话工作区选择器（自治取数 listWorkspaces + fetchMyBindings；首项「不使用工作区」，选中工作区按绑定 daemon_id 联动带出在线机器；空列表禁用提示 + 失败重试，2026-08-19-sessions-workspace-selector）
+  - `new-session-form` — 新会话五选择器（工作区 / runtime / profile / 供应商 / 会话名；选中工作区提交体带 workspace_id 并显示项目目录运行提示条）
   - `session-config-bar` — 运行中切换档案/供应商（点选即切换）
   - `ctx-usage-bar` — 上下文用量前端累计
 - 变更域（changes/）：
@@ -101,5 +102,6 @@ SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
 
 ## 变更索引
 
+- 2026-08-19-sessions-workspace-selector | 新建会话工作区选择器：workspace-session-picker 组件 + new-session-form 接入（工作区→绑定机器联动、提交体 workspace_id）
 - ql-20260819-001-b742 | 会话列表和面板头部增加工作区信息显示（session-list-panel chips + session header badge）
 - 2026-08-19-session-stream-ux | 会话流结构化重构：共享装配器 session-log-assembler（分段/归属嵌套/override 撤回收敛两处副本）+ turn-segment-views 段渲染族 + turn-status-bar 轮级状态条 + subagent-catalog 子代理目录 + TurnTimeline v2 段模型渲染（FR-01..06）

@@ -3,7 +3,7 @@
 schema_version: 2
 project: SillyHub
 source_commit: 744e3de4
-generated_at: 2026-08-18 01:25:00
+generated_at: 2026-08-20 00:50:00
 generator: sillyspec-scan
 # 模块映射（自动生成，可手动修改）。粒度沿用 6e78b29a 基线（backend 特性模块 + frontend 分层 + daemon 双端合并）。
 # depends_on 由 backend/app 内 "from app.modules.<x>" / "from app.core" import 扫描核实；used_by 为其反向 + 前端 lib API 客户端对应。
@@ -728,6 +728,7 @@ modules:
       - components/daemon/session-log-assembler（会话流共享装配器，2026-08-19-session-stream-ux）
       - components/daemon/turn-segment-views / turn-status-bar（段渲染族 + 轮级状态条）
       - components/sessions/subagent-catalog（子代理目录）
+      - components/sessions/workspace-session-picker（新建会话工作区选择器，2026-08-19-sessions-workspace-selector）
       - components/workspace-* / ppm-* / mcp-token-create-dialog / file-upload / file-viewer
       - components/permission-approval-card / error-boundary
     depends_on: [frontend_lib, frontend_stores]
