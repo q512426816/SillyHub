@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { ArrowLeftRight, Bell, ChevronRight, LogOut, Search, UserRound } from "lucide-react";
 
+import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Avatar,
   AvatarFallback,
@@ -140,6 +141,9 @@ export function TopBar({ displayName, onLogout }: TopBarProps) {
           <Bell className="h-5 w-5" />
           <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-red-500" />
         </button>
+
+        {/* task-07 / FR-02：主题切换（AI 紫 ↔ 明亮蓝 两态直切，经 store persist 记忆） */}
+        <ThemeToggle />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
