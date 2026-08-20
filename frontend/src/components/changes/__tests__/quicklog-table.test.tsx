@@ -3,7 +3,7 @@
  *
  * 覆盖：
  *   1. 4 态状态徽标映射（completed 绿/in_progress 蓝/partial_done 黄/stale 红）
- *   2. 空壳默认过滤开关（后端 include_placeholder 参数透传）
+ *   2. 空壳默认显示开关（默认勾选；后端 include_placeholder 参数透传）
  *   3. 轮询纯函数两分支：in_progress|stale 存在 → 30000；全终态 → false
  *   4. 列渲染：负责人 enrich 名 / 影响模块「—」降级 / 关联变更链接
  *   5. 筛选交互：状态切换触发带 status 参数的请求
@@ -119,7 +119,7 @@ describe("QuicklogTable", () => {
     expect(screen.getByText("qinyi")).toBeTruthy();
   });
 
-  it("列表默认不带 include_placeholder（空壳默认隐藏 D-007）", async () => {
+  it("列表默认带 include_placeholder=true（空壳默认显示，ql-20260820-008）", async () => {
     mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
     renderTable();
     await waitFor(() =>
@@ -128,18 +128,20 @@ describe("QuicklogTable", () => {
     const firstCall = mocks.listQuicklogEntries.mock.calls[0];
     expect(firstCall).toBeDefined();
     const params = firstCall?.[1];
-    expect(params?.include_placeholder).toBeUndefined();
+    expect(params?.include_placeholder).toBe(true);
   });
 
-  it("勾选「显示空壳占位」→ include_placeholder=true 重查", async () => {
+  it("取消勾选「显示空壳占位」→ 后续请求不带 include_placeholder（回到隐藏口径）", async () => {
     mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
     renderTable();
     const cb = await screen.findByRole("checkbox");
-    fireEvent.click(cb);
+    fireEvent.click(cb); // 默认勾选 → 点击即取消
     await waitFor(() => {
       const calls = mocks.listQuicklogEntries.mock.calls;
-      const withPlaceholder = calls.some((c) => c[1]?.include_placeholder === true);
-      expect(withPlaceholder).toBe(true);
+      const withoutPlaceholder = calls.some(
+        (c) => c[1]?.include_placeholder === undefined,
+      );
+      expect(withoutPlaceholder).toBe(true);
     });
   });
 

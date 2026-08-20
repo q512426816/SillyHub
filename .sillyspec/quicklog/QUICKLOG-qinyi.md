@@ -183,6 +183,15 @@
 方案：daemon-ci.yml新增；compose端口/口令收紧；meta.json等untrack；CI死配置清理；Makefile/README/.codex补齐；本地垃圾物理删除
 结果：YAML全过、释放约400MB、git状态干净
 
+## ql-20260820-006-2297 | 2026-08-20 08:43:37 | /ppm/projects 页「Agent 团队」按钮点击跳转 /projects/{id}/missions 时被拦截
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/layout.test.tsx, frontend/src/app/(dashboard)/layout.tsx
+需求：/ppm/projects 页「Agent 团队」按钮点击跳转 /projects/{id}/missions 时被拦截，直接重定向回工作区选择器 /workspaces。
+根因：(dashboard)/layout.tsx 工作区守卫白名单 WORKSPACE_WHITELIST 没有 /projects 前缀，pathname 命中守卫第 3 分支 router.replace('/workspaces')。该页是 2026-08-19-cross-workspace-team-mission task-15 新增的平台级跨工作区视图，不依赖所选工作区上下文，属漏配（与 /agent-profiles、/sessions 历史先例同型）。
+方案：白名单加入 /projects 并附注释说明；layout.test.tsx 按 TDD 先补 /projects/A/missions 放行用例（改前红、复现 replace /workspaces；改后绿）。
+结果：layout.test 18 用例全绿，projects/ppm-projects 页面测试 9 绿，tsc --noEmit 0 错；重建 frontend 镜像重启容器后浏览器实测：点「Agent 团队」→ /projects/{id}/missions 正常停留并渲染「项目团队会话」页（scope 候选正常列出），不再弹回 /workspaces。文件：frontend/src/app/(dashboard)/layout.tsx、frontend/src/app/(dashboard)/layout.test.tsx
+
 ## ql-20260820-007-6109 | 2026-08-20 09:59:22 | 修复 spec 同步策略 repo-native/repo-mirrored 在 daemon init 与 batch 路径静默失效
 状态：已完成
 关联变更：（无）
@@ -197,3 +206,21 @@
 方案：init 编排重排 pull→writeDaemonState→init（pull 失败 daemonState=null 契约变更）；batch 补传 ctx.specStrategy/ctx.rootPath；bump 缺失/损坏时完整重建 2 字段并补建 .runtime；顺带修 backend context.py 两处过时注释
 结果：test_init_lease 新增 7 用例并更新 2 旧断言，test_spec_version_refresh 2 用例更新到重建契约，daemon 全量 143 文件 2453 测试全绿，tsc 干净，backend 注释文件语法通过，模块文档 sillyhub-daemon.md 已同步暂存
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/tests/test_spec_version_refresh.test.ts
+
+## ql-20260820-008-fcb7 | 2026-08-20 10:17:21 | 快速修复列表默认显示空壳占位条目（进行中 quick 会话平台可见）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/changes/quicklog-table.tsx（showPlaceholder 默认 true + hasFilter 翻转为 !showPlaceholder）
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx（tab 计数带 include_placeholder=true）
+- frontend/src/components/changes/detail/quicklog-linked-card.tsx（关联卡带 include_placeholder=true）
+- frontend/src/components/changes/__tests__/quicklog-table.test.tsx（默认显示/取消勾选两断言翻转）
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx（计数用例补 include_placeholder 断言）
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx（关联卡精确参数断言同步新契约）
+- .sillyspec/docs/frontend/modules/lib-quicklog.md（占位口径+消费点更新）
+- .sillyspec/docs/frontend/modules/components-changes.md（Table/LinkedCard 描述更新）
+需求：快速修复列表默认显示空壳占位条目（进行中 quick 会话平台可见）
+根因：quick 会话进行中 CLI 只落「(quick 任务)」占位标题（真实标题 step3 --done 才回填），平台三消费点全按默认隐藏占位口径请求，会话全程在平台不可见
+方案：前端三消费点默认/显式传 include_placeholder=true——表格 showPlaceholder 默认勾选（复选框保留、取消=收窄筛选）、tab 计数与详情关联卡显式带参；hasFilter 空态语义同步翻转为「隐藏占位才算筛选」；后端 API 默认语义不动
+结果：受影响 3 个测试文件全绿（43+13 用例），前端全量 1770 用例全绿，typecheck 通过
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx

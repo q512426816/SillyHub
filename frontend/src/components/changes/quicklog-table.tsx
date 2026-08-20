@@ -62,7 +62,9 @@ export function QuicklogTable({ workspaceId, onSelect }: QuicklogTableProps) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [authorFilter, setAuthorFilter] = useState("");
-  const [showPlaceholder, setShowPlaceholder] = useState(false);
+  // 默认显示空壳占位（ql-20260820-008）：进行中 quick 会话 CLI 只落「(quick 任务)」
+  // 占位标题，隐藏会让会话全程在平台不可见；取消勾选=收窄筛选
+  const [showPlaceholder, setShowPlaceholder] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
 
@@ -216,7 +218,8 @@ export function QuicklogTable({ workspaceId, onSelect }: QuicklogTableProps) {
     },
   ];
 
-  const hasFilter = search || statusFilter || authorFilter || showPlaceholder;
+  // 隐藏占位=收窄筛选（ql-20260820-008 默认显示后，取消勾选才偏离全量口径）
+  const hasFilter = search || statusFilter || authorFilter || !showPlaceholder;
 
   const renderEmpty = (): ReactNode => {
     if (items.length > 0) return null;
