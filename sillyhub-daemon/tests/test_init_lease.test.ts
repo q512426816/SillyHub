@@ -40,13 +40,14 @@ vi.mock('../src/local-yaml-writer.js', async (importOriginal) => {
   return { ...actual, writeLocalYaml: localYamlWriterMock };
 });
 
-import { mkdtemp, mkdir, writeFile, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, rm, readFile, lstat } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 
 import {
   handleInitLease,
   writeDaemonState,
+  bumpLocalSpecVersion,
   DAEMON_STATE_FILENAME,
   resolveSpecDir,
   MIN_SILLYSPEC_VERSION_FOR_INIT,
@@ -102,6 +103,8 @@ const TEST_WS_IDS = [
   'ws-init-yaml-ok', 'ws-init-yaml-fail', 'ws-init-yaml-url',
   // task-08（2026-08-15-init-trigger-sillyspec-init）：init 步骤新用例组 A/B/C/D
   'ws-init-initfail', 'ws-init-gate', 'ws-init-order', 'ws-init-tools-pass', 'ws-init-tools-fallback',
+  // ql-20260820-007：策略分支 init 时序 + 状态文件保鲜重建用例
+  'ws-init-native', 'ws-init-mirror', 'ws-init-pm-state', 'ws-init-bump-recreate', 'ws-init-batch-native',
 ];
 afterAll(async () => {
   await Promise.all(
@@ -198,7 +201,7 @@ describe('handleInitLease / daemon 状态文件 (task-07 / D-001@v1)', () => {
     expect(client.postSpecSync).toHaveBeenCalledTimes(1);
   });
 
-  it('pullSpecBundle 抛 5xx → ok=false abort，daemonState 已写（步骤 1 完成）', async () => {
+  it('pullSpecBundle 抛 5xx → ok=false abort，daemonState 为 null（ql-20260820-007：writeDaemonState 后置于 pull）', async () => {
     const client = makeClient({
       getSpecBundle: vi.fn().mockRejectedValue({ status: 500, bodyText: 'boom' }),
     });
@@ -212,9 +215,8 @@ describe('handleInitLease / daemon 状态文件 (task-07 / D-001@v1)', () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toMatch(/spec_bundle_pull_failed/);
-    // daemonState 在 pull 失败返回中仍透传（步骤 1 已完成）
-    expect(result.daemonState).not.toBeNull();
-    expect(result.daemonState!.spec_version).toBe(2);
+    // ql-20260820-007 重排（pull → writeDaemonState）：pull 失败时状态文件尚未写 → null
+    expect(result.daemonState).toBeNull();
     // post 不应被调用（pull 失败 abort 在 post 之前）
     expect(client.postSpecSync).not.toHaveBeenCalled();
   });
@@ -475,9 +477,11 @@ describe('handleInitLease 第3步 runSillyspecInit (task-08 / D-002@v2 / D-003@v
     });
 
     expect(result.ok).toBe(true);
-    // writeDaemonState 落盘在 pull 前（读状态文件内容非空即可证步骤 1 完成；顺序由其余事件锚定）
+    // ql-20260820-007 重排后顺序：pull → writeDaemonState（同步先行完成，无异步事件可挂）
+    // → init → post → localYaml。writeDaemonState 后置于 pull：防 .runtime 占位阻塞策略分支
+    //（repo-native junction / repo-mirrored 首拷），且 pull 的 rm -rf 不再删掉刚写的状态文件。
     expect(order).toEqual([
-      'pull', // writeDaemonState 同步先行完成（无异步事件可挂），pull 是第一个异步锚点
+      'pull', // pull 是第一个异步锚点（writeDaemonState 在 pull 之后同步完成）
       'init_version_gate', // init 步骤 0：门控（D-002@v2：init 在 pull 后）
       'init_spawn', // init 步骤 1：spawn sillyspec init
       'post', // postSpecSync（步骤 4，init 后）
@@ -510,6 +514,152 @@ describe('handleInitLease 第3步 runSillyspecInit (task-08 / D-002@v2 / D-003@v
     expect(ok2.ok).toBe(true);
     const initCmdFallback = spawnFallback.calls.find((c) => c.includes(' init ')) ?? '';
     expect(initCmdFallback).toContain('--tool claude');
+  });
+});
+
+// ── 策略分支 init 时序 + 状态文件保鲜（ql-20260820-007：spec 策略静默失效修复）──
+//
+// 回归背景：2026-08-15-init-trigger-sillyspec-init 把 writeDaemonState 前置于 pullSpecBundle，
+// 状态文件 .runtime/ 先占位缓存目录 → repo-native ensureSpecJunction 命中「普通目录残留」
+// 守卫（spec-sync.ts ensureSpecJunction）、repo-mirrored cacheEmpty 判非空 → 两分支静默降级
+// platform-managed pull；且 pull 的 rm -rf 会删掉已写的状态文件（bump 不重建 → 保鲜失效）。
+// 修复：编排重排 pull → writeDaemonState；bumpLocalSpecVersion 缺失时完整重建。
+// 源项目 rootPath 用 mkdtemp 临时目录（含 .sillyspec），afterEach 清理。
+
+describe('策略分支 init 时序 + 状态文件保鲜 (ql-20260820-007)', () => {
+  let tmpProject: string;
+
+  beforeEach(async () => {
+    localYamlWriterMock.mockClear();
+    tmpProject = await mkdtemp(join(tmpdir(), 'init-strategy-'));
+  });
+  afterEach(async () => {
+    await rm(tmpProject, { recursive: true, force: true }).catch(() => {});
+  });
+
+  it('repo-native：缓存空 + 源项目有 .sillyspec → junction 建立，getSpecBundle 不被调，状态文件经 junction 落源项目', async () => {
+    await mkdir(join(tmpProject, '.sillyspec', 'docs'), { recursive: true });
+    await writeFile(join(tmpProject, '.sillyspec', 'docs', 'native.md'), '# native');
+    const client = makeClient(); // getSpecBundle 有 bundle 也不应被调（junction 早退）
+
+    const result = await handleInitLease(client as never, {
+      workspaceId: 'ws-init-native',
+      rootPath: tmpProject,
+      serverOrigin: 'http://127.0.0.1:8000',
+      strategy: 'repo-native',
+      latestSpecVersion: 2,
+      spawnFn: makeInitSpawn(),
+    });
+
+    expect(result.ok).toBe(true);
+    // junction 分支早退：不拉平台 bundle（拉了就等于降级 platform-managed）
+    expect(client.getSpecBundle).not.toHaveBeenCalled();
+    // 缓存路径已是 junction/symlink（repo-native 语义：指向源项目 .sillyspec）
+    const lst = await lstat(resolveSpecDir('ws-init-native'));
+    expect(lst.isSymbolicLink()).toBe(true);
+    // 状态文件经 junction 落进源项目 .sillyspec/.runtime（.runtime 已被 gitignore 覆盖）
+    const st = JSON.parse(
+      await readFile(join(tmpProject, '.sillyspec', DAEMON_STATE_FILENAME), 'utf-8'),
+    ) as Record<string, unknown>;
+    expect(st.spec_version).toBe(2);
+    expect(typeof st.synced_at).toBe('string');
+  });
+
+  it('repo-mirrored：缓存空 + 源项目有 .sillyspec → 首拷快照进缓存，getSpecBundle 不被调', async () => {
+    await mkdir(join(tmpProject, '.sillyspec', 'docs'), { recursive: true });
+    await writeFile(join(tmpProject, '.sillyspec', 'docs', 'a.md'), '# hello');
+    const client = makeClient();
+
+    const result = await handleInitLease(client as never, {
+      workspaceId: 'ws-init-mirror',
+      rootPath: tmpProject,
+      serverOrigin: 'http://127.0.0.1:8000',
+      strategy: 'repo-mirrored',
+      latestSpecVersion: 1,
+      spawnFn: makeInitSpawn(),
+    });
+
+    expect(result.ok).toBe(true);
+    // 首拷分支早退：不拉平台 bundle
+    expect(client.getSpecBundle).not.toHaveBeenCalled();
+    // 快照已复制进缓存（cacheEmpty 判定不再被 .runtime 占位干扰）
+    const copied = await readFile(
+      join(resolveSpecDir('ws-init-mirror'), 'docs', 'a.md'),
+      'utf-8',
+    );
+    expect(copied).toBe('# hello');
+    // 状态文件写在缓存（mirror 后缓存是普通目录，平台托管）
+    const st = JSON.parse(
+      await readFile(join(resolveSpecDir('ws-init-mirror'), DAEMON_STATE_FILENAME), 'utf-8'),
+    ) as Record<string, unknown>;
+    expect(st.spec_version).toBe(1);
+  });
+
+  it('platform-managed：pull 200 的 rm -rf 不再删掉状态文件（重排后 writeDaemonState 后置于 pull）', async () => {
+    // 预置旧状态文件 + 旧内容：pull 覆盖语义会 rm -rf 整个缓存——重排前状态文件先写后被删
+    const cacheRoot = resolveSpecDir('ws-init-pm-state');
+    await mkdir(join(cacheRoot, '.runtime'), { recursive: true });
+    await writeFile(join(cacheRoot, DAEMON_STATE_FILENAME), '{"spec_version":0,"synced_at":"old"}');
+    await writeFile(join(cacheRoot, 'stale.md'), 'stale');
+    const client = makeClient(); // 200 空 bundle → rm + 空解包
+
+    const result = await handleInitLease(client as never, {
+      workspaceId: 'ws-init-pm-state',
+      rootPath: tmpProject,
+      serverOrigin: 'http://127.0.0.1:8000',
+      strategy: 'platform-managed',
+      latestSpecVersion: 3,
+      spawnFn: makeInitSpawn(),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(client.getSpecBundle).toHaveBeenCalledTimes(1);
+    // 状态文件在 pull 之后写入 → 幸存（旧文件已随 rm 删除，新文件 spec_version=3）
+    const st = JSON.parse(
+      await readFile(join(cacheRoot, DAEMON_STATE_FILENAME), 'utf-8'),
+    ) as Record<string, unknown>;
+    expect(st.spec_version).toBe(3);
+    // 旧内容确已被覆盖语义清掉（证明确实发生了 rm+解包，非跳过 pull）
+    await expect(readFile(join(cacheRoot, 'stale.md'))).rejects.toThrow();
+  });
+
+  it('bumpLocalSpecVersion：状态文件缺失 → 完整重建（pull rm -rf 后保鲜不失效）', async () => {
+    const cacheRoot = resolveSpecDir('ws-init-bump-recreate');
+    try {
+      await mkdir(cacheRoot, { recursive: true }); // 目录存在但无状态文件
+
+      await bumpLocalSpecVersion(cacheRoot, 6);
+
+      const st = JSON.parse(
+        await readFile(join(cacheRoot, DAEMON_STATE_FILENAME), 'utf-8'),
+      ) as Record<string, unknown>;
+      expect(st.spec_version).toBe(6);
+      expect(typeof st.synced_at).toBe('string');
+    } finally {
+      await rm(cacheRoot, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it('bumpLocalSpecVersion：状态文件存在 → 仅保鲜版本（既有行为回归）', async () => {
+    const cacheRoot = resolveSpecDir('ws-init-bump-recreate');
+    try {
+      // 自包含预置：已有状态文件（2 字段完整）
+      await mkdir(join(cacheRoot, '.runtime'), { recursive: true });
+      await writeFile(
+        join(cacheRoot, DAEMON_STATE_FILENAME),
+        JSON.stringify({ spec_version: 2, synced_at: '2026-01-01T00:00:00.000Z' }),
+      );
+
+      await bumpLocalSpecVersion(cacheRoot, 9);
+
+      const st = JSON.parse(
+        await readFile(join(cacheRoot, DAEMON_STATE_FILENAME), 'utf-8'),
+      ) as Record<string, unknown>;
+      expect(st.spec_version).toBe(9);
+      expect(st.synced_at).not.toBe('2026-01-01T00:00:00.000Z'); // synced_at 已刷新
+    } finally {
+      await rm(cacheRoot, { recursive: true, force: true }).catch(() => {});
+    }
   });
 });
 
@@ -753,6 +903,42 @@ describe("TaskRunner.runLease mode='init' 分支 (task-07)", () => {
 
     // 非 init 路径触发了 spawn 调用（既有编排）
     expect(spawn).toHaveBeenCalled();
+  });
+
+  // ql-20260820-007：batch agent 路径 pullSpecBundle 补传 strategy/rootPath 回归。
+  // 修复前只传 existingSpecRoot → 永远按 platform-managed pull → rm -rf 拆除已建
+  // junction，repo-native 静默永久退化。断言：specStrategy=repo-native 时走 junction
+  // 早退分支（getSpecBundle 不被调 + 缓存路径成 symlink）。
+  it('batch agent：ctx.specStrategy=repo-native + rootPath 有 .sillyspec → pull 走 junction，getSpecBundle 不被调（ql-20260820-007）', async () => {
+    const tmpProject = await mkdtemp(join(tmpdir(), 'batch-strategy-'));
+    try {
+      await mkdir(join(tmpProject, '.sillyspec', 'docs'), { recursive: true });
+      await writeFile(join(tmpProject, '.sillyspec', 'docs', 'native.md'), '# native');
+      const { runner, client } = setupRunner();
+
+      // 普通 batch agent lease（无 mode 字段）+ 策略与成员项目根
+      const lease: LeaseCtx = {
+        leaseId: 'lease-batch-native-1',
+        runtimeId: 'rt-1',
+        claimToken: 'tok',
+        provider: 'claude',
+        cmdPath: '/usr/local/bin/claude',
+        prompt: 'hello',
+        workspaceId: 'ws-init-batch-native',
+        rootPath: tmpProject,
+        specStrategy: 'repo-native',
+      };
+
+      await runner.runLease(lease);
+
+      // junction 分支早退：不拉平台 bundle（修复前 platform-managed 兜底会调一次）
+      expect(client.getSpecBundle).not.toHaveBeenCalled();
+      // 缓存路径已是 junction/symlink，未被 pull 的 rm -rf 换成普通目录
+      const lst = await lstat(resolveSpecDir('ws-init-batch-native'));
+      expect(lst.isSymbolicLink()).toBe(true);
+    } finally {
+      await rm(tmpProject, { recursive: true, force: true }).catch(() => {});
+    }
   });
 
   // ── task-08（2026-08-15-init-trigger-sillyspec-init）：init 失败 → stats.init_error ──

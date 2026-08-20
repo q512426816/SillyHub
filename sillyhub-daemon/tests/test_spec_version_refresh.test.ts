@@ -132,9 +132,13 @@ describe('bumpLocalSpecVersion (task-11 / D-010 pull 后保鲜 / D-001@v1)', () 
     await expect(bumpLocalSpecVersion(undefined, 5)).resolves.toBeUndefined();
   });
 
-  it('状态文件不存在 → 不创建文件（init lease writeDaemonState 职责，保鲜不越界）', async () => {
+  it('状态文件不存在 → 完整重建 2 字段（ql-20260820-007：pull rm -rf 清掉状态文件后保鲜不失效）', async () => {
+    const statePath = join(specCacheRoot, DAEMON_STATE_FILENAME);
     await bumpLocalSpecVersion(specCacheRoot, 5);
-    await expect(readFile(join(specCacheRoot, DAEMON_STATE_FILENAME))).rejects.toThrow();
+    const after = JSON.parse(await readFile(statePath, 'utf-8')) as Record<string, unknown>;
+    expect(after.spec_version).toBe(5);
+    expect(typeof after.synced_at).toBe('string');
+    expect(Number.isNaN(Date.parse(after.synced_at as string))).toBe(false);
   });
 
   it('已有状态文件 → 更新 spec_version + synced_at', async () => {
@@ -157,12 +161,14 @@ describe('bumpLocalSpecVersion (task-11 / D-010 pull 后保鲜 / D-001@v1)', () 
     expect(after.spec_version).toBe(0);
   });
 
-  it('原状态文件是损坏 JSON → warn 不抛（保鲜 best-effort，不阻塞 pull 已落地缓存）', async () => {
+  it('原状态文件是损坏 JSON → warn 不抛且重建为合法 2 字段（ql-20260820-007：parse 失败按缺失重建）', async () => {
     const statePath = join(specCacheRoot, DAEMON_STATE_FILENAME);
     await writeFile(statePath, '{ broken');
     await expect(bumpLocalSpecVersion(specCacheRoot, 5)).resolves.toBeUndefined();
-    // 损坏文件原样保留（bump 未改写）
-    expect(await readFile(statePath, 'utf-8')).toBe('{ broken');
+    // 损坏文件被重建为合法 2 字段（保鲜 best-effort，下次比对可正常进行）
+    const after = JSON.parse(await readFile(statePath, 'utf-8')) as Record<string, unknown>;
+    expect(after.spec_version).toBe(5);
+    expect(typeof after.synced_at).toBe('string');
   });
 });
 
