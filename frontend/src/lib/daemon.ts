@@ -5,7 +5,7 @@ import { apiFetch, getApiBaseUrl } from "@/lib/api";
 import { useSession } from "@/stores/session";
 import type { AgentRunLogEntry } from "@/lib/agent";
 import type { components } from "@/lib/api-types";
-import { fetchSse } from "@/lib/fetch-sse";
+import { fetchSse, type FetchSseConnection } from "@/lib/fetch-sse";
 
 export interface OwnerRead {
   user_id: string | null;
@@ -848,8 +848,11 @@ export interface SessionStreamConnection {
  *   会导致 InteractiveSessionPanel 的 onTurnStarted/onLog/onTurnCompleted 收不到事件。
  * - 校验 session_id 匹配；turn_started/log/turn_completed 必须有 run_id。
  * - turn_completed 不 close；session_ended close + 回调幂等。
- * - onerror 不 close（task-12 迁移 fetch-sse 后无自动重连，断流由调用方
- *   重建连接 / 查询兜底）。
+ * - ql-20260820-009：onerror 自动重连（指数退避）——fetch-sse 无自动重连、
+ *   backend Redis Pub/Sub 无补发，断连期间事件对本连接永久丢失；重连前经
+ *   listSessionRuns + getAgentSessionLogs 全量回放/终态合成补齐缺口（调用方
+ *   按 log_id 去重，合成 turn 事件在页面侧终态幂等）。close()/session_ended
+ *   后不再重连。
  *
  * P0-1（2026-06-18）：从 addEventListener(kind) 改为 onmessage 单通道 dispatch，
  * 与 backend stream_session_logs 的 default data: 帧对齐。done/error 仍走命名事件
@@ -862,17 +865,32 @@ export function streamSession(
   options?: { cursor?: string },
 ): SessionStreamConnection {
   const base = getApiBaseUrl();
-  const { accessToken } = useSession.getState();
   const url = new URL(
     `${base}/api/daemon/sessions/${encodeURIComponent(sessionId)}/stream`,
   );
   // task-12：token 不再进 URL query（访问日志明文泄漏），cursor 业务参数保留。
   if (options?.cursor) url.searchParams.set("cursor", options.cursor);
 
-  // task-12：EventSource → fetch-sse（token 走 Authorization Bearer header）。
-  const es = fetchSse(url.toString(), accessToken ? { token: accessToken } : {});
   let lastEventId: string | null = null;
   let sessionEndedFired = false;
+  // ── ql-20260820-009：断线重连（指数退避 + 全量回放 + 终态合成） ──────────
+  // fetch-sse 无自动重连、backend Redis Pub/Sub 无补发：断连期间的 turn/log
+  // 事件对本连接永久丢失。onerror → 退避后 resync 补缺口再重建 SSE 连接。
+  let es: FetchSseConnection | null = null;
+  let closed = false; // 调用方 close()/session_ended 后不再重连
+  let retryCount = 0; // 退避档位（成功收到事件 / resync 后归零）
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
+  let postTurnTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const RECONNECT_BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000];
+  const TERMINAL_RUN_STATUSES: ReadonlySet<string | null> = new Set([
+    "completed",
+    "failed",
+    "killed",
+    "cancelled",
+    "interrupted",
+  ]);
 
   const dispatch = (raw: { data: string; lastEventId?: string }): void => {
     let parsed: unknown;
@@ -919,6 +937,10 @@ export function streamSession(
         break;
       case "turn_completed":
         handlers.onTurnCompleted(envelope);
+        // ql-20260820-010：轮完成即对账——Redis publish 是 best-effort（AC-06
+        // try/except 吞错），连接活着也可能丢尾部日志事件（实测最终答复文本
+        // 入库但未发布），轮边界重拉 DB 兜底收敛。
+        schedulePostTurnReconcile();
         break;
       case "tokens":
         // ql-20260621：实时累积 token（每次 submit_messages 推送）。
@@ -931,7 +953,8 @@ export function streamSession(
         if (!sessionEndedFired) {
           sessionEndedFired = true;
           handlers.onSessionEnded(envelope);
-          es.close();
+          closed = true; // 会话终局：不再重连（ql-20260820-009）
+          es?.close();
         }
         break;
       default:
@@ -965,19 +988,161 @@ export function streamSession(
     }
   };
 
-  // backend turn/log/permission_* 走默认 data 帧（无 event: 行）→ 必须用 onmessage 接。
-  //（task-12 迁移 fetch-sse 后 onmessage 签名 {data, lastEventId}，与原一致。）
-  es.onmessage = (e) => {
-    dispatch({ data: e.data, lastEventId: e.lastEventId || undefined });
+  /** run 快照 → 合成 turn 事件分发（ql-20260820-009 断线恢复路径）。 */
+  const dispatchRunSynth = (
+    run: SessionRunRead,
+    event: "turn_started" | "turn_completed",
+  ) => {
+    dispatch({
+      data: JSON.stringify({
+        event,
+        session_id: sessionId,
+        run_id: run.id,
+        turn: null,
+        log_id: null,
+        timestamp:
+          event === "turn_completed" ? run.finished_at : run.started_at,
+        channel: null,
+        content: null,
+        // interrupted/cancelled → killed（对齐页面 deriveTurnTerminalStatus 语义）
+        status:
+          event === "turn_completed"
+            ? run.status === "interrupted" || run.status === "cancelled"
+              ? "killed"
+              : run.status
+            : null,
+        exit_code: run.exit_code,
+        reason: null,
+        input_tokens: run.input_tokens,
+        output_tokens: run.output_tokens,
+      }),
+    });
   };
 
-  es.onerror = () => {
-    // task-12 迁移 fetch-sse 后无浏览器自动重连（helper 有意取舍）：断流时
-    // 仅通知组件（可选显示 reconnecting），由调用方重建连接 / 查询兜底。
+  const wireConnection = () => {
+    // token 每次重连现取（原实现只在 streamSession 调用时取一次，长连接跨
+    // token 刷新后重连会带旧值）。
+    const { accessToken } = useSession.getState();
+    es = fetchSse(url.toString(), accessToken ? { token: accessToken } : {});
+    // backend turn/log/permission_* 走默认 data 帧（无 event: 行）→ 必须用 onmessage 接。
+    //（task-12 迁移 fetch-sse 后 onmessage 签名 {data, lastEventId}，与原一致。）
+    es.onmessage = (e) => {
+      retryCount = 0; // 收到事件 = 连接健康，退避档位归零
+      dispatch({ data: e.data, lastEventId: e.lastEventId || undefined });
+    };
+    es.onerror = () => {
+      scheduleReconnect();
+    };
   };
+
+  const scheduleReconnect = () => {
+    if (closed) return;
+    const delay =
+      RECONNECT_BACKOFF_MS[
+        Math.min(retryCount, RECONNECT_BACKOFF_MS.length - 1)
+      ]!;
+    retryCount += 1;
+    reconnectTimer = setTimeout(() => {
+      void resyncAndReconnect();
+    }, delay);
+  };
+
+  /** DB 全量日志 → log 事件回放（resync 与轮后对账共用；调用方 seenLogIds 去重）。 */
+  const replayLogsFromDb = async () => {
+    const logs = await getAgentSessionLogs(sessionId);
+    if (closed) return;
+    for (const log of logs) {
+      dispatch({
+        data: JSON.stringify({
+          event: "log",
+          session_id: sessionId,
+          run_id: log.run_id,
+          turn: null,
+          log_id: log.id,
+          timestamp: log.timestamp,
+          channel: log.channel,
+          content: log.content_redacted ?? "",
+          status: null,
+          exit_code: null,
+          reason: null,
+        }),
+      });
+    }
+  };
+
+  /**
+   * 轮完成后对账（ql-20260820-010）：1.5s 缓冲后重拉日志回放——补「连接活着但
+   * Redis 发布丢失」的尾部事件（如最终答复文本）。页面 upsertTurn 允许 log 事件
+   * 落在终态轮（终态幂等设计），已见日志由装配器 seenLogIds 去重，回放安全。
+   */
+  const schedulePostTurnReconcile = () => {
+    if (closed) return;
+    if (postTurnTimer) clearTimeout(postTurnTimer);
+    postTurnTimer = setTimeout(() => {
+      void replayLogsFromDb().catch(() => {
+        /* 静默：下一次轮完成 / 断连对账再兜 */
+      });
+    }, 1500);
+  };
+
+  /**
+   * 断线恢复（ql-20260820-009）：runs 快照 → 运行中 run 合成 turn_started
+   * （建轮 + 设 currentRunId）→ /logs 全量回放（调用方 seenLogIds 去重补缺口）
+   * → 终态 run 合成 turn_completed（补错过的完成事件；页面终态幂等，重复合成
+   * no-op）→ 重建 SSE 连接。订阅后 5s 延迟复核兜「快照与订阅之间完成」的 run。
+   * 回放与实时事件的段内时序可能有微小交错（罕见，仅断连恢复瞬间）。
+   */
+  const resyncAndReconnect = async () => {
+    if (closed) return;
+    try {
+      const runs = await listSessionRuns(sessionId);
+      if (closed) return;
+      for (const run of runs) {
+        if (!TERMINAL_RUN_STATUSES.has(run.status)) {
+          dispatchRunSynth(run, "turn_started");
+        }
+      }
+      await replayLogsFromDb();
+      if (closed) return;
+      for (const run of runs) {
+        if (TERMINAL_RUN_STATUSES.has(run.status)) {
+          dispatchRunSynth(run, "turn_completed");
+        }
+      }
+      retryCount = 0;
+      wireConnection();
+      reconcileTimer = setTimeout(() => void reconcileTerminalRuns(), 5000);
+    } catch {
+      scheduleReconnect(); // 后端不可达 → 继续退避重试
+    }
+  };
+
+  /** 订阅后延迟复核：补「快照与订阅之间」完成的 run（幂等，已终态 no-op）。 */
+  const reconcileTerminalRuns = async () => {
+    if (closed) return;
+    try {
+      const runs = await listSessionRuns(sessionId);
+      if (closed) return;
+      for (const run of runs) {
+        if (TERMINAL_RUN_STATUSES.has(run.status)) {
+          dispatchRunSynth(run, "turn_completed");
+        }
+      }
+    } catch {
+      /* 复核失败不重试（下一断连循环会再兜） */
+    }
+  };
+
+  wireConnection();
 
   return {
-    close: () => es.close(),
+    close: () => {
+      closed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (reconcileTimer) clearTimeout(reconcileTimer);
+      if (postTurnTimer) clearTimeout(postTurnTimer);
+      es?.close();
+    },
     getLastEventId: () => lastEventId,
   };
 }

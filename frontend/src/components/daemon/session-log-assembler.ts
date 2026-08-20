@@ -203,8 +203,8 @@ export interface AssemblerLogInput {
 
 /** 结构化段模型（渲染与派生统计的唯一数据源，design §7）。 */
 export type TurnSegment =
-  | { kind: "text"; id: string; text: string; streaming: boolean; startedAt: number | null }
-  | { kind: "thinking"; id: string; text: string; streaming: boolean; ts: number | null }
+  | { kind: "text"; id: string; text: string; streaming: boolean; startedAt: number | null; segId?: string | null }
+  | { kind: "thinking"; id: string; text: string; streaming: boolean; ts: number | null; segId?: string | null }
   | {
       /** 工具段：id = 解析自 tool_call JSON 的 tool_use_id（result 配对定位 +
        * 子代理归属路由 key）；解析失败用 logId 兜底（toolName=null 原样显示 raw，R-07）。 */
@@ -521,7 +521,9 @@ function stringArg(v: unknown): string | null {
 /**
  * 主参数摘要提取——规则平移自 turn-timeline.tsx parseToolRaw（design §12：解析规则
  * 平移不重造）：Bash→command；Write/Edit/Read→file_path；Agent→description??prompt；
- * 通用→description??command??file_path??prompt??raw 前 120 字符。
+ * 通用→description??command??file_path??prompt??pattern??query??url??raw 前 120 字符。
+ * ql-20260820-008：通用链补 pattern（Grep/Glob）/query（WebSearch/WebFetch）/url——
+ * 此前不认识的工具落到「整个 JSON 截前 120 字符」，列表/状态条显示半截 JSON。
  */
 function extractPrimaryArg(
   tool: string | null,
@@ -540,6 +542,9 @@ function extractPrimaryArg(
     stringArg(args.command) ??
     stringArg(args.file_path) ??
     stringArg(args.prompt) ??
+    stringArg(args.pattern) ??
+    stringArg(args.query) ??
+    stringArg(args.url) ??
     raw.slice(0, 120)
   );
 }
@@ -834,11 +839,18 @@ function appendStreamText(
   const segId = nonEmptyString(input.segmentId);
   return applyToBucket(segments, bucketId, subagentType, (children) => {
     const last = children[children.length - 1];
-    if (
-      last &&
+    // ql-20260820-011：merge 按派生源对齐——partial（segId 非空）只续接同源派生段；
+    // 完整行（segId 空）只 merge 进普通段（segId 空）。完整行若 merge 进 partial
+    // 派生段，daemon 在完整行**之后** emit 的 override 撤回（session-manager
+    // fire-and-forget）会按 segmentId 把派生段连同 merge 进去的全文一并移除——
+    // 长文本直播消失、重进（历史无 partial）正常的根因。
+    const canMerge =
+      last != null &&
       last.kind === kind &&
-      (!segId || derivesFromSegmentId(last.id, kind, segId))
-    ) {
+      (segId
+        ? derivesFromSegmentId(last.id, kind, segId)
+        : (last.segId ?? null) === null);
+    if (last && canMerge) {
       const merged = kind === "text" ? last.text + text : `${last.text}\n${text}`;
       return [
         ...children.slice(0, -1),
@@ -854,6 +866,9 @@ function appendStreamText(
             // 带 segmentId 的 partial 追加 → streaming（§5 Phase3 置位规则）。
             streaming: !!segId,
             startedAt: ts,
+            // ql-20260820-011：仅 partial 携带派生源键（普通段不带，段对象形状
+            // 与既有消费方/测试期望保持兼容）。
+            ...(segId ? { segId } : {}),
           }
         : {
             kind: "thinking",
@@ -861,6 +876,7 @@ function appendStreamText(
             text,
             streaming: !!segId,
             ts,
+            ...(segId ? { segId } : {}),
           };
     return [...children, seg];
   });

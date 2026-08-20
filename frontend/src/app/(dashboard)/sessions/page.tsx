@@ -239,6 +239,10 @@ function SessionPanel({
   const panelRef = useRef<HTMLElement | null>(null);
   // 已拉取过 error_detail 的 failed run_id 集合（防 SSE 重连重复拉取）。
   const fetchedErrorRunIdsRef = useRef<Set<string>>(new Set());
+  // attach 竞态修复（ql-20260820-007）：镜像最新 detail.current_run_id。历史 logs
+  // 回灌可能晚于 detail 到达——彼时下方 attach 修正 effect 已对空 turns 扫过且其
+  // currentRunId 守卫不再重放，回灌时据本 ref 重放同一修正，使两种到达顺序结果一致。
+  const currentRunIdRef = useRef<string | null>(null);
 
   // ── SSE 建流 + 历史预取（sessionId 驱动，切换会话即重建）────────────────
   // gap-fix（FR-07/FR-08）：runs 快照拉取失败不阻断——whoLine 不注入、历史
@@ -260,6 +264,7 @@ function SessionPanel({
     setPendingRequests([]);
     setRunsMeta(new Map());
     fetchedErrorRunIdsRef.current.clear();
+    currentRunIdRef.current = null;
 
     // 预取历史 logs 回灌（防 SSE 订阅前 daemon publish 丢事件）；已有实时
     // turn 时不覆盖（SSE 先到时保留）。
@@ -267,7 +272,23 @@ function SessionPanel({
       .then((logs) => {
         if (cancelled) return;
         const restored = logsToTurns(logs);
-        setTurnState((prev) => (prev.turns.length > 0 ? prev : { ...prev, turns: restored }));
+        setTurnState((prev) => {
+          if (prev.turns.length > 0) return prev;
+          // attach 竞态修复（ql-20260820-007）：detail 先到时修正 effect 已扫过空
+          // turns——装回后按 currentRunIdRef 重放同一修正，运行中 run 不再被
+          // logsToTurns 的「一律 completed」卡成「已完成」（状态条随之恢复挂载）。
+          const cur = currentRunIdRef.current;
+          return {
+            ...prev,
+            turns: cur
+              ? restored.map((t) =>
+                  t.realRunId === cur && t.status === "completed"
+                    ? { ...t, status: "running" }
+                    : t,
+                )
+              : restored,
+          };
+        });
       })
       .catch(() => {
         /* 历史拉取失败不阻断 SSE */
@@ -448,6 +469,14 @@ function SessionPanel({
       cancelled = true;
     };
   }, [sessionId]);
+
+  // ── attach 竞态修复（ql-20260820-007）：镜像 current_run_id 供历史回灌消费 ──
+  useEffect(() => {
+    currentRunIdRef.current =
+      session && session.status === "active"
+        ? (session.current_run_id ?? null)
+        : null;
+  }, [session]);
 
   // ── attach 恢复运行中轮：detail.current_run_id 回填（SSE 只推新事件）────
   useEffect(() => {
@@ -1121,10 +1150,18 @@ function upsertTurn(
     };
     turns = [...prev.turns, apply(newTurn)];
   } else {
+    // attach 竞态修复（ql-20260820-007）防御分支：主修正位于历史回灌处；若某条
+    // 路径仍漏改（当前 run 的日志持续流入而轮卡终态），log 分支自愈翻回 running。
+    // 真正完成的 run 其 currentRunId 已被 onTurnCompleted 清空，不会误翻。
+    const healToRunning = env.event === "log" && prev.currentRunId === runId;
     turns = prev.turns.map((t, i) => {
       if (i !== idx) return t;
       if (env.event !== "log" && TERMINAL_TURN_STATUSES.has(t.status)) return t;
-      return apply(t);
+      const next = apply(t);
+      if (healToRunning && TERMINAL_TURN_STATUSES.has(next.status)) {
+        return { ...next, status: "running" };
+      }
+      return next;
     });
   }
   let currentRunId = prev.currentRunId;

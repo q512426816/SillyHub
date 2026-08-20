@@ -83,5 +83,10 @@ whoLine: attach 时并发拉 listSessionRuns，按 realRunId??runId 匹配注入
 
 ## 变更索引
 
+- ql-20260820-011-f230 | 会话流装配器修复——完整行不再 merge 进 partial 派生段（override 连坐撤回致长文本直播消失的根因）
+- ql-20260820-010-2223 | /sessions 轮边界对账——turn_completed 后重拉日志补 Redis 发布丢失的尾部事件（连接活着也丢的收口）
+- ql-20260820-009-ee9d | /sessions SSE 断线自动重连——退避重连 + 全量日志回放 + 终态合成（修复直播断连永久卡死）
+- ql-20260820-008-f5c3 | 工具卡片主参数摘要兜底链补 pattern/query/url——Grep/Glob 不再显示半截 JSON
+- ql-20260820-007-0cda | /sessions attach 恢复竞态修复——会话详情/历史日志到达顺序不再影响运行中轮状态（卡「已完成」/状态条消失）
 - ql-20260820-006-9e18 | 「我的供应商」页移除启动/停止（set-default）功能——供应商生效改 /sessions 会话级选择，本页纯 CRUD（后端端点保留待后续清理）
 - ql-20260819-002-9167 | /sessions 页移除「结束会话」按钮（结束走自然超时；runtimes 弹窗入口保留；已结束横幅/重新开启保留）

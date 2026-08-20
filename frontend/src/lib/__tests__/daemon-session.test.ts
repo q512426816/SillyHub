@@ -273,6 +273,8 @@ interface FakeSseStream {
   url: string;
   init: RequestInit;
   push: (text: string) => void;
+  /** ql-20260820-009 重连测试用：模拟服务端正常断开（reader done → onerror）。 */
+  close?: () => void;
 }
 
 const streams: FakeSseStream[] = [];
@@ -541,6 +543,234 @@ describe("streamSession", () => {
     }, "L5");
     await flushSse();
     expect(conn.getLastEventId()).toBe("L5");
+    conn.close();
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* streamSession 断线重连（ql-20260820-009：退避 + 全量回放 + 终态合成） */
+/* ------------------------------------------------------------------ */
+
+describe("streamSession 断线重连（ql-20260820-009）", () => {
+  /** 路由 fetch：/stream → 可控 SSE 流；/runs、/logs → JSON 固件。 */
+  let runsFixture: Array<Record<string, unknown>>;
+  let logsFixture: Array<Record<string, unknown>>;
+
+  function installRoutingFetchMock(): void {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: URL | RequestInfo, init?: RequestInit) => {
+        const u = typeof input === "string" ? input : input.toString();
+        if (u.includes("/stream")) {
+          let controller!: ReadableStreamDefaultController<Uint8Array>;
+          const body = new ReadableStream<Uint8Array>({
+            start(c) {
+              controller = c;
+            },
+          });
+          const encoder = new TextEncoder();
+          streams.push({
+            url: u,
+            init: (init ?? {}) as RequestInit,
+            push: (text) => controller.enqueue(encoder.encode(text)),
+            close: () => controller.close(),
+          });
+          lastStream = streams[streams.length - 1]!;
+          return Promise.resolve(
+            new Response(body, {
+              status: 200,
+              headers: { "Content-Type": "text/event-stream" },
+            }),
+          );
+        }
+        const payload = u.includes("/runs") ? runsFixture : logsFixture;
+        return Promise.resolve(
+          new Response(JSON.stringify(payload), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      },
+    );
+  }
+
+  /** 终态 run 快照（r-1 completed）+ 两条日志（断连前后各一）。 */
+  function seedFixtures(): void {
+    runsFixture = [
+      {
+        id: "r-1",
+        status: "completed",
+        error_code: null,
+        error_detail: null,
+        started_at: "2026-08-20T02:00:00Z",
+        finished_at: "2026-08-20T02:01:00Z",
+        exit_code: 0,
+        agent_profile_snapshot: null,
+        llm_provider_id: null,
+        input_tokens: 10,
+        output_tokens: 2,
+        user_id: null,
+        sender_name: null,
+      },
+    ];
+    logsFixture = [
+      {
+        id: "log-1",
+        run_id: "r-1",
+        timestamp: "2026-08-20T02:00:10Z",
+        channel: "stdout",
+        content_redacted: "断连前已见",
+        parent_tool_use_id: null,
+        subagent_type: null,
+        depth: null,
+        tool_kind: null,
+      },
+      {
+        id: "log-2",
+        run_id: "r-1",
+        timestamp: "2026-08-20T02:00:40Z",
+        channel: "stdout",
+        content_redacted: "断连期间新增",
+        parent_tool_use_id: null,
+        subagent_type: null,
+        depth: null,
+        tool_kind: null,
+      },
+    ];
+  }
+
+  function makeHandlers(): SessionStreamHandlers {
+    return {
+      onTurnStarted: vi.fn(),
+      onLog: vi.fn(),
+      onTurnCompleted: vi.fn(),
+      onSessionEnded: vi.fn(),
+      onError: vi.fn(),
+    };
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    streams.length = 0;
+    lastStream = null;
+    seedFixtures();
+    installRoutingFetchMock();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("断流 → 1s 退避重连：回放全量日志（含断连缺口）+ 终态 run 合成 turn_completed + 重建 SSE", async () => {
+    const handlers = makeHandlers();
+    const conn = streamSession("sess-1", handlers);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(streams).toHaveLength(1);
+
+    // 断连前收到一条实时日志
+    emitDefault(
+      streams[0]!,
+      {
+        event: "log", session_id: "sess-1", run_id: "r-1", turn: 1,
+        log_id: "log-1", timestamp: "t", channel: "stdout", content: "断连前已见",
+        status: null, exit_code: null, reason: null,
+      },
+      "log-1",
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(handlers.onLog).toHaveBeenCalledTimes(1);
+
+    // 服务端断开 → fetch-sse onerror → 1s 退避后 resync + 重连
+    streams[0]!.close!();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    // 回放：全量日志经 onLog 分发（去重由调用方 seenLogIds 负责）
+    const logContents = (handlers.onLog as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c: unknown[]) => (c[0] as { content: string | null }).content,
+    );
+    expect(logContents).toContain("断连期间新增");
+    // 终态 run 合成 turn_completed（status/tokens 对齐快照）
+    expect(handlers.onTurnCompleted).toHaveBeenCalledTimes(1);
+    const tc = (handlers.onTurnCompleted as ReturnType<typeof vi.fn>).mock
+      .calls[0]![0] as SessionStreamEnvelope;
+    expect(tc.run_id).toBe("r-1");
+    expect(tc.status).toBe("completed");
+    expect(tc.input_tokens).toBe(10);
+    // 终态 run 不合成 turn_started
+    expect(handlers.onTurnStarted).not.toHaveBeenCalled();
+    // 重连建立了第二条 SSE 连接
+    expect(streams).toHaveLength(2);
+
+    conn.close();
+  });
+
+  it("重连后 5s 延迟复核：再次合成终态（幂等，页面侧终态守卫消化）", async () => {
+    const handlers = makeHandlers();
+    const conn = streamSession("sess-1", handlers);
+    await vi.advanceTimersByTimeAsync(0);
+    streams[0]!.close!();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(handlers.onTurnCompleted).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(handlers.onTurnCompleted).toHaveBeenCalledTimes(2);
+    conn.close();
+  });
+
+  it("close() 后断流不重连（无新增连接、无 runs/logs 拉取）", async () => {
+    const handlers = makeHandlers();
+    const conn = streamSession("sess-1", handlers);
+    await vi.advanceTimersByTimeAsync(0);
+    conn.close();
+    const fetchCount = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.length;
+    streams[0]!.close!();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(streams).toHaveLength(1);
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.length).toBe(
+      fetchCount,
+    );
+  });
+
+  it("session_ended 事件后不再重连", async () => {
+    const handlers = makeHandlers();
+    const conn = streamSession("sess-1", handlers);
+    await vi.advanceTimersByTimeAsync(0);
+    emitDefault(streams[0]!, {
+      event: "session_ended", session_id: "sess-1", run_id: null, turn: null,
+      log_id: null, timestamp: "t", channel: null, content: null, status: "ended",
+      exit_code: null, reason: null,
+    });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(handlers.onSessionEnded).toHaveBeenCalledTimes(1);
+    expect(streams).toHaveLength(1); // 未重连
+    conn.close();
+  });
+
+  it("轮后对账（ql-20260820-010）：连接未断、turn_completed 已到 → 1.5s 后重拉日志补发布丢失的尾部文本", async () => {
+    const handlers = makeHandlers();
+    const conn = streamSession("sess-1", handlers);
+    await vi.advanceTimersByTimeAsync(0);
+    // 直播收到 turn_completed（连接活着），但最终文本 log 事件从未经 SSE 到达
+    // （DB 已有：log-2「断连期间新增」= 发布丢失场景）。
+    emitDefault(streams[0]!, {
+      event: "turn_completed", session_id: "sess-1", run_id: "r-1", turn: 1,
+      log_id: null, timestamp: "t", channel: null, content: null,
+      status: "completed", exit_code: 0, reason: null,
+      input_tokens: 10, output_tokens: 2,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(handlers.onTurnCompleted).toHaveBeenCalledTimes(1);
+    const live = (handlers.onLog as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c: unknown[]) => (c[0] as { content: string | null }).content,
+    );
+    expect(live).not.toContain("断连期间新增");
+
+    // 1.5s 对账窗口后从 DB 补回（不重连、不发 turn 事件，仅回放 log）
+    await vi.advanceTimersByTimeAsync(1500);
+    const after = (handlers.onLog as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c: unknown[]) => (c[0] as { content: string | null }).content,
+    );
+    expect(after).toContain("断连期间新增");
+    expect(streams).toHaveLength(1); // 连接从未断开
+    expect(handlers.onTurnCompleted).toHaveBeenCalledTimes(1); // 无重复合成
     conn.close();
   });
 });

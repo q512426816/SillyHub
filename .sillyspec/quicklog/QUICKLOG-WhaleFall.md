@@ -64,3 +64,61 @@
 根因：供应商生效方式已从「全局启动/停止互斥（is_default）」转为 /sessions 会话级选择（session_llm_provider_id），设置页启动入口冗余且误导
 方案：llm-provider-list.tsx 删启动/停止按钮、handleSetDefault/handleUnsetDefault、已启动徽标与默认行高亮、说明文案改会话级选择；llm-provider-form.tsx 删「保存后立即启动」勾选框与 isDefault 状态；lib/api/llm-providers.ts 删 setDefaultProvider/unsetDefaultProvider/SetDefaultResult/表单值与 Create/Update 的 is_default 字段（后端 Create 缺省 False、PATCH 不传不动，行为安全）；测试同步删 set-default 用例并新增「无启动/停止按钮」回归断言
 结果：tsc 零错误、前端全量 166 文件 1763 测试全绿、eslint 无新增 warning（form.tsx values 为 HEAD 预存）；后端 set-default/unset-default 端点保留（LiteLLM 注册与 lease 默认回退链仍依赖，待独立变更清理）
+
+## ql-20260820-007-0cda | 2026-08-20 10:22:16 | /sessions 会话运行中却显示「第 1 轮 · 已完成」、TurnStatusBar（执行中|工具 N）不渲染
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/sessions/page.tsx（新增 currentRunIdRef 镜像 detail.current_run_id；历史 logs 装回时重放 attach 修正；upsertTurn log 分支终态自愈翻 running）
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（新增两顺序竞态回归用例：detail先到/logs后到装回重放修正+状态条恢复；logs先到/detail后到 effect 兜底）
+- .sillyspec/docs/SillyHub/modules/frontend_app.md（变更索引追加 ql 条目）
+需求：/sessions 会话运行中却显示「第 1 轮 · 已完成」、TurnStatusBar（执行中|工具 N）不渲染，多次刷新有概率正常
+根因：attach 恢复时序竞态——logsToTurns 把历史轮一律标 completed，唯一修正在 detail.current_run_id 到达的 effect（page.tsx），其 currentRunId 守卫一次性短路：detail 先到时对空 turns 扫空只记 currentRunId，历史 logs 后到装回全 completed，effect 不重跑（deps=[session]），轮永久卡「已完成」；SSE log 分支只追加内容不修状态。刷新时序抽奖故有概率正常。
+方案：page.tsx 三处——①新增 currentRunIdRef 镜像最新 detail.current_run_id（含 active 判定与 ?? null 归一，sessionId 切换清空）；②历史 logs 装回时按 ref 重放同一修正（realRunId 命中且 completed→running），两种到达顺序结果一致；③upsertTurn log 分支自愈：prev.currentRunId===run_id 且 apply 后仍终态→翻回 running（真完成 run 的 currentRunId 已被 onTurnCompleted 清空，不误翻）。测试补 detail先到/logs后到 与 logs先到/detail后到 两顺序回归用例（可控 Promise 控序，打断按钮启用锚定 detail 已生效）。
+结果：sessions 页测试 13/13 全绿（含 2 新增竞态用例）；前端全量 166 文件 1765 测试全绿；tsc 零错误；eslint 改动文件干净。已 git add 暂存三文件
+
+## ql-20260820-008-f5c3 | 2026-08-20 11:07:02 | /sessions 会话流里 Grep/Glob 等工具卡片显示半截 JSON
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-log-assembler.ts（extractPrimaryArg 通用兜底链补 pattern??query??url）
+- frontend/src/components/daemon/turn-timeline.tsx（parseToolRaw 第二份副本同步补 pattern 系键）
+- frontend/src/components/daemon/__tests__/session-log-assembler.test.ts（新增主参数提取 describe 四用例）
+需求：/sessions 会话流里 Grep/Glob 等工具卡片显示半截 JSON
+根因：extractPrimaryArg 通用兜底链缺 pattern/query/url；turn-timeline parseToolRaw 第二份副本同缺
+方案：两处通用兜底链同步补 pattern??query??url；新增 4 用例
+结果：装配器 35/35 + 段视图 33 全绿；已 git add 暂存三文件
+
+## ql-20260820-009-ee9d | 2026-08-20 11:15:11 | /sessions 会话直播视图断连后永久卡死（缺内容/卡运行中
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/daemon.ts（streamSession 重构：fetchSse 连接可变句柄 + onerror 指数退避重连；resyncAndReconnect 三段式恢复——运行中 run 合成 turn_started/logs 全量回放/终态 run 合成 turn_completed；订阅后 5s 延迟复核；token 每次重连现取；session_ended 置 closed 停止重连）
+- frontend/src/lib/__tests__/daemon-session.test.ts（FakeSseStream 补 close；新增路由 fetch mock 与重连 describe 四用例）
+需求：/sessions 会话直播视图断连后永久卡死（缺内容/卡运行中，重进才恢复）
+根因：SSE 链路三层缺口叠加——backend Redis Pub/Sub 无补发、fetch-sse 有意不自动重连、streamSession onerror 为空且调用方无兜底
+方案：streamSession 内建重连——onerror 指数退避；resync：runs 快照→运行中 run 合成 turn_started→logs 全量回放（调用方去重）→终态 run 合成 turn_completed→重建 SSE（token 现取）；订阅后 5s 延迟复核；close/session_ended 停止重连；页面零改动
+结果：daemon-session 23/23 全绿（含 4 新增）；全量 1773 测试全绿；tsc 零错误；eslint 无新增。已 git add 暂存两文件
+
+## ql-20260820-010-2223 | 2026-08-20 12:08:14 | 直播中 turn_completed 与 token 实时到达但最终答复文本不渲染
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/daemon.ts（dispatch turn_completed 分支挂 schedulePostTurnReconcile：1.5s 后 replayLogsFromDb 回放；提取 replayLogsFromDb 与 009 断连恢复共用；close 清 postTurnTimer）
+- frontend/src/lib/__tests__/daemon-session.test.ts（新增轮后对账用例：连接未断补回丢失文本、无重连无重复合成 turn 事件）
+需求：直播中 turn_completed 与 token 实时到达但最终答复文本不渲染，重进才显示
+根因：submit_messages 两段式（commit 后才 publish）且 publish 吞错——发布丢失时 DB 有真相、订阅者永不可见；009 重连只覆盖断连不覆盖发布丢失
+方案：turn_completed 后 1.5s 重拉日志回放（replayLogsFromDb 与 009 同源）；终态轮收 log 幂等 + seenLogIds 去重
+结果：daemon-session 24/24 全绿（新增对账用例）；全量 1774 全绿；tsc 零错误。已暂存
+
+## ql-20260820-011-f230 | 2026-08-20 13:45:32 | 长文本回复直播视图消失（短文本正常、重进正常）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-log-assembler.ts（text/thinking 段携带派生源 segId（仅 partial 带键）；appendStreamText merge 按派生源对齐——完整行只 merge 进普通段、partial 只续接同源派生段）
+- frontend/src/components/daemon/__tests__/session-log-assembler.test.ts（新增隔离 describe 3 用例；streaming 置位两个既有用例期望随行为变更同步）
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（010 页面级对账回放用例，随 011 一并暂存）
+需求：长文本回复直播视图消失（短文本正常、重进正常）
+根因：daemon 完整 assistant message 先转发、override 撤回信号后异步 emit；装配器无 segmentId 的完整行 merge 进 partial 派生段，override 按 segmentId 连坐撤回把全文一并移除
+方案：text/thinking 段携带派生源 segId（仅 partial 带键）；merge 按派生源对齐——完整行只 merge 进普通段、partial 只续接同源派生段，完整行独立成段不被连坐
+结果：装配器 38/38、全量 166 文件 1777 测试全绿；tsc 零错误；部署后浏览器 E2E 复验长回复完整渲染 ✓。已暂存

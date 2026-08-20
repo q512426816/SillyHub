@@ -732,3 +732,167 @@ describe("SessionPanel SSE 装配器接线（task-09）", () => {
     expect(screen.getByText(/↑100/)).toBeTruthy();
   });
 });
+
+// ── ql-20260820-007：attach 运行中轮恢复竞态（detail / 历史 logs 到达顺序） ──
+
+describe("SessionPanel attach 运行中轮恢复竞态（ql-20260820-007）", () => {
+  function makeAttachLog(
+    id: string,
+    runId: string,
+    channel: string,
+    content: string,
+  ) {
+    return {
+      id,
+      run_id: runId,
+      timestamp: "2026-08-15T08:00:00Z",
+      channel,
+      content_redacted: content,
+      parent_tool_use_id: null,
+      subagent_type: null,
+      depth: null,
+      tool_kind: null,
+    };
+  }
+
+  /** 运行中 run r-live 的历史日志（logsToTurns 一律标 completed——竞态源）。 */
+  const runningLogs = () => [
+    makeAttachLog("log-rc-1", "r-live", "user_input", "帮我分析一下这个页面"),
+    makeAttachLog("log-rc-2", "r-live", "stdout", "分析进行中……"),
+  ];
+
+  it("detail 先到（修正扫空）+ 历史日志后到 → 装回重放修正：轮显「运行中」+ 执行中状态条", async () => {
+    const resolveDetail: Array<() => void> = [];
+    const resolveLogs: Array<() => void> = [];
+    mocks.getAgentSession.mockImplementation(
+      () =>
+        new Promise((res) => {
+          resolveDetail.push(() => res(makeSession({ current_run_id: "r-live" })));
+        }),
+    );
+    mocks.getAgentSessionLogs.mockImplementation(
+      () =>
+        new Promise((res) => {
+          resolveLogs.push(() => res(runningLogs()));
+        }),
+    );
+
+    renderPage();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
+    );
+
+    // detail 先落：attach 修正 effect 对空 turns 扫空（只设 currentRunId）。
+    // 打断按钮启用 = currentRunId 已提交（镜像 ref 与之同一轮 effect 写入）。
+    await act(async () => {
+      resolveDetail.forEach((r) => r());
+    });
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /打断本轮/ })).not.toBeDisabled();
+    });
+
+    // 历史日志后到：装回必须按 currentRunIdRef 重放修正（修复前全量卡「已完成」）。
+    await act(async () => {
+      resolveLogs.forEach((r) => r());
+    });
+
+    expect(await screen.findByText(/第 1 轮 · 运行中/)).toBeTruthy();
+    // TurnStatusBar 恢复挂载（修复前轮卡 completed 不渲染状态条）。
+    expect(screen.getByText("执行中")).toBeTruthy();
+    expect(screen.queryByText(/已完成/)).toBeNull();
+  });
+
+  it("历史日志先到 + detail 后到 → 修正 effect 兜底翻回运行中（既有路径回归保护）", async () => {
+    const resolveDetail: Array<() => void> = [];
+    mocks.getAgentSessionLogs.mockResolvedValue(runningLogs());
+    mocks.getAgentSession.mockImplementation(
+      () =>
+        new Promise((res) => {
+          resolveDetail.push(() => res(makeSession({ current_run_id: "r-live" })));
+        }),
+    );
+
+    renderPage();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
+    );
+    // 历史先回灌：detail 未到前面板显 Spin（!session 分支），但 logs 恢复在
+    // mount effect 内已落 turnState（此刻 logsToTurns 全 completed）。
+    await waitFor(() => {
+      expect(mocks.getAgentSessionLogs).toHaveBeenCalledWith("s-1");
+    });
+    await act(async () => {}); // flush 回灌 microtask 链（确保先于 detail 落地）
+
+    await act(async () => {
+      resolveDetail.forEach((r) => r());
+    });
+
+    // detail 后到 → 修正 effect 兜底翻回 running（logs-first 顺序回归保护）。
+    expect(await screen.findByText("帮我分析一下这个页面")).toBeTruthy();
+    expect(screen.getByText(/第 1 轮 · 运行中/)).toBeTruthy();
+    expect(screen.queryByText(/已完成/)).toBeNull();
+  });
+});
+
+// ── ql-20260820-010：轮后对账回放——终态轮接收迟到文本 log 的渲染 ───────────
+
+describe("SessionPanel 轮后对账回放（ql-20260820-010）", () => {
+  function makeStreamEnvelope(overrides: Record<string, unknown> = {}) {
+    return {
+      event: "log",
+      session_id: "s-1",
+      run_id: "r-live",
+      turn: 4,
+      log_id: null,
+      timestamp: "2026-08-15T10:00:00Z",
+      channel: null,
+      content: null,
+      status: null,
+      exit_code: null,
+      reason: null,
+      ...overrides,
+    };
+  }
+
+  it("turn_completed 后对账回放迟到文本 log → 终态轮追加渲染（不丢最终答复）", async () => {
+    const { streamSession, getAgentSessionLogs } = mocks;
+    const handlers = {
+      onTurnStarted: vi.fn(),
+      onLog: vi.fn(),
+      onTurnCompleted: vi.fn(),
+      onSessionEnded: vi.fn(),
+      onError: vi.fn(),
+    };
+    streamSession.mockImplementation((_id: string, h: typeof handlers) => {
+      Object.assign(handlers, h);
+      return { close: vi.fn(), getLastEventId: () => null };
+    });
+    getAgentSessionLogs.mockResolvedValue([]);
+
+    renderPage();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
+    );
+    await waitFor(() => expect(handlers.onLog).toBeDefined());
+
+    act(() => handlers.onTurnStarted(makeStreamEnvelope({ event: "turn_started" })));
+    act(() =>
+      handlers.onLog(makeStreamEnvelope({ log_id: "l-1", channel: "stdout", content: "工具阶段可见。" })),
+    );
+    act(() =>
+      handlers.onTurnCompleted(
+        makeStreamEnvelope({ event: "turn_completed", status: "completed", exit_code: 0 }),
+      ),
+    );
+    expect(await screen.findByText(/第 4 轮 · 已完成/)).toBeTruthy();
+    expect(await screen.findByText("工具阶段可见。")).toBeTruthy();
+
+    // 对账回放：turn_completed 后 1.5s，streamSession 重拉 logs 逐条 onLog
+    // （模拟实时发布丢失、仅 DB 有真相的最终文本）
+    act(() =>
+      handlers.onLog(makeStreamEnvelope({ log_id: "l-2", channel: "stdout", content: "最终答复文本。" })),
+    );
+
+    expect(await screen.findByText(/最终答复文本。/)).toBeTruthy();
+  });
+});

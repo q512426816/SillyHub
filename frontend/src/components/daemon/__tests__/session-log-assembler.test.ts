@@ -643,16 +643,19 @@ describe("streaming 置位与清除（§5 Phase3）", () => {
       makeLog("4", "stdout", "整段续接"),
     ]);
     // log2 的 partial 不与异源整段（text:1）续接 → 开新段置位；log3 续接同派生段保持置位；
-    // log4 无 segmentId 续接 → 保留原值（true）
+    // ql-20260820-011：log4 无 segmentId（完整行）不再 merge 进 partial 派生段
+    // （override 连坐撤回根因）→ 独立普通段，streaming false。
     expect(turn.segments).toEqual([
       { kind: "text", id: "text:1", text: "整段消息", streaming: false, startedAt: null },
       {
         kind: "text",
         id: "text:main:s1:1",
-        text: "partial-1partial-2整段续接",
+        text: "partial-1partial-2",
         streaming: true,
         startedAt: null,
+        segId: "main:s1:1",
       },
+      { kind: "text", id: "text:4", text: "整段续接", streaming: false, startedAt: null },
     ]);
   });
 
@@ -692,11 +695,11 @@ describe("streaming 置位与清除（§5 Phase3）", () => {
         startedAt: null,
         endedAt: null,
         children: [
-          { kind: "text", id: "text:tu_f:1", text: "子partial", streaming: false, startedAt: null },
+          { kind: "text", id: "text:tu_f:1", text: "子partial", streaming: false, startedAt: null, segId: "tu_f:1" },
         ],
         subagentType: null,
       },
-      { kind: "text", id: "text:main:f:1", text: "主partial", streaming: false, startedAt: null },
+      { kind: "text", id: "text:main:f:1", text: "主partial", streaming: false, startedAt: null, segId: "main:f:1" },
     ]);
     // streaming 不入投影：output / processItems / seenLogIds 原样（集合同引用）
     expect(done.output).toBe(turn.output);
@@ -707,5 +710,97 @@ describe("streaming 置位与清除（§5 Phase3）", () => {
   it("finishTurn 无 streaming 段 → 原引用返回（FR-06 引用稳定）", () => {
     const turn = applyAll([makeLog("1", "stdout", "整段")]);
     expect(finishTurn(turn)).toBe(turn);
+  });
+});
+
+// ── ql-20260820-008：主参数摘要提取（extractPrimaryArg 通用兜底链） ────────
+
+describe("主参数摘要提取（ql-20260820-008：通用链 pattern/query/url）", () => {
+  function toolPrimary(raw: string): string | null {
+    const turn = applyAll([makeLog("1", "tool_call", raw)]);
+    const seg = turn.segments[0];
+    return seg?.kind === "tool" ? seg.primary : null;
+  }
+
+  it("Grep/Glob 走 pattern：显示搜索表达式而非半截 JSON", () => {
+    expect(
+      toolPrimary(
+        '{"tool":"Grep","args":{"head_limit":10,"output_mode":"files_with_matches","path":"F:/WorkNew/SillyHub","pattern":"currentRunId"},"tool_use_id":"tu_g"}',
+      ),
+    ).toBe("currentRunId");
+    expect(
+      toolPrimary('{"tool":"Glob","args":{"pattern":"frontend/src/app/**/*.tsx"},"tool_use_id":"tu_gl"}'),
+    ).toBe("frontend/src/app/**/*.tsx");
+  });
+
+  it("WebSearch/WebFetch 走 query/url", () => {
+    expect(
+      toolPrimary('{"tool":"WebSearch","args":{"query":"sse reconnect best practice"},"tool_use_id":"tu_ws"}'),
+    ).toBe("sse reconnect best practice");
+    expect(
+      toolPrimary('{"tool":"WebFetch","args":{"url":"https://example.com/api"},"tool_use_id":"tu_wf"}'),
+    ).toBe("https://example.com/api");
+  });
+
+  it("description 仍优先于 pattern（带描述的工具不受影响）", () => {
+    expect(
+      toolPrimary(
+        '{"tool":"PowerShell","args":{"description":"检查重构提交","command":"git show b0f2a115"},"tool_use_id":"tu_ps"}',
+      ),
+    ).toBe("检查重构提交");
+  });
+
+  it("全部键缺失仍回退 raw 前 120 字符（既有兜底零回归）", () => {
+    const raw = '{"tool":"Unknown","args":{"foo":"bar"},"tool_use_id":"tu_u"}';
+    expect(toolPrimary(raw)).toBe(raw.slice(0, 120));
+  });
+});
+
+// ── ql-20260820-011：完整行不 merge 进 partial 派生段（override 连坐撤回根因） ──
+
+describe("完整行与 partial 派生段隔离（ql-20260820-011）", () => {
+  it("复刻用户场景：partial 流式 → 完整行 → override 撤回 → 完整文本保留", () => {
+    const turn = applyAll([
+      makeLog("p1", "stdout", "半截流式内", { segmentId: "main:msg_7:1" }),
+    ]);
+    // 完整行（daemon 在 partial 后转发，log_id 独立、无 segmentId）
+    const withFull = applyLogToSegments(
+      turn,
+      makeLog("full-1", "stdout", "[ASSISTANT] 半截流式内容完整版，全文在此。"),
+    );
+    // 完整行独立成段（不 merge 进 partial 派生段）→ 两段并存
+    const textSegs = withFull.segments.filter((s) => s.kind === "text");
+    expect(textSegs).toHaveLength(2);
+    // classify 剥 [ASSISTANT] 前缀，output = 半截 partial + 完整行全文
+    expect(withFull.output).toBe("半截流式内半截流式内容完整版，全文在此。");
+
+    // override 在完整行之后到达（session-manager fire-and-forget 时序）
+    const after = applyLogToSegments(
+      withFull,
+      makeLog("ov-1", null, "[ASSISTANT_OVERRIDE] main:msg_7:1"),
+    );
+    // 只撤 partial 派生段；完整行段保留 → 直播不再丢最终答复
+    expect(after.segments.filter((s) => s.kind === "text")).toHaveLength(1);
+    expect(after.output).toBe("半截流式内容完整版，全文在此。");
+  });
+
+  it("普通连续完整行 merge 行为不变（无 partial 时单段拼接）", () => {
+    const turn = applyAll([
+      makeLog("a-1", "stdout", "[ASSISTANT] 第一段。"),
+      makeLog("a-2", "stdout", "[ASSISTANT] 第二段。"),
+    ]);
+    const textSegs = turn.segments.filter((s) => s.kind === "text");
+    expect(textSegs).toHaveLength(1);
+    expect(turn.output).toBe("第一段。第二段。");
+  });
+
+  it("同源 partial 续接仍 merge（partial 间按 segmentId 对齐不受影响）", () => {
+    const turn = applyAll([
+      makeLog("p1", "stdout", "前半", { segmentId: "main:msg_8:1" }),
+      makeLog("p2", "stdout", "后半", { segmentId: "main:msg_8:1" }),
+    ]);
+    const textSegs = turn.segments.filter((s) => s.kind === "text");
+    expect(textSegs).toHaveLength(1);
+    expect(textSegs[0]).toMatchObject({ streaming: true, text: "前半后半" });
   });
 });

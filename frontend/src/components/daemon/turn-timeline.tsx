@@ -878,8 +878,11 @@ function parseToolRaw(
       const desc = args.description ?? args.prompt ?? "";
       return { tool, primary: desc, copyText: desc };
     }
-    // 通用：取 description/command/file_path/prompt，复制完整 args JSON
-    const generic = args.description ?? args.command ?? args.file_path ?? args.prompt ?? raw.slice(0, 120);
+    // 通用：取 description/command/file_path/prompt/pattern/query/url（ql-20260820-008
+    // 与 assembler extractPrimaryArg 同步补 pattern 系键），复制完整 args JSON
+    const generic =
+      args.description ?? args.command ?? args.file_path ?? args.prompt ??
+      args.pattern ?? args.query ?? args.url ?? raw.slice(0, 120);
     return { tool, primary: generic, copyText: JSON.stringify(args, null, 2) };
   } catch {
     return null;
