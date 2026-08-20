@@ -26,15 +26,21 @@
 19. SillySpec 任务记录是隔离的
     - **永不重置 / reset / 清零已存在的 change**。多个活跃 change 各自 `--change <名>` 隔离,不重叠。代码不重叠 = 新 `--change`,不是清旧 change。
     - quick:同一 QUICKLOG 文件按 ql-ID 条目追加,不是单槽位,不冲突。
-20. 前端样式统一参考：
-  * `.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/prototype-frontend-style-system.html`（设计系统总纲·原型）
-  * `.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/design.md`（设计系统总纲·设计决策）
-  * `.sillyspec/docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md`（页面级实现规范，改其它页面照这个）
+20. 前端样式统一参考（2026-08-20 起为 AI-Native 双主题系统）：
+  * `.sillyspec/changes/2026-08-20-frontend-ai-native-style/prototype-frontend-ai-native-style.html`（设计系统总纲·原型）
+  * `.sillyspec/changes/2026-08-20-frontend-ai-native-style/design.md`（设计系统总纲·设计决策）
+  * `.sillyspec/docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md`（页面级实现规范，改其它页面照这个；§0.5 主题系统为多主题必读）
+  * 多主题铁律：取值单一源 `frontend/src/styles/themes.ts`（blue/ai-native 双套）；品牌色类名用 `brand-*` 语义阶（随 html data-theme 换肤），`blue-*` 阶仅限真信息蓝/外部标识色；阴影走主题 token（shadow-* 已 var 化）；antd 组件色经 ConfigProvider token 不手写；旧参考 `archive/2026-06-21-2026-06-21-frontend-style-system/` 仅作历史背景，与冲突处以新系统为准。
 21. 前端接口类型（`frontend/src/lib/api-types.ts`）必须从后端 OpenAPI 生成（`pnpm gen:types`），禁止手写：
   * 后端 schema（DTO/请求/响应）有改动时，同一 quick/change 内必须跑 `pnpm gen:types` 并提交 `api-types.ts` + `backend/openapi.json`，不让类型落后后端形成债；
   * **gen:types 前先确认前端 node_modules 健康**（`pnpm exec tsc --version` 能跑、`.bin` 有 shim）：node_modules 半坏会报一堆**假的** `CSSProperties 不存在某属性` / `Cannot find module '@ant-design/icons'`（根因是缺间接依赖 csstype 等），误判成代码问题。修复 `pnpm install --force`（普通 install 可能命中缓存不修）；
   * 若 gen:types 暴露了与本次改动**无关**的旧测试债（如 mock 缺某字段），按惯例顺手补字段修好，而不是为躲报错改回手写。
 22. **SillySpec CLI 一律在主仓库根目录跑,永不 `cd` 进 worktree**（`cd` 会让 sillyspec 把当前目录当成独立项目实例,写出与主仓库分裂的进度库 / artifact / QUICKLOG）；需要在 worktree 或子目录读代码时用绝对路径或 `git -C <path>`，不切换工作目录。
+23. **危险 git 操作必须先完整备份工作区（index + 工作目录 + 未跟踪文件）**：
+    - `git branch <临时名> HEAD` **不是**有效备份——它只复制当前 commit，不保存 index 里已 `git add` 但未 commit 的文件，也不保存未跟踪文件。
+    - 需要清理/重置/切换分支前，正确做法是：切到临时分支 `git checkout -b rescue-YYYYMMDD-<描述>`，然后 `git add -A && git commit -m "RESCUE: 备份工作区 ..."`；**确认提交成功后再**对 main 做 reset/rebase/merge。
+    - `git stash -a` 在有 `node_modules/.pnpm` 等大量死链/未跟踪文件时容易超时失败，失败后要立刻改用临时分支 commit，不能继续裸 reset。
+    - SillySpec 归档产物（`.sillyspec/changes/archive/<change>/`、docs/sillyspec 工具缺陷记录等）一旦生成应立即 commit，不要只 add 不 commit 留到统一提交。
 
 
 ## 完成汇报格式 （子代理不必这样汇报，按主代理要求的格式即可）
