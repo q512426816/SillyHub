@@ -326,3 +326,85 @@
     animation: none;
   }
 }
+
+/* =============================================================
+   task-13 会话页 AI 原生细节 utility（2026-08-20-frontend-ai-native-style /
+   FR-05 / D-004@v1，视觉基准：prototype-frontend-ai-native-style.html 第 05 节
+   .caret / .typing / .ctx-chip）。仅追加，不动上方 task-02 双套变量块：
+   - .sh-stream-caret  流式输出光标（2×14px 窄条 blink steps(2)，--color-primary）
+   - .sh-typing-dots   typing 三点脉冲（6px 圆点 stagger 0.18s，--color-brand-400）
+   - .sh-ctx-chip      上下文引用 chip（11px 虚线描边浅底，brand 阶三档）
+   色值全走主题变量随 data-theme 换肤，无硬编码 hex；动效纯 CSS 无 JS。
+   ============================================================= */
+@layer components {
+  .sh-stream-caret {
+    display: inline-block;
+    width: 2px;
+    height: 14px;
+    margin-left: 2px;
+    vertical-align: -2px;
+    background: var(--color-primary);
+    animation: sh-caret-blink 1s steps(2) infinite;
+  }
+
+  .sh-typing-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .sh-typing-dots > span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-brand-400);
+    animation: sh-typing-pulse 1.2s ease-in-out infinite;
+  }
+  .sh-typing-dots > span:nth-child(2) {
+    animation-delay: 0.18s;
+  }
+  .sh-typing-dots > span:nth-child(3) {
+    animation-delay: 0.36s;
+  }
+
+  .sh-ctx-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--color-brand-700);
+    background: var(--color-brand-50);
+    border: 1px dashed var(--color-brand-300);
+    border-radius: 6px;
+    padding: 3px 8px;
+  }
+}
+
+@keyframes sh-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes sh-typing-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+/* 无障碍降级（task-13）：光标停闪常显、三点静止半透明（显式定态，同 task-11
+   utility 层降级块模式）；base 层全局 0.01ms 块（animation-duration/iteration
+   !important）对本组动画亦已兜底覆盖，此处为双保险确定性终态。 */
+@media (prefers-reduced-motion: reduce) {
+  .sh-stream-caret {
+    animation: none;
+  }
+  .sh-typing-dots > span {
+    animation: none;
+    opacity: 0.35;
+  }
+}

@@ -7,7 +7,7 @@
  *   - deriveTurnActivity：纯函数（无 React 依赖，亦供 task-08 子代理目录消费），从
  *     TurnSegment[] 派生 toolCount / subagents 清单 / currentActivity；
  *   - TurnStatusBar：运行中轮次头部状态条（spinner + 计时 mm:ss + 工具计数 + 运行中
- *     子代理计数 + 右侧当前活动摘要 live-dot 脉冲），视觉对齐原型
+ *     子代理计数 + 右侧当前活动摘要 typing 三点脉冲，task-13 起 .sh-typing-dots），视觉对齐原型
  *     prototype-session-stream.html 的 .turn-status-bar（蓝底 6% / 边框 18% /
  *     8px 圆角 / px-3 py-1.5 / text-xs；本项目 tailwind 把 rounded-lg 映射 12px，
  *     原型 8px 对应 rounded-md，以原型为准）。
@@ -312,10 +312,14 @@ export const TurnStatusBar = memo(function TurnStatusBar({
       )}
       {activity.currentActivity && (
         <span className="ml-auto flex min-w-0 max-w-[46%] items-center gap-1.5 text-[11.5px] text-foreground">
-          <span
-            aria-hidden
-            className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-blue-600"
-          />
+          {/* task-13（FR-05 / D-004@v1）：live-dot 单点脉冲换 .sh-typing-dots 三点
+              typing 指示（utility/降级统一在 globals.css）；deriveTurnActivity
+              派生与 memo 结构零改动。 */}
+          <span aria-hidden className="sh-typing-dots">
+            <span />
+            <span />
+            <span />
+          </span>
           <span className="min-w-0 truncate" title={activity.currentActivity}>
             {activity.currentActivity}
           </span>
