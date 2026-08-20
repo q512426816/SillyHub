@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class LlmProviderCreate(BaseModel):
@@ -27,6 +27,8 @@ class LlmProviderCreate(BaseModel):
     extra_env: dict[str, Any] | None = None
     settings_config: dict[str, Any] | None = None
     is_default: bool = False
+    # 2026-08-20 task-12（D-9）：多模态三态；None=不动（更新）/auto（创建默认走列默认）。
+    multimodal: str | None = Field(default=None, pattern="^(auto|true|false)$")
 
 
 class LlmProviderUpdate(BaseModel):
@@ -43,6 +45,7 @@ class LlmProviderUpdate(BaseModel):
     extra_env: dict[str, Any] | None = None
     settings_config: dict[str, Any] | None = None
     is_default: bool | None = None
+    multimodal: str | None = Field(default=None, pattern="^(auto|true|false)$")
 
 
 class LlmProviderRead(BaseModel):
@@ -65,6 +68,10 @@ class LlmProviderRead(BaseModel):
     is_default: bool
     # service _to_read 算后注入（默认 None = 安全方向，绝不泄漏明文，规则 X-09）
     api_key_masked: str | None = None
+    # 2026-08-20-session-multimodal-attachments task-05（D-9）：多模态能力三态
+    # （auto/true/false）。auto = 按生效模型名启发式推断（capability.py），
+    # true/false = 手动覆盖（中转站别名权威来源）。直映射列默认值。
+    multimodal: str = "auto"
     created_at: datetime
     updated_at: datetime
 

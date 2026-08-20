@@ -115,11 +115,17 @@ class SessionInjectRequest(BaseModel):
     ql-20260817-010：**静默切换**——携带切换字段时 prompt 可为空串（切换轮
     不产生用户消息与模型回应，daemon 只 reload 配置）；纯追问（无切换字段）
     仍要求非空 prompt。
+
+    2026-08-20-session-multimodal-attachments task-05：``attachment_ids`` 附件
+    引用（上传端点产出的 SessionAttachment id）；**D-7 豁免**——附件非空时
+    prompt 可为空（看图说话）；上限 10 = 图片 5 + 文件 5（逐 kind 校验归
+    service，DTO 层总量兜底）。
     """
 
     prompt: str = Field(default="", max_length=8000)
     agent_profile_id: str | None = None
     llm_provider_id: str | None = None
+    attachment_ids: list[uuid.UUID] = Field(default_factory=list, max_length=10)
 
     @model_validator(mode="after")
     def _require_prompt_or_switch(self) -> "SessionInjectRequest":
@@ -127,6 +133,7 @@ class SessionInjectRequest(BaseModel):
             not self.prompt.strip()
             and self.agent_profile_id is None
             and self.llm_provider_id is None
+            and not self.attachment_ids
         ):
             raise ValueError("prompt is required when no config switch is requested")
         return self

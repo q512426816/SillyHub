@@ -202,7 +202,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # HTTP session 不初始化，client initialize 会挂死到 timeout。合并到现有
         # lifespan（不覆盖上方 bootstrap / 下方 shutdown 逻辑）。
         async with mcp.session_manager.run():
-            yield
+            # 2026-08-20-session-multimodal-attachments task-08：附件草稿清理
+            # （启动先跑一轮 + 每小时循环；watchdog 后台任务同款收尾取消）。
+            from app.modules.session_attachment.cleanup import (
+                start_draft_cleanup_task,
+            )
+
+            draft_cleanup_task = start_draft_cleanup_task(get_session_factory)
+            try:
+                yield
+            finally:
+                draft_cleanup_task.cancel()
     finally:
         log.info("app.shutdown")
         # 停止事件循环堵塞看门狗
@@ -718,6 +728,11 @@ def create_app() -> FastAPI:
     # （text/event-stream + 短 session 连接池安全）。鉴权 require_permission_any(TASK_READ)。
     app.include_router(mcp_sse_router, prefix="/api")
     app.include_router(daemon_router, prefix="/api")
+    # 2026-08-20-session-multimodal-attachments task-03：会话附件端点
+    # （/api/daemon/session-attachments；上传/读取/删除）。
+    from app.modules.session_attachment.router import router as session_attachment_router
+
+    app.include_router(session_attachment_router, prefix="/api")
     # 2026-07-07-skills-mcp-management-ui task-02：平台 CustomSkill admin CRUD。
     app.include_router(skills_router, prefix="/api")
     app.include_router(worktree_router, prefix="/api")

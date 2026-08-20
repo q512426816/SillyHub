@@ -27,6 +27,7 @@ const INITIAL: LlmProviderRead = {
   website_url: "https://anthropic.com",
   auth_field: "ANTHROPIC_API_KEY",
   api_format: "anthropic",
+  multimodal: "auto",
   model_role_mappings: {
     opus: { display: "Opus", model: "claude-opus-4-8", one_m: true },
   },

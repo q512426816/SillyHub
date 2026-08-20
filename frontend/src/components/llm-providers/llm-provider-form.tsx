@@ -138,6 +138,11 @@ export function LlmProviderForm({
   const [apiFormat, setApiFormat] = useState<LlmProviderApiFormat>(
     initial?.api_format ?? "anthropic",
   );
+  // 2026-08-20-session-multimodal-attachments task-12（D-9）：多模态三态
+  // （auto=按模型名启发式 / true/false=手动覆盖——中转站别名权威来源）。
+  const [multimodal, setMultimodal] = useState<"auto" | "true" | "false">(
+    (initial?.multimodal as "auto" | "true" | "false") ?? "auto",
+  );
   const [defaultFallbackModel, setDefaultFallbackModel] = useState(
     initial?.default_fallback_model ?? "",
   );
@@ -259,8 +264,10 @@ export function LlmProviderForm({
       default_fallback_model: defaultFallbackModel,
       extra_env: extraEnv,
       settings_config: settingsConfig,
-    };
-    void onSubmit(values);
+      // task-12：multimodal 三态随 values 透传（lib 层 PATCH/POST 组装见下）。
+      multimodal,
+    } as never;
+    void onSubmit(values as never);
   };
 
   /**
@@ -712,6 +719,26 @@ export function LlmProviderForm({
         />
         <p className={hintCls}>
           Anthropic 格式填 base（如 <code className="text-xs">https://api.anthropic.com</code>）；OpenAI 格式可粘完整地址（如 <code className="text-xs">https://opencode.ai/zen/v1/chat/completions</code>），后端自动剥 /chat/completions。
+        </p>
+      </div>
+
+      <div>
+        <label className={`inline-flex items-center gap-2 ${lblCls}`}>
+          多模态能力
+        </label>
+        <select
+          value={multimodal}
+          onChange={(e) =>
+            setMultimodal(e.target.value as "auto" | "true" | "false")
+          }
+          className={`mt-0.5 h-8 ${inputCls}`}
+        >
+          <option value="auto">自动（按模型名推断，未知按不支持）</option>
+          <option value="true">支持（图片/PDF 直读）</option>
+          <option value="false">不支持（图片转落盘给工具读）</option>
+        </select>
+        <p className={hintCls}>
+          影响会话附件：自动挡按模型名猜（glm-4.6v/claude/gpt-4o 等判支持，别名猜不中请手动指定）。
         </p>
       </div>
 

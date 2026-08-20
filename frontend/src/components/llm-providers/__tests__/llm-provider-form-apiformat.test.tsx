@@ -20,20 +20,20 @@ const getSelectByValue = (value: string): HTMLSelectElement =>
   ) as HTMLSelectElement;
 
 describe("LlmProviderForm — API 格式下拉（task-05 / D-001@v1）", () => {
-  it("默认 anthropic：认证字段/角色映射/默认兜底可见（3 个 combobox）", () => {
+  it("默认 anthropic：认证字段/角色映射/默认兜底可见（3 个 combobox + task-12 多模态下拉 = 4）", () => {
     render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
     // Agent 种类 + API 格式 + 认证字段 = 3 个 select
-    expect(screen.getAllByRole("combobox")).toHaveLength(3);
+    expect(screen.getAllByRole("combobox")).toHaveLength(4);
     expect(screen.getByText("模型角色映射")).toBeInTheDocument();
     expect(screen.getByText("默认兜底模型（可选）")).toBeInTheDocument();
   });
 
-  it("切到 OpenAI Chat → 隐藏认证字段/角色映射/默认兜底（D-006）；env 块保留（2 combobox）", () => {
+  it("切到 OpenAI Chat → 隐藏认证字段/角色映射/默认兜底（D-006）；env 块保留（2 combobox + 多模态 = 3）", () => {
     render(<LlmProviderForm mode="create" onSubmit={vi.fn()} onCancel={vi.fn()} />);
     fireEvent.change(getSelectByValue("anthropic"), {
       target: { value: "openai_chat" },
     });
-    expect(screen.getAllByRole("combobox")).toHaveLength(2);
+    expect(screen.getAllByRole("combobox")).toHaveLength(3);
     expect(screen.queryByText("模型角色映射")).not.toBeInTheDocument();
     expect(screen.queryByText("默认兜底模型（可选）")).not.toBeInTheDocument();
     // 认证字段 option 随 select 整块移除
@@ -50,7 +50,8 @@ describe("LlmProviderForm — API 格式下拉（task-05 / D-001@v1）", () => {
     fireEvent.change(sel, { target: { value: "openai_chat" } });
     fireEvent.change(sel, { target: { value: "anthropic" } });
     expect(screen.getByText("模型角色映射")).toBeInTheDocument();
-    expect(screen.getAllByRole("combobox")).toHaveLength(3);
+    // task-12：+1 多模态下拉（4 = 3 既有 + multimodal）。
+    expect(screen.getAllByRole("combobox")).toHaveLength(4);
   });
 
   it("OpenAI 模式提交 → values.api_format === 'openai_chat'", async () => {

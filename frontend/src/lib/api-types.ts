@@ -4214,6 +4214,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/session-attachments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Attachment
+         * @description 上传会话附件（multipart：file + kind 表单；FR-1/FR-3/FR-8）。
+         *
+         *     成功即建草稿行（session_id NULL）；限制校验（大小/白名单/PIL magic）
+         *     在 service 抛 413/415（AppError 惯例同 file 模块）。
+         */
+        post: operations["upload_attachment_api_daemon_session_attachments_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/session-attachments/{attachment_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Attachment Content
+         * @description 流式回附件字节（历史回显/预览/daemon 回拉；FR-6）。
+         *
+         *     内容寻址不可变 → ``Cache-Control: immutable`` + ETag=sha256 + If-None-Match
+         *     命中短路 304（同对象二次拉取零字节）；展示名走 RFC 5987（中文兼容）。
+         */
+        get: operations["get_attachment_content_api_daemon_session_attachments__attachment_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/session-attachments/{attachment_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Attachment
+         * @description 删除草稿附件（仅 session_id NULL；bound 409；FR-8）。
+         *
+         *     只删行不删对象（D-5：内容寻址对象可能共享，V1 孤儿由清理任务兜）。
+         */
+        delete: operations["delete_attachment_api_daemon_session_attachments__attachment_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/custom-skills": {
         parameters: {
             query?: never;
@@ -8570,6 +8638,37 @@ export interface components {
             last_modified?: string | null;
         };
         /**
+         * AttachmentRead
+         * @description 上传/附件行读取 DTO（design §5.1；consumed by task-04/11）。
+         */
+        AttachmentRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "image" | "file";
+            /** Media Type */
+            media_type: string;
+            /** Bytes */
+            bytes: number;
+            /** Name */
+            name: string;
+            /** Width */
+            width?: number | null;
+            /** Height */
+            height?: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
          * AuditBatchRequest
          * @description Body for ``POST /daemon/audit/batch`` (design §7.3 lifecycle: audit_batch).
          *
@@ -8748,6 +8847,17 @@ export interface components {
         Body_import_problems_preview_api_ppm_problem_list_import_preview_post: {
             /** File */
             file: string;
+        };
+        /** Body_upload_attachment_api_daemon_session_attachments_post */
+        Body_upload_attachment_api_daemon_session_attachments_post: {
+            /** File */
+            file: string;
+            /**
+             * Kind
+             * @default image
+             * @enum {string}
+             */
+            kind: "image" | "file";
         };
         /** Body_upload_file_api_file_upload_post */
         Body_upload_file_api_file_upload_post: {
@@ -11183,6 +11293,11 @@ export interface components {
             is_default: boolean;
             /** Api Key Masked */
             api_key_masked?: string | null;
+            /**
+             * Multimodal
+             * @default auto
+             */
+            multimodal: string;
             /**
              * Created At
              * Format: date-time
@@ -15272,6 +15387,11 @@ export interface components {
          *     ql-20260817-010：**静默切换**——携带切换字段时 prompt 可为空串（切换轮
          *     不产生用户消息与模型回应，daemon 只 reload 配置）；纯追问（无切换字段）
          *     仍要求非空 prompt。
+         *
+         *     2026-08-20-session-multimodal-attachments task-05：``attachment_ids`` 附件
+         *     引用（上传端点产出的 SessionAttachment id）；**D-7 豁免**——附件非空时
+         *     prompt 可为空（看图说话）；上限 10 = 图片 5 + 文件 5（逐 kind 校验归
+         *     service，DTO 层总量兜底）。
          */
         SessionInjectRequest: {
             /**
@@ -15283,6 +15403,8 @@ export interface components {
             agent_profile_id?: string | null;
             /** Llm Provider Id */
             llm_provider_id?: string | null;
+            /** Attachment Ids */
+            attachment_ids?: string[];
         };
         /** SessionInjectResponse */
         SessionInjectResponse: {
@@ -25230,6 +25352,101 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    upload_attachment_api_daemon_session_attachments_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_attachment_api_daemon_session_attachments_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttachmentRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_attachment_content_api_daemon_session_attachments__attachment_id__content_get: {
+        parameters: {
+            query?: {
+                if_none_match?: string | null;
+            };
+            header?: never;
+            path: {
+                attachment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_attachment_api_daemon_session_attachments__attachment_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                attachment_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -907,6 +907,32 @@ export class HubClient {
   }
 
   /**
+   * 2026-08-20-session-multimodal-attachments task-09：下载会话附件字节。
+   * 完全复刻 getSpecBundle 二进制 GET 模式（鉴权/超时/非 2xx HubHttpError）。
+   * 端点 GET /api/daemon/session-attachments/<id>/content（归属校验在 backend）。
+   */
+  async downloadSessionAttachment(attachmentId: string): Promise<Buffer> {
+    const url = `${this.baseUrl}/api/daemon/session-attachments/${encodeURIComponent(attachmentId)}/content`;
+    const headers: Record<string, string> = { Accept: 'application/octet-stream' };
+    if (this.apiKey) {
+      headers['X-API-Key'] = this.apiKey;
+    } else if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+    const resp = await fetch(url, {
+      method: 'GET',
+      headers,
+      signal: AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
+    });
+    if (!resp.ok) {
+      const bodyText = await resp.text();
+      throw new HubHttpError(resp.status, bodyText, url, 'GET');
+    }
+    const ab = await resp.arrayBuffer();
+    return Buffer.from(ab);
+  }
+
+  /**
    * 回传 daemon 执行后的 spec 整树（tar 流）到服务器。
    *
    * 端点：POST /api/workspaces/{wsId}/spec-workspace/sync（task-06）。

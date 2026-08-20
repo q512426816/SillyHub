@@ -217,6 +217,47 @@ export interface SessionInjectPayload {
    *（桥接在 task-04 cli.ts 注入）。
    */
   claim_token: string;
+  /**
+   * 2026-08-20-session-multimodal-attachments task-07（D-1/D-4/D-9）：附件
+   * 列表，仅在有附件时携带（无附件路径与旧 payload 逐字节一致；旧 daemon
+   * 忽略未知键，协议向后兼容）。
+   *
+   * 链路判别口径（与 backend assemble_inject_attachments 对齐）：
+   * - kind=image + data → 内联多模态（backend 预读 base64，daemon 直接转
+   *   SDK ImageBlock / PDF DocumentBlock）；
+   * - kind=image 无 data（D-4 帧闸门超限回拉）→ daemon 经
+   *   GET /api/daemon/session-attachments/{id}/content 自行拉取后仍转多模态块；
+   * - kind=file → 一律落盘 {cwd}/attachments/（D-9 降级的图片/PDF 同走此
+   *   链路，media_type 保留原值供回显）。
+   */
+  attachments?: SessionInjectAttachment[];
+}
+
+/**
+ * SESSION_INJECT attachments 列表项（snake_case 对齐协议层逐字对齐惯例）。
+ * consumed by task-09（daemon.ts WS 路由 → SessionManager.inject）。
+ */
+export interface SessionInjectAttachment {
+  /** SessionAttachment 行 id（回拉端点路径段）。 */
+  id: string;
+  /** DB 原始 kind（image|file；D-9 降级的图片/PDF 保留原 kind，供回显）。 */
+  kind: 'image' | 'file';
+  /** MIME（降级图片/PDF 保留原 media_type，供前端回显缩略图）。 */
+  media_type: string;
+  /** 展示名（落盘文件名；同名冲突由 daemon 加序号）。 */
+  name: string;
+  /** 字节数（展示/日志用）。 */
+  bytes: number;
+  /**
+   * 消费链路（backend 全权决策，daemon 不做媒体类型推断）：
+   * block=转多模态块（image/* → ImageBlock、application/pdf → DocumentBlock；
+   * data 空时先经 content 端点回拉）；disk=下载落盘 cwd/attachments/。
+   */
+  deliver: 'block' | 'disk';
+  /** 内联 base64（deliver=block 且未触发 D-4 回拉时非空）。 */
+  data?: string;
+  /** 回拉/落盘模式对象键（daemon 实际拉取走 content 端点，此键仅日志）。 */
+  object_key?: string;
 }
 
 /**

@@ -397,3 +397,44 @@ export function SessionHistoryView({
     </section>
   );
 }
+
+// ── 2026-08-20-session-multimodal-attachments task-13（D-3）：附件标记行解析 ──
+
+/** 附件标记行解析产物：附件清单 + 剥离标记后的纯文本。 */
+export interface ParsedAttachmentMarker {
+  id: string;
+  kind: "image" | "file";
+  name: string;
+}
+
+/**
+ * 解析 prompt 头部的附件标记行（backend inject 写入，D-3）：
+ * `[附件:<uuid>|<kind>|<name>]` 逐行一条；UUID 锚定（防用户伪标记文本误报）。
+ * 解析失败的行按原文本保留（容错）；标记行后的正文原样返回。
+ */
+export function parseAttachmentMarkers(prompt: string): {
+  attachments: ParsedAttachmentMarker[];
+  text: string;
+} {
+  const uuidRe =
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+  const markerRe =
+    /^\[附件:([0-9a-fA-F-]{36})\|(image|file)\|(.+)\]$/;
+  const attachments: ParsedAttachmentMarker[] = [];
+  const lines = prompt.split("\n");
+  let i = 0;
+  while (i < lines.length) {
+    const m = markerRe.exec(lines[i]!.trim());
+    if (!m || !uuidRe.test(m[1]!)) break;
+    attachments.push({
+      id: m[1]!,
+      kind: m[2] as "image" | "file",
+      name: m[3]!,
+    });
+    i += 1;
+  }
+  if (i === 0) return { attachments, text: prompt };
+  // 标记行后的空行（backend 以 \n 接正文）剥一层。
+  const rest = lines.slice(i).join("\n").replace(/^\n/, "");
+  return { attachments, text: rest };
+}

@@ -246,6 +246,20 @@ class DaemonSessionRuntimeNotFound(AppError):
     http_status = 404
 
 
+class DaemonSessionAttachmentsUnsupported(AppError):
+    """非 claude 引擎（codex flat 协议无多模态）携附件 inject（D-6 三层门控第二层）。"""
+
+    code = "HTTP_422_SESSION_ATTACHMENTS_UNSUPPORTED"
+    http_status = 422
+
+
+class DaemonSessionAttachmentInvalid(AppError):
+    """附件引用非法：数量超限 / 类型不符（归属缺失走 404 隐藏语义）。"""
+
+    code = "HTTP_422_SESSION_ATTACHMENT_INVALID"
+    http_status = 422
+
+
 class DaemonSessionWorkspaceNotFound(AppError):
     """workspace_id 指向的工作区不存在 / 调用者无 WORKSPACE_READ 权限（404，不泄露存在性）。"""
 
@@ -1044,6 +1058,9 @@ class SessionService:
         # SESSION_SWITCH_CONFIG 下发归 task-05；默认 None 不改既有行为）。
         agent_profile_id: str | None = None,
         llm_provider_id: str | None = None,
+        # 2026-08-20-session-multimodal-attachments task-05：附件引用（D-7 豁免
+        # 空 prompt；引擎/归属/数量校验见 _inject_into_session；组装下发归 task-06）。
+        attachment_ids: list[uuid.UUID] | None = None,
     ) -> SessionDispatchResult:
         """Append a new turn run to an active session (FR-02 / design §7.6 step 1).
 
@@ -1067,8 +1084,13 @@ class SessionService:
         # ql-20260817-010：静默切换——携带切换字段时允许空 prompt（切换轮无用户
         # 消息/模型回应，daemon 只 reload 配置）；纯追问仍要求非空（DTO 已 422，
         # 服务层兜底防绕过）。
+        # 2026-08-20 task-05（D-7）：附件非空也豁免空 prompt（看图说话）。
         if not prompt or not prompt.strip():
-            if agent_profile_id is None and llm_provider_id is None:
+            if (
+                agent_profile_id is None
+                and llm_provider_id is None
+                and not attachment_ids
+            ):
                 raise DaemonSessionNotActive(
                     "prompt must not be empty.",
                     details={"reason": "empty_prompt"},
@@ -1091,6 +1113,8 @@ class SessionService:
             # sessions-portal task-05：切换参数透传共享核心（service 路径不传=零回归）。
             agent_profile_id=agent_profile_id,
             llm_provider_id=llm_provider_id,
+            # 2026-08-20 task-05：附件透传（None → 空列表零回归）。
+            attachment_ids=list(attachment_ids) if attachment_ids else None,
         )
 
     async def inject_session_as_service(
@@ -1154,6 +1178,9 @@ class SessionService:
         # 不传 → 走原有 inject 行为（零回归）。
         agent_profile_id: str | None = None,
         llm_provider_id: str | None = None,
+        # 2026-08-20-session-multimodal-attachments task-05：附件引用（None → 零
+        # 回归）。校验（引擎门控/归属/数量）在本方法事务内；组装下发归 task-06。
+        attachment_ids: list[uuid.UUID] | None = None,
     ) -> SessionDispatchResult:
         """Shared inject-turn core (used by :meth:`inject_session` +
         :meth:`inject_session_as_service`).
@@ -1194,6 +1221,49 @@ class SessionService:
                         "current_run_id": str(current.id),
                     },
                 )
+
+            # ── 2026-08-20 task-05：附件校验（D-6 引擎门控 / 归属 404 / 数量 422）──
+            # 组装（base64 内联/降级路由/标记行/回填）见下方 task-06 段；
+            # 本段只做整体拒绝（不部分生效）：任一校验失败 raise → 事务回滚。
+            validated_attachments: list = []
+            if attachment_ids:
+                if session.provider != "claude":
+                    raise DaemonSessionAttachmentsUnsupported(
+                        "此引擎不支持会话附件（仅 Claude 支持多模态与文件注入）。",
+                        details={"session_id": str(session_id), "provider": session.provider},
+                    )
+                from app.modules.session_attachment.model import SessionAttachment
+
+                rows = (
+                    (
+                        await self._session.execute(
+                            select(SessionAttachment).where(
+                                SessionAttachment.id.in_(attachment_ids),
+                                SessionAttachment.user_id == session.user_id,
+                            )
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                # 缺失/跨用户归一 404（资源隐藏语义，不泄露存在性）。
+                if len(rows) != len(set(attachment_ids)):
+                    raise DaemonSessionNotFound(
+                        "部分附件不存在或无权访问。",
+                        details={"session_id": str(session_id)},
+                    )
+                image_n = sum(1 for r in rows if r.kind == "image")
+                file_n = sum(1 for r in rows if r.kind == "file")
+                if image_n > 5 or file_n > 5 or (image_n + file_n) != len(rows):
+                    raise DaemonSessionAttachmentInvalid(
+                        "附件数量超限（图片≤5、文件≤5）或类型非法。",
+                        details={"image_count": image_n, "file_count": file_n},
+                    )
+                # 保留入参顺序（payload/标记行按用户勾选顺序稳定）。
+                by_id = {r.id: r for r in rows}
+                validated_attachments = [
+                    by_id[i] for i in dict.fromkeys(attachment_ids) if i in by_id
+                ]
 
             # ── task-05：配置切换解析（FR-05/FR-06 / Grill C-05 / D-013）────────
             # 维度语义：入参 None=不动；profile 非空且≠当前 → 切；provider 非空且
@@ -1364,14 +1434,62 @@ class SessionService:
 
             # task-01 / FR-02 / D-005@v1：后续 turn 同样落一条 channel="user_input"
             # AgentRunLog，挂在新建 run 上（首 turn 在 create_session 已落）。
+            # 2026-08-20 task-06（D-3）：附件标记行插头部——[附件:id|kind|name]
+            # 逐附件一行，换行后接原 prompt；kind 取 DB 原始值（前端回显缩略图
+            # 数据源）；沿用既有 5000 截断口径。
+            user_input_content = prompt
+            if validated_attachments:
+                from app.modules.session_attachment.service import (
+                    attachment_marker_line,
+                )
+
+                marker_lines = "\n".join(
+                    attachment_marker_line(r) for r in validated_attachments
+                )
+                user_input_content = f"{marker_lines}\n{prompt}" if prompt else marker_lines
             self._session.add(
                 AgentRunLog(
                     run_id=run.id,
                     channel="user_input",
-                    content_redacted=prompt[:5000],
+                    content_redacted=user_input_content[:5000],
                     timestamp=now,
                 )
             )
+
+            # ── 2026-08-20 task-06：附件组装与回填（D-4/D-9/draft→bound）────────
+            # 校验已过（上方 task-05 段）：本段在**同事务**内完成——①session_id
+            # 回填（draft→bound 唯一前进迁移；已 bound 附件再次引用不改状态）；
+            # ②多模态门控判定（D-9）+ payload 组装（D-4 闸门/降级路由）。
+            # 组装读对象（MinIO）为 IO 较重，但附件总量受 5MB×5/20MB×5 上限约束。
+            inject_attachments: list[dict] = []
+            if validated_attachments:
+                from app.modules.session_attachment.capability import (
+                    resolve_session_gate,
+                )
+                from app.modules.session_attachment.service import (
+                    assemble_inject_attachments,
+                )
+                from app.modules.session_attachment.storage import (
+                    SessionAttachmentStorage,
+                )
+                from app.modules.storage.factory import get_storage_backend
+
+                for att_row in validated_attachments:
+                    if att_row.session_id is None:
+                        att_row.session_id = session.id
+                        self._session.add(att_row)
+
+                gate = await resolve_session_gate(
+                    self._session,
+                    user_id=session.user_id,
+                    session_llm_provider_id=session.llm_provider_id,
+                    agent_kind=session.provider,
+                )
+                inject_attachments = await assemble_inject_attachments(
+                    validated_attachments,
+                    supports_multimodal=gate.supports_multimodal,
+                    storage=SessionAttachmentStorage(get_storage_backend()),
+                )
 
             if config_switch:
                 # task-05：lease metadata 同步（同事务，保持 DB 与会话列一致——
@@ -1515,17 +1633,22 @@ class SessionService:
                     },
                 )
             else:
+                inject_payload = {
+                    "session_id": str(session.id),
+                    "lease_id": str(session.lease_id),
+                    "run_id": str(run.id),
+                    "prompt": prompt,
+                    "claim_token": inject_claim_token,
+                    "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
+                }
+                # 2026-08-20 task-06：附件仅在有附件时附加（无附件路径与现状
+                # 逐字节一致零回归；旧 daemon 忽略未知键，协议向后兼容）。
+                if inject_attachments:
+                    inject_payload["attachments"] = inject_attachments
                 control_ok = await hub.send_session_control(
                     daemon_id,
                     DAEMON_MSG_SESSION_INJECT,
-                    {
-                        "session_id": str(session.id),
-                        "lease_id": str(session.lease_id),
-                        "run_id": str(run.id),
-                        "prompt": prompt,
-                        "claim_token": inject_claim_token,
-                        "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
-                    },
+                    inject_payload,
                 )
         if not control_ok:
             # New run failed to dispatch → converge it to failed but leave the

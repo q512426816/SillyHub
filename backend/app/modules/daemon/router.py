@@ -1957,6 +1957,9 @@ async def inject_session(
         prompt=data.prompt,
         agent_profile_id=data.agent_profile_id,
         llm_provider_id=data.llm_provider_id,
+        # 2026-08-20-session-multimodal-attachments task-05：附件引用透传
+        # （协调者扩权本文件：DTO 新字段须经路由转达 service，卡内已同步）。
+        attachment_ids=data.attachment_ids or None,
     )
     return SessionInjectResponse(
         session_id=result.agent_session.id,

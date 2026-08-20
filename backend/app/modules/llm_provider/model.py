@@ -5,7 +5,8 @@
 （xchacha20-poly1305，D-009，照 git_identity）；``is_default`` 在
 ``(user_id, agent_kind)`` 维度互斥（service 层事务内保证，R-05）。
 
-列定义须与 ``migrations/versions/20260725_create_llm_providers.py`` 一一对应（防漂移）。
+列定义须与 ``migrations/versions/20260725_create_llm_providers.py`` 一一对应（防漂移）；
+``multimodal`` 列对应 ``migrations/versions/20260820100000_session_attachments_multimodal.py``。
 """
 
 from __future__ import annotations
@@ -60,6 +61,13 @@ class LlmProvider(BaseModel, table=True):
         default=None,
         max_length=128,
         sa_column=Column(String(128), nullable=True),
+    )
+    # 多模态能力三态门控（D-9）：auto=按模型名启发式推断 / true/false=手动覆盖
+    # （中转站别名的权威来源）；server_default='auto' 存量行为零回归。
+    multimodal: str = Field(
+        default="auto",
+        max_length=8,
+        sa_column=Column(String(8), nullable=False, server_default="auto"),
     )
     notes: str | None = Field(
         default=None,

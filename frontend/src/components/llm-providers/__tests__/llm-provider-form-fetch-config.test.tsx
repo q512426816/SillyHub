@@ -47,6 +47,7 @@ const EDIT_INITIAL: LlmProviderRead = {
   website_url: null,
   auth_field: "ANTHROPIC_API_KEY",
   api_format: "anthropic",
+  multimodal: "auto",
   model_role_mappings: null,
   default_fallback_model: null,
   extra_env: null,

@@ -297,6 +297,34 @@ export async function* mapUserTurnInputToSdk(
   input: AsyncIterable<UserTurnInput>,
 ): AsyncGenerator<SDKUserMessage, void> {
   for await (const turn of input) {
+    // 2026-08-20-session-multimodal-attachments task-10：blocks 存在 →
+    // ContentBlockParam 数组（text 块 + image/document 块；无 text 且有块时
+    // 仍带空 text 块保持消息形状稳定）；无 blocks → 纯字符串路径**逐字不变**
+    // （既有测试零回归锚点）。
+    if (turn.blocks && turn.blocks.length > 0) {
+      const content: Array<{ type: 'text'; text: string } | Record<string, unknown>> = [
+        { type: 'text', text: turn.text },
+      ];
+      for (const block of turn.blocks) {
+        if (block.type === 'image') {
+          content.push({
+            type: 'image',
+            source: { type: 'base64', media_type: block.mediaType, data: block.base64 },
+          });
+        } else {
+          content.push({
+            type: 'document',
+            source: { type: 'base64', media_type: 'application/pdf', data: block.base64 },
+          });
+        }
+      }
+      yield {
+        type: 'user',
+        message: { role: 'user', content: content as never },
+        parent_tool_use_id: null,
+      };
+      continue;
+    }
     yield {
       type: 'user',
       message: { role: 'user', content: turn.text },

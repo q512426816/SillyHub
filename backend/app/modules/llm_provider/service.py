@@ -214,6 +214,7 @@ class LlmProviderService:
             extra_env=data.extra_env,
             settings_config=data.settings_config,
             is_default=data.is_default,
+            multimodal=data.multimodal or "auto",
         )
         self._session.add(row)
         await self._session.commit()
@@ -241,6 +242,10 @@ class LlmProviderService:
             ct, key_id = self._cipher.encrypt(new_api_key)
             row.encrypted_api_key = ct
             row.key_id = key_id
+
+        # 2026-08-20 task-12：multimodal 三态——显式 None 不覆盖（不传=不动）。
+        if updates.get("multimodal") is None:
+            updates.pop("multimodal", None)
 
         # is_default 互斥：置 True 前先清同 (user_id, agent_kind) 兄弟行
         want_default = updates.pop("is_default", None)

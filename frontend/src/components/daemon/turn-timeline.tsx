@@ -39,6 +39,10 @@ import type { ErrorLogItem } from "@/components/agent-log/normalize";
 import type { TurnSegment } from "@/components/daemon/session-log-assembler";
 import { SegmentView } from "@/components/daemon/turn-segment-views";
 import { TurnStatusBar } from "@/components/daemon/turn-status-bar";
+// 2026-08-20-session-multimodal-attachments task-13（D-3）：历史附件标记行解析
+// + 图片缩略图/文件 chip 渲染。
+import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
+import { AttachmentChips } from "@/components/daemon/attachment-chips";
 
 /** ql-20260817-003：轮次发送时间格式化（今天只显 HH:mm，跨天带 MM-DD HH:mm）。 */
 function formatTurnTime(iso: string): string {
@@ -296,7 +300,20 @@ export function TurnTimeline({
                     </span>
                   )}
                   <div className="max-w-[82%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-sm">
-                    <div className="whitespace-pre-wrap break-words">{turn.prompt}</div>
+                    {/* task-13：剥离历史附件标记行（D-3），文本与 chips 分层渲染 */}
+                    {(() => {
+                      const parsed = parseAttachmentMarkers(turn.prompt);
+                      return (
+                        <>
+                          {parsed.attachments.length > 0 && (
+                            <AttachmentChips attachments={parsed.attachments} />
+                          )}
+                          {parsed.text && (
+                            <div className="whitespace-pre-wrap break-words">{parsed.text}</div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                   {turn.sender && (
                     <span

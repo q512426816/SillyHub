@@ -69,6 +69,11 @@ export interface LlmProviderRead {
    */
   settings_config?: Record<string, unknown> | null;
   is_default: boolean;
+  /**
+   * 2026-08-20-session-multimodal-attachments task-11（D-9）：多模态能力三态
+   * （auto=按模型名启发式 / true/false=手动覆盖）。前端附件区降级提示消费。
+   */
+  multimodal: "auto" | "true" | "false";
   /** 如 "sk-1...abcd"（首4...尾4），空 key → null，短 key → "****"。 */
   api_key_masked: string | null;
   created_at: string;
@@ -92,6 +97,8 @@ export interface LlmProviderCreate {
   extra_env?: Record<string, string> | null;
   /** 高级配置片段（design §4 / D-004）；null=清空/未配置。 */
   settings_config?: Record<string, unknown> | null;
+  /** task-12（D-9）：多模态三态（可选，缺省 auto）。 */
+  multimodal?: "auto" | "true" | "false";
 }
 
 /** PATCH body；全部可选。api_key undefined/null = 不动原密钥（后端 None 语义）。 */
@@ -111,6 +118,8 @@ export interface LlmProviderUpdate {
   extra_env?: Record<string, string> | null;
   /** 高级配置片段（design §4 / D-004）；null=清空/未配置。 */
   settings_config?: Record<string, unknown> | null;
+  /** task-12（D-9）：多模态三态；不传=不动。 */
+  multimodal?: "auto" | "true" | "false";
 }
 
 export interface LlmProviderList {
@@ -144,6 +153,8 @@ export interface LlmProviderFormValues {
    * 可选：表单初始构建/单测固件不带此字段，提交时 `?? null` 归一（design §6.1 Grill B5）。
    */
   settings_config?: Record<string, unknown> | null;
+  /** task-12（D-9）：多模态三态；可选——旧固件不带时提交侧缺省 auto。 */
+  multimodal?: "auto" | "true" | "false";
 }
 
 // ── API 调用 ────────────────────────────────────────────────────────────
@@ -404,6 +415,7 @@ export function formToCreate(v: LlmProviderFormValues): LlmProviderCreate {
     default_fallback_model: clean(v.default_fallback_model) ?? null,
     extra_env: cleanExtraEnv(v.extra_env),
     settings_config: v.settings_config ?? null,
+    multimodal: v.multimodal ?? "auto",
   };
 }
 
@@ -424,6 +436,7 @@ export function formToUpdate(v: LlmProviderFormValues): LlmProviderUpdate {
     default_fallback_model: clean(v.default_fallback_model) ?? null,
     extra_env: cleanExtraEnv(v.extra_env),
     settings_config: v.settings_config ?? null,
+    ...(v.multimodal ? { multimodal: v.multimodal } : {}),
   };
   const apiKey = clean(v.api_key);
   if (apiKey) update.api_key = apiKey;

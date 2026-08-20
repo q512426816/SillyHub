@@ -703,6 +703,11 @@ export async function injectSession(
   if (options?.llm_provider_id !== undefined) {
     body.llm_provider_id = options.llm_provider_id;
   }
+  // 2026-08-20-session-multimodal-attachments task-12：附件引用（D-7 豁免空
+  // prompt 由 backend DTO 校验；空数组不下发保持既有 payload 形态）。
+  if (options?.attachment_ids && options.attachment_ids.length > 0) {
+    body.attachment_ids = options.attachment_ids;
+  }
   return apiFetch<SessionInjectResponse>(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/inject`,
     { method: "POST", json: body },

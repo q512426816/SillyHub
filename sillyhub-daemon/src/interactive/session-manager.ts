@@ -39,10 +39,13 @@ import type {
   McpServerConfigForDriver,
   UserTurnInput,
 } from './driver.js';
+import { basename, join } from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { InputQueue } from './input-queue.js';
 import { PermissionResolver } from './permission-resolver.js';
 import type { PermissionSendFn } from './permission-resolver.js';
 import type { CanUseToolDecision } from './types.js';
+import type { SessionInjectAttachment } from '../protocol.js';
 import type { PolicyEngine } from '../policy/filesystem-policy.js';
 import { isPathUnderAnyRoot, resolveRealPath, UNC_REJECTED } from '../policy/path-utils.js';
 import {
@@ -1868,6 +1871,37 @@ export class SessionManager {
    * + onTurnResult（notifyRunResult）能用新 token（否则 warn 不调 → turn 卡）。
    * session 不存在 / token 空 → 静默 no-op。
    */
+  /**
+   * task-09：附件落盘——{cwd}/attachments/{safeName}（basename 防穿越，
+   * 同名冲突自 1 加序号保留扩展名），子目录递归创建。返回相对路径
+   * attachments/xxx（prompt 路径清单用相对形态）。
+   */
+  private async _writeAttachmentFile(cwd: string, rawName: string, buf: Buffer): Promise<string> {
+    const dir = join(cwd, 'attachments');
+    await mkdir(dir, { recursive: true });
+    const safe = basename(rawName) || 'attachment';
+    const dot = safe.lastIndexOf('.');
+    const stem = dot > 0 ? safe.slice(0, dot) : safe;
+    const ext = dot > 0 ? safe.slice(dot) : '';
+    let rel = 'attachments/' + safe;
+    let n = 0;
+    // 冲突探测：写入前试目标存在性——用 writeFile 的 exclusive 模式轮试。
+    for (;;) {
+      try {
+        await writeFile(join(cwd, rel), buf, { flag: 'wx' });
+        return rel;
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code;
+        if (code === 'EEXIST') {
+          n += 1;
+          rel = 'attachments/' + stem + '(' + n + ')' + ext;
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+
   async refreshClaimToken(sessionId: string, claimToken: string): Promise<void> {
     const state = this._store.get(sessionId);
     if (!state || !claimToken) return;
@@ -1989,7 +2023,13 @@ export class SessionManager {
     }
   }
 
-  async inject(sessionId: string, prompt: string, runId: string): Promise<InjectResult> {
+  async inject(
+    sessionId: string,
+    prompt: string,
+    runId: string,
+    attachments?: SessionInjectAttachment[],
+    downloadAttachment?: (id: string) => Promise<Buffer>,
+  ): Promise<InjectResult> {
     const state = this._store.get(sessionId);
     if (!state) {
       throw new SessionNotFoundError(sessionId);
@@ -2015,7 +2055,65 @@ export class SessionManager {
     // inject 时 backend 行锁已防重复创建，daemon 侧 currentRunId 反映「即将执行的 run」。
     // task-02（D-009）：push provider-neutral UserTurnInput（不再构造 SDKUserMessage；
     // Claude driver 内部做形态转换，task-03）。
-    state.inputQueue.push({ type: 'user', text: prompt });
+    // 2026-08-20-session-multimodal-attachments task-09：附件消费（deliver 由
+    // backend 全权决策）。block=多模态块（内联 data 或经下载闭包回拉）；disk=落盘
+    // {cwd}/attachments/（同名加序号）+ text 追加路径清单；单文件失败降级标注不
+    // 中断 turn。无附件路径与原 push 逐字一致（零回归）。
+    let turnText = prompt;
+    let blocks: UserTurnInput['blocks'];
+    let filesToFetch: UserTurnInput['filesToFetch'];
+    if (attachments && attachments.length > 0) {
+      const blockList: NonNullable<UserTurnInput['blocks']> = [];
+      const savedPaths: string[] = [];
+      const fetched: NonNullable<UserTurnInput['filesToFetch']> = [];
+      const failedNames: string[] = [];
+      for (const att of attachments) {
+        try {
+          if (att.deliver === 'block') {
+            let b64 = att.data;
+            if (!b64 && downloadAttachment) {
+              b64 = (await downloadAttachment(att.id)).toString('base64');
+            }
+            if (!b64) {
+              failedNames.push(att.name);
+              continue;
+            }
+            if (att.media_type === 'application/pdf') {
+              blockList.push({ type: 'document', mediaType: 'application/pdf', base64: b64 });
+            } else {
+              blockList.push({ type: 'image', mediaType: att.media_type, base64: b64 });
+            }
+          } else {
+            if (!downloadAttachment) {
+              failedNames.push(att.name);
+              continue;
+            }
+            const buf = await downloadAttachment(att.id);
+            const rel = await this._writeAttachmentFile(state.cwd, att.name, buf);
+            savedPaths.push(rel);
+            fetched.push({ id: att.id, name: att.name });
+          }
+        } catch {
+          failedNames.push(att.name);
+        }
+      }
+      if (blockList.length > 0) blocks = blockList;
+      if (fetched.length > 0) filesToFetch = fetched;
+      const lines: string[] = [];
+      if (savedPaths.length > 0) {
+        lines.push('[附件已落盘，可用 Read/Grep 等工具读取]');
+        for (const rel of savedPaths) lines.push('- ' + rel);
+      }
+      for (const n of failedNames) lines.push('(下载失败: ' + n + ')');
+      if (lines.length > 0) {
+        turnText = (prompt ? prompt + '\n\n' : '') + lines.join('\n');
+      }
+    }
+    state.inputQueue.push(
+      blocks || filesToFetch
+        ? { type: 'user', text: turnText, ...(blocks ? { blocks } : {}), ...(filesToFetch ? { filesToFetch } : {}) }
+        : { type: 'user', text: turnText },
+    );
     state.currentRunId = runId;
     state.status = 'running';
     state.lastActiveAt = Date.now();

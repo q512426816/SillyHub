@@ -52,6 +52,7 @@ const baseProvider = (over: Partial<LlmProviderRead>): LlmProviderRead => ({
   website_url: null,
   auth_field: "ANTHROPIC_AUTH_TOKEN",
   api_format: "anthropic",
+  multimodal: "auto",
   model_role_mappings: null,
   default_fallback_model: null,
   extra_env: null,
@@ -152,6 +153,7 @@ describe("LlmProviderSection — openai 格式徽标（task-06）", () => {
     id: "p-anthropic",
     name: "Anthropic 官方",
     api_format: "anthropic",
+  multimodal: "auto",
     base_url: "https://api.anthropic.com",
   });
 

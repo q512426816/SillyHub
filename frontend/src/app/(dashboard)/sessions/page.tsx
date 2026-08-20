@@ -234,6 +234,9 @@ function SessionPanel({
   const [runsMeta, setRunsMeta] = useState<Map<string, SessionRunRead>>(new Map());
   const [viewMode, setViewMode] = useState<"conversation" | "all">("conversation");
   const [input, setInput] = useState("");
+  // 2026-08-20 task-12：待发送附件 ids（SessionInputBar 上传产物）与清理句柄。
+  const [pendingAttachmentIds, setPendingAttachmentIds] = useState<string[]>([]);
+  const clearAttachmentsRef = useRef<(() => void) | null>(null);
   const [reopening, setReopening] = useState(false);
 
   const streamRef = useRef<SessionStreamConnection | null>(null);
@@ -517,6 +520,29 @@ function SessionPanel({
   const restoring = status === "pending" || status === "reconnecting";
   const running = turnState.currentRunId != null;
 
+  // ── 2026-08-20 task-12：附件门控派生（D-6 引擎 / FR-10 D-9 多模态降级）────
+  const sessionEngine = session?.provider ?? null;
+  const attachmentsDisabled = sessionEngine !== "claude";
+  // 会话实际生效供应商（会话绑定优先；本机默认/未选 → null = 能力未知）。
+  const effectiveProvider = useMemo(
+    () =>
+      providers.find(
+        (p) => p.id === (session?.llm_provider_id ?? null),
+      ) ?? null,
+    [providers, session?.llm_provider_id],
+  );
+  const multimodalDowngraded = useMemo(() => {
+    if (!effectiveProvider) return false;
+    if (effectiveProvider.multimodal === "false") return true;
+    if (effectiveProvider.multimodal === "true") return false;
+    // auto：前端同源启发式（backend capability.py 权威；此处仅提示条预览）。
+    const model = effectiveProvider.model ?? effectiveProvider.default_fallback_model ?? "";
+    const lowered = model.toLowerCase();
+    return !/(vision|vl|glm-[34]\.\d+v|gpt-4o|gpt-4\.1|gpt-5|claude|gemini|qwen-vl|doubao-seed)/.test(
+      lowered,
+    );
+  }, [effectiveProvider]);
+
   // ── gap-fix（FR-07 / FR-08）：whoLine 注入 + 历史 usage 回填（渲染时派生）──
   // agentName：AgentRun 不存 runtime 展示名，按 config_snapshot.agent_name →
   // runtime 别名/名称 → 引擎 label 链兜底；快照缺键如实显示，不编造。
@@ -649,9 +675,11 @@ function SessionPanel({
   // ── 操作 ───────────────────────────────────────────────────────────────
   const handleSend = useCallback(async () => {
     const prompt = input.trim();
-    if (!prompt || prompt.length > MAX_PROMPT_LEN) return;
+    // 2026-08-20 task-12（D-7）：附件非空允许空文本（看图说话）；纯文本仍守卫。
+    if ((!prompt && pendingAttachmentIds.length === 0) || prompt.length > MAX_PROMPT_LEN) return;
     if (!session || ended || restoring || !machineOnline) return;
     if (turnState.currentRunId) return; // turn 级串行
+    const attachmentIds = [...pendingAttachmentIds];
     setInput("");
     const placeholderId = `__pending_inject_${Date.now()}__`;
     setTurnState((prev) => ({
@@ -677,7 +705,12 @@ function SessionPanel({
       ],
     }));
     try {
-      const resp = await injectSession(sessionId, prompt);
+      const resp = await injectSession(sessionId, prompt, {
+        // 2026-08-20 task-12：附件引用（空数组不进 body，保持既有 payload 形态）。
+        ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
+      });
+      setPendingAttachmentIds([]);
+      clearAttachmentsRef.current?.();
       setTurnState((prev) => ({
         currentRunId: resp.run_id,
         turns: prev.turns.map((t) =>
@@ -700,7 +733,7 @@ function SessionPanel({
       setErrorMsg(apiErr instanceof ApiError ? apiErr.message : "发送失败");
       if (isTurnConflict) setInput(prompt); // 保留 prompt 供重试
     }
-  }, [input, session, ended, restoring, machineOnline, turnState.currentRunId, sessionId]);
+  }, [input, session, ended, restoring, machineOnline, turnState.currentRunId, sessionId, pendingAttachmentIds]);
 
   const handleInterrupt = useCallback(async () => {
     if (!session || session.status !== "active" || !turnState.currentRunId) return;
@@ -1070,6 +1103,13 @@ function SessionPanel({
           disabled={sendingDisabled}
           placeholder={placeholder}
           creating={false}
+          // 2026-08-20 task-12：附件门控（D-6 codex 禁用；FR-10 降级提示）与回传。
+          attachmentsDisabled={attachmentsDisabled}
+          multimodalDowngraded={multimodalDowngraded}
+          onAttachmentsChange={setPendingAttachmentIds}
+          registerClearAttachments={(fn) => {
+            clearAttachmentsRef.current = fn;
+          }}
         />
         <div className="px-5 pb-3">
           <SessionConfigBar

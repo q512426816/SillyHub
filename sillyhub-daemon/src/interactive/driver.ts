@@ -36,6 +36,20 @@ export interface UserTurnInput {
    * SessionManager 层不在此做校验。
    */
   text: string;
+  /**
+   * 2026-08-20-session-multimodal-attachments task-09：多模态块（可选中）。
+   * Claude driver 转 SDK ContentBlockParam 数组；codex driver 不读（D-6 三层
+   * 门控兜底）。mediaType 为 MIME；document 固定 application/pdf。
+   */
+  blocks?: Array<
+    | { type: 'image'; mediaType: string; base64: string }
+    | { type: 'document'; mediaType: 'application/pdf'; base64: string }
+  >;
+  /**
+   * task-09：已落盘文件清单（SessionManager 在 push 前已下载完成并把路径
+   * 追加进 text；此字段供 driver/日志感知附件存在，不参与消息组装）。
+   */
+  filesToFetch?: Array<{ id: string; name: string }>;
 }
 
 /**

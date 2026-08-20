@@ -42,6 +42,8 @@ import { join } from 'node:path';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { type DaemonConfig, normalizeAllowedRoots } from './config.js';
 import { MSG } from './protocol.js';
+// 2026-08-20-session-multimodal-attachments task-09：SESSION_INJECT 附件类型。
+import type { SessionInjectAttachment } from './protocol.js';
 // task-06（design §5.4.4）：onTurnMessage/onTurnResult 参数类型从 Claude SDK 专属类型
 // 放宽为 provider-neutral 联合，支持 Codex flat message/result 透传。
 import type {
@@ -282,6 +284,9 @@ interface ClientLike {
   ): Promise<unknown>;
   markOffline?(runtimeId: string): Promise<unknown>;
   claimLease(leaseId: string, runtimeId: string): Promise<Record<string, unknown>>;
+  // 2026-08-20-session-multimodal-attachments task-09：会话附件下载（可选——
+  // HubClient 已实现；测试 mock 未实现时附件回拉/落盘走失败降级标注）。
+  downloadSessionAttachment?(attachmentId: string): Promise<Buffer>;
   startLease(leaseId: string, claimToken: string): Promise<unknown>;
   completeLease(
     leaseId: string,
@@ -2905,7 +2910,26 @@ export class Daemon {
         if (claimToken) {
           await this._sessionManager.refreshClaimToken(sessionId, claimToken);
         }
-        await this._sessionManager.inject(sessionId, prompt, runId);
+        // 2026-08-20-session-multimodal-attachments task-09：附件透传（可选）。
+        // raw.attachments 即协议 SessionInjectAttachment[]（snake_case）；下载闭包
+        // 用 daemon 既有 hub client（D-4 回拉 / disk 落盘共用），旧 payload 无此键
+        // → undefined 零回归。
+        const attachments = raw.attachments as SessionInjectAttachment[] | undefined;
+        const downloadAttachment = attachments?.length
+          ? async (id: string): Promise<Buffer> => {
+              if (!this._client.downloadSessionAttachment) {
+                throw new Error('hub client does not support attachment download');
+              }
+              return this._client.downloadSessionAttachment(id);
+            }
+          : undefined;
+        await this._sessionManager.inject(
+          sessionId,
+          prompt,
+          runId,
+          attachments,
+          downloadAttachment,
+        );
         break;
       }
       case MSG.SESSION_INTERRUPT: {

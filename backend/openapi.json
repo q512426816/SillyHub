@@ -11561,6 +11561,143 @@
         }
       }
     },
+    "/api/daemon/session-attachments": {
+      "post": {
+        "tags": [
+          "session-attachments"
+        ],
+        "summary": "Upload Attachment",
+        "description": "上传会话附件（multipart：file + kind 表单；FR-1/FR-3/FR-8）。\n\n成功即建草稿行（session_id NULL）；限制校验（大小/白名单/PIL magic）\n在 service 抛 413/415（AppError 惯例同 file 模块）。",
+        "operationId": "upload_attachment_api_daemon_session_attachments_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_attachment_api_daemon_session_attachments_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachmentRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/session-attachments/{attachment_id}/content": {
+      "get": {
+        "tags": [
+          "session-attachments"
+        ],
+        "summary": "Get Attachment Content",
+        "description": "流式回附件字节（历史回显/预览/daemon 回拉；FR-6）。\n\n内容寻址不可变 → ``Cache-Control: immutable`` + ETag=sha256 + If-None-Match\n命中短路 304（同对象二次拉取零字节）；展示名走 RFC 5987（中文兼容）。",
+        "operationId": "get_attachment_content_api_daemon_session_attachments__attachment_id__content_get",
+        "parameters": [
+          {
+            "name": "attachment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Attachment Id"
+            }
+          },
+          {
+            "name": "if_none_match",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If None Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/session-attachments/{attachment_id}": {
+      "delete": {
+        "tags": [
+          "session-attachments"
+        ],
+        "summary": "Delete Attachment",
+        "description": "删除草稿附件（仅 session_id NULL；bound 409；FR-8）。\n\n只删行不删对象（D-5：内容寻址对象可能共享，V1 孤儿由清理任务兜）。",
+        "operationId": "delete_attachment_api_daemon_session_attachments__attachment_id__delete",
+        "parameters": [
+          {
+            "name": "attachment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Attachment Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/custom-skills": {
       "get": {
         "tags": [
@@ -27852,6 +27989,73 @@
         "title": "ArtifactEntry",
         "description": "A single artifact file under .runtime/artifacts/."
       },
+      "AttachmentRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "image",
+              "file"
+            ],
+            "title": "Kind"
+          },
+          "media_type": {
+            "type": "string",
+            "title": "Media Type"
+          },
+          "bytes": {
+            "type": "integer",
+            "title": "Bytes"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "media_type",
+          "bytes",
+          "name",
+          "created_at"
+        ],
+        "title": "AttachmentRead",
+        "description": "上传/附件行读取 DTO（design §5.1；consumed by task-04/11）。"
+      },
       "AuditBatchRequest": {
         "properties": {
           "runtime_id": {
@@ -28179,6 +28383,29 @@
           "file"
         ],
         "title": "Body_import_problems_preview_api_ppm_problem_list_import_preview_post"
+      },
+      "Body_upload_attachment_api_daemon_session_attachments_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "image",
+              "file"
+            ],
+            "title": "Kind",
+            "default": "image"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_attachment_api_daemon_session_attachments_post"
       },
       "Body_upload_file_api_file_upload_post": {
         "properties": {
@@ -34172,6 +34399,11 @@
               }
             ],
             "title": "Api Key Masked"
+          },
+          "multimodal": {
+            "type": "string",
+            "title": "Multimodal",
+            "default": "auto"
           },
           "created_at": {
             "type": "string",
@@ -47193,11 +47425,20 @@
               }
             ],
             "title": "Llm Provider Id"
+          },
+          "attachment_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Attachment Ids"
           }
         },
         "type": "object",
         "title": "SessionInjectRequest",
-        "description": "POST /api/daemon/sessions/{id}/inject 请求体（FR-02 / design §5 Wave1）。\n\n``agent_profile_id`` 非空且 ≠ 会话当前档案 → 切档案；``llm_provider_id``\n非空且 ≠ 当前 → 切供应商（空串/\"none\" 语义=切回本机默认）。切换校验与\nSESSION_SWITCH_CONFIG 下发归 task-05，本 DTO 只透传。\n\nql-20260817-010：**静默切换**——携带切换字段时 prompt 可为空串（切换轮\n不产生用户消息与模型回应，daemon 只 reload 配置）；纯追问（无切换字段）\n仍要求非空 prompt。"
+        "description": "POST /api/daemon/sessions/{id}/inject 请求体（FR-02 / design §5 Wave1）。\n\n``agent_profile_id`` 非空且 ≠ 会话当前档案 → 切档案；``llm_provider_id``\n非空且 ≠ 当前 → 切供应商（空串/\"none\" 语义=切回本机默认）。切换校验与\nSESSION_SWITCH_CONFIG 下发归 task-05，本 DTO 只透传。\n\nql-20260817-010：**静默切换**——携带切换字段时 prompt 可为空串（切换轮\n不产生用户消息与模型回应，daemon 只 reload 配置）；纯追问（无切换字段）\n仍要求非空 prompt。\n\n2026-08-20-session-multimodal-attachments task-05：``attachment_ids`` 附件\n引用（上传端点产出的 SessionAttachment id）；**D-7 豁免**——附件非空时\nprompt 可为空（看图说话）；上限 10 = 图片 5 + 文件 5（逐 kind 校验归\nservice，DTO 层总量兜底）。"
       },
       "SessionInjectResponse": {
         "properties": {
