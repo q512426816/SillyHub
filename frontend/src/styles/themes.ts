@@ -5,7 +5,7 @@
  *   供 antd 等运行时消费方按当前主题取色 (themes[theme].color.*);
  *   task-02 的 globals.css CSS 变量双套、task-04 store、task-05 antd 动态化均以本文件为取值契约
  * - radius / shadow / font / spacing 两套主题共享,不进 ThemeDef,
- *   留在 tokens.ts 与 globals.css 消费侧 (design §5 P0)
+ *   留在 globals.css 消费侧 (design §5 P0;原 tokens.ts 已于 task-08 删除)
  *
  * 色阶严格采用 Tailwind v3 默认值,禁止自行调色。
  * 新增颜色必须经本文件入口 (边界 #5,接替 tokens.ts 的 palette 入口职责)。
