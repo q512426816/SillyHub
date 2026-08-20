@@ -146,10 +146,10 @@ async def test_get_runtime_progress(runtime_env, auth_headers):
     assert body["current_stage"] == "execute"
     assert body["current_change"] == "change-001"
     assert body["stages"]["scan"]["status"] == "completed"
-    # RPC 契约
+    # RPC 契约（root_path 取 fixture 绑定行的 C:\repo；无前缀配置原样下发）
     call = env["hub"].calls[0]
     assert call["method"] == "runtime.read_progress"
-    assert call["params"] == {"workspace_id": env["ws_id"]}
+    assert call["params"] == {"workspace_id": env["ws_id"], "root_path": r"C:\repo"}
 
 
 async def test_get_runtime_progress_none(runtime_env, auth_headers):
