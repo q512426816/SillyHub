@@ -88,7 +88,7 @@ export function TopBar({ displayName, onLogout }: TopBarProps) {
   const { label: switchLabel, href: switchHref } = resolvePlatformSwitch(pathname);
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-4 shadow-sm">
+    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-4 border-b bg-card px-4 shadow-sm">
       {/* task-09：工作区切换器（当前 ws 名 + daemon 徽标），顶栏最左侧锚点。
           ql-20260711-002：/ppm 下不渲染——PPM 不依赖工作区（页面/API 全走 /api/ppm/...、
           导航全 absolute），避免顶栏常驻「选择工作区」引导态误导用户以为必须先选工作区。 */}

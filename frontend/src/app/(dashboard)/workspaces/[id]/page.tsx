@@ -2,13 +2,12 @@
 
 import { useEffect, useState } from "react";
 
-import { Collapse, type CollapseProps } from "antd";
 import { AgentModelInput } from "@/components/AgentModelInput";
 import { SharedDaemonToggle } from "@/components/workspace/shared-daemon-toggle";
 import { LinkedProjectsSection } from "@/components/workspace/LinkedProjectsSection";
 import { WorkspaceConfigCard } from "@/components/workspace-config-card";
 import { Button } from "@/components/ui/button";
-import { PageContainer } from "@/components/layout";
+import { PageContainer, SectionCard } from "@/components/layout";
 import { WorkspaceDaemonSwitcher } from "@/components/workspace-daemon-switcher";
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { WorkspaceHeroHeader } from "@/components/workspace/hero-header";
@@ -24,11 +23,11 @@ import {
 import { listDaemonInstances, listDaemonRuntimes, PROVIDER_META, type DaemonInstanceRead, type DaemonRuntimeRead } from "@/lib/daemon";
 import { listComponents } from "@/lib/components";
 import { listChanges } from "@/lib/changes";
+import { listQuicklogEntries } from "@/lib/quicklog";
 import {
   getSpecWorkspace,
   type SpecWorkspace,
 } from "@/lib/spec-workspaces";
-import { getRuntimeProgress } from "@/lib/runtime";
 import {
   getWorkspace,
   updateWorkspace,
@@ -57,7 +56,8 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [componentCount, setComponentCount] = useState<number>(0);
   const [activeChanges, setActiveChanges] = useState<number>(0);
   const [archivedChanges, setArchivedChanges] = useState<number>(0);
-  const [currentStage, setCurrentStage] = useState<string | null>(null);
+  // ql-20260820-013：统计第四卡由"运行时阶段"改为快速修复条数（用户反馈）
+  const [quickTotal, setQuickTotal] = useState<number>(0);
   const [myBinding, setMyBinding] = useState<MemberBindingView | null>(null);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -143,13 +143,13 @@ export default function WorkspaceDetailPage({ params }: Props) {
     try {
       // 第六批：fetchMyBinding 仅依赖 workspaceId，与上 6 路相互独立，并入
       // Promise.all 并行（原串行排在 6 路之后，白多一个 RTT）。各路已有 .catch 降级。
-      const [ws, sw, comps, active, archived, rt, binding] = await Promise.all([
+      const [ws, sw, comps, active, archived, ql, binding] = await Promise.all([
         getWorkspace(workspaceId),
         getSpecWorkspace(workspaceId).catch(() => null),
         listComponents(workspaceId).catch(() => ({ items: [], total: 0 })),
         listChanges(workspaceId, { location: "active" }).catch(() => ({ items: [], total: 0 })),
         listChanges(workspaceId, { location: "archive" }).catch(() => ({ items: [], total: 0 })),
-        getRuntimeProgress(workspaceId).catch(() => null),
+        listQuicklogEntries(workspaceId).catch(() => ({ items: [], total: 0 })),
         fetchMyBinding(workspaceId).catch(() => null),
       ]);
       setWorkspace(ws);
@@ -168,7 +168,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
       setComponentCount(comps.total ?? comps.items?.length ?? 0);
       setActiveChanges(active.total ?? active.items?.length ?? 0);
       setArchivedChanges(archived.total ?? archived.items?.length ?? 0);
-      setCurrentStage(rt?.current_stage ?? null);
+      setQuickTotal(ql.total ?? ql.items?.length ?? 0);
 
       // task-08 / D-002：获取当前成员 binding 以判定 init 状态
       setMyBinding(binding);
@@ -271,14 +271,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
     </Button>
   );
 
-  const basicInfoItems: CollapseProps["items"] = [
-    {
-      key: "basic-info",
-      label: "基本信息",
-      extra: basicInfoExtra,
-      forceRender: true,
-      children: (
-        <>
+  // ql-20260820-013 用户反馈：信息区由 ghost Collapse 改回卡片形式（SectionCard
+  // 平铺），编辑按钮与折叠头的事件冲突随之消失（原 bug：点"编辑"会同时触发展开收起）。
+  const basicInfoBody = (
+    <>
           <dl className="grid grid-cols-[6rem_1fr] gap-y-1 text-xs">
             <WorkspacePathFields
               workspace={workspace}
@@ -382,17 +378,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
               onChanged={() => void load()}
             />
           </div>
-        </>
-      ),
-    },
-  ];
+    </>
+  );
 
-  const configItems: CollapseProps["items"] = [
-    {
-      key: "default-agent",
-      label: "默认智能体提供方",
-      forceRender: true,
-      children: (
+  const defaultAgentBody = (
         <div className="space-y-2.5">
           <p className="text-xs text-muted-foreground">
             自动派发（阶段流转、scan-generate）且未显式指定 provider 时使用。留空则由守护进程默认决定。
@@ -451,49 +440,9 @@ export default function WorkspaceDetailPage({ params }: Props) {
             </p>
           )}
         </div>
-      ),
-    },
-    {
-      key: "linked-projects",
-      label: "关联 PPM 项目",
-      forceRender: true,
-      children: <LinkedProjectsSection workspaceId={workspaceId} />,
-    },
-    {
-      key: "workspace-config",
-      label: "规范工作区配置",
-      forceRender: true,
-      children: (
-        <WorkspaceConfigCard
-          workspace={workspace}
-          specWs={specWs}
-          myBinding={myBinding}
-          boundDaemon={boundDaemon}
-          isOwner={isOwner}
-          onRefresh={load}
-          componentCount={componentCount}
-        />
-      ),
-    },
-  ];
+  );
 
-  if (myBinding) {
-    configItems.push({
-      key: "shared-daemon",
-      label: "守护进程共享",
-      forceRender: true,
-      children: (
-        <SharedDaemonToggle
-          workspaceId={workspaceId}
-          shared={myBinding?.shared}
-          daemonLabel={
-            boundDaemon?.display_alias ?? boundDaemon?.hostname ?? null
-          }
-          onChanged={() => void load()}
-        />
-      ),
-    });
-  }
+  // 关联 PPM 项目 / 规范工作区配置：两组件自带 SectionCard 外观，直接平铺不套卡。
 
   return (
     <PageContainer size="full">
@@ -511,28 +460,51 @@ export default function WorkspaceDetailPage({ params }: Props) {
           </div>
         )}
 
-        {/* 段②：统计卡行 */}
+        {/* 段②：统计卡行（ql-20260820-013 第四卡=快速修复条数） */}
         <WorkspaceStatsRow
           workspaceId={workspaceId}
           componentCount={componentCount}
           activeChanges={activeChanges}
           archivedChanges={archivedChanges}
-          currentStage={currentStage}
+          quickTotal={quickTotal}
         />
 
         {/* 段③：快速入口宫格 */}
         <QuickEntryGrid workspaceId={workspaceId} />
 
-        {/* 段④-1：基本信息（默认展开） */}
-        <Collapse
-          ghost
-          bordered={false}
-          defaultActiveKey={["basic-info"]}
-          items={basicInfoItems}
-        />
+        {/* 段④-1：基本信息卡片（编辑入口在卡头 extra） */}
+        <SectionCard title="基本信息" extra={basicInfoExtra} bodyPadding="p-4">
+          {basicInfoBody}
+        </SectionCard>
 
-        {/* 段④-2：配置分组（默认折叠） */}
-        <Collapse ghost bordered={false} items={configItems} />
+        {/* 段④-2：配置区卡片两列（自带卡的组件平铺，裸内容套 SectionCard） */}
+        <div className="grid items-start gap-4 lg:grid-cols-2">
+          <SectionCard title="默认智能体提供方" bodyPadding="p-4">
+            {defaultAgentBody}
+          </SectionCard>
+          <LinkedProjectsSection workspaceId={workspaceId} />
+          <WorkspaceConfigCard
+            workspace={workspace}
+            specWs={specWs}
+            myBinding={myBinding}
+            boundDaemon={boundDaemon}
+            isOwner={isOwner}
+            onRefresh={load}
+            componentCount={componentCount}
+          />
+          {myBinding && (
+            <SectionCard title="守护进程共享" bodyPadding="p-4">
+              <SharedDaemonToggle
+                workspaceId={workspaceId}
+                shared={myBinding?.shared}
+                daemonLabel={
+                  boundDaemon?.display_alias ?? boundDaemon?.hostname ?? null
+                }
+                onChanged={() => void load()}
+              />
+            </SectionCard>
+          )}
+        </div>
       </div>
     </PageContainer>
   );

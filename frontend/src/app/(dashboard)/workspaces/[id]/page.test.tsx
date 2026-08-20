@@ -98,7 +98,7 @@ vi.mock("@/lib/agent", async () => {
   const actual = await vi.importActual<typeof import("@/lib/agent")>("@/lib/agent");
   return { ...actual, listAgentRuns: vi.fn(async () => []) };
 });
-vi.mock("@/lib/runtime", () => ({ getRuntimeProgress: vi.fn(async () => null) }));
+vi.mock("@/lib/quicklog", () => ({ listQuicklogEntries: vi.fn(async () => ({ items: [], total: 0 })) }));
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
 
@@ -236,15 +236,18 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
 
   // ── task-05 / 2026-08-20-workspace-overview-redesign：统计四数字与 6 入口 href ──
 
-  it("统计四数字按 mock 数据渲染（组件/进行中/已归档/运行时阶段）", async () => {
+  it("统计四数字按 mock 数据渲染（组件/进行中/已归档/快速修复）", async () => {
     await renderWithStrategy("platform-managed", { componentCount: 7 });
-    // 四张统计卡标签应存在
+    // 四张统计卡标签应存在（ql-20260820-013 第四卡=快速修复）
     expect(screen.getByText("项目组组件")).toBeInTheDocument();
     expect(screen.getByText("进行中变更")).toBeInTheDocument();
     expect(screen.getByText("已归档变更")).toBeInTheDocument();
-    expect(screen.getByText("运行时阶段")).toBeInTheDocument();
-    const runtimeCard = screen.getByText("运行时阶段").closest("a") ?? screen.getByText("运行时阶段").closest("div");
-    expect(runtimeCard).toHaveTextContent("—");
+    const quickCard = screen.getByText("快速修复").closest("a");
+    expect(quickCard).toHaveAttribute(
+      "href",
+      "/workspaces/ws-1/changes",
+    );
+    expect(quickCard).toHaveTextContent("0");
     // 组件数显式断言
     const componentCard = screen.getByText("项目组组件").closest("a");
     expect(componentCard).toHaveTextContent("7");
@@ -336,9 +339,8 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     // 不应出现"请先绑定"占位
     expect(screen.queryByText("请先绑定守护进程。")).not.toBeInTheDocument();
 
-    // antd Collapse 折叠面板下隐藏状态的 select 无法被 findByRole("combobox") 命中；
-    // 通过 querySelector 直接取 select 元素（语义等价：验证已绑 daemon 有在线 provider
-    // 时渲染 provider 选择器）。
+    // ql-20260820-013 信息区已平铺为 SectionCard 卡片（原 Collapse 移除），
+    // select 不再处于折叠面板，querySelector 取法保留（语义不变）。
     const select = await waitFor(() => {
       const el = document.querySelector('select');
       expect(el).toBeInstanceOf(HTMLSelectElement);

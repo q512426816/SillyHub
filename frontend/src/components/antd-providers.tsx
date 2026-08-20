@@ -43,6 +43,8 @@ export function AntdProviders({ children }: { children: ReactNode }) {
         token: {
           // 主色 + 状态语义色 (D-005;info=各主题 accent 青,D-003@v2)
           colorPrimary: t.primary,
+          // ql-20260820-010 对照原型:hover 加深(primaryHover,非 antd 默认变浅)
+          colorPrimaryHover: t.primaryHover,
           colorSuccess: t.semantic.success,
           colorWarning: t.semantic.warning,
           colorError: t.semantic.error,
@@ -60,10 +62,11 @@ export function AntdProviders({ children }: { children: ReactNode }) {
         },
         components: {
           Table: {
-            headerBg: t.slate[100], // 中性表头底,两主题同构
+            // ql-20260820-009 对照原型:表头/行悬浮/footer 用主题 brand-50 淡底
+            headerBg: t.brand[50],
             headerColor: t.slate[600],
-            rowHoverBg: t.bg, // blue 主题下=#f8fafc,与旧 tokens.slate[50] 一致
-            footerBg: t.slate[100],
+            rowHoverBg: t.brand[50],
+            footerBg: t.brand[50],
             borderColor: t.border,
           },
           Card: {
@@ -82,6 +85,9 @@ export function AntdProviders({ children }: { children: ReactNode }) {
           Button: {
             borderRadius: RADIUS_MD,
             controlHeight: CONTROL_HEIGHT,
+            // ql-20260820-010:主按钮静止无投影(hover 投影由 globals.css
+            // .ant-btn-primary:hover 提供,值走主题 --shadow-primary)
+            primaryShadow: "none",
           },
         },
       }}

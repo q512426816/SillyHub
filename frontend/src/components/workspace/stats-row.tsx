@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Activity, Archive, GitBranch, Puzzle } from "lucide-react";
+import { Archive, GitBranch, Puzzle, Zap } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -10,10 +10,9 @@ interface WorkspaceStatsRowProps {
   componentCount: number;
   activeChanges: number;
   archivedChanges: number;
-  currentStage: string | null;
+  /** 快速修复总条数（QUICKLOG；用户反馈 ql-20260820-013：原"运行时阶段"卡替换）。 */
+  quickTotal: number;
 }
-
-const stageLabel = "运行时阶段";
 
 function StatCard({
   href,
@@ -63,7 +62,7 @@ export function WorkspaceStatsRow({
   componentCount,
   activeChanges,
   archivedChanges,
-  currentStage,
+  quickTotal,
 }: WorkspaceStatsRowProps): JSX.Element {
   return (
     <section
@@ -92,10 +91,10 @@ export function WorkspaceStatsRow({
         value={archivedChanges}
       />
       <StatCard
-        href={`/workspaces/${workspaceId}/runtime`}
-        icon={Activity}
-        label={stageLabel}
-        value={currentStage ?? "—"}
+        href={`/workspaces/${workspaceId}/changes`}
+        icon={Zap}
+        label="快速修复"
+        value={quickTotal}
         clickable
       />
     </section>

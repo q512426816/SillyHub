@@ -50,7 +50,7 @@ export const SectionCard = React.forwardRef<HTMLDivElement, SectionCardProps>(
         className={cn(
           "bg-card border rounded-lg shadow-sm",
           hover === "lift" &&
-            "transition hover:shadow-md hover:-translate-y-0.5",
+            "transition-[box-shadow,transform,border-color] duration-200 hover:border-brand-300 hover:shadow-lg hover:-translate-y-1",
           className,
         )}
         {...props}

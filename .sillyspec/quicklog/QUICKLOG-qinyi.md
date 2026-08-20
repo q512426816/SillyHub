@@ -224,3 +224,22 @@
 方案：前端三消费点默认/显式传 include_placeholder=true——表格 showPlaceholder 默认勾选（复选框保留、取消=收窄筛选）、tab 计数与详情关联卡显式带参；hasFilter 空态语义同步翻转为「隐藏占位才算筛选」；后端 API 默认语义不动
 结果：受影响 3 个测试文件全绿（43+13 用例），前端全量 1770 用例全绿，typecheck 通过
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx
+
+## ql-20260820-012-3dbc | 2026-08-20 15:29:02 | 恢复 commit 漏收且被清工作区的四轮 quick 改动（质感/卡片按钮/顶栏 sticky/两文档）
+状态：已完成
+关联变更：（无）
+文件：.claude/CLAUDE.md, .sillyspec/docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md, frontend/src/app/globals.css, frontend/src/components/antd-providers.tsx, frontend/src/components/app-shell.tsx, frontend/src/components/layout/data-table.tsx, frontend/src/components/layout/section-card.tsx, frontend/src/components/top-bar.tsx, frontend/src/components/workspace-card.tsx, frontend/tailwind.config.ts
+需求：恢复 commit 漏收且被清工作区的四轮 quick 改动（质感/卡片按钮/顶栏 sticky/两文档），源码与已部署容器一致化
+根因：提交主题变更时 quick 后续改动未纳入且工作区被清理，质感/顶栏/文档回退 HEAD
+方案：按会话内已验证 diff 逐文件重放十个文件（globals/tailwind/antd-providers/五组件/两文档）；FRONTEND_PAGE_STYLE.md 为有意文档更新（§0.5 主题系统），--force-baseline 显式解锁
+结果：tsc 0 error、eslint 0、相关 61 用例过、部署 200、容器产物五项标识全命中，源码=容器=文档一致
+
+## ql-20260820-013-cc92 | 2026-08-20 21:34:14 | 工作区页四点反馈修复——Tabs 风格统一、信息区卡片化、编辑折叠冲突、统计卡换快速修复
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/page.tsx, frontend/src/components/workspace-tabs.tsx, frontend/src/components/workspace/stats-row.tsx
+需求：工作区页四点反馈修复——Tabs 风格统一、信息区卡片化、编辑折叠冲突、统计卡换快速修复
+根因：子导航下划线旧风格不协调；ghost Collapse 无卡片外观且面板头点击区与编辑按钮事件冲突；运行时阶段卡信息价值低
+方案：Tabs 胶囊分段主题化；Collapse 移除改 SectionCard 平铺（基本信息全宽+配置两列）；stats 第四卡 currentStage→quickTotal（listQuicklogEntries 取 total 替换 getRuntimeProgress）
+结果：tsc 0 error、eslint 0、页面测试 10/10、全量 168 文件 1793 用例复跑两轮全绿（首轮 1 超时用例为满载 flaky 非本次引入）
+审计：📝 文档欠账（D-8）：4 个源码文件改动未同步任何模块文档（涉及模块：frontend）

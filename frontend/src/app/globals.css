@@ -91,9 +91,12 @@
     --radius-md: 8px;
     --radius-lg: 12px;
     --radius-xl: 16px;
-    --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
-    --shadow-md: 0 2px 8px -1px rgba(15, 23, 42, 0.08), 0 1px 3px 0 rgba(15, 23, 42, 0.04);
-    --shadow-lg: 0 8px 24px -4px rgba(15, 23, 42, 0.10), 0 4px 8px -2px rgba(15, 23, 42, 0.05);
+    /* 阴影主题化 token(ql-20260820-009,对照原型紫调柔影;blue 覆盖块回写旧灰调);
+       radius/font/spacing 仍为共享 token */
+    --shadow-sm: 0 1px 2px 0 rgba(30, 27, 75, 0.06);
+    --shadow-md: 0 4px 14px rgba(30, 27, 75, 0.08);
+    --shadow-lg: 0 16px 40px rgba(109, 40, 217, 0.16);
+    --shadow-primary: 0 4px 14px rgba(124, 58, 237, 0.32);
     --font-sans: Inter, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
     --spacing-base: 4px;
 
@@ -162,6 +165,12 @@
     --color-error: #ef4444;
     --color-info: #06b6d4;
     --color-neutral: #64748b;
+    /* 阴影:旧版灰调值原样平移(ql-20260820-009 主题化改动的 blue 侧);
+       primary 投影用品牌蓝调,与 purple 主题紫调投影同构 */
+    --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
+    --shadow-md: 0 2px 8px -1px rgba(15, 23, 42, 0.08), 0 1px 3px 0 rgba(15, 23, 42, 0.04);
+    --shadow-lg: 0 8px 24px -4px rgba(15, 23, 42, 0.10), 0 4px 8px -2px rgba(15, 23, 42, 0.05);
+    --shadow-primary: 0 4px 14px rgba(37, 99, 235, 0.32);
   }
 
   /* 暗色模式变量保留,当前未启用(D-001 非目标),勿在组件中使用 dark: 前缀 */
@@ -263,14 +272,15 @@
 /* task-11 通用动效 utility(组件层 SectionCard 已自带 hover-lift,此类供其它自定义容器按需挂载;
    不覆盖 antd 原生交互态——antd Card/Button 自身样式优先级更高,此 utility 仅作用于显式引用处)。 */
 @layer components {
-  /* hover-lift:shadow 抬升 + translateY(-1px),base 时长 150ms */
+  /* hover-lift:阴影抬升 + translateY(-2px),base 时长 150ms;
+     ql-20260820-009 对照原型强化(紫调 shadow-md token 已在双套块主题化) */
   .sh-hover-lift {
     transition: box-shadow var(--transition-base),
                 transform var(--transition-base);
   }
   .sh-hover-lift:hover {
     box-shadow: var(--shadow-md);
-    transform: translateY(-1px);
+    transform: translateY(-2px);
   }
 
   /* press:active 微缩 0.98,fast 时长 100ms,仅作用于自定义按钮容器 */
@@ -295,6 +305,31 @@
   .sh-btn-press:active {
     transform: none !important;
   }
+}
+
+/* ── ql-20260820-009 组件质感对齐原型(thin overrides) ──
+   置于文件级(非 @layer):Tailwind 只 purge @layer 内未命中 content 的选择器,
+   .ant-* 是运行时类不在源码出现,进 @layer 会被 purge(silly-route-loading 同款先例位置)。
+   只动呈现层细节,不覆盖 antd 布局;色值全部经主题变量,两主题自动换肤 */
+
+/* 主按钮 hover 品牌调投影(原型 .btn-primary:hover;antd 无 hover-shadow token) */
+.ant-btn-primary:not(:disabled):hover,
+.ant-btn-primary:not(:disabled):focus-visible {
+  box-shadow: var(--shadow-primary);
+}
+
+/* 分页器:胶囊圆角 6(原型 .pg);当前页配色走 antd colorPrimary 不覆盖 */
+.ant-pagination .ant-pagination-item {
+  border-radius: 6px;
+}
+
+/* DataTable 弱斑马纹(原型 .dt tbody 偶行 #FDFCFF):
+   brand-50 33% 混白近似,两主题自动;hover 底色交还 antd rowHoverBg(brand-50) */
+.sh-data-table .ant-table-tbody > tr:nth-child(even) > td {
+  background: color-mix(in srgb, var(--color-brand-50) 33%, #ffffff);
+}
+.sh-data-table .ant-table-tbody > tr:nth-child(even):hover > td {
+  background: transparent;
 }
 
 /* 路由段 loading 骨架(性能优化 2026-07-22,见 (dashboard)/loading.tsx) */

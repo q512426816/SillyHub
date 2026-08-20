@@ -8,7 +8,8 @@ source_commit: 5a00fc7e
 
 > 本规范以 `/ppm/projects` 当前样式为**唯一基准**,后续新建或改造其它列表/管理页一律对齐。
 > 基准组件:`PpmResourceTable`(`frontend/src/components/ppm-resource-table.tsx`,通用 CRUD 表格)+ `projects/page.tsx`(页面配置)。
-> 设计系统总纲(token/主题来源):`.sillyspec/changes/archive/2026-06-21-2026-06-21-frontend-style-system/design.md`。
+> **适用范围（D-304，2026-08-20-workspace-subpages-style-unify 立）**：本规范 §1-§12 以 PPM 类列表/管理页为基准（antd 全量条款适用）；**工作区工作台式页面**（/workspaces/[id] 及其子页）按 §0.5 主题系统 + 概览页基线执行（shadcn Button/SectionCard 四件套），§4 DataTable 强制、§5 antd Button 强制、§9 bg-red-50 错误条模板、§11 Don't 清单在该范围不适用。
+> 设计系统总纲(2026-08-20 起为 AI-Native 双主题):`.sillyspec/changes/2026-08-20-frontend-ai-native-style/design.md` + 原型 `prototype-frontend-ai-native-style.html`。
 
 ## 0. 一句话原则
 
@@ -16,7 +17,21 @@ source_commit: 5a00fc7e
 - **布局/间距/字号/颜色用 tailwind class**(`flex` / `grid` / `gap-*` / `text-*` / `bg-*`)—— tailwind 是样式工具,不是 shadcn,保留。
 - **页面骨架用共享 layout 组件**(`PageContainer` / `PageHeader` / `SectionCard` / `DataTable`),不自己堆 div。
 - **颜色不硬编码 hex**,走 antd token(主题)或 tailwind CSS 变量(`--background` / `--card` / `--muted` …)。
+- **品牌色一律用 `brand-*` 语义阶**(见 0.5 主题系统),禁止 `bg-blue-*`/`text-blue-*` 等蓝阶类表品牌用途。
 - **状态用 antd Badge(status)**,**分类用 antd Tag(color)**,空值统一 `—`。
+
+## 0.5 主题系统(2026-08-20-frontend-ai-native-style,多主题必读)
+
+**双主题**:`blue`(旧明亮蓝,观感平移)与 `ai-native`(AI 紫 #7C3AED × 交互青 #0891B2,默认)。顶栏 Palette 图标一键切换,localStorage `sillyhub-theme` 记忆,刷新不闪烁(layout inline script)。
+
+写页面/组件时的多主题铁律:
+
+1. **单一源**:`frontend/src/styles/themes.ts` 是两套取值唯一来源(含 brand 十一档/语义五档/primary/primaryHover/accent/bg/border)。改色改这里 + globals.css 双套变量块同步,禁止组件散落 hex。
+2. **品牌色类名用 `brand-*`**:`bg-brand-600`/`text-brand-700`/`border-brand-300`/`from-brand-700` 等(tailwind 映射 `var(--color-brand-*)`,随 `html data-theme` 自动换肤;`/` 透明度修饰符可用,如 `bg-brand-500/30`)。**blue 阶类仅限真信息蓝**(信息提示框/风险刻度/外部标识色板),品牌用途禁用。
+3. **阴影走主题 token**:`shadow-sm/md/lg`(tailwind boxShadow 已 var 化)+ `shadow-primary`(品牌投影,仅按钮 hover 类场景);主按钮 hover 投影已由 globals.css `.ant-btn-primary:hover` 全局提供,业务代码不重复写。
+4. **antd 组件色不手写**:ConfigProvider token 已从 themes.ts 动态取(表头/行悬浮=brand-50,主按钮 hover=primaryHover 加深);组件级覆盖颜色前先确认是否该进 token。
+5. **info 语义例外(D-003@v2)**:状态徽标 info 档两主题统一 accent 青(blue=#06b6d4 / ai-native=#0891B2),非旧蓝——保证状态语义跨主题一致。
+6. **顶栏固定**:`top-bar` 为 `sticky top-0 h-16`,与侧边栏 Brand 区同高 64px 对齐;新页面内容区勿加自己的 sticky 头与它重叠。
 
 ---
 

@@ -147,7 +147,9 @@ export function WorkspaceCard({
     <article
       onClick={onActivate ? handleCardClick : undefined}
       className={cn(
-        "flex flex-col rounded-lg border bg-card shadow-sm transition-shadow hover:shadow-md",
+        // ql-20260820-010 对照原型 .ws-card:hover 三件套:
+        // 抬升 -4px + 紫调大阴影(shadow-lg 主题 token) + 边框加深(brand-300)
+        "flex flex-col rounded-lg border bg-card shadow-sm transition-[box-shadow,transform,border-color] duration-200 hover:-translate-y-1 hover:border-brand-300 hover:shadow-lg",
         onActivate && "cursor-pointer",
       )}
     >

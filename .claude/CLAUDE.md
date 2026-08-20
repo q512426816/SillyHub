@@ -7,7 +7,7 @@
 
 1. 禁止绕过本文件规则和 SillySpec 流程。
 2. 修改代码前，必须先说明依据的文档路径或现有代码依据。
-3. 新功能 / 大改动必须走完整 SillySpec 流程技能：`brainstorm → plan → execute → verify → archive`。
+3. 新功能 / 大改动必须走完整 SillySpec 流程技能：`brainstorm → plan → execute → verify → （人工确认再执行）archive`。
 4. 小修复 / 小调整走 SillySpec quick 技能：`sillyspec run quick`。
 5. 执行顺序：文档 → 读代码 → 写测试 → 写实现 → 跑测试 → 验收 → 更新文档。 
 6. 中途停下用 `sillyspec status` / `sillyspec resume` 存进度，不直接 commit 半成品。

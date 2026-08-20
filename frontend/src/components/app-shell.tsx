@@ -327,7 +327,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       >
         {/* Brand：项目 LOGO（public/logo.png，含 SILLYHUB 文字） */}
         <div
-          className={`border-b flex items-center gap-2 py-4 transition-all duration-200 ${
+          className={`border-b flex h-16 shrink-0 items-center gap-2 transition-all duration-200 ${
             collapsed ? "justify-center px-2" : "px-5"
           }`}
         >

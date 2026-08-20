@@ -29,7 +29,7 @@ export function DataTable<T extends object>({
   ...rest
 }: DataTableProps<T>): React.ReactElement {
   return (
-    <div className={cn("overflow-hidden", className)}>
+    <div className={cn("sh-data-table overflow-hidden", className)}>
       <Table<T>
         {...rest}
         locale={{ emptyText, ...locale }}

@@ -39,7 +39,7 @@ export function WorkspaceTabs({
     <>
       <nav
         aria-label="工作区标签页"
-        className="flex min-w-0 flex-wrap gap-1 border-b border-border"
+        className="flex min-w-0 flex-wrap gap-1.5 rounded-lg border bg-card p-1.5 shadow-sm"
       >
         {TABS.map((tab) => {
           const active = isActive(tab.path);
@@ -49,10 +49,12 @@ export function WorkspaceTabs({
               href={`${base}${tab.path}`}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "inline-flex h-8 items-center border-b-2 -mb-px px-3 text-xs",
+                // ql-20260820-013 用户反馈：下划线旧风格与工作台式不协调，
+                // 改胶囊分段（brand 主题化，同 FRONTEND_PAGE_STYLE §0.5 铁律）
+                "inline-flex h-8 items-center rounded-md px-3 text-xs transition-colors",
                 active
-                  ? "border-foreground text-foreground font-medium"
-                  : "border-transparent text-muted-foreground hover:text-foreground",
+                  ? "bg-brand-50 font-semibold text-brand-700"
+                  : "text-muted-foreground hover:bg-brand-50/60 hover:text-brand-700",
               )}
             >
               {tab.label}
