@@ -123,7 +123,7 @@ export default function LoginPage() {
 
   return (
     <main className="relative flex min-h-screen w-full overflow-hidden bg-background text-foreground">
-      {/* 左侧:品牌区(深蓝渐变 + 光斑 + 网格 + 特性条) */}
+      {/* 左侧:品牌区(品牌色渐变 + 光斑 + 网格 + 特性条,渐变/光斑经 brand 阶随主题切换) */}
       <BrandPanel />
 
       {/* 右侧:表单区(亮色 + 玻璃拟态登录卡) */}
@@ -131,7 +131,7 @@ export default function LoginPage() {
         {/* 右侧极淡背景光晕,呼应品牌区 */}
         <div
           aria-hidden
-          className="pointer-events-none absolute -right-32 -top-32 h-96 w-96 rounded-full bg-blue-100/60 blur-3xl"
+          className="pointer-events-none absolute -right-32 -top-32 h-96 w-96 rounded-full bg-[color:color-mix(in_srgb,var(--color-brand-100)_60%,transparent)] blur-3xl"
         />
         <div
           aria-hidden
@@ -146,8 +146,8 @@ export default function LoginPage() {
             </span>
           </div>
 
-          {/* 玻璃拟态登录卡 */}
-          <div className="rounded-2xl border border-white/60 bg-white/80 shadow-[0_8px_40px_-12px_rgba(37,99,235,0.18)] backdrop-blur-xl">
+          {/* 玻璃拟态登录卡(阴影取 brand-600 18% 透明度,blue 主题下与重构前取值一致) */}
+          <div className="rounded-2xl border border-white/60 bg-white/80 shadow-[0_8px_40px_-12px_color-mix(in_srgb,var(--color-brand-600)_18%,transparent)] backdrop-blur-xl">
             <div className="p-6 sm:p-9">
               <div className="mb-7">
                 <h1 className="text-2xl font-bold tracking-tight text-slate-900">
@@ -244,14 +244,14 @@ export default function LoginPage() {
   );
 }
 
-/** 左侧品牌区:深蓝渐变 + 径向光斑 + 细网格纹理 + lucide 特性条。 */
+/** 左侧品牌区:品牌色渐变(brand 阶,随主题切换) + 径向光斑 + 细网格纹理 + lucide 特性条。 */
 function BrandPanel() {
   return (
     <section className="relative hidden flex-1 flex-col overflow-hidden lg:flex">
-      {/* 深蓝渐变底(primary #2563EB → 深 slate/blue) */}
+      {/* 品牌渐变底(brand-700 → brand-800 → 深 slate-950;blue 主题=原深蓝观感) */}
       <div
         aria-hidden
-        className="absolute inset-0 bg-gradient-to-br from-blue-700 via-blue-800 to-slate-950"
+        className="absolute inset-0 bg-gradient-to-br from-brand-700 via-brand-800 to-slate-950"
       />
       {/* 细网格纹理 */}
       <div
@@ -270,7 +270,7 @@ function BrandPanel() {
       />
       <div
         aria-hidden
-        className="absolute bottom-[-5rem] right-[-3rem] h-96 w-96 rounded-full bg-blue-500/30 blur-3xl"
+        className="absolute bottom-[-5rem] right-[-3rem] h-96 w-96 rounded-full bg-[color:color-mix(in_srgb,var(--color-brand-500)_30%,transparent)] blur-3xl"
       />
       <div
         aria-hidden
@@ -290,7 +290,7 @@ function BrandPanel() {
 
       {/* 中部主视觉 */}
       <div className="relative z-10 flex flex-1 flex-col items-start justify-center gap-8 px-12 xl:px-16">
-        <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-xs font-medium text-blue-100 backdrop-blur-sm">
+        <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-xs font-medium text-brand-100 backdrop-blur-sm">
           <Sparkles className="h-3.5 w-3.5" />
           多智能体协作平台
         </div>
@@ -299,7 +299,7 @@ function BrandPanel() {
           <br />
           SillyHub
         </h2>
-        <p className="max-w-md text-sm leading-relaxed text-blue-100/80">
+        <p className="max-w-md text-sm leading-relaxed text-[color:color-mix(in_srgb,var(--color-brand-100)_80%,transparent)]">
           多智能体协作平台 · 知识沉淀 · 规格驱动开发,让团队协作与知识资产在一处生长。
         </p>
 
@@ -342,7 +342,7 @@ function FeatureItem({
       </span>
       <div>
         <div className="text-sm font-semibold text-white">{title}</div>
-        <div className="text-xs text-blue-100/70">{desc}</div>
+        <div className="text-xs text-[color:color-mix(in_srgb,var(--color-brand-100)_70%,transparent)]">{desc}</div>
       </div>
     </div>
   );
