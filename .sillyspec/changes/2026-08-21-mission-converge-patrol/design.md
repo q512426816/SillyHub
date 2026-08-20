@@ -115,7 +115,7 @@ runtime.daemon_instance_id 为 NULL——迁移期遗留 nullable）→ 跳过�
 | mission_patrol_zombie_after_minutes | 60 | ge=5 |
 | mission_patrol_revive_window_minutes | 30 | ge=5 |
 
-## 4. 生命周期契约
+## 4. 生命周期契约表
 
 | 事件 | 发起方 | 接收方 | 状态变化 |
 |---|---|---|---|
