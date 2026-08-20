@@ -27,12 +27,13 @@ import {
   listSimpleProjects,
 } from "@/lib/ppm/project";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
-import { DatePicker, Form, message, Modal, Radio, Segmented, Tabs } from "antd";
+import { DatePicker, Form, Modal, Radio, Segmented, Tabs } from "antd";
 import type {
   KanbanTaskCard,
   ProjectSimpleItem,
   TaskExecuteWithPlan,
 } from "@/lib/ppm/types";
+import { useNotify } from "@/lib/errors";
 import { listTaskExecutesWithPlanByDateRange, updateTaskExecute } from "@/lib/ppm/task";
 import { useKanbanStore } from "@/stores/kanban";
 import { DEFAULT_THEME, themes } from "@/styles";
@@ -77,6 +78,7 @@ const PALETTE = [
 
 export default function KanbanPage() {
   const { toast } = useToast();
+  const notify = useNotify();
 
   const users = useKanbanStore((s) => s.users);
   const tasks = useKanbanStore((s) => s.tasks);
@@ -144,12 +146,11 @@ export default function KanbanPage() {
       setActualExecutes(list);
     } catch (err) {
       setActualExecutes([]);
-      message.error(
-        err instanceof Error ? err.message : "加载实际工作表失败",
-      );
+      notify.error(err, "加载实际工作表失败");
     } finally {
       setActualLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dateRange, filters.project_id]);
 
   useEffect(() => {
@@ -363,6 +364,7 @@ function ActualEditModal({
 }) {
   const [form] = Form.useForm();
   const [busy, setBusy] = useState(false);
+  const notify = useNotify();
   const editable = execute?.status === "90";
 
   useEffect(() => {
@@ -398,9 +400,7 @@ function ActualEditModal({
         });
         onSaved();
       } catch (err) {
-        message.error(
-          err instanceof Error ? err.message : "保存实际工时失败",
-        );
+        notify.error(err, "保存实际工时失败");
       }
     } catch {
       // validateFields 失败:AntD Form.Item 已显示字段级错误,无需额外提示

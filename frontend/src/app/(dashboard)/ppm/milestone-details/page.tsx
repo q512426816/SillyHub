@@ -42,7 +42,6 @@ import {
   Form,
   Input,
   InputNumber,
-  message,
   Modal,
   Select,
   Table,
@@ -69,6 +68,7 @@ import {
   PlanDetailActions,
 } from "@/components/ppm-status-actions";
 import { ApiError } from "@/lib/api";
+import { useNotify } from "@/lib/errors";
 import {
   fmtDate,
   fmtDateTime,
@@ -792,6 +792,7 @@ function ModuleLevelTable({
   readOnly,
   refreshTick,
 }: ModuleLevelProps) {
+  const notify = useNotify();
   const [modules, setModules] = useState<PlanNodeModule[]>([]);
   const [loading, setLoading] = useState(true);
   // P2-2:模块 CRUD 抽屉状态
@@ -853,9 +854,7 @@ function ModuleLevelTable({
           await deletePlanNodeModule(m.id);
           await reload();
         } catch (err) {
-          message.error(
-            err instanceof Error ? err.message : "删除模块失败",
-          );
+          notify.error(err, "删除模块失败");
         }
       },
     });
@@ -1105,6 +1104,7 @@ export function ImportModuleModal({
   onClose,
   onSuccess,
 }: ImportModuleModalProps) {
+  const notify = useNotify();
   // step: 1=上传 2=预览 3=结果
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [uploading, setUploading] = useState(false);
@@ -1135,10 +1135,10 @@ export function ImportModuleModal({
       const resp = await importModulesPreview(planNodeId, projectId, file);
       if (resp.parse_errors.length > 0) {
         // 整体解析错误(如找不到表头)提示但仍进预览,让用户看到错误
-        message.warning(resp.parse_errors.join("；"));
+        notify.warning(resp.parse_errors.join("；"));
       }
       if (!resp.sheets || resp.sheets.length === 0) {
-        message.error("未解析到任何数据 Sheet,请检查 Excel 表头格式");
+        notify.error(new Error("未解析到任何数据 Sheet,请检查 Excel 表头格式"));
         return;
       }
       const init: Record<string, boolean> = {};
@@ -1154,7 +1154,7 @@ export function ImportModuleModal({
       );
       setStep(2);
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "预览失败");
+      notify.error(err, "预览失败");
     } finally {
       setUploading(false);
     }
@@ -1285,7 +1285,7 @@ export function ImportModuleModal({
   const handleCommit = async () => {
     if (!preview) return;
     if (selectedRows.length === 0) {
-      message.warning("请至少勾选一行数据");
+      notify.warning("请至少勾选一行数据");
       return;
     }
     const bySheet = new Map<string, ImportPreviewRow[]>();
@@ -1307,7 +1307,7 @@ export function ImportModuleModal({
       setResult(resp);
       setStep(3);
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "导入失败");
+      notify.error(err, "导入失败");
     } finally {
       setCommitting(false);
     }
@@ -1766,6 +1766,7 @@ function DetailLevelTable({
   projectId,
   refreshTick,
 }: DetailLevelProps) {
+  const notify = useNotify();
   const [details, setDetails] = useState<PsPlanNodeDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1821,9 +1822,7 @@ function DetailLevelTable({
           await deletePsPlanNodeDetail(d.id);
           await reload();
         } catch (err) {
-          message.error(
-            err instanceof Error ? err.message : "删除里程碑明细失败",
-          );
+          notify.error(err, "删除里程碑明细失败");
         }
       },
     });
@@ -2146,6 +2145,7 @@ function DetailDrawer({
     },
   ) => void;
 }) {
+  const notify = useNotify();
   const [form] = Form.useForm<FormVals>();
 
   // 所属模块下拉选项:按 planNodeId 自取当前里程碑下的模块列表(plan_node_module)。
@@ -2312,7 +2312,7 @@ function DetailDrawer({
           );
           // task-08:autoSubmit=true=直接创建为 done,后端自动建任务计划,提示用户(仅 done 路径)。
           if (autoSubmit) {
-            message.success("已提交，已自动创建任务计划");
+            notify.success("已提交，已自动创建任务计划");
           }
           onSaved();
           return;
@@ -2338,7 +2338,7 @@ function DetailDrawer({
       // 不改明细 status、不生成新版本、不改任务 status(FR-03/D-007)。
       if (mode === "changeInfo") {
         await updatePsPlanNodeDetail(detail.id, baseBody);
-        message.success("已变更，任务计划已同步更新");
+        notify.success("已变更，任务计划已同步更新");
         onSaved();
         return;
       }

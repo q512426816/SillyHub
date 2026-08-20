@@ -12,9 +12,9 @@
  *   time_spent 覆盖日求和(含今天);休息日列后端也可能有值,一律灰底不染色(D-04)。
  */
 import { useEffect, useMemo, useState } from "react";
-import { message } from "antd";
 import dayjs from "dayjs";
 
+import { useNotify } from "@/lib/errors";
 import { fetchWorkloadGrid, type WorkloadGridResponse } from "@/lib/ppm/kanban";
 import { getDayStatus } from "@/lib/ppm/workday";
 import { DEFAULT_THEME, themes } from "@/styles";
@@ -46,6 +46,7 @@ export function KanbanWorkloadGrid({
 }: KanbanWorkloadGridProps) {
   const [data, setData] = useState<WorkloadGridResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const notify = useNotify();
 
   const userIdsKey = useMemo(() => (userIds ?? []).join(","), [userIds]);
 
@@ -64,9 +65,7 @@ export function KanbanWorkloadGrid({
       .catch((err) => {
         if (!cancelled) {
           setData(null);
-          message.error(
-            err instanceof Error ? err.message : "加载工时热力网格失败",
-          );
+          notify.error(err, "加载工时热力网格失败");
         }
       })
       .finally(() => {

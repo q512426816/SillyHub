@@ -20,7 +20,7 @@
  *       components/ppm-user-select (成员选择) + components/charts。
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Button, DatePicker, message, Select, Tabs, type TableProps } from "antd";
+import { Button, DatePicker, Select, Tabs, type TableProps } from "antd";
 import dayjs, { type Dayjs } from "dayjs";
 
 import {
@@ -33,6 +33,7 @@ import { PpmUserSelect, type PpmSelectOption } from "@/components/ppm-user-selec
 import { WorkHourBarChart, WorkHourPieChart } from "@/components/charts";
 import { DEFAULT_THEME, themes } from "@/styles";
 import { ApiError } from "@/lib/api";
+import { useNotify } from "@/lib/errors";
 import {
   listWorkHours,
   statWorkHoursByProject,
@@ -75,6 +76,7 @@ function Field({
 
 export default function WorkHourStatisticsPage() {
   const { toast } = useToast();
+  const notify = useNotify();
 
   const [dimension, setDimension] = useState<Dimension>("user");
   const [userId, setUserId] = useState<string>("");
@@ -99,11 +101,10 @@ export default function WorkHourStatisticsPage() {
       try {
         setProjects((await listSimpleProjects()) ?? []);
       } catch (e) {
-        message.error(
-          e instanceof Error ? e.message : "加载项目列表失败",
-        );
+        notify.error(e, "加载项目列表失败");
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const objectSelected =
