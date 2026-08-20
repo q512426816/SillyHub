@@ -385,7 +385,7 @@ export default function GitIdentitiesPage() {
         <h3 className="text-xs font-medium text-muted-foreground">凭据注入流程</h3>
         <div className="mt-3 flex items-center justify-center gap-1">
           {[
-            { label: "加密存储", bg: "bg-blue-50 text-blue-700 border-blue-200" },
+            { label: "加密存储", bg: "bg-brand-50 text-brand-700 border-brand-200" },
             { label: "临时注入", bg: "bg-amber-50 text-amber-700 border-amber-200" },
             { label: "智能体执行", bg: "bg-emerald-50 text-emerald-700 border-emerald-200" },
             { label: "自动清理", bg: "bg-red-50 text-red-700 border-red-200" },

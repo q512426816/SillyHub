@@ -247,7 +247,7 @@ export default function WorkspacesMobilePage() {
           <button
             type="button"
             onClick={() => void reload()}
-            className="ml-3 inline-flex min-h-[44px] items-center rounded-[var(--radius-sm)] px-2 text-[14px] font-medium text-blue-600 hover:underline"
+            className="ml-3 inline-flex min-h-[44px] items-center rounded-[var(--radius-sm)] px-2 text-[14px] font-medium text-brand-600 hover:underline"
           >
             重新加载
           </button>

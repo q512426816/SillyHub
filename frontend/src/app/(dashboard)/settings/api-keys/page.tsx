@@ -235,7 +235,7 @@ function StatCard({
   tone?: "neutral" | "success" | "warning" | "error";
 }) {
   const toneClass = {
-    neutral: "bg-blue-50 text-blue-700",
+    neutral: "bg-brand-50 text-brand-700",
     success: "bg-emerald-50 text-emerald-700",
     warning: "bg-amber-50 text-amber-700",
     error: "bg-red-50 text-red-700",

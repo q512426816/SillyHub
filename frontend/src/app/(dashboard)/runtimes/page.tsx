@@ -924,7 +924,7 @@ export default function RuntimesPage() {
                           className={cn(
                             "rounded px-2.5 py-1 text-[11.5px] font-semibold transition-colors",
                             usageWindow === w
-                              ? "bg-blue-600 text-white"
+                              ? "bg-brand-600 text-white"
                               : "text-slate-500 hover:text-slate-700",
                           )}
                         >
