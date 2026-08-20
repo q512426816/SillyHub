@@ -50,7 +50,8 @@ stage-team-config / team-progress）。派生脉络：2026-08-11-change-detail-l
   （AgentStepProgress 内嵌）+ TeamProgress 组合；ql-20260816-001 后 steps 链路退役，
   步骤明细统一走 ChangeStepTimeline，本卡只留运行态/刷新。
 - `QuicklogLinkedCard`（quicklog-linked-card.tsx）：按 linked_change=changeKey 反查关联
-  快速任务（useQuery，page_size 20）；只读、点击跳快速修复 tab；拉取失败静默隐藏区块。
+  快速任务（useQuery，page_size 20，含空壳占位——进行中关联 quick 任务可见，
+  ql-20260820-008-fcb7）；只读、点击跳快速修复 tab；拉取失败静默隐藏区块。
 ### changes/ 顶层（4 件）
 - `ChangeSessionSection`（change-session-section.tsx）：变更上下文内嵌会话区块。
   - 左 `SessionListLayout` + 右 `InteractiveSessionPanel`（与 runtimes 弹窗同源）。
@@ -62,7 +63,9 @@ stage-team-config / team-progress）。派生脉络：2026-08-11-change-detail-l
     ["claude", "codex"]。
 - `QuicklogTable`（quicklog-table.tsx）：快速任务列表。DataTable + 状态 Select 筛选 +
   `keepPreviousData`；STATUS_META 4 态（completed 已完成 / in_progress 进行中 /
-  partial_done 已暂存 / stale 疑似中断）。
+  partial_done 已暂存 / stale 疑似中断）。空壳占位默认显示（showPlaceholder 默认勾选，
+  取消=收窄筛选、空态文案按收窄口径，ql-20260820-008-fcb7）——进行中 quick 会话 CLI
+  只落「(quick 任务)」占位标题，默认隐藏会话全程不可见。
 - `QuicklogDrawer`（quicklog-drawer.tsx）：条目详情抽屉（antd Drawer）。四段正文固定
   顺序（需求/根因/方案/结果，BODY_ORDER）+ 文件括注清单 + 关联变更链接 + 「原始 md」
   Switch 直出 raw_block；缺失字段逐项优雅降级。

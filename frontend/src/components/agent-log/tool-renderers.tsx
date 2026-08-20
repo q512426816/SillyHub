@@ -419,7 +419,7 @@ function ReadToolPreview({ entry, mergedResult, durationMs }: ToolPreviewProps) 
   return (
     <div className="min-w-0 space-y-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1 rounded border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700">
+        <span className="inline-flex items-center gap-1 rounded border border-brand-200 bg-brand-50 px-1.5 py-0.5 text-[10px] font-semibold text-brand-700">
           <FileText className="h-3 w-3" />Read
         </span>
         <span className="min-w-0 break-words text-xs font-medium text-zinc-900 [overflow-wrap:anywhere]">
@@ -508,7 +508,7 @@ function GenericToolPreview({ entry, durationMs }: ToolPreviewProps) {
   return (
     <div className="min-w-0 space-y-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="min-w-0 break-words font-semibold text-blue-700 [overflow-wrap:anywhere]">
+        <span className="min-w-0 break-words font-semibold text-brand-700 [overflow-wrap:anywhere]">
           {entry.tool}
         </span>
         <StatusBadge status={entry.status} success={entry.success} durationMs={durationMs} />

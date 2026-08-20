@@ -220,7 +220,7 @@ const TOOL_STATUS_META: Record<
 > = {
   ok: { icon: "✓", cls: "text-emerald-600", title: "执行成功" },
   deny: { icon: "✗", cls: "text-destructive", title: "执行失败 / 被拒" },
-  running: { icon: "⏳", cls: "text-blue-600", title: "执行中" },
+  running: { icon: "⏳", cls: "text-brand-600", title: "执行中" },
 };
 
 /**
@@ -237,7 +237,7 @@ function subagentStatus(segment: SubagentContainerSegment): "running" | "ok" | "
 /**
  * 文本段：markdown 气泡（与现 turn-timeline 答复气泡同款式——rounded-2xl 左上
  * 收角 + bg-card + MarkdownText）。streaming=true 时尾部流式光标（原型
- * streaming-caret：7×15px 蓝色竖条，blink 0.9s step-end；因 MarkdownText 是
+ * streaming-caret：7×15px 竖条（brand 阶随主题），blink 0.9s step-end；因 MarkdownText 是
  * 块级容器，光标落在正文末段之后的新行行首，见文件头偏差说明 1）。
  */
 export const TextSegmentView = memo(function TextSegmentView({ segment }: TextSegmentViewProps) {
@@ -248,7 +248,7 @@ export const TextSegmentView = memo(function TextSegmentView({ segment }: TextSe
       {segment.streaming && (
         <span
           aria-hidden
-          className="seg-caret ml-0.5 inline-block h-[15px] w-[7px] rounded-[1px] bg-blue-600 align-[-2px]"
+          className="seg-caret ml-0.5 inline-block h-[15px] w-[7px] rounded-[1px] bg-brand-600 align-[-2px]"
         />
       )}
     </div>
@@ -283,8 +283,8 @@ export const ThinkingRowView = memo(function ThinkingRowView({ segment }: Thinki
         </span>
         <span className="shrink-0 font-medium">💭 思考过程</span>
         {segment.streaming && (
-          <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-blue-600">
-            <span aria-hidden className="h-[5px] w-[5px] animate-pulse rounded-full bg-blue-600" />
+          <span className="inline-flex shrink-0 items-center gap-1 text-[10.5px] text-brand-600">
+            <span aria-hidden className="h-[5px] w-[5px] animate-pulse rounded-full bg-brand-600" />
             思考中
           </span>
         )}
@@ -336,14 +336,14 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
           }
         }}
         className={cn(
-          "relative flex w-full cursor-pointer items-center gap-2 overflow-hidden rounded-lg border border-blue-200 bg-blue-50 px-3 py-[5px] text-xs",
+          "relative flex w-full cursor-pointer items-center gap-2 overflow-hidden rounded-lg border border-brand-200 bg-brand-50 px-3 py-[5px] text-xs",
           running && "seg-sweep",
         )}
       >
         <span aria-hidden className="shrink-0 text-xs">
           {toolIconOf(segment.toolName)}
         </span>
-        <span className="shrink-0 text-[11.5px] font-semibold text-blue-600">
+        <span className="shrink-0 text-[11.5px] font-semibold text-brand-600">
           {segment.toolName ?? (segment.raw ? "工具调用" : "工具结果")}
         </span>
         {desc && (
@@ -420,7 +420,7 @@ export const SubagentBlockView = memo(function SubagentBlockView({
 
   const dotCls =
     status === "running"
-      ? "bg-blue-600 animate-pulse"
+      ? "bg-brand-600 animate-pulse"
       : status === "deny"
         ? "bg-destructive"
         : "bg-emerald-600";

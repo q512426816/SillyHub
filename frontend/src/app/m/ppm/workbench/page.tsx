@@ -298,7 +298,7 @@ function BlockFallback({
           <button
             type="button"
             onClick={() => void onRetry()}
-            className="inline-flex min-h-[44px] items-center rounded-md px-3 text-[14px] font-medium text-blue-600 hover:underline"
+            className="inline-flex min-h-[44px] items-center rounded-md px-3 text-[14px] font-medium text-brand-600 hover:underline"
           >
             重新加载
           </button>
@@ -338,14 +338,14 @@ function ProfileCard({
     cn(
       "flex min-h-[44px] w-full items-center rounded-md px-2 py-2 text-left text-[14px]",
       active
-        ? "bg-blue-50 font-medium text-blue-700"
+        ? "bg-brand-50 font-medium text-brand-700"
         : "text-foreground active:bg-muted",
     );
   return (
     <MobileCard title="个人信息" bodyClass="p-4">
       <div className="flex items-center gap-3">
         <div
-          className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-500 text-[20px] font-bold text-white shadow-md shadow-blue-600/20"
+          className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-600 to-cyan-500 text-[20px] font-bold text-white shadow-md shadow-brand-600/20"
           aria-hidden
         >
           {profile?.avatar_text && profile.avatar_text.trim() !== ""
@@ -358,7 +358,7 @@ function ProfileCard({
               {placeholder(profile?.display_name)}
             </span>
             {role ? (
-              <span className="shrink-0 rounded-md bg-blue-50 px-1.5 py-0.5 text-[12px] font-medium text-blue-600">
+              <span className="shrink-0 rounded-md bg-brand-50 px-1.5 py-0.5 text-[12px] font-medium text-brand-600">
                 {role}
               </span>
             ) : null}
@@ -427,14 +427,14 @@ function ProfileCard({
 /** 指标语义色（对齐桌面 PersonalMetricStrip 配色）。 */
 type MetricColor = "blue" | "green" | "amber" | "cyan" | "red";
 const METRIC_TILE: Record<MetricColor, string> = {
-  blue: "bg-blue-50 text-blue-600",
+  blue: "bg-brand-50 text-brand-600",
   green: "bg-emerald-50 text-emerald-600",
   amber: "bg-amber-50 text-amber-600",
   cyan: "bg-cyan-50 text-cyan-600",
   red: "bg-red-50 text-red-600",
 };
 const METRIC_TEXT: Record<MetricColor, string> = {
-  blue: "text-blue-600",
+  blue: "text-brand-600",
   green: "text-emerald-600",
   amber: "text-amber-600",
   cyan: "text-cyan-600",
@@ -833,7 +833,7 @@ function CalendarBlock({
               tagCls:
                 e.status === "90"
                   ? "bg-emerald-100 text-emerald-700"
-                  : "bg-blue-100 text-blue-700",
+                  : "bg-brand-100 text-brand-700",
               main: e.content ?? "(无关联任务)",
               sub: e.time_spent != null ? `${e.time_spent}人天` : "",
             }))}
@@ -893,7 +893,7 @@ function DayDetailSection({
 function statusPillCls(color: string): string {
   switch (color) {
     case "processing":
-      return "bg-blue-100 text-blue-700";
+      return "bg-brand-100 text-brand-700";
     case "success":
       return "bg-emerald-100 text-emerald-700";
     case "warning":
@@ -924,7 +924,7 @@ function QuickEntriesCard({ readOnly }: { readOnly?: boolean }) {
     {
       label: "任务计划",
       icon: ClipboardCheck,
-      tile: "bg-blue-50 text-blue-600",
+      tile: "bg-brand-50 text-brand-600",
       href: "/ppm/task-plans",
     },
     {

@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from "next/navigation";
 import { ArrowLeftRight, Bell, ChevronRight, LogOut, Search, UserRound } from "lucide-react";
 
+import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Avatar,
   AvatarFallback,
@@ -127,7 +128,7 @@ export function TopBar({ displayName, onLogout }: TopBarProps) {
           <input
             type="search"
             placeholder="搜索..."
-            className="w-[240px] rounded-md border border-transparent bg-slate-100 py-1.5 pl-8 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-blue-400 focus:bg-white focus:outline-none"
+            className="w-[240px] rounded-md border border-transparent bg-slate-100 py-1.5 pl-8 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:bg-white focus:outline-none"
             aria-label="全局搜索"
           />
         </div>
@@ -141,6 +142,9 @@ export function TopBar({ displayName, onLogout }: TopBarProps) {
           <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-red-500" />
         </button>
 
+        {/* task-07 / FR-02：主题切换（AI 紫 ↔ 明亮蓝 两态直切，经 store persist 记忆） */}
+        <ThemeToggle />
+
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -149,7 +153,7 @@ export function TopBar({ displayName, onLogout }: TopBarProps) {
               aria-label="用户菜单"
             >
               <Avatar className="h-8 w-8">
-                <AvatarFallback className="bg-blue-600 text-xs font-medium text-white">
+                <AvatarFallback className="bg-brand-600 text-xs font-medium text-white">
                   {initial}
                 </AvatarFallback>
               </Avatar>

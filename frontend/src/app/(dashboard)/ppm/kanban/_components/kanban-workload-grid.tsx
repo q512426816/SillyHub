@@ -12,12 +12,12 @@
  *   time_spent 覆盖日求和(含今天);休息日列后端也可能有值,一律灰底不染色(D-04)。
  */
 import { useEffect, useMemo, useState } from "react";
-import { message } from "antd";
 import dayjs from "dayjs";
 
+import { useNotify } from "@/lib/errors";
 import { fetchWorkloadGrid, type WorkloadGridResponse } from "@/lib/ppm/kanban";
 import { getDayStatus } from "@/lib/ppm/workday";
-import { tokens } from "@/styles";
+import { DEFAULT_THEME, themes } from "@/styles";
 import { workloadCellColor, workloadCellColorForDay } from "./kanban-workload-helpers";
 import { ROW_HEAD_WIDTH, todayKey } from "./kanban-gantt-helpers";
 
@@ -46,6 +46,7 @@ export function KanbanWorkloadGrid({
 }: KanbanWorkloadGridProps) {
   const [data, setData] = useState<WorkloadGridResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const notify = useNotify();
 
   const userIdsKey = useMemo(() => (userIds ?? []).join(","), [userIds]);
 
@@ -64,9 +65,7 @@ export function KanbanWorkloadGrid({
       .catch((err) => {
         if (!cancelled) {
           setData(null);
-          message.error(
-            err instanceof Error ? err.message : "加载工时热力网格失败",
-          );
+          notify.error(err, "加载工时热力网格失败");
         }
       })
       .finally(() => {
@@ -141,7 +140,7 @@ export function KanbanWorkloadGrid({
                   style={{
                     width: CELL_WIDTH,
                     height: HEADER_HEIGHT,
-                    backgroundColor: status.rest ? tokens.color.slate[100] : undefined,
+                    backgroundColor: status.rest ? themes[DEFAULT_THEME].color.slate[100] : undefined,
                   }}
                 >
                   <div
@@ -194,8 +193,8 @@ export function KanbanWorkloadGrid({
                         style={{
                           width: CELL_WIDTH,
                           height: CELL_HEIGHT,
-                          backgroundColor: tokens.color.slate[100],
-                          color: tokens.color.slate[300],
+                          backgroundColor: themes[DEFAULT_THEME].color.slate[100],
+                          color: themes[DEFAULT_THEME].color.slate[300],
                         }}
                       >
                         —
@@ -211,7 +210,7 @@ export function KanbanWorkloadGrid({
                         width: CELL_WIDTH,
                         height: CELL_HEIGHT,
                         backgroundColor: c.bg,
-                        color: v === 0 ? tokens.color.slate[400] : c.fg,
+                        color: v === 0 ? themes[DEFAULT_THEME].color.slate[400] : c.fg,
                       }}
                       title={`${displayName} ${dk}: ${v.toFixed(1)} 人天`}
                     >
@@ -258,8 +257,8 @@ function WorkloadLegend() {
         <span
           className="flex h-6 w-10 items-center justify-center rounded border border-border text-[10px]"
           style={{
-            backgroundColor: tokens.color.slate[100],
-            color: tokens.color.slate[300],
+            backgroundColor: themes[DEFAULT_THEME].color.slate[100],
+            color: themes[DEFAULT_THEME].color.slate[300],
           }}
         >
           休

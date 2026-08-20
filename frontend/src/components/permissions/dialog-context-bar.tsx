@@ -106,7 +106,7 @@ export function DialogContextBar({
             会话{" "}
             <Link
               href={sessionHref}
-              className="font-mono text-[11px] text-blue-700 hover:underline"
+              className="font-mono text-[11px] text-brand-700 hover:underline"
               title={`跳转到会话 ${request.session_id}`}
               data-context-link="session"
             >
@@ -118,7 +118,7 @@ export function DialogContextBar({
             运行{" "}
             <Link
               href={runHref}
-              className="font-mono text-[11px] text-blue-700 hover:underline"
+              className="font-mono text-[11px] text-brand-700 hover:underline"
               title={`跳转到运行 ${request.run_id}`}
               data-context-link="run"
             >
@@ -133,7 +133,7 @@ export function DialogContextBar({
         </div>
         <Link
           href={sessionHref}
-          className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-medium text-blue-700 hover:bg-blue-50"
+          className="inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[11px] font-medium text-brand-700 hover:bg-brand-50"
           title="跳转到会话详情"
           data-context-link="view-session"
         >

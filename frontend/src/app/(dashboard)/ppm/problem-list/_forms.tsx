@@ -20,7 +20,6 @@ import {
   Form,
   Input,
   InputNumber,
-  message,
   Select,
   Switch,
 } from "antd";
@@ -32,7 +31,7 @@ import {
   type PpmSelectOption,
 } from "@/components/ppm-user-select";
 import { ApiError } from "@/lib/api";
-import { errMessage } from "@/lib/errors";
+import { useNotify } from "@/lib/errors";
 import {
   createProblem,
   listModulesByProject,
@@ -86,10 +85,6 @@ function dayStrToApi(v: string | null | undefined): string | null {
   return v;
 }
 
-function notifyOk(text: string) {
-  message.success(text);
-}
-
 // ===========================================================================
 // ProblemCreateForm — ListForm.vue (新建/编辑)
 // ===========================================================================
@@ -134,6 +129,7 @@ export const ProblemCreateForm = forwardRef<
   const isEdit = !!problem;
   const [form] = Form.useForm<ProblemCreateValues>();
   const [busy, setBusy] = useState(false);
+  const notify = useNotify();
   // dutyUser 联动 searchData 依赖 projectId + workType
   const [projectId, setProjectId] = useState<string | undefined>(
     problem?.project_id,
@@ -281,15 +277,15 @@ export const ProblemCreateForm = forwardRef<
           work_load: payload.work_load,
         };
         await updateProblem(problem.id, upd);
-        notifyOk("已保存");
+        notify.success("已保存");
       } else {
         await createProblem(payload);
-        notifyOk("已创建");
+        notify.success("已创建");
       }
       onSuccess();
     } catch (err) {
       // 校验失败时 form 内部已标注;仅对 API 错误提示
-      if (err instanceof ApiError) message.error(errMessage(err, "保存失败"));
+      if (err instanceof ApiError) notify.error(err, "保存失败");
     } finally {
       setBusy(false);
     }

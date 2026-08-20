@@ -32,11 +32,11 @@
  */
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, forwardRef, type ReactNode } from "react";
 import {
+  App,
   DatePicker,
   Form,
   Input,
   InputNumber,
-  message,
   Modal,
   Select,
   Switch,
@@ -66,7 +66,7 @@ import {
   type ProblemDetailMode,
 } from "@/app/(dashboard)/ppm/_components/problem-detail-modal";
 import { ApiError } from "@/lib/api";
-import { errMessage } from "@/lib/errors";
+import { useNotify } from "@/lib/errors";
 import { isOverEstimate } from "@/lib/ppm/format";
 import { addWorkingDaysDate } from "@/lib/ppm/workday";
 import {
@@ -150,6 +150,10 @@ function dayStrToApi(v: string | null | undefined): string | null {
 export default function ProblemListMobilePage() {
   const currentUser = useSession((s) => s.user);
   const currentUserId = currentUser?.id ?? "";
+  const notify = useNotify();
+  // useNotify 无 info 级方法,批量删除空目标提示经 App 上下文取 message.info
+  // (对齐 m/workspaces 先例,非 antd 裸 import,FR-04 不破)。
+  const { message } = App.useApp();
 
   // 归属:默认「全部」（对齐桌面 ql-20260722 调整）
   const [view, setView] = useState<"mine" | "all">("all");
@@ -268,7 +272,7 @@ export default function ProblemListMobilePage() {
     try {
       await exportProblems();
     } catch (err) {
-      message.error(err instanceof ApiError ? err.message : "导出失败");
+      notify.error(err, "导出失败");
     } finally {
       setExporting(false);
     }
@@ -315,7 +319,7 @@ export default function ProblemListMobilePage() {
       await startProblem(p.id);
       await load();
     } catch (err) {
-      message.error(err instanceof ApiError ? err.message : "开始失败");
+      notify.error(err, "开始失败");
     }
   };
 
@@ -334,7 +338,7 @@ export default function ProblemListMobilePage() {
           await deleteProblem(p.id);
           await load();
         } catch (err) {
-          message.error(err instanceof ApiError ? err.message : "删除失败");
+          notify.error(err, "删除失败");
         }
       },
     });
@@ -377,9 +381,9 @@ export default function ProblemListMobilePage() {
           }
         }
         if (failed > 0) {
-          message.warning(`已删除 ${targets.length - failed} 项，${failed} 项失败`);
+          notify.warning(`已删除 ${targets.length - failed} 项，${failed} 项失败`);
         } else {
-          message.success(`已删除 ${targets.length} 项`);
+          notify.success(`已删除 ${targets.length} 项`);
         }
         exitBatch();
         await load();
@@ -442,7 +446,7 @@ export default function ProblemListMobilePage() {
           <button
             type="button"
             onClick={() => void load()}
-            className="ml-3 inline-flex min-h-[44px] items-center rounded-[var(--radius-sm)] px-2 text-[14px] font-medium text-blue-600 hover:underline"
+            className="ml-3 inline-flex min-h-[44px] items-center rounded-[var(--radius-sm)] px-2 text-[14px] font-medium text-brand-600 hover:underline"
           >
             重新加载
           </button>
@@ -800,6 +804,7 @@ export const ProblemForm = forwardRef<ProblemFormHandle, ProblemFormProps>(
   function ProblemForm({ problem, onSuccess }, ref) {
     const isEdit = !!problem;
     const [form] = Form.useForm<ProblemCreateValues>();
+    const notify = useNotify();
     // dutyUser 联动 searchData 依赖 projectId + workType（对齐桌面）
     const [projectId, setProjectId] = useState<string | undefined>(problem?.project_id);
     const [workType, setWorkType] = useState<string | undefined>(
@@ -961,12 +966,13 @@ export const ProblemForm = forwardRef<ProblemFormHandle, ProblemFormProps>(
           work_load: payload.work_load,
         };
         await updateProblem(problem.id, upd);
-        message.success("已保存");
+        notify.success("已保存");
       } else {
         await createProblem(payload);
-        message.success("已创建");
+        notify.success("已创建");
       }
       onSuccess();
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- notify 为 App 上下文稳定句柄,不进依赖
     }, [form, fileUrls, isEdit, problem, handleOptions, onSuccess]);
 
     useImperativeHandle(ref, () => ({ submit }), [submit]);

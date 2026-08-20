@@ -171,7 +171,7 @@ export function CustomSkillEditDialog({ mode, skill, onClose }: Props) {
     <Dialog open onOpenChange={(open) => { if (!open && !submitting) onClose(); }}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+          <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
             {isEdit ? <Pencil className="h-5 w-5" /> : <Boxes className="h-5 w-5" />}
           </div>
           <DialogTitle>{isEdit ? "编辑自定义技能" : "新增自定义技能"}</DialogTitle>

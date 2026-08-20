@@ -729,7 +729,7 @@ function FormSectionHeader({
 }) {
   return (
     <Divider titlePlacement="left" plain className="!my-3">
-      <span className="text-xs font-semibold text-blue-700">
+      <span className="text-xs font-semibold text-brand-700">
         <span className="mr-1">{index}</span>
         {title}
       </span>

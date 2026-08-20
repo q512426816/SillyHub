@@ -270,14 +270,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     const classes = hasWorkspace
       ? `${base} ${
           active
-            ? "relative bg-blue-50 text-blue-700"
+            ? "relative bg-brand-50 text-brand-700"
             : "text-muted-foreground hover:bg-muted hover:text-foreground"
         }`
       : `${base} text-muted-foreground/40 cursor-not-allowed`;
 
     const indicator = active ? (
       <span
-        className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-blue-600"
+        className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r bg-brand-600"
         aria-hidden
       />
     ) : null;
@@ -350,7 +350,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${
                 inPpm
                   ? "bg-violet-50 text-violet-700"
-                  : "bg-blue-50 text-blue-700"
+                  : "bg-brand-50 text-brand-700"
               }`}
             >
               {platformName}

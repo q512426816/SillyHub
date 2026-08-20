@@ -258,6 +258,11 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     await waitFor(() =>
       expect(screen.getByText("7")).toBeInTheDocument(),
     );
+    // ql-20260820-008：计数口径含空壳占位（与表格默认显示一致，计数不与列表脱节）
+    const countCall = mocks.listQuicklogEntries.mock.calls.find(
+      ([, p]: any[]) => p?.page_size === 1,
+    );
+    expect(countCall?.[1]?.include_placeholder).toBe(true);
   });
 
   it("?search= 初始搜索词生效（quicklog 关联变更列跳转消费端，QA P2 修复）", async () => {

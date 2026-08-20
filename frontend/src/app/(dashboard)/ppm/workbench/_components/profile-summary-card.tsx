@@ -50,8 +50,8 @@ export function ProfileSummaryCard({
     <SectionCard title="个人信息" bodyPadding="p-5">
       <div className="flex items-center gap-4">
         {/* 头像首字:渐变背景 + 柔和投影,对齐原型 .avatar 视觉 */}
-        <Avatar className="size-16 shrink-0 rounded-2xl shadow-md shadow-blue-600/20">
-          <AvatarFallback className="rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-500 text-xl font-bold text-white">
+        <Avatar className="size-16 shrink-0 rounded-2xl shadow-md shadow-brand-600/20">
+          <AvatarFallback className="rounded-2xl bg-gradient-to-br from-brand-600 to-cyan-500 text-xl font-bold text-white">
             {profile?.avatar_text && profile.avatar_text.trim() !== ""
               ? profile.avatar_text
               : "?"}

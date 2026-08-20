@@ -57,6 +57,45 @@ const config: Config = {
           foreground: "hsl(var(--info-foreground))",
         },
 
+        // ---- brand 语义色阶(主题感知:50-950 十一档纯 CSS 变量名映射,无硬编码 hex;
+        //      双套取值由 globals.css 的 :root / [data-theme="blue"] 变量块提供(task-02),
+        //      bg-brand-50 等类随 html data-theme 切换自动换肤,D-003@v2;
+        //      blue 阶保留为真实信息色与非 brand 场景用途) ----
+        // 函数形式(协调修正,task-12 发现):Tailwind 3 对 var() 颜色的 /alpha 修饰符
+        // 静默失效(bg-brand-100/60 不生成 CSS),函数分支用 color-mix 补齐透明度语义。
+        // 透明度入参三种形态:数字(0.6)→百分比;var(--tw-*-opacity) 字符串(无修饰符类)
+        // →calc 包裹换算百分比(color-mix 只吃 <percentage>,裸数字/var 均非法);
+        // undefined(不经 withAlphaVariable 的调用方)→退回纯 var()。
+        brand: Object.fromEntries(
+          (
+            [
+              "50",
+              "100",
+              "200",
+              "300",
+              "400",
+              "500",
+              "600",
+              "700",
+              "800",
+              "900",
+              "950",
+            ] as const
+          ).map((step) => [
+            step,
+            ({ opacityValue }: { opacityValue?: number | string }) => {
+              if (opacityValue === undefined) {
+                return `var(--color-brand-${step})`;
+              }
+              const pct =
+                typeof opacityValue === "number"
+                  ? `${opacityValue * 100}%`
+                  : `calc(${opacityValue} * 100%)`;
+              return `color-mix(in srgb, var(--color-brand-${step}) ${pct}, transparent)`;
+            },
+          ])
+        ),
+
         // ---- 基础调色板(直接 hex,与 tokens.color.palette 对齐,
         //      不走 CSS 变量,避免运行时切换开销) ----
         blue: {

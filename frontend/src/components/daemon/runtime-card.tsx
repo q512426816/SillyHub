@@ -106,7 +106,7 @@ export function RuntimeCard({
   const btnDanger =
     "inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-[11.5px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:hover:bg-white";
   const btnPrimary =
-    "inline-flex items-center gap-1 rounded bg-blue-600 px-2 py-1 text-[11.5px] font-semibold text-white hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600";
+    "inline-flex items-center gap-1 rounded bg-brand-600 px-2 py-1 text-[11.5px] font-semibold text-white hover:bg-brand-700 disabled:opacity-50 disabled:hover:bg-brand-600";
 
   const roots = runtime.allowed_roots ?? [];
 

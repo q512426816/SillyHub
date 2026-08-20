@@ -17,8 +17,9 @@
  * ECharts 组件经 components/charts/ 动态包装(ssr:false)。
  */
 import { useEffect, useMemo, useState } from "react";
-import { Button, Empty, message, Spin } from "antd";
+import { Button, Empty, Spin } from "antd";
 
+import { useNotify } from "@/lib/errors";
 import { statWorkHoursByUser } from "@/lib/ppm/task";
 import type {
   KanbanTaskCard,
@@ -58,6 +59,7 @@ export function KanbanWorkHourChart({
 }: KanbanWorkHourChartProps) {
   const [byUser, setByUser] = useState<WorkHourStatResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const notify = useNotify();
 
   // 全员工时(by-user),范围变化时拉
   useEffect(() => {
@@ -70,9 +72,7 @@ export function KanbanWorkHourChart({
       .catch((err) => {
         if (!cancelled) {
           setByUser(null);
-          message.error(
-            err instanceof Error ? err.message : "加载工时统计失败",
-          );
+          notify.error(err, "加载工时统计失败");
         }
       })
       .finally(() => {
@@ -81,6 +81,7 @@ export function KanbanWorkHourChart({
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startDate, endDate]);
 
   const userNameById = useMemo(() => {

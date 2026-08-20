@@ -29,7 +29,7 @@ export type StepTimelineEntry = components["schemas"]["StepTimelineEntry"];
 // pending 灰渲染（兜底，不炸）。
 const DOT_CLASS: Record<string, string> = {
   completed: "bg-emerald-500",
-  "in-progress": "bg-blue-500 animate-pulse",
+  "in-progress": "bg-brand-500 animate-pulse",
   pending: "bg-gray-300",
   waiting: "bg-amber-500",
   failed: "bg-red-500",
@@ -39,7 +39,7 @@ const DOT_CLASS: Record<string, string> = {
 
 const NAME_CLASS: Record<string, string> = {
   completed: "text-foreground",
-  "in-progress": "text-blue-600 font-medium",
+  "in-progress": "text-brand-600 font-medium",
   pending: "text-muted-foreground",
   waiting: "text-amber-600 font-medium",
   failed: "text-red-600",

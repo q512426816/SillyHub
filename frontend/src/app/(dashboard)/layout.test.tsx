@@ -124,6 +124,16 @@ describe("DashboardLayout 工作区守卫 — CB-3 顺序与白名单", () => {
     expect(nav.replace).not.toHaveBeenCalled();
   });
 
+  // 2026-08-19-cross-workspace-team-mission task-15 补：/projects/{id}/missions
+  // （项目维度跨工作区团队会话）是平台级路由，不依赖所选工作区上下文；
+  // 部署实测发现被守卫弹回 /workspaces（同 /agent-profiles 先例），加入白名单。
+  it("/projects/A/missions → 放行（白名单 /projects 带前缀）", async () => {
+    nav.pathname = "/projects/A/missions";
+    renderLayout();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(nav.replace).not.toHaveBeenCalled();
+  });
+
   it("/workspaces （列表/选择器页本身，无 wsId）→ 放行", async () => {
     nav.pathname = "/workspaces";
     renderLayout();

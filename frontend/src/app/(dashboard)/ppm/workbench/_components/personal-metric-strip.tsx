@@ -54,7 +54,7 @@ interface MetricItem {
 
 /** 颜色 → 文本/图标底色语义 class(参照 tokens.ts 色值)。 */
 const COLOR_CLASS: Record<MetricColor, { text: string; tile: string }> = {
-  blue: { text: "text-blue-600", tile: "bg-blue-50 text-blue-600" },
+  blue: { text: "text-brand-600", tile: "bg-brand-50 text-brand-600" },
   green: { text: "text-emerald-600", tile: "bg-emerald-50 text-emerald-600" },
   amber: { text: "text-amber-600", tile: "bg-amber-50 text-amber-600" },
   cyan: { text: "text-cyan-600", tile: "bg-cyan-50 text-cyan-600" },

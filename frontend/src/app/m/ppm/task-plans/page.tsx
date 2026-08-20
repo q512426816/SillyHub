@@ -360,7 +360,7 @@ export default function TaskPlansMobilePage() {
           <button
             type="button"
             onClick={() => void load()}
-            className="ml-2 inline-flex min-h-[44px] items-center rounded-md px-2 text-[14px] font-medium text-blue-600 hover:underline"
+            className="ml-2 inline-flex min-h-[44px] items-center rounded-md px-2 text-[14px] font-medium text-brand-600 hover:underline"
           >
             重新加载
           </button>
@@ -766,7 +766,7 @@ function TaskFormSheet({
 function statusPillCls(color: string): string {
   switch (color) {
     case "processing":
-      return "bg-blue-100 text-blue-700";
+      return "bg-brand-100 text-brand-700";
     case "success":
       return "bg-emerald-100 text-emerald-700";
     case "warning":

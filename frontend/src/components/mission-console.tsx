@@ -41,7 +41,7 @@ import { workspaceTypeBadge } from "@/lib/workspace-types";
 /** 任务级状态徽标配色（STATUS_LABEL 控中文文案）。 */
 const STATUS_BADGE: Record<string, string> = {
   planning: "bg-gray-100 text-gray-700",
-  running: "bg-blue-100 text-blue-700",
+  running: "bg-brand-100 text-brand-700",
   done: "bg-green-100 text-green-700",
   degraded: "bg-yellow-100 text-yellow-800",
   failed: "bg-red-100 text-red-700",
@@ -222,8 +222,8 @@ function CoordinatorPanel({ mission }: { mission: Mission }) {
 
   if (mission.status === "planning") {
     return (
-      <div className="rounded border border-blue-200 bg-blue-50 p-3 text-sm">
-        <div className="flex items-center gap-2 font-medium text-blue-700">
+      <div className="rounded border border-brand-200 bg-brand-50 p-3 text-sm">
+        <div className="flex items-center gap-2 font-medium text-brand-700">
           <span className="animate-pulse">🧠</span> 主控正在拆解任务，规划分身分工…
         </div>
       </div>
@@ -416,7 +416,7 @@ function WorkerRow({
       : worker.status === "completed"
         ? "text-green-700"
         : worker.status === "running"
-          ? "text-blue-700"
+          ? "text-brand-700"
           : worker.status === "killed"
             ? "text-gray-400"
             : "text-gray-600";
@@ -470,7 +470,7 @@ function WorkerRow({
         <button
           type="button"
           onClick={() => setLogOpen((v) => !v)}
-          className="ml-auto rounded border border-gray-300 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50"
+          className="ml-auto rounded border border-gray-300 px-2 py-0.5 text-xs text-brand-600 hover:bg-brand-50"
         >
           {logOpen ? "收起日志" : "查看日志"}
         </button>
@@ -743,7 +743,7 @@ function ProjectScopePanel({
                 <label
                   className={`flex cursor-pointer items-center gap-2 rounded border px-2 py-1.5 text-sm ${
                     checked
-                      ? "border-blue-200 bg-blue-50/60"
+                      ? "border-brand-200 bg-brand-50/60"
                       : "border-slate-200 bg-white hover:bg-slate-50"
                   }`}
                 >
@@ -1070,7 +1070,7 @@ export function MissionConsole({
                   }}
                   title={m.objective || "(无目标)"}
                   className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-gray-100 ${
-                    mission?.id === m.id ? "bg-blue-50 ring-1 ring-blue-200" : ""
+                    mission?.id === m.id ? "bg-brand-50 ring-1 ring-brand-200" : ""
                   }`}
                 >
                   <Badge

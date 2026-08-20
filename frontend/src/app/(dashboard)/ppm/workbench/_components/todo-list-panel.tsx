@@ -142,7 +142,7 @@ export function TodoListPanel({ targetUserId, readOnly }: TodoListPanelProps) {
           <button
             type="button"
             onClick={() => void load()}
-            className="text-xs text-blue-600 hover:underline"
+            className="text-xs text-brand-600 hover:underline"
           >
             重新加载
           </button>

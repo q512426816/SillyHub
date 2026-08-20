@@ -209,11 +209,12 @@ export default function ChangesPage({ params }: Props) {
       archive: number;
       quicklog: number;
     }> => {
-      // task-08（D-001）：第三 tab 计数=快速修复条目数（placeholder 默认隐藏口径）
+      // task-08（D-001）：第三 tab 计数=快速修复条目数；ql-20260820-008 起含空壳
+      // 占位（与表格默认显示口径一致，计数不与列表脱节）
       const [a, b, q] = await Promise.all([
         listChanges(workspaceId, { location: "active", pageSize: 1 }),
         listChanges(workspaceId, { location: "archive", pageSize: 1 }),
-        listQuicklogEntries(workspaceId, { page_size: 1 }),
+        listQuicklogEntries(workspaceId, { include_placeholder: true, page_size: 1 }),
       ]);
       return { active: a.total, archive: b.total, quicklog: q.total };
     },

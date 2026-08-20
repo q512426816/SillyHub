@@ -20,10 +20,10 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import dayjs from "dayjs";
-import { Button, Drawer, Input, Progress, Spin, Tabs, Tag, message } from "antd";
+import { Button, Drawer, Input, Progress, Spin, Tabs, Tag } from "antd";
 
 import { FileViewer } from "@/components/file-viewer";
-import { ApiError } from "@/lib/api";
+import { useNotify } from "@/lib/errors";
 import { addKanbanComment, listKanbanComments } from "@/lib/ppm/kanban";
 import { listTaskExecutes } from "@/lib/ppm/task";
 import type { KanbanComment, KanbanTaskCard, TaskExecute } from "@/lib/ppm/types";
@@ -62,6 +62,7 @@ export function KanbanTaskDetailDrawer({
   const [records, setRecords] = useState<TaskExecute[]>([]);
   const [commentDraft, setCommentDraft] = useState("");
   const [activeTab, setActiveTab] = useState("executes");
+  const notify = useNotify();
 
   const taskId = task?.id ?? null;
 
@@ -77,12 +78,11 @@ export function KanbanTaskDetailDrawer({
     } catch (err) {
       setComments([]);
       setRecords([]);
-      void message.error(
-        err instanceof ApiError ? err.message : "加载详情失败",
-      );
+      notify.error(err, "加载详情失败");
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -96,7 +96,7 @@ export function KanbanTaskDetailDrawer({
     if (!taskId) return;
     const content = commentDraft.trim();
     if (!content) {
-      void message.warning("评论内容不能为空");
+      notify.warning("评论内容不能为空");
       return;
     }
     try {
@@ -104,9 +104,7 @@ export function KanbanTaskDetailDrawer({
       setComments((cur) => [...cur, created]);
       setCommentDraft("");
     } catch (err) {
-      void message.error(
-        err instanceof ApiError ? err.message : "评论失败",
-      );
+      notify.error(err, "评论失败");
     }
   };
 

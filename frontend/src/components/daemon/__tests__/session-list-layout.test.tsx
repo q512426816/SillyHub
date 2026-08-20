@@ -51,10 +51,10 @@ describe("SessionListLayout", () => {
     expect(screen.getByText("s2")).toBeInTheDocument();
   });
 
-  it("选中项高亮（蓝色左边框）", () => {
+  it("选中项高亮（brand 阶左边框）", () => {
     renderLayout({ selectedId: "s1" });
     const btn = screen.getByText("你好").closest("button");
-    expect(btn?.className).toContain("border-blue-600");
+    expect(btn?.className).toContain("border-brand-600");
   });
 
   it("点击列表项触发 onSelect(id)", () => {

@@ -81,7 +81,7 @@ function StepSubRow({ progress }: { progress: StepProgressSummary }) {
         <span
           data-testid="step-active-dot"
           aria-label="当前步骤进行中"
-          className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-blue-600"
+          className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-brand-600"
         />
       ) : (
         // 未知 current_step_status 兜底：灰点占位，零崩溃（后端契约外值防御）。
@@ -98,7 +98,7 @@ function StepSubRow({ progress }: { progress: StepProgressSummary }) {
         <span
           data-testid="step-bar"
           className={`block h-full rounded-full ${
-            done ? "bg-emerald-500" : status === "waiting" ? "bg-yellow-500" : "bg-blue-600"
+            done ? "bg-emerald-500" : status === "waiting" ? "bg-yellow-500" : "bg-brand-600"
           }`}
           style={{ width: `${percent}%` }}
         />

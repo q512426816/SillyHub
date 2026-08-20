@@ -375,7 +375,7 @@ export function WorkCalendarPanel({
                               "shrink-0 rounded-md px-1.5 py-px text-[10px] font-medium",
                               e.status === "90"
                                 ? "bg-emerald-100 text-emerald-700"
-                                : "bg-blue-100 text-blue-700",
+                                : "bg-brand-100 text-brand-700",
                             )}
                           >
                             {e.status === "90" ? "已完成" : (e.status ?? "—")}

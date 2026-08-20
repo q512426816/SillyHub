@@ -94,8 +94,8 @@ function AgentStepProgress({
             )}
           </div>
         ) : (
-          <div className="flex items-center gap-2 text-xs text-blue-600">
-            <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
+          <div className="flex items-center gap-2 text-xs text-brand-600">
+            <span className="inline-block h-2 w-2 rounded-full bg-brand-500" />
             <span>等待步骤数据同步</span>
           </div>
         )}

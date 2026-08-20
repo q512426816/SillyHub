@@ -44,7 +44,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban } from "lucide-react";
-import { Badge, Button, Spin, message } from "antd";
+import { Badge, Button, Spin } from "antd";
 
 import { buildErrorLogItem } from "@/components/agent-log/normalize";
 import {
@@ -65,6 +65,7 @@ import { SessionListPanel } from "@/components/sessions/session-list-panel";
 import { SubagentCatalog } from "@/components/sessions/subagent-catalog";
 import { PageContainer, PageHeader } from "@/components/layout";
 import { ApiError } from "@/lib/api";
+import { useNotify } from "@/lib/errors";
 import {
   listProviders,
   type LlmProviderRead,
@@ -193,6 +194,7 @@ function SessionPanel({
   onSessionListRefresh,
 }: SessionPanelProps) {
   const qc = useQueryClient();
+  const notify = useNotify();
 
   // ── 会话详情（配置三列 + 状态 + current_run_id）────────────────────────
   const detailQuery = useQuery({
@@ -748,8 +750,7 @@ function SessionPanel({
       await qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
       onSessionListRefresh?.();
     } catch (err) {
-      const apiErr = err as ApiError;
-      message.error(apiErr instanceof ApiError ? apiErr.message : "重新开启失败");
+      notify.error(err, "重新开启失败");
     } finally {
       setReopening(false);
     }
@@ -929,7 +930,7 @@ function SessionPanel({
               {title}
             </span>
           )}
-          {/* 会话 id 短码：点击复制完整 id（排障/引用入口），message 反馈。 */}
+          {/* 会话 id 短码：点击复制完整 id（排障/引用入口），notify 反馈。 */}
           <button
             type="button"
             aria-label="复制会话 ID"
@@ -937,8 +938,8 @@ function SessionPanel({
             onClick={() => {
               void navigator.clipboard
                 ?.writeText(session.id)
-                .then(() => message.success("已复制会话 ID"))
-                .catch(() => message.error("复制失败"));
+                .then(() => notify.success("已复制会话 ID"))
+                .catch(() => notify.error(new Error("复制失败")));
             }}
             className="shrink-0 cursor-pointer rounded px-1 py-0.5 font-mono text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           >

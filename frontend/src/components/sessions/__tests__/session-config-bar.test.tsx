@@ -37,6 +37,7 @@ const mocks = vi.hoisted(() => ({
   injectSession: vi.fn(),
   messageSuccess: vi.fn(),
   messageError: vi.fn(),
+  messageInfo: vi.fn(),
 }));
 
 vi.mock("@/lib/use-daemon-machines", () => ({
@@ -63,11 +64,23 @@ vi.mock("@/lib/daemon", async (importOriginal) => {
   };
 });
 
-// antd message 静态方法局部 mock（Button/Input 走真实实现）。
+// antd 局部 mock（Button/Input 走真实实现）。组件 toast 走 useNotify → App.useApp()
+// 上下文 message（message→useNotify 迁移，FR-04），故在 App.useApp 上挂 mock 断言；
+// 静态 message mock 保留兜底（若有第三方直调静态方法不至于崩）。
 vi.mock("antd", async (importOriginal) => {
   const actual = await importOriginal<typeof import("antd")>();
+  const AppWithMockUseApp = Object.assign(actual.App, {
+    useApp: () => ({
+      message: {
+        success: mocks.messageSuccess,
+        error: mocks.messageError,
+        info: mocks.messageInfo,
+      },
+    }),
+  });
   return {
     ...actual,
+    App: AppWithMockUseApp,
     message: { success: mocks.messageSuccess, error: mocks.messageError },
   };
 });
@@ -210,6 +223,7 @@ beforeEach(() => {
   mocks.injectSession.mockReset().mockResolvedValue(INJECT_RESPONSE);
   mocks.messageSuccess.mockReset();
   mocks.messageError.mockReset();
+  mocks.messageInfo.mockReset();
 });
 
 afterEach(() => {

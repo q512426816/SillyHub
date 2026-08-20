@@ -19,7 +19,7 @@ import {
   getTopology,
   type TopologyResponse,
 } from "@/lib/workspaces";
-import { tokens } from "@/styles/tokens";
+import { DEFAULT_THEME, themes } from "@/styles";
 
 interface Props {
   params: { id: string };
@@ -28,18 +28,19 @@ interface Props {
 /**
  * 节点类型 → 边框/手柄色。
  *
- * 全部取自 task-01 tokens(blue 色阶 + cyan/emerald + semantic),
- * 不再使用 Tailwind 默认色阶 hex。设计依据:tasks/task-09.md §topology。
+ * 全部取自主题注册表 themes(brand 色阶 + accent/semantic + slate),
+ * 编译期静态取色(themes[DEFAULT_THEME]),主题切换不变——设计决定。
+ * 设计依据:tasks/task-09.md §topology。
  */
 const TYPE_COLORS: Record<string, string> = {
-  frontend: tokens.color.blue[500],
-  backend: tokens.color.emerald,
-  tooling: tokens.color.semantic.warning.color,
-  docs: tokens.color.blue[800],
-  test: tokens.color.semantic.error.color,
-  library: tokens.color.blue[700],
-  service: tokens.color.cyan,
-  monorepo: tokens.color.blue[400],
+  frontend: themes[DEFAULT_THEME].color.brand[500],
+  backend: themes[DEFAULT_THEME].color.semantic.success,
+  tooling: themes[DEFAULT_THEME].color.semantic.warning,
+  docs: themes[DEFAULT_THEME].color.brand[800],
+  test: themes[DEFAULT_THEME].color.semantic.error,
+  library: themes[DEFAULT_THEME].color.brand[700],
+  service: themes[DEFAULT_THEME].color.accent,
+  monorepo: themes[DEFAULT_THEME].color.brand[400],
 };
 
 type WorkspaceNodeData = {
@@ -49,7 +50,7 @@ type WorkspaceNodeData = {
 };
 
 function WorkspaceNode({ data }: NodeProps<Node<WorkspaceNodeData>>) {
-  const bg = data.type ? TYPE_COLORS[data.type] ?? tokens.color.slate[500] : tokens.color.slate[500];
+  const bg = data.type ? TYPE_COLORS[data.type] ?? themes[DEFAULT_THEME].color.slate[500] : themes[DEFAULT_THEME].color.slate[500];
   return (
     <div
       className="rounded border bg-card px-3 py-2 text-xs shadow-sm"
@@ -117,8 +118,8 @@ export default function TopologyPage({ params }: Props) {
       target: e.target_id,
       label: e.relation_type,
       animated: true,
-      style: { stroke: tokens.color.slate[400] },
-      labelStyle: { fontSize: 10, fill: tokens.color.slate[600] },
+      style: { stroke: themes[DEFAULT_THEME].color.slate[400] },
+      labelStyle: { fontSize: 10, fill: themes[DEFAULT_THEME].color.slate[600] },
     }));
     return { nodes, edges };
   }, [topology]);

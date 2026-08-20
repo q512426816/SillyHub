@@ -15,7 +15,10 @@ import { useSession } from "@/stores/session";
 // 独立一级菜单、跨工作区聚合视图，不依赖工作区上下文——execute 时遗漏，部署实测发现被守卫重定向）。
 // 2026-08-14-sessions-portal task-10 补：加入 /sessions（智能体会话总入口，平台级
 // 跨工作区视图，不依赖工作区上下文）。
-const WORKSPACE_WHITELIST = ["/workspaces", "/admin", "/settings", "/ppm", "/runtimes", "/account", "/agent-profiles", "/sessions"];
+// 2026-08-19-cross-workspace-team-mission task-15 补：加入 /projects（项目维度
+// 跨工作区团队会话 /projects/{id}/missions，不依赖工作区上下文；ppm/projects 页
+// 「Agent 团队」入口曾因漏配被守卫弹回 /workspaces，部署实测发现）。
+const WORKSPACE_WHITELIST = ["/workspaces", "/admin", "/settings", "/ppm", "/runtimes", "/account", "/agent-profiles", "/sessions", "/projects"];
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const router = useRouter();

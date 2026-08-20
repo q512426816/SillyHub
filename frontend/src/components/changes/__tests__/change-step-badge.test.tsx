@@ -41,7 +41,7 @@ describe("ChangeStepBadge", () => {
     );
     const dot = screen.getByTestId("step-active-dot");
     expect(dot.className).toContain("animate-pulse");
-    expect(dot.className).toContain("bg-blue-600");
+    expect(dot.className).toContain("bg-brand-600");
     expect(screen.getByTestId("step-count")).toHaveTextContent("step 2/8");
     expect(screen.getByText(/对话式探索与需求澄清/)).toBeInTheDocument();
   });

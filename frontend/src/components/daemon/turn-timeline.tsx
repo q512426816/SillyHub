@@ -22,6 +22,12 @@
  *     output 单气泡 + processItems TurnDetailsList（§9.3 过渡期双路径，保留不删）；
  *   - whoLine / sender / errorDetail / 孤儿 turn 紧凑标记 / TurnStatusBadge / 空态 /
  *     滚动到底等现有特性两路径共享不动。
+ *
+ * task-13（2026-08-20-frontend-ai-native-style / FR-05 / D-004@v1）：会话页 AI
+ * 原生观感细节，仅表现层——whoLine 改 .sh-ctx-chip 引用 chip、ThinkingPlaceholder
+ * 三点改 .sh-typing-dots、旧路径 output 气泡运行中尾挂 .sh-stream-caret 流式光标
+ * （utility 与 reduced-motion 降级均在 globals.css；v2 路径流式光标由
+ * TextSegmentView 的 .seg-caret 承担，双路径语义一致）。数据逻辑 / SSE 零改动。
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -357,17 +363,19 @@ export function TurnTimeline({
                   })}
               {/* task-14（FR-07 / D-008@v1）：消息 who 行——读该轮 run 配置快照
                   （📋 档案 · 智能体 · ☁ 供应商），未选如实显示「未指定/本机默认」；
-                  历史不跟随会话当前配置。whoLine 缺省（弹窗旧组装）不渲染（零回归）。 */}
+                  历史不跟随会话当前配置。whoLine 缺省（弹窗旧组装）不渲染（零回归）。
+                  task-13（FR-05 / D-004@v1）：展示改 .sh-ctx-chip 上下文引用 chip
+                  （虚线描边浅底，brand 阶随主题，globals.css utility）——数据源仍为
+                  快照三字段，不加新数据，缺省不渲染语义不变。 */}
               {turn.whoLine && (
-                <div
-                  aria-label="轮次配置快照"
-                  className="ml-9 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground"
-                >
-                  <span>📋 {turn.whoLine.profileName ?? "未指定"}</span>
-                  <span aria-hidden>·</span>
-                  <span>{turn.whoLine.agentName}</span>
-                  <span aria-hidden>·</span>
-                  <span>☁ {turn.whoLine.providerName ?? "本机默认"}</span>
+                <div aria-label="轮次配置快照" className="ml-9">
+                  <span className="sh-ctx-chip">
+                    <span>📋 {turn.whoLine.profileName ?? "未指定"}</span>
+                    <span aria-hidden>·</span>
+                    <span>{turn.whoLine.agentName}</span>
+                    <span aria-hidden>·</span>
+                    <span>☁ {turn.whoLine.providerName ?? "本机默认"}</span>
+                  </span>
                 </div>
               )}
               {/* task-06（FR-01 / design §5 Phase2 + §9.3）：渲染主体双路径分支。
@@ -396,6 +404,14 @@ export function TurnTimeline({
                       <div className="flex items-end gap-1.5">
                         <div className="max-w-[82%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
                           <MarkdownText content={turn.output} />
+                          {/* task-13（FR-05 / D-004@v1）：流式光标——旧路径 output
+                              气泡运行中（isLiveTurn 三态）挂正文尾，轮终态随条件转
+                              false 移除；与 v2 路径 TextSegmentView 的 .seg-caret 同
+                              语义（双路径一致）。utility/降级见 globals.css
+                              .sh-stream-caret。 */}
+                          {isLiveTurn(turn.status) && (
+                            <span aria-hidden className="sh-stream-caret" />
+                          )}
                         </div>
                         {/* ql-20260817-004：答复完成时间（run.finished_at，缺省不渲染）。 */}
                         {turn.replyAt && (
@@ -477,9 +493,14 @@ function ThinkingPlaceholder({ viewMode }: { viewMode: SessionViewMode }) {
         <Bot className="h-3.5 w-3.5" aria-hidden />
       </span>
       <div className="flex items-center gap-1.5 rounded-2xl rounded-tl-md border bg-card px-4 py-3 shadow-sm">
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/60" />
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:150ms]" />
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground/60 [animation-delay:300ms]" />
+        {/* task-13（FR-05 / D-004@v1）：三点由内联 animate-pulse tailwind 类改为
+            .sh-typing-dots utility（stagger 脉冲动画统一由 globals.css 承担，
+            reduced-motion 静止半透明退化见该文件）；语义文案不变。 */}
+        <span aria-hidden className="sh-typing-dots">
+          <span />
+          <span />
+          <span />
+        </span>
         <span className="ml-1 text-xs text-muted-foreground">
           {viewMode === "all" ? "执行中…" : "正在思考…"}
         </span>
@@ -702,11 +723,11 @@ function ToolEventCard({ event }: { event: SessionToolEvent }) {
       ? { icon: "✓", cls: "text-emerald-600", title: "执行成功" }
       : event.status === "deny"
         ? { icon: "✗", cls: "text-destructive", title: "执行失败 / 被拒" }
-        : { icon: "⏳", cls: "text-blue-600", title: "执行中" };
+        : { icon: "⏳", cls: "text-brand-600", title: "执行中" };
   const result = event.result?.trim() ?? "";
   return (
-    <div className="rounded border border-blue-200 bg-blue-50/40 px-2 py-1.5">
-      <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-blue-700">
+    <div className="rounded border border-brand-200 bg-brand-50/40 px-2 py-1.5">
+      <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-brand-700">
         <Wrench className="h-3 w-3 shrink-0" aria-hidden />
         <span className="font-medium">{parsed?.tool ?? (event.raw ? "工具调用" : "工具结果")}</span>
         <span className={cn("font-mono", badge.cls)} title={badge.title} aria-label={badge.title}>
@@ -758,11 +779,11 @@ function AskUserToolCard({ dialog }: { dialog: SessionDialogRead }) {
   if (qa.length === 0) return null;
   const pending = dialog.status === "pending";
   const badge = pending
-    ? { icon: "⏳", cls: "text-blue-600", title: "等待回答" }
+    ? { icon: "⏳", cls: "text-brand-600", title: "等待回答" }
     : { icon: "✓", cls: "text-emerald-600", title: "已回答" };
   return (
-    <div className="rounded border border-blue-200 bg-blue-50/40 px-2 py-1.5">
-      <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-blue-700">
+    <div className="rounded border border-brand-200 bg-brand-50/40 px-2 py-1.5">
+      <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-brand-700">
         <Wrench className="h-3 w-3 shrink-0" aria-hidden />
         <span className="font-medium">AskUserQuestion</span>
         <span className={cn("font-mono", badge.cls)} title={badge.title} aria-label={badge.title}>
@@ -829,7 +850,7 @@ function SessionCollapsible({
   const headerCls =
     tone === "thinking"
       ? "bg-zinc-100 border-zinc-200 text-zinc-600"
-      : "bg-blue-50 border-blue-200 text-blue-700";
+      : "bg-brand-50 border-brand-200 text-brand-700";
   return (
     <div className={`overflow-hidden rounded border ${headerCls}`}>
       <button
@@ -912,7 +933,7 @@ function TurnStatusBadge({
   };
   const tone: Record<TurnUiStatus, string> = {
     pending: "text-muted-foreground",
-    running: "text-blue-600",
+    running: "text-brand-600",
     interrupting: "text-amber-600",
     completed: "text-emerald-600",
     failed: "text-destructive",

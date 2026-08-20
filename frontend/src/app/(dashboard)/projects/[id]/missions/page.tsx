@@ -106,7 +106,7 @@ export default function ProjectMissionsPage() {
           该项目尚未关联工作区。先在
           <Link
             href="/ppm/projects"
-            className="mx-1 text-blue-600 hover:underline"
+            className="mx-1 text-brand-600 hover:underline"
           >
             项目维护页
           </Link>

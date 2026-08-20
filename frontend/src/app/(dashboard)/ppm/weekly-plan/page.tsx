@@ -17,12 +17,11 @@ import {
   Switch,
   Table,
   Tag,
-  message,
   type TableProps,
 } from "antd";
 import dayjs from "dayjs";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
-import { ApiError } from "@/lib/api";
+import { useNotify } from "@/lib/errors";
 import { fmtDate } from "@/lib/ppm";
 import {
   exportWeeklyPlan,
@@ -96,6 +95,7 @@ interface DisplayRow extends WeeklyPlanRow {
 }
 
 export default function WeeklyPlanPage() {
+  const notify = useNotify();
   const [rawData, setRawData] = useState<WeeklyPlanRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
@@ -145,10 +145,11 @@ export default function WeeklyPlanPage() {
       const resp = await listWeeklyPlan(buildReq());
       setRawData(resp.items);
     } catch (err) {
-      message.error(err instanceof ApiError ? err.message : "加载失败");
+      notify.error(err, "加载失败");
     } finally {
       setLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- notify 为 App 上下文稳定句柄,不进依赖
   }, [buildReq]);
 
   useEffect(() => {
@@ -166,9 +167,9 @@ export default function WeeklyPlanPage() {
     setExporting(true);
     try {
       await exportWeeklyPlan(buildReq());
-      message.success("导出已开始");
+      notify.success("导出已开始");
     } catch (err) {
-      message.error(err instanceof ApiError ? err.message : "导出失败");
+      notify.error(err, "导出失败");
     } finally {
       setExporting(false);
     }

@@ -245,10 +245,11 @@ describe("变更详情页退化（task-10，D-003@v1）", () => {
     const card = await screen.findByTestId("quicklog-linked-card");
     expect(card).toBeInTheDocument();
     expect(screen.getByText("修侧栏宽度塌陷")).toBeInTheDocument();
-    // linked_change 用 change_key 筛选
+    // linked_change 用 change_key 筛选；含空壳占位（ql-20260820-008 默认显示口径）
     await waitFor(() =>
       expect(mocks.listQuicklogEntries).toHaveBeenCalledWith("ws-1", {
         linked_change: "2026-08-14-test-change",
+        include_placeholder: true,
         page_size: 20,
       }),
     );

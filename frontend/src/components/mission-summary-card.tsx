@@ -6,7 +6,7 @@ import type { Mission } from "@/lib/agent";
 /** 任务级状态徽标配色（STATUS_LABEL 控中文文案）。 */
 const STATUS_BADGE: Record<string, string> = {
   planning: "bg-gray-100 text-gray-700",
-  running: "bg-blue-100 text-blue-700",
+  running: "bg-brand-100 text-brand-700",
   done: "bg-green-100 text-green-700",
   degraded: "bg-yellow-100 text-yellow-800",
   failed: "bg-red-100 text-red-700",

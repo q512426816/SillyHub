@@ -320,12 +320,12 @@ export function UsageStat({
 }: {
   label: string;
   value: string;
-  /** tone 对齐 prototype .ustat .uv：cost=蓝、muted=灰（无数据）、default=深字。 */
+  /** tone 对齐 prototype .ustat .uv：cost=brand 阶强调、muted=灰（无数据）、default=深字。 */
   tone?: "default" | "cost" | "muted";
 }) {
   const valueColor = {
     default: "text-slate-900",
-    cost: "text-blue-700",
+    cost: "text-brand-700",
     muted: "text-slate-400 font-medium",
   }[tone];
   return (

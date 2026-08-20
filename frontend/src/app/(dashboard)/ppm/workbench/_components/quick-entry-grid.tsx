@@ -49,7 +49,7 @@ export function QuickEntryGrid({ readOnly }: { readOnly?: boolean }) {
     {
       label: "任务计划",
       icon: ClipboardCheck,
-      tile: "bg-blue-50 text-blue-600",
+      tile: "bg-brand-50 text-brand-600",
       onClick: () => router.push("/ppm/task-plans"),
     },
     {

@@ -19,7 +19,6 @@ import {
   Button,
   DatePicker,
   Input,
-  message,
   Modal,
   Select,
   Table,
@@ -40,6 +39,7 @@ import {
   PROBLEM_TYPE_TEXT,
 } from "@/components/ppm-status-actions";
 import { ApiError } from "@/lib/api";
+import { useNotify } from "@/lib/errors";
 import { isOverEstimate } from "@/lib/ppm/format";
 import {
   deleteProblem,
@@ -79,6 +79,7 @@ const IS_URGENT_OPTIONS = [
 export default function ProblemListPage() {
   const currentUser = useSession((s) => s.user);
   const currentUserId = currentUser?.id ?? "";
+  const notify = useNotify();
   // 归属:默认「全部」(ql-20260722 调整,不再默认只看我的)
   const [view, setView] = useState<"mine" | "all">("all");
 
@@ -179,7 +180,7 @@ export default function ProblemListPage() {
     try {
       await exportProblems();
     } catch (err) {
-      message.error(err instanceof ApiError ? err.message : "导出失败");
+      notify.error(err, "导出失败");
     } finally {
       setExporting(false);
     }
@@ -227,7 +228,7 @@ export default function ProblemListPage() {
       await startProblem(p.id);
       await load();
     } catch (err) {
-      message.error(err instanceof ApiError ? err.message : "开始失败");
+      notify.error(err, "开始失败");
     }
   };
 
@@ -245,7 +246,7 @@ export default function ProblemListPage() {
           await deleteProblem(p.id);
           await load();
         } catch (err) {
-          message.error(err instanceof ApiError ? err.message : "删除失败");
+          notify.error(err, "删除失败");
         }
       },
     });

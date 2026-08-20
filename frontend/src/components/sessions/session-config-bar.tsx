@@ -29,11 +29,11 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { message } from "antd";
+import { App } from "antd";
 
-import { ApiError } from "@/lib/api";
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
 import { listProviders } from "@/lib/api/llm-providers";
+import { useNotify } from "@/lib/errors";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import { injectSession, PROVIDER_META } from "@/lib/daemon";
 import type {
@@ -140,6 +140,10 @@ export function SessionConfigBar({
   // 数据源与 task-12 同（机器/智能体展示下拉 + 供应商/档案切换选项）。
   const { items: machines } = useDaemonMachines({});
   const { profiles } = useMineAgentProfiles();
+  const notify = useNotify();
+  // useNotify 无 info 级方法,引擎切换引导提示经 App 上下文取 message.info
+  // (对齐 m/ppm/problem-list 先例,非 antd 裸 import,FR-04 不破)。
+  const { message } = App.useApp();
   const providersQ = useQuery({
     queryKey: ["llmProviders", "sessions-config-bar"],
     queryFn: listProviders,
@@ -219,10 +223,10 @@ export function SessionConfigBar({
         p.field === "llm_provider_id" && p.value === SWITCH_NO_PROVIDER_VALUE
           ? "本机默认"
           : p.label;
-      message.success(`已切换${what} → ${name}（下一轮生效，历史消息保留当时配置）`);
+      notify.success(`已切换${what} → ${name}（下一轮生效，历史消息保留当时配置）`);
       onSwitched?.(resp, p.field, p.value);
     } catch (err) {
-      message.error(err instanceof ApiError ? err.message : "切换失败，请重试");
+      notify.error(err, "切换失败，请重试");
     } finally {
       setSubmitting(false);
     }

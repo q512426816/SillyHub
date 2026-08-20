@@ -544,7 +544,7 @@ function SessionRow({
             checked={checked ?? false}
             onChange={onToggleCheck}
             aria-label={`勾选 ${title}`}
-            className="h-3.5 w-3.5 shrink-0 accent-blue-600"
+            className="h-3.5 w-3.5 shrink-0 accent-brand-600"
           />
         ) : (
           <span

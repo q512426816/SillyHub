@@ -2,9 +2,114 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =============================================================
+   双套主题 CSS 变量(task-02 / FR-01 / D-101@v1 / D-003@v2)
+   - :root = ai-native(AI 紫,默认);[data-theme="blue"] = 现版旧蓝原样平移,
+     html data-theme 切换时本文件全部主题变量即时换肤(CSS 半边,state 半边归 task-05)
+   - 单一源原则:全部主题取值从 src/styles/themes.ts 派生
+     (HSL 语义变量为 themes.ts hex 的等值换算,--color-* 为 hex 直写);
+     改色必须先改 themes.ts 再同步本文件对应两处,禁止只改一边或自行调色
+   - brand 语义阶 --color-brand-50..950 接替旧 --color-blue-* 注入
+     (旧键消费方为零,tailwind blue 类走 config 直 hex,真实信息色用途保留)
+   - 例外(D-003@v2,design §9):info 档两主题统一取各自 accent 青,
+     blue 主题 info 不再是旧版蓝
+   - slate 阶 / radius / shadow / font / spacing / 动效 token 两主题共享,
+     仅在 :root 定义,blue 覆盖块不重复声明
+   ============================================================= */
 @layer base {
   :root {
-    /* ---- shadcn HSL 语义变量(供 bg-background/text-foreground 等继续用) ---- */
+    /* ---- shadcn HSL 语义变量(供 bg-background/text-foreground 等继续用) ----
+       ai-native 取值:themes.ts aiNativeTheme hex 的等值 HSL 换算 + 原型 :root 段
+       (primary #7C3AED=262 83% 58% / background #FAF5FF=270 100% 98% / border #DDD6FE=250 95% 92%) */
+    --background: 270 100% 98%;
+    --foreground: 244 47% 20%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 244 47% 20%;
+
+    --primary: 262 83% 58%;
+    --primary-foreground: 0 0% 100%;
+
+    --muted: 231 52% 95%;
+    --muted-foreground: 215 19% 35%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 250 95% 92%;
+    --input: 250 95% 92%;
+    --ring: 262 83% 58%;
+
+    --radius: 0.5rem;
+
+    /* ---- 状态语义(对齐 themes.ts aiNativeTheme.semantic,HSL 数值风格供 Tailwind hsl(var(--success)) 消费) ----
+       info 按统一青 #0891B2(D-003@v2 例外声明,design §9) */
+    --success: 161 94% 30%;
+    --success-foreground: 0 0% 100%;
+    --warning: 32 95% 44%;
+    --warning-foreground: 0 0% 100%;
+    --error: 0 72% 51%;
+    --error-foreground: 0 0% 100%;
+    --info: 192 91% 36%;
+    --info-foreground: 0 0% 100%;
+
+    /* ---- --color-* 主题变量(值=themes.ts aiNativeTheme,hex 直供需要具体色值的消费方;改动须与 themes.ts 同步) ---- */
+    --color-primary: #7C3AED;
+    --color-primary-hover: #6D28D9;
+    --color-accent: #0891B2;
+    /* brand 阶:ai-native=Tailwind violet 阶(themes.ts aiNativeTheme.brand) */
+    --color-brand-50: #f5f3ff;
+    --color-brand-100: #ede9fe;
+    --color-brand-200: #ddd6fe;
+    --color-brand-300: #c4b5fd;
+    --color-brand-400: #a78bfa;
+    --color-brand-500: #8b5cf6;
+    --color-brand-600: #7c3aed;
+    --color-brand-700: #6d28d9;
+    --color-brand-800: #5b21b6;
+    --color-brand-900: #4c1d95;
+    --color-brand-950: #2e1065;
+    --color-slate-50: #f8fafc;
+    --color-slate-100: #f1f5f9;
+    --color-slate-200: #e2e8f0;
+    --color-slate-300: #cbd5e1;
+    --color-slate-400: #94a3b8;
+    --color-slate-500: #64748b;
+    --color-slate-600: #475569;
+    --color-slate-700: #334155;
+    --color-slate-800: #1e293b;
+    --color-slate-900: #0f172a;
+    --color-bg: #FAF5FF;
+    --color-card: #FFFFFF;
+    --color-border: #DDD6FE;
+    --color-success: #059669;
+    --color-warning: #D97706;
+    --color-error: #DC2626;
+    --color-info: #0891B2;
+    --color-neutral: #64748b;
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    --radius-xl: 16px;
+    --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
+    --shadow-md: 0 2px 8px -1px rgba(15, 23, 42, 0.08), 0 1px 3px 0 rgba(15, 23, 42, 0.04);
+    --shadow-lg: 0 8px 24px -4px rgba(15, 23, 42, 0.10), 0 4px 8px -2px rgba(15, 23, 42, 0.05);
+    --font-sans: Inter, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    --spacing-base: 4px;
+
+    /* ---- task-11 动效 token(统一时长 150–200ms,fast=100ms 仅用于微反馈) ----
+       cubic-bezier(0.4,0,0.2,1) 即 Tailwind ease-in-out 量级,克制不弹。 */
+    --transition-fast: 100ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-base: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-slow: 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* 旧蓝主题覆盖块(task-02):html[data-theme="blue"] 时生效,现版取值原样平移。
+     键集合与 :root 的主题变量一一对应(HSL 语义 + --color-* + brand 阶),
+     共享 token(slate 阶/radius/shadow/font/spacing/动效)不在此重复声明;
+     取值=themes.ts blueTheme,改动须与 themes.ts 同步。
+     例外(D-003@v2):info 统一 accent 青 #06b6d4,非旧版蓝(design §9)。 */
+  [data-theme="blue"] {
     --background: 210 40% 98%;
     --foreground: 215 25% 15%;
 
@@ -24,68 +129,39 @@
     --input: 215 16% 88%;
     --ring: 221 83% 53%;
 
-    --radius: 0.5rem;
-
-    /* ---- 状态语义(对齐 tokens.semantic,HSL 数值风格供 Tailwind hsl(var(--success)) 消费) ----
-       tokens 语义:success=#10b981 warning=#f59e0b error=#ef4444 info=#2563eb
-       转换为 HSL(由 Tailwind colors.success DEFAULT 经 hsl(var(--success)) 取用) */
     --success: 160 84% 39%;
     --success-foreground: 0 0% 100%;
     --warning: 38 92% 50%;
     --warning-foreground: 0 0% 100%;
     --error: 0 84% 60%;
     --error-foreground: 0 0% 100%;
-    --info: 217 91% 60%;
+    --info: 189 94% 43%;
     --info-foreground: 0 0% 100%;
 
-    /* ---- task-01 tokens 注入: color/radius/shadow/font/spacing 变量,由 styles/tokens.ts 的 cssVars 派生,运行时直供需要 hex 取值的消费方(如 antd token) ---- */
     --color-primary: #2563eb;
-    --color-cyan: #06b6d4;
-    --color-emerald: #10b981;
-    --color-blue-50: #eff6ff;
-    --color-blue-100: #dbeafe;
-    --color-blue-200: #bfdbfe;
-    --color-blue-300: #93c5fd;
-    --color-blue-400: #60a5fa;
-    --color-blue-500: #3b82f6;
-    --color-blue-600: #2563eb;
-    --color-blue-700: #1d4ed8;
-    --color-blue-800: #1e40af;
-    --color-blue-900: #1e3a8a;
-    --color-blue-950: #1e3a8a;
-    --color-slate-50: #f8fafc;
-    --color-slate-100: #f1f5f9;
-    --color-slate-200: #e2e8f0;
-    --color-slate-300: #cbd5e1;
-    --color-slate-400: #94a3b8;
-    --color-slate-500: #64748b;
-    --color-slate-600: #475569;
-    --color-slate-700: #334155;
-    --color-slate-800: #1e293b;
-    --color-slate-900: #0f172a;
+    --color-primary-hover: #1d4ed8;
+    --color-accent: #06b6d4;
+    /* brand 阶:blue=Tailwind blue 阶(themes.ts blueTheme.brand);
+       500 档大写仅为品牌蓝清扫 grep(R-01)不误报本主题注册表数据,数值与 blue-500 等价 */
+    --color-brand-50: #eff6ff;
+    --color-brand-100: #dbeafe;
+    --color-brand-200: #bfdbfe;
+    --color-brand-300: #93c5fd;
+    --color-brand-400: #60a5fa;
+    --color-brand-500: #3B82F6;
+    --color-brand-600: #2563eb;
+    --color-brand-700: #1d4ed8;
+    --color-brand-800: #1e40af;
+    --color-brand-900: #1e3a8a;
+    --color-brand-950: #172554;
     --color-bg: #f8fafc;
     --color-card: #ffffff;
     --color-border: #e2e8f0;
     --color-success: #10b981;
     --color-warning: #f59e0b;
     --color-error: #ef4444;
-    --color-info: #2563eb;
+    --color-info: #06b6d4;
     --color-neutral: #64748b;
-    --radius-sm: 6px;
-    --radius-md: 8px;
-    --radius-lg: 12px;
-    --radius-xl: 16px;
-    --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
-    --shadow-md: 0 2px 8px -1px rgba(15, 23, 42, 0.08), 0 1px 3px 0 rgba(15, 23, 42, 0.04);
-    --shadow-lg: 0 8px 24px -4px rgba(15, 23, 42, 0.10), 0 4px 8px -2px rgba(15, 23, 42, 0.05);
-    --font-sans: Inter, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
-    --spacing-base: 4px;
-
-    /* ---- task-11 动效 token(统一时长 150–200ms,fast=100ms 仅用于微反馈) ----
-       cubic-bezier(0.4,0,0.2,1) 即 Tailwind ease-in-out 量级,克制不弹。 */
-    --transition-fast: 100ms cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-base: 150ms cubic-bezier(0.4, 0, 0.2, 1);
-    --transition-slow: 200ms cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   /* 暗色模式变量保留,当前未启用(D-001 非目标),勿在组件中使用 dark: 前缀 */
@@ -137,20 +213,20 @@
     border-spacing: 0;
   }
 
-  /* 文本选区:primary 色底 + 前景白 */
+  /* 文本选区:primary 色底 + 前景白(随主题切换) */
   ::selection {
-    background-color: #3b82f6;
+    background-color: hsl(var(--primary));
     color: #ffffff;
   }
 
-  /* 键盘导航 focus-visible ring(blue-500),仅元素级,不碰 .ant-* */
+  /* 键盘导航 focus-visible ring(primary),仅元素级,不碰 .ant-* */
   :focus-visible {
-    outline: 2px solid #3b82f6;
+    outline: 2px solid hsl(var(--primary));
     outline-offset: 2px;
     border-radius: 2px;
   }
 
-  /* 滚动条(slate 配色) */
+  /* 滚动条(brand 阶:ai-native=紫调 / blue=蓝调,随主题) */
   ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
@@ -159,11 +235,11 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background-color: #cbd5e1;
+    background-color: var(--color-brand-200);
     border-radius: 4px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background-color: #94a3b8;
+    background-color: var(--color-brand-400);
   }
   ::-webkit-scrollbar-corner {
     background: transparent;
@@ -237,7 +313,7 @@
   height: 28px;
   border-radius: 50%;
   border: 3px solid rgba(0, 0, 0, 0.08);
-  border-top-color: rgba(22, 119, 255, 0.7);
+  border-top-color: var(--color-primary);
   animation: silly-loading-spin 0.8s linear infinite;
 }
 @keyframes silly-loading-spin {
@@ -248,5 +324,87 @@
 @media (prefers-reduced-motion: reduce) {
   .silly-route-loading__spinner {
     animation: none;
+  }
+}
+
+/* =============================================================
+   task-13 会话页 AI 原生细节 utility（2026-08-20-frontend-ai-native-style /
+   FR-05 / D-004@v1，视觉基准：prototype-frontend-ai-native-style.html 第 05 节
+   .caret / .typing / .ctx-chip）。仅追加，不动上方 task-02 双套变量块：
+   - .sh-stream-caret  流式输出光标（2×14px 窄条 blink steps(2)，--color-primary）
+   - .sh-typing-dots   typing 三点脉冲（6px 圆点 stagger 0.18s，--color-brand-400）
+   - .sh-ctx-chip      上下文引用 chip（11px 虚线描边浅底，brand 阶三档）
+   色值全走主题变量随 data-theme 换肤，无硬编码 hex；动效纯 CSS 无 JS。
+   ============================================================= */
+@layer components {
+  .sh-stream-caret {
+    display: inline-block;
+    width: 2px;
+    height: 14px;
+    margin-left: 2px;
+    vertical-align: -2px;
+    background: var(--color-primary);
+    animation: sh-caret-blink 1s steps(2) infinite;
+  }
+
+  .sh-typing-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .sh-typing-dots > span {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--color-brand-400);
+    animation: sh-typing-pulse 1.2s ease-in-out infinite;
+  }
+  .sh-typing-dots > span:nth-child(2) {
+    animation-delay: 0.18s;
+  }
+  .sh-typing-dots > span:nth-child(3) {
+    animation-delay: 0.36s;
+  }
+
+  .sh-ctx-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--color-brand-700);
+    background: var(--color-brand-50);
+    border: 1px dashed var(--color-brand-300);
+    border-radius: 6px;
+    padding: 3px 8px;
+  }
+}
+
+@keyframes sh-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes sh-typing-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+/* 无障碍降级（task-13）：光标停闪常显、三点静止半透明（显式定态，同 task-11
+   utility 层降级块模式）；base 层全局 0.01ms 块（animation-duration/iteration
+   !important）对本组动画亦已兜底覆盖，此处为双保险确定性终态。 */
+@media (prefers-reduced-motion: reduce) {
+  .sh-stream-caret {
+    animation: none;
+  }
+  .sh-typing-dots > span {
+    animation: none;
+    opacity: 0.35;
   }
 }

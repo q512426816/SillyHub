@@ -204,7 +204,7 @@ export function WorkspaceSwitcher(): JSX.Element {
         type="button"
         aria-label="选择工作区"
         onClick={() => router.push("/workspaces")}
-        className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-500 transition-colors hover:border-blue-400 hover:bg-white hover:text-slate-700"
+        className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-500 transition-colors hover:border-brand-400 hover:bg-white hover:text-slate-700"
       >
         <span className="h-2 w-2 rounded-full bg-slate-300" aria-hidden />
         <span>选择工作区</span>
@@ -226,7 +226,7 @@ export function WorkspaceSwitcher(): JSX.Element {
           <button
             type="button"
             aria-label="切换工作区"
-            className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm transition-colors hover:border-blue-400"
+            className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm transition-colors hover:border-brand-400"
           >
             <span
               className={cn("h-2 w-2 rounded-full", currentBadge.dotClass)}
@@ -260,7 +260,7 @@ export function WorkspaceSwitcher(): JSX.Element {
                   }}
                   className={cn(
                     "flex cursor-pointer items-center justify-between gap-2 rounded-md px-2.5 py-2 text-sm",
-                    isCurrent && "bg-blue-50 text-blue-700",
+                    isCurrent && "bg-brand-50 text-brand-700",
                   )}
                   disabled={false}
                 >
@@ -282,7 +282,7 @@ export function WorkspaceSwitcher(): JSX.Element {
               e.preventDefault();
               router.push("/workspaces");
             }}
-            className="cursor-pointer px-2.5 py-2 text-sm font-semibold text-blue-600"
+            className="cursor-pointer px-2.5 py-2 text-sm font-semibold text-brand-600"
           >
             查看全部工作区 →
           </DropdownMenuItem>

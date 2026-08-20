@@ -176,7 +176,7 @@ export function MilestoneSheet({
   const renderNodeCard = (node: PsPlanNode) => (
     <div className="flex min-w-0 flex-col gap-1">
       <div className="flex items-center gap-2">
-        <span className="shrink-0 rounded-md bg-blue-100 px-1.5 py-0.5 text-[12px] font-medium text-blue-700">
+        <span className="shrink-0 rounded-md bg-brand-100 px-1.5 py-0.5 text-[12px] font-medium text-brand-700">
           {node.no ?? "—"}
         </span>
         <span className="shrink-0 rounded-md bg-violet-100 px-1.5 py-0.5 text-[12px] font-medium text-violet-700">
@@ -224,7 +224,7 @@ export function MilestoneSheet({
             <button
               type="button"
               onClick={() => void load()}
-              className="ml-2 inline-flex min-h-[44px] items-center rounded-md px-2 text-[14px] font-medium text-blue-600 hover:underline"
+              className="ml-2 inline-flex min-h-[44px] items-center rounded-md px-2 text-[14px] font-medium text-brand-600 hover:underline"
             >
               重新加载
             </button>

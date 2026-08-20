@@ -8,23 +8,23 @@
  */
 import type { EChartsOption } from "echarts";
 
-import { tokens } from "@/styles";
+import { DEFAULT_THEME, themes } from "@/styles";
 
-/** 图表配色:集中管理,柱/饼/成本三图共用。 */
+/** 图表配色:集中管理,柱/饼/成本三图共用。取自主题注册表(编译期静态取色)。 */
 export const CHART_COLORS = {
-  user: tokens.color.blue[600],
-  project: tokens.color.emerald,
-  budget: tokens.color.blue[600],
-  actual: tokens.color.semantic.warning.color,
-  remaining: tokens.color.emerald,
-  negative: tokens.color.semantic.error.color,
+  user: themes[DEFAULT_THEME].color.brand[600],
+  project: themes[DEFAULT_THEME].color.semantic.success,
+  budget: themes[DEFAULT_THEME].color.brand[600],
+  actual: themes[DEFAULT_THEME].color.semantic.warning,
+  remaining: themes[DEFAULT_THEME].color.semantic.success,
+  negative: themes[DEFAULT_THEME].color.semantic.error,
   pie: [
-    tokens.color.blue[600],
-    tokens.color.cyan,
-    tokens.color.emerald,
-    tokens.color.semantic.warning.color,
-    tokens.color.semantic.error.color,
-    tokens.color.semantic.neutral.color,
+    themes[DEFAULT_THEME].color.brand[600],
+    themes[DEFAULT_THEME].color.accent,
+    themes[DEFAULT_THEME].color.semantic.success,
+    themes[DEFAULT_THEME].color.semantic.warning,
+    themes[DEFAULT_THEME].color.semantic.error,
+    themes[DEFAULT_THEME].color.semantic.neutral,
   ],
 } as const;
 

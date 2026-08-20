@@ -110,7 +110,7 @@ export function SessionListLayout({
           onClick={onNewSession}
           className={cn(
             "h-8 w-full justify-center gap-1 border-dashed text-xs",
-            selectedId === null && "border-blue-600 text-blue-700",
+            selectedId === null && "border-brand-600 text-brand-700",
           )}
           title={newButtonLabel}
         >
@@ -141,8 +141,8 @@ export function SessionListLayout({
                     type="button"
                     onClick={() => onSelect(s.id)}
                     className={cn(
-                      "flex min-w-0 flex-1 flex-col items-start gap-1 border-l-[3px] border-transparent px-3 py-2.5 text-left hover:bg-blue-50/60",
-                      selected && "border-blue-600 bg-blue-50",
+                      "flex min-w-0 flex-1 flex-col items-start gap-1 border-l-[3px] border-transparent px-3 py-2.5 text-left hover:bg-brand-50/60",
+                      selected && "border-brand-600 bg-brand-50",
                     )}
                   >
                     <span className="flex w-full items-center justify-between gap-2">
