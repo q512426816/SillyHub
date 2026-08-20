@@ -20,6 +20,14 @@ risk_level: standard
 - 主 agent interactive lease 永不过期（lease/service.py:261）：daemon 死亡无事件、无 expiry 兜底。
 - worker lease 过期有既有兜底（handle_lease_expiry：重派或 attempt≥3 标 failed）。
 
+## 1.5 非目标（Non-goals）
+
+- 不做多实例分布式锁（单实例部署，converged_at 守卫兜底；R-04 登记边界）。
+- 不改 run_sync 回调契约（事件驱动方案已否决：daemon 死亡无事件可挂）。
+- 不做 worker run 僵尸检测（worker lease 有既有 expiry 兜底）。
+- 不做巡检管理端点/前端页面（观测走结构化日志）。
+- 不覆盖 external/single 模式（schedule_loop 无主 run 自动跳过）。
+
 ## 2. 总体方案
 
 新文件 `backend/app/modules/agent/patrol.py`（`MissionPatrolService`）+ `main.py` lifespan
