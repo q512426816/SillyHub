@@ -8,6 +8,8 @@ task-08（test_router.py 改写）覆盖。
 覆盖（task-04 验收）：
 
 - 四方法成功路径（progress / user_inputs / artifacts / artifact content）；
+- RPC params 携带 ``root_path``（binding 行原值；容器→宿主前缀配置时为改写后
+  宿主路径——2026-08-20-runtime-readpoint-repo-first task-02，D-02@v1/D-03@v1）；
 - 绑定缺失矩阵（无绑定行 / ``daemon_id IS NULL`` → ``RuntimeNotBound`` 404）；
 - RPC 错误映射全表（offline / mid-rpc 断连 / timeout / forbidden / not_found /
   method_not_found / artifact_too_large / 其余业务错误）；
@@ -103,6 +105,7 @@ async def setup_live(db_session, monkeypatch):
         exc: BaseException | None = None,
         with_binding: bool = True,
         daemon_id_null: bool = False,
+        binding_root_path: str = r"C:\repo",
     ) -> tuple[RuntimeLiveService, LiveEnv]:
         from app.core.security import password_hasher
         from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
@@ -151,7 +154,7 @@ async def setup_live(db_session, monkeypatch):
                     workspace_id=ws.id,
                     user_id=user.id,
                     daemon_id=None if daemon_id_null else daemon_id,
-                    root_path=r"C:\repo",
+                    root_path=binding_root_path,
                     path_source="daemon-client",
                 )
             )
@@ -199,10 +202,10 @@ async def test_get_progress_success(setup_live):
     assert progress.current_stage == "execute"
     assert progress.current_change == "c1"
     assert progress.stages["execute"].steps[0].name == "Wave 1"
-    # RPC 契约：方法名 + workspace_id 参数 + 显式超时
+    # RPC 契约：方法名 + workspace_id/root_path 参数（无前缀配置，原样下发）+ 显式超时
     call = env.hub.calls[0]
     assert call["method"] == "runtime.read_progress"
-    assert call["params"] == {"workspace_id": str(env.workspace_id)}
+    assert call["params"] == {"workspace_id": str(env.workspace_id), "root_path": r"C:\repo"}
     assert call["timeout"] == RUNTIME_RPC_TIMEOUT_SECONDS
     assert call["daemon_id"] == env.daemon_id
 
@@ -219,6 +222,10 @@ async def test_get_user_inputs_success(setup_live):
     content = await svc.get_user_inputs(env.workspace_id, env.user_id)
     assert content == "# 用户输入记录\n"
     assert env.hub.calls[0]["method"] == "runtime.read_user_inputs"
+    assert env.hub.calls[0]["params"] == {
+        "workspace_id": str(env.workspace_id),
+        "root_path": r"C:\repo",
+    }
 
 
 async def test_get_user_inputs_none(setup_live):
@@ -239,6 +246,10 @@ async def test_get_artifacts_success(setup_live):
     assert artifacts[0].filename == "design.md"
     assert artifacts[0].size_bytes == 100
     assert env.hub.calls[0]["method"] == "runtime.list_artifacts"
+    assert env.hub.calls[0]["params"] == {
+        "workspace_id": str(env.workspace_id),
+        "root_path": r"C:\repo",
+    }
 
 
 async def test_get_artifacts_empty(setup_live):
@@ -252,7 +263,35 @@ async def test_get_artifact_content_success(setup_live):
     assert content == "# 产物内容\n"
     call = env.hub.calls[0]
     assert call["method"] == "runtime.read_artifact"
-    assert call["params"]["filename"] == "design.md"
+    assert call["params"] == {
+        "workspace_id": str(env.workspace_id),
+        "filename": "design.md",
+        "root_path": r"C:\repo",
+    }
+
+
+async def test_root_path_rewritten_with_prefix_config(setup_live, monkeypatch):
+    """容器→宿主前缀配置生效：binding root_path 命中容器前缀 → params 携带改写后宿主路径。
+
+    Docker 部署下 binding 行存的是容器视角路径，daemon 进程在宿主机上——
+    ``resolve_root_path_for_daemon``（D-02@v1）负责改写，这里验证该改写
+    确实体现在下发的 RPC params 里。settings 单例属性 patch 对齐
+    daemon/tests/test_lease_service.py 的既有先例。
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    monkeypatch.setattr(settings, "container_path_prefix", "/host-projects")
+    monkeypatch.setattr(settings, "host_path_prefix", "C:/Users/qinyi/IdeaProjects")
+
+    svc, env = await setup_live(
+        result={"progress": None},
+        binding_root_path="/host-projects/my-repo",
+    )
+    await svc.get_progress(env.workspace_id, env.user_id)
+
+    call = env.hub.calls[0]
+    assert call["params"]["root_path"] == "C:/Users/qinyi/IdeaProjects/my-repo"
 
 
 # ────────────────────────────────────────────────────────────────────────────

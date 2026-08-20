@@ -110,7 +110,7 @@ import {
   bumpLocalSpecVersion,
   resolveSpecDir,
 } from './spec-sync.js';
-import { RuntimeHandler } from './runtime-handler.js';
+import { RuntimeHandler, normalizeRootPathParam } from './runtime-handler.js';
 import type {
   PersistedSessionRecord,
   SessionStatus,
@@ -780,8 +780,15 @@ export class Daemon {
   private _wsClient: WsClientLike | null = null;
   private readonly _wsClientFactory: WsClientFactory;
 
-  /** runtime.* RPC handler（2026-08-19-runtime-live-daemon-read，无状态只读）。 */
-  private readonly _runtimeHandler = new RuntimeHandler();
+  /**
+   * runtime.* RPC handler（2026-08-19-runtime-live-daemon-read，无状态只读）。
+   * task-04（2026-08-20-runtime-readpoint-repo-first，design §5.2）：注入
+   * rootsProvider 供 root_path 读点第二道校验（containment）——方法引用惰性求值，
+   * 规避字段初始化顺序问题，写法对齐 HostFsHandler（下方 _registerHostFsRpcHandler）。
+   */
+  private readonly _runtimeHandler = new RuntimeHandler({
+    rootsProvider: () => this._effectiveAllowedRoots(),
+  });
 
   /** 运行标志，三循环 while 条件。 */
   private _running = false;
@@ -2622,10 +2629,15 @@ export class Daemon {
    * - runtime.read_progress：RuntimeHandler spawn sillyspec progress dump --json；
    * - runtime.read_user_inputs / list_artifacts / read_artifact：直读 .runtime/ 下文件。
    *
+   * task-04（2026-08-20-runtime-readpoint-repo-first，design §5.2）：四方法透传
+   * 可选 root_path 读点（仓库优先缓存回退，D-01@v1）。
+   *
    * params 归一对齐 explorer handler 写法：workspace_id/filename 非字符串或缺省
-   * 归一为空串，由 RuntimeHandler 入口断言拒 forbidden。handler 不额外 try/catch：
-   * RuntimeHandler 抛 ws-client.RpcError（code 语义化），_dispatchRpc 原样回填
-   * （普通 Error 映射 internal），不冒泡（explorer / host_fs 同约定）。
+   * 归一为空串，由 RuntimeHandler 入口断言拒 forbidden；root_path 经
+   * normalizeRootPathParam 归一（非字符串/空串 → undefined = 缓存读点）。
+   * handler 不额外 try/catch：RuntimeHandler 抛 ws-client.RpcError（code 语义化），
+   * _dispatchRpc 原样回填（普通 Error 映射 internal），不冒泡（explorer / host_fs
+   * 同约定）。
    */
   private _registerRuntimeRpcHandler(ws: WsClientLike): void {
     if (typeof ws.registerRpcHandler !== 'function') {
@@ -2635,20 +2647,24 @@ export class Daemon {
     const handler = this._runtimeHandler;
     ws.registerRpcHandler('runtime.read_progress', async (params) => {
       const workspaceId = typeof params.workspace_id === 'string' ? params.workspace_id : '';
-      return handler.readProgress(workspaceId);
+      const rootPath = normalizeRootPathParam(params.root_path);
+      return handler.readProgress(workspaceId, rootPath);
     });
     ws.registerRpcHandler('runtime.read_user_inputs', async (params) => {
       const workspaceId = typeof params.workspace_id === 'string' ? params.workspace_id : '';
-      return handler.readUserInputs(workspaceId);
+      const rootPath = normalizeRootPathParam(params.root_path);
+      return handler.readUserInputs(workspaceId, rootPath);
     });
     ws.registerRpcHandler('runtime.list_artifacts', async (params) => {
       const workspaceId = typeof params.workspace_id === 'string' ? params.workspace_id : '';
-      return handler.listArtifacts(workspaceId);
+      const rootPath = normalizeRootPathParam(params.root_path);
+      return handler.listArtifacts(workspaceId, rootPath);
     });
     ws.registerRpcHandler('runtime.read_artifact', async (params) => {
       const workspaceId = typeof params.workspace_id === 'string' ? params.workspace_id : '';
       const filename = typeof params.filename === 'string' ? params.filename : '';
-      return handler.readArtifact(workspaceId, filename);
+      const rootPath = normalizeRootPathParam(params.root_path);
+      return handler.readArtifact(workspaceId, filename, rootPath);
     });
   }
 

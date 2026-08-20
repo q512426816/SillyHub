@@ -16,6 +16,11 @@
  * mock：@/lib/runtime（hoisted vi.fn）+ @/lib/workspace-binding（fetchMyBinding
  * 返回 daemon_id 非空）+ @/stores/session（is_platform_admin=false），风格对齐
  * mcp-tokens/__tests__/page.test.tsx。
+ *
+ * 2026-08-20-runtime-readpoint-repo-first / task-03 追加（FR-05 / design §5.3）：
+ *   6. user-inputs 超 50000 字符 → 仅渲染末段 + 截断提示（含完整文件路径）
+ *   7. user-inputs 短字符串 → 无提示行（现状回归）
+ *   8. 副标题新文案「优先本机仓库，回退同步缓存」（旧句不再出现）
  */
 
 import {
@@ -130,6 +135,14 @@ describe("运行时状态页 · 文案（FR-05）", () => {
     expect(
       screen.getByText(/经绑定守护进程实时读取/),
     ).toBeInTheDocument();
+    // 2026-08-20-runtime-readpoint-repo-first / FR-05：读点改为优先本机仓库、
+    // 回退同步缓存，副标题同步新文案（design §5.3），旧句不再出现。
+    expect(
+      screen.getByText(/优先本机仓库，回退同步缓存/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/展示当前工作流状态/),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -206,6 +219,45 @@ describe("运行时状态页 · 正常数据渲染", () => {
         screen.getByText(/当前工作区没有运行时数据/),
       ).toBeInTheDocument();
     });
+  });
+});
+
+describe("运行时状态页 · user-inputs 截断（FR-05 / design §5.3）", () => {
+  it("超过 50000 字符 → 仅渲染末段 + 截断提示（含完整文件路径）", async () => {
+    // 头部 11 字符 + 50000 个 x + 尾部 9 字符 = 50020 > 50000，
+    // slice(-50000) 应丢弃整个头部标记、保留尾部标记。
+    const longInput = `HEAD_DROPPED${"x".repeat(50000)}TAIL_KEPT`;
+    runtimeApi.getRuntimeProgress.mockResolvedValue(null);
+    runtimeApi.getRuntimeUserInputsRaw.mockResolvedValue(longInput);
+    runtimeApi.getRuntimeArtifacts.mockResolvedValue([]);
+    const { container } = renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("用户输入记录")).toBeInTheDocument();
+    });
+    // 提示行出现，文案含完整文件路径。
+    expect(
+      screen.getByText(/内容过长，已截断，仅显示末尾 50000 字符/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(".sillyspec/.runtime/user-inputs.md"),
+    ).toBeInTheDocument();
+    // 头部标记被截掉（文档中不再出现），尾部标记保留。
+    expect(screen.queryByText(/HEAD_DROPPED/)).not.toBeInTheDocument();
+    expect(screen.getByText(/TAIL_KEPT/)).toBeInTheDocument();
+    // <pre> 只渲染末尾 50000 字符。
+    const pre = container.querySelector("pre");
+    expect(pre?.textContent?.length).toBe(50000);
+  });
+
+  it("短字符串 → 不出现截断提示（现状回归）", async () => {
+    mockAllOk();
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText(/第一条/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/内容过长，已截断/)).not.toBeInTheDocument();
   });
 });
 

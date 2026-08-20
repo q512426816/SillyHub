@@ -15,14 +15,22 @@
  * specCacheRoot 推导复用 spec-sync.resolveSpecDir（task-10 constraints：不新建
  * 配置项）——`~/.sillyhub/daemon/specs/<workspace_id>/`。
  *
+ * 2026-08-20-runtime-readpoint-repo-first：读点改为「仓库优先、缓存回退」——
+ * 四方法加可选 root_path 入参，pickRuntimeSpecDir 三道校验（元字符黑名单 →
+ * assertWithinAllowedRoots → `<root_path>/.sillyspec/.runtime` 存在性）全过读
+ * `<root_path>/.sillyspec`，任一不过记 warn 回退缓存目录（design §5.2/§6
+ * D-01@v1）；workspace_id 校验的 forbidden 仍 fail-loud，不在回退 catch 范围。
+ *
  * 设计依据：.sillyspec/changes/2026-08-19-runtime-live-daemon-read/design.md
- * （§4.1 / §6.1 RPC 契约 / §6.3 错误码 / §8 R-01/R-04）。
+ * （§4.1 / §6.1 RPC 契约 / §6.3 错误码 / §8 R-01/R-04）+
+ * .sillyspec/changes/2026-08-20-runtime-readpoint-repo-first/design.md（§5.2/§6）。
  */
 
 import { spawn } from 'child_process';
 import type { ChildProcess } from 'child_process';
-import { readFile, readdir, stat } from 'fs/promises';
+import { access, readFile, readdir, stat } from 'fs/promises';
 import { join, resolve, sep } from 'path';
+import { assertWithinAllowedRoots } from './file-rpc.js';
 import { resolveSpecDir } from './spec-sync.js';
 import { RpcError } from './ws-client.js';
 
@@ -41,11 +49,22 @@ const ARTIFACT_MAX_BYTES = 1_000_000;
 
 /**
  * workspace_id 严格白名单（shell 拼接注入防线）：本系统 workspace_id 恒为
- * UUID hex-dash 形态，非此形态一律拒 forbidden——shell:true 下这是唯一的
- * 注入主防线（resolveSpecDir 的路径分隔符拒绝只拦 `..` 类穿越，不拦
- * `; rm -rf` 类命令注入）。
+ * UUID hex-dash 形态，非此形态一律拒 forbidden——workspace_id 进入 shell:true
+ * 命令串的唯一防线是这个白名单（resolveSpecDir 的路径分隔符拒绝只拦 `..` 类穿越，不拦
+ * `; rm -rf` 类命令注入）；root_path 入串的注入防线见下方 ROOT_PATH_METACHAR_RE。
  */
 const WORKSPACE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * root_path 元字符黑名单（2026-08-20-runtime-readpoint-repo-first design §6
+ * shell 注入面对策第一层）：root_path 会进入 readProgress 的 shell:true 命令串
+ * （--spec-dir "<specDir>"），Linux/macOS 上含这些字符的目录名是合法路径，可
+ * 先过 realpath containment 再注入 shell（Windows 文件名禁这些字符，风险仅
+ * Unix 系）。命中一律判无效回退缓存（优雅降级非报错）；常见路径（含中文、
+ * 空格）零误伤。字符集与 design §6 逐字一致："'`$&|;<>()%^ + 换行/回车/NUL，
+ * 一个不多一个不少。
+ */
+const ROOT_PATH_METACHAR_RE = /["'`$&|;<>()%^\n\r\0]/;
 
 /**
  * spawn 命令 + 超时杀树（范式对齐 spec-sync.ts runInitCmd:1453 / preflight.ts
@@ -54,7 +73,8 @@ const WORKSPACE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
  * **为何 spawn+shell 而非 task 卡原文的 execFile**：Windows npm 全局 bin 是
  * .cmd shim，`execFile('sillyspec')` 无 PATHEXT 解析必 ENOENT（Node ≥18.20
  * 同时拒绝无 shell 调 .cmd，实测证实；仓内先例 runInitCmd X-06 注释同结论）。
- * 注入面由 WORKSPACE_ID_RE 白名单收口（见上）。
+ * 注入面由 WORKSPACE_ID_RE 白名单（workspace_id 入串）+ ROOT_PATH_METACHAR_RE
+ * 黑名单（root_path 入串，2026-08-20-runtime-readpoint-repo-first）双防线收口（见上）。
  */
 function runSillyspecCmd(
   cmd: string,
@@ -135,6 +155,26 @@ export function specCacheRootFor(workspaceId: string): string {
   }
 }
 
+/**
+ * RPC 参数 root_path 归一（daemon.ts 注册器与四方法入口共用）：非字符串或
+ * trim 后为空 → undefined（走缓存读点，老 backend / 缺参兼容）；非空字符串
+ * 原样返回——只判空不做 trim 改值（路径本身允许首尾空格，改值会读错目录）。
+ */
+export function normalizeRootPathParam(v: unknown): string | undefined {
+  if (typeof v !== 'string' || v.trim() === '') return undefined;
+  return v;
+}
+
+/** pathExists 默认实现：fs/promises access 探测，存在/可达 → true，否则 false。 */
+async function pathExistsViaAccess(p: string): Promise<boolean> {
+  try {
+    await access(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** filename 预检：空名 / 控制字符 / 绝对路径 / `..` 段 / 子路径 → forbidden。 */
 function assertSafeArtifactFilename(filename: string): void {
   const bad =
@@ -154,20 +194,76 @@ function assertSafeArtifactFilename(filename: string): void {
   }
 }
 
-/** runtime.* handler。sillyspecCmd 可注入（测试 / 源码 link 场景覆盖）。 */
+/**
+ * runtime.* handler。sillyspecCmd / rootsProvider / pathExists 可注入
+ * （测试 / 源码 link 场景覆盖）。
+ */
 export class RuntimeHandler {
+  /** allowed_roots 注入（对齐 HostFsHandler rootsProvider 范式）；缺省空数组 → root_path 分支必回退缓存。 */
+  private readonly _rootsProvider: () => string[];
+  /** 目录存在性探测注入（读点第三道校验）；缺省 fs access 实现。 */
+  private readonly _pathExists: (p: string) => Promise<boolean>;
+
   constructor(
     private readonly opts: {
       sillyspecCmd?: (
         cmd: string,
         timeoutMs: number,
       ) => Promise<{ ok: boolean; stdout: string; stderr: string; timedOut: boolean }>;
+      /** 允许读的根目录白名单来源（design §6 第二道校验消费）。 */
+      rootsProvider?: () => string[];
+      /** 目录存在性探测（design §6 第三道校验消费，测试注入用）。 */
+      pathExists?: (p: string) => Promise<boolean>;
     } = {},
-  ) {}
+  ) {
+    this._rootsProvider = opts.rootsProvider ?? (() => []);
+    this._pathExists = opts.pathExists ?? pathExistsViaAccess;
+  }
 
-  /** progress dump（spawn sillyspec 子进程，design §6.2）。 */
-  async readProgress(workspaceId: string): Promise<{ progress: unknown | null }> {
-    const specDir = specCacheRootFor(workspaceId);
+  /**
+   * 读点选择（D-01@v1，仓库优先缓存回退）：root_path 非空时依次过三道校验，
+   * 全过 → `<root_path>/.sillyspec`；任一不过或抛错 → 记 warn 回退缓存目录。
+   *
+   * **catch 边界（关键）**：specCacheRootFor 的 workspace_id UUID 白名单校验在
+   * try 之外先执行——非法 workspace_id 的 forbidden 仍 fail-loud 不被回退吞掉
+   * （design §5.2）；try 内只包 root_path 三道校验路径：
+   *   ① ROOT_PATH_METACHAR_RE 元字符黑名单（shell 注入防线第一层）；
+   *   ② assertWithinAllowedRoots containment（复用 file-rpc 现有防线，不自实现）；
+   *   ③ `<root_path>/.sillyspec/.runtime` 目录存在（仓库没跑过 sillyspec 即回退）。
+   */
+  private async pickRuntimeSpecDir(workspaceId: string, rootPath?: string): Promise<string> {
+    // 先拿缓存目录——specCacheRootFor 内的 workspace_id 校验 fail-loud，不属于
+    // 回退 catch 范围（非法 workspace_id 是协议错误，root_path 失效只是数据失效）。
+    const cacheDir = specCacheRootFor(workspaceId);
+    const root = normalizeRootPathParam(rootPath);
+    if (root === undefined) return cacheDir; // 无/空 root_path → 现状缓存读点
+    try {
+      if (ROOT_PATH_METACHAR_RE.test(root)) {
+        throw new RpcError(
+          'forbidden',
+          `root_path contains shell metacharacters: ${JSON.stringify(root)}`,
+        );
+      }
+      assertWithinAllowedRoots(root, this._rootsProvider());
+      if (!(await this._pathExists(join(root, '.sillyspec', '.runtime')))) {
+        throw new RpcError(
+          'not_found',
+          `no .sillyspec/.runtime under root_path: ${JSON.stringify(root)}`,
+        );
+      }
+      return join(root, '.sillyspec');
+    } catch (e) {
+      // 校验失败一律回退而非报错（D-01：root_path 来自用户自配 binding 行，路径
+      // 失效时页面不应 502，回退缓存保持可用）；console.warn 与 spec-sync.ts 回退
+      // 日志同风格（模块内无 logger 注入点）。
+      console.warn('runtime_read_point_fallback', workspaceId, e);
+      return cacheDir;
+    }
+  }
+
+  /** progress dump（spawn sillyspec 子进程，design §6.2）；rootPath 可选读点（D-01@v1）。 */
+  async readProgress(workspaceId: string, rootPath?: string): Promise<{ progress: unknown | null }> {
+    const specDir = await this.pickRuntimeSpecDir(workspaceId, rootPath);
     const cmd = `sillyspec progress dump --spec-dir "${specDir}" --json`;
     const run = this.opts.sillyspecCmd ?? runSillyspecCmd;
     const r = await run(cmd, SILLYSPEC_TIMEOUT_MS);
@@ -192,9 +288,9 @@ export class RuntimeHandler {
     return { progress: envelope.data ?? null };
   }
 
-  /** 读 .runtime/user-inputs.md（不存在 → not_found，backend 映射 404）。 */
-  async readUserInputs(workspaceId: string): Promise<{ content: string | null }> {
-    const specDir = specCacheRootFor(workspaceId);
+  /** 读 .runtime/user-inputs.md（不存在 → not_found，backend 映射 404）；rootPath 可选读点（D-01@v1）。 */
+  async readUserInputs(workspaceId: string, rootPath?: string): Promise<{ content: string | null }> {
+    const specDir = await this.pickRuntimeSpecDir(workspaceId, rootPath);
     const uiPath = join(specDir, '.runtime', 'user-inputs.md');
     try {
       return { content: await readFile(uiPath, 'utf8') };
@@ -206,11 +302,11 @@ export class RuntimeHandler {
     }
   }
 
-  /** 列 .runtime/artifacts（目录不存在 → 空数组，与旧行为一致）。 */
-  async listArtifacts(workspaceId: string): Promise<{
+  /** 列 .runtime/artifacts（目录不存在 → 空数组，与旧行为一致）；rootPath 可选读点（D-01@v1）。 */
+  async listArtifacts(workspaceId: string, rootPath?: string): Promise<{
     artifacts: { filename: string; size_bytes: number; last_modified: string | null }[];
   }> {
-    const specDir = specCacheRootFor(workspaceId);
+    const specDir = await this.pickRuntimeSpecDir(workspaceId, rootPath);
     const artDir = join(specDir, '.runtime', 'artifacts');
     let names: string[];
     try {
@@ -235,10 +331,14 @@ export class RuntimeHandler {
     return { artifacts: artifacts.filter((a) => a.size_bytes > 0 || a.last_modified !== null) };
   }
 
-  /** 读单个产物（filename 预检 + realpath containment + 1MB 上限）。 */
-  async readArtifact(workspaceId: string, filename: string): Promise<{ content: string | null }> {
+  /** 读单个产物（filename 预检 + realpath containment + 1MB 上限）；rootPath 可选读点（D-01@v1）。 */
+  async readArtifact(
+    workspaceId: string,
+    filename: string,
+    rootPath?: string,
+  ): Promise<{ content: string | null }> {
     assertSafeArtifactFilename(filename);
-    const specDir = specCacheRootFor(workspaceId);
+    const specDir = await this.pickRuntimeSpecDir(workspaceId, rootPath);
     const artDir = resolve(join(specDir, '.runtime', 'artifacts'));
     const filePath = resolve(join(artDir, filename));
     // containment 主防线：resolve 后必须仍在 artDir 内（平文件名预检已过，这里

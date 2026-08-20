@@ -22,6 +22,7 @@ from app.modules.daemon.runtime.service import (
 )
 from app.modules.runtime.schema import ArtifactEntry, RuntimeProgress
 from app.modules.workspace.member_runtimes.resolver import MemberBindingResolver
+from app.modules.workspace.service import resolve_root_path_for_daemon
 
 log = get_logger(__name__)
 
@@ -39,7 +40,11 @@ log = get_logger(__name__)
 #   命名空间，不污染 host_fs 九方法契约）；
 # - 错误映射复用 explorer 的逻辑骨架，但暴露 ``Runtime*`` 错误子类（design §6.3：
 #   避免 HTTP body 泄漏内部 Explorer* 模块名）；
-# - daemon 离线/失败不回退平台快照（D-001@v1），直接按映射表抛错。
+# - daemon 离线/失败不回退平台快照（D-001@v1），直接按映射表抛错；
+# - 2026-08-20-runtime-readpoint-repo-first：四方法 params 携带 ``root_path``
+#   （当前用户自己 binding 行的值，经 ``resolve_root_path_for_daemon`` 容器→
+#   宿主改写后下发，D-02@v1/D-03@v1）——daemon 优先读本机仓库 ``.sillyspec/
+#   .runtime/``，校验不过回退同步缓存；老 daemon 忽略新键，行为不劣化。
 #
 # 设计依据：``.sillyspec/changes/2026-08-19-runtime-live-daemon-read/design.md``
 # （§4.1 链路总览 / §6.1 RPC 契约 / §6.3 错误映射 / §7 只读语义）。
@@ -121,11 +126,15 @@ class RuntimeLiveService:
 
     # ── 内部：绑定解析 / RPC 转发 / 错误映射 ──────────────────────────────────
 
-    async def _resolve_binding(self, workspace_id: uuid.UUID, user_id: uuid.UUID) -> uuid.UUID:
-        """解析当前用户自己的绑定行 → daemon_id（design §6.1 鉴权与 user_id 来源）。
+    async def _resolve_binding(
+        self, workspace_id: uuid.UUID, user_id: uuid.UUID
+    ) -> tuple[uuid.UUID, str]:
+        """解析当前用户自己的绑定行 → ``(daemon_id, root_path)``（design §6.1 / D-03@v1）。
 
-        resolver miss / 异常均收敛为 None，或 ``daemon_id IS NULL`` 过渡形态，
-        一律按未绑定处理 404（D-004@v1，与 explorer._resolve_binding 同语义）。
+        root_path 取当前用户自己 binding 行的值（列 NOT NULL 恒有值），供四方法
+        RPC params 下发——每个成员读自己本机的运行态。resolver miss / 异常均收敛
+        为 None，或 ``daemon_id IS NULL`` 过渡形态，一律按未绑定处理 404
+        （D-004@v1，与 explorer._resolve_binding 同语义）。
         """
         binding = await MemberBindingResolver.resolve_member_binding_or_none(
             self._session,
@@ -138,7 +147,7 @@ class RuntimeLiveService:
                 "当前账号未绑定本机工作区，请先到成员页完成绑定。",
                 details={"workspace_id": str(workspace_id)},
             )
-        return binding.daemon_id
+        return binding.daemon_id, binding.root_path
 
     async def _send_runtime_rpc(
         self,
@@ -199,11 +208,15 @@ class RuntimeLiveService:
         self, workspace_id: uuid.UUID, user_id: uuid.UUID
     ) -> RuntimeProgress | None:
         """实时读取流水线进度（daemon 调 sillyspec progress dump --json）。"""
-        daemon_id = await self._resolve_binding(workspace_id, user_id)
+        daemon_id, root_path = await self._resolve_binding(workspace_id, user_id)
         result = await self._send_runtime_rpc(
             daemon_id,
             "runtime.read_progress",
-            {"workspace_id": str(workspace_id)},
+            {
+                "workspace_id": str(workspace_id),
+                # D-02@v1：容器→宿主改写后下发，daemon 收到即可直接读本机仓库
+                "root_path": resolve_root_path_for_daemon(root_path),
+            },
             context={"workspace_id": str(workspace_id)},
         )
         progress_data = result.get("progress")
@@ -213,11 +226,14 @@ class RuntimeLiveService:
 
     async def get_user_inputs(self, workspace_id: uuid.UUID, user_id: uuid.UUID) -> str | None:
         """实时读取用户输入记录原文（.runtime/user-inputs.md）。"""
-        daemon_id = await self._resolve_binding(workspace_id, user_id)
+        daemon_id, root_path = await self._resolve_binding(workspace_id, user_id)
         result = await self._send_runtime_rpc(
             daemon_id,
             "runtime.read_user_inputs",
-            {"workspace_id": str(workspace_id)},
+            {
+                "workspace_id": str(workspace_id),
+                "root_path": resolve_root_path_for_daemon(root_path),
+            },
             context={"workspace_id": str(workspace_id)},
         )
         return result.get("content")
@@ -226,11 +242,14 @@ class RuntimeLiveService:
         self, workspace_id: uuid.UUID, user_id: uuid.UUID
     ) -> list[ArtifactEntry]:
         """实时列步骤产物（.runtime/artifacts）。"""
-        daemon_id = await self._resolve_binding(workspace_id, user_id)
+        daemon_id, root_path = await self._resolve_binding(workspace_id, user_id)
         result = await self._send_runtime_rpc(
             daemon_id,
             "runtime.list_artifacts",
-            {"workspace_id": str(workspace_id)},
+            {
+                "workspace_id": str(workspace_id),
+                "root_path": resolve_root_path_for_daemon(root_path),
+            },
             context={"workspace_id": str(workspace_id)},
         )
         return [ArtifactEntry.model_validate(a) for a in result.get("artifacts", [])]
@@ -240,11 +259,15 @@ class RuntimeLiveService:
     ) -> str | None:
         """实时读单个产物内容；filename 做 ``..``/绝对路径/控制字符预检（design §5）。"""
         _validate_artifact_filename(filename, workspace_id=workspace_id)
-        daemon_id = await self._resolve_binding(workspace_id, user_id)
+        daemon_id, root_path = await self._resolve_binding(workspace_id, user_id)
         result = await self._send_runtime_rpc(
             daemon_id,
             "runtime.read_artifact",
-            {"workspace_id": str(workspace_id), "filename": filename},
+            {
+                "workspace_id": str(workspace_id),
+                "filename": filename,
+                "root_path": resolve_root_path_for_daemon(root_path),
+            },
             context={"workspace_id": str(workspace_id), "filename": filename},
         )
         return result.get("content")

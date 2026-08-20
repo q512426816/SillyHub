@@ -46,6 +46,11 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+// 2026-08-20-runtime-readpoint-repo-first / FR-05（design §5.3）：user-inputs 是
+// 追加式日志（末尾最新），本机文件已到 MB 级，前端超长时只渲染末尾片段，避免
+// 一次性渲染巨型文本卡死页面；完整内容始终留在本机仓库文件中。
+const USER_INPUTS_MAX_DISPLAY = 50000;
+
 // 2026-08-19-runtime-live-daemon-read：实时读取链路的错误分级提示（design §6.3
 // 映射表的消费端）。backend 消息已是中文，这里补状态码维度的行动指引；非 ApiError
 // （网络中断等）无状态码，走通用文案。
@@ -204,6 +209,14 @@ export default function RuntimePage({ params }: Props) {
 
   const stageRows = toStageEntries(progress);
 
+  // 2026-08-20-runtime-readpoint-repo-first / FR-05（design §5.3）：user-inputs 超
+  // 上限时只显示末尾片段（追加式日志，末尾最新），并渲染含完整文件路径的提示行；
+  // 未超限时与现状完全一致。
+  const userInputsTooLong = userInputs.length > USER_INPUTS_MAX_DISPLAY;
+  const userInputsDisplay = userInputsTooLong
+    ? userInputs.slice(-USER_INPUTS_MAX_DISPLAY)
+    : userInputs;
+
   return (
     <PageContainer>
       <PageHeader
@@ -224,11 +237,13 @@ export default function RuntimePage({ params }: Props) {
               ← 工作区
             </Link>
             <span className="ml-2">
+              {/* 2026-08-20-runtime-readpoint-repo-first / FR-05：读点改为优先
+                  本机仓库、回退同步缓存（design §5.3），副标题同步真实数据来源。 */}
               经绑定守护进程实时读取{" "}
               <code className="rounded bg-muted px-1 text-[11px]">
                 .sillyspec/.runtime/
               </code>{" "}
-              展示当前工作流状态。
+              工作流状态（优先本机仓库，回退同步缓存）。
             </span>
           </>
         }
@@ -310,8 +325,14 @@ export default function RuntimePage({ params }: Props) {
           {/* User Inputs */}
           {userInputs && (
             <SectionCard title="用户输入记录">
+              {userInputsTooLong && (
+                <p className="mb-2 text-[11px] text-muted-foreground">
+                  内容过长，已截断，仅显示末尾 {USER_INPUTS_MAX_DISPLAY} 字符；完整内容见本机{" "}
+                  <code className="rounded bg-muted px-1">.sillyspec/.runtime/user-inputs.md</code>
+                </p>
+              )}
               <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
-                {userInputs}
+                {userInputsDisplay}
               </pre>
             </SectionCard>
           )}
