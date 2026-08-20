@@ -2,7 +2,8 @@
  * task-12：lib/api/llm-providers 单测。
  *
  * 覆盖：
- *   1. 五个 API 方法签名（method + path）与后端 router 一一对应。
+ *   1. 四个 API 方法签名（method + path）与后端 router 一一对应
+ *      （set/unset-default 已随 ql-20260820-006 移除）。
  *   2. formToCreate：表单值 → POST body 映射（角色映射嵌套 / extra_env 键值对）。
  *   3. formToUpdate：api_key 留空 → **不出现在 PATCH body**（铁律）；有值则携带。
  *   4. cleanRoleMappings：丢弃空行、one_m 仅随 model 携带。
@@ -20,8 +21,6 @@ import {
   formToCreate,
   formToUpdate,
   listProviders,
-  setDefaultProvider,
-  unsetDefaultProvider,
   updateProvider,
   type LlmProviderFormValues,
 } from "@/lib/api/llm-providers";
@@ -102,7 +101,6 @@ const FORM_VALUES: LlmProviderFormValues = {
     "": "should-drop", // 空键丢弃
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
   },
-  is_default: true,
 };
 
 describe("llm-providers API — method + path", () => {
@@ -127,7 +125,6 @@ describe("llm-providers API — method + path", () => {
       name: "Kimi 中转",
       agent_kind: "claude",
       auth_field: "ANTHROPIC_AUTH_TOKEN",
-      is_default: true,
     });
     expect(h.lastMethod()).toBe("POST");
     expect(h.lastUrl()).toContain("/api/llm-providers");
@@ -153,35 +150,6 @@ describe("llm-providers API — method + path", () => {
     expect(h.lastUrl()).toContain("/api/llm-providers/p-1");
   });
 
-  it("setDefaultProvider → POST /api/llm-providers/{id}/set-default（无 body）返回 SetDefaultResult", async () => {
-    // task-09：返回体由 LlmProviderRead 改为 SetDefaultResult（switched/affected_sessions/error）
-    const h = mockFetch({
-      status: 200,
-      body: { switched: true, affected_sessions: 2, error: null },
-    });
-    const result = await setDefaultProvider("p-1");
-    expect(h.lastMethod()).toBe("POST");
-    expect(h.lastUrl()).toContain("/api/llm-providers/p-1/set-default");
-    expect(h.lastBody()).toBeNull();
-    expect(result.switched).toBe(true);
-    expect(result.affected_sessions).toBe(2);
-    expect(result.error).toBeNull();
-  });
-
-  it("unsetDefaultProvider → POST /api/llm-providers/{id}/unset-default（无 body）返回 SetDefaultResult", async () => {
-    const h = mockFetch({
-      status: 200,
-      body: { switched: true, affected_sessions: 0, error: null },
-    });
-    const result = await unsetDefaultProvider("p-1");
-    expect(h.lastMethod()).toBe("POST");
-    expect(h.lastUrl()).toContain("/api/llm-providers/p-1/unset-default");
-    expect(h.lastBody()).toBeNull();
-    expect(result.switched).toBe(true);
-    expect(result.affected_sessions).toBe(0);
-    expect(result.error).toBeNull();
-  });
-
   it("id 含特殊字符走 encodeURIComponent（不破坏路径）", async () => {
     const h = mockFetch({ status: 204, body: null });
     await deleteProvider("p 1/2");
@@ -197,7 +165,6 @@ describe("formToCreate — 表单值 → POST body 映射", () => {
     expect(body.api_key).toBe("sk-secret-1234");
     expect(body.auth_field).toBe("ANTHROPIC_AUTH_TOKEN");
     expect(body.default_fallback_model).toBe("kimi-k2");
-    expect(body.is_default).toBe(true);
 
     // 角色映射：fable 空行被丢弃，sonnet/opus/haiku 保留
     const m = body.model_role_mappings;
@@ -242,7 +209,6 @@ describe("formToUpdate — api_key 留空不出现在 PATCH body（铁律）", (
     // 其余字段仍正常透传
     expect(body.name).toBe("Kimi 中转");
     expect(body.auth_field).toBe("ANTHROPIC_AUTH_TOKEN");
-    expect(body.is_default).toBe(true);
   });
 
   it("api_key 全空白 → 同样不含 api_key 键", () => {

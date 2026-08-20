@@ -70,7 +70,6 @@ describe("LlmProviderForm — 新建模式", () => {
     expect(values.base_url).toBe("https://api.moonshot.cn/anthropic");
     expect(values.agent_kind).toBe("claude");
     expect(values.auth_field).toBe("ANTHROPIC_AUTH_TOKEN"); // 默认值
-    expect(values.is_default).toBe(false); // 新建默认不勾选
     // 4 行角色映射 + 空 extra_env 结构存在
     expect(values.model_role_mappings).toHaveProperty("sonnet");
     expect(values.model_role_mappings).toHaveProperty("opus");
@@ -184,7 +183,6 @@ describe("LlmProviderForm — 编辑模式", () => {
     expect(values.extra_env).toEqual({
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
     });
-    expect(values.is_default).toBe(true);
   });
 
   it("取消按钮触发 onCancel", () => {

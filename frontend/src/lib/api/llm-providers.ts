@@ -1,7 +1,7 @@
 /**
  * LLM 供应商管理客户端（变更 2026-07-25-llm-provider-management / Wave4 task-12）。
  *
- * 封装 /api/llm-providers 的 list/create/update/delete/set_default 调用，复用
+ * 封装 /api/llm-providers 的 list/create/update/delete 调用，复用
  * `apiFetch`（@/lib/api），范式对齐 `lib/api-keys.ts`。
  *
  * 类型来源：后端 `backend/app/modules/llm_provider/schema.py`（LlmProviderRead/
@@ -15,7 +15,6 @@
  */
 
 import { apiFetch } from "@/lib/api";
-import type { components } from "@/lib/api-types";
 
 // ── 嵌套结构 ────────────────────────────────────────────────────────────
 
@@ -93,7 +92,6 @@ export interface LlmProviderCreate {
   extra_env?: Record<string, string> | null;
   /** 高级配置片段（design §4 / D-004）；null=清空/未配置。 */
   settings_config?: Record<string, unknown> | null;
-  is_default: boolean;
 }
 
 /** PATCH body；全部可选。api_key undefined/null = 不动原密钥（后端 None 语义）。 */
@@ -113,27 +111,12 @@ export interface LlmProviderUpdate {
   extra_env?: Record<string, string> | null;
   /** 高级配置片段（design §4 / D-004）；null=清空/未配置。 */
   settings_config?: Record<string, unknown> | null;
-  is_default?: boolean;
 }
 
 export interface LlmProviderList {
   items: LlmProviderRead[];
   total: number;
 }
-
-/**
- * set/unset-default 统一响应（task-09 / FR-07）。
- *
- * 直接引用 OpenAPI 生成类型（`pnpm gen:types` 产出，规则20 禁止手写同名）：
- * - `switched`：本次 set/unset 是否成功变更 is_default（set 凭证探测失败回滚时为 false；
- *   unset 恒为 true）；
- * - `affected_sessions`：notify 成功投递的 active interactive session 计数（D-001）；
- *   0=无运行中会话或 notify 异常 → 立即生效 / 无会话受影响；
- * - `error`：set 凭证探测失败原因（仅 switched=false 时有值）；成功 / unset 为 null。
- *
- * 前端据此区分 toast：立即生效 / 等 turn 边界 / 凭证失败（task-09）。
- */
-export type SetDefaultResult = components["schemas"]["SetDefaultResult"];
 
 // ── 表单值契约（task-11 provides: LlmProviderFormValues）─────────────────
 
@@ -161,7 +144,6 @@ export interface LlmProviderFormValues {
    * 可选：表单初始构建/单测固件不带此字段，提交时 `?? null` 归一（design §6.1 Grill B5）。
    */
   settings_config?: Record<string, unknown> | null;
-  is_default: boolean;
 }
 
 // ── API 调用 ────────────────────────────────────────────────────────────
@@ -198,39 +180,6 @@ export async function deleteProvider(id: string): Promise<void> {
   await apiFetch<void>(`/api/llm-providers/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
-}
-
-/**
- * 设为默认/「启动」（同 user×agent_kind 互斥，后端事务内先清兄弟行）。
- *
- * task-09：返回 `SetDefaultResult`（switched/affected_sessions/error），供调用方
- * 区分立即生效（switched=true + sessions=0）/ 等 turn 边界（switched=true +
- * sessions>0）/ 凭证失败（switched=false + error）三种状态，对应不同 toast。
- */
-export async function setDefaultProvider(
-  id: string,
-): Promise<SetDefaultResult> {
-  return apiFetch<SetDefaultResult>(
-    `/api/llm-providers/${encodeURIComponent(id)}/set-default`,
-    { method: "POST" },
-  );
-}
-
-/**
- * 取消默认/「停止」（对称 setDefaultProvider）。取消本行默认，不清兄弟。
- * 若取消后该用户×agent_kind 无任何默认 → lease 不再下发 provider_config
- * → daemon 回归本机凭证管理（design §9 D-007）。
- *
- * task-09：返回 `SetDefaultResult`（unset 不探测，恒 switched=true + error=null），
- * `affected_sessions` 表示将回退本机凭证的运行中会话数。
- */
-export async function unsetDefaultProvider(
-  id: string,
-): Promise<SetDefaultResult> {
-  return apiFetch<SetDefaultResult>(
-    `/api/llm-providers/${encodeURIComponent(id)}/unset-default`,
-    { method: "POST" },
-  );
 }
 
 // ── fetch-models（task-11 / D-001/D-006）──────────────────────────────────
@@ -455,7 +404,6 @@ export function formToCreate(v: LlmProviderFormValues): LlmProviderCreate {
     default_fallback_model: clean(v.default_fallback_model) ?? null,
     extra_env: cleanExtraEnv(v.extra_env),
     settings_config: v.settings_config ?? null,
-    is_default: v.is_default,
   };
 }
 
@@ -476,7 +424,6 @@ export function formToUpdate(v: LlmProviderFormValues): LlmProviderUpdate {
     default_fallback_model: clean(v.default_fallback_model) ?? null,
     extra_env: cleanExtraEnv(v.extra_env),
     settings_config: v.settings_config ?? null,
-    is_default: v.is_default,
   };
   const apiKey = clean(v.api_key);
   if (apiKey) update.api_key = apiKey;

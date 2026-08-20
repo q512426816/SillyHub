@@ -141,9 +141,6 @@ export function LlmProviderForm({
   const [defaultFallbackModel, setDefaultFallbackModel] = useState(
     initial?.default_fallback_model ?? "",
   );
-  const [isDefault, setIsDefault] = useState<boolean>(
-    isEdit ? initial?.is_default === true : false,
-  );
   const [roleRows, setRoleRows] = useState<Record<string, RoleRowState>>(() =>
     initRoleRows(initial),
   );
@@ -262,7 +259,6 @@ export function LlmProviderForm({
       default_fallback_model: defaultFallbackModel,
       extra_env: extraEnv,
       settings_config: settingsConfig,
-      is_default: isDefault,
     };
     void onSubmit(values);
   };
@@ -718,18 +714,6 @@ export function LlmProviderForm({
           Anthropic 格式填 base（如 <code className="text-xs">https://api.anthropic.com</code>）；OpenAI 格式可粘完整地址（如 <code className="text-xs">https://opencode.ai/zen/v1/chat/completions</code>），后端自动剥 /chat/completions。
         </p>
       </div>
-
-      <label className="flex items-center gap-2">
-        <input
-          type="checkbox"
-          checked={isDefault}
-          onChange={(e) => setIsDefault(e.target.checked)}
-          className="h-3.5 w-3.5 rounded border border-input"
-        />
-        <span className="text-xs">
-          保存后立即启动此供应商（同 agent 种类仅一个生效；启动后可在列表「停止」）
-        </span>
-      </label>
 
       <details className="rounded border border-dashed border-input/70 p-3">
         <summary className="cursor-pointer text-xs font-medium text-muted-foreground">

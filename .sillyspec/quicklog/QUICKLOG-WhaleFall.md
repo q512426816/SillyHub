@@ -48,3 +48,19 @@
 根因：用户要求去掉手动结束入口（误操作终结会话不可逆），会话仍可自然结束且 runtimes 弹窗保留该功能
 方案：page.tsx 删除结束会话 Button/handleEnd/endDisabled 及 Square、endSession 导入（已结束横幅与重新开启保留），page.test.tsx 断言由存在翻转为不存在
 结果：tsc 零错误 + sessions page 测试 11/11 全绿，已 git add 暂存三文件
+
+## ql-20260820-006-9e18 | 2026-08-20 09:40:49 | /sessions 已成智能体会话新入口（会话级选供应商）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/llm-providers/llm-provider-list.tsx（删启动/停止按钮、handlers、已启动徽标、默认行高亮、Power 导入；说明文案改会话级选择）
+- frontend/src/components/llm-providers/llm-provider-form.tsx（删「保存后立即启动」勾选框与 isDefault 状态、提交值 is_default）
+- frontend/src/lib/api/llm-providers.ts（删 setDefaultProvider/unsetDefaultProvider/SetDefaultResult/components 导入；表单值与 Create/Update 删 is_default）
+- frontend/src/components/llm-providers/__tests__/llm-provider-list.test.tsx（删 set-default 三个 toast 用例与两 openai 启动用例；新增「无启动/停止按钮」回归断言）
+- frontend/src/components/llm-providers/__tests__/llm-provider-form.test.tsx（删 values.is_default 两处断言）
+- frontend/src/lib/api/__tests__/llm-providers.test.ts（删 set/unset-default 两个 API 用例与 is_default 断言/固件字段）
+- .sillyspec/docs/SillyHub/modules/frontend_app.md（变更索引追加 ql 条目）
+需求：/sessions 已成智能体会话新入口（会话级选供应商），「我的供应商」页的启动/停止（set-default）状态不再被依赖，要求去掉该页启动相关功能
+根因：供应商生效方式已从「全局启动/停止互斥（is_default）」转为 /sessions 会话级选择（session_llm_provider_id），设置页启动入口冗余且误导
+方案：llm-provider-list.tsx 删启动/停止按钮、handleSetDefault/handleUnsetDefault、已启动徽标与默认行高亮、说明文案改会话级选择；llm-provider-form.tsx 删「保存后立即启动」勾选框与 isDefault 状态；lib/api/llm-providers.ts 删 setDefaultProvider/unsetDefaultProvider/SetDefaultResult/表单值与 Create/Update 的 is_default 字段（后端 Create 缺省 False、PATCH 不传不动，行为安全）；测试同步删 set-default 用例并新增「无启动/停止按钮」回归断言
+结果：tsc 零错误、前端全量 166 文件 1763 测试全绿、eslint 无新增 warning（form.tsx values 为 HEAD 预存）；后端 set-default/unset-default 端点保留（LiteLLM 注册与 lease 默认回退链仍依赖，待独立变更清理）

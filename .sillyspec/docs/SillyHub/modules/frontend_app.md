@@ -83,4 +83,5 @@ whoLine: attach 时并发拉 listSessionRuns，按 realRunId??runId 匹配注入
 
 ## 变更索引
 
+- ql-20260820-006-9e18 | 「我的供应商」页移除启动/停止（set-default）功能——供应商生效改 /sessions 会话级选择，本页纯 CRUD（后端端点保留待后续清理）
 - ql-20260819-002-9167 | /sessions 页移除「结束会话」按钮（结束走自然超时；runtimes 弹窗入口保留；已结束横幅/重新开启保留）

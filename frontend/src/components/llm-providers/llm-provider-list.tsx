@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Plus, Power, RefreshCw, Sparkles } from "lucide-react";
+import { Plus, RefreshCw, Sparkles } from "lucide-react";
 
 import { SectionCard } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
@@ -15,8 +15,6 @@ import {
   formToCreate,
   formToUpdate,
   listProviders,
-  setDefaultProvider,
-  unsetDefaultProvider,
   updateProvider,
   type LlmProviderFormValues,
   type LlmProviderRead,
@@ -28,13 +26,12 @@ import { UsageFooter } from "./usage-footer";
 /**
  * 「我的供应商」区块（task-11）。
  *
- * 列表 + 新建/编辑表单 + 启动/停止（cc-switch 式） + 删除，配置跟随账号、所有工作空间通用（D-002）。
- * 嵌入设置页（settings/page.tsx），不单独开路由（task allowed_paths 限定）。
+ * 列表 + 新建/编辑表单 + 删除，配置跟随账号、所有工作空间通用（D-002）。
+ * 供应商生效方式为 /sessions 会话级选择（session_llm_provider_id），本页只做
+ * 纯 CRUD 管理，不再有全局启动/停止（set-default）概念（ql-20260820-006）。
  *
  * 状态机：list ↔ form（create/edit）。form 打开时只渲染表单，取消回列表。
- * 启动 = set-default（is_default=true，同 agent 种类 R-05 互斥仅一个生效）；
- * 停止 = unset-default（is_default=false，全停则 lease 不注入 provider_config，daemon 回归本机，D-007）。
- * 操作后即时 reload 列表（启动/停止/删除/新建/编辑均刷新）。
+ * 操作后即时 reload 列表（删除/新建/编辑均刷新）。
  */
 
 /** 角色显示顺序，用于模型摘要。 */
@@ -107,59 +104,6 @@ export function LlmProviderSection() {
       notify.error(err, formMode?.kind === "edit" ? "更新失败" : "创建失败");
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleSetDefault = async (p: LlmProviderRead) => {
-    try {
-      const result = await setDefaultProvider(p.id);
-      // switched=false：set 凭证探测失败，后端已回滚，原供应商继续服务（D-003）
-      if (!result.switched) {
-        notify.error(
-          new Error(result.error ?? "凭证探测失败，请检查 API Key 与请求地址"),
-        );
-        return;
-      }
-      // affected_sessions>0：运行中会话需等当前回复完成后才切换（D-001 turn 边界）
-      if (result.affected_sessions > 0) {
-        notify.success(
-          `已启动「${p.name}」，${result.affected_sessions} 个运行中会话将在当前回复完成后切换`,
-        );
-      } else {
-        notify.success(`已启动「${p.name}」（立即生效）`);
-      }
-      // R-09 降级（task-12 / D-007 收口）：openai 格式供应商经 LiteLLM 注册失败 → is_default 已生效
-      // 但 Claude Code 经网关不可用。后端 best-effort 不回滚 is_default，前端明示降级态供用户排查网关。
-      if (result.litellm_registered === false) {
-        notify.warning(
-          "网关注册失败（LiteLLM），该供应商的 Claude Code 暂不可用，请检查 LiteLLM 网关后重试",
-        );
-      }
-      await load();
-    } catch (err) {
-      notify.error(err, "启动失败");
-    }
-  };
-
-  const handleUnsetDefault = async (p: LlmProviderRead) => {
-    try {
-      const result = await unsetDefaultProvider(p.id);
-      // unset 不探测，恒 switched=true；此处为防御
-      if (!result.switched) {
-        notify.error(new Error(result.error ?? "停止失败"));
-        return;
-      }
-      // affected_sessions>0：这些会话将回退到 daemon 本机凭证（D-007）
-      if (result.affected_sessions > 0) {
-        notify.success(
-          `已停止「${p.name}」，${result.affected_sessions} 个运行中会话将回退本机凭证`,
-        );
-      } else {
-        notify.success(`已停止「${p.name}」，平台不再下发，daemon 回归本机凭证`);
-      }
-      await load();
-    } catch (err) {
-      notify.error(err, "停止失败");
     }
   };
 
@@ -240,9 +184,8 @@ export function LlmProviderSection() {
       }
     >
       <p className="mb-3 text-[11px] text-muted-foreground">
-        管理你用于 Claude Code 的 LLM 供应商。配置跟随你的账号，<b>所有工作空间通用</b>。
-        点「<b>启动</b>」选中要生效的供应商，<b>同一时间只生效一个</b>（参考 cc-switch）；
-        点「<b>停止</b>」停用，<b>全部停止则平台不再管控，改用 daemon 本机凭证</b>。
+        管理你用于 Claude Code 的 LLM 供应商。配置跟随你的账号，<b>所有工作空间通用</b>；
+        在 <b>/sessions 新建会话时选择</b>哪个供应商生效。
         填好 API Key 和请求地址就能用；模型映射等高级项默认折叠，用中转站时再展开。
       </p>
 
@@ -279,10 +222,7 @@ export function LlmProviderSection() {
             return (
               <div
                 key={p.id}
-                className={cn(
-                  "rounded-lg border bg-card p-3",
-                  p.is_default && "border-success/40 bg-success/5",
-                )}
+                className="rounded-lg border bg-card p-3"
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium">{p.name}</span>
@@ -297,33 +237,7 @@ export function LlmProviderSection() {
                       💰 可查用量
                     </Badge>
                   )}
-                  {p.is_default && (
-                    <Badge variant="success" className="gap-0.5">
-                      <Power className="h-2.5 w-2.5" />
-                      已启动
-                    </Badge>
-                  )}
                   <div className="ml-auto flex items-center gap-1.5">
-                    {p.is_default ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 gap-1 text-[11px]"
-                        onClick={() => void handleUnsetDefault(p)}
-                      >
-                        <Power className="h-3.5 w-3.5" />
-                        停止
-                      </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        className="h-7 gap-1 text-[11px]"
-                        onClick={() => void handleSetDefault(p)}
-                      >
-                        <Power className="h-3.5 w-3.5" />
-                        启动
-                      </Button>
-                    )}
                     <Button
                       variant="outline"
                       size="sm"
