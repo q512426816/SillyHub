@@ -1,8 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { Wrench } from "lucide-react";
 
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorBanner } from "@/components/ui/error-banner";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useWorkspaceSkills } from "@/lib/workspace-skills-view";
 
@@ -25,33 +29,29 @@ export default function WorkspaceSkillsPage({ params }: Props) {
   return (
     <PageContainer>
       <PageHeader
-        title={
-          <span className="flex flex-col gap-0.5">
-            <span>自定义 Skills</span>
+        title="自定义 Skills"
+        subtitle="查看工作区 specDir/skills/ 下的自定义 skill（只读）"
+        actions={
+          <div className="flex items-center gap-2">
             <Link
               href={`/workspaces/${workspaceId}`}
-              className="text-[11px] font-normal text-muted-foreground hover:underline"
+              className="text-xs text-muted-foreground hover:text-foreground"
             >
               ← 工作区
             </Link>
-          </span>
-        }
-        subtitle="查看工作区 specDir/skills/ 下的自定义 skill（只读）"
-        actions={
-          <button
-            type="button"
-            onClick={() => void refetch()}
-            className="inline-flex h-7 items-center rounded border border-border px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            刷新
-          </button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void refetch()}
+            >
+              刷新
+            </Button>
+          </div>
         }
       />
 
       {isError && (
-        <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
-          {error?.message ?? "加载自定义 skills 失败"}
-        </div>
+        <ErrorBanner message={error?.message ?? "加载自定义 skills 失败"} />
       )}
 
       {isLoading && (
@@ -62,19 +62,18 @@ export default function WorkspaceSkillsPage({ params }: Props) {
 
       {!isLoading && !isError && skills.length === 0 && (
         <SectionCard>
-          <div className="flex flex-col items-center gap-2 py-8 text-center">
-            <p className="text-sm text-muted-foreground">暂无自定义 skill</p>
-            <p className="text-[11px] text-muted-foreground">
-              在 specDir/skills/ 下创建 skill 目录后，将在此只读展示。
-            </p>
-          </div>
+          <EmptyState
+            icon={<Wrench className="h-5 w-5" />}
+            title="暂无自定义 skill"
+            description="在 specDir/skills/ 下创建 skill 目录后，将在此只读展示。"
+          />
         </SectionCard>
       )}
 
       {!isLoading && !isError && skills.length > 0 && (
         <div className="space-y-2">
           {skills.map((skill) => (
-            <SectionCard key={skill.name}>
+            <SectionCard key={skill.name} hover="lift">
               <div className="mb-2 flex items-center gap-2">
                 <span className="text-sm font-semibold">{skill.name}</span>
                 <StatusBadge kind="neutral">

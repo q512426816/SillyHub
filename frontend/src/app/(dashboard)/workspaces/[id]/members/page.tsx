@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { Users } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorBanner } from "@/components/ui/error-banner";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { SharedDaemonManager } from "@/components/workspace/shared-daemon-manager";
 import { WorkspaceMemberAddDialog } from "@/components/workspace-member-add-dialog";
@@ -130,26 +134,20 @@ export default function MembersPage({ params }: Props) {
     <PageContainer size="full">
       <PageHeader
         title="成员管理"
-        subtitle="管理 workspace 成员：添加、修改角色、移除、传递所有权。"
+        subtitle="管理工作区成员：添加、修改角色、移除、传递所有权。"
         actions={
           <Button size="sm" onClick={handleAddClicked} disabled={actionLoading}>
-            + Add Member
+            + 添加成员
           </Button>
         }
       />
 
       {error && (
-        <div className="flex items-center justify-between gap-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
-          <span className="flex-1 break-all">{error}</span>
-          <button
-            type="button"
-            onClick={() => void refresh()}
-            disabled={loading}
-            className="shrink-0 underline hover:no-underline disabled:opacity-50"
-          >
-            重试
-          </button>
-        </div>
+        <ErrorBanner
+          message={error}
+          /* 重试接 refresh；loading 期间（refresh 已清 error，防御性兜底）不挂重试，等价原禁用 */
+          onRetry={loading ? undefined : () => void refresh()}
+        />
       )}
 
       {/* task-12 / FR-02 / D-003@v1：owner 共享 daemon 管理区（列表 + 撤销）。
@@ -165,32 +163,23 @@ export default function MembersPage({ params }: Props) {
           加载中…
         </p>
       ) : !members || members.length === 0 ? (
-        <SectionCard bodyPadding="p-8">
-          <div className="text-center">
-            <p className="text-sm">暂无成员</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              workspace 至少应有一个 workspace_owner；如出现空列表，请检查权限或联系平台管理员。
-            </p>
-          </div>
+        <SectionCard>
+          <EmptyState
+            icon={<Users className="h-5 w-5" />}
+            title="暂无成员"
+            description="workspace 至少应有一个 workspace_owner；如出现空列表，请检查权限或联系平台管理员。"
+          />
         </SectionCard>
       ) : (
         <SectionCard bodyPadding="p-0">
           <div className="overflow-x-auto">
           <table className="w-full border-collapse">
             <thead>
-              <tr className="border-b bg-muted/30">
-                <th className="px-3 py-2 text-left text-[11px] font-medium text-muted-foreground">
-                  User
-                </th>
-                <th className="px-3 py-2 text-left text-[11px] font-medium text-muted-foreground">
-                  Role
-                </th>
-                <th className="px-3 py-2 text-left text-[11px] font-medium text-muted-foreground">
-                  Granted At
-                </th>
-                <th className="px-3 py-2 text-right text-[11px] font-medium text-muted-foreground">
-                  Actions
-                </th>
+              <tr className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground">
+                <th className="px-4 py-3 font-semibold">用户</th>
+                <th className="px-4 py-3 font-semibold">角色</th>
+                <th className="px-4 py-3 font-semibold">授权时间</th>
+                <th className="px-4 py-3 text-right font-semibold">操作</th>
               </tr>
             </thead>
             <tbody>

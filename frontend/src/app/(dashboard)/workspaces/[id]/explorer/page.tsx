@@ -4,7 +4,7 @@
  * task-08：工作区文件浏览页（/workspaces/[id]/explorer）。
  *
  * 装配 FileExplorer + FilePreview 成左树右预览的 VSCode 式布局：
- * - 页面高度锚定视口（h-[calc(100vh-56px)]，TopBar h-14），树与预览区内部滚动，
+ * - 页面高度锚定视口（h-[calc(100vh-64px)]，TopBar h-16），树与预览区内部滚动，
  *   页面本体不随内容整体滚动（ql-20260818-010-f551）
  * - 左侧固定宽栏（w-60）展示可滚动文件树（支持横向滚动看长文件名）
  * - 右侧 flex 预览区展示选中文件内容
@@ -20,12 +20,13 @@
 import { useCallback, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button } from "antd";
 import { RefreshCw } from "lucide-react";
 
 import { FileExplorer } from "@/components/explorer/file-explorer";
 import { FilePreview } from "@/components/explorer/file-preview";
 import { PageContainer, PageHeader } from "@/components/layout";
+import { Button } from "@/components/ui/button";
+import { ErrorBanner } from "@/components/ui/error-banner";
 import { ApiError } from "@/lib/api";
 import { explorerQueryKeys, useExplorerFile, useExplorerTree } from "@/lib/explorer";
 
@@ -102,9 +103,9 @@ function ExplorerStatePanel({
     }
 
     const toneClasses = {
-      warning: "border-amber-200 bg-amber-50 text-amber-800",
-      error: "border-red-200 bg-red-50 text-red-800",
-      info: "border-blue-200 bg-blue-50 text-blue-800",
+      warning: "border-warning/30 bg-warning/10 text-warning",
+      error: "border-error/30 bg-error/10 text-error",
+      info: "border-info/30 bg-info/10 text-info",
     }[tone];
 
     return (
@@ -119,15 +120,12 @@ function ExplorerStatePanel({
     );
   }
 
-  // 其它错误：红条提示重试
+  // 其它错误：红条提示重试（ErrorBanner 容器 role=alert，测试断言依赖）
   const messages = errors.map((e) => e.message).filter(Boolean);
   return (
-    <div
-      role="alert"
-      className="rounded-lg border border-destructive/30 bg-red-50 px-4 py-3 text-sm text-destructive"
-    >
-      {messages.length > 0 ? messages.join("；") : "加载失败，请重试"}
-    </div>
+    <ErrorBanner
+      message={messages.length > 0 ? messages.join("；") : "加载失败，请重试"}
+    />
   );
 }
 
@@ -160,10 +158,10 @@ export default function WorkspaceExplorerPage() {
     setExplorerKey((k) => k + 1);
   }, [queryClient, workspaceId, selectedPath]);
 
-  // 视口高度锚定（TopBar h-14=56px，sessions 页同款先例）：页面本体不滚动，
+  // 视口高度锚定（TopBar h-16=64px）：页面本体不滚动，
   // 树与预览区各自内部滚动；overflow-hidden 兜住 min-h-screen 布局链外的溢出。
   return (
-    <PageContainer size="full" className="h-[calc(100vh-56px)] gap-3 overflow-hidden">
+    <PageContainer size="full" className="h-[calc(100vh-64px)] gap-3 overflow-hidden">
       <PageHeader
         title="文件浏览"
         subtitle="浏览本机守护进程转发的工作区文件"
@@ -178,11 +176,12 @@ export default function WorkspaceExplorerPage() {
               <FileBreadcrumb path={selectedPath} />
             </div>
             <Button
-              size="small"
-              className="flex-none"
-              icon={<RefreshCw className="h-3.5 w-3.5" />}
+              variant="outline"
+              size="sm"
+              className="flex-none gap-1.5"
               onClick={handleRefresh}
             >
+              <RefreshCw className="h-3.5 w-3.5" aria-hidden />
               刷新
             </Button>
           </div>

@@ -17,6 +17,7 @@ import {
   SectionCard,
 } from "@/components/layout";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { ErrorBanner } from "@/components/ui/error-banner";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ChangeStepBadge } from "@/components/changes/change-step-badge";
 import { QuicklogDrawer } from "@/components/changes/quicklog-drawer";
@@ -197,6 +198,8 @@ export default function ChangesPage({ params }: Props) {
       ? changesQuery.error.message
       : "加载变更列表失败"
     : null;
+  // 顶部红条取主 load 错误优先，其次 reparse 横幅错误（原 listError ?? pageError 就地表达式）
+  const bannerError = listError ?? pageError;
 
   // tab 计数（进行中=不聚焦的总数 M；已归档=archive total），用于 tab 挂数量 + 副标题 M。
   // 独立 useQuery（key 不含 filter/聚焦）：filter/聚焦变化不重发，tab 计数稳定不被
@@ -511,14 +514,10 @@ export default function ChangesPage({ params }: Props) {
         }
       />
 
-      {(listError ?? pageError) && (
-        <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
-          {listError ?? pageError}
-        </div>
-      )}
+      {bannerError && <ErrorBanner message={bannerError} />}
 
       {stats && (
-        <div className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+        <div className="rounded border border-success/30 bg-success/10 px-3 py-2 text-xs text-success">
           已重新扫描：解析 {stats.parsed}，新增 {stats.created} · 更新{" "}
           {stats.updated} · 删除 {stats.deleted}。
           {warnings.length > 0 && ` ${warnings.length} 个警告。`}
@@ -527,7 +526,7 @@ export default function ChangesPage({ params }: Props) {
 
       {warnings.length > 0 && (
         <SectionCard title="解析警告">
-          <ul className="list-disc space-y-0.5 pl-4 text-xs text-amber-600">
+          <ul className="list-disc space-y-0.5 pl-4 text-xs text-warning">
             {warnings.map((w, i) => (
               <li key={i}>
                 <span className="font-mono">[{w.code}]</span>{" "}

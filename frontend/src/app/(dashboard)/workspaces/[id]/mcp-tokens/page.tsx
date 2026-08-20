@@ -7,6 +7,7 @@ import { Ban, KeyRound, Plus, RefreshCw, ShieldAlert, ShieldCheck } from "lucide
 import { McpTokenCreateDialog } from "@/components/mcp-token-create-dialog";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorBanner } from "@/components/ui/error-banner";
 import { StatusBadge, type StatusKind } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
@@ -84,20 +85,16 @@ export default function WorkspaceMcpTokensPage({ params }: Props) {
   return (
     <PageContainer className="gap-5">
       <PageHeader
-        title={
-          <span className="flex flex-col gap-0.5">
-            <span>MCP 令牌</span>
-            <Link
-              href={`/workspaces/${workspaceId}`}
-              className="text-[11px] font-normal text-muted-foreground hover:underline"
-            >
-              ← 工作区
-            </Link>
-          </span>
-        }
+        title="MCP 令牌"
         subtitle="为外部客户端签发访问本工作区 MCP 服务的凭据，明文仅在签发后显示一次"
         actions={
           <>
+            <Link
+              href={`/workspaces/${workspaceId}`}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              ← 工作区
+            </Link>
             <Button
               variant="outline"
               size="lg"
@@ -116,11 +113,7 @@ export default function WorkspaceMcpTokensPage({ params }: Props) {
         }
       />
 
-      {pageError && (
-        <div className="rounded-lg border border-destructive/30 bg-red-50 px-4 py-3 text-sm text-destructive">
-          {pageError}
-        </div>
-      )}
+      {pageError && <ErrorBanner message={pageError} />}
 
       {forbidden ? (
         <SectionCard>
@@ -270,9 +263,9 @@ function StatCard({
 }) {
   const toneClass = {
     neutral: "bg-brand-50 text-brand-700",
-    success: "bg-emerald-50 text-emerald-700",
-    warning: "bg-amber-50 text-amber-700",
-    error: "bg-red-50 text-red-700",
+    success: "bg-success/10 text-success",
+    warning: "bg-warning/10 text-warning",
+    error: "bg-error/10 text-error",
   }[tone];
   return (
     <div className="rounded-lg border bg-card p-4 shadow-sm">

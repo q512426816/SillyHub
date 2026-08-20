@@ -58,9 +58,9 @@ export function WorkspaceMemberRow({
   const displayName = member.display_name?.trim() || member.email;
 
   return (
-    <tr className="border-t border-border">
+    <tr className="border-t border-border hover:bg-muted/25">
       {/* Col 1: User */}
-      <td className="px-3 py-2 align-top">
+      <td className="px-4 py-3 align-top">
         <div className="flex flex-col">
           <span className="text-xs font-medium">
             {displayName}
@@ -77,7 +77,7 @@ export function WorkspaceMemberRow({
       </td>
 
       {/* Col 2: Role dropdown */}
-      <td className="px-3 py-2 align-top">
+      <td className="px-4 py-3 align-top">
         <div className="flex items-center gap-1.5">
           <select
             value={member.role_key}
@@ -108,12 +108,12 @@ export function WorkspaceMemberRow({
       </td>
 
       {/* Col 3: Granted At */}
-      <td className="px-3 py-2 align-top text-[11px] text-muted-foreground">
+      <td className="px-4 py-3 align-top text-[11px] text-muted-foreground">
         {new Date(member.granted_at).toLocaleString("zh-CN")}
       </td>
 
       {/* Col 4: Actions */}
-      <td className="px-3 py-2 text-right align-top">
+      <td className="px-4 py-3 text-right align-top">
         <div className="inline-flex gap-1">
           <Button
             size="sm"

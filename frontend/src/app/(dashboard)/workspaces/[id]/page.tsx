@@ -8,6 +8,7 @@ import { LinkedProjectsSection } from "@/components/workspace/LinkedProjectsSect
 import { WorkspaceConfigCard } from "@/components/workspace-config-card";
 import { Button } from "@/components/ui/button";
 import { PageContainer, SectionCard } from "@/components/layout";
+import { ErrorBanner } from "@/components/ui/error-banner";
 import { WorkspaceDaemonSwitcher } from "@/components/workspace-daemon-switcher";
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { WorkspaceHeroHeader } from "@/components/workspace/hero-header";
@@ -454,11 +455,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
           editing={editingInfo}
         />
 
-        {pageError && (
-          <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
-            {pageError}
-          </div>
-        )}
+        {pageError && <ErrorBanner message={pageError} />}
 
         {/* 段②：统计卡行（ql-20260820-013 第四卡=快速修复条数） */}
         <WorkspaceStatsRow

@@ -28,6 +28,7 @@ import {
   type SessionListEntry,
 } from "@/components/daemon/session-list-layout";
 import { logsToTurns } from "@/components/daemon/runtime-session-helpers";
+import { SectionCard } from "@/components/layout";
 import { type AgentRunLogEntry } from "@/lib/agent";
 import { ApiError } from "@/lib/api";
 import { useSession } from "@/stores/session";
@@ -238,8 +239,15 @@ export function WorkspaceSessionSection({ workspaceId }: WorkspaceSessionSection
         onRetry={() => void reloadSessions()}
       />
 
-      {/* 右：会话面板（复用 InteractiveSessionPanel，attach 恢复历史 / 新建只带 workspace_id） */}
-      <div className="flex min-h-[420px] flex-col overflow-hidden rounded-md border bg-card">
+      {/* 右：会话面板（复用 InteractiveSessionPanel，attach 恢复历史 / 新建只带 workspace_id）。
+          task-05 容器统一：自写 rounded-md border div 换 SectionCard（基类
+          bg-card border rounded-lg shadow-sm）。flex 高度链：SectionCard 无 header 时
+          内层 body div（bodyPadding=p-0）是唯一包裹层，外层 flex/min-h/overflow 经
+          [&>div] 透传到 body（kanban 页 [&_.ant-*] 同款先例），保证 Panel h-full 撑满不断链。 */}
+      <SectionCard
+        bodyPadding="p-0"
+        className="flex min-h-[420px] flex-col overflow-hidden [&>div]:flex [&>div]:min-h-0 [&>div]:flex-1 [&>div]:flex-col"
+      >
         {/* key 强制 activeSessionId 切换时重 mount（清旧 SSE/轮询）。
             Panel 自管 SSE/inject/interrupt/end，组件不重造。 */}
         <InteractiveSessionPanel
@@ -255,7 +263,7 @@ export function WorkspaceSessionSection({ workspaceId }: WorkspaceSessionSection
           onSessionCreated={handleSessionCreated}
           onSessionReset={handleSessionReset}
         />
-      </div>
+      </SectionCard>
     </div>
   );
 }

@@ -2,14 +2,20 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { FolderGit2 } from "lucide-react";
 
 import {
   PageContainer,
   PageHeader,
   SectionCard,
 } from "@/components/layout";
+import { buttonVariants } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorBanner } from "@/components/ui/error-banner";
+import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
+import { cn } from "@/lib/utils";
 import {
   getWorkspace,
   getWorkspaceComponents,
@@ -79,20 +85,16 @@ export default function ComponentsPage({ params }: Props) {
   return (
     <PageContainer>
       <PageHeader
-        title={
-          <span className="flex flex-col gap-0.5">
-            <span>项目组件</span>
-            <Link
-              href="/workspaces"
-              className="text-[11px] font-normal text-muted-foreground hover:underline"
-            >
-              ← 工作区
-            </Link>
-          </span>
-        }
+        title="项目组件"
         subtitle="查看项目组的内部组件（只读，来自 projects/*.yaml）"
         actions={
           <div className="flex flex-wrap items-center gap-1.5">
+            <Link
+              href={`/workspaces/${workspaceId}`}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              ← 工作区
+            </Link>
             {NAV_ITEMS.map((item) => (
               <Link
                 key={item.href}
@@ -101,13 +103,13 @@ export default function ComponentsPage({ params }: Props) {
                     ? item.href
                     : `/workspaces/${workspaceId}/${item.href}`
                 }
-                className="inline-flex h-7 items-center rounded border border-border px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
               >
                 {item.label}
               </Link>
             ))}
-            <input
-              className="h-7 rounded border border-input bg-background px-2 text-xs focus:border-ring focus:outline-none"
+            <Input
+              className="h-8 w-40 px-2.5 text-xs"
               placeholder="搜索组件..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -116,11 +118,7 @@ export default function ComponentsPage({ params }: Props) {
         }
       />
 
-      {pageError && (
-        <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
-          {pageError}
-        </div>
-      )}
+      {pageError && <ErrorBanner message={pageError} />}
 
       {/* Workspace metadata card */}
       {workspace && (
@@ -170,9 +168,11 @@ export default function ComponentsPage({ params }: Props) {
         {loading ? (
           <p className="py-6 text-center text-xs text-muted-foreground">加载中…</p>
         ) : filtered.length === 0 ? (
-          <p className="py-6 text-center text-xs text-muted-foreground">
-            暂无组件。若未生成，可在变更中运行 generate_projects 重建 projects/*.yaml。
-          </p>
+          <EmptyState
+            icon={<FolderGit2 className="h-5 w-5" />}
+            title="暂无组件"
+            description="若未生成，可在变更中运行 generate_projects 重建 projects/*.yaml。"
+          />
         ) : (
           <div className="divide-y">
             {filtered.map((c) => (

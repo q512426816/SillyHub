@@ -1,8 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { Plug } from "lucide-react";
 
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { ErrorBanner } from "@/components/ui/error-banner";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useWorkspaceMcpConfig } from "@/lib/workspace-skills-view";
 
@@ -27,33 +31,29 @@ export default function WorkspaceMcpPage({ params }: Props) {
   return (
     <PageContainer>
       <PageHeader
-        title={
-          <span className="flex flex-col gap-0.5">
-            <span>MCP 配置</span>
+        title="MCP 配置"
+        subtitle="查看工作区 .mcp.json 的 MCP 服务器配置（只读，env 密钥已脱敏）"
+        actions={
+          <div className="flex items-center gap-2">
             <Link
               href={`/workspaces/${workspaceId}`}
-              className="text-[11px] font-normal text-muted-foreground hover:underline"
+              className="text-xs text-muted-foreground hover:text-foreground"
             >
               ← 工作区
             </Link>
-          </span>
-        }
-        subtitle="查看工作区 .mcp.json 的 MCP 服务器配置（只读，env 密钥已脱敏）"
-        actions={
-          <button
-            type="button"
-            onClick={() => void refetch()}
-            className="inline-flex h-7 items-center rounded border border-border px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
-          >
-            刷新
-          </button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void refetch()}
+            >
+              刷新
+            </Button>
+          </div>
         }
       />
 
       {isError && (
-        <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
-          {error?.message ?? "加载 MCP 配置失败"}
-        </div>
+        <ErrorBanner message={error?.message ?? "加载 MCP 配置失败"} />
       )}
 
       {isLoading && (
@@ -64,12 +64,11 @@ export default function WorkspaceMcpPage({ params }: Props) {
 
       {!isLoading && !isError && serverNames.length === 0 && (
         <SectionCard>
-          <div className="flex flex-col items-center gap-2 py-8 text-center">
-            <p className="text-sm text-muted-foreground">暂无 MCP 服务器配置</p>
-            <p className="text-[11px] text-muted-foreground">
-              specDir/.mcp.json 不存在或未配置 mcpServers。
-            </p>
-          </div>
+          <EmptyState
+            icon={<Plug className="h-5 w-5" />}
+            title="暂无 MCP 服务器配置"
+            description="specDir/.mcp.json 不存在或未配置 mcpServers。"
+          />
         </SectionCard>
       )}
 
@@ -79,7 +78,7 @@ export default function WorkspaceMcpPage({ params }: Props) {
             const server = mcpServers[name] ?? {};
             const entries = Object.entries(server);
             return (
-              <SectionCard key={name}>
+              <SectionCard key={name} hover="lift">
                 <div className="mb-2 flex items-center gap-2">
                   <span className="text-sm font-semibold">{name}</span>
                   <StatusBadge kind="neutral">
@@ -121,7 +120,7 @@ function FieldRow({ k, v }: { k: string; v: unknown }) {
                 <dd className="font-mono break-all">
                   {formatValue(sv)}
                   {sv === "<set>" && (
-                    <span className="ml-1 text-amber-600">（密钥已脱敏）</span>
+                    <span className="ml-1 text-warning">（密钥已脱敏）</span>
                   )}
                 </dd>
               </div>
