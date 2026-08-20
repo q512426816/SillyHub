@@ -234,7 +234,8 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     }
   });
 
-  // ── task-05 / 2026-08-20-workspace-overview-redesign：统计四数字与 6 入口 href ──
+  // ── task-05 / 2026-08-20-workspace-overview-redesign：统计四数字 ──
+  //（快速入口宫格已随 2026-08-20-workspace-nav-consolidate 删除，入口统一走顶部 WorkspaceTabs）
 
   it("统计四数字按 mock 数据渲染（组件/进行中/已归档/快速修复）", async () => {
     await renderWithStrategy("platform-managed", { componentCount: 7 });
@@ -254,22 +255,6 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     // 进行中 / 已归档变更因 mock 返回 total=0，断言卡片存在即可
     expect(screen.getByText("进行中变更")).toBeInTheDocument();
     expect(screen.getByText("已归档变更")).toBeInTheDocument();
-  });
-
-  it("快速入口宫格 6 项 href 正确（不 mock 子组件以锁住 page 编排层接线）", async () => {
-    await renderWithStrategy("platform-managed");
-    const expected = [
-      { label: "项目组件", href: "/workspaces/ws-1/components" },
-      { label: "变更中心", href: "/workspaces/ws-1/changes" },
-      { label: "扫描文档", href: "/workspaces/ws-1/scan-docs" },
-      { label: "运行时", href: "/workspaces/ws-1/runtime" },
-      { label: "智能体档案", href: "/workspaces/ws-1/agent-profiles" },
-      { label: "方案文件", href: "/workspaces/ws-1/files" },
-    ];
-    for (const { label, href } of expected) {
-      const link = screen.getByRole("link", { name: label });
-      expect(link).toHaveAttribute("href", href);
-    }
   });
 
   // ── task-11 / daemon-entity-binding：default_agent 独立选择器（保留，其他区块行为不变）──

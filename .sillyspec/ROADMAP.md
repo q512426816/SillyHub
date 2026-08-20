@@ -142,3 +142,4 @@
 - **provider 抽象**：Claude / Codex 经 `adapters/` 多协议 + interactive driver 抽象，新增 provider 加 driver 不触碰控制面
 - **数据层**：PostgreSQL + Redis（Pub/Sub），AgentRun + DaemonTaskLease 编排
 - **类型生成**：前端手写类型 → OpenAPI 生成类型（`api-types.ts`），react-query + zustand 并存
+- **workspace-subpages-style-unify**（2026-08-20）：工作区 8 子页面样式统一（组件/变更/会话/文件/Skills/MCP/MCP 令牌/成员）——ErrorBanner 公共组件收敛 9 处手写红条（role=alert 保留）、返回链接规范化入 PageHeader actions（目标统一详情页）、4 处空态换 EmptyState、5 处语义色 token 化（双主题跟随）、members/mcp-tokens 表头规格统一、members 中文化、session 右侧容器 SectionCard 化、explorer 高度锚 56→64px。批量模式 4 Wave/6 任务，1793 用例全绿，grep 三清零；D-304 立 FRONTEND_PAGE_STYLE 适用范围（工作台式页面按 §0.5+概览页基线，旧 antd 全量条款限 PPM 类页面）。范围外残留（audit/approvals 等 7 子页 15 处旧红条/tone）留档后续变更。

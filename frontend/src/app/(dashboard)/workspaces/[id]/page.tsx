@@ -13,7 +13,6 @@ import { WorkspaceDaemonSwitcher } from "@/components/workspace-daemon-switcher"
 import { WorkspacePathFields } from "@/components/workspace-path-fields";
 import { WorkspaceHeroHeader } from "@/components/workspace/hero-header";
 import { WorkspaceStatsRow } from "@/components/workspace/stats-row";
-import { QuickEntryGrid } from "@/components/workspace/quick-entry-grid";
 import { ApiError } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import {
@@ -466,15 +465,12 @@ export default function WorkspaceDetailPage({ params }: Props) {
           quickTotal={quickTotal}
         />
 
-        {/* 段③：快速入口宫格 */}
-        <QuickEntryGrid workspaceId={workspaceId} />
-
-        {/* 段④-1：基本信息卡片（编辑入口在卡头 extra） */}
+        {/* 段③-1：基本信息卡片（编辑入口在卡头 extra） */}
         <SectionCard title="基本信息" extra={basicInfoExtra} bodyPadding="p-4">
           {basicInfoBody}
         </SectionCard>
 
-        {/* 段④-2：配置区卡片两列（自带卡的组件平铺，裸内容套 SectionCard） */}
+        {/* 段③-2：配置区卡片两列（自带卡的组件平铺，裸内容套 SectionCard） */}
         <div className="grid items-start gap-4 lg:grid-cols-2">
           <SectionCard title="默认智能体提供方" bodyPadding="p-4">
             {defaultAgentBody}

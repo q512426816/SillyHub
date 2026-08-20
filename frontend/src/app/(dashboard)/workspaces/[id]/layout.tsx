@@ -13,12 +13,13 @@ export default function WorkspaceDetailLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  // ql-20260707-004：变更中心页 + 项目组件页脱离 workspace layout（不加 main wrapper，
-  // 不加 WorkspaceTabs），DOM 与 admin/roles 一致（dashboard layout main → page），
-  // 宽度由 dashboard layout max-w-[1440px] 统一管理，且不显示头部 tab 行。
-  // 用户反馈 components 页自带 PageContainer，不需要外层 WorkspaceTabs 的【概览/组件/变更/成员】。
-  const isStandalone = pathname.includes(`/workspaces/${params.id}/changes`) ||
-    pathname.includes(`/workspaces/${params.id}/components`);
+  // 2026-08-20-workspace-nav-consolidate（D-403）：standalone 收窄为仅 components/topology。
+  // ql-20260707-004 的宽度理由与现码不符（AppShell 无 max-w，包裹层 max-w-[1440px] 并不裁切），
+  // 双前缀剥离连带 changes/[cid] 等普通子页丢顶部菜单——普通页全部恢复统一布局；
+  // 仅 topology 是 h-screen 整屏画布页，包裹后 +88px chrome 必然溢出裁切，保留其 standalone。
+  const isStandalone = pathname.includes(
+    `/workspaces/${params.id}/components/topology`,
+  );
   if (isStandalone) {
     return <>{children}</>;
   }
