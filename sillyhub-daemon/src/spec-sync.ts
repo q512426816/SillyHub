@@ -1300,9 +1300,10 @@ export function shouldRefreshSpec(
  * pull 成功后把新 spec_version 回写本地 daemon 状态文件（保鲜，D-010；D-001@v1 迁到
  * .runtime/spec-version.json）。
  *
- * 仅更新 spec_version + synced_at（ISO 8601 UTC）。文件不存在时跳过（不主动创建——
- * 状态文件完整写入是 init lease writeDaemonState 的职责，本函数只在已初始化项目上
- * 保鲜版本号，避免半成品状态文件污染缓存目录）。
+ * 更新 spec_version + synced_at（ISO 8601 UTC）。文件**缺失时完整重建**（ql-20260820-007）：
+ * pull 的覆盖语义会 rm -rf 整个缓存目录（含 .runtime/spec-version.json），旧实现「缺失即
+ * 跳过」导致首次 pull 后保鲜永久失效（每次任务都判落后→全量 pull）。重建为完整 2 字段
+ *（spec_version + synced_at，非半成品），与 init lease writeDaemonState 的首写对齐。
  *
  * 失败语义：read/parse/write 任一异常 → 仅 warn 不抛（保鲜是 best-effort，失败不影响
  * pull 已落地的缓存可用性；下次任务比对仍会因版本旧而再 pull，自愈）。
@@ -1316,17 +1317,18 @@ export async function bumpLocalSpecVersion(
 ): Promise<void> {
   if (!specCacheRoot) return;
   const statePath = join(specCacheRoot, DAEMON_STATE_FILENAME);
-  let raw: string;
+  let obj: Record<string, unknown>;
   try {
-    raw = await readFile(statePath, 'utf-8');
+    obj = JSON.parse(await readFile(statePath, 'utf-8')) as Record<string, unknown>;
   } catch {
-    // 状态文件不存在（未初始化）→ 不主动创建，跳过（init lease writeDaemonState 负责）
-    return;
+    // 状态文件缺失（pull rm -rf 清掉 / 首次）→ 完整重建 2 字段（见 docstring）
+    obj = {};
   }
   try {
-    const obj = JSON.parse(raw) as Record<string, unknown>;
     obj.spec_version = newVersion;
     obj.synced_at = new Date().toISOString();
+    // .runtime 父目录可能随 pull 的 rm -rf 一并被清（bundle 不含 .runtime）→ 重建时补建
+    await mkdir(dirname(statePath), { recursive: true });
     await writeFile(statePath, JSON.stringify(obj, null, 2) + '\n', 'utf-8');
   } catch (e) {
     console.warn('spec_sync: bump_local_spec_version_failed', specCacheRoot, newVersion, e);
@@ -1677,16 +1679,24 @@ export interface HandleInitLeaseResult {
 /**
  * init lease 完整处理（design §2 / §5 / §9 生命周期：config_written → bundle_pulled → init_run → local_pushed）。
  *
- * 编排 6 步（顺序严格，硬失败步骤即 abort；rev2 时序 D-002@v2：init 后置于 pull）：
- *   1. **writeDaemonState**：写 2 字段 daemon 状态文件到 {resolveSpecDir(workspaceId)}/.runtime/。
- *      spec_version 取 latestSpecVersion（lease 下发）兜底 0。失败 → ok=false abort
- *      （状态文件是 daemon 保鲜基线，写失败后续保鲜失效，不降级）。D-001@v1：不再写 .sillyspec-platform.json。
- *   2. **pullSpecBundle**：拉服务器权威 spec 到本地缓存（~/.sillyhub/daemon/specs/<ws>）。
+ * 编排 6 步（顺序严格，硬失败步骤即 abort；rev2 时序 D-002@v2：init 后置于 pull；
+ * ql-20260820-007 rev3：writeDaemonState 后置于 pull）：
+ *   1. **pullSpecBundle**：拉服务器权威 spec 到本地缓存（~/.sillyhub/daemon/specs/<ws>）。
  *      内部含 task-12 pull 前回灌保护（hasUnsyncedLocalChanges）+ task-11 三分支 strategy。
  *      失败 → ok=false abort（pull 失败客户端无缓存可用，init 无意义）。404 容错在
  *      pullSpecBundle 内部已处理（首次 scan backend 无 bundle → mkdir 空目录，不算失败）。
  *      整删重建语义保留（bundle 为权威内容）——init 骨架必须后置于 pull，否则被 rm -rf
  *      物理删除（D-002@v2）。
+ *   2. **writeDaemonState**：写 2 字段 daemon 状态文件到 {resolveSpecDir(workspaceId)}/.runtime/。
+ *      spec_version 取 latestSpecVersion（lease 下发）兜底 0。失败 → ok=false abort
+ *      （状态文件是 daemon 保鲜基线，写失败后续保鲜失效，不降级）。D-001@v1：不再写 .sillyspec-platform.json。
+ *      **rev3 后置于 pull 的原因**（ql-20260820-007）：先写会在缓存根创建 .runtime/ 普通目录，
+ *      阻塞 pullSpecBundle 的 repo-native ensureSpecJunction（普通目录残留守卫）与
+ *      repo-mirrored cacheEmpty 首拷判定——两分支静默降级 platform-managed；且 pull 的
+ *      rm -rf 会把先写的状态文件删掉（保鲜失效）。后置后：junction 分支先建链、状态文件
+ *      经 junction 落源项目 .sillyspec/.runtime（被 gitignore 的 .runtime 通配规则覆盖），
+ *      platform-managed pull 覆盖后状态文件幸存。repo-native 时状态文件随 junction 落
+ *      源项目属可接受副作用（读写路径 resolveSpecDir(wsId)/.runtime 三策略统一，D-001@v1）。
  *   3. **runSillyspecInit**（task-04 产物，硬失败 abort，D-003@v1）：spawn
  *      `sillyspec init --dir rootPath --spec-dir specCacheRoot --workspace-id wsId
  *      --no-skills --tool tools`（60s 超时杀树 + 版本门控 D-009）。失败 → ok=false abort
@@ -1727,7 +1737,29 @@ export async function handleInitLease(
       : 0;
   const specCacheRoot = resolveSpecDir(params.workspaceId);
 
-  // 步骤 1：写 daemon 状态文件（硬失败 abort）。D-001@v1：取代旧 writePlatformConfig。
+  // 步骤 1：pullSpecBundle（硬失败 abort；404 容错在 utility 内已处理返回空 specDir）。
+  // ql-20260820-007 rev3：先 pull 后写状态文件——防 .runtime/ 占位阻塞 repo-native
+  // junction / repo-mirrored 首拷分支（见上方函数 docstring）。
+  let specDir: string | null = null;
+  try {
+    specDir = await pullSpecBundle(client, params.workspaceId, {
+      strategy,
+      rootPath: params.rootPath,
+    });
+  } catch (e) {
+    // pull 失败（5xx / 网络 / SpecPushBeforePullError）→ init 主体失败。
+    // 状态文件尚未写（rev3 后置于 pull）→ daemonState null。
+    return {
+      ok: false,
+      specVersion,
+      error: `spec_bundle_pull_failed: ${(e as Error)?.message ?? String(e)}`,
+      daemonState: null,
+      specDir: null,
+    };
+  }
+
+  // 步骤 2：写 daemon 状态文件（硬失败 abort）。D-001@v1：取代旧 writePlatformConfig。
+  // repo-native junction 已建：状态文件经 junction 落源项目 .sillyspec/.runtime（gitignored）。
   let daemonState: DaemonState;
   try {
     daemonState = await writeDaemonState(specCacheRoot, {
@@ -1739,26 +1771,7 @@ export async function handleInitLease(
       specVersion,
       error: `daemon_state_write_failed: ${(e as Error)?.message ?? String(e)}`,
       daemonState: null,
-      specDir: null,
-    };
-  }
-
-  // 步骤 2：pullSpecBundle（硬失败 abort；404 容错在 utility 内已处理返回空 specDir）。
-  let specDir: string | null = null;
-  try {
-    specDir = await pullSpecBundle(client, params.workspaceId, {
-      strategy,
-      rootPath: params.rootPath,
-    });
-  } catch (e) {
-    // pull 失败（5xx / 网络 / SpecPushBeforePullError）→ init 主体失败。
-    // 状态文件已写（步骤 1），但缓存不可用，complete 上报 failed 让前端引导重试。
-    return {
-      ok: false,
-      specVersion,
-      error: `spec_bundle_pull_failed: ${(e as Error)?.message ?? String(e)}`,
-      daemonState,
-      specDir: null,
+      specDir,
     };
   }
 

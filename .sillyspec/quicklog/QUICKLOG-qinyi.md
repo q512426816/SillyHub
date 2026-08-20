@@ -182,3 +182,18 @@
 根因：无（CI补齐+部署收紧+卫生清理）
 方案：daemon-ci.yml新增；compose端口/口令收紧；meta.json等untrack；CI死配置清理；Makefile/README/.codex补齐；本地垃圾物理删除
 结果：YAML全过、释放约400MB、git状态干净
+
+## ql-20260820-007-6109 | 2026-08-20 09:59:22 | 修复 spec 同步策略 repo-native/repo-mirrored 在 daemon init 与 batch 路径静默失效
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/spec-sync.ts（handleInitLease 重排 pull→writeDaemonState + bumpLocalSpecVersion 缺失重建）
+- sillyhub-daemon/src/task-runner.ts（batch pullSpecBundle 补传 strategy/rootPath + 修两处过时注释）
+- sillyhub-daemon/tests/test_init_lease.test.ts（新增策略分支/bump 重建/batch 透传 7 用例，更新 5xx 与顺序用例断言）
+- sillyhub-daemon/tests/test_spec_version_refresh.test.ts（bump 缺失与损坏 JSON 两用例更新到重建契约（启动未声明，事后归属））
+- backend/app/modules/daemon/lease/context.py（仅注释：.sillyspec-platform.json 旧名改 .runtime/spec-version.json 现行为）
+需求：修复 spec 同步策略 repo-native/repo-mirrored 在 daemon init 与 batch 路径静默失效
+根因：handleInitLease 的 writeDaemonState 先于 pull 写 .runtime 占位缓存根，阻塞 repo-native junction 守卫与 repo-mirrored 首拷判定（2026-08-15-init-trigger 时序回归）且 pull 的 rm -rf 反删状态文件；batch pullSpecBundle 漏传 strategy/rootPath 永远 platform-managed；bump 状态文件缺失不重建致保鲜永久失效
+方案：init 编排重排 pull→writeDaemonState→init（pull 失败 daemonState=null 契约变更）；batch 补传 ctx.specStrategy/ctx.rootPath；bump 缺失/损坏时完整重建 2 字段并补建 .runtime；顺带修 backend context.py 两处过时注释
+结果：test_init_lease 新增 7 用例并更新 2 旧断言，test_spec_version_refresh 2 用例更新到重建契约，daemon 全量 143 文件 2453 测试全绿，tsc 干净，backend 注释文件语法通过，模块文档 sillyhub-daemon.md 已同步暂存
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/tests/test_spec_version_refresh.test.ts

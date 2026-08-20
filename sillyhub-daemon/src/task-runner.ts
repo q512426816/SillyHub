@@ -427,8 +427,10 @@ export class TaskRunner {
     try {
       // ── init lease 分支（task-07 / D-002/D-009）：mode='init' → 不启 agent ──────────
       // daemon 拉到 init lease（kind=batch + mode='init'，backend task-06 start_init_dispatch
-      // 下发）：写 daemon 状态文件（2 字段）到 resolveSpecDir(workspaceId)/.runtime/（D-001@v1）→ pullSpecBundle 拉文档
-      // 缓存 → postSpecSync 回灌本地改动 → 提前 return TaskRunnerResult（不 spawn agent）。
+      // 下发）：pullSpecBundle 拉文档缓存 → 写 daemon 状态文件（2 字段）到
+      // resolveSpecDir(workspaceId)/.runtime/（D-001@v1；ql-20260820-007 rev3：状态文件
+      // 后置于 pull，防 .runtime 占位阻塞策略分支）→ postSpecSync 回灌本地改动
+      // → 提前 return TaskRunnerResult（不 spawn agent）。
       // 完整编排抽到 spec-sync.handleInitLease（纯函数 + client 参数注入，D-007@v1）。
       //
       // mode 探测：lease payload 字段 mode / purpose / init_mode 任一为 'init' 即视为 init lease
@@ -491,7 +493,15 @@ export class TaskRunner {
           specRoot = await pullSpecBundle(
             this.client as unknown as Parameters<typeof pullSpecBundle>[0],
             wsId,
-            { existingSpecRoot },
+            {
+              existingSpecRoot,
+              // ql-20260820-007：补传 strategy/rootPath——漏传时永远按 platform-managed
+              // pull（rm -rf + 解包），会拆除 interactive scan 已建的 repo-native junction，
+              // 策略静默永久退化；repo-mirrored 首拷判定同样失效。ctx.specStrategy 由
+              // daemon.ts execPayload 归一化透传（backend lease payload spec_strategy）。
+              strategy: ctx.specStrategy,
+              rootPath: ctx.rootPath,
+            },
           );
           // pull 成功（specDir 非空）+ lease 带了 latest_spec_version → 回写本地版本保鲜。
           // wsId 现永远非空（2026-07-10-remove-server-local-workspace-mode 移除 server-local，唯一路径恒为 daemon-client）；quick-chat / 无 workspace 场景 pullSpecBundle 返回 null 跳过。
@@ -869,7 +879,7 @@ export class TaskRunner {
    *   - 失败 → status='failed'，error 含失败步骤，stats 仍带 init_synced_spec_version（兜底 0）
    *     让 backend 记录「初始化失败」终态。
    *
-   * 容错：handleInitLease 内部已 catch 各步骤（写 platform.json / pull 硬失败 abort，post
+   * 容错：handleInitLease 内部已 catch 各步骤（写 daemon 状态文件 / pull 硬失败 abort，post
    * 软失败 warn），不会向上抛；此处不再 try/catch（保证终态落 completed/failed 而非 runLease
    * 顶层 catch 的 generic failed）。
    */

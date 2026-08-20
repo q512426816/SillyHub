@@ -536,8 +536,9 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
 
         # task-10（2026-07-02-workspace-config-flow，D-010）：lease payload 统一带
         # latest_spec_version（服务器权威文档版本），供 daemon 保鲜比对——每次执行
-        # agent/scan/init 任务前比对本地 .sillyspec-platform.json.spec_version，旧了
-        # 触发 pullSpecBundle。值源 = SpecWorkspace.spec_version（task-09 落字段）。
+        # agent/scan/init 任务前比对本地 daemon 状态文件
+        # resolveSpecDir(ws)/.runtime/spec-version.json.spec_version（D-001@v1 迁移，旧名
+        # .sillyspec-platform.json 已退役），旧了触发 pullSpecBundle。值源 = SpecWorkspace.spec_version（task-09 落字段）。
         #
         # 向前兼容（task-09 未合前）：getattr(spec_ws, "spec_version", 0)——spec_ws 行
         # 此时无 spec_version 列 → 返回默认 0。task-09 合入加列后自动读真实值，本处零改动。
@@ -617,8 +618,9 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         return payload
 
     # init lease（kind=batch + mode='init'，task-07 / workspace-config-flow D-002/D-009）：
-    # 不启 agent（无 agent_run_id），daemon 端 _runInitLease 读 payload 写
-    # .sillyspec-platform.json + pull spec。从 lease metadata 构建最小 payload，跳过
+    # 不启 agent（无 agent_run_id），daemon 端 _runInitLease 读 payload 写 daemon 状态文件
+    # （.runtime/spec-version.json，D-001@v1）+ pull spec + spawn sillyspec init。从 lease
+    # metadata 构建最小 payload，跳过
     # batch agent_run_id 校验（init 无 AgentRun，否则 _raise_no_agent_run 422）。
     # task-09：root_path 经 resolve_root_path_for_daemon 单参改写（单一 daemon-client）。
     # daemon _runInitLease 读 workspaceId/rootPath(camelCase) + platform_config + latestSpecVersion。
