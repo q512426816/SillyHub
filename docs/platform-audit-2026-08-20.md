@@ -53,8 +53,8 @@
 
 | ID | 问题 | 位置 | 复核 | 状态 |
 |----|------|------|------|------|
-| SS-1 | 工具 doctor 僵尸/孤儿对账依赖外部 sqlite3 CLI（本机无），catch 静默回退 known=∅ → 必然把全部活跃目录误报「孤儿目录（可清理）」并指引 rm -rf；应改用仓内 db-engine.js(node:sqlite) | sillyspec 工具仓 src/stages/doctor.js（跨仓引用，行 69/50/71/357） | 🤖 | 已修复（2026-08-20）|
-| SS-2 | stage-machine 提示「可用 doctor 清理」幽灵行，但 doctor 对幽灵行仅 WARNING 无清理动作 → 主仓 52 条残留记录永远清不掉（提示与能力不符） | sillyspec 工具仓 src/progress/stage-machine.js 行 184/191 + doctor-diagnostics.js 行 391（跨仓引用） | 🤖 | 已修复（2026-08-20）|
+| SS-1 | 工具 doctor 僵尸/孤儿对账依赖外部 sqlite3 CLI（本机无），catch 静默回退 known=∅ → 必然把全部活跃目录误报「孤儿目录（可清理）」并指引 rm -rf；应改用仓内 db-engine.js(node:sqlite) | repo://sillyspec/src/stages/doctor.js:69（另 50/71/357） | 🤖 | 已修复（2026-08-20）|
+| SS-2 | stage-machine 提示「可用 doctor 清理」幽灵行，但 doctor 对幽灵行仅 WARNING 无清理动作 → 主仓 52 条残留记录永远清不掉（提示与能力不符） | repo://sillyspec/src/progress/stage-machine.js:184（另 191）+ repo://sillyspec/src/doctor-diagnostics.js:391 | 🤖 | 已修复（2026-08-20）|
 
 ## 三、P2（应修）
 
