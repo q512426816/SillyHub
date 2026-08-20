@@ -723,11 +723,11 @@ function ToolEventCard({ event }: { event: SessionToolEvent }) {
       ? { icon: "✓", cls: "text-emerald-600", title: "执行成功" }
       : event.status === "deny"
         ? { icon: "✗", cls: "text-destructive", title: "执行失败 / 被拒" }
-        : { icon: "⏳", cls: "text-blue-600", title: "执行中" };
+        : { icon: "⏳", cls: "text-brand-600", title: "执行中" };
   const result = event.result?.trim() ?? "";
   return (
-    <div className="rounded border border-blue-200 bg-blue-50/40 px-2 py-1.5">
-      <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-blue-700">
+    <div className="rounded border border-brand-200 bg-brand-50/40 px-2 py-1.5">
+      <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-brand-700">
         <Wrench className="h-3 w-3 shrink-0" aria-hidden />
         <span className="font-medium">{parsed?.tool ?? (event.raw ? "工具调用" : "工具结果")}</span>
         <span className={cn("font-mono", badge.cls)} title={badge.title} aria-label={badge.title}>
@@ -779,11 +779,11 @@ function AskUserToolCard({ dialog }: { dialog: SessionDialogRead }) {
   if (qa.length === 0) return null;
   const pending = dialog.status === "pending";
   const badge = pending
-    ? { icon: "⏳", cls: "text-blue-600", title: "等待回答" }
+    ? { icon: "⏳", cls: "text-brand-600", title: "等待回答" }
     : { icon: "✓", cls: "text-emerald-600", title: "已回答" };
   return (
-    <div className="rounded border border-blue-200 bg-blue-50/40 px-2 py-1.5">
-      <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-blue-700">
+    <div className="rounded border border-brand-200 bg-brand-50/40 px-2 py-1.5">
+      <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-brand-700">
         <Wrench className="h-3 w-3 shrink-0" aria-hidden />
         <span className="font-medium">AskUserQuestion</span>
         <span className={cn("font-mono", badge.cls)} title={badge.title} aria-label={badge.title}>
@@ -850,7 +850,7 @@ function SessionCollapsible({
   const headerCls =
     tone === "thinking"
       ? "bg-zinc-100 border-zinc-200 text-zinc-600"
-      : "bg-blue-50 border-blue-200 text-blue-700";
+      : "bg-brand-50 border-brand-200 text-brand-700";
   return (
     <div className={`overflow-hidden rounded border ${headerCls}`}>
       <button
@@ -930,7 +930,7 @@ function TurnStatusBadge({
   };
   const tone: Record<TurnUiStatus, string> = {
     pending: "text-muted-foreground",
-    running: "text-blue-600",
+    running: "text-brand-600",
     interrupting: "text-amber-600",
     completed: "text-emerald-600",
     failed: "text-destructive",

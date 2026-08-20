@@ -64,9 +64,9 @@ function pickCatalogTurn(turns: SessionTurnView[]): SessionTurnView | null {
   return turns.length > 0 ? (turns[turns.length - 1] ?? null) : null;
 }
 
-/** 行状态点样式（原型 .catalog-row .st：running 蓝 pulse / done 绿 / deny 红）。 */
+/** 行状态点样式（原型 .catalog-row .st：running=brand 阶 pulse / done 绿 / deny 红）。 */
 const STATUS_DOT_CLS: Record<"running" | "done" | "deny", string> = {
-  running: "animate-pulse bg-blue-600",
+  running: "animate-pulse bg-brand-600",
   done: "bg-emerald-600",
   deny: "bg-destructive",
 };
@@ -147,7 +147,7 @@ export function SubagentCatalog({ turns, onJumpTo }: SubagentCatalogProps) {
         className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-[3px] text-xs text-foreground hover:bg-muted"
       >
         {hasRunning && (
-          <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-600" />
+          <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-600" />
         )}
         <span>子代理</span>
         <span className="text-[11px] text-muted-foreground">{hasRunning ? runningCount : subagents.length}</span>

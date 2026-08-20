@@ -64,9 +64,9 @@ describe("ChangeStepTimeline", () => {
       />,
     );
     expect(dot(container, "completed").className).toContain("bg-emerald-500");
-    // in-progress 蓝点脉动
+    // in-progress brand 点脉动
     const active = dot(container, "in-progress");
-    expect(active.className).toContain("bg-blue-500");
+    expect(active.className).toContain("bg-brand-500");
     expect(active.className).toContain("animate-pulse");
     expect(dot(container, "waiting").className).toContain("bg-amber-500");
     expect(dot(container, "failed").className).toContain("bg-red-500");

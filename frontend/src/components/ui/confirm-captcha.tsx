@@ -53,8 +53,8 @@ export function ConfirmCaptcha({ onVerified }: ConfirmCaptchaProps) {
       );
     }
     return (
-      <span className="flex h-5 w-5 items-center justify-center rounded border border-slate-300 bg-white transition-colors group-hover:border-blue-500">
-        <Shield className="h-3.5 w-3.5 text-slate-300 transition-colors group-hover:text-blue-500" />
+      <span className="flex h-5 w-5 items-center justify-center rounded border border-slate-300 bg-white transition-colors group-hover:border-brand-500">
+        <Shield className="h-3.5 w-3.5 text-slate-300 transition-colors group-hover:text-brand-500" />
       </span>
     );
   })();
@@ -79,7 +79,7 @@ export function ConfirmCaptcha({ onVerified }: ConfirmCaptchaProps) {
           ? "border-emerald-200 bg-emerald-50 text-emerald-700"
           : status === "fail"
             ? "border-red-200 bg-red-50 text-red-600"
-            : "border-slate-200 bg-slate-50 text-slate-700 hover:border-blue-300 hover:bg-blue-50/50",
+            : "border-slate-200 bg-slate-50 text-slate-700 hover:border-brand-300 hover:bg-brand-50/50",
       ].join(" ")}
     >
       {box}

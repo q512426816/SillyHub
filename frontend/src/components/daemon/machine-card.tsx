@@ -115,7 +115,7 @@ export function MachineCard({
     <section
       className={cn(
         "overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm",
-        expanded && "ring-1 ring-blue-100",
+        expanded && "ring-1 ring-brand-100",
       )}
     >
       {/* ===== 折叠头（点击整头切换 expanded） ===== */}
@@ -130,7 +130,7 @@ export function MachineCard({
             onToggleExpand();
           }
         }}
-        className="flex cursor-pointer items-center gap-3.5 px-[18px] py-3.5 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 focus-visible:ring-inset"
+        className="flex cursor-pointer items-center gap-3.5 px-[18px] py-3.5 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-inset"
       >
         {/* 机器图标（status→底色，对齐 prototype .machine-icon 42×42） */}
         <span
@@ -190,8 +190,8 @@ export function MachineCard({
 
         {/* 右侧 actions（对齐 prototype .machine-actions） */}
         <div className="flex shrink-0 items-center gap-2">
-          {/* 聚合费用胶囊（蓝，对齐 .machine-cost） */}
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">
+          {/* 聚合费用胶囊（brand 阶强调，对齐 .machine-cost） */}
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-100 bg-brand-50 px-2.5 py-1 text-xs font-semibold text-brand-700">
             {usageWindow === "7d" ? "7天费用 " : usageWindow === "1d" ? "当日费用 " : "30天费用 "}
             {formatCost(totalCost)}
           </span>

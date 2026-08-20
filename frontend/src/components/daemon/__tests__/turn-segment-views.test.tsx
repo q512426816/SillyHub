@@ -359,7 +359,7 @@ describe("SubagentBlockView 子代理块", () => {
     const header = rowOf("执行调研");
     expect(header.className).toContain("seg-sweep");
     expect(screen.getByText("运行中")).toBeInTheDocument();
-    expect(document.querySelector(".bg-blue-600")).not.toBeNull();
+    expect(document.querySelector(".bg-brand-600")).not.toBeNull();
   });
 
   it("children 递归渲染支持 depth>1 嵌套（孙辈块嵌在子辈 body 内，非顶层平铺）", () => {

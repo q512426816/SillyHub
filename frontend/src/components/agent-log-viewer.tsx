@@ -960,7 +960,7 @@ export function AgentLogViewer({
                 className={cn(
                   "inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-semibold transition-colors",
                   activeFilters.has(f.key)
-                    ? "border-blue-500/40 bg-blue-500/15 text-blue-700"
+                    ? "border-brand-500/40 bg-brand-500/15 text-brand-700"
                     : "border-zinc-200 bg-white text-zinc-600 hover:text-zinc-900",
                 )}
               >
@@ -993,7 +993,7 @@ export function AgentLogViewer({
                     className={cn(
                       "inline-flex h-5 shrink-0 items-center rounded px-1.5 text-[10px] font-semibold transition-colors",
                       activeToolKindFilters.has(f.key)
-                        ? "border border-blue-500/40 bg-blue-500/15 text-blue-700"
+                        ? "border border-brand-500/40 bg-brand-500/15 text-brand-700"
                         : "border border-transparent text-zinc-600 hover:text-zinc-900",
                     )}
                   >

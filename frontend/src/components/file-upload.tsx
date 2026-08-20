@@ -158,7 +158,7 @@ export function FileUpload({
           <div className="text-xs text-muted-foreground">上传中… {pct}%</div>
           <div className="mt-1 h-1 overflow-hidden rounded bg-muted">
             <div
-              className="h-full rounded bg-blue-600 transition-all"
+              className="h-full rounded bg-brand-600 transition-all"
               style={{ width: `${pct}%` }}
             />
           </div>

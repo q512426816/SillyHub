@@ -105,7 +105,7 @@ export function McpTokenCreateDialog({ workspaceId, onCreated, onClose }: Props)
         {phase === "form" && (
           <>
             <DialogHeader>
-              <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+              <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-lg bg-brand-50 text-brand-700">
                 <KeyRound className="h-5 w-5" />
               </div>
               <DialogTitle>签发 MCP 令牌</DialogTitle>

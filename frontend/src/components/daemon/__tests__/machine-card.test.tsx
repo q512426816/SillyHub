@@ -138,10 +138,10 @@ function findNativeButtonByName(name: RegExp): HTMLElement {
   return matches[0]!;
 }
 
-/** 聚合费用胶囊 span（蓝色，class 含 border-blue-100）。返回其 textContent。 */
+/** 聚合费用胶囊 span（brand 阶，class 含 border-brand-100）。返回其 textContent。 */
 function getCostBadgeText(container: HTMLElement): string {
-  const badge = container.querySelector("span.border-blue-100");
-  if (!badge) throw new Error("聚合费用胶囊 span.border-blue-100 未找到");
+  const badge = container.querySelector("span.border-brand-100");
+  if (!badge) throw new Error("聚合费用胶囊 span.border-brand-100 未找到");
   return badge.textContent ?? "";
 }
 

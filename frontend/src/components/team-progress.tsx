@@ -54,7 +54,7 @@ const ROLE_LABEL: Record<string, string> = {
 
 const STATUS_BADGE: Record<string, string> = {
   planning: "bg-gray-100 text-gray-700",
-  running: "bg-blue-100 text-blue-700",
+  running: "bg-brand-100 text-brand-700",
   done: "bg-green-100 text-green-700",
   degraded: "bg-yellow-100 text-yellow-800",
   failed: "bg-red-100 text-red-700",
@@ -317,7 +317,7 @@ function TeamWorkerRow({ worker }: { worker: MissionWorkerRun }) {
       : worker.status === "completed"
         ? "text-green-700"
         : worker.status === "running"
-          ? "text-blue-700"
+          ? "text-brand-700"
           : worker.status === "killed"
             ? "text-gray-400"
             : "text-gray-600";

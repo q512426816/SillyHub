@@ -26,11 +26,12 @@
  *           .sillyspec/changes/2026-06-21-ppm-frontend-alignment/tasks/task-01.md
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { message, Select, Spin, Tag } from "antd";
+import { Select, Spin, Tag } from "antd";
 import type { DefaultOptionType } from "antd/es/select";
 
 import { ApiError } from "@/lib/api";
 import { listRoles, listUsers } from "@/lib/admin";
+import { useNotify } from "@/lib/errors";
 import {
   listProjectMembers,
   listSimpleProjects,
@@ -228,6 +229,7 @@ export function PpmUserSelect(props: PpmUserSelectProps) {
   } = props;
 
   const adapter = useMemo(() => getAdapter(res), [res]);
+  const notify = useNotify();
 
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -279,7 +281,7 @@ export function PpmUserSelect(props: PpmUserSelectProps) {
         // 下拉数据加载失败:提示用户(避免静默 console.error),下拉显示空。
         // 关键字搜索/翻页的失败不刷屏:仅在首屏重置时提示。
         if (reset && err instanceof ApiError) {
-          message.error(err.message || "加载选项失败");
+          notify.error(err, "加载选项失败");
         }
       } finally {
         if (myReqId === reqIdRef.current) setLoading(false);

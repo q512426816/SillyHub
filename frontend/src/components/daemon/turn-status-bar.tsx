@@ -286,7 +286,7 @@ export const TurnStatusBar = memo(function TurnStatusBar({
       />
       <span className="shrink-0 text-muted-foreground">{STATUS_LABEL[turnStatus]}</span>
       {showElapsed && elapsedMs != null && (
-        <span className="shrink-0 font-mono font-medium text-blue-600">
+        <span className="shrink-0 font-mono font-medium text-brand-600">
           {formatElapsedMmss(elapsedMs)}
         </span>
       )}

@@ -675,9 +675,9 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
       // init 进行中反馈
       if (initing) {
         return (
-          <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+          <div className="rounded border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-800">
             <p className="font-medium">初始化进行中...</p>
-            <p className="mt-0.5 text-blue-600">
+            <p className="mt-0.5 text-brand-600">
               正在将平台配置下发到本地项目目录并拉取文档缓存，请稍候...
             </p>
           </div>
@@ -689,16 +689,16 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
       <>
         {!initSyncedAt &&
           (specWs.strategy === "platform-managed" ? (
-            <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+            <div className="rounded border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-800">
               <p className="font-medium">此工作区尚未初始化。</p>
-              <p className="mt-0.5 text-blue-600">
+              <p className="mt-0.5 text-brand-600">
                 点击上方<strong> 初始化 </strong>按钮，将平台配置下发到本地项目目录。
               </p>
             </div>
           ) : (
-            <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+            <div className="rounded border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-800">
               <p className="font-medium">此工作区尚未扫描。</p>
-              <p className="mt-0.5 text-blue-600">
+              <p className="mt-0.5 text-brand-600">
                 点击上方<strong> 扫描 </strong>按钮，将仓库中的规范文档读取到平台。
               </p>
             </div>
@@ -715,17 +715,17 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
           </div>
         )}
         {importing && (
-          <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+          <div className="rounded border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-800">
             <p className="font-medium">导入进行中...</p>
-            <p className="mt-0.5 text-blue-600">
+            <p className="mt-0.5 text-brand-600">
               {IMPORT_PHASE_LABEL[importPhase ?? "packing"]}，正在从仓库读取规范文档，请稍候...
             </p>
           </div>
         )}
         {generatingProjects && (
-          <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+          <div className="rounded border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-800">
             <p className="font-medium">生成项目组件中...</p>
-            <p className="mt-0.5 text-blue-600">
+            <p className="mt-0.5 text-brand-600">
               正在根据 projects/*.yaml 生成项目组件，请稍候...
             </p>
           </div>
@@ -750,17 +750,17 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
       const total = syncProgress.total ?? 0;
       const percent = hasTotal ? Math.round((processed / total) * 100) : 0;
       return (
-        <div className="rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+        <div className="rounded border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-brand-800">
           <p className="font-medium">同步中...</p>
           {hasTotal ? (
             <>
               <Progress percent={percent} size="small" />
-              <p className="mt-0.5 text-blue-600">
+              <p className="mt-0.5 text-brand-600">
                 正在推送文件变更 {processed}/{syncProgress.total}，请稍候...
               </p>
             </>
           ) : (
-            <p className="mt-0.5 text-blue-600">正在打包本地变更，请稍候...</p>
+            <p className="mt-0.5 text-brand-600">正在打包本地变更，请稍候...</p>
           )}
         </div>
       );
