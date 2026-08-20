@@ -306,8 +306,9 @@ describe("MissionConsole 重设计（2026-07-14-missions-page-redesign）", () =
 
 /* ------------------------------------------------------------------ */
 /*  perf-remediation task-08 / FR-10：WorkerLogPanel 日志增量游标      */
-/*  after = 已见最早一条 timestamp；后端返回更新条目；前端按 id 去重    */
-/*  合并；游标空结果且本地积压超阈值 → 一次全量重拉兜底。               */
+/*  FE-P1-3（2026-08-21 审查）：after = 已见最新一条 timestamp（后端    */
+/*  语义 timestamp > after 严格更新）；前端按 id 去重合并；游标空结果    */
+/*  且本地积压超阈值 → 一次全量重拉兜底。                               */
 /* ------------------------------------------------------------------ */
 
 function makeLog(id: string, ts: string): AgentRunLogEntry {
@@ -402,7 +403,7 @@ describe("WorkerLogPanel 5s 轮询增量游标（perf-remediation task-08）", (
     vi.useRealTimers();
   });
 
-  it("首拉无游标全量；后续轮询传最早一条 timestamp 作 after 并增量合并", async () => {
+  it("首拉无游标全量；后续轮询传最新一条 timestamp 作 after 并增量合并", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     // 首拉：无 after，全量两条
     hoisted.getAgentRunLogsMock.mockResolvedValueOnce([
@@ -411,9 +412,9 @@ describe("WorkerLogPanel 5s 轮询增量游标（perf-remediation task-08）", (
     ]);
     await renderDetailWithWorkerLog();
 
-    // 第二轮：增量响应一条新日志 + 同 timestamp 边界重复 b
+    // 第二轮：增量响应一条新日志（after=b 的 timestamp，严格更新语义下后端
+    // 不会回传 b 本身）
     hoisted.getAgentRunLogsMock.mockResolvedValueOnce([
-      makeLog("b", "2026-08-15T07:00:02.000Z"),
       makeLog("c", "2026-08-15T07:00:03.000Z"),
     ]);
     await act(async () => {
@@ -423,11 +424,11 @@ describe("WorkerLogPanel 5s 轮询增量游标（perf-remediation task-08）", (
       expect(hoisted.getAgentRunLogsMock).toHaveBeenCalledTimes(2),
     );
 
-    // 游标语义：after = 已见最早一条（a 的 timestamp）
+    // 游标语义（FE-P1-3）：after = 已见最新一条（b 的 timestamp），不再重拉 a/b
     const secondCall = hoisted.getAgentRunLogsMock.mock.calls[1] as unknown[];
-    expect(secondCall![2]).toBe("2026-08-15T07:00:01.000Z");
+    expect(secondCall![2]).toBe("2026-08-15T07:00:02.000Z");
     // 合并结果：a/b/c 各一条（viewer 把相邻 assistant 行合并成一个 markdown 块，
-    // 故用 body.textContent 断言集合，b 只出现一次 = id 去重生效）
+    // 故用 body.textContent 断言集合）
     await waitFor(() => {
       const text = document.body.textContent ?? "";
       expect(text).toContain("日志行 a");
@@ -470,7 +471,7 @@ describe("WorkerLogPanel 5s 轮询增量游标（perf-remediation task-08）", (
       expect(hoisted.getAgentRunLogsMock).toHaveBeenCalledTimes(4),
     );
     const resumeCall = hoisted.getAgentRunLogsMock.mock.calls[3] as unknown[];
-    expect(resumeCall![2]).toBe("2026-08-15T07:00:00.000Z");
+    expect(resumeCall![2]).toBe("2026-08-15T07:00:00.200Z");
     vi.useRealTimers();
   });
 });

@@ -43,7 +43,7 @@ from sqlmodel import col
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentArtifact, AgentRun
 from app.modules.agent.placement import NoOnlineDaemonError, RunPlacementService
-from app.modules.daemon.host_fs.delegate import HostFsDelegate
+from app.modules.daemon.host_fs.delegate import HostFsDelegate, HostFsDelegateUnavailable
 from app.modules.workspace.model import Workspace
 from app.modules.workspace.service import resolve_root_path_for_daemon
 
@@ -240,12 +240,34 @@ class MissionExecutionService:
             # X-001 空值兜底：ws.default_branch 可空（execution.py:122 同款语义），
             # 空 → "HEAD"（工作区未提交改动不带入副本，design §7）。
             base_ref = ws.default_branch or "HEAD"
-            wt_result = await self._host_fs_delegate.git_worktree_add(
-                ws,
-                sibling_path=sibling_path,
-                branch=worktree_branch,
-                base_ref=base_ref,
-            )
+            # BE-P1-2（2026-08-21 审查）：git_worktree_add 走 _via_rpc 通道时，目标
+            # workspace 无 bound daemon 会直接抛 HostFsDelegateUnavailable（不走
+            # _via_rpc_or_degrade 的降级 dict 路径）。原先该异常冒泡回 mcp 端点 re-raise
+            # 503，run 已落库 pending 且无终态化路径 → derive_status 永远 running、
+            # mission 挂死（scope 缺 binding 是创建预检明确放行的场景）。此处与下方
+            # ok=False 分支同语义收敛：failed + error_code，主 agent 收 503 后仍可重试。
+            try:
+                wt_result = await self._host_fs_delegate.git_worktree_add(
+                    ws,
+                    sibling_path=sibling_path,
+                    branch=worktree_branch,
+                    base_ref=base_ref,
+                )
+            except HostFsDelegateUnavailable as exc:
+                log.warning(
+                    "mission_worker_worktree_delegate_unavailable",
+                    run_id=str(run.id),
+                    workspace_id=str(effective_target),
+                    sibling_path=sibling_path,
+                    error=str(exc),
+                )
+                await mark_worker_run_failed(
+                    self._session,
+                    run,
+                    error_code="hostfs_unavailable",
+                    message=f"目标工作区暂无可用机器绑定：{exc}",
+                )
+                return None
             if not (isinstance(wt_result, dict) and wt_result.get("ok") is True):
                 # design §9：worktree 创建失败（daemon 离线 / RPC 失败 / git 错）
                 # → worker run 标 failed，主 agent 决策补派（worker_preset 内重

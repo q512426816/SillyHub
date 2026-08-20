@@ -67,13 +67,13 @@ async def _seed_workspace_and_mission(
 class TestDispatchWorker:
     @pytest.mark.asyncio
     async def test_dispatch_creates_worker_run(self, client, db_session, auth_headers) -> None:
-        """POST dispatch_worker → 建 worker run（delegate 注入后无 binding → 503 fail-loud）。
+        """POST dispatch_worker → 建 worker run（无 binding → failed + hostfs_unavailable）。
 
-        ql-20260713-002 接通 delegate 注入链后，``MissionExecutionService`` 持有
-        ``HostFsDelegate``，``dispatch_worker`` 前置调 ``git_worktree_add``。workspace
-        无 bound daemon instance → ``HostFsDelegateUnavailable``（delegate wiring 错误
-        fail-loud，delegate.py:734 不 degrade）→ 503。旧契约（201 + no_online_daemon）
-        基于 delegate 未注入的隐含假设，已随链路接通过时。
+        BE-P1-2（2026-08-21 审查）契约：workspace 无 bound daemon 时
+        ``git_worktree_add`` 抛 ``HostFsDelegateUnavailable``，execution 内部收敛为
+        ``failed + error_code=hostfs_unavailable``（201 响应携带终态 run）。旧契约
+        （503 fail-loud，ql-20260713-002）的缺陷：异常冒泡后 run 已落库 pending 且
+        无终态化路径 → derive_status 永远 running、mission 挂死。
         """
         ws_id, mission_id, _ = await _seed_workspace_and_mission(db_session)
         resp = await client.post(
@@ -81,20 +81,19 @@ class TestDispatchWorker:
             json={"objective": "扫描架构", "role": "arch", "read_only": True},
             headers=auth_headers,
         )
-        assert resp.status_code == 503, resp.text
+        assert resp.status_code == 201, resp.text
         data = resp.json()
-        assert data["code"] == "HOST_FS_DELEGATE_UNAVAILABLE"
-        assert data["details"]["method"] == "git_worktree_add"
+        assert data["status"] == "failed"
+        assert data["error_code"] == "hostfs_unavailable"
 
     @pytest.mark.asyncio
     async def test_dispatch_missing_role_uses_default(
         self, client, db_session, auth_headers
     ) -> None:
-        """role 缺省 → 默认 worker（dispatch 在 worktree 前置失败前已建 run + 用默认 role）。
+        """role 缺省 → 默认 worker（无 binding → failed + hostfs_unavailable）。
 
-        ql-20260713-002 后无 binding 走 503 fail-loud（见 test_dispatch_creates_worker_run），
-        本测改为校验前置建 run 时 role 兜底为 ``worker``：run 在 dispatch_worker 调
-        delegate 前已 commit，role 默认值经 503 响应前落库——直接查 DB 校验。
+        BE-P1-2 后无 binding 走 201 + failed（见 test_dispatch_creates_worker_run），
+        本测校验建 run 时 role 兜底为 ``worker``：直接查 DB 校验。
         """
         ws_id, mission_id, _ = await _seed_workspace_and_mission(db_session)
         resp = await client.post(
@@ -102,8 +101,9 @@ class TestDispatchWorker:
             json={"objective": "做事"},
             headers=auth_headers,
         )
-        # 无 binding → 503 fail-loud（delegate 注入后语义）
-        assert resp.status_code == 503, resp.text
+        # 无 binding → 201 + failed（BE-P1-2 契约）
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["status"] == "failed"
         # run 在 dispatch_worker 前置已建（mcp_tools.py:316-328 commit），role 兜底 worker
         from sqlalchemy import select
 
@@ -484,9 +484,9 @@ class TestCrossWorkspaceDispatch:
             },
             headers=auth_headers,
         )
-        # 无 binding → 503（预期语义，证明 scope 校验通过）
-        assert resp.status_code == 503, resp.text
-        assert resp.json()["code"] == "HOST_FS_DELEGATE_UNAVAILABLE"
+        # 无 binding → 201 + failed（BE-P1-2 契约，证明 scope 校验通过）
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["error_code"] == "hostfs_unavailable"
 
     @pytest.mark.asyncio
     async def test_dispatch_target_out_of_scope_400(self, client, db_session, auth_headers) -> None:
@@ -532,9 +532,9 @@ class TestCrossWorkspaceDispatch:
             json={"objective": "单工作区任务"},
             headers=auth_headers,
         )
-        # 无 binding → 503（预期语义，证明 target=anchor 校验通过）
-        assert resp.status_code == 503, resp.text
-        assert resp.json()["code"] == "HOST_FS_DELEGATE_UNAVAILABLE"
+        # 无 binding → 201 + failed（BE-P1-2 契约，证明 target=anchor 校验通过）
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["error_code"] == "hostfs_unavailable"
 
     @pytest.mark.asyncio
     async def test_profile_in_scope_accepted(self, client, db_session, auth_headers) -> None:
@@ -566,8 +566,9 @@ class TestCrossWorkspaceDispatch:
             },
             headers=auth_headers,
         )
-        # 无 binding → 503（证明 profile 校验通过）
-        assert resp.status_code == 503, resp.text
+        # 无 binding → 201 + failed（BE-P1-2 契约，证明 profile 校验通过）
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["error_code"] == "hostfs_unavailable"
 
     @pytest.mark.asyncio
     async def test_profile_out_of_scope_400(self, client, db_session, auth_headers) -> None:

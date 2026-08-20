@@ -41,7 +41,12 @@ export default function ProjectMissionsPage() {
   const reload = useCallback(() => setReloadFlag((n) => n + 1), []);
 
   useEffect(() => {
-    if (!projectId) return;
+    // FE-P2-8（2026-08-21 审查）：projectId 缺失（异常路由）时原先 effect 早退，
+    // candidates 永为 null 且无错误 → 页面永久停在"正在加载"。改为直接报错态。
+    if (!projectId) {
+      setLoadError("缺少项目 ID，无法加载项目团队会话页。");
+      return;
+    }
     let cancelled = false;
     setCandidates(null);
     setLoadError(null);

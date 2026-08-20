@@ -257,12 +257,12 @@ class TestAnchorProfileForScopeTarget:
             },
             headers=auth_headers,
         )
-        # 无 binding → 503 fail-loud（delegate wiring 层），证明 profile 归属校验通过
-        assert resp.status_code == 503, resp.text
-        assert resp.json()["code"] == "HOST_FS_DELEGATE_UNAVAILABLE"
+        # 无 binding → 201 + failed（BE-P1-2 契约），证明 profile 归属校验通过
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["error_code"] == "hostfs_unavailable"
 
         run = await _fetch_mission_run(db_session, mission.id)
         assert run.agent_profile_id == profile.id
         assert run.agent_profile_snapshot is not None
-        # 派发已按 target 走到 delegate 层（worktree 阶段 fail-loud，run 留 pending）
-        assert run.status == "pending"
+        # 派发已按 target 走到 delegate 层（无 binding → run 终态 failed，BE-P1-2 契约）
+        assert run.status == "failed"

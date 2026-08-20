@@ -433,9 +433,13 @@ class FinalizerService:
         )
         patch_artifact_id = (await self._session.execute(patch_stmt)).scalars().first()
 
-        # 取 mission 各 completed worker 的 (run_id, target_workspace_id) 二元组
+        # 取 mission 各终态 worker 的 (run_id, target_workspace_id) 二元组
         # （task-03 dispatch 时填 target_workspace_id，task-01 增加列）。
         # target_workspace_id 为 NULL 时回退到 mission.workspace_id（anchor）。
+        # BE-P1-4a（2026-08-21 审查）：过滤从 completed 扩到全部终态（failed/killed）。
+        # dispatch 失败 / worker 运行失败的 run 只要建了 worktree（worktree_branch
+        # 非空），副本与分支同样占磁盘；cleanup 被"无冲突全 merged"路径调用时该
+        # worker 的半成品无保留价值（排查副本仅 conflict 场景保留，X-003）。
         mission = await self._session.get(AgentMission, mission_id)
         if mission is None:
             log.warning(
@@ -450,7 +454,7 @@ class FinalizerService:
             AgentRun.target_workspace_id,
         ).where(
             AgentRun.mission_id == mission_id,
-            AgentRun.status == "completed",
+            AgentRun.status.in_(("completed", "failed", "killed")),
             AgentRun.worktree_branch.is_not(None),
         )
         rows = (await self._session.execute(worker_stmt)).all()
@@ -621,17 +625,48 @@ async def converge_mission_for_completed_run(
         # （merged_branches / pending_conflicts）。注意：本调用方未注入 host_fs_delegate
         # → finalize_execute_mission 跳过实际 merge 返回空结果（保留 task-04 既有行为，
         # design §9 零回归）；生产接线（注入 delegate）留 task-08 集成。
-        merge_result = await finalizer.finalize_execute_mission(mission_id)
-        # 路由分流契约（task-04 既有语义，task-05 保留）：execute mission = 有 patch
-        # artifact（write worker 的 diff_summary）或有 worktree_branch；bootstrap
-        # mission（read-only summary only，无 patch 无 branch）→ finalize_bootstrap_mission
-        # 合并 summary。merge_result 空 + 无 patch artifact = bootstrap 路径。
-        has_patch = await finalizer.has_execute_patches(mission_id)
-        is_execute_mission = bool(
-            merge_result.merged_branches or merge_result.pending_conflicts or has_patch
-        )
-        if not is_execute_mission:
-            await finalizer.finalize_bootstrap_mission(mission_id)
+        #
+        # BE-P1-3（2026-08-21 审查）：finalize 抛异常时回滚 converged_at=NULL。原先
+        # claim 先 commit、finalize 失败无回滚 → 后续重进因 rowcount=0 直接返回，
+        # merge/GLM 合并永久丢失（complete_lease 侧只 log.warning 吞异常）。回滚后
+        # 下一次 worker complete / schedule_loop 能重新 claim 重跑（merge 幂等，同
+        # mcp converge 端点无条件重跑 _finalize_merge_for_mission 的既有语义）。
+        try:
+            merge_result = await finalizer.finalize_execute_mission(mission_id)
+            # 路由分流契约（task-04 既有语义，task-05 保留）：execute mission = 有 patch
+            # artifact（write worker 的 diff_summary）或有 worktree_branch；bootstrap
+            # mission（read-only summary only，无 patch 无 branch）→ finalize_bootstrap_mission
+            # 合并 summary。merge_result 空 + 无 patch artifact = bootstrap 路径。
+            has_patch = await finalizer.has_execute_patches(mission_id)
+            is_execute_mission = bool(
+                merge_result.merged_branches or merge_result.pending_conflicts or has_patch
+            )
+            if not is_execute_mission:
+                await finalizer.finalize_bootstrap_mission(mission_id)
+            elif not merge_result.pending_conflicts:
+                # BE-P1-4b（2026-08-21 审查）：execute 路径全 merged（无 pending_conflicts）
+                # → cleanup worktree 副本。原先本入口（complete_lease 自动收敛 /
+                # schedule_loop 兜底收敛）从不调 cleanup，仅 MCP converge 端点的 merged
+                # 分支调——主 agent 未调 converge tool 的 mission 全部 worker 副本永久
+                # 残留磁盘。对齐端点语义：conflict 保留副本供排查（X-003）。
+                cleanup_result = await finalizer.cleanup_mission(mission_id)
+                log.info(
+                    "mission_converged_cleanup_done",
+                    mission_id=str(mission_id),
+                    cleaned=len(cleanup_result.get("cleaned", [])),
+                )
+        except Exception:
+            await session.rollback()
+            await session.execute(
+                update(AgentMission).where(AgentMission.id == mission_id).values(converged_at=None)
+            )
+            await session.commit()
+            log.warning(
+                "mission_finalize_failed_converge_requeued",
+                mission_id=str(mission_id),
+                trigger_run_id=str(run_id),
+            )
+            raise
         log.info(
             "mission_converged",
             mission_id=str(mission_id),

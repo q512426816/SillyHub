@@ -664,6 +664,9 @@ class AgentMission(BaseModel, table=True):
             Uuid(as_uuid=True),
             ForeignKey("ppm_project_maintenance.id", ondelete="SET NULL"),
             nullable=True,
+            # BE-P2-2（2026-08-21 审查）：list_project_missions 按 project_id 过滤，
+            # 补索引（migration 20260821100000 同步建）。
+            index=True,
         ),
     )
     # ── 派发范围快照（2026-08-19-cross-workspace-team-mission D-007@v1） ──

@@ -848,8 +848,9 @@ class TestMcpDispatchWorkerBindProfile:
             json={"objective": "做事", "agent_profile_id": str(profile.id)},
             headers=auth_headers,
         )
-        # 无 binding → 503 fail-loud（delegate 注入后语义），但 run 已前置 commit
-        assert resp.status_code == 503, resp.text
+        # 无 binding → 201 + failed（BE-P1-2 契约），run 已前置 commit
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["error_code"] == "hostfs_unavailable"
 
         run = await self._latest_run(db_session, mission_id)
         assert run is not None
@@ -908,7 +909,8 @@ class TestMcpDispatchWorkerBindProfile:
             json={"objective": "做事"},
             headers=auth_headers,
         )
-        assert resp.status_code == 503, resp.text
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["error_code"] == "hostfs_unavailable"
         run = await self._latest_run(db_session, mission_id)
         assert run is not None
         assert run.agent_profile_id is None

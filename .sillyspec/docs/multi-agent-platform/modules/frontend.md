@@ -42,6 +42,7 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+- ql-20260821-002（项目团队 mission 前端审查修复，docs/project-team-mission-review-2026-08-21.md）| mission-console.tsx 六项：①ACTIVE 集合去 degraded（终态不再 10s 轮询/不显示"取消任务"，原语义错误）；②`displayedMissionIdRef`+`selectMission` 轮询竞态守卫（切换 mission 丢弃在飞响应，不再闪回旧任务）；③worker 日志游标 earliestTimestamp→latestTimestamp（after=最新一条，消除每 5s 近乎全量重拉 5000 行 TEXT）；④budget 输入 0/负数/Infinity 阻断提交；⑤错误文案复用 errMessage（杜绝 [object Object]）；⑥anchor 默认过期注释更新（后端已按 backend-code 词表比对）。projects/[id]/missions/page.tsx：projectId 缺失渲染错误态（原永久 loading）；listProjectMissions 403 显式"仅项目经理"提示（原静默吞掉显示"无历史"）。游标 2 用例更新新语义 + missions-page 新增 degraded/budget/403 三用例；全量 1795 passed，tsc 0。
 - 2026-08-20-runtime-readpoint-repo-first | /workspaces/[id]/runtime 页：user-inputs 渲染超 `USER_INPUTS_MAX_DISPLAY=50000` 字符时 `slice(-50000)` 尾部截断（追加式日志末尾最新）+ 含完整文件路径的截断提示行；副标题改「优先本机仓库，回退同步缓存」。lib/runtime.ts 接口客户端零改动（12 passed）。
 - **2026-08-19-cross-workspace-team-mission**（跨工作区团队执行 + 项目维度会话）：新增项目维度会话入口 `app/(dashboard)/projects/[id]/missions/page.tsx`；扩展 `components/mission-console.tsx` 支持 `projectMode`（scope 多选、anchor 单选、目标工作区徽标列、调用 `createProjectMission`/`listProjectMissions`）；`lib/agent.ts` 新增 `createProjectMission` / `listProjectMissions`（类型从 `api-types.ts` MissionResponse/MissionCreateRequest 导入）；`lib/api-types.ts` 随 backend OpenAPI 重新生成。 vitest 全量 1684 passed，tsc exit 0。
 

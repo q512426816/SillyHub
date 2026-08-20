@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from app.core.auth_deps import require_permission, require_permission_any
+from app.core.auth_deps import get_current_user, require_permission, require_permission_any
 from app.core.db import get_session, get_session_factory
 from app.core.errors import AgentRunNotFound, AgentRunNotRunning
 from app.core.logging import get_logger
@@ -907,7 +907,10 @@ async def _load_mission_artifacts(
 async def list_missions(
     workspace_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.TASK_READ))],
+    # BE-P1-1（2026-08-21 审查）：原 require_permission_any 使 path 的 workspace_id
+    # 完全不参与鉴权（任意 ws 有 TASK_READ 即可列他人 ws 的 mission）。路径含
+    # {workspace_id}，改 require_permission 让其参与校验。
+    user: Annotated[User, Depends(require_permission(Permission.TASK_READ))],
     limit: int = Query(20, ge=1),
     offset: int = Query(0, ge=0),
 ) -> list[MissionResponse]:
@@ -979,7 +982,8 @@ async def create_mission(
     user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
 ) -> MissionResponse:
     """Plan a Mission via GLM, create Worker Runs, dispatch them to a daemon."""
-    constraints = dict(payload.constraints or {})
+    # BE-P2-4（2026-08-21 审查）：剥状态机保留键（与 create_project_mission 同款）。
+    constraints = _sanitize_constraints(payload.constraints)
     if getattr(payload, "mode", None) is not None:
         constraints["mode"] = payload.mode
     if getattr(payload, "session_id", None) is not None:
@@ -1083,11 +1087,17 @@ async def create_mission(
 async def get_mission(
     mission_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission_any(Permission.TASK_READ))],
+    # BE-P1-1（2026-08-21 审查）：原 require_permission_any(TASK_READ) + 无归属校验，
+    # 任意 ws 有 TASK_READ 的用户凭 mission_id 可读任意 mission。入口仅认证，
+    # 归属判定（anchor/scope 读权限或项目经理/超管）收敛到 _require_mission_access。
+    user: Annotated[User, Depends(get_current_user)],
 ) -> MissionResponse:
     mission = await session.get(AgentMission, mission_id)
     if mission is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "指定的任务组不存在。")
+    # BE-P1-1（2026-08-21 审查）：原先无归属校验，任何持 TASK_READ 的用户凭 mission_id
+    # 可读任意 mission。现要求 anchor/scope 内任一 ws 有 TASK_READ（或项目经理）。
+    await _require_mission_access(session, user, mission, write=False)
     # NOTE: collect_completed_artifacts is NOT called on every GET — it provoked
     # connection-pool exhaustion under polling (each GET ran extra queries).
     # Artifact 回灌 is triggered explicitly (cancel) / via complete_lease hook (todo).
@@ -1102,11 +1112,17 @@ async def get_mission(
 async def cancel_mission(
     mission_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+    # BE-P0-1（2026-08-21 审查）：原 require_permission(WORKSPACE_WRITE) 的 checker
+    # 声明 workspace_id: Path(...)，本路由路径无该参数 → 已认证请求恒 422，取消功能
+    # 完全不可用。入口仅认证（get_current_user），归属判定（anchor/scope 写权限或
+    # 项目经理/超管）全部收敛到 _require_mission_access——用任意 ws 权限做入口门槛
+    # 会把"项目经理但无 ws 角色"的合法取消者挡在门外。
+    user: Annotated[User, Depends(get_current_user)],
 ) -> MissionResponse:
     mission = await session.get(AgentMission, mission_id)
     if mission is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "指定的任务组不存在。")
+    await _require_mission_access(session, user, mission, write=True)
     ctrl = MissionControlService(session)
     await ctrl.cancel(mission)
     runs = await ctrl.worker_runs(mission.id)
@@ -1128,11 +1144,7 @@ async def _require_project_manager(
 
     复用 ppm/common/data_scope 的 is_super_admin + manager_project_ids。
     """
-    from app.modules.ppm.common.data_scope import is_super_admin, manager_project_ids
-
-    if await is_super_admin(session, user):
-        return
-    if project_id in await manager_project_ids(session, user):
+    if await _require_project_manager_or(session, user, project_id):
         return
     from app.core.errors import PermissionDenied
 
@@ -1140,6 +1152,62 @@ async def _require_project_manager(
         "仅项目经理可创建项目团队会话。",
         details={"project_id": str(project_id)},
     )
+
+
+async def _require_mission_access(
+    session: AsyncSession, user: User, mission: AgentMission, *, write: bool
+) -> None:
+    """通用 mission 端点（get/cancel，路径无 workspace_id）的归属校验，否则 403。
+
+    放行口径与 mcp_tools._get_mission 的 scope 语义对齐：用户对 anchor 或 scope
+    内任一 workspace 持对应权限即放行；项目维度 mission（project_id 非空）另放行
+    项目经理。修复审查 BE-P0-1/BE-P1-1：这两类端点原先完全无归属校验。
+    """
+    from app.modules.auth.rbac import has_permission
+
+    permission = Permission.WORKSPACE_WRITE if write else Permission.TASK_READ
+    scope_ids = {mission.workspace_id}
+    for sid in mission.scope_workspace_ids or []:
+        try:
+            scope_ids.add(uuid.UUID(sid))
+        except (ValueError, TypeError):
+            continue
+    for ws_id in scope_ids:
+        if await has_permission(session, user=user, permission=permission, workspace_id=ws_id):
+            return
+    if mission.project_id is not None and await _require_project_manager_or(
+        session, user, mission.project_id
+    ):
+        return
+    from app.core.errors import PermissionDenied
+
+    raise PermissionDenied(
+        "无权访问该任务组。",
+        details={"mission_id": str(mission.id)},
+    )
+
+
+async def _require_project_manager_or(
+    session: AsyncSession, user: User, project_id: uuid.UUID
+) -> bool:
+    """项目经理/超管判定（布尔版，供 _require_mission_access 复用）。"""
+    from app.modules.ppm.common.data_scope import is_super_admin, manager_project_ids
+
+    if await is_super_admin(session, user):
+        return True
+    return project_id in await manager_project_ids(session, user)
+
+
+def _sanitize_constraints(raw: dict | None) -> dict:
+    """剥离 constraints 中的状态机保留键（BE-P2-4，2026-08-21 审查）。
+
+    用户可预置 ``orchestration_mode``（使 finalizer 短路跳过一切 merge，与主
+    agent spawn 自相矛盾）、``conflict_attempts``（直接顶满解冲突轮次）、
+    ``needs_manual``（伪造人工介入态）等内部键操纵状态机。这些键只允许后端
+    按参数化路径写入（team_mission_entry / converge 状态机），创建入口一律剥离。
+    """
+    reserved = {"orchestration_mode", "conflict_attempts", "needs_manual"}
+    return {k: v for k, v in (raw or {}).items() if k not in reserved}
 
 
 async def _check_scope_bindings(
@@ -1249,8 +1317,9 @@ async def create_project_mission(
             missing=[m["name"] for m in missing_bindings],
         )
 
-    # 构造 constraints：mode 强制 team + project_id 落列
-    constraints = dict(payload.constraints or {})
+    # 构造 constraints：mode 强制 team + project_id 落列。
+    # BE-P2-4：先剥保留键（orchestration_mode 由下方参数化路径写入，不信任用户预置）。
+    constraints = _sanitize_constraints(payload.constraints)
     constraints["mode"] = "team"  # 项目维度无 single 语义
     if getattr(payload, "session_id", None) is not None:
         constraints["session_id"] = str(payload.session_id)

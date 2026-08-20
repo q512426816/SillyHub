@@ -134,12 +134,14 @@ async def render_orchestrator_prompt(
                     )
                     first_runtime = member_runtimes_result.first()
                     if first_runtime and first_runtime[0].daemon_id:
+                        # BE-P1-5（2026-08-21 审查）：query_daemon_online_by_id 的 SQL 含
+                        # ``AND user_id = :uid``，原传全零 UUID 占位（注释误称"在线判定
+                        # 不依赖 user_id"）→ 查询恒 None，scope 清单一律显示"离线"，
+                        # 系统性误导主 agent 派发决策。改传 binding 属主的 user_id。
                         online_daemon = await query_daemon_online_by_id(
                             session,
                             first_runtime[0].daemon_id,
-                            uuid.UUID(
-                                "00000000-0000-0000-0000-000000000000"
-                            ),  # user_id 占位（在线判定不依赖 user_id）
+                            first_runtime[0].user_id,
                         )
 
                     online_status = "在线" if online_daemon else "离线"
@@ -234,10 +236,12 @@ class OrchestratorService:
           （model.py:601）。
 
         team 模式 daemon 离线 / workspace 未绑定时，``dispatch_to_daemon`` 抛
-        ``NoOnlineDaemonError``——本方法捕获并把主 agent run 标记 ``pending`` +
-        ``error_code="no_online_daemon"``，不抛错（mission 仍建，后续靠 reconcile
-        重派）。这与 single 模式 dispatch_worker 失败语义一致（router.py:783-784）。
-        external 模式不调 dispatch_to_daemon，不存在该异常路径。
+        ``NoOnlineDaemonError``——本方法捕获并把主 agent run 标记 ``pending``
+        + ``error_code="no_online_daemon"``，不抛错（mission 仍建，后续靠
+        ``redispatch_pending_main_runs`` 启动重派兜底——BE-P1-6，2026-08-21 审查
+        接线，main.py lifespan startup 调用）。这与 single 模式 dispatch_worker
+        失败语义一致（router.py:783-784）。external 模式不调 dispatch_to_daemon，
+        不存在该异常路径。
         """
         merged = dict(constraints or {})
         # external 模式（路径A / SillySpec 外部调度）：把 mode 落进 mission.constraints
@@ -347,6 +351,67 @@ class OrchestratorService:
             lease_id=str(lease_id) if lease_id else None,
         )
         return mission, main_run
+
+    async def redispatch_pending_main_runs(self) -> int:
+        """启动兜底：重派 ``pending + no_online_daemon`` 的主 agent run（BE-P1-6）。
+
+        2026-08-21 审查发现：daemon 离线时创建的 mission 主 run 标 pending +
+        error_code=no_online_daemon 后无任何重派触发点 → derive_status 永远
+        running、mission 挂死。本方法由 main.py lifespan startup 调用（对齐
+        cleanup_stale_runs / gate reconcile 的启动 reconcile 模式），对 daemon
+        已恢复的场景重派一次；daemon 仍离线的 run 保持 pending 留待下次启动。
+        常驻轮询重派不在本次范围（需评估 dispatch 频控，留后续变更）。
+
+        Returns:
+            成功重派的 run 数。
+        """
+        stmt = select(AgentRun).where(
+            AgentRun.role == _ORCHESTRATOR_ROLE,
+            AgentRun.status == "pending",
+            AgentRun.error_code == "no_online_daemon",
+        )
+        runs = (await self._session.execute(stmt)).scalars().all()
+        redispatched = 0
+        for run in runs:
+            if run.mission_id is None:
+                continue
+            mission = await self._session.get(AgentMission, run.mission_id)
+            if (
+                mission is None
+                or mission.cancelled_at is not None
+                or mission.converged_at is not None
+            ):
+                continue
+            cfg = _resolve_main_agent_config(mission.main_agent_config)
+            try:
+                placement = RunPlacementService(self._session)
+                lease_id = await placement.dispatch_to_daemon(
+                    run.id,
+                    mission.created_by,
+                    workspace_id=mission.workspace_id,
+                    provider=cfg["provider"] or None,
+                    model=cfg["model"] or None,
+                    prompt=await render_orchestrator_prompt(mission, run, self._session),
+                    stage=_ORCHESTRATOR_ROLE,
+                    read_only=False,
+                    agent_profile_id=cfg["agent_profile_id"],
+                )
+            except NoOnlineDaemonError:
+                continue
+            run.error_code = None
+            run.output_redacted = None
+            self._session.add(run)
+            await self._session.commit()
+            redispatched += 1
+            log.info(
+                "orchestrator_pending_main_run_redispatched",
+                mission_id=str(mission.id),
+                run_id=str(run.id),
+                lease_id=str(lease_id) if lease_id else None,
+            )
+        if redispatched:
+            log.info("orchestrator_pending_main_runs_redispatched", count=redispatched)
+        return redispatched
 
     async def schedule_loop(self, mission_id: uuid.UUID) -> str | None:
         """主 agent 调度循环兜底巡检（D-001@v2 三重收敛，task-11 完整实现）。

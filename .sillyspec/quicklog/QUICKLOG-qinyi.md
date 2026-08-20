@@ -243,3 +243,31 @@
 方案：Tabs 胶囊分段主题化；Collapse 移除改 SectionCard 平铺（基本信息全宽+配置两列）；stats 第四卡 currentStage→quickTotal（listQuicklogEntries 取 total 替换 getRuntimeProgress）
 结果：tsc 0 error、eslint 0、页面测试 10/10、全量 168 文件 1793 用例复跑两轮全绿（首轮 1 超时用例为满载 flaky 非本次引入）
 审计：📝 文档欠账（D-8）：4 个源码文件改动未同步任何模块文档（涉及模块：frontend）
+
+## ql-20260821-001-dedb | 2026-08-21 04:49:31 | (quick 任务)
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
+
+## ql-20260821-002-55bb | 2026-08-21 04:49:44 | 项目触发团队操作功能全链路审查修复（流程正确性/代码缺陷/性能安全
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/router.py（cancel/get/list 归属校验+constraints 保留键过滤）
+- backend/app/modules/agent/mcp_tools.py（跨 ws target 权限校验+治理拒绝先 gate）
+- backend/app/modules/mcp_gateway/tools.py（链路B 同款 target 校验+gate 前置）
+- backend/app/modules/agent/execution.py（HostFsDelegateUnavailable 收敛 failed）
+- backend/app/modules/agent/finalizer.py（converged_at 回滚+cleanup 终态过滤+自动收敛接 cleanup）
+- backend/app/modules/agent/orchestrator.py（在线判定属主 user_id+启动重派）
+- backend/app/main.py（启动重派接线）
+- backend/app/modules/agent/mission_schema.py（输入上限）
+- backend/app/modules/agent/model.py（project_id 索引）
+- backend/migrations/versions/20260821100000_agent_mission_project_id_index.py（新索引 migration）
+- backend/app/modules/agent/tests/test_mission_access_control.py（新增 8 用例）
+- frontend/src/components/mission-console.tsx（六项前端修复）
+- frontend/src/app/(dashboard)/projects/[id]/missions/page.tsx（空 id 错误态）
+- docs/project-team-mission-review-2026-08-21.md（审查报告+修复记录）
+需求：项目触发团队操作功能全链路审查修复（流程正确性/代码缺陷/性能安全，清单 docs/project-team-mission-review-2026-08-21.md）
+根因：cancel 端点 require_permission 的 path 参数解析缺陷致已认证请求恒 422；get/list mission 无归属校验可跨工作区越权读写；dispatch_worker 跨 ws 派发不校验调用者对 target 权限；worktree 异常 run 永久 pending；converged_at 先置位失败无回滚致合并永久丢失；cleanup 只清 completed 且自动收敛路径不接 cleanup 致副本泄漏；主 agent 在线判定传全零 user_id 恒离线；no_online_daemon 主 run 无重派机制；治理拒绝落 killed run 污染 derive_status；前端 degraded 终态误入轮询集合、轮询无竞态守卫、日志游标方向反致全量重拉
+方案：后端 router 加 _require_mission_access 归属校验（cancel/get/list）+ dispatch target 权限校验（JWT 通道校验 apiKey 通道豁免）+ execution 捕获 HostFsDelegateUnavailable 收敛 failed + finalizer converged_at 失败回滚 + cleanup 过滤扩终态并接自动收敛路径 + orchestrator 在线判定改传 binding 属主 + redispatch_pending_main_runs 启动重派接线 + 治理拒绝先 gate 后建 run + schema 输入上限与保留键过滤与 project_id 索引；前端 ACTIVE 去 degraded + displayedMissionIdRef 竞态守卫 + 日志游标取最新 + budget 校验 + errMessage 复用 + 空 projectId 错误态 + 403 显式提示
+结果：backend agent+mcp_gateway+daemon 1518 passed；frontend 全量 1795 passed + tsc 0；新增归属控制 8 用例 + 页面 3 用例 + 游标 2 用例更新；gen:types 同步；9 项设计权衡类 P2 登记后续变更

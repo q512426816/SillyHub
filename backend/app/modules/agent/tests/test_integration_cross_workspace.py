@@ -441,11 +441,17 @@ class TestSingleWorkspaceZeroRegression:
         assert merge_ws_ids == {ws.id}
         assert all(b == worker.worktree_branch for _, b in fake.merge_calls)
 
-        # cleanup 单组：git_worktree_remove 收 anchor ws + task-03 sibling 公式
-        fake.git_worktree_remove.assert_awaited_once()
-        rm_args = fake.git_worktree_remove.await_args
-        assert rm_args.args[0].id == ws.id
-        assert rm_args.kwargs["sibling_path"] == f"{ws.root_path}/.worktrees/{str(worker.id)[:8]}"
+        # cleanup 单组：git_worktree_remove 收 anchor ws + task-03 sibling 公式。
+        # BE-P1-4b 后双路径各清一遍（converge_mission_for_completed_run 自动收敛 +
+        # 端点 merged 分支 _cleanup_mission），幂等重试（第二遍 worktree 已不存在，
+        # daemon 端快速返回），均落 anchor 组。
+        assert fake.git_worktree_remove.await_count == 2
+        rm_args_list = fake.git_worktree_remove.await_args_list
+        assert all(
+            c.args[0].id == ws.id
+            and c.kwargs["sibling_path"] == f"{ws.root_path}/.worktrees/{str(worker.id)[:8]}"
+            for c in rm_args_list
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -617,16 +623,20 @@ class TestCrossWorkspaceSmoke:
             (anchor_id, be.worktree_branch),
         }
 
-        # cleanup 分组：git_worktree_remove 各组各 ws，sibling 按 D-001@v2 公式
-        assert fake.git_worktree_remove.await_count == 2
-        rm_calls = {
+        # cleanup 分组：git_worktree_remove 各组各 ws，sibling 按 D-001@v2 公式。
+        # BE-P1-4b 后双路径各清一遍（自动收敛 + 端点 merged 分支），幂等重试，
+        # 每组恰好 2 次。
+        assert fake.git_worktree_remove.await_count == 4
+        rm_calls = [
             (c.args[0].id, c.kwargs["sibling_path"])
             for c in fake.git_worktree_remove.await_args_list
-        }
-        assert rm_calls == {
+        ]
+        expected = [
             (target_id, f"{env['target_root']}/.worktrees/{str(fe.id)[:8]}"),
             (anchor_id, f"{env['anchor_root']}/.worktrees/{str(be.id)[:8]}"),
-        }
+        ]
+        assert set(rm_calls) == set(expected)
+        assert all(rm_calls.count(e) == 2 for e in expected)
 
     async def test_cross_ws_converge_conflict_in_one_group_does_not_block_other(
         self, client, db_session, tmp_path, auth_headers

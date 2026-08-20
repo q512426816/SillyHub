@@ -6899,16 +6899,6 @@
               "format": "uuid",
               "title": "Mission Id"
             }
-          },
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Workspace Id"
-            }
           }
         ],
         "responses": {
@@ -34923,6 +34913,7 @@
         "properties": {
           "objective": {
             "type": "string",
+            "maxLength": 8000,
             "title": "Objective"
           },
           "change_id": {
@@ -34940,7 +34931,8 @@
           "budget_usd": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "number",
+                "minimum": 0.0
               },
               {
                 "type": "null"
@@ -35009,7 +35001,8 @@
                   "additionalProperties": true,
                   "type": "object"
                 },
-                "type": "array"
+                "type": "array",
+                "maxItems": 20
               },
               {
                 "type": "null"
@@ -35048,7 +35041,8 @@
                   "type": "string",
                   "format": "uuid"
                 },
-                "type": "array"
+                "type": "array",
+                "maxItems": 20
               },
               {
                 "type": "null"

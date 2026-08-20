@@ -135,6 +135,9 @@ describe("项目团队会话页（task-15 / cross-workspace-team-mission）", ()
     mocks.listProjectWorkspaces.mockResolvedValue(makeCandidates());
     mocks.listProjectMissions.mockResolvedValue([]);
     mocks.createProjectMission.mockResolvedValue(CREATED_MISSION);
+    // 重置 jsdom URL：前序用例创建成功会 writeMissionIdToUrl（?mission=miss-1），
+    // 残留会让后续用例挂载时走深链分支（getMission mock 无返回值 → undefined.then）
+    window.history.replaceState({}, "", "/");
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -331,6 +334,80 @@ describe("项目团队会话页（task-15 / cross-workspace-team-mission）", ()
     fireEvent.click(screen.getByRole("button", { name: /重\s*新\s*加\s*载/ }));
     await waitFor(() =>
       expect(mocks.listProjectWorkspaces).toHaveBeenCalledTimes(2),
+    );
+  });
+
+  // ── 6. FE-P1-1（2026-08-21 审查）：degraded 是终态，不显示"取消任务" ──
+
+  it("创建返回 degraded 终态 → 详情态不渲染「取消任务」按钮（终态不可取消）", async () => {
+    mocks.createProjectMission.mockResolvedValue({
+      ...CREATED_MISSION,
+      status: "degraded",
+    });
+    render(<ProjectMissionsPage />);
+    await waitFor(() =>
+      expect(screen.getByText("前端仓")).toBeInTheDocument(),
+    );
+
+    fireEvent.change(screen.getByPlaceholderText(/描述你要 AI 团队做什么/), {
+      target: { value: "整理数据" },
+    });
+    fireEvent.click(screen.getByLabelText("派发范围勾选 后端仓"));
+    fireEvent.click(screen.getByRole("button", { name: "启动" }));
+    await waitFor(() =>
+      expect(mocks.createProjectMission).toHaveBeenCalledTimes(1),
+    );
+
+    // degraded 是后端 derive_status 终态：无取消按钮、无 10s 轮询
+    expect(
+      await screen.findByRole("button", { name: /返回新建/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /取消任务/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  // ── 7. FE-P2-4（2026-08-21 审查）：budget 非法值阻断提交 ──────────────
+
+  it("预算填 0/负数 → 启动被拦截并提示，不发创建请求", async () => {
+    render(<ProjectMissionsPage />);
+    await waitFor(() =>
+      expect(screen.getByText("前端仓")).toBeInTheDocument(),
+    );
+
+    fireEvent.change(screen.getByPlaceholderText(/描述你要 AI 团队做什么/), {
+      target: { value: "整理数据" },
+    });
+    fireEvent.click(screen.getByLabelText("派发范围勾选 后端仓"));
+
+    // 预算输入框（唯一 number input）
+    const budgetField = screen.getByRole("spinbutton");
+    fireEvent.change(budgetField, { target: { value: "-5" } });
+    fireEvent.click(screen.getByRole("button", { name: "启动" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(/预算必须为正的有限数值/),
+      ).toBeInTheDocument(),
+    );
+    expect(mocks.createProjectMission).not.toHaveBeenCalled();
+  });
+
+  // ── 8. FE-P1-4（2026-08-21 审查，部分）：历史 403 显式提示 ────────────
+
+  it("listProjectMissions 403 → 显示「仅项目经理」权限提示（不再静默无历史）", async () => {
+    const { ApiError } = await import("@/lib/api");
+    mocks.listProjectMissions.mockRejectedValue(
+      new ApiError(403, {
+        code: "HTTP_403_PERMISSION_DENIED",
+        message: "仅项目经理可创建项目团队会话。",
+        request_id: null,
+      }),
+    );
+    render(<ProjectMissionsPage />);
+
+    await waitFor(() =>
+      expect(screen.getByText(/仅项目经理可查看项目团队会话/)).toBeInTheDocument(),
     );
   });
 });

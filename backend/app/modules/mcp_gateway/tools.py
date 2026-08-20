@@ -421,11 +421,58 @@ async def dispatch_worker(
                         "scope_workspace_ids": [str(sid) for sid in scope],
                     },
                 )
+            # BE-P0-2（2026-08-21 审查，对齐链路A mcp_tools）：跨 ws 派发越权修复——
+            # target 仅 ∈ scope 不够，token 属主（actor）还须对 target ws 有
+            # WORKSPACE_WRITE，否则 scope 内 A ws 的 token 可向属主无权限的 B ws
+            # 注入带 Bash/Edit/Write 的 worker。链路A 的 daemon apiKey 通道豁免
+            # （主 agent 编排，D-006）；链路B token 通道的 actor 是真实用户，照校。
+            if (
+                target_workspace_id != mission.workspace_id
+                and target_workspace_id != auth.workspace_id
+            ):
+                from app.modules.auth.permissions import Permission
+                from app.modules.auth.rbac import has_permission
+
+                actor_user = await _resolve_actor_user(session, auth)
+                if not await has_permission(
+                    session,
+                    user=actor_user,
+                    permission=Permission.WORKSPACE_WRITE,
+                    workspace_id=target_workspace_id,
+                ):
+                    raise AppError(
+                        "no write permission on target workspace",
+                        code="MCP_403_MISSION_TARGET_FORBIDDEN",
+                        http_status=403,
+                        details={
+                            "target_workspace_id": str(target_workspace_id),
+                        },
+                    )
         # target_workspace_id 为 None 时默认 anchor 仅在 execution 层回退；本层保持
         # None 透传，确保 target_workspace_id 列 NULL（零回归）。
         # FR-04：可选绑 AgentProfile（visibility + workspace 归属校验，actor=token.created_by）。
         actor = await _resolve_actor_user(session, auth)
         profile = await _resolve_dispatch_profile_mcp(session, mission, agent_profile_id, actor)
+
+        # 治理门（与 create_mission / mcp_tools 一致，control.can_dispatch_worker）。
+        # BE-P1-7（2026-08-21 审查，对齐链路A）：gate 挪到建 run 之前，拒绝抛 MCP
+        # 错误（携带 reason），不再产生 killed run——killed 属 derive_status 的
+        # _FAILED 集合，治理性拒绝会把全 worker 成功的 mission 也 derive 成 degraded。
+        ctrl = MissionControlService(session)
+        allowed, reason = await ctrl.can_dispatch_worker(mission)
+        if not allowed:
+            log.info(
+                "mcp_dispatch_worker_rejected",
+                mission_id=str(mission.id),
+                reason=reason,
+            )
+            raise AppError(
+                f"dispatch_worker rejected: {reason}",
+                code="MCP_400_DISPATCH_WORKER_REJECTED",
+                http_status=400,
+                details={"reason": reason},
+            )
+
         run = AgentRun(
             mission_id=mission.id,
             change_id=mission.change_id,
@@ -447,33 +494,6 @@ async def dispatch_worker(
         session.add(run)
         await session.commit()
         await session.refresh(run)
-
-        # 治理门（与 create_mission / mcp_tools 一致，control.can_dispatch_worker）。
-        ctrl = MissionControlService(session)
-        allowed, reason = await ctrl.can_dispatch_worker(mission)
-        if not allowed:
-            run.status = "killed"
-            run.finished_at = datetime.now(UTC)
-            run.exit_code = -1
-            run.error_code = reason
-            session.add(run)
-            await session.commit()
-            await session.refresh(run)
-            log.info(
-                "mcp_dispatch_worker_rejected",
-                mission_id=str(mission.id),
-                run_id=str(run.id),
-                reason=reason,
-            )
-            return {
-                "id": str(run.id),
-                "role": run.role,
-                "objective": run.objective,
-                "status": run.status,
-                "agent_type": run.agent_type,
-                "lease_id": None,
-                "error_code": run.error_code,
-            }
 
         exec_svc = MissionExecutionService(session, host_fs_delegate=new_host_fs_delegate(session))
         try:

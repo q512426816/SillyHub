@@ -365,12 +365,20 @@ async def test_dispatch_worker_binds_profile_and_writes_read_only(
     )
     ctx = _make_ctx(_auth(token, frozenset({MCP_SCOPE_DISPATCH})))
 
-    # 治理门拒绝（避免真起 daemon / worktree）：run 仍会先建+commit，
-    # profile + read_only 在 run 构造时即落，断言在此。
-    async def _deny(self: MissionControlService, mission: AgentMission) -> tuple[bool, str]:
-        return False, "test_block"
+    # 避免真起 daemon / worktree：放行治理门（BE-P1-7 后拒绝直接抛 AppError、
+    # 不再建 killed run），mock 掉 execution 层——run 构造时 profile + read_only
+    # 即落，断言在此。
+    async def _allow(self: MissionControlService, mission: AgentMission) -> tuple[bool, str]:
+        return True, ""
 
-    monkeypatch.setattr(MissionControlService, "can_dispatch_worker", _deny)
+    monkeypatch.setattr(MissionControlService, "can_dispatch_worker", _allow)
+
+    async def _no_exec(self, run, **kwargs):  # type: ignore[no-untyped-def]
+        return None
+
+    monkeypatch.setattr(
+        "app.modules.mcp_gateway.tools.MissionExecutionService.dispatch_worker", _no_exec
+    )
 
     result = await tools.dispatch_worker(
         mission_id=mission.id,

@@ -22,7 +22,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -388,6 +388,7 @@ async def dispatch_worker(
     workspace_id: uuid.UUID,
     mission_id: uuid.UUID,
     payload: DispatchWorkerRequest,
+    request: Request,
     session: SessionDep,
     user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
 ) -> WorkerRunResponse:
@@ -420,11 +421,56 @@ async def dispatch_worker(
             "mission_target_out_of_scope: target_workspace_id 不在 mission scope 内",
         )
 
+    # BE-P0-2（2026-08-21 审查）：跨 ws 派发越权修复。原先只查 target ∈ scope，
+    # 不校验调用者对 target 的权限——scope 内 A ws 的普通成员可向自己无权限的
+    # B ws 注入带 Bash/Edit/Write 的 worker（representative binding 落到 B 成员
+    # 机器执行）。现在：JWT 用户通道（Bearer）要求对 target 也有 WORKSPACE_WRITE；
+    # daemon apiKey 通道（X-API-Key）豁免——主 agent 编排是设计 D-006 允许的
+    # 跨 ws 派发路径（scope 圈选即授权，R-03）。
+    if explicit_target is not None and explicit_target != workspace_id:
+        auth_header = request.headers.get("authorization") or ""
+        if auth_header.lower().startswith("bearer "):
+            from app.modules.auth.rbac import has_permission
+
+            if not await has_permission(
+                session,
+                user=user,
+                permission=Permission.WORKSPACE_WRITE,
+                workspace_id=explicit_target,
+            ):
+                raise HTTPException(
+                    status.HTTP_403_FORBIDDEN,
+                    "mission_target_forbidden: 对目标工作区无写权限，不能跨工作区派发",
+                )
+
     # task-10：可选绑 AgentProfile（FR-04）。None → profile=None 走兜底链零回归；
     # 非空 → 校验可见性 + workspace 归属（不可用 / 跨 workspace 返 400，先于建 run）。
     profile = await _resolve_dispatch_agent_profile(
         session, mission, payload.agent_profile_id, user
     )
+
+    # 治理门（与 create_mission 一致，control.can_dispatch_worker）。
+    # BE-P1-7（2026-08-21 审查）：gate 挪到建 run **之前**，拒绝直接抛 400（携带
+    # reason），不再产生 killed run。原先先建 run 再拒绝标 killed——killed 属
+    # derive_status 的 _FAILED 集合，治理性拒绝（max_workers_reached 是正常运行
+    # 路径：worker 尚在 running 时补派）会把全 worker 成功的 mission 也 derive 成
+    # degraded，且僵尸 run 永久留在 worker 列表。主 agent 从错误 message 读 reason
+    # 自主决策（等待重派 / 收敛）。
+    from app.modules.agent.control import MissionControlService
+
+    ctrl = MissionControlService(session)
+    allowed, reason = await ctrl.can_dispatch_worker(mission)
+    if not allowed:
+        log.info(
+            "mcp_dispatch_worker_rejected",
+            mission_id=str(mission.id),
+            reason=reason,
+        )
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"mcp_dispatch_worker_rejected: {reason}",
+        )
+
     run = AgentRun(
         mission_id=mission.id,
         change_id=mission.change_id,
@@ -447,28 +493,6 @@ async def dispatch_worker(
     session.add(run)
     await session.commit()
     await session.refresh(run)
-
-    # 治理门（与 create_mission 一致，control.can_dispatch_worker）
-    # 主 agent 派 worker 时也走同一治理：取消 / 并发上限 / 预算。拒绝时标 killed。
-    from app.modules.agent.control import MissionControlService
-
-    ctrl = MissionControlService(session)
-    allowed, reason = await ctrl.can_dispatch_worker(mission)
-    if not allowed:
-        run.status = "killed"
-        run.finished_at = datetime.now(UTC)
-        run.exit_code = -1
-        run.error_code = reason
-        session.add(run)
-        await session.commit()
-        await session.refresh(run)
-        log.info(
-            "mcp_dispatch_worker_rejected",
-            mission_id=str(mission.id),
-            run_id=str(run.id),
-            reason=reason,
-        )
-        return WorkerRunResponse.model_validate(run)
 
     exec_svc = MissionExecutionService(session, host_fs_delegate=new_host_fs_delegate(session))
     try:

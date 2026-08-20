@@ -128,6 +128,21 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                     log.warning("gate.reconcile_reenqueued", **gate_result)
             except Exception:
                 log.exception("gate.reconcile_failed")
+            # BE-P1-6（2026-08-21 审查）：team mission 主 agent run 启动重派——
+            # daemon 离线时创建的 mission 主 run（pending + no_online_daemon）原先
+            # 无任何重派触发点，mission 永久 running。启动时对 daemon 已恢复的场景
+            # 重派一次；仍离线的留待下次启动。异常不阻断启动（对齐上方 reconcile 模式）。
+            try:
+                from app.modules.agent.orchestrator import OrchestratorService
+
+                redispatched = await OrchestratorService(session).redispatch_pending_main_runs()
+                if redispatched:
+                    log.warning(
+                        "orchestrator.pending_main_runs_redispatched_on_startup",
+                        count=redispatched,
+                    )
+            except Exception:
+                log.exception("orchestrator.redispatch_failed")
             # 2026-08-02-agent-profile-layer task-11 / D-015：启动 idempotent
             # 补种平台默认 AgentProfile（claude/codex）。迁移 task-01 覆盖新环境
             # 首次 seed；本 hook 覆盖「默认档案被误删后重启」场景，按

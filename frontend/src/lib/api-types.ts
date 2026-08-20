@@ -22453,7 +22453,6 @@ export interface operations {
             header?: never;
             path: {
                 mission_id: string;
-                workspace_id: string;
             };
             cookie?: never;
         };

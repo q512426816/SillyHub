@@ -16,6 +16,7 @@ import { MissionSummaryCard } from "@/components/mission-summary-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
+import { errMessage } from "@/lib/errors";
 import {
   cancelMission,
   createMission,
@@ -67,7 +68,11 @@ const WORKER_STATUS_LABEL: Record<string, string> = {
   killed: "已终止",
 };
 
-const ACTIVE = new Set(["planning", "running", "degraded"]);
+// FE-P1-1（2026-08-21 审查）：degraded 是后端 derive_status 的终态（mission.py
+// _FAILED + completed 混合即 degraded，与 done/failed 同级）。原先把 degraded 归入
+// ACTIVE → 终态任务每 10s 永久轮询 + 渲染"取消任务"按钮（点下去会把"部分完成"
+// 终态改成"已取消"，语义错误）。轮询与取消仅限真正可能变化的 planning/running。
+const ACTIVE = new Set(["planning", "running"]);
 
 /** 分身角色中文标注（主控拆解出的分工）。 */
 const ROLE_LABEL: Record<string, string> = {
@@ -165,9 +170,9 @@ function normalizeProjectMission(m: ProjectMissionResponse): ProjectMissionView 
 
 /**
  * scope 变更后的默认 anchor：type=backend-code 优先，否则第一个（design §7.1）。
- * 注意：后端 router.py anchor 缺省分支比对的是 "backend"（词表真值为
- * "backend-code"，永不命中→退化取第一个），前端按词表真值实现并显式传
- * anchor_workspace_id，绕开该后端缺陷（已登记遗留，不属本 task 边界）。
+ * 后端 create_project_mission 缺省分支同样按词表真值 "backend-code" 优先
+ * （router.py，2026-08-19 change 注释已修正旧 "backend" 比对问题）；前端显式
+ * 传 anchor_workspace_id 与后端口径一致，双保险。
  */
 function pickDefaultAnchor(
   candidates: WorkspaceBrief[],
@@ -305,13 +310,21 @@ export function mergeLogsById(
   );
 }
 
-/** 取当前已见日志中最早一条的 timestamp（增量游标，desc 下界）。 */
-function earliestTimestamp(logs: AgentRunLogEntry[]): string | undefined {
-  let min: string | undefined;
+/**
+ * 取当前已见日志中最新一条的 timestamp（增量游标）。
+ *
+ * FE-P1-3（2026-08-21 审查）：后端语义是 ``timestamp > after`` **严格更新**
+ * （service.py ``order_by desc, limit``）。原先取最早一条（最小值）当游标，
+ * 服务端返回"比最早一条新的所有日志"≈ 已见全集 + 新增，靠 mergeLogsById 按
+ * id 去重掩盖——每个展开日志的 worker 每 5s 重传近乎全量日志（上限 5000 行
+ * TEXT 大列）。改取最大 timestamp，同 timestamp 多条的边界由 id 去重吸收。
+ */
+function latestTimestamp(logs: AgentRunLogEntry[]): string | undefined {
+  let max: string | undefined;
   for (const l of logs) {
-    if (min === undefined || l.timestamp < min) min = l.timestamp;
+    if (max === undefined || l.timestamp > max) max = l.timestamp;
   }
-  return min;
+  return max;
 }
 
 function WorkerLogPanel({
@@ -338,7 +351,7 @@ function WorkerLogPanel({
   const refresh = useCallback(async () => {
     try {
       const current = logsRef.current;
-      const after = current.length > 0 ? earliestTimestamp(current) : undefined;
+      const after = current.length > 0 ? latestTimestamp(current) : undefined;
       const fetched = await getAgentRunLogs(workspaceId, runId, after);
       if (after === undefined) {
         // 首拉：无游标全量（现状语义）。
@@ -930,7 +943,7 @@ export function MissionConsole({
     const missionId = readMissionIdFromUrl();
     if (missionId && !mission) {
       getMission(missionId)
-        .then(setMission)
+        .then((m) => selectMission(m))
         .catch(() => {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -945,21 +958,44 @@ export function MissionConsole({
       } else {
         setHistory(await listMissions(workspaceId ?? "", { limit: 20 }));
       }
-    } catch {
-      /* swallow list errors */
+    } catch (e) {
+      // FE-P1-4（2026-08-21 审查，部分）：非项目经理访问项目会话页时后端 403，
+      // 原先静默吞掉 → 历史区误导性显示"无历史"。显式提示权限原因。
+      if (e instanceof ApiError && e.status === 403) {
+        setError("仅项目经理可查看项目团队会话（当前账号无权限）。");
+        return;
+      }
+      /* swallow 其它 list errors（历史区非关键路径） */
     }
   }, [projectMode, projectId, workspaceId]);
   useEffect(() => {
     refreshHistory();
   }, [refreshHistory]);
 
-  const refresh = useCallback(async (id: string) => {
-    try {
-      setMission(await getMission(id));
-    } catch {
-      /* swallow poll errors */
-    }
+  // FE-P1-2（2026-08-21 审查）：轮询竞态守卫。在飞请求的 Promise 无法取消——
+  // 旧 mission A 的轮询 resolve 时若用户已切到 mission B（历史点击/新建成功），
+  // setMission(A 的旧数据) 会把 B 覆盖、页面"卡"回 A。ref 记录当前应展示的
+  // mission id，resolve 时比对，不匹配则丢弃。所有切换 mission 的路径统一走
+  // selectMission 同步 ref。
+  const displayedMissionIdRef = useRef<string | null>(null);
+  const selectMission = useCallback((m: Mission | null) => {
+    displayedMissionIdRef.current = m?.id ?? null;
+    setMission(m);
   }, []);
+
+  const refresh = useCallback(
+    async (id: string) => {
+      try {
+        const m = await getMission(id);
+        if (displayedMissionIdRef.current === id) {
+          setMission(m);
+        }
+      } catch {
+        /* swallow poll errors */
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!mission || !ACTIVE.has(mission.status)) return;
@@ -983,15 +1019,22 @@ export function MissionConsole({
     // 项目维度：scope 必填 ≥1（后端 422 兜底，前端先拦省一次请求）。
     if (projectMode && scopeIds.length === 0) return;
     if (projectMode && !projectId) return;
+    // FE-P2-4（2026-08-21 审查）：budget 输入校验。原先 0/负数/Infinity 被静默
+    // 按"不限"提交（Number("1e999")=Infinity → JSON 序列化为 null），与用户
+    // 意图相反。资损相关字段显式阻断。
+    const budgetNum = budget.trim() ? Number(budget) : null;
+    if (budgetNum !== null && (!Number.isFinite(budgetNum) || budgetNum <= 0)) {
+      setError("预算必须为正的有限数值（留空表示不限）。");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      const budgetNum = budget.trim() ? Number(budget) : null;
       // 固定 team 模式（D-001@v1）：无条件传 mode="team" + 主控配置（默认值始终传，
       // 即使用户不展开高级 G2）+ 分身预设（默认空数组 → 主控自动拆）。
       const common = {
         objective: objective.trim(),
-        budget_usd: budgetNum !== null && budgetNum > 0 ? budgetNum : null,
+        budget_usd: budgetNum,
         mode: "team",
         main_agent_config: mainAgentConfig,
         worker_preset: workers,
@@ -999,7 +1042,7 @@ export function MissionConsole({
       let m: Mission;
       if (projectMode && projectId) {
         // task-15 / D-005@v1：项目维度创建，scope/anchor 随 payload 上行；
-        // anchor 前端已按 backend-code 优先预选，显式传值绕开后端缺省比对缺陷。
+        // anchor 前端已按 backend-code 优先预选，显式传值保持与后端缺省一致。
         const payload: CreateProjectMissionInput = {
           ...common,
           scope_workspace_ids: scopeIds,
@@ -1009,7 +1052,7 @@ export function MissionConsole({
       } else {
         m = await createMission(workspaceId ?? "", common);
       }
-      setMission(m);
+      selectMission(m);
       writeMissionIdToUrl(m.id);
       refreshHistory();
       setObjective("");
@@ -1020,7 +1063,9 @@ export function MissionConsole({
       setScopeIds([]);
       setAnchorId(null);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
+      // FE-P2-5（2026-08-21 审查）：复用 errMessage——非 ApiError 的普通对象
+      // 走 String(e) 会渲染 "[object Object]"，网络错误也有统一中文兜底。
+      setError(errMessage(e, "发起团队会话失败"));
     } finally {
       setBusy(false);
     }
@@ -1030,20 +1075,20 @@ export function MissionConsole({
     if (!mission) return;
     try {
       // projectMode 下 mission.workspace_id = anchor（鉴权锚，design D-006）。
-      setMission(
+      selectMission(
         await cancelMission(
           projectMode ? mission.workspace_id : (workspaceId ?? ""),
           mission.id,
         ),
       );
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
+      setError(errMessage(e, "取消任务失败"));
     }
   };
 
   // 详情态返回创建态：清 mission + 清 URL ?mission（让刷新不再回到详情）。
   const onBack = () => {
-    setMission(null);
+    selectMission(null);
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
       url.searchParams.delete("mission");
@@ -1065,7 +1110,7 @@ export function MissionConsole({
                 <button
                   type="button"
                   onClick={() => {
-                    setMission(m);
+                    selectMission(m);
                     writeMissionIdToUrl(m.id);
                   }}
                   title={m.objective || "(无目标)"}
