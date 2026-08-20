@@ -31,7 +31,7 @@ import {
 } from "@/components/layout";
 import { PpmUserSelect, type PpmSelectOption } from "@/components/ppm-user-select";
 import { WorkHourBarChart, WorkHourPieChart } from "@/components/charts";
-import { tokens } from "@/styles/tokens";
+import { DEFAULT_THEME, themes } from "@/styles";
 import { ApiError } from "@/lib/api";
 import {
   listWorkHours,
@@ -431,8 +431,8 @@ export default function WorkHourStatisticsPage() {
                           rows={rows}
                           color={
                             dimension === "user"
-                              ? tokens.color.blue[600]
-                              : tokens.color.emerald
+                              ? themes[DEFAULT_THEME].color.brand[600]
+                              : themes[DEFAULT_THEME].color.semantic.success
                           }
                           loading={loading}
                         />

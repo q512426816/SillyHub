@@ -35,7 +35,7 @@ import type {
 } from "@/lib/ppm/types";
 import { listTaskExecutesWithPlanByDateRange, updateTaskExecute } from "@/lib/ppm/task";
 import { useKanbanStore } from "@/stores/kanban";
-import { tokens } from "@/styles";
+import { DEFAULT_THEME, themes } from "@/styles";
 import { Toast, useToast } from "../shared";
 import { KanbanSearchBar } from "./_components/kanban-search-bar";
 import { KanbanGantt } from "./_components/kanban-gantt";
@@ -60,18 +60,19 @@ function thisWeekRange(): [Dayjs, Dayjs] {
 }
 
 /**
- * 项目色点调色板(任务-09):全部走 task-01 的 tokens 色阶,不用 antd 老色板。
- * 取 blue 色阶多档 + cyan + emerald + slate 兜底,保持视觉区分度。
+ * 项目色点调色板(任务-09):全部走主题注册表色阶(brand/accent/semantic/slate),
+ * 不用 antd 老色板。取 brand 色阶多档 + accent 青 + success 绿 + slate 兜底,保持视觉区分度。
+ * 编译期静态取色(themes[DEFAULT_THEME]),主题切换不变——设计决定,页面主色另行经 CSS 类/antd token 主题感知。
  */
 const PALETTE = [
-  tokens.color.blue[500],
-  tokens.color.blue[600],
-  tokens.color.blue[700],
-  tokens.color.blue[400],
-  tokens.color.cyan,
-  tokens.color.emerald,
-  tokens.color.blue[300],
-  tokens.color.slate[500],
+  themes[DEFAULT_THEME].color.brand[500],
+  themes[DEFAULT_THEME].color.brand[600],
+  themes[DEFAULT_THEME].color.brand[700],
+  themes[DEFAULT_THEME].color.brand[400],
+  themes[DEFAULT_THEME].color.accent,
+  themes[DEFAULT_THEME].color.semantic.success,
+  themes[DEFAULT_THEME].color.brand[300],
+  themes[DEFAULT_THEME].color.slate[500],
 ];
 
 export default function KanbanPage() {

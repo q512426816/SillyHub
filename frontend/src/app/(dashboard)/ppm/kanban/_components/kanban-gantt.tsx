@@ -14,7 +14,7 @@ import { Avatar, Progress } from "antd";
 import dayjs from "dayjs";
 
 import type { KanbanTaskCard, KanbanUserColumn } from "@/lib/ppm/types";
-import { tokens } from "@/styles";
+import { DEFAULT_THEME, themes } from "@/styles";
 import {
   assignLanes,
   BAR_GAP,
@@ -49,9 +49,9 @@ const UNSCHEDULED_ROW_H = 24;
 const UNSCHEDULED_HEADER_H = 26;
 
 function saturationColor(v: number): string {
-  if (v >= 80) return tokens.color.semantic.error.color;
-  if (v >= 60) return tokens.color.semantic.warning.color;
-  return tokens.color.semantic.success.color;
+  if (v >= 80) return themes[DEFAULT_THEME].color.semantic.error;
+  if (v >= 60) return themes[DEFAULT_THEME].color.semantic.warning;
+  return themes[DEFAULT_THEME].color.semantic.success;
 }
 
 function isOverdue(t: KanbanTaskCard): boolean {
@@ -126,9 +126,9 @@ export function KanbanGantt({
             const isToday = dk === today;
             const d = dayjs(dk);
             const bgTint = status.rest
-              ? `color-mix(in srgb, ${tokens.color.emerald} 14%, transparent)`
+              ? `color-mix(in srgb, ${themes[DEFAULT_THEME].color.semantic.success} 14%, transparent)`
               : status.adjustedWork
-                ? `color-mix(in srgb, ${tokens.color.semantic.warning.color} 14%, transparent)`
+                ? `color-mix(in srgb, ${themes[DEFAULT_THEME].color.semantic.warning} 14%, transparent)`
                 : undefined;
             return (
               <div
@@ -238,8 +238,8 @@ export function KanbanGantt({
                         width: DAY_WIDTH,
                         height: lanesH,
                         backgroundColor: status.rest
-                          ? `color-mix(in srgb, ${tokens.color.emerald} 8%, transparent)`
-                          : `color-mix(in srgb, ${tokens.color.semantic.warning.color} 8%, transparent)`,
+                          ? `color-mix(in srgb, ${themes[DEFAULT_THEME].color.semantic.success} 8%, transparent)`
+                          : `color-mix(in srgb, ${themes[DEFAULT_THEME].color.semantic.warning} 8%, transparent)`,
                       }}
                     />
                   );
@@ -250,8 +250,8 @@ export function KanbanGantt({
                   if (!layout) return null;
                   const lane = laneMap.get(t.id) ?? 0;
                   const color = t.project_id
-                    ? (projectColorMap.get(t.project_id) ?? tokens.color.slate[400])
-                    : tokens.color.slate[400];
+                    ? (projectColorMap.get(t.project_id) ?? themes[DEFAULT_THEME].color.slate[400])
+                    : themes[DEFAULT_THEME].color.slate[400];
                   return (
                     <GanttBar
                       key={t.id}
@@ -295,8 +295,8 @@ export function KanbanGantt({
                           className="inline-block h-2 w-2 shrink-0 rounded-full"
                           style={{
                             backgroundColor: t.project_id
-                              ? (projectColorMap.get(t.project_id) ?? tokens.color.slate[400])
-                              : tokens.color.slate[400],
+                              ? (projectColorMap.get(t.project_id) ?? themes[DEFAULT_THEME].color.slate[400])
+                              : themes[DEFAULT_THEME].color.slate[400],
                           }}
                         />
                         <span className="truncate text-foreground">{t.title ?? "(未命名任务)"}</span>
@@ -337,7 +337,7 @@ export function KanbanGantt({
                 >
                   <span
                     className="inline-block h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: tokens.color.slate[400] }}
+                    style={{ backgroundColor: themes[DEFAULT_THEME].color.slate[400] }}
                   />
                   <span className="truncate">{t.title ?? "(未命名任务)"}</span>
                 </div>
@@ -355,7 +355,7 @@ export function KanbanGantt({
               top: DATE_ROW_HEIGHT,
               bottom: 0,
               width: 2,
-              backgroundColor: tokens.color.semantic.error.color,
+              backgroundColor: themes[DEFAULT_THEME].color.semantic.error,
               opacity: 0.5,
               zIndex: 5,
             }}

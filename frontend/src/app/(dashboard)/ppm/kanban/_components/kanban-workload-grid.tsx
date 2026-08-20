@@ -17,7 +17,7 @@ import dayjs from "dayjs";
 
 import { fetchWorkloadGrid, type WorkloadGridResponse } from "@/lib/ppm/kanban";
 import { getDayStatus } from "@/lib/ppm/workday";
-import { tokens } from "@/styles";
+import { DEFAULT_THEME, themes } from "@/styles";
 import { workloadCellColor, workloadCellColorForDay } from "./kanban-workload-helpers";
 import { ROW_HEAD_WIDTH, todayKey } from "./kanban-gantt-helpers";
 
@@ -141,7 +141,7 @@ export function KanbanWorkloadGrid({
                   style={{
                     width: CELL_WIDTH,
                     height: HEADER_HEIGHT,
-                    backgroundColor: status.rest ? tokens.color.slate[100] : undefined,
+                    backgroundColor: status.rest ? themes[DEFAULT_THEME].color.slate[100] : undefined,
                   }}
                 >
                   <div
@@ -194,8 +194,8 @@ export function KanbanWorkloadGrid({
                         style={{
                           width: CELL_WIDTH,
                           height: CELL_HEIGHT,
-                          backgroundColor: tokens.color.slate[100],
-                          color: tokens.color.slate[300],
+                          backgroundColor: themes[DEFAULT_THEME].color.slate[100],
+                          color: themes[DEFAULT_THEME].color.slate[300],
                         }}
                       >
                         —
@@ -211,7 +211,7 @@ export function KanbanWorkloadGrid({
                         width: CELL_WIDTH,
                         height: CELL_HEIGHT,
                         backgroundColor: c.bg,
-                        color: v === 0 ? tokens.color.slate[400] : c.fg,
+                        color: v === 0 ? themes[DEFAULT_THEME].color.slate[400] : c.fg,
                       }}
                       title={`${displayName} ${dk}: ${v.toFixed(1)} 人天`}
                     >
@@ -258,8 +258,8 @@ function WorkloadLegend() {
         <span
           className="flex h-6 w-10 items-center justify-center rounded border border-border text-[10px]"
           style={{
-            backgroundColor: tokens.color.slate[100],
-            color: tokens.color.slate[300],
+            backgroundColor: themes[DEFAULT_THEME].color.slate[100],
+            color: themes[DEFAULT_THEME].color.slate[300],
           }}
         >
           休

@@ -15,7 +15,7 @@ import { Avatar } from "antd";
 import dayjs from "dayjs";
 
 import type { KanbanUserColumn, TaskExecuteWithPlan } from "@/lib/ppm/types";
-import { tokens } from "@/styles";
+import { DEFAULT_THEME, themes } from "@/styles";
 import {
   assignLanes,
   BAR_HEIGHT,
@@ -53,18 +53,18 @@ const STATUS_TEXT: Record<string, string> = {
   "90": "已完成",
 };
 
-/** 实际条形按 status 映射语义色(无 projectColorMap)。 */
+/** 实际条形按 status 映射语义色(无 projectColorMap)。取自主题注册表(编译期静态取色)。 */
 function executeBarColor(status: string | null | undefined): string {
   switch (status) {
     case "90":
-      return tokens.color.semantic.success.color;
+      return themes[DEFAULT_THEME].color.semantic.success;
     case "20":
-      return tokens.color.primary;
+      return themes[DEFAULT_THEME].color.primary;
     case "30":
     case "40":
-      return tokens.color.semantic.warning.color;
+      return themes[DEFAULT_THEME].color.semantic.warning;
     default:
-      return tokens.color.slate[500];
+      return themes[DEFAULT_THEME].color.slate[500];
   }
 }
 
@@ -126,9 +126,9 @@ export function KanbanActualGantt({
             const isToday = dk === today;
             const d = dayjs(dk);
             const bgTint = status.rest
-              ? `color-mix(in srgb, ${tokens.color.emerald} 14%, transparent)`
+              ? `color-mix(in srgb, ${themes[DEFAULT_THEME].color.semantic.success} 14%, transparent)`
               : status.adjustedWork
-                ? `color-mix(in srgb, ${tokens.color.semantic.warning.color} 14%, transparent)`
+                ? `color-mix(in srgb, ${themes[DEFAULT_THEME].color.semantic.warning} 14%, transparent)`
                 : undefined;
             return (
               <div
@@ -223,8 +223,8 @@ export function KanbanActualGantt({
                         width: DAY_WIDTH,
                         height: lanesH,
                         backgroundColor: status.rest
-                          ? `color-mix(in srgb, ${tokens.color.emerald} 8%, transparent)`
-                          : `color-mix(in srgb, ${tokens.color.semantic.warning.color} 8%, transparent)`,
+                          ? `color-mix(in srgb, ${themes[DEFAULT_THEME].color.semantic.success} 8%, transparent)`
+                          : `color-mix(in srgb, ${themes[DEFAULT_THEME].color.semantic.warning} 8%, transparent)`,
                       }}
                     />
                   );
@@ -325,7 +325,7 @@ export function KanbanActualGantt({
               top: DATE_ROW_HEIGHT,
               bottom: 0,
               width: 2,
-              backgroundColor: tokens.color.semantic.error.color,
+              backgroundColor: themes[DEFAULT_THEME].color.semantic.error,
               opacity: 0.5,
               zIndex: 5,
             }}
