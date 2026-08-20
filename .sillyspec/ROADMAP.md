@@ -4,11 +4,15 @@
 > 维护规则：每次 `sillyspec-archive` 归档变更时同步更新「已完成里程碑」与「当前活跃」两节。
 > 详细变更规格见 `.sillyspec/changes/`（活跃）与 `.sillyspec/changes/archive/`（历史）。
 
-最近更新：2026-08-19
+最近更新：2026-08-20
 
 ---
 
 ## 一、已完成里程碑（按时间，提炼自已归档变更）
+
+### 2026-08-20 · 运行时状态读点修正（仓库优先，缓存回退）
+
+- **runtime-readpoint-repo-first**（2026-08-20）：修「/workspaces/[id]/runtime 页恒显示空态」——2026-08-19-runtime-live-daemon-read 把数据源切到 daemon 实时读取但读点固定在 spec 快照缓存（`~/.sillyhub/daemon/specs/<wsId>/`），而 platform-managed 策略下 spec bundle 同步排除 `.runtime/` 整树，agent 驱动执行流的数据真源在成员本机仓库 `<root>/.sillyspec/.runtime/`，两者错位导致页面稳定空态。修正：backend 四个 runtime.* RPC params 加可选 `root_path`（当前用户 binding 行，经 `resolve_root_path_for_daemon` 容器→宿主改写，老 daemon 忽略新键零门控兼容）；daemon `pickRuntimeSpecDir` 三道校验读点选择（元字符黑名单（shell:true 命令串注入防线，Design Grill P1 补强）→ `assertWithinAllowedRoots` 复用 explorer 同款 realpath 防线 → `.runtime` 存在性），全过读 `<root>/.sillyspec`，任一不过记日志回退缓存（workspace_id 非法仍 forbidden fail-loud）；前端 user-inputs 超 50000 字符尾部截断+含文件路径提示、副标题「优先本机仓库，回退同步缓存」。端到端实测：b97f8231 工作区三端点 200 返回真实仓库数据（进度与 CLI dump 逐字一致/102.7 万字符输入记录/1589 个产物）。8 文件三端，backend 44+207/daemon 35+2463/frontend 12+1772 全绿，CLI 全量对账 1011s 通过。已知边界（首版接受）：平台触发 scan/gate 写缓存数据在仓库数据存在时不可见。沉淀工具缺陷记录 3 份（worktree deps install 白名单拒链式命令 / doctor 误删活跃孤儿分支 / verify-postcheck CRLF 解析致 modules 恒失效回退全量）。
 
 ### 2026-05 · 平台 bootstrap（14 个变更）
 

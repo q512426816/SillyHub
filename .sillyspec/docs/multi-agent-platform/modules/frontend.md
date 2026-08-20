@@ -42,6 +42,7 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
+- 2026-08-20-runtime-readpoint-repo-first | /workspaces/[id]/runtime 页：user-inputs 渲染超 `USER_INPUTS_MAX_DISPLAY=50000` 字符时 `slice(-50000)` 尾部截断（追加式日志末尾最新）+ 含完整文件路径的截断提示行；副标题改「优先本机仓库，回退同步缓存」。lib/runtime.ts 接口客户端零改动（12 passed）。
 - **2026-08-19-cross-workspace-team-mission**（跨工作区团队执行 + 项目维度会话）：新增项目维度会话入口 `app/(dashboard)/projects/[id]/missions/page.tsx`；扩展 `components/mission-console.tsx` 支持 `projectMode`（scope 多选、anchor 单选、目标工作区徽标列、调用 `createProjectMission`/`listProjectMissions`）；`lib/agent.ts` 新增 `createProjectMission` / `listProjectMissions`（类型从 `api-types.ts` MissionResponse/MissionCreateRequest 导入）；`lib/api-types.ts` 随 backend OpenAPI 重新生成。 vitest 全量 1684 passed，tsc exit 0。
 
 ## 变更索引
