@@ -57,6 +57,24 @@ const config: Config = {
           foreground: "hsl(var(--info-foreground))",
         },
 
+        // ---- brand 语义色阶(主题感知:50-950 十一档纯 CSS 变量名映射,无硬编码 hex;
+        //      双套取值由 globals.css 的 :root / [data-theme="blue"] 变量块提供(task-02),
+        //      bg-brand-50 等类随 html data-theme 切换自动换肤,D-003@v2;
+        //      blue 阶保留为真实信息色与非 brand 场景用途) ----
+        brand: {
+          50: "var(--color-brand-50)",
+          100: "var(--color-brand-100)",
+          200: "var(--color-brand-200)",
+          300: "var(--color-brand-300)",
+          400: "var(--color-brand-400)",
+          500: "var(--color-brand-500)",
+          600: "var(--color-brand-600)",
+          700: "var(--color-brand-700)",
+          800: "var(--color-brand-800)",
+          900: "var(--color-brand-900)",
+          950: "var(--color-brand-950)",
+        },
+
         // ---- 基础调色板(直接 hex,与 tokens.color.palette 对齐,
         //      不走 CSS 变量,避免运行时切换开销) ----
         blue: {
