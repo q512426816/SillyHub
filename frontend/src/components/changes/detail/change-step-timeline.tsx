@@ -12,8 +12,9 @@ import type { components } from "@/lib/api-types";
  * latest_progress.steps 经后端 _extract_step_progress 归一化：
  *   - stage 分组按 STAGE_ORDER 定序（quick 及未知 stage 追加在后）+ 组内按
  *     ordering——entries 顺序即展示顺序，本组件不再排序（design §5 Phase 2.2）；
- *   - completed_at 已归一 ISO 8601 UTC，前端直接展示字符串，不做 new Date()
- *     解析（规避 Safari 日期坑，归一化责任在后端，Grill #18）；
+ *   - completed_at 已归一 ISO 8601 UTC，展示经 formatStepTime 安全解析为本地
+ *     时间（Grill #18 精神保留：先正则归一到 spec 合法格式再 new Date，解析
+ *     失败回退原串，见该函数注释）；
  *   - output 全量透传（2026-08-16-change-owner-from-token D-004@v1 修订
  *     step-visibility R-02：截断仅保留列表摘要层），前端自然换行 + max-h
  *     滚动兜底（R-07 超长不撑爆布局）；
@@ -64,10 +65,59 @@ function nameClass(status: string): string {
   return NAME_CLASS[status] ?? "text-muted-foreground";
 }
 
+// ── 时间格式化（ql-20260821-017）──────────────────────────────────────────
+// 后端归一为 ISO 8601 UTC（_normalize_completed_at → isoformat），但形如
+// 2026-08-15T15:44:08.123456+00:00 直读体验差。此处先正则校验 + 重写成
+// ECMAScript 保证兼容的格式（T 分隔 / 补秒 / 微秒截到毫秒 / 偏移规范化），
+// 再 new Date 转本地时间按系统惯例 zh-CN 2-digit 输出（对齐 changes 列表
+// updated_at 与任务详情 formatDate 先例）；任何不匹配/解析失败回退原串，
+// 不炸不猜（Grill #18 的「不裸解析」精神保留在正则白名单这一层）。
+const ISO_LIKE_RE =
+  /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.(\d+))?(Z|[+-]\d{2}:?\d{2})?$/;
+
+/** 步骤时间展示格式（系统惯例：zh-CN 2-digit 年月日时分，如 2026/08/15 23:44） */
+const TIME_FORMAT_OPTS: Intl.DateTimeFormatOptions = {
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+};
+
+/** ISO 串 → 本地时间紧凑文案；非 ISO 形状 / Invalid Date 一律回退原串 */
+export function formatStepTime(iso: string): string {
+  const m = ISO_LIKE_RE.exec(iso.trim());
+  if (!m) return iso;
+  const [, y, mo, d, h, mi, s = "00", frac, tz] = m;
+  const ms = frac ? `.${frac.slice(0, 3).padEnd(3, "0")}` : "";
+  const offset =
+    !tz || tz === "Z"
+      ? "Z"
+      : tz.length === 6
+        ? tz
+        : `${tz.slice(0, 3)}:${tz.slice(3)}`;
+  const dt = new Date(`${y}-${mo}-${d}T${h}:${mi}:${s}${ms}${offset}`);
+  if (Number.isNaN(dt.getTime())) return iso;
+  return dt.toLocaleString("zh-CN", TIME_FORMAT_OPTS);
+}
+
 interface TimelineItemProps {
   entry: StepTimelineEntry;
   /** 父级派生的稳定 key（`${stage}-${ordering}`），用于 DOM data-key 便于测试/调试 */
   itemKey: string;
+}
+
+/** 完成时间 <time>：显示本地化文案，title/dateTime 保留原始 ISO（悬停可查精确值） */
+function StepTime({ completedAt }: { completedAt: string }) {
+  return (
+    <time
+      dateTime={completedAt}
+      title={completedAt}
+      className="ml-auto shrink-0 text-[11px] tabular-nums text-muted-foreground"
+    >
+      {formatStepTime(completedAt)}
+    </time>
+  );
 }
 
 /**
@@ -75,7 +125,7 @@ interface TimelineItemProps {
  * 👤 emoji 替代状态色点 + 紫色 chip，样式对齐原型 prototype-owner-events.html
  * .tl-item.owner-event / .owner-chip（bg #faf5ff≈purple-50 / 字 #7c3aed≈violet-600 /
  * 边 #e9d5ff≈purple-200 / 箭头 #a78bfa≈violet-400 加粗）。output（"A → B"）进
- * chip，底部不再重复渲染 <p>；completed_at 沿用 step 分支同款 time 元素。
+ * chip，底部不再重复渲染 <p>；completed_at 沿用 step 分支同款 StepTime。
  */
 function OwnerEventItem({ entry, itemKey }: TimelineItemProps) {
   // output 形如 "admin → qinyi"（后端按时间序合成，task-04）；按首个 → 拆开
@@ -114,15 +164,7 @@ function OwnerEventItem({ entry, itemKey }: TimelineItemProps) {
             )}
           </span>
         ) : null}
-        {entry.completed_at ? (
-          <time
-            dateTime={entry.completed_at}
-            title={entry.completed_at}
-            className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground"
-          >
-            {entry.completed_at}
-          </time>
-        ) : null}
+        {entry.completed_at ? <StepTime completedAt={entry.completed_at} /> : null}
       </div>
     </div>
   );
@@ -156,13 +198,7 @@ const TimelineItem = memo(function TimelineItem({
           {entry.name}
         </span>
         {entry.status === "completed" && entry.completed_at ? (
-          <time
-            dateTime={entry.completed_at}
-            title={entry.completed_at}
-            className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground"
-          >
-            {entry.completed_at}
-          </time>
+          <StepTime completedAt={entry.completed_at} />
         ) : label ? (
           <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
             {label}
@@ -191,19 +227,25 @@ interface StageGroupHeaderProps {
   total: number;
 }
 
-/** stage 组头：组名 + 完成数/总数（原型 .stage-group） */
+/** stage 组头：组名 + 引导线 + 完成数徽标（ql-20260821-017 对齐系统弱分隔风格） */
 function StageGroupHeader({ stage, done, total }: StageGroupHeaderProps) {
   const label = WORKFLOW_STAGE_LABELS[stage] ?? stage;
   const allDone = done === total;
   return (
     <div
       data-stage={stage}
-      className="mb-1 mt-3.5 flex items-center gap-1.5 text-xs text-muted-foreground first:mt-0"
+      className="mb-1.5 mt-4 flex items-center gap-2 first:mt-0"
     >
-      <span aria-hidden>{allDone ? "✅" : "•"}</span>
-      <span className="font-medium text-foreground/80">{label}</span>
-      <span>
-        {done}/{total} 步完成
+      <span
+        className={`shrink-0 text-[11px] font-medium ${
+          allDone ? "text-muted-foreground" : "text-foreground/80"
+        }`}
+      >
+        {label}
+      </span>
+      <span aria-hidden className="h-px flex-1 bg-border" />
+      <span className="shrink-0 rounded-full bg-muted px-1.5 py-px text-[10px] tabular-nums text-muted-foreground">
+        {done}/{total} 步
       </span>
     </div>
   );
@@ -212,6 +254,12 @@ function StageGroupHeader({ stage, done, total }: StageGroupHeaderProps) {
 export interface ChangeStepTimelineProps {
   /** step 级时间线明细（ChangeRead.steps）；null/undefined/空数组不渲染（降级，D-003@v1） */
   steps: StepTimelineEntry[] | null;
+  /**
+   * 阶段筛选（ql-20260821-017 阶段-步骤联动）：null/undefined = 全部阶段；
+   * 指定 stage 时仅渲染该组（与 ChangeStageHeader 节点点击联动）。筛选命中
+   * 空组时渲染弱提示行，不抛错。
+   */
+  focusStage?: string | null;
 }
 
 /**
@@ -222,14 +270,23 @@ export interface ChangeStepTimelineProps {
  * design Grill #17）。样式对齐原型 prototype-change-step-visibility.html 第②段
  * （timeline / tl-item / tl-dot / stage-group）。
  */
-export function ChangeStepTimeline({ steps }: ChangeStepTimelineProps) {
+export function ChangeStepTimeline({ steps, focusStage = null }: ChangeStepTimelineProps) {
   // 空态：无明细数据时不渲染任何节点（调用方布局不受影响，不抛错）
   if (!steps || steps.length === 0) return null;
+
+  // 阶段筛选（联动）：focusStage 只保留同 stage 条目，其余组整体隐藏
+  const visible =
+    focusStage !== null ? steps.filter((e) => e.stage === focusStage) : steps;
+  if (visible.length === 0) {
+    return (
+      <p className="py-2 text-xs text-muted-foreground">该阶段暂无步骤记录。</p>
+    );
+  }
 
   // 连续同 stage 归组——后端已保证 entries 按 STAGE_ORDER 分组定序 + 组内
   // ordering 排序（service._extract_step_progress），此处纯分组遍历不排序。
   const groups: { stage: string; entries: StepTimelineEntry[] }[] = [];
-  for (const entry of steps) {
+  for (const entry of visible) {
     const last = groups[groups.length - 1];
     if (last && last.stage === entry.stage) {
       last.entries.push(entry);

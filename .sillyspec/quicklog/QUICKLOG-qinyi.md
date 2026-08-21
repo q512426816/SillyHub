@@ -444,3 +444,22 @@
 方案：①explorer 与 scan-docs 两树 expandAction 统一改 click（点行展开/收起，本指令覆盖 ql-20260819-001 双击决策），file-explorer 三个双击用例改单击并删 dblClickNode 助手；②knowledge/page.tsx 重写——快速日志 tab 整体移除（变更中心快速修复 tab 保留完整入口），buildKnowledgeTree 按 path 建目录树 + FileNodeIcon/TreeBox/PanelResizer 共享三件套（默认 280px 钳 200~480 localStorage 记忆）+ antd Tree 点行展开默认全展开，内容区 .md 用 MarkdownPreview（复用统一 sanitize rehype 插件）渲染、非 md 仍纯文本 pre；③workspace-tabs.tsx 增 knowledge「知识库」tab 排文件后，menu-permissions.ts 侧边栏同步改名知识库。
 结果：新 knowledge-page.test.tsx 4 用例（树渲染/点行交互+md 渲染/拖拽记忆/WorkspaceTabs 顺序），关联 5 测试文件 78/78 通过，tsc 0 错，lint 仅预存 warning，frontend.md 变更索引已更新。
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
+
+## ql-20260821-016-c75f | 2026-08-21 11:10:59 | 变更文件树组件视觉对齐工作台风格
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/change-file-tree.tsx（七项视觉优化）
+需求：变更文件树组件视觉对齐工作台风格
+根因：树行单薄/内联 SVG amber 硬编码/旧红条/文字空态/无计数
+方案：ChevronRight 展开指示+选中品牌化+lucide 图标+计数 pill+ErrorBanner+EmptyState
+结果：tsc 0、eslint 0、全量 171 文件/1810 用例全绿、已部署
+
+## ql-20260821-017-4513 | 2026-08-21 13:46:54 | 变更详情页阶段节点与步骤时间线联动（点击阶段筛选步骤）+ 步骤时间格式优化 + 步骤样式对齐系统风格
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, frontend/src/components/changes/detail/__tests__/change-stage-header.test.tsx, frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx, frontend/src/components/changes/detail/change-stage-header.tsx, frontend/src/components/changes/detail/change-step-timeline.tsx, docs/sillyspec/2026-08-21-manual-archive-desync-status-only.md
+需求：变更详情页阶段节点与步骤时间线联动（点击阶段筛选步骤）+ 步骤时间格式优化 + 步骤样式对齐系统风格
+根因：无，纯样式与交互增强——阶段步骤条与步骤时间线两区块此前无任何关联，completed_at 直显 ISO 原串可读性差，组头样式与 AI-native 系统风格脱节
+方案：ChangeStageHeader 节点升级 button（stepStages 范围内可点、aria-pressed+brand ring 选中、无步骤阶段 disabled；不传联动 props 时渲染与旧版一致）；page.tsx 持 focusStage 状态（再次点击同阶段取消）+ 时间线卡片头「阶段 ✕」清除 chip + 标题带步数；ChangeStepTimeline 加 focusStage 过滤（命中空弱提示）；新增 formatStepTime 正则白名单归一后 new Date 本地化（zh-CN 2-digit，微秒截毫秒，失败回退原串，Grill #18 精神保留）；组头改组名+引导线+N/M 步徽标、时间 tabular-nums；time 元素 title/datetime 保留原始 ISO
+结果：组件测试 31 绿（含新增联动 5 例+格式化 4 例+筛选 3 例）、页面回归 13 绿、tsc 与 eslint 清零；Playwright+Chrome 真实登录隔离环境（临时库+本地后端，已清理）截图验证全部/筛选/切换/清除四态，时间显示 2026/08/20 09:15 且微秒精度正确转换

@@ -118,6 +118,12 @@ export default function ChangeDetailPage({ params }: Props) {
     null,
   );
 
+  // ── 阶段-步骤联动（ql-20260821-017）：点击阶段步骤条节点筛选步骤时间线 ──
+  // stepStages = steps 中实际有条目的阶段集合（决定哪些节点可点）；再次点击
+  // 同一阶段取消筛选；current_stage 非线性（quick 等）时步骤条不渲染，联动
+  // 入口自然缺席，focusStage 恒为 null 无副作用。
+  const [focusStage, setFocusStage] = useState<string | null>(null);
+
   // ── 辅助数据（任务看板 / agent 状态 / 绑定会话近似）：一次性加载，不随详情轮询 ──
   useEffect(() => {
     let cancelled = false;
@@ -229,6 +235,13 @@ export default function ChangeDetailPage({ params }: Props) {
   const panelRunId = agentStatus?.last_dispatch?.run_id ?? null;
   const panelIsActive = agentStatus?.has_active_run ?? false;
 
+  // 阶段-步骤联动派生：steps 条目出现的阶段去重（含 quick 等非线性 stage，
+  // 但步骤条只渲染 5 大阶段节点，非 WORKFLOW_STAGES 值仅参与 includes 判断）
+  const stepStages =
+    change.steps && change.steps.length > 0
+      ? Array.from(new Set(change.steps.map((e) => e.stage)))
+      : [];
+
   return (
     <PageContainer className="gap-5">
       <p className="text-[11px] text-muted-foreground">
@@ -276,11 +289,16 @@ export default function ChangeDetailPage({ params }: Props) {
         }
       />
 
-      {/* 阶段步骤条（主线宏观进度） */}
+      {/* 阶段步骤条（主线宏观进度；节点可点击筛选下方步骤时间线，ql-20260821-017） */}
       <ChangeStageHeader
         currentStage={change.current_stage ?? null}
         stages={change.stages as Record<string, unknown> | null}
         updatedAt={change.updated_at ?? null}
+        stepStages={stepStages}
+        focusStage={focusStage}
+        onStageClick={(stage) =>
+          setFocusStage((prev) => (prev === stage ? null : stage))
+        }
       />
 
       {pageError ? (
@@ -310,17 +328,32 @@ export default function ChangeDetailPage({ params }: Props) {
 
           {/* 步骤时间线（task-07 / D-005@v1：数据源 latest_progress.steps，替换旧
               SillySpecStepProgress 的 change.stages 派生挂载；steps 缺失降级不渲染，
-              组件内自空态兜底，D-003） */}
+              组件内自空态兜底，D-003；focusStage 与上方阶段节点联动 ql-20260821-017） */}
           {change.steps && change.steps.length > 0 ? (
             <section
               data-testid="change-step-timeline-card"
               className="rounded-md border bg-card"
             >
-              <div className="flex items-center justify-between border-b px-3 py-2">
-                <h2 className="text-xs font-medium">📋 步骤时间线</h2>
+              <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+                <h2 className="text-xs font-medium">
+                  📋 步骤时间线 ({change.steps.length})
+                </h2>
+                {focusStage ? (
+                  <button
+                    type="button"
+                    onClick={() => setFocusStage(null)}
+                    aria-label="清除阶段筛选"
+                    className="inline-flex shrink-0 items-center gap-1 rounded-full border border-brand-300 bg-brand-500/10 px-2 py-px text-[11px] text-brand-600 transition-colors hover:bg-brand-500/20"
+                  >
+                    {WORKFLOW_STAGE_LABELS[focusStage] ?? focusStage} ✕
+                  </button>
+                ) : null}
               </div>
               <div className="px-3 py-2.5">
-                <ChangeStepTimeline steps={change.steps} />
+                <ChangeStepTimeline
+                  steps={change.steps}
+                  focusStage={focusStage}
+                />
               </div>
             </section>
           ) : null}

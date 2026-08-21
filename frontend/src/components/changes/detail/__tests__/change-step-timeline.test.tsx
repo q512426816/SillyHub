@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ChangeStepTimeline,
+  formatStepTime,
   type StepTimelineEntry,
 } from "@/components/changes/detail/change-step-timeline";
 
@@ -15,7 +16,22 @@ import {
  * wait_reason / steps null 空态 / 分组顺序遵循后端 entries 顺序（组件不再排序）/
  * entry key 稳定（stage-ordering）/ kind=event 事件条目专属渲染（👤 + 紫色
  * chip）/ 事件与 steps 混合排序 / 纯 steps（kind 缺省）零变化回归。
+ *
+ * ql-20260821-017 增补：时间展示本地化（formatStepTime，断言用同款 Intl 调用
+ * 现算期望值——测试与组件跑在同一时区，跨环境确定性）/ 组头改「N/M 步」徽标 /
+ * focusStage 阶段筛选联动。
  */
+
+/** 与组件同款 Intl 格式现算期望值（时区随运行环境，两侧一致即确定） */
+function expectLocalTime(specIso: string): string {
+  return new Date(specIso).toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 function entry(
   over: Partial<StepTimelineEntry> & Pick<StepTimelineEntry, "name" | "stage">,
@@ -91,9 +107,9 @@ describe("ChangeStepTimeline", () => {
     const brainstormHeader = screen
       .getByText("需求分析")
       .closest("[data-stage]");
-    expect(brainstormHeader).toHaveTextContent("1/2 步完成");
+    expect(brainstormHeader).toHaveTextContent("1/2 步");
     const planHeader = screen.getByText("规划").closest("[data-stage]");
-    expect(planHeader).toHaveTextContent("1/1 步完成");
+    expect(planHeader).toHaveTextContent("1/1 步");
   });
 
   it("未知 stage 组头显示原 stage 名（quick 兜底）", () => {
@@ -105,11 +121,11 @@ describe("ChangeStepTimeline", () => {
       />,
     );
     expect(screen.getByText("quick")).toBeInTheDocument();
-    expect(screen.getByText("1/1 步完成")).toBeInTheDocument();
+    expect(screen.getByText("1/1 步")).toBeInTheDocument();
   });
 
   it("分组顺序遵循后端 entries 顺序，组件不再排序", () => {
-    render(
+    const { container } = render(
       <ChangeStepTimeline
         steps={[
           entry({ name: "p1", stage: "plan", status: "completed", ordering: 1 }),
@@ -117,15 +133,14 @@ describe("ChangeStepTimeline", () => {
         ]}
       />,
     );
-    // 组头计数 span 按 DOM 序断言：输入序 plan 在前（即使 STAGE_ORDER 中 brainstorm 更早）
-    const headers = screen.getAllByText(/步完成/);
-    const first = headers[0]?.closest("[data-stage]");
-    const second = headers[1]?.closest("[data-stage]");
-    expect(first).toHaveAttribute("data-stage", "plan");
-    expect(second).toHaveAttribute("data-stage", "brainstorm");
+    // 组头 data-stage 按 DOM 序断言：输入序 plan 在前（即使 STAGE_ORDER 中 brainstorm 更早）
+    const stages = Array.from(
+      container.querySelectorAll("[data-stage]"),
+    ).map((n) => n.getAttribute("data-stage"));
+    expect(stages).toEqual(["plan", "brainstorm"]);
   });
 
-  it("completed 步显示 ISO completed_at 与 output 全量（D-004@v1 不截断：无 clamp + break-words + max-h 滚动兜底）", () => {
+  it("completed 步显示本地化完成时间（title/datetime 保留原始 ISO）与 output 全量（D-004@v1 不截断：无 clamp + break-words + max-h 滚动兜底）", () => {
     render(
       <ChangeStepTimeline
         steps={[
@@ -140,9 +155,12 @@ describe("ChangeStepTimeline", () => {
         ]}
       />,
     );
-    const time = screen.getByText("2026-08-15T15:44:08+00:00");
+    // 展示层：zh-CN 2-digit 本地时间（与组件同款 Intl 现算期望，时区无关）
+    const time = screen.getByText(expectLocalTime("2026-08-15T15:44:08Z"));
     expect(time).toBeInTheDocument();
+    // 机器可读层：dateTime/title 均保留后端归一的原始 ISO
     expect(time).toHaveAttribute("datetime", "2026-08-15T15:44:08+00:00");
+    expect(time).toHaveAttribute("title", "2026-08-15T15:44:08+00:00");
     const output = screen.getByText(/CLI 六表 JSON 已含 steps\[\] 数据/);
     // D-004@v1 明确修订截断行为（明细不截断）——原「clamp 存在」断言按新行为翻转：
     // 无 line-clamp 自然换行 + max-h 容器滚动兜底（R-07）。
@@ -197,8 +215,10 @@ describe("ChangeStepTimeline", () => {
       document.querySelectorAll("[data-key]"),
     ).map((n) => n.getAttribute("data-key"));
     expect(keysAfter).toEqual(["execute-1", "execute-2", "execute-3"]);
-    // 变化步内容更新：完成时间出现
-    expect(screen.getByText("2026-08-15T16:00:00+00:00")).toBeInTheDocument();
+    // 变化步内容更新：完成时间出现（本地化文案）
+    expect(
+      screen.getByText(expectLocalTime("2026-08-15T16:00:00Z")),
+    ).toBeInTheDocument();
   });
 });
 
@@ -250,8 +270,9 @@ describe("ChangeStepTimeline 事件条目（kind=event）", () => {
     expect(chip?.querySelector(".font-bold")?.className).toContain(
       "text-violet-400",
     );
-    // completed_at 沿用 time 元素渲染（事件 status=completed，design §5 Phase 2.2）
-    expect(screen.getByText("2026-08-16T07:20:00+00:00")).toHaveAttribute(
+    // completed_at 沿用 time 元素渲染（事件 status=completed，design §5 Phase 2.2；
+    // 展示本地化文案，datetime 保留原始 ISO）
+    expect(screen.getByText(expectLocalTime("2026-08-16T07:20:00Z"))).toHaveAttribute(
       "datetime",
       "2026-08-16T07:20:00+00:00",
     );
@@ -301,8 +322,8 @@ describe("ChangeStepTimeline 事件条目（kind=event）", () => {
     expect(container.querySelector('[data-status="in-progress"]')).not.toBeNull();
     expect(screen.getByText(/等待原因：等用户/)).toBeInTheDocument();
     // 同 stage 的组头计数照常（brainstorm 1/2 + plan 0/1）
-    expect(screen.getByText("1/2 步完成")).toBeInTheDocument();
-    expect(screen.getByText("0/1 步完成")).toBeInTheDocument();
+    expect(screen.getByText("1/2 步")).toBeInTheDocument();
+    expect(screen.getByText("0/1 步")).toBeInTheDocument();
   });
 
   it("长文本不 clamp：超长 output 自然换行 + max-h 滚动兜底（D-004@v1 / R-07）", () => {
@@ -329,5 +350,84 @@ describe("ChangeStepTimeline 事件条目（kind=event）", () => {
     expect(output?.className).toContain("max-h");
     expect(output?.className).toContain("overflow-y-auto");
     expect(output?.textContent).toBe(longOutput);
+  });
+});
+
+// ── 时间格式化（ql-20260821-017）────────────────────────────────────────────
+
+describe("formatStepTime", () => {
+  it("标准 ISO（+00:00 / Z）→ 本地化 zh-CN 2-digit 输出，与直接解析等价", () => {
+    expect(formatStepTime("2026-08-15T15:44:08+00:00")).toBe(
+      expectLocalTime("2026-08-15T15:44:08Z"),
+    );
+    expect(formatStepTime("2026-08-16T07:20:00Z")).toBe(
+      expectLocalTime("2026-08-16T07:20:00Z"),
+    );
+  });
+
+  it("后端 isoformat 微秒（6 位）截到毫秒，结果与毫秒精度解析等价", () => {
+    expect(formatStepTime("2026-08-15T15:44:08.123456+00:00")).toBe(
+      expectLocalTime("2026-08-15T15:44:08.123Z"),
+    );
+  });
+
+  it("缺秒 / 空格分隔 / 紧凑偏移（+0800）等宽松形状可解析", () => {
+    expect(formatStepTime("2026-08-15T15:44+00:00")).toBe(
+      expectLocalTime("2026-08-15T15:44:00Z"),
+    );
+    expect(formatStepTime("2026-08-15 15:44:08+00:00")).toBe(
+      expectLocalTime("2026-08-15T15:44:08Z"),
+    );
+    expect(formatStepTime("2026-08-15T15:44:08+0000")).toBe(
+      expectLocalTime("2026-08-15T15:44:08Z"),
+    );
+  });
+
+  it("非 ISO 形状原串回退（Grill #18 兜底：不炸不猜）", () => {
+    expect(formatStepTime("not-a-date")).toBe("not-a-date");
+    expect(formatStepTime("")).toBe("");
+    // 语义非法（13 月 / 25 时）正则可过但 Invalid Date → 仍回退原串
+    expect(formatStepTime("2026-13-45T25:99:99+00:00")).toBe(
+      "2026-13-45T25:99:99+00:00",
+    );
+  });
+});
+
+// ── 阶段筛选联动（ql-20260821-017）──────────────────────────────────────────
+
+describe("ChangeStepTimeline focusStage 筛选", () => {
+  const mixed: StepTimelineEntry[] = [
+    entry({ name: "a1", stage: "brainstorm", status: "completed", ordering: 1, completed_at: "2026-08-15T15:44:08+00:00" }),
+    entry({ name: "b1", stage: "plan", status: "completed", ordering: 1 }),
+    entry({ name: "b2", stage: "plan", status: "in-progress", ordering: 2 }),
+  ];
+
+  it("focusStage=null/缺省 → 全部组渲染（默认行为回归）", () => {
+    const { container, rerender } = render(<ChangeStepTimeline steps={mixed} />);
+    expect(container.querySelectorAll("[data-stage]")).toHaveLength(2);
+    rerender(<ChangeStepTimeline steps={mixed} focusStage={null} />);
+    expect(container.querySelectorAll("[data-stage]")).toHaveLength(2);
+  });
+
+  it("focusStage=plan → 仅渲染 plan 组，brainstorm 组隐藏", () => {
+    const { container } = render(
+      <ChangeStepTimeline steps={mixed} focusStage="plan" />,
+    );
+    const stages = Array.from(
+      container.querySelectorAll("[data-stage]"),
+    ).map((n) => n.getAttribute("data-stage"));
+    expect(stages).toEqual(["plan"]);
+    // plan 组内两条目都在，组外条目不在
+    expect(container.querySelectorAll("[data-key]")).toHaveLength(2);
+    expect(screen.getByText("b2")).toBeInTheDocument();
+    expect(screen.queryByText("a1")).not.toBeInTheDocument();
+  });
+
+  it("focusStage 命中空（异常防御）→ 弱提示行不抛错", () => {
+    const { container } = render(
+      <ChangeStepTimeline steps={mixed} focusStage="verify" />,
+    );
+    expect(container.querySelector("[data-stage]")).toBeNull();
+    expect(screen.getByText("该阶段暂无步骤记录。")).toBeInTheDocument();
   });
 });

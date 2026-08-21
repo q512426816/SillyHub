@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import { ChangeStageHeader } from "@/components/changes/detail/change-stage-header";
 
@@ -59,5 +60,90 @@ describe("ChangeStageHeader", () => {
   it("lastActive 与 updatedAt 都缺失时不渲染时间行", () => {
     render(<ChangeStageHeader currentStage="plan" stages={null} updatedAt={null} />);
     expect(screen.queryByText(/当前阶段:/)).not.toBeInTheDocument();
+  });
+});
+
+// ── 阶段-步骤联动（ql-20260821-017：节点点击筛选步骤时间线）────────────────
+
+describe("ChangeStageHeader 阶段-步骤联动", () => {
+  it("未传联动 props → 纯展示（无 button），旧挂载方式零变化", () => {
+    render(<ChangeStageHeader currentStage="execute" stages={null} updatedAt={null} />);
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    expect(screen.getByText("执行")).toBeInTheDocument();
+  });
+
+  it("stepStages 中的阶段节点可点击：点击回调携带 stage", () => {
+    const onStageClick = vi.fn();
+    render(
+      <ChangeStageHeader
+        currentStage="execute"
+        stages={null}
+        updatedAt={null}
+        stepStages={["brainstorm", "plan", "execute"]}
+        focusStage={null}
+        onStageClick={onStageClick}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /需求分析/ }));
+    expect(onStageClick).toHaveBeenCalledWith("brainstorm");
+    fireEvent.click(screen.getByRole("button", { name: /执行/ }));
+    expect(onStageClick).toHaveBeenCalledWith("execute");
+  });
+
+  it("无步骤数据的阶段节点 disabled 不可点击", () => {
+    const onStageClick = vi.fn();
+    render(
+      <ChangeStageHeader
+        currentStage="execute"
+        stages={null}
+        updatedAt={null}
+        stepStages={["brainstorm"]}
+        focusStage={null}
+        onStageClick={onStageClick}
+      />,
+    );
+    const planBtn = screen.getByRole("button", { name: /规划/ });
+    expect(planBtn).toBeDisabled();
+    fireEvent.click(planBtn);
+    expect(onStageClick).not.toHaveBeenCalled();
+  });
+
+  it("focusStage 选中节点：aria-pressed + brand ring 高亮 + 标签 brand 色", () => {
+    render(
+      <ChangeStageHeader
+        currentStage="execute"
+        stages={null}
+        updatedAt={null}
+        stepStages={["brainstorm", "plan"]}
+        focusStage="plan"
+        onStageClick={() => {}}
+      />,
+    );
+    const planBtn = screen.getByRole("button", { name: /规划/ });
+    expect(planBtn).toHaveAttribute("aria-pressed", "true");
+    // 圆点（按钮内首个 div）带 brand ring（ring-offset-2 为选中态独有，
+    // 悬停态是 group-hover:ring-offset-1，避免子串误伤）；标签为 brand 色
+    const circle = planBtn.querySelector("div");
+    expect(circle?.className).toContain("ring-brand-500");
+    expect(circle?.className).toContain("ring-offset-2");
+    expect(screen.getByText("规划").className).toContain("text-brand-600");
+    // 未选中节点 aria-pressed=false 且无选中 ring
+    const brainstormBtn = screen.getByRole("button", { name: /需求分析/ });
+    expect(brainstormBtn).toHaveAttribute("aria-pressed", "false");
+    expect(brainstormBtn.querySelector("div")?.className).not.toContain(
+      "ring-offset-2",
+    );
+  });
+
+  it("只传 stepStages 不传 onStageClick → 不启用联动（按钮缺席）", () => {
+    render(
+      <ChangeStageHeader
+        currentStage="execute"
+        stages={null}
+        updatedAt={null}
+        stepStages={["brainstorm"]}
+      />,
+    );
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
   });
 });
