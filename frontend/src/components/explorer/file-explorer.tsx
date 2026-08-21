@@ -21,7 +21,9 @@
  *   超出容器时靠外层 overflow-auto 横向滚动；缩进 16px/层；树区域在页面视口锚定下内部滚动。
  *
  * 树图标沿用 remote-folder-picker 先例用 lucide（task-06 蓝图「目录文件分用 lucide 图标」），
- * 文件按扩展名分型配色（code/json/图片/音视频/压缩包/表格/文档，见 FILE_ICON_BY_EXT）。
+ * 文件按扩展名分型配色：常见开发语言各自独立图标（Java 咖啡 / Vue 三角 / React 原子 /
+ * Python f(x) / Go 六边形 / Ruby 宝石 / Rust 齿轮 / Swift 雨燕 / .NET 积木 / Shell 终端等，
+ * 详见 FILE_ICON_BY_EXT），其余语言与媒体/文档类沿用 ql-20260821-008 的映射。
  * 视觉遵循 FRONTEND_PAGE_STYLE.md（antd 业务组件 + tailwind 布局/颜色变量、中文文案）。
  * 依据：design.md §7.2 / Wave3 + tasks/task-06.md。
  */
@@ -30,6 +32,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Input, Spin, Tree, type TreeProps } from "antd";
 import type { DataNode } from "antd/es/tree";
 import {
+  Atom,
+  Bird,
+  Blocks,
+  Braces,
+  Binary,
+  CodeXml,
+  Cog,
+  Coffee,
+  Database,
   FileArchive,
   FileAudio2,
   FileCode2,
@@ -37,11 +48,18 @@ import {
   FileJson2,
   FileLock,
   FileSpreadsheet,
+  FileTerminal,
   FileText,
   FileType2,
   FileVideo,
   Folder,
   FolderOpen,
+  FunctionSquare,
+  Gem,
+  Globe,
+  Hexagon,
+  Palette,
+  Triangle,
   type LucideIcon,
 } from "lucide-react";
 
@@ -82,24 +100,94 @@ interface FileIconSpec {
   className: string;
 }
 
-/** 代码/脚本类：FileCode2 + 琥珀。 */
+/** 代码/脚本类：FileCode2 + 琥珀（未单列语言的兜底）。 */
 const CODE_ICON: FileIconSpec = { icon: FileCode2, className: "text-amber-500" };
 /** 默认/纯文本类：FileText + 主题灰（与旧版一致，未匹配扩展名的回退）。 */
 const DEFAULT_ICON: FileIconSpec = { icon: FileText, className: "text-muted-foreground" };
 
-/** 扩展名 → 图标规格。未命中扩展名回退 DEFAULT_ICON（FileText 灰）。 */
+/** 扩展名 → 图标规格。未命中扩展名回退 DEFAULT_ICON（FileText 灰）。
+ *  常见开发语言各自独立图标+配色（ql-20260821-012-22b0），其余语言回退 CODE_ICON。 */
 const FILE_ICON_BY_EXT: Record<string, FileIconSpec> = {
-  // 代码 / 脚本 / 配置结构
+  // ── 单列语言（形状+配色尽量贴语言品牌）──────────────────────────────
+  // Java：咖啡 + 深橙
+  java: { icon: Coffee, className: "text-orange-700" },
+  // JVM 字节码：二进制 + 锌灰
+  class: { icon: Binary, className: "text-zinc-500" },
+  // XML：code-xml + 橙
+  xml: { icon: CodeXml, className: "text-orange-500" },
+  // Vue：三角 V + 绿
+  vue: { icon: Triangle, className: "text-emerald-500" },
+  // JS 家族：花括号 + 黄；React（jsx）：原子 + 天蓝
+  js: { icon: Braces, className: "text-yellow-500" },
+  mjs: { icon: Braces, className: "text-yellow-500" },
+  cjs: { icon: Braces, className: "text-yellow-500" },
+  jsx: { icon: Atom, className: "text-sky-500" },
+  // TS：花括号 + 蓝；React TS（tsx）：原子 + 青
+  ts: { icon: Braces, className: "text-blue-600" },
+  mts: { icon: Braces, className: "text-blue-600" },
+  cts: { icon: Braces, className: "text-blue-600" },
+  tsx: { icon: Atom, className: "text-cyan-600" },
+  // Python：f(x) + 蓝
+  py: { icon: FunctionSquare, className: "text-blue-500" },
+  pyw: { icon: FunctionSquare, className: "text-blue-500" },
+  pyi: { icon: FunctionSquare, className: "text-blue-500" },
+  // Go：六边形 + 青（#00ADD8）
+  go: { icon: Hexagon, className: "text-cyan-600" },
+  // Ruby：宝石 + 玫红
+  rb: { icon: Gem, className: "text-rose-600" },
+  // Rust：齿轮 + 石墨
+  rs: { icon: Cog, className: "text-stone-600" },
+  // PHP：花括号 + 靛
+  php: { icon: Braces, className: "text-indigo-500" },
+  // Swift：雨燕 + 橙
+  swift: { icon: Bird, className: "text-orange-500" },
+  // Kotlin：花括号 + 紫罗兰
+  kt: { icon: Braces, className: "text-violet-600" },
+  kts: { icon: Braces, className: "text-violet-600" },
+  // C#/.NET 系：积木 + 紫（.net 本身不是扩展名，按语言/项目文件映射）
+  cs: { icon: Blocks, className: "text-violet-700" },
+  vb: { icon: Blocks, className: "text-violet-600" },
+  fs: { icon: Blocks, className: "text-violet-600" },
+  csproj: { icon: Blocks, className: "text-violet-600" },
+  vbproj: { icon: Blocks, className: "text-violet-600" },
+  fsproj: { icon: Blocks, className: "text-violet-600" },
+  sln: { icon: Blocks, className: "text-violet-700" },
+  // C / C++：FileCode2 + 深蓝系
+  c: { icon: FileCode2, className: "text-indigo-600" },
+  h: { icon: FileCode2, className: "text-indigo-600" },
+  cpp: { icon: FileCode2, className: "text-blue-700" },
+  hpp: { icon: FileCode2, className: "text-blue-700" },
+  cc: { icon: FileCode2, className: "text-blue-700" },
+  cxx: { icon: FileCode2, className: "text-blue-700" },
+  // Web：HTML 地球 + 橙；CSS 调色板 + 蓝；Sass/Less 系调色板 + 粉
+  html: { icon: Globe, className: "text-orange-600" },
+  htm: { icon: Globe, className: "text-orange-600" },
+  css: { icon: Palette, className: "text-sky-600" },
+  scss: { icon: Palette, className: "text-pink-600" },
+  sass: { icon: Palette, className: "text-pink-600" },
+  less: { icon: Palette, className: "text-pink-600" },
+  styl: { icon: Palette, className: "text-pink-600" },
+  // Shell：终端 + 绿
+  sh: { icon: FileTerminal, className: "text-green-600" },
+  bash: { icon: FileTerminal, className: "text-green-600" },
+  zsh: { icon: FileTerminal, className: "text-green-600" },
+  fish: { icon: FileTerminal, className: "text-green-600" },
+  ps1: { icon: FileTerminal, className: "text-green-600" },
+  bat: { icon: FileTerminal, className: "text-green-600" },
+  cmd: { icon: FileTerminal, className: "text-green-600" },
+  // SQL：数据库 + 靛
+  sql: { icon: Database, className: "text-indigo-500" },
+
+  // ── 其余代码/脚本/配置类（未单列语言，统一 FileCode2 琥珀）─────────
   ...Object.fromEntries(
     [
-      "js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx", "vue", "svelte", "astro",
-      "html", "htm", "css", "scss", "sass", "less", "styl",
-      "py", "pyw", "pyi", "go", "rs", "java", "kt", "kts", "swift", "zig", "dart",
-      "c", "h", "cpp", "hpp", "cs", "php", "rb", "scala",
-      "sh", "bash", "zsh", "fish", "ps1", "bat", "cmd", "sql",
+      "dart", "zig", "scala", "lua", "pl", "pm", "ex", "exs", "elm",
+      "hs", "clj", "cljs", "erl", "r", "m", "mm", "tcl", "groovy",
+      "gradle", "mak", "mk", "cmake", "properties", "svelte", "astro",
       "yaml", "yml", "toml", "ini", "cfg", "conf",
     ].map((ext) => [ext, CODE_ICON]),
   ),
+  // ── 结构化数据 / 媒体 / 文档（沿用 ql-20260821-008）─────────────────
   json: { icon: FileJson2, className: "text-emerald-500" },
   jsonl: { icon: FileJson2, className: "text-emerald-500" },
   // 图片

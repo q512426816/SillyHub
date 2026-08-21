@@ -387,3 +387,14 @@
 根因：2026-07-25-daemon-borrow-for-business task-12 只补了成员列表行内下拉的 business_member，漏了同域的 workspace-member-add-dialog.tsx，弹窗注释仍停留旧三角色口径
 方案：弹窗 ROLE_OPTIONS 补业务成员（文案与行内下拉一致）+修过时注释+角色说明文案补一句；新增测试两例（选项可见、选后 addMember 提交 business_member）
 结果：pnpm vitest run 弹窗+行内两测试文件 5 用例全绿；grep 确认无其它文件引用受影响；模块文档核对无需变更
+
+## ql-20260821-012-22b0 | 2026-08-21 10:10:49 | explorer 文件树图标再按常见开发语言细分
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/explorer/file-explorer.tsx（语言独立图标映射）
+- frontend/src/components/explorer/__tests__/file-explorer.test.tsx（语言图标用例）
+需求：explorer 文件树图标再按常见开发语言细分，java/class/xml/vue/jsx/py/net/go 等各配不一样的图标。
+根因：上一轮所有代码类文件共用 FileCode2 琥珀单档图标，语言之间没有视觉区分。
+方案：file-explorer.tsx 的 FILE_ICON_BY_EXT 重构——常用语言逐个拆出独立 lucide 图标与配色（Java 咖啡橙、class 二进制锌灰、xml code-xml 橙、Vue 三角绿、JS/TS 花括号黄/蓝、jsx 与 tsx React 原子天蓝/青、Python f(x) 蓝、Go 六边形青、Ruby 宝石玫红、Rust 齿轮石墨、PHP 靛、Swift 雨燕橙、Kotlin 紫罗兰、cs/vb/fs/csproj/vbproj/fsproj/sln 等 .NET 系积木紫、C/C++ 深蓝、HTML 地球橙、CSS 调色板蓝、Sass 系调色板粉、Shell 系终端绿、SQL 数据库靛），其余小众语言回退 FileCode2 琥珀兜底，媒体/文档映射不变。
+结果：file-explorer 测试 19/19 通过（图标用例改为 main.ts 断言花括号 + 新增 8 语言互不相同用例），tsc 0 错，lint exit 0 仅预存 warning，frontend.md 变更索引已补 ql-20260821-012 条目。

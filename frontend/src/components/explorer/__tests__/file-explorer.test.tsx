@@ -136,7 +136,7 @@ describe("FileExplorer（task-06）", () => {
 
   it("文件图标按扩展名分型：代码/json/图片各用不同 lucide 图标，未知扩展回退 FileText", async () => {
     mockFetchTree.mockResolvedValue({
-      entries: [file("main.py"), file("config.json"), file("logo.png"), file("data.xyz"), dir("docs")],
+      entries: [file("main.ts"), file("config.json"), file("logo.png"), file("data.xyz"), dir("docs")],
     });
     render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
@@ -147,13 +147,54 @@ describe("FileExplorer（task-06）", () => {
         .getByText(name)
         .closest(".ant-tree-treenode")!
         .querySelector(".ant-tree-iconEle svg")!.classList;
-    // lucide 类名规则：FileCode2 → lucide-file-code2（数字直接缀尾不加连字符）。
-    expect(rowIconClass("main.py").contains("lucide-file-code2")).toBe(true);
+    expect(rowIconClass("main.ts").contains("lucide-braces")).toBe(true);
     expect(rowIconClass("config.json").contains("lucide-file-json2")).toBe(true);
     expect(rowIconClass("logo.png").contains("lucide-file-image")).toBe(true);
     // 未匹配扩展名与目录：回退默认文件/目录图标。
     expect(rowIconClass("data.xyz").contains("lucide-file-text")).toBe(true);
     expect(rowIconClass("docs").contains("lucide-folder")).toBe(true);
+  });
+
+  it("常见开发语言各配独立图标：java/vue/jsx/py/go/class/cs 互不相同", async () => {
+    mockFetchTree.mockResolvedValue({
+      entries: [
+        file("Main.java"),
+        file("App.class"),
+        file("pom.xml"),
+        file("Widget.vue"),
+        file("App.jsx"),
+        file("main.py"),
+        file("main.go"),
+        file("Program.cs"),
+        file("run.sh"),
+      ],
+    });
+    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    await waitForRoot();
+
+    const rowIconClass = (name: string) =>
+      screen
+        .getByText(name)
+        .closest(".ant-tree-treenode")!
+        .querySelector(".ant-tree-iconEle svg")!.classList;
+    // 各语言独立形状：Java 咖啡 / class 二进制 / xml code-xml / Vue 三角 /
+    // jsx 原子 / py f(x)（lucide-square-function）/ Go 六边形 / C# 积木 / sh 终端。
+    expect(rowIconClass("Main.java").contains("lucide-coffee")).toBe(true);
+    expect(rowIconClass("App.class").contains("lucide-binary")).toBe(true);
+    expect(rowIconClass("pom.xml").contains("lucide-code-xml")).toBe(true);
+    expect(rowIconClass("Widget.vue").contains("lucide-triangle")).toBe(true);
+    expect(rowIconClass("App.jsx").contains("lucide-atom")).toBe(true);
+    expect(rowIconClass("main.py").contains("lucide-square-function")).toBe(true);
+    expect(rowIconClass("main.go").contains("lucide-hexagon")).toBe(true);
+    expect(rowIconClass("Program.cs").contains("lucide-blocks")).toBe(true);
+    expect(rowIconClass("run.sh").contains("lucide-file-terminal")).toBe(true);
+    // 互不相同：形状集合去重后仍为全量。
+    const shapes = new Set(
+      ["Main.java", "App.class", "pom.xml", "Widget.vue", "App.jsx", "main.py", "main.go", "Program.cs"].map((n) =>
+        [...rowIconClass(n)].find((c) => c.startsWith("lucide-") && c !== "lucide"),
+      ),
+    );
+    expect(shapes.size).toBe(8);
   });
 
   // ── 懒加载 / 文件选中 ─────────────────────────────────────────────────
