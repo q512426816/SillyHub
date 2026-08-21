@@ -6,7 +6,8 @@
  * 装配 FileExplorer + FilePreview 成左树右预览的 VSCode 式布局：
  * - 页面高度锚定视口（h-[calc(100vh-64px)]，TopBar h-16），树与预览区内部滚动，
  *   页面本体不随内容整体滚动（ql-20260818-010-f551）
- * - 左侧固定宽栏（w-60）展示可滚动文件树（支持横向滚动看长文件名）
+ * - 左侧文件树栏默认 320px（旧版 w-60=240px 偏窄），夹持拖拽把手可在
+ *   200~640px 间调整宽度，双击把手复位；宽度记忆到 localStorage（ql-20260821-008-fade）
  * - 右侧 flex 预览区展示选中文件内容
  * - 页面持有 selectedPath 状态，联动两侧组件
  * - 首屏 tree 请求失败按 ApiError.status 分发三降级中文卡：
@@ -17,7 +18,7 @@
  *       task-06 FileExplorer 契约、task-07 FilePreview 契约。
  */
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
@@ -29,6 +30,90 @@ import { Button } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { ApiError } from "@/lib/api";
 import { explorerQueryKeys, useExplorerFile, useExplorerTree } from "@/lib/explorer";
+
+/** 左栏（文件树）宽度：默认值与拖拽范围（px）。 */
+const TREE_PANEL_DEFAULT_W = 320;
+const TREE_PANEL_MIN_W = 200;
+const TREE_PANEL_MAX_W = 640;
+/** 宽度记忆 key（仅本地浏览器，与 sillyhub-theme 同款命名风格）。 */
+const TREE_PANEL_WIDTH_KEY = "sillyhub-explorer-tree-width";
+
+/** 宽度读入：非法/越界值回退默认（clamp 防手改 localStorage 打爆布局）。 */
+function clampTreeWidth(w: number): number {
+  return Math.min(TREE_PANEL_MAX_W, Math.max(TREE_PANEL_MIN_W, w));
+}
+
+function loadTreeWidth(): number {
+  if (typeof window === "undefined") return TREE_PANEL_DEFAULT_W;
+  try {
+    const raw = Number.parseInt(window.localStorage.getItem(TREE_PANEL_WIDTH_KEY) ?? "", 10);
+    return Number.isFinite(raw) ? clampTreeWidth(raw) : TREE_PANEL_DEFAULT_W;
+  } catch {
+    return TREE_PANEL_DEFAULT_W;
+  }
+}
+
+/** 左栏宽度拖拽把手：夹在树与预览区之间，左右拖调宽、双击复位、←/→ 键微调。
+ *  window 级 pointermove/pointerup 监听（不用 setPointerCapture——jsdom 无实现，
+ *  测试走 fireEvent(window) 同路径）；监听只挂一次，回调经 ref 转发取最新。 */
+function TreePanelResizer({
+  width,
+  onWidthChange,
+}: {
+  width: number;
+  onWidthChange: (_w: number) => void;
+}) {
+  /** 拖拽中锚点 {按下时指针 x, 按下时栏宽}；null = 未在拖拽。 */
+  const dragRef = useRef<{ startX: number; startW: number } | null>(null);
+  /** 最新回调（effect 空依赖时取闭包外的最新值）。 */
+  const onChangeRef = useRef(onWidthChange);
+  useEffect(() => {
+    onChangeRef.current = onWidthChange;
+  }, [onWidthChange]);
+
+  useEffect(() => {
+    const onMove = (e: PointerEvent) => {
+      const st = dragRef.current;
+      if (!st) return;
+      onChangeRef.current(clampTreeWidth(st.startW + e.clientX - st.startX));
+    };
+    const onUp = () => {
+      if (!dragRef.current) return;
+      dragRef.current = null;
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+  }, []);
+
+  return (
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="调整文件树宽度"
+      aria-valuenow={width}
+      aria-valuemin={TREE_PANEL_MIN_W}
+      aria-valuemax={TREE_PANEL_MAX_W}
+      data-testid="explorer-tree-resizer"
+      tabIndex={0}
+      className="w-1.5 shrink-0 cursor-col-resize rounded bg-transparent transition-colors hover:bg-border focus-visible:bg-border"
+      onPointerDown={(e) => {
+        e.preventDefault();
+        dragRef.current = { startX: e.clientX, startW: width };
+        document.body.style.userSelect = "none";
+      }}
+      onDoubleClick={() => onWidthChange(TREE_PANEL_DEFAULT_W)}
+      onKeyDown={(e) => {
+        if (e.key === "ArrowLeft") onWidthChange(clampTreeWidth(width - 16));
+        else if (e.key === "ArrowRight") onWidthChange(clampTreeWidth(width + 16));
+      }}
+    />
+  );
+}
 
 /** 面包屑：未选中显示「工作区根」，选中后显示 工作区根 / a / b。 */
 function FileBreadcrumb({ path }: { path: string | null }) {
@@ -137,6 +222,18 @@ export default function WorkspaceExplorerPage() {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   /** 刷新时变更 key，强制 FileExplorer 重挂并重拉根层。 */
   const [explorerKey, setExplorerKey] = useState(0);
+  /** 左栏（文件树）宽度：默认 320px，拖拽/键盘调整 200~640px，记忆到 localStorage。 */
+  const [treeWidth, setTreeWidth] = useState(loadTreeWidth);
+
+  /** 宽度变更统一入口（拖拽 move / 双击复位 / 方向键微调）：改状态 + 落 localStorage。 */
+  const handleTreeWidthChange = useCallback((w: number) => {
+    setTreeWidth(w);
+    try {
+      window.localStorage.setItem(TREE_PANEL_WIDTH_KEY, String(w));
+    } catch {
+      // 隐私模式等 localStorage 不可用时静默降级：宽度仅本次会话内生效
+    }
+  }, []);
 
   const treeQuery = useExplorerTree(workspaceId, "");
   const fileQuery = useExplorerFile(workspaceId, selectedPath);
@@ -187,13 +284,18 @@ export default function WorkspaceExplorerPage() {
           </div>
 
           <div className="flex min-h-0 flex-1 gap-3 overflow-hidden">
-            <div className="w-60 min-w-0 shrink-0 overflow-hidden rounded-md border">
+            <div
+              data-testid="explorer-tree-panel"
+              className="min-w-0 shrink-0 overflow-hidden rounded-md border"
+              style={{ width: `${treeWidth}px` }}
+            >
               <FileExplorer
                 key={explorerKey}
                 workspaceId={workspaceId}
                 onSelectFile={setSelectedPath}
               />
             </div>
+            <TreePanelResizer width={treeWidth} onWidthChange={handleTreeWidthChange} />
             <div className="min-w-0 flex-1 overflow-hidden rounded-md border">
               <FilePreview workspaceId={workspaceId} filePath={selectedPath} />
             </div>

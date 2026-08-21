@@ -127,11 +127,33 @@ describe("FileExplorer（task-06）", () => {
       el.textContent!.replace(/\d+(\.\d+)?\s?(B|KB|MB|GB)$/, ""),
     );
     expect(titles).toEqual(["工作区根", "a", "b", "a.txt", "z.md"]);
-    // 图标：目录 lucide-folder / 文件 lucide-file-text。
+    // 图标：目录 lucide-folder / 文件按扩展名（未知/文本类回退 lucide-file-text）。
     const dirRow = screen.getByText("a").closest(".ant-tree-treenode")!;
     expect(dirRow.querySelector("svg.lucide-folder")).toBeTruthy();
     const fileRow = screen.getByText("a.txt").closest(".ant-tree-treenode")!;
     expect(fileRow.querySelector("svg.lucide-file-text")).toBeTruthy();
+  });
+
+  it("文件图标按扩展名分型：代码/json/图片各用不同 lucide 图标，未知扩展回退 FileText", async () => {
+    mockFetchTree.mockResolvedValue({
+      entries: [file("main.py"), file("config.json"), file("logo.png"), file("data.xyz"), dir("docs")],
+    });
+    render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
+    await waitForRoot();
+
+    // 取 iconEle 内的图标 svg（目录行第一个 svg 是 switcher 展开箭头，无 lucide class）。
+    const rowIconClass = (name: string) =>
+      screen
+        .getByText(name)
+        .closest(".ant-tree-treenode")!
+        .querySelector(".ant-tree-iconEle svg")!.classList;
+    // lucide 类名规则：FileCode2 → lucide-file-code2（数字直接缀尾不加连字符）。
+    expect(rowIconClass("main.py").contains("lucide-file-code2")).toBe(true);
+    expect(rowIconClass("config.json").contains("lucide-file-json2")).toBe(true);
+    expect(rowIconClass("logo.png").contains("lucide-file-image")).toBe(true);
+    // 未匹配扩展名与目录：回退默认文件/目录图标。
+    expect(rowIconClass("data.xyz").contains("lucide-file-text")).toBe(true);
+    expect(rowIconClass("docs").contains("lucide-folder")).toBe(true);
   });
 
   // ── 懒加载 / 文件选中 ─────────────────────────────────────────────────

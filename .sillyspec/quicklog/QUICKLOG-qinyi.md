@@ -339,10 +339,19 @@
 审计：📝 文档欠账（D-8）：7 个源码文件改动未同步任何模块文档（涉及模块：frontend）
 审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/workspaces/[id]/explorer/page.tsx, frontend/src/components/explorer/file-explorer.tsx
 
-## ql-20260821-008-fade | 2026-08-21 09:14:34 | (quick 任务)
-状态：进行中
+## ql-20260821-008-fade | 2026-08-21 09:14:34 | explorer 文件树长文件名换行丑陋、树栏宽度不可调且偏窄、文件图标无类型区分
+状态：已完成
 关联变更：（无）
-文件：frontend/src/components/explorer/file-explorer.tsx, frontend/src/components/explorer/__tests__/file-explorer.test.tsx
+文件：
+- frontend/src/components/explorer/file-explorer.tsx（单行覆盖+扩展名图标）
+- frontend/src/components/explorer/__tests__/file-explorer.test.tsx（图标分型用例）
+- frontend/src/app/(dashboard)/workspaces/[id]/explorer/page.tsx（TreePanelResizer 拖拽调宽）
+- frontend/src/app/(dashboard)/workspaces/[id]/__tests__/explorer-page.test.tsx（拖拽 3 用例）
+需求：explorer 文件树长文件名换行丑陋、树栏宽度不可调且偏窄、文件图标无类型区分，要求单行展示、可拖拽调宽并加大默认宽度、图标按格式区分。
+根因：antd Tree blockNode 把树行钳在容器宽内，节点 wrapper 为 block 而图标/标题是行内盒，排不下时图标与文件大小整体掉到第二行，旧横向滚动方案因行宽被钳实际从未生效；左栏宽度 w-60 写死无调整入口；图标仅 FileText 单一灰。
+方案：file-explorer.tsx 树容器加 6 条 [&_…]! 提权覆盖（treenode 放开为 w-max+min-w-full、content-wrapper 强制 flex 单行不换行、indent-unit w-4 补 ! 修正旧覆盖被 antd css-in-js 压制）实现整行单行+真横向滚动；page.tsx 新增 TreePanelResizer 夹持把手（默认 320px、拖拽钳 200~640、双击复位、方向键微调、localStorage 记忆）；FILE_ICON_BY_EXT 按扩展名映射 lucide 图标与信息色（代码/json/图片/音视频/压缩包/表格/pdf/office/.env），树与搜索面板共用。
+结果：explorer 组件+页面 32/32 用例通过（新增图标分型 1 例+拖拽 3 例），tsc 0 错，lint 仅预存 warning，tailwind CLI 确认覆盖规则生成，模块文档变更索引已更新。
+审计：⚖️ 归属切分：4 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/workspaces/[id]/components/page.tsx, frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx, frontend/src/components/__tests__/workspace-card.test.tsx, frontend/src/components/workspace-tabs.tsx
 
 ## ql-20260821-009-7c69 | 2026-08-21 09:34:12 | 组件页删次级导航+菜单组件移扫描文档前
 状态：已完成

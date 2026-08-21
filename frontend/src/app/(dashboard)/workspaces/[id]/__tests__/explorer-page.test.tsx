@@ -11,7 +11,7 @@
  * 依据：tasks/task-08.md、task-06/07 组件契约。
  */
 
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -151,6 +151,7 @@ beforeEach(() => {
   filePreviewMock.receivedFilePath = null;
   explorerMock.useExplorerTree.mockReturnValue(makeQueryResult());
   explorerMock.useExplorerFile.mockReturnValue(makeQueryResult());
+  localStorage.removeItem("sillyhub-explorer-tree-width");
 });
 
 afterEach(() => {
@@ -189,6 +190,59 @@ describe("workspace explorer page（task-08）", () => {
   it("刷新按钮存在", () => {
     renderPage();
     expect(screen.getByRole("button", { name: "刷新" })).toBeInTheDocument();
+  });
+
+  // ── 左栏宽度拖拽（ql-20260821-008-fade）──────────────────────────────────
+
+  /** jsdom 无 PointerEvent 实现，fireEvent.pointer* 走 Event 兜底构造带不上坐标
+   *  （React handler 里 e.clientX 为 undefined），须 createEvent 后手工补属性再派发。 */
+  function firePointer(
+    el: Element | Window,
+    name: "pointerDown" | "pointerMove" | "pointerUp",
+    init: { clientX?: number } = {},
+  ) {
+    const ev = createEvent[name](el as Element, init);
+    for (const [k, v] of Object.entries(init)) {
+      Object.defineProperty(ev, k, { value: v });
+    }
+    fireEvent(el, ev);
+  }
+
+  it("左栏默认 320px；拖动把手调宽并写入 localStorage 记忆", () => {
+    renderPage();
+
+    const panel = screen.getByTestId("explorer-tree-panel");
+    expect(panel.style.width).toBe("320px");
+
+    const resizer = screen.getByTestId("explorer-tree-resizer");
+    firePointer(resizer, "pointerDown", { clientX: 320 });
+    firePointer(window, "pointerMove", { clientX: 420 });
+    firePointer(window, "pointerUp");
+
+    expect(panel.style.width).toBe("420px");
+    expect(localStorage.getItem("sillyhub-explorer-tree-width")).toBe("420");
+  });
+
+  it("拖拽钳制在 200~640px，双击把手复位 320px", () => {
+    renderPage();
+
+    const panel = screen.getByTestId("explorer-tree-panel");
+    const resizer = screen.getByTestId("explorer-tree-resizer");
+
+    firePointer(resizer, "pointerDown", { clientX: 320 });
+    firePointer(window, "pointerMove", { clientX: 2000 });
+    firePointer(window, "pointerUp");
+    expect(panel.style.width).toBe("640px");
+
+    fireEvent.dblClick(resizer);
+    expect(panel.style.width).toBe("320px");
+    expect(localStorage.getItem("sillyhub-explorer-tree-width")).toBe("320");
+  });
+
+  it("localStorage 有合法记忆宽度时按记忆值初始化", () => {
+    localStorage.setItem("sillyhub-explorer-tree-width", "480");
+    renderPage();
+    expect(screen.getByTestId("explorer-tree-panel").style.width).toBe("480px");
   });
 
   // ── 三降级态 ───────────────────────────────────────────────────────────
