@@ -161,11 +161,13 @@ const config: Config = {
         ],
       },
       boxShadow: {
-        // 与 tokens.shadow 对齐(柔和阴影,rgba 低透明)
-        xs: "0 1px 2px 0 rgba(15, 23, 42, 0.05)",
-        sm: "0 1px 2px 0 rgba(15, 23, 42, 0.05)",
-        md: "0 2px 8px -1px rgba(15, 23, 42, 0.08), 0 1px 3px 0 rgba(15, 23, 42, 0.04)",
-        lg: "0 8px 24px -4px rgba(15, 23, 42, 0.10), 0 4px 8px -2px rgba(15, 23, 42, 0.05)",
+        // ql-20260820-009 阴影主题化:走 CSS 变量(globals.css 双套,紫调/blue 旧灰调),
+        // shadow-* 类随 html data-theme 切换;与 brand 阶同款 var 模式
+        xs: "var(--shadow-sm)",
+        sm: "var(--shadow-sm)",
+        md: "var(--shadow-md)",
+        lg: "var(--shadow-lg)",
+        primary: "var(--shadow-primary)",
       },
       borderRadius: {
         // 补 xs;其余对齐 tokens.radius(sm/md/lg/xl)
