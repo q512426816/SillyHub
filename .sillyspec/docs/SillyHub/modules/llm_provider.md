@@ -80,3 +80,4 @@ query_usage: _detect_usage_provider(base_url) 路由（不加 DB 字段）
 <!-- MANUAL_NOTES_START -->
 
 <!-- MANUAL_NOTES_END -->
+- 2026-08-20-session-multimodal-attachments：会话附件（图片多模态/文件落盘/multimodal 三态门控）涉及本模块（详见 changes 归档）

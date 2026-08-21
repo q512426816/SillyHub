@@ -90,3 +90,4 @@ whoLine: attach 时并发拉 listSessionRuns，按 realRunId??runId 匹配注入
 - ql-20260820-007-0cda | /sessions attach 恢复竞态修复——会话详情/历史日志到达顺序不再影响运行中轮状态（卡「已完成」/状态条消失）
 - ql-20260820-006-9e18 | 「我的供应商」页移除启动/停止（set-default）功能——供应商生效改 /sessions 会话级选择，本页纯 CRUD（后端端点保留待后续清理）
 - ql-20260819-002-9167 | /sessions 页移除「结束会话」按钮（结束走自然超时；runtimes 弹窗入口保留；已结束横幅/重新开启保留）
+- 2026-08-20-session-multimodal-attachments：会话附件（图片多模态/文件落盘/multimodal 三态门控）涉及本模块（详见 changes 归档）

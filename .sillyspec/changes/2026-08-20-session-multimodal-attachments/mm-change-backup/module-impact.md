@@ -20,10 +20,10 @@
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `modules/daemon.md` | 更新 daemon 模块卡（附件端点/inject 扩展/协议扩展） | done |
-| `modules/agent.md` | 更新 agent 模块卡（user_input 标记行） | done |
-| `modules/models.md` | 更新 models 模块卡（SessionAttachment/multimodal 列） | done |
-| `modules/llm_provider.md` | 更新 llm_provider 模块卡（multimodal 字段） | done |
+| `modules/daemon.md` | 更新 daemon 模块卡（附件端点/inject 扩展/协议扩展） | pending |
+| `modules/agent.md` | 更新 agent 模块卡（user_input 标记行） | pending |
+| `modules/models.md` | 更新 models 模块卡（SessionAttachment/multimodal 列） | pending |
+| `modules/llm_provider.md` | 更新 llm_provider 模块卡（multimodal 字段） | pending |
 | `modules/storage.md` | 无变化（仅复用既有接口） | skipped |
-| `modules/frontend_app.md` | 更新 frontend_app 模块卡（附件 UI/回显） | done |
+| `modules/frontend_app.md` | 更新 frontend_app 模块卡（附件 UI/回显） | pending |
 | `_module-map.yaml` | 无变化（未增删模块，session_attachment 并入 daemon 模块路径） | skipped |
