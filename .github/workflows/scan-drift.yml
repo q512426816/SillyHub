@@ -37,6 +37,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install pytest（setup-python 是裸环境，测试步骤依赖需显式装）
+        run: python -m pip install --disable-pip-version-check pytest
+
       - name: Scan drift check tests（HY-10：本体测试此前无 CI 执行）
         run: python -m pytest scripts/test_scan_drift_check.py -q
 

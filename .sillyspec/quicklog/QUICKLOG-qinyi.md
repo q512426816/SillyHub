@@ -300,3 +300,30 @@
 方案：sticky top-16；查询同参对齐+href 带 tab；基本信息行展示项目名+行尾按钮开弹层删独立按钮
 结果：tsc 0、eslint 0、全量 1795 用例全绿、已部署
 审计：📝 文档欠账（D-8）：3 个源码文件改动未同步任何模块文档（涉及模块：frontend）
+
+## ql-20260821-005-50d1 | 2026-08-21 08:54:21 | /workspaces 列表页样式对齐工作台风格
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/page.tsx（六项样式优化）
+需求：/workspaces 列表页样式对齐工作台风格
+根因：旧样式残留（红条/裸筛选条/emoji 空态/文字加载态/两列网格）
+方案：ErrorBanner+筛选条白卡容器化+EmptyState 去 emoji+骨架卡+lg 三列
+结果：tsc 0、eslint 0、全量 1795 用例全绿、已部署
+
+## ql-20260821-006-6ebe | 2026-08-21 09:04:51 | 修复三处 CI 红灯（scan-drift 缺 pytest、mypy 多余 ignore、missions 测试时序断言）
+状态：已完成
+关联变更：（无）
+文件：
+- .github/workflows/scan-drift.yml（补 pip install pytest 步骤（裸环境显式装依赖））
+- backend/app/modules/mcp_gateway/tests/test_tools_new.py（删永不触发的 no-untyped-def ignore 码并留注释）
+- frontend/src/app/(dashboard)/projects/[id]/missions/__tests__/missions-page.test.tsx（listProjectMissions 断言包 waitFor 治满负载时序脆弱）
+需求：修复三处 CI 红灯（scan-drift 缺 pytest、mypy 多余 ignore、missions 测试时序断言）
+根因：91194fe1 给 scan-drift.yml 加 pytest 测试步骤但 setup-python 是裸环境从未装 pytest；1436b2b4 给 test_tools_new.py 加的 no-untyped-def ignore 码在 strict=false（未开 disallow_untyped_defs）下永不触发，warn_unused_ignores 报 unused-ignore；missions-page 测试在 waitFor 见到 DOM 后同步断言 effect 发起的 mock 调用，满负载下 effect flush 晚于 DOM 提交（单文件跑掩盖）
+方案：workflow 补 pip install pytest 步骤；删该 ignore 码留注释说明；mock 断言包 await waitFor
+结果：mypy 661 文件 0 错、ruff 过、vitest 全量 168 文件 1795 用例全绿、scan-drift 脚本测试 32 过、YAML 解析 OK
+
+## ql-20260821-007-e454 | 2026-08-21 09:08:08 | 工作区卡片五点优化：删绑定守护进程行在线徽标（与头部守护在线重复）/卡片展示关联项目/删详情关系按钮+剩余按钮样式优化/卡片排版重排/列表页筛选控件换 antd
+状态：进行中
+关联变更：（无）
+文件：frontend/src/components/workspace-path-fields.tsx, frontend/src/components/workspace-card.tsx, frontend/src/app/(dashboard)/workspaces/page.tsx, frontend/src/components/__tests__/workspace-card.test.tsx

@@ -373,7 +373,10 @@ async def test_dispatch_worker_binds_profile_and_writes_read_only(
 
     monkeypatch.setattr(MissionControlService, "can_dispatch_worker", _allow)
 
-    async def _no_exec(self, run, **kwargs):  # type: ignore[no-untyped-def]
+    # 未注解 def 合法（mypy strict=false，不检查未注解函数体）；原
+    # `# type: ignore[no-untyped-def]` 永不触发（未开 disallow_untyped_defs），
+    # warn_unused_ignores 下反而报 unused-ignore，已删。
+    async def _no_exec(self, run, **kwargs):
         return None
 
     monkeypatch.setattr(

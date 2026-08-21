@@ -168,11 +168,16 @@ describe("项目团队会话页（task-15 / cross-workspace-team-mission）", ()
       screen.getByText(/先在上方勾选派发范围，再选主工作区/),
     ).toBeInTheDocument();
 
-    // 按路由项目 id 拉候选；MissionConsole projectMode 挂载即拉项目历史
+    // 按路由项目 id 拉候选；MissionConsole projectMode 挂载即拉项目历史。
+    // 历史拉取在挂载 effect 里发起，DOM 提交与 effect flush 是两个时点——
+    // 满负载全量跑时 waitFor 见到候选名单时 effect 可能尚未执行（单文件跑
+    // 掩盖了这一点），mock 断言同样要 waitFor，不能紧跟 DOM 断言同步判。
     expect(mocks.listProjectWorkspaces).toHaveBeenCalledWith("proj-1");
-    expect(mocks.listProjectMissions).toHaveBeenCalledWith("proj-1", {
-      limit: 20,
-    });
+    await waitFor(() =>
+      expect(mocks.listProjectMissions).toHaveBeenCalledWith("proj-1", {
+        limit: 20,
+      }),
+    );
   });
 
   // ── 2. anchor 默认逻辑（design §7.1：backend-code 词表优先，否则第一个）──
