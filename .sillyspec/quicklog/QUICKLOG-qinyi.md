@@ -323,7 +323,47 @@
 方案：workflow 补 pip install pytest 步骤；删该 ignore 码留注释说明；mock 断言包 await waitFor
 结果：mypy 661 文件 0 错、ruff 过、vitest 全量 168 文件 1795 用例全绿、scan-drift 脚本测试 32 过、YAML 解析 OK
 
-## ql-20260821-007-e454 | 2026-08-21 09:08:08 | 工作区卡片五点优化：删绑定守护进程行在线徽标（与头部守护在线重复）/卡片展示关联项目/删详情关系按钮+剩余按钮样式优化/卡片排版重排/列表页筛选控件换 antd
+## ql-20260821-007-e454 | 2026-08-21 09:08:08 | 列表页卡片五点+两点优化（守护去重/关联项目/删按钮/重排/antd 筛选/删旁路/弹窗化）
+状态：已完成
+关联变更：（无）
+文件：
+- workspace-path-fields.tsx（去重）
+- workspace-card.tsx（重排）
+- workspaces/page.tsx（antd 筛选+项目接线+删链接）
+- workspace-scan-dialog.tsx（Modal 化）
+- 两测试（断言同步）
+需求：列表页卡片五点+两点优化（守护去重/关联项目/删按钮/重排/antd 筛选/删旁路/弹窗化）
+根因：在线徽标重复/卡片缺项目信息/footer 冗余/原生 select 差/旁路无用/内嵌块非弹窗
+方案：path-fields 去重+卡片重排+项目 tag 行+antd 筛选+删链接+Modal 化
+结果：tsc 0、eslint 0、全量 1793 用例全绿、已部署
+审计：📝 文档欠账（D-8）：7 个源码文件改动未同步任何模块文档（涉及模块：frontend）
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/workspaces/[id]/explorer/page.tsx, frontend/src/components/explorer/file-explorer.tsx
+
+## ql-20260821-008-fade | 2026-08-21 09:14:34 | (quick 任务)
 状态：进行中
 关联变更：（无）
-文件：frontend/src/components/workspace-path-fields.tsx, frontend/src/components/workspace-card.tsx, frontend/src/app/(dashboard)/workspaces/page.tsx, frontend/src/components/__tests__/workspace-card.test.tsx
+文件：frontend/src/components/explorer/file-explorer.tsx, frontend/src/components/explorer/__tests__/file-explorer.test.tsx
+
+## ql-20260821-009-7c69 | 2026-08-21 09:34:12 | 组件页删次级导航+菜单组件移扫描文档前
+状态：已完成
+关联变更：（无）
+文件：
+- components/page.tsx（删 NAV_ITEMS）
+- workspace-tabs.tsx（调序）
+需求：组件页删次级导航+菜单组件移扫描文档前
+根因：NAV_ITEMS 与顶部菜单重复（P2-3 留档）；组件位次应后移
+方案：删 NAV_ITEMS 渲染段；TABS 序=概览/变更/会话/文件/组件/扫描文档/…
+结果：tsc 0、eslint 0、全量 1797 用例全绿、已部署
+审计：📝 文档欠账（D-8）：2 个源码文件改动未同步任何模块文档（涉及模块：frontend）
+
+## ql-20260821-010-3993 | 2026-08-21 09:44:33 | runtime 页步骤产物 1589 个文件一次全渲染卡顿
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/[id]/runtime/page.tsx（产物分页 20/页 + Pagination 控件）
+- frontend/src/app/(dashboard)/workspaces/[id]/runtime/page.test.tsx（分页三用例）
+需求：runtime 页步骤产物 1589 个文件一次全渲染卡顿，需分页展示
+根因：产物区 artifacts.map 无分页，仓库运行时积累上千产物时 DOM 一次渲染全部行
+方案：ARTIFACTS_PAGE_SIZE=20 分页——antd Pagination（共 N 个/页码），pagedArtifacts slice 当页渲染，列表重载回第 1 页（safeArtifactPage 防越界），不足一页不渲染控件；展开态翻页保留（翻回自动重展）
+结果：vitest 15 passed（12 旧+3 新：当页 20 行/翻页第 2 页剩 5 行/单产物无控件）；tsc --noEmit 0 错
+审计：📝 文档欠账（D-8）：2 个源码文件改动未同步任何模块文档（涉及模块：frontend）

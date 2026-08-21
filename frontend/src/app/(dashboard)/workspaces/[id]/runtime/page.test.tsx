@@ -261,6 +261,60 @@ describe("运行时状态页 · user-inputs 截断（FR-05 / design §5.3）", (
   });
 });
 
+describe("运行时状态页 · 产物分页（2026-08-21 ql-20260821-010）", () => {
+  function mockManyArtifacts(count: number) {
+    runtimeApi.getRuntimeProgress.mockResolvedValue(PROGRESS);
+    runtimeApi.getRuntimeUserInputsRaw.mockResolvedValue("# 输入\n第一条\n");
+    runtimeApi.getRuntimeArtifacts.mockResolvedValue(
+      Array.from({ length: count }, (_, i) => ({
+        filename: `artifact-${String(i).padStart(4, "0")}.txt`,
+        size_bytes: 100 + i,
+        last_modified: "2026-08-21T09:00:00Z",
+      })),
+    );
+  }
+
+  it("超一页只渲染当页 20 行 + 分页控件与总数", async () => {
+    mockManyArtifacts(25);
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("步骤产物 (25)")).toBeInTheDocument();
+    });
+    expect(screen.getByText("共 25 个")).toBeInTheDocument();
+    // 第 1 页只含 artifact-0000 ~ artifact-0019
+    expect(screen.getByText("artifact-0000.txt")).toBeInTheDocument();
+    expect(screen.getByText("artifact-0019.txt")).toBeInTheDocument();
+    expect(screen.queryByText("artifact-0020.txt")).not.toBeInTheDocument();
+  });
+
+  it("翻到第 2 页渲染剩余 5 行", async () => {
+    mockManyArtifacts(25);
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("artifact-0019.txt")).toBeInTheDocument();
+    });
+    // antd Pagination 页码按钮按 title 定位
+    fireEvent.click(screen.getByTitle("2"));
+    await waitFor(() => {
+      expect(screen.getByText("artifact-0020.txt")).toBeInTheDocument();
+    });
+    expect(screen.getByText("artifact-0024.txt")).toBeInTheDocument();
+    expect(screen.queryByText("artifact-0000.txt")).not.toBeInTheDocument();
+  });
+
+  it("不足一页（1 个产物）不渲染分页控件", async () => {
+    mockAllOk();
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("步骤产物 (1)")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("共 1 个")).not.toBeInTheDocument();
+  });
+});
+
 describe("运行时状态页 · 错误分级提示（design §6.3 消费端）", () => {
   it.each([
     [

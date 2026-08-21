@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { type TableProps } from "antd";
+import { Pagination, type TableProps } from "antd";
 
 import {
   DataTable,
@@ -51,6 +51,9 @@ function formatBytes(bytes: number): string {
 // 一次性渲染巨型文本卡死页面；完整内容始终留在本机仓库文件中。
 const USER_INPUTS_MAX_DISPLAY = 50000;
 
+// 产物列表分页大小：仓库运行时可积累上千个产物（实测 1589），一次全渲染卡顿。
+const ARTIFACTS_PAGE_SIZE = 20;
+
 // 2026-08-19-runtime-live-daemon-read：实时读取链路的错误分级提示（design §6.3
 // 映射表的消费端）。backend 消息已是中文，这里补状态码维度的行动指引；非 ApiError
 // （网络中断等）无状态码，走通用文案。
@@ -77,6 +80,7 @@ export default function RuntimePage({ params }: Props) {
   const [userInputs, setUserInputs] = useState<string>("");
   const [artifacts, setArtifacts] = useState<ArtifactEntry[]>([]);
   const [selectedArtifact, setSelectedArtifact] = useState<string | null>(null);
+  const [artifactPage, setArtifactPage] = useState(1);
   const [artifactContent, setArtifactContent] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -102,6 +106,7 @@ export default function RuntimePage({ params }: Props) {
       setProgress(data);
       setUserInputs(ui);
       setArtifacts(arts);
+      setArtifactPage(1);
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "加载运行时状态失败");
       setPageErrorStatus(err instanceof ApiError ? err.status : null);
@@ -216,6 +221,15 @@ export default function RuntimePage({ params }: Props) {
   const userInputsDisplay = userInputsTooLong
     ? userInputs.slice(-USER_INPUTS_MAX_DISPLAY)
     : userInputs;
+
+  // 产物分页派生值：换页只重渲染当页 20 行；列表重新加载时回第 1 页，
+  // 展开态保留（selectedArtifact 未清，翻回原页自动重新展开）。
+  const artifactPageCount = Math.ceil(artifacts.length / ARTIFACTS_PAGE_SIZE);
+  const safeArtifactPage = Math.min(artifactPage, artifactPageCount || 1);
+  const pagedArtifacts = artifacts.slice(
+    (safeArtifactPage - 1) * ARTIFACTS_PAGE_SIZE,
+    safeArtifactPage * ARTIFACTS_PAGE_SIZE,
+  );
 
   return (
     <PageContainer>
@@ -341,7 +355,7 @@ export default function RuntimePage({ params }: Props) {
           {artifacts.length > 0 && (
             <SectionCard title={`步骤产物 (${artifacts.length})`} bodyPadding="p-0">
               <div className="divide-y">
-                {artifacts.map((art) => (
+                {pagedArtifacts.map((art) => (
                   <div key={art.filename}>
                     <button
                       type="button"
@@ -367,6 +381,19 @@ export default function RuntimePage({ params }: Props) {
                   </div>
                 ))}
               </div>
+              {artifactPageCount > 1 && (
+                <div className="flex items-center justify-end border-t px-3 py-2">
+                  <Pagination
+                    size="small"
+                    total={artifacts.length}
+                    pageSize={ARTIFACTS_PAGE_SIZE}
+                    current={safeArtifactPage}
+                    onChange={(p) => setArtifactPage(p)}
+                    showSizeChanger={false}
+                    showTotal={(t) => `共 ${t} 个`}
+                  />
+                </div>
+              )}
             </SectionCard>
           )}
         </div>
