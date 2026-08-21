@@ -1,7 +1,7 @@
 """20260821120000_backfill_session_agent_session_id
 
-Revision ID: 20260821120000
-Revises: 20260821100000
+Revision ID: 20260821130000
+Revises: 20260821120000
 Create Date: 2026-08-21
 
 存量会话 SDK resume key 一次性回填（task-02 / DS-2，变更
@@ -40,8 +40,8 @@ from typing import Sequence
 
 from alembic import op
 
-revision: str = "20260821120000"
-down_revision: str | None = "20260821100000"
+revision: str = "20260821130000"
+down_revision: str | None = "20260821120000"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

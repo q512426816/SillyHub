@@ -24,8 +24,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import sqlalchemy as sa
 
-REVISION_ID = "20260821120000"
-DOWN_REVISION_ID = "20260821100000"
+REVISION_ID = "20260821130000"
+DOWN_REVISION_ID = "20260821120000"  # merge 收口迁移之后（rebase 合线后单头链）
 
 
 def _load_migration(revision_id: str):
