@@ -61,6 +61,7 @@ execute 前缀步「加载上下文」的 `--done` 会硬校验符号影响面�
 
 - 路径：`{SPEC_ROOT}/changes/<变更名>/symbol-impact.md`（步骤 prompt 中会输出具体路径）。
 - 要求：plan.md 中**每个 task-XX 都要有一行结论**——涉及签名级变更（构造函数参数/接口/DTO/方法签名增删改）就列变更类型 + 受影响调用点 + 是否在任务范围内；无签名级变更也要显式写「无签名级变更」。
+- 🔧 **骨架生成**：`sillyspec symbol-impact --change <变更名>` 从 tasks.md 生成逐 task `<!--TODO-->` 骨架（撞 gate 时 CLI 也会自动落一份），逐行替换为结论即可；**未替换的 TODO 占位会被 gate 拒绝**（骨架不能直接过门）。
 - 文件缺失或未覆盖全部 task → `--done` 被阻断（进度不推进），补全后重跑即可。
 
 ### Task Review Gate
@@ -88,7 +89,10 @@ execute 完成时，每个 task 必须有 `review.json` 且 verdict 通过，否
   ```
 
 - `base` / `head` 必须是**真实 git commit**（`git rev-parse --verify`），否则判伪造并阻断。`changedFiles` 与实际 `git diff base..head` 完全不相交也判伪造。base..head 空 commit diff 但 working-tree 有未提交改动 → 视为有效改动（warning 不阻断）。
-- 后端 router task 另需在 `.sillyspec/.runtime/contract-artifacts/<task-name>/endpoints.json` 写 API 端点清单（扫 `@router.get/post/...`）。
+
+> 🔧 **mechanics 字段不要手算**：`schemaVersion`/`task`/`base`/`head`/`changedFiles`(/跨仓 `repo`) 全部可由 CLI 从 git + task 卡推导。子代理/你只需写**语义字段**（`specVerdict`/`qualityVerdict`/`reviewerNotes`/`requiredEvidence`），mechanics 字段可以瞎填占位（如 `"base": "TODO"`），写完跑 `sillyspec backfill-reviews --change <变更名> --adopt` 一键重算代填（verdict 原样保留）。gate 拦下 mechanics 错误时也跑同一条命令修复。
+
+- 后端 router task 另需产出 API 端点清单：`sillyspec endpoints extract --change <变更名> --task <task-NN>`（CLI 静态扫描 FastAPI/Express/Spring 路由装饰器生成 endpoints.json，verify 探针 5 消费；扫描面默认取 task 卡 allowed_paths ∪ design 清单，也可 `--dir`/`--files` 显式指定）。勿手扫装饰器手写——易漏 endpoint。
 
 ### Stage Review Gate（execute 末尾的 acceptance review.json）
 
@@ -114,7 +118,7 @@ execute 还有**第二道**独立的 stage 级审查：除逐 task review.json �
   }
   ```
 
-- `docHash` = `sha256(主审查文档内容)`（hex）—— execute 主审查文档是 `design.md`，即 `reviewedFiles[0]`。CLI 会重算 sha256 比对，不符判伪造（fail-closed）；找不到主文档也 fail。**改 design.md 后须重算 docHash 再写**，可用 `sillyspec run execute --done` 触发的 prompt 注入版契约（运行时注入的 schema 表 + JSON 示例 + docHash 算法）逐字改值。
+- `docHash` = `sha256(主审查文档内容)`（hex）—— execute 主审查文档是 `design.md`，即 `reviewedFiles[0]`。CLI 会重算 sha256 比对，不符判伪造（fail-closed）；找不到主文档也 fail。**docHash 可先占位（如 "TODO"）勿手算**——改 design.md 后跑 `sillyspec register-stage-review --change <变更名> --stage execute --refresh-hash` 一键重算代填（verdict 保留；design 改版多阶段联动加 --all）；gate 拦 docHash 失配时也用同一条命令修复。
 - `tier=independent` 时必须由独立 QA 子代理产出该 review.json（独立上下文，不共享实现者分析）；`tier=self`（变更 ≤3 文件）降级为当前 agent 自审。
 - **审查范围分级**（tier=independent 时省重复消耗）：Task Review Gate 已产出 review.json 且 specVerdict/qualityVerdict 双 pass 的 task，QA 子代理只抽查（读 1-2 个核心 diff 文件抽验 reviewerNotes 与实际改动相符）；fail/cannot_verify/缺失的 task 全量重审。三项始终必查：跨 task 交界、design.md 整体对照、组装行为（全量测试/构建/启动）——task review 只看单 task diff，覆盖不到这三项。
 - 该 acceptance review 同时覆盖"代码审查"视角，后续代码审查步骤仅需轻量复审。
@@ -127,6 +131,8 @@ execute 还有**第二道**独立的 stage 级审查：除逐 task review.json �
 
 可选：`sillyspec dispatch probe` 查看 SillyHub 是否可用。
 
+> 📍 `local.yaml` 恒在 `.sillyspec/local.yaml`——项目根目录**没有**这个文件，别去那里找或新建（hook 会拦）。worktree 内该文件不随 checkout 出现，读配置直接跑 `sillyspec config cat`（自动定位到主仓真实配置）；可用键清单见 `sillyspec config schema`。
+
 ## 跨仓 task（一个 change 改多个仓库）
 
 单个 change 的 task 可以分散到主仓 + 多个跨仓仓实现（典型场景：dogfood 自指、monorepo 多包仓、共享库 + 调用方联合改造）。**单仓 change 不需要任何跨仓配置**（所有 task 不写 `repo:` 即走原流程，零回归）。
@@ -134,7 +140,7 @@ execute 还有**第二道**独立的 stage 级审查：除逐 task review.json �
 ### 跨仓 task 配置（plan 阶段产出，execute 阶段消费）
 
 - **task 卡片 `repo:` 字段**：跨仓 task 在 `tasks/task-NN.md` frontmatter 写 `repo: <key>`（缺省='main'=主仓 task，不写即主仓）。
-- **local.yaml `repos:` 段**：在 `.sillyspec/local.yaml` 注册跨仓仓路径（`main` 不用注册，隐式=当前项目）：
+- **local.yaml `repos:` 段**：跨仓仓路径注册（`main` 不用注册，隐式=当前项目）。**用命令注册，勿手编 YAML**：`sillyspec local register-repo <key> <跨仓仓根路径>`（execute 启动报缺注册时报错文案里就带这条命令）。手写格式参考：
   ```yaml
   repos:
     shared-lib: ../shared-lib
@@ -147,12 +153,12 @@ execute 还有**第二道**独立的 stage 级审查：除逐 task review.json �
 
 - **主仓 task**：子代理 workdir = 主仓 worktree 路径（CLI 自动创建的隔离 worktree）。
 - **跨仓 task**：子代理 workdir = 跨仓仓根目录（**直接在跨仓仓主干工作区改+commit，不经主仓 worktree、不建分支**）。commit 到跨仓仓主干即落盘。
-- 同一个 Wave 内允许混合主仓 + 跨仓 task（每个 task 独立子代理，各传各的 workdir）。Wave prompt 会注入 per-task workdir 表，按表选。
+- 同一个 Wave 内允许混合主仓 + 跨仓 task。默认每 task 独立子代理（各传各的 workdir，Wave prompt 注入 per-task workdir 表，按表选）；同 Wave 内满足**文件正交 / 无契约链 / 组 ≤3** 三个条件的 task 可合并为一个 batch 子代理串行实现——batch 只合并实现，task 审查、review.json 产出与 checkbox 勾选仍归主 agent（子代理返回后逐 task 进行）。
 
 ### 跨仓 task 的双锡点（CLI 写入，子代理不改）
 
 - `base_commit`：CLI 派发跨仓 task 前实时 `git -C <跨仓仓根> rev-parse HEAD` 落盘到 task 卡 frontmatter（锁 base，防同 Wave 多 task 改同跨仓仓时 HEAD 推进致 diff 漂移）。
-- `head_commit`：跨仓 task 子代理 commit 完成后、写 review.json / 勾选 checkbox **之前**，由你（主 agent）运行 `git -C <跨仓仓根> rev-parse HEAD` 把结果写入该 task 卡 frontmatter `head_commit:` 字段。
+- `head_commit`：**同样由 CLI 自动落盘**——execute `--done` 时 CLI 实时 `git -C <跨仓仓根> rev-parse HEAD` 幂等写入 task 卡（已存在不覆盖，你手写的精确锚点优先）。你无需手跑 rev-parse。review.json 的 base/head 无需手算，跑 `sillyspec backfill-reviews --change <变更名> --adopt` 从 task 卡锡点一键代填。
 - review.json 的 `base`/`head` 取这两个锡点（非瞬时 HEAD）。
 
 ### 跨仓 task 的 review.json
@@ -187,7 +193,7 @@ execute 完成后（所有 Wave/task 完成 + Task Review Gate 通过），运�
 
 ### 批量完成（一次 --done 收尾）
 
-当 `plan.md` 所有 task checkbox 已勾（人工勾或基于各 task `review.json` pass 由 CLI 自动勾）且代码客观核验通过（`checkExecuteCodeEvidence` 非"零变更"）时，任一 execute `--done` 会**一次性补完所有剩余 step** 直达阶段完成，不必逐次 +1 推进。日志会打印 `🚀 execute 批量完成：plan 全勾 + 代码核验通过，一次性补完 N 个剩余 step`。条件不满足（plan 未全勾 / 代码零变更）时仍按单步推进，要求补 review 后重跑 `--done` 直至满足。
+当 `tasks.md`（任务注册表唯一真相）所有 task checkbox 已勾（agent 按 review gate 手动勾或基于各 task `review.json` pass 由 CLI `autoCheckPlanFromReviews` 自动勾，双路都写 tasks.md、文件锁 `.tasks.md.lock` 串行化）且代码客观核验通过（`checkExecuteCodeEvidence` 非"零变更"）时，任一 execute `--done` 会**一次性补完所有剩余 step** 直达阶段完成，不必逐次 +1 推进。日志会打印 `🚀 execute 批量完成` 提示。条件不满足（tasks.md 未全勾 / 代码零变更）时仍按单步推进，要求补 review 后重跑 `--done` 直至满足。
 
 ## 铁律
 

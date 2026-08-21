@@ -9,6 +9,8 @@ description: 用于归档已验证完成的变更。适合用户说"归档、arc
 - verify 已通过，把变更包归档沉淀
 - 5 步：任务完成度检查 → 模块影响分析 → 同步模块文档 → 确认归档 → 更新路线图
 
+> 🔧 模块影响分析步：先跑 `sillyspec module-impact --change <变更名>` 生成 module-impact.md 骨架——文件×模块归属按 `_module-map.yaml` paths 前缀匹配预填 + 未匹配文件清单，你只需逐行填「影响类型」与 review 标记（以 git diff 为准，真实 > 声明）；已存在不覆盖。
+
 ## 多变更说明
 
 项目有多个活跃变更（`.sillyspec/changes/` 下有多个目录）时，所有 `sillyspec run` 命令需加 `--change <变更名>` 指定操作目标；只有一个变更时可省略（CLI 自动检测）。
@@ -64,7 +66,7 @@ sillyspec run archive --continue --answer "确认写入"
 
 ### 归档结果
 
-归档后变更目录从 `changes/<名>/` 移到 `changes/archive/YYYY-MM-DD-<名>/`，并从活跃列表注销。后续用 `/sillyspec:commit` 提交。
+归档后变更目录从 `changes/<名>/` 移到 `changes/archive/<名>/`，并从活跃列表注销。后续用 `/sillyspec:commit` 提交。
 
 ## 阶段流转
 

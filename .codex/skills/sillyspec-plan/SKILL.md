@@ -1,13 +1,13 @@
 ---
 name: sillyspec:plan
-description: 用于把 design 拆解为可执行的实现计划。适合用户说"拆任务、做计划、排 wave、规划实现步骤"。产出 plan.md（Wave 分组 + Task 列表 + 依赖关系）。
+description: 用于把 design 拆解为可执行的实现计划。适合用户说"拆任务、做计划、排 wave、规划实现步骤"。产出 plan.md（Wave 分组 + 任务 ID 引用 + 依赖关系）+ tasks.md 任务清单（唯一真相，plan 阶段展开写回）。
 ---
 
 ## 何时使用
 
 - 用户说"拆任务、做计划、排 wave、规划实现步骤"
 - 把 brainstorm 的 design.md 拆成可执行的 Wave + Task
-- 产出：`plan.md`（Wave 分组 + Task 列表 + 依赖关系），可能含 `tasks/task-NN.md` 任务蓝图
+- 产出：`plan.md`（Wave 分组 + 任务 ID 引用行 + 依赖关系）+ `tasks.md` 任务清单展开写回（唯一真相）+ `tasks/task-NN.md` 任务蓝图
 
 ## 多变更说明
 
@@ -43,7 +43,7 @@ sillyspec run plan --done --answer "..." --output "..."    # 一步完成 wait+d
 
 ### 动态步骤
 
-plan 的步骤是动态的：`generate_plan`（生成分级计划）→ `review_plan`（审查计划，按规模分级：tier=self 当前 agent 自审 / tier=independent 启动独立审查子代理产出 stage review.json，避免生成+自审同一次输出的偏差）→ CLI 从 `plan.md` 解析出 task 自动插入"任务蓝图协调器"步骤（per-task）。这是正常行为，不要手动添加。
+plan 的步骤是动态的：`generate_plan`（生成分级计划）→ `review_plan`（审查计划，按规模分级：tier=self 当前 agent 自审 / tier=independent 启动独立审查子代理产出 stage review.json，避免生成+自审同一次输出的偏差）→ CLI 从 `tasks.md` 注册表解析出 task 自动插入"任务蓝图协调器"步骤（per-task；plan.md 只提供 Wave 引用分组）。这是正常行为，不要手动添加。
 
 ### Stage Review Gate（plan 的 design review.json）
 
@@ -69,13 +69,13 @@ plan 的步骤是动态的：`generate_plan`（生成分级计划）→ `review_
   }
   ```
 
-- `docHash` = `sha256(主审查文档内容)`（hex）—— plan 主文档是 `plan.md`（`reviewedFiles[0]`）。CLI 重算 sha256 比对，不符判伪造（fail-closed）。改 plan.md 后须重算 docHash。`tier=self`（≤3 文件）降级为当前 agent 自审。
+- `docHash` = `sha256(主审查文档内容)`（hex）—— plan 主文档是 `plan.md`（`reviewedFiles[0]`）。CLI 重算 sha256 比对，不符判伪造（fail-closed）。docHash 可先占位（如 "TODO"）；改 plan.md 后勿手算 sha256——跑 `sillyspec register-stage-review --change <变更名> --stage plan --refresh-hash` 一键重算代填（verdict 保留；多阶段联动加 --all）。`tier=self`（≤3 文件）降级为当前 agent 自审。
 - 运行时 CLI 会把精确 schema 表 + 完整 JSON 示例 + docHash 算法注入到该步 prompt，以你实际收到的注入版契约为权威逐字模板。
 
 ### 契约门控（阻断完成）
 
 - **plan 启动前**：CLI 校验 `design.md` 是否满足 plan 契约（缺文件变更清单/风险登记/自审章节会阻断）。若失败需先 `sillyspec run brainstorm --reopen --from-step N` 修订设计。
-- **plan 完成时**：CLI 校验 `plan.md` 是否满足 execute 契约（Wave 结构、task 引用等）。失败会阻断完成，提示修复后重新 `--done`。
+- **plan 完成时**：CLI 校验 `tasks.md`（任务注册表）× `plan.md`（Wave ID 引用）是否满足 execute 契约（引用存在性/覆盖恰一次/编号连续/旧格式拦）。失败会阻断完成，提示修复后重新 `--done`。
 
 ### 生产接线路径检查
 
@@ -95,7 +95,15 @@ plan 完成校验会检查：design 提到入口文件（cli.ts/main.ts/server.t
 
 ### local.yaml `repos:` 段（跨仓注册表）
 
-跨仓 change 必须在 `.sillyspec/local.yaml` 注册所有跨仓仓路径：
+> 📍 `local.yaml` 恒在 `.sillyspec/local.yaml`——项目根目录**没有**这个文件，别去那里找或新建（hook 会拦）。worktree 内该文件不随 checkout 出现，读配置直接跑 `sillyspec config cat`（自动定位到主仓真实配置）；可用键清单见 `sillyspec config schema`。
+
+跨仓 change 的每个 repo key 都要注册（execute 启动 fail-closed 校验）。**用命令注册，勿手编 YAML**：
+
+```
+sillyspec local register-repo <key> <跨仓仓根路径>
+```
+
+（外科手术式写入，只动 `repos:` 段，其余内容保留；execute 启动报缺注册时，报错文案里就带这条命令。）手写格式参考：
 
 ```yaml
 repos:
@@ -141,7 +149,7 @@ plan 完成后（plan.md 通过 execute 契约校验），运行 `sillyspec run 
 
 - **必须用 exec 工具（shell）执行 CLI，不要自己编造流程**
 - 只做当前步骤 prompt 描述的操作，不跳过、不自行扩展
-- plan.md 是任务完成的唯一真相源，task 拆解粒度要均匀、依赖要明确
+- tasks.md 是任务清单唯一真相（checkbox 注册表，plan 阶段展开写回——保留 ql-xxx 等非 task-XX 行）；plan.md Wave 段只写纯 ID 引用行（`- task-XX`），不重抄任务名
 - 完成后立即 `--done`，不跳过
 
 ## 用户指令

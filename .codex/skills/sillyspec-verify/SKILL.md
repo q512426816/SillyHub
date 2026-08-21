@@ -38,7 +38,9 @@ sillyspec run verify --reopen --from-step N    # 重新打开已完成阶段修�
 
 ## verify 特有：完成门控（重要）
 
-verify 是只读阶段（**禁止改代码/改 git 状态**，只检查 + 写报告）。完成时有硬校验：
+verify 是只读阶段（**禁止改代码/改 git 状态**，只检查 + 写报告）。
+
+**diff 对账基点**：本变更走 worktree 时，「加载规范并锚定」步骤会注入 worktree 基线锚点（分支名 + `git merge-base` 真实基点）——对照设计做 diff 对账时以它为基点，**不要拿主仓当前 HEAD 当基点**（主仓在 execute 期间可能被并行推进，用错基点会把别人的演进误判为本变更越权改动）。task review 的 base/head 引用分支上的 commit，逐 task 核验用 `git diff <base>..<head>`。完成时有硬校验：
 
 - **必须产出 `verify-result.md`**——不存在则阻断完成（不能跳过报告直接 `--done`）
 - **结论为 `FAIL` 则阻断完成**——不能带着 FAIL 标记 verify 完成
@@ -48,6 +50,8 @@ verify 是只读阶段（**禁止改代码/改 git 状态**，只检查 + 写报
 被阻断时 CLI 打印 ❌ 校验失败，不会提示"验证通过"。修复 `verify-result.md` 后重新 `--done`。
 
 ## verify-result.md 格式
+
+> 🔧 **机械探针 + 报告骨架一条命令**：`sillyspec verify-probes --change <变更名> --init`——探针 1（TODO 标记）/3（测试覆盖）/5（API 契约对账）/6（删除对账）CLI 跑完并预填进 verify-result.md 骨架（七章节、已存在不覆盖）；探针 2/4（关键词/决策追踪）与断言抽查、集成盲区标注是语义判断，替换骨架里的 `<!--TODO-->` 完成。结论必须写明 PASS/FAIL——留「待填」会被 gate 判不过。
 
 ```markdown
 # 验证报告

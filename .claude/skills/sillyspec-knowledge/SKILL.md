@@ -39,7 +39,7 @@ sillyspec knowledge search --query "GLM usage metadata"
       "id": "patterns",
       "path": "knowledge/patterns.md",
       "title": "Patterns",
-      "summary": "每个阶段对应 `src/stages/` 下的独立模块...",
+      "summary": "每个阶段一个独立模块定义（含步骤与提示词）...",
       "score": 3,
       "tags": ["worktree", "git-worktree", "WorktreeManager"],
       "category": "Patterns"

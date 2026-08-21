@@ -14,7 +14,13 @@ description: 工作区管理 — 初始化、管理多项目工作区，查看�
 
 ## CLI 边界（重要）
 
-sillyspec CLI **没有 `workspace` 顶层命令**。本 skill 通过直接读写 `.sillyspec/projects/*.yaml` 管理工作区，配套用 `sillyspec scan` 扫描子项目、`sillyspec init` 安装命令模板。**不要编造 `sillyspec workspace ...` 子命令。**
+`sillyspec workspace` 命令已存在（2026-08-21 落地）：
+```bash
+sillyspec workspace add <名> <相对路径> [--role <角色>] [--repo <仓库地址>]   # 登记子项目（外科写入 yaml，已有字段保留）
+sillyspec workspace remove <名>                                             # 删除登记（项目本体不动）
+sillyspec workspace status                                                  # 三态探测表（已扫描/已初始化/未初始化）
+```
+优先用命令；命令异常时才按下文手工兜底（yaml 字段口径：init 写 name/path/status 三字段，role/repo 由 add 追加）。
 
 ## 相关 CLI 命令
 
