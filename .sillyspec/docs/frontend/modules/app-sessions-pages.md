@@ -9,12 +9,12 @@ created_at: 2026-08-18 01:45:00
 # 智体会话门户页（app-sessions-pages）
 
 ## 定位
-智能体会话门户页（单一页面 `src/app/(dashboard)/sessions/page.tsx`，1122 行），路由 `/sessions`，跨工作区的会话总入口（一级菜单，2026-08-14-sessions-portal 落地）。左栏会话列表 + 右栏两态面板（未选 = 新建会话表单，选中 = 会话交互面板），是 daemon session 级交互的主战场：SSE 实时流、注入发送、配置切换、权限弹窗、上下文用量都在本页组装。
+智能体会话门户页（单一页面 `src/app/(dashboard)/sessions/page.tsx`，2026-08-21-session-message-queue 起瘦身为 ~117 行外壳），路由 `/sessions`，跨工作区的会话总入口（一级菜单，2026-08-14-sessions-portal 落地）。左栏会话列表 + 右栏两态面板（未选 = 新建会话表单，选中 = `<SessionPanel mode="page">` 共享组件）；页级职责只剩外壳布局 + machines/llmProviders 数据注入 + 选中态切换——SSE 实时流、注入排队、配置切换、权限弹窗、上下文用量全部下沉 components-daemon 的 SessionPanel。
 
 ## 契约摘要
 - `SessionsPortalPage` 布局：左 320px `<SessionListPanel>`（筛选 + 虚拟滚动 + 紧凑两行条目，components-sessions）；右两态——
   - 未选会话：`<NewSessionForm>`（机器 / 档案 / 供应商 / 模型四选择器），`onCreated` 切入选中态。
-  - 选中会话：`<SessionPanel>`（本页组装）：`TurnTimeline`（历史 + 实时轮次）+ `SessionInputBar`（共享输入条）+ `CtxUsageBar`（上下文用量）+ `SessionConfigBar`（配置切换条）。
+  - 选中会话：`<SessionPanel mode="page">`（components-daemon 共享组件，key=sessionId 重挂载）：TurnTimeline + SessionInputBar + MessageQueueBar（排队条）+ CtxUsageBar + SessionConfigBar；发送统一入 useMessageQueue 队列（running/reconnecting 可输入排队，turn 完成自动投递，D-001~D-004）。
 - 数据流：
   - 会话详情：`getAgentSession`（react-query，pending/reconnecting 态 1.5s 轮询；切换配置/结束/重开后 invalidate 刷新）。
   - 历史 turn：attach 时预取 `getAgentSessionLogs → logsToTurns` 先渲染（防 SSE 订阅前窗口期丢事件）。
@@ -37,7 +37,7 @@ whoLine:    runs 快照按 turn 的 realRunId??runId 匹配注入；
 ## 注意事项
 - 弹窗（权限审批 / AskUser）不在本页重复实现，沿用 components-permissions / components-admin 既有通道；SSE 事件语义改动须评估 `interactive-session-panel.tsx` 同步。
 - 会话行为（切换静默化、点选即切换）经多次 quick 迭代（ql-20260817-009/010），改注入/切换逻辑先查本页近期 change 记录。
-- 页面 1100+ 行是有意的大组装层：新增能力优先下沉 components-sessions / components-daemon 共享子组件，勿继续堆内联。
+- 面板本体已在 components-daemon/session-panel.tsx（本变更完成下沉）；本页只留外壳，新增会话能力优先改 SessionPanel 或下沉共享子组件，勿再往 page.tsx 堆逻辑。
 - 路由在 DashboardLayout 工作区白名单内（平台级跨工作区视图）；SSE 走 `/api/daemon/sessions/[sessionId]/stream` 中继（app-api-routes）。
 
 ## 人工备注

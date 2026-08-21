@@ -11,7 +11,7 @@ created_at: 2026-08-18 01:45:00
 ## 定位
 Daemon 运行时 / 机器 / 会话交互组件（`components/daemon/`，12 源文件 + 十余套测试）。三块职责：
 ① 运行时管理页展示（machine-card 手风琴机器卡 + runtime-card 运行时卡 + helpers 格式化件）；
-② 会话交互（runtime-session-dialog 统一弹窗、interactive-session-panel 组装层、
+② 会话交互（session-panel 共享双模式面板【2026-08-21-session-message-queue 起，sessions 页与弹窗统一实现 + useMessageQueue 排队】、runtime-session-dialog 统一弹窗、interactive-session-panel 薄适配层、
 turn-timeline 消息流、session-input-bar 输入区、session-list-layout 公共列表）；
 ③ 辅助件（remote-folder-picker 远程目录浏览器、session-log-sanitize 日志清洗、
 runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog 起 runtimes
@@ -26,13 +26,29 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
     SessionHistoryView 只读回看分支。
   - ended/failed 会话点开：先 `reopenSession` 转 reconnecting/active 再 attach
     （F-1/C-3：panel attach 轮询仅识别 active/failed，ended 直接 attach 卡超时）。
-- `InteractiveSessionPanel`（`interactive-session-panel.tsx`）：会话状态机 + 提交逻辑
-  组装层（2026-08-14-sessions-portal 后消息流/输入区抽为 TurnTimeline / SessionInputBar
-  共享子组件，对外 props 零回归）。
-  - 会话生命周期：首条消息 `createSession` → 追问 `injectSession`（同 session 下一
-    turn/新 run）→ `interruptSession` 只收敛 currentRun → `endSession` 结束。
-  - 单条 `streamSession` SSE 贯穿会话，envelope 含 run_id 区分 turn；turn 级串行
-    （currentRun 运行中禁发，D-002@v3）。
+- `SessionPanel`（`session-panel.tsx`，2026-08-21-session-message-queue）：/sessions 页
+  与 /runtimes 弹窗共享的会话面板，`mode: "page" | "dialog"` 渲染层分发（R4 铁律：
+  react-query 三件全收 page 子组件 SessionPanelPage，dialog 渲染路径零 useQuery）。
+  - page 模式：自 sessions/page.tsx 整块搬运（react-query detail 轮询/whoLine runs
+    快照/CtxUsageBar/SessionConfigBar/SubagentCatalog/附件链）。
+  - dialog 模式：自旧 interactive-session-panel 逐段搬运（idle createSession 直发/
+    attach 轮询 1.5s×10/legacy 反投影/provider+model 选择器/团队分析/offlineReadOnly）。
+  - 两模式追问统一走 `useMessageQueue`（hooks-message-queue 模块）：running/
+    reconnecting/pending 输入保持可用、消息排队，turn_completed / 恢复 active 后
+    自动投递；inject 失败（含 409 TURN_CONFLICT）队头 failed + 重试/删除（D-001~D-004）。
+  - 消息生命周期：首条 `createSession` → 追问 `injectSession`（排队调度）→
+    `interruptSession` → `endSession`；单条 `streamSession` SSE 贯穿，envelope
+    run_id 区分 turn。
+- `InteractiveSessionPanel`（`interactive-session-panel.tsx`）：**127 行薄适配层**
+  （2026-08-21-session-message-queue 起，原 ~1300 行实现体迁入 SessionPanel dialog
+  分支）——props 13 项按 diff-analysis §5.1 映射转 `SessionPanel mode="dialog"`
+  （attachSessionId ?? null 唯一语义迁移）；导出面（组件签名 + turn-timeline 类型
+  re-export）零变更，消费方 runtime-session-dialog / runtime-session-helpers /
+  workspace-session-section / change-session-section 零改动。
+- `MessageQueueBar`（`message-queue-bar.tsx`）：排队消息展示条（纯展示，接
+  useMessageQueue.queue）——pending/sending/failed 三态 chip（failed 红语义边框 +
+  重试/删除按钮）、40 字摘要 + 附件数、满员「队列已满（N/5）」Tag、点击展开
+  displayPrompt + 失败原因；空队列不渲染。
 - `TurnTimeline`（`turn-timeline.tsx`）：消息流渲染。类型 `SessionTurnView` /
   `SessionUiStatus`（idle/creating/active/ending/ended/failed/reconnecting 7 态）/
   `TurnUiStatus`（pending/running/interrupting/completed/failed/killed 6 态）/
@@ -73,6 +89,10 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
   turn_completed 后清空；SSE 重连重复 boundary 按 run_id 幂等更新已有项不新增。
 
 ## 注意事项
+- 排队语义（2026-08-21-session-message-queue 起）：输入框仅终态（ended/failed）与
+  离线禁用；running/reconnecting/pending 可输入、消息入队（旧「currentRun 运行中
+  禁发」语义已废弃，D-002@v3 由队列等价承载 turn 级串行）。改投递条件先读
+  hooks/use-message-queue.ts 头注释（D-001~D-004）。
 - `isActiveSession` 判定完全依赖状态集合——新增会话状态须同步
   `ACTIVE_SESSION_VIEW_STATUSES`；MachineCard 内联等值集合两处同步。
 - attach 流程涉及 SSE 连接 + 轮询到 active 的竞态，改动必须跑 `daemon/__tests__`

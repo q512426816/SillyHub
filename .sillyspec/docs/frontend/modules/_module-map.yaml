@@ -3,7 +3,7 @@
 schema_version: 2
 project: frontend
 source_commit: 744e3de4
-generated_at: 2026-08-18 01:25:00
+generated_at: 2026-08-22 02:45:00
 generator: sillyspec-scan
 # 全量重扫：基线 6e78b29a(62 模块) → 保留 62 + 新增 16 = 78 模块；
 # 剔除已消失路径/符号（form-layout、health-card、component-detail-drawer、sillyspec-step-progress、
@@ -195,13 +195,13 @@ modules:
       - SessionsPortalPage # /sessions
     main_symbols:
       - SessionsPortalPage
-      - SessionPanel
-    depends_on: [components-ui, components-sessions, components-permissions, lib-use-daemon-machines, lib-llm-providers, lib-fetch-sse, lib-agent-profiles, stores-session]
+    # SessionPanel 已提取至 components-daemon（2026-08-21-session-message-queue），
+    # 本页 1473→117 行外壳化，面板本体见 components-daemon.main_symbols
+    depends_on: [components-ui, components-sessions, components-permissions, components-daemon, lib-use-daemon-machines, lib-llm-providers, lib-fetch-sse, lib-agent-profiles, stores-session]
     used_by: []
     needs_review: false
-    concerns: [new-module-pending-card]
-    review_reasons:
-      - 新增模块（会话门户/切换静默化系列变更派生），modules/app-sessions-pages.md 卡片待下次 scan 生成
+    concerns: []
+    review_reasons: []
 
   # ─── App Router Pages (agent-profiles 全局档案，新增) ──────────────
 
@@ -434,8 +434,10 @@ modules:
     aliases: [daemon-components]
     entrypoints: []
     main_symbols:
+      - SessionPanel # 共享会话面板（mode: page|dialog，2026-08-21-session-message-queue 自 sessions 页提取 + ISP dialog 分支并入）
+      - InteractiveSessionPanel # 127 行薄适配层（props 映射 → SessionPanel mode="dialog"，导出签名零变更）
+      - MessageQueueBar # 排队消息展示条（三态 chip/重试删除/满员提示）
       - RuntimeSessionDialog
-      - InteractiveSessionPanel
       - MachineCard
       - RemoteFolderPicker
       - ProviderBadge
@@ -443,11 +445,30 @@ modules:
       - getStatusMeta
       - getProviderLabel
       - PROVIDER_TONES
-    depends_on: [components-ui, lib-daemon, lib-agent, stores-session]
-    used_by: [app-pages, app-workspace-pages]
+    depends_on: [components-ui, lib-daemon, lib-agent, stores-session, hooks-message-queue]
+    used_by: [app-pages, app-workspace-pages, app-sessions-pages]
     needs_review: false
     concerns:
       - 结构重排：旧 SessionsSidebar/SessionHistoryView 拆为 session-list-layout/session-input-bar/turn-timeline 等细粒度文件
+    review_reasons: []
+
+  # ─── Hooks（src/hooks 会话消息排队，2026-08-21-session-message-queue 新增）──
+
+  hooks-message-queue:
+    status: active
+    doc: modules/hooks-message-queue.md
+    paths:
+      - "frontend/src/hooks/**"
+    tags: [hooks, queue, sessions, 会话排队]
+    aliases: [message-queue-hook]
+    entrypoints: []
+    main_symbols:
+      - useMessageQueue # 排队/投递状态机（D-001~D-004：等 active 投递、上限5、失败留队头、附件 ids）
+      - QueueEntry
+    depends_on: []
+    used_by: [components-daemon]
+    needs_review: false
+    concerns: []
     review_reasons: []
 
   # ─── Charts Components（ECharts 图表） ────────────────────────────
