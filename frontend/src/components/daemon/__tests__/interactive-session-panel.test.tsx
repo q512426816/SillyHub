@@ -400,12 +400,18 @@ describe("InteractiveSessionPanel", () => {
     await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
   });
 
-  it("turn 级串行：currentRun 运行中发送按钮禁用", async () => {
+  // D-001（design §3.3 / task-07 经 SessionPanel 有意变更）：旧「currentRun 运行中
+  // 发送按钮禁用」改为「可输入 + 消息入队」；turn 级串行语义改由队列承载——
+  // 运行中入队不投递，turn_completed 清 currentRun 后 hook 自动投递（一次只一条）。
+  it("turn 级串行（队列化）：currentRun 运行中输入可用、消息排队，本轮完成后才投递", async () => {
     const stream = makeStreamMock();
     sessionApi.streamSession.mockImplementation(stream.factory);
     sessionApi.createSession.mockResolvedValue({
       session_id: "sess-1", run_id: "run-1", lease_id: "l",
       status: "active", stream_url: "",
+    });
+    sessionApi.injectSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-2", status: "active",
     });
 
     setupPanel();
@@ -419,8 +425,26 @@ describe("InteractiveSessionPanel", () => {
       conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-1", turn: 1 }));
     });
 
-    const sendBtn = screen.getByTitle("发送");
-    expect((sendBtn as HTMLButtonElement).disabled).toBe(true);
+    // running：输入不禁用（D-001），placeholder 提示排队语义
+    const input2 = screen.getByPlaceholderText(/消息将排队，等待本轮完成/) as HTMLTextAreaElement;
+    expect(input2.disabled).toBe(false);
+    fireEvent.change(input2, { target: { value: "second" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    // 入队成功：MessageQueueBar 出现「排队消息」，草稿清空
+    await waitFor(() => expect(screen.getByText(/排队消息（1）/)).toBeInTheDocument());
+    expect((screen.getByPlaceholderText(/消息将排队，等待本轮完成/) as HTMLTextAreaElement).value).toBe("");
+
+    // 本轮未完成：不投递（turn 级串行由队列等价承载）
+    expect(sessionApi.injectSession).not.toHaveBeenCalled();
+
+    // turn_completed 清 currentRun → hook 自动投递队头
+    act(() => {
+      conn.handlers.route(
+        makeEnvelope("turn_completed", { run_id: "run-1", status: "completed" }),
+      );
+    });
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
+    expect(sessionApi.injectSession).toHaveBeenCalledWith("sess-1", "second");
   });
 
   it("AC-11-07 end → close SSE + ended；session_ended 幂等", async () => {
@@ -497,7 +521,7 @@ describe("InteractiveSessionPanel", () => {
     expect(conn.closeSpy).toHaveBeenCalled();
   });
 
-  it("inject 返回 turn conflict 409 → 移除占位，保留 prompt 供重试", async () => {
+  it("inject 返回 turn conflict 409 → 队头 failed 条目 + 重试/删除按钮（D-003）", async () => {
     const stream = makeStreamMock();
     sessionApi.streamSession.mockImplementation(stream.factory);
     sessionApi.createSession.mockResolvedValue({
@@ -530,10 +554,16 @@ describe("InteractiveSessionPanel", () => {
     fireEvent.change(input2, { target: { value: "retry-me" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalled());
-    // 输入框保留 prompt 供重试
-    await waitFor(() => {
-      expect((screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement).value).toBe("retry-me");
-    });
+    // D-003（design §3.3 / task-07 经 SessionPanel 有意变更）：409 不再回填输入框
+    // 草稿——失败条目留队头（MessageQueueBar「发送失败」chip + 重试/删除按钮承载
+    // 重试语义）；占位 turn 已移除（retry-me 只出现在队列 chip，消息流无重复）。
+    await waitFor(() =>
+      expect(screen.getByLabelText(/发送失败，展开查看完整内容：retry-me/)).toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText("重试发送该消息")).toBeInTheDocument();
+    expect(screen.getByLabelText("从队列移除该消息")).toBeInTheDocument();
+    expect(screen.getAllByText(/retry-me/)).toHaveLength(1);
+    expect((screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement).value).toBe("");
   });
 
   it("session_ended SSE 先到：收口 ended + close", async () => {
@@ -636,9 +666,10 @@ describe("InteractiveSessionPanel", () => {
     // 预填历史 turn
     expect(screen.getByText(/历史提问/)).toBeInTheDocument();
     expect(screen.getByText(/历史回答/)).toBeInTheDocument();
-    // reconnecting → 输入禁用 + placeholder
-    const input = screen.getByPlaceholderText(/恢复会话中/) as HTMLTextAreaElement;
-    expect(input.disabled).toBe(true);
+    // D-001（design §3.3 / task-07 经 SessionPanel 有意变更）：reconnecting 不再
+    // 禁输入——消息入队等待恢复完成后自动投递，placeholder 改排队提示文案
+    const input = screen.getByPlaceholderText(/恢复会话中，消息将排队/) as HTMLTextAreaElement;
+    expect(input.disabled).toBe(false);
   });
 
   it("AC-10-01b 提问记录按 run_id 穿插到对应 turn（不堆顶）(ql-20260802-001)", async () => {
@@ -737,8 +768,9 @@ describe("InteractiveSessionPanel", () => {
       // 第一次轮询（reconnecting）
       await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
       expect(sessionApi.getAgentSession).toHaveBeenCalledTimes(1);
-      // 仍 reconnecting，输入禁用
-      expect((screen.getByPlaceholderText(/恢复会话中/) as HTMLTextAreaElement).disabled).toBe(true);
+      // 仍 reconnecting——D-001（task-07 经 SessionPanel 有意变更）：输入不禁用
+      //（消息入队等待恢复完成后自动投递）
+      expect((screen.getByPlaceholderText(/恢复会话中/) as HTMLTextAreaElement).disabled).toBe(false);
 
       // 第二次轮询（active）
       await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
