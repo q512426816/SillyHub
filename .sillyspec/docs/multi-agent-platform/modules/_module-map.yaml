@@ -6,7 +6,7 @@
 schema_version: 1
 project: multi-agent-platform
 source_commit: ba87eec
-generated_at: 2026-08-17 22:05:00
+generated_at: 2026-08-21T08:30:00+08:00
 generator: sillyspec-scan
 
 modules:
@@ -24,6 +24,7 @@ modules:
       - /api/* routers (workspace / members / auth / health / qc / runtimes / sessions / spec-workspace / scan-docs / change / daemon / platform-sync)
     main_symbols:
       - app (FastAPI)
+      - MissionPatrolService (backend/app/modules/agent/patrol.py, mission 收敛巡检常驻协程)
       - workspace_router
       - members_router
       - auth_router
