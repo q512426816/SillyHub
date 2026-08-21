@@ -1,0 +1,84 @@
+---
+author: qinyi
+created_at: 2026-08-21T18:45:00
+---
+
+# Runtime Evidence 采集结果（queue-e2e.mjs）
+- [2026-08-21T18:36:24.663Z] STEP1-login url=http://localhost:3000/workspaces
+- [2026-08-21T18:36:25.776Z] STEP2-machine-selected 
+- [2026-08-21T18:36:29.976Z] STEP2-session-created codex#0
+- [2026-08-21T18:36:29.981Z] STEP3-panel-input-visible placeholder="消息将排队，等待本轮完成后自动发送…"
+- [2026-08-21T18:36:30.038Z] STEP3-second-message-sent-while-first-turn-running 
+- [2026-08-21T18:36:30.860Z] STEP4-queue-state inputEnabled=true queueChip=true placeholder="消息将排队，等待本轮完成后自动发送…"
+- [2026-08-21T18:36:41.994Z] STEP5-auto-delivery queueCleared=true secondTurnReply=true
+- [2026-08-21T18:36:42.085Z] STEP6-session-ended 
+
+## /api 网络日志片段（截选）
+- POST /api/auth/login
+- GET /api/auth/me
+- GET /api/workspaces/my-bindings
+- GET /api/daemon/instances
+- GET /api/workspaces
+- GET /api/workspaces/my-bindings
+- GET /api/auth/me
+- GET /api/auth/me
+- GET /api/workspaces/my-bindings
+- GET /api/daemon/instances
+- GET /api/workspaces
+- GET /api/workspaces/my-bindings
+- GET /api/daemon/machines?limit=100
+- GET /api/daemon/sessions?limit=100
+- GET /api/workspaces?limit=100
+- GET /api/daemon/sessions?limit=50
+- GET /api/workspaces?limit=100
+- GET /api/workspaces/my-bindings
+- GET /api/daemon/machines
+- GET /api/daemon/sessions?limit=100
+- GET /api/agent-profiles?scope=mine
+- GET /api/llm-providers
+- GET /api/llm-providers
+- GET /api/auth/me
+- -> 200 /api/daemon/sessions?limit=100
+- -> 200 /api/daemon/sessions?limit=50
+- -> 200 /api/daemon/sessions?limit=100
+- POST /api/daemon/sessions
+- -> 201 /api/daemon/sessions
+- GET /api/daemon/sessions?limit=50
+- GET /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537
+- GET /api/workspaces?limit=100
+- GET /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/logs
+- GET /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/runs
+- GET /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/stream
+- GET /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/dialogs
+- GET /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/dialogs/history
+- GET /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/logs
+- GET /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/runs
+- GET /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/stream
+- GET /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/dialogs
+- GET /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/dialogs/history
+- -> 200 /api/daemon/sessions?limit=50
+- -> 200 /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/logs
+- -> 200 /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/runs
+- -> 200 /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537
+- GET /api/llm-providers
+- -> 200 /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/dialogs
+- -> 200 /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/logs
+- -> 200 /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/dialogs/history
+- -> 200 /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/runs
+- -> 200 /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/stream
+- -> 200 /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/dialogs
+- -> 200 /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/dialogs/history
+- GET /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/runs
+- POST /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/inject
+- -> 200 /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/runs
+- -> 201 /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/inject
+- GET /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/logs
+- -> 200 /api/daemon/sessions/5ce7e0cf-389c-4646-a7be-030ec27c8537/logs
+- GET /api/daemon/machines?limit=100
+- GET /api/daemon/sessions?limit=100
+- -> 200 /api/daemon/sessions?limit=100
+- GET /api/daemon/machines
+- GET /api/daemon/sessions?limit=100
+- -> 200 /api/daemon/sessions?limit=100
+
+## console 错误数：0
