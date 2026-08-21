@@ -2,11 +2,16 @@
 
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Tree, type TreeProps } from "antd";
+import type { DataNode } from "antd/es/tree";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { FileNodeIcon } from "@/components/ui/file-node-icon";
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
+import { PanelResizer, usePanelWidth } from "@/components/ui/panel-resizer";
+import { TreeBox } from "@/components/ui/tree-box";
 // 复用统一 sanitize 插件（task-13 / FR-13）：扫描文档内容源自 daemon 上报的仓库文件，不可信
 import { markdownRehypePlugins } from "@/components/ui/markdown-text";
 import { ApiError } from "@/lib/api";
@@ -17,7 +22,6 @@ import {
   listScanDocs,
   reparseScanDocs,
   getScanDoc,
-  STALE_THRESHOLD_MS,
   type ScanDocSummary,
   type ScanDocReparseResponse,
   type ScanDocRead,
@@ -33,74 +37,121 @@ import { useSession } from "@/stores/session";
 
 interface Props { params: { id: string }; }
 
-function FolderIcon({ open }: { open?: boolean }) {
-  return open ? (
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><path d="M12 10h6"/></svg>
-  ) : (
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+// ── 文档树（antd Tree，与 explorer 文件树同风格，ql-20260821-013-2c1a）────────
+// 单行展示/横向滚动/16px 缩进由 TreeBox 统一；图标按扩展名分型由 FileNodeIcon 统一；
+// 栏宽可拖拽（PanelResizer）。
+
+/** 左栏（文档树）宽度：默认值与拖拽范围（px）。 */
+const TREE_PANEL_DEFAULT_W = 280;
+const TREE_PANEL_MIN_W = 200;
+const TREE_PANEL_MAX_W = 480;
+/** 宽度记忆 key（仅本地浏览器）。 */
+const TREE_PANEL_WIDTH_KEY = "sillyhub-scan-docs-tree-width";
+
+/** 收集全部目录 path（初始全展开语义，沿用手搓版行为）。 */
+function collectDirPaths(nodes: TreeNode[], acc: string[] = []): string[] {
+  for (const n of nodes) {
+    if (n.doc === undefined) {
+      acc.push(n.path);
+      collectDirPaths(n.children, acc);
+    }
+  }
+  return acc;
+}
+
+/** 递归构建 path → 文档摘要索引（选中行回查 doc id 拉详情）。 */
+function buildDocIndex(nodes: TreeNode[], acc = new Map<string, ScanDocSummary>()): Map<string, ScanDocSummary> {
+  for (const n of nodes) {
+    if (n.doc) acc.set(n.path, n.doc);
+    buildDocIndex(n.children, acc);
+  }
+  return acc;
+}
+
+/** 文件行标题：名称 + 徽标（来源成员/历史版本数/文档类型），整行单行不换行。 */
+function renderDocTitle(node: TreeNode & { doc: ScanDocSummary }) {
+  const doc = node.doc;
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap">
+      <span title={doc.title ?? node.name}>{doc.title ?? node.name}</span>
+      <span className="flex shrink-0 items-center gap-1">
+        {doc.source_member_id && (
+          <Badge variant="info" className="px-1.5 text-[10px]">
+            👤 {doc.source_member_id.slice(0, 8)}
+          </Badge>
+        )}
+        {doc.conflict_count > 0 && (
+          <Badge
+            variant="outline"
+            className="px-1.5 text-[10px]"
+            title={`此文档有 ${doc.conflict_count} 个被覆盖的旧版本存档（同步时后写的版本生效，旧版留存备查），无需处理`}
+          >
+            🕘 历史{doc.conflict_count}版
+          </Badge>
+        )}
+        <Badge variant={doc.exists ? "success" : "outline"} className="px-1.5 text-[10px]">{doc.doc_type}</Badge>
+      </span>
+    </span>
   );
 }
 
-function FileIcon() {
-  return <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-muted-foreground"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>;
+/** TreeNode[] → antd DataNode[]（目录 font-medium；文件行带徽标；图标按扩展名分型）。 */
+function toAntdNodes(nodes: TreeNode[]): DataNode[] {
+  return nodes.map((n) => {
+    if (n.doc) {
+      return {
+        key: n.path,
+        title: renderDocTitle(n as TreeNode & { doc: ScanDocSummary }),
+        isLeaf: true,
+        icon: <FileNodeIcon name={n.name} type="file" />,
+      };
+    }
+    return {
+      key: n.path,
+      title: <span className="font-medium whitespace-nowrap">{n.name}</span>,
+      icon: <FileNodeIcon name={n.name} type="dir" />,
+      children: toAntdNodes(n.children),
+    };
+  });
 }
 
-function TreeView({ nodes, workspaceId, onSelect, selectedDoc, depth = 0 }: {
-  nodes: TreeNode[]; workspaceId: string; onSelect: (_doc: ScanDocRead) => void; selectedDoc: ScanDocRead | null; depth?: number;
+/** 文档树：antd Tree 受控（全展开初始 + 可收起；点文件行拉详情回调）。 */
+function DocTree({
+  tree,
+  workspaceId,
+  onSelect,
+  selectedPath,
+}: {
+  tree: TreeNode[];
+  workspaceId: string;
+  onSelect: (_doc: ScanDocRead) => void;
+  selectedPath: string | null;
 }) {
-  const [expanded, setExpanded] = useState<Set<string>>(() => {
-    const dirs = new Set<string>();
-    const collectDirs = (ns: TreeNode[]) => { for (const n of ns) { if (n.children.length > 0) { dirs.add(n.path); collectDirs(n.children); } } };
-    collectDirs(nodes);
-    return dirs;
-  });
-  const toggleDir = (p: string) => { setExpanded((prev) => { const next = new Set(prev); if (next.has(p)) next.delete(p); else next.add(p); return next; }); };
+  const treeData = useMemo(() => toAntdNodes(tree), [tree]);
+  const docIndex = useMemo(() => buildDocIndex(tree), [tree]);
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>(() => collectDirPaths(tree));
+  // 树重建（搜索过滤/重扫后）重算展开集，保持「全部展开」语义（手搓版同款初始行为）。
+  useEffect(() => {
+    setExpandedKeys(collectDirPaths(tree));
+  }, [tree]);
+
+  const onSelectTree: TreeProps["onSelect"] = (keys, info) => {
+    if (!info.node.isLeaf) return;
+    const doc = docIndex.get(String(info.node.key));
+    if (!doc) return;
+    void getScanDoc(workspaceId, doc.id).then(onSelect).catch(() => {});
+  };
+
   return (
-    <div className="text-sm">
-      {nodes.map((node) => {
-        const isDir = node.children.length > 0;
-        const isOpen = expanded.has(node.path);
-        if (isDir) {
-          return (<div key={node.path}>
-            <button className="flex w-full items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50"
-              style={{ paddingLeft: (depth * 16 + 8) + "px" }}
-              onClick={() => toggleDir(node.path)}>
-              <FolderIcon open={isOpen} />
-              <span className="truncate font-medium">{node.name}</span>
-            </button>
-            {isOpen && (<TreeView nodes={node.children} workspaceId={workspaceId} onSelect={onSelect} selectedDoc={selectedDoc} depth={depth + 1} />)}
-          </div>);
-        }
-        const doc = node.doc;
-        if (!doc) return null;
-        return (
-          <button key={doc.id} className="flex w-full items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50"
-            style={{ paddingLeft: (depth * 16 + 8) + "px" }}
-            onClick={async () => { try { const detail = await getScanDoc(workspaceId, doc.id); onSelect(detail); } catch {} }}
-          >
-            <FileIcon />
-            <span className="truncate">{doc.title ?? node.name}</span>
-            <span className="ml-auto flex items-center gap-1">
-              {doc.source_member_id && (
-                <Badge variant="info" className="text-[10px] px-1.5">
-                  👤 {doc.source_member_id.slice(0, 8)}
-                </Badge>
-              )}
-              {doc.conflict_count > 0 && (
-                <Badge
-                  variant="outline"
-                  className="text-[10px] px-1.5"
-                  title={`此文档有 ${doc.conflict_count} 个被覆盖的旧版本存档（同步时后写的版本生效，旧版留存备查），无需处理`}
-                >
-                  🕘 历史{doc.conflict_count}版
-                </Badge>
-              )}
-              <Badge variant={doc.exists ? "success" : "outline"} className="text-[10px] px-1.5">{doc.doc_type}</Badge>
-            </span>
-          </button>
-        );
-      })}
-    </div>
+    <Tree
+      treeData={treeData}
+      expandedKeys={expandedKeys}
+      onExpand={(keys) => setExpandedKeys([...keys])}
+      selectedKeys={selectedPath ? [selectedPath] : []}
+      onSelect={onSelectTree}
+      showIcon
+      blockNode
+    />
   );
 }
 
@@ -118,6 +169,13 @@ export default function ScanDocsPage({ params }: Props) {
   // （daemon-client），无 binding 时失败。门禁后移后，无 binding 主区渲染 DaemonRequiredNotice。
   const [myBinding, setMyBinding] = useState<MemberBindingView | null>(null);
   const [bindingReady, setBindingReady] = useState(false);
+  /** 左栏（文档树）宽度：默认 280px，拖拽/键盘调整 200~480px，记忆到 localStorage。 */
+  const [treeWidth, setTreeWidth] = usePanelWidth({
+    storageKey: TREE_PANEL_WIDTH_KEY,
+    defaultWidth: TREE_PANEL_DEFAULT_W,
+    minWidth: TREE_PANEL_MIN_W,
+    maxWidth: TREE_PANEL_MAX_W,
+  });
   const permissions = useSession((s) => s.user?.permissions);
   const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
   const canBorrow = canBorrowSharedDaemon(permissions, isPlatformAdmin);
@@ -255,25 +313,49 @@ export default function ScanDocsPage({ params }: Props) {
           {debouncedQ ? `没有匹配「${debouncedQ}」的文档` : "暂无扫描文档。点击「重新扫描」从文件系统解析。"}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[280px_1fr]">
-          <SectionCard
-            title="文档树"
-            bodyPadding="p-2"
+        <div className="flex flex-col gap-4 lg:flex-row">
+          {/* 树栏：lg 固定宽（CSS 变量承载拖拽宽度），移动端全宽堆叠 */}
+          <div
+            data-testid="scan-docs-tree-panel"
+            className="w-full shrink-0 lg:w-[var(--tree-w)]"
+            style={{ "--tree-w": `${treeWidth}px` } as React.CSSProperties}
           >
-            <div className="space-y-2">
-              <input
-                type="text"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="搜索名称或内容"
-                className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              />
-              <div className="max-h-[calc(100vh-260px)] overflow-auto">
-                <TreeView nodes={tree} workspaceId={workspaceId} onSelect={setSelectedDoc} selectedDoc={selectedDoc} />
+            <SectionCard
+              title="文档树"
+              bodyPadding="p-2"
+            >
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  placeholder="搜索名称或内容"
+                  className="w-full rounded border border-input bg-background px-2.5 py-1.5 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+                <TreeBox className="max-h-[calc(100vh-260px)]">
+                  <DocTree
+                    tree={tree}
+                    workspaceId={workspaceId}
+                    onSelect={setSelectedDoc}
+                    selectedPath={selectedDoc?.path ?? null}
+                  />
+                </TreeBox>
               </div>
-            </div>
-          </SectionCard>
-          <SectionCard>
+            </SectionCard>
+          </div>
+          {/* 拖拽把手：仅桌面分栏时展示（flex 拉伸使把手沿整列可抓） */}
+          <div className="hidden shrink-0 lg:flex">
+            <PanelResizer
+              width={treeWidth}
+              onWidthChange={setTreeWidth}
+              defaultWidth={TREE_PANEL_DEFAULT_W}
+              minWidth={TREE_PANEL_MIN_W}
+              maxWidth={TREE_PANEL_MAX_W}
+              ariaLabel="调整文档树宽度"
+              testId="scan-docs-tree-resizer"
+            />
+          </div>
+          <SectionCard className="min-w-0 flex-1">
             {selectedDoc ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-2">

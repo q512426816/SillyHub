@@ -398,3 +398,25 @@
 根因：上一轮所有代码类文件共用 FileCode2 琥珀单档图标，语言之间没有视觉区分。
 方案：file-explorer.tsx 的 FILE_ICON_BY_EXT 重构——常用语言逐个拆出独立 lucide 图标与配色（Java 咖啡橙、class 二进制锌灰、xml code-xml 橙、Vue 三角绿、JS/TS 花括号黄/蓝、jsx 与 tsx React 原子天蓝/青、Python f(x) 蓝、Go 六边形青、Ruby 宝石玫红、Rust 齿轮石墨、PHP 靛、Swift 雨燕橙、Kotlin 紫罗兰、cs/vb/fs/csproj/vbproj/fsproj/sln 等 .NET 系积木紫、C/C++ 深蓝、HTML 地球橙、CSS 调色板蓝、Sass 系调色板粉、Shell 系终端绿、SQL 数据库靛），其余小众语言回退 FileCode2 琥珀兜底，媒体/文档映射不变。
 结果：file-explorer 测试 19/19 通过（图标用例改为 main.ts 断言花括号 + 新增 8 语言互不相同用例），tsc 0 错，lint exit 0 仅预存 warning，frontend.md 变更索引已补 ql-20260821-012 条目。
+
+## ql-20260821-013-2c1a | 2026-08-21 10:22:48 | 扫描文档页左侧结构树改成 explorer 文件树风格（单行、扩展名图标、可拖拽宽度）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/ui/file-node-icon.tsx（新共享图标组件）
+- frontend/src/components/ui/panel-resizer.tsx（新共享拖拽把手）
+- frontend/src/components/ui/tree-box.tsx（新共享单行树容器）
+- frontend/src/components/explorer/file-explorer.tsx（改用共享组件）
+- frontend/src/app/(dashboard)/workspaces/[id]/explorer/page.tsx（改用共享把手）
+- frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx（左树 antd 化）
+- frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx（新页面测试）
+需求：扫描文档页左侧结构树改成 explorer 文件树风格（单行、扩展名图标、可拖拽宽度），并抽共享组件复用。
+根因：scan-docs 手搓递归 TreeView 用内联 SVG 单色图标、truncate 截断长文件名、固定 grid 280px 不可调宽，与文件树风格割裂且无复用载体。
+方案：新建三共享组件 ui/file-node-icon.tsx（FileNodeIcon+FILE_ICON_BY_EXT 全量图标映射单一源）、ui/panel-resizer.tsx（usePanelWidth hook+PanelResizer 拖拽把手，storageKey/min/max 参数化）、ui/tree-box.tsx（TreeBox 承载 antd Tree 单行 6 条 ! 提权覆盖类）；scan-docs/page.tsx 左树重写为受控 antd DocTree（默认全展开可收起、点文件行 getScanDoc 拉详情、👤/🕘/doc_type 徽标保留）+三组件装配+flex 分栏可拖拽（默认 280 钳 200~480，localStorage 记忆，移动端全宽堆叠）；file-explorer.tsx 与 explorer/page.tsx 同步改用共享组件，行为零变化。
+结果：4 测试文件 39/39 通过（scan-docs 新增 3 用例：树渲染图标徽标/点行拉详情/拖拽记忆），tsc 0 错，lint 0 新告警，frontend.md 变更索引已更新。
+审计：⚖️ 归属切分：5 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/next.config.mjs, frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx, frontend/src/components/ui/file-node-icon.tsx, frontend/src/components/ui/panel-resizer.tsx, frontend/src/components/ui/tree-box.tsx
+
+## ql-20260821-014-03b0 | 2026-08-21 10:34:01 | (quick 任务)
+状态：进行中
+关联变更：（无）
+文件：frontend/next.config.js
