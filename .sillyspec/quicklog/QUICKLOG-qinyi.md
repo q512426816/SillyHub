@@ -416,7 +416,14 @@
 结果：4 测试文件 39/39 通过（scan-docs 新增 3 用例：树渲染图标徽标/点行拉详情/拖拽记忆），tsc 0 错，lint 0 新告警，frontend.md 变更索引已更新。
 审计：⚖️ 归属切分：5 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/next.config.mjs, frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx, frontend/src/components/ui/file-node-icon.tsx, frontend/src/components/ui/panel-resizer.tsx, frontend/src/components/ui/tree-box.tsx
 
-## ql-20260821-014-03b0 | 2026-08-21 10:34:01 | (quick 任务)
-状态：进行中
+## ql-20260821-014-03b0 | 2026-08-21 10:34:01 | 前端 3001 代理下 changes/reparse 长请求被 30s 掐断返回 500
+状态：已完成
 关联变更：（无）
-文件：frontend/next.config.js
+文件：
+- frontend/next.config.mjs（experimental.proxyTimeout 300000 + 注释说明默认 30s 坑）
+- .sillyspec/docs/frontend/modules/build.md（契约摘要补 proxyTimeout、注意事项补排查指引）
+需求：前端 3001 代理下 changes/reparse 长请求被 30s 掐断返回 500
+根因：Next 14 standalone rewrite 代理默认 proxyTimeout=30000ms（router-utils/proxy-request.js），本次 reparse 后端需 32.8s，前端 30.01s 时 ECONNRESET 报 500，后端实际跑完记 200
+方案：next.config.mjs experimental 增 proxyTimeout:300000（5 分钟），重建前端镜像并重启容器
+结果：容器内 required-server-files.json 确认 proxyTimeout=300000 生效、容器 healthy；后端日志确认 reparse 本身正常（236 parsed）；端到端重放因 bootstrap 密码已轮换未做，等用户浏览器重试确认；无代码测试影响（纯构建配置）
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/next.config.mjs

@@ -5,6 +5,11 @@ const nextConfig = {
   poweredByHeader: false,
   experimental: {
     typedRoutes: true,
+    // rewrite 代理(/api、/daemon 转发到 backend)的响应超时。Next 14 默认 30s
+    // (router-utils/proxy-request.js: `proxyTimeout || 30000`)，changes/reparse 等
+    // 全量扫描请求 30s+ 会被前端掐断返回 500（后端仍在跑完记 200）。
+    // 提到 5 分钟覆盖长请求（ql-20260821-014）。
+    proxyTimeout: 300000,
     // 性能优化(2026-07-22):对这些重依赖的命名导入做模块级按需转换,减小 chunk
     // 体积、加速构建。antd v6 / 图标 / xyflow 命名导入量大。
     optimizePackageImports: [

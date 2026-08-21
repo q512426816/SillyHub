@@ -17,7 +17,7 @@ created_at: 2026-08-18 01:45:00
   - 关键 deps：next 14.2.5、react 18.3.1、antd ^6.4.4 + @ant-design/icons + nextjs-registry、@tanstack/react-query + react-virtual、zustand ^4.5、dayjs、echarts 6 + echarts-for-react、@xyflow/react、zod、lucide-react、@uiw/react-markdown-preview + rehype-sanitize、radix 原语（dialog/dropdown-menu/avatar）、@fontsource/inter。
   - devDeps：vitest 2 + @testing-library(react/jest-dom) + jsdom、openapi-typescript、puppeteer、@playwright/test、eslint-config-next。
 - `next.config.mjs`：
-  - `reactStrictMode`、`poweredByHeader:false`、`experimental.typedRoutes:true`、`experimental.optimizePackageImports:[antd, @ant-design/icons, lucide-react, @xyflow/react]`（重依赖命名导入按需转换，减 chunk 加速构建）。
+  - `reactStrictMode`、`poweredByHeader:false`、`experimental.typedRoutes:true`、`experimental.proxyTimeout:300000`（rewrite 代理响应超时 5 分钟，Next 14 默认 30s 会掐断 reparse 等长请求，ql-20260821-014）、`experimental.optimizePackageImports:[antd, @ant-design/icons, lucide-react, @xyflow/react]`（重依赖命名导入按需转换，减 chunk 加速构建）。
   - `output: standalone` 仅当 `NEXT_BUILD_STANDALONE=1`（Docker 用；本地 dev 不启用）。
   - rewrites 两条：`/api/:path*` 与 `/daemon/:path*`（daemon 安装脚本/版本清单公开端点，backend dist_router 提供无 /api 前缀）→ `${apiBase}` 同名路径；apiBase = `INTERNAL_API_BASE_URL ?? NEXT_PUBLIC_API_BASE_URL ?? http://localhost:8000`（去尾斜杠）。
 - `tsconfig.json`：ES2022、`strict` + `noUncheckedIndexedAccess`、moduleResolution bundler、别名 `@/* → ./src/*`、`types` 含 vitest/globals + @testing-library/jest-dom、include 含 `.next/types/**/*.ts`（typedRoutes 生成类型）。
@@ -42,6 +42,7 @@ Docker: deps(pnpm install) → builder(next build, STANDALONE=1)
 - `typedRoutes:true` 校验 `<Link href>` 合法性：新页面路由需 `next build` / typecheck 生成 `.next/types` 后才过；拼动态路径须满足类型约束。
 - `noUncheckedIndexedAccess` 索引访问返回 `T|undefined`，新代码须显式判空。
 - `/daemon/*` rewrite 是 daemon 安装链路（`curl | bash` 拉 install.sh、latest.json、bundle 都经前端代理到 backend）依赖，勿删；只代理 /api 会让安装脚本 404。
+- rewrite 代理响应超时走 `experimental.proxyTimeout`（Next 14 内置默认 30s，router-utils/proxy-request.js `proxyTimeout || 30000`）：后端 30s+ 的长请求（changes/reparse 全量扫描、scan-docs/reparse 等）会被前端掐断报 500，而后端仍在后台跑完记 200——排障时先对时间戳（前端 ECONNRESET 时刻 vs 后端完成时刻）。已设 300000ms；若未来有更长的同步接口，优先改后端异步化而不是继续调大超时（ql-20260821-014）。
 - vitest 勿动 restoreMocks 与 node 环境白名单，除非先全量跑红绿；启用 restoreMocks 需先把 describe 级 spy 下沉 beforeEach。
 - 路径别名 `@/*` 在 tsconfig / vitest / next 三处须一致；Docker 构建用 pnpm frozen-lockfile，本地 lockfile 缺失首次需 `--no-frozen-lockfile` 回退。
 - react-query 已实际投入使用（会话门户 / changes 列表 / hooks 层），与自封装 apiFetch 双轨并存：新代码按域内既有惯例选型，勿在同一数据流混用两套缓存。
