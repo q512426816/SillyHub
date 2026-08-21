@@ -156,3 +156,26 @@
 根因：content 端点 get_current_user 仅认 JWT；daemon 走 X-API-Key（config-63767aa5）
 方案：改 get_current_principal 双通道；归属校验不变
 结果：daemon key 实测 200 全量字节；端到端 agent 真实读出图内容；已部署提交
+
+## ql-20260821-016-c607 | 2026-08-21 14:22:05 | 本机默认会话切换供应商后约 1 秒会话即 ended（/sessions 复现）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/session-manager.ts（resolveResumeConfigDir 探测 helper + _reloadSession/restoreAndReconnect 按 jsonl 位置选目录 + resumeDirResolver 测试注入点）
+- sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts（新增 7 用例（helper 单测 4 + reload/restore 集成 3））
+需求：本机默认会话切换供应商后约 1 秒会话即 ended（/sessions 复现）
+根因：本机默认创建的会话 jsonl 写用户 ~/.claude（ql-20260729-002 不隔离设计），而 daemon reload/restore 无条件强制隔离目录 resume（ql-20260807-002），跨目录找不到 jsonl → claude 启动失败 → onError → fail → 上报 end
+方案：新增 resolveResumeConfigDir 按 jsonl 实际所在目录选 CLAUDE_CONFIG_DIR（隔离优先、home 次之、都无 fallback 隔离保持既有报错路径），_reloadSession 与 restoreAndReconnect 两处接入，SessionManagerOptions.resumeDirResolver 供测试注入
+结果：新增 7 用例全过（helper 4 + reload/restore 集成 3），config-switch 全文件 28 过；daemon 全量 2461 过、仅 3 个存量失败（git stash 干净树复现无关）；typecheck 过
+
+## ql-20260821-017-cf72 | 2026-08-21 14:38:26 | 清理 daemon 3 个存量测试失败（干净树复现
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/tests/daemon-session-switch-config.test.ts（inject 断言补第4/5参）
+- sillyhub-daemon/tests/daemon-kind-dispatch.test.ts（同款断言补参）
+- sillyhub-daemon/tests/policy/allowed-roots-temp-paths.test.ts（WORKSPACE_ROOT 按平台形态）
+需求：清理 daemon 3 个存量测试失败（干净树复现，与 ql-20260821-016 无关）
+根因：两处 SESSION_INJECT spy 断言缺第4/5参（daemon.ts inject 已带 attachments/downloadAttachment，无附件时 undefined）；policy 测试 Windows 上工作区 root 用 POSIX 形态与 target 盘符形态不匹配（跨平台提交即坏）
+方案：两处断言补 undefined, undefined；WORKSPACE_ROOT 常量按平台取形态
+结果：3 文件 44 用例全过，零产品代码改动
