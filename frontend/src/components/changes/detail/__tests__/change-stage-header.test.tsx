@@ -14,11 +14,23 @@ describe("ChangeStageHeader", () => {
     expect(container.querySelectorAll(".text-white").length).toBeGreaterThanOrEqual(2);
   });
 
-  it("非线性阶段（quick/blocked/archived）返回 null 不渲染", () => {
+  it("非线性阶段（quick/blocked）返回 null 不渲染", () => {
     const { container } = render(
       <ChangeStageHeader currentStage="quick" stages={null} updatedAt={null} />,
     );
     expect(container.firstChild).toBeNull();
+  });
+
+  it("archived 终态映射为 archive 渲染：前四阶段对勾、归档节点高亮", () => {
+    const { container } = render(
+      <ChangeStageHeader currentStage="archived" stages={null} updatedAt={null} />,
+    );
+    expect(screen.getByText("归档")).toBeInTheDocument();
+    expect(screen.getByText("归档").className).toContain("font-medium");
+    // 已完成 4 个（brainstorm/plan/execute/verify）+ 当前 archive 节点共 5 个可见
+    expect(container.querySelectorAll(".rounded-full").length).toBe(5);
+    // 对勾数量应 ≥ 4
+    expect(container.querySelectorAll(".text-white").length).toBeGreaterThanOrEqual(4);
   });
 
   it("未知阶段返回 null", () => {
@@ -133,6 +145,24 @@ describe("ChangeStageHeader 阶段-步骤联动", () => {
     expect(brainstormBtn.querySelector("div")?.className).not.toContain(
       "ring-offset-2",
     );
+  });
+
+  it("archived 终态联动：归档节点可点击并回调 'archive'", () => {
+    const onStageClick = vi.fn();
+    render(
+      <ChangeStageHeader
+        currentStage="archived"
+        stages={null}
+        updatedAt={null}
+        stepStages={["archive"]}
+        focusStage={null}
+        onStageClick={onStageClick}
+      />,
+    );
+    const archiveBtn = screen.getByRole("button", { name: /归档/ });
+    expect(archiveBtn).not.toBeDisabled();
+    fireEvent.click(archiveBtn);
+    expect(onStageClick).toHaveBeenCalledWith("archive");
   });
 
   it("只传 stepStages 不传 onStageClick → 不启用联动（按钮缺席）", () => {

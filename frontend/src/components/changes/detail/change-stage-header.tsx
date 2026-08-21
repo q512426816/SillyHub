@@ -49,8 +49,14 @@ export function ChangeStageHeader({
   onStageClick = null,
 }: ChangeStageHeaderProps) {
   if (!currentStage) return null;
+
+  // 终态别名兼容：CLI 归档 / 后端读侧投影会把 current_stage 写成 'archived'，
+  // 但工作流阶段名仍是 'archive'。映射到阶段条可识别的 key，保持节点高亮/对勾
+  // 及下方步骤时间线 focusStage（stage='archive'）联动一致。
+  const displayStage = currentStage === "archived" ? "archive" : currentStage;
+
   const currentIndex = WORKFLOW_STAGES.indexOf(
-    currentStage as (typeof WORKFLOW_STAGES)[number],
+    displayStage as (typeof WORKFLOW_STAGES)[number],
   );
   if (currentIndex < 0) return null;
 
@@ -59,7 +65,7 @@ export function ChangeStageHeader({
 
   const stagesObj = stages as Record<string, { lastActive?: string }> | null;
   const lastActive =
-    stagesObj?.[currentStage]?.lastActive ?? updatedAt ?? null;
+    stagesObj?.[displayStage]?.lastActive ?? updatedAt ?? null;
 
   return (
     <div className="rounded-md border bg-card px-3 py-2">
