@@ -376,3 +376,14 @@
 方案：ARTIFACTS_PAGE_SIZE=20 分页——antd Pagination（共 N 个/页码），pagedArtifacts slice 当页渲染，列表重载回第 1 页（safeArtifactPage 防越界），不足一页不渲染控件；展开态翻页保留（翻回自动重展）
 结果：vitest 15 passed（12 旧+3 新：当页 20 行/翻页第 2 页剩 5 行/单产物无控件）；tsc --noEmit 0 错
 审计：📝 文档欠账（D-8）：2 个源码文件改动未同步任何模块文档（涉及模块：frontend）
+
+## ql-20260821-011-9ddd | 2026-08-21 09:57:09 | 添加成员弹窗角色下拉补业务成员选项
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/workspace-member-add-dialog.tsx（ROLE_OPTIONS 补业务成员选项+注释与说明文案修正）
+- frontend/src/components/workspace-member-add-dialog.test.tsx（新建：选项可见与提交值两用例）
+需求：添加成员弹窗角色下拉补业务成员选项
+根因：2026-07-25-daemon-borrow-for-business task-12 只补了成员列表行内下拉的 business_member，漏了同域的 workspace-member-add-dialog.tsx，弹窗注释仍停留旧三角色口径
+方案：弹窗 ROLE_OPTIONS 补业务成员（文案与行内下拉一致）+修过时注释+角色说明文案补一句；新增测试两例（选项可见、选后 addMember 提交 business_member）
+结果：pnpm vitest run 弹窗+行内两测试文件 5 用例全绿；grep 确认无其它文件引用受影响；模块文档核对无需变更

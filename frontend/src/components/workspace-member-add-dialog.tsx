@@ -18,11 +18,14 @@ interface Props {
   onClose: () => void;
 }
 
-// FR-08 默认 developer；backend Literal["workspace_owner","developer","viewer"]
-// 不暴露 platform_admin / reviewer / qa / component_lead —— 后端会拒绝
+// FR-08 默认 developer。角色与 workspace-member-row.tsx 的 ROLE_OPTIONS 同步
+// （2026-07-25-daemon-borrow-for-business 补 business_member；后端白名单
+// members_service.ROLE_KEY_WHITELIST 四角色）。不暴露 platform_admin / reviewer /
+// qa / component_lead —— 后端会拒绝
 const ROLE_OPTIONS: ReadonlyArray<{ value: WorkspaceMemberRoleKey; label: string }> = [
   { value: "developer", label: "开发者" },
   { value: "viewer", label: "只读成员" },
+  { value: "business_member", label: "业务成员（借用守护进程）" },
   { value: "workspace_owner", label: "工作区所有者" },
 ];
 
@@ -210,7 +213,7 @@ export function WorkspaceMemberAddDialog({ workspaceId, onAdded, onClose }: Prop
               ))}
             </select>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              工作区所有者可管理成员；开发者可读写；只读成员只读。
+              工作区所有者可管理成员；开发者可读写；业务成员可借用共享守护进程跑智能体；只读成员只读。
             </p>
           </div>
 
