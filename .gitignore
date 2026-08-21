@@ -1,6 +1,8 @@
 # IDE
 .idea/
 .vscode/
+# ZCode CLI 工作区状态（skills 缓存 / 会话计划，本地工具产物勿入库）
+.zcode/
 
 # OS
 .DS_Store

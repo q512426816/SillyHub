@@ -463,3 +463,12 @@
 根因：无，纯样式与交互增强——阶段步骤条与步骤时间线两区块此前无任何关联，completed_at 直显 ISO 原串可读性差，组头样式与 AI-native 系统风格脱节
 方案：ChangeStageHeader 节点升级 button（stepStages 范围内可点、aria-pressed+brand ring 选中、无步骤阶段 disabled；不传联动 props 时渲染与旧版一致）；page.tsx 持 focusStage 状态（再次点击同阶段取消）+ 时间线卡片头「阶段 ✕」清除 chip + 标题带步数；ChangeStepTimeline 加 focusStage 过滤（命中空弱提示）；新增 formatStepTime 正则白名单归一后 new Date 本地化（zh-CN 2-digit，微秒截毫秒，失败回退原串，Grill #18 精神保留）；组头改组名+引导线+N/M 步徽标、时间 tabular-nums；time 元素 title/datetime 保留原始 ISO
 结果：组件测试 31 绿（含新增联动 5 例+格式化 4 例+筛选 3 例）、页面回归 13 绿、tsc 与 eslint 清零；Playwright+Chrome 真实登录隔离环境（临时库+本地后端，已清理）截图验证全部/筛选/切换/清除四态，时间显示 2026/08/20 09:15 且微秒精度正确转换
+
+## ql-20260821-018-e001 | 2026-08-21 14:26:16 | .zcode 目录加入 gitignore
+状态：已完成
+关联变更：（无）
+文件：.gitignore, backend/app/modules/change/service.py
+需求：.zcode 目录加入 gitignore
+根因：无，纯仓库配置——.zcode 为 ZCode CLI 本地工作区状态（skills 缓存/会话计划），非项目代码，此前以未跟踪文件滞留工作区
+方案：.gitignore IDE 区块增 .zcode/ 规则带中文注释说明用途；顺手清理上轮 rebase 遗漏的 sessions/page.tsx.orig 补丁备份文件
+结果：git check-ignore -v 验证 .zcode/plans/ 命中 .gitignore:5 规则生效；git status 仅剩本次 .gitignore 与 QUICKLOG 两处变更，无测试面（纯配置）
