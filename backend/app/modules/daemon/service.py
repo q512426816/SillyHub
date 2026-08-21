@@ -678,6 +678,9 @@ class DaemonService:
         # 2026-08-14-sessions-portal task-02：切档案/切供应商透传（实现归 task-05）。
         agent_profile_id: str | None = None,
         llm_provider_id: str | None = None,
+        # 2026-08-20-session-multimodal-attachments task-05：附件引用透传
+        # （校验/组装在 session 子域 _inject_into_session）。
+        attachment_ids: list[uuid.UUID] | None = None,
     ) -> SessionDispatchResult:
         return await self._sess.inject_session(
             session_id,
@@ -685,6 +688,7 @@ class DaemonService:
             prompt=prompt,
             agent_profile_id=agent_profile_id,
             llm_provider_id=llm_provider_id,
+            attachment_ids=attachment_ids,
         )
 
     async def interrupt_session(
