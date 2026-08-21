@@ -271,3 +271,32 @@
 根因：cancel 端点 require_permission 的 path 参数解析缺陷致已认证请求恒 422；get/list mission 无归属校验可跨工作区越权读写；dispatch_worker 跨 ws 派发不校验调用者对 target 权限；worktree 异常 run 永久 pending；converged_at 先置位失败无回滚致合并永久丢失；cleanup 只清 completed 且自动收敛路径不接 cleanup 致副本泄漏；主 agent 在线判定传全零 user_id 恒离线；no_online_daemon 主 run 无重派机制；治理拒绝落 killed run 污染 derive_status；前端 degraded 终态误入轮询集合、轮询无竞态守卫、日志游标方向反致全量重拉
 方案：后端 router 加 _require_mission_access 归属校验（cancel/get/list）+ dispatch target 权限校验（JWT 通道校验 apiKey 通道豁免）+ execution 捕获 HostFsDelegateUnavailable 收敛 failed + finalizer converged_at 失败回滚 + cleanup 过滤扩终态并接自动收敛路径 + orchestrator 在线判定改传 binding 属主 + redispatch_pending_main_runs 启动重派接线 + 治理拒绝先 gate 后建 run + schema 输入上限与保留键过滤与 project_id 索引；前端 ACTIVE 去 degraded + displayedMissionIdRef 竞态守卫 + 日志游标取最新 + budget 校验 + errMessage 复用 + 空 projectId 错误态 + 403 显式提示
 结果：backend agent+mcp_gateway+daemon 1518 passed；frontend 全量 1795 passed + tsc 0；新增归属控制 8 用例 + 页面 3 用例 + 游标 2 用例更新；gen:types 同步；9 项设计权衡类 P2 登记后续变更
+
+## ql-20260821-003-fc02 | 2026-08-21 08:32:18 | 工作区详情页五点布局调整（hero 删编辑信息/接入配置入 hero/关联 PPM 转弹层/规范配置全宽/提供方共享两列置底）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/workspace/hero-header.tsx（删编辑信息+extraActions slot）
+- frontend/src/app/(dashboard)/workspaces/[id]/page.tsx（五点重排+接入配置吸收+关联项目 Modal）
+- frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx（移除 BindingGuard）
+- frontend/src/components/workspace-binding-guard.tsx（删除）
+- missions-page.test.tsx（顺手补 mock details）
+需求：工作区详情页五点布局调整（hero 删编辑信息/接入配置入 hero/关联 PPM 转弹层/规范配置全宽/提供方共享两列置底）
+根因：编辑信息双入口重复；接入配置按钮孤悬与 hero 脱节；四卡长短不齐两列错位
+方案：hero 改 extraActions slot；BindingGuard 吸收进 page；LinkedProjects 入 Modal；布局重排；组件删除
+结果：tsc 0（顺手修预存 missions mock）、eslint 0、全量 1795 用例全绿、已部署验证
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/projects/[id]/missions/__tests__/missions-page.test.tsx
+
+## ql-20260821-004-5498 | 2026-08-21 08:42:05 | 详情页菜单吸顶/统计口径与跳转修复/基本信息展示关联项目并收敛按钮
+状态：已完成
+关联变更：（无）
+文件：
+- workspace-tabs.tsx（吸顶）
+- stats-row.tsx（带参跳转）
+- page.tsx（口径+关联行+按钮收敛）
+- page.test.tsx（断言同步）
+需求：详情页菜单吸顶/统计口径与跳转修复/基本信息展示关联项目并收敛按钮
+根因：tabs 无 sticky；统计与 tab 徽标口径不一致（quicklog 差 include_placeholder）且跳转不带参数；关联项目按钮与信息展示割裂
+方案：sticky top-16；查询同参对齐+href 带 tab；基本信息行展示项目名+行尾按钮开弹层删独立按钮
+结果：tsc 0、eslint 0、全量 1795 用例全绿、已部署
+审计：📝 文档欠账（D-8）：3 个源码文件改动未同步任何模块文档（涉及模块：frontend）

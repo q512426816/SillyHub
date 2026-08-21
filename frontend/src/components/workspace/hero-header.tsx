@@ -1,23 +1,22 @@
 "use client";
 
 import Link from "next/link";
-import { Pencil, ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Workspace } from "@/lib/workspaces";
 
 interface WorkspaceHeroHeaderProps {
   workspace: Workspace;
-  onEditInfo: () => void;
-  editing?: boolean;
+  /** 外部操作按钮 slot，渲染在「返回列表」左边（如「编辑我的接入配置」）。 */
+  extraActions?: React.ReactNode;
 }
 
 export function WorkspaceHeroHeader({
   workspace,
-  onEditInfo,
-  editing = false,
+  extraActions,
 }: WorkspaceHeroHeaderProps): JSX.Element {
   return (
     <section
@@ -47,19 +46,10 @@ export function WorkspaceHeroHeader({
           <p className="font-mono text-xs text-white/60">{workspace.slug}</p>
         </div>
 
-        {/* 右侧：操作组 */}
+        {/* 右侧：操作组（ql-20260821-003：编辑信息与基本信息卡头重复已删；
+            extraActions slot 供外部按钮（编辑我的接入配置）挂在返回列表左边） */}
         <div className="flex shrink-0 items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={editing}
-            onClick={onEditInfo}
-            className="border-white/20 bg-white/10 text-white hover:bg-white/20 hover:text-white disabled:opacity-50"
-          >
-            <Pencil className="mr-1.5 h-3.5 w-3.5" />
-            编辑信息
-          </Button>
+          {extraActions}
           <Link
             href="/workspaces"
             className={cn(

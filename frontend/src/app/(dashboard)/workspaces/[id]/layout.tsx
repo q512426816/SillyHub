@@ -2,7 +2,6 @@
 
 import { usePathname } from "next/navigation";
 
-import { WorkspaceBindingGuard } from "@/components/workspace-binding-guard";
 import { WorkspaceTabs } from "@/components/workspace-tabs";
 
 export default function WorkspaceDetailLayout({
@@ -25,7 +24,6 @@ export default function WorkspaceDetailLayout({
   }
   return (
     <main className="mx-auto flex w-full max-w-[1440px] flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
-      <WorkspaceBindingGuard workspaceId={params.id} />
       <WorkspaceTabs workspaceId={params.id}>{children}</WorkspaceTabs>
     </main>
   );

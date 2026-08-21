@@ -34,6 +34,12 @@ import {
   type Workspace,
 } from "@/lib/workspaces";
 import { fetchMyBinding, type MemberBindingView } from "@/lib/workspace-binding";
+import { listLinkedProjects } from "@/lib/workspace";
+import {
+  WorkspaceAccessGuide,
+  type AccessGuideInitial,
+} from "@/components/workspace-access-guide";
+import { Modal } from "antd";
 import { useSession } from "@/stores/session";
 
 /* ------------------------------------------------------------------ */
@@ -59,6 +65,12 @@ export default function WorkspaceDetailPage({ params }: Props) {
   // ql-20260820-013：统计第四卡由"运行时阶段"改为快速修复条数（用户反馈）
   const [quickTotal, setQuickTotal] = useState<number>(0);
   const [myBinding, setMyBinding] = useState<MemberBindingView | null>(null);
+  // ql-20260821-003：接入配置编辑态（原 layout 的 WorkspaceBindingGuard 入口吸收进 hero slot）
+  const [accessEditing, setAccessEditing] = useState(false);
+  // ql-20260821-003：关联 PPM 项目由平铺卡改为按钮+弹层
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  // ql-20260821-004：基本信息展示关联项目简要（名称列表，弹层内管理）
+  const [linkedProjectNames, setLinkedProjectNames] = useState<string[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
   // workspace 级默认 agent provider 编辑态（FR-01/FR-02，2026-06-14-agent-runtime-selection）
@@ -147,9 +159,11 @@ export default function WorkspaceDetailPage({ params }: Props) {
         getWorkspace(workspaceId),
         getSpecWorkspace(workspaceId).catch(() => null),
         listComponents(workspaceId).catch(() => ({ items: [], total: 0 })),
-        listChanges(workspaceId, { location: "active" }).catch(() => ({ items: [], total: 0 })),
-        listChanges(workspaceId, { location: "archive" }).catch(() => ({ items: [], total: 0 })),
-        listQuicklogEntries(workspaceId).catch(() => ({ items: [], total: 0 })),
+        // ql-20260821-004 口径对齐变更中心 tab 徽标（pageSize=1 取 total +
+        // quicklog 含空壳占位 include_placeholder，与 tabTotalsQuery 同参）
+        listChanges(workspaceId, { location: "active", pageSize: 1 }).catch(() => ({ items: [], total: 0 })),
+        listChanges(workspaceId, { location: "archive", pageSize: 1 }).catch(() => ({ items: [], total: 0 })),
+        listQuicklogEntries(workspaceId, { include_placeholder: true, page_size: 1 }).catch(() => ({ items: [], total: 0 })),
         fetchMyBinding(workspaceId).catch(() => null),
       ]);
       setWorkspace(ws);
@@ -172,6 +186,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
 
       // task-08 / D-002：获取当前成员 binding 以判定 init 状态
       setMyBinding(binding);
+      // ql-20260821-004：关联项目简要（独立拉取失败静默——展示性信息不阻断页面）
+      listLinkedProjects(workspaceId)
+        .then((briefs) => setLinkedProjectNames(briefs.map((b) => b.project_name ?? b.project_id)))
+        .catch(() => setLinkedProjectNames(null));
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "加载工作区失败");
     } finally {
@@ -369,6 +387,36 @@ export default function WorkspaceDetailPage({ params }: Props) {
               </div>
             </div>
           )}
+          {/* ql-20260821-004：关联项目简要行（名称列表 + 管理入口开弹层） */}
+          <div className="mt-3 flex items-center gap-2 border-t pt-2.5 text-xs">
+            <dt className="text-muted-foreground">关联项目</dt>
+            <dd className="min-w-0 flex-1 truncate">
+              {linkedProjectNames === null ? (
+                <span className="text-muted-foreground">—</span>
+              ) : linkedProjectNames.length === 0 ? (
+                <span className="text-muted-foreground">未关联</span>
+              ) : (
+                <span className="flex flex-wrap gap-1">
+                  {linkedProjectNames.map((name) => (
+                    <span
+                      key={name}
+                      className="inline-flex h-5 items-center rounded border border-brand-200 bg-brand-50 px-1.5 text-[10px] font-semibold text-brand-700"
+                    >
+                      {name}
+                    </span>
+                  ))}
+                </span>
+              )}
+            </dd>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 shrink-0 px-2 text-xs"
+              onClick={() => setProjectsOpen(true)}
+            >
+              关联 PPM 项目
+            </Button>
+          </div>
           {/* task-11 / 2026-07-10-remove-server-local-workspace-mode：所有工作区
               均为 daemon-client 语义，WorkspaceDaemonSwitcher 无条件渲染。 */}
           <div className="mt-3 border-t pt-2.5">
@@ -450,9 +498,36 @@ export default function WorkspaceDetailPage({ params }: Props) {
         {/* 段①：头部横幅 */}
         <WorkspaceHeroHeader
           workspace={workspace}
-          onEditInfo={() => setEditingInfo(true)}
-          editing={editingInfo}
+          extraActions={
+            myBinding && !accessEditing ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setAccessEditing(true)}
+                className="h-7 border-white/20 bg-white/10 text-xs text-white hover:bg-white/20 hover:text-white"
+                data-testid="binding-edit-entry"
+              >
+                编辑我的接入配置
+              </Button>
+            ) : undefined
+          }
         />
+
+        {/* 接入配置编辑表单（原 BindingGuard 展开态，保存后收起并刷新） */}
+        {accessEditing && myBinding && (
+          <WorkspaceAccessGuide
+            workspaceId={workspaceId}
+            initial={{
+              daemon_id: myBinding.daemon_id ?? null,
+              root_path: myBinding.root_path,
+            } satisfies AccessGuideInitial}
+            onConfigured={() => {
+              void load();
+              setAccessEditing(false);
+            }}
+          />
+        )}
 
         {pageError && <ErrorBanner message={pageError} />}
 
@@ -470,21 +545,22 @@ export default function WorkspaceDetailPage({ params }: Props) {
           {basicInfoBody}
         </SectionCard>
 
-        {/* 段③-2：配置区卡片两列（自带卡的组件平铺，裸内容套 SectionCard） */}
+        {/* 段③-2：规范工作区配置全宽（ql-20260821-003 用户指定整行展示） */}
+        <WorkspaceConfigCard
+          workspace={workspace}
+          specWs={specWs}
+          myBinding={myBinding}
+          boundDaemon={boundDaemon}
+          isOwner={isOwner}
+          onRefresh={load}
+          componentCount={componentCount}
+        />
+
+        {/* 段③-3：默认智能体提供方 | 守护进程共享 最下一行两块 */}
         <div className="grid items-start gap-4 lg:grid-cols-2">
           <SectionCard title="默认智能体提供方" bodyPadding="p-4">
             {defaultAgentBody}
           </SectionCard>
-          <LinkedProjectsSection workspaceId={workspaceId} />
-          <WorkspaceConfigCard
-            workspace={workspace}
-            specWs={specWs}
-            myBinding={myBinding}
-            boundDaemon={boundDaemon}
-            isOwner={isOwner}
-            onRefresh={load}
-            componentCount={componentCount}
-          />
           {myBinding && (
             <SectionCard title="守护进程共享" bodyPadding="p-4">
               <SharedDaemonToggle
@@ -498,6 +574,18 @@ export default function WorkspaceDetailPage({ params }: Props) {
             </SectionCard>
           )}
         </div>
+
+        {/* 关联 PPM 项目弹层（ql-20260821-004 入口收敛到基本信息行内按钮） */}
+        <Modal
+          open={projectsOpen}
+          title="关联 PPM 项目"
+          onCancel={() => setProjectsOpen(false)}
+          footer={null}
+          width={680}
+          destroyOnHidden
+        >
+          <LinkedProjectsSection workspaceId={workspaceId} />
+        </Modal>
       </div>
     </PageContainer>
   );

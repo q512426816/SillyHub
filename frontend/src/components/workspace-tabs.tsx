@@ -46,7 +46,7 @@ export function WorkspaceTabs({
     <>
       <nav
         aria-label="工作区标签页"
-        className="flex min-w-0 flex-nowrap overflow-x-auto gap-1.5 rounded-lg border bg-card p-1.5 shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="sticky top-16 z-20 flex min-w-0 flex-nowrap overflow-x-auto gap-1.5 rounded-lg border bg-card p-1.5 shadow-sm [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {TABS.map((tab) => {
           const active = isActive(tab.path);

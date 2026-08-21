@@ -246,7 +246,7 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     const quickCard = screen.getByText("快速修复").closest("a");
     expect(quickCard).toHaveAttribute(
       "href",
-      "/workspaces/ws-1/changes",
+      "/workspaces/ws-1/changes?tab=quicklog",
     );
     expect(quickCard).toHaveTextContent("0");
     // 组件数显式断言

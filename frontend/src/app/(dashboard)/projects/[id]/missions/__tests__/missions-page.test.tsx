@@ -402,6 +402,7 @@ describe("项目团队会话页（task-15 / cross-workspace-team-mission）", ()
         code: "HTTP_403_PERMISSION_DENIED",
         message: "仅项目经理可创建项目团队会话。",
         request_id: null,
+        details: null,
       }),
     );
     render(<ProjectMissionsPage />);

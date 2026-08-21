@@ -86,12 +86,14 @@ export function WorkspaceStatsRow({
         clickable
       />
       <StatCard
+        href={`/workspaces/${workspaceId}/changes?tab=archive`}
         icon={Archive}
         label="已归档变更"
         value={archivedChanges}
+        clickable
       />
       <StatCard
-        href={`/workspaces/${workspaceId}/changes`}
+        href={`/workspaces/${workspaceId}/changes?tab=quicklog`}
         icon={Zap}
         label="快速修复"
         value={quickTotal}
