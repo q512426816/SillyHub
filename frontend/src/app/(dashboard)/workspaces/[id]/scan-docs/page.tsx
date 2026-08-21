@@ -115,7 +115,7 @@ function toAntdNodes(nodes: TreeNode[]): DataNode[] {
   });
 }
 
-/** 文档树：antd Tree 受控（全展开初始 + 可收起；点文件行拉详情回调）。 */
+/** 文档树：antd Tree 受控（全展开初始 + 可收起；点目录行展开/收起 ql-20260821-015；点文件行拉详情回调）。 */
 function DocTree({
   tree,
   workspaceId,
@@ -145,6 +145,7 @@ function DocTree({
   return (
     <Tree
       treeData={treeData}
+      expandAction="click"
       expandedKeys={expandedKeys}
       onExpand={(keys) => setExpandedKeys([...keys])}
       selectedKeys={selectedPath ? [selectedPath] : []}

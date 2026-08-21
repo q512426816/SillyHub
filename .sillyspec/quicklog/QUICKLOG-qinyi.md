@@ -427,3 +427,20 @@
 方案：next.config.mjs experimental 增 proxyTimeout:300000（5 分钟），重建前端镜像并重启容器
 结果：容器内 required-server-files.json 确认 proxyTimeout=300000 生效、容器 healthy；后端日志确认 reparse 本身正常（236 parsed）；端到端重放因 bootstrap 密码已轮换未做，等用户浏览器重试确认；无代码测试影响（纯构建配置）
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/next.config.mjs
+
+## ql-20260821-015-4637 | 2026-08-21 10:49:59 | 文件树点目录行任意位置即展开/收起
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/explorer/file-explorer.tsx（expandAction=click）
+- frontend/src/components/explorer/__tests__/file-explorer.test.tsx（双击用例改单击）
+- frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx（expandAction=click）
+- frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx（知识库页重写）
+- frontend/src/components/workspace-tabs.tsx（加知识库 tab）
+- frontend/src/lib/menu-permissions.ts（侧边栏改名）
+- frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx（新页面测试）
+需求：文件树点目录行任意位置即展开/收起；「知识 & 日志」页改为知识库——不再展示快速修复日志、按钮纳入工作区顶部导航放文件之后、页面用共享树组件重做并渲染 Markdown 而非原文。
+根因：explorer 文件树沿用 ql-20260819-001 的 expandAction=doubleClick、scan-docs 树未设 expandAction（仅点箭头），与新指令不符；knowledge/page.tsx 是知识/快速日志双 tab 平铺按钮列表，MD 内容走裸 pre 原文展示，与文件树体系割裂。
+方案：①explorer 与 scan-docs 两树 expandAction 统一改 click（点行展开/收起，本指令覆盖 ql-20260819-001 双击决策），file-explorer 三个双击用例改单击并删 dblClickNode 助手；②knowledge/page.tsx 重写——快速日志 tab 整体移除（变更中心快速修复 tab 保留完整入口），buildKnowledgeTree 按 path 建目录树 + FileNodeIcon/TreeBox/PanelResizer 共享三件套（默认 280px 钳 200~480 localStorage 记忆）+ antd Tree 点行展开默认全展开，内容区 .md 用 MarkdownPreview（复用统一 sanitize rehype 插件）渲染、非 md 仍纯文本 pre；③workspace-tabs.tsx 增 knowledge「知识库」tab 排文件后，menu-permissions.ts 侧边栏同步改名知识库。
+结果：新 knowledge-page.test.tsx 4 用例（树渲染/点行交互+md 渲染/拖拽记忆/WorkspaceTabs 顺序），关联 5 测试文件 78/78 通过，tsc 0 错，lint 仅预存 warning，frontend.md 变更索引已更新。
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx

@@ -72,11 +72,6 @@ function expandRow(name: string) {
   fireEvent.click(switcher!);
 }
 
-/** 双击某节点行标题（expandAction=doubleClick 的展开/收起触发方式）。 */
-function dblClickNode(name: string) {
-  fireEvent.doubleClick(screen.getByText(name).closest(".ant-tree-node-content-wrapper")!);
-}
-
 /** 点某节点行标题触发选中。 */
 function clickNode(name: string) {
   fireEvent.click(screen.getByText(name).closest(".ant-tree-node-content-wrapper")!);
@@ -241,12 +236,12 @@ describe("FileExplorer（task-06）", () => {
     expect(wrapper.className).toContain("ant-tree-node-selected");
   });
 
-  it("双击目录节点 → 展开并懒加载当前层（等价 switcher 展开）", async () => {
+  it("点击目录节点 → 展开并懒加载当前层（expandAction=click，ql-20260821-015）", async () => {
     mockDefaultTree();
     render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
 
-    dblClickNode("backend");
+    clickNode("backend");
     await waitFor(() => expect(mockFetchTree).toHaveBeenCalledWith("ws1", "backend"));
     await waitFor(() => expect(screen.getByText("pyproject.toml")).toBeInTheDocument());
     // 只取当前层不递归预取。
@@ -254,24 +249,24 @@ describe("FileExplorer（task-06）", () => {
     expect(paths).toEqual(["", "backend"]);
   });
 
-  it("双击已展开目录 → 收起（子行隐藏、不重复拉取）", async () => {
+  it("点击已展开目录 → 收起（子行隐藏、不重复拉取）", async () => {
     mockDefaultTree();
     render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
 
-    dblClickNode("backend");
+    clickNode("backend");
     await waitFor(() => expect(screen.getByText("pyproject.toml")).toBeInTheDocument());
-    dblClickNode("backend");
+    clickNode("backend");
     await waitFor(() => expect(screen.queryByText("pyproject.toml")).not.toBeInTheDocument());
     expect(mockFetchTree).toHaveBeenCalledTimes(2); // "" + "backend"，收起不发请求
   });
 
-  it("双击文件节点 → 不触发展开请求（叶子忽略）", async () => {
+  it("点击文件节点 → 不触发展开请求（叶子忽略）", async () => {
     mockDefaultTree();
     render(<FileExplorer workspaceId="ws1" onSelectFile={vi.fn()} />);
     await waitForRoot();
 
-    dblClickNode("README.md");
+    clickNode("README.md");
     await act(async () => {});
     expect(mockFetchTree).toHaveBeenCalledTimes(1); // 仅根层
   });

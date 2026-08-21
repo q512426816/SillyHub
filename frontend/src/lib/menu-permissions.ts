@@ -145,7 +145,8 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
   {
     section: "workspace",
     menuKey: "knowledge",
-    menuLabel: "知识 & 日志",
+    // ql-20260821-015：快速日志入口移除（变更中心保留完整入口），改名知识库
+    menuLabel: "知识库",
     icon: "\u{1F4DA}",
     href: "knowledge",
     matchPattern: "/knowledge",

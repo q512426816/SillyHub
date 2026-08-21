@@ -10,6 +10,8 @@ const TABS = [
   { key: "changes", label: "变更", path: "/changes" },
   { key: "sessions", label: "会话", path: "/sessions" },
   { key: "explorer", label: "文件", path: "/explorer" },
+  // ql-20260821-015：知识库入顶部导航（用户指定排文件之后，页面已去快速日志 tab）
+  { key: "knowledge", label: "知识库", path: "/knowledge" },
   // 2026-08-20-workspace-nav-consolidate：概览宫格退役，4 入口并入菜单（顺序按使用频率）
   // ql-20260821-009：组件移到扫描文档之前（用户指定）
   { key: "components", label: "组件", path: "/components" },
