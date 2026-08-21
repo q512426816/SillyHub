@@ -484,3 +484,15 @@
 根因：CLI 归档补记只回填 status=archived，平台读侧刻意不消费 status（D-004@v2），已归档变更渲染成停在执行+归档0/5
 方案：complete-stage archive 补 5 步 completed+platform sync 推送；后端读侧投影 archived 终态覆盖 status/current_stage（D-004@v2 收窄为仅终态投 status）；前端 badge 补 archived 映射
 结果：后端 30+393 passed，前端 badge 13 passed；Docker 重建后浏览器验证已归档徽标+归档 5/5+历史归档批量生效
+
+## ql-20260821-020-69d9 | 2026-08-21 14:55:33 | 变更详情页阶段条兼容 archived 终态恢复显示
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/changes/detail/change-stage-header.tsx（archived 终态映射为 archive 渲染阶段条并保持步骤联动）
+- frontend/src/components/changes/detail/__tests__/change-stage-header.test.tsx（新增 archived 渲染与联动回调单测）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（追加 ql-20260821-020-69d9 变更索引）
+需求：变更详情页阶段条兼容 archived 终态恢复显示。
+根因：后端读侧把 CLI 归档投影为 current_stage='archived'，ChangeStageHeader 原只识别 'archive'，导致已归档页阶段条 return null、与步骤时间线联动入口消失。
+方案：ChangeStageHeader 内做 archived→archive 映射渲染，lastActive 取 displayStage 对应 stages 字段，保持节点点击回调传 'archive' 与 ChangeStepTimeline focusStage 一致；补 2 个单测覆盖归档渲染与联动回调。
+结果：change-stage-header 14 测 / change-step-timeline 19 测全绿，next lint 无 error（仅预存 warning），tsc --noEmit 通过；模块文档 frontend.md 已追加 ql-20260821-020-69d9 索引。
