@@ -725,6 +725,100 @@ async def test_machine_self_update_nonexistent_returns_404(
     assert resp.status_code == 404, resp.text
 
 
+# ── POST /machines/{instance_id}/cleanup ──────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_machine_cleanup_routes_to_ws_hub(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fresh_ws_hub: DaemonWsHub,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """cleanup：mock ws_hub，``send_cleanup`` 返回 True，断言响应 shape + 以
+    instance_id 路由（与 self-update 同款）。"""
+    admin, user_a, _ = await _bootstrap(db_session)
+    inst = await _create_instance(db_session, user_a.id, hostname="cu-host")
+    await _create_runtime(db_session, user_a.id, daemon_instance_id=inst.id)
+
+    captured: dict[str, Any] = {}
+
+    async def _fake_send_cleanup(
+        self_hub: DaemonWsHub,
+        daemon_id: uuid.UUID,
+    ) -> bool:
+        captured["daemon_id"] = daemon_id
+        return True
+
+    monkeypatch.setattr(DaemonWsHub, "send_cleanup", _fake_send_cleanup)
+
+    resp = await client.post(
+        f"/api/daemon/machines/{inst.id}/cleanup", headers=_headers(_token_for(admin))
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body == {"sent": True}
+    assert captured["daemon_id"] == inst.id
+
+
+@pytest.mark.asyncio
+async def test_machine_cleanup_offline_or_send_fail_returns_504(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fresh_ws_hub: DaemonWsHub,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """cleanup：离线 / 发送失败 → 504 DaemonRuntimeOffline。"""
+    admin, user_a, _ = await _bootstrap(db_session)
+    inst = await _create_instance(db_session, user_a.id, hostname="offline-cu-host")
+
+    async def _always_false(
+        self_hub: DaemonWsHub,
+        daemon_id: uuid.UUID,
+    ) -> bool:
+        return False
+
+    monkeypatch.setattr(DaemonWsHub, "send_cleanup", _always_false)
+
+    resp = await client.post(
+        f"/api/daemon/machines/{inst.id}/cleanup", headers=_headers(_token_for(admin))
+    )
+    assert resp.status_code == 504, resp.text
+
+
+@pytest.mark.asyncio
+async def test_machine_cleanup_cross_owner_returns_404(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fresh_ws_hub: DaemonWsHub,
+) -> None:
+    """cleanup：越权 → 404（_get_owned_instance，与 self-update 同）。"""
+    _admin, user_a, user_b = await _bootstrap(db_session)
+    inst = await _create_instance(db_session, user_b.id, hostname="other-cu-host")
+
+    resp = await client.post(
+        f"/api/daemon/machines/{inst.id}/cleanup", headers=_headers(_token_for(user_a))
+    )
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["code"] == "HTTP_404_DAEMON_RUNTIME_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_machine_cleanup_nonexistent_returns_404(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fresh_ws_hub: DaemonWsHub,
+) -> None:
+    """cleanup：不存在 instance_id → 404。"""
+    admin, _u_a, _u_b = await _bootstrap(db_session)
+
+    resp = await client.post(
+        f"/api/daemon/machines/{uuid.uuid4()}/cleanup",
+        headers=_headers(_token_for(admin)),
+    )
+    assert resp.status_code == 404, resp.text
+
+
 # ── 既有端点回归冒烟（FR-8，只确认 200 + shape，不断言全量）────────────────
 
 

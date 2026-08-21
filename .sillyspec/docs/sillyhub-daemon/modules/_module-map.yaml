@@ -23,10 +23,24 @@ modules:
     paths: ["sillyhub-daemon/src/cli.ts"]
     tags: [cli, entrypoint, commander, 命令行, 入口]
     aliases: [__main__]
-    entrypoints: ["start", "stop", "status", "logs"]
-    main_symbols: [createProgram, startAction, stopAction, statusAction, logsAction, getPidFile, getLogFile, resolveRunningDaemonConfig]
-    depends_on: [config, client, credential, credential-injector, workspace, agent-detector, task-runner, daemon, interactive, daemon-version, mcp-config, policy, resilience, runtime-lock]
+    entrypoints: ["start", "stop", "status", "logs", "clean"]
+    main_symbols: [createProgram, startAction, stopAction, statusAction, logsAction, cleanAction, getPidFile, getLogFile, resolveRunningDaemonConfig]
+    depends_on: [config, client, credential, credential-injector, workspace, agent-detector, task-runner, daemon, interactive, daemon-version, mcp-config, policy, resilience, runtime-lock, cleanup]
     used_by: []
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
+  cleanup:
+    status: active
+    doc: modules/cleanup.md
+    paths: ["sillyhub-daemon/src/cleanup.ts"]
+    tags: [cleanup, cache, maintenance, 清理, 缓存]
+    aliases: []
+    entrypoints: []
+    main_symbols: [performCleanup, CleanupEntry, CleanupResult]
+    depends_on: []
+    used_by: [cli, daemon]
     needs_review: false
     concerns: []
     review_reasons: []
@@ -174,7 +188,7 @@ modules:
     aliases: []
     entrypoints: []
     main_symbols: [Daemon, DaemonOptions, RecoveryCoordinator, SessionRecoverStatus, translateSpecRoot, InteractiveCredentialManager, RuntimeLockLike, LEASE_POLL_SKIP_MS]
-    depends_on: [config, protocol, types, agent-detector, client, model-error, ws-client, file-rpc, roots-rpc, host-fs-handler, runtime-handler, spawn-env, claude-settings, preflight, skill-manager, build-id, resilience, policy, workspace, interactive, spec-sync, task-runner]
+    depends_on: [config, protocol, types, agent-detector, client, model-error, ws-client, file-rpc, roots-rpc, host-fs-handler, runtime-handler, spawn-env, claude-settings, preflight, skill-manager, build-id, resilience, policy, workspace, interactive, spec-sync, task-runner, cleanup]
     used_by: [cli, client]
     needs_review: false
     concerns: []

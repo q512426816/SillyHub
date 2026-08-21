@@ -11,6 +11,7 @@ from fastapi import WebSocket
 
 from app.core.logging import get_logger
 from app.modules.daemon.protocol import (
+    DAEMON_MSG_CLEANUP,
     DAEMON_MSG_HEARTBEAT_ACK,
     DAEMON_MSG_PERMISSION_RESPONSE,
     DAEMON_MSG_POLICY_UPDATE,
@@ -367,6 +368,19 @@ class DaemonWsHub:
         if version:
             payload["version"] = version
         message = {"type": DAEMON_MSG_SELF_UPDATE, "payload": payload}
+        return await self.send_to_runtime(daemon_id, message)
+
+    async def send_cleanup(
+        self,
+        daemon_id: uuid.UUID,
+    ) -> bool:
+        """推送 daemon 本地缓存清理指令（Server → Daemon）。
+
+        daemon 按 cleanup.ts 黑名单删除 specs 缓存 / Claude 会话日志 / 备份 / 日志
+        文件，未列入清理目标的内容（config.json、locks/、workspaces/、outbox/、
+        runs/ 等）一律保留。fire-and-forget，无需回复。
+        """
+        message = {"type": DAEMON_MSG_CLEANUP, "payload": {}}
         return await self.send_to_runtime(daemon_id, message)
 
     async def send_policy_update(

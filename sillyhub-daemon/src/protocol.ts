@@ -184,6 +184,16 @@ export const MSG = {
    * reloadWithProvider 内部保证幂等（design R-02 / R-06 同 LEASE_CANCEL）。
    */
   PROVIDER_CONFIG_CHANGED: 'daemon:provider_config_changed',
+
+  /**
+   * Server → Daemon：清理本地缓存指令（specs 缓存 / Claude 会话日志 / 备份 / 日志）。
+   *
+   * daemon 按 cleanup.ts 黑名单删除，未列入清理目标的内容（config.json、locks/、
+   * workspaces/、outbox/、runs/ 等）一律保留。fire-and-forget，无需回复。
+   *
+   * payload: `{}`（当前无参数，后续可扩展 dry_run / keep_recent 等）。
+   */
+  CLEANUP: 'daemon:cleanup',
 } as const;
 
 /** WebSocket 消息类型联合（字面量），用于 DaemonMessage.type。 */

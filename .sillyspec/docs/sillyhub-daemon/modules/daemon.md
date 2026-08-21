@@ -47,7 +47,8 @@ _executeChangeWrite(): claim → taskRunner.runChangeWrite(轻量分支，不启
   → kind=spec-sync 时整树回灌 postSpecSync（严格不走 lease 状态机）
 _handleWsMessage(): TASK_AVAILABLE / HEARTBEAT_ACK(同步 allowed_roots+PolicyCache) /
   LEASE_CANCEL(taskRunner.cancel 杀子进程) / SESSION_INJECT|INTERRUPT|END|RESUME /
-  PERMISSION_RESPONSE / PROVIDER_CONFIG_CHANGED / SELF_UPDATE / session_switch_config
+  PERMISSION_RESPONSE / PROVIDER_CONFIG_CHANGED / SELF_UPDATE / CLEANUP(缓存清理,
+  交互会话运行中或已有清理在跑时跳过) / session_switch_config
 RPC handler 注册: list_dir / host_fs.* / get_spec_bundle
 ```
 

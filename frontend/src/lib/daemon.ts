@@ -169,6 +169,19 @@ export async function triggerMachineSelfUpdate(
   );
 }
 
+/**
+ * POST /api/daemon/machines/{instance_id}/cleanup — 按 instance 路由 daemon 缓存清理。
+ * daemon 收到后清理 specs/、会话日志、备份等本地缓存。返回 {sent}。
+ */
+export async function triggerMachineCleanup(
+  instanceId: string,
+): Promise<{ sent: boolean }> {
+  return apiFetch(
+    `/api/daemon/machines/${encodeURIComponent(instanceId)}/cleanup`,
+    { method: "POST" },
+  );
+}
+
 // task-06 / FR-04 / D-006@v1：平台管理员全局分页视图。旧 listDaemonRuntimes()
 // 仍请求 /api/daemon/runtimes 返回数组（FR-06 兼容）。
 export interface DaemonRuntimeListParams {

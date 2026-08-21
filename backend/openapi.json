@@ -9559,6 +9559,54 @@
         }
       }
     },
+    "/api/daemon/machines/{instance_id}/cleanup": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Trigger Machine Cleanup",
+        "description": "推送 daemon 本地缓存清理指令到指定机器（admin）。\n\ndaemon 按 cleanup.ts 黑名单删除 specs 缓存 / Claude 会话日志 / 备份 / 日志文件，\n未列入清理目标的内容（config.json、locks/、workspaces/、outbox/、runs/ 等）一律\n保留。fire-and-forget 模式。",
+        "operationId": "trigger_machine_cleanup_api_daemon_machines__instance_id__cleanup_post",
+        "parameters": [
+          {
+            "name": "instance_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instance Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Trigger Machine Cleanup Api Daemon Machines  Instance Id  Cleanup Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/runtimes/{runtime_id}/disable": {
       "post": {
         "tags": [
@@ -34154,6 +34202,18 @@
             "type": "boolean",
             "title": "Is Default",
             "default": false
+          },
+          "multimodal": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(auto|true|false)$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multimodal"
           }
         },
         "type": "object",
@@ -34592,6 +34652,18 @@
               }
             ],
             "title": "Is Default"
+          },
+          "multimodal": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(auto|true|false)$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Multimodal"
           }
         },
         "type": "object",

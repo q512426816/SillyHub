@@ -1,6 +1,6 @@
 {
   "name": "sillyhub-daemon",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "SillyHub local daemon for task execution (Node.js rewrite)",
   "private": true,
   "type": "module",

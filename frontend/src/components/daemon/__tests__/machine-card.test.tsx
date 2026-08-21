@@ -9,6 +9,7 @@
  *   5. runtime 数胶囊显示 `online_runtime_count / runtime_count` + "runtime"。
  *   6. 0-runtime 机器（runtimes=[]）展开体显空态文案「该机器暂无运行时」。
  *   7. 离线机器（status=offline）升级按钮 disabled，点击不触发 onUpgrade。
+ *   8. 清理按钮同款：离线 disabled 不触发 onCleanup；在线点击触发 onCleanup。
  *
  * 模式：照搬 page.test.tsx 的 QueryClientProvider 包裹（MachineCard 透传 RuntimeCard，
  * RuntimeCard 用 RuntimeUsageLineChart 走 dynamic import 链，包 QueryClientProvider 稳妥）。
@@ -109,6 +110,7 @@ function defaultProps(
     sessions: [],
     onEditAlias: vi.fn(),
     onUpgrade: vi.fn(),
+    onCleanup: vi.fn(),
     onRuntimeToggle: vi.fn(),
     onRuntimeOpenSession: vi.fn(),
     onRuntimeDelete: vi.fn(),
@@ -243,5 +245,25 @@ describe("MachineCard（task-08 / FR-4）", () => {
     expect(upgradeBtn).not.toBeDisabled();
     fireEvent.click(upgradeBtn);
     expect(onUpgrade).toHaveBeenCalledWith(machine);
+  });
+
+  it("离线机器（status=offline）清理按钮 disabled，点击不触发 onCleanup", () => {
+    const onCleanup = vi.fn();
+    const machine = makeMachine({ status: "offline" });
+    renderCard(<MachineCard {...defaultProps(machine, { onCleanup })} />);
+    const cleanupBtn = findNativeButtonByName(/清理/);
+    expect(cleanupBtn).toBeDisabled();
+    fireEvent.click(cleanupBtn);
+    expect(onCleanup).not.toHaveBeenCalled();
+  });
+
+  it("在线机器点清理按钮 → onCleanup 被调（stopPropagation 不冒泡折叠头）", () => {
+    const onCleanup = vi.fn();
+    const machine = makeMachine({ status: "online" });
+    renderCard(<MachineCard {...defaultProps(machine, { onCleanup })} />);
+    const cleanupBtn = findNativeButtonByName(/清理/);
+    expect(cleanupBtn).not.toBeDisabled();
+    fireEvent.click(cleanupBtn);
+    expect(onCleanup).toHaveBeenCalledWith(machine);
   });
 });

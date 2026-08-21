@@ -9,11 +9,11 @@ created_at: 2026-08-18 01:45:00
 # 命令行入口（cli）
 
 ## 定位
-sillyhub-daemon 的 commander 命令行入口（`#!/usr/bin/env node`，click → commander 迁移）。4 个子命令 start / stop / status / logs；start 负责组装 Daemon 全量依赖（client / workspace / credential / task-runner / session-manager / policy / resilience / runtime-lock / mcp-config 合并）并管理 PID 与日志文件生命周期。全局安装后 `sillyhub-daemon start` 的实际入口。
+sillyhub-daemon 的 commander 命令行入口（`#!/usr/bin/env node`，click → commander 迁移）。5 个子命令 start / stop / status / logs / clean；start 负责组装 Daemon 全量依赖（client / workspace / credential / task-runner / session-manager / policy / resilience / runtime-lock / mcp-config 合并）并管理 PID 与日志文件生命周期。全局安装后 `sillyhub-daemon start` 的实际入口。
 
 ## 契约摘要
 - `start`：选项 `--server` / `--token` / `--api-key`（互斥，先于 config 加载校验）/ `--workspace-dir` / `--poll-interval` / `--heartbeat-interval` / `--max-concurrent` / `--log-level` / `--open-terminal` / `--terminal-mode` / `--terminal-close-on-exit` / `--terminal-command` / `--force`。
-- `stop`：读 PID → 发 SIGTERM；`status`：打印 State/PID/Runtime ID/Server URL/Config dir 五字段；`logs --tail <n>`：读日志尾部 N 行（默认 50）。
+- `stop`：读 PID → 发 SIGTERM；`status`：打印 State/PID/Runtime ID/Server URL/Config dir 五字段；`logs --tail <n>`：读日志尾部 N 行（默认 50）；`clean [--dry]`：本地缓存清理（`cleanAction` 复用 cleanup.ts `performCleanup`，`--dry` 仅统计预览释放空间）。
 - 可测试性注入点（封装为函数供 vi.spyOn）：`getPidFile()`（~/.sillyhub/daemon/daemon.pid）、`getLogFile()`（daemon.log）、`loadConfigFn(server_url)`、`saveConfigFn(config, server_url)`。
 - 进程管理：`readPid` / `writePid` / `removePid` / `isProcessAlive`。
 - `resolveRunningDaemonConfig(pid)`：扫 locks/runtime-*.lock（含 pid + server_hash）按 pid 反查运行中进程实际连接的 per-server 配置（ql-20260818-001）。

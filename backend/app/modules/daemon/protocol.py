@@ -73,6 +73,12 @@ DAEMON_MSG_LEASE_CANCEL = "daemon:lease_cancel"  # Server → Daemon, FR-03 / R-
 # (向后兼容)。
 DAEMON_MSG_PROVIDER_CONFIG_CHANGED = "daemon:provider_config_changed"  # Server → Daemon, FR-06
 
+# daemon 本地缓存清理指令（Server → Daemon）。
+# daemon 按 cleanup.ts 黑名单删除 specs 缓存 / Claude 会话日志 / 备份 / 日志文件，
+# 未列入清理目标的内容（config.json、locks/、workspaces/、outbox/、runs/ 等）一律保留。
+# fire-and-forget，无需回复。与 sillyhub-daemon/src/protocol.ts MSG.CLEANUP 逐字对齐。
+DAEMON_MSG_CLEANUP = "daemon:cleanup"
+
 
 # ── Message envelope ────────────────────────────────────────────────────────
 

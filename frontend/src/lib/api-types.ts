@@ -3310,6 +3310,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/machines/{instance_id}/cleanup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Machine Cleanup
+         * @description 推送 daemon 本地缓存清理指令到指定机器（admin）。
+         *
+         *     daemon 按 cleanup.ts 黑名单删除 specs 缓存 / Claude 会话日志 / 备份 / 日志文件，
+         *     未列入清理目标的内容（config.json、locks/、workspaces/、outbox/、runs/ 等）一律
+         *     保留。fire-and-forget 模式。
+         */
+        post: operations["trigger_machine_cleanup_api_daemon_machines__instance_id__cleanup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/runtimes/{runtime_id}/disable": {
         parameters: {
             query?: never;
@@ -11204,6 +11228,8 @@ export interface components {
              * @default false
              */
             is_default: boolean;
+            /** Multimodal */
+            multimodal?: string | null;
         };
         /** LlmProviderList */
         LlmProviderList: {
@@ -11347,6 +11373,8 @@ export interface components {
             } | null;
             /** Is Default */
             is_default?: boolean | null;
+            /** Multimodal */
+            multimodal?: string | null;
         };
         /** LoginRequest */
         LoginRequest: {
@@ -24058,6 +24086,39 @@ export interface operations {
                 content: {
                     "application/json": {
                         [key: string]: string | boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_machine_cleanup_api_daemon_machines__instance_id__cleanup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
                     };
                 };
             };

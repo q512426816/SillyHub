@@ -602,7 +602,7 @@ describe('buildHandshake - codex 协议握手序列（ql-20260617-008）', () =>
     expect(init.id).toBe(1);
     expect(init.params.clientInfo).toEqual({
       name: 'sillyhub-daemon',
-      version: '0.1.0',
+      version: '0.1.1',
     });
 
     const notif = JSON.parse(lines[1]!);

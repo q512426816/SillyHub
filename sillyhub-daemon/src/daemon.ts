@@ -40,7 +40,7 @@ import { arch, homedir, hostname, platform, tmpdir } from 'node:os';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import { type DaemonConfig, normalizeAllowedRoots } from './config.js';
+import { type DaemonConfig, DEFAULT_CONFIG_DIR, normalizeAllowedRoots } from './config.js';
 import { MSG } from './protocol.js';
 // 2026-08-20-session-multimodal-attachments task-09：SESSION_INJECT 附件类型。
 import type { SessionInjectAttachment } from './protocol.js';
@@ -750,8 +750,11 @@ export class Daemon {
   /**
    * task-04：interactive lease.id → session_id（防 WS 重放重复 create，AC-09）。
    * batch lease 不进此 map（走 _inflightLeases 去重）。
+   * 也用作 CLEANUP 忙碌守卫：非空 = 有交互会话在跑，缓存清理跳过。
    */
   private readonly _interactiveSessionsByLease = new Map<string, string>();
+  /** CLEANUP 指令 in-flight guard：并发指令去重（对齐 terminal-observer cleanupStarted 模式）。 */
+  private _cleanupInFlight = false;
   /**
    * task-09（FR-02 / D-002@v1）：interactive 转发 per-run 确定性 flatSeq 计数。
    *
@@ -2851,6 +2854,40 @@ export class Daemon {
           this._logger.warn('self_update_failed', {
             error: (e as Error)?.message ?? String(e),
           });
+        }
+        break;
+      }
+      // Server → Daemon：清理本地缓存（specs 缓存 / Claude 会话日志 / 备份 / 日志）。
+      // 黑名单删除（cleanup.ts CLEANABLE_DIRS），outbox/（未投递消息）与 runs/
+      // （活跃任务日志，terminal-observer 另有 7 天保留期清理）不在清理范围。
+      // fire-and-forget，无需回复 backend。交互会话运行中跳过（避免删掉正被写的
+      // transcript / 正被部署的 skills），并发指令用 in-flight guard 去重。
+      case MSG.CLEANUP: {
+        if (this._cleanupInFlight) {
+          this._logger.warn('cleanup_skipped_inflight', {});
+          break;
+        }
+        if (this._interactiveSessionsByLease.size > 0) {
+          this._logger.warn('cleanup_skipped_busy', {
+            activeSessions: this._interactiveSessionsByLease.size,
+          });
+          break;
+        }
+        this._cleanupInFlight = true;
+        this._logger.info('cleanup_received', {});
+        try {
+          const { performCleanup } = await import('./cleanup.js');
+          const result = await performCleanup(DEFAULT_CONFIG_DIR);
+          this._logger.info('cleanup_done', {
+            entries: result.entries.length,
+            freedBytes: result.totalFreedBytes,
+          });
+        } catch (e) {
+          this._logger.warn('cleanup_failed', {
+            error: (e as Error)?.message ?? String(e),
+          });
+        } finally {
+          this._cleanupInFlight = false;
         }
         break;
       }

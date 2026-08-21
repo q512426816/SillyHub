@@ -14,7 +14,7 @@ backend 与 daemon 经 WebSocket + REST 双向通信，支持三种执行形态�
 
 ## 契约摘要（backend 侧）
 - **runtime / lease**：
-  - RuntimeService：注册/心跳/实例列表/机器级聚合读（machines 含别名、版本、构建号、启动时间、用量视图，规避 N+1）/别名更新/离线标记/禁用启用删除/失联清理/自更新指令下发（复用 WS self_update 消息，仅改路由键）。
+  - RuntimeService：注册/心跳/实例列表/机器级聚合读（machines 含别名、版本、构建号、启动时间、用量视图，规避 N+1）/别名更新/离线标记/禁用启用删除/失联清理/自更新指令下发（复用 WS self_update 消息，仅改路由键）/本地缓存清理指令下发（WS cleanup 消息，fire-and-forget，daemon 侧黑名单删除且跳过有活跃交互会话的机器）。
   - DaemonLeaseService：claim（claim_token 鉴权 compare_digest）/heartbeat/过期回收（expire_overdue_leases + stuck_terminating 告警）/cancel（区分 interactive 会话取消与 batch lease 取消两路下发）。
 - **claim payload 组装**（lease/context）：
   - provider 配置四级解析：run 绑定 profile 的 `llm_provider_id`（归属校验 user_id==runtime.user_id + agent_kind 一致）→ 平台默认供应商 → 本机不注入。
@@ -32,7 +32,7 @@ backend 与 daemon 经 WebSocket + REST 双向通信，支持三种执行形态�
   - `_trigger_stage_completion_callback`：lease 完结回调驱动 change stage 收口；`_advance_team_stage`：execute 团队 mission 全 worker 收敛后推阶段；`_handle_team_run_completion`。
   - gate/stage 状态变化事件发布（`_publish_gate_status_changed` / `_publish_stage_status_changed`）。
 - **文件通道**：host_fs（delegate + WS RPC，平台对 daemon 宿主文件的读写原语，rpc_id 关联）；patch（apply_patch_to_worktree 经 host_fs delegate 打补丁）；change_write 代写队列端点（claim/complete，change_writer proxy 的对端）。
-- **WsHub**：runtime→WebSocket 映射与 stale 驱逐；notify_task_available / send_wakeup / heartbeat_ack / session_control / permission_response / self_update / policy_update / send_rpc（rpc_id 关联 + 超时取消 + 全量 cancel）。
+- **WsHub**：runtime→WebSocket 映射与 stale 驱逐；notify_task_available / send_wakeup / heartbeat_ack / session_control / permission_response / self_update / cleanup / policy_update / send_rpc（rpc_id 关联 + 超时取消 + 全量 cancel）。
 - **llm-proxy**：`ANY /api/daemon/llm-proxy/{path}`——hub 进程持 master key 代理转发 LiteLLM；v1 路径白名单；校验 daemon apiKey 归属后注入 master key；模型归属校验失败拒绝。
 - **WS 升级期鉴权**：无/坏凭据 close 4001，解析 user 与 DaemonInstance.user_id 归属不匹配 close 4003；query token 回退已删，未升级旧 daemon 一律 4001。
 - **dist_router**：`/daemon/install.sh`、`latest.json`、单文件 JS——无 /api 前缀无鉴权的安装分发通道。

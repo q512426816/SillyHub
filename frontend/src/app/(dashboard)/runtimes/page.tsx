@@ -40,6 +40,7 @@ import {
   getDaemonVersion,
   getRuntimesUsage,
   PROVIDER_META,
+  triggerMachineCleanup,
   triggerMachineSelfUpdate,
   updateDaemonMachine,
   updateRuntimeAllowedRoots,
@@ -576,6 +577,31 @@ export default function RuntimesPage() {
     [notify, queryClient],
   );
 
+  // 清理 daemon 本地缓存（specs / 会话日志 / 备份 / 日志文件）。
+  // fire-and-forget 模式，daemon 清理后无需回传结果。
+  // 会删 Claude 会话转录等不可恢复内容，走 modal.confirm 二次确认（对齐移除运行时模式）。
+  const handleCleanup = useCallback(
+    (machine: DaemonMachineRead) => {
+      if (machine.status !== "online") return;
+      modal.confirm({
+        title: "清理本地缓存",
+        content: `确定清理机器「${machine.display_alias ?? machine.hostname}」的 daemon 本地缓存？将删除 specs 缓存、Claude 会话日志、备份与日志文件（含本地会话转录，不可恢复）。有交互会话运行时 daemon 会跳过本次清理。`,
+        okText: "清理",
+        okType: "danger",
+        cancelText: "取消",
+        onOk: async () => {
+          try {
+            await triggerMachineCleanup(machine.id);
+            notify.success("清理指令已下发，daemon 将清理本地缓存");
+          } catch (err) {
+            notify.error(err, "下发清理指令失败");
+          }
+        },
+      });
+    },
+    [modal, notify],
+  );
+
   // ql-012 / task-06 / FR-03 / D-003@v1 / D-007@v1：移除运行时（物理删除，级联清会话/lease）。
   // 二次确认改 antd Modal.confirm（走主题 + destructive 红按钮），替代浏览器原生 window.confirm。
   // 失败走 notify.error toast（409 后端中文 / network 中文兜底），成功补 notify.success。
@@ -1021,6 +1047,7 @@ export default function RuntimesPage() {
                       sessions={sessions}
                       onEditAlias={handleOpenAlias}
                       onUpgrade={handleUpgrade}
+                      onCleanup={handleCleanup}
                       onRuntimeToggle={handleToggleRuntime}
                       onRuntimeOpenSession={handleOpenSession}
                       onRuntimeDelete={handleDeleteRuntime}

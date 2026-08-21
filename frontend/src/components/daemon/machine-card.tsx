@@ -10,6 +10,7 @@
  */
 import {
   ChevronRight,
+  HardDrive,
   Pencil,
   RefreshCw,
   Server,
@@ -54,6 +55,7 @@ export interface MachineCardProps {
   sessions: AgentSessionRead[];
   onEditAlias: (machine: DaemonMachineRead) => void;
   onUpgrade: (machine: DaemonMachineRead) => void;
+  onCleanup: (machine: DaemonMachineRead) => void;
   onRuntimeToggle: (runtime: DaemonRuntimeRead) => Promise<void>;
   onRuntimeOpenSession: (runtime: DaemonRuntimeRead) => void;
   onRuntimeDelete: (runtime: DaemonRuntimeRead) => void;
@@ -88,6 +90,7 @@ export function MachineCard({
   sessions,
   onEditAlias,
   onUpgrade,
+  onCleanup,
   onRuntimeToggle,
   onRuntimeOpenSession,
   onRuntimeDelete,
@@ -231,6 +234,21 @@ export function MachineCard({
           >
             <RefreshCw className="h-3.5 w-3.5" />
             升级 daemon
+          </button>
+
+          {/* 清理缓存按钮（对齐 .btn-outline btn-tiny，offline disabled） */}
+          <button
+            type="button"
+            className={btnOutlineTiny}
+            disabled={isOffline}
+            onClick={(e) => {
+              e.stopPropagation();
+              onCleanup(machine);
+            }}
+            title={isOffline ? "离线，无法清理" : "清理本地缓存（specs / 会话日志 / 备份）"}
+          >
+            <HardDrive className="h-3.5 w-3.5" />
+            清理
           </button>
 
           {/* chevron（对齐 .chevron，展开 rotate-90） */}

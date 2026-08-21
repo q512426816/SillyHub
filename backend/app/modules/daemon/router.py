@@ -819,6 +819,37 @@ async def trigger_machine_self_update(
     return {"sent": True, "latest_version": latest}
 
 
+@router.post(
+    "/machines/{instance_id}/cleanup",
+)
+async def trigger_machine_cleanup(
+    instance_id: uuid.UUID,
+    session: SessionDep,
+    user: RuntimeAdminUser,
+) -> dict[str, bool]:
+    """推送 daemon 本地缓存清理指令到指定机器（admin）。
+
+    daemon 按 cleanup.ts 黑名单删除 specs 缓存 / Claude 会话日志 / 备份 / 日志文件，
+    未列入清理目标的内容（config.json、locks/、workspaces/、outbox/、runs/ 等）一律
+    保留。fire-and-forget 模式。
+    """
+    svc = DaemonService(session)
+    await svc._get_owned_instance(instance_id, user.id, is_platform_admin=user.is_platform_admin)
+
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+    hub = get_daemon_ws_hub()
+    sent = await hub.send_cleanup(instance_id)
+    if not sent:
+        from app.modules.daemon.runtime.service import DaemonRuntimeOffline
+
+        raise DaemonRuntimeOffline(
+            "目标机器当前离线或消息下发失败，请确认守护进程在线后重试。",
+            details={"daemon_instance_id": str(instance_id)},
+        )
+    return {"sent": True}
+
+
 @router.get(
     "/runtimes/{runtime_id}",
     response_model=DaemonRuntimeRead,

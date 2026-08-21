@@ -185,7 +185,7 @@ describe('TestStatus (test_cli.py)', () => {
         server_hash: 'd412c05c',
         started_at: '2026-08-18T00:00:00.000Z',
         updated_at: '2026-08-18T00:00:00.000Z',
-        version: '0.1.0',
+        version: '0.1.1',
       }),
     );
     writeFileSync(

@@ -76,6 +76,7 @@ import type { AuditBatchSender, AuditEvent } from './policy/audit-sink.js';
 import { PolicyEngine } from './policy/filesystem-policy.js';
 // task-04（security-audit-remediation / Grill M-2）：daemon apiKey 注入 injector。
 import { setDaemonApiKey } from './credential-injector.js';
+import { performCleanup } from './cleanup.js';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 // task-06（D-007@v2）：主 agent MCP tool 注入。buildDaemonMcpServerConfig 构造
 // daemon 内置 MCP server 配置（command=node + args=[dist/mcp-server.js] + env），
@@ -374,6 +375,17 @@ export function createProgram(): Command {
     .option('--tail <n>', 'Number of lines to show', '50')
     .action(async (opts: LogsOptions) => {
       const code = await logsAction(opts);
+      if (code !== 0) process.exit(code);
+    });
+
+  // ── clean ────────────────────────────────────────────────────────────────
+
+  program
+    .command('clean')
+    .description('清理 daemon 本地缓存（specs / 会话日志 / 备份 / 日志文件）。')
+    .option('--dry', '仅统计不删除（预览释放空间）')
+    .action(async (opts: { dry?: boolean }) => {
+      const code = await cleanAction(opts);
       if (code !== 0) process.exit(code);
     });
 
@@ -1054,6 +1066,36 @@ export async function logsAction(opts: LogsOptions): Promise<number> {
     process.stderr.write(`Error reading log file: ${msg}\n`);
     return 1;
   }
+}
+
+// ── cleanAction ─────────────────────────────────────────────────────────────
+
+interface CleanOptions {
+  dry?: boolean;
+}
+
+/**
+ * clean 子命令业务逻辑。导出便于测试。
+ *
+ * @returns 退出码（0 成功）
+ */
+export async function cleanAction(opts: CleanOptions): Promise<number> {
+  const result = await performCleanup(DEFAULT_CONFIG_DIR, { dryRun: opts.dry ?? false });
+
+  if (result.entries.length === 0) {
+    process.stdout.write('没有需要清理的内容。\n');
+    return 0;
+  }
+
+  const label = result.dryRun ? '预览' : '已清理';
+  process.stdout.write(`${label}：\n`);
+  for (const entry of result.entries) {
+    const sizeMB = (entry.freedBytes / 1024 / 1024).toFixed(1);
+    process.stdout.write(`  ${entry.path}  ${sizeMB} MB\n`);
+  }
+  const totalMB = (result.totalFreedBytes / 1024 / 1024).toFixed(1);
+  process.stdout.write(`合计释放：${totalMB} MB\n`);
+  return 0;
 }
 
 // ── 入口（ESM 顶层调用）─────────────────────────────────────────────────────

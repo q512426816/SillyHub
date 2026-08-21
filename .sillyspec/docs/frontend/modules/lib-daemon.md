@@ -21,7 +21,7 @@ daemon 域的浏览器侧 API 客户端 + 会话 SSE 接入层（`frontend/src/l
 
 **machine 两级视图（2026-07-07-daemon-machine-runtime-hierarchy）**
 - `DaemonMachineRead`：machine=daemon 实例聚合（hostname/alias/os/arch/version/build_id/started_at + runtime_count/online_runtime_count + 全量 `runtimes[]`，0-runtime 机器为 []）。
-- `listDaemonMachines(params)`（机器级分页）、`updateDaemonMachine`（0-runtime 机器也能改别名）、`triggerMachineSelfUpdate`（按 instance 路由，不再借道 runtime_id）。
+- `listDaemonMachines(params)`（机器级分页）、`updateDaemonMachine`（0-runtime 机器也能改别名）、`triggerMachineSelfUpdate`（按 instance 路由，不再借道 runtime_id）、`triggerMachineCleanup`（POST machines/{id}/cleanup，按 instance 路由推送 daemon:cleanup 缓存清理指令，返回 `{sent}`；破坏性操作，页面侧走 modal.confirm）。
 
 **daemon 实例与版本**
 - `listDaemonInstances()`：当前用户在线守护进程 + 各自已启用 providers（workspace-daemon-switcher 下拉 + provider 徽标）。

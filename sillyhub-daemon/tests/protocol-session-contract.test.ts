@@ -112,8 +112,8 @@ describe('protocol — batch 协议常量值不回归（FR-09 / AC-08）', () =>
     expect(MSG.RPC_RESULT).toBe('daemon:rpc_result');
   });
 
-  it('MSG 总数 = 19（10 旧 + 5 session/permission + 1 SESSION_RESUME + 1 SELF_UPDATE + 1 LEASE_CANCEL + 1 PROVIDER_CONFIG_CHANGED），互不干扰', () => {
-    expect(Object.keys(MSG)).toHaveLength(19);
+  it('MSG 总数 = 20（10 旧 + 5 session/permission + 1 SESSION_RESUME + 1 SELF_UPDATE + 1 LEASE_CANCEL + 1 PROVIDER_CONFIG_CHANGED + 1 CLEANUP），互不干扰', () => {
+    expect(Object.keys(MSG)).toHaveLength(20);
   });
 
   it('SELF_UPDATE（自更新链路）字符串值 = daemon:self_update', () => {

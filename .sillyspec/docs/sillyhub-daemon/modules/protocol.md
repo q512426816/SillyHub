@@ -16,7 +16,7 @@ interactive 共享的「契约字典」，与 backend `protocol.py` 的 `DAEMON_
 逐字对齐。
 
 ## 契约摘要
-- `MSG`（const）/ `MsgType`（19 种值联合）：
+- `MSG`（const）/ `MsgType`（20 种值联合）：
   - runtime 生命周期：`REGISTER`、`HEARTBEAT`（双向）、`HEARTBEAT_ACK`。
   - lease：`TASK_AVAILABLE`（S→D）、`LEASE_CLAIM` / `LEASE_START` / `LEASE_COMPLETE` /
     `LEASE_MESSAGES`（D→S）、`LEASE_CANCEL`（S→D，batch lease 即时取消）。
@@ -27,7 +27,8 @@ interactive 共享的「契约字典」，与 backend `protocol.py` 的 `DAEMON_
     （跨进程还原历史会话）、`PERMISSION_REQUEST`（D→S）、`PERMISSION_RESPONSE`
     （S→D，5min 超时 backend 自动 deny）。
   - 控制：`SELF_UPDATE`（daemon 自更新后退场）、`PROVIDER_CONFIG_CHANGED`
-    （会话供应商热切换，provider_config=null 表停止回退本机凭证）。
+    （会话供应商热切换，provider_config=null 表停止回退本机凭证）、`CLEANUP`
+    （本地缓存清理指令，payload `{}`，fire-and-forget 无回复）。
 - `LEASE_STATE` / `LeaseState` 5 态：`pending | running | completed | failed | cancelled`。
 - 端点：`WS_PATH = '/api/daemon/ws'`（runtime_id 由 WsClient 拼 query）；
   `REST_PREFIX = '/api/daemon'`。
