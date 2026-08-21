@@ -1,7 +1,7 @@
-# verify-postcheck 解析 local.yaml modules 块不剥离 CRLF → 恒回退全量对账
+# verify-postcheck 解析 local.yaml modules 块不剥离 CRLF → 恒回退全量对账 — 已修复
 
 - 发现日期：2026-08-20（变更 2026-08-20-runtime-readpoint-repo-first verify 实测对账）
-- 状态：活跃（已确认根因，待工具修复）
+- 状态：已修复（工具仓 commit `f191fc4`，随 3.26.13 发布）：`extractModules` / `extractKnownFailures` 解析入口统一 `normalizeLineEndings` 归一（建议方案落地），附带修复 `parseFlowValue` 双引号值不解 `\"` 转义。测试 `verify-postcheck-crlf.test.mjs` + `verify-crlf-module-subset-e2e.test.mjs`（本机 2026-08-21 实跑通过）
 
 ## 现象
 

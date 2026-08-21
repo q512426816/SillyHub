@@ -1,7 +1,7 @@
-# worktree deps 供给白名单拒绝链式 install 命令 → depsStatus=failed 卡死 execute
+# worktree deps 供给白名单拒绝链式 install 命令 → depsStatus=failed 卡死 execute — 已修复
 
 - 发现日期：2026-08-20（变更 2026-08-20-runtime-readpoint-repo-first execute Step1）
-- 状态：活跃（已确认绕过方案，待工具改进）
+- 状态：已修复（工具仓 commit `f191fc4`，随 3.26.13 发布）：`tryInstall` 按 `&&` 拆段逐段过白名单 + 元字符门，段内允许 `cd <相对子路径>`（resolve 后限 worktree 根内防越界），argv 执行不经 shell——建议方案 1 落地，`doctor --fix` 重放 provision 亦随之可自愈。测试 `worktree-install-chain.test.mjs` 9/9（本机 2026-08-21 实跑通过）。建议 2（--deps-manual 逃生口）/建议 3（postinstall 生成物）未做，属次要便利项，如再现再立新条目
 
 ## 现象
 
