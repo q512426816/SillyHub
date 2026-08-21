@@ -67,7 +67,7 @@ def test_multimodal_heuristic_table() -> None:
     for name in supports:
         assert supports_multimodal_by_model_name(name), name
     for name in rejects:
-        assert not supports_multimodal_by_model_name(name), name  # type: ignore[arg-type]
+        assert not supports_multimodal_by_model_name(name), name
 
 
 def test_resolve_gate_three_states() -> None:

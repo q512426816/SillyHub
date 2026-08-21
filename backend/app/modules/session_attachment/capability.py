@@ -30,20 +30,20 @@ from app.modules.llm_provider.model import LlmProvider
 _MULTIMODAL_PATTERNS: tuple[re.Pattern[str], ...] = tuple(
     re.compile(p)
     for p in (
-        r"\d+v($|[^a-z0-9])",        # 视觉变体收尾 v：glm-4.6v / step-1v（v 前是数字；deepseek-v3 等版本号不命中）
-        r"vision",                     # *vision*
-        r"[._-]vl",                    # qwen-vl / *-vl-*
-        r"glm-[34]\.\d+v",             # glm-4.5v / glm-4.6v（点号变体）
-        r"gpt-4o",                     # gpt-4o / gpt-4o-mini
-        r"gpt-4\.1",                   # gpt-4.1 系
-        r"gpt-5",                      # gpt-5 系
-        r"gpt-[46]\.[0-9]+-mini",      # 4.x-mini 多模态系（4.7+）
-        r"(^|[^a-z])o[134]",           # o1/o3/o4 推理系
-        r"claude",                     # claude 全系
-        r"gemini",                     # gemini 全系
-        r"deepseek-vl",                # deepseek 视觉系
-        r"doubao-seed",                # 豆包 seed 系
-        r"kimi-latest",                # kimi 最新（多模态）
+        r"\d+v($|[^a-z0-9])",  # 视觉变体收尾 v：glm-4.6v / step-1v（v 前是数字；deepseek-v3 等版本号不命中）
+        r"vision",  # *vision*
+        r"[._-]vl",  # qwen-vl / *-vl-*
+        r"glm-[34]\.\d+v",  # glm-4.5v / glm-4.6v（点号变体）
+        r"gpt-4o",  # gpt-4o / gpt-4o-mini
+        r"gpt-4\.1",  # gpt-4.1 系
+        r"gpt-5",  # gpt-5 系
+        r"gpt-[46]\.[0-9]+-mini",  # 4.x-mini 多模态系（4.7+）
+        r"(^|[^a-z])o[134]",  # o1/o3/o4 推理系
+        r"claude",  # claude 全系
+        r"gemini",  # gemini 全系
+        r"deepseek-vl",  # deepseek 视觉系
+        r"doubao-seed",  # 豆包 seed 系
+        r"kimi-latest",  # kimi 最新（多模态）
     )
 )
 
@@ -105,14 +105,18 @@ async def resolve_session_gate(
         ).scalar_one_or_none()
     if provider is None:
         provider = (
-            await session.execute(
-                select(LlmProvider)
-                .where(
-                    LlmProvider.user_id == user_id,
-                    LlmProvider.agent_kind == agent_kind,
-                    LlmProvider.is_default.is_(True),
+            (
+                await session.execute(
+                    select(LlmProvider)
+                    .where(
+                        LlmProvider.user_id == user_id,
+                        LlmProvider.agent_kind == agent_kind,
+                        LlmProvider.is_default.is_(True),
+                    )
+                    .limit(1)
                 )
-                .limit(1)
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
     return resolve_gate(provider)

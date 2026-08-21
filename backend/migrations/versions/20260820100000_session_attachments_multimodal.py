@@ -92,7 +92,5 @@ def downgrade() -> None:
     op.drop_column("llm_providers", "multimodal")
 
     op.drop_index("ix_session_attachments_session", table_name="session_attachments")
-    op.drop_index(
-        "ix_session_attachments_user_session", table_name="session_attachments"
-    )
+    op.drop_index("ix_session_attachments_user_session", table_name="session_attachments")
     op.drop_table("session_attachments")

@@ -1107,11 +1107,7 @@ class SessionService:
         # 服务层兜底防绕过）。
         # 2026-08-20 task-05（D-7）：附件非空也豁免空 prompt（看图说话）。
         if not prompt or not prompt.strip():
-            if (
-                agent_profile_id is None
-                and llm_provider_id is None
-                and not attachment_ids
-            ):
+            if agent_profile_id is None and llm_provider_id is None and not attachment_ids:
                 raise DaemonSessionNotActive(
                     "prompt must not be empty.",
                     details={"reason": "empty_prompt"},
@@ -1464,9 +1460,7 @@ class SessionService:
                     attachment_marker_line,
                 )
 
-                marker_lines = "\n".join(
-                    attachment_marker_line(r) for r in validated_attachments
-                )
+                marker_lines = "\n".join(attachment_marker_line(r) for r in validated_attachments)
                 user_input_content = f"{marker_lines}\n{prompt}" if prompt else marker_lines
             self._session.add(
                 AgentRunLog(
