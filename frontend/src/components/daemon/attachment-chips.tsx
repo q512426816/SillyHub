@@ -46,7 +46,8 @@ function AttachmentImageChip({ att }: { att: ParsedAttachmentMarker }) {
   }
   return (
     <a href={url} target="_blank" rel="noreferrer" title={`${att.name}（点击查看大图）`}>
-      {/* eslint-disable-next-line @next/next/no-img-element —— objectURL 本地 blob，不走图片优化管线 */}
+      {/* objectURL 本地 blob，不走图片优化管线 */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src={url}
         alt={att.name}
