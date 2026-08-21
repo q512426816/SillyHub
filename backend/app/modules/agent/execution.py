@@ -49,6 +49,14 @@ from app.modules.workspace.service import resolve_root_path_for_daemon
 
 log = get_logger(__name__)
 
+# task-09（2026-08-22-team-session-unify / design §5 Phase 2 / Grill NEW-2）：
+# 分身 lease stage 常量（单一来源）。daemon ``isMainAgentSession`` 谓词按 stage
+# 可判定排除分身——stage='mission_worker' 的 session 不注入主控 5 工具（防
+# worker 递归派发与 converge 干扰，审查 CC-12）。原 ``stage=run.role or
+# "mission_worker"`` 把 role 塞进 stage（stage='arch' 等任意值）致谓词不可判定；
+# role 语义改由 ``_apply_worker_role_to_lease`` 写 lease metadata.role 保留。
+MISSION_WORKER_STAGE = "mission_worker"
+
 
 async def mark_worker_run_failed(
     session: AsyncSession,
@@ -310,6 +318,9 @@ class MissionExecutionService:
         try:
             # task-04（D-001@v2）：dispatch_to_daemon 传 representative_fallback 旗标：
             # target≠anchor 时旗标开（走代表 binding）；target==anchor 时旗标关（维持 borrow）。
+            # task-09（D-002@v2 / Grill NEW-2）：stage 固定 MISSION_WORKER_STAGE 常量
+            # （原 ``run.role or "mission_worker"`` 携带 role 致 daemon 谓词不可判定），
+            # run.role 改由下方 _apply_worker_role_to_lease 写 lease metadata.role。
             lease_id = await self._placement.dispatch_to_daemon(
                 run.id,
                 user_id,
@@ -319,7 +330,7 @@ class MissionExecutionService:
                 prompt=prompt,
                 repo_url=repo_url,
                 branch=branch,
-                stage=run.role or "mission_worker",
+                stage=MISSION_WORKER_STAGE,
                 read_only=read_only,
                 tool_config=worker_tool_config(read_only),
                 root_path=root_path,
@@ -341,6 +352,9 @@ class MissionExecutionService:
                 message="runtime 在派发瞬间离线，dispatch 返回 None",
             )
             return None
+        # task-09（design §5 Phase 2 / Grill NEW-2）：stage 常量化后 role 语义保留——
+        # 按 lease_id 补写 metadata.role（模式对齐 _apply_worker_profile_to_lease）。
+        await self._apply_worker_role_to_lease(run.role, lease_id)
         # task-08（2026-08-12-dispatch-bind-agent-profile，修 GAP-6）：worker 绑了档案
         # 时（run.agent_profile_id 非 None，由 MCP dispatch_worker tool 建链时写入），
         # 补调 AgentService._apply_profile_to_lease 把档案字段（mcp_refs/skill_refs/
@@ -357,6 +371,61 @@ class MissionExecutionService:
             read_only=read_only,
         )
         return lease_id
+
+    async def _apply_worker_role_to_lease(self, role: str | None, lease_id: uuid.UUID) -> None:
+        """worker role 补写进 lease metadata 的 role 键（task-09，design §5 Phase 2）。
+
+        stage 固定 ``MISSION_WORKER_STAGE`` 后，原 ``stage=run.role or "mission_worker"``
+        附带携带的 role 语义改由本方法保留：按 lease_id 读-合并-写回，raw SQL 模式
+        对齐 :meth:`_apply_worker_profile_to_lease` → ``AgentService._apply_profile_to_lease``
+        （service.py:701，SQLite 返 JSON 文本 / PG 返已解 dict 统一容错）。role 为空
+        不写键（daemon 端缺键=普通 worker，与 profile 键"空则不写"行为一致）。
+
+        best-effort：dispatch 已成功（lease 在途），本写入仅为语义保留，失败只
+        log.warning 不抛、不标 failed（对齐 profile 补写的兜底风格，不崩 mission）。
+        """
+        if not role:
+            return
+        import json as _json
+
+        from sqlalchemy import text as _sa_text
+
+        try:
+            meta_row = (
+                (
+                    await self._session.execute(
+                        _sa_text("SELECT metadata FROM daemon_task_leases WHERE id = :id"),
+                        {"id": lease_id.hex},
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            raw_meta = meta_row["metadata"] if meta_row else None
+            if isinstance(raw_meta, str):
+                meta: dict = _json.loads(raw_meta) if raw_meta else {}
+            elif isinstance(raw_meta, dict):
+                meta = dict(raw_meta)
+            else:
+                meta = {}
+            meta["role"] = role
+            await self._session.execute(
+                _sa_text("UPDATE daemon_task_leases SET metadata = :meta WHERE id = :id"),
+                {"meta": _json.dumps(meta), "id": lease_id.hex},
+            )
+            await self._session.commit()
+            log.info(
+                "mission_worker_role_applied",
+                lease_id=str(lease_id),
+                role=role,
+            )
+        except Exception as exc:
+            log.warning(
+                "mission_worker_role_apply_failed",
+                lease_id=str(lease_id),
+                role=role,
+                error=str(exc),
+            )
 
     async def _apply_worker_profile_to_lease(self, run: AgentRun, lease_id: uuid.UUID) -> None:
         """worker lease 补档案字段（task-08，修 GAP-6）。
