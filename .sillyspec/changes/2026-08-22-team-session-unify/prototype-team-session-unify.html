@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SillyHub · 会话内团队操作 · 交互原型（评审稿 v2）</title>
+<style>
+/* ============================================================
+   双主题 Token —— 取值单一源 frontend/src/styles/themes.ts
+   ai-native（默认）= violet 阶；blue = Tailwind blue 阶
+   violet（团队/主控专用）、slate、语义色两主题共享，同生产代码
+   ============================================================ */
+:root, html[data-theme="ai-native"] {
+  --primary: #7C3AED; --primary-hover: #6D28D9;
+  --bg: #FAF5FF; --card: #FFFFFF; --border: #DDD6FE; --border-weak: #EEE9F8;
+  --brand-50: #f5f3ff; --brand-100: #ede9fe; --brand-200: #ddd6fe; --brand-300: #c4b5fd;
+  --brand-400: #a78bfa; --brand-500: #8b5cf6; --brand-600: #7c3aed; --brand-700: #6d28d9;
+  --success: #059669; --success-soft: #D1FAE5; --success-text: #065F46;
+  --warning: #D97706; --warning-soft: #FEF3C7; --warning-text: #92400E;
+  --error: #DC2626;   --error-soft: #FEE2E2;   --error-text: #991B1B;
+  --accent: #0891B2;  --accent-soft: #CFFAFE;  --accent-text: #0E7490;
+  --shadow-primary: 0 4px 14px rgba(124,58,237,.32);
+}
+html[data-theme="blue"] {
+  --primary: #2563EB; --primary-hover: #1d4ed8;
+  --bg: #f8fafc; --card: #FFFFFF; --border: #e2e8f0; --border-weak: #f1f5f9;
+  --brand-50: #eff6ff; --brand-100: #dbeafe; --brand-200: #bfdbfe; --brand-300: #93c5fd;
+  --brand-400: #60a5fa; --brand-500: #3b82f6; --brand-600: #2563eb; --brand-700: #1d4ed8;
+  --shadow-primary: 0 4px 14px rgba(37,99,235,.30);
+}
+:root {
+  --fg: #1E1B4B; --muted: #ECEEF9; --muted-fg: #475569; --faint: #94A3B8;
+  --violet-50: #f5f3ff; --violet-200: #ddd6fe; --violet-300: #c4b5fd; --violet-400: #a78bfa; --violet-700: #6d28d9;
+  --indigo-50: #eef2ff; --indigo-200: #c7d2fe; --indigo-600: #4f46e5;
+  --teal-50: #f0fdfa; --teal-300: #5eead4; --teal-800: #115e59;
+  --cyan-50: #ecfeff; --cyan-700: #0e7490;
+  --radius-sm: 6px; --radius-md: 8px; --radius-lg: 12px; --radius-xl: 16px;
+  --shadow-sm: 0 1px 2px rgba(30,27,75,.06);
+  --shadow-md: 0 4px 14px rgba(30,27,75,.08);
+  --shadow-pop: 0 8px 24px rgba(15,12,41,.16);
+  --dur: 200ms; --ease: cubic-bezier(.2,0,0,1);
+  --font-sans: Inter, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); background: var(--bg); color: var(--fg); font-size: 14px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* ---------- 主题切换（评审用） ---------- */
+.theme-switch { position: fixed; top: 16px; right: 16px; z-index: 99; display: inline-flex; border: 1px solid var(--border); border-radius: 999px; background: var(--card); box-shadow: var(--shadow-md); overflow: hidden; }
+.theme-switch button { border: none; background: none; font: inherit; font-size: 12px; font-weight: 600; padding: 7px 14px; cursor: pointer; color: var(--muted-fg); }
+.theme-switch button.on { background: var(--primary); color: #fff; }
+
+/* ---------- 图标 ---------- */
+.ic { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ic-sm { width: 14px; height: 14px; } .ic-lg { width: 20px; height: 20px; }
+
+/* ---------- 页首 ---------- */
+.hero { background: linear-gradient(135deg, #1E1B4B 0%, #6D28D9 52%, #0891B2 100%); color: #fff; padding: 46px 0 36px; }
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
+.hero-kicker { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; letter-spacing: .08em; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.25); border-radius: 999px; padding: 4px 12px; margin-bottom: 14px; }
+.hero h1 { font-size: 28px; font-weight: 800; letter-spacing: -.02em; }
+.hero p.sub { margin-top: 10px; font-size: 14px; color: rgba(255,255,255,.82); max-width: 900px; }
+.hero-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.hero-meta span { font-size: 12px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2); border-radius: 999px; padding: 3px 10px; color: rgba(255,255,255,.9); }
+.hero-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+.hero-nav a { color: #fff; text-decoration: none; font-size: 13px; font-weight: 500; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.22); padding: 6px 14px; border-radius: 999px; }
+.hero-nav a:hover { background: rgba(255,255,255,.22); }
+
+/* ---------- 章节 ---------- */
+main.wrap { padding-bottom: 56px; }
+section.sec { margin-top: 26px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 22px; scroll-margin-top: 16px; }
+.sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+.sec-num { font-size: 12px; font-weight: 700; color: var(--brand-700); background: var(--brand-50); border-radius: 6px; padding: 2px 8px; letter-spacing: .04em; }
+.sec-head h2 { font-size: 18px; font-weight: 700; }
+.sec-desc { font-size: 13px; color: var(--muted-fg); margin-bottom: 16px; }
+.note { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; color: #fff; background: var(--error); border-radius: 4px; padding: 1px 6px; vertical-align: 3px; letter-spacing: .04em; }
+
+/* ---------- 徽章 / 标签 / 按钮 ---------- */
+.badge { display: inline-flex; align-items: center; gap: 6px; height: 21px; padding: 0 9px; border-radius: 999px; font-size: 11.5px; font-weight: 500; white-space: nowrap; }
+.badge .dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.badge-success { background: var(--success-soft); color: var(--success-text); } .badge-success .dot { background: var(--success); }
+.badge-error { background: var(--error-soft); color: var(--error-text); } .badge-error .dot { background: var(--error); }
+.badge-running { background: var(--brand-100); color: var(--brand-700); }
+.badge-neutral { background: var(--muted); color: var(--muted-fg); } .badge-neutral .dot { background: var(--faint); }
+.tag { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border-radius: 5px; font-size: 10.5px; background: var(--brand-50); color: var(--brand-700); border: 1px solid var(--border); white-space: nowrap; }
+.tag-violet { background: var(--violet-50); color: var(--violet-700); border-color: var(--violet-200); }
+.tag-cyan { background: var(--cyan-50); color: var(--cyan-700); }
+.tag-gray { background: var(--muted); color: var(--muted-fg); border-color: transparent; }
+.ws-tag { display: inline-flex; height: 18px; align-items: center; border-radius: 4px; padding: 0 6px; font-size: 10px; font-weight: 600; border: 1px solid; }
+.ws-teal { border-color: #99f6e4; background: #f0fdfa; color: #0f766e; }
+.ws-sky { border-color: #bae6fd; background: #f0f9ff; color: #0369a1; }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 13px; border-radius: var(--radius-md); font-size: 12.5px; font-weight: 500; font-family: inherit; cursor: pointer; border: 1px solid transparent; white-space: nowrap; }
+.btn-primary { background: var(--primary); color: #fff; }
+.btn-default { background: var(--card); border-color: var(--border); color: var(--fg); }
+.seg { display: inline-flex; background: var(--muted); border-radius: 999px; padding: 3px; gap: 2px; }
+.seg button { border: none; background: none; font: inherit; font-size: 12px; padding: 5px 14px; border-radius: 999px; cursor: pointer; color: var(--muted-fg); }
+.seg button.on { background: var(--card); font-weight: 600; color: var(--fg); box-shadow: var(--shadow-sm); }
+
+/* ============================================================
+   会话面板 mock（普通会话 + 团队能力）
+   ============================================================ */
+.panel-mock { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; height: 720px; background: var(--card); }
+.sp-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--border); padding: 8px 16px; flex: none; }
+.sp-hl { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.sp-title { font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sp-id { font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; color: var(--muted-fg); }
+.sp-machine { font-size: 11px; color: var(--muted-fg); }
+.sp-ws { font-size: 11px; background: var(--cyan-50); color: var(--cyan-700); border-radius: 4px; padding: 1px 6px; white-space: nowrap; }
+.sp-hr { display: flex; align-items: center; gap: 8px; flex: none; }
+.subagent-btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: var(--card); border-radius: var(--radius-md); padding: 3px 10px; font-size: 12px; color: var(--muted-fg); }
+.subagent-btn i { width: 6px; height: 6px; border-radius: 50%; background: var(--brand-600); animation: pulse-dot 1.6s ease-in-out infinite; }
+@keyframes pulse-dot { 0%,100% { opacity: .4; } 50% { opacity: 1; } }
+
+/* —— 聊天流 —— */
+.sp-scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 13px; background: linear-gradient(180deg, var(--brand-50) 0%, transparent 120px); }
+.msg { display: flex; gap: 9px; }
+.msg .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--brand-600); color: #fff; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none; }
+.msg .avatar.gray { background: var(--muted); color: var(--muted-fg); border: 1px solid var(--border); }
+.msg.user { align-self: flex-end; flex-direction: row-reverse; }
+.bubble { border-radius: 14px; border-top-left-radius: 5px; padding: 9px 13px; font-size: 13px; line-height: 1.65; max-width: 86%; }
+.msg.assistant .bubble { background: var(--card); border: 1px solid var(--border); box-shadow: var(--shadow-sm); }
+.msg.user .bubble { background: var(--primary); color: #fff; border-top-left-radius: 14px; border-top-right-radius: 5px; box-shadow: var(--shadow-primary); }
+.bubble ol { padding-left: 18px; margin: 5px 0; } .bubble ol li { margin: 2px 0; }
+.bubble code { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; background: var(--muted); border-radius: 4px; padding: 1px 5px; }
+.turn-meta { display: flex; align-items: center; gap: 6px; padding-left: 37px; font-size: 10.5px; color: var(--muted-fg); }
+
+/* —— 团队任务块（TeamTaskBlock：对话视图内嵌，violet） —— */
+.team-block { margin-left: 37px; border: 1px solid var(--violet-200); background: color-mix(in srgb, var(--violet-50) 55%, transparent); border-radius: 10px; overflow: hidden; }
+.tb-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 7px 12px; cursor: pointer; user-select: none; }
+.tb-lead { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--violet-700); }
+.tb-stat { font-size: 11.5px; color: var(--muted-fg); }
+.tb-stat b { color: var(--fg); }
+.tb-cost { margin-left: auto; font-size: 11.5px; color: var(--muted-fg); }
+.tb-fold { font-size: 11px; color: var(--violet-700); display: inline-flex; align-items: center; gap: 3px; }
+.tb-body { border-top: 1px dashed var(--violet-200); padding: 8px 12px; display: flex; flex-direction: column; gap: 5px; background: var(--card); }
+.worker { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card); padding: 6px 10px; font-size: 12.5px; }
+.wrole { display: inline-flex; align-items: center; height: 19px; padding: 0 8px; border-radius: 5px; border: 1px solid var(--border); font-size: 11px; color: var(--muted-fg); white-space: nowrap; }
+.wrole.orch { border-color: var(--violet-400); color: var(--violet-700); background: var(--violet-50); }
+.wst { font-size: 12px; }
+.wst.run { color: var(--brand-700); } .wst.ok { color: var(--success); } .wst.fail { color: var(--error); } .wst.wait { color: var(--muted-fg); }
+.wgoal { font-size: 11.5px; color: var(--muted-fg); min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wlog { font-size: 11.5px; color: var(--brand-600); border: 1px solid var(--border); border-radius: 5px; padding: 1px 8px; background: var(--card); flex: none; }
+
+/* —— MCP 工具卡（进度视图段，brand） —— */
+.tool-card { margin-left: 37px; border: 1px solid var(--brand-200); background: color-mix(in srgb, var(--brand-50) 55%, transparent); border-radius: var(--radius-md); padding: 6px 10px; font-size: 12px; }
+.tool-card .th { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--brand-700); font-weight: 600; }
+.tool-card .cmd { font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; color: var(--muted-fg); }
+.run-bar { display: flex; align-items: center; gap: 10px; border: 1px solid color-mix(in srgb, var(--primary) 18%, transparent); background: color-mix(in srgb, var(--primary) 6%, transparent); border-radius: var(--radius-md); padding: 6px 12px; font-size: 12px; }
+.spinner { width: 12px; height: 12px; border: 2px solid color-mix(in srgb, var(--primary) 25%, transparent); border-top-color: var(--primary); border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.dots { display: inline-flex; gap: 4px; } .dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--brand-400); animation: pulse-dot 1.2s ease-in-out infinite; } .dots i:nth-child(2){animation-delay:.18s} .dots i:nth-child(3){animation-delay:.36s}
+.final-concl { margin-left: 37px; border: 1px solid var(--indigo-200); background: var(--indigo-50); border-radius: var(--radius-md); padding: 10px 12px; }
+.final-concl .lb { font-size: 11px; font-weight: 700; letter-spacing: .05em; color: var(--indigo-600); margin-bottom: 3px; }
+.final-concl .tx { font-size: 12.5px; color: var(--muted-fg); white-space: pre-wrap; }
+
+/* —— 排队条 / 输入区 / 配置条 —— */
+.queue-bar { display: flex; align-items: center; gap: 6px; border-top: 1px solid var(--border); background: var(--card); padding: 8px 18px; overflow-x: auto; flex: none; }
+.queue-label { font-size: 11px; font-weight: 500; color: var(--muted-fg); flex: none; }
+.qchip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); background: color-mix(in srgb, var(--muted) 50%, transparent); border-radius: var(--radius-md); padding: 3px 8px; font-size: 11px; color: var(--muted-fg); flex: none; max-width: 300px; white-space: nowrap; overflow: hidden; }
+.sp-input { border-top: 1px solid var(--border); background: var(--card); padding: 10px 18px 6px; flex: none; }
+.team-trigger-row { display: flex; align-items: center; gap: 6px; margin-bottom: 7px; }
+.team-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--violet-300); background: var(--violet-50); color: var(--violet-700); border-radius: 999px; padding: 2px 10px; font-size: 11.5px; font-weight: 500; }
+.team-btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; border: 1px solid var(--border); background: var(--card); color: var(--muted-fg); border-radius: 999px; padding: 0 12px; font-size: 12px; font-weight: 500; cursor: pointer; }
+.team-btn:hover { border-color: var(--violet-300); color: var(--violet-700); background: var(--violet-50); }
+.input-shell { display: flex; align-items: flex-end; gap: 10px; }
+.attach-btn { width: 42px; height: 42px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--card); color: var(--muted-fg); display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none; }
+.input-box { flex: 1; min-height: 42px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg); padding: 10px 12px; font-size: 13px; color: var(--fg); }
+.input-box .ph { color: var(--faint); }
+.send-btn { width: 42px; height: 42px; border-radius: var(--radius-md); border: none; background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; flex: none; box-shadow: var(--shadow-primary); }
+.config-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 8px 18px 10px; background: var(--card); flex: none; }
+.cfg { display: inline-flex; align-items: center; gap: 6px; border-radius: var(--radius-md); padding: 4px 8px; font-size: 12px; color: var(--muted-fg); cursor: pointer; }
+.cfg:hover { background: var(--muted); color: var(--fg); }
+.cfg-lock { margin-left: auto; font-size: 10.5px; color: var(--warning); }
+
+/* —— 触发弹层（向上弹出，同 SessionConfigBar 浮层风格） —— */
+.pop-anchor { position: relative; display: inline-flex; }
+.team-pop { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30; width: 380px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--card); box-shadow: var(--shadow-pop); padding: 14px; }
+.pop-title { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 6px; color: var(--violet-700); margin-bottom: 4px; }
+.pop-sub { font-size: 11.5px; color: var(--muted-fg); margin-bottom: 10px; }
+.pop-lb { font-size: 11px; font-weight: 600; color: var(--muted-fg); margin: 10px 0 5px; }
+.scope-item { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 6px 10px; font-size: 12.5px; cursor: pointer; background: var(--card); margin-bottom: 5px; }
+.scope-item.on { border-color: var(--brand-200); background: color-mix(in srgb, var(--brand-50) 60%, transparent); }
+.scope-item .nm { font-weight: 600; }
+.scope-item .ds { font-size: 11.5px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pop-foot { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+.pop-foot .tip { font-size: 11px; color: var(--faint); }
+
+/* ============================================================
+   说明
+   ============================================================ */
+.diff-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.diff-table th, .diff-table td { padding: 8px 12px; border-bottom: 1px solid var(--border-weak); text-align: left; vertical-align: top; }
+.diff-table th { background: var(--brand-50); font-size: 12px; color: var(--muted-fg); border-bottom: 1px solid var(--border); }
+.diff-table td.dim { width: 110px; font-weight: 600; }
+.diff-table .old { color: var(--muted-fg); } .diff-table .new { color: var(--brand-700); font-weight: 600; }
+pre.ascii { background: var(--fg); color: #E9E5F5; border-radius: var(--radius-md); padding: 16px 18px; font-family: ui-monospace, Consolas, monospace; font-size: 12px; line-height: 1.55; overflow-x: auto; }
+.steps { counter-reset: s; margin-top: 6px; }
+.steps li { list-style: none; counter-increment: s; display: flex; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--border-weak); font-size: 13px; }
+.steps li:last-child { border-bottom: none; }
+.steps li::before { content: counter(s); flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--brand-50); color: var(--brand-700); font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; margin-top: 2px; }
+.steps b { display: block; } .steps span { color: var(--muted-fg); font-size: 12px; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+footer.wrap { padding: 22px 24px; font-size: 12px; color: var(--faint); border-top: 1px solid var(--border); margin-top: 36px; }
+
+@media (max-width: 1024px) { .two-col { grid-template-columns: 1fr; } }
+summary::-webkit-details-marker { display: none; }
+</style>
+</head>
+<body>
+
+<div class="theme-switch" title="评审用：双主题切换（生产环境取值单一源 themes.ts）">
+  <button id="th-ai" class="on" onclick="setTheme('ai')">AI 紫（默认）</button>
+  <button id="th-blue" onclick="setTheme('blue')">明亮蓝</button>
+</div>
+
+<!-- SVG 图标库 -->
+<svg xmlns="http://www.w3.org/2000/svg" style="display:none" aria-hidden="true">
+  <symbol id="i-spark" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M12 2c.8 5.2 4.8 9.2 10 10-5.2.8-9.2 4.8-10 10-.8-5.2-4.8-9.2-10-10 5.2-.8 9.2-4.8 10-10z"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3.5 20c.6-3.4 2.7-5 5.5-5s4.9 1.6 5.5 5"/><circle cx="17" cy="9" r="2.5"/><path d="M16.4 15.3c2.2.4 3.6 1.8 4.1 4"/></symbol>
+  <symbol id="i-brain" viewBox="0 0 24 24"><path d="M9.5 3A2.5 2.5 0 0 0 7 5.5c-1.8.3-3 1.6-3 3.3 0 1 .4 1.8 1 2.4-.6.6-1 1.5-1 2.4A3.4 3.4 0 0 0 7.6 17c.2 2 1.6 3.4 3.4 3.4 1 0 1.9-.5 2.5-1.2V4.9A2.4 2.4 0 0 0 11 3.4c-.5-.3-1-.4-1.5-.4z"/><path d="M14.5 3A2.5 2.5 0 0 1 17 5.5c1.8.3 3 1.6 3 3.3 0 1-.4 1.8-1 2.4.6.6 1 1.5 1 2.4a3.4 3.4 0 0 1-3.6 3.4c-.2 2-1.6 3.4-3.4 3.4"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/></symbol>
+  <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m21.4 11.05-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 1 1 5.7 5.7l-9.2 9.1a2 2 0 0 1-2.8-2.8l8.5-8.5"/></symbol>
+  <symbol id="i-chev-d" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m5.5 5.5 13 13"/></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a4.5 4.5 0 0 0-6 6L3 18l3 3 5.7-5.7a4.5 4.5 0 0 0 6-6L14 13l-3-3 3.7-3.7z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-coins" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v10M9.5 9.5c0-1 1.1-1.7 2.5-1.7s2.5.7 2.5 1.7-1 1.5-2.5 1.9-2.5.9-2.5 1.9 1.1 1.7 2.5 1.7 2.5-.7 2.5-1.7"/></symbol>
+  <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 4 14h6.5L11 22l9-12h-6.5L13 2z"/></symbol>
+</svg>
+
+<!-- ===== 页首 ===== -->
+<header class="hero">
+  <div class="wrap">
+    <span class="hero-kicker"><svg class="ic"><use href="#i-spark"/></svg>INTERACTION PROTOTYPE · 评审稿 v2</span>
+    <h1>会话内团队操作</h1>
+    <p class="sub">核心心智：<b>团队不是另一种会话，而是当前会话里 agent 的一种能力</b>——就像子代理一样。你随时在对话里触发「派团队」，当前 agent 升级为主控（orchestrator），通过 MCP 工具派发分身（worker）：分身是真进程、可跨机器跨工作区，进度与结果直接回到这条消息流里，上下文不断、对话不换页面。不新增会话类型、不新增列表条目、没有独立团队页面。</p>
+    <div class="hero-meta">
+      <span>日期 2026-08-22 · v2 修订</span><span>触发 会话中随时</span><span>交互 主控 ⇄ MCP ⇄ 分身</span><span>分身 跨机器/跨工作区真任务</span><span>主题 ai-native / blue 双套</span>
+    </div>
+    <nav class="hero-nav">
+      <a href="#s1">① 会话中触发团队</a><a href="#s2">② 触发入口与配置</a><a href="#s3">③ 进度视图与结果回流</a><a href="#s4">④ 链路与改动说明</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+
+<!-- ================= 01 会话中触发团队 ================= -->
+<section class="sec" id="s1">
+  <div class="sec-head"><span class="sec-num">01</span><h2>普通会话 · 对话中途触发团队</h2></div>
+  <p class="sec-desc">一切发生在<b>同一个普通会话</b>里。前两轮是正常聊天；第三轮用户要动手了——点输入框旁的「派团队」按钮（或直接说“派个团队去做”），agent 作为主控拆解任务、经 MCP 派发分身。<span class="note">NEW</span> 团队任务块（TeamTaskBlock）嵌在本轮消息流里：概要行常驻，展开见分身明细。你在团队干活期间照常追问、插队、改需求。</p>
+
+  <div class="panel-mock">
+    <div class="sp-header">
+      <div class="sp-hl">
+        <span class="sp-title">登录页移动端问题</span>
+        <span class="sp-id">#a3f8c2d1</span>
+        <span class="badge badge-running"><span class="dot" style="background:var(--brand-600)"></span>活跃</span>
+        <span class="sp-machine">🖥 dev-box01</span>
+        <span class="sp-ws">📂 前端官网</span>
+      </div>
+      <div class="sp-hr">
+        <span class="subagent-btn"><i></i>分身 3 <svg class="ic ic-sm"><use href="#i-chev-d"/></svg></span>
+        <div class="seg"><button class="on">对话</button><button>进度</button></div>
+        <button class="btn btn-default"><svg class="ic ic-sm"><use href="#i-ban"/></svg>打断本轮</button>
+      </div>
+    </div>
+
+    <div class="sp-scroll">
+      <!-- 第 1 轮：正常聊天 -->
+      <div class="msg user"><span class="avatar gray">我</span><div class="bubble">登录页在 iPhone SE 上按钮会溢出，验证码倒计时也错位，帮我看看是什么原因。</div></div>
+      <div class="msg assistant"><span class="avatar"><svg class="ic"><use href="#i-brain"/></svg></span><div class="bubble">看了下 <code>Login.tsx</code>：按钮用的是固定宽度 <code>min-w-[120px]</code>，375px 视口下放不下两个按钮；倒计时没做等宽数字，跳动会撑开布局。要修吗？</div></div>
+      <div class="turn-meta">第 1 轮 · 已完成 · ↑0.9k ↓1.2k</div>
+
+      <!-- 第 2 轮：触发团队 -->
+      <div class="msg user">
+        <span class="avatar gray">我</span>
+        <div class="bubble">修吧。顺便补上移动端回归测试，再全局查一遍有没有同类问题。<br><span style="opacity:.85;font-size:11.5px">👤→👥 已点「派团队」· 范围：前端官网</span></div>
+      </div>
+      <div class="msg assistant">
+        <span class="avatar"><svg class="ic"><use href="#i-brain"/></svg></span>
+        <div class="bubble">收到，这单我当主控，拆成三路分身：<ol><li><b>实现</b>：修按钮溢出 + 倒计时等宽数字；</li><li><b>测试</b>：补 375/390/414px 三档回归用例；</li><li><b>风险</b>：全局扫描同类固定宽度写法。</li></ol>分身各自在独立工作副本上跑，完成后我来汇总。</div>
+      </div>
+
+      <!-- 团队任务块 -->
+      <div class="team-block">
+        <div class="tb-head" onclick="toggleBlock(this)">
+          <span class="tb-lead"><svg class="ic ic-sm"><use href="#i-users"/></svg>团队任务</span>
+          <span class="badge badge-running"><span class="dot" style="background:var(--brand-600)"></span>运行中</span>
+          <span class="tb-stat"><b>3</b> 分身 · 成功 <b>1</b> / 失败 <b>0</b></span>
+          <span class="tb-cost num"><svg class="ic ic-sm" style="vertical-align:-2px"><use href="#i-coins"/></svg> $0.42 / 预算 $5.00</span>
+          <span class="tb-fold">收起 <svg class="ic ic-sm"><use href="#i-chev-d"/></svg></span>
+        </div>
+        <div class="tb-body">
+          <div class="worker"><span class="wrole orch">🧠 主控</span><span class="wst run">运行中</span><span class="wgoal">盯分身产出，随时接你的追问</span><button class="wlog">日志</button></div>
+          <div class="worker"><span class="wrole">实现</span><span class="wst run">运行中</span><span class="ws-tag ws-teal">前端官网</span><span class="wgoal">修 Login.tsx 按钮溢出与倒计时错位</span><button class="wlog">日志</button></div>
+          <div class="worker"><span class="wrole">测试</span><span class="wst ok">已完成</span><span class="ws-tag ws-teal">前端官网</span><span class="wgoal">3 条移动端回归用例全部通过</span><button class="wlog">日志</button></div>
+          <div class="worker"><span class="wrole">风险</span><span class="wst wait">排队中</span><span class="ws-tag ws-teal">前端官网</span><span class="wgoal">扫描全局固定宽度写法</span><button class="wlog">日志</button></div>
+        </div>
+      </div>
+
+      <div class="run-bar">
+        <span class="spinner"></span><span>执行中</span><span class="num" style="font-family:ui-monospace,Consolas,monospace;color:var(--brand-600)">06:12</span>
+        <span style="color:var(--border)">·</span><span>工具 8 · 分身 3</span>
+        <span class="dots" style="margin-left:auto"><i></i><i></i><i></i></span>
+        <span style="font-size:11.5px">分身「实现」正在修改 Login.tsx…</span>
+      </div>
+    </div>
+
+    <!-- 排队条：团队忙，追问进队列 -->
+    <div class="queue-bar">
+      <span class="queue-label"><b>排队消息（1）</b></span>
+      <span class="qchip"><svg class="ic ic-sm"><use href="#i-clock"/></svg>测试分身顺便把注册页也覆盖了 <svg class="ic ic-sm" style="cursor:pointer"><use href="#i-x"/></svg></span>
+    </div>
+
+    <!-- 输入区：团队触发按钮 + 输入框 -->
+    <div class="sp-input">
+      <div class="team-trigger-row">
+        <button class="team-btn" onclick="togglePop()"><svg class="ic ic-sm"><use href="#i-users"/></svg>派团队<span style="color:var(--faint)">▾</span></button>
+        <span class="team-chip"><svg class="ic ic-sm"><use href="#i-users"/></svg>团队进行中 · 前端官网 · 3 分身<svg class="ic ic-sm" style="cursor:pointer;opacity:.7"><use href="#i-x"/></svg></span>
+        <span style="font-size:11px;color:var(--faint)">对本轮任务说「别用团队了」即可收回，已派分身跑到当前步骤后停止</span>
+      </div>
+      <div class="input-shell">
+        <button class="attach-btn" title="添加图片/文件附件"><svg class="ic"><use href="#i-paperclip"/></svg></button>
+        <div class="input-box"><span class="ph">继续追问…（可问进度 / 加派分身 / 改需求 · Enter 发送 · Shift+Enter 换行）</span></div>
+        <button class="send-btn" title="发送"><svg class="ic"><use href="#i-send"/></svg></button>
+      </div>
+    </div>
+    <div class="config-bar">
+      <span class="cfg">🖥 dev-box01 <span style="color:var(--faint)">▾</span></span>
+      <span class="cfg">⚡ Claude Code <span style="color:var(--faint)">▾</span></span>
+      <span class="cfg">☁ 本机默认 <span style="color:var(--faint)">▾</span></span>
+      <span class="cfg">📋 未指定 <span style="color:var(--faint)">▾</span></span>
+      <span class="cfg-lock">🔒 本轮完成后解锁切换</span>
+    </div>
+  </div>
+  <p style="font-size:12px;color:var(--faint);margin-top:10px">要点：header 不出现“团队会话”徽标——这就是普通会话；团队能力是本轮/本任务的属性。header 右侧的「分身 3」计数与现有「子代理目录」同位，点开见分身清单（跨机器派发的分身也在其中，标注目标机器）。</p>
+</section>
+
+<!-- ================= 02 触发入口与配置 ================= -->
+<section class="sec" id="s2">
+  <div class="sec-head"><span class="sec-num">02</span><h2>触发入口 · 三种等价方式</h2></div>
+  <p class="sec-desc">按钮、指令、自然语言最终都走同一条链路：给当前会话的 agent 注入团队 MCP 工具集（派分身/取结果/列分身/收敛/报进度），由它作为主控编排。按钮的价值是<b>显式保证 + 范围配置入口</b>；自然语言的价值是<b>零操作成本</b>。</p>
+
+  <div class="two-col">
+    <!-- 左：弹层 -->
+    <div style="border:1px solid var(--border);border-radius:var(--radius-lg);padding:40px 24px 24px;background:linear-gradient(180deg,var(--brand-50),var(--card) 120px);position:relative">
+      <div style="position:absolute;top:18px;left:24px;font-size:12px;font-weight:600;color:var(--muted-fg)">入口 A ·「派团队」按钮 → 配置弹层（输入框上方弹出）</div>
+      <div class="pop-anchor">
+        <button class="team-btn" style="border-color:var(--violet-300);color:var(--violet-700);background:var(--violet-50)"><svg class="ic ic-sm"><use href="#i-users"/></svg>派团队<span>▾</span></button>
+        <div class="team-pop">
+          <div class="pop-title"><svg class="ic ic-sm"><use href="#i-users"/></svg>派团队做这件事</div>
+          <div class="pop-sub">当前会话的智能体升级为主控，通过 MCP 派发分身；任务进展直接回到本会话。</div>
+          <div class="pop-lb">派发范围</div>
+          <div class="scope-item on"><input type="checkbox" checked style="accent-color:var(--primary)"><span class="nm">前端官网</span><span class="ws-tag ws-teal">当前工作区</span><span class="ds">分身在本工作区绑定的机器上跑</span></div>
+          <div class="scope-item"><input type="checkbox" style="accent-color:var(--primary)"><span class="nm">网站重构项目</span><span class="ws-tag ws-sky">项目 · 3 工作区</span><span class="ds">跨工作区派发，需选主工作区 Anchor</span></div>
+          <div class="pop-lb">费用上限（可选）</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <div style="flex:1;height:30px;border:1px solid var(--border);border-radius:var(--radius-md);padding:0 10px;font-size:12.5px;color:var(--faint);display:flex;align-items:center">留空 = 不限</div>
+            <button class="btn btn-default" style="height:30px;font-size:11.5px">分身预设…</button>
+          </div>
+          <div class="pop-foot">
+            <button class="btn btn-primary" style="height:30px">就绪，随下条消息发出</button>
+            <span class="tip">或直接在输入框说“派团队去…”</span>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:26px;display:flex;flex-direction:column;gap:8px">
+        <div style="font-size:12px;font-weight:600;color:var(--muted-fg)">确认后的输入区状态</div>
+        <div class="team-chip" style="align-self:flex-start"><svg class="ic ic-sm"><use href="#i-check"/></svg>团队已就绪 · 前端官网 · $5 上限<svg class="ic ic-sm" style="cursor:pointer;opacity:.7"><use href="#i-x"/></svg></div>
+        <div class="input-shell" style="pointer-events:none">
+          <button class="attach-btn"><svg class="ic"><use href="#i-paperclip"/></svg></button>
+          <div class="input-box"><span class="ph">写下目标，发送后主控开始拆解…</span></div>
+          <button class="send-btn"><svg class="ic"><use href="#i-send"/></svg></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右：指令与自然语言 -->
+    <div style="border:1px solid var(--border);border-radius:var(--radius-lg);padding:40px 24px 24px;background:var(--card)">
+      <div style="font-size:12px;font-weight:600;color:var(--muted-fg);margin-bottom:12px">入口 B/C · 指令前缀 & 自然语言（agent 常驻团队工具，自主判断）</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="border:1px dashed var(--violet-300);border-radius:var(--radius-md);padding:8px 12px;font-size:12.5px;background:var(--violet-50)">
+          <code style="font-family:ui-monospace,Consolas,monospace;font-size:11.5px;color:var(--violet-700)">/team</code> 修掉登录页三处移动端问题并补回归用例<br>
+          <span style="font-size:11.5px;color:var(--muted-fg)">指令前缀 = 强制走团队；后接目标，等价于按钮路径</span>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:var(--radius-md);padding:8px 12px;font-size:12.5px">
+          这事有点大，「你派几个分身分头去做」<br>
+          <span style="font-size:11.5px;color:var(--muted-fg)">自然语言 = agent 自行决定调团队工具（范围默认当前工作区，可追问确认）</span>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:var(--radius-md);padding:8px 12px;font-size:12.5px">
+          团队跑着的时候继续说：<br>
+          <span style="color:var(--muted-fg)">「测试分身把注册页也覆盖了」→ 追加指令实时转给主控<br>
+          「再加一个分身查兼容性」→ 主控动态加派<br>
+          「先停了吧」→ 主控收敛停止，出阶段小结</span>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:var(--radius-md);padding:8px 12px;font-size:12.5px;background:color-mix(in srgb,var(--muted) 30%,transparent)">
+          <svg class="ic ic-sm" style="vertical-align:-2px"><use href="#i-zap"/></svg> AskUser 卡也能触发：agent 反问「这个任务要派团队并行做，还是我自己顺序做？」选「派团队」即走同链路
+        </div>
+      </div>
+    </div>
+  </div>
+  <p style="font-size:12px;color:var(--faint);margin-top:10px">项目维度（原「项目团队会话」）：范围选项目后出现工作区多选 + 主工作区 Anchor 单选（默认后端代码类型优先），仅项目经理可选项目；范围在派出时冻结为快照。跨工作区分身在团队任务块里带各自目标工作区徽标。</p>
+</section>
+
+<!-- ================= 03 进度视图与结果回流 ================= -->
+<section class="sec" id="s3">
+  <div class="sec-head"><span class="sec-num">03</span><h2>进度视图 · 分身明细与结果回流</h2></div>
+  <p class="sec-desc">「进度」tab 沿用现有段竖线时间线：主控的 MCP 调用（派分身/取结果/收敛）以工具卡呈现，每个分身一个<span class="note">NEW</span> 分身段块（日志 + 产物）。任务收敛后结论回流对话视图，之后继续聊——团队可反复触发，每次一个任务块。</p>
+
+  <div class="two-col">
+    <!-- 进度视图 -->
+    <div style="border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;background:var(--card)">
+      <div style="display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);padding:8px 14px">
+        <span class="sp-title">登录页移动端问题</span>
+        <div class="seg" style="margin-left:auto"><button>对话</button><button class="on">进度</button></div>
+      </div>
+      <div style="padding:14px 16px 16px 37px;border-left:2px solid var(--muted);margin:14px 18px;border-radius:0;display:flex;flex-direction:column;gap:8px">
+        <div class="tool-card" style="margin-left:0"><div class="th"><svg class="ic ic-sm"><use href="#i-wrench"/></svg>mcp · dispatch_worker · 实现 <svg class="ic ic-sm" style="color:var(--success)"><use href="#i-check"/></svg></div><div class="cmd">target=前端官网 · worktree 隔离 → run#r91c</div></div>
+        <div class="tool-card" style="margin-left:0"><div class="th"><svg class="ic ic-sm"><use href="#i-wrench"/></svg>mcp · get_worker_result · 测试 <svg class="ic ic-sm" style="color:var(--success)"><use href="#i-check"/></svg></div><div class="cmd">3 条用例通过 · login.mobile.spec.tsx</div></div>
+        <details open style="border:1px solid var(--violet-200);background:var(--violet-50);border-radius:10px;padding:0;overflow:hidden">
+          <summary style="cursor:pointer;padding:7px 12px;font-size:12px;font-weight:700;color:var(--violet-700);list-style:none;display:flex;align-items:center;gap:8px">
+            <svg class="ic ic-sm"><use href="#i-users"/></svg>分身「实现」 · dev-box02 · 运行中 06:12
+            <span class="ws-tag ws-teal" style="margin-left:auto">前端官网</span>
+          </summary>
+          <div style="border-top:1px dashed var(--violet-200);padding:8px 12px;display:flex;flex-direction:column;gap:6px;background:var(--card)">
+            <div style="font-size:11.5px;color:var(--muted-fg)">目标：修 Login.tsx 按钮溢出与倒计时错位 · 独立 worktree</div>
+            <div style="border:1px solid var(--border-weak);border-radius:var(--radius-md);background:var(--bg);padding:8px 10px;font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--muted-fg);line-height:1.7">
+              02:14 编辑 src/Login.tsx（+12 −4）<br>
+              02:16 运行 pnpm test -- login → 3 passed<br>
+              02:18 编辑 src/Login.module.css（min-w → w-full）<span style="color:var(--brand-600)"> ●</span>
+            </div>
+            <div style="border:1px solid var(--border);border-radius:var(--radius-md);background:var(--card);padding:6px 10px;font-size:11.5px;display:flex;gap:8px;align-items:center">
+              <span class="tag tag-gray">📄 diff</span><span style="color:var(--muted-fg);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">login-fix.patch（+18 −7 · 待主控合并）</span>
+              <button class="btn btn-link" style="margin-left:auto;font-size:11.5px">展开</button>
+            </div>
+          </div>
+        </details>
+        <details style="border:1px solid var(--violet-200);background:var(--violet-50);border-radius:10px;padding:0;overflow:hidden">
+          <summary style="cursor:pointer;padding:7px 12px;font-size:12px;font-weight:700;color:var(--violet-700);list-style:none;display:flex;align-items:center;gap:8px">
+            <svg class="ic ic-sm"><use href="#i-users"/></svg>分身「测试」 · dev-box01 · 已完成 02:21
+            <span class="ws-tag ws-teal" style="margin-left:auto">前端官网</span>
+          </summary>
+        </details>
+        <div class="tool-card" style="margin-left:0"><div class="th"><svg class="ic ic-sm"><use href="#i-wrench"/></svg>mcp · converge <svg class="ic ic-sm" style="color:var(--brand-600)"><use href="#i-clock"/></svg></div><div class="cmd">等待：实现 · 风险 → 两分身终态后收敛</div></div>
+      </div>
+    </div>
+
+    <!-- 对话视图：结果回流 + 继续聊 -->
+    <div style="border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;display:flex;flex-direction:column;background:var(--card)">
+      <div style="display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--border);padding:8px 14px">
+        <span class="sp-title">登录页移动端问题</span>
+        <div class="seg" style="margin-left:auto"><button class="on">对话</button><button>进度</button></div>
+      </div>
+      <div style="flex:1;padding:14px 16px;display:flex;flex-direction:column;gap:12px;background:linear-gradient(180deg,var(--brand-50),transparent 80px)">
+        <!-- 团队任务块：终态折叠 -->
+        <div class="team-block">
+          <div class="tb-head" onclick="toggleBlock(this)">
+            <span class="tb-lead"><svg class="ic ic-sm"><use href="#i-users"/></svg>团队任务</span>
+            <span class="badge badge-success"><span class="dot"></span>已完成</span>
+            <span class="tb-stat"><b>3</b> 分身 · 成功 <b>3</b> / 失败 <b>0</b></span>
+            <span class="tb-cost num">$0.83 / $5.00</span>
+            <span class="tb-fold">展开 <svg class="ic ic-sm"><use href="#i-chev-d"/></svg></span>
+          </div>
+        </div>
+        <div class="final-concl">
+          <div class="lb">🤖 主控汇总</div>
+          <div class="tx">已修复 2 处样式问题（按钮溢出、倒计时错位），新增 3 条移动端回归用例全部通过；全局扫描发现 4 处同类固定宽度写法（清单在产物里）。注册页有同类溢出风险，建议处理。</div>
+        </div>
+        <div class="msg user"><span class="avatar gray">我</span><div class="bubble">注册页那个也一起修了吧，还是老规矩派团队。</div></div>
+        <div class="msg assistant"><span class="avatar"><svg class="ic"><use href="#i-brain"/></svg></span><div class="bubble">好，同一套分身配置直接复用：实现 + 测试两路，范围仍是前端官网。这就派。<br><span style="opacity:.75;font-size:11.5px">👤→👥 团队任务 #2 已派发</span></div></div>
+        <div class="turn-meta">第 5 轮 · 已完成 · 第 6 轮 · 运行中</div>
+        <div class="run-bar"><span class="spinner"></span><span>团队任务 #2</span><span class="dots" style="margin-left:auto"><i></i><i></i><i></i></span><span style="font-size:11.5px">主控正在拆解注册页任务…</span></div>
+      </div>
+      <div class="sp-input" style="border-top:1px solid var(--border)">
+        <div class="input-shell">
+          <button class="attach-btn"><svg class="ic"><use href="#i-paperclip"/></svg></button>
+          <div class="input-box"><span class="ph">继续追问…（Enter 发送 · Shift+Enter 换行）</span></div>
+          <button class="send-btn"><svg class="ic"><use href="#i-send"/></svg></button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p style="font-size:12px;color:var(--faint);margin-top:10px">一个会话里可以先后有多场团队任务（任务 #1、#2…各占一个块），互不干扰；分身产物（diff、报告）挂在块/段内，主控汇总后按需合并落盘。会话历史回放时这些块随消息流一起呈现——刷新、换机器登录都不丢。</p>
+</section>
+
+<!-- ================= 04 链路与改动说明 ================= -->
+<section class="sec" id="s4">
+  <div class="sec-head"><span class="sec-num">04</span><h2>链路与改动说明</h2></div>
+  <p class="sec-desc">核心洞察：现有 mission 链路的 MCP 基建（主控 5 工具、分身独立 worktree、跨工作区派发）全部保留——改的只是「主控从哪来」：不再是新建任务时另起一个一次性会话，而是<b>把团队工具注入你正在聊的这个会话</b>。</p>
+
+  <div style="font-size:13px;font-weight:600;color:var(--muted-fg);margin-bottom:8px">消息与任务的流转（全程不出当前会话）</div>
+  <pre class="ascii">你（输入框 / 派团队按钮 / /team / 自然语言）
+ │
+ ▼
+当前会话的 agent ←—— 升级为「主控」：注入团队 MCP 工具（既有注入机制）
+ │
+ ├─ mcp: dispatch_worker ──► 分身 run（独立 worktree，可跨机器/跨工作区）
+ │                              ├─ mcp: progress ──► 状态回流 → 团队任务块实时更新
+ │                              └─ mcp: get_worker_result ◄── 主控收取产物
+ ├─ 你随时插话（排队 → 本轮完成自动送达）──► 主控动态调整：加派 / 改需求 / 收敛
+ │
+ └─ mcp: converge ──► 主控汇总 ──► 结论回流消息流 ──► 继续对话（可再派 #2、#3…）</pre>
+
+  <table class="diff-table" style="margin-top:16px">
+    <thead><tr><th>维度</th><th>现状</th><th>本方案</th></tr></thead>
+    <tbody>
+      <tr><td class="dim">团队形态</td><td class="old">独立任务实体：另起主控会话 + 一次性烤死的指令，独立页面围观</td><td class="new">当前会话内的能力：agent 注入团队 MCP 工具即成主控，对话即指挥</td></tr>
+      <tr><td class="dim">触发</td><td class="old">只能从零创建一个任务；「用团队分析」按钮创建后与原会话断联</td><td class="new">会话中随时：按钮 / /team 指令 / 自然语言 / AskUser 选择，四路等价</td></tr>
+      <tr><td class="dim">沟通</td><td class="old">发起后无输入框；分身进度 10s 轮询整页控制台</td><td class="new">标准输入框 + 消息排队；分身进度嵌在消息流（任务块 + 进度段），追问实时转主控</td></tr>
+      <tr><td class="dim">上下文</td><td class="old">任务与发起会话无关（session_id 参数无人消费）</td><td class="new">主控就是你聊着的 agent，全程带对话上下文拆任务、汇总结论</td></tr>
+      <tr><td class="dim">项目跨工作区</td><td class="old">独立「项目团队会话」页面（仅项目经理）</td><td class="new">触发弹层里选项目范围 + Anchor，同一入口，无独立页面</td></tr>
+      <tr><td class="dim">保留的基建</td><td colspan="2">团队 MCP 5 工具与注入机制、分身 worktree 隔离、跨工作区派发、预算与收敛兜底、巡检——全部复用，不动</td></tr>
+    </tbody>
+  </table>
+
+  <div style="font-size:13px;font-weight:600;color:var(--muted-fg);margin:18px 0 8px">落地路径（评审通过后走 SillySpec 流程）</div>
+  <ol class="steps">
+    <li><div><b>工具注入与会话绑定</b><span>普通会话按需注入团队 MCP 工具（复用既有 isMainAgentSession 注入机制）；团队任务记录绑定发起会话，激活 mission.session_id 既有字段。</span></div></li>
+    <li><div><b>前端任务块</b><span>新增 TeamTaskBlock 组件（violet 卡：概要 + 分身行 + 日志/产物入口）；进度视图新增分身段块与 MCP 工具卡渲染。</span></div></li>
+    <li><div><b>触发链路</b><span>输入区「派团队」按钮 + 配置弹层（范围/项目/预算/分身预设）；/team 指令前缀；与自然语言触发统一到同一条后端链路。</span></div></li>
+    <li><div><b>收尾</b><span>收敛结论回流消息流；删除独立 missions 页面、路由与菜单；「用团队分析」改为在当前会话直接触发；更新模块文档。</span></div></li>
+  </ol>
+</section>
+
+</main>
+
+<footer class="wrap">
+  SillyHub · 会话内团队操作 · 交互原型（评审稿 v2）· 2026-08-22 · 静态原型无外部依赖，离线浏览器直接打开 · 右上角可切换双主题（取值同 themes.ts）· 评审通过后按 SillySpec 流程立项落地
+</footer>
+
+<script>
+function setTheme(name) {
+  document.documentElement.setAttribute('data-theme', name === 'blue' ? 'blue' : 'ai-native');
+  document.getElementById('th-ai').classList.toggle('on', name !== 'blue');
+  document.getElementById('th-blue').classList.toggle('on', name === 'blue');
+}
+function toggleBlock(head) {
+  var body = head.parentElement.querySelector('.tb-body');
+  if (!body) return;
+  var open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : '';
+  var fold = head.querySelector('.tb-fold');
+  if (fold) fold.innerHTML = (open ? '展开' : '收起') + ' <svg class="ic ic-sm" style="transform:rotate(' + (open ? 0 : 180) + 'deg)"><use href="#i-chev-d"/></svg>';
+}
+function togglePop() { /* 静态原型：弹层常开演示 */ }
+</script>
+
+</body>
+</html>
