@@ -56,6 +56,8 @@ import {
   type TurnSegment,
 } from "@/components/daemon/session-log-assembler";
 import { TurnTimeline, type SessionTurnView, type TurnUiStatus } from "@/components/daemon/turn-timeline";
+import type { AttachmentRead } from "@/lib/api/session-attachments";
+import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
 import { SessionInputBar } from "@/components/daemon/session-input-bar";
 import { logsToTurns } from "@/components/daemon/runtime-session-helpers";
 import { CtxUsageBar } from "@/components/sessions/ctx-usage-bar";
@@ -235,7 +237,7 @@ function SessionPanel({
   const [viewMode, setViewMode] = useState<"conversation" | "all">("conversation");
   const [input, setInput] = useState("");
   // 2026-08-20 task-12：待发送附件 ids（SessionInputBar 上传产物）与清理句柄。
-  const [pendingAttachmentIds, setPendingAttachmentIds] = useState<string[]>([]);
+  const [pendingAttachments, setPendingAttachments] = useState<AttachmentRead[]>([]);
   const clearAttachmentsRef = useRef<(() => void) | null>(null);
   const [reopening, setReopening] = useState(false);
 
@@ -676,10 +678,18 @@ function SessionPanel({
   const handleSend = useCallback(async () => {
     const prompt = input.trim();
     // 2026-08-20 task-12（D-7）：附件非空允许空文本（看图说话）；纯文本仍守卫。
-    if ((!prompt && pendingAttachmentIds.length === 0) || prompt.length > MAX_PROMPT_LEN) return;
+    if ((!prompt && pendingAttachments.length === 0) || prompt.length > MAX_PROMPT_LEN) return;
     if (!session || ended || restoring || !machineOnline) return;
     if (turnState.currentRunId) return; // turn 级串行
-    const attachmentIds = [...pendingAttachmentIds];
+    const attachmentIds = pendingAttachments.map((a) => a.id);
+    // ql-20260821-002：占位轮合成标记行——自己气泡即时渲染附件 chips（复用
+    // 历史回显解析链路；后端落库标记行与此逐字同构，真实日志到达后无感接管）。
+    const markerLines = pendingAttachments
+      .map((a) => `[附件:${a.id}|${a.kind}|${a.name}]`)
+      .join("\n");
+    const displayPrompt = prompt
+      ? `${markerLines}\n${prompt}`
+      : markerLines;
     setInput("");
     const placeholderId = `__pending_inject_${Date.now()}__`;
     setTurnState((prev) => ({
@@ -689,7 +699,7 @@ function SessionPanel({
         {
           runId: placeholderId,
           turn: null,
-          prompt,
+          prompt: displayPrompt,
           output: "",
           status: "pending",
           seenLogIds: new Set(),
@@ -709,7 +719,7 @@ function SessionPanel({
         // 2026-08-20 task-12：附件引用（空数组不进 body，保持既有 payload 形态）。
         ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
       });
-      setPendingAttachmentIds([]);
+      setPendingAttachments([]);
       clearAttachmentsRef.current?.();
       setTurnState((prev) => ({
         currentRunId: resp.run_id,
@@ -733,7 +743,7 @@ function SessionPanel({
       setErrorMsg(apiErr instanceof ApiError ? apiErr.message : "发送失败");
       if (isTurnConflict) setInput(prompt); // 保留 prompt 供重试
     }
-  }, [input, session, ended, restoring, machineOnline, turnState.currentRunId, sessionId, pendingAttachmentIds]);
+  }, [input, session, ended, restoring, machineOnline, turnState.currentRunId, sessionId, pendingAttachments]);
 
   const handleInterrupt = useCallback(async () => {
     if (!session || session.status !== "active" || !turnState.currentRunId) return;
@@ -793,7 +803,9 @@ function SessionPanel({
     async (prompt: string) => {
       if (!session || session.status !== "active") return;
       if (!machineOnline || turnState.currentRunId) return;
-      const trimmed = prompt.trim();
+      // ql-20260821-002：占位轮/历史轮 prompt 含附件标记行——重发前剥离
+      // （附件不随重发复活，仅回填原文）。
+      const trimmed = parseAttachmentMarkers(prompt).text.trim();
       if (!trimmed || trimmed.length > MAX_PROMPT_LEN) return;
       const placeholderId = `__pending_inject_${Date.now()}__`;
       setTurnState((prev) => ({
@@ -1106,7 +1118,7 @@ function SessionPanel({
           // 2026-08-20 task-12：附件门控（D-6 codex 禁用；FR-10 降级提示）与回传。
           attachmentsDisabled={attachmentsDisabled}
           multimodalDowngraded={multimodalDowngraded}
-          onAttachmentsChange={setPendingAttachmentIds}
+          onAttachmentsChange={setPendingAttachments}
           registerClearAttachments={(fn) => {
             clearAttachmentsRef.current = fn;
           }}

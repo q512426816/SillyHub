@@ -42,8 +42,8 @@ export interface SessionInputBarProps {
   attachmentsDisabled?: boolean;
   /** task-12：降级提示（FR-10）：当前供应商判不支持多模态 → 图片转落盘模式。 */
   multimodalDowngraded?: boolean;
-  /** task-12：待发送附件变化（父级 handleSend 消费 ids；发送成功后父级调 clearAttachments）。 */
-  onAttachmentsChange?: (ids: string[]) => void;
+  /** task-12：待发送附件变化（回传完整对象——父级合成标记行/取 ids；发送成功后父级调 clearAttachments）。 */
+  onAttachmentsChange?: (next: AttachmentRead[]) => void;
   /** task-12：父级发送成功后清空 chips（经 ref 暴露口，这里改用受控清理回调）。 */
   registerClearAttachments?: (fn: () => void) => void;
 }
@@ -72,7 +72,7 @@ export function SessionInputBar({
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   const syncToParent = (next: AttachmentRead[]) => {
-    onAttachmentsChange?.(next.map((a) => a.id));
+    onAttachmentsChange?.(next);
   };
 
   registerClearAttachments?.(() => {
