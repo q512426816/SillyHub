@@ -2424,6 +2424,34 @@ class SessionService:
             )
         return session
 
+    async def _heal_agent_session_id_from_runs(self, session: AgentSession) -> str | None:
+        """ql-20260821-001：从会话历史 run 恢复 SDK resume key 并写回 session 行。
+
+        历史版本的 SDK session id 只落到 run 级列 ``AgentRun.session_id``（daemon
+        消息流写入的 claude session_id / codex thread id，与 daemon 侧
+        ``state.agentSessionId`` 同源），session 级列从未回填。此处取该会话 runs
+        中最新非空值——fork 场景各 turn 可能轮换 id，``created_at DESC`` 保证取到
+        最新有效 key。命中即写 ``session.agent_session_id``（调用方事务内随
+        reopen 转换一起 commit/rollback，不留半更新状态）；无任何 run 记录过
+        session id 则返回 None（真不可恢复，D-004）。
+        """
+        stmt = (
+            select(AgentRun.session_id)
+            .where(
+                AgentRun.agent_session_id == session.id,
+                col(AgentRun.session_id).is_not(None),
+                col(AgentRun.session_id) != "",
+            )
+            .order_by(AgentRun.created_at.desc())
+            .limit(1)
+        )
+        healed = (await self._session.execute(stmt)).scalar_one_or_none()
+        if healed is None:
+            return None
+        session.agent_session_id = healed
+        self._session.add(session)
+        return healed
+
     async def reopen_session(
         self,
         session_id: uuid.UUID,
@@ -2439,8 +2467,11 @@ class SessionService:
              no existence leak — mirrors :meth:`end_session`).
           2. Pre-flight checks IN ORDER (first failure wins, see task-05 §边界):
              - provider not in {claude, codex} → :class:`DaemonSessionResumeUnsupported`
-             - agent_session_id is None → :class:`DaemonSessionNoAgentSession`
-               (D-004: create-time handshake never produced an SDK session id)
+             - agent_session_id is None → 先尝试从该会话历史 run 的
+               ``AgentRun.session_id`` 恢复 resume key（ql-20260821-001 存量自愈，
+               :meth:`_heal_agent_session_id_from_runs`）；恢复不到（D-004:
+               create-time handshake 从未产出 SDK session id）才抛
+               :class:`DaemonSessionNoAgentSession`
              - status in ACTIVE_SESSION_STATUSES → :class:`DaemonSessionNotActive`
                (caller should use inject, not reopen)
              - target runtime offline → :class:`DaemonOffline`
@@ -2469,9 +2500,22 @@ class SessionService:
                 },
             )
         if not session.agent_session_id:
-            raise DaemonSessionNoAgentSession(
-                f"Session '{session_id}' has no agent_session_id to resume.",
-                details={"session_id": str(session_id)},
+            # ql-20260821-001：存量会话自愈——SDK session id 在历史版本只写 run 级
+            # 列 AgentRun.session_id，session 级列恒 NULL（详见 run_sync
+            # submit_messages 的回填注释）。reopen 前从该会话最新 run 恢复 resume
+            # key 并持久化（同事务，随下方 reopen 转换一起 commit）；无任何 run
+            # 记录过 session id（create 阶段握手都没成功过，D-004）才真正拒绝。
+            healed_id = await self._heal_agent_session_id_from_runs(session)
+            if healed_id is None:
+                raise DaemonSessionNoAgentSession(
+                    f"会话 '{session_id}' 缺少可供恢复的 SDK 会话标识"
+                    "（该会话从未成功建立过 SDK 会话，无法重新打开）。",
+                    details={"session_id": str(session_id)},
+                )
+            log.info(
+                "session_sdk_id_healed_from_runs",
+                session_id=str(session_id),
+                agent_session_id=healed_id,
             )
         if session.status in ACTIVE_SESSION_STATUSES:
             raise DaemonSessionNotActive(
