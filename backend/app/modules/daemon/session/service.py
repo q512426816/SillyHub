@@ -62,6 +62,12 @@ ACTIVE_SESSION_STATUSES = frozenset({"pending", "active", "reconnecting"})
 ACTIVE_TURN_STATUSES = frozenset({"pending", "running", "pending_approval"})
 TERMINAL_TURN_STATUSES = frozenset({"completed", "failed", "killed", "cancelled"})
 
+# DS-4 / DS-5 / DS-6（2026-08-21-session-reopen-resume）：reconnecting 手动重试
+# 窗口秒数（基准 ``session.last_active_at``，两路径翻转 reconnecting 时均写 now）。
+# 唯一落点：task-04（reopen 前置校验窗口外放行）与 task-05（sweeper 巡检收敛）
+# 均 import 本常量，勿在别处重复定义；本 task 只定义不消费。
+RECONNECTING_RETRY_WINDOW_SEC = 180
+
 
 def _apply_session_terminal_status(run: AgentRun, session: AgentSession) -> str | None:
     """按 run 终态 + 任务类型计算 session 终态（D-002@v2 反向判定 + D-005 幂等）。
@@ -219,6 +225,21 @@ class DaemonSessionNoAgentSession(AppError):
     """
 
     code = "HTTP_409_DAEMON_SESSION_NO_AGENT_SESSION"
+    http_status = 409
+
+
+class DaemonSessionNoCwd(AppError):
+    """Session has an empty ``cwd`` — SDK resume cannot locate the transcript
+    (DS-7, 2026-08-21-session-reopen-resume).
+
+    Scan/bootstrap sessions are created without a ``cwd``
+    (``agent/service.py`` scan path / ``spec_workspace/bootstrap.py``), and
+    Claude transcripts live under ``projects/<encoded-cwd>/`` — an empty cwd
+    can never resume. Reject reopen up front instead of letting the
+    daemon-side SDK resume fail. The session is NOT mutated.
+    """
+
+    code = "HTTP_409_DAEMON_SESSION_NO_CWD"
     http_status = 409
 
 
@@ -2185,7 +2206,8 @@ class SessionService:
         session_id: uuid.UUID,
         *,
         runtime_id: uuid.UUID,
-    ) -> Literal["active", "failed", "rejected"]:
+        lease_id: uuid.UUID | None = None,
+    ) -> str:
         """Flip a reconnecting session to active after daemon resume succeeds.
 
         Two-phase recover (task-10 §4.4 step 7): daemon runs
@@ -2195,6 +2217,12 @@ class SessionService:
         session in reconnecting (converged by task-07 idle sweep or manual end).
 
         Ownership guard: runtime_id must match; mismatch → rejected.
+        Stale-confirmation guard (DS-4, 2026-08-21-session-reopen-resume):
+        when ``lease_id`` is provided and differs from the session's current
+        lease, this is a late confirmation from a previous reopen → idempotent
+        skip (no flip, no error, current status returned; a reconnecting
+        session therefore stays reconnecting). Omitted ``lease_id`` (legacy
+        daemon-restart recover chain) keeps the pre-DS-4 behavior verbatim.
         Non-reconnecting session (already active/ended/failed) → idempotent
         return of current status.
         """
@@ -2210,9 +2238,20 @@ class SessionService:
             session = (await self._session.execute(stmt)).scalar_one_or_none()
             if session is None:
                 return "rejected"
+            if lease_id is not None and session.lease_id != lease_id:
+                # DS-4 stale-confirmation guard: idempotent skip — 迟到的旧
+                # 确认不得误翻第二次 reopen 的 reconnecting。
+                log.info(
+                    "session_confirm_stale_lease_skipped",
+                    session_id=str(session_id),
+                    runtime_id=str(runtime_id),
+                    current_lease_id=str(session.lease_id),
+                    presented_lease_id=str(lease_id),
+                )
+                return session.status
             if session.status != "reconnecting":
                 # Idempotent: already active (or terminal). Return current.
-                return session.status  # type: ignore[return-value]
+                return session.status
 
             session.status = "active"
             session.last_active_at = datetime.now(UTC)
@@ -2256,13 +2295,26 @@ class SessionService:
         *,
         runtime_id: uuid.UUID,
         reason: str = "restore_failed",
-    ) -> Literal["failed", "rejected"]:
-        """Flip a reconnecting session to failed after daemon resume failed.
+        lease_id: uuid.UUID | None = None,
+    ) -> str:
+        """Flip a non-terminal session to failed after daemon resume failed.
 
         Daemon calls this when driver.start({resume}) throws (cwd mismatch /
         executable missing / SDK jsonl missing). The session was written
         reconnecting by recover_session_after_daemon_restart; resume failing
         means it cannot be restored → failed terminal.
+
+        Stale-confirmation guard (DS-4, 2026-08-21-session-reopen-resume):
+        when ``lease_id`` is provided and differs from the session's current
+        lease, this is a late failure report from a previous reopen →
+        idempotent skip (no flip, no error, current status returned). Omitted
+        ``lease_id`` keeps the pre-DS-4 behavior verbatim.
+
+        Flip semantics are intentionally broad: any status outside
+        ``{ended, failed}`` (reconnecting AND active alike) converges to
+        ``failed`` — daemon.ts markRecoveredSessionFailed async-fail bridge
+        relies on active→failed after confirm succeeded (DS-4 review gap:
+        must NOT be narrowed to reconnecting-only).
         """
         try:
             stmt = (
@@ -2276,8 +2328,19 @@ class SessionService:
             session = (await self._session.execute(stmt)).scalar_one_or_none()
             if session is None:
                 return "rejected"
+            if lease_id is not None and session.lease_id != lease_id:
+                # DS-4 stale-confirmation guard: idempotent skip — 迟到的旧
+                # 失败上报不得误杀第二次 reopen 的会话。
+                log.info(
+                    "session_recovery_failed_stale_lease_skipped",
+                    session_id=str(session_id),
+                    runtime_id=str(runtime_id),
+                    current_lease_id=str(session.lease_id),
+                    presented_lease_id=str(lease_id),
+                )
+                return session.status
             if session.status in ("ended", "failed"):
-                return session.status  # type: ignore[return-value]
+                return session.status
 
             now = datetime.now(UTC)
             session.status = "failed"
@@ -2472,11 +2535,25 @@ class SessionService:
                :meth:`_heal_agent_session_id_from_runs`）；恢复不到（D-004:
                create-time handshake 从未产出 SDK session id）才抛
                :class:`DaemonSessionNoAgentSession`
+             - cwd empty → :class:`DaemonSessionNoCwd` (DS-7: scan/bootstrap
+               sessions have no cwd; SDK resume needs it to locate the
+               transcript — reject up front, session NOT mutated)
              - status in ACTIVE_SESSION_STATUSES → :class:`DaemonSessionNotActive`
-               (caller should use inject, not reopen)
+               (caller should use inject, not reopen), EXCEPT (DS-5): status
+               == "reconnecting" with ``last_active_at`` older than
+               :data:`RECONNECTING_RETRY_WINDOW_SEC` (F2: last_active_at is the
+               single timeout basis — both reopen and daemon-restart recover
+               write it on flipping to reconnecting; never ``lease.created_at``,
+               which recover-path long sessions would always exceed) → the
+               suspended recovery is deemed dead and a second reopen is
+               allowed (the pending lease is converged to ``cancelled``,
+               DS-6 value: interactive leases have NULL ``lease_expires_at``
+               so ``expired`` never applies)
              - target runtime offline → :class:`DaemonOffline`
-          3. task-07 transition: create a NEW interactive lease (the original
-             ``completed`` lease is preserved untouched, design §6.2) with a
+          3. task-07 transition: create a NEW interactive lease (on the
+             ended/failed path the original ``completed`` lease is preserved
+             untouched, design §6.2; on the DS-5 stale-reconnecting path the
+             old suspended lease was just converged to ``cancelled``) with a
              fresh ``claim_token``, point ``session.lease_id`` at it, flip
              ``status="reconnecting"``, commit, then emit a best-effort
              ``daemon:session_resume`` WS (``agent_session_id`` is the SDK resume
@@ -2485,9 +2562,14 @@ class SessionService:
 
         ``FOR UPDATE`` serializes concurrent reopen on the same row; a second
         reopen landing after the first commits is caught by the status check
-        (now ``reconnecting`` ∈ ACTIVE_SESSION_STATUSES → NOT_ACTIVE).
+        (now ``reconnecting`` ∈ ACTIVE_SESSION_STATUSES → NOT_ACTIVE, unless
+        the retry window has already elapsed — DS-5).
         """
         session = await self._get_owned_session_for_update(session_id, user_id)
+
+        # DS-5：窗口判断需要统一时间基准，now 前移到前置校验之前；后续新建
+        # lease / 状态翻转复用同一 now，避免双取漂移。
+        now = datetime.now(UTC)
 
         # Pre-flight checks (order is load-bearing — see task-05 §边界处理).
         if session.provider not in {"claude", "codex"}:
@@ -2517,14 +2599,49 @@ class SessionService:
                 session_id=str(session_id),
                 agent_session_id=healed_id,
             )
-        if session.status in ACTIVE_SESSION_STATUSES:
-            raise DaemonSessionNotActive(
-                f"Session '{session_id}' is still {session.status}; use inject instead of reopen.",
-                details={
-                    "session_id": str(session_id),
-                    "status": session.status,
-                },
+        if not session.cwd:
+            # DS-7：scan/bootstrap 会话不写 cwd，空 cwd 的 SDK resume 必然失败
+            # （claude transcript 按 projects/<encoded-cwd>/ 定位），提前拒绝。
+            raise DaemonSessionNoCwd(
+                "该会话无关联工作目录，无法恢复对话记录",
+                details={"session_id": str(session_id)},
             )
+        if session.status in ACTIVE_SESSION_STATUSES:
+            # DS-5：仅 reconnecting 超窗是 ACTIVE_SESSION_STATUSES 例外（手动
+            # 重试兜底）；窗口内 / last_active_at 为 NULL（保守）/ pending /
+            # active 维持 409。基准锁 last_active_at（F2）。
+            last_active = session.last_active_at
+            if last_active is not None and last_active.tzinfo is None:
+                # SQLite（测试）读回 naive datetime，按 UTC 补 tz（先例
+                # lease_service.py term_at 处理）。
+                last_active = last_active.replace(tzinfo=UTC)
+            stale_reconnecting = (
+                session.status == "reconnecting"
+                and last_active is not None
+                and (now - last_active).total_seconds() > RECONNECTING_RETRY_WINDOW_SEC
+            )
+            if not stale_reconnecting:
+                raise DaemonSessionNotActive(
+                    f"Session '{session_id}' is still {session.status}; use inject instead of reopen.",
+                    details={
+                        "session_id": str(session_id),
+                        "status": session.status,
+                    },
+                )
+            # 旧挂起 lease 收敛 cancelled（DS-6 取值：expired 仅适用
+            # lease_expires_at 非 NULL 的租约，interactive 恒 NULL；cancelled
+            # 与"恢复放弃"语义一致），随下方 reopen 事务一起提交。ended/failed
+            # 路径旧 lease 已是终态（completed），不进本分支。
+            if session.lease_id is not None:
+                stale_lease = await self._session.get(DaemonTaskLease, session.lease_id)
+                if stale_lease is not None and stale_lease.status not in (
+                    "completed",
+                    "cancelled",
+                    "expired",
+                ):
+                    stale_lease.status = "cancelled"
+                    stale_lease.updated_at = now
+                    self._session.add(stale_lease)
         # Runtime must be connected so the daemon can run the SDK resume.
         runtime_id = session.runtime_id
         if runtime_id is not None:
@@ -2548,7 +2665,8 @@ class SessionService:
         # created with a fresh ``claim_token`` so a stale pre-reopen claim can
         # never be replayed against the resumed session (matches
         # recover_session_after_daemon_restart token rotation, task-10 §7).
-        now = datetime.now(UTC)
+        # ``now`` was hoisted above the pre-flight checks (DS-5) and is shared
+        # by the window check + lease transition below.
         target_runtime_id = session.runtime_id
         assert target_runtime_id is not None  # offline check above guarantees online
 

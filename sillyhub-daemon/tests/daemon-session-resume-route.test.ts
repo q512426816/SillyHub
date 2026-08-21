@@ -17,6 +17,14 @@
 // 注：SESSION_RESUME 与 INJECT/INTERRUPT/END 不同——收消息时 session 尚未在
 // SessionStore（正是来 resume 的），所以 _routeSessionControl 必须在 state
 // 存在校验之前分流到 resume 分支。
+//
+// task-06（session-reopen-resume / DS-3 / FR-03 / FR-04）追加最小行为用例：
+//   - 成功路径 confirmReconnected(sessionId, { leaseId, runtimeId })——runtimeId
+//     取自 payload（F1 静默吞解除，不依赖 _recoveryRuntimeBySession 映射）；
+//   - 失败路径（restoreAndReconnect 抛错，含 SessionAlreadyExistsError try 前
+//     抛出场景）→ markRecoveryFailed(sessionId, reason, { leaseId, runtimeId })；
+//   - confirmReconnected 自身抛错 best-effort：不阻塞 markReconnected /
+//     notifySessionReady（完整防回归深化归 task-07）。
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { Daemon } from '../src/daemon.js';
@@ -25,6 +33,7 @@ import type { DaemonConfig } from '../src/config.js';
 import type { DetectedAgent } from '../src/agent-detector.js';
 import type { SessionManager } from '../src/interactive/session-manager.js';
 import type { PersistedSessionRecord } from '../src/interactive/types.js';
+import { SessionAlreadyExistsError } from '../src/interactive/types.js';
 
 const mockConfig: DaemonConfig = {
   server_url: 'http://127.0.0.1:8000',
@@ -52,6 +61,12 @@ function createMockClient() {
     notifyRunResult: vi.fn(async () => ({})),
     submitMessages: vi.fn(async () => ({})),
     notifySessionEnd: vi.fn(async () => ({})),
+    // task-03（session-reopen-resume）：resume 成功后上报 ready（best-effort）。
+    notifySessionReady: vi.fn(async () => ({})),
+    // task-06（DS-3 / FR-03 / FR-04）：reopen 双向确认端点（可选方法，mock 补齐
+    // 供断言；ClientLike 声明带 ?，真实 HubClient 已实现）。
+    confirmReconnected: vi.fn(async () => ({})),
+    markRecoveryFailed: vi.fn(async () => ({})),
   };
 }
 
@@ -83,18 +98,22 @@ function createMockSessionManager(): SessionManager {
   } as unknown as SessionManager;
 }
 
-function buildDaemon(sm: SessionManager | null = createMockSessionManager()): {
+function buildDaemon(
+  sm: SessionManager | null = createMockSessionManager(),
+  client: ReturnType<typeof createMockClient> = createMockClient(),
+): {
   daemon: Daemon;
   sm: SessionManager;
+  client: ReturnType<typeof createMockClient>;
 } {
   const detector = { detectAgents: vi.fn(async () => [] as DetectedAgent[]) };
   const daemon = new Daemon(
     mockConfig,
-    createMockClient() as never,
+    client as never,
     createMockTaskRunner() as never,
     { detector, sessionManager: sm } as never,
   );
-  return { daemon, sm: sm as SessionManager };
+  return { daemon, sm: sm as SessionManager, client };
 }
 
 async function emit(daemon: Daemon, msg: {
@@ -250,5 +269,145 @@ describe('daemon SESSION_RESUME route（task-08 / session-history-enhance）', (
         },
       }),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('daemon SESSION_RESUME 双向确认（task-06 / session-reopen-resume / DS-3）', () => {
+  let daemons: Daemon[] = [];
+
+  afterEach(async () => {
+    for (const d of daemons) {
+      if (d.isRunning) {
+        await d.stop().catch(() => undefined);
+      }
+    }
+    daemons = [];
+  });
+
+  it('成功路径：confirmReconnected(sessionId, { leaseId, runtimeId })，runtimeId 取自 payload（F1）', async () => {
+    const { daemon, sm, client } = buildDaemon();
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: MSG.SESSION_RESUME,
+      payload: {
+        session_id: 'sess-confirm-1',
+        lease_id: 'lease-confirm-1',
+        agent_session_id: 'agent-sid-confirm',
+        cwd: '/tmp/p',
+        provider: 'claude',
+        runtime_id: 'runtime-from-payload',
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    // FR-03：恢复成功必须真实发出 confirm（携 payload 的 leaseId/runtimeId，
+    // 不依赖 _recoveryRuntimeBySession 映射——reopen 路径从未写映射）。
+    expect(client.confirmReconnected).toHaveBeenCalledTimes(1);
+    expect(client.confirmReconnected).toHaveBeenCalledWith('sess-confirm-1', {
+      leaseId: 'lease-confirm-1',
+      runtimeId: 'runtime-from-payload',
+    });
+    // 失败端点不应被触碰。
+    expect(client.markRecoveryFailed).not.toHaveBeenCalled();
+    // notifySessionReady 保持在其后（仍执行，不被 confirm 阻断）。
+    expect(client.notifySessionReady).toHaveBeenCalledWith('sess-confirm-1');
+    expect(
+      client.confirmReconnected.mock.invocationCallOrder[0]!,
+    ).toBeLessThan(client.notifySessionReady.mock.invocationCallOrder[0]!);
+    expect(sm.markReconnected).toHaveBeenCalledWith('sess-confirm-1');
+  });
+
+  it('restoreAndReconnect 抛 SessionAlreadyExistsError（try 前抛出）→ markRecoveryFailed 携 reason 与 opts', async () => {
+    const sm = createMockSessionManager();
+    (sm.restoreAndReconnect as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new SessionAlreadyExistsError('sess-dup'),
+    );
+    const { daemon, client } = buildDaemon(sm);
+    daemons.push(daemon);
+
+    await expect(
+      emit(daemon, {
+        type: MSG.SESSION_RESUME,
+        payload: {
+          session_id: 'sess-dup',
+          lease_id: 'lease-dup',
+          agent_session_id: 'agent-sid-dup',
+          cwd: '/tmp/dup',
+          provider: 'claude',
+          runtime_id: 'runtime-dup',
+        },
+      }),
+    ).resolves.toBeUndefined();
+    await new Promise((r) => setTimeout(r, 5));
+
+    // FR-04：恢复失败立即向 backend 写 failed（不等 sweeper 兜底）。
+    expect(client.markRecoveryFailed).toHaveBeenCalledTimes(1);
+    const [sid, reason, opts] = client.markRecoveryFailed.mock.calls[0]!;
+    expect(sid).toBe('sess-dup');
+    expect(String(reason)).toContain('sess-dup');
+    expect(opts).toEqual({ leaseId: 'lease-dup', runtimeId: 'runtime-dup' });
+    // 失败路径不再走成功链（不 confirm、不 ready 上报）。
+    expect(client.confirmReconnected).not.toHaveBeenCalled();
+    expect(client.notifySessionReady).not.toHaveBeenCalled();
+  });
+
+  it('restoreAndReconnect 抛普通错误 → markRecoveryFailed 携 reason 与 opts（不向上抛）', async () => {
+    const sm = createMockSessionManager();
+    (sm.restoreAndReconnect as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error('driver.start failed: SDK jsonl missing'),
+    );
+    const { daemon, client } = buildDaemon(sm);
+    daemons.push(daemon);
+
+    await expect(
+      emit(daemon, {
+        type: MSG.SESSION_RESUME,
+        payload: {
+          session_id: 'sess-boom',
+          lease_id: 'lease-boom',
+          agent_session_id: 'agent-sid-boom',
+          cwd: '/tmp/boom',
+          provider: 'claude',
+          runtime_id: 'runtime-boom',
+        },
+      }),
+    ).resolves.toBeUndefined();
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(client.markRecoveryFailed).toHaveBeenCalledTimes(1);
+    const [sid, reason, opts] = client.markRecoveryFailed.mock.calls[0]!;
+    expect(sid).toBe('sess-boom');
+    expect(String(reason)).toContain('driver.start failed');
+    expect(opts).toEqual({ leaseId: 'lease-boom', runtimeId: 'runtime-boom' });
+  });
+
+  it('confirmReconnected 抛错 → best-effort 不阻塞（markReconnected / notifySessionReady 仍执行）', async () => {
+    const client = createMockClient();
+    client.confirmReconnected.mockRejectedValueOnce(new Error('backend 502'));
+    const { daemon, sm } = buildDaemon(createMockSessionManager(), client);
+    daemons.push(daemon);
+
+    await expect(
+      emit(daemon, {
+        type: MSG.SESSION_RESUME,
+        payload: {
+          session_id: 'sess-502',
+          lease_id: 'lease-502',
+          agent_session_id: 'agent-sid-502',
+          cwd: '/tmp/502',
+          provider: 'claude',
+          runtime_id: 'runtime-502',
+        },
+      }),
+    ).resolves.toBeUndefined();
+    await new Promise((r) => setTimeout(r, 5));
+
+    // confirm HTTP 失败仅 warn：本地已恢复 active 不回滚，ready 上报继续
+    //（backend 180s sweeper 兜底收敛）。
+    expect(client.confirmReconnected).toHaveBeenCalledTimes(1);
+    expect(sm.markReconnected).toHaveBeenCalledWith('sess-502');
+    expect(client.notifySessionReady).toHaveBeenCalledWith('sess-502');
+    expect(client.markRecoveryFailed).not.toHaveBeenCalled();
   });
 });

@@ -3608,6 +3608,8 @@ export interface paths {
          *
          *     Two-phase recover step 2: daemon ran recover_session (wrote reconnecting) →
          *     restoreAndReconnect (driver.start resume) → on success calls this.
+         *     Optional ``lease_id`` (DS-4): mismatch with the current lease → idempotent
+         *     skip (stale confirmation must not flip a second reopen).
          */
         post: operations["confirm_session_reconnected_api_daemon_sessions__session_id__confirm_reconnected_post"];
         delete?: never;
@@ -3631,6 +3633,8 @@ export interface paths {
          *
          *     Daemon calls this when driver.start({resume}) throws (cwd mismatch /
          *     executable missing / SDK jsonl missing) — session cannot be restored.
+         *     Optional ``lease_id`` (DS-4): mismatch with the current lease → idempotent
+         *     skip (stale failure must not kill a second reopen).
          */
         post: operations["mark_session_recovery_failed_api_daemon_sessions__session_id__mark_recovery_failed_post"];
         delete?: never;
@@ -15535,6 +15539,10 @@ export interface components {
         /**
          * SessionRuntimeRequest
          * @description Body for confirm-reconnected / mark-recovery-failed (gap-8.1).
+         *
+         *     DS-4（2026-08-21-session-reopen-resume）：可选 ``lease_id`` 携带本次
+         *     SESSION_RESUME 的 lease_id 供陈旧确认防误翻——提供且与 session 当前
+         *     lease 不匹配时幂等跳过；不传（旧 daemon 重启 recover 链路）走既有行为。
          */
         SessionRuntimeRequest: {
             /**
@@ -15542,6 +15550,8 @@ export interface components {
              * Format: uuid
              */
             runtime_id: string;
+            /** Lease Id */
+            lease_id?: string | null;
             /** Reason */
             reason?: string | null;
         };

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -739,8 +739,11 @@ class DaemonService:
         session_id: uuid.UUID,
         *,
         runtime_id: uuid.UUID,
-    ) -> Literal["active", "failed", "rejected"]:
-        return await self._sess.confirm_session_reconnected(session_id, runtime_id=runtime_id)
+        lease_id: uuid.UUID | None = None,
+    ) -> str:
+        return await self._sess.confirm_session_reconnected(
+            session_id, runtime_id=runtime_id, lease_id=lease_id
+        )
 
     async def mark_session_recovery_failed(
         self,
@@ -748,9 +751,10 @@ class DaemonService:
         *,
         runtime_id: uuid.UUID,
         reason: str = "restore_failed",
-    ) -> Literal["failed", "rejected"]:
+        lease_id: uuid.UUID | None = None,
+    ) -> str:
         return await self._sess.mark_session_recovery_failed(
-            session_id, runtime_id=runtime_id, reason=reason
+            session_id, runtime_id=runtime_id, reason=reason, lease_id=lease_id
         )
 
     # ── Read-only session list + history (task-12, FR-10 / D-005@v1) ────────

@@ -21,12 +21,11 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
-from sqlmodel import col
 
 from app.core.db import get_session_factory
 from app.core.logging import get_logger
 from app.core.redis import get_redis
-from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
+from app.modules.agent.model import AgentRun, AgentRunLog
 from app.modules.agent.tool_kind import classify_tool_kind
 from app.modules.change.dispatch import _run_gate_via_delegate
 from app.modules.daemon.lease.service import DaemonAgentRunNotFound
@@ -748,29 +747,24 @@ class RunSyncService:
             if latest_session_id and not agent_run.session_id:
                 agent_run.session_id = latest_session_id
                 self._session.add(agent_run)
-            # ql-20260821-001：SDK session id 同步到 session 级列（reopen resume key）。
-            # daemon 拿到 SDK session id（claude system/init / codex thread_started）后只
-            # 存内存 state + 本地 JsonSessionPersistence，从未回传 backend 的
-            # AgentSession.agent_session_id —— 该列恒 NULL，reopen 必命中 409
-            # NO_AGENT_SESSION（DaemonSessionNoAgentSession）。此处随消息流回填：
-            # 定向 UPDATE 只碰这一列（避免与并发 close_interactive_run 的终态回写
-            # 互踩整行），last-write-wins 对齐 daemon _onMessage 允许 fork 后新 id
-            # 覆盖旧 id 的语义。存量会话由 reopen_session 的兜底恢复路径治愈。
+            # 2026-08-21-session-reopen-resume task-01 / DS-1 / FR-01：增量回填
+            # AgentSession.agent_session_id（SDK resume key，reopen 硬依赖该列）。
+            # 与上面 AgentRun.session_id 的「仅空时写」（D-001@v1）语义刻意不同 ——
+            # 会话列做**最新值覆盖**：fork/reload 后 SDK 换新 id，旧 key resume 会
+            # 回到分叉前历史，语义错误。守卫：仅 interactive run（agent_session_id
+            # 会话 FK 非空）；batch run 该 FK 为 None，不触碰 agent_sessions 表。
+            # 并发语义：最终一致（以最后到达消息为准），乱序迟到的旧 id 短暂回退
+            # 由同会话下一次上报自愈（design DS-1 审查修订，不加去重复杂度）。
+            # 事务：与消息落库走同一 commit()（含 IntegrityError 幂等回滚分支）。
             if latest_session_id and agent_run.agent_session_id is not None:
-                await self._session.execute(
-                    update(AgentSession)
-                    .where(
-                        AgentSession.id == agent_run.agent_session_id,
-                        col(AgentSession.agent_session_id).is_(None)
-                        | (col(AgentSession.agent_session_id) != latest_session_id),
-                    )
-                    .values(agent_session_id=latest_session_id)
-                )
-                log.info(
-                    "session_sdk_id_synced",
-                    session_id=str(agent_run.agent_session_id),
-                    agent_run_id=str(agent_run.id),
-                )
+                from app.modules.agent.model import AgentSession
+
+                session_row = await self._session.get(AgentSession, agent_run.agent_session_id)
+                # get 返回 None（理论不应发生：会话行在 create_session 的 commit 后
+                # 必然已存在）静默跳过；值相同不写（避免无谓 dirty）。
+                if session_row is not None and session_row.agent_session_id != latest_session_id:
+                    session_row.agent_session_id = latest_session_id
+                    self._session.add(session_row)
 
         # QueuePool 修复 3：commit 前从 agent_run 提取 publish 所需标量。commit()
         # 后 SQLAlchemy 默认 expire_on_commit 会令 ORM 属性失效，再读会触发 lazy

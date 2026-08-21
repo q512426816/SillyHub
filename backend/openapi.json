@@ -10201,7 +10201,7 @@
           "daemon"
         ],
         "summary": "Confirm Session Reconnected",
-        "description": "Flip reconnecting → active after daemon resume succeeds (gap-8.1).\n\nTwo-phase recover step 2: daemon ran recover_session (wrote reconnecting) →\nrestoreAndReconnect (driver.start resume) → on success calls this.",
+        "description": "Flip reconnecting → active after daemon resume succeeds (gap-8.1).\n\nTwo-phase recover step 2: daemon ran recover_session (wrote reconnecting) →\nrestoreAndReconnect (driver.start resume) → on success calls this.\nOptional ``lease_id`` (DS-4): mismatch with the current lease → idempotent\nskip (stale confirmation must not flip a second reopen).",
         "operationId": "confirm_session_reconnected_api_daemon_sessions__session_id__confirm_reconnected_post",
         "parameters": [
           {
@@ -10255,7 +10255,7 @@
           "daemon"
         ],
         "summary": "Mark Session Recovery Failed",
-        "description": "Flip reconnecting → failed after daemon resume failed (gap-8.1).\n\nDaemon calls this when driver.start({resume}) throws (cwd mismatch /\nexecutable missing / SDK jsonl missing) — session cannot be restored.",
+        "description": "Flip reconnecting → failed after daemon resume failed (gap-8.1).\n\nDaemon calls this when driver.start({resume}) throws (cwd mismatch /\nexecutable missing / SDK jsonl missing) — session cannot be restored.\nOptional ``lease_id`` (DS-4): mismatch with the current lease → idempotent\nskip (stale failure must not kill a second reopen).",
         "operationId": "mark_session_recovery_failed_api_daemon_sessions__session_id__mark_recovery_failed_post",
         "parameters": [
           {
@@ -47726,6 +47726,18 @@
             "format": "uuid",
             "title": "Runtime Id"
           },
+          "lease_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Id"
+          },
           "reason": {
             "anyOf": [
               {
@@ -47744,7 +47756,7 @@
           "runtime_id"
         ],
         "title": "SessionRuntimeRequest",
-        "description": "Body for confirm-reconnected / mark-recovery-failed (gap-8.1)."
+        "description": "Body for confirm-reconnected / mark-recovery-failed (gap-8.1).\n\nDS-4（2026-08-21-session-reopen-resume）：可选 ``lease_id`` 携带本次\nSESSION_RESUME 的 lease_id 供陈旧确认防误翻——提供且与 session 当前\nlease 不匹配时幂等跳过；不传（旧 daemon 重启 recover 链路）走既有行为。"
       },
       "SetDefaultResult": {
         "properties": {

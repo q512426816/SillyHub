@@ -269,11 +269,13 @@ export class HubClient {
   /**
    * gap-8.2（design §11）：sessionId → runtimeId 映射。
    *
-   * RecoveryCoordinator.confirmReconnected/markRecoveryFailed 接口只传
-   * sessionId（daemon.ts:277/279），但 backend recovery 端点要 runtime_id
-   * （ownership guard）。recoverSession 时存映射，confirm/markFailed 查表补
+   * recover 链路（daemon 重启恢复）专用：RecoveryCoordinator 调用点只传
+   * sessionId，backend recovery 端点要 runtime_id（ownership guard）。
+   * recoverSession 时存映射，confirm/markFailed 无 opts.runtimeId 时查表补
    * runtime_id；调用后删除（一次性）。daemon 活着期间映射有效（重启 = 全新
-   * 恢复流程，映射重建）。
+   * 恢复流程，映射重建）。reopen 链路（task-06 DS-3）不经 recoverSession，
+   * runtimeId 由 _routeSessionResume 从 SESSION_RESUME payload 经 opts
+   * 显式透传，不读不写本映射。
    */
   private readonly _recoveryRuntimeBySession = new Map<string, string>();
 
@@ -764,8 +766,10 @@ export class HubClient {
   // 实现 RecoveryCoordinator（daemon.ts:261）。daemon `_recoverSessionsOnBoot`
   // 调用序：recoverSession →（reconnecting）→ restoreAndReconnect（driver resume）
   // → confirmReconnected / markRecoveryFailed。鉴权：_headers() 的 X-API-Key
-  // （backend get_current_principal）。backend 端点 body 要 runtime_id；接口
-  // confirm/markFailed 只传 sessionId → 经 `_recoveryRuntimeBySession` 查表。
+  //（backend get_current_principal）。backend 端点 body 要 runtime_id；runtimeId
+  // 优先取调用方 opts 显式透传（task-06 DS-3 参数透传定案：reopen 路径
+  // SESSION_RESUME payload 自带 runtime_id），否则 fallback
+  // `_recoveryRuntimeBySession` 查表（recover 链路 recoverSession 时写入）。
 
   /**
    * gap-8.2：向 backend 收敛崩溃 currentRun + 写 session=reconnecting。
@@ -804,15 +808,24 @@ export class HubClient {
   /**
    * gap-8.2：恢复成功（reconnecting → active）后向 backend 确认。
    * 端点 POST {REST_PREFIX}/sessions/{sessionId}/confirm-reconnected。
-   * runtime_id 经映射查表；无映射（未 recover 过）静默（不误调 backend）。
+   * task-06（DS-3）：opts 可显式透传 runtimeId（reopen 路径取自 SESSION_RESUME
+   * payload）与 leaseId（绑定本次 lease，供 backend 防陈旧确认误翻）；缺省时
+   * runtimeId fallback 映射查表（recover 链路）。无任何来源（未 recover 过且
+   * 未传 opts.runtimeId）静默（不误调 backend）。
    */
-  async confirmReconnected(sessionId: string): Promise<void> {
-    const runtimeId = this._recoveryRuntimeBySession.get(sessionId);
+  async confirmReconnected(
+    sessionId: string,
+    opts?: { leaseId?: string; runtimeId?: string },
+  ): Promise<void> {
+    const runtimeId =
+      opts?.runtimeId ?? this._recoveryRuntimeBySession.get(sessionId);
     if (!runtimeId) return;
+    const body: Record<string, unknown> = { runtime_id: runtimeId };
+    if (opts?.leaseId) body.lease_id = opts.leaseId;
     await this._request(
       'POST',
       `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/confirm-reconnected`,
-      { runtime_id: runtimeId },
+      body,
     );
     this._recoveryRuntimeBySession.delete(sessionId);
   }
@@ -820,11 +833,19 @@ export class HubClient {
   /**
    * gap-8.2：恢复失败（driver.start 抛错）后向 backend 写 reconnecting → failed。
    * 端点 POST {REST_PREFIX}/sessions/{sessionId}/mark-recovery-failed。
+   * task-06（DS-3）：opts 语义同 confirmReconnected（runtimeId 显式透传 +
+   * leaseId 绑定；缺省 fallback 映射查表）；无任何来源静默。
    */
-  async markRecoveryFailed(sessionId: string, reason?: string): Promise<void> {
-    const runtimeId = this._recoveryRuntimeBySession.get(sessionId);
+  async markRecoveryFailed(
+    sessionId: string,
+    reason?: string,
+    opts?: { leaseId?: string; runtimeId?: string },
+  ): Promise<void> {
+    const runtimeId =
+      opts?.runtimeId ?? this._recoveryRuntimeBySession.get(sessionId);
     if (!runtimeId) return;
     const body: Record<string, unknown> = { runtime_id: runtimeId };
+    if (opts?.leaseId) body.lease_id = opts.leaseId;
     if (reason) body.reason = reason;
     await this._request(
       'POST',

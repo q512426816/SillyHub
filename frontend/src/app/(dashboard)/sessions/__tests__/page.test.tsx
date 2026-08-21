@@ -36,6 +36,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type * as React from "react";
 
 import SessionsPortalPage from "@/app/(dashboard)/sessions/page";
+import { ApiError } from "@/lib/api";
 import type {
   AgentSessionRead,
   DaemonMachineRead,
@@ -62,6 +63,10 @@ const mocks = vi.hoisted(() => ({
   profilesHook: vi.fn(),
   listProviders: vi.fn(),
   getProviderQuota: vi.fn(),
+  // task-08：useNotify 改 mock 捕获（409 中文文案断言走调用参数，不依赖 antd App 上下文）
+  notifyError: vi.fn(),
+  notifySuccess: vi.fn(),
+  notifyWarning: vi.fn(),
 }));
 
 vi.mock("@/lib/daemon", () => ({
@@ -103,6 +108,23 @@ vi.mock("@/lib/api/llm-providers", () => ({
   listProviders: (...args: unknown[]) => mocks.listProviders(...args),
   getProviderQuota: (...args: unknown[]) => mocks.getProviderQuota(...args),
 }));
+
+// task-08（2026-08-21-session-reopen-resume / FR-09）：useNotify 改 mock 捕获——
+// jsdom 无 antd <App> 上下文时 message.* 是 no-op 桩，409 中文文案断言只能看调用
+// 参数；errMessage 等其余导出走真实实现（子组件照常用）。
+vi.mock("@/lib/errors", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/errors")>(
+    "@/lib/errors",
+  );
+  return {
+    ...actual,
+    useNotify: () => ({
+      error: (...args: unknown[]) => mocks.notifyError(...args),
+      success: (...args: unknown[]) => mocks.notifySuccess(...args),
+      warning: (...args: unknown[]) => mocks.notifyWarning(...args),
+    }),
+  };
+});
 
 // 已知坑（对齐 turn-timeline / interactive-session-panel 测试惯例）：MarkdownText
 // 用 next/dynamic ssr:false，jsdom 同步 render 得 null——mock 成纯文本渲染，
@@ -944,5 +966,124 @@ describe("发送附件即时回显（ql-20260821-002）", () => {
     // 上传 chips 渲染由 SessionInputBar 内部状态承载，此用例改为验证合成
     // 链路的纯函数行为已在 markers 测试覆盖；此处断言页面接线类型契约即可。
     expect(typeof handlers.onLog).toBe("function");
+  });
+});
+
+// ── task-08（2026-08-21-session-reopen-resume / FR-09 / DS-5）：reconnecting 恢复超时 + 409 中文化 ──
+
+describe("SessionPanel reconnecting 恢复超时入口 + reopen 409 中文化（task-08）", () => {
+  /** fake timers 下推进并 flush（advanceTimersByTimeAsync 会级联触发期间全部定时器 + 微任务）。 */
+  async function advance(ms: number) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  }
+
+  it("reconnecting 计时 >240s → 「会话恢复超时」横幅 + 重新开启入口（点击触发 reopenSession）；<240s 不出现", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.getAgentSession.mockResolvedValue(
+        makeSession({ status: "reconnecting" }),
+      );
+      renderPage();
+      await advance(0); // 左列表落定
+      fireEvent.click(
+        screen.getByRole("button", { name: "会话 整理这周的会议纪要" }),
+      );
+      await advance(0); // SessionPanel 挂载 + detail 到达（锚点起算）
+
+      // 面板确在恢复态
+      expect(screen.getByPlaceholderText(/恢复会话中/)).toBeTruthy();
+
+      // <240s（239s）：无超时横幅、无重新开启入口
+      await advance(239_000);
+      expect(screen.queryByText(/会话恢复超时/)).toBeNull();
+      expect(screen.queryByRole("button", { name: /重新开启/ })).toBeNull();
+
+      // >240s（241s）：横幅出现（DS-5：后端 180s 窗口 + 60s 缓冲必已放行）
+      await advance(2_000);
+      expect(screen.getByText(/会话恢复超时/)).toBeTruthy();
+      const reopenBtn = screen.getByRole("button", { name: /重新开启/ });
+      fireEvent.click(reopenBtn);
+      await advance(0);
+      // 复用 ended 同一 handleReopen 回调（reopenSession 调用）
+      expect(mocks.reopenSession).toHaveBeenCalledWith("s-1");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("恢复成功（status→active）后超时入口消失；再进 reconnecting 计时从头起算不残留", async () => {
+    vi.useFakeTimers();
+    try {
+      // 先一直 reconnecting（挂载 + 轮询）→ 超时横幅出现
+      mocks.getAgentSession.mockResolvedValue(
+        makeSession({ status: "reconnecting" }),
+      );
+      renderPage();
+      await advance(0);
+      fireEvent.click(
+        screen.getByRole("button", { name: "会话 整理这周的会议纪要" }),
+      );
+      await advance(0); // detail 到达、锚点起算（先落定再推时间，对齐用例①）
+      await advance(241_000);
+      expect(screen.getByText(/会话恢复超时/)).toBeTruthy();
+
+      // 轮询翻 active → 入口消失（离开 reconnecting 清零重置）
+      mocks.getAgentSession.mockResolvedValue(makeSession({ status: "active" }));
+      await advance(1_600);
+      expect(screen.queryByText(/会话恢复超时/)).toBeNull();
+      expect(screen.queryByRole("button", { name: /重新开启/ })).toBeNull();
+
+      // 再进 reconnecting（active 后轮询已停 → 经「新建会话」→ 再选触发重挂）：
+      // 计时从头起算，<240s（200s）不出现，>240s 再现
+      mocks.getAgentSession.mockResolvedValue(
+        makeSession({ status: "reconnecting" }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+      fireEvent.click(
+        screen.getByRole("button", { name: "会话 整理这周的会议纪要" }),
+      );
+      await advance(0);
+      expect(screen.getByPlaceholderText(/恢复会话中/)).toBeTruthy();
+      await advance(200_000);
+      expect(screen.queryByText(/会话恢复超时/)).toBeNull();
+      await advance(41_000);
+      expect(screen.getByText(/会话恢复超时/)).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reopen 409（窗口内二次重开 NOT_ACTIVE）→ notify 显示映射表中文文案，不透传后端英文原文", async () => {
+    mocks.getAgentSession.mockResolvedValue(
+      makeSession({ status: "ended", ended_at: "2026-08-15T09:30:00Z" }),
+    );
+    const englishMsg =
+      "Session s-1 is not in reopenable state, use inject instead of reopen.";
+    mocks.reopenSession.mockRejectedValue(
+      new ApiError(409, {
+        code: "HTTP_409_DAEMON_SESSION_NOT_ACTIVE",
+        message: englishMsg,
+        request_id: "req-1",
+        details: null,
+      }),
+    );
+    renderPage();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
+    );
+    await waitFor(() => {
+      expect(screen.getByText(/会话已结束 —— 可浏览历史消息/)).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /重新开启/ }));
+    await waitFor(() => {
+      expect(mocks.notifyError).toHaveBeenCalled();
+    });
+    const shown = mocks.notifyError.mock.calls[0]?.[0];
+    expect(shown).toBeInstanceOf(Error);
+    // 命中映射表 → 中文文案（窗口内重开语义），非后端英文原文
+    expect((shown as Error).message).toBe("会话仍在恢复中，请稍后再试");
+    expect((shown as Error).message).not.toContain("reopen");
   });
 });

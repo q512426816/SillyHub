@@ -99,6 +99,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # 常驻协程占位——下方 bootstrap 完成后才 create_task；先占 None 保证 bootstrap
     # 期（DB 不可达等）抛错走 finally 时不会因未定义而掩盖原始异常。
     patrol_task: asyncio.Task[None] | None = None
+    # 2026-08-21-session-reopen-resume task-05 / design DS-6：会话恢复巡检常驻
+    # 协程占位——同样先占 None 保证 bootstrap 抛错走 finally 时不会因未定义
+    # 而掩盖原始异常（对齐上方 patrol_task 注释）。
+    sweep_task: asyncio.Task[None] | None = None
     try:
         # Bootstrap auth once the DB connection pool exists.
         from app.core.db import get_engine, get_session_factory
@@ -194,6 +198,20 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 "mission_patrol_started",
                 interval_seconds=settings.mission_patrol_interval_seconds,
             )
+        # 2026-08-21-session-reopen-resume task-05 / design DS-6（FR-07）：会话
+        # 恢复巡检常驻协程——把卡死 reconnecting 且 last_active_at 超时（>180s，
+        # RECONNECTING_RETRY_WINDOW_SEC）的会话收敛 failed（挂起 lease 置
+        # cancelled），与 DS-5 手动重试窗口构成双保险，并覆盖旧版 daemon 未
+        # 升级不发 confirm 的过渡期。巡检常开（task-05 constraints：不加
+        # Settings 开关，与 mission_patrol_enabled 先例不同）；60s 周期为
+        # interval 参数默认值。关停走 finally 的 cancel + await gather（对齐
+        # patrol——巡检轮内有 DB 写，须等取消落地）。
+        from app.modules.daemon.sweep import session_reconnect_sweeper
+
+        sweep_task = asyncio.create_task(
+            session_reconnect_sweeper(), name="session-reconnect-sweeper"
+        )
+        log.info("session_reconnect_sweeper_started")
         # 2026-08-06-public-mcp-server task-05 / spike-A 坑 2（P0）：MCP session
         # manager 必须在 app 服务期间常驻。streamable_http_app() 返回的子 app
         # 虽自带 lifespan=lambda app: self.session_manager.run()，但 Starlette
@@ -223,6 +241,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         if patrol_task is not None:
             patrol_task.cancel()
             await asyncio.gather(patrol_task, return_exceptions=True)
+        # 2026-08-21-session-reopen-resume task-05 / design DS-6：会话恢复巡检
+        # 协程关停——同上 patrol 手法 cancel 后 await gather 等取消落地，无悬挂
+        # 任务；sweeper 的 asyncio.sleep 处 CancelledError 透传保证干净退出。
+        if sweep_task is not None:
+            sweep_task.cancel()
+            await asyncio.gather(sweep_task, return_exceptions=True)
         try:
             from app.modules.storage.factory import get_storage_backend
 

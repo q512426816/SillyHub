@@ -97,6 +97,33 @@ import { cn } from "@/lib/utils";
 
 const MAX_PROMPT_LEN = 8000;
 
+/**
+ * task-08（2026-08-21-session-reopen-resume / FR-09）：重新开启 409 错误码 → 中文
+ * 文案映射。后端 reopen 409 的 message 是英文原文（DaemonSessionNotActive 等
+ * AppError 子类），errMessage 默认透传 err.message——errors.ts 不在本卡
+ * allowed_paths，映射收敛在本页，handleReopen notify 前查表，未命中回退既有行为。
+ * 错误码对齐 backend/app/modules/daemon/session/service.py:188-256（含 task-04
+ * 新增的空 cwd 码 HTTP_409_DAEMON_SESSION_NO_CWD，DS-7）。
+ */
+const REOPEN_ERROR_ZH: Record<string, string> = {
+  // 窗口内二次重开（后端 180s 恢复窗口内会话尚在恢复）
+  HTTP_409_DAEMON_SESSION_NOT_ACTIVE: "会话仍在恢复中，请稍后再试",
+  // agent_session_id IS NULL（创建时 SDK 握手未成功，D-004@v1）
+  HTTP_409_DAEMON_SESSION_NO_AGENT_SESSION: "该会话缺少恢复凭证，无法重新开启",
+  // provider 不支持 resume（非 claude/codex）
+  HTTP_409_DAEMON_SESSION_RESUME_UNSUPPORTED: "该会话类型不支持重新开启",
+  // 目标 runtime 无活跃 WS 连接
+  HTTP_409_DAEMON_OFFLINE: "执行代理当前不在线，请先启动 daemon 后重试",
+  // scan/bootstrap 会话不写 cwd，SDK resume 无法定位 transcript（DS-7）
+  HTTP_409_DAEMON_SESSION_NO_CWD: "该会话缺少工作目录记录，无法重新开启",
+};
+
+/**
+ * task-08（DS-5）：reconnecting 本地超时阈值。240s = 后端 180s 重开窗口 + 60s
+ * 缓冲——前端按钮出现时后端必已放行 reopen；后端 180s 仍是权威校验。
+ */
+const RECONNECT_TIMEOUT_MS = 240_000;
+
 /* ────────────────────── 页面 ────────────────────── */
 
 export default function SessionsPortalPage() {
@@ -545,6 +572,30 @@ function SessionPanel({
     );
   }, [effectiveProvider]);
 
+  // ── task-08（FR-09 / DS-5）：reconnecting 本地计时 ───────────────────────
+  // 进入 restoring（pending/reconnecting）以 Date.now() 锚定起点；status 离开
+  // reconnecting（active/ended/failed）即清零重置（锚点置 null + 超时态复位）。
+  // 驱动方式：restoring 期间单个 setTimeout（到期翻超时态），离开/卸载即清理，
+  // 不新增常驻定时器；pending→reconnecting 不重锚（effect 依赖 restoring 布尔）。
+  const [reconnectTimedOut, setReconnectTimedOut] = useState(false);
+  const reconnectAnchorRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!restoring) {
+      reconnectAnchorRef.current = null;
+      setReconnectTimedOut(false);
+      return;
+    }
+    reconnectAnchorRef.current ??= Date.now();
+    const remaining = Math.max(
+      0,
+      RECONNECT_TIMEOUT_MS - (Date.now() - reconnectAnchorRef.current),
+    );
+    const timer = window.setTimeout(() => setReconnectTimedOut(true), remaining);
+    return () => window.clearTimeout(timer);
+  }, [restoring]);
+  // 显示条件：status === "reconnecting" 且本地计时 >240s（pending 不显示入口）。
+  const reconnectTimedOutBanner = status === "reconnecting" && reconnectTimedOut;
+
   // ── gap-fix（FR-07 / FR-08）：whoLine 注入 + 历史 usage 回填（渲染时派生）──
   // agentName：AgentRun 不存 runtime 展示名，按 config_snapshot.agent_name →
   // runtime 别名/名称 → 引擎 label 链兜底；快照缺键如实显示，不编造。
@@ -793,11 +844,20 @@ function SessionPanel({
       await qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
       onSessionListRefresh?.();
     } catch (err) {
-      notify.error(err, "重新开启失败");
+      // task-08（FR-09）：reopen 409 先查本页中文映射表，命中不透传后端英文
+      // 原文（notify.error 传 Error 才会被 errMessage 取出 message）。
+      const apiErr = err as ApiError;
+      const zh =
+        apiErr instanceof ApiError ? REOPEN_ERROR_ZH[apiErr.code] : undefined;
+      if (zh) {
+        notify.error(new Error(zh));
+      } else {
+        notify.error(err, "重新开启失败");
+      }
     } finally {
       setReopening(false);
     }
-  }, [sessionId, qc, onSessionListRefresh]);
+  }, [sessionId, qc, onSessionListRefresh, notify]);
 
   const handleResend = useCallback(
     async (prompt: string) => {
@@ -1052,11 +1112,15 @@ function SessionPanel({
           </span>
         </div>
       )}
-      {/* 已结束/失败横幅 + 重新开启（原型 .ended-banner） */}
-      {ended && (
+      {/* 已结束/失败横幅 + 重新开启（原型 .ended-banner）；task-08：reconnecting
+          本地计时 >240s（DS-5）复用同位置同款入口，超时场景文案区分，onClick 与
+          ended 同一 handleReopen（不复制回调）。 */}
+      {(ended || reconnectTimedOutBanner) && (
         <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-5 py-2 text-xs text-muted-foreground">
           <span>
-            会话已{session.status === "failed" ? "失败" : "结束"} —— 可浏览历史消息
+            {ended
+              ? `会话已${session.status === "failed" ? "失败" : "结束"} —— 可浏览历史消息`
+              : "会话恢复超时 —— 可重新开启，或等待自动恢复"}
           </span>
           <Button size="small" loading={reopening} onClick={() => void handleReopen()}>
             重新开启

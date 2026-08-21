@@ -354,6 +354,27 @@ interface ClientLike {
    */
   notifySessionReady(sessionId: string): Promise<void>;
   /**
+   * task-06（session-reopen-resume / DS-3 / FR-03）：reopen 恢复成功后向
+   * backend 确认 reconnecting → active。可选方法（? 有 markOffline 先例）：
+   * reopen 路径经 _routeSessionResume 调用，opts 显式透传 payload 的
+   * leaseId/runtimeId（不依赖 recover 链路的 _recoveryRuntimeBySession 映射）。
+   * 与 hub-client.ts 实现签名对齐。
+   */
+  confirmReconnected?(
+    sessionId: string,
+    opts?: { leaseId?: string; runtimeId?: string },
+  ): Promise<void>;
+  /**
+   * task-06（session-reopen-resume / DS-3 / FR-04）：reopen 恢复失败（含
+   * SessionAlreadyExistsError）后向 backend 写 reconnecting → failed。
+   * opts 语义同 confirmReconnected。与 hub-client.ts 实现签名对齐。
+   */
+  markRecoveryFailed?(
+    sessionId: string,
+    reason?: string,
+    opts?: { leaseId?: string; runtimeId?: string },
+  ): Promise<void>;
+  /**
    * task-06（D-003@v1 tar 模式 pull）：GET spec bundle（tar Buffer）。
    * 与 hub-client.ts:694 实现对齐。interactive 路径经 pullSpecBundle 调用。
    */
@@ -2953,17 +2974,22 @@ export class Daemon {
    * 与 INJECT/INTERRUPT/END 不同：resume 时目标 session 尚未在内存 SessionStore
    *（已 end 或 daemon 进程重启），用 backend 下发的 agent_session_id 调
    * SessionManager.restoreAndReconnect（driver.start({resume}) 跨进程还原 SDK 上下文，
-   * spike D3）→ 随后 markReconnected 切 active → backend 收 confirm 切 status=active。
+   * spike D3）→ 随后 markReconnected 切 active → confirmReconnected 通知 backend
+   * 收 confirm 切 status=active（task-06 DS-3，携 payload 的 leaseId/runtimeId）。
    *
    * 字段名 snake/camel 双写归一化（与 SESSION_INJECT 同风格，ql-20260616-006）：
    * backend 发 snake_case（task-07），daemon 入口映射到 PersistedSessionRecord
    *（camelCase），避免字段名漂移导致丢 resume。
    *
-   * 边界（task-08.md AC-05）：
+   * 边界（task-08.md AC-05 + task-06 DS-3）：
    *   - payload 缺 session_id / agent_session_id → warn 丢弃，不 resume；
-   *   - restoreAndReconnect 抛错（provider≠claude / session 已存在 / driver.start 失败）
-   *     → 由上层 _handleWsMessage 的 void Promise catch 记 error，不崩主循环；
-   *     restoreAndReconnect 内部已收敛 driver.start 抛错（onSessionEnd(failed)）。
+   *   - restoreAndReconnect 抛错（provider 不支持 / SessionAlreadyExistsError
+   *     在 session-manager 内部 try 前直接 throw / driver.start 失败）或
+   *     markReconnected 抛错 → 本方法内 catch 收敛（记 error + best-effort 调
+   *     markRecoveryFailed 让 backend 立即置 failed），不再向上抛（与
+   *     _routeProviderConfigChanged catch 收敛风格一致）；
+   *   - confirmReconnected / markRecoveryFailed 自身失败仅 warn（best-effort：
+   *     不回滚本地已恢复状态，backend 180s sweeper 兜底收敛）。
    */
   private async _routeSessionResume(
     raw: Record<string, unknown>,
@@ -2977,6 +3003,12 @@ export class Daemon {
       (raw.session_id as string | undefined) ?? (raw.sessionId as string | undefined) ?? '';
     const leaseId =
       (raw.lease_id as string | undefined) ?? (raw.leaseId as string | undefined) ?? '';
+    // task-06（DS-3 / F1）：runtimeId 取自 SESSION_RESUME payload（protocol.ts:114
+    // payload 已含 runtime_id；snake/camel 双写同款 ql-20260616-006）。reopen 路径
+    // 唯一 runtimeId 来源——不写也不读 recover 链路的 _recoveryRuntimeBySession
+    // 映射（映射由 recoverSession 写入，reopen 不经 recover）。
+    const runtimeId =
+      (raw.runtime_id as string | undefined) ?? (raw.runtimeId as string | undefined) ?? '';
     const agentSessionId =
       (raw.agent_session_id as string | undefined) ??
       (raw.agentSessionId as string | undefined) ??
@@ -3017,18 +3049,55 @@ export class Daemon {
       lastActiveAt: Date.now(),
     };
     // restoreAndReconnect 内部 new InputQueue + driver.start({resume}) + fire
-    // consume 协程；成功返回后调 markReconnected 切 active（resume 是 daemon 主动
-    // 触发的 reopen，无需 backend 二次 confirm）。
-    await this._sessionManager!.restoreAndReconnect(record);
-    await this._sessionManager!.markReconnected(sessionId);
+    // consume 协程；成功返回后调 markReconnected 切 active。task-06（DS-3）：
+    // 本地恢复与 backend 状态翻转是两步——daemon 必须向 backend confirm
+    //（reconnecting → active）才算闭环；失败（含 SessionAlreadyExistsError
+    // 在 session-manager 内部 try 前抛出）则 markRecoveryFailed 置 failed。
+    try {
+      await this._sessionManager!.restoreAndReconnect(record);
+      await this._sessionManager!.markReconnected(sessionId);
+    } catch (e) {
+      this._logger.error('session_resume_restore_failed', {
+        session_id: sessionId,
+        lease_id: leaseId,
+        error: e,
+      });
+      // best-effort：立即向 backend 写 reconnecting → failed（不等 sweeper 兜底）。
+      // 自身失败（HTTP 抛错）仅 warn 不抛，与成功路径 confirm 同语义。
+      try {
+        await this._client.markRecoveryFailed?.(sessionId, String(e), {
+          leaseId,
+          runtimeId,
+        });
+      } catch (notifyErr) {
+        this._logger.warn('session_resume_mark_recovery_failed_call_failed', {
+          session_id: sessionId,
+          lease_id: leaseId,
+          error: notifyErr,
+        });
+      }
+      return;
+    }
     this._logger.info('session_resume_ok', { session_id: sessionId, lease_id: leaseId });
+    // task-06（DS-3 / FR-03）：恢复成功向 backend confirm（reconnecting → active），
+    // 显式携 payload 的 runtimeId（F1：不依赖 recover 映射）与 leaseId（供 backend
+    // 防陈旧确认误翻）。best-effort：失败仅 warn——本地已恢复 active 不回滚，
+    // backend 180s sweeper 兜底收敛（DS-6）。
+    try {
+      await this._client.confirmReconnected?.(sessionId, { leaseId, runtimeId });
+    } catch (e) {
+      this._logger.warn('session_resume_confirm_reconnected_failed', {
+        session_id: sessionId,
+        lease_id: leaseId,
+        error: e,
+      });
+    }
     // task-03（design Phase 1 / FR-01 / gap-1 修正）：recover 成功路径双覆盖——daemon
     // 重启 recover 重建 session 完成（restoreAndReconnect + markReconnected 切回 active）
     // 后上报 session ready，与 fresh create（task-02 _startInteractiveSession）双覆盖，
     // 避免 recover 后 inject 等 ready 超时降级 fallback。best-effort：notifySessionReady
-    // 自身失败 warn 不抛（hub-client.ts 实现），调用点无需 try/catch；recover 失败
-    //（restoreAndReconnect 抛错 / markReconnected 抛错）在上层 _handleWsMessage 的 void
-    // Promise catch 收敛，不会走到本行，故仅成功路径上报。
+    // 自身失败 warn 不抛（hub-client.ts 实现），调用点无需 try/catch；恢复失败已在
+    // 上方 catch 分支 return，不会走到本行，故仅成功路径上报。
     await this._client.notifySessionReady(sessionId);
   }
 

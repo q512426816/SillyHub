@@ -955,3 +955,110 @@ class TestReopenCodexSession:
             svc = DaemonService(db_session)
             with pytest.raises(DaemonOffline):
                 await svc.reopen_session(sess.id, uid)
+
+
+# ── DS-4（2026-08-21-session-reopen-resume）：confirm/mark-failed 可选 lease_id ──
+
+
+class TestRecoveryLeaseGuard:
+    """DS-4：可选 lease_id 陈旧确认防误翻 + 既有翻转语义守门（service 层）。
+
+    端点层（SessionRuntimeRequest 透传）见 test_session_reopen.py
+    TestReopenConfirmLinkage；无 lease_id 的 confirm 向后兼容由
+    test_session_readiness.py 既有用例守门。
+    """
+
+    @pytest.mark.asyncio
+    async def test_reconnecting_retry_window_constant(self) -> None:
+        """DS-4/DS-5：RECONNECTING_RETRY_WINDOW_SEC=180 唯一落点可 import。"""
+        from app.modules.daemon.session.service import RECONNECTING_RETRY_WINDOW_SEC
+
+        assert isinstance(RECONNECTING_RETRY_WINDOW_SEC, int)
+        assert RECONNECTING_RETRY_WINDOW_SEC == 180
+
+    @pytest.mark.asyncio
+    async def test_mark_failed_reconnecting_without_lease_flips_failed(
+        self, db_session, mocked_redis
+    ) -> None:
+        """向后兼容：不带 lease_id → reconnecting → failed（recover 链路现状）。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, _lease = await _make_ended_session(db_session, uid, rt.id, status="reconnecting")
+
+        svc = DaemonService(db_session)
+        result = await svc.mark_session_recovery_failed(sess.id, runtime_id=rt.id)
+
+        assert result == "failed"
+        status_row = (
+            await db_session.execute(select(AgentSession.status).where(AgentSession.id == sess.id))
+        ).scalar_one()
+        assert status_row == "failed"
+
+    @pytest.mark.asyncio
+    async def test_mark_failed_active_without_lease_still_flips_failed(
+        self, db_session, mocked_redis
+    ) -> None:
+        """守门（禁止收窄）：无 lease_id 时保留「非 ended/failed → failed」翻转。
+
+        daemon.ts markRecoveredSessionFailed async-fail 桥接在 confirm 翻
+        active 后仍依赖 active→failed 收敛（DS-4 复审 gap 明文保留）。
+        """
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, _lease = await _make_ended_session(db_session, uid, rt.id, status="active")
+
+        svc = DaemonService(db_session)
+        result = await svc.mark_session_recovery_failed(sess.id, runtime_id=rt.id)
+
+        assert result == "failed"
+        row = (
+            await db_session.execute(
+                select(AgentSession.status, AgentSession.ended_at).where(AgentSession.id == sess.id)
+            )
+        ).one()
+        assert row.status == "failed"
+        assert row.ended_at is not None
+
+    @pytest.mark.asyncio
+    async def test_mark_failed_active_with_matching_lease_flips_failed(
+        self, db_session, mocked_redis
+    ) -> None:
+        """active + 匹配当前 lease 的 lease_id → 照常翻 failed（桥接 + 防误翻双持）。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, lease = await _make_ended_session(db_session, uid, rt.id, status="active")
+
+        svc = DaemonService(db_session)
+        result = await svc.mark_session_recovery_failed(
+            sess.id, runtime_id=rt.id, lease_id=lease.id
+        )
+
+        assert result == "failed"
+        status_row = (
+            await db_session.execute(select(AgentSession.status).where(AgentSession.id == sess.id))
+        ).scalar_one()
+        assert status_row == "failed"
+
+    @pytest.mark.asyncio
+    async def test_mark_failed_active_with_stale_lease_skips(
+        self, db_session, mocked_redis
+    ) -> None:
+        """active + 陈旧 lease_id → 幂等跳过：返回当前状态、不翻转、不报错。
+
+        陈旧失败确认不得误杀已被第二次 reopen 重新激活的会话。
+        """
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, _lease = await _make_ended_session(db_session, uid, rt.id, status="active")
+        stale_lease_id = uuid.uuid4()  # 与 session.lease_id 不匹配
+
+        svc = DaemonService(db_session)
+        result = await svc.mark_session_recovery_failed(
+            sess.id, runtime_id=rt.id, lease_id=stale_lease_id
+        )
+
+        assert result == "active"
+        status_row = (
+            await db_session.execute(select(AgentSession.status).where(AgentSession.id == sess.id))
+        ).scalar_one()
+        assert status_row == "active"

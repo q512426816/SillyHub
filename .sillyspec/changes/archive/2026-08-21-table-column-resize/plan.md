@@ -16,10 +16,14 @@ plan_level: light
 - frontend/src/app/globals.css（手柄样式）
 - frontend/src/components/layout/use-resizable-columns.test.tsx（新增 5 用例）
 
-## Tasks
-- task-01（FR-01, D-501/502@v2）
-- task-02（FR-02/03/04, D-501~503）
-- task-03（全 FR 验收）
+## Wave 1（hook+样式，无依赖）
+- task-01
+
+## Wave 2（接入+兜底，依赖 W1）
+- task-02
+
+## Wave 3（测试验收，依赖 W2）
+- task-03
 
 ## 验收
 - number width 列手柄渲染/拖拽改宽（min 60）/拖中禁选中；string width 与无 width 列无手柄

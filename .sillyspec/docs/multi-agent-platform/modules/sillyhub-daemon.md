@@ -21,6 +21,7 @@ created_at: 2026-06-24T01:16:42
 - **消息协议**：`src/protocol.ts` 定义 WS 消息集合 `MSG` 与 payload（SessionInject、SessionControl、PermissionRequest/Response 等）。
 - **Agent 接入**：`src/adapters/`（json-rpc/jsonl/ndjson/stream-json/text/protocol-adapter）适配多种 Agent 输出流；`src/interactive/`（claude-sdk-driver、session-manager、session-store-persistence、permission-resolver、input-queue）支撑交互式会话。
 - **模型错误归类**：`src/model-error/`（types + classifier）把 claude turn 失败信号（is_error/resultText/api_retry.error/assistant stdout/stderr）按关键词归类成结构化 ModelError（8 类，429 quota 先于 rate）。stream-json adapter 在 result is_error=true 时产出并缓存；session-manager turn 收尾近源 classify 后随 notifyRunResult 回传（仅 claude 落地，D-001 扩展点）。
+- **SESSION_RESUME 恢复双向确认**（2026-08-21-session-reopen-resume）：`_routeSessionResume` 在恢复成功后调 `confirmReconnected`、失败时（`restoreAndReconnect` 抛错 + `SessionAlreadyExistsError` try 前分支）调 `markRecoveryFailed`，两路均 best-effort（失败仅 warn 不阻断）；hub-client 两方法新增可选 `opts: {leaseId?, runtimeId?}`——`leaseId` 显式透传 backend 做陈旧确认防护（lease 不匹配幂等跳过），`runtimeId` 从 SESSION_RESUME payload 显式供给（F1，不依赖仅 recover 链路填充的内存映射，`opts?.runtimeId ??` 映射回退）。旧 backend schema 忽略多余 `lease_id` 字段，向后兼容。
 
 ## 关键逻辑
 
