@@ -21,7 +21,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_deps import get_current_user
+from app.core.auth_deps import get_current_principal, get_current_user
 from app.core.db import get_session
 from app.core.errors import AppError
 from app.core.logging import get_logger
@@ -109,7 +109,10 @@ async def get_attachment_content(
     attachment_id: uuid.UUID,
     session: SessionDep,
     storage: Annotated[SessionAttachmentStorage, Depends(_make_storage)],
-    current_user: Annotated[User, Depends(get_current_user)],
+    # ql-20260821-003：双通道鉴权——浏览器走 Bearer JWT；daemon 回拉/落盘走
+    # X-API-Key（daemon 注册密钥=用户级 ApiKey，get_current_principal 双路复用）。
+    # 原仅 get_current_user 导致 daemon 下载 401 → 附件落盘恒失败。
+    current_user: Annotated[User, Depends(get_current_principal)],
     if_none_match: str | None = None,
 ) -> Response:
     """流式回附件字节（历史回显/预览/daemon 回拉；FR-6）。
