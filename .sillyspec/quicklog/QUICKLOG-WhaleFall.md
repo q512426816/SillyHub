@@ -146,3 +146,13 @@
 根因：占位轮 prompt 纯文本无标记行
 方案：合成标记行进 displayPrompt + resend 剥离
 结果：1783 全绿+build 过+部署复验
+
+## ql-20260821-003-1cb1 | 2026-08-21 11:26:37 | 发图后 daemon 下载恒 401 图片无法给智能体
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/session_attachment/router.py（content 端点 get_current_user → get_current_principal 双通道鉴权）
+需求：发图后 daemon 下载恒 401 图片无法给智能体
+根因：content 端点 get_current_user 仅认 JWT；daemon 走 X-API-Key（config-63767aa5）
+方案：改 get_current_principal 双通道；归属校验不变
+结果：daemon key 实测 200 全量字节；端到端 agent 真实读出图内容；已部署提交
