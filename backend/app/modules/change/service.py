@@ -1465,8 +1465,11 @@ class ChangeService:
         Change 2026-08-11-change-progress-projection task-08：read-only 等值 join
         ``platform_change_progress``（按 ``(change.workspace_id, change.change_key)`` 复合键），
         命中且 ``latest_progress`` 解析出 ``current_stage`` 则覆盖 ChangeRead.current_stage
-        （工具上行权威值），否则保留 change 现有值（D-003 fallback）。不投 status（D-004@v2）、
-        不写 changes 表（D-002 read-only）。
+        （工具上行权威值），否则保留 change 现有值（D-003 fallback）。不写 changes 表
+        （D-002 read-only）。2026-08-21 quick：D-004@v2"不投 status"收窄为仅终态——
+        ``changes[0].status == "archived"``（CLI ``unregisterChange`` 上行）时读时覆盖
+        status/current_stage='archived'（与平台内 complete_stage 终态同形，D-007）；
+        其余 status 值（active/in_progress）仍不投。
 
         2026-08-15-change-step-visibility task-01（design §5 Phase 1.3 / Grill #11）：同一次
         join 命中时额外提取 steps → ``read.step_progress``（摘要）+ ``read.steps``（明细）；
@@ -1488,6 +1491,13 @@ class ChangeService:
         if stage_info is not None:
             # 仅投影 current_stage（NG-03：详情 READ 不改 pending_review，恒 None）。
             change_read.current_stage = stage_info[0]
+            # 终态投影（2026-08-21 quick）：CLI 归档推送 status='archived' 时读时覆盖
+            # status/current_stage='archived'，与平台内 complete_stage 终态（D-007，
+            # _resolve_stage_completion 把 archive 完成映射 ('archived', None)）同形；
+            # 不写 changes 表（D-002 read-only 语义不变）。
+            if self._extract_change_status(stage_info[2]) == "archived":
+                change_read.status = "archived"
+                change_read.current_stage = "archived"
             summary, timeline = self._extract_step_progress(stage_info[2])
             change_read.step_progress = summary
             if timeline is not None:
@@ -1535,9 +1545,18 @@ class ChangeService:
             if stage_info is not None:
                 stage, completed, latest_progress = stage_info
                 summary.current_stage = stage
-                # task-01（D-008）：pending_review 与 current_stage 同源（latest_progress
-                # 镜像），复用 _map 纯函数（projection.py staticmethod，不读 sillyspec.db）。
-                summary.pending_review = StageProjectionService._map(stage, completed)
+                # 终态投影（2026-08-21 quick，与 enrich_with_workspace_ids 同范式）：
+                # CLI 归档推送 status='archived' → status/current_stage 读时覆盖
+                # 'archived'，pending_review 归 None（已归档不可能待审，防
+                # current_stage='verify'+completed 的历史推送误报 HUMAN_TEST）。
+                if self._extract_change_status(latest_progress) == "archived":
+                    summary.status = "archived"
+                    summary.current_stage = "archived"
+                    summary.pending_review = None
+                else:
+                    # task-01（D-008）：pending_review 与 current_stage 同源（latest_progress
+                    # 镜像），复用 _map 纯函数（projection.py staticmethod，不读 sillyspec.db）。
+                    summary.pending_review = StageProjectionService._map(stage, completed)
                 # 2026-08-15-change-step-visibility task-01：列表只带 step 摘要
                 # （~200B/行，R-02），明细随 ChangeRead.steps（enrich_with_workspace_ids）。
                 # Phase 2.4（D-004@v1）：明细 output 已全量透传，摘要 current_step_desc
@@ -1894,6 +1913,27 @@ class ChangeService:
             return None
         stage = first.get("current_stage")
         return stage if isinstance(stage, str) else None
+
+    @staticmethod
+    def _extract_change_status(latest_progress: dict | None) -> str | None:
+        """从 ``latest_progress.changes[0].status`` 解析 CLI 上行的变更状态。
+
+        与 ``_extract_current_stage`` 同源同范式（NG-6 不强类型化）：结构缺失/类型
+        异常一律返 None（调用方 fallback，不抛）。值域：CLI ``unregisterChange``
+        写 ``"archived"``（归档终态）、正常态 ``"active"``；平台自写
+        ``"in_progress"``（service.py:2205/2223）。读侧仅消费 ``"archived"``
+        做终态投影（2026-08-21 quick：CLI 归档变更与平台内归档同形渲染）。
+        """
+        if not isinstance(latest_progress, dict):
+            return None
+        changes = latest_progress.get("changes")
+        if not isinstance(changes, list) or not changes:
+            return None
+        first = changes[0]
+        if not isinstance(first, dict):
+            return None
+        value = first.get("status")
+        return value if isinstance(value, str) else None
 
     @staticmethod
     def _extract_completed_stages(latest_progress: dict | None) -> set[str]:

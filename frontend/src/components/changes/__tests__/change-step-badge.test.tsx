@@ -96,6 +96,11 @@ describe("ChangeStepBadge", () => {
     expect(screen.getByText("mystery-stage")).toBeInTheDocument();
   });
 
+  it("stage=archived（CLI 归档终态投影）：显示「已归档」中文标签，不裸显英文", () => {
+    render(<ChangeStepBadge stage="archived" stepProgress={null} />);
+    expect(screen.getByText("已归档")).toBeInTheDocument();
+  });
+
   it("降级：stepProgress null → 只渲染 stage 主行，无摘要副行", () => {
     const { container } = render(
       <ChangeStepBadge stage="execute" stepProgress={null} />,

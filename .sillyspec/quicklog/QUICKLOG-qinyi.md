@@ -472,3 +472,15 @@
 根因：无，纯仓库配置——.zcode 为 ZCode CLI 本地工作区状态（skills 缓存/会话计划），非项目代码，此前以未跟踪文件滞留工作区
 方案：.gitignore IDE 区块增 .zcode/ 规则带中文注释说明用途；顺手清理上轮 rebase 遗漏的 sessions/page.tsx.orig 补丁备份文件
 结果：git check-ignore -v 验证 .zcode/plans/ 命中 .gitignore:5 规则生效；git status 仅剩本次 .gitignore 与 QUICKLOG 两处变更，无测试面（纯配置）
+
+## ql-20260821-019-d168 | 2026-08-21 14:40:14 | 修复 table-column-resize 归档进度平台显示丢失（终态渲染）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/change/service.py（新增 _extract_change_status + enrich 两入口 archived 终态读时覆盖）
+- backend/app/modules/change/tests/test_enrich_projection.py（新增 5 个终态投影测试）
+- frontend/src/components/changes/change-step-badge.tsx（STAGE_LABELS/STAGE_KIND 补 archived）
+需求：修复 table-column-resize 归档进度平台显示丢失（终态渲染）
+根因：CLI 归档补记只回填 status=archived，平台读侧刻意不消费 status（D-004@v2），已归档变更渲染成停在执行+归档0/5
+方案：complete-stage archive 补 5 步 completed+platform sync 推送；后端读侧投影 archived 终态覆盖 status/current_stage（D-004@v2 收窄为仅终态投 status）；前端 badge 补 archived 映射
+结果：后端 30+393 passed，前端 badge 13 passed；Docker 重建后浏览器验证已归档徽标+归档 5/5+历史归档批量生效

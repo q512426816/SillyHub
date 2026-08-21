@@ -7,6 +7,12 @@ Change 2026-08-11-change-progress-projection task-08 acceptance 覆盖：
 - 异常 latest_progress（缺 changes 键 / 类型错）→ 不崩，fallback 现有值。
 - 全程不写 changes 表（read-only），status 不被投影。
 
+2026-08-21 quick（归档终态渲染）：D-004@v2"不投 status"收窄为仅终态——
+``changes[0].status == "archived"``（CLI ``unregisterChange`` 上行）时读时覆盖
+ChangeRead/ChangeSummary 的 status + current_stage='archived'（与平台内
+complete_stage 终态同形，D-007），其余 status 值（active/in_progress）仍不投；
+read-only 语义不变（DTO 层覆盖，ORM/库表不动）。
+
 change/tests/conftest.py（task-08）注册 platform_change_progress + platform_sync_tokens 表，
 让 enrich join 在测试库可执行。
 
@@ -61,10 +67,10 @@ async def _make_change(
     return change
 
 
-def _progress_payload(stage: str) -> dict:
+def _progress_payload(stage: str, status: str = "in_progress") -> dict:
     return {
         "project": {"name": "demo"},
-        "changes": [{"name": "x", "current_stage": stage, "status": "in_progress"}],
+        "changes": [{"name": "x", "current_stage": stage, "status": status}],
         "stages": [],
         "steps": [],
         "batch_progress": [],
@@ -72,7 +78,9 @@ def _progress_payload(stage: str) -> dict:
     }
 
 
-def _progress_with_stages(stage: str, completed_stages: set[str]) -> dict:
+def _progress_with_stages(
+    stage: str, completed_stages: set[str], status: str = "in_progress"
+) -> dict:
     """带 stages 表行的 latest_progress（spike-01 实证：stages=顶层数组，元素字段 stage+status）。
 
     对齐 platform_sync serializeForSync 六表 + projection._read_stage_progress_sync 的
@@ -80,7 +88,7 @@ def _progress_with_stages(stage: str, completed_stages: set[str]) -> dict:
     """
     return {
         "project": {"name": "demo"},
-        "changes": [{"name": "x", "current_stage": stage, "status": "in_progress"}],
+        "changes": [{"name": "x", "current_stage": stage, "status": status}],
         "stages": [{"stage": s, "status": "completed"} for s in sorted(completed_stages)],
         "steps": [],
         "batch_progress": [],
@@ -206,10 +214,12 @@ async def test_enrich_malformed_latest_progress_falls_back(db_session: AsyncSess
 
 @pytest.mark.asyncio
 async def test_enrich_does_not_write_changes_table(db_session: AsyncSession) -> None:
-    """enrich read-only：不改 Change ORM 对象的 current_stage；status 不被投影（D-002 / D-004@v2）。
+    """enrich read-only：不改 Change ORM 对象的 current_stage；非终态 status 不被投影。
 
     enrich 返回独立 DTO（model_validate），不 mutate 传入的 Change ORM 对象、不写库。
     断言调用前后 change.current_stage / status 不变（投影只在返回的 DTO 层生效）。
+    payload 的 status='in_progress' 非终态 → DTO status 也不投影（D-004@v2 收窄后
+    仅 'archived' 终态投影，见本文件头部 2026-08-21 quick 说明）。
     """
     ws = await _make_workspace(db_session)
     change = await _make_change(db_session, ws.id, "c-readonly", stage="plan")
@@ -226,9 +236,108 @@ async def test_enrich_does_not_write_changes_table(db_session: AsyncSession) -> 
 
     read = await ChangeService(db_session).enrich_with_workspace_ids(change)
     assert read.current_stage == "execute"  # DTO 被投影覆盖
+    assert read.status == "active"  # 非 archived status 不投影（D-004@v2 收窄语义）
     # ORM 对象本身不被 enrich 改写（read-only，D-002）
     assert change.current_stage == "plan"
-    assert change.status == "active"  # status 不被投影（D-004@v2）
+    assert change.status == "active"
+
+
+# ── 2026-08-21 quick（归档终态渲染）：CLI 上行 status='archived' 的读侧终态投影 ──
+
+
+@pytest.mark.asyncio
+async def test_enrich_detail_archived_terminal_projection(db_session: AsyncSession) -> None:
+    """详情命中 status='archived'（CLI unregisterChange 上行）→ status/current_stage 读时
+    覆盖 'archived'，与平台内 complete_stage 终态（D-007）同形；ORM 不动（read-only）。
+    """
+    ws = await _make_workspace(db_session)
+    change = await _make_change(db_session, ws.id, "arch-detail", stage="execute")
+    await _make_progress_row(
+        db_session, ws.id, "arch-detail", _progress_payload("execute", status="archived")
+    )
+
+    read = await ChangeService(db_session).enrich_with_workspace_ids(change)
+    assert read.status == "archived"
+    assert read.current_stage == "archived"
+    # ORM 对象与库表不动（D-002 read-only：只投 DTO）
+    assert change.status == "active"
+    assert change.current_stage == "execute"
+
+
+@pytest.mark.asyncio
+async def test_enrich_list_archived_terminal_projection(db_session: AsyncSession) -> None:
+    """列表 enrich_summaries 同范式：status='archived' → summary.status/current_stage
+    覆盖 'archived'，pending_review 归 None（已归档不可能待审）。
+    """
+    ws = await _make_workspace(db_session)
+    change = await _make_change(db_session, ws.id, "arch-list", stage="execute")
+    await _make_progress_row(
+        db_session, ws.id, "arch-list", _progress_payload("execute", status="archived")
+    )
+
+    summaries = await ChangeService(db_session).enrich_summaries([change])
+    assert summaries[0].status == "archived"
+    assert summaries[0].current_stage == "archived"
+    assert summaries[0].pending_review is None
+
+
+@pytest.mark.asyncio
+async def test_enrich_list_archived_suppresses_stale_pending_review(
+    db_session: AsyncSession,
+) -> None:
+    """archived 终态压掉陈旧审核门：current_stage='verify'+verify completed 的归档推送
+    （正规 CLI 归档的典型形态，_map 本会算 HUMAN_TEST）→ pending_review 仍 None，
+    已归档变更不出现在"待我处理"。
+    """
+    ws = await _make_workspace(db_session)
+    change = await _make_change(db_session, ws.id, "arch-stale", stage="verify")
+    await _make_progress_row(
+        db_session,
+        ws.id,
+        "arch-stale",
+        _progress_with_stages("verify", {"verify"}, status="archived"),
+    )
+
+    summaries = await ChangeService(db_session).enrich_summaries([change])
+    assert summaries[0].status == "archived"
+    assert summaries[0].current_stage == "archived"
+    assert summaries[0].pending_review is None
+
+
+@pytest.mark.asyncio
+async def test_enrich_active_status_not_projected(db_session: AsyncSession) -> None:
+    """status='active'（CLI 正常态上行）→ 不触发终态投影，current_stage 照常覆盖、
+    status 保留 changes 表原值（D-004@v2 收窄：仅 'archived' 终态投影）。
+    """
+    ws = await _make_workspace(db_session)
+    change = await _make_change(db_session, ws.id, "act-keep", stage="plan")
+    await _make_progress_row(
+        db_session, ws.id, "act-keep", _progress_payload("execute", status="active")
+    )
+
+    read = await ChangeService(db_session).enrich_with_workspace_ids(change)
+    assert read.current_stage == "execute"
+    assert read.status == "active"
+
+
+@pytest.mark.asyncio
+async def test_extract_change_status_malformed_falls_back(db_session: AsyncSession) -> None:
+    """_extract_change_status 畸形 payload 表驱动：结构缺失/类型异常一律返 None 不抛
+    （对齐 _extract_current_stage 的防御范式；status 非 str 也返 None）。
+    """
+    svc = ChangeService(db_session)
+    malformed_payloads: list[dict[str, object] | None] = [
+        None,
+        {"no_changes_key": True},
+        {"changes": "not-a-list"},
+        {"changes": []},
+        {"changes": [None]},
+        {"changes": [{"no_status": True}]},
+        {"changes": [{"status": 123}]},
+    ]
+    for malformed in malformed_payloads:
+        assert svc._extract_change_status(malformed) is None
+    assert svc._extract_change_status({"changes": [{"status": "archived"}]}) == "archived"
 
 
 # ── task-01（2026-08-13-change-center-rework）：_extract_completed_stages +

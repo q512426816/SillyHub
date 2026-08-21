@@ -32,6 +32,9 @@ export const STAGE_KIND: Record<string, StatusKind> = {
   execute: "info",
   verify: "success",
   archive: "neutral",
+  // 2026-08-21 quick：CLI 归档变更读侧终态投影 current_stage='archived'
+  //（与平台内 complete_stage 终态同形），列表徽标降级为中性色。
+  archived: "neutral",
 };
 
 /** stage → 中文标签：主线五阶段复用 change-stage-header 的 WORKFLOW_STAGE_LABELS，
@@ -41,6 +44,7 @@ export const STAGE_LABELS: Record<string, string> = {
   draft: "草稿",
   scan: "扫描",
   quick: "快速任务",
+  archived: "已归档",
 };
 
 export interface ChangeStepBadgeProps {
