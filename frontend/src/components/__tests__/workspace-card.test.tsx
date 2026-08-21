@@ -111,23 +111,7 @@ describe("WorkspaceCard 结构 (ql-20260702)", () => {
     expect(screen.getByText(/张三/)).toBeInTheDocument();
   });
 
-  it("详情与关系为带正确 href 的链接", () => {
-    render(
-      <WorkspaceCard
-        workspace={mkWorkspace({ id: "ws-8" })}
-        onChanged={() => {}}
-        onEditAlias={() => {}}
-      />,
-    );
-    expect(screen.getByRole("link", { name: "详情" })).toHaveAttribute(
-      "href",
-      "/workspaces/ws-8",
-    );
-    expect(screen.getByRole("link", { name: "关系" })).toHaveAttribute(
-      "href",
-      "/workspaces/ws-8/components",
-    );
-  });
+  // ql-20260821-007：详情/关系按钮已删（整卡可点即详情入口），链接断言用例随之移除。
 
   // 遗留 1（daemon-entity-binding）：daemon_runtime_id=NULL 的新工作区，
   // 卡片按 daemon 实体展示绑定（hostname/display_alias + provider 徽标）。
@@ -239,11 +223,10 @@ describe("WorkspaceCard daemon 徽标 + 整卡点击 (task-07)", () => {
         onActivate={onActivate}
       />,
     );
-    // 点击 footer 内的「详情」链接 → 不触发卡片 onActivate
-    fireEvent.click(screen.getByRole("link", { name: "详情" }));
-    expect(onActivate).not.toHaveBeenCalled();
-    // 点击 footer 内「别名」按钮 → 同样不触发
+    // ql-20260821-007：详情链接已删，用别名/重新扫描验证 footer stopPropagation
     fireEvent.click(screen.getByRole("button", { name: "别名" }));
+    expect(onActivate).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "重新扫描" }));
     expect(onActivate).not.toHaveBeenCalled();
   });
 });
@@ -268,7 +251,7 @@ describe("WorkspaceCard 工作区类型徽标 (task-06)", () => {
     expect(badge).toBeInTheDocument();
     // 徽标与标题同处一行（名字行容器）。
     const heading = screen.getByRole("heading", { level: 3 });
-    expect(heading.parentElement).toContainElement(badge);
+    expect(heading.closest("header")).toContainElement(badge);
     // 灰阶兜底配色（区别于已知值的 -700 档）。
     expect(badge.className).toContain("text-zinc-500");
     expect(badge.className).toContain("shrink-0");

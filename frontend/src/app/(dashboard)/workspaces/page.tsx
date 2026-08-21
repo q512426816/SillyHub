@@ -3,10 +3,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { Input, Modal } from "antd";
+import { listLinkedProjects, type PpmProjectBrief } from "@/lib/workspace";
+import { Input, Modal, Select } from "antd";
 
 import { Button, buttonVariants } from "@/components/ui/button";
-import { PageContainer, PageHeader } from "@/components/layout";
+import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
+import { ErrorBanner } from "@/components/ui/error-banner";
+import { EmptyState } from "@/components/ui/empty-state";
+import { FolderGit2 } from "lucide-react";
 import { WorkspaceCard, type DaemonBadgeStatus } from "@/components/workspace-card";
 import { WorkspaceScanDialog } from "@/components/workspace-scan-dialog";
 import { ApiError } from "@/lib/api";
@@ -42,6 +46,8 @@ const PAGE_SIZE = 12;
 export default function WorkspacesPage() {
   const router = useRouter();
   const [items, setItems] = useState<Workspace[] | null>(null);
+  // ql-20260821-007：逐卡关联项目（并行拉取，失败静默空——展示性信息）
+  const [projectsByWs, setProjectsByWs] = useState<Map<string, PpmProjectBrief[]>>(new Map());
   const [runtimesById, setRuntimesById] = useState<Map<string, DaemonRuntimeRead>>(
     () => new Map(),
   );
@@ -116,8 +122,17 @@ export default function WorkspacesPage() {
           bindings.map((b) => [b.workspace_id, { daemon_id: b.daemon_id ?? null }]),
         ),
       );
+      // ql-20260821-007：卡片关联项目 tag（并行，单卡失败不拖累整页）
+      void Promise.all(
+        list.map((w) =>
+          listLinkedProjects(w.id).catch(() => [] as PpmProjectBrief[]),
+        ),
+      ).then((perWs) => {
+        setProjectsByWs(new Map(list.map((w, i) => [w.id, perWs[i]!])));
+      });
     } catch (err) {
       setItems([]);
+      setProjectsByWs(new Map());
       setTotal(0);
       setRuntimesById(new Map());
       setInstancesById(new Map());
@@ -209,25 +224,7 @@ export default function WorkspacesPage() {
         subtitle="选择一个工作区开始，或在右上角进入平台后台"
         actions={
           <>
-            {/* task-07 / D-001：后台旁路入口，任何人可不选工作区直接进（守卫 task-05 白名单放行） */}
-            <Link
-              href="/admin"
-              className={cn(
-                buttonVariants({ variant: "ghost", size: "sm" }),
-                "text-muted-foreground",
-              )}
-            >
-              平台管理
-            </Link>
-            <Link
-              href="/settings"
-              className={cn(
-                buttonVariants({ variant: "ghost", size: "sm" }),
-                "text-muted-foreground",
-              )}
-            >
-              系统设置
-            </Link>
+            {/* ql-20260821-007：平台管理/系统设置入口已删（用户反馈无用，顶部菜单另有入口）。 */}
             {!showDialog && (
               <Button size="sm" onClick={() => setShowDialog(true)}>
                 + 添加工作区
@@ -244,92 +241,103 @@ export default function WorkspacesPage() {
         />
       )}
 
-      {error && (
-        <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
-          {error}
-        </div>
-      )}
+      {error && <ErrorBanner message={error} />}
 
       {/* task-08 / FR-04 / FR-05：服务端筛选条 + 平台管理员人员搜索 */}
       {items !== null && (
-        <div className="flex flex-wrap items-center gap-2">
-          <input
+        // ql-20260821-007：筛选控件换 antd（原生 select 观感差，antd 主题统一）。
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card p-2 shadow-sm">
+          <Input
+            allowClear
             aria-label="搜索资源"
             placeholder="搜索别名/名称/slug/路径"
             value={query}
             onChange={(e) => updateFilter(setQuery)(e.target.value)}
-            className="h-8 min-w-[12rem] flex-1 rounded border bg-card px-2 text-xs"
+            className="min-w-[12rem] flex-1"
+            size="small"
           />
-          <select
+          <Select
             aria-label="筛选类型"
             value={typeFilter ?? ""}
-            onChange={(e) =>
+            onChange={(v) =>
               updateFilter(setTypeFilter)(
-                e.target.value === ""
+                v === ""
                   ? null
-                  : e.target.value === "unclassified"
+                  : v === "unclassified"
                     ? "unclassified"
-                    : (e.target.value as WorkspaceType),
+                    : (v as WorkspaceType),
               )
             }
-            className="h-8 rounded border bg-card px-2 text-xs"
-          >
-            <option value="">全部类型</option>
-            {WORKSPACE_TYPE_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-            <option value="unclassified">{UNCLASSIFIED_OPTION.label}</option>
-          </select>
-          <select
+            className="min-w-[7.5rem]"
+            size="small"
+            options={[
+              { value: "", label: "全部类型" },
+              ...WORKSPACE_TYPE_OPTIONS.map((o) => ({ value: o.value, label: o.label })),
+              { value: "unclassified", label: UNCLASSIFIED_OPTION.label },
+            ]}
+          />
+          <Select
             aria-label="筛选状态"
             value={statusFilter}
-            onChange={(e) => updateFilter(setStatusFilter)(e.target.value)}
-            className="h-8 rounded border bg-card px-2 text-xs"
-          >
-            <option value="">全部状态</option>
-            <option value="active">活跃</option>
-            <option value="archived">已归档</option>
-            <option value="deleted">已删除</option>
-          </select>
+            onChange={(v) => updateFilter(setStatusFilter)(v)}
+            className="min-w-[7rem]"
+            size="small"
+            options={[
+              { value: "", label: "全部状态" },
+              { value: "active", label: "活跃" },
+              { value: "archived", label: "已归档" },
+              { value: "deleted", label: "已删除" },
+            ]}
+          />
           {isPlatformAdmin ? (
-            <select
+            <Select
               aria-label="筛选人员"
               value={ownerUserId ?? ""}
-              onChange={(e) => updateFilter(setOwnerUserId)(e.target.value || null)}
-              className="h-8 rounded border bg-card px-2 text-xs"
-            >
-              <option value="">全部人员</option>
-              {userOptions.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.display_name ?? u.email ?? u.username}
-                </option>
-              ))}
-            </select>
+              onChange={(v) => updateFilter(setOwnerUserId)(v || null)}
+              className="min-w-[7.5rem]"
+              size="small"
+              options={[
+                { value: "", label: "全部人员" },
+                ...userOptions.map((u) => ({
+                  value: u.id,
+                  label: u.display_name ?? u.email ?? u.username,
+                }))
+              ]}
+            />
           ) : null}
         </div>
       )}
 
       {items === null ? (
-        <p className="py-8 text-center text-xs text-muted-foreground">加载中…</p>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label="加载中">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-44 rounded-lg border bg-card shadow-sm">
+              <div className="border-b px-4 py-3"><div className="sh-skeleton h-4 w-1/2" /></div>
+              <div className="space-y-2 p-4">
+                <div className="sh-skeleton h-3 w-3/4" />
+                <div className="sh-skeleton h-3 w-2/3" />
+                <div className="sh-skeleton h-3 w-1/2" />
+              </div>
+            </div>
+          ))}
+        </div>
       ) : items.length === 0 ? (
         // task-07 / D-004 / AC-3：空状态创建引导（虚线框 + 主色「创建工作区」按钮）。
-        <div className="flex flex-col items-center gap-2 rounded-md border border-dashed py-14 text-center">
-          <div className="text-4xl" aria-hidden>
-            📂
-          </div>
-          <p className="text-sm text-foreground">你还没有任何工作区</p>
-          <p className="text-xs text-muted-foreground">
-            创建一个工作区开始使用平台，绑定项目仓库后即可进入。
-          </p>
-          <Button size="sm" onClick={() => setShowDialog(true)} className="mt-1">
-            ＋ 创建工作区
-          </Button>
-        </div>
+        <SectionCard bodyPadding="p-0">
+          <EmptyState
+            icon={<FolderGit2 className="h-6 w-6" />}
+            title="你还没有任何工作区"
+            description="创建一个工作区开始使用平台，绑定项目仓库后即可进入。"
+            action={
+              <Button size="sm" onClick={() => setShowDialog(true)}>
+                ＋ 创建工作区
+              </Button>
+            }
+          />
+        </SectionCard>
       ) : (
         <>
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
             {items.map((w) => {
               // 遗留 1：优先按 daemon 实体展示（runtime 绑定下沉到 member binding）。
               const bindingDaemonId = bindingsByWs.get(w.id)?.daemon_id;
@@ -339,6 +347,7 @@ export default function WorkspacesPage() {
               return (
                 <WorkspaceCard
                   key={w.id}
+                  linkedProjects={projectsByWs.get(w.id) ?? []}
                   workspace={w}
                   /* task-11 / 2026-07-10-remove-server-local-workspace-mode：
                    * 平台统一 daemon-client 语义后，WorkspaceCard 的 runtime 维度

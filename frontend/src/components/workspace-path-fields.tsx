@@ -21,7 +21,7 @@ interface WorkspacePathFieldsProps {
   runtime?: DaemonRuntimeRead | null;
   /**
    * 遗留 1（daemon-entity-binding）：按 daemon 实体展示绑定信息。
-   * 绑定存 member binding 行，卡片优先传 daemon 实体，显示 hostname/display_alias + provider 徽标。
+   * 绑定存 member binding 行，卡片优先传 daemon 实体，显示 hostname/display_alias + provider 徽标（在线状态由卡片头 daemon 徽标承担，ql-20260821-007 去重）。
    * 传入时优先于 ``runtime`` 旧路径渲染。
    */
   daemon?: DaemonInstanceRead | null;
@@ -67,12 +67,6 @@ export function WorkspacePathFields({
               ))}
             </span>
           )}
-          <Badge
-            variant={daemon.status === "online" ? "success" : "outline"}
-            className="ml-1.5 align-middle text-[10px]"
-          >
-            {daemon.status === "online" ? "在线" : "离线"}
-          </Badge>
         </dd>
 
         <dt className="text-muted-foreground">客户端路径</dt>

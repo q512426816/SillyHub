@@ -1,5 +1,6 @@
 "use client";
 
+import { Modal } from "antd";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -89,16 +90,18 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
     }
   };
 
+  // ql-20260821-007：内嵌展开块改为 antd Modal 弹窗（用户指定），
+  // 表单内容/交互零改动，仅容器形态变化。
   return (
-    <div className="rounded-md border bg-card">
-      <header className="flex items-center justify-between border-b px-4 py-2.5">
-        <h3>添加工作区</h3>
-        <Button variant="ghost" size="sm" onClick={onCancel}>
-          取消
-        </Button>
-      </header>
-
-      <div className="space-y-4 p-4">
+    <Modal
+      open
+      title="添加工作区"
+      onCancel={onCancel}
+      footer={null}
+      width={520}
+      destroyOnHidden
+    >
+      <div className="space-y-4">
         <p className="text-[11px] text-muted-foreground">
           使用本机守护进程上的项目路径。
         </p>
@@ -256,6 +259,6 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
           </Button>
         </footer>
       </div>
-    </div>
+    </Modal>
   );
 }

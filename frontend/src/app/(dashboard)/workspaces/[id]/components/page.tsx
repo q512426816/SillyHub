@@ -27,19 +27,6 @@ interface Props {
   params: { id: string };
 }
 
-const NAV_ITEMS = [
-  { href: "changes", label: "变更中心" },
-  { href: "scan-docs", label: "扫描文档" },
-  { href: "components/topology", label: "拓扑图" },
-  { href: "runtime", label: "运行时" },
-  { href: "knowledge", label: "知识 & 日志" },
-  { href: "releases", label: "发布" },
-  { href: "approvals", label: "审批中心" },
-  { href: "audit", label: "审计日志" },
-  { href: "incidents", label: "事件" },
-  { href: "/settings", label: "设置", absolute: true },
-] as const;
-
 export default function ComponentsPage({ params }: Props) {
   const workspaceId = params.id;
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
@@ -95,19 +82,6 @@ export default function ComponentsPage({ params }: Props) {
             >
               ← 工作区
             </Link>
-            {NAV_ITEMS.map((item) => (
-              <Link
-                key={item.href}
-                href={
-                  "absolute" in item && item.absolute
-                    ? item.href
-                    : `/workspaces/${workspaceId}/${item.href}`
-                }
-                className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
-              >
-                {item.label}
-              </Link>
-            ))}
             <Input
               className="h-8 w-40 px-2.5 text-xs"
               placeholder="搜索组件..."

@@ -194,13 +194,7 @@ afterEach(() => {
 });
 
 describe("WorkspacesPage 选择器改造 (task-07)", () => {
-  it("D-001：顶部渲染「平台管理」「系统设置」旁路链接，href=/admin /settings", async () => {
-    renderPage(<WorkspacesPage />);
-    const adminLink = await screen.findByRole("link", { name: "平台管理" });
-    const settingsLink = screen.getByRole("link", { name: "系统设置" });
-    expect(adminLink).toHaveAttribute("href", "/admin");
-    expect(settingsLink).toHaveAttribute("href", "/settings");
-  });
+  // ql-20260821-007：平台管理/系统设置旁路链接已按用户反馈删除（顶部菜单另有入口），用例移除。
 
   it("D-004 / AC-3：无工作区时显示创建引导 + 「创建工作区」按钮（点击开扫描弹窗）", async () => {
     renderPage(<WorkspacesPage />);
