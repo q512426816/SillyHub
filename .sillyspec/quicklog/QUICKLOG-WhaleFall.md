@@ -122,3 +122,27 @@
 根因：daemon 完整 assistant message 先转发、override 撤回信号后异步 emit；装配器无 segmentId 的完整行 merge 进 partial 派生段，override 按 segmentId 连坐撤回把全文一并移除
 方案：text/thinking 段携带派生源 segId（仅 partial 带键）；merge 按派生源对齐——完整行只 merge 进普通段、partial 只续接同源派生段，完整行独立成段不被连坐
 结果：装配器 38/38、全量 166 文件 1777 测试全绿；tsc 零错误；部署后浏览器 E2E 复验长回复完整渲染 ✓。已暂存
+
+## ql-20260821-001-9238 | 2026-08-21 08:41:39 | 会话 reopen 409 NO_AGENT_SESSION——resume key 列生产链路从未写入的双修
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/run_sync/service.py（ql-20260821-001 回填点在 latest_session_id 写 run 之后）
+- backend/app/modules/daemon/session/service.py（_heal_agent_session_id_from_runs 新增 + reopen 前置检查改兜底）
+- backend/app/modules/daemon/tests/test_session_reopen_resume_key.py（新增 4 用例）
+需求：会话 reopen 409 NO_AGENT_SESSION——resume key 列生产链路从未写入的双修
+根因：SDK session id 只落 run 级列 AgentRun.session_id（消息流写入），session 级列 AgentSession.agent_session_id 恒 NULL，reopen 前置检查必拒；旧测试夹具直接写列掩盖缺口
+方案：submit_messages 定向 UPDATE 回填 session 级列（防并发终态互踩 + fork last-write-wins）；reopen_session 经 _heal_agent_session_id_from_runs 从最新非空 run session_id 兜底治愈存量会话，无 id 才 409（文案中文化）
+结果：新增 4 用例全过；相邻回归 138 过 + submit_messages 相关 62 过；ruff check 过；session/service.py format 差异系 2026-08-20 既有遗留未触碰
+
+## ql-20260821-002-cb75 | 2026-08-21 10:54:07 | 发送带附件消息自己气泡缺 chips
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/sessions/page.tsx（pendingAttachments 状态改 AttachmentRead[]；handleSend 合成标记行 displayPrompt 进占位轮；handleResend 剥离标记行）
+- frontend/src/components/daemon/session-input-bar.tsx（onAttachmentsChange 回传完整对象）
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（接线契约用例）
+需求：发送带附件消息自己气泡缺 chips
+根因：占位轮 prompt 纯文本无标记行
+方案：合成标记行进 displayPrompt + resend 剥离
+结果：1783 全绿+build 过+部署复验
