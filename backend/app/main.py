@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -94,6 +95,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # 启动事件循环堵塞看门狗（后台协程，每 100ms 自检）
     watchdog_task = start_event_loop_watchdog()
     log.info("monitoring.watchdog_started")
+    # 2026-08-21-mission-converge-patrol task-09 / design §2 §4：mission 巡检
+    # 常驻协程占位——下方 bootstrap 完成后才 create_task；先占 None 保证 bootstrap
+    # 期（DB 不可达等）抛错走 finally 时不会因未定义而掩盖原始异常。
+    patrol_task: asyncio.Task[None] | None = None
     try:
         # Bootstrap auth once the DB connection pool exists.
         from app.core.db import get_engine, get_session_factory
@@ -175,6 +180,20 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             init_storage_backend(settings)
         except Exception:
             log.exception("storage.init_failed")
+        # 2026-08-21-mission-converge-patrol task-09 / design §2（D-001 载体方案
+        # 最后一环）：bootstrap（含上方 orchestrator redispatch 块）完成后、mcp
+        # session_manager yield 前接线 mission 巡检常驻协程（patrol.py 的
+        # mission_patrol_loop）；enabled=False 零巡检协程（NFR-02 零回归边界）。
+        # 对齐 watchdog 常驻协程模式，但关停走 finally 的 cancel + await gather
+        # （design §4）而非 fire-and-forget——巡检轮内有 DB 写，须等取消落地。
+        if settings.mission_patrol_enabled:
+            from app.modules.agent.patrol import mission_patrol_loop
+
+            patrol_task = asyncio.create_task(mission_patrol_loop(), name="mission-patrol")
+            log.info(
+                "mission_patrol_started",
+                interval_seconds=settings.mission_patrol_interval_seconds,
+            )
         # 2026-08-06-public-mcp-server task-05 / spike-A 坑 2（P0）：MCP session
         # manager 必须在 app 服务期间常驻。streamable_http_app() 返回的子 app
         # 虽自带 lifespan=lambda app: self.session_manager.run()，但 Starlette
@@ -188,6 +207,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         log.info("app.shutdown")
         # 停止事件循环堵塞看门狗
         stop_event_loop_watchdog(watchdog_task)
+        # 2026-08-21-mission-converge-patrol task-09 / design §4：巡检协程关停——
+        # cancel 后 await gather 等取消落地（巡检轮内有 DB 写，不学 watchdog 的
+        # fire-and-forget）；enabled=False 时 patrol_task 为 None 直接跳过。
+        if patrol_task is not None:
+            patrol_task.cancel()
+            await asyncio.gather(patrol_task, return_exceptions=True)
         try:
             from app.modules.storage.factory import get_storage_backend
 

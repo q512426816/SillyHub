@@ -323,6 +323,34 @@ class Settings(BaseSettings):
         description="Container mount point that maps to host_path_prefix (e.g. /host-projects).",
     )
 
+    # ── Mission patrol (2026-08-21-mission-converge-patrol task-01) ─────
+    # mission 巡检循环（lifespan 常驻协程）的唯一配置来源（design §3 / FR-04）。
+    # 四项全部带默认值：存量部署零配置可启动；开关关闭时行为零变化（NFR-02）。
+    mission_patrol_enabled: bool = Field(
+        default=True,
+        description=(
+            "Mission 巡检总开关。False 时巡检循环不启动，"
+            "零行为变化（brownfield 零回归开关，NFR-02）。"
+        ),
+    )
+    mission_patrol_interval_seconds: int = Field(
+        default=60,
+        ge=10,
+        description="巡检轮间隔（秒）。默认 60s；下界 10s 防高频空转扫库。",
+    )
+    mission_patrol_zombie_after_minutes: int = Field(
+        default=60,
+        ge=5,
+        description="daemon 持续离线多久判定其 run 为僵尸（分钟）。默认 60min。",
+    )
+    mission_patrol_revive_window_minutes: int = Field(
+        default=30,
+        ge=5,
+        description=(
+            "僵尸复活窗口（分钟）：run 判死后窗口内 daemon 回线可复活，超窗不可逆收敛。默认 30min。"
+        ),
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

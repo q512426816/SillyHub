@@ -15,11 +15,13 @@ worker 由主 agent 通过 ``mcp_tools`` endpoint 动态 dispatch（不预先拆
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentMission, AgentRun
 from app.modules.agent.placement import NoOnlineDaemonError, RunPlacementService
@@ -35,6 +37,34 @@ _ORCHESTRATOR_ROLE = "orchestrator"
 # Worker Run 终态集合（mission.py:26 _FAILED + completed）。schedule_loop 三重收敛
 # 信号 1 用：所有 worker run（role != orchestrator）全终态 = 收敛条件之一。
 _WORKER_TERMINAL = ("completed", "failed", "killed")
+
+# 主 run 僵尸判死标记（2026-08-21-mission-converge-patrol design §2.3）：patrol 判死
+# （task-05）写 run.error_code + mission.constraints 时间戳；复活（task-06）清标记。
+# 全库新引入值——既有路径（no_online_daemon 等）不触发 schedule_loop 豁免分支。
+_ZOMBIE_ERROR_CODE = "orchestrator_zombie"
+_ZOMBIE_MARKED_AT_KEY = "zombie_marked_at"
+
+
+def _zombie_exemption_active(mission: AgentMission) -> bool:
+    """zombie 复活窗口是否未耗尽（task-08 豁免判定，D-006 纯 DB 时间窗）。
+
+    ``constraints.zombie_marked_at``（ISO 字符串，patrol 判死写入）距今 <
+    ``settings.mission_patrol_revive_window_minutes`` → True（信号 1 暂不收敛，等
+    patrol 复活）。缺失 / constraints 为 None / 非法 ISO / 无时区锚点 → False——
+    不猜时间，豁免不成立（对齐判死链路断链跳过语义），走原收敛逻辑。
+    """
+    raw = (mission.constraints or {}).get(_ZOMBIE_MARKED_AT_KEY)
+    if not raw:
+        return False
+    try:
+        marked_at = datetime.fromisoformat(str(raw))
+    except ValueError:
+        return False
+    if marked_at.tzinfo is None:
+        return False
+    revive_window = timedelta(minutes=get_settings().mission_patrol_revive_window_minutes)
+    return datetime.now(UTC) - marked_at < revive_window
+
 
 # 默认主 agent 配置（main_agent_config 缺省时兜底）。agent_type 必须是 daemon 已知
 # provider 名（"claude_code" 是 agent_type 不是 provider，placement.dispatch_to_daemon
@@ -427,6 +457,10 @@ class OrchestratorService:
            dispatch 已由 ``control.can_dispatch_worker`` 复用（D-008@v1，零重写），
            本方法只补「已超支 → 强制收尾」兜底。
 
+        信号 1 带 zombie 豁免（2026-08-21-mission-converge-patrol task-08，D-004
+        两阶段复活）：主 run 被判死（error_code=orchestrator_zombie）且复活窗口
+        未耗尽 → 信号 1 暂不收敛（return None 等 patrol 复活）；信号 3 不豁免。
+
         重要：``derive_status``（mission.py:29）把 mission 下**所有** AgentRun
         （含主 agent run 自己）算进状态。主 agent run 通常 long-lived running，
         若直接喂 derive_status 永远返回 ``running``——本方法只对 **worker runs**
@@ -501,6 +535,29 @@ class OrchestratorService:
                 mission_id=str(mission_id),
                 worker_terminal=all_workers_terminal,
                 forced_degraded=forced_degraded,
+            )
+            return None
+
+        # 信号 1 zombie 豁免（2026-08-21-mission-converge-patrol task-08，D-004/D-006）：
+        # 主 run 被 patrol 判死（error_code=orchestrator_zombie + constraints.
+        # zombie_marked_at，task-05 写入）且复活窗口未耗尽 → 信号 1 本次不收敛，
+        # 不强标 main_run 终态 / 不 merge worker 产物，等 patrol 职责③复活（daemon
+        # 恢复清 error_code 后豁免条件自然失谐）。只挡信号 1——forced_degraded
+        # （信号 3 预算触顶）是治理强收，优先级高于复活等待，不豁免（短路顺序
+        # 保证 forced_degraded 时豁免检查直接跳过）。判定纯 DB 时间窗（D-006），
+        # 不查 daemon 在线。
+        if (
+            all_workers_terminal
+            and not forced_degraded
+            and main_run.error_code == _ZOMBIE_ERROR_CODE
+            and _zombie_exemption_active(mission)
+        ):
+            log.info(
+                "orchestrator_schedule_loop_zombie_exemption",
+                mission_id=str(mission_id),
+                main_run_id=str(main_run.id),
+                zombie_marked_at=(mission.constraints or {}).get(_ZOMBIE_MARKED_AT_KEY),
+                revive_window_minutes=get_settings().mission_patrol_revive_window_minutes,
             )
             return None
 

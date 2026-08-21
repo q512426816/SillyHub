@@ -89,7 +89,7 @@
 - FE-P1-4（部分）：listProjectMissions 403 显式提示"仅项目经理可查看"（入口级门禁需产品决策，暂不做）。
 - 随附：`pnpm gen:types` 重新生成 openapi.json + api-types.ts（schema 校验变更同步）。
 
-**登记不做**（设计权衡/重构面大，后续变更处理）：BE-P2-1（并发闸）、BE-P2-3（converge 契约重构）、BE-P2-5（路径归属）、BE-P2-6（owner 语义）、BE-P2-7（事务边界）、BE-P2-8（广播收敛）、FE-P2-1（需定警告落库语义）、FE-P2-2/3/6/7、BE-P1-6 的"项目维度 mission 收敛兜底接线"（涉及 run_sync 回调契约改动，单独变更处理）。
+**登记不做**（设计权衡/重构面大，后续变更处理）：BE-P2-1（并发闸）、BE-P2-3（converge 契约重构）、BE-P2-5（路径归属）、BE-P2-6（owner 语义）、BE-P2-7（事务边界）、BE-P2-8（广播收敛）、FE-P2-1（需定警告落库语义）、FE-P2-2/3/6/7、BE-P1-6 的"项目维度 mission 收敛兜底接线"——**已落地**（change 2026-08-21-mission-converge-patrol：lifespan 巡检协程三职责 + 两阶段僵尸可复活，2026-08-21 完成）。
 
 ## 四、修复记录
 

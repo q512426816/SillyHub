@@ -17,12 +17,14 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agent.model import AgentRun
+from app.core.config import get_settings
+from app.modules.agent.model import AgentMission, AgentRun
 from app.modules.agent.orchestrator import (
     OrchestratorService,
     _resolve_main_agent_config,
@@ -68,6 +70,50 @@ async def _make_workspace(session: AsyncSession) -> uuid.UUID:
     session.add(ws)
     await session.commit()
     return ws_id
+
+
+async def _mark_main_run_zombie(
+    session: AsyncSession,
+    mission: AgentMission,
+    main_run: AgentRun,
+    *,
+    minutes_ago: float | None = None,
+) -> None:
+    """把 main_run 标成 patrol 判死后状态（failed + error_code=orchestrator_zombie，
+    design §2.3 判死语义，task-05 落地）；minutes_ago 非 None 时同步写
+    constraints.zombie_marked_at（距今 minutes_ago 分钟的 ISO 时间戳）。"""
+    main_run.status = "failed"
+    main_run.error_code = "orchestrator_zombie"
+    if minutes_ago is not None:
+        constraints = dict(mission.constraints or {})
+        constraints["zombie_marked_at"] = (
+            datetime.now(UTC) - timedelta(minutes=minutes_ago)
+        ).isoformat()
+        mission.constraints = constraints
+        session.add(mission)
+    session.add(main_run)
+    await session.commit()
+
+
+async def _converge_and_mark(session, run_id, glm_config=None):
+    """Stub converge——在 _fake_converge 基础上把 mission.converged_at 落库，供
+    豁免用例区分「真收敛 / 未收敛」（autouse 的 _fake_converge 不写库，
+    converged_at 恒 None，无法断言收敛副作用）。"""
+    run = await session.get(AgentRun, run_id)
+    if run is not None and run.mission_id is not None:
+        mission = await session.get(AgentMission, run.mission_id)
+        if mission is not None:
+            mission.converged_at = datetime.now(UTC)
+            session.add(mission)
+            await session.commit()
+    return "done"
+
+
+def _patch_converge_to_mark(monkeypatch: pytest.MonkeyPatch) -> None:
+    """覆盖 autouse 的 _fake_converge，改用会写 converged_at 的 _converge_and_mark。"""
+    import app.modules.agent.finalizer as _finalizer_mod
+
+    monkeypatch.setattr(_finalizer_mod, "converge_mission_for_completed_run", _converge_and_mark)
 
 
 class TestTeamMissionEntry:
@@ -414,6 +460,219 @@ class TestScheduleLoopConvergence:
         svc = OrchestratorService(db_session)
         result = await svc.schedule_loop(mission.id)
         assert result is None
+
+
+class TestScheduleLoopZombieExemption:
+    """task-08：schedule_loop 信号 1 zombie 豁免（D-004 两阶段复活 / D-006 纯 DB 时间窗）。
+
+    主 run error_code=orchestrator_zombie（patrol 判死写入，全库新值）+ 复活窗口
+    未耗尽 → 信号 1 不收敛（return None 等 patrol 复活）；窗口耗尽 / 标记缺失非法
+    / 非 zombie error_code → 原逻辑照常收敛；信号 3（预算触顶）是治理强收，
+    优先级高于复活等待，不豁免。
+    """
+
+    @pytest.mark.asyncio
+    async def test_zombie_within_window_signal1_exempted(self, db_session: AsyncSession) -> None:
+        """窗口内 zombie：worker 全 completed（信号 1 达成）但主 run 判死未满复活
+        窗口 → return None 不收敛——main_run 不被强标、mission.converged_at 仍空。"""
+        ws_id = await _make_workspace(db_session)
+        svc = OrchestratorService(db_session)
+        mission, main_run = await svc.team_mission_entry(
+            workspace_id=ws_id,
+            objective="团队目标",
+            created_by=uuid.uuid4(),
+            change_id=None,
+            constraints={"mode": "team"},
+            budget_usd=10.0,
+            worker_preset=None,
+            main_agent_config=None,
+        )
+        worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            provider="claude",
+            status="completed",
+            role="arch",
+            objective="扫描",
+            output_redacted="架构摘要",
+            total_cost_usd=0.3,
+        )
+        db_session.add(worker)
+        # marked_at = now - window/2：对任意合法 revive_window 配置都在窗口内
+        window = get_settings().mission_patrol_revive_window_minutes
+        await _mark_main_run_zombie(db_session, mission, main_run, minutes_ago=window / 2)
+
+        result = await svc.schedule_loop(mission.id)
+
+        assert result is None
+        await db_session.refresh(main_run)
+        assert main_run.status == "failed"  # 未被信号 1 强标 completed
+        assert main_run.error_code == "orchestrator_zombie"
+        mission_fresh = await db_session.get(AgentMission, mission.id)
+        assert mission_fresh.converged_at is None
+
+    @pytest.mark.asyncio
+    async def test_zombie_window_exhausted_converges(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """窗口耗尽：豁免到期自然解除，信号 1 原逻辑照常收敛（done + converged_at 落库）。"""
+        _patch_converge_to_mark(monkeypatch)
+        ws_id = await _make_workspace(db_session)
+        svc = OrchestratorService(db_session)
+        mission, main_run = await svc.team_mission_entry(
+            workspace_id=ws_id,
+            objective="团队目标",
+            created_by=uuid.uuid4(),
+            change_id=None,
+            constraints={"mode": "team"},
+            budget_usd=10.0,
+            worker_preset=None,
+            main_agent_config=None,
+        )
+        worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            provider="claude",
+            status="completed",
+            role="impl",
+            objective="实现",
+            output_redacted="实现摘要",
+            total_cost_usd=0.3,
+        )
+        db_session.add(worker)
+        # marked_at = now - (window + 5min)：窗口必然已耗尽
+        window = get_settings().mission_patrol_revive_window_minutes
+        await _mark_main_run_zombie(db_session, mission, main_run, minutes_ago=window + 5)
+
+        result = await svc.schedule_loop(mission.id)
+
+        assert result == "done"
+        mission_fresh = await db_session.get(AgentMission, mission.id)
+        assert mission_fresh.converged_at is not None
+
+    @pytest.mark.asyncio
+    async def test_zombie_window_budget_exceeded_still_forces_degraded(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """信号 3 不豁免：预算触顶强收优先级高于复活等待——主 run zombie 窗口内
+        仍 degraded 强收，烧钱 worker 被 kill。"""
+        _patch_converge_to_mark(monkeypatch)
+        ws_id = await _make_workspace(db_session)
+        svc = OrchestratorService(db_session)
+        mission, main_run = await svc.team_mission_entry(
+            workspace_id=ws_id,
+            objective="团队目标",
+            created_by=uuid.uuid4(),
+            change_id=None,
+            constraints={"mode": "team"},
+            budget_usd=1.0,  # 低预算
+            worker_preset=None,
+            main_agent_config=None,
+        )
+        worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            provider="claude",
+            status="running",
+            role="arch",
+            objective="扫描",
+            total_cost_usd=1.5,  # >= 1.0 触顶
+            output_redacted="架构摘要",
+        )
+        db_session.add(worker)
+        window = get_settings().mission_patrol_revive_window_minutes
+        await _mark_main_run_zombie(db_session, mission, main_run, minutes_ago=window / 2)
+
+        result = await svc.schedule_loop(mission.id)
+
+        assert result == "degraded"
+        await db_session.refresh(worker)
+        assert worker.status == "killed"
+        mission_fresh = await db_session.get(AgentMission, mission.id)
+        assert mission_fresh.converged_at is not None
+
+    @pytest.mark.asyncio
+    async def test_non_zombie_error_code_not_exempted(self, db_session: AsyncSession) -> None:
+        """error_code=no_online_daemon（既有值，非 zombie）→ 豁免不触发，信号 1
+        原逻辑照常收敛（既有调用方零回归）。"""
+        ws_id = await _make_workspace(db_session)
+        svc = OrchestratorService(db_session)
+        mission, main_run = await svc.team_mission_entry(
+            workspace_id=ws_id,
+            objective="团队目标",
+            created_by=uuid.uuid4(),
+            change_id=None,
+            constraints={"mode": "team"},
+            budget_usd=10.0,
+            worker_preset=None,
+            main_agent_config=None,
+        )
+        worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            provider="claude",
+            status="completed",
+            role="arch",
+            objective="扫描",
+            output_redacted="架构摘要",
+            total_cost_usd=0.3,
+        )
+        db_session.add(worker)
+        main_run.status = "pending"
+        main_run.error_code = "no_online_daemon"  # 既有 error_code 值
+        db_session.add(main_run)
+        await db_session.commit()
+
+        result = await svc.schedule_loop(mission.id)
+
+        assert result == "done"
+        await db_session.refresh(main_run)
+        assert main_run.status == "completed"  # 信号 1 照常强标（豁免未挡）
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "constraints",
+        [
+            {"mode": "team"},  # zombie_marked_at 缺失
+            {"mode": "team", "zombie_marked_at": "not-an-iso-timestamp"},  # 非法 ISO
+            None,  # constraints 为 None
+        ],
+        ids=["missing", "invalid-iso", "constraints-none"],
+    )
+    async def test_zombie_marked_at_missing_or_invalid_not_exempted(
+        self, db_session: AsyncSession, constraints: dict | None
+    ) -> None:
+        """zombie_marked_at 缺失 / 非法 ISO / constraints 为 None → 不猜时间，
+        豁免不成立，信号 1 原逻辑照常收敛。"""
+        ws_id = await _make_workspace(db_session)
+        svc = OrchestratorService(db_session)
+        mission, main_run = await svc.team_mission_entry(
+            workspace_id=ws_id,
+            objective="团队目标",
+            created_by=uuid.uuid4(),
+            change_id=None,
+            constraints=constraints,
+            budget_usd=10.0,
+            worker_preset=None,
+            main_agent_config=None,
+        )
+        worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            provider="claude",
+            status="completed",
+            role="arch",
+            objective="扫描",
+            output_redacted="架构摘要",
+            total_cost_usd=0.3,
+        )
+        db_session.add(worker)
+        # 只标 run 侧判死态（error_code=zombie），constraints 不动（参数即被测态）
+        await _mark_main_run_zombie(db_session, mission, main_run)
+
+        result = await svc.schedule_loop(mission.id)
+
+        assert result == "done"
 
 
 class TestOrchestratorPromptConstraint:
