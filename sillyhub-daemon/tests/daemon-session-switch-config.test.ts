@@ -480,10 +480,11 @@ describe('task-09 / FR-05 / D-012@v1: daemon SESSION_SWITCH_CONFIG WS handler �
     });
     await flushMicro();
 
-    // SESSION_INJECT → inject(sessionId, prompt, runId) 两次，不受 switch 串线。
+    // SESSION_INJECT → inject(sessionId, prompt, runId, attachments, downloadAttachment)
+    // 两次（multimodal-attachments 后固定 5 参，无附件时后两参 undefined），不受 switch 串线。
     expect(sm.inject).toHaveBeenCalledTimes(2);
-    expect(sm.inject).toHaveBeenNthCalledWith(1, SESSION_ID, '普通注入', 'run-inject-1');
-    expect(sm.inject).toHaveBeenNthCalledWith(2, SESSION_ID, '普通注入二', 'run-inject-2');
+    expect(sm.inject).toHaveBeenNthCalledWith(1, SESSION_ID, '普通注入', 'run-inject-1', undefined, undefined);
+    expect(sm.inject).toHaveBeenNthCalledWith(2, SESSION_ID, '普通注入二', 'run-inject-2', undefined, undefined);
     // SESSION_SWITCH_CONFIG → markPendingConfigSwitch 两次（覆盖写幂等由 task-08 保证），
     // 不触发 inject。
     expect(sm.markPendingConfigSwitch).toHaveBeenCalledTimes(2);

@@ -19,6 +19,7 @@ import type {
   SDKMessage,
   SDKResultMessage,
 } from '@anthropic-ai/claude-agent-sdk';
+import { winPath as P } from '../helpers.js';
 import { SessionManager } from '../../src/interactive/session-manager.js';
 import type {
   ClaudeSdkDriver,
@@ -67,7 +68,7 @@ const BASE_INPUT = {
   claimToken: 'claim-1',
   firstPrompt: 'hi',
   firstRunId: 'run-1',
-  cwd: 'C:\\work',
+  cwd: P('C:\\work'),
   provider: 'claude' as const,
   pathToClaudeCodeExecutable: 'C:\\bin\\claude.exe',
 };
@@ -254,7 +255,7 @@ describe('task-10: 主 agent MCP 按 profile.mcpRefs 子集过滤', () => {
       sessionId: 'sess-restore-profile',
       leaseId: 'lease-restore',
       agentSessionId: 'sdk-sess-1',
-      cwd: 'C:\\work',
+      cwd: P('C:\\work'),
       provider: 'claude',
       turnCount: 0,
       lastActiveAt: Date.now(),
@@ -286,7 +287,7 @@ describe('task-10: 主 agent MCP 按 profile.mcpRefs 子集过滤', () => {
       stage: 'orchestrator',
       mcpRefs: ['sillyhub-daemon'],
       skillRefs: ['sillyspec', 'custom-skill'],
-      effectiveAllowedRoots: ['C:\\work\\project1'],
+      effectiveAllowedRoots: [P('C:\\work\\project1')],
     });
 
     // 模拟 system/init 写 agentSessionId（snapshotPersistable 要求非空才输出）
@@ -298,7 +299,7 @@ describe('task-10: 主 agent MCP 按 profile.mcpRefs 子集过滤', () => {
     expect(records).toHaveLength(1);
     expect(records[0].mcpRefs).toEqual(['sillyhub-daemon']);
     expect(records[0].skillRefs).toEqual(['sillyspec', 'custom-skill']);
-    expect(records[0].effectiveAllowedRoots).toEqual(['C:\\work\\project1']);
+    expect(records[0].effectiveAllowedRoots).toEqual([P('C:\\work\\project1')]);
   });
 
   it('不带 profile 的 session snapshotPersistable 不输出 profile 字段（FR-15）', async () => {
@@ -362,13 +363,13 @@ describe('task-10: effectiveAllowedRoots 收紧写守卫（fallback 无 policyEn
 
   it('带 effectiveAllowedRoots → 写落 effective 内 allow', async () => {
     const { canUseTool } = await makeChatSession({
-      providerRoots: ['C:\\work'],
-      effectiveRoots: ['C:\\work\\project1'],
+      providerRoots: [P('C:\\work')],
+      effectiveRoots: [P('C:\\work\\project1')],
     });
     // 写落 effective 子目录内 → allow
     const res = await canUseTool(
       'Write',
-      { file_path: 'C:\\work\\project1\\a.txt' },
+      { file_path: P('C:\\work\\project1\\a.txt') },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'allow' });
@@ -376,13 +377,13 @@ describe('task-10: effectiveAllowedRoots 收紧写守卫（fallback 无 policyEn
 
   it('带 effectiveAllowedRoots → 写落 provider 内但 effective 外 deny（收紧）', async () => {
     const { canUseTool } = await makeChatSession({
-      providerRoots: ['C:\\work'],
-      effectiveRoots: ['C:\\work\\project1'],
+      providerRoots: [P('C:\\work')],
+      effectiveRoots: [P('C:\\work\\project1')],
     });
     // C:\work\other 在 provider 内但 effective 外 → deny（profile 收紧）
     const res = await canUseTool(
       'Write',
-      { file_path: 'C:\\work\\other\\b.txt' },
+      { file_path: P('C:\\work\\other\\b.txt') },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
@@ -393,13 +394,13 @@ describe('task-10: effectiveAllowedRoots 收紧写守卫（fallback 无 policyEn
 
   it('带 effectiveAllowedRoots → 写落 provider 完全外 deny', async () => {
     const { canUseTool } = await makeChatSession({
-      providerRoots: ['C:\\work'],
-      effectiveRoots: ['C:\\work\\project1'],
+      providerRoots: [P('C:\\work')],
+      effectiveRoots: [P('C:\\work\\project1')],
     });
     // D:\evil 完全在 provider 外 → deny
     const res = await canUseTool(
       'Write',
-      { file_path: 'D:\\evil\\c.txt' },
+      { file_path: P('D:\\evil\\c.txt') },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
@@ -407,13 +408,13 @@ describe('task-10: effectiveAllowedRoots 收紧写守卫（fallback 无 policyEn
 
   it('不带 effectiveAllowedRoots → 用 provider 全量（FR-15）', async () => {
     const { canUseTool } = await makeChatSession({
-      providerRoots: ['C:\\work'],
+      providerRoots: [P('C:\\work')],
       // effectiveRoots 未传
     });
     // C:\work\anywhere 在 provider 内 → allow（未收紧）
     const res = await canUseTool(
       'Write',
-      { file_path: 'C:\\work\\anywhere\\d.txt' },
+      { file_path: P('C:\\work\\anywhere\\d.txt') },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'allow' });
@@ -421,12 +422,12 @@ describe('task-10: effectiveAllowedRoots 收紧写守卫（fallback 无 policyEn
 
   it('effectiveAllowedRoots 空数组 → 用 provider 全量（FR-15，空数组视为未启用）', async () => {
     const { canUseTool } = await makeChatSession({
-      providerRoots: ['C:\\work'],
+      providerRoots: [P('C:\\work')],
       effectiveRoots: [],
     });
     const res = await canUseTool(
       'Write',
-      { file_path: 'C:\\work\\x.txt' },
+      { file_path: P('C:\\work\\x.txt') },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'allow' });
@@ -436,20 +437,20 @@ describe('task-10: effectiveAllowedRoots 收紧写守卫（fallback 无 policyEn
     // backend 算 effective 时已保证 ⊆ daemon_roots，但防御 stale：effective 含 D:\stale
     //（不在 provider [C:\work] 内）→ ∩ 后被剔除 → 写 D:\stale deny。
     const { canUseTool } = await makeChatSession({
-      providerRoots: ['C:\\work'],
-      effectiveRoots: ['C:\\work\\project1', 'D:\\stale'],
+      providerRoots: [P('C:\\work')],
+      effectiveRoots: [P('C:\\work\\project1'), P('D:\\stale')],
     });
     // 写 D:\stale（effective 列了但 provider 没有）→ deny（物理兜底）
     const res = await canUseTool(
       'Write',
-      { file_path: 'D:\\stale\\e.txt' },
+      { file_path: P('D:\\stale\\e.txt') },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
     // 写 C:\work\project1（effective + provider 都有）→ allow
     const res2 = await canUseTool(
       'Write',
-      { file_path: 'C:\\work\\project1\\f.txt' },
+      { file_path: P('C:\\work\\project1\\f.txt') },
       { signal: undefined },
     );
     expect(res2).toMatchObject({ behavior: 'allow' });
@@ -472,7 +473,7 @@ describe('task-10: effectiveAllowedRoots 收紧写守卫（fallback 无 policyEn
       ...BASE_INPUT,
       sessionId: 'sess-effective-only',
       manualApproval: false,
-      effectiveAllowedRoots: ['C:\\sandbox'],
+      effectiveAllowedRoots: [P('C:\\sandbox')],
     });
     const canUseTool = getStartOpts()?.canUseTool;
     // 未注入 provider/policyEngine → 无写守卫（向后兼容）。

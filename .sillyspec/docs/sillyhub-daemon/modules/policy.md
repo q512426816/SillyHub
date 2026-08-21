@@ -41,9 +41,12 @@ judgeWrite(runtimeId, path, provider, tool):
   isPathUnderAnyRoot(normalizedPath, policy.allowedRoots) → allow / deny
   ALLOW 与 DENY 均记 audit（D-006 全量审计）
 
-resolveRealPath: normalizePath(剥引号 + git bash /x/→X:/ + resolve)
+resolveRealPath: normalizePath(剥引号 + git bash /x/→X:/ + UNC 直通 + resolve)
   → 存在则 realpathSync.native；不存在逐级向上 realpath 最近祖先再拼回
   → UNC 返回哨兵 UNC_REJECTED；Windows 盘符归一小写
+  → UNC 判定是 resolve 前的字符串级检查（`\\` 与 `//` 两种形态）：POSIX 上
+    pathResolve 会把 `\\host\share` 折叠成 cwd 相对文件名，resolve 后再判恒漏
+    （2026-08-21 CI 修复，Linux 安全不变量恢复）
 
 AuditSink flush: buffer 满或定时 → postBatch；失败指数退避(500ms×2^n, 5 次)
   → 连续失败 ≥3 降级 append 落盘 audit-failed.jsonl（防 OOM，buffer 必须能清空）

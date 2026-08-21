@@ -2,7 +2,7 @@
  * policy/path-utils.ts —— 路径规范化纯函数（D-005）。
  *
  * Filesystem Policy Engine 的路径层。所有路径判断必须经过此模块：
- *   1. normalizePath — strip 引号 + git bash `/x/`→`X:/` + resolve 折叠 `..`
+ *   1. normalizePath — strip 引号 + git bash `/x/`→`X:/` + UNC 原样直通 + resolve 折叠 `..`
  *   2. resolveRealPath — realpath 解析 symlink/junction（存在）/ 父目录 fallback（不存在）
  *   3. isPathUnderAnyRoot — 边界敏感前缀比较（迁移自 write-guard.ts:44）
  *
@@ -17,6 +17,9 @@ import { realpathSync, existsSync } from 'node:fs';
 /** UNC 路径前缀（Windows `\\server\share`）。 */
 const UNC_PREFIX = '\\\\';
 
+/** 正斜杠 UNC 形态前缀（`//server/share`；Windows pathResolve 会归一成 `\\`，POSIX 原样保留）。 */
+const UNC_PREFIX_POSIX = '//';
+
 /** isPathUnderAnyRoot 返回 sentinel 常量用的特殊 UNC 标记。 */
 export const UNC_REJECTED = '@@UNC_REJECTED@@';
 
@@ -28,7 +31,9 @@ export const UNC_REJECTED = '@@UNC_REJECTED@@';
  * 步骤：
  *   1. strip 外层引号（`'...'` / `"..."`）；
  *   2. Windows git bash `/x/...` → `X:/...`（修正盘符映射）；
- *   3. `pathResolve` 折叠 `..` 段。
+ *   3. UNC 形态（`\\server\share` / `//server/share`）原样直通，不 resolve
+ *      （POSIX 上 resolve 会把反斜杠形态折叠成 cwd 相对文件名）；
+ *   4. `pathResolve` 折叠 `..` 段。
  *
  * @param raw 路径字符串（含可能的前导引号、git bash 斜杠等）
  * @returns 规范化后的路径
@@ -51,6 +56,11 @@ export function normalizePath(raw: string): string {
       p = `${drive.toUpperCase()}:/${p.slice(slash.length)}`;
     }
   }
+  // UNC 原样返回（不 pathResolve）：POSIX 上 `\\server\share` 会被 resolve 成
+  // cwd 下的相对文件名（反斜杠是合法文件名字符），resolve 后形态被破坏。
+  if (p.startsWith(UNC_PREFIX) || p.startsWith(UNC_PREFIX_POSIX)) {
+    return p;
+  }
   return pathResolve(p);
 }
 
@@ -70,8 +80,13 @@ export function normalizePath(raw: string): string {
 export function resolveRealPath(p: string): string {
   const normalized = normalizePath(p);
 
-  // 拒 UNC（\\server\share）
-  if (normalized.startsWith(UNC_PREFIX)) {
+  // 拒 UNC（\\server\share 与 //server/share 两种形态）。
+  // normalizePath 对 UNC 原样返回（不 resolve），故此处两种前缀都在，
+  // 跨平台成立：POSIX 上不靠 pathResolve 归一形态也能命中。
+  if (
+    normalized.startsWith(UNC_PREFIX) ||
+    normalized.startsWith(UNC_PREFIX_POSIX)
+  ) {
     return UNC_REJECTED;
   }
 

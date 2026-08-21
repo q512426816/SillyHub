@@ -1,0 +1,499 @@
+
+## ql-20260818-005-7561 | 2026-08-18 08:54:54 | 存量模块卡片标题补中文名收官——multi-agent-platform 项目 11 张补齐，frontend/daemon 由并行会话同期完成，全仓 211 张核验全过
+状态：已完成
+关联变更：（无；生成端根修见 sillyspec 仓 ql-20260818-005-a999——scan/archive 模板标题格式修复）
+文件：
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（# 后端服务（backend））
+- .sillyspec/docs/multi-agent-platform/modules/build.md（# 构建与任务编排（build））
+- .sillyspec/docs/multi-agent-platform/modules/ci.md（# 持续集成（ci））
+- .sillyspec/docs/multi-agent-platform/modules/deploy.md（# 部署编排（deploy））
+- .sillyspec/docs/multi-agent-platform/modules/docs.md（# 设计文档库（docs））
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（# 前端控制台（frontend））
+- .sillyspec/docs/multi-agent-platform/modules/prototype.md（# 交互线框原型（prototype））
+- .sillyspec/docs/multi-agent-platform/modules/scripts.md（# 运维校验脚本（scripts））
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（# 本地守护进程（sillyhub-daemon））
+- .sillyspec/docs/multi-agent-platform/modules/sillyspec.md（# 变更管理规范（sillyspec））
+- .sillyspec/docs/multi-agent-platform/modules/spikes.md（# 技术验证（spikes））
+需求：工具扫描生成的模块卡片缺少中文标题信息，平台文档列表一墙英文代号；对齐 # 中文名（module-id）平台约定
+根因：sillyspec scan 子代理模板硬编码 # <module-id>（生成端已在 sillyspec 仓修复 ql-20260818-005-a999）；存量 94 张英文标题卡片中 frontend 86 张与 sillyhub-daemon 46 张由并行会话同期完成，multi-agent-platform 11 张由本会话子代理补齐
+方案：11 张卡片各改标题一行（中文名从「## 定位」段职责提炼），git diff 每文件恰一行，已 add 并入暂存与并行会话的大变更集统一提交（避免拆分提交回滚标题行）
+结果：全仓 211 张模块卡片独立脚本核验全部通过（中文名+括号 module-id+frontmatter module_id 三重匹配 0 bad）；纯 doc 改动未触及 src/test，npm test 按 CLAUDE.md 规则 8 跳过
+
+## ql-20260818-006-85d6 | 2026-08-18 09:19:24 | 变更中心快速修复 tab 负责人参考进行中/已归档列表的负责人来源
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/change/quicklog_service.py（新增 _enrich_linked_change_owners：linked_changes→owner_id→users 按 ID 解析，list/get 接线；author 筛选含 owner_name）
+- backend/app/modules/change/schema.py（QuicklogEntryListItem 增 owner_name 字段）
+- backend/app/modules/change/router.py（列表/详情两装配点透传 owner_name）
+- backend/app/modules/change/tests/test_quicklog_service.py（新增 owner 优先/兜底/筛选用例）
+- backend/openapi.json + frontend/src/lib/api-types.ts（gen:types 重生成，owner_name 两 DTO）
+- frontend/src/components/changes/quicklog-table.tsx（负责人列与下拉 owner_name 优先）
+- frontend/src/components/changes/quicklog-drawer.tsx（负责人行 owner_name 优先）
+- frontend/src/components/changes/__tests__/quicklog-table.test.tsx（owner 优先+回退链两用例，fixture 补 owner_name）
+需求：变更中心快速修复 tab 负责人参考进行中/已归档列表的负责人来源，既有逻辑做兜底。
+根因：quicklog 负责人原取 QUICKLOG 文件名推导的 author_raw 字符串按 users.username 猜匹配，非变更列表 owner_id（token 上行权威身份链）口径，username 不一致时显示偏差。
+方案：后端 quicklog_service 新增 _enrich_linked_change_owners——条目 linked_changes → changes.owner_id（一次 IN）→ users 按 ID 批量解析（一次 IN，display_name 优先 username fallback，对齐 _resolve_user_names），list_entries/get_entry 接线，fail-soft；schema QuicklogEntryListItem 与 router 两装配点新增 owner_name 下发；author 筛选同步匹配 owner_name；前端 quicklog-table 负责人列与下拉、quicklog-drawer 负责人行 owner_name 优先 → author_name → author_raw → — 兜底；pnpm gen:types 重生成 api-types.ts+openapi.json。
+结果：后端 change+platform_sync 479 passed 2 skipped，ruff format/check + mypy 干净；前端 vitest 1613/1613 全过、tsc 0 错；关联变更无 owner/无关联/用户已删时回退既有 author 链，向后兼容。
+
+## ql-20260818-007-22a9 | 2026-08-18 09:20:00 | 变更中心快速修复 tab 时间字段显示偏差 8 小时
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/change/quicklog_service.py（新增 _to_wallclock 输出边界剥 tzinfo，list 分页输出与 get_entry 详情下发 naive 墙钟）
+- backend/app/modules/change/tests/test_quicklog_service.py（新增 test_output_timestamp_naive_wallclock）
+需求：变更中心快速修复 tab 时间字段显示偏差 8 小时。
+根因：CLI 落盘/推送的时间串是本地墙钟（无时区），后端 _norm_utc 为 stale 内部运算打上 UTC 标签后原样下发（带 Z），前端 new Date().toLocaleString 再按浏览器本地时区（UTC+8）换算 → 显示 = 实际 +8h 双重偏移。
+方案：quicklog_service 新增 _to_wallclock 输出边界函数，list_entries 分页输出与 get_entry 详情返回均剥 tzinfo 下发 naive 墙钟；浏览器对 naive ISO 串按本地解析，展示与 CLI 落盘墙钟一致；stale 内部 aware 运算链路不动。
+结果：test_quicklog_service+router 19 passed，新增 test_output_timestamp_naive_wallclock 断言列表与详情 tzinfo 均为 None 且墙钟原样；ruff format/check+mypy 干净；纯时间戳序列化格式变化无 openapi schema 变更，无需 gen:types。
+
+## ql-20260818-008-ec6d | 2026-08-18 09:37:41 | 变更详情页「变更文件」Dialog 的文件预览区
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/change-file-tree.tsx（补 flex 限高链（section/grid/右列）+ FilePreview min-w-0 + pre 改 whitespace-pre 横向滚动 + 路径 truncate）
+- frontend/src/components/changes/detail/change-files-card.tsx（Dialog 内容容器加 flex flex-col 打通限高链 + 注释同步）
+需求：变更详情页「变更文件」Dialog 的文件预览区，垂直超长无滚动条（超出被裁）、水平超宽无横向滚动，希望预览区宽度固定。
+根因：Dialog(85vh)→section→grid→右列整条链无 min-h-0/flex 限高约束，flex-1 overflow-auto 失效，超长内容被 Dialog 的 overflow-hidden 直接裁切；横向 flex 子项缺 min-w-0 被宽内容撑开，且源码 pre 用 whitespace-pre-wrap 软折行。
+方案：change-file-tree.tsx——section 加 flex min-h-0 flex-1 flex-col、grid 加 min-h-0 flex-1 overflow-hidden + lg:grid-rows-[minmax(0,1fr)]、文件树列 lg 下满高滚动、右列改 flex flex-col、FilePreview 三分支统一 min-w-0（pre 改 whitespace-pre 不折行靠横向滚动看全、iframe 改 h-full+min-h-[60vh]）、文件路径 span 加 truncate；change-files-card.tsx——Dialog 内容容器加 flex flex-col 打通限高链 + 注释同步。
+结果：针对性 vitest 2 文件 9 用例全过；pnpm lint 仅 stores/kanban.ts 预存 warning（与本改动无关）；模块文档 frontend.md 已同步条目并 git add。
+
+## ql-20260818-009-c287 | 2026-08-18 13:25:18 | 修 spec-sync 增量同步超时（事件循环被阻塞 + 无谓全量 reparse）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/spec_workspace/service.py（FS 段抽 helper 入 to_thread + archive_hit 收窄 delete/rename）
+- backend/app/modules/spec_workspace/tests/test_incremental_reparse_trigger.py（归档用例翻新 scoped 断言 + 新增 rename/delete 入归档全量用例）
+- .sillyspec/docs/backend/modules/spec_workspace.md（关键逻辑与人工备注同步 ql-20260818-009）
+需求：修 spec-sync 增量同步超时（事件循环被阻塞 + 无谓全量 reparse）。
+根因：① apply_ops 的 write_bytes/mkdir/utime/move 在事件循环上同步执行，Windows bind mount 连写卡死循环数十秒，被卡请求的连接撞 120s idle-in-transaction 超时（db.py:40 ql-20260728-008 前科）；② _compute_reparse_scope 对任何 archive 路径 op 都置 archive_hit 全量重扫（parsed 225），daemon 陈旧缓存重推归档文件即误触发。
+方案：① 抽 _write_op_file/_move_op_file 同步 helper 五处 FS 段整体入 asyncio.to_thread；② archive_hit 仅在 delete/rename op 命中 archive 路径置位（真归档=跨根移动恒发 rename），add/update 走 scoped name，change_dirs 归档前缀剥前缀进 scoped；③ reparse 移出请求路径评估结论 defer——scoped <1s 全量 ~2s 且罕见，后台化复杂度不抵收益。
+结果：spec_workspace 97 passed + change 386 passed（各含预存 skip），ruff format/check 与 mypy 全绿；残余风险为归档同时改内容时 rename 退化为 delete+add 的陈旧行残留，留待下次全量重扫收敛（与 scoped 零删除红线同哲学）。
+
+
+## ql-20260818-010-f551 | 2026-08-18 22:42:28 | 工作区文件浏览页布局优化——树支持左右滑动、内容区固定高度内部滚动、预览细节优化
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/[id]/explorer/page.tsx（PageContainer 锚定视口高度+overflow-hidden+左栏收窄 w-60+面包屑防换行）
+- frontend/src/components/explorer/file-explorer.tsx（节点 nowrap 横向滚动+缩进 16px+搜索结果 nowrap）
+- frontend/src/components/explorer/file-preview.tsx（纯文本不软折行+图片 max-h-full 自适应）
+需求：工作区文件浏览页布局优化——树支持左右滑动、内容区固定高度内部滚动、预览细节优化。
+根因：AppShell 根容器 min-h-screen 高度被内容撑开，页面内 flex-1/overflow-hidden 链条无视口高度锚点全部落空导致整页滚动；树节点标题 truncate 截断长文件名且行宽锁死容器宽导致永不出现横向滚动条。
+方案：page.tsx 给 PageContainer 锚定 h-[calc(100vh-56px)]（TopBar h-14，sessions 页先例）+overflow-hidden，左栏收窄 w-60；file-explorer 节点改 whitespace-nowrap 靠容器 overflow-auto 横向滚动，缩进用任意选择器收 16px/层（antd v6 Tree 已无 indentSize prop），搜索结果同步 nowrap；file-preview 纯文本 pre 统一 whitespace-pre 横向滚动（与代码高亮分支一致），图片 max-h-[540px] 改 max-h-full 自适应容器。
+结果：vitest explorer 相关 3 文件 36 用例全过，tsc --noEmit 0 错，eslint 三文件仅 1 条预存警告（HEAD 基线同位存在，非本次引入）。
+
+## ql-20260819-001-4d85 | 2026-08-19 08:59:41 | explorer 文件树目录节点支持双击展开/收起
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/explorer/file-explorer.tsx（antd Tree 加 expandAction=doubleClick + 头注释同步）
+- frontend/src/components/explorer/__tests__/file-explorer.test.tsx（补 dblClickNode 辅助 + 双击展开/收起/叶子 3 用例）
+需求：explorer 文件树目录节点支持双击展开/收起
+根因：无，纯交互增强——antd Tree 默认 expandAction=false 只能点 switcher 箭头展开，用户习惯 VSCode 式双击目录行切换
+方案：file-explorer.tsx 的 antd Tree 加 expandAction=doubleClick（antd 6.4.4 透传 rc-tree 同名 prop），双击目录行走受控 onExpand+loadData 懒加载链路与 switcher 等价；单击仍只选中，叶子与 Ctrl/Shift 修饰键由 rc-tree 忽略；测试补双击展开/收起不重拉/叶子不触发 3 用例
+结果：vitest file-explorer 17/17 passed，pnpm lint PASS（警告均预存无关文件），tsc --noEmit 0 error
+
+## ql-20260819-002-4c90 | 2026-08-19 10:18:32 | 为跨工作区团队执行变更补可视化原型图
+状态：已完成
+关联变更：2026-08-19-cross-workspace-team-mission
+文件：
+- .sillyspec/changes/2026-08-19-cross-workspace-team-mission/design.md（在 §3 总体方案后插入方案示意图（Mermaid 数据流 + 概念映射表 + ASCII 页面线框））
+需求：为跨工作区团队执行变更补可视化原型图。
+根因：design.md 纯文字描述对 anchor/scope/target/representative binding 概念不够直观。
+方案：在 design.md §3 总体方案后新增 §3.1 方案示意图，含系统数据流 Mermaid 图、核心概念映射表、前端项目团队会话页 ASCII 线框。
+结果：仅改 design.md 一个文档，未触代码与测试，无需跑 test/lint。
+
+## ql-20260819-003-ad54 | 2026-08-19 13:05:55 | 扫描文档树徽标「⚠ 冲突N」语义误导
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx（徽标 destructive 红改 outline 灰，文案改历史N版，加 title 悬浮解释）
+- .sillyspec/docs/frontend/modules/app-workspace-pages.md（ScanDocsPage 条目补文档树徽标语义）
+需求：扫描文档树徽标「⚠ 冲突N」语义误导，改为中性叫法与配色。
+根因：conflict_count 实为 last-write-wins 覆盖存档历史计数（conflict_service D-001@V1），红色 destructive 徽标被误读成待解决冲突。
+方案：page.tsx 徽标改「🕘 历史N版」outline 灰配色加 title 悬浮说明（旧版本存档备查无需处理），模块文档同步徽标语义。
+结果：vitest 全量 1677/1677 通过加 tsc 0 错加 lint 0 错，无 API 字段变更。
+
+## ql-20260819-004-695a | 2026-08-19 13:20:49 | 修复 spec-sync 增量同步的软删行复活缺陷
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/spec_workspace/service.py（apply_ops 软删复活三分支+docstring 同步）
+- backend/app/modules/spec_workspace/tests/test_sync_incremental.py（TestSoftDeleteRevival 4 用例）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（变更索引补 ql-20260819-004 行）
+需求：修复 spec-sync 增量同步的软删行复活缺陷，un-archive 愈合同步不再永久冲突。
+根因：apply_ops 把 rename 目标路径的 exists=false 软删墓碑当占用判 conflict（2026-08-19 quick 误归档事故卡死主因），add 落软删行走同内容豁免 no-op 留僵尸行。
+方案：service.py 三处——add 落软删行原地复活、rename 目标墓碑不算占用且原地复活（避开 flush 先 INSERT 后 DELETE 撞唯一约束）、R-07 无旧行 rename 同款处理；test_sync_incremental.py 增 TestSoftDeleteRevival 4 用例（含事故组合守护，证明 rename 蒸发疑点隔离不可复现）。
+结果：pytest 29 passed+1 skipped（symlink 平台预存），ruff format/check 过，mypy 0 error；backend.md 模块卡补 ql-20260819-004 索引行。
+
+## ql-20260819-005-4950 | 2026-08-19 16:57:47 | 在 /ppm/projects 项目维护页行操作加「Agent 团队」入口
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/ppm/projects/__tests__/projects-page.test.tsx, frontend/src/app/(dashboard)/ppm/projects/page.tsx
+需求：在 /ppm/projects 项目维护页行操作加「Agent 团队」入口，从项目数据进入 /projects/{id}/missions。
+根因：无，纯新增入口（原页面仅支持 URL 直达）。
+方案：在 page.tsx 的 extraActions 新增 Button，点击 router.push(`/projects/${row.id}/missions`)；新建 __tests__/projects-page.test.tsx 用 Testing Library + vitest 覆盖按钮渲染与跳转。
+结果：新增测试 2 passed；pnpm exec tsc --noEmit 0 错误；改动文件已 git add。
+
+## ql-20260820-001-579d | 2026-08-20 01:05:34 | 修复 change 模块 test_router.py 等 26 个 fixture ERROR（基线旧债
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/change/tests/test_router.py, backend/app/modules/change/tests/test_sync_documents_traversal.py
+需求：修复 change 模块 test_router.py 等 26 个 fixture ERROR（基线旧债，与 spec-mirror-tombstone-sync 无关）
+根因：2026-08-19-workspace-role-type 把 Workspace Create.type 收成必填枚举后，4 个测试文件的 POST /api/workspaces fixture payload 未带 type → 422 建档失败 → 后续全部断言 ERROR
+方案：test_router / test_dispatch / test_files_router / test_sync_documents_traversal 四文件 payload 补 type=other（受控词表最中性值）
+结果：change 模块 388 passed / 2 skipped（26 ERROR→0）；spec_workspace 106 passed 交叉无影响；ruff check + format 全过
+审计：📝 文档欠账（D-8）：4 个源码文件改动未同步任何模块文档（涉及模块：backend）
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/change/tests/test_dispatch.py, backend/app/modules/change/tests/test_files_router.py
+
+## ql-20260820-002-8469 | 2026-08-20 02:09:11 | 全量审计平台缺陷/安全/性能/质量后按优先级修复（docs/platform-audit-2026-08-20.md 批次A+B：后端安全7项+质量9项+基线测…
+状态：已完成
+关联变更：（无）
+文件：backend/.env.example, backend/app/core/config.py, backend/app/core/security.py, backend/app/main.py, backend/app/modules/admin/router.py, backend/app/modules/admin/schema.py, backend/app/modules/admin/users_service.py, backend/app/modules/auth/router.py, backend/app/modules/auth/schema.py, backend/app/modules/change/dispatch.py, backend/app/modules/change_writer/service.py, backend/app/modules/daemon/session/service.py, backend/app/modules/daemon/tests/test_session_service.py, backend/app/modules/explorer/router.py, backend/app/modules/file/router.py, backend/app/modules/knowledge/service.py, backend/app/modules/knowledge/tests/test_router.py, backend/app/modules/platform_sync/tests/test_quicklog_push.py, backend/app/modules/platform_sync/tests/test_quicklog_table_smoke.py, backend/app/modules/ppm/common/export.py, backend/app/modules/ppm/plan/router.py, backend/app/modules/ppm/plan/service.py, backend/app/modules/ppm/plan/tests/test_detail_task_link.py, backend/app/modules/ppm/plan/tests/test_service.py, backend/app/modules/ppm/problem/router.py, backend/app/modules/ppm/problem/service.py, backend/app/modules/ppm/task/router.py, backend/app/modules/ppm/task/service.py, backend/app/modules/scan_docs/tests/test_router.py, backend/app/modules/settings/router.py, backend/app/modules/spec_workspace/service.py, backend/app/modules/task/tests/test_router.py, backend/app/modules/worktree/git_runner.py, backend/create_tables.py, backend/seed_workbench_demo.py, backend/tests/modules/admin/test_users_dominance.py, backend/tests/modules/admin/test_users_router.py, backend/tests/modules/change/test_router_transition.py, backend/tests/modules/workspace/test_scan_generate.py, backend/tests/modules/workspace/test_scan_generate_service.py, docs/sillyspec/finished/2026-08-20-doctor-sqlite3-dep-and-ghost-cleanup.md
+需求：全量审计平台缺陷/安全/性能/质量后按优先级修复（docs/platform-audit-2026-08-20.md 批次A+B：后端安全7项+质量9项+基线测试债39例）
+根因：tar fully_trusted符号链接逃逸；XFF取最左段可伪造绕过限流；PPM子域写接口仅认证不授权；默认口令硬编码；事件循环同步IO；导出走分页截断；模板路径依赖CWD；基线债=scan_generate改三元返回后测试未跟+workspace type必填后4文件漏补+daemon会话管理员404
+方案：tar改filter=data并拒绝链接成员；XFF取最右段；里程碑/明细上溯计划can_operate断言+模板CRDD平台管理员门控；初始口令secrets随机一次性下发+复杂度校验复用弱口令黑名单；CD去引号；stderr套redact_output；非dev关docs端点；prod拒minioadmin；导出改list_for_export(5000)；模板锚定__file__；knowledge/change_writer移线程池；gate孤儿in_批量；excel builder收敛公共模块；删create_tables.py+seed_workbench_demo.py；基线债按新契约修测试
+结果：ruff format/check过、mypy 657文件0错、后端全量pytest由19 failed/20 errors清零（4619+新增通过）；新增初始口令随机化+PPM越权403共3个安全回归测试
+
+## ql-20260820-003-6de8 | 2026-08-20 03:23:01 | 批次C修 daemon 安全/健壮/死代码（DA-1/2/4/5/6/7/11/12/13/15）
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/spikes/06-mcp-server/README.md, sillyhub-daemon/spikes/06-mcp-server/server.ts, sillyhub-daemon/spikes/06-mcp-server/spike.test.ts, sillyhub-daemon/src/.gitkeep, sillyhub-daemon/src/adapters/stream-json.ts, sillyhub-daemon/src/agent-detector.ts, sillyhub-daemon/src/config.ts, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/file-rpc.ts, sillyhub-daemon/src/host-fs-handler.ts, sillyhub-daemon/src/index.ts, sillyhub-daemon/src/task-runner.ts, sillyhub-daemon/tests/.gitkeep
+需求：批次C修 daemon 安全/健壮/死代码（DA-1/2/4/5/6/7/11/12/13/15）
+根因：shell:true 参数零转义注入；get_spec_bundle 无守卫；词法校验不解析 junction；SIGKILL 留孤儿孙进程；env 可劫持 PATH；凭证无 0600；toRpcError 双实现；detector exec 拼引号；占位/结题残留
+方案：shell 元字符硬失败+model 白名单；补 assertWithinAllowedRoots；收敛 isPathUnderAnyRoot(realpath)；taskkill /T /F 杀树；剔除受保护 env 键；chmod 0600；toRpcError 单实现；cmd-shim+execFile；删 src/index.ts+spikes/06
+结果：tsc 0 错；vitest 2447 passed 全绿
+
+## ql-20260820-004-dbc3 | 2026-08-20 03:34:52 | docs/platform-audit-2026-08-20.md 批次D前端（FE-2/3/4/5/8/9）
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+需求：docs/platform-audit-2026-08-20.md 批次D前端（FE-2/3/4/5/8/9）
+根因：无（测试同步+死代码清理+小改）
+方案：__setBindingMap 改hoisted状态；placeholder三元；删stage-team-config/workspace-binding-dialog/use-agent-runs及stub断言；审批卡终态停表；formatter去any
+结果：tsc 0错、vitest 1695 passed、lint 0 error
+
+## ql-20260820-005-68e3 | 2026-08-20 03:35:48 | docs/platform-audit-2026-08-20.md 批次E（HY-1/4/5/6/7/8/9/10/11/13/14/15）
+状态：已完成
+关联变更：（无）
+文件：.github/workflows/backend-ci.yml, .github/workflows/scan-drift.yml, .gitignore, .sillyspec-platform-cleaned, Makefile, README.md, deploy/.env.example, deploy/docker-compose.dev.yml, deploy/docker-compose.yml, meta.json, .codex/skills/deploy-to-server/, .codex/skills/sillyhub-docker-deploy/, .codex/skills/verify-per-user/, .github/workflows/daemon-ci.yml
+需求：docs/platform-audit-2026-08-20.md 批次E（HY-1/4/5/6/7/8/9/10/11/13/14/15）
+根因：无（CI补齐+部署收紧+卫生清理）
+方案：daemon-ci.yml新增；compose端口/口令收紧；meta.json等untrack；CI死配置清理；Makefile/README/.codex补齐；本地垃圾物理删除
+结果：YAML全过、释放约400MB、git状态干净
+
+## ql-20260820-006-2297 | 2026-08-20 08:43:37 | /ppm/projects 页「Agent 团队」按钮点击跳转 /projects/{id}/missions 时被拦截
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/layout.test.tsx, frontend/src/app/(dashboard)/layout.tsx
+需求：/ppm/projects 页「Agent 团队」按钮点击跳转 /projects/{id}/missions 时被拦截，直接重定向回工作区选择器 /workspaces。
+根因：(dashboard)/layout.tsx 工作区守卫白名单 WORKSPACE_WHITELIST 没有 /projects 前缀，pathname 命中守卫第 3 分支 router.replace('/workspaces')。该页是 2026-08-19-cross-workspace-team-mission task-15 新增的平台级跨工作区视图，不依赖所选工作区上下文，属漏配（与 /agent-profiles、/sessions 历史先例同型）。
+方案：白名单加入 /projects 并附注释说明；layout.test.tsx 按 TDD 先补 /projects/A/missions 放行用例（改前红、复现 replace /workspaces；改后绿）。
+结果：layout.test 18 用例全绿，projects/ppm-projects 页面测试 9 绿，tsc --noEmit 0 错；重建 frontend 镜像重启容器后浏览器实测：点「Agent 团队」→ /projects/{id}/missions 正常停留并渲染「项目团队会话」页（scope 候选正常列出），不再弹回 /workspaces。文件：frontend/src/app/(dashboard)/layout.tsx、frontend/src/app/(dashboard)/layout.test.tsx
+
+## ql-20260820-007-6109 | 2026-08-20 09:59:22 | 修复 spec 同步策略 repo-native/repo-mirrored 在 daemon init 与 batch 路径静默失效
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/spec-sync.ts（handleInitLease 重排 pull→writeDaemonState + bumpLocalSpecVersion 缺失重建）
+- sillyhub-daemon/src/task-runner.ts（batch pullSpecBundle 补传 strategy/rootPath + 修两处过时注释）
+- sillyhub-daemon/tests/test_init_lease.test.ts（新增策略分支/bump 重建/batch 透传 7 用例，更新 5xx 与顺序用例断言）
+- sillyhub-daemon/tests/test_spec_version_refresh.test.ts（bump 缺失与损坏 JSON 两用例更新到重建契约（启动未声明，事后归属））
+- backend/app/modules/daemon/lease/context.py（仅注释：.sillyspec-platform.json 旧名改 .runtime/spec-version.json 现行为）
+需求：修复 spec 同步策略 repo-native/repo-mirrored 在 daemon init 与 batch 路径静默失效
+根因：handleInitLease 的 writeDaemonState 先于 pull 写 .runtime 占位缓存根，阻塞 repo-native junction 守卫与 repo-mirrored 首拷判定（2026-08-15-init-trigger 时序回归）且 pull 的 rm -rf 反删状态文件；batch pullSpecBundle 漏传 strategy/rootPath 永远 platform-managed；bump 状态文件缺失不重建致保鲜永久失效
+方案：init 编排重排 pull→writeDaemonState→init（pull 失败 daemonState=null 契约变更）；batch 补传 ctx.specStrategy/ctx.rootPath；bump 缺失/损坏时完整重建 2 字段并补建 .runtime；顺带修 backend context.py 两处过时注释
+结果：test_init_lease 新增 7 用例并更新 2 旧断言，test_spec_version_refresh 2 用例更新到重建契约，daemon 全量 143 文件 2453 测试全绿，tsc 干净，backend 注释文件语法通过，模块文档 sillyhub-daemon.md 已同步暂存
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/tests/test_spec_version_refresh.test.ts
+
+## ql-20260820-008-fcb7 | 2026-08-20 10:17:21 | 快速修复列表默认显示空壳占位条目（进行中 quick 会话平台可见）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/changes/quicklog-table.tsx（showPlaceholder 默认 true + hasFilter 翻转为 !showPlaceholder）
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx（tab 计数带 include_placeholder=true）
+- frontend/src/components/changes/detail/quicklog-linked-card.tsx（关联卡带 include_placeholder=true）
+- frontend/src/components/changes/__tests__/quicklog-table.test.tsx（默认显示/取消勾选两断言翻转）
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/__tests__/page.test.tsx（计数用例补 include_placeholder 断言）
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx（关联卡精确参数断言同步新契约）
+- .sillyspec/docs/frontend/modules/lib-quicklog.md（占位口径+消费点更新）
+- .sillyspec/docs/frontend/modules/components-changes.md（Table/LinkedCard 描述更新）
+需求：快速修复列表默认显示空壳占位条目（进行中 quick 会话平台可见）
+根因：quick 会话进行中 CLI 只落「(quick 任务)」占位标题（真实标题 step3 --done 才回填），平台三消费点全按默认隐藏占位口径请求，会话全程在平台不可见
+方案：前端三消费点默认/显式传 include_placeholder=true——表格 showPlaceholder 默认勾选（复选框保留、取消=收窄筛选）、tab 计数与详情关联卡显式带参；hasFilter 空态语义同步翻转为「隐藏占位才算筛选」；后端 API 默认语义不动
+结果：受影响 3 个测试文件全绿（43+13 用例），前端全量 1770 用例全绿，typecheck 通过
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/__tests__/page-team-toggle.test.tsx
+
+## ql-20260820-012-3dbc | 2026-08-20 15:29:02 | 恢复 commit 漏收且被清工作区的四轮 quick 改动（质感/卡片按钮/顶栏 sticky/两文档）
+状态：已完成
+关联变更：（无）
+文件：.claude/CLAUDE.md, .sillyspec/docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md, frontend/src/app/globals.css, frontend/src/components/antd-providers.tsx, frontend/src/components/app-shell.tsx, frontend/src/components/layout/data-table.tsx, frontend/src/components/layout/section-card.tsx, frontend/src/components/top-bar.tsx, frontend/src/components/workspace-card.tsx, frontend/tailwind.config.ts
+需求：恢复 commit 漏收且被清工作区的四轮 quick 改动（质感/卡片按钮/顶栏 sticky/两文档），源码与已部署容器一致化
+根因：提交主题变更时 quick 后续改动未纳入且工作区被清理，质感/顶栏/文档回退 HEAD
+方案：按会话内已验证 diff 逐文件重放十个文件（globals/tailwind/antd-providers/五组件/两文档）；FRONTEND_PAGE_STYLE.md 为有意文档更新（§0.5 主题系统），--force-baseline 显式解锁
+结果：tsc 0 error、eslint 0、相关 61 用例过、部署 200、容器产物五项标识全命中，源码=容器=文档一致
+
+## ql-20260820-013-cc92 | 2026-08-20 21:34:14 | 工作区页四点反馈修复——Tabs 风格统一、信息区卡片化、编辑折叠冲突、统计卡换快速修复
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx, frontend/src/app/(dashboard)/workspaces/[id]/page.tsx, frontend/src/components/workspace-tabs.tsx, frontend/src/components/workspace/stats-row.tsx
+需求：工作区页四点反馈修复——Tabs 风格统一、信息区卡片化、编辑折叠冲突、统计卡换快速修复
+根因：子导航下划线旧风格不协调；ghost Collapse 无卡片外观且面板头点击区与编辑按钮事件冲突；运行时阶段卡信息价值低
+方案：Tabs 胶囊分段主题化；Collapse 移除改 SectionCard 平铺（基本信息全宽+配置两列）；stats 第四卡 currentStage→quickTotal（listQuicklogEntries 取 total 替换 getRuntimeProgress）
+结果：tsc 0 error、eslint 0、页面测试 10/10、全量 168 文件 1793 用例复跑两轮全绿（首轮 1 超时用例为满载 flaky 非本次引入）
+审计：📝 文档欠账（D-8）：4 个源码文件改动未同步任何模块文档（涉及模块：frontend）
+
+## ql-20260821-001-dedb | 2026-08-21 04:49:31 | (quick 任务)
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
+
+## ql-20260821-002-55bb | 2026-08-21 04:49:44 | 项目触发团队操作功能全链路审查修复（流程正确性/代码缺陷/性能安全
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/router.py（cancel/get/list 归属校验+constraints 保留键过滤）
+- backend/app/modules/agent/mcp_tools.py（跨 ws target 权限校验+治理拒绝先 gate）
+- backend/app/modules/mcp_gateway/tools.py（链路B 同款 target 校验+gate 前置）
+- backend/app/modules/agent/execution.py（HostFsDelegateUnavailable 收敛 failed）
+- backend/app/modules/agent/finalizer.py（converged_at 回滚+cleanup 终态过滤+自动收敛接 cleanup）
+- backend/app/modules/agent/orchestrator.py（在线判定属主 user_id+启动重派）
+- backend/app/main.py（启动重派接线）
+- backend/app/modules/agent/mission_schema.py（输入上限）
+- backend/app/modules/agent/model.py（project_id 索引）
+- backend/migrations/versions/20260821100000_agent_mission_project_id_index.py（新索引 migration）
+- backend/app/modules/agent/tests/test_mission_access_control.py（新增 8 用例）
+- frontend/src/components/mission-console.tsx（六项前端修复）
+- frontend/src/app/(dashboard)/projects/[id]/missions/page.tsx（空 id 错误态）
+- docs/project-team-mission-review-2026-08-21.md（审查报告+修复记录）
+需求：项目触发团队操作功能全链路审查修复（流程正确性/代码缺陷/性能安全，清单 docs/project-team-mission-review-2026-08-21.md）
+根因：cancel 端点 require_permission 的 path 参数解析缺陷致已认证请求恒 422；get/list mission 无归属校验可跨工作区越权读写；dispatch_worker 跨 ws 派发不校验调用者对 target 权限；worktree 异常 run 永久 pending；converged_at 先置位失败无回滚致合并永久丢失；cleanup 只清 completed 且自动收敛路径不接 cleanup 致副本泄漏；主 agent 在线判定传全零 user_id 恒离线；no_online_daemon 主 run 无重派机制；治理拒绝落 killed run 污染 derive_status；前端 degraded 终态误入轮询集合、轮询无竞态守卫、日志游标方向反致全量重拉
+方案：后端 router 加 _require_mission_access 归属校验（cancel/get/list）+ dispatch target 权限校验（JWT 通道校验 apiKey 通道豁免）+ execution 捕获 HostFsDelegateUnavailable 收敛 failed + finalizer converged_at 失败回滚 + cleanup 过滤扩终态并接自动收敛路径 + orchestrator 在线判定改传 binding 属主 + redispatch_pending_main_runs 启动重派接线 + 治理拒绝先 gate 后建 run + schema 输入上限与保留键过滤与 project_id 索引；前端 ACTIVE 去 degraded + displayedMissionIdRef 竞态守卫 + 日志游标取最新 + budget 校验 + errMessage 复用 + 空 projectId 错误态 + 403 显式提示
+结果：backend agent+mcp_gateway+daemon 1518 passed；frontend 全量 1795 passed + tsc 0；新增归属控制 8 用例 + 页面 3 用例 + 游标 2 用例更新；gen:types 同步；9 项设计权衡类 P2 登记后续变更
+
+## ql-20260821-003-fc02 | 2026-08-21 08:32:18 | 工作区详情页五点布局调整（hero 删编辑信息/接入配置入 hero/关联 PPM 转弹层/规范配置全宽/提供方共享两列置底）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/workspace/hero-header.tsx（删编辑信息+extraActions slot）
+- frontend/src/app/(dashboard)/workspaces/[id]/page.tsx（五点重排+接入配置吸收+关联项目 Modal）
+- frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx（移除 BindingGuard）
+- frontend/src/components/workspace-binding-guard.tsx（删除）
+- missions-page.test.tsx（顺手补 mock details）
+需求：工作区详情页五点布局调整（hero 删编辑信息/接入配置入 hero/关联 PPM 转弹层/规范配置全宽/提供方共享两列置底）
+根因：编辑信息双入口重复；接入配置按钮孤悬与 hero 脱节；四卡长短不齐两列错位
+方案：hero 改 extraActions slot；BindingGuard 吸收进 page；LinkedProjects 入 Modal；布局重排；组件删除
+结果：tsc 0（顺手修预存 missions mock）、eslint 0、全量 1795 用例全绿、已部署验证
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/projects/[id]/missions/__tests__/missions-page.test.tsx
+
+## ql-20260821-004-5498 | 2026-08-21 08:42:05 | 详情页菜单吸顶/统计口径与跳转修复/基本信息展示关联项目并收敛按钮
+状态：已完成
+关联变更：（无）
+文件：
+- workspace-tabs.tsx（吸顶）
+- stats-row.tsx（带参跳转）
+- page.tsx（口径+关联行+按钮收敛）
+- page.test.tsx（断言同步）
+需求：详情页菜单吸顶/统计口径与跳转修复/基本信息展示关联项目并收敛按钮
+根因：tabs 无 sticky；统计与 tab 徽标口径不一致（quicklog 差 include_placeholder）且跳转不带参数；关联项目按钮与信息展示割裂
+方案：sticky top-16；查询同参对齐+href 带 tab；基本信息行展示项目名+行尾按钮开弹层删独立按钮
+结果：tsc 0、eslint 0、全量 1795 用例全绿、已部署
+审计：📝 文档欠账（D-8）：3 个源码文件改动未同步任何模块文档（涉及模块：frontend）
+
+## ql-20260821-005-50d1 | 2026-08-21 08:54:21 | /workspaces 列表页样式对齐工作台风格
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/page.tsx（六项样式优化）
+需求：/workspaces 列表页样式对齐工作台风格
+根因：旧样式残留（红条/裸筛选条/emoji 空态/文字加载态/两列网格）
+方案：ErrorBanner+筛选条白卡容器化+EmptyState 去 emoji+骨架卡+lg 三列
+结果：tsc 0、eslint 0、全量 1795 用例全绿、已部署
+
+## ql-20260821-006-6ebe | 2026-08-21 09:04:51 | 修复三处 CI 红灯（scan-drift 缺 pytest、mypy 多余 ignore、missions 测试时序断言）
+状态：已完成
+关联变更：（无）
+文件：
+- .github/workflows/scan-drift.yml（补 pip install pytest 步骤（裸环境显式装依赖））
+- backend/app/modules/mcp_gateway/tests/test_tools_new.py（删永不触发的 no-untyped-def ignore 码并留注释）
+- frontend/src/app/(dashboard)/projects/[id]/missions/__tests__/missions-page.test.tsx（listProjectMissions 断言包 waitFor 治满负载时序脆弱）
+需求：修复三处 CI 红灯（scan-drift 缺 pytest、mypy 多余 ignore、missions 测试时序断言）
+根因：91194fe1 给 scan-drift.yml 加 pytest 测试步骤但 setup-python 是裸环境从未装 pytest；1436b2b4 给 test_tools_new.py 加的 no-untyped-def ignore 码在 strict=false（未开 disallow_untyped_defs）下永不触发，warn_unused_ignores 报 unused-ignore；missions-page 测试在 waitFor 见到 DOM 后同步断言 effect 发起的 mock 调用，满负载下 effect flush 晚于 DOM 提交（单文件跑掩盖）
+方案：workflow 补 pip install pytest 步骤；删该 ignore 码留注释说明；mock 断言包 await waitFor
+结果：mypy 661 文件 0 错、ruff 过、vitest 全量 168 文件 1795 用例全绿、scan-drift 脚本测试 32 过、YAML 解析 OK
+
+## ql-20260821-007-e454 | 2026-08-21 09:08:08 | 列表页卡片五点+两点优化（守护去重/关联项目/删按钮/重排/antd 筛选/删旁路/弹窗化）
+状态：已完成
+关联变更：（无）
+文件：
+- workspace-path-fields.tsx（去重）
+- workspace-card.tsx（重排）
+- workspaces/page.tsx（antd 筛选+项目接线+删链接）
+- workspace-scan-dialog.tsx（Modal 化）
+- 两测试（断言同步）
+需求：列表页卡片五点+两点优化（守护去重/关联项目/删按钮/重排/antd 筛选/删旁路/弹窗化）
+根因：在线徽标重复/卡片缺项目信息/footer 冗余/原生 select 差/旁路无用/内嵌块非弹窗
+方案：path-fields 去重+卡片重排+项目 tag 行+antd 筛选+删链接+Modal 化
+结果：tsc 0、eslint 0、全量 1793 用例全绿、已部署
+审计：📝 文档欠账（D-8）：7 个源码文件改动未同步任何模块文档（涉及模块：frontend）
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/workspaces/[id]/explorer/page.tsx, frontend/src/components/explorer/file-explorer.tsx
+
+## ql-20260821-008-fade | 2026-08-21 09:14:34 | explorer 文件树长文件名换行丑陋、树栏宽度不可调且偏窄、文件图标无类型区分
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/explorer/file-explorer.tsx（单行覆盖+扩展名图标）
+- frontend/src/components/explorer/__tests__/file-explorer.test.tsx（图标分型用例）
+- frontend/src/app/(dashboard)/workspaces/[id]/explorer/page.tsx（TreePanelResizer 拖拽调宽）
+- frontend/src/app/(dashboard)/workspaces/[id]/__tests__/explorer-page.test.tsx（拖拽 3 用例）
+需求：explorer 文件树长文件名换行丑陋、树栏宽度不可调且偏窄、文件图标无类型区分，要求单行展示、可拖拽调宽并加大默认宽度、图标按格式区分。
+根因：antd Tree blockNode 把树行钳在容器宽内，节点 wrapper 为 block 而图标/标题是行内盒，排不下时图标与文件大小整体掉到第二行，旧横向滚动方案因行宽被钳实际从未生效；左栏宽度 w-60 写死无调整入口；图标仅 FileText 单一灰。
+方案：file-explorer.tsx 树容器加 6 条 [&_…]! 提权覆盖（treenode 放开为 w-max+min-w-full、content-wrapper 强制 flex 单行不换行、indent-unit w-4 补 ! 修正旧覆盖被 antd css-in-js 压制）实现整行单行+真横向滚动；page.tsx 新增 TreePanelResizer 夹持把手（默认 320px、拖拽钳 200~640、双击复位、方向键微调、localStorage 记忆）；FILE_ICON_BY_EXT 按扩展名映射 lucide 图标与信息色（代码/json/图片/音视频/压缩包/表格/pdf/office/.env），树与搜索面板共用。
+结果：explorer 组件+页面 32/32 用例通过（新增图标分型 1 例+拖拽 3 例），tsc 0 错，lint 仅预存 warning，tailwind CLI 确认覆盖规则生成，模块文档变更索引已更新。
+审计：⚖️ 归属切分：4 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/workspaces/[id]/components/page.tsx, frontend/src/app/(dashboard)/workspaces/__tests__/page.test.tsx, frontend/src/components/__tests__/workspace-card.test.tsx, frontend/src/components/workspace-tabs.tsx
+
+## ql-20260821-009-7c69 | 2026-08-21 09:34:12 | 组件页删次级导航+菜单组件移扫描文档前
+状态：已完成
+关联变更：（无）
+文件：
+- components/page.tsx（删 NAV_ITEMS）
+- workspace-tabs.tsx（调序）
+需求：组件页删次级导航+菜单组件移扫描文档前
+根因：NAV_ITEMS 与顶部菜单重复（P2-3 留档）；组件位次应后移
+方案：删 NAV_ITEMS 渲染段；TABS 序=概览/变更/会话/文件/组件/扫描文档/…
+结果：tsc 0、eslint 0、全量 1797 用例全绿、已部署
+审计：📝 文档欠账（D-8）：2 个源码文件改动未同步任何模块文档（涉及模块：frontend）
+
+## ql-20260821-010-3993 | 2026-08-21 09:44:33 | runtime 页步骤产物 1589 个文件一次全渲染卡顿
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/[id]/runtime/page.tsx（产物分页 20/页 + Pagination 控件）
+- frontend/src/app/(dashboard)/workspaces/[id]/runtime/page.test.tsx（分页三用例）
+需求：runtime 页步骤产物 1589 个文件一次全渲染卡顿，需分页展示
+根因：产物区 artifacts.map 无分页，仓库运行时积累上千产物时 DOM 一次渲染全部行
+方案：ARTIFACTS_PAGE_SIZE=20 分页——antd Pagination（共 N 个/页码），pagedArtifacts slice 当页渲染，列表重载回第 1 页（safeArtifactPage 防越界），不足一页不渲染控件；展开态翻页保留（翻回自动重展）
+结果：vitest 15 passed（12 旧+3 新：当页 20 行/翻页第 2 页剩 5 行/单产物无控件）；tsc --noEmit 0 错
+审计：📝 文档欠账（D-8）：2 个源码文件改动未同步任何模块文档（涉及模块：frontend）
+
+## ql-20260821-011-9ddd | 2026-08-21 09:57:09 | 添加成员弹窗角色下拉补业务成员选项
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/workspace-member-add-dialog.tsx（ROLE_OPTIONS 补业务成员选项+注释与说明文案修正）
+- frontend/src/components/workspace-member-add-dialog.test.tsx（新建：选项可见与提交值两用例）
+需求：添加成员弹窗角色下拉补业务成员选项
+根因：2026-07-25-daemon-borrow-for-business task-12 只补了成员列表行内下拉的 business_member，漏了同域的 workspace-member-add-dialog.tsx，弹窗注释仍停留旧三角色口径
+方案：弹窗 ROLE_OPTIONS 补业务成员（文案与行内下拉一致）+修过时注释+角色说明文案补一句；新增测试两例（选项可见、选后 addMember 提交 business_member）
+结果：pnpm vitest run 弹窗+行内两测试文件 5 用例全绿；grep 确认无其它文件引用受影响；模块文档核对无需变更
+
+## ql-20260821-012-22b0 | 2026-08-21 10:10:49 | explorer 文件树图标再按常见开发语言细分
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/explorer/file-explorer.tsx（语言独立图标映射）
+- frontend/src/components/explorer/__tests__/file-explorer.test.tsx（语言图标用例）
+需求：explorer 文件树图标再按常见开发语言细分，java/class/xml/vue/jsx/py/net/go 等各配不一样的图标。
+根因：上一轮所有代码类文件共用 FileCode2 琥珀单档图标，语言之间没有视觉区分。
+方案：file-explorer.tsx 的 FILE_ICON_BY_EXT 重构——常用语言逐个拆出独立 lucide 图标与配色（Java 咖啡橙、class 二进制锌灰、xml code-xml 橙、Vue 三角绿、JS/TS 花括号黄/蓝、jsx 与 tsx React 原子天蓝/青、Python f(x) 蓝、Go 六边形青、Ruby 宝石玫红、Rust 齿轮石墨、PHP 靛、Swift 雨燕橙、Kotlin 紫罗兰、cs/vb/fs/csproj/vbproj/fsproj/sln 等 .NET 系积木紫、C/C++ 深蓝、HTML 地球橙、CSS 调色板蓝、Sass 系调色板粉、Shell 系终端绿、SQL 数据库靛），其余小众语言回退 FileCode2 琥珀兜底，媒体/文档映射不变。
+结果：file-explorer 测试 19/19 通过（图标用例改为 main.ts 断言花括号 + 新增 8 语言互不相同用例），tsc 0 错，lint exit 0 仅预存 warning，frontend.md 变更索引已补 ql-20260821-012 条目。
+
+## ql-20260821-013-2c1a | 2026-08-21 10:22:48 | 扫描文档页左侧结构树改成 explorer 文件树风格（单行、扩展名图标、可拖拽宽度）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/ui/file-node-icon.tsx（新共享图标组件）
+- frontend/src/components/ui/panel-resizer.tsx（新共享拖拽把手）
+- frontend/src/components/ui/tree-box.tsx（新共享单行树容器）
+- frontend/src/components/explorer/file-explorer.tsx（改用共享组件）
+- frontend/src/app/(dashboard)/workspaces/[id]/explorer/page.tsx（改用共享把手）
+- frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx（左树 antd 化）
+- frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx（新页面测试）
+需求：扫描文档页左侧结构树改成 explorer 文件树风格（单行、扩展名图标、可拖拽宽度），并抽共享组件复用。
+根因：scan-docs 手搓递归 TreeView 用内联 SVG 单色图标、truncate 截断长文件名、固定 grid 280px 不可调宽，与文件树风格割裂且无复用载体。
+方案：新建三共享组件 ui/file-node-icon.tsx（FileNodeIcon+FILE_ICON_BY_EXT 全量图标映射单一源）、ui/panel-resizer.tsx（usePanelWidth hook+PanelResizer 拖拽把手，storageKey/min/max 参数化）、ui/tree-box.tsx（TreeBox 承载 antd Tree 单行 6 条 ! 提权覆盖类）；scan-docs/page.tsx 左树重写为受控 antd DocTree（默认全展开可收起、点文件行 getScanDoc 拉详情、👤/🕘/doc_type 徽标保留）+三组件装配+flex 分栏可拖拽（默认 280 钳 200~480，localStorage 记忆，移动端全宽堆叠）；file-explorer.tsx 与 explorer/page.tsx 同步改用共享组件，行为零变化。
+结果：4 测试文件 39/39 通过（scan-docs 新增 3 用例：树渲染图标徽标/点行拉详情/拖拽记忆），tsc 0 错，lint 0 新告警，frontend.md 变更索引已更新。
+审计：⚖️ 归属切分：5 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/next.config.mjs, frontend/src/app/(dashboard)/workspaces/[id]/__tests__/scan-docs-page.test.tsx, frontend/src/components/ui/file-node-icon.tsx, frontend/src/components/ui/panel-resizer.tsx, frontend/src/components/ui/tree-box.tsx
+
+## ql-20260821-014-03b0 | 2026-08-21 10:34:01 | 前端 3001 代理下 changes/reparse 长请求被 30s 掐断返回 500
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/next.config.mjs（experimental.proxyTimeout 300000 + 注释说明默认 30s 坑）
+- .sillyspec/docs/frontend/modules/build.md（契约摘要补 proxyTimeout、注意事项补排查指引）
+需求：前端 3001 代理下 changes/reparse 长请求被 30s 掐断返回 500
+根因：Next 14 standalone rewrite 代理默认 proxyTimeout=30000ms（router-utils/proxy-request.js），本次 reparse 后端需 32.8s，前端 30.01s 时 ECONNRESET 报 500，后端实际跑完记 200
+方案：next.config.mjs experimental 增 proxyTimeout:300000（5 分钟），重建前端镜像并重启容器
+结果：容器内 required-server-files.json 确认 proxyTimeout=300000 生效、容器 healthy；后端日志确认 reparse 本身正常（236 parsed）；端到端重放因 bootstrap 密码已轮换未做，等用户浏览器重试确认；无代码测试影响（纯构建配置）
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/next.config.mjs
+
+## ql-20260821-015-4637 | 2026-08-21 10:49:59 | 文件树点目录行任意位置即展开/收起
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/explorer/file-explorer.tsx（expandAction=click）
+- frontend/src/components/explorer/__tests__/file-explorer.test.tsx（双击用例改单击）
+- frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx（expandAction=click）
+- frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx（知识库页重写）
+- frontend/src/components/workspace-tabs.tsx（加知识库 tab）
+- frontend/src/lib/menu-permissions.ts（侧边栏改名）
+- frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx（新页面测试）
+需求：文件树点目录行任意位置即展开/收起；「知识 & 日志」页改为知识库——不再展示快速修复日志、按钮纳入工作区顶部导航放文件之后、页面用共享树组件重做并渲染 Markdown 而非原文。
+根因：explorer 文件树沿用 ql-20260819-001 的 expandAction=doubleClick、scan-docs 树未设 expandAction（仅点箭头），与新指令不符；knowledge/page.tsx 是知识/快速日志双 tab 平铺按钮列表，MD 内容走裸 pre 原文展示，与文件树体系割裂。
+方案：①explorer 与 scan-docs 两树 expandAction 统一改 click（点行展开/收起，本指令覆盖 ql-20260819-001 双击决策），file-explorer 三个双击用例改单击并删 dblClickNode 助手；②knowledge/page.tsx 重写——快速日志 tab 整体移除（变更中心快速修复 tab 保留完整入口），buildKnowledgeTree 按 path 建目录树 + FileNodeIcon/TreeBox/PanelResizer 共享三件套（默认 280px 钳 200~480 localStorage 记忆）+ antd Tree 点行展开默认全展开，内容区 .md 用 MarkdownPreview（复用统一 sanitize rehype 插件）渲染、非 md 仍纯文本 pre；③workspace-tabs.tsx 增 knowledge「知识库」tab 排文件后，menu-permissions.ts 侧边栏同步改名知识库。
+结果：新 knowledge-page.test.tsx 4 用例（树渲染/点行交互+md 渲染/拖拽记忆/WorkspaceTabs 顺序），关联 5 测试文件 78/78 通过，tsc 0 错，lint 仅预存 warning，frontend.md 变更索引已更新。
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/workspaces/[id]/__tests__/knowledge-page.test.tsx
+
+## ql-20260821-016-c75f | 2026-08-21 11:10:59 | 变更文件树组件视觉对齐工作台风格
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/change-file-tree.tsx（七项视觉优化）
+需求：变更文件树组件视觉对齐工作台风格
+根因：树行单薄/内联 SVG amber 硬编码/旧红条/文字空态/无计数
+方案：ChevronRight 展开指示+选中品牌化+lucide 图标+计数 pill+ErrorBanner+EmptyState
+结果：tsc 0、eslint 0、全量 171 文件/1810 用例全绿、已部署
+
+## ql-20260821-017-4513 | 2026-08-21 13:46:54 | 变更详情页阶段节点与步骤时间线联动（点击阶段筛选步骤）+ 步骤时间格式优化 + 步骤样式对齐系统风格
+状态：已完成
+关联变更：（无）
+文件：frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx, frontend/src/components/changes/detail/__tests__/change-stage-header.test.tsx, frontend/src/components/changes/detail/__tests__/change-step-timeline.test.tsx, frontend/src/components/changes/detail/change-stage-header.tsx, frontend/src/components/changes/detail/change-step-timeline.tsx, docs/sillyspec/2026-08-21-manual-archive-desync-status-only.md
+需求：变更详情页阶段节点与步骤时间线联动（点击阶段筛选步骤）+ 步骤时间格式优化 + 步骤样式对齐系统风格
+根因：无，纯样式与交互增强——阶段步骤条与步骤时间线两区块此前无任何关联，completed_at 直显 ISO 原串可读性差，组头样式与 AI-native 系统风格脱节
+方案：ChangeStageHeader 节点升级 button（stepStages 范围内可点、aria-pressed+brand ring 选中、无步骤阶段 disabled；不传联动 props 时渲染与旧版一致）；page.tsx 持 focusStage 状态（再次点击同阶段取消）+ 时间线卡片头「阶段 ✕」清除 chip + 标题带步数；ChangeStepTimeline 加 focusStage 过滤（命中空弱提示）；新增 formatStepTime 正则白名单归一后 new Date 本地化（zh-CN 2-digit，微秒截毫秒，失败回退原串，Grill #18 精神保留）；组头改组名+引导线+N/M 步徽标、时间 tabular-nums；time 元素 title/datetime 保留原始 ISO
+结果：组件测试 31 绿（含新增联动 5 例+格式化 4 例+筛选 3 例）、页面回归 13 绿、tsc 与 eslint 清零；Playwright+Chrome 真实登录隔离环境（临时库+本地后端，已清理）截图验证全部/筛选/切换/清除四态，时间显示 2026/08/20 09:15 且微秒精度正确转换
+
+## ql-20260821-018-e001 | 2026-08-21 14:26:16 | .zcode 目录加入 gitignore
+状态：已完成
+关联变更：（无）
+文件：.gitignore, backend/app/modules/change/service.py
+需求：.zcode 目录加入 gitignore
+根因：无，纯仓库配置——.zcode 为 ZCode CLI 本地工作区状态（skills 缓存/会话计划），非项目代码，此前以未跟踪文件滞留工作区
+方案：.gitignore IDE 区块增 .zcode/ 规则带中文注释说明用途；顺手清理上轮 rebase 遗漏的 sessions/page.tsx.orig 补丁备份文件
+结果：git check-ignore -v 验证 .zcode/plans/ 命中 .gitignore:5 规则生效；git status 仅剩本次 .gitignore 与 QUICKLOG 两处变更，无测试面（纯配置）
+
+## ql-20260821-019-d168 | 2026-08-21 14:40:14 | 修复 table-column-resize 归档进度平台显示丢失（终态渲染）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/change/service.py（新增 _extract_change_status + enrich 两入口 archived 终态读时覆盖）
+- backend/app/modules/change/tests/test_enrich_projection.py（新增 5 个终态投影测试）
+- frontend/src/components/changes/change-step-badge.tsx（STAGE_LABELS/STAGE_KIND 补 archived）
+需求：修复 table-column-resize 归档进度平台显示丢失（终态渲染）
+根因：CLI 归档补记只回填 status=archived，平台读侧刻意不消费 status（D-004@v2），已归档变更渲染成停在执行+归档0/5
+方案：complete-stage archive 补 5 步 completed+platform sync 推送；后端读侧投影 archived 终态覆盖 status/current_stage（D-004@v2 收窄为仅终态投 status）；前端 badge 补 archived 映射
+结果：后端 30+393 passed，前端 badge 13 passed；Docker 重建后浏览器验证已归档徽标+归档 5/5+历史归档批量生效
+
+## ql-20260821-020-69d9 | 2026-08-21 14:55:33 | 变更详情页阶段条兼容 archived 终态恢复显示
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/changes/detail/change-stage-header.tsx（archived 终态映射为 archive 渲染阶段条并保持步骤联动）
+- frontend/src/components/changes/detail/__tests__/change-stage-header.test.tsx（新增 archived 渲染与联动回调单测）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（追加 ql-20260821-020-69d9 变更索引）
+需求：变更详情页阶段条兼容 archived 终态恢复显示。
+根因：后端读侧把 CLI 归档投影为 current_stage='archived'，ChangeStageHeader 原只识别 'archive'，导致已归档页阶段条 return null、与步骤时间线联动入口消失。
+方案：ChangeStageHeader 内做 archived→archive 映射渲染，lastActive 取 displayStage 对应 stages 字段，保持节点点击回调传 'archive' 与 ChangeStepTimeline focusStage 一致；补 2 个单测覆盖归档渲染与联动回调。
+结果：change-stage-header 14 测 / change-step-timeline 19 测全绿，next lint 无 error（仅预存 warning），tsc --noEmit 通过；模块文档 frontend.md 已追加 ql-20260821-020-69d9 索引。
+

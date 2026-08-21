@@ -5,7 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /** fixture 根目录绝对路径：tests/fixtures/ */
@@ -51,6 +51,21 @@ export function loadLines(relativePath: string): string[] {
     lines.pop();
   }
   return lines;
+}
+
+/**
+ * 把测试里的 Windows 路径字面量适配为当前平台等价路径（policy 路径比较类测试用）。
+ *
+ * POSIX 上 `C:\work\a.txt` 会被 Node path 视作单个相对文件名（反斜杠是合法
+ * 文件名字符），resolve 后白名单前缀比较恒 false，allow 方向断言必挂。
+ * 映射规则：`C:\x\y` → `/c/x/y`（盘符降为根下目录，保留「不同盘符互斥」语义）。
+ * Windows 上原样返回。
+ */
+export function winPath(winPathLiteral: string): string {
+  if (sep === '\\') return winPathLiteral;
+  return winPathLiteral
+    .replace(/^([A-Za-z]):[\\/]?/, (_m, drive: string) => `/${drive.toLowerCase()}/`)
+    .replace(/\\/g, '/');
 }
 
 /**

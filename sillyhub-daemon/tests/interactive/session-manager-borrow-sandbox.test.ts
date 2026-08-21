@@ -15,6 +15,7 @@
 //
 // 测试范式照抄 session-manager-allowed-roots.test.ts（mock driver 捕获 canUseTool）。
 
+import { join } from 'node:path';
 import { describe, it, expect, vi } from 'vitest';
 import type {
   Query,
@@ -22,6 +23,7 @@ import type {
   SDKResultMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
+import { winPath as P } from '../helpers.js';
 import { SessionManager } from '../../src/interactive/session-manager.js';
 import { PolicyEngine } from '../../src/policy/filesystem-policy.js';
 import { PolicyCache } from '../../src/policy/runtime-policy.js';
@@ -81,9 +83,9 @@ const noopDeps = {
 /** lender 的 runtime_id（开发人员的 claude runtime）。 */
 const LENDER_RUNTIME_ID = 'rt-lender-claude';
 /** lender 代码区（开发人员 allowed_roots，借用 agent 不应继承）。 */
-const LENDER_CODE_ROOT = 'C:\\dev\\multi-agent-platform';
+const LENDER_CODE_ROOT = P('C:\\dev\\multi-agent-platform');
 /** 借用 session 的独立沙箱目录。 */
-const BORROW_SANDBOX_ROOT = 'C:\\sillyhub\\borrow-sandboxes\\borrow-actor1-run1';
+const BORROW_SANDBOX_ROOT = P('C:\\sillyhub\\borrow-sandboxes\\borrow-actor1-run1');
 
 // ── 借用 session 写隔离（核心 R-02 反污染断言）────────────────────────────────
 
@@ -120,7 +122,7 @@ describe('task-09 借用 session 沙箱隔离 — 按 lease 而非 runtime', () 
     const res = await canUseTool(
       'Write',
       {
-        file_path: `${BORROW_SANDBOX_ROOT}\\draft.md`,
+        file_path: `${join(BORROW_SANDBOX_ROOT, 'draft.md')}`,
         content: '业务方案草稿',
       },
       { signal: undefined },
@@ -133,7 +135,7 @@ describe('task-09 借用 session 沙箱隔离 — 按 lease 而非 runtime', () 
     // lender runtime 缓存里 LENDER_CODE_ROOT 是 allowed——但借用 session 必须拒绝。
     const res = await canUseTool(
       'Write',
-      { file_path: `${LENDER_CODE_ROOT}\\src\\polluted.ts`, content: 'x' },
+      { file_path: `${join(LENDER_CODE_ROOT, 'src', 'polluted.ts')}`, content: 'x' },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
@@ -149,7 +151,7 @@ describe('task-09 借用 session 沙箱隔离 — 按 lease 而非 runtime', () 
     const { canUseTool } = await makeBorrowSession();
     const res = await canUseTool(
       'Edit',
-      { file_path: 'D:\\elsewhere\\secret.txt' },
+      { file_path: P('D:\\elsewhere\\secret.txt') },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
@@ -163,7 +165,7 @@ describe('task-09 借用 session 沙箱隔离 — 按 lease 而非 runtime', () 
     // 读 lender 代码区 → allow（读不拦，业务人员需读开发源码出方案）。
     const r1 = await canUseTool(
       'Read',
-      { file_path: `${LENDER_CODE_ROOT}\\README.md` },
+      { file_path: `${join(LENDER_CODE_ROOT, 'README.md')}` },
       { signal: undefined },
     );
     expect(r1).toMatchObject({ behavior: 'allow' });
@@ -180,7 +182,7 @@ describe('task-09 借用 session 沙箱隔离 — 按 lease 而非 runtime', () 
     const { canUseTool } = await makeBorrowSession();
     const res = await canUseTool(
       'Bash',
-      { command: `echo x > ${LENDER_CODE_ROOT}\\evil.txt` },
+      { command: `echo x > ${join(LENDER_CODE_ROOT, 'evil.txt')}` },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
@@ -193,7 +195,7 @@ describe('task-09 借用 session 沙箱隔离 — 按 lease 而非 runtime', () 
     const { canUseTool } = await makeBorrowSession();
     const res = await canUseTool(
       'Bash',
-      { command: `echo hello > ${BORROW_SANDBOX_ROOT}\\notes.txt` },
+      { command: `echo hello > ${join(BORROW_SANDBOX_ROOT, 'notes.txt')}` },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'allow' });
@@ -227,14 +229,14 @@ describe('task-09 非借用 session（开发人员自有任务）走原 runtime 
     // 开发人员写自己代码区 → allow（runtime policy 命中）。
     const res = await canUseTool(
       'Write',
-      { file_path: `${LENDER_CODE_ROOT}\\src\\feature.ts` },
+      { file_path: `${join(LENDER_CODE_ROOT, 'src', 'feature.ts')}` },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'allow' });
     // 开发人员写沙箱外（非 allowed）→ deny（runtime policy 原行为）。
     const deny = await canUseTool(
       'Write',
-      { file_path: 'D:\\outside\\x.txt' },
+      { file_path: P('D:\\outside\\x.txt') },
       { signal: undefined },
     );
     expect(deny).toMatchObject({ behavior: 'deny' });

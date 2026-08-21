@@ -25,6 +25,7 @@ import type {
   SDKResultMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
+import { winPath as P } from '../helpers.js';
 import { SessionManager } from '../../src/interactive/session-manager.js';
 import { PolicyEngine } from '../../src/policy/filesystem-policy.js';
 import { PolicyCache } from '../../src/policy/runtime-policy.js';
@@ -69,7 +70,7 @@ const BASE_INPUT = {
   leaseId: 'lease-1',
   firstPrompt: 'hi',
   firstRunId: 'run-1',
-  cwd: 'C:\\work',
+  cwd: P('C:\\work'),
   provider: 'claude' as const,
   pathToClaudeCodeExecutable: 'C:\\bin\\claude.exe',
 };
@@ -120,23 +121,23 @@ describe('默认 chat（enableApproval=false）写拦截 — PolicyEngine.canWri
   }
 
   it('写工具白名单内 → allow（透传 updatedInput）', async () => {
-    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const { canUseTool } = await makeChatSession([P('C:\\work')]);
     const res = await canUseTool(
       'Write',
-      { file_path: 'C:\\work\\a.txt', content: 'x' },
+      { file_path: P('C:\\work\\a.txt'), content: 'x' },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'allow' });
     expect((res as { updatedInput?: unknown }).updatedInput).toMatchObject({
-      file_path: 'C:\\work\\a.txt',
+      file_path: P('C:\\work\\a.txt'),
     });
   });
 
   it('写工具白名单外 → deny（reason = PolicyEngine 统一中文文案，含路径/原因）', async () => {
-    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const { canUseTool } = await makeChatSession([P('C:\\work')]);
     const res = await canUseTool(
       'Write',
-      { file_path: 'C:\\secret\\pw.txt', content: 'x' },
+      { file_path: P('C:\\secret\\pw.txt'), content: 'x' },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
@@ -150,8 +151,8 @@ describe('默认 chat（enableApproval=false）写拦截 — PolicyEngine.canWri
   });
 
   it('读工具（Read/Grep/Bash 纯读）→ allow（不拦，读自由）', async () => {
-    const { canUseTool } = await makeChatSession(['C:\\work']);
-    const r1 = await canUseTool('Read', { file_path: 'C:\\anywhere' }, { signal: undefined });
+    const { canUseTool } = await makeChatSession([P('C:\\work')]);
+    const r1 = await canUseTool('Read', { file_path: P('C:\\anywhere') }, { signal: undefined });
     expect(r1).toMatchObject({ behavior: 'allow' });
     // Bash 纯读命令（无重定向/cp/mv/tee/mkdir/touch）→ 提取不到写路径 → 放行。
     const r2 = await canUseTool('Bash', { command: 'ls -la /' }, { signal: undefined });
@@ -159,28 +160,28 @@ describe('默认 chat（enableApproval=false）写拦截 — PolicyEngine.canWri
   });
 
   it('Edit / MultiEdit 越界同样 deny（中文文案）', async () => {
-    const { canUseTool } = await makeChatSession(['C:\\work']);
-    const e = await canUseTool('Edit', { file_path: 'C:\\out\\x' }, { signal: undefined });
+    const { canUseTool } = await makeChatSession([P('C:\\work')]);
+    const e = await canUseTool('Edit', { file_path: P('C:\\out\\x') }, { signal: undefined });
     expect(e).toMatchObject({ behavior: 'deny' });
     const m = await canUseTool(
       'MultiEdit',
-      { file_path: 'C:\\out\\y' },
+      { file_path: P('C:\\out\\y') },
       { signal: undefined },
     );
     expect(m).toMatchObject({ behavior: 'deny' });
   });
 
   it('path 字段（非 file_path）→ 也校验', async () => {
-    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const { canUseTool } = await makeChatSession([P('C:\\work')]);
     // 白名单内 path 字段 → allow。
     const inside = await canUseTool(
       'Write',
-      { path: 'C:\\work\\sub\\b.txt' },
+      { path: P('C:\\work\\sub\\b.txt') },
       { signal: undefined },
     );
     expect(inside).toMatchObject({ behavior: 'allow' });
     // 白名单外 path 字段 → deny。
-    const outside = await canUseTool('Write', { path: 'D:\\elsewhere' }, { signal: undefined });
+    const outside = await canUseTool('Write', { path: P('D:\\elsewhere') }, { signal: undefined });
     expect(outside).toMatchObject({ behavior: 'deny' });
   });
 });
@@ -207,47 +208,47 @@ describe('Shell 工具间接写 — extractShellWritePaths + canWrite', () => {
   }
 
   it('Bash 重定向 > 白名单外 → deny', async () => {
-    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const { canUseTool } = await makeChatSession([P('C:\\work')]);
     const res = await canUseTool(
       'Bash',
-      { command: 'echo hello > C:\\evil\\out.txt' },
+      { command: `echo hello > ${P('C:\\evil\\out.txt')}` },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
   });
 
   it('Bash 重定向 > 白名单内 → allow', async () => {
-    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const { canUseTool } = await makeChatSession([P('C:\\work')]);
     const res = await canUseTool(
       'Bash',
-      { command: 'echo hello > C:\\work\\out.txt' },
+      { command: `echo hello > ${P('C:\\work\\out.txt')}` },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'allow' });
   });
 
   it('Bash cp 目标在白名单外 → deny', async () => {
-    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const { canUseTool } = await makeChatSession([P('C:\\work')]);
     const res = await canUseTool(
       'Bash',
-      { command: 'cp C:\\work\\src.txt C:\\evil\\dst.txt' },
+      { command: `cp ${P('C:\\work\\src.txt')} ${P('C:\\evil\\dst.txt')}` },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
   });
 
   it('Bash 混合读+写，写越界 → deny', async () => {
-    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const { canUseTool } = await makeChatSession([P('C:\\work')]);
     const res = await canUseTool(
       'Bash',
-      { command: 'ls C:\\work && echo x > C:\\evil\\out.txt' },
+      { command: `ls ${P('C:\\work')} && echo x > ${P('C:\\evil\\out.txt')}` },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
   });
 
   it('Bash 2>&1 不算写路径（fd 重定向）→ allow', async () => {
-    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const { canUseTool } = await makeChatSession([P('C:\\work')]);
     const res = await canUseTool(
       'Bash',
       { command: 'cmd 2>&1' },
@@ -257,20 +258,20 @@ describe('Shell 工具间接写 — extractShellWritePaths + canWrite', () => {
   });
 
   it('PowerShell Out-File 白名单外 → deny', async () => {
-    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const { canUseTool } = await makeChatSession([P('C:\\work')]);
     const res = await canUseTool(
       'PowerShell',
-      { command: 'Out-File -FilePath C:\\evil\\p.txt -InputObject x' },
+      { command: `Out-File -FilePath ${P('C:\\evil\\p.txt')} -InputObject x` },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
   });
 
   it('CMD echo > 白名单外 → deny', async () => {
-    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const { canUseTool } = await makeChatSession([P('C:\\work')]);
     const res = await canUseTool(
       'CMD',
-      { command: 'echo x > C:\\evil\\c.txt' },
+      { command: `echo x > ${P('C:\\evil\\c.txt')}` },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
@@ -281,30 +282,30 @@ describe('Shell 工具间接写 — extractShellWritePaths + canWrite', () => {
   // _shellKindOfTool('Bash')→'bash' 仅 bash 提取，漏 PowerShell cmdlet →
   // Set-Content 绕过（真机 e2e 发现）。修复后合并 bash+powershell+cmd 三提取。
   it('ql-20260703-001: Bash tool 跑 powershell Set-Content -Path 越界 → deny', async () => {
-    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const { canUseTool } = await makeChatSession([P('C:\\work')]);
     const res = await canUseTool(
       'Bash',
-      { command: 'powershell -Command "Set-Content -Path C:\\evil\\a.txt -Value x"' },
+      { command: `powershell -Command "Set-Content -Path ${P('C:\\evil\\a.txt')} -Value x"` },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
   });
 
   it('ql-20260703-001: Bash tool 跑 powershell Set-Content 位置参数越界 → deny', async () => {
-    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const { canUseTool } = await makeChatSession([P('C:\\work')]);
     const res = await canUseTool(
       'Bash',
-      { command: 'powershell -Command "Set-Content C:\\evil\\a.txt x"' },
+      { command: `powershell -Command "Set-Content ${P('C:\\evil\\a.txt')} x"` },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
   });
 
   it('ql-20260703-001: Bash tool 跑 pwsh Out-File 越界 → deny', async () => {
-    const { canUseTool } = await makeChatSession(['C:\\work']);
+    const { canUseTool } = await makeChatSession([P('C:\\work')]);
     const res = await canUseTool(
       'Bash',
-      { command: 'pwsh -Command "Out-File -FilePath C:\\evil\\b.txt -InputObject y"' },
+      { command: `pwsh -Command "Out-File -FilePath ${P('C:\\evil\\b.txt')} -InputObject y"` },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
@@ -316,8 +317,8 @@ describe('Shell 工具间接写 — extractShellWritePaths + canWrite', () => {
 describe('runtimeId 透传到 PolicyEngine（per-runtime 隔离 D-002）', () => {
   it('A runtime allow 的路径对 B runtime 不可见（deny）', async () => {
     const cache = new PolicyCache();
-    cache.set('rt-A', ['C:\\workA']);
-    cache.set('rt-B', ['C:\\workB']);
+    cache.set('rt-A', [P('C:\\workA')]);
+    cache.set('rt-B', [P('C:\\workB')]);
     const engine = new PolicyEngine(cache, new AuditSink());
 
     let currentRid = 'rt-A';
@@ -335,25 +336,25 @@ describe('runtimeId 透传到 PolicyEngine（per-runtime 隔离 D-002）', () =>
     // rt-A：C:\workA\x allow；C:\workB\x deny。
     currentRid = 'rt-A';
     expect(
-      await canUseTool('Write', { file_path: 'C:\\workA\\x.txt' }, { signal: undefined }),
+      await canUseTool('Write', { file_path: P('C:\\workA\\x.txt') }, { signal: undefined }),
     ).toMatchObject({ behavior: 'allow' });
     expect(
-      await canUseTool('Write', { file_path: 'C:\\workB\\x.txt' }, { signal: undefined }),
+      await canUseTool('Write', { file_path: P('C:\\workB\\x.txt') }, { signal: undefined }),
     ).toMatchObject({ behavior: 'deny' });
 
     // rt-B：C:\workB\x allow；C:\workA\x deny。
     currentRid = 'rt-B';
     expect(
-      await canUseTool('Write', { file_path: 'C:\\workB\\x.txt' }, { signal: undefined }),
+      await canUseTool('Write', { file_path: P('C:\\workB\\x.txt') }, { signal: undefined }),
     ).toMatchObject({ behavior: 'allow' });
     expect(
-      await canUseTool('Write', { file_path: 'C:\\workA\\x.txt' }, { signal: undefined }),
+      await canUseTool('Write', { file_path: P('C:\\workA\\x.txt') }, { signal: undefined }),
     ).toMatchObject({ behavior: 'deny' });
   });
 
   it('runtimeId 为空 → PolicyCache 未命中 deny（fail-closed D-007）', async () => {
     const cache = new PolicyCache();
-    cache.set('rt-real', ['C:\\work']);
+    cache.set('rt-real', [P('C:\\work')]);
     const engine = new PolicyEngine(cache, new AuditSink());
     const { driver, getOpts } = makeDriverCapturingOpts();
     const sm = new SessionManager(
@@ -367,7 +368,7 @@ describe('runtimeId 透传到 PolicyEngine（per-runtime 隔离 D-002）', () =>
     const canUseTool = getOpts()?.canUseTool!;
     const res = await canUseTool(
       'Write',
-      { file_path: 'C:\\work\\a.txt' },
+      { file_path: P('C:\\work\\a.txt') },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
@@ -403,10 +404,10 @@ describe('enableApproval=true（人审）路径前置写校验', () => {
   }
 
   it('写越界 → 直接 deny，不触发远程人审（send 未调用）', async () => {
-    const { canUseTool, sendMock } = await makeApprovalSession(['C:\\work']);
+    const { canUseTool, sendMock } = await makeApprovalSession([P('C:\\work')]);
     const res = await canUseTool(
       'Write',
-      { file_path: 'C:\\out\\secret.txt' },
+      { file_path: P('C:\\out\\secret.txt') },
       { signal: undefined },
     );
     expect(res).toMatchObject({ behavior: 'deny' });
@@ -429,18 +430,18 @@ describe('向后兼容：不注入 policyEngine → allowedRootsProvider fallbac
     const { driver, getOpts } = makeDriverCapturingOpts();
     const sm = new SessionManager(
       { driver, ...noopDeps },
-      { allowedRootsProvider: () => ['C:\\work'] },
+      { allowedRootsProvider: () => [P('C:\\work')] },
     );
     await sm.create({ ...BASE_INPUT, manualApproval: false });
     const canUseTool = getOpts()?.canUseTool!;
     // 白名单内 allow。
     expect(
-      await canUseTool('Write', { file_path: 'C:\\work\\a.txt' }, { signal: undefined }),
+      await canUseTool('Write', { file_path: P('C:\\work\\a.txt') }, { signal: undefined }),
     ).toMatchObject({ behavior: 'allow' });
     // 越界 deny（fallback 文案：path outside allowed_roots）。
     const deny = await canUseTool(
       'Write',
-      { file_path: 'C:\\evil\\a.txt' },
+      { file_path: P('C:\\evil\\a.txt') },
       { signal: undefined },
     );
     expect(deny).toMatchObject({ behavior: 'deny' });

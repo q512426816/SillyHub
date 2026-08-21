@@ -45,9 +45,12 @@ describe('permission-rules', () => {
   });
 
   it('去重相同路径', () => {
-    const { allow } = buildWritePermissionRules(['/tmp', '/tmp']);
-    const writeCount = allow.filter((r) => r.startsWith('Write(/tmp')).length;
-    // 每个写工具对 /tmp 只 1 条（去重）
-    expect(writeCount).toBe(2); // Write(/tmp/**) + Write(/tmp)
+    // 计数断言需用不与 SILLYSPEC_TEMP_PATTERNS 撞车的路径：Linux 上
+    // os.tmpdir() 即 /tmp，传入 /tmp 会叠加临时路径放行规则 → 计数 4 ≠ 2。
+    const root = '/ws/dedupe-root';
+    const { allow } = buildWritePermissionRules([root, root]);
+    const writeCount = allow.filter((r) => r.startsWith(`Write(${root}`)).length;
+    // 每个写工具对 root 只 1 条（去重）
+    expect(writeCount).toBe(2); // Write(root/**) + Write(root)
   });
 });

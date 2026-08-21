@@ -15,9 +15,9 @@ from app.modules.session_attachment.capability import (
 )
 from app.modules.session_attachment.model import SessionAttachment
 from app.modules.session_attachment.service import (
+    MAX_INLINE_ATTACHMENTS_BYTES,
     assemble_inject_attachments,
     attachment_marker_line,
-    MAX_INLINE_ATTACHMENTS_BYTES,
 )
 from app.modules.session_attachment.storage import SessionAttachmentStorage
 
@@ -54,8 +54,14 @@ def _row(kind: str = "image", media: str = "image/png", size: int = 1000) -> Ses
 
 def test_multimodal_heuristic_table() -> None:
     supports = [
-        "glm-4.6v", "GLM-4.5V", "qwen3-vl-plus", "gpt-4o-mini", "gpt-5",
-        "claude-sonnet-4-5", "gemini-2.5-pro", "o3",
+        "glm-4.6v",
+        "GLM-4.5V",
+        "qwen3-vl-plus",
+        "gpt-4o-mini",
+        "gpt-5",
+        "claude-sonnet-4-5",
+        "gemini-2.5-pro",
+        "o3",
     ]
     rejects = ["glm-4.5", "deepseek-v3", "my-relay-alias", "", None]
     for name in supports:

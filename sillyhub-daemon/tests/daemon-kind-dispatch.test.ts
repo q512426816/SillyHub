@@ -640,7 +640,15 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
     });
     await sleep(30);
 
-    expect(sessionManager.inject).toHaveBeenCalledWith('sess-1', 'follow up', 'run-2');
+    // 2026-08-20-session-multimodal-attachments 后 inject 固定 5 参（无附件时
+    // attachments/downloadAttachment 为 undefined），断言需带全。
+    expect(sessionManager.inject).toHaveBeenCalledWith(
+      'sess-1',
+      'follow up',
+      'run-2',
+      undefined,
+      undefined,
+    );
     await daemon.stop();
   });
 
