@@ -209,6 +209,27 @@ export interface PpmPageResp<T> {
 const DEFAULT_PAGE_SIZE = 20;
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
+// ── 业务列默认宽兜底 ─────────────────────────────────────────────────────
+// 依据 2026-08-21-table-column-resize design.md §5-2 / D-502@v2(Grill P1-3):
+// DataTable 仅给 number width 的列挂拖拽手柄,PpmFieldDef 未显式给 width 的
+// 业务列按字段类型映射默认宽,使 PPM 资源表业务列全部可拖;
+// 显式传入的 width(含 string 如 "20%")原样透传,不受此兜底影响。
+const PPM_FIELD_DEFAULT_WIDTH: Record<PpmFieldType, number> = {
+  text: 160, // 文本
+  textarea: 160, // 长文本
+  date: 130, // 日期
+  datetime: 130, // 日期时间
+  number: 110, // 数字
+  select: 120, // 枚举(布尔无独立类型,由 select 承载)
+};
+/** type 未声明的字段兜底宽。 */
+const PPM_FIELD_FALLBACK_WIDTH = 140;
+
+/** 无显式 width 的业务列按字段类型取默认宽(P1-3 兜底)。 */
+function ppmDefaultColumnWidth(type: PpmFieldType | undefined): number {
+  return (type && PPM_FIELD_DEFAULT_WIDTH[type]) || PPM_FIELD_FALLBACK_WIDTH;
+}
+
 export function PpmResourceTable<
   T extends { id: string },
   CreateBody,
@@ -430,7 +451,8 @@ export function PpmResourceTable<
         title: f.label,
         dataIndex: f.name as string,
         key: f.name as string,
-        width: f.width,
+        // 无 width 业务列按字段类型兜底默认宽(Grill P1-3),保证列可拖
+        width: f.width ?? ppmDefaultColumnWidth(f.type),
         sorter: f.type === "number",
         render: (value: unknown, row: T) => {
           if (f.render) return f.render(value, row);

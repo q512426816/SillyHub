@@ -3,7 +3,11 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
+
 import { Badge } from "@/components/ui/badge";
+import { ErrorBanner } from "@/components/ui/error-banner";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
 // 复用统一 sanitize 插件（task-13 / FR-13）：文件预览内容不可信，渲染管线必须过滤
 import { markdownRehypePlugins } from "@/components/ui/markdown-text";
@@ -31,14 +35,18 @@ interface Props {
 
 type SaveStatus = "idle" | "saving" | "done" | "pending" | "failed";
 
+// ql-20260821-016：内联 SVG 换 lucide 图标（原 FolderIcon amber-500 硬编码
+// 不随主题，且内联 SVG 不走图标库规范）。import 见文件头。
 function FolderIcon({ open }: { open?: boolean }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-amber-500"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><path d="M12 10h6"/></svg>
+  return open ? (
+    <FolderOpen className="h-3.5 w-3.5 shrink-0 text-brand-600" aria-hidden />
+  ) : (
+    <Folder className="h-3.5 w-3.5 shrink-0 text-brand-600" aria-hidden />
   );
 }
 
 function FileIcon() {
-  return <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted-foreground"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg>;
+  return <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />;
 }
 
 // 是否可渲染预览的 HTML 文件（后端 _TEXT_SUFFIXES 已含 .html/.htm，此处对齐大小写无关）
@@ -123,12 +131,16 @@ function TreeView({
           return (
             <div key={node.path}>
               <button
-                className="flex w-full items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50"
+                className="group flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs transition-colors hover:bg-brand-50"
                 style={{ paddingLeft: `${depth * 16 + 8}px` }}
                 onClick={() => toggle(node.path)}
               >
+                <ChevronRight
+                  className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`}
+                  aria-hidden
+                />
                 <FolderIcon open={isOpen} />
-                <span className="truncate font-medium">{node.name}</span>
+                <span className="truncate font-medium text-foreground">{node.name}</span>
               </button>
               {isOpen && (
                 <TreeView
@@ -149,8 +161,10 @@ function TreeView({
         return (
           <button
             key={doc.path}
-            className={`flex w-full items-center gap-1.5 rounded px-2 py-1 hover:bg-muted/50 ${
-              isSelected ? "bg-muted/70" : ""
+            className={`flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs transition-colors ${
+              isSelected
+                ? "bg-brand-50 font-medium text-brand-700"
+                : "text-foreground hover:bg-brand-50"
             }`}
             style={{ paddingLeft: `${depth * 16 + 8}px` }}
             onClick={() => onSelect(doc)}
@@ -329,8 +343,8 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
       )}
 
       {error && (
-        <div className="m-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
-          {error}
+        <div className="m-3">
+          <ErrorBanner message={error} onRetry={() => void refreshTree()} />
         </div>
       )}
 
@@ -341,15 +355,13 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
           {loading ? (
             <p className="px-2 py-4 text-center text-xs text-muted-foreground">加载中…</p>
           ) : tree.length === 0 ? (
-            <div className="px-2 py-4 text-center text-xs text-muted-foreground">
-              <p>暂无文件</p>
-              {/* ql-20260816-005：新建 change 进度走 CLI 直推（立即可见）而文件镜像走
-                  daemon 同步（滞后），空树期间用户误以为文件丢失——补行动指引。 */}
-              <p className="mt-1 text-[11px] leading-relaxed opacity-80">
-                若刚创建变更，文件可能尚未同步到平台镜像：可到工作区页的配置卡点
-                「同步到服务器」，完成后刷新查看
-              </p>
-            </div>
+            // ql-20260816-005：新建 change 进度走 CLI 直推（立即可见）而文件镜像走
+            // daemon 同步（滞后），空树期间用户误以为文件丢失——补行动指引。
+            <EmptyState
+              icon={<Folder className="h-6 w-6" />}
+              title="暂无文件"
+              description="若刚创建变更，文件可能尚未同步到平台镜像：可到工作区页的配置卡点「同步到服务器」，完成后刷新查看"
+            />
           ) : (
             <TreeView
               nodes={tree}

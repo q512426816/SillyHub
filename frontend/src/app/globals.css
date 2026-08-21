@@ -443,3 +443,34 @@
     opacity: 0.35;
   }
 }
+
+/* =============================================================
+   task-01 表格列宽拖拽（2026-08-21-table-column-resize / D-501~503）。
+   置于文件级(非 @layer)：类名由 use-resizable-columns.ts 运行时引用且与
+   .ant-table-cell 表头运行时类共存，同 ql-20260820-009 先例位置（@layer 内
+   未命中 content 的选择器会被 Tailwind purge）。
+   - .sh-resize-handle  表头右缘 7px 拖拽命中区（right:-3px 跨界好抓；
+     定位前提：antd 6 th 自带 position:relative 已实证）
+   - .active            拖拽激活态（hook 在阈值激活后经 classList 挂上）
+   - .sh-col-resizing   拖拽中挂 body：禁文本选中 + col-resize 光标
+   高亮色走 --color-brand-400 主题变量随 data-theme 换肤。
+   ============================================================= */
+.sh-resize-handle {
+  position: absolute;
+  right: -3px;
+  top: 0;
+  z-index: 1;
+  width: 7px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+}
+.sh-resize-handle:hover,
+.sh-resize-handle.active {
+  background: var(--color-brand-400);
+}
+.sh-col-resizing,
+.sh-col-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
