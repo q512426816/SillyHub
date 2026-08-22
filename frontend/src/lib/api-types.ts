@@ -4138,10 +4138,13 @@ export interface paths {
          * @description List the current user's AgentSessions (owner-scoped, stable paging).
          *
          *     task-06 / FR-02 / D-003@v1：可选过滤参数 runtime_id / machine_id（经
-         *     daemon_runtimes 关联）/ provider / q（标题模糊，实现为 user_input 内容
+         *     daemon_runtimes 关联）/ provider / q（标题模糊，实现为 user_input 的内容
          *     ilike，见 service 层 docstring）；全部可选，不传时查询与现状一致（零回归）。
          *     过滤在 SQL 层完成，total 为过滤后总数（R-04 真分页），分页 limit/offset
          *     作用于过滤结果。machine_id 不匹配 runtime 缺失的旧会话（无 runtime 即无机器）。
+         *     2026-08-22-workspace-sessions-portal / D-003@v2：新增可选 workspace_id /
+         *     change_id（AgentSession 冗余绑定列精确匹配），供 workspace/change 级会话
+         *     门户复用全局端点做 scope 过滤；不传 = 现状（零回归）。
          */
         get: operations["list_sessions_api_daemon_sessions_get"];
         put?: never;
@@ -25589,6 +25592,8 @@ export interface operations {
                 machine_id?: string | null;
                 provider?: ("claude" | "codex") | null;
                 q?: string | null;
+                workspace_id?: string | null;
+                change_id?: string | null;
             };
             header?: never;
             path?: never;

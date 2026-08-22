@@ -11197,7 +11197,7 @@
           "daemon"
         ],
         "summary": "List Sessions",
-        "description": "List the current user's AgentSessions (owner-scoped, stable paging).\n\ntask-06 / FR-02 / D-003@v1：可选过滤参数 runtime_id / machine_id（经\ndaemon_runtimes 关联）/ provider / q（标题模糊，实现为 user_input 内容\nilike，见 service 层 docstring）；全部可选，不传时查询与现状一致（零回归）。\n过滤在 SQL 层完成，total 为过滤后总数（R-04 真分页），分页 limit/offset\n作用于过滤结果。machine_id 不匹配 runtime 缺失的旧会话（无 runtime 即无机器）。",
+        "description": "List the current user's AgentSessions (owner-scoped, stable paging).\n\ntask-06 / FR-02 / D-003@v1：可选过滤参数 runtime_id / machine_id（经\ndaemon_runtimes 关联）/ provider / q（标题模糊，实现为 user_input 的内容\nilike，见 service 层 docstring）；全部可选，不传时查询与现状一致（零回归）。\n过滤在 SQL 层完成，total 为过滤后总数（R-04 真分页），分页 limit/offset\n作用于过滤结果。machine_id 不匹配 runtime 缺失的旧会话（无 runtime 即无机器）。\n2026-08-22-workspace-sessions-portal / D-003@v2：新增可选 workspace_id /\nchange_id（AgentSession 冗余绑定列精确匹配），供 workspace/change 级会话\n门户复用全局端点做 scope 过滤；不传 = 现状（零回归）。",
         "operationId": "list_sessions_api_daemon_sessions_get",
         "parameters": [
           {
@@ -11315,6 +11315,40 @@
                 }
               ],
               "title": "Q"
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "change_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Change Id"
             }
           }
         ],

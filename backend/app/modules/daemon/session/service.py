@@ -2416,6 +2416,10 @@ class SessionService:
         machine_id: uuid.UUID | None = None,
         provider: str | None = None,
         q: str | None = None,
+        # 2026-08-22-workspace-sessions-portal / D-003@v2：workspace/change 级
+        # 门户复用全局列表做 scope 过滤（照 runtime_id 模式，可选零回归）。
+        workspace_id: uuid.UUID | None = None,
+        change_id: uuid.UUID | None = None,
     ) -> tuple[list[AgentSession], int]:
         """Owner-scoped list of AgentSession with stable paging.
 
@@ -2435,6 +2439,13 @@ class SessionService:
           ilike q 的日志」EXISTS 过滤——title 恒为某条 user_input 的前缀，
           语义上为标题搜索的超集（无漏报）；``%``/``_``/反斜杠 按字面转义，
           参数经 SQLAlchemy 绑定（防注入）。
+
+        2026-08-22-workspace-sessions-portal / D-003@v2 新增（可选，零回归）：
+
+        - ``workspace_id``：``AgentSession.workspace_id`` 冗余绑定列精确匹配
+          （未绑定 workspace 的旧会话不匹配）。
+        - ``change_id``：``AgentSession.change_id`` 精确匹配；scope=change 的
+          门户查询形态为 ``workspace_id`` + ``change_id`` 双传取交集。
         """
         from sqlalchemy import exists, func
 
@@ -2446,6 +2457,11 @@ class SessionService:
             base_filters.append(AgentSession.status == status_filter)
         if runtime_id is not None:
             base_filters.append(AgentSession.runtime_id == runtime_id)
+        # 2026-08-22-workspace-sessions-portal / D-003@v2：scope 精确匹配过滤。
+        if workspace_id is not None:
+            base_filters.append(AgentSession.workspace_id == workspace_id)
+        if change_id is not None:
+            base_filters.append(AgentSession.change_id == change_id)
         if machine_id is not None:
             base_filters.append(
                 exists().where(

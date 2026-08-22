@@ -19,14 +19,17 @@
  *   8. 空态；错误态
  *   9. 虚拟滚动：大列表只渲染可视区（mount 即可，不测滚动物理行为）
  *   10. 加载更多（后端真分页 offset 递增，R-04）
- *   11. workspace scope（2026-08-22-workspace-sessions-portal task-04 /
- *      D-003@v1 直接断言）：数据源切 listWorkspaceAgentSessions(ws,
- *      include_ended=true) 且 listAgentSessions 零调用；仅本人过滤（他人
- *      剔除、author 缺失保留）
- *   12. scope 筛选条降级（Grill P1-2）：状态/机器/引擎三控件不渲染、本地
- *      标题搜索客户端过滤（不重查）、「加载更多」不出现（单页合成）
- *   13. scope 瘦字段降级（Grill P1-1 / design §4.B）：条目无 runtime_id /
- *      config_snapshot → 机器/档案/供应商 chips 不渲染，时间列相对时间或 —
+ *   11. workspace/change scope 数据源（2026-08-22-workspace-sessions-portal
+ *      task-11 v3 返工 / D-003@v2）：走全局端点 listAgentSessions 带过滤参
+ *      （workspace 只传 workspace_id；change 双传 workspace_id+change_id），
+ *      v2 两 scope 端点（listWorkspaceAgentSessions/listChangeSessions）零调用
+ *   12. scope 筛选条渲染（Grill P1-2 v3 反转）：状态/机器/引擎三控件在
+ *      scope 模式照常渲染（v2 隐藏特例已删），筛选照常走服务端参数
+ *      （scope 过滤参 + 筛选参同传，与全局同构）
+ *   13. scope 全字段渲染 + 端点过滤（Grill P1-1 / D-003@v2）：喂
+ *      AgentSessionRead 全字段形状 → chips（机器/引擎/档案/供应商）+
+ *      相对时间照常渲染（v2 瘦字段降级已删）；他人会话由端点过滤——
+ *      mock 返回什么显示什么（v2 客户端仅本人过滤已删）
  *
  * mock 策略：直接 mock 组件消费的模块（@/lib/daemon 的 listAgentSessions /
  * @/lib/use-daemon-machines），@/lib/api 保留真实（ApiError instanceof 用）。
@@ -55,7 +58,6 @@ import {
   type SessionListScope,
 } from "@/components/sessions/session-list-panel";
 import type {
-  AgentSessionListItem,
   AgentSessionRead,
   DaemonMachineRead,
   DaemonRuntimeRead,
@@ -65,28 +67,20 @@ import type {
 
 const mocks = vi.hoisted(() => ({
   listAgentSessions: vi.fn(),
-  // task-04 scope 契约（2026-08-22-workspace-sessions-portal task-08 补测）：
+  // v2 两 scope 端点保留 mock 仅为 D-003@v2 零调用断言（数据源已切全局端点）。
   listWorkspaceAgentSessions: vi.fn(),
   listChangeSessions: vi.fn(),
-  // D-003@v1 仅本人过滤：当前用户锚点（useSession 选择器入参状态）
-  sessionUser: { id: "u-me" } as { id: string } | null,
   machinesHook: vi.fn(),
   machinesRefetch: vi.fn(),
 }));
 
-// 组件只消费三个列表函数（类型导入编译期擦除），局部 mock 不加载真实 daemon.ts。
+// 组件只消费 listAgentSessions（类型导入编译期擦除），局部 mock 不加载真实
+// daemon.ts；两 scope 端点 mock 供零调用断言。
 vi.mock("@/lib/daemon", () => ({
   listAgentSessions: (...args: unknown[]) => mocks.listAgentSessions(...args),
   listWorkspaceAgentSessions: (...args: unknown[]) =>
     mocks.listWorkspaceAgentSessions(...args),
   listChangeSessions: (...args: unknown[]) => mocks.listChangeSessions(...args),
-}));
-
-// task-08（D-003@v1）：scope 模式仅本人过滤经 useSession 取当前用户——
-// mock 成可控用户（默认 u-me）。
-vi.mock("@/stores/session", () => ({
-  useSession: (selector: (_s: { user: { id: string } | null }) => unknown) =>
-    selector({ user: mocks.sessionUser }),
 }));
 
 vi.mock("@/lib/use-daemon-machines", () => ({
@@ -210,26 +204,6 @@ function listResponse(items: AgentSessionRead[], extra: Partial<{ total: number 
   };
 }
 
-/**
- * scope 端点瘦 item 固件（task-04 契约，对齐 daemon.ts AgentSessionListItem；
- * author 缺失场景传 `{ author: undefined }`——运行时旧数据形态，类型断言兜住）。
- */
-function makeScopeItem(
-  overrides: Partial<AgentSessionListItem> = {},
-): AgentSessionListItem {
-  return {
-    id: "s-own",
-    provider: "claude",
-    status: "active",
-    turn_count: 3,
-    mode: null,
-    author: { user_id: "u-me", display_name: "我" },
-    last_active_at: "2026-08-15T09:00:00Z",
-    title: "我的会话",
-    ...overrides,
-  } as AgentSessionListItem;
-}
-
 /** 设置 useDaemonMachines 返回（默认成功空集）。 */
 function setMachines(r: Partial<{ items: DaemonMachineRead[] }> = {}) {
   mocks.machinesHook.mockReturnValue({
@@ -318,10 +292,9 @@ function lastCallArgs(): Record<string, unknown> {
 
 beforeEach(() => {
   mocks.listAgentSessions.mockReset().mockResolvedValue(listResponse([]));
-  // task-08：scope 两 API + 仅本人过滤用户锚点复位
+  // D-003@v2：两 scope 端点仅剩零调用断言用途
   mocks.listWorkspaceAgentSessions.mockReset().mockResolvedValue([]);
   mocks.listChangeSessions.mockReset().mockResolvedValue([]);
-  mocks.sessionUser = { id: "u-me" };
   setMachines();
   mocks.machinesRefetch.mockReset();
 });
@@ -674,7 +647,7 @@ describe("SessionListPanel 加载更多", () => {
   });
 });
 
-// ── 11/12/13. workspace scope（task-04 / FR-04 / D-003@v1，QA §4.F 直接断言） ──
+// ── 11/12/13. scope 用例（task-11 v3 返工 / D-003@v2，QA §4.F 直接断言） ──
 //
 // 核心语义此前的落点在 sessions-portal.test.tsx（门户集成），此处补组件级
 // 直接断言。缺省（不传 scope）全局路径回归由 §1「初次渲染默认查询」既有
@@ -684,110 +657,138 @@ const WORKSPACE_SCOPE: SessionListScope = {
   kind: "workspace",
   workspaceId: "ws-1",
 };
+const CHANGE_SCOPE: SessionListScope = {
+  kind: "change",
+  workspaceId: "ws-1",
+  changeId: "chg-1",
+};
 
-describe("SessionListPanel workspace scope 数据源与仅本人过滤（D-003@v1）", () => {
-  it("走 listWorkspaceAgentSessions(ws, include_ended=true) 且 listAgentSessions 零调用；他人会话剔除、author 缺失保留", async () => {
-    // 跨成员返回固件：本人 + 他人 + author 缺失（旧数据）三条
-    mocks.listWorkspaceAgentSessions.mockResolvedValue([
-      makeScopeItem({ id: "s-own-1", title: "我的会议纪要" }),
-      makeScopeItem({
-        id: "s-other",
-        title: "同事的会话",
-        author: { user_id: "u-other", display_name: "张三" },
-      }),
-      makeScopeItem({ id: "s-legacy", title: "旧数据会话", author: undefined }),
-    ]);
+describe("SessionListPanel scope 数据源切全局端点（D-003@v2）", () => {
+  it("workspace scope：listAgentSessions 带 workspace_id（单参）；v2 两 scope 端点零调用", async () => {
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([makeSession({ id: "s-ws", title: "工作区会话" })]),
+    );
     renderPanel(<SessionListPanel scope={WORKSPACE_SCOPE} />);
 
     expect(
-      await screen.findByRole("button", { name: "会话 我的会议纪要" }),
+      await screen.findByRole("button", { name: "会话 工作区会话" }),
     ).toBeInTheDocument();
-    // 数据源：workspace 端点带 include_ended=true；全局/变更端点零调用
-    expect(mocks.listWorkspaceAgentSessions).toHaveBeenCalledTimes(1);
-    expect(mocks.listWorkspaceAgentSessions).toHaveBeenCalledWith("ws-1", {
-      include_ended: true,
-    });
-    expect(mocks.listAgentSessions).not.toHaveBeenCalled();
+    // 数据源（v3 反转）：全局端点 + workspace_id 过滤参（含既有 limit）
+    expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
+    expect(lastCallArgs()).toEqual({ limit: 50, workspace_id: "ws-1" });
+    expect(mocks.listWorkspaceAgentSessions).not.toHaveBeenCalled();
     expect(mocks.listChangeSessions).not.toHaveBeenCalled();
+  });
 
-    // 仅本人过滤（Grill P0-1）：attach 端点 owner-only → 他人会话剔除；
-    // author 缺失（旧数据）视为本人保留
+  it("change scope：listAgentSessions workspace_id + change_id 双传（change 隐含 workspace）", async () => {
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([makeSession({ id: "s-chg", title: "变更会话" })]),
+    );
+    renderPanel(<SessionListPanel scope={CHANGE_SCOPE} />);
+
     expect(
-      screen.getByRole("button", { name: "会话 旧数据会话" }),
+      await screen.findByRole("button", { name: "会话 变更会话" }),
+    ).toBeInTheDocument();
+    expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
+    expect(lastCallArgs()).toEqual({
+      limit: 50,
+      workspace_id: "ws-1",
+      change_id: "chg-1",
+    });
+    expect(mocks.listWorkspaceAgentSessions).not.toHaveBeenCalled();
+    expect(mocks.listChangeSessions).not.toHaveBeenCalled();
+  });
+
+  it("他人会话由端点过滤：mock 返回什么显示什么（客户端零过滤，v2 仅本人过滤已删）", async () => {
+    // D-003@v2：owner 隔离 + scope 过滤都是端点 SQL 层职责，前端透传过滤参
+    // 即完成；列表对端点返回的条目原样渲染（user_id ≠ 当前用户也不剔除）。
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-own", title: "我的会话", user_id: "u-me" }),
+        makeSession({
+          id: "s-other",
+          title: "同事的会话",
+          user_id: "u-other",
+        }),
+      ]),
+    );
+    renderPanel(<SessionListPanel scope={WORKSPACE_SCOPE} />);
+
+    expect(
+      await screen.findByRole("button", { name: "会话 我的会话" }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: "会话 同事的会话" }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: "会话 同事的会话" }),
+    ).toBeInTheDocument();
+    // 过滤参已透传（端点职责），客户端计数 = 端点返回 total
+    expect(lastCallArgs()).toEqual({ limit: 50, workspace_id: "ws-1" });
     expect(screen.getByText("共 2 个")).toBeInTheDocument();
   });
 });
 
-describe("SessionListPanel workspace scope 筛选条降级与本地搜索（Grill P1-2）", () => {
-  it("状态/机器/引擎三控件不渲染；标题搜索回车客户端过滤（不重查）；「加载更多」不出现", async () => {
-    mocks.listWorkspaceAgentSessions.mockResolvedValue([
-      makeScopeItem({ id: "s-a", title: "会议纪要整理" }),
-      makeScopeItem({ id: "s-b", title: "代码评审记录" }),
-    ]);
-    renderPanel(<SessionListPanel scope={WORKSPACE_SCOPE} />);
-
-    await waitFor(() => expect(sessionRows().length).toBe(2));
-
-    // 服务端筛选三控件隐藏（两 scope 端点不收这些参数）
-    expect(document.getElementById("slp-status")).toBeNull();
-    expect(document.getElementById("slp-machine")).toBeNull();
-    expect(document.querySelector(".ant-segmented")).toBeNull();
-
-    // 本地标题搜索仍可用：回车 → 客户端过滤
-    const input = screen.getByLabelText("搜索会话标题");
-    fireEvent.change(input, { target: { value: "会议" } });
-    fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "会话 会议纪要整理" }),
-      ).toBeInTheDocument();
+describe("SessionListPanel scope 筛选条渲染（Grill P1-2 v3 反转）", () => {
+  it("状态/机器/引擎三控件在 scope 模式照常渲染；服务端筛选照常带参（与全局同构）", async () => {
+    setMachines({
+      items: [
+        makeMachine({ id: "m-1", runtimes: [makeRuntime({ id: "rt-m1" })] }),
+      ],
     });
-    expect(
-      screen.queryByRole("button", { name: "会话 代码评审记录" }),
-    ).not.toBeInTheDocument();
-    // scope queryKey 不含 q → 客户端过滤不触发重查
-    expect(mocks.listWorkspaceAgentSessions).toHaveBeenCalledTimes(1);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([makeSession({ id: "s-ws", title: "工作区会话" })]),
+    );
+    renderPanel(<SessionListPanel scope={WORKSPACE_SCOPE} />);
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1));
 
-    // 整列单页合成（getNextPageParam 恒 undefined）→ 无「加载更多」
-    expect(
-      screen.queryByRole("button", { name: /加载更多/ }),
-    ).not.toBeInTheDocument();
+    // 三控件渲染（v3：v2 的 scope 隐藏特例已删）
+    expect(document.getElementById("slp-status")).not.toBeNull();
+    expect(document.getElementById("slp-machine")).not.toBeNull();
+    expect(document.querySelector(".ant-segmented")).not.toBeNull();
+
+    // 服务端筛选照常：scope 过滤参 + 筛选参同传
+    await chooseAntdOptionByText("slp-status", "已结束");
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(2));
+    expect(lastCallArgs()).toEqual({
+      limit: 50,
+      workspace_id: "ws-1",
+      status: "ended",
+    });
   });
 });
 
-describe("SessionListPanel workspace scope 瘦字段降级（Grill P1-1 / design §4.B）", () => {
-  it("条目无 runtime_id/config_snapshot → 机器名/档案名/供应商 chips 不渲染；时间列相对时间或 —", async () => {
-    // 机器在线存在：若实现错误回退 runtime→机器映射会渲染出 machine-1，
-    // 以此反证瘦字段路径真正跳过机器 chip。
-    setMachines({
-      items: [makeMachine({ id: "m-1", hostname: "machine-1" })],
-    });
-    mocks.listWorkspaceAgentSessions.mockResolvedValue([
-      makeScopeItem({
-        id: "s-thin",
-        title: "瘦字段会话",
-        last_active_at: new Date(Date.now() - 5 * 60_000).toISOString(),
-      }),
-      makeScopeItem({ id: "s-notime", title: "无时间会话", last_active_at: null }),
-    ]);
+describe("SessionListPanel scope 全字段渲染（Grill P1-1 v3 反转 / D-003@v2）", () => {
+  it("喂 AgentSessionRead 全字段形状 → chips（机器/引擎/档案/供应商）+ 相对时间 + 轮数照常渲染", async () => {
+    // v2 瘦字段降级已删：全局端点返回全字段，scope 模式与全局渲染零差异。
+    // （机器名读 config_snapshot 直显，机器列表留空以证明不依赖回退映射。）
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-full",
+          title: "全字段会话",
+          workspace_id: "ws-1",
+          config_snapshot: {
+            profile_name: "知识经理",
+            provider_name: "Kimi",
+            engine: "claude",
+            machine_name: "DESKTOP-2BN7FDC",
+            model: null,
+            agent_name: null,
+          },
+          last_active_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+          turn_count: 7,
+        }),
+      ]),
+    );
     renderPanel(<SessionListPanel scope={WORKSPACE_SCOPE} />);
 
-    const thin = await screen.findByRole("button", { name: "会话 瘦字段会话" });
-    // 有时间：相对时间 + 引擎/轮数照常；机器/档案/供应商 chips 缺席
-    expect(thin.textContent).toContain("5 分钟前");
-    expect(thin.textContent).toContain("Claude");
-    expect(thin.textContent).toContain("3 轮");
-    expect(thin.textContent).not.toContain("🖥");
-    expect(thin.textContent).not.toContain("machine-1");
-    expect(thin.textContent).not.toContain("📋");
-    expect(thin.textContent).not.toContain("☁");
-
-    // 无时间（last_active_at=null → created_at 兜底 "" → 空值统一 —）
-    const notime = screen.getByRole("button", { name: "会话 无时间会话" });
-    expect(notime.textContent).toContain("—");
+    const row = await screen.findByRole("button", { name: "会话 全字段会话" });
+    // chips 全量直显 + 相对时间（v2 用例断言的「缺席」反转为「在场」）
+    expect(row.textContent).toContain("🖥 DESKTOP-2BN7FDC");
+    expect(row.textContent).toContain("Claude");
+    expect(row.textContent).toContain("📋 知识经理");
+    expect(row.textContent).toContain("☁ Kimi");
+    expect(row.textContent).toContain("7 轮");
+    expect(row.textContent).toContain("5 分钟前");
+    // 后端 total 照常显示（非 v2 客户端合成计数）
+    expect(screen.getByText("共 1 个")).toBeInTheDocument();
   });
 });

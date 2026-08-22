@@ -6,6 +6,10 @@ provider / q（标题模糊，实现为 user_input 内容 ilike）四个过滤�
 （零回归）、分页 + 过滤组合（total 为过滤后总数）、machine_id 对无 runtime
 旧会话的边界（不匹配任何机器）。
 
+追加（change 2026-08-22-workspace-sessions-portal / D-003@v2）：workspace_id /
+change_id scope 过滤参数——workspace 级命中与不匹配剔除、不传零回归、
+change 级命中与 workspace_id+change_id 双传交集（scope=change 查询形态）。
+
 夹具范式镜像 ``test_session_history.py``（in-memory SQLite + httpx client）。
 """
 
@@ -20,7 +24,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.auth.model import User
+from app.modules.change.model import Change
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime
+from app.modules.workspace.model import Workspace
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -94,6 +100,42 @@ async def _make_runtime(
     return rt
 
 
+async def _make_workspace(session: AsyncSession, *, root_path: str) -> Workspace:
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="t-ws",
+        slug=f"t-ws-{uuid.uuid4().hex[:8]}",
+        root_path=root_path,
+        status="active",
+    )
+    session.add(ws)
+    await session.commit()
+    await session.refresh(ws)
+    return ws
+
+
+async def _make_change(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+) -> Change:
+    ck = f"2026-08-22-test-{uuid.uuid4().hex[:6]}"
+    change = Change(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        change_key=ck,
+        title="门户 scope 过滤测试",
+        status="active",
+        location="active",
+        path=f"changes/{ck}",
+        current_stage="execute",
+    )
+    session.add(change)
+    await session.commit()
+    await session.refresh(change)
+    return change
+
+
 async def _make_session(
     session: AsyncSession,
     user_id: uuid.UUID,
@@ -103,6 +145,10 @@ async def _make_session(
     provider: str = "claude",
     last_active_at: datetime | None = None,
     created_at: datetime | None = None,
+    # 2026-08-22-workspace-sessions-portal / D-003@v2：scope 绑定列（默认 None
+    # = 既有用例行为不变）。
+    workspace_id: uuid.UUID | None = None,
+    change_id: uuid.UUID | None = None,
 ) -> AgentSession:
     now = datetime.now(UTC)
     sess = AgentSession(
@@ -117,6 +163,8 @@ async def _make_session(
         created_at=created_at or now,
         last_active_at=last_active_at,
         ended_at=now if status in ("ended", "failed") else None,
+        workspace_id=workspace_id,
+        change_id=change_id,
     )
     session.add(sess)
     await session.commit()
@@ -568,3 +616,158 @@ class TestCombinedAndPaging:
         body = resp.json()
         assert body["total"] == 3
         assert sorted(i["id"] for i in body["items"]) == sorted(str(x) for x in expected)
+
+
+# ── workspace_id / change_id scope 过滤（D-003@v2）──────────────────────────
+
+
+class TestWorkspaceIdFilter:
+    """``GET /sessions?workspace_id=`` 精确匹配 AgentSession.workspace_id。"""
+
+    async def test_hit_and_miss(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        admin = await _get_admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        ws_a = await _make_workspace(db_session, root_path="D:/repo-a")
+        ws_b = await _make_workspace(db_session, root_path="D:/repo-b")
+        s_a = await _make_session(db_session, admin.id, rt.id, workspace_id=ws_a.id)
+        s_b = await _make_session(db_session, admin.id, rt.id, workspace_id=ws_b.id)
+        s_unbound = await _make_session(db_session, admin.id, rt.id)  # 未绑 workspace
+
+        resp = await client.get(
+            "/api/daemon/sessions", params={"workspace_id": str(ws_a.id)}, headers=auth_headers
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        # 命中 ws_a；同用户其它 workspace / 未绑定旧会话全部剔除
+        assert body["total"] == 1
+        assert [i["id"] for i in body["items"]] == [str(s_a.id)]
+        assert str(s_b.id) not in [i["id"] for i in body["items"]]
+        assert str(s_unbound.id) not in [i["id"] for i in body["items"]]
+
+        # 不存在的 workspace → 空结果（不是 500）
+        resp_miss = await client.get(
+            "/api/daemon/sessions",
+            params={"workspace_id": str(uuid.uuid4())},
+            headers=auth_headers,
+        )
+        assert resp_miss.status_code == 200
+        assert resp_miss.json()["total"] == 0
+
+    async def test_no_filter_baseline_with_scope_bindings(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """不传 workspace_id/change_id = 现状零回归（绑定与否不影响 owner 全量）。"""
+        admin = await _get_admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        ws = await _make_workspace(db_session, root_path="D:/repo-a")
+        change = await _make_change(db_session, workspace_id=ws.id)
+        expected = [
+            (await _make_session(db_session, admin.id, rt.id, workspace_id=ws.id)).id,
+            (
+                await _make_session(
+                    db_session, admin.id, rt.id, workspace_id=ws.id, change_id=change.id
+                )
+            ).id,
+            (await _make_session(db_session, admin.id, rt.id)).id,  # 未绑定
+        ]
+
+        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["total"] == 3
+        assert sorted(i["id"] for i in body["items"]) == sorted(str(x) for x in expected)
+
+    async def test_invalid_uuid_422(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        resp = await client.get(
+            "/api/daemon/sessions", params={"workspace_id": "not-a-uuid"}, headers=auth_headers
+        )
+        assert resp.status_code == 422
+
+
+class TestChangeIdFilter:
+    """``GET /sessions?change_id=`` 精确匹配 AgentSession.change_id。"""
+
+    async def test_hit_and_miss(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        admin = await _get_admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        ws = await _make_workspace(db_session, root_path="D:/repo-a")
+        change_a = await _make_change(db_session, workspace_id=ws.id)
+        change_b = await _make_change(db_session, workspace_id=ws.id)
+        s_ca = await _make_session(
+            db_session, admin.id, rt.id, workspace_id=ws.id, change_id=change_a.id
+        )
+        s_cb = await _make_session(
+            db_session, admin.id, rt.id, workspace_id=ws.id, change_id=change_b.id
+        )
+        # 绑 workspace 但未绑 change 的会话不命中 change_id 过滤
+        s_ws_only = await _make_session(db_session, admin.id, rt.id, workspace_id=ws.id)
+
+        resp = await client.get(
+            "/api/daemon/sessions", params={"change_id": str(change_a.id)}, headers=auth_headers
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["total"] == 1
+        assert [i["id"] for i in body["items"]] == [str(s_ca.id)]
+        assert str(s_cb.id) not in [i["id"] for i in body["items"]]
+        assert str(s_ws_only.id) not in [i["id"] for i in body["items"]]
+
+        # 不存在的 change → 空结果（不是 500）
+        resp_miss = await client.get(
+            "/api/daemon/sessions",
+            params={"change_id": str(uuid.uuid4())},
+            headers=auth_headers,
+        )
+        assert resp_miss.status_code == 200
+        assert resp_miss.json()["total"] == 0
+
+    async def test_workspace_and_change_combined_intersection(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """scope=change 门户查询形态：workspace_id + change_id 双传取交集。"""
+        admin = await _get_admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        ws_a = await _make_workspace(db_session, root_path="D:/repo-a")
+        ws_b = await _make_workspace(db_session, root_path="D:/repo-b")
+        change_a = await _make_change(db_session, workspace_id=ws_a.id)
+        change_b = await _make_change(db_session, workspace_id=ws_a.id)
+        s_a = await _make_session(
+            db_session, admin.id, rt.id, workspace_id=ws_a.id, change_id=change_a.id
+        )
+        # 同 workspace 不同 change：被 change_id 剔除
+        await _make_session(
+            db_session, admin.id, rt.id, workspace_id=ws_a.id, change_id=change_b.id
+        )
+        # 同 change_key 不可能跨 workspace（FK 同源），构造另一 ws 的 change 会话
+        change_c = await _make_change(db_session, workspace_id=ws_b.id)
+        await _make_session(
+            db_session, admin.id, rt.id, workspace_id=ws_b.id, change_id=change_c.id
+        )
+
+        resp = await client.get(
+            "/api/daemon/sessions",
+            params={"workspace_id": str(ws_a.id), "change_id": str(change_a.id)},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["total"] == 1
+        assert [i["id"] for i in body["items"]] == [str(s_a.id)]

@@ -1,34 +1,37 @@
 /**
  * SessionsPortal 单测（2026-08-22-workspace-sessions-portal task-08 / FR-07 /
- * D-003@v1 / D-004@v1）。
+ * D-003@v2 / D-004@v1；task-11 v3 返工改写 scope 断言）。
  *
  * 依据：
  *   - components/sessions/sessions-portal.tsx（task-01 共享门户实现）
- *   - design.md §4.F 用例枚举（三 scope 渲染 / 仅本人过滤 / ?session= 深链 /
- *     创建绑定双传）、§4.A（scope 派生三处路由）、§4.B（仅本人过滤）、
- *     §4.D（?session= 深链直达选中态）
+ *   - design.md §4.F 用例枚举（三 scope 渲染 / scope 过滤参透传 / ?session=
+ *     深链 / 创建绑定双传）、§4.A（scope 派生三处路由）、§4.B v3（scope
+ *     复用全局端点 listAgentSessions 加过滤参，D-003@v2）、§4.D（?session=
+ *     深链直达选中态）
  *   - tasks/task-08.md acceptance：对账双清单之一——退役 4 用例语义落点
- *     （仅本人过滤 / 创建绑定 / ?session= 深链在本文件；ended 恢复语义在
+ *     （scope 过滤 / 创建绑定 / ?session= 深链在本文件；ended 恢复语义在
  *     sessions 页 page.test.tsx 既有 reopen 断言）
  *
  * 覆盖（design §4.F）：
- *   1. 三 scope 渲染：全局无参（listAgentSessions 路由）/ workspace
- *      （listWorkspaceAgentSessions("ws", {include_ended:true})）/
- *      change（listChangeSessions("ws","chg")）+ 标题范围后缀（D-001@v1）
- *   2. 仅本人过滤（D-003@v1）：scope 列表剔除 author.user_id ≠ 当前用户的
- *      他人会话、author 缺失视为本人保留；change 级从跨成员变仅本人的
- *      有意统一断言（design §4.B）
+ *   1. 三 scope 渲染（D-003@v2）：全局无参（listAgentSessions({limit:50})）/
+ *      workspace（listAgentSessions({limit:50, workspace_id})）/
+ *      change（listAgentSessions({limit:50, workspace_id, change_id})，
+ *      change 隐含 workspace 双传）+ 标题范围后缀（D-001@v1）；
+ *      v2 两 scope 端点零调用
+ *   2. scope 过滤参透传即端点职责（D-003@v2，取代 v2 客户端仅本人过滤）：
+ *      mock 返回什么渲染什么（他人会话不再客户端剔除），断言落点在
+ *      listAgentSessions 过滤参（owner/scope 过滤都在端点 SQL 层）
  *   3. ?session= 深链（D-004@v1）：有效 id → getAgentSession 200 → 初始
  *      选中面板渲染；无参 / 无效 id → 静默停留新建表单态
  *   4. 绑定透传（task-05 契约经门户派生）：workspace scope createSession
  *      参数含 workspace_id；change scope change_id + workspace_id 双传
  *
  * mock 策略（对齐 sessions 页 page.test.tsx 既有结构——同一渲染树）：
- *   - @/lib/daemon 整模块 mock（三列表 API + 面板/表单/控件条消费函数，
- *     streamSession 不建真实 EventSource）
+ *   - @/lib/daemon 整模块 mock（列表 API + 面板/表单/控件条消费函数，
+ *     streamSession 不建真实 EventSource；listWorkspaceAgentSessions /
+ *     listChangeSessions 仅剩 D-003@v2 零调用断言用途）
  *   - next/navigation mock（useSearchParams——深链用例可控 ?session=，
  *     对齐 runtimes/__tests__/page.test.tsx 惯例）
- *   - @/stores/session mock（仅本人过滤的当前用户锚点，可变 hoisted 状态）
  *   - @/lib/use-daemon-machines、@/lib/agent-profiles（hook 部分）、
  *     @/lib/api/llm-providers、@/lib/workspaces、@/lib/workspace-binding mock
  *   - jsdom 虚拟滚动视口桩（与 session-list-panel.test.tsx 同款）
@@ -50,7 +53,6 @@ import { SessionsPortal } from "@/components/sessions/sessions-portal";
 import type { SessionListScope } from "@/components/sessions/session-list-panel";
 import { ApiError } from "@/lib/api";
 import type {
-  AgentSessionListItem,
   AgentSessionRead,
   DaemonMachineRead,
   DaemonRuntimeRead,
@@ -59,7 +61,8 @@ import type {
 // ── hoisted mock 状态 ─────────────────────────────────────────────────────
 
 const mocks = vi.hoisted(() => ({
-  // 三列表 API（task-04 scope 契约）
+  // 列表 API（D-003@v2：数据源统一 listAgentSessions；两 scope 端点仅剩
+  // 零调用断言用途）
   listAgentSessions: vi.fn(),
   listWorkspaceAgentSessions: vi.fn(),
   listChangeSessions: vi.fn(),
@@ -85,8 +88,6 @@ const mocks = vi.hoisted(() => ({
   fetchMyBindings: vi.fn(),
   // D-004@v1 深链：useSearchParams 返回值（每用例可改写）
   searchParams: new URLSearchParams(),
-  // D-003@v1 仅本人过滤：当前用户锚点（useSession 选择器入参状态）
-  sessionUser: { id: "u-me" } as { id: string } | null,
 }));
 
 vi.mock("@/lib/daemon", () => ({
@@ -119,13 +120,6 @@ vi.mock("@/lib/daemon", () => ({
 vi.mock("next/navigation", () => ({
   useSearchParams: () => mocks.searchParams,
   useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),
-}));
-
-// task-08（D-003@v1）：SessionListPanel scope 模式经 useSession 取当前用户
-// 做「仅本人」过滤——mock 成可控用户（默认 u-me）。
-vi.mock("@/stores/session", () => ({
-  useSession: (selector: (_s: { user: { id: string } | null }) => unknown) =>
-    selector({ user: mocks.sessionUser }),
 }));
 
 vi.mock("@/lib/use-daemon-machines", () => ({
@@ -299,26 +293,6 @@ function makeSession(
   } as AgentSessionRead;
 }
 
-/**
- * scope 端点瘦 item 固件（对齐 daemon.ts AgentSessionListItem）。
- * author 缺失场景传 `{ author: undefined }`（运行时旧数据形态，类型断言兜住）。
- */
-function makeScopeItem(
-  overrides: Partial<AgentSessionListItem> = {},
-): AgentSessionListItem {
-  return {
-    id: "s-own",
-    provider: "claude",
-    status: "active",
-    turn_count: 3,
-    mode: null,
-    author: { user_id: "u-me", display_name: "我" },
-    last_active_at: "2026-08-15T09:00:00Z",
-    title: "我的会话",
-    ...overrides,
-  } as AgentSessionListItem;
-}
-
 const WORKSPACE_SCOPE: SessionListScope = {
   kind: "workspace",
   workspaceId: "ws-1",
@@ -346,7 +320,6 @@ function renderPortal(scope?: SessionListScope) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.searchParams = new URLSearchParams();
-  mocks.sessionUser = { id: "u-me" };
   mocks.machinesHook.mockReturnValue({
     items: [
       makeMachine(),
@@ -415,10 +388,10 @@ afterEach(() => {
   cleanup();
 });
 
-// ── 1. 三 scope 渲染（design §4.A / §4.E / D-001@v1） ────────────────────
+// ── 1. 三 scope 渲染（design §4.A / §4.E / D-001@v1 / D-003@v2） ──────────
 
 describe("SessionsPortal 三 scope 渲染", () => {
-  it("全局（无参 scope）：列表走 listAgentSessions（limit 路由断言），标题无范围后缀，scope 两 API 零调用", async () => {
+  it("全局（无参 scope）：列表走 listAgentSessions（limit 路由断言），标题无范围后缀，scope 两端点零调用", async () => {
     renderPortal();
 
     expect(screen.getByRole("heading", { name: "智能体会话" })).toBeTruthy();
@@ -434,18 +407,20 @@ describe("SessionsPortal 三 scope 渲染", () => {
     ).toBeTruthy();
   });
 
-  it("workspace scope：列表走 listWorkspaceAgentSessions(ws, include_ended=true)，标题「智能体会话 · 工作区」，NewSessionForm 锁定工作区", async () => {
+  it("workspace scope：列表走 listAgentSessions({limit, workspace_id})，标题「智能体会话 · 工作区」，NewSessionForm 锁定工作区", async () => {
     renderPortal(WORKSPACE_SCOPE);
 
     expect(
       screen.getByRole("heading", { name: "智能体会话 · 工作区" }),
     ).toBeTruthy();
+    // D-003@v2：scope 复用全局端点，仅多传 workspace_id 过滤参
     await waitFor(() => {
-      expect(mocks.listWorkspaceAgentSessions).toHaveBeenCalledWith("ws-1", {
-        include_ended: true,
+      expect(mocks.listAgentSessions).toHaveBeenCalledWith({
+        limit: 50,
+        workspace_id: "ws-1",
       });
     });
-    expect(mocks.listAgentSessions).not.toHaveBeenCalled();
+    expect(mocks.listWorkspaceAgentSessions).not.toHaveBeenCalled();
     expect(mocks.listChangeSessions).not.toHaveBeenCalled();
 
     // 绑定透传（task-05 契约经门户派生）：⓪ 区锁定提示条替代 picker
@@ -455,17 +430,22 @@ describe("SessionsPortal 三 scope 渲染", () => {
     expect(screen.getByText(/已锁定 · 会话将在绑定工作区的项目目录中运行/)).toBeTruthy();
   });
 
-  it("change scope：列表走 listChangeSessions(ws, chg)，标题「智能体会话 · 变更」，其余两 API 零调用", async () => {
+  it("change scope：列表走 listAgentSessions({limit, workspace_id, change_id} 双传)，标题「智能体会话 · 变更」，其余两端点零调用", async () => {
     renderPortal(CHANGE_SCOPE);
 
     expect(
       screen.getByRole("heading", { name: "智能体会话 · 变更" }),
     ).toBeTruthy();
+    // D-003@v2：change 级隐含 workspace——两过滤参同时下发
     await waitFor(() => {
-      expect(mocks.listChangeSessions).toHaveBeenCalledWith("ws-1", "chg-1");
+      expect(mocks.listAgentSessions).toHaveBeenCalledWith({
+        limit: 50,
+        workspace_id: "ws-1",
+        change_id: "chg-1",
+      });
     });
-    expect(mocks.listAgentSessions).not.toHaveBeenCalled();
     expect(mocks.listWorkspaceAgentSessions).not.toHaveBeenCalled();
+    expect(mocks.listChangeSessions).not.toHaveBeenCalled();
 
     // change 级隐含 workspace 双传（task-05）：⓪ 区同样锁定
     expect(
@@ -474,58 +454,65 @@ describe("SessionsPortal 三 scope 渲染", () => {
   });
 });
 
-// ── 2. 仅本人过滤（D-003@v1；退役 workspace/change-session-section 语义落点） ──
+// ── 2. scope 过滤参透传（D-003@v2；v2 客户端仅本人过滤已删，语义落点改造） ──
 
-describe("SessionsPortal scope 仅本人过滤（D-003@v1）", () => {
-  /** 跨成员返回固件：本人 + 他人 + author 缺失（旧数据）三条。 */
-  function crossMemberItems() {
+describe("SessionsPortal scope 过滤参透传（D-003@v2：过滤是端点职责）", () => {
+  /** 端点过滤后返回固件：本人 + 他人两条（AgentSessionRead 全字段形状）。 */
+  function endpointFilteredItems() {
     return [
-      makeScopeItem({ id: "s-own", title: "我的会话" }),
-      makeScopeItem({
-        id: "s-other",
-        title: "同事的会话",
-        author: { user_id: "u-other", display_name: "张三" },
-      }),
-      makeScopeItem({
-        id: "s-legacy",
-        title: "旧数据会话",
-        author: undefined,
-      }),
+      makeSession({ id: "s-mine", title: "我的会话", user_id: "u-me" }),
+      makeSession({ id: "s-other", title: "同事的会话", user_id: "u-other" }),
     ];
   }
 
-  it("workspace scope：列表剔除他人会话（author.user_id ≠ 当前用户），author 缺失视为本人保留", async () => {
-    mocks.listWorkspaceAgentSessions.mockResolvedValue(crossMemberItems());
+  it("workspace scope：透传 workspace_id 即完成过滤（端点 SQL 层职责）；mock 返回什么渲染什么（零客户端剔除）", async () => {
+    mocks.listAgentSessions.mockResolvedValue({
+      items: endpointFilteredItems(),
+      total: 2,
+      limit: 50,
+      offset: 0,
+    });
     renderPortal(WORKSPACE_SCOPE);
 
+    // 过滤参断言 = v2「仅本人过滤」语义的 v3 落点：owner/scope 过滤都在端点
+    await waitFor(() => {
+      expect(mocks.listAgentSessions).toHaveBeenCalledWith({
+        limit: 50,
+        workspace_id: "ws-1",
+      });
+    });
+    // 客户端零过滤：他人会话（user_id ≠ 当前用户）照常渲染，总数 = 端点 total
     expect(
       await screen.findByRole("button", { name: "会话 我的会话" }),
     ).toBeTruthy();
-    // author 缺失（旧数据）保留
     expect(
-      screen.getByRole("button", { name: "会话 旧数据会话" }),
+      screen.getByRole("button", { name: "会话 同事的会话" }),
     ).toBeTruthy();
-    // 他人会话剔除（attach 端点 owner-only，展示只会误导点击）
-    expect(
-      screen.queryByRole("button", { name: "会话 同事的会话" }),
-    ).toBeNull();
-    // 总数 = 本人条数（2）
     expect(screen.getByText("共 2 个")).toBeTruthy();
   });
 
-  it("change scope：跨成员变仅本人的有意统一断言（他人剔除 / 缺失保留，与 workspace 同语义）", async () => {
-    mocks.listChangeSessions.mockResolvedValue(crossMemberItems());
+  it("change scope：workspace_id + change_id 双传（端点过滤）；change 级同样零客户端过滤", async () => {
+    mocks.listAgentSessions.mockResolvedValue({
+      items: endpointFilteredItems(),
+      total: 2,
+      limit: 50,
+      offset: 0,
+    });
     renderPortal(CHANGE_SCOPE);
 
+    await waitFor(() => {
+      expect(mocks.listAgentSessions).toHaveBeenCalledWith({
+        limit: 50,
+        workspace_id: "ws-1",
+        change_id: "chg-1",
+      });
+    });
     expect(
       await screen.findByRole("button", { name: "会话 我的会话" }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "会话 旧数据会话" }),
+      screen.getByRole("button", { name: "会话 同事的会话" }),
     ).toBeTruthy();
-    expect(
-      screen.queryByRole("button", { name: "会话 同事的会话" }),
-    ).toBeNull();
     expect(screen.getByText("共 2 个")).toBeTruthy();
   });
 });

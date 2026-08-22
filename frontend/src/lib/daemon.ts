@@ -1244,11 +1244,23 @@ export interface AgentSessionListParams {
   provider?: string;
   /** 标题模糊搜索（title ilike）。 */
   q?: string;
+  /**
+   * 按工作区过滤（2026-08-22-workspace-sessions-portal task-10 / D-003@v2）：
+   * workspace 级门户复用全局端点做 scope 过滤，后端 SQL 层精确匹配。
+   */
+  workspace_id?: string;
+  /**
+   * 按变更过滤（D-003@v2）：change 级门户复用全局端点（调用方同时传
+   * workspace_id，change 隐含 workspace），后端 SQL 层精确匹配。
+   */
+  change_id?: string;
 }
 
 /**
  * GET /api/daemon/sessions — 列出当前用户的会话（active/历史）。
- * 越权隔离在后端 SQL 层（user_id），前端只展示。
+ * 越权隔离在后端 SQL 层（user_id），前端只展示。D-003@v2：可选
+ * workspace_id/change_id 过滤参供 workspace/change 级门户复用（scope 模式
+ * 与全局同一端点，仅多传过滤参）。
  */
 export async function listAgentSessions(
   options?: AgentSessionListParams,
@@ -1261,6 +1273,9 @@ export async function listAgentSessions(
   if (options?.machine_id) query.machine_id = options.machine_id;
   if (options?.provider) query.provider = options.provider;
   if (options?.q) query.q = options.q;
+  // D-003@v2：scope 过滤参照 runtime_id 模式（真值才下发，缺省零回归）。
+  if (options?.workspace_id) query.workspace_id = options.workspace_id;
+  if (options?.change_id) query.change_id = options.change_id;
   return apiFetch<AgentSessionListResponse>("/api/daemon/sessions", { query });
 }
 

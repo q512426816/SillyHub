@@ -135,8 +135,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             // ql-20260818-012：逐条调 deleteAgentSession（后端软删），完成后
             // invalidate 列表 + 清除选中态（若选中被删的会话）。
             // task-01：前缀 ["agentSessions"] 同时覆盖全局
-            //（["agentSessions","sessionsPortal",serverParams]）与 scope
-            //（["agentSessions","sessionsPortal","scope",scope]）两套列表缓存。
+            //（["agentSessions","sessionsPortal",scope,serverParams] 单一路径——D-003@v2 起 scope 走全局端点加过滤参，前缀 invalidate 全覆盖。
             const { deleteAgentSession } = await import("@/lib/daemon");
             await Promise.allSettled(ids.map((id) => deleteAgentSession(id)));
             void qc.invalidateQueries({ queryKey: ["agentSessions"] });

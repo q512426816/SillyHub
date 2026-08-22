@@ -1821,14 +1821,21 @@ async def list_sessions(
     machine_id: uuid.UUID | None = Query(default=None),
     provider: _SessionProviderQuery | None = Query(default=None),
     q: str | None = Query(default=None, max_length=100),
+    # 2026-08-22-workspace-sessions-portal / D-003@v2：workspace/change 级
+    # 门户复用本端点，SQL 层精确匹配（照 runtime_id 模式，可选零回归）。
+    workspace_id: uuid.UUID | None = Query(default=None),
+    change_id: uuid.UUID | None = Query(default=None),
 ) -> AgentSessionListResponse:
     """List the current user's AgentSessions (owner-scoped, stable paging).
 
     task-06 / FR-02 / D-003@v1：可选过滤参数 runtime_id / machine_id（经
-    daemon_runtimes 关联）/ provider / q（标题模糊，实现为 user_input 内容
+    daemon_runtimes 关联）/ provider / q（标题模糊，实现为 user_input 的内容
     ilike，见 service 层 docstring）；全部可选，不传时查询与现状一致（零回归）。
     过滤在 SQL 层完成，total 为过滤后总数（R-04 真分页），分页 limit/offset
     作用于过滤结果。machine_id 不匹配 runtime 缺失的旧会话（无 runtime 即无机器）。
+    2026-08-22-workspace-sessions-portal / D-003@v2：新增可选 workspace_id /
+    change_id（AgentSession 冗余绑定列精确匹配），供 workspace/change 级会话
+    门户复用全局端点做 scope 过滤；不传 = 现状（零回归）。
     """
     from app.modules.agent.model import AgentRun, AgentRunLog
 
@@ -1842,6 +1849,8 @@ async def list_sessions(
         machine_id=machine_id,
         provider=provider,
         q=q,
+        workspace_id=workspace_id,
+        change_id=change_id,
     )
     reads = [AgentSessionRead.model_validate(item) for item in items]
     # task-13 / FR-04 / design §5 Phase4：批量查 lease.terminating_at 注入到每个 read。
