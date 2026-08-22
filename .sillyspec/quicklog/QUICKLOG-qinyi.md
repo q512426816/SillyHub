@@ -65,3 +65,13 @@
 根因：ql-20260822-002 只给 modules 块 12 条子模块命令加了 -n auto，顶层 commands.test 全量命令仍串行（08-21 verify 实测 936.69s≈15.6min），gate 超时压力仍在（坑2 注释也停在「未解」旧状态）
 方案：commands.test 的 backend 段 uv run pytest 加 -n auto（dist=loadscope 兜底，frontend/daemon 段不动）；文件头部坑2 过期注释改「已解」并附实测数据；backend.md 关键逻辑追加 ql-20260822-003 条目
 结果：backend 全量实测 4771 passed / 6 skipped / 3 xfailed，356.97s（5 分 56 秒）零 failed 零 flaky（Redis 停机状态下跑出，conftest 会话级探测 xdist 每 worker 生效），对比 08-21 串行 936.69s 提速 2.6 倍
+
+## ql-20260822-004-68a2 | 2026-08-22 12:31:00 | 核对并更正 local.yaml 过时注释与过时 deselect 逻辑
+状态：已完成
+关联变更：（无）
+文件：
+- .sillyspec/local.yaml（坑3/connect/引号/mcp/platform-token 五处注释更正 + agent 模块去 deselect）
+需求：核对并更正 local.yaml 过时注释与过时 deselect 逻辑
+根因：注释与实现不一致是万恶之源，多条注释引用的 sillyspec 源码行号/行为在工具迭代后已失效，agent 模块 deselect 的根因已在 backend conftest 修复
+方案：逐条比对 sillyspec 3.26.15（sync.js/client.js/config.js）与 backend（dispatch.py/auth.py/conftest.py/pyproject.toml）后更正 6 处——坑3 改已解、connect 改文本级定向替换说明、引号警告改已兼容、mcp 段去重复注释并修 client.js 行号为 sillyhub-mcp/client.js:58、platform token 改 shpsync_/shk_live_/JWT 三路径说明、agent 模块移除两条过时 deselect 恢复真实执行
+结果：YAML safe_load 验证 9 顶层键 14 模块 token 完整；agent 模块去 deselect 全量实测 634 passed 46.9s 零失败
