@@ -15,10 +15,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import {
-  InteractiveSessionPanel,
-  type SessionTurnView,
-} from "@/components/daemon/interactive-session-panel";
+import { SessionPanel } from "@/components/daemon/session-panel";
+import type { SessionTurnView } from "@/components/daemon/turn-timeline";
 import {
   SessionListLayout,
   type SessionListEntry,
@@ -209,8 +207,10 @@ export function ChangeSessionSection({ workspaceId, changeId }: ChangeSessionSec
       <div className="flex min-h-[420px] flex-col overflow-hidden rounded-md border bg-card">
         {/* key 强制 activeSessionId 切换时重 mount（清旧 SSE/轮询）。
             Panel 自管 SSE/inject/interrupt/end，组件不重造。 */}
-        <InteractiveSessionPanel
+        <SessionPanel
           key={activeSessionId ?? "new"}
+          mode="dialog"
+          sessionId={activeSessionId ?? null}
           providers={providers}
           defaultProvider={defaultProvider}
           model={model}
@@ -218,7 +218,6 @@ export function ChangeSessionSection({ workspaceId, changeId }: ChangeSessionSec
           hasOnlineProvider={hasOnlineProvider}
           changeId={changeId}
           workspaceId={workspaceId}
-          attachSessionId={activeSessionId ?? undefined}
           initialTurns={activeSessionId ? turns : undefined}
           onSessionCreated={handleSessionCreated}
           onSessionReset={handleSessionReset}

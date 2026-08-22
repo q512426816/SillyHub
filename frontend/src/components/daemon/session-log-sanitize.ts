@@ -1,15 +1,16 @@
 /**
  * 2026-07-11-unify-runtime-session-dialog / FR-04 / D-004: 共享日志内容过滤纯函数。
  *
- * 独立模块避免 runtime-session-helpers ↔ interactive-session-panel 循环依赖
- *（helpers 已 import panel 的 InteractiveSessionPanel；若 panel 反向 import
- * helpers 会成环，故共享纯函数下沉到此独立文件）。
+ * 独立模块的由来（史）：当时 runtime-session-helpers 已 import panel 的
+ * InteractiveSessionPanel，若 panel（interactive-session-panel，现已删除）反向
+ * import helpers 会成环，故共享纯函数下沉到此独立文件。
  *
  * attach 历史预填（logsToTurns）与实时 SSE（onLog）共用同一过滤，
  * 避免 thinking/SYSTEM/AskUserQuestion 等原始标记泄漏到正文（修复 attach 历史
  * 消息渲染 BUG：[SYSTEM:thinking_tokens]/[THINKING] 不再显示）。
  *
- * 过滤规则（与原 interactive-session-panel.tsx:894 renderLogContent 完全一致）：
+ * 过滤规则（史：源自原 interactive-session-panel 内 renderLogContent，语义
+ * 完全一致）：
  *   - 含 AskUserQuestion / [TOOL_RESULT] User answered / [SYSTEM…]/[RESULT…] → 丢弃
  *   - channel=stderr → 加 ⚠️ 前缀
  *   - channel=tool_call → 不加 🔧 前缀（ql-20260730-001：tool 内容走 classifySessionLog
@@ -19,8 +20,9 @@
  * 2026-08-19-session-stream-ux / task-01：classifySessionLog / isToolResultDenied /
  * statusFromToolUseRaw / OVERRIDE_RE / SessionLogSegment(Kind) 已迁入共享装配器
  * session-log-assembler.ts（design §6：分类函数迁为装配器内部依赖，语义零改动）。
- * 本文件保留同名导出垫片（下方 re-export）——interactive-session-panel /
- * runtime-session-helpers / sessions page 与既有单测等既有引用零改动；
+ * 本文件保留同名导出垫片（下方 re-export）——史：当时的 interactive-session-panel
+ * （现已删除）/ runtime-session-helpers / sessions page 与既有单测等引用零改动；
+ * 现消费方为 runtime-session-helpers / turn-timeline / session-log-assembler 与单测；
  * 本文件其余 sanitize 函数（sanitizeSessionLogContent / extractDialogQA）不动。
  */
 import { OVERRIDE_RE } from "./session-log-assembler";

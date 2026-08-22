@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会话面板统一 antd · 前后对照原型（2026-08-22-session-panel-unify）</title>
+<style>
+  :root {
+    /* ai-native 主题 token（默认主题，取值同 frontend/src/styles/themes.ts） */
+    --brand-600: #7C3AED;
+    --brand-700: #6D28D9;
+    --brand-50: #F5F3FF;
+    --accent: #0891B2;
+    --background: #FAFAFC;
+    --card: #FFFFFF;
+    --border: #E4E4E7;
+    --muted-fg: #71717A;
+    --fg: #18181B;
+    --destructive: #DC2626;
+    --success: #16A34A;
+    --warning: #D97706;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--background); color: var(--fg);
+    padding: 24px; font-size: 14px; line-height: 1.6;
+  }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { color: var(--muted-fg); font-size: 13px; margin-bottom: 20px; }
+  h2 { font-size: 15px; margin: 22px 0 10px; padding-left: 10px; border-left: 3px solid var(--brand-600); }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; }
+  .cell { flex: 1; min-width: 320px; background: var(--card); border: 1px solid var(--border);
+          border-radius: 10px; padding: 14px 16px; }
+  .tagline { font-size: 12px; color: var(--muted-fg); margin-bottom: 10px; }
+  .tagline b { color: var(--fg); }
+
+  /* ── antd 风格基元（统一后目标观感）── */
+  .a-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 32px; padding: 0 15px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--card); color: var(--fg);
+    font-size: 14px; cursor: pointer; white-space: nowrap;
+  }
+  .a-btn.primary { background: var(--brand-600); border-color: var(--brand-600); color: #fff; }
+  .a-btn.primary:hover { background: var(--brand-700); }
+  .a-btn.small { height: 24px; padding: 0 7px; font-size: 12px; }
+  .a-btn.link-danger { border: none; background: none; color: var(--destructive); height: 24px; padding: 0 4px; }
+  .a-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+  .a-badge .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .a-badge.processing .dot { background: var(--accent); box-shadow: 0 0 0 3px rgba(8,145,178,.15); }
+  .a-badge.success .dot { background: var(--success); }
+  .a-badge.error .dot { background: var(--destructive); }
+  .a-tag { display: inline-flex; height: 22px; align-items: center; padding: 0 7px;
+           border-radius: 4px; font-size: 12px; background: var(--brand-50); color: var(--brand-700);
+           border: 1px solid rgba(124,58,237,.25); }
+  .a-spin { width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--brand-600);
+            border-radius: 50%; display: inline-block; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── shadcn 风格基元（现状，仅对照）── */
+  .s-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 36px; padding: 0 16px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--card); color: var(--fg);
+    font-size: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.05); cursor: pointer;
+  }
+  .s-btn.destructive { border-color: rgba(220,38,38,.4); color: var(--destructive); }
+  .s-badge { display: inline-flex; height: 28px; align-items: center; padding: 0 8px;
+             border-radius: 6px; border: 1px solid var(--border); font-size: 12px; color: var(--muted-fg); }
+  .pill { display: inline-flex; height: 22px; align-items: center; padding: 0 10px;
+          border-radius: 11px; font-size: 12px; font-weight: 500; }
+
+  .demo-panel { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .demo-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px;
+               border-bottom: 1px solid var(--border); background: var(--card); flex-wrap: wrap; }
+  .demo-title { font-weight: 600; margin-right: auto; }
+  .demo-inputbar { display: flex; gap: 8px; padding: 12px; background: var(--card); align-items: center; }
+  .demo-input { flex: 1; height: 36px; border: 1px solid var(--border); border-radius: 8px; padding: 0 12px; color: var(--muted-fg); }
+  .queuebar { display: flex; gap: 8px; padding: 8px 12px; background: var(--brand-50); flex-wrap: wrap; }
+  .note { margin-top: 18px; padding: 12px 14px; border-radius: 8px; background: var(--card);
+          border: 1px dashed var(--border); font-size: 13px; color: var(--muted-fg); }
+  .note b { color: var(--fg); }
+  .unchanged { color: var(--success); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>会话面板统一 antd · 前后对照</h1>
+<div class="sub">2026-08-22-session-panel-unify · 仅按钮/徽标/加载圈基元替换，布局、结构、交互流程零变化 · 示例用默认 ai-native 主题（紫），实际随顶栏换肤走主题 token</div>
+
+<h2>① 弹窗头部操作区（/runtimes 弹窗、工作区会话区、变更会话区 共 4 个消费面）</h2>
+<div class="row">
+  <div class="cell">
+    <div class="tagline"><b>现状</b> · shadcn 基元（边框粗、圆角大、带投影）</div>
+    <div class="demo-panel">
+      <div class="demo-head">
+        <span class="demo-title">交互式会话</span>
+        <span class="s-badge">claude · 6 个提供方</span>
+        <button class="s-btn">新建会话</button>
+        <button class="s-btn destructive">结束会话</button>
+      </div>
+    </div>
+  </div>
+  <div class="cell">
+    <div class="tagline"><b>统一后</b> · antd Button（与 /sessions 页同款，紧凑 32px 高）</div>
+    <div class="demo-panel">
+      <div class="demo-head">
+        <span class="demo-title">交互式会话</span>
+        <span class="a-tag">claude · 6 个提供方</span>
+        <button class="a-btn">新建会话</button>
+        <button class="a-btn" style="color:var(--destructive);border-color:rgba(220,38,38,.4);">结束会话</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<h2>② 会话状态徽标 + 加载态</h2>
+<div class="row">
+  <div class="cell">
+    <div class="tagline"><b>现状</b> · shadcn outline 徽标（灰边框文字块）</div>
+    <span class="s-badge">恢复会话中</span>
+    <span class="s-badge" style="margin-left:8px;">运行中</span>
+  </div>
+  <div class="cell">
+    <div class="tagline"><b>统一后</b> · antd Badge status（彩点 + 文字，语义色走 token）</div>
+    <span class="a-badge processing"><span class="dot"></span>恢复会话中</span>
+    <span class="a-badge processing" style="margin-left:16px;"><span class="dot"></span>运行中</span>
+    <span class="a-badge success" style="margin-left:16px;"><span class="dot"></span>已完成</span>
+    <span class="a-badge error" style="margin-left:16px;"><span class="dot"></span>失败</span>
+    <span style="margin-left:16px;vertical-align:-3px;"><span class="a-spin"></span></span>
+  </div>
+</div>
+
+<h2>③ 输入区发送按钮（两模式共用 SessionInputBar，统一后两处同步变化）</h2>
+<div class="row">
+  <div class="cell">
+    <div class="tagline"><b>现状</b> · shadcn Button（36px 高、大圆角）</div>
+    <div class="demo-inputbar">
+      <div class="demo-input">消息将排队，等待本轮完成后自动发送…</div>
+      <button class="s-btn" style="background:var(--brand-600);color:#fff;border-color:var(--brand-600);">发送</button>
+    </div>
+  </div>
+  <div class="cell">
+    <div class="tagline"><b>统一后</b> · antd Button primary（32px 高、6px 圆角）</div>
+    <div class="demo-inputbar">
+      <div class="demo-input">消息将排队，等待本轮完成后自动发送…</div>
+      <button class="a-btn primary">发送</button>
+    </div>
+  </div>
+</div>
+
+<h2>④ 排队条 MessageQueueBar（<span class="unchanged">已统一，无变化</span>）</h2>
+<div class="cell" style="flex:none;width:100%;">
+  <div class="queuebar">
+    <span class="a-tag">① 帮我排查登录失败的原因（排队中）</span>
+    <span class="a-tag" style="border-color:rgba(220,38,38,.4);background:rgba(220,38,38,.06);color:var(--destructive);">② 顺带看下日志 ✕ 发送失败</span>
+  </div>
+  <div class="tagline" style="margin-top:8px;">本来就是 antd Button/Tag/Tooltip，本次仅核对保持，不动。</div>
+</div>
+
+<h2>⑤ /sessions 全页分支（<span class="unchanged">已统一，无变化</span>）</h2>
+<div class="cell" style="flex:none;width:100%;">
+  <div class="tagline">page 分支现已是 antd（Button×3 / Spin / Badge），本次零改动，作为统一对照基准。适配层删除后，4 个弹窗消费面与它渲染同一组件。</div>
+</div>
+
+<h2>⑥ 消息流状态小徽标 TurnStatusBadge（两模式共用，统一后两处同步变化）</h2>
+<div class="row">
+  <div class="cell">
+    <div class="tagline"><b>现状</b> · 纯样式彩色胶囊（span，不走主题 token）</div>
+    <span class="pill" style="background:rgba(124,58,237,.12);color:var(--brand-700);">运行中</span>
+    <span class="pill" style="background:rgba(22,163,74,.12);color:var(--success);margin-left:6px;">已完成</span>
+    <span class="pill" style="background:rgba(220,38,38,.10);color:var(--destructive);margin-left:6px;">失败</span>
+    <span class="pill" style="background:rgba(113,113,122,.12);color:var(--muted-fg);margin-left:6px;">已中断</span>
+  </div>
+  <div class="cell">
+    <div class="tagline"><b>统一后</b> · antd Badge status（彩点+文字，语义色走 token 随主题换肤）</div>
+    <span class="a-badge processing"><span class="dot"></span>运行中</span>
+    <span class="a-badge success" style="margin-left:14px;"><span class="dot"></span>已完成</span>
+    <span class="a-badge error" style="margin-left:14px;"><span class="dot"></span>失败</span>
+    <span class="a-badge" style="margin-left:14px;"><span class="dot" style="background:var(--muted-fg);"></span>已中断</span>
+  </div>
+</div>
+
+<div class="note">
+  <b>原型说明：</b>本变更 = 删 interactive-session-panel.tsx 适配层（4 消费方直连共享 SessionPanel，纯结构搬移，界面看不出变化）+ ①②③⑥ 四处基元换 antd（视觉变化如上）。antd 组件色不手写 hex，走 ConfigProvider 主题 token，随顶栏 blue / ai-native 双主题自动换肤（本示例展示 ai-native 默认态）。布局/信息层级/交互流程与现状完全一致；按钮高度 36→32（打断→24）属基元替换固有微调。
+</div>
+
+</body>
+</html>

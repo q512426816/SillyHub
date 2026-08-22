@@ -50,14 +50,10 @@ import {
   Square,
   Users,
 } from "lucide-react";
-import { Badge, Button, Spin } from "antd";
+import { Badge, Button, Spin, Tag } from "antd";
 
 import { AgentModelInput } from "@/components/AgentModelInput";
 import { buildErrorLogItem } from "@/components/agent-log/normalize";
-// dialog chrome 用 ui 基元（ISP 同源：variant="outline"/"destructive"）——与 page
-// 模式的 antd Badge/Button 是两套 API，别名消歧防同文件撞名。
-import { Badge as UiBadge } from "@/components/ui/badge";
-import { Button as UiButton } from "@/components/ui/button";
 import {
   applyLogToSegments,
   createEmptyAssembledTurn,
@@ -2331,9 +2327,8 @@ function SessionPanelDialog(props: SessionPanelProps) {
               </div>
             )}
             {workspaceId && (
-              <UiButton
-                variant="outline"
-                size="sm"
+              <Button
+                icon={<Users className="h-3 w-3" />}
                 onClick={handleAnalyzeWithTeam}
                 disabled={
                   !view.sessionId ||
@@ -2342,27 +2337,22 @@ function SessionPanelDialog(props: SessionPanelProps) {
                   teamAnalyzing ||
                   teamMissionId !== null
                 }
-                className="h-8 gap-1 px-3 text-xs"
                 title="用团队（主 agent + worker）分析当前会话上下文"
               >
-                <Users className="h-3 w-3" />
                 {teamMissionId ? "已建团队" : teamAnalyzing ? "组建中…" : "用团队分析"}
-              </UiButton>
+              </Button>
             )}
-            <UiButton
-              variant="outline"
-              size="sm"
+            <Button
+              icon={<Plus className="h-3 w-3" />}
               onClick={handleNewSession}
               disabled={offlineReadOnly || view.status === "creating" || view.status === "ending"}
-              className="h-8 gap-1 px-3 text-xs"
               title="新建会话"
             >
-              <Plus className="h-3 w-3" />
               新建会话
-            </UiButton>
-            <UiBadge variant="outline" className="h-7 px-2 text-xs">
+            </Button>
+            <Tag>
               {hasOnlineProvider ? `${providers.length} 个提供方` : "未连接"}
-            </UiBadge>
+            </Tag>
           </div>
         </div>
 
@@ -2395,28 +2385,24 @@ function SessionPanelDialog(props: SessionPanelProps) {
             />
           </div>
           <div className="flex flex-wrap items-end justify-end gap-2">
-            <UiButton
-              variant="outline"
-              size="sm"
+            <Button
+              size="small"
+              icon={<Ban className="h-3 w-3" />}
               onClick={handleInterrupt}
               disabled={interruptDisabled}
-              className="h-9 gap-1 px-3 text-xs"
               title="打断本轮（session 保持 active）"
             >
-              <Ban className="h-3.5 w-3.5" />
               打断本轮
-            </UiButton>
-            <UiButton
-              variant="destructive"
-              size="sm"
+            </Button>
+            <Button
+              danger
+              icon={<Square className="h-3 w-3" />}
               onClick={handleEnd}
               disabled={endDisabled}
-              className="h-9 gap-1 px-3 text-xs"
               title="结束整个会话"
             >
-              <Square className="h-3 w-3" />
               结束会话
-            </UiButton>
+            </Button>
           </div>
         </div>
       </header>

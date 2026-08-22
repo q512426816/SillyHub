@@ -25,8 +25,11 @@ vi.mock("@/lib/daemon", () => ({
 
 vi.mock("@/lib/agent", () => ({ AgentRunLogEntry: {} }));
 vi.mock("@/lib/api", () => ({ ApiError: class ApiError extends Error {} }));
-vi.mock("@/components/daemon/interactive-session-panel", () => ({
-  InteractiveSessionPanel: () => <div data-testid="session-panel" />,
+// task-05（2026-08-22-session-panel-unify）：mock 改指 SessionPanel 本体——适配层
+// 已删（Wave 2 / task-01），被测组件直连渲染 SessionPanel，替身挂其唯一渲染导出
+// 即覆盖实际渲染出口。
+vi.mock("@/components/daemon/session-panel", () => ({
+  SessionPanel: () => <div data-testid="session-panel" />,
 }));
 
 const ME = "11111111-1111-1111-1111-111111111111";

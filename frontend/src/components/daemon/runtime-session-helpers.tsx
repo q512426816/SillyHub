@@ -7,7 +7,8 @@ import { MessageSquarePlus } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { MarkdownText } from "@/components/ui/markdown-text";
-import { InteractiveSessionPanel, type SessionTurnView } from "@/components/daemon/interactive-session-panel";
+import { SessionPanel } from "@/components/daemon/session-panel";
+import type { SessionTurnView } from "@/components/daemon/turn-timeline";
 import { classifySessionLog } from "@/components/daemon/session-log-sanitize";
 import {
   logsToSegments,
@@ -114,14 +115,15 @@ export function InteractiveSessionChatSection({
           返回栏与 panel 在 flex-col 下正确分配，panel h-full 填满剩余空间，
           否则消息变多会撑破容器被上层 overflow-hidden 裁掉（底部输入框/最新消息看不到）。 */}
       <div className="min-h-0 flex-1 overflow-hidden">
-        <InteractiveSessionPanel
+        <SessionPanel
           key={attachSession?.id ?? "live"}
+          mode="dialog"
+          sessionId={attachSession?.id ?? null}
           providers={providers}
           defaultProvider={defaultProvider}
           model={model}
           onModelChange={setModel}
           hasOnlineProvider={hasOnlineProvider}
-          attachSessionId={attachSession?.id}
           initialTurns={initialTurns}
           onSessionCreated={handleSessionCreated}
           onSessionReset={handleSessionReset}

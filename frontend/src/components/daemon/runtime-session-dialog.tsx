@@ -18,9 +18,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 
-import {
-  InteractiveSessionPanel,
-} from "@/components/daemon/interactive-session-panel";
+import { SessionPanel } from "@/components/daemon/session-panel";
 import { isActiveSession, logsToTurns } from "@/components/daemon/runtime-session-helpers";
 import {
   SessionListLayout,
@@ -135,7 +133,7 @@ function RuntimeSessionDialogBody({
 
   // task-10 / FR-03 / D-002@v1：当前选中会话（据列表快照状态）。failed 时在右侧面板
   // 顶部渲染红色失败横幅——会话页 session failed 标红（run/turn 级标红由子组件
-  // InteractiveSessionPanel 的 TurnStatusBadge 已覆盖）。
+  // SessionPanel（mode="dialog"）内 TurnTimeline 的 TurnStatusBadge 已覆盖）。
   const selectedSession = useMemo(
     () => sessions.find((s) => s.id === selectedId) ?? null,
     [sessions, selectedId],
@@ -322,7 +320,8 @@ function RuntimeSessionDialogBody({
           {/* task-10 / FR-03 / D-002@v1：选中会话 failed 时顶部红色失败横幅
               （会话页 session failed 标红）。配色对齐样式系统 destructive
               （border-red-200/bg-red-50/text-red-700）。run/turn 级失败标红由
-              InteractiveSessionPanel 内部 TurnStatusBadge（failed: text-destructive）覆盖。 */}
+              SessionPanel 内 TurnTimeline 的 TurnStatusBadge（antd Badge status，
+              failed→error 档）覆盖。 */}
           {selectedSession?.status === "failed" && (
             <div
               role="status"
@@ -335,14 +334,15 @@ function RuntimeSessionDialogBody({
             </div>
           )}
           {/* key 随 selectedId 切换重 mount（清旧 SSE/轮询）；idle 用 runtime.id 锁 focusProvider */}
-          <InteractiveSessionPanel
+          <SessionPanel
             key={selectedId ?? `new-${runtimeId ?? "closed"}`}
+            mode="dialog"
+            sessionId={selectedId ?? null}
             providers={providers}
             defaultProvider={defaultProvider}
             model={model}
             onModelChange={setModel}
             hasOnlineProvider={hasOnlineProvider}
-            attachSessionId={selectedId ?? undefined}
             initialTurns={selectedId ? logsToTurns(logs) : undefined}
             onSessionCreated={handleSessionCreated}
             onSessionReset={handleSessionReset}

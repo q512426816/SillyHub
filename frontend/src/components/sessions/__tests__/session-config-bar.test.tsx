@@ -538,9 +538,11 @@ describe("TurnTimeline whoLine 轮次快照渲染（D-008）", () => {
   it("不传 whoLine → 不渲染（弹窗零回归）", () => {
     setupTimeline([makeTurn()]);
     expect(screen.queryByLabelText("轮次配置快照")).not.toBeInTheDocument();
-    // 既有渲染口径不受影响（task-13 冒烟断言）
+    // 既有渲染口径不受影响（task-13 冒烟断言）。task-03 antd 化后状态文本进
+    // Badge status 的 text 节点，与「第 1 轮 ·」分属不同文本节点，分别断言。
     expect(screen.getByText("用户提问")).toBeInTheDocument();
     expect(screen.getByText("agent 答复")).toBeInTheDocument();
-    expect(screen.getByText(/第 1 轮 · 已完成/)).toBeInTheDocument();
+    expect(screen.getByText(/第 1 轮 ·/)).toBeInTheDocument();
+    expect(screen.getByText("已完成")).toBeInTheDocument();
   });
 });

@@ -1,9 +1,9 @@
 // task-13（2026-08-14-sessions-portal / FR-05 / D-002@v1）：共享子组件冒烟测试。
 //
 // 抽取等价性验证分两层：
-//   1. 既有 interactive-session-panel 三套测试（panel/offline/changeid）不改一行，
-//      经组装层（InteractiveSessionPanel = header + TurnTimeline + SessionInputBar）
-//      全绿 = 弹窗零回归（最强等价证明）。
+//   1. 既有弹窗三套测试（session-panel-dialog{,-offline,-changeid}）直测
+//      SessionPanel mode="dialog"（2026-08-22-session-panel-unify：适配层已删、
+//      render 入口直迁），全绿 = 弹窗零回归（最强等价证明）。
 //   2. 本文件直接渲染子组件，断言「同一 props 下关键输出与原内联渲染一致」——
 //      选择器/文案沿用既有 panel 测试的断言口径（气泡文本 / 状态徽章 / 思考占位 /
 //      过程项折叠块标题），并验证子组件可独立 import（无弹窗上下文依赖）。
@@ -64,8 +64,11 @@ describe("TurnTimeline（task-13 抽取共享子组件）", () => {
     setupTimeline();
     expect(screen.getByText("用户提问")).toBeInTheDocument();
     expect(screen.getByText("agent 答复")).toBeInTheDocument();
-    // 与原 panel 渲染同口径：第 N 轮 · 状态 + ↑in ↓out
-    expect(screen.getByText(/第 1 轮 · 已完成/)).toBeInTheDocument();
+    // 与原 panel 渲染同口径：第 N 轮 · 状态 + ↑in ↓out。task-03 TurnStatusBadge
+    // antd 化后状态文本进 Badge status 的 text 节点（dot+text），与「第 N 轮 ·」
+    // 分属不同文本节点，按文本分别断言语义不变。
+    expect(screen.getByText(/第 1 轮 ·/)).toBeInTheDocument();
+    expect(screen.getByText("已完成")).toBeInTheDocument();
     expect(screen.getByText(/↑10/)).toBeInTheDocument();
     expect(screen.getByText(/↓20/)).toBeInTheDocument();
   });

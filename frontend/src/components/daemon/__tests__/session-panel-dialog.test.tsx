@@ -1,4 +1,6 @@
-// task-11：InteractiveSessionPanel 组件测试。
+// task-11：SessionPanel（mode="dialog"）组件测试。
+// （2026-08-22-session-panel-unify task-05：由 InteractiveSessionPanel 适配层测试
+//  先行迁移为直测 SessionPanel，断言语义不变；适配层删除于本变更 Wave 2。）
 //
 // 覆盖 AC：
 //   AC-11-01 首发调 createSession + 建 1 个 SSE
@@ -14,7 +16,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 
-import { InteractiveSessionPanel } from "../interactive-session-panel";
+import { SessionPanel } from "../session-panel";
 import type { SessionStreamConnection } from "@/lib/daemon";
 
 // MarkdownText 用 next/dynamic + ssr:false，jsdom 测试同步 render 处于 loading(null)，
@@ -148,18 +150,25 @@ function makeEnvelope(
 }
 
 function setupPanel(overrides: Record<string, any> = {}) {
-  const props = {
+  // 直测 SessionPanel：原 <InteractiveSessionPanel> 适配层映射（attachSessionId
+  // ?? null → sessionId、mode 固定 "dialog"）内联到 render 入口，其余 props 同名直传。
+  const { attachSessionId, ...props } = {
     providers: ["claude", "codex"],
     defaultProvider: "claude",
     model: null,
     onModelChange: vi.fn(),
     hasOnlineProvider: true,
+    // 显式声明键供解构（TS2525）：默认 undefined，overrides 可覆盖；
+    // sessionId={attachSessionId ?? null} 语义不变（string | undefined → string | null）
+    attachSessionId: undefined as string | undefined,
     ...overrides,
   };
-  return render(<InteractiveSessionPanel {...(props as any)} />);
+  return render(
+    <SessionPanel mode="dialog" sessionId={attachSessionId ?? null} {...(props as any)} />,
+  );
 }
 
-describe("InteractiveSessionPanel", () => {
+describe("SessionPanel（dialog）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // 默认无 pending dialog（改动二：fetchPendingDialogs 独立 effect）
@@ -1446,7 +1455,7 @@ describe("InteractiveSessionPanel", () => {
  * - 运行中无答复：对话模式显示「正在思考…」占位
  * （task-10 / 2026-08-19-session-stream-ux：「全部」更名「进度」，段模型 v2 渲染）
  */
-describe("InteractiveSessionPanel 对话/进度视图切换（ql-20260729-005）", () => {
+describe("SessionPanel（dialog）对话/进度视图切换（ql-20260729-005）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);
@@ -1581,7 +1590,7 @@ describe("InteractiveSessionPanel 对话/进度视图切换（ql-20260729-005）
  * 2026-08-03-session-stream-partial-revoke / FR-05 / task-08：onLog 按 segmentId
  * 撤回已渲染 partial（半截→override→complete 全文）。覆盖 AC-04/05/07。
  */
-describe("InteractiveSessionPanel partial override 撤回（task-06/08）", () => {
+describe("SessionPanel（dialog）partial override 撤回（task-06/08）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);
@@ -1817,7 +1826,7 @@ describe("InteractiveSessionPanel partial override 撤回（task-06/08）", () =
 });
 
 // task-13 / FR-04 / R-08 / design §5 Phase4：terminating_at 非空 → 面板显示「终止中…」横幅
-describe("InteractiveSessionPanel 终止中态显示（task-13 / FR-04）", () => {
+describe("SessionPanel（dialog）终止中态显示（task-13 / FR-04）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);

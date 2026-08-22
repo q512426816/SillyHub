@@ -750,7 +750,10 @@ describe("SessionPanel SSE 装配器接线（task-09）", () => {
     expect(await screen.findByText("答复完成。")).toBeTruthy();
     expect(screen.queryByText("不该出现在答复区")).toBeNull();
     // 终态徽标（deriveTurnTerminalStatus + token 写入）：第 4 轮 · 已完成 · ↑100 ↓20。
-    expect(screen.getByText(/第 4 轮 · 已完成/)).toBeTruthy();
+    // task-03 antd 化后状态文本进 Badge status 的 text 节点，与「第 4 轮 ·」
+    // 分属不同文本节点，按文本分别断言语义不变。
+    expect(screen.getByText(/第 4 轮 ·/)).toBeTruthy();
+    expect(screen.getByText("已完成")).toBeTruthy();
     expect(screen.getByText(/↑100/)).toBeTruthy();
   });
 });
@@ -818,7 +821,8 @@ describe("SessionPanel attach 运行中轮恢复竞态（ql-20260820-007）", ()
       resolveLogs.forEach((r) => r());
     });
 
-    expect(await screen.findByText(/第 1 轮 · 运行中/)).toBeTruthy();
+    expect(await screen.findByText("运行中")).toBeTruthy();
+    expect(screen.getByText(/第 1 轮 ·/)).toBeTruthy();
     // TurnStatusBar 恢复挂载（修复前轮卡 completed 不渲染状态条）。
     expect(screen.getByText("执行中")).toBeTruthy();
     expect(screen.queryByText(/已完成/)).toBeNull();
@@ -851,7 +855,8 @@ describe("SessionPanel attach 运行中轮恢复竞态（ql-20260820-007）", ()
 
     // detail 后到 → 修正 effect 兜底翻回 running（logs-first 顺序回归保护）。
     expect(await screen.findByText("帮我分析一下这个页面")).toBeTruthy();
-    expect(screen.getByText(/第 1 轮 · 运行中/)).toBeTruthy();
+    expect(screen.getByText(/第 1 轮 ·/)).toBeTruthy();
+    expect(screen.getByText("运行中")).toBeTruthy();
     expect(screen.queryByText(/已完成/)).toBeNull();
   });
 });
@@ -906,7 +911,8 @@ describe("SessionPanel 轮后对账回放（ql-20260820-010）", () => {
         makeStreamEnvelope({ event: "turn_completed", status: "completed", exit_code: 0 }),
       ),
     );
-    expect(await screen.findByText(/第 4 轮 · 已完成/)).toBeTruthy();
+    expect(await screen.findByText("已完成")).toBeTruthy();
+    expect(screen.getByText(/第 4 轮 ·/)).toBeTruthy();
     expect(await screen.findByText("工具阶段可见。")).toBeTruthy();
 
     // 对账回放：turn_completed 后 1.5s，streamSession 重拉 logs 逐条 onLog

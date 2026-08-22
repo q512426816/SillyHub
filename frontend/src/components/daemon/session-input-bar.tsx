@@ -17,8 +17,8 @@
 
 import { useRef, useState } from "react";
 import { Paperclip, RefreshCw, Send, X } from "lucide-react";
+import { Button } from "antd";
 
-import { Button } from "@/components/ui/button";
 import {
   removeSessionAttachment,
   uploadSessionAttachment,
@@ -167,7 +167,7 @@ export function SessionInputBar({
           onChange={(e) => void handleFiles(e.target.files)}
         />
         <Button
-          variant="ghost"
+          type="text"
           onClick={() => fileRef.current?.click()}
           disabled={disabled || attachmentsDisabled}
           className="h-12 w-12 shrink-0 p-0"
@@ -194,6 +194,7 @@ export function SessionInputBar({
           disabled={disabled}
         />
         <Button
+          type="primary"
           onClick={onSend}
           // D-7：带附件时空文本可发（看图说话）；纯文本仍要求非空。
           disabled={disabled || (!value.trim() && attachments.length === 0)}

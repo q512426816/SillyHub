@@ -1,18 +1,19 @@
 /**
- * task-15（2026-07-09-change-detail-session / FR-05）：InteractiveSessionPanel
+ * task-15（2026-07-09-change-detail-session / FR-05）：SessionPanel（mode="dialog"）
  * changeId / workspaceId 透传测试。
+ * （2026-08-22-session-panel-unify task-05：由 InteractiveSessionPanel 适配层测试迁移直测。）
  *
  * 覆盖 task-12 契约 + task-15 验收：
  *   - 传 changeId 时 createSession payload 含 change_id
  *   - 不传 changeId 时 createSession payload 不含 change_id（runtimes 页零回归）
  *
- * mock 模式复用既有 interactive-session-panel.test.tsx。
+ * mock 模式复用既有 session-panel-dialog.test.tsx。
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
-import { InteractiveSessionPanel } from "@/components/daemon/interactive-session-panel";
+import { SessionPanel } from "@/components/daemon/session-panel";
 
 // MarkdownText 用 next/dynamic + ssr:false，jsdom 同步 render 处于 loading(null)。
 vi.mock("@/components/ui/markdown-text", () => ({
@@ -56,18 +57,25 @@ function makeStreamMock(): { factory: ReturnType<typeof vi.fn> } {
 }
 
 function setupPanel(overrides: Record<string, any> = {}) {
-  const props = {
+  // 直测 SessionPanel：原 <InteractiveSessionPanel> 适配层映射（attachSessionId
+  // ?? null → sessionId、mode 固定 "dialog"）内联到 render 入口，其余 props 同名直传。
+  const { attachSessionId, ...props } = {
     providers: ["claude", "codex"],
     defaultProvider: "claude",
     model: null,
     onModelChange: vi.fn(),
     hasOnlineProvider: true,
+    // 显式声明键供解构（TS2525）：默认 undefined，overrides 可覆盖；
+    // sessionId={attachSessionId ?? null} 语义不变（string | undefined → string | null）
+    attachSessionId: undefined as string | undefined,
     ...overrides,
   };
-  return render(<InteractiveSessionPanel {...(props as any)} />);
+  return render(
+    <SessionPanel mode="dialog" sessionId={attachSessionId ?? null} {...(props as any)} />,
+  );
 }
 
-describe("InteractiveSessionPanel changeId/workspaceId 透传（task-15）", () => {
+describe("SessionPanel（dialog）changeId/workspaceId 透传（task-15）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);

@@ -32,6 +32,7 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Bot, Wrench } from "lucide-react";
+import { Badge } from "antd";
 
 import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
 import { RunErrorItem } from "@/components/agent-log/run-error-item";
@@ -948,13 +949,20 @@ function TurnStatusBadge({
     failed: "失败",
     killed: "已中止",
   };
-  const tone: Record<TurnUiStatus, string> = {
-    pending: "text-muted-foreground",
-    running: "text-brand-600",
-    interrupting: "text-amber-600",
-    completed: "text-emerald-600",
-    failed: "text-destructive",
-    killed: "text-amber-600",
+  // 2026-08-22-session-panel-unify task-03（FR-04 / D-003@v1）：状态色从自写 tone
+  // 彩色 span 胶囊换 antd Badge status 语义档（色经 ConfigProvider token 随双主题
+  // 换肤，不手写色值）。映射固定四档：running/interrupting→processing、
+  // completed→success、failed/killed→error、pending 及其余中性态→default。
+  const badgeStatus: Record<
+    TurnUiStatus,
+    "default" | "processing" | "success" | "error"
+  > = {
+    pending: "default",
+    running: "processing",
+    interrupting: "processing",
+    completed: "success",
+    failed: "error",
+    killed: "error",
   };
   // ql-20260621：token 显示。执行中（running/pending）有累积值时显示「输入 N…」
   // 表明实时统计进行中；终态显示完整「↑in ↓out」。两者皆 null 时不渲染。
@@ -964,8 +972,8 @@ function TurnStatusBadge({
   const showTokens = inTokens !== null || outTokens !== null;
   const isLive = status === "running" || status === "pending" || status === "interrupting";
   return (
-    <span className={cn("font-mono", tone[status])}>
-      {label} · {statusLabel[status]}
+    <span className="font-mono">
+      {label} · <Badge status={badgeStatus[status]} text={statusLabel[status]} />
       {showTokens && (
         <span className="ml-1.5 text-muted-foreground/80">
           {" · "}

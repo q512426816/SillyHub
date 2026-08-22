@@ -12,8 +12,8 @@
  *   - 无 allow/deny 二选一，只有"提交回答"（语义上即 allow + dialog_result.answers）；
  *   - 提交后进入 disabled 状态，等待 permission_resolved SSE 由父组件移除本卡。
  *
- * 父组件（interactive-session-panel）按 req.dialog_kind 是否存在决定渲染本卡还是
- * 普通审批卡。
+ * 父组件（session-panel，dialog/page 两模式同款分流）按 req.dialog_kind 是否存在
+ * 决定渲染本卡还是普通审批卡。
  *
  * task-09（FR-09 / D-010@v1）：本组件 provider 无关，零分支复用。
  *   - Claude Code canUseTool AskUserQuestion → dialog_kind="ask_user"
