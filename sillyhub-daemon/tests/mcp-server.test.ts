@@ -19,6 +19,7 @@ import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
   createMcpServer,
   DAEMON_MCP_SERVER_NAME,
+  readEnv,
 } from '../src/mcp-server';
 import { HubClient, HubHttpError } from '../src/hub-client';
 
@@ -116,7 +117,7 @@ describe('mcp-server: 5 tool 注册', () => {
     expect(DAEMON_MCP_SERVER_NAME).toBe('sillyhub-daemon');
   });
 
-  it('dispatch_worker inputSchema 含必填 objective/workspace_id/mission_id（无 worker_id）', async () => {
+  it('dispatch_worker inputSchema：objective 必填，workspace_id/mission_id 可选（task-10）', async () => {
     const { client } = makeMockClient();
     const { mcpClient, close } = await connect(client);
     try {
@@ -132,9 +133,10 @@ describe('mcp-server: 5 tool 注册', () => {
       expect(schema?.properties).toHaveProperty('mission_id');
       // backend 真实契约无 worker_id（spike-01 修正）
       expect(schema?.properties).not.toHaveProperty('worker_id');
+      // task-10（审查 B1）：mission_id/workspace_id 转可选（会话上下文 X-Session-Id 定位）
       expect(schema?.required).toContain('objective');
-      expect(schema?.required).toContain('workspace_id');
-      expect(schema?.required).toContain('mission_id');
+      expect(schema?.required).not.toContain('workspace_id');
+      expect(schema?.required).not.toContain('mission_id');
     } finally {
       await close();
     }
@@ -159,7 +161,7 @@ describe('mcp-server: 5 tool 注册', () => {
     }
   });
 
-  it('report_progress inputSchema 含必填 run_id/message（非 note）', async () => {
+  it('report_progress inputSchema：message 必填，run_id 可选（task-10，非 note）', async () => {
     const { client } = makeMockClient();
     const { mcpClient, close } = await connect(client);
     try {
@@ -172,7 +174,8 @@ describe('mcp-server: 5 tool 注册', () => {
       expect(schema?.properties).toHaveProperty('run_id');
       expect(schema?.properties).toHaveProperty('message');
       expect(schema?.properties).not.toHaveProperty('note');
-      expect(schema?.required).toContain('run_id');
+      // task-10（审查 B1）：run_id 转可选（backend 按 X-Session-Id 解析主控 run）
+      expect(schema?.required).not.toContain('run_id');
       expect(schema?.required).toContain('message');
     } finally {
       await close();
@@ -193,6 +196,128 @@ describe('mcp-server: 5 tool 注册', () => {
       expect(schema?.required).toContain('worker_id');
     } finally {
       await close();
+    }
+  });
+});
+
+// ── task-10（2026-08-22-team-session-unify / 审查 B1）：参数可选化 + 描述重写 + env ──
+
+describe('mcp-server: task-10 参数可选化与会话上下文', () => {
+  it('5 工具 mission_id/workspace_id 均不在 required（会话上下文定位，B1）', async () => {
+    const { client } = makeMockClient();
+    const { mcpClient, close } = await connect(client);
+    try {
+      const tools = await mcpClient.listTools();
+      for (const name of [
+        'dispatch_worker',
+        'get_worker_result',
+        'list_workers',
+        'converge_mission',
+        'report_progress',
+      ]) {
+        const tool = tools.tools.find((t) => t.name === name);
+        expect(tool, `tool ${name} 应注册`).toBeDefined();
+        const schema = tool?.inputSchema as {
+          properties?: Record<string, unknown>;
+          required?: string[];
+        };
+        // 属性仍存在（显式传参透传作越权校验锚），只是不再必填
+        expect(schema?.properties).toHaveProperty('mission_id');
+        expect(schema?.properties).toHaveProperty('workspace_id');
+        expect(schema?.required ?? []).not.toContain('mission_id');
+        expect(schema?.required ?? []).not.toContain('workspace_id');
+      }
+    } finally {
+      await close();
+    }
+  });
+
+  it('dispatch_worker 描述含「仅用户明确要求时派团队」文案（能力说明书）', async () => {
+    const { client } = makeMockClient();
+    const { mcpClient, close } = await connect(client);
+    try {
+      const tools = await mcpClient.listTools();
+      const tool = tools.tools.find((t) => t.name === 'dispatch_worker');
+      expect(tool?.description).toContain('仅用户明确要求时派团队');
+    } finally {
+      await close();
+    }
+  });
+
+  it('dispatch_worker 缺省 workspace_id/mission_id → undefined 透传（hub-client 守卫不下发）', async () => {
+    const { client, calls } = makeMockClient();
+    spyMethod(client, calls.dispatchWorker, 'dispatchWorker', {
+      id: 'run-lazy',
+      status: 'pending',
+      lease_id: null,
+      error_code: null,
+    });
+    const { mcpClient, close } = await connect(client);
+    try {
+      const result = await mcpClient.callTool({
+        name: 'dispatch_worker',
+        arguments: { objective: 'lazy mission dispatch' },
+      });
+      expect(result.isError).toBeFalsy();
+      expect(calls.dispatchWorker[0]).toEqual([
+        undefined,
+        undefined,
+        {
+          objective: 'lazy mission dispatch',
+          role: undefined,
+          agent_type: undefined,
+          model: undefined,
+          read_only: undefined,
+          worktree_path: undefined,
+          branch: undefined,
+          worker_prompt: undefined,
+          target_workspace_id: undefined,
+        },
+      ]);
+    } finally {
+      await close();
+    }
+  });
+
+  it('report_progress 缺省 run_id → undefined 透传（backend 按 X-Session-Id 解析主控 run）', async () => {
+    const { client, calls } = makeMockClient();
+    spyMethod(client, calls.reportProgress, 'reportProgress', {
+      run_id: 'run-1',
+      log_id: 'log-1',
+    });
+    const { mcpClient, close } = await connect(client);
+    try {
+      await mcpClient.callTool({
+        name: 'report_progress',
+        arguments: { message: 'decided to wait' },
+      });
+      expect(calls.reportProgress[0]).toEqual([
+        undefined,
+        undefined,
+        { run_id: undefined, message: 'decided to wait', decision: undefined },
+      ]);
+    } finally {
+      await close();
+    }
+  });
+
+  it('readEnv 读 process.env.MCP_SESSION_ID（spike-01 注入管道终点）', async () => {
+    process.env.MCP_SESSION_ID = 'sess-env-1';
+    try {
+      const env = readEnv();
+      expect(env.sessionId).toBe('sess-env-1');
+    } finally {
+      delete process.env.MCP_SESSION_ID;
+    }
+  });
+
+  it('MCP_SESSION_ID 未设 → readEnv.sessionId 空串（容错，不抛）', async () => {
+    const prev = process.env.MCP_SESSION_ID;
+    delete process.env.MCP_SESSION_ID;
+    try {
+      expect(readEnv().sessionId).toBe('');
+    } finally {
+      if (prev !== undefined) process.env.MCP_SESSION_ID = prev;
     }
   });
 });

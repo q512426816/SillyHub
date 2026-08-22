@@ -314,7 +314,19 @@ describe('task-15 / R-04 (2): 主 agent session（注入 mcpServers）end → cl
 
     const opts = getStartOpts();
     expect(opts).not.toBeNull();
-    expect(opts!.mcpServers).toEqual(MCP_CONFIG);
+    // task-10（2026-08-22-team-session-unify）：_resolveMainAgentMcp 现按 ctx.sessionId
+    // 给 sillyhub-daemon 条目补 MCP_SESSION_ID env（会话上下文注入，spike-01 管道），
+    // 故不再与原始 fixture 逐字节相等——期望值为注入后的形态（其余 server 不变）。
+    expect(opts!.mcpServers).toEqual({
+      ...MCP_CONFIG,
+      'sillyhub-daemon': {
+        ...MCP_CONFIG['sillyhub-daemon'],
+        env: {
+          ...MCP_CONFIG['sillyhub-daemon'].env,
+          MCP_SESSION_ID: MAIN_AGENT_BASE.sessionId,
+        },
+      },
+    });
   });
 
   it('主 agent session end → state.query.close 调一次（claude.exe kill 链入口触发）', async () => {
