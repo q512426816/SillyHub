@@ -859,7 +859,15 @@ def _mission_to_response(
         workspace_id=mission.workspace_id,
         change_id=mission.change_id,
         objective=mission.objective,
-        status=derive_status(runs, cancelled=mission.cancelled_at is not None),
+        # QA P2 修复（验收返工）：会话维度入参——nullable 语义下列非 NULL 即绑定
+        # 会话；session_active_turn 不查表（runs 已含主控轮，活跃 turn 由其状态
+        # 反映；GET 端点非 TeamTaskBlock 主数据源，边缘间隙不误终态展示）。
+        status=derive_status(
+            runs,
+            cancelled=mission.cancelled_at is not None,
+            converged=mission.converged_at is not None,
+            has_session=mission.session_id is not None,
+        ),
         budget_usd=mission.budget_usd,
         cost_so_far=cost,
         constraints=mission.constraints,

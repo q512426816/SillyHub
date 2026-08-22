@@ -38,6 +38,10 @@ PLAIN_INDEX = "ix_agent_missions_session_id"
 UNIQUE_INDEX = "uq_agent_missions_session_active"
 FK_NAME = "fk_agent_missions_session_id"
 PARTIAL_WHERE = "converged_at IS NULL AND cancelled_at IS NULL"
+# QA P1 修复：索引条件加 session_id IS NOT NULL（NULL 行不参与唯一约束）
+PARTIAL_WHERE_WITH_SESSION = (
+    "session_id IS NOT NULL AND converged_at IS NULL AND cancelled_at IS NULL"
+)
 
 # task-01 前 AgentMission 既有字段（守卫：新列之外零漂移）
 PRE_EXISTING_FIELDS = {
@@ -72,10 +76,11 @@ def test_agent_mission_session_id_field_present() -> None:
     )
 
 
-def test_session_id_uuid_not_null_fk_agent_sessions() -> None:
-    """D-006@v1：Uuid、FK agent_sessions.id、NOT NULL（写法仿 project_id）。"""
+def test_session_id_uuid_nullable_fk_agent_sessions() -> None:
+    """D-006@v1（验收返工）：Uuid、FK agent_sessions.id、nullable——external
+    mission（无会话存量入口）为 NULL，非 NULL 即绑定会话（QA P1 修复）。"""
     sa_column = AgentMission.model_fields["session_id"].sa_column
-    assert sa_column.nullable is False
+    assert sa_column.nullable is True
     fks = list(sa_column.foreign_keys)
     assert len(fks) == 1, f"expected 1 FK on session_id, got {len(fks)}"
     fk = fks[0]
@@ -102,17 +107,14 @@ def test_partial_unique_index_declared() -> None:
     pg_where = idx.dialect_options["postgresql"]["where"]
     sqlite_where = idx.dialect_options["sqlite"]["where"]
     for where in (pg_where, sqlite_where):
-        assert PARTIAL_WHERE in str(where)
+        assert PARTIAL_WHERE_WITH_SESSION in str(where)
 
 
-def test_session_id_default_factory_for_legacy_paths() -> None:
-    """存量构造路径兼容：不传 session_id 时 default_factory 兜底随机 uuid。
-
-    SQLite 测试不强制 FK（conftest 未开 PRAGMA foreign_keys），既有 mission
-    构造测试零改动通过；PG 下随机 uuid 触发 FK 失败，即时暴露未接线创建路径。
-    """
+def test_session_id_none_for_external_missions() -> None:
+    """存量 external 入口兼容（QA P1 修复）：不传 session_id → None（原
+    default_factory 随机 uuid 会违反 FK 压断 PG 上的 4 个无会话创建入口）。"""
     m = AgentMission(workspace_id=uuid.uuid4(), objective="x")
-    assert isinstance(m.session_id, uuid.UUID)
+    assert m.session_id is None
 
 
 # ── 2. 部分唯一索引行为（SQLite create_all 等价验证） ────────────────────────
@@ -128,7 +130,7 @@ async def _make_mission(
     m = AgentMission(
         workspace_id=uuid.uuid4(),
         objective="团队目标",
-        session_id=session_id or uuid.uuid4(),
+        session_id=session_id,
         converged_at=converged_at,
         cancelled_at=cancelled_at,
     )
@@ -171,8 +173,15 @@ class TestActiveMissionPartialUniqueIndex:
         self, db_session: AsyncSession
     ) -> None:
         """边界：不同 session 的活跃 mission 互不冲突（索引按 session 分组）。"""
-        await _make_mission(db_session)
-        await _make_mission(db_session)
+        await _make_mission(db_session, session_id=uuid.uuid4())
+        await _make_mission(db_session, session_id=uuid.uuid4())
+
+    @pytest.mark.asyncio
+    async def test_null_session_active_missions_coexist(self, db_session: AsyncSession) -> None:
+        """QA P1 修复验收：external mission（session_id NULL）多个活跃互不冲突
+        （索引条件含 session_id IS NOT NULL，NULL 行不参与唯一约束）。"""
+        await _make_mission(db_session, session_id=None)
+        await _make_mission(db_session, session_id=None)
 
 
 # ── 3. 不改变的表（design §8） ──────────────────────────────────────────────
@@ -244,19 +253,19 @@ def test_migration_is_single_head_after_mount() -> None:
 
 
 def test_migration_upgrade_adds_column_fk_and_indexes() -> None:
-    """upgrade 四件套：add_column(NOT NULL) + FK + 普通索引 + 部分唯一索引。"""
+    """upgrade 四件套：add_column(nullable，QA P1) + FK + 普通索引 + 部分唯一索引。"""
     import inspect
 
     mod = _load_migration()
     src = inspect.getsource(mod.upgrade)
-    assert 'sa.Column("session_id", sa.Uuid(), nullable=False)' in src
+    assert 'sa.Column("session_id", sa.Uuid(), nullable=True)' in src
     assert FK_NAME in src
     assert '"agent_sessions"' in src
     assert f'"{PLAIN_INDEX}"' in src
     assert f'"{UNIQUE_INDEX}"' in src
     assert "unique=True" in src
     # 部分唯一条件以模块常量传入，值与 model __table_args__ 同文本
-    assert PARTIAL_WHERE in str(mod._PARTIAL_WHERE)
+    assert PARTIAL_WHERE_WITH_SESSION in str(mod._PARTIAL_WHERE)
     assert src.count("_PARTIAL_WHERE") == 2  # postgresql_where + sqlite_where
     # 双方言 where（SQLite create_all/等价 replay 同语义）
     assert "postgresql_where" in src
