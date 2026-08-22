@@ -120,3 +120,19 @@
 方案：①_dispatch_worker_core 建 run 前调 resolve_representative_binding（owner→任意在线）预检，均无在线→422 中文引导不建 run，user_id 防御性取值防懒建 rollback 过期；②worker prompt 追加结果落盘 artifact 必守段；③19 个既有用例适配（stub 在线绑定 helper+3 处 error_code 断言弱化为终态）。
 结果：agent 模块全量 848 passed+1 xpassed 全绿、ruff 过、已提交 aa411691；部署待 rebuild backend。
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：.sillyspec/changes/2026-08-22-team-session-unify/tasks.md
+
+## ql-20260822-009-95bc | 2026-08-22 22:01:24 | 修复已结束会话重新打开后被立刻打回 ended 无法续聊（transcript 目录两侧不对称）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/claude-transcript-dir.ts（新增 transcript 位置探测（locate/apply 两入口，fs 吞错兜底））
+- sillyhub-daemon/src/interactive/session-manager.ts（restore/reload 两调用点改按位置判定 + 注释同步）
+- sillyhub-daemon/tests/interactive/claude-transcript-dir.test.ts（locator 单测（join 构造路径键避 Windows 反斜杠坑））
+- sillyhub-daemon/tests/interactive/session-manager-resume-config-dir.test.ts（resume/reload 集成断言（mock 探测三态））
+- .sillyspec/docs/sillyhub-daemon/modules/interactive.md（契约/关键逻辑/注意事项/人工备注同步）
+- .sillyspec/docs/SillyHub/flows/interactive-session.md（建会话图口径修正）
+- .sillyspec/docs/SillyHub/modules/daemon.md（interactive 条目口径修正）
+需求：修复已结束会话重新打开后被立刻打回 ended 无法续聊（transcript 目录两侧不对称）
+根因：create 仅配供应商时隔离 CLAUDE_CONFIG_DIR（未配供应商 transcript 写宿主机 ~/.claude），resume/reload 却无条件强制隔离目录，找不到 jsonl → claude 报错退出 → fail → 会话记回 ended，inject 全 409（部署日志实证 reopen 200 后 4 秒被 daemon 终结）
+方案：新增 claude-transcript-dir.ts 探测 sid.jsonl 实际在隔离目录还是 ~/.claude（扫两侧 projects 一层，fs 吞错兜底），restoreAndReconnect 与 _reloadSession 按探测结果设/删 env；两轮旧修复语义均保留，探测不到维持隔离默认
+结果：daemon 全量 vitest 2533 过 9 跳过零失败、tsc 零错；新增 16 用例（locator 11 + resume/reload 5）；三处模块文档同步；需重建 dist 并重启 daemon 后生效
