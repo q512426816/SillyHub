@@ -690,3 +690,55 @@ class ChangeWriteProgressRequest(BaseModel):
     claim_token: str
     files_total: int | None = None
     files_processed: int | None = None
+
+
+# ── Session team mission（2026-08-22-team-session-unify task-03 / design §7）──
+# 会话内团队能力的触发/列表契约：POST /api/daemon/sessions/{id}/team-mission
+# 预建 mission（scope 冻结快照 + objective 空落占位），GET .../team-missions 供
+# 前端 TeamTaskBlock 轮询。DTO 不含 anchor_workspace_id——anchor 由服务端按
+# scope 派生（backend-code 优先，对齐旧项目端点口径）。
+
+
+class TeamMissionTriggerRequest(BaseModel):
+    """POST /api/daemon/sessions/{session_id}/team-mission 请求体（design §7）。
+
+    - ``objective`` 可空：空则落库占位 ``SESSION_OBJECTIVE_PLACEHOLDER``
+      （orchestrator.py），首条 inject 后回填（CC-09）；
+    - ``scope_workspace_ids`` 可空：None=会话绑定工作区；会话无工作区且未传
+      → 422（CC-10 同款语义）；上限 20 对齐 mission_schema.py 既有口径；
+    - ``project_id`` 项目维度（仅项目经理/超管可建，scope ⊆ 项目关联工作区）；
+    - ``worker_preset`` / ``main_agent_config`` 沿用 mission_schema.py:30-37 既有
+      形态（list[dict] / dict）与上限。
+    """
+
+    objective: str | None = Field(default=None, max_length=8000)
+    scope_workspace_ids: list[uuid.UUID] | None = Field(default=None, max_length=20)
+    project_id: uuid.UUID | None = None
+    budget_usd: float | None = Field(default=None, ge=0)
+    worker_preset: list[dict] | None = Field(default=None, max_length=20)
+    main_agent_config: dict | None = None
+
+
+class TeamMissionWorkerSummary(BaseModel):
+    """TeamMissionSummary.workers 单项——分身 run（role != orchestrator）概要。"""
+
+    run_id: uuid.UUID
+    role: str | None = None
+    status: str
+    objective: str | None = None
+
+
+class TeamMissionSummary(BaseModel):
+    """触发/列表共用响应（design §7）。
+
+    ``status`` 为扩展后 derive_status 派生值（含 awaiting_input 档，会话维度
+    入参）；``workers`` 仅 role != orchestrator 的分身 run（主控轮 D-009 不进）；
+    ``scope_workspace_ids`` 为落库冻结快照（NULL 缺省回落 [anchor]）。
+    """
+
+    mission_id: uuid.UUID
+    status: str  # planning|running|awaiting_input|done|degraded|failed|cancelled
+    objective: str | None
+    scope_workspace_ids: list[str]
+    budget_usd: float | None
+    workers: list[TeamMissionWorkerSummary] = Field(default_factory=list)

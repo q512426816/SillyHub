@@ -34,6 +34,11 @@ log = get_logger(__name__)
 # mission_id，role 仅作语义标记。
 _ORCHESTRATOR_ROLE = "orchestrator"
 
+# 会话预建 mission 的 objective 占位文案（2026-08-22-team-session-unify task-03 /
+# design §8 CC-09）：objective 列 NOT NULL，预建时 objective 可空——落此占位，
+# 首次 inject 后以首条团队指令文本回填（task-04 回填检测 import 本常量，勿重复定义）。
+SESSION_OBJECTIVE_PLACEHOLDER = "（由会话首条团队指令定义）"
+
 # Worker Run 终态集合（mission.py:26 _FAILED + completed）。schedule_loop 三重收敛
 # 信号 1 用：所有 worker run（role != orchestrator）全终态 = 收敛条件之一。
 _WORKER_TERMINAL = ("completed", "failed", "killed")
@@ -224,8 +229,9 @@ class OrchestratorService:
     """Team 主 agent 编排服务（D-001@v2）。
 
     职责：
-    - ``team_mission_entry``：建 AgentMission（含 worker_preset/main_agent_config 落库）
-      + 主 agent AgentRun（role=orchestrator, mission_id 非空）+ 派 daemon lease。
+    - ``team_mission_entry``：建 AgentMission（含 worker_preset/main_agent_config 落库）；
+      team 模式另建主 agent AgentRun（role=orchestrator, mission_id 非空）+ 派
+      daemon lease；external / session 模式只建 mission 不 spawn（见方法 docstring）。
     - ``schedule_loop``：主 agent 调度循环骨架（三重收敛骨架，完整逻辑 task-11）。
 
     与 GLM planner 链路互斥：mode=team 走本服务，mode=single/None 走
@@ -249,11 +255,16 @@ class OrchestratorService:
         orchestration_mode: str = "team",
         scope_workspace_ids: list[uuid.UUID] | None = None,
         project_id: uuid.UUID | None = None,
+        session_id: uuid.UUID | None = None,
     ) -> tuple[AgentMission, AgentRun | None]:
         """建 mission；team 模式还建主 agent run + 派 daemon lease。
 
         ``project_id``（task-07，2026-08-19-cross-workspace-team-mission）：项目维度 mission
         关联项目 ID，单 workspace mission 可空（零回归）。跨 ws mission 必填。
+
+        ``session_id``（2026-08-22-team-session-unify task-03）：发起会话锚点
+        （mission.session_id 列，D-006@v1）。仅 ``"session"`` 预建模式必传；
+        team/external 旧模式不传 → 列 default_factory 兜底随机 uuid（零回归）。
 
         ``orchestration_mode`` 取值：
         - ``"team"``（默认，零回归）：复用 ``MissionService.start_mission`` 的持久化
@@ -264,6 +275,12 @@ class OrchestratorService:
           主 agent run + daemon lease——caller 在自己的 worktree 用 dispatch_worker
           自主派 worker，返回 ``(mission, None)``。不加 DB 列，constraints JSON 复用
           （model.py:601）。
+        - ``"session"``（task-03 会话预建，design §5 Phase 1）：只建 mission
+          （session_id 落列 + scope/project/budget/preset/main_agent_config 冻结
+          快照），objective 空落 ``SESSION_OBJECTIVE_PLACEHOLDER``（CC-09）；**跳过**
+          主 agent run + daemon lease + render_orchestrator_prompt——主控轮由会话
+          inject 当轮回填 mission_id+role='orchestrator'（task-04 双标记），返回
+          ``(mission, None)``。
 
         team 模式 daemon 离线 / workspace 未绑定时，``dispatch_to_daemon`` 抛
         ``NoOnlineDaemonError``——本方法捕获并把主 agent run 标记 ``pending``
@@ -273,12 +290,21 @@ class OrchestratorService:
         失败语义一致（router.py:783-784）。external 模式不调 dispatch_to_daemon，
         不存在该异常路径。
         """
+        if orchestration_mode == "session" and session_id is None:
+            raise ValueError("session 预建模式必须传 session_id（mission.session_id 锚点）")
+
         merged = dict(constraints or {})
         # external 模式（路径A / SillySpec 外部调度）：把 mode 落进 mission.constraints
         # 供 converge 检测（task-03 finalizer 查 orchestration_mode=="external" 跳过
         # finalize/cleanup）。team 模式不落——merged 与改动前字节一致（零回归）。
         if orchestration_mode == "external":
             merged["orchestration_mode"] = "external"
+
+        # session 预建模式（task-03 / CC-09）：objective 可空 → 落占位常量（首条
+        # inject 回填，task-04）。旧模式 objective 由 DTO 强制非空，不受影响。
+        effective_objective = objective
+        if orchestration_mode == "session" and not (objective and objective.strip()):
+            effective_objective = SESSION_OBJECTIVE_PLACEHOLDER
 
         # 转换 scope_workspace_ids（uuid → str 存 JSON 列）
         scope_workspace_ids_str: list[str] | None = None
@@ -287,8 +313,13 @@ class OrchestratorService:
 
         mission = AgentMission(
             workspace_id=workspace_id,
+            # session 预建模式传会话锚点；旧模式（team/external）不传 → 触发列
+            # default_factory 随机 uuid（model.py task-01 注释：PG 下随机 uuid 触发
+            # FK 失败即时暴露未接线入口，task-13 收口）。显式传 None 会绕过
+            # default_factory 直接违反 NOT NULL——故仅非空才传。
+            session_id=session_id if session_id is not None else uuid.uuid4(),
             change_id=change_id,
-            objective=objective,
+            objective=effective_objective,
             constraints=merged or None,
             budget_usd=budget_usd,
             worker_preset=worker_preset,
@@ -300,6 +331,21 @@ class OrchestratorService:
         self._session.add(mission)
         await self._session.commit()
         await self._session.refresh(mission)
+
+        # session 预建模式（task-03 / design §5 Phase 1）：只建 mission——不建主控
+        # AgentRun、不派 daemon lease、不渲染 prompt。主控轮 = 会话 inject 当轮回填
+        # 双标记（task-04），worker 由常驻 MCP 工具动态派（task-05）。约束键不写入
+        # constraints（design §8：constraints 的 session_id 死参数废弃）。
+        if orchestration_mode == "session":
+            log.info(
+                "orchestrator_mission_session_prebuilt",
+                mission_id=str(mission.id),
+                session_id=str(session_id),
+                scope_workspace_ids=scope_workspace_ids_str,
+                project_id=str(project_id) if project_id else None,
+                worker_preset_len=len(worker_preset) if worker_preset else 0,
+            )
+            return mission, None
 
         # external 模式：只建 mission，**跳过 orchestrator run + daemon lease**——
         # caller（SillySpec execute）在自己的 worktree 用 dispatch_worker 派 worker
