@@ -1,3 +1,8 @@
+---
+author: qinyi
+created_at: 2026-08-22 15:58:00
+---
+
 # 验证报告（2026-08-22-session-panel-unify / verify）
 
 > 骨架由 `sillyspec verify-probes --change <变更名> --init` 生成；语义章节由 verify agent 填写（2026-08-22）。CLI 机械探针原始输出见 git 历史（本版为复核后的收敛结论）。
