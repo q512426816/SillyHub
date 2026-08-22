@@ -185,6 +185,9 @@ async def test_team_mission_entry_external_skips_orchestrator_run(
     # mission 已落库
     assert mission.id is not None
     assert mission.workspace_id == ws.id
+    # 验收返工 QA P1（终审追加固化）：external mission 无会话，session_id 为
+    # None（随机 uuid 会违反 FK 压断 PG 存量链路——orchestrator.py None 透传）
+    assert mission.session_id is None
     # constraints 落 orchestration_mode（供 converge 检测，AC-05 命中依据）
     assert mission.constraints == {"orchestration_mode": "external"}
 

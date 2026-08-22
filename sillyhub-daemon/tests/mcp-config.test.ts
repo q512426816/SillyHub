@@ -229,6 +229,96 @@ describe('mcp-config: buildDaemonMcpServerConfig（task-05）', () => {
   });
 });
 
+// ── task-10（2026-08-22-team-session-unify / FR-04）：MCP_SESSION_ID env 注入 ──
+import {
+  MCP_SESSION_ID_ENV,
+  injectMcpSessionId,
+} from '../src/mcp-config.js';
+
+describe('mcp-config: buildDaemonMcpServerConfig MCP_SESSION_ID（task-10）', () => {
+  it('传入 sessionId → env.MCP_SESSION_ID = sessionId', () => {
+    // spike-01 结论：MCP server 子进程只继承白名单 + per-server env，
+    // MCP_SESSION_ID 必须写进 mcpServers['sillyhub-daemon'].env 才能到达子进程。
+    const cfg = buildDaemonMcpServerConfig(
+      'http://localhost:8000',
+      'tok',
+      '/fake/dist/mcp-server.js',
+      undefined,
+      'sess-abc-1',
+    );
+    expect(cfg.env?.MCP_SESSION_ID).toBe('sess-abc-1');
+  });
+
+  it('sessionId 缺省 → 不写 MCP_SESSION_ID（旧调用零回归）', () => {
+    const cfg = buildDaemonMcpServerConfig('http://x:8000', 'tok', '/x/mcp-server.js');
+    expect(cfg.env?.MCP_SESSION_ID).toBeUndefined();
+  });
+
+  it('sessionId 空串 → 不写 MCP_SESSION_ID（守卫风格）', () => {
+    const cfg = buildDaemonMcpServerConfig(
+      'http://x:8000',
+      'tok',
+      '/x/mcp-server.js',
+      undefined,
+      '',
+    );
+    expect(cfg.env?.MCP_SESSION_ID).toBeUndefined();
+  });
+
+  it('MCP_SESSION_ID_ENV 常量 = "MCP_SESSION_ID"（键名单一来源）', () => {
+    expect(MCP_SESSION_ID_ENV).toBe('MCP_SESSION_ID');
+  });
+});
+
+describe('mcp-config: injectMcpSessionId（task-10 session-manager 补写路径）', () => {
+  it('给 sillyhub-daemon 条目补 MCP_SESSION_ID，其余 server 不动', () => {
+    const servers = {
+      'sillyhub-daemon': {
+        command: 'node',
+        args: ['dist/mcp-server.js'],
+        env: { MCP_SERVER_DAEMON_TOKEN: 'tok' },
+      },
+      'workspace-mcp': {
+        command: 'node',
+        args: ['dist/ws.js'],
+        env: { WS_TOKEN: 'ws-tok' },
+      },
+    };
+    const out = injectMcpSessionId(servers, 'sess-inject-1');
+    expect(out['sillyhub-daemon'].env?.MCP_SESSION_ID).toBe('sess-inject-1');
+    // 既有 env 保留
+    expect(out['sillyhub-daemon'].env?.MCP_SERVER_DAEMON_TOKEN).toBe('tok');
+    // 其它 server 不注入（env 卫生：只有 daemon 内置 server 读该 env）
+    expect(out['workspace-mcp'].env).toEqual({ WS_TOKEN: 'ws-tok' });
+  });
+
+  it('不修改入参（返回新对象，provider 闭包配置不被污染）', () => {
+    const servers = {
+      'sillyhub-daemon': { command: 'node', env: { A: 'a' } },
+    };
+    const out = injectMcpSessionId(servers, 'sess-x');
+    expect(servers['sillyhub-daemon'].env).toEqual({ A: 'a' });
+    expect(out).not.toBe(servers);
+    expect(out['sillyhub-daemon'].env).toEqual({ A: 'a', MCP_SESSION_ID: 'sess-x' });
+  });
+
+  it('无 env 的条目 → 创建 env 对象', () => {
+    const servers = { 'sillyhub-daemon': { command: 'node' } };
+    const out = injectMcpSessionId(servers, 'sess-y');
+    expect(out['sillyhub-daemon'].env).toEqual({ MCP_SESSION_ID: 'sess-y' });
+  });
+
+  it('sessionId 空串 → 原样返回（守卫）', () => {
+    const servers = { 'sillyhub-daemon': { command: 'node', env: { A: 'a' } } };
+    expect(injectMcpSessionId(servers, '')).toBe(servers);
+  });
+
+  it('目标 server 不存在 → 原样返回（provider 未含 daemon server）', () => {
+    const servers = { 'other-mcp': { command: 'node' } };
+    expect(injectMcpSessionId(servers, 'sess-z')).toBe(servers);
+  });
+});
+
 // ── task-08 / D-017：mcp_refs 子集过滤 + type 校验 ──────────────────────────
 
 describe('mcp-config: mergeMcpConfigs mcp_refs 子集过滤（task-08 / D-017）', () => {

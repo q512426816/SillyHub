@@ -1396,6 +1396,29 @@ class SessionService:
                 effective_provider = await self._session.get(LlmProvider, session.llm_provider_id)
 
             config = dict(session.config or {})
+            # ── 2026-08-22-team-session-unify task-04 / D-009@v1：主控轮双标记 ──
+            # 会话存在活跃 mission（未收敛未取消，R-07 单活跃约束保证至多一条）时，
+            # 当轮 AgentRun 回填 mission_id + role='orchestrator'——该 run 即"主控
+            # run"（task-05 懒建补回填 / task-06 _get_main_run·finalizer 锚点 /
+            # task-08 patrol 主控存续判定消费）。建 run 前查询 + 同事务落库：任一
+            # 环节失败整体回滚，不落半标记；上方 turn 冲突守卫（:1232）保证单活
+            # 跃轮，双标记时序安全（design §5 Phase 1）。无活跃 mission 时此处为
+            # None → run 不带标记，既有行为逐字节不变。
+            from app.modules.agent.mission import get_active_mission_for_session
+            from app.modules.agent.orchestrator import SESSION_OBJECTIVE_PLACEHOLDER
+
+            active_mission = await get_active_mission_for_session(self._session, session_id)
+            # objective 占位回填（CC-09）：预建 mission 的 objective 为占位时，以
+            # 首条带消息文本的 inject 回填——文本口径=用户 prompt 原文（附件标记
+            # 行不参与，非 user_input_content）；回填后非占位，后续轮不再覆盖；
+            # 纯配置切换轮（空 prompt）无消息文本，不消耗首条名额。
+            if (
+                active_mission is not None
+                and active_mission.objective == SESSION_OBJECTIVE_PLACEHOLDER
+                and prompt.strip()
+            ):
+                active_mission.objective = prompt
+                self._session.add(active_mission)
             run = AgentRun(
                 id=uuid.uuid4(),
                 agent_type="claude_code",
@@ -1407,6 +1430,10 @@ class SessionService:
                 # ql-20260817-003：轮次发送者=本轮注入者（_inject_into_session 的
                 # 调用方注入：inject_session=实际 user；service 路径=会话属主）。
                 user_id=run_sender_user_id,
+                # task-04 / D-009：主控轮双标记——活跃 mission 命中时当轮回填
+                # （role 字面量同 orchestrator.py _ORCHESTRATOR_ROLE 存量语义）。
+                mission_id=active_mission.id if active_mission is not None else None,
+                role="orchestrator" if active_mission is not None else None,
             )
             # task-05 / D-008（ql-20260815-010 修正为每轮落快照）：新 run 带本轮
             # 生效配置——切换轮=新值；普通轮=会话当前值（沿用），无配置=NULL 如实。

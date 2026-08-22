@@ -248,11 +248,24 @@ export async function parseJsonFromResponse<T>(resp: Response): Promise<T> {
  * set; if both are present, ``apiKey`` wins on the wire (matches the
  * backend ``get_current_principal`` semantics where X-API-Key is the
  * fallback for non-browser callers).
+ *
+ * task-10（2026-08-22-team-session-unify / FR-04）adds optional ``sessionId``:
+ * 主 agent 会话 id（mcp-server.ts 从 env MCP_SESSION_ID 读入），5 个 MCP 端点
+ * 请求统一附 ``X-Session-Id`` header——backend 据此解析活跃 mission（懒建兜底）。
+ * 缺省（undefined/空）不带该头（缺失不附）。
  */
 export interface HubClientAuth {
   token?: string;
   apiKey?: string;
+  /** task-10：主 agent 会话 id（X-Session-Id，仅 MCP 5 端点附带）。 */
+  sessionId?: string;
 }
+
+/**
+ * task-10（2026-08-22-team-session-unify / FR-04）：会话上下文请求头名
+ * （契约 X_SESSION_ID_HEADER 单一来源；backend 消费方 task-05/06）。
+ */
+export const X_SESSION_ID_HEADER = 'X-Session-Id';
 
 /**
  * Daemon 与 SillyHub server 之间的 REST 客户端。
@@ -265,6 +278,8 @@ export class HubClient {
   private readonly baseUrl: string;
   private readonly token?: string;
   private readonly apiKey?: string;
+  /** task-10（FR-04）：主 agent 会话 id（MCP 5 端点附 X-Session-Id）。 */
+  private readonly sessionId?: string;
 
   /**
    * gap-8.2（design §11）：sessionId → runtimeId 映射。
@@ -295,6 +310,7 @@ export class HubClient {
     } else if (authOrToken) {
       this.token = authOrToken.token;
       this.apiKey = authOrToken.apiKey;
+      this.sessionId = authOrToken.sessionId;
     }
   }
 
@@ -323,6 +339,43 @@ export class HubClient {
       h['Authorization'] = `Bearer ${this.token}`;
     }
     return h;
+  }
+
+  /**
+   * task-10（2026-08-22-team-session-unify / FR-04）：MCP 5 端点的会话上下文头。
+   * sessionId 存在 → ``{ 'X-Session-Id': ... }``（经 _request extraHeaders 附加）；
+   * 缺失 → undefined（不带该头，缺失不附）。
+   */
+  private _sessionIdHeaders(): Record<string, string> | undefined {
+    return this.sessionId ? { [X_SESSION_ID_HEADER]: this.sessionId } : undefined;
+  }
+
+  /**
+   * task-10（审查 B1）：MCP 端点路径构造——workspace_id/mission_id 可选后的三种形态。
+   *
+   *   - ws + mid → ``/api/workspaces/{ws}/missions/{mid}/{action}``（既有形态，
+   *     显式传参照常透传，越权校验锚——零回归）；
+   *   - 仅 mid   → ``/api/missions/{mid}/{action}``（mission 自带 workspace 归属，
+   *     backend 按 mission 反解）；
+   *   - 均缺省   → ``/api/missions/{action}``（session-scoped：backend 按
+   *     X-Session-Id 解析活跃 mission，dispatch 无则懒建）。
+   *
+   * mission 缺省时 workspaceId 被忽略（懒建 scope 来自会话的工作区绑定，非工具参数，
+   * design §5 Phase 1）。session-scoped 路由的 backend 消费方为 task-05/06
+   * （并行任务），header 契约（X-Session-Id）以本常量为单一来源。
+   */
+  private _missionActionPath(
+    workspaceId: string | undefined,
+    missionId: string | undefined,
+    action: string,
+  ): string {
+    if (missionId === undefined || missionId === '') {
+      return `/api/missions/${action}`;
+    }
+    if (workspaceId === undefined || workspaceId === '') {
+      return `/api/missions/${encodeURIComponent(missionId)}/${action}`;
+    }
+    return `/api/workspaces/${encodeURIComponent(workspaceId)}/missions/${encodeURIComponent(missionId)}/${action}`;
   }
 
   /**
@@ -1202,8 +1255,8 @@ export class HubClient {
    * stdio 与链路B public gateway schema 同构。
    */
   async dispatchWorker(
-    workspaceId: string,
-    missionId: string,
+    workspaceId: string | undefined,
+    missionId: string | undefined,
     body: {
       objective: string;
       role?: string;
@@ -1229,10 +1282,12 @@ export class HubClient {
     if (body.worker_prompt !== undefined) payload.worker_prompt = body.worker_prompt;
     // task-10：跨工作区派发，undefined → backend None → 缺省用 anchor workspace
     if (body.target_workspace_id !== undefined) payload.target_workspace_id = body.target_workspace_id;
+    // task-10（审查 B1）：ws/mid 可选（X-Session-Id 定位 + 懒建兜底），请求附会话头。
     return this._request<Record<string, unknown>>(
       'POST',
-      `/api/workspaces/${encodeURIComponent(workspaceId)}/missions/${encodeURIComponent(missionId)}/dispatch_worker`,
+      this._missionActionPath(workspaceId, missionId, 'dispatch_worker'),
       payload,
+      this._sessionIdHeaders(),
     );
   }
 
@@ -1244,13 +1299,20 @@ export class HubClient {
    *   content_ref, id}] }
    */
   async getWorkerResult(
-    workspaceId: string,
-    missionId: string,
+    workspaceId: string | undefined,
+    missionId: string | undefined,
     workerId: string,
   ): Promise<Record<string, unknown>> {
+    // task-10：ws/mid 可选（X-Session-Id 定位），worker_id 必填。
     return this._request<Record<string, unknown>>(
       'GET',
-      `/api/workspaces/${encodeURIComponent(workspaceId)}/missions/${encodeURIComponent(missionId)}/workers/${encodeURIComponent(workerId)}/result`,
+      this._missionActionPath(
+        workspaceId,
+        missionId,
+        `workers/${encodeURIComponent(workerId)}/result`,
+      ),
+      undefined,
+      this._sessionIdHeaders(),
     );
   }
 
@@ -1262,12 +1324,15 @@ export class HubClient {
    *   objective?, total_cost_usd?}] }
    */
   async listWorkers(
-    workspaceId: string,
-    missionId: string,
+    workspaceId: string | undefined,
+    missionId: string | undefined,
   ): Promise<Record<string, unknown>> {
+    // task-10：ws/mid 可选（X-Session-Id 定位）。
     return this._request<Record<string, unknown>>(
       'GET',
-      `/api/workspaces/${encodeURIComponent(workspaceId)}/missions/${encodeURIComponent(missionId)}/workers`,
+      this._missionActionPath(workspaceId, missionId, 'workers'),
+      undefined,
+      this._sessionIdHeaders(),
     );
   }
 
@@ -1280,12 +1345,15 @@ export class HubClient {
    * 无 body（backend 以 mission 的主 agent run 为锚点触发收敛，参数全在路径）。
    */
   async convergeMission(
-    workspaceId: string,
-    missionId: string,
+    workspaceId: string | undefined,
+    missionId: string | undefined,
   ): Promise<Record<string, unknown>> {
+    // task-10：ws/mid 可选（converge 按 X-Session-Id 解析 mission，design §5 D-010）。
     return this._request<Record<string, unknown>>(
       'POST',
-      `/api/workspaces/${encodeURIComponent(workspaceId)}/missions/${encodeURIComponent(missionId)}/converge`,
+      this._missionActionPath(workspaceId, missionId, 'converge'),
+      undefined,
+      this._sessionIdHeaders(),
     );
   }
 
@@ -1297,28 +1365,31 @@ export class HubClient {
    *   { run_id, message, decision? }
    * 响应 201（``ProgressResponse``）：{ run_id, log_id }
    *
-   * **run_id 必填**：backend ``ProgressRequest`` 要求 ``run_id``（主 agent run
-   * 的 AgentRun.id），非 task 描述草案的 ``note``。MCP tool handler 须从
-   * tool 参数接收 run_id 透传。``decision`` 拼到日志 content 前缀便于筛选。
+   * **run_id 可选（task-10 审查 B1）**：显式传参时透传（越权校验锚）；缺省时
+   * 不写入 body，backend 按 ``X-Session-Id`` 解析会话当前主控 run。非 task
+   * 描述草案的 ``note``。``decision`` 拼到日志 content 前缀便于筛选。
    */
   async reportProgress(
-    workspaceId: string,
-    missionId: string,
+    workspaceId: string | undefined,
+    missionId: string | undefined,
     body: {
-      run_id: string;
+      /** task-10（审查 B1）：转可选——缺省时 backend 按 X-Session-Id 解析主控 run。 */
+      run_id?: string;
       message: string;
       decision?: string;
     },
   ): Promise<Record<string, unknown>> {
     const payload: Record<string, unknown> = {
-      run_id: body.run_id,
       message: body.message,
     };
+    // task-10：run_id 守卫（undefined 不写入 body → backend 按会话解析主控 run）。
+    if (body.run_id !== undefined) payload.run_id = body.run_id;
     if (body.decision !== undefined) payload.decision = body.decision;
     return this._request<Record<string, unknown>>(
       'POST',
-      `/api/workspaces/${encodeURIComponent(workspaceId)}/missions/${encodeURIComponent(missionId)}/progress`,
+      this._missionActionPath(workspaceId, missionId, 'progress'),
       payload,
+      this._sessionIdHeaders(),
     );
   }
 }

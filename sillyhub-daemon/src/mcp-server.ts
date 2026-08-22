@@ -27,6 +27,9 @@
  *     优先 config.api_key 写入此 env）
  *   MCP_SERVER_DAEMON_TOKEN  Bearer token（回落；apiKey 缺失时用 daemon Bearer
  *     token，backend mcp_tools 走 WORKSPACE_WRITE 权限校验）
+ *   MCP_SESSION_ID  主 agent 会话 id（task-10 / FR-04：session-manager 经
+ *     mcpServers['sillyhub-daemon'].env per-server 注入（spike-01 管道），
+ *     hub-client 给 MCP 5 端点附 X-Session-Id，backend 按会话定位活跃 mission）
  *
  * @module mcp-server
  */
@@ -35,7 +38,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { pathToFileURL } from 'node:url';
-import { HubClient, HubHttpError } from './hub-client.js';
+import { HubClient, HubHttpError, type HubClientAuth } from './hub-client.js';
 
 // ── 配置（env）─────────────────────────────────────────────────────────────
 
@@ -49,18 +52,24 @@ interface McpServerEnv {
   backendUrl: string;
   daemonToken: string;
   daemonApiKey: string;
+  /** task-10（2026-08-22-team-session-unify / FR-04）：主 agent 会话 id。 */
+  sessionId: string;
 }
 
 /**
- * 从 process.env 读 backend URL + token。空值返回空串（不抛错，server 仍启动，
- * tool 调用时返回结构化错误便于诊断）。task-09 P0：apiKey 优先（X-API-Key 路径，
- * backend get_current_principal 解析 apiKey → User），token 回落（Bearer JWT）。
+ * 从 process.env 读 backend URL + token + 会话 id。空值返回空串（不抛错，server
+ * 仍启动，tool 调用时返回结构化错误便于诊断）。task-09 P0：apiKey 优先（X-API-Key
+ * 路径，backend get_current_principal 解析 apiKey → User），token 回落（Bearer JWT）。
+ * task-10：MCP_SESSION_ID 经 mcpServers['sillyhub-daemon'].env per-server 注入
+ * （spike-01 验证管道：CLI spawn MCP 子进程时白名单 env + per-server env 合并）。
+ * 导出供单测断言注入链终点（session-manager → driver spawn → 本函数）。
  */
-function readEnv(): McpServerEnv {
+export function readEnv(): McpServerEnv {
   return {
     backendUrl: (process.env.MCP_SERVER_BACKEND_URL ?? '').replace(/\/+$/, ''),
     daemonApiKey: process.env.MCP_SERVER_DAEMON_API_KEY ?? '',
     daemonToken: process.env.MCP_SERVER_DAEMON_TOKEN ?? '',
+    sessionId: process.env.MCP_SESSION_ID ?? '',
   };
 }
 
@@ -149,25 +158,43 @@ export function createMcpServer(client: HubClient): {
   );
 
   // ── dispatch_worker ──────────────────────────────────────────────────────
-  // schema 对齐 backend DispatchWorkerRequest（mcp_tools.py:49）：无 worker_id
-  //（worker run id 由 backend 创建后返回）。
-  // task-06（2026-08-08-dispatch-worker-caller-worktree / R-06）：路径A 字段透传
-  //—— worktree_path/branch/worker_prompt 全部 optional，不传 → undefined →
-  // hub-client 守卫不写入 body → backend None → 走原 team 模式自建 worktree 逻辑
-  //（零回归）。链路A daemon stdio 与链路B public gateway schema 同构（D-009 branch）。
+  // task-10（2026-08-22-team-session-unify / 审查 B1）：mission_id/workspace_id
+  // 转可选——backend 按 X-Session-Id 定位活跃 mission（懒建兜底），显式传参仅作
+  // 越权校验锚。objective 仍必填。描述重写为「能力说明书」（何时派团队 / 如何拆解 /
+  // 何时 converge / 预算提示）。
   server.registerTool(
     'dispatch_worker',
     {
       title: 'Dispatch Worker',
       description:
-        'Dispatch a worker run for a mission. Routes via daemon MCP server to ' +
-        'backend POST /workspaces/{workspace_id}/missions/{mission_id}/dispatch_worker. ' +
-        'Returns worker run status receipt (id, status, lease_id, error_code). ' +
-        'error_code=no_online_daemon means run created but no daemon online (retry later). ' +
-        'Cross-workspace dispatch: set target_workspace_id to dispatch worker to another workspace.',
+        '派一个团队分身（worker run）执行独立子任务。能力与使用准则：' +
+        '【何时使用】仅用户明确要求时派团队（如「派团队」「让分身做」「并行分析」）；' +
+        '日常编码、问答、小改动默认自己完成，不要主动派团队。' +
+        '【如何拆解】把任务拆成目标明确、可独立验收的子任务，每个分身一条自包含 ' +
+        'objective（含上下文、目标、验收标准）；子任务之间尽量无依赖，有依赖则先做前置。' +
+        '【何时收敛】全部分身终态后调 converge_mission 合并产出；未全终态时 converge ' +
+        '返回 busy，等待即可。派发后可用 list_workers 轮询进度、get_worker_result 读产出。' +
+        '【预算提示】每个分身消耗真实 token 费用，控制数量（建议 ≤5）；' +
+        '只有目标较大（小时级以上）或可并行的任务才值得派团队。' +
+        '【定位】优先按当前会话上下文定位 mission（无则懒建）；' +
+        'mission_id/workspace_id 可选，仅作显式越权校验锚。' +
+        '响应 { id, status, lease_id, error_code }；error_code=no_online_daemon 表示 ' +
+        'run 已建但无在线 daemon（稍后重试）。跨工作区派发用 target_workspace_id。',
       inputSchema: {
-        workspace_id: z.string().describe('Target workspace UUID'),
-        mission_id: z.string().describe('Target mission UUID'),
+        workspace_id: z
+          .string()
+          .optional()
+          .describe(
+            'Optional anchor workspace UUID (validation anchor only; ' +
+              'mission is resolved from session context when omitted)',
+          ),
+        mission_id: z
+          .string()
+          .optional()
+          .describe(
+            'Optional mission UUID (validation anchor only; backend resolves the ' +
+              'active mission for this session and lazy-creates when omitted)',
+          ),
         objective: z.string().describe('Worker objective / task description'),
         role: z.string().optional().describe('Worker role (default: worker)'),
         agent_type: z.string().optional().describe('Agent type (default: claude_code)'),
@@ -237,16 +264,25 @@ export function createMcpServer(client: HubClient): {
   );
 
   // ── get_worker_result ────────────────────────────────────────────────────
+  // task-10（审查 B1）：ws/mid 转可选（会话上下文定位），worker_id 仍必填。
   server.registerTool(
     'get_worker_result',
     {
       title: 'Get Worker Result',
       description:
-        'Read a single worker run structured output (artifacts: patch/summary). ' +
-        'Routes to backend GET /workspaces/{workspace_id}/missions/{mission_id}/workers/{worker_id}/result.',
+        '读取单个分身 run 的结构化产出（artifacts：patch/summary 等）。' +
+        'worker_id 必填（dispatch_worker 响应返回的 run id）。' +
+        '优先按当前会话上下文定位 mission；mission_id/workspace_id 可选，仅作显式越权校验锚。' +
+        '分身可能仍在运行（status 非 completed）——此时先等待或轮询 list_workers。',
       inputSchema: {
-        workspace_id: z.string().describe('Target workspace UUID'),
-        mission_id: z.string().describe('Target mission UUID'),
+        workspace_id: z
+          .string()
+          .optional()
+          .describe('Optional anchor workspace UUID (validation anchor only)'),
+        mission_id: z
+          .string()
+          .optional()
+          .describe('Optional mission UUID (resolved from session context when omitted)'),
         worker_id: z.string().describe('Worker run UUID (AgentRun.id)'),
       },
     },
@@ -265,16 +301,24 @@ export function createMcpServer(client: HubClient): {
   );
 
   // ── list_workers ─────────────────────────────────────────────────────────
+  // task-10（审查 B1）：ws/mid 转可选（会话上下文定位）。
   server.registerTool(
     'list_workers',
     {
       title: 'List Workers',
       description:
-        'List all worker runs (including main orchestrator run) under a mission with status. ' +
-        'Routes to backend GET /workspaces/{workspace_id}/missions/{mission_id}/workers.',
+        '列出当前 mission 下全部分身 run 状态（含主控行，role=orchestrator）。' +
+        '用于轮询分身进度：全部终态（completed/failed）后即可调 converge_mission 收敛。' +
+        '优先按当前会话上下文定位 mission；mission_id/workspace_id 可选，仅作显式越权校验锚。',
       inputSchema: {
-        workspace_id: z.string().describe('Target workspace UUID'),
-        mission_id: z.string().describe('Target mission UUID'),
+        workspace_id: z
+          .string()
+          .optional()
+          .describe('Optional anchor workspace UUID (validation anchor only)'),
+        mission_id: z
+          .string()
+          .optional()
+          .describe('Optional mission UUID (resolved from session context when omitted)'),
       },
     },
     async (args) => {
@@ -291,17 +335,28 @@ export function createMcpServer(client: HubClient): {
   );
 
   // ── converge_mission ─────────────────────────────────────────────────────
+  // task-10（审查 B1 / D-010）：ws/mid 转可选；converge 按会话上下文解析 mission，
+  // 分身未全终态时 backend 返回 status=busy（等待后重试），全终态置 converged。
   server.registerTool(
     'converge_mission',
     {
       title: 'Converge Mission',
       description:
-        'Trigger mission convergence (merge worker artifacts via FinalizerService + GLM/concat). ' +
-        'Routes to backend POST /workspaces/{workspace_id}/missions/{mission_id}/converge. ' +
-        'Returns { mission_id, status, converged, artifact_id? }.',
+        '收敛合并分身产出（patch 合并 + 汇总报告）。' +
+        '【何时调用】list_workers 确认全部分身终态（completed/failed）后调用；' +
+        '分身未全终态时返回 status=busy（mission 状态不变，等待后重试，不要放弃）。' +
+        '响应 { mission_id, status, converged, artifact_id? }，status 含 ' +
+        'converged/busy/conflict/needs_manual。' +
+        '优先按当前会话上下文定位 mission；mission_id/workspace_id 可选，仅作显式越权校验锚。',
       inputSchema: {
-        workspace_id: z.string().describe('Target workspace UUID'),
-        mission_id: z.string().describe('Target mission UUID'),
+        workspace_id: z
+          .string()
+          .optional()
+          .describe('Optional anchor workspace UUID (validation anchor only)'),
+        mission_id: z
+          .string()
+          .optional()
+          .describe('Optional mission UUID (resolved from session context when omitted)'),
       },
     },
     async (args) => {
@@ -318,20 +373,33 @@ export function createMcpServer(client: HubClient): {
   );
 
   // ── report_progress ──────────────────────────────────────────────────────
-  // backend ProgressRequest 要 run_id（主 agent run.id），非 task 草案的 note。
+  // task-10（审查 B1）：ws/mid/run_id 转可选——backend 按 X-Session-Id 解析活跃
+  // mission 与主控 run；message 仍必填。
   server.registerTool(
     'report_progress',
     {
       title: 'Report Progress',
       description:
-        'Append a decision log entry for the main orchestrator run (AgentRunLog channel=tool_call). ' +
-        'Routes to backend POST /workspaces/{workspace_id}/missions/{mission_id}/progress. ' +
-        'Call after each main-agent decision (dispatch / judge / converge) for audit trail. ' +
-        'Returns { run_id, log_id }.',
+        '记录主控决策日志（审计轨迹，AgentRunLog channel=tool_call）。' +
+        '每次关键决策（派发 / 判定 / 收敛）后调用，便于事后审计与用户回看。' +
+        '优先按当前会话上下文定位 mission 与主控 run；mission_id/workspace_id/run_id ' +
+        '可选，仅作显式越权校验锚。响应 { run_id, log_id }。',
       inputSchema: {
-        workspace_id: z.string().describe('Target workspace UUID'),
-        mission_id: z.string().describe('Target mission UUID'),
-        run_id: z.string().describe('Main orchestrator AgentRun.id (log owner)'),
+        workspace_id: z
+          .string()
+          .optional()
+          .describe('Optional anchor workspace UUID (validation anchor only)'),
+        mission_id: z
+          .string()
+          .optional()
+          .describe('Optional mission UUID (resolved from session context when omitted)'),
+        run_id: z
+          .string()
+          .optional()
+          .describe(
+            'Optional main orchestrator AgentRun.id (log owner; resolved from ' +
+              'session context when omitted)',
+          ),
         message: z.string().describe('Decision message text'),
         decision: z
           .string()
@@ -386,9 +454,18 @@ export async function runMcpServer(): Promise<void> {
       '[mcp-server] MCP_SERVER_DAEMON_API_KEY / MCP_SERVER_DAEMON_TOKEN not set; tool calls will fail',
     );
   }
-  const auth = env.daemonApiKey
-    ? { apiKey: env.daemonApiKey }
-    : { token: env.daemonToken };
+  // task-10（FR-04 / spike-01）：会话 id 缺失与 token 缺失同模式——仍启动，
+  // 仅 warn（session-scoped mission 定位不可用，backend 走显式参数路径）。
+  if (!env.sessionId) {
+    console.error(
+      '[mcp-server] MCP_SESSION_ID not set; session-scoped mission resolution unavailable (backend falls back to explicit params)',
+    );
+  }
+  const auth: HubClientAuth = {
+    ...(env.daemonApiKey ? { apiKey: env.daemonApiKey } : { token: env.daemonToken }),
+    // task-10：sessionId → hub-client 给 MCP 5 端点附 X-Session-Id（缺失不附）。
+    ...(env.sessionId ? { sessionId: env.sessionId } : {}),
+  };
   const client = new HubClient(env.backendUrl || 'http://localhost:8000', auth);
   const { server } = createMcpServer(client);
   const transport = new StdioServerTransport();

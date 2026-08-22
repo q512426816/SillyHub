@@ -639,6 +639,24 @@ class AgentMission(BaseModel, table=True):
     __table_args__ = (
         Index("ix_agent_missions_workspace", "workspace_id"),
         Index("ix_agent_missions_change", "change_id"),
+        # 2026-08-22-team-session-unify task-01（design §8 / D-006@v1 / Grill NEW-3）：
+        # 活跃态部分唯一索引——一个会话同时至多一个未收敛（converged_at IS NULL）未
+        # 取消（cancelled_at IS NULL）的 mission（R-07 单活跃约束，懒建并发守卫的
+        # 数据库侧兜底）。session_id IS NOT NULL 守卫：external mission（无发起会话，
+        # 如 change 执行链/GLM fallback/扫描引导）session_id 为 NULL 不参与唯一约束，
+        # 多个 NULL 互不冲突。postgresql_where 供 PG、sqlite_where 供测试侧
+        # create_all（SQLite 3.8+ 支持部分索引），双方言同语义。
+        Index(
+            "uq_agent_missions_session_active",
+            "session_id",
+            unique=True,
+            postgresql_where=text(
+                "session_id IS NOT NULL AND converged_at IS NULL AND cancelled_at IS NULL"
+            ),
+            sqlite_where=text(
+                "session_id IS NOT NULL AND converged_at IS NULL AND cancelled_at IS NULL"
+            ),
+        ),
     )
 
     id: uuid.UUID = Field(
@@ -653,6 +671,20 @@ class AgentMission(BaseModel, table=True):
             Uuid(as_uuid=True),
             ForeignKey("workspaces.id", ondelete="CASCADE"),
             nullable=False,
+        ),
+    )
+    # ── 发起会话（2026-08-22-team-session-unify task-01 / D-006@v1，design §5
+    #    Phase1/§8；验收返工改 nullable）── 会话内团队的 mission 绑定发起会话
+    #    （FK agent_sessions.id + 索引）；external mission（change 执行链/GLM
+    #    fallback/扫描引导等无会话入口）为 NULL——非 NULL 即「绑定会话」，会话
+    #    维度判别（finalizer/patrol 的 _mission_bound_session）据此查表确认。
+    session_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_sessions.id"),
+            nullable=True,
+            index=True,
         ),
     )
     # ── 项目关联（2026-08-19-cross-workspace-team-mission design §4.1） ──

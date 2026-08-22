@@ -54,7 +54,7 @@ import {
 } from '../policy/shell-paths.js';
 // task-10（C-12 / D-017）：主 agent MCP 注入按 profile.mcpRefs 子集过滤（mergeMcpConfigs
 // 第三层）。McpConfig 用于把 driver 契约的 MCP 配置表转成 mergeMcpConfigs 入参形态。
-import { mergeMcpConfigs, type McpConfig } from '../mcp-config.js';
+import { injectMcpSessionId, mergeMcpConfigs, type McpConfig } from '../mcp-config.js';
 import type {
   CreateSessionInput,
   InjectResult,
@@ -1052,6 +1052,14 @@ export class SessionManager {
     if (this._isMainAgentSession?.(ctx) !== true) return undefined;
     const config = this._mainAgentMcpConfigProvider?.(ctx);
     if (!config) return undefined;
+    // task-10（2026-08-22-team-session-unify / FR-04 / spike-01）：会话上下文注入。
+    // MCP server 子进程只继承白名单 + per-server env（spike-01 结论），会话 id 必须
+    // 写进 mcpServers['sillyhub-daemon'].env（MCP_SESSION_ID）；cli.ts provider
+    // （task-09 定型，不在本任务 allowed_paths）不传 sessionId，故在 provider 返回后
+    // 按 ctx.sessionId 补写。create / restore / reload 三路共用本方法——每次 spawn
+    // 都重新解析，session id 变化即 env 变化（spike-01 执行指令 1）。仅补 daemon
+    // 内置 server 条目，其它 MCP server 不注入（env 卫生）。
+    const withSessionId = injectMcpSessionId(config, ctx.sessionId);
     // task-10（C-12 / FR-10 / D-017）：profile.mcpRefs 子集过滤。
     // 非空 mcpRefs 时对 provider 返回的 MCP 配置表按此 ∩ 过滤（mergeMcpConfigs 第三层，
     // 与 batch task-runner 同源逻辑）。cli.ts mainAgentMcpConfigProvider 产出的配置表
@@ -1059,13 +1067,13 @@ export class SessionManager {
     // 它会被剔除——这是 profile 收紧语义的正确表现（profile 只允许它声明的子集）。
     // 空数组/undefined → 不过滤（FR-15 行为同今天，provider 原样返回）。
     const mcpRefs = ctx.mcpRefs;
-    if (!mcpRefs || mcpRefs.length === 0) return config;
+    if (!mcpRefs || mcpRefs.length === 0) return withSessionId;
     // 转 McpConfig 入参（补 type:'stdio' + args 默认 []，满足 mergeMcpConfigs 类型 +
     // D-017 stdio 校验）。McpServerConfigForDriver 与 McpServerConfig 结构兼容（command/
     // args/env 同名同义），只是 args 可选 vs 必填、type 缺省——这里归一化补齐。
     const mcpConfigInput: McpConfig = {
       mcpServers: Object.fromEntries(
-        Object.entries(config).map(([name, cfg]) => [
+        Object.entries(withSessionId).map(([name, cfg]) => [
           name,
           {
             type: 'stdio' as const,

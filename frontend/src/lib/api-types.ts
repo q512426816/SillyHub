@@ -2372,7 +2372,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/workspaces/{workspace_id}/missions": {
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/dispatch_worker": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dispatch Worker
+         * @description 主 agent 动态派一个 worker run（D-002@v2）。
+         *
+         *     建 AgentRun(role 从 payload 或 preset 对应条目, status=pending) + 调
+         *     ``MissionExecutionService.dispatch_worker`` 派 daemon lease。daemon 离线 /
+         *     未绑定时 lease 失败但 run 仍建（pending + error_code=no_online_daemon），
+         *     主 agent 可读 worker 状态决定重派。
+         *
+         *     task-08（2026-08-19-cross-workspace-team-mission / §7.2 链路A）：
+         *     - 新增 target_workspace_id 参数（payload.target_workspace_id）
+         *     - 服务端校验 target ∈ scope（含 anchor），越界抛 400 mission_target_out_of_scope
+         *     - 有效 target 传 exec_svc.dispatch_worker 的 target_workspace_id 形参
+         *
+         *     task-05（2026-08-22-team-session-unify）：mission 解析接入 X-Session-Id 会话
+         *     定位（design §5 Phase 1 / §7）——header 命中会话活跃 mission 时显式路径参数
+         *     仅作越权校验锚；会话无活跃 mission 且无显式 mission_id 时懒建兜底（scope=
+         *     会话工作区、objective=dispatch 上下文、预算=默认上限 R-02 + 补回填双标记 +
+         *     并发守卫）。header 缺席走 ``_get_mission`` 显式路径，行为零回归。
+         */
+        post: operations["dispatch_worker_api_workspaces__workspace_id__missions__mission_id__dispatch_worker_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/workers/{worker_id}/result": {
         parameters: {
             query?: never;
             header?: never;
@@ -2380,22 +2416,420 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List Missions
-         * @description 列出 workspace 的 mission（按 created_at 倒序，分页）。
+         * Get Worker Result
+         * @description 读单个 worker 的结构化产出（AgentArtifact kind=patch/summary/...）。
          *
-         *     quick（mission 历史列表）：前端 Agent 团队页进页面时调，展示历史 mission
-         *     （状态徽标/目标/时间/worker 数），点击单条调 getMission 刷新详情。返回完整
-         *     MissionResponse（含 workers + cost + artifacts）以复用 _mission_to_response；
-         *     N+1 查询可接受（列表通常 <20，非高频轮询路径——活跃 mission 走 getMission 轮询）。
-         *     limit 默认 20，硬上限 50（min(limit,50) 防滥用，不报 422）。
+         *     task-05：接入 X-Session-Id 会话定位（header 命中活跃 mission 时显式参数仅作
+         *     越权校验锚；header 缺席零回归）。
          */
-        get: operations["list_missions_api_workspaces__workspace_id__missions_get"];
+        get: operations["get_worker_result_api_workspaces__workspace_id__missions__mission_id__workers__worker_id__result_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/workers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workers
+         * @description 列 mission 下所有 worker runs 状态（含主 agent run）。
+         *
+         *     task-05：接入 X-Session-Id 会话定位（header 命中活跃 mission 时显式参数仅作
+         *     越权校验锚；header 缺席零回归）。
+         */
+        get: operations["list_workers_api_workspaces__workspace_id__missions__mission_id__workers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/converge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
         put?: never;
         /**
-         * Create Mission
-         * @description Plan a Mission via GLM, create Worker Runs, dispatch them to a daemon.
+         * Converge Mission
+         * @description 主 agent 触发 mission 收敛（task-06 D-010 语义重定义，design §5 / §7 / §7.5）。
+         *
+         *     状态机（per mission，无新列——计数存 ``AgentMission.constraints`` JSON）：
+         *
+         *     0. **busy 前置**：分身 run（``role!='orchestrator'`` 含 NULL）未全终态 → 返
+         *        ``status=busy`` + message 引导文案，零状态变更（不置位/不 finalize）。
+         *     1. 分身全终态 → 以最新 orchestrator run 为锚调 ``converge_mission_for_completed_run``
+         *        （``converge_explicit=True``：分身维度判据 + converged_at 原子抢占置位，
+         *        不依赖主控 run 状态；保留 artifact 回灌 + bootstrap/execute 路由；冲突时
+         *        入口内回滚置位保重入）。
+         *     2. 复用 ``FinalizerService.finalize_execute_mission`` 拿 ``FinalizerMergeResult``
+         *        （merged_branches / pending_conflicts）——见 ``_finalize_merge_for_mission``
+         *        注释（为何不直接改 converge_mission_for_completed_run 返回值）。
+         *     3. ``pending_conflicts`` 非空 → 返 ``status=conflict`` + conflicts 给主 agent；
+         *        主 agent 自己 SDK Read/Write 解决（X-004，backend 不写文件）+ git add 后重入。
+         *     4. 重入：``finalize_execute_mission`` 重跑，已 merged 分支幂等（already-up-to-date），
+         *        主 agent 解决后的内容被下次 git 合进去；全 merged → ``status=converged`` +
+         *        调 ``_cleanup_mission``（task-07 cleanup_mission）清 worker 副本。
+         *     5. R-07：每次返 conflict 时计数 +1（``_bump_conflict_attempts``）；超限（默认 3）
+         *        → ``_mark_mission_needs_manual`` 标 ``needs_manual`` + 返
+         *        ``status=needs_manual``，副本保留供排查（X-003）。
+         *
+         *     简化（task-06 决策，见 ``_mark_mission_needs_manual``）：不实际 ``git merge --abort``——
+         *     workspace root 工作区状态在 daemon 侧，backend 不可控，强行 abort 可能误清主 agent 已
+         *     写的解决内容；改为标 needs_manual 让用户/主 agent 手动处理。
+         *
+         *     task-05（2026-08-22-team-session-unify）：mission 解析接入 X-Session-Id 会话
+         *     定位（header 命中活跃 mission 时显式参数仅作越权校验锚；header 缺席零回归）。
          */
-        post: operations["create_mission_api_workspaces__workspace_id__missions_post"];
+        post: operations["converge_mission_api_workspaces__workspace_id__missions__mission_id__converge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report Progress
+         * @description 落主 agent 决策日志（AgentRunLog channel=tool_call, tool_kind=other）。
+         *
+         *     主 agent 每次决策（派 worker / 判断达成 / 收敛）都调此 endpoint 落一条日志，
+         *     供前端展示决策链路 + 审计。``decision`` 字段拼到 content 前缀便于筛选。
+         *
+         *     task-05：接入 X-Session-Id 会话定位（header 命中活跃 mission 时显式参数仅作
+         *     越权校验锚；header 缺席零回归）。run_id 缺省时按会话当前主控 run 解析
+         *     （task-10 对齐）。
+         */
+        post: operations["report_progress_api_workspaces__workspace_id__missions__mission_id__progress_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/missions/dispatch_worker": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dispatch Worker For Session
+         * @description 会话维度 dispatch_worker——无活跃 mission 时懒建兜底（design §5 Phase 1）。
+         *
+         *     懒建：scope=会话绑定工作区、objective=dispatch 上下文、预算=默认上限（R-02），
+         *     复用 task-03 预建入口（``orchestration_mode="session"``）；建后补回填会话
+         *     当前活跃 run 双标记（Grill NEW-1）。会话未绑定工作区 → 422 引导弹层文案
+         *     （CC-10）；并发双懒建由部分唯一索引兜底（Grill NEW-3）。
+         */
+        post: operations["dispatch_worker_for_session_api_sessions__session_id__missions_dispatch_worker_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/missions/workers/{worker_id}/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Worker Result For Session
+         * @description 会话维度 get_worker_result——按会话活跃 mission 读分身产出。
+         */
+        get: operations["get_worker_result_for_session_api_sessions__session_id__missions_workers__worker_id__result_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/missions/workers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workers For Session
+         * @description 会话维度 list_workers——按会话活跃 mission 列 run 状态。
+         */
+        get: operations["list_workers_for_session_api_sessions__session_id__missions_workers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/missions/converge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Converge Mission For Session
+         * @description 会话维度 converge——按会话活跃 mission 触发收敛（内部语义归 task-06）。
+         */
+        post: operations["converge_mission_for_session_api_sessions__session_id__missions_converge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/missions/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report Progress For Session
+         * @description 会话维度 report_progress——按会话活跃 mission 落主控决策日志。
+         */
+        post: operations["report_progress_for_session_api_sessions__session_id__missions_progress_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missions/dispatch_worker": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dispatch Worker Scoped
+         * @description header-only dispatch_worker（``/missions/dispatch_worker``）——懒建兜底同会话族。
+         */
+        post: operations["dispatch_worker_scoped_api_missions_dispatch_worker_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missions/workers/{worker_id}/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Worker Result Scoped
+         * @description header-only get_worker_result（``/missions/workers/{wid}/result``）。
+         */
+        get: operations["get_worker_result_scoped_api_missions_workers__worker_id__result_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missions/workers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workers Scoped
+         * @description header-only list_workers（``/missions/workers``）——按 X-Session-Id 解析。
+         */
+        get: operations["list_workers_scoped_api_missions_workers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missions/converge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Converge Mission Scoped
+         * @description header-only converge（``/missions/converge``）——内部语义归 task-06。
+         */
+        post: operations["converge_mission_scoped_api_missions_converge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missions/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report Progress Scoped
+         * @description header-only report_progress（``/missions/progress``）。
+         */
+        post: operations["report_progress_scoped_api_missions_progress_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missions/{mission_id}/dispatch_worker": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dispatch Worker By Mission
+         * @description 仅 mid dispatch_worker（``/missions/{mid}/dispatch_worker``）。
+         *
+         *     header 在场：会话活跃 mission 解析 + mid 越权校验锚；header 缺席：mission
+         *     反解 + 锚工作区复核。有 mid 锚时不懒建（回退显式 mission，防锚失配副作用）。
+         */
+        post: operations["dispatch_worker_by_mission_api_missions__mission_id__dispatch_worker_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missions/{mission_id}/workers/{worker_id}/result": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Worker Result By Mission
+         * @description 仅 mid get_worker_result（``/missions/{mid}/workers/{wid}/result``）。
+         */
+        get: operations["get_worker_result_by_mission_api_missions__mission_id__workers__worker_id__result_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missions/{mission_id}/workers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workers By Mission
+         * @description 仅 mid list_workers（``/missions/{mid}/workers``）。
+         */
+        get: operations["list_workers_by_mission_api_missions__mission_id__workers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missions/{mission_id}/converge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Converge Mission By Mission
+         * @description 仅 mid converge（``/missions/{mid}/converge``）——内部语义归 task-06。
+         */
+        post: operations["converge_mission_by_mission_api_missions__mission_id__converge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/missions/{mission_id}/progress": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report Progress By Mission
+         * @description 仅 mid report_progress（``/missions/{mid}/progress``）。
+         */
+        post: operations["report_progress_by_mission_api_missions__mission_id__progress_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2430,175 +2864,6 @@ export interface paths {
         put?: never;
         /** Cancel Mission */
         post: operations["cancel_mission_api_missions__mission_id__cancel_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/projects/{project_id}/missions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Project Missions
-         * @description 列出项目下的 mission（按 created_at 倒序，分页，design §7.1 / FR-04）。
-         *
-         *     鉴权同 POST（项目经理/超管）。
-         *     返回 MissionResponse 列表（过滤 mission.project_id == project_id），复用
-         *     _mission_to_response 并扩展 workspace_name / workspace_type / scope 概要字段。
-         */
-        get: operations["list_project_missions_api_projects__project_id__missions_get"];
-        put?: never;
-        /**
-         * Create Project Mission
-         * @description 项目维度创建 mission（design §7.1 / FR-04）。
-         *
-         *     鉴权：项目经理或超管（非项目经理 403）。
-         *     校验：scope_workspace_ids ⊆ ppm_project_workspace(project_id)（越界 422）；
-         *           anchor_workspace_id ∈ scope（越界 422）；
-         *           scope 必填 ≥1 去重（项目维度入口强制）。
-         *     预检：scope 内各 ws 至少一条 binding 带 daemon_id（缺的报清单，不阻断）。
-         *     行为：mode 强制 team；project_id 落列；调 team_mission_entry 传 scope。
-         *     anchor 缺省：scope 第一个或 type=backend 优先。
-         */
-        post: operations["create_project_mission_api_projects__project_id__missions_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/missions/{mission_id}/dispatch_worker": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Dispatch Worker
-         * @description 主 agent 动态派一个 worker run（D-002@v2）。
-         *
-         *     建 AgentRun(role 从 payload 或 preset 对应条目, status=pending) + 调
-         *     ``MissionExecutionService.dispatch_worker`` 派 daemon lease。daemon 离线 /
-         *     未绑定时 lease 失败但 run 仍建（pending + error_code=no_online_daemon），
-         *     主 agent 可读 worker 状态决定重派。
-         *
-         *     task-08（2026-08-19-cross-workspace-team-mission / §7.2 链路A）：
-         *     - 新增 target_workspace_id 参数（payload.target_workspace_id）
-         *     - 服务端校验 target ∈ scope（含 anchor），越界抛 400 mission_target_out_of_scope
-         *     - 有效 target 传 exec_svc.dispatch_worker 的 target_workspace_id 形参
-         */
-        post: operations["dispatch_worker_api_workspaces__workspace_id__missions__mission_id__dispatch_worker_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/missions/{mission_id}/workers/{worker_id}/result": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Worker Result
-         * @description 读单个 worker 的结构化产出（AgentArtifact kind=patch/summary/...）。
-         */
-        get: operations["get_worker_result_api_workspaces__workspace_id__missions__mission_id__workers__worker_id__result_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/missions/{mission_id}/workers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Workers
-         * @description 列 mission 下所有 worker runs 状态（含主 agent run）。
-         */
-        get: operations["list_workers_api_workspaces__workspace_id__missions__mission_id__workers_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/missions/{mission_id}/converge": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Converge Mission
-         * @description 主 agent 触发 mission 收敛（task-06 改可重入，design §5.2 / §7.5）。
-         *
-         *     可重入状态机（per mission，无新列——计数存 ``AgentMission.constraints`` JSON）：
-         *
-         *     1. 调 ``converge_mission_for_completed_run``（既有链路，保留 artifact 回灌 +
-         *        derive_status + bootstrap 路由语义；其内部已调 finalize_execute_mission）。
-         *     2. 复用 ``FinalizerService.finalize_execute_mission`` 拿 ``FinalizerMergeResult``
-         *        （merged_branches / pending_conflicts）——见 ``_finalize_merge_for_mission``
-         *        注释（为何不直接改 converge_mission_for_completed_run 返回值）。
-         *     3. ``pending_conflicts`` 非空 → 返 ``status=conflict`` + conflicts 给主 agent；
-         *        主 agent 自己 SDK Read/Write 解决（X-004，backend 不写文件）+ git add 后重入。
-         *     4. 重入：``finalize_execute_mission`` 重跑，已 merged 分支幂等（already-up-to-date），
-         *        主 agent 解决后的内容被下次 git 合进去；全 merged → ``status=merged`` +
-         *        调 ``_cleanup_mission``（task-07 cleanup_mission）清 worker 副本。
-         *     5. R-07：每次返 conflict 时计数 +1（``_bump_conflict_attempts``）；超限（默认 3）
-         *        → ``_mark_mission_needs_manual`` 标 ``needs_manual`` + 返
-         *        ``status=failed_manual``，副本保留供排查（X-003）。
-         *
-         *     简化（task-06 决策，见 ``_mark_mission_needs_manual``）：不实际 ``git merge --abort``——
-         *     workspace root 工作区状态在 daemon 侧，backend 不可控，强行 abort 可能误清主 agent 已
-         *     写的解决内容；改为标 needs_manual 让用户/主 agent 手动处理。
-         */
-        post: operations["converge_mission_api_workspaces__workspace_id__missions__mission_id__converge_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/workspaces/{workspace_id}/missions/{mission_id}/progress": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Report Progress
-         * @description 落主 agent 决策日志（AgentRunLog channel=tool_call, tool_kind=other）。
-         *
-         *     主 agent 每次决策（派 worker / 判断达成 / 收敛）都调此 endpoint 落一条日志，
-         *     供前端展示决策链路 + 审计。``decision`` 字段拼到 content 前缀便于筛选。
-         */
-        post: operations["report_progress_api_workspaces__workspace_id__missions__mission_id__progress_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4092,6 +4357,62 @@ export interface paths {
          *     preserved so the frontend can delineate turn boundaries.
          */
         get: operations["get_session_logs_api_daemon_sessions__session_id__logs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/team-mission": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Session Team Mission
+         * @description 预建会话团队 mission（design §5 Phase 1 / §7）。
+         *
+         *     - 归属校验：跨用户/不存在 → 404（``svc.get_agent_session``，同
+         *       get_session_detail 资源隐藏口径）；
+         *     - 活跃冲突：会话已有活跃 mission（未收敛未取消）→ 409（R-07，经 task-02
+         *       ``get_active_mission_for_session`` 判活跃，与 uq_agent_missions_session_active
+         *       部分唯一索引同语义）；
+         *     - scope 解析：未传 → 会话绑定工作区；会话无工作区且未传 → 422（CC-10 同款）；
+         *     - 项目维度校验复用旧项目端点口径（agent/router.py:1239-1357，本卡迁移复用）：
+         *       非项目经理（非超管）→ 403；scope ⊄ 项目关联工作区 → 422；anchor 缺省取
+         *       scope 内 type=backend-code 优先否则第一个（DTO 不带 anchor，服务端派生）；
+         *     - 落库走 ``OrchestratorService.team_mission_entry`` 的 ``"session"`` 预建模式
+         *       （不建主控 run / 不派 lease / objective 空落 SESSION_OBJECTIVE_PLACEHOLDER）。
+         */
+        post: operations["trigger_session_team_mission_api_daemon_sessions__session_id__team_mission_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/team-missions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Session Team Missions
+         * @description 列出会话全部团队 mission（created_at 倒序）+ 分身概要（TeamTaskBlock 数据源）。
+         *
+         *     归属校验同 POST（404 资源隐藏）；workers 仅 ``role != orchestrator`` 分身
+         *     run（D-009）；status 用扩展后 derive_status（含 awaiting_input，会话维度入参
+         *     ——session_active_turn 对整个列表只需一次查询）。
+         */
+        get: operations["list_session_team_missions_api_daemon_sessions__session_id__team_missions_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -9498,14 +9819,23 @@ export interface components {
         };
         /**
          * ConvergeResponse
-         * @description ``converge_mission`` tool 返回契约（task-06 改可重入，design §5.2 / §7.5）。
+         * @description ``converge_mission`` tool 返回契约（task-06 D-010，design §5 Phase 1 / §7 / §7.5）。
          *
-         *     ``status`` 取值（task-06 起新增可重入三态，保留 task-04 既有收敛态）：
-         *     - ``conflict``：有合并冲突，已把 ``conflicts`` 返给主 agent；主 agent 自己用 SDK
-         *       Read/Write 解决后重入 ``converge_mission``（X-004，backend 不写文件）。
-         *     - ``merged``：全部 worker_branch 合并完成（本次或重入后），已触发 cleanup。
-         *     - ``failed_manual``：解冲突轮次超 R-07 上限，mission 标 needs_manual，副本保留。
-         *     - ``done``/``degraded``/``running``：既有语义（bootstrap 收敛 / 部分终态 / 进行中）。
+         *     ``status`` 取值收敛为四值（task-06，design §7；既有 done/degraded/merged 并入
+         *     ``converged``、failed_manual 改 ``needs_manual``）：
+         *     - ``converged``：收敛完成（bootstrap 合并产物 / execute 全分支 merged），
+         *       ``converged_at`` 已置位（不依赖主控 run 状态——分身全终态即置位，D-010）。
+         *     - ``busy``：分身 run（``role!='orchestrator'`` 含 NULL）未全终态——引导主
+         *       agent 等待后重试（mission 状态不变、不置位、不 finalize；message 附引导
+         *       文案与未完成计数）。
+         *     - ``conflict``：有合并冲突，已把 ``conflicts`` 返给主 agent；主 agent 自己用
+         *       SDK Read/Write 解决后重入 ``converge_mission``（X-004，backend 不写文件；
+         *       冲突未解决不算收敛，converged_at 回滚保持会话活跃 mission 可重入）。
+         *     - ``needs_manual``：解冲突轮次超 R-07 上限，mission 标 needs_manual，副本保留
+         *       （原 ``failed_manual`` 改名并入四值契约）。
+         *
+         *     防御透传：cancelled/planning 等不可达派生值原样返回（正常流 busy 前置判定已
+         *     挡；planning= 无分身 run 未置位，见 _converge_core）。
          *
          *     ``conflicts`` 形如 ``[{file, marker_lines, branch}]``（FinalizerMergeResult 透传）。
          *     ``attempt`` 为本次返的解冲突轮次（per mission 计数，存 ``AgentMission.constraints``）。
@@ -9539,6 +9869,8 @@ export interface components {
              * @default 0
              */
             attempt: number;
+            /** Message */
+            message?: string | null;
         };
         /**
          * CustomSkillCreate
@@ -11612,37 +11944,6 @@ export interface components {
              */
             created_at: string;
         };
-        /** MissionCreateRequest */
-        MissionCreateRequest: {
-            /** Objective */
-            objective: string;
-            /** Change Id */
-            change_id?: string | null;
-            /** Budget Usd */
-            budget_usd?: number | null;
-            /** Constraints */
-            constraints?: {
-                [key: string]: unknown;
-            } | null;
-            /** Mode */
-            mode?: ("single" | "team") | null;
-            /** Orchestration Mode */
-            orchestration_mode?: ("team" | "external") | null;
-            /** Session Id */
-            session_id?: string | null;
-            /** Worker Preset */
-            worker_preset?: {
-                [key: string]: unknown;
-            }[] | null;
-            /** Main Agent Config */
-            main_agent_config?: {
-                [key: string]: unknown;
-            } | null;
-            /** Anchor Workspace Id */
-            anchor_workspace_id?: string | null;
-            /** Scope Workspace Ids */
-            scope_workspace_ids?: string[] | null;
-        };
         /** MissionResponse */
         MissionResponse: {
             /**
@@ -13426,13 +13727,14 @@ export interface components {
         /**
          * ProgressRequest
          * @description 主 agent 决策日志（落 AgentRunLog channel=tool_call）。
+         *
+         *     task-10 对齐（审查 B1）：``run_id`` 可选——显式传参时透传（越权校验锚）；
+         *     缺省时 backend 按 ``X-Session-Id`` 解析会话当前主控 run（须已双标记到活跃
+         *     mission），无会话上下文且缺 run_id → 400。
          */
         ProgressRequest: {
-            /**
-             * Run Id
-             * Format: uuid
-             */
-            run_id: string;
+            /** Run Id */
+            run_id?: string | null;
             /** Message */
             message: string;
             /** Decision */
@@ -16738,6 +17040,78 @@ export interface components {
              * @description 附件 URL 列表
              */
             file_urls?: string[] | null;
+        };
+        /**
+         * TeamMissionSummary
+         * @description 触发/列表共用响应（design §7）。
+         *
+         *     ``status`` 为扩展后 derive_status 派生值（含 awaiting_input 档，会话维度
+         *     入参）；``workers`` 仅 role != orchestrator 的分身 run（主控轮 D-009 不进）；
+         *     ``scope_workspace_ids`` 为落库冻结快照（NULL 缺省回落 [anchor]）。
+         */
+        TeamMissionSummary: {
+            /**
+             * Mission Id
+             * Format: uuid
+             */
+            mission_id: string;
+            /** Status */
+            status: string;
+            /** Objective */
+            objective: string | null;
+            /** Scope Workspace Ids */
+            scope_workspace_ids: string[];
+            /** Budget Usd */
+            budget_usd: number | null;
+            /** Workers */
+            workers?: components["schemas"]["TeamMissionWorkerSummary"][];
+        };
+        /**
+         * TeamMissionTriggerRequest
+         * @description POST /api/daemon/sessions/{session_id}/team-mission 请求体（design §7）。
+         *
+         *     - ``objective`` 可空：空则落库占位 ``SESSION_OBJECTIVE_PLACEHOLDER``
+         *       （orchestrator.py），首条 inject 后回填（CC-09）；
+         *     - ``scope_workspace_ids`` 可空：None=会话绑定工作区；会话无工作区且未传
+         *       → 422（CC-10 同款语义）；上限 20 对齐 mission_schema.py 既有口径；
+         *     - ``project_id`` 项目维度（仅项目经理/超管可建，scope ⊆ 项目关联工作区）；
+         *     - ``worker_preset`` / ``main_agent_config`` 沿用 mission_schema.py:30-37 既有
+         *       形态（list[dict] / dict）与上限。
+         */
+        TeamMissionTriggerRequest: {
+            /** Objective */
+            objective?: string | null;
+            /** Scope Workspace Ids */
+            scope_workspace_ids?: string[] | null;
+            /** Project Id */
+            project_id?: string | null;
+            /** Budget Usd */
+            budget_usd?: number | null;
+            /** Worker Preset */
+            worker_preset?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Main Agent Config */
+            main_agent_config?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * TeamMissionWorkerSummary
+         * @description TeamMissionSummary.workers 单项——分身 run（role != orchestrator）概要。
+         */
+        TeamMissionWorkerSummary: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Role */
+            role?: string | null;
+            /** Status */
+            status: string;
+            /** Objective */
+            objective?: string | null;
         };
         /**
          * TokenPair
@@ -22507,206 +22881,6 @@ export interface operations {
             };
         };
     };
-    list_missions_api_workspaces__workspace_id__missions_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-                offset?: number;
-            };
-            header?: never;
-            path: {
-                workspace_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MissionResponse"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_mission_api_workspaces__workspace_id__missions_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                workspace_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MissionCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MissionResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_mission_api_missions__mission_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                mission_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MissionResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    cancel_mission_api_missions__mission_id__cancel_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                mission_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MissionResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_project_missions_api_projects__project_id__missions_get: {
-        parameters: {
-            query?: {
-                limit?: number;
-                offset?: number;
-            };
-            header?: never;
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MissionResponse"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_project_mission_api_projects__project_id__missions_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                project_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MissionCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MissionResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     dispatch_worker_api_workspaces__workspace_id__missions__mission_id__dispatch_worker_post: {
         parameters: {
             query?: never;
@@ -22863,6 +23037,533 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProgressResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dispatch_worker_for_session_api_sessions__session_id__missions_dispatch_worker_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DispatchWorkerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_worker_result_for_session_api_sessions__session_id__missions_workers__worker_id__result_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                worker_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerResultResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workers_for_session_api_sessions__session_id__missions_workers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    converge_mission_for_session_api_sessions__session_id__missions_converge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConvergeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_progress_for_session_api_sessions__session_id__missions_progress_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProgressRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgressResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dispatch_worker_scoped_api_missions_dispatch_worker_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DispatchWorkerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_worker_result_scoped_api_missions_workers__worker_id__result_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                worker_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerResultResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workers_scoped_api_missions_workers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerListResponse"];
+                };
+            };
+        };
+    };
+    converge_mission_scoped_api_missions_converge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConvergeResponse"];
+                };
+            };
+        };
+    };
+    report_progress_scoped_api_missions_progress_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProgressRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgressResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dispatch_worker_by_mission_api_missions__mission_id__dispatch_worker_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DispatchWorkerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerRunResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_worker_result_by_mission_api_missions__mission_id__workers__worker_id__result_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+                worker_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerResultResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workers_by_mission_api_missions__mission_id__workers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    converge_mission_by_mission_api_missions__mission_id__converge_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConvergeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_progress_by_mission_api_missions__mission_id__progress_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProgressRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProgressResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mission_api_missions__mission_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_mission_api_missions__mission_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                mission_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionResponse"];
                 };
             };
             /** @description Validation Error */
@@ -25222,6 +25923,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_session_team_mission_api_daemon_sessions__session_id__team_mission_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TeamMissionTriggerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamMissionSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_session_team_missions_api_daemon_sessions__session_id__team_missions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TeamMissionSummary"][];
                 };
             };
             /** @description Validation Error */

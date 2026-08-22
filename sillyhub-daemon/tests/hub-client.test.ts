@@ -770,3 +770,80 @@ describe('HubClient — task-05 team 主 agent MCP 5 方法', () => {
   });
 });
 
+// ── task-10（2026-08-22-team-session-unify / FR-04 / 审查 B1）：X-Session-Id + 可选定位参数 ──
+// 会话上下文：HubClientAuth.sessionId（mcp-server env MCP_SESSION_ID 注入）→
+// 5 个 MCP 端点请求统一附 X-Session-Id header；未设时不带。ws/mid 缺省时走
+// session-scoped 路径形态（backend task-05/06 按 header 解析活跃 mission）。
+
+describe('HubClient — task-10 X-Session-Id 会话上下文', () => {
+  beforeEach(() => vi.stubGlobal('fetch', mockFetchOk({ ok: true })));
+
+  it('dispatchWorker: sessionId 存在 → X-Session-Id 头', async () => {
+    const c = new HubClient('http://x:8000', { token: 't', sessionId: 'sess-h-1' });
+    await c.dispatchWorker('ws-1', 'mis-1', { objective: 'x' });
+    const headers = lastCall!.init.headers as Record<string, string>;
+    expect(headers['X-Session-Id']).toBe('sess-h-1');
+    // 既有鉴权头不受影响
+    expect(headers['Authorization']).toBe('Bearer t');
+  });
+
+  it('getWorkerResult / listWorkers / convergeMission / reportProgress: 同附 X-Session-Id', async () => {
+    const c = new HubClient('http://x:8000', { apiKey: 'key', sessionId: 'sess-h-2' });
+    const check = () => {
+      const headers = lastCall!.init.headers as Record<string, string>;
+      expect(headers['X-Session-Id']).toBe('sess-h-2');
+    };
+    await c.getWorkerResult('ws-1', 'mis-1', 'w-1');
+    check();
+    await c.listWorkers('ws-1', 'mis-1');
+    check();
+    await c.convergeMission('ws-1', 'mis-1');
+    check();
+    await c.reportProgress('ws-1', 'mis-1', { run_id: 'r', message: 'm' });
+    check();
+  });
+
+  it('sessionId 未设 → 不带 X-Session-Id 头（缺失不附）', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.dispatchWorker('ws-1', 'mis-1', { objective: 'x' });
+    const headers = lastCall!.init.headers as Record<string, string>;
+    expect(headers['X-Session-Id']).toBeUndefined();
+  });
+
+  it('dispatchWorker: ws/mid 缺省 → session-scoped 路径 /api/missions/dispatch_worker', async () => {
+    const c = new HubClient('http://x:8000', { token: 't', sessionId: 'sess-h-3' });
+    await c.dispatchWorker(undefined, undefined, { objective: 'lazy' });
+    expect(lastCall!.url).toBe('http://x:8000/api/missions/dispatch_worker');
+  });
+
+  it('dispatchWorker: 仅 mid → /api/missions/{mid}/dispatch_worker', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.dispatchWorker(undefined, 'mis-9', { objective: 'x' });
+    expect(lastCall!.url).toBe('http://x:8000/api/missions/mis-9/dispatch_worker');
+  });
+
+  it('listWorkers/convergeMission: ws/mid 缺省 → session-scoped /api/missions/{action}', async () => {
+    const c = new HubClient('http://x:8000', { token: 't', sessionId: 's' });
+    await c.listWorkers(undefined, undefined);
+    expect(lastCall!.url).toBe('http://x:8000/api/missions/workers');
+    await c.convergeMission(undefined, undefined);
+    expect(lastCall!.url).toBe('http://x:8000/api/missions/converge');
+  });
+
+  it('getWorkerResult: ws/mid 缺省 → /api/missions/workers/{wid}/result', async () => {
+    const c = new HubClient('http://x:8000', { token: 't', sessionId: 's' });
+    await c.getWorkerResult(undefined, undefined, 'w-9');
+    expect(lastCall!.url).toBe('http://x:8000/api/missions/workers/w-9/result');
+  });
+
+  it('reportProgress: run_id 缺省 → body 不含 run_id（backend 按 header 解析主控 run）', async () => {
+    const c = new HubClient('http://x:8000', { token: 't', sessionId: 'sess-h-4' });
+    await c.reportProgress('ws-1', 'mis-1', { message: 'plain' });
+    const body = JSON.parse(lastCall!.init.body as string);
+    expect(body).toEqual({ message: 'plain' });
+    expect('run_id' in body).toBe(false);
+    const headers = lastCall!.init.headers as Record<string, string>;
+    expect(headers['X-Session-Id']).toBe('sess-h-4');
+  });
+});
+

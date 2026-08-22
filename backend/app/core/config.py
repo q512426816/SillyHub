@@ -325,7 +325,8 @@ class Settings(BaseSettings):
 
     # ── Mission patrol (2026-08-21-mission-converge-patrol task-01) ─────
     # mission 巡检循环（lifespan 常驻协程）的唯一配置来源（design §3 / FR-04）。
-    # 四项全部带默认值：存量部署零配置可启动；开关关闭时行为零变化（NFR-02）。
+    # 全部带默认值：存量部署零配置可启动；开关关闭时行为零变化（NFR-02）。
+    # （2026-08-22-team-session-unify task-08 增补 awaiting_input 超时项，同族命名。）
     mission_patrol_enabled: bool = Field(
         default=True,
         description=(
@@ -348,6 +349,17 @@ class Settings(BaseSettings):
         ge=5,
         description=(
             "僵尸复活窗口（分钟）：run 判死后窗口内 daemon 回线可复活，超窗不可逆收敛。默认 30min。"
+        ),
+    )
+    # 2026-08-22-team-session-unify task-08（design §5 Phase 1 patrol 适配 / §7.5
+    # patrol auto-converge 行 / FR-08）：会话 mission awaiting_input 超时自动收敛阈值。
+    mission_patrol_awaiting_input_timeout_minutes: int = Field(
+        default=30,
+        ge=5,
+        description=(
+            "awaiting_input 超时自动收敛（分钟）：会话 mission 主控轮与分身全终态、"
+            "未 converge 且会话无活跃 turn 持续超时后，patrol 走 explicit 收敛入口"
+            "推进终态（时钟起点=最新 orchestrator run 的 finished_at）。默认 30min。"
         ),
     )
 

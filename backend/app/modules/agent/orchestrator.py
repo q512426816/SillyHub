@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
-from app.modules.agent.model import AgentMission, AgentRun
+from app.modules.agent.model import AgentMission, AgentRun, AgentSession
 from app.modules.agent.placement import NoOnlineDaemonError, RunPlacementService
 from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
 
@@ -33,6 +33,11 @@ log = get_logger(__name__)
 # （finalizer.py:206）要求 run.mission_id 非空才能触发收敛——主 agent run 必须写
 # mission_id，role 仅作语义标记。
 _ORCHESTRATOR_ROLE = "orchestrator"
+
+# 会话预建 mission 的 objective 占位文案（2026-08-22-team-session-unify task-03 /
+# design §8 CC-09）：objective 列 NOT NULL，预建时 objective 可空——落此占位，
+# 首次 inject 后以首条团队指令文本回填（task-04 回填检测 import 本常量，勿重复定义）。
+SESSION_OBJECTIVE_PLACEHOLDER = "（由会话首条团队指令定义）"
 
 # Worker Run 终态集合（mission.py:26 _FAILED + completed）。schedule_loop 三重收敛
 # 信号 1 用：所有 worker run（role != orchestrator）全终态 = 收敛条件之一。
@@ -224,8 +229,9 @@ class OrchestratorService:
     """Team 主 agent 编排服务（D-001@v2）。
 
     职责：
-    - ``team_mission_entry``：建 AgentMission（含 worker_preset/main_agent_config 落库）
-      + 主 agent AgentRun（role=orchestrator, mission_id 非空）+ 派 daemon lease。
+    - ``team_mission_entry``：建 AgentMission（含 worker_preset/main_agent_config 落库）；
+      team 模式另建主 agent AgentRun（role=orchestrator, mission_id 非空）+ 派
+      daemon lease；external / session 模式只建 mission 不 spawn（见方法 docstring）。
     - ``schedule_loop``：主 agent 调度循环骨架（三重收敛骨架，完整逻辑 task-11）。
 
     与 GLM planner 链路互斥：mode=team 走本服务，mode=single/None 走
@@ -249,11 +255,16 @@ class OrchestratorService:
         orchestration_mode: str = "team",
         scope_workspace_ids: list[uuid.UUID] | None = None,
         project_id: uuid.UUID | None = None,
+        session_id: uuid.UUID | None = None,
     ) -> tuple[AgentMission, AgentRun | None]:
         """建 mission；team 模式还建主 agent run + 派 daemon lease。
 
         ``project_id``（task-07，2026-08-19-cross-workspace-team-mission）：项目维度 mission
         关联项目 ID，单 workspace mission 可空（零回归）。跨 ws mission 必填。
+
+        ``session_id``（2026-08-22-team-session-unify task-03）：发起会话锚点
+        （mission.session_id 列，D-006@v1）。仅 ``"session"`` 预建模式必传；
+        team/external 旧模式不传 → 列 default_factory 兜底随机 uuid（零回归）。
 
         ``orchestration_mode`` 取值：
         - ``"team"``（默认，零回归）：复用 ``MissionService.start_mission`` 的持久化
@@ -264,6 +275,12 @@ class OrchestratorService:
           主 agent run + daemon lease——caller 在自己的 worktree 用 dispatch_worker
           自主派 worker，返回 ``(mission, None)``。不加 DB 列，constraints JSON 复用
           （model.py:601）。
+        - ``"session"``（task-03 会话预建，design §5 Phase 1）：只建 mission
+          （session_id 落列 + scope/project/budget/preset/main_agent_config 冻结
+          快照），objective 空落 ``SESSION_OBJECTIVE_PLACEHOLDER``（CC-09）；**跳过**
+          主 agent run + daemon lease + render_orchestrator_prompt——主控轮由会话
+          inject 当轮回填 mission_id+role='orchestrator'（task-04 双标记），返回
+          ``(mission, None)``。
 
         team 模式 daemon 离线 / workspace 未绑定时，``dispatch_to_daemon`` 抛
         ``NoOnlineDaemonError``——本方法捕获并把主 agent run 标记 ``pending``
@@ -273,12 +290,21 @@ class OrchestratorService:
         失败语义一致（router.py:783-784）。external 模式不调 dispatch_to_daemon，
         不存在该异常路径。
         """
+        if orchestration_mode == "session" and session_id is None:
+            raise ValueError("session 预建模式必须传 session_id（mission.session_id 锚点）")
+
         merged = dict(constraints or {})
         # external 模式（路径A / SillySpec 外部调度）：把 mode 落进 mission.constraints
         # 供 converge 检测（task-03 finalizer 查 orchestration_mode=="external" 跳过
         # finalize/cleanup）。team 模式不落——merged 与改动前字节一致（零回归）。
         if orchestration_mode == "external":
             merged["orchestration_mode"] = "external"
+
+        # session 预建模式（task-03 / CC-09）：objective 可空 → 落占位常量（首条
+        # inject 回填，task-04）。旧模式 objective 由 DTO 强制非空，不受影响。
+        effective_objective = objective
+        if orchestration_mode == "session" and not (objective and objective.strip()):
+            effective_objective = SESSION_OBJECTIVE_PLACEHOLDER
 
         # 转换 scope_workspace_ids（uuid → str 存 JSON 列）
         scope_workspace_ids_str: list[str] | None = None
@@ -287,8 +313,12 @@ class OrchestratorService:
 
         mission = AgentMission(
             workspace_id=workspace_id,
+            # session 预建模式传会话锚点；team/external 模式 None 透传
+            # （验收返工 QA P1：session_id 已改 nullable，external mission
+            # 无会话，随机 uuid 会违反 FK 压断 PG 上的存量创建链路）。
+            session_id=session_id,
             change_id=change_id,
-            objective=objective,
+            objective=effective_objective,
             constraints=merged or None,
             budget_usd=budget_usd,
             worker_preset=worker_preset,
@@ -300,6 +330,21 @@ class OrchestratorService:
         self._session.add(mission)
         await self._session.commit()
         await self._session.refresh(mission)
+
+        # session 预建模式（task-03 / design §5 Phase 1）：只建 mission——不建主控
+        # AgentRun、不派 daemon lease、不渲染 prompt。主控轮 = 会话 inject 当轮回填
+        # 双标记（task-04），worker 由常驻 MCP 工具动态派（task-05）。约束键不写入
+        # constraints（design §8：constraints 的 session_id 死参数废弃）。
+        if orchestration_mode == "session":
+            log.info(
+                "orchestrator_mission_session_prebuilt",
+                mission_id=str(mission.id),
+                session_id=str(session_id),
+                scope_workspace_ids=scope_workspace_ids_str,
+                project_id=str(project_id) if project_id else None,
+                worker_preset_len=len(worker_preset) if worker_preset else 0,
+            )
+            return mission, None
 
         # external 模式：只建 mission，**跳过 orchestrator run + daemon lease**——
         # caller（SillySpec execute）在自己的 worktree 用 dispatch_worker 派 worker
@@ -392,19 +437,33 @@ class OrchestratorService:
         已恢复的场景重派一次；daemon 仍离线的 run 保持 pending 留待下次启动。
         常驻轮询重派不在本次范围（需评估 dispatch 频控，留后续变更）。
 
+        task-08（2026-08-22-team-session-unify）：会话 mission 不进重派候选
+        （新链路无 pending 主控 run，显式 no-op），存量 external 保留——见下方
+        候选查询注释。
+
         Returns:
             成功重派的 run 数。
         """
-        stmt = select(AgentRun).where(
-            AgentRun.role == _ORCHESTRATOR_ROLE,
-            AgentRun.status == "pending",
-            AgentRun.error_code == "no_online_daemon",
+        # task-08（2026-08-22-team-session-unify / design §5 Phase 1）：候选 join
+        # AgentMission 并过滤会话 mission——session_id 指向真实 AgentSession 行的
+        # mission 不进重派（显式 no-op：会话链路主控轮由会话 lease 逐 turn 驱动，
+        # 无「pending 主控 run + no_online_daemon」重派语义；新链路主控轮也不会
+        # 写该 error_code）。存量 external/team mission（session_id 为 NULL）重派
+        # 行为保留；join 同时排除 mission 缺失的孤儿 run（原
+        # ``run.mission_id is None`` / ``mission is None`` 跳过语义上移到 SQL）。
+        stmt = (
+            select(AgentRun)
+            .join(AgentMission, AgentRun.mission_id == AgentMission.id)
+            .where(
+                AgentRun.role == _ORCHESTRATOR_ROLE,
+                AgentRun.status == "pending",
+                AgentRun.error_code == "no_online_daemon",
+                ~select(AgentSession.id).where(AgentSession.id == AgentMission.session_id).exists(),
+            )
         )
         runs = (await self._session.execute(stmt)).scalars().all()
         redispatched = 0
         for run in runs:
-            if run.mission_id is None:
-                continue
             mission = await self._session.get(AgentMission, run.mission_id)
             if (
                 mission is None
@@ -461,6 +520,12 @@ class OrchestratorService:
         两阶段复活）：主 run 被判死（error_code=orchestrator_zombie）且复活窗口
         未耗尽 → 信号 1 暂不收敛（return None 等 patrol 复活）；信号 3 不豁免。
 
+        会话 mission 分流（2026-08-22-team-session-unify task-08 / D-008）：会话
+        mission（session_id 指向真实 AgentSession）主控轮为短生命周期 turn run，
+        主控存续按「会话活跃 turn」判定——本方法对其整体 no-op（不强改主控轮
+        状态 / 不触发 converge），收敛入口仅 MCP converge 与 patrol awaiting_input
+        超时（task-06 契约）；存量 external/team mission 走原三重信号链路零回归。
+
         重要：``derive_status``（mission.py:29）把 mission 下**所有** AgentRun
         （含主 agent run 自己）算进状态。主 agent run 通常 long-lived running，
         若直接喂 derive_status 永远返回 ``running``——本方法只对 **worker runs**
@@ -484,6 +549,27 @@ class OrchestratorService:
         if mission.cancelled_at is not None:
             return None
 
+        # ── 会话 mission 分流（task-08 / 2026-08-22-team-session-unify，design
+        #    §5 Phase 1 patrol 适配 / D-008）──
+        # 会话 mission（session_id 指向真实 AgentSession 行，查表判别与
+        # finalizer 同款口径）主控轮为短生命周期 turn run，主控存续按「会话
+        # 活跃 turn」判定，不再以主 run 常驻 running 为存续依据。schedule_loop
+        # 对会话 mission 整体 no-op：
+        # - 不强改主控轮状态（终态后不被重写、running 轮不受巡检干扰）；
+        # - 不 kill 分身 / 不触发 converge——finalizer 非显式路径对会话 mission
+        #   已不自动收敛（task-06），置位入口仅 MCP converge 与 patrol
+        #   awaiting_input 超时（design §7.5）。
+        # 存量 external/team mission（session_id 为 NULL）走下方原三重
+        # 收敛信号链路，行为零回归。
+        if mission.session_id is not None and (
+            await self._session.get(AgentSession, mission.session_id) is not None
+        ):
+            log.debug(
+                "orchestrator_schedule_loop_session_mission_skip",
+                mission_id=str(mission_id),
+            )
+            return None
+
         # 延迟 import 避免与 control/mission/finalizer 的循环 import 风险（与
         # finalizer.converge_mission_for_completed_run 同款）。
         from app.modules.agent.control import MissionControlService
@@ -497,7 +583,15 @@ class OrchestratorService:
         # 找主 agent run 作 converge 锚点（converge_mission_for_completed_run 需 run_id）。
         # 主 agent run 不存在（mission 损坏 / single 模式误调）→ 无法走标准收敛锚点，
         # 巡检跳过（single 零回归：single mission 本就不该走 schedule_loop）。
-        main_run = next((r for r in all_runs if r.role == _ORCHESTRATOR_ROLE), None)
+        # task-08：锚点取 created_at 最新一条 role='orchestrator' run——与 task-06
+        # 锚点（mcp_tools._get_main_run / finalizer）一致；会话 mission 主控轮逐
+        # turn 多条（本方法对会话 mission 已上方分流跳过，此处锚点统一不动语义），
+        # 存量 external 单主控 run（首条即唯一）同规则命中零回归。
+        main_run = max(
+            (r for r in all_runs if r.role == _ORCHESTRATOR_ROLE),
+            key=lambda r: r.created_at,
+            default=None,
+        )
         if main_run is None:
             log.info(
                 "orchestrator_schedule_loop_no_main_run",

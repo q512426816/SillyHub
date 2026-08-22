@@ -290,3 +290,118 @@ describe('Wave2 task-04 gap-1 cli.startAction 注入 SessionManager', () => {
     expect(typeof opts!.permissionWsClient!.send).toBe('function');
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// task-09（2026-08-22-team-session-unify / design §5 Phase 2 / D-002@v2）：
+// isMainAgentSession 谓词真值表——Claude 会话常驻注入 + mission_worker 分身排除。
+//
+// 谓词语义（cli.ts startAction 注入，读捕获的 SessionManager opts）：
+//   provider=claude 且 stage ∈ {undefined/null/''，'orchestrator'} → true 注入 5 工具
+//   （普通 Claude 会话常驻注入；存量 external 主控 stage='orchestrator' 照常注入）
+//   provider=claude 且 stage='mission_worker'（backend execution.py MISSION_WORKER_STAGE
+//   常量派发）→ false 不注入（防分身递归派发，审查 CC-12）
+//   provider=codex 一律 false（D-003@v1，团队需要 Claude 引擎）
+// ════════════════════════════════════════════════════════════════════════════
+
+/** 谓词入参的最小上下文（MainAgentMcpContext 的判定相关字段子集）。 */
+type PredicateCtx = {
+  sessionId: string;
+  leaseId: string;
+  provider: 'claude' | 'codex';
+  cwd: string;
+  stage?: string;
+};
+
+function makeCtx(provider: 'claude' | 'codex', stage?: string | null): PredicateCtx {
+  const ctx: PredicateCtx = {
+    sessionId: 'sess-1',
+    leaseId: 'lease-1',
+    provider,
+    cwd: '/tmp/ws',
+  };
+  if (stage !== undefined) {
+    // null 属防御分支（类型为 stage?: string，经 cast 覆盖归一化前脏值）。
+    ctx.stage = stage as string;
+  }
+  return ctx;
+}
+
+describe('task-09 isMainAgentSession 谓词真值表（claude 常驻注入 + mission_worker 排除）', () => {
+  let tmpDir = '';
+  let _origArgv: string[];
+  let _origExit: typeof process.exit;
+
+  beforeEach(async () => {
+    tmpDir = await makeTmpDir('cli-injection-predicate');
+    resetCaptured();
+    _origArgv = process.argv;
+    _origExit = process.exit;
+    process.argv = ['node', 'sillyhub-daemon'];
+    process.exit = ((code?: number) => {
+      void code;
+      return undefined as never;
+    }) as never;
+  });
+
+  afterEach(async () => {
+    process.argv = _origArgv;
+    process.exit = _origExit;
+    vi.restoreAllMocks();
+    if (tmpDir) {
+      await cleanupDir(tmpDir);
+    }
+  });
+
+  /** startAction 后取捕获的谓词（每 case 重新构造，避免跨 case 共享闭包状态）。 */
+  async function getPredicate(): Promise<(ctx: PredicateCtx) => boolean> {
+    await cli.startAction({ token: 'test-token' });
+    const opts = captured.sessionManagerInstances[0]!.opts;
+    expect(opts).toBeDefined();
+    const predicate = opts!.isMainAgentSession;
+    expect(typeof predicate).toBe('function');
+    return predicate as (ctx: PredicateCtx) => boolean;
+  }
+
+  describe('provider=claude', () => {
+    it('stage=undefined（普通 Claude 会话不传 stage）→ true 常驻注入', async () => {
+      const predicate = await getPredicate();
+      expect(predicate(makeCtx('claude', undefined))).toBe(true);
+    });
+
+    it("stage=null（防御归一化前脏值）→ true", async () => {
+      const predicate = await getPredicate();
+      expect(predicate(makeCtx('claude', null))).toBe(true);
+    });
+
+    it("stage=''（空串）→ true", async () => {
+      const predicate = await getPredicate();
+      expect(predicate(makeCtx('claude', ''))).toBe(true);
+    });
+
+    it("stage='orchestrator'（存量 external 主控）→ true 照常注入", async () => {
+      const predicate = await getPredicate();
+      expect(predicate(makeCtx('claude', 'orchestrator'))).toBe(true);
+    });
+
+    it("stage='mission_worker'（分身 lease 常量）→ false 不注入（防递归派发）", async () => {
+      const predicate = await getPredicate();
+      expect(predicate(makeCtx('claude', 'mission_worker'))).toBe(false);
+    });
+
+    it("stage 其它非空值（'scan'）→ false", async () => {
+      const predicate = await getPredicate();
+      expect(predicate(makeCtx('claude', 'scan'))).toBe(false);
+    });
+  });
+
+  describe('provider=codex（D-003@v1 一律不注入）', () => {
+    it.each([
+      ['undefined', undefined],
+      ['orchestrator', 'orchestrator'],
+      ['mission_worker', 'mission_worker'],
+    ])('stage=%s → false', async (_label, stage) => {
+      const predicate = await getPredicate();
+      expect(predicate(makeCtx('codex', stage as string | undefined))).toBe(false);
+    });
+  });
+});

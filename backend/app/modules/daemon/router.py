@@ -8,7 +8,7 @@ import re
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import httpx
 from fastapi import (
@@ -87,6 +87,9 @@ from app.modules.daemon.schema import (
     SessionCreateRequest,
     SessionInjectRequest,
     SessionReopenResponse,
+    TeamMissionSummary,
+    TeamMissionTriggerRequest,
+    TeamMissionWorkerSummary,
 )
 from app.modules.daemon.service import (
     DaemonLeaseNotFound,
@@ -101,6 +104,10 @@ from app.modules.daemon.service import (
     DaemonSessionNotFound,
 )
 from app.modules.daemon.session.service import get_session_readiness
+
+if TYPE_CHECKING:
+    # 仅类型注解用（team-mission 汇总 helper 形参）；运行时在各端点内延迟 import。
+    from app.modules.agent.model import AgentMission
 
 log = get_logger(__name__)
 
@@ -2284,6 +2291,253 @@ async def get_session_logs(
     svc = DaemonService(session)
     logs = await svc.get_agent_session_logs(session_id, user.id)
     return [AgentRunLogEntry.model_validate(log) for log in logs]
+
+
+# ── Session team mission trigger/list（2026-08-22-team-session-unify task-03）──
+# 会话内团队能力数据源（design §5 Phase 1 / §7）：POST 预建 mission（scope 冻结
+# 快照 + objective 空落占位 + 活跃冲突 409 R-07），GET 供前端 TeamTaskBlock 轮询。
+# 归属校验同 get_session_detail 口径（missing/跨用户 → 404 资源隐藏）。
+
+
+async def _session_has_active_turn(session: AsyncSession, session_id: uuid.UUID) -> bool:
+    """会话当前是否有活跃 turn（run pending/running/interrupting）。
+
+    扩展后 derive_status 的 ``session_active_turn`` 入参（task-02 契约）：主控轮
+    还在跑 → 会话 mission 不进 awaiting_input 档。状态集合与 get_session_detail
+    的 current_run 查询同口径。
+    """
+    from app.modules.agent.model import AgentRun
+
+    stmt = (
+        select(AgentRun.id)
+        .where(
+            AgentRun.agent_session_id == session_id,
+            AgentRun.status.in_(["pending", "running", "interrupting"]),
+        )
+        .limit(1)
+    )
+    return (await session.execute(stmt)).first() is not None
+
+
+async def _team_mission_summary(
+    session: AsyncSession,
+    mission: AgentMission,
+    *,
+    session_active_turn: bool,
+) -> TeamMissionSummary:
+    """AgentMission + 全量 run → TeamMissionSummary（触发/列表共用组装）。
+
+    - status 用扩展后 ``derive_status``（task-02 契约：converged/has_session/
+      session_active_turn 会话维度入参，含 awaiting_input 档）；
+    - workers 仅 ``role != orchestrator`` 分身 run（D-009：主控轮不进概要；
+      Python 比较 None != 'orchestrator' 为 True，NULL role 分身天然保留）；
+    - scope 概要读落库冻结快照，NULL 缺省回落 [anchor]（单 ws 语义）。
+
+    mission 模块延迟 import（与 orchestrator.schedule_loop 同款，避免循环
+    import；task-02 并行时序下也保证本模块可 import）。
+    """
+    from app.modules.agent.control import MissionControlService
+    from app.modules.agent.mission import derive_status
+
+    ctrl = MissionControlService(session)
+    all_runs = await ctrl.worker_runs(mission.id)
+    status = derive_status(
+        all_runs,
+        cancelled=mission.cancelled_at is not None,
+        converged=mission.converged_at is not None,
+        has_session=mission.session_id is not None,
+        session_active_turn=session_active_turn,
+    )
+    return TeamMissionSummary(
+        mission_id=mission.id,
+        status=status,
+        objective=mission.objective,
+        scope_workspace_ids=list(mission.scope_workspace_ids or [str(mission.workspace_id)]),
+        budget_usd=mission.budget_usd,
+        workers=[
+            TeamMissionWorkerSummary(
+                run_id=r.id, role=r.role, status=r.status, objective=r.objective
+            )
+            for r in all_runs
+            if r.role != "orchestrator"
+        ],
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/team-mission",
+    response_model=TeamMissionSummary,
+    status_code=status.HTTP_201_CREATED,
+)
+async def trigger_session_team_mission(
+    session_id: uuid.UUID,
+    data: TeamMissionTriggerRequest,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> TeamMissionSummary:
+    """预建会话团队 mission（design §5 Phase 1 / §7）。
+
+    - 归属校验：跨用户/不存在 → 404（``svc.get_agent_session``，同
+      get_session_detail 资源隐藏口径）；
+    - 活跃冲突：会话已有活跃 mission（未收敛未取消）→ 409（R-07，经 task-02
+      ``get_active_mission_for_session`` 判活跃，与 uq_agent_missions_session_active
+      部分唯一索引同语义）；
+    - scope 解析：未传 → 会话绑定工作区；会话无工作区且未传 → 422（CC-10 同款）；
+    - 项目维度校验复用旧项目端点口径（agent/router.py:1239-1357，本卡迁移复用）：
+      非项目经理（非超管）→ 403；scope ⊄ 项目关联工作区 → 422；anchor 缺省取
+      scope 内 type=backend-code 优先否则第一个（DTO 不带 anchor，服务端派生）；
+    - 落库走 ``OrchestratorService.team_mission_entry`` 的 ``"session"`` 预建模式
+      （不建主控 run / 不派 lease / objective 空落 SESSION_OBJECTIVE_PLACEHOLDER）。
+    """
+    svc = DaemonService(session)
+    agent_session = await svc.get_agent_session(session_id, user.id)
+
+    # 活跃冲突（R-07 单活跃约束）。
+    from app.modules.agent.mission import get_active_mission_for_session
+
+    active_mission = await get_active_mission_for_session(session, session_id)
+    if active_mission is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该会话已有进行中的团队任务，请先收敛或取消后再发起新任务。",
+        )
+
+    # scope 解析：未传取会话绑定工作区；两者皆无 → 422。
+    if data.scope_workspace_ids:
+        scope_ids = list(dict.fromkeys(data.scope_workspace_ids))  # 去重保序
+    elif agent_session.workspace_id is not None:
+        scope_ids = [agent_session.workspace_id]
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="该会话未绑定工作区，请在触发团队任务时显式选择工作区范围（scope_workspace_ids）。",
+        )
+
+    anchor_id: uuid.UUID
+    if data.project_id is not None:
+        # 项目经理/超管校验（复用 ppm/common/data_scope 口径，非项目经理 403）。
+        from app.modules.ppm.common.data_scope import is_super_admin, manager_project_ids
+
+        if not (
+            await is_super_admin(session, user)
+            or data.project_id in await manager_project_ids(session, user)
+        ):
+            from app.core.errors import PermissionDenied
+
+            raise PermissionDenied(
+                "仅项目经理可创建项目维度的会话团队任务。",
+                details={"project_id": str(data.project_id)},
+            )
+
+        # scope ⊆ 项目关联工作区（复用 workspace link_service.list_by_project，越界 422）。
+        from app.modules.workspace import link_service
+
+        bound_workspaces = await link_service.list_by_project(
+            session, ppm_project_id=data.project_id
+        )
+        bound_ids = {w.workspace_id for w in bound_workspaces}
+        invalid_ids = set(scope_ids) - bound_ids
+        if invalid_ids:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"指定的工作区不在项目关联范围内：{', '.join(str(i) for i in invalid_ids)}",
+            )
+
+        # anchor 缺省：scope 内 type=backend-code 优先否则第一个（对齐
+        # agent/router.py:1295-1309 旧项目端点口径，逐字同款 backend_ws 选择）。
+        backend_ws = next(
+            (
+                w
+                for w in bound_workspaces
+                if w.type == "backend-code" and w.workspace_id in scope_ids
+            ),
+            None,
+        )
+        anchor_id = backend_ws.workspace_id if backend_ws else scope_ids[0]
+    elif len(scope_ids) == 1:
+        anchor_id = scope_ids[0]  # 单工作区：anchor 即该工作区（免查 Workspace type）
+    else:
+        # 非项目多工作区：scope 内 type=backend-code 优先否则第一个（同口径）。
+        from app.modules.workspace.model import Workspace
+
+        ws_rows = (
+            (await session.execute(select(Workspace).where(Workspace.id.in_(scope_ids))))
+            .scalars()
+            .all()
+        )
+        type_by_id = {w.id: w.type for w in ws_rows}
+        anchor_id = next(
+            (sid for sid in scope_ids if type_by_id.get(sid) == "backend-code"),
+            scope_ids[0],
+        )
+
+    from app.modules.agent.orchestrator import OrchestratorService
+
+    mission, _main_run = await OrchestratorService(session).team_mission_entry(
+        workspace_id=anchor_id,
+        objective=data.objective or "",
+        created_by=user.id,
+        # change_id 继承会话上下文（会话即团队任务的发起锚点，D-001 会话内能力）。
+        change_id=agent_session.change_id,
+        constraints=None,
+        budget_usd=data.budget_usd,
+        worker_preset=data.worker_preset,
+        main_agent_config=data.main_agent_config,
+        orchestration_mode="session",
+        scope_workspace_ids=scope_ids,
+        project_id=data.project_id,
+        session_id=session_id,
+    )
+    log.info(
+        "session_team_mission_prebuilt",
+        session_id=str(session_id),
+        mission_id=str(mission.id),
+        anchor_workspace_id=str(anchor_id),
+        project_id=str(data.project_id) if data.project_id else None,
+    )
+    return await _team_mission_summary(
+        session,
+        mission,
+        session_active_turn=await _session_has_active_turn(session, session_id),
+    )
+
+
+@router.get(
+    "/sessions/{session_id}/team-missions",
+    response_model=list[TeamMissionSummary],
+)
+async def list_session_team_missions(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> list[TeamMissionSummary]:
+    """列出会话全部团队 mission（created_at 倒序）+ 分身概要（TeamTaskBlock 数据源）。
+
+    归属校验同 POST（404 资源隐藏）；workers 仅 ``role != orchestrator`` 分身
+    run（D-009）；status 用扩展后 derive_status（含 awaiting_input，会话维度入参
+    ——session_active_turn 对整个列表只需一次查询）。
+    """
+    svc = DaemonService(session)
+    await svc.get_agent_session(session_id, user.id)
+
+    from app.modules.agent.model import AgentMission
+
+    missions = (
+        (
+            await session.execute(
+                select(AgentMission)
+                .where(AgentMission.session_id == session_id)
+                .order_by(AgentMission.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    session_active_turn = await _session_has_active_turn(session, session_id)
+    return [
+        await _team_mission_summary(session, m, session_active_turn=session_active_turn)
+        for m in missions
+    ]
 
 
 # ── llm-proxy 透传端点（task-04 / FR-03 / D-003@v1）───────────────────────────

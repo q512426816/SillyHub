@@ -28,6 +28,7 @@ import {
   ToolRowView,
   SubagentBlockView,
   StderrRowView,
+  TeamWorkerBlockView,
 } from "../turn-segment-views";
 import type {
   TextTurnSegment,
@@ -669,5 +670,164 @@ describe("formatElapsedMmss 计时格式化", () => {
     expect(formatElapsedMmss(60_000)).toBe("01:00");
     expect(formatElapsedMmss(3_723_500)).toBe("62:03"); // 跨小时分钟不封顶
     expect(formatElapsedMmss(-500)).toBe("00:00"); // 负时长钳零
+  });
+});
+
+/* ───────── 7. 团队 MCP 工具卡 + 分身段块（task-12 / 2026-08-22-team-session-unify / FR-07） ───────── */
+
+/** dispatch_worker 工具调用 raw（Claude 上报形态：mcp__<server>__<tool> 前缀）。 */
+const MCP_DISPATCH_RAW = JSON.stringify({
+  tool: "mcp__sillyhub__dispatch_worker",
+  args: { role: "impl", objective: "修登录页按钮溢出", target_workspace_id: "11111111-2222" },
+  tool_use_id: "call_dw",
+  success: true,
+});
+
+function makeDispatchSeg(overrides: Partial<ToolTurnSegment> = {}): ToolTurnSegment {
+  return makeToolSeg({
+    id: "call_dw",
+    raw: MCP_DISPATCH_RAW,
+    result: undefined,
+    status: "running",
+    toolName: "mcp__sillyhub__dispatch_worker",
+    primary: null,
+    startedAt: 5_000,
+    endedAt: null,
+    children: [],
+    ...overrides,
+  });
+}
+
+describe("ToolRowView 团队 MCP 工具卡（泛化微调）", () => {
+  it("mcp 前缀工具名：显示短名 + mcp 标识 + 👥 图标 + 角色/目标主参数摘要", () => {
+    render(<ToolRowView segment={makeDispatchSeg({ status: "ok", endedAt: 6_000 })} />);
+    expect(screen.getByText("dispatch_worker")).toBeInTheDocument(); // 短名（剥 mcp__server__ 前缀）
+    expect(screen.getByText("mcp")).toBeInTheDocument(); // mcp 来源标识
+    expect(screen.getByText("👥")).toBeInTheDocument(); // 团队工具统一图标
+    expect(screen.getByText("impl · 修登录页按钮溢出")).toBeInTheDocument(); // 主参数摘要
+  });
+
+  it("裸工具名（无 mcp__ 前缀）同样识别：converge_mission", () => {
+    render(
+      <ToolRowView
+        segment={makeToolSeg({
+          id: "call_cv",
+          raw: JSON.stringify({ tool: "converge_mission", args: {}, tool_use_id: "call_cv" }),
+          toolName: "converge_mission",
+          primary: null,
+        })}
+      />,
+    );
+    expect(screen.getByText("converge_mission")).toBeInTheDocument();
+    expect(screen.getByText("mcp")).toBeInTheDocument();
+    expect(screen.getByText("收敛分身产出")).toBeInTheDocument();
+  });
+
+  it("非团队工具不受影响：无 mcp 标识、无 👥 图标", () => {
+    render(<ToolRowView segment={makeToolSeg()} />);
+    expect(screen.queryByText("mcp")).not.toBeInTheDocument();
+    expect(screen.queryByText("👥")).not.toBeInTheDocument();
+    expect(screen.getByText("Read")).toBeInTheDocument();
+  });
+
+  it("raw 解析失败回退既有 desc 链（primary / raw 原样），不渲染团队摘要", () => {
+    render(
+      <ToolRowView
+        segment={makeDispatchSeg({ raw: "非 JSON 摘要", toolName: "mcp__sillyhub__dispatch_worker" })}
+      />,
+    );
+    expect(screen.getByText("dispatch_worker")).toBeInTheDocument();
+    expect(screen.getByText(/非 JSON 摘要/)).toBeInTheDocument();
+  });
+});
+
+describe("TeamWorkerBlockView 分身段块（violet）", () => {
+  it("运行中默认展开：分身「角色」+ 状态 + mm:ss 耗时 + 工作区徽标 + children 渲染", () => {
+    render(
+      <TeamWorkerBlockView
+        role="impl"
+        status="running"
+        objective="修登录页按钮溢出"
+        durationMs={84_000}
+        workspaceName="前端官网"
+        workspaceType="frontend-code"
+      >
+        <div>分身内部日志</div>
+      </TeamWorkerBlockView>,
+    );
+    expect(screen.getByText("分身「impl」")).toBeInTheDocument();
+    expect(screen.getByText("运行中")).toBeInTheDocument();
+    expect(screen.getByText("01:24")).toBeInTheDocument();
+    expect(screen.getByText("前端官网")).toBeInTheDocument(); // 工作区徽标（类型配色）
+    expect(screen.getByText("目标：修登录页按钮溢出")).toBeInTheDocument();
+    expect(screen.getByText("分身内部日志")).toBeInTheDocument(); // 默认展开
+  });
+
+  it("终态默认折叠：children 不挂载；点击展开可见，再点击收起", () => {
+    render(
+      <TeamWorkerBlockView role="test" status="completed" durationMs={141_000}>
+        <div>分身产出内容</div>
+      </TeamWorkerBlockView>,
+    );
+    expect(screen.getByText("分身「test」")).toBeInTheDocument();
+    expect(screen.getByText("已完成")).toBeInTheDocument();
+    expect(screen.getByText("02:21")).toBeInTheDocument();
+    expect(screen.queryByText("分身产出内容")).not.toBeInTheDocument();
+
+    fireEvent.click(rowOf("分身「test」"));
+    expect(screen.getByText("分身产出内容")).toBeInTheDocument();
+    fireEvent.click(rowOf("分身「test」"));
+    expect(screen.queryByText("分身产出内容")).not.toBeInTheDocument();
+  });
+
+  it("SegmentView 分发：dispatch_worker tool 段升级为分身段块（无 children 时）", () => {
+    render(<SegmentView segment={makeDispatchSeg()} />);
+    expect(screen.getByText("分身「impl」")).toBeInTheDocument();
+    expect(screen.getByText("运行中")).toBeInTheDocument();
+    expect(screen.getByText("#11111111")).toBeInTheDocument(); // target_workspace_id 短标识徽标
+    expect(screen.getByText("目标：修登录页按钮溢出")).toBeInTheDocument();
+    // 无 children → 预留说明，不是空白
+    expect(screen.getByText(/日志与产物入口/)).toBeInTheDocument();
+  });
+
+  it("dispatch_worker 段 children（分身归属日志）渲染进段块 body", () => {
+    render(
+      <SegmentView
+        segment={makeDispatchSeg({
+          children: [makeTextSeg({ id: "text:w1", text: "分身流式日志" })],
+        })}
+      />,
+    );
+    expect(screen.getByText("分身流式日志")).toBeInTheDocument(); // running 默认展开
+  });
+
+  it("running → 终态过渡自动收敛折叠（对齐 SubagentBlockView 语义）", () => {
+    const running = makeDispatchSeg();
+    const { rerender } = render(<SegmentView segment={running} />);
+    expect(screen.getByText("目标：修登录页按钮溢出")).toBeInTheDocument();
+
+    const finished = makeDispatchSeg({ status: "ok", result: "{}", endedAt: 9_000 });
+    rerender(<SegmentView segment={finished} />);
+    expect(screen.getByText("已完成")).toBeInTheDocument();
+    expect(screen.queryByText("目标：修登录页按钮溢出")).not.toBeInTheDocument();
+  });
+
+  it("其它团队工具（get_worker_result）走普通工具卡，不升级分身段块", () => {
+    render(
+      <SegmentView
+        segment={makeToolSeg({
+          id: "call_gr",
+          raw: JSON.stringify({
+            tool: "mcp__sillyhub__get_worker_result",
+            args: { role: "test" },
+            tool_use_id: "call_gr",
+          }),
+          toolName: "mcp__sillyhub__get_worker_result",
+          primary: null,
+        })}
+      />,
+    );
+    expect(screen.getByText("get_worker_result")).toBeInTheDocument();
+    expect(screen.queryByText(/分身「/)).not.toBeInTheDocument();
   });
 });

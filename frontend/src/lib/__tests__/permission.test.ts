@@ -240,14 +240,9 @@ describe("visibleMenusBySection", () => {
     ]);
   });
 
-  it("FR-06 #4: with ['task:read'] on 'agent' includes missions（task:read 在 runtime 菜单保留，agent 节仍有 missions 等菜单）", () => {
-    // Given user.permissions = ["task:read"]
-    // When visibleMenusBySection(user, "agent")
-    // Then 至少包含 missions（不锁死其它菜单）
-    const user = mkUser({ permissions: ["task:read"] });
-    const result = visibleMenusBySection(user, "agent");
-    expect(result.some((g) => g.menuKey === "missions")).toBe(true);
-  });
+  // FR-06 #4（task:read → agent 节 missions 菜单）随 missions 菜单项删除移除：
+  // task-13（2026-08-22-team-session-unify / D-011）删「Agent 团队」菜单，入口归一
+  // 会话内触发；task:read 的菜单可见性仍由 workspace 节 runtime 菜单覆盖。
 
   it("FR-06 #5: with ['change:read'] on 'workspace' includes changes", () => {
     // Given user.permissions = ["change:read"]

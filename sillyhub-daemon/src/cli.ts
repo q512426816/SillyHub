@@ -693,13 +693,22 @@ export async function startAction(opts: StartOptions): Promise<number> {
       // (provider) 对齐心跳 _syncAllowedRoots 按 _registeredRuntimes 存的 rid）。
       policyEngine,
       runtimeIdProvider: (provider: string) => daemon?.resolveRuntimeId(provider) ?? '',
-      // task-06（D-007@v2 / R-01）：主 agent（role=orchestrator）MCP tool 注入。
+      // task-06（D-007@v2 / R-01）→ task-09 放宽（D-002@v2，2026-08-22-team-session-unify）：
+      // Claude 会话常驻注入 5 工具。
       //
-      // isMainAgentSession：读 ctx.stage判定本 session 是否 team 主 agent
-      //（backend orchestrator.py:162 dispatch_to_daemon(stage='orchestrator') →
-      // lease.metadata.stage → daemon execPayload.stage → CreateSessionInput.stage →
-      // MainAgentMcpContext.stage）。普通 scan/stage/chat session stage 未传或非
-      // 'orchestrator' → 不注入（零回归）。
+      // isMainAgentSession：读 ctx.provider + ctx.stage 判定本 session 是否注入
+      // 主 agent MCP tool。链路：backend 写 lease.metadata.stage → daemon claim
+      // payload stage（lease/context.py:479）→ execPayload.stage（daemon.ts:3760）
+      // → CreateSessionInput.stage → MainAgentMcpContext.stage → 本谓词。判据
+      // （design §5 Phase 2）：
+      //   - provider=claude 且 stage ∈ {undefined/null/''，'orchestrator'} → true：
+      //     普通 Claude 会话不传 stage（常驻注入）；存量 external 主控
+      //     stage='orchestrator'（orchestrator.py dispatch_to_daemon）照常注入。
+      //   - provider=claude 且 stage='mission_worker'（backend execution.py
+      //     MISSION_WORKER_STAGE 常量派发）→ false：分身不注入（防 worker 递归
+      //     派发与 converge 干扰，审查 CC-12）；其它非空 stage 值同样不注入。
+      //   - provider=codex → 一律 false（D-003@v1：团队需要 Claude 引擎，codex
+      //     不消费 mcpServers，另立后续变更）。
       //
       // mainAgentMcpConfigProvider：构造主 agent spawn 时要注入的 MCP server 配置表。
       // 用 buildDaemonMcpServerConfig 构造 daemon 内置 MCP server（command=node +
@@ -716,7 +725,11 @@ export async function startAction(opts: StartOptions): Promise<number> {
       // （MCP_SERVER_DAEMON_API_KEY + MCP_SERVER_DAEMON_TOKEN），mcp-server.ts 优先
       // X-API-Key 路径，backend get_current_principal 解析 apiKey → User →
       // has_permission(WORKSPACE_WRITE)，5 endpoint 链路通。
-      isMainAgentSession: (ctx) => ctx.stage === 'orchestrator',
+      isMainAgentSession: (ctx) => {
+        if (ctx.provider !== 'claude') return false;
+        const stage = ctx.stage ?? '';
+        return stage === '' || stage === 'orchestrator';
+      },
       mainAgentMcpConfigProvider: (ctx) => {
         // task-09 P0 鉴权 gap 闭合：apiKey（X-API-Key）与 token（Bearer）分开透传。
         // daemon apiKey 优先（config.api_key），回落 Bearer token（config.token）。

@@ -6717,14 +6717,15 @@
         }
       }
     },
-    "/api/workspaces/{workspace_id}/missions": {
-      "get": {
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/dispatch_worker": {
+      "post": {
         "tags": [
-          "agent"
+          "agent",
+          "agent-mcp"
         ],
-        "summary": "List Missions",
-        "description": "列出 workspace 的 mission（按 created_at 倒序，分页）。\n\nquick（mission 历史列表）：前端 Agent 团队页进页面时调，展示历史 mission\n（状态徽标/目标/时间/worker 数），点击单条调 getMission 刷新详情。返回完整\nMissionResponse（含 workers + cost + artifacts）以复用 _mission_to_response；\nN+1 查询可接受（列表通常 <20，非高频轮询路径——活跃 mission 走 getMission 轮询）。\nlimit 默认 20，硬上限 50（min(limit,50) 防滥用，不报 422）。",
-        "operationId": "list_missions_api_workspaces__workspace_id__missions_get",
+        "summary": "Dispatch Worker",
+        "description": "主 agent 动态派一个 worker run（D-002@v2）。\n\n建 AgentRun(role 从 payload 或 preset 对应条目, status=pending) + 调\n``MissionExecutionService.dispatch_worker`` 派 daemon lease。daemon 离线 /\n未绑定时 lease 失败但 run 仍建（pending + error_code=no_online_daemon），\n主 agent 可读 worker 状态决定重派。\n\ntask-08（2026-08-19-cross-workspace-team-mission / §7.2 链路A）：\n- 新增 target_workspace_id 参数（payload.target_workspace_id）\n- 服务端校验 target ∈ scope（含 anchor），越界抛 400 mission_target_out_of_scope\n- 有效 target 传 exec_svc.dispatch_worker 的 target_workspace_id 形参\n\ntask-05（2026-08-22-team-session-unify）：mission 解析接入 X-Session-Id 会话\n定位（design §5 Phase 1 / §7）——header 命中会话活跃 mission 时显式路径参数\n仅作越权校验锚；会话无活跃 mission 且无显式 mission_id 时懒建兜底（scope=\n会话工作区、objective=dispatch 上下文、预算=默认上限 R-02 + 补回填双标记 +\n并发守卫）。header 缺席走 ``_get_mission`` 显式路径，行为零回归。",
+        "operationId": "dispatch_worker_api_workspaces__workspace_id__missions__mission_id__dispatch_worker_post",
         "parameters": [
           {
             "name": "workspace_id",
@@ -6737,39 +6738,33 @@
             }
           },
           {
-            "name": "limit",
-            "in": "query",
-            "required": false,
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
             "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 20,
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "title": "Offset"
+              "type": "string",
+              "format": "uuid",
+              "title": "Mission Id"
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DispatchWorkerRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/MissionResponse"
-                  },
-                  "title": "Response List Missions Api Workspaces  Workspace Id  Missions Get"
+                  "$ref": "#/components/schemas/WorkerRunResponse"
                 }
               }
             }
@@ -6785,14 +6780,17 @@
             }
           }
         }
-      },
-      "post": {
+      }
+    },
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/workers/{worker_id}/result": {
+      "get": {
         "tags": [
-          "agent"
+          "agent",
+          "agent-mcp"
         ],
-        "summary": "Create Mission",
-        "description": "Plan a Mission via GLM, create Worker Runs, dispatch them to a daemon.",
-        "operationId": "create_mission_api_workspaces__workspace_id__missions_post",
+        "summary": "Get Worker Result",
+        "description": "读单个 worker 的结构化产出（AgentArtifact kind=patch/summary/...）。\n\ntask-05：接入 X-Session-Id 会话定位（header 命中活跃 mission 时显式参数仅作\n越权校验锚；header 缺席零回归）。",
+        "operationId": "get_worker_result_api_workspaces__workspace_id__missions__mission_id__workers__worker_id__result_get",
         "parameters": [
           {
             "name": "workspace_id",
@@ -6803,6 +6801,191 @@
               "format": "uuid",
               "title": "Workspace Id"
             }
+          },
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Mission Id"
+            }
+          },
+          {
+            "name": "worker_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Worker Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerResultResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/workers": {
+      "get": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "List Workers",
+        "description": "列 mission 下所有 worker runs 状态（含主 agent run）。\n\ntask-05：接入 X-Session-Id 会话定位（header 命中活跃 mission 时显式参数仅作\n越权校验锚；header 缺席零回归）。",
+        "operationId": "list_workers_api_workspaces__workspace_id__missions__mission_id__workers_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Mission Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/converge": {
+      "post": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Converge Mission",
+        "description": "主 agent 触发 mission 收敛（task-06 D-010 语义重定义，design §5 / §7 / §7.5）。\n\n状态机（per mission，无新列——计数存 ``AgentMission.constraints`` JSON）：\n\n0. **busy 前置**：分身 run（``role!='orchestrator'`` 含 NULL）未全终态 → 返\n   ``status=busy`` + message 引导文案，零状态变更（不置位/不 finalize）。\n1. 分身全终态 → 以最新 orchestrator run 为锚调 ``converge_mission_for_completed_run``\n   （``converge_explicit=True``：分身维度判据 + converged_at 原子抢占置位，\n   不依赖主控 run 状态；保留 artifact 回灌 + bootstrap/execute 路由；冲突时\n   入口内回滚置位保重入）。\n2. 复用 ``FinalizerService.finalize_execute_mission`` 拿 ``FinalizerMergeResult``\n   （merged_branches / pending_conflicts）——见 ``_finalize_merge_for_mission``\n   注释（为何不直接改 converge_mission_for_completed_run 返回值）。\n3. ``pending_conflicts`` 非空 → 返 ``status=conflict`` + conflicts 给主 agent；\n   主 agent 自己 SDK Read/Write 解决（X-004，backend 不写文件）+ git add 后重入。\n4. 重入：``finalize_execute_mission`` 重跑，已 merged 分支幂等（already-up-to-date），\n   主 agent 解决后的内容被下次 git 合进去；全 merged → ``status=converged`` +\n   调 ``_cleanup_mission``（task-07 cleanup_mission）清 worker 副本。\n5. R-07：每次返 conflict 时计数 +1（``_bump_conflict_attempts``）；超限（默认 3）\n   → ``_mark_mission_needs_manual`` 标 ``needs_manual`` + 返\n   ``status=needs_manual``，副本保留供排查（X-003）。\n\n简化（task-06 决策，见 ``_mark_mission_needs_manual``）：不实际 ``git merge --abort``——\nworkspace root 工作区状态在 daemon 侧，backend 不可控，强行 abort 可能误清主 agent 已\n写的解决内容；改为标 needs_manual 让用户/主 agent 手动处理。\n\ntask-05（2026-08-22-team-session-unify）：mission 解析接入 X-Session-Id 会话\n定位（header 命中活跃 mission 时显式参数仅作越权校验锚；header 缺席零回归）。",
+        "operationId": "converge_mission_api_workspaces__workspace_id__missions__mission_id__converge_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Mission Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConvergeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/progress": {
+      "post": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Report Progress",
+        "description": "落主 agent 决策日志（AgentRunLog channel=tool_call, tool_kind=other）。\n\n主 agent 每次决策（派 worker / 判断达成 / 收敛）都调此 endpoint 落一条日志，\n供前端展示决策链路 + 审计。``decision`` 字段拼到 content 前缀便于筛选。\n\ntask-05：接入 X-Session-Id 会话定位（header 命中活跃 mission 时显式参数仅作\n越权校验锚；header 缺席零回归）。run_id 缺省时按会话当前主控 run 解析\n（task-10 对齐）。",
+        "operationId": "report_progress_api_workspaces__workspace_id__missions__mission_id__progress_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Mission Id"
+            }
           }
         ],
         "requestBody": {
@@ -6810,7 +6993,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MissionCreateRequest"
+                "$ref": "#/components/schemas/ProgressRequest"
               }
             }
           }
@@ -6821,7 +7004,694 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MissionResponse"
+                  "$ref": "#/components/schemas/ProgressResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{session_id}/missions/dispatch_worker": {
+      "post": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Dispatch Worker For Session",
+        "description": "会话维度 dispatch_worker——无活跃 mission 时懒建兜底（design §5 Phase 1）。\n\n懒建：scope=会话绑定工作区、objective=dispatch 上下文、预算=默认上限（R-02），\n复用 task-03 预建入口（``orchestration_mode=\"session\"``）；建后补回填会话\n当前活跃 run 双标记（Grill NEW-1）。会话未绑定工作区 → 422 引导弹层文案\n（CC-10）；并发双懒建由部分唯一索引兜底（Grill NEW-3）。",
+        "operationId": "dispatch_worker_for_session_api_sessions__session_id__missions_dispatch_worker_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DispatchWorkerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerRunResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{session_id}/missions/workers/{worker_id}/result": {
+      "get": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Get Worker Result For Session",
+        "description": "会话维度 get_worker_result——按会话活跃 mission 读分身产出。",
+        "operationId": "get_worker_result_for_session_api_sessions__session_id__missions_workers__worker_id__result_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "worker_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Worker Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerResultResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{session_id}/missions/workers": {
+      "get": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "List Workers For Session",
+        "description": "会话维度 list_workers——按会话活跃 mission 列 run 状态。",
+        "operationId": "list_workers_for_session_api_sessions__session_id__missions_workers_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{session_id}/missions/converge": {
+      "post": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Converge Mission For Session",
+        "description": "会话维度 converge——按会话活跃 mission 触发收敛（内部语义归 task-06）。",
+        "operationId": "converge_mission_for_session_api_sessions__session_id__missions_converge_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConvergeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{session_id}/missions/progress": {
+      "post": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Report Progress For Session",
+        "description": "会话维度 report_progress——按会话活跃 mission 落主控决策日志。",
+        "operationId": "report_progress_for_session_api_sessions__session_id__missions_progress_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgressRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/missions/dispatch_worker": {
+      "post": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Dispatch Worker Scoped",
+        "description": "header-only dispatch_worker（``/missions/dispatch_worker``）——懒建兜底同会话族。",
+        "operationId": "dispatch_worker_scoped_api_missions_dispatch_worker_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DispatchWorkerRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerRunResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/missions/workers/{worker_id}/result": {
+      "get": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Get Worker Result Scoped",
+        "description": "header-only get_worker_result（``/missions/workers/{wid}/result``）。",
+        "operationId": "get_worker_result_scoped_api_missions_workers__worker_id__result_get",
+        "parameters": [
+          {
+            "name": "worker_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Worker Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerResultResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/missions/workers": {
+      "get": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "List Workers Scoped",
+        "description": "header-only list_workers（``/missions/workers``）——按 X-Session-Id 解析。",
+        "operationId": "list_workers_scoped_api_missions_workers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/missions/converge": {
+      "post": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Converge Mission Scoped",
+        "description": "header-only converge（``/missions/converge``）——内部语义归 task-06。",
+        "operationId": "converge_mission_scoped_api_missions_converge_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConvergeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/missions/progress": {
+      "post": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Report Progress Scoped",
+        "description": "header-only report_progress（``/missions/progress``）。",
+        "operationId": "report_progress_scoped_api_missions_progress_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgressRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/missions/{mission_id}/dispatch_worker": {
+      "post": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Dispatch Worker By Mission",
+        "description": "仅 mid dispatch_worker（``/missions/{mid}/dispatch_worker``）。\n\nheader 在场：会话活跃 mission 解析 + mid 越权校验锚；header 缺席：mission\n反解 + 锚工作区复核。有 mid 锚时不懒建（回退显式 mission，防锚失配副作用）。",
+        "operationId": "dispatch_worker_by_mission_api_missions__mission_id__dispatch_worker_post",
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Mission Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DispatchWorkerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerRunResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/missions/{mission_id}/workers/{worker_id}/result": {
+      "get": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Get Worker Result By Mission",
+        "description": "仅 mid get_worker_result（``/missions/{mid}/workers/{wid}/result``）。",
+        "operationId": "get_worker_result_by_mission_api_missions__mission_id__workers__worker_id__result_get",
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Mission Id"
+            }
+          },
+          {
+            "name": "worker_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Worker Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerResultResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/missions/{mission_id}/workers": {
+      "get": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "List Workers By Mission",
+        "description": "仅 mid list_workers（``/missions/{mid}/workers``）。",
+        "operationId": "list_workers_by_mission_api_missions__mission_id__workers_get",
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Mission Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/missions/{mission_id}/converge": {
+      "post": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Converge Mission By Mission",
+        "description": "仅 mid converge（``/missions/{mid}/converge``）——内部语义归 task-06。",
+        "operationId": "converge_mission_by_mission_api_missions__mission_id__converge_post",
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Mission Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConvergeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/missions/{mission_id}/progress": {
+      "post": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Report Progress By Mission",
+        "description": "仅 mid report_progress（``/missions/{mid}/progress``）。",
+        "operationId": "report_progress_by_mission_api_missions__mission_id__progress_post",
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Mission Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProgressRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProgressResponse"
                 }
               }
             }
@@ -6908,433 +7778,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MissionResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/projects/{project_id}/missions": {
-      "post": {
-        "tags": [
-          "agent"
-        ],
-        "summary": "Create Project Mission",
-        "description": "项目维度创建 mission（design §7.1 / FR-04）。\n\n鉴权：项目经理或超管（非项目经理 403）。\n校验：scope_workspace_ids ⊆ ppm_project_workspace(project_id)（越界 422）；\n      anchor_workspace_id ∈ scope（越界 422）；\n      scope 必填 ≥1 去重（项目维度入口强制）。\n预检：scope 内各 ws 至少一条 binding 带 daemon_id（缺的报清单，不阻断）。\n行为：mode 强制 team；project_id 落列；调 team_mission_entry 传 scope。\nanchor 缺省：scope 第一个或 type=backend 优先。",
-        "operationId": "create_project_mission_api_projects__project_id__missions_post",
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Project Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MissionCreateRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MissionResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "tags": [
-          "agent"
-        ],
-        "summary": "List Project Missions",
-        "description": "列出项目下的 mission（按 created_at 倒序，分页，design §7.1 / FR-04）。\n\n鉴权同 POST（项目经理/超管）。\n返回 MissionResponse 列表（过滤 mission.project_id == project_id），复用\n_mission_to_response 并扩展 workspace_name / workspace_type / scope 概要字段。",
-        "operationId": "list_project_missions_api_projects__project_id__missions_get",
-        "parameters": [
-          {
-            "name": "project_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Project Id"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 20,
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "title": "Offset"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/MissionResponse"
-                  },
-                  "title": "Response List Project Missions Api Projects  Project Id  Missions Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workspaces/{workspace_id}/missions/{mission_id}/dispatch_worker": {
-      "post": {
-        "tags": [
-          "agent",
-          "agent-mcp"
-        ],
-        "summary": "Dispatch Worker",
-        "description": "主 agent 动态派一个 worker run（D-002@v2）。\n\n建 AgentRun(role 从 payload 或 preset 对应条目, status=pending) + 调\n``MissionExecutionService.dispatch_worker`` 派 daemon lease。daemon 离线 /\n未绑定时 lease 失败但 run 仍建（pending + error_code=no_online_daemon），\n主 agent 可读 worker 状态决定重派。\n\ntask-08（2026-08-19-cross-workspace-team-mission / §7.2 链路A）：\n- 新增 target_workspace_id 参数（payload.target_workspace_id）\n- 服务端校验 target ∈ scope（含 anchor），越界抛 400 mission_target_out_of_scope\n- 有效 target 传 exec_svc.dispatch_worker 的 target_workspace_id 形参",
-        "operationId": "dispatch_worker_api_workspaces__workspace_id__missions__mission_id__dispatch_worker_post",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Workspace Id"
-            }
-          },
-          {
-            "name": "mission_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Mission Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DispatchWorkerRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkerRunResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workspaces/{workspace_id}/missions/{mission_id}/workers/{worker_id}/result": {
-      "get": {
-        "tags": [
-          "agent",
-          "agent-mcp"
-        ],
-        "summary": "Get Worker Result",
-        "description": "读单个 worker 的结构化产出（AgentArtifact kind=patch/summary/...）。",
-        "operationId": "get_worker_result_api_workspaces__workspace_id__missions__mission_id__workers__worker_id__result_get",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Workspace Id"
-            }
-          },
-          {
-            "name": "mission_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Mission Id"
-            }
-          },
-          {
-            "name": "worker_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Worker Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkerResultResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workspaces/{workspace_id}/missions/{mission_id}/workers": {
-      "get": {
-        "tags": [
-          "agent",
-          "agent-mcp"
-        ],
-        "summary": "List Workers",
-        "description": "列 mission 下所有 worker runs 状态（含主 agent run）。",
-        "operationId": "list_workers_api_workspaces__workspace_id__missions__mission_id__workers_get",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Workspace Id"
-            }
-          },
-          {
-            "name": "mission_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Mission Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkerListResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workspaces/{workspace_id}/missions/{mission_id}/converge": {
-      "post": {
-        "tags": [
-          "agent",
-          "agent-mcp"
-        ],
-        "summary": "Converge Mission",
-        "description": "主 agent 触发 mission 收敛（task-06 改可重入，design §5.2 / §7.5）。\n\n可重入状态机（per mission，无新列——计数存 ``AgentMission.constraints`` JSON）：\n\n1. 调 ``converge_mission_for_completed_run``（既有链路，保留 artifact 回灌 +\n   derive_status + bootstrap 路由语义；其内部已调 finalize_execute_mission）。\n2. 复用 ``FinalizerService.finalize_execute_mission`` 拿 ``FinalizerMergeResult``\n   （merged_branches / pending_conflicts）——见 ``_finalize_merge_for_mission``\n   注释（为何不直接改 converge_mission_for_completed_run 返回值）。\n3. ``pending_conflicts`` 非空 → 返 ``status=conflict`` + conflicts 给主 agent；\n   主 agent 自己 SDK Read/Write 解决（X-004，backend 不写文件）+ git add 后重入。\n4. 重入：``finalize_execute_mission`` 重跑，已 merged 分支幂等（already-up-to-date），\n   主 agent 解决后的内容被下次 git 合进去；全 merged → ``status=merged`` +\n   调 ``_cleanup_mission``（task-07 cleanup_mission）清 worker 副本。\n5. R-07：每次返 conflict 时计数 +1（``_bump_conflict_attempts``）；超限（默认 3）\n   → ``_mark_mission_needs_manual`` 标 ``needs_manual`` + 返\n   ``status=failed_manual``，副本保留供排查（X-003）。\n\n简化（task-06 决策，见 ``_mark_mission_needs_manual``）：不实际 ``git merge --abort``——\nworkspace root 工作区状态在 daemon 侧，backend 不可控，强行 abort 可能误清主 agent 已\n写的解决内容；改为标 needs_manual 让用户/主 agent 手动处理。",
-        "operationId": "converge_mission_api_workspaces__workspace_id__missions__mission_id__converge_post",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Workspace Id"
-            }
-          },
-          {
-            "name": "mission_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Mission Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ConvergeResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/workspaces/{workspace_id}/missions/{mission_id}/progress": {
-      "post": {
-        "tags": [
-          "agent",
-          "agent-mcp"
-        ],
-        "summary": "Report Progress",
-        "description": "落主 agent 决策日志（AgentRunLog channel=tool_call, tool_kind=other）。\n\n主 agent 每次决策（派 worker / 判断达成 / 收敛）都调此 endpoint 落一条日志，\n供前端展示决策链路 + 审计。``decision`` 字段拼到 content 前缀便于筛选。",
-        "operationId": "report_progress_api_workspaces__workspace_id__missions__mission_id__progress_post",
-        "parameters": [
-          {
-            "name": "workspace_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Workspace Id"
-            }
-          },
-          {
-            "name": "mission_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid",
-              "title": "Mission Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ProgressRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProgressResponse"
                 }
               }
             }
@@ -11350,6 +11793,108 @@
                   "type": "array",
                   "items": {},
                   "title": "Response Get Session Logs Api Daemon Sessions  Session Id  Logs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/team-mission": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Trigger Session Team Mission",
+        "description": "预建会话团队 mission（design §5 Phase 1 / §7）。\n\n- 归属校验：跨用户/不存在 → 404（``svc.get_agent_session``，同\n  get_session_detail 资源隐藏口径）；\n- 活跃冲突：会话已有活跃 mission（未收敛未取消）→ 409（R-07，经 task-02\n  ``get_active_mission_for_session`` 判活跃，与 uq_agent_missions_session_active\n  部分唯一索引同语义）；\n- scope 解析：未传 → 会话绑定工作区；会话无工作区且未传 → 422（CC-10 同款）；\n- 项目维度校验复用旧项目端点口径（agent/router.py:1239-1357，本卡迁移复用）：\n  非项目经理（非超管）→ 403；scope ⊄ 项目关联工作区 → 422；anchor 缺省取\n  scope 内 type=backend-code 优先否则第一个（DTO 不带 anchor，服务端派生）；\n- 落库走 ``OrchestratorService.team_mission_entry`` 的 ``\"session\"`` 预建模式\n  （不建主控 run / 不派 lease / objective 空落 SESSION_OBJECTIVE_PLACEHOLDER）。",
+        "operationId": "trigger_session_team_mission_api_daemon_sessions__session_id__team_mission_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TeamMissionTriggerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeamMissionSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/team-missions": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "List Session Team Missions",
+        "description": "列出会话全部团队 mission（created_at 倒序）+ 分身概要（TeamTaskBlock 数据源）。\n\n归属校验同 POST（404 资源隐藏）；workers 仅 ``role != orchestrator`` 分身\nrun（D-009）；status 用扩展后 derive_status（含 awaiting_input，会话维度入参\n——session_active_turn 对整个列表只需一次查询）。",
+        "operationId": "list_session_team_missions_api_daemon_sessions__session_id__team_missions_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TeamMissionSummary"
+                  },
+                  "title": "Response List Session Team Missions Api Daemon Sessions  Session Id  Team Missions Get"
                 }
               }
             }
@@ -30053,6 +30598,17 @@
             "type": "integer",
             "title": "Attempt",
             "default": 0
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
           }
         },
         "type": "object",
@@ -30062,7 +30618,7 @@
           "converged"
         ],
         "title": "ConvergeResponse",
-        "description": "``converge_mission`` tool 返回契约（task-06 改可重入，design §5.2 / §7.5）。\n\n``status`` 取值（task-06 起新增可重入三态，保留 task-04 既有收敛态）：\n- ``conflict``：有合并冲突，已把 ``conflicts`` 返给主 agent；主 agent 自己用 SDK\n  Read/Write 解决后重入 ``converge_mission``（X-004，backend 不写文件）。\n- ``merged``：全部 worker_branch 合并完成（本次或重入后），已触发 cleanup。\n- ``failed_manual``：解冲突轮次超 R-07 上限，mission 标 needs_manual，副本保留。\n- ``done``/``degraded``/``running``：既有语义（bootstrap 收敛 / 部分终态 / 进行中）。\n\n``conflicts`` 形如 ``[{file, marker_lines, branch}]``（FinalizerMergeResult 透传）。\n``attempt`` 为本次返的解冲突轮次（per mission 计数，存 ``AgentMission.constraints``）。"
+        "description": "``converge_mission`` tool 返回契约（task-06 D-010，design §5 Phase 1 / §7 / §7.5）。\n\n``status`` 取值收敛为四值（task-06，design §7；既有 done/degraded/merged 并入\n``converged``、failed_manual 改 ``needs_manual``）：\n- ``converged``：收敛完成（bootstrap 合并产物 / execute 全分支 merged），\n  ``converged_at`` 已置位（不依赖主控 run 状态——分身全终态即置位，D-010）。\n- ``busy``：分身 run（``role!='orchestrator'`` 含 NULL）未全终态——引导主\n  agent 等待后重试（mission 状态不变、不置位、不 finalize；message 附引导\n  文案与未完成计数）。\n- ``conflict``：有合并冲突，已把 ``conflicts`` 返给主 agent；主 agent 自己用\n  SDK Read/Write 解决后重入 ``converge_mission``（X-004，backend 不写文件；\n  冲突未解决不算收敛，converged_at 回滚保持会话活跃 mission 可重入）。\n- ``needs_manual``：解冲突轮次超 R-07 上限，mission 标 needs_manual，副本保留\n  （原 ``failed_manual`` 改名并入四值契约）。\n\n防御透传：cancelled/planning 等不可达派生值原样返回（正常流 busy 前置判定已\n挡；planning= 无分身 run 未置位，见 _converge_core）。\n\n``conflicts`` 形如 ``[{file, marker_lines, branch}]``（FinalizerMergeResult 透传）。\n``attempt`` 为本次返的解冲突轮次（per mission 计数，存 ``AgentMission.constraints``）。"
       },
       "CustomSkillCreate": {
         "properties": {
@@ -35212,154 +35768,6 @@
           "created_at"
         ],
         "title": "MissionArtifactResponse"
-      },
-      "MissionCreateRequest": {
-        "properties": {
-          "objective": {
-            "type": "string",
-            "maxLength": 8000,
-            "title": "Objective"
-          },
-          "change_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Change Id"
-          },
-          "budget_usd": {
-            "anyOf": [
-              {
-                "type": "number",
-                "minimum": 0.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Budget Usd"
-          },
-          "constraints": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Constraints"
-          },
-          "mode": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "single",
-                  "team"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Mode"
-          },
-          "orchestration_mode": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "team",
-                  "external"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Orchestration Mode"
-          },
-          "session_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Session Id"
-          },
-          "worker_preset": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array",
-                "maxItems": 20
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Worker Preset"
-          },
-          "main_agent_config": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Main Agent Config"
-          },
-          "anchor_workspace_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Anchor Workspace Id"
-          },
-          "scope_workspace_ids": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string",
-                  "format": "uuid"
-                },
-                "type": "array",
-                "maxItems": 20
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Scope Workspace Ids"
-          }
-        },
-        "type": "object",
-        "required": [
-          "objective"
-        ],
-        "title": "MissionCreateRequest"
       },
       "MissionResponse": {
         "properties": {
@@ -41234,8 +41642,15 @@
       "ProgressRequest": {
         "properties": {
           "run_id": {
-            "type": "string",
-            "format": "uuid",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Run Id"
           },
           "message": {
@@ -41256,11 +41671,10 @@
         },
         "type": "object",
         "required": [
-          "run_id",
           "message"
         ],
         "title": "ProgressRequest",
-        "description": "主 agent 决策日志（落 AgentRunLog channel=tool_call）。"
+        "description": "主 agent 决策日志（落 AgentRunLog channel=tool_call）。\n\ntask-10 对齐（审查 B1）：``run_id`` 可选——显式传参时透传（越权校验锚）；\n缺省时 backend 按 ``X-Session-Id`` 解析会话当前主控 run（须已双标记到活跃\nmission），无会话上下文且缺 run_id → 400。"
       },
       "ProgressResponse": {
         "properties": {
@@ -50695,6 +51109,194 @@
         ],
         "title": "TaskUpdateReq",
         "description": "看板任务更新请求 (FR-01)。\n\n仅更新非空字段;``status`` 接收 ``未开始`` / ``进行中`` / ``已完成``\n(PlanTask.status 实际枚举,中文;对齐 ``PlanTask.model`` default +\n``task/service.execute_plan`` 写入值,前端 ``taskStatusBadge`` 已识别)。"
+      },
+      "TeamMissionSummary": {
+        "properties": {
+          "mission_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Mission Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "objective": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objective"
+          },
+          "scope_workspace_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Scope Workspace Ids"
+          },
+          "budget_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Usd"
+          },
+          "workers": {
+            "items": {
+              "$ref": "#/components/schemas/TeamMissionWorkerSummary"
+            },
+            "type": "array",
+            "title": "Workers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mission_id",
+          "status",
+          "objective",
+          "scope_workspace_ids",
+          "budget_usd"
+        ],
+        "title": "TeamMissionSummary",
+        "description": "触发/列表共用响应（design §7）。\n\n``status`` 为扩展后 derive_status 派生值（含 awaiting_input 档，会话维度\n入参）；``workers`` 仅 role != orchestrator 的分身 run（主控轮 D-009 不进）；\n``scope_workspace_ids`` 为落库冻结快照（NULL 缺省回落 [anchor]）。"
+      },
+      "TeamMissionTriggerRequest": {
+        "properties": {
+          "objective": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 8000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objective"
+          },
+          "scope_workspace_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": "array",
+                "maxItems": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Workspace Ids"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "budget_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Usd"
+          },
+          "worker_preset": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "maxItems": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Preset"
+          },
+          "main_agent_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Agent Config"
+          }
+        },
+        "type": "object",
+        "title": "TeamMissionTriggerRequest",
+        "description": "POST /api/daemon/sessions/{session_id}/team-mission 请求体（design §7）。\n\n- ``objective`` 可空：空则落库占位 ``SESSION_OBJECTIVE_PLACEHOLDER``\n  （orchestrator.py），首条 inject 后回填（CC-09）；\n- ``scope_workspace_ids`` 可空：None=会话绑定工作区；会话无工作区且未传\n  → 422（CC-10 同款语义）；上限 20 对齐 mission_schema.py 既有口径；\n- ``project_id`` 项目维度（仅项目经理/超管可建，scope ⊆ 项目关联工作区）；\n- ``worker_preset`` / ``main_agent_config`` 沿用 mission_schema.py:30-37 既有\n  形态（list[dict] / dict）与上限。"
+      },
+      "TeamMissionWorkerSummary": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "objective": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objective"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "title": "TeamMissionWorkerSummary",
+        "description": "TeamMissionSummary.workers 单项——分身 run（role != orchestrator）概要。"
       },
       "TokenPair": {
         "properties": {

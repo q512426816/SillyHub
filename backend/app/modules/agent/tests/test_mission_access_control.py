@@ -1,4 +1,4 @@
-"""Mission 通用端点（get/cancel/list）归属校验回归测试（2026-08-21 审查 BE-P0-1/BE-P1-1）。
+"""Mission 通用端点（get/cancel）归属校验回归测试（2026-08-21 审查 BE-P0-1/BE-P1-1）。
 
 背景：
 - BE-P0-1：``POST /api/missions/{id}/cancel`` 原依赖 ``require_permission``（checker
@@ -9,7 +9,8 @@
 修复后契约：
 - cancel：登录 + 归属校验（anchor/scope 内任一 ws 有 workspace:write，或项目经理/超管）。
 - get：归属校验（anchor/scope 内任一 ws 有 task:read，或项目经理/超管）。
-- list：path 的 workspace_id 参与鉴权（require_permission(TASK_READ)）。
+- list（workspace/project 维度创建+列表端点）：task-13（D-011）随入口归一会话触发
+  一并删除，相关用例已移除；本文件仅守护保留的 get/cancel/dispatch_worker。
 """
 
 from __future__ import annotations
@@ -225,48 +226,6 @@ async def test_get_mission_denied_for_outsider(client, db_session, tmp_path):
     )
     assert member_resp.status_code == status.HTTP_200_OK, member_resp.text
     assert member_resp.json()["id"] == str(mission.id)
-
-
-async def test_list_missions_denied_for_non_member(client, db_session, tmp_path):
-    """BE-P1-1：list_missions 的 path workspace_id 参与鉴权（非成员 403）。"""
-    outsider = await _make_user(db_session)
-    member = await _make_user(db_session)
-    ws = Workspace(
-        id=uuid.uuid4(),
-        name="List WS",
-        slug=f"list-ws-{uuid.uuid4().hex[:8]}",
-        root_path=str(tmp_path / "l"),
-        status="active",
-    )
-    ws_other = Workspace(
-        id=uuid.uuid4(),
-        name="List Other WS",
-        slug=f"list-other-ws-{uuid.uuid4().hex[:8]}",
-        root_path=str(tmp_path / "lo"),
-        status="active",
-    )
-    db_session.add_all([ws, ws_other])
-    # 外部用户只在别的 ws 有 task:read（修复前 require_permission_any 会放行）
-    await _grant_ws_permission(
-        db_session, user=outsider, workspace_id=ws_other.id, permission="task:read"
-    )
-    await _grant_ws_permission(db_session, user=member, workspace_id=ws.id, permission="task:read")
-    await db_session.commit()
-    await _make_mission(db_session, ws.id)
-    await db_session.refresh(outsider)
-    await db_session.refresh(member)
-
-    outsider_resp = await client.get(
-        f"/api/workspaces/{ws.id}/missions",
-        headers=_auth(_token_for(outsider)),
-    )
-    assert outsider_resp.status_code == status.HTTP_403_FORBIDDEN, outsider_resp.text
-
-    member_resp = await client.get(
-        f"/api/workspaces/{ws.id}/missions",
-        headers=_auth(_token_for(member)),
-    )
-    assert member_resp.status_code == status.HTTP_200_OK, member_resp.text
 
 
 async def test_project_manager_can_cancel_project_mission(client, db_session, tmp_path):

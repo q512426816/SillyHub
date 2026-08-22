@@ -28,13 +28,22 @@ change ``2026-07-12-worker-worktree-isolation`` task-08 / D-001@v2 / D-005@v2：
 - 场景3（worker 创建失败）：dispatch_worker git_worktree_add ok=False → run failed
   → 主 agent 补派另一 worker。
 - 场景4（超轮次回退）：converge 反复冲突超 R-07（CONVERGE_MAX_CONFLICT_ATTEMPTS）
-  → failed_manual + needs_manual + **不调 cleanup_mission**（副本保留 X-003）。
+  → needs_manual + **不调 cleanup_mission**（副本保留 X-003；2026-08-22-team-session-
+  unify task-06 四值契约，原 failed_manual 改名）。
 
 测试边界（铁律）：
 - **全 mock WS RPC**：HostFsDelegate 每方法返结构化 dict（不依赖真 daemon / 真 git）；
   placement.dispatch_to_daemon mock 为 AsyncMock（不派真 lease）。
 - 真部署 e2e（daemon complete_lease diff 回灌真链路 / 真宿主机 git）留 verify/部署阶段。
 - 复用 task-03/05/06/07 的 mock helper（_make_delegate / _delegate_with_merge 等）。
+
+2026-08-22-team-session-unify task-06 适配：
+- converge_mission 自 task-05 起新增 ``request`` 形参（X-Session-Id 解析）——直调
+  形态改为 ``(ws.id, mission.id, _plain_request(), db_session, None)``（无会话头，
+  走显式路径解析）。
+- ``converge_mission_for_completed_run`` 自 task-06 起新增 ``converge_explicit``
+  keyword-only 形参——本文件 mock 同步加参。
+- 状态值断言随四值契约更新（merged→converged / failed_manual→needs_manual）。
 
 集成接线说明（与生产 task-08 接线对齐）：
 - dispatch 走 ``MissionExecutionService(session, placement=..., host_fs_delegate=...)``
@@ -55,12 +64,19 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
 
 from app.modules.agent.execution import MissionExecutionService
 from app.modules.agent.finalizer import FinalizerService
 from app.modules.agent.mcp_tools import ConvergeResponse, converge_mission
 from app.modules.agent.model import AgentArtifact, AgentMission, AgentRun
 from app.modules.workspace.model import Workspace
+
+
+def _plain_request() -> Request:
+    """无 X-Session-Id 的直调 Request（task-05 起 converge_mission 带 request 形参）。"""
+    return Request({"type": "http", "headers": []})
+
 
 # sibling_path / branch 公式（D-001@v2，与 task-03 execution.dispatch_worker /
 # task-07 finalizer.cleanup_mission 同款；测试用裸 root_path，无 prefix 配置时
@@ -233,7 +249,9 @@ def _patch_converge_helpers_with_delegate(
 
     cleanup_calls: list[uuid.UUID] = []
 
-    async def _fake_converge_for_completed_run(session, run_id, cfg):
+    async def _fake_converge_for_completed_run(session, run_id, cfg, *, converge_explicit=False):
+        # task-06：converge_explicit keyword-only 形参与真实签名对齐（_converge_core
+        # 以 converge_explicit=True 调用——显式收敛置位入口）。
         return "done"
 
     async def _wired_finalize_merge(session, mission_id):
@@ -358,8 +376,10 @@ class TestScenario1SuccessPath:
     async def test_converge_endpoint_merged_status_on_all_success(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """同场景经 converge_mission endpoint：全 merged → status=merged + converged=True
-        + cleanup 被调一次（_cleanup_mission 接 delegate 后调 git_worktree_remove）。"""
+        """同场景经 converge_mission endpoint：全 merged → status=converged + converged=True
+        + cleanup 被调一次（_cleanup_mission 接 delegate 后调 git_worktree_remove）。
+
+        task-06 四值：原 status=merged 并入 converged。"""
         monkeypatch.setenv("HOST_PATH_PREFIX", "")
         monkeypatch.setenv("CONTAINER_PATH_PREFIX", "")
 
@@ -379,10 +399,10 @@ class TestScenario1SuccessPath:
         # git_merge 默认返成功（_make_delegate_mock 已置）
         harness = _patch_converge_helpers_with_delegate(monkeypatch, delegate)
 
-        resp = await converge_mission(ws.id, mission.id, db_session, user=None)
+        resp = await converge_mission(ws.id, mission.id, _plain_request(), db_session, None)
 
         assert isinstance(resp, ConvergeResponse)
-        assert resp.status == "merged"
+        assert resp.status == "converged"
         assert resp.converged is True
         assert sorted(resp.merged_branches) == sorted(["workers/aaaaaaaa", "workers/bbbbbbbb"])
         assert resp.conflicts == []
@@ -406,10 +426,10 @@ class TestScenario2ConflictResolution:
         """2 worker 改同一文件 → converge 第一次：第1个 git_merge ok、第2个 conflict
         （pending_conflicts 非空）→ converge_mission 返 {status:conflict}（主 agent SDK
         解决，mock）→ 重入 converge：第2次 git_merge ok（mock already-up-to-date）→
-        status=merged → cleanup。
+        status=converged → cleanup。
 
         断言：
-        - 状态机 conflict → merged。
+        - 状态机 conflict → converged（task-06 四值，原 merged 并入）。
         - 首次返 conflict + attempt +1（R-07 计数）。
         - 重入后 cleanup_calls=[mission.id]。
         """
@@ -453,7 +473,7 @@ class TestScenario2ConflictResolution:
         harness = _patch_converge_helpers_with_delegate(monkeypatch, delegate)
 
         # --- 第一次 converge：冲突 ---
-        resp1 = await converge_mission(ws.id, mission.id, db_session, user=None)
+        resp1 = await converge_mission(ws.id, mission.id, _plain_request(), db_session, None)
         assert resp1.status == "conflict"
         assert resp1.converged is False
         assert resp1.attempt == 1, "首次冲突 attempt 从 0 自增到 1"
@@ -472,8 +492,8 @@ class TestScenario2ConflictResolution:
 
         # --- 模拟主 agent SDK 解决冲突（git add）后重入 converge ---
         # 重置 _wired_finalize_merge 内部 FinalizerService 每次新建，merge 重跑走 call_state>=3
-        resp2 = await converge_mission(ws.id, mission.id, db_session, user=None)
-        assert resp2.status == "merged"
+        resp2 = await converge_mission(ws.id, mission.id, _plain_request(), db_session, None)
+        assert resp2.status == "converged"
         assert resp2.converged is True
         assert sorted(resp2.merged_branches) == sorted([b1, b2])
         assert resp2.attempt == 1, "重入成功 attempt 不再自增（仍是首次冲突的计数）"
@@ -561,8 +581,8 @@ class TestScenario4ExceedMaxAttemptsFallback:
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """converge 反复冲突超 R-07 上限（CONVERGE_MAX_CONFLICT_ATTEMPTS=3）→
-        converge_mission 返 {status:failed_manual} + mission.constraints.needs_manual 设置
-        + **不调 cleanup_mission**（副本保留，X-003）。
+        converge_mission 返 {status:needs_manual} + mission.constraints.needs_manual 设置
+        + **不调 cleanup_mission**（副本保留，X-003；task-06 四值，原 failed_manual 改名）。
 
         断言：
         - attempt 计数到上限。
@@ -604,19 +624,19 @@ class TestScenario4ExceedMaxAttemptsFallback:
         await db_session.commit()
         await db_session.refresh(mission)
 
-        resp3 = await converge_mission(ws.id, mission.id, db_session, user=None)
+        resp3 = await converge_mission(ws.id, mission.id, _plain_request(), db_session, None)
         assert resp3.status == "conflict", "attempt+1=3 未超 3 → 仍给主 agent 机会"
         assert resp3.attempt == 3
         assert harness["cleanup_calls"] == []
 
-        # 第 4 次（attempt=3 → +1=4 > 3）→ failed_manual
-        resp4 = await converge_mission(ws.id, mission.id, db_session, user=None)
-        assert resp4.status == "failed_manual"
+        # 第 4 次（attempt=3 → +1=4 > 3）→ needs_manual
+        resp4 = await converge_mission(ws.id, mission.id, _plain_request(), db_session, None)
+        assert resp4.status == "needs_manual"
         assert resp4.converged is False
         assert resp4.attempt == 3, "超限时 attempt 反映当前累计值（不再 +1 漂移）"
         assert resp4.conflicts == persistent_conflict
-        # X-003：失败路径不清副本（保留供人工排查）
-        assert harness["cleanup_calls"] == [], "超限 failed_manual 不应清副本（X-003 保留）"
+        # X-03：失败路径不清副本（保留供人工排查）
+        assert harness["cleanup_calls"] == [], "超限 needs_manual 不应清副本（X-003 保留）"
 
         # needs_manual 标记已落库
         m_after = (
@@ -634,7 +654,8 @@ class TestScenario4ExceedMaxAttemptsFallback:
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """CONVERGE_MAX_CONFLICT_ATTEMPTS env 覆盖（=1）→ 首次冲突即超限（attempt+1=1
-        未超 1，第二次 +1=2 > 1 → failed_manual）。验证 R-07 阈值可配 + 失败保留副本。"""
+        未超 1，第二次 +1=2 > 1 → needs_manual；task-06 四值，原 failed_manual 改名）。
+        验证 R-07 阈值可配 + 失败保留副本。"""
         monkeypatch.setenv("HOST_PATH_PREFIX", "")
         monkeypatch.setenv("CONTAINER_PATH_PREFIX", "")
         monkeypatch.setenv("CONVERGE_MAX_CONFLICT_ATTEMPTS", "1")
@@ -662,11 +683,11 @@ class TestScenario4ExceedMaxAttemptsFallback:
         harness = _patch_converge_helpers_with_delegate(monkeypatch, delegate)
 
         # 首次 converge：attempt=0 → +1=1 未超 1 → 仍 conflict
-        resp1 = await converge_mission(ws.id, mission.id, db_session, user=None)
+        resp1 = await converge_mission(ws.id, mission.id, _plain_request(), db_session, None)
         assert resp1.status == "conflict"
         assert resp1.attempt == 1
 
-        # 第二次 converge：attempt=1 → +1=2 > 1 → failed_manual
-        resp2 = await converge_mission(ws.id, mission.id, db_session, user=None)
-        assert resp2.status == "failed_manual"
+        # 第二次 converge：attempt=1 → +1=2 > 1 → needs_manual
+        resp2 = await converge_mission(ws.id, mission.id, _plain_request(), db_session, None)
+        assert resp2.status == "needs_manual"
         assert harness["cleanup_calls"] == [], "失败保留副本（X-003）"

@@ -285,6 +285,17 @@ export function hasAnyMcpServers(...configs: McpConfig[]): boolean {
 export const DAEMON_MCP_SERVER_NAME = 'sillyhub-daemon';
 
 /**
+ * task-10（2026-08-22-team-session-unify / FR-04 / spike-01）：MCP server 子进程
+ * 读会话 id 的 env 键名（单一来源，mcp-config 写侧与 mcp-server 读侧共用）。
+ *
+ * spike-01 结论：MCP server 子进程**不继承** claude.exe 完整环境，只继承白名单
+ * （PATH/HOME 等 12 个）+ per-server env——会话 id 必须写进
+ * ``mcpServers['sillyhub-daemon'].env``（本模块构造/补写），放 SDK 顶层
+ * ``options.env`` 无效。
+ */
+export const MCP_SESSION_ID_ENV = 'MCP_SESSION_ID';
+
+/**
  * 构造 daemon 内置 MCP server 的 ``McpServerConfig``（task-05）。
  *
  * 主 agent spawn 时，调用方把本配置并入 platform_default（``mergeMcpConfigs(wl,
@@ -302,6 +313,8 @@ export const DAEMON_MCP_SERVER_NAME = 'sillyhub-daemon';
  *   - ``MCP_SERVER_DAEMON_API_KEY`` = 传入 apiKey（task-09 P0：daemon 长期 apiKey，
  *     X-API-Key 路径，backend get_current_principal 解析 apiKey → User。优先于 token）
  *   - ``MCP_SERVER_DAEMON_TOKEN`` = 传入 token（回落；apiKey 缺失时 Bearer JWT）
+ *   - ``MCP_SESSION_ID`` = 传入 sessionId（task-10：主 agent 会话 id，mcp-server
+ *     读后经 hub-client 附 X-Session-Id 请求头；缺省不写键——旧调用零回归）
  *
  * **token 注入时机**：本函数只构造静态配置，token/apiKey 由调用方在 spawn 主 agent
  * 前从 daemon config 取传入。空值仍构造配置（server 启动后 tool 调用返回结构化错误，
@@ -311,12 +324,14 @@ export const DAEMON_MCP_SERVER_NAME = 'sillyhub-daemon';
  * @param token       daemon Bearer token（回落，apiKey 缺失时用）
  * @param serverModulePath  可选，覆盖默认编译产物路径（测试用，避免依赖 dist/）
  * @param apiKey      可选，daemon 长期 API Key（task-09 P0，优先于 token）
+ * @param sessionId   可选，主 agent 会话 id（task-10，写 env MCP_SESSION_ID）
  */
 export function buildDaemonMcpServerConfig(
   backendUrl: string,
   token: string,
   serverModulePath?: string,
   apiKey?: string,
+  sessionId?: string,
 ): McpServerConfig {
   const args = [serverModulePath ?? defaultMcpServerModulePath()];
   const env: Record<string, string> = {
@@ -327,10 +342,50 @@ export function buildDaemonMcpServerConfig(
   if (apiKey) {
     env.MCP_SERVER_DAEMON_API_KEY = apiKey;
   }
+  // task-10：会话上下文 env（spike-01 验证的 per-server env 注入管道）。
+  // 空串/undefined 不写键（守卫风格，旧调用零回归）。
+  if (sessionId) {
+    env[MCP_SESSION_ID_ENV] = sessionId;
+  }
   return {
     command: 'node',
     args,
     env,
+  };
+}
+
+/**
+ * task-10（2026-08-22-team-session-unify / FR-04 / spike-01）：给 MCP server 配置表
+ * 中的 daemon 内置 server（``DAEMON_MCP_SERVER_NAME``）条目补 ``MCP_SESSION_ID`` env。
+ *
+ * 背景：cli.ts 的 ``mainAgentMcpConfigProvider``（task-09 定型，不在 task-10
+ * allowed_paths）调 ``buildDaemonMcpServerConfig`` 时不传 sessionId；session-manager
+ * ``_resolveMainAgentMcp`` 在 provider 返回后按 ``ctx.sessionId`` 调本函数补写
+ * （design §6 数据流 producer=session-manager）。create / restore / reload 三路共用，
+ * 每次 spawn 重构造 → session id 变化即 env 变化。
+ *
+ * 语义：
+ *   - 仅补 ``serverName``（默认 sillyhub-daemon）条目——只有 daemon 内置 server 读
+ *     该 env，其它 MCP server 不注入（env 卫生）；
+ *   - 不修改入参（浅拷贝条目 + 新 env 对象），provider 闭包持有的配置不被污染；
+ *   - sessionId 空串 / 目标条目缺失 → 原样返回同一引用（零开销短路）。
+ *
+ * 泛型 ``T`` 兼容 ``McpServerConfig`` 与 driver 契约 ``McpServerConfigForDriver``
+ * （两者 env 字段同构 ``Record<string, string>``）。
+ */
+export function injectMcpSessionId<T extends { env?: Record<string, string> }>(
+  servers: Record<string, T>,
+  sessionId: string,
+  serverName: string = DAEMON_MCP_SERVER_NAME,
+): Record<string, T> {
+  const target = servers[serverName];
+  if (!target || !sessionId) return servers;
+  return {
+    ...servers,
+    [serverName]: {
+      ...target,
+      env: { ...target.env, [MCP_SESSION_ID_ENV]: sessionId },
+    },
   };
 }
 
