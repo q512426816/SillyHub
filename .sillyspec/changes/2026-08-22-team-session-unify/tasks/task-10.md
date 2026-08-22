@@ -23,7 +23,8 @@ allowed_paths:
   - sillyhub-daemon/tests/interactive/session-manager-main-agent-mcp.test.ts
   - sillyhub-daemon/tests/mcp-server.test.ts
   - sillyhub-daemon/tests/hub-client.test.ts
-related_tests: [sillyhub-daemon/tests/mcp-server.test.ts]
+  - sillyhub-daemon/tests/interactive/claude-sdk-driver-mcp-kill-cleanup.test.ts
+related_tests: [sillyhub-daemon/tests/mcp-server.test.ts, sillyhub-daemon/tests/interactive/claude-sdk-driver-mcp-kill-cleanup.test.ts（:317 mcpServers 深相等断言因会话 env 注入失效，主代理追认最小适配）]
 goal: >
   prompt 烤 id 下线后团队 5 工具改靠会话上下文定位（design §5 Phase 2 / 审查 B1 / FR-04）——MCP server 子进程读 env MCP_SESSION_ID，hub-client 请求统一带 X-Session-Id，5 工具参数全可选、描述重写。
 implementation:

@@ -19,6 +19,7 @@ allowed_paths:
   - frontend/src/components/daemon/team-trigger-popover.tsx
   - frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx
   - frontend/src/components/daemon/__tests__/interactive-session-panel.test.tsx
+  - frontend/src/components/daemon/__tests__/session-panel-team.test.tsx
 goal: >
   会话输入区提供团队触发四路入口——派团队按钮+配置弹层+状态 chip+/team
   指令，Codex 置灰，两处「用团队分析」改为打开触发弹层，消息流挂载

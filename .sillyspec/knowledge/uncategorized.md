@@ -209,3 +209,17 @@
 - 仓内范式：① `spec-sync.ts runInitCmd`（X-06 注释）`spawn(cmd, {shell:true})` + 超时 taskkill /T /F 杀树；② `cmd-shim.ts resolveWindowsCmdShim` 读 `.cmd` 提取真实 exe + target 直接 spawn（重任务用）；③ `preflight.ts runWithTreeKill` 同范式。
 - 注入防线：shell:true 时命令串拼接是注入面，入参必须白名单（本例 workspace_id UUID 正则先于拼接，`; rm -rf` / `&& calc` / `$(whoami)` / 反引号全拒）。
 - 通用坑：task 卡/设计文档写「execFile 非 shell 防注入」在 Windows 调 npm bin 场景是**纸上方案**——落地前先实测平台行为，防注入诉求改为入参白名单 + shell 隔离双层。
+
+## worktree doctor 标记 installed 但 node_modules junction 实际未建
+sillyspec execute 的 worktree doctor --fix 对 frontend/daemon node_modules 报 depsStatus=installed/re-provisioned 成功，但 worktree 内 frontend/node_modules、sillyhub-daemon/node_modules 实际不存在（ls 报 No such file）——doctor 的 provision 第 2 段 junction 在某些环境下静默失败且状态仍写 installed。规避：doctor --fix 后必须 ls <worktree>/frontend/node_modules/.bin 复核；缺失时手动 `cmd //c mklink /J <worktree>rontend
+ode_modules <主仓>rontend
+ode_modules`（daemon 同理），再跑一次 .bin 存在性检查。backend .venv 不受影响（worktree 自建）。来源：2026-08-22-team-session-unify Wave1（execute step3）。
+
+## MCP server 子进程不继承 claude.exe 完整环境：env 必须放 mcpServers[*].env
+claude.exe（2.1.x）spawn MCP server 子进程时 env 为「白名单基线（PATH/HOME 等 12 个）+ per-server env 覆盖合并」，不继承完整父环境。给 MCP server 注入自定义变量（如 MCP_SESSION_ID）必须放在 options.mcpServers['<server>'].env（daemon mcp-config.ts 的 server config env 字段），放 SDK 顶层 options.env 无效。证据链：claude-sdk-driver.ts:407 透传 → sdk.d.ts:1092 McpStdioServerConfig.env → sdk.mjs --mcp-config 全量序列化 → claude.exe StdioClientTransport.start spawn env 合并。来源：2026-08-22-team-session-unify spike-01。
+
+## aiosqlite 不支持 SELECT FOR UPDATE：并发唯一性守卫用部分唯一索引+IntegrityError 捕获
+agent 模块测试跑 SQLite（aiosqlite），FOR UPDATE 语法不被支持（直接报错，不是静默忽略），需要并发防重的场景（如懒建 mission 防同 turn 双建）应：DB 层建部分唯一索引（WHERE 业务活跃条件）兜底 + 应用层捕获 IntegrityError 后 rollback 重查复用先到者。本仓先例：uq_agent_missions_session_active（20260822090000 迁移）+ mcp_tools 懒建守卫。来源：2026-08-22-team-session-unify task-05。
+
+## AgentMission.session_id 判别口径：列非 NULL 不可信，须查表确认指向真实 AgentSession
+session_id 列 NOT NULL + default_factory=uuid4（为兼容 ~50 处存量构造不传该字段的测试/路径）意味着"列非 NULL"不等于"绑定会话"——存量/旧链路 mission 会带随机 uuid。判别会话 mission 的正确口径=查表确认 session_id 指向真实存在的 AgentSession（patrol/finalizer 的 _mission_bound_session 同源实现）。来源：2026-08-22-team-session-unify task-01/06（Grill NEW-4 延伸）。

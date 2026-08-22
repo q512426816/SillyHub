@@ -13,6 +13,8 @@ allowed_paths:
   - backend/app/modules/agent/mcp_tools.py
   - backend/app/modules/agent/finalizer.py
   - backend/app/modules/agent/tests/test_mcp_tools.py
+  - backend/app/modules/agent/tests/test_converge_mission_reentrant.py
+  - backend/app/modules/agent/tests/test_worktree_integration.py
 expects_from:
   task-05: [{contract: SESSION_SCOPED_MISSION_RESOLUTION, needs: [X-Session-Id 解析活跃 mission]}]
 provides:
@@ -37,6 +39,8 @@ acceptance:
   - test_mcp_tools.py 既有 converge 用例断言适配后全绿
 related_tests:
   - backend/app/modules/agent/tests/test_mcp_tools.py（test_converge_running_when_worker_pending 断言 status=running 需改 busy；test_converge_all_completed 断言 status=done/converged 需随新响应语义适配）
+  - backend/app/modules/agent/tests/test_converge_mission_reentrant.py（主代理追认：task-05/06 签名与状态值变更致 6 例旧签名直调失效，随本卡适配）
+  - backend/app/modules/agent/tests/test_worktree_integration.py（主代理追认：同上 4 例）
 verify:
   - cd backend && uv run pytest app/modules/agent -q --no-cov --deselect app/modules/agent/tests/test_dispatch_metadata.py::test_build_claim_payload_propagates_bundle_fields --deselect app/modules/agent/tests/test_execution_context.py::test_get_execution_context_task_run
 constraints:

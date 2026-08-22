@@ -28,10 +28,11 @@ goal: >
   会话内触发（task-11 已交付）；保留 GET /missions/{id} 与 cancel 供
   TeamTaskBlock/team-progress 使用，全仓引用清零（design §5 Phase 4、D-011）。
 implementation:
+  - router.py GET /missions/{id} 与 cancel 响应的 workers 列表改用 control.non_orchestrator_runs()（task-07 提供的治理口径，排除主控轮；worker_runs 全量语义不动）
   - 删两个页面路由（workspaces/[id]/missions、projects/[id]/missions）、mission-console.tsx 及其测试；menu-permissions.ts 删「Agent 团队」菜单项（menuKey missions 整条移除）
   - lib/agent.ts 删 createMission/listMissions/createProjectMission/listProjectMissions 及 CreateMissionInput/CreateProjectMissionInput/ProjectMissionResponse 类型；保留 getMission/cancelMission 与 Mission/MissionWorkerRun/MissionArtifact/WorkerPresetItem/MainAgentConfig（team-progress 与触发弹层在用）
   - backend agent/router.py 删四个端点——POST/GET /workspaces/{id}/missions 与 POST/GET /projects/{id}/missions；仅被它们使用的 helper 一并清理（_require_project_manager/_check_scope_bindings 若已被 task-03 新端点复用则保留）；保留 GET /missions/{id}、POST /missions/{id}/cancel 与全部 MCP 端点
-  - 适配既有测试——test_mission_list.py/test_router_project_missions.py 删除或改写为保留端点行为；test_mission_access_control.py 的 list 断言删改；test_team_mode_dispatch.py 的 _create_mission 与 test_integration_cross_workspace.py 的创建 helper 改直建 DB 记录
+  - 适配既有测试——test_mission_list.py/test_router_project_missions.py 删除或改写为保留端点行为；test_mission_access_control.py 的 list 断言删改；test_team_mode_dispatch.py 的 _create_mission 与 test_integration_cross_workspace.py 的创建 helper 改直建 DB 记录；test_integration_cross_workspace.py 另有两处 converge 响应断言 merged 需改 converged（task-06 四值改名，主代理记录）
   - 全仓 grep missions/mission-console/createMission/listMissions 引用清零（生产代码）
 acceptance:
   - /workspaces/{id}/missions 与 /projects/{id}/missions 两路由 404
