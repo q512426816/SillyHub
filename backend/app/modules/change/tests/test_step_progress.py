@@ -211,19 +211,19 @@ def test_extract_status_seven_values_pass_through() -> None:
 
 
 def test_extract_completed_at_normalized_to_iso_utc() -> None:
-    """completed_at CLI 本地格式 → ISO 8601 UTC；解析失败保留原串；非 str → None。"""
-    # 本地时区往返：输入本地墙钟 2026/8/15 23:44:08，输出同一时刻的 UTC ISO 串。
-    local_tz = datetime.now().astimezone().tzinfo
-    expected_utc = datetime(2026, 8, 15, 23, 44, 8, tzinfo=local_tz).astimezone(UTC).isoformat()
+    """completed_at CLI 本地格式 → ISO 8601 UTC；解析失败保留原串；非 str → None。
+
+    解释时区固定为 settings.cli_progress_timezone（默认 Asia/Shanghai），与后端
+    进程时区无关——旧行为 ``astimezone()`` 随进程走，Docker 容器 UTC 下把东八区
+    墙钟当 UTC，前端转浏览器本地后整体偏 8 小时（ql-20260822-006 回归锚定）。
+    """
     steps = [
         _step("verify", "v1", status="completed", ordering=1, completed_at="2026/8/15 23:44:08")
     ]
     _, timeline = ChangeService._extract_step_progress(_payload("verify", steps))
     assert timeline is not None
-    assert timeline[0].completed_at == expected_utc
-    # UTC+8 主开发环境语义验证：北京时间 20:00 == UTC 12:00（动态本地时区，跨环境稳）
-    if getattr(local_tz, "utcoffset", None) and local_tz.utcoffset(None) == timedelta(hours=8):
-        assert expected_utc == "2026-08-15T15:44:08+00:00"
+    # 北京时间 2026/8/15 23:44:08 == UTC 15:44:08（不再随进程时区漂移）
+    assert timeline[0].completed_at == "2026-08-15T15:44:08+00:00"
 
     steps_bad = [_step("verify", "v2", status="completed", ordering=1, completed_at="15/8/2026")]
     _, timeline_bad = ChangeService._extract_step_progress(_payload("verify", steps_bad))
@@ -234,6 +234,33 @@ def test_extract_completed_at_normalized_to_iso_utc() -> None:
     _, timeline_none = ChangeService._extract_step_progress(_payload("verify", steps_none))
     assert timeline_none is not None
     assert timeline_none[0].completed_at is None
+
+
+def test_normalize_completed_at_tz_from_settings_not_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """归一化解释时区来自 settings 配置，与进程本地时区无关（ql-20260822-006）。
+
+    同一墙钟串在 CLI_PROGRESS_TIMEZONE=UTC 与 +05:30 下产出各自配置的 UTC
+    时刻——后端跑在任意进程时区（含容器 UTC）都不影响结果。IANA 名与固定
+    偏移两种配置形态都走 resolve_cli_tzinfo。
+    """
+    from types import SimpleNamespace
+
+    import app.modules.change.service as service_module
+
+    monkeypatch.setattr(
+        service_module, "get_settings", lambda: SimpleNamespace(cli_progress_timezone="UTC")
+    )
+    assert ChangeService._normalize_completed_at("2026/8/15 23:44:08") == (
+        "2026-08-15T23:44:08+00:00"
+    )
+    monkeypatch.setattr(
+        service_module, "get_settings", lambda: SimpleNamespace(cli_progress_timezone="+05:30")
+    )
+    assert ChangeService._normalize_completed_at("2026/8/15 23:44:08") == (
+        "2026-08-15T18:14:08+00:00"
+    )
 
 
 def test_normalize_completed_at_unit() -> None:

@@ -21,6 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from app.core.config import get_settings, resolve_cli_tzinfo
 from app.core.errors import ChangeDocNotFound, ChangeNotFound, InvalidTransition, PermissionDenied
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentSession
@@ -1966,7 +1967,7 @@ class ChangeService:
     # step 级进度提取辅助（2026-08-15-change-step-visibility task-01，design §5 Phase 1.2）
 
     _OUTPUT_TRUNCATE_LEN: int = 200  # 列表摘要专用（current_step_desc；~200B/行契约。Phase 2.4/D-004@v1：明细 output 全量透传不截断）
-    _CLI_DT_FORMAT: str = "%Y/%m/%d %H:%M:%S"  # CLI 本地时区习惯格式（design §5 Phase 1.2）
+    _CLI_DT_FORMAT: str = "%Y/%m/%d %H:%M:%S"  # CLI 宿主机墙钟习惯格式（design §5 Phase 1.2；解释时区见 _normalize_completed_at）
 
     @staticmethod
     def _stage_group_order(stage: str) -> tuple[int, str]:
@@ -1982,17 +1983,23 @@ class ChangeService:
 
     @staticmethod
     def _normalize_completed_at(value: object) -> str | None:
-        """completed_at 归一化（Grill #18）：``2026/8/15 23:44:08`` 本地时区 → ISO 8601 UTC。
+        """completed_at 归一化（Grill #18）：``2026/8/22 02:43:59`` CLI 宿主机墙钟 → ISO 8601 UTC。
+
+        CLI 用 ``toLocaleString('zh-CN')`` 写 CLI 宿主机本地时间（无时区标记），
+        解释时区取 ``settings.cli_progress_timezone``（默认 Asia/Shanghai）——不能
+        随进程本地时区走：Docker 容器是 UTC，按进程时区解释会把东八区墙钟当
+        UTC，前端转浏览器本地后整体偏 8 小时（ql-20260822-006）。
 
         值非 str / 解析失败（含时区语义不明）→ 原样保留（str 原串 / None），不抛。
         """
         if not isinstance(value, str):
             return None
         try:
-            local_dt = datetime.strptime(value, ChangeService._CLI_DT_FORMAT)
+            naive_dt = datetime.strptime(value, ChangeService._CLI_DT_FORMAT)
         except ValueError:
             return value
-        return local_dt.astimezone().astimezone(UTC).isoformat()
+        cli_tz = resolve_cli_tzinfo(get_settings().cli_progress_timezone)
+        return naive_dt.replace(tzinfo=cli_tz).astimezone(UTC).isoformat()
 
     @staticmethod
     def _extract_step_progress(

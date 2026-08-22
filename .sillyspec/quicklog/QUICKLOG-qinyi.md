@@ -76,10 +76,20 @@
 方案：逐条比对 sillyspec 3.26.15（sync.js/client.js/config.js）与 backend（dispatch.py/auth.py/conftest.py/pyproject.toml）后更正 6 处——坑3 改已解、connect 改文本级定向替换说明、引号警告改已兼容、mcp 段去重复注释并修 client.js 行号为 sillyhub-mcp/client.js:58、platform token 改 shpsync_/shk_live_/JWT 三路径说明、agent 模块移除两条过时 deselect 恢复真实执行
 结果：YAML safe_load 验证 9 顶层键 14 模块 token 完整；agent 模块去 deselect 全量实测 634 passed 46.9s 零失败
 
-## ql-20260822-006-f113 | 2026-08-22 16:37:38 | 修复变更详情步骤时间线时间偏8小时:后端按容器UTC解释CLI东八区naive时间
-状态：进行中
+## ql-20260822-006-f113 | 2026-08-22 16:37:38 | 修复变更详情步骤时间线时间显示偏8小时
+状态：已完成
 关联变更：（无）
-文件：backend/app/modules/change/service.py, backend/app/modules/change/tests/test_step_progress.py, backend/app/core/config.py, backend/pyproject.toml
+文件：
+- backend/app/core/config.py（新增 cli_progress_timezone 配置+resolve_cli_tzinfo+validator）
+- backend/app/modules/change/service.py（_normalize_completed_at 按配置时区归一,弃 astimezone()）
+- backend/app/modules/change/tests/test_step_progress.py（固定时区断言替换进程时区往返+新增回归用例）
+- backend/pyproject.toml（加 tzdata 依赖）
+- backend/uv.lock（tzdata 锁定）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（变更索引+注意事项时区契约）
+需求：修复变更详情步骤时间线时间显示偏8小时
+根因：sillyspec CLI 用 toLocaleString(zh-CN) 写宿主机墙钟(无时区标记),后端 _normalize_completed_at 用 naive.astimezone() 随进程时区解释——Docker 后端容器是 UTC,把东八区墙钟当 UTC,前端转浏览器本地后整体 +8h
+方案：core/config.py 新增 cli_progress_timezone 配置(默认 Asia/Shanghai,resolve_cli_tzinfo 接受 IANA 名或 ±HH:MM 偏移,validator 启动期 fail-fast),_normalize_completed_at 改按该时区 replace(tzinfo) 归一与进程时区解耦;pyproject 加 tzdata 依赖(Windows venv 必需)
+结果：测试改固定时区断言+新增 settings 驱动回归用例,change 模块 394 passed;重建后端镜像后真实 HTTP 端点验证——首步 2026-08-21T18:43:59Z=北京 02:43 与 CLI 墙钟一致;归一在读侧进行存量数据零迁移
 
 ## ql-20260822-007-d62a | 2026-08-22 16:39:44 | 修复 backend-ci Mypy 红灯
 状态：已完成

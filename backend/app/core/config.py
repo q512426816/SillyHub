@@ -8,11 +8,14 @@ from feature code.
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 import sys
+from datetime import timedelta, timezone, tzinfo
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -38,6 +41,31 @@ _WEAK_BOOTSTRAP_PASSWORDS = frozenset(
         "welcome123",
     }
 )
+
+
+def resolve_cli_tzinfo(value: str) -> tzinfo:
+    """CLI naive 时间戳解释时区串 → tzinfo。
+
+    sillyspec CLI 上行的 ``completed_at``/``started_at`` 是 CLI 宿主机墙钟
+    （``toLocaleString('zh-CN')``，无时区标记）。后端归一到 UTC 时需要一个
+    显式解释时区，不能随进程本地时区走——Docker 容器是 UTC，按进程时区解释
+    会把东八区墙钟当 UTC，前端转浏览器本地后整体偏 8 小时（ql-20260822-006）。
+
+    接受 IANA 区名（``Asia/Shanghai``，经 ZoneInfo/tzdata）或固定偏移
+    （``+08:00`` / ``-0530``，无 DST 地区等价精确）。非法串抛 ValueError
+    （Settings validator 借此启动期 fail-fast）。
+    """
+    try:
+        return ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError, KeyError):
+        pass
+    m = re.fullmatch(r"([+-])(\d{2}):?(\d{2})", value.strip())
+    if m:
+        sign = 1 if m.group(1) == "+" else -1
+        hours, minutes = int(m.group(2)), int(m.group(3))
+        if hours <= 23 and minutes <= 59:
+            return timezone(sign * timedelta(hours=hours, minutes=minutes))
+    raise ValueError(f"unknown or invalid timezone: {value!r}")
 
 
 class Settings(BaseSettings):
@@ -205,6 +233,24 @@ class Settings(BaseSettings):
         description="Host filesystem path for spec storage, passed to daemon/agent in scan/stage "
         "prompts. SPEC_DATA_ROOT is the in-container path bind-mounted to this host path.",
     )
+
+    # ── CLI progress naive 时间戳解释时区（ql-20260822-006）─────────────────
+    # CLI 写的是宿主机墙钟（无时区标记），后端进程时区（Docker 容器 UTC）≠ CLI
+    # 宿主机时区，解释时区必须显式配置（详见 resolve_cli_tzinfo docstring）。
+    cli_progress_timezone: str = Field(
+        default="Asia/Shanghai",
+        description="Timezone interpreting naive local timestamps uploaded by the sillyspec CLI "
+        "(steps.completed_at / stages.started_at, host wall clock). IANA name or fixed offset "
+        "like '+08:00'. Independent of backend process timezone (containers run UTC).",
+    )
+
+    @field_validator("cli_progress_timezone")
+    @classmethod
+    def _validate_cli_progress_timezone(cls, raw: object) -> object:
+        """fail-fast：非 IANA 名也非 ±HH:MM 偏移的串启动期即拒（不等到归一化时静默错时）。"""
+        if isinstance(raw, str):
+            resolve_cli_tzinfo(raw)
+        return raw
 
     # ── Spec transport (global switch, NOT persisted to DB — D-001@v1) ────────
     # D-002@v2: 默认改为 tar（2026-07-11 ql-20260711-001 spec sync 修复）。
