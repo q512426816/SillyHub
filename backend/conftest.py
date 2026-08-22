@@ -91,6 +91,43 @@ def _reset_settings_cache() -> Iterator[None]:
     get_settings.cache_clear()
 
 
+# 会话级 Redis 可用性探测缓存（进程内只探测一次，xdist 下每 worker 各一次）。
+# Redis 停机时 localhost 连接失败不是立即拒绝而是等满 socket_connect_timeout
+# （Windows 实测 ~2s），若每个测试的 _reset_redis_state 都去 flushdb 一次，
+# agent 模块 600+ 用例纯等待就是半小时级（2026-08-22 实测 632 用例 34.8min，
+# CPU 仅 ~90s，slowest durations 清一色 setup ~3.2s）。改为首个测试用 0.5s 短超时
+# ping 探测一次，失败则本进程后续测试全部跳过 flushdb。探测失败后 redis 中途
+# 起死回生的窗口不追认：残留 login:fail 计数只影响登录类用例的顺序隔离，而
+# redis 本就是 best-effort 依赖（停机时限流降级放行），风险可接受。
+_redis_probe_ok: bool | None = None
+
+
+async def _probe_redis_once() -> bool:
+    """进程内一次性探测 Redis 可用性，结果缓存到 ``_redis_probe_ok``。"""
+    global _redis_probe_ok
+    if _redis_probe_ok is None:
+        import redis.asyncio as aioredis
+
+        from app.core.config import get_settings
+
+        probe = aioredis.from_url(
+            get_settings().redis_url,
+            socket_connect_timeout=0.5,
+            socket_timeout=0.5,
+        )
+        try:
+            await probe.ping()
+            _redis_probe_ok = True
+        except Exception:
+            _redis_probe_ok = False
+        finally:
+            try:
+                await probe.aclose()
+            except Exception:
+                pass
+    return _redis_probe_ok
+
+
 @pytest.fixture(autouse=True)
 async def _reset_redis_state() -> AsyncIterator[None]:
     """每个测试前重置共享 Redis 状态，隔离登录限流计数 / captcha 累计。
@@ -104,7 +141,8 @@ async def _reset_redis_state() -> AsyncIterator[None]:
 
     本 fixture（function scope，autouse）：每测试前重置 ``_client`` 单例（强制在
     当前 loop 重建，绑本 loop）+ ``FLUSHDB`` 清 db 15 残留计数；redis 不可用时
-    best-effort 跳过（测试不强依赖 redis，captcha_service 限流降级放行）。
+    best-effort 跳过（测试不强依赖 redis，captcha_service 限流降级放行）——
+    可用性由 ``_probe_redis_once()`` 进程内探测一次，停机时不逐测试吃连接超时。
     """
     import app.core.redis as redis_module
 
@@ -118,7 +156,8 @@ async def _reset_redis_state() -> AsyncIterator[None]:
 
     # redis 可用时清整个 db 15，消除 login:fail:* / captcha:* 跨测试残留。
     try:
-        await redis_module.get_redis().flushdb()
+        if await _probe_redis_once():
+            await redis_module.get_redis().flushdb()
     except Exception:
         # redis 未起 / 连接失败：限流降级放行，测试不依赖 redis 状态，安全跳过。
         pass
