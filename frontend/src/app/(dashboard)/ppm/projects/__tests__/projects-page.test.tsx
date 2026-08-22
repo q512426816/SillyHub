@@ -55,7 +55,7 @@ const sampleProject: ProjectMaintenance = {
 
 const renderPage = () => render(<PpmProjectsPage />);
 
-describe("PpmProjectsPage / Agent 团队入口", () => {
+describe("PpmProjectsPage / 发起团队入口", () => {
   beforeEach(() => {
     mocks.pageProjects.mockResolvedValue({
       items: [sampleProject],
@@ -68,29 +68,29 @@ describe("PpmProjectsPage / Agent 团队入口", () => {
     vi.clearAllMocks();
   });
 
-  it("renders Agent 团队 action button for each project row", async () => {
+  it("renders 发起团队 action button for each project row", async () => {
     renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("示例项目")).toBeInTheDocument();
     });
 
-    const agentTeamButton = screen.getByRole("button", { name: /Agent\s*团队/ });
-    expect(agentTeamButton).toBeInTheDocument();
+    const teamButton = screen.getByRole("button", { name: /发起\s*团队/ });
+    expect(teamButton).toBeInTheDocument();
   });
 
-  it("navigates to /projects/{id}/missions on click", async () => {
+  it("navigates to unified /sessions on click", async () => {
     renderPage();
 
     await waitFor(() => {
       expect(screen.getByText("示例项目")).toBeInTheDocument();
     });
 
-    const agentTeamButton = screen.getByRole("button", { name: /Agent\s*团队/ });
-    agentTeamButton.click();
+    const teamButton = screen.getByRole("button", { name: /发起\s*团队/ });
+    teamButton.click();
 
     await waitFor(() => {
-      expect(mocks.push).toHaveBeenCalledWith(`/projects/${sampleProject.id}/missions`);
+      expect(mocks.push).toHaveBeenCalledWith("/sessions");
     });
   });
 });
