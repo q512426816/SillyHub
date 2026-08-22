@@ -13,7 +13,9 @@ import uuid
 from collections.abc import Iterable
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.core.logging import get_logger
 from app.modules.agent.delegation import CoordinatorPlanner, DelegationError
@@ -26,17 +28,36 @@ _DONE = {"completed"}
 _FAILED = {"failed", "killed"}
 
 
-def derive_status(runs: Iterable[AgentRun], cancelled: bool = False) -> str:
+def derive_status(
+    runs: Iterable[AgentRun],
+    cancelled: bool = False,
+    *,
+    converged: bool = False,
+    has_session: bool = False,
+    session_active_turn: bool = False,
+) -> str:
     """Derive Mission status from its child AgentRuns.
 
-    Returns one of: ``planning | running | degraded | done | failed | cancelled``.
+    Returns one of:
+    ``planning | running | awaiting_input | degraded | done | failed | cancelled``.
+
+    判据矩阵（2026-08-22-team-session-unify task-02 / design §5 Phase1，按序判）：
 
     - ``cancelled``: mission explicitly cancelled (``cancelled_at`` set).
-    - ``planning``: no child runs yet.
-    - ``running``: any child run still pending/running.
-    - ``done``: all terminal, at least one completed, none failed.
+    - ``planning``: no child runs yet（无分身 run 且无主控轮回填，输入为空）.
+    - ``running``: any run（主控轮或分身）still pending/running.
+    - ``awaiting_input``: all runs terminal + 未 converge（``converged_at`` IS NULL）
+      + 无会话活跃 turn + mission 绑定会话（``has_session``）——会话 mission 等
+      主控输入的中间档，仅派生不落库（design §8）。
     - ``degraded``: all terminal, at least one completed AND at least one failed.
+    - ``done``: all terminal, at least one completed, none failed.
     - ``failed``: all terminal, none completed.
+
+    纯函数契约：``converged`` / ``has_session`` / ``session_active_turn`` 由调用方
+    查明后以 keyword-only 布尔传入，函数内不查 DB。NULL 守卫（Grill NEW-4）：
+    ``has_session=False``（存量 external/bootstrap mission，session 维度缺失）永不
+    进 ``awaiting_input``——存量调用方不传新参时返回值逐字节不变，complete_lease
+    自动收敛依赖的 derive∈{done, degraded} 语义零回归。
     """
     if cancelled:
         return "cancelled"
@@ -45,6 +66,10 @@ def derive_status(runs: Iterable[AgentRun], cancelled: bool = False) -> str:
         return "planning"
     if any(s in _ACTIVE for s in statuses):
         return "running"
+    # awaiting_input 仅会话 mission（session_id 非 NULL）可进；converge 置位
+    # （已终态化）或主控会话有活跃 turn（新一轮进行中）时回落存量终态判定。
+    if has_session and not converged and not session_active_turn:
+        return "awaiting_input"
     has_completed = any(s in _DONE for s in statuses)
     has_failed = any(s in _FAILED for s in statuses)
     if has_completed and has_failed:
@@ -52,6 +77,32 @@ def derive_status(runs: Iterable[AgentRun], cancelled: bool = False) -> str:
     if has_completed:
         return "done"
     return "failed"
+
+
+async def get_active_mission_for_session(
+    db: AsyncSession, session_id: uuid.UUID
+) -> AgentMission | None:
+    """按会话取活跃 mission（design §6 辅助查询，R-07 单活跃约束）。
+
+    活跃 = ``session_id = X`` AND ``converged_at IS NULL`` AND
+    ``cancelled_at IS NULL``；命中多条时取 ``created_at`` 最新一条（数据库侧
+    部分唯一索引 ``uq_agent_missions_session_active`` 已保证至多一条，排序仅
+    防御），无活跃返回 ``None``。消费方：task-03 预建 409 冲突检测 / task-04
+    inject 双标记回填 / task-05 mcp_tools 会话定位。注意：懒建并发守卫
+    （Grill NEW-3）在 daemon 侧另走 SELECT...FOR UPDATE，本查询不加锁。
+    """
+    stmt = (
+        select(AgentMission)
+        .where(
+            col(AgentMission.session_id) == session_id,
+            col(AgentMission.converged_at).is_(None),
+            col(AgentMission.cancelled_at).is_(None),
+        )
+        .order_by(col(AgentMission.created_at).desc())
+        .limit(1)
+    )
+    result = await db.execute(stmt)
+    return result.scalars().first()
 
 
 class MissionService:
