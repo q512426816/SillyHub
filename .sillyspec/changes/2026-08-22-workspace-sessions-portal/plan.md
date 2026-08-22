@@ -37,6 +37,11 @@ plan_level: full
 ### Wave 6（回归与部署实证）
 - task-09
 
+### Wave 7（v3 返工：scope 数据源反转，用户验收驱动）
+- task-10
+- task-11
+- task-12
+
 ## 任务总表
 | 编号 | 任务 | Wave | 优先级 | 依赖 | 覆盖 FR/D | 说明 |
 |---|---|---|---|---|---|---|
@@ -67,3 +72,7 @@ task-04/05 → task-01 → task-02 → task-07 → task-08 → task-09
 | D-003@v1 | task-04, task-06, task-08 | 过滤断言（含 change 级统一断言） |
 | D-004@v1 | task-01, task-06, task-08 | ?session= 有效/无效两分支用例 |
 | D-005@v1 | task-07 | 退役后 page 模式 reopen 断言 |
+
+| task-10 | 后端全局列表加 scope 过滤参 | W7 | P0 | — | D-003@v2 | router+service+pytest |
+| task-11 | 前端 scope 切全局端点+删降级 | W7 | P0 | task-10 | D-003@v2 | 同字段同筛选 |
+| task-12 | 回归+部署+三入口复验 | W7 | P0 | task-11 | FR-04/07 | 用户复验闭环 |

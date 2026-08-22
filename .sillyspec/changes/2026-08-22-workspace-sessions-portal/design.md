@@ -3,7 +3,7 @@ author: qinyi
 created_at: 2026-08-22T16:41:22
 change: 2026-08-22-workspace-sessions-portal
 scale: large
-revision: v2（Grill 独立审查修订：P0-1 作者过滤/P0-2 深链/P1 筛选与降级矩阵/P2 判别联合）
+revision: v3（用户验收返工：scope 列表数据源反转为全局端点+后端补 workspace_id/change_id 过滤参——撤 v2 的降级矩阵与客户端仅本人过滤，D-003@v2 取代 D-003@v1）
 ---
 
 # 会话门户三入口统一（以 /sessions 为准）
@@ -26,8 +26,7 @@ D-004@v1 ?session= 统一能力、D-005@v1 ended 恢复手动化。
 
 ## 2. 设计目标
 
-1. 三个入口渲染**同一个组件**，观感与交互零差异（口径见 §4.B 降级矩阵：布局/
-   交互/面板一致，列表行信息密度按端点字段能力呈现）：
+1. 三个入口渲染**同一个组件**，观感与交互零差异（v3 起 scope 列表与全局同端点同字段同筛选，仅条目集合按 scope 过滤——降级矩阵已随 D-003@v2 撤销）：
    - `/sessions`（全局）
    - `/workspaces/[id]/sessions`（工作区级）
    - `/workspaces/[id]/changes/[cid]/sessions`（**新路由**，变更级）
@@ -35,15 +34,14 @@ D-004@v1 ?session= 统一能力、D-005@v1 ended 恢复手动化。
 3. WorkspaceSessionSection 与 change-session-section 的 dialog 面板装配退役
   （ended 会话恢复由 page 模式自带 reopen 承接，P10）；/runtimes 弹窗成为
    dialog 模式唯一消费面（弹窗场景合理保留）；
-4. 后端零改动（三个列表端点均已存在）；全量回归 + 3001 部署实证。
+4. 后端仅加两个可选过滤参数（零回归）；全量回归 + 3001 部署实证 + 用户复验。
 
 ## 3. 非目标
 
 - 不动 /runtimes 弹窗（dialog 模式在弹窗场景是正确形态）；
 - 不动 SessionPanel 组件本体（page/dialog 两分支实现不变，只是消费面重组）；
 - 不动团队功能（2026-08-22-team-session-unify 刚合入的派团队按钮/任务块等）；
-- 不做列表筛选器（状态/机器/运行时）在 workspace/change 级的语义扩展——scope
-  模式隐藏服务端筛选条、保留本地标题搜索（§4.B Grill P1-2 定案）；
+- 不做列表筛选器语义扩展（v3 起 scope 复用全局筛选，无需扩展；v2 的「隐藏筛选条」随 D-003@v2 撤销）；
 - 不迁移 URL 参数行为差异之外的历史包袱（?session= 恢复点**升级为门户统一
   能力**，见 §4.A——非维持旧文件实现而是迁移语义）；
 
@@ -73,28 +71,21 @@ type ChangeScope = { kind: "change"; workspaceId: string; changeId: string };
   迁移的能力，全局入口同样受益；无参或无效 id 时静默忽略、行为不变，沿用旧
   :106-108 语义）。变更入口卡「直达选中态」经此链路实现（Link 带 ?session=）。
 
-### 4.B SessionListPanel 加 scope（修改）
+### 4.B SessionListPanel 加 scope（修改；v3 数据源反转）
 
-props 增加可选 `scope`（判别联合，同 §4.A）：
-- 缺省：`listAgentSessions` 真分页 + useInfiniteQuery（现状零动）；
-- workspace：`listWorkspaceAgentSessions(workspaceId, { include_ended: true })`
-  返回整列数组 → 合成单页喂 InfiniteQuery（getNextPageParam 恒 undefined，
-  「加载更多」按钮隐藏；工作区会话量级小，虚拟滚动兜底）；
-- change：`listChangeSessions(workspaceId, changeId)` 同上整列适配；
-- **作者可见性过滤（Grill P0-1 修订）**：scope 模式客户端按
-  `AgentSessionListItem.author` 过滤仅本人（自旧 workspace-section :201-212 迁移
-  的语义——logs/stream owner-only，他人会话 attach 必 404；全局模式维持
-  listAgentSessions 既有服务端行为零动）；
-- **筛选条 scope 语义（Grill P1-2 修订）**：scope 模式隐藏服务端筛选（状态/
-  机器/运行时——两 scope 端点不收这些参数，多选即全滤空），保留本地标题搜索
-  （客户端过滤）；全局模式筛选条现状零动；
-- **字段降级矩阵（Grill P1-1 修订，接受并写明）**：scope 端点返回瘦 item
-  （无 runtime_id/config_snapshot/workspace_id/created_at）→ SessionRow 的机器/
-  档案/供应商 chips 不渲染（缺字段即跳过），时间列回退 last_active_at 相对时间；
-  全局模式字段全量现状零动。「与 /sessions 零差异」的准确口径 = 布局/交互/
-  面板一致，列表行的信息密度按端点字段能力呈现（降级项显式接受）；
-- 删除回调 onDeleteSessions 由门户统一接（软删后按 scope invalidate 对应
-  queryKey）。
+props 增加可选 `scope`（判别联合，同 §4.A）。**v3：scope 模式复用全局端点
+`listAgentSessions` 加过滤参**（后端 GET /api/daemon/sessions 增可选
+`workspace_id`/`change_id` Query，SQL 层精确匹配，照 runtime_id 模式零回归）：
+
+- scope=workspace → `listAgentSessions({ workspace_id })`；scope=change →
+  `listAgentSessions({ workspace_id, change_id })`；
+- 全局端点本就 owner-scoped（「List the current user's AgentSessions」）+
+  返回全字段（runtime_id/config_snapshot/created_at/llm_provider_id 等 24 键）
+  → **列表条目 chips/时间/服务端筛选条（状态/机器/引擎）/真分页/加载更多与
+  /sessions 完全一致**，仅条目集合按 scope 过滤；
+- v2 的 scopeItemToRow 瘦字段降级、filterOwnSessions 客户端过滤、筛选条隐藏
+  三段逻辑**全部删除**（D-003@v2 取代 D-003@v1：owner 隔离由端点保证）；
+- queryKey 带 scope 区分缓存；删除软删后 invalidate 前缀键（同全局）。
 
 ### 4.C NewSessionForm 加锁定绑定（修改）
 
@@ -159,6 +150,10 @@ ChangeSessionSection 移除。
 | 修改 | `frontend/src/components/sessions/__tests__/new-session-form.test.tsx` | 补锁定绑定用例 |
 | 修改 | `frontend/src/components/changes/detail/__tests__/change-sessions-card.test.tsx` | 入口形态适配 |
 | 修改 | `frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx` | 薄壳化适配（18 用例语义保留） |
+| 修改 | `backend/app/modules/daemon/router.py` | v3：GET /sessions 增 workspace_id/change_id 过滤参（task-10） |
+| 修改 | `backend/app/modules/daemon/service.py` + `backend/app/modules/daemon/session/service.py` | v3：两层透传+SQL 过滤（task-10） |
+| 修改 | `backend/app/modules/daemon/tests/test_sessions_list_filters.py` | v3：5 新用例（task-10） |
+| 修改 | `backend/openapi.json` + `frontend/src/lib/api-types.ts` | v3：gen:types 同步（规则 21，task-12） |
 
 ## 6. 接口定义
 

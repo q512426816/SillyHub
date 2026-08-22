@@ -15,3 +15,7 @@ created_at: 2026-08-22 16:56:30
 - [x] task-07: 退役 workspace-session-section / change-session-section 及其测试 + 全仓 dangling 守护 (depends_on: task-02, task-03, task-06)
 - [x] task-08: 测试适配与新增（sessions-portal.test 三 scope+过滤+深链+绑定用例；list-panel/new-session-form/sessions 页测试适配；card 测试已归 task-06） (depends_on: task-07)
 - [x] task-09: 全量回归（vitest/tsc/lint）+ 3001 重建部署 + 三入口浏览器实证 (depends_on: task-08)
+- [x] task-10: 后端 GET /api/daemon/sessions 增 workspace_id/change_id 可选过滤参（router+service 两层透传+SQL 精确匹配，照 runtime_id 模式）+ pytest 用例 (depends_on: —)
+- [x] task-11: 前端 scope 列表切全局端点（lib/daemon 参数扩展 + list-panel 删瘦端点/客户端过滤/筛选隐藏三段逻辑，筛选条与分页恢复）+ 测试改写 (depends_on: task-10)
+- [x] task-12: 全量回归 + 3001 重建部署 + 三入口复验（列表字段/筛选/分页一致性） (depends_on: task-11)
+- [x] ql-20260822-010-aa7b 提案书（Proposal）

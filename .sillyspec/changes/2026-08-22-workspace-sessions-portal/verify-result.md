@@ -224,7 +224,7 @@ D-001~005 → requirements 覆盖矩阵 → plan 覆盖矩阵 → tasks 卡 → 
 
 integration-critical（session/daemon 关键词命中；纯前端装配重组横跨三入口）。集成证据已实跑提供（上节）。
 
-## Runtime Evidence（部署版浏览器三入口实证，非 mock）
+## Runtime Evidence（v2 版实证记录；其中「服务端筛选隐藏/瘦字段」断言已被文末 v3 增补取代——v3 起三入口筛选条全在场、字段全量）
 
 链路：Chrome headless → **3001 部署版**（门户变更重建镜像）→ backend :8001 真实数据（工作区 24 会话/22 本人）。产物 runtime-evidence/portal-smoke.mjs + artifacts/（5 截图+evidence-log）。
 
@@ -238,3 +238,7 @@ integration-critical（session/daemon 关键词命中；纯前端装配重组横
 ## 代码审查
 
 execute 独立 QA acceptance 9 项（8 pass/1 gap 已闭环）+ 主代理逐波审查 9 份 task review 全 pass。代码质量：净删两组件、新增一个门户组件，结构收敛。
+
+## v3 返工增补（用户验收驱动，D-003@v2）
+
+用户人工验收指出 v2 的瘦端点降级不可接受（列表缺字段/缺筛选）→ v3 数据源反转：后端 GET /sessions 增 workspace_id/change_id 过滤参（pytest 22 过零回归）+ 前端 scope 切全局端点（净 -87 行同构，删三段降级逻辑）+ gen:types 同步。QA v3 增量复审 6/6 双 pass。**部署版 3001 三入口复验（v3-*.png）**：筛选条三处在场、富字段行（机器/智能体/轮数/时间）、workspace 24 条/change 1 条正确过滤、零 console 零 4xx——三入口与 /sessions 同端点同字段同筛选，用户验收诉求（完整移植、一个组件一模一样）达成。结论维持 **PASS**（v3 增补后）。

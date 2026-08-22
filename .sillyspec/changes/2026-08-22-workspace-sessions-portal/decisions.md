@@ -50,3 +50,15 @@
 - answer: 统一为 page 模式手动重开——用户「以 /sessions 为准」原则的直接推论；design §4.E 明示为有意交互变更。
 - impacts: [FR-06, task-07]
 - evidence: session-panel.tsx:1453-1466 vs workspace-section:164-176（Grill 核对）。
+
+## D-003@v2: scope 列表数据源=全局端点+服务端过滤（取代 D-003@v1 客户端过滤）
+- type: architecture
+- priority: P0
+- status: accepted
+- supersedes: D-003@v1
+- source: user
+- question: 用户验收：scope 列表缺字段/缺筛选，「完整移植」不成立（v1 为零后端约束选瘦端点+降级）？
+- answer: 后端 GET /sessions 增 workspace_id/change_id 可选过滤参；前端 scope 复用全局端点（owner-scoped+全字段+筛选+分页），v2 的降级矩阵/客户端过滤/筛选隐藏全部退场。
+- normalized_requirement: workspace/change 列表请求与全局同端点同字段同筛选 UI，仅多两个过滤参数；行为一致性由同组件+同数据形状保证。
+- impacts: [FR-04 修订, task-10, task-11, task-12]
+- evidence: 全局/瘦端点字段对比实测（24 键 vs 8 键）+ 全局端点 owner-scoped docstring（router.py:1824）+ 用户验收反馈轮。
