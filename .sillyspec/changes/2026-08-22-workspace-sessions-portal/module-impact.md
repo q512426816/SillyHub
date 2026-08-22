@@ -23,7 +23,7 @@ created_at: 2026-08-22 17:18:00
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| docs/frontend/modules/components-sessions.md | 归档时更新：SessionsPortal 契约 + list-panel scope + form 锁定绑定 | pending |
-| docs/frontend/modules/app-sessions-pages.md | 归档时更新：三路由装配（薄壳×2 + 新路由） | pending |
-| docs/frontend/modules/components-daemon.md | 归档时更新：退役组件条目划线 + dialog 消费面收敛说明 | pending |
+| docs/frontend/modules/components-sessions.md | 已更新（verify 收尾）：定位段加 SessionsPortal；SessionListPanel 补 scope 契约（双端点/仅本人/筛选隐藏/降级）；NewSessionForm 补锁定绑定 | done |
+| docs/frontend/modules/app-sessions-pages.md | 已更新（verify 收尾）：薄壳化+三入口统一说明+深链直达 | done |
+| docs/frontend/modules/components-daemon.md | 已更新（verify 收尾）：dialog 消费面收敛（退役两 section）+ SessionListLayout 消费面收敛 | done |
 | docs/frontend/modules/_module-map.yaml | 无变化（未增删模块） | skipped |

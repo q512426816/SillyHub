@@ -9,9 +9,10 @@ created_at: 2026-08-18 01:45:00
 # 会话门户组件（components-sessions）
 
 ## 定位
-会话门户（`/sessions`）的四个功能组件（`components/sessions/`），2026-08-14-sessions-portal 变更派生 + 切换静默化系列 quick 迭代（ql-20260817-009/010）：
-- `SessionListPanel`：左栏会话列表（筛选 + 虚拟滚动 + 后端真分页）。
-- `NewSessionForm`：新建会话四选择器联动表单。
+会话门户（`/sessions`）的功能组件（`components/sessions/`），2026-08-14-sessions-portal 变更派生 + 切换静默化系列 quick 迭代（ql-20260817-009/010）：
+- `SessionsPortal`（2026-08-22-workspace-sessions-portal 起）：共享门户组件——左列表+右两态+SessionPanel page 模式+页级数据，可选 `scope`（WorkspaceScope/ChangeScope 判别联合，类型自 SessionListPanel 导出）派生列表数据源/新建绑定/标题后缀；`?session=` 深链（挂载解析一次，getAgentSession 验证，无效静默）；三入口（/sessions、/workspaces/[id]/sessions、/workspaces/[id]/changes/[cid]/sessions）渲染同一组件。
+- `SessionListPanel`：左栏会话列表（筛选 + 虚拟滚动 + 后端真分页）；可选 `scope` 时切 listWorkspaceAgentSessions(include_ended)/listChangeSessions 整列合成单页（加载更多隐藏）、客户端仅本人过滤（author 缺失视为本人，D-003）、隐藏服务端筛选保留本地标题搜索、瘦字段降级（chips 缺字段不渲染/时间回退 last_active_at）。
+- `NewSessionForm`：新建会话四选择器联动表单；可选 `bindWorkspaceId`（锁定：选择器不渲染直传）/`bindChangeId`（change_id+workspace_id 双传）。
 - `SessionConfigBar`：会话顶部配置控件条（档案/供应商点选即切换）。
 - `ctx-usage-bar.tsx`：上下文用量环 + 供应商额度胶囊。
 

@@ -9,7 +9,7 @@ created_at: 2026-08-18 01:45:00
 # 智体会话门户页（app-sessions-pages）
 
 ## 定位
-智能体会话门户页（单一页面 `src/app/(dashboard)/sessions/page.tsx`，2026-08-21-session-message-queue 起瘦身为 ~117 行外壳），路由 `/sessions`，跨工作区的会话总入口（一级菜单，2026-08-14-sessions-portal 落地）。左栏会话列表 + 右栏两态面板（未选 = 新建会话表单，选中 = `<SessionPanel mode="page">` 共享组件）；页级职责只剩外壳布局 + machines/llmProviders 数据注入 + 选中态切换——SSE 实时流、注入排队、配置切换、权限弹窗、上下文用量全部下沉 components-daemon 的 SessionPanel。
+智能体会话门户页（`src/app/(dashboard)/sessions/page.tsx`，2026-08-22-workspace-sessions-portal 起薄壳化——仅渲染 `<SessionsPortal />`），路由 `/sessions`，跨工作区的会话总入口（一级菜单，2026-08-14-sessions-portal 落地）。2026-08-22-workspace-sessions-portal 起门户三入口统一：本页（全局 scope）+ `/workspaces/[id]/sessions`（workspace scope）+ `/workspaces/[id]/changes/[cid]/sessions`（change scope 新路由）三页均为 SessionsPortal 薄壳；左栏会话列表 + 右栏两态面板（未选 = 新建会话表单，选中 = `<SessionPanel mode="page">`）与页级数据注入全部在 SessionsPortal 内——SSE 实时流、注入排队、配置切换、权限弹窗、上下文用量全部下沉 components-daemon 的 SessionPanel。变更详情入口卡（change-sessions-card）经 `?session=` 深链直达本门户选中态。
 
 ## 契约摘要
 - `SessionsPortalPage` 布局：左 320px `<SessionListPanel>`（筛选 + 虚拟滚动 + 紧凑两行条目，components-sessions）；右两态——

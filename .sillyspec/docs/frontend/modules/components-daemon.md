@@ -30,8 +30,7 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
   与 /runtimes 弹窗共享的会话面板，`mode: "page" | "dialog"` 渲染层分发（R4 铁律：
   react-query 三件全收 page 子组件 SessionPanelPage，dialog 渲染路径零 useQuery）。
   2026-08-22-session-panel-unify 起：**唯一直连入口**（适配层已删，4 消费方
-  runtime-session-dialog / runtime-session-helpers / workspace-session-section /
-  change-session-section 直接 `SessionPanel mode="dialog"` +
+  runtime-session-dialog / runtime-session-helpers 直接 `SessionPanel mode="dialog"` +（2026-08-22-workspace-sessions-portal 起 workspace-session-section 与 change-session-section 已退役删除，dialog 模式消费面收敛为 runtimes 弹窗侧；会话门户三入口改用 SessionsPortal + page 模式）
   `sessionId={attachSessionId ?? null}`，key 重挂载契约保持）；dialog 分支 chrome
   统一 antd（新建/团队分析默认 32px、打断 small、结束 danger、提供方徽标 Tag；
   D-304 跨区共享组件备案见该变更 design §4.B.7）。
@@ -62,10 +61,9 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
   pending→default，色走 token 零手写）。
 - `SessionInputBar`（`session-input-bar.tsx`）：输入区（发送=antd primary、📎=
   antd text，2026-08-22-session-panel-unify；chips 删除为原生 button）。
-- `SessionListLayout`（`session-list-layout.tsx`）：公共会话列表（runtimes 弹窗与
-  ChangeSessionSection 共用）；调用方 fetch 后 map 成 `SessionListEntry`
+- `SessionListLayout`（`session-list-layout.tsx`）：公共会话列表（2026-08-22-workspace-sessions-portal 起消费面随 ChangeSessionSection 退役收敛，现仅 runtimes 弹窗使用）；调用方 fetch 后 map 成 `SessionListEntry`
   （id/title/statusBadge/secondaryText/lastActiveAt）传入；`onDelete` 可选
-  （runtimes 传删除按钮、变更会话不传）；title 空回退 shortId。
+  （runtimes 传删除按钮）；title 空回退 shortId。
 - `MachineCard`（`machine-card.tsx`）：受控手风琴机器卡（expanded 由 page 持有）；
   usageByRuntime 由 page 注入（不在卡内拉用量）；展开体内嵌 RuntimeCard 网格；
   内联 `ACTIVE_SESSION_STATUSES`（与 helpers 集合等值，因 allowed_paths 不能 import）。
