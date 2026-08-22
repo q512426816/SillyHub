@@ -166,18 +166,6 @@ export const MENU_PERMISSION_GROUPS: MenuPermissionGroup[] = [
     ],
   },
   {
-    section: "agent",
-    menuKey: "missions",
-    menuLabel: "Agent 团队",
-    icon: "\u{1F91D}",
-    href: "missions",
-    matchPattern: "/missions",
-    permissions: [
-      { key: "workspace:write", name: "工作区写入" },
-      { key: "task:read", name: "任务查看" },
-    ],
-  },
-  {
     // 2026-07-29-sidebar-menu-restructure 新增：技能管理提为独立菜单，指向平台级
     // /settings/skills（工作区级仍在工作区内部访问）。
     // 2026-07-31-custom-skill-per-user D-003：权限放宽——去掉 settings:admin 门槛，

@@ -102,7 +102,7 @@ const BACKEND_PERMISSION_KEYS = [
   "ppm:weekly-plan:view",
 ] as const;
 
-/** 39 个 menuKey 期望集合（原 34 条 + 2026-07-29-sidebar-menu-restructure 新增 3 条 + 2026-08-04-agent-profile-ui-redesign 新增 agent-profiles + 2026-08-14-sessions-portal 新增 sessions） */
+/** menuKey 期望集合（2026-08-22-team-session-unify task-13 / D-011 删 missions 菜单项） */
 const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "workspaces",
   "components",
@@ -114,7 +114,6 @@ const EXPECTED_MENU_KEYS: ReadonlySet<string> = new Set([
   "releases",
   "git-identities",
   "api-keys",
-  "missions",
   // 2026-07-29-sidebar-menu-restructure 新增（D-002/D-003）
   "llm-providers",
   "skills",
@@ -158,8 +157,8 @@ const VALID_SECTIONS: ReadonlySet<string> = new Set([
 ]);
 
 describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
-  it("MENU_PERMISSION_GROUPS 长度 === 38", () => {
-    expect(MENU_PERMISSION_GROUPS).toHaveLength(38);
+  it("MENU_PERMISSION_GROUPS 长度 === 37（task-13 删 missions 后）", () => {
+    expect(MENU_PERMISSION_GROUPS).toHaveLength(37);
   });
 
   it("所有 menuKey 互不重复，且严格等于 FR-02 预定义清单", () => {
@@ -174,7 +173,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
     });
   });
 
-  it("section 分布：workspace 8 / agent 5 / config 4 / governance 3 / system 4 / ppm 14", () => {
+  it("section 分布：workspace 8 / agent 4 / config 4 / governance 3 / system 4 / ppm 14（task-13 删 missions）", () => {
     const counter: Record<MenuSection, number> = {
       workspace: 0,
       agent: 0,
@@ -187,7 +186,7 @@ describe("MENU_PERMISSION_GROUPS 数据完整性", () => {
       counter[g.section] += 1;
     });
     expect(counter.workspace).toBe(8);
-    expect(counter.agent).toBe(5);
+    expect(counter.agent).toBe(4);
     expect(counter.config).toBe(4);
     expect(counter.governance).toBe(3);
     expect(counter.system).toBe(4);

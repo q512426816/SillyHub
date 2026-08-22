@@ -164,9 +164,9 @@ export default function PpmProjectsPage() {
             <Button
               size="small"
               type="link"
-              onClick={() => router.push(`/projects/${row.id}/missions`)}
+              onClick={() => router.push("/sessions")}
             >
-              Agent 团队
+              发起团队
             </Button>
           </>
         )}

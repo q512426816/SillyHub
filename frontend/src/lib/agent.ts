@@ -1,5 +1,4 @@
 import { apiFetch } from "./api";
-import type { components } from "./api-types";
 
 export type AgentRunStatus =
   | "pending"
@@ -216,7 +215,8 @@ export function listWorkspaceAgentSessions(
 }
 
 /* ================================================================== */
-/*  Mission — multi-agent orchestration (2026-06-19-multi-agent)       */
+/*  Mission — team progress（task-13 / D-011：create/list 入口已删，  */
+/*  仅保留 team-progress / change 详情消费的 getMission/cancelMission） */
 /* ================================================================== */
 
 export interface MissionArtifact {
@@ -274,29 +274,11 @@ export interface MainAgentConfig {
   model: string;
 }
 
-export interface CreateMissionInput {
-  objective: string;
-  change_id?: string | null;
-  budget_usd?: number | null;
-  constraints?: Record<string, unknown> | null;
-  mode?: "single" | "team" | null;
-  session_id?: string | null;
-  // task-07 / D-002@v2：team 模式用户预设 worker 列表（mode=team 时携带）。
-  // single 模式应传 null/undefined，后端按 mode 路由。
-  worker_preset?: WorkerPresetItem[] | null;
-  // task-07 / D-003@v2：team 模式主 agent 配置（mode=team 时携带）。
-  main_agent_config?: MainAgentConfig | null;
-}
-
-/** Create a Mission: GLM plans Worker delegations, dispatched to a daemon. */
-export function createMission(workspaceId: string, input: CreateMissionInput) {
-  return apiFetch<Mission>(`/api/workspaces/${workspaceId}/missions`, {
-    method: "POST",
-    json: input,
-  });
-}
-
-/** Read a Mission (derived status + workers; lazily reaps completed Artifacts). */
+/**
+ * Read a Mission (derived status + workers; lazily reaps completed Artifacts).
+ * task-13（D-011）：创建入口归一会话触发（lib/daemon.ts triggerSessionTeamMission），
+ * 本文件仅保留读/取消 client。
+ */
 export function getMission(missionId: string) {
   return apiFetch<Mission>(`/api/missions/${missionId}`);
 }
@@ -306,70 +288,5 @@ export function cancelMission(workspaceId: string, missionId: string) {
   return apiFetch<Mission>(
     `/api/workspaces/${workspaceId}/missions/${missionId}/cancel`,
     { method: "POST" },
-  );
-}
-
-/**
- * List Missions in a workspace (created_at desc, paginated).
- * quick（mission 历史列表）：Agent 团队页进页面加载历史，点击单条调 getMission 切换详情。
- */
-export function listMissions(
-  workspaceId: string,
-  params?: { limit?: number; offset?: number },
-) {
-  const search = new URLSearchParams();
-  if (params?.limit !== undefined) search.set("limit", String(params.limit));
-  if (params?.offset !== undefined) search.set("offset", String(params.offset));
-  const qs = search.toString() ? `?${search.toString()}` : "";
-  return apiFetch<Mission[]>(`/api/workspaces/${workspaceId}/missions${qs}`);
-}
-
-/**
- * 项目维度 mission 响应（task-14）：task-13 生成的 api-types MissionResponse，
- * 相比本地 Mission 多 project_id / scope_workspace_ids / workspace_name /
- * workspace_type 扩展字段。形状取自 api-types.ts 生成物，不手写。
- */
-export type ProjectMissionResponse = components["schemas"]["MissionResponse"];
-
-/**
- * task-14 / D-005@v1：项目维度创建 mission 入参。
- * 复用 CreateMissionInput 全部字段，另加 anchor / scope 两个字段，
- * 命名与后端 MissionCreateRequest 对齐（scope_workspace_ids 非 scopeWsIds）。
- */
-export interface CreateProjectMissionInput extends CreateMissionInput {
-  anchor_workspace_id?: string | null;
-  scope_workspace_ids?: string[] | null;
-}
-
-/**
- * Create a Mission under a project（design §7.3 / FR-04）：
- * POST /api/projects/{projectId}/missions。后端 mode 强制 team、scope 必填 ≥1、
- * scope ⊆ 项目关联工作区、anchor ∈ scope（越界 422），anchor 缺省取 scope
- * 第一个或 type=backend 优先。
- */
-export function createProjectMission(
-  projectId: string,
-  input: CreateProjectMissionInput,
-) {
-  return apiFetch<ProjectMissionResponse>(`/api/projects/${projectId}/missions`, {
-    method: "POST",
-    json: input,
-  });
-}
-
-/**
- * List Missions under a project（created_at 倒序 + 分页，design §7.3 / FR-04）。
- * 项目维度 mission 页进页面加载历史，点击单条调 getMission 切详情。
- */
-export function listProjectMissions(
-  projectId: string,
-  params?: { limit?: number; offset?: number },
-) {
-  const search = new URLSearchParams();
-  if (params?.limit !== undefined) search.set("limit", String(params.limit));
-  if (params?.offset !== undefined) search.set("offset", String(params.offset));
-  const qs = search.toString() ? `?${search.toString()}` : "";
-  return apiFetch<ProjectMissionResponse[]>(
-    `/api/projects/${projectId}/missions${qs}`,
   );
 }

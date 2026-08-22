@@ -3,14 +3,17 @@
 change ``2026-08-19-cross-workspace-team-mission`` task-16 / design §4（派发与收敛
 链路）+ §10 验收 1 / 3 / 5。与单点单测互补（test_execution_target_routing 只测
 execution 路由、test_finalize_execute_mission_merge / test_finalizer_cleanup 只测
-finalizer 分组、test_router_project_missions 只测项目端点校验），本文件把
-「创建 → 派发 → 收敛」串成一次 HTTP 全链路：service 级用假 delegate / 假
-placement / GLM 隔离，不打真 daemon、不建真 worktree、零网络。
+finalizer 分组），本文件把「建 mission → 派发 → 收敛」串起来：service 级用假
+delegate / 假 placement / GLM 隔离，不打真 daemon、不建真 worktree、零网络。
+
+task-13（2026-08-22-team-session-unify / D-011）：``POST /api/workspaces/{id}/missions``
+与 ``POST /api/projects/{pid}/missions`` create 端点删除后，mission 改
+``_create_mission_direct`` 直建 DB（+ role='orchestrator' 主控 run 供 converge
+锚定 ``_get_main_run``）；派发/收敛走保留的 MCP 端点（dispatch_worker /
+converge），本文件继续钉住这两段的跨 ws 路由与分组行为。
 
 用例组 A（验收 1 单 ws 零回归）``TestSingleWorkspaceZeroRegression``：
-- 既有端点 ``POST /api/workspaces/{id}/missions``（mode=team，不传 scope/target）
-  → mission 落库 project_id/scope NULL，主 agent run 派发按 anchor 且不带
-  representative 旗标（design §4.2 B-04：主 agent 维持 borrow 兜底链）；
+- 直建单 ws mission（不传 scope/target）→ mission 落库 project_id/scope NULL；
 - MCP ``dispatch_worker`` 不带 target → ``AgentRun.target_workspace_id`` NULL、
   worktree 建 anchor root、provider/model 按 anchor、placement
   ``representative_fallback=False``（旧行为逐点对齐）；
@@ -18,8 +21,7 @@ placement / GLM 隔离，不打真 daemon、不建真 worktree、零网络。
   git_worktree_remove 都只收 anchor workspace）。
 
 用例组 B（验收 3/5 跨 ws 冒烟）``TestCrossWorkspaceSmoke``：
-- ``POST /api/projects/{pid}/missions`` 建 scope 两 ws mission（anchor 缺省
-  type=backend-code 优先——词表真值，非 "backend"）；
+- 直建 scope 两 ws mission（project 维度，anchor 显式落 backend-code）；
 - dispatch_worker target=member（∈ scope）→ worktree/provider/placement 全按
   target 路由 + placement ``representative_fallback=True``（走代表 binding）；
 - 不带 target 的 worker 维持 anchor 路由（旗标 False，零回归）；
@@ -50,7 +52,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import password_hasher
-from app.modules.agent.model import AgentRun
+from app.modules.agent.model import AgentMission, AgentRun
 from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime
 from app.modules.ppm.project.model import PpmProjectMaintenance
@@ -252,26 +254,44 @@ async def _setup_cross_ws_project(db_session: AsyncSession, tmp_path) -> dict[st
 _PLACEMENT_PATH = "app.modules.agent.placement.RunPlacementService.dispatch_to_daemon"
 
 
-async def _create_team_mission(
-    client, headers: dict[str, str], ws_id: uuid.UUID, body: dict[str, Any]
-) -> tuple[dict[str, Any], AsyncMock]:
-    """POST /api/workspaces/{id}/missions（mode=team）→ (mission, placement mock)。"""
-    placement: AsyncMock = AsyncMock(return_value=uuid.uuid4())
-    with patch(_PLACEMENT_PATH, new=placement):
-        resp = await client.post(f"/api/workspaces/{ws_id}/missions", json=body, headers=headers)
-    assert resp.status_code == 201, resp.text
-    return resp.json(), placement
+async def _create_mission_direct(
+    db_session: AsyncSession,
+    ws_id: uuid.UUID,
+    *,
+    objective: str,
+    project_id: uuid.UUID | None = None,
+    scope_workspace_ids: list[uuid.UUID] | None = None,
+) -> AgentMission:
+    """直建 AgentMission + 主控 run（task-13 / D-011：create 端点已删）。
 
-
-async def _create_project_mission(
-    client, headers: dict[str, str], project_id: uuid.UUID, body: dict[str, Any]
-) -> tuple[dict[str, Any], AsyncMock]:
-    """POST /api/projects/{pid}/missions → (mission, placement mock)。"""
-    placement: AsyncMock = AsyncMock(return_value=uuid.uuid4())
-    with patch(_PLACEMENT_PATH, new=placement):
-        resp = await client.post(f"/api/projects/{project_id}/missions", json=body, headers=headers)
-    assert resp.status_code == 201, resp.text
-    return resp.json(), placement
+    落库形状对齐原 create 端点 ``team_mission_entry``：``constraints["mode"]="team"``、
+    project/scope 列（scope 为 JSON 列，存 uuid-hex 字符串）、外加
+    ``role='orchestrator'`` 主控 run——converge 的 ``_get_main_run`` 锚点
+    （无主控 run 会 404）。主控 run 置 running（旧链路创建后即派发运行）。
+    """
+    mission = AgentMission(
+        workspace_id=ws_id,
+        objective=objective,
+        constraints={"mode": "team"},
+        project_id=project_id,
+        scope_workspace_ids=(
+            [str(s) for s in scope_workspace_ids] if scope_workspace_ids else None
+        ),
+    )
+    db_session.add(mission)
+    await db_session.commit()
+    await db_session.refresh(mission)
+    db_session.add(
+        AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            status="running",
+            role="orchestrator",
+            objective=objective,
+        )
+    )
+    await db_session.commit()
+    return mission
 
 
 async def _dispatch_worker(
@@ -375,23 +395,16 @@ class TestSingleWorkspaceZeroRegression:
             default_model="model_single",
         )
 
-        # 1) 既有端点创建（mode=team，不传 scope/target）
-        mission, placement = await _create_team_mission(
-            client, auth_headers, ws.id, {"objective": "单工作区零回归", "mode": "team"}
-        )
-        assert mission["workspace_id"] == str(ws.id)
-        assert mission["project_id"] is None
-        assert mission["scope_workspace_ids"] is None
-        assert (mission["constraints"] or {}).get("mode") == "team"
-        # 主 agent run 派发按 anchor；team_mission_entry 不传 representative 旗标
-        # （默认 False，主 agent 维持 borrow 兜底链——design §4.2 B-04）
-        assert placement.await_count == 1
-        main_kwargs = placement.call_args.kwargs
-        assert main_kwargs["workspace_id"] == ws.id
-        assert "representative_fallback" not in main_kwargs
+        # 1) 直建 mission（mode=team，不传 scope/target；task-13/D-011 后创建入口
+        #    归一会话触发，本链路只钉派发/收敛行为）
+        mission = await _create_mission_direct(db_session, ws.id, objective="单工作区零回归")
+        assert mission.workspace_id == ws.id
+        assert mission.project_id is None
+        assert mission.scope_workspace_ids is None
+        assert (mission.constraints or {}).get("mode") == "team"
 
-        mission_id = mission["id"]
-        mid = uuid.UUID(mission_id)
+        mission_id = str(mission.id)
+        mid = mission.id
 
         # 主 agent run 落库
         main_run = (
@@ -430,7 +443,8 @@ class TestSingleWorkspaceZeroRegression:
         # 3) converge：全 completed → 单组 merge + 单组 cleanup
         await _complete_all_runs(db_session, mid)
         conv = await _converge(client, auth_headers, ws.id, mission_id, fake)
-        assert conv["status"] == "merged"
+        # task-06 四值改名：converge 响应 status=converged（原 merged）
+        assert conv["status"] == "converged"
         assert conv["converged"] is True
         assert conv["merged_branches"] == [worker.worktree_branch]
 
@@ -477,27 +491,22 @@ class TestCrossWorkspaceSmoke:
             root_path=str(tmp_path / "ws3"),
         )
 
-        # 1) 项目维度创建（不带 anchor → backend-code 优先，词表真值）
-        mission, placement = await _create_project_mission(
-            client,
-            auth_headers,
-            env["project_id"],
-            {
-                "objective": "跨工作区团队执行",
-                "scope_workspace_ids": [str(anchor_id), str(target_id)],
-            },
+        # 1) 直建项目维度 mission（scope 两 ws，anchor 显式落 backend-code——
+        #    原 create 端点的 anchor 缺省派生随端点删除，直建不再覆盖该逻辑）
+        mission = await _create_mission_direct(
+            db_session,
+            anchor_id,
+            objective="跨工作区团队执行",
+            project_id=env["project_id"],
+            scope_workspace_ids=[anchor_id, target_id],
         )
-        assert mission["project_id"] == str(env["project_id"])
-        assert set(mission["scope_workspace_ids"]) == {str(anchor_id), str(target_id)}
-        assert mission["workspace_id"] == str(anchor_id)
-        assert (mission["constraints"] or {}).get("mode") == "team"
-        # 主 agent 派发走 anchor 且不带 representative 旗标（B-04 维持 borrow）
-        assert placement.await_count == 1
-        assert placement.call_args.kwargs["workspace_id"] == anchor_id
-        assert "representative_fallback" not in placement.call_args.kwargs
+        assert mission.project_id == env["project_id"]
+        assert set(mission.scope_workspace_ids or []) == {str(anchor_id), str(target_id)}
+        assert mission.workspace_id == anchor_id
+        assert (mission.constraints or {}).get("mode") == "team"
 
-        mission_id = mission["id"]
-        mid = uuid.UUID(mission_id)
+        mission_id = str(mission.id)
+        mid = mission.id
 
         # 2) 主 agent 派 worker 到 target ws（∈ scope 放行）
         resp, fake, placement = await _dispatch_worker(
@@ -570,17 +579,15 @@ class TestCrossWorkspaceSmoke:
         anchor_id: uuid.UUID = env["anchor_id"]
         target_id: uuid.UUID = env["target_id"]
 
-        mission, _placement = await _create_project_mission(
-            client,
-            auth_headers,
-            env["project_id"],
-            {
-                "objective": "跨工作区收敛冒烟",
-                "scope_workspace_ids": [str(anchor_id), str(target_id)],
-            },
+        mission = await _create_mission_direct(
+            db_session,
+            anchor_id,
+            objective="跨工作区收敛冒烟",
+            project_id=env["project_id"],
+            scope_workspace_ids=[anchor_id, target_id],
         )
-        mission_id = mission["id"]
-        mid = uuid.UUID(mission_id)
+        mission_id = str(mission.id)
+        mid = mission.id
 
         resp_fe, _fake_fe, placement_fe = await _dispatch_worker(
             client,
@@ -612,7 +619,8 @@ class TestCrossWorkspaceSmoke:
 
         fake = _fake_delegate()
         conv = await _converge(client, auth_headers, anchor_id, mission_id, fake)
-        assert conv["status"] == "merged"
+        # task-06 四值改名：converge 响应 status=converged（原 merged）
+        assert conv["status"] == "converged"
         assert conv["converged"] is True
         assert fe.worktree_branch is not None and be.worktree_branch is not None
         assert sorted(conv["merged_branches"]) == sorted([fe.worktree_branch, be.worktree_branch])
@@ -647,17 +655,15 @@ class TestCrossWorkspaceSmoke:
         anchor_id: uuid.UUID = env["anchor_id"]
         target_id: uuid.UUID = env["target_id"]
 
-        mission, _placement = await _create_project_mission(
-            client,
-            auth_headers,
-            env["project_id"],
-            {
-                "objective": "跨工作区冲突隔离冒烟",
-                "scope_workspace_ids": [str(anchor_id), str(target_id)],
-            },
+        mission = await _create_mission_direct(
+            db_session,
+            anchor_id,
+            objective="跨工作区冲突隔离冒烟",
+            project_id=env["project_id"],
+            scope_workspace_ids=[anchor_id, target_id],
         )
-        mission_id = mission["id"]
-        mid = uuid.UUID(mission_id)
+        mission_id = str(mission.id)
+        mid = mission.id
 
         resp_fe, _, _ = await _dispatch_worker(
             client,

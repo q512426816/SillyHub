@@ -43,12 +43,6 @@ const sessionApi = vi.hoisted(() => ({
   triggerSessionTeamMission: vi.fn(),
 }));
 
-// task-08（FR-08）：旧「用团队分析」直调 createMission（task-11 已下线该路径，
-// mock 保留用于回归断言「不再调用」；createMission 删除归 task-13）。
-const missionApi = vi.hoisted(() => ({
-  createMission: vi.fn(),
-}));
-
 // task-11：触发弹层（TeamTriggerPopover）数据源——项目下拉 + 项目关联工作区。
 const popoverApi = vi.hoisted(() => ({
   listProjects: vi.fn(),
@@ -85,15 +79,6 @@ vi.mock("@/lib/workspace", async () => {
     "@/lib/workspace",
   );
   return { ...actual, listProjectWorkspaces: popoverApi.listProjectWorkspaces };
-});
-
-// task-08：「用团队分析」走 createMission（@/lib/agent），mock 之
-vi.mock("@/lib/agent", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/agent")>("@/lib/agent");
-  return {
-    ...actual,
-    createMission: missionApi.createMission,
-  };
 });
 
 /* ----- fake SSE connection ----- */
@@ -1377,8 +1362,8 @@ describe("InteractiveSessionPanel", () => {
   });
 
   /* ---------- task-08（FR-08 / D-001@v2）：「用团队分析」按钮 ----------
-   * task-11（2026-08-22-team-session-unify / FR-03 / D-004）：不再直调
-   * createMission（task-13 将删该 client），改为打开触发弹层 → 确认走
+   * task-11（2026-08-22-team-session-unify / FR-03 / D-004）：不直调
+   * createMission（task-13 / D-011 已删该 client），改为打开触发弹层 → 确认走
    * triggerSessionTeamMission 预建（与派团队按钮/指令四路等价）。 ---------- */
 
   it("task-08 无 workspaceId 时「用团队分析」按钮不渲染", async () => {
@@ -1392,7 +1377,7 @@ describe("InteractiveSessionPanel", () => {
     expect((btn as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("task-11 点「用团队分析」→ 打开触发弹层（objective 预填），不再调 createMission", async () => {
+  it("task-11 点「用团队分析」→ 打开触发弹层（objective 预填）", async () => {
     const stream = makeStreamMock();
     sessionApi.streamSession.mockImplementation(stream.factory);
     sessionApi.createSession.mockResolvedValue({
@@ -1418,8 +1403,6 @@ describe("InteractiveSessionPanel", () => {
     expect((screen.getByLabelText(/^目标/) as HTMLInputElement).value).toBe(
       "团队分析当前会话上下文",
     );
-    // 旧路径（task-13 将删的 createMission client）不再被调用。
-    expect(missionApi.createMission).not.toHaveBeenCalled();
   });
 
   it("task-11 弹层确认 → triggerSessionTeamMission 预建 + mission 列表/chip 呈现 + objective 回填输入框", async () => {
@@ -1471,7 +1454,6 @@ describe("InteractiveSessionPanel", () => {
         }),
       ),
     );
-    expect(missionApi.createMission).not.toHaveBeenCalled();
     expect(onTeamMissionCreated).toHaveBeenCalledWith("m-team-1");
 
     // 刷新后的 mission 列表：TeamTaskBlock 挂载 + 活跃 chip。
@@ -1526,7 +1508,6 @@ describe("InteractiveSessionPanel", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("派团队做这件事")).toBeInTheDocument();
     expect(onTeamMissionCreated).not.toHaveBeenCalled();
-    expect(missionApi.createMission).not.toHaveBeenCalled();
   });
 });
 
