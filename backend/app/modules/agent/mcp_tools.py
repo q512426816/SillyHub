@@ -825,6 +825,39 @@ async def _dispatch_worker_core(
             f"mcp_dispatch_worker_rejected: {reason}",
         )
 
+    # 冒烟修复①（ql-20260822-008）：目标工作区在线绑定预检——原先要到
+    # worktree 阶段才 failed hostfs_unavailable（run 已落库成垃圾、主 agent
+    # 拿不到可引导的信息）。owner 优先→任意在线（resolve_representative_binding
+    # 与派发链路同一启发式）都查无在线 → 422 中文引导，不建 run。
+    # 语义安全性：该函数返回 None 意味着全工作区（含创建者本人）无在线绑定，
+    # 本人 binding 路径（placement）也必失败，前置拦截不误伤。
+    from app.modules.workspace.member_runtimes.queries import (
+        resolve_representative_binding,
+    )
+
+    dispatch_target = explicit_target or anchor
+    # user_id 供 resolve 的 owner 分支过滤；懒建竞态 rollback 会 expire 会话内
+    # 全部对象（含请求 user），过期属性访问触发隐式刷新在 greenlet 外炸
+    # MissingGreenlet——捕获后回落 None（owner 分支 miss，走「任意在线」分支2
+    # 兜底，绑定是工作区维度，语义不受影响）。
+    try:
+        dispatch_user_id = user.id
+    except Exception:
+        dispatch_user_id = None
+    binding = await resolve_representative_binding(
+        session,
+        workspace_id=uuid.UUID(str(dispatch_target)),
+        user_id=dispatch_user_id,
+        provider=None,
+    )
+    if binding is None:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "该工作区暂无在线机器绑定，分身无法在其上创建工作副本执行任务。"
+            "请让该工作区绑定的守护进程上线后重试，或改选其它有在线绑定的"
+            "工作区范围。",
+        )
+
     run = AgentRun(
         mission_id=mission.id,
         change_id=mission.change_id,

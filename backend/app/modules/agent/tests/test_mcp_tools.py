@@ -30,6 +30,41 @@ from app.modules.agent.profile.model import AgentProfile
 from app.modules.workspace.model import Workspace
 
 
+async def _stub_representative_binding(session: AsyncSession, ws_id: uuid.UUID) -> None:
+    """给工作区造一条在线机器绑定（ql-20260822-008 预检用例）。
+
+    daemon_instances(online) + daemon_runtimes(online) + workspace_member_runtimes
+    （member 绑定行，命中 resolve_representative_binding 分支2「任意在线」）。
+    """
+    from sqlalchemy import text
+
+    di_id = uuid.uuid4()
+    member_uid = uuid.uuid4()
+    ts = "2026-08-22T00:00:00+00:00"
+    await session.execute(
+        text(
+            "INSERT INTO daemon_instances (id, user_id, hostname, server_url, allowed_roots, status, created_at, updated_at)"
+            " VALUES (:id, :uid, 'h1', 'http://t', '[\"~/.sillyhub\"]', 'online', :ts, :ts)"
+        ),
+        {"id": di_id.hex, "uid": member_uid.hex, "ts": ts},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO daemon_runtimes (id, user_id, daemon_instance_id, provider, status, created_at, updated_at)"
+            " VALUES (:id, :uid, :di, 'claude', 'online', :ts, :ts)"
+        ),
+        {"id": uuid.uuid4().hex, "uid": member_uid.hex, "di": di_id.hex, "ts": ts},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO workspace_member_runtimes (workspace_id, user_id, root_path, path_source, daemon_id, shared, created_at, updated_at)"
+            " VALUES (:wid, :uid, '/tmp/w', 'manual', :di, false, :ts, :ts)"
+        ),
+        {"wid": ws_id.hex, "uid": member_uid.hex, "di": di_id.hex, "ts": ts},
+    )
+    await session.commit()
+
+
 async def _seed_workspace_and_mission(
     session: AsyncSession,
     *,
@@ -77,13 +112,13 @@ async def _seed_workspace_and_mission(
 class TestDispatchWorker:
     @pytest.mark.asyncio
     async def test_dispatch_creates_worker_run(self, client, db_session, auth_headers) -> None:
-        """POST dispatch_worker → 建 worker run（无 binding → failed + hostfs_unavailable）。
+        """POST dispatch_worker → 无在线绑定 → 422 前置拦截（ql-20260822-008 冒烟修复①）。
 
-        BE-P1-2（2026-08-21 审查）契约：workspace 无 bound daemon 时
-        ``git_worktree_add`` 抛 ``HostFsDelegateUnavailable``，execution 内部收敛为
-        ``failed + error_code=hostfs_unavailable``（201 响应携带终态 run）。旧契约
-        （503 fail-loud，ql-20260713-002）的缺陷：异常冒泡后 run 已落库 pending 且
-        无终态化路径 → derive_status 永远 running、mission 挂死。
+        历史：BE-P1-2 契约曾为「无 binding → 201 + failed(hostfs_unavailable)」
+        （run 落库保留诊断）。真机冒烟暴露该形态对配置性缺绑定引导差：主 agent
+        只能反复重试。现前置预检（resolve_representative_binding owner→任意在线
+        均无）→ 422 中文引导，不建 run；瞬时离线语义不变（预检与派发用同一
+        在线判定，本就派不出去，只是更早失败）。
         """
         ws_id, mission_id, _ = await _seed_workspace_and_mission(db_session)
         resp = await client.post(
@@ -91,29 +126,29 @@ class TestDispatchWorker:
             json={"objective": "扫描架构", "role": "arch", "read_only": True},
             headers=auth_headers,
         )
-        assert resp.status_code == 201, resp.text
-        data = resp.json()
-        assert data["status"] == "failed"
-        assert data["error_code"] == "hostfs_unavailable"
+        assert resp.status_code == 422, resp.text
+        assert "在线机器绑定" in resp.json()["message"]
 
     @pytest.mark.asyncio
     async def test_dispatch_missing_role_uses_default(
         self, client, db_session, auth_headers
     ) -> None:
-        """role 缺省 → 默认 worker（无 binding → failed + hostfs_unavailable）。
+        """role 缺省 → 默认 worker（有在线绑定 → 正常建 run，role 兜底）。
 
-        BE-P1-2 后无 binding 走 201 + failed（见 test_dispatch_creates_worker_run），
-        本测校验建 run 时 role 兜底为 ``worker``：直接查 DB 校验。
+        ql-20260822-008 后无绑定走 422 前置拦截（见上一个用例），本测改用
+        stub 在线绑定走通建 run 路径，校验 role 兜底为 ``worker``。
         """
         ws_id, mission_id, _ = await _seed_workspace_and_mission(db_session)
+        await _stub_representative_binding(db_session, ws_id)
+        await _stub_representative_binding(db_session, ws_id)
+
         resp = await client.post(
             f"/api/workspaces/{ws_id}/missions/{mission_id}/dispatch_worker",
             json={"objective": "做事"},
             headers=auth_headers,
         )
-        # 无 binding → 201 + failed（BE-P1-2 契约）
         assert resp.status_code == 201, resp.text
-        assert resp.json()["status"] == "failed"
+        assert resp.json()["status"] in ("pending", "running", "failed")
         # run 在 dispatch_worker 前置已建（mcp_tools.py:316-328 commit），role 兜底 worker
         from sqlalchemy import select
 
@@ -982,7 +1017,8 @@ class TestCrossWorkspaceDispatch:
         anchor_ws_id, target_ws_id, mission_id, _mission = await self._seed_cross_ws_mission(
             db_session, with_target_in_scope=True
         )
-        # 派发到 target（在 scope 中）
+        # 无 binding → 422 前置拦截（ql-20260822-008，证明 scope 校验已通过——
+        # 越界场景在 400 先拦，此处的 422 来自绑定预检而非 scope）
         resp = await client.post(
             f"/api/workspaces/{anchor_ws_id}/missions/{mission_id}/dispatch_worker",
             json={
@@ -991,9 +1027,8 @@ class TestCrossWorkspaceDispatch:
             },
             headers=auth_headers,
         )
-        # 无 binding → 201 + failed（BE-P1-2 契约，证明 scope 校验通过）
-        assert resp.status_code == 201, resp.text
-        assert resp.json()["error_code"] == "hostfs_unavailable"
+        assert resp.status_code == 422, resp.text
+        assert "在线机器绑定" in resp.json()["message"]
 
     @pytest.mark.asyncio
     async def test_dispatch_target_out_of_scope_400(self, client, db_session, auth_headers) -> None:
@@ -1034,6 +1069,8 @@ class TestCrossWorkspaceDispatch:
             db_session, with_target_in_scope=True
         )
         # 不传 target_workspace_id → fallback 到 anchor
+        await _stub_representative_binding(db_session, anchor_ws_id)
+
         resp = await client.post(
             f"/api/workspaces/{anchor_ws_id}/missions/{mission_id}/dispatch_worker",
             json={"objective": "单工作区任务"},
@@ -1041,7 +1078,8 @@ class TestCrossWorkspaceDispatch:
         )
         # 无 binding → 201 + failed（BE-P1-2 契约，证明 target=anchor 校验通过）
         assert resp.status_code == 201, resp.text
-        assert resp.json()["error_code"] == "hostfs_unavailable"
+        # ql-20260822-008：stub 绑定后走到 worktree 阶段，测试环境派发失败形态（hostfs 不可达/委托降级）
+        assert resp.json()["status"] == "failed"
 
     @pytest.mark.asyncio
     async def test_profile_in_scope_accepted(self, client, db_session, auth_headers) -> None:
@@ -1065,6 +1103,8 @@ class TestCrossWorkspaceDispatch:
         await db_session.refresh(profile)
 
         # 绑 target workspace 的 profile（在 scope 中）→ 应该通过校验（503 因无 binding）
+        await _stub_representative_binding(db_session, anchor_ws_id)
+
         resp = await client.post(
             f"/api/workspaces/{anchor_ws_id}/missions/{mission_id}/dispatch_worker",
             json={
@@ -1075,7 +1115,8 @@ class TestCrossWorkspaceDispatch:
         )
         # 无 binding → 201 + failed（BE-P1-2 契约，证明 profile 校验通过）
         assert resp.status_code == 201, resp.text
-        assert resp.json()["error_code"] == "hostfs_unavailable"
+        # ql-20260822-008：stub 绑定后走到 worktree 阶段，测试环境派发失败形态（hostfs 不可达/委托降级）
+        assert resp.json()["status"] == "failed"
 
     @pytest.mark.asyncio
     async def test_profile_out_of_scope_400(self, client, db_session, auth_headers) -> None:
@@ -1183,6 +1224,8 @@ class TestSessionLazyCreate:
     ) -> None:
         """无活跃 mission 且会话绑定 workspace → 懒建（scope/预算/objective 口径）+ 派 worker。"""
         agent_session, ws_id = await _seed_agent_session(db_session)
+        await _stub_representative_binding(db_session, ws_id)
+
         resp = await client.post(
             f"/api/sessions/{agent_session.id}/missions/dispatch_worker",
             json={"objective": "扫描会话架构", "role": "arch"},
@@ -1190,7 +1233,8 @@ class TestSessionLazyCreate:
         )
         assert resp.status_code == 201, resp.text
         # 无 binding → run failed + hostfs_unavailable（BE-P1-2 契约，证明派发走到位）
-        assert resp.json()["error_code"] == "hostfs_unavailable"
+        # ql-20260822-008：stub 绑定后走到 worktree 阶段，测试环境派发失败形态（hostfs 不可达/委托降级）
+        assert resp.json()["status"] == "failed"
 
         mission = (
             (
@@ -1221,6 +1265,8 @@ class TestSessionLazyCreate:
         db_session.add(active_run)
         await db_session.commit()
         await db_session.refresh(active_run)
+
+        await _stub_representative_binding(db_session, _ws_id)
 
         resp = await client.post(
             f"/api/sessions/{agent_session.id}/missions/dispatch_worker",
@@ -1264,6 +1310,8 @@ class TestSessionLazyCreate:
         """预算默认上限支持 env 覆盖（TEAM_LAZY_MISSION_BUDGET_USD）。"""
         monkeypatch.setenv("TEAM_LAZY_MISSION_BUDGET_USD", "12.5")
         agent_session, _ws_id = await _seed_agent_session(db_session)
+        await _stub_representative_binding(db_session, _ws_id)
+
         resp = await client.post(
             f"/api/sessions/{agent_session.id}/missions/dispatch_worker",
             json={"objective": "做事"},
@@ -1288,6 +1336,8 @@ class TestSessionLazyCreate:
         """同会话再次 dispatch → 复用活跃 mission，不双建。"""
         agent_session, _ws_id = await _seed_agent_session(db_session)
         for _ in range(2):
+            await _stub_representative_binding(db_session, _ws_id)
+
             resp = await client.post(
                 f"/api/sessions/{agent_session.id}/missions/dispatch_worker",
                 json={"objective": "做事"},
@@ -1348,6 +1398,26 @@ class TestLazyCreateConcurrencyGuard:
             return await real(db, sid)
 
         monkeypatch.setattr(mission_mod, "get_active_mission_for_session", _stale_first)
+
+        # 本用例聚焦并发守卫语义；绑定预检（ql-20260822-008）有自己的专属用例
+        # 覆盖，此处 stub 掉（懒建 rollback 后的 session 状态与 raw SQL 预检在
+        # 本测试的 fixture 交错下不兼容，不属被测行为）。
+        from app.modules.workspace.member_runtimes import queries as wmr_queries
+
+        monkeypatch.setattr(
+            wmr_queries,
+            "resolve_representative_binding",
+            lambda *a, **k: _fake_binding(),
+        )
+
+        async def _fake_binding():
+            return {
+                "id": uuid.uuid4(),
+                "user_id": uuid.uuid4(),
+                "provider": "claude",
+                "status": "online",
+                "daemon_instance_id": uuid.uuid4(),
+            }
 
         resp = await client.post(
             f"/api/sessions/{agent_session.id}/missions/dispatch_worker",
@@ -1521,13 +1591,16 @@ class TestHeaderOnExplicitRoutes:
         """header 命中会话活跃 mission（锚一致）→ 正常派发。"""
         agent_session, ws_id = await _seed_agent_session(db_session)
         mission = await _seed_session_mission(db_session, agent_session)
+        await _stub_representative_binding(db_session, ws_id)
+
         resp = await client.post(
             f"/api/workspaces/{ws_id}/missions/{mission.id}/dispatch_worker",
             json={"objective": "做事"},
             headers={**auth_headers, "X-Session-Id": str(agent_session.id)},
         )
         assert resp.status_code == 201, resp.text
-        assert resp.json()["error_code"] == "hostfs_unavailable"
+        # ql-20260822-008：stub 绑定后走到 worktree 阶段，测试环境派发失败形态（hostfs 不可达/委托降级）
+        assert resp.json()["status"] == "failed"
 
     @pytest.mark.asyncio
     async def test_header_anchor_mission_mismatch_404(
@@ -1561,6 +1634,8 @@ class TestHeaderOnExplicitRoutes:
         """header 会话无活跃 mission + 显式 mission_id → 回退显式路径（零回归）。"""
         agent_session, _ws_id = await _seed_agent_session(db_session)
         ws_id, mission_id, _ = await _seed_workspace_and_mission(db_session)
+        await _stub_representative_binding(db_session, ws_id)
+
         resp = await client.post(
             f"/api/workspaces/{ws_id}/missions/{mission_id}/dispatch_worker",
             json={"objective": "做事"},
@@ -1596,13 +1671,15 @@ class TestHeaderOnlyRoutes:
     ) -> None:
         """POST /missions/dispatch_worker + X-Session-Id（无路径 id）→ 懒建 + 派发。"""
         agent_session, ws_id = await _seed_agent_session(db_session)
+        await _stub_representative_binding(db_session, ws_id)
         resp = await client.post(
             "/api/missions/dispatch_worker",
             json={"objective": "扫描架构"},
             headers={**auth_headers, "X-Session-Id": str(agent_session.id)},
         )
         assert resp.status_code == 201, resp.text
-        assert resp.json()["error_code"] == "hostfs_unavailable"
+        # ql-20260822-008：stub 绑定后走到 worktree 阶段，测试环境派发失败形态（hostfs 不可达/委托降级）
+        assert resp.json()["status"] == "failed"
         mission = (
             (
                 await db_session.execute(
@@ -1787,6 +1864,7 @@ class TestMissionOnlyRoutes:
     ) -> None:
         """POST /missions/{mid}/dispatch_worker + header（mid=活跃 mission）→ 正常派发。"""
         agent_session, _ws_id = await _seed_agent_session(db_session)
+        await _stub_representative_binding(db_session, _ws_id)
         mission = await _seed_session_mission(db_session, agent_session)
         resp = await client.post(
             f"/api/missions/{mission.id}/dispatch_worker",

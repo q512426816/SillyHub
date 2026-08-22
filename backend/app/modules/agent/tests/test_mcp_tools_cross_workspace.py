@@ -89,6 +89,44 @@ def _fake_delegate() -> MagicMock:
     return delegate
 
 
+async def _stub_representative_binding(session: AsyncSession, ws_id: uuid.UUID) -> None:
+    """给工作区造一条在线机器绑定（ql-20260822-008 派发前在线绑定预检用例）。
+
+    与 test_mcp_tools._stub_representative_binding 同款：daemon_instances(online)
+    + daemon_runtimes(online) + workspace_member_runtimes（member 绑定行，命中
+    resolve_representative_binding 分支2「任意在线」）。raw SQL 注意 SQLite
+    兼容：无 ::json 转换、显式 created_at/updated_at 字符串。本文件派发目标
+    均为 member ws（显式 target），stub 的 ws 须与 target_workspace_id 一致。
+    """
+    from sqlalchemy import text
+
+    di_id = uuid.uuid4()
+    member_uid = uuid.uuid4()
+    ts = "2026-08-22T00:00:00+00:00"
+    await session.execute(
+        text(
+            "INSERT INTO daemon_instances (id, user_id, hostname, server_url, allowed_roots, status, created_at, updated_at)"
+            " VALUES (:id, :uid, 'h1', 'http://t', '[\"~/.sillyhub\"]', 'online', :ts, :ts)"
+        ),
+        {"id": di_id.hex, "uid": member_uid.hex, "ts": ts},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO daemon_runtimes (id, user_id, daemon_instance_id, provider, status, created_at, updated_at)"
+            " VALUES (:id, :uid, :di, 'claude', 'online', :ts, :ts)"
+        ),
+        {"id": uuid.uuid4().hex, "uid": member_uid.hex, "di": di_id.hex, "ts": ts},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO workspace_member_runtimes (workspace_id, user_id, root_path, path_source, daemon_id, shared, created_at, updated_at)"
+            " VALUES (:wid, :uid, '/tmp/w', 'manual', :di, false, :ts, :ts)"
+        ),
+        {"wid": ws_id.hex, "uid": member_uid.hex, "di": di_id.hex, "ts": ts},
+    )
+    await session.commit()
+
+
 async def _fetch_mission_run(session: AsyncSession, mission_id: uuid.UUID) -> AgentRun:
     """mission 下（唯一）worker run，从 DB 现查。"""
     stmt = select(AgentRun).where(AgentRun.mission_id == mission_id)
@@ -107,6 +145,8 @@ class TestMemberContextDispatchFlow:
         """URL 用 scope 内 member ws：dispatch_worker 放行建 run，list_workers
         同一 member 上下文可读（_get_mission 放宽 × 工具入口的组合）。"""
         _anchor, member, mission = await _seed_cross_ws_pair(db_session)
+        # ql-20260822-008：派发前在线绑定预检查派发目标（target=member）的绑定
+        await _stub_representative_binding(db_session, member.id)
 
         fake = _fake_delegate()
         placement: AsyncMock = AsyncMock(return_value=uuid.uuid4())
@@ -151,6 +191,8 @@ class TestTargetTransparentForwarding:
         worktree 按 member 建、lease root_path 落 member 的 .worktrees 副本、
         placement 收 member 路由 + representative_fallback=True。"""
         anchor, member, mission = await _seed_cross_ws_pair(db_session)
+        # ql-20260822-008：派发前在线绑定预检查派发目标（target=member）的绑定
+        await _stub_representative_binding(db_session, member.id)
 
         fake = _fake_delegate()
         placement: AsyncMock = AsyncMock(return_value=uuid.uuid4())
@@ -230,11 +272,14 @@ class TestAnchorProfileForScopeTarget:
         """workspace 级 profile 属 anchor ws，target=member（∈ scope）派发使用
         → 归属校验放行（P2-1：profile.workspace_id ∈ {anchor} ∪ scope）。
 
-        不 patch delegate：无 binding → 503 HOST_FS_DELEGATE_UNAVAILABLE 证明
-        走过了 profile 校验与建 run（校验失败是 400 且不建 run）；run 上冻结的
-        agent_profile_id / snapshot 是校验通过后落库的组合证据。
+        不 patch delegate：run 上冻结的 agent_profile_id / snapshot 是归属校验
+        放行（校验失败是 400 且不建 run）后落库的组合证据；ql-20260822-008
+        预检通过 stub 在线绑定（target=member）过检，真 delegate 派发在测试
+        环境落到 worktree 阶段失败（run 终态 failed，形态不锁死）。
         """
         anchor, member, mission = await _seed_cross_ws_pair(db_session)
+        # ql-20260822-008：预检查派发目标（target=member）的在线绑定
+        await _stub_representative_binding(db_session, member.id)
 
         profile = AgentProfile(
             id=uuid.uuid4(),
@@ -257,9 +302,10 @@ class TestAnchorProfileForScopeTarget:
             },
             headers=auth_headers,
         )
-        # 无 binding → 201 + failed（BE-P1-2 契约），证明 profile 归属校验通过
         assert resp.status_code == 201, resp.text
-        assert resp.json()["error_code"] == "hostfs_unavailable"
+        # ql-20260822-008：stub 绑定后走到 worktree 阶段，测试环境派发失败形态
+        # （hostfs 不可达/委托降级），证明 profile 归属校验通过且 run 已建
+        assert resp.json()["status"] == "failed"
 
         run = await _fetch_mission_run(db_session, mission.id)
         assert run.agent_profile_id == profile.id

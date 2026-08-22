@@ -151,6 +151,44 @@ async def _make_workspace(
     return ws
 
 
+async def _stub_representative_binding(session: AsyncSession, ws_id: uuid.UUID) -> None:
+    """给工作区造一条在线机器绑定（ql-20260822-008 派发前在线绑定预检用例）。
+
+    与 test_mcp_tools._stub_representative_binding 同款：daemon_instances(online)
+    + daemon_runtimes(online) + workspace_member_runtimes（member 绑定行，命中
+    resolve_representative_binding 分支2「任意在线」）。raw SQL 注意 SQLite
+    兼容：无 ::json 转换、显式 created_at/updated_at 字符串。跨 ws 项目用例
+    （_setup_cross_ws_project）自带双 binding，仅单 ws 用例需要本 helper。
+    """
+    from sqlalchemy import text
+
+    di_id = uuid.uuid4()
+    member_uid = uuid.uuid4()
+    ts = "2026-08-22T00:00:00+00:00"
+    await session.execute(
+        text(
+            "INSERT INTO daemon_instances (id, user_id, hostname, server_url, allowed_roots, status, created_at, updated_at)"
+            " VALUES (:id, :uid, 'h1', 'http://t', '[\"~/.sillyhub\"]', 'online', :ts, :ts)"
+        ),
+        {"id": di_id.hex, "uid": member_uid.hex, "ts": ts},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO daemon_runtimes (id, user_id, daemon_instance_id, provider, status, created_at, updated_at)"
+            " VALUES (:id, :uid, :di, 'claude', 'online', :ts, :ts)"
+        ),
+        {"id": uuid.uuid4().hex, "uid": member_uid.hex, "di": di_id.hex, "ts": ts},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO workspace_member_runtimes (workspace_id, user_id, root_path, path_source, daemon_id, shared, created_at, updated_at)"
+            " VALUES (:wid, :uid, '/tmp/w', 'manual', :di, false, :ts, :ts)"
+        ),
+        {"wid": ws_id.hex, "uid": member_uid.hex, "di": di_id.hex, "ts": ts},
+    )
+    await session.commit()
+
+
 async def _setup_cross_ws_project(db_session: AsyncSession, tmp_path) -> dict[str, Any]:
     """项目 + anchor(backend-code) + target(frontend-code) + 双 binding。
 
@@ -415,6 +453,9 @@ class TestSingleWorkspaceZeroRegression:
         assert main_run.role == "orchestrator"
 
         # 2) worker 派发不带 target
+        # ql-20260822-008：派发前在线绑定预检——单 ws 用例无 binding 会被 422
+        # 前置拦截，给 anchor 造在线绑定（delegate/placement 仍 mock，零网络）
+        await _stub_representative_binding(db_session, ws.id)
         resp, fake, placement = await _dispatch_worker(
             client, auth_headers, ws.id, mission_id, objective="改按钮文案"
         )

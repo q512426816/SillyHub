@@ -26,6 +26,8 @@ import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import get_settings
 from app.core.security import create_access_token, password_hasher
 from app.modules.agent.model import AgentRun
@@ -79,6 +81,43 @@ def _token(user: User) -> str:
         settings=get_settings(),
     )
     return token
+
+
+async def _stub_representative_binding(session: AsyncSession, ws_id: uuid.UUID) -> None:
+    """给工作区造一条在线机器绑定（ql-20260822-008 派发前在线绑定预检用例）。
+
+    与 test_mcp_tools._stub_representative_binding 同款：daemon_instances(online)
+    + daemon_runtimes(online) + workspace_member_runtimes（member 绑定行，命中
+    resolve_representative_binding 分支2「任意在线」）。raw SQL 注意 SQLite
+    兼容：无 ::json 转换、显式 created_at/updated_at 字符串。
+    """
+    from sqlalchemy import text
+
+    di_id = uuid.uuid4()
+    member_uid = uuid.uuid4()
+    ts = "2026-08-22T00:00:00+00:00"
+    await session.execute(
+        text(
+            "INSERT INTO daemon_instances (id, user_id, hostname, server_url, allowed_roots, status, created_at, updated_at)"
+            " VALUES (:id, :uid, 'h1', 'http://t', '[\"~/.sillyhub\"]', 'online', :ts, :ts)"
+        ),
+        {"id": di_id.hex, "uid": member_uid.hex, "ts": ts},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO daemon_runtimes (id, user_id, daemon_instance_id, provider, status, created_at, updated_at)"
+            " VALUES (:id, :uid, :di, 'claude', 'online', :ts, :ts)"
+        ),
+        {"id": uuid.uuid4().hex, "uid": member_uid.hex, "di": di_id.hex, "ts": ts},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO workspace_member_runtimes (workspace_id, user_id, root_path, path_source, daemon_id, shared, created_at, updated_at)"
+            " VALUES (:wid, :uid, '/tmp/w', 'manual', :di, false, :ts, :ts)"
+        ),
+        {"wid": ws_id.hex, "uid": member_uid.hex, "di": di_id.hex, "ts": ts},
+    )
+    await session.commit()
 
 
 async def _seed_task_run(
@@ -772,9 +811,9 @@ class TestStartRunProfileWiring:
 class TestMcpDispatchWorkerBindProfile:
     """POST dispatch_worker 传 agent_profile_id：校验 + 落 run.agent_profile_id/快照。
 
-    复用 test_mcp_tools 的「无 binding → 503」前置：run 在 dispatch_worker 调 delegate
-    前已 commit（含 profile 绑定），故直接查 DB 断言两字段；跨 workspace 的 400 在
-    建 run 前抛出（无 run 落库）。
+    run 在 dispatch_worker 走到 worktree/委托派发阶段前已 commit（含 profile
+    绑定），故 stub 在线绑定过预检（ql-20260822-008）后直接查 DB 断言两字段；
+    跨 workspace 的 400 在建 run 前抛出（无 run 落库）。
     """
 
     @staticmethod
@@ -842,15 +881,18 @@ class TestMcpDispatchWorkerBindProfile:
         )
         db_session.add(profile)
         await db_session.commit()
+        # ql-20260822-008：派发前在线绑定预检——目标 ws 造在线绑定过预检，
+        # run（含 profile 绑定）先于 worktree/委托阶段落库
+        await _stub_representative_binding(db_session, ws_id)
 
         resp = await client.post(
             f"/api/workspaces/{ws_id}/missions/{mission_id}/dispatch_worker",
             json={"objective": "做事", "agent_profile_id": str(profile.id)},
             headers=auth_headers,
         )
-        # 无 binding → 201 + failed（BE-P1-2 契约），run 已前置 commit
         assert resp.status_code == 201, resp.text
-        assert resp.json()["error_code"] == "hostfs_unavailable"
+        # ql-20260822-008：stub 绑定后走到 worktree 阶段，测试环境派发失败形态（hostfs 不可达/委托降级）
+        assert resp.json()["status"] == "failed"
 
         run = await self._latest_run(db_session, mission_id)
         assert run is not None
@@ -904,13 +946,16 @@ class TestMcpDispatchWorkerBindProfile:
         """不传 agent_profile_id → 走兜底链，两字段 None（零回归）。"""
         await self._admin_user(db_session)
         ws_id, mission_id = await self._seed_mission(db_session)
+        # ql-20260822-008：派发前在线绑定预检——造在线绑定过预检，run 先行落库
+        await _stub_representative_binding(db_session, ws_id)
         resp = await client.post(
             f"/api/workspaces/{ws_id}/missions/{mission_id}/dispatch_worker",
             json={"objective": "做事"},
             headers=auth_headers,
         )
         assert resp.status_code == 201, resp.text
-        assert resp.json()["error_code"] == "hostfs_unavailable"
+        # ql-20260822-008：stub 绑定后走到 worktree 阶段，测试环境派发失败形态（hostfs 不可达/委托降级）
+        assert resp.json()["status"] == "failed"
         run = await self._latest_run(db_session, mission_id)
         assert run is not None
         assert run.agent_profile_id is None
