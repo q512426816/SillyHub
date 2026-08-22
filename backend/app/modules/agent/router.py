@@ -1083,6 +1083,11 @@ async def create_mission(
     return _mission_to_response(mission, fresh, cost, arts)
 
 
+# Team 主 agent MCP endpoint（2026-07-12-team-main-agent-orchestration task-03 / D-007@v2）：
+# 嵌套 include，随 agent_router 一起挂到 /api 前缀。
+router.include_router(mcp_tools_router)
+
+
 @router.get("/missions/{mission_id}", response_model=MissionResponse)
 async def get_mission(
     mission_id: uuid.UUID,
@@ -1444,8 +1449,3 @@ async def list_project_missions(
         responses.append(resp)
 
     return responses
-
-
-# Team 主 agent MCP endpoint（2026-07-12-team-main-agent-orchestration task-03 / D-007@v2）：
-# 嵌套 include，随 agent_router 一起挂到 /api 前缀。
-router.include_router(mcp_tools_router)

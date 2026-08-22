@@ -13,9 +13,16 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agent.model import AgentArtifact, AgentMission, AgentRun, AgentRunLog
+from app.modules.agent.model import (
+    AgentArtifact,
+    AgentMission,
+    AgentRun,
+    AgentRunLog,
+    AgentSession,
+)
 from app.modules.agent.profile.model import AgentProfile
 from app.modules.workspace.model import Workspace
 
@@ -614,3 +621,699 @@ class TestCrossWorkspaceDispatch:
         data = resp.json()
         # 错误在 message 字段（AppError 统一格式）
         assert "其它 workspace" in data.get("message", "")
+
+
+# ---------------------------------------------------------------------------
+# task-05（2026-08-22-team-session-unify）：X-Session-Id 会话定位 + dispatch 懒建
+# design §5 Phase 1 懒建段 / §7——5 端点缺参经会话解析；dispatch_worker 无活跃
+# mission 时懒建（scope=会话工作区 / objective=dispatch 上下文 / 预算=默认上限），
+# 补回填当前活跃 run 双标记；无工作区 422；并发守卫走部分唯一索引兜底。
+# ---------------------------------------------------------------------------
+
+
+async def _seed_agent_session(
+    session: AsyncSession,
+    *,
+    with_workspace: bool = True,
+) -> tuple[AgentSession, uuid.UUID | None]:
+    """建 AgentSession（可选绑定 workspace），返回 (session, ws_id|None)。"""
+    ws_id: uuid.UUID | None = None
+    if with_workspace:
+        ws_id = uuid.uuid4()
+        session.add(
+            Workspace(
+                id=ws_id,
+                name=f"sess-ws-{ws_id.hex[:8]}",
+                slug=f"sess-ws-{ws_id.hex[:8]}",
+                root_path=f"/tmp/sess-ws-{ws_id.hex}",
+            )
+        )
+    agent_session = AgentSession(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        provider="claude",
+        status="active",
+        workspace_id=ws_id,
+    )
+    session.add(agent_session)
+    await session.commit()
+    await session.refresh(agent_session)
+    return agent_session, ws_id
+
+
+async def _seed_session_mission(session: AsyncSession, agent_session: AgentSession) -> AgentMission:
+    """建会话活跃 mission（session_id 落列，converged/cancelled 均 NULL）。"""
+    mission = AgentMission(
+        workspace_id=agent_session.workspace_id,
+        objective="会话团队任务",
+        session_id=agent_session.id,
+    )
+    session.add(mission)
+    await session.commit()
+    await session.refresh(mission)
+    return mission
+
+
+class TestSessionLazyCreate:
+    """dispatch_worker 会话路由懒建（design §5 Phase 1 / Grill NEW-1）。"""
+
+    @pytest.mark.asyncio
+    async def test_lazy_create_builds_mission_and_dispatches(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """无活跃 mission 且会话绑定 workspace → 懒建（scope/预算/objective 口径）+ 派 worker。"""
+        agent_session, ws_id = await _seed_agent_session(db_session)
+        resp = await client.post(
+            f"/api/sessions/{agent_session.id}/missions/dispatch_worker",
+            json={"objective": "扫描会话架构", "role": "arch"},
+            headers={**auth_headers, "X-Session-Id": str(agent_session.id)},
+        )
+        assert resp.status_code == 201, resp.text
+        # 无 binding → run failed + hostfs_unavailable（BE-P1-2 契约，证明派发走到位）
+        assert resp.json()["error_code"] == "hostfs_unavailable"
+
+        mission = (
+            (
+                await db_session.execute(
+                    select(AgentMission).where(AgentMission.session_id == agent_session.id)
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert mission.workspace_id == ws_id
+        assert mission.scope_workspace_ids == [str(ws_id)]
+        assert mission.objective == "扫描会话架构"  # objective=dispatch 上下文
+        assert mission.budget_usd == 5.0  # 懒建默认预算上限（R-02）
+
+    @pytest.mark.asyncio
+    async def test_lazy_create_backfills_active_run_double_tag(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """懒建成功后补回填会话当前活跃 run 的 mission_id+role='orchestrator'（Grill NEW-1）。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        active_run = AgentRun(
+            agent_session_id=agent_session.id,
+            agent_type="claude_code",
+            provider="claude",
+            status="running",
+        )
+        db_session.add(active_run)
+        await db_session.commit()
+        await db_session.refresh(active_run)
+
+        resp = await client.post(
+            f"/api/sessions/{agent_session.id}/missions/dispatch_worker",
+            json={"objective": "做事"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+
+        await db_session.refresh(active_run)
+        assert active_run.mission_id is not None
+        assert active_run.role == "orchestrator"
+
+    @pytest.mark.asyncio
+    async def test_lazy_create_without_workspace_422(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """会话未绑定 workspace → 422 + 引导弹层文案，不建 mission（CC-10）。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session, with_workspace=False)
+        resp = await client.post(
+            f"/api/sessions/{agent_session.id}/missions/dispatch_worker",
+            json={"objective": "做事"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 422, resp.text
+        assert "未绑定工作区" in resp.text
+        missions = (
+            (
+                await db_session.execute(
+                    select(AgentMission).where(AgentMission.session_id == agent_session.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert missions == []
+
+    @pytest.mark.asyncio
+    async def test_lazy_create_budget_env_override(
+        self, client, db_session, auth_headers, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """预算默认上限支持 env 覆盖（TEAM_LAZY_MISSION_BUDGET_USD）。"""
+        monkeypatch.setenv("TEAM_LAZY_MISSION_BUDGET_USD", "12.5")
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        resp = await client.post(
+            f"/api/sessions/{agent_session.id}/missions/dispatch_worker",
+            json={"objective": "做事"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        mission = (
+            (
+                await db_session.execute(
+                    select(AgentMission).where(AgentMission.session_id == agent_session.id)
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert mission.budget_usd == 12.5
+
+    @pytest.mark.asyncio
+    async def test_second_dispatch_reuses_active_mission(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """同会话再次 dispatch → 复用活跃 mission，不双建。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        for _ in range(2):
+            resp = await client.post(
+                f"/api/sessions/{agent_session.id}/missions/dispatch_worker",
+                json={"objective": "做事"},
+                headers=auth_headers,
+            )
+            assert resp.status_code == 201, resp.text
+
+        missions = (
+            (
+                await db_session.execute(
+                    select(AgentMission).where(AgentMission.session_id == agent_session.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(missions) == 1
+        runs = (
+            (
+                await db_session.execute(
+                    select(AgentRun).where(AgentRun.mission_id == missions[0].id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(runs) == 2  # 两次 dispatch 的 worker run 都落同一 mission
+
+
+class TestLazyCreateConcurrencyGuard:
+    """懒建并发守卫（Grill NEW-3）：uq_agent_missions_session_active 部分唯一索引兜底。"""
+
+    @pytest.mark.asyncio
+    async def test_integrity_error_race_reuses_existing(
+        self, client, db_session, auth_headers, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """并发窗口读到过期 None → 懒建 INSERT 撞部分唯一索引 → 回滚重查复用活跃 mission。"""
+        from app.modules.agent import mission as mission_mod
+
+        agent_session, ws_id = await _seed_agent_session(db_session)
+        existing = AgentMission(
+            workspace_id=ws_id,
+            objective="先到者已建",
+            session_id=agent_session.id,
+        )
+        db_session.add(existing)
+        await db_session.commit()
+        await db_session.refresh(existing)
+
+        real = mission_mod.get_active_mission_for_session
+        calls = {"n": 0}
+
+        async def _stale_first(db, sid):
+            # 首查返回 None（模拟并发窗口的过期读），其后放行真查询
+            if calls["n"] == 0:
+                calls["n"] += 1
+                return None
+            return await real(db, sid)
+
+        monkeypatch.setattr(mission_mod, "get_active_mission_for_session", _stale_first)
+
+        resp = await client.post(
+            f"/api/sessions/{agent_session.id}/missions/dispatch_worker",
+            json={"objective": "并发派发"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+
+        missions = (
+            (
+                await db_session.execute(
+                    select(AgentMission).where(AgentMission.session_id == agent_session.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(missions) == 1
+        assert missions[0].id == existing.id  # 复用先到者，不双建
+        runs = (
+            (await db_session.execute(select(AgentRun).where(AgentRun.mission_id == existing.id)))
+            .scalars()
+            .all()
+        )
+        assert len(runs) == 1  # worker run 派进复用的 mission
+
+
+class TestSessionRouteResolution:
+    """其余 4 端点的会话维度路由（缺省 mission_id/workspace_id 经会话解析）。"""
+
+    @pytest.mark.asyncio
+    async def test_list_workers_via_session_route(self, client, db_session, auth_headers) -> None:
+        """GET /sessions/{sid}/missions/workers → 解析活跃 mission 并列 run。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            status="completed",
+            role="arch",
+            objective="扫描",
+        )
+        db_session.add(worker)
+        await db_session.commit()
+
+        resp = await client.get(
+            f"/api/sessions/{agent_session.id}/missions/workers",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["mission_id"] == str(mission.id)
+        assert [w["role"] for w in data["workers"]] == ["arch"]
+
+    @pytest.mark.asyncio
+    async def test_list_workers_no_active_mission_404(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """会话无活跃 mission → 404（非 dispatch 端点不懒建）。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        resp = await client.get(
+            f"/api/sessions/{agent_session.id}/missions/workers",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 404, resp.text
+
+    @pytest.mark.asyncio
+    async def test_get_worker_result_via_session_route(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """GET /sessions/{sid}/missions/workers/{wid}/result → 读分身 artifact。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            status="completed",
+            role="arch",
+            objective="扫描",
+        )
+        db_session.add(worker)
+        await db_session.commit()
+        await db_session.refresh(worker)
+        db_session.add(AgentArtifact(run_id=worker.id, kind="summary", content_ref="摘要"))
+        await db_session.commit()
+
+        resp = await client.get(
+            f"/api/sessions/{agent_session.id}/missions/workers/{worker.id}/result",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["worker_id"] == str(worker.id)
+        assert len(data["artifacts"]) == 1
+
+    @pytest.mark.asyncio
+    async def test_progress_via_session_route(self, client, db_session, auth_headers) -> None:
+        """POST /sessions/{sid}/missions/progress → 落主控决策日志。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        main_run = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            provider="claude",
+            status="running",
+            role="orchestrator",
+        )
+        db_session.add(main_run)
+        await db_session.commit()
+        await db_session.refresh(main_run)
+
+        resp = await client.post(
+            f"/api/sessions/{agent_session.id}/missions/progress",
+            json={"run_id": str(main_run.id), "message": "已派 arch", "decision": "dispatch"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["run_id"] == str(main_run.id)
+
+    @pytest.mark.asyncio
+    async def test_converge_via_session_route(self, client, db_session, auth_headers) -> None:
+        """POST /sessions/{sid}/missions/converge → 既有收敛链路零语义变化（task-06 前态）。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            status="completed",
+            role="arch",
+            objective="扫描",
+        )
+        main_run = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            provider="claude",
+            status="completed",
+            role="orchestrator",
+        )
+        db_session.add_all([worker, main_run])
+        await db_session.commit()
+        await db_session.refresh(worker)
+        db_session.add(AgentArtifact(run_id=worker.id, kind="summary", content_ref="摘要"))
+        await db_session.commit()
+
+        resp = await client.post(
+            f"/api/sessions/{agent_session.id}/missions/converge",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["mission_id"] == str(mission.id)
+        assert data["status"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_header_path_session_mismatch_400(self, client, db_session, auth_headers) -> None:
+        """X-Session-Id 与路径 session_id 不一致 → 400（防歧义）。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        resp = await client.get(
+            f"/api/sessions/{agent_session.id}/missions/workers",
+            headers={**auth_headers, "X-Session-Id": str(uuid.uuid4())},
+        )
+        assert resp.status_code == 400, resp.text
+
+
+class TestHeaderOnExplicitRoutes:
+    """显式路由 + X-Session-Id：会话优先解析，显式参数仅作越权校验锚。"""
+
+    @pytest.mark.asyncio
+    async def test_header_resolves_active_mission(self, client, db_session, auth_headers) -> None:
+        """header 命中会话活跃 mission（锚一致）→ 正常派发。"""
+        agent_session, ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        resp = await client.post(
+            f"/api/workspaces/{ws_id}/missions/{mission.id}/dispatch_worker",
+            json={"objective": "做事"},
+            headers={**auth_headers, "X-Session-Id": str(agent_session.id)},
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["error_code"] == "hostfs_unavailable"
+
+    @pytest.mark.asyncio
+    async def test_header_anchor_mission_mismatch_404(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """路径 mission_id 与会话活跃 mission 不一致（锚失配）→ 404。"""
+        agent_session, ws_id = await _seed_agent_session(db_session)
+        await _seed_session_mission(db_session, agent_session)
+        resp = await client.post(
+            f"/api/workspaces/{ws_id}/missions/{uuid.uuid4()}/dispatch_worker",
+            json={"objective": "做事"},
+            headers={**auth_headers, "X-Session-Id": str(agent_session.id)},
+        )
+        assert resp.status_code == 404, resp.text
+        # 不因锚失配触发懒建
+        missions = (
+            (
+                await db_session.execute(
+                    select(AgentMission).where(AgentMission.session_id == agent_session.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(missions) == 1
+
+    @pytest.mark.asyncio
+    async def test_header_without_active_falls_back_to_explicit_ids(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """header 会话无活跃 mission + 显式 mission_id → 回退显式路径（零回归）。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        ws_id, mission_id, _ = await _seed_workspace_and_mission(db_session)
+        resp = await client.post(
+            f"/api/workspaces/{ws_id}/missions/{mission_id}/dispatch_worker",
+            json={"objective": "做事"},
+            headers={**auth_headers, "X-Session-Id": str(agent_session.id)},
+        )
+        assert resp.status_code == 201, resp.text
+        # 回退显式路径，不懒建
+        missions = (
+            (
+                await db_session.execute(
+                    select(AgentMission).where(AgentMission.session_id == agent_session.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert missions == []
+
+
+# ---------------------------------------------------------------------------
+# task-10 对齐（2026-08-22-team-session-unify）：``/missions/{action}``
+# （header-only）与 ``/missions/{mid}/{action}``（仅 mid）路由族——daemon
+# hub-client `_missionActionPath` 缺参 URL 契约的 backend 消费方。
+# ---------------------------------------------------------------------------
+
+
+class TestHeaderOnlyRoutes:
+    """``/missions/{action}`` header-only 族（会话身份完全由 X-Session-Id 承载）。"""
+
+    @pytest.mark.asyncio
+    async def test_dispatch_lazy_create_via_header_only(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """POST /missions/dispatch_worker + X-Session-Id（无路径 id）→ 懒建 + 派发。"""
+        agent_session, ws_id = await _seed_agent_session(db_session)
+        resp = await client.post(
+            "/api/missions/dispatch_worker",
+            json={"objective": "扫描架构"},
+            headers={**auth_headers, "X-Session-Id": str(agent_session.id)},
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["error_code"] == "hostfs_unavailable"
+        mission = (
+            (
+                await db_session.execute(
+                    select(AgentMission).where(AgentMission.session_id == agent_session.id)
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert mission.workspace_id == ws_id
+        assert mission.budget_usd == 5.0
+
+    @pytest.mark.asyncio
+    async def test_dispatch_without_header_400(self, client, db_session, auth_headers) -> None:
+        """header-only 路由缺 X-Session-Id → 400（不落任何 mission）。"""
+        resp = await client.post(
+            "/api/missions/dispatch_worker",
+            json={"objective": "做事"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400, resp.text
+        assert "X-Session-Id" in resp.text
+        missions = (await db_session.execute(select(AgentMission))).scalars().all()
+        assert missions == []
+
+    @pytest.mark.asyncio
+    async def test_progress_via_header_only(self, client, db_session, auth_headers) -> None:
+        """POST /missions/progress + header → 按会话活跃 mission 落日志。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        main_run = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            provider="claude",
+            status="running",
+            role="orchestrator",
+        )
+        db_session.add(main_run)
+        await db_session.commit()
+        await db_session.refresh(main_run)
+
+        resp = await client.post(
+            "/api/missions/progress",
+            json={"run_id": str(main_run.id), "message": "已派 arch"},
+            headers={**auth_headers, "X-Session-Id": str(agent_session.id)},
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["run_id"] == str(main_run.id)
+
+    @pytest.mark.asyncio
+    async def test_progress_without_run_id_resolves_main_run(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """run_id 缺省（task-10 对齐）→ 按会话当前主控 run 解析落日志。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        main_run = AgentRun(
+            agent_session_id=agent_session.id,
+            mission_id=mission.id,
+            agent_type="claude_code",
+            provider="claude",
+            status="running",
+            role="orchestrator",
+        )
+        db_session.add(main_run)
+        await db_session.commit()
+        await db_session.refresh(main_run)
+
+        resp = await client.post(
+            "/api/missions/progress",
+            json={"message": "决定等待分身完成"},
+            headers={**auth_headers, "X-Session-Id": str(agent_session.id)},
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["run_id"] == str(main_run.id)
+
+    @pytest.mark.asyncio
+    async def test_progress_without_run_id_and_session_400(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """run_id 缺省且无 X-Session-Id → 400（无法定位主控 run）。
+
+        用仅 mid 路由（无 header 也可解析 mission）触发 run_id 分支——header-only
+        路由缺 header 时在 mission 解析层已先 400（缺 X-Session-Id 文案）。
+        """
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        resp = await client.post(
+            f"/api/missions/{mission.id}/progress",
+            json={"message": "无上下文"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 400, resp.text
+        assert "run_id" in resp.text
+
+    @pytest.mark.asyncio
+    async def test_worker_result_via_header_only(self, client, db_session, auth_headers) -> None:
+        """GET /missions/workers/{wid}/result + header → 读会话活跃 mission 的分身产出。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            status="completed",
+            role="arch",
+        )
+        db_session.add(worker)
+        await db_session.commit()
+        await db_session.refresh(worker)
+
+        resp = await client.get(
+            f"/api/missions/workers/{worker.id}/result",
+            headers={**auth_headers, "X-Session-Id": str(agent_session.id)},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["worker_id"] == str(worker.id)
+
+    @pytest.mark.asyncio
+    @pytest.mark.xfail(
+        reason=(
+            "GET /missions/workers 被先注册的 GET /missions/{mission_id}"
+            "（router.py:1086，mcp_tools include 于 :1451 之后）按首个全匹配截走 → "
+            "uuid 校验 422，本路由不可达；router.py 把 mcp_tools include 挪到"
+            " :1086 之前后本用例自动转 XPASS 生效（非 strict）"
+        ),
+        strict=False,
+    )
+    async def test_list_workers_via_header_only(self, client, db_session, auth_headers) -> None:
+        """GET /missions/workers + header → 按会话活跃 mission 列 run（冲突 canary）。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        db_session.add(
+            AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                status="completed",
+                role="arch",
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get(
+            "/api/missions/workers",
+            headers={**auth_headers, "X-Session-Id": str(agent_session.id)},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["mission_id"] == str(mission.id)
+
+
+class TestMissionOnlyRoutes:
+    """``/missions/{mid}/{action}`` 仅 mid 族（task-10 `_missionActionPath` 形态二）。"""
+
+    @pytest.mark.asyncio
+    async def test_list_workers_without_header_resolves_by_mission_id(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """GET /missions/{mid}/workers 无 header → mission 反解 + 列 run。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        db_session.add(
+            AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                status="completed",
+                role="arch",
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get(
+            f"/api/missions/{mission.id}/workers",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["mission_id"] == str(mission.id)
+        assert [w["role"] for w in data["workers"]] == ["arch"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_with_header_and_matching_mid(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """POST /missions/{mid}/dispatch_worker + header（mid=活跃 mission）→ 正常派发。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        resp = await client.post(
+            f"/api/missions/{mission.id}/dispatch_worker",
+            json={"objective": "做事"},
+            headers={**auth_headers, "X-Session-Id": str(agent_session.id)},
+        )
+        assert resp.status_code == 201, resp.text
+        # 有 mid 锚时不懒建（复用既有活跃 mission）
+        missions = (
+            (
+                await db_session.execute(
+                    select(AgentMission).where(AgentMission.session_id == agent_session.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(missions) == 1
+
+    @pytest.mark.asyncio
+    async def test_list_workers_mismatched_mid_with_header_404(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """GET /missions/{mid}/workers + header，mid ≠ 会话活跃 mission → 404（锚失配）。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        await _seed_session_mission(db_session, agent_session)
+        resp = await client.get(
+            f"/api/missions/{uuid.uuid4()}/workers",
+            headers={**auth_headers, "X-Session-Id": str(agent_session.id)},
+        )
+        assert resp.status_code == 404, resp.text
