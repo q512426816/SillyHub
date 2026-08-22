@@ -10,6 +10,17 @@
 task-02 落骨架（循环 / 活跃查询 limit 100 / 异常隔离框架 / ``mission_patrol_round_done``
 日志 / 每轮独立短 session——``get_session_factory()()`` async with，轮间不长期持连接，
 对齐 complete_lease 请求路径生命周期，D-001/D-002）；task-03~07 依次接线三职责。
+
+task-08（2026-08-22-team-session-unify / design §5 Phase 1 patrol 适配 / §7.5
+patrol auto-converge 行 / D-008 / FR-08）——mission 挂到会话后存续口径从「主控
+run 常驻 running」改为「会话活跃 turn」：
+
+- 职责①扩展：会话 mission awaiting_input 超时自动收敛（主控轮+分身全终态未
+  converge 且会话无活跃 turn 持续超 ``mission_patrol_awaiting_input_timeout_minutes``
+  → 走 task-06 explicit 置位入口，时钟起点=最新 orchestrator run 的 finished_at）。
+- 职责③判死分流：会话 mission 判死对象从主 run 改为分身 run（非终态 + 承载
+  daemon 离线超时 + 主控会话无活跃 turn）；存量 external 保持原主 run 判定链路
+  零回归。
 """
 
 from __future__ import annotations
@@ -19,13 +30,13 @@ import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.db import get_session_factory
 from app.core.logging import get_logger
-from app.modules.agent.model import AgentMission, AgentRun
+from app.modules.agent.model import AgentMission, AgentRun, AgentSession
 from app.modules.agent.orchestrator import (
     _ORCHESTRATOR_ROLE,
     OrchestratorService,
@@ -40,6 +51,10 @@ log = get_logger(__name__)
 # 每轮活跃 mission 上限（FR-01.3 / R-05）：防 mission 积压时单轮过载。
 # created_at 升序 = 老 mission 先巡。模块级常量便于单测收紧验证 limit 生效。
 ACTIVE_MISSION_LIMIT = 100
+
+# run 终态集合（task-08）：与 mcp_tools._TERMINAL_RUN_STATUSES 同口径——
+# awaiting_input 超时收敛的「全终态」判据与分身僵尸判死的「非终态」判据共用。
+_TERMINAL_RUN_STATUSES = ("completed", "failed", "killed")
 
 # run_once 返回 / round_done 日志共用的五计数键（FR-04.2）。
 PATROL_COUNT_KEYS = (
@@ -78,6 +93,38 @@ def _zombie_marked_at(mission: AgentMission) -> datetime | None:
         return _as_utc(datetime.fromisoformat(str(raw)))
     except ValueError:
         return None
+
+
+async def _session_has_active_turn(db: AsyncSession, session_id: uuid.UUID) -> bool:
+    """会话当前是否有活跃 turn（run pending/running/interrupting）——task-08。
+
+    状态集合与 daemon/router._session_has_active_turn、finalizer.
+    _session_has_active_turn 同口径（task-02 契约的 ``session_active_turn``
+    入参来源，task-04/05 同源判定）；patrol 不能 import daemon.router
+    （循环依赖），同语义内联（finalizer 同款处理）。
+    """
+    stmt = (
+        select(AgentRun.id)
+        .where(
+            AgentRun.agent_session_id == session_id,
+            AgentRun.status.in_(("pending", "running", "interrupting")),
+        )
+        .limit(1)
+    )
+    return (await db.execute(stmt)).first() is not None
+
+
+async def _mission_bound_session(db: AsyncSession, mission: AgentMission) -> AgentSession | None:
+    """会话 mission 判别（task-08，与 finalizer/orchestrator 同款口径）。
+
+    ``session_id`` 列对存量构造路径 default_factory 兜底随机 uuid（model.py
+    task-01 注释），不能仅凭非 NULL 判定——按「该 id 的 AgentSession 真实存在」
+    判别：存在 → 会话 mission（awaiting_input 档适用，Grill NEW-4）；查无行 →
+    存量 external/team mission（保持原链路）。
+    """
+    if mission.session_id is None:
+        return None
+    return await db.get(AgentSession, mission.session_id)
 
 
 class MissionPatrolService:
@@ -166,17 +213,96 @@ class MissionPatrolService:
         return converged
 
     async def _converge_mission(self, mission_id: uuid.UUID) -> int:
-        """单 mission 收敛兜底（task-03，design §2.1）：``schedule_loop`` 幂等巡检。
+        """单 mission 收敛兜底（task-03 + task-08 扩展，design §2.1/§7.5）。
 
-        返回 ``str`` = 收敛后 mission status（done/degraded/...）、``None`` = 本轮
-        未触发收敛（orchestrator.py schedule_loop 返回值语义）。external / single
-        模式无主 run → 内部跳过返回 None，本方法零额外过滤（taskcard 约束）。
+        task-03：``schedule_loop`` 幂等巡检（external / single 模式无主 run →
+        内部跳过返回 None，本方法零额外过滤，taskcard 约束）。
+
+        task-08：``schedule_loop`` 返回 None（含会话 mission 整体 no-op——orchestrator
+        分流后不再自动收敛）时，再探会话 mission awaiting_input 超时自动收敛
+        （``_auto_converge_awaiting_input``），命中计入 converged 计数。
 
         Returns:
             本 mission 本轮是否触发收敛（1 / 0）。
         """
         status = await OrchestratorService(self._session).schedule_loop(mission_id)
-        return 1 if status is not None else 0
+        if status is not None:
+            return 1
+        return await self._auto_converge_awaiting_input(mission_id)
+
+    async def _auto_converge_awaiting_input(self, mission_id: uuid.UUID) -> int:
+        """会话 mission awaiting_input 超时自动收敛（task-08 / FR-08 / §7.5 行）。
+
+        判据全格（任一不满足 → 0 不收敛）：
+        - 会话 mission（``session_id`` 指向真实 AgentSession——存量 external/team
+          的随机 uuid 查无会话行，不进此档，Grill NEW-4 零回归）；
+        - 未 converge 未 cancel（活跃态）；
+        - 会话无活跃 turn（pending/running/interrupting，task-02/04/05 同源口径）；
+        - 主控轮 + 分身全终态（task-02 派生态 awaiting_input 的 run 维度前提）；
+        - 时钟起点=最新 ``role='orchestrator'`` run 的 ``finished_at``（锚点与
+          task-06 一致），距今持续超 ``mission_patrol_awaiting_input_timeout_minutes``；
+          finished_at 缺失 → 跳过不猜（对齐判死链路断链语义）。
+
+        命中 → 走 task-06 explicit 置位入口（``converge_explicit=True``：分身维度
+        判据 + converged_at 原子抢占，不依赖主控 run 状态；冲突时入口内回滚置位
+        保重入），推进 mission 进 done/degraded/failed 终态。
+
+        Returns:
+            1 = 本次触发收敛且 converged_at 落库；0 = 未触发 / 置位被抢占或回滚。
+        """
+        # 延迟 import 避免与 control/finalizer/delegation 的循环 import 风险
+        # （与 orchestrator.schedule_loop 同款处理）。
+        from app.modules.agent.control import MissionControlService
+
+        mission = await self._session.get(AgentMission, mission_id)
+        if mission is None or mission.converged_at is not None or mission.cancelled_at is not None:
+            return 0
+        if await _mission_bound_session(self._session, mission) is None:
+            return 0
+        if await _session_has_active_turn(self._session, mission.session_id):
+            # 主控新一轮进行中（会话活跃 turn）→ 非 awaiting_input。
+            return 0
+
+        all_runs = await MissionControlService(self._session).worker_runs(mission_id)
+        if not all_runs or any(r.status not in _TERMINAL_RUN_STATUSES for r in all_runs):
+            # 空集合=planning；有非终态 run=running——均不属 awaiting_input。
+            return 0
+        anchor = max(
+            (r for r in all_runs if r.role == _ORCHESTRATOR_ROLE),
+            key=lambda r: r.created_at,
+            default=None,
+        )
+        if anchor is None or anchor.finished_at is None:
+            # 无主控轮回填 / 时钟缺失：无法定超时起点，跳过不猜（Grill P2-2 同语义）。
+            log.debug(
+                "mission_patrol_awaiting_input_clock_missing",
+                mission_id=str(mission_id),
+            )
+            return 0
+        timeout = timedelta(minutes=get_settings().mission_patrol_awaiting_input_timeout_minutes)
+        now = datetime.now(UTC)
+        if now - _as_utc(anchor.finished_at) < timeout:
+            return 0
+
+        from app.modules.agent.delegation import GLMConfig
+        from app.modules.agent.finalizer import converge_mission_for_completed_run
+
+        result_status = await converge_mission_for_completed_run(
+            self._session, anchor.id, GLMConfig.from_env(), converge_explicit=True
+        )
+        # 置位走原子 UPDATE 绕过身份映射（expire_on_commit=False 下内存对象不自动
+        # 刷新），refresh 重读判定是否真置位（抢占失败 rowcount=0 / 冲突回滚均未置位）。
+        await self._session.refresh(mission)
+        if mission.converged_at is not None and result_status in ("done", "degraded", "failed"):
+            log.info(
+                "mission_patrol_awaiting_input_auto_converged",
+                mission_id=str(mission_id),
+                anchor_run_id=str(anchor.id),
+                status=result_status,
+                timeout_minutes=get_settings().mission_patrol_awaiting_input_timeout_minutes,
+            )
+            return 1
+        return 0
 
     async def _patrol_redispatch(self) -> int:
         """职责② 离线重派（task-04，design §2.2）。
@@ -194,11 +320,20 @@ class MissionPatrolService:
     async def _patrol_zombie(self) -> tuple[int, int]:
         """职责③ 僵尸两阶段（design §2.3；task-05 判死 / task-06 复活 / task-07 豁免解除）。
 
-        判死：项目维度 mission（change_id IS NULL，Grill P1）的主 run running + 有
-        lease + 承载 daemon 持续离线超阈值 → failed(orchestrator_zombie) +
-        zombie_marked_at，不收敛（信号豁免期开始）。判死双条件 = daemon.status !=
-        online AND now - last_heartbeat_at >= zombie_after_minutes（D-003 持续离线，
-        R-02 防 status 断连标记滞后）；链路断链跳过（Grill P2-2）。
+        判死（存量 external 链路）：项目维度 mission（change_id IS NULL，Grill P1）
+        的主 run running + 有 lease + 承载 daemon 持续离线超阈值 →
+        failed(orchestrator_zombie) + zombie_marked_at，不收敛（信号豁免期开始）。
+        判死双条件 = daemon.status != online AND now - last_heartbeat_at >=
+        zombie_after_minutes（D-003 持续离线，R-02 防 status 断连标记滞后）；链路
+        断链跳过（Grill P2-2）。
+
+        判死（会话 mission 分流，task-08 / D-008）：会话 mission 判死对象=分身
+        run——非终态 + 有 lease + 承载 daemon 持续离线超阈值 + 主控会话无活跃
+        turn（主控存续按会话活跃 turn 判定，会话活跃期间不判死）；命中标
+        failed(orchestrator_zombie) + finished_at，不写 mission.zombie_marked_at
+        （该标记由复活段消费，复活候选仅 role=orchestrator——分身无重派复活
+        语义），mission 后续走 awaiting_input 超时自动收敛。会话 mission 主控轮
+        （短生命周期 turn run）不进存量主 run 判死。
 
         复活（task-06）：zombie 主 run 窗口内（now - zombie_marked_at <
         revive_window_minutes）且 daemon 恢复 online → 翻回 running + 清标记 +
@@ -214,11 +349,13 @@ class MissionPatrolService:
         zombie_after = timedelta(minutes=settings.mission_patrol_zombie_after_minutes)
         revive_window = timedelta(minutes=settings.mission_patrol_revive_window_minutes)
 
-        # ── 判死段（task-05）──
+        # ── 判死段·存量主 run（task-05，task-08 排除会话 mission）──
         # 候选：项目维度 mission（change_id IS NULL）未收敛未取消 + 主 run
         # role=orchestrator AND status='running' 且存在 lease（pending 无 lease 天然
         # 排除——pending+no_online_daemon 归职责②重派，design §2.3）。幂等判重
         # （Grill P2-6）：候选仅取 status='running'，已 failed+zombie 的 run 不再进。
+        # task-08：会话 mission（session_id 指向真实 AgentSession）主控轮为短生命
+        # 周期 turn run，不进存量主 run 判定——其僵尸判定走下方分身段。
         stmt = (
             select(AgentRun)
             .join(AgentMission, AgentRun.mission_id == AgentMission.id)
@@ -231,6 +368,7 @@ class MissionPatrolService:
                 select(DaemonTaskLease.id)
                 .where(DaemonTaskLease.agent_run_id == AgentRun.id)
                 .exists(),
+                ~select(AgentSession.id).where(AgentSession.id == AgentMission.session_id).exists(),
             )
         )
         runs = (await self._session.execute(stmt)).scalars().all()
@@ -265,6 +403,63 @@ class MissionPatrolService:
                 "mission_patrol_zombie_marked",
                 mission_id=str(run.mission_id),
                 run_id=str(run.id),
+                daemon_id=str(daemon.id),
+                last_heartbeat_at=str(daemon.last_heartbeat_at),
+            )
+
+        # ── 判死段·会话 mission 分身（task-08，design §5 Phase 1 / D-008）──
+        # 候选：会话 mission（session_id 指向真实 AgentSession 行）未收敛未取消 +
+        # 分身 run（role!='orchestrator' 含 NULL——SQL 三值逻辑下 ``!=`` 漏 NULL
+        # 行，须显式 ``role IS NULL OR`` 守卫）非终态且存在 lease。判死条件与
+        # 存量段同款 daemon 双条件 + 「主控会话无活跃 turn」；不写 mission
+        # zombie 标记（复活段候选仅 role=orchestrator，见 docstring）。
+        session_stmt = (
+            select(AgentRun)
+            .join(AgentMission, AgentRun.mission_id == AgentMission.id)
+            .where(
+                AgentMission.converged_at.is_(None),
+                AgentMission.cancelled_at.is_(None),
+                select(AgentSession.id).where(AgentSession.id == AgentMission.session_id).exists(),
+                or_(AgentRun.role.is_(None), AgentRun.role != _ORCHESTRATOR_ROLE),
+                AgentRun.status.notin_(_TERMINAL_RUN_STATUSES),
+                select(DaemonTaskLease.id)
+                .where(DaemonTaskLease.agent_run_id == AgentRun.id)
+                .exists(),
+            )
+        )
+        session_runs = (await self._session.execute(session_stmt)).scalars().all()
+
+        # 同 mission 多分身共享「会话活跃 turn」判定，逐 mission 查一次缓存复用。
+        session_active_cache: dict[uuid.UUID, bool] = {}
+        for run in session_runs:
+            daemon = await self._resolve_run_daemon(run.id)
+            if daemon is None:
+                continue
+            if daemon.status == "online" or daemon.last_heartbeat_at is None:
+                continue
+            if now - _as_utc(daemon.last_heartbeat_at) < zombie_after:
+                continue
+            mission = await self._session.get(AgentMission, run.mission_id)
+            if mission is None:
+                continue
+            if mission.session_id not in session_active_cache:
+                session_active_cache[mission.session_id] = await _session_has_active_turn(
+                    self._session, mission.session_id
+                )
+            if session_active_cache[mission.session_id]:
+                # 主控会话有活跃 turn：主控本轮还活着（可能仍在等该分身），不判死。
+                continue
+
+            run.status = "failed"
+            run.error_code = ZOMBIE_ERROR_CODE
+            run.finished_at = now
+            self._session.add(run)
+            zombie_marked += 1
+            log.info(
+                "mission_patrol_zombie_marked_session_worker",
+                mission_id=str(run.mission_id),
+                run_id=str(run.id),
+                role=run.role,
                 daemon_id=str(daemon.id),
                 last_heartbeat_at=str(daemon.last_heartbeat_at),
             )

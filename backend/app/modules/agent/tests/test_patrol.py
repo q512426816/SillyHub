@@ -15,6 +15,17 @@ task-09（main.py lifespan 接线）补充两组：
 
 task-01（Settings 四字段）与本任务同 Wave 并行，本文件用配置桩验证循环行为，
 不依赖 Settings 真字段——merge 后 get_settings() 返回真字段，桩替换为等价语义。
+
+task-08（2026-08-22-team-session-unify，design §5 Phase 1 patrol 适配 / §7.5
+patrol auto-converge 行 / D-008 / FR-08）追加两组：
+- awaiting_input 超时自动收敛：会话 mission（session_id 指向真实 AgentSession）
+  主控轮+分身全终态未 converge 且会话无活跃 turn 持续超
+  ``mission_patrol_awaiting_input_timeout_minutes`` → 走 task-06 explicit
+  置位入口（锚点=最新 orchestrator run）；未超时 / 时钟缺失 / 会话活跃 /
+  分身非终态 / 存量 external 不触发。
+- 僵尸判定按会话维度：分身 run 非终态 + 承载 daemon 离线超时 + 主控会话无
+  活跃 turn → 判死分身（不写 mission zombie 标记，无复活语义）；会话 mission
+  主控轮不进存量主 run 判死；存量 external 主 run 判定零回归（分流用例）。
 """
 
 from __future__ import annotations
@@ -30,7 +41,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import app.modules.agent.patrol as patrol
-from app.modules.agent.model import AgentMission, AgentRun
+from app.modules.agent.model import AgentMission, AgentRun, AgentSession
 from app.modules.agent.orchestrator import OrchestratorService
 from app.modules.agent.patrol import MissionPatrolService, mission_patrol_loop
 from app.modules.agent.placement import NoOnlineDaemonError, RunPlacementService
@@ -42,13 +53,16 @@ def _stub_settings(
     interval_seconds: int = 0,
     zombie_after_minutes: int = 60,
     revive_window_minutes: int = 30,
+    awaiting_input_timeout_minutes: int = 30,
 ) -> SimpleNamespace:
-    """巡检配置桩：循环消费 enabled/interval，僵尸段消费 after/revive 两阈值。"""
+    """巡检配置桩：循环消费 enabled/interval，僵尸段消费 after/revive 两阈值，
+    task-08 超时收敛段消费 awaiting_input_timeout。"""
     return SimpleNamespace(
         mission_patrol_enabled=enabled,
         mission_patrol_interval_seconds=interval_seconds,
         mission_patrol_zombie_after_minutes=zombie_after_minutes,
         mission_patrol_revive_window_minutes=revive_window_minutes,
+        mission_patrol_awaiting_input_timeout_minutes=awaiting_input_timeout_minutes,
     )
 
 
@@ -82,8 +96,17 @@ async def _make_mission(
     change_id: uuid.UUID | None = None,
     constraints: dict | None = None,
     created_by: uuid.UUID | None = None,
+    session_id: uuid.UUID | None = None,
 ) -> AgentMission:
-    """建一条 AgentMission 行，created_at / cancelled_at / converged_at 可显式控制。"""
+    """建一条 AgentMission 行，created_at / cancelled_at / converged_at / session_id 可显式控制。
+
+    ``session_id`` 传真实 AgentSession.id 即「会话 mission」；缺省走列
+    default_factory 随机 uuid（= 存量 external/team 形态，查无会话行）。
+    """
+    extra: dict = {}
+    if session_id is not None:
+        # 显式传 None 会绕过 default_factory 违反 NOT NULL（orchestrator.py 同款注释）。
+        extra["session_id"] = session_id
     mission = AgentMission(
         workspace_id=ws_id,
         change_id=change_id,
@@ -93,11 +116,53 @@ async def _make_mission(
         created_at=created_at,
         cancelled_at=cancelled_at,
         converged_at=converged_at,
+        **extra,
     )
     session.add(mission)
     await session.commit()
     await session.refresh(mission)
     return mission
+
+
+async def _make_agent_session(session: AsyncSession) -> AgentSession:
+    """建一条真实 AgentSession 行（会话 mission 判别依据：session_id 指向此行）。"""
+    agent_session = AgentSession(
+        user_id=uuid.uuid4(),
+        provider="claude",
+        status="active",
+    )
+    session.add(agent_session)
+    await session.commit()
+    await session.refresh(agent_session)
+    return agent_session
+
+
+async def _make_worker_run(
+    session: AsyncSession,
+    mission_id: uuid.UUID,
+    *,
+    status: str = "completed",
+    role: str | None = "arch",
+    finished_at: datetime | None = None,
+    created_at: datetime | None = None,
+) -> AgentRun:
+    """建一条分身 run（role 可传 None 覆盖存量 NULL role 形态）。"""
+    extra: dict = {}
+    if created_at is not None:
+        extra["created_at"] = created_at
+    run = AgentRun(
+        mission_id=mission_id,
+        agent_type="claude_code",
+        status=status,
+        role=role,
+        objective="分身目标",
+        finished_at=finished_at,
+        **extra,
+    )
+    session.add(run)
+    await session.commit()
+    await session.refresh(run)
+    return run
 
 
 async def _make_user(session: AsyncSession) -> uuid.UUID:
@@ -157,8 +222,17 @@ async def _make_orchestrator_run(
     status: str = "running",
     error_code: str | None = None,
     finished_at: datetime | None = None,
+    agent_session_id: uuid.UUID | None = None,
+    created_at: datetime | None = None,
 ) -> AgentRun:
-    """建主 agent run（role=orchestrator），status/error_code/finished_at 可控。"""
+    """建主 agent run（role=orchestrator），status/error_code/finished_at/会话锚可控。
+
+    ``agent_session_id`` 传会话 id 即会话 mission 的主控轮 turn run 形态（task-04
+    双标记）；``created_at`` 显式控制用于「最新 orchestrator run」锚点判定。
+    """
+    extra: dict = {}
+    if created_at is not None:
+        extra["created_at"] = created_at
     run = AgentRun(
         mission_id=mission_id,
         agent_type="claude_code",
@@ -166,6 +240,8 @@ async def _make_orchestrator_run(
         role="orchestrator",
         error_code=error_code,
         finished_at=finished_at,
+        agent_session_id=agent_session_id,
+        **extra,
     )
     session.add(run)
     await session.commit()
@@ -1112,3 +1188,540 @@ class TestZombieExemptionRelease:
         assert (marked, revived) == (0, 0)
         assert mission.constraints == constraints_before
         assert run.status == "failed"
+
+
+def _patch_explicit_converge_recorder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[uuid.UUID, bool]]:
+    """mock finalizer.converge_mission_for_completed_run（task-08 超时收敛消费侧）。
+
+    记录 ``(run_id, converge_explicit)`` 调用并置位 ``mission.converged_at``（对齐
+    真实 explicit 入口的原子置位副作用，供 converged 计数与终态断言）；真实入口
+    内部 FinalizerService 走 git_merge RPC / GLM httpx（单跑偶发 8~34s），照
+    test_orchestrator._mock_converge 惯例统一 mock。
+    """
+    import app.modules.agent.finalizer as finalizer_mod
+
+    calls: list[tuple[uuid.UUID, bool]] = []
+
+    async def _fake_converge(session, run_id, glm_config=None, *, converge_explicit=False):
+        calls.append((run_id, converge_explicit))
+        run = await session.get(AgentRun, run_id)
+        if run is not None and run.mission_id is not None:
+            mission = await session.get(AgentMission, run.mission_id)
+            if mission is not None:
+                mission.converged_at = datetime.now(UTC)
+                session.add(mission)
+                await session.commit()
+        return "done"
+
+    monkeypatch.setattr(finalizer_mod, "converge_mission_for_completed_run", _fake_converge)
+    return calls
+
+
+class TestAwaitingInputAutoConverge:
+    """task-08 职责①扩展：会话 mission awaiting_input 超时自动收敛（FR-08 / §7.5）。
+
+    判据全格：会话 mission（session_id 指向真实 AgentSession）+ 主控轮与分身全
+    终态 + 未 converge + 会话无活跃 turn（task-02 派生态）持续超
+    ``mission_patrol_awaiting_input_timeout_minutes`` → 走 task-06 explicit
+    置位入口（锚点=最新 orchestrator run）；任一条件不满足（未超时 / 时钟缺失 /
+    会话活跃 / 分身非终态 / 存量 external）→ 不收敛。
+    """
+
+    @pytest.mark.asyncio
+    async def test_timeout_expired_converges_via_explicit_entry(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """全条件满足 + 超时 → explicit 入口收敛（converge_explicit=True + 锚点=
+        最新 orchestrator run），converged 计 1，converged_at 落库。"""
+        monkeypatch.setattr(patrol, "get_settings", lambda: _stub_settings())
+        calls = _patch_explicit_converge_recorder(monkeypatch)
+        ws_id = await _make_workspace(db_session)
+        agent_session = await _make_agent_session(db_session)
+        mission = await _make_mission(
+            db_session,
+            ws_id,
+            created_at=datetime.now(UTC) - timedelta(hours=2),
+            session_id=agent_session.id,
+        )
+        turn_run = await _make_orchestrator_run(
+            db_session,
+            mission.id,
+            status="completed",
+            finished_at=datetime.now(UTC) - timedelta(minutes=40),
+            agent_session_id=agent_session.id,
+        )
+        await _make_worker_run(db_session, mission.id, status="completed")
+
+        counts = await MissionPatrolService(db_session).run_once()
+
+        assert counts["converged"] == 1
+        assert calls == [(turn_run.id, True)], "必须走 explicit 入口且锚点=最新主控轮"
+        assert mission.converged_at is not None
+
+    @pytest.mark.asyncio
+    async def test_within_timeout_not_converged(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """未超时（finished_at=10min 前 < 默认 30min）→ 不收敛（awaiting_input 窗口内）。"""
+        monkeypatch.setattr(patrol, "get_settings", lambda: _stub_settings())
+        calls = _patch_explicit_converge_recorder(monkeypatch)
+        ws_id = await _make_workspace(db_session)
+        agent_session = await _make_agent_session(db_session)
+        mission = await _make_mission(
+            db_session,
+            ws_id,
+            created_at=datetime.now(UTC) - timedelta(hours=2),
+            session_id=agent_session.id,
+        )
+        await _make_orchestrator_run(
+            db_session,
+            mission.id,
+            status="completed",
+            finished_at=datetime.now(UTC) - timedelta(minutes=10),
+            agent_session_id=agent_session.id,
+        )
+        await _make_worker_run(db_session, mission.id, status="completed")
+
+        counts = await MissionPatrolService(db_session).run_once()
+
+        assert counts["converged"] == 0
+        assert calls == []
+        assert mission.converged_at is None
+
+    @pytest.mark.asyncio
+    async def test_clock_missing_skipped(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """时钟缺失（最新 orchestrator run finished_at=None）→ 跳过不猜（对齐断链语义）。"""
+        monkeypatch.setattr(patrol, "get_settings", lambda: _stub_settings())
+        calls = _patch_explicit_converge_recorder(monkeypatch)
+        ws_id = await _make_workspace(db_session)
+        agent_session = await _make_agent_session(db_session)
+        mission = await _make_mission(
+            db_session,
+            ws_id,
+            created_at=datetime.now(UTC) - timedelta(hours=2),
+            session_id=agent_session.id,
+        )
+        await _make_orchestrator_run(
+            db_session,
+            mission.id,
+            status="completed",
+            finished_at=None,
+            agent_session_id=agent_session.id,
+        )
+        await _make_worker_run(db_session, mission.id, status="completed")
+
+        counts = await MissionPatrolService(db_session).run_once()
+
+        assert counts["converged"] == 0
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_session_active_turn_not_converged(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """会话有活跃 turn（pending/running/interrupting，task-04/05 同源口径）→
+        主控新一轮进行中，不属 awaiting_input，不超时收敛。"""
+        monkeypatch.setattr(patrol, "get_settings", lambda: _stub_settings())
+        calls = _patch_explicit_converge_recorder(monkeypatch)
+        ws_id = await _make_workspace(db_session)
+        agent_session = await _make_agent_session(db_session)
+        mission = await _make_mission(
+            db_session,
+            ws_id,
+            created_at=datetime.now(UTC) - timedelta(hours=2),
+            session_id=agent_session.id,
+        )
+        await _make_orchestrator_run(
+            db_session,
+            mission.id,
+            status="completed",
+            finished_at=datetime.now(UTC) - timedelta(minutes=40),
+            agent_session_id=agent_session.id,
+        )
+        await _make_worker_run(db_session, mission.id, status="completed")
+        # 会话当前活跃 turn：挂在该会话上的 running run（mission 全 run 仍终态，
+        # 隔离「会话活跃 turn」这一独立判据）
+        db_session.add(
+            AgentRun(
+                agent_session_id=agent_session.id,
+                agent_type="claude_code",
+                status="running",
+            )
+        )
+        await db_session.commit()
+
+        counts = await MissionPatrolService(db_session).run_once()
+
+        assert counts["converged"] == 0
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_worker_not_terminal_not_converged(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """分身非终态（running）→ 派生态=running 非 awaiting_input，不超时收敛。"""
+        monkeypatch.setattr(patrol, "get_settings", lambda: _stub_settings())
+        calls = _patch_explicit_converge_recorder(monkeypatch)
+        ws_id = await _make_workspace(db_session)
+        agent_session = await _make_agent_session(db_session)
+        mission = await _make_mission(
+            db_session,
+            ws_id,
+            created_at=datetime.now(UTC) - timedelta(hours=2),
+            session_id=agent_session.id,
+        )
+        await _make_orchestrator_run(
+            db_session,
+            mission.id,
+            status="completed",
+            finished_at=datetime.now(UTC) - timedelta(minutes=40),
+            agent_session_id=agent_session.id,
+        )
+        await _make_worker_run(db_session, mission.id, status="running")
+
+        counts = await MissionPatrolService(db_session).run_once()
+
+        assert counts["converged"] == 0
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_external_mission_not_timeout_converged(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """存量 external/team mission（session_id 随机 uuid 查无会话行）不进超时
+        收敛——其收敛仍走 schedule_loop 存量链路（此处 stub 返回 None 隔离），explicit 入口不被调。"""
+        monkeypatch.setattr(patrol, "get_settings", lambda: _stub_settings())
+        calls = _patch_explicit_converge_recorder(monkeypatch)
+
+        async def _fake_schedule_loop(
+            self: OrchestratorService, mission_id: uuid.UUID
+        ) -> str | None:
+            return None
+
+        monkeypatch.setattr(OrchestratorService, "schedule_loop", _fake_schedule_loop)
+        ws_id = await _make_workspace(db_session)
+        mission = await _make_mission(
+            db_session, ws_id, created_at=datetime.now(UTC) - timedelta(hours=2)
+        )
+        await _make_orchestrator_run(
+            db_session,
+            mission.id,
+            status="completed",
+            finished_at=datetime.now(UTC) - timedelta(minutes=40),
+        )
+        await _make_worker_run(db_session, mission.id, status="completed")
+
+        counts = await MissionPatrolService(db_session).run_once()
+
+        assert counts["converged"] == 0
+        assert calls == [], "存量 external 不得走 awaiting_input 超时收敛（Grill NEW-4）"
+
+    @pytest.mark.asyncio
+    async def test_clock_starts_from_latest_orchestrator_run(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """时钟起点=最新 orchestrator run 的 finished_at：旧轮 45min 前已终、最新轮
+        5min 前才终 → 未超时不收敛（不得拿旧轮时钟提前收）。"""
+        monkeypatch.setattr(patrol, "get_settings", lambda: _stub_settings())
+        calls = _patch_explicit_converge_recorder(monkeypatch)
+        ws_id = await _make_workspace(db_session)
+        agent_session = await _make_agent_session(db_session)
+        mission = await _make_mission(
+            db_session,
+            ws_id,
+            created_at=datetime.now(UTC) - timedelta(hours=2),
+            session_id=agent_session.id,
+        )
+        base = datetime.now(UTC) - timedelta(hours=1)
+        await _make_orchestrator_run(
+            db_session,
+            mission.id,
+            status="completed",
+            finished_at=datetime.now(UTC) - timedelta(minutes=45),
+            agent_session_id=agent_session.id,
+            created_at=base,
+        )
+        latest = await _make_orchestrator_run(
+            db_session,
+            mission.id,
+            status="completed",
+            finished_at=datetime.now(UTC) - timedelta(minutes=5),
+            agent_session_id=agent_session.id,
+            created_at=base + timedelta(minutes=10),
+        )
+        await _make_worker_run(db_session, mission.id, status="completed")
+
+        counts = await MissionPatrolService(db_session).run_once()
+
+        assert counts["converged"] == 0
+        assert calls == []
+
+        # 对照：最新轮也超时后 → 收敛且锚点=最新轮（不取旧轮）。
+        latest_run = await db_session.get(AgentRun, latest.id)
+        latest_run.finished_at = datetime.now(UTC) - timedelta(minutes=40)
+        db_session.add(latest_run)
+        await db_session.commit()
+
+        converged = await MissionPatrolService(db_session)._auto_converge_awaiting_input(mission.id)
+
+        assert converged == 1
+        assert calls == [(latest.id, True)]
+
+
+class TestAwaitingInputTimeoutConfig:
+    """task-08：``mission_patrol_awaiting_input_timeout_minutes`` 配置契约（默认 30 / ge=5）。"""
+
+    def test_default_30(self) -> None:
+        """不设 env 时默认 30 分钟（存量部署零配置可启动）。"""
+        from app.core.config import Settings
+
+        s = Settings(
+            database_url="postgresql+asyncpg://u:p@localhost/db",
+            secret_key="x" * 16,
+        )
+        assert s.mission_patrol_awaiting_input_timeout_minutes == 30
+
+    def test_below_5_rejected_and_bound_allowed(self) -> None:
+        """低于 5 拒绝（ValidationError）；恰好 5 合法（ge 下界含端点）。"""
+        from pydantic import ValidationError
+
+        from app.core.config import Settings
+
+        base = {
+            "database_url": "postgresql+asyncpg://u:p@localhost/db",
+            "secret_key": "x" * 16,
+        }
+        with pytest.raises(ValidationError):
+            Settings(**base, mission_patrol_awaiting_input_timeout_minutes=4)
+        ok = Settings(**base, mission_patrol_awaiting_input_timeout_minutes=5)
+        assert ok.mission_patrol_awaiting_input_timeout_minutes == 5
+
+
+async def _make_session_zombie_setup(
+    db_session: AsyncSession,
+    *,
+    daemon_status: str,
+    worker_status: str = "running",
+    worker_role: str | None = "arch",
+    active_turn: bool = False,
+) -> tuple[AgentMission, AgentRun]:
+    """建会话维度僵尸用例前置：真实 AgentSession + 会话 mission + 非终态分身 run
+    （带 lease 的完整 daemon 链）。active_turn=True 时补一条挂在该会话的 running
+    turn run（无 mission_id，纯会话活跃信号）。"""
+    ws_id = await _make_workspace(db_session)
+    user_id = await _make_user(db_session)
+    agent_session = await _make_agent_session(db_session)
+    mission = await _make_mission(
+        db_session,
+        ws_id,
+        created_at=datetime.now(UTC) - timedelta(hours=3),
+        session_id=agent_session.id,
+    )
+    worker = await _make_worker_run(db_session, mission.id, status=worker_status, role=worker_role)
+    _, runtime_id = await _make_daemon_chain(
+        db_session,
+        user_id,
+        daemon_status=daemon_status,
+        last_heartbeat_at=datetime.now(UTC) - timedelta(minutes=90),
+    )
+    await _make_lease(db_session, worker.id, runtime_id)
+    if active_turn:
+        db_session.add(
+            AgentRun(
+                agent_session_id=agent_session.id,
+                agent_type="claude_code",
+                status="running",
+            )
+        )
+        await db_session.commit()
+    return mission, worker
+
+
+class TestZombieSessionDimension:
+    """task-08 职责③判死段会话维度分流（design §5 Phase 1 patrol 适配 / D-008）。
+
+    判死条件=分身 run（role!='orchestrator' 含 NULL）非终态 + 承载 daemon 持续
+    离线超 zombie_after + 主控会话无活跃 turn；会话 mission 主控轮（短生命周期
+    turn run）不进存量主 run 判死；存量 external 主 run 判定链路零回归。
+    """
+
+    @pytest.mark.asyncio
+    async def test_session_worker_offline_beyond_threshold_marked(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """全条件满足 → 分身标 failed(orchestrator_zombie)+finished_at；不写 mission
+        zombie_marked_at（分身无复活语义，mission 走 awaiting_input 超时收敛）。"""
+        monkeypatch.setattr(patrol, "get_settings", lambda: _stub_settings())
+        mission, worker = await _make_session_zombie_setup(db_session, daemon_status="offline")
+
+        marked, revived = await MissionPatrolService(db_session)._patrol_zombie()
+
+        assert (marked, revived) == (1, 0)
+        assert worker.status == "failed"
+        assert worker.error_code == "orchestrator_zombie"
+        assert worker.finished_at is not None
+        assert mission.converged_at is None
+        assert "zombie_marked_at" not in (mission.constraints or {})
+
+    @pytest.mark.asyncio
+    async def test_session_worker_active_turn_not_marked(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """主控会话有活跃 turn（主控本轮还活着，可能仍在等分身）→ 不判死。"""
+        monkeypatch.setattr(patrol, "get_settings", lambda: _stub_settings())
+        _mission, worker = await _make_session_zombie_setup(
+            db_session, daemon_status="offline", active_turn=True
+        )
+
+        marked, _ = await MissionPatrolService(db_session)._patrol_zombie()
+
+        assert marked == 0
+        assert worker.status == "running"
+
+    @pytest.mark.asyncio
+    async def test_session_worker_daemon_online_not_marked(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """承载 daemon 在线（心跳再老）→ 不判死。"""
+        monkeypatch.setattr(patrol, "get_settings", lambda: _stub_settings())
+        _mission, worker = await _make_session_zombie_setup(db_session, daemon_status="online")
+
+        marked, _ = await MissionPatrolService(db_session)._patrol_zombie()
+
+        assert marked == 0
+        assert worker.status == "running"
+
+    @pytest.mark.asyncio
+    async def test_session_worker_offline_below_threshold_not_marked(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """daemon 离线但未超 zombie_after（默认 60min，心跳 10min 前）→ 不判死。
+
+        _make_session_zombie_setup 心跳固定 90min 前，这里手动改回 10min 前。
+        """
+        monkeypatch.setattr(patrol, "get_settings", lambda: _stub_settings())
+        _mission, worker = await _make_session_zombie_setup(db_session, daemon_status="offline")
+        from sqlalchemy import update
+
+        from app.modules.daemon.model import DaemonInstance
+
+        await db_session.execute(
+            update(DaemonInstance)
+            .where(DaemonInstance.status == "offline")
+            .values(last_heartbeat_at=datetime.now(UTC) - timedelta(minutes=10))
+        )
+        await db_session.commit()
+
+        marked, _ = await MissionPatrolService(db_session)._patrol_zombie()
+
+        assert marked == 0
+        assert worker.status == "running"
+
+    @pytest.mark.asyncio
+    async def test_session_worker_without_lease_not_marked(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """无 lease 的分身 run（链路断链/未派成）不进候选——判死需承载 daemon 链路。"""
+        monkeypatch.setattr(patrol, "get_settings", lambda: _stub_settings())
+        ws_id = await _make_workspace(db_session)
+        agent_session = await _make_agent_session(db_session)
+        mission = await _make_mission(
+            db_session,
+            ws_id,
+            created_at=datetime.now(UTC) - timedelta(hours=3),
+            session_id=agent_session.id,
+        )
+        worker = await _make_worker_run(db_session, mission.id, status="running")
+
+        marked, _ = await MissionPatrolService(db_session)._patrol_zombie()
+
+        assert marked == 0
+        assert worker.status == "running"
+
+    @pytest.mark.asyncio
+    async def test_null_role_session_worker_marked(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """role=NULL 的存量形态分身也在候选内（SQL 三值逻辑 NULL 守卫）。"""
+        monkeypatch.setattr(patrol, "get_settings", lambda: _stub_settings())
+        _mission, worker = await _make_session_zombie_setup(
+            db_session, daemon_status="offline", worker_role=None
+        )
+
+        marked, _ = await MissionPatrolService(db_session)._patrol_zombie()
+
+        assert marked == 1
+        assert worker.status == "failed"
+        assert worker.error_code == "orchestrator_zombie"
+
+    @pytest.mark.asyncio
+    async def test_session_mission_orchestrator_turn_run_not_legacy_marked(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """会话 mission 的主控轮（turn run，即使 running + 有 lease + daemon 离线）
+        不进存量主 run 判死——主控存续按会话活跃 turn 判定，不按主 run 常驻。"""
+        monkeypatch.setattr(patrol, "get_settings", lambda: _stub_settings())
+        ws_id = await _make_workspace(db_session)
+        user_id = await _make_user(db_session)
+        agent_session = await _make_agent_session(db_session)
+        mission = await _make_mission(
+            db_session,
+            ws_id,
+            created_at=datetime.now(UTC) - timedelta(hours=3),
+            session_id=agent_session.id,
+        )
+        turn_run = await _make_orchestrator_run(
+            db_session, mission.id, status="running", agent_session_id=agent_session.id
+        )
+        _, runtime_id = await _make_daemon_chain(
+            db_session,
+            user_id,
+            daemon_status="offline",
+            last_heartbeat_at=datetime.now(UTC) - timedelta(minutes=90),
+        )
+        await _make_lease(db_session, turn_run.id, runtime_id)
+
+        marked, _ = await MissionPatrolService(db_session)._patrol_zombie()
+
+        assert marked == 0
+        assert turn_run.status == "running"
+
+    @pytest.mark.asyncio
+    async def test_session_worker_and_external_main_run_disjoint_paths(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """分流回归：同轮会话 mission 判死分身、存量 external 判死主 run，互不串道。"""
+        monkeypatch.setattr(patrol, "get_settings", lambda: _stub_settings())
+        # 会话侧：分身 running + daemon 离线
+        session_mission, worker = await _make_session_zombie_setup(
+            db_session, daemon_status="offline"
+        )
+        # 存量 external 侧：主 run running + lease + daemon 离线（原判死链路）
+        ws_id = await _make_workspace(db_session)
+        user_id = await _make_user(db_session)
+        external_mission = await _make_mission(
+            db_session, ws_id, created_at=datetime.now(UTC) - timedelta(hours=3)
+        )
+        main_run = await _make_orchestrator_run(db_session, external_mission.id)
+        _, runtime_id = await _make_daemon_chain(
+            db_session,
+            user_id,
+            daemon_status="offline",
+            last_heartbeat_at=datetime.now(UTC) - timedelta(minutes=90),
+        )
+        await _make_lease(db_session, main_run.id, runtime_id)
+
+        marked, revived = await MissionPatrolService(db_session)._patrol_zombie()
+
+        assert (marked, revived) == (2, 0)
+        assert worker.status == "failed"
+        assert worker.error_code == "orchestrator_zombie"
+        assert main_run.status == "failed"
+        assert main_run.error_code == "orchestrator_zombie"
+        # 存量 external 判死保留 mission zombie 标记（复活窗口语义），会话分身不写。
+        assert "zombie_marked_at" in (external_mission.constraints or {})
+        assert "zombie_marked_at" not in (session_mission.constraints or {})

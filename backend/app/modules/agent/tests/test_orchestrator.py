@@ -12,6 +12,14 @@
   - cancelled mission / 无主 agent run → 跳过。
 - 主 agent run 必须写 mission_id（否则 converge_mission_for_completed_run 在
   finalizer.py:206 run.mission_id is None 直接 return，mission 永不收敛）。
+
+task-08（2026-08-22-team-session-unify / design §5 Phase 1 patrol 适配 / D-008）追加：
+- ``schedule_loop`` 会话 mission 分流：主控轮为短生命周期 turn run，三重收敛信号
+  按 session 维度判定主控存续——不强改主控轮状态、不触发 converge（收敛入口仅
+  MCP converge 与 patrol awaiting_input 超时，task-06 契约）；收敛锚点=最新
+  orchestrator run（与 task-06 一致）；存量 external 链路零回归。
+- ``redispatch_pending_main_runs`` 候选过滤会话 mission（显式 no-op），存量
+  external 重派行为保留。
 """
 
 from __future__ import annotations
@@ -24,11 +32,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.modules.agent.model import AgentMission, AgentRun
+from app.modules.agent.model import AgentMission, AgentRun, AgentSession
 from app.modules.agent.orchestrator import (
     OrchestratorService,
     _resolve_main_agent_config,
 )
+from app.modules.agent.placement import RunPlacementService
 
 
 async def _fake_converge(session, run_id, glm_config=None):
@@ -673,6 +682,315 @@ class TestScheduleLoopZombieExemption:
         result = await svc.schedule_loop(mission.id)
 
         assert result == "done"
+
+
+async def _make_session_mission(
+    session: AsyncSession,
+    ws_id: uuid.UUID,
+    *,
+    budget_usd: float | None = None,
+) -> tuple[AgentMission, AgentSession]:
+    """建真实 AgentSession + 绑定它的会话 mission（task-08 会话维度判定对象）。
+
+    会话 mission 判别口径与 finalizer / patrol 一致：mission.session_id 指向
+    真实存在的 AgentSession 行（存量 external 的随机 uuid 查无此行 → 走原链路）。
+    """
+    agent_session = AgentSession(
+        user_id=uuid.uuid4(),
+        provider="claude",
+        status="active",
+    )
+    session.add(agent_session)
+    mission = AgentMission(
+        workspace_id=ws_id,
+        session_id=agent_session.id,
+        objective="会话团队目标",
+        constraints={"mode": "team"},
+        budget_usd=budget_usd,
+    )
+    session.add(mission)
+    await session.commit()
+    await session.refresh(mission)
+    return mission, agent_session
+
+
+async def _make_run(
+    session: AsyncSession,
+    mission_id: uuid.UUID | None,
+    *,
+    status: str,
+    role: str | None,
+    agent_session_id: uuid.UUID | None = None,
+    created_at: datetime | None = None,
+    cost: float = 0.0,
+) -> AgentRun:
+    """建一条 AgentRun（主控轮 / 分身通用，role 可 None 覆盖存量形态）。"""
+    extra: dict = {}
+    if created_at is not None:
+        extra["created_at"] = created_at
+    run = AgentRun(
+        mission_id=mission_id,
+        agent_type="claude_code",
+        status=status,
+        role=role,
+        objective="run objective",
+        total_cost_usd=cost,
+        agent_session_id=agent_session_id,
+        **extra,
+    )
+    session.add(run)
+    await session.commit()
+    await session.refresh(run)
+    return run
+
+
+def _patch_converge_recorder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[uuid.UUID, bool]]:
+    """覆盖 autouse _mock_converge：记录 (run_id, converge_explicit) 的 converge 桩。
+
+    不写任何库副作用（会话 mission 用例断言「零收敛副作用」；external 锚点用例
+    只关心 run_id 参数）。
+    """
+    import app.modules.agent.finalizer as _finalizer_mod
+
+    calls: list[tuple[uuid.UUID, bool]] = []
+
+    async def _recording_converge(session, run_id, glm_config=None, *, converge_explicit=False):
+        calls.append((run_id, converge_explicit))
+        return "done"
+
+    monkeypatch.setattr(_finalizer_mod, "converge_mission_for_completed_run", _recording_converge)
+    return calls
+
+
+class TestScheduleLoopSessionDimension:
+    """task-08：schedule_loop 会话 mission 分流（design §5 Phase 1 / D-008）。
+
+    会话 mission 主控轮=短生命周期 turn run，主控存续按「会话活跃 turn」判定：
+    schedule_loop 对会话 mission 整体 no-op（不强改主控轮状态 / 不 kill worker /
+    不触发 converge），收敛入口仅 MCP converge 与 patrol awaiting_input 超时
+    （task-06 契约——finalizer 非显式路径对会话 mission 已不自动收敛）。
+    """
+
+    @pytest.mark.asyncio
+    async def test_session_mission_all_terminal_no_converge_no_mutation(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """会话 mission 分身全终态（存量信号 1 场景）→ return None；主控轮终态
+        不被强改、converge 不被调、converged_at 不落库（awaiting_input 窗口保留）。"""
+        calls = _patch_converge_recorder(monkeypatch)
+        ws_id = await _make_workspace(db_session)
+        mission, agent_session = await _make_session_mission(db_session, ws_id)
+        turn_run = await _make_run(
+            db_session,
+            mission.id,
+            status="completed",
+            role="orchestrator",
+            agent_session_id=agent_session.id,
+        )
+        await _make_run(db_session, mission.id, status="completed", role="arch")
+
+        result = await OrchestratorService(db_session).schedule_loop(mission.id)
+
+        assert result is None
+        assert calls == [], "会话 mission 不得经 schedule_loop 收敛（task-06 契约）"
+        await db_session.refresh(turn_run)
+        assert turn_run.status == "completed", "主控轮终态不得被强改"
+        mission_fresh = await db_session.get(AgentMission, mission.id)
+        assert mission_fresh.converged_at is None
+
+    @pytest.mark.asyncio
+    async def test_session_mission_running_turn_run_untouched(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """主控轮当轮 running（会话活跃 turn）+ 分身全终态 → return None；running
+        主控轮不被标终态（存量信号 1 会强标 completed——会话链路禁用）。"""
+        calls = _patch_converge_recorder(monkeypatch)
+        ws_id = await _make_workspace(db_session)
+        mission, agent_session = await _make_session_mission(db_session, ws_id)
+        turn_run = await _make_run(
+            db_session,
+            mission.id,
+            status="running",
+            role="orchestrator",
+            agent_session_id=agent_session.id,
+        )
+        await _make_run(db_session, mission.id, status="completed", role="arch")
+
+        result = await OrchestratorService(db_session).schedule_loop(mission.id)
+
+        assert result is None
+        assert calls == []
+        await db_session.refresh(turn_run)
+        assert turn_run.status == "running", "running 主控轮不得被巡检强改状态"
+
+    @pytest.mark.asyncio
+    async def test_session_mission_budget_exceeded_no_force_kill(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """会话 mission 预算触顶（存量信号 3 场景）→ 不强收：worker 不被 kill、
+        主控轮不动、不 converge（预算拒新派已由 can_dispatch_worker 治理，收尾
+        走 MCP converge / patrol 超时）。"""
+        calls = _patch_converge_recorder(monkeypatch)
+        ws_id = await _make_workspace(db_session)
+        mission, agent_session = await _make_session_mission(db_session, ws_id, budget_usd=1.0)
+        turn_run = await _make_run(
+            db_session,
+            mission.id,
+            status="completed",
+            role="orchestrator",
+            agent_session_id=agent_session.id,
+        )
+        worker = await _make_run(db_session, mission.id, status="running", role="arch", cost=1.5)
+
+        result = await OrchestratorService(db_session).schedule_loop(mission.id)
+
+        assert result is None
+        assert calls == []
+        await db_session.refresh(worker)
+        assert worker.status == "running", "会话 mission 分身不经 schedule_loop 强杀"
+        await db_session.refresh(turn_run)
+        assert turn_run.status == "completed"
+        mission_fresh = await db_session.get(AgentMission, mission.id)
+        assert mission_fresh.converged_at is None
+
+    @pytest.mark.asyncio
+    async def test_session_mission_without_orchestrator_run_returns_none(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """会话 mission 尚无主控轮回填（planning：预建后未 inject）→ return None，
+        不抛错（存量无主 run 锚点跳过语义对会话链路同样成立）。"""
+        calls = _patch_converge_recorder(monkeypatch)
+        ws_id = await _make_workspace(db_session)
+        mission, _agent_session = await _make_session_mission(db_session, ws_id)
+
+        result = await OrchestratorService(db_session).schedule_loop(mission.id)
+
+        assert result is None
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_external_anchor_is_latest_orchestrator_run(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """锚点=最新 orchestrator run（task-06 一致）：存量 external 多主控 run 时
+        收敛锚定 created_at 最新一条。"""
+        calls = _patch_converge_recorder(monkeypatch)
+        ws_id = await _make_workspace(db_session)
+        svc = OrchestratorService(db_session)
+        mission, old_main = await svc.team_mission_entry(
+            workspace_id=ws_id,
+            objective="团队目标",
+            created_by=uuid.uuid4(),
+            change_id=None,
+            constraints={"mode": "team"},
+            budget_usd=10.0,
+            worker_preset=None,
+            main_agent_config=None,
+        )
+        await _make_run(db_session, mission.id, status="completed", role="arch")
+        base = datetime.now(UTC)
+        await _make_run(
+            db_session,
+            mission.id,
+            status="completed",
+            role="orchestrator",
+            created_at=base + timedelta(minutes=10),
+        )
+
+        result = await svc.schedule_loop(mission.id)
+
+        assert result == "done"
+        assert len(calls) == 1
+        assert calls[0][0] != old_main.id, "锚点不得取首条/旧主控 run"
+
+
+class TestRedispatchSessionFilter:
+    """task-08：redispatch_pending_main_runs 候选过滤会话 mission（显式 no-op）。
+
+    会话链路主控轮由会话 lease 逐 turn 驱动，无「pending 主控 run +
+    no_online_daemon」重派语义；存量 external/team 重派行为保留（零回归）。
+    """
+
+    @pytest.mark.asyncio
+    async def test_session_mission_pending_main_run_skipped(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """会话 mission 的 pending+no_online_daemon 主控轮 run 不进重派候选。"""
+        ws_id = await _make_workspace(db_session)
+        mission, _agent_session = await _make_session_mission(db_session, ws_id)
+        main_run = await _make_run(
+            db_session,
+            mission.id,
+            status="pending",
+            role="orchestrator",
+        )
+        main_run.error_code = "no_online_daemon"
+        db_session.add(main_run)
+        await db_session.commit()
+
+        dispatch_calls: list[uuid.UUID] = []
+
+        async def _fake_dispatch(
+            self: RunPlacementService,
+            agent_run_id: uuid.UUID,
+            user_id: uuid.UUID | None,
+            **kwargs: object,
+        ) -> uuid.UUID:
+            dispatch_calls.append(agent_run_id)
+            return uuid.uuid4()
+
+        monkeypatch.setattr(RunPlacementService, "dispatch_to_daemon", _fake_dispatch)
+
+        redispatched = await OrchestratorService(db_session).redispatch_pending_main_runs()
+
+        assert redispatched == 0
+        assert dispatch_calls == []
+        await db_session.refresh(main_run)
+        assert main_run.error_code == "no_online_daemon", "会话 mission 主控轮不被重派改写"
+
+    @pytest.mark.asyncio
+    async def test_external_pending_main_run_still_redispatched(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """存量 external/team（随机 session_id 查无会话行）重派行为保留：pending+
+        no_online_daemon 主 run 在 daemon 可派时重派成功并清 error_code。"""
+        ws_id = await _make_workspace(db_session)
+        svc = OrchestratorService(db_session)
+        # workspace 未绑 daemon → team_mission_entry 走 NoOnlineDaemonError 分支，
+        # 主 run 落 pending + no_online_daemon（即重派候选形态）。
+        _mission, main_run = await svc.team_mission_entry(
+            workspace_id=ws_id,
+            objective="团队目标",
+            created_by=uuid.uuid4(),
+            change_id=None,
+            constraints={"mode": "team"},
+            budget_usd=None,
+            worker_preset=None,
+            main_agent_config=None,
+        )
+        assert main_run.error_code == "no_online_daemon"
+
+        dispatch_calls: list[uuid.UUID] = []
+
+        async def _fake_dispatch(
+            self: RunPlacementService,
+            agent_run_id: uuid.UUID,
+            user_id: uuid.UUID | None,
+            **kwargs: object,
+        ) -> uuid.UUID:
+            dispatch_calls.append(agent_run_id)
+            return uuid.uuid4()
+
+        monkeypatch.setattr(RunPlacementService, "dispatch_to_daemon", _fake_dispatch)
+
+        redispatched = await svc.redispatch_pending_main_runs()
+
+        assert redispatched == 1
+        assert dispatch_calls == [main_run.id]
+        await db_session.refresh(main_run)
+        assert main_run.error_code is None
 
 
 class TestOrchestratorPromptConstraint:
