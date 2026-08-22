@@ -601,8 +601,8 @@ async def converge_mission_for_completed_run(
       当轮 running 也要能收敛）；判据含 ``failed``（分身全终态但无一 completed
       仍属「全终态」→ 置位 converged_at，design §7.5 converge 行）。
     - 非显式路径（complete_lease / schedule_loop）对会话 mission（``session_id``
-      指向真实存在的 ``AgentSession``——列对存量构造路径 default_factory 兜底随机
-      uuid，须查表判别）**不自动收敛**：contract 表（design §7.5）会话
+      指向真实存在的 ``AgentSession``，查表判别）**不自动收敛**：contract 表
+      （design §7.5）会话
       mission 的收敛入口只有 MCP converge 与 patrol 超时——complete_lease 提前
       置位会让 awaiting_input 窗口失效，且 converged_at 一置位会话活跃 mission
       即查不到，mid-turn 自动收敛会把主控后续 dispatch_worker 挤去懒建新

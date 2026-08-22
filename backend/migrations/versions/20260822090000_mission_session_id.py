@@ -15,10 +15,9 @@ Change 2026-08-22-team-session-unify task-01（design §5 Phase1 / §8 / D-006@v
    数据库侧兜底）；NULL 行不参与唯一约束。
 
 存量行处理：不做数据迁移回填（项目未上线，允许清库重建，CLAUDE.md 规则 11 /
-design §3 非目标、§9 回退路径）——NOT NULL 列加到非空 agent_missions 表需先
-清库再 upgrade。类型说明：design §8 伪 SQL 写 VARCHAR(36)，实际落地 sa.Uuid()
-——agent_sessions.id 即 Uuid（PG uuid 类型），VARCHAR 列 FK 引用 uuid 列在 PG
-无法建约束。
+design §3 非目标、§9 回退路径）；nullable 列对存量行无迁移压力。类型说明：
+design §8 伪 SQL 写 VARCHAR(36)，实际落地 sa.Uuid()——agent_sessions.id 即
+Uuid（PG uuid 类型），VARCHAR 列 FK 引用 uuid 列在 PG 无法建约束。
 
 postgresql_where 供 PG；sqlite_where 供 SQLite 等价 replay / 测试侧同语义。
 

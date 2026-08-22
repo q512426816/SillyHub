@@ -117,10 +117,9 @@ async def _session_has_active_turn(db: AsyncSession, session_id: uuid.UUID) -> b
 async def _mission_bound_session(db: AsyncSession, mission: AgentMission) -> AgentSession | None:
     """会话 mission 判别（task-08，与 finalizer/orchestrator 同款口径）。
 
-    ``session_id`` 列对存量构造路径 default_factory 兜底随机 uuid（model.py
-    task-01 注释），不能仅凭非 NULL 判定——按「该 id 的 AgentSession 真实存在」
-    判别：存在 → 会话 mission（awaiting_input 档适用，Grill NEW-4）；查无行 →
-    存量 external/team mission（保持原链路）。
+    按该 id 的 AgentSession 真实存在判别：存在 → 会话 mission（awaiting_input
+    档适用，Grill NEW-4）；NULL 或查无行 → 存量 external/team mission（保持
+    原链路）。查表（而非仅列非 NULL）保持三处口径统一，防外部直构随机 uuid。
     """
     if mission.session_id is None:
         return None

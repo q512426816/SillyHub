@@ -313,11 +313,10 @@ class OrchestratorService:
 
         mission = AgentMission(
             workspace_id=workspace_id,
-            # session 预建模式传会话锚点；旧模式（team/external）不传 → 触发列
-            # default_factory 随机 uuid（model.py task-01 注释：PG 下随机 uuid 触发
-            # FK 失败即时暴露未接线入口，task-13 收口）。显式传 None 会绕过
-            # default_factory 直接违反 NOT NULL——故仅非空才传。
-            session_id=session_id if session_id is not None else uuid.uuid4(),
+            # session 预建模式传会话锚点；team/external 模式 None 透传
+            # （验收返工 QA P1：session_id 已改 nullable，external mission
+            # 无会话，随机 uuid 会违反 FK 压断 PG 上的存量创建链路）。
+            session_id=session_id,
             change_id=change_id,
             objective=effective_objective,
             constraints=merged or None,
@@ -449,8 +448,8 @@ class OrchestratorService:
         # AgentMission 并过滤会话 mission——session_id 指向真实 AgentSession 行的
         # mission 不进重派（显式 no-op：会话链路主控轮由会话 lease 逐 turn 驱动，
         # 无「pending 主控 run + no_online_daemon」重派语义；新链路主控轮也不会
-        # 写该 error_code）。存量 external/team mission（session_id 兜底随机 uuid
-        # 查无会话行）重派行为保留；join 同时排除 mission 缺失的孤儿 run（原
+        # 写该 error_code）。存量 external/team mission（session_id 为 NULL）重派
+        # 行为保留；join 同时排除 mission 缺失的孤儿 run（原
         # ``run.mission_id is None`` / ``mission is None`` 跳过语义上移到 SQL）。
         stmt = (
             select(AgentRun)
@@ -552,15 +551,15 @@ class OrchestratorService:
 
         # ── 会话 mission 分流（task-08 / 2026-08-22-team-session-unify，design
         #    §5 Phase 1 patrol 适配 / D-008）──
-        # 会话 mission（session_id 指向真实 AgentSession 行——列对存量构造路径
-        # default_factory 兜底随机 uuid，须查表判别，与 finalizer 同款口径）主控轮
-        # 为短生命周期 turn run，主控存续按「会话活跃 turn」判定，不再以主 run
-        # 常驻 running 为存续依据。schedule_loop 对会话 mission 整体 no-op：
+        # 会话 mission（session_id 指向真实 AgentSession 行，查表判别与
+        # finalizer 同款口径）主控轮为短生命周期 turn run，主控存续按「会话
+        # 活跃 turn」判定，不再以主 run 常驻 running 为存续依据。schedule_loop
+        # 对会话 mission 整体 no-op：
         # - 不强改主控轮状态（终态后不被重写、running 轮不受巡检干扰）；
         # - 不 kill 分身 / 不触发 converge——finalizer 非显式路径对会话 mission
         #   已不自动收敛（task-06），置位入口仅 MCP converge 与 patrol
         #   awaiting_input 超时（design §7.5）。
-        # 存量 external/team mission（随机 session_id 查无会话行）走下方原三重
+        # 存量 external/team mission（session_id 为 NULL）走下方原三重
         # 收敛信号链路，行为零回归。
         if mission.session_id is not None and (
             await self._session.get(AgentSession, mission.session_id) is not None
