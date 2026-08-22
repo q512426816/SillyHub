@@ -11,7 +11,7 @@ created_at: 2026-08-18 01:45:00
 ## 定位
 Daemon 运行时 / 机器 / 会话交互组件（`components/daemon/`，12 源文件 + 十余套测试）。三块职责：
 ① 运行时管理页展示（machine-card 手风琴机器卡 + runtime-card 运行时卡 + helpers 格式化件）；
-② 会话交互（session-panel 共享双模式面板【2026-08-21-session-message-queue 起，sessions 页与弹窗统一实现 + useMessageQueue 排队】、runtime-session-dialog 统一弹窗、interactive-session-panel 薄适配层、
+② 会话交互（session-panel 共享双模式面板【2026-08-21-session-message-queue 起，sessions 页与弹窗统一实现 + useMessageQueue 排队；2026-08-22-session-panel-unify 起适配层已删、chrome 统一 antd】、runtime-session-dialog 统一弹窗、
 turn-timeline 消息流、session-input-bar 输入区、session-list-layout 公共列表）；
 ③ 辅助件（remote-folder-picker 远程目录浏览器、session-log-sanitize 日志清洗、
 runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog 起 runtimes
@@ -29,6 +29,12 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 - `SessionPanel`（`session-panel.tsx`，2026-08-21-session-message-queue）：/sessions 页
   与 /runtimes 弹窗共享的会话面板，`mode: "page" | "dialog"` 渲染层分发（R4 铁律：
   react-query 三件全收 page 子组件 SessionPanelPage，dialog 渲染路径零 useQuery）。
+  2026-08-22-session-panel-unify 起：**唯一直连入口**（适配层已删，4 消费方
+  runtime-session-dialog / runtime-session-helpers / workspace-session-section /
+  change-session-section 直接 `SessionPanel mode="dialog"` +
+  `sessionId={attachSessionId ?? null}`，key 重挂载契约保持）；dialog 分支 chrome
+  统一 antd（新建/团队分析默认 32px、打断 small、结束 danger、提供方徽标 Tag；
+  D-304 跨区共享组件备案见该变更 design §4.B.7）。
   - page 模式：自 sessions/page.tsx 整块搬运（react-query detail 轮询/whoLine runs
     快照/CtxUsageBar/SessionConfigBar/SubagentCatalog/附件链）。
   - dialog 模式：自旧 interactive-session-panel 逐段搬运（idle createSession 直发/
@@ -39,12 +45,10 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
   - 消息生命周期：首条 `createSession` → 追问 `injectSession`（排队调度）→
     `interruptSession` → `endSession`；单条 `streamSession` SSE 贯穿，envelope
     run_id 区分 turn。
-- `InteractiveSessionPanel`（`interactive-session-panel.tsx`）：**127 行薄适配层**
-  （2026-08-21-session-message-queue 起，原 ~1300 行实现体迁入 SessionPanel dialog
-  分支）——props 13 项按 diff-analysis §5.1 映射转 `SessionPanel mode="dialog"`
-  （attachSessionId ?? null 唯一语义迁移）；导出面（组件签名 + turn-timeline 类型
-  re-export）零变更，消费方 runtime-session-dialog / runtime-session-helpers /
-  workspace-session-section / change-session-section 零改动。
+- ~~`InteractiveSessionPanel`（`interactive-session-panel.tsx`）~~：**已删除**
+  （2026-08-22-session-panel-unify task-01）——127 行薄适配层退役，消费方直连
+  `SessionPanel mode="dialog"`；其类型 re-export（turn-timeline 5 类型）由消费方
+  直接 import `@/components/daemon/turn-timeline`。
 - `MessageQueueBar`（`message-queue-bar.tsx`）：排队消息展示条（纯展示，接
   useMessageQueue.queue）——pending/sending/failed 三态 chip（failed 红语义边框 +
   重试/删除按钮）、40 字摘要 + 附件数、满员「队列已满（N/5）」Tag、点击展开
@@ -53,7 +57,11 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
   `SessionUiStatus`（idle/creating/active/ending/ended/failed/reconnecting 7 态）/
   `TurnUiStatus`（pending/running/interrupting/completed/failed/killed 6 态）/
   `SessionViewMode`（conversation|all）；复用 agent-log 的 renderers。
-- `SessionInputBar`（`session-input-bar.tsx`）：输入区。
+  TurnStatusBadge 内部渲染为 antd `Badge status`（2026-08-22-session-panel-unify：
+  running/interrupting→processing、completed→success、failed/killed→error、
+  pending→default，色走 token 零手写）。
+- `SessionInputBar`（`session-input-bar.tsx`）：输入区（发送=antd primary、📎=
+  antd text，2026-08-22-session-panel-unify；chips 删除为原生 button）。
 - `SessionListLayout`（`session-list-layout.tsx`）：公共会话列表（runtimes 弹窗与
   ChangeSessionSection 共用）；调用方 fetch 后 map 成 `SessionListEntry`
   （id/title/statusBadge/secondaryText/lastActiveAt）传入；`onDelete` 可选
@@ -96,7 +104,7 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 - `isActiveSession` 判定完全依赖状态集合——新增会话状态须同步
   `ACTIVE_SESSION_VIEW_STATUSES`；MachineCard 内联等值集合两处同步。
 - attach 流程涉及 SSE 连接 + 轮询到 active 的竞态，改动必须跑 `daemon/__tests__`
-  （interactive-session-panel×3 / runtime-session-dialog×3 / turn-timeline-session-input-bar /
+  （session-panel-dialog×3 / runtime-session-dialog×3 / turn-timeline-session-input-bar /
   session-list-layout / runtime-card×2 / machine-card / remote-folder-picker /
   runtime-session-helpers / session-log-sanitize 等）。
 - 会话日志渲染前须经 session-log-sanitize 清洗分类，勿绕过直写渲染逻辑。

@@ -28,7 +28,7 @@ created_at: 2026-08-22 14:05:00
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `docs/frontend/modules/components-daemon.md` | 归档时更新：适配层条目删除、SessionPanel 双模式契约补 antd 基元说明、TurnStatusBadge/SessionInputBar 契约微调 | pending |
-| `docs/frontend/modules/components-sessions.md` | 归档时核对（workspace-session-section 引用路径变化） | pending |
+| `docs/frontend/modules/components-daemon.md` | 已更新（verify 收尾）：定位段去适配层；SessionPanel 契约补「唯一直连入口 + antd chrome + D-304 备案」；InteractiveSessionPanel 条目划线标注已删除；TurnTimeline 补 TurnStatusBadge antd 映射；SessionInputBar 补按钮基元；测试清单改 session-panel-dialog×3 | done |
+| `docs/frontend/modules/components-sessions.md` | 核对完成：该模块卡只覆盖 sessions 页组件（SessionListPanel/NewSessionForm/SessionConfigBar），不含 workspace-session-section（其归属 components-daemon 契约与根 components 域），无引用需改 | skipped |
 | `docs/frontend/modules/app-sessions-pages.md` | 无变化（页面装配未动） | skipped |
 | `docs/frontend/modules/_module-map.yaml` | 无变化（未增删模块，仅组件内部重构） | skipped |
