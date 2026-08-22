@@ -639,6 +639,18 @@ class AgentMission(BaseModel, table=True):
     __table_args__ = (
         Index("ix_agent_missions_workspace", "workspace_id"),
         Index("ix_agent_missions_change", "change_id"),
+        # 2026-08-22-team-session-unify task-01（design §8 / D-006@v1 / Grill NEW-3）：
+        # 活跃态部分唯一索引——一个会话同时至多一个未收敛（converged_at IS NULL）未
+        # 取消（cancelled_at IS NULL）的 mission（R-07 单活跃约束，懒建 SELECT...FOR
+        # UPDATE 的数据库侧兜底）。postgresql_where 供 PG、sqlite_where 供测试侧
+        # create_all（SQLite 3.8+ 支持部分索引），双方言同语义。
+        Index(
+            "uq_agent_missions_session_active",
+            "session_id",
+            unique=True,
+            postgresql_where=text("converged_at IS NULL AND cancelled_at IS NULL"),
+            sqlite_where=text("converged_at IS NULL AND cancelled_at IS NULL"),
+        ),
     )
 
     id: uuid.UUID = Field(
@@ -653,6 +665,21 @@ class AgentMission(BaseModel, table=True):
             Uuid(as_uuid=True),
             ForeignKey("workspaces.id", ondelete="CASCADE"),
             nullable=False,
+        ),
+    )
+    # ── 发起会话（2026-08-22-team-session-unify task-01 / D-006@v1，design §5
+    #    Phase1/§8）── mission 绑定的发起会话（会话内团队能力锚点）。FK
+    #    agent_sessions.id，NOT NULL + 索引（写法仿 project_id）。default_factory
+    #    仅为存量构造路径兜底：start_mission / team_mission_entry / 既有测试不传
+    #    session_id 时给随机 uuid（SQLite 测试不强制 FK）；PG 生产下随机 uuid 触发
+    #    FK 失败，即时暴露未接线创建路径——task-03/05/13 接线后全部入口显式传入。
+    session_id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_sessions.id"),
+            nullable=False,
+            index=True,
         ),
     )
     # ── 项目关联（2026-08-19-cross-workspace-team-mission design §4.1） ──
