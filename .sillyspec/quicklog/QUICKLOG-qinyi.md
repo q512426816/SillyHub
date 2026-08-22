@@ -103,3 +103,20 @@
 方案：patrol.py 在读取 session_active_cache 前先判断 mission.session_id is None 则 continue；测试文件删除 53/80/191 三处 # type:ignore[no-untyped-def]
 结果：本地 uv run mypy app：678 source files Success no issues；uv run pytest app/modules/agent app/modules/daemon -q --no-cov -n auto：1818 passed 1 xpassed（预存路由顺序 XPASS，与本次无关）
 审计：⚖️ 归属切分：5 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/core/config.py, backend/app/modules/change/service.py, backend/app/modules/change/tests/test_step_progress.py, backend/pyproject.toml, backend/uv.lock
+
+## ql-20260822-008-0d44 | 2026-08-22 19:51:18 | 修复真机冒烟发现的两个遗留——①选到无在线绑定工作区时派发要到 worktree 阶段才 failed hostfs_unavailable（run 落库成垃圾…
+状态：已完成
+关联变更：2026-08-22-team-session-unify
+文件：
+- backend/app/modules/agent/mcp_tools.py（派发前在线绑定预检 422 引导）
+- backend/app/modules/agent/execution.py（worker prompt 结果落盘 artifact 要求）
+- backend/app/modules/agent/tests/test_mcp_tools.py（预检用例+stub helper+12 用例适配）
+- backend/app/modules/agent/tests/test_dispatch_profile.py（2 用例 stub 适配）
+- backend/app/modules/agent/tests/test_integration_cross_workspace.py（单 ws 全流程 stub 适配）
+- backend/app/modules/agent/tests/test_mcp_tools_cross_workspace.py（3 用例 stub 适配）
+- backend/app/modules/agent/tests/test_mission_access_control.py（api_key 通道用例 stub 适配）
+需求：修复真机冒烟发现的两个遗留——①选到无在线绑定工作区时派发要到 worktree 阶段才 failed hostfs_unavailable（run 落库成垃圾且主 agent 无引导）②分身跑完任务但 get_worker_result 取不到 artifact（结果只写在对话未落盘）。
+根因：①dispatch_worker 无派发前绑定预检，配置性缺绑定与瞬时失败同路径；②render_worker_prompt 未要求分身把产出写文件，主 agent 的 get_worker_result 只能取落盘产物。
+方案：①_dispatch_worker_core 建 run 前调 resolve_representative_binding（owner→任意在线）预检，均无在线→422 中文引导不建 run，user_id 防御性取值防懒建 rollback 过期；②worker prompt 追加结果落盘 artifact 必守段；③19 个既有用例适配（stub 在线绑定 helper+3 处 error_code 断言弱化为终态）。
+结果：agent 模块全量 848 passed+1 xpassed 全绿、ruff 过、已提交 aa411691；部署待 rebuild backend。
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：.sillyspec/changes/2026-08-22-team-session-unify/tasks.md

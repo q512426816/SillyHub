@@ -21,3 +21,4 @@ created_at: 2026-08-22 03:28:02
 - [x] task-12: 前端 TeamTaskBlock（概要/分身明细/日志产物/取消）+ 进度视图分身段块与 MCP 工具卡 + lib/daemon.ts API client (depends_on: task-03)
 - [x] task-13: 删除旧入口——mission-console/两页面路由/菜单项/lib/agent.ts create+list client + backend agent/router.py 删 create+list 四端点（保留 GET /missions/{id} 与 cancel）+ 全仓引用清理（保留 getMission/cancelMission） (depends_on: task-11)
 - [x] task-14: 类型同步（frontend/daemon api-types + backend openapi.json）+ agent/daemon 模块文档更新收尾 (depends_on: task-05, task-06, task-08, task-10, task-11, task-12, task-13)
+- [x] ql-20260822-008-0d44 会话内团队操作
