@@ -4,13 +4,16 @@
 - POST dispatch_worker：建 worker run + 派 lease（daemon 离线时 error_code）。
 - GET workers/{id}/result：读 worker AgentArtifact。
 - GET workers：列 mission 下所有 run 状态。
-- POST converge：触发 FinalizerService 收敛（全终态 → done）。
+- POST converge：触发 FinalizerService 收敛——task-06（D-010）语义重定义：busy
+  前置判定 / converged_at 独立置位（不依赖主控 run 状态）/ 最新 orchestrator 锚点 /
+  响应四值 converged/busy/conflict/needs_manual（TestConvergeSessionSemantics）。
 - POST progress：落主 agent 决策日志（AgentRunLog）。
 """
 
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
@@ -229,7 +232,11 @@ class TestConvergeMission:
 
     @pytest.mark.asyncio
     async def test_converge_all_completed(self, client, db_session, auth_headers) -> None:
-        """POST converge → 全终态（completed）→ done → converged=True。"""
+        """POST converge → 全终态（completed）→ status=converged + converged=True（task-06 四值）。
+
+        旧断言 status=="done"（bootstrap 透传 derive 值）已随 D-010 响应契约收敛为
+        ``converged``；同时断言 converged_at 已独立置位（不依赖主控 run 状态）。
+        """
         ws_id, mission_id, _main_run = await _seed_workspace_and_mission(
             db_session, main_run_status="completed"
         )
@@ -254,15 +261,21 @@ class TestConvergeMission:
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert data["mission_id"] == str(mission_id)
-        assert data["status"] == "done"
+        assert data["status"] == "converged"
         assert data["converged"] is True
         assert data["artifact_id"] is not None
+        mission = await db_session.get(AgentMission, mission_id)
+        assert mission is not None and mission.converged_at is not None
 
     @pytest.mark.asyncio
     async def test_converge_running_when_worker_pending(
         self, client, db_session, auth_headers
     ) -> None:
-        """POST converge → 有 pending worker → status=running → converged=False。"""
+        """POST converge → 有 pending 分身 → status=busy + 引导文案，零状态变更（D-010）。
+
+        旧断言 status=="running" 已随 task-06 busy 前置判定改写；busy 不置
+        converged_at、不触发 finalize（无合并 summary artifact）。
+        """
         ws_id, mission_id, _ = await _seed_workspace_and_mission(
             db_session, main_run_status="completed"
         )
@@ -283,7 +296,494 @@ class TestConvergeMission:
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert data["converged"] is False
-        assert data["status"] == "running"
+        assert data["status"] == "busy"
+        assert "分身" in (data.get("message") or "")
+        mission = await db_session.get(AgentMission, mission_id)
+        assert mission is not None and mission.converged_at is None
+        # 不触发 finalize：mission 下无任何 summary 合并产物
+        merged = (
+            (
+                await db_session.execute(
+                    select(AgentArtifact)
+                    .join(AgentRun, AgentArtifact.run_id == AgentRun.id)
+                    .where(AgentRun.mission_id == mission_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert merged == []
+
+
+class TestConvergeSessionSemantics:
+    """task-06（D-010，design §5 Phase 1 / §7 / §7.5）：converge 语义重定义。
+
+    - busy 前置判定：分身 run（role!='orchestrator' 含 NULL）未全终态 → busy 引导，
+      零状态变更（不置 converged_at / 不 finalize）。
+    - 分身全终态 → converged_at 独立置位，**不依赖主控 run 状态**（主控轮当轮
+      running 也能收敛）。
+    - 锚点统一：_get_main_run / finalizer._carrier_run 取该 mission 最新
+      role='orchestrator' run（存量单主控 run 同规则命中）。
+    - 响应四值：converged / busy / conflict / needs_manual；conflict 重入不回退
+      （冲突未解决保持会话活跃 mission 可解析，session 路由重入不 404）。
+    - complete_lease（非显式入口）对会话 mission 不自动收敛——awaiting_input
+      窗口保留；``converge_explicit=True`` 显式入口（task-08 patrol 复用契约）。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _isolate_glm(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """GLM 隔离（同 TestConvergeMission）：from_env 返 None，finalize 走 concat。"""
+        from app.modules.agent import delegation
+
+        class _FakeGLMConfig:
+            @staticmethod
+            def from_env():
+                return None
+
+        monkeypatch.setattr(delegation, "GLMConfig", _FakeGLMConfig)
+
+    @pytest.mark.asyncio
+    async def test_busy_when_worker_pending_via_session(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """会话 converge：分身 pending → busy + 引导文案；converged_at 不置位。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        db_session.add(
+            AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                provider="claude",
+                status="running",
+                role="orchestrator",
+            )
+        )
+        db_session.add(
+            AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                status="pending",
+                role="arch",
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.post(
+            f"/api/sessions/{agent_session.id}/missions/converge",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["status"] == "busy"
+        assert data["converged"] is False
+        assert "分身" in (data.get("message") or "")
+        # endpoint 侧 raw UPDATE 不联动本测试 session 的 identity map，须 refresh 复核
+        await db_session.refresh(mission)
+        assert mission.converged_at is None
+
+    @pytest.mark.asyncio
+    async def test_busy_counts_null_role_worker(self, client, db_session, auth_headers) -> None:
+        """NULL role 分身未终态同样计入 busy（SQL 三值逻辑守卫，D-009/D-010）。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        db_session.add(
+            AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                provider="claude",
+                status="completed",
+                role="orchestrator",
+            )
+        )
+        db_session.add(
+            AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                status="running",
+                role=None,  # 存量分身 run 的可空 role
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.post(
+            f"/api/sessions/{agent_session.id}/missions/converge",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["status"] == "busy"
+        assert data["converged"] is False
+        # endpoint 侧 raw UPDATE 不联动本测试 session 的 identity map，须 refresh 复核
+        await db_session.refresh(mission)
+        assert mission.converged_at is None
+
+    @pytest.mark.asyncio
+    async def test_converge_midturn_sets_converged_at_and_carrier_is_latest_orchestrator(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """主控轮 running（当轮 converge）→ 置位 converged_at + 合并产物挂**最新**
+        orchestrator run（_get_main_run/_carrier_run 锚点统一，不依赖主控 run 状态）。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        first_turn = AgentRun(
+            agent_session_id=agent_session.id,
+            mission_id=mission.id,
+            agent_type="claude_code",
+            provider="claude",
+            status="completed",
+            role="orchestrator",
+            created_at=datetime(2026, 8, 22, 10, 0, 0, tzinfo=UTC),
+        )
+        current_turn = AgentRun(
+            agent_session_id=agent_session.id,
+            mission_id=mission.id,
+            agent_type="claude_code",
+            provider="claude",
+            status="running",
+            role="orchestrator",
+            created_at=datetime(2026, 8, 22, 11, 0, 0, tzinfo=UTC),
+        )
+        worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            status="completed",
+            role="arch",
+            output_redacted="分身摘要内容",
+        )
+        db_session.add_all([first_turn, current_turn, worker])
+        await db_session.commit()
+
+        resp = await client.post(
+            f"/api/sessions/{agent_session.id}/missions/converge",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["status"] == "converged"
+        assert data["converged"] is True
+        assert data["artifact_id"] is not None
+
+        # endpoint 侧 raw UPDATE 不联动本测试 session 的 identity map，须 refresh 复核
+        await db_session.refresh(mission)
+        assert mission.converged_at is not None
+
+        # 合并产物（bootstrap concat）挂最新 orchestrator run（载体锚点），
+        # 不挂在旧主控轮 / 分身 run 上。
+        carrier_arts = (
+            (
+                await db_session.execute(
+                    select(AgentArtifact).where(AgentArtifact.run_id == current_turn.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(carrier_arts) == 1
+        assert "分身摘要内容" in (carrier_arts[0].content_ref or "")
+        first_turn_arts = (
+            (
+                await db_session.execute(
+                    select(AgentArtifact).where(AgentArtifact.run_id == first_turn.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # 旧主控轮只有 collect 回灌的「(无产出)」占位 summary（既有 collect 行为，
+        # 不过滤 role）；合并产物只挂最新主控轮。
+        assert all("分身摘要内容" not in (a.content_ref or "") for a in first_turn_arts)
+
+    @pytest.mark.asyncio
+    async def test_get_main_run_returns_latest_orchestrator(self, db_session, auth_headers) -> None:
+        """_get_main_run 取最新 role='orchestrator' run（多主控轮场景，D-009/D-010）。"""
+        from app.modules.agent.mcp_tools import _get_main_run
+
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        older = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            status="completed",
+            role="orchestrator",
+            created_at=datetime(2026, 8, 22, 10, 0, 0, tzinfo=UTC),
+        )
+        newer = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            status="running",
+            role="orchestrator",
+            created_at=datetime(2026, 8, 22, 11, 0, 0, tzinfo=UTC),
+        )
+        latest_worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            status="pending",
+            role="arch",
+            created_at=datetime(2026, 8, 22, 12, 0, 0, tzinfo=UTC),
+        )
+        db_session.add_all([older, newer, latest_worker])
+        await db_session.commit()
+
+        run = await _get_main_run(db_session, mission.id)
+        assert run.id == newer.id
+
+    @pytest.mark.asyncio
+    async def test_conflict_reentry_keeps_mission_active(
+        self, client, db_session, auth_headers, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """冲突 → converged_at 回滚（会话活跃 mission 保持可解析）→ 解决后重入 → converged。
+
+        重入语义不回退（task-06 铁律）：冲突未解决不算收敛，session 路由第二次
+        converge 不 404。``_finalize_merge_for_mission`` mock 两段结果模拟「首次
+        冲突 → 主 agent SDK 解决 → 重入全 merged」。
+        """
+        from app.modules.agent import mcp_tools as mod
+
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        db_session.add(
+            AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                provider="claude",
+                status="running",
+                role="orchestrator",
+            )
+        )
+        worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            status="completed",
+            role="arch",
+            output_redacted="分身产出",
+        )
+        db_session.add(worker)
+        await db_session.commit()
+
+        conflicts = [{"file": "src/a.py", "marker_lines": [5], "branch": "workers/aaa"}]
+        merge_iter = iter([(["workers/bbb"], conflicts), (["workers/aaa", "workers/bbb"], [])])
+        cleanup_calls: list[uuid.UUID] = []
+
+        async def _fake_finalize_merge(session, mission_id):
+            return next(merge_iter)
+
+        async def _fake_cleanup(session, mission_id):
+            cleanup_calls.append(mission_id)
+
+        monkeypatch.setattr(mod, "_finalize_merge_for_mission", _fake_finalize_merge)
+        monkeypatch.setattr(mod, "_cleanup_mission", _fake_cleanup)
+
+        # 第一次：冲突 → status=conflict，converged_at 保持 NULL（回滚）
+        resp1 = await client.post(
+            f"/api/sessions/{agent_session.id}/missions/converge",
+            headers=auth_headers,
+        )
+        assert resp1.status_code == 200, resp1.text
+        data1 = resp1.json()
+        assert data1["status"] == "conflict"
+        assert data1["converged"] is False
+        assert data1["conflicts"] == conflicts
+        assert data1["attempt"] == 1
+        # endpoint 侧 raw UPDATE 不联动本测试 session 的 identity map，须 refresh 复核
+        await db_session.refresh(mission)
+        assert mission.converged_at is None
+
+        # 第二次（重入，主 agent 已解决冲突）：session 路由不 404 → converged
+        resp2 = await client.post(
+            f"/api/sessions/{agent_session.id}/missions/converge",
+            headers=auth_headers,
+        )
+        assert resp2.status_code == 200, resp2.text
+        data2 = resp2.json()
+        assert data2["status"] == "converged"
+        assert data2["converged"] is True
+        assert data2["merged_branches"] == ["workers/aaa", "workers/bbb"]
+        assert data2["attempt"] == 1, "重入成功 attempt 不再自增"
+        assert cleanup_calls == [mission.id]
+        # endpoint 侧 raw UPDATE 不联动本测试 session 的 identity map，须 refresh 复核
+        await db_session.refresh(mission)
+        assert mission.converged_at is not None
+
+    @pytest.mark.asyncio
+    async def test_needs_manual_status_value(
+        self, client, db_session, auth_headers, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R-07 超限 → status=needs_manual（四值契约，原 failed_manual 改名）。"""
+        from app.modules.agent import mcp_tools as mod
+
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        mission.constraints = {"conflict_attempts": 3}
+        db_session.add(mission)
+        await db_session.commit()
+        db_session.add(
+            AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                provider="claude",
+                status="completed",
+                role="orchestrator",
+            )
+        )
+        db_session.add(
+            AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                status="completed",
+                role="arch",
+                output_redacted="分身产出",
+            )
+        )
+        await db_session.commit()
+
+        conflicts = [{"file": "src/b.py", "marker_lines": [1], "branch": "workers/ccc"}]
+
+        async def _fake_finalize_merge(session, mission_id):
+            return (["workers/ddd"], conflicts)
+
+        async def _fake_cleanup(session, mission_id):
+            raise AssertionError("needs_manual 路径不应清副本（X-003）")
+
+        monkeypatch.setattr(mod, "_finalize_merge_for_mission", _fake_finalize_merge)
+        monkeypatch.setattr(mod, "_cleanup_mission", _fake_cleanup)
+
+        resp = await client.post(
+            f"/api/sessions/{agent_session.id}/missions/converge",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["status"] == "needs_manual"
+        assert data["converged"] is False
+        assert data["attempt"] == 3
+        assert data["conflicts"] == conflicts
+        assert "needs_manual" in (data.get("message") or "")
+        # _mark_mission_needs_manual 在 endpoint session 提交，须 refresh 复核
+        await db_session.refresh(mission)
+        nm = (mission.constraints or {}).get("needs_manual")
+        assert nm is not None and "R-07" in nm.get("reason", "")
+
+    @pytest.mark.asyncio
+    async def test_complete_lease_keeps_session_mission_awaiting_input(self, db_session) -> None:
+        """非显式入口（complete_lease 语义）对会话 mission 不自动收敛。
+
+        分身全终态 + 主控轮终态 + 无会话活跃 turn → 返 awaiting_input，
+        converged_at 不置位、无合并产物（design §7.5：会话 mission 收敛入口只有
+        MCP converge / patrol 超时，awaiting_input 窗口保留）。
+        """
+        from app.modules.agent.finalizer import converge_mission_for_completed_run
+
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        turn_run = AgentRun(
+            agent_session_id=agent_session.id,
+            mission_id=mission.id,
+            agent_type="claude_code",
+            provider="claude",
+            status="completed",
+            role="orchestrator",
+        )
+        worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            status="completed",
+            role="arch",
+            output_redacted="分身产出",
+        )
+        db_session.add_all([turn_run, worker])
+        await db_session.commit()
+
+        result = await converge_mission_for_completed_run(db_session, worker.id, None)
+
+        assert result == "awaiting_input"
+        # endpoint 侧 raw UPDATE 不联动本测试 session 的 identity map，须 refresh 复核
+        await db_session.refresh(mission)
+        assert mission.converged_at is None
+
+    @pytest.mark.asyncio
+    async def test_complete_lease_midturn_reports_running_no_converge(self, db_session) -> None:
+        """主控轮 running 时 worker complete（非显式）→ derive=running、不置位。"""
+        from app.modules.agent.finalizer import converge_mission_for_completed_run
+
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        db_session.add(
+            AgentRun(
+                agent_session_id=agent_session.id,
+                mission_id=mission.id,
+                agent_type="claude_code",
+                provider="claude",
+                status="running",
+                role="orchestrator",
+            )
+        )
+        worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            status="completed",
+            role="arch",
+            output_redacted="分身产出",
+        )
+        db_session.add(worker)
+        await db_session.commit()
+
+        result = await converge_mission_for_completed_run(db_session, worker.id, None)
+
+        assert result == "running"
+        # endpoint 侧 raw UPDATE 不联动本测试 session 的 identity map，须 refresh 复核
+        await db_session.refresh(mission)
+        assert mission.converged_at is None
+
+    @pytest.mark.asyncio
+    async def test_explicit_entry_point_converges_awaiting_input(self, db_session) -> None:
+        """``converge_explicit=True`` 显式置位入口（task-08 patrol 复用契约）。
+
+        awaiting_input 态 mission（分身全终态、无活跃 turn）→ 置位 converged_at +
+        finalize（bootstrap 合并产物挂最新 orchestrator run）。
+        """
+        from app.modules.agent.finalizer import converge_mission_for_completed_run
+
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        turn_run = AgentRun(
+            agent_session_id=agent_session.id,
+            mission_id=mission.id,
+            agent_type="claude_code",
+            provider="claude",
+            status="completed",
+            role="orchestrator",
+        )
+        worker = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            status="completed",
+            role="arch",
+            output_redacted="分身产出",
+        )
+        db_session.add_all([turn_run, worker])
+        await db_session.commit()
+
+        result = await converge_mission_for_completed_run(
+            db_session, turn_run.id, None, converge_explicit=True
+        )
+
+        assert result == "done"
+        # endpoint 侧 raw UPDATE 不联动本测试 session 的 identity map，须 refresh 复核
+        await db_session.refresh(mission)
+        assert mission.converged_at is not None
+        carrier_arts = (
+            (
+                await db_session.execute(
+                    select(AgentArtifact).where(AgentArtifact.run_id == turn_run.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # 载体上除 collect 回灌的「(无产出)」占位（turn_run 亦 completed）外，
+        # 必须有且仅有一份含分身产出的合并 summary。
+        merged_on_carrier = [a for a in carrier_arts if "分身产出" in (a.content_ref or "")]
+        assert len(merged_on_carrier) == 1
 
 
 class TestReportProgress:
@@ -969,7 +1469,7 @@ class TestSessionRouteResolution:
 
     @pytest.mark.asyncio
     async def test_converge_via_session_route(self, client, db_session, auth_headers) -> None:
-        """POST /sessions/{sid}/missions/converge → 既有收敛链路零语义变化（task-06 前态）。"""
+        """POST /sessions/{sid}/missions/converge → 分身全终态 → converged（task-06 四值）。"""
         agent_session, _ws_id = await _seed_agent_session(db_session)
         mission = await _seed_session_mission(db_session, agent_session)
         worker = AgentRun(
@@ -999,7 +1499,8 @@ class TestSessionRouteResolution:
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert data["mission_id"] == str(mission.id)
-        assert data["status"] == "done"
+        assert data["status"] == "converged"
+        assert data["converged"] is True
 
     @pytest.mark.asyncio
     async def test_header_path_session_mismatch_400(self, client, db_session, auth_headers) -> None:

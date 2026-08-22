@@ -13,6 +13,12 @@ workspace_id 缺省的调用（daemon mcp-server task-10 参数可选化后）�
 （header 优先，路径 session_id 兜底）解析会话活跃 mission；dispatch_worker 无
 活跃 mission 时懒建兜底。既有 workspace/mission 路径前缀路由零回归。
 
+task-06（2026-08-22-team-session-unify / D-010 / design §5 Phase 1 converge 段）：
+converge 语义重定义——分身 run（role!='orchestrator' 含 NULL）未全终态返
+``busy`` 引导等待；全终态独立原子置位 ``converged_at``（不依赖主控 run 状态）；
+``_get_main_run``/finalizer 锚点取该 mission**最新** orchestrator run；
+``ConvergeResponse.status`` 收敛为 converged/busy/conflict/needs_manual 四值。
+
 权限（task-09 P0 鉴权 gap 已闭合）：统一 ``WORKSPACE_WRITE``，经
 ``require_permission`` → ``get_current_principal``（auth_deps.py:154）双路径鉴权——
 浏览器/直调走 JWT（``Authorization: Bearer``），daemon MCP server 走长期 API Key
@@ -30,7 +36,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -73,6 +79,11 @@ _SESSION_ID_HEADER = "x-session-id"
 # 会话活跃 run 判定口径（与 daemon/router._session_has_active_turn、session/service
 # task-04 inject 同源）：懒建成功后按此取会话当前活跃 run 补回填主控轮双标记。
 _ACTIVE_RUN_STATUSES = ("pending", "running", "interrupting")
+
+# task-06（D-010）：converge busy 判定的分身 run 终态集合——与 derive_status 的
+# _DONE|_FAILED（mission.py）及 finalizer cleanup_mission 的终态过滤同口径
+# （pending/running/interrupting 均视为未终态）。
+_TERMINAL_RUN_STATUSES = ("completed", "failed", "killed")
 
 # 懒建默认预算上限（design §5 Phase 1 / §10 R-02：防 agent 未被要求时自主派团队
 # 失控）。命名对齐 config.py mission_* 家族；本卡 allowed_paths 不含 config.py，
@@ -164,14 +175,23 @@ class WorkerListResponse(BaseModel):
 
 
 class ConvergeResponse(BaseModel):
-    """``converge_mission`` tool 返回契约（task-06 改可重入，design §5.2 / §7.5）。
+    """``converge_mission`` tool 返回契约（task-06 D-010，design §5 Phase 1 / §7 / §7.5）。
 
-    ``status`` 取值（task-06 起新增可重入三态，保留 task-04 既有收敛态）：
-    - ``conflict``：有合并冲突，已把 ``conflicts`` 返给主 agent；主 agent 自己用 SDK
-      Read/Write 解决后重入 ``converge_mission``（X-004，backend 不写文件）。
-    - ``merged``：全部 worker_branch 合并完成（本次或重入后），已触发 cleanup。
-    - ``failed_manual``：解冲突轮次超 R-07 上限，mission 标 needs_manual，副本保留。
-    - ``done``/``degraded``/``running``：既有语义（bootstrap 收敛 / 部分终态 / 进行中）。
+    ``status`` 取值收敛为四值（task-06，design §7；既有 done/degraded/merged 并入
+    ``converged``、failed_manual 改 ``needs_manual``）：
+    - ``converged``：收敛完成（bootstrap 合并产物 / execute 全分支 merged），
+      ``converged_at`` 已置位（不依赖主控 run 状态——分身全终态即置位，D-010）。
+    - ``busy``：分身 run（``role!='orchestrator'`` 含 NULL）未全终态——引导主
+      agent 等待后重试（mission 状态不变、不置位、不 finalize；message 附引导
+      文案与未完成计数）。
+    - ``conflict``：有合并冲突，已把 ``conflicts`` 返给主 agent；主 agent 自己用
+      SDK Read/Write 解决后重入 ``converge_mission``（X-004，backend 不写文件；
+      冲突未解决不算收敛，converged_at 回滚保持会话活跃 mission 可重入）。
+    - ``needs_manual``：解冲突轮次超 R-07 上限，mission 标 needs_manual，副本保留
+      （原 ``failed_manual`` 改名并入四值契约）。
+
+    防御透传：cancelled/planning 等不可达派生值原样返回（正常流 busy 前置判定已
+    挡；planning= 无分身 run 未置位，见 _converge_core）。
 
     ``conflicts`` 形如 ``[{file, marker_lines, branch}]``（FinalizerMergeResult 透传）。
     ``attempt`` 为本次返的解冲突轮次（per mission 计数，存 ``AgentMission.constraints``）。
@@ -184,6 +204,9 @@ class ConvergeResponse(BaseModel):
     merged_branches: list[str] = []
     conflicts: list[dict] = []
     attempt: int = 0
+    # task-06：busy/needs_manual 等状态的引导文案（design §5「分身未全终态返回
+    # 引导信息」；主 agent 据 status+message 决定等待/重入）。
+    message: str | None = None
 
 
 class ProgressRequest(BaseModel):
@@ -652,11 +675,18 @@ async def _cleanup_mission(session: AsyncSession, mission_id: uuid.UUID) -> None
 
 
 async def _get_main_run(session: AsyncSession, mission_id: uuid.UUID) -> AgentRun:
-    """取 mission 的主 agent run（role=orchestrator）。"""
+    """取 mission 最新主控轮 run（task-06，design §5 核心机制 D-009/D-010）。
+
+    ``role='orchestrator'`` 按 ``created_at desc`` 取**最新一条**——会话 mission 的
+    主控轮是逐 turn 回填双标记的多条 run（task-04 inject / task-05 懒建补回填），
+    converge/finalize 锚定当轮；存量 external/bootstrap mission 单主控 run 且先于
+    worker 创建（首条即唯一），同规则命中零回归。无主控轮回填 → 404（fail-loud，
+    会话链路 inject/懒建均保证双标记，缺失属接线异常）。
+    """
     stmt = (
         select(AgentRun)
         .where(AgentRun.mission_id == mission_id, AgentRun.role == "orchestrator")
-        .order_by(AgentRun.created_at)
+        .order_by(AgentRun.created_at.desc())
         .limit(1)
     )
     run = (await session.execute(stmt)).scalars().first()
@@ -946,23 +976,27 @@ async def converge_mission(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
 ) -> ConvergeResponse:
-    """主 agent 触发 mission 收敛（task-06 改可重入，design §5.2 / §7.5）。
+    """主 agent 触发 mission 收敛（task-06 D-010 语义重定义，design §5 / §7 / §7.5）。
 
-    可重入状态机（per mission，无新列——计数存 ``AgentMission.constraints`` JSON）：
+    状态机（per mission，无新列——计数存 ``AgentMission.constraints`` JSON）：
 
-    1. 调 ``converge_mission_for_completed_run``（既有链路，保留 artifact 回灌 +
-       derive_status + bootstrap 路由语义；其内部已调 finalize_execute_mission）。
+    0. **busy 前置**：分身 run（``role!='orchestrator'`` 含 NULL）未全终态 → 返
+       ``status=busy`` + message 引导文案，零状态变更（不置位/不 finalize）。
+    1. 分身全终态 → 以最新 orchestrator run 为锚调 ``converge_mission_for_completed_run``
+       （``converge_explicit=True``：分身维度判据 + converged_at 原子抢占置位，
+       不依赖主控 run 状态；保留 artifact 回灌 + bootstrap/execute 路由；冲突时
+       入口内回滚置位保重入）。
     2. 复用 ``FinalizerService.finalize_execute_mission`` 拿 ``FinalizerMergeResult``
        （merged_branches / pending_conflicts）——见 ``_finalize_merge_for_mission``
        注释（为何不直接改 converge_mission_for_completed_run 返回值）。
     3. ``pending_conflicts`` 非空 → 返 ``status=conflict`` + conflicts 给主 agent；
        主 agent 自己 SDK Read/Write 解决（X-004，backend 不写文件）+ git add 后重入。
     4. 重入：``finalize_execute_mission`` 重跑，已 merged 分支幂等（already-up-to-date），
-       主 agent 解决后的内容被下次 git 合进去；全 merged → ``status=merged`` +
+       主 agent 解决后的内容被下次 git 合进去；全 merged → ``status=converged`` +
        调 ``_cleanup_mission``（task-07 cleanup_mission）清 worker 副本。
     5. R-07：每次返 conflict 时计数 +1（``_bump_conflict_attempts``）；超限（默认 3）
        → ``_mark_mission_needs_manual`` 标 ``needs_manual`` + 返
-       ``status=failed_manual``，副本保留供排查（X-003）。
+       ``status=needs_manual``，副本保留供排查（X-003）。
 
     简化（task-06 决策，见 ``_mark_mission_needs_manual``）：不实际 ``git merge --abort``——
     workspace root 工作区状态在 daemon 侧，backend 不可控，强行 abort 可能误清主 agent 已
@@ -970,8 +1004,6 @@ async def converge_mission(
 
     task-05（2026-08-22-team-session-unify）：mission 解析接入 X-Session-Id 会话
     定位（header 命中活跃 mission 时显式参数仅作越权校验锚；header 缺席零回归）。
-    converge 内部语义（busy 引导 / converged_at 独立置位 / 锚点取最新 orchestrator
-    run）归 task-06，本卡不动。
     """
     mission = await _resolve_session_mission(
         session, request, user, workspace_id=workspace_id, mission_id=mission_id
@@ -980,30 +1012,91 @@ async def converge_mission(
 
 
 async def _converge_core(session: AsyncSession, mission: AgentMission) -> ConvergeResponse:
-    """converge_mission 共用主体（显式路由 / 会话路由同构，task-05 抽取零改写）。"""
+    """converge_mission 共用主体（task-05 抽取显式/会话路由同构；task-06 D-010 语义重定义）。
+
+    判定序（design §5 Phase 1 / §7.5 converge 行）：
+
+    1. **busy 前置判定**：分身 run（``role!='orchestrator'``，含 NULL role 守卫——
+       SQL 三值逻辑下 ``!=`` 漏 NULL 行，统一走 ``non_orchestrator_runs``）未全
+       终态 → 返 ``status=busy`` + 引导文案（message 携未完成计数）；mission
+       状态不变、不置 ``converged_at``、不触发 finalize/merge（主 agent 等待后
+       重试）。
+    2. 分身全终态 → 以**最新 orchestrator run** 为锚调 ``converge_mission_for_completed_run``
+       （``converge_explicit=True``：derive 判据只看分身 run + ``converged_at``
+       原子抢占 UPDATE...WHERE IS NULL——**不依赖主控 run 状态**，会话 mission
+       主控轮当轮 running 也能收敛；execute 冲突未解决时该入口回滚置位，保住
+       会话活跃 mission 重入）。
+    3. merge 结果（``_finalize_merge_for_mission``）有 pending_conflicts → 可重入
+       conflict 状态机（attempt 计数 / R-07 超限 → ``needs_manual``，语义保留）；
+       全 merged → cleanup + ``status=converged``。
+
+    响应 ``status`` 四值 converged/busy/conflict/needs_manual（ConvergeResponse
+    docstring）；cancelled/planning 等防御性派生值原样透传（busy 已前置挡 running）。
+    """
+    from app.modules.agent.control import MissionControlService
+
+    # --- 1. busy 前置判定（D-010：分身未全终态 → 引导等待，零状态变更）---
+    ctrl = MissionControlService(session)
+    worker_runs = await ctrl.non_orchestrator_runs(mission.id)
+    active_workers = [r for r in worker_runs if r.status not in _TERMINAL_RUN_STATUSES]
+    if active_workers:
+        log.info(
+            "converge_mission_busy",
+            mission_id=str(mission.id),
+            active_workers=len(active_workers),
+            total_workers=len(worker_runs),
+        )
+        return ConvergeResponse(
+            mission_id=mission.id,
+            status="busy",
+            converged=False,
+            artifact_id=None,
+            merged_branches=[],
+            conflicts=[],
+            attempt=_read_conflict_attempts(mission),
+            message=(
+                f"还有 {len(active_workers)} 个分身任务未完成（共 {len(worker_runs)} 个），"
+                "尚不能收敛：请等待全部分身到达终态后重试 converge，"
+                "或先用 list_workers 查看各分身进度。"
+            ),
+        )
+
+    # --- 2. 分身全终态 → 收敛（锚点=最新 orchestrator run，不依赖主控 run 状态）---
     main_run = await _get_main_run(session, mission.id)
 
     from app.modules.agent.delegation import GLMConfig
     from app.modules.agent.finalizer import converge_mission_for_completed_run
 
     cfg = GLMConfig.from_env()
-    result_status = await converge_mission_for_completed_run(session, main_run.id, cfg)
-    base_converged = result_status in ("done", "degraded")
+    result_status = await converge_mission_for_completed_run(
+        session, main_run.id, cfg, converge_explicit=True
+    )
+    # done/degraded/failed 均为分身全终态（failed=无一 completed 的全终态），
+    # 置位与合并已由 converge_explicit 入口完成；running/planning/cancelled 未置位。
+    base_converged = result_status in ("done", "degraded", "failed")
 
     # converge_mission_for_completed_run 内部已 commit；补 flush 保证后续读取一致。
     await session.flush()
 
     # 读 merge 结果（merged_branches / pending_conflicts）。execute mission（有 patch /
     # worktree_branch）走 conflict 状态机；bootstrap mission（无 patch）merge 结果为空
-    # → 走既有 done/degraded 收敛语义（artifact_id 取最新 summary）。
+    # → 走收敛语义（artifact_id 取最新 summary）。
     merged_branches, pending_conflicts = await _finalize_merge_for_mission(session, mission.id)
 
-    # --- bootstrap 路径（无 worker_branch 合并需求）→ 既有语义，不进 conflict 状态机 ---
+    # --- bootstrap 路径（无 worker_branch 合并需求）→ 不进 conflict 状态机 ---
     if not merged_branches and not pending_conflicts:
         artifact_id = await _latest_artifact_id(session, mission.id) if base_converged else None
+        # 四值映射：置位成功 → converged；running（防御，busy 前置判定已挡）→ busy；
+        # cancelled/planning（已叫停 / 尚无分身 run，均未置位）原样透传供主 agent 判断。
+        if base_converged:
+            resp_status = "converged"
+        elif result_status == "running":
+            resp_status = "busy"
+        else:
+            resp_status = result_status or "busy"
         return ConvergeResponse(
             mission_id=mission.id,
-            status=result_status or "running",
+            status=resp_status,
             converged=base_converged,
             artifact_id=artifact_id,
             merged_branches=[],
@@ -1014,20 +1107,32 @@ async def _converge_core(session: AsyncSession, mission: AgentMission) -> Conver
     # --- execute 路径（有 merge 需求）→ 可重入 conflict 状态机（design §5.2）---
     if pending_conflicts:
         # R-07：先判是否已超限（避免超限后仍 +1 漂移）。当前 attempts 是返 conflict 前
-        # 的累计值；超限指「即将超过上限」即 attempts+1 > max。
+        # 的累计值；超限指「即将超过上限」即 attempts+1 > max。needs_manual 路径不回滚
+        # converged_at（终态转人工；置位与否随 converge_explicit 入口的冲突回滚结果）。
         current_attempts = _read_conflict_attempts(mission)
         if current_attempts + 1 > _max_conflict_attempts():
             await _mark_mission_needs_manual(session, mission, reason="R-07 解冲突轮次超限")
             return ConvergeResponse(
                 mission_id=mission.id,
-                status="failed_manual",
+                status="needs_manual",
                 converged=False,
                 artifact_id=None,
                 merged_branches=merged_branches,
                 conflicts=pending_conflicts,
                 attempt=current_attempts,
+                message=(
+                    f"解冲突轮次已达上限（{current_attempts}），mission 已标记 needs_manual，"
+                    "worker 副本保留供人工排查（X-003），请转人工处理。"
+                ),
             )
-        # 未超限 → 计数 +1（落库）+ 返 conflict 给主 agent
+        # 未超限 → 计数 +1（落库）+ 返 conflict 给主 agent。
+        # D-010 冲突重入守卫（兜底）：冲突未解决不算收敛——``converge_explicit`` 入口
+        # 已按内部 merge 结果回滚本次置位，此处对**最终判定**（``_finalize_merge_for_
+        # mission`` 结果）再兜底置空一次（防御两段 merge 结果短暂不一致），保持会话
+        # 活跃 mission 可解析——session 路由重入 converge 不 404（重入语义不回退）。
+        await session.execute(
+            update(AgentMission).where(AgentMission.id == mission.id).values(converged_at=None)
+        )
         new_attempt = await _bump_conflict_attempts(mission)
         await session.commit()
         await session.refresh(mission)
@@ -1047,7 +1152,7 @@ async def _converge_core(session: AsyncSession, mission: AgentMission) -> Conver
             attempt=new_attempt,
         )
 
-    # --- 全 merged 成功（pending_conflicts 空 + 有 merged_branches）→ cleanup + merged ---
+    # --- 全 merged 成功（pending_conflicts 空 + 有 merged_branches）→ cleanup + converged ---
     # 副本清理由 task-07 cleanup_mission 负责（expects_from 契约）；失败保留（X-003）。
     await _cleanup_mission(session, mission.id)
     artifact_id = await _latest_artifact_id(session, mission.id)
@@ -1059,7 +1164,7 @@ async def _converge_core(session: AsyncSession, mission: AgentMission) -> Conver
     )
     return ConvergeResponse(
         mission_id=mission.id,
-        status="merged",
+        status="converged",
         converged=True,
         artifact_id=artifact_id,
         merged_branches=merged_branches,

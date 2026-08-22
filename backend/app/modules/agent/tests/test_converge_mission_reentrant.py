@@ -1,11 +1,20 @@
 """Tests for ``converge_mission`` 可重入冲突解决（task-06 / design §5.2 / §7.5 / R-07）。
 
-覆盖可重入状态机四态：
-- 成功路径（全 merged）→ 调 ``_cleanup_mission`` + 返 ``status=merged``。
+覆盖可重入状态机（task-06 D-010 后响应四值 converged/busy/conflict/needs_manual）：
+- 成功路径（全 merged）→ 调 ``_cleanup_mission`` + 返 ``status=converged``。
 - 冲突返 ``status=conflict`` + conflicts（主 agent 自己 SDK 解决）+ attempt +1。
-- 重入（mock 第二次 ``_finalize_merge_for_mission`` 返全 merged）→ cleanup + merged。
-- R-07 超限（attempt+1 > 上限仍有 conflict）→ ``status=failed_manual`` +
+- 重入（mock 第二次 ``_finalize_merge_for_mission`` 返全 merged）→ cleanup + converged。
+- R-07 超限（attempt+1 > 上限仍有 conflict）→ ``status=needs_manual`` +
   mission.constraints.needs_manual（X-003 副本保留，简化不实际 abort）。
+
+2026-08-22-team-session-unify task-06 适配：
+- converge_mission 自 task-05 起新增 ``request`` 形参（X-Session-Id 解析）——直调
+  形态改为 ``(ws_id, mission_id, _plain_request(), db_session, None)``（无会话头，
+  走显式路径解析）。
+- ``converge_mission_for_completed_run`` 自 task-06 起新增 ``converge_explicit``
+  keyword-only 形参——本文件 mock 同步加参。
+- 状态值断言随四值契约更新（merged→converged / failed_manual→needs_manual /
+  bootstrap 透传 done→converged）。
 
 测试隔离策略：整体 mock ``converge_mission_for_completed_run``（既有链路，返 done）+
 ``_finalize_merge_for_mission``（task-05 契约 FinalizerMergeResult 透出）+
@@ -19,11 +28,17 @@ import uuid
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
 
 from app.modules.agent import mcp_tools
 from app.modules.agent.mcp_tools import ConvergeResponse, converge_mission
 from app.modules.agent.model import AgentMission, AgentRun
 from app.modules.workspace.model import Workspace
+
+
+def _plain_request() -> Request:
+    """无 X-Session-Id 的直调 Request（task-05 起 converge_mission 带 request 形参）。"""
+    return Request({"type": "http", "headers": []})
 
 
 async def _seed_mission(session: AsyncSession) -> tuple[uuid.UUID, uuid.UUID, AgentRun]:
@@ -80,7 +95,9 @@ def _patch_converge_dependencies(
     from app.modules.agent import delegation, finalizer
     from app.modules.agent import mcp_tools as mod
 
-    async def _fake_converge_for_completed_run(session, run_id, cfg):
+    async def _fake_converge_for_completed_run(session, run_id, cfg, *, converge_explicit=False):
+        # task-06：converge_explicit keyword-only 形参与真实签名对齐（_converge_core
+        # 以 converge_explicit=True 调用——显式收敛置位入口）。
         return "done"
 
     merge_iter = iter(merge_results)
@@ -117,7 +134,7 @@ class TestConvergeReentrant:
     async def test_success_path_calls_cleanup_and_returns_merged(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """用例 1：全 merged → status=merged + 调 cleanup_mission + converged=True。"""
+        """用例 1：全 merged → status=converged + 调 cleanup_mission + converged=True（四值）。"""
         ws_id, mission_id, _main_run = await _seed_mission(db_session)
         cleanup_calls: list[uuid.UUID] = []
         _patch_converge_dependencies(
@@ -126,9 +143,9 @@ class TestConvergeReentrant:
             cleanup_calls=cleanup_calls,
         )
 
-        resp = await converge_mission(ws_id, mission_id, db_session, user=None)
+        resp = await converge_mission(ws_id, mission_id, _plain_request(), db_session, None)
         assert isinstance(resp, ConvergeResponse)
-        assert resp.status == "merged"
+        assert resp.status == "converged"
         assert resp.converged is True
         assert resp.merged_branches == ["workers/aaa", "workers/bbb"]
         assert resp.conflicts == []
@@ -151,7 +168,7 @@ class TestConvergeReentrant:
             cleanup_calls=cleanup_calls,
         )
 
-        resp = await converge_mission(ws_id, mission_id, db_session, user=None)
+        resp = await converge_mission(ws_id, mission_id, _plain_request(), db_session, None)
         assert resp.status == "conflict"
         assert resp.converged is False
         assert resp.merged_branches == ["workers/bbb"]
@@ -190,14 +207,14 @@ class TestConvergeReentrant:
         )
 
         # 第一次调用：冲突
-        resp1 = await converge_mission(ws_id, mission_id, db_session, user=None)
+        resp1 = await converge_mission(ws_id, mission_id, _plain_request(), db_session, None)
         assert resp1.status == "conflict"
         assert resp1.attempt == 1
         assert cleanup_calls == []
 
         # 第二次调用：重入（主 agent 已 SDK 解决）
-        resp2 = await converge_mission(ws_id, mission_id, db_session, user=None)
-        assert resp2.status == "merged"
+        resp2 = await converge_mission(ws_id, mission_id, _plain_request(), db_session, None)
+        assert resp2.status == "converged"
         assert resp2.converged is True
         assert resp2.merged_branches == ["workers/aaa", "workers/bbb"]
         assert resp2.attempt == 1, "重入成功 attempt 不再自增（仍是首次冲突的计数）"
@@ -207,11 +224,12 @@ class TestConvergeReentrant:
     async def test_r07_exceed_returns_failed_manual(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """用例 4：R-07 超限——attempt+1 > 上限（默认 3）仍有 conflict → failed_manual。
+        """用例 4：R-07 超限——attempt+1 > 上限（默认 3）仍有 conflict → needs_manual。
 
         预置 mission.constraints.conflict_attempts=2（已尝试 2 轮），第 3 次冲突时
-        attempts+1=3 不超 3；再 bump 到 3 后第 4 次调用（attempts+1=4>3）→ failed_manual。
-        简化（task-06 决策）：不实际 git merge --abort，标 needs_manual 让用户手动处理。
+        attempts+1=3 不超 3；再 bump 到 3 后第 4 次调用（attempts+1=4>3）→ needs_manual
+        （task-06 四值，原 failed_manual 改名）。简化（task-06 决策）：不实际
+        git merge --abort，标 needs_manual 让用户手动处理。
         """
         ws_id, mission_id, _main_run = await _seed_mission(db_session)
         # 预置已累计 3 轮（attempts=3）→ 下次冲突 attempts+1=4 > 3 → 超限
@@ -235,8 +253,8 @@ class TestConvergeReentrant:
             cleanup_calls=cleanup_calls,
         )
 
-        resp = await converge_mission(ws_id, mission_id, db_session, user=None)
-        assert resp.status == "failed_manual"
+        resp = await converge_mission(ws_id, mission_id, _plain_request(), db_session, None)
+        assert resp.status == "needs_manual"
         assert resp.converged is False
         assert resp.attempt == 3, "超限时 attempt 反映当前累计值（不再 +1 漂移）"
         assert resp.conflicts == conflicts
@@ -281,7 +299,7 @@ class TestConvergeReentrant:
             cleanup_calls=cleanup_calls,
         )
 
-        resp = await converge_mission(ws_id, mission_id, db_session, user=None)
+        resp = await converge_mission(ws_id, mission_id, _plain_request(), db_session, None)
         # attempt=2 → +1=3，不超 3 → 仍 conflict
         assert resp.status == "conflict"
         assert resp.attempt == 3
@@ -291,10 +309,11 @@ class TestConvergeReentrant:
     async def test_bootstrap_path_preserves_legacy_behavior(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """bootstrap mission（无 worker_branch 合并）→ 走既有 done 语义（零回归）。
+        """bootstrap mission（无 worker_branch 合并）→ 走收敛语义返 converged（四值）。
 
-        merge 结果空（无 merged 无 conflict）→ 不进 conflict 状态机，返 converge_mission_for_completed_run
-        的 status（done），保护 task-04 既有 bootstrap 路径（design §9）。
+        merge 结果空（无 merged 无 conflict）→ 不进 conflict 状态机，返 converged
+        （task-06 D-010：done 并入 converged；置位由 converge_explicit 入口完成，
+        本文件 mock 其返 done）。
         """
         ws_id, mission_id, _main_run = await _seed_mission(db_session)
         cleanup_calls: list[uuid.UUID] = []
@@ -304,8 +323,8 @@ class TestConvergeReentrant:
             cleanup_calls=cleanup_calls,
         )
 
-        resp = await converge_mission(ws_id, mission_id, db_session, user=None)
-        assert resp.status == "done"
+        resp = await converge_mission(ws_id, mission_id, _plain_request(), db_session, None)
+        assert resp.status == "converged"
         assert resp.converged is True
         assert resp.merged_branches == []
         assert resp.conflicts == []
