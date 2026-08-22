@@ -9,13 +9,18 @@
  *   - ThinkingRowView   思考折叠行（摘要 60 字截断 + streaming「思考中」脉冲标记）
  *   - ToolRowView       工具单行（图标+工具名+主参数+状态徽章+耗时+运行中扫动；
  *                       点击整行展开 result，MarkdownText 渲染；复制按钮平移现有
- *                       turn-timeline parseToolRaw 的 copyText 规则）
+ *                       turn-timeline parseToolRaw 的 copyText 规则；
+ *                       task-12：团队 MCP 工具（dispatch_worker 等 5 个）泛化微调
+ *                       ——短名 + mcp 标识 + 👥 图标 + 角色/目标主参数摘要）
  *   - SubagentBlockView 子代理嵌套块（头部状态点/名称/类型/时长 + children 递归
  *                       渲染；运行中默认展开+头部扫动，完成默认折叠；subagent_stub
  *                       兜底段复用同组件）
  *   - StderrRowView     stderr 警示行（⚠ 前缀，平移现有 amber 样式）
+ *   - TeamWorkerBlockView 分身段块（task-12 / 2026-08-22-team-session-unify FR-07：
+ *                       violet 折叠卡——角色/目标工作区徽标/状态/耗时 + children
+ *                       日志产物；dispatch_worker tool 段在 SegmentView 升级路由到此）
  *   - SegmentView       统一入口分发器（按 kind 分发；tool 段有 children 时升级为
- *                       子代理块渲染）
+ *                       子代理块渲染；dispatch_worker 团队工具升级为分身段块）
  *
  * 渲染经济性（FR-06 / R-03）：全部组件 React.memo（默认浅比较）——装配器
  * path-copy 保证未触及段引用稳定，流式 delta 只重渲染当前段；列表层以段 id 为
@@ -37,7 +42,8 @@
  *      经 .seg-subagent-body 父级选择器覆盖，保持 props 契约不变（无 variant 参数）。
  */
 
-import { memo, useEffect, useRef, useState } from "react";
+import { Children, memo, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 
 import { MarkdownText } from "@/components/ui/markdown-text";
 import type {
@@ -45,6 +51,7 @@ import type {
   ToolTurnSegment,
   TurnSegment,
 } from "@/components/daemon/session-log-assembler";
+import { workspaceTypeBadge } from "@/lib/workspace-types";
 import { cn } from "@/lib/utils";
 
 /* ───────────────── 段动画 keyframes（自包含注入，见文件头说明） ───────────────── */
@@ -232,6 +239,85 @@ function subagentStatus(segment: SubagentContainerSegment): "running" | "ok" | "
   return segment.kind === "subagent_stub" ? "running" : segment.status;
 }
 
+/* ─────────────── 团队 MCP 工具识别与摘要（task-12 / FR-07） ─────────────── */
+
+/** 主控团队 MCP 5 工具（sillyhub-daemon mcp-server.ts registerTool 名单）。 */
+const TEAM_MCP_TOOLS: ReadonlySet<string> = new Set([
+  "dispatch_worker",
+  "get_worker_result",
+  "list_workers",
+  "converge_mission",
+  "report_progress",
+]);
+
+/**
+ * 团队 MCP 工具短名识别：Claude 上报形态带 `mcp__<server>__` 前缀（如
+ * mcp__sillyhub__dispatch_worker），daemon 直报裸名（dispatch_worker）——取末段
+ * 匹配 5 工具白名单；非团队工具返回 null（走既有 ToolRowView 泛化路径）。
+ */
+function teamMcpToolName(toolName: string | null): string | null {
+  if (!toolName) return null;
+  const last = toolName.split("__").pop() ?? "";
+  return TEAM_MCP_TOOLS.has(last) ? last : null;
+}
+
+/** 团队工具 args 解析（raw 为 tool_call JSON；解析失败返回空对象）。 */
+function parseTeamToolArgs(raw: string): Record<string, unknown> {
+  try {
+    const obj = JSON.parse((raw ?? "").trim()) as { args?: unknown } | null;
+    if (obj && typeof obj === "object" && obj.args && typeof obj.args === "object") {
+      return obj.args as Record<string, unknown>;
+    }
+  } catch {
+    // 非 JSON → 空对象（desc 回退既有 primary/raw 链）
+  }
+  return {};
+}
+
+/** 摘要截断（团队工具主参数，40 字）。 */
+function teamBrief(text: string, max = 40): string {
+  const s = text.replace(/\s+/g, " ").trim();
+  return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+/**
+ * 团队 MCP 工具主参数摘要（原型 §03 tool-card .cmd 语义）：
+ * dispatch_worker → 「角色 · 目标」；get_worker_result → 读取产出；
+ * converge_mission → 收敛分身产出；list_workers → 列出分身进度；
+ * report_progress → 进度备注。args 空时返回 null（回退既有 desc 链）。
+ */
+function teamToolSummaryOf(tool: string, raw: string): string | null {
+  const args = parseTeamToolArgs(raw);
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  switch (tool) {
+    case "dispatch_worker": {
+      const role = str(args.role);
+      const objective = str(args.objective);
+      if (!role && !objective) return null;
+      return objective ? `${role ?? "分身"} · ${teamBrief(objective)}` : (role ?? "分身");
+    }
+    case "get_worker_result": {
+      const role = str(args.role) ?? str(args.run_id);
+      return role ? `读取 ${teamBrief(role)} 产出` : "读取分身产出";
+    }
+    case "converge_mission":
+      return "收敛分身产出";
+    case "list_workers":
+      return "列出分身进度";
+    case "report_progress": {
+      const note = str(args.note) ?? str(args.progress);
+      return note ? `进度：${teamBrief(note)}` : "上报进度";
+    }
+    default:
+      return null;
+  }
+}
+
+/** dispatch_worker tool 段 → 分身段块（SegmentView 升级路由用，见 TeamWorkerBlockView）。 */
+function isTeamDispatchTool(toolName: string | null): boolean {
+  return teamMcpToolName(toolName) === "dispatch_worker";
+}
+
 /* ───────────────────────────── 段组件（全部 memo） ───────────────────────────── */
 
 /**
@@ -309,6 +395,10 @@ export const ThinkingRowView = memo(function ThinkingRowView({ segment }: Thinki
  * （MarkdownText，默认折叠，限高 200px 滚动）；运行中无 result 展开显示
  * 「执行中…」占位。toolName 为空：孤儿 result 段显示「工具结果」，解析失败
  * （R-07）主参数位置原样显示 raw。
+ *
+ * task-12（2026-08-22-team-session-unify FR-07）团队 MCP 工具泛化微调（原型 §03
+ * tool-card）：5 团队工具（mcp__server__ 前缀或裸名）→ 👥 图标 + mcp 来源标识 +
+ * 短名（剥前缀）+ 角色/目标主参数摘要；其余工具渲染零改动。
  */
 export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewProps) {
   useSegmentAnimations();
@@ -320,7 +410,9 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
       ? formatToolDuration(segment.endedAt - segment.startedAt)
       : null;
   const copyText = toolCopyText(segment.raw, segment.toolName);
-  const desc = segment.primary ?? (segment.raw || null);
+  const teamTool = teamMcpToolName(segment.toolName);
+  const teamSummary = teamTool ? teamToolSummaryOf(teamTool, segment.raw) : null;
+  const desc = teamSummary ?? segment.primary ?? (segment.raw || null);
   const result = segment.result?.trim() ?? "";
   return (
     <div className="w-full">
@@ -341,10 +433,18 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
         )}
       >
         <span aria-hidden className="shrink-0 text-xs">
-          {toolIconOf(segment.toolName)}
+          {teamTool ? "👥" : toolIconOf(segment.toolName)}
         </span>
+        {teamTool && (
+          <span
+            className="shrink-0 rounded border border-violet-200 bg-violet-50 px-1 py-px text-[9.5px] font-semibold leading-none text-violet-700"
+            title="团队 MCP 工具"
+          >
+            mcp
+          </span>
+        )}
         <span className="shrink-0 text-[11.5px] font-semibold text-brand-600">
-          {segment.toolName ?? (segment.raw ? "工具调用" : "工具结果")}
+          {teamTool ?? segment.toolName ?? (segment.raw ? "工具调用" : "工具结果")}
         </span>
         {desc && (
           <span
@@ -498,12 +598,161 @@ export const StderrRowView = memo(function StderrRowView({ segment }: StderrRowV
   );
 });
 
+/* ─────────────── 分身段块（task-12 / 2026-08-22-team-session-unify / FR-07） ─────────────── */
+
+/** 分身 run 状态 → 渲染态/文案/颜色（与 team-task-block WORKER_STATUS_META 对齐；
+ * 段族文件保持零跨模块依赖，故独立维护同款映射）。 */
+const WORKER_STATUS_META: Record<string, { label: string; cls: string }> = {
+  pending: { label: "排队中", cls: "text-muted-foreground" },
+  running: { label: "运行中", cls: "text-brand-700" },
+  completed: { label: "已完成", cls: "text-emerald-700" },
+  failed: { label: "失败", cls: "text-red-600" },
+  killed: { label: "已终止", cls: "text-muted-foreground" },
+  cancelled: { label: "已取消", cls: "text-muted-foreground" },
+  interrupted: { label: "已打断", cls: "text-muted-foreground" },
+};
+
+const WORKER_STATUS_FALLBACK = { label: "未知", cls: "text-muted-foreground" };
+
+export interface TeamWorkerBlockProps {
+  /** 分身角色（dispatch_worker args.role；缺省「分身」）。 */
+  role: string | null;
+  /** 分身 run 状态（pending/running/completed/failed/killed…，未知值有兜底）。 */
+  status: string;
+  /** 分身目标（dispatch_worker args.objective）。 */
+  objective?: string | null;
+  /** 耗时（ms，起止差——纯组件不读本地时钟，由调用方传入）。 */
+  durationMs?: number | null;
+  /** 目标工作区徽标：名称 + 类型（类型配色走 workspaceTypeBadge 词表）。 */
+  workspaceName?: string | null;
+  workspaceType?: string | null;
+  /** 目标工作区 id 短标识（无名称时兜底展示 #xxxxxxxx，原型 §03 ws-tag 语义）。 */
+  workspaceId?: string | null;
+  /** body 内容（分身归属日志/产物；SegmentView 路由为 children 段递归）。 */
+  children?: ReactNode;
+}
+
+/**
+ * 分身段块（原型 §03 violet `<details>` .worker 语义）：violet 折叠卡——头部 =
+ * 👥 分身「角色」+ 状态 + mm:ss 耗时 + 目标工作区徽标；body = 目标一行 + children
+ * （分身日志/产物）。运行中默认展开 + 无扫动（头部轻量），终态默认折叠，点击切换；
+ * running→终态过渡自动收敛折叠（对齐 SubagentBlockView）。无 children 时显示
+ * 日志/产物入口预留说明。
+ *
+ * 数据两条路：① SegmentView 升级路由——dispatch_worker tool 段（主控 MCP 派发
+ * 调用，其 children 为分身归属日志段）自动进本组件；② 父层直传 props（task-11
+ * 接线真实工作区名称/类型徽标）。
+ */
+export const TeamWorkerBlockView = memo(function TeamWorkerBlockView({
+  role,
+  status,
+  objective,
+  durationMs,
+  workspaceName,
+  workspaceType,
+  workspaceId,
+  children,
+}: TeamWorkerBlockProps) {
+  useSegmentAnimations();
+  const wsMeta = WORKER_STATUS_META[status] ?? WORKER_STATUS_FALLBACK;
+  const running = status === "pending" || status === "running";
+  const [open, setOpen] = useState(running);
+  // running → 终态过渡：收敛为折叠（同 SubagentBlockView 生命周期语义）。
+  const prevRunningRef = useRef(running);
+  useEffect(() => {
+    if (prevRunningRef.current && !running) setOpen(false);
+    prevRunningRef.current = running;
+  }, [running]);
+
+  const hasWs = Boolean(workspaceName || workspaceId);
+  return (
+    <div className="w-full self-stretch overflow-hidden rounded-[10px] border border-violet-200 bg-violet-50">
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen(!open);
+          }
+        }}
+        className="flex cursor-pointer select-none items-center gap-2 px-3 py-[7px] text-xs"
+      >
+        <span aria-hidden className="shrink-0">
+          👥
+        </span>
+        <span className="min-w-0 shrink-0 truncate font-semibold text-violet-700">
+          {`分身「${role || "分身"}」`}
+        </span>
+        <span className={cn("shrink-0 text-[12px]", wsMeta.cls)}>{wsMeta.label}</span>
+        {durationMs != null && (
+          <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
+            {formatClockDuration(durationMs)}
+          </span>
+        )}
+        {hasWs && (
+          <span
+            className={cn(
+              "inline-flex h-5 shrink-0 items-center rounded border px-1.5 text-[10px] font-semibold",
+              workspaceName
+                ? workspaceTypeBadge(workspaceType).className
+                : "border-violet-200 bg-card font-mono text-violet-700",
+            )}
+            title={workspaceId ?? workspaceName ?? undefined}
+          >
+            {workspaceName || (workspaceId ? `#${workspaceId.slice(0, 8)}` : "")}
+          </span>
+        )}
+      </div>
+      {open && (
+        <div className="flex flex-col gap-[5px] border-t border-dashed border-violet-200 bg-card px-3 pb-2.5 pt-2">
+          {objective && (
+            <p className="text-[11.5px] text-muted-foreground">{`目标：${objective}`}</p>
+          )}
+          {Children.count(children) > 0 ? (
+            children
+          ) : (
+            <p className="text-[11px] text-muted-foreground/80">
+              日志与产物入口（接线后开放）
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
+
+/** dispatch_worker tool 段 → TeamWorkerBlockProps（args 解析 + 段三态映射）。 */
+function teamWorkerBlockFromSegment(segment: ToolTurnSegment): TeamWorkerBlockProps {
+  const args = parseTeamToolArgs(segment.raw);
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  return {
+    role: str(args.role),
+    // 段三态 → run 状态口径（running/ok/deny → running/completed/failed）
+    status:
+      segment.status === "ok" ? "completed" : segment.status === "deny" ? "failed" : "running",
+    objective: str(args.objective),
+    durationMs:
+      segment.startedAt != null && segment.endedAt != null
+        ? segment.endedAt - segment.startedAt
+        : null,
+    workspaceId: str(args.target_workspace_id),
+    children: segment.children.map((child) => (
+      <SegmentView key={child.id} segment={child} />
+    )),
+  };
+}
+
 /* ───────────────────────── 统一入口分发器 ───────────────────────── */
 
 /**
- * SegmentView：按 kind 分发到五个段组件（task-05 统一入口）。tool 段带
+ * SegmentView：按 kind 分发到段组件（task-05 统一入口）。tool 段带
  * children（子代理归属，FR-03）时升级为 SubagentBlockView 渲染，普通工具走
  * ToolRowView；subagent_stub 兜底段复用 SubagentBlockView（design §9.5）。
+ * task-12（FR-07）：dispatch_worker 团队工具段升级为 TeamWorkerBlockView
+ * （分身段块——派发调用即分身在进度视图的代表，其 children 为分身归属日志）。
  * memo 默认浅比较依赖装配器 path-copy 的段引用稳定性（FR-06）；列表层以
  * segment.id 为稳定 key（消费方 task-06）。
  */
@@ -514,6 +763,9 @@ export const SegmentView = memo(function SegmentView({ segment }: SegmentViewPro
     case "thinking":
       return <ThinkingRowView segment={segment} />;
     case "tool":
+      if (isTeamDispatchTool(segment.toolName)) {
+        return <TeamWorkerBlockView {...teamWorkerBlockFromSegment(segment)} />;
+      }
       return segment.children.length > 0 ? (
         <SubagentBlockView segment={segment} />
       ) : (

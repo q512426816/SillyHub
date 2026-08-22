@@ -3,7 +3,11 @@
  */
 import { apiFetch, getApiBaseUrl } from "@/lib/api";
 import { useSession } from "@/stores/session";
-import type { AgentRunLogEntry } from "@/lib/agent";
+import type {
+  AgentRunLogEntry,
+  MainAgentConfig,
+  WorkerPresetItem,
+} from "@/lib/agent";
 import type { components } from "@/lib/api-types";
 import { fetchSse, type FetchSseConnection } from "@/lib/fetch-sse";
 
@@ -1489,5 +1493,114 @@ export async function getRuntimesUsage(
   return apiFetch<RuntimeUsageResponse>("/api/daemon/runtimes/usage", {
     query: { window },
   });
+}
+
+/* ---------- Session team mission (2026-08-22-team-session-unify task-12 / FR-07) ----------
+ *
+ * 会话内团队任务 client（design §5 Phase 3 / §7）：
+ *   - POST /api/daemon/sessions/{id}/team-mission  触发（预建，活跃冲突 409）
+ *   - GET  /api/daemon/sessions/{id}/team-missions 列表（TeamTaskBlock 数据源）
+ *   - POST /api/missions/{id}/cancel               取消（保留端点，D-011）
+ *
+ * 消费方：TeamTaskBlock（task-12）/ team-trigger-popover（task-11）。活跃 mission
+ * （planning/running/awaiting_input）的 5s 轮询由父层（task-11 session-panel）驱动，
+ * 本文件只提供一次性请求。
+ */
+
+/**
+ * mission 派生状态（task-02 扩展后 derive_status 判据矩阵产出，含 awaiting_input 档；
+ * 存量 external mission 不进该档）。渲染层对未知值有兜底映射，新增取值不崩。
+ */
+export type TeamMissionStatus =
+  | "planning"
+  | "running"
+  | "awaiting_input"
+  | "done"
+  | "degraded"
+  | "failed"
+  | "cancelled";
+
+/**
+ * 分身 run 概要（TeamMissionSummary.workers 单项）。后端仅收 role != orchestrator
+ * 的分身 run（主控轮 D-009 不进列表）；status 为 AgentRunStatus（pending/running/
+ * completed/failed/killed）。
+ */
+export interface TeamMissionWorkerSummary {
+  run_id: string;
+  role: string | null;
+  status: string;
+  objective: string | null;
+}
+
+/**
+ * 会话团队任务概要（触发响应 / 列表项，对齐 task-03 backend daemon/schema.py
+ * TeamMissionSummary）。scope_workspace_ids 为落库冻结快照（NULL 缺省回落 [anchor]）。
+ *
+ * 注：本接口为手写契约（task-03 已落库的 DTO 形状），task-14 `pnpm gen:types` 后
+ * 应替换为 api-types 生成版并对齐（CLAUDE.md 规则 21 的本卡例外——生成物统一在
+ * task-14 提交，避免与后端 schema 半成品反复对撞）。
+ */
+export interface TeamMissionSummary {
+  mission_id: string;
+  status: TeamMissionStatus;
+  objective: string | null;
+  scope_workspace_ids: string[];
+  budget_usd: number | null;
+  workers: TeamMissionWorkerSummary[];
+}
+
+/**
+ * POST /api/daemon/sessions/{id}/team-mission 请求体（对齐 task-03
+ * TeamMissionTriggerRequest）。objective 可空（落库占位，首条 inject 回填 CC-09）；
+ * scope_workspace_ids 缺省 = 会话绑定工作区（会话无工作区且未传 → 422，CC-10）。
+ */
+export interface TeamMissionTriggerRequest {
+  objective?: string | null;
+  scope_workspace_ids?: string[] | null;
+  project_id?: string | null;
+  budget_usd?: number | null;
+  worker_preset?: WorkerPresetItem[] | null;
+  main_agent_config?: MainAgentConfig | null;
+}
+
+/**
+ * POST /api/daemon/sessions/{session_id}/team-mission — 在当前会话预建团队任务
+ *（2026-08-22-team-session-unify task-03 端点）。会话已有活跃 mission 时后端
+ * 返回 409（R-07 单活跃约束，ApiError 透传给触发弹层提示）。
+ */
+export async function triggerSessionTeamMission(
+  sessionId: string,
+  req: TeamMissionTriggerRequest,
+): Promise<TeamMissionSummary> {
+  return apiFetch<TeamMissionSummary>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/team-mission`,
+    { method: "POST", json: req },
+  );
+}
+
+/**
+ * GET /api/daemon/sessions/{session_id}/team-missions — 会话关联团队任务列表
+ *（created_at 倒序）+ 分身概要。TeamTaskBlock 数据源；父层对活跃 mission 5s
+ * 轮询本端点，终态停止（design §5 Phase 3）。
+ */
+export async function listSessionTeamMissions(
+  sessionId: string,
+): Promise<TeamMissionSummary[]> {
+  return apiFetch<TeamMissionSummary[]>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/team-missions`,
+  );
+}
+
+/**
+ * POST /api/missions/{mission_id}/cancel — 取消团队任务（D-011 保留端点，workspace
+ * 无关路径）。TeamTaskBlock 取消按钮用；lib/agent.ts 的 cancelMission 是 workspace
+ * 前缀旧路由（task-13 清理对象），勿混用。响应为 MissionResponse，本卡只关心
+ * 取消副作用（父层 onRefresh 重拉列表展示新状态），不消费具体字段。
+ */
+export async function cancelTeamMission(missionId: string): Promise<void> {
+  await apiFetch(
+    `/api/missions/${encodeURIComponent(missionId)}/cancel`,
+    { method: "POST" },
+  );
 }
 
