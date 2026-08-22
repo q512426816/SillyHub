@@ -10,11 +10,12 @@ created_at: 2026-08-18 01:45:00
 
 ## 定位
 
-交互式会话子系统（`src/interactive/`，8 文件约 7800 行）：区别于 batch lease 的一次
+交互式会话子系统（`src/interactive/`，9 文件约 7900 行）：区别于 batch lease 的一次
 性 spawn，提供同进程多轮长驻会话。分层：SessionManager（生命周期，不依赖任何
 provider SDK）→ provider-neutral driver 契约（driver.ts 纯类型）→ ClaudeSdkDriver
 （Claude Agent SDK）/ CodexAppServerDriver（codex app-server JSON-RPC）双实现；
 辅助件 InputQueue（输入队列）、PermissionResolver（远程人审）、
+claude-transcript-dir（transcript 位置探测）、
 JsonSessionPersistence（元数据持久化）、types.ts（局部类型，独立于 src/types.ts）。
 
 ## 契约摘要
@@ -57,8 +58,11 @@ turn 收尾: classifyModelError → result.modelError → daemon 桥接 notifyRu
   policyEngine 未注入时退化 allowedRootsProvider fallback（空数组放行防全 deny）
 主 agent MCP: isMainAgentSession(ctx.stage==='orchestrator') → mainAgentMcpConfigProvider
   经 mergeMcpConfigs 注入 daemon 内置 MCP server；恢复时按 record.stage 重注入
-reloadWithProvider: buildSpawnEnv 构造新 env + CLAUDE_CONFIG_DIR 隔离；null=停止
-  供应商回退本机凭证（隔离仍保持）
+reloadWithProvider: buildSpawnEnv 构造新 env；null=停止供应商回退本机凭证。
+  CLAUDE_CONFIG_DIR（resume/reload 两路径）按 transcript 实际位置判定
+  （claude-transcript-dir：隔离目录命中→隔离，保 ql-20260807-002 停供应商语义；
+  仅宿主机 ~/.claude 命中→不隔离；探测不到→维持隔离默认，ql-20260822-009）
+restoreAndReconnect: 同上按位置判定 + record.providerConfig 快照重建 env
 空闲扫描: _scanIdle → _onIdleExpire → end（running 先 interrupt 再 end 兜底）
 ```
 
@@ -78,8 +82,11 @@ reloadWithProvider: buildSpawnEnv 构造新 env + CLAUDE_CONFIG_DIR 隔离；nul
   prompt 轮次内容 / agent 输出 / Query 句柄 / InputQueue。例外：
   record.providerConfig 含 api_key（sessions-portal task-08 决策，恢复 resume 不丢
   配置；0600 与 credentials.json 同信任域）。
-- SDK 自动持久化 `~/.claude/projects/<encoded-cwd>/<sid>.jsonl` 由 SDK 写，daemon
-  不读不写，resume 靠 SDK 内部加载。
+- SDK 自动持久化 transcript 由 SDK 写，daemon 不读不写，resume 靠 SDK 内部加载。
+  位置随 create 时是否配供应商分两侧：配了（provider_config 第 0 层生效）写 daemon
+  隔离目录 `claude-config/projects/<encoded-cwd>/<sid>.jsonl`；没配（本机凭证链）
+  写宿主机 `~/.claude/projects/...`。resume/reload 用 claude-transcript-dir 探测
+  实际在哪侧再设/删 CLAUDE_CONFIG_DIR（ql-20260822-009，见「关键逻辑」）。
 - codex driver 常量：KILL_GRACE_MS=2000（SIGTERM→SIGKILL 升级）、stderr 上限
   20KB、握手间隔 300ms（codex.cmd 包装层 100ms 会丢 stdin）。
 - manualApproval=true 才注入 canUseTool/onUserDialog；supportedDialogKinds 缺省
@@ -91,5 +98,6 @@ reloadWithProvider: buildSpawnEnv 构造新 env + CLAUDE_CONFIG_DIR 隔离；nul
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->
+- ql-20260822-009：修复「已结束会话点重新打开 4 秒后被 daemon 打回 ended」。根因：create（spawn-env buildSpawnEnv）只在 provider_config 存在时隔离 CLAUDE_CONFIG_DIR（ql-20260729-002），未配供应商会话的 transcript 写在宿主机 ~/.claude；而 restoreAndReconnect/_reloadSession 无条件强制隔离目录（ql-20260807-002 防停供应商后找不到 jsonl）→ resume 去隔离目录找 transcript 必失败 → claude 报错退出 → fail → backend end_session（daemon 上报 failed 也记 ended）→ 用户 inject 409。修复：新增 claude-transcript-dir.ts 探测 `<sid>.jsonl` 实际在哪侧（扫两侧 projects/*/ 一层，免复刻 cwd 编码），按位置设/删 env；探测不到维持原隔离默认（零回归兜底）。教训：两轮旧修复各修了一半场景（隔离侧/宿主侧），按 provider_config 现值推断 transcript 位置不可靠（热切换后是现值非创建值），只能按文件实存探测。
 - ql-20260624-007：codex turn 收敛依赖 turn/completed 经 parseTurnCompleted 产 complete event → finishTurn(currentTurnPromise)；该方法已对齐 claude result 强契约（params.turn 缺失也必收敛，见 adapter-json-rpc 模块）。新增 codex 子进程 stdout 原始行落盘：consume 内 ctx.sessionId 存在时建 WriteStream 写 ~/.sillyhub/daemon/runs/codex-interactive/<sessionId>.log（fire-and-forget 静默，不写日志不影响主流程），sessionId 经 CodexStartOptions 传入、session-manager._buildDriverOptions 一处填充（create+restore 共用）。下次 turn 卡死时看该日志确认 turn/completed 是否到达 / payload 长啥样。
 <!-- MANUAL_NOTES_END -->

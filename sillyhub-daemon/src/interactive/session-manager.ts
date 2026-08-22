@@ -78,8 +78,10 @@ import type { ProviderConfig } from '../types.js';
 // → 回退本机凭证，spawn-env.ts:140-164 已支持）。SpawnCredentialManager 鸭子类型，
 // daemon 生产路径注入 daemon._credentialManager，测试 / 未注入时用 noopCredential fallback。
 import { buildSpawnEnv, type SpawnCredentialManager } from '../spawn-env.js';
-// ql-20260807-002：reload 始终用 daemon 隔离 CLAUDE_CONFIG_DIR（jsonl 在那），停止供应商也保持。
-import { CLAUDE_CONFIG_DIR } from '../config.js';
+// ql-20260822-009：resume / reload 的 CLAUDE_CONFIG_DIR 按 transcript 实际位置判定
+// （隔离目录命中 → 隔离，保 ql-20260807-002 停供应商语义；仅宿主机 ~/.claude 命中 →
+// 不隔离，修复未配供应商会话重开被 fail 打回 ended）。
+import { applyTranscriptConfigDir } from './claude-transcript-dir.js';
 // task-04（FR-01 / D-005@v1）：turn 收尾把模型调用失败归类为结构化 ModelError，
 // 挂到 result.modelError 透传给 daemon 桥接 → notifyRunResult → backend error_detail。
 // 与 stream-json.ts:954 批量路径同源（近源归类，D-005 方案 C 三端标准协议）。
@@ -2617,17 +2619,17 @@ export class SessionManager {
         skillRefs: record.skillRefs,
         effectiveAllowedRoots: record.effectiveAllowedRoots,
       });
-      // 修复「重启 daemon 后 active session 变 ended」：resume 必须用 daemon 隔离的
-      // CLAUDE_CONFIG_DIR（SDK jsonl 写在此），与 create（_startInteractiveSession
-      // buildSpawnEnv）/ reloadWithProvider 对齐。原先 env:undefined → driver 回退裸
-      // process.env（无 CLAUDE_CONFIG_DIR）→ claude 用默认 ~/.claude → 找不到 daemon
-      // claude-config/projects/<cwd>/<sid>.jsonl → resume 失败 → claude 非 0 退出
-      // → driver onError → SessionManager.fail → backend end_session（总设 ended）。
+      // ql-20260822-009：resume 的 CLAUDE_CONFIG_DIR 按 transcript 实际位置判定
+      // （claude-transcript-dir 单一来源）。历史两轮修复的语义都保留：
+      //   - 隔离目录有 jsonl（create 带供应商 / ql-20260807-002 停止供应商场景）
+      //     → 仍强制隔离，防「重启 daemon 后 active session 变 ended」回归；
+      //   - 仅宿主机 ~/.claude 有 jsonl（create 未配供应商，ql-20260729-002 不隔离）
+      //     → 删除 env 让 claude 回 ~/.claude 找——原先无条件强制隔离导致 resume
+      //     找不到 jsonl → claude 报错退出 → fail → 会话被打回 ended（重开失效）。
       // 恢复路径 provider_config：task-08（sessions-portal）起 sessions.json 落盘会话级
       // 供应商配置快照——重启 resume 不丢配置（design §5 Wave2）。旧 sessions.json 无
-      // 该字段（undefined）→ 第 0 层自然跳过（本机凭证链，零回归）；显式设
-      // CLAUDE_CONFIG_DIR 保证 jsonl 一致，凭证靠 process.env（与 create 同源）
-      // + credentials.json（层 2，若有）。与 _reloadSession 同款构造。
+      // 该字段（undefined）→ 第 0 层自然跳过（本机凭证链，零回归）；凭证靠 process.env
+      // （与 create 同源）+ credentials.json（层 2，若有）。
       const restoreCredential: SpawnCredentialManager = this._credentialManager ?? {
         get: () => undefined,
         buildEnv: () => ({}),
@@ -2636,7 +2638,7 @@ export class SessionManager {
         { provider_config: state.providerConfig ?? undefined },
         { credential: restoreCredential },
       );
-      restoreEnv.CLAUDE_CONFIG_DIR = CLAUDE_CONFIG_DIR;
+      await applyTranscriptConfigDir(restoreEnv, state.agentSessionId);
       const driverOpts = this._buildDriverOptions(state, {
         exePath: exe,
         model: record.model,
@@ -2947,8 +2949,9 @@ export class SessionManager {
    *      不注人格——systemPrompt 仅 claude 消费，原 D-003 / NG-02）。
    *   ② ``buildSpawnEnv`` 构造新 env：provider_config 非 null → 第 0 层 injector 产
    *      ANTHROPIC_* env + 隔离 CLAUDE_CONFIG_DIR；null → 第 0 层跳过（本机凭证）。
-   *      无论 null 与否强制 ``CLAUDE_CONFIG_DIR=daemon 隔离目录``（jsonl 在那，
-   *      ql-20260807-002：停止供应商也保持，防 resume 找不到 jsonl）。
+   *      随后 ``applyTranscriptConfigDir`` 按 transcript 实际位置覆盖（ql-20260822-009）：
+   *      jsonl 在隔离目录 → 强制隔离（ql-20260807-002 停供应商语义）；仅在宿主机
+   *      ~/.claude → 不隔离（create 未配供应商的会话）；都没有 → 维持隔离默认。
    *   ③ 校验 ``state.agentSessionId`` 必需（SDK jsonl 恢复 key；缺失=首 turn 未完成
    *      → 无可恢复 jsonl → 抛错，不启动全新会话替换语义）。
    *   ④ ``_buildDriverOptions`` 透传 cwd / canUseTool / mcpServers / permissionMode +
@@ -3018,12 +3021,13 @@ export class SessionManager {
         { provider_config: providerConfig ?? undefined },
         { credential },
       );
-      // ql-20260807-002：reload 必须保持 CLAUDE_CONFIG_DIR=daemon 隔离目录。create/切换时
-      // jsonl 写在 daemon claude-config；停止（provider_config=null）buildSpawnEnv 会
-      // delete CLAUDE_CONFIG_DIR 回退 ~/.claude，致新 claude resume jsonl 找不到 → 启动
-      // 失败 → onError → fail → session ended。reload 始终用 daemon 隔离目录（jsonl 一致），
-      // 凭证靠 env token（层 2 credentials.json）+ daemon settings.json，不回退用户 ~/.claude。
-      newEnv.CLAUDE_CONFIG_DIR = CLAUDE_CONFIG_DIR;
+      // ql-20260822-009：reload 的 CLAUDE_CONFIG_DIR 同样按 transcript 实际位置判定
+      // （claude-transcript-dir 单一来源，与 restoreAndReconnect 对称）。ql-20260807-002
+      // 语义保留：jsonl 在 daemon 隔离目录（create 带供应商 / 停止供应商前创建）→ 仍
+      // 强制隔离，防新 claude resume 找不到 jsonl → onError → fail → session ended。
+      // 新增：jsonl 仅在宿主机 ~/.claude（create 未配供应商）→ 不隔离，回 ~/.claude 找。
+      // 凭证靠 env token（层 2 credentials.json）+ daemon settings.json。
+      await applyTranscriptConfigDir(newEnv, state.agentSessionId);
 
       // ── ③ 校验 resume key 必需 ──
       // agentSessionId 来自首 turn system/init（Claude）或 thread_started（Codex），

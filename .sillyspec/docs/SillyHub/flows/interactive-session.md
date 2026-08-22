@@ -31,7 +31,9 @@ updated_at: 2026-08-17T17:06:26Z
 (daemon)    _startInteractiveSession：
      │  ├─ pullSpecBundle 拉最新 spec（tar 解包到本地缓存）
      │  ├─ session-manager 起 claude-sdk-driver / codex-app-server-driver
-     │  │    （会话 jsonl 持久化，CLAUDE_CONFIG_DIR 指向 daemon 隔离目录保证 resume 可达）
+     │  │    （会话 jsonl 持久化；create 配供应商→写 daemon 隔离目录、未配→写宿主机
+     │  │     ~/.claude，resume/reload 按 transcript 实际位置设 CLAUDE_CONFIG_DIR，
+     │  │     ql-20260822-009）
      │  └─ POST /sessions/{id}/ready → backend SessionReadiness.mark_ready
      ▼
 === 对话循环 ===
