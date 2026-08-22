@@ -73,7 +73,9 @@ export interface InteractiveSessionPanelProps {
   /**
    * task-08（FR-08 / D-001@v2）：「用团队分析」成功创建 mission 后上报 missionId。
    * 父级可据此挂 TeamProgress 组件展示主 agent 决策 + worker 进度。
-   * mode=team + session_id 绑当前会话，主 agent 接管上下文。
+   * task-11（2026-08-22-team-session-unify / D-004）：「用团队分析」改为打开触发
+   * 弹层，本回调语义更新 = 弹层确认后 triggerSessionTeamMission 预建成功的
+   * mission_id 上报（SessionPanel dialog 分支内部触发，本层仅原样透传）。
    */
   onTeamMissionCreated?: (missionId: string) => void;
   /**

@@ -84,7 +84,8 @@ import { SessionConfigBar } from "@/components/sessions/session-config-bar";
 import { SubagentCatalog } from "@/components/sessions/subagent-catalog";
 import { ApiError } from "@/lib/api";
 import { useNotify } from "@/lib/errors";
-import { createMission } from "@/lib/agent";
+import { TeamTaskBlock, isActiveTeamMission } from "@/components/daemon/team-task-block";
+import { TeamTriggerPopover } from "@/components/daemon/team-trigger-popover";
 import {
   type LlmProviderRead,
   type LlmProviderRoleMapping,
@@ -100,6 +101,8 @@ import {
   injectSession,
   interruptSession,
   listSessionRuns,
+  listSessionTeamMissions,
+  triggerSessionTeamMission,
   PROVIDER_META,
   reopenSession,
   streamSession,
@@ -110,6 +113,8 @@ import {
   type SessionRunRead,
   type SessionStreamConnection,
   type SessionStreamEnvelope,
+  type TeamMissionSummary,
+  type TeamMissionTriggerRequest,
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
 
@@ -171,8 +176,9 @@ export interface SessionPanelProps {
   changeId?: string;
   /** dialog 可选：createSession 绑定 workspace + team 按钮显隐开关。〔prop〕2/4 消费方传。 */
   workspaceId?: string;
-  /** dialog 可选：团队分析 mission 创建上报。〔prop〕当前无消费方传，保留透传位
-   *  （design D-005 明确要求 team 可选透传）。 */
+  /** dialog 可选：团队任务上报。〔prop〕task-11 起语义 = 触发弹层确认后
+   *  triggerSessionTeamMission 预建成功的 mission_id 上报（父级可挂 TeamProgress）；
+   *  当前无消费方传，保留透传位（design D-005 明确要求 team 可选透传）。 */
   onTeamMissionCreated?: (missionId: string) => void;
   /** dialog 可选：离线只读（禁 4 操作 + 不建 SSE + 横幅）。〔prop〕仅 runtime-session-dialog 传。 */
   offlineReadOnly?: boolean;
@@ -260,6 +266,156 @@ interface TurnState {
 
 const INITIAL_TURN_STATE: TurnState = { turns: [], currentRunId: null };
 
+/* ────────────────────── task-11（2026-08-22-team-session-unify）：会话内团队触发（page/dialog 共用） ────────────────────── */
+
+/** 活跃 mission 轮询间隔（design §5 Phase 3：活跃 5s 轮询、终态停止）。 */
+const TEAM_MISSION_POLL_MS = 5000;
+
+/**
+ * /team 指令前缀解析（D-004 四路等价）：命中返回去前缀目标文本（可空串），
+ * 未命中返回 null（普通消息原路发送）。仅匹配整条指令——"/teams" 之类不误伤。
+ */
+function parseTeamCommand(prompt: string): string | null {
+  const m = /^\/team(?:\s+([\s\S]*))?$/.exec(prompt);
+  return m ? (m[1] ?? "").trim() : null;
+}
+
+/** triggerSessionTeamMission 错误 → 中文文案（409 单活跃冲突 / 403 项目维度权限 / 422 参数）。 */
+function teamTriggerErrorText(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 409) return "已有进行中的团队任务，等它完成或取消后再派";
+    if (err.status === 403) return "无权限派发团队（项目维度仅项目经理可用）";
+    if (err.status === 422) return `派发参数有误：${err.message}`;
+    return err.message;
+  }
+  return "派团队失败，请稍后重试";
+}
+
+/**
+ * task-11：会话团队任务列表（GET /sessions/{id}/team-missions）+ 活跃 5s 轮询。
+ * 纯 fetch + setInterval（不用 react-query——R4：团队入口在 dialog 渲染路径同样
+ * 挂载，dialog 分支零 react-query 铁律覆盖至此）；拉取失败静默（任务块非关键
+ * 路径，不阻断会话主流程，下轮轮询/取消刷新自愈）。
+ */
+function useSessionTeamMissions(sessionId: string | null) {
+  const [missions, setMissions] = useState<TeamMissionSummary[]>([]);
+  const refresh = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      setMissions(await listSessionTeamMissions(sessionId));
+    } catch {
+      /* 列表拉取失败不阻断 */
+    }
+  }, [sessionId]);
+  useEffect(() => {
+    setMissions([]);
+    if (sessionId) void refresh();
+  }, [sessionId, refresh]);
+  const hasActive = missions.some((m) => isActiveTeamMission(m.status));
+  useEffect(() => {
+    if (!sessionId || !hasActive) return;
+    const timer = window.setInterval(() => {
+      void refresh();
+    }, TEAM_MISSION_POLL_MS);
+    return () => window.clearInterval(timer);
+  }, [sessionId, hasActive, refresh]);
+  return { missions, refresh };
+}
+
+/**
+ * task-11：输入区上方团队触发行（原型 §01 .team-trigger-row + §02 弹层锚点），
+ * page/dialog 两模式共用：派团队按钮（引擎门控 + tooltip）+ 活跃状态 chip（可
+ * 关闭收回）+ TeamTriggerPopover 挂载（relative 锚点 + absolute bottom-full，
+ * 同 SessionConfigBar 浮层风格）+ 触发错误提示（409/403/422 中文文案）。
+ * 纯受控：API 调用/弹层开关归父层（本组件不含团队业务状态）。
+ */
+interface TeamTriggerRowProps {
+  /** 派团队按钮禁用（引擎非 claude / 无会话 / 终态 / 离线等，由父层合成）。 */
+  disabled: boolean;
+  /** 按钮 tooltip（引擎门控时固定「团队需要 Claude 引擎」）。 */
+  tooltip: string;
+  /** 活跃 mission 分身数（chip 文案「团队进行中 · N 分身」）；null = 隐藏。 */
+  activeWorkers: number | null;
+  /** chip 关闭（只收回提示条，不取消任务——TeamTaskBlock 仍展示进展）。 */
+  onDismissChip: () => void;
+  /** 弹层开关（父层 state）。 */
+  popoverOpen: boolean;
+  /** 会话绑定工作区（弹层 scope 默认「当前工作区」数据源）。 */
+  workspaceId: string | null;
+  workspaceName: string | null;
+  /** 目标预填（/team 指令文本 /「用团队分析」提示句）。 */
+  defaultObjective: string | null;
+  /** triggerSessionTeamMission 在途（确认按钮禁用）。 */
+  submitting: boolean;
+  /** 触发错误文案（弹层保持打开时行内展示）。 */
+  errorText: string | null;
+  onOpen: () => void;
+  onTrigger: (payload: TeamMissionTriggerRequest) => void;
+  onClose: () => void;
+}
+
+function TeamTriggerRow({
+  disabled,
+  tooltip,
+  activeWorkers,
+  onDismissChip,
+  popoverOpen,
+  workspaceId,
+  workspaceName,
+  defaultObjective,
+  submitting,
+  errorText,
+  onOpen,
+  onTrigger,
+  onClose,
+}: TeamTriggerRowProps) {
+  return (
+    <div className="relative flex shrink-0 flex-wrap items-center gap-2 border-t border-border bg-card px-5 py-2">
+      <button
+        type="button"
+        onClick={onOpen}
+        disabled={disabled}
+        title={tooltip}
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-violet-300 bg-violet-50/60 px-2.5 text-[12px] font-semibold text-violet-700 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        <Users className="h-3.5 w-3.5" aria-hidden />
+        派团队
+      </button>
+      {activeWorkers !== null && (
+        <span
+          data-testid="team-active-chip"
+          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-violet-300 bg-violet-50 px-2.5 py-0.5 text-[11.5px] font-medium text-violet-700"
+        >
+          <span aria-hidden>👥</span>团队进行中 · {activeWorkers} 分身
+          <button
+            type="button"
+            aria-label="收起团队状态提示"
+            onClick={onDismissChip}
+            className="ml-0.5 rounded-full px-1 leading-none text-violet-500 hover:bg-violet-100 hover:text-violet-700"
+          >
+            ×
+          </button>
+        </span>
+      )}
+      {errorText && (
+        <p role="alert" className="min-w-0 flex-1 truncate text-[11px] text-destructive">
+          {errorText}
+        </p>
+      )}
+      {popoverOpen && (
+        <TeamTriggerPopover
+          workspaceId={workspaceId}
+          workspaceName={workspaceName}
+          defaultObjective={defaultObjective}
+          submitting={submitting}
+          onTrigger={onTrigger}
+          onClose={onClose}
+        />
+      )}
+    </div>
+  );
+}
+
 function SessionPanelPage({
   sessionId,
   machines,
@@ -311,6 +467,18 @@ function SessionPanelPage({
   const [pendingAttachments, setPendingAttachments] = useState<AttachmentRead[]>([]);
   const clearAttachmentsRef = useRef<(() => void) | null>(null);
   const [reopening, setReopening] = useState(false);
+
+  // ── task-11（2026-08-22-team-session-unify）：会话内团队触发 + TeamTaskBlock ──
+  // 任务列表/轮询共用 hook；弹层开关与预填、触发在途、错误文案、chip 收回为面板态。
+  const { missions: teamMissions, refresh: refreshTeamMissions } =
+    useSessionTeamMissions(sessionId);
+  const [teamPopover, setTeamPopover] = useState<{ open: boolean; objective: string | null }>({
+    open: false,
+    objective: null,
+  });
+  const [teamTriggering, setTeamTriggering] = useState(false);
+  const [teamError, setTeamError] = useState<string | null>(null);
+  const [teamChipDismissedId, setTeamChipDismissedId] = useState<string | null>(null);
 
   const streamRef = useRef<SessionStreamConnection | null>(null);
   // 面板根 ref（task-09 / FR-04）：子代理目录跳转的 DOM 定位查询范围（限面板内）。
@@ -869,6 +1037,40 @@ function SessionPanelPage({
     });
 
   // ── 操作 ───────────────────────────────────────────────────────────────
+  // task-11：团队弹层开关（打开时清旧错误；objective 预填 /team 指令文本）。
+  const openTeamPopover = useCallback((objective: string | null) => {
+    setTeamError(null);
+    setTeamPopover({ open: true, objective });
+  }, []);
+  const closeTeamPopover = useCallback(() => {
+    setTeamError(null);
+    setTeamPopover({ open: false, objective: null });
+  }, []);
+
+  /**
+   * task-11：弹层确认 → POST /sessions/{id}/team-mission 预建（triggerSessionTeamMission）。
+   * 成功：关弹层 + 刷新 mission 列表（TeamTaskBlock/chip 即时呈现）+ objective
+   * 回填输入框（「就绪，随下条消息发出」——CC-09 首条 inject 回填 mission objective）。
+   * 失败：弹层保持打开，行内中文文案提示（409 活跃冲突/403 项目权限/422 参数）。
+   */
+  const handleTeamTrigger = useCallback(
+    async (payload: TeamMissionTriggerRequest) => {
+      setTeamTriggering(true);
+      setTeamError(null);
+      try {
+        await triggerSessionTeamMission(sessionId, payload);
+        closeTeamPopover();
+        await refreshTeamMissions();
+        if (payload.objective) setInput(payload.objective);
+      } catch (err) {
+        setTeamError(teamTriggerErrorText(err));
+      } finally {
+        setTeamTriggering(false);
+      }
+    },
+    [sessionId, refreshTeamMissions, closeTeamPopover],
+  );
+
   // task-03（design §3.3 状态机）：发送 = 统一 enqueue。active 且无 currentRun
   // 时 hook 立即投递（行为等效原直发）；running / reconnecting / pending 时排队，
   // 由 hook 在 turn_completed / status→active 后自动投递。原直发路径（restoring/
@@ -878,6 +1080,14 @@ function SessionPanelPage({
     const prompt = input.trim();
     // 2026-08-20 task-12（D-7）：附件非空允许空文本（看图说话）；纯文本仍守卫。
     if ((!prompt && pendingAttachments.length === 0) || prompt.length > MAX_PROMPT_LEN) return;
+    // task-11（D-004 四路等价）：/team 前缀拦截——不直接发送，弹层确认后目标文本
+    // 随下条消息发出（objective 预填去前缀文本）。仅 Claude 会话且可发消息时拦截。
+    const teamCmd = parseTeamCommand(prompt);
+    if (teamCmd !== null && sessionEngine === "claude" && !ended && machineOnline) {
+      openTeamPopover(teamCmd || null);
+      setInput("");
+      return;
+    }
     // design §3.3：仅终态（ended/failed）与离线禁发；running / reconnecting /
     // pending 不再拦截（入队等待，D-001）。
     if (!session || ended || !machineOnline) return;
@@ -901,7 +1111,7 @@ function SessionPanelPage({
     setInput("");
     setPendingAttachments([]);
     clearAttachmentsRef.current?.();
-  }, [input, session, ended, machineOnline, isQueueFull, pendingAttachments, enqueue]);
+  }, [input, session, ended, machineOnline, isQueueFull, pendingAttachments, enqueue, sessionEngine, openTeamPopover]);
 
   const handleInterrupt = useCallback(async () => {
     if (!session || session.status !== "active" || !turnState.currentRunId) return;
@@ -1124,6 +1334,24 @@ function SessionPanelPage({
   const interruptDisabled =
     session.status !== "active" || !turnState.currentRunId || !machineOnline;
 
+  // task-11：团队入口派生——引擎门控（D-003 一期 Claude 专属）+ 活跃 chip
+  //（R-07 单活跃约束，取首个活跃 mission；chip 收回按 mission id 记忆）。
+  const teamEngineOk = sessionEngine === "claude";
+  const teamButtonDisabled = !teamEngineOk || ended || !machineOnline;
+  const teamButtonTitle = !teamEngineOk
+    ? "团队需要 Claude 引擎"
+    : ended
+      ? "会话已结束，无法派团队"
+      : !machineOnline
+        ? "机器离线，无法派团队"
+        : "派团队：当前会话智能体升级为主控，派发分身";
+  const activeTeamMission =
+    teamMissions.find((m) => isActiveTeamMission(m.status)) ?? null;
+  const teamChipWorkers =
+    activeTeamMission && activeTeamMission.mission_id !== teamChipDismissedId
+      ? activeTeamMission.workers.length
+      : null;
+
   // ql-20260815-011：无真实标题不渲染占位「未命名会话」，只留 id 短码。
   const title = session.title?.trim() || "";
   const statusBadge =
@@ -1274,6 +1502,33 @@ function SessionPanelPage({
         }
       />
 
+      {/* task-11：会话团队任务块（TeamTaskBlock）——消息流末尾/输入区上方渲染会话
+          mission 列表（listSessionTeamMissions created_at 倒序全部渲染、活跃在前，
+          R-07 单活跃约束下至多一个活跃）；取消成功 onRefresh 重拉，活跃期间父层
+          5s 轮询刷新（终态停止，见 useSessionTeamMissions）。 */}
+      {teamMissions.length > 0 && (
+        <div
+          aria-label="会话团队任务列表"
+          className="flex shrink-0 flex-col gap-1.5 border-t border-border bg-card px-5 py-2"
+        >
+          {[...teamMissions]
+            .sort(
+              (a, b) =>
+                Number(isActiveTeamMission(b.status)) -
+                Number(isActiveTeamMission(a.status)),
+            )
+            .map((m) => (
+              <TeamTaskBlock
+                key={m.mission_id}
+                summary={m}
+                onRefresh={() => {
+                  void refreshTeamMissions();
+                }}
+              />
+            ))}
+        </div>
+      )}
+
       {/* 输入区：ctx 用量行 + 输入框 + 配置控件条（原型 .input-zone） */}
       <div className="flex shrink-0 flex-col bg-card">
         <div className="px-5 pt-3">
@@ -1300,6 +1555,27 @@ function SessionPanelPage({
           onRetry={(id) => {
             void retryEntry(id);
           }}
+        />
+        {/* task-11：输入区上方团队触发行（派团队按钮 + 活跃 chip + 配置弹层），
+            原型 §01 .team-trigger-row；弹层相对本行向上弹出（§02 .team-pop）。 */}
+        <TeamTriggerRow
+          disabled={teamButtonDisabled}
+          tooltip={teamButtonTitle}
+          activeWorkers={teamChipWorkers}
+          onDismissChip={() => {
+            if (activeTeamMission) setTeamChipDismissedId(activeTeamMission.mission_id);
+          }}
+          popoverOpen={teamPopover.open}
+          workspaceId={session.workspace_id ?? null}
+          workspaceName={workspaceName}
+          defaultObjective={teamPopover.objective}
+          submitting={teamTriggering}
+          errorText={teamError}
+          onOpen={() => openTeamPopover(null)}
+          onTrigger={(payload) => {
+            void handleTeamTrigger(payload);
+          }}
+          onClose={closeTeamPopover}
         />
         <SessionInputBar
           value={input}
@@ -1502,10 +1778,18 @@ function SessionPanelDialog(props: SessionPanelProps) {
   const [provider, setProvider] = useState(defaultProvider);
   const [input, setInput] = useState("");
   const [view, setView] = useState<SessionDialogView>(INITIAL_DIALOG_VIEW);
-  // 「用团队分析」按钮状态。teamAnalyzing=建 mission 进行中（按钮置灰）；
-  // teamMissionId=已为当前 session 建过 mission（按钮转「已建团队」只读态）。
-  const [teamAnalyzing, setTeamAnalyzing] = useState(false);
-  const [teamMissionId, setTeamMissionId] = useState<string | null>(null);
+  // task-11（2026-08-22-team-session-unify）：会话内团队触发——弹层开关/预填、
+  // 触发在途、错误文案、chip 收回；mission 列表 + 活跃 5s 轮询走共用 hook
+  //（旧 teamAnalyzing/teamMissionId（createMission 直发）随「用团队分析」改造下线）。
+  const { missions: teamMissions, refresh: refreshTeamMissions } =
+    useSessionTeamMissions(view.sessionId);
+  const [teamPopover, setTeamPopover] = useState<{ open: boolean; objective: string | null }>({
+    open: false,
+    objective: null,
+  });
+  const [teamTriggering, setTeamTriggering] = useState(false);
+  const [teamError, setTeamError] = useState<string | null>(null);
+  const [teamChipDismissedId, setTeamChipDismissedId] = useState<string | null>(null);
   // AskUserQuestion / 普通 permission_request 待答卡片队列。仅渲染 dialog_kind
   // 存在的（AskUserDialogCard）；普通工具审批卡在本面板不展示（/runtimes 页的
   // PermissionApprovalsPanel 负责）。
@@ -1530,12 +1814,6 @@ function SessionPanelDialog(props: SessionPanelProps) {
       setProvider(providers[0] ?? defaultProvider);
     }
   }, [providers, provider, defaultProvider]);
-
-  // session 切换 / 重置时清掉 teamMissionId（新会话可重新建 team）；idle（无
-  // sessionId）也清，确保按钮回到「用团队分析」可点状态。
-  useEffect(() => {
-    setTeamMissionId(null);
-  }, [view.sessionId]);
 
   // SSE 连接由 sessionId 驱动：createSession 成功后建立唯一 SSE，贯穿整个会话。
   const establishStream = useCallback(async (sessionId: string) => {
@@ -1967,6 +2245,42 @@ function SessionPanelDialog(props: SessionPanelProps) {
       onSend: sendFromQueue,
     });
 
+  // ── task-11：会话内团队触发（弹层开关 + 预建回调，语义同 page 模式）──────
+  const openTeamPopover = useCallback((objective: string | null) => {
+    setTeamError(null);
+    setTeamPopover({ open: true, objective });
+  }, []);
+  const closeTeamPopover = useCallback(() => {
+    setTeamError(null);
+    setTeamPopover({ open: false, objective: null });
+  }, []);
+
+  /**
+   * 弹层确认 → triggerSessionTeamMission 预建；成功刷新 mission 列表 +
+   * onTeamMissionCreated 上报（透传位保留，父级可挂 TeamProgress）+ objective
+   * 回填输入框；失败弹层保持打开，行内中文文案（409/403/422）。
+   */
+  const handleTeamTrigger = useCallback(
+    async (payload: TeamMissionTriggerRequest) => {
+      const sid = view.sessionId;
+      if (!sid) return;
+      setTeamTriggering(true);
+      setTeamError(null);
+      try {
+        const summary = await triggerSessionTeamMission(sid, payload);
+        closeTeamPopover();
+        onTeamMissionCreated?.(summary.mission_id);
+        await refreshTeamMissions();
+        if (payload.objective) setInput(payload.objective);
+      } catch (err) {
+        setTeamError(teamTriggerErrorText(err));
+      } finally {
+        setTeamTriggering(false);
+      }
+    },
+    [view.sessionId, refreshTeamMissions, closeTeamPopover, onTeamMissionCreated],
+  );
+
   /**
    * 发送主入口（队列化，design §3.3）：
    *   - idle 首条 → createSession 直发（R2：creating 态无既有 session 可附着，
@@ -1988,6 +2302,21 @@ function SessionPanelDialog(props: SessionPanelProps) {
     if (view.status === "ended" || view.status === "failed") return;
     if (view.status === "creating" || view.status === "ending") return;
     if (isQueueFull) return; // D-002 满员拒收
+
+    // task-11（D-004 四路等价）：/team 前缀拦截——不发送，弹层确认后目标随下条
+    // 消息发出（objective 预填去前缀文本）。仅 Claude 引擎且已有 active 会话时
+    // 拦截（idle 无会话可挂 mission / 非 active 原路发送）。
+    const teamCmd = parseTeamCommand(prompt);
+    if (
+      teamCmd !== null &&
+      provider === "claude" &&
+      view.sessionId &&
+      view.status === "active"
+    ) {
+      openTeamPopover(teamCmd || null);
+      setInput("");
+      return;
+    }
 
     // 首 turn：createSession（绕过队列直发，R2）
     if (view.status === "idle") {
@@ -2059,7 +2388,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
     if (!enqueue(prompt, [], prompt)) return; // D-002 兜底
     // 入队成功：清草稿（page 模式同款语义；队满失败时草稿保留）。
     setInput("");
-  }, [input, hasOnlineProvider, offlineReadOnly, view.status, isQueueFull, provider, changeId, workspaceId, establishStream, onSessionCreated, enqueue]);
+  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.sessionId, isQueueFull, provider, changeId, workspaceId, establishStream, onSessionCreated, enqueue, openTeamPopover]);
 
   // 失败轮次「重新发送」——复用 submitFollowup 重新提交该 turn 的 prompt。受
   // turn 级串行 / active 守卫；retryable=false 的错误由 RunErrorItem 隐藏按钮
@@ -2185,48 +2514,9 @@ function SessionPanelDialog(props: SessionPanelProps) {
     );
   }, []);
 
-  // 「用团队分析」（D9）：模式 team + 绑定当前 session_id。主 agent 作为
-  // orchestrator 接管会话上下文，按预设 worker 列表派发分析。worker_preset 用
-  // 通用分析模板（arch + verify 两角色），具体业务可在 mission 详情页编辑。
-  const handleAnalyzeWithTeam = useCallback(async () => {
-    if (!view.sessionId) return;
-    if (!workspaceId) return;
-    if (teamAnalyzing || teamMissionId) return;
-    setTeamAnalyzing(true);
-    try {
-      const m = await createMission(workspaceId, {
-        objective: "团队分析当前会话上下文",
-        mode: "team",
-        session_id: view.sessionId,
-        // changeId 透传（变更会话入口时绑定 change 上下文）
-        ...(changeId ? { change_id: changeId } : {}),
-        // 通用分析 worker 预设模板
-        worker_preset: [
-          {
-            agent_type: "claude_code",
-            model: "",
-            objective: "梳理会话上下文，输出问题与方案摘要",
-            role: "arch",
-          },
-          {
-            agent_type: "claude_code",
-            model: "",
-            objective: "核验方案可行性，标注风险与遗漏",
-            role: "verify",
-          },
-        ],
-      });
-      setTeamMissionId(m.id);
-      onTeamMissionCreated?.(m.id);
-    } catch (err) {
-      setView((prev) => ({
-        ...prev,
-        errorMsg: err instanceof ApiError ? err.message : "启动团队分析失败",
-      }));
-    } finally {
-      setTeamAnalyzing(false);
-    }
-  }, [view.sessionId, workspaceId, teamAnalyzing, teamMissionId, changeId, onTeamMissionCreated]);
+  // task-11（FR-03 / D-004）：「用团队分析」不再直调 createMission（task-13 将删
+  // 该 client），改为打开触发弹层（objective 预填通用分析提示句），确认后走
+  // triggerSessionTeamMission 预建链路（handleTeamTrigger，与派团队按钮/指令等价）。
 
   // 输入框 / 发送按钮状态（队列化语义，design §3.3）：仅终态与离线禁输入——
   // running / reconnecting 排队可输入（有意行为变更：ISP 旧语义为全态禁用，
@@ -2243,6 +2533,30 @@ function SessionPanelDialog(props: SessionPanelProps) {
     view.turns.some((t) => t.runId === view.currentRunId && t.status === "interrupting") ||
     offlineReadOnly; // 离线只读禁用打断
   const endDisabled = view.status !== "active" || offlineReadOnly; // 离线只读禁用结束
+
+  // task-11：团队入口派生——引擎门控（provider state 即面板现有引擎信息源，
+  // D-003 一期 Claude 专属）+ 活跃 chip（R-07 单活跃约束，取首个活跃 mission）。
+  const teamEngineOk = provider === "claude";
+  const teamButtonDisabled =
+    !teamEngineOk ||
+    !view.sessionId ||
+    view.status === "ended" ||
+    view.status === "failed" ||
+    !hasOnlineProvider ||
+    offlineReadOnly;
+  const teamButtonTitle = !teamEngineOk
+    ? "团队需要 Claude 引擎"
+    : !view.sessionId
+      ? "发送首条消息创建会话后可用"
+      : view.status === "ended" || view.status === "failed"
+        ? "会话已结束，无法派团队"
+        : "派团队：当前会话智能体升级为主控，派发分身";
+  const activeTeamMission =
+    teamMissions.find((m) => isActiveTeamMission(m.status)) ?? null;
+  const teamChipWorkers =
+    activeTeamMission && activeTeamMission.mission_id !== teamChipDismissedId
+      ? activeTeamMission.workers.length
+      : null;
 
   // 占位文案（队列化语义，与 page 模式同构的优先级链）：终态 / 离线 / 队满 →
   // 提示；reconnecting / creating / ending / running → 排队或过渡提示（running 的
@@ -2334,19 +2648,24 @@ function SessionPanelDialog(props: SessionPanelProps) {
               <UiButton
                 variant="outline"
                 size="sm"
-                onClick={handleAnalyzeWithTeam}
+                // task-11：改为打开触发弹层（不再直调 createMission）——objective
+                // 预填通用分析提示句，确认走 triggerSessionTeamMission 预建链路。
+                onClick={() => openTeamPopover("团队分析当前会话上下文")}
                 disabled={
                   !view.sessionId ||
                   view.status === "ended" ||
                   view.status === "failed" ||
-                  teamAnalyzing ||
-                  teamMissionId !== null
+                  !teamEngineOk
                 }
                 className="h-8 gap-1 px-3 text-xs"
-                title="用团队（主 agent + worker）分析当前会话上下文"
+                title={
+                  !teamEngineOk
+                    ? "团队需要 Claude 引擎"
+                    : "用团队（主 agent + worker）分析当前会话上下文"
+                }
               >
                 <Users className="h-3 w-3" />
-                {teamMissionId ? "已建团队" : teamAnalyzing ? "组建中…" : "用团队分析"}
+                用团队分析
               </UiButton>
             )}
             <UiButton
@@ -2440,6 +2759,32 @@ function SessionPanelDialog(props: SessionPanelProps) {
         emptyProviderLabel={getProviderLabel(provider)}
       />
 
+      {/* task-11：会话团队任务块（TeamTaskBlock）——消息流末尾/输入区上方渲染会话
+          mission 列表（倒序全部渲染、活跃在前）；取消成功 onRefresh 重拉，活跃期间
+          5s 轮询刷新（终态停止）。 */}
+      {teamMissions.length > 0 && (
+        <div
+          aria-label="会话团队任务列表"
+          className="flex shrink-0 flex-col gap-1.5 border-t border-border bg-card px-5 py-2"
+        >
+          {[...teamMissions]
+            .sort(
+              (a, b) =>
+                Number(isActiveTeamMission(b.status)) -
+                Number(isActiveTeamMission(a.status)),
+            )
+            .map((m) => (
+              <TeamTaskBlock
+                key={m.mission_id}
+                summary={m}
+                onRefresh={() => {
+                  void refreshTeamMissions();
+                }}
+              />
+            ))}
+        </div>
+      )}
+
       {/* 排队消息条（design §3.2 / 目标 3：dialog 与 page 共用；空队列组件自返回
           null 不占位）。dialog 附件能力关闭（R3），条目无附件元数据镜像可清，
           onRemove 直通；onRetry 仅用户触发（D-003，hook 内 failed→pending 后条件
@@ -2450,6 +2795,28 @@ function SessionPanelDialog(props: SessionPanelProps) {
         onRetry={(id) => {
           void retryEntry(id);
         }}
+      />
+
+      {/* task-11：输入区上方团队触发行（派团队按钮 + 活跃 chip + 配置弹层），
+          原型 §01 .team-trigger-row；弹层相对本行向上弹出（§02 .team-pop）。 */}
+      <TeamTriggerRow
+        disabled={teamButtonDisabled}
+        tooltip={teamButtonTitle}
+        activeWorkers={teamChipWorkers}
+        onDismissChip={() => {
+          if (activeTeamMission) setTeamChipDismissedId(activeTeamMission.mission_id);
+        }}
+        popoverOpen={teamPopover.open}
+        workspaceId={workspaceId ?? null}
+        workspaceName={null}
+        defaultObjective={teamPopover.objective}
+        submitting={teamTriggering}
+        errorText={teamError}
+        onOpen={() => openTeamPopover(null)}
+        onTrigger={(payload) => {
+          void handleTeamTrigger(payload);
+        }}
+        onClose={closeTeamPopover}
       />
 
       {/* 输入区共享子组件。R3：dialog 不传附件 props（createSession 无

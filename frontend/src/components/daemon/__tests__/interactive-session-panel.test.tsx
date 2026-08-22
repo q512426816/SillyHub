@@ -37,11 +37,22 @@ const sessionApi = vi.hoisted(() => ({
   getAgentSessionLogs: vi.fn(),
   fetchPendingDialogs: vi.fn(),
   fetchSessionDialogHistory: vi.fn(),
+  // task-11（2026-08-22-team-session-unify）：会话内团队触发 client（弹层确认走
+  // triggerSessionTeamMission 预建；TeamTaskBlock/chip 数据源 listSessionTeamMissions）。
+  listSessionTeamMissions: vi.fn(),
+  triggerSessionTeamMission: vi.fn(),
 }));
 
-// task-08（FR-08）：「用团队分析」按钮调 createMission(mode=team, session_id 绑定)
+// task-08（FR-08）：旧「用团队分析」直调 createMission（task-11 已下线该路径，
+// mock 保留用于回归断言「不再调用」；createMission 删除归 task-13）。
 const missionApi = vi.hoisted(() => ({
   createMission: vi.fn(),
+}));
+
+// task-11：触发弹层（TeamTriggerPopover）数据源——项目下拉 + 项目关联工作区。
+const popoverApi = vi.hoisted(() => ({
+  listProjects: vi.fn(),
+  listProjectWorkspaces: vi.fn(),
 }));
 
 vi.mock("@/lib/daemon", async () => {
@@ -57,7 +68,23 @@ vi.mock("@/lib/daemon", async () => {
     getAgentSessionLogs: sessionApi.getAgentSessionLogs,
     fetchPendingDialogs: sessionApi.fetchPendingDialogs,
     fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
+    listSessionTeamMissions: sessionApi.listSessionTeamMissions,
+    triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
   };
+});
+
+vi.mock("@/lib/ppm/project", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/ppm/project")>(
+    "@/lib/ppm/project",
+  );
+  return { ...actual, listProjects: popoverApi.listProjects };
+});
+
+vi.mock("@/lib/workspace", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/workspace")>(
+    "@/lib/workspace",
+  );
+  return { ...actual, listProjectWorkspaces: popoverApi.listProjectWorkspaces };
 });
 
 // task-08：「用团队分析」走 createMission（@/lib/agent），mock 之
@@ -169,6 +196,19 @@ describe("InteractiveSessionPanel", () => {
     // 默认空 []：跳过回灌直接建 SSE，与各测试验证的「SSE 建连」语义一致；不走真实
     // fetch（jsdom 无 server 会挂起，导致 streamSession 永不调用、测试超时）。
     sessionApi.getAgentSessionLogs.mockResolvedValue([]);
+    // task-11：会话团队默认无 mission（TeamTaskBlock/chip 不出现）；弹层项目下拉
+    // 默认无可选项目（仅当前工作区路径）。
+    sessionApi.listSessionTeamMissions.mockResolvedValue([]);
+    sessionApi.triggerSessionTeamMission.mockResolvedValue({
+      mission_id: "m-team-1",
+      status: "planning",
+      objective: null,
+      scope_workspace_ids: [],
+      budget_usd: null,
+      workers: [],
+    });
+    popoverApi.listProjects.mockResolvedValue([]);
+    popoverApi.listProjectWorkspaces.mockResolvedValue([]);
   });
   afterEach(() => {
     vi.clearAllMocks();
@@ -1336,7 +1376,10 @@ describe("InteractiveSessionPanel", () => {
     expect(screen.getByText("mcp_elicitation")).toBeInTheDocument();
   });
 
-  /* ---------- task-08（FR-08 / D-001@v2）：「用团队分析」按钮 ---------- */
+  /* ---------- task-08（FR-08 / D-001@v2）：「用团队分析」按钮 ----------
+   * task-11（2026-08-22-team-session-unify / FR-03 / D-004）：不再直调
+   * createMission（task-13 将删该 client），改为打开触发弹层 → 确认走
+   * triggerSessionTeamMission 预建（与派团队按钮/指令四路等价）。 ---------- */
 
   it("task-08 无 workspaceId 时「用团队分析」按钮不渲染", async () => {
     setupPanel(); // 默认不传 workspaceId
@@ -1349,7 +1392,7 @@ describe("InteractiveSessionPanel", () => {
     expect((btn as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("task-08 active session 点「用团队分析」→ createMission(mode=team, session_id)", async () => {
+  it("task-11 点「用团队分析」→ 打开触发弹层（objective 预填），不再调 createMission", async () => {
     const stream = makeStreamMock();
     sessionApi.streamSession.mockImplementation(stream.factory);
     sessionApi.createSession.mockResolvedValue({
@@ -1359,25 +1402,8 @@ describe("InteractiveSessionPanel", () => {
       status: "active",
       stream_url: "",
     });
-    missionApi.createMission.mockResolvedValue({
-      id: "m-team-1",
-      workspace_id: "ws-1",
-      change_id: null,
-      objective: "团队分析当前会话上下文",
-      status: "planning",
-      budget_usd: null,
-      cost_so_far: 0,
-      constraints: null,
-      cancelled_at: null,
-      created_at: "t",
-      workers: [],
-    });
-    const onTeamMissionCreated = vi.fn();
 
-    setupPanel({
-      workspaceId: "ws-1",
-      onTeamMissionCreated,
-    });
+    setupPanel({ workspaceId: "ws-1" });
     const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
@@ -1387,24 +1413,82 @@ describe("InteractiveSessionPanel", () => {
     expect((teamBtn as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(teamBtn);
 
-    await waitFor(() => expect(missionApi.createMission).toHaveBeenCalledTimes(1));
-    const callArg = missionApi.createMission.mock.calls[0]![1];
-    expect(callArg).toEqual(
-      expect.objectContaining({
-        objective: "团队分析当前会话上下文",
-        mode: "team",
-        session_id: "sess-1",
-      }),
+    // task-11（FR-03 / D-004）：改为打开触发弹层——objective 预填通用分析提示句。
+    expect(await screen.findByText("派团队做这件事")).toBeInTheDocument();
+    expect((screen.getByLabelText(/^目标/) as HTMLInputElement).value).toBe(
+      "团队分析当前会话上下文",
     );
-    expect(callArg.worker_preset).toHaveLength(2);
-    expect(onTeamMissionCreated).toHaveBeenCalledWith("m-team-1");
-    // 按钮转「已建团队」+ 禁用
-    await waitFor(() =>
-      expect(screen.getByText("已建团队")).toBeInTheDocument(),
-    );
+    // 旧路径（task-13 将删的 createMission client）不再被调用。
+    expect(missionApi.createMission).not.toHaveBeenCalled();
   });
 
-  it("task-08 createMission 失败显示错误，按钮恢复可点", async () => {
+  it("task-11 弹层确认 → triggerSessionTeamMission 预建 + mission 列表/chip 呈现 + objective 回填输入框", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1",
+      run_id: "run-1",
+      lease_id: "l",
+      status: "active",
+      stream_url: "",
+    });
+    // 初始拉取无 mission；触发后刷新返回活跃 mission（2 分身）。
+    sessionApi.listSessionTeamMissions
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([
+        {
+          mission_id: "m-team-1",
+          status: "running",
+          objective: "团队分析当前会话上下文",
+          scope_workspace_ids: [],
+          budget_usd: null,
+          workers: [
+            { run_id: "w-1", role: "arch", status: "running", objective: "梳理上下文" },
+            { run_id: "w-2", role: "verify", status: "completed", objective: "核验方案" },
+          ],
+        },
+      ]);
+    const onTeamMissionCreated = vi.fn();
+
+    setupPanel({ workspaceId: "ws-1", onTeamMissionCreated });
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hi" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+
+    fireEvent.click(await screen.findByTitle(/用团队/));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /就绪，随下条消息发出/ }),
+    );
+
+    // 预建链路：triggerSessionTeamMission（非 createMission）。
+    await waitFor(() =>
+      expect(sessionApi.triggerSessionTeamMission).toHaveBeenCalledWith(
+        "sess-1",
+        expect.objectContaining({
+          objective: "团队分析当前会话上下文",
+          budget_usd: null,
+        }),
+      ),
+    );
+    expect(missionApi.createMission).not.toHaveBeenCalled();
+    expect(onTeamMissionCreated).toHaveBeenCalledWith("m-team-1");
+
+    // 刷新后的 mission 列表：TeamTaskBlock 挂载 + 活跃 chip。
+    expect(await screen.findByLabelText("团队任务")).toBeInTheDocument();
+    const chip = await screen.findByTestId("team-active-chip");
+    expect(chip.textContent).toContain("团队进行中 · 2 分身");
+
+    // objective 回填输入框（「就绪，随下条消息发出」——CC-09 首条 inject 回填）。
+    expect(
+      (screen.getByDisplayValue("团队分析当前会话上下文") as HTMLTextAreaElement)
+        .tagName,
+    ).toBe("TEXTAREA");
+    // 弹层关闭。
+    expect(screen.queryByText("派团队做这件事")).not.toBeInTheDocument();
+  });
+
+  it("task-11 触发失败（409 活跃冲突）→ 中文错误行内提示，弹层保持打开", async () => {
     const stream = makeStreamMock();
     sessionApi.streamSession.mockImplementation(stream.factory);
     sessionApi.createSession.mockResolvedValue({
@@ -1415,27 +1499,34 @@ describe("InteractiveSessionPanel", () => {
       stream_url: "",
     });
     const { ApiError } = await import("@/lib/api");
-    missionApi.createMission.mockRejectedValue(
-      new ApiError(500, {
-        code: "INTERNAL",
-        message: "建 mission 失败",
+    sessionApi.triggerSessionTeamMission.mockRejectedValue(
+      new ApiError(409, {
+        code: "HTTP_409_ACTIVE_MISSION",
+        message: "active mission exists",
         request_id: null,
         details: null,
       }),
     );
+    const onTeamMissionCreated = vi.fn();
 
-    setupPanel({ workspaceId: "ws-1" });
+    setupPanel({ workspaceId: "ws-1", onTeamMissionCreated });
     const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
 
-    const teamBtn = await screen.findByTitle(/用团队/);
-    fireEvent.click(teamBtn);
-    await waitFor(() =>
-      expect(screen.getByText(/建 mission 失败/)).toBeInTheDocument(),
+    fireEvent.click(await screen.findByTitle(/用团队/));
+    fireEvent.click(
+      await screen.findByRole("button", { name: /就绪，随下条消息发出/ }),
     );
-    expect(screen.getByText("用团队分析")).toBeInTheDocument();
+
+    // 409 单活跃冲突 → 中文文案（映射自 teamTriggerErrorText），弹层不关闭可调整重试。
+    expect(
+      await screen.findByText(/已有进行中的团队任务/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("派团队做这件事")).toBeInTheDocument();
+    expect(onTeamMissionCreated).not.toHaveBeenCalled();
+    expect(missionApi.createMission).not.toHaveBeenCalled();
   });
 });
 
@@ -1451,6 +1542,16 @@ describe("InteractiveSessionPanel 对话/进度视图切换（ql-20260729-005）
     vi.clearAllMocks();
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);
     sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
+    // task-11：会话团队默认无 mission（避免真实 fetch）。
+    sessionApi.listSessionTeamMissions.mockResolvedValue([]);
+    sessionApi.triggerSessionTeamMission.mockResolvedValue({
+      mission_id: "m-team-1",
+      status: "planning",
+      objective: null,
+      scope_workspace_ids: [],
+      budget_usd: null,
+      workers: [],
+    });
   });
 
   it("默认对话视图：tool_call/thinking 不展示，reply 正常展示；切进度后过程项出现", async () => {
@@ -1586,6 +1687,16 @@ describe("InteractiveSessionPanel partial override 撤回（task-06/08）", () =
     vi.clearAllMocks();
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);
     sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
+    // task-11：会话团队默认无 mission（避免真实 fetch）。
+    sessionApi.listSessionTeamMissions.mockResolvedValue([]);
+    sessionApi.triggerSessionTeamMission.mockResolvedValue({
+      mission_id: "m-team-1",
+      status: "planning",
+      objective: null,
+      scope_workspace_ids: [],
+      budget_usd: null,
+      workers: [],
+    });
   });
 
   async function startSession() {
@@ -1822,6 +1933,16 @@ describe("InteractiveSessionPanel 终止中态显示（task-13 / FR-04）", () =
     vi.clearAllMocks();
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);
     sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
+    // task-11：会话团队默认无 mission（避免真实 fetch）。
+    sessionApi.listSessionTeamMissions.mockResolvedValue([]);
+    sessionApi.triggerSessionTeamMission.mockResolvedValue({
+      mission_id: "m-team-1",
+      status: "planning",
+      objective: null,
+      scope_workspace_ids: [],
+      budget_usd: null,
+      workers: [],
+    });
   });
 
   it("attach 轮询返回 terminating_at 非空 + status active：显示「终止中…」横幅", async () => {
