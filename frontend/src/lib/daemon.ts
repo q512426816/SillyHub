@@ -1533,12 +1533,15 @@ export interface TeamMissionWorkerSummary {
 }
 
 /**
- * 会话团队任务概要（触发响应 / 列表项，对齐 task-03 backend daemon/schema.py
+ * 会话团队任务概要（触发响应 / 列表项，对齐 backend daemon/schema.py
  * TeamMissionSummary）。scope_workspace_ids 为落库冻结快照（NULL 缺省回落 [anchor]）。
  *
- * 注：本接口为手写契约（task-03 已落库的 DTO 形状），task-14 `pnpm gen:types` 后
- * 应替换为 api-types 生成版并对齐（CLAUDE.md 规则 21 的本卡例外——生成物统一在
- * task-14 提交，避免与后端 schema 半成品反复对撞）。
+ * task-14 gen:types 已核对：与生成版 components["schemas"]["TeamMissionSummary"]
+ * 字段名一致，但形态有差异，按 task-14 规则保留手写并在此注释差异：
+ *   1. 生成版 status 为裸 string（后端 DTO 声明 str 而非 Literal/enum），
+ *      手写保留 TeamMissionStatus 联合以获得编译期取值收窄；
+ *   2. 生成版 workers 为可选（pydantic default_factory → 生成器标 ?），后端实际
+ *      总会序列化该数组，手写保持必填省去消费方判空。
  */
 export interface TeamMissionSummary {
   mission_id: string;
