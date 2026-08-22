@@ -136,3 +136,23 @@
 根因：create 仅配供应商时隔离 CLAUDE_CONFIG_DIR（未配供应商 transcript 写宿主机 ~/.claude），resume/reload 却无条件强制隔离目录，找不到 jsonl → claude 报错退出 → fail → 会话记回 ended，inject 全 409（部署日志实证 reopen 200 后 4 秒被 daemon 终结）
 方案：新增 claude-transcript-dir.ts 探测 sid.jsonl 实际在隔离目录还是 ~/.claude（扫两侧 projects 一层，fs 吞错兜底），restoreAndReconnect 与 _reloadSession 按探测结果设/删 env；两轮旧修复语义均保留，探测不到维持隔离默认
 结果：daemon 全量 vitest 2533 过 9 跳过零失败、tsc 零错；新增 16 用例（locator 11 + resume/reload 5）；三处模块文档同步；需重建 dist 并重启 daemon 后生效
+
+## ql-20260822-010-aa7b | 2026-08-22 22:28:51 | 会话门户三修复：新建表单聊天优先改版+滚动贴底跟随+刷新后渲染一致性
+状态：已完成
+关联变更：2026-08-22-workspace-sessions-portal
+文件：
+- frontend/src/components/sessions/new-session-form.tsx（聊天优先版式（chips+折叠+大输入框））
+- frontend/src/components/sessions/__tests__/new-session-form.test.tsx（renderForm 默认展开适配+聊天优先 3 用例）
+- frontend/src/components/sessions/__tests__/sessions-portal.test.tsx（锁定断言适配折叠态（超出启动声明文件清单的合理扩散））
+- frontend/src/components/daemon/turn-timeline.tsx（贴底跟随滚动+pending 强制回底）
+- frontend/src/components/daemon/session-panel.tsx（displayTurns 终态回补+viewMode 持久化）
+- frontend/src/components/daemon/runtime-session-helpers.tsx（去重收窄+runTerminalTurnStatus）
+- frontend/src/components/daemon/__tests__/runtime-session-helpers.test.tsx（新增 4 用例）
+- frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx（新增滚动 5 用例）
+- .sillyspec/docs/frontend/modules/components-sessions.md（NewSessionForm 版式同步）
+- .sillyspec/docs/frontend/modules/components-daemon.md（TurnTimeline 滚动/终态回补/viewMode 同步）
+需求：会话门户三修复：新建表单聊天优先改版+滚动贴底跟随+刷新后渲染一致性
+根因：①五选择区平铺视觉强制感而默认值其实已自动解析 ②turn-timeline 每次 turns 更新无条件 scrollTo 底部无贴底判断 ③历史回看一律标 completed 遮蔽失败轮/双层内容级去重误删重复工具输出/viewMode 刷新回默认，三源造成实时与刷新后不一致
+方案：NewSessionForm 聊天优先版式（chips 摘要+修改配置折叠区+大输入框，锁定 chips 常显）；TurnTimeline onScroll 距底<80px 贴底才跟随+pending 轮强制回底；displayTurns 按 runsMeta 回补终态（runTerminalTurnStatus）+去重收窄（预过滤仅 user_input/reply+装配器 seenTextDedup:false）+viewMode 按会话 localStorage 持久化
+结果：全量 1917/1917 全绿（新增滚动 5+helpers 4+聊天优先 3 用例、门户 2 用例适配折叠态）、tsc 零错、lint 持平零新增警告；components-sessions/components-daemon 模块文档已同步
+审计：⚖️ 归属切分：6 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：.sillyspec/changes/2026-08-22-workspace-sessions-portal/verify-result.md, frontend/src/components/sessions/__tests__/sessions-portal.test.tsx, .sillyspec/changes/2026-08-22-workspace-sessions-portal/runtime-evidence/artifacts/v3-change.png, .sillyspec/changes/2026-08-22-workspace-sessions-portal/runtime-evidence/artifacts/v3-global.png, .sillyspec/changes/2026-08-22-workspace-sessions-portal/runtime-evidence/artifacts/v3-workspace.png, frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx

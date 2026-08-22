@@ -18,7 +18,7 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-import { logsToTurns } from "../runtime-session-helpers";
+import { logsToTurns, runTerminalTurnStatus } from "../runtime-session-helpers";
 import type { TurnSegment } from "../session-log-assembler";
 import type { AgentRunLogEntry } from "@/lib/agent";
 
@@ -314,5 +314,46 @@ describe("task-11 段模型接入（logsToSegments + 兼容投影）", () => {
     expect(turns[1]!.realRunId).toBe("run-2");
     expect(turns[0]!.segments?.map((s) => (s.kind === "text" ? s.text : s.kind))).toEqual(["第一答"]);
     expect(turns[1]!.segments?.map((s) => (s.kind === "text" ? s.text : s.kind))).toEqual(["第二答"]);
+  });
+});
+
+// ── ql-20260822-010：去重收窄 + run 快照终态映射（历史回看一致性） ─────────
+
+describe("logsToTurns 去重收窄（ql-20260822-010）", () => {
+  it("同轮内重复 tool_result 文本不再被内容级去重误删（与实时路径一致）", () => {
+    const turns = toSegmentTurns([
+      makeLog("1", "run-1", "user_input", "跑两次同样的命令"),
+      makeLog("2", "run-1", "tool_call", '{"tool":"Bash","args":{"command":"ls"},"success":true}'),
+      makeLog("3", "run-1", "stdout", "[TOOL_RESULT] same output"),
+      makeLog("4", "run-1", "tool_call", '{"tool":"Bash","args":{"command":"ls"},"success":true}'),
+      makeLog("5", "run-1", "stdout", "[TOOL_RESULT] same output"),
+    ]);
+    expect(turns).toHaveLength(1);
+    const results = turns[0]!.segments
+      ?.map((s) => (s.kind === "tool" ? (s.result ?? null) : null))
+      .filter((t): t is string => t !== null);
+    // 收窄前第二条 "[TOOL_RESULT] same output" 会被 seenText（kind:text 键）丢掉
+    // → 刷新后工具结果变少，与实时 SSE 路径不一致。
+    expect(results).toEqual(["same output", "same output"]);
+  });
+
+  it("防御性去重保留：完全重复的 user_input 仍只计一次 prompt", () => {
+    const turns = logsToTurns([
+      makeLog("1", "run-1", "user_input", "帮我看看"),
+      makeLog("2", "run-1", "user_input", "帮我看看"),
+    ]);
+    expect(turns[0]!.prompt).toBe("帮我看看");
+  });
+});
+
+describe("runTerminalTurnStatus（ql-20260822-010）", () => {
+  it("failed → failed；interrupted/cancelled → killed；正常状态 → null", () => {
+    expect(runTerminalTurnStatus("failed")).toBe("failed");
+    expect(runTerminalTurnStatus("interrupted")).toBe("killed");
+    expect(runTerminalTurnStatus("cancelled")).toBe("killed");
+    expect(runTerminalTurnStatus("completed")).toBeNull();
+    expect(runTerminalTurnStatus("running")).toBeNull();
+    expect(runTerminalTurnStatus("pending")).toBeNull();
+    expect(runTerminalTurnStatus(null)).toBeNull();
   });
 });

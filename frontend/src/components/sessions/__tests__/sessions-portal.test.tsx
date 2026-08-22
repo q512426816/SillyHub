@@ -423,7 +423,12 @@ describe("SessionsPortal 三 scope 渲染", () => {
     expect(mocks.listWorkspaceAgentSessions).not.toHaveBeenCalled();
     expect(mocks.listChangeSessions).not.toHaveBeenCalled();
 
-    // 绑定透传（task-05 契约经门户派生）：⓪ 区锁定提示条替代 picker
+    // 绑定透传（task-05 契约经门户派生）：ql-20260822-010 聊天优先——折叠态
+    // chips 常显锁定标识；展开「修改配置」后 ⓪ 区锁定提示条替代 picker。
+    expect(
+      await screen.findByRole("button", { name: "🔒 工作区已锁定" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "修改配置" }));
     expect(
       await screen.findByText(/已锁定绑定工作区，不可更换/),
     ).toBeTruthy();
@@ -447,7 +452,12 @@ describe("SessionsPortal 三 scope 渲染", () => {
     expect(mocks.listWorkspaceAgentSessions).not.toHaveBeenCalled();
     expect(mocks.listChangeSessions).not.toHaveBeenCalled();
 
-    // change 级隐含 workspace 双传（task-05）：⓪ 区同样锁定
+    // change 级隐含 workspace 双传（task-05）：⓪ 区同样锁定（折叠态 chips +
+    // 展开后提示条，ql-20260822-010 聊天优先版式）
+    expect(
+      await screen.findByRole("button", { name: "🔒 工作区已锁定" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "修改配置" }));
     expect(
       await screen.findByText(/已锁定绑定工作区，不可更换/),
     ).toBeTruthy();

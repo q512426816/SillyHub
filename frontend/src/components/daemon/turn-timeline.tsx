@@ -219,15 +219,42 @@ export function TurnTimeline({
 }: TurnTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // ql-20260822-010：贴底跟随——原实现每次 turns 更新无条件 scrollTo 底部，
+  // 用户上滚读历史时被流式更新反复拉回底部。改为：onScroll 维护「距底 <
+  // 阈值」ref，仅贴底时跟随新内容滚底；新增 pending 轮（用户刚发送/入队
+  // 消息的占位 turn）例外强制回底——用户应立即看到自己发出的消息。
+  const isNearBottomRef = useRef(true);
+  const lastTurnKeyRef = useRef<string | null>(null);
+
+  const handleScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    isNearBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
+
   useEffect(() => {
     const el = scrollRef.current;
-    if (el && typeof el.scrollTo === "function") {
+    if (!el || typeof el.scrollTo !== "function") return;
+    const last = turns[turns.length - 1] ?? null;
+    const turnKey = last ? `${last.runId}:${last.turn ?? "-"}` : null;
+    // 占位 turn（status=pending）首次出现视为「用户刚发送」→ 无条件回底；
+    // 同一 turn 后续状态更新（running/completed）不再触发强制回底。
+    const isNewPendingTurn =
+      last !== null && last.status === "pending" && lastTurnKeyRef.current !== turnKey;
+    lastTurnKeyRef.current = turnKey;
+    if (isNewPendingTurn || isNearBottomRef.current) {
       el.scrollTo(0, el.scrollHeight);
     }
   }, [turns]);
 
   return (
-    <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto bg-background px-5 py-5">
+    <div
+      ref={scrollRef}
+      onScroll={handleScroll}
+      data-testid="turn-timeline-scroll"
+      className="min-h-0 flex-1 overflow-y-auto bg-background px-5 py-5"
+    >
       {errorMsg && (
         <div className="mb-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {errorMsg}

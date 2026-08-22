@@ -204,6 +204,22 @@ function firstLogTimestampMs(entries: AgentRunLogEntry[]): number | null {
 }
 
 /**
+ * ql-20260822-010：run 快照终态 → 轮次 UI 终态修正（历史回看一致性）。
+ * logsToTurns 对历史轮一律标 completed（历史 logs 无 SSE 终态事件），失败/中止
+ * 轮的真实终态由消费方（session-panel displayTurns）按 run 快照回补。映射语义
+ * 对齐实时路径 deriveTurnTerminalStatus + daemon.ts run.status 先例
+ * （interrupted/cancelled → killed）。completed/pending/running 等正常状态返回
+ * null（调用方不动原状态）。
+ */
+export function runTerminalTurnStatus(
+  status: string | null,
+): "failed" | "killed" | null {
+  if (status === "failed") return "failed";
+  if (status === "interrupted" || status === "cancelled") return "killed";
+  return null;
+}
+
+/**
  * task-11 logsToTurns：把历史日志按 run_id 分组，转成 attach 面板预填的 SessionTurnView。
  *
  * 职责划分（design §7 Grill X-05 形状澄清）——turn 级胶水留本函数：run 分组
@@ -249,9 +265,17 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     for (const entry of entries) {
       const seg = classifySessionLog(entry.content_redacted ?? "", entry.channel);
       if (!seg) continue;
-      const dedupKey = `${seg.kind}:${seg.text}`;
-      if (seenText.has(dedupKey)) continue;
-      seenText.add(dedupKey);
+      // ql-20260822-010：内容级去重收窄到 user_input / reply——原 kind:text 一刀切
+      // 会误删同轮内合法的重复内容（两次相同工具输出/重复思考段），而实时 SSE
+      // 路径只按 log_id 去重不丢这些内容，形成「聊天时可见、刷新后消失」的不一致。
+      // 防御目的（task-12：后端重复广播 user_input/agent log）由收窄后的两类覆盖；
+      // tool/thinking/stderr 的条目唯一性由 log id 保证，不做内容级去重。
+      const dedupable = entry.channel === "user_input" || seg.kind === "reply";
+      if (dedupable) {
+        const dedupKey = `${seg.kind}:${seg.text}`;
+        if (seenText.has(dedupKey)) continue;
+        seenText.add(dedupKey);
+      }
       // user_input 是用户消息（prompt）——turn 级胶水，不装配进段（Grill X-05）。
       if (entry.channel === "user_input") {
         prompts.push(seg.text);
@@ -260,7 +284,11 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
       assemblerInputs.push(toAssemblerInput(entry));
     }
     // task-11：按 run 分组后逐组喂入共享装配器（段不跨 run）。
-    const segments = logsToSegments(assemblerInputs);
+    // ql-20260822-010：seenTextDedup: false——内容级去重收敛到上方预过滤
+    // （user_input / reply 防御性去重）单层。装配器默认开启的第二层 kind:text
+    // 去重会误删同轮内合法的重复内容（两次相同工具输出等），而实时 SSE 路径
+    // 只按 log_id 去重，形成「聊天时可见、刷新后消失」的路径不一致。
+    const segments = logsToSegments(assemblerInputs, { seenTextDedup: false });
     // 兼容投影（§9.4）：output / processItems 形状与改前手写路径等价。
     const legacy = segmentsToLegacy(segments);
     turns.push({

@@ -233,16 +233,27 @@ function setProfiles(profiles: { id: string; name: string }[] = []) {
   });
 }
 
-function renderForm(ui: React.ReactElement) {
+/**
+ * ql-20260822-010 聊天优先：⓪-④ 配置选择器默认折叠，默认 expand: true 在
+ * render 后点开「修改配置」（既有用例操作选择器的前提）；测默认收起交互的
+ * 用例传 { expand: false }。
+ */
+function renderForm(ui: React.ReactElement, opts: { expand?: boolean } = {}) {
   const client = new QueryClient({
     defaultOptions: {
       queries: { retry: false, gcTime: 0, refetchInterval: false },
       mutations: { retry: false },
     },
   });
-  return render(
+  const r = render(
     <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
   );
+  if (opts.expand !== false) {
+    // 多实例并存时（describe 6 连续两次 render）取最后渲染实例的按钮。
+    const btns = r.getAllByRole("button", { name: "修改配置" });
+    fireEvent.click(btns[btns.length - 1]!);
+  }
+  return r;
 }
 
 /**
@@ -1114,5 +1125,92 @@ describe("NewSessionForm 锁定绑定（bindWorkspaceId / bindChangeId）", () =
       workspace_id: "ws-bind",
       change_id: "chg-bind",
     });
+  });
+});
+
+// ── 9. 聊天优先版式（ql-20260822-010） ──────────────────────────────────
+
+describe("NewSessionForm 聊天优先（ql-20260822-010）", () => {
+  it("默认收起配置区：chips 摘要默认机器/智能体，输入首句零配置操作直接开始", async () => {
+    setMachines({
+      items: [
+        makeMachine({
+          id: "m-1",
+          hostname: "machine-1",
+          runtimes: [makeRuntime({ id: "rt-claude", name: "Claude Code" })],
+        }),
+      ],
+    });
+    renderForm(<NewSessionForm />, { expand: false });
+
+    // 配置区默认折叠（⓪-④ 不渲染）
+    expect(screen.queryByLabelText("会话配置区")).not.toBeInTheDocument();
+    expect(screen.queryByText(/① 守护进程/)).not.toBeInTheDocument();
+
+    // chips 摘要：默认机器（最新心跳）+ 默认智能体 Claude Code
+    const machineChip = await waitFor(() =>
+      screen.getByRole("button", { name: "🖥 machine-1" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "⚡ Claude Code" }),
+    ).toBeInTheDocument();
+    // 机器/智能体 chip 醒目：带「创建会话后不可更换」提示
+    expect(machineChip.getAttribute("title")).toBe("创建会话后不可更换");
+    expect(
+      screen.getByRole("button", { name: "⚡ Claude Code" }).getAttribute("title"),
+    ).toBe("创建会话后不可更换");
+
+    // 零配置操作：输入首句直接开始（默认值自动解析，请求体只含必选项）
+    inputPrompt("直接开聊");
+    fireEvent.click(screen.getByRole("button", { name: /开始会话/ }));
+    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledTimes(1));
+    expect(mocks.createSession).toHaveBeenCalledWith({
+      runtime_id: "rt-claude",
+      prompt: "直接开聊",
+      manual_approval: true,
+      ask_user_only: true,
+    });
+  });
+
+  it("点「修改配置」展开后选择器可改，chips 摘要跟随联动更新", async () => {
+    setMachines({
+      items: [
+        makeMachine({
+          id: "m-a",
+          hostname: "machine-a",
+          runtimes: [
+            makeRuntime({ id: "rt-claude", provider: "claude", name: "Claude Code" }),
+            makeRuntime({ id: "rt-codex", provider: "codex", name: "Codex" }),
+          ],
+          runtime_count: 2,
+        }),
+      ],
+    });
+    renderForm(<NewSessionForm />);
+
+    // 默认展开（renderForm 契约）：切 Codex → chips 摘要从 Claude Code 跟随
+    fireEvent.click(screen.getByRole("button", { name: "选择智能体 Codex" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "◎ Codex" })).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByRole("button", { name: "⚡ Claude Code" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("锁定绑定：chips 行常显「🔒 工作区已锁定」（折叠态也可见）", async () => {
+    setMachines({
+      items: [
+        makeMachine({
+          runtimes: [makeRuntime({ id: "rt-claude", name: "Claude Code" })],
+        }),
+      ],
+    });
+    renderForm(<NewSessionForm bindWorkspaceId="ws-bind" />, {
+      expand: false,
+    });
+    expect(
+      screen.getByRole("button", { name: "🔒 工作区已锁定" }),
+    ).toBeInTheDocument();
   });
 });

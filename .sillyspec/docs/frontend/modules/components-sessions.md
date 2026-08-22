@@ -12,7 +12,7 @@ created_at: 2026-08-18 01:45:00
 会话门户（`/sessions`）的功能组件（`components/sessions/`），2026-08-14-sessions-portal 变更派生 + 切换静默化系列 quick 迭代（ql-20260817-009/010）：
 - `SessionsPortal`（2026-08-22-workspace-sessions-portal 起）：共享门户组件——左列表+右两态+SessionPanel page 模式+页级数据，可选 `scope`（WorkspaceScope/ChangeScope 判别联合，类型自 SessionListPanel 导出）派生列表数据源/新建绑定/标题后缀；`?session=` 深链（挂载解析一次，getAgentSession 验证，无效静默）；三入口（/sessions、/workspaces/[id]/sessions、/workspaces/[id]/changes/[cid]/sessions）渲染同一组件。
 - `SessionListPanel`：左栏会话列表（筛选 + 虚拟滚动 + 后端真分页）；可选 `scope` 时切 listWorkspaceAgentSessions(include_ended)/listChangeSessions 整列合成单页（加载更多隐藏）、客户端仅本人过滤（author 缺失视为本人，D-003）、隐藏服务端筛选保留本地标题搜索、瘦字段降级（chips 缺字段不渲染/时间回退 last_active_at）。
-- `NewSessionForm`：新建会话四选择器联动表单；可选 `bindWorkspaceId`（锁定：选择器不渲染直传）/`bindChangeId`（change_id+workspace_id 双传）。
+- `NewSessionForm`：新建会话表单——聊天优先版式（ql-20260822-010）：大输入框居中 + 配置摘要 chips 行 + ⓪-④四选择器收进「修改配置」折叠区（默认收起，联动逻辑不变）；可选 `bindWorkspaceId`（锁定：选择器不渲染直传，chips 常显「🔒 工作区已锁定」）/`bindChangeId`（change_id+workspace_id 双传）。
 - `SessionConfigBar`：会话顶部配置控件条（档案/供应商点选即切换）。
 - `ctx-usage-bar.tsx`：上下文用量环 + 供应商额度胶囊。
 
@@ -31,6 +31,7 @@ created_at: 2026-08-18 01:45:00
   - chips 优先读 `config_snapshot` 直显免二次查询；快照缺省（旧数据 null）回退 runtime/provider 基础信息（机器名经 runtime_id→机器映射）。
   - 导出 `formatRelativeTime(iso, now?)`（中文相对时间，空/非法→—）。
 - `NewSessionForm`：props `{ onCreated?(session, values) }`，导出 `NewSessionFormValues`。
+  - 版式（ql-20260822-010 聊天优先）：默认值自动解析后 chips 行摘要当前配置（机器/智能体主色强调 + title「创建会话后不可更换」），输入首句点「开始会话」即按当前默认值创建；⓪-④ 选择器在「修改配置」折叠区内（默认收起），点任一 chip 或按钮展开。
   - ①机器（必选，仅在线）：`useDaemonMachines`；默认走 `resolveDefaultMachineId(machines, sessions)` 三级回退。
   - ②智能体（必选）：选中机器 runtimes 过滤在线 + provider∈{claude,codex}（`SESSION_SUPPORTED_PROVIDERS`）；不支持的 provider 置灰「暂不支持会话」；切机器重置选择。
   - ③供应商（可选）：`listProviders` + 「不指定（本机默认）」（`NO_PROVIDER_VALUE=""`）；engine≠claude 锁定（Codex 无会话级供应商）。
@@ -77,6 +78,7 @@ CtxUsageRing 分母: roleMapping.one_m → 1_000_000
 - 切换语义（设计定版）：配置切换走 `injectSession` 带新配置+prompt，session 维持 active 不重建；空 prompt 切换不产生消息与模型回应（切换静默化）。
 - 供应商「不指定（本机默认）」用空串 `""` 作 Select 值，提交侧必须转 `llm_provider_id: ""`，未选项从请求体剔除。
 - 智能体显示名规则：主显引擎名（Claude Code/Codex），`runtime.name` 默认是机器主机名不得作主标签；有自定义别名时「别名 · 引擎名」并呈。
+- 聊天优先版式（ql-20260822-010）：测试渲染需先点「修改配置」展开 ⓪-④（new-session-form.test 的 `renderForm` 默认 expand: true 承担）；机器/智能体 chips 的 title「创建会话后不可更换」是醒目契约（建会话即绑定 runtime）。
 - `config_snapshot` 是条目 chips 的免查询直显源，旧会话快照为 null 时回退基础字段渲染。
 - ctx 用量环分子（usedTokens）由父层累计传入；改分母逻辑须同步 `MODEL_CTX_WINDOW_TABLE` 与 `DEFAULT_CTX_WINDOW_TOKENS`。
 - 空值统一显示 `—`、日期显式 `zh-CN`（项目规则）；机器多选过滤受后端仅支持单 machine_id 限制。

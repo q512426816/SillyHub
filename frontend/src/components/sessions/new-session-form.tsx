@@ -19,6 +19,14 @@
  *   ④ 档案（可选）：useMineAgentProfiles 跨工作区聚合，不做引擎过滤（D-013）；
  *      Codex 智能体下选项标注「人格暂不支持」。
  *
+ * 聊天优先版式（ql-20260822-010）：
+ *   默认配置经四选择器联动自动解析（D-005 三级回退 / 默认 Claude / 可选项
+ *   不指定），页面主体为「开始新会话」大输入区——输入第一句点「开始会话」即
+ *   用当前默认配置创建，不必逐项选择；⓪-④ 完整选择器收进「修改配置」折叠区
+ *   （默认收起，联动逻辑与文案原样），chips 行摘要当前配置——机器/智能体主色
+ *   强调并带「创建会话后不可更换」提示（供应商/档案可会话内切换，机器/智能
+ *   体绑定 runtime，事后不可换）。
+ *
  * 提交：createSession({ runtime_id, agent_profile_id?, llm_provider_id?, prompt,
  * manual_approval: true, ask_user_only: true })；未选项不进请求体（task-16 契约，
  * daemon.ts createSession 对 undefined 字段不下发）。成功后经 props 回调交给父层
@@ -231,6 +239,41 @@ export function NewSessionForm({
 
   const canStart = Boolean(machineId && agentRuntime && prompt.trim());
 
+  // ql-20260822-010 聊天优先：配置摘要 chips 文案 + 折叠态。默认值已在上方
+  // 联动逻辑自动解析（D-005 三级回退 / 默认 Claude / 可选项不指定），chips
+  // 只做一目了然的展示；完整选择器收进「修改配置」折叠区（⓪-④ 原样保留）。
+  const [showConfig, setShowConfig] = useState(false);
+  const expandConfig = () => setShowConfig((v) => !v);
+  const workspaceChipText = bindWorkspaceId
+    ? "🔒 工作区已锁定"
+    : workspaceId
+      ? "📂 工作区：已选择"
+      : "工作区：不指定";
+  const machineChipText = isError
+    ? "守护进程加载失败"
+    : isLoading
+      ? "守护进程：加载中…"
+      : machines.length === 0
+        ? "暂无守护进程"
+        : machine
+          ? `🖥 ${machineLabel(machine)}`
+          : "无在线守护进程";
+  const agentChipText = !machine
+    ? "智能体：待选机器"
+    : agentRuntime
+      ? `${engineIcon(engine)} ${runtimeLabel(agentRuntime)}`
+      : "智能体：该机器暂无可用";
+  const providerChipText = providerLocked
+    ? "供应商：本机默认（引擎锁定）"
+    : (() => {
+        const name = providers.find((p) => p.id === effectiveProviderId)?.name;
+        return effectiveProviderId && name ? `供应商：${name}` : "供应商：本机默认";
+      })();
+  const profileChipText = (() => {
+    const name = profiles.find((p) => p.id === profileId)?.name;
+    return profileId && name ? `档案：${name}` : "档案：不指定";
+  })();
+
   const pickMachine = (id: string) => {
     if (id === machineId) return;
     setMachineId(id);
@@ -287,13 +330,46 @@ export function NewSessionForm({
   };
 
   return (
-    <div className="flex flex-col gap-5" aria-label="新建会话表单">
-      <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-lg font-semibold text-foreground">新建会话</h2>
-        <span className="text-xs text-muted-foreground">
-          配置可随时在会话内切换（当前轮完成后）
-        </span>
+    <div className="flex h-full flex-col" aria-label="新建会话表单">
+      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center gap-4 py-2">
+      <div>
+        <h2 className="text-lg font-semibold text-foreground">开始新会话</h2>
+        <p className="text-xs text-muted-foreground">
+          发送第一句话即按当前默认配置开始 · 供应商与档案可随时在会话内切换，机器与智能体创建后不可更换
+        </p>
       </div>
+
+      {/* ql-20260822-010 聊天优先：配置摘要 chips 行——默认值一目了然（机器/
+          智能体为主色强调并带「创建后不可换」提示），点「修改配置」展开完整
+          选择器；⓪-④ 联动逻辑与文案原样保留在折叠区内。 */}
+      <div className="flex flex-wrap items-center gap-1.5" aria-label="当前配置摘要">
+        <ConfigSummaryChip text={workspaceChipText} onClick={expandConfig} />
+        <ConfigSummaryChip
+          text={machineChipText}
+          onClick={expandConfig}
+          tone={isError ? "error" : machine ? "critical" : undefined}
+        />
+        <ConfigSummaryChip
+          text={agentChipText}
+          onClick={expandConfig}
+          tone={agentRuntime ? "critical" : undefined}
+        />
+        <ConfigSummaryChip text={providerChipText} onClick={expandConfig} />
+        <ConfigSummaryChip text={profileChipText} onClick={expandConfig} />
+        <Button
+          type="link"
+          size="small"
+          className="px-1"
+          aria-expanded={showConfig}
+          onClick={expandConfig}
+        >
+          {showConfig ? "收起配置" : "修改配置"}
+        </Button>
+      </div>
+
+      {/* 展开的完整配置区（原 ⓪-④ 五段，行为与文案原样） */}
+      {showConfig && (
+        <div className="flex flex-col gap-5 rounded-lg border border-border bg-muted/20 p-4" aria-label="会话配置区">
 
       {/* ⓪ 工作区（可选；task-05 锁定绑定时不可换） */}
       <section className="flex flex-col gap-2">
@@ -485,22 +561,27 @@ export function NewSessionForm({
         </p>
       </section>
 
-      {/* 消息 + 开始会话 */}
+        </div>
+      )}
+
+      {/* 消息 + 开始会话（ql-20260822-010 聊天优先：大输入区始终可见，不随
+          配置折叠收起） */}
       <section className="flex flex-col gap-2">
-        <span className="text-sm font-medium text-foreground">消息</span>
         <Input.TextArea
-          rows={3}
+          rows={5}
           value={prompt}
-          placeholder="输入第一条消息…"
+          placeholder="输入第一句话，直接开始对话…"
           onChange={(e) => setPrompt(e.target.value)}
           aria-label="会话消息输入"
+          className="text-base"
         />
-        <div className="flex items-center justify-end gap-3">
+        <div className="flex items-center justify-between gap-3">
           <span className="text-xs text-muted-foreground">
-            机器、智能体必选并输入消息后「开始会话」可点击{workspaceId ? " · 已选择工作区" : ""}
+            按当前配置开始{workspaceId ? " · 已选择工作区" : ""} · 机器与智能体创建后不可换
           </span>
           <Button
             type="primary"
+            size="large"
             disabled={!canStart}
             loading={submitting}
             onClick={() => void handleStart()}
@@ -512,7 +593,40 @@ export function NewSessionForm({
           <Alert type="error" showIcon title={submitError} aria-label="创建会话错误" />
         )}
       </section>
+      </div>
     </div>
+  );
+}
+
+/**
+ * ql-20260822-010 聊天优先：配置摘要 chip——点击展开完整配置区。
+ * tone=critical（机器/智能体）：主色强调 + title 提示「创建会话后不可更换」；
+ * tone=error（守护进程加载失败）：destructive 强调。
+ */
+function ConfigSummaryChip({
+  text,
+  onClick,
+  tone,
+}: {
+  text: string;
+  onClick: () => void;
+  tone?: "critical" | "error";
+}) {
+  const toneCls =
+    tone === "critical"
+      ? "border-primary/70 bg-primary/5 font-medium text-foreground"
+      : tone === "error"
+        ? "border-destructive/50 bg-red-50 text-destructive"
+        : "border-border bg-card text-muted-foreground hover:text-foreground";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={tone === "critical" ? "创建会话后不可更换" : undefined}
+      className={`rounded-full border px-2.5 py-1 text-xs leading-none transition-colors ${toneCls}`}
+    >
+      {text}
+    </button>
   );
 }
 

@@ -70,7 +70,10 @@ import {
   type TurnUiStatus,
 } from "@/components/daemon/turn-timeline";
 import type { AttachmentRead } from "@/lib/api/session-attachments";
-import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
+import {
+  parseAttachmentMarkers,
+  runTerminalTurnStatus,
+} from "@/components/daemon/runtime-session-helpers";
 import { SessionInputBar } from "@/components/daemon/session-input-bar";
 import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
 import { useMessageQueue } from "@/hooks/use-message-queue";
@@ -458,6 +461,19 @@ function SessionPanelPage({
   // 预取 + 每轮 turn_completed 后刷新，供 whoLine 注入与历史 usage 回填。
   const [runsMeta, setRunsMeta] = useState<Map<string, SessionRunRead>>(new Map());
   const [viewMode, setViewMode] = useState<"conversation" | "all">("conversation");
+  // ql-20260822-010：视图模式（对话/进度）按会话持久化——原实现刷新后回默认
+  // 「对话」，与聊天中切到的视图不一致。挂载后回读（effect 内 set，避免 SSR
+  // hydration mismatch）；切换时写入。dialog 适配层无刷新恢复场景，不持久化。
+  useEffect(() => {
+    setViewMode(readPersistedViewMode(sessionId));
+  }, [sessionId]);
+  const changeViewMode = useCallback(
+    (m: "conversation" | "all") => {
+      setViewMode(m);
+      writePersistedViewMode(sessionId, m);
+    },
+    [sessionId],
+  );
   const [input, setInput] = useState("");
   // 2026-08-20 task-12：待发送附件 ids（SessionInputBar 上传产物）与清理句柄。
   const [pendingAttachments, setPendingAttachments] = useState<AttachmentRead[]>([]);
@@ -842,8 +858,33 @@ function SessionPanelPage({
     const enriched = turnState.turns.map((t) => {
       const meta = runsMeta.get(t.realRunId ?? t.runId);
       if (!meta) return t;
+      // ql-20260822-010：终态回补——历史回看轮（logsToTurns）一律 completed，run
+      // 快照为 failed/interrupted/cancelled 时修正为 failed/killed 并回填
+      // errorDetail，消除「聊天时红色错误卡、刷新后变已完成」的路径不一致。
+      // 实时轮终态与 run 快照一致，覆盖为同值无害；errorDetail 只补缺（?? 链）。
+      const terminal = runTerminalTurnStatus(meta.status);
+      const terminalPatch =
+        terminal === null
+          ? {}
+          : terminal === "failed"
+            ? {
+                status: "failed" as const,
+                errorDetail:
+                  t.errorDetail ??
+                  buildErrorLogItem(meta.error_detail) ?? {
+                    // 无详情兜底（先例 normalize.ts runStatus=failed 无 detail）。
+                    type: "unknown" as const,
+                    code: null,
+                    message: "运行失败（无详情）",
+                    retryable: false,
+                    hint: null,
+                    raw: null,
+                  },
+              }
+            : { status: "killed" as const };
       return {
         ...t,
+        ...terminalPatch,
         // ql-20260817-003：轮次发送者（run.user_id + sender_name；旧 run NULL 不显示）。
         sender:
           t.sender ?? (meta.user_id && meta.sender_name
@@ -1415,7 +1456,7 @@ function SessionPanelPage({
                   key={m}
                   role="tab"
                   aria-selected={viewMode === m}
-                  onClick={() => setViewMode(m)}
+                  onClick={() => changeViewMode(m)}
                   className={cn(
                     "rounded-full px-2.5 py-1 text-[11px] leading-none transition-colors",
                     viewMode === m
@@ -2986,4 +3027,35 @@ function deriveTurnTerminalStatus(env: SessionStreamEnvelope): TurnUiStatus {
     return env.exit_code === 130 || env.exit_code === 143 ? "killed" : "failed";
   }
   return "completed";
+}
+
+/* ── ql-20260822-010：会话视图模式（对话/进度）按会话持久化 ──────────────── */
+
+/** localStorage key（先例 NEW_SESSION_MACHINE_LS_KEY 同 sillyhub.sessions 前缀）。 */
+function viewModeLsKey(sessionId: string): string {
+  return `sillyhub.sessions.viewMode.${sessionId}`;
+}
+
+/** 挂载回读：仅识别 "all"，其余/缺失/SSR 无 window 一律默认 "conversation"。 */
+function readPersistedViewMode(sessionId: string): "conversation" | "all" {
+  if (typeof window === "undefined") return "conversation";
+  try {
+    return window.localStorage.getItem(viewModeLsKey(sessionId)) === "all"
+      ? "all"
+      : "conversation";
+  } catch {
+    return "conversation";
+  }
+}
+
+/** 切换时写入（隐私模式等写入失败静默，不阻断切换本身）。 */
+function writePersistedViewMode(
+  sessionId: string,
+  m: "conversation" | "all",
+): void {
+  try {
+    window.localStorage.setItem(viewModeLsKey(sessionId), m);
+  } catch {
+    /* 静默容错 */
+  }
 }

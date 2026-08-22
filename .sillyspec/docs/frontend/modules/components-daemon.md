@@ -44,6 +44,12 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
   - 消息生命周期：首条 `createSession` → 追问 `injectSession`（排队调度）→
     `interruptSession` → `endSession`；单条 `streamSession` SSE 贯穿，envelope
     run_id 区分 turn。
+  - 历史回看一致性（ql-20260822-010）：displayTurns 富集时按 runsMeta run 快照
+    回补终态（`runTerminalTurnStatus`：failed→failed+errorDetail（无详情兜底
+    「运行失败（无详情）」）、interrupted/cancelled→killed）——logsToTurns 一律
+    completed 的伪态不再遮蔽失败轮；viewMode（对话/进度）按会话 localStorage
+    持久化（page 模式，挂载 effect 回读防 hydration mismatch；dialog 无刷新
+    恢复场景不持久化）。
 - ~~`InteractiveSessionPanel`（`interactive-session-panel.tsx`）~~：**已删除**
   （2026-08-22-session-panel-unify task-01）——127 行薄适配层退役，消费方直连
   `SessionPanel mode="dialog"`；其类型 re-export（turn-timeline 5 类型）由消费方
@@ -58,7 +64,9 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
   `SessionViewMode`（conversation|all）；复用 agent-log 的 renderers。
   TurnStatusBadge 内部渲染为 antd `Badge status`（2026-08-22-session-panel-unify：
   running/interrupting→processing、completed→success、failed/killed→error、
-  pending→default，色走 token 零手写）。
+  pending→default，色走 token 零手写）。滚动容器贴底跟随（ql-20260822-010）：
+  onScroll 维护距底 <80px ref，仅贴底时随 turns 更新滚底（上滚读历史不被拉回），
+  新增 pending 轮（用户刚发送）例外强制回底。
 - `SessionInputBar`（`session-input-bar.tsx`）：输入区（发送=antd primary、📎=
   antd text，2026-08-22-session-panel-unify；chips 删除为原生 button）。
 - `SessionListLayout`（`session-list-layout.tsx`）：公共会话列表（2026-08-22-workspace-sessions-portal 起消费面随 ChangeSessionSection 退役收敛，现仅 runtimes 弹窗使用）；调用方 fetch 后 map 成 `SessionListEntry`
@@ -81,8 +89,11 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
   `extractDialogQA`（问答卡数据提取，DialogQA/DialogOption）。
 - `runtime-session-helpers.tsx`：`shortId`（8+4 截短）/ `isActiveSession`
   （`ACTIVE_SESSION_VIEW_STATUSES` = active/pending/reconnecting）/ `canResumeSession` /
-  `resumeDisabledTitle` / `logsToTurns`（历史日志按 run_id 分组转 SessionTurnView[]
-  预填 attach 面板）/ `InteractiveSessionChatSection` / `SessionHistoryView`
+  `resumeDisabledTitle` / `runTerminalTurnStatus`（run 快照终态→failed/killed 修正，
+  ql-20260822-010）/ `logsToTurns`（历史日志按 run_id 分组转 SessionTurnView[]
+  预填 attach 面板；内容级去重收窄：预过滤仅 user_input/reply 防御性去重 +
+  装配器 `seenTextDedup:false`，与实时路径 log_id 去重语义对齐，不误删同轮重复
+  工具输出）/ `InteractiveSessionChatSection` / `SessionHistoryView`
   （遗留导出，dialog 重构后已不再用）。
 
 ## 关键逻辑
