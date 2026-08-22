@@ -14,4 +14,4 @@ created_at: 2026-08-22 13:33:10
 - [x] task-05: 3 套 ISP 测试迁移改名 session-panel-dialog*（56 用例对账语义保留）+ workspace-section mock 路径 (depends_on: —)
 - [x] task-06: 3 文件注释锚点校正（ask-user-dialog-card / lib/daemon / session-log-sanitize） (depends_on: task-01)
 - [x] task-07: 全量回归（vitest + tsc + lint + 双主题换肤冒烟 + 5 消费面人工冒烟对照原型） (depends_on: task-02, task-03, task-04, task-06)
-- [ ] task-08: 合入后更新 team-unify task-11.md 代码锚点（仅文档，P1 门收尾动作） (depends_on: task-07)
+- [x] task-08: 合入后更新 team-unify task-11.md 代码锚点（仅文档，P1 门收尾动作） (depends_on: task-07)

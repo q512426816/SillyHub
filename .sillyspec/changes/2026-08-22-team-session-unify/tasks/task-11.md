@@ -15,10 +15,10 @@ expects_from:
       needs: [TeamTaskBlock 组件, triggerSessionTeamMission client]
 allowed_paths:
   - frontend/src/components/daemon/session-panel.tsx
-  - frontend/src/components/daemon/interactive-session-panel.tsx
+  - frontend/src/components/daemon/interactive-session-panel.tsx（已删除，改 session-panel.tsx）
   - frontend/src/components/daemon/team-trigger-popover.tsx
   - frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx
-  - frontend/src/components/daemon/__tests__/interactive-session-panel.test.tsx
+  - frontend/src/components/daemon/__tests__/interactive-session-panel.test.tsx（已改名 session-panel-dialog.test.tsx）
   - frontend/src/components/daemon/__tests__/session-panel-team.test.tsx
 goal: >
   会话输入区提供团队触发四路入口——派团队按钮+配置弹层+状态 chip+/team
@@ -28,15 +28,15 @@ implementation:
   - 新建 team-trigger-popover.tsx——输入框上方弹层（同 SessionConfigBar 浮层风格），含范围（当前工作区/项目+scope 多选+anchor，仅项目经理可选项目）、预算上限（留空不限）、分身预设折叠；确认调 triggerSessionTeamMission 预建，409 活跃冲突提示
   - session-panel.tsx 输入区新增「派团队」按钮——provider 为 claude 可用，codex 等置灰并 tooltip「团队需要 Claude 引擎」；触发后显示就绪/进行中状态 chip（可关闭收回）
   - /team 指令拦截——检测前缀不直接发送，弹层确认后目标文本随下条消息发出（D-004 四路等价）
-  - 「用团队分析」两处改造——session-panel.tsx header 按钮与 interactive-session-panel.tsx 透传层不再调 createMission，改为打开触发弹层（page/dialog 两模式覆盖）
+  - 「用团队分析」两处改造——session-panel.tsx header 按钮与 SessionPanel（mode="dialog" 分支）的团队分析按钮（现于 session-panel.tsx dialog 分支，基元已 antd 化）不再调 createMission，改为打开触发弹层（page/dialog 两模式覆盖）
   - 消息流挂载 TeamTaskBlock（task-12 组件）——按 listSessionTeamMissions 数据在对话视图渲染团队任务块
-  - 适配 interactive-session-panel.test.tsx 既有「用团队分析」断言为弹层新行为；新增 team-trigger-popover 测试
+  - 适配 session-panel-dialog.test.tsx 既有「用团队分析」断言为弹层新行为；新增 team-trigger-popover 测试
 acceptance:
   - Claude 会话显示派团队按钮；Codex 会话按钮置灰且 tooltip 提示团队需要 Claude 引擎
   - 弹层含范围（当前工作区/项目+scope+anchor）、预算、分身预设，确认走 triggerSessionTeamMission 预建
   - /team 前缀输入被拦截并走弹层确认路径，与按钮路径等价
   - 状态 chip 显示团队就绪/进行中并可关闭收回
-  - session-panel 与 interactive-session-panel 两处「用团队分析」均改为打开触发弹层，不再调用 createMission
+  - session-panel（page 分支与 dialog 分支）两处「用团队分析」均改为打开触发弹层，不再调用 createMission
   - TeamTaskBlock 挂载在会话消息流中渲染团队任务
 verify:
   - cd frontend && pnpm test
