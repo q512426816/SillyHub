@@ -223,3 +223,6 @@ agent 模块测试跑 SQLite（aiosqlite），FOR UPDATE 语法不被支持（�
 
 ## AgentMission.session_id 判别口径：列非 NULL 不可信，须查表确认指向真实 AgentSession
 session_id 列 NOT NULL + default_factory=uuid4（为兼容 ~50 处存量构造不传该字段的测试/路径）意味着"列非 NULL"不等于"绑定会话"——存量/旧链路 mission 会带随机 uuid。判别会话 mission 的正确口径=查表确认 session_id 指向真实存在的 AgentSession（patrol/finalizer 的 _mission_bound_session 同源实现）。来源：2026-08-22-team-session-unify task-01/06（Grill NEW-4 延伸）。
+
+## Git Bash 下修 worktree node_modules junction：cmd mklink 传参必败，用 PowerShell New-Item Junction
+worktree doctor 静默失败后手动补链时（上一条 junction 坑的修复动作），Git Bash 里 `cmd //c mklink /J "<绝对路径>" "<目标>"` 两种写法都报「无效开关 - 路径」——MSYS 对反斜杠参数做了路径转换劫持，双反斜杠转义也救不回。可靠姿势：`powershell -NoProfile -Command "New-Item -ItemType Junction -Path '<win路径>' -Target '<win路径>'"`（路径先用 cygpath -w "$(pwd)/相对路径" 转绝对 Windows 路径），建完 `(Get-Item).LinkType` 应输出 Junction，再 ls .bin 抽查。补链后 worktree frontend 内 pnpm exec tsc/vitest 直接可用（同 lockfile 链主仓 node_modules）。来源：2026-08-22-session-panel-unify execute step3。

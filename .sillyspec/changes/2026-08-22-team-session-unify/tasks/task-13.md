@@ -23,6 +23,10 @@ allowed_paths:
   - backend/app/modules/agent/tests/test_mission_access_control.py
   - backend/app/modules/agent/tests/test_team_mode_dispatch.py
   - backend/app/modules/agent/tests/test_integration_cross_workspace.py
+  - frontend/src/lib/__tests__/menu-permissions.test.ts
+  - frontend/src/lib/__tests__/permission.test.ts
+  - frontend/src/app/(dashboard)/ppm/projects/page.tsx
+  - frontend/src/app/(dashboard)/ppm/projects/__tests__/projects-page.test.tsx
 goal: >
   删除独立 missions 创建页面/路由/菜单与前后端 create+list 入口，入口归一到
   会话内触发（task-11 已交付）；保留 GET /missions/{id} 与 cancel 供

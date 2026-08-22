@@ -15,6 +15,8 @@ provides:
 allowed_paths:
   - backend/app/modules/agent/model.py
   - backend/migrations/versions/20260822090000_mission_session_id.py
+  - backend/app/modules/agent/tests/test_mission_session_id.py
+  - backend/app/modules/agent/tests/test_mission_external_mode.py
 goal: >
   建立 mission 绑定发起会话的数据基础（design §5 Phase1/§8，D-006@v1）——agent_missions
   新增 session_id 列与索引，并用活跃态部分唯一索引保证一个会话同时至多一个未收敛未取消

@@ -11,6 +11,7 @@ requirement_ids: [FR-01, FR-08]
 decision_ids: [D-007@v2]
 allowed_paths:
   - backend/app/modules/agent/control.py
+  - backend/app/modules/agent/tests/test_control_orchestrator_exclusion.py
 goal: >
   主控轮 run（role='orchestrator'）回填 mission_id 后不计入 MAX_WORKERS=5 并发额度、
   分身成本与 workers 列表（design §5 核心机制 D-009，审查 B3）——control.py 的 mission
