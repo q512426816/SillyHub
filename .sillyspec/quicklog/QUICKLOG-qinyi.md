@@ -54,3 +54,14 @@
 根因：①根 conftest _reset_redis_state autouse 每测试 flushdb，Redis 停机时 localhost 连接失败不是立即拒绝而是等满超时（Windows 实测 ~2s/次、setup ~3.2s/用例），agent 模块 632 用例纯等待 ≈34min、CPU 仅 ~90s；②local.yaml modules 块 12 个 backend 条目 test 命令裸串行，07-23/08-12 两轮 xdist 优化只覆盖手动全量跑，verify/子代理走的模块命令从未并行
 方案：①conftest 新增 _probe_redis_once 进程内一次 0.5s 短超时 ping 探测（xdist 每 worker 各一次），失败则本会话全部跳过 flushdb，redis 可用路径逐测试 FLUSHDB 行为不变；②12 个 backend 模块 test 命令统一加 -n auto（pyproject addopts dist=loadscope 兜底跨文件状态污染），顶层 commands.test 全量命令本轮未动
 结果：agent 模块 632 passed：串行 34.8min→2 分 39 秒、-n auto 44.4s 零 flaky；ruff check+format 过；backend.md 关键逻辑已同步 ql-20260822-002 条目
+
+## ql-20260822-003-a265 | 2026-08-22 11:00:30 | verify gate 全量测试提速：commands.test 的 backend 段加 -n auto 并行
+状态：已完成
+关联变更：（无）
+文件：
+- .sillyspec/local.yaml（commands.test backend 段加 -n auto + 坑2 注释改已解（gitignored 本机配置不入库））
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（关键逻辑区追加 ql-20260822-003 条目）
+需求：verify gate 全量测试提速：commands.test 的 backend 段加 -n auto 并行
+根因：ql-20260822-002 只给 modules 块 12 条子模块命令加了 -n auto，顶层 commands.test 全量命令仍串行（08-21 verify 实测 936.69s≈15.6min），gate 超时压力仍在（坑2 注释也停在「未解」旧状态）
+方案：commands.test 的 backend 段 uv run pytest 加 -n auto（dist=loadscope 兜底，frontend/daemon 段不动）；文件头部坑2 过期注释改「已解」并附实测数据；backend.md 关键逻辑追加 ql-20260822-003 条目
+结果：backend 全量实测 4771 passed / 6 skipped / 3 xfailed，356.97s（5 分 56 秒）零 failed 零 flaky（Redis 停机状态下跑出，conftest 会话级探测 xdist 每 worker 生效），对比 08-21 串行 936.69s 提速 2.6 倍
