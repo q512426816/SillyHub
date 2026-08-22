@@ -441,6 +441,8 @@ class MissionPatrolService:
             mission = await self._session.get(AgentMission, run.mission_id)
             if mission is None:
                 continue
+            if mission.session_id is None:
+                continue
             if mission.session_id not in session_active_cache:
                 session_active_cache[mission.session_id] = await _session_has_active_turn(
                     self._session, mission.session_id

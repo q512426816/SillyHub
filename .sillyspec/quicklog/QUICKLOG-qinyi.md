@@ -75,3 +75,21 @@
 根因：注释与实现不一致是万恶之源，多条注释引用的 sillyspec 源码行号/行为在工具迭代后已失效，agent 模块 deselect 的根因已在 backend conftest 修复
 方案：逐条比对 sillyspec 3.26.15（sync.js/client.js/config.js）与 backend（dispatch.py/auth.py/conftest.py/pyproject.toml）后更正 6 处——坑3 改已解、connect 改文本级定向替换说明、引号警告改已兼容、mcp 段去重复注释并修 client.js 行号为 sillyhub-mcp/client.js:58、platform token 改 shpsync_/shk_live_/JWT 三路径说明、agent 模块移除两条过时 deselect 恢复真实执行
 结果：YAML safe_load 验证 9 顶层键 14 模块 token 完整；agent 模块去 deselect 全量实测 634 passed 46.9s 零失败
+
+## ql-20260822-006-f113 | 2026-08-22 16:37:38 | 修复变更详情步骤时间线时间偏8小时:后端按容器UTC解释CLI东八区naive时间
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/change/service.py, backend/app/modules/change/tests/test_step_progress.py, backend/app/core/config.py, backend/pyproject.toml
+
+## ql-20260822-007-d62a | 2026-08-22 16:39:44 | 修复 backend-ci Mypy 红灯
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/patrol.py（session_id None 收窄）
+- backend/app/modules/daemon/tests/test_session_team_mission.py（删除 3 处多余 type:ignore）
+- .sillyspec/docs/multi-agent-platform/modules/backend.md（模块变更索引追加）
+需求：修复 backend-ci Mypy 红灯
+根因：6d7d1d2c 让 mission.session_id 类型可空，patrol.py 未收窄即作 dict[UUID,bool] 键；test_session_team_mission.py 三处手写 type:ignore 因 warn_unused_ignores=true 变成多余注释错误
+方案：patrol.py 在读取 session_active_cache 前先判断 mission.session_id is None 则 continue；测试文件删除 53/80/191 三处 # type:ignore[no-untyped-def]
+结果：本地 uv run mypy app：678 source files Success no issues；uv run pytest app/modules/agent app/modules/daemon -q --no-cov -n auto：1818 passed 1 xpassed（预存路由顺序 XPASS，与本次无关）
+审计：⚖️ 归属切分：5 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/core/config.py, backend/app/modules/change/service.py, backend/app/modules/change/tests/test_step_progress.py, backend/pyproject.toml, backend/uv.lock

@@ -50,7 +50,7 @@ def _stub_task02_mission_contracts(monkeypatch: pytest.MonkeyPatch) -> None:
 
     if not hasattr(mission_mod, "get_active_mission_for_session"):
 
-        async def _get_active_mission_for_session(db, session_id):  # type: ignore[no-untyped-def]
+        async def _get_active_mission_for_session(db, session_id):
             stmt = (
                 select(AgentMission)
                 .where(
@@ -77,7 +77,7 @@ def _stub_task02_mission_contracts(monkeypatch: pytest.MonkeyPatch) -> None:
         failed = {"failed", "killed"}
 
         def _derive_status(
-            runs,  # type: ignore[no-untyped-def]
+            runs,
             cancelled: bool = False,
             *,
             converged: bool = False,
@@ -188,7 +188,7 @@ async def _seed_env(
     return env
 
 
-def _plain_user_token(db_session, user_id: uuid.UUID, email: str) -> str:  # type: ignore[no-untyped-def]
+def _plain_user_token(db_session, user_id: uuid.UUID, email: str) -> str:
     from app.core.config import get_settings
     from app.core.security import create_access_token
 
