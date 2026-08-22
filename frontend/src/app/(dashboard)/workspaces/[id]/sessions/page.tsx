@@ -1,30 +1,27 @@
 "use client";
 
 /**
- * task-08（FR-03 / D-002@v1）：工作区独立「会话」入口页（与变更中心平级）。
+ * task-02（2026-08-22-workspace-sessions-portal / FR-02 / D-001@v1）：工作区级
+ * 会话入口页——薄壳渲染 workspace scope 的 SessionsPortal（三入口统一组件）。
  *
- * 左侧 workspace 级会话列表（含已结束，listWorkspaceAgentSessions include_ended=true）
- * + 发起新会话入口，右侧复用 InteractiveSessionPanel（建会话 workspace 级，不绑 change_id）。
- * 两栏布局由 WorkspaceSessionSection 承载（从 change-session-section 抽取的通用组件）。
- * 本页不内嵌变更上下文的会话逻辑（那是 change-session-section 职责）。
+ * 依据：
+ *   - tasks/task-02.md（allowed_paths / implementation / acceptance）
+ *   - design.md §4.A（workspaceId 取自路由 params.id 组装 WorkspaceScope）、
+ *     §4.E（原 dialog 模式两栏装配组件自本页解绑，本页不再消费）
+ *   - components/sessions/sessions-portal.tsx（task-01 共享门户：scope 派生
+ *     workspace 级列表数据源 + NewSessionForm 锁定 bindWorkspaceId + 标题
+ *     「智能体会话 · 工作区」后缀；?session= 深链恢复）
+ *
+ * 原 dialog 模式会话装配组件自本页解绑，组件本体退役归 task-07。本页不内嵌
+ * 任何会话列表/面板逻辑（全在门户组件）。
  */
 
-import { PageContainer, PageHeader } from "@/components/layout";
-import { WorkspaceSessionSection } from "@/components/workspace-session-section";
+import { SessionsPortal } from "@/components/sessions/sessions-portal";
 
 interface Props {
   params: { id: string };
 }
 
 export default function WorkspaceSessionsPage({ params }: Props) {
-  const workspaceId = params.id;
-  return (
-    <PageContainer size="full">
-      <PageHeader
-        title="会话"
-        subtitle="工作区级会话：与 agent 对话、发起新会话（不绑定具体变更，与变更中心平级）。"
-      />
-      <WorkspaceSessionSection workspaceId={workspaceId} />
-    </PageContainer>
-  );
+  return <SessionsPortal scope={{ kind: "workspace", workspaceId: params.id }} />;
 }

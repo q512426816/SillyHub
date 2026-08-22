@@ -1,61 +1,124 @@
 "use client";
 
-import { useState } from "react";
+import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 
-import { ChangeSessionSection } from "@/components/changes/change-session-section";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { formatRelativeTime } from "@/components/sessions/session-list-panel";
+import { buttonVariants } from "@/components/ui/button";
+import { listChangeSessions } from "@/lib/daemon";
+import { cn } from "@/lib/utils";
+import { useSession } from "@/stores/session";
 
 /**
- * 会话调试卡（次线侧栏入口，2026-08-11-change-detail-layout-rework / FR-02 / D-002 +
- * ql-20260811-002 修复）。
+ * 会话入口卡（变更详情次线侧栏；2026-08-11-change-detail-layout-rework 建卡，
+ * ql-20260811-002 改 Dialog 承载，task-06（2026-08-22-workspace-sessions-portal）
+ * 改入口形态）。
  *
- * 原版把 ChangeSessionSection（两栏 grid `md:grid-cols-[230px_1fr]`：会话列表 + 问答面板）
- * 整包塞进 320px 折叠卡——`md:` 是视口断点非容器断点，桌面视口下即使容器只有 320px 也强制
- * 两栏 → 面板被挤到 ~80px 根本用不了。改为：侧栏紧凑入口卡（标题+说明+「打开」按钮），点击
- * 在宽 Dialog（max-w-6xl × 85vh）里渲染完整 ChangeSessionSection——容器有足够横向空间让
- * 两栏布局正常工作。黑盒复用 ChangeSessionSection 不改其内部。Dialog 内容仅 open 时 mount
- * （radix Portal 惰性），关闭即卸载，无空载请求与 SSE 连接。
+ * 依据：
+ *   - tasks/task-06.md（allowed_paths / implementation / acceptance / constraints）
+ *   - design.md §4.D（入口卡：listChangeSessions 仅本人过滤取前 3 条预览，
+ *     条目经 ?session= 深链直达变更级门户选中态，卡尾按钮跳专属路由）、
+ *     D-002@v1（变更详情承载 = 方案A 专属路由门户）、D-003@v1（仅本人过滤）、
+ *     D-004@v1（?session= 门户统一深链能力，task-01 提供）
+ *
+ * 入口形态（原 Dialog 内嵌 ChangeSessionSection 装配移除，组件文件退役归
+ * task-07）：窄卡只做预览与跳转——
+ *   - 数据源 listChangeSessions(workspaceId, changeId)（跨成员可见端点），
+ *     客户端按 author 仅本人过滤（author 缺失视为本人保留，同旧
+ *     workspace-session-section 过滤口径：logs/stream owner-only，他人会话
+ *     attach 必 404，展示只会误导点击）→ last_active_at 倒序 → 前 3 条；
+ *   - 每条渲染 id 短码（# + slice(0,8)，同 session-panel 面板头口径）/状态
+ *     中文/相对时间（复用 session-list-panel 导出的 formatRelativeTime）；
+ *   - 卡尾「打开会话工作台」Link 至变更级门户路由（task-03 新建，不带参数）。
  */
+
+/** 会话状态中文标签（同 change-stage-actions.tsx:62 只读展示口径）。 */
+const SESSION_STATUS_LABELS: Record<string, string> = {
+  pending: "等待中",
+  active: "进行中",
+  reconnecting: "重连中",
+  ended: "已结束",
+  failed: "已失败",
+};
+
+/** 预览条数上限（design §4.D：仅本人过滤后取前 3）。 */
+const PREVIEW_LIMIT = 3;
+
 export interface ChangeSessionsCardProps {
   workspaceId: string;
   changeId: string;
 }
 
-export function ChangeSessionsCard({ workspaceId, changeId }: ChangeSessionsCardProps) {
-  const [open, setOpen] = useState(false);
+export function ChangeSessionsCard({
+  workspaceId,
+  changeId,
+}: ChangeSessionsCardProps) {
+  // task-06（D-003@v1）：当前用户 id——仅本人过滤依据。
+  const currentUserId = useSession((s) => s.user?.id ?? null);
+
+  // task-06（D-002@v1）：数据源显式为变更级列表端点（Grill P2），过滤在客户端。
+  const sessionsQ = useQuery({
+    queryKey: ["agentSessions", "changeSessionsCard", workspaceId, changeId],
+    queryFn: () => listChangeSessions(workspaceId, changeId),
+  });
+
+  // 仅本人 → last_active_at 倒序（后端不保证顺序，同旧 section 口径）→ 前 3 条。
+  const previews = (sessionsQ.data ?? [])
+    .filter((s) => s.author?.user_id == null || s.author.user_id === currentUserId)
+    .sort((a, b) => (b.last_active_at ?? "").localeCompare(a.last_active_at ?? ""))
+    .slice(0, PREVIEW_LIMIT);
+
+  // 变更级门户专属路由（task-03）：条目带 ?session= 深链直达选中态（D-004@v1，
+  // 门户挂载时解析恢复；无效 id 静默忽略）；卡尾按钮同路由不带参。
+  const portalHref = `/workspaces/${workspaceId}/changes/${changeId}/sessions`;
+
   return (
     <section className="rounded-md border bg-card px-3 py-2.5">
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0">
           <h2 className="text-xs font-medium">会话调试</h2>
           <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
-            在变更上下文中提问 / 调试（点开进入）
+            本变更的最近会话（仅本人，点击直达选中）
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-          打开
-        </Button>
       </div>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="flex h-[85vh] max-w-6xl flex-col gap-0 p-0">
-          <DialogHeader className="border-b px-4 py-3">
-            <DialogTitle className="text-sm">会话调试</DialogTitle>
-            <DialogDescription className="text-[11px]">
-              历史会话列表 + 问答面板（与主线执行日志分开）
-            </DialogDescription>
-          </DialogHeader>
-          <div className="min-h-0 flex-1 overflow-hidden p-3">
-            <ChangeSessionSection workspaceId={workspaceId} changeId={changeId} />
-          </div>
-        </DialogContent>
-      </Dialog>
+
+      {/* 最近会话预览：id 短码 / 状态中文 / 相对时间 */}
+      <ul className="mt-2 space-y-0.5" data-testid="change-session-previews">
+        {previews.map((s) => (
+          <li key={s.id}>
+            <Link
+              href={`${portalHref}?session=${encodeURIComponent(s.id)}`}
+              className="flex items-center justify-between gap-2 rounded-sm px-1.5 py-1 text-[11px] hover:bg-muted"
+            >
+              <span className="font-mono">#{s.id.slice(0, 8)}</span>
+              <span className="flex min-w-0 items-center gap-1.5 text-muted-foreground">
+                <span className="shrink-0">
+                  {SESSION_STATUS_LABELS[s.status] ?? s.status}
+                </span>
+                <span className="shrink-0">{formatRelativeTime(s.last_active_at)}</span>
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+      {sessionsQ.isPending ? (
+        <p className="px-1.5 py-1 text-[11px] text-muted-foreground">加载中…</p>
+      ) : previews.length === 0 ? (
+        <p className="px-1.5 py-1 text-[11px] text-muted-foreground">
+          暂无本人会话，可打开工作台新建
+        </p>
+      ) : null}
+
+      {/* 卡尾入口：打开会话工作台（变更级门户，不带 session 参数） */}
+      <div className="mt-2.5">
+        <Link
+          href={portalHref}
+          className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-full")}
+        >
+          打开会话工作台
+        </Link>
+      </div>
     </section>
   );
 }

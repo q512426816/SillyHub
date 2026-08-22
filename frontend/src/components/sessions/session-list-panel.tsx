@@ -25,6 +25,23 @@
  *     免二次查询（Grill C-12）；快照缺省（旧数据 null）回退 runtime/provider
  *     基础信息（机器名经 runtime_id→机器映射、引擎用 session.provider）。
  *   点击条目 → onSelect(session)（页面组装归 task-10，本组件自治）。
+ *
+ * scope 化（2026-08-22-workspace-sessions-portal task-04 / FR-04 / D-003@v1）：
+ *   - 可选 scope 入参（判别联合，见下方 WorkspaceScope/ChangeScope 导出）：
+ *     workspace → listWorkspaceAgentSessions(include_ended=true)、
+ *     change → listChangeSessions；两端点返回裸数组，客户端仅本人过滤后
+ *     合成单页喂 InfiniteQuery（getNextPageParam 恒 undefined →「加载更多」
+ *     自然隐藏，design §4.B：工作区会话量级小，虚拟滚动兜底）；
+ *   - 仅本人过滤（Grill P0-1 / D-003@v1）：scope 端点跨成员返回，但 logs/
+ *     dialogs/stream 端点 owner-only（他人会话 attach 必 404），author 缺失
+ *     视为本人保留（迁移 workspace-session-section 旧 :201-212 语义）；
+ *   - 筛选条 scope 语义（Grill P1-2 / D-003@v1）：scope 模式隐藏服务端筛选
+ *     三控件（状态/机器/引擎——两 scope 端点不收这些参数），保留本地标题
+ *     搜索做客户端过滤；全局模式筛选条现状零动；
+ *   - 瘦字段降级（Grill P1-1，design §4.B 字段降级矩阵）：scope 端点返回瘦
+ *     item（无 runtime_id/config_snapshot/workspace_id/created_at），缺失字段
+ *     填 null → SessionRow 跳过对应 chips，时间列以 last_active_at 呈现；
+ *   - 缺省（不传 scope）全局路径零变化（真分页 queryKey/queryFn/加载更多）。
  */
 import { useMemo, useRef, useState } from "react";
 import {
@@ -37,15 +54,34 @@ import { Badge, Button, Input, Modal, Segmented, Select, Spin, Tag } from "antd"
 import { SearchOutlined } from "@ant-design/icons";
 import { Trash2 } from "lucide-react";
 import { ApiError } from "@/lib/api";
+import { useSession } from "@/stores/session";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import { listWorkspaces } from "@/lib/workspaces";
 import {
   listAgentSessions,
+  listChangeSessions,
+  listWorkspaceAgentSessions,
+  type AgentSessionListItem,
   type AgentSessionListResponse,
   type AgentSessionRead,
   type AgentSessionStatus,
   type DaemonMachineRead,
 } from "@/lib/daemon";
+
+/* ────────────── scope 判别联合（task-04 provides 契约，供 task-01 门户复用） ────────────── */
+
+/** 工作区范围：列表与创建绑定锁定到单个工作区（design §4.A 判别联合，Grill P2）。 */
+export type WorkspaceScope = { kind: "workspace"; workspaceId: string };
+
+/** 变更范围：workspace 级超集，再绑定单个变更（change 级隐含 workspace）。 */
+export type ChangeScope = {
+  kind: "change";
+  workspaceId: string;
+  changeId: string;
+};
+
+/** scope 判别联合（缺省不传 = 全局门户现状）。 */
+export type SessionListScope = WorkspaceScope | ChangeScope;
 
 /** 引擎胶囊 tab（FR-02：全部/claude/codex → provider 参数）。 */
 const ENGINE_TABS = [
@@ -76,9 +112,57 @@ export interface SessionListPanelProps {
   onSelect?: (_session: AgentSessionRead) => void;
   /** ql-20260818-012：删除会话回调（单条/批量共用，软删后 invalidate 列表）。 */
   onDeleteSessions?: (_ids: string[]) => Promise<void>;
+  /**
+   * task-04（2026-08-22-workspace-sessions-portal）：可选 scope，锁定列表
+   * 数据源到工作区/变更级；缺省 = 全局门户现状（零变化）。
+   */
+  scope?: SessionListScope;
 }
 
 /* ────────────────────── 纯辅助（组件外便于单测推理） ────────────────────── */
+
+/**
+ * 仅本人过滤（task-04 / Grill P0-1 / D-003@v1）：scope 端点跨成员返回
+ * （D-005@v1），但 logs/dialogs/stream 端点 owner-only（跨用户 404），attach
+ * 他人会话必然全 404，展示只会误导点击。author 缺失视为本人保留（迁移旧
+ * workspace-session-section :201-212 语义）。
+ */
+function filterOwnSessions(
+  items: AgentSessionListItem[],
+  currentUserId: string | null,
+): AgentSessionListItem[] {
+  return items.filter(
+    (s) => s.author?.user_id == null || s.author.user_id === currentUserId,
+  );
+}
+
+/**
+ * scope 端点瘦 item → 列表行渲染形状（AgentSessionRead 兼容，task-04 瘦字段
+ * 降级——design §4.B 字段降级矩阵）：瘦 item 无 runtime_id/config_snapshot/
+ * workspace_id/created_at，缺失字段填 null——SessionRow 对 null 字段跳过对应
+ * chips（机器/档案/供应商/工作区），时间列以 last_active_at 呈现
+ * （created_at 填 last_active_at 或空串：既有回退链 last_active_at ??
+ * created_at 的终端为 formatRelativeTime("")→"—"）。
+ */
+function scopeItemToRow(item: AgentSessionListItem): AgentSessionRead {
+  return {
+    id: item.id,
+    runtime_id: null, // 机器 chip 跳过（瘦 item 无 runtime 映射）
+    lease_id: null,
+    provider: item.provider,
+    status: item.status as AgentSessionStatus, // 后端同枚举值，收窄回判别联合
+    agent_session_id: null,
+    config: null,
+    turn_count: item.turn_count,
+    created_at: item.last_active_at ?? "",
+    last_active_at: item.last_active_at,
+    ended_at: null,
+    change_id: null,
+    workspace_id: null, // 工作区 chip 跳过
+    config_snapshot: null, // 档案/供应商 chips 跳过
+    title: item.title,
+  };
+}
 
 /** 机器显示名（与 new-session-form.tsx 同语义：别名优先）。 */
 function machineLabel(m: DaemonMachineRead): string {
@@ -125,6 +209,7 @@ export function SessionListPanel({
   selectedSessionId,
   onSelect,
   onDeleteSessions,
+  scope,
 }: SessionListPanelProps) {
   // 四维筛选状态（选择型即查：setState → queryKey 变化 → react-query 停旧启新）。
   const [engine, setEngine] = useState<string>("");
@@ -137,6 +222,9 @@ export function SessionListPanel({
   const [batchMode, setBatchMode] = useState(false);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
+  // task-04（D-003@v1）：scope 模式客户端仅本人过滤的当前用户锚点
+  //（useSession 取 user.id；未登录 null，见 filterOwnSessions）。
+  const currentUserId = useSession((s) => s.user?.id ?? null);
 
   // 机器列表（筛选多选 + chips 机器名回退 / 离线判定共用一份数据源）。
   const { items: machines } = useDaemonMachines({ limit: 100 });
@@ -175,22 +263,52 @@ export function SessionListPanel({
     InfiniteData<AgentSessionListResponse, number>,
     readonly unknown[],
     number
-  >({
-    queryKey: ["agentSessions", "sessionsPortal", serverParams],
-    queryFn: ({ pageParam }) =>
-      listAgentSessions({
-        ...serverParams,
-        // 首页省略 offset（与 listAgentSessions 默认参数一致）。
-        ...(pageParam > 0 ? { offset: pageParam } : {}),
-      }),
-    initialPageParam: 0,
-    getNextPageParam: (lastPage, pages) => {
-      const loaded = pages.reduce((n, p) => n + p.items.length, 0);
-      return loaded < lastPage.total && lastPage.items.length > 0
-        ? loaded
-        : undefined;
-    },
-  });
+  >(
+    scope
+      ? {
+          // task-04（D-003@v1）：scope 模式整列单页合成——两端点返回裸数组，
+          // 客户端仅本人过滤后合成单页；getNextPageParam 恒 undefined → 无下一页
+          //（「加载更多」按钮经 hasNextPage 自然隐藏）。queryKey 带 scope 供
+          // 门户（task-01）软删后按 scope invalidate。
+          queryKey: ["agentSessions", "sessionsPortal", "scope", scope],
+          queryFn: async () => {
+            const raw =
+              scope.kind === "workspace"
+                ? await listWorkspaceAgentSessions(scope.workspaceId, {
+                    include_ended: true,
+                  })
+                : await listChangeSessions(scope.workspaceId, scope.changeId);
+            const own = filterOwnSessions(raw, currentUserId);
+            // 合成单页：limit=own.length（整列一页装下）、offset=0、total=本人条数
+            //（分页字段仅补形状，scope 模式无翻页语义）。
+            return {
+              items: own.map(scopeItemToRow),
+              total: own.length,
+              limit: own.length,
+              offset: 0,
+            };
+          },
+          initialPageParam: 0,
+          getNextPageParam: () => undefined,
+        }
+      : {
+          // 缺省全局路径零变化（task-04 约束：真分页 + queryKey 结构不动）。
+          queryKey: ["agentSessions", "sessionsPortal", serverParams],
+          queryFn: ({ pageParam }) =>
+            listAgentSessions({
+              ...serverParams,
+              // 首页省略 offset（与 listAgentSessions 默认参数一致）。
+              ...(pageParam > 0 ? { offset: pageParam } : {}),
+            }),
+          initialPageParam: 0,
+          getNextPageParam: (lastPage, pages) => {
+            const loaded = pages.reduce((n, p) => n + p.items.length, 0);
+            return loaded < lastPage.total && lastPage.items.length > 0
+              ? loaded
+              : undefined;
+          },
+        },
+  );
 
   /** runtime_id → 所属机器（机器名回退 + 离线划线判定）。 */
   const runtimeToMachine = useMemo(() => {
@@ -214,6 +332,16 @@ export function SessionListPanel({
 
   // 机器多选（>1）：后端单 machine_id 装不下 → 对已加载页客户端过滤。
   const items = useMemo(() => {
+    // task-04（D-003@v1）：scope 模式服务端筛选条隐藏，仅剩本地标题搜索做
+    // 客户端过滤（两 scope 端点不收 q 参数，多选即全滤空——Grill P1-2 定案）。
+    if (scope) {
+      const q = appliedQuery.trim().toLowerCase();
+      if (!q) return loadedItems;
+      return loadedItems.filter((s) =>
+        (s.title ?? "").toLowerCase().includes(q),
+      );
+    }
+    // 全局现状零动：机器多选（>1）后端单 machine_id 装不下 → 客户端过滤。
     if (machineIds.length <= 1) return loadedItems;
     const selected = new Set(machineIds);
     return loadedItems.filter((s) => {
@@ -221,7 +349,7 @@ export function SessionListPanel({
       const hit = runtimeToMachine.get(s.runtime_id);
       return hit ? selected.has(hit.machine.id) : false;
     });
-  }, [loadedItems, machineIds, runtimeToMachine]);
+  }, [scope, loadedItems, machineIds, runtimeToMachine, appliedQuery]);
 
   const total = sessionsQuery.data?.pages.at(-1)?.total ?? 0;
 
@@ -308,7 +436,9 @@ export function SessionListPanel({
         <span className="text-[11px] text-muted-foreground">共 {total} 个</span>
       </div>
 
-      {/* 筛选区（FR-02 四维；选择型即查、文本回车查） */}
+      {/* 筛选区（FR-02 四维；选择型即查、文本回车查）。
+          task-04（D-003@v1）：scope 模式隐藏服务端筛选三控件（状态/机器/引擎
+          ——两 scope 端点不收这些参数），保留本地标题搜索；全局模式现状零动。 */}
       <div className="flex flex-col gap-2 border-b border-border px-3 py-2">
         <Input
           size="small"
@@ -320,34 +450,38 @@ export function SessionListPanel({
           onChange={(e) => setSearchInput(e.target.value)}
           onPressEnter={() => setAppliedQuery(searchInput.trim())}
         />
-        <div className="flex items-center gap-1.5">
-          <Select
-            id="slp-status"
-            size="small"
-            className="w-28 shrink-0"
-            value={status}
-            onChange={(v) => setStatus(v ?? "")}
-            options={STATUS_OPTIONS.map((o) => ({ ...o }))}
-          />
-          <Select
-            id="slp-machine"
-            mode="multiple"
-            size="small"
-            className="min-w-0 flex-1"
-            placeholder="机器（全部）"
-            allowClear
-            maxTagCount={2}
-            value={machineIds}
-            onChange={(v) => setMachineIds(v ?? [])}
-            options={machineOptions}
-          />
-        </div>
-        <Segmented
-          size="small"
-          value={engine}
-          onChange={(v) => setEngine(v as string)}
-          options={ENGINE_TABS.map((o) => ({ ...o }))}
-        />
+        {!scope && (
+          <>
+            <div className="flex items-center gap-1.5">
+              <Select
+                id="slp-status"
+                size="small"
+                className="w-28 shrink-0"
+                value={status}
+                onChange={(v) => setStatus(v ?? "")}
+                options={STATUS_OPTIONS.map((o) => ({ ...o }))}
+              />
+              <Select
+                id="slp-machine"
+                mode="multiple"
+                size="small"
+                className="min-w-0 flex-1"
+                placeholder="机器（全部）"
+                allowClear
+                maxTagCount={2}
+                value={machineIds}
+                onChange={(v) => setMachineIds(v ?? [])}
+                options={machineOptions}
+              />
+            </div>
+            <Segmented
+              size="small"
+              value={engine}
+              onChange={(v) => setEngine(v as string)}
+              options={ENGINE_TABS.map((o) => ({ ...o }))}
+            />
+          </>
+        )}
       </div>
 
       {/* ql-20260818-012：批量选择模式切换 + 批量删除/单条删除操作栏 */}
@@ -447,7 +581,9 @@ export function SessionListPanel({
               ];
             })}
           </div>
-          {/* 后端真分页（R-04）：未取完时手动加载下一页。 */}
+          {/* 后端真分页（R-04）：未取完时手动加载下一页。
+              task-04：scope 模式 getNextPageParam 恒 undefined → hasNextPage
+              恒 false → 按钮自然隐藏（整列单页，无需分页）。 */}
           {sessionsQuery.hasNextPage && (
             <div className="border-t border-border px-3 py-2 text-center">
               <Button

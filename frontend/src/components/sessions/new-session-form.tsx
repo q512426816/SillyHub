@@ -23,6 +23,14 @@
  * manual_approval: true, ask_user_only: true })；未选项不进请求体（task-16 契约，
  * daemon.ts createSession 对 undefined 字段不下发）。成功后经 props 回调交给父层
  * （页面组装归 task-10，本组件不管路由/SSE）。
+ *
+ * 锁定绑定（2026-08-22-workspace-sessions-portal task-05 / FR-02 / FR-03）：
+ *   - 可选 bindWorkspaceId：传入即锁定工作区——第⓪区不渲染
+ *     WorkspaceSessionPicker（换锁定提示条），workspaceId 直接初始为绑定值且
+ *     不存在被改写的路径（不走 handleWsChange 用户选择链路）；
+ *   - 可选 bindChangeId：createSession 在 workspace_id 之外加 change_id 双传
+ *     （change 级隐含 workspace 双传，先例 daemon/session-panel.tsx:2347）；
+ *   - 缺省（两参均不传）表单行为零变化，四选择器联动与默认机器三级回退保留。
  */
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
@@ -63,6 +71,16 @@ export interface NewSessionFormValues {
 export interface NewSessionFormProps {
   /** 会话创建成功回调（父层接手 SSE/页面切换，本组件不感知路由）。 */
   onCreated?: (_session: SessionCreateResponse, _values: NewSessionFormValues) => void;
+  /**
+   * task-05（2026-08-22-workspace-sessions-portal / FR-02）：锁定绑定工作区。
+   * 传入即隐藏 WorkspaceSessionPicker，createSession 的 workspace_id 恒传绑定值。
+   */
+  bindWorkspaceId?: string;
+  /**
+   * task-05（FR-03）：锁定绑定变更。传入即 createSession 加 change_id，且
+   * change 级隐含 workspace 双传（调用方须同时给 bindWorkspaceId）。
+   */
+  bindChangeId?: string;
 }
 
 /* ────────────────────── 纯辅助（组件外便于单测推理） ────────────────────── */
@@ -137,7 +155,11 @@ export function resolveDefaultMachineId(
 
 /* ────────────────────── 组件 ────────────────────── */
 
-export function NewSessionForm({ onCreated }: NewSessionFormProps) {
+export function NewSessionForm({
+  onCreated,
+  bindWorkspaceId,
+  bindChangeId,
+}: NewSessionFormProps) {
   const {
     items: machines,
     sessions,
@@ -159,7 +181,11 @@ export function NewSessionForm({ onCreated }: NewSessionFormProps) {
   const [providerId, setProviderId] = useState<string>(NO_PROVIDER_VALUE);
   const [profileId, setProfileId] = useState<string>(NO_PROFILE_VALUE);
   const [prompt, setPrompt] = useState("");
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  // task-05：锁定绑定——workspaceId 直接初始为绑定值；锁定期间选择器不渲染、
+  // handleWsChange 不触达，state 不存在被改写的路径（父层按 scope key 重挂载换绑定）。
+  const [workspaceId, setWorkspaceId] = useState<string | null>(
+    bindWorkspaceId ?? null,
+  );
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -234,6 +260,9 @@ export function NewSessionForm({ onCreated }: NewSessionFormProps) {
           ? { llm_provider_id: effectiveProviderId }
           : {}),
         ...(profileId ? { agent_profile_id: profileId } : {}),
+        // task-05：change 锁定绑定时 change_id 与 workspace_id 双传（change 级
+        // 隐含 workspace，先例 daemon/session-panel.tsx:2347 同体展开）。
+        ...(bindChangeId ? { change_id: bindChangeId } : {}),
         ...(workspaceId ? { workspace_id: workspaceId } : {}),
       });
       // D-005：记住本次机器选择（下次打开表单的默认第一级）。
@@ -266,20 +295,30 @@ export function NewSessionForm({ onCreated }: NewSessionFormProps) {
         </span>
       </div>
 
-      {/* ⓪ 工作区（可选） */}
+      {/* ⓪ 工作区（可选；task-05 锁定绑定时不可换） */}
       <section className="flex flex-col gap-2">
         <div className="flex items-baseline gap-2">
           <span className="text-sm font-medium text-foreground">⓪ 工作区</span>
           <span className="text-xs text-muted-foreground">
-            可选 · 选中后会话将在工作区项目目录中运行
+            {bindWorkspaceId
+              ? "已锁定 · 会话将在绑定工作区的项目目录中运行"
+              : "可选 · 选中后会话将在工作区项目目录中运行"}
           </span>
         </div>
-        <WorkspaceSessionPicker
-          value={workspaceId}
-          onChange={handleWsChange}
-          machines={machines}
-          disabled={submitting}
-        />
+        {bindWorkspaceId ? (
+          // task-05：锁定绑定——第⓪区不渲染 WorkspaceSessionPicker，换锁定
+          // 提示条（运行确认由下方既有绿色提示条承接）。
+          <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            🔒 已锁定绑定工作区，不可更换
+          </div>
+        ) : (
+          <WorkspaceSessionPicker
+            value={workspaceId}
+            onChange={handleWsChange}
+            machines={machines}
+            disabled={submitting}
+          />
+        )}
         {workspaceId && (
           <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700">
             ✓ 会话将在该项目目录中运行，自动加载其规范文档

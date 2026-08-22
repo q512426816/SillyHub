@@ -15,6 +15,12 @@
  *   5. 开始会话 createSession 参数（runtime_id/manual_approval/ask_user_only、
  *      可选 id 仅在选中时携带）+ onCreated 回调
  *   6. 必选缺失（无智能体 / 无消息）→ 开始会话按钮禁用
+ *   7. 工作区选择器联动（⓪ 区）：选工作区切绑定机器 / 无绑定不动 / 提交含
+ *      workspace_id、不选零回归
+ *   8. 锁定绑定（2026-08-22-workspace-sessions-portal task-05 / FR-02 /
+ *      FR-03，QA §4.F 直接断言）：bindWorkspaceId → WorkspaceSessionPicker
+ *      不渲染 + 已锁定提示 + 提交 createSession 含 workspace_id=绑定值；
+ *      bindChangeId（+bindWorkspaceId）→ change_id 与 workspace_id 双传
  *
  * mock 策略：直接 mock 组件消费的 hook/函数模块（useDaemonMachines /
  * useMineAgentProfiles / listProviders / createSession），@/lib/api 保留真实
@@ -1024,5 +1030,89 @@ describe("NewSessionForm 工作区选择器联动", () => {
     const callArgs = mocks.createSession.mock.calls[0]![0]!;
     expect(callArgs).not.toHaveProperty("workspace_id");
     expect(callArgs.runtime_id).toBe("rt-claude");
+  });
+});
+
+// ── 8. 锁定绑定（task-05 / FR-02 / FR-03，QA §4.F 直接断言） ──────────────
+//
+// 此前绑定语义落点在 sessions-portal.test.tsx（门户 scope 派生透传），此处
+// 补表单组件级直接断言。缺省（两参均不传）零回归由 §7「不选工作区零回归」
+// 既有用例覆盖，不重复。
+
+describe("NewSessionForm 锁定绑定（bindWorkspaceId / bindChangeId）", () => {
+  it("bindWorkspaceId：WorkspaceSessionPicker 不渲染 + 已锁定提示在；提交 createSession 含 workspace_id=绑定值", async () => {
+    setMachines({
+      items: [
+        makeMachine({
+          id: "m-1",
+          hostname: "machine-1",
+          runtimes: [makeRuntime({ id: "rt-claude", name: "Claude Code" })],
+        }),
+      ],
+    });
+    renderForm(<NewSessionForm bindWorkspaceId="ws-bind" />);
+
+    // 负断言：第⓪区不渲染选择器（mock 的 picker 带 data-testid）
+    expect(screen.queryByTestId("workspace-picker")).not.toBeInTheDocument();
+    // 换锁定提示条 + 标签锁定文案
+    expect(
+      await screen.findByText(/已锁定绑定工作区，不可更换/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/已锁定 · 会话将在绑定工作区的项目目录中运行/),
+    ).toBeInTheDocument();
+    // workspaceId 初始=绑定值 → 运行目录提示条在
+    expect(
+      screen.getByText(/✓ 会话将在该项目目录中运行/),
+    ).toBeInTheDocument();
+
+    // 提交：workspace_id 恒为绑定值（不经 handleWsChange 用户选择链路）
+    await waitFor(() =>
+      expect(pressedAgent()?.getAttribute("aria-label")).toBe(
+        "选择智能体 Claude Code",
+      ),
+    );
+    inputPrompt("在绑定工作区开会话");
+    fireEvent.click(screen.getByRole("button", { name: /开始会话/ }));
+    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledTimes(1));
+    expect(mocks.createSession).toHaveBeenCalledWith({
+      runtime_id: "rt-claude",
+      prompt: "在绑定工作区开会话",
+      manual_approval: true,
+      ask_user_only: true,
+      workspace_id: "ws-bind",
+    });
+  });
+
+  it("bindChangeId（+bindWorkspaceId）：提交 createSession 参数 change_id 与 workspace_id 双传（change 级隐含 workspace）", async () => {
+    setMachines({
+      items: [
+        makeMachine({
+          id: "m-1",
+          hostname: "machine-1",
+          runtimes: [makeRuntime({ id: "rt-claude", name: "Claude Code" })],
+        }),
+      ],
+    });
+    renderForm(
+      <NewSessionForm bindWorkspaceId="ws-bind" bindChangeId="chg-bind" />,
+    );
+
+    await waitFor(() =>
+      expect(pressedAgent()?.getAttribute("aria-label")).toBe(
+        "选择智能体 Claude Code",
+      ),
+    );
+    inputPrompt("在绑定变更开会话");
+    fireEvent.click(screen.getByRole("button", { name: /开始会话/ }));
+    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledTimes(1));
+    expect(mocks.createSession).toHaveBeenCalledWith({
+      runtime_id: "rt-claude",
+      prompt: "在绑定变更开会话",
+      manual_approval: true,
+      ask_user_only: true,
+      workspace_id: "ws-bind",
+      change_id: "chg-bind",
+    });
   });
 });

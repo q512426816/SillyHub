@@ -1,12 +1,14 @@
 /**
- * /sessions 智能体会话总入口页冒烟（2026-08-14-sessions-portal task-10）。
+ * /sessions 智能体会话总入口页冒烟（2026-08-14-sessions-portal task-10 建页；
+ * 2026-08-22-workspace-sessions-portal task-08 薄壳化适配）。
  *
  * 依据：
- *   - app/(dashboard)/sessions/page.tsx（本 task 实现）
- *   - tasks/task-10.md acceptance：两栏渲染、无选中显示 NewSessionForm、选中显示
- *     SessionPanel（含 ConfigBar/UsageBar 挂载）、onCreated/onSelect 两态切换
+ *   - app/(dashboard)/sessions/page.tsx（task-02 薄壳：仅渲染无参 SessionsPortal）
+ *   - components/sessions/sessions-portal.tsx（task-01 提取的共享门户——本组
+ *     18 用例的断言目标不变，渲染出口由原页装配改为经门户组件间接覆盖）
+ *   - tasks/task-08.md acceptance：18=18 语义保留对账（禁删用例，可改装配细节）
  *
- * 覆盖：
+ * 覆盖（语义全保留迁移，编号同 task-10 原枚举）：
  *   1. 两栏渲染：左「会话列表」+ 右「新建会话表单」（无选中态）+ 页头标题
  *   2. 点击列表条目 onSelect → 右侧 SessionPanel（会话面板 / 配置控件条 /
  *      ctx-ring / 输入框 / 打断·结束按钮），新建表单隐藏、页头出现「新建会话」
@@ -14,10 +16,17 @@
  *   4. NewSessionForm onCreated 流：填消息点「开始会话」→ createSession 带
  *      runtime_id → 右侧切到新会话 SessionPanel（getAgentSession(s-new)）
  *   5. ended 会话 → 已结束横幅 + 重新开启按钮
+ *   （6-18：gap-fix whoLine/usage 注入 4 条、SSE 装配器 2 条、attach 竞态
+ *    2 条、对账回放 1 条、附件回显 1 条、reopen/409 中文化 3 条——均为
+ *    SessionPanel page 模式语义，随门户提取整块迁移，断言点零删减）
  *
  * mock 策略（对齐 sessions 组件测试惯例）：
  *   - @/lib/daemon 整模块 mock（页面/列表/表单/控件条消费的全部函数，
  *     streamSession 不建真实 EventSource）
+ *   - next/navigation mock（task-08：门户 useSearchParams 深链
+ *     sessions-portal.tsx:78——薄壳化后页面树经门户消费，jsdom 无 app router
+ *     上下文时 useSearchParams 返回 null，即原 18 红根因；对齐
+ *     runtimes/__tests__/page.test.tsx 惯例 mock 成可控 searchParams）
  *   - @/lib/use-daemon-machines、@/lib/agent-profiles（hook 部分）、
  *     @/lib/api/llm-providers mock
  *   - jsdom 虚拟滚动视口桩：session-scroll offsetHeight/offsetWidth 非零
@@ -63,7 +72,11 @@ const mocks = vi.hoisted(() => ({
   profilesHook: vi.fn(),
   listProviders: vi.fn(),
   getProviderQuota: vi.fn(),
-  // task-08：useNotify 改 mock 捕获（409 中文文案断言走调用参数，不依赖 antd App 上下文）
+  // task-08（D-004@v1）：门户 useSearchParams 返回值（深链用例可改写；
+  // 默认空参 = 全局门户静默停留新建态）
+  searchParams: new URLSearchParams(),
+  // task-08（2026-08-21-session-reopen-resume / FR-09）：useNotify 改 mock 捕获
+  //（409 中文文案断言走调用参数，不依赖 antd App 上下文）
   notifyError: vi.fn(),
   notifySuccess: vi.fn(),
   notifyWarning: vi.fn(),
@@ -91,6 +104,15 @@ vi.mock("@/lib/daemon", () => ({
 
 vi.mock("@/lib/use-daemon-machines", () => ({
   useDaemonMachines: () => mocks.machinesHook(),
+}));
+
+// task-08（2026-08-22-workspace-sessions-portal / D-004@v1）：薄壳页经
+// SessionsPortal 消费 useSearchParams 解析 ?session= 深链——jsdom 无 app
+// router 上下文时返回 null（sessions-portal.tsx:78 即原 18 红根因）。
+// 对齐 runtimes/__tests__/page.test.tsx 惯例 mock 成可控 searchParams。
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => mocks.searchParams,
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),
 }));
 
 vi.mock("@/lib/agent-profiles", async () => {
@@ -271,6 +293,9 @@ function renderPage() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // task-08：深链 searchParams 复位（默认空参——本页全局门户无深链用例，
+  // 语义已迁 sessions-portal.test.tsx；此处仅保证门户可渲染不炸）。
+  mocks.searchParams = new URLSearchParams();
   // 机器：1 台在线（rt-1 claude）+ 1 台带 codex 的在线机器（表单默认机器回退用）
   mocks.machinesHook.mockReturnValue({
     items: [
@@ -354,7 +379,7 @@ afterEach(() => {
 
 // ── 用例 ─────────────────────────────────────────────────────────────────
 
-describe("SessionsPortalPage 两栏两态组装（task-10 冒烟）", () => {
+describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄壳化——渲染经 SessionsPortal 间接覆盖）", () => {
   it("无选中：左会话列表 + 右新建会话表单 + 页头标题", async () => {
     renderPage();
 
