@@ -10,6 +10,8 @@
 - 同 file_id 重放（撞 dedup 唯一索引 IntegrityError）不 500；publish 异常仅降级仍 201。
 - GET 按 session_id/run_id 返 FileMetaResp（description/created_at）倒序；无
   WORKSPACE_READ → 403。
+- 会话归属人制（ql-20260823-013）：无工作区会话归属人可传可列（201/200），
+  非归属人 403；workspace 会话归属人无 ws 角色同样放行（脱钩工作区）。
 """
 
 from __future__ import annotations
@@ -114,10 +116,14 @@ async def _seed_workspace(session: AsyncSession, name: str = "文件制品工作
     return ws
 
 
-async def _seed_agent_session(session: AsyncSession, ws_id: uuid.UUID | None) -> AgentSession:
+async def _seed_agent_session(
+    session: AsyncSession,
+    ws_id: uuid.UUID | None,
+    user_id: uuid.UUID | None = None,
+) -> AgentSession:
     agent_session = AgentSession(
         id=uuid.uuid4(),
-        user_id=uuid.uuid4(),
+        user_id=user_id or uuid.uuid4(),
         provider="claude",
         status="active",
         workspace_id=ws_id,
@@ -439,6 +445,80 @@ class TestUploadAuth:
         )
         assert files == []
 
+    async def test_post_workspace_less_session_by_owner_201(
+        self, artifact_client, db_session
+    ) -> None:
+        """ql-20260823-013 核心场景：无工作区 runtime 会话，归属人（无任何 ws 角色）
+        上传 → 201——不再按 workspace 锚兜底 deny。"""
+        owner = await _make_user(db_session)
+        agent_session = await _seed_agent_session(db_session, None, user_id=owner.id)
+        active_run = await _seed_run(db_session, agent_session_id=agent_session.id)
+
+        with patch("app.modules.agent.file_artifacts.get_redis", return_value=AsyncMock()):
+            resp = await artifact_client.post(
+                "/api/agent/file-artifacts",
+                headers={
+                    "Authorization": f"Bearer {_token_for(owner)}",
+                    "X-Session-Id": str(agent_session.id),
+                },
+                **_png_form(description="无工作区会话产物"),
+            )
+        assert resp.status_code == 201, resp.text
+        file_row = await db_session.get(File, uuid.UUID(resp.json()["id"]))
+        assert file_row is not None
+        assert file_row.owner_type == "agent_session"
+        assert file_row.owner_id == agent_session.id
+        assert file_row.uploaded_by == owner.id
+        logs = await _file_upload_logs(db_session, active_run.id)
+        assert len(logs) == 1
+
+    async def test_post_workspace_less_session_by_non_owner_403(
+        self, artifact_client, db_session
+    ) -> None:
+        """无工作区会话非归属人（连平台管理员也不是）→ 锚 NULL 兜底 deny 403。"""
+        owner = await _make_user(db_session)
+        agent_session = await _seed_agent_session(db_session, None, user_id=owner.id)
+        await _seed_run(db_session, agent_session_id=agent_session.id)
+        outsider = await _make_user(db_session)
+
+        resp = await artifact_client.post(
+            "/api/agent/file-artifacts",
+            headers={
+                "Authorization": f"Bearer {_token_for(outsider)}",
+                "X-Session-Id": str(agent_session.id),
+            },
+            **_png_form(),
+        )
+        assert resp.status_code == 403, resp.text
+        assert _has_cjk(resp.json()["message"])
+        files = (
+            (await db_session.execute(select(File).where(File.owner_type == "agent_session")))
+            .scalars()
+            .all()
+        )
+        assert files == []
+
+    async def test_post_workspace_session_owner_without_ws_role_201(
+        self, artifact_client, db_session
+    ) -> None:
+        """workspace 会话的归属人在该 ws 无任何角色 → 仍 201（脱钩工作区，
+        ql-20260823-013；旧口径会在 require_permission_any 入口门 403）。"""
+        ws = await _seed_workspace(db_session)
+        owner = await _make_user(db_session)
+        agent_session = await _seed_agent_session(db_session, ws.id, user_id=owner.id)
+        await _seed_run(db_session, agent_session_id=agent_session.id)
+
+        with patch("app.modules.agent.file_artifacts.get_redis", return_value=AsyncMock()):
+            resp = await artifact_client.post(
+                "/api/agent/file-artifacts",
+                headers={
+                    "Authorization": f"Bearer {_token_for(owner)}",
+                    "X-Session-Id": str(agent_session.id),
+                },
+                **_png_form(),
+            )
+        assert resp.status_code == 201, resp.text
+
     async def test_post_unauthenticated_401(self, artifact_client, db_session) -> None:
         """未携带任何凭证 → 401。"""
         ws = await _seed_workspace(db_session)
@@ -678,6 +758,43 @@ class TestListArtifacts:
             permission=Permission.WORKSPACE_READ.value,
         )
         agent_session = await _seed_agent_session(db_session, target_ws.id)
+
+        resp = await artifact_client.get(
+            "/api/agent/file-artifacts",
+            params={"session_id": str(agent_session.id)},
+            headers={"Authorization": f"Bearer {_token_for(outsider)}"},
+        )
+        assert resp.status_code == 403, resp.text
+
+    async def test_get_workspace_less_session_by_owner_200(
+        self, artifact_client, db_session
+    ) -> None:
+        """无工作区会话归属人列文件 → 200（ql-20260823-013 回显链路）。"""
+        owner = await _make_user(db_session)
+        agent_session = await _seed_agent_session(db_session, None, user_id=owner.id)
+        await _seed_file_row(
+            db_session,
+            owner_type="agent_session",
+            owner_id=agent_session.id,
+            name="回显.png",
+            created_at=datetime(2026, 8, 23, 12, 0, tzinfo=UTC),
+        )
+
+        resp = await artifact_client.get(
+            "/api/agent/file-artifacts",
+            params={"session_id": str(agent_session.id)},
+            headers={"Authorization": f"Bearer {_token_for(owner)}"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert [f["original_name"] for f in resp.json()["files"]] == ["回显.png"]
+
+    async def test_get_workspace_less_session_by_non_owner_403(
+        self, artifact_client, db_session
+    ) -> None:
+        """无工作区会话非归属人列文件 → 403。"""
+        owner = await _make_user(db_session)
+        agent_session = await _seed_agent_session(db_session, None, user_id=owner.id)
+        outsider = await _make_user(db_session)
 
         resp = await artifact_client.get(
             "/api/agent/file-artifacts",

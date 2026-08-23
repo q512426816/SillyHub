@@ -2847,10 +2847,11 @@ export interface paths {
          * List File Artifacts
          * @description 按 session_id / run_id 列文件制品（FileMetaResp 含 description/created_at）。
          *
-         *     WORKSPACE_READ（读级鉴权）+ 锚 workspace 复核；按 created_at 倒序。前端 run
-         *     详情「产出文件」区与 daemon list_uploaded_files 工具共用本端点（D-010@v1，
-         *     不复用 /api/file/list——其非 admin owner 分支把 owner_id 当 workspace id
-         *     鉴权会 404）。
+         *     会话场景走会话归属人制（归属人放行，非归属人按 workspace 锚复核
+         *     WORKSPACE_READ，ql-20260823-013）；run 场景仍锚 workspace 复核 WORKSPACE_READ；
+         *     按 created_at 倒序。前端 run 详情「产出文件」区与 daemon list_uploaded_files
+         *     工具共用本端点（D-010@v1，不复用 /api/file/list——其非 admin owner 分支把
+         *     owner_id 当 workspace id 鉴权会 404）。
          */
         get: operations["list_file_artifacts_api_agent_file_artifacts_get"];
         put?: never;
@@ -2864,9 +2865,10 @@ export interface paths {
          *       owner_type=agent_run；锚 workspace 走 task-02 解析链。
          *     - 会话场景（``X-Session-Id``，与 mcp_tools 同名同源）：日志行挂当前活跃 run
          *       （无活跃取最新，均无 422 中文引导），owner_type=agent_session、owner_id=
-         *       会话 id；锚 workspace=AgentSession.workspace_id。
+         *       会话 id；授权走会话归属人制（ql-20260823-013）：归属人放行（无工作区会话
+         *       同样可传），非归属人按 AgentSession.workspace_id 锚复核 WORKSPACE_WRITE。
          *
-         *     两场景都按锚 workspace 复核 WORKSPACE_WRITE（越权 403）；重放防护：直写日志行
+         *     worker 场景按锚 workspace 复核 WORKSPACE_WRITE（越权 403）；重放防护：直写日志行
          *     撞 ``(run_id, dedup_key)`` 部分唯一索引（ux_agent_run_logs_dedup）的
          *     IntegrityError 视作已写入，不 500。
          */

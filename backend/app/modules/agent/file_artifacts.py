@@ -12,11 +12,17 @@
   （FileMetaResp 含 description/created_at，created_at 倒序），供前端 run 详情
   「产出文件」区（D-010@v1，不复用 /api/file/list）。
 
-鉴权（mcp_tools.py 同款双路径）：``require_permission_any``（JWT Bearer /
-X-API-Key 经 ``get_current_principal`` 落同一 User）+ 解析出归属后按锚 workspace
-复核（task-02 解析链：会话=AgentSession.workspace_id，run=target_workspace_id
-?? mission ?? task，锚 NULL 兜底 deny，D-004@v2）——POST 复核 WORKSPACE_WRITE，
-GET 复核 WORKSPACE_READ（读级，面向前端普通成员与 daemon list 工具）。
+鉴权（mcp_tools.py 同款双路径）：JWT Bearer / X-API-Key 经 ``get_current_principal``
+落同一 User，解析出归属后分场景复核（ql-20260823-013 会话归属人制，supersede
+D-004@v2 的会话场景锚 NULL 兜底 deny）：
+
+- 会话场景（X-Session-Id）：上传者 == ``AgentSession.user_id`` 即放行——无工作区
+  的 runtime 会话同样可传可列（「会话的都能上传回显」）；非归属人回退按
+  ``AgentSession.workspace_id`` 锚复核（workspace 会话的成员/管理员语义不变）。
+- worker 场景（run_id）：仍按 task-02 解析链取锚 workspace 复核
+  （target_workspace_id ?? mission ?? task，锚 NULL 兜底 deny，D-004@v2）。
+POST 复核 WORKSPACE_WRITE，GET 复核 WORKSPACE_READ（读级，面向前端普通成员与
+daemon list 工具）。
 """
 
 from __future__ import annotations
@@ -33,7 +39,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth_deps import require_permission_any
+from app.core.auth_deps import get_current_principal
 from app.core.config import Settings, get_settings
 from app.core.db import get_session
 from app.core.logging import get_logger
@@ -58,10 +64,12 @@ router = APIRouter(tags=["agent-file-artifacts"])
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
-# 双路径鉴权（JWT / X-API-Key，mcp_tools.SessionMcpUser 同款）：路径无 workspace
-# 锚，先过「任意工作区持有该权限」的门，归属解析后再按锚 workspace 复核。
-WriterUser = Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_WRITE))]
-ReaderUser = Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_READ))]
+# 双路径鉴权入口（JWT / X-API-Key，mcp_tools.SessionMcpUser 同款）：仅认证身份。
+# 归属解析后分场景复核——会话场景走会话归属人制（_check_session_permission），
+# worker 场景按锚 workspace 复核（_check_anchor_permission）。原 require_permission_any
+# 「任意工作区持权」入口门已在 ql-20260823-013 移除：它把无任何工作区角色的
+# 会话归属人也挡在门外，与「会话的都能上传回显」冲突；场景内复核权限只紧不松。
+PrincipalUser = Annotated[User, Depends(get_current_principal)]
 
 # D-007@v1：文件上传日志行常量（前端 assembler 按 tool_kind='FileUpload' 精确
 # 匹配映射 file 段，优先于通用 tool_use 映射，R-07）。
@@ -108,6 +116,30 @@ async def _check_anchor_permission(
             status.HTTP_403_FORBIDDEN,
             "对该会话或执行记录所属的工作区没有相应权限，禁止访问其文件制品。",
         )
+
+
+async def _check_session_permission(
+    session: AsyncSession,
+    user: User,
+    *,
+    permission: Permission,
+    agent_session: AgentSession,
+) -> None:
+    """会话场景授权——会话归属人制（ql-20260823-013，supersede D-004@v2 会话分支）。
+
+    上传者 == ``AgentSession.user_id`` 即放行：daemon 的 API key / 浏览器 JWT 本就
+    是会话主人的身份，无工作区的 runtime 会话同样可传可列；非归属人回退按
+    ``AgentSession.workspace_id`` 锚复核（workspace 会话的成员/平台管理员语义
+    不变），锚 NULL 且非归属人 → 403。
+    """
+    if user.id == agent_session.user_id:
+        return
+    await _check_anchor_permission(
+        session,
+        user,
+        permission=permission,
+        anchor_workspace_id=agent_session.workspace_id,
+    )
 
 
 async def _current_session_run(
@@ -202,7 +234,7 @@ async def _publish_file_upload_log(
 async def upload_file_artifact(
     request: Request,
     session: SessionDep,
-    user: WriterUser,
+    user: PrincipalUser,
     service: Annotated[FileService, Depends(_make_file_service)],
     file: Annotated[UploadFile, FastAPIFile()],
     description: Annotated[str, Form()] = "",
@@ -216,9 +248,10 @@ async def upload_file_artifact(
       owner_type=agent_run；锚 workspace 走 task-02 解析链。
     - 会话场景（``X-Session-Id``，与 mcp_tools 同名同源）：日志行挂当前活跃 run
       （无活跃取最新，均无 422 中文引导），owner_type=agent_session、owner_id=
-      会话 id；锚 workspace=AgentSession.workspace_id。
+      会话 id；授权走会话归属人制（ql-20260823-013）：归属人放行（无工作区会话
+      同样可传），非归属人按 AgentSession.workspace_id 锚复核 WORKSPACE_WRITE。
 
-    两场景都按锚 workspace 复核 WORKSPACE_WRITE（越权 403）；重放防护：直写日志行
+    worker 场景按锚 workspace 复核 WORKSPACE_WRITE（越权 403）；重放防护：直写日志行
     撞 ``(run_id, dedup_key)`` 部分唯一索引（ux_agent_run_logs_dedup）的
     IntegrityError 视作已写入，不 500。
     """
@@ -236,6 +269,13 @@ async def upload_file_artifact(
         # task-02 解析链（FileService._agent_run_anchor，D-004@v2）：
         # target_workspace_id ?? mission.workspace_id ?? task.workspace_id。
         anchor_workspace_id = await service._agent_run_anchor(run.id)
+        # ── 2. worker 场景：锚 workspace 复核 WORKSPACE_WRITE（越权 403）─────
+        await _check_anchor_permission(
+            session,
+            user,
+            permission=Permission.WORKSPACE_WRITE,
+            anchor_workspace_id=anchor_workspace_id,
+        )
     else:
         agent_session_id = _request_session_id(request, None)
         if agent_session_id is None:
@@ -254,16 +294,14 @@ async def upload_file_artifact(
             )
         owner_type = "agent_session"
         owner_id = agent_session.id
-        # task-02 会话锚（FileService._agent_session_anchor 同源列）
-        anchor_workspace_id = agent_session.workspace_id
-
-    # ── 2. 锚 workspace 复核 WORKSPACE_WRITE（越权 403）─────────────────────
-    await _check_anchor_permission(
-        session,
-        user,
-        permission=Permission.WORKSPACE_WRITE,
-        anchor_workspace_id=anchor_workspace_id,
-    )
+        # ── 2. 会话场景：会话归属人制（归属人放行，非归属人按 workspace 锚
+        #    复核 WORKSPACE_WRITE，ql-20260823-013）───────────────────────────
+        await _check_session_permission(
+            session,
+            user,
+            permission=Permission.WORKSPACE_WRITE,
+            agent_session=agent_session,
+        )
 
     # ── 3. 落 File 行（FileService 复用：大小/类型校验 + MinIO + 元数据）────
     data = await file.read()
@@ -335,17 +373,18 @@ async def upload_file_artifact(
 @router.get("/agent/file-artifacts", response_model=FileArtifactListResponse)
 async def list_file_artifacts(
     session: SessionDep,
-    user: ReaderUser,
+    user: PrincipalUser,
     service: Annotated[FileService, Depends(_make_file_service)],
     session_id: Annotated[uuid.UUID | None, Query()] = None,
     run_id: Annotated[uuid.UUID | None, Query()] = None,
 ) -> FileArtifactListResponse:
     """按 session_id / run_id 列文件制品（FileMetaResp 含 description/created_at）。
 
-    WORKSPACE_READ（读级鉴权）+ 锚 workspace 复核；按 created_at 倒序。前端 run
-    详情「产出文件」区与 daemon list_uploaded_files 工具共用本端点（D-010@v1，
-    不复用 /api/file/list——其非 admin owner 分支把 owner_id 当 workspace id
-    鉴权会 404）。
+    会话场景走会话归属人制（归属人放行，非归属人按 workspace 锚复核
+    WORKSPACE_READ，ql-20260823-013）；run 场景仍锚 workspace 复核 WORKSPACE_READ；
+    按 created_at 倒序。前端 run 详情「产出文件」区与 daemon list_uploaded_files
+    工具共用本端点（D-010@v1，不复用 /api/file/list——其非 admin owner 分支把
+    owner_id 当 workspace id 鉴权会 404）。
     """
     if (session_id is None) == (run_id is None):
         raise HTTPException(
@@ -358,7 +397,12 @@ async def list_file_artifacts(
             raise HTTPException(status.HTTP_404_NOT_FOUND, "会话不存在。")
         owner_type = "agent_session"
         owner_id = agent_session.id
-        anchor_workspace_id = agent_session.workspace_id
+        await _check_session_permission(
+            session,
+            user,
+            permission=Permission.WORKSPACE_READ,
+            agent_session=agent_session,
+        )
     else:
         assert run_id is not None  # 上面互斥校验保证二选一
         run = await session.get(AgentRun, run_id)
@@ -370,13 +414,12 @@ async def list_file_artifacts(
         owner_type = "agent_run"
         owner_id = run.id
         anchor_workspace_id = await service._agent_run_anchor(run.id)
-
-    await _check_anchor_permission(
-        session,
-        user,
-        permission=Permission.WORKSPACE_READ,
-        anchor_workspace_id=anchor_workspace_id,
-    )
+        await _check_anchor_permission(
+            session,
+            user,
+            permission=Permission.WORKSPACE_READ,
+            anchor_workspace_id=anchor_workspace_id,
+        )
     stmt = (
         select(File)
         .where(
