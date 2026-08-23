@@ -365,10 +365,19 @@
 方案：sessionListPollInterval 条件轮询接 sessionsQuery 函数式 refetchInterval（非终态在场 10s/全静默 30s，后台标签不轮询）+ page 模式 onTurnCompleted 接 onSessionListRefresh 每轮完成即时刷新
 结果：新增 3 用例（纯函数参数化/fake timers 轮询接线/onTurnCompleted invalidate 重拉）全绿；前端全量 181 文件 2022/2022 passed + tsc 0 + lint 仅存量 warning
 
-## ql-20260824-005-aa13 | 2026-08-24 07:11:37 | (quick 任务)
-状态：进行中
+## ql-20260824-005-aa13 | 2026-08-24 07:11:37 | 工作区绑定 PPM 项目后页面关联信息即时回显
+状态：已完成
 关联变更：（无）
-文件：（见实际改动）
+文件：
+- frontend/src/components/workspace/LinkedProjectsSection.tsx（加 onChanged 可选回调，bind/unbind 成功后通知宿主）
+- frontend/src/app/(dashboard)/workspaces/[id]/page.tsx（抽 refreshLinkedProjects，弹窗 onChanged 即时回显 + Modal 关闭兜底重拉）
+- frontend/src/components/workspace/__tests__/LinkedProjectsSection.test.tsx（+3 onChanged 契约用例（成功通知/失败不通知/解绑通知））
+- frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx（+1 弹窗绑定后基本信息行回显用例，补 workspace/ppm-project mock）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引补 ql-20260824-005-aa13）
+需求：工作区绑定 PPM 项目后页面关联信息即时回显，免手动刷新
+根因：详情页基本信息卡「关联项目」简要行 linkedProjectNames 只在整页 load() 赋值一次，弹窗内 LinkedProjectsSection 绑定/解绑成功后只刷自己内部 state，无向上通知回调，Modal 关闭也不重拉（同页 daemon switcher 等区块均有 onChanged 联动，唯独此弹窗缺）
+方案：LinkedProjectsSection 加 onChanged 可选回调（bind/unbind 成功且自身 reload 完成后调用，失败不通知）；详情页抽 refreshLinkedProjects（load 内联逻辑收敛，单拉 listLinkedProjects 不整页 load 避免闪烁），弹窗 onChanged 即时回显 + Modal 关闭兜底重拉。项目侧 LinkWorkspaceDialog 自身 reload 正常且项目表格无关联工作区列可回显，不动
+结果：组件 +3 onChanged 契约用例、详情页 +1 弹窗绑定后基本信息行回显用例，前端全量 181 文件 2026 用例绿，tsc 0 错，改动文件 lint 0 告警
 
 ## ql-20260824-006-3617 | 2026-08-24 07:18:07 | 修复 codex 交互会话第二轮输入必崩（单订阅 InputQueue 被每轮重订阅）
 状态：已完成
@@ -379,3 +388,8 @@
 方案：迭代器改 consume 循环外创建一次，_takeNextTurn 循环内只 next()；fake 队列补单订阅语义让 TDD-4 自动成回归测试，另加显式回归用例
 结果：codex 驱动 24 用例全绿（含新回归用例）、interactive 全目录 509 用例全绿、tsc 0 错；daemon.md 同步
 审计：⚖️ 归属切分：3 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/workspaces/[id]/page.tsx, frontend/src/components/workspace/LinkedProjectsSection.tsx, frontend/src/components/workspace/__tests__/LinkedProjectsSection.test.tsx
+
+## ql-20260824-007-37c2 | 2026-08-24 07:22:11 | 会话僵尸收敛：sweep 扩展离线 runtime 收敛 + 终态写入点统一广播 session_ended + SSE 对 recovery_failed 收尾
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/daemon/sweep.py, backend/app/modules/daemon/lease_service.py, backend/app/modules/agent/service.py, backend/app/modules/daemon/tests/test_session_reconnect_sweep.py

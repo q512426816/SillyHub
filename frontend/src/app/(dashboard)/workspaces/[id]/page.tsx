@@ -187,14 +187,21 @@ export default function WorkspaceDetailPage({ params }: Props) {
       // task-08 / D-002：获取当前成员 binding 以判定 init 状态
       setMyBinding(binding);
       // ql-20260821-004：关联项目简要（独立拉取失败静默——展示性信息不阻断页面）
-      listLinkedProjects(workspaceId)
-        .then((briefs) => setLinkedProjectNames(briefs.map((b) => b.project_name ?? b.project_id)))
-        .catch(() => setLinkedProjectNames(null));
+      refreshLinkedProjects();
     } catch (err) {
       setPageError(err instanceof ApiError ? err.message : "加载工作区失败");
     } finally {
       setLoading(false);
     }
+  };
+
+  // ql-20260824-005-aa13：关联项目简要重拉（load 内联逻辑收敛于此）。弹窗内
+  // 绑定/解绑成功（onChanged）与关闭弹层时调用，基本信息行即时回显免手动刷新；
+  // 单独轻拉这一路，不整页 load()（避免全页 loading 闪烁与其余 7 路重复请求）。
+  const refreshLinkedProjects = () => {
+    listLinkedProjects(workspaceId)
+      .then((briefs) => setLinkedProjectNames(briefs.map((b) => b.project_name ?? b.project_id)))
+      .catch(() => setLinkedProjectNames(null));
   };
 
   useEffect(() => {
@@ -575,16 +582,24 @@ export default function WorkspaceDetailPage({ params }: Props) {
           )}
         </div>
 
-        {/* 关联 PPM 项目弹层（ql-20260821-004 入口收敛到基本信息行内按钮） */}
+        {/* 关联 PPM 项目弹层（ql-20260821-004 入口收敛到基本信息行内按钮）。
+            ql-20260824-005-aa13：onChanged 即时回显 + 关闭兜底重拉（覆盖弹层
+            开启期间其它入口改动的边缘场景），基本信息「关联项目」行不再陈旧。 */}
         <Modal
           open={projectsOpen}
           title="关联 PPM 项目"
-          onCancel={() => setProjectsOpen(false)}
+          onCancel={() => {
+            setProjectsOpen(false);
+            refreshLinkedProjects();
+          }}
           footer={null}
           width={680}
           destroyOnHidden
         >
-          <LinkedProjectsSection workspaceId={workspaceId} />
+          <LinkedProjectsSection
+            workspaceId={workspaceId}
+            onChanged={refreshLinkedProjects}
+          />
         </Modal>
       </div>
     </PageContainer>

@@ -27,6 +27,12 @@ import {
 
 interface Props {
   workspaceId: string;
+  /**
+   * ql-20260824-005-aa13：绑定/解绑成功（自身 reload 完成后）通知宿主页。
+   * 工作区详情页消费——刷新基本信息卡「关联项目」简要行,免手动刷新浏览器。
+   * 失败不通知（错误已由本组件 errMessage 呈现）。
+   */
+  onChanged?: () => void;
 }
 
 // PPM 项目状态 code→中文标签(与 ppm/projects 页 PROJECT_STATUS_OPTIONS 一致);
@@ -44,7 +50,7 @@ function projectStatusLabel(status: string | null | undefined): string {
   }
 }
 
-export function LinkedProjectsSection({ workspaceId }: Props) {
+export function LinkedProjectsSection({ workspaceId, onChanged }: Props) {
   const [loading, setLoading] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -90,6 +96,7 @@ export function LinkedProjectsSection({ workspaceId }: Props) {
     try {
       await linkProject(workspaceId, projectId);
       await reload();
+      onChanged?.();
     } catch (err) {
       setError(errMessage(err, "绑定失败"));
     } finally {
@@ -103,6 +110,7 @@ export function LinkedProjectsSection({ workspaceId }: Props) {
     try {
       await unlinkProject(workspaceId, projectId);
       await reload();
+      onChanged?.();
     } catch (err) {
       setError(errMessage(err, "解绑失败"));
     } finally {

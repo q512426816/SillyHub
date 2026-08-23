@@ -106,4 +106,50 @@ describe("LinkedProjectsSection（task-12 / 工作区侧关联项目）", () => 
       expect(workspaceApi.unlinkProject).toHaveBeenCalledWith("ws-1", "proj-1");
     });
   });
+
+  // ── ql-20260824-005-aa13：onChanged 宿主通知契约（详情页基本信息行回显）──
+
+  it("绑定成功 → onChanged 被调用一次", async () => {
+    workspaceApi.listLinkedProjects.mockResolvedValue([]);
+    projectApi.listProjects.mockResolvedValue([makeProject()]);
+    workspaceApi.linkProject.mockResolvedValue({
+      project_id: "proj-1",
+      project_name: "项目甲",
+      project_status: "1",
+    });
+    const onChanged = vi.fn();
+
+    render(<LinkedProjectsSection workspaceId="ws-1" onChanged={onChanged} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "绑定" }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+  });
+
+  it("绑定失败 → 错误就地呈现,不通知宿主", async () => {
+    workspaceApi.listLinkedProjects.mockResolvedValue([]);
+    projectApi.listProjects.mockResolvedValue([makeProject()]);
+    workspaceApi.linkProject.mockRejectedValue(new Error("boom"));
+    const onChanged = vi.fn();
+
+    render(<LinkedProjectsSection workspaceId="ws-1" onChanged={onChanged} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "绑定" }));
+    // errMessage 抽取 Error.message → "boom"（fallback 文案仅在无消息时用）
+    expect(await screen.findByText("boom")).toBeInTheDocument();
+    expect(onChanged).not.toHaveBeenCalled();
+  });
+
+  it("解绑成功 → onChanged 被调用一次", async () => {
+    workspaceApi.listLinkedProjects.mockResolvedValue([
+      { project_id: "proj-1", project_name: "项目甲", project_status: "1" },
+    ]);
+    projectApi.listProjects.mockResolvedValue([]);
+    workspaceApi.unlinkProject.mockResolvedValue(undefined);
+    const onChanged = vi.fn();
+
+    render(<LinkedProjectsSection workspaceId="ws-1" onChanged={onChanged} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "解绑" }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
+  });
 });

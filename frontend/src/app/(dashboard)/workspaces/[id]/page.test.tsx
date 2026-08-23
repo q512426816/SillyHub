@@ -11,7 +11,7 @@
  * task-05 / 2026-08-20-workspace-overview-redesign：四段式重排后同步断言，
  * 新增统计四数字与 6 入口 href 覆盖（FR-05, D-202）。
  */
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import WorkspaceDetailPage from "@/app/(dashboard)/workspaces/[id]/page";
@@ -99,6 +99,32 @@ vi.mock("@/lib/agent", async () => {
   return { ...actual, listAgentRuns: vi.fn(async () => []) };
 });
 vi.mock("@/lib/quicklog", () => ({ listQuicklogEntries: vi.fn(async () => ({ items: [], total: 0 })) }));
+
+// ql-20260824-005-aa13：关联项目链路（page 基本信息行 + 弹窗内真实
+// LinkedProjectsSection）。默认空数组——load 内 refreshLinkedProjects 拿 []，
+// 不影响既有用例（均不断言「未关联/项目名」）。
+const workspaceLinkApi = vi.hoisted(() => ({
+  listLinkedProjects: vi.fn(async () => [] as unknown[]),
+  linkProject: vi.fn(),
+}));
+vi.mock("@/lib/workspace", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/workspace")>("@/lib/workspace");
+  return {
+    ...actual,
+    listLinkedProjects: workspaceLinkApi.listLinkedProjects,
+    linkProject: workspaceLinkApi.linkProject,
+  };
+});
+const ppmProjectApi = vi.hoisted(() => ({
+  listProjects: vi.fn(async () => [] as unknown[]),
+}));
+vi.mock("@/lib/ppm/project", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/ppm/project")>("@/lib/ppm/project");
+  return {
+    ...actual,
+    listProjects: ppmProjectApi.listProjects,
+  };
+});
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
 
@@ -387,5 +413,44 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     expect(
       await screen.findByText("当前绑定的守护进程无在线智能体提供方，请先确认守护进程已启用。"),
     ).toBeInTheDocument();
+  });
+
+  // ── ql-20260824-005-aa13：关联项目弹窗操作后基本信息行回显 ──
+
+  it("弹窗内绑定成功 → 基本信息「关联项目」行即时回显,无需手动刷新", async () => {
+    const brief = {
+      project_id: "proj-1",
+      project_name: "项目甲",
+      project_status: "1",
+    };
+    let linkedCalls = 0;
+    // 1 = page load；2 = 弹窗挂载 reload → 均空；3 = 绑定后 section reload；
+    // 4 = onChanged 重拉基本信息行 → 已关联。
+    workspaceLinkApi.listLinkedProjects.mockImplementation(async () => {
+      linkedCalls += 1;
+      return linkedCalls >= 3 ? [brief] : [];
+    });
+    ppmProjectApi.listProjects.mockResolvedValue([
+      {
+        id: "proj-1",
+        project_name: "项目甲",
+        project_code: "P-001",
+        project_status: "1",
+      } as never,
+    ]);
+    workspaceLinkApi.linkProject.mockResolvedValue(brief as never);
+
+    await renderWithStrategy("platform-managed");
+    expect(await screen.findByText("未关联")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "关联 PPM 项目" }));
+    fireEvent.click(await screen.findByRole("button", { name: "绑定" }));
+
+    // 基本信息行刷新：「未关联」消失；「项目甲」出现在基本信息 tag 与
+    // 弹窗已关联列表两处（Modal 为覆盖层,背后页面仍在 DOM）。
+    await waitFor(() =>
+      expect(screen.queryByText("未关联")).not.toBeInTheDocument(),
+    );
+    expect(screen.getAllByText("项目甲").length).toBeGreaterThanOrEqual(2);
   });
 });
