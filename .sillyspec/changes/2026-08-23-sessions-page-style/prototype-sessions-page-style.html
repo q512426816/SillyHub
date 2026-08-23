@@ -1,0 +1,1142 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>/sessions 智能体会话 · 整体风格升级原型（AI-Native 对齐）</title>
+<style>
+  /* ═══════════ 双主题变量（单一源语义，对应 themes.ts） ═══════════ */
+  /* [data-theme-scope] 作用域包装 = 多主题适配矩阵同屏对照用（规则 20：取值单一源仍是这两组变量） */
+  :root[data-theme="blue"], [data-theme-scope="blue"] {
+    --primary:#2563EB; --primary-hover:#1d4ed8; --accent:#0891B2; --accent-soft:rgba(6,182,212,.10);
+    --bg:#f8fafc; --card:#ffffff; --muted:#f1f5f9; --border:#e2e8f0; --border-strong:#cbd5e1;
+    --brand-50:#eff6ff; --brand-100:#dbeafe; --brand-200:#bfdbfe; --brand-300:#93c5fd;
+    --brand-600:#2563eb; --brand-700:#1d4ed8; --brand-800:#1e40af;
+    --brand-grad:linear-gradient(135deg,#2563EB 0%,#0891B2 100%);
+    --fg:#0f172a; --fg-mid:#334155; --fg-mut:#64748b; --fg-faint:#94a3b8;
+    --success:#059669; --success-bg:#d1fae5; --warn:#d97706; --warn-bg:#fef3c7;
+    --error:#dc2626; --error-bg:#fee2e2; --info:#0891B2; --info-bg:#cffafe;
+    --shadow-sm:0 1px 2px rgba(15,23,42,.05); --shadow-md:0 4px 12px rgba(15,23,42,.08);
+    --shadow-primary:0 4px 14px rgba(37,99,235,.35);
+  }
+  :root[data-theme="ai-native"], [data-theme-scope="ai-native"] {
+    --primary:#7C3AED; --primary-hover:#6D28D9; --accent:#0891B2; --accent-soft:rgba(8,145,178,.08);
+    --bg:#FAF5FF; --card:#ffffff; --muted:#ECEEF9; --border:#DDD6FE; --border-strong:#c4b5fd;
+    --brand-50:#f5f3ff; --brand-100:#ede9fe; --brand-200:#ddd6fe; --brand-300:#c4b5fd;
+    --brand-600:#7c3aed; --brand-700:#6d28d9; --brand-800:#5b21b6;
+    --brand-grad:linear-gradient(135deg,#7C3AED 0%,#0891B2 100%);
+    --fg:#1E1B4B; --fg-mid:#475569; --fg-mut:#64748b; --fg-faint:#94a3b8;
+    --success:#059669; --success-bg:#d1fae5; --warn:#d97706; --warn-bg:#fef3c7;
+    --error:#dc2626; --error-bg:#fee2e2; --info:#0891B2; --info-bg:#cffafe;
+    --shadow-sm:0 1px 2px rgba(30,27,75,.05); --shadow-md:0 4px 12px rgba(30,27,75,.08);
+    --shadow-primary:0 4px 14px rgba(124,58,237,.35);
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+       background:var(--bg);color:var(--fg);font-size:13px;line-height:1.5}
+  button{font-family:inherit}
+  svg.ic{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+  svg.ic-sm{width:12px;height:12px}
+  svg.ic-lg{width:20px;height:20px}
+
+  /* ═══════════ 原型页框架 ═══════════ */
+  .toggle{position:sticky;top:0;z-index:99;display:flex;gap:6px;justify-content:flex-end;padding:10px 16px;background:var(--bg)}
+  .toggle button{border:1px solid var(--border);background:var(--card);border-radius:999px;padding:4px 14px;cursor:pointer;font-size:12px;color:var(--fg-mut)}
+  .toggle button.on{border-color:var(--primary);color:var(--primary);font-weight:600;background:var(--brand-50)}
+  .proto-head{max-width:1500px;margin:0 auto;padding:10px 24px 4px}
+  .proto-head h1{font-size:17px;font-weight:700;letter-spacing:-.01em}
+  .proto-head .hint{color:var(--fg-mut);font-size:12.5px;margin-top:4px;max-width:960px}
+  .proto-head .hint b{color:var(--fg-mid)}
+  .sec-label{max-width:1500px;margin:22px 24px 10px;display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;color:var(--fg-mid)}
+  .sec-label .n{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:6px;background:var(--brand-grad);color:#fff;font-size:11px}
+
+  /* ═══════════ 全页 mockup（1:1 页面骨架） ═══════════ */
+  .app-shell{max-width:1500px;margin:0 auto;border:1px solid var(--border);border-radius:14px;overflow:hidden;
+             background:var(--card);box-shadow:var(--shadow-md);display:flex;min-height:960px}
+
+  /* —— 侧边栏 —— */
+  .side{width:216px;flex:none;border-right:1px solid var(--border);background:var(--card);display:flex;flex-direction:column}
+  .side-brand{display:flex;align-items:center;gap:9px;padding:14px 16px;border-bottom:1px solid var(--border)}
+  .brand-mark{width:30px;height:30px;border-radius:9px;background:var(--brand-grad);color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow-primary)}
+  .side-brand b{font-size:14.5px;letter-spacing:-.01em}
+  .nav{flex:1;overflow-y:auto;padding:10px 10px}
+  .nav-group{font-size:10.5px;font-weight:700;color:var(--fg-faint);letter-spacing:.08em;padding:12px 8px 5px}
+  .nav-item{display:flex;align-items:center;gap:8px;padding:6.5px 9px;border-radius:8px;color:var(--fg-mut);font-size:12.5px;cursor:default;margin-bottom:1px}
+  .nav-item:hover{background:var(--muted)}
+  .nav-item.active{background:var(--brand-100);color:var(--brand-700);font-weight:600}
+  .side-user{display:flex;align-items:center;gap:8px;border-top:1px solid var(--border);padding:10px 14px}
+  .side-user .avatar{width:26px;height:26px;border-radius:50%;background:var(--brand-grad);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+
+  /* —— 主区 —— */
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .topbar{height:56px;flex:none;display:flex;align-items:center;gap:14px;border-bottom:1px solid var(--border);padding:0 18px;background:var(--card)}
+  .ws-btn{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--fg-mid);
+          border:1px solid var(--border);border-radius:8px;padding:4px 10px;background:var(--card)}
+  .crumb{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--fg-faint)}
+  .crumb b{color:var(--fg-mid);font-weight:600}
+  .search-box{margin-left:auto;display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;
+              padding:4px 12px;color:var(--fg-faint);font-size:12px;width:210px;background:var(--bg)}
+  .top-ico{position:relative;display:flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:8px;color:var(--fg-mut);cursor:default}
+  .top-ico:hover{background:var(--muted)}
+  .top-ico .dot{position:absolute;top:5px;right:5px;width:6px;height:6px;border-radius:50%;background:var(--error)}
+
+  /* —— 页面内容 —— */
+  .page{flex:1;display:flex;flex-direction:column;gap:12px;padding:16px 18px;background:var(--bg);min-height:0}
+  .page-head{flex:none}
+  .page-head h2{font-size:19px;font-weight:700;letter-spacing:-.02em;display:flex;align-items:center;gap:8px}
+  .page-head .bar{width:4px;height:18px;border-radius:2px;background:var(--brand-grad)}
+  .page-head p{font-size:12px;color:var(--fg-mut);margin-top:3px;margin-left:12px}
+
+  .grid{flex:1;display:grid;grid-template-columns:320px minmax(0,1fr);gap:14px;min-height:0}
+
+  /* ═══════════ 左列：会话列表（升级点 ★） ═══════════ */
+  .list-panel{display:flex;flex-direction:column;min-height:0;border:1px solid var(--border);border-radius:12px;
+              background:var(--card);box-shadow:var(--shadow-sm);overflow:hidden}
+  .list-head{flex:none;display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--border)}
+  .list-head b{font-size:13px}
+  .list-head .count{font-size:10.5px;font-weight:600;color:var(--brand-700);background:var(--brand-100);
+                    border-radius:999px;padding:1px 8px}
+  .list-head .sp{flex:1}
+  .icon-btn{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;
+            border:none;background:transparent;color:var(--fg-mut);cursor:pointer;transition:all .15s}
+  .icon-btn:hover{background:var(--brand-100);color:var(--brand-700)}
+  .icon-btn.brand{background:var(--brand-100);color:var(--brand-700)}
+  .icon-btn.brand:hover{background:var(--brand-600);color:#fff;box-shadow:var(--shadow-primary)}
+
+  .filter-zone{flex:none;padding:9px 12px;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:8px}
+  .search-row{display:flex;gap:7px}
+  .search-inp{flex:1;display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:8px;
+              padding:5px 10px;color:var(--fg-faint);font-size:12px;background:var(--bg)}
+  .search-inp.focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--brand-100);background:var(--card)}
+  .status-sel{display:flex;align-items:center;gap:4px;border:1px solid var(--border);border-radius:8px;padding:5px 9px;
+              font-size:12px;color:var(--fg-mut);background:var(--card);flex:none}
+  .pill-row{display:flex;align-items:center;gap:5px;flex-wrap:nowrap}
+  .pill-row .lbl{font-size:10.5px;color:var(--fg-faint);flex:none}
+  .pill{display:inline-flex;align-items:center;gap:4px;max-width:150px;border:1px solid var(--border);border-radius:999px;
+        padding:2px 10px;font-size:11px;color:var(--fg-mut);cursor:pointer;background:var(--card);transition:all .15s;flex:none}
+  .pill span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pill:hover{border-color:var(--border-strong);color:var(--fg-mid)}
+  .pill.on{border-color:var(--primary);background:var(--brand-50);color:var(--brand-700);font-weight:600}
+
+  .tree{flex:1;overflow-y:auto;padding:8px}
+  /* 组头 ★：emoji → 线性图标；＋/多选 → 图标按钮（hover 浮现） */
+  .group{border:1px solid transparent;border-radius:10px;margin-bottom:6px;overflow:hidden;transition:border-color .15s}
+  .group:hover{border-color:var(--border)}
+  .group.open{border-color:var(--border);background:var(--card)}
+  .g-head{display:flex;align-items:center;gap:7px;padding:7px 9px;cursor:pointer;border-radius:10px}
+  .g-head:hover{background:var(--muted)}
+  .g-head .chev{color:var(--fg-faint);transition:transform .15s;font-size:9px}
+  .group.open .g-head .chev{transform:rotate(90deg)}
+  .g-head .g-name{display:flex;align-items:center;gap:6px;min-width:0;flex:1;font-size:12.5px;font-weight:600;color:var(--fg)}
+  .g-head .g-name svg{color:var(--brand-600)}
+  .g-head .g-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .g-head .g-n{flex:none;font-size:10.5px;color:var(--fg-faint)}
+  .g-acts{display:none;gap:2px;flex:none}
+  .g-head:hover .g-acts,.g-acts.always{display:flex}
+  .g-acts .icon-btn{width:22px;height:22px;border-radius:6px}
+  .g-acts .icon-btn svg{width:12px;height:12px}
+
+  /* 机器小节 */
+  .m-sec{padding:2px 6px 4px}
+  .m-head{display:flex;align-items:center;gap:6px;padding:5px 6px 3px;font-size:10.5px;color:var(--fg-mut)}
+  .m-head .st{width:6px;height:6px;border-radius:50%;flex:none}
+  .m-head .st.on{background:var(--success);box-shadow:0 0 0 3px var(--success-bg)}
+  .m-head .st.off{background:var(--fg-faint)}
+
+  /* 会话行 ★：chips 降噪（彩色 Tag → 1 个引擎 chip + 纯文本 meta）；选中态强化 */
+  .s-row{position:relative;display:flex;flex-direction:column;gap:3px;padding:6px 9px 6px 12px;border-radius:9px;cursor:pointer;transition:background .15s}
+  .s-row::before{content:"";position:absolute;left:3px;top:8px;bottom:8px;width:3px;border-radius:2px;background:transparent;transition:background .15s}
+  .s-row:hover{background:var(--muted)}
+  .s-row.sel{background:var(--brand-100)}
+  .s-row.sel::before{background:var(--brand-600)}
+  .s-row.sel .t{color:var(--brand-700)}
+  .r1{display:flex;align-items:center;gap:6px}
+  .r1 .st{width:6px;height:6px;border-radius:50%;flex:none}
+  .st.pending{background:var(--fg-faint)}
+  .st.active{background:var(--info);box-shadow:0 0 0 3px var(--info-bg)}
+  .st.done{background:var(--success)}
+  .r1 .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12.5px;font-weight:500;color:var(--fg)}
+  .badge-tool{flex:none;display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:600;color:var(--brand-700);
+              border:1px solid var(--brand-300);background:var(--brand-50);border-radius:999px;padding:0 6px;height:15px}
+  .r1 .tm{flex:none;font-size:10px;color:var(--fg-faint)}
+  .r1 .del{display:none;flex:none;border:none;background:transparent;color:var(--fg-faint);cursor:pointer;padding:2px;border-radius:5px}
+  .s-row:hover .r1 .del{display:inline-flex}
+  .r1 .del:hover{background:var(--error-bg);color:var(--error)}
+  .r2{display:flex;align-items:center;gap:6px;padding-left:12px;min-width:0;overflow:hidden;white-space:nowrap}
+  .engine-chip{flex:none;display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:600;border-radius:5px;padding:0 5px;height:16px}
+  .engine-chip.claude{color:var(--warn);background:var(--warn-bg)}
+  .engine-chip.codex{color:#7c3aed;background:var(--brand-100)}
+  .engine-chip.zcode{color:var(--info);background:var(--info-bg)}
+  .r2 .meta{font-size:10px;color:var(--fg-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .r2 .meta i{font-style:normal;margin-right:6px}
+  .r2 .meta i:last-child{margin-right:0}
+
+  .more-btn{display:block;width:100%;text-align:center;border:none;background:transparent;color:var(--brand-700);
+            font-size:11px;padding:5px;cursor:pointer;border-radius:8px}
+  .more-btn:hover{background:var(--brand-50)}
+
+  /* ═══════════ 右列：会话面板 ═══════════ */
+  .chat-panel{display:flex;flex-direction:column;min-height:0;border:1px solid var(--border);border-radius:12px;
+              background:var(--card);box-shadow:var(--shadow-sm);overflow:hidden}
+  /* 面板头 ★：分组层次（左标题组 / 右操作组），上下文 chips 统一细边框样式 */
+  .p-head{flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--border);padding:9px 14px}
+  .p-head .lft{display:flex;align-items:center;gap:8px;min-width:0}
+  .p-head .ttl{font-size:13.5px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px}
+  .sid{flex:none;font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--fg-faint);cursor:pointer;
+       border-radius:5px;padding:1px 5px}
+  .sid:hover{background:var(--muted);color:var(--fg-mid)}
+  .st-badge{flex:none;display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;border-radius:999px;padding:1.5px 9px}
+  .st-badge.warn{color:var(--warn);background:var(--warn-bg)}
+  .st-badge.info{color:var(--info);background:var(--info-bg)}
+  .ctx-chip{flex:none;display:inline-flex;align-items:center;gap:4px;font-size:10.5px;color:var(--fg-mut);
+            border:1px solid var(--border);border-radius:999px;padding:1.5px 8px;background:var(--bg)}
+  .p-head .rgt{display:flex;align-items:center;gap:9px;flex:none}
+  .seg{display:inline-flex;border-radius:999px;background:var(--muted);padding:2px}
+  .seg button{border:none;background:transparent;font-size:11px;color:var(--fg-mut);border-radius:999px;padding:3px 12px;cursor:pointer}
+  .seg button.on{background:var(--card);color:var(--fg);font-weight:600;box-shadow:var(--shadow-sm)}
+  .btn{display:inline-flex;align-items:center;gap:5px;border-radius:8px;padding:4.5px 12px;font-size:12px;cursor:pointer;transition:all .15s}
+  .btn-ghost{border:1px solid var(--border);background:var(--card);color:var(--fg-mid)}
+  .btn-ghost:hover{border-color:var(--primary);color:var(--brand-700)}
+  .btn-primary{border:none;background:var(--primary);color:#fff;font-weight:600}
+  .btn-primary:hover{background:var(--primary-hover);box-shadow:var(--shadow-primary)}
+
+  /* 配置条 ★：四类配置统一 chip-button 组 */
+  .cfg-bar{flex:none;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--border);padding:7px 14px;background:var(--bg)}
+  .cfg{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border);border-radius:999px;background:var(--card);
+       font-size:11px;color:var(--fg-mid);padding:2.5px 10px;cursor:pointer;transition:all .15s}
+  .cfg:hover{border-color:var(--primary);color:var(--brand-700)}
+  .cfg b{font-weight:600;color:var(--fg)}
+  .cfg svg{color:var(--brand-600)}
+
+  /* 对话流 ★：AI 原生细节——渐变用户气泡 / typing 三点 / 思考折叠 / 工具卡 */
+  .stream{flex:1;overflow-y:auto;padding:16px 18px;display:flex;flex-direction:column;gap:14px}
+  .day-chip{align-self:center;font-size:10.5px;color:var(--fg-faint);border:1px solid var(--border);border-radius:999px;padding:2px 12px;background:var(--bg)}
+  .msg-u{display:flex;justify-content:flex-end;gap:8px}
+  .u-bub{max-width:78%;background:var(--brand-600);color:#fff;border-radius:14px;border-top-right-radius:4px;
+         padding:8px 13px;font-size:12.5px;line-height:1.6;box-shadow:var(--shadow-primary);white-space:pre-wrap}
+  .msg-a{display:flex;gap:9px;align-items:flex-start}
+  .a-ava{width:28px;height:28px;border-radius:50%;background:var(--brand-grad);color:#fff;display:flex;align-items:center;justify-content:center;flex:none;box-shadow:var(--shadow-sm)}
+  .a-body{min-width:0;max-width:86%;display:flex;flex-direction:column;gap:7px}
+  .a-card{background:var(--card);border:1px solid var(--border);border-radius:14px;border-top-left-radius:4px;
+          padding:9px 13px;font-size:12.5px;line-height:1.65;box-shadow:var(--shadow-sm)}
+  .a-card code{font-family:ui-monospace,Consolas,monospace;background:var(--bg);padding:1px 5px;border-radius:4px;font-size:11px}
+  .think{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--fg-faint);cursor:pointer;
+         border-left:2px solid var(--border);padding-left:9px}
+  .think:hover{color:var(--fg-mut)}
+  .tool{border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--card)}
+  .tool-h{display:flex;align-items:center;gap:7px;padding:6px 11px;cursor:pointer;font-size:11.5px;color:var(--fg-mid);background:var(--bg)}
+  .tool-h .nm{font-family:ui-monospace,Consolas,monospace;font-weight:600;color:var(--accent)}
+  .tool-h .rs{margin-left:auto;font-size:10px;font-weight:600;color:var(--success)}
+  .typing{display:inline-flex;gap:4px;align-items:center;padding:4px 2px}
+  .typing i{width:5px;height:5px;border-radius:50%;background:var(--brand-600);animation:tp 1.2s infinite}
+  .typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+  @keyframes tp{0%,60%,100%{opacity:.25;transform:translateY(0)}30%{opacity:1;transform:translateY(-2px)}}
+  .caret{display:inline-block;width:2px;height:13px;background:var(--brand-600);margin-left:2px;vertical-align:-2px;animation:blink .9s step-end infinite}
+  @keyframes blink{50%{opacity:0}}
+
+  /* 输入区 ★：胶囊输入 + 渐变圆形发送 */
+  .input-zone{flex:none;border-top:1px solid var(--border);padding:11px 14px;background:var(--card)}
+  .ctx-line{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--fg-faint);margin-bottom:7px}
+  .input-row{display:flex;align-items:flex-end;gap:9px;border:1.5px solid var(--border);border-radius:14px;background:var(--bg);
+             padding:9px 8px 9px 14px;transition:all .15s}
+  .input-row.focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--brand-100);background:var(--card)}
+  .input-row .ph{flex:1;font-size:12.5px;color:var(--fg-faint)}
+  .plus-btn{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;color:var(--fg-faint);cursor:pointer}
+  .plus-btn:hover{background:var(--muted);color:var(--fg-mid)}
+  .send-btn{width:34px;height:34px;border-radius:50%;border:none;background:var(--brand-grad);color:#fff;display:flex;
+            align-items:center;justify-content:center;cursor:pointer;flex:none;box-shadow:var(--shadow-primary);transition:transform .15s}
+  .send-btn:hover{transform:scale(1.06)}
+  .input-tip{font-size:10px;color:var(--fg-faint);margin-top:6px;text-align:center}
+
+  /* ═══════════ 空门户态 ═══════════ */
+  .empty-portal{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-height:420px;
+                border:1px dashed var(--border-strong);border-radius:12px;background:var(--card);padding:40px 24px;text-align:center}
+  .empty-ico{width:56px;height:56px;border-radius:16px;background:var(--brand-grad);color:#fff;display:flex;align-items:center;
+             justify-content:center;box-shadow:var(--shadow-primary);margin-bottom:10px}
+  .empty-portal h3{font-size:15px;font-weight:700}
+  .empty-portal p{font-size:12px;color:var(--fg-mut);max-width:360px;line-height:1.7}
+  .quick-acts{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;justify-content:center}
+  .qa-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:999px;background:var(--card);
+           font-size:12px;color:var(--fg-mid);padding:6px 16px;cursor:pointer;transition:all .15s}
+  .qa-chip svg{color:var(--brand-600)}
+  .qa-chip:hover{border-color:var(--primary);color:var(--brand-700);box-shadow:var(--shadow-sm)}
+
+  /* ═══════════ 改进对照表 ═══════════ */
+  .cmp-table{max-width:1500px;margin:0 24px 40px;border-collapse:collapse;width:calc(100% - 48px);background:var(--card);
+             border-radius:12px;overflow:hidden;box-shadow:var(--shadow-sm);font-size:12.5px}
+  .cmp-table th{background:var(--muted);text-align:left;padding:9px 14px;font-size:11.5px;color:var(--fg-mid);font-weight:700}
+  .cmp-table td{border-top:1px solid var(--border);padding:9px 14px;vertical-align:top;color:var(--fg-mid)}
+  .cmp-table td:first-child{font-weight:600;color:var(--fg);white-space:nowrap}
+  .cmp-table .old{color:var(--fg-faint)}
+  .cmp-table .new{color:var(--brand-700)}
+  .tag-note{display:inline-block;font-size:9.5px;font-weight:700;border-radius:4px;padding:0 5px;margin-right:6px}
+  .tag-note.k{background:var(--brand-100);color:var(--brand-700)}
+  .tag-note.s{background:var(--info-bg);color:var(--info)}
+
+  /* ═══════════ 弹窗与浮层（新建会话浮层 / 删除确认 / 子代理目录） ═══════════ */
+  .dlg-zone{max-width:1500px;margin:0 24px;display:flex;gap:16px;flex-wrap:wrap}
+  .dlg-stage{flex:1;min-width:330px;border:1px dashed var(--border-strong);border-radius:14px;
+             background:var(--bg);padding:14px;display:flex;flex-direction:column;gap:10px}
+  .dlg-stage .stage-tag{font-size:10.5px;font-weight:600;color:var(--fg-faint);display:flex;align-items:center;gap:5px}
+  .dlg-stage .stage-tag b{color:var(--fg-mid)}
+  /* 弹窗本体 ★：圆角 14 + shadow-md 层次 + 渐变图标头（现状：antd 默认白盒直角感） */
+  .dlg{background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-md);
+       padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+  .dlg-head{display:flex;align-items:center;gap:9px}
+  .dlg-ico{width:30px;height:30px;border-radius:9px;background:var(--brand-grad);color:#fff;display:flex;
+           align-items:center;justify-content:center;flex:none;box-shadow:var(--shadow-primary)}
+  .dlg-ico.danger{background:linear-gradient(135deg,#dc2626,#f59e0b);box-shadow:0 4px 14px rgba(220,38,38,.3)}
+  .dlg-head b{font-size:13.5px;flex:1}
+  .dlg-close{border:none;background:transparent;color:var(--fg-faint);cursor:pointer;border-radius:6px;padding:2px 6px;font-size:12px}
+  .dlg-close:hover{background:var(--muted);color:var(--fg-mid)}
+  /* 两步进度指示 ★（现状：纯文字 ① ②） */
+  .steps{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--fg-faint)}
+  .steps .stp{display:inline-flex;align-items:center;gap:4px}
+  .steps .stp i{font-style:normal;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;
+                border-radius:50%;border:1px solid var(--border-strong);font-size:9.5px}
+  .steps .stp.on{color:var(--brand-700);font-weight:600}
+  .steps .stp.on i{background:var(--brand-grad);border-color:transparent;color:#fff}
+  .steps .sep{flex:none;width:14px;height:1px;background:var(--border-strong)}
+  /* 机器卡 / 智能体卡 ★：hover 品牌边 + 选中品牌底（现状：灰边白卡无明显反馈） */
+  .pick-card{display:flex;flex-direction:column;gap:4px;border:1px solid var(--border);border-radius:10px;
+             background:var(--card);padding:8px 12px;cursor:pointer;transition:all .15s;text-align:left}
+  .pick-card:hover{border-color:var(--brand-300);box-shadow:var(--shadow-sm)}
+  .pick-card.sel{border-color:var(--primary);background:var(--brand-50);box-shadow:0 0 0 3px var(--brand-100)}
+  .pick-card .pc-r1{display:flex;align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--fg)}
+  .pick-card .pc-r1 .st{width:7px;height:7px;border-radius:50%;background:var(--success);box-shadow:0 0 0 3px var(--success-bg);flex:none}
+  .pick-card .pc-r1 .sub{font-size:10.5px;font-weight:400;color:var(--fg-faint)}
+  .pick-card .pc-r2{display:flex;align-items:center;justify-content:space-between;font-size:10.5px;color:var(--fg-faint)}
+  .pick-row{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:10px;background:var(--card);
+            padding:7px 12px;cursor:pointer;font-size:12.5px;color:var(--fg);transition:all .15s}
+  .pick-row:hover{border-color:var(--brand-300)}
+  .pick-row.sel{border-color:var(--primary);background:var(--brand-50);box-shadow:0 0 0 3px var(--brand-100);font-weight:600}
+  .pick-row .e-ava{width:22px;height:22px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;flex:none;font-size:10px;font-weight:700}
+  .pick-row .e-ava.c{color:var(--warn);background:var(--warn-bg)}
+  .pick-row .e-ava.x{color:var(--brand-700);background:var(--brand-100)}
+  .def-tag{margin-left:auto;font-size:9.5px;font-weight:700;color:var(--brand-700);background:var(--brand-100);
+           border-radius:4px;padding:1px 6px;flex:none}
+  .dlg-acts{display:flex;justify-content:flex-end;gap:8px;margin-top:2px}
+  .btn-danger{border:none;background:var(--error);color:#fff;font-weight:600}
+  .btn-danger:hover{background:#b91c1c;box-shadow:0 4px 14px rgba(220,38,38,.3)}
+  .dlg-desc{font-size:12px;color:var(--fg-mut);line-height:1.7}
+  .dlg-desc code{font-family:ui-monospace,Consolas,monospace;background:var(--bg);padding:1px 5px;border-radius:4px;font-size:11px;color:var(--fg-mid)}
+  /* 子代理目录 popover ★ */
+  .pop{align-self:flex-start;background:var(--card);border:1px solid var(--border);border-radius:12px;
+       box-shadow:var(--shadow-md);width:280px;overflow:hidden}
+  .pop-h{display:flex;align-items:center;gap:6px;padding:8px 12px;border-bottom:1px solid var(--border);
+         font-size:11.5px;font-weight:700;color:var(--fg-mid);background:var(--bg)}
+  .pop-h .count{font-size:10px;font-weight:600;color:var(--brand-700);background:var(--brand-100);border-radius:999px;padding:0 7px}
+  .pop-row{display:flex;align-items:center;gap:8px;padding:7px 12px;font-size:12px;color:var(--fg);cursor:pointer}
+  .pop-row:hover{background:var(--brand-50)}
+  .pop-row .st{width:6px;height:6px;border-radius:50%;flex:none}
+  .pop-row .dur{margin-left:auto;font-size:10.5px;color:var(--fg-faint);font-family:ui-monospace,Consolas,monospace}
+
+  /* ═══════════ 派团队弹层（TeamTriggerPopover · violet 固定身份阶 + brand 语义阶） ═══════════ */
+  .team-stage{flex:1 1 100%;border:1px dashed var(--border-strong);border-radius:14px;background:var(--bg);
+              padding:14px;display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+  .team-stage .stage-tag{font-size:10.5px;font-weight:600;color:var(--fg-faint);display:flex;align-items:center;gap:5px;flex:1 1 100%}
+  .team-stage .stage-tag b{color:var(--fg-mid)}
+  .team-ctx{flex:1;min-width:240px;display:flex;flex-direction:column;gap:10px;padding-top:4px}
+  .team-pop{width:400px;flex:none;background:var(--card);border:1px solid #ddd6fe;border-radius:12px;
+            box-shadow:var(--shadow-md);padding:13px 14px;display:flex;flex-direction:column;gap:9px;font-size:12px}
+  .tp-title{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:#6d28d9}
+  .tp-sub{font-size:11px;color:var(--fg-mut);line-height:1.6;margin-top:-4px}
+  .tp-lb{font-size:10.5px;font-weight:600;color:var(--fg-mut)}
+  .tp-inp{border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:12px;color:var(--fg-faint);background:var(--bg)}
+  .tp-inp.focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--brand-100);background:var(--card);color:var(--fg-mid)}
+  .tp-opt{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:9px;
+          padding:6.5px 10px;font-size:12px;color:var(--fg-mid);cursor:pointer;transition:all .15s}
+  .tp-opt:hover{background:var(--muted)}
+  .tp-opt.sel{border-color:var(--brand-300);background:var(--brand-50)}
+  .tp-opt b{color:var(--fg)}
+  .tp-opt .hint{font-size:10.5px;color:var(--fg-faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .radio{width:13px;height:13px;border-radius:50%;border:1.5px solid var(--border-strong);flex:none;background:var(--card)}
+  .tp-opt.sel .radio{border:4px solid var(--primary)}
+  .mini-tag{flex:none;font-size:9.5px;font-weight:700;border-radius:4px;padding:1px 6px}
+  .mini-tag.cyan{color:#0e7490;background:#ecfeff}
+  .mini-tag.sky{color:#0369a1;background:#f0f9ff}
+  .mini-tag.teal{color:#0f766e;background:#f0fdfa;border:1px solid #99f6e4;border-radius:999px;padding:1px 8px}
+  .mini-tag.violet{color:#6d28d9;background:#ede9fe}
+  .tp-sub-box{border:1px solid var(--border);border-radius:9px;background:var(--bg);padding:8px;display:flex;flex-direction:column;gap:6px}
+  .ws-check{display:flex;align-items:center;gap:7px;border:1px solid var(--border);border-radius:8px;
+            background:var(--card);padding:4.5px 9px;font-size:11.5px;color:var(--fg-mid);cursor:pointer}
+  .ws-check.on{border-color:var(--brand-300);background:var(--brand-50)}
+  .checkbox{width:13px;height:13px;border-radius:4px;border:1.5px solid var(--border-strong);flex:none;
+            display:inline-flex;align-items:center;justify-content:center;font-size:9px;color:transparent;background:var(--card)}
+  .ws-check.on .checkbox{background:var(--primary);border-color:var(--primary);color:#fff}
+  .anchor-line{display:flex;align-items:center;gap:5px;flex-wrap:wrap;font-size:10.5px;color:var(--fg-faint)}
+  .preset{border:1px solid #ddd6fe;border-radius:9px;background:rgba(245,243,255,.45);padding:8px 9px;display:flex;flex-direction:column;gap:7px}
+  .preset-head{display:flex;align-items:center;justify-content:space-between;font-size:11.5px;font-weight:600;color:#6d28d9;cursor:pointer}
+  .preset-head .chev{font-size:9px}
+  .worker-card{border:1px solid var(--border);border-radius:8px;background:var(--card);padding:7px;display:flex;flex-direction:column;gap:5px}
+  .worker-card .wc-head{display:flex;align-items:center;justify-content:space-between;font-size:10.5px;font-weight:600;color:var(--fg-mut)}
+  .wc-del{border:1px solid var(--border);background:transparent;color:var(--error);border-radius:5px;font-size:10px;padding:0 7px;cursor:pointer}
+  .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+  .fld{display:flex;flex-direction:column;gap:3px;font-size:9.5px;color:var(--fg-faint)}
+  .fld .v{display:flex;align-items:center;justify-content:space-between;gap:4px;border:1px solid var(--border);
+          border-radius:6px;background:var(--card);padding:3px 7px;font-size:11px;color:var(--fg-mid)}
+  .fld .v svg{color:var(--fg-faint)}
+  .tp-foot{display:flex;align-items:center;gap:8px;margin-top:2px}
+  .tp-foot .hint{margin-left:auto;font-size:10px;color:var(--fg-faint)}
+  .add-worker{align-self:flex-end;border:1px solid #c4b5fd;background:var(--card);color:#6d28d9;border-radius:6px;
+              font-size:10.5px;font-weight:600;padding:2px 9px;cursor:pointer}
+  .add-worker:hover{background:#ede9fe}
+  /* 输入区「派团队」入口按钮（session-panel 挂载点） */
+  .team-btn{display:inline-flex;align-items:center;gap:5px;border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;
+            border-radius:999px;padding:3px 12px;font-size:11px;font-weight:600;cursor:pointer;transition:all .15s;flex:none}
+  .team-btn:hover{background:#ede9fe;box-shadow:0 2px 8px rgba(124,58,237,.18)}
+  .team-live{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:#6d28d9;
+             background:#ede9fe;border-radius:999px;padding:2px 10px;cursor:pointer}
+  .team-note{font-size:11px;color:var(--fg-mut);line-height:1.7;border-left:2px solid var(--border);padding-left:10px}
+  .team-note b{color:var(--fg-mid)}
+
+  /* ═══════════ 多主题适配矩阵（双主题同屏对照） ═══════════ */
+  .theme-grid{max-width:1500px;margin:0 24px;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .theme-cell{border:1px solid var(--border);border-radius:14px;background:var(--bg);padding:14px;
+              display:flex;flex-direction:column;gap:12px}
+  .theme-cell .tc-tag{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--fg-mid)}
+  .theme-cell .tc-tag i{font-style:normal;width:10px;height:10px;border-radius:3px;background:var(--brand-grad)}
+  .tc-block{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:10px;display:flex;flex-direction:column;gap:8px}
+  .tc-block .tc-lbl{font-size:10px;color:var(--fg-faint)}
+  .tc-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+
+  /* 两视图切换 */
+  .view-tabs{display:flex;gap:6px;margin-left:auto}
+  .view-tabs button{border:1px solid var(--border);background:var(--card);border-radius:999px;padding:3px 12px;font-size:11.5px;color:var(--fg-mut);cursor:pointer}
+  .view-tabs button.on{border-color:var(--primary);color:var(--brand-700);background:var(--brand-50);font-weight:600}
+  .hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<div class="toggle">
+  <button id="t-blue" onclick="setTheme('blue')">明亮蓝</button>
+  <button id="t-ai" class="on" onclick="setTheme('ai-native')">AI 紫（默认）</button>
+</div>
+
+<div class="proto-head">
+  <h1>/sessions 智能体会话 · 整体风格升级原型</h1>
+  <p class="hint">
+    对齐 <b>AI-Native 双主题设计系统</b>（2026-08-20 总纲）的页面级落地稿。
+    <b>交互结构零变更</b>——组头「＋」新建、两层筛选 tab、批量删除、深链等既有契约保持原样，只升级视觉：
+    左列降噪、选中态强化、右侧 AI 原生细节（typing / 流式光标 / 渐变气泡）、空门户引导态。
+    右上可切换双主题核对；改进明细见页面底部对照表。<br>
+    <b>数据为真</b>：左列会话清单与右列对话流取自 2026-08-23 本机真实 zcode 运行日志
+    （<code>~/.zcode/cli/log/zcode-2026-08-23.jsonl</code>，47 个会话、模型 GLM-5.3）
+    与 daemon 解析器对 <code>rollout/model-io-sess_10ed55fc</code> 的实测解析输出（80 段、零坏行）。
+  </p>
+</div>
+
+<div class="sec-label">
+  <span class="n">A</span> 全页效果（选中会话态）
+  <div class="view-tabs">
+    <button class="on" onclick="switchView('chat',this)">选中会话</button>
+    <button onclick="switchView('empty',this)">空门户态</button>
+  </div>
+</div>
+
+<div class="app-shell" id="view-chat">
+  <!-- 侧边栏 -->
+  <aside class="side">
+    <div class="side-brand">
+      <span class="brand-mark"><svg class="ic"><use href="#i-bot"/></svg></span>
+      <b>SillyHub</b>
+    </div>
+    <nav class="nav">
+      <div class="nav-group">工作区</div>
+      <div class="nav-item"><svg class="ic ic-sm"><use href="#i-home"/></svg>工作区首页</div>
+      <div class="nav-item"><svg class="ic ic-sm"><use href="#i-box"/></svg>项目组组件</div>
+      <div class="nav-item"><svg class="ic ic-sm"><use href="#i-topo"/></svg>拓扑图</div>
+      <div class="nav-item"><svg class="ic ic-sm"><use href="#i-git"/></svg>变更中心</div>
+      <div class="nav-item"><svg class="ic ic-sm"><use href="#i-scan"/></svg>扫描文档</div>
+      <div class="nav-item"><svg class="ic ic-sm"><use href="#i-runtime"/></svg>运行时</div>
+      <div class="nav-group">智能体</div>
+      <div class="nav-item"><svg class="ic ic-sm"><use href="#i-zap"/></svg>技能管理</div>
+      <div class="nav-item"><svg class="ic ic-sm"><use href="#i-mcp"/></svg>MCP 管理</div>
+      <div class="nav-item"><svg class="ic ic-sm"><use href="#i-user"/></svg>智能体档案</div>
+      <div class="nav-item active"><svg class="ic ic-sm"><use href="#i-chat"/></svg>智能体会话</div>
+      <div class="nav-group">配置中心</div>
+      <div class="nav-item"><svg class="ic ic-sm"><use href="#i-cloud"/></svg>我的供应商</div>
+      <div class="nav-item"><svg class="ic ic-sm"><use href="#i-key"/></svg>API 密钥</div>
+      <div class="nav-group">协作治理</div>
+      <div class="nav-item"><svg class="ic ic-sm"><use href="#i-audit"/></svg>审计中心</div>
+    </nav>
+    <div class="side-user">
+      <span class="avatar">系</span>
+      <div style="min-width:0"><div style="font-size:12px;font-weight:600">系统管理员</div><div style="font-size:10px;color:var(--fg-faint)">admin</div></div>
+      <span class="top-ico" style="margin-left:auto"><svg class="ic ic-sm"><use href="#i-out"/></svg></span>
+    </div>
+  </aside>
+
+  <!-- 主区 -->
+  <div class="main">
+    <div class="topbar">
+      <span class="ws-btn"><svg class="ic ic-sm"><use href="#i-box"/></svg>SillyHub<svg class="ic ic-sm"><use href="#i-chev-d"/></svg></span>
+      <span class="crumb">智能体 <svg class="ic ic-sm"><use href="#i-chev-r"/></svg> <b>智能体会话</b></span>
+      <span class="search-box"><svg class="ic ic-sm"><use href="#i-search"/></svg>搜索会话、智能体…</span>
+      <span class="top-ico"><svg class="ic"><use href="#i-palette"/></svg></span>
+      <span class="top-ico"><svg class="ic"><use href="#i-bell"/></svg><i class="dot"></i></span>
+    </div>
+
+    <div class="page">
+      <div class="page-head">
+        <h2><span class="bar"></span>智能体会话</h2>
+        <p>跨机器、跨智能体的统一会话入口：左侧选择会话，右侧继续对话或新建</p>
+      </div>
+
+      <div class="grid">
+        <!-- ═══ 左列：会话列表 ═══ -->
+        <section class="list-panel" aria-label="会话列表">
+          <div class="list-head">
+            <b>会话</b><span class="count">47</span>
+            <span class="sp"></span>
+            <button class="icon-btn" title="多选管理"><svg class="ic ic-sm"><use href="#i-check-sq"/></svg></button>
+          </div>
+
+          <div class="filter-zone">
+            <div class="search-row">
+              <span class="search-inp focus"><svg class="ic ic-sm"><use href="#i-search"/></svg>搜索会话标题…</span>
+              <span class="status-sel">全部状态 <svg class="ic ic-sm"><use href="#i-chev-d"/></svg></span>
+            </div>
+            <div class="pill-row">
+              <span class="lbl">机器</span>
+              <span class="pill on"><svg class="ic ic-sm"><use href="#i-layers"/></svg><span>全部</span></span>
+              <span class="pill" title="qinyideMac-mini-3.local"><svg class="ic ic-sm"><use href="#i-machine"/></svg><span>qinyideMac-m…</span></span>
+            </div>
+          </div>
+
+          <div class="tree">
+            <!-- SillyHub 工作区组（真实：今日 5 个主会话，均 zcode / GLM-5.3） -->
+            <div class="group open">
+              <div class="g-head">
+                <span class="chev">▶</span>
+                <span class="g-name"><svg class="ic ic-sm"><use href="#i-folder"/></svg><span>SillyHub</span></span>
+                <span class="g-n">5</span>
+                <span class="g-acts">
+                  <button class="icon-btn brand" title="在 SillyHub 新建会话"><svg class="ic ic-sm"><use href="#i-plus"/></svg></button>
+                  <button class="icon-btn" title="多选"><svg class="ic ic-sm"><use href="#i-check-sq"/></svg></button>
+                </span>
+              </div>
+              <div class="m-sec">
+                <div class="m-head"><span class="st on"></span>qinyideMac-mini-3.local</div>
+                <div class="s-row sel">
+                  <div class="r1">
+                    <span class="st active"></span>
+                    <span class="t">你重新帮我再设计优化下</span>
+                    <span class="tm">1 分钟前</span>
+                    <button class="del" title="删除"><svg class="ic ic-sm"><use href="#i-trash"/></svg></button>
+                  </div>
+                  <div class="r2">
+                    <span class="engine-chip zcode">zcode</span>
+                    <span class="meta"><i>👤 系统管理员</i><i>☁ 智谱 GLM</i><i>7 轮</i></span>
+                  </div>
+                </div>
+                <div class="s-row">
+                  <div class="r1">
+                    <span class="st active"></span>
+                    <span class="t">zcode · 2026-08-23-agent-log-conversation-view</span>
+                    <span class="tm">7 分钟前</span>
+                    <button class="del" title="删除"><svg class="ic ic-sm"><use href="#i-trash"/></svg></button>
+                  </div>
+                  <div class="r2"><span class="engine-chip zcode">zcode</span><span class="meta"><i>👤 系统管理员</i><i>☁ 智谱 GLM</i><i>6 轮</i></span></div>
+                </div>
+                <div class="s-row">
+                  <div class="r1">
+                    <span class="st active"></span>
+                    <span class="t">zcode · 2026-08-23-sessions-page-style</span>
+                    <span class="tm">9 分钟前</span>
+                    <button class="del" title="删除"><svg class="ic ic-sm"><use href="#i-trash"/></svg></button>
+                  </div>
+                  <div class="r2"><span class="engine-chip zcode">zcode</span><span class="meta"><i>👤 系统管理员</i><i>☁ 智谱 GLM</i><i>7 轮</i></span></div>
+                </div>
+                <div class="s-row">
+                  <div class="r1">
+                    <span class="st done"></span>
+                    <span class="t">zcode · 本地活动</span>
+                    <span class="tm">14 分钟前</span>
+                    <button class="del" title="删除"><svg class="ic ic-sm"><use href="#i-trash"/></svg></button>
+                  </div>
+                  <div class="r2"><span class="engine-chip zcode">zcode</span><span class="meta"><i>👤 系统管理员</i><i>☁ 智谱 GLM</i><i>4 轮</i></span></div>
+                </div>
+                <div class="s-row">
+                  <div class="r1">
+                    <span class="st done"></span>
+                    <span class="t">zcode · 本地活动</span>
+                    <span class="tm">22 分钟前</span>
+                    <button class="del" title="删除"><svg class="ic ic-sm"><use href="#i-trash"/></svg></button>
+                  </div>
+                  <div class="r2"><span class="engine-chip zcode">zcode</span><span class="meta"><i>👤 系统管理员</i><i>☁ 智谱 GLM</i><i>5 轮</i></span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- sillyspec 工作区组（真实：/Users/qinyi/Desktop/sillyspec，4 个主会话） -->
+            <div class="group open">
+              <div class="g-head">
+                <span class="chev">▶</span>
+                <span class="g-name"><svg class="ic ic-sm"><use href="#i-folder"/></svg><span>sillyspec</span></span>
+                <span class="g-n">4</span>
+                <span class="g-acts">
+                  <button class="icon-btn brand" title="新建会话"><svg class="ic ic-sm"><use href="#i-plus"/></svg></button>
+                  <button class="icon-btn" title="多选"><svg class="ic ic-sm"><use href="#i-check-sq"/></svg></button>
+                </span>
+              </div>
+              <div class="m-sec">
+                <div class="m-head"><span class="st on"></span>qinyideMac-mini-3.local</div>
+                <div class="s-row">
+                  <div class="r1">
+                    <span class="st active"></span>
+                    <span class="t">zcode · repo-native-spec-backfill 归档</span>
+                    <span class="tm">7 分钟前</span>
+                    <button class="del" title="删除"><svg class="ic ic-sm"><use href="#i-trash"/></svg></button>
+                  </div>
+                  <div class="r2"><span class="engine-chip zcode">zcode</span><span class="meta"><i>👤 系统管理员</i><i>☁ 智谱 GLM</i><i>6 轮</i></span></div>
+                </div>
+                <div class="s-row">
+                  <div class="r1">
+                    <span class="st done"></span>
+                    <span class="t">zcode · 本地活动</span>
+                    <span class="tm">3 小时前</span>
+                    <button class="del" title="删除"><svg class="ic ic-sm"><use href="#i-trash"/></svg></button>
+                  </div>
+                  <div class="r2"><span class="engine-chip zcode">zcode</span><span class="meta"><i>👤 系统管理员</i><i>☁ 智谱 GLM</i><i>1 轮</i></span></div>
+                </div>
+                <div class="s-row">
+                  <div class="r1">
+                    <span class="st done"></span>
+                    <span class="t">zcode · 本地活动</span>
+                    <span class="tm">3 小时前</span>
+                    <button class="del" title="删除"><svg class="ic ic-sm"><use href="#i-trash"/></svg></button>
+                  </div>
+                  <div class="r2"><span class="engine-chip zcode">zcode</span><span class="meta"><i>👤 系统管理员</i><i>☁ 智谱 GLM</i><i>1 轮</i></span></div>
+                </div>
+                <div class="s-row">
+                  <div class="r1">
+                    <span class="st done"></span>
+                    <span class="t">zcode · 本地活动</span>
+                    <span class="tm">4 小时前</span>
+                    <button class="del" title="删除"><svg class="ic ic-sm"><use href="#i-trash"/></svg></button>
+                  </div>
+                  <div class="r2"><span class="engine-chip zcode">zcode</span><span class="meta"><i>👤 系统管理员</i><i>☁ 智谱 GLM</i><i>1 轮</i></span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 子代理会话组（真实：今日 38 个子代理会话，默认收起） -->
+            <div class="group">
+              <div class="g-head">
+                <span class="chev">▶</span>
+                <span class="g-name"><svg class="ic ic-sm"><use href="#i-bot"/></svg><span>子代理会话</span></span>
+                <span class="g-n">38</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ═══ 右列：会话面板 ═══ -->
+        <section class="chat-panel" aria-label="会话面板">
+          <header class="p-head">
+            <div class="lft">
+              <span class="ttl">你重新帮我再设计优化下</span>
+              <span class="sid" title="点击复制会话 ID">#10ed55fc</span>
+              <span class="st-badge info">● 运行中</span>
+              <span class="ctx-chip"><svg class="ic ic-sm"><use href="#i-machine"/></svg>qinyideMac-mini-3.local</span>
+              <span class="ctx-chip"><svg class="ic ic-sm"><use href="#i-folder"/></svg>SillyHub</span>
+            </div>
+            <div class="rgt">
+              <span class="seg"><button class="on">对话</button><button>进度</button></span>
+              <button class="btn btn-ghost"><svg class="ic ic-sm"><use href="#i-ban"/></svg>打断本轮</button>
+            </div>
+          </header>
+
+          <div class="cfg-bar">
+            <span class="cfg"><svg class="ic ic-sm"><use href="#i-machine"/></svg>机器 <b>qinyideMac-m…</b> <svg class="ic ic-sm" style="color:var(--fg-faint)"><use href="#i-chev-d"/></svg></span>
+            <span class="cfg"><svg class="ic ic-sm"><use href="#i-bot"/></svg>智能体 <b>zcode</b> <svg class="ic ic-sm" style="color:var(--fg-faint)"><use href="#i-chev-d"/></svg></span>
+            <span class="cfg"><svg class="ic ic-sm"><use href="#i-cloud"/></svg>供应商 <b>智谱 GLM · GLM-5.3</b> <svg class="ic ic-sm" style="color:var(--fg-faint)"><use href="#i-chev-d"/></svg></span>
+            <span class="cfg"><svg class="ic ic-sm"><use href="#i-user"/></svg>档案 <b>未指定</b> <svg class="ic ic-sm" style="color:var(--fg-faint)"><use href="#i-chev-d"/></svg></span>
+          </div>
+
+          <div class="stream">
+            <span class="day-chip">今天 · 会话 #10ed55fc · 日志回显 80 段</span>
+
+            <div class="msg-u"><div class="u-bub">你重新帮我再设计优化下</div></div>
+
+            <div class="msg-a">
+              <span class="a-ava"><svg class="ic"><use href="#i-bot"/></svg></span>
+              <div class="a-body">
+                <div class="think"><svg class="ic ic-sm"><use href="#i-brain"/></svg>思考过程：理解「再设计优化」的意图——更大胆、更有设计感，而非保守对齐现有结构…（点击展开）</div>
+                <div class="tool">
+                  <div class="tool-h">🔧 <span class="nm">Read</span> prototype-frontend-ai-native-style.html:15-134 <span class="rs">✓ 120 行</span></div>
+                </div>
+                <div class="tool">
+                  <div class="tool-h">🔧 <span class="nm">Read</span> prototype-frontend-ai-native-style.html:250-309（会话章节） <span class="rs">✓ 60 行</span></div>
+                </div>
+                <div class="a-card">
+                  用户觉得第一版不够满意，我重新做一版更大胆、更有 AI 原生质感的。先快速看下 AI-Native 总纲原型里还没用足的设计资产（渐变、光晕、动效），然后出 v2。
+                </div>
+              </div>
+            </div>
+
+            <div class="msg-u"><div class="u-bub">怎么那么慢啊</div></div>
+            <div class="msg-u"><div class="u-bub">怎么还不写啊？</div></div>
+            <div class="msg-u"><div class="u-bub">继续，可以探索呀</div></div>
+
+            <div class="msg-a">
+              <span class="a-ava"><svg class="ic"><use href="#i-bot"/></svg></span>
+              <div class="a-body">
+                <div class="a-card">
+                  正在重写原型 v2：玻璃拟态背景 + 卡片化分组 + 流式动效<span class="caret"></span>
+                  <span class="typing"><i></i><i></i><i></i></span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="input-zone">
+            <div class="ctx-line">
+              <svg class="ic ic-sm"><use href="#i-pin"/></svg>zcode 本地 Agent 会话 · daemon 日志解析回显（80 段，零泄漏）· 模型 GLM-5.3
+              <span style="flex:1"></span>
+              <span class="team-live" title="点击收回团队">👥 团队进行中 · 3 分身</span>
+              <span class="team-btn">👥 派团队</span>
+            </div>
+            <div class="input-row">
+              <span class="plus-btn"><svg class="ic"><use href="#i-plus"/></svg></span>
+              <span class="ph">向智能体提问，Enter 发送 / Shift+Enter 换行</span>
+              <button class="send-btn" title="发送"><svg class="ic ic-sm"><use href="#i-send"/></svg></button>
+            </div>
+            <div class="input-tip">会话内配置即时生效 · 上下文与档案仅影响本会话</div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 空门户态视图 ═══ -->
+<div class="app-shell hidden" id="view-empty" style="min-height:640px">
+  <aside class="side">
+    <div class="side-brand"><span class="brand-mark"><svg class="ic"><use href="#i-bot"/></svg></span><b>SillyHub</b></div>
+    <nav class="nav">
+      <div class="nav-group">智能体</div>
+      <div class="nav-item active"><svg class="ic ic-sm"><use href="#i-chat"/></svg>智能体会话</div>
+    </nav>
+    <div class="side-user"><span class="avatar">系</span><div><div style="font-size:12px;font-weight:600">系统管理员</div></div></div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <span class="ws-btn"><svg class="ic ic-sm"><use href="#i-box"/></svg>SillyHub<svg class="ic ic-sm"><use href="#i-chev-d"/></svg></span>
+      <span class="crumb">智能体 <svg class="ic ic-sm"><use href="#i-chev-r"/></svg> <b>智能体会话</b></span>
+    </div>
+    <div class="page">
+      <div class="page-head">
+        <h2><span class="bar"></span>智能体会话</h2>
+        <p>跨机器、跨智能体的统一会话入口：左侧选择会话，右侧继续对话或新建</p>
+      </div>
+      <div class="grid">
+        <section class="list-panel" aria-label="会话列表">
+          <div class="list-head"><b>会话</b><span class="count">0</span></div>
+          <div class="filter-zone">
+            <div class="search-row">
+              <span class="search-inp"><svg class="ic ic-sm"><use href="#i-search"/></svg>搜索会话标题…</span>
+              <span class="status-sel">全部状态 <svg class="ic ic-sm"><use href="#i-chev-d"/></svg></span>
+            </div>
+          </div>
+          <div class="tree" style="display:flex;align-items:center;justify-content:center;color:var(--fg-faint);font-size:12px">
+            没有符合条件的会话
+          </div>
+        </section>
+        <section class="empty-portal" data-testid="sessions-empty-portal">
+          <span class="empty-ico"><svg class="ic ic-lg"><use href="#i-spark"/></svg></span>
+          <h3>开始新会话</h3>
+          <p>在左侧工作区分组点「＋」选择机器与智能体，发送第一句话即创建会话；<br>也可以从列表选择一个既有会话继续对话。</p>
+          <div class="quick-acts">
+            <span class="qa-chip"><svg class="ic ic-sm"><use href="#i-plus"/></svg>在 SillyHub 新建会话</span>
+            <span class="qa-chip"><svg class="ic ic-sm"><use href="#i-clock"/></svg>继续最近会话「你重新帮我再设计优化下」</span>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 弹窗与浮层 ═══ -->
+<div class="sec-label"><span class="n">B</span> 弹窗与浮层（派团队弹层 · 新建会话两步浮层 · 删除确认 · 子代理目录）</div>
+<div class="dlg-zone">
+  <!-- 派团队弹层（TeamTriggerPopover）：会话输入框上方弹出，触发四路等价的共用确认 UI -->
+  <div class="team-stage">
+    <span class="stage-tag"><b>派团队配置弹层</b> TeamTriggerPopover · 输入框上方弹出（bottom-full 锚点）· 触发四路等价：按钮 / /team 指令 / 自然语言 / AskUser（D-004）；一期 Claude 专属（D-003 按钮引擎门控）</span>
+
+    <div class="team-ctx">
+      <div class="team-note"><b>它是什么：</b>当前会话的智能体升级为「主控」，通过 MCP 派发「分身」并行干活，任务进展直接回到本会话。不是新建会话，是把当前会话升级成团队作战。</div>
+      <div class="team-note"><b>挂载点：</b>session-panel 输入区上方的「👥 派团队」按钮（A 区输入区已补该按钮），弹层从输入框上沿向上展开；团队运行中显示「团队进行中 · N 分身」chip，可点击收回。</div>
+      <div class="team-note"><b>视觉问题（现状）：</b>violet-200/700 手写色散落、原生 radio/checkbox 未品牌化、表单密集无层次、分身预设折叠区无质感。升级稿见右侧——violet 作为「团队」固定身份色保留，但统一走 token 化圆角/间距/阴影。</div>
+      <!-- 输入区锚点演示 -->
+      <div class="input-row" style="margin-top:auto">
+        <span class="plus-btn"><svg class="ic"><use href="#i-plus"/></svg></span>
+        <span class="ph">向智能体提问，Enter 发送 / Shift+Enter 换行</span>
+        <span class="team-btn">👥 派团队</span>
+        <button class="send-btn" title="发送"><svg class="ic ic-sm"><use href="#i-send"/></svg></button>
+      </div>
+    </div>
+
+    <div class="team-pop" role="dialog" aria-label="派团队配置">
+      <p class="tp-title">👥 派团队做这件事</p>
+      <p class="tp-sub">当前会话的智能体升级为主控，通过 MCP 派发分身；任务进展直接回到本会话。</p>
+
+      <span class="tp-lb">目标（可选，确认后回填输入框，随下条消息发出）</span>
+      <div class="tp-inp focus">把 /sessions 页面整体风格升级落地，双主题都要过</div>
+
+      <span class="tp-lb">派发范围</span>
+      <div class="tp-opt sel">
+        <span class="radio"></span><b>SillyHub</b>
+        <span class="mini-tag cyan">当前工作区</span>
+        <span class="hint">分身在本工作区绑定的机器上跑</span>
+      </div>
+      <div class="tp-opt">
+        <span class="radio"></span><b>项目维度</b>
+        <span class="mini-tag sky">项目 · 跨工作区</span>
+        <span class="hint">仅项目经理可选，需选主工作区 Anchor</span>
+      </div>
+      <div class="tp-sub-box">
+        <div class="fld">选择项目
+          <span class="v">SillyHub 平台建设<svg class="ic ic-sm"><use href="#i-chev-d"/></svg></span>
+        </div>
+        <span class="tp-lb">派发范围（Scope）· 勾选工作区</span>
+        <div class="ws-check on"><span class="checkbox">✓</span><b>SillyHub</b><span class="mini-tag violet">后端代码</span></div>
+        <div class="ws-check"><span class="checkbox">✓</span>sillyspec<span class="mini-tag cyan">文档</span></div>
+        <div class="anchor-line">主控将运行在 <span class="mini-tag teal">SillyHub</span> （后端代码类型优先，自动派生）</div>
+      </div>
+
+      <span class="tp-lb">费用上限（可选，美元）</span>
+      <div class="tp-inp">留空 = 不限</div>
+
+      <div class="preset">
+        <div class="preset-head"><span>⚙ 分身预设（1）· 主控配置</span><span class="chev">收起 ▴</span></div>
+        <div class="grid3">
+          <div class="fld">主控 AI 类型<span class="v">Claude Code<svg class="ic ic-sm"><use href="#i-chev-d"/></svg></span></div>
+          <div class="fld">主控厂家<span class="v">GLM（智谱）<svg class="ic ic-sm"><use href="#i-chev-d"/></svg></span></div>
+          <div class="fld">主控模型<span class="v">glm-5.3</span></div>
+        </div>
+        <div class="worker-card">
+          <div class="wc-head"><span>分身 #1</span><button class="wc-del">删除</button></div>
+          <div class="grid3">
+            <div class="fld">AI 类型<span class="v">Claude Code<svg class="ic ic-sm"><use href="#i-chev-d"/></svg></span></div>
+            <div class="fld">角色<span class="v">前端<svg class="ic ic-sm"><use href="#i-chev-d"/></svg></span></div>
+            <div class="fld">模型<span class="v">留空走默认</span></div>
+          </div>
+          <div class="fld">分工目标<span class="v">改左列会话列表组件样式</span></div>
+        </div>
+        <button class="add-worker">＋ 添加分身</button>
+      </div>
+
+      <div class="tp-foot">
+        <button class="btn btn-ghost">取消</button>
+        <button class="btn btn-primary">就绪，随下条消息发出</button>
+        <span class="hint">或直接说「派团队去…」</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 新建会话两步浮层 · 第一步：选机器（仅在线，契约 D-107 不变） -->
+  <div class="dlg-stage">
+    <span class="stage-tag"><b>新建会话浮层 · 第一步</b> PreSessionPicker · ppm/projects「发起团队」→ /sessions?new=1 直达打开的就是它（ql-20260823-005）</span>
+    <div class="dlg" role="dialog" aria-label="新建会话 · 选择运行位置">
+      <div class="dlg-head">
+        <span class="dlg-ico"><svg class="ic ic-sm"><use href="#i-plus"/></svg></span>
+        <b>新建会话 · 选择运行位置</b>
+        <button class="dlg-close">✕</button>
+      </div>
+      <div class="steps">
+        <span class="stp on"><i>1</i>机器（仅在线）</span>
+        <span class="sep"></span>
+        <span class="stp"><i>2</i>智能体</span>
+      </div>
+      <div class="pick-card sel">
+        <span class="pc-r1"><span class="st"></span>qinyideMac-mini-3.local <span class="sub">2 个智能体在线</span></span>
+        <span class="pc-r2"><span>darwin · arm64</span><span>心跳 08-23 23:31</span></span>
+      </div>
+      <div class="pick-card">
+        <span class="pc-r1"><span class="st"></span>dev-server-01 <span class="sub">3 个智能体在线</span></span>
+        <span class="pc-r2"><span>linux · x86_64</span><span>心跳 08-23 23:30</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 新建会话浮层 · 第二步：选智能体（白名单 claude/codex，默认 Claude Code 高亮） -->
+  <div class="dlg-stage">
+    <span class="stage-tag"><b>新建会话浮层 · 第二步</b> 选完即创建并关闭（无确认按钮，两步即达）</span>
+    <div class="dlg">
+      <div class="dlg-head">
+        <span class="dlg-ico"><svg class="ic ic-sm"><use href="#i-bot"/></svg></span>
+        <b>新建会话 · 选择运行位置</b>
+        <button class="dlg-close">✕</button>
+      </div>
+      <div class="steps">
+        <span class="stp"><i>1</i>机器</span>
+        <span class="sep"></span>
+        <span class="stp on"><i>2</i>智能体 · qinyideMac-mini-3.local</span>
+      </div>
+      <div class="pick-row sel"><span class="e-ava c">⚡</span>Claude Code<span class="def-tag">默认</span></div>
+      <div class="pick-row"><span class="e-ava x">◎</span>Codex</div>
+    </div>
+  </div>
+
+  <!-- 删除确认（单删 / 批量删共用形态，替换 antd Modal.confirm 默认黄感叹号） -->
+  <div class="dlg-stage">
+    <span class="stage-tag"><b>删除确认</b> 单删与批量删除共用（session-list-panel Modal.confirm ×2）</span>
+    <div class="dlg">
+      <div class="dlg-head">
+        <span class="dlg-ico danger"><svg class="ic ic-sm"><use href="#i-trash"/></svg></span>
+        <b>删除会话</b>
+        <button class="dlg-close">✕</button>
+      </div>
+      <p class="dlg-desc">确定删除会话「你重新帮我再设计优化下」<code>#10ed55fc</code> 吗？<br>仅删除平台记录，本机日志文件不受影响。</p>
+      <div class="dlg-acts">
+        <button class="btn btn-ghost">取消</button>
+        <button class="btn btn-danger">删除</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 子代理目录 popover（会话头部触发，点击行定位跳转） -->
+  <div class="dlg-stage">
+    <span class="stage-tag"><b>子代理目录</b> 面板头触发 · 点击行切进度视图并滚动定位（D-003）</span>
+    <div class="pop">
+      <div class="pop-h"><svg class="ic ic-sm"><use href="#i-bot"/></svg>子代理目录 <span class="count">3</span></div>
+      <div class="pop-row"><span class="st active"></span>Explore · 搜索会话页代码<span class="dur">01:23</span></div>
+      <div class="pop-row"><span class="st done"></span>general-purpose · 原型静态校验<span class="dur">03:52</span></div>
+      <div class="pop-row"><span class="st done"></span>Plan · 两步浮层方案<span class="dur">02:10</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 多主题适配矩阵 ═══ -->
+<div class="sec-label"><span class="n">C</span> 多主题适配矩阵（双主题同屏对照 · 取值单一源 themes.ts，data-theme-scope 仅原型演示机制）</div>
+<div class="theme-grid">
+  <div class="theme-cell" data-theme-scope="blue">
+    <span class="tc-tag"><i></i>明亮蓝 blue</span>
+    <div class="tc-block">
+      <span class="tc-lbl">会话行 · 选中态</span>
+      <div class="s-row sel">
+        <div class="r1"><span class="st active"></span><span class="t">你重新帮我再设计优化下</span><span class="tm">1 分钟前</span></div>
+        <div class="r2"><span class="engine-chip zcode">zcode</span><span class="meta"><i>👤 系统管理员</i><i>☁ 智谱 GLM</i><i>7 轮</i></span></div>
+      </div>
+      <div class="s-row">
+        <div class="r1"><span class="st done"></span><span class="t">zcode · 本地活动</span><span class="tm">22 分钟前</span></div>
+        <div class="r2"><span class="engine-chip zcode">zcode</span><span class="meta"><i>👤 系统管理员</i><i>5 轮</i></span></div>
+      </div>
+    </div>
+    <div class="tc-block">
+      <span class="tc-lbl">徽标 / chip / 按钮</span>
+      <div class="tc-row">
+        <span class="st-badge info">● 运行中</span>
+        <span class="st-badge warn">● 恢复中</span>
+        <span class="ctx-chip"><svg class="ic ic-sm"><use href="#i-machine"/></svg>qinyideMac-m…</span>
+      </div>
+      <div class="tc-row">
+        <span class="engine-chip claude">Claude</span>
+        <span class="engine-chip codex">Codex</span>
+        <span class="engine-chip zcode">zcode</span>
+      </div>
+      <div class="tc-row">
+        <button class="btn btn-primary">发送</button>
+        <button class="btn btn-ghost">打断本轮</button>
+        <button class="send-btn" title="发送"><svg class="ic ic-sm"><use href="#i-send"/></svg></button>
+      </div>
+    </div>
+    <div class="tc-block">
+      <span class="tc-lbl">气泡 / 弹窗卡</span>
+      <div class="msg-u" style="display:flex"><div class="u-bub">继续，可以探索呀</div></div>
+      <div class="pick-row sel"><span class="e-ava c">⚡</span>Claude Code<span class="def-tag">默认</span></div>
+    </div>
+  </div>
+
+  <div class="theme-cell" data-theme-scope="ai-native">
+    <span class="tc-tag"><i></i>AI 紫 ai-native（默认）</span>
+    <div class="tc-block">
+      <span class="tc-lbl">会话行 · 选中态</span>
+      <div class="s-row sel">
+        <div class="r1"><span class="st active"></span><span class="t">你重新帮我再设计优化下</span><span class="tm">1 分钟前</span></div>
+        <div class="r2"><span class="engine-chip zcode">zcode</span><span class="meta"><i>👤 系统管理员</i><i>☁ 智谱 GLM</i><i>7 轮</i></span></div>
+      </div>
+      <div class="s-row">
+        <div class="r1"><span class="st done"></span><span class="t">zcode · 本地活动</span><span class="tm">22 分钟前</span></div>
+        <div class="r2"><span class="engine-chip zcode">zcode</span><span class="meta"><i>👤 系统管理员</i><i>5 轮</i></span></div>
+      </div>
+    </div>
+    <div class="tc-block">
+      <span class="tc-lbl">徽标 / chip / 按钮</span>
+      <div class="tc-row">
+        <span class="st-badge info">● 运行中</span>
+        <span class="st-badge warn">● 恢复中</span>
+        <span class="ctx-chip"><svg class="ic ic-sm"><use href="#i-machine"/></svg>qinyideMac-m…</span>
+      </div>
+      <div class="tc-row">
+        <span class="engine-chip claude">Claude</span>
+        <span class="engine-chip codex">Codex</span>
+        <span class="engine-chip zcode">zcode</span>
+      </div>
+      <div class="tc-row">
+        <button class="btn btn-primary">发送</button>
+        <button class="btn btn-ghost">打断本轮</button>
+        <button class="send-btn" title="发送"><svg class="ic ic-sm"><use href="#i-send"/></svg></button>
+      </div>
+    </div>
+    <div class="tc-block">
+      <span class="tc-lbl">气泡 / 弹窗卡</span>
+      <div class="msg-u" style="display:flex"><div class="u-bub">继续，可以探索呀</div></div>
+      <div class="pick-row sel"><span class="e-ava c">⚡</span>Claude Code<span class="def-tag">默认</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 改进对照表 ═══ -->
+<div class="sec-label"><span class="n">D</span> 改进点对照（交互结构零变更，仅视觉升级）</div>
+<table class="cmp-table">
+  <tr><th style="width:170px">区域</th><th>现状</th><th>升级后</th><th style="width:280px">依据</th></tr>
+  <tr>
+    <td>左列 · 会话条目</td>
+    <td class="old">每条会话挂 4~5 个彩色 antd Tag（gold/purple/geekblue/cyan/blue），视觉噪音大</td>
+    <td class="new">只保留 1 个引擎身份 chip（Claude 金 / Codex 紫 / zcode 青），创建人·供应商·轮数降级为纯文本 meta 弱化显示</td>
+    <td><span class="tag-note k">降噪</span>FRONTEND_PAGE_STYLE §7 分类标签克制原则；AI-Native 总纲「减少色彩噪音」</td>
+  </tr>
+  <tr>
+    <td>左列 · 选中态</td>
+    <td class="old">2px 竖条 + 5% 底色，弱、易看漏</td>
+    <td class="new">brand-100 底 + brand-600 圆角竖条 + 标题 brand-700，行整体圆角内嵌</td>
+    <td><span class="tag-note k">层次</span>brand 语义阶（主题感知，双主题自动还原）</td>
+  </tr>
+  <tr>
+    <td>左列 · 图标体系</td>
+    <td class="old">📂 🖥 👤 📋 ☁ emoji 混排</td>
+    <td class="new">统一 lucide 线性图标（folder/monitor/user/file/cloud），线宽 1.8 一致</td>
+    <td><span class="tag-note k">一致</span>总纲原型 §应用框架图标语言</td>
+  </tr>
+  <tr>
+    <td>左列 · 组头操作</td>
+    <td class="old">「＋」「多选」常驻文字小方块按钮，与组头拥挤</td>
+    <td class="new">hover 浮现的图标按钮组（＋= brand 品牌色）；交互契约不变（组头＋= 新建入口）</td>
+    <td><span class="tag-note s">契约</span>D-107 / X-12 决策保持</td>
+  </tr>
+  <tr>
+    <td>左列 · 机器筛选 pill</td>
+    <td class="old">长机器名（qinyideMac-mini-3.local）直接挤爆 320px 行宽</td>
+    <td class="new">pill 内截断 + hover title 全名，行永不换行溢出</td>
+    <td><span class="tag-note k">防溢出</span>R-03 列表宽度预算</td>
+  </tr>
+  <tr>
+    <td>右列 · 面板头部</td>
+    <td class="old">标题/id/状态/机器/工作区全部一行平铺，无分组</td>
+    <td class="new">左侧「标题组」+ 右侧「操作组」；机器/工作区统一细边框 ctx-chip 样式</td>
+    <td><span class="tag-note k">层次</span>总纲 P3 ctx-chip 定义</td>
+  </tr>
+  <tr>
+    <td>右列 · 对话流</td>
+    <td class="old">无 typing 指示、无流式光标、用户消息为浅底色块</td>
+    <td class="new">用户消息 brand 渐变投影气泡；typing 三点 + 流式光标；思考折叠线 + 工具卡（数据层已有，仅补样式）</td>
+    <td><span class="tag-note k">AI 细节</span>design.md §2 目标 4（P3 会话页 AI 细节）</td>
+  </tr>
+  <tr>
+    <td>右列 · 输入区</td>
+    <td class="old">antd 输入框 + 方形发送按钮</td>
+    <td class="new">胶囊大输入区（聚焦 brand 光环）+ 渐变圆形发送按钮，附上下文说明行</td>
+    <td><span class="tag-note k">AI 细节</span>总纲原型 .chat-input / .send-btn</td>
+  </tr>
+  <tr>
+    <td>空门户态</td>
+    <td class="old">白盒子里两行灰字</td>
+    <td class="new">渐变图标 + 引导文案 + 快捷动作 chip（新建/继续最近），保留组头＋为主入口不变</td>
+    <td><span class="tag-note k">引导</span>总纲原型空状态模板</td>
+  </tr>
+  <tr>
+    <td>页面级 · 容器</td>
+    <td class="old">1px 边框白卡片无阴影，页面底色未跟随主题</td>
+    <td class="new">卡片 shadow-sm/md 层次 + 12px 圆角；页面底色走主题 token（AI 紫=淡紫 / blue=浅灰蓝）</td>
+    <td><span class="tag-note k">主题</span>FRONTEND_PAGE_STYLE §10 阴影 token 化</td>
+  </tr>
+  <tr>
+    <td>派团队弹层（真正的「团队」入口）</td>
+    <td class="old">violet-200/700 手写色散落；原生 radio/checkbox 未品牌化；目标/范围/预算/分身预设密集堆叠无层次；底部按钮无主次</td>
+    <td class="new">violet 保留为「团队」固定身份色但收拢到标题/预设区/入口按钮三处；单选卡（当前工作区 cyan tag / 项目维度 sky tag）与 scope 多选卡品牌化选中态；anchor 派生 teal 胶囊保留；分身卡网格化 + 主按钮「就绪，随下条消息发出」</td>
+    <td><span class="tag-note s">契约</span>触发四路等价（按钮//team/自然语言/AskUser，D-004）、一期 Claude 专属引擎门控（D-003）、anchor 服务端派生仅展示——全部不变</td>
+  </tr>
+  <tr>
+    <td>新建会话两步浮层（PreSessionPicker）</td>
+    <td class="old">bg-black/40 遮罩 + 白盒直角感卡片 + 纯文字「① 机器 / ② 智能体」；机器卡/智能体行选中无品牌反馈</td>
+    <td class="new">渐变图标头 + 圆点步骤指示 + 机器卡/智能体行品牌选中态（brand 边 + brand-50 底 + 光环）；「默认」Tag 改 brand 语义 chip</td>
+    <td><span class="tag-note s">契约</span>两步即达 / 仅在线机器 / claude+codex 白名单 / 默认 Claude Code——D-107 全部保持；ql-20260823-005 ?new=1 直达不动</td>
+  </tr>
+  <tr>
+    <td>删除确认弹窗</td>
+    <td class="old">antd Modal.confirm 默认黄感叹号 + 一句干文案</td>
+    <td class="new">危险渐变图标头 + 说明文案（标题 + sid + 「仅删平台记录，不动本机日志」）+ danger 实心删除钮；单删/批量删共用同一形态</td>
+    <td><span class="tag-note k">层次</span>session-list-panel Modal.confirm ×2 统一替换</td>
+  </tr>
+  <tr>
+    <td>子代理目录 popover</td>
+    <td class="old">自绘白盒列表，无计数、无 hover 反馈</td>
+    <td class="new">头部计数 chip + 行 hover brand-50 + 状态点语义色 + 等宽时长字体</td>
+    <td><span class="tag-note s">契约</span>D-003 点击行定位跳转不变</td>
+  </tr>
+  <tr>
+    <td>多主题适配</td>
+    <td class="old">弹窗/遮罩存在手写色（bg-black/40、antd 默认 token 未走 ConfigProvider），换肤后遮罩与卡片脱节</td>
+    <td class="new">全部取值走 CSS var 语义 token（shadow/brand/状态色），零手写 hex；本原型 C 区双主题同屏对照即验收方式（实现侧 = html data-theme 换肤自动生效）</td>
+    <td><span class="tag-note k">主题</span>规则 20 多主题铁律：单一源 themes.ts，brand-* 语义阶</td>
+  </tr>
+</table>
+
+<!-- SVG 图标库（lucide 线性风格） -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <g id="i-bot"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4m-3 8v.5m6-.5v.5M2 14h2m16 0h2"/><circle cx="12" cy="3" r="1"/></g>
+    <g id="i-chat"><path d="M21 12a8 8 0 0 1-8 8H5l-2 2V12a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z"/></g>
+    <g id="i-search"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></g>
+    <g id="i-plus"><path d="M12 5v14M5 12h14"/></g>
+    <g id="i-trash"><path d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3"/></g>
+    <g id="i-folder"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></g>
+    <g id="i-machine"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/></g>
+    <g id="i-user"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-6 8-6s8 2 8 6"/></g>
+    <g id="i-cloud"><path d="M17.5 19a4.5 4.5 0 1 0-.9-8.9A6 6 0 1 0 6 19h11.5Z"/></g>
+    <g id="i-send"><path d="M22 2 11 13M22 2l-7 20-4-9-9-4 20-7Z"/></g>
+    <g id="i-ban"><circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/></g>
+    <g id="i-brain"><path d="M12 5a3 3 0 0 0-6 0 3 3 0 0 0-1 5.8A3 3 0 0 0 7 17h5V5Zm0 0a3 3 0 0 1 6 0 3 3 0 0 1 1 5.8A3 3 0 0 1 17 17h-5"/></g>
+    <g id="i-spark"><path d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4L12 2Z"/></g>
+    <g id="i-clock"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></g>
+    <g id="i-pin"><path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11Z"/><circle cx="12" cy="10" r="2.5"/></g>
+    <g id="i-check-sq"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="m8.5 12 2.5 2.5 4.5-5"/></g>
+    <g id="i-home"><path d="M4 11 12 4l8 7v8a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1v-8Z"/></g>
+    <g id="i-box"><path d="M21 8v8a2 2 0 0 1-1 1.7l-7 4a2 2 0 0 1-2 0l-7-4A2 2 0 0 1 3 16V8a2 2 0 0 1 1-1.7l7-4a2 2 0 0 1 2 0l7 4A2 2 0 0 1 21 8Z"/><path d="M3.3 7 12 12l8.7-5M12 22V12"/></g>
+    <g id="i-topo"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8 7.5 11 16m5-8.5L13 16M8.5 6h7"/></g>
+    <g id="i-git"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M6 8.5v7M8.5 6h4a3 3 0 0 1 3 3v.5"/></g>
+    <g id="i-scan"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M4 12h16"/></g>
+    <g id="i-runtime"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M19 5l-2 2M7 17l-2 2"/></g>
+    <g id="i-zap"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></g>
+    <g id="i-mcp"><circle cx="12" cy="12" r="2.5"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M6.7 6.7 10 10m4 0 3.3-3.3M6.7 17.3 10 14m4 0 3.3 3.3"/></g>
+    <g id="i-key"><circle cx="8" cy="15" r="4.5"/><path d="m11.5 11.5 8-8m-2.5-.5 3 3M15 7l2.5 2.5"/></g>
+    <g id="i-audit"><path d="M6 3h12a1 1 0 0 1 1 1v17l-3-2-3 2-3-2-3 2-2-1.5V4a1 1 0 0 1 1-1Z"/><path d="M9 8h6M9 12h6"/></g>
+    <g id="i-palette"><circle cx="12" cy="12" r="9"/><circle cx="8.5" cy="10" r="1"/><circle cx="12" cy="7.5" r="1"/><circle cx="15.5" cy="10" r="1"/><path d="M12 21a3 3 0 0 0 0-6h-1a2 2 0 0 1-2-2c0-1 .8-2 2-2"/></g>
+    <g id="i-bell"><path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/></g>
+    <g id="i-out"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></g>
+    <g id="i-layers"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/></g>
+    <g id="i-chev-d"><path d="m6 9 6 6 6-6"/></g>
+    <g id="i-chev-r"><path d="m9 6 6 6-6 6"/></g>
+  </defs>
+</svg>
+
+<script>
+  function setTheme(t) {
+    document.documentElement.dataset.theme = t;
+    document.getElementById("t-blue").classList.toggle("on", t === "blue");
+    document.getElementById("t-ai").classList.toggle("on", t === "ai-native");
+  }
+  function switchView(v, btn) {
+    document.getElementById("view-chat").classList.toggle("hidden", v !== "chat");
+    document.getElementById("view-empty").classList.toggle("hidden", v !== "empty");
+    btn.parentElement.querySelectorAll("button").forEach(b => b.classList.remove("on"));
+    btn.classList.add("on");
+  }
+</script>
+</body>
+</html>

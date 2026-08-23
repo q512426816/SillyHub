@@ -465,9 +465,9 @@ describe("SessionListPanel 树条目 chips", () => {
 
     const row = await screen.findByRole("button", { name: "会话 整理会议纪要" });
     expect(row.textContent).toContain("Claude");
-    expect(row.textContent).toContain("👤 qinyi");
-    expect(row.textContent).toContain("📋 知识经理");
-    expect(row.textContent).toContain("☁ Kimi");
+    expect(row.textContent).toContain("qinyi");
+    expect(row.textContent).toContain("知识经理");
+    expect(row.textContent).toContain("Kimi");
     expect(row.textContent).toContain("12 轮");
     expect(row.textContent).toContain("5 分钟前");
     expect(row.querySelector('[aria-label="状态 active"]')).toBeTruthy();
@@ -486,7 +486,7 @@ describe("SessionListPanel 树条目 chips", () => {
     renderPanel(<SessionListPanel />);
 
     const row = await screen.findByRole("button", { name: "会话 旧会话" });
-    expect(row.textContent).toContain("👤 —");
+    expect(row.textContent).toContain("—");
   });
 
   it("快照缺省回退：config_snapshot null → 引擎回退 session.provider，无档案/供应商 chips", async () => {
@@ -508,8 +508,8 @@ describe("SessionListPanel 树条目 chips", () => {
 
     const row = await screen.findByRole("button", { name: "会话 旧会话" });
     expect(row.textContent).toContain("Codex");
-    expect(row.textContent).not.toContain("📋");
-    expect(row.textContent).not.toContain("☁");
+    expect(row.textContent).not.toContain("未指定");
+    expect(row.textContent).not.toContain("本机默认");
   });
 });
 
@@ -563,7 +563,7 @@ describe("SessionListPanel 两层筛选 tab", () => {
     // 选 machine-1 → 两条；再选 ◎ Codex → 仅 Codex
     fireEvent.click(screen.getByRole("button", { name: "机器tab machine-1" }));
     await waitFor(() => expect(sessionRows().length).toBe(2));
-    fireEvent.click(screen.getByRole("button", { name: "智能体tab ◎ Codex" }));
+    fireEvent.click(screen.getByRole("button", { name: "智能体tab Codex" }));
     await waitFor(() => expect(sessionRows().length).toBe(1));
     expect(
       screen.getByRole("button", { name: "会话 机器一Codex" }),
@@ -711,7 +711,7 @@ describe("SessionListPanel 筛选后条目去冗余（ql-20260823-003）", () =>
     const groupHead = () =>
       screen.getByRole("button", { name: "工作区分组 SillyHub" });
     fireEvent.click(screen.getByRole("button", { name: "机器tab machine-1" }));
-    fireEvent.click(screen.getByRole("button", { name: "智能体tab ⚡ Claude Code" }));
+    fireEvent.click(screen.getByRole("button", { name: "智能体tab Claude Code" }));
     fireEvent.click(groupHead());
     await waitFor(() => {
       const filtered = screen.getByRole("button", { name: "会话 会话A" });
@@ -767,7 +767,7 @@ describe("SessionListPanel 组头回调与截断", () => {
     // 两层筛选：机器 machine-1 → 智能体 Claude Code
     fireEvent.click(screen.getByRole("button", { name: "机器tab machine-1" }));
     fireEvent.click(
-      screen.getByRole("button", { name: "智能体tab ⚡ Claude Code" }),
+      screen.getByRole("button", { name: "智能体tab Claude Code" }),
     );
     fireEvent.click(screen.getByRole("button", { name: "在 SillyHub 新建会话" }));
     expect(onNewInGroup).toHaveBeenCalledWith("ws-1", {
@@ -981,9 +981,9 @@ describe("SessionListPanel workspace scope（树单组，端点过滤维持）",
     ).toBeInTheDocument();
     // 全字段 chips（D-003@v2：全局端点返回全字段，树形态照常渲染）
     expect(row.textContent).toContain("Claude");
-    expect(row.textContent).toContain("👤 qinyi");
-    expect(row.textContent).toContain("📋 知识经理");
-    expect(row.textContent).toContain("☁ Kimi");
+    expect(row.textContent).toContain("qinyi");
+    expect(row.textContent).toContain("知识经理");
+    expect(row.textContent).toContain("Kimi");
     expect(row.textContent).toContain("7 轮");
     expect(row.textContent).toContain("5 分钟前");
     // 机器名经快照回退落小节标题（机器列表留空证明不依赖映射）

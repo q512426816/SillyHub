@@ -30,6 +30,17 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { App } from "antd";
+import {
+  Bot,
+  BookUser,
+  ChevronDown,
+  Cloud,
+  Command,
+  Lock,
+  Monitor,
+  User,
+  Zap,
+} from "lucide-react";
 
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
 import { listProviders } from "@/lib/api/llm-providers";
@@ -108,11 +119,12 @@ export interface SessionConfigBarProps {
 
 /* ────────────────────── 纯辅助（组件外便于单测推理） ────────────────────── */
 
-/** 引擎图标（原型语义：claude ⚡ / codex ◎ / 其它 ✦）。 */
-function engineIcon(provider: string | null | undefined): string {
-  if (provider === "claude") return "⚡";
-  if (provider === "codex") return "◎";
-  return "✦";
+/** 引擎图标（线性统一，2026-08-24 emoji 退役）：claude=Zap / codex=Command / 其它=Bot。 */
+function engineIcon(provider: string | null | undefined): React.ReactNode {
+  const cls = "h-3.5 w-3.5";
+  if (provider === "claude") return <Zap aria-hidden className={cls} />;
+  if (provider === "codex") return <Command aria-hidden className={cls} />;
+  return <Bot aria-hidden className={cls} />;
 }
 
 /** 机器展示名（别名优先，FRONTEND_PAGE_STYLE 空值统一 —）。 */
@@ -280,7 +292,7 @@ export function SessionConfigBar({
   // barRef 导致所有下拉都渲染在最左侧）。
   const ctrlButton = (
     kind: SessionConfigCtrlKind,
-    icon: string,
+    icon: React.ReactNode,
     value: string,
     title: string,
     dropdown?: React.ReactNode,
@@ -300,11 +312,14 @@ export function SessionConfigBar({
           openKind === kind && "bg-muted text-primary",
         )}
       >
-        <span aria-hidden>{icon}</span>
-        <span className="max-w-[160px] truncate">{value}</span>
-        <span aria-hidden className="text-muted-foreground/60">
-          ▾
+        <span aria-hidden className="shrink-0 text-brand-600">
+          {icon}
         </span>
+        <span className="max-w-[160px] truncate">{value}</span>
+        <ChevronDown
+          aria-hidden
+          className="h-3 w-3 shrink-0 text-muted-foreground/60"
+        />
       </button>
       {openKind === kind && dropdown ? dropdown : null}
     </span>
@@ -315,7 +330,7 @@ export function SessionConfigBar({
       <div className="flex flex-wrap items-center gap-0.5">
         {ctrlButton(
           "machine",
-          "🖥",
+          <Monitor aria-hidden className="h-3.5 w-3.5" />,
           machineNameText,
           "守护进程（换机器需开新会话）",
           <ConfigDropdown
@@ -351,7 +366,7 @@ export function SessionConfigBar({
         )}
         {ctrlButton(
           "agent",
-          engineIcon(effectiveEngine),
+          <Bot aria-hidden className="h-3.5 w-3.5" />,
           agentName,
           "智能体（换引擎需开新会话）",
           <ConfigDropdown
@@ -400,7 +415,7 @@ export function SessionConfigBar({
         )}
         {ctrlButton(
           "provider",
-          "☁",
+          <Cloud aria-hidden className="h-3.5 w-3.5" />,
           providerLabel,
           providerLocked
             ? "Codex 引擎暂不支持会话级供应商"
@@ -410,7 +425,7 @@ export function SessionConfigBar({
             title="切换供应商 · 只影响本会话"
           >
             <SwitchItem
-              icon="☁"
+              icon={<Cloud aria-hidden className="h-3 w-3" />}
               label="不指定（本机默认）"
               current={llmProviderId == null}
               onClick={() =>
@@ -424,7 +439,7 @@ export function SessionConfigBar({
             {providers.map((p) => (
               <SwitchItem
                 key={p.id}
-                icon="☁"
+                icon={<Cloud aria-hidden className="h-3 w-3" />}
                 label={p.name}
                 sub={p.model ?? undefined}
                 current={p.id === llmProviderId}
@@ -446,7 +461,7 @@ export function SessionConfigBar({
         )}
         {ctrlButton(
           "profile",
-          "📋",
+          <User aria-hidden className="h-3.5 w-3.5" />,
           profileLabel,
           "智能体档案",
           <ConfigDropdown
@@ -455,7 +470,7 @@ export function SessionConfigBar({
           >
             {/* ql-20260818-004：取消档案与供应商「不指定」对称——空串语义回无人格。 */}
             <SwitchItem
-              icon="📋"
+              icon={<User aria-hidden className="h-3 w-3" />}
               label="不指定（无人格）"
               current={agentProfileId == null}
               onClick={() =>
@@ -469,7 +484,7 @@ export function SessionConfigBar({
             {profiles.map((p) => (
               <SwitchItem
                 key={p.id}
-                icon="📋"
+                icon={<User aria-hidden className="h-3 w-3" />}
                 // D-013：不做引擎过滤；Codex 下仅标注人格不注入（原 D-003）。
                 label={
                   effectiveEngine === "codex"
@@ -496,7 +511,8 @@ export function SessionConfigBar({
         <span className="flex-1" />
         {running && (
           <span className="inline-flex items-center gap-1 text-[10.5px] text-warning">
-            🔒 本轮完成后解锁切换
+            <Lock aria-hidden className="h-3 w-3" />
+            本轮完成后解锁切换
           </span>
         )}
       </div>
@@ -595,7 +611,7 @@ function SwitchItem({
   current,
   onClick,
 }: {
-  icon: string;
+  icon: React.ReactNode;
   label: string;
   sub?: string;
   current?: boolean;

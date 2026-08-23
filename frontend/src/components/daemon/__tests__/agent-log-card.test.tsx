@@ -951,7 +951,7 @@ describe("会话列表 tool_report 徽标", () => {
     // tool_report 徽标：仅 1 个（chat 条目无）。
     const badges = await screen.findAllByTestId("tool-report-badge");
     expect(badges).toHaveLength(1);
-    expect(badges[0]?.textContent).toBe("🧾 本地 Agent");
+    expect(badges[0]?.textContent).toBe("本地 Agent");
 
     // title 直接用后端 title（含派生 harness 前缀，无需前端特判）。
     expect(screen.getByText("zcode · agent-log-ingest")).toBeInTheDocument();

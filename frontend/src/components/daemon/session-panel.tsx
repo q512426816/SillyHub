@@ -48,10 +48,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Ban,
+  Bot,
+  FolderOpen,
+  Lock,
   MessageSquareText,
+  Monitor,
   Plus,
+  Puzzle,
   RefreshCw,
   Square,
+  TriangleAlert,
   Users,
 } from "lucide-react";
 import { Badge, Button, Spin, Tag } from "antd";
@@ -427,7 +433,8 @@ function TeamTriggerRow({
           data-testid="team-active-chip"
           className="inline-flex shrink-0 items-center gap-1 rounded-full border border-violet-300 bg-violet-50 px-2.5 py-0.5 text-[11.5px] font-medium text-violet-700"
         >
-          <span aria-hidden>👥</span>团队进行中 · {activeWorkers} 分身
+          <Users aria-hidden className="h-3.5 w-3.5" />
+          团队进行中 · {activeWorkers} 分身
           <button
             type="button"
             aria-label="收起团队状态提示"
@@ -1551,13 +1558,15 @@ function SessionPanelPage({
               新会话
             </span>
             {preMachineName && (
-              <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">
-                🖥 {preMachineName}
+              <span className="hidden shrink-0 items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground sm:inline-flex">
+                <Monitor aria-hidden className="h-3 w-3" />
+                {preMachineName}
               </span>
             )}
             {preWorkspaceName && (
-              <span className="hidden shrink-0 rounded-sm bg-cyan-50 px-1.5 py-0.5 text-[11px] text-cyan-700 sm:inline">
-                📂 {preWorkspaceName}
+              <span className="hidden shrink-0 items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground sm:inline-flex">
+                <FolderOpen aria-hidden className="h-3 w-3" />
+                {preWorkspaceName}
               </span>
             )}
           </div>
@@ -1576,29 +1585,39 @@ function SessionPanelPage({
         </header>
 
         {/* 锁定上下文行（D-104 完全只读：纯文本 span，无任何可交互元素）。
-            原型 .ctx-line：📂 工作区 / 🖥 机器 / ⚡ 智能体 + 🔒 锁定提示。
-            task-07（D-106）：change 入口在最前加显 🧩 变更名（仅 changeId 存在时）。 */}
+            图标统一 lucide 线性（2026-08-23-sessions-page-style：🧩→Puzzle /
+            📂→FolderOpen / 🖥→Monitor / ⚡→Bot / 🔒→Lock）。 */}
         <div
           data-testid="pre-session-context"
           aria-label="预会话上下文（已锁定）"
           className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground"
         >
           {preContext?.changeId && (
-            <span>🧩 {preChangeName ?? "—"}</span>
+            <span className="inline-flex items-center gap-1">
+              <Puzzle aria-hidden className="h-3 w-3" />
+              {preChangeName ?? "—"}
+            </span>
           )}
-          <span>
-            📂{" "}
+          <span className="inline-flex items-center gap-1">
+            <FolderOpen aria-hidden className="h-3 w-3" />
             {preContext?.workspaceId
               ? (preWorkspaceName ?? "未命名工作区")
               : "不指定（非工作区）"}
           </span>
-          <span>🖥 {preMachineName ?? "—"}</span>
-          <span>⚡ {preAgentLabel ?? "—"}</span>
+          <span className="inline-flex items-center gap-1">
+            <Monitor aria-hidden className="h-3 w-3" />
+            {preMachineName ?? "—"}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Bot aria-hidden className="h-3 w-3" />
+            {preAgentLabel ?? "—"}
+          </span>
           <span
-            className="ml-auto shrink-0"
+            className="ml-auto inline-flex shrink-0 items-center gap-1"
             title="上下文已锁定，创建会话后不可更换"
           >
-            🔒 上下文已锁定 · 创建会话后不可更换
+            <Lock aria-hidden className="h-3 w-3" />
+            上下文已锁定 · 创建会话后不可更换
           </span>
         </div>
 
@@ -1801,13 +1820,15 @@ function SessionPanelPage({
           </button>
           <Badge status={statusBadge.status} text={statusBadge.text} />
           {machineName && (
-            <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">
-              🖥 {machineName}
+            <span className="hidden shrink-0 items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground sm:inline-flex">
+              <Monitor aria-hidden className="h-3 w-3" />
+              {machineName}
             </span>
           )}
           {workspaceName && (
-            <span className="hidden shrink-0 rounded-sm bg-cyan-50 px-1.5 py-0.5 text-[11px] text-cyan-700 sm:inline">
-              📂 {workspaceName}
+            <span className="hidden shrink-0 items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground sm:inline-flex">
+              <FolderOpen aria-hidden className="h-3 w-3" />
+              {workspaceName}
             </span>
           )}
         </div>
@@ -1855,7 +1876,7 @@ function SessionPanelPage({
       {/* 离线只读横幅（2026-07-31-offline-session-readonly 语义） */}
       {!machineOnline && (
         <div className="flex items-center gap-2 border-b border-amber-300 bg-amber-50 px-5 py-2 text-xs text-amber-800">
-          <span aria-hidden>⚠️</span>
+          <TriangleAlert aria-hidden className="h-3.5 w-3.5 shrink-0" />
           <span>
             会话所属机器{machineName ? `（${machineName}）` : ""}当前离线 —— 可浏览历史消息，暂不能继续对话；机器恢复在线后可继续。
           </span>
@@ -3017,7 +3038,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
     <section className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
       {offlineReadOnly ? (
         <div className="flex items-center gap-2 border-b border-amber-300 bg-amber-50 px-5 py-2 text-xs text-amber-800">
-          <span aria-hidden>⚠️</span>
+          <TriangleAlert aria-hidden className="h-3.5 w-3.5 shrink-0" />
           <span>运行时离线，当前为只读浏览（发送/打断/结束/新建已禁用），重连后自动恢复。</span>
         </div>
       ) : null}

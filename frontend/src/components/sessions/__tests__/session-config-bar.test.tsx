@@ -268,7 +268,7 @@ describe("SessionConfigBar 四控件渲染", () => {
 // ── 2. running / ended 置灰（FR-05） ─────────────────────────────────────
 
 describe("SessionConfigBar 状态置灰", () => {
-  it("running：四控件全禁用 + 「🔒 本轮完成后解锁切换」提示，下拉不可开", () => {
+  it("running：四控件全禁用 + 「本轮完成后解锁切换」(Lock 图标)提示，下拉不可开", () => {
     renderBar({ running: true });
     for (const name of [
       "配置-机器 machine-1",
@@ -280,7 +280,7 @@ describe("SessionConfigBar 状态置灰", () => {
         (screen.getByRole("button", { name }) as HTMLButtonElement).disabled,
       ).toBe(true);
     }
-    expect(screen.getByText("🔒 本轮完成后解锁切换")).toBeInTheDocument();
+    expect(screen.getByText("本轮完成后解锁切换")).toBeInTheDocument();
     // 点击置灰控件不开下拉
     fireEvent.click(screen.getByRole("button", { name: "配置-供应商 本机默认" }));
     expect(screen.queryByTestId("config-dd-provider")).not.toBeInTheDocument();
@@ -293,7 +293,7 @@ describe("SessionConfigBar 状态置灰", () => {
         .disabled,
     ).toBe(true);
     expect(
-      screen.queryByText("🔒 本轮完成后解锁切换"),
+      screen.queryByText("本轮完成后解锁切换"),
     ).not.toBeInTheDocument();
   });
 });
@@ -488,7 +488,7 @@ describe("TurnTimeline whoLine 轮次快照渲染（D-008）", () => {
     );
   }
 
-  it("whoLine 按 run 快照渲染「📋 档案 · 智能体 · ☁ 供应商」", () => {
+  it("whoLine 按 run 快照渲染「档案 · 智能体 · 供应商」(BookUser/Cloud 图标)", () => {
     setupTimeline([
       makeTurn({
         whoLine: {
@@ -499,9 +499,9 @@ describe("TurnTimeline whoLine 轮次快照渲染（D-008）", () => {
       }),
     ]);
     const who = screen.getByLabelText("轮次配置快照");
-    expect(who).toHaveTextContent("📋 知识经理");
+    expect(who).toHaveTextContent("知识经理");
     expect(who).toHaveTextContent("Claude Code");
-    expect(who).toHaveTextContent("☁ GLM 平台");
+    expect(who).toHaveTextContent("GLM 平台");
   });
 
   it("profileName/providerName 为 null → 如实显示「未指定」/「本机默认」", () => {
@@ -511,8 +511,8 @@ describe("TurnTimeline whoLine 轮次快照渲染（D-008）", () => {
       }),
     ]);
     const who = screen.getByLabelText("轮次配置快照");
-    expect(who).toHaveTextContent("📋 未指定");
-    expect(who).toHaveTextContent("☁ 本机默认");
+    expect(who).toHaveTextContent("未指定");
+    expect(who).toHaveTextContent("本机默认");
   });
 
   it("多轮各读各的快照：切换后旧消息 who 行保持原配置不跟随", () => {

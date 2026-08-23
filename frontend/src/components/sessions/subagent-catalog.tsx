@@ -150,7 +150,9 @@ export function SubagentCatalog({ turns, onJumpTo }: SubagentCatalogProps) {
           <span aria-hidden className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand-600" />
         )}
         <span>子代理</span>
-        <span className="text-[11px] text-muted-foreground">{hasRunning ? runningCount : subagents.length}</span>
+        <span className="rounded-full bg-brand-100 px-1.5 text-[10.5px] font-semibold leading-4 text-brand-700">
+          {hasRunning ? runningCount : subagents.length}
+        </span>
         <ChevronDown aria-hidden className="h-3 w-3 text-muted-foreground" />
       </button>
 
@@ -159,10 +161,13 @@ export function SubagentCatalog({ turns, onJumpTo }: SubagentCatalogProps) {
       {open && (
         <div
           onClick={(e) => e.stopPropagation()}
-          className="absolute right-0 top-full z-30 mt-1.5 w-96 overflow-hidden rounded-md border border-border bg-card shadow-[0_8px_24px_rgb(0_0_0/0.12)]"
+          className="absolute right-0 top-full z-30 mt-1.5 w-96 overflow-hidden rounded-xl border border-border bg-card shadow-md"
         >
-          <div className="border-b border-border px-3 py-2 text-xs font-semibold text-foreground">
+          <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-2 text-xs font-semibold text-foreground">
             子代理目录
+            <span className="rounded-full bg-brand-100 px-1.5 text-[10px] font-semibold leading-4 text-brand-700">
+              {subagents.length}
+            </span>
           </div>
           <ul role="list" className="max-h-80 overflow-y-auto">
             {subagents.map((sa) => (
@@ -176,7 +181,7 @@ export function SubagentCatalog({ turns, onJumpTo }: SubagentCatalogProps) {
                   title={`${sa.name}${sa.subagentType ? ` · ${sa.subagentType}` : ""}${
                     sa.latestActivity ? `\n${sa.latestActivity}` : ""
                   }`}
-                  className="flex w-full items-center gap-2 px-3 py-[7px] text-left text-xs hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+                  className="flex w-full items-center gap-2 px-3 py-[7px] text-left text-xs hover:bg-brand-50 focus-visible:bg-brand-50 focus-visible:outline-none"
                 >
                   <span
                     aria-hidden

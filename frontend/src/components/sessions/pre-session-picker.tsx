@@ -25,7 +25,8 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Badge, Tag } from "antd";
+import { Bot, Command, Plus, Zap } from "lucide-react";
+import { Tag } from "antd";
 
 import {
   PROVIDER_META,
@@ -71,11 +72,12 @@ function formatHeartbeat(iso: string | null): string {
   return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-/** 引擎图标（原型语义：claude ⚡ / codex ◎）。 */
-function engineIcon(provider: string | null): string {
-  if (provider === "claude") return "⚡";
-  if (provider === "codex") return "◎";
-  return "✦";
+/** 引擎图标（线性统一，2026-08-24 emoji 退役）：claude=Zap / codex=Command / 其它=Bot。 */
+function engineIcon(provider: string | null): React.ReactNode {
+  const cls = "h-3.5 w-3.5";
+  if (provider === "claude") return <Zap aria-hidden className={cls} />;
+  if (provider === "codex") return <Command aria-hidden className={cls} />;
+  return <Bot aria-hidden className={cls} />;
 }
 
 /* ────────────────────── 组件 ────────────────────── */
@@ -120,7 +122,7 @@ export function PreSessionPicker({
     <div
       data-testid="pre-session-picker-mask"
       aria-label="新建会话选择浮层"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-brand-950/30 p-4 backdrop-blur-[2px]"
       onClick={(e) => {
         // 遮罩自身点击才取消（浮层内点击不冒泡取消）。
         if (e.target === e.currentTarget) onCancel();
@@ -130,12 +132,21 @@ export function PreSessionPicker({
         role="dialog"
         aria-modal="true"
         aria-label="新建会话 · 选择运行位置"
-        className="w-full max-w-[360px] rounded-xl border border-border bg-card p-4 shadow-xl"
+        className="w-full max-w-[360px] rounded-2xl border border-border bg-card p-4 shadow-lg"
       >
         <div className="flex items-start justify-between gap-2">
-          <h3 className="text-sm font-semibold text-foreground">
-            新建会话 · 选择运行位置
-          </h3>
+          {/* 原型 .dlg-head：渐变图标头（2026-08-23-sessions-page-style）。 */}
+          <div className="flex items-center gap-2.5">
+            <span
+              aria-hidden
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-brand-600 to-info text-white shadow-primary"
+            >
+              <Plus className="h-4 w-4" />
+            </span>
+            <h3 className="text-sm font-semibold text-foreground">
+              新建会话 · 选择运行位置
+            </h3>
+          </div>
           <button
             type="button"
             aria-label="关闭"
@@ -149,7 +160,10 @@ export function PreSessionPicker({
         {!machine ? (
           <>
             {/* ① 机器（仅在线）——原型 .picker #pickStep1/#pickMachines。 */}
-            <p className="mt-2 text-xs text-muted-foreground">① 机器（仅在线）</p>
+            <p className="mt-3 flex items-center gap-1.5 rounded-md bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
+              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-brand-600" />
+              ① 机器（仅在线）
+            </p>
             {onlineMachines.length === 0 ? (
               <p className="mt-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
                 暂无在线机器，请先启动 daemon 后再新建会话
@@ -162,10 +176,13 @@ export function PreSessionPicker({
                     type="button"
                     aria-label={`选择机器 ${machineLabel(m)}`}
                     onClick={() => setMachineId(m.id)}
-                    className="flex flex-col gap-1 rounded-lg border border-border bg-card px-3 py-2 text-left transition-colors hover:border-primary/60"
+                    className="flex flex-col gap-1 rounded-lg border border-border bg-card px-3 py-2 text-left transition-all hover:border-brand-300 hover:shadow-sm"
                   >
                     <span className="flex items-center gap-2">
-                      <Badge status="success" />
+                      <span
+                        aria-hidden
+                        className="h-1.5 w-1.5 shrink-0 rounded-full bg-success ring-2 ring-success/20"
+                      />
                       <span className="text-sm font-medium text-foreground">
                         {machineLabel(m)}
                       </span>
@@ -187,7 +204,8 @@ export function PreSessionPicker({
         ) : (
           <>
             {/* ② 智能体——原型 .picker #pickStep2/#pickAgents，选完即 onPick 关闭。 */}
-            <p className="mt-2 text-xs text-muted-foreground">
+            <p className="mt-3 flex items-center gap-1.5 rounded-md bg-muted/50 px-2.5 py-1.5 text-xs text-muted-foreground">
+              <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-brand-600" />
               ② 智能体 · {machineLabel(machine)}（默认 Claude Code）
             </p>
             {supportedRuntimes.length === 0 ? (
@@ -207,15 +225,19 @@ export function PreSessionPicker({
                       aria-pressed={isDefault}
                       onClick={() => onPick(r.id)}
                       className={cn(
-                        "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-left text-sm transition-colors",
+                        "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-left text-sm transition-all",
                         isDefault
-                          ? "border-primary bg-primary/5 text-foreground"
-                          : "border-border bg-card text-foreground hover:border-primary/60",
+                          ? "border-primary bg-brand-50 text-foreground ring-2 ring-brand-100"
+                          : "border-border bg-card text-foreground hover:border-brand-300",
                       )}
                     >
                       <span aria-hidden>{engineIcon(r.provider)}</span>
                       <span>{runtimeLabel(r)}</span>
-                      {isDefault && <Tag>默认</Tag>}
+                      {isDefault && (
+                        <Tag className="mr-0 rounded-full border-brand-300 bg-brand-100 text-brand-700">
+                          默认
+                        </Tag>
+                      )}
                     </button>
                   );
                 })}

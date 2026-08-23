@@ -66,6 +66,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
 
+import { Clock, Plus, Sparkles } from "lucide-react";
+
 import {
   SessionPanel,
   type SessionPreContext,
@@ -128,6 +130,19 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   // sessions/isLoading 供 ?new=1 直达的 D-005 默认机器解析（ql-20260823-005）。
   const { items: machines, sessions, isLoading: machinesLoading } =
     useDaemonMachines({ limit: 100 });
+
+  // 最近会话（空门户快捷动作「继续最近会话」）：last_active_at 优先，其次
+  // created_at；无会话返回 null 不渲染入口。
+  const recentSession = useMemo(() => {
+    if (sessions.length === 0) return null;
+    return (
+      [...sessions].sort(
+        (a, b) =>
+          parseTs(b.last_active_at ?? b.created_at) -
+          parseTs(a.last_active_at ?? a.created_at),
+      )[0] ?? null
+    );
+  }, [sessions]);
 
   // 供应商列表：CtxUsageRing 分母派生（role mapping one_m / fallback model）。
   const providersQ = useQuery({
@@ -333,19 +348,58 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             onPreSessionCreated={handlePreSessionCreated}
           />
         ) : (
-          // 空门户态（task-06 / X-12）：轻引导占位——不用表单，新建入口在左侧
-          // 组头「＋」；深链无效/无参也落此处（design §9）。
+          // 空门户态（task-06 / X-12；2026-08-23-sessions-page-style 原型
+          // .empty-portal）：渐变图标 + 引导文案 + 快捷动作——新建走两步浮层
+          // （与组头「＋」同一入口，X-12 契约不变）、继续最近会话直达选中。
           <div
             data-testid="sessions-empty-portal"
             aria-label="门户空态"
-            className="flex min-h-0 flex-col items-center justify-center gap-2 overflow-hidden rounded-lg border border-border bg-card px-6 py-6 text-center"
+            className="flex min-h-0 flex-col items-center justify-center gap-1.5 overflow-hidden rounded-xl border border-dashed border-brand-300 bg-card px-6 py-8 text-center shadow-sm"
           >
-            <h3 className="text-sm font-semibold text-foreground">开始新会话</h3>
-            <p className="max-w-[320px] text-xs leading-5 text-muted-foreground">
+            <span
+              aria-hidden
+              className="mb-2 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-600 to-info text-white shadow-primary"
+            >
+              <Sparkles className="h-6 w-6" />
+            </span>
+            <h3 className="text-[15px] font-semibold text-foreground">
+              开始新会话
+            </h3>
+            <p className="max-w-[380px] text-xs leading-6 text-muted-foreground">
               {scope?.kind === "change"
                 ? "在左侧工作区分组点「＋」选择机器与智能体，发送第一句话即在当前变更下创建会话；也可以从列表选择一个既有会话继续对话。"
                 : "在左侧工作区分组点「＋」选择机器与智能体，发送第一句话即创建会话；也可以从列表选择一个既有会话继续对话。"}
             </p>
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setPickerWorkspaceId(scopedPickerWorkspaceId());
+                  setPickerOpen(true);
+                }}
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-4 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-brand-700 hover:shadow-sm"
+              >
+                <Plus aria-hidden className="h-3.5 w-3.5 text-brand-600" />
+                新建会话
+              </button>
+              {recentSession && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreContext(null);
+                    setSelectedSessionId(recentSession.id);
+                  }}
+                  title={`继续会话「${recentSession.title?.trim() || "未命名会话"}」`}
+                  className="inline-flex max-w-[260px] items-center gap-1.5 rounded-full border border-border bg-card px-4 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-brand-700 hover:shadow-sm"
+                >
+                  <Clock aria-hidden className="h-3.5 w-3.5 text-brand-600" />
+                  <span className="truncate">
+                    继续最近会话「
+                    {recentSession.title?.trim() || "未命名会话"}」
+                  </span>
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

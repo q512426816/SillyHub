@@ -36,6 +36,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { Settings, Users } from "lucide-react";
 
 import type { TeamMissionTriggerRequest } from "@/lib/daemon";
 import type { MainAgentConfig, WorkerPresetItem } from "@/lib/agent";
@@ -246,7 +247,8 @@ export function TeamTriggerPopover({
     >
       {/* 标题 + 说明（原型 .pop-title / .pop-sub） */}
       <p className="flex items-center gap-1.5 text-[13px] font-bold text-violet-700">
-        <span aria-hidden>👥</span>派团队做这件事
+        <Users aria-hidden className="h-4 w-4" />
+        派团队做这件事
       </p>
       <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
         当前会话的智能体升级为主控，通过 MCP 派发分身；任务进展直接回到本会话。
@@ -455,8 +457,9 @@ export function TeamTriggerPopover({
         className="mt-2.5 flex w-full items-center justify-between rounded border border-violet-200 bg-violet-50/40 px-2.5 py-1.5 text-[11.5px] font-semibold text-violet-700 hover:bg-violet-50"
         aria-expanded={presetOpen}
       >
-        <span>
-          ⚙ 分身预设{workers.length > 0 ? `（${workers.length}）` : ""} ·
+        <span className="inline-flex items-center gap-1">
+          <Settings aria-hidden className="h-3.5 w-3.5" />
+          分身预设{workers.length > 0 ? `（${workers.length}）` : ""} ·
           主控配置
         </span>
         <span aria-hidden>{presetOpen ? "收起 ▴" : "展开 ▾"}</span>
@@ -522,8 +525,9 @@ export function TeamTriggerPopover({
 
           {/* 分身列表（留空 = 主控自动拆） */}
           <div className="flex items-center justify-between">
-            <span className="text-[10.5px] font-semibold text-violet-700">
-              👥 分身列表（{workers.length}）· 留空 = 主控自动拆
+            <span className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-violet-700">
+              <Users aria-hidden className="h-3 w-3" />
+              分身列表（{workers.length}）· 留空 = 主控自动拆
             </span>
             <button
               type="button"

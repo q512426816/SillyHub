@@ -881,7 +881,7 @@ describe("SessionsPortal 筛选态直带上下文（ql-20260823-001）", () => {
       await screen.findByRole("button", { name: "机器tab machine-1" }),
     );
     fireEvent.click(
-      screen.getByRole("button", { name: "智能体tab ⚡ Claude Code" }),
+      screen.getByRole("button", { name: "智能体tab Claude Code" }),
     );
     fireEvent.click(
       screen.getByRole("button", { name: "在 非工作区 新建会话" }),
@@ -929,7 +929,7 @@ describe("SessionsPortal 筛选态直带上下文（ql-20260823-001）", () => {
       await screen.findByRole("button", { name: "机器tab machine-2" }),
     );
     fireEvent.click(
-      screen.getByRole("button", { name: "智能体tab ◎ Codex" }),
+      screen.getByRole("button", { name: "智能体tab Codex" }),
     );
     fireEvent.click(
       screen.getByRole("button", { name: "在 非工作区 新建会话" }),

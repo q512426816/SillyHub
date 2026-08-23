@@ -16,7 +16,7 @@
  */
 
 import { useRef, useState } from "react";
-import { Paperclip, RefreshCw, Send, X } from "lucide-react";
+import { FileText, Image as ImageIcon, Paperclip, RefreshCw, Send, X } from "lucide-react";
 import { Button } from "antd";
 
 import {
@@ -133,8 +133,12 @@ export function SessionInputBar({
                 className="flex max-w-[220px] items-center gap-1 rounded border border-input bg-muted/50 px-2 py-1 text-[11px]"
                 title={`${att.name} · ${formatBytes(att.bytes)}`}
               >
-                <span className="truncate">
-                  {att.kind === "image" ? "🖼 " : "📄 "}
+                <span className="truncate inline-flex items-center gap-1">
+                  {att.kind === "image" ? (
+                    <ImageIcon aria-hidden className="h-3 w-3 shrink-0" />
+                  ) : (
+                    <FileText aria-hidden className="h-3 w-3 shrink-0" />
+                  )}
                   {att.name} · {formatBytes(att.bytes)}
                 </span>
                 <button
@@ -158,7 +162,10 @@ export function SessionInputBar({
           )}
         </div>
       )}
-      <div className="flex items-end gap-3">
+      {/* 胶囊输入区（2026-08-23-sessions-page-style 原型 .input-row）：圆角容器
+          聚焦光环 + 附件按钮内嵌 + 渐变圆形发送按钮；Enter/附件/disabled 交互
+          契约原样（task-13 / D-7）。 */}
+      <div className="flex items-end gap-2 rounded-2xl border border-border bg-muted/40 px-2.5 py-2 transition-all focus-within:border-primary focus-within:bg-card focus-within:ring-4 focus-within:ring-brand-100">
         <input
           ref={fileRef}
           type="file"
@@ -170,7 +177,7 @@ export function SessionInputBar({
           type="text"
           onClick={() => fileRef.current?.click()}
           disabled={disabled || attachmentsDisabled}
-          className="h-12 w-12 shrink-0 p-0"
+          className="h-9 w-9 shrink-0 p-0 text-muted-foreground"
           title={
             attachmentsDisabled
               ? "当前引擎不支持附件"
@@ -189,16 +196,17 @@ export function SessionInputBar({
             }
           }}
           placeholder={placeholder}
-          className="min-h-12 flex-1 resize-none rounded border border-input bg-background px-3 py-2 text-sm leading-5 focus:border-ring focus:outline-none disabled:cursor-not-allowed disabled:bg-muted"
+          className="min-h-11 flex-1 resize-none bg-transparent px-1 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
           rows={2}
           disabled={disabled}
         />
         <Button
           type="primary"
+          shape="circle"
           onClick={onSend}
           // D-7：带附件时空文本可发（看图说话）；纯文本仍要求非空。
           disabled={disabled || (!value.trim() && attachments.length === 0)}
-          className="h-12 w-12 shrink-0 p-0"
+          className="mb-0.5 h-9 w-9 shrink-0 border-none bg-gradient-to-br from-brand-600 to-info shadow-primary hover:from-brand-700 hover:to-info hover:shadow-primary"
           title="发送"
         >
           {creating ? (

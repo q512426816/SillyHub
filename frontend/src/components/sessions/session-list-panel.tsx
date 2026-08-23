@@ -55,9 +55,22 @@
  */
 import { useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Badge, Button, Input, Modal, Select, Spin, Tag } from "antd";
+import { Button, Input, Modal, Select, Spin, Tag } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
-import { Trash2 } from "lucide-react";
+import {
+  BookUser,
+  Cloud,
+  Command,
+  FileText,
+  Folder,
+  FolderOpen,
+  ListChecks,
+  Monitor,
+  Plus,
+  Trash2,
+  User,
+  Zap,
+} from "lucide-react";
 import { ApiError } from "@/lib/api";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import { listWorkspaces } from "@/lib/workspaces";
@@ -94,11 +107,21 @@ const STATUS_OPTIONS = [
   { label: "已失败", value: "failed" },
 ] as const;
 
-/** 第二层智能体 tab 选项（D-107：claude/codex 固定两档，原型 ⚡/◎ 图标）。 */
+/** 第二层智能体 tab 选项（D-107：claude/codex 固定两档，引擎标记线性图标）。 */
 const AGENT_TABS = [
-  { label: "⚡ Claude Code", value: "claude" },
-  { label: "◎ Codex", value: "codex" },
+  { label: "Claude Code", value: "claude" },
+  { label: "Codex", value: "codex" },
 ] as const;
+
+/** 引擎身份标记（线性图标统一，2026-08-24 用户裁决 emoji 全退役）：claude=Zap / codex=Command。 */
+function EngineMark({ provider }: { provider: string }) {
+  const cls = "h-3 w-3 shrink-0";
+  return provider === "claude" ? (
+    <Zap aria-hidden className={cls} />
+  ) : (
+    <Command aria-hidden className={cls} />
+  );
+}
 
 /** 组内截断阈值 + 「显示全部」（R-03）。 */
 const GROUP_ITEM_LIMIT = 50;
@@ -185,8 +208,10 @@ function engineValueOf(s: AgentSessionRead): string | null {
 /** 状态点颜色（原型 .dot 语义；pending/reconnecting 视作活跃态）。 */
 function statusDotClass(status: AgentSessionStatus): string {
   if (status === "failed") return "bg-destructive";
-  if (status === "ended") return "bg-muted-foreground/50";
-  return "bg-primary";
+  if (status === "ended") return "bg-success";
+  // 进行中 = info 青 + 光环（D-003 info 档统一 accent 青，2026-08-23 原型 .st.active）。
+  if (status === "active") return "bg-info ring-2 ring-info/20";
+  return "bg-muted-foreground/50";
 }
 
 /** runtime→机器映射值（机器小节 / 离线判定共用）。 */
@@ -516,7 +541,17 @@ function WorkspaceTreeList({
     if (!onDeleteSessions || deleting) return;
     Modal.confirm({
       title: "删除会话",
-      content: `确定要删除「${title}」吗？删除后将从列表中移除。`,
+      // 原型 .dlg（危险渐变图标头 + 明确影响范围文案，2026-08-23-sessions-page-style）。
+      icon: (
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-destructive to-amber-500 text-white shadow-md">
+          <Trash2 aria-hidden className="h-4 w-4" />
+        </span>
+      ),
+      content: (
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          确定删除会话「{title}」吗？仅删除平台记录，本机日志文件不受影响。
+        </p>
+      ),
       okText: "删除",
       okButtonProps: { danger: true },
       cancelText: "取消",
@@ -534,7 +569,17 @@ function WorkspaceTreeList({
     if (!onDeleteSessions || deleting || checkedIds.size === 0) return;
     Modal.confirm({
       title: "批量删除会话",
-      content: `确定要删除「${groupName}」中选中的 ${checkedIds.size} 个会话吗？删除后将从列表中移除。`,
+      icon: (
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-destructive to-amber-500 text-white shadow-md">
+          <Trash2 aria-hidden className="h-4 w-4" />
+        </span>
+      ),
+      content: (
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          确定删除「{groupName}」中选中的 {checkedIds.size}{" "}
+          个会话吗？仅删除平台记录，本机日志文件不受影响。
+        </p>
+      ),
       okText: `删除 ${checkedIds.size} 个`,
       okButtonProps: { danger: true },
       cancelText: "取消",
@@ -560,7 +605,9 @@ function WorkspaceTreeList({
       {/* 头部：标题 + 总数（视图过滤后计数；无筛选时 = 拉取条数） */}
       <div className="flex items-center justify-between border-b border-border px-3 py-2">
         <h2 className="text-sm font-semibold text-foreground">会话</h2>
-        <span className="text-[11px] text-muted-foreground">共 {visibleTotal} 个</span>
+        <span className="rounded-full bg-brand-100 px-2 py-px text-[10.5px] font-semibold text-brand-700">
+          共 {visibleTotal} 个
+        </span>
       </div>
 
       {/* 筛选区：搜索（回车应用）+ 状态下拉（X-11 保留）+ 两层筛选 tab（D-107） */}
@@ -601,7 +648,8 @@ function WorkspaceTreeList({
               active={filterMachineId === m.id}
               onClick={() => pickMachineTab(m.id)}
             >
-              🖥 {machineLabel(m)}
+              <Monitor aria-hidden className="h-3 w-3 shrink-0" />
+              {machineLabel(m)}
             </FilterPill>
           ))}
         </div>
@@ -628,6 +676,7 @@ function WorkspaceTreeList({
                 active={filterAgent === t.value}
                 onClick={() => pickAgentTab(t.value)}
               >
+                <EngineMark provider={t.value} />
                 {t.label}
               </FilterPill>
             ))}
@@ -757,13 +806,13 @@ function FilterPill({
       aria-pressed={active}
       onClick={onClick}
       className={cn(
-        "shrink-0 rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+        "inline-flex min-w-0 max-w-[160px] shrink-0 items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs transition-colors",
         active
           ? "border-primary bg-primary/10 font-medium text-primary"
           : "border-border bg-muted/40 text-muted-foreground hover:border-primary/50",
       )}
     >
-      {children}
+      <span className="min-w-0 truncate">{children}</span>
     </button>
   );
 }
@@ -849,7 +898,7 @@ function WorkspaceGroupNode({
 
   return (
     <div className="mb-2 overflow-hidden rounded-lg border border-border bg-card">
-      {/* 组头：展开箭头 + 📂名称 + 会话数 + 「＋」新建 + 多选入口（原型 .ws-head） */}
+      {/* 组头：展开箭头 + Folder 图标 + 名称 + 会话数 + 「＋」新建 + 多选入口 */}
       <div
         role="button"
         tabIndex={0}
@@ -859,7 +908,7 @@ function WorkspaceGroupNode({
         onKeyDown={(e) => {
           if (e.key === "Enter") onToggleExpand();
         }}
-        className="flex cursor-pointer select-none items-center gap-2 px-2.5 py-2 hover:bg-muted/40"
+        className="group/g-head flex cursor-pointer select-none items-center gap-2 px-2.5 py-2 hover:bg-muted/40"
       >
         <span
           aria-hidden
@@ -869,47 +918,57 @@ function WorkspaceGroupNode({
         >
           ▶
         </span>
-        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
-          📂 {group.name}
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-[13px] font-semibold text-foreground">
+          <Folder aria-hidden className="h-3.5 w-3.5 shrink-0 text-brand-600" />
+          <span className="min-w-0 truncate">{group.name}</span>
         </span>
-        <span className="shrink-0 text-[11px] text-muted-foreground">
+        <span className="shrink-0 text-[11px] text-muted-foreground/80">
           {visibleSessions.length} 个会话
         </span>
-        {/* 「＋」新建（D-105：非工作区组同样有——workspaceId 传 null；未知工作区
-            组 id 不可解析，不渲染）；上下文解析归 task-06，未接线前不显示入口。 */}
-        {group.canNew && onNew && (
-          <button
-            type="button"
-            aria-label={`在 ${group.name} 新建会话`}
-            title={`在 ${group.name} 新建会话`}
-            onClick={(e) => {
-              e.stopPropagation();
-              onNew(group.workspaceId);
-            }}
-            className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-primary/60 bg-primary/10 text-[13px] leading-none text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
-          >
-            ＋
-          </button>
-        )}
-        {/* X-11 批量删除保留：组头尾随多选态入口（aria-pressed 标记激活）。 */}
-        {batchEnabled && (
-          <button
-            type="button"
-            aria-label={`多选 ${group.name}`}
-            aria-pressed={batchActive}
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleBatch();
-            }}
-            className={`shrink-0 rounded border px-1.5 py-0.5 text-[11px] leading-4 transition-colors ${
-              batchActive
-                ? "border-primary bg-primary/10 text-primary"
-                : "border-border bg-muted/40 text-muted-foreground hover:border-primary/50"
-            }`}
-          >
-            {batchActive ? "退出多选" : "多选"}
-          </button>
-        )}
+        {/* 组头操作（原型 .g-acts）：展开组常显，收起组 hover/聚焦浮现——
+            交互契约不变（组头＋= 新建入口 D-107，多选 X-11）。 */}
+        <span
+          className={cn(
+            "flex shrink-0 items-center gap-1 transition-opacity",
+            expanded || batchActive
+              ? "opacity-100"
+              : "opacity-0 group-hover/g-head:opacity-100 focus-within:opacity-100",
+          )}
+        >
+          {group.canNew && onNew && (
+            <button
+              type="button"
+              aria-label={`在 ${group.name} 新建会话`}
+              title={`在 ${group.name} 新建会话`}
+              onClick={(e) => {
+                e.stopPropagation();
+                onNew(group.workspaceId);
+              }}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-brand-300 bg-brand-100 text-brand-700 transition-colors hover:bg-brand-600 hover:text-white hover:shadow-primary"
+            >
+              <Plus aria-hidden className="h-3.5 w-3.5" />
+            </button>
+          )}
+          {batchEnabled && (
+            <button
+              type="button"
+              aria-label={`多选 ${group.name}`}
+              aria-pressed={batchActive}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleBatch();
+              }}
+              className={cn(
+                "flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition-colors",
+                batchActive
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border bg-muted/40 text-muted-foreground hover:border-primary/50 hover:text-primary",
+              )}
+            >
+              <ListChecks aria-hidden className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </span>
       </div>
       {expanded && (
         <div className="pb-1">
@@ -940,7 +999,15 @@ function WorkspaceGroupNode({
                     className="flex items-center gap-1.5 px-1.5 pb-0.5 pt-1.5 text-[11px] text-muted-foreground"
                     aria-label={`机器小节 ${sec.label}`}
                   >
-                    <Badge status={sec.online ? "success" : "default"} />
+                    <span
+                      aria-hidden
+                      className={cn(
+                        "h-1.5 w-1.5 shrink-0 rounded-full",
+                        sec.online
+                          ? "bg-success ring-2 ring-success/20"
+                          : "bg-muted-foreground/40",
+                      )}
+                    />
                     <span className="truncate">
                       {sec.label}
                       {sec.online ? "" : "（离线）"}
@@ -1071,11 +1138,25 @@ function SessionRow({
             }
           : undefined
       }
-      className={`flex cursor-pointer flex-col justify-center gap-1 overflow-hidden border-b border-border px-3 py-1.5 ${
-        selected
-          ? "border-l-2 border-l-primary bg-primary/5"
-          : "border-l-2 border-l-transparent hover:bg-muted/40"
-      }`}
+      className={cn(
+        "group flex cursor-pointer flex-col justify-center gap-1 overflow-hidden px-3 py-1.5 transition-colors",
+        variant === "tree"
+          ? // 树形态（原型 .s-row）：圆角行卡 + brand 选中态（brand-100 底 +
+            // brand-600 竖条 + 标题 brand-700），无下边线。
+            cn(
+              "mb-0.5 rounded-lg border-l-[3px]",
+              selected
+                ? "border-l-brand-600 bg-brand-100"
+                : "border-l-transparent hover:bg-muted/50",
+            )
+          : // 平铺形态（退役路径，原样式保留）。
+            cn(
+              "border-b border-border border-l-2",
+              selected
+                ? "border-l-primary bg-primary/5"
+                : "border-l-transparent hover:bg-muted/40",
+            ),
+      )}
     >
       {/* 第一行：状态点 + 标题截断 + 相对时间 + 删除按钮（hover） */}
       <div className="group flex items-center gap-1.5">
@@ -1094,19 +1175,27 @@ function SessionRow({
             aria-label={`状态 ${session.status}`}
           />
         )}
-        {/* task-07：tool_report 标题旁 🧾「本地 Agent」徽标（原型 .badge-tool：
-            brand-100 底 + brand-600 描边 + brand-700 字，随主题换肤）。 */}
+        {/* task-07：tool_report 标题旁 FileText「本地 Agent」徽标（原型
+            .badge-tool：brand 阶，图标线性化 2026-08-24）。 */}
         <span className="flex min-w-0 flex-1 items-center gap-1">
-          <span className="min-w-0 truncate text-[13px] font-medium text-foreground">
+          <span
+            className={cn(
+              "min-w-0 truncate text-[13px] font-medium",
+              variant === "tree" && selected
+                ? "text-brand-700"
+                : "text-foreground",
+            )}
+          >
             {title}
           </span>
           {isToolReport && (
             <span
               title="由 SillySpec CLI 自动上报创建的本地 Agent 会话"
               data-testid="tool-report-badge"
-              className="shrink-0 rounded-full border border-brand-600 bg-brand-100 px-1.5 py-px text-[10px] font-medium leading-4 text-brand-700"
+              className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-brand-600 bg-brand-100 px-1.5 py-px text-[10px] font-medium leading-4 text-brand-700"
             >
-              🧾 本地 Agent
+              <FileText aria-hidden className="h-2.5 w-2.5" />
+              本地 Agent
             </span>
           )}
         </span>
@@ -1128,11 +1217,18 @@ function SessionRow({
           </button>
         )}
       </div>
-      {/* 第二行：chips——tree 形态：引擎/创建人/档案/供应商/轮数（工作区/机器
-          由组头与机器小节承载，不重复）；flat 形态：工作区/机器/引擎/档案/
-          供应商/轮数（现状）。Tag 紧凑样式保留、长名 max-w+truncate 防单个
-          长名占整行，截断悬停有 title 全名。 */}
-      <div className="flex flex-wrap items-center gap-0.5 pl-2.5">
+      {/* 第二行（树形态=2026-08-23 原型 .r2 降噪版）：引擎身份 chip
+          （claude=warning 金 / codex=brand 紫 / tool_report harness=info 青）
+          + 创建人/档案/供应商/轮数纯文本 meta（title 悬停全量）；工作区/机器
+          由组头与机器小节承载不重复。平铺形态（退役路径）保留原 antd Tag 集。 */}
+      <div
+        className={cn(
+          "flex items-center gap-1.5 pl-3",
+          variant === "tree"
+            ? "min-w-0 overflow-hidden whitespace-nowrap"
+            : "flex-wrap",
+        )}
+      >
         {variant === "flat" &&
           session.workspace_id &&
           workspaceIdToName?.has(session.workspace_id) && (
@@ -1141,7 +1237,8 @@ function SessionRow({
               className="m-0 max-w-[120px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
               color="cyan"
             >
-              📂 {workspaceIdToName.get(session.workspace_id)}
+              <FolderOpen aria-hidden className="mr-0.5 inline h-3 w-3" />
+              {workspaceIdToName.get(session.workspace_id)}
             </Tag>
           )}
         {variant === "flat" && machineName && (
@@ -1151,49 +1248,81 @@ function SessionRow({
               machineOffline ? "line-through opacity-60" : ""
             }`}
           >
-            🖥 {machineName}
+            <Monitor aria-hidden className="mr-0.5 inline h-3 w-3" />
+            {machineName}
             {machineOffline ? "（离线）" : ""}
           </Tag>
         )}
-        {/* task-07：tool_report 引擎位改显 harness（design §3.4「harness
-            engine 色」——配色沿用引擎 Tag 档，文本是真实 harness 身份）。 */}
         {!hideEngineChip && (
-          <Tag
-            className="m-0 shrink-0 rounded-sm px-1 py-0 text-[10px] leading-4"
-            color={engineValue === "codex" ? "purple" : "gold"}
+          <span
+            className={cn(
+              "inline-flex h-4 shrink-0 items-center rounded px-1.5 text-[10px] font-semibold leading-none",
+              isToolReport
+                ? "bg-info/10 text-info"
+                : engineValue === "codex"
+                  ? "bg-brand-100 text-brand-700"
+                  : "bg-warning/15 text-warning",
+            )}
           >
             {isToolReport ? harnessName : engineLabel(engineValue)}
-          </Tag>
+          </span>
         )}
-        {variant === "tree" && (
-          <Tag
-            title={`创建人 ${session.owner_name ?? "—"}`}
-            className="m-0 shrink-0 rounded-sm px-1 py-0 text-[10px] leading-4"
-            color="geekblue"
+        {variant === "tree" ? (
+          <span
+            className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-[10px] leading-4 text-muted-foreground/80"
+            title={[
+              `${session.owner_name ?? "—"}`,
+              snapshot?.profile_name ?? null,
+              snapshot?.provider_name ?? null,
+              `${session.turn_count} 轮`,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           >
-            👤 {session.owner_name ?? "—"}
-          </Tag>
+            <span className="inline-flex min-w-0 items-center gap-0.5">
+              <User aria-hidden className="h-3 w-3 shrink-0" />
+              <span className="truncate">{session.owner_name ?? "—"}</span>
+            </span>
+            {snapshot?.profile_name && (
+              <span className="inline-flex min-w-0 items-center gap-0.5">
+                <BookUser aria-hidden className="h-3 w-3 shrink-0" />
+                <span className="truncate">{snapshot.profile_name}</span>
+              </span>
+            )}
+            {snapshot?.provider_name && (
+              <span className="inline-flex min-w-0 items-center gap-0.5">
+                <Cloud aria-hidden className="h-3 w-3 shrink-0" />
+                <span className="truncate">{snapshot.provider_name}</span>
+              </span>
+            )}
+            <span className="shrink-0">{session.turn_count} 轮</span>
+          </span>
+        ) : (
+          <>
+            {snapshot?.profile_name && (
+              <Tag
+                title={snapshot.profile_name}
+                className="m-0 max-w-[150px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
+                color="blue"
+              >
+                <BookUser aria-hidden className="mr-0.5 inline h-3 w-3" />
+                {snapshot.profile_name}
+              </Tag>
+            )}
+            {snapshot?.provider_name && (
+              <Tag
+                title={snapshot.provider_name}
+                className="m-0 max-w-[130px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
+              >
+                <Cloud aria-hidden className="mr-0.5 inline h-3 w-3" />
+                {snapshot.provider_name}
+              </Tag>
+            )}
+            <Tag className="m-0 shrink-0 rounded-sm px-1 py-0 text-[10px] leading-4">
+              {session.turn_count} 轮
+            </Tag>
+          </>
         )}
-        {snapshot?.profile_name && (
-          <Tag
-            title={snapshot.profile_name}
-            className="m-0 max-w-[150px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
-            color="blue"
-          >
-            📋 {snapshot.profile_name}
-          </Tag>
-        )}
-        {snapshot?.provider_name && (
-          <Tag
-            title={snapshot.provider_name}
-            className="m-0 max-w-[130px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
-          >
-            ☁ {snapshot.provider_name}
-          </Tag>
-        )}
-        <Tag className="m-0 shrink-0 rounded-sm px-1 py-0 text-[10px] leading-4">
-          {session.turn_count} 轮
-        </Tag>
       </div>
     </div>
   );

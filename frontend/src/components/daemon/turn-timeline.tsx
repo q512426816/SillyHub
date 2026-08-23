@@ -32,7 +32,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Bot, Wrench } from "lucide-react";
+import { BookUser, Bot, Cloud, Settings, Wrench } from "lucide-react";
 import { Badge } from "antd";
 
 import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
@@ -333,11 +333,11 @@ export function TurnTimeline({
                 key={turn.runId}
                 className="flex items-center gap-1.5 text-[11px] text-muted-foreground opacity-70"
               >
-                <span>⚙</span>
+                <Settings aria-hidden className="h-3 w-3" />
                 {turn.replyAt && <span>{formatTurnTime(turn.replyAt)}</span>}
-                <span>· 📋 {turn.whoLine!.profileName ?? '未指定'}</span>
+                <span>· <BookUser aria-hidden className="inline h-3 w-3 align-[-2px]" /> {turn.whoLine!.profileName ?? '未指定'}</span>
                 <span>· {turn.whoLine!.agentName}</span>
-                <span>· ☁ {turn.whoLine!.providerName ?? '本机默认'}</span>
+                <span>· <Cloud aria-hidden className="inline h-3 w-3 align-[-2px]" /> {turn.whoLine!.providerName ?? '本机默认'}</span>
               </div>
             ) : <div key={turn.runId} className="space-y-2.5">
               {/* 用户消息气泡（右）。attach 中途接入的 unknown-run turn 无 prompt，不渲染。
@@ -430,7 +430,7 @@ export function TurnTimeline({
                     );
                   })}
               {/* task-14（FR-07 / D-008@v1）：消息 who 行——读该轮 run 配置快照
-                  （📋 档案 · 智能体 · ☁ 供应商），未选如实显示「未指定/本机默认」；
+                  （档案 · 智能体 · 供应商），未选如实显示「未指定/本机默认」；
                   历史不跟随会话当前配置。whoLine 缺省（弹窗旧组装）不渲染（零回归）。
                   task-13（FR-05 / D-004@v1）：展示改 .sh-ctx-chip 上下文引用 chip
                   （虚线描边浅底，brand 阶随主题，globals.css utility）——数据源仍为
@@ -438,11 +438,17 @@ export function TurnTimeline({
               {turn.whoLine && (
                 <div aria-label="轮次配置快照" className="ml-9">
                   <span className="sh-ctx-chip">
-                    <span>📋 {turn.whoLine.profileName ?? "未指定"}</span>
+                    <span className="inline-flex items-center gap-1">
+                      <BookUser aria-hidden className="h-3 w-3" />
+                      {turn.whoLine.profileName ?? "未指定"}
+                    </span>
                     <span aria-hidden>·</span>
                     <span>{turn.whoLine.agentName}</span>
                     <span aria-hidden>·</span>
-                    <span>☁ {turn.whoLine.providerName ?? "本机默认"}</span>
+                    <span className="inline-flex items-center gap-1">
+                      <Cloud aria-hidden className="h-3 w-3" />
+                      {turn.whoLine.providerName ?? "本机默认"}
+                    </span>
                   </span>
                 </div>
               )}
