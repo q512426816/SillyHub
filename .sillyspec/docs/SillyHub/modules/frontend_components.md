@@ -24,6 +24,7 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
   - `machine-card.tsx` / `runtime-card.tsx` — 机器级与实例级卡片
   - `remote-folder-picker.tsx` — daemon list_roots/list_dir 懒加载目录树（自治：初始化根 / Tree loadData / 手输跳转校验 / 错误降级红条）
   - `session-list-layout.tsx` / `session-log-sanitize.ts` / `daemon-required-notice.tsx`
+  - `agent-log-card.tsx` — 本地 Agent 会话（tool_report）日志条目卡；「查看内容」对话化回显（2026-08-23-agent-log-conversation-view）：先调 messages 端点，parsed 时直构段列表渲染（用户气泡/MarkdownText/思考折叠/tool_use↔tool_result 按 tool_use_id 配对、失配「结果未记录」中性徽章禁「执行中」）+「对话/原文」tab + truncated 加载更早；status≠parsed/ApiError 静默回落原文 <pre> 黄条提示；不走 session-log-assembler（Grill B2 裁决）
 - sessions/（总入口配套）：
   - `session-list-panel` — 筛选 + 虚拟滚动 + 紧凑两行条目
   - `workspace-session-picker` — 新建会话工作区选择器（自治取数 listWorkspaces + fetchMyBindings；首项「不使用工作区」，选中工作区按绑定 daemon_id 联动带出在线机器；空列表禁用提示 + 失败重试，2026-08-19-sessions-workspace-selector）

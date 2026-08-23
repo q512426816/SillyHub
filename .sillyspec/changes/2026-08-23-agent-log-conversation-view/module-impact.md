@@ -26,8 +26,8 @@ created_at: 2026-08-23 21:20:00
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `modules/daemon.md` | 更新 daemon 模块卡（新增 agent-log 解析器与 read_agent_log_messages RPC） | pending |
-| `modules/platform_sync.md` | 更新 platform_sync 模块卡（新 messages 端点与共享 helper） | pending |
-| `modules/frontend_lib.md` | 更新 frontend_lib 模块卡（readAgentLogMessages） | pending |
-| `modules/frontend_components.md` | 更新 frontend_components 模块卡（agent-log-card 对话化渲染） | pending |
+| `modules/daemon.md` | 更新 daemon 模块卡（新增 agent-log 解析器与 read_agent_log_messages RPC） | done |
+| `modules/platform_sync.md` | 更新 platform_sync 模块卡（新 messages 端点与共享 helper） | done |
+| `modules/frontend_lib.md` | 更新 frontend_lib 模块卡（readAgentLogMessages） | done |
+| `modules/frontend_components.md` | 更新 frontend_components 模块卡（agent-log-card 对话化渲染） | done |
 | `_module-map.yaml` | 无变化（未增删模块，仅模块内新增文件） | skipped |

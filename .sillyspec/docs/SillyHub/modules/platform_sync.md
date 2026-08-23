@@ -18,6 +18,11 @@ SillySpec CLI ↔ 平台的跨仓同步层。CLI（agent 进程内运行，或 d
   - 文档：`POST /changes/{name}/documents`（四件套全文扁平 map）
   - 审批：`GET /changes/{name}/approval`、`POST /changes/{name}/approval`
   - quicklog：`POST /quicklog-entries`
+  - agent 日志（2026-08-23-platform-agent-log-ingest / 2026-08-23-agent-log-conversation-view）：
+    - `POST /agent-logs`：CLI 批量幂等 upsert + 归属（hub_session_id 挂接 / (harness, ctx) find-or-create tool_report 会话）
+    - `GET /agent-logs`：按读 scope 聚合列表
+    - `GET /agent-logs/{id}/content`：原文尾部 256KB（读即弃；回落与二进制格式唯一通道）
+    - `GET /agent-logs/{id}/messages?before_seq=`：对话化归一化消息——经 ws rpc host_fs.read_agent_log_messages 透传（MVP 解析 zcode model-io），status 四值一律 200 分层（parsed/unsupported/parse_error/too_large，前端判断回落）；唯一 422=老 daemon method-not-found；与 content 端点共享 scope 校验/二进制黑名单/daemon 定位/错误映射 helper（`_resolve_agent_log_read_target` / `_send_agent_log_rpc`）
   - spec 文件增量（spec-file-incremental-sync）：
     - `GET /changes/-/spec-manifest`：服务器权威清单全量行（含 exists=False 软删行）
     - `POST /changes/-/spec-sync`：FileOp 增量应用，单事务全成全败，返回 new_versions / conflict / server_versions；无标注时扫 ops 内 `changes/` 前缀兜底触发 reparse
