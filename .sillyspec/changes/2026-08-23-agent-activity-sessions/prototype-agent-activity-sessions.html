@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>本地 Agent 会话 · 原型（会话列表新类型 + 详情内容化 + 关联会话内条目）</title>
+<style>
+  :root[data-theme="blue"] {
+    --primary:#2563EB; --bg:#f8fafc; --card:#fff; --border:#e2e8f0;
+    --brand-50:#eff6ff; --brand-100:#dbeafe; --brand-600:#2563eb; --brand-700:#1d4ed8;
+    --slate-500:#64748b; --slate-700:#334155; --slate-900:#0f172a; --success:#10b981; --cyan-700:#0e7490;
+  }
+  :root[data-theme="ai-native"] {
+    --primary:#7C3AED; --bg:#FAF5FF; --card:#fff; --border:#DDD6FE;
+    --brand-50:#f5f3ff; --brand-100:#ede9fe; --brand-600:#7c3aed; --brand-700:#6d28d9;
+    --slate-500:#64748b; --slate-700:#334155; --slate-900:#0f172a; --success:#10b981; --cyan-700:#0e7490;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--slate-900);padding:24px;font-size:13px}
+  .toggle{position:fixed;top:12px;right:16px;z-index:9}
+  .toggle button{border:1px solid var(--border);background:var(--card);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;color:var(--slate-700)}
+  .toggle button.on{border-color:var(--primary);color:var(--primary);font-weight:600}
+  .stage{max-width:1080px;margin:0 auto}
+  .stage h1{font-size:15px;margin-bottom:4px}
+  .hint{color:var(--slate-500);font-size:12px;margin-bottom:18px}
+  .cols{display:grid;grid-template-columns:340px 1fr;gap:16px;align-items:start}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+  .panel h2{font-size:12px;font-weight:600;padding:10px 12px;border-bottom:1px solid var(--border);background:var(--brand-50);color:var(--brand-700)}
+  .sec-title{font-size:12px;font-weight:600;margin:22px 0 8px;color:var(--slate-700)}
+
+  /* 会话列表条目 */
+  .item{display:flex;gap:10px;padding:10px 12px;border-bottom:1px solid var(--border);cursor:pointer}
+  .item:hover{background:var(--brand-50)}
+  .item.sel{background:var(--brand-50);outline:1.5px solid var(--brand-600)}
+  .dot{width:8px;height:8px;border-radius:50%;margin-top:5px;flex-shrink:0}
+  .dot.live{background:var(--success)} .dot.idle{background:#94a3b8}
+  .item .mid{min-width:0;flex:1}
+  .t1{display:flex;align-items:center;gap:6px}
+  .t1 .title{font-weight:500;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .badge-tool{font-size:10px;padding:1px 6px;border-radius:999px;background:var(--brand-100);color:var(--brand-700);border:1px solid var(--brand-600);flex-shrink:0}
+  .t2{display:flex;gap:6px;margin-top:4px;flex-wrap:wrap}
+  .chip{font-size:10.5px;padding:1px 6px;border-radius:4px;background:var(--bg);color:var(--slate-500)}
+  .chip.engine{color:var(--cyan-700)}
+  .rt{margin-left:auto;font-size:10.5px;color:var(--slate-500);white-space:nowrap}
+
+  /* 会话详情（本地 Agent 会话） */
+  .head{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--border)}
+  .head .t{font-size:13px;font-weight:600}
+  .badge-type{font-size:10px;padding:1px 8px;border-radius:999px;background:var(--brand-100);color:var(--brand-700);border:1px solid var(--brand-600)}
+  .head .sub{font-size:11px;color:var(--slate-500)}
+  .stream{padding:14px;display:flex;flex-direction:column;gap:10px;max-height:420px;overflow-y:auto;background:var(--bg)}
+  .row{display:flex;gap:8px;align-items:flex-start}
+  .ava{width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--card);display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}
+  .bubble{background:var(--card);border:1px solid var(--border);border-radius:12px;border-top-left-radius:4px;padding:8px 12px;box-shadow:0 1px 2px rgba(0,0,0,.04);max-width:86%}
+  .b1{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .harn{font-size:11px;font-weight:600;padding:1px 8px;border-radius:999px;background:var(--brand-50);color:var(--brand-700);border:1px solid var(--brand-100)}
+  .harn.zcode{background:rgba(8,145,178,.08);color:var(--cyan-700);border-color:rgba(8,145,178,.25)}
+  .mono{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--slate-700);background:var(--bg);border-radius:4px;padding:1px 6px;cursor:pointer}
+  .b1 .sz{margin-left:auto;font-size:11px;color:var(--slate-500)}
+  .b2{margin-top:5px;display:flex;gap:10px;font-size:11px;color:var(--slate-500);flex-wrap:wrap}
+  .b2 code{font-family:ui-monospace,Consolas,monospace;background:var(--bg);padding:0 5px;border-radius:4px}
+  .path{margin-top:4px;font-family:ui-monospace,Consolas,monospace;font-size:10.5px;color:var(--slate-500);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+  .path:hover{color:var(--primary)}
+  .view-btn{font-size:11px;color:var(--brand-700);background:none;border:none;cursor:pointer;padding:0}
+  .inputbar{display:flex;gap:8px;padding:10px 14px;border-top:1px solid var(--border);background:var(--card)}
+  .inputbar input{flex:1;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12.5px}
+  .inputbar .note{font-size:10.5px;color:var(--slate-500);align-self:center}
+  .inputbar button{border:1px solid var(--primary);background:var(--primary);color:#fff;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:12px}
+
+  /* 关联会话（普通聊天会话）内的日志条目 */
+  .linked-note{font-size:11px;color:var(--slate-500);padding:2px 12px}
+</style>
+</head>
+<body>
+<div class="toggle"><button id="t-blue" onclick="setTheme('blue')">明亮蓝</button><button id="t-ai" class="on" onclick="setTheme('ai-native')">AI 紫</button></div>
+<div class="stage">
+  <h1>「本地 Agent 会话」原型</h1>
+  <p class="hint">状态一：会话列表出现新类型（🧾 徽标 + harness/变更名）＋ 打开详情 = 日志条目即会话内容 + 底部输入可继续对话（首条消息懒激活派发）。右上角切换双主题。</p>
+
+  <div class="cols">
+    <!-- 左：会话列表 -->
+    <div class="panel">
+      <h2>会话 · multi-agent-platform</h2>
+      <div class="item sel">
+        <span class="dot live"></span>
+        <div class="mid">
+          <div class="t1"><span class="title">zcode · agent-log-ingest</span><span class="badge-tool">🧾 本地 Agent</span></div>
+          <div class="t2"><span class="chip">📂 multi-agent-platform</span><span class="chip engine">zcode</span><span class="chip">2 个日志文件</span></div>
+        </div>
+        <span class="rt">3 分钟前</span>
+      </div>
+      <div class="item">
+        <span class="dot live"></span>
+        <div class="mid">
+          <div class="t1"><span class="title">codex · ql-20260823-002 修宽度</span><span class="badge-tool">🧾 本地 Agent</span></div>
+          <div class="t2"><span class="chip">📂 multi-agent-platform</span><span class="chip engine">codex</span><span class="chip">快速修复</span></div>
+        </div>
+        <span class="rt">1 小时前</span>
+      </div>
+      <div class="item">
+        <span class="dot idle"></span>
+        <div class="mid">
+          <div class="t1"><span class="title">把 verify 的结论摘出来看…</span></div>
+          <div class="t2"><span class="chip">📂 multi-agent-platform</span><span class="chip engine">claude</span></div>
+        </div>
+        <span class="rt">昨天</span>
+      </div>
+      <div class="item">
+        <span class="dot idle"></span>
+        <div class="mid">
+          <div class="t1"><span class="title">nih</span></div>
+          <div class="t2"><span class="chip">📂 multi-agent-platform</span><span class="chip engine">claude</span></div>
+        </div>
+        <span class="rt">08-22</span>
+      </div>
+    </div>
+
+    <!-- 右：本地 Agent 会话详情 -->
+    <div class="panel">
+      <div class="head">
+        <span class="t">zcode · agent-log-ingest</span>
+        <span class="badge-type">🧾 本地 Agent 会话</span>
+        <span class="sub">由 SillySpec CLI 自动上报创建 · 点输入框即可继续对话</span>
+      </div>
+      <div class="stream">
+        <div class="row"><div class="ava">🧾</div>
+          <div class="bubble">
+            <div class="b1">
+              <span class="harn zcode">zcode</span>
+              <span class="mono" title="点击复制">sess 8f14e45f…18e9</span>
+              <span class="sz">12.4 MB · 3 分钟前活跃</span>
+            </div>
+            <div class="b2"><span>调用 6 次</span><span>最近命令 <code>verify</code></span><span>zcode-model-io-jsonl</span></div>
+            <div class="path" title="点击复制">C:/Users/qinyi/.zcode/cli/rollout/model-io-sess_8f14e45f….jsonl <button class="view-btn">查看内容 ▾</button></div>
+          </div>
+        </div>
+        <div class="row"><div class="ava">🧾</div>
+          <div class="bubble">
+            <div class="b1">
+              <span class="harn zcode">zcode</span>
+              <span class="mono">sess subagent_5b97…</span>
+              <span class="sz">12.0 MB · 1 小时前活跃</span>
+            </div>
+            <div class="b2"><span>调用 2 次</span><span>最近命令 <code>status</code></span></div>
+            <div class="path">C:/Users/qinyi/.zcode/cli/rollout/model-io-sess_subagent….jsonl <button class="view-btn">查看内容 ▾</button></div>
+          </div>
+        </div>
+        <!-- 继续对话后的普通消息 -->
+        <div class="row" style="justify-content:flex-end"><div class="bubble" style="background:var(--brand-600);color:#fff;border:none;border-radius:12px;border-top-right-radius:4px">接着把 deploy-notes 补一下</div></div>
+        <div class="row"><div class="ava">🤖</div><div class="bubble">好的，deploy-notes 已补充……（继续后即正常对话，历史日志保留在上方）</div></div>
+      </div>
+      <div class="inputbar">
+        <input placeholder="发消息继续这个会话（将派发到绑定机器的 agent）…">
+        <button>发送</button>
+        <span class="note">Enter 发送</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec-title">状态二：普通聊天会话中调了 sillyspec —— 日志条目出现在该会话对话流内（关联，不新建）</div>
+  <div class="panel">
+    <div class="stream">
+      <div class="row" style="justify-content:flex-end"><div class="bubble" style="background:var(--brand-600);color:#fff;border:none">跑一下 sillyspec status</div></div>
+      <div class="row"><div class="ava">🤖</div><div class="bubble">status 输出：当前 verify 阶段……</div></div>
+      <div class="row"><div class="ava">🧾</div>
+        <div class="bubble">
+          <div class="b1"><span class="harn zcode">zcode</span><span class="mono">sess 8f14e45f…</span><span class="sz">3.1 MB · 刚刚</span><span style="margin-left:auto;font-size:10px;color:var(--slate-500)">▸</span></div>
+          <div class="b2"><span>调用 1 次 · 最近命令 <code>status</code></span><button class="view-btn">查看内容 ▾</button></div>
+        </div>
+      </div>
+    </div>
+    <div class="linked-note">（会话尾部出现「本会话 agent 的本地日志」折叠条目——仅显示关联到这个会话的上报，展开交互同左）</div>
+  </div>
+</div>
+<script>
+function setTheme(t){document.documentElement.setAttribute('data-theme',t);document.getElementById('t-blue').classList.toggle('on',t==='blue');document.getElementById('t-ai').classList.toggle('on',t==='ai-native')}
+</script>
+</body>
+</html>
