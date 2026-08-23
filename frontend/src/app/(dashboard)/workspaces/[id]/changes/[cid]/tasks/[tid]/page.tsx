@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AgentModelInput } from "@/components/AgentModelInput";
 import { AgentProfileSelect } from "@/components/agent-profile-select";
 import { AgentProviderSelect } from "@/components/AgentProviderSelect";
+import { RunFileArtifacts } from "@/components/changes/detail/run-file-artifacts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -774,6 +775,12 @@ export default function TaskDetailPage({ params }: Props) {
             ))}
           </div>
         </div>
+      )}
+
+      {/* ---- Run File Artifacts（2026-08-23-agent-file-upload-mcp task-09 / D-010@v1：
+            数据源 GET /api/agent/file-artifacts?run_id=，多 run 合并去重倒序）---- */}
+      {agentRuns.length > 0 && (
+        <RunFileArtifacts runIds={agentRuns.map((run) => run.id)} />
       )}
     </PageContainer>
   );
