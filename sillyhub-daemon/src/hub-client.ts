@@ -136,6 +136,55 @@ export interface SpecIncrementalSyncResult {
   server_versions?: Record<string, number> | null;
 }
 
+// ── agent 文件制品类型（change 2026-08-23-agent-file-upload-mcp / design §7.1-7.2）──
+//
+// backend 端点（agent/file_artifacts.py，task-03）响应文件 id 字段名是 id
+// （FileUploadResp.id / FileMetaResp.id）；daemon 侧对外统一映射为 file_id
+// （agent 工具输出口径，design §7.1），Backend 后缀类型即映射前形态。
+
+/** POST /api/agent/file-artifacts 响应原样形态（backend FileUploadResp）。 */
+interface FileArtifactUploadBackendResp {
+  id: string;
+  original_name: string;
+  mime_type: string;
+  size: number;
+  description?: string | null;
+}
+
+/** GET /api/agent/file-artifacts files 元素原样形态（backend FileMetaResp）。 */
+interface FileArtifactMetaBackendResp {
+  id: string;
+  original_name: string;
+  mime_type: string;
+  size: number;
+  description?: string | null;
+  created_at: string;
+}
+
+/** 上传结果（id → file_id 映射后，upload_file 工具输出）。 */
+export interface FileArtifactUploadResult {
+  file_id: string;
+  original_name: string;
+  mime_type: string;
+  size: number;
+  description: string | null;
+}
+
+/** 列表结果（list_uploaded_files 工具输出，含 task-03 契约字段 created_at）。 */
+export interface FileArtifactListResult {
+  files: FileArtifactMeta[];
+}
+
+/** 列表元素（FileMetaResp 映射后；description 旧数据为 null）。 */
+export interface FileArtifactMeta {
+  file_id: string;
+  original_name: string;
+  mime_type: string;
+  size: number;
+  description: string | null;
+  created_at: string;
+}
+
 // ── 错误类型 ──────────────────────────────────────────────────────────────────
 
 /**
@@ -222,6 +271,15 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  * 不动（对齐 Python 语义），仅同步上传两方法单独放宽。
  */
 const SPEC_SYNC_TIMEOUT_MS = 300_000;
+
+/**
+ * agent 文件制品上传专用超时 300 秒（task-05 2026-08-23-agent-file-upload-mcp）。
+ *
+ * 文件受 backend ``file_max_size_mb`` 上限约束（可达几十 MB），multipart 全量
+ * 直传在大文件 + 慢网络下 30s 默认值不够；与 SPEC_SYNC_TIMEOUT_MS 同款放宽
+ * 理由（大 payload 单独放宽，DEFAULT_TIMEOUT_MS 保持 30s 不动）。
+ */
+const FILE_ARTIFACT_TIMEOUT_MS = 300_000;
 
 /**
  * JSON.parse 的 BOM-safe 包装。
@@ -1355,6 +1413,138 @@ export class HubClient {
       undefined,
       this._sessionIdHeaders(),
     );
+  }
+
+  // -- task-05（2026-08-23-agent-file-upload-mcp / D-005@v1）：agent 文件制品通道 --
+  //
+  // 端点挂在 agent router（/api 前缀，非 REST_PREFIX=/api/daemon），与 5 个编排
+  // MCP 端点同款。backend ``app/modules/agent/file_artifacts.py``（task-03 落地）：
+  //   - POST /api/agent/file-artifacts（multipart）：file + description? + run_id?
+  //     → 201 FileUploadResp { id, original_name, mime_type, size, description }
+  //   - GET /api/agent/file-artifacts?session_id=|run_id=
+  //     → { files: [FileMetaResp { id, original_name, mime_type, size, description,
+  //       created_at }] }（created_at 倒序）
+  //
+  // **字段名映射（契约注意）**：backend 响应文件 id 字段名是 ``id``（FileUploadResp.id
+  // / FileMetaResp.id），agent 工具输出统一用 ``file_id``（design §7.1 口径）——
+  // 映射在本层完成，mcp-server tool handler 直接 okContent 即得 file_id 字段名。
+
+  /**
+   * task-05：上传一个 agent 文件制品（multipart 直传，不经 agent 对话上下文）。
+   *
+   * 端点：POST /api/agent/file-artifacts
+   * 场景（design §7.2，二选一）：
+   *   - 会话主 agent：HubClientAuth.sessionId → 请求附 ``X-Session-Id`` 头
+   *     （backend 据此定位会话活跃 run，owner_type=agent_session）；
+   *   - 批任务 worker：params.runId → multipart ``run_id`` 字段（owner_type=agent_run）。
+   *
+   * **multipart 关键约束**：body 用 Node 20 原生 FormData + Blob 装文件字节，
+   * **不设手工 Content-Type**——fetch 自动生成含 boundary 的
+   * ``multipart/form-data; boundary=...`` 头；``_headers()`` 的
+   * ``application/json`` 绝不能随 multipart body 发（会破坏 boundary，task 约束）。
+   * 鉴权头（X-API-Key / Bearer）照 ``_headers()`` 同款优先级单独构造。
+   *
+   * **超时**：单独放宽到 300s（对齐 SPEC_SYNC_TIMEOUT_MS 先例）——文件受
+   * ``file_max_size_mb`` 上限约束可达几十 MB，30s 默认值在大文件 + 慢网络下假失败。
+   *
+   * 失败语义（对齐 _request）：HTTP 非 2xx（413 超限 / 403 越权 / 422 上下文缺失）
+   * → HubHttpError；网络/超时 → 透传 fetch 原始错误。
+   *
+   * @returns backend FileUploadResp，``id`` 已映射为 ``file_id``（agent 工具口径）
+   */
+  async uploadFileArtifact(params: {
+    /** 文件原始名（multipart filename，落 File.original_name）。 */
+    filename: string;
+    /** 文件字节（mcp-server 本地读盘所得）。 */
+    data: Uint8Array;
+    /** 文件 MIME 类型（multipart part Content-Type；缺省 application/octet-stream）。 */
+    mimeType?: string;
+    /** 可选描述（落 File.description，前端文件卡片展示）。 */
+    description?: string;
+    /** worker 场景 run id（会话场景缺省，走 X-Session-Id）。 */
+    runId?: string;
+  }): Promise<FileArtifactUploadResult> {
+    const url = `${this.baseUrl}/api/agent/file-artifacts`;
+    // FormData（Node 20 原生，undici 提供）：file 用 Blob 装字节 + filename；
+    // description/run_id 缺省不 append（backend Form() 默认值兜底：""/None）。
+    const form = new FormData();
+    form.append(
+      'file',
+      new Blob([params.data], {
+        type: params.mimeType || 'application/octet-stream',
+      }),
+      params.filename,
+    );
+    if (params.description !== undefined) {
+      form.append('description', params.description);
+    }
+    if (params.runId !== undefined) {
+      form.append('run_id', params.runId);
+    }
+    // 鉴权头照 _headers() 口径（apiKey 优先），但不带其 Content-Type（见上）。
+    const headers: Record<string, string> = {};
+    if (this.apiKey) {
+      headers['X-API-Key'] = this.apiKey;
+    } else if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+    // 会话场景附 X-Session-Id（与 5 个编排 MCP 端点同源，_sessionIdHeaders 单一来源）。
+    const sessionHeaders = this._sessionIdHeaders();
+    if (sessionHeaders) {
+      Object.assign(headers, sessionHeaders);
+    }
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: form,
+      signal: AbortSignal.timeout(FILE_ARTIFACT_TIMEOUT_MS),
+    });
+    if (!resp.ok) {
+      const bodyText = await resp.text();
+      throw new HubHttpError(resp.status, bodyText, url, 'POST');
+    }
+    const body = await parseJsonFromResponse<FileArtifactUploadBackendResp>(resp);
+    return {
+      file_id: String(body.id),
+      original_name: body.original_name,
+      mime_type: body.mime_type,
+      size: body.size,
+      description: body.description ?? null,
+    };
+  }
+
+  /**
+   * task-05：按会话 / run 列已上传文件制品（list_uploaded_files 工具数据源）。
+   *
+   * 端点：GET /api/agent/file-artifacts?session_id={id} 或 ?run_id={id}
+   * （backend 要求二选一，均无 → 422；调用方按注入上下文 MCP_SESSION_ID /
+   * MCP_RUN_ID 决定传哪个）。WORKSPACE_READ 读级鉴权。
+   *
+   * @returns ``{ files: [FileArtifactMeta] }``，``id`` 已映射为 ``file_id``
+   *   （含 description/created_at，task-03 契约字段）
+   */
+  async listFileArtifacts(params: {
+    sessionId?: string;
+    runId?: string;
+  }): Promise<FileArtifactListResult> {
+    const query = new URLSearchParams();
+    if (params.sessionId) query.set('session_id', params.sessionId);
+    if (params.runId) query.set('run_id', params.runId);
+    const qs = query.size > 0 ? `?${query.toString()}` : '';
+    const body = await this._request<{ files: FileArtifactMetaBackendResp[] }>(
+      'GET',
+      `/api/agent/file-artifacts${qs}`,
+    );
+    return {
+      files: body.files.map((f) => ({
+        file_id: String(f.id),
+        original_name: f.original_name,
+        mime_type: f.mime_type,
+        size: f.size,
+        description: f.description ?? null,
+        created_at: f.created_at,
+      })),
+    };
   }
 
   /**

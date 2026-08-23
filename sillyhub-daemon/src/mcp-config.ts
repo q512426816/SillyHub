@@ -11,7 +11,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseJsonFromResponse } from './hub-client.js';
 
@@ -285,6 +285,27 @@ export function hasAnyMcpServers(...configs: McpConfig[]): boolean {
 export const DAEMON_MCP_SERVER_NAME = 'sillyhub-daemon';
 
 /**
+ * task-05（2026-08-23-agent-file-upload-mcp / D-005@v1）：文件 MCP server 对外
+ * 名称（与 ``src/mcp-server.ts`` ``FILE_MCP_SERVER_NAME`` 对齐）。
+ *
+ * 白名单惯例（同 DAEMON_MCP_SERVER_NAME）：``mergeMcpConfigs`` 把**首个配置**
+ * （platform config）里的 server 名自动加白（:233-237）——调用方（task-06 会话
+ * 注入 / task-07 worker .mcp.json）把 ``buildFileMcpServerConfig`` 产物并入
+ * platform_default 即隐式允许，无需改白名单逻辑。
+ */
+export const FILE_MCP_SERVER_NAME = 'sillyhub-file';
+
+/**
+ * task-05（本变更）：file 模式三个 per-server env 键名（mcp-config 写侧与
+ * mcp-server ``readEnv`` 读侧共用的单一来源；对齐 ``MCP_SESSION_ID_ENV`` 惯例）。
+ * MCP 子进程只继承白名单 env + per-server env（spike-01 结论），上下文必须走
+ * ``mcpServers[FILE_MCP_SERVER_NAME].env``。
+ */
+export const MCP_TOOLSET_ENV = 'MCP_TOOLSET';
+export const MCP_RUN_ID_ENV = 'MCP_RUN_ID';
+export const MCP_ALLOWED_ROOT_ENV = 'MCP_ALLOWED_ROOT';
+
+/**
  * task-10（2026-08-22-team-session-unify / FR-04 / spike-01）：MCP server 子进程
  * 读会话 id 的 env 键名（单一来源，mcp-config 写侧与 mcp-server 读侧共用）。
  *
@@ -350,6 +371,84 @@ export function buildDaemonMcpServerConfig(
   return {
     command: 'node',
     args,
+    env,
+  };
+}
+
+// ── task-05（2026-08-23-agent-file-upload-mcp）：sillyhub-file server 工厂 ────
+
+/** daemon → backend 凭证（task-05：``buildFileMcpServerConfig`` 入参形态）。 */
+export interface DaemonMcpAuth {
+  /** daemon Bearer token（回落凭证，apiKey 缺失时用）。 */
+  token?: string;
+  /** daemon 长期 API Key（X-API-Key 路径，优先于 token；task-09 P0 口径）。 */
+  apiKey?: string;
+}
+
+/** sillyhub-file server 上下文（design §6：注入方按场景二选一写 env）。 */
+export interface FileMcpServerContext {
+  /** 会话场景：主 agent 会话 id（→ env MCP_SESSION_ID；task-06 session-manager 补写）。 */
+  sessionId?: string;
+  /** worker 场景：run id（→ env MCP_RUN_ID；task-07 task-runner 注入）。 */
+  runId?: string;
+  /** 上传允许根（→ env MCP_ALLOWED_ROOT；会话=cwd、worker=worktree 根，写入前
+   *  resolve 成绝对路径；缺失 → mcp-server fail-closed 拒绝一切上传）。 */
+  allowedRoot?: string;
+}
+
+/**
+ * task-05（2026-08-23-agent-file-upload-mcp / design §6）：构造 sillyhub-file
+ * MCP server 条目（``mcpServers[FILE_MCP_SERVER_NAME]`` 值）。
+ *
+ * 与 ``buildDaemonMcpServerConfig`` 共用 ``node dist/mcp-server.js`` 入口与
+ * 鉴权 env（MCP_SERVER_BACKEND_URL / MCP_SERVER_DAEMON_API_KEY /
+ * MCP_SERVER_DAEMON_TOKEN），差异仅三处：
+ *   - ``MCP_TOOLSET=file``（mcp-server readEnv 切文件 2 工具模式）；
+ *   - 上下文 env：sessionId（可选）/ runId（可选）/ allowedRoot（resolve 绝对
+ *     路径后写入，mcp-server 前缀校验的基准）；
+ *   - 调用方把本条目并入 platform_default（首个配置）即自动入
+ *     ``mergeMcpConfigs`` 白名单（同 DAEMON_MCP_SERVER_NAME 惯例）。
+ *
+ * 空凭证仍构造配置（server 启动后 tool 调用返回结构化错误便于诊断，与
+ * buildDaemonMcpServerConfig 容错一致）；sessionId/runId/allowedRoot 空值不写
+ * 键（守卫风格，旧调用零回归）。
+ *
+ * @param backendUrl        backend 根 URL（如 http://localhost:8000）
+ * @param auth              daemon 凭证（apiKey 优先 / token 回落）
+ * @param ctx               可选上下文（sessionId / runId / allowedRoot）
+ * @param serverModulePath  可选，覆盖默认 ``dist/mcp-server.js`` 编译产物路径（测试用）
+ */
+export function buildFileMcpServerConfig(
+  backendUrl: string,
+  auth: DaemonMcpAuth,
+  ctx: FileMcpServerContext = {},
+  serverModulePath?: string,
+): McpServerConfig {
+  const env: Record<string, string> = {
+    MCP_SERVER_BACKEND_URL: backendUrl.replace(/\/+$/, ''),
+    [MCP_TOOLSET_ENV]: 'file',
+  };
+  if (auth.token) {
+    env.MCP_SERVER_DAEMON_TOKEN = auth.token;
+  }
+  // task-09 P0：apiKey 独立 env，mcp-server.ts 优先 X-API-Key 路径。
+  if (auth.apiKey) {
+    env.MCP_SERVER_DAEMON_API_KEY = auth.apiKey;
+  }
+  if (ctx.sessionId) {
+    env[MCP_SESSION_ID_ENV] = ctx.sessionId;
+  }
+  if (ctx.runId) {
+    env[MCP_RUN_ID_ENV] = ctx.runId;
+  }
+  // allowedRoot 归一为绝对路径再写入（相对路径会让 mcp-server 的
+  // resolve+前缀校验基准漂移到 MCP 子进程 cwd，跨平台不稳定）。
+  if (ctx.allowedRoot) {
+    env[MCP_ALLOWED_ROOT_ENV] = resolve(ctx.allowedRoot);
+  }
+  return {
+    command: 'node',
+    args: [serverModulePath ?? defaultMcpServerModulePath()],
     env,
   };
 }

@@ -11,7 +11,13 @@ from __future__ import annotations
 import uuid
 
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
+from app.modules.auth.model import User
+from app.modules.file.model import File
+from app.modules.file.schema import FileMetaResp
+from app.modules.file.service import FileService
 from app.modules.file.tests.conftest import MockStorage, make_id, png_upload
 
 
@@ -196,3 +202,88 @@ async def test_list_without_filters_returns_all_active(
 async def test_list_requires_auth(file_client: AsyncClient) -> None:
     resp = await file_client.get("/api/file/list")
     assert resp.status_code == 401, resp.text
+
+
+# ── agent-file-upload-mcp task-01：description / created_at 扩展字段 ─────────
+# design §7.1 / §8 D-006@v2：/api/file/upload 既有签名不变（description 业务
+# 消费方是 task-03 file_artifacts 端点），带 description 的上传走 service 直调；
+# HTTP 侧只断言新字段在响应中出现且缺省为 None（旧行 NULL 兼容）。
+
+
+async def test_upload_resp_description_default_none(
+    file_client: AsyncClient, auth_headers: dict
+) -> None:
+    """HTTP 上传不传 description：上传/meta/batch/list 响应 description 均为 None，meta 另含 created_at。"""
+    up = await file_client.post("/api/file/upload", headers=auth_headers, files=png_upload())
+    assert up.status_code == 201, up.text
+    body = up.json()
+    assert body["description"] is None
+    fid = body["id"]
+
+    meta = await file_client.get(f"/api/file/{fid}/meta", headers=auth_headers)
+    assert meta.status_code == 200
+    assert meta.json()["description"] is None
+    assert "created_at" in meta.json()
+
+    batch = await file_client.post(
+        "/api/file/batch-meta", headers=auth_headers, json={"ids": [fid]}
+    )
+    assert batch.status_code == 200
+    assert batch.json()[0]["description"] is None
+    assert "created_at" in batch.json()[0]
+
+    listed = await file_client.get("/api/file/list", headers=auth_headers)
+    assert listed.status_code == 200
+    row = next(r for r in listed.json() if r["id"] == fid)
+    assert row["description"] is None
+    assert "created_at" in row
+
+
+async def test_service_upload_with_description_roundtrip(
+    db_session: AsyncSession, mock_storage: MockStorage
+) -> None:
+    """service 直调带 description：FileUploadResp 带出，meta/batch/list 全路径回显，created_at 等于落库时间。"""
+    svc = FileService(db_session, mock_storage, get_settings())
+    uid = make_id()
+    resp = await svc.upload_file(
+        original_name="方案.md",
+        data=b"# plan",
+        mime_type="text/markdown",
+        uploaded_by=uid,
+        description="主 agent 产出的执行方案",
+    )
+    assert resp.description == "主 agent 产出的执行方案"
+
+    me = User(id=uid, is_platform_admin=False)  # 仅 _can_access 属性判定用
+    row = await db_session.get(File, resp.id)
+    assert row.description == "主 agent 产出的执行方案"
+
+    meta = FileMetaResp.model_validate(await svc.get_meta(resp.id, user=me))
+    assert meta.description == "主 agent 产出的执行方案"
+    assert meta.created_at == row.created_at  # 等于落库时间
+
+    batch = await svc.batch_meta([resp.id], user=me)
+    assert batch[0].description == "主 agent 产出的执行方案"
+    assert batch[0].created_at == row.created_at
+
+    listed = await svc.list_files(user=me)
+    assert [f.id for f in listed] == [resp.id]
+    assert listed[0].description == "主 agent 产出的执行方案"
+    assert listed[0].created_at == row.created_at
+
+
+async def test_service_upload_description_truncated_to_255(
+    db_session: AsyncSession, mock_storage: MockStorage
+) -> None:
+    """超长 description 落库前截断 255（仿 original_name，不加新校验错误码）。"""
+    svc = FileService(db_session, mock_storage, get_settings())
+    resp = await svc.upload_file(
+        original_name="a.md",
+        data=b"a",
+        mime_type="text/markdown",
+        uploaded_by=make_id(),
+        description="x" * 300,
+    )
+    assert resp.description == "x" * 255
+    row = await db_session.get(File, resp.id)
+    assert row.description == "x" * 255

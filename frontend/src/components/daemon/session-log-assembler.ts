@@ -54,6 +54,12 @@
  *   - kind=tool_use：channel=tool_call（daemon 上报的工具 JSON，含 tool_use_id/success，
  *     权威源）。stdout 的 [TOOL_USE] 文本行与该 JSON 重复 → 丢弃（双发去重，否则 tool_use
  *     翻倍、result 仅够配一半，余下永显「执行中 ⏳」）
+ *   - kind=file：channel=tool_call 且 tool_kind=FileUpload（task-08 /
+ *     2026-08-23-agent-file-upload-mcp / FR-01 / D-007@v1），content JSON
+ *     {file_id, original_name, size, mime_type, description} 可解析 → file 段
+ *     （design §7.3，优先于通用 tool_use 映射——聊天流渲染文件卡片而非工具行）；
+ *     解析失败 / 缺 file_id → 回退通用 tool_use 映射不丢行；未知 / 缺省 tool_kind
+ *     一律走原 tool_use 映射（零回归）
  *   - kind=tool_result：[TOOL_RESULT] 前缀的 stdout 文本行（剥前缀，供配对最近 tool_use）
  *   - kind=stderr：channel=stderr
  *   - kind=reply：其余（剥 [ASSISTANT]/[LOG:\w+] 前缀）
@@ -67,7 +73,8 @@ export type SessionLogSegmentKind =
   | "tool_use"
   | "tool_result"
   | "stderr"
-  | "override";
+  | "override"
+  | "file";
 
 export interface SessionLogSegment {
   kind: SessionLogSegmentKind;
@@ -83,6 +90,15 @@ export interface SessionLogSegment {
    * 撤回实现（task-02）据此决定截断文本段还是移除思考段。
    */
   variant?: "assistant" | "thinking";
+  /**
+   * file kind 专有（task-08 / design §7.3）——FileUpload 日志行 content JSON 解析
+   * 产物五字段（file 段的唯一数据源；其余 kind 恒缺省）。text 对 file 恒为空串。
+   */
+  fileId?: string;
+  name?: string;
+  size?: number;
+  mime?: string;
+  description?: string;
 }
 
 /**
@@ -97,9 +113,51 @@ export interface SessionLogSegment {
  */
 export const OVERRIDE_RE = /^\[(ASSISTANT_OVERRIDE|THINKING_OVERRIDE)\]\s+(\S+)/;
 
+/** FileUpload 日志行 content JSON 解析产物（design §7.2 / task-03 契约五字段）。 */
+interface FileUploadContent {
+  fileId: string;
+  name: string;
+  size: number;
+  mime: string;
+  description: string;
+}
+
+/**
+ * task-08（2026-08-23-agent-file-upload-mcp / D-007@v1）：解析 FileUpload 日志行的
+ * content JSON（{file_id, original_name, size, mime_type, description}）。
+ * 非 JSON / 非对象 / file_id / original_name 缺失 → null（调用方回退通用 tool_use
+ * 映射，不丢行，R-07 容错）；size / mime_type / description 类型异常时按 0 / 空串
+ * 兜底（后端契约恒为合法 JSON，此处防御截断行与旧数据）。
+ */
+function parseFileUploadContent(raw: string): FileUploadContent | null {
+  try {
+    const obj = JSON.parse(raw) as {
+      file_id?: unknown;
+      original_name?: unknown;
+      size?: unknown;
+      mime_type?: unknown;
+      description?: unknown;
+    } | null;
+    if (!obj || typeof obj !== "object") return null;
+    const fileId = typeof obj.file_id === "string" ? obj.file_id.trim() : "";
+    const name = typeof obj.original_name === "string" ? obj.original_name.trim() : "";
+    if (!fileId || !name) return null;
+    return {
+      fileId,
+      name,
+      size: typeof obj.size === "number" && Number.isFinite(obj.size) ? obj.size : 0,
+      mime: typeof obj.mime_type === "string" ? obj.mime_type : "",
+      description: typeof obj.description === "string" ? obj.description : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function classifySessionLog(
   content: string,
   channel?: string | null,
+  toolKind?: string | null,
 ): SessionLogSegment | null {
   const trimmed = (content ?? "").trim();
   if (!trimmed) return null;
@@ -119,7 +177,16 @@ export function classifySessionLog(
     };
   }
   if (channel === "stderr") return { kind: "stderr", text: trimmed };
-  if (channel === "tool_call") return { kind: "tool_use", text: trimmed };
+  if (channel === "tool_call") {
+    // task-08 / R-07：tool_kind=FileUpload 的行优先映射 file 段（五字段取自 content
+    // JSON，design §7.3）——不再误渲染通用 tool_use 段；解析失败回退通用映射不丢行；
+    // 未知 / 缺省 tool_kind（含旧调用两参形态）一律走原 tool_use 映射，零回归。
+    if (toolKind === "FileUpload") {
+      const file = parseFileUploadContent(trimmed);
+      if (file) return { kind: "file", text: "", ...file };
+    }
+    return { kind: "tool_use", text: trimmed };
+  }
   // ql-20260730-003 修正：stdout [TOOL_USE] 文本行与 channel=tool_call JSON 是同一工具的
   // 重复记录（daemon 双发），丢弃文本行、以 tool_call JSON 为权威源——否则 tool_use 翻倍、
   // result 仅够配一半，余下永显「执行中 ⏳」（已结束会话也假运行）。
@@ -198,6 +265,8 @@ export interface AssemblerLogInput {
   parentToolUseId?: string | null;
   subagentType?: string | null;
   depth?: number | null;
+  /** 工具种类（AgentRunLog.tool_kind，归一层填入）。task-08：'FileUpload' 的
+   *  tool_call 行经 classifySessionLog 第三参优先映射为 file 段。 */
   toolKind?: string | null;
 }
 
@@ -238,7 +307,30 @@ export type TurnSegment =
       subagentType: string | null;
       children: TurnSegment[];
     }
-  | { kind: "stderr"; id: string; text: string; ts: number | null };
+  | { kind: "stderr"; id: string; text: string; ts: number | null }
+  | {
+      /**
+       * 文件段（task-08 / 2026-08-23-agent-file-upload-mcp / design §7.3 / D-001@v1）：
+       * tool_kind=FileUpload 日志行（D-007@v1）的分类映射产物——聊天流文件卡片
+       * （FileMessageCard）的数据源，task-09 run 详情产出文件区复用同字段。
+       * 五字段取自 content JSON；id 走 logId/segmentId 派生 + 唯一后缀；ts 取 log
+       * timestamp；兼容投影（segmentsToLegacy）跳过本段（旧消费方零感知）。
+       */
+      kind: "file";
+      id: string;
+      /** 文件 id（File 表主键；blob 拉取与下载均经此）。 */
+      fileId: string;
+      /** 原始文件名。 */
+      name: string;
+      /** 大小（字节）。 */
+      size: number;
+      /** MIME（isImageMime 判定缩略图/通用形态）。 */
+      mime: string;
+      /** 上传描述（agent 填写，可空串）。 */
+      description: string;
+      ts: number | null;
+      segId?: string | null;
+    };
 
 export type ToolTurnSegment = Extract<TurnSegment, { kind: "tool" }>;
 export type StubTurnSegment = Extract<TurnSegment, { kind: "subagent_stub" }>;
@@ -606,7 +698,7 @@ export function applyLogToSegments(
   // 对齐现有 applyLogToTurn 的 seenLogIds 入口检查。
   if (input.logId && turn.seenLogIds.has(input.logId)) return turn;
 
-  const seg = classifySessionLog(input.content ?? "", input.channel);
+  const seg = classifySessionLog(input.content ?? "", input.channel, input.toolKind);
   if (!seg) return turn;
 
   // override 撤回令箭（task-02）：撤回信号非内容，不渲染进段——按 segmentId 前缀路由
@@ -764,8 +856,31 @@ export function applyLogToSegments(
         },
       ]);
       break;
+    case "file": {
+      // task-08（design §7.3）：FileUpload 行的结构化产物按归属桶原位追加——主
+      // agent 上传落顶层、子代理上传（parent_tool_use_id 非空）落父工具段 children。
+      // id 走 logId/segmentId 派生 + 唯一后缀；ts 取 log timestamp；五字段由
+      // classifySessionLog 的 file 分支保证非空（?? 兜底仅类型收窄）；segId 按既有
+      // 段派生规则仅在输入携带时写入（FileUpload 行为完整行，实践不带）。
+      const fileSegId = nonEmptyString(input.segmentId);
+      segments = applyToBucket(segments, bucketId, routeSubagentType, (children) => [
+        ...children,
+        {
+          kind: "file",
+          id: makeUniqueSegmentId(segments, segmentIdBase(input, "file", ts)),
+          fileId: seg.fileId ?? "",
+          name: seg.name ?? "",
+          size: seg.size ?? 0,
+          mime: seg.mime ?? "",
+          description: seg.description ?? "",
+          ts,
+          ...(fileSegId ? { segId: fileSegId } : {}),
+        },
+      ]);
+      break;
+    }
     default:
-      // classifySessionLog 仅产上述五类 + override（已提前 return），防御分支。
+      // classifySessionLog 仅产上述六类 + override（已提前 return），防御分支。
       break;
   }
 
@@ -903,10 +1018,12 @@ export function logsToSegments(
   let turn = createEmptyAssembledTurn();
   for (const log of logs) {
     if (dedup) {
-      const seg = classifySessionLog(log.content ?? "", log.channel);
+      const seg = classifySessionLog(log.content ?? "", log.channel, log.toolKind);
       // 分类丢弃行（协议卡 / SYSTEM 等）不记键（对齐 logsToTurns 的 continue 位置）。
       if (!seg) continue;
-      const key = `${seg.kind}:${seg.text}`;
+      // task-08：file 段 text 恒空——键改用 fileId，两份不同文件不得误去重；
+      // 同 file_id 重复行为内容级去重兜底（后端另有 (run_id, dedup_key) 唯一索引）。
+      const key = seg.kind === "file" ? `file:${seg.fileId ?? ""}` : `${seg.kind}:${seg.text}`;
       if (seenText.has(key)) continue;
       seenText.add(key);
     }
@@ -953,6 +1070,10 @@ export function segmentsToLegacy(segments: TurnSegment[]): {
           break;
         case "stderr":
           processItems.push({ kind: "stderr", text: s.text, ts: s.ts ?? undefined });
+          break;
+        case "file":
+          // task-08：file 段跳过投影——旧消费方（turn-timeline 的 output /
+          // processItems）零感知，文件卡片只走段渲染路径（FileMessageCard）。
           break;
       }
     }

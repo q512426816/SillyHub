@@ -12,6 +12,9 @@
  *   6. 双路去重（R-01 / Grill X-08）：SSE log_id 与历史 seenText 两路独立不合并；
  *   7. 历史与实时一致性（§9.1 / §9.4）：增量 vs 批量深度相等 + 投影 ts 映射；
  *   8. streaming（§5 Phase3）：置位 / 撤回随段清除 / finishTurn 全树清除。
+ *   9. FileUpload 文件段（task-08 / 2026-08-23-agent-file-upload-mcp / FR-01 /
+ *      design §7.3）：FileUpload 行 → file 段且不再产 tool_use 段 / 坏 JSON 回退
+ *      通用映射 / 未知 tool_kind 策略保持 / 投影跳过 / 两路去重不受影响。
  */
 
 import { describe, it, expect } from "vitest";
@@ -802,5 +805,109 @@ describe("完整行与 partial 派生段隔离（ql-20260820-011）", () => {
     const textSegs = turn.segments.filter((s) => s.kind === "text");
     expect(textSegs).toHaveLength(1);
     expect(textSegs[0]).toMatchObject({ streaming: true, text: "前半后半" });
+  });
+});
+
+/* ───────── 9. FileUpload 文件段（task-08 / 2026-08-23-agent-file-upload-mcp / FR-01 / design §7.3） ───────── */
+
+describe("FileUpload 文件段（task-08 / FR-01 / design §7.3）", () => {
+  const T1 = "2026-08-23T09:30:00.000Z";
+  /** task-03 契约：channel=tool_call、tool_kind=FileUpload、content 五字段 JSON。 */
+  const FILE_JSON = JSON.stringify({
+    file_id: "f-1",
+    original_name: "q3-bug-trend.png",
+    size: 186368,
+    mime_type: "image/png",
+    description: "三季度 Bug 趋势图",
+  });
+
+  function makeFileLog(
+    id: string,
+    content: string,
+    extra?: Partial<AssemblerLogInput>,
+  ): AssemblerLogInput {
+    return makeLog(id, "tool_call", content, {
+      toolKind: "FileUpload",
+      timestamp: T1,
+      ...extra,
+    });
+  }
+
+  it("tool_kind=FileUpload 的 tool_call 行 → file 段（五字段取自 content JSON、ts 取 log timestamp），同轮不产生 tool_use 段（R-07 锚点）", () => {
+    const turn = applyAll([makeFileLog("1", FILE_JSON)]);
+    expect(turn.segments).toEqual([
+      {
+        kind: "file",
+        id: "file:1",
+        fileId: "f-1",
+        name: "q3-bug-trend.png",
+        size: 186368,
+        mime: "image/png",
+        description: "三季度 Bug 趋势图",
+        ts: Date.parse(T1),
+      },
+    ]);
+    expect(turn.segments.some((s) => s.kind === "tool")).toBe(false);
+  });
+
+  it("content 非 JSON / 缺 file_id → 回退通用 tool_use 映射不丢行（raw 原样进 tool 段）", () => {
+    const badText = "upload_file 上传失败：文件不存在";
+    const missingId = JSON.stringify({ size: 1, mime_type: "text/plain", description: "" });
+    const turn = applyAll([
+      makeFileLog("1", badText),
+      makeFileLog("2", missingId),
+    ]);
+    expect(turn.segments.map((s) => s.kind)).toEqual(["tool", "tool"]);
+    expect(expectTool(turn.segments[0]).raw).toBe(badText);
+    expect(expectTool(turn.segments[1]).raw).toBe(missingId);
+  });
+
+  it("未知 / 缺省 tool_kind 的 tool_call 行 → 仍走通用 tool_use 映射（既有策略零回归，design §9）", () => {
+    const turn = applyAll([
+      makeLog("1", "tool_call", FILE_JSON),
+      makeLog("2", "tool_call", FILE_JSON, { toolKind: "SomethingElse" }),
+    ]);
+    expect(turn.segments).toHaveLength(2);
+    expect(turn.segments.every((s) => s.kind === "tool")).toBe(true);
+  });
+
+  it("segmentsToLegacy 投影跳过 file 段（output / processItems 零贡献，旧消费方零感知）", () => {
+    const turn = applyAll([
+      makeLog("1", "stdout", "图表已生成"),
+      makeFileLog("2", FILE_JSON),
+    ]);
+    expect(turn.segments.map((s) => s.kind)).toEqual(["text", "file"]);
+    expect(turn.output).toBe("图表已生成");
+    expect(turn.processItems).toEqual([]);
+  });
+
+  it("logsToSegments 两路去重不受影响：不同文件不去重（键含 fileId）、同 file_id 重复行内容级去重、SSE log_id 去重照常", () => {
+    const json2 = JSON.stringify({
+      file_id: "f-2",
+      original_name: "q3-bug-data.csv",
+      size: 47104,
+      mime_type: "text/csv",
+      description: "",
+    });
+    // 两个不同文件：file 段 text 恒空，若仍按 kind:text 做键会误去重——键必须含 fileId
+    const two = logsToSegments([makeFileLog("1", FILE_JSON), makeFileLog("2", json2)]);
+    expect(two.map((s) => (s.kind === "file" ? s.fileId : s.kind))).toEqual(["f-1", "f-2"]);
+    // 同 file_id 重复行（重放）：内容级去重兜底（后端另有 (run_id, dedup_key) 唯一索引）
+    const dup = logsToSegments([makeFileLog("1", FILE_JSON), makeFileLog("2", FILE_JSON)]);
+    expect(dup).toHaveLength(1);
+    // SSE 实时路径 log_id 去重：重复 input 原引用返回（file 行同样适用）
+    const turn = applyAll([makeFileLog("1", FILE_JSON)]);
+    expect(applyLogToSegments(turn, makeFileLog("1", FILE_JSON))).toBe(turn);
+  });
+
+  it("parent_tool_use_id 归属路由：子代理上传的文件段进父工具段 children（file 段可嵌套）", () => {
+    const raw = '{"tool":"Task","args":{"description":"子"},"tool_use_id":"tu_s","success":true}';
+    const turn = applyAll([
+      makeLog("1", "tool_call", raw),
+      makeFileLog("2", FILE_JSON, { parentToolUseId: "tu_s" }),
+    ]);
+    const tool = toolById(turn.segments, "tu_s");
+    expect(tool.children.map((s) => s.kind)).toEqual(["file"]);
+    expect(tool.children[0]).toMatchObject({ fileId: "f-1", ts: Date.parse(T1) });
   });
 });

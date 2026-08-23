@@ -21,12 +21,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import Settings
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.modules.agent.model import AgentMission, AgentRun, AgentSession
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import allowed_workspace_ids, has_permission
 from app.modules.file.model import File
 from app.modules.file.schema import FileMetaResp, FileUploadResp
 from app.modules.storage.base import StorageBackend
+from app.modules.task.model import Task
 
 log = get_logger(__name__)
 
@@ -75,8 +77,13 @@ class FileService:
         uploaded_by: uuid.UUID,
         owner_type: str = "",
         owner_id: uuid.UUID | None = None,
+        description: str | None = None,
     ) -> FileUploadResp:
-        """上传：校验 → 存对象 → 落 File 表 → 返回 FileUploadResp。"""
+        """上传：校验 → 存对象 → 落 File 表 → 返回 FileUploadResp。
+
+        ``description``：agent 上传制品说明（D-006@v2），落库前截断 255
+        （仿 original_name，不加新校验错误码）；缺省 None 兼容旧行 NULL。
+        """
         self.validate_upload(size=len(data), mime_type=mime_type)
         file_id = uuid.uuid4()
         now = datetime.now(UTC)
@@ -94,6 +101,7 @@ class FileService:
             size=len(data),
             uploaded_by=uploaded_by,
             created_at=now,
+            description=description[:255] if description else None,
         )
         self._session.add(row)
         try:
@@ -108,7 +116,11 @@ class FileService:
                 log.warning("file.upload_compensation_failed", stored_key=stored_key)
             raise
         return FileUploadResp(
-            id=row.id, original_name=row.original_name, mime_type=row.mime_type, size=row.size
+            id=row.id,
+            original_name=row.original_name,
+            mime_type=row.mime_type,
+            size=row.size,
+            description=row.description,
         )
 
     async def _get_active(self, file_id: uuid.UUID) -> File:
@@ -128,6 +140,12 @@ class FileService:
         本人上传（uploaded_by == user.id）或 platform_admin 豁免；
         workspace 归属文件对在该 workspace 有 WORKSPACE_READ 的用户可见
         （借用方案查看，R-04）。权限解析统一走 auth/rbac.py，不在本模块重复实现。
+
+        agent 产物归属（2026-08-23-agent-file-upload-mcp task-02 / D-004@v2）：
+        owner_type=agent_session/agent_run 时按会话/run 解析出 workspace 锚点，
+        锚点存在则同样判 WORKSPACE_READ；锚点 NULL（会话无 workspace / run 解析链
+        全空的孤儿）一律兜底 deny——绝不能把 None 传进 has_permission（其
+        workspace_id=None 分支会查「任意 workspace 有该权限」放行，等于锚点失效）。
         """
         if row.uploaded_by == user.id or user.is_platform_admin:
             return True
@@ -138,7 +156,60 @@ class FileService:
                 permission=Permission.WORKSPACE_READ,
                 workspace_id=row.owner_id,
             )
+        if row.owner_type == "agent_session" and row.owner_id is not None:
+            anchor = await self._agent_session_anchor(row.owner_id)
+            if anchor is None:
+                return False
+            return await has_permission(
+                self._session,
+                user=user,
+                permission=Permission.WORKSPACE_READ,
+                workspace_id=anchor,
+            )
+        if row.owner_type == "agent_run" and row.owner_id is not None:
+            anchor = await self._agent_run_anchor(row.owner_id)
+            if anchor is None:
+                return False
+            return await has_permission(
+                self._session,
+                user=user,
+                permission=Permission.WORKSPACE_READ,
+                workspace_id=anchor,
+            )
         return False
+
+    async def _agent_session_anchor(self, session_id: uuid.UUID) -> uuid.UUID | None:
+        """会话归属 → workspace 锚点：主键单查 AgentSession.workspace_id。
+
+        会话不存在或 workspace_id 为 NULL（runtime 级会话无绑定）→ None，
+        由调用方兜底 deny（无权与不存在同语义 404，D-001）。
+        """
+        sess = await self._session.get(AgentSession, session_id)
+        if sess is None or sess.workspace_id is None:
+            return None
+        return sess.workspace_id
+
+    async def _agent_run_anchor(self, run_id: uuid.UUID) -> uuid.UUID | None:
+        """run 归属 → workspace 锚点（D-004@v2 解析链）：
+
+        ``target_workspace_id ?? mission.workspace_id ?? task.workspace_id``，
+        逐段主键/外键单查（R-06：量级与会话文件数同阶，可接受，不做批量预取）。
+        AgentRun 无 workspace_id 列；三段全空的孤儿 run → None 兜底 deny。
+        """
+        run = await self._session.get(AgentRun, run_id)
+        if run is None:
+            return None
+        if run.target_workspace_id is not None:
+            return run.target_workspace_id
+        if run.mission_id is not None:
+            mission = await self._session.get(AgentMission, run.mission_id)
+            if mission is not None:
+                return mission.workspace_id
+        if run.task_id is not None:
+            task = await self._session.get(Task, run.task_id)
+            if task is not None:
+                return task.workspace_id
+        return None
 
     async def _get_active_for(self, file_id: uuid.UUID, *, user: User) -> File:
         """取未软删 File 并断言归属；不存在/已删/无权统一 404（D-001）。"""

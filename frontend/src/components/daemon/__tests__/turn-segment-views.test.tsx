@@ -4,7 +4,8 @@
 // 覆盖维度：
 //   1. 各段类型渲染——text（MarkdownText 正文 + streaming 光标 .seg-caret）/ thinking
 //      （折叠头「💭 思考过程」+ 摘要 60 字截断）/ tool（工具名 + 主参数 + 状态徽章
-//      ✓/⏳/✗ + result 展开 + 复制按钮）/ stderr（⚠ 前缀）/ tool 带 children → 子代理块；
+//      ✓/⏳/✗ + result 展开 + 复制按钮）/ stderr（⚠ 前缀）/ tool 带 children → 子代理块 /
+//      file（task-08 → FileMessageCard 分流 + 五字段透传，卡片本体另测）；
 //   2. 折叠交互——思考行 / 工具行 / 子代理块默认折叠 → 点击展开内容可见；
 //   3. 扫动动画类名——running 工具行与子代理头含 seg-sweep，ok/deny 不含；
 //   4. 子代理递归——depth>1 嵌套渲染 + running→终态自动收敛折叠 + stub 名称回退；
@@ -34,6 +35,7 @@ import type {
   TextTurnSegment,
   ThinkingTurnSegment,
   StderrTurnSegment,
+  FileTurnSegment,
 } from "../turn-segment-views";
 import {
   TurnStatusBar,
@@ -48,6 +50,20 @@ import type {
 vi.mock("@/components/ui/markdown-text", () => ({
   MarkdownText: ({ content }: { content: string }) => (
     <div data-testid="markdown-text">{content}</div>
+  ),
+}));
+
+// task-08：file 段卡片以桩替换——卡内两形态（图片缩略图/通用卡）与下载交互由
+// file-message-card.test.tsx 专项覆盖，本文件只锁 SegmentView 的分流与字段透传。
+vi.mock("@/components/daemon/file-message-card", () => ({
+  FileMessageCard: (props: Record<string, unknown>) => (
+    <div
+      data-testid="file-message-card"
+      data-file-id={String(props.fileId)}
+      data-mime={String(props.mime)}
+      data-name={String(props.name)}
+      data-size={String(props.size)}
+    />
   ),
 }));
 
@@ -132,6 +148,21 @@ function makeStubSeg(overrides: Partial<StubTurnSegment> = {}): StubTurnSegment 
     id: "call_stub",
     subagentType: "Explore",
     children: [],
+    ...overrides,
+  };
+}
+
+/** 文件段 fixture（task-08 / design §7.3，字段对齐 FileUpload content JSON 五字段）。 */
+function makeFileSeg(overrides: Partial<FileTurnSegment> = {}): FileTurnSegment {
+  return {
+    kind: "file",
+    id: "file:1",
+    fileId: "f-1",
+    name: "q3-bug-trend.png",
+    size: 186368,
+    mime: "image/png",
+    description: "三季度 Bug 趋势图",
+    ts: 1_000,
     ...overrides,
   };
 }
@@ -317,6 +348,16 @@ describe("SegmentView 统一分发器", () => {
   it("subagent_stub 无 subagentType：名称回退「子代理」且无类型标签", () => {
     render(<SegmentView segment={makeStubSeg({ subagentType: null })} />);
     expect(screen.getByText("子代理")).toBeInTheDocument();
+  });
+
+  it("file 段 → FileMessageCard 接线：「agent 上传了文件」标注 + 五字段透传（task-08）", () => {
+    render(<SegmentView segment={makeFileSeg()} />);
+    expect(screen.getByText("agent 上传了文件")).toBeInTheDocument();
+    const card = screen.getByTestId("file-message-card");
+    expect(card.getAttribute("data-file-id")).toBe("f-1");
+    expect(card.getAttribute("data-name")).toBe("q3-bug-trend.png");
+    expect(card.getAttribute("data-size")).toBe("186368");
+    expect(card.getAttribute("data-mime")).toBe("image/png");
   });
 });
 

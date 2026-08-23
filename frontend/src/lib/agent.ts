@@ -119,6 +119,45 @@ export function getAgentRunLogs(workspaceId: string, runId: string, after?: stri
   );
 }
 
+// ── Agent File Artifacts（2026-08-23-agent-file-upload-mcp task-09）──
+
+/**
+ * agent 文件制品元数据（GET /api/agent/file-artifacts 响应 files 条目）。
+ *
+ * 对齐 backend file/schema.py FileMetaResp（含 task-01 扩展的 description /
+ * created_at，旧数据 description 可为 null）。类型本卡本地声明，api-types.ts
+ * 生成对齐归 task-10，本卡不手改生成文件。
+ */
+export interface AgentFileArtifactMeta {
+  id: string;
+  original_name: string;
+  mime_type: string;
+  size: number;
+  owner_type: string;
+  owner_id: string | null;
+  description: string | null;
+  created_at: string;
+}
+
+interface AgentFileArtifactListResp {
+  files: AgentFileArtifactMeta[];
+}
+
+/**
+ * 按执行记录（run）列 agent 上传的产出文件（design §7.2 / D-010@v1）。
+ *
+ * 端点路径无 workspace 前缀（/api/agent/file-artifacts），鉴权为 JWT 用户
+ * WORKSPACE_READ + run 锚 workspace 复核（apiFetch 自动带 Bearer）。不复用
+ * /api/file/list（其非 admin owner 分支把 owner_id 当 workspace id 鉴权会
+ * 404，D-010@v1）。响应 { files: [...] } 在此拆包，调用方直接拿数组（服务端
+ * 已按 created_at 倒序）。
+ */
+export function listAgentFileArtifacts(runId: string) {
+  return apiFetch<AgentFileArtifactListResp>("/api/agent/file-artifacts", {
+    query: { run_id: runId },
+  }).then((resp) => resp.files);
+}
+
 /** 运行列表/详情展示用：优先 provider+model，回退 agent_type（内部 adapter id）。 */
 export function formatRunProviderLabel(
   run: Pick<AgentRun, "provider" | "model" | "agent_type">,

@@ -10,6 +10,9 @@
 //     （daemon 重启后主 agent 恢复 MCP tool）
 //   - isMainAgentSession 未注入时所有 session 都不注入 MCP（向后兼容）
 //   - mainAgentMcpConfigProvider 返回 undefined 时不注入（容错）
+//   - task-06（2026-08-23-agent-file-upload-mcp / FR-02）：双 server（sillyhub-daemon
+//     + sillyhub-file）注入、两内置条目 env 均补 MCP_SESSION_ID、codex/mission_worker
+//     不注入任何 server、mcpRefs 非空未列名被剔除（同语义）
 
 import { describe, it, expect, vi } from 'vitest';
 import type { Query, SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
@@ -62,12 +65,24 @@ const BASE_INPUT = {
   pathToClaudeCodeExecutable: 'C:\\bin\\claude.exe',
 };
 
-// 主 agent MCP 配置 provider（模拟 cli.ts 注入的闭包）
+// 主 agent MCP 配置 provider（模拟 cli.ts 注入的闭包）。
+// task-06（2026-08-23-agent-file-upload-mcp）：cli.ts provider 现返回双 server 表
+// （sillyhub-daemon 编排 + sillyhub-file 上传），此处 mock 对齐该形态。
 const FAKE_DAEMON_MCP: Record<string, McpServerConfigForDriver> = {
   'sillyhub-daemon': {
     command: 'node',
     args: ['dist/mcp-server.js'],
     env: { MCP_SERVER_BACKEND_URL: 'http://localhost:8000', MCP_SERVER_DAEMON_TOKEN: 'token-x' },
+  },
+  'sillyhub-file': {
+    command: 'node',
+    args: ['dist/mcp-server.js'],
+    env: {
+      MCP_SERVER_BACKEND_URL: 'http://localhost:8000',
+      MCP_SERVER_DAEMON_TOKEN: 'token-x',
+      MCP_TOOLSET: 'file',
+      MCP_ALLOWED_ROOT: 'C:\\work',
+    },
   },
 };
 
@@ -91,6 +106,9 @@ describe('task-06: 主 agent MCP tool 注入', () => {
     expect(opts!.mcpServers!['sillyhub-daemon']).toBeDefined();
     expect(opts!.mcpServers!['sillyhub-daemon'].command).toBe('node');
     expect(opts!.mcpServers!['sillyhub-daemon'].env?.MCP_SERVER_DAEMON_TOKEN).toBe('token-x');
+    // task-06：sillyhub-file 与 sillyhub-daemon 并列注入（双 server 表）
+    expect(opts!.mcpServers!['sillyhub-file']).toBeDefined();
+    expect(opts!.mcpServers!['sillyhub-file'].env?.MCP_TOOLSET).toBe('file');
   });
 
   it('普通会话（stage 未传）create 时不注入 mcpServers', async () => {
@@ -243,6 +261,8 @@ describe('task-06: 主 agent MCP tool 注入', () => {
 // 必须写进 mcpServers['sillyhub-daemon'].env。cli.ts provider（task-09 定型，不在
 // task-10 allowed_paths）不传 sessionId，故由 _resolveMainAgentMcp 在 provider 返回后
 // 按 ctx.sessionId 补写。provider 收到的 ctx 含 sessionId（构造侧契约）。
+// task-06（2026-08-23-agent-file-upload-mcp）：sillyhub-file 与 sillyhub-daemon 同
+// 管道补写（调用两次 injectMcpSessionId），其它外部 server 仍不注入。
 
 describe('task-10: MCP_SESSION_ID 会话上下文注入', () => {
   it('create 时 sillyhub-daemon 条目 env 含 MCP_SESSION_ID = ctx.sessionId', async () => {
@@ -262,6 +282,26 @@ describe('task-10: MCP_SESSION_ID 会话上下文注入', () => {
     expect(opts!.mcpServers!['sillyhub-daemon'].env?.MCP_SESSION_ID).toBe('sess-ctx-1');
     // 既有 env 不被覆盖
     expect(opts!.mcpServers!['sillyhub-daemon'].env?.MCP_SERVER_DAEMON_TOKEN).toBe('token-x');
+  });
+
+  it('task-06: create 时 sillyhub-file 条目 env 同样含 MCP_SESSION_ID（双条目补写）', async () => {
+    const { driver, getStartOpts } = makeMockDriver();
+    const deps = makeDeps();
+    const sm = new SessionManager(
+      { driver, ...deps },
+      {
+        isMainAgentSession: (ctx) => ctx.stage === 'orchestrator',
+        mainAgentMcpConfigProvider: () => FAKE_DAEMON_MCP,
+      },
+    );
+
+    await sm.create({ ...BASE_INPUT, sessionId: 'sess-ctx-2', stage: 'orchestrator' });
+
+    const opts = getStartOpts();
+    expect(opts!.mcpServers!['sillyhub-file'].env?.MCP_SESSION_ID).toBe('sess-ctx-2');
+    // sillyhub-file 既有 env（allowedRoot / toolset）不被补写覆盖
+    expect(opts!.mcpServers!['sillyhub-file'].env?.MCP_TOOLSET).toBe('file');
+    expect(opts!.mcpServers!['sillyhub-file'].env?.MCP_ALLOWED_ROOT).toBe('C:\\work');
   });
 
   it('restoreAndReconnect 时同样注入（daemon 重启后恢复会话上下文）', async () => {
@@ -288,9 +328,11 @@ describe('task-10: MCP_SESSION_ID 会话上下文注入', () => {
 
     const opts = getStartOpts();
     expect(opts!.mcpServers!['sillyhub-daemon'].env?.MCP_SESSION_ID).toBe('sess-restore-ctx');
+    // task-06：restore 路径双条目同补写
+    expect(opts!.mcpServers!['sillyhub-file'].env?.MCP_SESSION_ID).toBe('sess-restore-ctx');
   });
 
-  it('provider 返回的其它 MCP server 不注入 MCP_SESSION_ID（env 卫生）', async () => {
+  it('provider 返回的外部 MCP server 不注入 MCP_SESSION_ID（env 卫生，仅两个内置条目补写）', async () => {
     const { driver, getStartOpts } = makeMockDriver();
     const deps = makeDeps();
     const multi: Record<string, McpServerConfigForDriver> = {
@@ -305,10 +347,14 @@ describe('task-10: MCP_SESSION_ID 会话上下文注入', () => {
       },
     );
 
-    await sm.create({ ...BASE_INPUT, stage: 'orchestrator' });
+    await sm.create({ ...BASE_INPUT, sessionId: 'sess-hygien', stage: 'orchestrator' });
 
     const opts = getStartOpts();
+    // 外部 server 原样（env 卫生）
     expect(opts!.mcpServers!['workspace-mcp'].env).toEqual({ WS_TOKEN: 't' });
+    // 两个 daemon 内置条目均补写 MCP_SESSION_ID
+    expect(opts!.mcpServers!['sillyhub-daemon'].env?.MCP_SESSION_ID).toBe('sess-hygien');
+    expect(opts!.mcpServers!['sillyhub-file'].env?.MCP_SESSION_ID).toBe('sess-hygien');
   });
 
   it('注入后的 env 穿过 mcpRefs 子集过滤保留（sillyhub-daemon 在 refs 内）', async () => {
@@ -331,5 +377,95 @@ describe('task-10: MCP_SESSION_ID 会话上下文注入', () => {
 
     const opts = getStartOpts();
     expect(opts!.mcpServers!['sillyhub-daemon'].env?.MCP_SESSION_ID).toBe('sess-refs-ctx');
+    // task-06（design §9）：mcpRefs 非空未列 sillyhub-file → 同语义剔除（不单独豁免）
+    expect(opts!.mcpServers!['sillyhub-file']).toBeUndefined();
+  });
+
+  it('task-06: mcpRefs 列入双 server 时均保留；空数组不过滤', async () => {
+    const { driver, getStartOpts } = makeMockDriver();
+    const deps = makeDeps();
+    const sm = new SessionManager(
+      { driver, ...deps },
+      {
+        isMainAgentSession: (ctx) => ctx.stage === 'orchestrator',
+        mainAgentMcpConfigProvider: () => FAKE_DAEMON_MCP,
+      },
+    );
+
+    // 显式列名 → 双条目均保留
+    await sm.create({
+      ...BASE_INPUT,
+      sessionId: 'sess-refs-both',
+      stage: 'orchestrator',
+      mcpRefs: ['sillyhub-daemon', 'sillyhub-file'],
+    });
+    let opts = getStartOpts();
+    expect(opts!.mcpServers!['sillyhub-daemon']).toBeDefined();
+    expect(opts!.mcpServers!['sillyhub-file']).toBeDefined();
+    expect(opts!.mcpServers!['sillyhub-file'].env?.MCP_SESSION_ID).toBe('sess-refs-both');
+
+    // 空数组 → 不过滤（FR-15 行为同今天）
+    await sm.create({
+      ...BASE_INPUT,
+      sessionId: 'sess-refs-empty',
+      stage: 'orchestrator',
+      mcpRefs: [],
+    });
+    opts = getStartOpts();
+    expect(opts!.mcpServers!['sillyhub-daemon']).toBeDefined();
+    expect(opts!.mcpServers!['sillyhub-file']).toBeDefined();
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// task-06（2026-08-23-agent-file-upload-mcp / FR-02 / D-002@v1）：谓词门控下
+// sillyhub-file 注入的排除面。用 cli.ts isMainAgentSession 同款谓词验证：
+//   - provider=codex → 一律不注入任何 server（D-008@v1：codex 不消费 mcpServers）
+//   - stage=mission_worker → 不注入任何 server（防 worker 递归派发，CC-12）
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('task-06: codex / mission_worker 不注入任何 server', () => {
+  /** cli.ts isMainAgentSession 同款谓词（startAction 注入形态）。 */
+  const cliPredicate = (ctx: { provider: string; stage?: string }) => {
+    if (ctx.provider !== 'claude') return false;
+    const stage = ctx.stage ?? '';
+    return stage === '' || stage === 'orchestrator';
+  };
+
+  it('provider=codex（stage 空或 orchestrator）→ mcpServers undefined（不注入任何 server）', async () => {
+    const { driver, getStartOpts } = makeMockDriver();
+    const deps = makeDeps();
+    // provider=codex 路由 drivers.codex（单 driver 入参只映射 claude），同一 mock 复用。
+    const sm = new SessionManager(
+      { ...deps, drivers: { claude: driver, codex: driver } } as ConstructorParameters<
+        typeof SessionManager
+      >[0],
+      {
+        isMainAgentSession: cliPredicate,
+        mainAgentMcpConfigProvider: () => FAKE_DAEMON_MCP,
+      },
+    );
+
+    await sm.create({ ...BASE_INPUT, sessionId: 'sess-codex', provider: 'codex' });
+
+    const opts = getStartOpts();
+    expect(opts!.mcpServers).toBeUndefined();
+  });
+
+  it('provider=claude 且 stage=mission_worker → mcpServers undefined（分身不注入）', async () => {
+    const { driver, getStartOpts } = makeMockDriver();
+    const deps = makeDeps();
+    const sm = new SessionManager(
+      { driver, ...deps },
+      {
+        isMainAgentSession: cliPredicate,
+        mainAgentMcpConfigProvider: () => FAKE_DAEMON_MCP,
+      },
+    );
+
+    await sm.create({ ...BASE_INPUT, sessionId: 'sess-worker', stage: 'mission_worker' });
+
+    const opts = getStartOpts();
+    expect(opts!.mcpServers).toBeUndefined();
   });
 });

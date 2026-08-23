@@ -818,6 +818,7 @@ async def save_agent_run_checkpoint(
 # ---------------------------------------------------------------------------
 
 from app.modules.agent.control import MissionControlService  # noqa: E402
+from app.modules.agent.file_artifacts import router as file_artifacts_router  # noqa: E402
 from app.modules.agent.mcp_tools import router as mcp_tools_router  # noqa: E402
 from app.modules.agent.mission import derive_status  # noqa: E402
 from app.modules.agent.mission_schema import (  # noqa: E402
@@ -903,6 +904,9 @@ async def _load_mission_artifacts(
 # Team 主 agent MCP endpoint（2026-07-12-team-main-agent-orchestration task-03 / D-007@v2）：
 # 嵌套 include，随 agent_router 一起挂到 /api 前缀。
 router.include_router(mcp_tools_router)
+# agent 文件制品端点（2026-08-23-agent-file-upload-mcp task-03，design §7.2）：
+# POST/GET /api/agent/file-artifacts，与 mcp_tools 并列挂载（daemon 双路径鉴权）。
+router.include_router(file_artifacts_router)
 
 
 @router.get("/missions/{mission_id}", response_model=MissionResponse)

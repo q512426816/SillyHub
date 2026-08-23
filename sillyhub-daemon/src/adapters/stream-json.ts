@@ -271,6 +271,15 @@ export class StreamJsonAdapter implements ProtocolAdapter {
    * `--verbose` 让 result 事件带 usage/cost stats（parseResult 提取到 metadata.stats）。
    *
    * resumeSessionId 非空时追加 `--resume <id>`（多轮续跑，对照 Python execute L50-52）。
+   *
+   * task-07（2026-08-23-agent-file-upload-mcp / D-008@v1 / D-009@v2 / R-03 spike-01
+   * 已验证）：`mcpConfigPath` 非空时 claude 分支追加 `--mcp-config <path>`（task-runner
+   * 写入的 0600 tmpdir .mcp.json，含 sillyhub-file server）。spike-01 本机实测
+   * （claude CLI 2.1.216）：`--mcp-config` 与本方法既有全套参数（-p /
+   * --output-format stream-json / --input-format stream-json / --verbose /
+   * --permission-mode / --include-partial-messages / --allowedTools / --max-turns /
+   * --settings）完全共存，system/init 事件 mcp_servers 列表含该 server；cursor 分支
+   * 忽略（cursor-agent CLI 无此参数，D-008@v1）。
    */
   buildArgs(opts?: {
     model?: string;
@@ -278,6 +287,7 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     resumeSessionId?: string;
     prompt?: string;
     allowedRoots?: string[];
+    mcpConfigPath?: string;
     toolConfig?: {
       mode?: string;
       allowed_tools?: string[];
@@ -292,6 +302,7 @@ export class StreamJsonAdapter implements ProtocolAdapter {
       // --include-partial-messages；prompt 作位置参数，不走 stdin NDJSON。
       // 不加 --stream-partial-output：partial 会高频重发累积全文，运行日志重复且
       // 每条都 submit_messages 拖慢执行。完整 assistant message 与 Claude Code 一致。
+      // task-07（D-008@v1）：mcpConfigPath 在 cursor 分支忽略（不消费、不追加）。
       const args = [
         '-p',
         '--output-format', 'stream-json',
@@ -330,6 +341,12 @@ export class StreamJsonAdapter implements ProtocolAdapter {
       // 的 message.usage 永远是 {0,0}，只能在最终 result 事件拿到真实值——无法实时累加。
       '--include-partial-messages',
     ];
+    // task-07（D-009@v2 / R-09）：sillyhub-file MCP 配置文件（0600 tmpdir .mcp.json）。
+    // 路径来自 task-runner（os.tmpdir() 生成，run 终删除）；claude 分支非空才追加。
+    // gemini 也走本分支但不传该参（task-runner 仅 provider=claude 注入，D-008@v1）。
+    if (opts?.mcpConfigPath) {
+      args.push('--mcp-config', opts.mcpConfigPath);
+    }
     // 2026-06-29-runtime-allowed-roots-config task-05：注入 CC permission 沙箱
     // （写白名单 allow + 写通配 deny + 读自由）。仅 claude 分支（cursor 走自己的权限）。
     if (opts?.allowedRoots && opts.allowedRoots.length > 0) {

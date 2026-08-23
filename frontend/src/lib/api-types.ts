@@ -2836,6 +2836,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agent/file-artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List File Artifacts
+         * @description 按 session_id / run_id 列文件制品（FileMetaResp 含 description/created_at）。
+         *
+         *     WORKSPACE_READ（读级鉴权）+ 锚 workspace 复核；按 created_at 倒序。前端 run
+         *     详情「产出文件」区与 daemon list_uploaded_files 工具共用本端点（D-010@v1，
+         *     不复用 /api/file/list——其非 admin owner 分支把 owner_id 当 workspace id
+         *     鉴权会 404）。
+         */
+        get: operations["list_file_artifacts_api_agent_file_artifacts_get"];
+        put?: never;
+        /**
+         * Upload File Artifact
+         * @description 上传一个 agent 文件制品：File 行 + AgentRunLog 日志行 + Redis 实时扇出。
+         *
+         *     场景解析（design §7.2）：
+         *
+         *     - worker 场景（显式 ``run_id``）：校验 run 存在（404）后挂该 run，
+         *       owner_type=agent_run；锚 workspace 走 task-02 解析链。
+         *     - 会话场景（``X-Session-Id``，与 mcp_tools 同名同源）：日志行挂当前活跃 run
+         *       （无活跃取最新，均无 422 中文引导），owner_type=agent_session、owner_id=
+         *       会话 id；锚 workspace=AgentSession.workspace_id。
+         *
+         *     两场景都按锚 workspace 复核 WORKSPACE_WRITE（越权 403）；重放防护：直写日志行
+         *     撞 ``(run_id, dedup_key)`` 部分唯一索引（ux_agent_run_logs_dedup）的
+         *     IntegrityError 视作已写入，不 500。
+         */
+        post: operations["upload_file_artifact_api_agent_file_artifacts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/missions/{mission_id}": {
         parameters: {
             query?: never;
@@ -9406,6 +9447,18 @@ export interface components {
             /** File */
             file: string;
         };
+        /** Body_upload_file_artifact_api_agent_file_artifacts_post */
+        Body_upload_file_artifact_api_agent_file_artifacts_post: {
+            /** File */
+            file: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /** Run Id */
+            run_id?: string | null;
+        };
         /**
          * CalendarDay
          * @description 日历单日(左点负载/右点进度 + 当日三类详情)。
@@ -11019,8 +11072,19 @@ export interface components {
             models: components["schemas"]["FetchModelsItem"][];
         };
         /**
+         * FileArtifactListResponse
+         * @description GET /api/agent/file-artifacts 响应（D-010@v1，design §7.2）。
+         */
+        FileArtifactListResponse: {
+            /** Files */
+            files: components["schemas"]["FileMetaResp"][];
+        };
+        /**
          * FileMetaResp
          * @description 文件元数据响应（task-04 provides；batch-meta 回显用）。
+         *
+         *     description / created_at 为 agent-file-upload-mcp task-01 扩展
+         *     （design §7.1 list 工具 / §8 D-006@v2）：旧数据 description 为 NULL。
          */
         FileMetaResp: {
             /**
@@ -11038,6 +11102,13 @@ export interface components {
             owner_type: string;
             /** Owner Id */
             owner_id?: string | null;
+            /** Description */
+            description?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /**
          * FileOp
@@ -11087,6 +11158,8 @@ export interface components {
             mime_type: string;
             /** Size */
             size: number;
+            /** Description */
+            description?: string | null;
         };
         /** GitIdentityCreate */
         GitIdentityCreate: {
@@ -23695,6 +23768,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProgressResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_file_artifacts_api_agent_file_artifacts_get: {
+        parameters: {
+            query?: {
+                session_id?: string | null;
+                run_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileArtifactListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_file_artifact_api_agent_file_artifacts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_file_artifact_api_agent_file_artifacts_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileUploadResp"];
                 };
             };
             /** @description Validation Error */
