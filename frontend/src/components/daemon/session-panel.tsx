@@ -554,6 +554,10 @@ function SessionPanelPage({
   // 保留可重试，不切真会话态）。dialog idle 先例是"先清输入再建、失败即丢"，
   // 这里改为成功后才清空（Grill X-02）。
   const [preCreating, setPreCreating] = useState(false);
+  // ql-20260823-008：预会话供应商/档案暂存——SessionConfigBar provisional 模式
+  // 点选暂存（无会话不 inject），首句 createSession 携带（""=不指定/本机默认不传）。
+  const [preProviderId, setPreProviderId] = useState("");
+  const [preProfileId, setPreProfileId] = useState("");
   const [preError, setPreError] = useState<string | null>(null);
 
   // ── task-11（2026-08-22-team-session-unify）：会话内团队触发 + TeamTaskBlock ──
@@ -1269,6 +1273,9 @@ function SessionPanelPage({
             ? { workspace_id: preContext.workspaceId }
             : {}),
           ...(preContext.changeId ? { change_id: preContext.changeId } : {}),
+          // ql-20260823-008：预会话配置条暂存值随首句落为会话初始配置。
+          ...(preProviderId ? { llm_provider_id: preProviderId } : {}),
+          ...(preProfileId ? { agent_profile_id: preProfileId } : {}),
         });
         // R-02：成功才清空（失败路径输入保留在 catch 之外，可原地重试）。
         setInput("");
@@ -1281,7 +1288,7 @@ function SessionPanelPage({
         setPreCreating(false);
       }
     },
-    [preContext, preCreating, onPreSessionCreated],
+    [preContext, preCreating, onPreSessionCreated, preProviderId, preProfileId],
   );
 
   // task-03（design §3.3 状态机）：发送 = 统一 enqueue。active 且无 currentRun
@@ -1614,9 +1621,26 @@ function SessionPanelPage({
               usedTokens={0}
               roleMapping={null}
               fallbackModel={null}
-              providerId={null}
+              providerId={preProviderId || null}
             />
           </div>
+          {/* ql-20260823-008：团队触发行同构挂载（置灰——agent 未运行，用户定调
+              的唯一差异）；组件要求全 props，预会话给安全空值。 */}
+          <TeamTriggerRow
+            disabled
+            tooltip="发送第一句话创建会话后可用"
+            activeWorkers={null}
+            onDismissChip={() => {}}
+            popoverOpen={false}
+            workspaceId={preContext?.workspaceId ?? null}
+            workspaceName={preWorkspaceName}
+            defaultObjective={null}
+            submitting={false}
+            errorText={null}
+            onOpen={() => {}}
+            onTrigger={() => {}}
+            onClose={() => {}}
+          />
           <SessionInputBar
             value={input}
             onChange={setInput}
@@ -1631,6 +1655,25 @@ function SessionPanelPage({
               clearAttachmentsRef.current = fn;
             }}
           />
+          {/* ql-20260823-008：配置控件条同构挂载（provisional 暂存模式）——机器/
+              智能体只读（D-104 锁定与真会话一致），供应商/档案可选暂存随首句生效。 */}
+          <div className="px-5 pb-3">
+            <SessionConfigBar
+              sessionId=""
+              provisional
+              running={false}
+              ended={false}
+              agentProfileId={preProfileId || null}
+              llmProviderId={preProviderId || null}
+              configSnapshot={null}
+              runtimeId={preContext?.runtimeId ?? null}
+              engine={preEngine}
+              onProvisionalSwitch={(field, value) => {
+                if (field === "llm_provider_id") setPreProviderId(value);
+                else setPreProfileId(value);
+              }}
+            />
+          </div>
           {/* R-02：创建失败内联错误（输入保留在上框，点发送即重试）。 */}
           {preError && (
             <p

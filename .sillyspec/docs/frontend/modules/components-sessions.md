@@ -38,7 +38,7 @@ updated_at: 2026-08-23 12:58:00
   - 条目紧凑两行（D-006）：第一行=状态点+标题截断+相对时间+hover 删除；第二行 chips——树形态=引擎/**创建人（👤 owner_name，null 显"—"，D-108@v2）**/档案/供应商/轮数（工作区/机器由组头与小节承载不重复）；flat 形态=工作区/机器/引擎/档案/供应商/轮数（现状）。chips 优先读 `config_snapshot` 直显，缺省回退基础字段。
   - 导出 `WorkspaceScope`/`ChangeScope`/`SessionListScope`（scope 判别联合）、`formatRelativeTime(iso, now?)`。
 - `PreSessionPicker`：props `{ open, machines, onCancel, onPick }`——纯展示受控组件（零数据请求，machines 父层注入）。① 仅在线机器卡（Badge+别名||hostname+心跳时间+在线智能体数）；② 该机器 runtimes 过滤 provider∈{claude,codex}（`SESSION_SUPPORTED_PROVIDERS`）且在线，默认 Claude Code 高亮（主色边框+「默认」Tag）；选完智能体立即 `onPick(runtimeId)` 关闭（两步即达无确认按钮）；取消/遮罩点击仅 onCancel（open 受控父层，重开重置回第一步）；空态引导（无在线机器/无可用智能体）。
-- `SessionConfigBar`：props `{ sessionId, running, ended, agentProfileId, llmProviderId, configSnapshot, runtimeId?, engine?, switchPrompt?, onSwitched? }`。
+- `SessionConfigBar`：props `{ sessionId, running, ended, agentProfileId, llmProviderId, configSnapshot, runtimeId?, engine?, switchPrompt?, onSwitched?, provisional?, onProvisionalSwitch? }`。ql-20260823-008：provisional 模式（预会话同构挂载）——供应商/档案点选**暂存**不 inject（onProvisionalSwitch 回调），父层随首句 createSession 携带（llm_provider_id/agent_profile_id）；机器名快照缺失时从 runtimeId→机器列表解析。
   - 四控件（机器/智能体/供应商/档案）展示会话当前配置（`agent_sessions.config_snapshot` 为展示名来源）。
   - 可切：档案、供应商——idle 点开下拉点选即切换（ql-20260817-009 去掉确认行/提示消息步骤）→ `injectSession(sessionId, prompt, 带新配置)`。
   - 供应商下拉含「不指定（本机默认）」→ `llm_provider_id: ""` 切回本机默认（task-16 契约）。

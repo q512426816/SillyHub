@@ -101,6 +101,12 @@ vi.mock("@/lib/workspace", async () => {
 
 // page 模式 chrome（SessionConfigBar）数据 hook：无网络，空数据（转真会话态
 // 后 SessionConfigBar 挂载用）。
+vi.mock("@/lib/errors", () => ({
+  // ql-20260823-008：配置条 provisional 暂存 toast 走 useNotify（App.useApp
+  // 上下文）——测试环境无 antd App 包裹，mock 成 noop（先例 config-bar.test 注释）。
+  useNotify: () => ({ success: vi.fn(), error: vi.fn() }),
+}));
+
 vi.mock("@/lib/use-daemon-machines", () => ({
   useDaemonMachines: () => ({ items: [] }),
 }));
@@ -507,5 +513,100 @@ describe("SessionPanel 预会话首句创建失败（R-02）", () => {
       await Promise.resolve();
     });
     expect(sessionApi.createSession).not.toHaveBeenCalled();
+  });
+});
+
+/* ───────── 6. ql-20260823-008：配置条/团队行同构挂载（provisional 暂存） ───────── */
+
+describe("SessionPanel 预会话配置条与团队行（ql-20260823-008 完全一致）", () => {
+  it("配置控件条渲染：机器/智能体只读（D-104 锁定同真会话），供应商/档案可选；派团队按钮置灰", () => {
+    setupPre();
+
+    // 配置条在（aria-label 同真会话）
+    expect(screen.getByLabelText("会话配置控件条")).toBeInTheDocument();
+    // 机器/智能体：与真会话 idle 同形态（展示型下拉可点开、选项标注需开新
+    // 会话，D-104 锁定语义由预会话上下文行承担；不断言 disabled——真会话
+    // idle 同样可点开，完全一致）。
+    expect(
+      screen.getByRole("button", { name: "配置-机器 —" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "配置-智能体 Claude Code" }),
+    ).toBeInTheDocument();
+    // 供应商/档案可选（未锁）
+    const providerCtrl = screen.getByRole("button", {
+      name: "配置-供应商 本机默认",
+    }) as HTMLButtonElement;
+    const profileCtrl = screen.getByRole("button", {
+      name: "配置-档案 未指定",
+    }) as HTMLButtonElement;
+    expect(providerCtrl.disabled).toBe(false);
+    expect(profileCtrl.disabled).toBe(false);
+    // 派团队按钮置灰（agent 未运行——用户定调的唯一差异）
+    const teamBtn = screen.getByRole("button", { name: /派团队/ }) as HTMLButtonElement;
+    expect(teamBtn.disabled).toBe(true);
+  });
+
+  it("选供应商 → 暂存不 inject；首句 createSession 携带 llm_provider_id", async () => {
+    const { listProviders } = await import("@/lib/api/llm-providers");
+    vi.mocked(listProviders).mockResolvedValue([
+      { id: "prov-1", name: "智谱 GLM" },
+    ] as never);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-pre-new",
+      run_id: "run-1",
+      lease_id: null,
+      status: "pending",
+      stream_url: "/x",
+    });
+    setupPre();
+
+    // 点开供应商下拉选「智谱 GLM」→ 暂存（injectSession 零调用，控件显示新值）
+    fireEvent.click(screen.getByRole("button", { name: "配置-供应商 本机默认" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "选择 智谱 GLM" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "配置-供应商 智谱 GLM" }),
+      ).toBeInTheDocument(),
+    );
+    expect(sessionApi.injectSession).not.toHaveBeenCalled();
+
+    // 首句发送 → createSession 带暂存供应商
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "带供应商开聊" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
+    expect(sessionApi.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtime_id: "rt-claude",
+        prompt: "带供应商开聊",
+        llm_provider_id: "prov-1",
+      }),
+    );
+  });
+
+  it("不选供应商/档案 → createSession 不带两字段（默认不指定语义保持）", async () => {
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-pre-new",
+      run_id: "run-1",
+      lease_id: null,
+      status: "pending",
+      stream_url: "/x",
+    });
+    setupPre();
+
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "直接开聊" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
+    const arg = sessionApi.createSession.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg.llm_provider_id).toBeUndefined();
+    expect(arg.agent_profile_id).toBeUndefined();
   });
 });

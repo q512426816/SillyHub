@@ -93,6 +93,17 @@ export interface SessionConfigBarProps {
     field: SessionConfigSwitchField,
     value: string,
   ) => void;
+  /**
+   * ql-20260823-008：预会话（provisional）模式——供应商/档案点选**暂存**而非
+   * injectSession（会话尚未创建），父层经 onProvisionalSwitch 收值并入首句
+   * createSession（llm_provider_id/agent_profile_id）；机器/智能体仍只读展示
+   * （D-104 锁定语义与真会话一致）。running/ended 传 false 即可。
+   */
+  provisional?: boolean;
+  onProvisionalSwitch?: (
+    field: SessionConfigSwitchField,
+    value: string,
+  ) => void;
 }
 
 /* ────────────────────── 纯辅助（组件外便于单测推理） ────────────────────── */
@@ -136,6 +147,8 @@ export function SessionConfigBar({
   engine,
   switchPrompt,
   onSwitched,
+  provisional,
+  onProvisionalSwitch,
 }: SessionConfigBarProps) {
   // 数据源与 task-12 同（机器/智能体展示下拉 + 供应商/档案切换选项）。
   const { items: machines } = useDaemonMachines({});
@@ -181,7 +194,13 @@ export function SessionConfigBar({
   const providerLocked = effectiveEngine != null && effectiveEngine !== "claude";
 
   // 当前值展示（快照直显免二次解析，Grill C-12；id 兜底防列表缺行）。
-  const machineName = configSnapshot?.machine_name ?? "—";
+  // ql-20260823-008：快照缺失（预会话）时从 runtimeId→机器列表解析（currentMachine
+  // 在下方 useMemo，先声明机器名函数不依赖它——直接 machines 查找）。
+  const machineHit = runtimeId
+    ? (machines.find((m) => m.runtimes?.some((r) => r.id === runtimeId)) ?? null)
+    : null;
+  const machineNameText =
+    configSnapshot?.machine_name ?? (machineHit ? machineLabel(machineHit) : "—");
   // ql-20260815-011：智能体=引擎维度（FR-01）——引擎名优先（后端快照
   // agent_name 存的 runtime.name 默认=主机名，仅作引擎缺失时的兜底）。
   const agentName =
@@ -213,6 +232,18 @@ export function SessionConfigBar({
    * 切换轮无用户消息/模型回应）。switchPrompt 传入时仍作为切换轮消息发出。 */
   const executeSwitch = async (p: PendingSwitch) => {
     if (submitting) return;
+    // ql-20260823-008：预会话暂存——不 inject（无会话），值随首句 createSession 生效。
+    if (provisional) {
+      setOpenKind(null);
+      const what = p.field === "llm_provider_id" ? "供应商" : "档案";
+      const name =
+        p.field === "llm_provider_id" && p.value === SWITCH_NO_PROVIDER_VALUE
+          ? "本机默认"
+          : p.label;
+      notify.success(`已选择${what} → ${name}（第一句话发送创建会话时生效）`);
+      onProvisionalSwitch?.(p.field, p.value);
+      return;
+    }
     const prompt = (switchPrompt ?? "").trim();
     setSubmitting(true);
     setOpenKind(null);
@@ -285,7 +316,7 @@ export function SessionConfigBar({
         {ctrlButton(
           "machine",
           "🖥",
-          machineName,
+          machineNameText,
           "守护进程（换机器需开新会话）",
           <ConfigDropdown
             testId="config-dd-machine"

@@ -245,3 +245,13 @@
 根因：get_pending_leases 返回所有 status=pending 租约（含只应经 SESSION_RESUME WS 消费的 reopen 租约），daemon HTTP 轮询兜底认领后因无 prompt/run_id 走 interactive_missing_fields 裸退，无人释放；且 mark-recovery-failed 翻 failed 时不收口租约
 方案：pending-leases 端点按 metadata.reopened_from_status 精确排除 reopen 租约；mark_session_recovery_failed 翻 failed 同事务把挂起租约（pending/claimed）收敛 cancelled；顺带清理存量 13 条孤儿/死挂 claimed 租约
 结果：daemon 模块 880 过（+2 用例：排除/收敛）、ruff+mypy 绿；Docker 后端已重建部署（容器内 grep 确认新代码）；存量孤儿清零、daemon 在线、bdec91a4 保持 active
+
+## ql-20260823-008-c3ca | 2026-08-23 14:31:31 | 预会话与真会话完全一致：配置条暂存+团队置灰
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx, frontend/src/components/daemon/session-panel.tsx, frontend/src/components/sessions/session-config-bar.tsx
+需求：预会话与真会话完全一致：配置条暂存+团队置灰
+根因：task-03 只做骨架同构，配置条/团队行因依赖会话 id 未挂载
+方案：ConfigBar provisional 暂存模式（供应商/档案选了暂存随首句 createSession 携带）+ TeamTriggerRow 置灰 + CtxUsageBar 联动
+结果：31/31+全量 1958/1958+tsc 零+lint 持平；文档同步；待部署
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/2026-08-23-register-repo-crlf-parse-mismatch.md
