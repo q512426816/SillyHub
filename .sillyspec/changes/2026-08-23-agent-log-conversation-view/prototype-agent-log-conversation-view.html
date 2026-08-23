@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>本地 Agent 会话 · 日志对话化回显原型（查看内容升级 + 回落态）</title>
+<style>
+  :root[data-theme="blue"] {
+    --primary:#2563EB; --bg:#f8fafc; --card:#fff; --border:#e2e8f0;
+    --brand-50:#eff6ff; --brand-100:#dbeafe; --brand-600:#2563eb; --brand-700:#1d4ed8;
+    --slate-500:#64748b; --slate-700:#334155; --slate-900:#0f172a; --success:#10b981;
+    --cyan-700:#0e7490; --warn:#d97706; --warn-bg:#fffbeb;
+  }
+  :root[data-theme="ai-native"] {
+    --primary:#7C3AED; --bg:#FAF5FF; --card:#fff; --border:#DDD6FE;
+    --brand-50:#f5f3ff; --brand-100:#ede9fe; --brand-600:#7c3aed; --brand-700:#6d28d9;
+    --slate-500:#64748b; --slate-700:#334155; --slate-900:#0f172a; --success:#10b981;
+    --cyan-700:#0e7490; --warn:#d97706; --warn-bg:#fffbeb;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--slate-900);padding:24px;font-size:13px}
+  .toggle{position:fixed;top:12px;right:16px;z-index:9}
+  .toggle button{border:1px solid var(--border);background:var(--card);border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;color:var(--slate-700)}
+  .toggle button.on{border-color:var(--primary);color:var(--primary);font-weight:600}
+  .stage{max-width:920px;margin:0 auto}
+  .stage h1{font-size:15px;margin-bottom:4px}
+  .hint{color:var(--slate-500);font-size:12px;margin-bottom:18px}
+  .sec-title{font-size:12px;font-weight:600;margin:26px 0 8px;color:var(--slate-700)}
+  .panel{background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:8px}
+
+  /* 日志条目卡片（现状结构不变，仅「查看内容」展开内容升级） */
+  .entry{padding:10px 14px;border-bottom:1px solid var(--border)}
+  .rowline{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .harn{font-size:11px;font-weight:600;padding:1px 8px;border-radius:999px;background:rgba(8,145,178,.08);color:var(--cyan-700);border:1px solid rgba(8,145,178,.25)}
+  .meta{font-size:11px;color:var(--slate-500)}
+  .mono{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--slate-700);background:var(--bg);border-radius:4px;padding:1px 6px}
+  .view-btn{margin-left:auto;font-size:11.5px;color:var(--brand-700);background:none;border:none;cursor:pointer;padding:0}
+  .view-btn:hover{text-decoration:underline}
+
+  /* ── 对话化展开面板（新） ── */
+  .dialog{margin:10px 0 4px;border:1px solid var(--border);border-radius:10px;background:var(--bg);overflow:hidden}
+  .dialog-head{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);background:var(--card);font-size:11.5px;color:var(--slate-500)}
+  .dialog-head b{color:var(--slate-700);font-size:12px}
+  .dialog-head .spacer{flex:1}
+  .dialog-head .tab{border:1px solid var(--border);background:var(--card);border-radius:6px;padding:2px 10px;font-size:11px;cursor:pointer;color:var(--slate-700)}
+  .dialog-head .tab.on{border-color:var(--primary);color:var(--primary);font-weight:600}
+  .stream{padding:12px;display:flex;flex-direction:column;gap:10px;max-height:430px;overflow-y:auto}
+  .u-row{display:flex;justify-content:flex-end}
+  .u-bubble{background:var(--brand-600);color:#fff;border-radius:12px;border-top-right-radius:4px;padding:8px 12px;max-width:82%;font-size:12.5px;line-height:1.55;white-space:pre-wrap}
+  .a-row{display:flex;gap:8px;align-items:flex-start}
+  .ava{width:26px;height:26px;border-radius:50%;border:1px solid var(--border);background:var(--card);display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0}
+  .a-body{min-width:0;max-width:88%;display:flex;flex-direction:column;gap:6px}
+  .a-text{background:var(--card);border:1px solid var(--border);border-radius:12px;border-top-left-radius:4px;padding:8px 12px;font-size:12.5px;line-height:1.6;box-shadow:0 1px 2px rgba(0,0,0,.04)}
+  .a-text code{font-family:ui-monospace,Consolas,monospace;background:var(--bg);padding:0 4px;border-radius:4px;font-size:11.5px}
+  /* 工具调用卡片（复用 ToolCallPreview 形态） */
+  .tool{border:1px solid var(--border);border-radius:8px;background:var(--card);overflow:hidden}
+  .tool-head{display:flex;align-items:center;gap:6px;padding:6px 10px;cursor:pointer;font-size:11.5px;color:var(--slate-700);background:var(--bg)}
+  .tool-head .nm{font-family:ui-monospace,Consolas,monospace;font-weight:600;color:var(--cyan-700)}
+  .tool-head .st{margin-left:auto;font-size:10.5px}
+  .tool-head .st.ok{color:var(--success)} .tool-head .st.err{color:#dc2626}
+  .tool-body{display:none;padding:8px 10px;border-top:1px dashed var(--border);font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--slate-700);white-space:pre-wrap;max-height:180px;overflow-y:auto;background:var(--card)}
+  .tool.open .tool-body{display:block}
+  /* 思考折叠 */
+  .think{border-left:3px solid var(--border);padding:2px 10px;font-size:11.5px;color:var(--slate-500);cursor:pointer}
+  .think .ti{display:flex;gap:6px;align-items:center}
+  .think .tx{display:none;margin-top:4px;white-space:pre-wrap;line-height:1.5}
+  .think.open .tx{display:block}
+  .timechip{font-size:10px;color:var(--slate-500);margin-top:2px}
+  .turn-gap{height:4px}
+  .load-earlier{align-self:center;font-size:11.5px;color:var(--brand-700);background:var(--card);border:1px solid var(--border);border-radius:999px;padding:4px 14px;cursor:pointer}
+  .trunc-note{align-self:center;font-size:11px;color:var(--warn);background:var(--warn-bg);border:1px solid #fde68a;border-radius:8px;padding:4px 12px}
+
+  /* ── 回落态（解析失败 → 原文 <pre>，现状保留） ── */
+  .fallback{margin:10px 0 4px;border:1px dashed var(--border);border-radius:8px;background:var(--warn-bg);padding:8px 10px}
+  .fallback .fb-note{font-size:11px;color:var(--warn);margin-bottom:6px}
+  .fallback pre{max-height:180px;overflow:auto;white-space:pre-wrap;word-break:break-all;font-family:ui-monospace,Consolas,monospace;font-size:10.5px;line-height:1.45;color:var(--slate-700);background:var(--card);border-radius:6px;padding:8px}
+</style>
+</head>
+<body>
+<div class="toggle"><button id="t-blue" onclick="setTheme('blue')">明亮蓝</button><button id="t-ai" class="on" onclick="setTheme('ai-native')">AI 紫</button></div>
+<div class="stage">
+  <h1>「查看内容」对话化回显原型</h1>
+  <p class="hint">本地 Agent 会话详情 → 日志条目行「查看内容 ▾」展开后：A. zcode 日志解析为对话流（新）；B. 解析失败/格式不支持回落原文（现状保留）。右上角切换双主题；点击工具卡片/思考行可展开。</p>
+
+  <div class="sec-title">A. 对话化展开（zcode model-io 解析成功）</div>
+  <div class="panel">
+    <div class="entry">
+      <div class="rowline">
+        <span class="harn">zcode</span>
+        <span class="meta">24 次调用 · 最近 20:22</span>
+        <span class="mono">…/rollout/model-io-sess_f8d16b14….jsonl</span>
+        <button class="view-btn" onclick="this.textContent= this.textContent==='查看内容 ▾'?'收起 ▴':'查看内容 ▾'">收起 ▴</button>
+      </div>
+      <div class="dialog">
+        <div class="dialog-head">
+          <b>会话回放</b><span>· 12 轮对话 · 38 个工具调用</span>
+          <span class="spacer"></span>
+          <span class="tab on">对话</span><span class="tab">原文</span>
+        </div>
+        <div class="stream" id="stream">
+          <div class="load-earlier" onclick="this.remove()">加载更早 6 轮 ↑</div>
+
+          <div class="u-row"><div class="u-bubble">调查 sillyspec CLI 上报 agent-logs 时为何未携带 quick_id/change_key</div></div>
+
+          <div class="a-row">
+            <div class="ava">🤖</div>
+            <div class="a-body">
+              <div class="think" onclick="this.classList.toggle('open')">
+                <div class="ti">💭 思考过程（点击展开）</div>
+                <div class="tx">CLI 侧代码在 /opt/homebrew/lib/node_modules/sillyspec…先确认后端 schema 是否预留字段，再查 CLI 调用点上下文…</div>
+              </div>
+              <div class="tool open" onclick="this.classList.toggle('open')">
+                <div class="tool-head">🔧 <span class="nm">Grep</span> quick_id|change_key <span class="st ok">✓ 2 处</span></div>
+                <div class="tool-body">platform_sync/schema.py:276: change_key: str | None
+platform_sync/schema.py:277: quick_id: str | None</div>
+              </div>
+              <div class="tool" onclick="this.classList.toggle('open')">
+                <div class="tool-head">🔧 <span class="nm">Bash</span> psql 查 tool_report 会话 <span class="st ok">✓ 1 行</span></div>
+                <div class="tool-body">aggregation_key='zcode|' | title='zcode · 本地活动'</div>
+              </div>
+              <div class="a-text">后端 schema 已预留 change_key/quick_id 字段（schema.py:276-277），但 CLI 侧从未填充——查 CLI 调用点确认。</div>
+            </div>
+          </div>
+
+          <div class="turn-gap"></div>
+
+          <div class="u-row"><div class="u-bubble">继续，看 npm 发版时间线</div></div>
+
+          <div class="a-row">
+            <div class="ava">🤖</div>
+            <div class="a-body">
+              <div class="tool" onclick="this.classList.toggle('open')">
+                <div class="tool-head">🔧 <span class="nm">Bash</span> npm view sillyspec time <span class="st ok">✓</span></div>
+                <div class="tool-body">3.27.2  2026-08-23T04:02:56.241Z</div>
+              </div>
+              <div class="a-text">结论：npm 3.27.2 发布于 12:02（本地），早于功能提交 14:54——<b>CLI 改动未发版</b>，这是空 ctx 的根因。</div>
+              <div class="timechip">20:32</div>
+            </div>
+          </div>
+
+          <div class="trunc-note">⚠ 仅展示最近 12 轮（共 47 轮）· 点「加载更早」查看更多</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec-title">B. 回落态（解析失败 / 格式不支持 → 原文查看，现状保留）</div>
+  <div class="panel">
+    <div class="entry">
+      <div class="rowline">
+        <span class="harn" style="background:var(--brand-50);color:var(--brand-700);border-color:var(--brand-100)">codex</span>
+        <span class="meta">9 次调用 · 最近 19:58</span>
+        <span class="mono">…/sessions/2026/08/23/rollout-…jsonl</span>
+        <button class="view-btn">查看内容 ▾</button>
+      </div>
+      <div class="fallback">
+        <div class="fb-note">⚠ 该格式暂不支持对话化解析（codex rollout，二期支持），已回落原文尾部查看（最多 256KB）</div>
+        <pre>{"type":"session_meta","payload":{"session_id":"…","cwd":"/Users/qinyi/SillyHub","originator":"sillyhub-daemon"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[…]}}</pre>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+function setTheme(t){
+  document.documentElement.setAttribute('data-theme',t);
+  document.getElementById('t-blue').classList.toggle('on',t==='blue');
+  document.getElementById('t-ai').classList.toggle('on',t==='ai-native');
+}
+</script>
+</body>
+</html>
