@@ -116,7 +116,7 @@ export function SessionInputBar({
   };
 
   return (
-    <footer className="shrink-0 border-t bg-card px-5 py-4">
+    <footer className="shrink-0 bg-card px-5 pb-4 pt-1">
       {/* 附件区：chips + 降级提示条（task-12）。 */}
       {(attachments.length > 0 || uploading > 0 || uploadError) && (
         <div className="mb-2 space-y-1.5">
@@ -177,14 +177,14 @@ export function SessionInputBar({
           type="text"
           onClick={() => fileRef.current?.click()}
           disabled={disabled || attachmentsDisabled}
-          className="h-9 w-9 shrink-0 p-0 text-muted-foreground"
+          className="h-10 w-10 shrink-0 self-center rounded-full p-0 text-muted-foreground"
           title={
             attachmentsDisabled
               ? "当前引擎不支持附件"
               : "添加图片/文件附件（图片直读需多模态模型）"
           }
         >
-          <Paperclip className="h-4 w-4" />
+          <Paperclip className="h-5 w-5" />
         </Button>
         <textarea
           value={value}
@@ -206,7 +206,7 @@ export function SessionInputBar({
           onClick={onSend}
           // D-7：带附件时空文本可发（看图说话）；纯文本仍要求非空。
           disabled={disabled || (!value.trim() && attachments.length === 0)}
-          className="mb-0.5 h-9 w-9 shrink-0 border-none bg-gradient-to-br from-brand-600 to-info shadow-primary hover:from-brand-700 hover:to-info hover:shadow-primary"
+          className="h-9 w-9 shrink-0 self-center border-none bg-gradient-to-br from-brand-600 to-info shadow-primary hover:from-brand-700 hover:to-info hover:shadow-primary"
           title="发送"
         >
           {creating ? (

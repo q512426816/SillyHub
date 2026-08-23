@@ -417,13 +417,13 @@ function TeamTriggerRow({
   onClose,
 }: TeamTriggerRowProps) {
   return (
-    <div className="relative flex shrink-0 flex-wrap items-center gap-2 border-t border-border bg-card px-5 py-2">
+    <div className="relative flex shrink-0 flex-wrap items-center gap-2 border-t border-border bg-card px-5 pb-1.5 pt-2">
       <button
         type="button"
         onClick={onOpen}
         disabled={disabled}
         title={tooltip}
-        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-violet-300 bg-violet-50/60 px-2.5 text-[12px] font-semibold text-violet-700 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-60"
+        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-violet-300 bg-violet-50/60 px-3 text-[12px] font-semibold text-violet-700 transition-shadow hover:bg-violet-100 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none"
       >
         <Users className="h-3.5 w-3.5" aria-hidden />
         派团队
