@@ -435,8 +435,18 @@ describe('task-07: 启动清扫 tmpdir 同前缀残留', () => {
     const old = new Date(Date.now() - FILE_MCP_TMP_MAX_AGE_MS - 60 * 60 * 1000);
     await utimes(stalePath, old, old);
 
-    // 构造即触发（fire-and-forget）：waitFor 轮询等待异步清扫完成
-    const { runner } = await makeRunner('ws-ctor-clean-');
+    // 构造即触发（fire-and-forget）。清扫守卫是进程级单次（防测试并行构造的 IO
+    // 风暴），本文件前序用例已构造过 TaskRunner 把守卫消耗——单文件运行时若直接
+    // 构造会 deterministic 挂死（验收审查 P2）。resetModules 取全新模块副本（守卫
+    // 复位）再构造，既证「构造触发」接线，又不受前序用例污染。
+    vi.resetModules();
+    const { TaskRunner: FreshTaskRunner } = await import('../src/task-runner.js');
+    const runner = new FreshTaskRunner(
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+    );
     void runner;
 
     await waitFor(async () => !(await exists(stalePath)), 5_000, 'constructor cleanup');
