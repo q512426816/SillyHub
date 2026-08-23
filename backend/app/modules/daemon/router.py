@@ -1856,16 +1856,20 @@ async def list_sessions(
     )
     reads = [AgentSessionRead.model_validate(item) for item in items]
     # 2026-08-23-sessions-workspace-hub task-01 / FR-05 / D-108@v2：批量查
-    # users.username 注入 owner_name（照 OwnerRead / 下方 terminating_at 的
-    # IN 批查注入先例，免逐行 N+1）。属主用户行缺失 / username 未回填的旧
-    # 数据不在 map 中 → 保持 None（brownfield，不阻断列表）。
+    # users 注入 owner_name（照 OwnerRead / 下方 terminating_at 的
+    # IN 批查注入先例，免逐行 N+1）。ql-20260823-003：展示名 display_name
+    # 优先、回退 username 登录名（用户反馈：树里应显示名称不是登录名）。
+    # 属主用户行缺失 / 两字段均未回填的旧数据不在 map 中 → 保持 None
+    # （brownfield，不阻断列表）。
     owner_ids = {item.user_id for item in items if item.user_id is not None}
     if owner_ids:
         owner_rows = (
-            await session.execute(select(User.id, User.username).where(User.id.in_(owner_ids)))
+            await session.execute(
+                select(User.id, User.display_name, User.username).where(User.id.in_(owner_ids))
+            )
         ).all()
         owner_names: dict[uuid.UUID, str] = {
-            row[0]: row[1] for row in owner_rows if row[1] is not None
+            row[0]: (row[1] or row[2]) for row in owner_rows if (row[1] or row[2]) is not None
         }
         for r in reads:
             r.owner_name = owner_names.get(r.user_id)

@@ -693,6 +693,40 @@ describe("SessionListPanel 状态与搜索（树形态视图过滤）", () => {
   });
 });
 
+// ── 5b. 筛选态条目信息去冗余（ql-20260823-003） ────────────────────────────
+
+describe("SessionListPanel 筛选后条目去冗余（ql-20260823-003）", () => {
+  it("筛选智能体后条目隐藏引擎 chip（全部同引擎，冗余）；清空恢复", async () => {
+    setMachines({ items: [makeMachine()] });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
+    );
+    renderPanel(<SessionListPanel />);
+
+    const row = await screen.findByRole("button", { name: "会话 会话A" });
+    expect(row.textContent).toContain("Claude"); // 未筛选：引擎 chip 在
+
+    // R-05：筛选切换重置展开态（无选中会话 → 全组折叠），断言前先重新展开组
+    const groupHead = () =>
+      screen.getByRole("button", { name: "工作区分组 SillyHub" });
+    fireEvent.click(screen.getByRole("button", { name: "机器tab machine-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "智能体tab ⚡ Claude Code" }));
+    fireEvent.click(groupHead());
+    await waitFor(() => {
+      const filtered = screen.getByRole("button", { name: "会话 会话A" });
+      expect(filtered.textContent).not.toContain("Claude"); // 筛选后隐藏
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "机器tab 全部" }));
+    fireEvent.click(groupHead());
+    await waitFor(() => {
+      const restored = screen.getByRole("button", { name: "会话 会话A" });
+      expect(restored.textContent).toContain("Claude"); // 清空恢复
+    });
+  });
+});
+
 // ── 6. 组头交互 + 截断（R-03） ────────────────────────────────────────────
 
 describe("SessionListPanel 组头回调与截断", () => {
@@ -958,112 +992,79 @@ describe("SessionListPanel workspace scope（树单组，端点过滤维持）",
   });
 });
 
-describe("SessionListPanel change scope（维持现状平铺列表，design §3 边界）", () => {
-  it("数据源：{limit:50, workspace_id, change_id} 双传；v2 两 scope 端点零调用；平铺控件（引擎 Segmented/机器多选）在", async () => {
+describe("SessionListPanel change scope（ql-20260823-003：同走工作区树，D-106 修订）", () => {
+  it("数据源：{limit:500, workspace_id, change_id} 双传；树单组渲染 + 组头「＋」在；平铺控件（引擎 Segmented/机器多选/加载更多）退役", async () => {
     setMachines({ items: twoMachines() });
     setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
     mocks.listAgentSessions.mockResolvedValue(
       listResponse([makeSession({ id: "s-chg", workspace_id: "ws-1", title: "变更会话" })]),
     );
-    renderPanel(<SessionListPanel scope={CHANGE_SCOPE} />);
+    renderPanel(<SessionListPanel scope={CHANGE_SCOPE} onNewInGroup={vi.fn()} />);
 
     expect(
       await screen.findByRole("button", { name: "会话 变更会话" }),
     ).toBeInTheDocument();
     expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
     expect(lastCallArgs()).toEqual({
-      limit: 50,
+      limit: 500,
       workspace_id: "ws-1",
       change_id: "chg-1",
     });
     expect(mocks.listWorkspaceAgentSessions).not.toHaveBeenCalled();
     expect(mocks.listChangeSessions).not.toHaveBeenCalled();
-    // 平铺现状控件在（不回归）：状态下拉 + 机器多选 + 引擎胶囊
-    expect(document.getElementById("slp-status")).not.toBeNull();
-    expect(document.getElementById("slp-machine")).not.toBeNull();
-    expect(document.querySelector(".ant-segmented")).not.toBeNull();
-    // 无工作区树分组头
-    expect(groupHeadLabels()).toEqual([]);
+    // 树形态：单组分组头 + 组头「＋」（新建经门户双传 change 上下文）；
+    // mock workspaces 命中 → 组名解析为 SillyHub。
+    expect(groupHeadLabels()).toEqual(["工作区分组 SillyHub"]);
+    expect(
+      screen.getByRole("button", { name: "在 SillyHub 新建会话" }),
+    ).toBeInTheDocument();
+    // 平铺控件退役（引擎胶囊/机器多选/加载更多）
+    expect(document.querySelector(".ant-segmented")).toBeNull();
+    expect(document.getElementById("slp-machine")).toBeNull();
+    expect(screen.queryByRole("button", { name: /加载更多/ })).toBeNull();
   });
 
-  it("服务端筛选照常带参：状态 status / 引擎 provider / 机器 machine_id（scope 过滤参 + 筛选参同传）", async () => {
+  it("树形态筛选纯视图过滤：状态客户端过滤零请求", async () => {
     setMachines({ items: twoMachines() });
     setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
-    mocks.listAgentSessions.mockResolvedValue(listResponse([]));
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-1", workspace_id: "ws-1", title: "活跃的", status: "active" }),
+        makeSession({ id: "s-2", workspace_id: "ws-1", title: "已结束的", status: "ended" }),
+      ]),
+    );
     renderPanel(<SessionListPanel scope={CHANGE_SCOPE} />);
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1));
+    await screen.findByRole("button", { name: "会话 活跃的" });
+    const calls = mocks.listAgentSessions.mock.calls.length;
 
     await chooseAntdOptionByText("slp-status", "已结束");
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(2));
-    expect(lastCallArgs()).toEqual({
-      limit: 50,
-      workspace_id: "ws-1",
-      change_id: "chg-1",
-      status: "ended",
-    });
-
-    clickEngineTab("Claude");
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(3));
-    expect(lastCallArgs()).toEqual({
-      limit: 50,
-      workspace_id: "ws-1",
-      change_id: "chg-1",
-      status: "ended",
-      provider: "claude",
-    });
-
-    await chooseAntdOptionByText("slp-machine", "machine-2");
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(4));
-    expect(lastCallArgs()).toEqual({
-      limit: 50,
-      workspace_id: "ws-1",
-      change_id: "chg-1",
-      status: "ended",
-      provider: "claude",
-      machine_id: "m-2",
-    });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "会话 活跃的" })).toBeNull(),
+    );
+    expect(screen.getByRole("button", { name: "会话 已结束的" })).toBeInTheDocument();
+    expect(mocks.listAgentSessions.mock.calls.length).toBe(calls); // 零请求
   });
 
-  it("搜索回车触发 q（服务端参数）；仅输入不触发", async () => {
+  it("搜索客户端过滤：回车后按标题过滤可见条目（零请求）", async () => {
     setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
-    mocks.listAgentSessions.mockResolvedValue(listResponse([]));
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-1", workspace_id: "ws-1", title: "会议纪要" }),
+        makeSession({ id: "s-2", workspace_id: "ws-1", title: "部署手册" }),
+      ]),
+    );
     renderPanel(<SessionListPanel scope={CHANGE_SCOPE} />);
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1));
+    await screen.findByRole("button", { name: "会话 会议纪要" });
+    const calls = mocks.listAgentSessions.mock.calls.length;
 
     const input = screen.getByLabelText("搜索会话标题");
     fireEvent.change(input, { target: { value: "会议" } });
-    await act(async () => {
-      await Promise.resolve();
-    });
-    expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1); // 输入不触发
-
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(2));
-    expect(lastCallArgs()).toEqual({
-      limit: 50,
-      workspace_id: "ws-1",
-      change_id: "chg-1",
-      q: "会议",
-    });
-  });
-
-  it("加载更多 offset 递增（后端真分页保留，R-04）", async () => {
-    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
-    const page1 = Array.from({ length: 50 }, (_, i) =>
-      makeSession({ id: `p1-${i}`, workspace_id: "ws-1", title: `第一页${i}` }),
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "会话 部署手册" })).toBeNull(),
     );
-    mocks.listAgentSessions.mockResolvedValue(listResponse(page1, { total: 60 }));
-    renderPanel(<SessionListPanel scope={CHANGE_SCOPE} />);
-
-    const moreBtn = await screen.findByRole("button", { name: /加载更多/ });
-    expect(moreBtn.textContent).toContain("50/60");
-    const page2 = Array.from({ length: 10 }, (_, i) =>
-      makeSession({ id: `p2-${i}`, workspace_id: "ws-1", title: `第二页${i}` }),
-    );
-    mocks.listAgentSessions.mockResolvedValue(listResponse(page2, { total: 60 }));
-    fireEvent.click(moreBtn);
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(2));
-    expect(lastCallArgs()).toMatchObject({ limit: 50, offset: 50 });
+    expect(screen.getByRole("button", { name: "会话 会议纪要" })).toBeInTheDocument();
+    expect(mocks.listAgentSessions.mock.calls.length).toBe(calls); // 零请求
   });
 
   it("他人会话由端点过滤：mock 返回什么显示什么（客户端零过滤）", async () => {
@@ -1087,6 +1088,5 @@ describe("SessionListPanel change scope（维持现状平铺列表，design §3 
     expect(
       screen.getByRole("button", { name: "会话 同事的会话" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("共 2 个")).toBeInTheDocument();
   });
 });

@@ -523,16 +523,16 @@ describe("SessionsPortal 三 scope 渲染", () => {
     ).toBeTruthy();
   });
 
-  it("change scope：列表走 listAgentSessions({limit, workspace_id, change_id} 双传)，标题「智能体会话 · 变更」，空门户态（平铺列表不传预展开），其余两端点零调用", async () => {
+  it("change scope：列表走 listAgentSessions({limit:500, workspace_id, change_id} 双传)，标题「智能体会话 · 变更」，树单组＋预展开（ql-20260823-003 统一树形态），页头按钮已移除", async () => {
     renderPortal(CHANGE_SCOPE);
 
     expect(
       screen.getByRole("heading", { name: "智能体会话 · 变更" }),
     ).toBeTruthy();
-    // D-003@v2：change 级隐含 workspace——两过滤参同时下发
+    // D-003@v2：change 级隐含 workspace——两过滤参同时下发（树一次拉取 limit 500）
     await waitFor(() => {
       expect(mocks.listAgentSessions).toHaveBeenCalledWith({
-        limit: 50,
+        limit: 500,
         workspace_id: "ws-1",
         change_id: "chg-1",
       });
@@ -540,15 +540,18 @@ describe("SessionsPortal 三 scope 渲染", () => {
     expect(mocks.listWorkspaceAgentSessions).not.toHaveBeenCalled();
     expect(mocks.listChangeSessions).not.toHaveBeenCalled();
 
-    // task-06：右侧空门户态；task-07：change 入口预会话按钮在页头（左侧平铺
-    // 列表无组头「＋」——入口接线见 describe 5）
+    // 右侧空门户态；树单组组头「＋」（新建入口，经门户双传 change 上下文）
     expect(screen.getByLabelText("门户空态")).toBeTruthy();
     expect(screen.queryByLabelText("新建会话表单")).toBeNull();
     expect(
-      screen.getByRole("button", { name: "新建会话（本变更）" }),
+      await screen.findByRole("button", { name: "在 当前工作区 新建会话" }),
     ).toBeTruthy();
-    // change scope 平铺列表（D-106）不传预展开
-    expect(mocks.lastListPanelProps?.defaultExpandedWorkspaceId).toBeUndefined();
+    // ql-20260823-003：页头按钮移除（D-106 修订，入口收敛组头「＋」）
+    expect(
+      screen.queryByRole("button", { name: "新建会话（本变更）" }),
+    ).toBeNull();
+    // change 同 workspace 入口：预展开该组
+    expect(mocks.lastListPanelProps?.defaultExpandedWorkspaceId).toBe("ws-1");
   });
 });
 
@@ -602,7 +605,7 @@ describe("SessionsPortal scope 过滤参透传（D-003@v2：过滤是端点职�
 
     await waitFor(() => {
       expect(mocks.listAgentSessions).toHaveBeenCalledWith({
-        limit: 50,
+        limit: 500,
         workspace_id: "ws-1",
         change_id: "chg-1",
       });
@@ -887,12 +890,12 @@ describe("SessionsPortal workspace 组＋创建绑定（preContext 继承）", (
   // task-07：change 双传（change_id + workspace_id，X-13）用例——原经
   // NewSessionForm bindChangeId 断言的语义由本用例（门户 change 入口接线）与
   // session-panel-pre-session.test「X-13 语义」用例（面板参数展开层）共同承接。
-  it("change 入口（task-07 / X-13）：页头「新建会话（本变更）」→ 同一浮层 → preContext 双传；上下文行加显变更名（D-106）；首句 createSession change_id+workspace_id 双传", async () => {
+  it("change 入口（X-13）：树组头「＋」→ 同一浮层 → preContext 双传；上下文行加显变更名（D-106）；首句 createSession change_id+workspace_id 双传（ql-20260823-003 起入口=组头＋）", async () => {
     renderPortal(CHANGE_SCOPE);
 
-    // change scope 左侧平铺列表（D-106）无组头「＋」→ 入口在页头 actions
+    // change scope 树单组组头「＋」（ql-20260823-003，D-106 修订）
     fireEvent.click(
-      screen.getByRole("button", { name: "新建会话（本变更）" }),
+      await screen.findByRole("button", { name: "在 当前工作区 新建会话" }),
     );
     // 同一两步浮层（①机器 ②智能体）
     fireEvent.click(
@@ -949,7 +952,7 @@ describe("SessionsPortal workspace 组＋创建绑定（preContext 继承）", (
     });
     renderPortal(CHANGE_SCOPE);
     fireEvent.click(
-      screen.getByRole("button", { name: "新建会话（本变更）" }),
+      await screen.findByRole("button", { name: "在 当前工作区 新建会话" }),
     );
     fireEvent.click(
       await screen.findByRole("button", { name: "选择机器 machine-1" }),

@@ -18,9 +18,8 @@
  *     D-103）客户端按 workspace_id 分组；workspace scope 维持既有端点过滤
  *     （D-003@v2 只多传 workspace_id），树形态为 task-06 workspace 入口
  *     「深链预展开+滚动到该分组」（FR-06，经 defaultExpandedWorkspaceId）预留；
- *   - change scope → ChangeScopeFlatList 维持现状平铺列表（design §3 边界 /
- *     D-106：引擎胶囊 tab、机器多选 Select、全局 useVirtualizer、真分页加载
- *     更多均只在此分支保留——全局形态已退役，见下）。
+ *   - change scope：ql-20260823-003 起同走工作区树（用户要求三入口一致，
+ *     D-106 修订——平铺分支 ChangeScopeFlatList 已退役删除）。
  *
  * 工作区树（全局/workspace 形态）结构：
  *   筛选区：
@@ -44,8 +43,8 @@
  *
  * 退役清单（全局形态，X-11 / task-05 implementation 第 5 点）：
  *   引擎胶囊 tab（Segmented）→ 两层筛选 tab 智能体层取代；全局 useVirtualizer
- *   → 分组结构 + 组内截断取代（R-04）；机器多选 Select → 机器 tab 取代。
- *   三者仅在 change 分支保留原实现。
+ *   → 分组结构 + 组内截断取代（R-04）；机器多选 Select → 机器 tab 取代
+ *  （ql-20260823-003：change 分支随平铺形态一并退役，三入口零残留）。
  *
  * 组头回调 onNewInGroup(workspaceId)（props 新增，上下文解析归 task-06）；
  * defaultExpandedWorkspaceId（受控展开 prop，供 task-06 workspace 深链预展开）。
@@ -54,14 +53,9 @@
  * task-11 v3 返工）：scope 判别联合（WorkspaceScope/ChangeScope 导出）、D-003@v2
  * 端点过滤、D-006 紧凑两行、ql-20260818-012 批量删除——语义均随本次重构迁移。
  */
-import { useMemo, useRef, useState, type ReactNode } from "react";
-import {
-  useInfiniteQuery,
-  useQuery,
-  type InfiniteData,
-} from "@tanstack/react-query";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { Badge, Button, Input, Modal, Segmented, Select, Spin, Tag } from "antd";
+import { useMemo, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Badge, Button, Input, Modal, Select, Spin, Tag } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import { Trash2 } from "lucide-react";
 import { ApiError } from "@/lib/api";
@@ -92,13 +86,6 @@ export type ChangeScope = {
 /** scope 判别联合（缺省不传 = 全局门户现状）。 */
 export type SessionListScope = WorkspaceScope | ChangeScope;
 
-/** 引擎胶囊 tab（change 分支保留：全部/claude/codex → provider 参数）。 */
-const ENGINE_TABS = [
-  { label: "全部", value: "" },
-  { label: "Claude", value: "claude" },
-  { label: "Codex", value: "codex" },
-] as const;
-
 /** 状态下拉选项（active/ended/failed；空串=不过滤）。 */
 const STATUS_OPTIONS = [
   { label: "全部状态", value: "" },
@@ -106,13 +93,6 @@ const STATUS_OPTIONS = [
   { label: "已结束", value: "ended" },
   { label: "已失败", value: "failed" },
 ] as const;
-
-/** 后端真分页页大小（R-04，change 分支保留）。 */
-const PAGE_SIZE = 50;
-/** 虚拟行固定高（change 分支保留；ql-20260817-002 两行条目 96px 容纳）。 */
-const ROW_HEIGHT = 96;
-/** 视口外预渲染行数（change 分支保留）。 */
-const OVERSCAN = 6;
 
 /** 第二层智能体 tab 选项（D-107：claude/codex 固定两档，原型 ⚡/◎ 图标）。 */
 const AGENT_TABS = [
@@ -263,13 +243,9 @@ interface TreeGroup {
 /* ────────────────────── 组件 ────────────────────── */
 
 export function SessionListPanel(props: SessionListPanelProps) {
-  // scope 判断分支保留（task-05 implementation 第 1 点）：change 独立页左侧
-  // 维持现状 scope 平铺列表不改树（design §3 / D-106）；全局与 workspace
-  // scope 走工作区树（FR-01/FR-06——task-06 workspace 深链预展开依赖树形态，
-  // 其 allowed_paths 不含本文件，树能力须在本卡落齐）。
-  if (props.scope?.kind === "change") {
-    return <ChangeScopeFlatList {...props} />;
-  }
+  // ql-20260823-003：change scope 平铺分支退役（用户要求三入口一致，D-106
+  // 修订）——全部 scope 统一工作区树（change 数据仍带 change_id+workspace_id
+  // 端点过滤，单组形态；组头「＋」经门户 handleNewInGroup 双传 change 上下文）。
   return <WorkspaceTreeList {...props} />;
 }
 
@@ -360,6 +336,8 @@ function WorkspaceTreeList({
       listAgentSessions({
         limit: AGENT_SESSIONS_TREE_FETCH_LIMIT,
         ...(scope?.workspaceId ? { workspace_id: scope.workspaceId } : {}),
+        // ql-20260823-003：change 树化后端点过滤参随树透传（D-003@v2）。
+        ...(scope?.kind === "change" ? { change_id: scope.changeId } : {}),
       }),
   });
 
@@ -387,6 +365,19 @@ function WorkspaceTreeList({
       else byWs.set(wsId, [s]);
     }
     if (scope?.kind === "workspace") {
+      return [
+        {
+          id: scope.workspaceId,
+          workspaceId: scope.workspaceId,
+          name: workspaceIdToName.get(scope.workspaceId) ?? "当前工作区",
+          canNew: true,
+          sessions: byWs.get(scope.workspaceId) ?? [],
+        },
+      ];
+    }
+    // ql-20260823-003：change 同款单组（端点已过滤 change_id+workspace_id，
+    // 组头「＋」经门户 handleNewInGroup 双传 change 上下文）。
+    if (scope?.kind === "change") {
       return [
         {
           id: scope.workspaceId,
@@ -724,6 +715,7 @@ function WorkspaceTreeList({
                   })
                 }
                 hideMachineTitles={filterMachineId !== ""}
+                hideEngineChip={filterAgent !== ""}
                 runtimeToMachine={runtimeToMachine}
               />
             );
@@ -799,6 +791,7 @@ function WorkspaceGroupNode({
   showAll,
   onToggleShowAll,
   hideMachineTitles,
+  hideEngineChip,
   runtimeToMachine,
 }: {
   group: TreeGroup;
@@ -823,6 +816,8 @@ function WorkspaceGroupNode({
   onToggleShowAll: () => void;
   /** 筛选态隐藏机器小节标题（FR-02：已隐含——条目按机器过滤后小节名冗余）。 */
   hideMachineTitles: boolean;
+  /** ql-20260823-003：筛选智能体后条目隐藏引擎 chip（全部同引擎，冗余）。 */
+  hideEngineChip: boolean;
   runtimeToMachine: RuntimeMachineIndex;
 }) {
   // 组内超 50 截断（R-03）：截断作用于分组（跨机器小节），小节由可见条目派生。
@@ -962,6 +957,7 @@ function WorkspaceGroupNode({
                       title={title}
                       selected={s.id === selectedSessionId}
                       runtimeToMachine={runtimeToMachine}
+                      hideEngineChip={hideEngineChip}
                       onSelect={onSelect}
                       batchMode={batchActive}
                       checked={checkedIds.has(s.id)}
@@ -988,325 +984,6 @@ function WorkspaceGroupNode({
 
 /* ────────────────────── change scope 现状平铺列表（design §3 边界 / D-106） ────────────────────── */
 
-function ChangeScopeFlatList({
-  selectedSessionId,
-  onSelect,
-  onDeleteSessions,
-  scope,
-}: SessionListPanelProps) {
-  // 四维筛选状态（选择型即查：setState → queryKey 变化 → react-query 停旧启新）。
-  const [engine, setEngine] = useState<string>("");
-  const [status, setStatus] = useState<string>("");
-  const [machineIds, setMachineIds] = useState<string[]>([]);
-  // 文本型：输入态 vs 已应用态分离，回车才把 q 应用进查询（不每键触发）。
-  const [searchInput, setSearchInput] = useState("");
-  const [appliedQuery, setAppliedQuery] = useState("");
-  // ql-20260818-012：批量选择模式 + 已勾选 id 集合 + 删除进行中。
-  const [batchMode, setBatchMode] = useState(false);
-  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
-  const [deleting, setDeleting] = useState(false);
-
-  const { machines, workspaceIdToName, runtimeToMachine } =
-    useSessionListSharedData();
-
-  /** server 侧过滤参数（task-16 契约：runtime_id/machine_id/provider/q/status）。 */
-  const serverParams = useMemo(
-    () => ({
-      limit: PAGE_SIZE,
-      ...(engine ? { provider: engine } : {}),
-      ...(status ? { status: status as AgentSessionStatus } : {}),
-      // 后端 machine_id 是单值参数：恰好选 1 台才下发；多台走客户端过滤。
-      ...(machineIds.length === 1 ? { machine_id: machineIds[0] } : {}),
-      ...(appliedQuery ? { q: appliedQuery } : {}),
-    }),
-    [engine, status, machineIds, appliedQuery],
-  );
-
-  // D-003@v2：scope 与全局共用同一条 InfiniteQuery——queryKey 加 scope 槽位
-  // 区分缓存，queryFn 只多传 workspace_id/change_id 过滤参，真分页与缺省同构。
-  const sessionsQuery = useInfiniteQuery<
-    AgentSessionListResponse,
-    ApiError,
-    InfiniteData<AgentSessionListResponse, number>,
-    readonly unknown[],
-    number
-  >({
-    queryKey: ["agentSessions", "sessionsPortal", scope ?? null, serverParams],
-    queryFn: ({ pageParam }) =>
-      listAgentSessions({
-        ...serverParams,
-        ...(scope?.workspaceId ? { workspace_id: scope.workspaceId } : {}),
-        ...(scope?.kind === "change" ? { change_id: scope.changeId } : {}),
-        // 首页省略 offset（与 listAgentSessions 默认参数一致）。
-        ...(pageParam > 0 ? { offset: pageParam } : {}),
-      }),
-    initialPageParam: 0,
-    getNextPageParam: (lastPage, pages) => {
-      const loaded = pages.reduce((n, p) => n + p.items.length, 0);
-      return loaded < lastPage.total && lastPage.items.length > 0
-        ? loaded
-        : undefined;
-    },
-  });
-
-  const loadedItems = useMemo(
-    () => sessionsQuery.data?.pages.flatMap((p) => p.items) ?? [],
-    [sessionsQuery.data],
-  );
-
-  // 机器多选（>1）：后端单 machine_id 装不下 → 对已加载页客户端过滤。
-  const items = useMemo(() => {
-    if (machineIds.length <= 1) return loadedItems;
-    const selected = new Set(machineIds);
-    return loadedItems.filter((s) => {
-      if (!s.runtime_id) return false;
-      const hit = runtimeToMachine.get(s.runtime_id);
-      return hit ? selected.has(hit.machine.id) : false;
-    });
-  }, [loadedItems, machineIds, runtimeToMachine]);
-
-  const total = sessionsQuery.data?.pages.at(-1)?.total ?? 0;
-
-  // ql-20260818-012/013：删除处理（单条/批量共用，Modal.confirm 二次确认）。
-  const handleSingleDelete = (id: string, title: string) => {
-    if (!onDeleteSessions || deleting) return;
-    Modal.confirm({
-      title: "删除会话",
-      content: `确定要删除「${title}」吗？删除后将从列表中移除。`,
-      okText: "删除",
-      okButtonProps: { danger: true },
-      cancelText: "取消",
-      onOk: async () => {
-        setDeleting(true);
-        try {
-          await onDeleteSessions([id]);
-        } finally {
-          setDeleting(false);
-        }
-      },
-    });
-  };
-  const handleBatchDelete = () => {
-    if (!onDeleteSessions || deleting || checkedIds.size === 0) return;
-    Modal.confirm({
-      title: "批量删除会话",
-      content: `确定要删除选中的 ${checkedIds.size} 个会话吗？删除后将从列表中移除。`,
-      okText: `删除 ${checkedIds.size} 个`,
-      okButtonProps: { danger: true },
-      cancelText: "取消",
-      onOk: async () => {
-        setDeleting(true);
-        try {
-          await onDeleteSessions([...checkedIds]);
-          setCheckedIds(new Set());
-        } finally {
-          setDeleting(false);
-        }
-      },
-    });
-  };
-  const toggleChecked = (id: string) => {
-    setCheckedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  // 虚拟滚动（change 分支保留）：固定行高，jsdom/真实环境行为一致。
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const virtualizer = useVirtualizer({
-    count: items.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: () => ROW_HEIGHT,
-    overscan: OVERSCAN,
-  });
-  const virtualItems = virtualizer.getVirtualItems();
-
-  const machineOptions = useMemo(
-    () =>
-      machines.map((m) => ({
-        value: m.id,
-        label: (
-          <span className="flex items-center gap-1.5">
-            <Badge status={m.status === "online" ? "success" : "default"} />
-            <span>{machineLabel(m)}</span>
-          </span>
-        ),
-      })),
-    [machines],
-  );
-
-  return (
-    <div
-      aria-label="会话列表"
-      className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card"
-    >
-      {/* 头部：标题 + 总数 */}
-      <div className="flex items-center justify-between border-b border-border px-3 py-2">
-        <h2 className="text-sm font-semibold text-foreground">会话</h2>
-        <span className="text-[11px] text-muted-foreground">共 {total} 个</span>
-      </div>
-
-      {/* 筛选区（FR-02 四维；选择型即查、文本回车查）——change 独立页维持现状。 */}
-      <div className="flex flex-col gap-2 border-b border-border px-3 py-2">
-        <Input
-          size="small"
-          allowClear
-          prefix={<SearchOutlined />}
-          placeholder="搜索会话标题…（回车搜索）"
-          aria-label="搜索会话标题"
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-          onPressEnter={() => setAppliedQuery(searchInput.trim())}
-        />
-        <div className="flex items-center gap-1.5">
-          <Select
-            id="slp-status"
-            size="small"
-            className="w-28 shrink-0"
-            value={status}
-            onChange={(v) => setStatus(v ?? "")}
-            options={STATUS_OPTIONS.map((o) => ({ ...o }))}
-          />
-          <Select
-            id="slp-machine"
-            mode="multiple"
-            size="small"
-            className="min-w-0 flex-1"
-            placeholder="机器（全部）"
-            allowClear
-            maxTagCount={2}
-            value={machineIds}
-            onChange={(v) => setMachineIds(v ?? [])}
-            options={machineOptions}
-          />
-        </div>
-        <Segmented
-          size="small"
-          value={engine}
-          onChange={(v) => setEngine(v as string)}
-          options={ENGINE_TABS.map((o) => ({ ...o }))}
-        />
-      </div>
-
-      {/* ql-20260818-012：批量选择模式切换 + 批量删除/单条删除操作栏 */}
-      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-border">
-        <Button
-          size="small"
-          type={batchMode ? "primary" : "default"}
-          onClick={() => {
-            setBatchMode(!batchMode);
-            setCheckedIds(new Set());
-          }}
-        >
-          {batchMode ? "退出批量" : "批量管理"}
-        </Button>
-        {batchMode && (
-          <>
-            <Button
-              size="small"
-              disabled={checkedIds.size === 0 || deleting}
-              loading={deleting}
-              onClick={handleBatchDelete}
-            >
-              删除选中（{checkedIds.size}）
-            </Button>
-            <Button
-              size="small"
-              onClick={() => {
-                const allIds = new Set(loadedItems.map((s) => s.id));
-                setCheckedIds(
-                  checkedIds.size === allIds.size ? new Set() : allIds,
-                );
-              }}
-            >
-              {checkedIds.size === loadedItems.length && checkedIds.size > 0
-                ? "取消全选"
-                : "全选"}
-            </Button>
-          </>
-        )}
-      </div>
-
-      {/* 列表区 */}
-      {sessionsQuery.isError ? (
-        <div className="m-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
-          加载会话失败：{sessionsQuery.error?.message ?? "未知错误"}
-          <Button
-            size="small"
-            className="ml-2"
-            onClick={() => void sessionsQuery.refetch()}
-          >
-            重新加载
-          </Button>
-        </div>
-      ) : sessionsQuery.isLoading ? (
-        <div className="flex flex-1 items-center justify-center">
-          <Spin data-testid="sessions-loading" />
-        </div>
-      ) : items.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center px-4 text-center text-xs text-muted-foreground">
-          没有符合条件的会话
-        </div>
-      ) : (
-        <div
-          ref={scrollRef}
-          data-testid="session-scroll"
-          className="min-h-0 flex-1 overflow-y-auto"
-        >
-          <div
-            style={{
-              height: virtualizer.getTotalSize(),
-              position: "relative",
-              width: "100%",
-            }}
-          >
-            {virtualItems.flatMap((virtualRow) => {
-              // noUncheckedIndexedAccess：越界项（数据与虚拟索引瞬时错位）跳过。
-              const session = items[virtualRow.index];
-              if (!session) return [];
-              const selected = session.id === selectedSessionId;
-              const title = session.title?.trim() || "未命名会话";
-              return [
-                <SessionRow
-                  key={session.id}
-                  variant="flat"
-                  session={session}
-                  title={title}
-                  selected={selected}
-                  runtimeToMachine={runtimeToMachine}
-                  workspaceIdToName={workspaceIdToName}
-                  virtualStart={virtualRow.start}
-                  virtualSize={virtualRow.size}
-                  onSelect={onSelect}
-                  batchMode={batchMode}
-                  checked={checkedIds.has(session.id)}
-                  onToggleCheck={() => toggleChecked(session.id)}
-                  onDelete={onDeleteSessions ? () => handleSingleDelete(session.id, title) : undefined}
-                />,
-              ];
-            })}
-          </div>
-          {/* 后端真分页（R-04）：未取完时手动加载下一页。 */}
-          {sessionsQuery.hasNextPage && (
-            <div className="border-t border-border px-3 py-2 text-center">
-              <Button
-                size="small"
-                loading={sessionsQuery.isFetchingNextPage}
-                onClick={() => void sessionsQuery.fetchNextPage()}
-              >
-                加载更多（已加载 {loadedItems.length}/{total}）
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ────────────────────── 紧凑两行条目（D-006） ────────────────────── */
 
 interface SessionRowProps {
@@ -1326,6 +1003,8 @@ interface SessionRowProps {
   checked?: boolean;
   onToggleCheck?: () => void;
   onDelete?: () => void;
+  /** ql-20260823-003：树形态筛选智能体后隐藏引擎 chip（全组同引擎冗余）。 */
+  hideEngineChip?: boolean;
 }
 
 function SessionRow({
@@ -1342,6 +1021,7 @@ function SessionRow({
   checked,
   onToggleCheck,
   onDelete,
+  hideEngineChip,
 }: SessionRowProps) {
   // chips 数据源：config_snapshot 直显免二次查询；快照缺省回退基础信息。
   const snapshot = session.config_snapshot;
@@ -1452,12 +1132,14 @@ function SessionRow({
             {machineOffline ? "（离线）" : ""}
           </Tag>
         )}
-        <Tag
-          className="m-0 shrink-0 rounded-sm px-1 py-0 text-[10px] leading-4"
-          color={engineValue === "codex" ? "purple" : "gold"}
-        >
-          {engineLabel(engineValue)}
-        </Tag>
+        {!hideEngineChip && (
+          <Tag
+            className="m-0 shrink-0 rounded-sm px-1 py-0 text-[10px] leading-4"
+            color={engineValue === "codex" ? "purple" : "gold"}
+          >
+            {engineLabel(engineValue)}
+          </Tag>
+        )}
         {variant === "tree" && (
           <Tag
             title={`创建人 ${session.owner_name ?? "—"}`}

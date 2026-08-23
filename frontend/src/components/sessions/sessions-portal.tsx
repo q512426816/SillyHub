@@ -32,7 +32,7 @@
  *   onPick(runtimeId) 合成 preContext { workspaceId(组), runtimeId }）。
  *
  * change 入口预会话（task-07 / FR-06 / D-106 / X-13）：change scope 左侧为
- *   平铺列表（design §3，无组头「＋」）→ 页头 actions 放「新建会话（本变更）」
+ *   工作区树（ql-20260823-003 起与全局同形态，组头「＋」承载新建）
  *   按钮走同一两步浮层，onPick 合成 preContext 显式双传 workspaceId +
  *   changeId（change 级隐含 workspace，原 NewSessionForm bindChangeId 契约由
  *   preContext 继承）。NewSessionForm/WorkspaceSessionPicker 本卡全量退役
@@ -54,13 +54,12 @@
  * defaultExpandedWorkspaceId（挂载后仅该分组展开）。
  *
  * 页头「新建会话」按钮已移除（X-12：新建入口收敛到组头「＋」，actions 空）；
- * task-07 例外：change scope 页头 actions 放「新建会话（本变更）」（其左侧
+ * ql-20260823-003：change 页头按钮移除（D-106 修订，树组头「＋」统一承载；原 task-07 例外（其左侧
  * 平铺列表无组头「＋」，见上）。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
-import { Button } from "antd";
 
 import {
   SessionPanel,
@@ -145,7 +144,6 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   }`;
   // change scope（task-07 / FR-06 / D-106）：左侧平铺列表无组头「＋」，预会话
   // 入口由页头 actions 承载（X-12 的例外，仅此 scope 有页头按钮）。
-  const isChangeScope = scope?.kind === "change";
 
   /**
    * 组头「＋」（FR-04 / D-107 优先级链第一段，ql-20260823-001 补齐）：两层筛选
@@ -175,14 +173,6 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
     },
     [machines, scope],
   );
-
-  /** change 入口「新建会话（本变更）」：走同一浮层（pickerWorkspaceId 置
-   *  scope.workspaceId，X-13 双传见 handlePickerPick）。 */
-  const handleNewInChange = useCallback(() => {
-    if (scope?.kind !== "change") return;
-    setPickerWorkspaceId(scope.workspaceId);
-    setPickerOpen(true);
-  }, [scope]);
 
   /** 浮层两步选完（两步即达）：合成 preContext 切预会话态（清选中——三分支
    *  优先级）。change scope 显式双传 workspaceId + changeId（X-13：change 级
@@ -224,15 +214,10 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
       aria-label={portalTitle}
     >
       {/* X-12：页头「新建会话」按钮移除——新建入口收敛到组头「＋」，actions 空；
-          task-07 例外：change scope 平铺列表无组头「＋」，页头承载预会话入口。 */}
+          ql-20260823-003：change 亦树形态，页头按钮移除（D-106 修订）。 */}
       <PageHeader
         title={portalTitle}
         subtitle="跨机器、跨智能体的统一会话入口：左侧选择会话，右侧继续对话或新建"
-        actions={
-          isChangeScope ? (
-            <Button onClick={handleNewInChange}>新建会话（本变更）</Button>
-          ) : undefined
-        }
       />
       {/* 原型 .main-grid：左 320px 列表 + 右面板 */}
       <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)] gap-3.5">
@@ -246,7 +231,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
           }}
           onNewInGroup={handleNewInGroup}
           defaultExpandedWorkspaceId={
-            scope?.kind === "workspace" ? scope.workspaceId : undefined
+            scope?.kind === "workspace" || scope?.kind === "change"
+              ? scope.workspaceId
+              : undefined
           }
           onDeleteSessions={async (ids) => {
             // ql-20260818-012：逐条调 deleteAgentSession（后端软删），完成后
@@ -288,8 +275,8 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
           >
             <h3 className="text-sm font-semibold text-foreground">开始新会话</h3>
             <p className="max-w-[320px] text-xs leading-5 text-muted-foreground">
-              {isChangeScope
-                ? "点右上「新建会话（本变更）」选择机器与智能体，发送第一句话即在当前变更下创建会话；也可以从列表选择一个既有会话继续对话。"
+              {scope?.kind === "change"
+                ? "在左侧工作区分组点「＋」选择机器与智能体，发送第一句话即在当前变更下创建会话；也可以从列表选择一个既有会话继续对话。"
                 : "在左侧工作区分组点「＋」选择机器与智能体，发送第一句话即创建会话；也可以从列表选择一个既有会话继续对话。"}
             </p>
           </div>

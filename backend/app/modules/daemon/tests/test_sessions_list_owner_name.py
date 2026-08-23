@@ -2,7 +2,9 @@
 
 覆盖 FR-05 / D-108@v2 / D-103@v1：
 
-- owner_name：router 层批量查 ``users.username`` 注入（照 OwnerRead /
+- owner_name：router 层批量查 ``users`` 注入，display_name 展示名优先、回退
+  ``users.username`` 登录名（ql-20260823-003：用户反馈树里应显示名称不是登录名；
+  照 OwnerRead /
   terminating_at 的 IN 批查先例）——本人会话 = 本人用户名；属主用户行存在
   但 username 未回填的旧数据（username-login 迁移前旧账号）→ null
   （brownfield 不崩、不阻断列表）。
@@ -66,15 +68,16 @@ async def _make_session(
 
 
 class TestOwnerName:
-    async def test_own_session_owner_name_is_own_username(
+    async def test_owner_name_prefers_display_name(
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],
         db_session: AsyncSession,
     ) -> None:
-        """命中：本人会话的 owner_name = 本人 users.username。"""
+        """ql-20260823-003：display_name 展示名优先——树里显示名称不是登录名。"""
         admin = await _get_admin(db_session)
         admin.username = "qinyi_admin"
+        admin.display_name = "秦毅"
         await db_session.commit()
         s = await _make_session(db_session, admin.id, None)
 
@@ -84,7 +87,24 @@ class TestOwnerName:
         assert body["total"] == 1
         item = body["items"][0]
         assert item["id"] == str(s.id)
-        assert item["owner_name"] == "qinyi_admin"
+        assert item["owner_name"] == "秦毅"
+
+    async def test_owner_name_falls_back_to_username(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """display_name 未填 → 回退 username 登录名。"""
+        admin = await _get_admin(db_session)
+        admin.username = "qinyi_admin"
+        admin.display_name = None
+        await db_session.commit()
+        await _make_session(db_session, admin.id, None)
+
+        resp = await client.get("/api/daemon/sessions", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["items"][0]["owner_name"] == "qinyi_admin"
 
     async def test_legacy_owner_without_username_returns_null(
         self,
@@ -92,11 +112,14 @@ class TestOwnerName:
         auth_headers: dict[str, str],
         db_session: AsyncSession,
     ) -> None:
-        """无主旧数据：属主用户行存在但 username 未回填（username-login 迁移前
-        旧账号）→ owner_name=null，列表不崩不丢行。"""
+        """无主旧数据：属主用户行存在但 display_name/username 均未回填
+        （旧账号）→ owner_name=null，列表不崩不丢行。"""
         admin = await _get_admin(db_session)
-        # 根 conftest 的 admin fixture 不写 username（None）——正是该 brownfield。
+        # 根 conftest 的 admin fixture 不写 username（None）；display_name 需
+        # 显式清空——两字段皆空才是该 brownfield。
         assert admin.username is None
+        admin.display_name = None
+        await db_session.commit()
         s = await _make_session(db_session, admin.id, None)
 
         resp = await client.get("/api/daemon/sessions", headers=auth_headers)
