@@ -1854,18 +1854,12 @@ function SessionPanelPage({
         emptyProviderLabel={
           PROVIDER_META[session.provider]?.label ?? session.provider
         }
+        streamFooter={
+          session.workspace_id ? (
+            <AgentLogCard workspaceId={session.workspace_id} />
+          ) : null
+        }
       />
-
-      {/* task-04（2026-08-23-platform-agent-log-ingest / FR-04 / D-006）：
-          本地 Agent 日志卡（AgentLogCard）——消息流（TurnTimeline）下方、
-          TeamTaskBlock 上方；session.workspace_id 为 null 不渲染（FR-04），
-          detailQuery 数据即得，无额外请求（design §3.4）。仅 page 分支渲染
-          （本组件在 SessionPanelPage 内，dialog 模式不涉及）。 */}
-      {session.workspace_id ? (
-        <div className="shrink-0 border-t border-border bg-card px-5 py-2">
-          <AgentLogCard workspaceId={session.workspace_id} />
-        </div>
-      ) : null}
 
       {/* task-11：会话团队任务块（TeamTaskBlock）——消息流末尾/输入区上方渲染会话
           mission 列表（listSessionTeamMissions created_at 倒序全部渲染、活跃在前，

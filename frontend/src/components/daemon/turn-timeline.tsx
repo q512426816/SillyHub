@@ -202,6 +202,13 @@ export interface TurnTimelineProps {
   hasOnlineProvider: boolean;
   /** 空态文案：在线 provider 展示名（父级经 PROVIDER_META 解析后传入）。 */
   emptyProviderLabel: string;
+  /**
+   * ql-20260823-002-6a1a：消息流末尾注入位（会话式条目挂载口）——渲染在最后
+   * 一个 turn 之后、同一滚动容器内，让附加信息以「对话流里的一条消息」形态出现
+   * （先例：AgentLogCard 本地 Agent 日志条目）而非面板级独立卡片。null/undefined
+   * 不渲染（零回归）；空 turns（空态占位）不渲染（流不存在无落点）。
+   */
+  streamFooter?: ReactNode;
 }
 
 export function TurnTimeline({
@@ -216,6 +223,7 @@ export function TurnTimeline({
   onSwitchProvider,
   hasOnlineProvider,
   emptyProviderLabel,
+  streamFooter,
 }: TurnTimelineProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -511,6 +519,10 @@ export function TurnTimeline({
               </div>
             </div>
           ))}
+          {/* ql-20260823-002-6a1a：消息流末尾注入位（props.streamFooter）——
+              最后一个 turn 之后、同一 space-y-5 流容器内渲染，附加信息以
+              「对话流里的一条消息」形态出现（AgentLogCard 先例）。 */}
+          {streamFooter}
         </div>
       )}
     </div>

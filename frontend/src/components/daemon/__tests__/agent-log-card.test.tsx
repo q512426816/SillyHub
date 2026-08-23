@@ -1,16 +1,17 @@
-// task-04（2026-08-23-platform-agent-log-ingest / FR-04 / D-006）：
-// AgentLogCard「本地 Agent 日志」卡片单测（design §3.4 + 原型
-// prototype-agent-log-panel.html 三态）。
+// task-04（2026-08-23-platform-agent-log-ingest / FR-04 / D-006）+
+// ql-20260823-002-6a1a（改会话流内展示）：
+// AgentLogCard「本地 Agent 日志」会话流条目单测。
 //
 // 覆盖：
-//   1. 列表渲染字段：harness 徽标（codex brand / zcode info 青双分支）/
-//      originator 标签 / session 短码（uuid 前 8…后 4）/ 大小人性化 /
-//      相对时间活跃 + 15 分钟内绿点 / 调用次数 / 最近命令 code / log_path；
-//   2. 空态文案（虚线框引导 sillyspec run 自动上报）；
-//   3. 折叠交互：>3 条默认 3 条 + 「展开全部 N 条」/「收起」；
+//   1. 折叠默认态：只渲染一行摘要（标题 + N 个 + 最新 X 前），明细不渲染；
+//   2. 展开交互：点头部摘要 → 明细列表（harness 徽标双分支 / originator /
+//      session 短码 / 大小人性化 / 相对时间 + 绿点 / 调用次数 / 最近命令 /
+//      log_path）；再点收起；
+//   3. 条数折叠：>3 条默认 3 条 + 「展开全部 N 条」/「收起」；
 //   4. 复制回调：navigator.clipboard.writeText 收到完整 session_id /
 //      log_path，900ms「已复制 ✓」瞬时反馈后还原；
-//   5. error 静默返回 null（design §4：增强信息不干扰会话主体验）。
+//   5. 静默隐藏：error / 空列表 / loading 一律返回 null（会话流内不出现
+//      占位块，design §4：增强信息不干扰会话主体验）。
 //
 // 测试纪律：FIRST / AAA / 仅 mock 网络层（@/lib/agent-logs 的 listAgentLogs）
 // 与 navigator.clipboard；断言用 aria-label / data-testid 避开样式细节。
@@ -93,6 +94,13 @@ function setupCard(workspaceId = "ws-1") {
   );
 }
 
+/** 等数据落地并展开明细（默认折叠：先等摘要出现，再点开）。 */
+async function openEntries() {
+  const toggle = await screen.findByTestId("agent-log-toggle");
+  fireEvent.click(toggle);
+  await screen.findByTestId("agent-log-entries");
+}
+
 beforeEach(() => {
   // jsdom 无剪贴板：mock writeText（复制回调断言对象）。
   Object.assign(navigator, {
@@ -100,23 +108,43 @@ beforeEach(() => {
   });
 });
 
-/* ───────────────── 1. 列表渲染字段 ───────────────── */
+/* ───────────────── 1. 折叠默认态（会话流一行摘要） ───────────────── */
 
-describe("AgentLogCard 列表渲染", () => {
-  it("渲染 harness 徽标 / originator / session 短码 / 大小 / 活跃时间 / 调用次数 / 最近命令 / log_path", async () => {
+describe("AgentLogCard 会话流条目（折叠默认态）", () => {
+  it("默认只渲染摘要行（标题 + N 个 + 最新相对时间），明细不出现", async () => {
     agentLogsApi.listAgentLogs.mockResolvedValue({ items: twoHarnessItems() });
     setupCard();
 
-    // 查询参数：workspaceId 透传给 listAgentLogs（findByText 等数据落地后首断言）。
+    // 查询参数：workspaceId 透传给 listAgentLogs。
     await waitFor(() => expect(agentLogsApi.listAgentLogs).toHaveBeenCalledWith("ws-1"));
 
+    // 摘要：标题 + 2 个 + 最新 N 分钟前（首条即最新，列表 last_seen_at 新→旧）。
+    const toggle = await screen.findByTestId("agent-log-toggle");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByText("本地 Agent 日志")).toBeInTheDocument();
+    expect(screen.getByText(/2 个 · 最新 \d+ 分钟前/)).toBeInTheDocument();
+
+    // 明细未渲染（折叠态）。
+    expect(screen.queryByTestId("agent-log-entries")).not.toBeInTheDocument();
+    expect(screen.queryByText("codex")).not.toBeInTheDocument();
+  });
+});
+
+/* ───────────────── 2. 展开明细 ───────────────── */
+
+describe("AgentLogCard 展开明细", () => {
+  it("点摘要展开：harness 徽标 / originator / session 短码 / 大小 / 活跃时间 / 调用次数 / 最近命令 / log_path；再点收起", async () => {
+    agentLogsApi.listAgentLogs.mockResolvedValue({ items: twoHarnessItems() });
+    setupCard();
+    await openEntries();
+
     // harness 徽标：codex（brand 阶）+ zcode（info 青分支；zcode 同名 originator 共 2 处）。
-    expect(await screen.findByText("codex")).toBeInTheDocument();
+    expect(screen.getByText("codex")).toBeInTheDocument();
     expect(screen.getAllByText("zcode")).toHaveLength(2);
     // originator：daemon 来源标签。
     expect(screen.getByText("sillyhub-daemon")).toBeInTheDocument();
 
-    // session 短码：uuid 前 8 + … + 后 4（原型 sess 8f14e45f…5a9c）。
+    // session 短码：uuid 前 8 + … + 后 4。
     const sessBtn = screen.getByRole("button", {
       name: `复制 session_id：${CODEX_SESSION_ID}`,
     }) as HTMLButtonElement;
@@ -144,6 +172,11 @@ describe("AgentLogCard 列表渲染", () => {
       name: `复制日志路径：${CODEX_LOG_PATH}`,
     }) as HTMLButtonElement;
     expect(pathBtn.title).toBe(CODEX_LOG_PATH);
+
+    // 再点头部摘要收起：明细卸载、aria-expanded 回 false。
+    fireEvent.click(screen.getByTestId("agent-log-toggle"));
+    expect(screen.queryByTestId("agent-log-entries")).not.toBeInTheDocument();
+    expect(screen.getByTestId("agent-log-toggle").getAttribute("aria-expanded")).toBe("false");
   });
 
   it("可选字段 null 安全：session_id / originator / 命令 / 大小 / 时间缺失不阻塞渲染", async () => {
@@ -161,8 +194,9 @@ describe("AgentLogCard 列表渲染", () => {
       ],
     });
     setupCard();
+    await openEntries();
 
-    expect(await screen.findByText("codex")).toBeInTheDocument();
+    expect(screen.getByText("codex")).toBeInTheDocument();
     expect(screen.queryAllByRole("button", { name: /复制 session_id/ })).toHaveLength(0);
     // 大小 / 时间 null → 「—」。
     expect(screen.getByText("— · —")).toBeInTheDocument();
@@ -171,32 +205,19 @@ describe("AgentLogCard 列表渲染", () => {
   });
 });
 
-/* ───────────────── 2. 空态 ───────────────── */
+/* ───────────────── 3. 条数折叠（展开全部） ───────────────── */
 
-describe("AgentLogCard 空态", () => {
-  it("无上报：虚线框引导文案（sillyspec run 自动上报）", async () => {
-    agentLogsApi.listAgentLogs.mockResolvedValue({ items: [] });
-    setupCard();
-
-    expect(
-      await screen.findByText("尚未收到该工作区的 agent 日志上报"),
-    ).toBeInTheDocument();
-    expect(screen.getByText("sillyspec run")).toBeInTheDocument();
-  });
-});
-
-/* ───────────────── 3. 折叠 / 展开 ───────────────── */
-
-describe("AgentLogCard 折叠交互", () => {
-  it("默认 3 条，超出折叠，「展开全部 N 条」/「收起」切换", async () => {
+describe("AgentLogCard 条数折叠", () => {
+  it("展开后默认 3 条，超出折叠，「展开全部 N 条」/「收起」切换", async () => {
     agentLogsApi.listAgentLogs.mockResolvedValue({
       items: Array.from({ length: 5 }, (_, i) =>
         makeItem({ id: `log-${i + 1}`, session_id: `sess-0000000${i + 1}-0000-0000-0000-00000000000${i}` }),
       ),
     });
     setupCard();
+    await openEntries();
 
-    const list = await screen.findByTestId("agent-log-entries");
+    const list = screen.getByTestId("agent-log-entries");
     expect(list.children).toHaveLength(3);
 
     // 展开全部 5 条。
@@ -215,7 +236,7 @@ describe("AgentLogCard 复制交互", () => {
   it("session 短码 / log_path 点击复制完整值 + 「已复制 ✓」900ms 瞬时反馈", async () => {
     agentLogsApi.listAgentLogs.mockResolvedValue({ items: [makeItem()] });
     setupCard();
-    await screen.findByText("codex");
+    await openEntries();
 
     // session_id：复制完整 uuid（非短码）。
     fireEvent.click(
@@ -239,15 +260,23 @@ describe("AgentLogCard 复制交互", () => {
   });
 });
 
-/* ───────────────── 5. error 静默隐藏 ───────────────── */
+/* ───────────────── 5. 静默隐藏（error / 空 / loading） ───────────────── */
 
-describe("AgentLogCard error 态", () => {
-  it("查询失败返回 null（卡片隐藏，不干扰会话主体验）", async () => {
+describe("AgentLogCard 静默隐藏", () => {
+  it("查询失败返回 null（条目隐藏，不干扰会话主体验）", async () => {
     agentLogsApi.listAgentLogs.mockRejectedValue(new Error("network down"));
     const { container } = setupCard();
 
     await waitFor(() => expect(agentLogsApi.listAgentLogs).toHaveBeenCalled());
-    // 先经历 pending（「加载中…」）再落 error → 整卡卸载。
     await waitFor(() => expect(container.firstChild).toBeNull());
+  });
+
+  it("空列表返回 null（会话流内不出现占位块）", async () => {
+    agentLogsApi.listAgentLogs.mockResolvedValue({ items: [] });
+    const { container } = setupCard();
+
+    await waitFor(() => expect(agentLogsApi.listAgentLogs).toHaveBeenCalled());
+    await waitFor(() => expect(container.firstChild).toBeNull());
+    expect(screen.queryByTestId("agent-log-toggle")).not.toBeInTheDocument();
   });
 });
