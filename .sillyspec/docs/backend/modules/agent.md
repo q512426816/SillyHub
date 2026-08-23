@@ -16,6 +16,13 @@ RunPlacementService 选 daemon 运行时 + lease，与 daemon 模块双向协作
 完成回调 run_sync）。
 
 ## 契约摘要
+- 文件制品面（2026-08-23-agent-file-upload-mcp）：`POST /api/agent/file-artifacts`
+  （multipart file/description/run_id + X-Session-Id 会话场景；WORKSPACE_WRITE 双路径
+  鉴权，落 File 行 owner_type=agent_session/agent_run + AgentRunLog 日志行
+  channel=tool_call/tool_kind=FileUpload/dedup_key=file-upload:{file_id}（IntegrityError
+  重放防护）+ Redis 双通道 publish（submit_run_input 同款模式，失败 WARNING 降级））；
+  `GET /api/agent/file-artifacts?session_id=|run_id=`（WORKSPACE_READ + 锚复核，
+  FileMetaResp 倒序）。daemon sillyhub-file MCP 的上传直连此端点。
 - run 面：`POST /{wid}/agent/runs`（创建）+ 子路由
   `GET /agent/runs/{run_id}`（详情）、`/kill`（统一 kill 通道）、`/input`、
   `/logs`、`/stream`（SSE）、`/resume`、`/approve`、`GET|POST /checkpoint`；

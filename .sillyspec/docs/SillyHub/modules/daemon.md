@@ -47,7 +47,8 @@ backend 与 daemon 经 WebSocket + REST 双向通信，支持三种执行形态�
 - **policy/**：filesystem-policy / runtime-policy（PolicyCache realpath 归一统一口径）/ audit-sink / path-utils（盘符根/Unix 根边界敏感前缀比较，root 已含尾 sep 勿再补）。
 - **resilience/**：ResilienceService——submitWithRetry 流式消息退避重试（上限约 8s）用尽入 FileOutbox；retryTerminal 终态轻量重试；心跳健康信号触发 drainOutbox 补发（补发前校验 lease 有效/session 未终态，遇 422 claim_token 失效丢弃）。
 - **spec-sync.ts**：spec 树双向同步——拉取 bundle（tar 解包）+ 推送增量（本地 manifest 与 hub spec-manifest 对比算 FileOp ops，hub 404 首推全量）；junction 挂载、pending-push 标记、`SpecPushConflict` 与 push-before-pull 防护。
-- **其它**：credential-injector（litellm_proxy 标记→ANTHROPIC_BASE_URL 指向 hub 代理）、ws-client（连接带 X-API-Key header）、mcp-server.ts、local-yaml-writer（init 下发 local.yaml 写盘）、model-error 分类、skill-manager、roots-rpc（磁盘根列举）、host-fs-handler、build-id 自动注入。
+- **mcp-server.ts（双 toolset）**：同一二进制双模式（env `MCP_TOOLSET`，缺省/拼错回落 orchestration=原 5 编排工具零变化）；`file` 模式=独立 server 名 `sillyhub-file` 仅注册 `upload_file`/`list_uploaded_files` 两工具（worker 注入不含编排工具，不触碰 CC-12 防递归）。路径校验 fail-closed：`MCP_ALLOWED_ROOT` 缺失/空串拒绝一切上传（path_out_of_root），resolve+分隔符前缀校验拒绝对路径/`..` 出根；文件本地读取经 hub-client multipart 直传 `POST /api/agent/file-artifacts`（内容不经 agent 上下文）。注入两条链（2026-08-23-agent-file-upload-mcp）：会话=cli.ts mainAgentMcpConfigProvider 双 server 表 + session-manager per-server env（MCP_SESSION_ID 双条目，injectMcpSessionId 调两次不改签名）；worker（仅 provider=claude）=task-runner 步骤 5.5 写 `os.tmpdir()` 0600 临时 .mcp.json（凭证 per-server env——spike-01 证父进程自定义 env 不透传 MCP 子进程，per-server env 是唯一可靠通道；**同步写**保持 spawn 前零真实异步 IO 间隙）+ run 终 finally 删除 + 构造进程级单次清扫残留 + stream-json buildArgs mcpConfigPath（claude 追加 `--mcp-config`，cursor 忽略）。spike-01（claude CLI 2.1.216 实测）：--mcp-config 与全套既有参数共存；.mcp.json env 支持 `${VAR}` 展开。
+- **其它**：credential-injector（litellm_proxy 标记→ANTHROPIC_BASE_URL 指向 hub 代理）、ws-client（连接带 X-API-Key header）、local-yaml-writer（init 下发 local.yaml 写盘）、model-error 分类、skill-manager、roots-rpc（磁盘根列举）、host-fs-handler、build-id 自动注入。
 
 ## 关键逻辑
 ```

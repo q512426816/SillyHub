@@ -77,11 +77,17 @@ SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
 历史 turn = getAgentSessionLogs → logsToTurns（内部走装配器 logsToSegments + 兼容投影）
 实时 turn = streamSession SSE → envelope 归一 → applyLogToSegments（session-log-assembler.ts
            纯函数：分段装配/归属路由/override 撤回/双路去重，输出 TurnSegment[] 结构化段模型）
-渲染 = TurnTimeline v2：turn 带 segments 走段渲染（turn-segment-views 五类段组件
+渲染 = TurnTimeline v2：turn 带 segments 走段渲染（turn-segment-views 六类段组件
        + 内置 TurnStatusBar 轮级状态条）；segments 缺省回退旧渲染路径（brownfield）
 子代理 = parent_tool_use_id 归属嵌套进 Task 工具段 children（depth>1 递归）+
          sessions/subagent-catalog 头部目录（仅 /sessions 页）
 发送 = injectSession；计时锚点三源（live 占位 Date.now / attach run.started_at / 首条 log）
+文件段（2026-08-23-agent-file-upload-mcp）= tool_kind='FileUpload' 日志行（content 为
+       六字段 JSON）经 classifySessionLog(toolKind) 优先映射 file 段（不再误产 tool_use 段，
+       坏 JSON 回退不丢行）→ FileMessageCard（图片 isImageMime 缩略图/通用图标卡+downloadFile）；
+       run 详情产出文件区=changes/detail/run-file-artifacts.tsx（listAgentFileArtifacts
+       GET /api/agent/file-artifacts?run_id=，useQueries 去重倒序；禁用 /api/file/list——
+       其非 admin 把 owner_id 当 workspace id 会 404，D-010@v1）
 ```
 
 ## 注意事项

@@ -23,10 +23,12 @@ created_at: 2026-08-23 09:50:30
 
 ## 更新结果（verify/收尾阶段回填）
 
+真实变更清单核对（merge cbe5f328 首父差异，38 个业务文件，全部落入上述矩阵模块；含计划外连带 4 文件：agent/tests/test_mission_session_id.py 与 backend/tests/test_session_agent_session_id_migration.py（alembic 守卫钉值债顺手修）、daemon turn-status-bar.tsx 与 turn-timeline.tsx（TurnSegment 新成员穷尽 switch 1 行涟漪，已在 task-01/08 卡 related_tests 声明））。
+
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| docs/backend/modules（file 模块文档） | 待更新：description 列/DTO 字段/_can_access 新分支 | pending |
-| docs/backend/modules（agent 模块文档） | 待更新：file_artifacts 端点/worker 白名单 | pending |
-| docs/sillyhub-daemon 模块文档 | 待更新：MCP_TOOLSET 双模式/两条注入链/tmpfile 卫生 | pending |
-| docs/frontend/modules（components-daemon） | 待更新：file 段与 FileMessageCard | pending |
-| 各 _module-map.yaml | 预计无变化（未增删模块，新文件归既有模块） | pending |
+| docs/backend/modules（file 模块文档） | 待更新：description 列/DTO 字段/_can_access 新分支 | pending（archive sync-module-docs 步执行） |
+| docs/backend/modules（agent 模块文档） | 待更新：file_artifacts 端点/worker 白名单 | pending（同上） |
+| docs/sillyhub-daemon 模块文档 | 待更新：MCP_TOOLSET 双模式/两条注入链/tmpfile 卫生 | pending（同上） |
+| docs/frontend/modules（components-daemon） | 待更新：file 段与 FileMessageCard | pending（同上） |
+| 各 _module-map.yaml | 无变化（未增删模块，新文件归既有模块） | confirmed |

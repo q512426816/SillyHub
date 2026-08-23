@@ -12,13 +12,13 @@ created_at: 2026-08-18 01:45:00
 平台级对象存储文件中心：独立 `file` 元数据表 + 统一上传/下载/列表/元数据/批量元数据/软删接口。需要附件的业务（PPM 问题清单、计划、看板等）与 agent 产物都走本中心，业务表只存文件 id（`file_urls: string[]` 值为 id 列表），不存裸 URL。存储能力经 `storage` 抽象层（默认 MinIO），不直接耦合实现。
 
 ## 契约摘要
-- `POST /api/file/upload` — multipart 上传，可选 query `owner_type`/`owner_id`，201 返回 `FileUploadResp(id/original_name/mime_type/size)`。
+- `POST /api/file/upload` — multipart 上传，可选 query `owner_type`/`owner_id`，201 返回 `FileUploadResp(id/original_name/mime_type/size/description)`。
 - `GET /api/file/{id}` — 下载/预览；图片白名单 `Content-Disposition: inline`，其余 `attachment`；中文文件名走 RFC 5987 `filename*=UTF-8''{quote(name)}`。
 - `GET /api/file/list` — 按 owner 维度列文件（登录用户按 workspace 读权限过滤：`allowed_workspace_ids(user, WORKSPACE_READ)` 集合内 owner_id）。
 - `GET /api/file/{id}/meta` / `POST /api/file/batch-meta`（body ids，上限 200，跳过软删项）— 元数据回显。
 - `DELETE /api/file/{id}` — 软删（204），删除后再访问 404。
-- `FileService(session, storage, settings)`：`validate_upload`（超限 413 `file_too_large` / 类型不在白名单 415 `file_type_not_allowed`）/ `upload_file` / `get_stream` → (File, AsyncIterator[bytes]) / `get_meta` / `batch_meta` / `list_files` / `soft_delete`；访问校验 `_can_access`（属主或工作区成员）。
-- `File` 模型：id / owner_type / owner_id（可空）/ original_name / stored_key（唯一）/ mime_type / size（BigInteger）/ uploaded_by / created_at / deleted_at。
+- `FileService(session, storage, settings)`：`validate_upload`（超限 413 `file_too_large` / 类型不在白名单 415 `file_type_not_allowed`）/ `upload_file`（2026-08-23-agent-file-upload-mcp 起带可选 keyword-only `description`，落库截断 255）/ `get_stream` → (File, AsyncIterator[bytes]) / `get_meta` / `batch_meta` / `list_files` / `soft_delete`；访问校验 `_can_access`（属主或工作区成员；agent_session/agent_run 归属按 D-004@v2 解析链锚 workspace 后 WORKSPACE_READ，锚 NULL/孤儿 run 兜底 deny——锚**绝不传 None 进 has_permission**，其 None 分支会按任意 ws 放行）。
+- `File` 模型：id / owner_type（自由字符串，新增取值 agent_session/agent_run）/ owner_id（可空）/ original_name / stored_key（唯一）/ mime_type / size（BigInteger）/ description（String(255) nullable，2026-08-23-agent-file-upload-mcp）/ uploaded_by / created_at / deleted_at；FileMetaResp 含 description+created_at。
 - 表名 `file`（单数）。
 
 ## 关键逻辑
