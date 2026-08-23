@@ -50,6 +50,11 @@
  * 深链恢复（D-004@v1）语义保留：?session= 有效直达选中态；无效/无参静默落
  * 空门户态（原落新建表单态，design §9 兼容策略）。
  *
+ * ?new=1 直达新建（ql-20260823-005，用户反馈：ppm/projects「发起团队」等外部
+ * 入口应直达会话页，不让用户再手动点组头「＋」）：挂载解析一次，机器数据就绪
+ * 后按 D-005 默认机器回退解析 runtime（默认 Claude）直接进预会话态；未命中自动
+ * 弹两步浮层兜底；?session= 深链优先于本参数。
+ *
  * workspace 入口预展开（FR-06）：scope.workspaceId → SessionListPanel
  * defaultExpandedWorkspaceId（挂载后仅该分组展开）。
  *
@@ -119,8 +124,10 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
       });
   }, [searchParams]);
 
-  // 机器列表：SessionPanel 离线判定 + PreSessionPicker 第一步数据源共用。
-  const { items: machines } = useDaemonMachines({ limit: 100 });
+  // 机器列表：SessionPanel 离线判定 + PreSessionPicker 第一步数据源共用；
+  // sessions/isLoading 供 ?new=1 直达的 D-005 默认机器解析（ql-20260823-005）。
+  const { items: machines, sessions, isLoading: machinesLoading } =
+    useDaemonMachines({ limit: 100 });
 
   // 供应商列表：CtxUsageRing 分母派生（role mapping one_m / fallback model）。
   const providersQ = useQuery({
@@ -134,6 +141,76 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   const refreshSessionLists = useCallback(() => {
     void qc.invalidateQueries({ queryKey: ["agentSessions"] });
   }, [qc]);
+
+  /** ql-20260823-005：?new=1 直达时预会话/兜底浮层的默认组——workspace/change
+   *  scope 锁定本组，全局门户不指定（null，与组头「＋」非工作区分组同语义）。 */
+  const scopedPickerWorkspaceId = useCallback(() => {
+    if (scope?.kind === "workspace" || scope?.kind === "change") {
+      return scope.workspaceId;
+    }
+    return null;
+  }, [scope]);
+
+  /** 合成 preContext 切预会话态（清选中——右侧三分支优先级真会话 > 预会话）；
+   *  change scope 显式双传 workspaceId + changeId（X-13）——handlePickerPick 与
+   *  ?new=1 直达两入口共用（ql-20260823-005 自原 handlePickerPick 主体提取）。 */
+  const enterPreSession = useCallback(
+    (runtimeId: string, workspaceId: string | null) => {
+      setPreContext(
+        scope?.kind === "change"
+          ? {
+              workspaceId: scope.workspaceId,
+              changeId: scope.changeId,
+              runtimeId,
+            }
+          : { workspaceId, runtimeId },
+      );
+      setSelectedSessionId(null);
+    },
+    [scope],
+  );
+
+  // ql-20260823-005（用户反馈：ppm/projects「发起团队」等外部入口应直达会话页，
+  // 不让用户再手动点组头「＋」新建）：?new=1 直达新建。挂载解析一次；?session=
+  // 深链优先（同传时只恢复选中，不自动新建）；机器数据就绪后按 D-005 三级回退
+  // 解析默认机器（resolveDefaultMachineId——导出注释即指明门户为消费点），取其
+  // 在线 claude/codex runtime（默认 Claude，与浮层第二步「默认」高亮一致）直接
+  // 进预会话态（首句 createSession，FR-03 零残留不变）；未命中自动弹两步浮层
+  // 兜底（无在线机器等场景由浮层空态引导承接）。
+  const autoNewDoneRef = useRef(false);
+  useEffect(() => {
+    if (autoNewDoneRef.current) return;
+    if (searchParams.get("new") !== "1") return;
+    if (searchParams.get("session")) {
+      // 深链选中优先：让出本效应且不再触发（无效深链落空门户态，design §9）。
+      autoNewDoneRef.current = true;
+      return;
+    }
+    if (machinesLoading) return; // 机器数据未就绪不解析（空数组会误判无在线机器）
+    autoNewDoneRef.current = true;
+    const machineId = resolveDefaultMachineId(machines, sessions);
+    const runtimes = (
+      machines.find((m) => m.id === machineId)?.runtimes ?? []
+    ).filter(
+      (r) =>
+        r.status === "online" &&
+        (r.provider === "claude" || r.provider === "codex"),
+    );
+    const runtime = runtimes.find((r) => r.provider === "claude") ?? runtimes[0];
+    if (runtime) {
+      enterPreSession(runtime.id, scopedPickerWorkspaceId());
+    } else {
+      setPickerWorkspaceId(scopedPickerWorkspaceId());
+      setPickerOpen(true);
+    }
+  }, [
+    searchParams,
+    machinesLoading,
+    machines,
+    sessions,
+    enterPreSession,
+    scopedPickerWorkspaceId,
+  ]);
 
   // scope 派生（design §4.A 三处路由之二）：标题范围后缀（固定文案，不拉
   // workspace 名）。创建绑定锁（原 NewSessionForm bindWorkspaceId/bindChangeId）
@@ -174,24 +251,14 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
     [machines, scope],
   );
 
-  /** 浮层两步选完（两步即达）：合成 preContext 切预会话态（清选中——三分支
-   *  优先级）。change scope 显式双传 workspaceId + changeId（X-13：change 级
-   *  隐含 workspace，先例原 NewSessionForm bindChangeId「调用方须同时双传」）。 */
+  /** 浮层两步选完（两步即达）：合成 preContext 切预会话态并关浮层（X-13 双传
+   *  语义收敛进 enterPreSession，ql-20260823-005 提取共用）。 */
   const handlePickerPick = useCallback(
     (runtimeId: string) => {
-      setPreContext(
-        scope?.kind === "change"
-          ? {
-              workspaceId: scope.workspaceId,
-              changeId: scope.changeId,
-              runtimeId,
-            }
-          : { workspaceId: pickerWorkspaceId, runtimeId },
-      );
-      setSelectedSessionId(null);
+      enterPreSession(runtimeId, pickerWorkspaceId);
       setPickerOpen(false);
     },
-    [pickerWorkspaceId, scope],
+    [enterPreSession, pickerWorkspaceId],
   );
 
   /**

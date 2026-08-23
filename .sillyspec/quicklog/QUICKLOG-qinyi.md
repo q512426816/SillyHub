@@ -182,7 +182,43 @@
 结果：vitest 7/7（折叠默认/展开/条数折叠/复制/静默隐藏）、daemon 目录 24 文件 341 测试零回归、tsc 0 错、lint 过；Docker 前端镜像重建部署，生产 3001 实证条目在会话流内正确落位（折叠摘要 + 实时数据），dev 3000 全交互实证（展开明细/复制按钮/invocations=2 心跳数据）；提交 2c8f0f0d。审计注：backend/app/modules/daemon/router.py 为并行会话未提交工作（非本 quick 范围，仅审计行追溯）。
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/router.py
 
-## ql-20260823-003-b37e | 2026-08-23 11:49:49 | 创建人显示名称/筛选后隐藏引擎chip/变更入口树统一
+## ql-20260823-003-b37e | 2026-08-23 11:49:49 | 会话树三体验修正：创建人显名称/筛选后藏引擎chip/变更入口树统一
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/router.py（owner_name display_name 优先）
+- backend/app/modules/daemon/tests/test_sessions_list_owner_name.py（三态用例）
+- frontend/src/components/sessions/session-list-panel.tsx（hideEngineChip+change 树化+FlatList 退役）
+- frontend/src/components/sessions/sessions-portal.tsx（页头按钮移除+预展开）
+- frontend/src/components/sessions/__tests__/session-list-panel.test.tsx（change 重写+chip 用例）
+- frontend/src/components/sessions/__tests__/sessions-portal.test.tsx（change 改组头＋）
+- .sillyspec/docs/frontend/modules/components-sessions.md（D-106 修订四处）
+需求：会话树三体验修正：创建人显名称/筛选后藏引擎chip/变更入口树统一
+根因：①owner_name 注入用 username 登录名应显用户名称 ②筛选智能体后全组同引擎逐条 chip 冗余 ③变更入口左侧仍是 D-106 保留的旧平铺与全局不一致
+方案：①后端注入 display_name 优先回退 username ②SessionRow hideEngineChip（filterAgent 非空隐藏引擎 Tag）③ChangeScopeFlatList 退役删除 change 树化单组+组头＋（页头按钮移除 change_id 透传 预展开）
+结果：backend daemon 979+前端 1932 全绿、tsc 零错、lint 本卡零新增；list-panel/portal 47/47；components-sessions.md 四处同步（D-106 修订）；待 backend+frontend 重建部署
+
+## ql-20260823-004-3338 | 2026-08-23 12:47:57 | (quick 任务)
 状态：进行中
 关联变更：（无）
-文件：backend/app/modules/daemon/router.py, backend/app/modules/daemon/tests/test_sessions_list_owner_name.py, frontend/src/components/sessions/session-list-panel.tsx, frontend/src/components/sessions/sessions-portal.tsx, frontend/src/components/sessions/__tests__/session-list-panel.test.tsx, frontend/src/components/sessions/__tests__/sessions-portal.test.tsx, .sillyspec/docs/frontend/modules/components-sessions.md
+文件：frontend/src/app/(dashboard)/ppm/projects/page.tsx, frontend/src/app/(dashboard)/ppm/projects/__tests__/projects-page.test.tsx, frontend/src/components/sessions/sessions-portal.tsx, frontend/src/components/sessions/__tests__/sessions-portal.test.tsx
+
+## ql-20260823-005-4fa7 | 2026-08-23 12:48:18 | ppm/projects「发起团队」直达会话页（跳 /sessions?new=1 自动进预会话）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/ppm/projects/page.tsx（发起团队按钮改跳 /sessions?new=1）
+- frontend/src/components/sessions/sessions-portal.tsx（?new=1 直达效应 + enterPreSession 提取）
+- frontend/src/app/(dashboard)/ppm/projects/__tests__/projects-page.test.tsx（跳转断言更新）
+- frontend/src/components/sessions/__tests__/sessions-portal.test.tsx（新增 ?new=1 直达 4 用例）
+- .sillyspec/docs/frontend/modules/components-sessions.md（契约摘要+关键逻辑补 ?new=1）
+- .sillyspec/docs/frontend/modules/app-ppm-pages.md（PpmProjectsPage 行操作与变更索引）
+需求：ppm/projects「发起团队」直达会话页（跳 /sessions?new=1 自动进预会话）
+根因：原按钮只跳 /sessions 空门户态，用户还要手动点组头「＋」→ 两步浮层 → 才能开始对话，用户反馈应直接进入会话页面
+方案：① 按钮改跳 /sessions?new=1；② SessionsPortal 挂载解析 ?new=1（?session= 深链优先），机器数据就绪后 resolveDefaultMachineId（D-005 三级回退）解析默认机器，取其在线 claude/codex runtime（默认 Claude 与浮层一致）直接 enterPreSession 进预会话态，未命中自动弹两步浮层兜底；③ handlePickerPick 主体提取 enterPreSession 两入口共用，X-13 双传语义不变
+结果：门户新增 4 用例全绿（直达/浮层兜底/深链优先/workspace 绑定），projects 页断言更新 2/2，sessions 域 6 文件 114 用例全绿，tsc --noEmit 与 next lint 干净
+
+## ql-20260823-006-80c8 | 2026-08-23 13:10:33 | (quick 任务)
+状态：进行中
+关联变更：（无）
+文件：sillyhub-daemon/src/interactive/session-manager.ts, sillyhub-daemon/src/interactive/session-manager.test.ts, backend/app/modules/daemon/session/service.py, backend/app/modules/daemon/tests/test_session_reopen.py

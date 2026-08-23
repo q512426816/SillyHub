@@ -682,6 +682,86 @@ describe("SessionsPortal ?session= 深链（D-004@v1）", () => {
 
 // ── 4. 组头＋→两步浮层→预会话（FR-03/FR-04/D-107，task-06 核心接线） ───────
 
+// ── 3.5 ?new=1 直达新建（ql-20260823-005：外部入口「发起团队」免手动新建） ──
+
+describe("SessionsPortal ?new=1 直达新建（ql-20260823-005）", () => {
+  it("默认机器解析命中（localStorage 上次选择，D-005 第一级）→ 跳过浮层直接预会话态，上下文行=机器+默认 Claude；首句未发零残留", async () => {
+    window.localStorage.setItem(NEW_SESSION_MACHINE_LS_KEY, "m-1");
+    mocks.searchParams = new URLSearchParams("new=1");
+    renderPortal();
+
+    // 自动进预会话（不经组头＋/浮层）
+    await waitFor(() => {
+      expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull();
+    const ctx = screen.getByTestId("pre-session-context");
+    expect(ctx.textContent).toContain("machine-1");
+    expect(ctx.textContent).toContain("Claude Code");
+    expect(ctx.textContent).toContain("不指定（非工作区）");
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("解析不命中（无在线机器）→ 自动弹两步浮层兜底（浮层空态引导），不落空门户态让用户再手动点", async () => {
+    mocks.machinesHook.mockReturnValue({
+      items: [
+        makeMachine({ id: "m-off", hostname: "machine-off", status: "offline" }),
+      ],
+      sessions: [],
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mocks.searchParams = new URLSearchParams("new=1");
+    renderPortal();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("pre-session-picker-mask")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("session-pre-session-panel")).toBeNull();
+  });
+
+  it("?new=1 与 ?session= 同传 → 深链选中优先（getAgentSession 验证直达），不自动新建", async () => {
+    mocks.searchParams = new URLSearchParams("new=1&session=s-deep");
+    mocks.getAgentSession.mockResolvedValue(
+      makeSession({ id: "s-deep", title: "深链直达的会话" }),
+    );
+    renderPortal();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("会话面板")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("session-pre-session-panel")).toBeNull();
+    expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull();
+  });
+
+  it("workspace scope + ?new=1 → preContext 绑定 scope.workspaceId，首句 createSession 带 workspace_id", async () => {
+    window.localStorage.setItem(NEW_SESSION_MACHINE_LS_KEY, "m-1");
+    mocks.searchParams = new URLSearchParams("new=1");
+    renderPortal(WORKSPACE_SCOPE);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy();
+    });
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "工作区里开个会话" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledTimes(1));
+    expect(mocks.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtime_id: "rt-1",
+        prompt: "工作区里开个会话",
+        workspace_id: "ws-1",
+      }),
+    );
+  });
+});
+
 describe("SessionsPortal 组头＋→浮层→预会话（FR-03/FR-04）", () => {
   it("组头＋ → 两步浮层（机器→智能体）→ onPick 合成 preContext：渲染 SessionPanel sessionId=null 预会话态，上下文行=分组+机器+智能体", async () => {
     renderPortal();

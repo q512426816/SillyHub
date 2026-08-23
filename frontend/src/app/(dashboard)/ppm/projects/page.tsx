@@ -164,7 +164,9 @@ export default function PpmProjectsPage() {
             <Button
               size="small"
               type="link"
-              onClick={() => router.push("/sessions")}
+              // ql-20260823-005：?new=1 直达新建预会话（用户反馈：发起团队应
+              // 直进会话页，不让用户再在门户手动点组头「＋」新建）。
+              onClick={() => router.push("/sessions?new=1")}
             >
               发起团队
             </Button>

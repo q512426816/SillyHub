@@ -79,7 +79,7 @@ describe("PpmProjectsPage / 发起团队入口", () => {
     expect(teamButton).toBeInTheDocument();
   });
 
-  it("navigates to unified /sessions on click", async () => {
+  it("navigates to /sessions?new=1 (直达新建预会话，ql-20260823-005) on click", async () => {
     renderPage();
 
     await waitFor(() => {
@@ -90,7 +90,7 @@ describe("PpmProjectsPage / 发起团队入口", () => {
     teamButton.click();
 
     await waitFor(() => {
-      expect(mocks.push).toHaveBeenCalledWith("/sessions");
+      expect(mocks.push).toHaveBeenCalledWith("/sessions?new=1");
     });
   });
 });

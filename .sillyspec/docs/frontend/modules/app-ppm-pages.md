@@ -14,7 +14,7 @@ PPM（项目管理）业务页面集合，挂在 `/ppm/*` 路由组下（17 个 
 ## 契约摘要
 - `PpmIndexPage`（`/ppm`）：server 组件，直接 `redirect("/ppm/workbench")`——PPM 域真正的首页是工作台。
 - `WorkbenchPage`（`/ppm/workbench`）：个人工作台，三栏聚合——左（ProfileSummaryCard 个人信息+切换用户 / TodoListPanel 我的待办自带分页 / 消息位）+ 中（PersonalMetricStrip 本月指标 / WorkbenchTaskTable 我的任务自包含 fetch+筛选）+ 右（WorkCalendarPanel 工作日历 / QuickEntryGrid 快捷入口）。切换用户：经理与 super_admin（`profile.can_view_others`）可切他人视角，`targetUserId` 透传全部 fetch 接口，查看他人时顶部提示条 + 返回我自己。自有 layout 强制 force-dynamic（见 app-layouts 卡）。
-- `PpmProjectsPage`（`/ppm/projects`）：项目 CRUD，走 `lib/ppm/project.ts`。
+- `PpmProjectsPage`（`/ppm/projects`）：项目 CRUD，走 `lib/ppm/project.ts`；行操作「成员管理」跳 project-members 带项目名查询、「关联工作区」开 LinkWorkspaceDialog、「发起团队」跳 `/sessions?new=1`（ql-20260823-005：门户自动进预会话直达新建，免手动点组头「＋」）。
 - `ProjectPlansPage`（`/ppm/project-plans`）：`PageContainer size="full"` + `DataTable`（12 列 + 操作 + 合计行），支持导出。
 - `KanbanPage`（`/ppm/kanban`，495 行）：任务看板，数据全部来自 `useKanbanStore`（users/tasks/filters），分组过滤在 store selector 完成；点卡片开任务详情抽屉（Tabs：执行记录 / 评论 / 附件；执行记录复用 `listTaskExecutes({plan_task_id})` 只读表，对齐任务计划/问题清单详情）。
 - `WeeklyPlanPage`（`/ppm/weekly-plan`，691 行）：实施计划汇总——所有项目实施阶段（三级里程碑 has_module=true）下的明细 + 任务计划（PlanTask），19 列两级表头 + 项目分组行（colSpan=19 独占一行，虚拟列表不支持 rowSpan）+ 虚拟列表 + 导出（`listWeeklyPlan` / `exportWeeklyPlan`，lib/ppm/weekly-plan.ts）。
@@ -44,6 +44,7 @@ PPM（项目管理）业务页面集合，挂在 `/ppm/*` 路由组下（17 个 
 <!-- MANUAL_NOTES_START -->
 
 ## 变更索引
+- ql-20260823-005-4fa7 | projects 行操作「发起团队」改跳 /sessions?new=1（门户 ?new=1 直达预会话，免手动新建；详见 components-sessions 卡）
 - ql-20260714-003-f53e | milestone-details 新建明细必填校验补全（仅要求/附件/所属模块可空）+ 所属模块仅实施阶段显示
 - ql-20260714-004-e884 | milestone-details 明细所有状态可删（去 draft 限制）+ 所属模块（实施阶段）改必填
 - ql-20260714-005-34d7 | 修 ql-004 遗漏：handleDelete 残留 status!==draft 守卫致删除按钮点击无反应
