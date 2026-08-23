@@ -64,9 +64,12 @@ def test_revision_id_fits_alembic_version_column():
 
 
 def test_alembic_single_head_chain():
-    """迁移挂载后 alembic 图仍是单 head（AC：不破坏单 head 链）。
+    """迁移挂载后 alembic 图仍是单 head 且本迁移仍在链上（AC：不破坏单 head 链）。
 
     不连 DB，仅 ScriptDirectory 静态解析 versions/ 目录。
+    不钉死 head 值——后续变更推进 head 不应打破本守卫（修法同
+    ``app/modules/agent/tests/test_mission_session_id.py`` 的
+    ``test_migration_is_single_head_after_mount``）。
     """
     from pathlib import Path
 
@@ -75,7 +78,9 @@ def test_alembic_single_head_chain():
     backend_root = Path(__file__).resolve().parent.parent
     sd = ScriptDirectory(str(backend_root / "migrations"))
     heads = sd.get_heads()
-    assert heads == [REVISION_ID], f"expected single head {REVISION_ID}, got {heads}"
+    assert len(heads) == 1, f"expected single head, got {heads}"
+    chain = {rev.revision for rev in sd.walk_revisions()}
+    assert REVISION_ID in chain, f"migration {REVISION_ID} not reachable from head {heads[0]}"
 
 
 def test_downgrade_is_noop():
