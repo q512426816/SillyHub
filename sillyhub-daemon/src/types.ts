@@ -246,6 +246,8 @@ export interface ProviderConfig {
    * skipDangerousModePermissionPrompt / model）由 daemon 生成 Claude settings.json 处
    * 合并（归 task-06）。**api_key 永不从 settings_config 取**（只走 c.api_key + c.auth_field）。
    * absent / undefined → toEnv `c.settings_config?.env ?? {}` 安全跳过（零回归）。
+   * env 内空串值按「未配置」跳过、不覆盖上游注入值（ql-20260823-007：空占位曾把
+   * 真实 api_key 盖成空串致 "Not logged in"）。
    */
   settings_config?: {
     env?: Record<string, string>;

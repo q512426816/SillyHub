@@ -271,3 +271,103 @@ describe("LlmProviderForm — 预设选择器（task-07 / D-001）", () => {
     expect(screen.queryAllByTitle("支持余额查询")).toHaveLength(0);
   });
 });
+
+// ── 字段 ↔ 配置 JSON 联动（ql-20260823-007）──────────────────────────────────
+// 结构化字段（base_url / 兜底模型 / 角色模型 / 认证字段）变更时，settings_config.env
+// 同名键跟随更新，避免 JSON 里的过期值（历史预设空占位等）静默覆盖结构化字段——
+// 曾致真实 api_key 被 `ANTHROPIC_AUTH_TOKEN: ""` 盖掉 → 会话 "Not logged in"。
+describe("LlmProviderForm — 字段 ↔ settings_config.env 联动（ql-20260823-007）", () => {
+  /** 编辑态 initial：模拟历史存量行——settings_config 带空 token 占位（预设旧版预填）。 */
+  const WITH_ENV: LlmProviderRead = {
+    ...INITIAL,
+    base_url: "https://open.bigmodel.cn/api/anthropic",
+    auth_field: "ANTHROPIC_AUTH_TOKEN",
+    settings_config: {
+      env: {
+        ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/anthropic",
+        ANTHROPIC_AUTH_TOKEN: "", // 历史空占位（事故根因形态）
+        ANTHROPIC_MODEL: "glm-5.1",
+        ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-5.1",
+      },
+    },
+  };
+
+  const getJson = (): string =>
+    (screen.getByLabelText("JSON 编辑器") as HTMLTextAreaElement).value;
+
+  it("改 base_url 字段 → env.ANTHROPIC_BASE_URL 跟随；env 无该键时不凭空创建", () => {
+    render(<LlmProviderForm mode="edit" initial={WITH_ENV} onSubmit={vi.fn()} onCancel={vi.fn()} />);
+    fireEvent.change(
+      screen.getByPlaceholderText(/https:\/\/api\.anthropic\.com/),
+      { target: { value: "https://api.deepseek.com/anthropic" } },
+    );
+    const cfg = JSON.parse(getJson()) as {
+      env: Record<string, string>;
+    };
+    expect(cfg.env.ANTHROPIC_BASE_URL).toBe("https://api.deepseek.com/anthropic");
+    // 其它键（含空占位）不被联动误伤
+    expect(cfg.env.ANTHROPIC_MODEL).toBe("glm-5.1");
+    expect(cfg.env.ANTHROPIC_AUTH_TOKEN).toBe("");
+  });
+
+  it("切认证字段 → env 旧认证键空占位被删除（不再进提交体）", () => {
+    render(<LlmProviderForm mode="edit" initial={WITH_ENV} onSubmit={vi.fn()} onCancel={vi.fn()} />);
+    fireEvent.change(
+      screen.getByDisplayValue("ANTHROPIC_AUTH_TOKEN（默认，中转站常用）"),
+      { target: { value: "ANTHROPIC_API_KEY" } },
+    );
+    const cfg = JSON.parse(getJson()) as {
+      env: Record<string, string>;
+    };
+    expect(cfg.env).not.toHaveProperty("ANTHROPIC_AUTH_TOKEN");
+    // 空占位直接删（无值不迁移新键）
+    expect(cfg.env).not.toHaveProperty("ANTHROPIC_API_KEY");
+    expect(cfg.env.ANTHROPIC_MODEL).toBe("glm-5.1");
+  });
+
+  it("改兜底模型 / 角色模型 → env.ANTHROPIC_MODEL / 角色键跟随；清空字段 → 删键", () => {
+    render(<LlmProviderForm mode="edit" initial={WITH_ENV} onSubmit={vi.fn()} onCancel={vi.fn()} />);
+    // 兜底模型（INITIAL.default_fallback_model=claude-opus-4-8 预填）
+    fireEvent.change(
+      screen.getByPlaceholderText(/未映射的角色都走这个模型/),
+      { target: { value: "glm-5.3" } },
+    );
+    // sonnet 角色模型（INITIAL 无 sonnet 映射 → 空输入框）
+    fireEvent.change(
+      screen.getByPlaceholderText(/kimi-k2 \/ claude-sonnet-5/),
+      { target: { value: "glm-5.3" } },
+    );
+    let cfg = JSON.parse(getJson()) as { env: Record<string, string> };
+    expect(cfg.env.ANTHROPIC_MODEL).toBe("glm-5.3");
+    expect(cfg.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("glm-5.3");
+    // 清空兜底模型 → 删除 env 同名键（结构化字段是真相源）
+    fireEvent.change(
+      screen.getByPlaceholderText(/未映射的角色都走这个模型/),
+      { target: { value: "" } },
+    );
+    cfg = JSON.parse(getJson()) as { env: Record<string, string> };
+    expect(cfg.env).not.toHaveProperty("ANTHROPIC_MODEL");
+  });
+
+  it("env 无同名键时字段变更不创建键；JSON 非法时联动静默不崩", () => {
+    const noEnvKey: LlmProviderRead = { ...INITIAL, settings_config: { env: {} } };
+    render(
+      <LlmProviderForm mode="edit" initial={noEnvKey} onSubmit={vi.fn()} onCancel={vi.fn()} />,
+    );
+    fireEvent.change(
+      screen.getByPlaceholderText(/https:\/\/api\.anthropic\.com/),
+      { target: { value: "https://x.example.com" } },
+    );
+    expect(JSON.parse(getJson())).toEqual({ env: {} }); // 未凭空创建
+
+    // JSON 非法（用户手打到一半）：字段联动不崩、不丢输入
+    fireEvent.change(screen.getByLabelText("JSON 编辑器"), {
+      target: { value: "{ not valid json" },
+    });
+    fireEvent.change(
+      screen.getByPlaceholderText(/https:\/\/api\.anthropic\.com/),
+      { target: { value: "https://y.example.com" } },
+    );
+    expect(getJson()).toBe("{ not valid json");
+  });
+});

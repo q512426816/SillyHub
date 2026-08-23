@@ -32,6 +32,11 @@ import { ModelInputWithFetch, type FetchedModel } from "./model-input-with-fetch
  *   默认兜底模型 / 自定义 env 键值编辑器（增删行 → extra_env）。
  *
  * api_key 全程不明文回显：编辑模式密码框留空占位 "保持原密钥不变"。
+ *
+ * 字段 ↔ 配置 JSON 联动（ql-20260823-007）：base_url / 兜底模型 / 角色模型 /
+ * 认证字段变更时同步 settings_config.env 同名键（仅键已存在时跟随），避免 JSON 里
+ * 的过期值静默覆盖结构化字段（曾致真实 api_key 被空占位盖掉 → 会话 Not logged in）。
+ * 提交链路另经 lib 层 cleanSettingsConfig 剔除 env 空串占位。
  */
 
 const inputCls =
@@ -105,6 +110,74 @@ function initEnvRows(initial?: LlmProviderRead | null): EnvRowState[] {
   // 至少留一行空位方便新增
   if (rows.length === 0) rows.push({ key: "", value: "" });
   return rows;
+}
+
+/** 4 角色模型 env 键名（联动结构化字段 ↔ settings_config.env，ql-20260823-007）。 */
+const ROLE_ENV_NAME: Record<string, string> = {
+  sonnet: "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  opus: "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  fable: "ANTHROPIC_DEFAULT_FABLE_MODEL",
+  haiku: "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+};
+
+/**
+ * 联动（ql-20260823-007）：结构化字段 → settings_config.env 同名键同步。
+ *
+ * 仅当 env 中已存在该键时跟随字段值更新（不凭空创建，尊重手写 JSON）；字段清空 →
+ * 删除该键（结构化字段是真相源）。JSON 非法 / env 非对象 → 原样返回（照
+ * handleConfigToggle 静默不崩惯例）。
+ */
+function syncSettingsEnvKey(json: string, key: string, value: string): string {
+  try {
+    const parsed = JSON.parse(json || "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return json;
+    }
+    const cfg = parsed as Record<string, unknown>;
+    const env = cfg.env;
+    if (!env || typeof env !== "object" || Array.isArray(env)) return json;
+    const envObj = env as Record<string, unknown>;
+    if (!(key in envObj)) return json;
+    if (value.trim() === "") delete envObj[key];
+    else envObj[key] = value.trim();
+    if (Object.keys(envObj).length === 0) delete cfg.env;
+    return JSON.stringify(cfg, null, 2);
+  } catch {
+    return json;
+  }
+}
+
+/**
+ * 联动（ql-20260823-007）：认证字段切换 → settings_config.env 认证键改名。
+ * 旧键为空（历史预设空占位）→ 直接删除；旧键有值（用户在 env 里手填过令牌）→
+ * 迁移到新键名。JSON 非法 → 原样返回。
+ */
+function renameSettingsEnvAuthKey(
+  json: string,
+  from: string,
+  to: string,
+): string {
+  if (from === to) return json;
+  try {
+    const parsed = JSON.parse(json || "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return json;
+    }
+    const cfg = parsed as Record<string, unknown>;
+    const env = cfg.env;
+    if (!env || typeof env !== "object" || Array.isArray(env)) return json;
+    const envObj = env as Record<string, unknown>;
+    if (!(from in envObj)) return json;
+    const value = envObj[from];
+    delete envObj[from];
+    if (typeof value === "string" && value.trim() !== "") {
+      envObj[to] = value;
+    }
+    if (Object.keys(envObj).length === 0) delete cfg.env;
+    return JSON.stringify(cfg, null, 2);
+  } catch {
+    return json;
+  }
 }
 
 export interface LlmProviderFormProps {
@@ -195,6 +268,14 @@ export function LlmProviderForm({
       };
       return { ...prev, [role]: { ...cur, ...patch } };
     });
+    // 联动（ql-20260823-007）：模型单元格变更 → env 同名角色键跟随（仅键已存在时）。
+    const model = patch.model;
+    if (model !== undefined) {
+      const envName = ROLE_ENV_NAME[role];
+      if (envName) {
+        setSettingsConfigJson((prev) => syncSettingsEnvKey(prev, envName, model));
+      }
+    }
   };
 
   const setEnv = (idx: number, patch: Partial<EnvRowState>): void => {
@@ -713,7 +794,14 @@ export function LlmProviderForm({
         </label>
         <input
           value={baseUrl}
-          onChange={(e) => setBaseUrl(e.target.value)}
+          onChange={(e) => {
+            const v = e.target.value;
+            setBaseUrl(v);
+            // 联动（ql-20260823-007）：base_url 字段 → env.ANTHROPIC_BASE_URL 跟随。
+            setSettingsConfigJson((prev) =>
+              syncSettingsEnvKey(prev, "ANTHROPIC_BASE_URL", v),
+            );
+          }}
           className={`mt-0.5 ${inputCls}`}
           placeholder="https://api.anthropic.com 或中转站地址；OpenAI 格式可填完整 .../v1/chat/completions"
         />
@@ -754,9 +842,14 @@ export function LlmProviderForm({
             <label className={lblCls}>认证字段</label>
             <select
               value={authField}
-              onChange={(e) =>
-                setAuthField(e.target.value as LlmProviderAuthField)
-              }
+              onChange={(e) => {
+                const next = e.target.value as LlmProviderAuthField;
+                setAuthField(next);
+                // 联动（ql-20260823-007）：认证键改名——env 旧键空占位删除、有值迁移。
+                setSettingsConfigJson((prev) =>
+                  renameSettingsEnvAuthKey(prev, authField, next),
+                );
+              }}
               className={`mt-0.5 ${inputCls}`}
             >
               {AUTH_FIELD_OPTIONS.map((o) => (
@@ -889,7 +982,14 @@ export function LlmProviderForm({
             <label className={lblCls}>默认兜底模型（可选）</label>
             <input
               value={defaultFallbackModel}
-              onChange={(e) => setDefaultFallbackModel(e.target.value)}
+              onChange={(e) => {
+                const v = e.target.value;
+                setDefaultFallbackModel(v);
+                // 联动（ql-20260823-007）：兜底模型字段 → env.ANTHROPIC_MODEL 跟随。
+                setSettingsConfigJson((prev) =>
+                  syncSettingsEnvKey(prev, "ANTHROPIC_MODEL", v),
+                );
+              }}
               className={`mt-0.5 ${inputCls}`}
               placeholder="如 kimi-k2（未映射的角色都走这个模型）"
             />
@@ -960,7 +1060,8 @@ export function LlmProviderForm({
             字段（与基础字段合并下发）。开关快捷开关常用项；JSON 编辑器可格式化。{" "}
             <span className="text-amber-700">
               注意：这里的 <code className="text-xs">env</code>{" "}
-              优先级最高，会覆盖上方「自定义环境变量」（D-007）。
+              优先级最高，会覆盖上方「自定义环境变量」（D-007）；上方 base_url /
+              模型 / 认证字段改动会自动同步 env 同名键（ql-20260823-007）。
             </span>
           </p>
 

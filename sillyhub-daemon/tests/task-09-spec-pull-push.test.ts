@@ -189,9 +189,14 @@ function mockSpawnReturn(child: FakeChild): void {
  * helpers/fake-child.waitForSpawn 检查 calls>0，但若前序测试已调过 spawn 且
  * clearAllMocks 时序有 race（forks 池下观察到），会立即返回导致 exit emit 早于 spawn
  * → 死锁。本 helper 显式等 calls 增加，对单/多 lease 都稳健。
+ *
+ * 轮询预算按真实时间（不按次数）：tar 解包 / rm -rf 是真实 fs IO，慢盘 CI 上
+ * 2000 次 setImmediate 可能在 IO 完成前耗尽（CI run 32624736272 的 30s 超时）。
+ * 超时抛错而非静默返回，避免 emitExit 丢事件 → await p 死等 30s 的模糊失败。
  */
-async function waitForNextSpawn(baseline = 0): Promise<void> {
-  for (let i = 0; i < 2000; i++) {
+async function waitForNextSpawn(baseline = 0, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     if (vi.mocked(spawn).mock.calls.length > baseline) {
       // 多让一拍让 listener 注册完成（对齐 waitForSpawn 行为）
       await new Promise<void>((r) => setImmediate(r));
@@ -199,8 +204,10 @@ async function waitForNextSpawn(baseline = 0): Promise<void> {
     }
     await new Promise<void>((r) => setImmediate(r));
   }
-  // 超时兜底
-  await new Promise<void>((r) => setImmediate(r));
+  throw new Error(
+    `waitForNextSpawn: ${timeoutMs}ms 内 spawn 调用数未超过 baseline=${baseline} —— ` +
+      `spec pull / workspace 准备卡住或失败，继续等待会引发 emitExit 丢事件死锁`,
+  );
 }
 
 /** 构造一个最小合法 tar Buffer（手工 ustar），含给定文件。 */

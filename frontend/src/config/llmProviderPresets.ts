@@ -5,9 +5,12 @@
  * 表单（name / base_url / auth_field / default_model / 角色映射 / website_url /
  * settings_config），api_key 始终留空给用户手填。
  *
- * env 块逐字抄 cc-switch `claudeProviderPresets.ts`（ANTHROPIC_BASE_URL + 留空的
- * ANTHROPIC_AUTH_TOKEN + ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL + 厂商特有键），
- * 不臆造模型名 / URL（R-05）。affiliate 参数（?aff= / ?ic=）已剔除（属 cc-switch 不属本平台）。
+ * env 块逐字抄 cc-switch `claudeProviderPresets.ts`（ANTHROPIC_BASE_URL +
+ * ANTHROPIC_DEFAULT_{HAIKU,SONNET,OPUS}_MODEL + 厂商特有键），不臆造模型名 / URL
+ * （R-05）。**认证键（ANTHROPIC_AUTH_TOKEN / ANTHROPIC_API_KEY）不预填**——密钥只走
+ * 表单专用 API Key 字段；cc-switch 原版的留空占位若照抄，会在 daemon 注入链把真实
+ * key 覆盖成空串致 "Not logged in"（ql-20260823-007，有守护测试）。
+ * affiliate 参数（?aff= / ?ic=）已剔除（属 cc-switch 不属本平台）。
  *
  * 「能否查用量」（usage 字段）以后端 `detect_provider(base_url)` 为准（D-004）——只标
  * 后端真实可查的 6 家：balance（DeepSeek / 硅基 / OpenRouter）+ token_plan
@@ -44,8 +47,9 @@ export interface LlmProviderPreset {
   /** 头像背景色（hex，取 cc-switch iconColor）。 */
   icon_color?: string;
   /**
-   * 预填 settings_config（env 块）。api_key 对应的 ANTHROPIC_AUTH_TOKEN 留空 ""，
-   * 由用户手填（永不预填明文 token）。
+   * 预填 settings_config（env 块）。**永不预填认证键**（ANTHROPIC_AUTH_TOKEN /
+   * ANTHROPIC_API_KEY）——密钥只走表单专用 API Key 字段（加密存储）；空串占位会覆盖
+   * 真实 key（ql-20260823-007）。
    */
   settings_config_partial?: Record<string, unknown>;
 }
@@ -76,7 +80,6 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     settings_config_partial: {
       env: {
         ANTHROPIC_BASE_URL: "https://api.moonshot.cn/anthropic",
-        ANTHROPIC_AUTH_TOKEN: "",
         ANTHROPIC_MODEL: "kimi-k2.7-code",
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-k2.7-code",
         ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi-k2.7-code",
@@ -98,7 +101,6 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     settings_config_partial: {
       env: {
         ANTHROPIC_BASE_URL: "https://api.kimi.com/coding/",
-        ANTHROPIC_AUTH_TOKEN: "",
         ANTHROPIC_MODEL: "kimi-for-coding",
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-for-coding",
         ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi-for-coding",
@@ -123,7 +125,6 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     settings_config_partial: {
       env: {
         ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/anthropic",
-        ANTHROPIC_AUTH_TOKEN: "",
         ANTHROPIC_MODEL: "glm-5.1",
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "glm-5.1",
         ANTHROPIC_DEFAULT_SONNET_MODEL: "glm-5.1",
@@ -145,7 +146,6 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     settings_config_partial: {
       env: {
         ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic",
-        ANTHROPIC_AUTH_TOKEN: "",
         ANTHROPIC_MODEL: "deepseek-v4-pro",
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash",
         ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-pro",
@@ -168,7 +168,6 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     settings_config_partial: {
       env: {
         ANTHROPIC_BASE_URL: "https://api.siliconflow.cn",
-        ANTHROPIC_AUTH_TOKEN: "",
         ANTHROPIC_MODEL: "Pro/MiniMaxAI/MiniMax-M2.7",
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "Pro/MiniMaxAI/MiniMax-M2.7",
         ANTHROPIC_DEFAULT_SONNET_MODEL: "Pro/MiniMaxAI/MiniMax-M2.7",
@@ -191,7 +190,6 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     settings_config_partial: {
       env: {
         ANTHROPIC_BASE_URL: "https://openrouter.ai/api",
-        ANTHROPIC_AUTH_TOKEN: "",
         ANTHROPIC_MODEL: "anthropic/claude-sonnet-5",
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "anthropic/claude-haiku-4.5",
         ANTHROPIC_DEFAULT_SONNET_MODEL: "anthropic/claude-sonnet-5",
@@ -216,7 +214,6 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     settings_config_partial: {
       env: {
         ANTHROPIC_BASE_URL: "https://opencode.ai/zen/go",
-        ANTHROPIC_AUTH_TOKEN: "",
         ANTHROPIC_MODEL: "deepseek-v4-flash",
         ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash",
         ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-flash",
@@ -254,7 +251,6 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     settings_config_partial: {
       env: {
         ANTHROPIC_BASE_URL: "https://api.minimaxi.com/anthropic",
-        ANTHROPIC_AUTH_TOKEN: "",
         API_TIMEOUT_MS: "3000000",
         CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1,
         ANTHROPIC_MODEL: "MiniMax-M2.7",
@@ -277,7 +273,6 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     settings_config_partial: {
       env: {
         ANTHROPIC_BASE_URL: "https://dashscope.aliyuncs.com/apps/anthropic",
-        ANTHROPIC_AUTH_TOKEN: "",
       },
     },
   },
@@ -294,7 +289,6 @@ export const LLM_PROVIDER_PRESETS: LlmProviderPreset[] = [
     settings_config_partial: {
       env: {
         ANTHROPIC_BASE_URL: "https://coding.dashscope.aliyuncs.com/apps/anthropic",
-        ANTHROPIC_AUTH_TOKEN: "",
       },
     },
   },

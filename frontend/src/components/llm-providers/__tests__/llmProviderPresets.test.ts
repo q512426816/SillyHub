@@ -55,3 +55,25 @@ describe("LLM_PROVIDER_PRESETS — api_format 字段（task-06 / D-001@v1）", (
     expect(go!.api_format).toBe("anthropic");
   });
 });
+
+// ql-20260823-007：预设永不预填认证键空占位。空串 ANTHROPIC_AUTH_TOKEN 会在 daemon
+// 注入链（credential-injector 规则 7 修复前）把真实 api_key 覆盖成空串 → 会话报
+// "Not logged in · Please run /login"。密钥只走表单专用 API Key 字段。
+describe("LLM_PROVIDER_PRESETS — 不预填认证键（ql-20260823-007）", () => {
+  it("所有预设 settings_config_partial.env 均不含空串认证键（ANTHROPIC_AUTH_TOKEN/API_KEY）", () => {
+    for (const p of LLM_PROVIDER_PRESETS) {
+      const env = (
+        p.settings_config_partial as { env?: Record<string, unknown> } | undefined
+      )?.env;
+      if (!env) continue;
+      for (const [k, v] of Object.entries(env)) {
+        if (k === "ANTHROPIC_AUTH_TOKEN" || k === "ANTHROPIC_API_KEY") {
+          expect(
+            v,
+            `预设 ${p.key} 不应预填认证键 ${k}（空占位会覆盖真实 key）`,
+          ).not.toBe("");
+        }
+      }
+    }
+  });
+});

@@ -286,6 +286,59 @@ describe('ClaudeCredentialInjector', () => {
       expect(env.UNRELATED).toBe('x');
     });
 
+    // ql-20260823-007 回归：前端预设历史预填 `ANTHROPIC_AUTH_TOKEN: ""` 空占位，
+    // 规则 7 原样 Object.assign 会把规则 2 注入的真实 api_key 盖成空串 → claude CLI
+    // 报 "Not logged in · Please run /login"（隔离 CLAUDE_CONFIG_DIR 下无本机凭证兜底，
+    // 实证：会话 dac28018 run 4463a75a）。空串占位现按「未配置」跳过。
+    describe('settings_config.env 空串占位跳过（ql-20260823-007）', () => {
+      it('空串 AUTH_TOKEN 占位不覆盖规则 2 注入的真实 api_key（本事故回归）', () => {
+        const env = injector.toEnv({
+          ...baseConfig,
+          base_url: 'https://open.bigmodel.cn/api/anthropic',
+          api_key: 'sk-real-key',
+          auth_field: 'ANTHROPIC_AUTH_TOKEN',
+          settings_config: {
+            env: {
+              ANTHROPIC_BASE_URL: 'https://open.bigmodel.cn/api/anthropic',
+              ANTHROPIC_AUTH_TOKEN: '', // 预设历史预填的空占位
+              ANTHROPIC_MODEL: 'glm-5.1',
+            },
+          },
+        });
+        expect(env.ANTHROPIC_AUTH_TOKEN).toBe('sk-real-key');
+        expect(env.ANTHROPIC_BASE_URL).toBe('https://open.bigmodel.cn/api/anthropic');
+        expect(env.ANTHROPIC_MODEL).toBe('glm-5.1');
+      });
+
+      it('空串值不新建空值键（无上游值时该键直接缺省）', () => {
+        const env = injector.toEnv({
+          ...baseConfig,
+          settings_config: { env: { CUSTOM_FLAG: '', ANTHROPIC_MODEL: 'glm-5.1' } },
+        });
+        expect(env.CUSTOM_FLAG).toBeUndefined();
+        expect('CUSTOM_FLAG' in env).toBe(false);
+        expect(env.ANTHROPIC_MODEL).toBe('glm-5.1');
+      });
+
+      it('非空值覆盖语义保留（空串跳过不影响 D-007 最高优先级）', () => {
+        const env = injector.toEnv({
+          ...baseConfig,
+          model_role_mappings: { sonnet: { model: 'kimi-k2' } },
+          settings_config: { env: { ANTHROPIC_DEFAULT_SONNET_MODEL: 'settings-override' } },
+        });
+        expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('settings-override');
+      });
+
+      it('extra_env 契约不变：空串值仍原样写入（cleanExtraEnv 显式保留空值语义）', () => {
+        const env = injector.toEnv({
+          ...baseConfig,
+          extra_env: { ANTHROPIC_AUTH_TOKEN: '' },
+        });
+        // 规则 6 未改：extra_env 空串照写（边界锁定，防止误扩修复范围）
+        expect(env.ANTHROPIC_AUTH_TOKEN).toBe('');
+      });
+    });
+
     it('端到端：extra_env + settings_config.env 共存 → settings_config.env 胜', () => {
       const env = injector.toEnv({
         agent_kind: 'claude',

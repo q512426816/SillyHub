@@ -125,12 +125,18 @@ export function readStdin(child: FakeChild): string {
  * credential 渲染、getBackend、startLease 等所有 await 步骤后到达 spawn。
  *
  * 测试在 runner.runLease(lease) 之后、_emitExit/_emitError 之前调此函数。
+ *
+ * 轮询预算必须按真实时间（不按次数）：spawn 前有真实 fs/网络 IO（spec pull、
+ * workspace 准备），慢盘 CI 上 1000 次 setImmediate 可能在 IO 完成前就耗尽。
+ * 超时必须抛错（不能静默返回）：否则调用方 emitExit 时实现层尚未注册 exit
+ * listener，事件丢失 → await child.once('exit') 永等 → 30s 测试超时
+ * （CI run 32625847696 / task-runner.test.ts:360 注释记录的死锁链）。
  */
-export async function waitForSpawn(): Promise<void> {
-  // 轮询：每微任务让出一次，最多等 1000 次（约 1s 上限）
+export async function waitForSpawn(timeoutMs = 10_000): Promise<void> {
   const { spawn } = await import('node:child_process');
   const mocked = spawn as unknown as { mock?: { calls: unknown[] } };
-  for (let i = 0; i < 1000; i++) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     if (mocked.mock && mocked.mock.calls.length > 0) {
       // spawn 已调；再多让一拍让 listener 注册完成
       await new Promise<void>((resolve) => setImmediate(resolve));
@@ -138,6 +144,8 @@ export async function waitForSpawn(): Promise<void> {
     }
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
-  // 超时兜底
-  await new Promise<void>((resolve) => setImmediate(resolve));
+  throw new Error(
+    `waitForSpawn: ${timeoutMs}ms 内 spawn 未被调用 —— 实现层在 spawn 前卡住/失败，` +
+      `或本用例预期不 spawn 却误用了 waitForSpawn（静默等待会引发 emitExit 丢事件死锁）`,
+  );
 }

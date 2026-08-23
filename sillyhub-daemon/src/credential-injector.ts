@@ -67,6 +67,25 @@ export interface CredentialInjector {
 }
 
 /**
+ * Object.assign 但跳过空串值（ql-20260823-007）。
+ *
+ * settings_config.env 里的空串占位（前端预设历史预填的 `ANTHROPIC_AUTH_TOKEN: ""`）
+ * 语义上是「未配置」，不是「配置为空」——写入空串会把注入链上游的真实值（如规则 2
+ * 的 api_key）覆盖掉。仅跳过 `v === ''`；undefined 字段本就不进 Object.entries，
+ * 非字符串值（数字等）保持原行为。
+ */
+function assignSkippingEmptyStrings(
+  target: Record<string, string>,
+  source: Record<string, string> | null | undefined,
+): void {
+  if (!source) return;
+  for (const [k, v] of Object.entries(source)) {
+    if (v === '') continue; // 空串视为未配置，不覆盖不新建
+    target[k] = v;
+  }
+}
+
+/**
  * claude code 专属注入器（agentKind='claude'）。
  *
  * 按 design §7 TS 块的 6 条映射规则产 ANTHROPIC_* env：
@@ -76,7 +95,8 @@ export interface CredentialInjector {
  *   4. model_role_mappings → ANTHROPIC_DEFAULT_{ROLE}_MODEL（仅 model 非空注入；未知角色忽略，D-011）
  *   5. one_m=true → 角色模型名追加 [1m] 后缀（X-12 官方文档实测，触发 1M 上下文）
  *   6. extra_env → Object.assign 注入（可覆盖角色 env，design §7 Object.assign 顺序）
- *   7. settings_config.env → Object.assign 注入（最后，覆盖优先级最高，D-007 / task-05）
+ *   7. settings_config.env → Object.assign 注入（最后，覆盖优先级最高，D-007 / task-05；
+ *      空串值跳过——占位空串视为未配置，不覆盖上游注入的真实值，ql-20260823-007）
  */
 export class ClaudeCredentialInjector implements CredentialInjector {
   readonly agentKind = 'claude';
@@ -169,12 +189,17 @@ export class ClaudeCredentialInjector implements CredentialInjector {
     }
 
     // 6. extra_env → Object.assign（可覆盖角色 env，design §7 Object.assign 顺序）
+    //    契约不变：值允许空串（前端 cleanExtraEnv 显式保留，D-010）。
     Object.assign(env, c.extra_env ?? {});
 
     // 7. settings_config.env → Object.assign（最后，覆盖优先级最高，D-007 / task-05）
     //    仅 env 子键在 toEnv 处理；attribution/enabledPlugins/model/skipDangerousModePermissionPrompt
     //    顶层键归 task-06（settings.json 生成处）。api_key 永不从 settings_config 取（安全）。
-    Object.assign(env, c.settings_config?.env ?? {});
+    //    ql-20260823-007：空串值跳过——前端预设曾预填 `ANTHROPIC_AUTH_TOKEN: ""` 占位，
+    //    原样 Object.assign 会把规则 2 用真实 api_key 注入的认证键盖成空串 → claude CLI
+    //    判定未认证（隔离 CLAUDE_CONFIG_DIR 下无本机凭证兜底）→ "Not logged in · Please
+    //    run /login"。对齐 spawn-env 层 2「空串视为未配置（绝不写入空串）」既有约定。
+    assignSkippingEmptyStrings(env, c.settings_config?.env);
 
     return env;
   }

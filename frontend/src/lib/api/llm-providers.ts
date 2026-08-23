@@ -400,6 +400,31 @@ export function cleanExtraEnv(
   return Object.keys(out).length === 0 ? null : out;
 }
 
+/**
+ * 清洗 settings_config（ql-20260823-007）：env 内空串值（历史预设预填的
+ * `ANTHROPIC_AUTH_TOKEN: ""` 占位 / 用户手输空值）按「未配置」剔除——空串会经
+ * daemon 注入链覆盖结构化字段注入的真实 key 致会话 "Not logged in"。
+ * env 剔空后为空对象 → 删 env；整体为空 → null。非字符串值（数字等）原样保留；
+ * 顶层键（attribution/enabledPlugins/…）不动。
+ */
+export function cleanSettingsConfig(
+  cfg: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | null {
+  if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) return null;
+  const out: Record<string, unknown> = { ...cfg };
+  const env = out.env;
+  if (env && typeof env === "object" && !Array.isArray(env)) {
+    const cleaned: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(env as Record<string, unknown>)) {
+      if (typeof v === "string" && v.trim() === "") continue; // 空串占位=未配置
+      cleaned[k] = v;
+    }
+    if (Object.keys(cleaned).length === 0) delete out.env;
+    else out.env = cleaned;
+  }
+  return Object.keys(out).length === 0 ? null : out;
+}
+
 /** 表单值 → POST body。 */
 export function formToCreate(v: LlmProviderFormValues): LlmProviderCreate {
   return {
@@ -414,7 +439,7 @@ export function formToCreate(v: LlmProviderFormValues): LlmProviderCreate {
     model_role_mappings: cleanRoleMappings(v.model_role_mappings),
     default_fallback_model: clean(v.default_fallback_model) ?? null,
     extra_env: cleanExtraEnv(v.extra_env),
-    settings_config: v.settings_config ?? null,
+    settings_config: cleanSettingsConfig(v.settings_config),
     multimodal: v.multimodal ?? "auto",
   };
 }
@@ -435,7 +460,7 @@ export function formToUpdate(v: LlmProviderFormValues): LlmProviderUpdate {
     model_role_mappings: cleanRoleMappings(v.model_role_mappings),
     default_fallback_model: clean(v.default_fallback_model) ?? null,
     extra_env: cleanExtraEnv(v.extra_env),
-    settings_config: v.settings_config ?? null,
+    settings_config: cleanSettingsConfig(v.settings_config),
     ...(v.multimodal ? { multimodal: v.multimodal } : {}),
   };
   const apiKey = clean(v.api_key);

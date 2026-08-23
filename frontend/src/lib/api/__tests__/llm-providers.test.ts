@@ -8,6 +8,8 @@
  *   3. formToUpdate：api_key 留空 → **不出现在 PATCH body**（铁律）；有值则携带。
  *   4. cleanRoleMappings：丢弃空行、one_m 仅随 model 携带。
  *   5. cleanExtraEnv：丢弃空键、保留空值。
+ *   6. cleanSettingsConfig：env 空串占位剔除 + formToCreate/formToUpdate 接线
+ *      （ql-20260823-007）。
  *
  * fetch harness 仿 lib/workspaces.test.ts（apiFetch 内部走 fetch）。
  */
@@ -16,6 +18,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cleanExtraEnv,
   cleanRoleMappings,
+  cleanSettingsConfig,
   createProvider,
   deleteProvider,
   formToCreate,
@@ -275,5 +278,62 @@ describe("cleanExtraEnv — 边界", () => {
   it("键前后空白被 trim", () => {
     const out = cleanExtraEnv({ "  SPACED  ": "v" });
     expect(out).toEqual({ SPACED: "v" });
+  });
+});
+
+// ql-20260823-007：settings_config 清洗——env 空串占位（历史预设预填的
+// ANTHROPIC_AUTH_TOKEN: ""）按「未配置」剔除，防止 daemon 注入链被空串覆盖真实 key。
+describe("cleanSettingsConfig — env 空串占位剔除（ql-20260823-007）", () => {
+  it("空串 AUTH_TOKEN 占位被剔除，其余键保留", () => {
+    const out = cleanSettingsConfig({
+      env: {
+        ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/anthropic",
+        ANTHROPIC_AUTH_TOKEN: "",
+        ANTHROPIC_MODEL: "glm-5.1",
+      },
+    });
+    expect(out).toEqual({
+      env: {
+        ANTHROPIC_BASE_URL: "https://open.bigmodel.cn/api/anthropic",
+        ANTHROPIC_MODEL: "glm-5.1",
+      },
+    });
+  });
+
+  it("env 剔空后为空对象 → 删 env；整体为空 → null", () => {
+    expect(cleanSettingsConfig({ env: { ANTHROPIC_AUTH_TOKEN: "" } })).toBeNull();
+    expect(cleanSettingsConfig({})).toBeNull();
+    expect(cleanSettingsConfig(null)).toBeNull();
+    expect(cleanSettingsConfig(undefined)).toBeNull();
+  });
+
+  it("非字符串值与顶层键原样保留（attribution / 数字值）", () => {
+    const out = cleanSettingsConfig({
+      attribution: { commit: "", pr: "" },
+      env: { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1, KEEP: "v" },
+    });
+    expect(out).toEqual({
+      attribution: { commit: "", pr: "" },
+      env: { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1, KEEP: "v" },
+    });
+  });
+
+  it("formToCreate / formToUpdate 均走 cleanSettingsConfig", () => {
+    const cfg = {
+      env: { ANTHROPIC_AUTH_TOKEN: "", ANTHROPIC_MODEL: "glm-5.1" },
+    };
+    const created = formToCreate({ ...FORM_VALUES, settings_config: cfg });
+    expect(created.settings_config).toEqual({
+      env: { ANTHROPIC_MODEL: "glm-5.1" },
+    });
+    const updated = formToUpdate({ ...FORM_VALUES, settings_config: cfg });
+    expect(updated.settings_config).toEqual({
+      env: { ANTHROPIC_MODEL: "glm-5.1" },
+    });
+  });
+
+  it("settings_config 缺省 → body 落 null（不误造空对象）", () => {
+    const created = formToCreate(FORM_VALUES);
+    expect(created.settings_config).toBeNull();
   });
 });
