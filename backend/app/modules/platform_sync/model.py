@@ -20,9 +20,13 @@ from datetime import UTC, datetime
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
+    Boolean,
     Column,
     DateTime,
+    Float,
     ForeignKey,
+    Integer,
     String,
     UniqueConstraint,
     Uuid,
@@ -156,6 +160,145 @@ class QuicklogEntryORM(BaseModel, table=True):
     payload: dict | None = Field(
         default=None,
         sa_column=Column(JSON, nullable=True),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+
+
+class AgentSessionLogORM(BaseModel, table=True):
+    """CLI 推送的 agent 会话日志元信息行（design §3.1 / D-002 / D-003）。
+
+    Change 2026-08-23-platform-agent-log-ingest task-01：承接 CLI ``sillyspec run``
+    每次入口探测本地 harness 会话日志后的 best-effort POST 上报（协议
+    ``docs/platform-agent-log-protocol.md``），只落**路径与元信息**、不落日志内容
+    （内容解析由 daemon 按路径读文件，可选增强，本次不做）。
+
+    只存结构化列、不存 payload JSON 原文（D-002）：协议明言「整行存 entries 元信息」，
+    本表无派生逻辑、展示字段固定（quicklog 存 payload 是因为派生字段查询时算，此处
+    不同）；CLI schema 升版的未知字段由 Pydantic ``extra=ignore`` 静默丢弃（不 422），
+    字段演进靠 schema 升版加列。
+
+    时间字段（``first_seen_at`` / ``last_seen_at`` / ``pushed_at``）存 CLI ISO 8601 UTC
+    **原文 String**（D-003，对齐 ``last_pushed_at`` 先例避免时区/精度转换）：CLI 恒发
+    UTC Z 格式 → 字符串字典序 = 时间序，比较/排序直接用，``last_seen_at`` 即列表排序键。
+
+    ``(workspace_id, log_path)`` 复合唯一约束支撑幂等 upsert（design §3.2 D-005：CLI
+    重跑整行覆盖，CLI 留底文件是 invocations 计数权威，服务端不自己累加）。
+    ``workspace_id`` 只由 shpsync_ token 派生（auth.py D-004@v1 通道），无 shk_live_
+    过渡期 NULL 场景，此处必填 NOT NULL；workspace 删则级联删本表行。
+    ``log_path`` 存 CLI 上报原样（Windows 盘符/反斜杠，NFR-02）。
+    """
+
+    __tablename__ = "platform_agent_logs"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "log_path",
+            name="uq_platform_agent_logs_workspace_path",
+        ),
+    )
+
+    id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            primary_key=True,
+            nullable=False,
+            default=uuid.uuid4,
+        ),
+    )
+    workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    log_path: str = Field(
+        sa_column=Column(String(1024), nullable=False),
+    )
+    harness: str = Field(
+        sa_column=Column(String(32), nullable=False),
+    )
+    # codex-rollout-jsonl 等 CLI 侧探测出的格式标识。
+    format: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    # agent CLI 自身会话 id。
+    session_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(128), nullable=True),
+    )
+    # sillyhub-daemon / zcode / …（日志的产生方）。
+    originator: str | None = Field(
+        default=None,
+        sa_column=Column(String(128), nullable=True),
+    )
+    # 探测通道（如 codex-session-meta-cwd）。
+    detected_via: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    # entry 级 agent 工作目录。
+    agent_cwd: str | None = Field(
+        default=None,
+        sa_column=Column(String(1024), nullable=True),
+    )
+    # 上报时文件存在性。
+    exists: bool = Field(
+        default=True,
+        sa_column=Column(Boolean, nullable=False),
+    )
+    size_bytes: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, nullable=True),
+    )
+    mtime_ms: float | None = Field(
+        default=None,
+        sa_column=Column(Float, nullable=True),
+    )
+    # 以下两个时间字段为 CLI ISO 8601 UTC 原文 String（D-003）。
+    first_seen_at: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    last_seen_at: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    # CLI 侧累计调用次数（CLI 留底文件是计数权威，D-005）。
+    invocations: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
+    # 只含 flag 名，不含参数值（协议 §7）。
+    last_command: str | None = Field(
+        default=None,
+        sa_column=Column(String(255), nullable=True),
+    )
+    # 顶层 body 带下的扫描 run id（辅助归属）。
+    scan_run_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(128), nullable=True),
+    )
+    # 本行最近一次上报的 body.pushed_at（D-003 同款 String 原文）。
+    pushed_at: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),

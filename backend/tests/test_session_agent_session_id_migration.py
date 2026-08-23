@@ -67,6 +67,9 @@ def test_alembic_single_head_chain():
     """迁移挂载后 alembic 图仍是单 head（AC：不破坏单 head 链）。
 
     不连 DB，仅 ScriptDirectory 静态解析 versions/ 目录。
+    2026-08-23-platform-agent-log-ingest：断言从「REVISION_ID 必须是 head」放宽为
+    「单 head 且 REVISION_ID 仍在链上」——本测试此前已因后续迁移推进 head 而腐烂
+    （head 到 20260822090000 后仍断言 20260821130000，长期红），按测试意图修复。
     """
     from pathlib import Path
 
@@ -75,7 +78,9 @@ def test_alembic_single_head_chain():
     backend_root = Path(__file__).resolve().parent.parent
     sd = ScriptDirectory(str(backend_root / "migrations"))
     heads = sd.get_heads()
-    assert heads == [REVISION_ID], f"expected single head {REVISION_ID}, got {heads}"
+    assert len(heads) == 1, f"expected single head, got {heads}"
+    chain_ids = {rev.revision for rev in sd.walk_revisions()}
+    assert REVISION_ID in chain_ids, f"revision {REVISION_ID} not reachable from head"
 
 
 def test_downgrade_is_noop():

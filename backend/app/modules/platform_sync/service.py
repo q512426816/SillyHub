@@ -37,10 +37,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.core.logging import get_logger
-from app.modules.platform_sync.model import PlatformChangeProgressORM, QuicklogEntryORM
+from app.modules.platform_sync.model import (
+    AgentSessionLogORM,
+    PlatformChangeProgressORM,
+    QuicklogEntryORM,
+)
 
 if TYPE_CHECKING:
     # 类型标注专用（``from __future__ import annotations`` 惰性求值），运行时零导入。
+    from app.modules.platform_sync.schema import AgentLogEntry
     from app.modules.spec_workspace.schema import FileOp
 
 log = get_logger(__name__)
@@ -592,3 +597,116 @@ class PlatformSyncService:
         from app.modules.spec_workspace.service import SpecWorkspaceService
 
         return await SpecWorkspaceService(self._session).apply_ops(workspace_id, ops)
+
+    # ── Change 2026-08-23-platform-agent-log-ingest task-02（design §3.2 API 契约）──
+
+    async def upsert_agent_log_entries(
+        self,
+        workspace_id: uuid.UUID,
+        entries: list[AgentLogEntry],
+        pushed_at: str | None,
+        scan_run_id: str | None,
+    ) -> int:
+        """POST /agent-logs：批量幂等 upsert（design §3.2 / D-005 整行覆盖）。
+
+        逐条按 ``(workspace_id, log_path)`` select：无则 INSERT、有则整行覆盖——
+        ``invocations`` / ``first_seen_at`` 等一律以 CLI 值为准整行写入，服务端**不
+        自行累加**（CLI 留底文件是计数权威，D-005）；``created_at`` 首插后保留不动，
+        仅刷 ``updated_at``。同请求内重复 ``log_path`` 先按首现位置去重保序、以靠后
+        条目为准（design §3.2），全批单事务最后一次 commit，返回落库行数（去重后）。
+        """
+        # dict 化去重：键保留首现顺序（保序），值被靠后条目覆盖（后者为准）。
+        deduped: dict[str, AgentLogEntry] = {entry.log_path: entry for entry in entries}
+        now = datetime.now(UTC)
+        for entry in deduped.values():
+            stmt = select(AgentSessionLogORM).where(
+                col(AgentSessionLogORM.workspace_id) == workspace_id,
+                col(AgentSessionLogORM.log_path) == entry.log_path,
+            )
+            row = (await self._session.execute(stmt)).scalar_one_or_none()
+            if row is None:
+                self._session.add(
+                    AgentSessionLogORM(
+                        id=uuid.uuid4(),
+                        workspace_id=workspace_id,
+                        log_path=entry.log_path,
+                        harness=entry.harness,
+                        format=entry.format,
+                        session_id=entry.session_id,
+                        originator=entry.originator,
+                        detected_via=entry.detected_via,
+                        agent_cwd=entry.agent_cwd,
+                        exists=entry.exists if entry.exists is not None else True,
+                        size_bytes=entry.size_bytes,
+                        mtime_ms=entry.mtime_ms,
+                        first_seen_at=entry.first_seen_at,
+                        last_seen_at=entry.last_seen_at,
+                        invocations=entry.invocations,
+                        last_command=entry.last_command,
+                        scan_run_id=scan_run_id,
+                        pushed_at=pushed_at,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                )
+                continue
+            # 整行覆盖（D-005）：除 id/workspace_id/log_path/created_at 外全列以本次
+            # 上报为准；exists None 回落 ORM 列默认 true（NOT NULL）。
+            row.harness = entry.harness
+            row.format = entry.format
+            row.session_id = entry.session_id
+            row.originator = entry.originator
+            row.detected_via = entry.detected_via
+            row.agent_cwd = entry.agent_cwd
+            row.exists = entry.exists if entry.exists is not None else True
+            row.size_bytes = entry.size_bytes
+            row.mtime_ms = entry.mtime_ms
+            row.first_seen_at = entry.first_seen_at
+            row.last_seen_at = entry.last_seen_at
+            row.invocations = entry.invocations
+            row.last_command = entry.last_command
+            row.scan_run_id = scan_run_id
+            row.pushed_at = pushed_at
+            row.updated_at = now
+        await self._session.commit()
+        return len(deduped)
+
+    async def list_agent_logs(
+        self,
+        workspace_id: uuid.UUID | None,
+        allowed_workspace_ids: list[uuid.UUID] | None = None,
+        filter_workspace_id: uuid.UUID | None = None,
+        limit: int = 20,
+    ) -> list[AgentSessionLogORM]:
+        """GET /agent-logs：按读 scope 聚合列表（design §3.2 / D-004 读通道）。
+
+        - ``allowed_workspace_ids`` 非 None（JWT/shk_live_ 读路径）→ workspace_id
+          ``IN (并集)`` 聚合——本表 workspace_id NOT NULL，无 NULL 桶子句（X-04）；
+          空集合即空结果。
+        - ``workspace_id`` 非 None（shpsync_ 路径）→ 精确匹配（token 收件箱）。
+        - 两者均 None（防御，router ``_read_args`` 恒给其一）→ 空结果（fail-closed）。
+        - ``filter_workspace_id`` 非 None 时再 AND 等值——不在 scope 内（越权）=
+          空结果不报错（不 403 不泄漏 workspace 存在性，D-004）。
+
+        排序 ``last_seen_at DESC NULLS LAST``（显式 nulls_last 消除 PG/SQLite 方言
+        分叉 X-07；ISO 8601 UTC 字符串字典序 = 时间序，D-003），``limit`` 由 router
+        层 Query 校验（默认 20 上限 100）。
+        """
+        ws_col = col(AgentSessionLogORM.workspace_id)
+        filters: list[ColumnElement[bool]] = []
+        if allowed_workspace_ids is not None:
+            filters.append(ws_col.in_(allowed_workspace_ids))
+        elif workspace_id is not None:
+            filters.append(ws_col == workspace_id)
+        else:
+            return []
+        if filter_workspace_id is not None:
+            filters.append(ws_col == filter_workspace_id)
+        stmt = (
+            select(AgentSessionLogORM)
+            .where(*filters)
+            .order_by(col(AgentSessionLogORM.last_seen_at).desc().nulls_last())
+            .limit(limit)
+        )
+        rows = (await self._session.execute(stmt)).scalars().all()
+        return list(rows)

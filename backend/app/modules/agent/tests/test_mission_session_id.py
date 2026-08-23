@@ -242,14 +242,22 @@ def test_migration_revision_chain() -> None:
 
 
 def test_migration_is_single_head_after_mount() -> None:
-    """挂载后 alembic 图单 head（多 head 会阻断 upgrade，卡片要求停并报告）。"""
+    """挂载后 alembic 图单 head（多 head 会阻断 upgrade，卡片要求停并报告）。
+
+    2026-08-23-platform-agent-log-ingest：断言从「REVISION_ID 必须是 head」放宽为
+    「单 head 且 REVISION_ID 仍在链上（head 可达祖先）」——后续迁移合法推进 head
+    不应打破本测试（旧写法在任何新迁移落盘后即红）。
+    """
     from pathlib import Path
 
     from alembic.script import ScriptDirectory
 
     backend_root = Path(__file__).resolve().parents[4]
-    heads = ScriptDirectory(str(backend_root / "migrations")).get_heads()
-    assert heads == [REVISION_ID], f"expected single head {REVISION_ID}, got {heads}"
+    sd = ScriptDirectory(str(backend_root / "migrations"))
+    heads = sd.get_heads()
+    assert len(heads) == 1, f"expected single head, got {heads}"
+    chain_ids = {rev.revision for rev in sd.walk_revisions()}
+    assert REVISION_ID in chain_ids, f"revision {REVISION_ID} not reachable from head"
 
 
 def test_migration_upgrade_adds_column_fk_and_indexes() -> None:

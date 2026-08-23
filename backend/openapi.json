@@ -26499,6 +26499,115 @@
         }
       }
     },
+    "/api/agent-logs": {
+      "post": {
+        "tags": [
+          "platform-sync",
+          "platform-sync"
+        ],
+        "summary": "Push Agent Logs",
+        "description": "POST agent 会话日志元信息批量上报（协议 docs/platform-agent-log-protocol.md §1）。\n\nCLI ``sillyspec run`` 每次入口探测本地 harness 会话日志后 best-effort POST\n（5s 超时、失败只 warn 不阻断、本地 ``agent-session-log.json`` 留底）；上报只含\n路径与元信息、不含日志内容。语义恒 200 成功体（幂等 upsert，``(workspace_id,\nlog_path)`` 整行覆盖 D-005，无乐观锁），CLI 不读 body、任意 2xx 即成功。\n\nworkspace_id 从 require_platform_sync_write 派生（仅 shpsync_ 可写，D-004@v1；\n无凭据 401 / shk_live_·JWT 403，与 quicklog-entries 完全同款）；body 顶层\n``workspace_id`` 键被 extra=ignore 吞掉——token 派生唯一权威，不信任 body。",
+        "operationId": "push_agent_logs_api_agent_logs_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentLogPushRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentLogPushOk"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "platform-sync",
+          "platform-sync"
+        ],
+        "summary": "List Agent Logs",
+        "description": "GET agent 会话日志列表（design §3.2 读通道，会话详情页日志线索）。\n\n鉴权 scope 复用 ``_read_args`` 翻译（shpsync_ → token 绑定 workspace；JWT/\nshk_live_ → CHANGE_READ 并集，本表 workspace_id NOT NULL 无 NULL 桶）。可选\n``workspace_id`` query 参数再 AND 等值过滤：不在 scope 内（越权）→ 空列表，\n不 403 不泄漏 workspace 存在性（D-004）。排序 ``last_seen_at DESC NULLS LAST``\n（显式 nulls_last 消除方言分叉 X-07；ISO 8601 UTC 字典序 = 时间序 D-003）。\n响应字段 snake_case 原样（X-06，前端类型以 gen:types 生成契约为准）。",
+        "operationId": "list_agent_logs_api_agent_logs_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "可选 workspace 过滤",
+              "title": "Workspace Id"
+            },
+            "description": "可选 workspace 过滤"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "返回条数，默认 20 上限 100",
+              "default": 20,
+              "title": "Limit"
+            },
+            "description": "返回条数，默认 20 上限 100"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentLogListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/platform-sync-tokens": {
       "post": {
         "tags": [
@@ -26672,6 +26781,456 @@
           "status"
         ],
         "title": "AgentKillResponse"
+      },
+      "AgentLogEntry": {
+        "properties": {
+          "harness": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Harness"
+          },
+          "log_path": {
+            "type": "string",
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Log Path"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Format"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "originator": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Originator"
+          },
+          "detected_via": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detected Via"
+          },
+          "agent_cwd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Cwd"
+          },
+          "exists": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exists"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "mtime_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mtime Ms"
+          },
+          "first_seen_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Seen At"
+          },
+          "last_seen_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen At"
+          },
+          "invocations": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invocations"
+          },
+          "last_command": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Command"
+          }
+        },
+        "type": "object",
+        "required": [
+          "harness",
+          "log_path"
+        ],
+        "title": "AgentLogEntry",
+        "description": "POST /agent-logs 单条日志元信息（协议 docs/platform-agent-log-protocol.md §1）。\n\n必填仅 ``harness`` + ``log_path``（复合幂等键之二维），其余 optional；字符串字段\n``max_length`` 与 ORM 列宽对齐——超长在 Pydantic 层先行 422（防 PG 超长 500，\nX-08），其中 ``log_path`` 上限 1024 与列宽逐字一致。``extra=ignore`` 宽松吞掉\nCLI schema 升版的未知字段（D-002：静默丢弃不 422，字段演进靠加列）。"
+      },
+      "AgentLogListItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "log_path": {
+            "type": "string",
+            "title": "Log Path"
+          },
+          "harness": {
+            "type": "string",
+            "title": "Harness"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Format"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "originator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Originator"
+          },
+          "detected_via": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detected Via"
+          },
+          "agent_cwd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Cwd"
+          },
+          "exists": {
+            "type": "boolean",
+            "title": "Exists"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "mtime_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mtime Ms"
+          },
+          "first_seen_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Seen At"
+          },
+          "last_seen_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen At"
+          },
+          "invocations": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invocations"
+          },
+          "last_command": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Command"
+          },
+          "scan_run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scan Run Id"
+          },
+          "pushed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pushed At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "log_path",
+          "harness",
+          "exists",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AgentLogListItem",
+        "description": "GET /agent-logs 列表项——design §3.1 全列 snake_case 原样（X-06）。\n\n``from_attributes`` 支持 ORM 行直接 ``model_validate``（router 层零手工映射）；\n字段即 ``platform_agent_logs`` 表全列（无 payload JSON，D-002）。"
+      },
+      "AgentLogListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AgentLogListItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "title": "AgentLogListResponse",
+        "description": "GET /agent-logs 200 响应（按 last_seen_at DESC NULLS LAST 排序，design §3.2）。"
+      },
+      "AgentLogPushOk": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok",
+            "default": true
+          },
+          "upserted": {
+            "type": "integer",
+            "title": "Upserted",
+            "description": "本次落库的日志行数（同请求去重后）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "upserted"
+        ],
+        "title": "AgentLogPushOk",
+        "description": "POST /agent-logs 200 响应（CLI best-effort 不读 body，任意 2xx 即成功）。"
+      },
+      "AgentLogPushRequest": {
+        "properties": {
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version",
+            "default": 1
+          },
+          "pushed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pushed At"
+          },
+          "agent_cwd": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 1024
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Cwd"
+          },
+          "scan_run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scan Run Id"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/AgentLogEntry"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Entries"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entries"
+        ],
+        "title": "AgentLogPushRequest",
+        "description": "POST /agent-logs 请求（CLI ``sillyspec run`` 入口 best-effort 批量推送，协议 §1）。\n\n**不声明 workspace_id 字段**——body 里出现的值被 extra=ignore 吞掉，workspace\n一律由 shpsync_ token 派生（token 派生唯一权威，协议 §1「不信任 body 里的\nworkspace_id」）。``entries`` 1..50 条防滥用；同请求内同 log_path 重复条目由\nservice 层去重取后者（design §3.2）。"
       },
       "AgentProfileAggregatedItem": {
         "properties": {

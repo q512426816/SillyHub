@@ -236,3 +236,98 @@ class SpecSyncResponse(BaseModel):
     new_versions: dict[str, int]
     conflict: bool = False
     server_versions: dict[str, int] | None = None
+
+
+# ── Change 2026-08-23-platform-agent-log-ingest task-02（design §3.2 API 契约）──
+
+
+class AgentLogEntry(BaseModel):
+    """POST /agent-logs 单条日志元信息（协议 docs/platform-agent-log-protocol.md §1）。
+
+    必填仅 ``harness`` + ``log_path``（复合幂等键之二维），其余 optional；字符串字段
+    ``max_length`` 与 ORM 列宽对齐——超长在 Pydantic 层先行 422（防 PG 超长 500，
+    X-08），其中 ``log_path`` 上限 1024 与列宽逐字一致。``extra=ignore`` 宽松吞掉
+    CLI schema 升版的未知字段（D-002：静默丢弃不 422，字段演进靠加列）。
+    """
+
+    model_config = {"extra": "ignore"}
+
+    harness: str = Field(min_length=1, max_length=32)
+    log_path: str = Field(min_length=1, max_length=1024)
+    format: str | None = Field(default=None, max_length=64)
+    session_id: str | None = Field(default=None, max_length=128)
+    originator: str | None = Field(default=None, max_length=128)
+    detected_via: str | None = Field(default=None, max_length=64)
+    agent_cwd: str | None = Field(default=None, max_length=1024)
+    exists: bool | None = None
+    size_bytes: int | None = Field(default=None, ge=0)
+    mtime_ms: float | None = None
+    # 以下两个时间字段为 CLI ISO 8601 UTC 原文（D-003，字典序 = 时间序）。
+    first_seen_at: str | None = Field(default=None, max_length=64)
+    last_seen_at: str | None = Field(default=None, max_length=64)
+    # CLI 侧累计调用次数（CLI 留底文件是计数权威，D-005）。
+    invocations: int | None = Field(default=None, ge=0)
+    # 只含 flag 名，不含参数值（协议 §7）。
+    last_command: str | None = Field(default=None, max_length=255)
+
+
+class AgentLogPushRequest(BaseModel):
+    """POST /agent-logs 请求（CLI ``sillyspec run`` 入口 best-effort 批量推送，协议 §1）。
+
+    **不声明 workspace_id 字段**——body 里出现的值被 extra=ignore 吞掉，workspace
+    一律由 shpsync_ token 派生（token 派生唯一权威，协议 §1「不信任 body 里的
+    workspace_id」）。``entries`` 1..50 条防滥用；同请求内同 log_path 重复条目由
+    service 层去重取后者（design §3.2）。
+    """
+
+    model_config = {"extra": "ignore"}
+
+    schema_version: int = 1
+    pushed_at: str | None = Field(default=None, max_length=64)
+    agent_cwd: str | None = Field(default=None, max_length=1024)
+    scan_run_id: str | None = Field(default=None, max_length=128)
+    entries: list[AgentLogEntry] = Field(min_length=1, max_length=50)
+
+
+class AgentLogPushOk(BaseModel):
+    """POST /agent-logs 200 响应（CLI best-effort 不读 body，任意 2xx 即成功）。"""
+
+    ok: bool = True
+    upserted: int = Field(description="本次落库的日志行数（同请求去重后）")
+
+
+class AgentLogListItem(BaseModel):
+    """GET /agent-logs 列表项——design §3.1 全列 snake_case 原样（X-06）。
+
+    ``from_attributes`` 支持 ORM 行直接 ``model_validate``（router 层零手工映射）；
+    字段即 ``platform_agent_logs`` 表全列（无 payload JSON，D-002）。
+    """
+
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    workspace_id: uuid.UUID
+    log_path: str
+    harness: str
+    format: str | None = None
+    session_id: str | None = None
+    originator: str | None = None
+    detected_via: str | None = None
+    agent_cwd: str | None = None
+    exists: bool
+    size_bytes: int | None = None
+    mtime_ms: float | None = None
+    first_seen_at: str | None = None
+    last_seen_at: str | None = None
+    invocations: int | None = None
+    last_command: str | None = None
+    scan_run_id: str | None = None
+    pushed_at: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentLogListResponse(BaseModel):
+    """GET /agent-logs 200 响应（按 last_seen_at DESC NULLS LAST 排序，design §3.2）。"""
+
+    items: list[AgentLogListItem] = Field(default_factory=list)

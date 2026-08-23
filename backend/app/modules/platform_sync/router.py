@@ -8,6 +8,10 @@
 - POST /changes/{name}/documents：四件套全文同步（2026-08-14-platform-sync-docs-approval，D-004@v1）
 - POST /changes/{name}/approval：审批决定提交（同上，D-001@v1 完整闭环）
 - GET /changes/{name}/approval：审批状态查询（改读库，无记录默认 approved 放行）
+- POST /quicklog-entries：quicklog 条目上行（幂等 upsert）
+- POST /agent-logs：agent 会话日志元信息批量上报（2026-08-23-platform-agent-log-ingest
+  task-02，协议 docs/platform-agent-log-protocol.md §1，仅 shpsync_）
+- GET /agent-logs：agent 会话日志列表（读 scope 过滤 + last_seen_at 倒序，同上 task-02）
 
 router **不自带 prefix**，路径在路由内写全（``/changes/...``）；main 挂 ``prefix="/api"``
 落地 ``/api/changes/...``。不自带 prefix 是为了避开 FastAPI 对 ``GET /changes`` 的
@@ -26,9 +30,10 @@ workspace 并集 + NULL 桶聚合（service ``allowed_workspace_ids`` 参数）�
 
 from __future__ import annotations
 
+import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,6 +45,10 @@ from app.modules.platform_sync.auth import (
     require_platform_sync_write,
 )
 from app.modules.platform_sync.schema import (
+    AgentLogListItem,
+    AgentLogListResponse,
+    AgentLogPushOk,
+    AgentLogPushRequest,
     ApprovalSubmitOk,
     ApprovalSubmitRequest,
     ChangeApprovalResponse,
@@ -344,3 +353,62 @@ async def push_quicklog_entry(
         payload=body.model_dump(exclude_none=False),
     )
     return QuicklogPushOk(ql_id=body.ql_id)
+
+
+# ── Change 2026-08-23-platform-agent-log-ingest task-02（design §3.2 / 协议 §1）──
+
+
+@router.post("/agent-logs", response_model=AgentLogPushOk)
+async def push_agent_logs(
+    body: AgentLogPushRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    auth: _write_auth,
+) -> AgentLogPushOk:
+    """POST agent 会话日志元信息批量上报（协议 docs/platform-agent-log-protocol.md §1）。
+
+    CLI ``sillyspec run`` 每次入口探测本地 harness 会话日志后 best-effort POST
+    （5s 超时、失败只 warn 不阻断、本地 ``agent-session-log.json`` 留底）；上报只含
+    路径与元信息、不含日志内容。语义恒 200 成功体（幂等 upsert，``(workspace_id,
+    log_path)`` 整行覆盖 D-005，无乐观锁），CLI 不读 body、任意 2xx 即成功。
+
+    workspace_id 从 require_platform_sync_write 派生（仅 shpsync_ 可写，D-004@v1；
+    无凭据 401 / shk_live_·JWT 403，与 quicklog-entries 完全同款）；body 顶层
+    ``workspace_id`` 键被 extra=ignore 吞掉——token 派生唯一权威，不信任 body。
+    """
+    _user, scope = auth
+    if scope.workspace_id is None:
+        # 防御：require_platform_sync_write 的 shpsync_ 通道恒派生 workspace；到达此
+        # 分支即凭据形态异常，403 关闭写通道（fail-closed，对齐 quicklog-entries 范式）。
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="缺少工作区归属")
+    upserted = await PlatformSyncService(session).upsert_agent_log_entries(
+        workspace_id=scope.workspace_id,
+        entries=body.entries,
+        pushed_at=body.pushed_at,
+        scan_run_id=body.scan_run_id,
+    )
+    return AgentLogPushOk(upserted=upserted)
+
+
+@router.get("/agent-logs", response_model=AgentLogListResponse)
+async def list_agent_logs(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    auth: _read_auth,
+    workspace_id: uuid.UUID | None = Query(default=None, description="可选 workspace 过滤"),
+    limit: int = Query(default=20, ge=1, le=100, description="返回条数，默认 20 上限 100"),
+) -> AgentLogListResponse:
+    """GET agent 会话日志列表（design §3.2 读通道，会话详情页日志线索）。
+
+    鉴权 scope 复用 ``_read_args`` 翻译（shpsync_ → token 绑定 workspace；JWT/
+    shk_live_ → CHANGE_READ 并集，本表 workspace_id NOT NULL 无 NULL 桶）。可选
+    ``workspace_id`` query 参数再 AND 等值过滤：不在 scope 内（越权）→ 空列表，
+    不 403 不泄漏 workspace 存在性（D-004）。排序 ``last_seen_at DESC NULLS LAST``
+    （显式 nulls_last 消除方言分叉 X-07；ISO 8601 UTC 字典序 = 时间序 D-003）。
+    响应字段 snake_case 原样（X-06，前端类型以 gen:types 生成契约为准）。
+    """
+    _user, scope = auth
+    rows = await PlatformSyncService(session).list_agent_logs(
+        **_read_args(scope),
+        filter_workspace_id=workspace_id,
+        limit=limit,
+    )
+    return AgentLogListResponse(items=[AgentLogListItem.model_validate(row) for row in rows])

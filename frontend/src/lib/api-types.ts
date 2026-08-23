@@ -8298,6 +8298,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agent-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Agent Logs
+         * @description GET agent 会话日志列表（design §3.2 读通道，会话详情页日志线索）。
+         *
+         *     鉴权 scope 复用 ``_read_args`` 翻译（shpsync_ → token 绑定 workspace；JWT/
+         *     shk_live_ → CHANGE_READ 并集，本表 workspace_id NOT NULL 无 NULL 桶）。可选
+         *     ``workspace_id`` query 参数再 AND 等值过滤：不在 scope 内（越权）→ 空列表，
+         *     不 403 不泄漏 workspace 存在性（D-004）。排序 ``last_seen_at DESC NULLS LAST``
+         *     （显式 nulls_last 消除方言分叉 X-07；ISO 8601 UTC 字典序 = 时间序 D-003）。
+         *     响应字段 snake_case 原样（X-06，前端类型以 gen:types 生成契约为准）。
+         */
+        get: operations["list_agent_logs_api_agent_logs_get"];
+        put?: never;
+        /**
+         * Push Agent Logs
+         * @description POST agent 会话日志元信息批量上报（协议 docs/platform-agent-log-protocol.md §1）。
+         *
+         *     CLI ``sillyspec run`` 每次入口探测本地 harness 会话日志后 best-effort POST
+         *     （5s 超时、失败只 warn 不阻断、本地 ``agent-session-log.json`` 留底）；上报只含
+         *     路径与元信息、不含日志内容。语义恒 200 成功体（幂等 upsert，``(workspace_id,
+         *     log_path)`` 整行覆盖 D-005，无乐观锁），CLI 不读 body、任意 2xx 即成功。
+         *
+         *     workspace_id 从 require_platform_sync_write 派生（仅 shpsync_ 可写，D-004@v1；
+         *     无凭据 401 / shk_live_·JWT 403，与 quicklog-entries 完全同款）；body 顶层
+         *     ``workspace_id`` 键被 extra=ignore 吞掉——token 派生唯一权威，不信任 body。
+         */
+        post: operations["push_agent_logs_api_agent_logs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/platform-sync-tokens": {
         parameters: {
             query?: never;
@@ -8381,6 +8421,154 @@ export interface components {
             id: string;
             /** Status */
             status: string;
+        };
+        /**
+         * AgentLogEntry
+         * @description POST /agent-logs 单条日志元信息（协议 docs/platform-agent-log-protocol.md §1）。
+         *
+         *     必填仅 ``harness`` + ``log_path``（复合幂等键之二维），其余 optional；字符串字段
+         *     ``max_length`` 与 ORM 列宽对齐——超长在 Pydantic 层先行 422（防 PG 超长 500，
+         *     X-08），其中 ``log_path`` 上限 1024 与列宽逐字一致。``extra=ignore`` 宽松吞掉
+         *     CLI schema 升版的未知字段（D-002：静默丢弃不 422，字段演进靠加列）。
+         */
+        AgentLogEntry: {
+            /** Harness */
+            harness: string;
+            /** Log Path */
+            log_path: string;
+            /** Format */
+            format?: string | null;
+            /** Session Id */
+            session_id?: string | null;
+            /** Originator */
+            originator?: string | null;
+            /** Detected Via */
+            detected_via?: string | null;
+            /** Agent Cwd */
+            agent_cwd?: string | null;
+            /** Exists */
+            exists?: boolean | null;
+            /** Size Bytes */
+            size_bytes?: number | null;
+            /** Mtime Ms */
+            mtime_ms?: number | null;
+            /** First Seen At */
+            first_seen_at?: string | null;
+            /** Last Seen At */
+            last_seen_at?: string | null;
+            /** Invocations */
+            invocations?: number | null;
+            /** Last Command */
+            last_command?: string | null;
+        };
+        /**
+         * AgentLogListItem
+         * @description GET /agent-logs 列表项——design §3.1 全列 snake_case 原样（X-06）。
+         *
+         *     ``from_attributes`` 支持 ORM 行直接 ``model_validate``（router 层零手工映射）；
+         *     字段即 ``platform_agent_logs`` 表全列（无 payload JSON，D-002）。
+         */
+        AgentLogListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Log Path */
+            log_path: string;
+            /** Harness */
+            harness: string;
+            /** Format */
+            format?: string | null;
+            /** Session Id */
+            session_id?: string | null;
+            /** Originator */
+            originator?: string | null;
+            /** Detected Via */
+            detected_via?: string | null;
+            /** Agent Cwd */
+            agent_cwd?: string | null;
+            /** Exists */
+            exists: boolean;
+            /** Size Bytes */
+            size_bytes?: number | null;
+            /** Mtime Ms */
+            mtime_ms?: number | null;
+            /** First Seen At */
+            first_seen_at?: string | null;
+            /** Last Seen At */
+            last_seen_at?: string | null;
+            /** Invocations */
+            invocations?: number | null;
+            /** Last Command */
+            last_command?: string | null;
+            /** Scan Run Id */
+            scan_run_id?: string | null;
+            /** Pushed At */
+            pushed_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * AgentLogListResponse
+         * @description GET /agent-logs 200 响应（按 last_seen_at DESC NULLS LAST 排序，design §3.2）。
+         */
+        AgentLogListResponse: {
+            /** Items */
+            items?: components["schemas"]["AgentLogListItem"][];
+        };
+        /**
+         * AgentLogPushOk
+         * @description POST /agent-logs 200 响应（CLI best-effort 不读 body，任意 2xx 即成功）。
+         */
+        AgentLogPushOk: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /**
+             * Upserted
+             * @description 本次落库的日志行数（同请求去重后）
+             */
+            upserted: number;
+        };
+        /**
+         * AgentLogPushRequest
+         * @description POST /agent-logs 请求（CLI ``sillyspec run`` 入口 best-effort 批量推送，协议 §1）。
+         *
+         *     **不声明 workspace_id 字段**——body 里出现的值被 extra=ignore 吞掉，workspace
+         *     一律由 shpsync_ token 派生（token 派生唯一权威，协议 §1「不信任 body 里的
+         *     workspace_id」）。``entries`` 1..50 条防滥用；同请求内同 log_path 重复条目由
+         *     service 层去重取后者（design §3.2）。
+         */
+        AgentLogPushRequest: {
+            /**
+             * Schema Version
+             * @default 1
+             */
+            schema_version: number;
+            /** Pushed At */
+            pushed_at?: string | null;
+            /** Agent Cwd */
+            agent_cwd?: string | null;
+            /** Scan Run Id */
+            scan_run_id?: string | null;
+            /** Entries */
+            entries: components["schemas"]["AgentLogEntry"][];
         };
         /**
          * AgentProfileAggregatedItem
@@ -34291,6 +34479,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuicklogPushOk"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_agent_logs_api_agent_logs_get: {
+        parameters: {
+            query?: {
+                /** @description 可选 workspace 过滤 */
+                workspace_id?: string | null;
+                /** @description 返回条数，默认 20 上限 100 */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentLogListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_agent_logs_api_agent_logs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentLogPushRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentLogPushOk"];
                 };
             };
             /** @description Validation Error */
