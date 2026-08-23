@@ -96,16 +96,29 @@ def worker_tool_config(read_only: bool) -> dict[str, object]:
     write tools; write Workers get edit tools under ``acceptEdits``. ``max_turns``
     bounds execution so a Worker can't run unbounded (without it read-only
     analysis Workers ran 6min+).
+
+    agent-file-upload-mcp task-04（design §10 R-02 / D-008@v1）：两分支白名单
+    各追加整服务器名 ``mcp__sillyhub-file``（不用 ``mcp__sillyhub-file__*``
+    通配写法——claude CLI 通配行为未验证），否则显式 allowed_tools 会物理禁掉
+    worker 的上传/列表工具（FR-02）。无白名单（bypassPermissions）模式不动。
     """
     if read_only:
         return {
             "mode": "plan",
-            "allowed_tools": ["Read", "Glob", "Grep"],
+            "allowed_tools": ["Read", "Glob", "Grep", "mcp__sillyhub-file"],
             "max_turns": 25,
         }
     return {
         "mode": "acceptEdits",
-        "allowed_tools": ["Read", "Glob", "Grep", "Edit", "Write", "Bash"],
+        "allowed_tools": [
+            "Read",
+            "Glob",
+            "Grep",
+            "Edit",
+            "Write",
+            "Bash",
+            "mcp__sillyhub-file",
+        ],
         "max_turns": 30,
     }
 
