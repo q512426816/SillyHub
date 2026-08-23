@@ -319,3 +319,13 @@
 根因：frontend 连续 3 红：6e2a239a 有意退役 whoLine emoji 改 lucide 图标但 page.test.tsx 4 处断言未跟进；backend 红：test_context_builder.py 落盘未跑 ruff format；daemon 2 红：2-4 核 runner 上 maxForks 8 超订阅饿死重 I/O 用例过 30s 超时（非断言失败，下轮自愈）
 方案：page.test.tsx 4 行断言去 📋/☁ 前缀只留名称；ruff format 该文件（引号风格+行合并无语义变化）；vitest.config.ts testTimeout 30s→60s + CI 下 maxForks 8→4，并修正原注释「CI ≤8 核不受影响」错误判断
 结果：frontend sessions page.test.tsx 18/18 绿（原 2 红）；backend ruff format --check 941 文件全过 + ruff check 干净 + pytest 26 通过；daemon 两曾超时文件 88/88 绿 + tsc 干净
+
+## ql-20260824-002-5bfa | 2026-08-24 06:11:54 | backend-ci mypy 挂红修复——agent-log entry Optional 类型收窄
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/platform_sync/router.py（in_scope 中间布尔改直接 None 判定使 mypy 收窄 entry）
+需求：backend-ci mypy 挂红修复——agent-log entry Optional 类型收窄
+根因：94d755e1 链用中间布尔 in_scope 承载 entry 非 None 判定，mypy 无法经 not in_scope:raise 收窄，返回处 entry 仍 Optional 与签名冲突；此前被 ruff 挂红挡在 mypy 步骤前未暴露，修好 ruff 后浮出
+方案：router.py scope 校验改 entry is None or 直接条件取反判越权，mypy 可收窄；语义零变化（不可见/不存在同语义 404 保留）
+结果：mypy 687 文件 0 错；ruff check+format 过；agent_log 两测试文件 36/36 绿

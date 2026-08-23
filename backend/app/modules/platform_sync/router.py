@@ -491,12 +491,13 @@ async def _resolve_agent_log_read_target(
     ).scalar_one_or_none()
     # scope 内校验：shpsync_ 精确匹配 token 派生 workspace；JWT/shk_live_ 并集
     # 包含。不可见/不存在同语义 404（不泄漏存在性，口径同 list_agent_logs）。
-    in_scope = entry is not None and (
-        entry.workspace_id == scope.workspace_id
+    # entry is None 与越权在同一 if 直接判（不用中间布尔变量），mypy 才能在此后
+    # 把 entry 收窄为非 None（函数返回类型是 AgentSessionLogORM 非 Optional）。
+    if entry is None or (
+        entry.workspace_id != scope.workspace_id
         if scope.workspace_id is not None
-        else entry.workspace_id in scope.allowed_workspace_ids_
-    )
-    if not in_scope:
+        else entry.workspace_id not in scope.allowed_workspace_ids_
+    ):
         raise AppError(
             "日志条目不存在或无权访问。",
             code="HTTP_404_AGENT_LOG_ENTRY_NOT_FOUND",
