@@ -36,7 +36,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Settings, Users } from "lucide-react";
+import { Check, Settings, Users } from "lucide-react";
 
 import type { TeamMissionTriggerRequest } from "@/lib/daemon";
 import type { MainAgentConfig, WorkerPresetItem } from "@/lib/agent";
@@ -243,43 +243,48 @@ export function TeamTriggerPopover({
     <div
       role="dialog"
       aria-label="派团队配置"
-      className="absolute bottom-full left-0 z-30 mb-1.5 max-h-[70vh] w-[380px] overflow-y-auto rounded-lg border border-violet-200 bg-card p-3.5 text-xs shadow-lg"
+      className="absolute bottom-full left-0 z-30 mb-1.5 max-h-[70vh] w-[400px] overflow-y-auto rounded-xl border border-violet-200 bg-card p-4 text-xs shadow-md"
     >
-      {/* 标题 + 说明（原型 .pop-title / .pop-sub） */}
-      <p className="flex items-center gap-1.5 text-[13px] font-bold text-violet-700">
-        <Users aria-hidden className="h-4 w-4" />
+      {/* 标题 + 说明（原型 .team-pop .tp-title / .tp-sub；violet =「团队」固定身份色） */}
+      <p className="flex items-center gap-2 text-[13px] font-bold text-violet-700">
+        <span
+          aria-hidden
+          className="flex h-6 w-6 items-center justify-center rounded-md bg-violet-100"
+        >
+          <Users className="h-3.5 w-3.5" />
+        </span>
         派团队做这件事
       </p>
-      <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">
+      <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
         当前会话的智能体升级为主控，通过 MCP 派发分身；任务进展直接回到本会话。
       </p>
 
       {/* 目标（可选）：/team 指令文本或「用团队分析」提示句预填；确认后随下条消息发出 */}
-      <label className="mt-2.5 block">
-        <span className="text-[11px] font-semibold text-muted-foreground">
+      <label className="mt-3 block">
+        <span className="text-[10.5px] font-semibold text-muted-foreground">
           目标（可选，确认后回填输入框，随下条消息发出）
         </span>
         <input
           type="text"
           aria-label="目标（可选，随下条消息发出）"
           placeholder="留空则在下条消息里写目标"
-          className="mt-1 h-8 w-full rounded border border-input bg-background px-2 text-[12.5px] text-foreground focus:border-ring focus:outline-none"
+          className="mt-1 h-8 w-full rounded-lg border border-input bg-background px-2.5 text-[12.5px] text-foreground transition-[border-color,box-shadow] placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none focus:ring-[3px] focus:ring-brand-100"
           value={objective}
           onChange={(e) => setObjective(e.target.value)}
         />
       </label>
 
-      {/* 派发范围（原型 .pop-lb + .scope-item） */}
-      <p className="mt-2.5 text-[11px] font-semibold text-muted-foreground">
+      {/* 派发范围（原型 .tp-lb + .tp-opt 单选卡：原生 radio 视觉隐藏，peer 自绘品牌圆点） */}
+      <p className="mt-3 text-[10.5px] font-semibold text-muted-foreground">
         派发范围
       </p>
-      <div className="mt-1 flex flex-col gap-1">
+      <div className="mt-1 flex flex-col gap-1.5">
         {/* 选项 1：当前工作区（默认） */}
         <label
           className={cn(
-            "flex cursor-pointer items-center gap-2 rounded border px-2.5 py-1.5 text-[12.5px]",
+            "flex cursor-pointer items-center gap-2 rounded-lg border px-2.5 py-2 text-[12.5px] transition-colors",
             scopeMode === "workspace"
-              ? "border-brand-200 bg-brand-50/60"
+              ? "border-brand-300 bg-brand-50 ring-[3px] ring-brand-100"
               : "border-border bg-card hover:bg-muted/50",
             !workspaceId && "cursor-not-allowed opacity-60",
           )}
@@ -291,15 +296,19 @@ export function TeamTriggerPopover({
             checked={scopeMode === "workspace"}
             disabled={!workspaceId}
             onChange={() => setScopeMode("workspace")}
-            className="h-3.5 w-3.5 shrink-0"
+            className="peer sr-only"
+          />
+          <span
+            aria-hidden
+            className="h-3.5 w-3.5 shrink-0 rounded-full border-[1.5px] border-border-strong bg-card transition-colors peer-checked:border-[5px] peer-checked:border-primary peer-disabled:opacity-50"
           />
           <span className="shrink-0 font-semibold text-foreground">
             {workspaceLabel ?? "未绑定工作区"}
           </span>
-          <span className="shrink-0 rounded bg-cyan-50 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-700">
+          <span className="shrink-0 rounded-full bg-cyan-50 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-700">
             当前工作区
           </span>
-          <span className="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground/70">
+          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/70">
             分身在本工作区绑定的机器上跑
           </span>
         </label>
@@ -307,9 +316,9 @@ export function TeamTriggerPopover({
         {/* 选项 2：项目维度（仅项目经理可选；scope 多选 + anchor 派生展示） */}
         <label
           className={cn(
-            "flex items-center gap-2 rounded border px-2.5 py-1.5 text-[12.5px]",
+            "flex items-center gap-2 rounded-lg border px-2.5 py-2 text-[12.5px] transition-colors",
             scopeMode === "project"
-              ? "border-brand-200 bg-brand-50/60"
+              ? "border-brand-300 bg-brand-50 ring-[3px] ring-brand-100"
               : "border-border bg-card hover:bg-muted/50",
             !projectSelectable && "cursor-not-allowed opacity-60",
           )}
@@ -321,13 +330,17 @@ export function TeamTriggerPopover({
             checked={scopeMode === "project"}
             disabled={!projectSelectable}
             onChange={() => setScopeMode("project")}
-            className="h-3.5 w-3.5 shrink-0"
+            className="peer sr-only"
+          />
+          <span
+            aria-hidden
+            className="h-3.5 w-3.5 shrink-0 rounded-full border-[1.5px] border-border-strong bg-card transition-colors peer-checked:border-[5px] peer-checked:border-primary peer-disabled:opacity-50"
           />
           <span className="shrink-0 font-semibold text-foreground">项目维度</span>
-          <span className="shrink-0 rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700">
+          <span className="shrink-0 rounded-full bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-700">
             项目 · 跨工作区
           </span>
-          <span className="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground/70">
+          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/70">
             仅项目经理可选，需选主工作区 Anchor
           </span>
         </label>
@@ -341,16 +354,16 @@ export function TeamTriggerPopover({
         </p>
       )}
 
-      {/* 项目维度展开：项目下拉 + 工作区多选 + anchor 胶囊 */}
+      {/* 项目维度展开：项目下拉 + 工作区多选 + anchor 胶囊（原型 .tp-sub-box） */}
       {scopeMode === "project" && (
-        <div className="mt-1.5 space-y-1.5 rounded border border-border bg-muted/30 p-2">
+        <div className="mt-1.5 space-y-2 rounded-lg border border-border bg-muted/40 p-2.5">
           <label className="block">
-            <span className="text-[11px] font-medium text-muted-foreground">
+            <span className="text-[10.5px] font-semibold text-muted-foreground">
               选择项目
             </span>
             <select
               aria-label="选择项目"
-              className="mt-1 h-8 w-full rounded border border-input bg-card px-2 text-[12.5px] text-foreground"
+              className="mt-1 h-8 w-full rounded-lg border border-input bg-card px-2 text-[12.5px] text-foreground focus:border-primary focus:outline-none"
               value={projectId}
               onChange={(e) => setProjectId(e.target.value)}
             >
@@ -365,7 +378,7 @@ export function TeamTriggerPopover({
 
           {projectId && (
             <>
-              <div className="text-[11px] font-medium text-muted-foreground">
+              <div className="text-[10.5px] font-semibold text-muted-foreground">
                 派发范围（Scope）· 勾选工作区
               </div>
               {projectWorkspaces === null ? (
@@ -385,9 +398,9 @@ export function TeamTriggerPopover({
                       <li key={w.workspace_id}>
                         <label
                           className={cn(
-                            "flex cursor-pointer items-center gap-2 rounded border px-2 py-1 text-[12px]",
+                            "flex cursor-pointer items-center gap-2 rounded-lg border px-2 py-1.5 text-[12px] transition-colors",
                             checked
-                              ? "border-brand-200 bg-brand-50/60"
+                              ? "border-brand-300 bg-brand-50 ring-[3px] ring-brand-100"
                               : "border-border bg-card hover:bg-muted/50",
                           )}
                         >
@@ -396,14 +409,20 @@ export function TeamTriggerPopover({
                             aria-label={`勾选工作区 ${w.name}`}
                             checked={checked}
                             onChange={() => toggleScope(w.workspace_id)}
-                            className="h-3.5 w-3.5 shrink-0"
+                            className="peer sr-only"
                           />
+                          <span
+                            aria-hidden
+                            className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[4px] border-[1.5px] border-border-strong bg-card text-transparent transition-colors peer-checked:border-primary peer-checked:bg-primary peer-checked:text-white"
+                          >
+                            <Check className="h-2.5 w-2.5" strokeWidth={3} />
+                          </span>
                           <span className="shrink-0 font-medium text-foreground">
                             {w.name}
                           </span>
                           <span
                             title={w.type ?? undefined}
-                            className={`inline-flex h-5 shrink-0 items-center rounded border px-1.5 text-[10px] font-semibold ${badge.className}`}
+                            className={`inline-flex h-5 shrink-0 items-center rounded-full border px-1.5 text-[10px] font-semibold ${badge.className}`}
                           >
                             {badge.label}
                           </span>
@@ -434,9 +453,9 @@ export function TeamTriggerPopover({
         </div>
       )}
 
-      {/* 费用上限（原型 .pop-lb：留空 = 不限） */}
-      <label className="mt-2.5 block">
-        <span className="text-[11px] font-semibold text-muted-foreground">
+      {/* 费用上限（原型 .tp-inp：留空 = 不限） */}
+      <label className="mt-3 block">
+        <span className="text-[10.5px] font-semibold text-muted-foreground">
           费用上限（可选，美元）
         </span>
         <input
@@ -444,7 +463,7 @@ export function TeamTriggerPopover({
           aria-label="费用上限（美元，留空不限）"
           placeholder="留空 = 不限"
           inputMode="decimal"
-          className="mt-1 h-8 w-full rounded border border-input bg-background px-2 text-[12.5px] text-foreground focus:border-ring focus:outline-none"
+          className="mt-1 h-8 w-full rounded-lg border border-input bg-background px-2.5 text-[12.5px] text-foreground transition-[border-color,box-shadow] placeholder:text-muted-foreground/60 focus:border-primary focus:outline-none focus:ring-[3px] focus:ring-brand-100"
           value={budget}
           onChange={(e) => setBudget(e.target.value)}
         />
@@ -454,7 +473,7 @@ export function TeamTriggerPopover({
       <button
         type="button"
         onClick={() => setPresetOpen((v) => !v)}
-        className="mt-2.5 flex w-full items-center justify-between rounded border border-violet-200 bg-violet-50/40 px-2.5 py-1.5 text-[11.5px] font-semibold text-violet-700 hover:bg-violet-50"
+        className="mt-3 flex w-full items-center justify-between rounded-lg border border-violet-200 bg-violet-50/50 px-2.5 py-1.5 text-[11.5px] font-semibold text-violet-700 transition-colors hover:bg-violet-100/70"
         aria-expanded={presetOpen}
       >
         <span className="inline-flex items-center gap-1">
@@ -465,7 +484,7 @@ export function TeamTriggerPopover({
         <span aria-hidden>{presetOpen ? "收起 ▴" : "展开 ▾"}</span>
       </button>
       {presetOpen && (
-        <div className="mt-1.5 space-y-2 rounded border border-violet-200 bg-violet-50/40 p-2.5">
+        <div className="mt-1.5 space-y-2 rounded-lg border border-violet-200 bg-violet-50/40 p-2.5">
           {/* 主控配置（不填走默认 Claude · claude-sonnet-4-6） */}
           <div className="grid grid-cols-3 gap-1.5">
             <label className="flex flex-col gap-1">
@@ -540,7 +559,7 @@ export function TeamTriggerPopover({
           {workers.map((w, idx) => (
             <div
               key={idx}
-              className="space-y-1.5 rounded border border-border bg-card p-2"
+              className="space-y-1.5 rounded-lg border border-border bg-card p-2 shadow-sm"
             >
               <div className="flex items-center justify-between">
                 <span className="text-[10.5px] font-semibold text-muted-foreground">
@@ -552,7 +571,7 @@ export function TeamTriggerPopover({
                   onClick={() =>
                     setWorkers((prev) => prev.filter((_, i) => i !== idx))
                   }
-                  className="rounded border border-border px-1.5 py-0.5 text-[10.5px] text-red-600 hover:bg-red-50"
+                  className="rounded-md border border-border px-1.5 py-0.5 text-[10.5px] text-destructive transition-colors hover:bg-destructive/10"
                 >
                   删除
                 </button>
@@ -624,17 +643,20 @@ export function TeamTriggerPopover({
 
       {/* 错误提示 */}
       {error && (
-        <p className="mt-2 text-[11px] text-destructive" role="alert">
+        <p
+          className="mt-2.5 rounded-lg border border-destructive/30 bg-red-50 px-2.5 py-1.5 text-[11px] text-destructive"
+          role="alert"
+        >
           {error}
         </p>
       )}
 
-      {/* 底部操作（原型 .pop-foot） */}
-      <div className="mt-3 flex items-center gap-2">
+      {/* 底部操作（原型 .tp-foot：主按钮实心品牌色 + hint 右对齐可换行） */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={onClose}
-          className="h-[30px] rounded-md border border-border bg-card px-3 text-[12px] text-muted-foreground hover:bg-muted"
+          className="h-[30px] rounded-lg border border-border bg-card px-3 text-[12px] text-muted-foreground transition-colors hover:bg-muted"
         >
           取消
         </button>
@@ -642,7 +664,7 @@ export function TeamTriggerPopover({
           type="button"
           onClick={handleConfirm}
           disabled={submitting}
-          className="h-[30px] rounded-md bg-primary px-3 text-[12px] font-medium text-primary-foreground shadow-sm hover:bg-primary/90 disabled:opacity-60"
+          className="h-[30px] rounded-lg bg-primary px-3.5 text-[12px] font-medium text-primary-foreground shadow-sm transition-shadow hover:shadow-primary disabled:opacity-60"
         >
           {submitting ? "派发中…" : "就绪，随下条消息发出"}
         </button>
