@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<!--
+author: qinyi
+created_at: 2026-08-23 08:52:00
+变更: 2026-08-23-agent-file-upload-mcp
+内容: 会话聊天流文件卡片（图片内联缩略图）+ 批任务 run 详情页「产出文件」区 + 日志流文件记录行
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 · Agent 文件上传 MCP（2026-08-23-agent-file-upload-mcp）</title>
+<style>
+  :root {
+    --bg: #f5f7fa; --panel: #ffffff; --card: #ffffff; --border: #e5e9f0;
+    --text: #1d2129; --muted: #86909c; --primary: #1668dc; --primary-bg: rgba(22,104,220,.08);
+    --green: #00b42a; --red: #f53f3f; --shadow: 0 4px 16px rgba(29,33,41,.08);
+  }
+  html[data-theme="ai-native"] {
+    --bg: #101418; --panel: #171c22; --card: #1d232b; --border: #2a323c;
+    --text: #e6eaf0; --muted: #8b95a3; --primary: #5b8cff; --primary-bg: rgba(91,140,255,.12);
+    --green: #3dd68c; --red: #ff7875; --shadow: 0 4px 16px rgba(0,0,0,.4);
+  }
+  body { background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; margin: 0; padding: 20px; }
+  .layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; max-width: 1200px; margin: 0 auto; }
+  h1 { font-size: 15px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .panel-head { padding: 10px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+  .panel-head .who { color: var(--muted); font-size: 11px; }
+  .chat-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; min-height: 420px; }
+
+  .bubble { max-width: 82%; padding: 8px 12px; font-size: 13px; border-radius: 10px; }
+  .bubble.user { align-self: flex-end; background: var(--primary-bg); border: 1px solid var(--border); border-radius: 10px 10px 2px 10px; }
+  .bubble.agent { align-self: flex-start; background: var(--bg); border: 1px solid var(--border); border-radius: 10px 10px 10px 2px; }
+
+  /* ── 文件卡片（聊天流内，agent 上传产物） ─────────────────── */
+  .file-msg { align-self: flex-start; display: flex; flex-direction: column; gap: 4px; max-width: 82%; }
+  .file-msg .who { font-size: 11px; color: var(--muted); padding-left: 2px; }
+  .file-card { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; box-shadow: var(--shadow); }
+  .file-card .icon { width: 34px; height: 34px; border-radius: 8px; background: var(--primary-bg); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 16px; flex: none; }
+  .file-card .meta { flex: 1; min-width: 0; }
+  .file-card .name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-card .desc { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-card .size { font-size: 11px; color: var(--muted); }
+  .file-card .actions { display: flex; gap: 6px; flex: none; }
+  .file-card .btn { border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+  .file-card .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .file-thumb { align-self: flex-start; border: 1px solid var(--border); border-radius: 10px; padding: 4px; background: var(--card); box-shadow: var(--shadow); }
+  .file-thumb img { display: block; width: 220px; height: 140px; object-fit: cover; border-radius: 6px; background: linear-gradient(135deg,#5b8cff22,#00b42a22); }
+  .file-thumb .cap { display: flex; align-items: center; justify-content: space-between; padding: 6px 6px 2px; font-size: 12px; }
+  .file-thumb .cap .sz { color: var(--muted); font-size: 11px; }
+  .file-thumb .cap a { color: var(--primary); text-decoration: none; cursor: pointer; }
+  .tool-row { align-self: flex-start; font-size: 12px; color: var(--muted); background: var(--bg); border: 1px dashed var(--border); border-radius: 8px; padding: 4px 10px; }
+  .tool-row b { color: var(--text); font-weight: 600; }
+
+  /* ── run 详情：产出文件区 ─────────────────── */
+  .run-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; min-height: 420px; }
+  .section-title { font-size: 12.5px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+  .section-title .cnt { color: var(--muted); font-weight: 400; font-size: 11px; }
+  .file-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .log-line { font-family: Consolas, monospace; font-size: 11.5px; color: var(--muted); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; display: flex; gap: 8px; align-items: center; }
+  .log-line .tag { color: var(--primary); background: var(--primary-bg); border-radius: 4px; padding: 0 6px; font-size: 10.5px; flex: none; }
+  .log-line a { color: var(--primary); text-decoration: none; }
+  .note { position: fixed; right: 16px; bottom: 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 11px; color: var(--muted); max-width: 340px; z-index: 9; box-shadow: var(--shadow); }
+  .theme-toggle { border: 1px solid var(--border); background: var(--bg); color: var(--text); border-radius: 999px; padding: 3px 12px; font-size: 12px; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Agent 文件上传 MCP — 交互原型</h1>
+<div class="sub">左：会话聊天流（文件卡片 + 图片内联缩略图）｜右：批任务 run 详情页（产出文件区 + 日志流文件记录）<button class="theme-toggle" onclick="var h=document.documentElement;h.dataset.theme=h.dataset.theme==='ai-native'?'':'ai-native';this.textContent=h.dataset.theme==='ai-native'?'☀ 浅色':'🌙 AI-Native'">🌙 AI-Native</button></div>
+
+<div class="layout">
+  <!-- 左：会话聊天 -->
+  <div class="panel">
+    <div class="panel-head"><span>💬 会话 · 会话门户 / 团队工作区</span><span class="who">claude · 主 agent</span></div>
+    <div class="chat-body">
+      <div class="bubble user">帮我把本季度的 bug 趋势整理成图表给我</div>
+      <div class="tool-row">🛠 <b>upload_file</b>(path="reports/q3-bug-trend.png", description="三季度 Bug 趋势图")</div>
+
+      <!-- 图片：内联缩略图卡片 -->
+      <div class="file-msg">
+        <div class="who">agent 上传了文件</div>
+        <div class="file-thumb">
+          <img src="data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='140'%3E%3Crect width='220' height='140' fill='%23eef3ff'/%3E%3Cpolyline points='10,110 60,80 110,95 160,50 210,30' fill='none' stroke='%231668dc' stroke-width='3'/%3E%3Ccircle cx='60' cy='80' r='4' fill='%2300b42a'/%3E%3Ccircle cx='110' cy='95' r='4' fill='%2300b42a'/%3E%3Ccircle cx='160' cy='50' r='4' fill='%23f53f3f'/%3E%3Ctext x='12' y='24' font-size='11' fill='%2386909c'%3EQ3 Bug 趋势%3C/text%3E%3C/svg%3E" alt="q3-bug-trend.png">
+          <div class="cap"><span>q3-bug-trend.png <span class="sz">182 KB</span></span><a>下载 ⭳</a></div>
+        </div>
+      </div>
+
+      <div class="bubble agent">图表已生成并上传 ✓ 数据显示 8 月 Bug 数明显下降，主要归因于 2026-08-05-daemon-kill-channel-unify 变更。完整数据我也整理成了 CSV：</div>
+      <div class="tool-row">🛠 <b>upload_file</b>(path="reports/q3-bug-data.csv", description="三季度 Bug 明细数据")</div>
+
+      <!-- 普通文件：文件卡片 -->
+      <div class="file-msg">
+        <div class="who">agent 上传了文件</div>
+        <div class="file-card">
+          <div class="icon">📊</div>
+          <div class="meta">
+            <div class="name">q3-bug-data.csv</div>
+            <div class="desc">三季度 Bug 明细数据</div>
+          </div>
+          <div class="size">46 KB</div>
+          <div class="actions"><button class="btn primary">下载 ⭳</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右：run 详情 -->
+  <div class="panel">
+    <div class="panel-head"><span>📦 Worker Run 详情 · run-8f3a21c</span><span class="who">mission_worker · 已完成</span></div>
+    <div class="run-body">
+      <div class="section-title">📁 产出文件 <span class="cnt">2 个 · 点击下载</span></div>
+      <div class="file-grid">
+        <div class="file-card">
+          <div class="icon">📄</div>
+          <div class="meta"><div class="name">scan-report.md</div><div class="desc">worker 产出的代码扫描报告</div></div>
+          <div class="size">23 KB</div>
+          <div class="actions"><button class="btn primary">下载 ⭳</button></div>
+        </div>
+        <div class="file-card">
+          <div class="icon">🖼</div>
+          <div class="meta"><div class="name">dep-graph.png</div><div class="desc">模块依赖关系图</div></div>
+          <div class="size">310 KB</div>
+          <div class="actions"><button class="btn primary">下载 ⭳</button></div>
+        </div>
+      </div>
+      <div class="section-title">📜 运行日志流 <span class="cnt">文件上传也会出现在这里</span></div>
+      <div class="log-line"><span class="tag">FILE</span> upload_file → scan-report.md（23 KB）<a>下载</a></div>
+      <div class="log-line"><span class="tag">TOOL</span> Bash(grep -rn "mcp" src/) → 14 行结果</div>
+      <div class="log-line"><span class="tag">FILE</span> upload_file → dep-graph.png（310 KB）<a>下载</a></div>
+      <div class="log-line"><span class="tag">TEXT</span> 扫描完成，共识别 3 个 MCP 相关模块…</div>
+    </div>
+  </div>
+</div>
+
+<div class="note">原型说明：文件卡片/缩略图数据来自后端文件中心（file id + JWT blob 拉取）；聊天流卡片由「文件上传日志段」驱动渲染；run 详情产出文件区按 run 归属查询。上传由 agent 调用 sillyhub-file MCP 的 upload_file 工具完成。</div>
+</body>
+</html>
