@@ -85,7 +85,9 @@ import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sd
 // 注入（不走 --mcp-config 文件），故此处只用 buildDaemonMcpServerConfig + merge。
 import {
   buildDaemonMcpServerConfig,
+  buildFileMcpServerConfig,
   DAEMON_MCP_SERVER_NAME,
+  FILE_MCP_SERVER_NAME,
   mergeMcpConfigs,
 } from './mcp-config.js';
 import type { McpServerConfigForDriver } from './interactive/driver.js';
@@ -714,9 +716,10 @@ export async function startAction(opts: StartOptions): Promise<number> {
       // 用 buildDaemonMcpServerConfig 构造 daemon 内置 MCP server（command=node +
       // args=[dist/mcp-server.js] + env={MCP_SERVER_BACKEND_URL, MCP_SERVER_DAEMON_TOKEN}），
       // 经 mergeMcpConfigs 与空 platform_default 合并（白名单自动加入 DAEMON_MCP_SERVER_NAME，
-      // 见 mcp-config.ts:188）。返回 ``{ [DAEMON_MCP_SERVER_NAME]: config }`` 单 server 表，
+      // 见 mcp-config.ts:188）。返回双 server 表（sillyhub-daemon 编排 5 tool +
+      // task-06 sillyhub-file 上传 2 tool），
       // SessionManager 透传到 driverOpts.mcpServers → ClaudeSdkDriver.start 写入
-      // SDK options.mcpServers → 主 agent discover 5 tool。
+      // SDK options.mcpServers → 主 agent discover 全部 MCP tool。
       //
       // **token 来源（task-09 P0 闭合）**：task-06 用 daemon apiKey（config.api_key
       // 优先，回落 config.token）但旧实现经 MCP_SERVER_DAEMON_TOKEN 单 env 把 apiKey
@@ -744,10 +747,23 @@ export async function startAction(opts: StartOptions): Promise<number> {
           undefined,
           mcpApiKey || undefined,
         );
-        // mergeMcpConfigs：空 platform_default + daemon server。daemon server 作为
-        // configs[0]（platform 位）自动入白名单（mcp-config.ts:188），无需额外配白名单。
+        // task-06（2026-08-23-agent-file-upload-mcp / FR-02 / D-002@v1）：并列构造
+        // sillyhub-file server（upload_file / list_uploaded_files，mcp-server file 模式）。
+        // allowedRoot=ctx.cwd（会话场景工作目录，design §7.1：会话=cwd）；sessionId 不在
+        // 此拼——session-manager _resolveMainAgentMcp 在 provider 返回后按 ctx.sessionId
+        // 统一补写（浅拷贝语义，不污染本闭包持有的配置）。
+        const fileServer = buildFileMcpServerConfig(
+          config.server_url,
+          { token: mcpToken, apiKey: mcpApiKey || undefined },
+          { allowedRoot: ctx.cwd },
+        );
+        // mergeMcpConfigs：空 platform_default + daemon/file 两个内置 server。二者都
+        // 在 configs[0]（platform 位）自动入白名单（mcp-config.ts:188），无需额外配白名单。
         const merged = mergeMcpConfigs([], {
-          mcpServers: { [DAEMON_MCP_SERVER_NAME]: daemonServer },
+          mcpServers: {
+            [DAEMON_MCP_SERVER_NAME]: daemonServer,
+            [FILE_MCP_SERVER_NAME]: fileServer,
+          },
         });
         // 转为 driver 契约类型（McpServerConfig → McpServerConfigForDriver，结构兼容）。
         const result: Record<string, McpServerConfigForDriver> = {};
@@ -761,8 +777,7 @@ export async function startAction(opts: StartOptions): Promise<number> {
         // provider/model 透传：ctx.model 含主 agent configured model（来自
         // CreateSessionInput.model），driver 已在 _buildDriverOptions 单独透传 model
         // 到 SDK options.model，此处 MCP 配置不需重复（MCP server 不读 model）。
-        // ctx 仅作日志/未来扩展用（如 codex 主 agent 需不同 server 配置）。
-        void ctx;
+        // ctx 现读 cwd（sillyhub-file allowedRoot，task-06）；其余字段留未来扩展。
         return Object.keys(result).length > 0 ? result : undefined;
       },
       // task-08（FR-05 / D-004@v1）：reloadWithProvider 构造新 env 的本机凭证管理器。

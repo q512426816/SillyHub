@@ -14,6 +14,7 @@
 // 立即返回，捕获 options.sessionManager 与 deps 回调。
 
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest';
+import { resolve } from 'node:path';
 import { makeTmpDir, cleanupDir } from './helpers.js';
 
 // ── 捕获桩：vi.mock 在 import 前注册（hoist）─────────────────────────────────
@@ -403,5 +404,91 @@ describe('task-09 isMainAgentSession 谓词真值表（claude 常驻注入 + mis
       const predicate = await getPredicate();
       expect(predicate(makeCtx('codex', stage as string | undefined))).toBe(false);
     });
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// task-06（2026-08-23-agent-file-upload-mcp / FR-02 / D-002@v1）：cli.ts
+// mainAgentMcpConfigProvider 并入 sillyhub-file——与 sillyhub-daemon 并列放进
+// mergeMcpConfigs 的 platform 位（平台内置名自动入白名单）。
+//
+// provider 内容断言（MCP_SESSION_ID 不在 provider 拼——session-manager 在 provider
+// 返回后按 ctx.sessionId 补写，见 session-manager-main-agent-mcp.test.ts）：
+//   - 双 server 表：sillyhub-daemon（编排 5 tool）+ sillyhub-file（上传 2 tool）
+//   - sillyhub-file env：MCP_TOOLSET=file、凭证、MCP_ALLOWED_ROOT=resolve(ctx.cwd)
+//   - 两个 server 均在 platform 位（mergeMcpConfigs 自动入白名单，无 rejected）
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('task-06: mainAgentMcpConfigProvider 并入 sillyhub-file（双 server 表）', () => {
+  let tmpDir = '';
+  let _origArgv: string[];
+  let _origExit: typeof process.exit;
+
+  beforeEach(async () => {
+    tmpDir = await makeTmpDir('cli-injection-file-mcp');
+    resetCaptured();
+    _origArgv = process.argv;
+    _origExit = process.exit;
+    process.argv = ['node', 'sillyhub-daemon'];
+    process.exit = ((code?: number) => {
+      void code;
+      return undefined as never;
+    }) as never;
+  });
+
+  afterEach(async () => {
+    process.argv = _origArgv;
+    process.exit = _origExit;
+    vi.restoreAllMocks();
+    if (tmpDir) {
+      await cleanupDir(tmpDir);
+    }
+  });
+
+  /** startAction 后取捕获的 provider（config mock：token='test-token'，api_key=null）。 */
+  async function getProvider(): Promise<
+    (ctx: { sessionId: string; leaseId: string; provider: string; cwd: string }) =>
+      | Record<string, { command: string; args?: string[]; env?: Record<string, string> }>
+      | undefined
+  > {
+    await cli.startAction({ token: 'test-token' });
+    const opts = captured.sessionManagerInstances[0]!.opts;
+    expect(opts).toBeDefined();
+    const provider = opts!.mainAgentMcpConfigProvider;
+    expect(typeof provider).toBe('function');
+    return provider as ReturnType<typeof getProvider>;
+  }
+
+  it('返回双 server 表：sillyhub-daemon + sillyhub-file 并列', async () => {
+    const provider = await getProvider();
+    const result = provider({ sessionId: 'sess-1', leaseId: 'lease-1', provider: 'claude', cwd: '/tmp/ws' });
+    expect(result).toBeDefined();
+    expect(Object.keys(result!).sort()).toEqual(['sillyhub-daemon', 'sillyhub-file']);
+    // 两个条目均为 node <mcp-server.js> stdio 形态
+    expect(result!['sillyhub-daemon']!.command).toBe('node');
+    expect(result!['sillyhub-file']!.command).toBe('node');
+    expect(result!['sillyhub-daemon']!.args?.[0]).toMatch(/mcp-server\.js$/);
+    expect(result!['sillyhub-file']!.args?.[0]).toMatch(/mcp-server\.js$/);
+  });
+
+  it('sillyhub-file env 含 MCP_TOOLSET=file、凭证与 MCP_ALLOWED_ROOT=resolve(ctx.cwd)', async () => {
+    const provider = await getProvider();
+    const result = provider({ sessionId: 'sess-1', leaseId: 'lease-1', provider: 'claude', cwd: '/tmp/ws' });
+    const fileEnv = result!['sillyhub-file']!.env!;
+    expect(fileEnv.MCP_TOOLSET).toBe('file');
+    expect(fileEnv.MCP_SERVER_BACKEND_URL).toBe('http://127.0.0.1:8000');
+    // config mock：token='test-token'、api_key=null → Bearer token 回落路径
+    expect(fileEnv.MCP_SERVER_DAEMON_TOKEN).toBe('test-token');
+    expect(fileEnv.MCP_SERVER_DAEMON_API_KEY).toBeUndefined();
+    // allowedRoot = 会话 cwd（design §7.1：会话场景=cwd），resolve 为绝对路径
+    expect(fileEnv.MCP_ALLOWED_ROOT).toBe(resolve('/tmp/ws'));
+  });
+
+  it("provider 不拼 MCP_SESSION_ID（session-manager 在 provider 返回后补写）", async () => {
+    const provider = await getProvider();
+    const result = provider({ sessionId: 'sess-1', leaseId: 'lease-1', provider: 'claude', cwd: '/tmp/ws' });
+    // provider 闭包不拼会话 id——task-06 契约：session-manager 按 ctx.sessionId 补写双条目
+    expect(result!['sillyhub-daemon']!.env?.MCP_SESSION_ID).toBeUndefined();
+    expect(result!['sillyhub-file']!.env?.MCP_SESSION_ID).toBeUndefined();
   });
 });

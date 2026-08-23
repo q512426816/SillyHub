@@ -54,7 +54,13 @@ import {
 } from '../policy/shell-paths.js';
 // task-10（C-12 / D-017）：主 agent MCP 注入按 profile.mcpRefs 子集过滤（mergeMcpConfigs
 // 第三层）。McpConfig 用于把 driver 契约的 MCP 配置表转成 mergeMcpConfigs 入参形态。
-import { injectMcpSessionId, mergeMcpConfigs, type McpConfig } from '../mcp-config.js';
+import {
+  DAEMON_MCP_SERVER_NAME,
+  FILE_MCP_SERVER_NAME,
+  injectMcpSessionId,
+  mergeMcpConfigs,
+  type McpConfig,
+} from '../mcp-config.js';
 import type {
   CreateSessionInput,
   InjectResult,
@@ -1059,14 +1065,20 @@ export class SessionManager {
     // 写进 mcpServers['sillyhub-daemon'].env（MCP_SESSION_ID）；cli.ts provider
     // （task-09 定型，不在本任务 allowed_paths）不传 sessionId，故在 provider 返回后
     // 按 ctx.sessionId 补写。create / restore / reload 三路共用本方法——每次 spawn
-    // 都重新解析，session id 变化即 env 变化（spike-01 执行指令 1）。仅补 daemon
-    // 内置 server 条目，其它 MCP server 不注入（env 卫生）。
-    const withSessionId = injectMcpSessionId(config, ctx.sessionId);
+    // 都重新解析，session id 变化即 env 变化（spike-01 执行指令 1）。
+    // task-06（2026-08-23-agent-file-upload-mcp / FR-02）：sillyhub-file server 读
+    // 同名 MCP_SESSION_ID env 定位会话（design §6），与 sillyhub-daemon 同管道补写
+    // ——调用两次 injectMcpSessionId（serverName 参数已可选，不改其签名），仍仅补
+    // 两个 daemon 内置 server 条目，其它 MCP server 不注入（env 卫生）。
+    const withDaemonSessionId = injectMcpSessionId(config, ctx.sessionId, DAEMON_MCP_SERVER_NAME);
+    const withSessionId = injectMcpSessionId(withDaemonSessionId, ctx.sessionId, FILE_MCP_SERVER_NAME);
     // task-10（C-12 / FR-10 / D-017）：profile.mcpRefs 子集过滤。
     // 非空 mcpRefs 时对 provider 返回的 MCP 配置表按此 ∩ 过滤（mergeMcpConfigs 第三层，
     // 与 batch task-runner 同源逻辑）。cli.ts mainAgentMcpConfigProvider 产出的配置表
-    // 已含 daemon 内置 MCP server（sillyhub-daemon）；若 profile.mcpRefs 未列入该 server，
-    // 它会被剔除——这是 profile 收紧语义的正确表现（profile 只允许它声明的子集）。
+    // 已含 daemon 内置 MCP server（sillyhub-daemon / sillyhub-file，task-06）；若
+    // profile.mcpRefs 未列入某 server，它会被剔除——这是 profile 收紧语义的正确表现
+    // （profile 只允许它声明的子集）。task-06：sillyhub-file 与 sillyhub-daemon 同语义
+    // 受过滤、不单独豁免（design §9；需要常驻的 profile 显式列名即可）。
     // 空数组/undefined → 不过滤（FR-15 行为同今天，provider 原样返回）。
     const mcpRefs = ctx.mcpRefs;
     if (!mcpRefs || mcpRefs.length === 0) return withSessionId;
