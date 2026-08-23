@@ -255,3 +255,13 @@
 方案：ConfigBar provisional 暂存模式（供应商/档案选了暂存随首句 createSession 携带）+ TeamTriggerRow 置灰 + CtxUsageBar 联动
 结果：31/31+全量 1958/1958+tsc 零+lint 持平；文档同步；待部署
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/2026-08-23-register-repo-crlf-parse-mismatch.md
+
+## ql-20260823-009-820d | 2026-08-23 15:16:16 | 修复 test_execution dispatch 断言过时预存红测试
+状态：已完成
+关联变更：（无）
+文件：
+- backend/tests/modules/agent/test_execution.py（stage 断言同步 mission_worker+role 路径注释）
+需求：修复 test_execution dispatch 断言过时预存红测试
+根因：产品 f4665fa0（2026-08-22）把 worker lease stage 从 run.role 改为固定常量 mission_worker、role 移 lease metadata.role，测试断言未同步成唯一预存红测试
+方案：断言 stage=='mission_worker' 并注释说明 role 走 _apply_worker_role_to_lease 写 lease metadata（placement mock 无真实 lease 行，role 路径集成层验证）
+结果：tests/modules/agent/test_execution.py 6 passed、ruff 过，已单独提交；backend 全量回归零已知失败
