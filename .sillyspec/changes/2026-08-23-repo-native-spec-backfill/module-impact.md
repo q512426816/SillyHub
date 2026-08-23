@@ -28,5 +28,5 @@ created_at: 2026-08-23 22:10:00
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `modules/agent.md` | 更新 agent 模块卡（build_scan_bundle strategy 三分支门禁，repo-native 本地模板） | pending |
-| `docs/sillyspec/`（主仓工具缺陷记录） | 2026-08-23 回灌断链坑从活跃迁 finished（修复落地后） | pending |
+| `modules/agent.md` | 更新 agent 模块卡（build_scan_bundle strategy 三分支门禁，repo-native 本地模板） | done（辅助组件段，2026-08-23） |
+| `docs/sillyspec/`（主仓工具缺陷记录） | 2026-08-23 回灌断链坑从活跃迁 finished（修复落地后） | done（finished/坑8-repo-native平台指针锁死CLI上行断链.md） |

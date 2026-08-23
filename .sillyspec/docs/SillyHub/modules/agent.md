@@ -19,6 +19,7 @@ created_at: 2026-08-18 01:45:00
   - run 创建 / 详情 / 列表、kill、input（提交用户输入）、logs 与 SSE stream、任务维度 run 列表。
   - 幂等续跑与审批：resume / approve / checkpoint（存/读）。
   - `/agent-sessions` 工作区活跃会话列表；`/dialogs` 待处理权限对话框；missions 列表与 cancel；`GET /agent-runs/{id}/execution-context`。
+  - 文件制品 `POST/GET /agent/file-artifacts`（file_artifacts.py，daemon sillyhub-file MCP 直传 + 前端产出文件区共用）。授权（ql-20260823-013 会话归属人制）：会话场景（X-Session-Id）上传者==`AgentSession.user_id` 即放行——无工作区的 runtime 会话同样可传可列；非归属人回退按会话 workspace 锚复核（POST=WORKSPACE_WRITE / GET=WORKSPACE_READ）。worker 场景（run_id）仍按 `target_workspace_id ?? mission ?? task` 锚链复核，锚 NULL 兜底 deny。
 - **AgentService**：
   - `start_run`（独立任务/quick-chat）；无在线 daemon 抛 NoOnlineDaemonError 并标记 run。
   - `start_stage_dispatch`（阶段派发，需写盘时 `_try_acquire_lease` 申请 worktree lease）。
@@ -33,7 +34,7 @@ created_at: 2026-08-18 01:45:00
   - ExecutionCoordinatorService：幂等 key、AgentSpecBundle 指纹（compute/validate）、resume token、checkpoint 存读、审批请求/通过。
   - MissionService + MissionControlService：mission 生命周期（多 worker）、`derive_status` 聚合 worker 状态、`can_dispatch_worker` 并发/成本预算校验、cancel。
   - MissionExecutionService：单 worker `dispatch_worker`（含 read_only 工具配置）、产物收集（collect_artifact / collect_completed_artifacts）。
-- **辅助组件**：placement（选在线 daemon）、borrow_resolver/context_builder（借用工作区解析与上下文组装）、post_scan_validator（扫描后校验）、delegation（GLM 委派路由）、orchestrator、diff_collector/finalizer（execute 收口合并与清理）、skills_bundle_service（技能 bundle + `read_skill_md` 白名单固定读 SKILL.md 防穿越）、mcp_tools、tool_kind。
+- **辅助组件**：placement（选在线 daemon）、borrow_resolver/context_builder（借用工作区解析与上下文组装；`build_scan_bundle` 按 SpecWorkspace.strategy 三分支生成 scan 指令——platform-managed（含读取失败回退）/repo-mirrored 走平台参数模板，repo-native 走本地模板（`sillyspec run scan --dir <root>` 零平台参数、无 init，产物落源码 `.sillyspec/` 经 CLI 内置 sync 上行），与 stage 派发的 platform-managed 门禁共同消除 scan/stage 注入不对称（2026-08-23-repo-native-spec-backfill））、post_scan_validator（扫描后校验）、delegation（GLM 委派路由）、orchestrator、diff_collector/finalizer（execute 收口合并与清理）、skills_bundle_service（技能 bundle + `read_skill_md` 白名单固定读 SKILL.md 防穿越）、mcp_tools、tool_kind。
 
 ## 关键逻辑
 ```

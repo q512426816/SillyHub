@@ -8,7 +8,8 @@ priority: P0
 depends_on: []
 blocks: [task-03, task-04]
 repo: sillyspec
-base_commit: 84db32696fbf415a1fa53e486921c00a1ac687af
+base_commit: 2c35ab240cf1489b1cffde9a47eb34f4971c358c
+head_commit: 2c35ab240cf1489b1cffde9a47eb34f4971c358c
 repo_root: /Users/qinyi/Desktop/sillyspec
 requirement_ids: [FR-3, FR-5]
 decision_ids: [D-001, D-002]
