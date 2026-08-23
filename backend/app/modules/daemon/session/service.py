@@ -131,6 +131,62 @@ async def _resolve_daemon_id_for_runtime(
     return runtime.daemon_instance_id
 
 
+async def _send_session_end_best_effort(
+    db_session: AsyncSession,
+    *,
+    session_id: uuid.UUID,
+    lease_id: uuid.UUID | None,
+    runtime_id: uuid.UUID | None,
+    reason: str,
+) -> bool:
+    """ql-20260823-006：后端把会话翻终态（ended/failed）的路径补发 SESSION_END。
+
+    背景（2026-08-23 会话 bdec91a4 事故）：close_interactive_run 等路径只翻 DB
+    终态，daemon 内存 SessionStore 里的活会话无人通知 → 残留条目让后续 reopen
+    全部撞 SESSION_ALREADY_EXISTS 死循环。本 helper 把 end_session 的 SESSION_END
+    收口点推广到 run 终态自动翻终态的路径。best-effort：runtime/lease 缺失、
+    daemon 不在线、WS 发送失败、任何异常均仅记日志返 False，不影响已 commit
+    的终态（与 end_session 内联版同语义）。
+
+    Returns:
+        True 表示 WS 发送成功；False 表示跳过或失败（均已记日志）。
+    """
+    if lease_id is None or runtime_id is None:
+        return False
+    try:
+        from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+        hub = get_daemon_ws_hub()
+        daemon_id = await _resolve_daemon_id_for_runtime(db_session, runtime_id)
+        if daemon_id is None:
+            return False
+        ok = await hub.send_session_control(
+            daemon_id,
+            DAEMON_MSG_SESSION_END,
+            {
+                "session_id": str(session_id),
+                "lease_id": str(lease_id),
+                "runtime_id": str(runtime_id),
+            },
+        )
+        if not ok:
+            log.warning(
+                "session_end_control_send_failed",
+                session_id=str(session_id),
+                runtime_id=str(runtime_id),
+                reason=reason,
+            )
+        return ok
+    except Exception:
+        log.warning(
+            "session_end_control_send_failed",
+            session_id=str(session_id),
+            runtime_id=str(runtime_id),
+            reason=reason,
+        )
+        return False
+
+
 async def _merge_lease_metadata(
     db_session: AsyncSession,
     lease_id: uuid.UUID,

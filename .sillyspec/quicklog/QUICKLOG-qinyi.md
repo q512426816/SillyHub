@@ -218,7 +218,17 @@
 方案：① 按钮改跳 /sessions?new=1；② SessionsPortal 挂载解析 ?new=1（?session= 深链优先），机器数据就绪后 resolveDefaultMachineId（D-005 三级回退）解析默认机器，取其在线 claude/codex runtime（默认 Claude 与浮层一致）直接 enterPreSession 进预会话态，未命中自动弹两步浮层兜底；③ handlePickerPick 主体提取 enterPreSession 两入口共用，X-13 双传语义不变
 结果：门户新增 4 用例全绿（直达/浮层兜底/深链优先/workspace 绑定），projects 页断言更新 2/2，sessions 域 6 文件 114 用例全绿，tsc --noEmit 与 next lint 干净
 
-## ql-20260823-006-80c8 | 2026-08-23 13:10:33 | (quick 任务)
-状态：进行中
+## ql-20260823-006-80c8 | 2026-08-23 13:10:33 | 修僵尸会话 reopen 死循环（SESSION_ALREADY_EXISTS）双源头
+状态：已完成
 关联变更：（无）
-文件：sillyhub-daemon/src/interactive/session-manager.ts, sillyhub-daemon/src/interactive/session-manager.test.ts, backend/app/modules/daemon/session/service.py, backend/app/modules/daemon/tests/test_session_reopen.py
+文件：
+- sillyhub-daemon/src/interactive/session-manager.ts（restoreAndReconnect 残留驱逐 + _terminateSession notifyBackend 开关）
+- sillyhub-daemon/src/daemon.ts（路由边界注释同步）
+- backend/app/modules/daemon/session/service.py（_send_session_end_best_effort helper）
+- backend/app/modules/daemon/run_sync/service.py（close_interactive_run 翻终态后补发）
+- sillyhub-daemon/tests/interactive/session-recovery.test.ts（+2 驱逐用例）
+- backend/app/modules/daemon/tests/test_close_interactive_run_session_status.py（+2 SESSION_END 用例）
+需求：修僵尸会话 reopen 死循环（SESSION_ALREADY_EXISTS）双源头
+根因：daemon restoreAndReconnect 对 _store 残留条目直接抛错（end() 不删条目 + backend 翻终态不通知 daemon 都会残留）；后端 close_interactive_run 翻会话 ended/failed 只写 DB 不发 SESSION_END，daemon 内存副本无人清理成僵尸工厂
+方案：daemon 侧遇残留先静默驱逐再恢复（_terminateSession 加 notifyBackend:false 防与 reconnecting→active 竞态）；后端翻终态后 commit 补发 SESSION_END（新 helper _send_session_end_best_effort，多轮 active 不发防误杀）
+结果：daemon 全量 2534 过（+2 驱逐用例）、backend daemon 模块 878 过（+2 SESSION_END 用例）、ruff/mypy/tsc 全绿；已重建并重启本机 daemon + Docker 后端容器；bdec91a4 两次 reopen 达 active（含人工翻 failed 复现僵尸现场后成功恢复），用户进行中会话不受影响

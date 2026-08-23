@@ -281,3 +281,92 @@ async def test_session_already_ended_not_overwritten(
     )
     expected = ended_at.replace(tzinfo=None)
     assert stored == expected
+
+
+# ── ql-20260823-006：run 终态翻会话终态 → 补发 SESSION_END 清理 daemon 内存 ──
+
+
+@pytest.mark.asyncio
+async def test_single_turn_terminal_flip_sends_session_end(
+    db_session: AsyncSession, mocked_redis, monkeypatch
+) -> None:
+    """单轮任务 run completed → session ended 的同时 best-effort 发 SESSION_END。
+
+    僵尸会话事故根因：close_interactive_run 只翻 DB 终态，daemon 内存 SessionStore
+    副本无人通知，后续 reopen 全撞 SESSION_ALREADY_EXISTS（2026-08-23 bdec91a4）。
+    """
+    from app.modules.daemon import ws_hub
+    from app.modules.daemon.protocol import DAEMON_MSG_SESSION_END
+
+    sent: list[tuple[object, str, dict]] = []
+
+    async def fake_send(daemon_id, msg_type, payload):
+        sent.append((daemon_id, msg_type, payload))
+        return True
+
+    hub = ws_hub.get_daemon_ws_hub()
+    monkeypatch.setattr(hub, "send_session_control", fake_send)
+
+    change_id = uuid.uuid4()
+    lease_id, run_id, token, session_id = await _seed_session_and_run(
+        db_session,
+        spec_strategy="interactive",
+        change_id=change_id,
+    )
+    svc = DaemonService(db_session)
+    await svc.close_interactive_run(
+        lease_id,
+        run_id,
+        token,
+        status="success",
+        is_error=False,
+        subtype="success",
+    )
+
+    assert len(sent) == 1
+    _daemon_id, msg_type, payload = sent[0]
+    assert msg_type == DAEMON_MSG_SESSION_END
+    assert payload["session_id"] == str(session_id)
+    assert payload["lease_id"] == str(lease_id)
+    # runtime_id 透传（daemon 侧 provider 分流键）
+    assert payload["runtime_id"]
+
+
+@pytest.mark.asyncio
+async def test_multi_turn_active_flip_sends_no_session_end(
+    db_session: AsyncSession, mocked_redis, monkeypatch
+) -> None:
+    """多轮对话 run completed → session 保持 active，不触发 SESSION_END。
+
+    active 会话的 daemon 内存副本就是本体，误发 SESSION_END 会把活会话杀掉。
+    """
+    from app.modules.daemon import ws_hub
+
+    sent: list[tuple[object, str, dict]] = []
+
+    async def fake_send(daemon_id, msg_type, payload):
+        sent.append((daemon_id, msg_type, payload))
+        return True
+
+    hub = ws_hub.get_daemon_ws_hub()
+    monkeypatch.setattr(hub, "send_session_control", fake_send)
+
+    lease_id, run_id, token, session_id = await _seed_session_and_run(
+        db_session,
+        spec_strategy="interactive",
+        change_id=None,  # 多轮对话
+    )
+    svc = DaemonService(db_session)
+    await svc.close_interactive_run(
+        lease_id,
+        run_id,
+        token,
+        status="success",
+        is_error=False,
+        subtype="success",
+    )
+
+    refreshed = await db_session.get(AgentSession, session_id, populate_existing=True)
+    assert refreshed is not None
+    assert refreshed.status == "active"
+    assert sent == []

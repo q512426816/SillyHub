@@ -2370,6 +2370,7 @@ export class SessionManager {
   private async _terminateSession(
     state: SessionState,
     reason: 'manual' | 'driver_error',
+    opts: { notifyBackend?: boolean } = {},
   ): Promise<void> {
     const isManual = reason === 'manual';
 
@@ -2415,7 +2416,12 @@ export class SessionManager {
     }
 
     // 7. 通知 backend 终态（原 end→'ended' / fail→'failed'）。
-    await this.deps.onSessionEnd(state.sessionId, isManual ? 'ended' : 'failed');
+    //    ql-20260823-006：notifyBackend=false 供 restoreAndReconnect 驱逐内存
+    //    残留条目用——backend 正推进 reconnecting→active，回发终态会与之竞态
+    //    把刚要恢复的会话误翻 failed。
+    if (opts.notifyBackend !== false) {
+      await this.deps.onSessionEnd(state.sessionId, isManual ? 'ended' : 'failed');
+    }
 
     // 8. task-10：终态从落盘集合移除后 flush（不复活 ended/failed session）。
     this._scheduleFlush();
@@ -2520,6 +2526,9 @@ export class SessionManager {
    * 在固定 cwd 重启 driver，重建跨进程上下文。
    *
    * 流程：
+   *   0. ql-20260823-006：store 已有同 id 残留条目（backend 未通知 SESSION_END
+   *      的活僵尸 / end() 留下的终态条目）→ 先静默驱逐（_terminateSession 全套
+   *      清理，notifyBackend=false），不再抛 SessionAlreadyExistsError。
    *   1. 构造 fresh InputQueue（新对象，不恢复旧队列）。
    *   2. state = { reconnecting, currentRunId=undefined, agentSessionId=record.agentSessionId,
    *      cwd=record.cwd } 写入 _store。
@@ -2543,8 +2552,17 @@ export class SessionManager {
     // task-02（D-001/FR-06）：按 provider 取 driver（未注册 → UnsupportedProviderError）。
     // 删除原 `if (record.provider !== 'claude') throw` 硬编码，codex 不再被拦截。
     const driver = this._getDriver(record.provider);
-    if (this._store.has(record.sessionId)) {
-      throw new SessionAlreadyExistsError(record.sessionId);
+    // ql-20260823-006：内存残留条目不再拒绝恢复。旧行为（_store.has() 即抛
+    // SessionAlreadyExistsError）让两类残留把 reopen 打成死循环：① backend 翻
+    // 终态但未通知 SESSION_END 的活僵尸（2026-08-23 会话 bdec91a4 事故，4 次
+    // reopen 全撞死）；② end()/fail() 收口留下的终态条目（_terminateSession 不
+    // 删 store）。backend 下发 SESSION_RESUME 本身就断言 daemon 侧副本已死，
+    // 这里先静默驱逐（terminate 清理链全套但不回发 onSessionEnd——backend 正
+    // 推进 reconnecting→active，回发终态会与之竞态误翻 failed），再走正常恢复。
+    const stale = this._store.get(record.sessionId);
+    if (stale) {
+      await this._terminateSession(stale, 'driver_error', { notifyBackend: false });
+      this._store.delete(record.sessionId);
     }
 
     // task-02（D-009）：恢复路径同样用 provider-neutral UserTurnInput 队列。

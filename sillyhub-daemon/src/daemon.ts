@@ -3020,8 +3020,9 @@ export class Daemon {
    *
    * 边界（task-08.md AC-05 + task-06 DS-3）：
    *   - payload 缺 session_id / agent_session_id → warn 丢弃，不 resume；
-   *   - restoreAndReconnect 抛错（provider 不支持 / SessionAlreadyExistsError
-   *     在 session-manager 内部 try 前直接 throw / driver.start 失败）或
+   *   - restoreAndReconnect 抛错（provider 不支持 / driver.start 失败；内存残留
+   *     同 id 条目自 ql-20260823-006 起在 session-manager 内先静默驱逐再恢复，
+   *     不再抛 SessionAlreadyExistsError）或
    *     markReconnected 抛错 → 本方法内 catch 收敛（记 error + best-effort 调
    *     markRecoveryFailed 让 backend 立即置 failed），不再向上抛（与
    *     _routeProviderConfigChanged catch 收敛风格一致）；

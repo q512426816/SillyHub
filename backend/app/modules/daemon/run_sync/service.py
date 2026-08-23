@@ -34,6 +34,7 @@ from app.modules.daemon.model_error import ModelErrorDTO
 from app.modules.daemon.session.service import (
     TERMINAL_TURN_STATUSES,
     _apply_session_terminal_status,
+    _send_session_end_best_effort,
 )
 from app.modules.git_gateway.service import redact_output
 
@@ -1124,6 +1125,7 @@ class RunSyncService:
         # D-009：必须新建 query（禁止复用 :1039 _resolve_gate_workspace_id 的 session
         # query，它在 commit 之后调用，回写不进同一事务）；D-005 幂等由
         # _apply_session_terminal_status 守卫（已 ended/failed 返 None）。
+        _session_end_intent: tuple[uuid.UUID, uuid.UUID | None, uuid.UUID | None] | None = None
         if agent_run.agent_session_id is not None:
             from app.modules.agent.model import AgentSession
 
@@ -1134,12 +1136,31 @@ class RunSyncService:
                     session.status = new_status
                     if new_status in ("ended", "failed"):
                         session.ended_at = now
+                        # ql-20260823-006：会话被 run 终态翻成 ended/failed 时记下
+                        # 发送意图，commit 后补发 SESSION_END 清理 daemon 内存副本——
+                        # 否则 daemon SessionStore 残留活条目（backend 终态 ≠ daemon
+                        # 感知），后续 reopen 全撞 SESSION_ALREADY_EXISTS 死循环
+                        # （2026-08-23 会话 bdec91a4 事故）。expire_on_commit 前取标量。
+                        _session_end_intent = (session.id, session.lease_id, session.runtime_id)
                     else:
                         session.last_active_at = now
                     self._session.add(session)
 
         await self._session.commit()
         await self._session.refresh(agent_run)
+
+        # ql-20260823-006：run 终态翻会话 ended/failed → commit 后 best-effort 补发
+        # SESSION_END（失败仅日志，不影响已 commit 终态），daemon 侧 end() 收口
+        # （kill driver + close InputQueue + 终态条目不再落盘）。
+        if _session_end_intent is not None:
+            flip_session_id, flip_lease_id, flip_runtime_id = _session_end_intent
+            await _send_session_end_best_effort(
+                self._session,
+                session_id=flip_session_id,
+                lease_id=flip_lease_id,
+                runtime_id=flip_runtime_id,
+                reason="run_terminal_flip",
+            )
 
         # task-10 / FR-06 / D-010@v1：借用 agent run 完成 → 方案文本落文件中心 +
         # 补 daemon_borrow_audit.usage_summary。仅 borrowed lease 生效（helper 内部

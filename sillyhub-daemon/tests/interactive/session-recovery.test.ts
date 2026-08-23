@@ -244,6 +244,44 @@ describe('SessionManager.restoreAndReconnect', () => {
     await sm2.restoreAndReconnect({ ...RECORD, pathToClaudeCodeExecutable: undefined });
     expect(deps2.onSessionEnd).toHaveBeenCalledWith('sess-9', 'failed');
   });
+
+  // ── ql-20260823-006：内存残留条目先驱逐再恢复（僵尸会话 reopen 死循环修复）──
+
+  it('store 已有同 id 活条目（backend 未通知 SESSION_END 的僵尸）→ 静默驱逐后恢复，不抛 SessionAlreadyExistsError', async () => {
+    const mock = makeMockDriver();
+    const deps = makeDeps();
+    const sm = new SessionManager({ driver: mock.driver, ...deps });
+    // 先用同 sessionId create 活会话（模拟 2026-08-23 bdec91a4 事故：backend 已翻
+    // 终态但 daemon 内存仍 running）。
+    await sm.create({ ...BASE_INPUT, sessionId: 'sess-9', leaseId: 'lease-old' });
+    mock.emitMessage(systemInit('sdk-old'));
+    // 旧行为：SessionAlreadyExistsError；新行为：驱逐旧条目后正常恢复。
+    await expect(sm.restoreAndReconnect(RECORD)).resolves.toBeUndefined();
+    const state = sm.get('sess-9');
+    expect(state).toBeDefined();
+    expect(state!.status).toBe('reconnecting');
+    expect(state!.agentSessionId).toBe('sdk-sess-9');
+    expect(state!.leaseId).toBe('lease-9');
+    // 静默驱逐：不回发 onSessionEnd——backend 正推进 reconnecting→active，
+    // 回发终态通知会与之竞态把会话误翻 failed。
+    expect(deps.onSessionEnd).not.toHaveBeenCalled();
+    // 恢复 driver.start 仍带 resume key。
+    expect(mock.startCalls.at(-1)!.resume).toBe('sdk-sess-9');
+  });
+
+  it('store 已有同 id 终态条目（end() 收口不删 store）→ 同样驱逐后恢复', async () => {
+    const mock = makeMockDriver();
+    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+    await sm.create({ ...BASE_INPUT, sessionId: 'sess-9', leaseId: 'lease-old' });
+    mock.emitMessage(systemInit('sdk-old'));
+    await sm.end('sess-9');
+    // end() 后条目仍在 store（终态 status=ended），reopen 必须能恢复。
+    expect(sm.get('sess-9')).toBeDefined();
+    await sm.restoreAndReconnect(RECORD);
+    const state = sm.get('sess-9');
+    expect(state!.status).toBe('reconnecting');
+    expect(state!.leaseId).toBe('lease-9');
+  });
 });
 
 // ── markReconnected ───────────────────────────────────────────────────────────
