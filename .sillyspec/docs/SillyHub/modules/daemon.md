@@ -26,6 +26,7 @@ backend 与 daemon 经 WebSocket + REST 双向通信，支持三种执行形态�
   - create_session workspace 归属校验（2026-08-19-sessions-workspace-selector）：workspace_id 非空时先经 `allowed_workspace_ids(user, WORKSPACE_READ)` 校验可见性，不可见抛 404 `HTTP_404_DAEMON_SESSION_WORKSPACE_NOT_FOUND`（校验在读 Workspace 行之前，不在事务内，失败不落库）。
   - `SessionReadiness` 模块级单例（mark_ready/wait/clear）：daemon create/recover 完成后 POST /ready 上报，backend 发 SESSION_INJECT 前 await wait(30s)，超时 fallback 仍发兼容旧 daemon——防 inject 早到 daemon 丢消息。
   - permission_service：权限请求落 dialog 行、pending/history/workspace 级聚合、响应下发、超时收敛。
+  - 僵尸收敛双档 sweep（`sweep.py`，2026-08-24 会话审查 P2b）：① reconnecting 超窗（180s）→ failed（DS-6 原档）；② `session_offline_sweep_once`——active/pending 会话其 runtime 非「online 且心跳≥600s 宽限」→ failed + 挂起 run failed + 挂起 lease cancelled（daemon 永久死亡场景；正常重启走 recover→reconnecting 不进本档）；两档收敛后都广播 `session_ended`（SSE 只认它收尾）。终态写入点 `cancel_lease`（kill 把会话置 ended）也广播 session_ended；SSE 生成器对 `session_recovery_failed` 同样收尾（agent/service.py stream_session_logs）。
 - **run_sync**：
   - `submit_messages`：daemon 上行消息落库；partial/complete 用 segmentId 跨调用去重（`_revoke_committed_partials` 撤已提交半截）；pending→running 用原子条件 UPDATE 防迟到的 submit 覆盖终态（lost update）。
   - `sync_agent_run_status`、`close_interactive_run`（gate 任务仅 verify 阶段适用 `_gate_applicable`，勿扩大）。

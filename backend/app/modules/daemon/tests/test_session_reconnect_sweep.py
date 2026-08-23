@@ -14,9 +14,11 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -390,3 +392,142 @@ class TestSweepSoftDeleted:
         ).scalar_one()
         assert status_row == "failed"
         assert await _lease_status(db_session, lease.id) == "cancelled"
+
+
+# ── P2b（2026-08-24 会话审查）：runtime 离线 sweep + 终态广播 ───────────────
+
+
+class TestOfflineSweep:
+    async def test_offline_runtime_active_session_converged(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """runtime 离线（心跳早于宽限阈值）+ active 会话 → failed + 挂起 run
+        failed + 挂起 lease cancelled + 广播 session_ended。"""
+        from app.modules.daemon import sweep as sweep_mod
+
+        captured: list[tuple[str, str]] = []
+
+        class _FakeRedis:
+            async def publish(self, channel: str, payload: str) -> int:
+                captured.append((channel, payload))
+                return 1
+
+        monkeypatch.setattr(sweep_mod, "get_redis", lambda: _FakeRedis())
+
+        user = await _make_user(db_session)
+        rt = await _make_runtime(db_session, user.id)
+        rt.status = "offline"
+        rt.last_heartbeat_at = datetime.now(UTC) - timedelta(
+            seconds=sweep_mod.RUNTIME_OFFLINE_GRACE_SEC + 60
+        )
+        db_session.add(rt)
+        lease = await _make_lease(db_session, rt.id, status="claimed")
+        sess = await _make_session(
+            db_session,
+            user.id,
+            rt.id,
+            status="active",
+            lease_id=lease.id,
+            last_active_at=datetime.now(UTC),
+        )
+        # 挂起 run（running，挂在会话上）
+        from app.modules.agent.model import AgentRun
+
+        run = AgentRun(agent_type="claude_code", status="running", agent_session_id=sess.id)
+        db_session.add(run)
+        await db_session.commit()
+
+        converged = await sweep_mod.session_offline_sweep_once(db_session)
+
+        assert converged == 1
+        row = (
+            await db_session.execute(
+                select(AgentSession.status, AgentSession.ended_at).where(AgentSession.id == sess.id)
+            )
+        ).one()
+        assert row.status == "failed"
+        assert row.ended_at is not None
+        assert await _lease_status(db_session, lease.id) == "cancelled"
+        run_status = (
+            await db_session.execute(select(AgentRun.status).where(AgentRun.id == run.id))
+        ).scalar_one()
+        assert run_status == "failed"
+        # 广播 session_ended（SSE 收尾依赖）
+        events = [json.loads(p) for ch, p in captured if ch == f"agent_session:{sess.id}"]
+        assert any(e.get("event") == "session_ended" for e in events)
+
+    async def test_online_runtime_session_untouched(self, db_session: AsyncSession) -> None:
+        """runtime 在线且心跳新鲜 → active 会话不收敛（不误伤）。"""
+        from app.modules.daemon import sweep as sweep_mod
+
+        user = await _make_user(db_session)
+        rt = await _make_runtime(db_session, user.id)  # online + 新鲜心跳
+        lease = await _make_lease(db_session, rt.id, status="pending")
+        sess = await _make_session(
+            db_session,
+            user.id,
+            rt.id,
+            status="active",
+            lease_id=lease.id,
+            last_active_at=datetime.now(UTC),
+        )
+
+        converged = await sweep_mod.session_offline_sweep_once(db_session)
+
+        assert converged == 0
+        status_row = (
+            await db_session.execute(select(AgentSession.status).where(AgentSession.id == sess.id))
+        ).scalar_one()
+        assert status_row == "active"
+        assert await _lease_status(db_session, lease.id) == "pending"
+
+    async def test_pending_session_offline_converged(self, db_session: AsyncSession) -> None:
+        """pending 会话（派发后 daemon 从未就绪即死）同样收敛。"""
+        from app.modules.daemon import sweep as sweep_mod
+
+        user = await _make_user(db_session)
+        rt = await _make_runtime(db_session, user.id)
+        rt.last_heartbeat_at = datetime.now(UTC) - timedelta(
+            seconds=sweep_mod.RUNTIME_OFFLINE_GRACE_SEC + 300
+        )
+        db_session.add(rt)
+        lease = await _make_lease(db_session, rt.id, status="pending")
+        sess = await _make_session(
+            db_session,
+            user.id,
+            rt.id,
+            status="pending",
+            lease_id=lease.id,
+            last_active_at=datetime.now(UTC),
+        )
+        await db_session.commit()
+
+        converged = await sweep_mod.session_offline_sweep_once(db_session)
+
+        assert converged == 1
+        status_row = (
+            await db_session.execute(select(AgentSession.status).where(AgentSession.id == sess.id))
+        ).scalar_one()
+        assert status_row == "failed"
+
+    async def test_idempotent_second_run(self, db_session: AsyncSession) -> None:
+        """同数据二跑收敛 0 行（状态条件挡住，多轮/多 worker 幂等）。"""
+        from app.modules.daemon import sweep as sweep_mod
+
+        user = await _make_user(db_session)
+        rt = await _make_runtime(db_session, user.id)
+        rt.status = "offline"
+        db_session.add(rt)
+        lease = await _make_lease(db_session, rt.id, status="pending")
+        await _make_session(
+            db_session,
+            user.id,
+            rt.id,
+            status="active",
+            lease_id=lease.id,
+            last_active_at=datetime.now(UTC),
+        )
+        await db_session.commit()
+
+        assert await sweep_mod.session_offline_sweep_once(db_session) == 1
+        assert await sweep_mod.session_offline_sweep_once(db_session) == 0

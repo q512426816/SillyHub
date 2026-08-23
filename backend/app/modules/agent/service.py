@@ -1241,10 +1241,17 @@ class AgentService:
                         payload = json.loads(data)
                     except (json.JSONDecodeError, TypeError):
                         payload = {}
-                    if payload.get("event") == "session_ended":
+                    # 终态事件统一收尾（2026-08-24 会话审查 P2b）：session_ended
+                    # 正常终点；session_recovery_failed（daemon 恢复失败）也是
+                    # 终态，不收尾则已连客户端永远 keepalive。
+                    evt = payload.get("event")
+                    if evt in ("session_ended", "session_recovery_failed"):
                         done_data = json.dumps(
                             {
-                                "status": payload.get("status", "ended"),
+                                "status": payload.get(
+                                    "status",
+                                    "failed" if evt == "session_recovery_failed" else "ended",
+                                ),
                                 "reason": payload.get("reason"),
                             }
                         )

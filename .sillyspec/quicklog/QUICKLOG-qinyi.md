@@ -389,7 +389,11 @@
 结果：codex 驱动 24 用例全绿（含新回归用例）、interactive 全目录 509 用例全绿、tsc 0 错；daemon.md 同步
 审计：⚖️ 归属切分：3 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/workspaces/[id]/page.tsx, frontend/src/components/workspace/LinkedProjectsSection.tsx, frontend/src/components/workspace/__tests__/LinkedProjectsSection.test.tsx
 
-## ql-20260824-007-37c2 | 2026-08-24 07:22:11 | 会话僵尸收敛：sweep 扩展离线 runtime 收敛 + 终态写入点统一广播 session_ended + SSE 对 recovery_failed 收尾
-状态：进行中
+## ql-20260824-007-37c2 | 2026-08-24 07:22:11 | 会话僵尸收敛：runtime 离线 sweep + 终态写入点统一广播 session_ended
+状态：已完成
 关联变更：（无）
-文件：backend/app/modules/daemon/sweep.py, backend/app/modules/daemon/lease_service.py, backend/app/modules/agent/service.py, backend/app/modules/daemon/tests/test_session_reconnect_sweep.py
+文件：backend/app/modules/agent/service.py, backend/app/modules/daemon/lease_service.py, backend/app/modules/daemon/sweep.py, backend/app/modules/daemon/tests/test_session_reconnect_sweep.py
+需求：会话僵尸收敛：runtime 离线 sweep + 终态写入点统一广播 session_ended
+根因：daemon 永久死后 active 会话无收敛路径（sweep 只扫 reconnecting）前端永远转圈；终态写入点不广播 session_ended 则已连 SSE 永远 keepalive 占 Redis pubsub
+方案：sweep.py 新增 session_offline_sweep_once（runtime 离线超 600s 宽限的 active/pending 会话 → failed+run failed+lease cancelled+广播）并入常驻循环；两档 sweep 收敛后广播；cancel_lease 收敛会话后广播；SSE break 扩到 session_recovery_failed
+结果：sweep 测试 10 用例绿（新增 4）；daemon 域 893 绿、agent tests 218 绿；ruff 0 错；daemon.md 同步

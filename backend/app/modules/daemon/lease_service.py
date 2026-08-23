@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import secrets
 import uuid
 from datetime import UTC, datetime
@@ -13,6 +14,7 @@ from sqlmodel import col
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.core.redis import get_redis
 from app.modules.agent.model import AgentRun, AgentSession
 from app.modules.daemon.model import DaemonTaskLease
 
@@ -20,6 +22,33 @@ if TYPE_CHECKING:
     pass
 
 log = get_logger(__name__)
+
+
+async def _publish_session_ended(session_id: uuid.UUID, *, reason: str) -> None:
+    """kill 收敛会话时广播 session_ended（best-effort，Redis 抖动只告警）.
+
+    SSE 生成器只认 session_ended 收尾；cancel_lease 把会话置 ended 而不广播
+    会让已连上的 /sessions/{id}/stream 永远 keepalive（2026-08-24 会话审查 P2b）。
+    """
+    try:
+        redis = get_redis()
+        await redis.publish(
+            f"agent_session:{session_id}",
+            json.dumps(
+                {
+                    "event": "session_ended",
+                    "session_id": str(session_id),
+                    "reason": reason,
+                    "current_run_id": None,
+                },
+                default=str,
+            ),
+        )
+    except Exception:
+        log.warning(
+            "cancel_lease_publish_session_ended_failed",
+            session_id=str(session_id),
+        )
 
 
 # ── Domain errors ─────────────────────────────────────────────────────────────
@@ -381,6 +410,7 @@ class DaemonLeaseService:
         # 独立于 lease，基于 run.agent_session_id（kill 的 run 都有 agent_session_id）。
         # D-003 kill=正常终止→ended（非 failed）；D-005 幂等仅 pending/active/reconnecting 收口。
         agent_run = await self._session.get(AgentRun, agent_run_id)
+        converged_session_id: uuid.UUID | None = None
         if agent_run is not None and agent_run.agent_session_id is not None:
             session = await self._session.get(AgentSession, agent_run.agent_session_id)
             if session is not None and session.status in (
@@ -391,6 +421,7 @@ class DaemonLeaseService:
                 session.status = "ended"
                 session.ended_at = now
                 self._session.add(session)
+                converged_session_id = session.id
 
         if lease is None:
             log.warning(
@@ -400,6 +431,10 @@ class DaemonLeaseService:
             # 即使没有 active lease，agent_run 若仍 pending/running 也要收尾
             await self._mark_agent_run_killed_if_pending(agent_run_id, now)
             await self._session.commit()  # 提交 session 收口（lease None 也要落库）
+            # kill 把会话置 ended 时广播 session_ended（P2b：SSE 只认它收尾，
+            # 不广播则已连上的 /sessions/{id}/stream 永远 keepalive）。best-effort。
+            if converged_session_id is not None:
+                await _publish_session_ended(converged_session_id, reason="killed")
             return
 
         prior_status = lease.status
@@ -417,6 +452,9 @@ class DaemonLeaseService:
         lease.terminating_at = now
         self._session.add(lease)
         await self._session.commit()  # session 收口（上面 add）随 lease cancelled 一起落库
+        # 同上：kill 收敛的会话广播 session_ended（P2b，best-effort）
+        if converged_session_id is not None:
+            await _publish_session_ended(converged_session_id, reason="killed")
 
         log.info(
             "lease_cancelled",

@@ -23,15 +23,18 @@ daemon 回调 confirm-reconnected / mark-recovery-failed 翻转；旧版 daemon 
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.core.db import get_session_factory
 from app.core.logging import get_logger
-from app.modules.agent.model import AgentSession
-from app.modules.daemon.model import DaemonTaskLease
+from app.core.redis import get_redis
+from app.modules.agent.model import AgentRun, AgentSession
+from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.session.service import RECONNECTING_RETRY_WINDOW_SEC
 
 log = get_logger(__name__)
@@ -40,10 +43,43 @@ log = get_logger(__name__)
 # 字段/开关（task-05 constraints：巡检常开，与 mission_patrol_enabled 先例不同）。
 SWEEP_INTERVAL_SEC = 60
 
+# runtime 离线宽限（2026-08-24 会话审查 P2b）：active/pending 会话其 runtime
+# 心跳早于该阈值（或 status 非 online）即收敛 failed。daemon 正常重启会把
+# 会话翻 reconnecting 走既有 sweep；走到本档说明 runtime 长时间无心跳且未
+# 恢复（机器关机 / 进程死亡不重启），不收敛会永远 active、前端永远转圈。
+RUNTIME_OFFLINE_GRACE_SEC = 600
+
 # 仅挂起态 lease 需收敛 cancelled；已终态（completed / cancelled / expired）
 # 不回写——幂等且不动 lease 状态机取值集合（model.py status 为 free-form
 # String(20)，本模块不引入新取值）。
 _SWEEPABLE_LEASE_STATUSES = ("pending", "claimed")
+
+# 离线档收敛的会话状态（active=已建立；pending=派发后从未就绪）。
+_OFFLINE_SWEEPABLE_SESSION_STATUSES = ("active", "pending")
+
+
+async def _publish_session_ended(session_id, *, reason: str, current_run_id=None) -> None:
+    """广播 session_ended（best-effort，Redis 抖动不影响收敛本身）.
+
+    SSE 生成器（AgentService.stream_session_logs）只在收到 session_ended 时
+    收尾；终态写入点不广播会让已连上的客户端永远收 keepalive。
+    """
+    try:
+        redis = get_redis()
+        await redis.publish(
+            f"agent_session:{session_id}",
+            json.dumps(
+                {
+                    "event": "session_ended",
+                    "session_id": str(session_id),
+                    "reason": reason,
+                    "current_run_id": str(current_run_id) if current_run_id else None,
+                },
+                default=str,
+            ),
+        )
+    except Exception:
+        log.warning("sweep_publish_session_ended_failed", session_id=str(session_id), reason=reason)
 
 
 async def session_reconnect_sweep_once(session: AsyncSession) -> int:
@@ -102,7 +138,106 @@ async def session_reconnect_sweep_once(session: AsyncSession) -> int:
         )
 
     await session.commit()
+    # 终态广播（P2b）：sweep 收敛此前不发任何事件，已连上的 SSE 永远 keepalive。
+    # 以 UPDATE 后状态复查决定广播对象（条件 UPDATE 未命中的并发翻转行 status
+    # 已非 failed，不发——避免向活会话误发 ended）。
+    final_rows = (
+        await session.execute(
+            select(AgentSession.id, AgentSession.status).where(AgentSession.id.in_(hit_ids))
+        )
+    ).all()
+    for row in final_rows:
+        if row.status == "failed":
+            await _publish_session_ended(row.id, reason="reconnect_window_expired")
     return converged
+
+
+async def session_offline_sweep_once(session: AsyncSession) -> int:
+    """单次扫描收敛 runtime 长时间离线的 active/pending 会话（返回收敛行数）.
+
+    2026-08-24 会话审查 P2b（M-2/H-3）：daemon 永久死亡（机器报废 / 进程死亡
+    不重启）后，active 会话无任何收敛路径——sweep 只扫 reconnecting，用户
+    inject 每轮"派发失败 run failed 但会话保持 active"，前端永远转圈。本档
+    补位：``status IN ('active','pending')`` 且 runtime 不满足
+    ``status='online' AND last_heartbeat_at >= now-RUNTIME_OFFLINE_GRACE_SEC``
+    的会话收敛 ``failed``。
+
+    daemon 正常重启的会话走 recover → reconnecting → 既有 sweep，不会进本档
+    （重启即翻状态）；进本档的都是长时间无心跳且未恢复的 runtime。
+
+    收敛动作同事务三步（对齐 reconnecting sweep 手法）：
+    1. 会话 → ``failed`` + ``ended_at``（条件 UPDATE 重挂状态条件，幂等）；
+    2. 命中会话的挂起 run（pending/running）→ ``failed`` + ``finished_at``；
+    3. 挂起 lease（pending/claimed）→ ``cancelled``。
+    commit 后逐会话广播 ``session_ended``（reason=runtime_offline）。
+    """
+    now = datetime.now(UTC)
+    grace = now - timedelta(seconds=RUNTIME_OFFLINE_GRACE_SEC)
+
+    online_runtime = (
+        select(DaemonRuntime.id)
+        .where(
+            DaemonRuntime.id == AgentSession.runtime_id,
+            col(DaemonRuntime.status) == "online",
+            col(DaemonRuntime.last_heartbeat_at) >= grace,
+        )
+        .correlate(AgentSession)
+        .exists()
+    )
+    hit_rows = (
+        await session.execute(
+            select(AgentSession.id, AgentSession.lease_id).where(
+                AgentSession.status.in_(_OFFLINE_SWEEPABLE_SESSION_STATUSES),
+                col(AgentSession.runtime_id).is_not(None),
+                ~online_runtime,
+            )
+        )
+    ).all()
+    if not hit_rows:
+        return 0
+
+    hit_ids = [row.id for row in hit_rows]
+    await session.execute(
+        update(AgentSession)
+        .where(
+            AgentSession.id.in_(hit_ids),
+            AgentSession.status.in_(_OFFLINE_SWEEPABLE_SESSION_STATUSES),
+        )
+        .values(status="failed", ended_at=now)
+    )
+
+    # 命中会话的挂起 run 一并收敛（否则 run 永远 running）。
+    await session.execute(
+        update(AgentRun)
+        .where(
+            AgentRun.agent_session_id.in_(hit_ids),
+            AgentRun.status.in_(("pending", "running")),
+        )
+        .values(status="failed", finished_at=now)
+    )
+
+    lease_ids = [row.lease_id for row in hit_rows if row.lease_id is not None]
+    if lease_ids:
+        await session.execute(
+            update(DaemonTaskLease)
+            .where(
+                DaemonTaskLease.id.in_(lease_ids),
+                DaemonTaskLease.status.in_(_SWEEPABLE_LEASE_STATUSES),
+            )
+            .values(status="cancelled", updated_at=now)
+        )
+
+    await session.commit()
+
+    final_rows = (
+        await session.execute(
+            select(AgentSession.id, AgentSession.status).where(AgentSession.id.in_(hit_ids))
+        )
+    ).all()
+    for row in final_rows:
+        if row.status == "failed":
+            await _publish_session_ended(row.id, reason="runtime_offline")
+    return len([r for r in final_rows if r.status == "failed"])
 
 
 async def session_reconnect_sweeper(interval: float = SWEEP_INTERVAL_SEC) -> None:
@@ -120,11 +255,20 @@ async def session_reconnect_sweeper(interval: float = SWEEP_INTERVAL_SEC) -> Non
         try:
             async with get_session_factory()() as db_session:
                 converged = await session_reconnect_sweep_once(db_session)
+                # P2b：同一轮顺带收敛 runtime 离线的 active/pending 会话
+                # （daemon 永久死亡场景，reconnecting sweep 覆盖不到）。
+                offline_converged = await session_offline_sweep_once(db_session)
             if converged:
                 log.warning(
                     "session_reconnect_sweep_converged",
                     count=converged,
                     window_seconds=RECONNECTING_RETRY_WINDOW_SEC,
+                )
+            if offline_converged:
+                log.warning(
+                    "session_offline_sweep_converged",
+                    count=offline_converged,
+                    grace_seconds=RUNTIME_OFFLINE_GRACE_SEC,
                 )
         except Exception:
             log.exception("session_reconnect_sweep_round_failed")
