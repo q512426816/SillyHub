@@ -101,6 +101,8 @@ const mocks = vi.hoisted(() => ({
   getChange: vi.fn(),
   // D-004@v1 深链：useSearchParams 返回值（每用例可改写）
   searchParams: new URLSearchParams(),
+  // ql-20260824-001：选中态 URL 同步（?session= 写入/移除）的 replace 捕获
+  routerReplace: vi.fn(),
   // task-06：SessionListPanel props 捕获（defaultExpandedWorkspaceId 断言用）
   lastListPanelProps: null as Record<string, unknown> | null,
 }));
@@ -136,7 +138,13 @@ vi.mock("@/lib/daemon", () => ({
 // 按 runtimes/__tests__/page.test.tsx 惯例 mock 成可控 searchParams。
 vi.mock("next/navigation", () => ({
   useSearchParams: () => mocks.searchParams,
-  useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),
+  // ql-20260824-001：选中态 URL 同步消费 usePathname + useRouter.replace。
+  usePathname: () => "/sessions",
+  useRouter: () => ({
+    replace: (...args: unknown[]) => mocks.routerReplace(...args),
+    push: vi.fn(),
+    refresh: vi.fn(),
+  }),
 }));
 
 vi.mock("@/lib/use-daemon-machines", () => ({
@@ -379,6 +387,18 @@ async function enterPreSession(groupNewLabel: string) {
   return screen.findByTestId("session-pre-session-panel");
 }
 
+/**
+ * 展开左栏「非工作区」分组（ql-20260824-001 起分组默认折叠；默认固件会话
+ * workspace_id=null 落该组）。
+ */
+async function openNoWorkspaceGroup() {
+  const head = await screen.findByRole("button", {
+    name: "工作区分组 非工作区",
+  });
+  fireEvent.click(head);
+  await waitFor(() => expect(head).toHaveAttribute("aria-expanded", "true"));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.searchParams = new URLSearchParams();
@@ -479,7 +499,8 @@ describe("SessionsPortal 三 scope 渲染", () => {
     expect(mocks.listWorkspaceAgentSessions).not.toHaveBeenCalled();
     expect(mocks.listChangeSessions).not.toHaveBeenCalled();
 
-    // 全局列表条目照常渲染（门户默认态可交互）
+    // 全局列表条目照常渲染（门户默认态可交互；分组默认折叠，先展开再断言）
+    await openNoWorkspaceGroup();
     expect(
       await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
     ).toBeTruthy();
@@ -841,6 +862,8 @@ describe("SessionsPortal 组头＋→浮层→预会话（FR-03/FR-04）", () =>
     await enterPreSession("在 非工作区 新建会话");
 
     // 切走：点列表既有会话 → 真会话面板接管，预会话面板消失
+    //（分组默认折叠，先展开「非工作区」组再点条目）
+    await openNoWorkspaceGroup();
     fireEvent.click(
       screen.getByRole("button", { name: "会话 整理这周的会议纪要" }),
     );
@@ -1123,5 +1146,131 @@ describe("SessionsPortal resolveDefaultMachineId 迁移（D-005 三级回退）"
       }),
     ];
     expect(resolveDefaultMachineId(machines, [])).toBe("m-b");
+  });
+});
+
+// ── 7. 选中态 URL 同步（ql-20260824-001：刷新保持当前会话） ────────────────
+
+describe("SessionsPortal 选中态 URL 同步（ql-20260824-001）", () => {
+  /**
+   * mock 环境下 searchParams 是冻结快照（真实 Next 会随 replace 更新并触发
+   * 重渲染）——改写 mocks.searchParams 后需触发一次门户重渲染（开/关两步
+   * 浮层），后续事件闭包才能读到新参数（清参路径依赖当前参数非空才触发）。
+   */
+  async function nudgeRerender() {
+    fireEvent.click(
+      screen.getByRole("button", { name: "在 非工作区 新建会话" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    await waitFor(() =>
+      expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull(),
+    );
+  }
+
+  it("列表选中 → replace 写 ?session=<id>（scroll:false）+ 列表所在组自动展开定位", async () => {
+    renderPortal();
+    await openNoWorkspaceGroup();
+    fireEvent.click(
+      screen.getByRole("button", { name: "会话 整理这周的会议纪要" }),
+    );
+    await waitFor(() =>
+      expect(mocks.routerReplace).toHaveBeenCalledWith("/sessions?session=s-1", {
+        scroll: false,
+      }),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("会话面板")).toBeTruthy(),
+    );
+  });
+
+  it("深链恢复（URL 已带同参）再点同一会话 → 参数一致去重，不 replace", async () => {
+    mocks.searchParams = new URLSearchParams("session=s-1");
+    renderPortal();
+    await waitFor(() =>
+      expect(screen.getByLabelText("会话面板")).toBeTruthy(),
+    );
+    // 选中会话在非工作区组 → 组自动展开，条目直接可点
+    fireEvent.click(
+      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.routerReplace).not.toHaveBeenCalled();
+  });
+
+  it("删除选中会话 → 选中清空 + replace 移除 ?session=", async () => {
+    renderPortal();
+    await openNoWorkspaceGroup();
+    fireEvent.click(
+      screen.getByRole("button", { name: "会话 整理这周的会议纪要" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByLabelText("会话面板")).toBeTruthy(),
+    );
+    expect(mocks.routerReplace).toHaveBeenCalledWith("/sessions?session=s-1", {
+      scroll: false,
+    });
+    // 模拟 Next 参数已随上一次 replace 更新为 session=s-1
+    mocks.searchParams = new URLSearchParams("session=s-1");
+    mocks.routerReplace.mockClear();
+    await nudgeRerender();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "删除 整理这周的会议纪要" }),
+    );
+    const okBtn = await waitFor(() => {
+      const btn = document.querySelector(
+        ".ant-modal-confirm-btns .ant-btn-primary",
+      ) as HTMLElement | null;
+      if (!btn) throw new Error("confirm ok button not found");
+      return btn;
+    });
+    fireEvent.click(okBtn);
+    await waitFor(() =>
+      expect(screen.getByLabelText("门户空态")).toBeTruthy(),
+    );
+    await waitFor(() =>
+      expect(mocks.routerReplace).toHaveBeenCalledWith("/sessions", {
+        scroll: false,
+      }),
+    );
+  });
+
+  it("进入预会话 → replace 清参；首句创建成功 → replace 写新会话 id", async () => {
+    renderPortal();
+    await openNoWorkspaceGroup();
+    fireEvent.click(
+      screen.getByRole("button", { name: "会话 整理这周的会议纪要" }),
+    );
+    await waitFor(() =>
+      expect(mocks.routerReplace).toHaveBeenCalledWith("/sessions?session=s-1", {
+        scroll: false,
+      }),
+    );
+    // 模拟 Next 参数已随上一次 replace 更新为 session=s-1
+    mocks.searchParams = new URLSearchParams("session=s-1");
+    mocks.routerReplace.mockClear();
+
+    await enterPreSession("在 非工作区 新建会话");
+    await waitFor(() =>
+      expect(mocks.routerReplace).toHaveBeenCalledWith("/sessions", {
+        scroll: false,
+      }),
+    );
+
+    // 首句创建成功 → 切真会话并写新 id
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "第一句话开个会话" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(mocks.createSession).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(mocks.routerReplace).toHaveBeenCalledWith(
+        "/sessions?session=s-new",
+        { scroll: false },
+      ),
+    );
   });
 });

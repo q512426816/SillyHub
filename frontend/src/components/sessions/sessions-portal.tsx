@@ -64,7 +64,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { Clock, Plus, Sparkles } from "lucide-react";
 
@@ -126,6 +126,30 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
       });
   }, [searchParams]);
 
+  // 选中态 ↔ URL ?session= 双向同步（ql-20260824-001 用户反馈：页面刷新要
+  // 保持当前会话）：列表选中 / 继续最近会话 / 预会话创建成功 → replace 写入
+  // ?session=<id>（与当前参数一致时去重跳过）；进入预会话 / 删除选中 → 移除
+  // 该参数（刷新不恢复已离开的会话）。new=1 已消费一并移除（选中态下直达
+  // 新建语义已终结）；写参后置 urlRestoreDoneRef 防上方深链 effect 对自己
+  // 写入的参数二次验证。replace 不产生历史记录，浏览器后退仍退出页面。
+  const router = useRouter();
+  const pathname = usePathname();
+  const syncSessionParam = useCallback(
+    (id: string | null) => {
+      const params = new URLSearchParams(searchParams.toString());
+      const unchanged =
+        params.get("session") === id && !params.get("new");
+      params.delete("new");
+      if (id) params.set("session", id);
+      else params.delete("session");
+      if (unchanged) return;
+      urlRestoreDoneRef.current = true;
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [searchParams, pathname, router],
+  );
+
   // 机器列表：SessionPanel 离线判定 + PreSessionPicker 第一步数据源共用；
   // sessions/isLoading 供 ?new=1 直达的 D-005 默认机器解析（ql-20260823-005）。
   const { items: machines, sessions, isLoading: machinesLoading } =
@@ -181,8 +205,10 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
           : { workspaceId, runtimeId },
       );
       setSelectedSessionId(null);
+      // ql-20260824-001：清选中同步清 ?session=（刷新不恢复已离开的会话）。
+      syncSessionParam(null);
     },
-    [scope],
+    [scope, syncSessionParam],
   );
 
   // ql-20260823-005（用户反馈：ppm/projects「发起团队」等外部入口应直达会话页，
@@ -257,13 +283,15 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
                 { workspaceId: scope.workspaceId, changeId: scope.changeId, runtimeId: runtime.id }
               : { workspaceId, runtimeId: runtime.id },
           );
+          // ql-20260824-001：清选中同步清 ?session=（同 enterPreSession）。
+          syncSessionParam(null);
           return;
         }
       }
       setPickerWorkspaceId(workspaceId);
       setPickerOpen(true);
     },
-    [machines, scope],
+    [machines, scope, syncSessionParam],
   );
 
   /** 浮层两步选完（两步即达）：合成 preContext 切预会话态并关浮层（X-13 双传
@@ -284,9 +312,11 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
     (resp: SessionCreateResponse) => {
       setPreContext(null);
       setSelectedSessionId(resp.session_id);
+      // ql-20260824-001：新会话选中落 URL（刷新保持）。
+      syncSessionParam(resp.session_id);
       refreshSessionLists();
     },
-    [refreshSessionLists],
+    [refreshSessionLists, syncSessionParam],
   );
 
   return (
@@ -310,6 +340,8 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             // 用户切走（task-06 / FR-03）：清预会话态不残留。
             setPreContext(null);
             setSelectedSessionId(s.id);
+            // ql-20260824-001：选中落 URL（刷新保持当前会话）。
+            syncSessionParam(s.id);
           }}
           onNewInGroup={handleNewInGroup}
           defaultExpandedWorkspaceId={
@@ -325,7 +357,11 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             const { deleteAgentSession } = await import("@/lib/daemon");
             await Promise.allSettled(ids.map((id) => deleteAgentSession(id)));
             void qc.invalidateQueries({ queryKey: ["agentSessions"] });
-            if (ids.includes(selectedSessionId ?? "")) setSelectedSessionId(null);
+            if (ids.includes(selectedSessionId ?? "")) {
+              setSelectedSessionId(null);
+              // ql-20260824-001：选中被删清空，同步移除 ?session=。
+              syncSessionParam(null);
+            }
           }}
         />
         {selectedSessionId ? (
@@ -388,6 +424,8 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
                   onClick={() => {
                     setPreContext(null);
                     setSelectedSessionId(recentSession.id);
+                    // ql-20260824-001：继续最近会话同样落 URL（刷新保持）。
+                    syncSessionParam(recentSession.id);
                   }}
                   title={`继续会话「${recentSession.title?.trim() || "未命名会话"}」`}
                   className="inline-flex max-w-[260px] items-center gap-1.5 rounded-full border border-border bg-card px-4 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-brand-700 hover:shadow-sm"

@@ -33,8 +33,15 @@
  *       展开箭头；0 会话组仍显示（计数 0）；「非工作区」（workspace_id null）
  *       固定末尾组同样有「＋」（D-105）；workspace_id 无法解析（工作区已删）
  *       的会话落「未知工作区」桶（无「＋」——无法在其上新建）
+ *     - ql-20260824-001（用户反馈收纳）：分组默认全折叠，仅选中会话所在组
+ *       （刷新/深链恢复 ?session= 定位）与 defaultExpandedWorkspaceId（FR-06
+ *       入口预展开）豁免展开；选中变化时兜底展开新所在组（用户手动折叠的
+ *       组不被回弹——同一选中只触发一次）
  *     - 组内机器小节：机器名 + 在线状态点；runtime→machine 映射来自会话
  *       runtime_id，缺省回退 config_snapshot.machine_name
+ *     - 组内「本地 Agent」合并小节（ql-20260824-001）：origin=tool_report
+ *       （SillySpec CLI 自动上报）会话不进机器分桶，统一合并进组内末尾专属
+ *       小节，默认折叠（选中会话在其中 → 展开）；筛选变化随组级 R-05 重置
  *     - 组内超 50 截断 + 「显示全部」（R-03）
  *   条目（D-006 紧凑两行沿用）：第一行 = 状态点 + 标题 + 相对时间；第二行 =
  *     chips（引擎/创建人/档案/供应商/轮数——树形态下工作区/机器信息由组头与
@@ -53,7 +60,7 @@
  * task-11 v3 返工）：scope 判别联合（WorkspaceScope/ChangeScope 导出）、D-003@v2
  * 端点过滤、D-006 紧凑两行、ql-20260818-012 批量删除——语义均随本次重构迁移。
  */
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button, Input, Modal, Select, Spin, Tag } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
@@ -130,9 +137,15 @@ const GROUP_ITEM_LIMIT = 50;
 const NO_WORKSPACE_GROUP_ID = "__no_workspace__";
 /** 未知工作区分组 id（会话 workspace_id 已无法解析，如工作区被删）。 */
 const UNKNOWN_WORKSPACE_GROUP_ID = "__unknown_workspace__";
+/** 组内「本地 Agent」合并小节 key（origin=tool_report 会话统一落此，不进机器分桶）。 */
+const TOOL_REPORT_SECTION_KEY = "__tool_report__";
 
 export interface SessionListPanelProps {
-  /** 当前选中会话 id（高亮，受控；页面组装归 task-10）。 */
+  /**
+   * 当前选中会话 id（高亮，受控；页面组装归 task-10）。ql-20260824-001 起
+   * 兼驱动默认展开：未交互折叠态下所在组（及「本地 Agent」小节）豁免折叠，
+   * 刷新/深链恢复时定位到当前会话。
+   */
   selectedSessionId?: string | null;
   /** 点击条目回调。 */
   onSelect?: (_session: AgentSessionRead) => void;
@@ -161,7 +174,8 @@ export interface SessionListPanelProps {
   ) => void;
   /**
    * task-05（FR-06）：默认展开的工作区分组 id（非受控一次性初值；供 task-06
-   * workspace 入口深链预展开——缺省全部分组展开）。
+   * workspace 入口深链预展开——ql-20260824-001 起其余组默认折叠，仅该组与
+   * 选中会话所在组展开）。
    */
   defaultExpandedWorkspaceId?: string;
 }
@@ -262,6 +276,16 @@ interface TreeGroup {
   /** 是否渲染组头「＋」（D-105：非工作区组也有；未知工作区组无法在其上新建）。 */
   canNew: boolean;
   /** 组内全部会话（视图过滤前）。 */
+  sessions: AgentSessionRead[];
+}
+
+/** 组内小节（机器小节 / 「本地 Agent」合并小节，ql-20260824-001）。 */
+interface GroupSection {
+  key: string;
+  label: string;
+  online: boolean;
+  /** true = origin=tool_report 合并小节（可折叠，默认收起）。 */
+  isToolReport: boolean;
   sessions: AgentSessionRead[];
 }
 
@@ -480,23 +504,35 @@ function WorkspaceTreeList({
     );
   }, [groups, selectedSessionId]);
 
-  // 生效折叠集合：用户未交互（collapsedIds null）时用渲染期默认——缺省全展开；
-  // defaultExpandedWorkspaceId 给定时仅该组展开。默认在渲染期派生而非 effect
+  // 生效折叠集合：用户未交互（collapsedIds null）时用渲染期默认——缺省全组
+  // 折叠（ql-20260824-001 用户要求收纳），仅两组豁免展开：选中会话所在组
+  // （刷新/深链恢复 ?session= 时定位到当前会话）+ defaultExpandedWorkspaceId
+  // （workspace/change 入口深链预展开，FR-06）。默认在渲染期派生而非 effect
   // 落地：工作区列表晚于会话到达时分组会生长，派生值随之收敛。
   const effectiveCollapsedIds = useMemo(() => {
     if (collapsedIds) return collapsedIds;
-    if (
-      defaultExpandedWorkspaceId &&
-      groups.some((g) => g.id === defaultExpandedWorkspaceId)
-    ) {
-      return new Set(
-        groups.filter((g) => g.id !== defaultExpandedWorkspaceId).map((g) => g.id),
-      );
-    }
-    return new Set<string>();
-  }, [collapsedIds, groups, defaultExpandedWorkspaceId]);
+    const keepOpen = new Set<string>();
+    if (currentGroupId) keepOpen.add(currentGroupId);
+    if (defaultExpandedWorkspaceId) keepOpen.add(defaultExpandedWorkspaceId);
+    return new Set(groups.filter((g) => !keepOpen.has(g.id)).map((g) => g.id));
+  }, [collapsedIds, groups, currentGroupId, defaultExpandedWorkspaceId]);
 
-  // defaultExpandedWorkspaceId 初值见上方 effectiveCollapsedIds（渲染期派生）。
+  // 选中变化时兜底展开所在分组（ql-20260824-001）：仅覆盖用户已折叠过
+  // （collapsedIds 非空）后经门户路径换选中的场景（继续最近会话 / 预会话
+  // 创建成功）——列表点击必在已展开组内，刷新恢复走上方渲染期默认。同一
+  // 选中只触发一次：用户随后手动再折叠不被回弹。
+  const lastOpenForSelRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedSessionId || !currentGroupId) return;
+    if (lastOpenForSelRef.current === selectedSessionId) return;
+    lastOpenForSelRef.current = selectedSessionId;
+    setCollapsedIds((prev) => {
+      if (!prev || !prev.has(currentGroupId)) return prev;
+      const next = new Set(prev);
+      next.delete(currentGroupId);
+      return next;
+    });
+  }, [selectedSessionId, currentGroupId]);
 
   /** R-05：筛选变化重置展开态（除当前组）与组内「显示全部」。 */
   const resetExpansionForFilter = () => {
@@ -516,12 +552,17 @@ function WorkspaceTreeList({
   };
 
   const toggleGroup = (id: string) => {
-    setCollapsedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    // 基于生效态切换（ql-20260824-001）：默认折叠后 collapsedIds null 表示
+    // 「空集 + 渲染期默认」，首次点击需以 effectiveCollapsedIds 为基线翻转，
+    // 否则默认已折叠的组第一次点击会被误判为「展开中→折叠」而无视觉变化。
+    const wasCollapsed = effectiveCollapsedIds.has(id);
+    setCollapsedIds(
+      new Set(
+        wasCollapsed
+          ? [...effectiveCollapsedIds].filter((x) => x !== id)
+          : [...effectiveCollapsedIds, id],
+      ),
+    );
   };
 
   // 组头尾随多选态入口（X-11）：一次一个组；切换清空勾选。
@@ -596,6 +637,12 @@ function WorkspaceTreeList({
   };
 
   const visibleTotal = viewFiltered.length;
+
+  /**
+   * R-05 筛选纪元（ql-20260824-001）：任一筛选值变化即翻新——「本地 Agent」
+   * 小节据此丢弃旧覆盖值回到默认折叠（与组级 resetExpansionForFilter 同步）。
+   */
+  const filterEpoch = `${filterMachineId}|${filterAgent}|${status}|${appliedQuery}`;
 
   return (
     <div
@@ -721,6 +768,7 @@ function WorkspaceTreeList({
                 visibleSessions={groupVisible}
                 expanded={!effectiveCollapsedIds.has(group.id)}
                 onToggleExpand={() => toggleGroup(group.id)}
+                filterEpoch={filterEpoch}
                 onNew={
                   onNewInGroup
                     ? (wsId: string | null) =>
@@ -823,6 +871,7 @@ function WorkspaceGroupNode({
   visibleSessions,
   expanded,
   onToggleExpand,
+  filterEpoch,
   onNew,
   batchActive,
   onToggleBatch,
@@ -847,6 +896,8 @@ function WorkspaceGroupNode({
   visibleSessions: AgentSessionRead[];
   expanded: boolean;
   onToggleExpand: () => void;
+  /** R-05 筛选纪元（变化即重置「本地 Agent」小节展开覆盖，ql-20260824-001）。 */
+  filterEpoch: string;
   onNew?: (_workspaceId: string | null) => void;
   batchActive: boolean;
   onToggleBatch: () => void;
@@ -876,25 +927,74 @@ function WorkspaceGroupNode({
     : visibleSessions;
 
   // 机器小节：首现序分桶（后端按最近活跃倒序 → 最近活跃的机器排前）。
+  // origin=tool_report（本地 Agent，SillySpec CLI 自动上报）不进机器分桶，
+  // 统一合并进组内末尾「本地 Agent」小节（ql-20260824-001 用户要求收纳，
+  // 默认折叠）——批量上报条目不再刷屏机器小节。
   const sections = useMemo(() => {
-    const list: { key: string; label: string; online: boolean; sessions: AgentSessionRead[] }[] =
-      [];
-    const index = new Map<
-      string,
-      { key: string; label: string; online: boolean; sessions: AgentSessionRead[] }
-    >();
+    const list: GroupSection[] = [];
+    const index = new Map<string, GroupSection>();
+    let toolSection: GroupSection | null = null;
     for (const s of shownSessions) {
+      if (s.origin === "tool_report") {
+        if (!toolSection) {
+          toolSection = {
+            key: TOOL_REPORT_SECTION_KEY,
+            label: "本地 Agent",
+            online: false,
+            isToolReport: true,
+            sessions: [],
+          };
+        }
+        toolSection.sessions.push(s);
+        continue;
+      }
       const ref = sessionMachineRef(s, runtimeToMachine);
       let sec = index.get(ref.key);
       if (!sec) {
-        sec = { key: ref.key, label: ref.label, online: ref.online, sessions: [] };
+        sec = {
+          key: ref.key,
+          label: ref.label,
+          online: ref.online,
+          isToolReport: false,
+          sessions: [],
+        };
         index.set(ref.key, sec);
         list.push(sec);
       }
       sec.sessions.push(s);
     }
+    if (toolSection) list.push(toolSection);
     return list;
   }, [shownSessions, runtimeToMachine]);
+
+  // 「本地 Agent」小节折叠态（ql-20260824-001）：覆盖值带筛选纪元——epoch
+  // 变化（R-05 筛选重置）时旧覆盖被丢弃回到默认（收起；选中会话在小节内 →
+  // 展开，与组级渲染期默认同语义）。
+  const [toolOpenState, setToolOpenState] = useState<{
+    epoch: string;
+    open: boolean;
+  } | null>(null);
+  const toolSection = sections.find((s) => s.isToolReport) ?? null;
+  const toolSectionOpen =
+    (toolOpenState && toolOpenState.epoch === filterEpoch
+      ? toolOpenState.open
+      : null) ??
+    Boolean(toolSection?.sessions.some((s) => s.id === selectedSessionId));
+  const toggleToolSection = () => {
+    setToolOpenState({ epoch: filterEpoch, open: !toolSectionOpen });
+  };
+  // 选中变化经门户路径落到小节内时兜底展开（列表点击必在小节已展开时发生；
+  // 同一选中只触发一次，用户随后手动收起不被回弹——与组级 lastOpenForSelRef
+  // 同语义）。
+  const lastToolOpenSelRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedSessionId || !toolSection) return;
+    if (lastToolOpenSelRef.current === selectedSessionId) return;
+    lastToolOpenSelRef.current = selectedSessionId;
+    if (toolSection.sessions.some((s) => s.id === selectedSessionId)) {
+      setToolOpenState({ epoch: filterEpoch, open: true });
+    }
+  }, [selectedSessionId, toolSection, filterEpoch]);
 
   return (
     <div className="mb-2 overflow-hidden rounded-lg border border-border bg-card">
@@ -993,46 +1093,80 @@ function WorkspaceGroupNode({
           ) : (
             sections.map((sec) => (
               <div key={sec.key} className="px-2 pb-1">
-                {/* 机器小节标题：机器名 + 在线状态点（筛选态隐藏，FR-02） */}
-                {!hideMachineTitles && (
+                {sec.isToolReport ? (
+                  // 「本地 Agent」小节头（ql-20260824-001）：可折叠（默认收起，
+                  // 折叠态计数可见）。它是折叠控件而非冗余标题，机器筛选态
+                  // （hideMachineTitles）不隐藏。
                   <div
-                    className="flex items-center gap-1.5 px-1.5 pb-0.5 pt-1.5 text-[11px] text-muted-foreground"
-                    aria-label={`机器小节 ${sec.label}`}
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={toolSectionOpen}
+                    aria-label="本地 Agent 小节"
+                    onClick={toggleToolSection}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") toggleToolSection();
+                    }}
+                    className="flex cursor-pointer select-none items-center gap-1.5 px-1.5 pb-0.5 pt-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
                   >
                     <span
                       aria-hidden
-                      className={cn(
-                        "h-1.5 w-1.5 shrink-0 rounded-full",
-                        sec.online
-                          ? "bg-success ring-2 ring-success/20"
-                          : "bg-muted-foreground/40",
-                      )}
+                      className={`text-[10px] text-muted-foreground transition-transform ${
+                        toolSectionOpen ? "rotate-90" : ""
+                      }`}
+                    >
+                      ▶
+                    </span>
+                    <FileText
+                      aria-hidden
+                      className="h-3 w-3 shrink-0 text-brand-600"
                     />
-                    <span className="truncate">
-                      {sec.label}
-                      {sec.online ? "" : "（离线）"}
+                    <span className="truncate">{sec.label}</span>
+                    <span className="shrink-0 text-muted-foreground/80">
+                      {sec.sessions.length} 个会话
                     </span>
                   </div>
+                ) : (
+                  !hideMachineTitles && (
+                    <div
+                      className="flex items-center gap-1.5 px-1.5 pb-0.5 pt-1.5 text-[11px] text-muted-foreground"
+                      aria-label={`机器小节 ${sec.label}`}
+                    >
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "h-1.5 w-1.5 shrink-0 rounded-full",
+                          sec.online
+                            ? "bg-success ring-2 ring-success/20"
+                            : "bg-muted-foreground/40",
+                        )}
+                      />
+                      <span className="truncate">
+                        {sec.label}
+                        {sec.online ? "" : "（离线）"}
+                      </span>
+                    </div>
+                  )
                 )}
-                {sec.sessions.map((s) => {
-                  const title = s.title?.trim() || "未命名会话";
-                  return (
-                    <SessionRow
-                      key={s.id}
-                      variant="tree"
-                      session={s}
-                      title={title}
-                      selected={s.id === selectedSessionId}
-                      runtimeToMachine={runtimeToMachine}
-                      hideEngineChip={hideEngineChip}
-                      onSelect={onSelect}
-                      batchMode={batchActive}
-                      checked={checkedIds.has(s.id)}
-                      onToggleCheck={() => onToggleChecked(s.id)}
-                      onDelete={onDelete ? () => onDelete(s.id, title) : undefined}
-                    />
-                  );
-                })}
+                {(sec.isToolReport ? toolSectionOpen : true) &&
+                  sec.sessions.map((s) => {
+                    const title = s.title?.trim() || "未命名会话";
+                    return (
+                      <SessionRow
+                        key={s.id}
+                        variant="tree"
+                        session={s}
+                        title={title}
+                        selected={s.id === selectedSessionId}
+                        runtimeToMachine={runtimeToMachine}
+                        hideEngineChip={hideEngineChip}
+                        onSelect={onSelect}
+                        batchMode={batchActive}
+                        checked={checkedIds.has(s.id)}
+                        onToggleCheck={() => onToggleChecked(s.id)}
+                        onDelete={onDelete ? () => onDelete(s.id, title) : undefined}
+                      />
+                    );
+                  })}
               </div>
             ))
           )}

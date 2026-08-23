@@ -307,3 +307,19 @@
 方案：file_artifacts.py 新增 _check_session_permission：上传者==AgentSession.user_id 即放行，非归属人回退 workspace 锚复核；POST/GET 会话分支接入；移除 require_permission_any 入口门；worker(run_id) 锚链不变；agent.md 同步
 结果：test_file_artifacts 23 全绿（含 5 新用例）+相邻 file/mission 44 绿+ruff 过；真实会话 c5b97325 端到端 201/200/200；连带修 dev 存储（MinIO 容器+127.0.0.1 端点，坑记录 docs/sillyspec/）
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/2026-08-23-dev-minio-localhost-put-intercepted.md
+
+## ql-20260824-001-60df | 2026-08-24 06:28:50 | 会话页本地 Agent 会话合并分组默认折叠、全部分组默认折叠、刷新保持在当前会话
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/sessions/session-list-panel.tsx（分组默认折叠+本地 Agent 小节+生效态翻转）
+- frontend/src/components/sessions/sessions-portal.tsx（?session= URL 双向同步）
+- frontend/src/components/sessions/__tests__/session-list-panel.test.tsx（迁移+新增 5 用例）
+- frontend/src/components/sessions/__tests__/sessions-portal.test.tsx（新增 URL 同步 4 用例）
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（默认折叠下先展开组再选会话）
+- frontend/src/components/daemon/__tests__/agent-log-card.test.tsx（集成用例适配+emoji 标题存量债）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引 ql-20260824-001-60df）
+需求：会话页本地 Agent 会话合并分组默认折叠、全部分组默认折叠、刷新保持在当前会话
+根因：原树缺省全展开且 tool_report（SillySpec CLI 自动上报）会话散落机器小节刷屏；选中态仅 ?session= 深链可恢复，列表点选不写 URL，刷新即丢失当前会话
+方案：session-list-panel 默认全组折叠（选中组/defaultExpandedWorkspaceId 豁免+选中变化兜底展开）、tool_report 合并组内末尾可折叠『本地 Agent』小节（默认收起+filterEpoch 随 R-05 重置）；sessions-portal 选中态与 ?session= replace 双向同步（写参/清参/去重/new=1 移除）
+结果：相关 4 测试文件 101 用例全绿，前端全量 181 文件 2014/2014 passed，tsc 0 错，eslint 仅 2 条预存 warning

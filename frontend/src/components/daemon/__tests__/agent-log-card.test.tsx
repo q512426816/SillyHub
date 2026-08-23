@@ -920,7 +920,7 @@ function makeSession(
 }
 
 describe("会话列表 tool_report 徽标", () => {
-  it("origin=tool_report：🧾「本地 Agent」徽标 + 引擎位显示 harness；chat 条目无徽标显引擎名", async () => {
+  it("origin=tool_report：FileText「本地 Agent」徽标 + 引擎位显示 harness；chat 条目无徽标显引擎名", async () => {
     sessionListApi.listAgentSessions.mockResolvedValue({
       items: [
         makeSession(),
@@ -946,6 +946,21 @@ describe("会话列表 tool_report 徽标", () => {
       <QueryClientProvider client={qc}>
         <SessionListPanel />
       </QueryClientProvider>,
+    );
+
+    // ql-20260824-001 起分组默认折叠 + tool_report 落「本地 Agent」小节
+    //（默认收起）：先展开组与小节再断言条目徽标。
+    const groupHead = await screen.findByRole("button", {
+      name: "工作区分组 multi-agent-platform",
+    });
+    fireEvent.click(groupHead);
+    await waitFor(() =>
+      expect(groupHead).toHaveAttribute("aria-expanded", "true"),
+    );
+    const toolHead = screen.getByRole("button", { name: "本地 Agent 小节" });
+    fireEvent.click(toolHead);
+    await waitFor(() =>
+      expect(toolHead).toHaveAttribute("aria-expanded", "true"),
     );
 
     // tool_report 徽标：仅 1 个（chat 条目无）。

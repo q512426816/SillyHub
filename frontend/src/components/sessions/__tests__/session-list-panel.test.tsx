@@ -320,6 +320,15 @@ function sessionRows(): HTMLElement[] {
   return screen.queryAllByRole("button", { name: /^会话 / });
 }
 
+/** 展开工作区分组（ql-20260824-001 起默认全组折叠，点组头展开）。 */
+async function openGroup(name: string) {
+  const head = await screen.findByRole("button", {
+    name: `工作区分组 ${name}`,
+  });
+  fireEvent.click(head);
+  await waitFor(() => expect(head).toHaveAttribute("aria-expanded", "true"));
+}
+
 /** 组头 label 序列（断言分组顺序/存在性）。 */
 function groupHeadLabels(): (string | null)[] {
   return screen
@@ -385,7 +394,8 @@ describe("SessionListPanel 全局树初次渲染", () => {
     );
     renderPanel(<SessionListPanel />);
 
-    await screen.findByRole("button", { name: "会话 核对变更" });
+    // ql-20260824-001 起默认全组折叠：以组头为数据到达锚点（计数在组头可见）
+    await screen.findByRole("button", { name: "工作区分组 SillyHub" });
     // 数据层：一次拉取 limit=500（D-103），无过滤参
     expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
     expect(lastCallArgs()).toEqual({ limit: 500 });
@@ -427,6 +437,7 @@ describe("SessionListPanel 全局树初次渲染", () => {
       ]),
     );
     renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
 
     await screen.findByRole("button", { name: "会话 映射会话" });
     expect(machineSection("machine-1")).not.toBeNull();
@@ -462,6 +473,7 @@ describe("SessionListPanel 树条目 chips", () => {
       ]),
     );
     renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
 
     const row = await screen.findByRole("button", { name: "会话 整理会议纪要" });
     expect(row.textContent).toContain("Claude");
@@ -484,6 +496,7 @@ describe("SessionListPanel 树条目 chips", () => {
       ]),
     );
     renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
 
     const row = await screen.findByRole("button", { name: "会话 旧会话" });
     expect(row.textContent).toContain("—");
@@ -505,6 +518,7 @@ describe("SessionListPanel 树条目 chips", () => {
       ]),
     );
     renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
 
     const row = await screen.findByRole("button", { name: "会话 旧会话" });
     expect(row.textContent).toContain("Codex");
@@ -593,9 +607,12 @@ describe("SessionListPanel 两层筛选 tab", () => {
       ]),
     );
     renderPanel(<SessionListPanel selectedSessionId="s-1" />);
-    // 缺省全展开：两组条目都可见
+    // ql-20260824-001 起默认全组折叠，选中会话所在组豁免展开（恢复定位语义）
     await screen.findByRole("button", { name: "会话 会话A" });
-    expect(screen.getByRole("button", { name: "会话 会话B" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "会话 会话B" })).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "工作区分组 工作区二" }),
+    ).toHaveAttribute("aria-expanded", "false");
 
     // 筛选变化：当前组（选中会话所在 ws-1）保持展开，ws-2 折叠
     fireEvent.click(screen.getByRole("button", { name: "机器tab machine-1" }));
@@ -656,6 +673,7 @@ describe("SessionListPanel 状态与搜索（树形态视图过滤）", () => {
       ]),
     );
     renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
     await waitFor(() => expect(sessionRows().length).toBe(2));
 
     await chooseAntdOptionByText("slp-status", "已结束");
@@ -677,6 +695,7 @@ describe("SessionListPanel 状态与搜索（树形态视图过滤）", () => {
       ]),
     );
     renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
     await waitFor(() => expect(sessionRows().length).toBe(2));
 
     const input = screen.getByLabelText("搜索会话标题");
@@ -703,6 +722,7 @@ describe("SessionListPanel 筛选后条目去冗余（ql-20260823-003）", () =>
       listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
     );
     renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
 
     const row = await screen.findByRole("button", { name: "会话 会话A" });
     expect(row.textContent).toContain("Claude"); // 未筛选：引擎 chip 在
@@ -741,8 +761,10 @@ describe("SessionListPanel 组头回调与截断", () => {
     const onNewInGroup = vi.fn();
     renderPanel(<SessionListPanel onNewInGroup={onNewInGroup} />);
 
-    await screen.findByRole("button", { name: "会话 会话A" });
-    fireEvent.click(screen.getByRole("button", { name: "在 SillyHub 新建会话" }));
+    // 默认折叠下组头「＋」仍在 DOM（opacity 隐藏不影响测试点击）
+    fireEvent.click(
+      await screen.findByRole("button", { name: "在 SillyHub 新建会话" }),
+    );
     // ql-20260823-001：未筛选时筛选快照为空串（两层均未选）。
     expect(onNewInGroup).toHaveBeenCalledWith("ws-1", {
       machineId: "",
@@ -763,8 +785,8 @@ describe("SessionListPanel 组头回调与截断", () => {
     const onNewInGroup = vi.fn();
     renderPanel(<SessionListPanel onNewInGroup={onNewInGroup} />);
 
-    await screen.findByRole("button", { name: "会话 会话A" });
-    // 两层筛选：机器 machine-1 → 智能体 Claude Code
+    // 默认折叠下组头「＋」仍在 DOM；两层筛选：机器 machine-1 → 智能体 Claude Code
+    await screen.findByRole("button", { name: "在 SillyHub 新建会话" });
     fireEvent.click(screen.getByRole("button", { name: "机器tab machine-1" }));
     fireEvent.click(
       screen.getByRole("button", { name: "智能体tab Claude Code" }),
@@ -783,6 +805,7 @@ describe("SessionListPanel 组头回调与截断", () => {
     );
     mocks.listAgentSessions.mockResolvedValue(listResponse(many));
     renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
 
     await waitFor(() => expect(sessionRows().length).toBe(50));
     const moreBtn = screen.getByRole("button", { name: /显示全部/ });
@@ -829,6 +852,7 @@ describe("SessionListPanel 批量与单条删除（组头尾随多选入口）",
     );
     const onDeleteSessions = vi.fn().mockResolvedValue(undefined);
     renderPanel(<SessionListPanel onDeleteSessions={onDeleteSessions} />);
+    await openGroup("SillyHub");
 
     await screen.findByRole("button", { name: "会话 会话A" });
     fireEvent.click(screen.getByRole("button", { name: "多选 SillyHub" }));
@@ -857,6 +881,7 @@ describe("SessionListPanel 批量与单条删除（组头尾随多选入口）",
     );
     const onDeleteSessions = vi.fn().mockResolvedValue(undefined);
     renderPanel(<SessionListPanel onDeleteSessions={onDeleteSessions} />);
+    await openGroup("SillyHub");
 
     await screen.findByRole("button", { name: "会话 会话A" });
     fireEvent.click(screen.getByRole("button", { name: "删除 会话A" }));
@@ -932,7 +957,9 @@ describe("SessionListPanel workspace scope（树单组，端点过滤维持）",
     mocks.listAgentSessions.mockResolvedValue(
       listResponse([makeSession({ id: "s-ws", workspace_id: "ws-1", title: "工作区会话" })]),
     );
-    renderPanel(<SessionListPanel scope={WORKSPACE_SCOPE} />);
+    renderPanel(
+      <SessionListPanel scope={WORKSPACE_SCOPE} defaultExpandedWorkspaceId="ws-1" />,
+    );
 
     await screen.findByRole("button", { name: "会话 工作区会话" });
     expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
@@ -973,7 +1000,9 @@ describe("SessionListPanel workspace scope（树单组，端点过滤维持）",
         }),
       ]),
     );
-    renderPanel(<SessionListPanel scope={WORKSPACE_SCOPE} />);
+    renderPanel(
+      <SessionListPanel scope={WORKSPACE_SCOPE} defaultExpandedWorkspaceId="ws-1" />,
+    );
 
     const row = await screen.findByRole("button", { name: "会话 全字段会话" });
     expect(
@@ -999,7 +1028,13 @@ describe("SessionListPanel change scope（ql-20260823-003：同走工作区树�
     mocks.listAgentSessions.mockResolvedValue(
       listResponse([makeSession({ id: "s-chg", workspace_id: "ws-1", title: "变更会话" })]),
     );
-    renderPanel(<SessionListPanel scope={CHANGE_SCOPE} onNewInGroup={vi.fn()} />);
+    renderPanel(
+      <SessionListPanel
+        scope={CHANGE_SCOPE}
+        defaultExpandedWorkspaceId="ws-1"
+        onNewInGroup={vi.fn()}
+      />,
+    );
 
     expect(
       await screen.findByRole("button", { name: "会话 变更会话" }),
@@ -1033,7 +1068,9 @@ describe("SessionListPanel change scope（ql-20260823-003：同走工作区树�
         makeSession({ id: "s-2", workspace_id: "ws-1", title: "已结束的", status: "ended" }),
       ]),
     );
-    renderPanel(<SessionListPanel scope={CHANGE_SCOPE} />);
+    renderPanel(
+      <SessionListPanel scope={CHANGE_SCOPE} defaultExpandedWorkspaceId="ws-1" />,
+    );
     await screen.findByRole("button", { name: "会话 活跃的" });
     const calls = mocks.listAgentSessions.mock.calls.length;
 
@@ -1053,7 +1090,9 @@ describe("SessionListPanel change scope（ql-20260823-003：同走工作区树�
         makeSession({ id: "s-2", workspace_id: "ws-1", title: "部署手册" }),
       ]),
     );
-    renderPanel(<SessionListPanel scope={CHANGE_SCOPE} />);
+    renderPanel(
+      <SessionListPanel scope={CHANGE_SCOPE} defaultExpandedWorkspaceId="ws-1" />,
+    );
     await screen.findByRole("button", { name: "会话 会议纪要" });
     const calls = mocks.listAgentSessions.mock.calls.length;
 
@@ -1080,7 +1119,9 @@ describe("SessionListPanel change scope（ql-20260823-003：同走工作区树�
         }),
       ]),
     );
-    renderPanel(<SessionListPanel scope={CHANGE_SCOPE} />);
+    renderPanel(
+      <SessionListPanel scope={CHANGE_SCOPE} defaultExpandedWorkspaceId="ws-1" />,
+    );
 
     expect(
       await screen.findByRole("button", { name: "会话 我的会话" }),
@@ -1088,5 +1129,192 @@ describe("SessionListPanel change scope（ql-20260823-003：同走工作区树�
     expect(
       screen.getByRole("button", { name: "会话 同事的会话" }),
     ).toBeInTheDocument();
+  });
+});
+
+// ── 9. 分组默认折叠 + 本地 Agent 合并小节（ql-20260824-001） ────────────────
+
+describe("SessionListPanel 分组默认折叠与本地 Agent 小节（ql-20260824-001）", () => {
+  /** tool_report 固件：origin=tool_report（SillySpec CLI 自动上报，本地 Agent）。 */
+  function makeToolSession(
+    overrides: Partial<AgentSessionRead> = {},
+  ): AgentSessionRead {
+    return makeSession({
+      origin: "tool_report",
+      runtime_id: null,
+      config_snapshot: {
+        profile_name: null,
+        provider_name: null,
+        engine: null,
+        machine_name: "machine-1",
+        agent_name: null,
+        model: null,
+      },
+      ...overrides,
+    });
+  }
+
+  it("无选中初态：全组默认折叠（组头 aria-expanded=false，条目不渲染）；点组头展开", async () => {
+    setWorkspaces([
+      makeWorkspace({ id: "ws-1", name: "工作区一" }),
+      makeWorkspace({ id: "ws-2", name: "工作区二" }),
+    ]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" }),
+        makeSession({ id: "s-2", workspace_id: "ws-2", title: "会话B" }),
+      ]),
+    );
+    renderPanel(<SessionListPanel />);
+
+    await screen.findByRole("button", { name: "工作区分组 工作区一" });
+    for (const name of ["工作区一", "工作区二", "非工作区"]) {
+      expect(
+        screen.getByRole("button", { name: `工作区分组 ${name}` }),
+      ).toHaveAttribute("aria-expanded", "false");
+    }
+    expect(
+      screen.queryByRole("button", { name: "会话 会话A" }),
+    ).not.toBeInTheDocument();
+
+    await openGroup("工作区一");
+    expect(
+      screen.getByRole("button", { name: "会话 会话A" }),
+    ).toBeInTheDocument();
+  });
+
+  it("选中会话所在组默认展开（刷新/深链恢复 ?session= 的定位语义），其余组折叠", async () => {
+    setWorkspaces([
+      makeWorkspace({ id: "ws-1", name: "工作区一" }),
+      makeWorkspace({ id: "ws-2", name: "工作区二" }),
+    ]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" }),
+        makeSession({ id: "s-2", workspace_id: "ws-2", title: "会话B" }),
+      ]),
+    );
+    renderPanel(<SessionListPanel selectedSessionId="s-2" />);
+
+    expect(
+      await screen.findByRole("button", { name: "会话 会话B" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "会话 会话A" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "工作区分组 工作区一" }),
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("tool_report 会话合并进组内「本地 Agent」小节：不进机器分桶、默认折叠、展开可见", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-normal",
+          workspace_id: "ws-1",
+          runtime_id: "rt-m1",
+          title: "正常会话",
+        }),
+        makeToolSession({
+          id: "s-tool",
+          workspace_id: "ws-1",
+          title: "CLI 上报的会话",
+        }),
+      ]),
+    );
+    renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
+
+    // tool_report 不进机器分桶（机器小节只含正常会话）
+    expect(machineSection("machine-1")).not.toBeNull();
+    expect(machineSection("machine-1")?.textContent).not.toContain("CLI 上报的会话");
+    // 「本地 Agent」小节头：默认折叠 + 折叠态计数可见
+    const toolHead = screen.getByRole("button", { name: "本地 Agent 小节" });
+    expect(toolHead).toHaveAttribute("aria-expanded", "false");
+    expect(toolHead.textContent).toContain("1 个会话");
+    expect(
+      screen.queryByRole("button", { name: "会话 CLI 上报的会话" }),
+    ).not.toBeInTheDocument();
+
+    // 点小节头展开 → 条目可见
+    fireEvent.click(toolHead);
+    await waitFor(() => expect(toolHead).toHaveAttribute("aria-expanded", "true"));
+    expect(
+      screen.getByRole("button", { name: "会话 CLI 上报的会话" }),
+    ).toBeInTheDocument();
+  });
+
+  it("选中会话是 tool_report → 所在组 + 「本地 Agent」小节默认展开（恢复定位）", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-normal",
+          workspace_id: "ws-1",
+          runtime_id: "rt-m1",
+          title: "正常会话",
+        }),
+        makeToolSession({
+          id: "s-tool",
+          workspace_id: "ws-1",
+          title: "CLI 上报的会话",
+        }),
+      ]),
+    );
+    renderPanel(<SessionListPanel selectedSessionId="s-tool" />);
+
+    expect(
+      await screen.findByRole("button", { name: "会话 CLI 上报的会话" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "本地 Agent 小节" }),
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("R-05：筛选变化重置「本地 Agent」小节展开态（与组级重置同语义）", async () => {
+    setMachines({ items: [makeMachine()] });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-normal",
+          workspace_id: "ws-1",
+          runtime_id: "rt-m1",
+          title: "正常会话",
+        }),
+        makeToolSession({
+          id: "s-tool",
+          workspace_id: "ws-1",
+          // 挂 runtime 使其通过 machine-1 tab 筛选（默认机器 runtime id=rt-m1；
+          // 分桶不受影响——tool_report 恒落「本地 Agent」小节）。
+          runtime_id: "rt-m1",
+          title: "CLI 上报的会话",
+        }),
+      ]),
+    );
+    renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
+    fireEvent.click(screen.getByRole("button", { name: "本地 Agent 小节" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "会话 CLI 上报的会话" }),
+      ).toBeInTheDocument(),
+    );
+
+    // 机器 tab 切换 → R-05 重置：组与小节都回默认折叠
+    fireEvent.click(screen.getByRole("button", { name: "机器tab machine-1" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "会话 CLI 上报的会话" }),
+      ).not.toBeInTheDocument(),
+    );
+    await openGroup("SillyHub");
+    expect(
+      screen.getByRole("button", { name: "本地 Agent 小节" }),
+    ).toHaveAttribute("aria-expanded", "false");
   });
 });

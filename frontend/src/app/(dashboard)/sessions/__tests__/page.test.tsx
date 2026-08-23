@@ -125,6 +125,8 @@ vi.mock("@/lib/workspaces", () => ({
 // 对齐 runtimes/__tests__/page.test.tsx 惯例 mock 成可控 searchParams。
 vi.mock("next/navigation", () => ({
   useSearchParams: () => mocks.searchParams,
+  // ql-20260824-001：门户选中态 URL 同步消费 usePathname + replace。
+  usePathname: () => "/sessions",
   useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),
 }));
 
@@ -414,6 +416,20 @@ async function enterPreSession() {
   return screen.findByTestId("session-pre-session-panel");
 }
 
+/**
+ * 展开左栏「非工作区」分组（ql-20260824-001 起分组默认折叠）并点默认固件
+ * 会话行——原各用例的「点列表条目」步骤统一收敛到此。
+ */
+async function selectDefaultSession() {
+  const head = await screen.findByRole("button", {
+    name: "工作区分组 非工作区",
+  });
+  fireEvent.click(head);
+  fireEvent.click(
+    screen.getByRole("button", { name: "会话 整理这周的会议纪要" }),
+  );
+}
+
 describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄壳化——渲染经 SessionsPortal 间接覆盖；task-07 表单态断言迁移预会话/空门户态）", () => {
   it("无选中：左会话列表 + 右空门户态 + 页头标题（task-07：原「新建会话表单」断言迁移）", async () => {
     renderPage();
@@ -421,11 +437,13 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄�
     // 页头
     expect(screen.getByRole("heading", { name: "智能体会话" })).toBeTruthy();
 
-    // 左栏：列表（标题条目进可视区；task-05 树形态下落「非工作区」组）
+    // 左栏：列表（ql-20260824-001 起分组默认折叠，组头计数可见；task-05
+    // 树形态下固件会话落「非工作区」组）
     expect(screen.getByLabelText("会话列表")).toBeTruthy();
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "会话 整理这周的会议纪要" })).toBeTruthy();
+    const groupHead = await screen.findByRole("button", {
+      name: "工作区分组 非工作区",
     });
+    expect(groupHead).toHaveAttribute("aria-expanded", "false");
 
     // 右栏：空门户态（未选会话且无 preContext）；表单已退役（D-109）
     expect(screen.getByLabelText("门户空态")).toBeTruthy();
@@ -436,10 +454,7 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄�
 
   it("点击列表条目 → SessionPanel（ConfigBar / CtxUsageBar / 输入框挂载），空门户态隐藏", async () => {
     renderPage();
-    const row = await screen.findByRole("button", {
-      name: "会话 整理这周的会议纪要",
-    });
-    fireEvent.click(row);
+    await selectDefaultSession();
 
     // 右侧会话面板组装到位
     await waitFor(() => {
@@ -485,9 +500,7 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄�
 
   it("组头「＋」→ 两步浮层 → 预会话态（原「页头新建会话回表单态」断言迁移；真会话卸载 SSE 关闭）", async () => {
     renderPage();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
-    );
+    await selectDefaultSession();
     await waitFor(() => {
       expect(screen.getByLabelText("会话面板")).toBeTruthy();
     });
@@ -539,9 +552,7 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄�
       makeSession({ status: "ended", ended_at: "2026-08-15T09:30:00Z" }),
     );
     renderPage();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
-    );
+    await selectDefaultSession();
 
     await waitFor(() => {
       expect(screen.getByText(/会话已结束 —— 可浏览历史消息/)).toBeTruthy();
@@ -612,9 +623,7 @@ describe("SessionPanel attach 历史 whoLine + usage 注入（gap-fix）", () =>
     mocks.listProviders.mockResolvedValue([{ id: "lp-1", name: "GLM 中转" }]);
 
     renderPage();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
-    );
+    await selectDefaultSession();
 
     // attach 并发拉 run 快照（whoLine 数据源）
     await waitFor(() => {
@@ -645,9 +654,7 @@ describe("SessionPanel attach 历史 whoLine + usage 注入（gap-fix）", () =>
     ]);
 
     renderPage();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
-    );
+    await selectDefaultSession();
 
     const who = await screen.findByLabelText("轮次配置快照");
     expect(who).toHaveTextContent("未指定");
@@ -662,9 +669,7 @@ describe("SessionPanel attach 历史 whoLine + usage 注入（gap-fix）", () =>
     mocks.listSessionRuns.mockRejectedValue(new Error("boom"));
 
     renderPage();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
-    );
+    await selectDefaultSession();
 
     await waitFor(() => {
       expect(screen.getByText("提问内容")).toBeTruthy();
@@ -695,9 +700,7 @@ describe("SessionPanel attach 历史 whoLine + usage 注入（gap-fix）", () =>
     ]);
 
     renderPage();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
-    );
+    await selectDefaultSession();
 
     // ql-20260817-007：用户侧=[时间][气泡][头像首字]，agent 侧=[头像][气泡][时间]。
     await screen.findByText("属主发言"); // 等 attach 历史回灌
@@ -748,9 +751,7 @@ describe("SessionPanel SSE 装配器接线（task-09）", () => {
   /** 选中 s-1 进面板并等 SSE 建流，返回 mock 捕获的 handlers。 */
   async function selectSession() {
     renderPage();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
-    );
+    await selectDefaultSession();
     await waitFor(() => {
       expect(mocks.streamSession).toHaveBeenCalledWith(
         "s-1",
@@ -883,9 +884,7 @@ describe("SessionPanel attach 运行中轮恢复竞态（ql-20260820-007）", ()
     );
 
     renderPage();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
-    );
+    await selectDefaultSession();
 
     // detail 先落：attach 修正 effect 对空 turns 扫空（只设 currentRunId）。
     // 打断按钮启用 = currentRunId 已提交（镜像 ref 与之同一轮 effect 写入）。
@@ -919,9 +918,7 @@ describe("SessionPanel attach 运行中轮恢复竞态（ql-20260820-007）", ()
     );
 
     renderPage();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
-    );
+    await selectDefaultSession();
     // 历史先回灌：detail 未到前面板显 Spin（!session 分支），但 logs 恢复在
     // mount effect 内已落 turnState（此刻 logsToTurns 全 completed）。
     await waitFor(() => {
@@ -977,9 +974,7 @@ describe("SessionPanel 轮后对账回放（ql-20260820-010）", () => {
     getAgentSessionLogs.mockResolvedValue([]);
 
     renderPage();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
-    );
+    await selectDefaultSession();
     await waitFor(() => expect(handlers.onLog).toBeDefined());
 
     act(() => handlers.onTurnStarted(makeStreamEnvelope({ event: "turn_started" })));
@@ -1019,9 +1014,7 @@ describe("发送附件即时回显（ql-20260821-002）", () => {
     mocks.getAgentSessionLogs.mockResolvedValue([]);
     // 输入栏回调直通：模拟「上传完成 → onAttachmentsChange → 发送」
     renderPage();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
-    );
+    await selectDefaultSession();
     await waitFor(() => expect(handlers.onLog).toBeTruthy());
     // 经 props 链无直接访问点——以 input 上传路径 mock 验证：上传 API 成功后
     // chips 出现且发送带 ids。此处用 fetch mock 上传一张 1x1 png。
@@ -1073,6 +1066,10 @@ describe("SessionPanel reconnecting 恢复超时入口 + reopen 409 中文化（
       );
       renderPage();
       await advance(0); // 左列表落定
+      // 分组默认折叠：先展开「非工作区」组再点条目（同步 fireEvent 即时生效）
+      fireEvent.click(
+        screen.getByRole("button", { name: "工作区分组 非工作区" }),
+      );
       fireEvent.click(
         screen.getByRole("button", { name: "会话 整理这周的会议纪要" }),
       );
@@ -1108,6 +1105,10 @@ describe("SessionPanel reconnecting 恢复超时入口 + reopen 409 中文化（
       );
       renderPage();
       await advance(0);
+      // 分组默认折叠：先展开「非工作区」组再点条目（同步 fireEvent 即时生效）
+      fireEvent.click(
+        screen.getByRole("button", { name: "工作区分组 非工作区" }),
+      );
       fireEvent.click(
         screen.getByRole("button", { name: "会话 整理这周的会议纪要" }),
       );
@@ -1166,9 +1167,7 @@ describe("SessionPanel reconnecting 恢复超时入口 + reopen 409 中文化（
       }),
     );
     renderPage();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
-    );
+    await selectDefaultSession();
     await waitFor(() => {
       expect(screen.getByText(/会话已结束 —— 可浏览历史消息/)).toBeTruthy();
     });
