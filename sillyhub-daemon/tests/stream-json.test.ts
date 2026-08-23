@@ -449,6 +449,43 @@ describe('buildArgs / buildInput (spawn 参数 + stdin 输入)', () => {
     expect(args).toContain('--output-format');
   });
 
+  // ── task-07（2026-08-23-agent-file-upload-mcp / D-008@v1 / D-009@v2 / R-03）──
+  // spike-01 本机实测（claude CLI 2.1.216）：--mcp-config 与 buildArgs 既有全套参数
+  // （-p / --output-format stream-json / --input-format stream-json / --verbose /
+  // --permission-mode / --include-partial-messages / --allowedTools / --max-turns /
+  // --settings）共存无冲突，system/init 事件 mcp_servers 含配置文件里的 server；
+  // .mcp.json per-server env 的 ${VAR} 按 claude 进程 env 展开可用（加固形态可升级）。
+  it('buildArgs mcpConfigPath 非空时追加 --mcp-config <path>（claude，task-07）', () => {
+    const a = new StreamJsonAdapter('claude');
+    const args = a.buildArgs({
+      mcpConfigPath: 'C:\\tmp\\sillyhub-file-mcp-run-1.json',
+      allowedRoots: ['/tmp/ws'],
+      toolConfig: { mode: 'bypassPermissions', allowed_tools: ['mcp__sillyhub-file__upload_file'] },
+    });
+    const idx = args.indexOf('--mcp-config');
+    expect(idx).toBeGreaterThan(-1);
+    expect(args[idx + 1]).toBe('C:\\tmp\\sillyhub-file-mcp-run-1.json');
+    // 既有参数零回归：基础 flags + --settings + --allowedTools 共存
+    expect(args).toContain('-p');
+    expect(args).toContain('--verbose');
+    expect(args).toContain('--settings');
+    expect(args).toContain('--allowedTools');
+  });
+
+  it('buildArgs mcpConfigPath 缺省不追加 --mcp-config（零回归，task-07）', () => {
+    const a = new StreamJsonAdapter('claude');
+    expect(a.buildArgs()).not.toContain('--mcp-config');
+    expect(a.buildArgs({})).not.toContain('--mcp-config');
+    expect(a.buildArgs({ mcpConfigPath: '' })).not.toContain('--mcp-config');
+  });
+
+  it('buildArgs cursor 分支忽略 mcpConfigPath（D-008@v1，task-07）', () => {
+    const a = new StreamJsonAdapter('cursor');
+    const args = a.buildArgs({ prompt: 'hi', mcpConfigPath: 'C:\\tmp\\mcp.json' });
+    expect(args).not.toContain('--mcp-config');
+    expect(args[args.length - 1]).toBe('hi');
+  });
+
   it('buildInput 返回合法 user message JSON（对照 Python TestBuildInput）', () => {
     const a = new StreamJsonAdapter('claude');
     const data = a.buildInput('hello world');

@@ -41,7 +41,17 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import * as readline from 'node:readline';
 import { mkdir, writeFile, readdir, rm, stat } from 'node:fs/promises';
+import { writeFileSync, chmodSync } from 'node:fs';
 import { join, relative, isAbsolute, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
+// task-07（2026-08-23-agent-file-upload-mcp / FR-02/FR-07 / D-009@v2）：worker spawn
+// 注入 sillyhub-file MCP——buildFileMcpServerConfig 构造 server 条目，凭证经
+// per-server env 写入 0600 tmpdir 临时 .mcp.json（唯一已验证可靠通道，spike-01）。
+import {
+  buildFileMcpServerConfig,
+  FILE_MCP_SERVER_NAME,
+  type DaemonMcpAuth,
+} from './mcp-config.js';
 
 import {
   pullSpecBundle,
@@ -258,6 +268,72 @@ export function mapDetectedToSillyspecTools(detected: readonly string[]): string
   return detected.filter((name) => SILLYSPEC_VALID_TOOLS.has(name));
 }
 
+// ── task-07（2026-08-23-agent-file-upload-mcp / R-09 / D-009@v2）：worker .mcp.json ──
+
+/**
+ * worker 临时 .mcp.json 文件名前缀（os.tmpdir() 下；清扫残留按此前缀匹配）。
+ * 文件名形态：``sillyhub-file-mcp-<runId>.json``（含 runId 可辨识）。
+ */
+export const FILE_MCP_TMP_PREFIX = 'sillyhub-file-mcp-';
+
+/**
+ * 启动清扫的残留文件年龄阈值（1 小时）。tmpfile 在 run 终态 finally 删除，
+ * 仅 daemon 崩溃才会残留；清扫跳过比阈值新的文件——防止误删**并发在跑** run
+ *（同机多 daemon / 测试并行构造多个 TaskRunner）的活跃 tmpfile。
+ */
+export const FILE_MCP_TMP_MAX_AGE_MS = 60 * 60 * 1000;
+
+/**
+ * 构造 worker .mcp.json 在 os.tmpdir() 下的绝对路径（node:path join，三平台兼容）。
+ * runId 做字符白名单清洗（UUID 天然安全；防 duck-typed payload 注入路径分隔符）。
+ */
+export function fileMcpTmpPathFor(runId: string): string {
+  const safe = runId.replace(/[^A-Za-z0-9._-]/g, '_');
+  return join(tmpdir(), `${FILE_MCP_TMP_PREFIX}${safe}.json`);
+}
+
+/**
+ * 进程级单次守卫：清扫每进程只跑一次（见 TaskRunner 构造器注释）。
+ */
+let fileMcpSweepStarted = false;
+
+/**
+ * 清扫 tmpdir 同前缀残留 .mcp.json（daemon 启动时 fire-and-forget 调用）。
+ *
+ * 三平台兼容：readdir/stat/rm 全走 node:fs/promises；单文件失败 / tmpdir 不可读
+ * 静默继续（清扫是卫生动作，绝不让 daemon 启动失败）。跳过未超年龄阈值的文件
+ * （并发保护，见 {@link FILE_MCP_TMP_MAX_AGE_MS}）。
+ *
+ * @returns 实际删除的文件数（测试断言用）。
+ */
+export async function cleanupStaleFileMcpConfigs(
+  maxAgeMs: number = FILE_MCP_TMP_MAX_AGE_MS,
+): Promise<number> {
+  let removed = 0;
+  const dir = tmpdir();
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch {
+    return 0;
+  }
+  const now = Date.now();
+  for (const name of entries) {
+    if (!name.startsWith(FILE_MCP_TMP_PREFIX) || !name.endsWith('.json')) continue;
+    const filePath = join(dir, name);
+    try {
+      const s = await stat(filePath);
+      if (!s.isFile()) continue;
+      if (now - s.mtimeMs < maxAgeMs) continue;
+      await rm(filePath, { force: true });
+      removed++;
+    } catch {
+      // 单文件 stat/rm 失败：继续下一个（清扫 best-effort）
+    }
+  }
+  return removed;
+}
+
 /**
  * 任务编排器：执行一个 lease，把 agent 输出流式 submit 到 server，
  * 收集 git diff，产出 TaskResult。
@@ -326,7 +402,20 @@ export class TaskRunner {
      * runSillyspecInit 兜底 ['claude']。探测失败不阻塞 daemon 启动（cli.ts 侧 catch）。
      */
     private readonly detectedAgents?: string[] | null,
-  ) {}
+  ) {
+    // task-07（2026-08-23-agent-file-upload-mcp / R-09）：daemon 启动清扫 tmpdir 同
+    // 前缀残留 .mcp.json（上次 daemon 崩溃未走 run 终 finally 的遗留，内含 daemon
+    // 凭证）。fire-and-forget——清扫失败不影响 TaskRunner 可用性，也不动 cli.ts
+    //（构造即触发）。年龄阈值防误删并发在跑 run 的活跃 tmpfile（见常量注释）。
+    // 进程级单次守卫：生产 daemon 每进程仅构造一次 TaskRunner，行为不变；测试并行
+    // 构造多个 TaskRunner 时避免重复全量 readdir 系统临时目录造成 IO 风暴，拖慢
+    // spawn 前路径击穿 waitForSpawn 类轮询预算（回归修正，见 _writeFileMcpTmpConfig
+    // 同步写注释）。
+    if (!fileMcpSweepStarted) {
+      fileMcpSweepStarted = true;
+      void cleanupStaleFileMcpConfigs().catch(() => {});
+    }
+  }
 
   // ── 追踪与取消 ────────────────────────────────────────────────────────────
 
@@ -423,6 +512,11 @@ export class TaskRunner {
     // ql-20260616-006：lease heartbeat 循环控制器（声明在 try 外，便于 finally 清理）
     let hbStop: AbortController | null = null;
     let heartbeatPromise: Promise<void> | null = null;
+
+    // task-07（2026-08-23-agent-file-upload-mcp / R-09 / D-009@v2）：worker .mcp.json
+    // 临时文件路径（声明在 try 外，便于 finally 删除；null = 未写入——非 claude
+    // provider 或写盘失败降级）。run 终态（成功/失败/取消）finally 删除，凭证不残留。
+    let fileMcpTmpPath: string | null = null;
 
     try {
       // ── init lease 分支（task-07 / D-002/D-009）：mode='init' → 不启 agent ──────────
@@ -655,6 +749,26 @@ export class TaskRunner {
         ? intersectAllowedRoots(physicalAllowedRoots, effectiveRoots)
         : physicalAllowedRoots;
 
+      // 步骤 5.5（task-07 / 2026-08-23-agent-file-upload-mcp / FR-02/FR-07）：
+      // 仅 provider=claude 租约注入 sillyhub-file MCP（D-008@v1：codex/cursor 不注入，
+      // gemini 无链路）。buildFileMcpServerConfig（runId=agentRunId、allowedRoot=workDir
+      // worktree 根、daemon 凭证）→ 写 os.tmpdir() 下 0600 临时 .mcp.json（D-009@v2：
+      // 凭证经 per-server env 落 0600 tmpfile——spike-01 证父进程 spawnEnv 自定义变量
+      // 不透传 interactive SDK MCP 子进程，per-server env 是已验证可靠通道；R-03 spike
+      // 顺带实测 claude CLI 2.1.216 的 .mcp.json per-server env 支持 ${VAR} 展开（按
+      // claude 进程 env 展开），「文件只存变量引用」加固形态可用，本任务按 D-009@v2
+      // 直写凭证形态实现）。文件不进 workDir（rootPath 模式 workDir=宿主真实仓库，
+      // 防 git status 污染，R-09）；重试循环复用同一文件；run 终 finally 删除。
+      // 写盘失败仅 warn 降级（worker 无上传工具但编排照跑，与 startLease 失败同策略）。
+      if (provider === 'claude') {
+        try {
+          fileMcpTmpPath = this._writeFileMcpTmpConfig(leaseId, ctx, workDir);
+        } catch (e) {
+          console.warn('task_runner: file_mcp_config_write_failed', leaseId, e);
+          fileMcpTmpPath = null;
+        }
+      }
+
       // 重试循环：spawn → stream → 判定（task-10 B3）。
       // 可重试：timeout / spawn ENOENT / OOM / segfault / killed。
       // 不重试：cancelled / businessError（claude is_error）/ completed / 业务非零退出。
@@ -713,19 +827,26 @@ export class TaskRunner {
         // args 每次重试都重新构建（重试时 effectiveCtx.resumeSessionId 已清空，buildArgs 不带 --resume）
         // ql-20260617-008：透传 prompt，ndjson 协议把 prompt 作为 args 末尾位置参数
         // task-16：allowedRoots 用 frozenAllowedRoots（D-003 冻结，不随热更新变）。
-        const args = adapter.buildArgs
-          ? adapter.buildArgs({
-              model: effectiveCtx.model,
-              sessionId: effectiveCtx.sessionId,
-              resumeSessionId: effectiveCtx.resumeSessionId,
-              prompt: effectivePrompt,
-              // task-16：per-runtime allowed_roots（PolicyCache.get 快照，spawn 时冻结）。
-              allowedRoots: frozenAllowedRoots,
-              toolConfig: ctx.toolConfig as
-                | { mode?: string; allowed_tools?: string[]; max_turns?: number }
-                | undefined,
-            })
-          : [];
+        // task-07：mcpConfigPath 走交叉类型局部变量透传——ProtocolAdapter.buildArgs
+        // 契约（protocol-adapter.ts）不含该字段（本任务不改契约文件），StreamJsonAdapter
+        // 的 buildArgs opts 已扩 mcpConfigPath?，非 claude provider 时为 undefined。
+        const buildArgsOpts: Parameters<NonNullable<ProtocolAdapter['buildArgs']>>[0] & {
+          mcpConfigPath?: string;
+        } = {
+          model: effectiveCtx.model,
+          sessionId: effectiveCtx.sessionId,
+          resumeSessionId: effectiveCtx.resumeSessionId,
+          prompt: effectivePrompt,
+          // task-16：per-runtime allowed_roots（PolicyCache.get 快照，spawn 时冻结）。
+          allowedRoots: frozenAllowedRoots,
+          toolConfig: ctx.toolConfig as
+            | { mode?: string; allowed_tools?: string[]; max_turns?: number }
+            | undefined,
+        };
+        if (fileMcpTmpPath) {
+          buildArgsOpts.mcpConfigPath = fileMcpTmpPath;
+        }
+        const args = adapter.buildArgs ? adapter.buildArgs(buildArgsOpts) : [];
 
         result = await this._spawnAndStream({
           cmdPath,
@@ -853,7 +974,60 @@ export class TaskRunner {
       // ql-20260616-006：停止 lease heartbeat 循环并等其退出，避免泄漏
       if (hbStop) hbStop.abort();
       if (heartbeatPromise) await heartbeatPromise.catch(() => {});
+      // task-07（R-09/D-009@v2）：run 终态（成功/失败/取消/异常统一路径）删除
+      // tmp .mcp.json——凭证生命周期收敛为单 run。force 容忍已不存在，rm 失败静默
+      //（残留由下次 daemon 启动清扫兜底，见构造器 cleanupStaleFileMcpConfigs）。
+      if (fileMcpTmpPath) {
+        await rm(fileMcpTmpPath, { force: true }).catch(() => {});
+      }
     }
+  }
+
+  // ── task-07（2026-08-23-agent-file-upload-mcp）：worker sillyhub-file .mcp.json ──
+
+  /**
+   * 写 worker 临时 .mcp.json（仅 claude 租约调用，runLease 步骤 5.5）。
+   *
+   * - server 条目：``buildFileMcpServerConfig(server_url, {token, apiKey}, {runId,
+   *   allowedRoot: workDir})``（task-05 工厂；runId 缺省回落 leaseId，保证文件名可辨识）；
+   * - 位置：``os.tmpdir()``（node:path join 三平台兼容；**不进 workDir**——rootPath
+   *   模式 workDir=宿主真实仓库，写进去会污染 git status，R-09）；
+   * - 权限：writeFile mode 0600 + 显式 chmod 兜底（umask）；Windows 无 POSIX 权限位，
+   *   chmod best-effort 不抛错（三平台兼容）；
+   * - 凭证（D-009@v2）：daemon token/apiKey 经 per-server env 写入本 0600 文件
+   *   （spike-01 验证 per-server env 是 MCP 子进程可靠投递通道）。
+   *
+   * 写盘异常由调用方 catch（warn 降级，不阻塞 worker 编排）。
+   */
+  private _writeFileMcpTmpConfig(leaseId: string, ctx: LeaseCtx, workDir: string): string {
+    const backendUrl = this.config?.server_url ?? '';
+    const auth: DaemonMcpAuth = {
+      // config 字段可空（null），Duck 类型归一为 undefined（守卫式不写键）。
+      token: this.config?.token ?? undefined,
+      apiKey: this.config?.api_key ?? undefined,
+    };
+    // runId 优先 AgentRun id（mcp-server 写日志行的锚）；缺失回落 leaseId 只求可辨识。
+    const runId = ctx.agentRunId && ctx.agentRunId.trim() ? ctx.agentRunId : leaseId;
+    const server = buildFileMcpServerConfig(backendUrl, auth, {
+      runId,
+      allowedRoot: workDir,
+    });
+    const path = fileMcpTmpPathFor(runId);
+    const payload =
+      JSON.stringify({ mcpServers: { [FILE_MCP_SERVER_NAME]: server } }, null, 2) + '\n';
+    // 同步写（task-07 回归修正）：spawn 前路径保持零真实异步 IO 间隙——异步写入曾
+    // 在并行测试负载下把 spawn 推迟到 waitForSpawn 轮询 / fake-timer 泵预算之外，
+    // 子进程事件在监听器注册前发出被丢，35 例既有测试挂死。文件仅数百字节、worker
+    // spawn 本就是重操作，同步写开销可忽略。
+    writeFileSync(path, payload, { mode: 0o600 });
+    // umask 可能把创建权限位收紧以外的位裁掉；显式 chmod 兜底回 0600。
+    // Windows chmod 仅映射只读位、不抛错——best-effort（三平台兼容）。
+    try {
+      chmodSync(path, 0o600);
+    } catch {
+      // best-effort：chmod 失败不影响功能（创建时已带 mode）
+    }
+    return path;
   }
 
   // ── init lease 轻量分支（task-07 / D-002/D-009，不启 agent）──────────────────
