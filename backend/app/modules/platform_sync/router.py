@@ -12,6 +12,10 @@
 - POST /agent-logs：agent 会话日志元信息批量上报（2026-08-23-platform-agent-log-ingest
   task-02，协议 docs/platform-agent-log-protocol.md §1，仅 shpsync_）
 - GET /agent-logs：agent 会话日志列表（读 scope 过滤 + last_seen_at 倒序，同上 task-02）
+- GET /agent-logs/{entry_id}/content：单条日志原文尾部查看（2026-08-23-agent-activity-sessions
+  task-05；读取前置/错误映射自 agent-log-conversation-view task-03 起抽共享 helper）
+- GET /agent-logs/{entry_id}/messages：单条日志对话化归一化消息（2026-08-23-agent-log-
+  conversation-view task-03，design §7.2；status 四值一律 200 分层、老 daemon 422）
 
 router **不自带 prefix**，路径在路由内写全（``/changes/...``）；main 挂 ``prefix="/api"``
 落地 ``/api/changes/...``。不自带 prefix 是为了避开 FastAPI 对 ``GET /changes`` 的
@@ -31,7 +35,7 @@ workspace 并集 + NULL 桶聚合（service ``allowed_workspace_ids`` 参数）�
 from __future__ import annotations
 
 import uuid
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
@@ -48,6 +52,7 @@ from app.modules.platform_sync.schema import (
     AgentLogContentResponse,
     AgentLogListItem,
     AgentLogListResponse,
+    AgentLogMessagesResponse,
     AgentLogPushOk,
     AgentLogPushRequest,
     ApprovalSubmitOk,
@@ -65,6 +70,11 @@ from app.modules.platform_sync.schema import (
     SpecSyncResponse,
 )
 from app.modules.platform_sync.service import PlatformSyncService
+
+if TYPE_CHECKING:
+    # 仅类型标注用（helper 返回值）；运行时 import 维持函数级（防模块加载环，
+    # 与 read_agent_log_content 既有函数级 import 惯例一致）。
+    from app.modules.platform_sync.model import AgentSessionLogORM
 
 router = APIRouter(tags=["platform-sync"])
 
@@ -432,7 +442,8 @@ async def list_agent_logs(
     return AgentLogListResponse(items=[AgentLogListItem.model_validate(row) for row in rows])
 
 
-# ── 2026-08-23-agent-activity-sessions task-05（design §3.3.5 内容查看端点）──
+# ── 2026-08-23-agent-activity-sessions task-05（design §3.3.5 内容查看端点）；──
+# ── 2026-08-23-agent-log-conversation-view task-03：读取前置/RPC 错误映射抽共享 helper ──
 
 #: format 黑名单子串（Grill P2 改黑名单语义）：命中即视为二进制，409 拒绝在线
 #: 查看；其余（含 *-jsonl / opencode-session-json-tree / unknown 等文本类）放行。
@@ -445,49 +456,36 @@ _AGENT_LOG_BINARY_FORMAT_TOKENS: frozenset[str] = frozenset({"sqlite", "zstd"})
 _AGENT_LOG_CONTENT_MAX_BYTES = 262144
 
 
-@router.get("/agent-logs/{entry_id}/content", response_model=AgentLogContentResponse)
-async def read_agent_log_content(
+async def _resolve_agent_log_read_target(
+    session: AsyncSession,
     entry_id: uuid.UUID,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    auth: _read_auth,
-) -> AgentLogContentResponse:
-    """GET 单条 agent 日志的内容（design §3.3.5，读即弃不落库）。
+    scope: PlatformSyncAuthScope,
+) -> tuple[AgentSessionLogORM, uuid.UUID]:
+    """agent 日志读取共享前置（task-03 从 read_agent_log_content 抽取，行为保持）。
 
-    鉴权 scope 校验 entry 可见（shpsync_ = token 绑定 workspace；JWT/shk_live_ =
-    CHANGE_READ 并集），不可见 404 中文（不泄漏存在性）。
+    content / messages 两端点共用（2026-08-23-agent-log-conversation-view design
+    §5/§7.2），防 scope/黑名单/daemon 定位两口径漂移：
 
-    读取链路（**直连 ws rpc，不走 ``HostFsDelegate.read_file``**——其
-    ``_via_rpc_or_degrade`` 会把离线/远端错静默降级为空串，与错误语义冲突）：
-
-    1. format 黑名单（sqlite/zstd 子串）→ 409 中文「二进制暂不支持」。
-    2. 定位 daemon_id：``entry.agent_session.runtime_id → DaemonRuntime.
+    1. scope 内校验：shpsync_ 精确匹配 token 派生 workspace；JWT/shk_live_ 并集
+       包含。不可见/不存在同语义 404（不泄漏存在性，口径同 list_agent_logs）。
+    2. format 黑名单（Grill P2）：二进制格式显式 409，不喂给文本渲染。
+    3. 定位目标 daemon：``entry.agent_session.runtime_id → DaemonRuntime.
        daemon_instance_id``（迁移窗口回落 runtime_id）优先；pending 未激活 →
        ``resolve_daemon_instance_for_workspace(entry.workspace_id)``；都无 →
        404 中文。
-    3. ``host_fs.read_file {path}`` RPC（默认 30s 超时）；daemon 拒 forbidden →
-       409 中文（含 allowed_roots 配置指引）/ not_found → 404 中文 / 其余远端
-       错 → 既有 502；机器离线 → 既有 ``DaemonRuntimeOffline``；RPC 超时 →
-       既有 ``DaemonRpcTimeout``（504）。
-    4. 尾部 262144 字节截断（``errors="ignore"`` 回解）后返回
-       ``{content, truncated, size_bytes}``。
+
+    Returns ``(entry, daemon_id)``；不可恢复错误直接 raise AppError。
     """
     from sqlalchemy import select
 
     from app.core.errors import AppError
     from app.modules.agent.model import AgentSession
-    from app.modules.daemon.host_fs.ws_rpc import send_host_fs_rpc
-    from app.modules.daemon.runtime.service import (
-        DaemonRpcRemoteError,
-        DaemonRpcRemoteGatewayError,
-    )
     from app.modules.daemon.session.service import _resolve_daemon_id_for_runtime
-    from app.modules.daemon.ws_hub import get_daemon_ws_hub
     from app.modules.platform_sync.model import AgentSessionLogORM
     from app.modules.workspace.member_runtimes.queries import (
         resolve_daemon_instance_for_workspace,
     )
 
-    _user, scope = auth
     entry = (
         await session.execute(select(AgentSessionLogORM).where(AgentSessionLogORM.id == entry_id))
     ).scalar_one_or_none()
@@ -537,17 +535,43 @@ async def read_agent_log_content(
             http_status=404,
             details={"entry_id": str(entry_id)},
         )
+    return entry, daemon_id
 
-    # ── 3. 直连 ws rpc 读文件（30s 默认传输预算；错误四类显式映射不降级）。──
+
+async def _send_agent_log_rpc(
+    entry: AgentSessionLogORM,
+    daemon_id: uuid.UUID,
+    method: str,
+    args: dict[str, Any],
+    *,
+    unsupported_on_method_not_found: bool = False,
+) -> dict[str, Any]:
+    """agent 日志读取共享 RPC + ``DaemonRpcRemoteError`` 映射（task-03 抽取，行为保持）。
+
+    直连 ws rpc（**不走 ``HostFsDelegate.read_file``**——其 ``_via_rpc_or_degrade``
+    会把离线/远端错静默降级为空串，与错误语义冲突），默认 30s 传输预算。错误映射：
+
+    - ``forbidden``（allowed_roots 白名单外）→ 409 中文（含 allowed_roots 配置指引）；
+    - ``not_found``（文件不存在）→ 404 中文；
+    - ``method_not_found``（老 daemon 未注册该方法）→ 422 中文
+      ``HTTP_422_AGENT_LOG_UNSUPPORTED``——仅 ``unsupported_on_method_not_found=
+      True`` 的调用方启用（messages 端点新方法；content 端点 read_file 全代
+      daemon 均已注册，恒 False 保持既有语义）；
+    - 其余远端错 → 既有 502 网关语义（不裸抛非 AppError 的 500）；
+    - 离线（``DaemonRuntimeOffline``）/ 超时（``DaemonRpcTimeout``）为既有 AppError
+      原样透传（错误处理器按既有 code/http_status 渲染，不在此改写语义）。
+    """
+    from app.core.errors import AppError
+    from app.modules.daemon.host_fs.ws_rpc import send_host_fs_rpc
+    from app.modules.daemon.runtime.service import (
+        DaemonRpcRemoteError,
+        DaemonRpcRemoteGatewayError,
+    )
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
     hub = get_daemon_ws_hub()
     try:
-        result = await send_host_fs_rpc(
-            hub,
-            daemon_id,
-            "read_file",
-            entry.workspace_id,
-            {"path": entry.log_path},
-        )
+        return await send_host_fs_rpc(hub, daemon_id, method, entry.workspace_id, args)
     except DaemonRpcRemoteError as exc:
         # daemon 侧业务错（code 来自 toRpcError / assertWithinAllowedRoots）：
         # forbidden（allowed_roots 白名单外）/ not_found（文件不存在）显式中文，
@@ -558,21 +582,60 @@ async def read_agent_log_content(
                 "请在 daemon 配置的 allowed_roots 中加入该日志所在目录后重试。",
                 code="HTTP_409_AGENT_LOG_READ_FORBIDDEN",
                 http_status=409,
-                details={"entry_id": str(entry_id), "log_path": entry.log_path},
+                details={"entry_id": str(entry.id), "log_path": entry.log_path},
             ) from exc
         if exc.code == "not_found":
             raise AppError(
                 "日志文件在目标机器上不存在（可能已被清理或移动）。",
                 code="HTTP_404_AGENT_LOG_FILE_NOT_FOUND",
                 http_status=404,
-                details={"entry_id": str(entry_id), "log_path": entry.log_path},
+                details={"entry_id": str(entry.id), "log_path": entry.log_path},
+            ) from exc
+        if unsupported_on_method_not_found and exc.code == "method_not_found":
+            # 老 daemon 未升级：ws-client ``_dispatchRpc`` 对未注册 method 回
+            # ``error.code='method_not_found'``（实测 ws-client.ts:530）→ 422，
+            # 前端据此回落原文端点（design §7.2 / D-003@v1；唯一 422 场景）。
+            raise AppError(
+                "当前机器的守护进程版本过旧，暂不支持对话式查看日志；"
+                "请升级守护进程后重试，或改用原文查看。",
+                code="HTTP_422_AGENT_LOG_UNSUPPORTED",
+                http_status=422,
+                details={"entry_id": str(entry.id), "daemon_code": exc.code},
             ) from exc
         raise DaemonRpcRemoteGatewayError(
             f"读取日志内容失败（daemon 返回错误：{exc.code}）。",
-            details={"entry_id": str(entry_id), "daemon_code": exc.code},
+            details={"entry_id": str(entry.id), "daemon_code": exc.code},
         ) from exc
-    # 离线（DaemonRuntimeOffline）/ 超时（DaemonRpcTimeout）为既有 AppError，
-    # 原样透传（错误处理器按既有 code/http_status 渲染，不在此改写语义）。
+
+
+@router.get("/agent-logs/{entry_id}/content", response_model=AgentLogContentResponse)
+async def read_agent_log_content(
+    entry_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    auth: _read_auth,
+) -> AgentLogContentResponse:
+    """GET 单条 agent 日志的内容（design §3.3.5，读即弃不落库）。
+
+    鉴权 scope 校验 entry 可见（shpsync_ = token 绑定 workspace；JWT/shk_live_ =
+    CHANGE_READ 并集），不可见 404 中文（不泄漏存在性）。
+
+    读取链路（scope 校验 / format 黑名单 / daemon 定位 / 错误映射自 task-03 起
+    共享 ``_resolve_agent_log_read_target`` + ``_send_agent_log_rpc``，与 messages
+    端点同口径）：
+
+    1. format 黑名单（sqlite/zstd 子串）→ 409 中文「二进制暂不支持」。
+    2. 定位 daemon_id：会话 runtime→daemon_instance 优先；workspace 绑定回落；
+       都无 → 404 中文。
+    3. ``host_fs.read_file {path}`` RPC（默认 30s 超时）；daemon 拒 forbidden →
+       409 中文（含 allowed_roots 配置指引）/ not_found → 404 中文 / 其余远端
+       错 → 既有 502；机器离线 → 既有 ``DaemonRuntimeOffline``；RPC 超时 →
+       既有 ``DaemonRpcTimeout``（504）。
+    4. 尾部 262144 字节截断（``errors="ignore"`` 回解）后返回
+       ``{content, truncated, size_bytes}``。
+    """
+    _user, scope = auth
+    entry, daemon_id = await _resolve_agent_log_read_target(session, entry_id, scope)
+    result = await _send_agent_log_rpc(entry, daemon_id, "read_file", {"path": entry.log_path})
 
     content = str(result.get("content", "")) if isinstance(result, dict) else ""
     # ── 4. 尾部 262144 字节截断（多字节字符被切由 errors=ignore 吞掉）。──
@@ -582,3 +645,61 @@ async def read_agent_log_content(
     if truncated:
         content = raw[-_AGENT_LOG_CONTENT_MAX_BYTES:].decode("utf-8", errors="ignore")
     return AgentLogContentResponse(content=content, truncated=truncated, size_bytes=size_bytes)
+
+
+# ── 2026-08-23-agent-log-conversation-view task-03（design §7.2 对话化消息端点）──
+
+
+@router.get("/agent-logs/{entry_id}/messages", response_model=AgentLogMessagesResponse)
+async def read_agent_log_messages(
+    entry_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    auth: _read_auth,
+    before_seq: int | None = Query(
+        default=None, description="加载更早段：返回 seq 严格小于该值的窗口切片"
+    ),
+) -> AgentLogMessagesResponse:
+    """GET 单条 agent 日志的对话化归一化消息（design §7.2，读即弃不落库）。
+
+    scope 校验 / format 二进制 409 / daemon 定位 / RpcError→HTTP 映射全部复用
+    ``_resolve_agent_log_read_target`` + ``_send_agent_log_rpc``（与 content 端点
+    共享，防两口径漂移）。
+
+    调 ``host_fs.read_agent_log_messages {path, format, beforeSeq?}``（task-02
+    契约，默认 30s 传输预算）：daemon 全量读文件本地解析后只回 KB 级归一化消息
+    （FR-02，替代 content 端点 256KB 原文尾部口径）。外层 daemon 返回 camelCase
+    （``totalSegments``/``skippedLines``）→ 本端点转换层落 snake_case；messages
+    内层逐字段已对齐（design §7.1）无需改名。
+
+    status 四值（parsed/unsupported/parse_error/too_large）**一律 200 透传**——
+    「RPC 成功≠解析成功」，unsupported/parse_error/too_large 由前端判断回落原文
+    端点（design §7.2 / D-003@v1）；本端点零解析零改写（D-001@v1）。唯一 422：
+    老 daemon 未注册该方法（``method_not_found``）→
+    ``HTTP_422_AGENT_LOG_UNSUPPORTED``。``before_seq`` (int | None) 透传 daemon
+    侧 ``beforeSeq``（加载更早切片键，FR-05）。
+    """
+    _user, scope = auth
+    entry, daemon_id = await _resolve_agent_log_read_target(session, entry_id, scope)
+
+    rpc_args: dict[str, Any] = {"path": entry.log_path, "format": entry.format or ""}
+    if before_seq is not None:
+        rpc_args["beforeSeq"] = before_seq
+    result = await _send_agent_log_rpc(
+        entry,
+        daemon_id,
+        "read_agent_log_messages",
+        rpc_args,
+        unsupported_on_method_not_found=True,
+    )
+
+    # camelCase→snake_case 转换层（messages 内层逐字段已对齐，model_validate
+    # 递归校验即可）；status 非四值（契约破坏）由 pydantic 显式炸出而非静默改写。
+    return AgentLogMessagesResponse.model_validate(
+        {
+            "status": result.get("status"),
+            "messages": result.get("messages") or [],
+            "truncated": result.get("truncated", False),
+            "total_segments": result.get("totalSegments", 0),
+            "skipped_lines": result.get("skippedLines", 0),
+        }
+    )

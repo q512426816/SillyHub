@@ -43,7 +43,7 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
   - workspace/ 目录：`LinkWorkspaceDialog` / `LinkedProjectsSection`（PPM 项目链接）、`shared-daemon-manager` / `shared-daemon-toggle`（共享 daemon 管理与成员视图）；LinkWorkspaceDialog 已关联/可选两侧均按词表徽标渲染
     工作区类型（title 带 role/description 摘要）
 - 供应商域（llm-providers/）：
-  - `llm-provider-form` — CRUD 表单（agent_kind / auth_field / api_format / 模型角色映射编辑）
+  - `llm-provider-form` — CRUD 表单（agent_kind / auth_field / api_format / 模型角色映射编辑）；结构化字段（base_url/兜底模型/角色模型/认证字段）↔ 配置 JSON `settings_config.env` 同名键联动（仅键已存在时跟随，字段清空删键；ql-20260823-007，防 JSON 过期值覆盖字段——曾致空占位盖掉真实 key → 会话 Not logged in）
   - `llm-provider-list` — 启停（set/unset-default）与列表
   - `model-input-with-fetch` — 拉上游 /v1/models 填充模型下拉
   - `usage-footer` — 余额/配额/用量两态展示（瞬时错误保上次值）

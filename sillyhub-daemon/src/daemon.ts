@@ -2437,8 +2437,8 @@ export class Daemon {
   }
 
   /**
-   * task-03（2026-07-06-daemon-host-fs-delegate / FR-02）+ task-02（P3 driver gate pilot）：
-   * 注册 host_fs.* 九方法 RPC handler。
+   * task-03（2026-07-06-daemon-host-fs-delegate / FR-02）+ task-02（P3 driver gate pilot）
+   * + task-02（2026-08-23-agent-log-conversation-view）：注册 host_fs.* 十方法 RPC handler。
    *
    * backend complete_lease 收尾的 3 个宿主操作（apply_patch / post_scan / stage_callback）
    * 经 HostFsDelegate（task-01）+ ws_rpc（task-02）调本 handler，在宿主（Windows）执行
@@ -2449,6 +2449,12 @@ export class Daemon {
    * 经 send_rpc（M5 带 timeout）转发的 gate 核验请求，在宿主跑 `sillyspec gate verify --change
    * <name> --json [--stage <stage>]`（命令白名单 R3 + AC-8 拒非 gate 命令），返回
    * `{exit_code, stdout, stderr, duration_ms}`（design §5.3 / §7）。
+   *
+   * task-02（2026-08-23-agent-log-conversation-view / FR-02）：加第 10 方法
+   * read_agent_log_messages，接 backend platform_sync 转发的 agent 日志对话化读取
+   * 请求，返回 `{status, messages, truncated, totalSegments, skippedLines}`
+   * （design §7.1）。老 daemon 未注册本方法 → ws method-not-found 语义由
+   * backend task-03 映射 422 HTTP_422_AGENT_LOG_UNSUPPORTED。
    *
    * 方法名带 `host_fs.` 前缀（与 design §7 method 字段对齐，避免与 list_dir /
    * get_spec_bundle 命名空间冲突）。handler 收 `params`（ws-client.ts:_dispatchRpc 已归一化
@@ -2485,7 +2491,7 @@ export class Daemon {
     }
     const handler = new HostFsHandler({ rootsProvider: () => this._effectiveAllowedRoots() });
 
-    // 九方法各注册一次（method 带 host_fs. 前缀）。handler 抛 RpcError 由 _dispatchRpc
+    // 十方法各注册一次（method 带 host_fs. 前缀）。handler 抛 RpcError 由 _dispatchRpc
     // 原样回填 code；抛普通 Error 映射 internal（ws-client.ts:512-519）。
     ws.registerRpcHandler('host_fs.stat', async (params) => {
       const path = typeof params.path === 'string' ? params.path : '';
@@ -2586,6 +2592,21 @@ export class Daemon {
           ? (params.env as Record<string, string>)
           : null;
       return handler.runCommand({ command, args, cwd, timeout, env });
+    });
+    // task-02（2026-08-23-agent-log-conversation-view / FR-02 / design §7.1）：
+    // 第 10 方法 read_agent_log_messages——agent 日志对话化读取（backend task-03
+    // platform_sync 经 send_rpc 转发 path + format + beforeSeq?）。
+    // 参数清洗与既有九方法同款：path/format 非字符串归一空串（由
+    // assertWithinAllowedRoots 入口断言拒 forbidden）；beforeSeq 数字可选，
+    // 非数字/缺省归 undefined（透传 handler → 解析器按 null = 不切片）。
+    // not_found/forbidden 由 handler 抛 RpcError（与 read_file 同通道），
+    // unsupported/too_large/parse_error 走 status 结构化返回（不抛）。
+    ws.registerRpcHandler('host_fs.read_agent_log_messages', async (params) => {
+      const path = typeof params.path === 'string' ? params.path : '';
+      const format = typeof params.format === 'string' ? params.format : '';
+      const beforeSeq =
+        typeof params.beforeSeq === 'number' ? params.beforeSeq : undefined;
+      return handler.readAgentLogMessages(path, format, beforeSeq);
     });
   }
 

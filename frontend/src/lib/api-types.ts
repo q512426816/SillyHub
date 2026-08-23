@@ -8403,14 +8403,13 @@ export interface paths {
          *     鉴权 scope 校验 entry 可见（shpsync_ = token 绑定 workspace；JWT/shk_live_ =
          *     CHANGE_READ 并集），不可见 404 中文（不泄漏存在性）。
          *
-         *     读取链路（**直连 ws rpc，不走 ``HostFsDelegate.read_file``**——其
-         *     ``_via_rpc_or_degrade`` 会把离线/远端错静默降级为空串，与错误语义冲突）：
+         *     读取链路（scope 校验 / format 黑名单 / daemon 定位 / 错误映射自 task-03 起
+         *     共享 ``_resolve_agent_log_read_target`` + ``_send_agent_log_rpc``，与 messages
+         *     端点同口径）：
          *
          *     1. format 黑名单（sqlite/zstd 子串）→ 409 中文「二进制暂不支持」。
-         *     2. 定位 daemon_id：``entry.agent_session.runtime_id → DaemonRuntime.
-         *        daemon_instance_id``（迁移窗口回落 runtime_id）优先；pending 未激活 →
-         *        ``resolve_daemon_instance_for_workspace(entry.workspace_id)``；都无 →
-         *        404 中文。
+         *     2. 定位 daemon_id：会话 runtime→daemon_instance 优先；workspace 绑定回落；
+         *        都无 → 404 中文。
          *     3. ``host_fs.read_file {path}`` RPC（默认 30s 超时）；daemon 拒 forbidden →
          *        409 中文（含 allowed_roots 配置指引）/ not_found → 404 中文 / 其余远端
          *        错 → 既有 502；机器离线 → 既有 ``DaemonRuntimeOffline``；RPC 超时 →
@@ -8419,6 +8418,43 @@ export interface paths {
          *        ``{content, truncated, size_bytes}``。
          */
         get: operations["read_agent_log_content_api_agent_logs__entry_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-logs/{entry_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Agent Log Messages
+         * @description GET 单条 agent 日志的对话化归一化消息（design §7.2，读即弃不落库）。
+         *
+         *     scope 校验 / format 二进制 409 / daemon 定位 / RpcError→HTTP 映射全部复用
+         *     ``_resolve_agent_log_read_target`` + ``_send_agent_log_rpc``（与 content 端点
+         *     共享，防两口径漂移）。
+         *
+         *     调 ``host_fs.read_agent_log_messages {path, format, beforeSeq?}``（task-02
+         *     契约，默认 30s 传输预算）：daemon 全量读文件本地解析后只回 KB 级归一化消息
+         *     （FR-02，替代 content 端点 256KB 原文尾部口径）。外层 daemon 返回 camelCase
+         *     （``totalSegments``/``skippedLines``）→ 本端点转换层落 snake_case；messages
+         *     内层逐字段已对齐（design §7.1）无需改名。
+         *
+         *     status 四值（parsed/unsupported/parse_error/too_large）**一律 200 透传**——
+         *     「RPC 成功≠解析成功」，unsupported/parse_error/too_large 由前端判断回落原文
+         *     端点（design §7.2 / D-003@v1）；本端点零解析零改写（D-001@v1）。唯一 422：
+         *     老 daemon 未注册该方法（``method_not_found``）→
+         *     ``HTTP_422_AGENT_LOG_UNSUPPORTED``。``before_seq`` (int | None) 透传 daemon
+         *     侧 ``beforeSeq``（加载更早切片键，FR-05）。
+         */
+        get: operations["read_agent_log_messages_api_agent_logs__entry_id__messages_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -8651,6 +8687,103 @@ export interface components {
         AgentLogListResponse: {
             /** Items */
             items?: components["schemas"]["AgentLogListItem"][];
+        };
+        /**
+         * AgentLogMessageItem
+         * @description GET /agent-logs/{entry_id}/messages 单条归一化消息（design §7.1）。
+         *
+         *     字段与 daemon 解析器产出的 ``NormalizedLogMessage``（parse-zcode-model-io.ts）
+         *     **逐字对齐 snake_case**（producer→consumer 全链：daemon → ws rpc JSON → 本
+         *     schema → openapi → 前端 api-types）。``tool_use_id`` 是 tool_use / tool_result
+         *     配对键（消息级 toolCalls[].id / toolCallId）；``tool_input``/``tool_result`` 是
+         *     摘要文本（首 2KB/4KB 截断）；``ts`` 为所属行 completedAt 原文。
+         *     ``extra=ignore`` 保证 daemon 字段演进而后端透传不炸（与 AgentLogEntry 同款宽松）。
+         */
+        AgentLogMessageItem: {
+            /**
+             * Seq
+             * @description 全局段序（加载更早切片键；窗口空洞跳过后重编号）
+             */
+            seq: number;
+            /**
+             * Kind
+             * @description 消息类别（前端渲染分支：气泡/Markdown/折叠/工具卡）
+             * @enum {string}
+             */
+            kind: "user_input" | "reply" | "thinking" | "tool_use" | "tool_result";
+            /**
+             * Text
+             * @description user_input/reply/thinking 正文
+             */
+            text?: string | null;
+            /**
+             * Tool Name
+             * @description tool_use 工具名
+             */
+            tool_name?: string | null;
+            /**
+             * Tool Use Id
+             * @description tool_use 与 tool_result 配对键
+             */
+            tool_use_id?: string | null;
+            /**
+             * Tool Input
+             * @description 工具入参摘要（JSON 串，首 2KB 截断）
+             */
+            tool_input?: string | null;
+            /**
+             * Tool Result
+             * @description 工具结果摘要（首 4KB 截断）
+             */
+            tool_result?: string | null;
+            /**
+             * Is Error
+             * @description tool_result 专用：是否报错
+             */
+            is_error?: boolean | null;
+            /**
+             * Ts
+             * @description 所属行 completedAt 原文
+             */
+            ts?: string | null;
+        };
+        /**
+         * AgentLogMessagesResponse
+         * @description GET /agent-logs/{entry_id}/messages 200 响应（design §7.2）。
+         *
+         *     daemon 侧 ``host_fs.read_agent_log_messages`` 外层 camelCase
+         *     （``totalSegments``/``skippedLines``）→ router 转换层落 snake_case；messages
+         *     内层逐字段已对齐无需改名。status 四值一律 200 透传——「RPC 成功≠解析成功」：
+         *     unsupported/parse_error/too_large 由前端判断回落原文端点（D-003@v1），backend
+         *     零解析零改写（D-001@v1）。
+         */
+        AgentLogMessagesResponse: {
+            /**
+             * Status
+             * @description 解析结果分层（parsed=渲染对话流；其余前端回落原文查看）
+             * @enum {string}
+             */
+            status: "parsed" | "unsupported" | "parse_error" | "too_large";
+            /**
+             * Messages
+             * @description 归一化消息（仅 status=parsed 非空）
+             */
+            messages?: components["schemas"]["AgentLogMessageItem"][];
+            /**
+             * Truncated
+             * @description 段窗口是否被截断（最近 200 段之外还有更早内容）
+             */
+            truncated: boolean;
+            /**
+             * Total Segments
+             * @description 解析出的总段数（仅 parsed 有意义）
+             */
+            total_segments: number;
+            /**
+             * Skipped Lines
+             * @description 解析中跳过的坏行数
+             */
+            skipped_lines: number;
         };
         /**
          * AgentLogPushOk
@@ -34810,6 +34943,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentLogContentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_agent_log_messages_api_agent_logs__entry_id__messages_get: {
+        parameters: {
+            query?: {
+                /** @description 加载更早段：返回 seq 严格小于该值的窗口切片 */
+                before_seq?: number | null;
+            };
+            header?: never;
+            path: {
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentLogMessagesResponse"];
                 };
             };
             /** @description Validation Error */

@@ -4,7 +4,8 @@
  * 实现 design §5.2 的 daemon 侧 host_fs handler：接收 backend 经 per-daemon WS
  * （DaemonWsHub.send_rpc）转发的 `host_fs.<method>` 请求，在宿主（Windows / Linux / macOS）
  * 执行 stat / read_file / list_dir / git_apply / git_rev_parse / pollution_archive /
- * read_package_json / read_local_yaml / run_command 九方法，返回结构化结果。
+ * read_package_json / read_local_yaml / run_command / read_agent_log_messages 十方法，
+ * 返回结构化结果。
  *
  * **职责定位**：
  *   - 本模块是 host_fs 业务层，由 daemon.ts 包装成 RpcHandler 注册到 WsClient
@@ -48,7 +49,7 @@
  */
 
 import { lstat, readFile, readdir, rename, mkdir } from 'node:fs/promises';
-import type { Dirent } from 'node:fs';
+import type { Dirent, Stats } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { join, resolve as pathResolve } from 'node:path';
 import yaml from 'js-yaml';
@@ -59,6 +60,8 @@ import {
   toRpcError,
   type ListDirResult,
 } from './file-rpc.js';
+import { getAgentLogParser, type AgentLogMessagesResult } from './agent-log/registry.js';
+import { DEFAULT_MAX_CONTENT_BYTES } from './agent-log/parse-zcode-model-io.js';
 
 // ── 类型定义（与 backend HostFsDelegate / design §7 三端对齐）─────────────────
 
@@ -425,12 +428,13 @@ async function runGitRevParse(
   return { commit: first.commit, error: first.error ?? 'not_git_repo' };
 }
 
-// ── HostFsHandler：九方法宿主实现 ─────────────────────────────────────────────
+// ── HostFsHandler：十方法宿主实现 ─────────────────────────────────────────────
 
 /**
- * daemon 侧 host_fs handler 业务层（task-03 八方法 + task-02 P3 run_command 第九方法）。
+ * daemon 侧 host_fs handler 业务层（task-03 八方法 + task-02 P3 run_command
+ * 第九方法 + task-02 agent-log 第十方法 read_agent_log_messages）。
  *
- * 九方法 1:1 对齐 design §5.1 / §5.3 / backend HostFsDelegate 签名（跨任务契约锁死）。
+ * 十方法 1:1 对齐 design §5.1 / §5.3 / backend HostFsDelegate 签名（跨任务契约锁死）。
  * 由 daemon.ts:_registerHostFsRpcHandler 包装成 RpcHandler 注册到 WsClient。
  */
 export class HostFsHandler {
@@ -1084,5 +1088,80 @@ export class HostFsHandler {
       stderr: stderrFinal,
       duration_ms: Date.now() - startedAt,
     };
+  }
+
+  // ── read_agent_log_messages（task-02 / 2026-08-23-agent-log-conversation-view）──
+
+  /**
+   * `read_agent_log_messages(path, format, beforeSeq?) → { status, messages,
+   * truncated, totalSegments, skippedLines }`（design §7.1，外层 camelCase；
+   * messages 内层 NormalizedLogMessage snake_case 原样透传）。
+   *
+   * agent 日志对话化读取第 10 方法：backend platform_sync 经 ws_rpc 转发
+   * platform_agent_logs 落库的 path + format，daemon 在宿主读原文并解析为
+   * 归一化对话消息（FR-02），替代 256KB 原文尾部直出口径。
+   *
+   * **错误双通道分层**（Grill B3 裁决 / design §7.1）——「RPC 成功≠解析成功」：
+   *   - 走 throw RpcError（与 readFile 完全同通道同 code，backend 既有映射零改动）：
+   *     越界 `forbidden`（assertWithinAllowedRoots）；文件不存在 `not_found`（toRpcError）。
+   *   - 走 status 结构化返回（不抛）：未注册 format → `unsupported`（registry 判 null，
+   *     不进解析器；FR-04 二进制格式在 backend 409 黑名单拦截，daemon 侧 unsupported
+   *     兜底）；超 20MB → `too_large`（lstat 预判，不读全文入内存）；其余
+   *     parsed / parse_error 由解析器产出（task-01 契约）。
+   *
+   * 处理顺序：白名单守卫（不论 format 注册与否都先过，安全铁律）→ 注册表分发
+   * （null → unsupported，避免无谓文件 IO）→ lstat 预判大小 → readFile utf8 全量
+   * 交解析器（透传 content + beforeSeq；解析器内部 20MB 预算为兜底，task-01 契约）。
+   */
+  async readAgentLogMessages(
+    path: string,
+    format: string,
+    beforeSeq?: number,
+  ): Promise<AgentLogMessagesResult> {
+    // 1. 白名单守卫（与 readFile 同款）：越界抛 forbidden RpcError。
+    assertWithinAllowedRoots(path, this._rootsProvider());
+    const abs = pathResolve(path);
+
+    // 2. 注册表分发：未注册 format → unsupported（不进解析器、不读文件；
+    //    含二进制格式串透传到达时的 daemon 侧兜底，D-002）。
+    const parser = getAgentLogParser(format);
+    if (parser === null) {
+      return {
+        status: 'unsupported',
+        messages: [],
+        truncated: false,
+        totalSegments: 0,
+        skippedLines: 0,
+      };
+    }
+
+    // 3. lstat 预判大小（超 20MB → too_large，不读全文入内存；阈值与解析器内部
+    //    预算共用同一常量 DEFAULT_MAX_CONTENT_BYTES，两侧不漂移）。
+    let info: Stats;
+    try {
+      info = await lstat(abs);
+    } catch (e) {
+      throw toRpcError(e, 'host_fs.read_agent_log_messages.lstat');
+    }
+    if (info.size > DEFAULT_MAX_CONTENT_BYTES) {
+      return {
+        status: 'too_large',
+        messages: [],
+        truncated: false,
+        totalSegments: 0,
+        skippedLines: 0,
+      };
+    }
+
+    // 4. readFile utf8 全量（不存在/读失败 → toRpcError 抛 not_found，
+    //    与 readFile 同通道）→ 透传 content + beforeSeq 交解析器，原样回传
+    //    { status, messages, truncated, totalSegments, skippedLines }。
+    let content: string;
+    try {
+      content = await readFile(abs, 'utf8');
+    } catch (e) {
+      throw toRpcError(e, 'host_fs.read_agent_log_messages');
+    }
+    return parser(content, { beforeSeq: beforeSeq ?? null });
   }
 }

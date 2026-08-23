@@ -72,6 +72,7 @@ query_usage: _detect_usage_provider(base_url) 路由（不加 DB 字段）
 - usage_handlers 只做「请求+解析」：base_url 只取 scheme://host 拼各家固定用量端点（兼容 .cn/.com 与子路径变体）；balance 三家回绝对额、token_plan 四家回百分比（total=100），负数/超 100 不裁剪（裁剪归前端）；上游 body 不回传前端（防回显泄漏，只进 debug 日志）。
 - 探测形态当前是 GET /v1/models（spike-01 结论，留 TODO：若 GLM/kimi 兼容端点不通需改极简 completion）。
 - `PATCH` 显式传 api_key=null 按「不动」处理——前端「清空密钥」当前无入口，需要时单独设计。
+- `settings_config` env 空串占位三层防线（ql-20260823-007，历史预设预填 `ANTHROPIC_AUTH_TOKEN: ""` 曾在 daemon 注入链盖掉真实 key 致会话 "Not logged in"）：预设不再预填认证键（前端守护测试锁定）→ 提交经 `cleanSettingsConfig` 剔 env 空串 → daemon 注入器合并 settings_config.env 时空串按「未配置」跳过（治愈存量行）。表单侧 base_url/兜底模型/角色模型/认证字段与配置 JSON 联动（改字段自动同步 env 同名键）。
 - 测试：service 构造可注入 cipher（in-memory 免 KMS）；probe mock `probe.httpx.AsyncClient`；涉 LLM 配置测试防本机环境变量泄漏打真实网关（GLMConfig.from_env 须 monkeypatch）。
 - 与 git_identity 同构（加密/owner 过滤/service 范式照搬），改其一审视另一。
 

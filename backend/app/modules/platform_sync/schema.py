@@ -364,3 +364,53 @@ class AgentLogContentResponse(BaseModel):
     content: str = Field(description="日志内容尾部文本（最多 262144 字节 UTF-8）")
     truncated: bool = Field(description="原始内容是否超过 262144 字节被截断")
     size_bytes: int = Field(description="daemon 侧读到的文件总字节数（截断前）")
+
+
+# ── 2026-08-23-agent-log-conversation-view task-03（design §7.1/§7.2 对话化回显）──
+
+
+class AgentLogMessageItem(BaseModel):
+    """GET /agent-logs/{entry_id}/messages 单条归一化消息（design §7.1）。
+
+    字段与 daemon 解析器产出的 ``NormalizedLogMessage``（parse-zcode-model-io.ts）
+    **逐字对齐 snake_case**（producer→consumer 全链：daemon → ws rpc JSON → 本
+    schema → openapi → 前端 api-types）。``tool_use_id`` 是 tool_use / tool_result
+    配对键（消息级 toolCalls[].id / toolCallId）；``tool_input``/``tool_result`` 是
+    摘要文本（首 2KB/4KB 截断）；``ts`` 为所属行 completedAt 原文。
+    ``extra=ignore`` 保证 daemon 字段演进而后端透传不炸（与 AgentLogEntry 同款宽松）。
+    """
+
+    model_config = {"extra": "ignore"}
+
+    seq: int = Field(description="全局段序（加载更早切片键；窗口空洞跳过后重编号）")
+    kind: Literal["user_input", "reply", "thinking", "tool_use", "tool_result"] = Field(
+        description="消息类别（前端渲染分支：气泡/Markdown/折叠/工具卡）"
+    )
+    text: str | None = Field(default=None, description="user_input/reply/thinking 正文")
+    tool_name: str | None = Field(default=None, description="tool_use 工具名")
+    tool_use_id: str | None = Field(default=None, description="tool_use 与 tool_result 配对键")
+    tool_input: str | None = Field(default=None, description="工具入参摘要（JSON 串，首 2KB 截断）")
+    tool_result: str | None = Field(default=None, description="工具结果摘要（首 4KB 截断）")
+    is_error: bool | None = Field(default=None, description="tool_result 专用：是否报错")
+    ts: str | None = Field(default=None, description="所属行 completedAt 原文")
+
+
+class AgentLogMessagesResponse(BaseModel):
+    """GET /agent-logs/{entry_id}/messages 200 响应（design §7.2）。
+
+    daemon 侧 ``host_fs.read_agent_log_messages`` 外层 camelCase
+    （``totalSegments``/``skippedLines``）→ router 转换层落 snake_case；messages
+    内层逐字段已对齐无需改名。status 四值一律 200 透传——「RPC 成功≠解析成功」：
+    unsupported/parse_error/too_large 由前端判断回落原文端点（D-003@v1），backend
+    零解析零改写（D-001@v1）。
+    """
+
+    status: Literal["parsed", "unsupported", "parse_error", "too_large"] = Field(
+        description="解析结果分层（parsed=渲染对话流；其余前端回落原文查看）"
+    )
+    messages: list[AgentLogMessageItem] = Field(
+        default_factory=list, description="归一化消息（仅 status=parsed 非空）"
+    )
+    truncated: bool = Field(description="段窗口是否被截断（最近 200 段之外还有更早内容）")
+    total_segments: int = Field(description="解析出的总段数（仅 parsed 有意义）")
+    skipped_lines: int = Field(description="解析中跳过的坏行数")
