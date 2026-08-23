@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>本地 Agent 日志面板 · 原型（会话详情内嵌卡片）</title>
+<style>
+  /* 主题 token：取值单一源 frontend/src/styles/themes.ts（blue / ai-native 双套） */
+  :root[data-theme="blue"] {
+    --primary: #2563EB; --primary-hover: #1d4ed8; --accent: #06b6d4;
+    --bg: #f8fafc; --card: #ffffff; --border: #e2e8f0;
+    --brand-50: #eff6ff; --brand-100: #dbeafe; --brand-600: #2563eb; --brand-700: #1d4ed8;
+    --slate-500: #64748b; --slate-700: #334155; --slate-900: #0f172a;
+    --success: #10b981;
+  }
+  :root[data-theme="ai-native"] {
+    --primary: #7C3AED; --primary-hover: #6D28D9; --accent: #0891B2;
+    --bg: #FAF5FF; --card: #FFFFFF; --border: #DDD6FE;
+    --brand-50: #f5f3ff; --brand-100: #ede9fe; --brand-600: #7c3aed; --brand-700: #6d28d9;
+    --slate-500: #64748b; --slate-700: #334155; --slate-900: #0f172a;
+    --success: #10b981;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--slate-900); padding: 24px; font-size: 13px; }
+  .theme-toggle { position: fixed; top: 12px; right: 16px; z-index: 9; }
+  .theme-toggle button { border: 1px solid var(--border); background: var(--card); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 12px; color: var(--slate-700); }
+  .theme-toggle button.on { border-color: var(--primary); color: var(--primary); font-weight: 600; }
+
+  .stage { max-width: 720px; margin: 0 auto; }
+  .stage h1 { font-size: 15px; margin-bottom: 4px; }
+  .stage .hint { color: var(--slate-500); font-size: 12px; margin-bottom: 16px; }
+
+  /* 面板卡片：模式 A 小卡片（先例 change-sessions-card.tsx），嵌于 SessionPanelPage 消息流下方 */
+  .agent-log-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .card-title { font-size: 12px; font-weight: 600; color: var(--slate-900); }
+  .card-sub { margin-top: 2px; font-size: 11px; color: var(--slate-500); }
+  .card-head .actions { display: flex; gap: 6px; }
+  .mini-btn { border: 1px solid var(--border); background: transparent; border-radius: 6px; padding: 3px 8px; font-size: 11px; color: var(--slate-700); cursor: pointer; }
+  .mini-btn:hover { border-color: var(--primary); color: var(--primary); }
+
+  .entry-list { margin-top: 10px; display: flex; flex-direction: column; gap: 8px; }
+  .entry { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .entry-row1 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .harness { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; background: var(--brand-50); color: var(--brand-700); border: 1px solid var(--brand-100); }
+  .harness.zcode { /* zcode 走语义 info（青）而非品牌色 */ background: rgba(8,145,178,.08); color: #0e7490; border-color: rgba(8,145,178,.25); }
+  .originator { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px dashed var(--border); color: var(--slate-500); }
+  .originator.daemon { border-style: solid; border-color: var(--brand-600); color: var(--brand-700); }
+  .sess-id { font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--slate-700); background: var(--bg); border-radius: 4px; padding: 1px 6px; cursor: pointer; }
+  .sess-id:hover { color: var(--primary); }
+  .size { font-size: 11px; color: var(--slate-500); margin-left: auto; white-space: nowrap; }
+  .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); display: inline-block; margin-right: 4px; }
+  .entry-row2 { margin-top: 6px; display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--slate-500); flex-wrap: wrap; }
+  .last-cmd { font-family: ui-monospace, Consolas, monospace; background: var(--bg); border-radius: 4px; padding: 1px 6px; color: var(--slate-700); }
+  .log-path { margin-top: 5px; font-family: ui-monospace, Consolas, monospace; font-size: 10.5px; color: var(--slate-500); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+  .log-path:hover { color: var(--primary); }
+
+  .empty { margin-top: 10px; border: 1px dashed var(--border); border-radius: 8px; padding: 14px; text-align: center; color: var(--slate-500); font-size: 12px; }
+  .collapsed-note { margin-top: 8px; font-size: 11px; color: var(--slate-500); text-align: center; }
+</style>
+</head>
+<body>
+<div class="theme-toggle">
+  <button id="t-blue" onclick="setTheme('blue')">明亮蓝</button>
+  <button id="t-ai" class="on" onclick="setTheme('ai-native')">AI 紫</button>
+</div>
+
+<div class="stage">
+  <h1>「本地 Agent 日志」面板原型</h1>
+  <p class="hint">挂载点：会话详情（SessionPanelPage）消息流下方、团队任务块附近；数据 GET /api/agent-logs?workspace_id=…（sillyspec CLI 推送落库，按 last_seen_at 新→旧）。右上角可切换双主题。</p>
+
+  <!-- 状态一：有日志 -->
+  <section class="agent-log-card" id="card-with-logs">
+    <div class="card-head">
+      <div>
+        <div class="card-title">本地 Agent 日志</div>
+        <div class="card-sub">agent 会话的完整模型 I/O 日志（本机文件），由 SillySpec CLI 自动上报 · 最近 3 条</div>
+      </div>
+      <div class="actions">
+        <button class="mini-btn" onclick="alert('刷新 = react-query invalidate')">刷新</button>
+      </div>
+    </div>
+    <div class="entry-list">
+      <div class="entry">
+        <div class="entry-row1">
+          <span class="harness">codex</span>
+          <span class="originator daemon">sillyhub-daemon</span>
+          <span class="sess-id" title="点击复制 session_id" onclick="copy(this)">sess 8f14e45f…a9</span>
+          <span class="size"><span class="live-dot"></span>2.4 MB · 3 分钟前活跃</span>
+        </div>
+        <div class="entry-row2">
+          <span>调用 12 次</span>
+          <span>最近命令 <code class="last-cmd">execute --wave 1</code></span>
+          <span>codex-rollout-jsonl</span>
+        </div>
+        <div class="log-path" title="点击复制完整路径" onclick="copy(this)">C:/Users/qinyi/.codex/sessions/2026/08/23/rollout-2026-08-23T02-32-08-8f14e45f-…jsonl</div>
+      </div>
+      <div class="entry">
+        <div class="entry-row1">
+          <span class="harness">claude-code</span>
+          <span class="originator">zcode</span>
+          <span class="sess-id" title="点击复制 session_id" onclick="copy(this)">sess 01ef9a2c…77</span>
+          <span class="size">861 KB · 42 分钟前活跃</span>
+        </div>
+        <div class="entry-row2">
+          <span>调用 5 次</span>
+          <span>最近命令 <code class="last-cmd">status</code></span>
+          <span>claude-code-jsonl</span>
+        </div>
+        <div class="log-path" title="点击复制完整路径" onclick="copy(this)">C:/Users/qinyi/.claude/projects/C--Users-qinyi-IdeaProjects-sillyspec/01ef9a2c-….jsonl</div>
+      </div>
+      <div class="entry">
+        <div class="entry-row1">
+          <span class="harness zcode">zcode</span>
+          <span class="originator">zcode</span>
+          <span class="sess-id" title="点击复制 session_id" onclick="copy(this)">sess model-io…c3</span>
+          <span class="size">5.1 MB · 2 小时前活跃</span>
+        </div>
+        <div class="entry-row2">
+          <span>调用 31 次</span>
+          <span>最近命令 <code class="last-cmd">verify</code></span>
+          <span>zcode-model-io-jsonl</span>
+        </div>
+        <div class="log-path" title="点击复制完整路径" onclick="copy(this)">C:/Users/qinyi/.zcode/cli/rollout/model-io-sess_c3….jsonl</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 状态二：空态（无 workspace 或尚无上报） -->
+  <section class="agent-log-card" style="margin-top:16px;">
+    <div class="card-head">
+      <div>
+        <div class="card-title">本地 Agent 日志</div>
+        <div class="card-sub">同上 · 空态示例</div>
+      </div>
+    </div>
+    <div class="empty">尚未收到该工作区的 agent 日志上报<br>agent 下次执行 <code style="font-family:ui-monospace,Consolas,monospace">sillyspec run</code> 时会自动上报本地日志路径</div>
+  </section>
+
+  <!-- 状态三：条目多于 3 条折叠 -->
+  <section class="agent-log-card" style="margin-top:16px;">
+    <div class="card-head">
+      <div>
+        <div class="card-title">本地 Agent 日志</div>
+        <div class="card-sub">折叠态示例（默认展示 3 条）</div>
+      </div>
+      <div class="actions"><button class="mini-btn">展开全部 7 条</button></div>
+    </div>
+    <div class="collapsed-note">（列表同上，此处省略）</div>
+  </section>
+</div>
+
+<script>
+  function setTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    document.getElementById('t-blue').classList.toggle('on', t === 'blue');
+    document.getElementById('t-ai').classList.toggle('on', t === 'ai-native');
+  }
+  function copy(el) {
+    navigator.clipboard && navigator.clipboard.writeText(el.textContent);
+    const old = el.textContent;
+    el.textContent = '已复制 ✓';
+    setTimeout(() => { el.textContent = old; }, 900);
+  }
+</script>
+</body>
+</html>
