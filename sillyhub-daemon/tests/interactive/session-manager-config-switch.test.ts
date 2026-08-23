@@ -28,7 +28,7 @@
 //     ——被测对象是标记路由本身）。
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
@@ -916,6 +916,154 @@ describe('task-08 / 持久化 config 快照（design §5 Wave2 / §9）', () => 
       expect(readState(sm, 'sess-legacy')!.providerConfig).toBeUndefined();
     } finally {
       if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── ql-20260822-001：home 会话切供应商 → jsonl 迁移隔离目录（env 污染修复）──
+// E2E 实锤：本机 ~/.claude/settings.json 的 env 块（cc-switch 指向本机网关）
+// 优先于进程注入的供应商 env——仅「回本机目录 resume」会把切换后的流量串到
+// 本机默认网关（BigModel 400[1214]）。修复：home + 生效供应商非空 → 迁移
+// jsonl 到隔离目录 → 回隔离 env。用 resumeDirs tmp 目录对端到端验证。
+// （移植说明：本地原版走 resolveResumeConfigDir 探测 + 迁移覆盖；main 上
+// ql-20260822-009 已用 claude-transcript-dir 模块统一探测，此处迁移改为
+// 模块内自门控——isolated 已有副本即跳过，防回灌丢增量。）
+
+describe('ql-20260822-001 / home 会话切供应商迁移 jsonl 到隔离目录', () => {
+  const buildDirs = () => {
+    const root = mkdtempSync(join(tmpdir(), 'sm-migrate-'));
+    return {
+      root,
+      isolated: join(root, 'iso-claude-config'),
+      home: join(root, 'home-claude'),
+    };
+  };
+  const writeHomeJsonl = (dirs: ReturnType<typeof buildDirs>, sid: string) => {
+    const dir = join(dirs.home, 'projects', 'C--work');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${sid}.jsonl`), '{}\n', 'utf8');
+  };
+
+  it('MIG-5: home jsonl + reload 切供应商 → 迁移生效：env 回隔离目录 + 隔离副本落盘', async () => {
+    // Arrange：本机默认创建（jsonl 在 home）→ 首 turn 完成拿到 sid。
+    const dirs = buildDirs();
+    try {
+      writeHomeJsonl(dirs, 'sdk-sess-mig');
+      const mock = makeMockClaudeDriver();
+      const sm = new SessionManager(
+        { driver: mock.driver, ...makeDeps() },
+        { resumeDirs: dirs },
+      );
+      await sm.create({ ...BASE_INPUT });
+      mock.emitMessage(systemInitMessage('sdk-sess-mig'));
+      await flushMicrotasks();
+      mock.emitResult(resultSuccess());
+      await flushMicrotasks();
+
+      // Act：切供应商。
+      await sm.reloadWithProvider(BASE_INPUT.sessionId, newProviderConfig());
+
+      // Assert：迁移后回隔离 env（阻断本机 settings.json 污染）+ 副本落盘
+      // + 供应商 env 注入 + resume key 不变 + 会话状态不破坏。
+      const env = mock.startCalls[1].opts['env'] as NodeJS.ProcessEnv;
+      expect(env.CLAUDE_CONFIG_DIR).toBe(dirs.isolated);
+      expect(env.ANTHROPIC_BASE_URL).toBe('https://new.example.com');
+      expect(mock.startCalls[1].opts['resume']).toBe('sdk-sess-mig');
+      expect(
+        existsSync(join(dirs.isolated, 'projects', 'C--work', 'sdk-sess-mig.jsonl')),
+      ).toBe(true);
+      // home 原件保留（复制非移动）。
+      expect(
+        existsSync(join(dirs.home, 'projects', 'C--work', 'sdk-sess-mig.jsonl')),
+      ).toBe(true);
+      expect(readState(sm, BASE_INPUT.sessionId)!.status).toBe('active');
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('MIG-6: home jsonl + reload 切回本机默认（null）→ 不迁移，env 保持本机目录', async () => {
+    const dirs = buildDirs();
+    try {
+      writeHomeJsonl(dirs, 'sdk-sess-mig6');
+      const mock = makeMockClaudeDriver();
+      const sm = new SessionManager(
+        { driver: mock.driver, ...makeDeps() },
+        { resumeDirs: dirs },
+      );
+      await sm.create({ ...BASE_INPUT });
+      mock.emitMessage(systemInitMessage('sdk-sess-mig6'));
+      await flushMicrotasks();
+      mock.emitResult(resultSuccess());
+      await flushMicrotasks();
+
+      await sm.reloadWithProvider(BASE_INPUT.sessionId, null);
+
+      const env = mock.startCalls[1].opts['env'] as NodeJS.ProcessEnv;
+      expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
+      // 无供应商 → 不迁移（本机会话本来就要读本机 settings/凭证）。
+      expect(existsSync(join(dirs.isolated, 'projects'))).toBe(false);
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('MIG-7: restore 带供应商 + home jsonl → 迁移生效（存量会话重启自愈）', async () => {
+    const dirs = buildDirs();
+    try {
+      writeHomeJsonl(dirs, 'sdk-sess-mig7');
+      const mock = makeMockClaudeDriver();
+      const sm = new SessionManager(
+        { driver: mock.driver, ...makeDeps() },
+        { resumeDirs: dirs },
+      );
+      const record: PersistedSessionRecord = {
+        sessionId: 'sess-mig7',
+        leaseId: 'lease-mig7',
+        agentSessionId: 'sdk-sess-mig7',
+        cwd: 'C:\work',
+        provider: 'claude',
+        turnCount: 3,
+        lastActiveAt: Date.now(),
+        providerConfig: newProviderConfig('https://mig7.example.com'),
+      };
+
+      await sm.restoreAndReconnect(record);
+      await flushMicrotasks();
+
+      const env = mock.startCalls[0].opts['env'] as NodeJS.ProcessEnv;
+      expect(env.CLAUDE_CONFIG_DIR).toBe(dirs.isolated);
+      expect(
+        existsSync(join(dirs.isolated, 'projects', 'C--work', 'sdk-sess-mig7.jsonl')),
+      ).toBe(true);
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('MIG-8: 双侧都无 jsonl → unknown 兜底强制隔离（ql-20260822-009 语义不变）', async () => {
+    // 迁移找不到源（false）→ 探测亦未命中 → unknown → 保持强制隔离默认。
+    const dirs = buildDirs();
+    try {
+      const mock = makeMockClaudeDriver();
+      const sm = new SessionManager(
+        { driver: mock.driver, ...makeDeps() },
+        { resumeDirs: dirs },
+      );
+      await sm.create({ ...BASE_INPUT });
+      mock.emitMessage(systemInitMessage('sdk-sess-mig8'));
+      await flushMicrotasks();
+      mock.emitResult(resultSuccess());
+      await flushMicrotasks();
+
+      await sm.reloadWithProvider(BASE_INPUT.sessionId, newProviderConfig());
+
+      const env = mock.startCalls[1].opts['env'] as NodeJS.ProcessEnv;
+      expect(env.CLAUDE_CONFIG_DIR).toBe(dirs.isolated);
+      expect(env.ANTHROPIC_BASE_URL).toBe('https://new.example.com');
+      expect(readState(sm, BASE_INPUT.sessionId)!.status).toBe('active');
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
     }
   });
 });

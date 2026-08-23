@@ -179,3 +179,17 @@
 根因：两处 SESSION_INJECT spy 断言缺第4/5参（daemon.ts inject 已带 attachments/downloadAttachment，无附件时 undefined）；policy 测试 Windows 上工作区 root 用 POSIX 形态与 target 盘符形态不匹配（跨平台提交即坏）
 方案：两处断言补 undefined, undefined；WORKSPACE_ROOT 常量按平台取形态
 结果：3 文件 44 用例全过，零产品代码改动
+
+## ql-20260822-001-port | 2026-08-23 14:55:00 | home 会话切供应商流量串本机网关——jsonl 迁移隔离（移植主线）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/claude-transcript-dir.ts（新增 findClaudeTranscriptPath / migrateClaudeTranscriptToIsolated；locateClaudeTranscript/applyTranscriptConfigDir 增可选 dirs 参数）
+- sillyhub-daemon/src/interactive/session-manager.ts（SessionManagerOptions.resumeDirs 注入点 + reload/restore 双路径迁移门控）
+- sillyhub-daemon/tests/interactive/claude-transcript-dir.test.ts（find/migrate 单测 6 用例）
+- sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts（MIG-5/6/7/8 集成 4 用例）
+- .sillyspec/docs/sillyhub-daemon/modules/interactive.md（关键逻辑 + 人工备注同步）
+需求：home 会话切供应商流量串本机网关（本地分支 0cc03698 已有 E2E 实锤修复，main 上远端 ql-20260822-009 已用不同架构修了同源问题，需移植合并）
+根因：回本机 ~/.claude resume 后，用户 settings.json 的 env 块（cc-switch 指向本机网关）优先于进程注入的供应商 env，切了 Kimi 流量串到 BigModel（400[1214] modelCode 不存在）
+方案：home 会话 + 生效供应商非空 → migrateClaudeTranscriptToIsolated 复制 jsonl 进隔离目录再回隔离 env（reload/restore 双路径，restore 顺带自愈存量）；落在 009 的 claude-transcript-dir 模块上（探测/迁移单一来源）。语义差异：本地版「isolated 已有旧副本覆盖重写」改为「跳过防回灌」（isolated 是新真相源，回灌 home 旧副本会丢增量）。本地 ql-20260821-016 的 resolveResumeConfigDir 探测语义已由远端 009 覆盖，不重复移植
+结果：claude-transcript-dir 12 用例 + config-switch 30 用例全过（合计 42）；typecheck 零错误。daemon 全量套件在部署前回归

@@ -61,8 +61,12 @@ turn 收尾: classifyModelError → result.modelError → daemon 桥接 notifyRu
 reloadWithProvider: buildSpawnEnv 构造新 env；null=停止供应商回退本机凭证。
   CLAUDE_CONFIG_DIR（resume/reload 两路径）按 transcript 实际位置判定
   （claude-transcript-dir：隔离目录命中→隔离，保 ql-20260807-002 停供应商语义；
-  仅宿主机 ~/.claude 命中→不隔离；探测不到→维持隔离默认，ql-20260822-009）
-restoreAndReconnect: 同上按位置判定 + record.providerConfig 快照重建 env
+  仅宿主机 ~/.claude 命中→不隔离；探测不到→维持隔离默认，ql-20260822-009）；
+  home 会话 + 生效供应商非空 → 先 migrateClaudeTranscriptToIsolated 把 jsonl
+  复制进隔离目录再回隔离 env（复制非移动，home 原件停档；isolated 已有副本
+  跳过防回灌；provider_config null=本机默认不迁移，读本机 settings/凭证，
+  ql-20260822-001）
+restoreAndReconnect: 同上按位置判定 + 迁移 + record.providerConfig 快照重建 env
 空闲扫描: _scanIdle → _onIdleExpire → end（running 先 interrupt 再 end 兜底）
 ```
 
@@ -98,6 +102,7 @@ restoreAndReconnect: 同上按位置判定 + record.providerConfig 快照重建 
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->
+- ql-20260822-001（移植主线）：「home 会话切供应商流量串本机网关」——回 ~/.claude resume 后用户 settings.json 的 env 块（cc-switch 指向本机网关）优先于进程注入的供应商 env，切了供应商流量串到 BigModel（E2E 实锤 400[1214] modelCode 不存在）。修复：home 会话 + 生效供应商非空时 migrateClaudeTranscriptToIsolated 复制 jsonl 进隔离目录再回隔离 env（reload/restore 双路径，restore 顺带自愈存量会话）。与本地 ql-20260821-016 线的 resolveResumeConfigDir 实现等价但落在 009 的 claude-transcript-dir 模块上（探测/迁移函数同文件单一来源）；语义差异：本地版「isolated 已有旧副本覆盖重写」改为「跳过防回灌」（isolated 是新真相源）。SessionManagerOptions.resumeDirs 注入 tmp 目录对做密闭测试；探测/迁移全链路 fs 吞错降级 home（R-01，绝不因迁移失败破坏会话）。
 - ql-20260822-009：修复「已结束会话点重新打开 4 秒后被 daemon 打回 ended」。根因：create（spawn-env buildSpawnEnv）只在 provider_config 存在时隔离 CLAUDE_CONFIG_DIR（ql-20260729-002），未配供应商会话的 transcript 写在宿主机 ~/.claude；而 restoreAndReconnect/_reloadSession 无条件强制隔离目录（ql-20260807-002 防停供应商后找不到 jsonl）→ resume 去隔离目录找 transcript 必失败 → claude 报错退出 → fail → backend end_session（daemon 上报 failed 也记 ended）→ 用户 inject 409。修复：新增 claude-transcript-dir.ts 探测 `<sid>.jsonl` 实际在哪侧（扫两侧 projects/*/ 一层，免复刻 cwd 编码），按位置设/删 env；探测不到维持原隔离默认（零回归兜底）。教训：两轮旧修复各修了一半场景（隔离侧/宿主侧），按 provider_config 现值推断 transcript 位置不可靠（热切换后是现值非创建值），只能按文件实存探测。
 - ql-20260624-007：codex turn 收敛依赖 turn/completed 经 parseTurnCompleted 产 complete event → finishTurn(currentTurnPromise)；该方法已对齐 claude result 强契约（params.turn 缺失也必收敛，见 adapter-json-rpc 模块）。新增 codex 子进程 stdout 原始行落盘：consume 内 ctx.sessionId 存在时建 WriteStream 写 ~/.sillyhub/daemon/runs/codex-interactive/<sessionId>.log（fire-and-forget 静默，不写日志不影响主流程），sessionId 经 CodexStartOptions 传入、session-manager._buildDriverOptions 一处填充（create+restore 共用）。下次 turn 卡死时看该日志确认 turn/completed 是否到达 / payload 长啥样。
 <!-- MANUAL_NOTES_END -->

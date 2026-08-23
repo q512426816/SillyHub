@@ -15,6 +15,15 @@
 
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { Dirent } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 vi.mock('../../src/config.js', async (importOriginal) => ({
@@ -35,6 +44,9 @@ const mocks = vi.hoisted(() => ({ readdir: vi.fn() }));
 import {
   locateClaudeTranscript,
   applyTranscriptConfigDir,
+  findClaudeTranscriptPath,
+  migrateClaudeTranscriptToIsolated,
+  type TranscriptDirs,
 } from '../../src/interactive/claude-transcript-dir.js';
 
 interface FakeDirent {
@@ -157,5 +169,102 @@ describe('applyTranscriptConfigDir', () => {
     await applyTranscriptConfigDir(env, undefined);
     expect(env.CLAUDE_CONFIG_DIR).toBe('/fake-isolated');
     expect(mocks.readdir).not.toHaveBeenCalled();
+  });
+});
+
+// ── ql-20260822-001：findClaudeTranscriptPath / migrateClaudeTranscriptToIsolated
+// 单测。sync 函数用真实 tmp 目录（注入 TranscriptDirs，与本文件上方 fs mock
+// 互不干扰；fs mock 只影响 async 探测路径）。──────────────────────────────
+
+/** tmp 目录对（isolated/home 都指向同一 root 下不同子目录）。 */
+function buildTmpDirs(): TranscriptDirs & { root: string } {
+  const root = mkdtempSync(join(tmpdir(), 'ctd-mig-'));
+  return { root, isolated: join(root, 'iso'), home: join(root, 'home') };
+}
+
+/** 在 configDir/projects/<encoded>/ 写 <sid>.jsonl。 */
+function writeJsonl(configDir: string, encoded: string, sid: string, content = '{}\n'): void {
+  const dir = join(configDir, 'projects', encoded);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${sid}.jsonl`), content, 'utf8');
+}
+
+describe('findClaudeTranscriptPath', () => {
+  it('命中 → 返回绝对路径；未命中 → null', () => {
+    const dirs = buildTmpDirs();
+    try {
+      writeJsonl(dirs.home, 'C--work', 'sid-find');
+      const hit = findClaudeTranscriptPath(dirs.home, 'sid-find');
+      expect(hit).toBe(join(dirs.home, 'projects', 'C--work', 'sid-find.jsonl'));
+      expect(findClaudeTranscriptPath(dirs.home, 'sid-none')).toBeNull();
+      expect(findClaudeTranscriptPath(dirs.isolated, 'sid-find')).toBeNull();
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('agentSessionId 非法（路径分隔符）→ null 不探测', () => {
+    const dirs = buildTmpDirs();
+    try {
+      expect(findClaudeTranscriptPath(dirs.home, '../evil')).toBeNull();
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('migrateClaudeTranscriptToIsolated', () => {
+  it('MIG-1: home jsonl 存在 → 复制到隔离目录同子目录，home 原件保留（复制非移动）', () => {
+    const dirs = buildTmpDirs();
+    try {
+      writeJsonl(dirs.home, 'C--work', 'sid-m1');
+      expect(migrateClaudeTranscriptToIsolated('sid-m1', dirs)).toBe(true);
+      expect(
+        existsSync(join(dirs.isolated, 'projects', 'C--work', 'sid-m1.jsonl')),
+      ).toBe(true);
+      // 复制非移动：用户 ~/.claude 原件不动（daemon 不删用户数据）。
+      expect(
+        existsSync(join(dirs.home, 'projects', 'C--work', 'sid-m1.jsonl')),
+      ).toBe(true);
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('MIG-2: home 无源 jsonl → false（迁移降级语义，调用方保持 home resume）', () => {
+    const dirs = buildTmpDirs();
+    try {
+      expect(migrateClaudeTranscriptToIsolated('sid-none', dirs)).toBe(false);
+      expect(existsSync(join(dirs.isolated, 'projects'))).toBe(false);
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('MIG-3: isolated 已有副本 → false 跳过（isolated 是真相源，防回灌 home 旧副本丢增量）', () => {
+    const dirs = buildTmpDirs();
+    try {
+      writeJsonl(dirs.home, 'C--work', 'sid-m3', 'stale-home\n');
+      writeJsonl(dirs.isolated, 'C--work', 'sid-m3', 'fresh-isolated\n');
+      expect(migrateClaudeTranscriptToIsolated('sid-m3', dirs)).toBe(false);
+      // 隔离副本内容不被 home 旧副本覆盖。
+      expect(
+        readFileSync(
+          join(dirs.isolated, 'projects', 'C--work', 'sid-m3.jsonl'),
+          'utf8',
+        ),
+      ).toBe('fresh-isolated\n');
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('MIG-4: agentSessionId 非法 → false 不迁移', () => {
+    const dirs = buildTmpDirs();
+    try {
+      expect(migrateClaudeTranscriptToIsolated('../evil', dirs)).toBe(false);
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
   });
 });

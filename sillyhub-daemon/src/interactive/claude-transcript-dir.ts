@@ -24,12 +24,28 @@
  */
 
 import { readdir } from 'node:fs/promises';
+import { copyFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { CLAUDE_CONFIG_DIR } from '../config.js';
 
 /** transcript 探测结果。 */
 export type ClaudeTranscriptLocation = 'isolated' | 'host' | 'unknown';
+
+/**
+ * ql-20260822-001：transcript 探测/迁移共用的目录对。测试注入 tmp 目录对，
+ * 可完整覆盖「home jsonl → 切供应商 → 迁移到隔离目录」链路而不触碰真实
+ * ~/.claude。缺省 daemon 隔离目录 + 宿主机 ~/.claude。
+ */
+export interface TranscriptDirs {
+  isolated: string;
+  home: string;
+}
+
+/** 缺省目录对（生产路径）。 */
+export function defaultTranscriptDirs(): TranscriptDirs {
+  return { isolated: CLAUDE_CONFIG_DIR, home: join(homedir(), '.claude') };
+}
 
 /**
  * agentSessionId 合法性守卫：SDK 生成的是 UUID 形态。含路径分隔符 / 点点等可疑
@@ -75,11 +91,12 @@ async function projectsDirHas(
  */
 export async function locateClaudeTranscript(
   agentSessionId: string,
+  dirs: TranscriptDirs = defaultTranscriptDirs(),
 ): Promise<ClaudeTranscriptLocation> {
   if (!SAFE_SESSION_ID.test(agentSessionId)) return 'unknown';
   const fileName = `${agentSessionId}.jsonl`;
-  const isolatedRoot = join(CLAUDE_CONFIG_DIR, 'projects');
-  const hostRoot = join(homedir(), '.claude', 'projects');
+  const isolatedRoot = join(dirs.isolated, 'projects');
+  const hostRoot = join(dirs.home, 'projects');
   if (await projectsDirHas(isolatedRoot, fileName)) return 'isolated';
   if (await projectsDirHas(hostRoot, fileName)) return 'host';
   return 'unknown';
@@ -92,13 +109,90 @@ export async function locateClaudeTranscript(
 export async function applyTranscriptConfigDir(
   env: NodeJS.ProcessEnv,
   agentSessionId: string | undefined,
+  dirs: TranscriptDirs = defaultTranscriptDirs(),
 ): Promise<void> {
   const location = agentSessionId
-    ? await locateClaudeTranscript(agentSessionId)
+    ? await locateClaudeTranscript(agentSessionId, dirs)
     : 'unknown';
   if (location === 'host') {
     delete env.CLAUDE_CONFIG_DIR;
   } else {
-    env.CLAUDE_CONFIG_DIR = CLAUDE_CONFIG_DIR;
+    env.CLAUDE_CONFIG_DIR = dirs.isolated;
+  }
+}
+
+/**
+ * ql-20260822-001（移植自本地 resolveResumeConfigDir 演化线）：在
+ * <configDir>/projects/<encoded-cwd>/ 下按文件名定位 <sid>.jsonl，命中返回
+ * 绝对路径，未命中/IO 异常返回 null。
+ *
+ * encoded-cwd 编码规则非公开契约，故线性扫 projects 一层子目录（子目录数 =
+ * 历史 cwd 数，个位数；existsSync 开销可忽略）。同步版供迁移路径使用（迁移
+ * 本身是同步 fs，混入 async 探测会让调用链无谓拉长）。
+ */
+export function findClaudeTranscriptPath(
+  configDir: string,
+  agentSessionId: string,
+): string | null {
+  if (!SAFE_SESSION_ID.test(agentSessionId)) return null;
+  try {
+    const projects = join(configDir, 'projects');
+    if (!existsSync(projects)) return null;
+    for (const entry of readdirSync(projects)) {
+      const p = join(projects, entry, `${agentSessionId}.jsonl`);
+      if (existsSync(p)) return p;
+    }
+    return null;
+  } catch {
+    // 目录不可读等 IO 异常按「不存在」处理（fallback 由调用方决定）。
+    return null;
+  }
+}
+
+/**
+ * ql-20260822-001：home transcript 迁移（复制）到 daemon 隔离目录，让
+ * reload/restore 后的 env 隔离（CLAUDE_CONFIG_DIR=隔离目录）重新生效。
+ *
+ * 为什么必须迁移（E2E 实锤 BigModel 400[1214]）：本机默认创建的会话 jsonl
+ * 在 ~/.claude，仅「回本机目录 resume」（ql-20260822-009 语义）会把 claude
+ * 暴露给用户真实的 ~/.claude/settings.json——其 env 块（cc-switch 手配）
+ * **优先于进程注入的供应商 env**，切了供应商流量却跑到本机默认网关。唯一能
+ * 同时满足「resume 找得到历史」+「供应商 env 不被污染」的办法是把历史搬进
+ * 隔离目录再回隔离 env。
+ *
+ * 语义（自门控，调用方无需先探测）：
+ *   - isolated 已命中 → false 跳过（isolated 是新真相源——迁移成功后新 turn
+ *     写隔离副本，回灌 home 旧副本会丢增量；与 locateClaudeTranscript 的
+ *     「双侧命中取 isolated」一致）；
+ *   - home 无源 → false（迁移降级语义，调用方保持 home resume）；
+ *   - home 有且 isolated 无 → 复制（非移动：~/.claude 是用户数据 daemon 不删
+ *     不改，原件停留档；子目录名沿用源的 encoded-cwd 保证 resume 定位命中）。
+ *
+ * @returns true=迁移成功（applyTranscriptConfigDir 将命中 isolated）；
+ *   false=无需迁移或复制失败（权限/磁盘等 → 调用方降级 home resume：会话
+ *   可用但供应商 env 可能被本机 settings.json 污染，R-01 降级语义，绝不因
+ *   迁移失败破坏会话）。
+ */
+export function migrateClaudeTranscriptToIsolated(
+  agentSessionId: string,
+  dirs: TranscriptDirs = defaultTranscriptDirs(),
+): boolean {
+  if (!SAFE_SESSION_ID.test(agentSessionId)) return false;
+  if (findClaudeTranscriptPath(dirs.isolated, agentSessionId)) return false;
+  const src = findClaudeTranscriptPath(dirs.home, agentSessionId);
+  if (!src) return false;
+  try {
+    const dst = join(
+      dirs.isolated,
+      'projects',
+      basename(dirname(src)),
+      `${agentSessionId}.jsonl`,
+    );
+    mkdirSync(dirname(dst), { recursive: true });
+    copyFileSync(src, dst);
+    return true;
+  } catch {
+    // 复制失败（权限/磁盘等）→ 降级 home resume（调用方据 false 处理）。
+    return false;
   }
 }

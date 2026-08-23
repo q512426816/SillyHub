@@ -81,7 +81,15 @@ import { buildSpawnEnv, type SpawnCredentialManager } from '../spawn-env.js';
 // ql-20260822-009：resume / reload 的 CLAUDE_CONFIG_DIR 按 transcript 实际位置判定
 // （隔离目录命中 → 隔离，保 ql-20260807-002 停供应商语义；仅宿主机 ~/.claude 命中 →
 // 不隔离，修复未配供应商会话重开被 fail 打回 ended）。
-import { applyTranscriptConfigDir } from './claude-transcript-dir.js';
+// ql-20260822-001（移植）：home 会话切供应商前把 jsonl 迁移（复制）到隔离目录——
+// 仅回 home resume 会把 claude 暴露给用户 ~/.claude/settings.json，其 env 块
+//（cc-switch）优先于进程注入的供应商 env，流量串本机网关（E2E 实锤 400[1214]）。
+import {
+  applyTranscriptConfigDir,
+  defaultTranscriptDirs,
+  migrateClaudeTranscriptToIsolated,
+  type TranscriptDirs,
+} from './claude-transcript-dir.js';
 // task-04（FR-01 / D-005@v1）：turn 收尾把模型调用失败归类为结构化 ModelError，
 // 挂到 result.modelError 透传给 daemon 桥接 → notifyRunResult → backend error_detail。
 // 与 stream-json.ts:954 批量路径同源（近源归类，D-005 方案 C 三端标准协议）。
@@ -108,6 +116,12 @@ export interface SessionManagerOptions {
   idleTimeoutSec?: number;
   /** 扫描周期秒，默认 60（避免与空闲阈值同量级导致抖动）。测试可注入短周期。 */
   idleScanSec?: number;
+  /**
+   * ql-20260822-001：resume transcript 目录对（探测 + home→隔离迁移共用）。
+   * 缺省 daemon 隔离目录 + 宿主机 ~/.claude；测试经此注入 tmp 目录对，
+   * 完整覆盖「home jsonl → 切供应商 → 迁移隔离」链路而不触碰真实 ~/.claude。
+   */
+  resumeDirs?: TranscriptDirs;
   /**
    * task-08（D-007@v1 / FR-07）：是否启用 canUseTool 远程人审。
    *
@@ -517,6 +531,12 @@ export class SessionManager {
   private readonly _idleScanSec: number;
 
   /**
+   * ql-20260822-001：resume transcript 目录对（探测 + home→隔离迁移共用）。
+   * 缺省 { isolated: CLAUDE_CONFIG_DIR, home: ~/.claude }；测试注入 tmp 对。
+   */
+  private readonly _resumeDirs: TranscriptDirs;
+
+  /**
    * task-08（D-007@v1 / FR-07）：canUseTool 远程人审三件套。
    *
    * 实例级配置——manualApproval=true 时必需 resolverFactory + wsClient；
@@ -614,6 +634,8 @@ export class SessionManager {
       optsScan !== undefined && Number.isFinite(optsScan) && optsScan > 0
         ? optsScan
         : DEFAULT_IDLE_SCAN_SEC;
+    // ql-20260822-001：resume transcript 目录对（测试注入 tmp 对，生产取缺省）。
+    this._resumeDirs = opts.resumeDirs ?? defaultTranscriptDirs();
 
     // task-02（D-001@v1）：构造 drivers registry。显式 registry 优先；兼容旧单 driver 入参。
     const explicitDrivers = deps.drivers ?? {};
@@ -2638,7 +2660,23 @@ export class SessionManager {
         { provider_config: state.providerConfig ?? undefined },
         { credential: restoreCredential },
       );
-      await applyTranscriptConfigDir(restoreEnv, state.agentSessionId);
+      // ql-20260822-001：home 会话带供应商 → 先迁移 jsonl 到隔离目录，让下方
+      // applyTranscriptConfigDir 命中 isolated 回隔离 env（daemon 重启自愈：
+      // 迁移前的存量 home 会话在此补迁移）。仅回 home 会把 claude 暴露给用户
+      // ~/.claude/settings.json，其 env 块优先于进程注入的供应商 env → 流量串
+      // 本机网关。无供应商（本机凭证链）不迁移；迁移失败降级 home（R-01）。
+      if (
+        state.providerConfig != null &&
+        state.provider === 'claude' &&
+        state.agentSessionId
+      ) {
+        migrateClaudeTranscriptToIsolated(state.agentSessionId, this._resumeDirs);
+      }
+      await applyTranscriptConfigDir(
+        restoreEnv,
+        state.agentSessionId,
+        this._resumeDirs,
+      );
       const driverOpts = this._buildDriverOptions(state, {
         exePath: exe,
         model: record.model,
@@ -3027,7 +3065,24 @@ export class SessionManager {
       // 强制隔离，防新 claude resume 找不到 jsonl → onError → fail → session ended。
       // 新增：jsonl 仅在宿主机 ~/.claude（create 未配供应商）→ 不隔离，回 ~/.claude 找。
       // 凭证靠 env token（层 2 credentials.json）+ daemon settings.json。
-      await applyTranscriptConfigDir(newEnv, state.agentSessionId);
+      // ql-20260822-001：home 会话切供应商（provider_config 非空）→ 先迁移 jsonl
+      // 到隔离目录，让 applyTranscriptConfigDir 命中 isolated 回隔离 env。仅回
+      // home 会把 claude 暴露给用户 ~/.claude/settings.json，其 env 块
+      //（cc-switch）优先于进程注入的供应商 env，切了供应商流量仍串本机网关
+      //（E2E 实锤 BigModel 400[1214]）。切回本机默认（null）不迁移——本机会话
+      // 本来就要读本机 settings/凭证。迁移失败降级 home（会话可用，R-01）。
+      if (
+        providerConfig != null &&
+        state.provider === 'claude' &&
+        state.agentSessionId
+      ) {
+        migrateClaudeTranscriptToIsolated(state.agentSessionId, this._resumeDirs);
+      }
+      await applyTranscriptConfigDir(
+        newEnv,
+        state.agentSessionId,
+        this._resumeDirs,
+      );
 
       // ── ③ 校验 resume key 必需 ──
       // agentSessionId 来自首 turn system/init（Claude）或 thread_started（Codex），
