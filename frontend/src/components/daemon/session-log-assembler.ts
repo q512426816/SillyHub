@@ -354,7 +354,17 @@ export interface SessionToolEvent {
 export type SessionProcessItem =
   | { kind: "thinking"; text: string; ts?: number }
   | ({ kind: "tool" } & SessionToolEvent & { ts?: number })
-  | { kind: "stderr"; text: string; ts?: number };
+  | { kind: "stderr"; text: string; ts?: number }
+  // agent-file-upload-mcp：file 段的历史回放投影项（与 turn-timeline 同名类型逐字段一致）
+  | {
+      kind: "file";
+      fileId: string;
+      name: string;
+      size: number;
+      mime: string;
+      description?: string | null;
+      ts?: number;
+    };
 
 /** 装配产物（单 turn）：段序列 + 兼容投影 + 计时锚点（design §7）。 */
 export interface AssembledTurn {
@@ -1072,8 +1082,20 @@ export function segmentsToLegacy(segments: TurnSegment[]): {
           processItems.push({ kind: "stderr", text: s.text, ts: s.ts ?? undefined });
           break;
         case "file":
-          // task-08：file 段跳过投影——旧消费方（turn-timeline 的 output /
-          // processItems）零感知，文件卡片只走段渲染路径（FileMessageCard）。
+          // ql 修复（agent-file-upload-mcp 部署验证发现）：原实现跳过 file 段，
+          // 但会话面板历史回放（runtime-session-helpers attach 路径）正是经
+          // segmentsToLegacy 投影渲染的「旧消费方」——跳过导致文件卡片只在实时
+          // SSE 可见、刷新后消失（违反 FR-01「刷新后仍在原位」）。改为投影
+          // kind:"file" 过程项，由 TurnDetailsList 渲染 FileMessageCard。
+          processItems.push({
+            kind: "file",
+            fileId: s.fileId,
+            name: s.name,
+            size: s.size,
+            mime: s.mime,
+            description: s.description,
+            ts: s.ts ?? undefined,
+          });
           break;
       }
     }

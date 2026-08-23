@@ -2132,6 +2132,19 @@ function bootstrapLegacySegments(
     if (item.kind === "stderr") {
       return { kind: "stderr", id: `legacy:stderr:${i}`, text: item.text, ts: item.ts ?? null };
     }
+    if (item.kind === "file") {
+      // agent-file-upload-mcp：file 过程项反投影回 file 段（字段一一对应）
+      return {
+        kind: "file",
+        id: `legacy:file:${i}`,
+        fileId: item.fileId,
+        name: item.name,
+        size: item.size,
+        mime: item.mime,
+        description: item.description ?? "",
+        ts: item.ts ?? null,
+      };
+    }
     return {
       kind: "tool",
       id: `legacy:tool:${i}`,

@@ -40,6 +40,8 @@ import type { ErrorLogItem } from "@/components/agent-log/normalize";
 import type { TurnSegment } from "@/components/daemon/session-log-assembler";
 import { SegmentView } from "@/components/daemon/turn-segment-views";
 import { TurnStatusBar } from "@/components/daemon/turn-status-bar";
+// agent-file-upload-mcp：历史回放过程项渲染 agent 上传文件卡片（TurnDetailsList）
+import { FileMessageCard } from "@/components/daemon/file-message-card";
 // 2026-08-20-session-multimodal-attachments task-13（D-3）：历史附件标记行解析
 // + 图片缩略图/文件 chip 渲染。
 import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
@@ -75,7 +77,17 @@ import { extractDialogQA } from "@/components/daemon/session-log-sanitize";
 export type SessionProcessItem =
   | { kind: "thinking"; text: string; ts?: number }
   | ({ kind: "tool" } & SessionToolEvent & { ts?: number })
-  | { kind: "stderr"; text: string; ts?: number };
+  | { kind: "stderr"; text: string; ts?: number }
+  // agent-file-upload-mcp：历史回放投影的文件卡片项（TurnDetailsList 渲染 FileMessageCard）
+  | {
+      kind: "file";
+      fileId: string;
+      name: string;
+      size: number;
+      mime: string;
+      description?: string | null;
+      ts?: number;
+    };
 
 export type SessionUiStatus = "idle" | "creating" | "active" | "ending" | "ended" | "failed" | "reconnecting";
 export type TurnUiStatus = "pending" | "running" | "interrupting" | "completed" | "failed" | "killed";
@@ -714,7 +726,16 @@ function TurnDetailsList({
     | { kind: "thinking"; text: string }
     | { kind: "tool"; event: SessionToolEvent }
     | { kind: "stderr"; text: string }
-    | { kind: "askUser"; dialog: SessionDialogRead };
+    | { kind: "askUser"; dialog: SessionDialogRead }
+    | {
+        kind: "file";
+        fileId: string;
+        name: string;
+        size: number;
+        mime: string;
+        description?: string | null;
+        ts?: number;
+      };
   const grouped: RenderItem[] = [];
   for (const item of items) {
     if (item.kind === "thinking") {
@@ -731,6 +752,16 @@ function TurnDetailsList({
       });
     } else if (item.kind === "askUser") {
       grouped.push({ kind: "askUser", dialog: item.dialog });
+    } else if (item.kind === "file") {
+      grouped.push({
+        kind: "file",
+        fileId: item.fileId,
+        name: item.name,
+        size: item.size,
+        mime: item.mime,
+        description: item.description,
+        ts: item.ts,
+      });
     } else {
       grouped.push({ kind: "stderr", text: item.text });
     }
@@ -758,6 +789,22 @@ function TurnDetailsList({
         }
         if (item.kind === "askUser") {
           return <AskUserToolCard key={idx} dialog={item.dialog} />;
+        }
+        if (item.kind === "file") {
+          // agent-file-upload-mcp：历史回放的 agent 上传文件卡片（与段渲染路径
+          // turn-segment-views 同款「agent 上传了文件」标注 + FileMessageCard）
+          return (
+            <div key={idx} className="space-y-1">
+              <div className="text-[11px] text-muted-foreground">agent 上传了文件</div>
+              <FileMessageCard
+                fileId={item.fileId}
+                name={item.name}
+                size={item.size}
+                mime={item.mime}
+                description={item.description ?? ""}
+              />
+            </div>
+          );
         }
         // stderr
         return (

@@ -871,14 +871,27 @@ describe("FileUpload 文件段（task-08 / FR-01 / design §7.3）", () => {
     expect(turn.segments.every((s) => s.kind === "tool")).toBe(true);
   });
 
-  it("segmentsToLegacy 投影跳过 file 段（output / processItems 零贡献，旧消费方零感知）", () => {
+  it("segmentsToLegacy 投影 file 段为 kind:'file' 过程项（历史回放可见；output 零贡献）", () => {
+    // ql 修复（agent-file-upload-mcp 部署验证发现）：原实现跳过 file 段导致会话
+    // 面板历史回放（经 segmentsToLegacy 渲染）刷新后文件卡片消失，违反 FR-01
+    // 「刷新后仍在原位」——改为投影 file 过程项由 TurnDetailsList 渲染卡片。
     const turn = applyAll([
       makeLog("1", "stdout", "图表已生成"),
       makeFileLog("2", FILE_JSON),
     ]);
     expect(turn.segments.map((s) => s.kind)).toEqual(["text", "file"]);
     expect(turn.output).toBe("图表已生成");
-    expect(turn.processItems).toEqual([]);
+    expect(turn.processItems).toEqual([
+      {
+        kind: "file",
+        fileId: "f-1",
+        name: "q3-bug-trend.png",
+        size: 186368,
+        mime: "image/png",
+        description: "三季度 Bug 趋势图",
+        ts: Date.parse(T1),
+      },
+    ]);
   });
 
   it("logsToSegments 两路去重不受影响：不同文件不去重（键含 fileId）、同 file_id 重复行内容级去重、SSE log_id 去重照常", () => {
