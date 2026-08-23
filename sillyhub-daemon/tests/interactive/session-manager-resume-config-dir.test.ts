@@ -43,6 +43,13 @@ vi.mock('../../src/interactive/claude-transcript-dir.js', () => ({
       else env.CLAUDE_CONFIG_DIR = '/fake-isolated';
     },
   ),
+  // ql-20260822-001 移植后 SessionManager 新增 import；探测语义由上方
+  // applyTranscriptConfigDir mock 全权控制，迁移在本测试不触发真实 fs。
+  defaultTranscriptDirs: () => ({
+    isolated: '/fake-isolated',
+    home: '/fake-home/.claude',
+  }),
+  migrateClaudeTranscriptToIsolated: vi.fn(() => false),
 }));
 
 // ── 辅助构造（对齐 config-switch / main-agent-mcp 测试）───────────────────────

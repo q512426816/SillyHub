@@ -26,6 +26,9 @@ import type { AuditEvent, AuditSink } from '../../src/policy/audit-sink.js';
 
 const isWin = sep === '\\';
 
+/** 工作区根：与 target 同形态（Windows 盘符 / POSIX 绝对路径），跨平台匹配。 */
+const WORKSPACE_ROOT = isWin ? 'C:\\workspace\\proj' : '/workspace/proj';
+
 /** daemon.ts SILLYSPEC_TEMP_ROOTS 的等价集合（task-04 把这些并入 allowed_roots）。 */
 const TEMP_ROOTS = isWin
   ? ['C:\\dev\\null', 'C:/dev/null', tmpdir()]
@@ -61,7 +64,7 @@ describe('PolicyEngine allowed_roots 临时路径放行（FR-007）', () => {
     sink = createMockSink();
     engine = new PolicyEngine(cache, sink);
     // 模拟 daemon.ts：工作区根 + 临时路径并入 allowed_roots
-    cache.set('rt-claude', ['/workspace/proj', ...TEMP_ROOTS]);
+    cache.set('rt-claude', [WORKSPACE_ROOT, ...TEMP_ROOTS]);
   });
 
   // ── 临时路径放行写（FR-007）────────────────────────────────────────────────
