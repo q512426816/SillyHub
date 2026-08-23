@@ -369,3 +369,13 @@
 状态：进行中
 关联变更：（无）
 文件：（见实际改动）
+
+## ql-20260824-006-3617 | 2026-08-24 07:18:07 | 修复 codex 交互会话第二轮输入必崩（单订阅 InputQueue 被每轮重订阅）
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/interactive/codex-app-server-driver.ts, sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts
+需求：修复 codex 交互会话第二轮输入必崩（单订阅 InputQueue 被每轮重订阅）
+根因：codex 驱动 _takeNextTurn 每轮新建订阅，InputQueue 单订阅第二次抛 SessionQueueDoubleSubscribeError，首轮结束即会话 failed；测试 fake 队列每次返回新迭代器掩盖缺陷
+方案：迭代器改 consume 循环外创建一次，_takeNextTurn 循环内只 next()；fake 队列补单订阅语义让 TDD-4 自动成回归测试，另加显式回归用例
+结果：codex 驱动 24 用例全绿（含新回归用例）、interactive 全目录 509 用例全绿、tsc 0 错；daemon.md 同步
+审计：⚖️ 归属切分：3 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/workspaces/[id]/page.tsx, frontend/src/components/workspace/LinkedProjectsSection.tsx, frontend/src/components/workspace/__tests__/LinkedProjectsSection.test.tsx

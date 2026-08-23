@@ -817,9 +817,14 @@ export class CodexAppServerDriver implements InteractiveDriver {
       // 跳过首轮 turn/start 的标志（resume 路径首轮）
       let skipFirstTurnStart = isResume;
 
+      // 输入队列单订阅：整个 consume 生命周期只 [Symbol.asyncIterator]() 一次
+      //（InputQueue 第二次订阅抛 SessionQueueDoubleSubscribeError）。迭代器在
+      // 循环外创建，循环内只 next()——此前每轮重订阅，第二轮输入必抛错致会话失败。
+      const inputIt = ctx.input[Symbol.asyncIterator]();
+
       while (!h.closing && !finalized) {
         // 取下一条用户输入（阻塞直到有 / queue 关闭）
-        const turn = await this._takeNextTurn(ctx.input);
+        const turn = await this._takeNextTurn(inputIt);
         if (!turn) break; // input queue 结束 → 收敛
         if (h.closing || finalized) break;
 
@@ -996,12 +1001,14 @@ export class CodexAppServerDriver implements InteractiveDriver {
     }
   }
 
-  /** 从 input queue 取下一条（阻塞直到有或 done）。 */
+  /** 从 input 迭代器取下一条（阻塞直到有或 done）。
+   *
+   * 迭代器由调用方在多轮循环外创建一次后传入（InputQueue 单订阅语义，
+   * 第二次 [Symbol.asyncIterator]() 抛 SessionQueueDoubleSubscribeError）。 */
   private async _takeNextTurn(
-    input: AsyncIterable<UserTurnInput>,
+    input: AsyncIterator<UserTurnInput>,
   ): Promise<UserTurnInput | null> {
-    const it = input[Symbol.asyncIterator]();
-    const res = await it.next();
+    const res = await input.next();
     if (res.done) return null;
     return res.value;
   }

@@ -89,7 +89,11 @@ function makeCallbacks(): {
   return { cb, messages, results, errors };
 }
 
-/** 构造可控 input queue（push/close）。 */
+/** 构造可控 input queue（push/close）。
+ *
+ * 单订阅语义对齐真实 InputQueue：第二次 [Symbol.asyncIterator]() 抛错——
+ * 此前 fake 每次返回新迭代器读共享缓冲，掩盖了驱动每轮重订阅的缺陷
+ * （第二轮输入必抛 SessionQueueDoubleSubscribeError，TDD-4 因此测不出）。 */
 function makeInputQueue(): {
   queue: AsyncIterable<UserTurnInput>;
   push: (text: string) => void;
@@ -97,9 +101,14 @@ function makeInputQueue(): {
 } {
   const pending: UserTurnInput[] = [];
   let closed = false;
+  let subscribed = false;
   let waiter: (() => void) | null = null;
   const queue: AsyncIterable<UserTurnInput> = {
     [Symbol.asyncIterator]() {
+      if (subscribed) {
+        throw new Error('SessionQueueDoubleSubscribeError（fake 对齐真实 InputQueue 单订阅）');
+      }
+      subscribed = true;
       return {
         async next(): Promise<IteratorResult<UserTurnInput>> {
           if (pending.length > 0) {
@@ -649,6 +658,49 @@ describe('TDD-4：多轮串行（无并发 turn）', () => {
       turnCompletedNotif('completed'),
     ]);
     await new Promise<void>((r) => setTimeout(r, 50));
+
+    close();
+    child._emitExit(0);
+    await consumeP;
+  });
+
+  it('多轮只订阅输入队列一次（2026-08-24 会话审查 P2a：第二轮输入不再抛双订阅错）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, errors, results } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_123')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // 第一轮
+    push('first');
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [turnStartedNotif('thr_123', 'turn_1'), turnCompletedNotif('completed')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // 第二轮：修前此处对单订阅队列二次订阅 → SessionQueueDoubleSubscribeError →
+    // onError + 会话失败，第二轮 turn/start 永不发出
+    push('second');
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [turnStartedNotif('thr_123', 'turn_2'), turnCompletedNotif('completed')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    const turnStarts = readStdinJson(child).filter((m) => m.method === 'turn/start');
+    expect(turnStarts).toHaveLength(2);
+    expect(
+      (turnStarts[1]!.params as { input: { text: string }[] }).input[0].text,
+    ).toBe('second');
+    // 两轮均正常收敛，无双订阅错误
+    expect(errors).toHaveLength(0);
+    expect(results.filter((r) => (r as { is_error?: boolean }).is_error !== true)).toHaveLength(
+      2,
+    );
 
     close();
     child._emitExit(0);
