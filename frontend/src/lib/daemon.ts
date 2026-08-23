@@ -896,6 +896,13 @@ export function streamSession(
 
   let lastEventId: string | null = null;
   let sessionEndedFired = false;
+  // ── P4（2026-08-24 会话审查）：增量回放游标 ──────────────────────────────
+  // 最近一条已见 log 的 timestamp。回放（断线 resync / 轮后对账）只拉
+  // `after = lastLogTs - 2s` 之后的增量，替代全量重放（5000 行 × 50KB）。
+  // -2s 重叠窗口兜「submit_messages 同批日志共用同一 timestamp，纯 timestamp
+  // 游标跳过同批后到行」的边界；重复行由页面装配器 seenLogIds（log_id）去重。
+  let lastLogTs: string | null = null;
+  const REPLAY_OVERLAP_MS = 2000;
   // ── ql-20260820-009：断线重连（指数退避 + 全量回放 + 终态合成） ──────────
   // fetch-sse 无自动重连、backend Redis Pub/Sub 无补发：断连期间的 turn/log
   // 事件对本连接永久丢失。onerror → 退避后 resync 补缺口再重建 SSE 连接。
@@ -949,6 +956,10 @@ export function streamSession(
     }
     if (kind === "log" && raw.lastEventId) {
       lastEventId = raw.lastEventId;
+    }
+    // P4：游标推进——实时 log 事件也计入（envelope.timestamp 是后端落库同源 ts）。
+    if (kind === "log" && typeof env.timestamp === "string" && env.timestamp) {
+      if (!lastLogTs || env.timestamp > lastLogTs) lastLogTs = env.timestamp;
     }
     const envelope = env as SessionStreamEnvelope;
     switch (kind) {
@@ -1070,11 +1081,24 @@ export function streamSession(
     }, delay);
   };
 
-  /** DB 全量日志 → log 事件回放（resync 与轮后对账共用；调用方 seenLogIds 去重）。 */
+  /** DB 日志 → log 事件回放（resync 与轮后对账共用；调用方 seenLogIds 去重）。
+   *
+   * P4：已有游标（lastLogTs）时改增量拉取（after = 游标 - 2s 重叠，后端
+   * `timestamp > after` 严格过滤）；首次（无游标）仍全量。 */
   const replayLogsFromDb = async () => {
-    const logs = await getAgentSessionLogs(sessionId);
+    let afterParam: string | undefined;
+    if (lastLogTs) {
+      const ts = Date.parse(lastLogTs);
+      if (!Number.isNaN(ts)) {
+        afterParam = new Date(Math.max(0, ts - REPLAY_OVERLAP_MS)).toISOString();
+      }
+    }
+    const logs = await getAgentSessionLogs(sessionId, afterParam ? { after: afterParam } : {});
     if (closed) return;
     for (const log of logs) {
+      if (log.timestamp && (!lastLogTs || log.timestamp > lastLogTs)) {
+        lastLogTs = log.timestamp;
+      }
       dispatch({
         data: JSON.stringify({
           event: "log",
@@ -1110,7 +1134,7 @@ export function streamSession(
 
   /**
    * 断线恢复（ql-20260820-009）：runs 快照 → 运行中 run 合成 turn_started
-   * （建轮 + 设 currentRunId）→ /logs 全量回放（调用方 seenLogIds 去重补缺口）
+   * （建轮 + 设 currentRunId）→ /logs 增量回放（P4 游标-2s 重叠，首次全量；调用方 seenLogIds 去重补缺口）
    * → 终态 run 合成 turn_completed（补错过的完成事件；页面终态幂等，重复合成
    * no-op）→ 重建 SSE 连接。订阅后 5s 延迟复核兜「快照与订阅之间完成」的 run。
    * 回放与实时事件的段内时序可能有微小交错（罕见，仅断连恢复瞬间）。
@@ -1395,9 +1419,11 @@ export async function getAgentSession(
  */
 export async function getAgentSessionLogs(
   sessionId: string,
+  opts?: { after?: string },
 ): Promise<AgentRunLogEntry[]> {
+  const qs = opts?.after ? `?after=${encodeURIComponent(opts.after)}` : "";
   return apiFetch<AgentRunLogEntry[]>(
-    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/logs`,
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/logs${qs}`,
   );
 }
 

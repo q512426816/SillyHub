@@ -3211,8 +3211,15 @@ class SessionService:
         user_id: uuid.UUID,
         *,
         limit: int = 5000,
+        after: datetime | None = None,
     ) -> list[AgentRunLog]:
         """Return all AgentRunLog rows for an owned session, cross-run aggregate.
+
+        ``after``（2026-08-24 会话审查 P4，对齐 run 级 ``?after=`` 先例）：增量
+        游标——只返回 ``timestamp > after`` 的行，供前端断线重连/轮后对账增量
+        拉取，替代全量重放（5000 行 × 50KB 的重连代价）。submit_messages 同批
+        日志共用同一 timestamp，纯 timestamp 游标在批次内边界会漏同批后到行，
+        调用方应回退 1-2s 重叠窗口并按 log_id 去重（前端已具备该去重）。
 
         D-005@v1: aggregation key is ``AgentRun.agent_session_id`` (the 1:N FK
         to AgentSession), NEVER ``AgentRun.session_id`` (the claude resume id,
@@ -3275,7 +3282,11 @@ class SessionService:
             select(AgentRunLog)
             .select_from(AgentRunLog)
             .join(run_anchor, run_anchor.c.run_id == AgentRunLog.run_id)
-            .order_by(
+        )
+        if after is not None:
+            stmt = stmt.where(AgentRunLog.timestamp > after)
+        stmt = (
+            stmt.order_by(
                 run_anchor.c.anchor_ts.desc(),
                 AgentRunLog.timestamp.desc(),
                 AgentRunLog.id.desc(),

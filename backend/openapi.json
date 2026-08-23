@@ -7716,7 +7716,7 @@
           "agent-file-artifacts"
         ],
         "summary": "Upload File Artifact",
-        "description": "上传一个 agent 文件制品：File 行 + AgentRunLog 日志行 + Redis 实时扇出。\n\n场景解析（design §7.2）：\n\n- worker 场景（显式 ``run_id``）：校验 run 存在（404）后挂该 run，\n  owner_type=agent_run；锚 workspace 走 task-02 解析链。\n- 会话场景（``X-Session-Id``，与 mcp_tools 同名同源）：日志行挂当前活跃 run\n  （无活跃取最新，均无 422 中文引导），owner_type=agent_session、owner_id=\n  会话 id；锚 workspace=AgentSession.workspace_id。\n\n两场景都按锚 workspace 复核 WORKSPACE_WRITE（越权 403）；重放防护：直写日志行\n撞 ``(run_id, dedup_key)`` 部分唯一索引（ux_agent_run_logs_dedup）的\nIntegrityError 视作已写入，不 500。",
+        "description": "上传一个 agent 文件制品：File 行 + AgentRunLog 日志行 + Redis 实时扇出。\n\n场景解析（design §7.2）：\n\n- worker 场景（显式 ``run_id``）：校验 run 存在（404）后挂该 run，\n  owner_type=agent_run；锚 workspace 走 task-02 解析链。\n- 会话场景（``X-Session-Id``，与 mcp_tools 同名同源）：日志行挂当前活跃 run\n  （无活跃取最新，均无 422 中文引导），owner_type=agent_session、owner_id=\n  会话 id；授权走会话归属人制（ql-20260823-013）：归属人放行（无工作区会话\n  同样可传），非归属人按 AgentSession.workspace_id 锚复核 WORKSPACE_WRITE。\n\nworker 场景按锚 workspace 复核 WORKSPACE_WRITE（越权 403）；重放防护：直写日志行\n撞 ``(run_id, dedup_key)`` 部分唯一索引（ux_agent_run_logs_dedup）的\nIntegrityError 视作已写入，不 500。",
         "operationId": "upload_file_artifact_api_agent_file_artifacts_post",
         "requestBody": {
           "required": true,
@@ -7757,7 +7757,7 @@
           "agent-file-artifacts"
         ],
         "summary": "List File Artifacts",
-        "description": "按 session_id / run_id 列文件制品（FileMetaResp 含 description/created_at）。\n\nWORKSPACE_READ（读级鉴权）+ 锚 workspace 复核；按 created_at 倒序。前端 run\n详情「产出文件」区与 daemon list_uploaded_files 工具共用本端点（D-010@v1，\n不复用 /api/file/list——其非 admin owner 分支把 owner_id 当 workspace id\n鉴权会 404）。",
+        "description": "按 session_id / run_id 列文件制品（FileMetaResp 含 description/created_at）。\n\n会话场景走会话归属人制（归属人放行，非归属人按 workspace 锚复核\nWORKSPACE_READ，ql-20260823-013）；run 场景仍锚 workspace 复核 WORKSPACE_READ；\n按 created_at 倒序。前端 run 详情「产出文件」区与 daemon list_uploaded_files\n工具共用本端点（D-010@v1，不复用 /api/file/list——其非 admin owner 分支把\nowner_id 当 workspace id 鉴权会 404）。",
         "operationId": "list_file_artifacts_api_agent_file_artifacts_get",
         "parameters": [
           {
@@ -11926,6 +11926,25 @@
               "format": "uuid",
               "title": "Session Id"
             }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "增量游标（ISO timestamp，2026-08-24 会话审查 P4）：只返回 timestamp 严格更新的日志；不传返回全量。同批日志共用同一 timestamp，调用方应回退 1-2s 重叠窗口并按 log_id 去重",
+              "title": "After"
+            },
+            "description": "增量游标（ISO timestamp，2026-08-24 会话审查 P4）：只返回 timestamp 严格更新的日志；不传返回全量。同批日志共用同一 timestamp，调用方应回退 1-2s 重叠窗口并按 log_id 去重"
           }
         ],
         "responses": {

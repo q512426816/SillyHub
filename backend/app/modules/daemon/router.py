@@ -2315,6 +2315,14 @@ async def get_session_logs(
     session_id: uuid.UUID,
     session: SessionDep,
     user: TaskRunAgentUser,
+    after: datetime | None = Query(
+        None,
+        description=(
+            "增量游标（ISO timestamp，2026-08-24 会话审查 P4）：只返回 timestamp "
+            "严格更新的日志；不传返回全量。同批日志共用同一 timestamp，调用方应"
+            "回退 1-2s 重叠窗口并按 log_id 去重"
+        ),
+    ),
 ) -> list[AgentRunLogEntry]:
     """Return all logs of a session, aggregated across AgentRuns (D-005@v1).
 
@@ -2324,7 +2332,7 @@ async def get_session_logs(
     preserved so the frontend can delineate turn boundaries.
     """
     svc = DaemonService(session)
-    logs = await svc.get_agent_session_logs(session_id, user.id)
+    logs = await svc.get_agent_session_logs(session_id, user.id, after=after)
     return [AgentRunLogEntry.model_validate(log) for log in logs]
 
 

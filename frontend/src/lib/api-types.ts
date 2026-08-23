@@ -26468,7 +26468,10 @@ export interface operations {
     };
     get_session_logs_api_daemon_sessions__session_id__logs_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 增量游标（ISO timestamp，2026-08-24 会话审查 P4）：只返回 timestamp 严格更新的日志；不传返回全量。同批日志共用同一 timestamp，调用方应回退 1-2s 重叠窗口并按 log_id 去重 */
+                after?: string | null;
+            };
             header?: never;
             path: {
                 session_id: string;

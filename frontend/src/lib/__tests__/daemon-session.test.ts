@@ -555,6 +555,8 @@ describe("streamSession 断线重连（ql-20260820-009）", () => {
   /** 路由 fetch：/stream → 可控 SSE 流；/runs、/logs → JSON 固件。 */
   let runsFixture: Array<Record<string, unknown>>;
   let logsFixture: Array<Record<string, unknown>>;
+  /** P4：捕获 /logs 请求 URL（断言 after 增量游标）。 */
+  const logsFetchUrls: string[] = [];
 
   function installRoutingFetchMock(): void {
     vi.spyOn(globalThis, "fetch").mockImplementation(
@@ -583,6 +585,7 @@ describe("streamSession 断线重连（ql-20260820-009）", () => {
           );
         }
         const payload = u.includes("/runs") ? runsFixture : logsFixture;
+        if (u.includes("/logs")) logsFetchUrls.push(u);
         return Promise.resolve(
           new Response(JSON.stringify(payload), {
             status: 200,
@@ -652,6 +655,7 @@ describe("streamSession 断线重连（ql-20260820-009）", () => {
     vi.useFakeTimers();
     streams.length = 0;
     lastStream = null;
+    logsFetchUrls.length = 0;
     seedFixtures();
     installRoutingFetchMock();
   });
@@ -712,6 +716,42 @@ describe("streamSession 断线重连（ql-20260820-009）", () => {
     expect(handlers.onTurnCompleted).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(5000);
     expect(handlers.onTurnCompleted).toHaveBeenCalledTimes(2);
+    conn.close();
+  });
+
+  it("P4 增量回放：已有游标时断连重连只拉 after=游标-2s 的增量（首次仍全量）", async () => {
+    const handlers = makeHandlers();
+    const conn = streamSession("sess-1", handlers);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(streams).toHaveLength(1);
+    // 尚无游标 → 首次（如有）拉取不带 after
+    const initialUrls = [...logsFetchUrls];
+
+    // 直播收到一条带真实 ISO 时间戳的日志 → 游标 = 2026-08-20T02:00:20Z
+    emitDefault(
+      streams[0]!,
+      {
+        event: "log", session_id: "sess-1", run_id: "r-1", turn: 1,
+        log_id: "log-1", timestamp: "2026-08-20T02:00:20Z", channel: "stdout",
+        content: "已见", status: null, exit_code: null, reason: null,
+      },
+      "log-1",
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    // 断连 → 1s 退避 resync：/logs 请求带 after=游标-2s（重叠窗口兜同批同 timestamp 边界）
+    streams[0]!.close!();
+    await vi.advanceTimersByTimeAsync(1000);
+
+    const incrementalUrl = logsFetchUrls.find(
+      (u) => u !== undefined && u.includes("after="),
+    );
+    expect(incrementalUrl).toBeTruthy();
+    expect(incrementalUrl).toContain("sessions/sess-1/logs");
+    expect(decodeURIComponent(incrementalUrl!)).toContain("2026-08-20T02:00:18"); // 20Z - 2s
+
+    // 首次（连接前无游标）不应有带 after 的请求
+    expect(initialUrls.every((u) => !u.includes("after="))).toBe(true);
     conn.close();
   });
 

@@ -325,6 +325,70 @@ class TestSessionLogs:
         # logs ordered by timestamp asc.
         assert [e["content_redacted"] for e in body] == ["a1", "a2", "b1"]
 
+    async def test_after_cursor_returns_newer_only(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """P4（2026-08-24 会话审查）：?after= 增量游标只回 timestamp 严格更新的行。
+
+        断线重连/轮后对账改增量拉取的后端支撑（替代 5000 行全量重放）；
+        等 after 的一条不返回（对齐 run 级 ?after= 语义）。
+        """
+        admin = (
+            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+            .scalars()
+            .first()
+        )
+        assert admin is not None
+        rt = await _make_runtime(db_session, admin.id)
+        sess = await _make_session(db_session, admin.id, rt.id, status="ended")
+        run_a = await _make_run(db_session, sess.id)
+        base = datetime.now(UTC) - timedelta(minutes=3)
+        await _make_log(db_session, run_a.id, content="l1", timestamp=base)
+        await _make_log(db_session, run_a.id, content="l2", timestamp=base + timedelta(seconds=10))
+        await _make_log(db_session, run_a.id, content="l3", timestamp=base + timedelta(seconds=20))
+
+        after = (base + timedelta(seconds=10)).isoformat()
+        resp = await client.get(
+            f"/api/daemon/sessions/{sess.id}/logs",
+            headers=auth_headers,
+            params={"after": after},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        # l2 的 timestamp 恰好等于 after → 不返回（严格大于）
+        assert [e["content_redacted"] for e in body] == ["l3"]
+
+    async def test_after_future_returns_empty(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """after 晚于全部日志 → 空列表（增量已追平）。"""
+        admin = (
+            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+            .scalars()
+            .first()
+        )
+        assert admin is not None
+        rt = await _make_runtime(db_session, admin.id)
+        sess = await _make_session(db_session, admin.id, rt.id, status="ended")
+        run_a = await _make_run(db_session, sess.id)
+        base = datetime.now(UTC) - timedelta(minutes=3)
+        await _make_log(db_session, run_a.id, content="l1", timestamp=base)
+
+        future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+        resp = await client.get(
+            f"/api/daemon/sessions/{sess.id}/logs",
+            headers=auth_headers,
+            params={"after": future},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == []
+
     async def test_empty_logs(
         self,
         client: AsyncClient,

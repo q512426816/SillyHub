@@ -813,8 +813,10 @@ class DaemonService:
         self,
         session_id: uuid.UUID,
         user_id: uuid.UUID,
+        *,
+        after: datetime | None = None,
     ) -> list[AgentRunLog]:
-        return await self._sess.get_agent_session_logs(session_id, user_id)
+        return await self._sess.get_agent_session_logs(session_id, user_id, after=after)
 
     # ── Helpers ───────────────────────────────────────────────────────────
 

@@ -422,3 +422,22 @@
 根因：SQLAlchemy Core Delete 无 .limit() 方法且 PG 无 DELETE LIMIT 方言，cleanup_expired_draft_attachments 每小时首条 delete 即抛 AttributeError，被 _run_forever except 吞成 warning——任务自上线起从未删过任何行，48h 草稿无限累积
 方案：改 id IN (SELECT id WHERE session_id IS NULL AND created_at<cutoff LIMIT 200) 子查询写法（SQLite/PG 双方言兼容，批量上限语义不变）；新增 test_cleanup.py 两用例锁行为
 结果：新增 2 用例（只删过期草稿且不动已绑定附件/单轮批量上限）全绿；ruff 0 错
+
+## ql-20260824-010-5c30 | 2026-08-24 07:46:39 | 会话日志增量游标：/daemon/sessions/{id}/logs 加 after 参数
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/session/service.py（after 过滤）
+- backend/app/modules/daemon/service.py（门面透传）
+- backend/app/modules/daemon/router.py（Query 参数）
+- backend/app/modules/daemon/tests/test_session_history.py（新增 2 用例）
+- frontend/src/lib/daemon.ts（游标+增量回放）
+- frontend/src/lib/__tests__/daemon-session.test.ts（增量回放用例）
+- frontend/src/lib/api-types.ts（gen:types）
+- backend/openapi.json（gen:types）
+- .sillyspec/docs/SillyHub/modules/daemon.md（logs 段同步）
+需求：会话日志增量游标：/daemon/sessions/{id}/logs 加 after 参数，前端对账改增量拉取
+根因：会话级日志接口无增量游标（run 级有 after 而会话级没做），前端断线重连与每轮 turn_completed 对账都全量重拉（默认 5000 行×50KB 上限），长会话连续对话退化为持续大请求轮询
+方案：get_agent_session_logs 加 after 过滤（timestamp 严格大于，门面层透传，router 暴露 Query 参数）；前端 streamSession 维护 lastLogTs 游标（实时 log 事件与回放共同推进），replayLogsFromDb 改拉 after=游标-2s 重叠窗口（兜 submit_messages 同批共用同一 timestamp 的边界，重复行由既有 seenLogIds/log_id 去重），首次仍全量；pnpm gen:types 同步 api-types.ts+openapi.json
+结果：后端 test_session_history 新增 2 用例（严格大于/未来时间空）全绿、daemon 域 895 全绿；前端新增增量回放用例（after=游标-2s 断言）全绿、lib+daemon 组件 798 全绿；tsc/ruff 0 错；daemon.md 同步
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/service.py
