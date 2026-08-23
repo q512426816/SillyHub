@@ -62,6 +62,7 @@ import type * as React from "react";
 
 import {
   SessionListPanel,
+  SESSION_TREE_EXPANSION_LS_KEY,
   type SessionListScope,
 } from "@/components/sessions/session-list-panel";
 import type {
@@ -355,6 +356,8 @@ beforeEach(() => {
   setWorkspaces();
   setMachines();
   mocks.machinesRefetch.mockReset();
+  // ql-20260824-002：展开记忆隔离（用户手动 toggle 落盘，跨用例须清）
+  window.localStorage.removeItem(SESSION_TREE_EXPANSION_LS_KEY);
 });
 
 afterEach(() => {
@@ -1315,6 +1318,140 @@ describe("SessionListPanel 分组默认折叠与本地 Agent 小节（ql-2026082
     await openGroup("SillyHub");
     expect(
       screen.getByRole("button", { name: "本地 Agent 小节" }),
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+});
+
+// ── 10. 展开状态 localStorage 记忆（ql-20260824-002） ───────────────────────
+
+describe("SessionListPanel 展开状态 localStorage 记忆（ql-20260824-002）", () => {
+  /** 两组各一条会话的标准固件（工作区一=A / 工作区二=B）。 */
+  function twoGroupsFixture() {
+    setWorkspaces([
+      makeWorkspace({ id: "ws-1", name: "工作区一" }),
+      makeWorkspace({ id: "ws-2", name: "工作区二" }),
+    ]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" }),
+        makeSession({ id: "s-2", workspace_id: "ws-2", title: "会话B" }),
+      ]),
+    );
+  }
+
+  it("手动展开组 → 重挂载（模拟刷新）保持展开；未动过的组保持折叠", async () => {
+    twoGroupsFixture();
+    const first = renderPanel(<SessionListPanel />);
+    await openGroup("工作区一");
+    first.unmount();
+
+    renderPanel(<SessionListPanel />);
+    await screen.findByRole("button", { name: "工作区分组 工作区一" });
+    expect(
+      screen.getByRole("button", { name: "工作区分组 工作区一" }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.getByRole("button", { name: "工作区分组 工作区二" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.getByRole("button", { name: "会话 会话A" }),
+    ).toBeInTheDocument();
+  });
+
+  it("展开后再手动收起 → 记忆更新，重挂载保持收起", async () => {
+    twoGroupsFixture();
+    const first = renderPanel(<SessionListPanel />);
+    await openGroup("工作区一");
+    // 再点一次收起（用户显式折叠落盘）
+    fireEvent.click(
+      screen.getByRole("button", { name: "工作区分组 工作区一" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "工作区分组 工作区一" }),
+      ).toHaveAttribute("aria-expanded", "false"),
+    );
+    first.unmount();
+
+    renderPanel(<SessionListPanel />);
+    await screen.findByRole("button", { name: "工作区分组 工作区一" });
+    expect(
+      screen.getByRole("button", { name: "工作区分组 工作区一" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.queryByRole("button", { name: "会话 会话A" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("记忆与选中定位并集：记忆展开的组保持 + 选中会话所在组仍自动展开（不落盘）", async () => {
+    twoGroupsFixture();
+    // 先制造记忆：展开工作区二
+    const first = renderPanel(<SessionListPanel />);
+    await openGroup("工作区二");
+    first.unmount();
+
+    // 重挂载带选中 ws-1 会话：记忆(ws-2) ∪ 选中组(ws-1) 都展开
+    renderPanel(<SessionListPanel selectedSessionId="s-1" />);
+    expect(
+      await screen.findByRole("button", { name: "会话 会话A" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "会话 会话B" }),
+    ).toBeInTheDocument();
+    // 兜底展开不落盘：记忆仍只有 ws-2
+    expect(JSON.parse(window.localStorage.getItem(SESSION_TREE_EXPANSION_LS_KEY) ?? "{}")).toEqual({
+      openGroups: ["ws-2"],
+      openToolSections: [],
+    });
+  });
+
+  it("「本地 Agent」小节展开记忆：展开后重挂载，组与小节都保持展开", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-normal",
+          workspace_id: "ws-1",
+          runtime_id: "rt-m1",
+          title: "正常会话",
+        }),
+        makeSession({
+          id: "s-tool",
+          workspace_id: "ws-1",
+          origin: "tool_report",
+          title: "CLI 上报的会话",
+        }),
+      ]),
+    );
+    const first = renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
+    const toolHead = screen.getByRole("button", { name: "本地 Agent 小节" });
+    fireEvent.click(toolHead);
+    await waitFor(() => expect(toolHead).toHaveAttribute("aria-expanded", "true"));
+    first.unmount();
+
+    renderPanel(<SessionListPanel />);
+    // 组与小节记忆都生效，条目直接可见
+    expect(
+      await screen.findByRole("button", { name: "会话 CLI 上报的会话" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "本地 Agent 小节" }),
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("坏数据容错：localStorage 存垃圾 JSON → 静默回默认全折叠", async () => {
+    window.localStorage.setItem(SESSION_TREE_EXPANSION_LS_KEY, "{oops");
+    twoGroupsFixture();
+    renderPanel(<SessionListPanel />);
+
+    await screen.findByRole("button", { name: "工作区分组 工作区一" });
+    expect(
+      screen.getByRole("button", { name: "工作区分组 工作区一" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.getByRole("button", { name: "工作区分组 工作区二" }),
     ).toHaveAttribute("aria-expanded", "false");
   });
 });

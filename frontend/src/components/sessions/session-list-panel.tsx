@@ -37,6 +37,10 @@
  *       （刷新/深链恢复 ?session= 定位）与 defaultExpandedWorkspaceId（FR-06
  *       入口预展开）豁免展开；选中变化时兜底展开新所在组（用户手动折叠的
  *       组不被回弹——同一选中只触发一次）
+ *     - ql-20260824-002（用户反馈记忆）：用户手动展开/折叠经 localStorage
+ *       记忆（openGroups/openToolSections 记「展开例外」，与默认全折叠自洽
+ *       且跨 scope 不泄漏——未记的组恒收起）；仅 toggle 落盘，R-05 筛选
+ *       重置与选中兜底展开不写；渲染期默认 = 记忆 ∪ 选中组 ∪ 入口预展开
  *     - 组内机器小节：机器名 + 在线状态点；runtime→machine 映射来自会话
  *       runtime_id，缺省回退 config_snapshot.machine_name
  *     - 组内「本地 Agent」合并小节（ql-20260824-001）：origin=tool_report
@@ -139,6 +143,77 @@ const NO_WORKSPACE_GROUP_ID = "__no_workspace__";
 const UNKNOWN_WORKSPACE_GROUP_ID = "__unknown_workspace__";
 /** 组内「本地 Agent」合并小节 key（origin=tool_report 会话统一落此，不进机器分桶）。 */
 const TOOL_REPORT_SECTION_KEY = "__tool_report__";
+
+/* ────────── 展开记忆（ql-20260824-002：localStorage 持久化用户手动展开） ────────── */
+
+/** 展开记忆 localStorage key（先例：NEW_SESSION_MACHINE_LS_KEY 命名风格）。 */
+export const SESSION_TREE_EXPANSION_LS_KEY = "sillyhub.sessions.tree.expansion";
+
+/**
+ * 展开记忆形状：记「展开例外」而非折叠集合——默认全折叠下不在集合即收起，
+ * 跨 scope 不泄漏（workspace/change 入口看不到的组不进集合，全局页读到的
+ * 记忆对未提及的组仍走默认收起）。
+ */
+interface SessionTreeExpansionCache {
+  openGroups: string[];
+  openToolSections: string[];
+}
+
+/** 读展开记忆（无记录/坏 JSON/SSR → null 静默回默认）。 */
+function readExpansionCache(): SessionTreeExpansionCache | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(SESSION_TREE_EXPANSION_LS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<SessionTreeExpansionCache>;
+    const strArr = (v: unknown) =>
+      Array.isArray(v)
+        ? v.filter((x): x is string => typeof x === "string")
+        : null;
+    const openGroups = strArr(parsed.openGroups);
+    const openToolSections = strArr(parsed.openToolSections);
+    if (!openGroups || !openToolSections) return null;
+    return { openGroups, openToolSections };
+  } catch {
+    return null;
+  }
+}
+
+/** 写展开记忆（隐私模式/配额异常静默忽略——丢记忆不阻断交互）。 */
+function writeExpansionCache(cache: SessionTreeExpansionCache): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      SESSION_TREE_EXPANSION_LS_KEY,
+      JSON.stringify(cache),
+    );
+  } catch {
+    // 写不进只是丢记忆，不影响本次交互。
+  }
+}
+
+/**
+ * 记录当前 scope 内各组的展开态（scope 外组的既有记忆保留——组 id 全局
+ * 唯一不重叠，workspace/change 入口只覆写自己看得到的组）。
+ */
+function saveOpenGroups(open: Set<string>, scopeGroupIds: string[]): void {
+  const cache = readExpansionCache() ?? { openGroups: [], openToolSections: [] };
+  const inScope = new Set(scopeGroupIds);
+  cache.openGroups = [
+    ...new Set([...cache.openGroups.filter((id) => !inScope.has(id)), ...open]),
+  ];
+  writeExpansionCache(cache);
+}
+
+/** 记录某组「本地 Agent」小节展开态（组 id 天然全局唯一，无 scope 问题）。 */
+function saveToolSectionOpen(groupId: string, isOpen: boolean): void {
+  const cache = readExpansionCache() ?? { openGroups: [], openToolSections: [] };
+  const next = new Set(cache.openToolSections);
+  if (isOpen) next.add(groupId);
+  else next.delete(groupId);
+  cache.openToolSections = [...next];
+  writeExpansionCache(cache);
+}
 
 export interface SessionListPanelProps {
   /**
@@ -504,18 +579,33 @@ function WorkspaceTreeList({
     );
   }, [groups, selectedSessionId]);
 
+  // 展开记忆（ql-20260824-002）：挂载时惰性读一次——用户手动展开过的组。
+  // 记忆作为渲染期默认的并集项（非「已交互」折叠集），会话内后续 toggle 由
+  // collapsedIds 接管；仅 toggle 落盘，此处不随交互刷新。
+  const persistedOpenGroupIds = useMemo(
+    () => new Set(readExpansionCache()?.openGroups ?? []),
+    [],
+  );
+
   // 生效折叠集合：用户未交互（collapsedIds null）时用渲染期默认——缺省全组
-  // 折叠（ql-20260824-001 用户要求收纳），仅两组豁免展开：选中会话所在组
-  // （刷新/深链恢复 ?session= 时定位到当前会话）+ defaultExpandedWorkspaceId
-  // （workspace/change 入口深链预展开，FR-06）。默认在渲染期派生而非 effect
-  // 落地：工作区列表晚于会话到达时分组会生长，派生值随之收敛。
+  // 折叠（ql-20260824-001 用户要求收纳），豁免展开 = 展开记忆（ql-20260824-002
+  // 刷新/重进恢复用户手动展开）∪ 选中会话所在组（刷新/深链恢复 ?session= 时
+  // 定位到当前会话）∪ defaultExpandedWorkspaceId（workspace/change 入口深链
+  // 预展开，FR-06）。默认在渲染期派生而非 effect 落地：工作区列表晚于会话
+  // 到达时分组会生长，派生值随之收敛。
   const effectiveCollapsedIds = useMemo(() => {
     if (collapsedIds) return collapsedIds;
-    const keepOpen = new Set<string>();
+    const keepOpen = new Set<string>(persistedOpenGroupIds);
     if (currentGroupId) keepOpen.add(currentGroupId);
     if (defaultExpandedWorkspaceId) keepOpen.add(defaultExpandedWorkspaceId);
     return new Set(groups.filter((g) => !keepOpen.has(g.id)).map((g) => g.id));
-  }, [collapsedIds, groups, currentGroupId, defaultExpandedWorkspaceId]);
+  }, [
+    collapsedIds,
+    groups,
+    currentGroupId,
+    defaultExpandedWorkspaceId,
+    persistedOpenGroupIds,
+  ]);
 
   // 选中变化时兜底展开所在分组（ql-20260824-001）：仅覆盖用户已折叠过
   // （collapsedIds 非空）后经门户路径换选中的场景（继续最近会话 / 预会话
@@ -556,12 +646,18 @@ function WorkspaceTreeList({
     // 「空集 + 渲染期默认」，首次点击需以 effectiveCollapsedIds 为基线翻转，
     // 否则默认已折叠的组第一次点击会被误判为「展开中→折叠」而无视觉变化。
     const wasCollapsed = effectiveCollapsedIds.has(id);
-    setCollapsedIds(
-      new Set(
-        wasCollapsed
-          ? [...effectiveCollapsedIds].filter((x) => x !== id)
-          : [...effectiveCollapsedIds, id],
-      ),
+    const next = new Set(
+      wasCollapsed
+        ? [...effectiveCollapsedIds].filter((x) => x !== id)
+        : [...effectiveCollapsedIds, id],
+    );
+    setCollapsedIds(next);
+    // ql-20260824-002：仅用户手动 toggle 落盘（展开 = scope 内组全集 - 折叠
+    // 集；R-05 筛选重置与选中兜底展开不写——那些是临时视图/定位，不覆盖
+    // 用户的手动选择记忆）。
+    saveOpenGroups(
+      new Set(groupIds.filter((gid) => !next.has(gid))),
+      groupIds,
     );
   };
 
@@ -969,11 +1065,18 @@ function WorkspaceGroupNode({
 
   // 「本地 Agent」小节折叠态（ql-20260824-001）：覆盖值带筛选纪元——epoch
   // 变化（R-05 筛选重置）时旧覆盖被丢弃回到默认（收起；选中会话在小节内 →
-  // 展开，与组级渲染期默认同语义）。
+  // 展开，与组级渲染期默认同语义）。ql-20260824-002：展开记忆惰性初值——
+  // 挂载纪元取当时 filterEpoch（数据晚于筛选到达时也生效），此后筛选变化
+  // 照常经 epoch 丢弃回默认。
   const [toolOpenState, setToolOpenState] = useState<{
     epoch: string;
     open: boolean;
-  } | null>(null);
+  } | null>(() => {
+    const cached = readExpansionCache();
+    return cached?.openToolSections.includes(group.id)
+      ? { epoch: filterEpoch, open: true }
+      : null;
+  });
   const toolSection = sections.find((s) => s.isToolReport) ?? null;
   const toolSectionOpen =
     (toolOpenState && toolOpenState.epoch === filterEpoch
@@ -981,7 +1084,10 @@ function WorkspaceGroupNode({
       : null) ??
     Boolean(toolSection?.sessions.some((s) => s.id === selectedSessionId));
   const toggleToolSection = () => {
-    setToolOpenState({ epoch: filterEpoch, open: !toolSectionOpen });
+    const next = !toolSectionOpen;
+    setToolOpenState({ epoch: filterEpoch, open: next });
+    // ql-20260824-002：仅用户手动 toggle 落盘（同组级 toggleGroup 语义）。
+    saveToolSectionOpen(group.id, next);
   };
   // 选中变化经门户路径落到小节内时兜底展开（列表点击必在小节已展开时发生；
   // 同一选中只触发一次，用户随后手动收起不被回弹——与组级 lastOpenForSelRef

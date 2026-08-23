@@ -323,3 +323,20 @@
 根因：原树缺省全展开且 tool_report（SillySpec CLI 自动上报）会话散落机器小节刷屏；选中态仅 ?session= 深链可恢复，列表点选不写 URL，刷新即丢失当前会话
 方案：session-list-panel 默认全组折叠（选中组/defaultExpandedWorkspaceId 豁免+选中变化兜底展开）、tool_report 合并组内末尾可折叠『本地 Agent』小节（默认收起+filterEpoch 随 R-05 重置）；sessions-portal 选中态与 ?session= replace 双向同步（写参/清参/去重/new=1 移除）
 结果：相关 4 测试文件 101 用例全绿，前端全量 181 文件 2014/2014 passed，tsc 0 错，eslint 仅 2 条预存 warning
+
+## ql-20260824-002-0d64 | 2026-08-24 07:00:53 | 会话列表分组与本地 Agent 小节的展开折叠状态前端缓存记忆
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/sessions/session-list-panel.tsx（LS key+读改写辅助+渲染期默认并入+双 toggle 落盘）
+- frontend/src/components/sessions/__tests__/session-list-panel.test.tsx（新增 5 记忆用例+beforeEach 清 key）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引 ql-20260824-002-0d64）
+需求：会话列表分组与本地 Agent 小节的展开折叠状态前端缓存记忆，刷新重进恢复用户手动选择
+根因：上一 quick 落地的折叠体系是内存 state，刷新即回默认全折叠，用户每次都要重新展开
+方案：localStorage sillyhub.sessions.tree.expansion 存 {openGroups,openToolSections} 展开例外集合（跨 scope 不泄漏）；渲染期默认=记忆∪选中组∪入口预展开；仅用户 toggle 读改写落盘（筛选重置/选中兜底不写）；坏 JSON/SSR 静默容错
+结果：panel 36 用例全绿（新增 5：展开/收起记忆、记忆∪选中并集、小节记忆、坏数据容错），前端全量 181 文件 2019/2019 passed，tsc 0 错，lint 仅预存 warning
+
+## ql-20260824-003-0920 | 2026-08-24 07:04:45 | (quick 任务)
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/agent/router.py, backend/tests/modules/agent/test_agent_run_workspace_auth.py, backend/tests/modules/agent/test_agent_run_log_tool_kind.py
