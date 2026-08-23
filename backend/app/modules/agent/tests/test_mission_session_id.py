@@ -242,14 +242,17 @@ def test_migration_revision_chain() -> None:
 
 
 def test_migration_is_single_head_after_mount() -> None:
-    """挂载后 alembic 图单 head（多 head 会阻断 upgrade，卡片要求停并报告）。"""
+    """挂载后 alembic 图单 head 且本迁移仍在链上（不钉死 head 值——后续变更推进 head 不应打破本守卫）。"""
     from pathlib import Path
 
     from alembic.script import ScriptDirectory
 
     backend_root = Path(__file__).resolve().parents[4]
-    heads = ScriptDirectory(str(backend_root / "migrations")).get_heads()
-    assert heads == [REVISION_ID], f"expected single head {REVISION_ID}, got {heads}"
+    script = ScriptDirectory(str(backend_root / "migrations"))
+    heads = script.get_heads()
+    assert len(heads) == 1, f"expected single head, got {heads}"
+    chain = {rev.revision for rev in script.walk_revisions()}
+    assert REVISION_ID in chain, f"migration {REVISION_ID} not reachable from head {heads[0]}"
 
 
 def test_migration_upgrade_adds_column_fk_and_indexes() -> None:
