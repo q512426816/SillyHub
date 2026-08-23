@@ -674,15 +674,22 @@ export class CodexAppServerDriver implements InteractiveDriver {
       // while(!h.closing && !finalized) 永不退出、currentTurnPromise 永不 resolve
       // → 交互式会话永久卡死（主 agent lease 永不过期，卡到 daemon 重启）。
       // finalizeWithError 幂等（上方 finalized 守卫），'error'+'exit' 双触发安全。
+      const exitDesc =
+        code === null
+          ? `codex killed by signal ${signal ?? 'unknown'}`
+          : `codex exited code=${code}`;
       finalizeWithError({
         subtype: 'error_during_execution',
         is_error: true,
-        result:
-          code === null
-            ? `codex killed by signal ${signal ?? 'unknown'}`
-            : `codex exited code=${code}`,
+        result: exitDesc,
       });
       finishTurn({ kind: 'failed' });
+      // 2026-08-24 会话审查 P2b（daemon H2）：进程非正常退出还需会话级收敛——
+      // 只 finalizeWithError（turn 级）时 session-manager 侧会话仍 active，consume
+      // 退出后无任何消费者，后续 inject 全部入无人消费的队列、turn 永不结束
+      // （前端永久转圈）。onError → session-manager fail()（幂等，正常 end 路径
+      // 已终态直接 return）→ onSessionEnd 上报 backend 收敛。
+      if (onError) onError(new Error(exitDesc));
     });
 
     // ── readline 行处理 ────────────────────────────────────────────────────

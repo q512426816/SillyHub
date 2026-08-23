@@ -360,6 +360,44 @@ describe('daemon notifySessionReady 上报（task-11 / FR-05）', () => {
       await daemon.stop();
       errorSpy.mockRestore();
     });
+
+    it('create 抛错 → notifyRunResult 回传 failed（P2b/daemon H4：run 不再永久 pending）', async () => {
+      // 2026-08-24 会话审查 P2b：interactive lease lease_expires_at=NULL + WS 不失活
+      // 时 backend 永不收 failed → run 永远 pending。create 失败必须主动回传。
+      const client = createMockClient();
+      const sessionManager = createMockSessionManager();
+      (sessionManager.create as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new Error('ClaudeExecutableNotFoundError: wrapper parse failed'),
+      );
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { daemon, wsClientMock } = buildDaemon({ client, sessionManager });
+      track(daemon);
+
+      await daemon.start();
+      const { claimResp, wsPayload } = interactiveClaimPayload(
+        'sess-fail-report-1',
+        'run-fail-report-1',
+        'lease-fail-report-1',
+      );
+      client.claimLease.mockResolvedValueOnce(claimResp);
+
+      wsClientMock._injectMessage({ type: MSG.TASK_AVAILABLE, payload: wsPayload });
+      await waitForSpy(
+        client.notifyRunResult as unknown as { mock: { calls: unknown[][] } },
+      );
+
+      expect(client.notifyRunResult).toHaveBeenCalledTimes(1);
+      const call = (
+        client.notifyRunResult as unknown as { mock: { calls: unknown[][] } }
+      ).mock.calls[0]!;
+      const [, , runId, body] = call as [string, string, string, Record<string, unknown>];
+      expect(runId).toBe('run-fail-report-1');
+      expect(body.status).toBe('error_during_execution');
+      expect(body.is_error).toBe(true);
+      expect(String(body.result_summary)).toContain('create failed');
+      await daemon.stop();
+      errorSpy.mockRestore();
+    });
   });
 
   // ── recover 路径（SESSION_RESUME → _routeSessionResume）─────────────────────

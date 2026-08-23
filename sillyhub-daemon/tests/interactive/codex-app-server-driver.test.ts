@@ -706,6 +706,38 @@ describe('TDD-4：多轮串行（无并发 turn）', () => {
     child._emitExit(0);
     await consumeP;
   });
+
+  it('进程非正常退出触发会话级 onTurnError（P2b/daemon H2：不留无消费者僵尸会话）', async () => {
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const driver = new CodexAppServerDriver({ handshakeIntervalMs: 0 });
+    const { queue, push, close } = makeInputQueue();
+    const { cb, errors } = makeCallbacks();
+    const handle = (await driver.start(queue, makeOpts())) as CodexHandle;
+    const consumeP = driver.consume(handle, cb);
+
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [threadStartResponse('thr_123')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    // 一轮正常完成（会话回到空闲态）后，进程退出且非 close 触发
+    push('first');
+    await new Promise<void>((r) => setTimeout(r, 50));
+    emitLines(child, [turnStartedNotif('thr_123', 'turn_1'), turnCompletedNotif('completed')]);
+    await new Promise<void>((r) => setTimeout(r, 50));
+
+    child._emitExit(0); // 非 closing 的干净退出
+    // 真实链路：onError → session-manager fail() → _terminateSession → inputQueue
+    // close → consume 循环退出。测试回调只记录，手动关队列模拟该链路。
+    close();
+    await consumeP;
+
+    // 会话级收敛触发：onTurnError 是 session-manager fail() 链入口（修前只有
+    // turn 级 onTurnResult，会话保持 active 无消费者，后续 inject 永久挂起）
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as Error).message).toContain('exited code=0');
+  });
 });
 
 // ── TDD-5/6：interrupt ───────────────────────────────────────────────────────

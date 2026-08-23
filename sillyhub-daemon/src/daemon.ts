@@ -3829,12 +3829,14 @@ export class Daemon {
       // task-02（design Phase 1 / FR-01）：create 成功后上报 session ready，让 backend
       // inject_session 的 ready wait 解除（修复 inject 在 create 完成前到达被丢导致
       // /model 空白的时序竞态）。best-effort：notifySessionReady 自身失败 warn 不抛
-      //（hub-client.ts 实现），调用点无需 try/catch；catch 块（create 失败）不上报，
-      // 由 backend DaemonRuntimeOffline 兜底。
+      //（hub-client.ts 实现），调用点无需 try/catch；catch 块（create 失败）改为
+      // 主动回传 run failed（见下方 P2b），不再依赖 backend 兜底。
       await this._client.notifySessionReady(sessionId);
     } catch (e) {
       // create 抛错（ClaudeExecutableNotFoundError wrapper 解析失败等）：移除登记，
-      // 让 WS 重放可重试；记录错误不崩。SessionManager 已标 failed（onSessionEnd）。
+      // 让 WS 重放可重试；记录错误不崩。SessionManager create catch 只删 store 后
+      // rethrow（不触发 onSessionEnd）——此前注释称「已标 failed（onSessionEnd）」
+      // 与实现不符（2026-08-24 会话审查 P2b/daemon H4 修正）。
       this._interactiveSessionsByLease.delete(leaseId);
       const code =
         (e as Error & { code?: string })?.code ??
@@ -3845,6 +3847,27 @@ export class Daemon {
         code,
         error: e,
       });
+      // P2b（daemon H4）治本：create 失败必须回传 run failed。interactive lease
+      // lease_expires_at=NULL（长生命周期）+ WS 不失活时 backend 永不收 failed，
+      // run 永远 pending（前端首条消息永久转圈）。同 ql-20260703-001 executable
+      // 缺失路径的上报手法；notifyRunResult 失败仅 warn 不阻塞主循环。
+      if (execPayload.claimToken && firstRunId) {
+        try {
+          await this._client.notifyRunResult(leaseId, execPayload.claimToken, firstRunId, {
+            status: 'error_during_execution',
+            is_error: true,
+            result_summary: `interactive session create failed (${code}): ${
+              e instanceof Error ? e.message : String(e)
+            }`,
+          });
+        } catch (reportErr) {
+          this._logger.warn('interactive_create_failed_report_failed', {
+            lease_id: leaseId,
+            run_id: firstRunId,
+            error: String(reportErr),
+          });
+        }
+      }
     }
   }
 

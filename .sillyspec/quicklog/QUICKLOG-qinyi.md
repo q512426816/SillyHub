@@ -397,3 +397,17 @@
 根因：daemon 永久死后 active 会话无收敛路径（sweep 只扫 reconnecting）前端永远转圈；终态写入点不广播 session_ended 则已连 SSE 永远 keepalive 占 Redis pubsub
 方案：sweep.py 新增 session_offline_sweep_once（runtime 离线超 600s 宽限的 active/pending 会话 → failed+run failed+lease cancelled+广播）并入常驻循环；两档 sweep 收敛后广播；cancel_lease 收敛会话后广播；SSE break 扩到 session_recovery_failed
 结果：sweep 测试 10 用例绿（新增 4）；daemon 域 893 绿、agent tests 218 绿；ruff 0 错；daemon.md 同步
+
+## ql-20260824-008-1768 | 2026-08-24 07:42:53 | daemon 会话失败上报与僵尸收敛：create 抛错回传 run failed + codex 非正常退出发会话级 onError
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/daemon.ts（create catch 回传 run failed）
+- sillyhub-daemon/src/interactive/codex-app-server-driver.ts（exit 非 closing 追加 onError）
+- sillyhub-daemon/tests/interactive/daemon-notify-session-ready.test.ts（create 失败上报回归）
+- sillyhub-daemon/tests/interactive/codex-app-server-driver.test.ts（exit→onError 回归）
+- .sillyspec/docs/SillyHub/modules/daemon.md（契约摘要同步）
+需求：daemon 会话失败上报与僵尸收敛：create 抛错回传 run failed + codex 非正常退出发会话级 onError
+根因：SessionManager create catch 只删 store 后 rethrow 不上报（注释声称已标 failed 与实现不符），interactive lease 恒 NULL 过期时间 + WS 不失活时 run 永久 pending；codex 子进程非正常退出只做 turn 级 finalizeWithError，会话保持 active 无消费者，后续 inject 全部入无人消费队列永久挂起
+方案：daemon.ts create catch 同 ql-20260703-001 范式回传 notifyRunResult(error_during_execution)（best-effort warn 不崩）；codex exit 非 closing 分支在 turn 级收敛后追加 onError（session-manager fail 链，幂等）触发会话级终止与 onSessionEnd 上报；修正过时注释
+结果：新增 2 回归用例（create 失败上报断言 runId/status/summary；exit 触发 onTurnError）全绿；interactive 511 + daemon 全量 2642 用例全绿；tsc 0 错；daemon.md 同步
