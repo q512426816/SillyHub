@@ -788,6 +788,75 @@ describe("SessionsPortal 组头＋→浮层→预会话（FR-03/FR-04）", () =>
   });
 });
 
+// ── ql-20260823-001：筛选态直带链（D-107 优先级第一段补齐） ───────────────
+
+describe("SessionsPortal 筛选态直带上下文（ql-20260823-001）", () => {
+  it("两层筛选已选（机器+智能体）点组头「＋」→ 跳过浮层直接预会话，上下文行=筛选机器+引擎", async () => {
+    renderPortal();
+    // 树内两层筛选（默认 mock：m-1 machine-1 rt-1 claude 在线）
+    fireEvent.click(
+      await screen.findByRole("button", { name: "机器tab machine-1" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "智能体tab ⚡ Claude Code" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "在 非工作区 新建会话" }),
+    );
+
+    // 浮层不出现（免重复选择）——直进预会话态
+    await waitFor(() =>
+      expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy(),
+    );
+    expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull();
+    const ctx = screen.getByTestId("pre-session-context");
+    expect(ctx.textContent).toContain("machine-1");
+    expect(ctx.textContent).toContain("Claude Code");
+    expect(ctx.textContent).toContain("不指定（非工作区）");
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it("仅选机器未选智能体（或未筛选）→ 仍走两步浮层（上下文不完整不直带）", async () => {
+    renderPortal();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "机器tab machine-1" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "在 非工作区 新建会话" }),
+    );
+    // 智能体层未选具体值 → 浮层兜底
+    expect(screen.getByTestId("pre-session-picker-mask")).toBeTruthy();
+    expect(screen.queryByTestId("session-pre-session-panel")).toBeNull();
+  });
+
+  it("筛选的引擎无在线 runtime（如 Codex 离线）→ 回退浮层（不直带失效上下文）", async () => {
+    mocks.machinesHook.mockReturnValue({
+      items: [
+        makeMachine({ id: "m-2", hostname: "machine-2", runtimes: [makeRuntime({ id: "rt-2", provider: "codex", status: "offline" })] }),
+      ],
+      sessions: [],
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderPortal();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "机器tab machine-2" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "智能体tab ◎ Codex" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "在 非工作区 新建会话" }),
+    );
+    // 该引擎无在线 runtime → 回退浮层（浮层第一步仅列在线机器）
+    expect(screen.getByTestId("pre-session-picker-mask")).toBeTruthy();
+    expect(screen.queryByTestId("session-pre-session-panel")).toBeNull();
+  });
+});
+
 // ── 5. workspace 组＋绑定继承（原 NewSessionForm bindWorkspaceId 语义由 preContext 继承） ──
 
 describe("SessionsPortal workspace 组＋创建绑定（preContext 继承）", () => {

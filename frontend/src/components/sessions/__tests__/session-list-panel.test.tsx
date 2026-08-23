@@ -696,7 +696,7 @@ describe("SessionListPanel 状态与搜索（树形态视图过滤）", () => {
 // ── 6. 组头交互 + 截断（R-03） ────────────────────────────────────────────
 
 describe("SessionListPanel 组头回调与截断", () => {
-  it("组头「＋」→ onNewInGroup(workspaceId)；非工作区组「＋」→ onNewInGroup(null)（D-105）", async () => {
+  it("组头「＋」→ onNewInGroup(workspaceId, 筛选快照)；非工作区组「＋」→ onNewInGroup(null, …)（D-105；ql-20260823-001 二参）", async () => {
     setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
     mocks.listAgentSessions.mockResolvedValue(
       listResponse([
@@ -709,11 +709,37 @@ describe("SessionListPanel 组头回调与截断", () => {
 
     await screen.findByRole("button", { name: "会话 会话A" });
     fireEvent.click(screen.getByRole("button", { name: "在 SillyHub 新建会话" }));
-    expect(onNewInGroup).toHaveBeenCalledWith("ws-1");
+    // ql-20260823-001：未筛选时筛选快照为空串（两层均未选）。
+    expect(onNewInGroup).toHaveBeenCalledWith("ws-1", {
+      machineId: "",
+      agent: "",
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "在 非工作区 新建会话" }));
-    expect(onNewInGroup).toHaveBeenCalledWith(null);
+    expect(onNewInGroup).toHaveBeenCalledWith(null, { machineId: "", agent: "" });
     expect(onNewInGroup).toHaveBeenCalledTimes(2);
+  });
+
+  it("筛选态（机器+智能体均已选）点组头「＋」→ 回调携带具体筛选值（D-107 直带链前提）", async () => {
+    setMachines({ items: [makeMachine()] });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
+    );
+    const onNewInGroup = vi.fn();
+    renderPanel(<SessionListPanel onNewInGroup={onNewInGroup} />);
+
+    await screen.findByRole("button", { name: "会话 会话A" });
+    // 两层筛选：机器 machine-1 → 智能体 Claude Code
+    fireEvent.click(screen.getByRole("button", { name: "机器tab machine-1" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "智能体tab ⚡ Claude Code" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "在 SillyHub 新建会话" }));
+    expect(onNewInGroup).toHaveBeenCalledWith("ws-1", {
+      machineId: "m-1",
+      agent: "claude",
+    });
   });
 
   it("组内超 50 截断 + 「显示全部」（R-03）", async () => {

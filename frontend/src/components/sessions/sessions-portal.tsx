@@ -24,14 +24,12 @@
  *     3. 两者皆无 → 空门户态轻引导（不用表单；NewSessionForm 渲染分支已由
  *        本卡替换，组件文件与 import 删除归 task-07，X-12 / D-109）。
  *
- * 上下文解析（组头「＋」onNewInGroup，FR-04 / D-107——降级说明）：
- *   设计优先级 = 筛选 tab（机器+智能体已选）> 工作区绑定在线机器 > D-005 三级
- *   回退。task-05 的 SessionListPanel 把两层筛选 tab 态收在组件内部（未暴露
- *   回调/受控 prop，本卡 allowed_paths 不含该文件不可加）→ 降级为「全部态
- *   统一弹 task-04 两步浮层」：①在线机器 → ②智能体（默认 Claude 高亮），
- *   onPick(runtimeId) 后合成 preContext { workspaceId(组), runtimeId }。与
- *   筛选一致的意图经浮层默认高亮承接，用户无感知差异；tab 上下文直取待后续
- *   给 SessionListPanel 加受控 prop 后恢复。
+ * 上下文解析（组头「＋」onNewInGroup，FR-04 / D-107）：
+ *   优先级 = 筛选 tab（机器+智能体已选，ql-20260823-001 补齐直带链：
+ *   SessionListPanel 随回调透出筛选态快照，两层均具体时直接合成
+ *   preContext 跳过浮层）> 两步浮层兜底（task-04：①在线机器 → ②智能体
+ *   默认 Claude 高亮，缺筛选层或该引擎无在线 runtime 时走此路径，
+ *   onPick(runtimeId) 合成 preContext { workspaceId(组), runtimeId }）。
  *
  * change 入口预会话（task-07 / FR-06 / D-106 / X-13）：change scope 左侧为
  *   平铺列表（design §3，无组头「＋」）→ 页头 actions 放「新建会话（本变更）」
@@ -149,11 +147,34 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   // 入口由页头 actions 承载（X-12 的例外，仅此 scope 有页头按钮）。
   const isChangeScope = scope?.kind === "change";
 
-  /** 组头「＋」（FR-04）：统一弹两步浮层（tab 上下文降级说明见文件头）。 */
-  const handleNewInGroup = useCallback((workspaceId: string | null) => {
-    setPickerWorkspaceId(workspaceId);
-    setPickerOpen(true);
-  }, []);
+  /**
+   * 组头「＋」（FR-04 / D-107 优先级链第一段，ql-20260823-001 补齐）：两层筛选
+   * tab 已选具体机器+智能体时**直接带上下文进预会话**（用户已在具体机器和智能体
+   * 上，不再弹浮层重复选择）；缺任一层或该引擎无在线 runtime 时回退两步浮层。
+   */
+  const handleNewInGroup = useCallback(
+    (workspaceId: string | null, filter?: { machineId: string; agent: string }) => {
+      if (filter?.machineId && filter.agent) {
+        const machine = machines.find((m) => m.id === filter.machineId);
+        const runtime = machine?.runtimes?.find(
+          (r) => r.status === "online" && r.provider === filter.agent,
+        );
+        if (runtime) {
+          setSelectedSessionId(null);
+          setPreContext(
+            scope?.kind === "change"
+              ? // change 入口组头不出现，保守与 handlePickerPick 双传语义对齐（X-13）。
+                { workspaceId: scope.workspaceId, changeId: scope.changeId, runtimeId: runtime.id }
+              : { workspaceId, runtimeId: runtime.id },
+          );
+          return;
+        }
+      }
+      setPickerWorkspaceId(workspaceId);
+      setPickerOpen(true);
+    },
+    [machines, scope],
+  );
 
   /** change 入口「新建会话（本变更）」：走同一浮层（pickerWorkspaceId 置
    *  scope.workspaceId，X-13 双传见 handlePickerPick）。 */

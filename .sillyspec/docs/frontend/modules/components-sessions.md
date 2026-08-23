@@ -22,7 +22,7 @@ updated_at: 2026-08-23 10:10:26
 
 ## 契约摘要
 - `SessionsPortal`（task-06/07 双态接线）：props `{ scope? }`；右侧三分支优先级 = 真会话（selectedSessionId → `SessionPanel mode="page" key={id}`）> 预会话（preContext → `SessionPanel sessionId=null` + preContext + onPreSessionCreated，key=`pre:{workspaceId ?? "-"}:{runtimeId}`）> 空门户态（`data-testid="sessions-empty-portal"` 轻引导，深链无效/无参亦落此）。
-  - 组头「＋」onNewInGroup → 统一弹 PreSessionPicker（task-05 筛选 tab 态收在列表组件内未暴露受控 prop → 设计的「tab 上下文直取」降级为全部态统一浮层，意图经浮层默认高亮承接，D-107 降级说明）；onPick 合成 preContext `{ workspaceId(组), runtimeId }` 并清选中。
+  - 组头「＋」onNewInGroup(workspaceId, filter) → 筛选态直带链（ql-20260823-001 补齐 D-107 第一段）：两层筛选 tab（机器+智能体）均已选具体值且该引擎有在线 runtime 时**跳过浮层直接合成 preContext**；缺任一层或无在线 runtime 回退 PreSessionPicker 两步浮层（默认高亮 Claude）；onPick 合成 preContext `{ workspaceId(组), runtimeId }` 并清选中。
   - change scope（task-07）：左侧平铺列表无组头「＋」→ 页头 actions「新建会话（本变更）」按钮走同一浮层，onPick 显式双传 `{ workspaceId, changeId, runtimeId }`（X-13，原 bindChangeId 契约由 preContext 继承）；其余 scope 页头按钮已移除（X-12，actions 空）。
   - 状态机（FR-03 零残留）：首句创建成功（onPreSessionCreated）→ setSelectedSessionId（key 重挂载状态机自然接管）+ 清 preContext + invalidate `["agentSessions"]`；用户列表 onSelect 切走 → 清 preContext（首句未发 = 零服务端实体）。
   - workspace 深链预展开（FR-06）：scope.workspaceId → SessionListPanel `defaultExpandedWorkspaceId`。
@@ -87,7 +87,7 @@ CtxUsageRing 分母: roleMapping.one_m → 1_000_000
 - 切换语义（设计定版）：配置切换走 `injectSession` 带新配置+prompt，session 维持 active 不重建；空 prompt 切换不产生消息与模型回应（切换静默化）。
 - 供应商「不指定（本机默认）」用空串 `""` 作 Select 值，提交侧必须转 `llm_provider_id: ""`，未选项从请求体剔除。
 - 智能体显示名规则：主显引擎名（Claude Code/Codex），`runtime.name` 默认是机器主机名不得作主标签；有自定义别名时「别名 · 引擎名」并呈。
-- 树形态筛选是纯视图过滤（机器/智能体 tab、状态、搜索均不进数据层）；两层筛选 tab 态收在 SessionListPanel 内部未暴露受控 prop——组头「＋」上下文直取因此降级为统一浮层（D-107），后续若给列表加受控 prop 可恢复 tab 上下文直取。
+- 树形态筛选是纯视图过滤（机器/智能体 tab、状态、搜索均不进数据层）；筛选态经 onNewInGroup 第二参快照透出（空串=未筛），门户据此直带/回退浮层（ql-20260823-001，D-107 直带链已落地）。
 - `owner_name` chip 读后端列表注入字段（本人隔离视图下恒为本人，为未来共享场景预留，D-108@v2）；null 显「—」。
 - `config_snapshot` 是条目 chips 的免查询直显源，旧会话快照为 null 时回退基础字段渲染；机器小节的 runtime→机器映射缺席（分页外/已删机器）回退快照 machine_name（按离线渲染）。
 - ctx 用量环分子（usedTokens）由父层累计传入；改分母逻辑须同步 `MODEL_CTX_WINDOW_TABLE` 与 `DEFAULT_CTX_WINDOW_TOKENS`。

@@ -147,7 +147,15 @@ export interface SessionListPanelProps {
    * id，「非工作区」组传 null。上下文解析（筛选 tab > 绑定 > D-005 回退 +
    * 全部态两步浮层）归 task-06；未传则组头不渲染「＋」。
    */
-  onNewInGroup?: (_workspaceId: string | null) => void;
+  /**
+   * 组头「＋」回调：workspaceId（null=非工作区分组）+ 当前两层筛选态快照
+   * （ql-20260823-001：machineId/agent 为空串表示该层未选——消费方据此判断
+   * 「筛选齐备直带上下文」还是回退浮层，D-107 优先级链第一段）。
+   */
+  onNewInGroup?: (
+    _workspaceId: string | null,
+    _filter?: { machineId: string; agent: string },
+  ) => void;
   /**
    * task-05（FR-06）：默认展开的工作区分组 id（非受控一次性初值；供 task-06
    * workspace 入口深链预展开——缺省全部分组展开）。
@@ -673,7 +681,16 @@ function WorkspaceTreeList({
                 visibleSessions={groupVisible}
                 expanded={!effectiveCollapsedIds.has(group.id)}
                 onToggleExpand={() => toggleGroup(group.id)}
-                onNew={onNewInGroup}
+                onNew={
+                  onNewInGroup
+                    ? (wsId: string | null) =>
+                        // ql-20260823-001：点「＋」瞬间的筛选态随回调透出（空串=未筛）。
+                        onNewInGroup(wsId, {
+                          machineId: filterMachineId,
+                          agent: filterAgent,
+                        })
+                    : undefined
+                }
                 batchActive={batchActive}
                 onToggleBatch={() => toggleGroupBatch(group.id)}
                 batchEnabled={Boolean(onDeleteSessions) && groupVisible.length > 0}

@@ -156,3 +156,23 @@
 方案：NewSessionForm 聊天优先版式（chips 摘要+修改配置折叠区+大输入框，锁定 chips 常显）；TurnTimeline onScroll 距底<80px 贴底才跟随+pending 轮强制回底；displayTurns 按 runsMeta 回补终态（runTerminalTurnStatus）+去重收窄（预过滤仅 user_input/reply+装配器 seenTextDedup:false）+viewMode 按会话 localStorage 持久化
 结果：全量 1917/1917 全绿（新增滚动 5+helpers 4+聊天优先 3 用例、门户 2 用例适配折叠态）、tsc 零错、lint 持平零新增警告；components-sessions/components-daemon 模块文档已同步
 审计：⚖️ 归属切分：6 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：.sillyspec/changes/2026-08-22-workspace-sessions-portal/verify-result.md, frontend/src/components/sessions/__tests__/sessions-portal.test.tsx, .sillyspec/changes/2026-08-22-workspace-sessions-portal/runtime-evidence/artifacts/v3-change.png, .sillyspec/changes/2026-08-22-workspace-sessions-portal/runtime-evidence/artifacts/v3-global.png, .sillyspec/changes/2026-08-22-workspace-sessions-portal/runtime-evidence/artifacts/v3-workspace.png, frontend/src/components/daemon/__tests__/turn-timeline-scroll.test.tsx
+
+## ql-20260823-001-c001 | 2026-08-23 11:12:57 | 筛选态点组头＋免重复选择（D-107 直带链补齐）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/sessions/session-list-panel.tsx（onNewInGroup 二参筛选快照）
+- frontend/src/components/sessions/sessions-portal.tsx（直带链+回退浮层）
+- frontend/src/components/sessions/__tests__/session-list-panel.test.tsx（断言二参化+筛选快照用例）
+- frontend/src/components/sessions/__tests__/sessions-portal.test.tsx（直带/缺层/离线回退三用例）
+- .sillyspec/docs/frontend/modules/components-sessions.md（D-107 直带链落地）
+需求：筛选态点组头＋免重复选择（D-107 直带链补齐）
+根因：task-06 时 SessionListPanel 未暴露筛选态（allowed_paths 边界）降级全态浮层——用户已在具体机器+智能体上仍要重选（QA P2-1）
+方案：onNewInGroup 二参筛选快照（空串=未筛）+ 门户直带链（两层具体且有在线 runtime 直接合成 preContext 跳过浮层，缺层/离线回退浮层）
+结果：受影响 47/47（3 新用例）+ 全量 1931/1931 + tsc 零错；components-sessions.md 同步；待前端重建部署
+审计：⚖️ 归属切分：4 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/__tests__/agent-log-card.test.tsx, frontend/src/components/daemon/agent-log-card.tsx, frontend/src/components/daemon/session-panel.tsx, frontend/src/components/daemon/turn-timeline.tsx
+
+## ql-20260823-002-6a1a | 2026-08-23 11:17:17 | 「本地 Agent 日志」改为会话流内展示：不要独立卡片，融进消息流末尾成一条会话式条目（助手侧头像+气泡形态，默认折叠一行摘要，点开明细；空态不渲染）
+状态：进行中
+关联变更：2026-08-23-platform-agent-log-ingest
+文件：frontend/src/components/daemon/agent-log-card.tsx, frontend/src/components/daemon/session-panel.tsx, frontend/src/components/daemon/turn-timeline.tsx, frontend/src/components/daemon/__tests__/agent-log-card.test.tsx
