@@ -430,11 +430,17 @@ async def test_session_channel_payload_contains_tool_kind(monkeypatch: pytest.Mo
 async def _seed_logs_for_api(db_session: AsyncSession) -> tuple[uuid.UUID, uuid.UUID]:
     """构造 1 个 run + 4 条 tool_call + 1 条 stdout 日志，覆盖三种 API 筛选 case。
 
-    返回 (workspace_id, run_id)（workspace_id 不参与 router 逻辑，仅凑路径）。
+    返回 (workspace_id, run_id)。workspace_id 参与路由的对象级授权
+    （_require_run_workspace）：run 必须真实关联该 workspace，否则 403。
     """
+    from app.modules.workspace.model import AgentRunWorkspace, Workspace
+
+    ws = Workspace(id=uuid.uuid4(), name="t", slug="t", root_path="/tmp", status="active")
+    db_session.add(ws)
     run = AgentRun(agent_type="claude_code", status="running")
     db_session.add(run)
     await db_session.flush()
+    db_session.add(AgentRunWorkspace(agent_run_id=run.id, workspace_id=ws.id))
 
     rows = [
         AgentRunLog(
@@ -465,7 +471,7 @@ async def _seed_logs_for_api(db_session: AsyncSession) -> tuple[uuid.UUID, uuid.
     ]
     db_session.add_all(rows)
     await db_session.commit()
-    return uuid.uuid4(), run.id
+    return ws.id, run.id
 
 
 async def test_api_get_logs_no_filter_returns_all(

@@ -336,7 +336,36 @@
 方案：localStorage sillyhub.sessions.tree.expansion 存 {openGroups,openToolSections} 展开例外集合（跨 scope 不泄漏）；渲染期默认=记忆∪选中组∪入口预展开；仅用户 toggle 读改写落盘（筛选重置/选中兜底不写）；坏 JSON/SSR 静默容错
 结果：panel 36 用例全绿（新增 5：展开/收起记忆、记忆∪选中并集、小节记忆、坏数据容错），前端全量 181 文件 2019/2019 passed，tsc 0 错，lint 仅预存 warning
 
-## ql-20260824-003-0920 | 2026-08-24 07:04:45 | (quick 任务)
+## ql-20260824-003-0920 | 2026-08-24 07:04:45 | 修复 workspace 级 run 端点越权（IDOR）：run 详情/kill/logs/stream 补 run↔workspace 归属校验
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/router.py（_require_run_workspace 守卫+四端点接入）
+- backend/tests/modules/agent/test_agent_run_workspace_auth.py（对象级授权 9 用例）
+- backend/tests/modules/agent/test_agent_run_log_tool_kind.py（旧测试债补 workspace 关联）
+- backend/app/modules/agent/tests/test_router.py（3 用例补 workspace 关联）
+- .sillyspec/docs/SillyHub/modules/agent.md（契约摘要补对象级授权）
+需求：修复 workspace 级 run 端点越权（IDOR）：run 详情/kill/logs/stream 补 run↔workspace 归属校验
+根因：权限依赖只校验「调用者在路径 workspace 有权限」，run 查找全局进行，任意 workspace 成员可用自己的 workspace_id 越权读日志、订阅流、杀掉其它工作区的 run
+方案：router.py 新增 _require_run_workspace 守卫（AgentRunWorkspace 关联行存在才放行，403 否则）接入 get/kill/logs/stream 四端点；input 端点 service 层已有同款校验不动；quick-chat run 无关联走 /api/daemon-chat 专属链
+结果：新增 test_agent_run_workspace_auth.py 9 用例全绿（越权 403×4+kill 无副作用+正常 200×4+无关联 run 403）；修 3 处旧测试债（随机 workspace_id/无关联 run 补真实关联）；agent 域全量 1103 passed；agent.md 契约摘要同步
+审计：⚖️ 归属切分：3 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/agent/tests/test_router.py, frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/components/daemon/session-panel.tsx
+
+## ql-20260824-004-978e | 2026-08-24 07:11:03 | 会话左侧树信息与状态信息及时更新（轮数/状态点/新上报会话/远端结束）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/sessions/session-list-panel.tsx（sessionListPollInterval+函数式 refetchInterval）
+- frontend/src/components/daemon/session-panel.tsx（onTurnCompleted 接 onSessionListRefresh）
+- frontend/src/components/sessions/__tests__/session-list-panel.test.tsx（轮询 2 用例）
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（onTurnCompleted 刷新用例）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引 ql-20260824-004-978e）
+需求：会话左侧树信息与状态信息及时更新（轮数/状态点/新上报会话/远端结束）
+根因：列表查询无轮询，仅窗口聚焦超过 15s 与四个少数 invalidate 点触发刷新，用户停在页面期间左侧一切不动
+方案：sessionListPollInterval 条件轮询接 sessionsQuery 函数式 refetchInterval（非终态在场 10s/全静默 30s，后台标签不轮询）+ page 模式 onTurnCompleted 接 onSessionListRefresh 每轮完成即时刷新
+结果：新增 3 用例（纯函数参数化/fake timers 轮询接线/onTurnCompleted invalidate 重拉）全绿；前端全量 181 文件 2022/2022 passed + tsc 0 + lint 仅存量 warning
+
+## ql-20260824-005-aa13 | 2026-08-24 07:11:37 | (quick 任务)
 状态：进行中
 关联变更：（无）
-文件：backend/app/modules/agent/router.py, backend/tests/modules/agent/test_agent_run_workspace_auth.py, backend/tests/modules/agent/test_agent_run_log_tool_kind.py
+文件：（见实际改动）

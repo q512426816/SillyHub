@@ -116,6 +116,42 @@ async def _user_owns_run(
     return result.scalar_one_or_none() is not None
 
 
+async def _require_run_workspace(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    run_id: uuid.UUID,
+) -> AgentRun:
+    """取 run 并校验其关联到路径 workspace（run 级端点对象级授权）。
+
+    权限依赖只校验「调用者在路径 workspace 有权限」，run 查找本身是全局
+    的——必须补 run↔workspace 关联校验，否则任意 workspace 成员可用自己的
+    workspace_id 越权读/杀其它工作区的 run（IDOR）。run 不存在 → 404；
+    未关联该 workspace → 403（含无任何 workspace 关联的 quick-chat run，
+    那类走 /api/daemon-chat 专属归属链）。
+    """
+    run = await AgentService(session).get_run(run_id)
+    if run is None:
+        raise AgentRunNotFound(
+            "指定的执行记录不存在，可能已被删除。",
+            details={"run_id": str(run_id)},
+        )
+    linked = await session.execute(
+        select(AgentRunWorkspace.agent_run_id)
+        .where(
+            AgentRunWorkspace.agent_run_id == run_id,
+            AgentRunWorkspace.workspace_id == workspace_id,
+        )
+        .limit(1)
+    )
+    if linked.scalar_one_or_none() is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="该执行记录不属于当前工作区，无权访问。",
+        )
+    return run
+
+
 async def _fetch_active_lease_meta(session: AsyncSession, run_id: uuid.UUID) -> dict:
     """查 run 的活跃 lease（pending/claimed），返回 metadata（无则 {}）。
 
@@ -384,13 +420,8 @@ async def get_agent_run(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission(Permission.TASK_READ))],
 ) -> AgentRunResponse:
+    run = await _require_run_workspace(session, workspace_id=workspace_id, run_id=run_id)
     svc = AgentService(session)
-    run = await svc.get_run(run_id)
-    if run is None:
-        raise AgentRunNotFound(
-            "指定的执行记录不存在，可能已被删除。",
-            details={"run_id": str(run_id)},
-        )
     return await svc.enrich_with_workspace_ids(run)
 
 
@@ -405,18 +436,13 @@ async def kill_agent_run(
     user: Annotated[User, Depends(require_permission(Permission.TASK_RUN_AGENT))],
 ) -> AgentKillResponse:
     """Terminate a running agent execution."""
-    svc = AgentService(session)
-    run = await svc.get_run(run_id)
-    if run is None:
-        raise AgentRunNotFound(
-            "指定的执行记录不存在，可能已被删除。",
-            details={"run_id": str(run_id)},
-        )
+    run = await _require_run_workspace(session, workspace_id=workspace_id, run_id=run_id)
     if run.status not in ("pending", "running"):
         raise AgentRunNotRunning(
             "执行已结束或尚未开始，无法执行终止操作。",
             details={"run_id": str(run_id), "status": run.status},
         )
+    svc = AgentService(session)
     await svc.kill_run(run_id)
     await session.refresh(run)
     return AgentKillResponse(id=run.id, status=run.status)
@@ -469,13 +495,8 @@ async def get_agent_run_logs(
         ),
     ),
 ) -> list[AgentRunLogEntry]:
+    await _require_run_workspace(session, workspace_id=workspace_id, run_id=run_id)
     svc = AgentService(session)
-    run = await svc.get_run(run_id)
-    if run is None:
-        raise AgentRunNotFound(
-            "指定的执行记录不存在，可能已被删除。",
-            details={"run_id": str(run_id)},
-        )
     logs = await svc.get_run_logs(run_id, tool_kind=tool_kind, after=after)
     return [AgentRunLogEntry.model_validate(e) for e in logs]
 
@@ -502,21 +523,14 @@ async def stream_agent_run_logs(
     立即归还；stream_run_logs 生成器内部用 get_session_factory() 自建独立
     短 session（见 AgentService.stream_run_logs）。
     """
-    # 存在性 + 状态校验：短 session，校验完即归还连接池 slot
+    # 存在性 + workspace 归属 + 状态校验：短 session，校验完即归还连接池 slot
+    # （归属校验同 get/kill/logs 端点，见 _require_run_workspace）
     run_status = None
     run_exit_code = None
-    found = False
     async with get_session_factory()() as session:
-        run = await AgentService(session).get_run(run_id)
-        if run is not None:
-            found = True
-            run_status = run.status
-            run_exit_code = run.exit_code
-    if not found:
-        raise AgentRunNotFound(
-            "指定的执行记录不存在，可能已被删除。",
-            details={"run_id": str(run_id)},
-        )
+        run = await _require_run_workspace(session, workspace_id=workspace_id, run_id=run_id)
+        run_status = run.status
+        run_exit_code = run.exit_code
     if run_status not in ("pending", "running"):
         done_data = json.dumps({"status": run_status, "exit_code": run_exit_code})
         return StreamingResponse(

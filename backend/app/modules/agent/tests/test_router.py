@@ -462,9 +462,16 @@ async def test_create_agent_run_omits_agent_profile_id_when_absent(client, db_se
 # ---------------------------------------------------------------------------
 
 
-async def _seed_run_with_logs(db_session, timestamps: list[datetime]) -> uuid.UUID:
-    """建一个 running AgentRun + 逐条 AgentRunLog（时间戳给定，正文带序号）。"""
+async def _seed_run_with_logs(
+    db_session, timestamps: list[datetime], workspace_id: uuid.UUID | None = None
+) -> uuid.UUID:
+    """建一个 running AgentRun + 逐条 AgentRunLog（时间戳给定，正文带序号）。
+
+    workspace_id 给定时建 AgentRunWorkspace 关联——run 级端点有对象级授权
+    （_require_run_workspace），未关联的 run 经 workspace 路径访问会 403。
+    """
     from app.modules.agent.model import AgentRun, AgentRunLog
+    from app.modules.workspace.model import AgentRunWorkspace
 
     run_id = uuid.uuid4()
     run = AgentRun(
@@ -476,6 +483,8 @@ async def _seed_run_with_logs(db_session, timestamps: list[datetime]) -> uuid.UU
         started_at=datetime.now(UTC),
     )
     db_session.add(run)
+    if workspace_id is not None:
+        db_session.add(AgentRunWorkspace(agent_run_id=run_id, workspace_id=workspace_id))
     for i, ts in enumerate(timestamps):
         db_session.add(
             AgentRunLog(
@@ -493,8 +502,8 @@ async def test_get_agent_run_logs_no_after_returns_all(client, db_session, tmp_p
     """无 after：行为与现状等价——全量正序返回（既有锚点，零回归兜底）。"""
     base = datetime(2026, 8, 15, 7, 0, 0, tzinfo=UTC)
     ts = [base, base + timedelta(seconds=1), base + timedelta(seconds=2)]
-    run_id = await _seed_run_with_logs(db_session, ts)
     refs = await _setup(db_session, tmp_path)
+    run_id = await _seed_run_with_logs(db_session, ts, workspace_id=refs["ws_id"])
 
     resp = await client.get(
         f"/api/workspaces/{refs['ws_id']}/agent/runs/{run_id}/logs",
@@ -509,8 +518,8 @@ async def test_get_agent_run_logs_after_returns_newer_only(client, db_session, t
     """有 after：只返回 timestamp 严格更新的条目（等 after 的一条不返回）。"""
     base = datetime(2026, 8, 15, 7, 0, 0, tzinfo=UTC)
     ts = [base, base + timedelta(seconds=1), base + timedelta(seconds=2)]
-    run_id = await _seed_run_with_logs(db_session, ts)
     refs = await _setup(db_session, tmp_path)
+    run_id = await _seed_run_with_logs(db_session, ts, workspace_id=refs["ws_id"])
 
     resp = await client.get(
         f"/api/workspaces/{refs['ws_id']}/agent/runs/{run_id}/logs"
@@ -528,8 +537,10 @@ async def test_get_agent_run_logs_after_returns_newer_only(client, db_session, t
 async def test_get_agent_run_logs_after_future_returns_empty(client, db_session, tmp_path):
     """after 晚于全部日志 → 空列表（前端据此走 fallback 全量重拉）。"""
     base = datetime(2026, 8, 15, 7, 0, 0, tzinfo=UTC)
-    run_id = await _seed_run_with_logs(db_session, [base, base + timedelta(seconds=1)])
     refs = await _setup(db_session, tmp_path)
+    run_id = await _seed_run_with_logs(
+        db_session, [base, base + timedelta(seconds=1)], workspace_id=refs["ws_id"]
+    )
     future = (base + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
 
     resp = await client.get(
@@ -543,8 +554,8 @@ async def test_get_agent_run_logs_after_future_returns_empty(client, db_session,
 async def test_get_agent_run_logs_after_invalid_returns_422(client, db_session, tmp_path):
     """after 非 ISO timestamp → FastAPI 校验 422（datetime 解析失败）。"""
     base = datetime(2026, 8, 15, 7, 0, 0, tzinfo=UTC)
-    run_id = await _seed_run_with_logs(db_session, [base])
     refs = await _setup(db_session, tmp_path)
+    run_id = await _seed_run_with_logs(db_session, [base], workspace_id=refs["ws_id"])
 
     resp = await client.get(
         f"/api/workspaces/{refs['ws_id']}/agent/runs/{run_id}/logs?after=not-a-timestamp",

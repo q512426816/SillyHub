@@ -16,7 +16,7 @@ created_at: 2026-08-18 01:45:00
 
 ## 契约摘要
 - **API（tag=agent，workspace 级路径）**：
-  - run 创建 / 详情 / 列表、kill、input（提交用户输入）、logs 与 SSE stream、任务维度 run 列表。
+  - run 创建 / 详情 / 列表、kill、input（提交用户输入）、logs 与 SSE stream、任务维度 run 列表。run 详情 / kill / logs / stream 四端点带对象级授权（`_require_run_workspace`，2026-08-24 会话审查 P1）：run 必须关联路径 workspace（AgentRunWorkspace 行存在），未关联 → 403——权限依赖只校验「调用者在路径 workspace 有权限」，无此守卫任意 workspace 成员可越权读/杀其它工作区的 run（input 端点由 service.submit_run_input 内同款校验覆盖；quick-chat run 无关联走 /api/daemon-chat 专属归属链）。
   - 幂等续跑与审批：resume / approve / checkpoint（存/读）。
   - `/agent-sessions` 工作区活跃会话列表；`/dialogs` 待处理权限对话框；missions 列表与 cancel；`GET /agent-runs/{id}/execution-context`。
   - 文件制品 `POST/GET /agent/file-artifacts`（file_artifacts.py，daemon sillyhub-file MCP 直传 + 前端产出文件区共用）。授权（ql-20260823-013 会话归属人制）：会话场景（X-Session-Id）上传者==`AgentSession.user_id` 即放行——无工作区的 runtime 会话同样可传可列；非归属人回退按会话 workspace 锚复核（POST=WORKSPACE_WRITE / GET=WORKSPACE_READ）。worker 场景（run_id）仍按 `target_workspace_id ?? mission ?? task` 锚链复核，锚 NULL 兜底 deny。
