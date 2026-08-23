@@ -12,7 +12,8 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
+from sqlmodel import col
 
 from app.core.logging import get_logger
 from app.modules.session_attachment.model import SessionAttachment
@@ -25,16 +26,25 @@ _BATCH_LIMIT = 200  # 单轮有界（对齐 lease expire limit 模式）
 
 
 async def cleanup_expired_draft_attachments(session_factory) -> int:
-    """删除过期草稿行，返回删除数（session_factory = get_session_factory()）。"""
+    """删除过期草稿行，返回删除数（session_factory = get_session_factory()）。
+
+    批量上限经 ``id IN (SELECT ... LIMIT n)`` 子查询实现（2026-08-24 会话审查
+    P3）：SQLAlchemy Core ``Delete`` 无 ``.limit()``（且 PG 无 DELETE LIMIT），
+    旧写法每小时必抛 AttributeError 被 ``_run_forever`` 吞掉，草稿从未清过。
+    """
     cutoff = datetime.now(UTC) - DRAFT_TTL
     async with session_factory() as session:
         result = await session.execute(
-            delete(SessionAttachment)
-            .where(
-                SessionAttachment.session_id.is_(None),
-                SessionAttachment.created_at < cutoff,
+            delete(SessionAttachment).where(
+                col(SessionAttachment.id).in_(
+                    select(SessionAttachment.id)
+                    .where(
+                        SessionAttachment.session_id.is_(None),
+                        SessionAttachment.created_at < cutoff,
+                    )
+                    .limit(_BATCH_LIMIT)
+                )
             )
-            .limit(_BATCH_LIMIT)
         )
         await session.commit()
         deleted = int(getattr(result, "rowcount", 0) or 0)

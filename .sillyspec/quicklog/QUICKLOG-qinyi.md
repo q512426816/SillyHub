@@ -411,3 +411,14 @@
 根因：SessionManager create catch 只删 store 后 rethrow 不上报（注释声称已标 failed 与实现不符），interactive lease 恒 NULL 过期时间 + WS 不失活时 run 永久 pending；codex 子进程非正常退出只做 turn 级 finalizeWithError，会话保持 active 无消费者，后续 inject 全部入无人消费队列永久挂起
 方案：daemon.ts create catch 同 ql-20260703-001 范式回传 notifyRunResult(error_during_execution)（best-effort warn 不崩）；codex exit 非 closing 分支在 turn 级收敛后追加 onError（session-manager fail 链，幂等）触发会话级终止与 onSessionEnd 上报；修正过时注释
 结果：新增 2 回归用例（create 失败上报断言 runId/status/summary；exit 触发 onTurnError）全绿；interactive 511 + daemon 全量 2642 用例全绿；tsc 0 错；daemon.md 同步
+
+## ql-20260824-009-ea40 | 2026-08-24 07:43:47 | 修活会话附件草稿清理任务（delete().limit() 每小时必抛 AttributeError 被吞）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/session_attachment/cleanup.py（子查询写法替换）
+- backend/app/modules/session_attachment/tests/test_cleanup.py（新增 2 用例）
+需求：修活会话附件草稿清理任务（delete().limit() 每小时必抛 AttributeError 被吞）
+根因：SQLAlchemy Core Delete 无 .limit() 方法且 PG 无 DELETE LIMIT 方言，cleanup_expired_draft_attachments 每小时首条 delete 即抛 AttributeError，被 _run_forever except 吞成 warning——任务自上线起从未删过任何行，48h 草稿无限累积
+方案：改 id IN (SELECT id WHERE session_id IS NULL AND created_at<cutoff LIMIT 200) 子查询写法（SQLite/PG 双方言兼容，批量上限语义不变）；新增 test_cleanup.py 两用例锁行为
+结果：新增 2 用例（只删过期草稿且不动已绑定附件/单轮批量上限）全绿；ruff 0 错
