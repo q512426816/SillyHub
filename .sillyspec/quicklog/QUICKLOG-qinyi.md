@@ -287,3 +287,23 @@
 根因：docstring 幂等性段写『前端按钮已禁用』，但现行前端 workspace-config-card 初始化按钮 disabled 仅取 busyReason()（忙时禁用），已初始化后仍可重复点击触发重复 init，注释滞后于实现（CLAUDE.md 规则 18）
 方案：注释改为与真实行为一致——重复 init 可重复触发，但旧 token 内联吊销 + init 第 5 步重写 local.yaml 保证用户侧恒单活 token，lease claim 单飞窗口防并发签发；纯注释零行为变更
 结果：ruff check + py_compile 通过；无代码路径变更零测试影响
+
+## ql-20260823-012-3a9f | 2026-08-23 21:37:14 | (quick 任务)
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
+
+## ql-20260823-013-1d4c | 2026-08-23 21:37:25 | agent 会话文件上传授权改会话归属人制——无工作区会话可传可回显
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/file_artifacts.py（会话归属人制鉴权（POST/GET+helper））
+- backend/app/modules/agent/tests/test_file_artifacts.py（新增 5 用例+helper 支持 user_id）
+- .sillyspec/docs/SillyHub/modules/agent.md（契约摘要登记授权口径）
+- docs/sillyspec/2026-08-23-dev-minio-localhost-put-intercepted.md（dev 本机存储三坑记录）
+- backend/.env（S3_ENDPOINT 改 127.0.0.1（gitignore 不入库））
+需求：agent 会话文件上传授权改会话归属人制——无工作区会话可传可回显
+根因：D-004@v2 把会话场景授权锚定 AgentSession.workspace_id，锚 NULL（runtime 无工作区会话）一律兜底 deny 连平台管理员也 403，与「会话的都能上传回显」诉求冲突
+方案：file_artifacts.py 新增 _check_session_permission：上传者==AgentSession.user_id 即放行，非归属人回退 workspace 锚复核；POST/GET 会话分支接入；移除 require_permission_any 入口门；worker(run_id) 锚链不变；agent.md 同步
+结果：test_file_artifacts 23 全绿（含 5 新用例）+相邻 file/mission 44 绿+ruff 过；真实会话 c5b97325 端到端 201/200/200；连带修 dev 存储（MinIO 容器+127.0.0.1 端点，坑记录 docs/sillyspec/）
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/2026-08-23-dev-minio-localhost-put-intercepted.md
