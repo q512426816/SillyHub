@@ -289,7 +289,7 @@ function SummaryCard({
   tone?: "neutral" | "online" | "warning" | "offline" | "disabled";
 }) {
   const toneClass = {
-    neutral: "border-slate-200 bg-white text-slate-700",
+    neutral: "border-slate-200 bg-card text-slate-700",
     online: "border-emerald-500 bg-emerald-50 text-emerald-700",
     warning: "border-amber-200 bg-amber-50 text-amber-700",
     offline: "border-slate-200 bg-slate-50 text-slate-600",
@@ -939,7 +939,7 @@ export default function RuntimesPage() {
                     useEffect 重发 getRuntimesUsage(新窗) → 所有卡片用量区同步刷新。
                   */}
                   <div className="flex items-center gap-1.5">
-                    <div className="flex items-center gap-0.5 rounded-md border border-slate-300 bg-white p-0.5">
+                    <div className="flex items-center gap-0.5 rounded-md border border-slate-300 bg-card p-0.5">
                       {(Object.keys(WINDOW_LABELS) as RuntimeUsageWindow[]).map((w) => (
                         <button
                           key={w}
@@ -982,13 +982,13 @@ export default function RuntimesPage() {
                     placeholder="搜索主机名/别名/提供方"
                     value={query}
                     onChange={(e) => updateFilter(setQuery)(e.target.value)}
-                    className="h-8 min-w-[12rem] flex-1 rounded border border-slate-300 bg-white px-2 text-xs text-slate-700 placeholder:text-slate-400"
+                    className="h-8 min-w-[12rem] flex-1 rounded border border-slate-300 bg-card px-2 text-xs text-slate-700 placeholder:text-slate-400"
                   />
                   <select
                     aria-label="筛选提供方"
                     value={providerFilter}
                     onChange={(e) => updateFilter(setProviderFilter)(e.target.value)}
-                    className="h-8 rounded border border-slate-300 bg-white px-2 text-xs text-slate-700"
+                    className="h-8 rounded border border-slate-300 bg-card px-2 text-xs text-slate-700"
                   >
                     <option value="">全部提供方</option>
                     {Object.entries(PROVIDER_META).map(([key, meta]) => (
@@ -1001,7 +1001,7 @@ export default function RuntimesPage() {
                     aria-label="筛选状态"
                     value={statusFilter}
                     onChange={(e) => updateFilter(setStatusFilter)(e.target.value)}
-                    className="h-8 rounded border border-slate-300 bg-white px-2 text-xs text-slate-700"
+                    className="h-8 rounded border border-slate-300 bg-card px-2 text-xs text-slate-700"
                   >
                     <option value="">全部状态</option>
                     <option value="online">在线</option>
@@ -1014,7 +1014,7 @@ export default function RuntimesPage() {
                       aria-label="筛选人员"
                       value={ownerUserId ?? ""}
                       onChange={(e) => updateFilter(setOwnerUserId)(e.target.value || null)}
-                      className="h-8 rounded border border-slate-300 bg-white px-2 text-xs text-slate-700"
+                      className="h-8 rounded border border-slate-300 bg-card px-2 text-xs text-slate-700"
                     >
                       <option value="">全部人员</option>
                       {userOptions.map((u) => (

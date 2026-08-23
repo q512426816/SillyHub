@@ -112,12 +112,12 @@ export function MachineCard({
 
   // prototype .btn-outline btn-tiny（机器头别名/升级按钮）。
   const btnOutlineTiny =
-    "inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white";
+    "inline-flex items-center gap-1 rounded border border-slate-300 bg-card px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-card";
 
   return (
     <section
       className={cn(
-        "overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm",
+        "overflow-hidden rounded-lg border border-slate-200 bg-card shadow-sm",
         expanded && "ring-1 ring-brand-100",
       )}
     >

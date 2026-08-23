@@ -188,7 +188,7 @@ export function TeamProgress({ missionId, workspaceId, compact, pollMs }: TeamPr
       </div>
 
       {/* 主 agent 决策日志（orchestrator_log，brownfield 空→提示） */}
-      <div className="rounded-md border border-violet-200 bg-white p-3">
+      <div className="rounded-md border border-violet-200 bg-card p-3">
         <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-700">
           🧠 主 Agent 决策
         </div>
@@ -229,7 +229,7 @@ export function TeamProgress({ missionId, workspaceId, compact, pollMs }: TeamPr
           👥 Worker 进度（{workerRuns.length}）
         </div>
         {workerRuns.length === 0 ? (
-          <p className="rounded-md border border-dashed border-slate-300 bg-white px-3 py-2 text-[11px] text-slate-400">
+          <p className="rounded-md border border-dashed border-slate-300 bg-card px-3 py-2 text-[11px] text-slate-400">
             暂无 Worker。主 agent 接管后将按预设派发。
           </p>
         ) : (
@@ -289,7 +289,7 @@ function TeamCostBar({ cost, budget }: { cost: number; budget: number | null }) 
 function TeamArtifactCard({ artifact }: { artifact: MissionArtifact }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="rounded border border-gray-200 bg-white text-xs">
+    <div className="rounded border border-gray-200 bg-card text-xs">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -323,7 +323,7 @@ function TeamWorkerRow({ worker }: { worker: MissionWorkerRun }) {
             : "text-gray-600";
   const role = worker.role ?? "worker";
   return (
-    <li className="space-y-1 rounded border border-gray-200 bg-white p-2 text-sm">
+    <li className="space-y-1 rounded border border-gray-200 bg-card p-2 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="outline" className="text-xs">
           {ROLE_LABEL[role] ?? role}

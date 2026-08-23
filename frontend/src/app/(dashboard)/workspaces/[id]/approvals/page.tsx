@@ -240,7 +240,7 @@ export default function ApprovalsPage({ params }: Props) {
                 {RISK_TOOLS[level].tools.map((tool) => (
                   <code
                     key={tool}
-                    className="rounded bg-white/60 px-1.5 py-0.5 text-[11px] font-mono"
+                    className="rounded bg-card px-1.5 py-0.5 text-[11px] font-mono"
                   >
                     {tool}
                   </code>

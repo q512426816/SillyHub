@@ -160,7 +160,7 @@ export default function WorkbenchPage() {
           <button
             type="button"
             onClick={() => setTargetUserId(null)}
-            className="rounded border border-amber-400 bg-white px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100"
+            className="rounded border border-amber-400 bg-card px-3 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100"
           >
             返回我自己
           </button>

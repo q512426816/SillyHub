@@ -128,7 +128,7 @@ export function TopBar({ displayName, onLogout }: TopBarProps) {
           <input
             type="search"
             placeholder="搜索..."
-            className="w-[240px] rounded-md border border-transparent bg-slate-100 py-1.5 pl-8 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:bg-white focus:outline-none"
+            className="w-[240px] rounded-md border border-transparent bg-slate-100 py-1.5 pl-8 pr-3 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand-400 focus:bg-card focus:outline-none"
             aria-label="全局搜索"
           />
         </div>

@@ -102,16 +102,16 @@ export function RuntimeCard({
 
   // prototype .btn 系列 className（btn-ghost btn-tiny / btn-primary btn-tiny / btn-danger btn-tiny）。
   const btnGhost =
-    "inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-[11.5px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-white";
+    "inline-flex items-center gap-1 rounded border border-slate-300 bg-card px-2 py-1 text-[11.5px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-card";
   const btnDanger =
-    "inline-flex items-center gap-1 rounded border border-slate-300 bg-white px-2 py-1 text-[11.5px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:hover:bg-white";
+    "inline-flex items-center gap-1 rounded border border-slate-300 bg-card px-2 py-1 text-[11.5px] font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:hover:bg-card";
   const btnPrimary =
     "inline-flex items-center gap-1 rounded bg-brand-600 px-2 py-1 text-[11.5px] font-semibold text-white hover:bg-brand-700 disabled:opacity-50 disabled:hover:bg-brand-600";
 
   const roots = runtime.allowed_roots ?? [];
 
   return (
-    <article className="overflow-hidden rounded-md border border-slate-200 bg-white">
+    <article className="overflow-hidden rounded-md border border-slate-200 bg-card">
       {/* ===== rh：provider 徽章 + 状态徽章 + runtime 名（右对齐 mono）===== */}
       <header className="flex items-center gap-2 border-b border-slate-100 px-3 py-2.5">
         <ProviderBadge provider={runtime.provider} />
@@ -192,7 +192,7 @@ export function RuntimeCard({
       </div>
 
       {/* ===== rt-roots：可写目录（allowed_roots 沙箱） ===== */}
-      <div className="border-t border-slate-100 bg-white px-3 py-1.5 text-[10.5px] text-slate-500">
+      <div className="border-t border-slate-100 bg-card px-3 py-1.5 text-[10.5px] text-slate-500">
         <span>可写目录：</span>
         {roots.length > 0 ? (
           <span className="ml-0.5 inline-flex flex-wrap gap-1 align-middle">

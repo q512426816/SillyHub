@@ -178,7 +178,7 @@ export default function WorkbenchMobilePage() {
           <button
             type="button"
             onClick={() => setTargetUserId(null)}
-            className="inline-flex min-h-[36px] shrink-0 items-center rounded-md border border-amber-400 bg-white px-3 text-[12px] font-medium text-amber-700"
+            className="inline-flex min-h-[36px] shrink-0 items-center rounded-md border border-amber-400 bg-card px-3 text-[12px] font-medium text-amber-700"
           >
             返回我自己
           </button>

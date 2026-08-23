@@ -85,7 +85,7 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="inline-flex items-center gap-1 rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950"
+      className="inline-flex items-center gap-1 rounded border border-zinc-300 bg-card px-1.5 py-0.5 text-[10px] text-zinc-700 hover:bg-zinc-100 hover:text-zinc-950"
       title={label}
     >
       <Copy className="h-2.5 w-2.5" />
@@ -664,7 +664,7 @@ export function ToolResultCard({ body }: { body: string }) {
   if (spec) return <WorkflowSpecResultCard summary={spec} fullText={body} />;
 
   return (
-    <div className="rounded-md border border-zinc-200 bg-white px-2.5 py-2">
+    <div className="rounded-md border border-zinc-200 bg-card px-2.5 py-2">
       <div className="text-[11px] font-semibold text-emerald-700">工具结果</div>
       {isLong ? (
         <>

@@ -124,7 +124,7 @@ function semanticCategoryMeta(category: SemanticCategory): {
       return {
         label: "思路",
         Icon: Brain,
-        badgeClass: "border-zinc-200 bg-white text-zinc-600",
+        badgeClass: "border-zinc-200 bg-card text-zinc-600",
         rowClass: "hover:bg-zinc-100/60",
       };
     case "tool_call":
@@ -166,7 +166,7 @@ function semanticCategoryMeta(category: SemanticCategory): {
       return {
         label: "日志",
         Icon: CircleDot,
-        badgeClass: "border-zinc-200 bg-white text-zinc-600",
+        badgeClass: "border-zinc-200 bg-card text-zinc-600",
         rowClass: "hover:bg-zinc-100/60",
       };
   }
@@ -270,7 +270,7 @@ function renderLogLines(content: string) {
 
 function ScanCheckSummaryCard({ result }: { result: ScanCheckResult }) {
   return (
-    <div className="mt-1 rounded-md border border-zinc-200 bg-white px-2.5 py-2">
+    <div className="mt-1 rounded-md border border-zinc-200 bg-card px-2.5 py-2">
       <div className="flex items-center gap-2 text-[11px] font-semibold">
         {result.passed ? (
           <span className="text-emerald-700">✓ 扫描自检通过</span>
@@ -518,7 +518,7 @@ export function AgentLogRow({
                       }
                     }}
                     disabled={submitting}
-                    className="h-8 min-w-0 border-zinc-200 bg-white text-xs text-zinc-800 placeholder:text-zinc-400"
+                    className="h-8 min-w-0 border-zinc-200 bg-card text-xs text-zinc-800 placeholder:text-zinc-400"
                   />
                   <Button
                     size="sm"
@@ -901,7 +901,7 @@ export function AgentLogViewer({
   return (
     <div
       className={cn(
-        "min-w-0 overflow-hidden bg-white text-zinc-800",
+        "min-w-0 overflow-hidden bg-card text-zinc-800",
         fullscreen
           ? "fixed inset-0 z-50 flex flex-col"
           : "max-w-full",
@@ -961,7 +961,7 @@ export function AgentLogViewer({
                   "inline-flex h-5 items-center rounded border px-1.5 text-[10px] font-semibold transition-colors",
                   activeFilters.has(f.key)
                     ? "border-brand-500/40 bg-brand-500/15 text-brand-700"
-                    : "border-zinc-200 bg-white text-zinc-600 hover:text-zinc-900",
+                    : "border-zinc-200 bg-card text-zinc-600 hover:text-zinc-900",
                 )}
               >
                 {f.label}

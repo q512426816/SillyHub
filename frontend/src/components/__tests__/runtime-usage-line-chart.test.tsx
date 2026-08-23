@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 // 直接 import 具体组件文件,绕过 charts/index.ts 的 next/dynamic(ssr:false)
 // (dynamic 在 jsdom 测试环境会一直停在 loading 态)。
 import { RuntimeUsageLineChart } from "@/components/charts/RuntimeUsageLineChart";
 import type { RuntimeUsagePoint } from "@/components/charts/RuntimeUsageLineChart";
+import { useThemeStore } from "@/stores/theme";
 
 function makePoint(ts: string, input = 100, output = 50): RuntimeUsagePoint {
   return {
@@ -18,6 +19,12 @@ function makePoint(ts: string, input = 100, output = 50): RuntimeUsagePoint {
 }
 
 describe("RuntimeUsageLineChart", () => {
+  // 组件订阅 useThemeStore(task-09),dark 用例改写 store 后恢复默认主题,
+  // 避免 zustand 单例状态泄漏到其它测试文件。
+  afterEach(() => {
+    useThemeStore.setState({ theme: "ai-native" });
+  });
+
   it("有数据时挂载 echarts 容器,不抛错", () => {
     const { container } = render(
       <RuntimeUsageLineChart
@@ -28,6 +35,16 @@ describe("RuntimeUsageLineChart", () => {
       />,
     );
     // echarts-for-react 渲染根 div 带 class
+    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
+  });
+
+  it("dark 主题下订阅 useThemeStore 正常渲染(dark 系列色/legend 注入)", () => {
+    useThemeStore.setState({ theme: "dark" });
+    const { container } = render(
+      <RuntimeUsageLineChart
+        points={[makePoint("2026-06-24T00:00:00", 1000, 500)]}
+      />,
+    );
     expect(container.querySelector(".echarts-for-react")).not.toBeNull();
   });
 

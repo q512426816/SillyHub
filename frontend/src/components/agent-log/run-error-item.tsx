@@ -49,7 +49,7 @@ export interface ModelErrorMeta {
   containerClass: string;
   /** 标题行图标 / 文字色（text-{c}-700）。 */
   titleClass: string;
-  /** type 徽标样式（border-{c}-200 bg-white/70 text-{c}-700，参照 tool-kind-meta badgeClass）。 */
+  /** type 徽标样式（border-{c}-200 bg-card text-{c}-700，参照 tool-kind-meta badgeClass）。 */
   badgeClass: string;
   /** 后端未给 hint 时的兜底建议（R-01：classifier 漏判仍给可操作建议）。 */
   defaultHint: string;
@@ -69,7 +69,7 @@ export const MODEL_ERROR_META: Record<ModelErrorType, ModelErrorMeta> = {
     Icon: Lock,
     containerClass: "border-l-red-400 bg-red-50",
     titleClass: "text-red-700",
-    badgeClass: "border-red-200 bg-white/70 text-red-700",
+    badgeClass: "border-red-200 bg-card text-red-700",
     defaultHint: "前往供应商设置检查并更新 API Key 凭证。",
   },
   quota_exceeded: {
@@ -77,7 +77,7 @@ export const MODEL_ERROR_META: Record<ModelErrorType, ModelErrorMeta> = {
     Icon: Wallet,
     containerClass: "border-l-orange-400 bg-orange-50",
     titleClass: "text-orange-700",
-    badgeClass: "border-orange-200 bg-white/70 text-orange-700",
+    badgeClass: "border-orange-200 bg-card text-orange-700",
     defaultHint: "切换到有额度的供应商，或等待额度重置后重试。",
   },
   rate_limited: {
@@ -85,7 +85,7 @@ export const MODEL_ERROR_META: Record<ModelErrorType, ModelErrorMeta> = {
     Icon: Gauge,
     containerClass: "border-l-amber-400 bg-amber-50",
     titleClass: "text-amber-700",
-    badgeClass: "border-amber-200 bg-white/70 text-amber-700",
+    badgeClass: "border-amber-200 bg-card text-amber-700",
     defaultHint: "请求过于频繁，请稍候片刻再重试。",
   },
   timeout: {
@@ -93,7 +93,7 @@ export const MODEL_ERROR_META: Record<ModelErrorType, ModelErrorMeta> = {
     Icon: Timer,
     containerClass: "border-l-purple-400 bg-purple-50",
     titleClass: "text-purple-700",
-    badgeClass: "border-purple-200 bg-white/70 text-purple-700",
+    badgeClass: "border-purple-200 bg-card text-purple-700",
     defaultHint: "模型响应超时，请稍后重试；若持续超时，请检查网络或更换供应商。",
   },
   model_not_found: {
@@ -101,7 +101,7 @@ export const MODEL_ERROR_META: Record<ModelErrorType, ModelErrorMeta> = {
     Icon: PackageSearch,
     containerClass: "border-l-rose-400 bg-rose-50",
     titleClass: "text-rose-700",
-    badgeClass: "border-rose-200 bg-white/70 text-rose-700",
+    badgeClass: "border-rose-200 bg-card text-rose-700",
     defaultHint: "当前供应商不支持该模型，请在设置中选择可用模型或切换供应商。",
   },
   network: {
@@ -109,7 +109,7 @@ export const MODEL_ERROR_META: Record<ModelErrorType, ModelErrorMeta> = {
     Icon: WifiOff,
     containerClass: "border-l-cyan-400 bg-cyan-50",
     titleClass: "text-cyan-700",
-    badgeClass: "border-cyan-200 bg-white/70 text-cyan-700",
+    badgeClass: "border-cyan-200 bg-card text-cyan-700",
     defaultHint: "请检查网络连接与供应商服务地址（BASE_URL）是否可达。",
   },
   provider_error: {
@@ -117,7 +117,7 @@ export const MODEL_ERROR_META: Record<ModelErrorType, ModelErrorMeta> = {
     Icon: AlertOctagon,
     containerClass: "border-l-red-400 bg-red-50",
     titleClass: "text-red-700",
-    badgeClass: "border-red-200 bg-white/70 text-red-700",
+    badgeClass: "border-red-200 bg-card text-red-700",
     defaultHint: "供应商服务异常，请稍后重试；若持续报错，请切换供应商。",
   },
   unknown: {
@@ -125,7 +125,7 @@ export const MODEL_ERROR_META: Record<ModelErrorType, ModelErrorMeta> = {
     Icon: AlertTriangle,
     containerClass: "border-l-zinc-400 bg-zinc-50",
     titleClass: "text-zinc-700",
-    badgeClass: "border-zinc-200 bg-white/70 text-zinc-700",
+    badgeClass: "border-zinc-200 bg-card text-zinc-700",
     defaultHint: "请查看下方详情或稍后重试；若持续失败，请联系管理员。",
   },
 };
@@ -202,7 +202,7 @@ export function RunErrorItem({
 
   const primaryBtnClass = "bg-primary text-primary-foreground hover:opacity-90";
   const defaultBtnClass =
-    "border border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-100";
+    "border border-zinc-300 bg-card text-zinc-700 hover:bg-zinc-100";
 
   return (
     <div
@@ -233,7 +233,7 @@ export function RunErrorItem({
           {meta.label} · {item.type}
         </span>
         {item.code && (
-          <span className="inline-flex items-center rounded border border-zinc-200 bg-white/70 px-1.5 py-0.5 font-mono text-[10px] text-zinc-600">
+          <span className="inline-flex items-center rounded border border-zinc-200 bg-card px-1.5 py-0.5 font-mono text-[10px] text-zinc-600">
             code: {item.code}
           </span>
         )}
@@ -306,7 +306,7 @@ export function RunErrorItem({
 
       {/* 原始错误文本（折叠展开） */}
       {showDetail && hasRaw && (
-        <pre className="mt-2 max-w-full whitespace-pre-wrap break-words rounded border border-zinc-200 bg-white px-2 py-1.5 font-mono text-[11px] leading-5 text-zinc-700 [overflow-wrap:anywhere]">
+        <pre className="mt-2 max-w-full whitespace-pre-wrap break-words rounded border border-zinc-200 bg-card px-2 py-1.5 font-mono text-[11px] leading-5 text-zinc-700 [overflow-wrap:anywhere]">
           {item.raw}
         </pre>
       )}

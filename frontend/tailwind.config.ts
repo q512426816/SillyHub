@@ -96,8 +96,9 @@ const config: Config = {
           ])
         ),
 
-        // ---- 基础调色板(直接 hex,与 tokens.color.palette 对齐,
-        //      不走 CSS 变量,避免运行时切换开销) ----
+        // ---- 基础调色板·真实信息色(直接 hex,与 tokens.color.palette 对齐,
+        //      不走 CSS 变量;blue 阶仅限真信息蓝/外部标识色场景;
+        //      slate 中性阶已变量化,例外见下方) ----
         blue: {
           50: "#eff6ff",
           100: "#dbeafe",
@@ -137,18 +138,41 @@ const config: Config = {
           800: "#065f46",
           900: "#064e3b",
         },
-        slate: {
-          50: "#f8fafc",
-          100: "#f1f5f9",
-          200: "#e2e8f0",
-          300: "#cbd5e1",
-          400: "#94a3b8",
-          500: "#64748b",
-          600: "#475569",
-          700: "#334155",
-          800: "#1e293b",
-          900: "#0f172a",
-        },
+        // ---- slate 中性阶(主题感知:50-900 十档纯 CSS 变量名映射,无硬编码 hex;
+        //      取值由 globals.css 的 :root / [data-theme="blue"] / [data-theme="dark"]
+        //      变量块提供(本变更 task-02),bg-slate-100 等类随 html data-theme 切换
+        //      自动换肤(dark 为 50↔900 对称翻转);浅色两主题取值与 Tailwind 默认
+        //      hex 逐值相等,观感零变化,D-005@v1;
+        //      函数映射与上方 brand 阶同构:/alpha 修饰符经 color-mix 补齐透明度语义
+        //      (透明度入参三形态说明见 brand 段注释) ----
+        slate: Object.fromEntries(
+          (
+            [
+              "50",
+              "100",
+              "200",
+              "300",
+              "400",
+              "500",
+              "600",
+              "700",
+              "800",
+              "900",
+            ] as const
+          ).map((step) => [
+            step,
+            ({ opacityValue }: { opacityValue?: number | string }) => {
+              if (opacityValue === undefined) {
+                return `var(--color-slate-${step})`;
+              }
+              const pct =
+                typeof opacityValue === "number"
+                  ? `${opacityValue * 100}%`
+                  : `calc(${opacityValue} * 100%)`;
+              return `color-mix(in srgb, var(--color-slate-${step}) ${pct}, transparent)`;
+            },
+          ])
+        ),
       },
       fontFamily: {
         // 通过 var(--font-inter) 接入 task-02 next/font 注入的 Inter,

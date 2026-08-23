@@ -323,7 +323,7 @@ function StatCard({
   const toneCls = {
     allow: "border-emerald-200 bg-emerald-50 text-emerald-700",
     deny: "border-rose-200 bg-rose-50 text-rose-700",
-    neutral: "border-slate-200 bg-white text-slate-700",
+    neutral: "border-slate-200 bg-card text-slate-700",
   }[tone];
   return (
     <div className={`flex min-h-[88px] flex-col justify-center rounded-md border px-4 py-3 ${toneCls}`}>

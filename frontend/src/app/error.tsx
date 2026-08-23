@@ -39,7 +39,7 @@ export default function AppRouteError({
       <button
         type="button"
         onClick={reset}
-        className="rounded border border-red-300 bg-white px-3 py-1 text-xs text-red-700 hover:bg-red-100"
+        className="rounded border border-red-300 bg-card px-3 py-1 text-xs text-red-700 hover:bg-red-100"
       >
         重试
       </button>

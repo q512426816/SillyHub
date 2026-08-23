@@ -57,7 +57,7 @@ export function MissionSummaryCard({ mission }: { mission: Mission }) {
   const cost = mission.cost_so_far;
 
   return (
-    <div className="space-y-3 rounded-lg border border-slate-200 bg-white p-4">
+    <div className="space-y-3 rounded-lg border border-slate-200 bg-card p-4">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <Badge className={STATUS_BADGE[mission.status] ?? "bg-gray-100 text-gray-700"}>
           {STATUS_LABEL[mission.status] ?? mission.status}

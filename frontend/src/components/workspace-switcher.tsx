@@ -204,7 +204,7 @@ export function WorkspaceSwitcher(): JSX.Element {
         type="button"
         aria-label="选择工作区"
         onClick={() => router.push("/workspaces")}
-        className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-500 transition-colors hover:border-brand-400 hover:bg-white hover:text-slate-700"
+        className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm text-slate-500 transition-colors hover:border-brand-400 hover:bg-card hover:text-slate-700"
       >
         <span className="h-2 w-2 rounded-full bg-slate-300" aria-hidden />
         <span>选择工作区</span>
@@ -226,7 +226,7 @@ export function WorkspaceSwitcher(): JSX.Element {
           <button
             type="button"
             aria-label="切换工作区"
-            className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-sm transition-colors hover:border-brand-400"
+            className="inline-flex items-center gap-2 rounded-md border border-slate-200 bg-card px-3 py-1.5 text-sm transition-colors hover:border-brand-400"
           >
             <span
               className={cn("h-2 w-2 rounded-full", currentBadge.dotClass)}

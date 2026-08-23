@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, type ReactNode } from "react";
-import { App as AntApp, ConfigProvider } from "antd";
+import { App as AntApp, ConfigProvider, theme as antdTheme } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import dayjs from "dayjs";
 import "dayjs/locale/zh-cn";
@@ -26,6 +26,9 @@ const FONT_SANS = 'Inter, -apple-system, "PingFang SC", "Microsoft YaHei", sans-
 // ConfigProvider theme 全面定制 (task-05 / FR-03 / D-101@v1)
 // 颜色全部取自 themes.ts 当前主题 (themes[theme].color),随 useThemeStore 切换即时生效;
 // hover 档 (colorPrimaryHover 等) 由 antd 自动派生不手写,严禁散落 hex。
+// 暗色适配 (变更 2026-08-23-frontend-dark-theme / task-06 / D-006@v1):dark 经
+// antdTheme.darkAlgorithm 自动翻转 antd 组件灰阶;下方 token 与 components 仍查
+// themes 表 (dark 翻转阶自动给深紫底/亮紫字),不加 dark 分支,其余逻辑零改动。
 export function AntdProviders({ children }: { children: ReactNode }) {
   const theme = useThemeStore((s) => s.theme);
   const t = themes[theme].color;
@@ -40,6 +43,9 @@ export function AntdProviders({ children }: { children: ReactNode }) {
     <ConfigProvider
       locale={zhCN}
       theme={{
+        // D-006@v1:dark 走 darkAlgorithm 翻转灰阶,浅色两主题恒 defaultAlgorithm 观感零变化
+        algorithm:
+          theme === "dark" ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
         token: {
           // 主色 + 状态语义色 (D-005;info=各主题 accent 青,D-003@v2)
           colorPrimary: t.primary,

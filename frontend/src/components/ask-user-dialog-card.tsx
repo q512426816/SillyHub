@@ -322,7 +322,7 @@ export function AskUserDialogCard({
                           "flex w-full items-start gap-2 rounded-md border px-2.5 py-1.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60",
                           selected
                             ? "border-indigo-400 bg-indigo-50"
-                            : "border-zinc-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/40",
+                            : "border-zinc-200 bg-card hover:border-indigo-300 hover:bg-indigo-50/40",
                         )}
                       >
                         <span
@@ -331,7 +331,7 @@ export function AskUserDialogCard({
                             q.multiSelect ? "rounded-sm" : "rounded-full",
                             selected
                               ? "border-indigo-500 bg-indigo-500 text-white"
-                              : "border-zinc-300 bg-white",
+                              : "border-zinc-300 bg-card",
                           )}
                         >
                           {selected && <Check className="h-3 w-3" />}

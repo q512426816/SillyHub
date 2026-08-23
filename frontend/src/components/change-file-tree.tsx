@@ -68,14 +68,14 @@ function FilePreview({ path, name, content }: { path: string; name: string; cont
   }
   if (isPreviewableHtml(path)) {
     return (
-      <div className="min-w-0 flex-1 overflow-hidden rounded-md border border-border bg-white">
+      <div className="min-w-0 flex-1 overflow-hidden rounded-md border border-border bg-card">
         <iframe
           title={`${name} 渲染预览`}
           srcDoc={content}
           // sandbox 不设 allow-same-origin：iframe 被当作唯一源，
           // 脚本可跑（交互原型可见）但无法访问父页面 cookie/storage/DOM，安全隔离。
           sandbox="allow-scripts allow-popups"
-          className="h-full min-h-[60vh] w-full border-0 bg-white"
+          className="h-full min-h-[60vh] w-full border-0 bg-card"
         />
       </div>
     );

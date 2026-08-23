@@ -13,6 +13,10 @@ SillyHub 前端的 Next.js App Router 页面路由层（frontend/src/app/** + mi
 
 ## 契约摘要
 - 根级装配：`layout.tsx`（RootLayout，lang=zh-CN + suppressHydrationWarning + 全局 CSS + AntdProviders + AppProviders）、`error.tsx` / `global-error.tsx` / `loading.tsx`、首页 `page.tsx`。
+- 主题系统契约（2026-08-23-frontend-dark-theme 起）：三主题并列 `ai-native`（默认浅色）/ `blue`（浅色）/ `dark`（暗夜，slate-900 底 + violet 阶对称翻转）。
+  - 取值单一源 `frontend/src/styles/themes.ts`（`ThemeName` 三值 + `themes` 注册表）；CSS 半边 = `globals.css` 三套 `[data-theme]` 变量块 + dark 固定调色板工具类覆盖层（D-007@v1，18 色族 177 条）。
+  - `layout.tsx` 内联防闪烁脚本：首帧直读 `localStorage["sillyhub-theme"]`（白名单 blue/dark）；**无记录时跟随系统 `prefers-color-scheme`**（系统暗色→dark，异常回落 ai-native）——与 `stores/theme.ts` persist merge 口径成对一致。
+  - 顶栏 `ThemeToggle`（antd Dropdown 三选一，themes 注册表派生）；antd 侧 `antd-providers.tsx` dark 时 `theme.darkAlgorithm`，token 继续查表；tailwind `slate` 阶已变量化（`var(--color-slate-*)`），全站 slate 类随 data-theme 换肤。
 - 桌面路由组：
   - `(auth)/login` — 登录页（无 dashboard 守卫）
   - `(dashboard)/workspaces` — 工作区列表（选择器页）+ `[id]` 详情（列表带类型徽标+词表筛选/未分类；

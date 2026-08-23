@@ -3,18 +3,21 @@
 @tailwind utilities;
 
 /* =============================================================
-   双套主题 CSS 变量(task-02 / FR-01 / D-101@v1 / D-003@v2)
-   - :root = ai-native(AI 紫,默认);[data-theme="blue"] = 现版旧蓝原样平移,
+   三套主题 CSS 变量(2026-08-23-frontend-dark-theme 增补 dark 第三套,
+   前身双套:task-02 / FR-01 / D-101@v1 / D-003@v2)
+   - :root = ai-native(AI 紫,默认);[data-theme="blue"] = 现版旧蓝原样平移;
+     [data-theme="dark"] = 暗夜(slate-900 深底 + violet-500 提亮主色,D-001@v1),
      html data-theme 切换时本文件全部主题变量即时换肤(CSS 半边,state 半边归 task-05)
    - 单一源原则:全部主题取值从 src/styles/themes.ts 派生
      (HSL 语义变量为 themes.ts hex 的等值换算,--color-* 为 hex 直写);
-     改色必须先改 themes.ts 再同步本文件对应两处,禁止只改一边或自行调色
+     改色必须先改 themes.ts 再同步本文件对应三处,禁止只改一边或自行调色
    - brand 语义阶 --color-brand-50..950 接替旧 --color-blue-* 注入
-     (旧键消费方为零,tailwind blue 类走 config 直 hex,真实信息色用途保留)
-   - 例外(D-003@v2,design §9):info 档两主题统一取各自 accent 青,
+     (旧键消费方为零,tailwind blue 类走 config 直 hex,真实信息色用途保留);
+     dark 块 brand/slate 阶对称翻转(brand 50↔950 / slate 50↔900)
+   - 例外(D-003@v2,design §9):info 档各主题统一取各自 accent 青,
      blue 主题 info 不再是旧版蓝
-   - slate 阶 / radius / shadow / font / spacing / 动效 token 两主题共享,
-     仅在 :root 定义,blue 覆盖块不重复声明
+   - radius / font / spacing / 动效 token 三主题共享,仅在 :root 定义;
+     slate 阶浅色两主题共享(:root 直写,dark 翻转覆盖)、shadow 各主题覆盖
    ============================================================= */
 @layer base {
   :root {
@@ -87,6 +90,11 @@
     --color-error: #DC2626;
     --color-info: #0891B2;
     --color-neutral: #64748b;
+    /* route-loading 硬编码修正键(2026-08-23-frontend-dark-theme/FR-04):
+       --muted-fg 原无定义、纯靠消费方 #8c8c8c 兜底,现三套块各写真值;
+       --color-loading-track 为 spinner 轨道新键,浅色两主题保持原值零变化 */
+    --muted-fg: #8c8c8c;
+    --color-loading-track: rgba(0, 0, 0, 0.08);
     --radius-sm: 6px;
     --radius-md: 8px;
     --radius-lg: 12px;
@@ -165,6 +173,9 @@
     --color-error: #ef4444;
     --color-info: #06b6d4;
     --color-neutral: #64748b;
+    /* route-loading 修正键(blue):与 :root 同值,浅色渲染零变化 */
+    --muted-fg: #8c8c8c;
+    --color-loading-track: rgba(0, 0, 0, 0.08);
     /* 阴影:旧版灰调值原样平移(ql-20260820-009 主题化改动的 blue 侧);
        primary 投影用品牌蓝调,与 purple 主题紫调投影同构 */
     --shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
@@ -173,26 +184,90 @@
     --shadow-primary: 0 4px 14px rgba(37, 99, 235, 0.32);
   }
 
-  /* 暗色模式变量保留,当前未启用(D-001 非目标),勿在组件中使用 dark: 前缀 */
-  .dark {
-    --background: 220 20% 10%;
-    --foreground: 215 20% 92%;
+  /* 暗色主题覆盖块(2026-08-23-frontend-dark-theme / FR-01 / D-001@v1):
+     [data-theme="dark"] 时生效,三主题(ai-native/blue/dark)之一,选择器与 blue 块同构。
+     取值=themes.ts darkTheme(design §5.1,全 Tailwind v3 默认色阶):bg/card/border=
+     slate-900/800/700,primary=violet-500 提亮保深底对比,semantic 提亮至 500 系,
+     brand/slate 阶对称翻转(brand 50↔950 / slate 50↔900;slate 消费侧 tailwind config
+     走 var(--color-slate-*) 映射归另一 task,D-005@v1)。
+     HSL 语义变量为 hex 等值换算(行内注释标注对应 hex);
+     共享 token(radius/font/spacing/动效)不在此重复声明;
+     改动须与 themes.ts 同步,禁止自行调色。
+     注:遗留暗色类选择器死块(蓝灰调,原 176-196 行)已随本变更删除。 */
+  [data-theme="dark"] {
+    --background: 222 47% 11%; /* =#0f172a slate-900 */
+    --foreground: 210 40% 96%; /* =#f1f5f9 slate-100 */
 
-    --card: 220 20% 13%;
-    --card-foreground: 215 20% 92%;
+    --card: 217 33% 17%; /* =#1e293b slate-800 */
+    --card-foreground: 210 40% 96%; /* =#f1f5f9 同 foreground */
 
-    --primary: 215 40% 60%;
-    --primary-foreground: 220 20% 10%;
+    --primary: 258 90% 66%; /* =#8b5cf6 violet-500,暗色提亮 */
+    --primary-foreground: 0 0% 100%; /* =#ffffff */
 
-    --muted: 220 16% 18%;
-    --muted-foreground: 215 12% 62%;
+    --muted: 215 25% 27%; /* =#334155 slate-700(蓝图 HSL 217 19% 27% 实为 gray-700 值,按 hex 等值规则修正) */
+    --muted-foreground: 215 20% 65%; /* =#94a3b8 slate-400 */
 
-    --destructive: 0 62% 50%;
+    --destructive: 0 72% 51%; /* 与两浅色主题同值保持(等值 #dc2626) */
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 16% 20%;
-    --input: 220 16% 20%;
-    --ring: 215 40% 60%;
+    --border: 215 25% 27%; /* =#334155 同 muted */
+    --input: 215 25% 27%; /* =#334155 同 border */
+    --ring: 258 90% 66%; /* =#8b5cf6 同 primary */
+
+    --success: 160 84% 39%; /* =#10b981 emerald-500 */
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%; /* =#f59e0b amber-500 */
+    --warning-foreground: 0 0% 100%;
+    --error: 0 72% 51%; /* 蓝图指定与 destructive 取值一致(hex 侧 --color-error=#ef4444 red-500 档) */
+    --error-foreground: 0 0% 100%;
+    --info: 187 85% 53%; /* =#22d3ee cyan-400,与 accent 同值 */
+    --info-foreground: 0 0% 100%;
+
+    --color-primary: #8b5cf6;
+    --color-primary-hover: #a78bfa; /* violet-400,暗色 hover 提亮 */
+    --color-accent: #22d3ee; /* cyan-400 */
+    /* brand 阶:dark=violet 阶对称翻转(50↔950、100↔900…500 自映),
+       深底下浅档变深、深档变浅,bg-brand-50/text-brand-600 等类名不改自动换肤 */
+    --color-brand-50: #2e1065;
+    --color-brand-100: #4c1d95;
+    --color-brand-200: #5b21b6;
+    --color-brand-300: #6d28d9;
+    --color-brand-400: #7c3aed;
+    --color-brand-500: #8b5cf6;
+    --color-brand-600: #a78bfa;
+    --color-brand-700: #c4b5fd;
+    --color-brand-800: #ddd6fe;
+    --color-brand-900: #ede9fe;
+    --color-brand-950: #f5f3ff;
+    /* slate 阶:dark 对称翻转(50↔900、100↔800…400↔500) */
+    --color-slate-50: #0f172a;
+    --color-slate-100: #1e293b;
+    --color-slate-200: #334155;
+    --color-slate-300: #475569;
+    --color-slate-400: #64748b;
+    --color-slate-500: #94a3b8;
+    --color-slate-600: #cbd5e1;
+    --color-slate-700: #e2e8f0;
+    --color-slate-800: #f1f5f9;
+    --color-slate-900: #f8fafc;
+    --color-bg: #0f172a;
+    --color-card: #1e293b;
+    --color-border: #334155;
+    --color-success: #10b981;
+    --color-warning: #f59e0b;
+    --color-error: #ef4444;
+    --color-info: #22d3ee;
+    --color-neutral: #94a3b8;
+    /* route-loading 修正键(dark):--muted-fg 次要文字取 slate-400,
+       loading 轨道改白系半透明(黑底上可见) */
+    --muted-fg: #94a3b8;
+    --color-loading-track: rgba(255, 255, 255, 0.12);
+    /* 阴影:黑基调加深(暗色下阴影需更深才有层次,design §5.1),
+       primary 投影随提亮主色取 rgba(139,92,246,0.28) */
+    --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.35);
+    --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.6);
+    --shadow-primary: 0 4px 14px rgba(139, 92, 246, 0.28);
   }
 
   * {
@@ -269,6 +344,333 @@
   }
 }
 
+/* =============================================================
+   dark 固定调色板工具类覆盖层(2026-08-23-frontend-dark-theme / task-02 增补 / D-007@v1)
+   - 背景:全站约 260 处固定调色板状态色类(bg-red-50 等八族,§9 错误条模板产物)
+     按浅色调值书写,dark 下不覆盖会残留刺眼浅色块(FR-01)
+   - 写法:选择器前缀 [data-theme="dark"] 仅 dark 命中,浅色两主题零影响;
+     特异度 (0,2,0) 胜过 tailwind 工具类 (0,1,0)(如 .bg-red-50)
+   - 置于文件级(非 @layer):同 ql-20260820-009 先例位置,不被 Tailwind purge,
+     输出顺序也在 utilities 之后,双保险覆盖
+   - 映射规则(暗色下整体升降档,色值=Tailwind v3 默认值,禁止自行调色):
+     bg-*-50 → *-950 / bg-*-100 → *-900(background-color)
+     border-*-200 → *-900 / border-*-300 → *-800(border-color)
+     text-*-400 → *-300 / text-*-500 → *-400 /
+     text-*-600 与 *-700 → *-300 / text-*-800 → *-200(color)
+   - 覆盖集=frontend/src grep(--include=*.tsx)实际命中清单,非全阶;
+     后续新增固定调色板类按上述规则在此补对应条目(斜杠透明度变体如
+     text-red-600/70 的生成类名不同,命中时需按变体名单独补)
+   - 2026-08-23 收口批(D-007@v1):下方「扩展色族」小节把覆盖面扩到
+     zinc/violet/indigo/sky/teal/rose/purple/pink/fuchsia/lime 十族,并按
+     色阶对称翻转(themes.ts dark 品牌阶同款先例)补档: bg 200→800、
+     border 100→900、border 400 与 500→300(强边框)、text 900→100、950→50
+   ============================================================= */
+
+/* ---- red 族(10 条;2026-08-23 收口批补 text-800 与 hover: 前缀类) ---- */
+[data-theme="dark"] .bg-red-50 { background-color: #450a0a; }
+[data-theme="dark"] .bg-red-100 { background-color: #7f1d1d; }
+[data-theme="dark"] .text-red-500 { color: #f87171; }
+[data-theme="dark"] .text-red-600 { color: #fca5a5; }
+[data-theme="dark"] .text-red-700 { color: #fca5a5; }
+[data-theme="dark"] .text-red-800 { color: #fecaca; }
+[data-theme="dark"] .border-red-200 { border-color: #7f1d1d; }
+[data-theme="dark"] .border-red-300 { border-color: #991b1b; }
+/* hover: 前缀生成独立类名(hover\:bg-red-50),元素仅挂 hover 变体时普通选择器
+   匹配不到,须按实际类名转义单独覆盖,特异度 (0,3,0) 胜过 tailwind (0,2,0) */
+[data-theme="dark"] .hover\:bg-red-50:hover { background-color: #450a0a; }
+[data-theme="dark"] .hover\:bg-red-100:hover { background-color: #7f1d1d; }
+
+/* ---- blue 族(8 条;2026-08-23 收口批补 lib/daemon.ts 徽章 bg-100/text-800) ---- */
+[data-theme="dark"] .bg-blue-50 { background-color: #172554; }
+[data-theme="dark"] .bg-blue-100 { background-color: #1e3a8a; }
+[data-theme="dark"] .text-blue-500 { color: #60a5fa; }
+[data-theme="dark"] .text-blue-600 { color: #93c5fd; }
+[data-theme="dark"] .text-blue-700 { color: #93c5fd; }
+[data-theme="dark"] .text-blue-800 { color: #bfdbfe; }
+[data-theme="dark"] .border-blue-200 { border-color: #1e3a8a; }
+[data-theme="dark"] .border-blue-300 { border-color: #1e40af; }
+
+/* ---- emerald 族(9 条;2026-08-23 收口批补 border-500) ---- */
+[data-theme="dark"] .bg-emerald-50 { background-color: #022c22; }
+[data-theme="dark"] .bg-emerald-100 { background-color: #064e3b; }
+[data-theme="dark"] .text-emerald-500 { color: #34d399; }
+[data-theme="dark"] .text-emerald-600 { color: #6ee7b7; }
+[data-theme="dark"] .text-emerald-700 { color: #6ee7b7; }
+[data-theme="dark"] .text-emerald-800 { color: #a7f3d0; }
+[data-theme="dark"] .border-emerald-200 { border-color: #064e3b; }
+[data-theme="dark"] .border-emerald-300 { border-color: #065f46; }
+/* border-500 强边框档→emerald-300(2026-08-23 收口批补) */
+[data-theme="dark"] .border-emerald-500 { border-color: #6ee7b7; }
+
+/* ---- amber 族(12 条;2026-08-23 收口批补 text-900、border-400、hover: 前缀类) ---- */
+[data-theme="dark"] .bg-amber-50 { background-color: #451a03; }
+[data-theme="dark"] .bg-amber-100 { background-color: #78350f; }
+[data-theme="dark"] .text-amber-500 { color: #fbbf24; }
+[data-theme="dark"] .text-amber-600 { color: #fcd34d; }
+[data-theme="dark"] .text-amber-700 { color: #fcd34d; }
+[data-theme="dark"] .text-amber-800 { color: #fde68a; }
+[data-theme="dark"] .text-amber-900 { color: #fef3c7; }
+[data-theme="dark"] .border-amber-200 { border-color: #78350f; }
+[data-theme="dark"] .border-amber-300 { border-color: #92400e; }
+/* border-400 强边框档→amber-300 */
+[data-theme="dark"] .border-amber-400 { border-color: #fcd34d; }
+/* hover: 前缀生成独立类名,须按实际类名转义单独覆盖(特异度 (0,3,0)) */
+[data-theme="dark"] .hover\:bg-amber-50:hover { background-color: #451a03; }
+[data-theme="dark"] .hover\:bg-amber-100:hover { background-color: #78350f; }
+
+/* ---- yellow 族(8 条;2026-08-23 收口批补 bg-200、border-200) ---- */
+[data-theme="dark"] .bg-yellow-50 { background-color: #1a2e05; }
+[data-theme="dark"] .bg-yellow-100 { background-color: #713f12; }
+[data-theme="dark"] .bg-yellow-200 { background-color: #854d0e; }
+[data-theme="dark"] .text-yellow-400 { color: #fde047; }
+[data-theme="dark"] .text-yellow-500 { color: #facc15; }
+[data-theme="dark"] .text-yellow-700 { color: #fde047; }
+[data-theme="dark"] .text-yellow-800 { color: #fef08a; }
+[data-theme="dark"] .border-yellow-200 { border-color: #713f12; }
+
+/* ---- green 族(8 条) ---- */
+[data-theme="dark"] .bg-green-50 { background-color: #002e17; }
+[data-theme="dark"] .bg-green-100 { background-color: #14532d; }
+[data-theme="dark"] .text-green-500 { color: #4ade80; }
+[data-theme="dark"] .text-green-600 { color: #86efac; }
+[data-theme="dark"] .text-green-700 { color: #86efac; }
+[data-theme="dark"] .text-green-800 { color: #bbf7d0; }
+[data-theme="dark"] .border-green-200 { border-color: #14532d; }
+[data-theme="dark"] .border-green-300 { border-color: #166534; }
+
+/* ---- orange 族(7 条;2026-08-23 收口批补 lib/daemon.ts 徽章 bg-100/text-800) ---- */
+[data-theme="dark"] .bg-orange-50 { background-color: #431407; }
+[data-theme="dark"] .bg-orange-100 { background-color: #7c2d12; }
+[data-theme="dark"] .text-orange-500 { color: #fb923c; }
+[data-theme="dark"] .text-orange-600 { color: #fdba74; }
+[data-theme="dark"] .text-orange-700 { color: #fdba74; }
+[data-theme="dark"] .text-orange-800 { color: #fed7aa; }
+[data-theme="dark"] .border-orange-200 { border-color: #7c2d12; }
+
+/* ---- cyan 族(6 条;2026-08-23 收口批补 lib/daemon.ts 徽章 text-800) ---- */
+[data-theme="dark"] .bg-cyan-50 { background-color: #083344; }
+[data-theme="dark"] .bg-cyan-100 { background-color: #164e63; }
+[data-theme="dark"] .text-cyan-600 { color: #67e8f9; }
+[data-theme="dark"] .text-cyan-700 { color: #67e8f9; }
+[data-theme="dark"] .text-cyan-800 { color: #a5f3fc; }
+[data-theme="dark"] .border-cyan-200 { border-color: #164e63; }
+
+/* ---- 斜杠透明度变体(21 条,D-007@v1 增补,来源变更 2026-08-23-frontend-dark-theme) ----
+   - 覆盖集=frontend/src grep -rhoE 实际命中清单;已全量覆盖(复核于本批:
+     补齐 bg-amber-50/95、bg-blue-50/30|40|60|70、bg-emerald-50/30、bg-red-50/40,
+     及 hover:/dark: 前缀生成的独立类名(hover\:bg-blue-50\/70、
+     hover\:bg-emerald-50\/60、dark\:bg-yellow-900\/40)与登录页 bg-cyan-100/50;
+     唯一例外:BrandPanel 固定深色品牌渐变(from-brand-700 via-brand-800 to-
+     slate-950,全主题恒深)上的 bg-cyan-400/25、bg-cyan-500/15 装饰光斑按
+     design §5.3 品牌区保留原样,非 dark 残留,不属覆盖范围)
+   - 写法:类名中的斜杠需 CSS 转义(\/);取值用 color-mix(in srgb, <暗档 hex>
+     <原透明度>%, transparent) 保持原透明度语义;档位映射沿用上方覆盖层规则
+     (bg 50→950、text 500→400/600→300、border 200→900/300→800),
+     border-amber-500 属强边框档→amber-300 */
+
+/* text-red-600/70 → red-300 @70% */
+[data-theme="dark"] .text-red-600\/70 { color: color-mix(in srgb, #fca5a5 70%, transparent); }
+/* text-red-600/80 → red-300 @80% */
+[data-theme="dark"] .text-red-600\/80 { color: color-mix(in srgb, #fca5a5 80%, transparent); }
+/* text-red-500/70 → red-400 @70% */
+[data-theme="dark"] .text-red-500\/70 { color: color-mix(in srgb, #f87171 70%, transparent); }
+/* bg-amber-50/60 → amber-950 @60% */
+[data-theme="dark"] .bg-amber-50\/60 { background-color: color-mix(in srgb, #451a03 60%, transparent); }
+/* bg-amber-50/40 → amber-950 @40% */
+[data-theme="dark"] .bg-amber-50\/40 { background-color: color-mix(in srgb, #451a03 40%, transparent); }
+/* bg-red-50/60 → red-950 @60% */
+[data-theme="dark"] .bg-red-50\/60 { background-color: color-mix(in srgb, #450a0a 60%, transparent); }
+/* bg-emerald-50/60 → emerald-950 @60% */
+[data-theme="dark"] .bg-emerald-50\/60 { background-color: color-mix(in srgb, #022c22 60%, transparent); }
+/* border-amber-500/40 → amber-300(强边框档) @40% */
+[data-theme="dark"] .border-amber-500\/40 { border-color: color-mix(in srgb, #fcd34d 40%, transparent); }
+/* border-blue-200/60 → blue-900 @60% */
+[data-theme="dark"] .border-blue-200\/60 { border-color: color-mix(in srgb, #1e3a8a 60%, transparent); }
+/* border-amber-300/50 → amber-800 @50% */
+[data-theme="dark"] .border-amber-300\/50 { border-color: color-mix(in srgb, #92400e 50%, transparent); }
+/* bg-amber-50/95 → amber-950 @95% */
+[data-theme="dark"] .bg-amber-50\/95 { background-color: color-mix(in srgb, #451a03 95%, transparent); }
+/* bg-blue-50/30 → blue-950 @30% */
+[data-theme="dark"] .bg-blue-50\/30 { background-color: color-mix(in srgb, #172554 30%, transparent); }
+/* bg-blue-50/40 → blue-950 @40% */
+[data-theme="dark"] .bg-blue-50\/40 { background-color: color-mix(in srgb, #172554 40%, transparent); }
+/* bg-blue-50/60 → blue-950 @60% */
+[data-theme="dark"] .bg-blue-50\/60 { background-color: color-mix(in srgb, #172554 60%, transparent); }
+/* bg-blue-50/70 → blue-950 @70%(当前实际使用形态为 hover: 前缀,见下方收尾条目) */
+[data-theme="dark"] .bg-blue-50\/70 { background-color: color-mix(in srgb, #172554 70%, transparent); }
+/* bg-emerald-50/30 → emerald-950 @30% */
+[data-theme="dark"] .bg-emerald-50\/30 { background-color: color-mix(in srgb, #022c22 30%, transparent); }
+/* bg-red-50/40 → red-950 @40% */
+[data-theme="dark"] .bg-red-50\/40 { background-color: color-mix(in srgb, #450a0a 40%, transparent); }
+
+/* ---- 同批复核收尾(前缀生成类名与登录页残留,选择器按实际类名转义) ---- */
+/* hover:bg-blue-50/70 → blue-950 @70%(hover: 前缀生成独立类名 hover\:bg-blue-50\/70,
+   普通 .bg-blue-50\/70 选择器匹配不到须单独覆盖;agent-log-viewer 行底 hover 态,
+   特异度 (0,3,0) 胜过 tailwind 工具类 (0,2,0)) */
+[data-theme="dark"] .hover\:bg-blue-50\/70:hover { background-color: color-mix(in srgb, #172554 70%, transparent); }
+/* hover:bg-emerald-50/60 → emerald-950 @60%(同上,hover: 前缀独立类名单独覆盖) */
+[data-theme="dark"] .hover\:bg-emerald-50\/60:hover { background-color: color-mix(in srgb, #022c22 60%, transparent); }
+/* bg-cyan-100/50 → cyan-900 @50%(登录页表单区装饰光晕;同位兄弟光斑走
+   var(--color-brand-100) 已随 dark 翻深,此条按映射 bg 100→900 对齐消除浅色残留) */
+[data-theme="dark"] .bg-cyan-100\/50 { background-color: color-mix(in srgb, #164e63 50%, transparent); }
+/* dark:bg-yellow-900/40 → yellow-900 @40%(change-step-badge;darkMode=["class"] 且
+   全站从不挂 .dark 类,该 tailwind dark: 变体恒不生效,按原意补 [data-theme] 版;
+   与基础类 .bg-yellow-100 覆盖同为 (0,2,0),本条源码序在后胜出) */
+[data-theme="dark"] .dark\:bg-yellow-900\/40 { background-color: color-mix(in srgb, #713f12 40%, transparent); }
+
+/* ---- 扩展色族(zinc/violet/indigo/sky/teal/rose/purple/pink/fuchsia/lime,
+   88 条,D-007@v1 收口批,来源变更 2026-08-23-frontend-dark-theme) ----
+   - 覆盖集=frontend/src grep -rhoE(--include=*.tsx/*.ts,注释剔除)实际命中
+     清单,非全阶;每族一组,斜杠透明度与 hover: 前缀变体就地编入所属族;
+   - 映射规则沿用上方覆盖层,并按色阶对称翻转补档(themes.ts dark 品牌阶
+     同款先例,50↔950、100↔900、200↔800、300↔700、400↔600):
+     bg 50→950 / 100→900 / 200→800;
+     border 100→900 / 200→900 / 300→800 / 400 与 500→300(强边框);
+     text 500→400 / 600 与 700→300 / 800→200 / 900→100 / 950→50;
+     斜杠透明度 color-mix 保原透明度;hover: 前缀生成类名(hover\:xxx)须
+     按实际类名转义单独覆盖,特异度 (0,3,0) 胜过 tailwind 工具类 (0,2,0);
+   - 有意豁免清单见本小节末注释(实心 bg-*-500 状态实色、实心状态点、
+     登录页装饰光斑、text-300/400 浅亮档),均为非 dark 残留 */
+
+/* ---- zinc 族(21 条;灰阶中性族,text-900/950 深灰标题按对称翻转
+   900→100、950→50,否则暗底近黑不可读) ---- */
+[data-theme="dark"] .bg-zinc-50 { background-color: #09090b; }
+[data-theme="dark"] .bg-zinc-100 { background-color: #18181b; }
+[data-theme="dark"] .bg-zinc-200 { background-color: #27272a; }
+[data-theme="dark"] .text-zinc-500 { color: #a1a1aa; }
+[data-theme="dark"] .text-zinc-600 { color: #d4d4d8; }
+[data-theme="dark"] .text-zinc-700 { color: #d4d4d8; }
+[data-theme="dark"] .text-zinc-800 { color: #e4e4e7; }
+[data-theme="dark"] .text-zinc-900 { color: #f4f4f5; }
+[data-theme="dark"] .text-zinc-950 { color: #fafafa; }
+[data-theme="dark"] .border-zinc-100 { border-color: #18181b; }
+[data-theme="dark"] .border-zinc-200 { border-color: #18181b; }
+[data-theme="dark"] .border-zinc-300 { border-color: #27272a; }
+/* 斜杠透明度:zinc-50/70→950@70%、zinc-100/60→900@60%、zinc-200/70→800@70% */
+[data-theme="dark"] .bg-zinc-50\/70 { background-color: color-mix(in srgb, #09090b 70%, transparent); }
+[data-theme="dark"] .bg-zinc-100\/60 { background-color: color-mix(in srgb, #18181b 60%, transparent); }
+[data-theme="dark"] .bg-zinc-200\/70 { background-color: color-mix(in srgb, #27272a 70%, transparent); }
+/* hover: 前缀独立类名单独覆盖 */
+[data-theme="dark"] .hover\:bg-zinc-100:hover { background-color: #18181b; }
+[data-theme="dark"] .hover\:bg-zinc-100\/60:hover { background-color: color-mix(in srgb, #18181b 60%, transparent); }
+[data-theme="dark"] .hover\:text-zinc-800:hover { color: #e4e4e7; }
+[data-theme="dark"] .hover\:text-zinc-900:hover { color: #f4f4f5; }
+[data-theme="dark"] .hover\:text-zinc-950:hover { color: #fafafa; }
+/* divide: 变体(QA 验收 gap 收口,原类名 divide-zinc-100,来源变更
+   2026-08-23-frontend-dark-theme D-007@v1):tailwind divide 工具类不生成
+   .divide-zinc-100 自描述边框,而是子选择器形态 > :not([hidden]) ~ :not([hidden]),
+   普通 .border-zinc-100 覆盖匹配不到,须按该生成形态单独补;
+   映射沿用 border 100→900(zinc-100 → zinc-900 #18181b) */
+[data-theme="dark"] .divide-zinc-100 > :not([hidden]) ~ :not([hidden]) { border-color: #18181b; }
+
+/* ---- violet 族(15 条;violet 阶=brand 阶,取值与 themes.ts 暗色翻转档一致) ---- */
+[data-theme="dark"] .bg-violet-50 { background-color: #2e1065; }
+[data-theme="dark"] .bg-violet-100 { background-color: #4c1d95; }
+[data-theme="dark"] .text-violet-500 { color: #a78bfa; }
+[data-theme="dark"] .text-violet-600 { color: #c4b5fd; }
+[data-theme="dark"] .text-violet-700 { color: #c4b5fd; }
+[data-theme="dark"] .border-violet-200 { border-color: #4c1d95; }
+[data-theme="dark"] .border-violet-300 { border-color: #5b21b6; }
+/* 斜杠透明度:一律 violet-950 按原透明度混合 */
+[data-theme="dark"] .bg-violet-50\/20 { background-color: color-mix(in srgb, #2e1065 20%, transparent); }
+[data-theme="dark"] .bg-violet-50\/40 { background-color: color-mix(in srgb, #2e1065 40%, transparent); }
+[data-theme="dark"] .bg-violet-50\/50 { background-color: color-mix(in srgb, #2e1065 50%, transparent); }
+[data-theme="dark"] .bg-violet-50\/55 { background-color: color-mix(in srgb, #2e1065 55%, transparent); }
+[data-theme="dark"] .bg-violet-50\/60 { background-color: color-mix(in srgb, #2e1065 60%, transparent); }
+/* hover: 前缀独立类名单独覆盖 */
+[data-theme="dark"] .hover\:bg-violet-50:hover { background-color: #2e1065; }
+[data-theme="dark"] .hover\:bg-violet-100:hover { background-color: #4c1d95; }
+[data-theme="dark"] .hover\:text-violet-700:hover { color: #c4b5fd; }
+
+/* ---- indigo 族(15 条) ---- */
+[data-theme="dark"] .bg-indigo-50 { background-color: #1e1b4b; }
+[data-theme="dark"] .bg-indigo-100 { background-color: #312e81; }
+[data-theme="dark"] .text-indigo-500 { color: #818cf8; }
+[data-theme="dark"] .text-indigo-600 { color: #a5b4fc; }
+[data-theme="dark"] .text-indigo-700 { color: #a5b4fc; }
+[data-theme="dark"] .text-indigo-800 { color: #c7d2fe; }
+[data-theme="dark"] .border-indigo-200 { border-color: #312e81; }
+[data-theme="dark"] .border-indigo-300 { border-color: #3730a3; }
+/* border 400/500 强边框档→indigo-300 */
+[data-theme="dark"] .border-indigo-400 { border-color: #a5b4fc; }
+[data-theme="dark"] .border-indigo-500 { border-color: #a5b4fc; }
+/* 斜杠透明度:一律 indigo-950 按原透明度混合 */
+[data-theme="dark"] .bg-indigo-50\/40 { background-color: color-mix(in srgb, #1e1b4b 40%, transparent); }
+[data-theme="dark"] .bg-indigo-50\/60 { background-color: color-mix(in srgb, #1e1b4b 60%, transparent); }
+[data-theme="dark"] .bg-indigo-50\/95 { background-color: color-mix(in srgb, #1e1b4b 95%, transparent); }
+/* hover: 前缀独立类名单独覆盖 */
+[data-theme="dark"] .hover\:bg-indigo-50\/40:hover { background-color: color-mix(in srgb, #1e1b4b 40%, transparent); }
+[data-theme="dark"] .hover\:border-indigo-300:hover { border-color: #3730a3; }
+
+/* ---- sky 族(8 条) ---- */
+[data-theme="dark"] .bg-sky-50 { background-color: #082f49; }
+[data-theme="dark"] .text-sky-500 { color: #38bdf8; }
+[data-theme="dark"] .text-sky-600 { color: #7dd3fc; }
+[data-theme="dark"] .text-sky-700 { color: #7dd3fc; }
+[data-theme="dark"] .border-sky-200 { border-color: #0c4a6e; }
+/* 斜杠透明度:一律 sky-950 按原透明度混合 */
+[data-theme="dark"] .bg-sky-50\/30 { background-color: color-mix(in srgb, #082f49 30%, transparent); }
+[data-theme="dark"] .bg-sky-50\/60 { background-color: color-mix(in srgb, #082f49 60%, transparent); }
+/* hover: 前缀独立类名单独覆盖 */
+[data-theme="dark"] .hover\:bg-sky-50\/60:hover { background-color: color-mix(in srgb, #082f49 60%, transparent); }
+
+/* ---- teal 族(6 条) ---- */
+[data-theme="dark"] .bg-teal-50 { background-color: #042f2e; }
+[data-theme="dark"] .bg-teal-100 { background-color: #134e4a; }
+[data-theme="dark"] .text-teal-700 { color: #5eead4; }
+[data-theme="dark"] .text-teal-800 { color: #99f6e4; }
+[data-theme="dark"] .border-teal-200 { border-color: #134e4a; }
+[data-theme="dark"] .border-teal-300 { border-color: #115e59; }
+
+/* ---- rose 族(5 条) ---- */
+[data-theme="dark"] .bg-rose-50 { background-color: #4c0519; }
+[data-theme="dark"] .text-rose-500 { color: #fb7185; }
+[data-theme="dark"] .text-rose-600 { color: #fda4af; }
+[data-theme="dark"] .text-rose-700 { color: #fda4af; }
+[data-theme="dark"] .border-rose-200 { border-color: #881337; }
+
+/* ---- purple 族(5 条) ---- */
+[data-theme="dark"] .bg-purple-50 { background-color: #3b0764; }
+[data-theme="dark"] .bg-purple-100 { background-color: #581c87; }
+[data-theme="dark"] .text-purple-700 { color: #d8b4fe; }
+[data-theme="dark"] .text-purple-800 { color: #e9d5ff; }
+[data-theme="dark"] .border-purple-200 { border-color: #581c87; }
+
+/* ---- pink 族(7 条) ---- */
+[data-theme="dark"] .bg-pink-50 { background-color: #500724; }
+[data-theme="dark"] .bg-pink-100 { background-color: #831843; }
+[data-theme="dark"] .text-pink-500 { color: #f472b6; }
+[data-theme="dark"] .text-pink-600 { color: #f9a8d4; }
+[data-theme="dark"] .text-pink-700 { color: #f9a8d4; }
+[data-theme="dark"] .text-pink-800 { color: #fbcfe8; }
+[data-theme="dark"] .border-pink-200 { border-color: #831843; }
+
+/* ---- fuchsia 族(3 条) ---- */
+[data-theme="dark"] .bg-fuchsia-50 { background-color: #4a044e; }
+[data-theme="dark"] .text-fuchsia-700 { color: #f0abfc; }
+[data-theme="dark"] .border-fuchsia-200 { border-color: #701a75; }
+
+/* ---- lime 族(3 条) ---- */
+[data-theme="dark"] .bg-lime-50 { background-color: #1a2e05; }
+[data-theme="dark"] .text-lime-700 { color: #bef264; }
+[data-theme="dark"] .border-lime-200 { border-color: #365314; }
+
+/* ---- 扩展色族批有意豁免清单(非 dark 残留,留档备查) ----
+   - 实心 bg-*-500 及更深实色状态/品牌块:bg-red-500/600(hover:bg-red-700 同)、
+     bg-amber-500、bg-yellow-500、bg-green-500、bg-orange-500、
+     bg-emerald-500/600、bg-cyan-500、bg-violet-500、bg-indigo-500、bg-sky-500、
+     bg-teal-500、bg-rose-500、bg-pink-500、bg-lime-500 —— 实色在暗底对比
+     仍足,按既有口径不动,仅报告;
+   - bg-amber-400 / bg-emerald-400:实心小状态点(workspace-switcher 热点、
+     agent-log 在线 ping 点),亮实色暗底可见,不动;
+   - bg-indigo-400/20:登录页 aria-hidden 装饰光斑(blur-3xl,与已豁免
+     bg-cyan-500/15 同组非信息元素),20% 透明暗底呈弱紫光,无浅色残留;
+   - text-zinc-300/400、text-violet-400、placeholder:text-zinc-400、
+     text-cyan-200:浅亮档文字暗底本就可读,按映射规则 300/400 档不动;
+   - dark:text-yellow-400:darkMode=["class"] 且全站不挂 .dark,tailwind 变体
+     恒不生效;基础类 text-yellow-500 已映射为 #facc15(=yellow-400 值),
+     与该变体本意一致,无须另补 */
+
 /* task-11 通用动效 utility(组件层 SectionCard 已自带 hover-lift,此类供其它自定义容器按需挂载;
    不覆盖 antd 原生交互态——antd Card/Button 自身样式优先级更高,此 utility 仅作用于显式引用处)。 */
 @layer components {
@@ -324,15 +726,19 @@
 }
 
 /* DataTable 弱斑马纹(原型 .dt tbody 偶行 #FDFCFF):
-   brand-50 33% 混白近似,两主题自动;hover 底色交还 antd rowHoverBg(brand-50) */
+   brand-50 33% 混 --color-card(2026-08-23-frontend-dark-theme 硬编码修正:
+   浅色两主题 --color-card 均为纯白,与原混 #ffffff 等值零回归;dark 混深底自动得暗紫纹);
+   hover 底色交还 antd rowHoverBg(brand-50) */
 .sh-data-table .ant-table-tbody > tr:nth-child(even) > td {
-  background: color-mix(in srgb, var(--color-brand-50) 33%, #ffffff);
+  background: color-mix(in srgb, var(--color-brand-50) 33%, var(--color-card));
 }
 .sh-data-table .ant-table-tbody > tr:nth-child(even):hover > td {
   background: transparent;
 }
 
-/* 路由段 loading 骨架(性能优化 2026-07-22,见 (dashboard)/loading.tsx) */
+/* 路由段 loading 骨架(性能优化 2026-07-22,见 (dashboard)/loading.tsx;
+   2026-08-23-frontend-dark-theme:文字色/轨道色改走主题变量,
+   --muted-fg/--color-loading-track 三套块各定义,浅色两主题取原硬编码等值零变化) */
 .silly-route-loading {
   display: flex;
   flex-direction: column;
@@ -340,14 +746,14 @@
   justify-content: center;
   min-height: 40vh;
   gap: 12px;
-  color: var(--muted-fg, #8c8c8c);
+  color: var(--muted-fg);
   font-size: 14px;
 }
 .silly-route-loading__spinner {
   width: 28px;
   height: 28px;
   border-radius: 50%;
-  border: 3px solid rgba(0, 0, 0, 0.08);
+  border: 3px solid var(--color-loading-track);
   border-top-color: var(--color-primary);
   animation: silly-loading-spin 0.8s linear infinite;
 }

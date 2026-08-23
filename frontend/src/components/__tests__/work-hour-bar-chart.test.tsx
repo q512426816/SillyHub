@@ -1,11 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 // 直接 import 具体组件文件,绕过 charts/index.ts 的 next/dynamic(ssr:false)
 // (dynamic 在 jsdom 测试环境会一直停在 loading 态)。
 import { WorkHourBarChart } from "@/components/charts/WorkHourBarChart";
+import { useThemeStore } from "@/stores/theme";
 
 describe("WorkHourBarChart", () => {
+  // 组件订阅 useThemeStore(task-09),dark 用例改写 store 后恢复默认主题,
+  // 避免 zustand 单例状态泄漏到其它测试文件。
+  afterEach(() => {
+    useThemeStore.setState({ theme: "ai-native" });
+  });
+
   it("有数据时挂载 echarts 容器,不抛错", () => {
     const { container } = render(
       <WorkHourBarChart
@@ -16,6 +23,14 @@ describe("WorkHourBarChart", () => {
       />,
     );
     // echarts-for-react 渲染根 div 带 class
+    expect(container.querySelector(".echarts-for-react")).not.toBeNull();
+  });
+
+  it("dark 主题下订阅 useThemeStore 正常渲染(dark 文字/分割线注入)", () => {
+    useThemeStore.setState({ theme: "dark" });
+    const { container } = render(
+      <WorkHourBarChart rows={[{ name: "alice", total_hours: 10 }]} />,
+    );
     expect(container.querySelector(".echarts-for-react")).not.toBeNull();
   });
 

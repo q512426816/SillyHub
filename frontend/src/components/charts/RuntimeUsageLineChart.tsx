@@ -15,12 +15,17 @@
  * 删除本文件内的局部 `RuntimeUsagePoint` 定义,改为
  * `import type { RuntimeUsagePoint } from "@/lib/daemon"`(由 task-13/14 统一迁移)。
  * 当前 task-11 未实现,本组件先内联最小类型保证自洽可独立验收(task-12 allowed_paths 仅本文件)。
+ * - 主题感知 (task-09):订阅 useThemeStore,legend 文字色(slate-600)与双系列色
+ *   (输入/输出经 chartColors(theme))按当前主题取值注入,切换主题即时重渲染;
+ *   坐标轴 label/分割线本就隐藏,无需注入。
  */
 import { useMemo } from "react";
 import ReactECharts from "echarts-for-react";
 import type { EChartsOption } from "echarts";
 
-import { CHART_COLORS } from "@/lib/ppm/aggregations";
+import { chartColors } from "@/lib/ppm/aggregations";
+import { themes } from "@/styles";
+import { useThemeStore } from "@/stores/theme";
 
 /**
  * 时间序列单点(20 分钟桶 1d / 小时桶 7d / 日桶 30d)。
@@ -71,7 +76,11 @@ export function RuntimeUsageLineChart({
   height = 120,
   loading = false,
 }: RuntimeUsageLineChartProps) {
+  const theme = useThemeStore((s) => s.theme);
   const option = useMemo<EChartsOption>(() => {
+    // 取色全部由 theme 派生(查表确定性映射),memo 依赖仅 theme 即可稳定。
+    const textColor = themes[theme].color.slate[600];
+    const colors = chartColors(theme);
     const xs = points.map((p) => p.ts);
     const inputs = points.map((p) => p.input_tokens);
     const outputs = points.map((p) => p.output_tokens);
@@ -95,7 +104,11 @@ export function RuntimeUsageLineChart({
           return [header, ...lines].join("<br/>");
         },
       },
-      legend: { data: ["输入", "输出"], top: 0, textStyle: { fontSize: 10 } },
+      legend: {
+        data: ["输入", "输出"],
+        top: 0,
+        textStyle: { fontSize: 10, color: textColor },
+      },
       grid: { left: 8, right: 8, top: 24, bottom: 8, containLabel: false },
       xAxis: {
         type: "category",
@@ -118,7 +131,7 @@ export function RuntimeUsageLineChart({
           smooth: true,
           showSymbol: false,
           lineStyle: { width: 2 },
-          itemStyle: { color: CHART_COLORS.user },
+          itemStyle: { color: colors.user },
           areaStyle: { opacity: 0.08 },
         },
         {
@@ -128,12 +141,12 @@ export function RuntimeUsageLineChart({
           smooth: true,
           showSymbol: false,
           lineStyle: { width: 2 },
-          itemStyle: { color: CHART_COLORS.project },
+          itemStyle: { color: colors.project },
           areaStyle: { opacity: 0.08 },
         },
       ],
     };
-  }, [points]);
+  }, [points, theme]);
 
   if (loading) {
     return (

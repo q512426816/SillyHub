@@ -622,11 +622,11 @@ describe("SessionPanel attach 历史 whoLine + usage 注入（gap-fix）", () =>
     });
 
     const who = await screen.findByLabelText("轮次配置快照");
-    expect(who).toHaveTextContent("📋 知识经理");
+    expect(who).toHaveTextContent("知识经理");
     // agentName 兜底链首取会话 config_snapshot.agent_name
     expect(who).toHaveTextContent("Claude Code");
     // llm_provider_id 对照供应商列表名
-    expect(who).toHaveTextContent("☁ GLM 中转");
+    expect(who).toHaveTextContent("GLM 中转");
 
     // 历史 usage 回填：ctx-ring 累计含历史轮（无分母 → 直显累计值 1.5k）
     const ring = screen.getByTestId("ctx-ring");
@@ -650,8 +650,8 @@ describe("SessionPanel attach 历史 whoLine + usage 注入（gap-fix）", () =>
     );
 
     const who = await screen.findByLabelText("轮次配置快照");
-    expect(who).toHaveTextContent("📋 未指定");
-    expect(who).toHaveTextContent("☁ 本机默认");
+    expect(who).toHaveTextContent("未指定");
+    expect(who).toHaveTextContent("本机默认");
   });
 
   it("runs 快照拉取失败 → whoLine 不注入、消息流照常渲染（容错零回归）", async () => {

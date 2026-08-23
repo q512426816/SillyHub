@@ -147,7 +147,7 @@ export default function LoginPage() {
           </div>
 
           {/* 玻璃拟态登录卡(阴影取 brand-600 18% 透明度,blue 主题下与重构前取值一致) */}
-          <div className="rounded-2xl border border-white/60 bg-white/80 shadow-[0_8px_40px_-12px_color-mix(in_srgb,var(--color-brand-600)_18%,transparent)] backdrop-blur-xl">
+          <div className="rounded-2xl border border-white/60 bg-card shadow-[0_8px_40px_-12px_color-mix(in_srgb,var(--color-brand-600)_18%,transparent)] backdrop-blur-xl">
             <div className="p-6 sm:p-9">
               <div className="mb-7">
                 <h1 className="text-2xl font-bold tracking-tight text-slate-900">

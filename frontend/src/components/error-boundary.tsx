@@ -62,7 +62,7 @@ function DefaultFallback({ error, onReset }: { error: Error; onReset: () => void
       <button
         type="button"
         onClick={onReset}
-        className="mt-1 rounded border border-red-300 bg-white px-1.5 py-0.5 text-[10px] text-red-700 hover:bg-red-100"
+        className="mt-1 rounded border border-red-300 bg-card px-1.5 py-0.5 text-[10px] text-red-700 hover:bg-red-100"
       >
         重试
       </button>

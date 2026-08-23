@@ -130,7 +130,7 @@ function TokenUsageBadge({
   return (
     <span
       data-testid="token-usage-badge"
-      className="inline-flex items-center gap-1 rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] font-mono text-zinc-600"
+      className="inline-flex items-center gap-1 rounded border border-zinc-200 bg-card px-1.5 py-0.5 text-[10px] font-mono text-zinc-600"
     >
       <span title="输入词元">↓ {formatTokenCount(input)}</span>
       <span className="text-zinc-300">|</span>

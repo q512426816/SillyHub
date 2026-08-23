@@ -47,13 +47,13 @@ export function ConfirmCaptcha({ onVerified }: ConfirmCaptchaProps) {
     }
     if (status === "verifying") {
       return (
-        <span className="flex h-5 w-5 items-center justify-center rounded border border-slate-300 bg-white">
+        <span className="flex h-5 w-5 items-center justify-center rounded border border-slate-300 bg-card">
           <Loader2 className="h-3.5 w-3.5 animate-spin text-slate-400" />
         </span>
       );
     }
     return (
-      <span className="flex h-5 w-5 items-center justify-center rounded border border-slate-300 bg-white transition-colors group-hover:border-brand-500">
+      <span className="flex h-5 w-5 items-center justify-center rounded border border-slate-300 bg-card transition-colors group-hover:border-brand-500">
         <Shield className="h-3.5 w-3.5 text-slate-300 transition-colors group-hover:text-brand-500" />
       </span>
     );
