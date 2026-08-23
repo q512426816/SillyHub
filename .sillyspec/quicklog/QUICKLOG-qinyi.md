@@ -307,3 +307,15 @@
 方案：file_artifacts.py 新增 _check_session_permission：上传者==AgentSession.user_id 即放行，非归属人回退 workspace 锚复核；POST/GET 会话分支接入；移除 require_permission_any 入口门；worker(run_id) 锚链不变；agent.md 同步
 结果：test_file_artifacts 23 全绿（含 5 新用例）+相邻 file/mission 44 绿+ruff 过；真实会话 c5b97325 端到端 201/200/200；连带修 dev 存储（MinIO 容器+127.0.0.1 端点，坑记录 docs/sillyspec/）
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：docs/sillyspec/2026-08-23-dev-minio-localhost-put-intercepted.md
+
+## ql-20260824-001-fac3 | 2026-08-24 00:49:40 | CI 修复——sessions whoLine 断言滞后 emoji 退役 + backend ruff 格式 + daemon CI 超时 flaky 加固
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（whoLine 断言去已退役 emoji 前缀）
+- backend/app/modules/agent/tests/test_context_builder.py（ruff format 引号风格与行合并）
+- sillyhub-daemon/vitest.config.ts（testTimeout 60s + CI maxForks 4 治超时 flaky）
+需求：CI 修复——sessions whoLine 断言滞后 emoji 退役 + backend ruff 格式 + daemon CI 超时 flaky 加固
+根因：frontend 连续 3 红：6e2a239a 有意退役 whoLine emoji 改 lucide 图标但 page.test.tsx 4 处断言未跟进；backend 红：test_context_builder.py 落盘未跑 ruff format；daemon 2 红：2-4 核 runner 上 maxForks 8 超订阅饿死重 I/O 用例过 30s 超时（非断言失败，下轮自愈）
+方案：page.test.tsx 4 行断言去 📋/☁ 前缀只留名称；ruff format 该文件（引号风格+行合并无语义变化）；vitest.config.ts testTimeout 30s→60s + CI 下 maxForks 8→4，并修正原注释「CI ≤8 核不受影响」错误判断
+结果：frontend sessions page.test.tsx 18/18 绿（原 2 红）；backend ruff format --check 941 文件全过 + ruff check 干净 + pytest 26 通过；daemon 两曾超时文件 88/88 绿 + tsc 干净
