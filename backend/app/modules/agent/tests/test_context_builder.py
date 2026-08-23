@@ -582,3 +582,252 @@ def test_render_bundle_no_referenced_workspaces() -> None:
     )
     md = render_bundle_to_claude_md(bundle)
     assert "## Referenced Workspaces" not in md
+
+
+# ---------------------------------------------------------------------------
+# build_scan_bundle — 三策略模板（2026-08-23-repo-native-spec-backfill task-01）
+# ---------------------------------------------------------------------------
+
+SCAN_WS_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
+SCAN_RUN_ID = uuid.UUID("33333333-3333-3333-3333-333333333333")
+SCAN_SPEC_ROOT = "/srv/sillyhub/specs/ws-scan"
+SCAN_RUNTIME_ROOT = "/srv/sillyhub/specs/ws-scan/runtime"
+SCAN_ROOT_PATH = "/home/dev/my-project"
+
+# 改码前（快照先行）跑出的 platform 模板 step_prompt 固定字符串——
+# platform-managed / repo-mirrored / 策略读取回退 三种场景都必须与之逐字节一致（D-002@v1 / FR-5）。
+_PLATFORM_MODE_STEP_PROMPT_SNAPSHOT = (
+    "你是一个项目分析 agent。请对项目目录 /home/dev/my-project 执行 sillyspec scan。\n\n"
+    "## ⚠️ 命令模板（严格复制，不要省略任何参数）\n\n"
+    "**第 1 步 — 启动 scan（仅一次，必须包含全部平台参数）：**\n"
+    "```\n"
+    "sillyspec run scan --dir \"/home/dev/my-project\""
+    " --spec-root ~/.sillyhub/daemon/specs/22222222-2222-2222-2222-222222222222"
+    " --runtime-root ~/.sillyhub/daemon/specs/22222222-2222-2222-2222-222222222222/runtime"
+    " --workspace-id 22222222-2222-2222-2222-222222222222"
+    " --scan-run-id 33333333-3333-3333-3333-333333333333\n"
+    "```\n\n"
+    "**第 2-N 步 — 逐步推进（每次完成后执行）：**\n"
+    "```\n"
+    "sillyspec run scan --done --change default --dir \"/home/dev/my-project\""
+    " --input \"步骤描述\" --output \"步骤摘要\"\n"
+    "```\n\n"
+    "## 执行流程\n"
+    "1. 执行 scan 启动命令（包含全部平台参数，文档输出到"
+    " ~/.sillyhub/daemon/specs/22222222-2222-2222-2222-222222222222）\n"
+    "2. CLI 输出 step prompt → 执行扫描操作 → 用 done 命令推进\n"
+    "3. 重复 step 2 直到 10/10 步全部完成\n\n"
+    "## 规则\n"
+    "- --dir 必须指向源码目录 /home/dev/my-project（不是 spec_root）\n"
+    "- 对 /home/dev/my-project 目录中的源码只读，不要修改项目文件\n"
+    "- 文档生成在 ~/.sillyhub/daemon/specs/22222222-2222-2222-2222-222222222222/ 下，"
+    "源码目录保持只读，不会创建 .sillyspec/\n"
+    "- ⚠️ 平台模式禁止执行 sillyspec init（会在源码目录创建 .sillyspec 并触发源码保护）\n"
+    "- 文档生成在 ~/.sillyhub/daemon/specs/22222222-2222-2222-2222-222222222222/docs/"
+    " 目录下（扁平布局，无 .sillyspec 包裹）\n"
+    "- 启动 scan 命令必须包含 --spec-root/--runtime-root/--workspace-id/--scan-run-id\n"
+    "- done 命令不需要重复平台参数\n"
+    "- 每个步骤必须用 done 完成，不要跳过\n"
+    "- ⚠️ 发现多个潜在子项目（如 frontend + backend 多服务）或扫描策略不明确时，"
+    "**必须调用 `AskUserQuestion` 工具**询问用户决策（提供清晰选项 + 说明），"
+    "调用后会**暂停等待**用户选择；**禁止**用 `sillyspec run scan --wait` 或自行假设。"
+    "用户回答后继续 scan。"
+)
+
+
+async def _seed_scan_workspace(session: AsyncSession) -> None:
+    """Seed the Workspace row required by build_scan_bundle's existence check."""
+    from app.modules.workspace.model import Workspace
+
+    session.add(
+        Workspace(
+            id=SCAN_WS_ID,
+            name="scan-ws",
+            slug="scan-ws",
+            root_path=SCAN_ROOT_PATH,
+            status="active",
+        )
+    )
+    await session.commit()
+
+
+def _mock_spec_strategy(monkeypatch: pytest.MonkeyPatch, strategy: str) -> None:
+    """Patch SpecWorkspaceService.get to return a SpecWorkspace with the given strategy."""
+    from unittest.mock import AsyncMock
+
+    from app.modules.spec_workspace.model import SpecWorkspace
+    from app.modules.spec_workspace.service import SpecWorkspaceService
+
+    spec_ws = SpecWorkspace(
+        id=uuid.uuid4(),
+        workspace_id=SCAN_WS_ID,
+        spec_root=SCAN_SPEC_ROOT,
+        strategy=strategy,
+    )
+    monkeypatch.setattr(SpecWorkspaceService, "get", AsyncMock(return_value=spec_ws))
+
+
+def _mock_spec_get_raises(monkeypatch: pytest.MonkeyPatch, exc: Exception) -> None:
+    from unittest.mock import AsyncMock
+
+    from app.modules.spec_workspace.service import SpecWorkspaceService
+
+    monkeypatch.setattr(SpecWorkspaceService, "get", AsyncMock(side_effect=exc))
+
+
+async def _build_scan_bundle(db_session: AsyncSession) -> AgentSpecBundle:
+    from app.modules.agent.context_builder import build_scan_bundle
+
+    return await build_scan_bundle(
+        db_session,
+        SCAN_WS_ID,
+        SCAN_SPEC_ROOT,
+        SCAN_ROOT_PATH,
+        run_id=SCAN_RUN_ID,
+        runtime_root=SCAN_RUNTIME_ROOT,
+    )
+
+
+def _assert_dual_track_spec_root(bundle: AgentSpecBundle) -> None:
+    """双轨不变：bundle.spec_root 与 platform_metadata.spec_root 均为入参容器路径（D-006）。"""
+    assert bundle.spec_root == SCAN_SPEC_ROOT
+    assert bundle.platform_metadata["spec_root"] == SCAN_SPEC_ROOT
+    assert bundle.platform_metadata["runtime_root"] == SCAN_RUNTIME_ROOT
+    assert bundle.platform_metadata["scan_run_id"] == str(SCAN_RUN_ID)
+
+
+@pytest.mark.asyncio
+async def test_build_scan_bundle_platform_managed_snapshot(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """platform-managed：平台模板与改前快照逐字节一致（D-002@v1 / FR-5）。"""
+    await _seed_scan_workspace(db_session)
+    _mock_spec_strategy(monkeypatch, "platform-managed")
+
+    bundle = await _build_scan_bundle(db_session)
+
+    assert bundle.step_prompt == _PLATFORM_MODE_STEP_PROMPT_SNAPSHOT
+    _assert_dual_track_spec_root(bundle)
+
+
+@pytest.mark.asyncio
+async def test_build_scan_bundle_repo_mirrored_snapshot(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """repo-mirrored：与 platform-managed 同走平台模板，快照逐字节一致（D-002@v1 / FR-5）。"""
+    await _seed_scan_workspace(db_session)
+    _mock_spec_strategy(monkeypatch, "repo-mirrored")
+
+    bundle = await _build_scan_bundle(db_session)
+
+    assert bundle.step_prompt == _PLATFORM_MODE_STEP_PROMPT_SNAPSHOT
+    _assert_dual_track_spec_root(bundle)
+
+
+@pytest.mark.asyncio
+async def test_build_scan_bundle_strategy_read_error_falls_back(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SpecWorkspace 读取异常 → 回退 platform-managed 平台模板。"""
+    from app.core.errors import SpecWorkspaceNotFound
+
+    await _seed_scan_workspace(db_session)
+
+    # 场景 1：行缺失（get 抛 SpecWorkspaceNotFound，真实 DB 无 SpecWorkspace 行）
+    bundle = await _build_scan_bundle(db_session)
+    assert bundle.step_prompt == _PLATFORM_MODE_STEP_PROMPT_SNAPSHOT
+    _assert_dual_track_spec_root(bundle)
+
+    # 场景 2：读取抛其它异常（如 DB 故障）
+    _mock_spec_get_raises(monkeypatch, RuntimeError("db exploded"))
+    bundle2 = await _build_scan_bundle(db_session)
+    assert bundle2.step_prompt == _PLATFORM_MODE_STEP_PROMPT_SNAPSHOT
+    _assert_dual_track_spec_root(bundle2)
+
+    # 场景 3：领域错误 SpecWorkspaceNotFound 显式抛出同样回退
+    _mock_spec_get_raises(
+        monkeypatch, SpecWorkspaceNotFound("未找到该工作区对应的 spec 工作区。")
+    )
+    bundle3 = await _build_scan_bundle(db_session)
+    assert bundle3.step_prompt == _PLATFORM_MODE_STEP_PROMPT_SNAPSHOT
+
+
+@pytest.mark.asyncio
+async def test_build_scan_bundle_missing_workspace_raises(
+    db_session: AsyncSession,
+) -> None:
+    """Workspace 行不存在仍抛 WorkspaceNotFound（既有行为不变）。"""
+    from app.core.errors import WorkspaceNotFound
+    from app.modules.agent.context_builder import build_scan_bundle
+
+    with pytest.raises(WorkspaceNotFound):
+        await build_scan_bundle(
+            db_session,
+            SCAN_WS_ID,
+            SCAN_SPEC_ROOT,
+            SCAN_ROOT_PATH,
+            run_id=SCAN_RUN_ID,
+            runtime_root=SCAN_RUNTIME_ROOT,
+        )
+
+
+@pytest.mark.asyncio
+async def test_build_scan_bundle_repo_native_local_template(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """repo-native（D-001@v1 / FR-1）：本地模板——零平台参数、无 init、本地产物文案。"""
+    await _seed_scan_workspace(db_session)
+    _mock_spec_strategy(monkeypatch, "repo-native")
+
+    bundle = await _build_scan_bundle(db_session)
+    prompt = bundle.step_prompt
+
+    # 启动命令零平台参数（只有 --dir）
+    assert 'sillyspec run scan --dir "/home/dev/my-project"' in prompt
+    for forbidden in ("--spec-root", "--runtime-root", "--workspace-id", "--scan-run-id"):
+        assert forbidden not in prompt
+    # 无 init 步骤
+    assert "sillyspec init" not in prompt
+    assert "初始化" not in prompt
+    # 本地产物文案：文档生成在源码目录 .sillyspec/ 下
+    assert f"文档生成在源码目录 {SCAN_ROOT_PATH}/.sillyspec/ 下" in prompt
+    # CLI 经 local.yaml 平台凭据自动同步，无需手动操作
+    assert "local.yaml" in prompt
+    assert "自动同步" in prompt
+    assert "无需手动操作" in prompt
+    # done 命令与现有相同（不带平台参数）
+    assert (
+        'sillyspec run scan --done --change default --dir "/home/dev/my-project"'
+        ' --input "步骤描述" --output "步骤摘要"' in prompt
+    )
+    # 既有规则沿用：只读 + AskUserQuestion 多子项目门禁
+    assert f"对 {SCAN_ROOT_PATH} 目录中的源码只读" in prompt
+    assert "AskUserQuestion" in prompt
+    # 双轨不变：bundle.spec_root / platform_metadata 仍为入参容器路径（D-006）
+    _assert_dual_track_spec_root(bundle)
+
+
+def test_render_bundle_sillyspec_tool_hint_neutral() -> None:
+    """FR-2：sillyspec 工具提示无 --spec-root 硬编码，改为按会话模板参数执行的中性表述。"""
+    from app.modules.agent.context_builder import render_bundle_to_claude_md
+
+    bundle = AgentSpecBundle(
+        change_summary="Scan workspace project structure",
+        task_key="stage:scan",
+        task_title="Stage dispatch: scan",
+    )
+    md = render_bundle_to_claude_md(bundle)
+
+    assert "sillyspec init --dir <source_root>" in md
+    assert "sillyspec run scan --dir <source_root>" in md
+    # 无 --spec-root 硬编码
+    assert "--spec-root" not in md
+    # 按会话 prompt 模板参数执行；未给平台参数时不自行添加
+    assert "parameters given in the session prompt template" in md
+    assert "do not add any on your own" in md
+    # 不写 .sillyspec 文件直接手写的禁令保留
+    assert "Do NOT write .sillyspec files directly" in md

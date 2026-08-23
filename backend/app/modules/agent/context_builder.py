@@ -389,6 +389,24 @@ async def build_scan_bundle(
     if workspace is None:
         raise WorkspaceNotFound(f"Workspace '{workspace_id}' not found.")
 
+    # Step 1a — 读取 SpecWorkspace.strategy（2026-08-23-repo-native-spec-backfill task-01 / D-001@v1）。
+    # 与 service.py stage dispatch 同款读法（函数内 import + SpecWorkspaceService.get）；
+    # 读取异常 / 行缺失回退 platform-managed（平台模板，行为与改前逐字节一致）。
+    spec_strategy = "platform-managed"
+    try:
+        from app.modules.spec_workspace.service import SpecWorkspaceService
+
+        spec_ws = await SpecWorkspaceService(session).get(workspace_id)
+        if spec_ws and spec_ws.strategy:
+            spec_strategy = spec_ws.strategy
+    except Exception as exc:  # 回退策略：任何读取故障都不阻断 scan 派发
+        spec_strategy = "platform-managed"
+        log.warning(
+            "scan_bundle_strategy_resolve_failed",
+            workspace_id=str(workspace_id),
+            error=str(exc),
+        )
+
     # Step 1b — 推导 runtime_root
     if runtime_root is None:
         runtime_root = str(Path(spec_root) / "runtime")
@@ -411,22 +429,59 @@ async def build_scan_bundle(
     # 平台模式文档写 spec-root，源码目录不需要 .sillyspec，否则触发 sillyspec
     # 源码保护"拒绝删除源码目录的 .sillyspec：检测到真实资产"。
     is_platform_mode = bool(spec_root)
+    # repo-native（D-001@v1，2026-08-23-repo-native-spec-backfill task-01）：源项目
+    # .sillyspec 为唯一真理源，scan 以零平台参数本地模式执行——文档落源码目录
+    # .sillyspec/，CLI 内置 sync 经 local.yaml 平台凭据自动上行平台变更中心。
+    # 无 init 步骤：源项目必有 .sillyspec，且本地 init 残留清理有删 local.yaml
+    # 平台凭据的已知坑（见 git 72f153fb）。
+    is_repo_native = spec_strategy == "repo-native"
     init_cmd: str | None = None
     if not is_platform_mode:
         init_cmd = f'sillyspec init --dir "{root_path}"'
-    scan_start_cmd = (
-        f"sillyspec run scan"
-        f' --dir "{root_path}"'
-        f" --spec-root {host_spec_root}"
-        f" --runtime-root {host_runtime_root}"
-        f" --workspace-id {ws_id}"
-        f" --scan-run-id {run_id_str}"
-    )
+    if is_repo_native:
+        scan_start_cmd = f'sillyspec run scan --dir "{root_path}"'
+    else:
+        scan_start_cmd = (
+            f"sillyspec run scan"
+            f' --dir "{root_path}"'
+            f" --spec-root {host_spec_root}"
+            f" --runtime-root {host_runtime_root}"
+            f" --workspace-id {ws_id}"
+            f" --scan-run-id {run_id_str}"
+        )
     scan_done_cmd = (
         f'sillyspec run scan --done --change default --dir "{root_path}"'
         f' --input "步骤描述" --output "步骤摘要"'
     )
-    if is_platform_mode:
+    if is_repo_native:
+        # repo-native 本地模板（D-001@v1）：零平台参数、无 init；产物落源码目录
+        # .sillyspec/；CLI 经 .sillyspec/local.yaml 平台凭据自动同步，无需手动操作。
+        step_prompt = (
+            f"你是一个项目分析 agent。请对项目目录 {root_path} 执行 sillyspec scan。\n\n"
+            f"## ⚠️ 命令模板（严格复制，不要省略任何参数）\n\n"
+            f"**第 1 步 — 启动 scan（仅一次）：**\n"
+            f"```\n{scan_start_cmd}\n```\n\n"
+            f"**第 2-N 步 — 逐步推进（每次完成后执行）：**\n"
+            f"```\n{scan_done_cmd}\n"
+            f"```\n\n"
+            f"## 执行流程\n"
+            f"1. 执行 scan 启动命令\n"
+            f"2. CLI 输出 step prompt → 执行扫描操作 → 用 done 命令推进\n"
+            f"3. 重复 step 2 直到 10/10 步全部完成\n\n"
+            f"## 规则\n"
+            f"- --dir 必须指向源码目录 {root_path}\n"
+            f"- 启动 scan 命令按模板原样执行，不要自行添加任何平台参数\n"
+            f"- 对 {root_path} 目录中的源码只读，不要修改项目文件（.sillyspec/ 产物除外）\n"
+            f"- 文档生成在源码目录 {root_path}/.sillyspec/ 下（源码 .sillyspec 是唯一真理源）\n"
+            f"- CLI 会经 .sillyspec/local.yaml 中的平台凭据自动同步变更到平台，无需手动操作\n"
+            f"- done 命令照模板执行即可\n"
+            f"- 每个步骤必须用 done 完成，不要跳过\n"
+            f"- ⚠️ 发现多个潜在子项目（如 frontend + backend 多服务）或扫描策略不明确时，"
+            f"**必须调用 `AskUserQuestion` 工具**询问用户决策（提供清晰选项 + 说明），"
+            f"调用后会**暂停等待**用户选择；**禁止**用 `sillyspec run scan --wait` 或自行假设。"
+            f"用户回答后继续 scan。"
+        )
+    elif is_platform_mode:
         step_prompt = (
             f"你是一个项目分析 agent。请对项目目录 {root_path} 执行 sillyspec scan。\n\n"
             f"## ⚠️ 命令模板（严格复制，不要省略任何参数）\n\n"
@@ -518,6 +573,7 @@ async def build_scan_bundle(
         "scan_bundle_built",
         workspace_id=str(workspace_id),
         run_id=str(run_id),
+        spec_strategy=spec_strategy,
         spec_root=bundle.spec_root,
         runtime_root=runtime_root,
         root_path=root_path,
@@ -649,11 +705,17 @@ def render_bundle_to_claude_md(bundle: AgentSpecBundle) -> str:
         lines.append("## Available Tools")
         for tool in bundle.available_tools:
             if tool == "sillyspec":
+                # 2026-08-23-repo-native-spec-backfill task-01 / FR-2：去 --spec-root
+                # 硬编码，改中性表述——按会话 prompt 模板给的参数执行，未给平台参数
+                # 时不自行添加（repo-native 本地模式 scan 不带平台参数）。
                 lines.append(
                     "- **sillyspec**: Use `sillyspec init --dir <source_root>` to"
                     " initialize spec space, then `sillyspec run scan --dir"
-                    " <source_root> --spec-root <spec_root>` to scan."
-                    " Do NOT write .sillyspec files directly — always use the CLI."
+                    " <source_root>` to scan. Run the commands with exactly the"
+                    " parameters given in the session prompt template; when the"
+                    " template provides no platform parameters, do not add any on"
+                    " your own. Do NOT write .sillyspec files directly — always"
+                    " use the CLI."
                 )
             else:
                 lines.append(f"- {tool}")
