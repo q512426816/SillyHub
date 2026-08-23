@@ -102,7 +102,7 @@ tier: independent
 1. 读 entry（含 agent_session 关联）→ 定位 daemon_id：entry.agent_session.runtime→daemon_instance_id 优先；无（pending 未激活）→ `resolve_daemon_instance_for_workspace(entry.workspace_id)`；都无 → 404 中文。
 2. **直连 `send_host_fs_rpc`/`hub.send_rpc`（Grill P2 修正：`HostFsDelegate.read_file` 走 `_via_rpc_or_degrade` 会把离线/远端错静默降级为空串，与错误语义冲突）**：`host_fs.read_file {path}`，超时 30s；daemon 侧整文件 utf8 读（无上限）——**后端按字节截断尾部 262144**（编码回解时 `errors="ignore"` 防多字节字符被切）后返回 `{content, truncated, size_bytes}`。
 3. **format 门控（Grill P2，复核补强：改黑名单）**：format 命中黑名单（`sqlite` / `zstd` 等二进制标识）→ 409 中文「该日志格式为二进制，暂不支持在线查看」；其余（含 `*-jsonl`、`opencode-session-json-tree`、`unknown` 等文本类）放行。
-4. daemon 拒绝（allowed_roots 外 / 文件不存在）→ 409 / 404 中文（白名单文案含配置指引）；机器离线 → `DaemonRuntimeOffline` 既有 503；RPC 超时 → 504。
+4. daemon 拒绝（allowed_roots 外 / 文件不存在）→ 409 / 404 中文（白名单文案含配置指引）；机器离线 → `DaemonRuntimeOffline` 既有 504（task-05 实证：该类 http_status=504，原设计笔误 503）；RPC 超时同 504。
 
 #### 3.3.6 `GET /api/agent-logs` 增 `session_id` 过滤参数（scope 内校验，越权空列表同既有语义）。
 

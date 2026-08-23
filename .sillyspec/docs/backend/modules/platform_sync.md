@@ -24,6 +24,10 @@ SillySpec CLI 直跑时的跨仓上行通道（进度 / 文档 / 审批 / quickl
 - agent 会话日志上报（2026-08-23-platform-agent-log-ingest，协议 sillyspec 仓 `docs/platform-agent-log-protocol.md` §1）：
   - `POST /api/agent-logs`（写）：CLI `sillyspec run` 入口探测本地 harness 日志后 best-effort 推送**路径+元信息**（不含内容）；`(workspace_id, log_path)` 幂等 upsert 整行覆盖（`AgentSessionLogORM` / `platform_agent_logs` 表，CLI 留底是 invocations 计数权威）；任意 2xx 即成功。
   - `GET /api/agent-logs?workspace_id=&limit=`（读）：会话详情「本地 Agent 日志」面板数据源；scope 复用 `_read_args`（越权 workspace → 空列表不 403），`last_seen_at DESC NULLS LAST` 排序。
+  - agent 日志会话化（2026-08-23-agent-activity-sessions，协议 sillyspec 仓 §1 v1.1）：
+    - `POST` 增 body 级 `hub_session_id`（daemon env 注入，命中且同 ws → entries 关联该会话；未命中静默降级）与 entry 级 `change_key`/`quick_id`（随 entry 持久化，D-009）；无 hub → 按 `(workspace, harness, ctx)` find-or-create `origin='tool_report'` 会话（agent_sessions 加 origin/aggregation_key/title 列）。
+    - `GET /api/agent-logs?session_id=`（读）：会话关联条目（普通会话尾部折叠条目 + tool_report 会话主体）。
+    - `GET /api/agent-logs/{id}/content`（读）：daemon `host_fs.read_file` 直连（不走 delegate degrade）、format 黑名单 409、尾部 256KB 字节截断、404/409/504 错误族。
 - workspace 面（`platform_sync_workspace_router`，prefix=/workspaces）：`/api/workspaces/{workspace_id}/platform-sync-tokens` 签发；`POST /api/workspaces/resolve-by-root-path` connect 换发（含手动 `has_permission(WORKSPACE_WRITE)` 403/404 闭环）。
 
 ## 关键逻辑
@@ -53,6 +57,7 @@ spec-sync: row.version != op.base_version → conflict=true（另有同内容豁
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->
+- **2026-08-23-agent-activity-sessions**：上报日志会话化——`platform_agent_logs` 加 `agent_session_id` FK；upsert 归属两分支（hub 关联 D-005 降级 / (harness, entry.ctx) find-or-create tool_report 会话 D-009，会话 owner=token 派生 user、provider 按 harness 映射 D-007、pending、last_active_at 心跳）；GET 增 session_id 过滤；新内容端点（直连 ws_rpc 26 用例）。配套：daemon 三路径注入 SILLYHUB_SESSION_ID（本仓 sillyhub-daemon/）、inject 懒激活（daemon/session，409 离线 AppError）、前端 🧾 徽标 + AgentLogSessionBody + 会话关联折叠条目（移除 workspace 级挂载 D-004）。跨仓 sillyspec commit 4e4fc6b0（entry 级 ctx + hub_session_id）；主仓 20f57f6c。端到端六项实证 runtime-evidence.md。
 - **2026-08-23-platform-agent-log-ingest**：新增 agent 日志上报双端点（POST/GET /api/agent-logs）+ `platform_agent_logs` 表（迁移 20260823090000，(workspace_id, log_path) 复合唯一 upsert、结构化列不存 payload D-002、时间列 String ISO 原文 D-003）+ 前端会话详情 AgentLogCard 卡片（frontend/src/components/daemon/）。鉴权完全复用既有两依赖（写 shpsync_ fail-closed / 读 CHANGE_READ 并集）；消费方扩展为 CLI（写）+ 前端面板（读，此前前端不直接调本模块读端点——GET /agent-logs 是首个）。12 新测试（鉴权矩阵/幂等/去重/跨 ws/422/scope+排序+limit）；端到端双实证：worktree 后端 8010 真实 CLI 推送落 3 行 zcode 条目 + 部署后 8001 真实 200 与 invocations 1→2 心跳。附带修复两个「迁移单头断言写死 REVISION_ID 是 head」的过严测试（agent/tests/test_mission_session_id.py、tests/test_session_agent_session_id_migration.py，按意图放宽为单头+在链）。
 - **2026-08-14-platform-sync-docs-approval**（D-001~004@v1）：补 CLI 预留两契约端点（POST documents 404 / POST approval 405 均为 sillyspec 仓 sync.js 的 959 行（跨仓引用，时点 2026-08-14）TBD-hub-api 未对齐）+ GET approval 改读库完整闭环（reject 后 CLI execute 真正阻断）。表加 documents/approval 两 JSON 列（migration 20260814220000 batch_alter_table 零回填）；service 三方法定向列单写者；46 测试（32 旧零回归 + 14 新含单写者/占位行守卫）；CLI E2E 三连验证（sync-docs 4 文档/approve/reject+GET 回读 rejected）；gen:types openapi 363 paths。两实现修正：DocumentsSyncRequest 用 RootModel 裸扁平 map（CLI JSON.stringify(documents) 顶层即文件名）；list 占位行过滤用 Python 层（SQLite JSON 'null' 字符串坑）。
 - **2026-08-12-init-provision-local-yaml**（D-001）：PlatformSyncTokenService 新增 `get_or_issue(*, workspace_id, created_by) -> tuple[ORM, 明文]`——内联 select 旧未吊销（ws+created_by+revoked_at IS NULL）+ UPDATE 吊销（不新增 public revoke，零回归）+ 调既有 create（name='init-provisioned', scope=None）签新。供 init claim 时 `build_claim_payload`（daemon/lease/context.py mode=='init' 分支）现算注入 payload.platform_config.local_yaml（明文不落 lease.metadata_，D-002/P0）。"复用"语义=吊销旧+签新（明文不可恢复）。守 design §5.2。

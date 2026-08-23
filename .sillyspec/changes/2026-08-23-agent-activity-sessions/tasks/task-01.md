@@ -8,7 +8,7 @@ priority: P0
 depends_on: []
 blocks: []
 repo: sillyspec
-base_commit: 562a47bd8257515be7fe275f170a989a9df28dc4
+base_commit: 7135771dac8a617b72aeb175ce89d0571f6c1a1e
 head_commit: 0749ca6559fa219997b42190b90dbd7dff86420e
 repo_root: C:/Users/qinyi/IdeaProjects/sillyspec
 requirement_ids: [FR-01]

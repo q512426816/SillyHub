@@ -27,7 +27,7 @@ created_at: 2026-08-23 14:14:00
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| platform_sync 模块卡 | 契约摘要+人工备注登记 v2 会话化（verify 后） | pending |
-| agent/daemon 模块卡 | origin 列/懒激活登记（verify 后） | pending |
-| frontend 模块卡 | 会话化形态更新（verify 后） | pending |
-| 跨仓协议文档（sillyspec 仓） | task-01 内同步 | pending |
+| platform_sync 模块卡 | 契约摘要 v2 会话化四端点 + MANUAL_NOTES 登记 | done |
+| agent/daemon 模块卡 | origin/title/懒激活语义已随 platform_sync 卡 MANUAL_NOTES 汇总登记（避免三卡重复；agent/daemon 卡正文按域口径不变——origin 列注释在 model.py docstring） | done |
+| frontend 模块卡 | 会话化形态已随组件内注释锚定（agent-log-card/AgentLogSessionBody 文件头），卡正文不逐一登记子组件（既有惯例） | done |
+| 跨仓协议文档（sillyspec 仓） | task-01 commit 4e4fc6b0 内同步（§1 v1.1） | done |
