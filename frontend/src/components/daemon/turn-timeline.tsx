@@ -15,7 +15,8 @@
  * task-06（2026-08-19-session-stream-ux / FR-01 / FR-02 / FR-06 / design §5 Phase2
  * + §9.3）：渲染层 v2 段模型双路径——
  *   - turn.segments 非 undefined → v2 路径（SegmentedTurnBody）：「对话」视图渲染
- *     文本段（每段独立气泡）+ 运行中 TurnStatusBar（内置，Grill X-09 两消费方自动
+ *     文本段与文件段（文件卡片是面向用户的交付物，agent-file-upload-mcp FR-01；
+ *     每段独立气泡）+ 运行中 TurnStatusBar（内置，Grill X-09 两消费方自动
  *     获得）；「全部（进度语义）」视图渲染完整段时间线（ml-9 竖线容器 + SegmentView
  *     段组件族），AskUser 记录按 ts 与段合并排序穿插（merged 逻辑平移）；
  *   - turn.segments === undefined（孤儿 turn 构造 / 旧数据）→ 旧渲染路径回退：
@@ -125,9 +126,10 @@ export interface SessionTurnView {
    */
   errorDetail?: ErrorLogItem | null;
   /**
-   * ql-20260730-003：回合过程项（思考/工具/stderr），按真实到达顺序累积。
-   * 默认「对话」视图只渲染 prompt + output（答复正文）；切「全部」后在答复气泡前按序
-   * 渲染——连续 thinking 合并成一整段、被工具/stderr 打断则分段（保留时序）。
+   * ql-20260730-003：回合过程项（思考/工具/stderr/文件），按真实到达顺序累积。
+   * 「对话」视图渲染 prompt + output（答复正文）+ file 过程项（agent 上传文件卡片，
+   * agent-file-upload-mcp FR-01 交付物）；切「全部」后在答复气泡前按序渲染——连续
+   * thinking 合并成一整段、被工具/stderr 打断则分段（保留时序）。
    * 可选：外部构造的历史 turn（logsToTurns 已填充）。
    */
   processItems?: SessionProcessItem[];
@@ -189,7 +191,8 @@ export interface SessionTurnView {
   turnStartedAt?: number | null;
 }
 
-/** 消息视图模式（ql-20260729-005）：对话=只显用户消息+答复正文；全部=追加过程项。 */
+/** 消息视图模式（ql-20260729-005）：对话=用户消息+答复正文+文件卡片（交付物，
+ * agent-file-upload-mcp FR-01）；全部=追加思考/工具等过程项。 */
 export type SessionViewMode = "conversation" | "all";
 
 export interface TurnTimelineProps {
@@ -489,6 +492,26 @@ export function TurnTimeline({
                   ) : (
                     isLiveTurn(turn.status) && <ThinkingPlaceholder viewMode={viewMode} />
                   )}
+                  {/* agent-file-upload-mcp（FR-01）：旧路径对话视图的文件卡片——file
+                      过程项是面向用户的交付物，答复气泡之后渲染（与 v2 段路径
+                      SegmentView case "file" 同款标注 + FileMessageCard）。 */}
+                  {viewMode !== "all" &&
+                    (turn.processItems ?? [])
+                      .filter((p) => p.kind === "file")
+                      .map((p) => (
+                        <div key={`file-${p.fileId}`} className="ml-9 space-y-1">
+                          <div className="text-[11px] text-muted-foreground">
+                            agent 上传了文件
+                          </div>
+                          <FileMessageCard
+                            fileId={p.fileId}
+                            name={p.name}
+                            size={p.size}
+                            mime={p.mime}
+                            description={p.description ?? ""}
+                          />
+                        </div>
+                      ))}
                 </>
               )}
               {turn.errorDetail && (
@@ -608,8 +631,9 @@ type SegmentTimelineItem =
  * task-06（FR-01 / FR-02 / FR-06）：v2 段模型轮渲染主体（segments 非 undefined 的
  * turn 专用，双视图分支 + 内置轮级状态条）：
  *
- *   - 「对话」视图（viewMode=conversation）：只渲染 text 段（每段独立气泡，贴原型
- *     .seg-text；思考/工具/子代理/stderr 段不挂载——渲染经济，FR-06），轻量 ❓
+ *   - 「对话」视图（viewMode=conversation）：渲染 text 段与 file 段（每段独立气泡，
+ *     贴原型 .seg-text——file 段是面向用户的交付物，agent-file-upload-mcp FR-01 聊天流
+ *     呈现；思考/工具/子代理/stderr 段不挂载——渲染经济，FR-06），轻量 ❓
  *     AskUser 记录由外层共享逻辑渲染（答复之前）；
  *   - 「全部（进度）」视图（viewMode=all）：完整段时间线——ml-9 竖线容器（原型
  *     .turn-timeline：左缩进 36px + 2px 边线 + 14px 内距 + 6px 段距）内按序渲染
@@ -648,7 +672,10 @@ function SegmentedTurnBody({
     [dialogHistory, runKey],
   );
   const textSegments = useMemo(
-    () => (viewMode === "all" ? null : segments.filter((s) => s.kind === "text")),
+    () =>
+      viewMode === "all"
+        ? null
+        : segments.filter((s) => s.kind === "text" || s.kind === "file"),
     [viewMode, segments],
   );
   const timeline = useMemo(() => {
@@ -689,7 +716,9 @@ function SegmentedTurnBody({
           )}
         </div>
       )}
-      {/* 「对话」：只渲染 text 段，每段独立气泡（FR-01 文本不再粘连）。 */}
+      {/* 「对话」：渲染 text 段与 file 段（file 是面向用户的交付物，agent-file-upload-mcp
+          FR-01 聊天流呈现；其余思考/工具段仍只在「全部」视图，渲染经济 FR-06），每段独立
+          气泡。 */}
       {textSegments != null && textSegments.length > 0 && (
         <div className="ml-9 flex flex-col gap-1.5">
           {textSegments.map((s) => (

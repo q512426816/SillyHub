@@ -314,7 +314,8 @@ export type TurnSegment =
        * tool_kind=FileUpload 日志行（D-007@v1）的分类映射产物——聊天流文件卡片
        * （FileMessageCard）的数据源，task-09 run 详情产出文件区复用同字段。
        * 五字段取自 content JSON；id 走 logId/segmentId 派生 + 唯一后缀；ts 取 log
-       * timestamp；兼容投影（segmentsToLegacy）跳过本段（旧消费方零感知）。
+       * timestamp；兼容投影（segmentsToLegacy）产出 kind:"file" 过程项（历史回放
+       * 路径渲染文件卡片，「对话」「全部」两视图均显示）。
        */
       kind: "file";
       id: string;

@@ -265,3 +265,16 @@
 根因：产品 f4665fa0（2026-08-22）把 worker lease stage 从 run.role 改为固定常量 mission_worker、role 移 lease metadata.role，测试断言未同步成唯一预存红测试
 方案：断言 stage=='mission_worker' 并注释说明 role 走 _apply_worker_role_to_lease 写 lease metadata（placement mock 无真实 lease 行，role 路径集成层验证）
 结果：tests/modules/agent/test_execution.py 6 passed、ruff 过，已单独提交；backend 全量回归零已知失败
+
+## ql-20260823-010-f284 | 2026-08-23 17:38:30 | 对话视图渲染 agent 上传文件卡片
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/turn-timeline.tsx（双路径渲染逻辑与注释）
+- frontend/src/components/daemon/session-log-assembler.ts（file 段投影注释修正）
+- frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx（新增测试）
+需求：对话视图渲染 agent 上传文件卡片
+根因：file-upload-mcp FR-01 要求聊天流呈现文件卡片，但默认对话视图 v2 过滤只留 text 段、legacy 路径不渲染 processItems，卡片只在进度视图可见
+方案：turn-timeline 双路径补渲染——v2 过滤条件加 file 段经 SegmentView 分流；legacy 对话视图答复气泡后渲染 file 过程项 FileMessageCard；修正 session-log-assembler 投影注释
+结果：新增 3 用例锁双路径契约；前端 1968 用例全绿、tsc 零错、lint 零新增；Docker 重建后真实登录验证对话/进度双视图卡片可见并截图
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/session-log-assembler.ts, frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
