@@ -89,7 +89,10 @@ async def test_dispatch_worker_calls_placement_with_role_and_tool_config(
     assert lease_id is not None
     fake_placement.dispatch_to_daemon.assert_awaited_once()
     kwargs = fake_placement.dispatch_to_daemon.call_args.kwargs
-    assert kwargs["stage"] == "arch"
+    # f4665fa0 起 stage 固定 MISSION_WORKER_STAGE（daemon 注入谓词按它排除编排工具），
+    # run.role（arch）不再走 dispatch kwargs，改由 _apply_worker_role_to_lease 写
+    # lease metadata.role（placement 为 mock 时无真实 lease 行，role 路径在集成层验证）。
+    assert kwargs["stage"] == "mission_worker"
     assert kwargs["read_only"] is True
     assert "scan arch" in kwargs["prompt"]
     assert kwargs["tool_config"]["mode"] == "plan"  # read-only governance
