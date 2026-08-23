@@ -1,28 +1,31 @@
 /**
  * /sessions 智能体会话总入口页冒烟（2026-08-14-sessions-portal task-10 建页；
- * 2026-08-22-workspace-sessions-portal task-08 薄壳化适配）。
+ * 2026-08-22-workspace-sessions-portal task-08 薄壳化适配；2026-08-23-
+ * sessions-workspace-hub task-07 预会话语义迁移——原「新建会话表单态」断言
+ * 全量改写，18 用例编号保持）。
  *
  * 依据：
  *   - app/(dashboard)/sessions/page.tsx（task-02 薄壳：仅渲染无参 SessionsPortal）
- *   - components/sessions/sessions-portal.tsx（task-01 提取的共享门户——本组
- *     18 用例的断言目标不变，渲染出口由原页装配改为经门户组件间接覆盖）
- *   - tasks/task-08.md acceptance：18=18 语义保留对账（禁删用例，可改装配细节）
+ *   - components/sessions/sessions-portal.tsx（task-01 提取的共享门户——task-06
+ *     起右侧三分支：真会话 / 预会话（组头＋→两步浮层→preContext）/ 空门户态；
+ *     NewSessionForm 已 task-07 退役 D-109）
+ *   - tasks/task-07.md implementation（page.test 迁移：「新建会话→表单态」
+ *     「NewSessionForm onCreated」断言改空门户态/预会话语义）
+ *   - tasks/task-08.md acceptance 存量对账（18=18 编号保持，表单系断言除外）
  *
- * 覆盖（语义全保留迁移，编号同 task-10 原枚举）：
- *   1. 两栏渲染：左「会话列表」+ 右「新建会话表单」（无选中态）+ 页头标题
- *   2. 点击列表条目 onSelect → 右侧 SessionPanel（会话面板 / 配置控件条 /
- *      ctx-ring / 输入框 / 打断·结束按钮），新建表单隐藏、页头出现「新建会话」
- *   3. 页头「新建会话」→ 回到 NewSessionForm 态
- *   4. NewSessionForm onCreated 流：填消息点「开始会话」→ createSession 带
- *      runtime_id → 右侧切到新会话 SessionPanel（getAgentSession(s-new)）
- *   5. ended 会话 → 已结束横幅 + 重新开启按钮
- *   （6-18：gap-fix whoLine/usage 注入 4 条、SSE 装配器 2 条、attach 竞态
- *    2 条、对账回放 1 条、附件回显 1 条、reopen/409 中文化 3 条——均为
- *    SessionPanel page 模式语义，随门户提取整块迁移，断言点零删减）
+ * 迁移映射（旧 → 新，task-07）：
+ *   1. 右「新建会话表单」 → 右「空门户态」（未选会话且无 preContext）
+ *   3. 页头「新建会话」回表单态 → 组头「＋」→两步浮层→预会话态（SSE 关闭）
+ *   4. NewSessionForm onCreated 流 → 组头＋→浮层→预会话首句发送 createSession
+ *      → onPreSessionCreated 切真会话
+ *   （2/5-18 SessionPanel page 模式语义原样；2 的页头按钮断言随 X-12 移除改
+ *    组头「＋」/页头无按钮断言；17 的「新建会话」重挂路径改经预会话态中转）
  *
  * mock 策略（对齐 sessions 组件测试惯例）：
- *   - @/lib/daemon 整模块 mock（页面/列表/表单/控件条消费的全部函数，
+ *   - @/lib/daemon 整模块 mock（页面/列表/面板消费的全部函数 + task-05 树形态
+ *     一次拉取常量 AGENT_SESSIONS_TREE_FETCH_LIMIT——18 红基线根因即缺它，
  *     streamSession 不建真实 EventSource）
+ *   - @/lib/workspaces mock（task-05 起 SessionListPanel chips/组头名解析消费）
  *   - next/navigation mock（task-08：门户 useSearchParams 深链
  *     sessions-portal.tsx:78——薄壳化后页面树经门户消费，jsdom 无 app router
  *     上下文时 useSearchParams 返回 null，即原 18 红根因；对齐
@@ -72,6 +75,8 @@ const mocks = vi.hoisted(() => ({
   profilesHook: vi.fn(),
   listProviders: vi.fn(),
   getProviderQuota: vi.fn(),
+  // task-07：task-05 树形态起 SessionListPanel 消费（组头名/chips）。
+  listWorkspaces: vi.fn(),
   // task-08（D-004@v1）：门户 useSearchParams 返回值（深链用例可改写；
   // 默认空参 = 全局门户静默停留新建态）
   searchParams: new URLSearchParams(),
@@ -87,6 +92,8 @@ vi.mock("@/lib/daemon", () => ({
     claude: { label: "Claude Code", icon: "🟣", color: "" },
     codex: { label: "Codex", icon: "🟢", color: "" },
   },
+  // task-07：task-05 树形态一次拉取常量（原 18 红基线根因即缺它）。
+  AGENT_SESSIONS_TREE_FETCH_LIMIT: 500,
   listAgentSessions: (...args: unknown[]) => mocks.listAgentSessions(...args),
   getAgentSession: (...args: unknown[]) => mocks.getAgentSession(...args),
   getAgentSessionLogs: (...args: unknown[]) => mocks.getAgentSessionLogs(...args),
@@ -100,10 +107,16 @@ vi.mock("@/lib/daemon", () => ({
   fetchSessionDialogHistory: (...args: unknown[]) =>
     mocks.fetchSessionDialogHistory(...args),
   listSessionRuns: (...args: unknown[]) => mocks.listSessionRuns(...args),
+  deleteAgentSession: vi.fn(),
 }));
 
 vi.mock("@/lib/use-daemon-machines", () => ({
   useDaemonMachines: () => mocks.machinesHook(),
+}));
+
+// task-07：SessionListPanel（task-05 树形态）组头名/chips 工作区名解析。
+vi.mock("@/lib/workspaces", () => ({
+  listWorkspaces: (...args: unknown[]) => mocks.listWorkspaces(...args),
 }));
 
 // task-08（2026-08-22-workspace-sessions-portal / D-004@v1）：薄壳页经
@@ -332,6 +345,7 @@ beforeEach(() => {
   });
   mocks.listProviders.mockResolvedValue([]);
   mocks.getProviderQuota.mockResolvedValue({ quota: null });
+  mocks.listWorkspaces.mockResolvedValue({ items: [], total: 0 });
   mocks.listAgentSessions.mockResolvedValue({
     items: [makeSession()],
     total: 1,
@@ -379,26 +393,48 @@ afterEach(() => {
 
 // ── 用例 ─────────────────────────────────────────────────────────────────
 
-describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄壳化——渲染经 SessionsPortal 间接覆盖）", () => {
-  it("无选中：左会话列表 + 右新建会话表单 + 页头标题", async () => {
+/**
+ * task-07 迁移辅助：组头「＋」→ 两步浮层（machine-1 → Claude Code 默认）→
+ * 预会话态（对齐 sessions-portal.test enterPreSession；全局 scope 固件会话
+ * workspace_id=null → 落「非工作区」组）。返回预会话面板 waitFor promise。
+ */
+async function enterPreSession() {
+  fireEvent.click(
+    await screen.findByRole("button", { name: "在 非工作区 新建会话" }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "选择机器 machine-1" }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "选择智能体 Claude Code" }),
+  );
+  await waitFor(() =>
+    expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull(),
+  );
+  return screen.findByTestId("session-pre-session-panel");
+}
+
+describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄壳化——渲染经 SessionsPortal 间接覆盖；task-07 表单态断言迁移预会话/空门户态）", () => {
+  it("无选中：左会话列表 + 右空门户态 + 页头标题（task-07：原「新建会话表单」断言迁移）", async () => {
     renderPage();
 
     // 页头
     expect(screen.getByRole("heading", { name: "智能体会话" })).toBeTruthy();
 
-    // 左栏：列表（标题条目进可视区）
+    // 左栏：列表（标题条目进可视区；task-05 树形态下落「非工作区」组）
     expect(screen.getByLabelText("会话列表")).toBeTruthy();
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "会话 整理这周的会议纪要" })).toBeTruthy();
     });
 
-    // 右栏：新建态表单（四选择器 + 消息输入）
-    expect(screen.getByLabelText("新建会话表单")).toBeTruthy();
-    expect(screen.getByLabelText("会话消息输入")).toBeTruthy();
+    // 右栏：空门户态（未选会话且无 preContext）；表单已退役（D-109）
+    expect(screen.getByLabelText("门户空态")).toBeTruthy();
+    expect(screen.queryByLabelText("新建会话表单")).toBeNull();
     expect(screen.queryByLabelText("会话面板")).toBeNull();
+    expect(screen.queryByTestId("session-pre-session-panel")).toBeNull();
   });
 
-  it("点击列表条目 → SessionPanel（ConfigBar / CtxUsageBar / 输入框挂载），新建表单隐藏", async () => {
+  it("点击列表条目 → SessionPanel（ConfigBar / CtxUsageBar / 输入框挂载），空门户态隐藏", async () => {
     renderPage();
     const row = await screen.findByRole("button", {
       name: "会话 整理这周的会议纪要",
@@ -409,7 +445,7 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄�
     await waitFor(() => {
       expect(screen.getByLabelText("会话面板")).toBeTruthy();
     });
-    expect(screen.queryByLabelText("新建会话表单")).toBeNull();
+    expect(screen.queryByLabelText("门户空态")).toBeNull();
     // 会话态细节：标题 + 配置控件条 + ctx-ring + 输入框 + 打断/结束
     // （标题同时出现在左列表条目与右面板头，取全部命中）
     expect(screen.getAllByText("整理这周的会议纪要").length).toBeGreaterThanOrEqual(2);
@@ -422,8 +458,15 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄�
     // ql-20260819-002：/sessions 页「结束会话」按钮已移除（会话结束走自然超时；
     // runtimes 弹窗保留该入口）
     expect(screen.queryByRole("button", { name: /结束会话/ })).toBeNull();
-    // 页头出现「新建会话」入口（回到新建态）
-    expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
+    // task-07 / X-12：页头「新建会话」按钮已移除（入口收敛组头「＋」，
+    // change scope 专属页头按钮在本全局页不出现）
+    expect(screen.queryByRole("button", { name: "新建会话" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "新建会话（本变更）" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "在 非工作区 新建会话" }),
+    ).toBeTruthy();
 
     // attach 模式：SSE 建流 + 历史预取 + pending dialogs 恢复
     await waitFor(() => {
@@ -440,7 +483,7 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄�
     expect(mocks.getAgentSession).toHaveBeenCalledWith("s-1");
   });
 
-  it("页头「新建会话」→ 回到 NewSessionForm 态（SSE 关闭）", async () => {
+  it("组头「＋」→ 两步浮层 → 预会话态（原「页头新建会话回表单态」断言迁移；真会话卸载 SSE 关闭）", async () => {
     renderPage();
     fireEvent.click(
       await screen.findByRole("button", { name: "会话 整理这周的会议纪要" }),
@@ -448,20 +491,32 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄�
     await waitFor(() => {
       expect(screen.getByLabelText("会话面板")).toBeTruthy();
     });
-    fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+    await enterPreSession();
 
-    expect(screen.getByLabelText("新建会话表单")).toBeTruthy();
-    expect(screen.queryByLabelText("会话面板")).toBeNull();
+    // 预会话态接管（同构空态 + 锁定上下文行）；真会话卸载、SSE 关闭。
+    // 注：预会话面板与真会话同构（同为 aria-label「会话面板」，D-101），以
+    // 预会话专属 testid / 上下文行 + 真会话专属输入占位区分两态。
+    expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy();
+    expect(screen.getByTestId("pre-session-context")).toBeTruthy();
+    expect(screen.queryByLabelText("门户空态")).toBeNull();
+    expect(
+      screen.queryByPlaceholderText("继续追问…（Enter 发送 · Shift+Enter 换行）"),
+    ).toBeNull();
     expect(mocks.streamClose).toHaveBeenCalled();
+    // 未发首句不创建（FR-03 零残留）
+    expect(mocks.createSession).not.toHaveBeenCalled();
   });
 
-  it("NewSessionForm onCreated：开始会话 → createSession(runtime_id) → 切到新会话面板", async () => {
+  it("预会话首句发送：createSession(runtime_id) → onPreSessionCreated 切到新会话面板（原 NewSessionForm onCreated 断言迁移）", async () => {
     renderPage();
+    await enterPreSession();
 
-    // 默认机器自动回退（D-005：最新在线心跳），填首条消息后开始
-    const prompt = screen.getByLabelText("会话消息输入");
-    fireEvent.change(prompt, { target: { value: "帮我把这个函数重构成 async" } });
-    fireEvent.click(screen.getByRole("button", { name: "开始会话" }));
+    // 预会话首句（task-03 契约：面板内部 createSession）
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "帮我把这个函数重构成 async" } });
+    fireEvent.click(screen.getByTitle("发送"));
 
     await waitFor(() => {
       expect(mocks.createSession).toHaveBeenCalledWith(
@@ -469,14 +524,14 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄�
       );
     });
 
-    // onCreated → 右侧切到 s-new 的会话面板
+    // onPreSessionCreated → 右侧切到 s-new 的会话面板（key 重挂载）
     await waitFor(() => {
       expect(mocks.getAgentSession).toHaveBeenCalledWith("s-new");
     });
     await waitFor(() => {
       expect(screen.getByLabelText("会话面板")).toBeTruthy();
     });
-    expect(screen.queryByLabelText("新建会话表单")).toBeNull();
+    expect(screen.queryByTestId("session-pre-session-panel")).toBeNull();
   });
 
   it("已结束会话：显示已结束横幅 + 重新开启按钮", async () => {
@@ -1066,12 +1121,22 @@ describe("SessionPanel reconnecting 恢复超时入口 + reopen 409 中文化（
       expect(screen.queryByText(/会话恢复超时/)).toBeNull();
       expect(screen.queryByRole("button", { name: /重新开启/ })).toBeNull();
 
-      // 再进 reconnecting（active 后轮询已停 → 经「新建会话」→ 再选触发重挂）：
+      // 再进 reconnecting（active 后轮询已停 → 经预会话入口清选中 → 再选触发
+      // 重挂；task-07：页头「新建会话」已移除，经组头「＋」→两步浮层中转）：
       // 计时从头起算，<240s（200s）不出现，>240s 再现
       mocks.getAgentSession.mockResolvedValue(
         makeSession({ status: "reconnecting" }),
       );
-      fireEvent.click(screen.getByRole("button", { name: "新建会话" }));
+      // 组头「＋」→ 浮层两步（fake timers 下全用同步 getBy，act 内即时渲染）
+      fireEvent.click(
+        screen.getByRole("button", { name: "在 非工作区 新建会话" }),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "选择机器 machine-1" }),
+      );
+      fireEvent.click(
+        screen.getByRole("button", { name: "选择智能体 Claude Code" }),
+      );
       fireEvent.click(
         screen.getByRole("button", { name: "会话 整理这周的会议纪要" }),
       );

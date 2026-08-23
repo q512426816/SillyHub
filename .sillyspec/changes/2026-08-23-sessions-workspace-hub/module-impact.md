@@ -24,7 +24,9 @@ created_at: 2026-08-23 05:00:00
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| docs/frontend/modules/components-sessions.md | 待更新（task-08）：树/浮层/退役/门户 preContext | pending |
-| docs/frontend/modules/components-daemon.md | 待更新（task-08）：预会话守卫清单+首句链路 | pending |
-| backend daemon 模块文档 | 待更新（task-08）：owner_name/limit | pending |
-| docs/frontend/modules/_module-map.yaml | 预计无变化（未增删模块，pre-session-picker 归 components-sessions） | pending |
+| docs/frontend/modules/components-sessions.md | 已更新（task-08）：SessionListPanel 工作区树契约（两层筛选 tab/分组手风琴/机器小节/owner chip/保留能力/退役清单/组头＋回调/defaultExpandedWorkspaceId/change 平铺现状）、SessionsPortal 双态接线（三分支/浮层/深链/页头按钮/D-005 迁入）、新增 PreSessionPicker 条目、NewSessionForm/WorkspaceSessionPicker 标注退役删除 | done（2026-08-23） |
+| docs/frontend/modules/components-daemon.md | 已更新（task-08）：SessionPanel 预会话态契约（sessionId=null 同构空态/preContext/onPreSessionCreated/null 守卫清单/首句失败保留输入/change 变更名查询）；测试清单补 session-panel-pre-session；SUPPORTED_SESSION_PROVIDERS 内联处改 pre-session-picker | done（2026-08-23） |
+| backend daemon 模块文档 | 已更新（task-08）：列表端点 owner_name（IN 批量注入/null 兜底）+ limit le=500 | done（2026-08-23） |
+| docs/frontend/modules/_module-map.yaml | 未增删模块；仅符号级更新 components-sessions.main_symbols（删 NewSessionForm，增 SessionsPortal/PreSessionPicker/resolveDefaultMachineId） | done（2026-08-23） |
+
+回归证据见同目录 `regression-evidence.md`（backend 978 passed / frontend 1921 passed / typecheck 零错误 / lint 零新增警告）。

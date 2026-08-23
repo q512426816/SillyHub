@@ -1,0 +1,511 @@
+// task-03（2026-08-23-sessions-workspace-hub / FR-03）：SessionPanel（page 模式）
+// 预会话态单测——sessionId=null 渲染与真会话同构的空态（D-101，用户硬约束
+// "不要独立页面"），会话作用域副作用 effect 全部 null 守卫（R-01），首句发送才
+// createSession 原地接管（D-102），失败保留输入可重试（R-02），上下文行完全
+// 只读（D-104）。
+//
+// 覆盖（TaskCard acceptance）：
+//   1. D-101 同构渲染：面板头 / 时间线容器 / 输入区均在，仅内容空 + 多上下文行；
+//   2. R-01 专项：sessionId=null 时 detailQuery（getAgentSession）/ SSE 建流 /
+//      历史预取 / dialogs 恢复 / 队列投递 / team missions 逐项零调用；
+//   3. D-102 首句创建：createSession 参数含 runtime_id + prompt（+可选
+//      workspace_id / change_id 条件展开，不带 provider）；成功清空输入 +
+//      onPreSessionCreated 上报 + 父层切 sessionId 后状态机自然接管；
+//   4. R-02 失败保留输入 + 内联错误 + 原地重试成功；
+//   5. 门控派生：无 preContext / 机器离线 → 输入禁用。
+//
+// mock 风格照抄 session-panel-team.test.tsx（page 模式 QueryClientProvider +
+// 仅 mock 网络层；断言用 aria-label / 正则避开 antd 中文按钮拆分坑）。
+
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+
+import { SessionPanel, type SessionPreContext } from "../session-panel";
+import type {
+  DaemonMachineRead,
+  DaemonRuntimeRead,
+} from "@/lib/daemon";
+
+// MarkdownText 用 next/dynamic + ssr:false，jsdom 同步 render 处于 loading(null)——
+// mock 成纯文本渲染（同 session-panel-dialog.test.tsx）。
+vi.mock("@/components/ui/markdown-text", () => ({
+  MarkdownText: ({ content }: { content: string }) => (
+    <div data-testid="markdown-text">{content}</div>
+  ),
+}));
+
+/* ----- mock 网络层（lib/daemon 会话 API 全量，R-01 断言数据源） ----- */
+
+const sessionApi = vi.hoisted(() => ({
+  createSession: vi.fn(),
+  injectSession: vi.fn(),
+  interruptSession: vi.fn(),
+  endSession: vi.fn(),
+  streamSession: vi.fn(),
+  getAgentSession: vi.fn(),
+  getAgentSessionLogs: vi.fn(),
+  fetchPendingDialogs: vi.fn(),
+  fetchSessionDialogHistory: vi.fn(),
+  listSessionRuns: vi.fn(),
+  listSessionTeamMissions: vi.fn(),
+  triggerSessionTeamMission: vi.fn(),
+}));
+
+vi.mock("@/lib/daemon", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
+  return {
+    ...actual,
+    createSession: sessionApi.createSession,
+    injectSession: sessionApi.injectSession,
+    interruptSession: sessionApi.interruptSession,
+    endSession: sessionApi.endSession,
+    streamSession: sessionApi.streamSession,
+    getAgentSession: sessionApi.getAgentSession,
+    getAgentSessionLogs: sessionApi.getAgentSessionLogs,
+    fetchPendingDialogs: sessionApi.fetchPendingDialogs,
+    fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
+    listSessionRuns: sessionApi.listSessionRuns,
+    listSessionTeamMissions: sessionApi.listSessionTeamMissions,
+    triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
+  };
+});
+
+// page 模式 workspacesQuery（工作区名解析，预会话上下文行数据源）。
+const workspaceApi = vi.hoisted(() => ({
+  listWorkspaces: vi.fn(),
+  listProjects: vi.fn(),
+  listProjectWorkspaces: vi.fn(),
+}));
+
+vi.mock("@/lib/workspaces", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/workspaces")>(
+    "@/lib/workspaces",
+  );
+  return { ...actual, listWorkspaces: workspaceApi.listWorkspaces };
+});
+
+vi.mock("@/lib/ppm/project", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/ppm/project")>(
+    "@/lib/ppm/project",
+  );
+  return { ...actual, listProjects: workspaceApi.listProjects };
+});
+
+vi.mock("@/lib/workspace", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/workspace")>(
+    "@/lib/workspace",
+  );
+  return { ...actual, listProjectWorkspaces: workspaceApi.listProjectWorkspaces };
+});
+
+// page 模式 chrome（SessionConfigBar）数据 hook：无网络，空数据（转真会话态
+// 后 SessionConfigBar 挂载用）。
+vi.mock("@/lib/use-daemon-machines", () => ({
+  useDaemonMachines: () => ({ items: [] }),
+}));
+vi.mock("@/lib/agent-profiles", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/agent-profiles")>(
+    "@/lib/agent-profiles",
+  );
+  return { ...actual, useMineAgentProfiles: () => ({ profiles: [] }) };
+});
+vi.mock("@/lib/api/llm-providers", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api/llm-providers")>(
+    "@/lib/api/llm-providers",
+  );
+  return { ...actual, listProviders: vi.fn().mockResolvedValue([]) };
+});
+
+/* ----- fixture ----- */
+
+function makeRuntime(
+  id: string,
+  provider: string,
+  overrides: Partial<DaemonRuntimeRead> = {},
+): DaemonRuntimeRead {
+  return {
+    id,
+    display_alias: null,
+    name: "DESKTOP-1",
+    provider,
+    version: null,
+    os: null,
+    arch: null,
+    status: "online",
+    last_heartbeat_at: null,
+    capabilities: null,
+    allowed_roots: [],
+    created_at: "2026-08-01T00:00:00Z",
+    updated_at: "2026-08-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeMachine(
+  overrides: Partial<DaemonMachineRead> = {},
+): DaemonMachineRead {
+  return {
+    id: "m-1",
+    hostname: "DESKTOP-1",
+    display_alias: "机器一",
+    os: "Windows",
+    arch: "x64",
+    status: "online",
+    last_heartbeat_at: "2026-08-23T04:00:00Z",
+    version: "1.0.0",
+    build_id: null,
+    started_at: null,
+    created_at: "2026-08-01T00:00:00Z",
+    runtime_count: 2,
+    online_runtime_count: 2,
+    runtimes: [makeRuntime("rt-claude", "claude"), makeRuntime("rt-codex", "codex")],
+    ...overrides,
+  };
+}
+
+/** 真会话详情（转真会话态后 detailQuery 数据，形状对齐 session-panel-team.test）。 */
+function makeDetail() {
+  return {
+    id: "sess-pre-1",
+    runtime_id: "rt-claude",
+    lease_id: null,
+    provider: "claude",
+    status: "active",
+    agent_session_id: "ag-1",
+    config: null,
+    turn_count: 1,
+    created_at: "t",
+    last_active_at: null,
+    ended_at: null,
+    current_run_id: null,
+    workspace_id: null,
+    llm_provider_id: null,
+    agent_profile_id: null,
+    title: "预会话转正",
+    config_snapshot: null,
+  };
+}
+
+function setupPre(
+  overrides: {
+    sessionId?: string | null;
+    preContext?: SessionPreContext | null;
+    machines?: DaemonMachineRead[];
+    onPreSessionCreated?: (_resp: { session_id: string; run_id: string }) => void;
+    /** workspacesQuery 返回（上下文行工作区名解析数据源）。 */
+    workspacesItems?: { id: string; name: string }[];
+  } = {},
+) {
+  sessionApi.getAgentSession.mockResolvedValue(makeDetail());
+  sessionApi.getAgentSessionLogs.mockResolvedValue([]);
+  sessionApi.listSessionRuns.mockResolvedValue([]);
+  sessionApi.fetchPendingDialogs.mockResolvedValue([]);
+  sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
+  sessionApi.listSessionTeamMissions.mockResolvedValue([]);
+  sessionApi.streamSession.mockImplementation(() => ({
+    close: vi.fn(),
+    getLastEventId: () => null,
+  }));
+  workspaceApi.listWorkspaces.mockResolvedValue({
+    items: overrides.workspacesItems ?? [],
+  });
+  workspaceApi.listProjects.mockResolvedValue([]);
+  workspaceApi.listProjectWorkspaces.mockResolvedValue([]);
+
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const machines = overrides.machines ?? [makeMachine()];
+  const view = (
+    sid: string | null,
+    preCtx: SessionPreContext | null | undefined,
+  ) => (
+    <QueryClientProvider client={qc}>
+      <SessionPanel
+        mode="page"
+        sessionId={sid}
+        machines={machines}
+        llmProviders={[]}
+        preContext={preCtx ?? undefined}
+        onPreSessionCreated={overrides.onPreSessionCreated}
+      />
+    </QueryClientProvider>
+  );
+  const preContext: SessionPreContext | null =
+    overrides.preContext === undefined
+      ? { workspaceId: null, runtimeId: "rt-claude" }
+      : overrides.preContext;
+  const result = render(view(overrides.sessionId ?? null, preContext));
+  return { ...result, rerenderWith: (sid: string | null) => result.rerender(view(sid, preContext)) };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+/* ───────── 1. D-101 同构渲染 + D-104 上下文行只读 ───────── */
+
+describe("SessionPanel 预会话态渲染（D-101 同构空态）", () => {
+  it("面板头 / 时间线容器 / 输入区均在：新会话标题 + 空时间线提示 + 可输入，仅多上下文行", () => {
+    setupPre();
+
+    // 面板头：新会话标题 + 同构 chrome（打断按钮存在且禁用；title 为预会话
+    // 引导文案，按 role name 断言避开 title 语义混淆）。
+    expect(screen.getByText("新会话")).toBeInTheDocument();
+    const interruptBtn = screen.getByRole("button", {
+      name: /打断本轮/,
+    }) as HTMLButtonElement;
+    expect(interruptBtn.disabled).toBe(true);
+
+    // 时间线容器（与 TurnTimeline 同容器语义）+ 空态文案。
+    expect(screen.getByTestId("turn-timeline-scroll")).toBeInTheDocument();
+    expect(screen.getByText(/发送第一句话开始对话/)).toBeInTheDocument();
+
+    // 输入区：完整输入可用（机器在线 + preContext 就位）。
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    expect(input.disabled).toBe(false);
+  });
+
+  it("上下文行渲染 preContext：工作区不指定文案 / 机器别名 / 引擎名，且完全只读（D-104 无任何可交互元素）", () => {
+    setupPre();
+    const ctx = screen.getByTestId("pre-session-context");
+    expect(ctx.textContent).toContain("不指定（非工作区）");
+    expect(ctx.textContent).toContain("机器一");
+    expect(ctx.textContent).toContain("Claude Code");
+    expect(ctx.textContent).toContain("上下文已锁定");
+    // D-104：锁定行无任何可交互元素（无 button / link / input）。
+    expect(within(ctx).queryAllByRole("button")).toHaveLength(0);
+    expect(within(ctx).queryAllByRole("link")).toHaveLength(0);
+    expect(within(ctx).queryAllByRole("textbox")).toHaveLength(0);
+  });
+
+  it("workspaceId 命中时上下文行显示工作区名（workspacesQuery 解析）", async () => {
+    setupPre({
+      preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" },
+      workspacesItems: [{ id: "ws-1", name: "前端重构" }],
+    });
+
+    const ctx = await screen.findByTestId("pre-session-context");
+    await waitFor(() => expect(ctx.textContent).toContain("前端重构"));
+  });
+
+  it("无 preContext（空门户态兜底）：上下文行降级占位 + 输入禁用引导文案", () => {
+    setupPre({ preContext: null });
+    const input = screen.getByPlaceholderText(
+      /请先选择机器与智能体/,
+    ) as HTMLTextAreaElement;
+    expect(input.disabled).toBe(true);
+    const ctx = screen.getByTestId("pre-session-context");
+    expect(ctx.textContent).toContain("不指定（非工作区）");
+    expect(ctx.textContent).toContain("—");
+  });
+
+  it("preContext 目标机器离线：输入禁用 + 离线占位文案", () => {
+    setupPre({
+      machines: [makeMachine({ status: "offline", online_runtime_count: 0 })],
+    });
+    const input = screen.getByPlaceholderText(
+      /机器离线，输入不可用/,
+    ) as HTMLTextAreaElement;
+    expect(input.disabled).toBe(true);
+  });
+});
+
+/* ───────── 2. R-01 专项：sessionId=null 副作用零调用 ───────── */
+
+describe("SessionPanel 预会话态 null 守卫（R-01 专项）", () => {
+  it("sessionId=null 时 getAgentSession / 建流 / 历史预取 / dialogs 恢复 / 队列投递 / team missions 逐项零调用", async () => {
+    setupPre();
+    // 等待一轮 microtask/effect flush（守卫失效时各 effect 会在此窗口发起请求）。
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(sessionApi.getAgentSession).not.toHaveBeenCalled(); // detailQuery 轮询
+    expect(sessionApi.streamSession).not.toHaveBeenCalled(); // SSE 建流
+    expect(sessionApi.getAgentSessionLogs).not.toHaveBeenCalled(); // 历史预取
+    expect(sessionApi.listSessionRuns).not.toHaveBeenCalled(); // runs 快照
+    expect(sessionApi.fetchPendingDialogs).not.toHaveBeenCalled(); // dialogs 恢复
+    expect(sessionApi.fetchSessionDialogHistory).not.toHaveBeenCalled();
+    expect(sessionApi.listSessionTeamMissions).not.toHaveBeenCalled(); // team 轮询
+    expect(sessionApi.injectSession).not.toHaveBeenCalled(); // 队列投递
+    expect(sessionApi.createSession).not.toHaveBeenCalled(); // 未发送不创建
+  });
+});
+
+/* ───────── 3. D-102 首句创建链路 ───────── */
+
+describe("SessionPanel 预会话首句创建（D-102）", () => {
+  it("首句发送 → createSession 含 runtime_id + prompt + manual_approval/ask_user_only（不带 provider），成功清空输入并上报 onPreSessionCreated", async () => {
+    const onPreSessionCreated = vi.fn();
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-pre-1",
+      run_id: "run-pre-1",
+      lease_id: "l",
+      status: "active",
+      stream_url: "",
+    });
+    setupPre({ onPreSessionCreated });
+
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "帮我核对文档" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
+    expect(sessionApi.createSession).toHaveBeenCalledWith({
+      runtime_id: "rt-claude",
+      prompt: "帮我核对文档",
+      manual_approval: true,
+      ask_user_only: true,
+    });
+    // 成功后才清空输入（R-02 反例守护）。
+    await waitFor(() => expect(input.value).toBe(""));
+    // 上报父层（resp 完整对象）——父层切 sessionId 的接线依据。
+    await waitFor(() =>
+      expect(onPreSessionCreated).toHaveBeenCalledWith(
+        expect.objectContaining({ session_id: "sess-pre-1", run_id: "run-pre-1" }),
+      ),
+    );
+
+    // 面板仍处预会话态（父层未切 sessionId）→ SSE 不建流（接线归 task-06）。
+    expect(sessionApi.streamSession).not.toHaveBeenCalled();
+  });
+
+  it("preContext 带 workspaceId + changeId → createSession 条件展开双传（X-13 语义）", async () => {
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-pre-2",
+      run_id: "run-pre-2",
+      lease_id: "l",
+      status: "active",
+      stream_url: "",
+    });
+    const onPreSessionCreated = vi.fn();
+    setupPre({
+      preContext: { workspaceId: "ws-1", changeId: "chg-1", runtimeId: "rt-codex" },
+      onPreSessionCreated,
+    });
+
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "变更入口首句" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
+    expect(sessionApi.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtime_id: "rt-codex",
+        prompt: "变更入口首句",
+        workspace_id: "ws-1",
+        change_id: "chg-1",
+        manual_approval: true,
+        ask_user_only: true,
+      }),
+    );
+    // 上报父层（resp 完整对象）——父层切 sessionId 的接线依据。
+    await waitFor(() =>
+      expect(onPreSessionCreated).toHaveBeenCalledWith(
+        expect.objectContaining({ session_id: "sess-pre-2", run_id: "run-pre-2" }),
+      ),
+    );
+  });
+
+  it("成功后父层切 sessionId → 状态机自然接管（detailQuery / SSE 建流随依赖激活）", async () => {
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-pre-1",
+      run_id: "run-pre-1",
+      lease_id: "l",
+      status: "active",
+      stream_url: "",
+    });
+    const { rerenderWith } = setupPre();
+
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "首句" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+
+    // 模拟父层（门户，task-06）按 onPreSessionCreated 切换 sessionId。
+    rerenderWith("sess-pre-1");
+    await waitFor(() =>
+      expect(sessionApi.getAgentSession).toHaveBeenCalledWith("sess-pre-1"),
+    );
+    await waitFor(() =>
+      expect(sessionApi.streamSession).toHaveBeenCalledWith(
+        "sess-pre-1",
+        expect.any(Object),
+      ),
+    );
+    // 真会话面板头接管（标题来自 detailQuery）。
+    await waitFor(() => expect(screen.getByText("预会话转正")).toBeInTheDocument());
+  });
+});
+
+/* ───────── 4. R-02 失败保留输入 + 重试 ───────── */
+
+describe("SessionPanel 预会话首句创建失败（R-02）", () => {
+  it("失败：输入保留 + 内联错误可见 + 不建流；原地重发成功后错误清除", async () => {
+    const { ApiError } = await import("@/lib/api");
+    sessionApi.createSession
+      .mockRejectedValueOnce(
+        new ApiError(503, {
+          code: "DAEMON_UNAVAILABLE",
+          message: "daemon 暂不可用",
+          request_id: null,
+          details: null,
+        }),
+      )
+      .mockResolvedValueOnce({
+        session_id: "sess-pre-3",
+        run_id: "run-pre-3",
+        lease_id: "l",
+        status: "active",
+        stream_url: "",
+      });
+    setupPre();
+
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "会失败的首句" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    // R-02：失败保留输入（dialog idle 先清后建失败即丢——此处有意改造）。
+    await waitFor(() =>
+      expect(screen.getByLabelText("创建会话错误")).toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText("创建会话错误").textContent).toContain(
+      "daemon 暂不可用",
+    );
+    expect(input.value).toBe("会失败的首句");
+    expect(sessionApi.streamSession).not.toHaveBeenCalled();
+
+    // 原地重试（输入未丢，直接再点发送）→ 第二次成功。
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.queryByLabelText("创建会话错误")).not.toBeInTheDocument(),
+    );
+    await waitFor(() => expect(input.value).toBe(""));
+  });
+
+  it("空文本不发首句（后端 prompt 首句约束）", async () => {
+    setupPre();
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "   " } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(sessionApi.createSession).not.toHaveBeenCalled();
+  });
+});

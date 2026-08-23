@@ -10,12 +10,14 @@
  *     §4.E（三入口统一渲染体：全局 / 工作区 / 变更）
  *   - components/sessions/sessions-portal.tsx（task-01 提取的共享门户；本页原
  *     外壳逻辑——机器/供应商 react-query、selectedSessionId 状态、SessionListPanel
- *     + NewSessionForm/SessionPanel 两态、key 重挂载契约、删除后清选中、?session=
- *     深链——已整块迁移至该组件，本页零自持逻辑）
+ *     + SessionPanel 两态、key 重挂载契约、删除后清选中、?session= 深链——已
+ *     整块迁移至该组件，本页零自持逻辑；task-06/07 起右侧=真会话/预会话/空
+ *     门户三分支，NewSessionForm 已退役 D-109）
  *
  * 薄壳职责：仅提供路由文件与默认导出；无参 SessionsPortal = 全局门户
  * （scope 缺省，D-001@v1），行为与提取前的本页零回归。
- * page.test.tsx 18 用例适配归 task-08（本卡不修改测试文件）。
+ * page.test.tsx 18 用例预会话语义迁移归 task-07（2026-08-23-sessions-
+ * workspace-hub）。
  */
 
 import { SessionsPortal } from "@/components/sessions/sessions-portal";

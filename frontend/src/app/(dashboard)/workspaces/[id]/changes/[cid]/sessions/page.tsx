@@ -15,6 +15,13 @@
  * "use client" + params 平铺对象直取，Next 14 无 Promise 解包）。
  * 仅薄壳无业务逻辑——列表/创建绑定/深链选中（?session= 恢复点）全在门户组件
  * （task-01 sessions-portal.tsx）；变更详情入口卡接线归 task-06。
+ *
+ * task-07（2026-08-23-sessions-workspace-hub / FR-06 / D-106 / X-13）：本页
+ * scope（workspaceId+changeId）即 change 入口 preContext 的双传来源——门户在
+ * change scope 下页头渲染「新建会话（本变更）」，选完机器/智能体合成
+ * preContext { workspaceId, changeId, runtimeId }（原 NewSessionForm
+ * bindChangeId 锁定语义由 preContext 继承，表单已退役 D-109）；本页代码零
+ * 变化（scope 已携带双 id，仅注释更新）。
  */
 
 import { SessionsPortal } from "@/components/sessions/sessions-portal";

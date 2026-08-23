@@ -1,46 +1,60 @@
 "use client";
 
 /**
- * SessionListPanel — 左栏会话列表：筛选 + 虚拟滚动 + 紧凑两行条目
- * （2026-08-14-sessions-portal task-11 / FR-02 / D-003 / D-006 / R-04）。
+ * SessionListPanel — 左栏会话列表（2026-08-23-sessions-workspace-hub task-05
+ * 工作区树重构，FR-01/FR-02 / D-103 / D-105 / D-107 / R-03 / R-05 / X-11）。
  *
  * 依据：
- *   - tasks/task-11.md（allowed_paths / implementation / acceptance）
- *   - design.md §2 FR-02、§5 Wave3 SessionListPanel 段、§10 R-04（真分页+过滤）
- *   - prototype-sessions-portal.html renderList / renderSessionPanel（视觉语义）
- *   - FRONTEND_PAGE_STYLE.md（antd 组件 + tailwind 变量、Tag color、空值 —）
+ *   - tasks/task-05.md（allowed_paths / implementation 六点 / acceptance）
+ *   - design.md §2 FR-01/FR-02、§3 非目标（能力边界：状态筛选/批量删除/搜索
+ *     保留，change 独立页左侧维持现状 scope 列表不改树）、§10 R-03/R-05
+ *   - prototype-sessions-workspace-hub.html v2（.filter-bar 两层 tab /
+ *     .ws-group .ws-head 组头 / .machine-sec 机器小节 / .sess-item chips）
+ *   - FRONTEND_PAGE_STYLE.md（antd 组件 + tailwind 语义 token、空值 —）
  *
- * 结构：
- *   筛选区（FR-02 四维）：
- *     - 引擎胶囊 tab（Segmented 全部/Claude/Codex → provider 参数，单选即查）
- *     - 状态下拉（active/ended/failed → status 参数，即查）
- *     - 机器多选（useDaemonMachines；恰好选中 1 台 → machine_id 走 server 侧过滤；
- *       多台 → 后端仅支持单 machine_id（task-16 契约），退化为客户端过滤）
- *     - 标题搜索（回车触发 q 参数，FRONTEND_PAGE_STYLE 查询触发规则）
- *   列表：@tanstack/react-virtual useVirtualizer（D-003 决策），只渲染可视区；
- *     数据经 listAgentSessions 后端真分页（useInfiniteQuery + 加载更多，R-04）。
- *   条目（D-006 紧凑两行）：
- *     第一行 = 状态点 + 标题截断 + 相对时间；
- *     第二行 = chips（机器/引擎/档案/供应商/轮数）——优先读 config_snapshot 直显
- *     免二次查询（Grill C-12）；快照缺省（旧数据 null）回退 runtime/provider
- *     基础信息（机器名经 runtime_id→机器映射、引擎用 session.provider）。
- *   点击条目 → onSelect(session)（页面组装归 task-10，本组件自治）。
+ * 形态分派（scope 判断分支保留）：
+ *   - 全局（缺省）/ workspace scope → 工作区树 WorkspaceTreeList：
+ *     数据一次拉取 limit=500（AGENT_SESSIONS_TREE_FETCH_LIMIT 收口，
+ *     D-103）客户端按 workspace_id 分组；workspace scope 维持既有端点过滤
+ *     （D-003@v2 只多传 workspace_id），树形态为 task-06 workspace 入口
+ *     「深链预展开+滚动到该分组」（FR-06，经 defaultExpandedWorkspaceId）预留；
+ *   - change scope → ChangeScopeFlatList 维持现状平铺列表（design §3 边界 /
+ *     D-106：引擎胶囊 tab、机器多选 Select、全局 useVirtualizer、真分页加载
+ *     更多均只在此分支保留——全局形态已退役，见下）。
  *
- * scope 化（2026-08-22-workspace-sessions-portal task-11 / D-003@v2 v3 返工）：
- *   - 可选 scope 入参（判别联合，见下方 WorkspaceScope/ChangeScope 导出）：
- *     workspace → listAgentSessions({ workspace_id })、change →
- *     listAgentSessions({ workspace_id, change_id })——scope 模式复用全局
- *     端点多传过滤参，真分页/getNextPageParam/加载更多/服务端筛选条（状态/
- *     机器/引擎）/标题搜索与缺省全局完全同一代码路径，仅条目集合按 scope
- *     过滤（后端 task-10 端点支持，SQL 层精确匹配）；
- *   - v2 的三段降级逻辑全部删除（D-003@v2 取代 D-003@v1）：scopeItemToRow
- *     瘦字段降级（全局端点返回全字段 24 键，chips/时间照常渲染）、
- *     filterOwnSessions 客户端仅本人过滤（owner 隔离由端点保证）、筛选条
- *     scope 隐藏（服务端筛选照常可用）；
- *   - queryKey 在全局键结构上加 scope 槽位区分缓存；缺省（不传 scope）行为
- *     零变化（scope ?? null = null）。
+ * 工作区树（全局/workspace 形态）结构：
+ *   筛选区：
+ *     - 标题搜索（回车应用，X-11 保留；树形态为纯视图过滤不进数据层）
+ *     - 状态下拉（X-11 保留：组内过滤 = 视图过滤）
+ *     - 两层筛选 tab（FR-02 / D-107）：第一层机器（含「全部」清空），选中后
+ *       出第二层智能体（⚡Claude Code/◎Codex，含「全部」）；纯视图过滤不进
+ *       数据层；筛选态隐藏机器小节标题；筛选变化重置展开态除当前组（R-05）
+ *   树：
+ *     - 工作区分组手风琴：组头 = 📂名称 + 会话数 + 「＋」新建 + 多选入口 +
+ *       展开箭头；0 会话组仍显示（计数 0）；「非工作区」（workspace_id null）
+ *       固定末尾组同样有「＋」（D-105）；workspace_id 无法解析（工作区已删）
+ *       的会话落「未知工作区」桶（无「＋」——无法在其上新建）
+ *     - 组内机器小节：机器名 + 在线状态点；runtime→machine 映射来自会话
+ *       runtime_id，缺省回退 config_snapshot.machine_name
+ *     - 组内超 50 截断 + 「显示全部」（R-03）
+ *   条目（D-006 紧凑两行沿用）：第一行 = 状态点 + 标题 + 相对时间；第二行 =
+ *     chips（引擎/创建人/档案/供应商/轮数——树形态下工作区/机器信息由组头与
+ *     小节承载，chips 不再重复）；创建人 chip 读 owner_name（D-108@v2，任务
+ *     卡：null 显"—"；本人隔离视图下恒为本人，字段为未来共享场景预留）。
+ *
+ * 退役清单（全局形态，X-11 / task-05 implementation 第 5 点）：
+ *   引擎胶囊 tab（Segmented）→ 两层筛选 tab 智能体层取代；全局 useVirtualizer
+ *   → 分组结构 + 组内截断取代（R-04）；机器多选 Select → 机器 tab 取代。
+ *   三者仅在 change 分支保留原实现。
+ *
+ * 组头回调 onNewInGroup(workspaceId)（props 新增，上下文解析归 task-06）；
+ * defaultExpandedWorkspaceId（受控展开 prop，供 task-06 workspace 深链预展开）。
+ *
+ * 历史（2026-08-14-sessions-portal task-11 / 2026-08-22-workspace-sessions-portal
+ * task-11 v3 返工）：scope 判别联合（WorkspaceScope/ChangeScope 导出）、D-003@v2
+ * 端点过滤、D-006 紧凑两行、ql-20260818-012 批量删除——语义均随本次重构迁移。
  */
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import {
   useInfiniteQuery,
   useQuery,
@@ -54,12 +68,14 @@ import { ApiError } from "@/lib/api";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import { listWorkspaces } from "@/lib/workspaces";
 import {
+  AGENT_SESSIONS_TREE_FETCH_LIMIT,
   listAgentSessions,
   type AgentSessionListResponse,
   type AgentSessionRead,
   type AgentSessionStatus,
   type DaemonMachineRead,
 } from "@/lib/daemon";
+import { cn } from "@/lib/utils";
 
 /* ────────────── scope 判别联合（task-04 provides 契约，供 task-01 门户复用） ────────────── */
 
@@ -76,14 +92,14 @@ export type ChangeScope = {
 /** scope 判别联合（缺省不传 = 全局门户现状）。 */
 export type SessionListScope = WorkspaceScope | ChangeScope;
 
-/** 引擎胶囊 tab（FR-02：全部/claude/codex → provider 参数）。 */
+/** 引擎胶囊 tab（change 分支保留：全部/claude/codex → provider 参数）。 */
 const ENGINE_TABS = [
   { label: "全部", value: "" },
   { label: "Claude", value: "claude" },
   { label: "Codex", value: "codex" },
 ] as const;
 
-/** 状态下拉选项（FR-02：active/ended/failed；空串=不过滤）。 */
+/** 状态下拉选项（active/ended/failed；空串=不过滤）。 */
 const STATUS_OPTIONS = [
   { label: "全部状态", value: "" },
   { label: "活跃", value: "active" },
@@ -91,12 +107,26 @@ const STATUS_OPTIONS = [
   { label: "已失败", value: "failed" },
 ] as const;
 
-/** 后端真分页页大小（R-04）。 */
+/** 后端真分页页大小（R-04，change 分支保留）。 */
 const PAGE_SIZE = 50;
-/** 虚拟行固定高（ql-20260817-002：标题行 + chips 换行至多 3 行，96px 容纳）。 */
+/** 虚拟行固定高（change 分支保留；ql-20260817-002 两行条目 96px 容纳）。 */
 const ROW_HEIGHT = 96;
-/** 视口外预渲染行数（jsdom 无量测时也保证有可断言的条目）。 */
+/** 视口外预渲染行数（change 分支保留）。 */
 const OVERSCAN = 6;
+
+/** 第二层智能体 tab 选项（D-107：claude/codex 固定两档，原型 ⚡/◎ 图标）。 */
+const AGENT_TABS = [
+  { label: "⚡ Claude Code", value: "claude" },
+  { label: "◎ Codex", value: "codex" },
+] as const;
+
+/** 组内截断阈值 + 「显示全部」（R-03）。 */
+const GROUP_ITEM_LIMIT = 50;
+
+/** 「非工作区」固定末尾组 id（分组/展开集合用；区别于 workspace uuid）。 */
+const NO_WORKSPACE_GROUP_ID = "__no_workspace__";
+/** 未知工作区分组 id（会话 workspace_id 已无法解析，如工作区被删）。 */
+const UNKNOWN_WORKSPACE_GROUP_ID = "__unknown_workspace__";
 
 export interface SessionListPanelProps {
   /** 当前选中会话 id（高亮，受控；页面组装归 task-10）。 */
@@ -107,11 +137,22 @@ export interface SessionListPanelProps {
   onDeleteSessions?: (_ids: string[]) => Promise<void>;
   /**
    * task-04（2026-08-22-workspace-sessions-portal）：可选 scope，锁定列表
-   * 到工作区/变更级。D-003@v2（task-11 v3 返工）：scope 仅给全局端点多传
-   * workspace_id/change_id 过滤参，数据源/筛选/分页与缺省完全同构；
-   * 缺省 = 全局门户现状（零变化）。
+   * 到工作区/变更级。D-003@v2：scope 仅给全局端点多传 workspace_id/change_id
+   * 过滤参；本卡（task-05）起全局/workspace 形态为工作区树、change 维持
+   * 现状平铺列表（design §3 边界）。
    */
   scope?: SessionListScope;
+  /**
+   * task-05（FR-01/D-105）：组头「＋」新建回调——workspaceId 为组所在工作区
+   * id，「非工作区」组传 null。上下文解析（筛选 tab > 绑定 > D-005 回退 +
+   * 全部态两步浮层）归 task-06；未传则组头不渲染「＋」。
+   */
+  onNewInGroup?: (_workspaceId: string | null) => void;
+  /**
+   * task-05（FR-06）：默认展开的工作区分组 id（非受控一次性初值；供 task-06
+   * workspace 入口深链预展开——缺省全部分组展开）。
+   */
+  defaultExpandedWorkspaceId?: string;
 }
 
 /* ────────────────────── 纯辅助（组件外便于单测推理） ────────────────────── */
@@ -148,6 +189,11 @@ function engineLabel(engine: string | null | undefined): string {
   return engine || "—";
 }
 
+/** 条目引擎取值（快照优先，回退 session.provider；两层筛选第二层同源）。 */
+function engineValueOf(s: AgentSessionRead): string | null {
+  return s.config_snapshot?.engine ?? s.provider;
+}
+
 /** 状态点颜色（原型 .dot 语义；pending/reconnecting 视作活跃态）。 */
 function statusDotClass(status: AgentSessionStatus): string {
   if (status === "failed") return "bg-destructive";
@@ -155,9 +201,777 @@ function statusDotClass(status: AgentSessionStatus): string {
   return "bg-primary";
 }
 
+/** runtime→机器映射值（机器小节 / 离线判定共用）。 */
+type RuntimeMachineIndex = Map<
+  string,
+  { machine: DaemonMachineRead; online: boolean }
+>;
+
+/** 条目所属机器引用（机器小节分桶用；原型 .machine-sec 语义）。 */
+interface SessionMachineRef {
+  /** 分桶键：可解析时为 machine.id，快照回退时为 name: 前缀。 */
+  key: string;
+  label: string;
+  online: boolean;
+}
+
+/**
+ * 条目 → 机器引用：runtime_id 经 runtimeToMachine 映射（在线状态只能来自
+ * 实时机器列表）；映射缺席（机器列表分页外/已删）回退 config_snapshot.
+ * machine_name（无在线信息，按离线渲染）；两者皆无 → 未知机器。
+ */
+function sessionMachineRef(
+  s: AgentSessionRead,
+  runtimeToMachine: RuntimeMachineIndex,
+): SessionMachineRef {
+  if (s.runtime_id) {
+    const hit = runtimeToMachine.get(s.runtime_id);
+    if (hit) {
+      return {
+        key: hit.machine.id,
+        label: machineLabel(hit.machine),
+        online: hit.online,
+      };
+    }
+  }
+  const snapName = s.config_snapshot?.machine_name;
+  if (snapName) return { key: `name:${snapName}`, label: snapName, online: false };
+  return { key: "__unknown_machine__", label: "未知机器", online: false };
+}
+
+/** 工作区树分组（客户端按 workspace_id 分组，D-103）。 */
+interface TreeGroup {
+  /** 分组 id（workspace uuid / 两个固定哨兵 id）。 */
+  id: string;
+  /** 组所在工作区 id；「非工作区」/「未知工作区」为 null（后者无「＋」）。 */
+  workspaceId: string | null;
+  name: string;
+  /** 是否渲染组头「＋」（D-105：非工作区组也有；未知工作区组无法在其上新建）。 */
+  canNew: boolean;
+  /** 组内全部会话（视图过滤前）。 */
+  sessions: AgentSessionRead[];
+}
+
 /* ────────────────────── 组件 ────────────────────── */
 
-export function SessionListPanel({
+export function SessionListPanel(props: SessionListPanelProps) {
+  // scope 判断分支保留（task-05 implementation 第 1 点）：change 独立页左侧
+  // 维持现状 scope 平铺列表不改树（design §3 / D-106）；全局与 workspace
+  // scope 走工作区树（FR-01/FR-06——task-06 workspace 深链预展开依赖树形态，
+  // 其 allowed_paths 不含本文件，树能力须在本卡落齐）。
+  if (props.scope?.kind === "change") {
+    return <ChangeScopeFlatList {...props} />;
+  }
+  return <WorkspaceTreeList {...props} />;
+}
+
+/** 机器列表 + 工作区列表 + runtime→机器映射（树/平铺两分支共用数据源）。 */
+function useSessionListSharedData() {
+  // 机器列表（两层筛选机器 tab / 机器小节在线点 / chips 回退共用一份数据源）。
+  const { items: machines } = useDaemonMachines({ limit: 100 });
+
+  // 工作区列表（树分组 / chips 工作区名解析）。
+  const workspacesQuery = useQuery({
+    queryKey: ["workspaces", "session-list"],
+    queryFn: () => listWorkspaces({ limit: 100 }),
+    staleTime: 60_000,
+  });
+
+  /** workspace_id → 工作区名称映射。 */
+  const workspaceIdToName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const ws of workspacesQuery.data?.items ?? []) {
+      map.set(ws.id, ws.name);
+    }
+    return map;
+  }, [workspacesQuery.data]);
+
+  /** runtime_id → 所属机器（机器名回退 + 离线判定）。 */
+  const runtimeToMachine = useMemo(() => {
+    const map: RuntimeMachineIndex = new Map();
+    for (const m of machines) {
+      const online = m.status === "online";
+      for (const r of m.runtimes ?? []) {
+        map.set(r.id, { machine: m, online });
+      }
+    }
+    return map;
+  }, [machines]);
+
+  return {
+    machines,
+    workspaces: workspacesQuery.data?.items ?? [],
+    workspaceIdToName,
+    runtimeToMachine,
+  };
+}
+
+/* ────────────────────── 工作区树（全局 / workspace scope） ────────────────────── */
+
+function WorkspaceTreeList({
+  selectedSessionId,
+  onSelect,
+  onDeleteSessions,
+  scope,
+  onNewInGroup,
+  defaultExpandedWorkspaceId,
+}: SessionListPanelProps) {
+  // 两层筛选 tab（D-107）：纯视图过滤，不进数据层（机器/智能体值都是 tab id）。
+  const [filterMachineId, setFilterMachineId] = useState("");
+  const [filterAgent, setFilterAgent] = useState("");
+  // X-11 保留：状态下拉（组内过滤）+ 标题搜索（回车应用）——树形态同为视图过滤。
+  const [status, setStatus] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [appliedQuery, setAppliedQuery] = useState("");
+  // 展开态：折叠集合（null = 未交互，用渲染期默认——缺省全展开；
+  // defaultExpandedWorkspaceId 给定时仅该组展开。默认在渲染期派生而非 effect
+  // 落地：工作区列表晚于会话到达时分组会生长，派生值随之收敛）。
+  const [collapsedIds, setCollapsedIds] = useState<Set<string> | null>(null);
+  // 组头尾随多选态入口（X-11 批量删除保留；一次只在一个组内多选）。
+  const [batchGroupId, setBatchGroupId] = useState<string | null>(null);
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+  // 组内超 50 截断（R-03）的「显示全部」展开集合。
+  const [showAllGroupIds, setShowAllGroupIds] = useState<Set<string>>(new Set());
+
+  const { machines, workspaces, workspaceIdToName, runtimeToMachine } =
+    useSessionListSharedData();
+
+  // D-103：一次拉取 limit=500，客户端按 workspace_id 分组；workspace scope
+  // 维持既有端点过滤（D-003@v2 只多传 workspace_id）。queryKey 沿用全局键
+  // 结构（scope 槽位 + 参数对象），门户软删后按前缀 ["agentSessions"]
+  // invalidate 继续全覆盖。
+  const sessionsQuery = useQuery<AgentSessionListResponse, ApiError>({
+    queryKey: [
+      "agentSessions",
+      "sessionsPortal",
+      scope ?? null,
+      { limit: AGENT_SESSIONS_TREE_FETCH_LIMIT },
+    ],
+    queryFn: () =>
+      listAgentSessions({
+        limit: AGENT_SESSIONS_TREE_FETCH_LIMIT,
+        ...(scope?.workspaceId ? { workspace_id: scope.workspaceId } : {}),
+      }),
+  });
+
+  const sessions = useMemo(
+    () => sessionsQuery.data?.items ?? [],
+    [sessionsQuery.data],
+  );
+  const totalFromServer = sessionsQuery.data?.total ?? 0;
+
+  // 分组：先按 workspace_id 分桶（不依赖名称解析——workspace scope 下端点已
+  // 过滤，名称查询缺席/迟到时分组不落空）；workspace scope → 单组（名字解析
+  // 失败兜底「当前工作区」）；全局 → 工作区列表序（0 会话组仍显示）+ 未知
+  // 工作区桶 + 「非工作区」固定末尾组（D-105；全局形态恒渲染，含 0 会话）。
+  const groups = useMemo<TreeGroup[]>(() => {
+    const byWs = new Map<string, AgentSessionRead[]>();
+    const none: AgentSessionRead[] = [];
+    for (const s of sessions) {
+      const wsId = s.workspace_id;
+      if (!wsId) {
+        none.push(s);
+        continue;
+      }
+      const bucket = byWs.get(wsId);
+      if (bucket) bucket.push(s);
+      else byWs.set(wsId, [s]);
+    }
+    if (scope?.kind === "workspace") {
+      return [
+        {
+          id: scope.workspaceId,
+          workspaceId: scope.workspaceId,
+          name: workspaceIdToName.get(scope.workspaceId) ?? "当前工作区",
+          canNew: true,
+          sessions: byWs.get(scope.workspaceId) ?? [],
+        },
+      ];
+    }
+    const result: TreeGroup[] = workspaces.map((ws) => ({
+      id: ws.id,
+      workspaceId: ws.id,
+      name: ws.name,
+      canNew: true,
+      sessions: byWs.get(ws.id) ?? [],
+    }));
+    // 工作区列表外残留的 workspace_id（如工作区已删）合并进「未知工作区」桶。
+    const leftover: AgentSessionRead[] = [];
+    for (const [wsId, list] of byWs) {
+      if (!workspaceIdToName.has(wsId)) leftover.push(...list);
+    }
+    if (leftover.length > 0) {
+      result.push({
+        id: UNKNOWN_WORKSPACE_GROUP_ID,
+        workspaceId: null,
+        name: "未知工作区",
+        canNew: false,
+        sessions: leftover,
+      });
+    }
+    result.push({
+      id: NO_WORKSPACE_GROUP_ID,
+      workspaceId: null,
+      name: "非工作区",
+      canNew: true,
+      sessions: none,
+    });
+    return result;
+  }, [sessions, workspaces, workspaceIdToName, scope]);
+
+  // 视图过滤（R-05：纯视图，不进数据层）：机器 tab（+ 其下智能体 tab）、状态
+  // 下拉、标题搜索。智能体层仅在选中机器后生效（与第二层 tab 出现条件一致）。
+  const viewFiltered = useMemo(() => {
+    const q = appliedQuery.trim().toLowerCase();
+    return sessions.filter((s) => {
+      if (filterMachineId) {
+        if (sessionMachineRef(s, runtimeToMachine).key !== filterMachineId) {
+          return false;
+        }
+        if (filterAgent && engineValueOf(s) !== filterAgent) return false;
+      }
+      if (status && s.status !== status) return false;
+      if (q && !(s.title ?? "").toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [sessions, filterMachineId, filterAgent, status, appliedQuery, runtimeToMachine]);
+
+  /** 分组 id → 视图过滤后条目。 */
+  const visibleByGroup = useMemo(() => {
+    const visible = new Set(viewFiltered);
+    return new Map(
+      groups.map((g) => [g.id, g.sessions.filter((s) => visible.has(s))]),
+    );
+  }, [groups, viewFiltered]);
+
+  const groupIds = useMemo(() => groups.map((g) => g.id), [groups]);
+
+  /** 当前组（R-05 展开态重置的豁免对象）：选中会话所在分组。 */
+  const currentGroupId = useMemo(() => {
+    if (!selectedSessionId) return null;
+    return (
+      groups.find((g) => g.sessions.some((s) => s.id === selectedSessionId))
+        ?.id ?? null
+    );
+  }, [groups, selectedSessionId]);
+
+  // 生效折叠集合：用户未交互（collapsedIds null）时用渲染期默认——缺省全展开；
+  // defaultExpandedWorkspaceId 给定时仅该组展开。默认在渲染期派生而非 effect
+  // 落地：工作区列表晚于会话到达时分组会生长，派生值随之收敛。
+  const effectiveCollapsedIds = useMemo(() => {
+    if (collapsedIds) return collapsedIds;
+    if (
+      defaultExpandedWorkspaceId &&
+      groups.some((g) => g.id === defaultExpandedWorkspaceId)
+    ) {
+      return new Set(
+        groups.filter((g) => g.id !== defaultExpandedWorkspaceId).map((g) => g.id),
+      );
+    }
+    return new Set<string>();
+  }, [collapsedIds, groups, defaultExpandedWorkspaceId]);
+
+  // defaultExpandedWorkspaceId 初值见上方 effectiveCollapsedIds（渲染期派生）。
+
+  /** R-05：筛选变化重置展开态（除当前组）与组内「显示全部」。 */
+  const resetExpansionForFilter = () => {
+    setShowAllGroupIds(new Set());
+    setCollapsedIds(
+      new Set(groupIds.filter((id) => id !== currentGroupId)),
+    );
+  };
+  const pickMachineTab = (id: string) => {
+    setFilterMachineId(id);
+    setFilterAgent(""); // 第二层随第一层重置（原型 pickMachine 语义）
+    resetExpansionForFilter();
+  };
+  const pickAgentTab = (v: string) => {
+    setFilterAgent(v);
+    resetExpansionForFilter();
+  };
+
+  const toggleGroup = (id: string) => {
+    setCollapsedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  // 组头尾随多选态入口（X-11）：一次一个组；切换清空勾选。
+  const toggleGroupBatch = (id: string) => {
+    setBatchGroupId((prev) => (prev === id ? null : id));
+    setCheckedIds(new Set());
+  };
+  const toggleChecked = (id: string) => {
+    setCheckedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const handleSingleDelete = (id: string, title: string) => {
+    if (!onDeleteSessions || deleting) return;
+    Modal.confirm({
+      title: "删除会话",
+      content: `确定要删除「${title}」吗？删除后将从列表中移除。`,
+      okText: "删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        setDeleting(true);
+        try {
+          await onDeleteSessions([id]);
+        } finally {
+          setDeleting(false);
+        }
+      },
+    });
+  };
+  const handleBatchDelete = (groupName: string) => {
+    if (!onDeleteSessions || deleting || checkedIds.size === 0) return;
+    Modal.confirm({
+      title: "批量删除会话",
+      content: `确定要删除「${groupName}」中选中的 ${checkedIds.size} 个会话吗？删除后将从列表中移除。`,
+      okText: `删除 ${checkedIds.size} 个`,
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        setDeleting(true);
+        try {
+          await onDeleteSessions([...checkedIds]);
+          setCheckedIds(new Set());
+        } finally {
+          setDeleting(false);
+        }
+      },
+    });
+  };
+
+  const visibleTotal = viewFiltered.length;
+
+  return (
+    <div
+      aria-label="会话列表"
+      className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card"
+    >
+      {/* 头部：标题 + 总数（视图过滤后计数；无筛选时 = 拉取条数） */}
+      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+        <h2 className="text-sm font-semibold text-foreground">会话</h2>
+        <span className="text-[11px] text-muted-foreground">共 {visibleTotal} 个</span>
+      </div>
+
+      {/* 筛选区：搜索（回车应用）+ 状态下拉（X-11 保留）+ 两层筛选 tab（D-107） */}
+      <div className="flex flex-col gap-2 border-b border-border px-3 py-2">
+        <div className="flex items-center gap-1.5">
+          <Input
+            size="small"
+            allowClear
+            prefix={<SearchOutlined />}
+            placeholder="搜索会话标题…（回车搜索）"
+            aria-label="搜索会话标题"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            onPressEnter={() => setAppliedQuery(searchInput.trim())}
+          />
+          <Select
+            id="slp-status"
+            size="small"
+            className="w-28 shrink-0"
+            value={status}
+            onChange={(v) => setStatus(v ?? "")}
+            options={STATUS_OPTIONS.map((o) => ({ ...o }))}
+          />
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="shrink-0 text-[11px] text-muted-foreground">机器</span>
+          <FilterPill
+            label="机器tab 全部"
+            active={filterMachineId === ""}
+            onClick={() => pickMachineTab("")}
+          >
+            全部
+          </FilterPill>
+          {machines.map((m) => (
+            <FilterPill
+              key={m.id}
+              label={`机器tab ${machineLabel(m)}`}
+              active={filterMachineId === m.id}
+              onClick={() => pickMachineTab(m.id)}
+            >
+              🖥 {machineLabel(m)}
+            </FilterPill>
+          ))}
+        </div>
+        {/* 第二层：选中机器后出现（原型 #agentTabs display 语义）；「全部」清空智能体 */}
+        {filterMachineId !== "" && (
+          <div
+            className="flex flex-wrap items-center gap-1.5"
+            aria-label="智能体筛选层"
+          >
+            <span className="shrink-0 text-[11px] text-muted-foreground">
+              智能体
+            </span>
+            <FilterPill
+              label="智能体tab 全部"
+              active={filterAgent === ""}
+              onClick={() => pickAgentTab("")}
+            >
+              全部
+            </FilterPill>
+            {AGENT_TABS.map((t) => (
+              <FilterPill
+                key={t.value}
+                label={`智能体tab ${t.label}`}
+                active={filterAgent === t.value}
+                onClick={() => pickAgentTab(t.value)}
+              >
+                {t.label}
+              </FilterPill>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 树区（分组结构 + 组内截断替代全局虚拟滚动，R-04） */}
+      {sessionsQuery.isError ? (
+        <div className="m-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
+          加载会话失败：{sessionsQuery.error?.message ?? "未知错误"}
+          <Button
+            size="small"
+            className="ml-2"
+            onClick={() => void sessionsQuery.refetch()}
+          >
+            重新加载
+          </Button>
+        </div>
+      ) : sessionsQuery.isLoading ? (
+        <div className="flex flex-1 items-center justify-center">
+          <Spin data-testid="sessions-loading" />
+        </div>
+      ) : (
+        <div
+          data-testid="session-tree"
+          className="min-h-0 flex-1 overflow-y-auto p-2"
+        >
+          {groups.map((group) => {
+            const groupVisible = visibleByGroup.get(group.id) ?? [];
+            const batchActive = batchGroupId === group.id;
+            const groupCheckedIds = groupVisible.filter((s) =>
+              checkedIds.has(s.id),
+            );
+            const allChecked =
+              groupVisible.length > 0 &&
+              groupCheckedIds.length === groupVisible.length;
+            return (
+              <WorkspaceGroupNode
+                key={group.id}
+                group={group}
+                visibleSessions={groupVisible}
+                expanded={!effectiveCollapsedIds.has(group.id)}
+                onToggleExpand={() => toggleGroup(group.id)}
+                onNew={onNewInGroup}
+                batchActive={batchActive}
+                onToggleBatch={() => toggleGroupBatch(group.id)}
+                batchEnabled={Boolean(onDeleteSessions) && groupVisible.length > 0}
+                allChecked={allChecked}
+                checkedCount={groupCheckedIds.length}
+                onToggleSelectAll={() =>
+                  setCheckedIds(
+                    allChecked
+                      ? new Set()
+                      : new Set(groupVisible.map((s) => s.id)),
+                  )
+                }
+                onBatchDelete={() => handleBatchDelete(group.name)}
+                deleting={deleting}
+                checkedIds={checkedIds}
+                onToggleChecked={toggleChecked}
+                selectedSessionId={selectedSessionId}
+                onSelect={onSelect}
+                onDelete={
+                  onDeleteSessions
+                    ? (id, title) => handleSingleDelete(id, title)
+                    : undefined
+                }
+                showAll={showAllGroupIds.has(group.id)}
+                onToggleShowAll={() =>
+                  setShowAllGroupIds((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(group.id)) next.delete(group.id);
+                    else next.add(group.id);
+                    return next;
+                  })
+                }
+                hideMachineTitles={filterMachineId !== ""}
+                runtimeToMachine={runtimeToMachine}
+              />
+            );
+          })}
+          {visibleTotal === 0 && (
+            <div className="flex items-center justify-center px-4 py-6 text-center text-xs text-muted-foreground">
+              没有符合条件的会话
+            </div>
+          )}
+          {/* R-03 提示：一次拉取上限外的余量（个人使用评估 <200，极端兜底可见） */}
+          {totalFromServer > sessions.length && (
+            <div className="px-2 pb-1 text-center text-[11px] text-muted-foreground">
+              仅显示最近 {sessions.length} 条（共 {totalFromServer} 条）
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 两层筛选 tab 的胶囊按钮（原型 .ftab：圆角胶囊，选中态主色描边+底色）。 */
+function FilterPill({
+  active,
+  onClick,
+  label,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  /** 无障碍名（两层都有「全部」，测试/读屏需锚定层级）。 */
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        "shrink-0 rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+        active
+          ? "border-primary bg-primary/10 font-medium text-primary"
+          : "border-border bg-muted/40 text-muted-foreground hover:border-primary/50",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** 工作区分组节点（组头手风琴 + 机器小节 + 条目，原型 .ws-group 结构）。 */
+function WorkspaceGroupNode({
+  group,
+  visibleSessions,
+  expanded,
+  onToggleExpand,
+  onNew,
+  batchActive,
+  onToggleBatch,
+  batchEnabled,
+  allChecked,
+  checkedCount,
+  onToggleSelectAll,
+  onBatchDelete,
+  deleting,
+  checkedIds,
+  onToggleChecked,
+  selectedSessionId,
+  onSelect,
+  onDelete,
+  showAll,
+  onToggleShowAll,
+  hideMachineTitles,
+  runtimeToMachine,
+}: {
+  group: TreeGroup;
+  visibleSessions: AgentSessionRead[];
+  expanded: boolean;
+  onToggleExpand: () => void;
+  onNew?: (_workspaceId: string | null) => void;
+  batchActive: boolean;
+  onToggleBatch: () => void;
+  batchEnabled: boolean;
+  allChecked: boolean;
+  checkedCount: number;
+  onToggleSelectAll: () => void;
+  onBatchDelete: () => void;
+  deleting: boolean;
+  checkedIds: ReadonlySet<string>;
+  onToggleChecked: (_id: string) => void;
+  selectedSessionId?: string | null;
+  onSelect?: (_session: AgentSessionRead) => void;
+  onDelete?: (_id: string, _title: string) => void;
+  showAll: boolean;
+  onToggleShowAll: () => void;
+  /** 筛选态隐藏机器小节标题（FR-02：已隐含——条目按机器过滤后小节名冗余）。 */
+  hideMachineTitles: boolean;
+  runtimeToMachine: RuntimeMachineIndex;
+}) {
+  // 组内超 50 截断（R-03）：截断作用于分组（跨机器小节），小节由可见条目派生。
+  const truncated = !showAll && visibleSessions.length > GROUP_ITEM_LIMIT;
+  const shownSessions = truncated
+    ? visibleSessions.slice(0, GROUP_ITEM_LIMIT)
+    : visibleSessions;
+
+  // 机器小节：首现序分桶（后端按最近活跃倒序 → 最近活跃的机器排前）。
+  const sections = useMemo(() => {
+    const list: { key: string; label: string; online: boolean; sessions: AgentSessionRead[] }[] =
+      [];
+    const index = new Map<
+      string,
+      { key: string; label: string; online: boolean; sessions: AgentSessionRead[] }
+    >();
+    for (const s of shownSessions) {
+      const ref = sessionMachineRef(s, runtimeToMachine);
+      let sec = index.get(ref.key);
+      if (!sec) {
+        sec = { key: ref.key, label: ref.label, online: ref.online, sessions: [] };
+        index.set(ref.key, sec);
+        list.push(sec);
+      }
+      sec.sessions.push(s);
+    }
+    return list;
+  }, [shownSessions, runtimeToMachine]);
+
+  return (
+    <div className="mb-2 overflow-hidden rounded-lg border border-border bg-card">
+      {/* 组头：展开箭头 + 📂名称 + 会话数 + 「＋」新建 + 多选入口（原型 .ws-head） */}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        aria-label={`工作区分组 ${group.name}`}
+        onClick={onToggleExpand}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") onToggleExpand();
+        }}
+        className="flex cursor-pointer select-none items-center gap-2 px-2.5 py-2 hover:bg-muted/40"
+      >
+        <span
+          aria-hidden
+          className={`text-[10px] text-muted-foreground transition-transform ${
+            expanded ? "rotate-90" : ""
+          }`}
+        >
+          ▶
+        </span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
+          📂 {group.name}
+        </span>
+        <span className="shrink-0 text-[11px] text-muted-foreground">
+          {visibleSessions.length} 个会话
+        </span>
+        {/* 「＋」新建（D-105：非工作区组同样有——workspaceId 传 null；未知工作区
+            组 id 不可解析，不渲染）；上下文解析归 task-06，未接线前不显示入口。 */}
+        {group.canNew && onNew && (
+          <button
+            type="button"
+            aria-label={`在 ${group.name} 新建会话`}
+            title={`在 ${group.name} 新建会话`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onNew(group.workspaceId);
+            }}
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-primary/60 bg-primary/10 text-[13px] leading-none text-primary transition-colors hover:bg-primary hover:text-primary-foreground"
+          >
+            ＋
+          </button>
+        )}
+        {/* X-11 批量删除保留：组头尾随多选态入口（aria-pressed 标记激活）。 */}
+        {batchEnabled && (
+          <button
+            type="button"
+            aria-label={`多选 ${group.name}`}
+            aria-pressed={batchActive}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleBatch();
+            }}
+            className={`shrink-0 rounded border px-1.5 py-0.5 text-[11px] leading-4 transition-colors ${
+              batchActive
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border bg-muted/40 text-muted-foreground hover:border-primary/50"
+            }`}
+          >
+            {batchActive ? "退出多选" : "多选"}
+          </button>
+        )}
+      </div>
+      {expanded && (
+        <div className="pb-1">
+          {/* 多选态操作条：全选本组 / 删除选中（ql-20260818-012 语义随组化） */}
+          {batchActive && (
+            <div className="flex items-center gap-2 border-y border-border bg-muted/30 px-2.5 py-1.5">
+              <Button size="small" onClick={onToggleSelectAll}>
+                {allChecked ? "取消全选" : "全选本组"}
+              </Button>
+              <Button
+                size="small"
+                disabled={checkedCount === 0 || deleting}
+                loading={deleting}
+                onClick={onBatchDelete}
+              >
+                删除选中（{checkedCount}）
+              </Button>
+            </div>
+          )}
+          {sections.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-muted-foreground">（暂无会话）</p>
+          ) : (
+            sections.map((sec) => (
+              <div key={sec.key} className="px-2 pb-1">
+                {/* 机器小节标题：机器名 + 在线状态点（筛选态隐藏，FR-02） */}
+                {!hideMachineTitles && (
+                  <div
+                    className="flex items-center gap-1.5 px-1.5 pb-0.5 pt-1.5 text-[11px] text-muted-foreground"
+                    aria-label={`机器小节 ${sec.label}`}
+                  >
+                    <Badge status={sec.online ? "success" : "default"} />
+                    <span className="truncate">
+                      {sec.label}
+                      {sec.online ? "" : "（离线）"}
+                    </span>
+                  </div>
+                )}
+                {sec.sessions.map((s) => {
+                  const title = s.title?.trim() || "未命名会话";
+                  return (
+                    <SessionRow
+                      key={s.id}
+                      variant="tree"
+                      session={s}
+                      title={title}
+                      selected={s.id === selectedSessionId}
+                      runtimeToMachine={runtimeToMachine}
+                      onSelect={onSelect}
+                      batchMode={batchActive}
+                      checked={checkedIds.has(s.id)}
+                      onToggleCheck={() => onToggleChecked(s.id)}
+                      onDelete={onDelete ? () => onDelete(s.id, title) : undefined}
+                    />
+                  );
+                })}
+              </div>
+            ))
+          )}
+          {truncated && (
+            <div className="border-t border-border px-3 py-1.5 text-center">
+              <Button size="small" onClick={onToggleShowAll}>
+                显示全部（共 {visibleSessions.length} 条）
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ────────────────────── change scope 现状平铺列表（design §3 边界 / D-106） ────────────────────── */
+
+function ChangeScopeFlatList({
   selectedSessionId,
   onSelect,
   onDeleteSessions,
@@ -175,23 +989,8 @@ export function SessionListPanel({
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
 
-  // 机器列表（筛选多选 + chips 机器名回退 / 离线判定共用一份数据源）。
-  const { items: machines } = useDaemonMachines({ limit: 100 });
-
-  // 工作区列表（chips 工作区名称解析）。
-  const workspacesQuery = useQuery({
-    queryKey: ["workspaces", "session-list"],
-    queryFn: () => listWorkspaces({ limit: 100 }),
-    staleTime: 60_000,
-  });
-  /** workspace_id → 工作区名称映射。 */
-  const workspaceIdToName = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const ws of workspacesQuery.data?.items ?? []) {
-      map.set(ws.id, ws.name);
-    }
-    return map;
-  }, [workspacesQuery.data]);
+  const { machines, workspaceIdToName, runtimeToMachine } =
+    useSessionListSharedData();
 
   /** server 侧过滤参数（task-16 契约：runtime_id/machine_id/provider/q/status）。 */
   const serverParams = useMemo(
@@ -206,11 +1005,8 @@ export function SessionListPanel({
     [engine, status, machineIds, appliedQuery],
   );
 
-  // task-11 / D-003@v2（v3 返工）：scope 与全局共用同一条 InfiniteQuery——
-  // queryKey 在全局键结构上加 scope 槽位区分缓存（null = 全局缺省；门户软删
-  // 后按前缀 ["agentSessions"] invalidate 继续全覆盖），queryFn 只多传
-  // workspace_id/change_id 过滤参，真分页/getNextPageParam/加载更多与缺省
-  // 完全同构。
+  // D-003@v2：scope 与全局共用同一条 InfiniteQuery——queryKey 加 scope 槽位
+  // 区分缓存，queryFn 只多传 workspace_id/change_id 过滤参，真分页与缺省同构。
   const sessionsQuery = useInfiniteQuery<
     AgentSessionListResponse,
     ApiError,
@@ -222,7 +1018,6 @@ export function SessionListPanel({
     queryFn: ({ pageParam }) =>
       listAgentSessions({
         ...serverParams,
-        // D-003@v2：scope 仅多传过滤参（owner/scope 过滤都是端点职责）。
         ...(scope?.workspaceId ? { workspace_id: scope.workspaceId } : {}),
         ...(scope?.kind === "change" ? { change_id: scope.changeId } : {}),
         // 首页省略 offset（与 listAgentSessions 默认参数一致）。
@@ -237,28 +1032,12 @@ export function SessionListPanel({
     },
   });
 
-  /** runtime_id → 所属机器（机器名回退 + 离线划线判定）。 */
-  const runtimeToMachine = useMemo(() => {
-    const map = new Map<
-      string,
-      { machine: DaemonMachineRead; online: boolean }
-    >();
-    for (const m of machines) {
-      const online = m.status === "online";
-      for (const r of m.runtimes ?? []) {
-        map.set(r.id, { machine: m, online });
-      }
-    }
-    return map;
-  }, [machines]);
-
   const loadedItems = useMemo(
     () => sessionsQuery.data?.pages.flatMap((p) => p.items) ?? [],
     [sessionsQuery.data],
   );
 
   // 机器多选（>1）：后端单 machine_id 装不下 → 对已加载页客户端过滤。
-  // D-003@v2：scope 特例已删——scope 模式 q/筛选全走服务端，与全局同构。
   const items = useMemo(() => {
     if (machineIds.length <= 1) return loadedItems;
     const selected = new Set(machineIds);
@@ -271,8 +1050,7 @@ export function SessionListPanel({
 
   const total = sessionsQuery.data?.pages.at(-1)?.total ?? 0;
 
-  // ql-20260818-012：删除处理（单条/批量共用 onDeleteSessions 回调）。
-  // ql-20260818-013：加二次确认（Modal.confirm）。
+  // ql-20260818-012/013：删除处理（单条/批量共用，Modal.confirm 二次确认）。
   const handleSingleDelete = (id: string, title: string) => {
     if (!onDeleteSessions || deleting) return;
     Modal.confirm({
@@ -319,7 +1097,7 @@ export function SessionListPanel({
     });
   };
 
-  // 虚拟滚动（D-003）：固定行高（estimateSize），jsdom/真实环境行为一致。
+  // 虚拟滚动（change 分支保留）：固定行高，jsdom/真实环境行为一致。
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const virtualizer = useVirtualizer({
     count: items.length,
@@ -354,9 +1132,7 @@ export function SessionListPanel({
         <span className="text-[11px] text-muted-foreground">共 {total} 个</span>
       </div>
 
-      {/* 筛选区（FR-02 四维；选择型即查、文本回车查）。
-          D-003@v2（task-11 v3 返工）：scope 模式筛选条照常渲染（v2 的隐藏
-          特例已删），全部走服务端参数，与全局完全同构。 */}
+      {/* 筛选区（FR-02 四维；选择型即查、文本回车查）——change 独立页维持现状。 */}
       <div className="flex flex-col gap-2 border-b border-border px-3 py-2">
         <Input
           size="small"
@@ -479,6 +1255,7 @@ export function SessionListPanel({
               return [
                 <SessionRow
                   key={session.id}
+                  variant="flat"
                   session={session}
                   title={title}
                   selected={selected}
@@ -495,8 +1272,7 @@ export function SessionListPanel({
               ];
             })}
           </div>
-          {/* 后端真分页（R-04）：未取完时手动加载下一页。D-003@v2：scope
-              模式同键同路径（v2 的单页合成已删），加载更多照常出现。 */}
+          {/* 后端真分页（R-04）：未取完时手动加载下一页。 */}
           {sessionsQuery.hasNextPage && (
             <div className="border-t border-border px-3 py-2 text-center">
               <Button
@@ -517,13 +1293,16 @@ export function SessionListPanel({
 /* ────────────────────── 紧凑两行条目（D-006） ────────────────────── */
 
 interface SessionRowProps {
+  /** 形态：tree = 工作区树条目（chips 省工作区/机器，加创建人）；flat = 平铺列表条目（含虚拟定位）。 */
+  variant: "tree" | "flat";
   session: AgentSessionRead;
   title: string;
   selected: boolean;
-  runtimeToMachine: Map<string, { machine: DaemonMachineRead; online: boolean }>;
-  workspaceIdToName: Map<string, string>;
-  virtualStart: number;
-  virtualSize: number;
+  runtimeToMachine: RuntimeMachineIndex;
+  workspaceIdToName?: Map<string, string>;
+  /** 仅 flat：虚拟滚动定位（tree 为文档流）。 */
+  virtualStart?: number;
+  virtualSize?: number;
   onSelect?: (_session: AgentSessionRead) => void;
   /** ql-20260818-012：批量模式/勾选/删除 */
   batchMode?: boolean;
@@ -533,6 +1312,7 @@ interface SessionRowProps {
 }
 
 function SessionRow({
+  variant,
   session,
   title,
   selected,
@@ -558,7 +1338,7 @@ function SessionRow({
     (machineHit ? machineLabel(machineHit.machine) : null);
   // 离线判定只能来自实时机器列表（快照是建会话时的名字，无在线状态）。
   const machineOffline = machineHit ? !machineHit.online : false;
-  const engineValue = snapshot?.engine ?? session.provider;
+  const engineValue = engineValueOf(session);
 
   return (
     <div
@@ -570,14 +1350,20 @@ function SessionRow({
       onKeyDown={(e) => {
         if (e.key === "Enter") batchMode ? onToggleCheck?.() : onSelect?.(session);
       }}
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        width: "100%",
-        height: virtualSize,
-        transform: `translateY(${virtualStart}px)`,
-      }}
+      style={
+        variant === "flat" &&
+        virtualStart !== undefined &&
+        virtualSize !== undefined
+          ? {
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: virtualSize,
+              transform: `translateY(${virtualStart}px)`,
+            }
+          : undefined
+      }
       className={`flex cursor-pointer flex-col justify-center gap-1 overflow-hidden border-b border-border px-3 py-1.5 ${
         selected
           ? "border-l-2 border-l-primary bg-primary/5"
@@ -586,7 +1372,7 @@ function SessionRow({
     >
       {/* 第一行：状态点 + 标题截断 + 相对时间 + 删除按钮（hover） */}
       <div className="group flex items-center gap-1.5">
-        {/* ql-20260818-012：批量模式 → 勾选框替代点击选会话 */}
+        {/* 批量模式 → 勾选框替代点击选会话 */}
         {batchMode ? (
           <input
             type="checkbox"
@@ -622,20 +1408,23 @@ function SessionRow({
           </button>
         )}
       </div>
-      {/* 第二行：chips（工作区/机器/引擎/档案/供应商/轮数）——ql-20260817-002 改
-          flex-wrap 自动换行 2-3 行（单行压挤更看不清）；Tag 紧凑样式保留、
-          长名 max-w+truncate 防单个长名占整行，截断悬停有 title 全名。 */}
+      {/* 第二行：chips——tree 形态：引擎/创建人/档案/供应商/轮数（工作区/机器
+          由组头与机器小节承载，不重复）；flat 形态：工作区/机器/引擎/档案/
+          供应商/轮数（现状）。Tag 紧凑样式保留、长名 max-w+truncate 防单个
+          长名占整行，截断悬停有 title 全名。 */}
       <div className="flex flex-wrap items-center gap-0.5 pl-2.5">
-        {session.workspace_id && workspaceIdToName.has(session.workspace_id) && (
-          <Tag
-            title={workspaceIdToName.get(session.workspace_id)}
-            className="m-0 max-w-[120px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
-            color="cyan"
-          >
-            📂 {workspaceIdToName.get(session.workspace_id)}
-          </Tag>
-        )}
-        {machineName && (
+        {variant === "flat" &&
+          session.workspace_id &&
+          workspaceIdToName?.has(session.workspace_id) && (
+            <Tag
+              title={workspaceIdToName.get(session.workspace_id)}
+              className="m-0 max-w-[120px] truncate rounded-sm px-1 py-0 text-[10px] leading-4"
+              color="cyan"
+            >
+              📂 {workspaceIdToName.get(session.workspace_id)}
+            </Tag>
+          )}
+        {variant === "flat" && machineName && (
           <Tag
             title={machineOffline ? `${machineName}（离线）` : machineName}
             className={`m-0 max-w-[120px] truncate rounded-sm px-1 py-0 text-[10px] leading-4 ${
@@ -652,6 +1441,15 @@ function SessionRow({
         >
           {engineLabel(engineValue)}
         </Tag>
+        {variant === "tree" && (
+          <Tag
+            title={`创建人 ${session.owner_name ?? "—"}`}
+            className="m-0 shrink-0 rounded-sm px-1 py-0 text-[10px] leading-4"
+            color="geekblue"
+          >
+            👤 {session.owner_name ?? "—"}
+          </Tag>
+        )}
         {snapshot?.profile_name && (
           <Tag
             title={snapshot.profile_name}

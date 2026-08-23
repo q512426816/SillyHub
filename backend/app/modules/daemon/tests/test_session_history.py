@@ -212,7 +212,8 @@ class TestListSessions:
         r = await client.get("/api/daemon/sessions?limit=0", headers=auth_headers)
         assert r.status_code == 422
         # limit too large
-        r = await client.get("/api/daemon/sessions?limit=101", headers=auth_headers)
+        # （2026-08-23-sessions-workspace-hub task-01 / D-103：上限 le=100 → le=500）
+        r = await client.get("/api/daemon/sessions?limit=501", headers=auth_headers)
         assert r.status_code == 422
         # negative offset
         r = await client.get("/api/daemon/sessions?offset=-1", headers=auth_headers)

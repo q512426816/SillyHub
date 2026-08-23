@@ -16,10 +16,14 @@
  * 结构：
  *   - 对外导出 SessionPanel：按 mode 分发，两个分支在渲染层互斥（本函数不调用
  *     任何 hook）。page 模式渲染内部子组件 SessionPanelPage（自 sessions/page.tsx
- *     页内 SessionPanel 整块搬运，行为零回归）；dialog 模式渲染内部子组件
- *     SessionPanelDialog（自 interactive-session-panel.tsx 逐段搬运 + 队列化改造，
- *     见下）；task-07 将把 interactive-session-panel.tsx 改为薄适配层透传
- *     mode="dialog"（diff-analysis §5 替换策略，本文件为其渲染主体）；
+ *     页内 SessionPanel 整块搬运，行为零回归；task-03 / 2026-08-23-sessions-
+ *     workspace-hub 新增：sessionId=null 预会话空态——与真会话同构渲染 +
+ *     会话作用域 effect null 守卫清单（R-01）+ 首句 createSession（D-102，成功
+ *     后父层切 sessionId 状态机自然接管，失败保留输入可重试 R-02））；dialog
+ *     模式渲染内部子组件 SessionPanelDialog（自 interactive-session-panel.tsx
+ *     逐段搬运 + 队列化改造，见下）；task-07 将把 interactive-session-panel.tsx
+ *     改为薄适配层透传 mode="dialog"（diff-analysis §5 替换策略，本文件为其
+ *     渲染主体）；
  *   - dialog 分支（task-05 第二步）：SSE 建流 / attach 轮询 1.5s×10 / initialTurns
  *     预填 + legacy 反投影（R1/D13）/ provider·model 选择器头部 / 新建·结束·
  *     团队分析按钮 / offlineReadOnly / 终止中横幅等 chrome 与状态机自 ISP 搬运；
@@ -90,6 +94,7 @@ import {
   type LlmProviderRoleMapping,
 } from "@/lib/api/llm-providers";
 import { listWorkspaces } from "@/lib/workspaces";
+import { getChange } from "@/lib/changes";
 import {
   createSession,
   endSession,
@@ -107,6 +112,7 @@ import {
   streamSession,
   type DaemonMachineRead,
   type InteractiveProvider,
+  type SessionCreateResponse,
   type SessionDialogRead,
   type SessionPermissionRequest,
   type SessionRunRead,
@@ -116,6 +122,21 @@ import {
   type TeamMissionTriggerRequest,
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
+
+/**
+ * 预会话上下文（task-03 / 2026-08-23-sessions-workspace-hub design §7）：
+ * 入口/组头「＋」的解析产物，SessionPanel 空态渲染（锁定上下文行）与首句
+ * createSession 共用。机器+引擎经 runtimeId 已定（绑定优先/D-005 回退/筛选
+ * tab/浮层选择），创建后不可换（D-004@v2）。
+ */
+export interface SessionPreContext {
+  /** null = 非工作区分组（不指定工作区）。 */
+  workspaceId: string | null;
+  /** 变更入口独立页传入（change 级隐含 workspace，调用方须显式双传，X-13）。 */
+  changeId?: string | null;
+  /** 目标 runtime id（首句 createSession 的 runtime_id）。 */
+  runtimeId: string;
+}
 
 /**
  * 共享会话面板 props（diff-analysis.md §4.2 草案逐字落地，task-07 适配层按此编写）。
@@ -128,7 +149,8 @@ export interface SessionPanelProps {
   mode: "page" | "dialog";
 
   // ── 会话标识（两模式共用）──────────────────────────────────────────
-  /** page 模式：必填，选中的既有会话 id（父级同时用作 key）。
+  /** page 模式：选中的既有会话 id（父级同时用作 key）；null = 预会话空态
+   *  （task-03 / D-101：与真会话同构，首句发送才 createSession 原地接管）。
    *  dialog 模式：null = idle 新建（首条消息走 createSession，原 attachSessionId
    *  为 undefined 的语义）；非 null = attach 续聊（原 attachSessionId）。
    *  〔prop〕会话 identity 必须外部驱动——两面板现状都由父级选中态决定，
@@ -150,6 +172,15 @@ export interface SessionPanelProps {
   /** page 可选：会话终态 / 配置切换 / session_ended 后刷新左侧列表。
    *  〔prop〕纯回调。 */
   onSessionListRefresh?: () => void;
+
+  /** page 可选：预会话上下文（task-03）。sessionId=null 时用于渲染锁定上下文行
+   *  与首句 createSession（runtime_id 必需；workspace_id/change_id 条件下发）。
+   *  change 入口须显式双传 workspaceId + changeId（X-13）。〔prop〕 */
+  preContext?: SessionPreContext;
+
+  /** page 可选：预会话首句创建成功上报（task-03）。父层据此切换 sessionId →
+   *  面板状态机自然接管（门户接线归 task-06）。〔prop〕 */
+  onPreSessionCreated?: (_resp: SessionCreateResponse) => void;
 
   // ── dialog 模式专属（对应 InteractiveSessionPanelProps）────────────
   /** dialog 必需：在线引擎名列表（claude/codex）。〔prop〕消费方从 runtimes 派生
@@ -198,15 +229,17 @@ export interface SessionPanelProps {
  */
 export function SessionPanel(props: SessionPanelProps) {
   if (props.mode === "page") {
-    // page 模式 sessionId 语义必填（父级仅在选中会话后渲染本面板并配 key）；
-    // null 属调用方契约违规，防御性不渲染（不发起任何请求）。
-    if (!props.sessionId) return null;
+    // task-03（D-101）：sessionId=null = 预会话空态——不再防御性 return null，
+    // 改为渲染与真会话同构的空态（首句发送才 createSession 原地接管，用户硬
+    // 约束"不要独立页面"）；非 null 语义不变（父级选中态驱动）。
     return (
       <SessionPanelPage
         sessionId={props.sessionId}
         machines={props.machines ?? []}
         llmProviders={props.llmProviders ?? []}
         onSessionListRefresh={props.onSessionListRefresh}
+        preContext={props.preContext}
+        onPreSessionCreated={props.onPreSessionCreated}
       />
     );
   }
@@ -221,11 +254,16 @@ export function SessionPanel(props: SessionPanelProps) {
 
 /** page 模式窄化 props（外层 SessionPanel 已归一可选 props，见分发处）。 */
 interface SessionPanelPageProps {
-  sessionId: string;
+  /** task-03：null = 预会话空态（同构渲染 + 全 effect null 守卫，R-01）。 */
+  sessionId: string | null;
   machines: DaemonMachineRead[];
   llmProviders: LlmProviderRead[];
   /** 会话终态 / 配置切换后刷新左侧列表。 */
   onSessionListRefresh?: () => void;
+  /** 预会话上下文（sessionId=null 时渲染锁定上下文行 + 首句 createSession）。 */
+  preContext?: SessionPreContext;
+  /** 预会话首句创建成功上报（父层切 sessionId → 状态机自然接管）。 */
+  onPreSessionCreated?: (_resp: SessionCreateResponse) => void;
 }
 
 const MAX_PROMPT_LEN = 8000;
@@ -420,14 +458,22 @@ function SessionPanelPage({
   machines,
   llmProviders,
   onSessionListRefresh,
+  preContext,
+  onPreSessionCreated,
 }: SessionPanelPageProps) {
   const qc = useQueryClient();
   const notify = useNotify();
 
   // ── 会话详情（配置三列 + 状态 + current_run_id）────────────────────────
+  // task-03（R-01）：预会话态（sessionId=null）不发起 getAgentSession(null)——
+  // enabled 守卫停轮询；queryFn 内再防御性窄化（enabled 走漏也不发脏请求）。
   const detailQuery = useQuery({
     queryKey: ["agentSessionDetail", sessionId],
-    queryFn: () => getAgentSession(sessionId),
+    queryFn: () => {
+      if (!sessionId) throw new Error("预会话态不请求会话详情");
+      return getAgentSession(sessionId);
+    },
+    enabled: sessionId !== null,
     // pending/reconnecting 期间轮询直到 active/终态（attach 恢复语义）。
     refetchInterval: (query) => {
       const st = query.state.data?.status;
@@ -450,6 +496,26 @@ function SessionPanelPage({
     );
   }, [session?.workspace_id, workspacesQuery.data]);
 
+  // ── task-07（D-106）：change 入口预会话上下文行加显变更名 ────────────────
+  // X-13 双传契约保证 changeId 存在时 workspaceId 必在；真会话态 / 非 change
+  // 预会话（changeId 空）enabled 守卫停请求。title 缺省回退 change_key。
+  const preChangeQuery = useQuery({
+    queryKey: [
+      "change",
+      "preSessionCtx",
+      preContext?.workspaceId,
+      preContext?.changeId,
+    ],
+    queryFn: () => {
+      if (!preContext?.workspaceId || !preContext.changeId) {
+        throw new Error("变更名解析缺 workspaceId/changeId（X-13 双传契约）");
+      }
+      return getChange(preContext.workspaceId, preContext.changeId);
+    },
+    enabled: Boolean(preContext?.workspaceId && preContext?.changeId),
+    staleTime: 60_000,
+  });
+
   // ── 实时 turn 状态机（对齐 interactive-session-panel 的 SSE 处理）───────
   const [turnState, setTurnState] = useState<TurnState>(INITIAL_TURN_STATE);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -464,13 +530,15 @@ function SessionPanelPage({
   // ql-20260822-010：视图模式（对话/进度）按会话持久化——原实现刷新后回默认
   // 「对话」，与聊天中切到的视图不一致。挂载后回读（effect 内 set，避免 SSR
   // hydration mismatch）；切换时写入。dialog 适配层无刷新恢复场景，不持久化。
+  // task-03（R-01）：预会话态无会话级持久化键，跳过（转真会话时随依赖重跑）。
   useEffect(() => {
+    if (!sessionId) return;
     setViewMode(readPersistedViewMode(sessionId));
   }, [sessionId]);
   const changeViewMode = useCallback(
     (m: "conversation" | "all") => {
       setViewMode(m);
-      writePersistedViewMode(sessionId, m);
+      if (sessionId) writePersistedViewMode(sessionId, m);
     },
     [sessionId],
   );
@@ -479,6 +547,13 @@ function SessionPanelPage({
   const [pendingAttachments, setPendingAttachments] = useState<AttachmentRead[]>([]);
   const clearAttachmentsRef = useRef<(() => void) | null>(null);
   const [reopening, setReopening] = useState(false);
+
+  // ── task-03（2026-08-23-sessions-workspace-hub）：预会话首句创建态 ────────
+  // creating 在途（发送按钮 spinner + 防重复提交）；失败内联错误（R-02：输入
+  // 保留可重试，不切真会话态）。dialog idle 先例是"先清输入再建、失败即丢"，
+  // 这里改为成功后才清空（Grill X-02）。
+  const [preCreating, setPreCreating] = useState(false);
+  const [preError, setPreError] = useState<string | null>(null);
 
   // ── task-11（2026-08-22-team-session-unify）：会话内团队触发 + TeamTaskBlock ──
   // 任务列表/轮询共用 hook；弹层开关与预填、触发在途、错误文案、chip 收回为面板态。
@@ -521,6 +596,10 @@ function SessionPanelPage({
   }, []);
 
   useEffect(() => {
+    // task-03（R-01）：预会话态不建流/不预取历史（getAgentSessionLogs /
+    // listSessionRuns 均零调用）。首句创建成功后父层切 sessionId，本 effect 随
+    // 依赖变化自然接管；string→null 时上方 cleanup 已 close 旧流。
+    if (!sessionId) return;
     let cancelled = false;
     setTurnState(INITIAL_TURN_STATE);
     setErrorMsg(null);
@@ -705,7 +784,10 @@ function SessionPanelPage({
   }, [sessionId]);
 
   // ── pending AskUser 对话 + 问答历史恢复（REST，SSE 只推实时增量）────────
+  // task-03（R-01）：对齐 dialog 版守卫（:2129/:2157 先例）——预会话态不发起
+  // fetchPendingDialogs / fetchSessionDialogHistory 恢复拉取。
   useEffect(() => {
+    if (!sessionId) return;
     let cancelled = false;
     void fetchPendingDialogs(sessionId)
       .then((dialogs) => {
@@ -774,6 +856,51 @@ function SessionPanelPage({
   const machineName = machineHit
     ? machineHit.display_alias?.trim() || machineHit.hostname
     : session?.config_snapshot?.machine_name ?? null;
+
+  // ── task-03（D-101）：预会话派生（preContext → 上下文行 + 输入门控）──────
+  // 与真会话的 machineHit/machineOnline 同构：runtimeId 反查所属机器与引擎；
+  // 找不到机器（列表分页外/已删除）不武断判离线（既有 machineOnline 同语义）。
+  const preRuntimeHit = useMemo(
+    () =>
+      preContext
+        ? (machines
+            .flatMap((m) => m.runtimes ?? [])
+            .find((r) => r.id === preContext.runtimeId) ?? null)
+        : null,
+    [machines, preContext],
+  );
+  const preMachine = useMemo(
+    () =>
+      preContext
+        ? (machines.find((m) =>
+            (m.runtimes ?? []).some((r) => r.id === preContext.runtimeId),
+          ) ?? null)
+        : null,
+    [machines, preContext],
+  );
+  const preMachineName = preMachine
+    ? preMachine.display_alias?.trim() || preMachine.hostname
+    : null;
+  const preMachineOnline = preMachine ? preMachine.status === "online" : true;
+  const preEngine = preRuntimeHit?.provider ?? null;
+  const preAgentLabel = preEngine
+    ? (PROVIDER_META[preEngine]?.label ?? preEngine)
+    : null;
+  // 上下文行工作区名（与真会话 workspaceName 同源 workspacesQuery；预会话态
+  // 该 query 仍启用——页面级数据，非会话作用域）。
+  const preWorkspaceName = useMemo(() => {
+    const wsId = preContext?.workspaceId ?? null;
+    if (!wsId) return null;
+    return workspacesQuery.data?.items.find((ws) => ws.id === wsId)?.name ?? null;
+  }, [preContext, workspacesQuery.data]);
+  // 上下文行变更名（task-07 / D-106）：change 入口加显——title 回退 change_key，
+  // 查询中/失败显 —（FRONTEND_PAGE_STYLE 空值统一）。
+  const preChangeName = useMemo(() => {
+    if (!preContext?.changeId) return null;
+    return preChangeQuery.data?.title ?? preChangeQuery.data?.change_key ?? null;
+  }, [preContext?.changeId, preChangeQuery.data]);
+  // 附件门控（D-6 引擎门控同构）：预会话无会话实体，按目标 runtime 引擎判定。
+  const preAttachmentsDisabled = preEngine !== "claude";
 
   const status = session?.status ?? null;
   const ended = status === "ended" || status === "failed";
@@ -1003,6 +1130,9 @@ function SessionPanelPage({
    */
   const sendFromQueue = useCallback(
     async (prompt: string, attachmentIds: string[]) => {
+      // task-03（R-01）：预会话态无会话可 inject——sessionActive=false 时 hook
+      // 不投递，此处防御性短路（对齐 dialog 版 ?? "" + status 守卫先例）。
+      if (!sessionId) return;
       const placeholderId = `__pending_inject_${Date.now()}__`;
       // ql-20260821-002：占位轮合成标记行——与 handleSend 入队侧逐字同构
       // （后端落库标记行同款，真实日志到达后无感接管）；kind/name 查
@@ -1067,7 +1197,10 @@ function SessionPanelPage({
 
   const { queue, enqueue, removeEntry, retryEntry, isQueueFull } =
     useMessageQueue({
-      sessionId,
+      // task-03（R-01）：预会话态队列不激活不投递（sessionActive=false——
+      // session 为 null 时 status 派生 null；对齐 dialog 版 view.sessionId ?? ""
+      // + status!=="active" 先例）。
+      sessionId: sessionId ?? "",
       sessionActive,
       hasCurrentRun: running,
       onSend: sendFromQueue,
@@ -1092,6 +1225,8 @@ function SessionPanelPage({
    */
   const handleTeamTrigger = useCallback(
     async (payload: TeamMissionTriggerRequest) => {
+      // task-03（R-01）：预会话态无会话可挂 mission（team 行为会话绑定）。
+      if (!sessionId) return;
       setTeamTriggering(true);
       setTeamError(null);
       try {
@@ -1108,6 +1243,46 @@ function SessionPanelPage({
     [sessionId, refreshTeamMissions, closeTeamPopover],
   );
 
+  /**
+   * task-03（D-102）：预会话首句创建——发送动作触发 createSession（后端 prompt
+   * 首句约束由发送满足，零协议改动）。复用 dialog idle 先例（:2359-2421）但两处
+   * 改造（Grill X-02）：① 传 runtime_id（机器+引擎已定）而非 dialog 的 provider；
+   * ② 成功后才清空输入（dialog 现状先清后建、失败输入即丢）——失败保留输入 +
+   * 内联错误可重试（R-02），不切真会话态。成功经 onPreSessionCreated 上报父层
+   * （父层切 sessionId → 本组件状态机自然接管，门户接线归 task-06）。
+   * 注：createSession 契约无 attachment_ids（R3 先例）——附件 chips 随成功清空，
+   * 首句只发文本。
+   */
+  const handlePreSessionSend = useCallback(
+    async (prompt: string) => {
+      if (!preContext || preCreating) return;
+      setPreCreating(true);
+      setPreError(null);
+      try {
+        const resp = await createSession({
+          runtime_id: preContext.runtimeId,
+          prompt,
+          manual_approval: true,
+          ask_user_only: true,
+          ...(preContext.workspaceId
+            ? { workspace_id: preContext.workspaceId }
+            : {}),
+          ...(preContext.changeId ? { change_id: preContext.changeId } : {}),
+        });
+        // R-02：成功才清空（失败路径输入保留在 catch 之外，可原地重试）。
+        setInput("");
+        setPendingAttachments([]);
+        clearAttachmentsRef.current?.();
+        onPreSessionCreated?.(resp);
+      } catch (err) {
+        setPreError(err instanceof ApiError ? err.message : "创建会话失败，请重试");
+      } finally {
+        setPreCreating(false);
+      }
+    },
+    [preContext, preCreating, onPreSessionCreated],
+  );
+
   // task-03（design §3.3 状态机）：发送 = 统一 enqueue。active 且无 currentRun
   // 时 hook 立即投递（行为等效原直发）；running / reconnecting / pending 时排队，
   // 由 hook 在 turn_completed / status→active 后自动投递。原直发路径（restoring/
@@ -1117,6 +1292,13 @@ function SessionPanelPage({
     const prompt = input.trim();
     // 2026-08-20 task-12（D-7）：附件非空允许空文本（看图说话）；纯文本仍守卫。
     if ((!prompt && pendingAttachments.length === 0) || prompt.length > MAX_PROMPT_LEN) return;
+    // task-03（D-102）：预会话首句 → createSession 直发（不走队列——无既有
+    // session 可附着，R2 先例）；首句必须非空（后端 prompt 首句约束）。
+    if (!sessionId) {
+      if (!prompt) return;
+      void handlePreSessionSend(prompt);
+      return;
+    }
     // task-11（D-004 四路等价）：/team 前缀拦截——不直接发送，弹层确认后目标文本
     // 随下条消息发出（objective 预填去前缀文本）。仅 Claude 会话且可发消息时拦截。
     const teamCmd = parseTeamCommand(prompt);
@@ -1148,10 +1330,11 @@ function SessionPanelPage({
     setInput("");
     setPendingAttachments([]);
     clearAttachmentsRef.current?.();
-  }, [input, session, ended, machineOnline, isQueueFull, pendingAttachments, enqueue, sessionEngine, openTeamPopover]);
+  }, [input, sessionId, session, ended, machineOnline, isQueueFull, pendingAttachments, enqueue, sessionEngine, openTeamPopover, handlePreSessionSend]);
 
   const handleInterrupt = useCallback(async () => {
-    if (!session || session.status !== "active" || !turnState.currentRunId) return;
+    // task-03（R-01）：预会话态无可打断轮（按钮本就禁用，防御性短路）。
+    if (!sessionId || !session || session.status !== "active" || !turnState.currentRunId) return;
     const localRunId = turnState.currentRunId;
     setTurnState((prev) => ({
       ...prev,
@@ -1192,6 +1375,8 @@ function SessionPanelPage({
   }, [session, turnState.currentRunId, sessionId]);
 
   const handleReopen = useCallback(async () => {
+    // task-03（R-01）：预会话态无会话可重开（入口本就不渲染，防御性短路）。
+    if (!sessionId) return;
     setReopening(true);
     try {
       await reopenSession(sessionId);
@@ -1215,7 +1400,8 @@ function SessionPanelPage({
 
   const handleResend = useCallback(
     async (prompt: string) => {
-      if (!session || session.status !== "active") return;
+      // task-03（R-01）：预会话态无失败轮可重发（防御性短路）。
+      if (!sessionId || !session || session.status !== "active") return;
       if (!machineOnline || turnState.currentRunId) return;
       // ql-20260821-002：占位轮/历史轮 prompt 含附件标记行——重发前剥离
       // （附件不随重发复活，仅回填原文）。
@@ -1328,6 +1514,136 @@ function SessionPanelPage({
   );
 
   // ── 渲染 ───────────────────────────────────────────────────────────────
+  // task-03（D-101）：预会话空态——与真会话同构（同面板头 / 时间线容器 / 输入
+  // 区结构，用户硬约束"不要独立页面"），仅内容空 + 多锁定上下文行（原型
+  // startPre：.ctx-line + .empty-hint）。会话作用域查询/effect 已在上方逐项
+  // null 守卫（R-01：detailQuery 轮询 / SSE 建流 / dialogs 恢复 / 队列投递 /
+  // team missions）；team 触发行与配置条为会话绑定语义，预会话态不渲染。
+  if (!sessionId) {
+    const preSendingDisabled = !preContext || !preMachineOnline;
+    const prePlaceholder = !preContext
+      ? "请先选择机器与智能体…"
+      : !preMachineOnline
+        ? "机器离线，输入不可用…"
+        : "发送第一句话开始对话…（Enter 发送 · Shift+Enter 换行）";
+    return (
+      <section
+        ref={panelRef}
+        className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card"
+        aria-label="会话面板"
+        data-testid="session-pre-session-panel"
+      >
+        {/* 面板头（同构）：新会话标题 + 机器/工作区 chips + 打断按钮（禁用）。 */}
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-sm font-semibold text-foreground">
+              新会话
+            </span>
+            {preMachineName && (
+              <span className="hidden shrink-0 text-[11px] text-muted-foreground sm:inline">
+                🖥 {preMachineName}
+              </span>
+            )}
+            {preWorkspaceName && (
+              <span className="hidden shrink-0 rounded-sm bg-cyan-50 px-1.5 py-0.5 text-[11px] text-cyan-700 sm:inline">
+                📂 {preWorkspaceName}
+              </span>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {/* task-09：子代理目录（空 turns 返回 null，同构占位）。 */}
+            <SubagentCatalog turns={[]} onJumpTo={handleJumpToSubagent} />
+            <Button
+              size="small"
+              icon={<Ban className="h-3 w-3" />}
+              disabled
+              title="发送第一句话创建会话后可用"
+            >
+              打断本轮
+            </Button>
+          </div>
+        </header>
+
+        {/* 锁定上下文行（D-104 完全只读：纯文本 span，无任何可交互元素）。
+            原型 .ctx-line：📂 工作区 / 🖥 机器 / ⚡ 智能体 + 🔒 锁定提示。
+            task-07（D-106）：change 入口在最前加显 🧩 变更名（仅 changeId 存在时）。 */}
+        <div
+          data-testid="pre-session-context"
+          aria-label="预会话上下文（已锁定）"
+          className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 border-b border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground"
+        >
+          {preContext?.changeId && (
+            <span>🧩 {preChangeName ?? "—"}</span>
+          )}
+          <span>
+            📂{" "}
+            {preContext?.workspaceId
+              ? (preWorkspaceName ?? "未命名工作区")
+              : "不指定（非工作区）"}
+          </span>
+          <span>🖥 {preMachineName ?? "—"}</span>
+          <span>⚡ {preAgentLabel ?? "—"}</span>
+          <span
+            className="ml-auto shrink-0"
+            title="上下文已锁定，创建会话后不可更换"
+          >
+            🔒 上下文已锁定 · 创建会话后不可更换
+          </span>
+        </div>
+
+        {/* 空时间线（同构容器类名 + 原型 .empty-hint 文案）。 */}
+        <div
+          data-testid="turn-timeline-scroll"
+          className="min-h-0 flex-1 overflow-y-auto bg-background px-5 py-5"
+        >
+          <div className="flex h-full min-h-[260px] flex-col items-center justify-center text-center">
+            <p className="text-sm font-medium text-foreground">
+              发送第一句话开始对话
+            </p>
+            <p className="mt-1 max-w-[260px] text-[11px] text-muted-foreground">
+              第一句话发送时创建会话 · 供应商与档案可在会话内随时切换
+            </p>
+          </div>
+        </div>
+
+        {/* 输入区（同构）：ctx 用量行 + 完整输入（含附件，引擎门控同构 D-6）。 */}
+        <div className="flex shrink-0 flex-col bg-card">
+          <div className="px-5 pt-3">
+            <CtxUsageBar
+              usedTokens={0}
+              roleMapping={null}
+              fallbackModel={null}
+              providerId={null}
+            />
+          </div>
+          <SessionInputBar
+            value={input}
+            onChange={setInput}
+            onSend={handleSend}
+            disabled={preSendingDisabled}
+            placeholder={prePlaceholder}
+            creating={preCreating}
+            attachmentsDisabled={preAttachmentsDisabled}
+            multimodalDowngraded={false}
+            onAttachmentsChange={setPendingAttachments}
+            registerClearAttachments={(fn) => {
+              clearAttachmentsRef.current = fn;
+            }}
+          />
+          {/* R-02：创建失败内联错误（输入保留在上框，点发送即重试）。 */}
+          {preError && (
+            <p
+              role="alert"
+              aria-label="创建会话错误"
+              className="mx-5 mb-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive"
+            >
+              {preError}（输入已保留，可直接重试）
+            </p>
+          )}
+        </div>
+      </section>
+    );
+  }
   if (detailQuery.isError) {
     return (
       <div className="m-6 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive" aria-label="会话详情加载失败">

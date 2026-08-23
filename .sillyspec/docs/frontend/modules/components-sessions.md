@@ -4,40 +4,39 @@ doc_type: module-card
 module_id: components-sessions
 author: qinyi
 created_at: 2026-08-18 01:45:00
+updated_at: 2026-08-23 10:10:26
 ---
 
 # 会话门户组件（components-sessions）
 
 ## 定位
-会话门户（`/sessions`）的功能组件（`components/sessions/`），2026-08-14-sessions-portal 变更派生 + 切换静默化系列 quick 迭代（ql-20260817-009/010）：
-- `SessionsPortal`（2026-08-22-workspace-sessions-portal 起）：共享门户组件——左列表+右两态+SessionPanel page 模式+页级数据，可选 `scope`（WorkspaceScope/ChangeScope 判别联合，类型自 SessionListPanel 导出）派生列表数据源/新建绑定/标题后缀；`?session=` 深链（挂载解析一次，getAgentSession 验证，无效静默）；三入口（/sessions、/workspaces/[id]/sessions、/workspaces/[id]/changes/[cid]/sessions）渲染同一组件。
-- `SessionListPanel`：左栏会话列表（筛选 + 虚拟滚动 + 后端真分页）；可选 `scope` 时切 listWorkspaceAgentSessions(include_ended)/listChangeSessions 整列合成单页（加载更多隐藏）、客户端仅本人过滤（author 缺失视为本人，D-003）、隐藏服务端筛选保留本地标题搜索、瘦字段降级（chips 缺字段不渲染/时间回退 last_active_at）。
-- `NewSessionForm`：新建会话表单——聊天优先版式（ql-20260822-010）：大输入框居中 + 配置摘要 chips 行 + ⓪-④四选择器收进「修改配置」折叠区（默认收起，联动逻辑不变）；可选 `bindWorkspaceId`（锁定：选择器不渲染直传，chips 常显「🔒 工作区已锁定」）/`bindChangeId`（change_id+workspace_id 双传）。
+会话门户（`/sessions`）的功能组件（`components/sessions/`），2026-08-14-sessions-portal 变更派生 + 切换静默化系列 quick 迭代（ql-20260817-010）+ 2026-08-23-sessions-workspace-hub 工作区中心化重构：
+- `SessionsPortal`：共享门户组件——左列表 + 右**三分支**（真会话 / 预会话 / 空门户态）+ SessionPanel page 模式 + 页级数据，可选 `scope`（WorkspaceScope/ChangeScope 判别联合，类型自 SessionListPanel 导出）派生列表数据源/标题后缀；`?session=` 深链（挂载解析一次，getAgentSession 验证，无效静默落空门户态）；三入口（/sessions、/workspaces/[id]/sessions、/workspaces/[id]/changes/[cid]/sessions）渲染同一组件。2026-08-23-sessions-workspace-hub task-06/07 起双态接线：组头「＋」/change 页头按钮 → PreSessionPicker 浮层 → preContext 预会话态（详见契约摘要）。
+- `SessionListPanel`（2026-08-23-sessions-workspace-hub task-05 重构）：左栏**工作区树**——全局/workspace scope 走两层筛选 tab + 工作区分组手风琴 + 机器小节（数据一次拉取 limit=500 客户端分组，D-103）；change scope 维持现状平铺列表（引擎胶囊/机器多选/虚拟滚动/真分页只在此分支保留）。
+- `PreSessionPicker`（2026-08-23-sessions-workspace-hub task-04 新增）：全部态新建的两步轻选择浮层（①在线机器 → ②智能体，两步即达）。
+- ~~`NewSessionForm`~~ / ~~`WorkspaceSessionPicker`~~：**已退役删除**（2026-08-23-sessions-workspace-hub task-07，D-109/X-12）——新建入口收敛为「组头＋→浮层→预会话态首句创建」，表单/双列选择器文件与 import 已删；`resolveDefaultMachineId`/`NEW_SESSION_MACHINE_LS_KEY` 迁入 sessions-portal.tsx。
 - `SessionConfigBar`：会话顶部配置控件条（档案/供应商点选即切换）。
 - `ctx-usage-bar.tsx`：上下文用量环 + 供应商额度胶囊。
 
 组件自治约定：只收 props / 只调本域接口，不做 SSE 订阅与页面路由——组装归 `app-sessions-pages` 的 SessionPanel 页面（task-10）。
 
 ## 契约摘要
-- `SessionListPanel`：props `{ selectedSessionId?, onSelect? }`。
-  - 筛选四维（FR-02）：
-    - 引擎胶囊 tab（Segmented 全部/claude/codex → provider 参数，单选即查）。
-    - 状态下拉（active/ended/failed → status 参数，即查）。
-    - 机器多选（`useDaemonMachines`；恰好选中 1 台走 server 侧 machine_id，多台退化客户端过滤——后端仅支持单 machine_id）。
-    - 标题搜索（回车触发 q 参数）。
-  - 列表：`useInfiniteQuery` + `listAgentSessions` 后端真分页（PAGE_SIZE=50，加载更多）。
-  - 渲染：`useVirtualizer` 虚拟滚动只渲染可视区（ROW_HEIGHT=96 容纳 chips 至多 3 行、OVERSCAN=6）。
-  - 条目紧凑两行：第一行=状态点+标题截断+相对时间；第二行=chips（机器/引擎/档案/供应商/轮数）。
-  - chips 优先读 `config_snapshot` 直显免二次查询；快照缺省（旧数据 null）回退 runtime/provider 基础信息（机器名经 runtime_id→机器映射）。
-  - 导出 `formatRelativeTime(iso, now?)`（中文相对时间，空/非法→—）。
-- `NewSessionForm`：props `{ onCreated?(session, values) }`，导出 `NewSessionFormValues`。
-  - 版式（ql-20260822-010 聊天优先）：默认值自动解析后 chips 行摘要当前配置（机器/智能体主色强调 + title「创建会话后不可更换」），输入首句点「开始会话」即按当前默认值创建；⓪-④ 选择器在「修改配置」折叠区内（默认收起），点任一 chip 或按钮展开。
-  - ①机器（必选，仅在线）：`useDaemonMachines`；默认走 `resolveDefaultMachineId(machines, sessions)` 三级回退。
-  - ②智能体（必选）：选中机器 runtimes 过滤在线 + provider∈{claude,codex}（`SESSION_SUPPORTED_PROVIDERS`）；不支持的 provider 置灰「暂不支持会话」；切机器重置选择。
-  - ③供应商（可选）：`listProviders` + 「不指定（本机默认）」（`NO_PROVIDER_VALUE=""`）；engine≠claude 锁定（Codex 无会话级供应商）。
-  - ④档案（可选）：`useMineAgentProfiles` 跨工作区聚合，不做引擎过滤；Codex 智能体下标注「人格暂不支持」。
-  - 提交 `createSession({ runtime_id, agent_profile_id?, llm_provider_id?, prompt, manual_approval: true, ask_user_only: true })`；未选项不进请求体。
-  - 导出 `NEW_SESSION_MACHINE_LS_KEY`（localStorage 记住上次机器）。
+- `SessionsPortal`（task-06/07 双态接线）：props `{ scope? }`；右侧三分支优先级 = 真会话（selectedSessionId → `SessionPanel mode="page" key={id}`）> 预会话（preContext → `SessionPanel sessionId=null` + preContext + onPreSessionCreated，key=`pre:{workspaceId ?? "-"}:{runtimeId}`）> 空门户态（`data-testid="sessions-empty-portal"` 轻引导，深链无效/无参亦落此）。
+  - 组头「＋」onNewInGroup → 统一弹 PreSessionPicker（task-05 筛选 tab 态收在列表组件内未暴露受控 prop → 设计的「tab 上下文直取」降级为全部态统一浮层，意图经浮层默认高亮承接，D-107 降级说明）；onPick 合成 preContext `{ workspaceId(组), runtimeId }` 并清选中。
+  - change scope（task-07）：左侧平铺列表无组头「＋」→ 页头 actions「新建会话（本变更）」按钮走同一浮层，onPick 显式双传 `{ workspaceId, changeId, runtimeId }`（X-13，原 bindChangeId 契约由 preContext 继承）；其余 scope 页头按钮已移除（X-12，actions 空）。
+  - 状态机（FR-03 零残留）：首句创建成功（onPreSessionCreated）→ setSelectedSessionId（key 重挂载状态机自然接管）+ 清 preContext + invalidate `["agentSessions"]`；用户列表 onSelect 切走 → 清 preContext（首句未发 = 零服务端实体）。
+  - workspace 深链预展开（FR-06）：scope.workspaceId → SessionListPanel `defaultExpandedWorkspaceId`。
+  - 页级数据：`useDaemonMachines`（面板离线判定 + 浮层数据源共用）、`listProviders`（CtxUsageRing 分母）；删除逐条 `deleteAgentSession` + invalidate 前缀 `["agentSessions"]`（覆盖全局/scope 单一路径）。
+  - 底部纯函数区：`NEW_SESSION_MACHINE_LS_KEY` + `resolveDefaultMachineId(machines, sessions)`（D-005 三级回退，task-06 自 NewSessionForm 迁入、task-07 删源后此处为唯一实现）。
+- `SessionListPanel`（task-05 工作区树）：props `{ selectedSessionId?, onSelect?, onDeleteSessions?, scope?, onNewInGroup?, defaultExpandedWorkspaceId? }`；`scope?.kind === "change"` → ChangeScopeFlatList 平铺现状，否则 → WorkspaceTreeList。
+  - 工作区树数据：`useQuery` 一次拉取 `listAgentSessions({ limit: AGENT_SESSIONS_TREE_FETCH_LIMIT=500 })`（D-103，>500 余量底部提示「仅显示最近 N 条」）；workspace scope 维持端点过滤（D-003@v2 只多传 workspace_id，单组、名称解析失败兜底「当前工作区」）；分组 = 客户端按 workspace_id 分桶 + 工作区列表序（0 会话组仍显示）+「未知工作区」桶（workspace_id 无法解析，无「＋」）+「非工作区」固定末尾组（有「＋」，workspaceId 传 null，D-105）。
+  - 筛选（纯视图过滤不进数据层）：标题搜索（回车应用）+ 状态下拉（X-11 保留）+ 两层筛选 tab（D-107）——第一层机器胶囊（含「全部」清空），选中后出第二层智能体（⚡Claude Code/◎Codex + 「全部」）；筛选态隐藏机器小节标题；筛选变化重置展开态与「显示全部」（豁免当前选中会话所在组，R-05）。
+  - 树渲染：工作区分组手风琴（组头=▶展开箭头+📂名称+会话数+「＋」新建+多选入口）→ 组内机器小节（机器名+在线 Badge 点，runtime_id→机器映射缺席回退 config_snapshot.machine_name）→ 条目；组内超 50 截断 + 「显示全部」（GROUP_ITEM_LIMIT=50，R-03）。
+  - 保留能力（X-11）：状态下拉/标题搜索（树形态=组内视图过滤）；批量删除（组头「多选」入口→组内勾选/全选本组/删除选中，一次一个组）；单条 hover 删除。全局 `useVirtualizer` 已退役（R-04，分组结构+组内截断取代）。
+  - 退役清单（全局形态，X-11）：引擎胶囊 tab（Segmented）→ 两层筛选 tab 智能体层取代；机器多选 Select → 机器 tab 取代；三者仅在 change 分支保留原实现（PAGE_SIZE=50 真分页/ROW_HEIGHT=96 虚拟滚动/引擎胶囊四维筛选均平铺分支专属）。
+  - 条目紧凑两行（D-006）：第一行=状态点+标题截断+相对时间+hover 删除；第二行 chips——树形态=引擎/**创建人（👤 owner_name，null 显"—"，D-108@v2）**/档案/供应商/轮数（工作区/机器由组头与小节承载不重复）；flat 形态=工作区/机器/引擎/档案/供应商/轮数（现状）。chips 优先读 `config_snapshot` 直显，缺省回退基础字段。
+  - 导出 `WorkspaceScope`/`ChangeScope`/`SessionListScope`（scope 判别联合）、`formatRelativeTime(iso, now?)`。
+- `PreSessionPicker`：props `{ open, machines, onCancel, onPick }`——纯展示受控组件（零数据请求，machines 父层注入）。① 仅在线机器卡（Badge+别名||hostname+心跳时间+在线智能体数）；② 该机器 runtimes 过滤 provider∈{claude,codex}（`SESSION_SUPPORTED_PROVIDERS`）且在线，默认 Claude Code 高亮（主色边框+「默认」Tag）；选完智能体立即 `onPick(runtimeId)` 关闭（两步即达无确认按钮）；取消/遮罩点击仅 onCancel（open 受控父层，重开重置回第一步）；空态引导（无在线机器/无可用智能体）。
 - `SessionConfigBar`：props `{ sessionId, running, ended, agentProfileId, llmProviderId, configSnapshot, runtimeId?, engine?, switchPrompt?, onSwitched? }`。
   - 四控件（机器/智能体/供应商/档案）展示会话当前配置（`agent_sessions.config_snapshot` 为展示名来源）。
   - 可切：档案、供应商——idle 点开下拉点选即切换（ql-20260817-009 去掉确认行/提示消息步骤）→ `injectSession(sessionId, prompt, 带新配置)`。
@@ -58,7 +57,17 @@ created_at: 2026-08-18 01:45:00
 
 ## 关键逻辑
 ```
-resolveDefaultMachineId:                        // D-005 三级回退
+SessionsPortal 右侧三分支（task-06/07）:        // 优先级：真会话 > 预会话 > 空门户
+  selectedSessionId → SessionPanel key={id}（key 变化清 SSE/轮询/队列）
+  preContext        → SessionPanel sessionId=null（首句 createSession 原地接管）
+  else              → 空门户态轻引导
+  组头＋/change 页头按钮 → PreSessionPicker → onPick 合成 preContext（清选中）
+  首句创建成功（onPreSessionCreated）→ 切 sessionId + 清 preContext
+    + invalidate ["agentSessions"]（新会话落对应分组顶部）
+  列表 onSelect 切走 → 清 preContext（首句未发 = 零服务端残留，FR-03）
+
+resolveDefaultMachineId（sessions-portal.tsx 底部，D-005 三级回退；task-06 自
+  NewSessionForm 迁入，源已删此处唯一实现）:
   无在线机器 → null
   localStorage 上次选择（仍在线）→ saved
   sessions 按 last_active_at 排序 → runtimeToMachine 命中在线机 → mid
@@ -78,10 +87,12 @@ CtxUsageRing 分母: roleMapping.one_m → 1_000_000
 - 切换语义（设计定版）：配置切换走 `injectSession` 带新配置+prompt，session 维持 active 不重建；空 prompt 切换不产生消息与模型回应（切换静默化）。
 - 供应商「不指定（本机默认）」用空串 `""` 作 Select 值，提交侧必须转 `llm_provider_id: ""`，未选项从请求体剔除。
 - 智能体显示名规则：主显引擎名（Claude Code/Codex），`runtime.name` 默认是机器主机名不得作主标签；有自定义别名时「别名 · 引擎名」并呈。
-- 聊天优先版式（ql-20260822-010）：测试渲染需先点「修改配置」展开 ⓪-④（new-session-form.test 的 `renderForm` 默认 expand: true 承担）；机器/智能体 chips 的 title「创建会话后不可更换」是醒目契约（建会话即绑定 runtime）。
-- `config_snapshot` 是条目 chips 的免查询直显源，旧会话快照为 null 时回退基础字段渲染。
+- 树形态筛选是纯视图过滤（机器/智能体 tab、状态、搜索均不进数据层）；两层筛选 tab 态收在 SessionListPanel 内部未暴露受控 prop——组头「＋」上下文直取因此降级为统一浮层（D-107），后续若给列表加受控 prop 可恢复 tab 上下文直取。
+- `owner_name` chip 读后端列表注入字段（本人隔离视图下恒为本人，为未来共享场景预留，D-108@v2）；null 显「—」。
+- `config_snapshot` 是条目 chips 的免查询直显源，旧会话快照为 null 时回退基础字段渲染；机器小节的 runtime→机器映射缺席（分页外/已删机器）回退快照 machine_name（按离线渲染）。
 - ctx 用量环分子（usedTokens）由父层累计传入；改分母逻辑须同步 `MODEL_CTX_WINDOW_TABLE` 与 `DEFAULT_CTX_WINDOW_TOKENS`。
-- 空值统一显示 `—`、日期显式 `zh-CN`（项目规则）；机器多选过滤受后端仅支持单 machine_id 限制。
+- 空值统一显示 `—`、日期显式 `zh-CN`（项目规则）；机器多选过滤（change 平铺分支）受后端仅支持单 machine_id 限制。
+- NewSessionForm/WorkspaceSessionPicker 已删（2026-08-23-sessions-workspace-hub）：旧 import/测试引用须改走 PreSessionPicker + 预会话态链路，勿复活表单形态。
 
 ## 人工备注
 

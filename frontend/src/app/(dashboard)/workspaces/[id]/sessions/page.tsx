@@ -9,8 +9,10 @@
  *   - design.md §4.A（workspaceId 取自路由 params.id 组装 WorkspaceScope）、
  *     §4.E（原 dialog 模式两栏装配组件自本页解绑，本页不再消费）
  *   - components/sessions/sessions-portal.tsx（task-01 共享门户：scope 派生
- *     workspace 级列表数据源 + NewSessionForm 锁定 bindWorkspaceId + 标题
- *     「智能体会话 · 工作区」后缀；?session= 深链恢复）
+ *     workspace 级列表数据源 + 组头「＋」preContext 带组 workspaceId（原
+ *     NewSessionForm bindWorkspaceId 锁定语义由 preContext 继承，表单已随
+ *     task-07 退役 D-109）+ 标题「智能体会话 · 工作区」后缀；?session= 深链
+ *     恢复 + workspace 入口预展开）
  *
  * 原 dialog 模式会话装配组件自本页解绑，组件本体退役归 task-07。本页不内嵌
  * 任何会话列表/面板逻辑（全在门户组件）。

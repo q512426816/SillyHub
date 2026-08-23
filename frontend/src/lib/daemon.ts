@@ -1231,6 +1231,14 @@ export type AgentSessionListResponse = Omit<
   items: AgentSessionRead[];
 };
 
+/**
+ * 工作区树一次拉取上限（2026-08-23-sessions-workspace-hub task-05 / D-103@v1）。
+ * 后端 router le=500 已放宽（task-01），列表组件用它做单次全量拉取后客户端按
+ * workspace_id 分组；超出部分由组件层「组内 50 截断 + 显示全部」兜底（R-03）。
+ * 收口在 API client 侧，避免调用方各写一个魔数。
+ */
+export const AGENT_SESSIONS_TREE_FETCH_LIMIT = 500;
+
 /** GET /api/daemon/sessions 过滤参数（分页 + 2026-08-14-sessions-portal FR-02 筛选）。 */
 export interface AgentSessionListParams {
   limit?: number;

@@ -8823,6 +8823,8 @@ export interface components {
             config_snapshot?: {
                 [key: string]: unknown;
             } | null;
+            /** Owner Name */
+            owner_name?: string | null;
         };
         /** ApiKeyCreateRequest */
         ApiKeyCreateRequest: {

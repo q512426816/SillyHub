@@ -1,45 +1,52 @@
 /**
- * SessionListPanel 单测（2026-08-14-sessions-portal task-11 / FR-02 / D-003 / D-006 / R-04）。
+ * SessionListPanel 单测（2026-08-23-sessions-workspace-hub task-05 工作区树重构
+ * / FR-01 / FR-02 / D-103 / D-105 / D-107 / R-03 / R-05 / X-11）。
  *
  * 依据：
  *   - components/sessions/session-list-panel.tsx（本 task 实现）
- *   - tasks/task-11.md acceptance：四维筛选组合走后端过滤参数、虚拟滚动只渲染
- *     可视区、chips 读 config_snapshot、点击条目回调 onSelect
+ *   - tasks/task-05.md acceptance：分组/小节/chips（创建人 null→"—"）渲染正确、
+ *     非工作区末尾组可新建回调、两层筛选过滤生效且「全部」清空、筛选态隐藏
+ *     小节标题、状态筛选/批量删除/搜索保留、组内 50 截断+显示全部、
+ *     scope=workspace/change 行为不回归
  *
- * 覆盖：
- *   1. 初次渲染默认查询（limit，不带过滤参数）+ 条目两行渲染（标题/状态点/chips）
- *   2. 引擎 tab（provider 参数）单选即查
- *   3. 状态下拉（status 参数）
- *   4. 机器单选（machine_id server 侧过滤）；机器多选（后端单值参数装不下 →
- *      不带 machine_id + 客户端过滤）
- *   5. 搜索回车触发（q 参数）；仅输入不回车不触发
- *   6. chips 读 config_snapshot；快照缺省回退 runtime/provider 基础信息；
- *      离线机器 chip 划线 +（离线）
- *   7. 点击条目 onSelect 回调 + 选中态高亮（aria-pressed）
- *   8. 空态；错误态
- *   9. 虚拟滚动：大列表只渲染可视区（mount 即可，不测滚动物理行为）
- *   10. 加载更多（后端真分页 offset 递增，R-04）
- *   11. workspace/change scope 数据源（2026-08-22-workspace-sessions-portal
- *      task-11 v3 返工 / D-003@v2）：走全局端点 listAgentSessions 带过滤参
- *      （workspace 只传 workspace_id；change 双传 workspace_id+change_id），
- *      v2 两 scope 端点（listWorkspaceAgentSessions/listChangeSessions）零调用
- *   12. scope 筛选条渲染（Grill P1-2 v3 反转）：状态/机器/引擎三控件在
- *      scope 模式照常渲染（v2 隐藏特例已删），筛选照常走服务端参数
- *      （scope 过滤参 + 筛选参同传，与全局同构）
- *   13. scope 全字段渲染 + 端点过滤（Grill P1-1 / D-003@v2）：喂
- *      AgentSessionRead 全字段形状 → chips（机器/引擎/档案/供应商）+
- *      相对时间照常渲染（v2 瘦字段降级已删）；他人会话由端点过滤——
- *      mock 返回什么显示什么（v2 客户端仅本人过滤已删）
+ * ── 旧断言迁移清单（R-06 前置：逐条迁移，非删断言凑绿） ──────────────────
+ * 旧版（2026-08-14/22 平铺列表）断言 → 新落点：
+ *   1. 初次渲染默认查询 limit → §1「一次拉取 limit=500」；chips 断言拆到
+ *      §2（树形态 chips 无 📂/🖥，机器信息由组头/小节承载——语义迁移非删除）
+ *   2. 引擎胶囊 tab（provider 参数）→ 全局形态退役，语义落 §8 change scope
+ *      「引擎 Segmented 照常带 provider 参数」（change 独立页维持现状）
+ *   3. 状态下拉 status 参数 → §5 树形态组内视图过滤（不触发新查询）+
+ *      §8 change scope 服务端参数
+ *   4. 机器单选 machine_id / 多选客户端过滤 → 单选语义落 §8 change scope；
+ *      多选 Select 全局退役（被机器 tab 取代，见退役清单）
+ *   5. 搜索回车触发 q → §5 树形态回车应用为视图过滤（不触发新查询）+
+ *      §8 change scope 服务端 q 参数
+ *   6. chips 快照缺省回退/离线划线 → §3（引擎回退 provider；离线机器小节点
+ *      灰 + （离线）后缀——离线划线语义随 🖥 chip 退役迁移到小节标题）
+ *   7. 点击 onSelect + aria-pressed → §6 原样迁移
+ *   8. 空态/错误态 → §7 原样迁移（树形态空态含分组头 + 无匹配提示）
+ *   9. 虚拟滚动只渲染可视区（全局）→ **有意删除**：全局 useVirtualizer 退役
+ *      （task-05 implementation 第 5 点，分组+组内截断取代，R-04）；change
+ *      分支虚拟滚动仍在（滚动容器 data-testid="session-scroll" 存在性由 §8
+ *      渲染路径隐式覆盖）
+ *   10. 加载更多（真分页 offset 递增）→ §8 change scope（全局一次拉取无分页）
+ *   11-13. scope 数据源/筛选条/全字段渲染 → §8（workspace=树单组 limit 500；
+ *       change=现状平铺 limit 50）+ §2（全字段 chips 落树形态）
  *
- * mock 策略：直接 mock 组件消费的模块（@/lib/daemon 的 listAgentSessions /
- * @/lib/use-daemon-machines），@/lib/api 保留真实（ApiError instanceof 用）。
+ * ── 全局形态有意退役的断言清单 ────────────────────────────────────────────
+ *   - 引擎胶囊 tab（Segmented 全局 provider 参数即查）
+ *   - 全局 useVirtualizer 可视区渲染（80 条只渲染 ≪80 行）
+ *   - 机器多选 Select（单选 server machine_id / 多选客户端过滤组合）
+ *   以上由两层筛选 tab（§4）+ 组内截断（§6 截断用例）承接（X-11）。
  *
- * jsdom 已知坑：@tanstack/react-virtual 的 observeElementRect 同步读滚动容器
- * 的 offsetWidth/offsetHeight（jsdom 恒 0 → 可视区 0 行）。测试内对
- * [data-testid="session-scroll"] 打 offsetHeight=600 / offsetWidth=320 桩，
- * 其余元素保持 jsdom 原值。不 mock 虚拟库本身（要验证真实虚拟化行为）。
- * ResizeObserver 已由 src/test/setup.ts 全局桩（observe 空实现，不影响
- * 同步 getRect 路径）。
+ * mock 策略：直接 mock 组件消费的模块（@/lib/daemon 的 listAgentSessions +
+ * AGENT_SESSIONS_TREE_FETCH_LIMIT 常量 / @/lib/use-daemon-machines /
+ * @/lib/workspaces 的 listWorkspaces），@/lib/api 保留真实（ApiError
+ * instanceof 用）。
+ *
+ * jsdom 已知坑：change 分支虚拟滚动的 observeElementRect 同步读滚动容器
+ * offsetWidth/offsetHeight（jsdom 恒 0），测试内对 [data-testid=
+ * "session-scroll"] 打 600/320 桩（树形态不依赖）。
  */
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import {
@@ -62,32 +69,39 @@ import type {
   DaemonMachineRead,
   DaemonRuntimeRead,
 } from "@/lib/daemon";
+import type { Workspace } from "@/lib/workspaces";
 
 // ── hoisted mock 状态 ─────────────────────────────────────────────────────
 
 const mocks = vi.hoisted(() => ({
   listAgentSessions: vi.fn(),
-  // v2 两 scope 端点保留 mock 仅为 D-003@v2 零调用断言（数据源已切全局端点）。
+  // v2 两 scope 端点保留 mock 仅为 D-003@v2 零调用断言（数据源走全局端点）。
   listWorkspaceAgentSessions: vi.fn(),
   listChangeSessions: vi.fn(),
   machinesHook: vi.fn(),
   machinesRefetch: vi.fn(),
+  listWorkspaces: vi.fn(),
 }));
 
-// 组件只消费 listAgentSessions（类型导入编译期擦除），局部 mock 不加载真实
-// daemon.ts；两 scope 端点 mock 供零调用断言。
+// 组件只消费 listAgentSessions + 树拉取上限常量（类型导入编译期擦除），
+// 局部 mock 不加载真实 daemon.ts；两 scope 端点 mock 供零调用断言。
 vi.mock("@/lib/daemon", () => ({
   listAgentSessions: (...args: unknown[]) => mocks.listAgentSessions(...args),
   listWorkspaceAgentSessions: (...args: unknown[]) =>
     mocks.listWorkspaceAgentSessions(...args),
   listChangeSessions: (...args: unknown[]) => mocks.listChangeSessions(...args),
+  AGENT_SESSIONS_TREE_FETCH_LIMIT: 500,
 }));
 
 vi.mock("@/lib/use-daemon-machines", () => ({
   useDaemonMachines: () => mocks.machinesHook(),
 }));
 
-// ── jsdom 虚拟滚动桩：scroll 容器给出非零视口 ────────────────────────────
+vi.mock("@/lib/workspaces", () => ({
+  listWorkspaces: (...args: unknown[]) => mocks.listWorkspaces(...args),
+}));
+
+// ── jsdom 虚拟滚动桩：change 分支 scroll 容器给出非零视口 ────────────────
 
 const SCROLL_VIEWPORT = { height: 600, width: 320 };
 const origOffsetHeight = Object.getOwnPropertyDescriptor(
@@ -170,6 +184,17 @@ function makeMachine(
   } as DaemonMachineRead;
 }
 
+function makeWorkspace(overrides: Partial<Workspace> = {}): Workspace {
+  return {
+    id: "ws-1",
+    name: "SillyHub",
+    slug: "sillyhub",
+    root_path: "C:/sillyhub",
+    status: "active",
+    ...overrides,
+  } as Workspace;
+}
+
 function makeSession(
   overrides: Partial<AgentSessionRead> = {},
 ): AgentSessionRead {
@@ -216,6 +241,16 @@ function setMachines(r: Partial<{ items: DaemonMachineRead[] }> = {}) {
     error: null,
     refetch: mocks.machinesRefetch,
     ...r,
+  });
+}
+
+/** 设置 listWorkspaces 返回（默认成功空集）。 */
+function setWorkspaces(items: Workspace[] = []) {
+  mocks.listWorkspaces.mockResolvedValue({
+    items,
+    total: items.length,
+    limit: 100,
+    offset: 0,
   });
 }
 
@@ -266,7 +301,7 @@ async function chooseAntdOptionByText(selectId: string, optionText: string) {
   });
 }
 
-/** 点引擎胶囊 tab（Segmented；chips 里也有引擎名，须在 .ant-segmented 内锚定）。 */
+/** 点引擎胶囊 tab（change 分支；chips 里也有引擎名，须在 .ant-segmented 内锚定）。 */
 function clickEngineTab(label: string) {
   const seg = document.querySelector(".ant-segmented");
   if (!seg) throw new Error(".ant-segmented not found");
@@ -280,9 +315,21 @@ function clickEngineTab(label: string) {
   fireEvent.click(labelEl);
 }
 
-/** 当前渲染的会话行（虚拟滚动的可视区行）。 */
+/** 当前渲染的会话行（树内/平铺均为 role=button name=会话 …）。 */
 function sessionRows(): HTMLElement[] {
   return screen.queryAllByRole("button", { name: /^会话 / });
+}
+
+/** 组头 label 序列（断言分组顺序/存在性）。 */
+function groupHeadLabels(): (string | null)[] {
+  return screen
+    .queryAllByRole("button", { name: /^工作区分组 / })
+    .map((el) => el.getAttribute("aria-label"));
+}
+
+/** 机器小节标题（非表单元素，经 aria-label 直接锚定）。 */
+function machineSection(label: string): Element | null {
+  return document.querySelector(`[aria-label="机器小节 ${label}"]`);
 }
 
 function lastCallArgs(): Record<string, unknown> {
@@ -295,6 +342,8 @@ beforeEach(() => {
   // D-003@v2：两 scope 端点仅剩零调用断言用途
   mocks.listWorkspaceAgentSessions.mockReset().mockResolvedValue([]);
   mocks.listChangeSessions.mockReset().mockResolvedValue([]);
+  mocks.listWorkspaces.mockReset();
+  setWorkspaces();
   setMachines();
   mocks.machinesRefetch.mockReset();
 });
@@ -303,20 +352,103 @@ afterEach(() => {
   cleanup();
 });
 
-// ── 1. 默认查询 + 条目渲染 ───────────────────────────────────────────────
+/** 两台机器的标准固件（rt-m1/rt-m2 分别挂 machine-1/machine-2）。 */
+function twoMachines() {
+  return [
+    makeMachine({
+      id: "m-1",
+      hostname: "machine-1",
+      runtimes: [makeRuntime({ id: "rt-m1" })],
+    }),
+    makeMachine({
+      id: "m-2",
+      hostname: "machine-2",
+      runtimes: [makeRuntime({ id: "rt-m2" })],
+    }),
+  ];
+}
 
-describe("SessionListPanel 初次渲染", () => {
-  it("默认查询只带 limit；条目两行渲染（标题/状态点/相对时间/chips 读快照）", async () => {
-    setMachines({
-      items: [makeMachine({ id: "m-1", runtimes: [makeRuntime({ id: "rt-m1" })] })],
-    });
-    // 相对时间：last_active_at = 5 分钟前（避免时区歧义，相对 Date.now 构造）
+// ── 1. 全局树初次渲染（D-103 一次拉取 + 客户端分组） ─────────────────────
+
+describe("SessionListPanel 全局树初次渲染", () => {
+  it("默认一次拉取 limit=500；按 workspace_id 分组（工作区列表序+非工作区固定末尾）；0 会话组仍显示计数 0", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([
+      makeWorkspace({ id: "ws-1", name: "SillyHub" }),
+      makeWorkspace({ id: "ws-2", name: "空工作区" }),
+    ]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-a", workspace_id: "ws-1", title: "核对变更" }),
+        makeSession({ id: "s-b", workspace_id: null, title: "临时问答" }),
+      ]),
+    );
+    renderPanel(<SessionListPanel />);
+
+    await screen.findByRole("button", { name: "会话 核对变更" });
+    // 数据层：一次拉取 limit=500（D-103），无过滤参
+    expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
+    expect(lastCallArgs()).toEqual({ limit: 500 });
+
+    // 分组顺序：工作区列表序 + 非工作区固定末尾（D-105）
+    expect(groupHeadLabels()).toEqual([
+      "工作区分组 SillyHub",
+      "工作区分组 空工作区",
+      "工作区分组 非工作区",
+    ]);
+    // 0 会话组仍显示（计数 0）；SillyHub 与非工作区各 1 条
+    expect(screen.getByText("0 个会话")).toBeInTheDocument();
+    expect(screen.getAllByText("1 个会话").length).toBe(2);
+    // 头部总数
+    expect(screen.getByText("共 2 个")).toBeInTheDocument();
+  });
+
+  it("组内机器小节：机器名 + 在线状态；runtime 缺席回退 config_snapshot.machine_name", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-a", workspace_id: "ws-1", runtime_id: "rt-m1", title: "映射会话" }),
+        // runtime 列表外的机器：回退快照 machine_name，无在线信息（离线渲染）
+        makeSession({
+          id: "s-b",
+          workspace_id: "ws-1",
+          runtime_id: "rt-gone",
+          config_snapshot: {
+            profile_name: null,
+            provider_name: null,
+            engine: null,
+            machine_name: "DESKTOP-GONE",
+            agent_name: null,
+            model: null,
+          },
+          title: "快照机器会话",
+        }),
+      ]),
+    );
+    renderPanel(<SessionListPanel />);
+
+    await screen.findByRole("button", { name: "会话 映射会话" });
+    expect(machineSection("machine-1")).not.toBeNull();
+    expect(machineSection("DESKTOP-GONE")).not.toBeNull();
+    expect(machineSection("DESKTOP-GONE")?.textContent).toContain("（离线）");
+  });
+});
+
+// ── 2. 条目 chips（含创建人 owner_name，D-108@v2） ────────────────────────
+
+describe("SessionListPanel 树条目 chips", () => {
+  it("chips 读快照：引擎/档案/供应商/轮数 + 创建人（owner_name 有值直显）；树形态不重复 📂/🖥 chips", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
     mocks.listAgentSessions.mockResolvedValue(
       listResponse([
         makeSession({
           id: "s-1",
+          workspace_id: "ws-1",
           title: "整理会议纪要",
           turn_count: 12,
+          owner_name: "qinyi",
           last_active_at: new Date(Date.now() - 5 * 60_000).toISOString(),
           config_snapshot: {
             profile_name: "知识经理",
@@ -331,221 +463,285 @@ describe("SessionListPanel 初次渲染", () => {
     );
     renderPanel(<SessionListPanel />);
 
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "会话 整理会议纪要" })).toBeInTheDocument();
-    });
-    expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
-    expect(lastCallArgs()).toEqual({ limit: 50 });
-
-    // 第二行 chips：快照直显（免二次查询）+ 轮数
-    const row = screen.getByRole("button", { name: "会话 整理会议纪要" });
-    expect(row.textContent).toContain("🖥 DESKTOP-2BN7FDC");
+    const row = await screen.findByRole("button", { name: "会话 整理会议纪要" });
     expect(row.textContent).toContain("Claude");
+    expect(row.textContent).toContain("👤 qinyi");
     expect(row.textContent).toContain("📋 知识经理");
     expect(row.textContent).toContain("☁ Kimi");
     expect(row.textContent).toContain("12 轮");
-    // 第一行：状态点 + 相对时间
-    expect(row.querySelector('[aria-label="状态 active"]')).toBeTruthy();
     expect(row.textContent).toContain("5 分钟前");
-    // 头部总数
-    expect(screen.getByText("共 1 个")).toBeInTheDocument();
+    expect(row.querySelector('[aria-label="状态 active"]')).toBeTruthy();
+    // 树形态：工作区/机器信息由组头与小节承载，chips 不再重复
+    expect(row.textContent).not.toContain("📂");
+    expect(row.textContent).not.toContain("🖥");
+  });
+
+  it("owner_name 为 null（旧会话/无主）→ 创建人 chip 显 —（brownfield 兜底）", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-old", workspace_id: "ws-1", owner_name: null, title: "旧会话" }),
+      ]),
+    );
+    renderPanel(<SessionListPanel />);
+
+    const row = await screen.findByRole("button", { name: "会话 旧会话" });
+    expect(row.textContent).toContain("👤 —");
+  });
+
+  it("快照缺省回退：config_snapshot null → 引擎回退 session.provider，无档案/供应商 chips", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-old",
+          workspace_id: "ws-1",
+          runtime_id: "rt-m1",
+          provider: "codex",
+          config_snapshot: null,
+          title: "旧会话",
+        }),
+      ]),
+    );
+    renderPanel(<SessionListPanel />);
+
+    const row = await screen.findByRole("button", { name: "会话 旧会话" });
+    expect(row.textContent).toContain("Codex");
+    expect(row.textContent).not.toContain("📋");
+    expect(row.textContent).not.toContain("☁");
   });
 });
 
-// ── 2/3. 引擎 tab + 状态下拉（选择型即查） ───────────────────────────────
+// ── 3/4. 两层筛选 tab（D-107：纯视图过滤不进数据层） ──────────────────────
 
-describe("SessionListPanel 引擎/状态筛选", () => {
-  it("点 Claude tab → 带 provider=claude 重新查询", async () => {
-    mocks.listAgentSessions.mockResolvedValue(listResponse([]));
-    renderPanel(<SessionListPanel />);
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1));
-
-    clickEngineTab("Claude");
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(2));
-    expect(lastCallArgs()).toEqual({ limit: 50, provider: "claude" });
-  });
-
-  it("状态下拉选「已结束」→ 带 status=ended；「活跃」→ active", async () => {
-    mocks.listAgentSessions.mockResolvedValue(listResponse([]));
-    renderPanel(<SessionListPanel />);
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1));
-
-    await chooseAntdOptionByText("slp-status", "已结束");
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(2));
-    expect(lastCallArgs()).toEqual({ limit: 50, status: "ended" });
-
-    await chooseAntdOptionByText("slp-status", "活跃");
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(3));
-    expect(lastCallArgs()).toEqual({ limit: 50, status: "active" });
-  });
-});
-
-// ── 4. 机器筛选（单选 server 侧 / 多选客户端） ───────────────────────────
-
-describe("SessionListPanel 机器筛选", () => {
-  function threeMachines() {
+describe("SessionListPanel 两层筛选 tab", () => {
+  function mixedSessions() {
     return [
-      makeMachine({
-        id: "m-1",
-        hostname: "machine-1",
-        runtimes: [makeRuntime({ id: "rt-m1" })],
-      }),
-      makeMachine({
-        id: "m-2",
-        hostname: "machine-2",
-        runtimes: [makeRuntime({ id: "rt-m2" })],
-      }),
-      makeMachine({
-        id: "m-3",
-        hostname: "machine-3",
-        status: "offline",
-        runtimes: [makeRuntime({ id: "rt-m3" })],
-      }),
+      makeSession({ id: "s-1", runtime_id: "rt-m1", provider: "claude", title: "机器一Claude" }),
+      makeSession({ id: "s-2", runtime_id: "rt-m1", provider: "codex", title: "机器一Codex" }),
+      makeSession({ id: "s-3", runtime_id: "rt-m2", provider: "claude", title: "机器二Claude" }),
     ];
   }
 
-  it("单选 1 台 → machine_id 走 server 侧过滤", async () => {
-    setMachines({ items: threeMachines() });
-    mocks.listAgentSessions.mockResolvedValue(listResponse([]));
-    renderPanel(<SessionListPanel />);
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1));
+  it("默认仅机器层；选机器后出现智能体层并过滤条目；小节标题隐藏；零新增请求（纯视图）", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(listResponse(mixedSessions()));
+    // selectedSessionId 所在组（非工作区桶）在筛选切换后保持展开（R-05 除当前组）
+    renderPanel(<SessionListPanel selectedSessionId="s-3" />);
+    await waitFor(() => expect(sessionRows().length).toBe(3));
 
-    await chooseAntdOptionByText("slp-machine", "machine-2");
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(2));
-    expect(lastCallArgs()).toEqual({ limit: 50, machine_id: "m-2" });
+    // 默认：仅机器层（无智能体层）
+    expect(document.querySelector('[aria-label="智能体筛选层"]')).toBeNull();
+
+    // 选 machine-2 → 仅其条目 + 智能体层出现 + 小节标题隐藏（FR-02）
+    fireEvent.click(screen.getByRole("button", { name: "机器tab machine-2" }));
+    await waitFor(() => expect(sessionRows().length).toBe(1));
+    expect(
+      screen.queryByRole("button", { name: "会话 机器二Claude" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "会话 机器一Claude" }),
+    ).not.toBeInTheDocument();
+    expect(document.querySelector('[aria-label="智能体筛选层"]')).not.toBeNull();
+    expect(machineSection("machine-2")).toBeNull(); // 筛选态隐藏机器小节标题
+
+    // 纯视图过滤：不进数据层（调用次数不变）
+    expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
+    expect(lastCallArgs()).toEqual({ limit: 500 });
   });
 
-  it("多选 2 台 → 不带 machine_id（后端单值装不下）+ 客户端过滤掉其它机器会话", async () => {
-    setMachines({ items: threeMachines() });
+  it("智能体层过滤 codex；「全部」清空智能体；机器层「全部」清空并隐藏第二层", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(listResponse(mixedSessions()));
+    // 同上：当前组（非工作区桶）保持展开
+    renderPanel(<SessionListPanel selectedSessionId="s-1" />);
+    await waitFor(() => expect(sessionRows().length).toBe(3));
+
+    // 选 machine-1 → 两条；再选 ◎ Codex → 仅 Codex
+    fireEvent.click(screen.getByRole("button", { name: "机器tab machine-1" }));
+    await waitFor(() => expect(sessionRows().length).toBe(2));
+    fireEvent.click(screen.getByRole("button", { name: "智能体tab ◎ Codex" }));
+    await waitFor(() => expect(sessionRows().length).toBe(1));
+    expect(
+      screen.getByRole("button", { name: "会话 机器一Codex" }),
+    ).toBeInTheDocument();
+
+    // 智能体「全部」清空
+    fireEvent.click(screen.getByRole("button", { name: "智能体tab 全部" }));
+    await waitFor(() => expect(sessionRows().length).toBe(2));
+
+    // 机器「全部」清空并隐藏第二层
+    fireEvent.click(screen.getByRole("button", { name: "机器tab 全部" }));
+    await waitFor(() => expect(sessionRows().length).toBe(3));
+    expect(document.querySelector('[aria-label="智能体筛选层"]')).toBeNull();
+    expect(machineSection("machine-1")).not.toBeNull(); // 小节标题恢复
+  });
+
+  it("R-05：筛选切换重置展开态除当前组（selectedSessionId 所在组保持展开）", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([
+      makeWorkspace({ id: "ws-1", name: "工作区一" }),
+      makeWorkspace({ id: "ws-2", name: "工作区二" }),
+    ]);
     mocks.listAgentSessions.mockResolvedValue(
       listResponse([
-        makeSession({ id: "s-m1", runtime_id: "rt-m1", title: "会话一" }),
-        makeSession({ id: "s-m2", runtime_id: "rt-m2", title: "会话二" }),
-        makeSession({ id: "s-m3", runtime_id: "rt-m3", title: "会话三" }),
+        makeSession({ id: "s-1", workspace_id: "ws-1", runtime_id: "rt-m1", title: "会话A" }),
+        makeSession({ id: "s-2", workspace_id: "ws-2", runtime_id: "rt-m1", title: "会话B" }),
       ]),
     );
-    renderPanel(<SessionListPanel />);
-    await waitFor(() => {
-      expect(sessionRows().length).toBe(3);
-    });
+    renderPanel(<SessionListPanel selectedSessionId="s-1" />);
+    // 缺省全展开：两组条目都可见
+    await screen.findByRole("button", { name: "会话 会话A" });
+    expect(screen.getByRole("button", { name: "会话 会话B" })).toBeInTheDocument();
 
-    await chooseAntdOptionByText("slp-machine", "machine-1");
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(2));
-    expect(lastCallArgs()).toEqual({ limit: 50, machine_id: "m-1" });
+    // 筛选变化：当前组（选中会话所在 ws-1）保持展开，ws-2 折叠
+    fireEvent.click(screen.getByRole("button", { name: "机器tab machine-1" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "会话 会话B" })).not.toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "会话 会话A" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "工作区分组 工作区二" }),
+    ).toHaveAttribute("aria-expanded", "false");
 
-    await chooseAntdOptionByText("slp-machine", "machine-2");
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(3));
-    // 多选：不下发 machine_id
-    expect(lastCallArgs()).toEqual({ limit: 50 });
-    // 客户端过滤：m-1/m-2 的会话保留，m-3 的「会话三」被滤掉
-    const titles = sessionRows().map((r) => r.getAttribute("aria-label"));
-    expect(titles).toContain("会话 会话一");
-    expect(titles).toContain("会话 会话二");
-    expect(titles).not.toContain("会话 会话三");
+    // 组头点击可再展开（手风琴）
+    fireEvent.click(screen.getByRole("button", { name: "工作区分组 工作区二" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "会话 会话B" })).toBeInTheDocument(),
+    );
+  });
+
+  it("defaultExpandedWorkspaceId：仅该组展开，其余折叠（task-06 深链预展开预留）", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([
+      makeWorkspace({ id: "ws-1", name: "工作区一" }),
+      makeWorkspace({ id: "ws-2", name: "工作区二" }),
+    ]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" }),
+        makeSession({ id: "s-2", workspace_id: "ws-2", title: "会话B" }),
+      ]),
+    );
+    renderPanel(<SessionListPanel defaultExpandedWorkspaceId="ws-2" />);
+
+    await screen.findByRole("button", { name: "工作区分组 工作区二" });
+    // 初值经 effect 落地（数据到位后一次性设置），waitFor 等 DOM 收敛
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "工作区分组 工作区一" }),
+      ).toHaveAttribute("aria-expanded", "false"),
+    );
+    expect(screen.getByRole("button", { name: "工作区分组 工作区二" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "会话 会话B" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "会话 会话A" })).not.toBeInTheDocument();
   });
 });
 
-// ── 5. 搜索回车触发 ──────────────────────────────────────────────────────
+// ── 5. 状态下拉 + 标题搜索（X-11 保留：视图过滤不进数据层） ───────────────
 
-describe("SessionListPanel 标题搜索", () => {
-  it("回车才触发 q；仅输入不触发新查询", async () => {
-    mocks.listAgentSessions.mockResolvedValue(listResponse([]));
+describe("SessionListPanel 状态与搜索（树形态视图过滤）", () => {
+  it("状态下拉选「已结束」→ 仅 ended 条目；零新增请求", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-1", workspace_id: "ws-1", status: "active", title: "活跃会话" }),
+        makeSession({ id: "s-2", workspace_id: "ws-1", status: "ended", title: "结束会话" }),
+      ]),
+    );
     renderPanel(<SessionListPanel />);
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(sessionRows().length).toBe(2));
+
+    await chooseAntdOptionByText("slp-status", "已结束");
+    await waitFor(() => expect(sessionRows().length).toBe(1));
+    expect(screen.getByRole("button", { name: "会话 结束会话" })).toBeInTheDocument();
+    expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
+
+    // 切回全部状态
+    await chooseAntdOptionByText("slp-status", "全部状态");
+    await waitFor(() => expect(sessionRows().length).toBe(2));
+  });
+
+  it("标题搜索：回车才应用（视图过滤）；仅输入不生效", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-1", workspace_id: "ws-1", title: "整理会议纪要" }),
+        makeSession({ id: "s-2", workspace_id: "ws-1", title: "扫描文档" }),
+      ]),
+    );
+    renderPanel(<SessionListPanel />);
+    await waitFor(() => expect(sessionRows().length).toBe(2));
 
     const input = screen.getByLabelText("搜索会话标题");
     fireEvent.change(input, { target: { value: "会议" } });
-    // 输入不触发（不每键查）
     await act(async () => {
       await Promise.resolve();
     });
-    expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
+    expect(sessionRows().length).toBe(2); // 输入不生效
 
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(2));
-    expect(lastCallArgs()).toEqual({ limit: 50, q: "会议" });
+    await waitFor(() => expect(sessionRows().length).toBe(1));
+    expect(screen.getByRole("button", { name: "会话 整理会议纪要" })).toBeInTheDocument();
+    expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1); // 视图过滤零请求
   });
 });
 
-// ── 6. chips 快照缺省回退 + 离线划线 ─────────────────────────────────────
+// ── 6. 组头交互 + 截断（R-03） ────────────────────────────────────────────
 
-describe("SessionListPanel chips 快照与回退", () => {
-  it("config_snapshot 为 null → 机器名回退机器映射、引擎回退 session.provider，无档案/供应商 chips", async () => {
-    setMachines({
-      items: [
-        makeMachine({
-          id: "m-1",
-          hostname: "machine-1",
-          runtimes: [makeRuntime({ id: "rt-m1" })],
-        }),
-        makeMachine({
-          id: "m-off",
-          hostname: "machine-offline",
-          status: "offline",
-          runtimes: [makeRuntime({ id: "rt-off", provider: "codex" })],
-        }),
-      ],
-    });
+describe("SessionListPanel 组头回调与截断", () => {
+  it("组头「＋」→ onNewInGroup(workspaceId)；非工作区组「＋」→ onNewInGroup(null)（D-105）", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
     mocks.listAgentSessions.mockResolvedValue(
       listResponse([
-        makeSession({ id: "s-old", runtime_id: "rt-m1", config_snapshot: null, title: "旧会话" }),
-        makeSession({
-          id: "s-off",
-          runtime_id: "rt-off",
-          provider: "codex",
-          status: "ended",
-          config_snapshot: null,
-          title: "离线机会话",
-        }),
+        makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" }),
+        makeSession({ id: "s-2", workspace_id: null, title: "临时问答" }),
       ]),
     );
-    renderPanel(<SessionListPanel />);
+    const onNewInGroup = vi.fn();
+    renderPanel(<SessionListPanel onNewInGroup={onNewInGroup} />);
 
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "会话 旧会话" })).toBeInTheDocument();
-    });
-    const oldRow = screen.getByRole("button", { name: "会话 旧会话" });
-    // 回退：机器名来自 runtime→机器映射；引擎来自 provider；无 📋/☁ chips
-    expect(oldRow.textContent).toContain("🖥 machine-1");
-    expect(oldRow.textContent).toContain("Claude");
-    expect(oldRow.textContent).not.toContain("📋");
-    expect(oldRow.textContent).not.toContain("☁");
+    await screen.findByRole("button", { name: "会话 会话A" });
+    fireEvent.click(screen.getByRole("button", { name: "在 SillyHub 新建会话" }));
+    expect(onNewInGroup).toHaveBeenCalledWith("ws-1");
 
-    const offRow = screen.getByRole("button", { name: "会话 离线机会话" });
-    // 引擎回退 codex + 离线机器 chip 划线（line-through）+（离线）
-    expect(offRow.textContent).toContain("Codex");
-    expect(offRow.textContent).toContain("（离线）");
-    const machineChip = [...offRow.querySelectorAll(".ant-tag")].find((t) =>
-      t.textContent?.includes("machine-offline"),
-    );
-    expect(machineChip?.className).toContain("line-through");
+    fireEvent.click(screen.getByRole("button", { name: "在 非工作区 新建会话" }));
+    expect(onNewInGroup).toHaveBeenCalledWith(null);
+    expect(onNewInGroup).toHaveBeenCalledTimes(2);
   });
 
-  it("快照引擎字段优先于 session.provider（引擎切换过的旧会话）", async () => {
-    setMachines({ items: [] });
-    mocks.listAgentSessions.mockResolvedValue(
-      listResponse([
-        makeSession({
-          provider: "codex",
-          config_snapshot: { engine: "claude", profile_name: null, provider_name: null, model: null, machine_name: "m1", agent_name: null },
-          title: "快照会话",
-        }),
-      ]),
+  it("组内超 50 截断 + 「显示全部」（R-03）", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    const many = Array.from({ length: 60 }, (_, i) =>
+      makeSession({ id: `s-${i}`, workspace_id: "ws-1", title: `批量会话${i}` }),
     );
+    mocks.listAgentSessions.mockResolvedValue(listResponse(many));
     renderPanel(<SessionListPanel />);
-    const row = await screen.findByRole("button", { name: "会话 快照会话" });
-    expect(row.textContent).toContain("Claude");
+
+    await waitFor(() => expect(sessionRows().length).toBe(50));
+    const moreBtn = screen.getByRole("button", { name: /显示全部/ });
+    expect(moreBtn.textContent).toContain("共 60 条");
+
+    fireEvent.click(moreBtn);
+    await waitFor(() => expect(sessionRows().length).toBe(60));
   });
 });
 
-// ── 7. 点击回调 + 选中态 ─────────────────────────────────────────────────
+// ── 7. 点击回调 / 空态 / 错误态 ───────────────────────────────────────────
 
 describe("SessionListPanel 点击与选中态", () => {
   it("点击条目 → onSelect 回调带完整 session；selectedSessionId 对应行 aria-pressed=true", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
     mocks.listAgentSessions.mockResolvedValue(
       listResponse([
-        makeSession({ id: "s-1", title: "会话A" }),
-        makeSession({ id: "s-2", title: "会话B" }),
+        makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" }),
+        makeSession({ id: "s-2", workspace_id: "ws-1", title: "会话B" }),
       ]),
     );
     const onSelect = vi.fn();
@@ -562,19 +758,76 @@ describe("SessionListPanel 点击与选中态", () => {
   });
 });
 
-// ── 8. 空态 / 错误态 ─────────────────────────────────────────────────────
+describe("SessionListPanel 批量与单条删除（组头尾随多选入口）", () => {
+  it("组头「多选」→ 勾选条目 → 删除选中回调 ids；全选本组", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" }),
+        makeSession({ id: "s-2", workspace_id: "ws-1", title: "会话B" }),
+      ]),
+    );
+    const onDeleteSessions = vi.fn().mockResolvedValue(undefined);
+    renderPanel(<SessionListPanel onDeleteSessions={onDeleteSessions} />);
 
-describe("SessionListPanel 空态与错误态", () => {
-  it("无会话 → 空态文案", async () => {
+    await screen.findByRole("button", { name: "会话 会话A" });
+    fireEvent.click(screen.getByRole("button", { name: "多选 SillyHub" }));
+    // 多选态：点行 = 勾选（不触发 onSelect）
+    fireEvent.click(screen.getByRole("button", { name: "会话 会话A" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /删除选中（1）/ })).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "全选本组" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /删除选中（2）/ })).toBeInTheDocument(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /删除选中（2）/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "删除 2 个" }));
+    await waitFor(() =>
+      expect(onDeleteSessions).toHaveBeenCalledWith(["s-1", "s-2"]),
+    );
+  });
+
+  it("单条删除：hover 删除按钮 → 确认 → onDeleteSessions([id])", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
+    );
+    const onDeleteSessions = vi.fn().mockResolvedValue(undefined);
+    renderPanel(<SessionListPanel onDeleteSessions={onDeleteSessions} />);
+
+    await screen.findByRole("button", { name: "会话 会话A" });
+    fireEvent.click(screen.getByRole("button", { name: "删除 会话A" }));
+    // Modal.confirm 确认按钮（okText「删除」两字，antd 自动插空格影响可访问名，
+    // 经危险按钮类锚定）
+    const okBtn = await waitFor(() => {
+      const btn = document.querySelector(
+        ".ant-modal-confirm-btns .ant-btn-primary",
+      ) as HTMLElement | null;
+      if (!btn) throw new Error("confirm ok button not found");
+      return btn;
+    });
+    fireEvent.click(okBtn);
+    await waitFor(() => expect(onDeleteSessions).toHaveBeenCalledWith(["s-1"]));
+  });
+});
+
+describe("SessionListPanel 空态与错误态（树形态）", () => {
+  it("无会话 → 非工作区空组仍在 + 无匹配提示", async () => {
+    setWorkspaces([]);
     mocks.listAgentSessions.mockResolvedValue(listResponse([]));
     renderPanel(<SessionListPanel />);
     await waitFor(() =>
       expect(screen.getByText("没有符合条件的会话")).toBeInTheDocument(),
     );
+    // 全局形态：非工作区固定末尾组（0 会话仍显示）
+    expect(groupHeadLabels()).toEqual(["工作区分组 非工作区"]);
     expect(sessionRows().length).toBe(0);
   });
 
-  it("查询失败 → 错误条 + 重新加载", async () => {
+  it("查询失败 → 错误条 + 重新加载恢复", async () => {
     const { ApiError } = await import("@/lib/api");
     mocks.listAgentSessions.mockRejectedValue(
       new ApiError(500, {
@@ -597,61 +850,7 @@ describe("SessionListPanel 空态与错误态", () => {
   });
 });
 
-// ── 9. 虚拟滚动只渲染可视区 ──────────────────────────────────────────────
-
-describe("SessionListPanel 虚拟滚动（D-003）", () => {
-  it("80 条会话单页 → 只渲染可视区行（≪ 总数），滚动容器 mount", async () => {
-    const many = Array.from({ length: 80 }, (_, i) =>
-      makeSession({ id: `s-${i}`, title: `批量会话${i}` }),
-    );
-    mocks.listAgentSessions.mockResolvedValue(listResponse(many, { total: 80 }));
-    renderPanel(<SessionListPanel />);
-
-    await waitFor(() => {
-      expect(sessionRows().length).toBeGreaterThan(0);
-    });
-    expect(document.querySelector('[data-testid="session-scroll"]')).toBeTruthy();
-    const rendered = sessionRows().length;
-    // 视口 600px / 行高 64 ≈ 10 行 + overscan 6 → 远小于 80
-    expect(rendered).toBeLessThan(30);
-    // 且渲染的是连续的首屏条目（从 0 开始）
-    expect(
-      screen.queryByRole("button", { name: "会话 批量会话0" }),
-    ).toBeInTheDocument();
-  });
-});
-
-// ── 10. 加载更多（后端真分页，R-04） ─────────────────────────────────────
-
-describe("SessionListPanel 加载更多", () => {
-  it("total > 已加载 → 显示按钮；点击后 offset 递增取下一页", async () => {
-    const page1 = Array.from({ length: 50 }, (_, i) =>
-      makeSession({ id: `p1-${i}`, title: `第一页${i}` }),
-    );
-    mocks.listAgentSessions.mockResolvedValue(listResponse(page1, { total: 60 }));
-    renderPanel(<SessionListPanel />);
-
-    const moreBtn = await screen.findByRole("button", { name: /加载更多/ });
-    expect(moreBtn.textContent).toContain("50/60");
-
-    const page2 = Array.from({ length: 10 }, (_, i) =>
-      makeSession({ id: `p2-${i}`, title: `第二页${i}` }),
-    );
-    mocks.listAgentSessions.mockResolvedValue(listResponse(page2, { total: 60 }));
-    fireEvent.click(moreBtn);
-
-    await waitFor(() =>
-      expect(mocks.listAgentSessions).toHaveBeenCalledTimes(2),
-    );
-    expect(lastCallArgs()).toMatchObject({ limit: 50, offset: 50 });
-  });
-});
-
-// ── 11/12/13. scope 用例（task-11 v3 返工 / D-003@v2，QA §4.F 直接断言） ──
-//
-// 核心语义此前的落点在 sessions-portal.test.tsx（门户集成），此处补组件级
-// 直接断言。缺省（不传 scope）全局路径回归由 §1「初次渲染默认查询」既有
-// 用例覆盖（真分页/加载更多另见 §10），不重复。
+// ── 8. scope 用例（D-003@v2：workspace=树单组 / change=现状平铺） ─────────
 
 const WORKSPACE_SCOPE: SessionListScope = {
   kind: "workspace",
@@ -663,26 +862,82 @@ const CHANGE_SCOPE: SessionListScope = {
   changeId: "chg-1",
 };
 
-describe("SessionListPanel scope 数据源切全局端点（D-003@v2）", () => {
-  it("workspace scope：listAgentSessions 带 workspace_id（单参）；v2 两 scope 端点零调用", async () => {
+describe("SessionListPanel workspace scope（树单组，端点过滤维持）", () => {
+  it("listAgentSessions 带 {limit:500, workspace_id}；仅渲染该工作区单组；v2 两 scope 端点零调用", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([
+      makeWorkspace({ id: "ws-1", name: "SillyHub" }),
+      makeWorkspace({ id: "ws-2", name: "其它工作区" }),
+    ]);
     mocks.listAgentSessions.mockResolvedValue(
-      listResponse([makeSession({ id: "s-ws", title: "工作区会话" })]),
+      listResponse([makeSession({ id: "s-ws", workspace_id: "ws-1", title: "工作区会话" })]),
     );
     renderPanel(<SessionListPanel scope={WORKSPACE_SCOPE} />);
 
-    expect(
-      await screen.findByRole("button", { name: "会话 工作区会话" }),
-    ).toBeInTheDocument();
-    // 数据源（v3 反转）：全局端点 + workspace_id 过滤参（含既有 limit）
+    await screen.findByRole("button", { name: "会话 工作区会话" });
     expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
-    expect(lastCallArgs()).toEqual({ limit: 50, workspace_id: "ws-1" });
+    expect(lastCallArgs()).toEqual({ limit: 500, workspace_id: "ws-1" });
+    // 单组：仅该工作区分组（非工作区组不渲染——数据已被端点过滤）
+    expect(groupHeadLabels()).toEqual(["工作区分组 SillyHub"]);
     expect(mocks.listWorkspaceAgentSessions).not.toHaveBeenCalled();
     expect(mocks.listChangeSessions).not.toHaveBeenCalled();
   });
 
-  it("change scope：listAgentSessions workspace_id + change_id 双传（change 隐含 workspace）", async () => {
+  it("他人会话由端点过滤：mock 返回什么显示什么（客户端零过滤）+ 全字段 chips 渲染", async () => {
+    setMachines({ items: [] });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
     mocks.listAgentSessions.mockResolvedValue(
-      listResponse([makeSession({ id: "s-chg", title: "变更会话" })]),
+      listResponse([
+        makeSession({
+          id: "s-full",
+          workspace_id: "ws-1",
+          user_id: "u-me",
+          title: "全字段会话",
+          owner_name: "qinyi",
+          config_snapshot: {
+            profile_name: "知识经理",
+            provider_name: "Kimi",
+            engine: "claude",
+            machine_name: "DESKTOP-2BN7FDC",
+            model: null,
+            agent_name: null,
+          },
+          last_active_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+          turn_count: 7,
+        }),
+        makeSession({
+          id: "s-other",
+          workspace_id: "ws-1",
+          user_id: "u-other",
+          title: "同事的会话",
+        }),
+      ]),
+    );
+    renderPanel(<SessionListPanel scope={WORKSPACE_SCOPE} />);
+
+    const row = await screen.findByRole("button", { name: "会话 全字段会话" });
+    expect(
+      screen.getByRole("button", { name: "会话 同事的会话" }),
+    ).toBeInTheDocument();
+    // 全字段 chips（D-003@v2：全局端点返回全字段，树形态照常渲染）
+    expect(row.textContent).toContain("Claude");
+    expect(row.textContent).toContain("👤 qinyi");
+    expect(row.textContent).toContain("📋 知识经理");
+    expect(row.textContent).toContain("☁ Kimi");
+    expect(row.textContent).toContain("7 轮");
+    expect(row.textContent).toContain("5 分钟前");
+    // 机器名经快照回退落小节标题（机器列表留空证明不依赖映射）
+    expect(machineSection("DESKTOP-2BN7FDC")).not.toBeNull();
+    expect(screen.getByText("共 2 个")).toBeInTheDocument();
+  });
+});
+
+describe("SessionListPanel change scope（维持现状平铺列表，design §3 边界）", () => {
+  it("数据源：{limit:50, workspace_id, change_id} 双传；v2 两 scope 端点零调用；平铺控件（引擎 Segmented/机器多选）在", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([makeSession({ id: "s-chg", workspace_id: "ws-1", title: "变更会话" })]),
     );
     renderPanel(<SessionListPanel scope={CHANGE_SCOPE} />);
 
@@ -697,22 +952,108 @@ describe("SessionListPanel scope 数据源切全局端点（D-003@v2）", () => 
     });
     expect(mocks.listWorkspaceAgentSessions).not.toHaveBeenCalled();
     expect(mocks.listChangeSessions).not.toHaveBeenCalled();
+    // 平铺现状控件在（不回归）：状态下拉 + 机器多选 + 引擎胶囊
+    expect(document.getElementById("slp-status")).not.toBeNull();
+    expect(document.getElementById("slp-machine")).not.toBeNull();
+    expect(document.querySelector(".ant-segmented")).not.toBeNull();
+    // 无工作区树分组头
+    expect(groupHeadLabels()).toEqual([]);
   });
 
-  it("他人会话由端点过滤：mock 返回什么显示什么（客户端零过滤，v2 仅本人过滤已删）", async () => {
-    // D-003@v2：owner 隔离 + scope 过滤都是端点 SQL 层职责，前端透传过滤参
-    // 即完成；列表对端点返回的条目原样渲染（user_id ≠ 当前用户也不剔除）。
+  it("服务端筛选照常带参：状态 status / 引擎 provider / 机器 machine_id（scope 过滤参 + 筛选参同传）", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(listResponse([]));
+    renderPanel(<SessionListPanel scope={CHANGE_SCOPE} />);
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1));
+
+    await chooseAntdOptionByText("slp-status", "已结束");
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(2));
+    expect(lastCallArgs()).toEqual({
+      limit: 50,
+      workspace_id: "ws-1",
+      change_id: "chg-1",
+      status: "ended",
+    });
+
+    clickEngineTab("Claude");
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(3));
+    expect(lastCallArgs()).toEqual({
+      limit: 50,
+      workspace_id: "ws-1",
+      change_id: "chg-1",
+      status: "ended",
+      provider: "claude",
+    });
+
+    await chooseAntdOptionByText("slp-machine", "machine-2");
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(4));
+    expect(lastCallArgs()).toEqual({
+      limit: 50,
+      workspace_id: "ws-1",
+      change_id: "chg-1",
+      status: "ended",
+      provider: "claude",
+      machine_id: "m-2",
+    });
+  });
+
+  it("搜索回车触发 q（服务端参数）；仅输入不触发", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(listResponse([]));
+    renderPanel(<SessionListPanel scope={CHANGE_SCOPE} />);
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1));
+
+    const input = screen.getByLabelText("搜索会话标题");
+    fireEvent.change(input, { target: { value: "会议" } });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1); // 输入不触发
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(2));
+    expect(lastCallArgs()).toEqual({
+      limit: 50,
+      workspace_id: "ws-1",
+      change_id: "chg-1",
+      q: "会议",
+    });
+  });
+
+  it("加载更多 offset 递增（后端真分页保留，R-04）", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    const page1 = Array.from({ length: 50 }, (_, i) =>
+      makeSession({ id: `p1-${i}`, workspace_id: "ws-1", title: `第一页${i}` }),
+    );
+    mocks.listAgentSessions.mockResolvedValue(listResponse(page1, { total: 60 }));
+    renderPanel(<SessionListPanel scope={CHANGE_SCOPE} />);
+
+    const moreBtn = await screen.findByRole("button", { name: /加载更多/ });
+    expect(moreBtn.textContent).toContain("50/60");
+    const page2 = Array.from({ length: 10 }, (_, i) =>
+      makeSession({ id: `p2-${i}`, workspace_id: "ws-1", title: `第二页${i}` }),
+    );
+    mocks.listAgentSessions.mockResolvedValue(listResponse(page2, { total: 60 }));
+    fireEvent.click(moreBtn);
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(2));
+    expect(lastCallArgs()).toMatchObject({ limit: 50, offset: 50 });
+  });
+
+  it("他人会话由端点过滤：mock 返回什么显示什么（客户端零过滤）", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
     mocks.listAgentSessions.mockResolvedValue(
       listResponse([
-        makeSession({ id: "s-own", title: "我的会话", user_id: "u-me" }),
+        makeSession({ id: "s-own", workspace_id: "ws-1", user_id: "u-me", title: "我的会话" }),
         makeSession({
           id: "s-other",
-          title: "同事的会话",
+          workspace_id: "ws-1",
           user_id: "u-other",
+          title: "同事的会话",
         }),
       ]),
     );
-    renderPanel(<SessionListPanel scope={WORKSPACE_SCOPE} />);
+    renderPanel(<SessionListPanel scope={CHANGE_SCOPE} />);
 
     expect(
       await screen.findByRole("button", { name: "会话 我的会话" }),
@@ -720,75 +1061,6 @@ describe("SessionListPanel scope 数据源切全局端点（D-003@v2）", () => 
     expect(
       screen.getByRole("button", { name: "会话 同事的会话" }),
     ).toBeInTheDocument();
-    // 过滤参已透传（端点职责），客户端计数 = 端点返回 total
-    expect(lastCallArgs()).toEqual({ limit: 50, workspace_id: "ws-1" });
     expect(screen.getByText("共 2 个")).toBeInTheDocument();
-  });
-});
-
-describe("SessionListPanel scope 筛选条渲染（Grill P1-2 v3 反转）", () => {
-  it("状态/机器/引擎三控件在 scope 模式照常渲染；服务端筛选照常带参（与全局同构）", async () => {
-    setMachines({
-      items: [
-        makeMachine({ id: "m-1", runtimes: [makeRuntime({ id: "rt-m1" })] }),
-      ],
-    });
-    mocks.listAgentSessions.mockResolvedValue(
-      listResponse([makeSession({ id: "s-ws", title: "工作区会话" })]),
-    );
-    renderPanel(<SessionListPanel scope={WORKSPACE_SCOPE} />);
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1));
-
-    // 三控件渲染（v3：v2 的 scope 隐藏特例已删）
-    expect(document.getElementById("slp-status")).not.toBeNull();
-    expect(document.getElementById("slp-machine")).not.toBeNull();
-    expect(document.querySelector(".ant-segmented")).not.toBeNull();
-
-    // 服务端筛选照常：scope 过滤参 + 筛选参同传
-    await chooseAntdOptionByText("slp-status", "已结束");
-    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(2));
-    expect(lastCallArgs()).toEqual({
-      limit: 50,
-      workspace_id: "ws-1",
-      status: "ended",
-    });
-  });
-});
-
-describe("SessionListPanel scope 全字段渲染（Grill P1-1 v3 反转 / D-003@v2）", () => {
-  it("喂 AgentSessionRead 全字段形状 → chips（机器/引擎/档案/供应商）+ 相对时间 + 轮数照常渲染", async () => {
-    // v2 瘦字段降级已删：全局端点返回全字段，scope 模式与全局渲染零差异。
-    // （机器名读 config_snapshot 直显，机器列表留空以证明不依赖回退映射。）
-    mocks.listAgentSessions.mockResolvedValue(
-      listResponse([
-        makeSession({
-          id: "s-full",
-          title: "全字段会话",
-          workspace_id: "ws-1",
-          config_snapshot: {
-            profile_name: "知识经理",
-            provider_name: "Kimi",
-            engine: "claude",
-            machine_name: "DESKTOP-2BN7FDC",
-            model: null,
-            agent_name: null,
-          },
-          last_active_at: new Date(Date.now() - 5 * 60_000).toISOString(),
-          turn_count: 7,
-        }),
-      ]),
-    );
-    renderPanel(<SessionListPanel scope={WORKSPACE_SCOPE} />);
-
-    const row = await screen.findByRole("button", { name: "会话 全字段会话" });
-    // chips 全量直显 + 相对时间（v2 用例断言的「缺席」反转为「在场」）
-    expect(row.textContent).toContain("🖥 DESKTOP-2BN7FDC");
-    expect(row.textContent).toContain("Claude");
-    expect(row.textContent).toContain("📋 知识经理");
-    expect(row.textContent).toContain("☁ Kimi");
-    expect(row.textContent).toContain("7 轮");
-    expect(row.textContent).toContain("5 分钟前");
-    // 后端 total 照常显示（非 v2 客户端合成计数）
-    expect(screen.getByText("共 1 个")).toBeInTheDocument();
   });
 });

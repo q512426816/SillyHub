@@ -726,12 +726,14 @@ modules:
     aliases: [session-components]
     entrypoints: []
     main_symbols:
-      - NewSessionForm
+      - SessionsPortal
       - SessionListPanel
+      - PreSessionPicker
       - SessionConfigBar
       - buildDefaultSwitchPrompt
       - formatRelativeTime
       - NEW_SESSION_MACHINE_LS_KEY
+      - resolveDefaultMachineId
     depends_on: [components-ui, lib-use-daemon-machines, lib-llm-providers, lib-agent-profiles]
     used_by: [app-sessions-pages]
     needs_review: false

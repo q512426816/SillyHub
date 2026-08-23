@@ -4,6 +4,7 @@ doc_type: module-card
 module_id: daemon
 author: qinyi
 created_at: 2026-08-18 01:45:00
+updated_at: 2026-08-23 10:10:26
 ---
 
 # 守护进程中枢（daemon）
@@ -43,6 +44,11 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
   `/{id}/inject|reopen|interrupt|end`、`/{id}/recover|confirm-reconnected|
   mark-recovery-failed|ready`、`GET /{id}/stream`（SSE）、`/{id}/runs`、`/{id}/logs`、
   `GET|POST /{id}/dialogs`（+history）、`POST /{id}/permissions/{rid}/response`；
+  列表 `GET /sessions`：`limit` 收口 `le=500`（2026-08-23-sessions-workspace-hub
+  D-103@v1，le=100→le=500 供门户树单页全量取回，>500 仍 422）；响应含非 ORM 列
+  `owner_name`（FR-05/D-108@v2——router 层对本页 owner_ids `IN` 批量查
+  users.username 注入，免逐行 N+1，照 terminating_at 批查先例；属主用户行缺失/
+  username 未回填的旧数据兜底 None 不阻断列表，前端 null 显「—」）；
   `SessionService` 含 `inject_session_as_service`（服务身份注入，跳过用户归属校验，
   供 change 审批联动）。
 - change-write 队列（change_write_router.py）：`GET /runtimes/{id}/pending-change-writes`、

@@ -4,6 +4,7 @@ doc_type: module-card
 module_id: components-daemon
 author: qinyi
 created_at: 2026-08-18 01:45:00
+updated_at: 2026-08-23 10:10:26
 ---
 
 # Daemon 运行时交互组件（components-daemon）
@@ -36,6 +37,16 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
   D-304 跨区共享组件备案见该变更 design §4.B.7）。
   - page 模式：自 sessions/page.tsx 整块搬运（react-query detail 轮询/whoLine runs
     快照/CtxUsageBar/SessionConfigBar/SubagentCatalog/附件链）。
+  - 预会话态（2026-08-23-sessions-workspace-hub task-03/07，仅 page 分支）：page 模式
+    `sessionId=null` + `preContext` → 与真会话**同构**的空态（不防御性 return null），
+    渲染锁定上下文行（工作区名/变更名/机器·智能体）+ 输入框；首句发送触发
+    `createSession` 原地接管（D-101/D-102），成功经 `onPreSessionCreated(resp)` 上报
+    父层（父层切 sessionId → 状态机自然接管），**失败保留输入 + 内联错误可重试**
+    （R-02，成功才清输入——dialog idle 先清后建的丢输入行为不复用）；首句只发文本
+    （createSession 契约无 attachment_ids）。
+    - `SessionPreContext`（导出）：`{ workspaceId: string | null, changeId?: string | null, runtimeId: string }`——入口/组头「＋」解析产物；机器+引擎经 runtimeId 已定（创建后不可换）；change 入口调用方须显式双传 workspaceId+changeId（X-13）。
+    - null 守卫清单（R-01，预会话态全 effect 停发）：不请求会话详情（detailQuery enabled 守卫 + queryFn 窄化双保险）、无会话级 viewMode 持久化键、不建 SSE 流/不预取历史（getAgentSessionLogs/listSessionRuns 零调用）、消息队列不激活不投递、团队 mission 不挂载、会话作用域操作对齐 dialog 版守卫。
+    - change 变更名查询（task-07/D-106）：preContext 双传时 getChange 解析变更名（enabled 守卫，真会话/非 change 预会话停请求；title 缺省回退 change_key）。
   - dialog 模式：自旧 interactive-session-panel 逐段搬运（idle createSession 直发/
     attach 轮询 1.5s×10/legacy 反投影/provider+model 选择器/团队分析/offlineReadOnly）。
   - 两模式追问统一走 `useMessageQueue`（hooks-message-queue 模块）：running/
@@ -113,14 +124,16 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 - `isActiveSession` 判定完全依赖状态集合——新增会话状态须同步
   `ACTIVE_SESSION_VIEW_STATUSES`；MachineCard 内联等值集合两处同步。
 - attach 流程涉及 SSE 连接 + 轮询到 active 的竞态，改动必须跑 `daemon/__tests__`
-  （session-panel-dialog×3 / runtime-session-dialog×3 / turn-timeline-session-input-bar /
+  （session-panel-dialog×3 / session-panel-pre-session / runtime-session-dialog×3 /
+  turn-timeline-session-input-bar /
   session-list-layout / runtime-card×2 / machine-card / remote-folder-picker /
   runtime-session-helpers / session-log-sanitize 等）。
 - 会话日志渲染前须经 session-log-sanitize 清洗分类，勿绕过直写渲染逻辑。
 - `runtime-session-helpers.tsx` 顶层 import 链含 next/navigation，测试须 mock
   （runtime-session-helpers.test.tsx 头注释为证）。
-- SUPPORTED_SESSION_PROVIDERS = ["claude","codex"] 在 dialog 与 ChangeSessionSection
-  两处内联，扩展 provider 两处同步。
+- SUPPORTED_SESSION_PROVIDERS = ["claude","codex"] 在 dialog 分支与
+  sessions/pre-session-picker（NewSessionForm 删除后接棒，2026-08-23-sessions-
+  workspace-hub）两处内联，扩展 provider 两处同步。
 
 ## 人工备注
 

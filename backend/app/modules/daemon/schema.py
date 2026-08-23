@@ -51,6 +51,11 @@ class AgentSessionRead(BaseModel):
     agent_profile_id: uuid.UUID | None = None
     llm_provider_id: uuid.UUID | None = None
     config_snapshot: dict | None = None
+    # 2026-08-23-sessions-workspace-hub task-01 / FR-05 / D-108@v2：属主用户名
+    # （门户列表显示会话归属）。非 ORM 列——由 router 层批量查 users.username
+    # 注入（照 OwnerRead + 本端点 terminating_at 的批量注入先例，避免 N+1）；
+    # 属主用户行缺失 / username 未回填的旧数据一律走默认 None（brownfield 不崩）。
+    owner_name: str | None = None
 
     model_config = {"from_attributes": True}
 

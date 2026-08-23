@@ -1814,7 +1814,9 @@ _SessionProviderQuery = Literal["claude", "codex"]
 async def list_sessions(
     session: SessionDep,
     user: TaskRunAgentUser,
-    limit: int = Query(default=20, ge=1, le=100),
+    # 2026-08-23-sessions-workspace-hub task-01 / D-103@v1：一次拉取上限放宽
+    # le=100 → le=500（portal 单页全量取回；>500 仍 422 拒绝）。
+    limit: int = Query(default=20, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     status: _SessionStatusQuery | None = Query(default=None),
     runtime_id: uuid.UUID | None = Query(default=None),
@@ -1853,6 +1855,20 @@ async def list_sessions(
         change_id=change_id,
     )
     reads = [AgentSessionRead.model_validate(item) for item in items]
+    # 2026-08-23-sessions-workspace-hub task-01 / FR-05 / D-108@v2：批量查
+    # users.username 注入 owner_name（照 OwnerRead / 下方 terminating_at 的
+    # IN 批查注入先例，免逐行 N+1）。属主用户行缺失 / username 未回填的旧
+    # 数据不在 map 中 → 保持 None（brownfield，不阻断列表）。
+    owner_ids = {item.user_id for item in items if item.user_id is not None}
+    if owner_ids:
+        owner_rows = (
+            await session.execute(select(User.id, User.username).where(User.id.in_(owner_ids)))
+        ).all()
+        owner_names: dict[uuid.UUID, str] = {
+            row[0]: row[1] for row in owner_rows if row[1] is not None
+        }
+        for r in reads:
+            r.owner_name = owner_names.get(r.user_id)
     # task-13 / FR-04 / design §5 Phase4：批量查 lease.terminating_at 注入到每个 read。
     # 经 session.lease_id 关联 DaemonTaskLease；只查本页 lease_id 非空子集（IN 避免 N+1）。
     # lease.terminating_at 为空 / session 无 lease → read.terminating_at 保持 None（brownfield）。
