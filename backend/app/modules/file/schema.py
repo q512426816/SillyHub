@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel as PydanticModel
 from pydantic import Field
@@ -23,10 +24,15 @@ class FileUploadResp(PydanticModel):
     original_name: str
     mime_type: str
     size: int
+    description: str | None = None
 
 
 class FileMetaResp(PydanticModel):
-    """文件元数据响应（task-04 provides；batch-meta 回显用）。"""
+    """文件元数据响应（task-04 provides；batch-meta 回显用）。
+
+    description / created_at 为 agent-file-upload-mcp task-01 扩展
+    （design §7.1 list 工具 / §8 D-006@v2）：旧数据 description 为 NULL。
+    """
 
     model_config = {"from_attributes": True}
 
@@ -36,6 +42,8 @@ class FileMetaResp(PydanticModel):
     size: int
     owner_type: str
     owner_id: uuid.UUID | None = None
+    description: str | None = None
+    created_at: datetime
 
 
 class BatchMetaRequest(PydanticModel):

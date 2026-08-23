@@ -73,6 +73,11 @@ class File(BaseModel, table=True):
         default_factory=_now,
         sa_column=Column(DateTime(timezone=True), nullable=False),
     )
+    description: str | None = Field(
+        default=None,
+        sa_column=Column(String(255), nullable=True),
+        description="文件描述（agent 上传制品说明，D-006@v2）；旧数据 NULL。",
+    )
     deleted_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),

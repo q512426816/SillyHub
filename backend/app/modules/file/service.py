@@ -75,8 +75,13 @@ class FileService:
         uploaded_by: uuid.UUID,
         owner_type: str = "",
         owner_id: uuid.UUID | None = None,
+        description: str | None = None,
     ) -> FileUploadResp:
-        """上传：校验 → 存对象 → 落 File 表 → 返回 FileUploadResp。"""
+        """上传：校验 → 存对象 → 落 File 表 → 返回 FileUploadResp。
+
+        ``description``：agent 上传制品说明（D-006@v2），落库前截断 255
+        （仿 original_name，不加新校验错误码）；缺省 None 兼容旧行 NULL。
+        """
         self.validate_upload(size=len(data), mime_type=mime_type)
         file_id = uuid.uuid4()
         now = datetime.now(UTC)
@@ -94,6 +99,7 @@ class FileService:
             size=len(data),
             uploaded_by=uploaded_by,
             created_at=now,
+            description=description[:255] if description else None,
         )
         self._session.add(row)
         try:
@@ -108,7 +114,11 @@ class FileService:
                 log.warning("file.upload_compensation_failed", stored_key=stored_key)
             raise
         return FileUploadResp(
-            id=row.id, original_name=row.original_name, mime_type=row.mime_type, size=row.size
+            id=row.id,
+            original_name=row.original_name,
+            mime_type=row.mime_type,
+            size=row.size,
+            description=row.description,
         )
 
     async def _get_active(self, file_id: uuid.UUID) -> File:
