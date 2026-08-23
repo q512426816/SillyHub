@@ -722,6 +722,10 @@ function SessionPanelPage({
         // run 行（dispatch 冻结）注入，切换配置后的下一轮跟随新快照。
         refreshRunsMeta(sessionId);
 
+        // ql-20260824-004：每轮完成即时刷新左栏列表（轮数/相对时间/状态点，
+        // 不等 10s 轮询兜底；dialog 模式不传 onSessionListRefresh 天然不受影响）。
+        onSessionListRefresh?.();
+
         // 失败轮拉取结构化错误详情（同 run 只拉一次，供 RunErrorItem 渲染）。
         if (
           terminal === "failed" &&

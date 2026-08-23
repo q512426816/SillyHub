@@ -63,6 +63,7 @@ import type * as React from "react";
 import {
   SessionListPanel,
   SESSION_TREE_EXPANSION_LS_KEY,
+  sessionListPollInterval,
   type SessionListScope,
 } from "@/components/sessions/session-list-panel";
 import type {
@@ -1453,5 +1454,75 @@ describe("SessionListPanel 展开状态 localStorage 记忆（ql-20260824-002）
     expect(
       screen.getByRole("button", { name: "工作区分组 工作区二" }),
     ).toHaveAttribute("aria-expanded", "false");
+  });
+});
+
+// ── 11. 列表条件轮询（ql-20260824-004：左栏信息及时更新） ───────────────────
+
+describe("SessionListPanel 列表条件轮询（ql-20260824-004）", () => {
+  it("sessionListPollInterval：存在非终态会话→10s（聊天中近实时）；全终态/无数据→30s 巡航", () => {
+    expect(sessionListPollInterval(undefined)).toBe(30_000);
+    expect(sessionListPollInterval([])).toBe(30_000);
+    expect(
+      sessionListPollInterval([
+        makeSession({ status: "ended" }),
+        makeSession({ status: "failed" }),
+      ]),
+    ).toBe(30_000);
+    expect(sessionListPollInterval([makeSession({ status: "active" })])).toBe(10_000);
+    expect(sessionListPollInterval([makeSession({ status: "pending" })])).toBe(10_000);
+    expect(sessionListPollInterval([makeSession({ status: "reconnecting" })])).toBe(10_000);
+    // 混合：一条进行中即近实时
+    expect(
+      sessionListPollInterval([
+        makeSession({ status: "ended" }),
+        makeSession({ status: "active" }),
+      ]),
+    ).toBe(10_000);
+  });
+
+  it("轮询接线：活跃会话在场 10s 重拉；翻全终态后 10s 不拉、30s 拉（间隔随数据收敛）", async () => {
+    vi.useFakeTimers();
+    try {
+      setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+      mocks.listAgentSessions.mockResolvedValue(
+        listResponse([
+          makeSession({ id: "s-1", workspace_id: "ws-1", status: "active", title: "会话A" }),
+        ]),
+      );
+      renderPanel(<SessionListPanel />);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      const afterMount = mocks.listAgentSessions.mock.calls.length;
+
+      // 活跃在场：10s 到点重拉
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(mocks.listAgentSessions.mock.calls.length).toBeGreaterThan(afterMount);
+
+      // 翻全终态：本次 10s 到点的重拉返回 ended → 间隔切 30s
+      mocks.listAgentSessions.mockResolvedValue(
+        listResponse([
+          makeSession({ id: "s-1", workspace_id: "ws-1", status: "ended", title: "会话A" }),
+        ]),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      const settled = mocks.listAgentSessions.mock.calls.length;
+      // 30s 间隔：再过 10s 不拉，累计 30s 才拉
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_000);
+      });
+      expect(mocks.listAgentSessions.mock.calls.length).toBe(settled);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20_000);
+      });
+      expect(mocks.listAgentSessions.mock.calls.length).toBeGreaterThan(settled);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

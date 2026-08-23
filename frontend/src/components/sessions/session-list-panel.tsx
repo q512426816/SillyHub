@@ -303,6 +303,23 @@ function statusDotClass(status: AgentSessionStatus): string {
   return "bg-muted-foreground/50";
 }
 
+/**
+ * 会话列表轮询间隔（ql-20260824-004：用户反馈左栏信息/状态不及时——原仅
+ * 窗口聚焦与少数 invalidate 点刷新，页面停留期间轮数/状态点/新上报会话
+ * 均不动）：存在进行中会话（非 ended/failed——聊天/排队/恢复中）→ 10s
+ * 近实时；全静默 → 30s 巡航（CLI 上报新会话/远端状态变化兜底）。后台标签
+ * 页不轮询（refetchIntervalInBackground 沿用全局默认 false）；structuralSharing
+ * 默认开，内容不变不重渲染。先例：quicklogPollInterval / changesRefetchInterval。
+ */
+export function sessionListPollInterval(
+  items: AgentSessionRead[] | undefined,
+): number {
+  const hasOngoing = (items ?? []).some(
+    (s) => s.status !== "ended" && s.status !== "failed",
+  );
+  return hasOngoing ? 10_000 : 30_000;
+}
+
 /** runtime→机器映射值（机器小节 / 离线判定共用）。 */
 type RuntimeMachineIndex = Map<
   string,
@@ -449,6 +466,8 @@ function WorkspaceTreeList({
   // 维持既有端点过滤（D-003@v2 只多传 workspace_id）。queryKey 沿用全局键
   // 结构（scope 槽位 + 参数对象），门户软删后按前缀 ["agentSessions"]
   // invalidate 继续全覆盖。
+  // ql-20260824-004：函数式条件轮询（间隔按最近一次数据推导，先例
+  // quicklog-table quicklogPollInterval）——聊天中 10s / 静默 30s。
   const sessionsQuery = useQuery<AgentSessionListResponse, ApiError>({
     queryKey: [
       "agentSessions",
@@ -463,6 +482,8 @@ function WorkspaceTreeList({
         // ql-20260823-003：change 树化后端点过滤参随树透传（D-003@v2）。
         ...(scope?.kind === "change" ? { change_id: scope.changeId } : {}),
       }),
+    refetchInterval: (query) =>
+      sessionListPollInterval(query.state.data?.items),
   });
 
   const sessions = useMemo(

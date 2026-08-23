@@ -837,6 +837,32 @@ describe("SessionPanel SSE 装配器接线（task-09）", () => {
     expect(screen.getByText("已完成")).toBeTruthy();
     expect(screen.getByText(/↑100/)).toBeTruthy();
   });
+
+  it("onTurnCompleted → invalidate agentSessions 前缀命中左栏树查询重拉（ql-20260824-004：轮数/状态即时刷新）", async () => {
+    renderPage();
+    await selectDefaultSession();
+    await waitFor(() => {
+      expect(mocks.streamSession).toHaveBeenCalledWith(
+        "s-1",
+        expect.objectContaining({ onLog: expect.any(Function) }),
+      );
+    });
+    const listCalls = mocks.listAgentSessions.mock.calls.length;
+    act(() => {
+      getStreamHandlers().onTurnCompleted(
+        makeStreamEnvelope({
+          event: "turn_completed",
+          status: "completed",
+          exit_code: 0,
+        }),
+      );
+    });
+    await waitFor(() =>
+      expect(mocks.listAgentSessions.mock.calls.length).toBeGreaterThan(
+        listCalls,
+      ),
+    );
+  });
 });
 
 // ── ql-20260820-007：attach 运行中轮恢复竞态（detail / 历史 logs 到达顺序） ──
