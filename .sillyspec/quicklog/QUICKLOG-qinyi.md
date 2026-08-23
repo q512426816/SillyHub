@@ -172,7 +172,17 @@
 结果：受影响 47/47（3 新用例）+ 全量 1931/1931 + tsc 零错；components-sessions.md 同步；待前端重建部署
 审计：⚖️ 归属切分：4 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/__tests__/agent-log-card.test.tsx, frontend/src/components/daemon/agent-log-card.tsx, frontend/src/components/daemon/session-panel.tsx, frontend/src/components/daemon/turn-timeline.tsx
 
-## ql-20260823-002-6a1a | 2026-08-23 11:17:17 | 「本地 Agent 日志」改为会话流内展示：不要独立卡片，融进消息流末尾成一条会话式条目（助手侧头像+气泡形态，默认折叠一行摘要，点开明细；空态不渲染）
-状态：进行中
+## ql-20260823-002-6a1a | 2026-08-23 11:17:17 | 本地 Agent 日志不要独立卡片展示（夹在消息流与输入区之间很别扭）
+状态：已完成
 关联变更：2026-08-23-platform-agent-log-ingest
-文件：frontend/src/components/daemon/agent-log-card.tsx, frontend/src/components/daemon/session-panel.tsx, frontend/src/components/daemon/turn-timeline.tsx, frontend/src/components/daemon/__tests__/agent-log-card.test.tsx
+文件：.sillyspec/changes/2026-08-23-platform-agent-log-ingest/tasks.md
+需求：本地 Agent 日志不要独立卡片展示（夹在消息流与输入区之间很别扭），要融进会话消息流。
+根因：无，纯展示形态重构（挂载位置与视觉形态问题，数据链路不变）。
+方案：TurnTimeline 增 streamFooter 注入口（最后一个 turn 后、同滚动容器内渲染）；AgentLogCard 改会话流条目——🧾 圆形头像 + 答复同款 rounded-tl 气泡，默认折叠一行摘要「本地 Agent 日志 · N 个 · 最新 X 前 ▸」，点击头部展开明细（保留 3 条折叠/展开全部/刷新/复制交互）；空/错/加载一律不渲染；session-panel 挂载从独立区块改为传 prop。文件：agent-log-card.tsx、session-panel.tsx、turn-timeline.tsx、__tests__/agent-log-card.test.tsx。
+结果：vitest 7/7（折叠默认/展开/条数折叠/复制/静默隐藏）、daemon 目录 24 文件 341 测试零回归、tsc 0 错、lint 过；Docker 前端镜像重建部署，生产 3001 实证条目在会话流内正确落位（折叠摘要 + 实时数据），dev 3000 全交互实证（展开明细/复制按钮/invocations=2 心跳数据）；提交 2c8f0f0d。审计注：backend/app/modules/daemon/router.py 为并行会话未提交工作（非本 quick 范围，仅审计行追溯）。
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/router.py
+
+## ql-20260823-003-b37e | 2026-08-23 11:49:49 | 创建人显示名称/筛选后隐藏引擎chip/变更入口树统一
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/daemon/router.py, backend/app/modules/daemon/tests/test_sessions_list_owner_name.py, frontend/src/components/sessions/session-list-panel.tsx, frontend/src/components/sessions/sessions-portal.tsx, frontend/src/components/sessions/__tests__/session-list-panel.test.tsx, frontend/src/components/sessions/__tests__/sessions-portal.test.tsx, .sillyspec/docs/frontend/modules/components-sessions.md

@@ -10,3 +10,4 @@ created_at: 2026-08-23 04:50:00
 - [x] task-03: 类型同步——`pnpm gen:types` 重生成 `frontend/src/lib/api-types.ts` + `backend/openapi.json` (depends_on: task-02)
 - [x] task-04: 前端——`src/lib/agent-logs.ts`（listAgentLogs + query-keys 工厂 agentLogs 键）+ `agent-log-card.tsx` 组件（三态：列表/空态/折叠，复制交互，双主题 brand 阶，dayjs.extend(relativeTime)）+ SessionPanelPage 挂载（workspace_id null 守卫）+ vitest 组件测试 (depends_on: task-03)
 - [x] task-05: 全量回归与端到端实证——backend pytest + ruff + mypy、frontend vitest + tsc + lint；本地起后端跑真实 `sillyspec status` 验证 CLI 上报 200 落库（对齐上一会话 404 基线） (depends_on: task-04)
+- [x] ql-20260823-002-6a1a 「本地 Agent 日志」改为会话流内展示：不要独立卡片，融进消息流末尾成一条会话式条目（助手侧头像+气泡形态，默认折叠一行摘要，点开明细；空态不渲染）
