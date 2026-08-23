@@ -5,6 +5,13 @@
  * hub-client → backend mcp_tools.py 5 endpoint（派 worker / 读产出 / 列 worker /
  * 收敛 / 报进度）。
  *
+ * task-05（2026-08-23-agent-file-upload-mcp / D-005@v1）：``MCP_TOOLSET`` 双模式——
+ *   - ``orchestration``（缺省）：上述 5 编排工具，行为零变化（兼容约束）；
+ *   - ``file``：仅注册 ``upload_file`` / ``list_uploaded_files``（D-003@v1），
+ *     供会话主 agent / 批任务 worker 把工作目录内产物上传给用户。sillyhub-file
+ *     server 条目由 mcp-config.ts ``buildFileMcpServerConfig`` 构造（env 注入
+ *     MCP_TOOLSET=file + 上下文），会话注入归 task-06、worker 注入归 task-07。
+ *
  * spike-01（spikes/06-mcp-server）验证了 stdio MCP server + 1 tool 的协议链路；
  * 本文件扩展到生产 5 tool，handler 调 HubClient 方法（非 spike 的直接 fetch），
  * 鉴权 / 非 2xx / snake_case body 全复用 hub-client 既有语义。
@@ -13,6 +20,8 @@
  *   - backend ``app/modules/agent/mcp_tools.py`` 5 endpoint 真实契约（task-03 建，
  *     task-09 P0 鉴权 gap 闭合：require_permission → get_current_principal 双路径
  *     鉴权 JWT + X-API-Key）
+ *   - backend ``app/modules/agent/file_artifacts.py``（本变更 task-03）上传/列表
+ *     端点契约（multipart file/description/run_id + X-Session-Id；GET 二选一 query）
  *   - ``hub-client.ts`` ``_request``（:274 非 2xx 抛 HubHttpError）+ ``_headers``
  *     （:252 Bearer token / X-API-Key 鉴权）
  *   - spike-01 README：tool schema 对齐 backend 真实契约（dispatch_worker 无
@@ -30,6 +39,12 @@
  *   MCP_SESSION_ID  主 agent 会话 id（task-10 / FR-04：session-manager 经
  *     mcpServers['sillyhub-daemon'].env per-server 注入（spike-01 管道），
  *     hub-client 给 MCP 5 端点附 X-Session-Id，backend 按会话定位活跃 mission）
+ *   MCP_TOOLSET  工具集模式（task-05 本变更）：'file' = 仅文件 2 工具；
+ *     未设 / 其它值 = orchestration（5 编排工具，缺省零回归）
+ *   MCP_RUN_ID  worker run id（file 模式：批任务 worker 场景，上传时作 multipart
+ *     run_id 字段、列表时作 run_id query；task-07 task-runner 注入）
+ *   MCP_ALLOWED_ROOT  上传允许根目录（file 模式；会话=cwd、worker=worktree 根，
+ *     注入方解析为绝对路径写入；**缺失拒绝一切上传**——R-01 fail-closed）
  *
  * @module mcp-server
  */
@@ -37,6 +52,8 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { readFile } from 'node:fs/promises';
+import { basename, extname, resolve as resolvePath, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { HubClient, HubHttpError, type HubClientAuth } from './hub-client.js';
 
@@ -48,12 +65,29 @@ import { HubClient, HubHttpError, type HubClientAuth } from './hub-client.js';
  */
 export const DAEMON_MCP_SERVER_NAME = 'sillyhub-daemon';
 
+/**
+ * 文件 MCP server 对外名称（task-05 2026-08-23-agent-file-upload-mcp / D-005@v1）。
+ * mcp-config.ts ``buildFileMcpServerConfig`` 用同名 key 构造 server 条目，
+ * 调用方（task-06 会话注入 / task-07 worker 注入）并入 platform_default 即自动
+ * 入 ``mergeMcpConfigs`` 白名单（与 DAEMON_MCP_SERVER_NAME 同惯例）。
+ */
+export const FILE_MCP_SERVER_NAME = 'sillyhub-file';
+
+/** 工具集模式：orchestration（5 编排工具，缺省）| file（文件 2 工具）。 */
+export type McpToolset = 'orchestration' | 'file';
+
 interface McpServerEnv {
   backendUrl: string;
   daemonToken: string;
   daemonApiKey: string;
   /** task-10（2026-08-22-team-session-unify / FR-04）：主 agent 会话 id。 */
   sessionId: string;
+  /** task-05（本变更）：工具集模式；仅 'file' 显式开启文件工具，其余归 orchestration。 */
+  toolset: McpToolset;
+  /** task-05（本变更）：worker run id（file 模式，MCP_RUN_ID 注入）。 */
+  runId: string;
+  /** task-05（本变更）：上传允许根目录（file 模式，MCP_ALLOWED_ROOT 注入；缺失拒一切）。 */
+  allowedRoot: string;
 }
 
 /**
@@ -62,6 +96,9 @@ interface McpServerEnv {
  * 路径，backend get_current_principal 解析 apiKey → User），token 回落（Bearer JWT）。
  * task-10：MCP_SESSION_ID 经 mcpServers['sillyhub-daemon'].env per-server 注入
  * （spike-01 验证管道：CLI spawn MCP 子进程时白名单 env + per-server env 合并）。
+ * task-05（本变更）：MCP_TOOLSET 仅字面量 'file' 切文件模式（拼写错误容错回落
+ * orchestration，不 crash）；MCP_RUN_ID / MCP_ALLOWED_ROOT 空值返回空串（file
+ * 工具内 fail-closed 处理）。
  * 导出供单测断言注入链终点（session-manager → driver spawn → 本函数）。
  */
 export function readEnv(): McpServerEnv {
@@ -70,6 +107,9 @@ export function readEnv(): McpServerEnv {
     daemonApiKey: process.env.MCP_SERVER_DAEMON_API_KEY ?? '',
     daemonToken: process.env.MCP_SERVER_DAEMON_TOKEN ?? '',
     sessionId: process.env.MCP_SESSION_ID ?? '',
+    toolset: process.env.MCP_TOOLSET === 'file' ? 'file' : 'orchestration',
+    runId: process.env.MCP_RUN_ID ?? '',
+    allowedRoot: process.env.MCP_ALLOWED_ROOT ?? '',
   };
 }
 
@@ -139,23 +179,111 @@ function errorContent(tool: string, err: unknown): ToolResult {
   };
 }
 
-// ── server 构造（导出供测试注入 mock hub-client）──────────────────────────────
+/**
+ * file 工具集本地校验错误回执（task-05 2026-08-23-agent-file-upload-mcp）。
+ *
+ * 与 ``errorContent`` 同构（isError + JSON content），但 error 码是 design §7.1
+ * 枚举的业务码（``path_out_of_root`` / ``file_not_found`` 等），供主 agent 区分
+ * 「改路径重试可恢复」与「传输/后端失败」。非本地校验错误（backend 非 2xx /
+ * 网络异常）仍走 ``errorContent``（http / network / internal）。
+ */
+function fileToolError(tool: string, code: string, message: string): ToolResult {
+  return {
+    isError: true,
+    content: [
+      { type: 'text', text: JSON.stringify({ error: code, tool, message }) },
+    ],
+  };
+}
+
+// ── file 工具集：MIME 猜测（Node 20 无内建 mime db，小表覆盖常见产物）───────
 
 /**
- * 构造 daemon MCP server 并注册 5 tool。
+ * 扩展名 → MIME 小表（task-05）。图片类型影响前端卡片形态（图片内联缩略图，
+ * design 目标 1），其余覆盖常见报告/数据导出产物；未知扩展名回落
+ * ``application/octet-stream``（backend 同款兜底值）。
+ */
+const MIME_BY_EXT: Readonly<Record<string, string>> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.pdf': 'application/pdf',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.json': 'application/json',
+  '.csv': 'text/csv',
+  '.html': 'text/html',
+  '.htm': 'text/html',
+  '.xml': 'application/xml',
+  '.zip': 'application/zip',
+};
+
+function guessMimeType(filename: string): string {
+  return MIME_BY_EXT[extname(filename).toLowerCase()] ?? 'application/octet-stream';
+}
+
+// ── server 构造（导出供测试注入 mock hub-client）──────────────────────────────
+
+/** file 工具集上下文（task-05：注入方经 per-server env 写入，runMcpServer 从 env 读）。 */
+export interface FileToolsetContext {
+  /** 会话场景：主 agent 会话 id（列表 query session_id）。 */
+  sessionId?: string;
+  /** worker 场景：run id（上传 multipart run_id 字段 / 列表 query run_id）。 */
+  runId?: string;
+  /** 上传允许根目录（缺失拒绝一切上传，R-01 fail-closed）。 */
+  allowedRoot?: string;
+}
+
+/**
+ * ``createMcpServer`` 选项（task-05 双模式）。全字段可选——旧调用
+ * ``createMcpServer(client)`` 等价 ``{ toolset: 'orchestration' }``（5 编排
+ * 工具，零回归）。
+ */
+export interface CreateMcpServerOptions extends FileToolsetContext {
+  /** 工具集模式，缺省 'orchestration'；'file' = 仅文件 2 工具。 */
+  toolset?: McpToolset;
+}
+
+/**
+ * 构造 daemon MCP server 并注册工具（双模式，task-05）。
+ *
+ * - ``orchestration``（缺省）：5 编排工具（本方法内既有注册，行为零变化）；
+ * - ``file``：仅 ``upload_file`` / ``list_uploaded_files``（D-003@v1），server
+ *   名切换为 ``FILE_MCP_SERVER_NAME``（sillyhub-file，供客户端/日志识别）。
  *
  * @param client  HubClient 实例（测试可传 mock）；生产由 ``runMcpServer`` 用 env
  *   构造。tool handler 全部经此 client 调 backend。
+ * @param opts    可选：toolset / sessionId / runId / allowedRoot（file 模式上下文，
+ *   生产由 ``runMcpServer`` 从 env 读入注入；测试直接传）
  * @returns ``{ server, transport }``，调用方 ``await server.connect(transport)``
  *   启动。分离构造与连接便于测试断言 tool 注册（``listTools``）无需 stdio。
  */
-export function createMcpServer(client: HubClient): {
+export function createMcpServer(
+  client: HubClient,
+  opts: CreateMcpServerOptions = {},
+): {
   server: McpServer;
 } {
+  const toolset: McpToolset = opts.toolset ?? 'orchestration';
   const server = new McpServer(
-    { name: DAEMON_MCP_SERVER_NAME, version: '0.1.0' },
+    {
+      name: toolset === 'file' ? FILE_MCP_SERVER_NAME : DAEMON_MCP_SERVER_NAME,
+      version: '0.1.0',
+    },
     { capabilities: { tools: {} } },
   );
+
+  if (toolset === 'file') {
+    registerFileTools(server, client, {
+      sessionId: opts.sessionId,
+      runId: opts.runId,
+      allowedRoot: opts.allowedRoot,
+    });
+    return { server };
+  }
 
   // ── dispatch_worker ──────────────────────────────────────────────────────
   // task-10（2026-08-22-team-session-unify / 审查 B1）：mission_id/workspace_id
@@ -428,12 +556,142 @@ export function createMcpServer(client: HubClient): {
   return { server };
 }
 
+// ── file 工具集注册（task-05 2026-08-23-agent-file-upload-mcp / D-003@v1）─────
+
+/**
+ * 注册 file 工具集 2 工具（仅 ``MCP_TOOLSET=file`` 模式调用）。
+ *
+ * 安全边界（design §7.1 / R-01）：
+ *   - ``allowedRoot`` 缺失 → 拒绝一切上传（fail-closed，不降级放行）；
+ *   - ``resolvePath(allowedRoot, path)`` 结果必须以 ``allowedRoot + 平台分隔符``
+ *     为前缀——绝对路径与含 ``..`` 的逃逸经 resolve 归一后自然落根外，统一拒绝
+ *     （``path_out_of_root``）；
+ *   - 本地读文件后才经 hub-client multipart 直传（文件内容不经 agent 上下文）。
+ */
+function registerFileTools(
+  server: McpServer,
+  client: HubClient,
+  ctx: FileToolsetContext,
+): void {
+  // ── upload_file ──────────────────────────────────────────────────────────
+  server.registerTool(
+    'upload_file',
+    {
+      title: 'Upload File',
+      description:
+        '把工作目录内的一个文件上传给用户（平台文件中心，聊天流/运行详情出现文件卡片）。' +
+        '【何时使用】生成报告、图表、数据导出等用户需要的产物文件后调用。' +
+        '【路径规则】path 必须是相对当前工作目录的路径；绝对路径或含 .. 越出工作目录的路径' +
+        '会被拒绝（path_out_of_root），文件不存在返回 file_not_found。' +
+        '【描述】description 一句话说明文件内容，展示在文件卡片上（可选）。' +
+        '响应 { file_id, original_name, size, mime_type, description }。',
+      inputSchema: {
+        path: z
+          .string()
+          .describe(
+            'File path relative to the working directory (absolute paths and ' +
+              '".." escapes outside the allowed root are rejected)',
+          ),
+        description: z
+          .string()
+          .optional()
+          .describe(
+            'Optional one-line description shown on the file card (e.g. what the file contains)',
+          ),
+      },
+    },
+    async (args: { path: string; description?: string }) => {
+      const tool = 'upload_file';
+      // R-01 fail-closed：allowedRoot 缺失拒绝一切上传（空串/未注入同罪）。
+      const root = (ctx.allowedRoot ?? '').trim();
+      if (!root) {
+        return fileToolError(
+          tool,
+          'path_out_of_root',
+          'MCP_ALLOWED_ROOT is not set; all uploads are rejected (fail-closed)',
+        );
+      }
+      // resolve + 平台分隔符前缀校验：绝对路径（resolve 直接采纳）与 .. 逃逸
+      //（resolve 归一上跳）都落根外；根自身是目录，也必须带分隔符才视为根内。
+      const resolvedRoot = resolvePath(root);
+      const resolved = resolvePath(resolvedRoot, args.path);
+      if (!resolved.startsWith(resolvedRoot + sep)) {
+        return fileToolError(
+          tool,
+          'path_out_of_root',
+          `path "${args.path}" resolves outside the allowed root`,
+        );
+      }
+      // 本地读文件（内容不经 agent 对话上下文，daemon 直传 backend）。
+      let data: Buffer;
+      try {
+        data = await readFile(resolved);
+      } catch (e) {
+        if ((e as { code?: unknown }).code === 'ENOENT') {
+          return fileToolError(tool, 'file_not_found', `file not found: ${args.path}`);
+        }
+        return errorContent(tool, e);
+      }
+      try {
+        const result = await client.uploadFileArtifact({
+          filename: basename(resolved),
+          data,
+          mimeType: guessMimeType(resolved),
+          description: args.description,
+          // worker 场景经 env 注入 runId；会话场景空 → 不发 run_id 字段，
+          // backend 走 X-Session-Id（hub-client auth.sessionId）。
+          runId: ctx.runId || undefined,
+        });
+        return okContent(result);
+      } catch (e) {
+        return errorContent(tool, e);
+      }
+    },
+  );
+
+  // ── list_uploaded_files ──────────────────────────────────────────────────
+  server.registerTool(
+    'list_uploaded_files',
+    {
+      title: 'List Uploaded Files',
+      description:
+        '列出当前上下文（会话或批任务 run）已上传给用户的全部文件制品，按上传时间倒序。' +
+        '用于确认此前 upload_file 的结果或向用户汇总已交付文件。' +
+        '响应 { files: [{ file_id, original_name, size, mime_type, description, created_at }] }。',
+      inputSchema: {},
+    },
+    async () => {
+      const tool = 'list_uploaded_files';
+      const sessionId = ctx.sessionId ?? '';
+      const runId = ctx.runId ?? '';
+      // 注入方（task-06 会话 / task-07 worker）必写其一；均缺 → 结构化错误
+      //（不发无 query 的请求白吃 backend 422）。
+      if (!sessionId && !runId) {
+        return fileToolError(
+          tool,
+          'missing_context',
+          'neither MCP_SESSION_ID nor MCP_RUN_ID is set; cannot resolve uploaded files owner',
+        );
+      }
+      try {
+        const result = await client.listFileArtifacts(
+          sessionId ? { sessionId } : { runId },
+        );
+        return okContent(result);
+      } catch (e) {
+        return errorContent(tool, e);
+      }
+    },
+  );
+}
+
 // ── 启动入口（生产：env 构造 HubClient + stdio transport）─────────────────────
 
 /**
  * 启动 daemon MCP server（stdio transport）。
  *
- * 从 env 读 backend URL + token 构造 HubClient，注册 5 tool，连接
+ * 从 env 读 backend URL + token 构造 HubClient，按 ``MCP_TOOLSET`` 注册工具
+ *（缺省 orchestration = 5 编排工具；file = 2 文件工具，task-05），连接
  * StdioServerTransport。env 缺失时仍启动（tool 调用返回结构化错误，不 crash）。
  *
  * 仅在作为独立进程运行（``node dist/mcp-server.js``）时调用；测试用
@@ -467,10 +725,25 @@ export async function runMcpServer(): Promise<void> {
     ...(env.sessionId ? { sessionId: env.sessionId } : {}),
   };
   const client = new HubClient(env.backendUrl || 'http://localhost:8000', auth);
-  const { server } = createMcpServer(client);
+  // task-05（本变更）：双模式——env 全量透传（toolset + file 上下文），
+  // 缺省 orchestration 与旧调用完全一致（零回归）。
+  const { server } = createMcpServer(client, {
+    toolset: env.toolset,
+    sessionId: env.sessionId,
+    runId: env.runId,
+    allowedRoot: env.allowedRoot,
+  });
+  if (env.toolset === 'file' && !env.allowedRoot) {
+    // R-01 fail-closed 提示：server 照常启动，upload_file 一律结构化报错。
+    console.error(
+      '[mcp-server] MCP_ALLOWED_ROOT not set; upload_file will reject all paths (fail-closed)',
+    );
+  }
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('[mcp-server] sillyhub-daemon MCP server started (stdio)');
+  console.error(
+    `[mcp-server] ${env.toolset === 'file' ? FILE_MCP_SERVER_NAME : DAEMON_MCP_SERVER_NAME} MCP server started (stdio)`,
+  );
 }
 
 // ── 直接运行入口（node dist/mcp-server.js）──────────────────────────────────
