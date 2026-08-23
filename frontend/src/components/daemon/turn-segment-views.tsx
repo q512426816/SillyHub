@@ -19,6 +19,10 @@
  *   - TeamWorkerBlockView 分身段块（task-12 / 2026-08-22-team-session-unify FR-07：
  *                       violet 折叠卡——角色/目标工作区徽标/状态/耗时 + children
  *                       日志产物；dispatch_worker tool 段在 SegmentView 升级路由到此）
+ *   - file 段 → FileMessageCard（task-08 / 2026-08-23-agent-file-upload-mcp FR-01 /
+ *                       D-001@v1：agent 上传文件卡片——图片缩略图 / 通用文件卡两
+ *                       形态；本文件只包一层「agent 上传了文件」标注，卡片本体在
+ *                       daemon/file-message-card.tsx）
  *   - SegmentView       统一入口分发器（按 kind 分发；tool 段有 children 时升级为
  *                       子代理块渲染；dispatch_worker 团队工具升级为分身段块）
  *
@@ -46,6 +50,7 @@ import { Children, memo, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { MarkdownText } from "@/components/ui/markdown-text";
+import { FileMessageCard } from "@/components/daemon/file-message-card";
 import type {
   StubTurnSegment,
   ToolTurnSegment,
@@ -124,10 +129,12 @@ function useSegmentAnimations(): void {
 
 /* ───────────────────── props 契约（task-06 / task-12 消费） ───────────────────── */
 
-/** 段类型收窄别名（assembler 只导出 tool/stub 两个，此处补齐其余三类）。 */
+/** 段类型收窄别名（assembler 只导出 tool/stub 两个，此处补齐其余四类）。 */
 export type TextTurnSegment = Extract<TurnSegment, { kind: "text" }>;
 export type ThinkingTurnSegment = Extract<TurnSegment, { kind: "thinking" }>;
 export type StderrTurnSegment = Extract<TurnSegment, { kind: "stderr" }>;
+/** 文件段（task-08 / design §7.3）：FileMessageCard 的段级数据源。 */
+export type FileTurnSegment = Extract<TurnSegment, { kind: "file" }>;
 /** 子代理容器段：有 children 的 tool 段 + subagent_stub 兜底段（复用同一组件）。 */
 export type SubagentContainerSegment = ToolTurnSegment | StubTurnSegment;
 
@@ -753,6 +760,7 @@ function teamWorkerBlockFromSegment(segment: ToolTurnSegment): TeamWorkerBlockPr
  * ToolRowView；subagent_stub 兜底段复用 SubagentBlockView（design §9.5）。
  * task-12（FR-07）：dispatch_worker 团队工具段升级为 TeamWorkerBlockView
  * （分身段块——派发调用即分身在进度视图的代表，其 children 为分身归属日志）。
+ * task-08（FR-01）：file 段渲染 FileMessageCard（agent 上传文件卡片）。
  * memo 默认浅比较依赖装配器 path-copy 的段引用稳定性（FR-06）；列表层以
  * segment.id 为稳定 key（消费方 task-06）。
  */
@@ -775,6 +783,25 @@ export const SegmentView = memo(function SegmentView({ segment }: SegmentViewPro
       return <SubagentBlockView segment={segment} />;
     case "stderr":
       return <StderrRowView segment={segment} />;
+    case "file":
+      // task-08（FR-01 / D-001@v1）：文件段 → FileMessageCard（图片缩略图 / 通用
+      // 卡两形态，antd 仅经其间接使用）；本层只加「agent 上传了文件」标注行
+      // （原型 .file-msg .who），卡片本体在 task-09 产出文件区可原样复用。
+      return (
+        <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
+          <span className="select-none pl-0.5 text-[11px] text-muted-foreground">
+            agent 上传了文件
+          </span>
+          <FileMessageCard
+            fileId={segment.fileId}
+            name={segment.name}
+            size={segment.size}
+            mime={segment.mime}
+            description={segment.description}
+            ts={segment.ts}
+          />
+        </div>
+      );
     default: {
       // 穷尽防御：TurnSegment 新增 kind 时此处编译期报错（never 不兼容）。
       const exhaustive: never = segment;

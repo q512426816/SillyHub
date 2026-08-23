@@ -66,6 +66,9 @@ function segmentTs(seg: TurnSegment): number {
       return seg.ts ?? Number.NEGATIVE_INFINITY;
     case "subagent_stub":
       return Number.NEGATIVE_INFINITY;
+    // task-08（agent-file-upload-mcp）：file 段非 running 候选，时间戳取 log ts。
+    case "file":
+      return seg.ts ?? Number.NEGATIVE_INFINITY;
   }
 }
 

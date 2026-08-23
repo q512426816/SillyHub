@@ -568,6 +568,10 @@ function segmentTsOf(seg: TurnSegment): number | null {
       return seg.ts;
     case "subagent_stub":
       return null;
+    // task-08（agent-file-upload-mcp）：file 段渲染走 SegmentView（文件卡片），
+    // 排序时间戳取 log ts（同 thinking/stderr 语义）。
+    case "file":
+      return seg.ts;
   }
 }
 
