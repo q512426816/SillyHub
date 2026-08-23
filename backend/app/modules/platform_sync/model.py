@@ -26,6 +26,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     UniqueConstraint,
@@ -201,6 +202,12 @@ class AgentSessionLogORM(BaseModel, table=True):
     ``workspace_id`` 只由 shpsync_ token 派生（auth.py D-004@v1 通道），无 shk_live_
     过渡期 NULL 场景，此处必填 NOT NULL；workspace 删则级联删本表行。
     ``log_path`` 存 CLI 上报原样（Windows 盘符/反斜杠，NFR-02）。
+
+    Change 2026-08-23-agent-activity-sessions task-03（design §3.3.1 / FR-04）：加
+    ``agent_session_id`` 列——会话化归属落点（design §3.3.3：body 级 hub_session_id
+    命中直挂、无关联按 entry ctx 聚合 find-or-create，task-04 实现）。NULL = 未归属
+    （存量行不回填，R-03）；ON DELETE SET NULL——会话删除不拖日志行（行属 workspace
+    留底审计）。
     """
 
     __tablename__ = "platform_agent_logs"
@@ -210,6 +217,8 @@ class AgentSessionLogORM(BaseModel, table=True):
             "log_path",
             name="uq_platform_agent_logs_workspace_path",
         ),
+        # 会话维度过滤（GET /api/agent-logs?session_id=，FR-08/§3.3.6）+ 归属回查。
+        Index("ix_platform_agent_logs_agent_session_id", "agent_session_id"),
     )
 
     id: uuid.UUID = Field(
@@ -299,6 +308,17 @@ class AgentSessionLogORM(BaseModel, table=True):
     pushed_at: str | None = Field(
         default=None,
         sa_column=Column(String(64), nullable=True),
+    )
+    # 2026-08-23-agent-activity-sessions task-03 / FR-04：所属平台会话（会话化归属，
+    # design §3.3.3，归属写入在 task-04）。NULL = 未归属（存量行不回填，R-03）；
+    # ON DELETE SET NULL——会话删除不拖日志行（行属 workspace 留底审计）。
+    agent_session_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_sessions.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
     )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),

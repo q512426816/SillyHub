@@ -50,6 +50,14 @@ export interface SpawnEnvCtx {
    * absent / null / agent_kind 未注册 → 第 0 层跳过，env 与现状三层逐字一致（零回归）。
    */
   provider_config?: ProviderConfig | null;
+  /**
+   * task-02（2026-08-23-agent-activity-sessions / D-008）：平台会话 id
+   * （agent_sessions.id，非 agent 侧 resume key）。非空 → 注入
+   * SILLYHUB_SESSION_ID（层 1 之上，见 buildSpawnEnv 内注释），让会话内跑的
+   * sillyspec CLI 上报 hub_session_id 关联 platform_agent_logs（design §3.2）。
+   * undefined / 空串 → 不注入（非平台会话派发不含该键，零回归）。
+   */
+  agentSessionId?: string;
 }
 
 /** spawn env 构造选项。 */
@@ -72,6 +80,13 @@ export interface BuildSpawnEnvOpts {
  */
 export const ANTHROPIC_API_KEY_FIELD = 'ANTHROPIC_API_KEY';
 export const CLAUDE_OAUTH_TOKEN_FIELD = 'CLAUDE_OAUTH_TOKEN';
+
+/**
+ * task-02（2026-08-23-agent-activity-sessions / D-008）：平台会话身份 env 键。
+ * daemon 派生 agent 子进程注入该键（值 = 平台 agent_sessions.id），sillyspec CLI
+ * 读它作上报 hub_session_id（协议 v1.1，design §3.1/§3.2）。
+ */
+export const SILLYHUB_SESSION_ID_FIELD = 'SILLYHUB_SESSION_ID';
 
 const TOKEN_FIELDS: readonly string[] = [
   ANTHROPIC_API_KEY_FIELD,
@@ -105,6 +120,8 @@ const SENSITIVE_KEY = /KEY\b|TOKEN\b|SECRET\b|PASSWORD\b|PAT\b|CREDENTIAL\b/i;
  * 四层合并（优先级从高到低）：provider_config（第 0 层）> tool_config.env（层 1）
  * > claude token（层 2）> process.env（层 3）。
  * token 绝不写空串（避免误判已配置）；credentials.json 与 process.env 都无则不写入。
+ * task-02（2026-08-23-agent-activity-sessions）：ctx.agentSessionId 非空时在
+ * 层 1 之上、层 0 之下注入 SILLYHUB_SESSION_ID（平台会话身份，见下方内联注释）。
  *
  * 第 0 层（task-09 / D-004）：provider_config 存在 + agent_kind 已注册 injector
  * → injector.toEnv 产 env **最后赋值**盖过三层同名 key（最高优先级）。
@@ -142,6 +159,20 @@ export function buildSpawnEnv(
       );
     }
     env[k] = v;
+  }
+
+  // task-02（2026-08-23-agent-activity-sessions / D-008）：平台会话身份注入。
+  // 注入层级放在 tool_config（层 1）之上——写在层 1 赋值之后，后写覆盖 tool_config
+  // 大写后同名键（防 lease tool_config 下发 SILLYHUB_SESSION_ID 遮蔽平台会话身份，
+  // Grill 建议）；同时写在 provider_config（层 0）赋值之前——极端场景 injector 产
+  // 同名键时第 0 层生效（可接受：供应商配置属平台更高意志，正常不会下发此键）。
+  // 值仅内存传递随 spawn env 进子进程，禁落盘/日志（R-09 同款约束）。
+  // 空串视为未注入（永不写空会话 id）；不注入时清掉层 3 可能继承的残留同名键
+  // （如 daemon 自身在平台会话终端内启动），确保非平台会话派发不含该键。
+  if (ctx.agentSessionId) {
+    env[SILLYHUB_SESSION_ID_FIELD] = ctx.agentSessionId;
+  } else if (env[SILLYHUB_SESSION_ID_FIELD] !== undefined) {
+    delete env[SILLYHUB_SESSION_ID_FIELD];
   }
 
   // 层 0：provider_config（最高优先级，task-09 / D-004）

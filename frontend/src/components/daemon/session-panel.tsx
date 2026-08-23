@@ -89,7 +89,10 @@ import { ApiError } from "@/lib/api";
 import { useNotify } from "@/lib/errors";
 import { TeamTaskBlock, isActiveTeamMission } from "@/components/daemon/team-task-block";
 import { TeamTriggerPopover } from "@/components/daemon/team-trigger-popover";
-import { AgentLogCard } from "@/components/daemon/agent-log-card";
+import {
+  AgentLogCard,
+  AgentLogSessionBody,
+} from "@/components/daemon/agent-log-card";
 import {
   type LlmProviderRead,
   type LlmProviderRoleMapping,
@@ -1715,18 +1718,25 @@ function SessionPanelPage({
   //   新：ended || !machineOnline → 禁用；running（currentRunId 有值）/
   //       reconnecting / pending 保持可输入，消息入队等待自动投递（D-001）。
   // 队满（D-002）不禁输入但 handleSend 阻止提交，提示由 placeholder 承载。
+  // task-07（2026-08-23-agent-activity-sessions design §3.4 / Grill P2）：纯日志
+  // 主体判定——origin=tool_report 且 turn_count===0（未继续过对话）→ 输入框
+  // placeholder 引导继续（首条消息懒激活派发，D-002）。
+  const isToolReportBody =
+    session.origin === "tool_report" && session.turn_count === 0;
   const sendingDisabled = ended || !machineOnline;
   const placeholder = ended
     ? "会话已结束，请新建会话"
     : !machineOnline
       ? "机器离线，输入不可用…"
-      : isQueueFull
-        ? "队列已满，请等待投递或删除排队消息…"
-        : restoring
-          ? "恢复会话中，消息将排队等待恢复完成后自动发送…"
-          : running
-            ? "消息将排队，等待本轮完成后自动发送…"
-            : "继续追问…（Enter 发送 · Shift+Enter 换行）";
+      : isToolReportBody
+        ? "发消息继续这个会话（将派发到绑定机器的 agent）…"
+        : isQueueFull
+          ? "队列已满，请等待投递或删除排队消息…"
+          : restoring
+            ? "恢复会话中，消息将排队等待恢复完成后自动发送…"
+            : running
+              ? "消息将排队，等待本轮完成后自动发送…"
+              : "继续追问…（Enter 发送 · Shift+Enter 换行）";
 
   const interruptDisabled =
     session.status !== "active" || !turnState.currentRunId || !machineOnline;
@@ -1867,8 +1877,18 @@ function SessionPanelPage({
         </div>
       )}
 
-      {/* 消息流（task-13 共享子组件；弹窗与新页面同构复用）。
-          gap-fix：turns 用 displayTurns（whoLine + 历史 usage 注入后的派生视图）。 */}
+      {/* 会话主体（task-07 / 2026-08-23-agent-activity-sessions design §3.4）：
+          - origin=tool_report 且 turn_count===0（未继续过对话）→ 本地 Agent
+            日志条目流即会话主体（AgentLogSessionBody），输入区保留在下方
+            （首条消息懒激活派发，D-002）；
+          - 其余会话（chat / 已激活 tool_report 继续对话后）→ 正常对话流
+            （task-13 共享子组件；弹窗与新页面同构复用。gap-fix：turns 用
+            displayTurns），尾部挂仅关联本会话的折叠日志条目（AgentLogCard
+            sessionId 关联；D-004：workspace 级旧挂载已移除，streamFooter
+            注入口保留复用）。 */}
+      {isToolReportBody ? (
+        <AgentLogSessionBody sessionId={session.id} />
+      ) : (
       <TurnTimeline
         turns={displayTurns}
         viewMode={viewMode}
@@ -1897,12 +1917,9 @@ function SessionPanelPage({
         emptyProviderLabel={
           PROVIDER_META[session.provider]?.label ?? session.provider
         }
-        streamFooter={
-          session.workspace_id ? (
-            <AgentLogCard workspaceId={session.workspace_id} />
-          ) : null
-        }
+        streamFooter={<AgentLogCard sessionId={session.id} />}
       />
+      )}
 
       {/* task-11：会话团队任务块（TeamTaskBlock）——消息流末尾/输入区上方渲染会话
           mission 列表（listSessionTeamMissions created_at 倒序全部渲染、活跃在前，

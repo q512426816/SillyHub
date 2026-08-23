@@ -22,6 +22,7 @@ import {
   redactProviderConfig,
   ANTHROPIC_API_KEY_FIELD,
   CLAUDE_OAUTH_TOKEN_FIELD,
+  SILLYHUB_SESSION_ID_FIELD,
 } from '../src/spawn-env.js';
 import type { ProviderConfig } from '../src/types.js';
 
@@ -379,5 +380,110 @@ describe('spawn-env layer-0 (task-09: provider_config 第 0 层注入)', () => {
       expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
       delete process.env.CLAUDE_CONFIG_DIR;
     });
+  });
+});
+
+// task-02（2026-08-23-agent-activity-sessions / D-008）：SILLYHUB_SESSION_ID 平台会话
+// 身份注入。create（daemon.ts _startInteractiveSession 传 execPayload.agentSessionId）
+// / restore（session-manager.ts restoreEnv 传 state.sessionId）/ reload
+// （_reloadSession 传 state.sessionId）三路径共用 buildSpawnEnv 单点——本层断言
+// 覆盖注入值、层级（tool_config 层 1 之上 / provider_config 层 0 之下）、
+// 非平台会话缺省与残留清理（design §3.2）。
+describe('spawn-env SILLYHUB_SESSION_ID (task-02: 平台会话身份注入)', () => {
+  let credDir: string;
+  let cred: CredentialManager;
+  // 备份/恢复被测试修改的 process.env 键，避免污染其他用例
+  const envBackup: Record<string, string | undefined> = {};
+  const ENV_KEYS = [SILLYHUB_SESSION_ID_FIELD];
+
+  beforeEach(async () => {
+    credDir = await mkdtemp(join(tmpdir(), 'sillyhub-sessionid-'));
+    cred = new CredentialManager(join(credDir, 'credentials.json'));
+    for (const k of ENV_KEYS) {
+      envBackup[k] = process.env[k];
+      delete process.env[k];
+    }
+  });
+
+  afterEach(async () => {
+    for (const k of ENV_KEYS) {
+      if (envBackup[k] === undefined) delete process.env[k];
+      else process.env[k] = envBackup[k];
+    }
+    await rm(credDir, { recursive: true, force: true });
+  });
+
+  it('传 agentSessionId → env 含 SILLYHUB_SESSION_ID 且值正确', () => {
+    const env = buildSpawnEnv(
+      { toolConfig: {}, agentSessionId: '3f2a1b9c-1111-2222-3333-444455556666' },
+      { credential: cred },
+    );
+    expect(env[SILLYHUB_SESSION_ID_FIELD]).toBe(
+      '3f2a1b9c-1111-2222-3333-444455556666',
+    );
+  });
+
+  it('优先级：盖过 tool_config 层同名键（层 1 之上，防 lease 下发遮蔽）', () => {
+    const env = buildSpawnEnv(
+      {
+        toolConfig: { sillyhub_session_id: 'stale-from-tool-config' },
+        agentSessionId: 'sess-platform-id',
+      },
+      { credential: cred },
+    );
+    // tool_config.env 经 buildEnv 大写 → SILLYHUB_SESSION_ID，被注入层后写覆盖
+    expect(env[SILLYHUB_SESSION_ID_FIELD]).toBe('sess-platform-id');
+  });
+
+  it('不传 agentSessionId → 不含该键（非平台会话派发零污染）', () => {
+    const env = buildSpawnEnv({ toolConfig: {} }, { credential: cred });
+    expect(env[SILLYHUB_SESSION_ID_FIELD]).toBeUndefined();
+  });
+
+  it('不传 + process.env 残留同名键 → 清掉（防 daemon 继承宿主会话身份误关联）', () => {
+    process.env[SILLYHUB_SESSION_ID_FIELD] = 'inherited-from-daemon-parent';
+    const env = buildSpawnEnv({ toolConfig: {} }, { credential: cred });
+    expect(env[SILLYHUB_SESSION_ID_FIELD]).toBeUndefined();
+  });
+
+  it('空串 → 不注入（等同缺省，永不写空会话 id）', () => {
+    process.env[SILLYHUB_SESSION_ID_FIELD] = 'inherited-should-be-cleared';
+    const env = buildSpawnEnv(
+      { toolConfig: {}, agentSessionId: '' },
+      { credential: cred },
+    );
+    expect(env[SILLYHUB_SESSION_ID_FIELD]).toBeUndefined();
+  });
+
+  it('与 provider_config 共存：身份键注入且第 0 层注入不受影响（正常无同名冲突）', () => {
+    const env = buildSpawnEnv(
+      {
+        toolConfig: {},
+        provider_config: {
+          agent_kind: 'claude',
+          base_url: 'https://gw.example.com',
+          api_key: 'sk-0',
+          auth_field: 'ANTHROPIC_AUTH_TOKEN',
+          default_fallback_model: 'kimi-k2',
+        },
+        agentSessionId: 'sess-with-provider',
+      },
+      { credential: cred },
+    );
+    expect(env[SILLYHUB_SESSION_ID_FIELD]).toBe('sess-with-provider');
+    expect(env.ANTHROPIC_BASE_URL).toBe('https://gw.example.com');
+  });
+
+  it('注入键不破坏四层合并：缺省时 env 与不传 agentSessionId 逐字一致', () => {
+    cred.set(ANTHROPIC_API_KEY_FIELD, 'sk-cred');
+    const without = buildSpawnEnv(
+      { toolConfig: { foo: 'bar' } },
+      { credential: cred },
+    );
+    const withUndefined = buildSpawnEnv(
+      { toolConfig: { foo: 'bar' }, agentSessionId: undefined },
+      { credential: cred },
+    );
+    expect(withUndefined).toEqual(without);
   });
 });

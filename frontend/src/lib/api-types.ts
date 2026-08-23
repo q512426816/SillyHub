@@ -8353,9 +8353,14 @@ export interface paths {
          *     鉴权 scope 复用 ``_read_args`` 翻译（shpsync_ → token 绑定 workspace；JWT/
          *     shk_live_ → CHANGE_READ 并集，本表 workspace_id NOT NULL 无 NULL 桶）。可选
          *     ``workspace_id`` query 参数再 AND 等值过滤：不在 scope 内（越权）→ 空列表，
-         *     不 403 不泄漏 workspace 存在性（D-004）。排序 ``last_seen_at DESC NULLS LAST``
-         *     （显式 nulls_last 消除方言分叉 X-07；ISO 8601 UTC 字典序 = 时间序 D-003）。
-         *     响应字段 snake_case 原样（X-06，前端类型以 gen:types 生成契约为准）。
+         *     不 403 不泄漏 workspace 存在性（D-004）。
+         *
+         *     2026-08-23-agent-activity-sessions task-04（design §3.3.6）：可选 ``session_id``
+         *     query 参数再 AND ``agent_session_id`` 等值——会话详情页只取该会话关联条目；
+         *     会话存在但不属 scope（越权）→ 空列表同既有语义（scope 过滤天然拦截）。
+         *     排序 ``last_seen_at DESC NULLS LAST``（显式 nulls_last 消除方言分叉 X-07；
+         *     ISO 8601 UTC 字典序 = 时间序 D-003）。响应字段 snake_case 原样（X-06，前端
+         *     类型以 gen:types 生成契约为准）。
          */
         get: operations["list_agent_logs_api_agent_logs_get"];
         put?: never;
@@ -8371,8 +8376,51 @@ export interface paths {
          *     workspace_id 从 require_platform_sync_write 派生（仅 shpsync_ 可写，D-004@v1；
          *     无凭据 401 / shk_live_·JWT 403，与 quicklog-entries 完全同款）；body 顶层
          *     ``workspace_id`` 键被 extra=ignore 吞掉——token 派生唯一权威，不信任 body。
+         *
+         *     2026-08-23-agent-activity-sessions task-04（design §3.3.3）：透传鉴权 tuple 派生
+         *     的真实 User id（tool_report 会话 owner，R-02）与 body 级 ``hub_session_id``
+         *     （daemon env 注入的平台会话关联）给 service 做落库后归属——hub 未命中/跨 ws
+         *     静默降级（D-005），响应恒 200 不变。
          */
         post: operations["push_agent_logs_api_agent_logs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-logs/{entry_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Agent Log Content
+         * @description GET 单条 agent 日志的内容（design §3.3.5，读即弃不落库）。
+         *
+         *     鉴权 scope 校验 entry 可见（shpsync_ = token 绑定 workspace；JWT/shk_live_ =
+         *     CHANGE_READ 并集），不可见 404 中文（不泄漏存在性）。
+         *
+         *     读取链路（**直连 ws rpc，不走 ``HostFsDelegate.read_file``**——其
+         *     ``_via_rpc_or_degrade`` 会把离线/远端错静默降级为空串，与错误语义冲突）：
+         *
+         *     1. format 黑名单（sqlite/zstd 子串）→ 409 中文「二进制暂不支持」。
+         *     2. 定位 daemon_id：``entry.agent_session.runtime_id → DaemonRuntime.
+         *        daemon_instance_id``（迁移窗口回落 runtime_id）优先；pending 未激活 →
+         *        ``resolve_daemon_instance_for_workspace(entry.workspace_id)``；都无 →
+         *        404 中文。
+         *     3. ``host_fs.read_file {path}`` RPC（默认 30s 超时）；daemon 拒 forbidden →
+         *        409 中文（含 allowed_roots 配置指引）/ not_found → 404 中文 / 其余远端
+         *        错 → 既有 502；机器离线 → 既有 ``DaemonRuntimeOffline``；RPC 超时 →
+         *        既有 ``DaemonRpcTimeout``（504）。
+         *     4. 尾部 262144 字节截断（``errors="ignore"`` 回解）后返回
+         *        ``{content, truncated, size_bytes}``。
+         */
+        get: operations["read_agent_log_content_api_agent_logs__entry_id__content_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -8464,6 +8512,33 @@ export interface components {
             status: string;
         };
         /**
+         * AgentLogContentResponse
+         * @description GET /agent-logs/{entry_id}/content 200 响应。
+         *
+         *     daemon 侧 ``host_fs.read_file`` 整文件 utf8 读（无上限），后端按字节截断
+         *     **尾部** 262144 字节后返回（防大文件撑爆响应；尾部 = 最新内容，回解
+         *     ``errors="ignore"`` 防多字节字符被切出现乱码开头）。``size_bytes`` 是
+         *     daemon 读到的文件总字节数（截断前权威值，不回退用 entry.size_bytes 旧元
+         *     信息）。读即弃不落库（task-05 constraints）。
+         */
+        AgentLogContentResponse: {
+            /**
+             * Content
+             * @description 日志内容尾部文本（最多 262144 字节 UTF-8）
+             */
+            content: string;
+            /**
+             * Truncated
+             * @description 原始内容是否超过 262144 字节被截断
+             */
+            truncated: boolean;
+            /**
+             * Size Bytes
+             * @description daemon 侧读到的文件总字节数（截断前）
+             */
+            size_bytes: number;
+        };
+        /**
          * AgentLogEntry
          * @description POST /agent-logs 单条日志元信息（协议 docs/platform-agent-log-protocol.md §1）。
          *
@@ -8501,6 +8576,10 @@ export interface components {
             invocations?: number | null;
             /** Last Command */
             last_command?: string | null;
+            /** Change Key */
+            change_key?: string | null;
+            /** Quick Id */
+            quick_id?: string | null;
         };
         /**
          * AgentLogListItem
@@ -8552,6 +8631,8 @@ export interface components {
             scan_run_id?: string | null;
             /** Pushed At */
             pushed_at?: string | null;
+            /** Agent Session Id */
+            agent_session_id?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -8595,6 +8676,11 @@ export interface components {
          *     一律由 shpsync_ token 派生（token 派生唯一权威，协议 §1「不信任 body 里的
          *     workspace_id」）。``entries`` 1..50 条防滥用；同请求内同 log_path 重复条目由
          *     service 层去重取后者（design §3.2）。
+         *
+         *     2026-08-23-agent-activity-sessions task-04（design §3.3.2）：增 body 级
+         *     ``hub_session_id``——daemon 派发时经 env ``SILLYHUB_SESSION_ID`` 注入的平台会话
+         *     id（run 所属会话唯一，故 body 级而非 entry 级，D-008）；服务端校验 workspace
+         *     归属，未命中/跨 ws 静默降级（D-005 best-effort）。
          */
         AgentLogPushRequest: {
             /**
@@ -8608,6 +8694,8 @@ export interface components {
             agent_cwd?: string | null;
             /** Scan Run Id */
             scan_run_id?: string | null;
+            /** Hub Session Id */
+            hub_session_id?: string | null;
             /** Entries */
             entries: components["schemas"]["AgentLogEntry"][];
         };
@@ -9054,6 +9142,11 @@ export interface components {
             } | null;
             /** Owner Name */
             owner_name?: string | null;
+            /**
+             * Origin
+             * @default chat
+             */
+            origin: string;
         };
         /** ApiKeyCreateRequest */
         ApiKeyCreateRequest: {
@@ -34635,6 +34728,8 @@ export interface operations {
             query?: {
                 /** @description 可选 workspace 过滤 */
                 workspace_id?: string | null;
+                /** @description 可选会话过滤（只回该会话关联条目） */
+                session_id?: string | null;
                 /** @description 返回条数，默认 20 上限 100 */
                 limit?: number;
             };
@@ -34684,6 +34779,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentLogPushOk"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_agent_log_content_api_agent_logs__entry_id__content_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentLogContentResponse"];
                 };
             };
             /** @description Validation Error */

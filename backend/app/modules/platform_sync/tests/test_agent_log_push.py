@@ -1,9 +1,14 @@
-"""POST/GET /api/agent-logs 端点测试（task-02 / design §3.2 / §5）。
+"""POST/GET /api/agent-logs 端点测试（task-02 / design §3.2 / §5；task-04 归属扩展）。
 
 覆盖：鉴权矩阵（无凭据 401 / shk_live_ 403 / JWT 403 / shpsync_ 200）、落库全字段
 断言、幂等整行覆盖（created_at 保留）、同请求重复 log_path 后者胜、跨 workspace
 复合键隔离、必填缺失 422 + extra=ignore 宽松、GET scope 过滤 + last_seen_at
 倒序（NULLS LAST）+ workspace_id 越权空列表 + limit 生效。
+
+2026-08-23-agent-activity-sessions task-04（design §3.3.3/§3.3.6 / D-005/D-006/
+D-007/D-009）：hub_session_id 关联命中与跨 ws 降级、无 hub 按 (harness, entry.ctx)
+分组 find-or-create tool_report 会话（幂等收敛 / entry 级 ctx 分组 / 无 ctx 单桶 /
+字段断言含 provider 映射）、GET session_id 过滤与越权空列表。
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.agent.model import AgentSession
 from app.modules.platform_sync.model import AgentSessionLogORM
 
 # 协议 §1 示例风格的两条 entry（codex rollout + claude-code transcript）。
@@ -390,3 +396,348 @@ async def test_get_limit_applies(
 
     resp_over = await client.get("/api/agent-logs", params={"limit": 101}, headers=headers)
     assert resp_over.status_code == 422  # 上限 100 校验
+
+
+# ── 2026-08-23-agent-activity-sessions task-04：归属（hub 关联 / tool_report 聚合）──
+
+
+async def _tool_report_sessions(db_session: AsyncSession) -> list[AgentSession]:
+    """查全部未软删 ``origin='tool_report'`` 会话（populate_existing 强制读库新值）。"""
+    stmt = (
+        select(AgentSession)
+        .where(AgentSession.origin == "tool_report", AgentSession.deleted_at.is_(None))
+        .execution_options(populate_existing=True)
+    )
+    return list((await db_session.execute(stmt)).scalars().all())
+
+
+async def _all_log_rows(db_session: AsyncSession) -> list[AgentSessionLogORM]:
+    """查全部日志行（populate_existing 绕开身份映射旧值，见既有惯例）。"""
+    stmt = select(AgentSessionLogORM).execution_options(populate_existing=True)
+    return list((await db_session.execute(stmt)).scalars().all())
+
+
+@pytest.mark.asyncio
+async def test_push_hub_session_hit_links_entries(
+    client: AsyncClient,
+    shpsync_headers: tuple[Any, dict[str, str]],
+    db_session: AsyncSession,
+) -> None:
+    """hub_session_id 命中（同 ws 未软删）→ 本批 entries 全挂该会话，status 不变。"""
+    import uuid as _uuid
+
+    ws_id, headers = shpsync_headers
+    hub = AgentSession(
+        id=_uuid.uuid4(),
+        user_id=_uuid.uuid4(),  # SQLite 测试库不强制 FK，任意 owner 即可
+        workspace_id=ws_id,
+        provider="claude",
+        status="active",  # 故意非默认 pending：断言归属不改 status（生命周期契约）
+    )
+    db_session.add(hub)
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/agent-logs",
+        json={**SAMPLE_BODY, "hub_session_id": str(hub.id)},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "upserted": 2}
+
+    rows = await _all_log_rows(db_session)
+    assert len(rows) == 2
+    assert {r.agent_session_id for r in rows} == {hub.id}
+
+    hub_after = (
+        await db_session.execute(
+            select(AgentSession)
+            .where(AgentSession.id == hub.id)
+            .execution_options(populate_existing=True)
+        )
+    ).scalar_one()
+    assert hub_after.status == "active"  # 目标会话 status 不变，仅 entries 挂接
+    assert await _tool_report_sessions(db_session) == []  # hub 分支不建聚合会话
+
+
+@pytest.mark.asyncio
+async def test_push_hub_session_random_uuid_degrades(
+    client: AsyncClient,
+    shpsync_headers: tuple[Any, dict[str, str]],
+    db_session: AsyncSession,
+) -> None:
+    """D-005：hub_session_id 随机不存在 → 200 且 entries 无归属（不入聚合分支）。"""
+    import uuid as _uuid
+
+    _ws_id, headers = shpsync_headers
+    resp = await client.post(
+        "/api/agent-logs",
+        json={**SAMPLE_BODY, "hub_session_id": str(_uuid.uuid4())},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["upserted"] == 2
+
+    rows = await _all_log_rows(db_session)
+    assert len(rows) == 2
+    assert all(r.agent_session_id is None for r in rows)  # 静默降级，仍入库
+    assert await _tool_report_sessions(db_session) == []
+
+
+@pytest.mark.asyncio
+async def test_push_hub_session_cross_workspace_degrades(
+    client: AsyncClient,
+    shpsync_headers: tuple[Any, dict[str, str]],
+    db_session: AsyncSession,
+) -> None:
+    """D-005：hub_session_id 指向他 workspace 的会话（存在但 ws 不匹配）→ 同样降级。"""
+    import uuid as _uuid
+
+    _ws_id, headers = shpsync_headers
+    other_ws_session = AgentSession(
+        id=_uuid.uuid4(),
+        user_id=_uuid.uuid4(),
+        workspace_id=_uuid.uuid4(),  # 跨 ws：行存在但非 token 派生 workspace
+        provider="claude",
+    )
+    db_session.add(other_ws_session)
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/agent-logs",
+        json={**SAMPLE_BODY, "hub_session_id": str(other_ws_session.id)},
+        headers=headers,
+    )
+    assert resp.status_code == 200
+
+    rows = await _all_log_rows(db_session)
+    assert len(rows) == 2
+    assert all(r.agent_session_id is None for r in rows)
+    assert await _tool_report_sessions(db_session) == []
+
+
+@pytest.mark.asyncio
+async def test_push_aggregation_idempotent_single_session(
+    client: AsyncClient,
+    shpsync_headers: tuple[Any, dict[str, str]],
+    db_session: AsyncSession,
+) -> None:
+    """D-001/D-006：同 (harness, ctx) 两次上报 → 只 1 个 tool_report 会话，二推只刷 last_active_at。"""
+    _ws_id, headers = shpsync_headers
+    body = {
+        **SAMPLE_BODY,
+        "entries": [{**CODEX_ENTRY, "change_key": "change-aggregate"}],
+    }
+
+    resp1 = await client.post("/api/agent-logs", json=body, headers=headers)
+    assert resp1.status_code == 200
+    sessions1 = await _tool_report_sessions(db_session)
+    assert len(sessions1) == 1
+    first = sessions1[0]
+    assert first.aggregation_key == "codex|change-aggregate"
+    first_active_at = first.last_active_at
+
+    resp2 = await client.post("/api/agent-logs", json=body, headers=headers)
+    assert resp2.status_code == 200
+    sessions2 = await _tool_report_sessions(db_session)
+    assert len(sessions2) == 1  # 幂等收敛：不重复建会话
+    second = sessions2[0]
+    assert second.id == first.id
+    assert first_active_at is not None
+    assert second.last_active_at is not None
+    assert second.last_active_at >= first_active_at  # 只刷活跃时间
+    assert second.status == "pending"  # 不改 status / turn_count
+    assert second.turn_count == 0
+
+    rows = await _all_log_rows(db_session)
+    assert len(rows) == 1
+    assert rows[0].agent_session_id == second.id
+
+
+@pytest.mark.asyncio
+async def test_push_entry_level_ctx_groups_two_sessions(
+    client: AsyncClient,
+    shpsync_headers: tuple[Any, dict[str, str]],
+    db_session: AsyncSession,
+) -> None:
+    """D-009：一次 POST 同 harness 两条 entry（change_key 不同）→ 两个会话各挂一条。"""
+    _ws_id, headers = shpsync_headers
+    body = {
+        **SAMPLE_BODY,
+        "entries": [
+            {
+                **CODEX_ENTRY,
+                "log_path": "C:/Users/qinyi/.codex/sessions/rollout-a.jsonl",
+                "change_key": "change-a",
+            },
+            {
+                **CODEX_ENTRY,
+                "log_path": "C:/Users/qinyi/.codex/sessions/rollout-b.jsonl",
+                "change_key": "change-b",
+            },
+        ],
+    }
+    resp = await client.post("/api/agent-logs", json=body, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "upserted": 2}
+
+    sessions = await _tool_report_sessions(db_session)
+    assert len(sessions) == 2
+    by_key = {s.aggregation_key: s for s in sessions}
+    assert set(by_key) == {"codex|change-a", "codex|change-b"}
+    assert by_key["codex|change-a"].title == "codex · change-a"
+    assert by_key["codex|change-b"].title == "codex · change-b"
+
+    rows = await _all_log_rows(db_session)
+    assert len(rows) == 2
+    for row in rows:
+        expected_key = (
+            "codex|change-a" if row.log_path.endswith("rollout-a.jsonl") else "codex|change-b"
+        )
+        assert row.agent_session_id == by_key[expected_key].id  # 各挂一条
+
+
+@pytest.mark.asyncio
+async def test_push_no_ctx_single_bucket_session(
+    client: AsyncClient,
+    shpsync_headers: tuple[Any, dict[str, str]],
+    db_session: AsyncSession,
+) -> None:
+    """无 change_key/quick_id → ws+harness 单桶会话，title「{harness} · 本地活动」（D-001 回落）。"""
+    _ws_id, headers = shpsync_headers
+    body = {
+        **SAMPLE_BODY,
+        "entries": [
+            {**CLAUDE_ENTRY, "log_path": "C:/Users/qinyi/.claude/projects/p/claude-a.jsonl"},
+            {**CLAUDE_ENTRY, "log_path": "C:/Users/qinyi/.claude/projects/p/claude-b.jsonl"},
+        ],
+    }
+    resp = await client.post("/api/agent-logs", json=body, headers=headers)
+    assert resp.status_code == 200
+
+    sessions = await _tool_report_sessions(db_session)
+    assert len(sessions) == 1  # 同 harness 无 ctx → 单桶
+    bucket = sessions[0]
+    assert bucket.aggregation_key == "claude-code|"
+    assert bucket.title == "claude-code · 本地活动"
+
+    rows = await _all_log_rows(db_session)
+    assert len(rows) == 2
+    assert {r.agent_session_id for r in rows} == {bucket.id}
+
+
+@pytest.mark.asyncio
+async def test_get_session_id_filter_and_out_of_scope_empty(
+    client: AsyncClient,
+    shpsync_headers: tuple[Any, dict[str, str]],
+    db_session: AsyncSession,
+) -> None:
+    """GET session_id 只回该会话关联条目；越权（他 ws 会话）→ 空列表（design §3.3.6）。"""
+    import uuid as _uuid
+
+    _ws_id, headers = shpsync_headers
+    body = {
+        **SAMPLE_BODY,
+        "entries": [
+            {**CODEX_ENTRY, "change_key": "change-x"},
+            {**CLAUDE_ENTRY, "change_key": "change-y"},
+        ],
+    }
+    resp = await client.post("/api/agent-logs", json=body, headers=headers)
+    assert resp.status_code == 200
+    sessions = await _tool_report_sessions(db_session)
+    assert len(sessions) == 2
+    target = next(s for s in sessions if s.aggregation_key == "codex|change-x")
+
+    resp = await client.get(
+        "/api/agent-logs", params={"session_id": str(target.id)}, headers=headers
+    )
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) == 1  # 只回该会话 entries
+    assert items[0]["agent_session_id"] == str(target.id)
+    assert items[0]["harness"] == "codex"
+
+    # 越权：会话存在但不属 token scope（另一 ws 的会话 + 关联行直插库）。
+    other_ws = _uuid.uuid4()
+    other_session = AgentSession(
+        id=_uuid.uuid4(),
+        user_id=_uuid.uuid4(),
+        workspace_id=other_ws,
+        provider="claude",
+        origin="tool_report",
+        aggregation_key="codex|foreign",
+    )
+    db_session.add(other_session)
+    db_session.add(
+        AgentSessionLogORM(
+            workspace_id=other_ws,
+            log_path="C:/other-ws/codex-foreign.jsonl",
+            harness="codex",
+            agent_session_id=other_session.id,
+        )
+    )
+    await db_session.commit()
+
+    resp_foreign = await client.get(
+        "/api/agent-logs", params={"session_id": str(other_session.id)}, headers=headers
+    )
+    assert resp_foreign.status_code == 200
+    assert resp_foreign.json()["items"] == []  # 空列表，不 403 不泄漏存在性
+
+
+@pytest.mark.asyncio
+async def test_push_tool_report_session_fields_and_provider_mapping(
+    client: AsyncClient,
+    shpsync_headers: tuple[Any, dict[str, str]],
+    db_session: AsyncSession,
+) -> None:
+    """tool_report 会话字段全断言：origin/status/title/config_snapshot/owner + D-007 映射。"""
+    from app.modules.platform_sync.token_model import PlatformSyncTokenORM
+
+    ws_id, headers = shpsync_headers
+    zcode_entry: dict[str, Any] = {
+        "harness": "zcode",
+        "log_path": "C:/Users/qinyi/.zcode/sessions/zk-agg-001.jsonl",
+        "quick_id": "ql-20260823-001",  # quick ctx：原样短码入标题（D-009）
+    }
+    body = {
+        **SAMPLE_BODY,
+        "entries": [
+            {**CODEX_ENTRY, "change_key": "provider-map-check"},
+            zcode_entry,
+        ],
+    }
+    resp = await client.post("/api/agent-logs", json=body, headers=headers)
+    assert resp.status_code == 200
+
+    sessions = await _tool_report_sessions(db_session)
+    by_key = {s.aggregation_key: s for s in sessions}
+    assert set(by_key) == {"codex|provider-map-check", "zcode|ql-20260823-001"}
+
+    codex_session = by_key["codex|provider-map-check"]
+    zcode_session = by_key["zcode|ql-20260823-001"]
+    for s in (codex_session, zcode_session):
+        assert s.origin == "tool_report"
+        assert s.status == "pending"
+        assert s.turn_count == 0
+        assert s.last_active_at is not None
+        assert s.lease_id is None  # 未激活（懒激活在 daemon 侧 task）
+        assert s.workspace_id == ws_id
+    # D-007 provider 映射：codex→codex、其余（zcode）→claude。
+    assert codex_session.provider == "codex"
+    assert zcode_session.provider == "claude"
+    # 标题：change ctx 直显、quick ctx 用原样短码。
+    assert codex_session.title == "codex · provider-map-check"
+    assert zcode_session.title == "zcode · ql-20260823-001"
+    # harness 真实身份由 config_snapshot 展示（D-007）。
+    assert codex_session.config_snapshot == {"harness": "codex"}
+    assert zcode_session.config_snapshot == {"harness": "zcode"}
+    # owner = token 签发人（R-02：token 派生 user 建会话）。
+    token = (
+        await db_session.execute(
+            select(PlatformSyncTokenORM).where(PlatformSyncTokenORM.workspace_id == ws_id)
+        )
+    ).scalar_one()
+    assert codex_session.user_id == token.created_by
+    assert zcode_session.user_id == token.created_by

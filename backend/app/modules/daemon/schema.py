@@ -56,6 +56,12 @@ class AgentSessionRead(BaseModel):
     # 注入（照 OwnerRead + 本端点 terminating_at 的批量注入先例，避免 N+1）；
     # 属主用户行缺失 / username 未回填的旧数据一律走默认 None（brownfield 不崩）。
     owner_name: str | None = None
+    # 2026-08-23-agent-activity-sessions task-05（design §3.3.2/§3.3.4 / FR-03）：
+    # 会话来源列（task-03 落列）——'chat'（平台对话会话，存量行为）|
+    # 'tool_report'（CLI 工具上报聚合的「本地 Agent 会话」，前端据此渲染 🧾
+    # 「本地 Agent」徽标 + 纯日志主体）。from_attributes 直接映射（列表/详情
+    # 同一映射路径自动下发）；默认 'chat' 守护列缺失的旧行。
+    origin: str = "chat"
 
     model_config = {"from_attributes": True}
 

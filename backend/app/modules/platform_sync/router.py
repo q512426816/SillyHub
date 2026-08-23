@@ -45,6 +45,7 @@ from app.modules.platform_sync.auth import (
     require_platform_sync_write,
 )
 from app.modules.platform_sync.schema import (
+    AgentLogContentResponse,
     AgentLogListItem,
     AgentLogListResponse,
     AgentLogPushOk,
@@ -374,6 +375,11 @@ async def push_agent_logs(
     workspace_id 从 require_platform_sync_write 派生（仅 shpsync_ 可写，D-004@v1；
     无凭据 401 / shk_live_·JWT 403，与 quicklog-entries 完全同款）；body 顶层
     ``workspace_id`` 键被 extra=ignore 吞掉——token 派生唯一权威，不信任 body。
+
+    2026-08-23-agent-activity-sessions task-04（design §3.3.3）：透传鉴权 tuple 派生
+    的真实 User id（tool_report 会话 owner，R-02）与 body 级 ``hub_session_id``
+    （daemon env 注入的平台会话关联）给 service 做落库后归属——hub 未命中/跨 ws
+    静默降级（D-005），响应恒 200 不变。
     """
     _user, scope = auth
     if scope.workspace_id is None:
@@ -385,6 +391,9 @@ async def push_agent_logs(
         entries=body.entries,
         pushed_at=body.pushed_at,
         scan_run_id=body.scan_run_id,
+        # 建会话 owner = token 签发人（R-02 隔离语义：他人 token 上报产生他人会话）。
+        user_id=_user.id,
+        hub_session_id=body.hub_session_id,
     )
     return AgentLogPushOk(upserted=upserted)
 
@@ -394,6 +403,9 @@ async def list_agent_logs(
     session: Annotated[AsyncSession, Depends(get_session)],
     auth: _read_auth,
     workspace_id: uuid.UUID | None = Query(default=None, description="可选 workspace 过滤"),
+    session_id: uuid.UUID | None = Query(
+        default=None, description="可选会话过滤（只回该会话关联条目）"
+    ),
     limit: int = Query(default=20, ge=1, le=100, description="返回条数，默认 20 上限 100"),
 ) -> AgentLogListResponse:
     """GET agent 会话日志列表（design §3.2 读通道，会话详情页日志线索）。
@@ -401,14 +413,172 @@ async def list_agent_logs(
     鉴权 scope 复用 ``_read_args`` 翻译（shpsync_ → token 绑定 workspace；JWT/
     shk_live_ → CHANGE_READ 并集，本表 workspace_id NOT NULL 无 NULL 桶）。可选
     ``workspace_id`` query 参数再 AND 等值过滤：不在 scope 内（越权）→ 空列表，
-    不 403 不泄漏 workspace 存在性（D-004）。排序 ``last_seen_at DESC NULLS LAST``
-    （显式 nulls_last 消除方言分叉 X-07；ISO 8601 UTC 字典序 = 时间序 D-003）。
-    响应字段 snake_case 原样（X-06，前端类型以 gen:types 生成契约为准）。
+    不 403 不泄漏 workspace 存在性（D-004）。
+
+    2026-08-23-agent-activity-sessions task-04（design §3.3.6）：可选 ``session_id``
+    query 参数再 AND ``agent_session_id`` 等值——会话详情页只取该会话关联条目；
+    会话存在但不属 scope（越权）→ 空列表同既有语义（scope 过滤天然拦截）。
+    排序 ``last_seen_at DESC NULLS LAST``（显式 nulls_last 消除方言分叉 X-07；
+    ISO 8601 UTC 字典序 = 时间序 D-003）。响应字段 snake_case 原样（X-06，前端
+    类型以 gen:types 生成契约为准）。
     """
     _user, scope = auth
     rows = await PlatformSyncService(session).list_agent_logs(
         **_read_args(scope),
         filter_workspace_id=workspace_id,
+        filter_session_id=session_id,
         limit=limit,
     )
     return AgentLogListResponse(items=[AgentLogListItem.model_validate(row) for row in rows])
+
+
+# ── 2026-08-23-agent-activity-sessions task-05（design §3.3.5 内容查看端点）──
+
+#: format 黑名单子串（Grill P2 改黑名单语义）：命中即视为二进制，409 拒绝在线
+#: 查看；其余（含 *-jsonl / opencode-session-json-tree / unknown 等文本类）放行。
+#: 子串匹配覆盖 sqlite3 / *-zstd 等变体；format 为 None（未上报）放行由 daemon
+#: 读取侧兜底（文本读失败会以 remote error 形式显式报错，不静默）。
+_AGENT_LOG_BINARY_FORMAT_TOKENS: frozenset[str] = frozenset({"sqlite", "zstd"})
+
+#: 内容尾部截断上限（字节）：daemon 整文件读回后只下发尾部 262144 字节
+#: （256 KiB，最新内容在尾部）；回解 ``errors="ignore"`` 防多字节字符被切。
+_AGENT_LOG_CONTENT_MAX_BYTES = 262144
+
+
+@router.get("/agent-logs/{entry_id}/content", response_model=AgentLogContentResponse)
+async def read_agent_log_content(
+    entry_id: uuid.UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    auth: _read_auth,
+) -> AgentLogContentResponse:
+    """GET 单条 agent 日志的内容（design §3.3.5，读即弃不落库）。
+
+    鉴权 scope 校验 entry 可见（shpsync_ = token 绑定 workspace；JWT/shk_live_ =
+    CHANGE_READ 并集），不可见 404 中文（不泄漏存在性）。
+
+    读取链路（**直连 ws rpc，不走 ``HostFsDelegate.read_file``**——其
+    ``_via_rpc_or_degrade`` 会把离线/远端错静默降级为空串，与错误语义冲突）：
+
+    1. format 黑名单（sqlite/zstd 子串）→ 409 中文「二进制暂不支持」。
+    2. 定位 daemon_id：``entry.agent_session.runtime_id → DaemonRuntime.
+       daemon_instance_id``（迁移窗口回落 runtime_id）优先；pending 未激活 →
+       ``resolve_daemon_instance_for_workspace(entry.workspace_id)``；都无 →
+       404 中文。
+    3. ``host_fs.read_file {path}`` RPC（默认 30s 超时）；daemon 拒 forbidden →
+       409 中文（含 allowed_roots 配置指引）/ not_found → 404 中文 / 其余远端
+       错 → 既有 502；机器离线 → 既有 ``DaemonRuntimeOffline``；RPC 超时 →
+       既有 ``DaemonRpcTimeout``（504）。
+    4. 尾部 262144 字节截断（``errors="ignore"`` 回解）后返回
+       ``{content, truncated, size_bytes}``。
+    """
+    from sqlalchemy import select
+
+    from app.core.errors import AppError
+    from app.modules.agent.model import AgentSession
+    from app.modules.daemon.host_fs.ws_rpc import send_host_fs_rpc
+    from app.modules.daemon.runtime.service import (
+        DaemonRpcRemoteError,
+        DaemonRpcRemoteGatewayError,
+    )
+    from app.modules.daemon.session.service import _resolve_daemon_id_for_runtime
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+    from app.modules.platform_sync.model import AgentSessionLogORM
+    from app.modules.workspace.member_runtimes.queries import (
+        resolve_daemon_instance_for_workspace,
+    )
+
+    _user, scope = auth
+    entry = (
+        await session.execute(select(AgentSessionLogORM).where(AgentSessionLogORM.id == entry_id))
+    ).scalar_one_or_none()
+    # scope 内校验：shpsync_ 精确匹配 token 派生 workspace；JWT/shk_live_ 并集
+    # 包含。不可见/不存在同语义 404（不泄漏存在性，口径同 list_agent_logs）。
+    in_scope = entry is not None and (
+        entry.workspace_id == scope.workspace_id
+        if scope.workspace_id is not None
+        else entry.workspace_id in scope.allowed_workspace_ids_
+    )
+    if not in_scope:
+        raise AppError(
+            "日志条目不存在或无权访问。",
+            code="HTTP_404_AGENT_LOG_ENTRY_NOT_FOUND",
+            http_status=404,
+            details={"entry_id": str(entry_id)},
+        )
+
+    # ── 1. format 黑名单（Grill P2）：二进制格式显式 409，不喂给文本渲染。──
+    fmt = (entry.format or "").lower()
+    if any(token in fmt for token in _AGENT_LOG_BINARY_FORMAT_TOKENS):
+        raise AppError(
+            "该日志格式为二进制，暂不支持在线查看。",
+            code="HTTP_409_AGENT_LOG_BINARY_FORMAT",
+            http_status=409,
+            details={"entry_id": str(entry_id), "format": entry.format},
+        )
+
+    # ── 2. 定位目标 daemon（会话已激活绑机优先；未激活回落 workspace 绑定）。──
+    daemon_id: uuid.UUID | None = None
+    if entry.agent_session_id is not None:
+        runtime_id = (
+            await session.execute(
+                select(AgentSession.runtime_id).where(AgentSession.id == entry.agent_session_id)
+            )
+        ).scalar_one_or_none()
+        if runtime_id is not None:
+            # runtime→daemon_instance 映射（迁移窗口 daemon_instance_id 为 NULL 时
+            # 回落 runtime_id 作连接键），runtime 行缺失返回 None 继续回落。
+            daemon_id = await _resolve_daemon_id_for_runtime(session, runtime_id)
+    if daemon_id is None:
+        daemon_id = await resolve_daemon_instance_for_workspace(session, entry.workspace_id)
+    if daemon_id is None:
+        raise AppError(
+            "未找到可读取该日志的机器（会话未激活且工作区未绑定守护进程），无法在线查看内容。",
+            code="HTTP_404_AGENT_LOG_NO_BOUND_DAEMON",
+            http_status=404,
+            details={"entry_id": str(entry_id)},
+        )
+
+    # ── 3. 直连 ws rpc 读文件（30s 默认传输预算；错误四类显式映射不降级）。──
+    hub = get_daemon_ws_hub()
+    try:
+        result = await send_host_fs_rpc(
+            hub,
+            daemon_id,
+            "read_file",
+            entry.workspace_id,
+            {"path": entry.log_path},
+        )
+    except DaemonRpcRemoteError as exc:
+        # daemon 侧业务错（code 来自 toRpcError / assertWithinAllowedRoots）：
+        # forbidden（allowed_roots 白名单外）/ not_found（文件不存在）显式中文，
+        # 其余远端错沿用既有 502 网关语义（不裸抛非 AppError 的 500）。
+        if exc.code == "forbidden":
+            raise AppError(
+                "读取该日志被守护进程拒绝：日志路径不在 allowed_roots 白名单内。"
+                "请在 daemon 配置的 allowed_roots 中加入该日志所在目录后重试。",
+                code="HTTP_409_AGENT_LOG_READ_FORBIDDEN",
+                http_status=409,
+                details={"entry_id": str(entry_id), "log_path": entry.log_path},
+            ) from exc
+        if exc.code == "not_found":
+            raise AppError(
+                "日志文件在目标机器上不存在（可能已被清理或移动）。",
+                code="HTTP_404_AGENT_LOG_FILE_NOT_FOUND",
+                http_status=404,
+                details={"entry_id": str(entry_id), "log_path": entry.log_path},
+            ) from exc
+        raise DaemonRpcRemoteGatewayError(
+            f"读取日志内容失败（daemon 返回错误：{exc.code}）。",
+            details={"entry_id": str(entry_id), "daemon_code": exc.code},
+        ) from exc
+    # 离线（DaemonRuntimeOffline）/ 超时（DaemonRpcTimeout）为既有 AppError，
+    # 原样透传（错误处理器按既有 code/http_status 渲染，不在此改写语义）。
+
+    content = str(result.get("content", "")) if isinstance(result, dict) else ""
+    # ── 4. 尾部 262144 字节截断（多字节字符被切由 errors=ignore 吞掉）。──
+    raw = content.encode("utf-8")
+    size_bytes = len(raw)
+    truncated = size_bytes > _AGENT_LOG_CONTENT_MAX_BYTES
+    if truncated:
+        content = raw[-_AGENT_LOG_CONTENT_MAX_BYTES:].decode("utf-8", errors="ignore")
+    return AgentLogContentResponse(content=content, truncated=truncated, size_bytes=size_bytes)

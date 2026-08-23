@@ -269,6 +269,12 @@ class AgentLogEntry(BaseModel):
     invocations: int | None = Field(default=None, ge=0)
     # 只含 flag 名，不含参数值（协议 §7）。
     last_command: str | None = Field(default=None, max_length=255)
+    # ── 2026-08-23-agent-activity-sessions task-04（design §3.3.2 / D-009 entry 级 ctx）──
+    # 检出/更新该 entry 的那次 run 的归属 ctx（change 名或 quick 会话短码），随 entry
+    # 持久化——CLI 全量重推时未被本次 run 触及的存量 entry 保留原 ctx；服务端按
+    # ``(harness, coalesce(change_key, quick_id, ''))`` 分组归属（互斥：CLI quick 优先）。
+    change_key: str | None = Field(default=None, max_length=128)
+    quick_id: str | None = Field(default=None, max_length=128)
 
 
 class AgentLogPushRequest(BaseModel):
@@ -278,6 +284,11 @@ class AgentLogPushRequest(BaseModel):
     一律由 shpsync_ token 派生（token 派生唯一权威，协议 §1「不信任 body 里的
     workspace_id」）。``entries`` 1..50 条防滥用；同请求内同 log_path 重复条目由
     service 层去重取后者（design §3.2）。
+
+    2026-08-23-agent-activity-sessions task-04（design §3.3.2）：增 body 级
+    ``hub_session_id``——daemon 派发时经 env ``SILLYHUB_SESSION_ID`` 注入的平台会话
+    id（run 所属会话唯一，故 body 级而非 entry 级，D-008）；服务端校验 workspace
+    归属，未命中/跨 ws 静默降级（D-005 best-effort）。
     """
 
     model_config = {"extra": "ignore"}
@@ -286,6 +297,7 @@ class AgentLogPushRequest(BaseModel):
     pushed_at: str | None = Field(default=None, max_length=64)
     agent_cwd: str | None = Field(default=None, max_length=1024)
     scan_run_id: str | None = Field(default=None, max_length=128)
+    hub_session_id: uuid.UUID | None = None
     entries: list[AgentLogEntry] = Field(min_length=1, max_length=50)
 
 
@@ -323,6 +335,9 @@ class AgentLogListItem(BaseModel):
     last_command: str | None = None
     scan_run_id: str | None = None
     pushed_at: str | None = None
+    # 2026-08-23-agent-activity-sessions task-04（design §3.3.2 / FR-04）：所属平台
+    # 会话（hub 关联或 tool_report 聚合写入）；NULL = 未归属（存量行不回填，R-03）。
+    agent_session_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -331,3 +346,21 @@ class AgentLogListResponse(BaseModel):
     """GET /agent-logs 200 响应（按 last_seen_at DESC NULLS LAST 排序，design §3.2）。"""
 
     items: list[AgentLogListItem] = Field(default_factory=list)
+
+
+# ── 2026-08-23-agent-activity-sessions task-05（design §3.3.5 内容查看端点）──
+
+
+class AgentLogContentResponse(BaseModel):
+    """GET /agent-logs/{entry_id}/content 200 响应。
+
+    daemon 侧 ``host_fs.read_file`` 整文件 utf8 读（无上限），后端按字节截断
+    **尾部** 262144 字节后返回（防大文件撑爆响应；尾部 = 最新内容，回解
+    ``errors="ignore"`` 防多字节字符被切出现乱码开头）。``size_bytes`` 是
+    daemon 读到的文件总字节数（截断前权威值，不回退用 entry.size_bytes 旧元
+    信息）。读即弃不落库（task-05 constraints）。
+    """
+
+    content: str = Field(description="日志内容尾部文本（最多 262144 字节 UTF-8）")
+    truncated: bool = Field(description="原始内容是否超过 262144 字节被截断")
+    size_bytes: int = Field(description="daemon 侧读到的文件总字节数（截断前）")

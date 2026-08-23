@@ -1916,8 +1916,14 @@ async def list_sessions(
                 first_ts[sid] = row.ts
                 content_by[sid] = row.content or ""
         title_map = {sid: (content or "")[:30] or None for sid, content in content_by.items()}
+        # task-05（2026-08-23-agent-activity-sessions / design §3.3.4）：标题派生改
+        # session.title（ORM 持久化列，tool_report 会话由 task-04 服务端写自动标题）
+        # 优先，无标题回落既有首条 user_input 前 30 字派生——chat 会话 title 列恒
+        # NULL，行为与现状逐字节一致（零回归）；详情端点 title 为 ORM 列经
+        # from_attributes 自动映射，无需本段注入。
+        session_titles: dict[uuid.UUID, str | None] = {item.id: item.title for item in items}
         for r in reads:
-            r.title = title_map.get(r.id)
+            r.title = session_titles.get(r.id) or title_map.get(r.id)
     return AgentSessionListResponse(
         items=reads,
         total=total,

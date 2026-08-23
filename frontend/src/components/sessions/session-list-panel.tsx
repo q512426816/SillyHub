@@ -1036,6 +1036,16 @@ function SessionRow({
   // 离线判定只能来自实时机器列表（快照是建会话时的名字，无在线状态）。
   const machineOffline = machineHit ? !machineHit.online : false;
   const engineValue = engineValueOf(session);
+  // task-07（2026-08-23-agent-activity-sessions FR-08 / design §3.4）：origin=
+  // tool_report 条目——标题旁 🧾「本地 Agent」徽标（brand 阶，原型
+  // .badge-tool），chips 引擎位改显 harness 真实身份（D-007：创建时写入快照）。
+  // title 直接用后端 title（tool_report 会话该字段即派生标题，无需特判）。
+  const isToolReport = session.origin === "tool_report";
+  // lib/daemon.ts 不在本卡 allowed_paths：AgentSessionConfigSnapshot 暂缺
+  // harness 字段，按快照 JSON blob 直显语义本地窄化读取。
+  const harnessName =
+    (session.config_snapshot as { harness?: string | null } | null)?.harness ??
+    "—";
 
   return (
     <div
@@ -1084,8 +1094,21 @@ function SessionRow({
             aria-label={`状态 ${session.status}`}
           />
         )}
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground">
-          {title}
+        {/* task-07：tool_report 标题旁 🧾「本地 Agent」徽标（原型 .badge-tool：
+            brand-100 底 + brand-600 描边 + brand-700 字，随主题换肤）。 */}
+        <span className="flex min-w-0 flex-1 items-center gap-1">
+          <span className="min-w-0 truncate text-[13px] font-medium text-foreground">
+            {title}
+          </span>
+          {isToolReport && (
+            <span
+              title="由 SillySpec CLI 自动上报创建的本地 Agent 会话"
+              data-testid="tool-report-badge"
+              className="shrink-0 rounded-full border border-brand-600 bg-brand-100 px-1.5 py-px text-[10px] font-medium leading-4 text-brand-700"
+            >
+              🧾 本地 Agent
+            </span>
+          )}
         </span>
         <span className="shrink-0 text-[11px] text-muted-foreground">
           {formatRelativeTime(session.last_active_at ?? session.created_at)}
@@ -1132,12 +1155,14 @@ function SessionRow({
             {machineOffline ? "（离线）" : ""}
           </Tag>
         )}
+        {/* task-07：tool_report 引擎位改显 harness（design §3.4「harness
+            engine 色」——配色沿用引擎 Tag 档，文本是真实 harness 身份）。 */}
         {!hideEngineChip && (
           <Tag
             className="m-0 shrink-0 rounded-sm px-1 py-0 text-[10px] leading-4"
             color={engineValue === "codex" ? "purple" : "gold"}
           >
-            {engineLabel(engineValue)}
+            {isToolReport ? harnessName : engineLabel(engineValue)}
           </Tag>
         )}
         {variant === "tree" && (

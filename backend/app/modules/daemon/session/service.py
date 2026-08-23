@@ -376,6 +376,20 @@ class DaemonSessionConfigInvalid(AppError):
     http_status = 422
 
 
+class ToolReportActivateNoDaemon(AppError):
+    """tool_report 会话懒激活时无可用的在线守护进程（409）。
+
+    2026-08-23-agent-activity-sessions task-05（design §3.3.4 / Grill P2）：
+    ``prepare_interactive_dispatch`` 无在线机器抛的 ``NoOnlineDaemonError`` 是
+    裸 Exception（placement.py，非 AppError）——直接透传会 500。懒激活分支自包
+    本 AppError 子类（中文 detail + 409），让「继续本地 Agent 会话」的失败走
+    既有中文错误链路（前端 toast），不裸抛。
+    """
+
+    code = "HTTP_409_TOOL_REPORT_ACTIVATE_NO_DAEMON"
+    http_status = 409
+
+
 @dataclass(frozen=True, slots=True)
 class SessionDispatchResult:
     """Result of create_session / inject_session (D-005@v1 triple)."""
@@ -1125,6 +1139,202 @@ class SessionService:
                 lease_id=str(lease_id),
             )
 
+    async def _activate_tool_report_session(
+        self,
+        session: AgentSession,
+        user_id: uuid.UUID,
+        *,
+        prompt: str,
+    ) -> SessionDispatchResult:
+        """懒激活一个未绑定机器的 tool_report 会话（task-05 / design §3.3.4）。
+
+        CLI 工具上报聚合出的会话（``origin='tool_report'``，platform_sync task-04
+        创建，``status='pending'`` 且无 lease/runtime）在用户发首条消息继续时调用：
+        复刻 :meth:`create_session` 的派发段——建首轮 AgentRun + interactive lease
+        （**首条消息即首轮**，prompt 存 lease metadata）+ commit + 唤醒 daemon +
+        best-effort SESSION_INJECT。与 create 的差异：
+
+        - **机器选择（D-010 / Grill P1-2）**：不新增成员绑定预检，沿用
+          ``prepare_interactive_dispatch`` 内部既有自选（用户自有 first-online +
+          workspace shared 借用），与 create「仅 provider 入口」同语义。
+        - **cwd**：最新关联 ``platform_agent_logs`` 行（``agent_session_id`` 匹配、
+          ``last_seen_at`` 倒序取 1）的 ``agent_cwd``，缺省回落
+          ``workspace.root_path``；都无 → None（不设，走普通 quick-chat 语义）。
+        - **provider**：保持 task-04 创建时的 D-007 映射，不覆盖。
+        - **无在线机器**：``NoOnlineDaemonError``（裸 Exception）转
+          :class:`ToolReportActivateNoDaemon`（409 中文），不裸抛 500。
+
+        Caller（:meth:`inject_session`）已持会话行锁并完成归属校验（user_id 必须
+        是会话属主）；本方法成功后直接返回首轮派发结果（不回落
+        ``_inject_into_session``——激活已消费首条消息为首轮，再走 inject 会撞
+        turn 冲突守卫）。
+        """
+        from app.modules.agent.placement import (
+            NoOnlineDaemonError,
+            RunPlacementService,
+        )
+        from app.modules.platform_sync.model import AgentSessionLogORM
+
+        now = datetime.now(UTC)
+        # ── cwd 解析（design §3.3.4 第 2 点）：最新关联 entry.agent_cwd 优先，
+        # 回落 workspace.root_path；两者皆无 → None 不设（cwd 可空）。
+        cwd: str | None = None
+        latest_entry = (
+            await self._session.execute(
+                select(AgentSessionLogORM.agent_cwd)
+                .where(col(AgentSessionLogORM.agent_session_id) == session.id)
+                .order_by(col(AgentSessionLogORM.last_seen_at).desc().nulls_last())
+                .limit(1)
+            )
+        ).first()
+        if latest_entry is not None and latest_entry[0]:
+            cwd = latest_entry[0]
+        if cwd is None and session.workspace_id is not None:
+            from app.modules.workspace.model import Workspace
+
+            ws_row = await self._session.get(Workspace, session.workspace_id)
+            if ws_row is not None:
+                cwd = ws_row.root_path
+
+        model = (session.config or {}).get("model")
+        try:
+            # 首轮 run（对齐 create_session :876-894；首轮发送者=激活注入者，
+            # 即会话属主——inject_session 已过 _get_owned_session_for_update）。
+            run = AgentRun(
+                id=uuid.uuid4(),
+                agent_type="claude_code",
+                provider=session.provider,
+                model=model,
+                status="pending",
+                spec_strategy="interactive",
+                agent_session_id=session.id,
+                user_id=user_id,
+            )
+            self._session.add(run)
+            await self._session.flush()
+
+            placement = RunPlacementService(self._session)
+            try:
+                dispatch = await placement.prepare_interactive_dispatch(
+                    agent_session_id=session.id,
+                    agent_run_id=run.id,
+                    user_id=user_id,
+                    provider=session.provider,
+                    prompt=prompt,
+                    model=model,
+                    workspace_id=session.workspace_id,
+                    cwd=cwd,
+                )
+            except NoOnlineDaemonError as exc:
+                # 裸 Exception → 409 中文 AppError（不裸抛 500，design §3.3.4 第 6 点）。
+                raise ToolReportActivateNoDaemon(
+                    "当前没有可用的在线守护进程，无法继续该会话",
+                    details={"session_id": str(session.id)},
+                ) from exc
+
+            # 回填三元组 + 激活（对齐 create_session :954-958：turn_count 置 1，
+            # 首条消息即首轮）。
+            session.runtime_id = dispatch.runtime_id
+            session.lease_id = dispatch.lease_id
+            session.status = "active"
+            session.turn_count = 1
+            session.last_active_at = now
+            if cwd is not None:
+                session.cwd = cwd
+            # config_snapshot 补 machine_name/agent_name（design §3.3.4 第 4 点，
+            # 展示用）：保留 task-04 写入的 harness 等既有键。
+            machine_name, agent_name = await self._resolve_runtime_labels(dispatch.runtime_id)
+            snapshot = dict(session.config_snapshot or {})
+            snapshot["machine_name"] = machine_name
+            snapshot["agent_name"] = agent_name
+            session.config_snapshot = snapshot
+            self._session.add(session)
+
+            # 首 turn user_input 日志（对齐 create_session :986-993，列表标题派生
+            # 与历史回放依赖该行）。
+            self._session.add(
+                AgentRunLog(
+                    run_id=run.id,
+                    channel="user_input",
+                    content_redacted=prompt[:5000],
+                    timestamp=now,
+                )
+            )
+            await self._session.commit()
+            await self._session.refresh(session)
+            await self._session.refresh(run)
+        except AppError:
+            await self._session.rollback()
+            raise
+        except Exception:
+            await self._session.rollback()
+            raise
+
+        # commit 成功 → 唤醒 daemon（对齐 create_session :1001-1020：失败收敛
+        # 刚提交的三元组为 failed 终态后抛 DaemonRuntimeOffline）。
+        delivered = await placement.notify_interactive_dispatch(dispatch)
+        if not delivered:
+            await self._converge_failed_dispatch(
+                session=session,
+                run=run,
+                lease_id=dispatch.lease_id,
+                error="interactive dispatch wake-up failed (daemon offline)",
+            )
+            raise DaemonRuntimeOffline(
+                "执行代理当前不在线，会话无法启动。请确认本机 daemon 进程已运行"
+                "（任务栏/终端 sillyhub-daemon），重启后重试；若刚重启请等几秒再试。",
+                details={
+                    "runtime_id": str(dispatch.runtime_id),
+                    "session_id": str(session.id),
+                    "run_id": str(run.id),
+                },
+            )
+
+        # best-effort SESSION_INJECT 携带首条消息（对齐 create_session :1022-1065：
+        # 唤醒已信号 lease，控制消息让 daemon SessionManager 拿到确切首 prompt；
+        # 等 session ready 再发，超时 fallback 仍发兼容不上报 ready 的旧 daemon）。
+        from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+        hub = get_daemon_ws_hub()
+        daemon_id = await _resolve_daemon_id_for_runtime(self._session, dispatch.runtime_id)
+        ready = await get_session_readiness().wait(session.id, timeout=8)
+        if not ready:
+            log.warning("session_ready_timeout", session_id=str(session.id))
+        control_ok = False
+        if daemon_id is not None:
+            control_ok = await hub.send_session_control(
+                daemon_id,
+                DAEMON_MSG_SESSION_INJECT,
+                {
+                    "session_id": str(session.id),
+                    "lease_id": str(dispatch.lease_id),
+                    "run_id": str(run.id),
+                    "prompt": prompt,
+                    # gap-2：首 turn SESSION_INJECT 携带 lease 级 claim_token。
+                    "claim_token": dispatch.claim_token,
+                    "runtime_id": str(dispatch.runtime_id),
+                },
+            )
+        if not control_ok:
+            # 唤醒已送达但控制消息发送失败：daemon 仍会 claim lease（metadata 含
+            # prompt），不因控制消息失败判定会话失败，仅留观测日志（对齐 create）。
+            log.warning(
+                "tool_report_activation_control_send_failed",
+                session_id=str(session.id),
+                run_id=str(run.id),
+                runtime_id=str(dispatch.runtime_id),
+            )
+
+        await self._publish_session_event(
+            session.id,
+            {"event": "session_created", "session_id": str(session.id), "run_id": str(run.id)},
+        )
+        return SessionDispatchResult(
+            agent_session=session,
+            agent_run=run,
+            lease_id=dispatch.lease_id,
+        )
+
     async def inject_session(
         self,
         session_id: uuid.UUID,
@@ -1178,6 +1388,15 @@ class SessionService:
         except Exception:
             await self._session.rollback()
             raise
+        # ── task-05（design §3.3.4 / D-010）：tool_report 会话懒激活分支 ──────────
+        # CLI 工具上报聚合出的「本地 Agent 会话」（origin='tool_report'，创建时
+        # status='pending' 且无 lease/runtime）首次被用户继续（首条消息）时，才
+        # 绑定机器建 interactive lease——首条消息即首轮（prompt 存 lease metadata
+        # 并下发 SESSION_INJECT），激活成功直接返回激活派发结果；已激活（lease
+        # 存在）的 tool_report 会话与 origin 缺省的 chat 会话不进本分支，走既有
+        # inject 路径零回归（design §3.3.4 第 5 点）。
+        if getattr(session, "origin", "chat") == "tool_report" and session.lease_id is None:
+            return await self._activate_tool_report_session(session, user_id, prompt=prompt)
         return await self._inject_into_session(
             session,
             prompt=prompt,

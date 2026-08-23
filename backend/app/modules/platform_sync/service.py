@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.core.logging import get_logger
+from app.modules.agent.model import AgentSession
 from app.modules.platform_sync.model import (
     AgentSessionLogORM,
     PlatformChangeProgressORM,
@@ -49,6 +50,19 @@ if TYPE_CHECKING:
     from app.modules.spec_workspace.schema import FileOp
 
 log = get_logger(__name__)
+
+# ── 2026-08-23-agent-activity-sessions task-04（design §3.3.3 / D-007）──
+#: harness → tool_report 会话 ``AgentSession.provider`` 映射：激活派发用默认引擎，
+#: harness 真实身份由 ``config_snapshot.harness`` 展示（创建时写入）。
+_TOOL_REPORT_PROVIDER_BY_HARNESS: dict[str, str] = {
+    "claude-code": "claude",
+    "codex": "codex",
+}
+
+
+def _tool_report_provider(harness: str) -> str:
+    """D-007：claude-code→'claude'、codex→'codex'、其余（zcode 等）→'claude'。"""
+    return _TOOL_REPORT_PROVIDER_BY_HARNESS.get(harness, "claude")
 
 
 @dataclass
@@ -599,6 +613,7 @@ class PlatformSyncService:
         return await SpecWorkspaceService(self._session).apply_ops(workspace_id, ops)
 
     # ── Change 2026-08-23-platform-agent-log-ingest task-02（design §3.2 API 契约）──
+    # ── 2026-08-23-agent-activity-sessions task-04（design §3.3.3 归属扩展）──
 
     async def upsert_agent_log_entries(
         self,
@@ -606,18 +621,39 @@ class PlatformSyncService:
         entries: list[AgentLogEntry],
         pushed_at: str | None,
         scan_run_id: str | None,
+        user_id: uuid.UUID,
+        hub_session_id: uuid.UUID | None = None,
     ) -> int:
-        """POST /agent-logs：批量幂等 upsert（design §3.2 / D-005 整行覆盖）。
+        """POST /agent-logs：批量幂等 upsert + 落库后归属（design §3.2/§3.3.3）。
 
-        逐条按 ``(workspace_id, log_path)`` select：无则 INSERT、有则整行覆盖——
-        ``invocations`` / ``first_seen_at`` 等一律以 CLI 值为准整行写入，服务端**不
-        自行累加**（CLI 留底文件是计数权威，D-005）；``created_at`` 首插后保留不动，
-        仅刷 ``updated_at``。同请求内重复 ``log_path`` 先按首现位置去重保序、以靠后
-        条目为准（design §3.2），全批单事务最后一次 commit，返回落库行数（去重后）。
+        落库部分逐条按 ``(workspace_id, log_path)`` select：无则 INSERT、有则整行
+        覆盖——``invocations`` / ``first_seen_at`` 等一律以 CLI 值为准整行写入，
+        服务端**不自行累加**（CLI 留底文件是计数权威，D-005）；``created_at`` 首插
+        后保留不动，仅刷 ``updated_at``。同请求内重复 ``log_path`` 先按首现位置去重
+        保序、以靠后条目为准（design §3.2）。
+
+        归属部分（task-04，同事务——归属写在本方法唯一一次 commit 之前）：
+
+        1. ``hub_session_id`` 分支（daemon env 注入的平台会话）：select
+           ``agent_sessions`` where id=hub 且 workspace=token 派生 ws 且未软删——
+           命中 → 本批全部 entries 挂该会话；未命中/跨 ws → **静默跳过**（D-005
+           best-effort：entries 仍入库，绝不 4xx/抛错）。
+        2. 无 hub 分支（entry 级 ctx，D-009）：entries 按 ``(harness,
+           coalesce(change_key, quick_id, ''))`` 分组，每组 find-or-create
+           ``origin='tool_report'`` 会话——find 按 ``aggregation_key="{harness}|{ctx}"``
+           取 ``last_active_at`` 最新一行（D-006：无唯一约束，并发撞键重复行按最新
+           收敛、败者僵尸行不清理）；create 由本服务单一写者写入（owner=token
+           派生 user，provider 走 D-007 映射，title=``{harness} · {ctx 或 '本地活动'}``，
+           quick_id 显示为原样短码）。find 命中也刷新 ``last_active_at``，不改
+           status（生命周期契约：已有活跃/终态会话只刷活跃时间）。
+
+        返回落库行数（去重后）。
         """
         # dict 化去重：键保留首现顺序（保序），值被靠后条目覆盖（后者为准）。
         deduped: dict[str, AgentLogEntry] = {entry.log_path: entry for entry in entries}
         now = datetime.now(UTC)
+        # (entry, ORM 行) 配对留存：归属阶段需要 entry 级 harness/ctx 对应到落库行。
+        persisted: list[tuple[AgentLogEntry, AgentSessionLogORM]] = []
         for entry in deduped.values():
             stmt = select(AgentSessionLogORM).where(
                 col(AgentSessionLogORM.workspace_id) == workspace_id,
@@ -625,49 +661,114 @@ class PlatformSyncService:
             )
             row = (await self._session.execute(stmt)).scalar_one_or_none()
             if row is None:
-                self._session.add(
-                    AgentSessionLogORM(
-                        id=uuid.uuid4(),
-                        workspace_id=workspace_id,
-                        log_path=entry.log_path,
-                        harness=entry.harness,
-                        format=entry.format,
-                        session_id=entry.session_id,
-                        originator=entry.originator,
-                        detected_via=entry.detected_via,
-                        agent_cwd=entry.agent_cwd,
-                        exists=entry.exists if entry.exists is not None else True,
-                        size_bytes=entry.size_bytes,
-                        mtime_ms=entry.mtime_ms,
-                        first_seen_at=entry.first_seen_at,
-                        last_seen_at=entry.last_seen_at,
-                        invocations=entry.invocations,
-                        last_command=entry.last_command,
-                        scan_run_id=scan_run_id,
-                        pushed_at=pushed_at,
-                        created_at=now,
-                        updated_at=now,
+                row = AgentSessionLogORM(
+                    id=uuid.uuid4(),
+                    workspace_id=workspace_id,
+                    log_path=entry.log_path,
+                    harness=entry.harness,
+                    format=entry.format,
+                    session_id=entry.session_id,
+                    originator=entry.originator,
+                    detected_via=entry.detected_via,
+                    agent_cwd=entry.agent_cwd,
+                    exists=entry.exists if entry.exists is not None else True,
+                    size_bytes=entry.size_bytes,
+                    mtime_ms=entry.mtime_ms,
+                    first_seen_at=entry.first_seen_at,
+                    last_seen_at=entry.last_seen_at,
+                    invocations=entry.invocations,
+                    last_command=entry.last_command,
+                    scan_run_id=scan_run_id,
+                    pushed_at=pushed_at,
+                    created_at=now,
+                    updated_at=now,
+                )
+                self._session.add(row)
+            else:
+                # 整行覆盖（D-005）：除 id/workspace_id/log_path/created_at 外全列以本次
+                # 上报为准；exists None 回落 ORM 列默认 true（NOT NULL）。
+                row.harness = entry.harness
+                row.format = entry.format
+                row.session_id = entry.session_id
+                row.originator = entry.originator
+                row.detected_via = entry.detected_via
+                row.agent_cwd = entry.agent_cwd
+                row.exists = entry.exists if entry.exists is not None else True
+                row.size_bytes = entry.size_bytes
+                row.mtime_ms = entry.mtime_ms
+                row.first_seen_at = entry.first_seen_at
+                row.last_seen_at = entry.last_seen_at
+                row.invocations = entry.invocations
+                row.last_command = entry.last_command
+                row.scan_run_id = scan_run_id
+                row.pushed_at = pushed_at
+                row.updated_at = now
+            persisted.append((entry, row))
+
+        # ── 归属（design §3.3.3：与 entries upsert 同事务，commit 前写归属列）──
+        if hub_session_id is not None:
+            hub_session = (
+                await self._session.execute(
+                    select(AgentSession).where(
+                        col(AgentSession.id) == hub_session_id,
+                        col(AgentSession.workspace_id) == workspace_id,
+                        col(AgentSession.deleted_at).is_(None),
                     )
                 )
-                continue
-            # 整行覆盖（D-005）：除 id/workspace_id/log_path/created_at 外全列以本次
-            # 上报为准；exists None 回落 ORM 列默认 true（NOT NULL）。
-            row.harness = entry.harness
-            row.format = entry.format
-            row.session_id = entry.session_id
-            row.originator = entry.originator
-            row.detected_via = entry.detected_via
-            row.agent_cwd = entry.agent_cwd
-            row.exists = entry.exists if entry.exists is not None else True
-            row.size_bytes = entry.size_bytes
-            row.mtime_ms = entry.mtime_ms
-            row.first_seen_at = entry.first_seen_at
-            row.last_seen_at = entry.last_seen_at
-            row.invocations = entry.invocations
-            row.last_command = entry.last_command
-            row.scan_run_id = scan_run_id
-            row.pushed_at = pushed_at
-            row.updated_at = now
+            ).scalar_one_or_none()
+            if hub_session is not None:
+                for _entry, log_row in persisted:
+                    log_row.agent_session_id = hub_session.id
+            # D-005 best-effort：hub 会话不存在/跨 workspace/已软删 → 静默跳过归属，
+            # entries 仍入库（不抛错不 4xx），目标会话 status 也不受影响。
+        else:
+            # D-009 entry 级 ctx 分组：变更 B 的日志不因全量重推挂到变更 A 的会话。
+            groups: dict[tuple[str, str], list[AgentSessionLogORM]] = {}
+            for entry, log_row in persisted:
+                ctx = entry.change_key or entry.quick_id or ""
+                groups.setdefault((entry.harness, ctx), []).append(log_row)
+            for (harness, ctx), group_rows in groups.items():
+                agg_key = f"{harness}|{ctx}"
+                # D-006 find-then-insert：普通索引非唯一，极小概率并发重复行按
+                # last_active_at 最新取一，后续上报自然收敛到该行。
+                found = (
+                    await self._session.execute(
+                        select(AgentSession)
+                        .where(
+                            col(AgentSession.origin) == "tool_report",
+                            col(AgentSession.workspace_id) == workspace_id,
+                            col(AgentSession.aggregation_key) == agg_key,
+                            col(AgentSession.deleted_at).is_(None),
+                        )
+                        .order_by(col(AgentSession.last_active_at).desc().nulls_last())
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if found is not None:
+                    # 命中只刷活跃时间，不改 status/turn_count（生命周期契约）。
+                    found.last_active_at = now
+                    group_session_id = found.id
+                else:
+                    # create（单一写者=本服务）：owner=token 派生 user（R-02）、
+                    # provider 走 D-007 映射、ctx 空显示「本地活动」（D-001 回落单桶）。
+                    group_session_id = uuid.uuid4()
+                    self._session.add(
+                        AgentSession(
+                            id=group_session_id,
+                            user_id=user_id,
+                            workspace_id=workspace_id,
+                            provider=_tool_report_provider(harness),
+                            status="pending",
+                            origin="tool_report",
+                            aggregation_key=agg_key,
+                            title=f"{harness} · {ctx or '本地活动'}",
+                            config_snapshot={"harness": harness},
+                            turn_count=0,
+                            last_active_at=now,
+                        )
+                    )
+                for log_row in group_rows:
+                    log_row.agent_session_id = group_session_id
         await self._session.commit()
         return len(deduped)
 
@@ -676,6 +777,7 @@ class PlatformSyncService:
         workspace_id: uuid.UUID | None,
         allowed_workspace_ids: list[uuid.UUID] | None = None,
         filter_workspace_id: uuid.UUID | None = None,
+        filter_session_id: uuid.UUID | None = None,
         limit: int = 20,
     ) -> list[AgentSessionLogORM]:
         """GET /agent-logs：按读 scope 聚合列表（design §3.2 / D-004 读通道）。
@@ -687,6 +789,9 @@ class PlatformSyncService:
         - 两者均 None（防御，router ``_read_args`` 恒给其一）→ 空结果（fail-closed）。
         - ``filter_workspace_id`` 非 None 时再 AND 等值——不在 scope 内（越权）=
           空结果不报错（不 403 不泄漏 workspace 存在性，D-004）。
+        - ``filter_session_id`` 非 None（task-04 / design §3.3.6）再 AND
+          ``agent_session_id`` 等值——scope 内会话的关联条目；会话存在但不属
+          scope（越权）→ 空列表同既有语义（scope 过滤天然拦截，不泄漏存在性）。
 
         排序 ``last_seen_at DESC NULLS LAST``（显式 nulls_last 消除 PG/SQLite 方言
         分叉 X-07；ISO 8601 UTC 字符串字典序 = 时间序，D-003），``limit`` 由 router
@@ -702,6 +807,8 @@ class PlatformSyncService:
             return []
         if filter_workspace_id is not None:
             filters.append(ws_col == filter_workspace_id)
+        if filter_session_id is not None:
+            filters.append(col(AgentSessionLogORM.agent_session_id) == filter_session_id)
         stmt = (
             select(AgentSessionLogORM)
             .where(*filters)

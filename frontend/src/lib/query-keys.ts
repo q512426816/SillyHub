@@ -64,11 +64,13 @@ export const queryKeys = {
     whitelist: ["mcpSettings", "whitelist"] as const,
   },
   // 2026-08-23-platform-agent-log-ingest task-04：本地 agent 日志列表缓存 key
-  //（components/daemon/agent-log-card.tsx 轮询消费）。workspaceId 进 key
-  //（影响查询结果的全部变量，本文件头规则）；undefined/null 归一 null，
-  // 避免可选参数产生两个分叉键。刷新按钮 invalidate all。
+  //（components/daemon/agent-log-card.tsx 轮询消费）。sessionId 进 key
+  //（影响查询结果的全部变量，本文件头规则）；2026-08-23-agent-activity-sessions
+  // task-07 会话化：入参从 workspaceId 改 sessionId（D-004：workspace 级旧
+  // 挂载移除，列表只按会话关联拉取）。undefined/null 归一 null，避免可选参数
+  // 产生两个分叉键。刷新按钮 invalidate all。
   agentLogs: {
     all: ["agentLogs"] as const,
-    list: (workspaceId?: string) => ["agentLogs", "list", workspaceId ?? null] as const,
+    list: (sessionId?: string) => ["agentLogs", "list", sessionId ?? null] as const,
   },
 } as const;

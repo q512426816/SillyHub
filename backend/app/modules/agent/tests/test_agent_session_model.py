@@ -19,7 +19,7 @@ def test_agent_session_tablename() -> None:
     assert AgentSession.__tablename__ == "agent_sessions"
 
 
-def test_agent_session_has_all_19_fields() -> None:
+def test_agent_session_has_all_22_fields() -> None:
     expected = {
         "id",
         "user_id",
@@ -41,12 +41,17 @@ def test_agent_session_has_all_19_fields() -> None:
         "agent_profile_id",
         "llm_provider_id",
         "config_snapshot",
+        # 2026-08-23-agent-activity-sessions task-03 / FR-03：会话化三列
+        # （origin/aggregation_key/title，design §3.3.1）。
+        "origin",
+        "aggregation_key",
+        "title",
     }
     actual = set(AgentSession.model_fields.keys())
     assert actual == expected, (
         f"AgentSession field mismatch. missing={expected - actual}, extra={actual - expected}"
     )
-    assert len(AgentSession.model_fields) == 19
+    assert len(AgentSession.model_fields) == 22
 
 
 def test_agent_session_defaults() -> None:

@@ -1,31 +1,36 @@
 "use client";
 
 /**
- * AgentLogCard —— 「本地 Agent 日志」会话流条目（2026-08-23-platform-agent-log-ingest
- * task-04 / FR-04 / D-006；ql-20260823-002-6a1a 改会话流内展示）。
+ * AgentLogCard / AgentLogSessionBody —— 「本地 Agent 日志」会话化两形态
+ * （2026-08-23-agent-activity-sessions task-07 / FR-07 / FR-08 / D-004；
+ * 前身 2026-08-23-platform-agent-log-ingest task-04 ql-20260823-002-6a1a）。
  *
- * 依据：
- *   - 用户反馈：独立卡片夹在消息流与输入区之间「很别扭」→ 改为消息流内条目
- *   - design.md §3.4（数据链路不变：listAgentLogs(workspaceId)，GET /api/agent-logs，
- *     类型取 api-types 生成 schema，X-06）/ §4（失败不干扰会话主体验）
- *   - turn-timeline.tsx 视觉语言：助手答复 = 左侧圆形头像 + rounded-tl 气泡
- *     （本组件同构复用该形态，头像换 FileText 图标标识「日志条目」）
+ * 依据（design §3.4 + prototype-agent-activity-sessions.html）：
+ *   - AgentLogCard：普通会话（chat 或已激活 tool_report）对话流**尾部**的折叠
+ *     条目——streamFooter 注入（turn-timeline.tsx），仅关联本会话的上报
+ *     （listAgentLogs(sessionId)，GET /api/agent-logs?session_id=…）。
+ *     形态沿用：🧾 头像 + 助手答复同款气泡 + 一行摘要「N 个 · 最新 X 前 ▸」
+ *     + 展开明细（harness 徽标 / originator / session 短码 / 大小 / 活跃绿点 /
+ *     调用次数 / 最近命令 / log_path 复制）。
+ *   - AgentLogSessionBody：origin=tool_report 且 turn_count===0 的会话**主体**
+ *     ——全量 entries 逐条气泡流（不折叠成 3 条），顶部说明「由 SillySpec CLI
+ *     自动上报创建」+ 刷新；底部输入区由 session-panel 保留（首条消息懒激活）。
+ *   - 每个条目行尾「查看内容 ▾」：readAgentLogContent(entryId)（GET
+ *     /api/agent-logs/{id}/content，后端尾部 256KB 截断）内联展开 <pre> 文本；
+ *     truncated 时顶部注明；失败（二进制 409 / 无归属 404 / 离线 504）中文
+ *     message 直接展示（design §3.3.5 / §4）。
  *
- * 形态（ql-20260823-002-6a1a）：挂载改走 TurnTimeline streamFooter 注入口——
- * 渲染在最后一个 turn 之后、同一滚动容器内，是「对话流里的一条消息」而非
- * 面板级独立卡片（session-panel.tsx 不再独立挂载）。默认**折叠成一行摘要**
- * （🧾 本地 Agent 日志 · N 个 · 最新 X 前 + 展开箭头），点击头部切换展开明细。
- *
- * 渲染门控：空列表 / error / loading 一律返回 null——流内不出现占位块
- * （有上报才出现，避免每条会话尾巴挂空盒）。
+ * 渲染门控（AgentLogCard）：空列表 / error / loading 一律返回 null——流内
+ * 不出现占位块（有上报才出现，避免每条会话尾巴挂空盒）。SessionBody 是
+ * 会话主体，loading / error / 空态各有显式中文提示。
  *
  * 视觉（双主题铁律）：harness 徽标走 brand-* 语义阶（bg-brand-50/
  * text-brand-700/border-brand-100，随 html data-theme 换肤）；zcode 用语义
  * info 青（cyan 固定阶，对齐 runtime-card-helpers info 徽标，NFR-03）；
- * sillyhub-daemon originator 加 brand 实线边框，其余虚线灰。不硬编码 hex。
+ * 「查看内容」按钮 brand 阶文字色。不硬编码 hex。
  *
- * 相对时间：dayjs relativeTime 插件 + zh-cn locale——全仓首次 extend（X-15），
- * 日期渲染显式 zh-CN 语境（CONVENTIONS 类型与数据契约 8）。
+ * 相对时间：dayjs relativeTime 插件 + zh-cn locale（X-15），日期渲染显式
+ * zh-CN 语境（CONVENTIONS 类型与数据契约 8）。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -35,7 +40,13 @@ import "dayjs/locale/zh-cn";
 import relativeTime from "dayjs/plugin/relativeTime";
 import { FileText } from "lucide-react";
 
-import { listAgentLogs, type AgentLogListItem } from "@/lib/agent-logs";
+import {
+  listAgentLogs,
+  readAgentLogContent,
+  type AgentLogContentResponse,
+  type AgentLogListItem,
+} from "@/lib/agent-logs";
+import { ApiError } from "@/lib/api";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 
@@ -44,7 +55,7 @@ import { cn } from "@/lib/utils";
 dayjs.extend(relativeTime);
 dayjs.locale("zh-cn");
 
-/** 展开态默认展示条数（超出走「展开全部 N 条 / 收起」）。 */
+/** 展开态默认展示条数（超出走「展开全部 N 条 / 收起」）——仅 AgentLogCard 折叠形态。 */
 const COLLAPSED_COUNT = 3;
 
 /** 「活跃中」判定窗口：last_seen_at 15 分钟内显示绿点（原型 .live-dot）。 */
@@ -113,8 +124,15 @@ function useCopyFeedback() {
   return { copiedKey, copy };
 }
 
-/* ───────────────── 条目行 ───────────────── */
+/* ───────────────── 条目行（两形态共用） ───────────────── */
 
+/**
+ * 单条日志元信息行：harness 徽标 / originator / session 短码 / 大小 + 活跃
+ * 绿点 / 调用次数 + 最近命令 + format / log_path 复制 /「查看内容」内联展开。
+ *
+ * 根元素是 div（不带 li/bubble 壳）——AgentLogCard 折叠明细以 <li> 包裹
+ * （列表语义），AgentLogSessionBody 以头像 + 气泡包裹（对话流语义）。
+ */
 function AgentLogEntry({
   entry,
   copiedKey,
@@ -137,8 +155,45 @@ function AgentLogEntry({
     : null;
   const recentlyActive = isRecentlyActive(entry.last_seen_at);
 
+  // 「查看内容」内联展开态（design §3.4：一律显示按钮，文本类由后端放行；
+  // 二进制黑名单 / 离线 / 无归属在内容端点侧判，错误中文 message 展示）。
+  const [peekOpen, setPeekOpen] = useState(false);
+  const [peekLoading, setPeekLoading] = useState(false);
+  const [peekData, setPeekData] = useState<AgentLogContentResponse | null>(null);
+  const [peekError, setPeekError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // 收起即清态：重开重新拉取，错误/数据不驻留陈旧状态。
+    if (!peekOpen) {
+      setPeekLoading(false);
+      setPeekData(null);
+      setPeekError(null);
+      return;
+    }
+    let cancelled = false;
+    setPeekLoading(true);
+    setPeekError(null);
+    readAgentLogContent(entry.id)
+      .then((data) => {
+        if (cancelled) return;
+        setPeekData(data);
+        setPeekLoading(false);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // ApiError.message 即后端中文文案（409 二进制 / 404 无归属 / 504 离线）。
+        setPeekError(
+          err instanceof ApiError ? err.message : "读取日志内容失败",
+        );
+        setPeekLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [peekOpen, entry.id]);
+
   return (
-    <li className="rounded-md border border-border px-2.5 py-2">
+    <div>
       {/* 第一行：harness / originator / session 短码 · 大小 + 活跃时间（右侧） */}
       <div className="flex flex-wrap items-center gap-2">
         <span
@@ -204,23 +259,86 @@ function AgentLogEntry({
         {entry.format != null && <span>{entry.format}</span>}
       </div>
 
-      {/* 第三行：log_path 截断展示（title 全文）+ 点击复制完整路径 */}
-      <button
-        type="button"
-        aria-label={`复制日志路径：${entry.log_path}`}
-        title={entry.log_path}
-        onClick={() => onCopy({ key: pathKey, text: entry.log_path })}
-        className="mt-1 block w-full cursor-pointer truncate text-left font-mono text-[10.5px] text-muted-foreground transition-colors hover:text-foreground"
-      >
-        {copiedKey === pathKey ? "已复制 ✓" : entry.log_path}
-      </button>
-    </li>
+      {/* 第三行：log_path 截断展示（title 全文 + 点击复制完整路径）+「查看内容」。 */}
+      <div className="mt-1 flex items-center gap-2">
+        <button
+          type="button"
+          aria-label={`复制日志路径：${entry.log_path}`}
+          title={entry.log_path}
+          onClick={() => onCopy({ key: pathKey, text: entry.log_path })}
+          className="min-w-0 flex-1 cursor-pointer truncate text-left font-mono text-[10.5px] text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {copiedKey === pathKey ? "已复制 ✓" : entry.log_path}
+        </button>
+        <button
+          type="button"
+          aria-expanded={peekOpen}
+          title={peekOpen ? "收起日志内容" : "查看日志尾部内容（最多 256KB）"}
+          onClick={() => setPeekOpen((v) => !v)}
+          data-testid="agent-log-content-toggle"
+          className="shrink-0 cursor-pointer rounded px-1 py-0.5 text-[11px] text-brand-700 transition-colors hover:bg-brand-50"
+        >
+          {peekOpen ? "收起 ▴" : "查看内容 ▾"}
+        </button>
+      </div>
+
+      {/* 查看内容内联面板（原型 .view-btn 展开形态）。 */}
+      {peekOpen && (
+        <div
+          data-testid="agent-log-content-panel"
+          className="mt-1.5 overflow-hidden rounded-md border border-border bg-muted/40"
+        >
+          {peekLoading && (
+            <p className="px-2.5 py-2 text-[11px] text-muted-foreground">
+              内容加载中…
+            </p>
+          )}
+          {peekError && (
+            <p
+              role="alert"
+              className="px-2.5 py-2 text-[11px] text-destructive"
+            >
+              内容读取失败：{peekError}
+            </p>
+          )}
+          {peekData && (
+            <>
+              {peekData.truncated && (
+                <p className="border-b border-border px-2.5 py-1 text-[10.5px] text-muted-foreground">
+                  已截断至末尾 256KB
+                </p>
+              )}
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all px-2.5 py-2 font-mono text-[10.5px] leading-4 text-foreground">
+                {peekData.content}
+              </pre>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
-/* ───────────────── 会话流条目 ───────────────── */
+/* ───────────────── 会话关联查询（两形态共用 hook 参数） ───────────────── */
 
-export function AgentLogCard({ workspaceId }: { workspaceId: string }) {
+/** 会话关联日志查询选项（30s 轮询跟随上报节奏，design §3.4，X-20：非秒级心跳）。 */
+function useSessionAgentLogs(sessionId: string) {
+  return useQuery({
+    queryKey: queryKeys.agentLogs.list(sessionId),
+    queryFn: () => listAgentLogs(sessionId),
+    refetchInterval: 30_000,
+    enabled: Boolean(sessionId),
+  });
+}
+
+/* ───────────────── 形态一：对话流尾部折叠条目 ───────────────── */
+
+/**
+ * AgentLogCard —— 普通会话（chat / 已激活 tool_report）对话流尾部条目：
+ * 默认折叠成一行摘要，点击展开明细（>3 条再折叠一层）。
+ * 挂载走 TurnTimeline streamFooter（session-panel.tsx 传 sessionId 关联）。
+ */
+export function AgentLogCard({ sessionId }: { sessionId: string }) {
   const qc = useQueryClient();
   const { copiedKey, copy } = useCopyFeedback();
   // 外层折叠（会话流内默认收起成一行摘要，点击头部展开）；内层 expanded 管
@@ -228,18 +346,12 @@ export function AgentLogCard({ workspaceId }: { workspaceId: string }) {
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
-  const logsQ = useQuery({
-    queryKey: queryKeys.agentLogs.list(workspaceId),
-    queryFn: () => listAgentLogs(workspaceId),
-    // 30s 轮询跟随 run 级上报节奏（design §3.4，X-20：非秒级心跳）。
-    refetchInterval: 30_000,
-    enabled: Boolean(workspaceId),
-  });
+  const logsQ = useSessionAgentLogs(sessionId);
 
-  // workspaceId 空 / error / loading / 空列表 一律不渲染：会话流内不出现占位块
+  // sessionId 空 / error / loading / 空列表 一律不渲染：会话流内不出现占位块
   //（ql-20260823-002-6a1a：有上报才出现；design §4 增强信息不干扰主体验）。
   // 注意先调完 hook 再 return（hooks 规则）。
-  if (!workspaceId || logsQ.isError || logsQ.isPending) return null;
+  if (!sessionId || logsQ.isError || logsQ.isPending) return null;
 
   const items = logsQ.data?.items ?? [];
   if (items.length === 0) return null;
@@ -303,12 +415,16 @@ export function AgentLogCard({ workspaceId }: { workspaceId: string }) {
               data-testid="agent-log-entries"
             >
               {visible.map((entry) => (
-                <AgentLogEntry
+                <li
                   key={entry.id}
-                  entry={entry}
-                  copiedKey={copiedKey}
-                  onCopy={copy}
-                />
+                  className="rounded-md border border-border px-2.5 py-2"
+                >
+                  <AgentLogEntry
+                    entry={entry}
+                    copiedKey={copiedKey}
+                    onCopy={copy}
+                  />
+                </li>
               ))}
             </ul>
             <div className="mt-2 flex items-center justify-between gap-2">
@@ -338,6 +454,98 @@ export function AgentLogCard({ workspaceId }: { workspaceId: string }) {
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ───────────────── 形态二：tool_report 会话主体 ───────────────── */
+
+/**
+ * AgentLogSessionBody —— origin=tool_report 且 turn_count===0 会话的内容主体：
+ * 全量 entries 逐条气泡流（不折叠；条目多时容器自身滚动），条目行复用
+ * AgentLogEntry（含复制 + 查看内容交互）。输入区由 session-panel 保留在下方
+ * （首条消息懒激活派发，D-002）。
+ *
+ * 容器与 TurnTimeline 同构（min-h-0 flex-1 overflow-y-auto bg-background
+ * px-5 py-5），保证与对话流形态互换时布局零跳动。
+ */
+export function AgentLogSessionBody({ sessionId }: { sessionId: string }) {
+  const qc = useQueryClient();
+  const { copiedKey, copy } = useCopyFeedback();
+  const logsQ = useSessionAgentLogs(sessionId);
+
+  const items = logsQ.data?.items ?? [];
+
+  return (
+    <div
+      data-testid="agent-log-session-body"
+      className="min-h-0 flex-1 overflow-y-auto bg-background px-5 py-5"
+    >
+      {/* 顶部说明行 + 刷新（原型 .head .sub「由 SillySpec CLI 自动上报创建」）。 */}
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <p className="text-[11px] text-muted-foreground">
+          由 SillySpec CLI 自动上报创建 · 点下方输入框即可继续对话
+        </p>
+        <button
+          type="button"
+          title="刷新"
+          onClick={() => {
+            void qc.invalidateQueries({ queryKey: queryKeys.agentLogs.all });
+          }}
+          className="shrink-0 cursor-pointer rounded px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        >
+          刷新
+        </button>
+      </div>
+
+      {logsQ.isPending ? (
+        <p className="py-6 text-center text-xs text-muted-foreground">
+          日志条目加载中…
+        </p>
+      ) : logsQ.isError ? (
+        <div
+          role="alert"
+          className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive"
+        >
+          加载本地 Agent 日志失败：
+          {logsQ.error instanceof Error ? logsQ.error.message : "未知错误"}
+          <button
+            type="button"
+            onClick={() => void logsQ.refetch()}
+            className="ml-2 cursor-pointer rounded border border-destructive/40 px-1.5 py-0.5 transition-colors hover:bg-destructive/10"
+          >
+            重新加载
+          </button>
+        </div>
+      ) : items.length === 0 ? (
+        <p className="py-6 text-center text-xs text-muted-foreground">
+          暂无日志上报，等待 SillySpec CLI 下次上报…
+        </p>
+      ) : (
+        <ul
+          className="flex flex-col gap-2.5"
+          data-testid="agent-log-session-entries"
+        >
+          {items.map((entry) => (
+            <li key={entry.id} className="flex items-start gap-2.5">
+              {/* 头像 + 气泡：对话流同构（🧾 标识日志条目身份）。 */}
+              <span
+                aria-hidden
+                className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full border bg-muted text-muted-foreground"
+              >
+                <FileText className="h-3.5 w-3.5" />
+              </span>
+              <div className="min-w-0 max-w-[86%] rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm shadow-sm">
+                <AgentLogEntry
+                  entry={entry}
+                  copiedKey={copiedKey}
+                  onCopy={copy}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

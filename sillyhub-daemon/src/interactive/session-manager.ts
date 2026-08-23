@@ -2687,7 +2687,14 @@ export class SessionManager {
         buildEnv: () => ({}),
       };
       const restoreEnv = buildSpawnEnv(
-        { provider_config: state.providerConfig ?? undefined },
+        {
+          provider_config: state.providerConfig ?? undefined,
+          // task-02（2026-08-23-agent-activity-sessions / D-008）：restore 从零重建
+          // env（不回放 state.env，Grill P1-4）→ 平台会话身份须重注入。
+          // state.sessionId 是平台 agent_sessions.id（注意区别于 agent 侧 resume
+          // key state.agentSessionId——后者是 SDK jsonl 恢复键，非平台身份）。
+          agentSessionId: state.sessionId,
+        },
         { credential: restoreCredential },
       );
       // ql-20260822-001：home 会话带供应商 → 先迁移 jsonl 到隔离目录，让下方
@@ -3086,7 +3093,13 @@ export class SessionManager {
         buildEnv: () => ({}),
       };
       const newEnv = buildSpawnEnv(
-        { provider_config: providerConfig ?? undefined },
+        {
+          provider_config: providerConfig ?? undefined,
+          // task-02（2026-08-23-agent-activity-sessions / D-008）：reload 与 restore
+          // 同理从零重建 env → SILLYHUB_SESSION_ID 用 state.sessionId（平台会话 id，
+          // 非 agent 侧 resume key）重注入，切供应商/人格后 CLI 上报身份不丢。
+          agentSessionId: state.sessionId,
+        },
         { credential },
       );
       // ql-20260822-009：reload 的 CLAUDE_CONFIG_DIR 同样按 transcript 实际位置判定

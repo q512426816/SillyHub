@@ -490,6 +490,16 @@ class AgentSession(BaseModel, table=True):
     The ``agent_session_id`` column stores the SDK-returned session id used for
     resume; it is intentionally distinct from AgentRun.session_id (claude
     resume id, untouched per D-001@v1).
+
+    2026-08-23-agent-activity-sessions task-03（design §3.3.1 / FR-03）：加
+    ``origin`` / ``aggregation_key`` / ``title`` 三列支撑工具上报日志会话化。
+    ``origin`` 区分平台对话会话（chat，存量行为）与 CLI 工具上报自动聚合的
+    「本地 Agent 会话」（tool_report）；``aggregation_key`` 是 tool_report 会话
+    的聚合键文本（D-001），只建普通索引**不做唯一约束**（D-006 容错：
+    workspace_id nullable，并发撞键靠 find-then-insert，极小概率重复行按
+    last_active_at 取最新、后续上报自然收敛，败者僵尸行不清理）；``title``
+    NULL 兼容（Grill P1-1）：chat 会话保持 NULL 走 router 首条 user_input 派生
+    标题的既有路径，tool_report 会话由服务端写入自动标题（task-04）。
     """
 
     __tablename__ = "agent_sessions"
@@ -502,6 +512,10 @@ class AgentSession(BaseModel, table=True):
         Index("ix_agent_sessions_deleted_at", "deleted_at"),
         # 性能优化 Wave 1(2026-07-22):change/workspace 维度 session listing 兜底查询。
         Index("ix_agent_sessions_workspace", "workspace_id"),
+        # 2026-08-23-agent-activity-sessions task-03（design §3.3.1 / D-006）：
+        # tool_report 会话 find-or-create 查找键。普通索引非唯一——workspace_id
+        # nullable 无法建复合唯一，并发撞键容错见 aggregation_key 列注释。
+        Index("ix_agent_sessions_ws_agg", "workspace_id", "aggregation_key"),
     )
 
     id: uuid.UUID = Field(
@@ -586,6 +600,31 @@ class AgentSession(BaseModel, table=True):
         default="pending",
         sa_column=Column(String(20), nullable=False, default="pending"),
     )  # pending, active, reconnecting, ended, failed
+    # ── 会话化三列（2026-08-23-agent-activity-sessions task-03 / FR-03 / design §3.3.1）──
+    # 会话来源：'chat'（平台对话会话，存量行为；server_default 'chat' 使迁移对存量
+    # 行免回填即得 chat 语义）| 'tool_report'（CLI 工具上报聚合出的本地 Agent 会话，
+    # task-04 find-or-create 写入）。
+    origin: str = Field(
+        default="chat",
+        sa_column=Column(
+            String(16),
+            nullable=False,
+            server_default=text("'chat'"),
+        ),
+    )
+    # tool_report 会话聚合键 "{harness}|{ctx_key}"（ctx_key = change_key 或
+    # quick_id 或空，D-001）。NULL = chat 会话（不参与聚合查找）。
+    aggregation_key: str | None = Field(
+        default=None,
+        sa_column=Column(String(255), nullable=True),
+    )
+    # 会话标题（Grill P1-1：AgentSession 原无 title 列）。NULL = 无标题：chat 会话
+    # 由 router 首条 user_input 派生（既有路径不变）；tool_report 会话由服务端写
+    # 自动标题（task-04），列表 router 改 title 优先在 task-05。
+    title: str | None = Field(
+        default=None,
+        sa_column=Column(String(255), nullable=True),
+    )
     agent_session_id: str | None = Field(
         default=None,
         sa_column=Column(String(255), nullable=True),

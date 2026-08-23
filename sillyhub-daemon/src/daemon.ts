@@ -3610,6 +3610,11 @@ export class Daemon {
         toolConfig: execPayload.toolConfig ?? {},
         // task-09（D-004@v1）：lease 下发的 provider_config 透传给第 0 层。
         provider_config: execPayload.provider_config,
+        // task-02（2026-08-23-agent-activity-sessions / D-008）：平台会话身份注入。
+        // sessionId 即 execPayload.agentSessionId（:3415 取出，:3516 已验非空）——
+        // 会话内跑的 sillyspec CLI 读该 env 作上报 hub_session_id，关联
+        // platform_agent_logs 到本会话（design §3.2）。仅内存传递不落盘。
+        agentSessionId: sessionId,
       },
       { credential: this._credentialManager ?? noopCredential },
     );

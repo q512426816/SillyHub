@@ -188,7 +188,12 @@ class TestActiveMissionPartialUniqueIndex:
 
 
 def test_agent_sessions_model_fields_unchanged() -> None:
-    """agent_sessions 不加字段（design §8 不改变的表；口径同 test_agent_session_model）。"""
+    """agent_sessions 字段清单守卫（本变更 mission_session_id 未动该表；口径同
+    test_agent_session_model）。
+
+    2026-08-23-agent-activity-sessions task-03 后加会话化三列
+    origin/aggregation_key/title（design §3.3.1），清单同步为 22 字段。
+    """
     expected = {
         "id",
         "user_id",
@@ -209,6 +214,9 @@ def test_agent_sessions_model_fields_unchanged() -> None:
         "agent_profile_id",
         "llm_provider_id",
         "config_snapshot",
+        "origin",
+        "aggregation_key",
+        "title",
     }
     assert set(AgentSession.model_fields.keys()) == expected
 
