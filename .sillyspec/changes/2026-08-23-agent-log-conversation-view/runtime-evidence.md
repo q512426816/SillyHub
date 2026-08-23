@@ -55,3 +55,10 @@ created_at: 2026-08-23 22:36:12
 | 3 | rollout 目录轮换快：subagent 会话文件随会话结束被清理 | 实证须用「当时最新」文件并登记文件名+规模快照（本轮已按此执行） |
 | 4 | 真实文件未达 200 段窗口阈值 | 截断路径由单测覆盖；部署 E2E 时主会话自然增长后可覆盖 |
 | 5 | 本轮零源码改动，未发现新缺陷 | 无需回填任务卡 |
+
+## 5. 部署后实测（2026-08-23 23:0x，本机 dev 栈）
+
+- 重新部署内容：daemon `pnpm build` + 同参数重启（旧 PID 24536 SIGTERM 未退→确认非本会话宿主后强杀→新 PID 76482 runtime 5edcc9f3，会话恢复 total=4 recovered=4 failed=0）；backend uvicorn --reload 自动热载（8000）；frontend next dev 热更新（浏览器刷新即得）。
+- **API 级全链路 E2E（原部署态补验项①的链路部分已闭环）**：`GET /api/agent-logs/27cc6bc2…/messages`（Bearer shpsync_）→ **HTTP 200 status=parsed，48 段**（user_input 1 / thinking 10 / tool_use 17 / tool_result 16 / reply 4），truncated=false、skipped_lines=0；首条 reply 中文正文正常（「现在读取被测对象源码与现有测试风格。」）；输出全文 grep "You are ZCode"/"system-reminder"/"cache_control" 零命中。
+- 失败路径实测：文件已轮换的条目 → HTTP 404 HTTP_404_AGENT_LOG_FILE_NOT_FOUND 中文文案（且此 404 本身证明新 daemon 新 RPC 生效——老 daemon 会回 422 method-not-found）。
+- 仍待补验：浏览器真实点击交互（对话渲染/黄条回落/加载更早/tab）——前端 dev 已热载新代码，打开本地 Agent 会话详情「查看内容」即可人工验收。
