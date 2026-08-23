@@ -88,8 +88,10 @@ class PlatformSyncTokenService:
         不写日志不落 lease.metadata（对齐 D-001 与 §9）。
 
         幂等性：单次调用非幂等（每次签新）；但同维度至多一条活 token，旧 token
-        被吊销后 authenticate 返 None。重复 init 重复签新可接受（前端按钮已禁
-        用 + lease claim 窗口防并发）。
+        被吊销后 authenticate 返 None。重复 init 重复签新可接受：前端初始化按钮
+        仅忙时禁用、已初始化后仍可重复触发（workspace-config-card busyReason），
+        但旧 token 内联吊销 + init 第 5 步重写 local.yaml，用户侧恒单活 token；
+        lease claim 单飞窗口防并发签发。
         """
         # 1) select 旧未吊销（workspace_id + created_by + revoked_at IS NULL）
         stmt = (

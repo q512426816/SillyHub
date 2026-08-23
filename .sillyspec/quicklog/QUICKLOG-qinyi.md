@@ -278,3 +278,12 @@
 方案：turn-timeline 双路径补渲染——v2 过滤条件加 file 段经 SegmentView 分流；legacy 对话视图答复气泡后渲染 file 过程项 FileMessageCard；修正 session-log-assembler 投影注释
 结果：新增 3 用例锁双路径契约；前端 1968 用例全绿、tsc 零错、lint 零新增；Docker 重建后真实登录验证对话/进度双视图卡片可见并截图
 审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/session-log-assembler.ts, frontend/src/components/daemon/__tests__/turn-timeline-conversation-file-card.test.tsx
+
+## ql-20260823-011-d9bf | 2026-08-23 20:21:49 | 修 token_service get_or_issue 注释与实现不一致
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/platform_sync/token_service.py
+需求：修 token_service get_or_issue 注释与实现不一致
+根因：docstring 幂等性段写『前端按钮已禁用』，但现行前端 workspace-config-card 初始化按钮 disabled 仅取 busyReason()（忙时禁用），已初始化后仍可重复点击触发重复 init，注释滞后于实现（CLAUDE.md 规则 18）
+方案：注释改为与真实行为一致——重复 init 可重复触发，但旧 token 内联吊销 + init 第 5 步重写 local.yaml 保证用户侧恒单活 token，lease claim 单飞窗口防并发签发；纯注释零行为变更
+结果：ruff check + py_compile 通过；无代码路径变更零测试影响
