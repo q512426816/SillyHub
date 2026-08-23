@@ -1176,6 +1176,42 @@ class TestReopenConfirmLinkage:
         assert row.status == "failed"
         assert row.ended_at is not None
 
+    async def test_mark_recovery_failed_converges_pending_lease(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        monkeypatch,
+    ) -> None:
+        """ql-20260823-007：恢复失败翻 failed 时挂起租约收敛 cancelled（防永挂）。
+
+        reopen 创建的租约在 resume 失败后即死——此前无人收口，含被任务轮询误
+        认领的 claimed 态都永挂（2026-08-23 bdec91a4 事故的租约残留）。
+        """
+        sess, current_lease_id, _old = await self._reopen_and_capture_lease_id(
+            client, auth_headers, db_session, monkeypatch, agent_session_id="sdk-leaseconv"
+        )
+
+        db_session.expunge_all()
+        resp = await client.post(
+            f"/api/daemon/sessions/{sess.id}/mark-recovery-failed",
+            headers=auth_headers,
+            json={
+                "runtime_id": str(sess.runtime_id),
+                "lease_id": str(current_lease_id),
+                "reason": "restore_failed",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "failed"
+
+        lease_status = (
+            await db_session.execute(
+                select(DaemonTaskLease.status).where(DaemonTaskLease.id == current_lease_id)
+            )
+        ).scalar_one()
+        assert lease_status == "cancelled"
+
     async def test_mark_recovery_failed_with_stale_lease_skips(
         self,
         client: AsyncClient,

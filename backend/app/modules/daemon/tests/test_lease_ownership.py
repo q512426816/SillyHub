@@ -321,6 +321,46 @@ class TestPendingLeasesOwnership:
         assert any(item["lease_id"] == str(lease.id) for item in body)
 
     @pytest.mark.asyncio
+    async def test_pending_leases_excludes_reopen_lease(
+        self, db_session: AsyncSession, client: AsyncClient
+    ) -> None:
+        """ql-20260823-007：reopen 租约（metadata 带 reopened_from_status）不进轮询列表。
+
+        reopen 租约只经 daemon:session_resume WS 消费；混进 pending-leases 会被
+        daemon 轮询兜底认领，随后因无 prompt/run_id 走 interactive_missing_fields
+        裸退，租约永挂 claimed（2026-08-23 bdec91a4 事故排查发现）。
+        """
+        owner, owner_token = await _create_user_with_token(db_session, name="owner10")
+        _inst, rt = await _seed_runtime(db_session, owner.id)
+        normal = await _seed_batch_lease(db_session, rt.id)
+        now = datetime.now(UTC)
+        reopen_lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            kind="interactive",
+            status="pending",
+            lease_expires_at=None,
+            metadata_={
+                "reopened_from_status": "failed",
+                "session_id": str(uuid.uuid4()),
+                "provider": "claude",
+            },
+            created_at=now,
+            updated_at=now,
+        )
+        db_session.add(reopen_lease)
+        await db_session.commit()
+
+        resp = await client.get(
+            f"/api/daemon/runtimes/{rt.id}/pending-leases",
+            headers=_headers(owner_token),
+        )
+        assert resp.status_code == 200, resp.text
+        ids = [item["lease_id"] for item in resp.json()]
+        assert str(normal.id) in ids
+        assert str(reopen_lease.id) not in ids
+
+    @pytest.mark.asyncio
     async def test_pending_leases_unknown_runtime_returns_404(
         self, db_session: AsyncSession, client: AsyncClient
     ) -> None:

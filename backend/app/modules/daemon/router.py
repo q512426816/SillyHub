@@ -3195,6 +3195,13 @@ async def get_pending_leases(
     out = []
     for lease in result:
         meta = lease.metadata_ or {}
+        # ql-20260823-007：reopen 租约只经 daemon:session_resume WS 消费（设计
+        # §6.4），不是任务轮询的消费对象——混进 pending-leases 会被 daemon 的
+        # HTTP 轮询兜底认领，随后因无 prompt/run_id 走 interactive_missing_fields
+        # 裸退，租约永挂 claimed（2026-08-23 bdec91a4 事故排查发现）。
+        # metadata.reopened_from_status 是 reopen 转换写入的精确标记。
+        if meta.get("reopened_from_status") is not None:
+            continue
         out.append(
             {
                 "lease_id": str(lease.id),

@@ -232,3 +232,16 @@
 根因：daemon restoreAndReconnect 对 _store 残留条目直接抛错（end() 不删条目 + backend 翻终态不通知 daemon 都会残留）；后端 close_interactive_run 翻会话 ended/failed 只写 DB 不发 SESSION_END，daemon 内存副本无人清理成僵尸工厂
 方案：daemon 侧遇残留先静默驱逐再恢复（_terminateSession 加 notifyBackend:false 防与 reconnecting→active 竞态）；后端翻终态后 commit 补发 SESSION_END（新 helper _send_session_end_best_effort，多轮 active 不发防误杀）
 结果：daemon 全量 2534 过（+2 驱逐用例）、backend daemon 模块 878 过（+2 SESSION_END 用例）、ruff/mypy/tsc 全绿；已重建并重启本机 daemon + Docker 后端容器；bdec91a4 两次 reopen 达 active（含人工翻 failed 复现僵尸现场后成功恢复），用户进行中会话不受影响
+
+## ql-20260823-007-2c9e | 2026-08-23 13:50:01 | 修 reopen 租约被任务轮询误认领并永挂 claimed
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/router.py（pending-leases 排除 reopen 租约）
+- backend/app/modules/daemon/session/service.py（mark-recovery-failed 收敛挂起租约）
+- backend/app/modules/daemon/tests/test_lease_ownership.py（+1 排除用例）
+- backend/app/modules/daemon/tests/test_session_reopen.py（+1 收敛用例）
+需求：修 reopen 租约被任务轮询误认领并永挂 claimed
+根因：get_pending_leases 返回所有 status=pending 租约（含只应经 SESSION_RESUME WS 消费的 reopen 租约），daemon HTTP 轮询兜底认领后因无 prompt/run_id 走 interactive_missing_fields 裸退，无人释放；且 mark-recovery-failed 翻 failed 时不收口租约
+方案：pending-leases 端点按 metadata.reopened_from_status 精确排除 reopen 租约；mark_session_recovery_failed 翻 failed 同事务把挂起租约（pending/claimed）收敛 cancelled；顺带清理存量 13 条孤儿/死挂 claimed 租约
+结果：daemon 模块 880 过（+2 用例：排除/收敛）、ruff+mypy 绿；Docker 后端已重建部署（容器内 grep 确认新代码）；存量孤儿清零、daemon 在线、bdec91a4 保持 active

@@ -2424,6 +2424,18 @@ class SessionService:
             session.ended_at = now
             session.last_active_at = now
             self._session.add(session)
+
+            # ql-20260823-007：恢复失败 = 本次 reopen 的租约已死。挂起态
+            # （pending/claimed——含被任务轮询误认领的）收敛 cancelled 防永挂；
+            # 终态（completed/cancelled/expired）不动（幂等）。cancelled 语义对齐
+            # sweep.py / reopen DS-5 分支（interactive lease 恒 NULL
+            # lease_expires_at，expired 不适用）。
+            if session.lease_id is not None:
+                failed_lease = await self._session.get(DaemonTaskLease, session.lease_id)
+                if failed_lease is not None and failed_lease.status in ("pending", "claimed"):
+                    failed_lease.status = "cancelled"
+                    failed_lease.updated_at = now
+                    self._session.add(failed_lease)
             await self._session.commit()
             await self._session.refresh(session)
 
