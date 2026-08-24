@@ -487,3 +487,8 @@
 根因：94d755e1 链用中间布尔 in_scope 承载 entry 非 None 判定，mypy 无法经 not in_scope:raise 收窄，返回处 entry 仍 Optional 与签名冲突；此前被 ruff 挂红挡在 mypy 步骤前未暴露，修好 ruff 后浮出
 方案：router.py scope 校验改 entry is None or 直接条件取反判越权，mypy 可收窄；语义零变化（不可见/不存在同语义 404 保留）
 结果：mypy 687 文件 0 错；ruff check+format 过；agent_log 两测试文件 36/36 绿
+
+## ql-20260824-013-b820 | 2026-08-24 08:48:23 | 前端暗色主题与三主题切换
+状态：进行中
+关联变更：2026-08-23-frontend-dark-theme
+文件：frontend/src/styles/themes.ts, frontend/src/app/globals.css, frontend/src/styles/themes.test.ts
