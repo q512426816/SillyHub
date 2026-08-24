@@ -39,13 +39,14 @@ from app.modules.daemon.model import (
     DaemonTaskLease,
 )
 from app.modules.daemon.protocol import (
+    DAEMON_MSG_PLAN_RESPONSE,
     DAEMON_MSG_SESSION_END,
     DAEMON_MSG_SESSION_INJECT,
     DAEMON_MSG_SESSION_INTERRUPT,
     DAEMON_MSG_SESSION_RESUME,
 )
 from app.modules.daemon.runtime.service import DaemonRuntimeOffline
-from app.modules.daemon.schema import SessionReopenResponse
+from app.modules.daemon.schema import PlanResponseDecision, SessionReopenResponse
 
 log = get_logger(__name__)
 
@@ -2241,6 +2242,106 @@ class SessionService:
             agent_session=session,
             current_run_id=run.id if run else None,
         )
+
+    async def handle_plan_response(
+        self,
+        session_id: uuid.UUID,
+        run_id: uuid.UUID,
+        decision: PlanResponseDecision,
+        feedback: str | None,
+        user_id: uuid.UUID,
+    ) -> dict[str, bool]:
+        """Handle user's response to a plan-mode confirmation request (task-02 / FR-02).
+
+        Validates that the session is owned by ``user_id`` and that ``run_id`` is a
+        turn bound to this session, persists the decision in ``session.config`` (no
+        new tables per design §数据模型), then best-effort pushes a
+        ``daemon:plan_response`` control message to the owning daemon so the Agent
+        can continue / revise / cancel.
+
+        Returns ``{"ok": True, "delivered": <ws-delivered>}``. Redis/WS failures are
+        logged but do not roll back the persisted decision.
+        """
+        session = await self._get_owned_session_for_update(session_id, user_id)
+
+        # Validate the run exists and belongs to this session.
+        run = (
+            await self._session.execute(
+                select(AgentRun).where(
+                    AgentRun.id == run_id,
+                    AgentRun.agent_session_id == session_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if run is None:
+            raise DaemonSessionNotFound(
+                f"AgentRun '{run_id}' not found for session '{session_id}'.",
+                details={"session_id": str(session_id), "run_id": str(run_id)},
+            )
+
+        # Defensive service-level validation: DTO already enforces, but callers
+        # bypassing the REST layer (e.g., internal scripts) must not leave invalid
+        # state. Match the DTO error message so tests see consistent text.
+        if decision not in (
+            PlanResponseDecision.confirm,
+            PlanResponseDecision.revise,
+            PlanResponseDecision.cancel,
+        ):
+            raise DaemonSessionConfigInvalid(
+                "decision must be one of confirm, revise, cancel.",
+                details={"decision": str(decision)},
+            )
+        if decision in (PlanResponseDecision.revise, PlanResponseDecision.cancel) and (
+            not feedback or not feedback.strip()
+        ):
+            raise DaemonSessionConfigInvalid(
+                "decision 为 revise/cancel 时 feedback 必填且不可为空白",
+                details={"decision": decision.value},
+            )
+
+        # Persist the decision into session.config (no new table).
+        responded_at = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+        config = dict(session.config or {})
+        config["plan_response"] = {
+            "run_id": str(run_id),
+            "decision": decision.value,
+            "feedback": feedback,
+            "responded_at": responded_at,
+        }
+        session.config = config
+        flag_modified(session, "config")
+        self._session.add(session)
+        await self._session.commit()
+        await self._session.refresh(session)
+
+        # Best-effort WebSocket push to the owning daemon.
+        delivered = False
+        if session.runtime_id is not None:
+            from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+            hub = get_daemon_ws_hub()
+            daemon_id = await _resolve_daemon_id_for_runtime(self._session, session.runtime_id)
+            if daemon_id is not None:
+                delivered = await hub.send_session_control(
+                    daemon_id,
+                    DAEMON_MSG_PLAN_RESPONSE,
+                    {
+                        "session_id": str(session_id),
+                        "run_id": str(run_id),
+                        "decision": decision.value,
+                        "feedback": feedback,
+                        "runtime_id": str(session.runtime_id),
+                    },
+                )
+        if not delivered:
+            log.warning(
+                "plan_response_ws_send_failed",
+                session_id=str(session_id),
+                run_id=str(run_id),
+                runtime_id=str(session.runtime_id) if session.runtime_id else None,
+            )
+
+        return {"ok": True, "delivered": delivered}
 
     # ── Daemon-restart recovery (task-10, FR-08 / D-003@v1) ──────────────────
 
