@@ -220,3 +220,13 @@
 根因：（无缺陷，例行版本升级；2.1.158 为旧 pin）
 方案：改 compose build arg 默认值；node-tools 层 cache-miss 重装（npmmirror 源，~2 分钟）；重建 backend 容器
 结果：容器内 claude --version = 2.1.241 (Claude Code)；/api/health ok；daemon WS 已重连（心跳 200）。deploy/.env 无覆盖项，改默认即生效
+
+## ql-20260824-005-bom | 2026-08-24 11:37:00 | install.ps1 双 BOM 修复——两个 BOM 修复提交叠加出的新 bug
+状态：已完成
+关联变更：远端 3c0c7914 + 5b377fcf
+文件：
+- sillyhub-daemon/scripts/install.ps1（去源文件 BOM）
+需求：irm install.ps1 | iex 可能因双 U+FEFF 报错，另一台机器装不了 daemon
+根因：3c0c7914 给源文件加了 BOM，5b377fcf 又让 Dockerfile 构建时 printf 无条件再打一个 → 容器内 EF BB BF ×2（实测 od 证实）；另发现 dist_router read_text universal newlines 把 CRLF 归一成 LF 再吐（对 iex 字符串解析无影响，不修）
+方案：源文件去 BOM 保持仓库干净，BOM 单一来源 = Dockerfile 构建时打（与 CRLF 转换同层，唯一分发出口）
+结果：容器内 + LAN 端点 od 实测单 BOM；/api/health ok；daemon 心跳 200。顺手把 CC pin 2.1.158→2.1.241 一并验证（容器内 claude --version = 2.1.241）

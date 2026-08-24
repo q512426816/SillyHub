@@ -1,4 +1,4 @@
-﻿# install.ps1 -- SillyHub daemon installer (Windows PowerShell).
+# install.ps1 -- SillyHub daemon installer (Windows PowerShell).
 #
 # author: qinyi
 # created_at: 2026-07-14
