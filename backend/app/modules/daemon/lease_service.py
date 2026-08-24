@@ -17,6 +17,7 @@ from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.modules.agent.model import AgentRun, AgentSession
 from app.modules.daemon.model import DaemonTaskLease
+from app.modules.daemon.session_events import publish_sessions_changed
 
 if TYPE_CHECKING:
     pass
@@ -411,6 +412,10 @@ class DaemonLeaseService:
         # D-003 kill=正常终止→ended（非 failed）；D-005 幂等仅 pending/active/reconnecting 收口。
         agent_run = await self._session.get(AgentRun, agent_run_id)
         converged_session_id: uuid.UUID | None = None
+        # task-03（2026-08-24-sessions-live-updates）：会话实际翻 ended 时同步广播
+        # 列表信号 status_changed；user_id 在 commit 前取标量（幂等未变更时两者
+        # 均保持 None，不发）。
+        converged_user_id: uuid.UUID | None = None
         if agent_run is not None and agent_run.agent_session_id is not None:
             session = await self._session.get(AgentSession, agent_run.agent_session_id)
             if session is not None and session.status in (
@@ -422,6 +427,7 @@ class DaemonLeaseService:
                 session.ended_at = now
                 self._session.add(session)
                 converged_session_id = session.id
+                converged_user_id = session.user_id
 
         if lease is None:
             log.warning(
@@ -435,6 +441,10 @@ class DaemonLeaseService:
             # 不广播则已连上的 /sessions/{id}/stream 永远 keepalive）。best-effort。
             if converged_session_id is not None:
                 await _publish_session_ended(converged_session_id, reason="killed")
+                # task-03（design §3）：会话列表信号随收口一并发（lease None 分支）。
+                await publish_sessions_changed(
+                    "status_changed", converged_session_id, converged_user_id
+                )
             return
 
         prior_status = lease.status
@@ -455,6 +465,11 @@ class DaemonLeaseService:
         # 同上：kill 收敛的会话广播 session_ended（P2b，best-effort）
         if converged_session_id is not None:
             await _publish_session_ended(converged_session_id, reason="killed")
+            # task-03（design §3）：会话列表信号随收口一并发（主路径）。幂等未
+            # 变更（converged_session_id 为 None）零发布。
+            await publish_sessions_changed(
+                "status_changed", converged_session_id, converged_user_id
+            )
 
         log.info(
             "lease_cancelled",

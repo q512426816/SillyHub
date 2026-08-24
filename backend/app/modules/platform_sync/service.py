@@ -38,6 +38,7 @@ from sqlmodel import col
 
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentSession
+from app.modules.daemon.session_events import publish_sessions_changed
 from app.modules.platform_sync.model import (
     AgentSessionLogORM,
     PlatformChangeProgressORM,
@@ -706,6 +707,11 @@ class PlatformSyncService:
             persisted.append((entry, row))
 
         # ── 归属（design §3.3.3：与 entries upsert 同事务，commit 前写归属列）──
+        # task-03（2026-08-24-sessions-live-updates）：本批新 INSERT 的 tool_report
+        # 会话（session_id + user_id），commit 后逐个广播 created；命中已有会话
+        # 只刷 last_active_at 不进此清单（列表视图无变化，零发布）。hub 分支只挂
+        # 已有会话、无 INSERT，恒为空清单。
+        created_group_sessions: list[tuple[uuid.UUID, uuid.UUID]] = []
         if hub_session_id is not None:
             hub_session = (
                 await self._session.execute(
@@ -767,9 +773,14 @@ class PlatformSyncService:
                             last_active_at=now,
                         )
                     )
+                    created_group_sessions.append((group_session_id, user_id))
                 for log_row in group_rows:
                     log_row.agent_session_id = group_session_id
         await self._session.commit()
+        # task-03（design §3）：仅新 INSERT 的 tool_report 会话广播 created（列表
+        # 出现新行）；publish 内部静默容错，Redis 抖动不影响 CLI 上报主流程。
+        for created_sid, created_uid in created_group_sessions:
+            await publish_sessions_changed("created", created_sid, created_uid)
         return len(deduped)
 
     async def list_agent_logs(
