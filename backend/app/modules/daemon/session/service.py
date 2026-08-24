@@ -2707,6 +2707,8 @@ class SessionService:
         # 门户复用全局列表做 scope 过滤（照 runtime_id 模式，可选零回归）。
         workspace_id: uuid.UUID | None = None,
         change_id: uuid.UUID | None = None,
+        # 2026-08-24：会话归档过滤（archived=True 只看已归档，False 只看未归档）。
+        archived: bool = False,
     ) -> tuple[list[AgentSession], int]:
         """Owner-scoped list of AgentSession with stable paging.
 
@@ -2740,6 +2742,11 @@ class SessionService:
             AgentSession.user_id == user_id,
             AgentSession.deleted_at.is_(None),  # FR-07 软删过滤
         ]
+        # 2026-08-24：archived 过滤（默认 False=未归档可见，True=已归档可见）。
+        if archived:
+            base_filters.append(AgentSession.archived_at.isnot(None))
+        else:
+            base_filters.append(AgentSession.archived_at.is_(None))
         if status_filter is not None:
             base_filters.append(AgentSession.status == status_filter)
         if runtime_id is not None:
@@ -3204,6 +3211,70 @@ class SessionService:
                 self._session.add(lease)
 
         await self._session.flush()
+
+    # ── 2026-08-24：会话归档/取消归档 ──────────────────────────────────
+
+    async def archive_session(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        """Archive an owned session (hide from default list view).
+
+        2026-08-24 会话归档功能：设置 ``archived_at`` 时间戳。所有状态均可归档
+        （活跃会话归档后从默认列表隐藏，筛选「已归档会话」可查看）。
+        幂等：已归档会话重复调用无操作。archived_at 与 deleted_at 正交——
+        可归档后删除，也可直接删除。
+        """
+        agent_session = (
+            await self._session.execute(
+                select(AgentSession)
+                .where(
+                    AgentSession.id == session_id,
+                    AgentSession.user_id == user_id,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if agent_session is None:
+            raise DaemonSessionNotFound(
+                f"AgentSession '{session_id}' not found.",
+                details={"session_id": str(session_id)},
+            )
+        if agent_session.archived_at is not None:
+            return  # 幂等：已归档
+        agent_session.archived_at = datetime.now(UTC)
+        await self._session.commit()
+
+    async def unarchive_session(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        """Unarchive an owned session (restore to default list view).
+
+        2026-08-24 会话归档功能：清除 ``archived_at`` 时间戳。
+        幂等：未归档会话重复调用无操作。
+        """
+        agent_session = (
+            await self._session.execute(
+                select(AgentSession)
+                .where(
+                    AgentSession.id == session_id,
+                    AgentSession.user_id == user_id,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if agent_session is None:
+            raise DaemonSessionNotFound(
+                f"AgentSession '{session_id}' not found.",
+                details={"session_id": str(session_id)},
+            )
+        if agent_session.archived_at is None:
+            return  # 幂等：未归档
+        agent_session.archived_at = None
+        await self._session.commit()
 
     async def get_agent_session_logs(
         self,

@@ -52,6 +52,8 @@ verify 是只读阶段（**禁止改代码/改 git 状态**，只检查 + 写报
 ## verify-result.md 格式
 
 > 🔧 **机械探针 + 报告骨架一条命令**：`sillyspec verify-probes --change <变更名> --init`——探针 1（TODO 标记）/3（测试覆盖）/5（API 契约对账）/6（删除对账）CLI 跑完并预填进 verify-result.md 骨架（七章节、已存在不覆盖）；探针 2/4（关键词/决策追踪）与断言抽查、集成盲区标注是语义判断，替换骨架里的 `<!--TODO-->` 完成。结论必须写明 PASS/FAIL——留「待填」会被 gate 判不过。
+>
+> 🔧 **test/lint 实测对账**：`--done` 时 CLI 亲自执行 local.yaml 的 `commands.test`（实测失败阻断 verify 完成）与 `commands.lint`（advisory 对账，实测失败会明示）——自报告与实测不符时以实测为准，勿谎报跑过。
 
 ```markdown
 # 验证报告

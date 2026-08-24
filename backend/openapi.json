@@ -6299,7 +6299,7 @@
           "agent"
         ],
         "summary": "List Workspace Agent Sessions",
-        "description": "工作区会话列表（2026-08-14-change-center-conversation-driven task-06 / D-002@v1）。\n\ninclude_ended=false（缺省）：现状——仅 active 会话最小字段 dict\n（id/status/mode/provider），供 approvals 审批中心聚合 scan 歧义决策。\ninclude_ended=true：工作区全量会话（含已结束），完整 AgentSessionListItem\n（id/provider/status/turn_count/author/last_active_at/title，对齐\ndaemon/schema.py:71-84），排序 coalesce(last_active_at, created_at) desc。\n权限/过滤保持现状（workspace 成员跨成员可见），不因 include_ended 改变。",
+        "description": "工作区会话列表（2026-08-14-change-center-conversation-driven task-06 / D-002@v1）。\n\ninclude_ended=false（缺省）：现状——仅 active 会话最小字段 dict\n（id/status/mode/provider），供 approvals 审批中心聚合 scan 歧义决策。\ninclude_ended=true：工作区会话（含已结束），完整 AgentSessionListItem\n（id/provider/status/turn_count/author/last_active_at/title，对齐\ndaemon/schema.py:71-84），排序 coalesce(last_active_at, created_at) desc；\nP5（2026-08-24 会话审查）：该分支原先无界全量返回，现按 limit/offset 分页\n（默认 200；mode 过滤在 Python 侧截断后执行，传 mode 时页内可能少于 limit）。\n权限/过滤保持现状（workspace 成员跨成员可见），不因 include_ended 改变。",
         "operationId": "list_workspace_agent_sessions_api_workspaces__workspace_id__agent_sessions_get",
         "parameters": [
           {
@@ -6337,6 +6337,33 @@
               "default": false,
               "title": "Include Ended"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "include_ended 分页页大小",
+              "default": 200,
+              "title": "Limit"
+            },
+            "description": "include_ended 分页页大小"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "include_ended 分页偏移",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "include_ended 分页偏移"
           }
         ],
         "responses": {
@@ -11460,6 +11487,16 @@
               ],
               "title": "Change Id"
             }
+          },
+          {
+            "name": "archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Archived"
+            }
           }
         ],
         "responses": {
@@ -11804,6 +11841,80 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/archive": {
+      "patch": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Archive Session",
+        "description": "Archive an owned session (hide from default list view).",
+        "operationId": "archive_session_api_daemon_sessions__session_id__archive_patch",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/unarchive": {
+      "patch": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Unarchive Session",
+        "description": "Unarchive an owned session (restore to default list view).",
+        "operationId": "unarchive_session_api_daemon_sessions__session_id__unarchive_patch",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -29215,6 +29326,18 @@
               }
             ],
             "title": "Deleted At"
+          },
+          "archived_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
           },
           "current_run_id": {
             "anyOf": [

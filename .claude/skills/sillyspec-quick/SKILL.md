@@ -60,7 +60,7 @@ sillyspec run quick --done --change quick-<hash> --output "…"  # 完成该会�
 | 参数 | 说明 |
 |---|---|
 | `--linked-changes none\|a,b` | **显式关联变更（取代 `--change`，推荐）**。none=不关联，a,b=关联列表 |
-| `--files a.js,b.js` | 显式声明本次允许修改的文件（边界保护 + 声明即归属：多 agent 并发仓防他者窗口文件混入 QUICKLOG 文件行，未声明窗口文件进「审计：」行追溯）。**中途可追加**：发现要改声明外文件（如新写的测试）时，带新增文件恢复会话即并入边界（追加不替换）——`sillyspec run quick --files <新增> --change <sessionId>`；不带 `--files` 恢复则边界原样保留 |
+| `--files a.js,b.js` | 显式声明本次允许修改的文件（边界保护 + 声明即归属：多 agent 并发仓防他者窗口文件混入 QUICKLOG 文件行，未声明窗口文件进「审计：」行追溯；**他向亦然**——其他 active 会话已声明的文件在你的 `--done` 审计中自动剔除归该会话，不再误拦、无需 `--force-baseline`）。**中途可追加**：发现要改声明外文件（如新写的测试）时，带新增文件恢复会话即并入边界（追加不替换）——`sillyspec run quick --files <新增> --change <sessionId>`；不带 `--files` 恢复则边界原样保留 |
 | `--file-notes "p::注 \|\| p::注"` | quick `--done` 用：QUICKLOG「文件：」行落盘为多行带括注 bullet（省事后手改文件行）。格式 `path::括注`，`\|\|` 分隔多条；**只随 step3 --done 同命令传**（CLI 短进程，step1/step2 传无效，不带到 step3） |
 | `--allow-new` | 允许新增文件（默认禁止，防意外创建） |
 | `--allow-delete` | 允许删除文件（默认 fail-closed，删除是破坏性操作；确认删除带此 flag 显式解锁） |
@@ -72,6 +72,7 @@ sillyspec run quick --done --change quick-<hash> --output "…"  # 完成该会�
 `--done` 收尾时对比 step1 baseline 与当前 `git status`，拦「危险文件 / 新增文件 / 覆盖 baseline」。要点：
 
 - **并发其他会话的 `.sillyspec/changes/<非关联变更>/` 不再被本 quick 拦截**。quick 自己没有 `changes/` 目录，该路径下非关联内容视为并发会话的工作，整体放行（确定性审计无法区分「并发工作」与「本 quick 偷建变更」，后者这类意图软判定留给 sillyhub）。
+- **其他 active 会话已声明的文件自动豁免（`--files` 的他向语义）**。多 agent 并发时，并行 quick 会话 `--files` 显式声明的文件（如它的 `daemon/router.py`）出现在你的窗口内（它在你启动后改的、不在你的 baseline）——`--done` 审计自动剔除归该会话边界管，不再判危险 BLOCK、无需 `--force-baseline`。放行可见：输出 🔗 软警告逐文件列归属会话；若确系你的改动，恢复会话时 `--files` 追加声明；超 7 天未收尾的僵尸会话声明自动失效（`sillyspec run quick --cancel --change <他者会话ID>` 清理）。豁免只认他者**显式声明**——未声明的他者文件照旧走各门判定（漏声明的补 `--files`，危险文件仍需 `--force-baseline`）。
 - **关联变更的文件仍走审计**：reverse-sync 改自己关联变更的 `design.md` 会被拦，需 `--force-baseline` 显式确认。
 - **baseline 折叠目录前缀匹配**：step1 启动时整片 `changes/` 未跟踪会被 git 折叠成 `?? .sillyspec/changes/`（带尾斜杠 token）；审计时若该目录下文件被并发会话跟踪而展开成文件级路径，按尾斜杠 token 前缀放行其下所有文件，不误判。
 - **同文件并发 warn（advisory，不阻断）**：step1 启动时若你的某个 `allowedFile` 已在他者脏文件列表里（他者也改了这文件），--done 时 CLI 会比对当前内容 hash 与启动时录入的 hash——不一致（你也改了它）即判「同文件并发」并 warn：整文件 pathspec 提交会夹带他者 hunk。warn 给出分离指引（`git add -p <file>` 交互选你自己的 hunk，或 `git diff <file> > mine.patch` 编辑后 `git apply --cached mine.patch` 再 commit）。这**不阻断** --done（你可能有意整文件提交），看 warn 后自行决定是否分离。

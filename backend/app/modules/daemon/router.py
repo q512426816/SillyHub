@@ -1829,6 +1829,8 @@ async def list_sessions(
     # 门户复用本端点，SQL 层精确匹配（照 runtime_id 模式，可选零回归）。
     workspace_id: uuid.UUID | None = Query(default=None),
     change_id: uuid.UUID | None = Query(default=None),
+    # 2026-08-24：会话归档过滤（True=只看已归档，False=只看未归档）。
+    archived: bool = Query(default=False),
 ) -> AgentSessionListResponse:
     """List the current user's AgentSessions (owner-scoped, stable paging).
 
@@ -1855,6 +1857,7 @@ async def list_sessions(
         q=q,
         workspace_id=workspace_id,
         change_id=change_id,
+        archived=archived,
     )
     reads = [AgentSessionRead.model_validate(item) for item in items]
     # 2026-08-23-sessions-workspace-hub task-01 / FR-05 / D-108@v2：批量查
@@ -2161,6 +2164,35 @@ async def delete_session(
 ) -> None:
     """Delete an owned terminal session without deleting its run history."""
     await DaemonService(session).delete_agent_session(session_id, user.id)
+
+
+# 2026-08-24：会话归档/取消归档端点（照 delete_session 模式）。
+
+
+@router.patch(
+    "/sessions/{session_id}/archive",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def archive_session(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> None:
+    """Archive an owned session (hide from default list view)."""
+    await DaemonService(session).archive_session(session_id, user.id)
+
+
+@router.patch(
+    "/sessions/{session_id}/unarchive",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def unarchive_session(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> None:
+    """Unarchive an owned session (restore to default list view)."""
+    await DaemonService(session).unarchive_session(session_id, user.id)
 
 
 async def _inject_run_error_events(

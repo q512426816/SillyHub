@@ -35,6 +35,8 @@ class AgentSessionRead(BaseModel):
     # 由 router 层注入（非 ORM 字段）；FR-05 deleted_at 软删时间戳（ORM 直接映射）。
     title: str | None = None
     deleted_at: datetime | None = None
+    # 2026-08-24：会话归档时间戳（archived_at）。NULL = 可见；非 NULL = 已归档。
+    archived_at: datetime | None = None
     # 当前运行 run（attach 恢复 currentRunId，启用打断按钮；非 ORM 字段，router 注入）
     current_run_id: uuid.UUID | None = None
     # 2026-08-05-daemon-kill-channel-unify task-13 / FR-04 / design §5 Phase4：
