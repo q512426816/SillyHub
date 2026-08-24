@@ -466,3 +466,24 @@
 根因：@uiw/react-markdown-preview 的 markdown.css 给 table tr 写死库内 GitHub 变量 --color-canvas-default（按系统 prefers-color-scheme 切换，不认本站 html data-theme），手动 dark+系统浅色时白底撞主题浅前景
 方案：globals.css D-007 覆盖层补第三方库小节——[data-theme=dark] 下 .wmde-markdown table tr 行底透明随容器、th/td 边框走 var(--color-border)（特异度 0,2,2 胜库 0,1,2）；浅色两主题不覆盖保留库默认
 结果：Playwright 忠实级联测试（真实库 CSS chunk+表格探针+colorScheme=light 复现用户场景）dark 透明底+#334155 边框 PASS、ai-native/blue 白底库默认零回归 PASS；tsc 零错误；本地容器已重建生效
+## ql-20260824-001-fac3 | 2026-08-24 00:49:40 | CI 修复——sessions whoLine 断言滞后 emoji 退役 + backend ruff 格式 + daemon CI 超时 flaky 加固
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（whoLine 断言去已退役 emoji 前缀）
+- backend/app/modules/agent/tests/test_context_builder.py（ruff format 引号风格与行合并）
+- sillyhub-daemon/vitest.config.ts（testTimeout 60s + CI maxForks 4 治超时 flaky）
+需求：CI 修复——sessions whoLine 断言滞后 emoji 退役 + backend ruff 格式 + daemon CI 超时 flaky 加固
+根因：frontend 连续 3 红：6e2a239a 有意退役 whoLine emoji 改 lucide 图标但 page.test.tsx 4 处断言未跟进；backend 红：test_context_builder.py 落盘未跑 ruff format；daemon 2 红：2-4 核 runner 上 maxForks 8 超订阅饿死重 I/O 用例过 30s 超时（非断言失败，下轮自愈）
+方案：page.test.tsx 4 行断言去 📋/☁ 前缀只留名称；ruff format 该文件（引号风格+行合并无语义变化）；vitest.config.ts testTimeout 30s→60s + CI 下 maxForks 8→4，并修正原注释「CI ≤8 核不受影响」错误判断
+结果：frontend sessions page.test.tsx 18/18 绿（原 2 红）；backend ruff format --check 941 文件全过 + ruff check 干净 + pytest 26 通过；daemon 两曾超时文件 88/88 绿 + tsc 干净
+
+## ql-20260824-002-5bfa | 2026-08-24 06:11:54 | backend-ci mypy 挂红修复——agent-log entry Optional 类型收窄
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/platform_sync/router.py（in_scope 中间布尔改直接 None 判定使 mypy 收窄 entry）
+需求：backend-ci mypy 挂红修复——agent-log entry Optional 类型收窄
+根因：94d755e1 链用中间布尔 in_scope 承载 entry 非 None 判定，mypy 无法经 not in_scope:raise 收窄，返回处 entry 仍 Optional 与签名冲突；此前被 ruff 挂红挡在 mypy 步骤前未暴露，修好 ruff 后浮出
+方案：router.py scope 校验改 entry is None or 直接条件取反判越权，mypy 可收窄；语义零变化（不可见/不存在同语义 404 保留）
+结果：mypy 687 文件 0 错；ruff check+format 过；agent_log 两测试文件 36/36 绿

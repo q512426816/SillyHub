@@ -601,7 +601,7 @@ _PLATFORM_MODE_STEP_PROMPT_SNAPSHOT = (
     "## ⚠️ 命令模板（严格复制，不要省略任何参数）\n\n"
     "**第 1 步 — 启动 scan（仅一次，必须包含全部平台参数）：**\n"
     "```\n"
-    "sillyspec run scan --dir \"/home/dev/my-project\""
+    'sillyspec run scan --dir "/home/dev/my-project"'
     " --spec-root ~/.sillyhub/daemon/specs/22222222-2222-2222-2222-222222222222"
     " --runtime-root ~/.sillyhub/daemon/specs/22222222-2222-2222-2222-222222222222/runtime"
     " --workspace-id 22222222-2222-2222-2222-222222222222"
@@ -609,8 +609,8 @@ _PLATFORM_MODE_STEP_PROMPT_SNAPSHOT = (
     "```\n\n"
     "**第 2-N 步 — 逐步推进（每次完成后执行）：**\n"
     "```\n"
-    "sillyspec run scan --done --change default --dir \"/home/dev/my-project\""
-    " --input \"步骤描述\" --output \"步骤摘要\"\n"
+    'sillyspec run scan --done --change default --dir "/home/dev/my-project"'
+    ' --input "步骤描述" --output "步骤摘要"\n'
     "```\n\n"
     "## 执行流程\n"
     "1. 执行 scan 启动命令（包含全部平台参数，文档输出到"
@@ -748,9 +748,7 @@ async def test_build_scan_bundle_strategy_read_error_falls_back(
     _assert_dual_track_spec_root(bundle2)
 
     # 场景 3：领域错误 SpecWorkspaceNotFound 显式抛出同样回退
-    _mock_spec_get_raises(
-        monkeypatch, SpecWorkspaceNotFound("未找到该工作区对应的 spec 工作区。")
-    )
+    _mock_spec_get_raises(monkeypatch, SpecWorkspaceNotFound("未找到该工作区对应的 spec 工作区。"))
     bundle3 = await _build_scan_bundle(db_session)
     assert bundle3.step_prompt == _PLATFORM_MODE_STEP_PROMPT_SNAPSHOT
 
