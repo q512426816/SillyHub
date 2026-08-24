@@ -247,3 +247,13 @@
 根因：providerConfig null 语义前后端冲突 + daemon 两层 ?? 塌缩。后端切回本机时 SESSION_SWITCH_CONFIG 下发 providerConfig:null（=切本机），daemon.ts 路由层 ?? null 把字段缺席也归一成 null（销毁缺席/显式 null 的区别），reloadWithConfig 里 payload.providerConfig ?? state.providerConfig 再把 null 塌缩成沿用旧供应商。连带第二根因：曾用平台供应商的会话 transcript 落在 daemon 隔离目录，即使清掉供应商 env，applyTranscriptConfigDir 按 jsonl 实际位置仍强制隔离 CLAUDE_CONFIG_DIR，cc 读不到宿主机 ~/.claude/settings.json（本机 OpenCode Go 等配置）。
 方案：① daemon.ts 路由 providerConfig 用 !== undefined 判键存在（snake 键含显式 null 优先，缺席保持 undefined）；② reloadWithConfig 改 payload.providerConfig !== undefined ? payload.providerConfig : (state.providerConfig ?? null)，null=切回本机；③ 新增 migrateClaudeTranscriptToHost（isolated jsonl 覆盖回宿主机旧副本并删 isolated 原件，自门控，失败降级 isolated 不破坏会话）；④ _reloadSession 在 providerConfig==null 分支挂反向迁移，与既有正向 migrateClaudeTranscriptToIsolated 对称；⑤ interactive/types.ts payload 类型改可选并同步注释。
 结果：daemon typecheck 通过；vitest 全量 152 文件/2650 测试全绿（9 skipped 同基线）。新增测试锁死新契约：CFG-2 重写（null=切回本机）、CFG-2b（缺席=不切）、MIG-9（隔离 jsonl 切回本机回迁宿主机+env 不隔离）、MIG-H1~H5（反向迁移单测）、路由缺席透传 undefined 用例。daemon.md 契约摘要+变更索引已同步。注意：存量带病会话（daemon sessions.json 已持久化旧供应商 config）需重新切换一次供应商或重启后重新切换才自愈。
+
+## ql-20260824-006-bom-fix | 2026-08-24 16:34:00 | install.ps1 零 BOM 修复——两个 agent 各修一半互相抵消
+状态：已完成
+关联变更：远端 09b43b3a（删 Dockerfile printf）+ 本地22808178（删源 BOM）
+文件：
+- backend/Dockerfile（补回 printf BOM 行）
+需求：另一台机器 irm install.ps1 | iex 因缺 BOM 致 PS5 解析报错
+根因：两个 agent 各修了双 BOM bug 的一半（一方删源 BOM，另一方删 Dockerfile printf），叠加后镜像里零 BOM
+方案：补回 Dockerfile printf BOM 行（源文件无 BOM 保持仓库干净，Dockerfile 为唯一分发点打 BOM）
+结果：容器内 + LAN 端点 od 实测单 BOM（EF BB BF）；/api/health ok；CC 2.1.241；daemon bundle 最新
