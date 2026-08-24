@@ -519,6 +519,7 @@ class AgentSession(BaseModel, table=True):
         Index("ix_agent_sessions_lease_id", "lease_id"),
         Index("ix_agent_sessions_change_id", "change_id"),
         Index("ix_agent_sessions_deleted_at", "deleted_at"),
+        Index("ix_agent_sessions_archived_at", "archived_at"),
         # 性能优化 Wave 1(2026-07-22):change/workspace 维度 session listing 兜底查询。
         Index("ix_agent_sessions_workspace", "workspace_id"),
         # 2026-08-23-agent-activity-sessions task-03（design §3.3.1 / D-006）：
@@ -670,6 +671,13 @@ class AgentSession(BaseModel, table=True):
     # NULL = 可见行；非空 = 用户已删除（list/get 过滤隐藏，行保留供审计，
     # agent_runs.agent_session_id 外键刻意不断，run/log 历史仍可查）。
     deleted_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    # 2026-08-24：会话归档时间戳（archived_at）。NULL = 可见；非 NULL = 已归档
+    # （默认列表隐藏，筛选「已归档会话」时展示）。与 deleted_at 正交——
+    # 可归档后删除，也可直接删除。
+    archived_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )

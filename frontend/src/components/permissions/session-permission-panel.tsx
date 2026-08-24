@@ -11,14 +11,22 @@
  *      run_summary/created_at）覆盖 SSE 占位（design §4.4 C4：查询覆盖 SSE，不反向）。
  *   3. 每张卡用 DialogContextBar（task-08）作兄弟包裹层渲染来源上下文条 + 跳转入口，
  *      不侵入卡组件内部（design §4.4 / C5）。
+ *   4. task-08（2026-08-24-platform-session-feedback-fix FR-04 / D-003@v1）：卡片可
+ *      最小化为右下角浮动胶囊（未决角标 + 最近一条标题），wrapper hidden 切显隐、
+ *      卡组件不卸载 → 已填内容保留；permission_resolved 经 removeCard 同步清胶囊计数。
  *
  * 仍接收 sessionIds 列表为每个 session 开 SSE 订阅 permission_request /
  * permission_resolved，聚合到统一的待决策卡片列表。permission_resolved（decision 字段）
  * 按 request_id 移除卡片（既有逻辑保留）。
  */
 
-import { useEffect, useRef, useState } from "react";
-import { ShieldAlert } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  ChevronUp,
+  HelpCircle,
+  MessageCircleQuestion,
+  ShieldAlert,
+} from "lucide-react";
 
 import { AskUserDialogCard } from "@/components/ask-user-dialog-card";
 import { PermissionApprovalCard } from "@/components/permission-approval-card";
@@ -99,6 +107,26 @@ export function mergeDialogRequests(
   return next;
 }
 
+/**
+ * task-08（FR-04 / D-003@v1）：最小化胶囊标题——dialog 卡取第一个非空问题文本，
+ * 普通审批卡取 tool_name。纯函数便于测试。
+ */
+export function resolvePendingTitle(req: SessionPermissionRequest): string {
+  if (req.dialog_kind) {
+    const raw = req.dialog_payload?.questions;
+    if (Array.isArray(raw)) {
+      for (const item of raw) {
+        const question = (item as { question?: unknown } | null)?.question;
+        if (typeof question === "string" && question.trim()) {
+          return question.trim();
+        }
+      }
+    }
+    return "智能体提问";
+  }
+  return `工具审批：${req.tool_name}`;
+}
+
 export function SessionPermissionPanel({
   sessionIds,
   pendingFallback,
@@ -106,6 +134,42 @@ export function SessionPermissionPanel({
 }: SessionPermissionPanelProps) {
   const [cards, setCards] = useState<SessionPermissionRequest[]>([]);
   const accessToken = useSession((s) => s.accessToken);
+  // task-08（FR-04 / D-003@v1）：最小化卡片集合（会话内存态，不持久化）+ 胶囊
+  // 明细列表展开态。最小化只切换 wrapper 的 hidden，不卸载卡组件子树 →
+  // AskUserDialogCard / PermissionApprovalCard 已填 state 保留（design D-003）。
+  const [minimizedIds, setMinimizedIds] = useState<Set<string>>(new Set());
+  const [capsuleOpen, setCapsuleOpen] = useState(false);
+
+  /** 从卡片列表移除（permission_resolved SSE / 卡片自提交成功），并同步清最小化集合（胶囊计数不残留）。 */
+  const removeCard = useCallback((requestId: string) => {
+    setCards((prev) => prev.filter((c) => c.request_id !== requestId));
+    setMinimizedIds((prev) => {
+      if (!prev.has(requestId)) return prev;
+      const next = new Set(prev);
+      next.delete(requestId);
+      return next;
+    });
+  }, []);
+
+  /** 卡头最小化按钮 → 加入最小化集合（收缩为右下角胶囊）。 */
+  const handleMinimize = useCallback((requestId: string) => {
+    setMinimizedIds((prev) => {
+      if (prev.has(requestId)) return prev;
+      const next = new Set(prev);
+      next.add(requestId);
+      return next;
+    });
+  }, []);
+
+  /** 胶囊还原 → 从最小化集合移除（卡片回列表原位置）。 */
+  const handleRestore = useCallback((requestId: string) => {
+    setMinimizedIds((prev) => {
+      if (!prev.has(requestId)) return prev;
+      const next = new Set(prev);
+      next.delete(requestId);
+      return next;
+    });
+  }, []);
   // task-12：EventSource → fetch-sse 连接句柄（close() 语义不变）。
   const sourcesRef = useRef<Map<string, FetchSseConnection>>(new Map());
 
@@ -130,6 +194,9 @@ export function SessionPermissionPanel({
     sourcesRef.current.forEach((es) => es.close());
     sourcesRef.current.clear();
     setCards([]);
+    // task-08：会话集合重建时同步清最小化态（胶囊不残留旧会话的卡片）。
+    setMinimizedIds(new Set());
+    setCapsuleOpen(false);
 
     const base = getApiBaseUrl();
     // task-10 / NFR-1：SSE 连接数硬上限——超出 MAX_SESSION_SSE 的 session 不订阅，
@@ -160,9 +227,8 @@ export function SessionPermissionPanel({
           }
           if (parsed && (parsed as { decision?: string }).decision) {
             const resolved = parsed as { request_id: string };
-            setCards((prev) =>
-              prev.filter((c) => c.request_id !== resolved.request_id),
-            );
+            // task-08：最小化中的卡片同样经 removeCard 移除并清胶囊计数。
+            removeCard(resolved.request_id);
           }
         } catch {
           // 非 JSON / 非 permission 事件：忽略（其它 SSE 事件类型由订阅方自行处理）
@@ -178,13 +244,19 @@ export function SessionPermissionPanel({
       sourcesRef.current.forEach((es) => es.close());
       sourcesRef.current.clear();
     };
-  }, [sessionIds, accessToken, workspaceName]);
+  }, [sessionIds, accessToken, workspaceName, removeCard]);
+
+  // task-08（FR-04 / D-003@v1）：右下角浮动胶囊数据——最小化中的卡集合 +
+  // 最近一条（capsule 主体点击还原最近一条）。须在 early-return 之前计算。
+  const minimizedCards = cards.filter((c) => minimizedIds.has(c.request_id));
+  const latestMinimized = minimizedCards[minimizedCards.length - 1];
 
   if (sessionIds.length === 0 && (!pendingFallback || pendingFallback.length === 0)) {
     return null; // 无活跃会话且无兜底数据时不渲染（保持 approvals 页整洁）
   }
 
   return (
+    <>
     <section className="rounded-md border bg-card">
       <header className="flex items-center justify-between gap-2 border-b px-4 py-3">
         <div className="flex items-center gap-2">
@@ -206,31 +278,110 @@ export function SessionPermissionPanel({
             暂无待决策的询问（agent 遇歧义或需授权时会在此弹出）
           </p>
         ) : (
-          cards.map((req) => (
-            <DialogContextBar key={req.request_id} request={req}>
-              {req.dialog_kind ? (
-                <AskUserDialogCard
-                  request={req}
-                  onResolved={(requestId) =>
-                    setCards((prev) =>
-                      prev.filter((c) => c.request_id !== requestId),
-                    )
-                  }
-                />
-              ) : (
-                <PermissionApprovalCard
-                  request={req}
-                  onResolved={(requestId) =>
-                    setCards((prev) =>
-                      prev.filter((c) => c.request_id !== requestId),
-                    )
-                  }
-                />
-              )}
-            </DialogContextBar>
-          ))
+          cards.map((req) => {
+            const isMinimized = minimizedIds.has(req.request_id);
+            return (
+              // task-08：key 在 wrapper、hidden 切 display、子树结构不变 →
+              // 最小化/还原只是隐藏与显隐，卡片不重挂载，已填 state 保留。
+              <div
+                key={req.request_id}
+                hidden={isMinimized}
+                data-panel-card={req.request_id}
+                data-minimized={isMinimized ? "true" : "false"}
+              >
+                <DialogContextBar request={req}>
+                  {req.dialog_kind ? (
+                    <AskUserDialogCard
+                      request={req}
+                      minimized={isMinimized}
+                      onMinimize={handleMinimize}
+                      onResolved={removeCard}
+                    />
+                  ) : (
+                    <PermissionApprovalCard
+                      request={req}
+                      minimized={isMinimized}
+                      onMinimize={handleMinimize}
+                      onResolved={removeCard}
+                    />
+                  )}
+                </DialogContextBar>
+              </div>
+            );
+          })
         )}
       </div>
     </section>
+
+    {/* task-08（FR-04 / D-003@v1）：右下角浮动胶囊——仅当存在最小化卡片时渲染。
+        主题合规：brand-* 语义阶（浅/深主题都可读）+ shadow-lg + bg-card/border 变量类；
+        amber-600 仅警告图标语义色（与面板现状一致）。 */}
+    {latestMinimized && (
+      <div
+        className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2"
+        role="group"
+        aria-label="最小化的待决策卡片"
+        data-minimized-capsule
+      >
+        {capsuleOpen && (
+          <ul className="w-64 overflow-hidden rounded-md border bg-card shadow-lg">
+            {minimizedCards.map((req) => (
+              <li key={req.request_id} className="border-b last:border-b-0">
+                <button
+                  type="button"
+                  onClick={() => handleRestore(req.request_id)}
+                  className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-left transition-colors hover:bg-muted"
+                  aria-label={`还原 ${resolvePendingTitle(req)}`}
+                >
+                  {req.dialog_kind ? (
+                    <HelpCircle className="h-3.5 w-3.5 shrink-0 text-brand-600" />
+                  ) : (
+                    <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-foreground">
+                    {resolvePendingTitle(req)}
+                  </span>
+                  <span className="shrink-0 font-mono text-[10px] text-muted-foreground">
+                    {req.request_id.slice(0, 12)}
+                  </span>
+                  <span className="shrink-0 text-[11px] font-medium text-brand-600">
+                    还原
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div className="flex max-w-72 items-center gap-1.5 rounded-full border bg-card py-1.5 pl-3 pr-1.5 shadow-lg">
+          <MessageCircleQuestion className="h-4 w-4 shrink-0 text-brand-600" />
+          <button
+            type="button"
+            onClick={() => handleRestore(latestMinimized.request_id)}
+            className="min-w-0 flex-1 truncate text-left text-[11px] font-medium text-foreground hover:underline"
+            title="点击还原该卡片（最近一条）"
+          >
+            {resolvePendingTitle(latestMinimized)}
+          </button>
+          <span
+            aria-hidden
+            data-capsule-count={minimizedCards.length}
+            className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-brand-600 px-1 text-[10px] font-semibold tabular-nums text-brand-50"
+          >
+            {minimizedCards.length}
+          </span>
+          <button
+            type="button"
+            onClick={() => setCapsuleOpen((v) => !v)}
+            className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label={capsuleOpen ? "收起最小化列表" : "展开最小化列表"}
+          >
+            <ChevronUp
+              className={`h-3.5 w-3.5 transition-transform${capsuleOpen ? "" : " rotate-180"}`}
+            />
+          </button>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

@@ -108,6 +108,46 @@ export interface HeartbeatBody {
   providers: { provider: string; status?: string }[];
 }
 
+// ── session 事件 HTTP 上报（change 2026-08-24-platform-session-feedback-fix / FR-01~03）─
+
+/** Plan 模式进入事件上报体（对齐 backend PlanModeEnteredEvent / task-01 DTO）。 */
+export interface NotifyPlanModeEnteredBody {
+  session_id: string;
+  run_id: string;
+  summary: { objective: string; tasks: string[]; design_snippet?: string };
+}
+
+/** Bash 执行状态事件上报体（对齐 backend BashStatusEvent / task-01 DTO）。 */
+export interface NotifyBashStatusBody {
+  session_id: string;
+  run_id: string;
+  command: string;
+  status: 'running' | 'completed' | 'failed';
+  exit_code?: number;
+  elapsed_ms?: number;
+}
+
+/** Bash 输出块事件上报体（对齐 backend BashChunkEvent / task-01 DTO）。 */
+export interface NotifyBashChunkBody {
+  session_id: string;
+  run_id: string;
+  command: string;
+  channel: 'stdout' | 'stderr';
+  content: string;
+  is_final: boolean;
+}
+
+/** Agent 任务状态事件上报体（对齐 backend AgentTaskStatusEvent / task-01 DTO）。 */
+export interface NotifyAgentTaskStatusBody {
+  session_id: string;
+  run_id: string;
+  task_id: string;
+  task_name: string;
+  status: 'running' | 'completed' | 'failed';
+  progress?: number;
+  message?: string;
+}
+
 // ── 增量 spec 同步类型（change 2026-08-13-platform-managed-file-sync / design §7）──
 //
 // 字段命名与 backend spec_workspace/schema.py 的 FileOp 逐字一致（避免 422）。
@@ -871,6 +911,133 @@ export class HubClient {
         error: String(e),
       });
     }
+  }
+
+  // ── session 反馈事件 HTTP 上报（change 2026-08-24-platform-session-feedback-fix / FR-01~03）─
+
+  /**
+   * task-03（FR-01）：上报 Plan 模式进入事件。
+   *
+   * 端点：POST {REST_PREFIX}/sessions/{sessionId}/plan-mode-entered
+   * body（snake_case，对齐 backend PlanModeEnteredEvent / task-01 DTO）：
+   *   { session_id, run_id, summary: { objective, tasks, design_snippet? } }
+   *
+   * 失败语义（对齐 _request）：非 2xx → HubHttpError；网络/超时透传。
+   * 调用方（task-04 session-manager 桥接）负责 fire-and-forget 或捕获处理。
+   */
+  async notifyPlanModeEntered(
+    sessionId: string,
+    runId: string,
+    summary: { objective: string; tasks: string[]; design_snippet?: string },
+  ): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/plan-mode-entered`,
+      {
+        session_id: sessionId,
+        run_id: runId,
+        summary,
+      } satisfies NotifyPlanModeEnteredBody,
+    );
+  }
+
+  /**
+   * task-03（FR-01）：上报 Bash 执行状态事件。
+   *
+   * 端点：POST {REST_PREFIX}/sessions/{sessionId}/bash-status
+   * body（snake_case，对齐 backend BashStatusEvent / task-01 DTO）：
+   *   { session_id, run_id, command, status, exit_code?, elapsed_ms? }
+   *
+   * undefined 字段守卫写入（exit_code / elapsed_ms 缺省时不传 → backend 保留 None）。
+   * 失败语义（对齐 _request）：非 2xx → HubHttpError；网络/超时透传。
+   */
+  async notifyBashStatus(
+    sessionId: string,
+    runId: string,
+    command: string,
+    status: 'running' | 'completed' | 'failed',
+    exitCode?: number,
+    elapsedMs?: number,
+  ): Promise<Record<string, unknown>> {
+    const body: NotifyBashStatusBody = {
+      session_id: sessionId,
+      run_id: runId,
+      command,
+      status,
+    };
+    if (exitCode !== undefined) body.exit_code = exitCode;
+    if (elapsedMs !== undefined) body.elapsed_ms = elapsedMs;
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/bash-status`,
+      body,
+    );
+  }
+
+  /**
+   * task-03（FR-02）：上报 Bash 实时输出块事件。
+   *
+   * 端点：POST {REST_PREFIX}/sessions/{sessionId}/bash-chunk
+   * body（snake_case，对齐 backend BashChunkEvent / task-01 DTO）：
+   *   { session_id, run_id, command, channel, content, is_final }
+   *
+   * 失败语义（对齐 _request）：非 2xx → HubHttpError；网络/超时透传。
+   */
+  async notifyBashChunk(
+    sessionId: string,
+    runId: string,
+    command: string,
+    channel: 'stdout' | 'stderr',
+    content: string,
+    isFinal: boolean,
+  ): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/bash-chunk`,
+      {
+        session_id: sessionId,
+        run_id: runId,
+        command,
+        channel,
+        content,
+        is_final: isFinal,
+      } satisfies NotifyBashChunkBody,
+    );
+  }
+
+  /**
+   * task-03（FR-03）：上报 Agent 任务状态事件。
+   *
+   * 端点：POST {REST_PREFIX}/sessions/{sessionId}/agent-task-status
+   * body（snake_case，对齐 backend AgentTaskStatusEvent / task-01 DTO）：
+   *   { session_id, run_id, task_id, task_name, status, progress?, message? }
+   *
+   * undefined 字段守卫写入（progress / message 缺省时不传 → backend 保留 None）。
+   * 失败语义（对齐 _request）：非 2xx → HubHttpError；网络/超时透传。
+   */
+  async notifyAgentTaskStatus(
+    sessionId: string,
+    runId: string,
+    taskId: string,
+    taskName: string,
+    status: 'running' | 'completed' | 'failed',
+    progress?: number,
+    message?: string,
+  ): Promise<Record<string, unknown>> {
+    const body: NotifyAgentTaskStatusBody = {
+      session_id: sessionId,
+      run_id: runId,
+      task_id: taskId,
+      task_name: taskName,
+      status,
+    };
+    if (progress !== undefined) body.progress = progress;
+    if (message !== undefined) body.message = message;
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/agent-task-status`,
+      body,
+    );
   }
 
   // ── Daemon-restart session recovery (gap-8.2 / design §11) ───────────────

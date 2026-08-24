@@ -51,10 +51,17 @@ from app.modules.daemon.protocol import (
     DAEMON_MSG_RPC_RESULT,
     PermissionRequestPayload,
 )
-from app.modules.daemon.run_sync.service import publish_submitted_messages
+from app.modules.daemon.run_sync.service import (
+    publish_bash_chunk_event,
+    publish_session_event,
+    publish_submitted_messages,
+)
 from app.modules.daemon.schema import (
     AgentSessionListResponse,
     AgentSessionRead,
+    AgentTaskStatusEvent,
+    BashChunkEvent,
+    BashStatusEvent,
     DaemonInstanceProviderItem,
     DaemonInstanceRead,
     DaemonMachineListResponse,
@@ -84,6 +91,8 @@ from app.modules.daemon.schema import (
     ListDirResponse,
     ListRootsResponse,
     OwnerRead,
+    PlanModeEnteredEvent,
+    PlanResponseRequest,
     RuntimeUsageListResponse,
     RuntimeUsageWindow,
     SessionCreateRequest,
@@ -106,7 +115,7 @@ from app.modules.daemon.service import (
     DaemonService,
     DaemonSessionNotFound,
 )
-from app.modules.daemon.session.service import get_session_readiness
+from app.modules.daemon.session.service import SessionService, get_session_readiness
 
 if TYPE_CHECKING:
     # 仅类型注解用（team-mission 汇总 helper 形参）；运行时在各端点内延迟 import。
@@ -1413,6 +1422,116 @@ async def notify_session_ready(
     return {"ok": True}
 
 
+@router.post(
+    "/sessions/{session_id}/plan-response",
+    response_model=dict[str, bool],
+)
+async def handle_plan_response(
+    session_id: uuid.UUID,
+    data: PlanResponseRequest,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> dict[str, bool]:
+    """Receive user's plan-mode decision and push it to the daemon (task-02 / FR-02).
+
+    校验路径与请求体中的 ``session_id`` 一致，确认当前用户拥有该会话，将决策写入
+    ``AgentSession.config`` 后通过现有 WebSocket Hub 下发 ``daemon:plan_response``
+    控制消息。返回 ``{"ok": true, "delivered": <bool>}``。
+    """
+    if data.session_id != session_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="path session_id does not match body session_id",
+        )
+    svc = SessionService(session)
+    return await svc.handle_plan_response(
+        session_id=session_id,
+        run_id=data.run_id,
+        decision=data.decision,
+        feedback=data.feedback,
+        user_id=user.id,
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/plan-mode-entered",
+    response_model=dict[str, bool],
+)
+async def notify_plan_mode_entered(
+    session_id: uuid.UUID,
+    data: PlanModeEnteredEvent,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> dict[str, bool]:
+    """Receive daemon plan-mode-entered report and forward to frontend SSE (task-02)."""
+    if data.session_id != session_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="path session_id does not match body session_id",
+        )
+    await publish_session_event(session_id, data)
+    return {"ok": True}
+
+
+@router.post(
+    "/sessions/{session_id}/bash-status",
+    response_model=dict[str, bool],
+)
+async def notify_bash_status(
+    session_id: uuid.UUID,
+    data: BashStatusEvent,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> dict[str, bool]:
+    """Receive daemon bash-status report and forward to frontend SSE (task-02)."""
+    if data.session_id != session_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="path session_id does not match body session_id",
+        )
+    await publish_session_event(session_id, data)
+    return {"ok": True}
+
+
+@router.post(
+    "/sessions/{session_id}/bash-chunk",
+    response_model=dict[str, bool],
+)
+async def notify_bash_chunk(
+    session_id: uuid.UUID,
+    data: BashChunkEvent,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> dict[str, bool]:
+    """Receive daemon bash-chunk report and forward to frontend SSE (task-02).
+
+    经 ``publish_bash_chunk_event`` 发布，内含 100ms 节流与 8KB 单条截断。
+    """
+    if data.session_id != session_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="path session_id does not match body session_id",
+        )
+    published = await publish_bash_chunk_event(data)
+    return {"ok": True, "throttled": not published}
+
+
+@router.post(
+    "/sessions/{session_id}/agent-task-status",
+    response_model=dict[str, bool],
+)
+async def notify_agent_task_status(
+    session_id: uuid.UUID,
+    data: AgentTaskStatusEvent,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> dict[str, bool]:
+    """Receive daemon agent-task-status report and forward to frontend SSE (task-02)."""
+    if data.session_id != session_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="path session_id does not match body session_id",
+        )
+    await publish_session_event(session_id, data)
+    return {"ok": True}
+
+
 @router.get(
     "/leases/{lease_id}",
     response_model=DaemonTaskLeaseRead,
@@ -1830,6 +1949,8 @@ async def list_sessions(
     # 门户复用本端点，SQL 层精确匹配（照 runtime_id 模式，可选零回归）。
     workspace_id: uuid.UUID | None = Query(default=None),
     change_id: uuid.UUID | None = Query(default=None),
+    # 2026-08-24：会话归档过滤（True=只看已归档，False=只看未归档）。
+    archived: bool = Query(default=False),
 ) -> AgentSessionListResponse:
     """List the current user's AgentSessions (owner-scoped, stable paging).
 
@@ -1856,6 +1977,7 @@ async def list_sessions(
         q=q,
         workspace_id=workspace_id,
         change_id=change_id,
+        archived=archived,
     )
     reads = [AgentSessionRead.model_validate(item) for item in items]
     # 2026-08-23-sessions-workspace-hub task-01 / FR-05 / D-108@v2：批量查
@@ -2165,6 +2287,35 @@ async def delete_session(
 ) -> None:
     """Delete an owned terminal session without deleting its run history."""
     await DaemonService(session).delete_agent_session(session_id, user.id)
+
+
+# 2026-08-24：会话归档/取消归档端点（照 delete_session 模式）。
+
+
+@router.patch(
+    "/sessions/{session_id}/archive",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def archive_session(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> None:
+    """Archive an owned session (hide from default list view)."""
+    await DaemonService(session).archive_session(session_id, user.id)
+
+
+@router.patch(
+    "/sessions/{session_id}/unarchive",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def unarchive_session(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> None:
+    """Unarchive an owned session (restore to default list view)."""
+    await DaemonService(session).unarchive_session(session_id, user.id)
 
 
 async def _inject_run_error_events(

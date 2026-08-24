@@ -66,6 +66,7 @@ import { FileOutbox } from './resilience/outbox.js';
 import { ClaudeSdkDriver } from './interactive/claude-sdk-driver.js';
 import { CodexAppServerDriver } from './interactive/codex-app-server-driver.js';
 import { SessionManager } from './interactive/session-manager.js';
+import type { SessionEventForBackend } from './interactive/types.js';
 import { JsonSessionPersistence } from './interactive/session-store-persistence.js';
 import { DAEMON_VERSION } from './daemon-version.js';
 import { RuntimeLockManager } from './runtime-lock.js';
@@ -668,6 +669,61 @@ export async function startAction(opts: StartOptions): Promise<number> {
         void daemon.onTurnMessage(sessionId, runId, msg as SDKMessage);
       },
       onSessionEnd: (sessionId, status) => daemon.onSessionEnd(sessionId, status),
+      // task-04（FR-01~03）：session 反馈事件桥接 → HubClient 对应 notify 方法。
+      // 失败仅日志不阻塞；字段从 camelCase event 映射为 snake_case body。
+      onSessionEvent: (sessionId, runId, event: SessionEventForBackend) => {
+        void (async () => {
+          try {
+            switch (event.kind) {
+              case 'plan_mode_entered':
+                await client.notifyPlanModeEntered(sessionId, runId, event.summary);
+                break;
+              case 'bash_status':
+                await client.notifyBashStatus(
+                  sessionId,
+                  runId,
+                  event.command,
+                  event.status,
+                  event.exit_code,
+                  event.elapsed_ms,
+                );
+                break;
+              case 'bash_chunk':
+                await client.notifyBashChunk(
+                  sessionId,
+                  runId,
+                  event.command,
+                  event.channel,
+                  event.content,
+                  event.is_final,
+                );
+                break;
+              case 'agent_task_status':
+                await client.notifyAgentTaskStatus(
+                  sessionId,
+                  runId,
+                  event.task_id,
+                  event.task_name,
+                  event.status,
+                  event.progress,
+                  event.message,
+                );
+                break;
+              default:
+                // 其它 kind 不上报（约束：仅 plan/bash/agent_task）。
+                break;
+            }
+          } catch (e) {
+            // eslint-disable-next-line no-console
+            console.error('[cli] onSessionEvent notify failed', {
+              sessionId,
+              runId,
+              kind: event.kind,
+              error: e instanceof Error ? e.message : String(e),
+            });
+          }
+        })();
+      },
     },
     {
       // scan 真阻塞（改造点 C）：实例级 manualApproval=true 仅表示「能力就绪」

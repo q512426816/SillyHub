@@ -11093,6 +11093,296 @@
         }
       }
     },
+    "/api/daemon/sessions/{session_id}/plan-response": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Handle Plan Response",
+        "description": "Receive user's plan-mode decision and push it to the daemon (task-02 / FR-02).\n\n校验路径与请求体中的 ``session_id`` 一致，确认当前用户拥有该会话，将决策写入\n``AgentSession.config`` 后通过现有 WebSocket Hub 下发 ``daemon:plan_response``\n控制消息。返回 ``{\"ok\": true, \"delivered\": <bool>}``。",
+        "operationId": "handle_plan_response_api_daemon_sessions__session_id__plan_response_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanResponseRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Handle Plan Response Api Daemon Sessions  Session Id  Plan Response Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/plan-mode-entered": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Notify Plan Mode Entered",
+        "description": "Receive daemon plan-mode-entered report and forward to frontend SSE (task-02).",
+        "operationId": "notify_plan_mode_entered_api_daemon_sessions__session_id__plan_mode_entered_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PlanModeEnteredEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Notify Plan Mode Entered Api Daemon Sessions  Session Id  Plan Mode Entered Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/bash-status": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Notify Bash Status",
+        "description": "Receive daemon bash-status report and forward to frontend SSE (task-02).",
+        "operationId": "notify_bash_status_api_daemon_sessions__session_id__bash_status_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BashStatusEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Notify Bash Status Api Daemon Sessions  Session Id  Bash Status Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/bash-chunk": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Notify Bash Chunk",
+        "description": "Receive daemon bash-chunk report and forward to frontend SSE (task-02).\n\n经 ``publish_bash_chunk_event`` 发布，内含 100ms 节流与 8KB 单条截断。",
+        "operationId": "notify_bash_chunk_api_daemon_sessions__session_id__bash_chunk_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BashChunkEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Notify Bash Chunk Api Daemon Sessions  Session Id  Bash Chunk Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/agent-task-status": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Notify Agent Task Status",
+        "description": "Receive daemon agent-task-status report and forward to frontend SSE (task-02).",
+        "operationId": "notify_agent_task_status_api_daemon_sessions__session_id__agent_task_status_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentTaskStatusEvent"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Notify Agent Task Status Api Daemon Sessions  Session Id  Agent Task Status Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/leases/{lease_id}": {
       "get": {
         "tags": [
@@ -11601,6 +11891,16 @@
               ],
               "title": "Change Id"
             }
+          },
+          {
+            "name": "archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Archived"
+            }
           }
         ],
         "responses": {
@@ -11945,6 +12245,80 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/archive": {
+      "patch": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Archive Session",
+        "description": "Archive an owned session (hide from default list view).",
+        "operationId": "archive_session_api_daemon_sessions__session_id__archive_patch",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/unarchive": {
+      "patch": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Unarchive Session",
+        "description": "Unarchive an owned session (restore to default list view).",
+        "operationId": "unarchive_session_api_daemon_sessions__session_id__unarchive_patch",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -29368,6 +29742,18 @@
             ],
             "title": "Deleted At"
           },
+          "archived_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
           "current_run_id": {
             "anyOf": [
               {
@@ -29462,6 +29848,75 @@
           "workspace_id"
         ],
         "title": "AgentSessionRead"
+      },
+      "AgentTaskStatusEvent": {
+        "properties": {
+          "event": {
+            "type": "string",
+            "const": "agent_task_status",
+            "title": "Event",
+            "default": "agent_task_status"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "task_name": {
+            "type": "string",
+            "title": "Task Name"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "completed",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "run_id",
+          "task_id",
+          "task_name",
+          "status"
+        ],
+        "title": "AgentTaskStatusEvent",
+        "description": "``agent_task_status`` 事件——Agent 任务粒度状态（FR-03）。"
       },
       "ApiKeyCreateRequest": {
         "properties": {
@@ -30132,6 +30587,121 @@
         ],
         "title": "AuditPageResponse",
         "description": "Paginated response for the audit query endpoint."
+      },
+      "BashChunkEvent": {
+        "properties": {
+          "event": {
+            "type": "string",
+            "const": "bash_chunk",
+            "title": "Event",
+            "default": "bash_chunk"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "command": {
+            "type": "string",
+            "title": "Command"
+          },
+          "channel": {
+            "type": "string",
+            "enum": [
+              "stdout",
+              "stderr"
+            ],
+            "title": "Channel"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "is_final": {
+            "type": "boolean",
+            "title": "Is Final",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "run_id",
+          "command",
+          "channel",
+          "content"
+        ],
+        "title": "BashChunkEvent",
+        "description": "``bash_chunk`` 事件——Bash 命令实时输出块（FR-02）。\n\n发布侧（run_sync publish_bash_chunk_event）做 100ms 节流与 8KB 单条\n截断，DTO 本身不限制 content 长度。"
+      },
+      "BashStatusEvent": {
+        "properties": {
+          "event": {
+            "type": "string",
+            "const": "bash_status",
+            "title": "Event",
+            "default": "bash_status"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "command": {
+            "type": "string",
+            "title": "Command"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "completed",
+              "failed"
+            ],
+            "title": "Status"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "elapsed_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elapsed Ms"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "run_id",
+          "command",
+          "status"
+        ],
+        "title": "BashStatusEvent",
+        "description": "``bash_status`` 事件——Bash 命令开始/结束状态（FR-02）。\n\nrunning 时前端渲染/更新 BashProgressCard，completed/failed 携带\nexit_code / elapsed_ms 收尾。"
       },
       "BatchMetaRequest": {
         "properties": {
@@ -38469,6 +39039,42 @@
         ],
         "title": "PermissionResponseRequest"
       },
+      "PlanModeEnteredEvent": {
+        "properties": {
+          "event": {
+            "type": "string",
+            "const": "plan_mode_entered",
+            "title": "Event",
+            "default": "plan_mode_entered"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/PlanSummary"
+          },
+          "requested_at": {
+            "type": "string",
+            "title": "Requested At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "run_id",
+          "summary",
+          "requested_at"
+        ],
+        "title": "PlanModeEnteredEvent",
+        "description": "``plan_mode_entered`` 事件——Agent 进入 plan 模式请求确认（FR-01）。\n\n前端收到后渲染 PlanApprovalCard，会话进入 plan_pending 态。"
+      },
       "PlanNodeCreate": {
         "properties": {
           "overall_stage": {
@@ -39307,6 +39913,52 @@
         "type": "object",
         "title": "PlanNodeUpdate"
       },
+      "PlanResponseDecision": {
+        "type": "string",
+        "enum": [
+          "confirm",
+          "revise",
+          "cancel"
+        ],
+        "title": "PlanResponseDecision",
+        "description": "plan 响应决策（前端 → 后端，design §接口定义）。\n\npy312 StrEnum（ruff UP042）：成员即 str（``PlanResponseDecision.revise ==\n\"revise\"``），替代 ``(str, enum.Enum)`` 双继承，序列化行为不变。"
+      },
+      "PlanResponseRequest": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/PlanResponseDecision"
+          },
+          "feedback": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feedback"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "run_id",
+          "decision"
+        ],
+        "title": "PlanResponseRequest",
+        "description": "plan 响应请求体（task-02 ``plan-response`` 端点复用）。\n\ndecision 为 revise / cancel 时 feedback 必填且非空白。"
+      },
       "PlanReviewRequest": {
         "properties": {
           "decision": {
@@ -39336,6 +39988,39 @@
           "decision"
         ],
         "title": "PlanReviewRequest"
+      },
+      "PlanSummary": {
+        "properties": {
+          "objective": {
+            "type": "string",
+            "title": "Objective"
+          },
+          "tasks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tasks"
+          },
+          "design_snippet": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Design Snippet"
+          }
+        },
+        "type": "object",
+        "required": [
+          "objective",
+          "tasks"
+        ],
+        "title": "PlanSummary",
+        "description": "PlanModeEnteredEvent.summary——plan 模式计划概要。"
       },
       "PlanTaskBrief": {
         "properties": {

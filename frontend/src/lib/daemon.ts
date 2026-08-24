@@ -564,6 +564,128 @@ export function parseSessionPermissionEvent(
 }
 
 /**
+ * task-05 / 2026-08-24-platform-session-feedback-fix：把 SSE payload 归一化为
+ * PlanModeEnteredEvent。dispatch 已校验 session_id / run_id，本函数只做字段兜底。
+ */
+function parsePlanModeEnteredEvent(
+  data: unknown,
+  sessionId: string,
+): PlanModeEnteredEvent {
+  const evt = data as Record<string, unknown>;
+  const rawSummary =
+    evt.summary && typeof evt.summary === "object"
+      ? (evt.summary as Record<string, unknown>)
+      : {};
+  const summary: PlanSummary = {
+    objective: typeof rawSummary.objective === "string" ? rawSummary.objective : "",
+    tasks: Array.isArray(rawSummary.tasks)
+      ? rawSummary.tasks.filter((t): t is string => typeof t === "string")
+      : [],
+    design_snippet:
+      typeof rawSummary.design_snippet === "string"
+        ? rawSummary.design_snippet
+        : null,
+  };
+  return {
+    event: "plan_mode_entered",
+    session_id: sessionId,
+    run_id: String(evt.run_id),
+    summary,
+    requested_at: typeof evt.requested_at === "string" ? evt.requested_at : "",
+  };
+}
+
+/** 把 SSE payload 归一化为 BashStatusEvent。 */
+function parseBashStatusEvent(
+  data: unknown,
+  sessionId: string,
+): BashStatusEvent {
+  const evt = data as Record<string, unknown>;
+  const status =
+    evt.status === "running" ||
+    evt.status === "completed" ||
+    evt.status === "failed"
+      ? evt.status
+      : "running";
+  return {
+    event: "bash_status",
+    session_id: sessionId,
+    run_id: String(evt.run_id),
+    command: typeof evt.command === "string" ? evt.command : "",
+    status,
+    exit_code: typeof evt.exit_code === "number" ? evt.exit_code : null,
+    elapsed_ms: typeof evt.elapsed_ms === "number" ? evt.elapsed_ms : null,
+  };
+}
+
+/** 把 SSE payload 归一化为 BashChunkEvent。 */
+function parseBashChunkEvent(
+  data: unknown,
+  sessionId: string,
+): BashChunkEvent {
+  const evt = data as Record<string, unknown>;
+  return {
+    event: "bash_chunk",
+    session_id: sessionId,
+    run_id: String(evt.run_id),
+    command: typeof evt.command === "string" ? evt.command : "",
+    channel: evt.channel === "stderr" ? "stderr" : "stdout",
+    content: typeof evt.content === "string" ? evt.content : "",
+    is_final: Boolean(evt.is_final),
+  };
+}
+
+/** 把 SSE payload 归一化为 AgentTaskStatusEvent（verify P1 返工 / FR-03）。 */
+function parseAgentTaskStatusEvent(
+  data: unknown,
+  sessionId: string,
+): AgentTaskStatusEvent {
+  const evt = data as Record<string, unknown>;
+  const status =
+    evt.status === "completed" || evt.status === "failed"
+      ? evt.status
+      : "running";
+  return {
+    event: "agent_task_status",
+    session_id: sessionId,
+    run_id: String(evt.run_id),
+    task_id: typeof evt.task_id === "string" ? evt.task_id : "",
+    task_name: typeof evt.task_name === "string" ? evt.task_name : "",
+    status,
+    progress: typeof evt.progress === "number" ? evt.progress : null,
+    message: typeof evt.message === "string" ? evt.message : null,
+  };
+}
+
+/**
+ * task-05：提交用户对 plan 的决策（confirm / revise / cancel）。
+ * POST /api/daemon/sessions/{sessionId}/plan-response，body 字段 snake_case。
+ * revise / cancel 时 feedback 必填（调用方应保证，本函数兜底抛 Error）。
+ */
+export async function submitPlanResponse(
+  sessionId: string,
+  runId: string,
+  decision: "confirm" | "revise" | "cancel",
+  feedback?: string,
+): Promise<void> {
+  if (decision !== "confirm" && (!feedback || feedback.trim() === "")) {
+    throw new Error("plan 决策为 revise/cancel 时必须提供 feedback");
+  }
+  const body: Record<string, unknown> = {
+    session_id: sessionId,
+    run_id: runId,
+    decision,
+  };
+  if (feedback !== undefined) {
+    body.feedback = feedback;
+  }
+  await apiFetch(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/plan-response`,
+    { method: "POST", json: body },
+  );
+}
+
+/**
  * GET /api/daemon/sessions/{id}/dialogs — 恢复刷新前未回答的 AskUserQuestion
  * 对话（dialog_kind 待答 permission_request）。
  *
@@ -784,7 +906,64 @@ export type SessionEventKind =
   | "turn_completed"
   | "session_status"
   | "session_ended"
-  | "tokens";
+  | "tokens"
+  | "plan_mode_entered"
+  | "bash_status"
+  | "bash_chunk"
+  | "agent_task_status";
+
+/** Plan 模式摘要（plan_mode_entered 事件 payload）。 */
+export interface PlanSummary {
+  objective: string;
+  tasks: string[];
+  design_snippet?: string | null;
+}
+
+/** plan_mode_entered 事件：Agent 进入 plan 模式，需用户确认/修改/取消。 */
+export interface PlanModeEnteredEvent {
+  event: "plan_mode_entered";
+  session_id: string;
+  run_id: string;
+  summary: PlanSummary;
+  requested_at: string;
+}
+
+/** bash_status 事件：Bash 命令开始/结束/失败。 */
+export interface BashStatusEvent {
+  event: "bash_status";
+  session_id: string;
+  run_id: string;
+  command: string;
+  status: "running" | "completed" | "failed";
+  exit_code: number | null;
+  elapsed_ms: number | null;
+}
+
+/** bash_chunk 事件：Bash 命令实时 stdout/stderr 片段。 */
+export interface BashChunkEvent {
+  event: "bash_chunk";
+  session_id: string;
+  run_id: string;
+  command: string;
+  channel: "stdout" | "stderr";
+  content: string;
+  is_final: boolean;
+}
+
+/**
+ * agent_task_status 事件：后台 Agent 任务（Task/Agent 工具派发的子代理）状态。
+ * verify P1 返工（FR-03）：daemon 在 Task/Agent tool_use 时上报，前端渲染任务卡片。
+ */
+export interface AgentTaskStatusEvent {
+  event: "agent_task_status";
+  session_id: string;
+  run_id: string;
+  task_id: string;
+  task_name: string;
+  status: "running" | "completed" | "failed";
+  progress: number | null;
+  message: string | null;
+}
 
 export interface SessionStreamEnvelope {
   event: SessionEventKind;
@@ -798,6 +977,26 @@ export interface SessionStreamEnvelope {
   status: string | null;
   exit_code: number | null;
   reason: string | null;
+  /**
+   * task-05 / 2026-08-24-platform-session-feedback-fix：plan 模式进入事件携带的
+   * 计划摘要与请求时间。
+   */
+  summary?: PlanSummary | null;
+  requested_at?: string | null;
+  /**
+   * task-05：Bash 进度事件携带的命令行、运行时长。
+   * status / channel / content / exit_code 已复用既有同名字段。
+   */
+  command?: string | null;
+  elapsed_ms?: number | null;
+  is_final?: boolean;
+  /**
+   * task-05 预留：agent task 状态事件字段（后续 task 消费）。
+   */
+  task_id?: string | null;
+  task_name?: string | null;
+  progress?: number | null;
+  message?: string | null;
   /**
    * ql-20260621：实时 / 终态 token。`tokens` 事件（执行中累积）与
    * `turn_completed` 事件（终态）都会带这两个字段；其它事件为 null。
@@ -877,6 +1076,24 @@ export interface SessionStreamHandlers {
    *（用户操作 manual 或 5min 超时 timeout）。父组件据此移除对应卡片。
    */
   onPermissionResolved?(resolved: SessionPermissionResolved): void;
+  /**
+   * task-05 / 2026-08-24-platform-session-feedback-fix：Agent 进入 plan 模式，
+   * 父组件渲染 PlanApprovalCard 供用户 confirm / revise / cancel。
+   */
+  onPlanModeEntered?(event: PlanModeEnteredEvent): void;
+  /**
+   * task-05：Bash 命令状态变更（running / completed / failed）。
+   */
+  onBashStatus?(event: BashStatusEvent): void;
+  /**
+   * task-05：Bash 命令实时输出片段（stdout / stderr）。
+   */
+  onBashChunk?(event: BashChunkEvent): void;
+  /**
+   * verify P1 返工（FR-03）：后台 Agent 任务状态（running / completed / failed）。
+   * 父组件按 task_id 维护任务卡片列表；存在 running 任务时会话不显示「已完成」。
+   */
+  onAgentTaskStatus?(event: AgentTaskStatusEvent): void;
 }
 
 export interface SessionStreamConnection {
@@ -971,9 +1188,15 @@ export function streamSession(
       handlers.onError(new Error(`Session id mismatch on ${kind} event`));
       return;
     }
-    // turn 类事件必须有 run_id
+    // turn / plan / bash 类事件必须有 run_id
     if (
-      (kind === "turn_started" || kind === "log" || kind === "turn_completed" || kind === "tokens") &&
+      (kind === "turn_started" ||
+        kind === "log" ||
+        kind === "turn_completed" ||
+        kind === "tokens" ||
+        kind === "plan_mode_entered" ||
+        kind === "bash_status" ||
+        kind === "bash_chunk") &&
       !env.run_id
     ) {
       handlers.onError(new Error(`Missing run_id on ${kind} event`));
@@ -1004,6 +1227,18 @@ export function streamSession(
       case "tokens":
         // ql-20260621：实时累积 token（每次 submit_messages 推送）。
         handlers.onTokens?.(envelope);
+        break;
+      case "plan_mode_entered":
+        handlers.onPlanModeEntered?.(parsePlanModeEnteredEvent(parsed, sessionId));
+        break;
+      case "bash_status":
+        handlers.onBashStatus?.(parseBashStatusEvent(parsed, sessionId));
+        break;
+      case "bash_chunk":
+        handlers.onBashChunk?.(parseBashChunkEvent(parsed, sessionId));
+        break;
+      case "agent_task_status":
+        handlers.onAgentTaskStatus?.(parseAgentTaskStatusEvent(parsed, sessionId));
         break;
       case "session_status":
         // session_status 不进入专门 handler（无 status 变更时静默），可选扩展。

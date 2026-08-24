@@ -176,12 +176,20 @@ execute 还有**第二道**独立的 stage 级审查：除逐 task review.json �
 ```bash
 sillyspec worktree apply <变更名>              # 校验并应用 worktree 变更到主工作区
 sillyspec worktree apply <变更名> --check-only # 只检查不应用
+sillyspec worktree apply <变更名> --skip-overlap # 主仓有并行在途变更时：跳过重叠文件，只应用非重叠子集
 sillyspec worktree assess <变更名>             # 风险审计 + 自动 apply
 sillyspec worktree list                        # 列出所有活跃 worktree
 sillyspec worktree meta <变更名>               # 读取 worktree meta.json
 sillyspec worktree cleanup <变更名>            # 清理 worktree
 sillyspec worktree doctor [--fix]              # 健康检查 + 修复
 ```
+
+**apply 并发要点（多 agent 仓库）**：
+- **主仓互斥锁**：apply / worktree cleanup / 归档收尾共用主仓级互斥锁（`.sillyspec/.runtime/main-repo.lock`，10 分钟 stale）——两会话并发对主仓的写操作会报「主仓互斥锁被占用（持有者: pid=…, change=…, 操作=…）」并退出，等对方完成重试即可；确认持有进程已崩溃时按报错里的路径删锁。等待时长可用 env `SILLYSPEC_MAIN_REPO_LOCK_TIMEOUT_MS` 调短。
+- **`--skip-overlap`**：主仓有与本次变更**同文件**的未提交改动（并行会话在途变更）时，默认整批拦截；带 `--skip-overlap` 则只应用非重叠子集，重叠文件安全留在 worktree（不覆盖主仓在途改动），输出后续指引——主仓提交/stash 后重新 apply 只补剩余文件，或确认放弃后 `cleanup --force`。优先用这条路，别再走 rescue 手动 cp。
+- **`--merge` 冲突保留现场**：--merge 遇真冲突不再直接 abort——主仓保留 merge-in-progress（冲突标记 + MERGE_HEAD），按提示编辑冲突文件 → `git add` → `git commit` 完成合并即可（无需重跑 apply）；`git merge --abort` 可放弃。若主仓有未提交改动会被合并覆盖，git 会拒绝启动合并（无现场），按提示先 commit/stash 或改用 `--skip-overlap`。
+- **派生产物基线漂移提示**：apply 输出若警告「N 个变更文件在 worktree 基线后主仓已有新提交」——多 agent 并发仓中并行变更可能已把新内容合入主仓，你 worktree 里生成的产物（api-types/generated 等）是旧基线版本，apply 会覆盖已合入内容；**apply 后必须在新基线重跑一次生成命令**（如 gen:types）再验证。
+- **worktree 目录残留清理**：apply/cleanup 输出若提示「部分清理残留」——Windows 下**勿直接 rm -rf**（会穿透 node_modules junction 删主仓依赖）：先 `cmd /c rmdir "<worktree>\node_modules"` 解链（含子模块 junction）再删目录，或跑 `sillyspec worktree doctor --fix`。
 
 ## 阶段流转
 

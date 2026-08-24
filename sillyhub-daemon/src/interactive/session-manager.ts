@@ -526,6 +526,18 @@ export class SessionManager {
   private readonly _borrowSandboxRoots = new Map<string, string>();
 
   /**
+   * task-04（FR-02）：运行中 Bash 命令内存索引。
+   *
+   * key = tool_use_id，value = { command, startTime, sessionId }。在 assistant message 的
+   * Bash tool_use 开始时写入，在对应 user message 的 tool_result 到达或 session 终态时
+   * 清理。仅内存态，不持久化。
+   */
+  private readonly _runningBashCommands = new Map<
+    string,
+    { command: string; startTime: number; sessionId: string }
+  >();
+
+  /**
    * task-07（FR-06 / D-004@v1）：空闲扫描定时器。start() 启动、stop() 清理。
    * unref 不阻止 node 退出；daemon.shutdown 显式 stop。
    */
@@ -2185,6 +2197,82 @@ export class SessionManager {
   }
 
   /**
+   * task-02 verify P0 返工（FR-02 / D-001@v1）：用户 plan 决策送达当前会话。
+   *
+   * daemon 收到 WS ``daemon:plan_response``（用户在 Web 端 PlanApprovalCard 选择
+   * confirm/revise/cancel，backend 落库后推送）后经此方法把决策注入 turn：
+   * 决策格式化为用户消息，复用 inject 进 InputQueue——当前 turn 在跑则排队到
+   * 下一 turn（spike S1 语义），turn 已结束则直接开新 turn，Agent 据此继续执行 /
+   * 修订计划 / 终止。
+   *
+   * 新旧校验：run_id 与 state.currentRunId 不一致（决策属于更早的 plan 轮，会话
+   * 已推进到后续 turn）→ warn 丢弃返回 false，不回注旧消息（inject 会把
+   * currentRunId 切回旧 run，污染日志归属）。currentRunId 为空（恢复后尚未有
+   * turn）时放行——inject 会顺带回填。
+   *
+   * 全部失败路径（session 不存在 / 已终态 / inject 抛错）只 warn 返回 false，
+   * 不向上抛——决策已在 backend session.config 落库，可经 UI 重发。
+   */
+  async resolvePlanResponse(
+    sessionId: string,
+    runId: string,
+    decision: 'confirm' | 'revise' | 'cancel',
+    feedback?: string | null,
+  ): Promise<boolean> {
+    const state = this._store.get(sessionId);
+    if (!state) {
+      // eslint-disable-next-line no-console
+      console.warn('[session-manager] plan_response_session_not_found', { sessionId });
+      return false;
+    }
+    if (state.status === 'ended' || state.status === 'failed' || state.status === 'reconnecting') {
+      // eslint-disable-next-line no-console
+      console.warn('[session-manager] plan_response_session_inactive', {
+        sessionId,
+        status: state.status,
+      });
+      return false;
+    }
+    if (state.currentRunId && state.currentRunId !== runId) {
+      // eslint-disable-next-line no-console
+      console.warn('[session-manager] plan_response_stale_run', {
+        sessionId,
+        planRunId: runId,
+        currentRunId: state.currentRunId,
+      });
+      return false;
+    }
+    const trimmed = (feedback ?? '').trim();
+    let message: string;
+    if (decision === 'confirm') {
+      message = '【计划确认】用户已确认当前计划，请按计划继续执行。';
+    } else if (decision === 'revise') {
+      message =
+        '【计划修订】用户要求修改计划后再执行。修改意见：' +
+        (trimmed || '（未填写）') +
+        '。请据此调整计划；如需再次确认，请重新提交计划摘要。';
+    } else {
+      message =
+        '【计划取消】用户已取消当前计划。原因：' +
+        (trimmed || '（未填写）') +
+        '。请停止执行该计划的后续步骤，并简要总结当前进展。';
+    }
+    try {
+      await this.inject(sessionId, message, runId);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[session-manager] plan_response_inject_failed', {
+        sessionId,
+        runId,
+        decision,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * spike D1：turn 级 interrupt。
    *   - session 不存在 / 无 query → no-op false
    *   - status=active（无 running turn）→ no-op false
@@ -2208,6 +2296,9 @@ export class SessionManager {
       state.lastActiveAt = Date.now();
       // task-08：interrupt 已生效，pending 审批不再有意义 → abortAll deny。
       this._resolversBySession.get(sessionId)?.abortAll('session_interrupted');
+      // task-04（FR-02）：interrupt 时清空本 session 运行中 Bash 命令表（命令被强制终止，
+      // 后续 tool_result 不会到达，避免内存泄漏）。
+      this._clearRunningBashCommands(sessionId);
       // task-10：interrupt 后排队 flush（currentRunId 仍在，等 result 收尾）。
       this._scheduleFlush();
     }
@@ -2423,11 +2514,14 @@ export class SessionManager {
     // 3. task-09：清借用沙箱登记（session 已终态，写守卫注册表不再需要本条）。
     this._clearBorrowSandbox(state.sessionId);
 
-    // 4. ql-20260621-partial：销毁 partial buffer（含 timer），防止 end 后定时器仍
+    // 4. task-04（FR-02）：清运行中 Bash 命令表（session 终态，后续 tool_result 不再到达）。
+    this._clearRunningBashCommands(state.sessionId);
+
+    // 5. ql-20260621-partial：销毁 partial buffer（含 timer），防止 end 后定时器仍
     //    fire 推送到已结束 session。
     this._destroyPartialBuffer(state.sessionId);
 
-    // 5. task-01 新增（D-003 / D-004 / R-01）：接通 driver kill 链。
+    // 6. task-01 新增（D-003 / D-004 / R-01）：接通 driver kill 链。
     //    Claude 句柄运行时存在 state.query（实为 ClaudeDriverHandle，经 task-01 已补
     //    close）；Codex 句柄存在 state.driverHandle（_close 已存在）。按 provider 取
     //    目标（同 _interruptInternal 的 provider 分流模式，line 1803-1805）。
@@ -2442,14 +2536,14 @@ export class SessionManager {
       /* R-01: close 异常不阻塞 terminate 流程（SDK 内部已有 SIGTERM→SIGKILL 升级兜底）。 */
     }
 
-    // 6. close InputQueue（给 stdin EOF；幂等，已 closed 不抛）。
+    // 7. close InputQueue（给 stdin EOF；幂等，已 closed 不抛）。
     try {
       state.inputQueue.close();
     } catch {
       /* close 幂等，已 closed 不抛 */
     }
 
-    // 7. 通知 backend 终态（原 end→'ended' / fail→'failed'）。
+    // 8. 通知 backend 终态（原 end→'ended' / fail→'failed'）。
     //    ql-20260823-006：notifyBackend=false 供 restoreAndReconnect 驱逐内存
     //    残留条目用——backend 正推进 reconnecting→active，回发终态会与之竞态
     //    把刚要恢复的会话误翻 failed。
@@ -2457,7 +2551,7 @@ export class SessionManager {
       await this.deps.onSessionEnd(state.sessionId, isManual ? 'ended' : 'failed');
     }
 
-    // 8. task-10：终态从落盘集合移除后 flush（不复活 ended/failed session）。
+    // 9. task-10：终态从落盘集合移除后 flush（不复活 ended/failed session）。
     this._scheduleFlush();
   }
 
@@ -3469,6 +3563,68 @@ export class SessionManager {
             const tId = (b as { id?: string }).id;
             if (typeof tId === 'string' && tId) {
               state.subagentDepth.set(tId, msgDepth + 1);
+
+              // task-04（FR-01~03）：识别 plan / Bash / 后台任务 tool_use 并上报 backend。
+              const toolName = (b as { name?: string }).name;
+              const toolInput = (b as { input?: Record<string, unknown> }).input;
+              const runId = state.currentRunId;
+              if (typeof toolName === 'string' && runId) {
+                if (toolName === 'Bash') {
+                  const command =
+                    toolInput && typeof toolInput === 'object'
+                      ? String(toolInput['command'] ?? '')
+                      : '';
+                  this._runningBashCommands.set(tId, {
+                    command,
+                    startTime: Date.now(),
+                    sessionId: state.sessionId,
+                  });
+                  this._emitSessionEvent(state.sessionId, runId, {
+                    kind: 'bash_status',
+                    command,
+                    status: 'running',
+                  });
+                } else if (toolName === 'EnterPlanMode' || toolName === 'ExitPlanMode') {
+                  const objective =
+                    toolInput && typeof toolInput === 'object'
+                      ? String(toolInput['objective'] ?? '')
+                      : '';
+                  const rawTasks =
+                    toolInput && typeof toolInput === 'object'
+                      ? toolInput['tasks']
+                      : undefined;
+                  const tasks = Array.isArray(rawTasks)
+                    ? rawTasks.filter((t): t is string => typeof t === 'string')
+                    : [];
+                  const designSnippet =
+                    toolInput && typeof toolInput === 'object'
+                      ? String(toolInput['design_snippet'] ?? toolInput['plan'] ?? '')
+                      : '';
+                  this._emitSessionEvent(state.sessionId, runId, {
+                    kind: 'plan_mode_entered',
+                    summary: {
+                      objective,
+                      tasks,
+                      ...(designSnippet ? { design_snippet: designSnippet } : {}),
+                    },
+                  });
+                } else if (toolName === 'Task' || toolName === 'Agent') {
+                  const taskId =
+                    toolInput && typeof toolInput === 'object'
+                      ? String(toolInput['task_id'] ?? tId)
+                      : tId;
+                  const taskName =
+                    toolInput && typeof toolInput === 'object'
+                      ? String(toolInput['description'] ?? toolInput['name'] ?? toolName)
+                      : toolName;
+                  this._emitSessionEvent(state.sessionId, runId, {
+                    kind: 'agent_task_status',
+                    task_id: taskId,
+                    task_name: taskName,
+                    status: 'running',
+                  });
+                }
+              }
             }
           }
         }
@@ -3579,6 +3735,53 @@ export class SessionManager {
       return;
     }
 
+    // task-04（FR-02）：user message 的 tool_result 到达时，若匹配运行中 Bash 命令则
+    // 上报 bash_chunk + 最终 bash_status，并清理 Map。
+    if (msgType === 'user') {
+      const userContent = msgRecord['content'];
+      const runId = state.currentRunId;
+      if (runId && Array.isArray(userContent)) {
+        for (const item of userContent) {
+          if (
+            item &&
+            typeof item === 'object' &&
+            (item as { type?: string }).type === 'tool_result'
+          ) {
+            const resultToolUseId = (item as { tool_use_id?: string }).tool_use_id;
+            if (typeof resultToolUseId !== 'string' || !resultToolUseId) continue;
+            const running = this._runningBashCommands.get(resultToolUseId);
+            if (running && running.sessionId === state.sessionId) {
+              const content = (item as { content?: unknown }).content;
+              const isError = (item as { is_error?: boolean }).is_error === true;
+              const contentStr =
+                content === undefined
+                  ? ''
+                  : typeof content === 'string'
+                    ? content
+                    : JSON.stringify(content);
+              this._emitSessionEvent(state.sessionId, runId, {
+                kind: 'bash_chunk',
+                command: running.command,
+                channel: isError ? 'stderr' : 'stdout',
+                content: contentStr,
+                is_final: true,
+              });
+              const elapsedMs = Date.now() - running.startTime;
+              const exitCode = isError ? 1 : 0;
+              this._emitSessionEvent(state.sessionId, runId, {
+                kind: 'bash_status',
+                command: running.command,
+                status: isError ? 'failed' : 'completed',
+                exit_code: exitCode,
+                elapsed_ms: elapsedMs,
+              });
+              this._runningBashCommands.delete(resultToolUseId);
+            }
+          }
+        }
+      }
+    }
+
     const runId = state.currentRunId;
     if (runId) {
       await this.deps.onTurnMessage(state.sessionId, runId, msg);
@@ -3586,6 +3789,40 @@ export class SessionManager {
   }
 
   // ── ql-20260621-partial：streaming delta 缓冲节流 ──────────────────────────
+
+  /**
+   * task-04（FR-01~03）：fire-and-forget 上报会话反馈事件。
+   *
+   * 异常吞掉不阻塞 turn 主流程与 onTurnMessage 转发；仅 console.error 记日志。
+   */
+  private _emitSessionEvent(
+    sessionId: string,
+    runId: string,
+    event: import('./types.js').SessionEventForBackend,
+  ): void {
+    const cb = this.deps.onSessionEvent;
+    if (!cb) return;
+    void (async () => { await cb(sessionId, runId, event); })().catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error('[session-manager] onSessionEvent failed', {
+        sessionId,
+        runId,
+        kind: event.kind,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  }
+
+  /**
+   * task-04（FR-02）：清理指定 session 的运行中 Bash 命令表。
+   */
+  private _clearRunningBashCommands(sessionId: string): void {
+    for (const [toolUseId, meta] of this._runningBashCommands) {
+      if (meta.sessionId === sessionId) {
+        this._runningBashCommands.delete(toolUseId);
+      }
+    }
+  }
 
   /**
    * 2026-06-28-daemon-subagent-transcript task-03 / D-002@v1：从消息读归属 parentKey。

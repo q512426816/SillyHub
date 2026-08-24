@@ -45,6 +45,8 @@ DAEMON_MSG_SESSION_END = "daemon:session_end"  # Server → Daemon, FR-05
 # Daemon side runs SDK resume (task-08); echoed verbatim as
 # `daemon:session_resume` in sillyhub-daemon/src/protocol.ts.
 DAEMON_MSG_SESSION_RESUME = "daemon:session_resume"  # Server → Daemon, FR-2
+# task-02 / FR-02：前端对 plan 模式的确认/修订/取消决策，经 WS Hub 下发 daemon。
+DAEMON_MSG_PLAN_RESPONSE = "daemon:plan_response"  # Server → Daemon, FR-02
 DAEMON_MSG_PERMISSION_REQUEST = "daemon:permission_request"  # Daemon → Server, FR-07 / D-007
 DAEMON_MSG_PERMISSION_RESPONSE = "daemon:permission_response"  # Server → Daemon, FR-07 / D-007
 DAEMON_MSG_SELF_UPDATE = "daemon:self_update"  # Server → Daemon, 推送 daemon 自更新指令

@@ -69,6 +69,40 @@ export interface SessionSwitchConfigPayload {
   providerConfig: ProviderConfig | null;
 }
 
+/**
+ * task-04（FR-01~03）：session-manager 向 backend 上报的会话反馈事件联合。
+ *
+ * 仅包含 plan/Bash/agent_task 三类事件；其它工具事件不上报。
+ * 字段名用 camelCase（session-manager 内部口径），cli.ts 桥接时映射为 snake_case body。
+ */
+export type SessionEventForBackend =
+  | {
+      kind: 'plan_mode_entered';
+      summary: { objective: string; tasks: string[]; design_snippet?: string };
+    }
+  | {
+      kind: 'bash_status';
+      command: string;
+      status: 'running' | 'completed' | 'failed';
+      exit_code?: number;
+      elapsed_ms?: number;
+    }
+  | {
+      kind: 'bash_chunk';
+      command: string;
+      channel: 'stdout' | 'stderr';
+      content: string;
+      is_final: boolean;
+    }
+  | {
+      kind: 'agent_task_status';
+      task_id: string;
+      task_name: string;
+      status: 'running' | 'completed' | 'failed';
+      progress?: number;
+      message?: string;
+    };
+
 /** session 生命周期状态。 */
 export type SessionStatus =
   | 'active' // 空闲可接 inject（无 running turn）
@@ -405,6 +439,17 @@ export interface SessionManagerDeps {
   onSessionEnd: (
     sessionId: string,
     status: SessionStatus,
+  ) => void | Promise<void>;
+  /**
+   * task-04（FR-01~03）：会话反馈事件上报回调（plan/Bash/agent_task）。
+   *
+   * additive-optional：未注入时 session-manager 内部识别逻辑照常运行，但不上报 backend，
+   * 保持测试 mock 与旧构造点零影响。
+   */
+  onSessionEvent?: (
+    sessionId: string,
+    runId: string,
+    event: SessionEventForBackend,
   ) => void | Promise<void>;
   /**
    * task-10（§4.3）：元数据持久化端口。

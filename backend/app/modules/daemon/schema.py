@@ -35,6 +35,8 @@ class AgentSessionRead(BaseModel):
     # 由 router 层注入（非 ORM 字段）；FR-05 deleted_at 软删时间戳（ORM 直接映射）。
     title: str | None = None
     deleted_at: datetime | None = None
+    # 2026-08-24：会话归档时间戳（archived_at）。NULL = 可见；非 NULL = 已归档。
+    archived_at: datetime | None = None
     # 当前运行 run（attach 恢复 currentRunId，启用打断按钮；非 ORM 字段，router 注入）
     current_run_id: uuid.UUID | None = None
     # 2026-08-05-daemon-kill-channel-unify task-13 / FR-04 / design §5 Phase4：
@@ -786,3 +788,109 @@ class TeamMissionSummary(BaseModel):
     scope_workspace_ids: list[str]
     budget_usd: float | None
     workers: list[TeamMissionWorkerSummary] = Field(default_factory=list)
+
+
+# ── Plan / bash / agent_task SSE 事件与 plan 响应 DTO ─────────────────────────
+# （2026-08-24-platform-session-feedback-fix task-01 / design §接口定义）
+# daemon 经 HTTP 上报、后端转 Redis pub/sub（agent_session:{id} 频道）推前端
+# 的实时事件契约，外加前端 plan 响应请求体（task-02 plan-response 端点复用）。
+# 事件不落库（design §数据模型：无新增持久化表，历史回放依赖 AgentRunLog 流）。
+
+
+class PlanSummary(BaseModel):
+    """PlanModeEnteredEvent.summary——plan 模式计划概要。"""
+
+    objective: str
+    tasks: list[str]
+    design_snippet: str | None = None
+
+
+class PlanModeEnteredEvent(BaseModel):
+    """``plan_mode_entered`` 事件——Agent 进入 plan 模式请求确认（FR-01）。
+
+    前端收到后渲染 PlanApprovalCard，会话进入 plan_pending 态。
+    """
+
+    event: Literal["plan_mode_entered"] = "plan_mode_entered"
+    session_id: uuid.UUID
+    run_id: uuid.UUID
+    summary: PlanSummary
+    requested_at: str  # ISO 8601 UTC
+
+
+class BashStatusEvent(BaseModel):
+    """``bash_status`` 事件——Bash 命令开始/结束状态（FR-02）。
+
+    running 时前端渲染/更新 BashProgressCard，completed/failed 携带
+    exit_code / elapsed_ms 收尾。
+    """
+
+    event: Literal["bash_status"] = "bash_status"
+    session_id: uuid.UUID
+    run_id: uuid.UUID
+    command: str
+    status: Literal["running", "completed", "failed"]
+    exit_code: int | None = None
+    elapsed_ms: int | None = None
+
+
+class BashChunkEvent(BaseModel):
+    """``bash_chunk`` 事件——Bash 命令实时输出块（FR-02）。
+
+    发布侧（run_sync publish_bash_chunk_event）做 100ms 节流与 8KB 单条
+    截断，DTO 本身不限制 content 长度。
+    """
+
+    event: Literal["bash_chunk"] = "bash_chunk"
+    session_id: uuid.UUID
+    run_id: uuid.UUID
+    command: str
+    channel: Literal["stdout", "stderr"]
+    content: str
+    is_final: bool = False
+
+
+class AgentTaskStatusEvent(BaseModel):
+    """``agent_task_status`` 事件——Agent 任务粒度状态（FR-03）。"""
+
+    event: Literal["agent_task_status"] = "agent_task_status"
+    session_id: uuid.UUID
+    run_id: uuid.UUID
+    task_id: str
+    task_name: str
+    status: Literal["running", "completed", "failed"]
+    progress: int | None = None
+    message: str | None = None
+
+
+class PlanResponseDecision(enum.StrEnum):
+    """plan 响应决策（前端 → 后端，design §接口定义）。
+
+    py312 StrEnum（ruff UP042）：成员即 str（``PlanResponseDecision.revise ==
+    "revise"``），替代 ``(str, enum.Enum)`` 双继承，序列化行为不变。
+    """
+
+    confirm = "confirm"
+    revise = "revise"
+    cancel = "cancel"
+
+
+class PlanResponseRequest(BaseModel):
+    """plan 响应请求体（task-02 ``plan-response`` 端点复用）。
+
+    decision 为 revise / cancel 时 feedback 必填且非空白。
+    """
+
+    session_id: uuid.UUID
+    run_id: uuid.UUID
+    decision: PlanResponseDecision
+    feedback: str | None = None  # revise/cancel 时必填
+
+    @model_validator(mode="after")
+    def _validate_feedback_required(self) -> "PlanResponseRequest":
+        """revise / cancel 必须携带非空白 feedback（design §接口定义）。"""
+        if self.decision in (PlanResponseDecision.revise, PlanResponseDecision.cancel) and (
+            not self.feedback or not self.feedback.strip()
+        ):
+            raise ValueError("decision 为 revise/cancel 时 feedback 必填且不可为空白")
+        return self

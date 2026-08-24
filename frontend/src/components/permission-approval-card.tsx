@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Check, ShieldAlert, X } from "lucide-react";
+import { Check, Minimize2, ShieldAlert, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +32,15 @@ export interface PermissionApprovalCardProps {
   request: SessionPermissionRequest;
   /** 卡片被移除时回调（permission_resolved SSE / 父组件清空时触发）。 */
   onResolved?: (requestId: string, decision: "allow" | "deny") => void;
+  /**
+   * task-08（FR-04 / D-003@v1）：最小化受控态。true 时本组件渲染 null，但
+   * 保持挂载（父组件不卸载子树），还原（切回 false）后继续审批。倒计时
+   * useEffect 在最小化期间照常运行（backend 5min 超时是真相源，UI 不停表）。
+   * undefined = 现状零变化（默认展开）。
+   */
+  minimized?: boolean;
+  /** 点击卡头最小化按钮时回调（缺省不渲染按钮，向后兼容旧用法）。 */
+  onMinimize?: (requestId: string) => void;
 }
 
 /**
@@ -64,6 +73,8 @@ function formatCountdown(remainingMs: number): string {
 export function PermissionApprovalCard({
   request,
   onResolved,
+  minimized,
+  onMinimize,
 }: PermissionApprovalCardProps) {
   const [submitting, setSubmitting] = useState<"allow" | "deny" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +99,10 @@ export function PermissionApprovalCard({
     () => summarizeInput(request.input ?? {}),
     [request.input],
   );
+
+  // task-08（FR-04）：最小化时渲染 null 但**不卸载组件**——须放在全部 hooks
+  // （含倒计时 useEffect / summary useMemo）之后，hooks 调用不能条件化。
+  if (minimized) return null;
 
   const handleRespond = async (decision: "allow" | "deny") => {
     if (submitting || expired) return;
@@ -136,17 +151,30 @@ export function PermissionApprovalCard({
             </p>
           </div>
         </div>
-        <span
-          className={cn(
-            "shrink-0 font-mono text-[11px] tabular-nums",
-            remaining < 60_000
-              ? "text-destructive"
-              : "text-muted-foreground",
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span
+            className={cn(
+              "font-mono text-[11px] tabular-nums",
+              remaining < 60_000
+                ? "text-destructive"
+                : "text-muted-foreground",
+            )}
+            title="5 分钟未响应将自动拒绝"
+          >
+            {formatCountdown(remaining)}
+          </span>
+          {onMinimize && (
+            <button
+              type="button"
+              onClick={() => onMinimize(request.request_id)}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              title="最小化为右下角浮动胶囊"
+              aria-label="最小化审批卡片"
+            >
+              <Minimize2 className="h-3.5 w-3.5" />
+            </button>
           )}
-          title="5 分钟未响应将自动拒绝"
-        >
-          {formatCountdown(remaining)}
-        </span>
+        </div>
       </header>
 
       <div className="px-3 py-2">

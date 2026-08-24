@@ -777,6 +777,8 @@ class DaemonService:
         # 2026-08-22-workspace-sessions-portal / D-003@v2：scope 过滤参透传。
         workspace_id: uuid.UUID | None = None,
         change_id: uuid.UUID | None = None,
+        # 2026-08-24：会话归档过滤。
+        archived: bool = False,
     ) -> tuple[list[AgentSession], int]:
         # task-06 / FR-02：过滤参数透传（全部可选，不传 = 现状，零回归）。
         return await self._sess.list_agent_sessions(
@@ -790,6 +792,7 @@ class DaemonService:
             q=q,
             workspace_id=workspace_id,
             change_id=change_id,
+            archived=archived,
         )
 
     async def get_agent_session(
@@ -812,6 +815,21 @@ class DaemonService:
         user_id: uuid.UUID,
     ) -> None:
         await self._sess.delete_agent_session(session_id, user_id)
+
+    # 2026-08-24：会话归档/取消归档（照 delete_agent_session 一行委托模式）。
+    async def archive_session(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        await self._sess.archive_session(session_id, user_id)
+
+    async def unarchive_session(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        await self._sess.unarchive_session(session_id, user_id)
 
     async def get_agent_session_logs(
         self,
