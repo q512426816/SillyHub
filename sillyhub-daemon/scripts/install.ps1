@@ -1,4 +1,4 @@
-# install.ps1 -- SillyHub daemon 一键安装脚本（Windows PowerShell 版）。
+﻿# install.ps1 -- SillyHub daemon 一键安装脚本（Windows PowerShell 版）。
 #
 # author: qinyi
 # created_at: 2026-07-14
