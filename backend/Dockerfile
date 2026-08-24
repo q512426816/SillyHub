@@ -119,7 +119,6 @@ RUN mkdir -p /app/.cache /app/.config /app/.claude /tmp/.npm /data/spec-workspac
  && sed -i 's/\r$//' /app/docker-entrypoint.sh /app/daemon-dist/install.sh \
  && chmod +x /app/docker-entrypoint.sh \
  && sed -i 's/$/\r/' /app/daemon-dist/install.ps1 \
- && printf '\357\273\277' | cat - /app/daemon-dist/install.ps1 > /tmp/ps1tmp && mv /tmp/ps1tmp /app/daemon-dist/install.ps1 \
  && ln -sf /app/docker-entrypoint.sh /usr/local/bin/sillyhub-backend-entrypoint
 USER app
 
