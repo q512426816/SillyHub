@@ -33,6 +33,7 @@ from app.core.auth_deps import get_current_principal, require_permission_any
 from app.core.config import get_settings
 from app.core.db import get_session, get_session_factory
 from app.core.logging import get_logger
+from app.core.redis import get_redis
 from app.core.security import AccessTokenError, decode_access_token
 from app.modules.agent.schema import AgentRunLogEntry
 from app.modules.auth.api_key_service import API_KEY_PREFIX, ApiKeyService
@@ -106,6 +107,7 @@ from app.modules.daemon.service import (
     DaemonSessionNotFound,
 )
 from app.modules.daemon.session.service import get_session_readiness
+from app.modules.daemon.session_events import SESSIONS_CHANGED_CHANNEL
 
 if TYPE_CHECKING:
     # 仅类型注解用（team-mission 汇总 helper 形参）；运行时在各端点内延迟 import。
@@ -2221,6 +2223,73 @@ async def _inject_run_error_events(
             "error": run.error_detail,
         }
         yield f"data: {json.dumps(error_event, default=str)}\n\n"
+
+
+# task-04 / FR：浏览器可订阅的会话列表变更信号流。固定路径 ``/sessions/events``
+# 必须注册在参数化 ``/sessions/{session_id}/...`` 路由之前（照 GET /sessions 的
+# 注册顺序约定），否则 "events" 会被当作 {session_id} 吃掉。
+@router.get("/sessions/events")
+async def stream_sessions_events(
+    user: TaskRunAgentUser,
+) -> StreamingResponse:
+    """Stream list-change signals for the current user's sessions (task-04).
+
+    浏览器 EventSource 订阅 ``GET /api/daemon/sessions/events``，收到本人会话的
+    created / status_changed / deleted 信号后刷新列表视图（代替轮询 GET /sessions）。
+    data 帧 JSON：``event`` / ``session_id`` / ``user_id`` / ``at``（由 task-01
+    ``publish_sessions_changed`` 发布，原样透传，不做 Last-Event-ID 回放——D-006
+    Non-Goal）。
+
+    单频道 + 服务端过滤（D-005）：所有用户共享 ``SESSIONS_CHANGED_CHANNEL`` 全局
+    频道，本生成器只下发 ``user_id`` 等于当前用户的信号，他人信号静默丢弃。
+
+    连接池安全（对齐 stream_session_logs）：不注入请求级 DB session，生成器内
+    零 DB 访问——订阅期间不占用任何连接池 slot。
+    """
+    return StreamingResponse(
+        _stream_sessions_events(str(user.id)),
+        media_type="text/event-stream",
+        headers=_SESSION_SSE_HEADERS,
+    )
+
+
+async def _stream_sessions_events(user_id: str) -> AsyncGenerator[str, None]:
+    """订阅全局列表变更频道并按用户过滤下发（stream_sessions_events 的生成器体）。
+
+    帧协议（对齐 AgentService.stream_session_logs 先例）：
+    * ``: connected`` 初始注释——立即冲掉代理缓冲，让 EventSource 尽快 open；
+    * ``data: {raw}`` —— 本人信号原样透传（raw 即 publish 端 json.dumps 产物，
+      保证 ``event/session_id/user_id/at`` 字段与发布侧零漂移）；
+    * ``: keepalive`` —— 静默约 30s（get_message timeout 到点返回 None）发一条
+      注释帧维持连接；
+    * finally —— 客户端断开（GeneratorExit）或异常时 unsubscribe + close，
+      不泄漏 Redis 订阅连接。
+    """
+    redis = get_redis()
+    pubsub = redis.pubsub()
+    try:
+        yield ": connected\n\n"
+
+        await pubsub.subscribe(SESSIONS_CHANGED_CHANNEL)
+
+        while True:
+            msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=30.0)
+            if msg and msg.get("type") == "message":
+                raw = msg.get("data")
+                try:
+                    payload = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    payload = {}
+                # 单频道广播（D-005）：只下发属于当前用户的信号，其余静默跳过
+                # （跳过不产出帧，继续等下一条，不发 keepalive）。
+                if payload.get("user_id") == user_id:
+                    yield f"data: {raw}\n\n"
+            else:
+                # timeout 到点无消息 → keepalive 注释帧
+                yield ": keepalive\n\n"
+    finally:
+        await pubsub.unsubscribe(SESSIONS_CHANGED_CHANNEL)
+        await pubsub.close()
 
 
 @router.get("/sessions/{session_id}/stream")
