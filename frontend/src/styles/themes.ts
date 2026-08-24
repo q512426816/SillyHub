@@ -161,21 +161,23 @@ const aiNativeTheme: ThemeDef = {
 
 /**
  * 暗夜主题 (变更 2026-08-23-frontend-dark-theme / D-004@v1 / design §5.1)
- * 取值策略:色阶对称翻转 (见文件头),主色与语义色较浅色主题提亮一档保证深底对比度;
- * 全部取值为 Tailwind v3 默认值,禁止自调。
+ * 取值策略:色阶翻转 (见文件头) —— ql-20260824-013 用户反馈对称翻转的亮紫端刺眼,
+ * 亮端档 (600-950) 整体降一档 (violet-400→500、300→400、…),primary 同步降回
+ * violet-600 (hover 提亮 violet-500,暗色 hover 变亮的常规方向);全 Tailwind v3 默认值。
  */
 const darkTheme: ThemeDef = {
   name: 'dark',
   label: '暗夜',
   color: {
-    primary: '#8b5cf6', // violet-500 (浅色主题 primary 为 violet-600,提亮一档)
-    primaryHover: '#a78bfa', // violet-400
+    primary: '#7c3aed', // violet-600 (ql-20260824-013:原 violet-500 反馈刺眼降一档)
+    primaryHover: '#8b5cf6', // violet-500 (hover 提亮一档)
     accent: '#22d3ee', // cyan-400 (浅色主题 accent 为 cyan-600,提亮两档)
     bg: '#0f172a', // slate-900
     card: '#1e293b', // slate-800
     border: '#334155', // slate-700
-    // violet 阶对称翻转 (50↔950、100↔900、200↔800、300↔700、400↔600、500 自映):
-    // 深紫档 (50-500) 供底色/填充,亮紫档 (600-950) 供深底上的文字/强调
+    // violet 阶翻转+亮端降档 (ql-20260824-013):深紫档 (50-500) 供底色/填充不变,
+    // 亮紫档 (600-950) 各降一档供深底上的文字/强调——600 与 500 同取 violet-500
+    // (#8b5cf6,文字端起点与填充主档合流,单调无断层),往上逐档回落
     brand: {
       50: '#2e1065',
       100: '#4c1d95',
@@ -183,11 +185,11 @@ const darkTheme: ThemeDef = {
       300: '#6d28d9',
       400: '#7c3aed',
       500: '#8b5cf6',
-      600: '#a78bfa',
-      700: '#c4b5fd',
-      800: '#ddd6fe',
-      900: '#ede9fe',
-      950: '#f5f3ff',
+      600: '#8b5cf6',
+      700: '#a78bfa',
+      800: '#c4b5fd',
+      900: '#ddd6fe',
+      950: '#ede9fe',
     },
     slate: darkSlate,
     // info 统一取 accent 青 (D-003@v2 口径延续);

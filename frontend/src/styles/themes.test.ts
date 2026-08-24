@@ -194,9 +194,10 @@ describe("task-10: dark 主题取值完整性与对称翻转（2026-08-23-fronte
     expect(dark["900"]).toBe(light["50"]);
   });
 
-  it("dark brand 阶对称翻转（D-004@v1，对照 ai-native violet 阶）：50↔950 … 400↔600、500 自映", () => {
-    // dark 是 AI 紫暗色版，brand 翻转基准取 ai-native 的 violet 阶（非 blue 的 blue 阶）：
-    // 如 dark.brand[600]===浅色 brand[400]（#a78bfa）、dark.brand[50]===浅色 brand[950]（#2e1065）
+  it("dark brand 阶翻转+亮端降档（D-004@v1 + ql-20260824-013 刺眼反馈）：50-500 翻转不变、600-950 各降一档", () => {
+    // dark 是 AI 紫暗色版，brand 翻转基准取 ai-native 的 violet 阶（非 blue 的 blue 阶）。
+    // ql-20260824-013：对称翻转的亮紫端（600-950）反馈刺眼，各降一档——
+    // 600 与 500 同取 violet-500（#8b5cf6，文字端起点与填充主档合流），往上逐档回落
     const light = themes["ai-native"].color.brand;
     const dark = themes.dark.color.brand;
     expect(dark["50"]).toBe(light["950"]);
@@ -205,11 +206,11 @@ describe("task-10: dark 主题取值完整性与对称翻转（2026-08-23-fronte
     expect(dark["300"]).toBe(light["700"]);
     expect(dark["400"]).toBe(light["600"]);
     expect(dark["500"]).toBe(light["500"]);
-    expect(dark["600"]).toBe(light["400"]);
-    expect(dark["700"]).toBe(light["300"]);
-    expect(dark["800"]).toBe(light["200"]);
-    expect(dark["900"]).toBe(light["100"]);
-    expect(dark["950"]).toBe(light["50"]);
+    expect(dark["600"]).toBe(light["500"]); // violet-500（原 light[400]，降一档）
+    expect(dark["700"]).toBe(light["400"]); // violet-400（原 light[300]）
+    expect(dark["800"]).toBe(light["300"]);
+    expect(dark["900"]).toBe(light["200"]);
+    expect(dark["950"]).toBe(light["100"]);
   });
 
   it("浅色零回归（D-005@v1）：blue 与 ai-native 的 slate 十档与 Tailwind v3 默认 hex 逐值相等", () => {
@@ -220,9 +221,9 @@ describe("task-10: dark 主题取值完整性与对称翻转（2026-08-23-fronte
     }
   });
 
-  it("dark 关键取值（design §5.1，全部 Tailwind v3 默认值）：主色 / 表面 / 边框 / 语义五色", () => {
-    expect(themes.dark.color.primary).toBe("#8b5cf6");
-    expect(themes.dark.color.primaryHover).toBe("#a78bfa");
+  it("dark 关键取值（design §5.1 + ql-20260824-013，全部 Tailwind v3 默认值）：主色 / 表面 / 边框 / 语义五色", () => {
+    expect(themes.dark.color.primary).toBe("#7c3aed");
+    expect(themes.dark.color.primaryHover).toBe("#8b5cf6");
     expect(themes.dark.color.accent).toBe("#22d3ee");
     expect(themes.dark.color.bg).toBe("#0f172a");
     expect(themes.dark.color.card).toBe("#1e293b");

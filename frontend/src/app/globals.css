@@ -187,9 +187,9 @@
   /* 暗色主题覆盖块(2026-08-23-frontend-dark-theme / FR-01 / D-001@v1):
      [data-theme="dark"] 时生效,三主题(ai-native/blue/dark)之一,选择器与 blue 块同构。
      取值=themes.ts darkTheme(design §5.1,全 Tailwind v3 默认色阶):bg/card/border=
-     slate-900/800/700,primary=violet-500 提亮保深底对比,semantic 提亮至 500 系,
-     brand/slate 阶对称翻转(brand 50↔950 / slate 50↔900;slate 消费侧 tailwind config
-     走 var(--color-slate-*) 映射归另一 task,D-005@v1)。
+     slate-900/800/700,primary=violet-600(ql-20260824-013 刺眼反馈自 violet-500 降档),
+     semantic 提亮至 500 系,brand 阶翻转+亮端(600-950)降一档、slate 阶对称翻转
+     (slate 消费侧 tailwind config 走 var(--color-slate-*) 映射归另一 task,D-005@v1)。
      HSL 语义变量为 hex 等值换算(行内注释标注对应 hex);
      共享 token(radius/font/spacing/动效)不在此重复声明;
      改动须与 themes.ts 同步,禁止自行调色。
@@ -201,7 +201,7 @@
     --card: 217 33% 17%; /* =#1e293b slate-800 */
     --card-foreground: 210 40% 96%; /* =#f1f5f9 同 foreground */
 
-    --primary: 258 90% 66%; /* =#8b5cf6 violet-500,暗色提亮 */
+    --primary: 258 90% 58%; /* =#7c3aed violet-600,ql-20260824-013 亮紫刺眼降一档 */
     --primary-foreground: 0 0% 100%; /* =#ffffff */
 
     --muted: 215 25% 27%; /* =#334155 slate-700(蓝图 HSL 217 19% 27% 实为 gray-700 值,按 hex 等值规则修正) */
@@ -212,7 +212,7 @@
 
     --border: 215 25% 27%; /* =#334155 同 muted */
     --input: 215 25% 27%; /* =#334155 同 border */
-    --ring: 258 90% 66%; /* =#8b5cf6 同 primary */
+    --ring: 258 90% 58%; /* =#7c3aed 同 primary */
 
     --success: 160 84% 39%; /* =#10b981 emerald-500 */
     --success-foreground: 0 0% 100%;
@@ -223,22 +223,23 @@
     --info: 187 85% 53%; /* =#22d3ee cyan-400,与 accent 同值 */
     --info-foreground: 0 0% 100%;
 
-    --color-primary: #8b5cf6;
-    --color-primary-hover: #a78bfa; /* violet-400,暗色 hover 提亮 */
+    --color-primary: #7c3aed;
+    --color-primary-hover: #8b5cf6; /* violet-500,暗色 hover 提亮一档 */
     --color-accent: #22d3ee; /* cyan-400 */
-    /* brand 阶:dark=violet 阶对称翻转(50↔950、100↔900…500 自映),
-       深底下浅档变深、深档变浅,bg-brand-50/text-brand-600 等类名不改自动换肤 */
+    /* brand 阶:dark=violet 阶翻转+亮端降档(ql-20260824-013 刺眼反馈:
+       深紫档 50-500 供底色/填充不变,亮紫档 600-950 各降一档供文字/强调,
+       600 与 500 同取 #8b5cf6 合流),bg-brand-50/text-brand-600 等类名不改自动换肤 */
     --color-brand-50: #2e1065;
     --color-brand-100: #4c1d95;
     --color-brand-200: #5b21b6;
     --color-brand-300: #6d28d9;
     --color-brand-400: #7c3aed;
     --color-brand-500: #8b5cf6;
-    --color-brand-600: #a78bfa;
-    --color-brand-700: #c4b5fd;
-    --color-brand-800: #ddd6fe;
-    --color-brand-900: #ede9fe;
-    --color-brand-950: #f5f3ff;
+    --color-brand-600: #8b5cf6;
+    --color-brand-700: #a78bfa;
+    --color-brand-800: #c4b5fd;
+    --color-brand-900: #ddd6fe;
+    --color-brand-950: #ede9fe;
     /* slate 阶:dark 对称翻转(50↔900、100↔800…400↔500) */
     --color-slate-50: #0f172a;
     --color-slate-100: #1e293b;
@@ -267,7 +268,7 @@
     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.35);
     --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
     --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.6);
-    --shadow-primary: 0 4px 14px rgba(139, 92, 246, 0.28);
+    --shadow-primary: 0 4px 14px rgba(124, 58, 237, 0.28);
   }
 
   * {

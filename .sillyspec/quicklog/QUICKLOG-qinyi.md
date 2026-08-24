@@ -488,7 +488,14 @@
 方案：router.py scope 校验改 entry is None or 直接条件取反判越权，mypy 可收窄；语义零变化（不可见/不存在同语义 404 保留）
 结果：mypy 687 文件 0 错；ruff check+format 过；agent_log 两测试文件 36/36 绿
 
-## ql-20260824-013-b820 | 2026-08-24 08:48:23 | 前端暗色主题与三主题切换
-状态：进行中
+## ql-20260824-013-b820 | 2026-08-24 08:48:23 | 暗色主题紫色太亮刺眼调优
+状态：已完成
 关联变更：2026-08-23-frontend-dark-theme
-文件：frontend/src/styles/themes.ts, frontend/src/app/globals.css, frontend/src/styles/themes.test.ts
+文件：
+- frontend/src/styles/themes.ts（darkTheme primary 降档+brand 亮端降一档）
+- frontend/src/app/globals.css（dark 块 primary ring brand 阶 shadow-primary 同步）
+- frontend/src/styles/themes.test.ts（dark brand 断言改亮端降档口径）
+需求：暗色主题紫色太亮刺眼调优
+根因：对称翻转策略下暗色亮紫端与 primary 整体过亮，用户反馈刺眼
+方案：dark 亮端档 600-950 各降一档，primary 降回 violet-600 且 hover 提亮 violet-500；themes.ts 与 globals.css dark 块同步，全部仍取 Tailwind v3 默认值
+结果：tsc 零错误；themes.test 与 theme.test 共 18/18 绿；本地容器重建后 Playwright 实测 dark 取值全部生效；浅色两主题零触碰
