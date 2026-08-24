@@ -4006,6 +4006,112 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/plan-response": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Handle Plan Response
+         * @description Receive user's plan-mode decision and push it to the daemon (task-02 / FR-02).
+         *
+         *     校验路径与请求体中的 ``session_id`` 一致，确认当前用户拥有该会话，将决策写入
+         *     ``AgentSession.config`` 后通过现有 WebSocket Hub 下发 ``daemon:plan_response``
+         *     控制消息。返回 ``{"ok": true, "delivered": <bool>}``。
+         */
+        post: operations["handle_plan_response_api_daemon_sessions__session_id__plan_response_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/plan-mode-entered": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Notify Plan Mode Entered
+         * @description Receive daemon plan-mode-entered report and forward to frontend SSE (task-02).
+         */
+        post: operations["notify_plan_mode_entered_api_daemon_sessions__session_id__plan_mode_entered_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/bash-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Notify Bash Status
+         * @description Receive daemon bash-status report and forward to frontend SSE (task-02).
+         */
+        post: operations["notify_bash_status_api_daemon_sessions__session_id__bash_status_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/bash-chunk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Notify Bash Chunk
+         * @description Receive daemon bash-chunk report and forward to frontend SSE (task-02).
+         *
+         *     经 ``publish_bash_chunk_event`` 发布，内含 100ms 节流与 8KB 单条截断。
+         */
+        post: operations["notify_bash_chunk_api_daemon_sessions__session_id__bash_chunk_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/agent-task-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Notify Agent Task Status
+         * @description Receive daemon agent-task-status report and forward to frontend SSE (task-02).
+         */
+        post: operations["notify_agent_task_status_api_daemon_sessions__session_id__agent_task_status_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/leases/{lease_id}": {
         parameters: {
             query?: never;
@@ -9327,6 +9433,41 @@ export interface components {
              */
             origin: string;
         };
+        /**
+         * AgentTaskStatusEvent
+         * @description ``agent_task_status`` 事件——Agent 任务粒度状态（FR-03）。
+         */
+        AgentTaskStatusEvent: {
+            /**
+             * Event
+             * @default agent_task_status
+             * @constant
+             */
+            event: "agent_task_status";
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Task Id */
+            task_id: string;
+            /** Task Name */
+            task_name: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "completed" | "failed";
+            /** Progress */
+            progress?: number | null;
+            /** Message */
+            message?: string | null;
+        };
         /** ApiKeyCreateRequest */
         ApiKeyCreateRequest: {
             /** Name */
@@ -9649,6 +9790,81 @@ export interface components {
             limit: number;
             /** Offset */
             offset: number;
+        };
+        /**
+         * BashChunkEvent
+         * @description ``bash_chunk`` 事件——Bash 命令实时输出块（FR-02）。
+         *
+         *     发布侧（run_sync publish_bash_chunk_event）做 100ms 节流与 8KB 单条
+         *     截断，DTO 本身不限制 content 长度。
+         */
+        BashChunkEvent: {
+            /**
+             * Event
+             * @default bash_chunk
+             * @constant
+             */
+            event: "bash_chunk";
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Command */
+            command: string;
+            /**
+             * Channel
+             * @enum {string}
+             */
+            channel: "stdout" | "stderr";
+            /** Content */
+            content: string;
+            /**
+             * Is Final
+             * @default false
+             */
+            is_final: boolean;
+        };
+        /**
+         * BashStatusEvent
+         * @description ``bash_status`` 事件——Bash 命令开始/结束状态（FR-02）。
+         *
+         *     running 时前端渲染/更新 BashProgressCard，completed/failed 携带
+         *     exit_code / elapsed_ms 收尾。
+         */
+        BashStatusEvent: {
+            /**
+             * Event
+             * @default bash_status
+             * @constant
+             */
+            event: "bash_status";
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Command */
+            command: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "running" | "completed" | "failed";
+            /** Exit Code */
+            exit_code?: number | null;
+            /** Elapsed Ms */
+            elapsed_ms?: number | null;
         };
         /**
          * BatchMetaRequest
@@ -13079,6 +13295,33 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
+        /**
+         * PlanModeEnteredEvent
+         * @description ``plan_mode_entered`` 事件——Agent 进入 plan 模式请求确认（FR-01）。
+         *
+         *     前端收到后渲染 PlanApprovalCard，会话进入 plan_pending 态。
+         */
+        PlanModeEnteredEvent: {
+            /**
+             * Event
+             * @default plan_mode_entered
+             * @constant
+             */
+            event: "plan_mode_entered";
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            summary: components["schemas"]["PlanSummary"];
+            /** Requested At */
+            requested_at: string;
+        };
         /** PlanNodeCreate */
         PlanNodeCreate: {
             /** Overall Stage */
@@ -13297,6 +13540,36 @@ export interface components {
             /** Has Module */
             has_module?: boolean | null;
         };
+        /**
+         * PlanResponseDecision
+         * @description plan 响应决策（前端 → 后端，design §接口定义）。
+         *
+         *     py312 StrEnum（ruff UP042）：成员即 str（``PlanResponseDecision.revise ==
+         *     "revise"``），替代 ``(str, enum.Enum)`` 双继承，序列化行为不变。
+         * @enum {string}
+         */
+        PlanResponseDecision: "confirm" | "revise" | "cancel";
+        /**
+         * PlanResponseRequest
+         * @description plan 响应请求体（task-02 ``plan-response`` 端点复用）。
+         *
+         *     decision 为 revise / cancel 时 feedback 必填且非空白。
+         */
+        PlanResponseRequest: {
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            decision: components["schemas"]["PlanResponseDecision"];
+            /** Feedback */
+            feedback?: string | null;
+        };
         /** PlanReviewRequest */
         PlanReviewRequest: {
             /** Decision */
@@ -13308,6 +13581,18 @@ export interface components {
              * @default true
              */
             notify_session: boolean;
+        };
+        /**
+         * PlanSummary
+         * @description PlanModeEnteredEvent.summary——plan 模式计划概要。
+         */
+        PlanSummary: {
+            /** Objective */
+            objective: string;
+            /** Tasks */
+            tasks: string[];
+            /** Design Snippet */
+            design_snippet?: string | null;
         };
         /**
          * PlanTaskBrief
@@ -25937,6 +26222,191 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    handle_plan_response_api_daemon_sessions__session_id__plan_response_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanResponseRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notify_plan_mode_entered_api_daemon_sessions__session_id__plan_mode_entered_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlanModeEnteredEvent"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notify_bash_status_api_daemon_sessions__session_id__bash_status_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BashStatusEvent"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notify_bash_chunk_api_daemon_sessions__session_id__bash_chunk_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BashChunkEvent"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    notify_agent_task_status_api_daemon_sessions__session_id__agent_task_status_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentTaskStatusEvent"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
