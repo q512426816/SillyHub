@@ -193,3 +193,20 @@
 根因：回本机 ~/.claude resume 后，用户 settings.json 的 env 块（cc-switch 指向本机网关）优先于进程注入的供应商 env，切了 Kimi 流量串到 BigModel（400[1214] modelCode 不存在）
 方案：home 会话 + 生效供应商非空 → migrateClaudeTranscriptToIsolated 复制 jsonl 进隔离目录再回隔离 env（reload/restore 双路径，restore 顺带自愈存量）；落在 009 的 claude-transcript-dir 模块上（探测/迁移单一来源）。语义差异：本地版「isolated 已有旧副本覆盖重写」改为「跳过防回灌」（isolated 是新真相源，回灌 home 旧副本会丢增量）。本地 ql-20260821-016 的 resolveResumeConfigDir 探测语义已由远端 009 覆盖，不重复移植
 结果：claude-transcript-dir 12 用例 + config-switch 30 用例全过（合计 42）；typecheck 零错误。daemon 全量套件在部署前回归
+
+## ql-20260824-003-b1b1 | 2026-08-24 08:54:58 | (quick 任务)
+状态：进行中
+关联变更：（无）
+文件：frontend/src/components/daemon/session-panel.tsx, frontend/src/components/daemon/__tests__/session-panel-prompt.test.tsx
+
+## ql-20260824-004-9783 | 2026-08-24 08:55:08 | 修复 /sessions 会话页 live 发送的用户消息气泡上方出现空行
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel.tsx（两处 displayPrompt 拼接改走 joinAttachmentMarkers（sendFromQueue 占位轮 + handleSend 队列条目））
+- frontend/src/components/daemon/runtime-session-helpers.tsx（新增 joinAttachmentMarkers 导出（parseAttachmentMarkers 逆操作））
+- frontend/src/components/daemon/__tests__/session-panel-prompt.test.tsx（回归测试：纯函数三态 + page 模式占位轮气泡无前导换行）
+需求：修复 /sessions 会话页 live 发送的用户消息气泡上方出现空行。
+根因：61a1b709（2026-08-21-session-message-queue）在 page 模式 sendFromQueue 与 handleSend 两处把占位轮 displayPrompt 拼成标记行+换行+正文，无附件时 markerLines 为空串产出前导换行，气泡 whitespace-pre-wrap 原样渲染成空行；后端落库无此前缀且 SSE user_input 不回填，空行只存在于 live 占位轮、刷新即消失。
+方案：runtime-session-helpers 新增 joinAttachmentMarkers（parseAttachmentMarkers 逆操作，无附件原样返回正文，语义对齐 backend inject），两处拼接改走该函数。
+结果：新增 session-panel-prompt.test.tsx 4 例（纯函数 3 + page 模式组件 1）红绿对照验证——旧代码组件断言失败 expected ['\nsecond'] to include 'second'，新代码全绿；定向回归 session-panel 5 文件 81 例 + 队列/helper 4 文件 48 例全绿，tsc 零错，lint 仅存量 cn 未使用警告（非本次引入）。

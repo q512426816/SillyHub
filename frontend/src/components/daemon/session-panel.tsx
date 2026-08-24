@@ -81,6 +81,7 @@ import {
 } from "@/components/daemon/turn-timeline";
 import type { AttachmentRead } from "@/lib/api/session-attachments";
 import {
+  joinAttachmentMarkers,
   parseAttachmentMarkers,
   runTerminalTurnStatus,
 } from "@/components/daemon/runtime-session-helpers";
@@ -1156,13 +1157,15 @@ function SessionPanelPage({
       // ql-20260821-002：占位轮合成标记行——与 handleSend 入队侧逐字同构
       // （后端落库标记行同款，真实日志到达后无感接管）；kind/name 查
       // attachmentMetaRef（D-004，入队时已登记，兜底值仅防御异常路径）。
+      // ql-20260824-004：无附件时经 joinAttachmentMarkers 原样返回正文，
+      // 不再拼出前导换行（气泡 whitespace-pre-wrap 渲染出文字上方空行）。
       const markerLines = attachmentIds
         .map((id) => {
           const meta = attachmentMetaRef.current.get(id);
           return `[附件:${id}|${meta?.kind ?? "file"}|${meta?.name ?? id}]`;
         })
         .join("\n");
-      const displayPrompt = prompt ? `${markerLines}\n${prompt}` : markerLines;
+      const displayPrompt = joinAttachmentMarkers(markerLines, prompt);
       setTurnState((prev) => ({
         currentRunId: placeholderId,
         turns: [
@@ -1336,13 +1339,12 @@ function SessionPanelPage({
     const attachmentIds = pendingAttachments.map((a) => a.id);
     // ql-20260821-002：队列条目展示文本（MessageQueueBar 摘要/展开用）——附件
     // 标记行 + 原文；投递侧占位轮标记行在 sendFromQueue 依 attachmentMetaRef
-    // 重建（与后端落库标记行逐字同构）。
+    // 重建（与后端落库标记行逐字同构）。ql-20260824-004：无附件时不拼前导
+    // 换行（joinAttachmentMarkers，同 sendFromQueue 修复）。
     const markerLines = pendingAttachments
       .map((a) => `[附件:${a.id}|${a.kind}|${a.name}]`)
       .join("\n");
-    const displayPrompt = prompt
-      ? `${markerLines}\n${prompt}`
-      : markerLines;
+    const displayPrompt = joinAttachmentMarkers(markerLines, prompt);
     // D-004：登记附件元数据（onSend 只携带 ids）——先登记再入队，保证投递时可查。
     for (const a of pendingAttachments) {
       attachmentMetaRef.current.set(a.id, { kind: a.kind, name: a.name });

@@ -468,3 +468,14 @@ export function parseAttachmentMarkers(prompt: string): {
   const rest = lines.slice(i).join("\n").replace(/^\n/, "");
   return { attachments, text: rest };
 }
+
+/**
+ * 拼接附件标记行与正文（parseAttachmentMarkers 的逆操作，语义对齐 backend
+ * inject 落库口径：仅附件存在时才写 `标记行\n正文`，无附件 = 原文）。
+ * ql-20260824-004：旧拼接 `${markerLines}\n${prompt}` 在无附件（markerLines 空串）
+ * 时产出前导换行 `\n正文`，气泡 whitespace-pre-wrap 渲染出用户文字上方空行。
+ */
+export function joinAttachmentMarkers(markerLines: string, prompt: string): string {
+  if (!markerLines) return prompt;
+  return prompt ? `${markerLines}\n${prompt}` : markerLines;
+}
