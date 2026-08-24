@@ -359,9 +359,9 @@ describe("AgentSessionListResponseSchema guard", () => {
 
 /** 捕获型 fetchSse 连接桩：handlers 由被测代码赋值，测试手动触发。 */
 interface CapturedSseConnection {
-  onmessage: ((e: { data: string; lastEventId: string }) => void) | null;
+  onmessage: ((_e: { data: string; lastEventId: string }) => void) | null;
   onopen: (() => void) | null;
-  onerror: ((ev: { status?: number }) => void) | null;
+  onerror: ((_ev: { status?: number }) => void) | null;
   close: ReturnType<typeof vi.fn>;
 }
 
