@@ -79,7 +79,7 @@ describe("PpmProjectsPage / 发起团队入口", () => {
     expect(teamButton).toBeInTheDocument();
   });
 
-  it("navigates to /sessions?new=1 (直达新建预会话，ql-20260823-005) on click", async () => {
+  it("唤起悬浮会话并携带 ppm_project 页面上下文（2026-08-25-unified-floating-session FR-6 替代旧 /sessions?new=1 跳转）", async () => {
     renderPage();
 
     await waitFor(() => {
@@ -89,8 +89,16 @@ describe("PpmProjectsPage / 发起团队入口", () => {
     const teamButton = screen.getByRole("button", { name: /发起\s*团队/ });
     teamButton.click();
 
-    await waitFor(() => {
-      expect(mocks.push).toHaveBeenCalledWith("/sessions?new=1");
+    // 新契约：不再路由跳转，改写悬浮壳层 store（requestNewSession + 项目上下文）。
+    // 直接读真 store（页面消费的是真实现）：壳态进入自动新建挂起 + 携带项目 id。
+    const { useFloatingSessionStore } = await import("@/stores/floating-session");
+    const s = useFloatingSessionStore.getState();
+    expect(s.autoNewPending).toBe(true);
+    expect(s.open).toBe(true);
+    expect(s.pageContext).toEqual({
+      page_key: "ppm_project",
+      project_id: "proj-uuid-1",
     });
+    expect(mocks.push).not.toHaveBeenCalled();
   });
 });

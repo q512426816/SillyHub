@@ -35,6 +35,7 @@ import type {
   ProjectMaintenancePageReq,
   ProjectMaintenanceUpdate,
 } from "@/lib/ppm/types";
+import { useFloatingSessionStore } from "@/stores/floating-session";
 
 // 项目类型 / 状态枚举(参照源 vue 字典 pm_project_type / pm_project_status)
 // D-003/D-004:类型用 antd Tag 分类色(blue/cyan/default灰);状态用 StatusBadge 语义(statusKind)。
@@ -99,6 +100,8 @@ const fields: PpmFieldDef<Entity>[] = [
 
 export default function PpmProjectsPage() {
   const router = useRouter();
+  // 2026-08-25-unified-floating-session：发起团队改唤起悬浮会话（携带项目上下文）。
+  const requestNewSession = useFloatingSessionStore((s) => s.requestNewSession);
   // task-10:当前打开关联工作区弹窗的目标项目(null = 关闭)。
   const [linkTarget, setLinkTarget] = useState<{ id: string; name: string } | null>(
     null,
@@ -164,9 +167,16 @@ export default function PpmProjectsPage() {
             <Button
               size="small"
               type="link"
-              // ql-20260823-005：?new=1 直达新建预会话（用户反馈：发起团队应
-              // 直进会话页，不让用户再在门户手动点组头「＋」新建）。
-              onClick={() => router.push("/sessions?new=1")}
+              // 2026-08-25-unified-floating-session task-07（FR-6）：唤起悬浮
+              // 会话抽屉并携带 ppm_project 页面上下文（服务端回查注入【页面
+              // 上下文】前导，AI 首轮即知本项目；替代旧 /sessions?new=1 跳转，
+              // 门户直达路径本身保留）。
+              onClick={() =>
+                requestNewSession({
+                  page_key: "ppm_project",
+                  project_id: row.id,
+                })
+              }
             >
               发起团队
             </Button>

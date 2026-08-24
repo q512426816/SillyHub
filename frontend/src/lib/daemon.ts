@@ -828,6 +828,9 @@ export async function createSession(
   // task-13（FR-05）：预会话团队任务块透传（有值才带；后端 create 路径预建
   // 归 task-09——flush-only 同事务，失败整体回滚）。
   if (input.team_mission !== undefined) body.team_mission = input.team_mission;
+  // 2026-08-25-unified-floating-session（FR-5）：悬浮入口页面上下文透传（有值
+  // 才带；后端服务端回查注入【页面上下文】前导，缺省零回归）。
+  if (input.page_context !== undefined) body.page_context = input.page_context;
   return apiFetch<SessionCreateResponse>("/api/daemon/sessions", {
     method: "POST",
     json: body,

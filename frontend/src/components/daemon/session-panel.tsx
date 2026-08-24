@@ -157,6 +157,12 @@ export interface SessionPreContext {
   changeId?: string | null;
   /** 目标 runtime id（首句 createSession 的 runtime_id）。 */
   runtimeId: string;
+  /**
+   * 悬浮入口页面上下文（2026-08-25-unified-floating-session task-06 / FR-5 /
+   * D-006）：可选，缺省零回归；有值时随首句 createSession 上送 page_context
+   * （后端服务端白名单回查注入【页面上下文】前导）。门户三入口不传。
+   */
+  pageContext?: { page_key: "ppm_project"; project_id: string };
 }
 
 /**
@@ -1435,6 +1441,11 @@ function SessionPanelPage({
           // task-13（FR-05/D-009@v2）：弹层确认暂存的团队 payload 随首句上送
           //（有值才带；后端 create 路径预建 mission，objective 空时以首句回填）。
           ...(preTeamMission ? { team_mission: preTeamMission } : {}),
+          // 2026-08-25-unified-floating-session task-06（FR-5/D-006）：悬浮入口
+          // 页面上下文随首句上送（有值才带；后端服务端回查注入前导，缺省零回归）。
+          ...(preContext.pageContext
+            ? { page_context: preContext.pageContext }
+            : {}),
         });
         // R-02：成功才清空（失败路径输入保留在 catch 之外，可原地重试——
         // 暂存 team payload 同语义：失败保留，重试仍携带）。

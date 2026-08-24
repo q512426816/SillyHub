@@ -5,6 +5,7 @@ import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
+import { FloatingSessionHost } from "@/components/floating/floating-session-host";
 import { fetchMe } from "@/lib/auth";
 import { useSession } from "@/stores/session";
 
@@ -61,5 +62,12 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   if (!hydrated) return null;
   if (!accessToken) return null;
 
-  return <AppShell>{children}</AppShell>;
+  // 2026-08-25-unified-floating-session task-05（FR-1~4）：全局悬浮会话宿主
+  // （球+抽屉；门户三路由互斥自卸载；挂载门控见组件头约束 3）。
+  return (
+    <AppShell>
+      {children}
+      <FloatingSessionHost />
+    </AppShell>
+  );
 }
