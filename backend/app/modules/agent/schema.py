@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class AgentRunCreate(BaseModel):
@@ -248,3 +248,64 @@ class ToolFailureStats(BaseModel):
         default=0.0,
         description="tool_failed / tool_total (0.0 when tool_total == 0).",
     )
+
+
+# ── task-03 / 2026-08-24-session-team-mission-context / FR-02 / design §7：─────
+# mission_status 查询响应 DTO。数据流：producer=mcp_tools 组装（Workspace+任一
+# 成员 binding+daemon 实例+探测 helper）→ consumer=daemon mcp-server 转发 MCP
+# 工具响应 → 主控 agent（task-11）。
+
+
+class WorkerListItem(BaseModel):
+    """mission worker run 概要（原居 mcp_tools.py，task-03 上移至此）。
+
+    上移原因：schema.py 顶部 import mcp_tools 会成环（mcp_tools→service，
+    service.py 已反向 import schema），反向（mcp_tools→schema）无环。mcp_tools
+    改 from-import 并保留模块级重导出，既有
+    ``from app.modules.agent.mcp_tools import WorkerListItem`` 消费方零改动；
+    字段定义单源在此，禁止复制造成漂移。
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    role: str | None = None
+    status: str
+    objective: str | None = None
+    total_cost_usd: float | None = None
+
+
+class ScopeWorkspaceStatus(BaseModel):
+    """scope 工作区状态条目（design §7 逐字）。
+
+    组装源：``orchestrator.collect_scope_workspace_statuses``（task-01）——
+    ``daemon_name`` 取任一成员 binding 的 ``display_alias||hostname``（不限本人，
+    UB-2 口径）；``git_mode`` 为 task-02 ``probe_workspace_git_mode`` 实时探测
+    三态。
+    """
+
+    id: str
+    name: str
+    type: str | None
+    description: str | None
+    daemon_online: bool
+    daemon_name: str | None  # display_alias||hostname（任一成员 binding）
+    git_mode: str  # "git"|"direct"|"unknown"
+
+
+class MissionStatusResponse(BaseModel):
+    """``GET /missions/status`` 响应（design §7，默认值逐字对齐）。
+
+    无活跃 mission 时仅 ``active=false`` + ``hint``（D-005/D-012，不走 404），
+    其余字段保持默认值，不泄露 scope/binding 信息。
+    """
+
+    active: bool
+    hint: str | None = None  # active=false 时引导文案
+    mission_id: str | None = None
+    status: str | None = None  # 派生状态（derive_status）
+    objective: str | None = None
+    anchor_workspace: ScopeWorkspaceStatus | None = None
+    scope_workspaces: list[ScopeWorkspaceStatus] = []
+    workers: list[WorkerListItem] = []  # 复用 _list_workers_core
+    budget_usd: float | None = None

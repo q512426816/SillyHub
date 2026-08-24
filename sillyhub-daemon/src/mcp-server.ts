@@ -553,6 +553,49 @@ export function createMcpServer(
     },
   );
 
+  // ── mission_status ────────────────────────────────────────────────────────
+  // task-11（2026-08-24-session-team-mission-context / FR-02 / D-005@v1）：第 6
+  // 个常驻工具——只读查询当前会话团队任务状态。参数全可选（X-Session-Id 会话
+  // 上下文定位，显式传参仅作越权校验锚，同 task-10 审查 B1 模式）。无活跃
+  // mission 时 backend 200 active=false（D-012 不走 404），handler 不报错。
+  server.registerTool(
+    'mission_status',
+    {
+      title: 'Mission Status',
+      description:
+        '查询当前会话团队任务状态（只读，随时可调）。' +
+        '【返回内容】mission 概要（objective/status/budget_usd）；派发范围工作区列表 ' +
+        'scope_workspaces（每项含绑定机器名 daemon_name、在线状态 daemon_online、' +
+        'git 模式 git_mode=git隔离|直通|未知）；分身列表 workers（role/status/' +
+        'objective/费用）。' +
+        '【何时使用】派团队前可先查 scope 与机器状态（确认目标工作区已绑机器且在线）；' +
+        '无活跃任务返回 active=false，可先查再派；派发后与 list_workers 互补查看整体进展。' +
+        '优先按当前会话上下文定位 mission；mission_id/workspace_id 可选，' +
+        '仅作显式越权校验锚。',
+      inputSchema: {
+        workspace_id: z
+          .string()
+          .optional()
+          .describe('Optional anchor workspace UUID (validation anchor only)'),
+        mission_id: z
+          .string()
+          .optional()
+          .describe('Optional mission UUID (resolved from session context when omitted)'),
+      },
+    },
+    async (args) => {
+      try {
+        const result = await client.getMissionStatus(
+          args.workspace_id,
+          args.mission_id,
+        );
+        return okContent(result);
+      } catch (e) {
+        return errorContent('mission_status', e);
+      }
+    },
+  );
+
   return { server };
 }
 

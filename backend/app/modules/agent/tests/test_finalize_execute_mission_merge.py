@@ -310,3 +310,47 @@ class TestFinalizeExecuteErrorTreatedAsConflict:
 
         assert result.merged_branches == []
         assert result.pending_conflicts == []  # 无 conflict markers，但也不计 merged
+
+
+# ── 混合 mission（task-14 / D-007@v1 直通+git 并存）────────────────────────
+
+
+class TestFinalizeExecuteMixedDirectAndGitWorkers:
+    @pytest.mark.asyncio
+    async def test_mixed_mission_merges_only_git_worker_branch(
+        self, db_session: AsyncSession
+    ) -> None:
+        """直通 worker（worktree_branch=None）+ git worker（branch 落列）混合 mission
+        → finalize 只合并后者：git_merge 恰调一次且 branch 为 git worker 的，
+        merged_branches 只含该 branch（直通 worker 在工作区根直写，无副本可合）。
+
+        2026-08-24-session-team-mission-context task-14 收尾补例——task-05 已在
+        dispatch 侧断言直通 worker 不建 worktree（worktree_branch 保持 None），
+        本例补 converge/finalize 侧的天然跳过证据。"""
+        ws = await _make_workspace(db_session)
+        mission = await _make_mission(db_session, ws.id)
+        await _make_worker(
+            db_session, mission.id, worktree_branch=None, diff_summary="diff --git a/d.py b/d.py"
+        )
+        b_git = "workers/bbbbbbbb"
+        await _make_worker(
+            db_session, mission.id, worktree_branch=b_git, diff_summary="diff --git a/g.py b/g.py"
+        )
+
+        merge_calls: list[str] = []
+        delegate = MagicMock()
+        delegate.git_worktree_add = AsyncMock()
+        delegate.git_worktree_remove = AsyncMock()
+
+        async def _git_merge(workspace, *, worker_branch: str) -> dict:
+            merge_calls.append(worker_branch)
+            return {"ok": True, "conflicts": [], "merged_files": ["g.py"], "error": None}
+
+        delegate.git_merge = _git_merge
+        fin = FinalizerService(db_session, None, host_fs_delegate=delegate)
+
+        result = await fin.finalize_execute_mission(mission.id)
+
+        assert merge_calls == [b_git], "直通 worker（无 branch）不应触发 git_merge"
+        assert result.merged_branches == [b_git]
+        assert result.pending_conflicts == []

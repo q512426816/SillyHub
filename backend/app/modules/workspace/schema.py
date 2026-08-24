@@ -322,3 +322,37 @@ class PpmProjectBrief(BaseModel):
     project_id: uuid.UUID
     project_name: str | None = None
     project_status: str | None = None
+
+
+# ── 批量探测 DTO（2026-08-24-session-team-mission-context task-10 / FR-03 / D-008@v2）──
+# 弹层机器状态统一走后端 POST /api/workspaces/probe（design §5.C）：任一成员
+# binding 口径消除本人/他人 binding 展示不一致（UB-2），三字段与 mission_status
+# 的 scope_workspaces 完全同源（orchestrator.collect_single_workspace_status +
+# host_fs delegate probe_workspace_git_mode）。
+
+
+class WorkspaceProbeRequest(BaseModel):
+    """Request body for ``POST /api/workspaces/probe``。
+
+    ``workspace_ids`` 非空、上限 20（对齐 mission scope 上限口径）；元素为
+    UUID——非法格式由 Pydantic 422。查无行（缺失）的 id 由 handler 跳过不报错
+    （与 collect_scope_workspace_statuses 无效 id 跳过同语义，fail-safe 不 5xx）。
+    """
+
+    workspace_ids: list[uuid.UUID] = Field(min_length=1, max_length=20)
+
+
+class WorkspaceProbeItem(BaseModel):
+    """单工作区探测结果项（``POST /api/workspaces/probe`` 响应元素）。
+
+    - ``git_mode``：三态 ``"git"|"direct"|"unknown"``（实时探测不缓存，R-02；
+      RPC 失败/未绑 daemon 归 unknown 不抛）。
+    - ``daemon_name``：任一成员 binding daemon 的 ``display_alias or hostname``
+      （未绑/daemon 行缺失 → None）。
+    - ``daemon_online``：该 binding daemon 的在线态。
+    """
+
+    workspace_id: uuid.UUID
+    git_mode: Literal["git", "direct", "unknown"]
+    daemon_name: str | None = None
+    daemon_online: bool

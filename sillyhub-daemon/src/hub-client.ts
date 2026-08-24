@@ -1415,6 +1415,34 @@ export class HubClient {
     );
   }
 
+  /**
+   * task-11（2026-08-24-session-team-mission-context / FR-02）：查当前会话团队
+   * 任务状态（mission_status 常驻工具的 client 方法，只读）。
+   *
+   * 端点：GET _missionActionPath(action='status')——ws/mid 缺省时 session-scoped
+   * 形态 ``/api/missions/status``（backend task-03 契约，按 ``X-Session-Id`` 定位）；
+   * 显式传参走 ``/api/workspaces/{ws}/missions/{mid}/status``（越权校验锚）。
+   *
+   * 响应（backend ``MissionStatusResponse``）：``{ active, hint?, mission_id?,
+   * status?, objective?, anchor_workspace?, scope_workspaces[], workers[],
+   * budget_usd? }``。**无活跃 mission 时 200 ``active=false`` + hint**（D-005@v1
+   * 优雅返回，不走 404）——2xx 即原样返回，由调用方（工具层）透传不报错。
+   *
+   * 瘦客户端惯例：不缓存不重试，非 2xx 抛 HubHttpError、网络错误透传 fetch
+   * 原始异常（同既有 5 方法）。
+   */
+  async getMissionStatus(
+    workspaceId: string | undefined,
+    missionId: string | undefined,
+  ): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>(
+      'GET',
+      this._missionActionPath(workspaceId, missionId, 'status'),
+      undefined,
+      this._sessionIdHeaders(),
+    );
+  }
+
   // -- task-05（2026-08-23-agent-file-upload-mcp / D-005@v1）：agent 文件制品通道 --
   //
   // 端点挂在 agent router（/api 前缀，非 REST_PREFIX=/api/daemon），与 5 个编排

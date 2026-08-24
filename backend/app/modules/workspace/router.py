@@ -37,6 +37,8 @@ from app.modules.workspace.schema import (
     ScanResponse,
     WorkspaceCreate,
     WorkspaceListResponse,
+    WorkspaceProbeItem,
+    WorkspaceProbeRequest,
     WorkspaceRead,
     WorkspaceStructureDTO,
     WorkspaceUpdate,
@@ -156,6 +158,49 @@ async def create_workspace(
     if notice:
         ws_read.creation_notice = _creation_notice(notice)
     return ws_read
+
+
+@router.post("/probe", response_model=list[WorkspaceProbeItem])
+async def probe_workspaces(
+    payload: WorkspaceProbeRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission_any(Permission.WORKSPACE_WRITE))],
+) -> list[WorkspaceProbeItem]:
+    """批量探测工作区 git 模式 + 绑定机器状态（task-10 / FR-03 / D-008@v2 / design §5.C）。
+
+    弹层机器状态统一后端口径（任一成员 binding，含他人绑定，消除本人/他人
+    binding 展示不一致 UB-2）：``git_mode/daemon_name/daemon_online`` 三字段与
+    mission_status 的 scope_workspaces 完全同源——逐工作区经
+    ``orchestrator.collect_single_workspace_status``（task-01 单 ws 收集共享
+    函数，口径单一来源）+ ``probe_workspace_git_mode``（task-02 三态探测）组装。
+
+    只读无状态变化（design §7.5）；每次调用实时探测不缓存（R-02）；探测 RPC
+    失败/未绑 daemon 归 ``unknown`` 不抛 5xx（fail-safe）。查无行的 workspace_id
+    跳过不报错（与 collect_scope 无效 id 跳过同语义）。
+    """
+    from app.modules.agent.orchestrator import collect_single_workspace_status
+    from app.modules.daemon.host_fs import new_host_fs_delegate
+
+    # delegate per-request 构造 + 探测回调注入——与 mission_status 路由
+    # （mcp_tools._mission_status_core）同款接线，三字段口径完全同源。
+    delegate = new_host_fs_delegate(session)
+    items: list[WorkspaceProbeItem] = []
+    for ws_id in payload.workspace_ids:
+        ws = await session.get(Workspace, ws_id)
+        if ws is None:
+            continue
+        entry = await collect_single_workspace_status(
+            session, ws, git_probe=delegate.probe_workspace_git_mode
+        )
+        items.append(
+            WorkspaceProbeItem(
+                workspace_id=ws_id,
+                git_mode=entry["git_mode"],
+                daemon_name=entry["daemon_name"],
+                daemon_online=entry["daemon_online"],
+            )
+        )
+    return items
 
 
 @router.post("/{workspace_id}/activate", response_model=WorkspaceRead)

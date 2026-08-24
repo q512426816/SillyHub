@@ -65,8 +65,14 @@ async def _make_worker(session: AsyncSession, *, mission_id: uuid.UUID) -> Agent
 
 
 def _make_delegate_mock(*, ok: bool, worktree_path: str | None = None, error: str | None = None):
-    """Build a fake HostFsDelegate with git_worktree_add as a recording AsyncMock."""
+    """Build a fake HostFsDelegate with git_worktree_add as a recording AsyncMock.
+
+    task-05（2026-08-24-session-team-mission-context）：本文件用例均验「探测=git
+    → 照旧 worktree」链路，probe 固定返 "git"（direct/unknown 分支见
+    test_dispatch_worker_direct_mode.py）。仅 mock 补齐，断言零改动。
+    """
     delegate = MagicMock()
+    delegate.probe_workspace_git_mode = AsyncMock(return_value="git")
     delegate.git_worktree_add = AsyncMock(
         return_value={
             "ok": ok,

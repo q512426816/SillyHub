@@ -123,16 +123,41 @@ def worker_tool_config(read_only: bool) -> dict[str, object]:
     }
 
 
-def render_worker_prompt(run: AgentRun) -> str:
+def render_worker_prompt(run: AgentRun, *, mode: str = "git") -> str:
     """Render a Worker's execution prompt from its delegation objective.
 
     task-04（2026-07-12-worker-worktree-isolation）：末尾追加 per-worker
     worktree 协作约束（design §5.1 步骤4 + D-002@v1 + D-003@v1）——每个
     worker 在自己的 git worktree 副本里产出可合并的 commit，验证与合并
     留 converge 阶段主 agent 统一处理。
+
+    task-05（2026-08-24-session-team-mission-context / FR-04 / design §5.D）：
+    新增可选 ``mode`` 参数（缺省 "git" = 既有文案，既有调用方零改动）。仅
+    ``mode="direct"``（工作区根经 task-02 探测**确证**非 git checkout；RPC 故障
+    是 unknown 走现状，不是 direct）切换直通变体，两段调整：①「worktree 协作
+    约束」块替换为直通约束（无 commit 指令：直接在工作区目录内工作、改动
+    立即生效、无隔离副本；同目录可能有其它分身，避免并行写同一文件）；
+    ②结果落盘段去掉「随 commit 提交」——直通无 commit 可推，产物按 run_id
+    收 AgentArtifact（get_worker_result 不依赖 worktree_branch），落盘要求保留。
     """
     role = run.role or "worker"
     objective = run.objective or "(未指定目标)"
+    if mode == "direct":
+        return (
+            f"你是多 Agent 团队中的一个 Worker（角色：{role}）。\n"
+            f"你的目标：{objective}\n\n"
+            "完成目标后，输出一份结构化摘要（发现/结论/产出文件路径/风险），"
+            "供 Coordinator 收敛。不要输出与目标无关的内容。\n"
+            "【结果落盘（必须遵守）】把任务产出的正文内容（清单/报告/结论等）"
+            "写入一份文件（如 results.md 或与目标匹配的产物文件）"
+            "——主 agent 通过 get_worker_result 按 run_id 收取落盘产物"
+            "（artifact），只写在对话里的结果它拿不到。\n\n"
+            "【直通工作区约束（必须遵守）】\n"
+            "你直接在工作区目录内工作，改动立即生效、无隔离副本（没有待合并的"
+            "分支副本，改动直接落在工作区）；同目录可能有其它分身并行工作，"
+            "避免并行写同一文件——严格在主 agent 指示你负责的文件/模块范围内"
+            "修改，不要动其他 worker 负责的文件。"
+        )
     return (
         f"你是多 Agent 团队中的一个 Worker（角色：{role}）。\n"
         f"你的目标：{objective}\n\n"
@@ -247,17 +272,61 @@ class MissionExecutionService:
         provider = (ws.default_agent if ws else None) or "claude"
         model = ws.default_model if ws else None
 
+        # task-05（2026-08-24-session-team-mission-context / FR-04 / D-006@v2 /
+        # D-007@v1 / design §5.D）：worktree 块前三态 git 模式探测分流。仅当
+        # delegate 注入、ws/root_path 就绪、且非 caller worktree 形态
+        # （worktree_path 为空——路径A :242-243 语义不动，caller worktree 与
+        # worker_prompt 覆写两形态不受探测影响）时探测；其余情形（含
+        # delegate=None）一律视 unknown 走现状。probe 契约（task-02）内部已把
+        # transport 异常 / HostFsDelegateUnavailable / 超时归 unknown 不向 caller
+        # 抛；此处 except 是防御性兜底（如 delegate 替身未实现 probe），任何
+        # 意外异常同样归 unknown——绝不归 direct（D-006@v2：宁可走现状
+        # worktree 路径 / worktree_create_failed 也不误直通）。
+        git_mode: str = "unknown"
+        if (
+            self._host_fs_delegate is not None
+            and ws is not None
+            and root_path
+            and not worktree_path
+        ):
+            try:
+                git_mode = await self._host_fs_delegate.probe_workspace_git_mode(ws)
+            except Exception as exc:
+                log.warning(
+                    "mission_worker_git_mode_probe_failed",
+                    run_id=str(run.id),
+                    workspace_id=str(effective_target),
+                    error=type(exc).__name__,
+                )
+                git_mode = "unknown"
+        if git_mode == "direct":
+            # direct（daemon 真答 .git exists=False，确证非 git checkout）：跳过
+            # 下方 worktree 创建块——root_path 保持上方 resolve_root_path_for_daemon
+            # (ws.root_path)（工作区根即 worker cwd）；run.worktree_branch 保持
+            # None（路径A 语义，D-007@v1：finalizer 合并/清理只选 NOT NULL，直通
+            # worker 天然跳过）；lease metadata 不写 branch——ws.default_branch
+            # 回退在 direct 分支旁路，dispatch_to_daemon 传 branch=None。
+            branch = None
+            log.info(
+                "mission_worker_direct_mode",
+                run_id=str(run.id),
+                workspace_id=str(effective_target),
+            )
+
         # task-03（D-001@v2 / D-005@v2）：per-worker worktree 隔离。
         # worktree 放 workspace 内 ``.worktrees/<run.id 短8>/``（非父目录 sibling
         # ——daemon ``allowed_roots`` 只含 ``ws.root_path``，父目录会被
         # ``assertWithinAllowedRoots`` 拒绝，design §7 路径策略）。
         # workspace 需在 ``.gitignore`` 排除 ``.worktrees/`` 防污染（运行时产物，
         # 非 backend 代码，本变更不动 backend/.gitignore）。
+        # task-05：git / unknown 照旧进入本块（unknown=维持现状，失败按
+        # worktree_create_failed 既有语义，绝不降级直通）；direct 旁路。
         if (
             self._host_fs_delegate is not None
             and ws is not None
             and root_path
             and not worktree_path
+            and git_mode != "direct"
         ):
             run_id_short = str(run.id)[:8]
             sibling_path = f"{root_path}/.worktrees/{run_id_short}"
@@ -329,9 +398,14 @@ class MissionExecutionService:
             )
 
         # task-02（D-001@v1 方案A）：caller 全权覆写 worker prompt（含"不 commit /
-        # 不越界 allowedPaths"指令）；不传 → 原 render_worker_prompt（含 commit 协作
+        # 不越界 allowedPaths"指令）；不传 → render_worker_prompt（含 commit 协作
         # 约束，team 模式不变）。design §7.4 逐字。
-        prompt = worker_prompt if worker_prompt is not None else render_worker_prompt(run)
+        # task-05（design §5.D）：未覆写时按探测结果选变体——git/unknown 渲染
+        # 既有 worktree 约束文案（unknown=维持现状），direct 渲染直通变体
+        # （无 commit 指令）；caller 显式覆写优先，探测不影响。
+        prompt = (
+            worker_prompt if worker_prompt is not None else render_worker_prompt(run, mode=git_mode)
+        )
         try:
             # task-04（D-001@v2）：dispatch_to_daemon 传 representative_fallback 旗标：
             # target≠anchor 时旗标开（走代表 binding）；target==anchor 时旗标关（维持 borrow）。

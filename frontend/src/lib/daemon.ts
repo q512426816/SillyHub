@@ -630,6 +630,12 @@ export type InteractiveProvider = "claude" | "codex";
  * manual_approval/ask_user_only 在后端 pydantic 有 default → OpenAPI 标记为必填，
  * 但客户端允许省略（省略即走后端默认 true），故 Omit 后放宽为可选——
  * 字段集合/命名仍锚定生成 schema，漂移会在 gen:types 时暴露。
+ *
+ * task-13（2026-08-24-session-team-mission-context / FR-05 / D-009@v2）：可选
+ * team_mission 块（预会话弹层确认后暂存、首句随 create 上送；后端 create 路径
+ * 预建已由 task-09 落地）。task-14 gen:types 后生成版 SessionCreateRequest 已
+ * 自带 team_mission?: TeamMissionCreateBlock——本类型的 team_mission 局部扩展
+ * 已收敛（不再覆写，直接继承生成字段），漂移由 tsc 暴露。
  */
 export type SessionCreateRequest = Omit<
   components["schemas"]["SessionCreateRequest"],
@@ -640,6 +646,16 @@ export type SessionCreateRequest = Omit<
   /** 省略 = 后端默认 true。 */
   ask_user_only?: boolean;
 };
+
+/**
+ * task-13（FR-05 / D-010@v1）→ task-14 收敛：createSession 的 team_mission 块。
+ * 字段集合 = 后端 TeamMissionCreateBlock 七字段（objective/scope_workspace_ids/
+ * project_id/budget_usd/worker_preset/main_agent_config/orchestrator_workspace_id）。
+ * gen:types（task-14）后不再手写交集，直接别名生成版——单一来源，后端改字段
+ * 时 gen + tsc 即暴露。弹层侧构造用更精确的组件内类型（WorkerPresetItem[] 等），
+ * 精确 → 宽松结构安全，见 team-trigger-popover.tsx TeamTriggerPayload 注释。
+ */
+export type SessionCreateTeamMission = components["schemas"]["TeamMissionCreateBlock"];
 
 export interface SessionCreateResponse {
   session_id: string;
@@ -687,6 +703,9 @@ export async function createSession(
   }
   if (input.change_id !== undefined) body.change_id = input.change_id;
   if (input.workspace_id !== undefined) body.workspace_id = input.workspace_id;
+  // task-13（FR-05）：预会话团队任务块透传（有值才带；后端 create 路径预建
+  // 归 task-09——flush-only 同事务，失败整体回滚）。
+  if (input.team_mission !== undefined) body.team_mission = input.team_mission;
   return apiFetch<SessionCreateResponse>("/api/daemon/sessions", {
     method: "POST",
     json: body,

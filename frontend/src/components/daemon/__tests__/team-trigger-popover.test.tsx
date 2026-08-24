@@ -17,17 +17,32 @@
 //      main_agent_config；未展开（默认）不带（走主控自动拆解 / 服务端默认）；
 //   7. 取消回调 onClose。
 //
+// task-12（2026-08-24-session-team-mission-context / FR-03 / FR-06 / D-008@v2 /
+// D-010@v1）追加覆盖（文末新 describe，既有断言不动）：
+//   8. 弹层打开即对候选集（workspaceId）probe 一次（POST /api/workspaces/probe
+//      via @/lib/api apiFetch），无轮询；项目切换候选集变化补拉一次（同候选集不重复）；
+//   9. 工作区行（scope 多选 + 当前工作区卡）meta：机器名（daemon_name）+ 在线 dot
+//      （on/off/none 三态）+ git 模式标签（git 隔离/非 git · 直通/模式未知）；
+//      未绑（daemon_name=null）显示「未绑机器」；
+//  10. 主 agent（项目经理）选择器仅 preSession 实例渲染：默认「当前会话」+
+//      scope 已选工作区选项；daemon_online=false/未绑 → option disabled；确认
+//      payload.orchestrator_workspace_id（选工作区=其 id、默认=null）；非 preSession
+//      实例不渲染选择器且 payload 不含该字段；
+//  11. probe 失败 fail-safe：meta 标签缺失不阻断弹层可用（确认照常回调）。
+//
 // 测试纪律：FIRST / AAA / 仅 mock 网络层（@/lib/ppm/project listProjects +
-// @/lib/workspace listProjectWorkspaces）；组件纯受控（onTrigger/onClose 回调），
+// @/lib/workspace listProjectWorkspaces + @/lib/api apiFetch——probe 为组件文件内
+// module-level 函数，网络边界即 apiFetch）；组件纯受控（onTrigger/onClose 回调），
 // API 调用归 session-panel（父层）。组件不用 antd（对齐段族惯例，规避中文
 // autoLetterSpacing 拆分坑），getByText/getByRole 直接可用。
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 
 import { TeamTriggerPopover } from "../team-trigger-popover";
 import { listProjects } from "@/lib/ppm/project";
 import { listProjectWorkspaces } from "@/lib/workspace";
+import { apiFetch } from "@/lib/api";
 import type { TeamMissionTriggerRequest } from "@/lib/daemon";
 
 vi.mock("@/lib/ppm/project", async () => {
@@ -44,8 +59,14 @@ vi.mock("@/lib/workspace", async () => {
   return { ...actual, listProjectWorkspaces: vi.fn() };
 });
 
+vi.mock("@/lib/api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+  return { ...actual, apiFetch: vi.fn() };
+});
+
 const listProjectsMock = vi.mocked(listProjects);
 const listProjectWorkspacesMock = vi.mocked(listProjectWorkspaces);
+const apiFetchMock = vi.mocked(apiFetch);
 
 /* ───────── fixture ───────── */
 
@@ -84,10 +105,14 @@ const HANDLERS = {
   onClose: vi.fn(),
 };
 
-/** last payload（断言便捷）。 */
-function lastPayload(): TeamMissionTriggerRequest {
+/** last payload（断言便捷）。task-12：preSession 实例追加 orchestrator_workspace_id（组件内类型交集，task-13 归 lib）。 */
+function lastPayload(): TeamMissionTriggerRequest & {
+  orchestrator_workspace_id?: string | null;
+} {
   const calls = HANDLERS.onTrigger.mock.calls;
-  return calls[calls.length - 1]![0] as TeamMissionTriggerRequest;
+  return calls[calls.length - 1]![0] as TeamMissionTriggerRequest & {
+    orchestrator_workspace_id?: string | null;
+  };
 }
 
 function setup(overrides: Record<string, unknown> = {}) {
@@ -107,6 +132,8 @@ beforeEach(() => {
   // 默认项目加载失败 → 仅当前工作区（各用例按需覆盖）。
   listProjectsMock.mockResolvedValue([]);
   listProjectWorkspacesMock.mockResolvedValue([]);
+  // 默认 probe 空响应 → meta 行不渲染（既有用例渲染不变；新用例按需覆盖）。
+  apiFetchMock.mockResolvedValue([]);
 });
 
 /* ───────── 1/2. 渲染默认 + 最小 payload ───────── */
@@ -328,5 +355,306 @@ describe("TeamTriggerPopover 取消", () => {
       (screen.getByRole("button", { name: /派发中/ }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
+  });
+});
+
+/* ───────────────── 8. task-12：弹层 probe 一次拉取（无轮询） ───────────────── */
+
+const CURRENT_WS_ID = "11111111-2222-3333-4444-555555555555";
+
+/** task-10 probe 契约响应项 fixture（组件文件内本地类型的字面量形态）。 */
+function probeItem(
+  workspace_id: string,
+  overrides: Partial<{
+    git_mode: "git" | "direct" | "unknown";
+    daemon_name: string | null;
+    daemon_online: boolean;
+  }> = {},
+) {
+  return {
+    workspace_id,
+    git_mode: "git" as const,
+    daemon_name: "牛逼的电脑💻",
+    daemon_online: true,
+    ...overrides,
+  };
+}
+
+describe("TeamTriggerPopover 弹层 probe（POST /api/workspaces/probe）", () => {
+  it("弹层打开即对候选集（workspaceId）probe 一次，无定时器轮询", async () => {
+    apiFetchMock.mockResolvedValue([
+      probeItem(CURRENT_WS_ID, { daemon_online: true }),
+    ]);
+    setup();
+
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(1));
+    expect(apiFetchMock).toHaveBeenCalledWith("/api/workspaces/probe", {
+      method: "POST",
+      json: { workspace_ids: [CURRENT_WS_ID] },
+    });
+
+    // 无轮询：静置一段时间后仍是单次调用（实现无 setInterval/定时器）。
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    expect(apiFetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("项目切换候选集变化 → 事件驱动补拉一次；同候选集不重复拉", async () => {
+    apiFetchMock.mockResolvedValue([]);
+    listProjectsMock.mockResolvedValue([
+      makeProject("p-1", "网站重构项目"),
+      makeProject("p-2", "设计协作项目"),
+    ]);
+    listProjectWorkspacesMock.mockImplementation(async (projectId: string) =>
+      projectId === "p-1"
+        ? [makeWs("ws-a", "sillyspec", "backend-code"), makeWs("ws-b", "平台前端", "frontend-code")]
+        : [makeWs("ws-c", "共享文档盘", "docs")],
+    );
+    setup();
+
+    // mount：候选集=[当前工作区]。
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(1));
+    expect(apiFetchMock).toHaveBeenLastCalledWith("/api/workspaces/probe", {
+      method: "POST",
+      json: { workspace_ids: [CURRENT_WS_ID] },
+    });
+
+    // 选 p-1 → 项目工作区加载完成 → 补拉一次（候选集=当前+2）。
+    fireEvent.click(screen.getByRole("radio", { name: /项目维度/ }));
+    fireEvent.change(await screen.findByLabelText(/选择项目/), {
+      target: { value: "p-1" },
+    });
+    await screen.findByText("sillyspec");
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(2));
+    expect(apiFetchMock).toHaveBeenLastCalledWith("/api/workspaces/probe", {
+      method: "POST",
+      json: { workspace_ids: [CURRENT_WS_ID, "ws-a", "ws-b"] },
+    });
+
+    // 切 p-2：加载中间态（list→null 候选集回落 mount 集）不重复拉；新列表到达补拉一次。
+    fireEvent.change(screen.getByLabelText(/选择项目/), {
+      target: { value: "p-2" },
+    });
+    await screen.findByText("共享文档盘");
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(3));
+    expect(apiFetchMock).toHaveBeenLastCalledWith("/api/workspaces/probe", {
+      method: "POST",
+      json: { workspace_ids: [CURRENT_WS_ID, "ws-c"] },
+    });
+
+    // 再切回 p-1：候选集曾拉过 → 静态快照沿用，不重复拉。
+    fireEvent.change(screen.getByLabelText(/选择项目/), {
+      target: { value: "p-1" },
+    });
+    await screen.findByText("sillyspec");
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+    expect(apiFetchMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+/* ───────────────── 9. task-12：工作区行机器状态 meta（原型场景①②） ───────────────── */
+
+describe("TeamTriggerPopover 工作区行机器状态 meta", () => {
+  it("当前工作区卡：机器名+在线 dot(on)+git 隔离标签（场景②）", async () => {
+    apiFetchMock.mockResolvedValue([
+      probeItem(CURRENT_WS_ID, { daemon_name: "牛逼的电脑💻", daemon_online: true, git_mode: "git" }),
+    ]);
+    setup();
+
+    expect(await screen.findByText("牛逼的电脑💻 · 在线")).toBeInTheDocument();
+    expect(screen.getByText("git 隔离")).toBeInTheDocument();
+    const dot = screen.getByTestId(`probe-dot-${CURRENT_WS_ID}`);
+    expect(dot.getAttribute("data-state")).toBe("on");
+  });
+
+  it("scope 多选列表：离线 dot(off)+非 git · 直通；未绑显示「未绑机器」+虚线 dot(none)；unknown 弱化「模式未知」", async () => {
+    apiFetchMock.mockResolvedValue([
+      probeItem(CURRENT_WS_ID),
+      probeItem("ws-git", { daemon_name: "机器A", daemon_online: true, git_mode: "git" }),
+      probeItem("ws-direct", { daemon_name: "机器B", daemon_online: false, git_mode: "direct" }),
+      probeItem("ws-none", { daemon_name: null, daemon_online: false, git_mode: "unknown" }),
+      probeItem("ws-unk", { daemon_name: "机器C", daemon_online: true, git_mode: "unknown" }),
+    ]);
+    listProjectsMock.mockResolvedValue([makeProject("p-1", "网站重构项目")]);
+    listProjectWorkspacesMock.mockResolvedValue([
+      makeWs("ws-git", "sillyspec", "backend-code"),
+      makeWs("ws-direct", "设计稿共享盘", "docs"),
+      makeWs("ws-none", "未绑盘", "docs"),
+      makeWs("ws-unk", "未知盘", "docs"),
+    ]);
+    setup();
+
+    fireEvent.click(screen.getByRole("radio", { name: /项目维度/ }));
+    fireEvent.change(await screen.findByLabelText(/选择项目/), {
+      target: { value: "p-1" },
+    });
+    await screen.findByText("sillyspec");
+
+    // 在线 git 行（场景①）；当前工作区卡（fixture 同为 git）也带同标签 → 共 2 处。
+    expect(await screen.findByText("机器A · 在线")).toBeInTheDocument();
+    expect(screen.getAllByText("git 隔离")).toHaveLength(2);
+    expect(screen.getByTestId("probe-dot-ws-git").getAttribute("data-state")).toBe("on");
+    // 离线 direct 行。
+    expect(screen.getByText("机器B · 离线")).toBeInTheDocument();
+    expect(screen.getByText("非 git · 直通")).toBeInTheDocument();
+    expect(screen.getByTestId("probe-dot-ws-direct").getAttribute("data-state")).toBe("off");
+    // 未绑：未绑机器 + 虚线 dot（原型 .dot.none）。
+    expect(screen.getByText("未绑机器")).toBeInTheDocument();
+    expect(screen.getByTestId("probe-dot-ws-none").getAttribute("data-state")).toBe("none");
+    // git_mode=unknown：弱化「模式未知」（未绑盘与未知盘两行均为 unknown）。
+    expect(screen.getByText("机器C · 在线")).toBeInTheDocument();
+    expect(screen.getAllByText("模式未知")).toHaveLength(2);
+  });
+});
+
+/* ───────────────── 10. task-12：主 agent（项目经理）选择器（preSession，场景③） ───────────────── */
+
+describe("TeamTriggerPopover 主 agent 选择器（preSession）", () => {
+  function setupPreSession() {
+    apiFetchMock.mockResolvedValue([
+      probeItem(CURRENT_WS_ID, { daemon_name: "主机器" }),
+      probeItem("ws-on", { daemon_name: "在线机器", daemon_online: true }),
+      probeItem("ws-off", { daemon_name: "离线机器", daemon_online: false }),
+      probeItem("ws-none", { daemon_name: null, daemon_online: false }),
+    ]);
+    listProjectsMock.mockResolvedValue([makeProject("p-1", "网站重构项目")]);
+    listProjectWorkspacesMock.mockResolvedValue([
+      makeWs("ws-on", "在线盘", "backend-code"),
+      makeWs("ws-off", "离线盘", "docs"),
+      makeWs("ws-none", "无绑盘", "docs"),
+    ]);
+    return setup({ preSession: true });
+  }
+
+  /** 切项目维度 → 选 p-1 → 勾选三个 scope 工作区（选择器候选就绪）。 */
+  async function selectAllScope() {
+    fireEvent.click(screen.getByRole("radio", { name: /项目维度/ }));
+    fireEvent.change(await screen.findByLabelText(/选择项目/), {
+      target: { value: "p-1" },
+    });
+    await screen.findByText("在线盘");
+    fireEvent.click(screen.getByRole("checkbox", { name: /勾选工作区 在线盘/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /勾选工作区 离线盘/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /勾选工作区 无绑盘/ }));
+    return (await screen.findByLabelText(
+      /主 agent（项目经理）/,
+    )) as HTMLSelectElement;
+  }
+
+  it("缺省（preSession=false）不渲染选择器", () => {
+    setup();
+
+    expect(screen.queryByLabelText(/主 agent（项目经理）/)).not.toBeInTheDocument();
+  });
+
+  it("preSession=true 渲染选择器：默认「当前会话」；scope 工作区选项带机器状态，离线/未绑 disabled（场景③）", async () => {
+    setupPreSession();
+    const sel = await selectAllScope();
+
+    // 首项默认「当前会话（默认：用上方选择的机器与智能体）」且为当前值。
+    expect(sel.value).toBe("");
+    expect(sel.options[0]!.text).toBe("当前会话（默认：用上方选择的机器与智能体）");
+    // 在线工作区可选，文案带机器名。
+    expect(sel.options[1]!.text).toBe("在线盘 · 在线机器（该工作区设备与智能体）");
+    expect((sel.options[1] as HTMLOptionElement).disabled).toBe(false);
+    // 离线/未绑 → disabled（「机器离线」/「未绑机器」）。
+    expect(sel.options[2]!.text).toBe("离线盘 · 机器离线");
+    expect((sel.options[2] as HTMLOptionElement).disabled).toBe(true);
+    expect(sel.options[3]!.text).toBe("无绑盘 · 未绑机器");
+    expect((sel.options[3] as HTMLOptionElement).disabled).toBe(true);
+
+    // preSession 实例确认按钮文案（原型场景③）。
+    expect(
+      screen.getByRole("button", { name: /派团队（随首句创建生效）/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("选工作区 → payload.orchestrator_workspace_id=该 id；默认「当前会话」=null", async () => {
+    setupPreSession();
+    const sel = await selectAllScope();
+
+    // 默认「当前会话」→ null。
+    fireEvent.click(screen.getByRole("button", { name: /派团队（随首句创建生效）/ }));
+    await waitFor(() => expect(HANDLERS.onTrigger).toHaveBeenCalledTimes(1));
+    expect(lastPayload().orchestrator_workspace_id).toBeNull();
+
+    // 选「在线盘」→ 该工作区 id。
+    fireEvent.change(sel, { target: { value: "ws-on" } });
+    fireEvent.click(screen.getByRole("button", { name: /派团队（随首句创建生效）/ }));
+    await waitFor(() => expect(HANDLERS.onTrigger).toHaveBeenCalledTimes(2));
+    expect(lastPayload().orchestrator_workspace_id).toBe("ws-on");
+  });
+
+  it("取消勾选已选工作区 → 选择回落「当前会话」（payload=null）", async () => {
+    setupPreSession();
+    const sel = await selectAllScope();
+
+    fireEvent.change(sel, { target: { value: "ws-on" } });
+    expect(sel.value).toBe("ws-on");
+    // 取消勾选在线盘 → 选项消失，选择值回落默认。
+    fireEvent.click(screen.getByRole("checkbox", { name: /勾选工作区 在线盘/ }));
+    await waitFor(() => expect(sel.value).toBe(""));
+    fireEvent.click(screen.getByRole("button", { name: /派团队（随首句创建生效）/ }));
+    await waitFor(() => expect(HANDLERS.onTrigger).toHaveBeenCalledTimes(1));
+    expect(lastPayload().orchestrator_workspace_id).toBeNull();
+  });
+
+  it("非 preSession 实例：payload 不含 orchestrator_workspace_id（既有行为零变化）", async () => {
+    apiFetchMock.mockResolvedValue([probeItem(CURRENT_WS_ID)]);
+    listProjectsMock.mockResolvedValue([makeProject("p-1", "网站重构项目")]);
+    listProjectWorkspacesMock.mockResolvedValue([makeWs("ws-on", "在线盘", "backend-code")]);
+    setup();
+
+    // 项目模式勾选工作区确认（scope 完整路径）也不带该字段。
+    fireEvent.click(screen.getByRole("radio", { name: /项目维度/ }));
+    fireEvent.change(await screen.findByLabelText(/选择项目/), {
+      target: { value: "p-1" },
+    });
+    await screen.findByText("在线盘");
+    fireEvent.click(screen.getByRole("checkbox", { name: /勾选工作区 在线盘/ }));
+    fireEvent.click(screen.getByRole("button", { name: /就绪，随下条消息发出/ }));
+
+    await waitFor(() => expect(HANDLERS.onTrigger).toHaveBeenCalledTimes(1));
+    expect("orchestrator_workspace_id" in lastPayload()).toBe(false);
+  });
+
+  it("工作区模式（scope=当前工作区）：preSession 选择器含当前工作区选项（在线可选）", async () => {
+    apiFetchMock.mockResolvedValue([
+      probeItem(CURRENT_WS_ID, { daemon_name: "主机器", daemon_online: true }),
+    ]);
+    setup({ preSession: true });
+
+    const sel = (await screen.findByLabelText(
+      /主 agent（项目经理）/,
+    )) as HTMLSelectElement;
+    expect(sel.options.length).toBe(2);
+    expect(sel.options[1]!.text).toBe("前端官网 · 主机器（该工作区设备与智能体）");
+    expect((sel.options[1] as HTMLOptionElement).disabled).toBe(false);
+  });
+});
+
+/* ───────────────── 11. task-12：probe 失败 fail-safe ───────────────── */
+
+describe("TeamTriggerPopover probe 失败 fail-safe", () => {
+  it("probe 失败 → 机器 meta 标签缺失、弹层照常可用（确认回调不受阻）", async () => {
+    apiFetchMock.mockRejectedValue(new Error("probe down"));
+    setup();
+
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10));
+    });
+
+    // meta 缺失：无机器名/在线文案/git 模式标签。
+    expect(screen.queryByText(/· 在线/)).not.toBeInTheDocument();
+    expect(screen.queryByText("git 隔离")).not.toBeInTheDocument();
+    expect(screen.queryByText("未绑机器")).not.toBeInTheDocument();
+    // 不阻断：确认按钮可用且 payload 正常组装（不含探测字段）。
+    fireEvent.click(screen.getByRole("button", { name: /就绪，随下条消息发出/ }));
+    await waitFor(() => expect(HANDLERS.onTrigger).toHaveBeenCalledTimes(1));
+    expect(lastPayload()).toEqual({ objective: null, budget_usd: null });
   });
 });

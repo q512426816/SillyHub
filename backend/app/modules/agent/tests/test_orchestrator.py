@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.modules.agent.model import AgentMission, AgentRun, AgentSession
 from app.modules.agent.orchestrator import (
+    SESSION_OBJECTIVE_PLACEHOLDER,
     OrchestratorService,
     _resolve_main_agent_config,
 )
@@ -268,6 +269,150 @@ class TestTeamMissionEntry:
         )
         assert persisted is not None
         assert persisted.role == "orchestrator"
+
+
+class TestPrecreateMissionFlush:
+    """task-04（2026-08-24-session-team-mission-context）：flush-only 预建 helper 契约。
+
+    D-009@v2 / Grill UB-1：从 ``team_mission_entry`` 抽出 ``_precreate_mission_flush``
+    ——只 add+flush **不 commit 不 refresh**。本体 = helper + commit（既有 trigger 端点
+    调用方零回归）；task-09 create 路径复用 helper 共用 create_session 唯一 commit
+    （service.py:1008 commit / :1011 rollback），失败整体回滚无孤儿 session/mission。
+    """
+
+    @pytest.mark.asyncio
+    async def test_helper_flush_only_rollback_no_residue(self, db_session: AsyncSession) -> None:
+        """helper 不 commit：调用后同事务 rollback 无 mission 行残留（flush-only 语义
+        锚点，供 task-09 复用——插入它人事务时不会提前提交）。"""
+        ws_id = await _make_workspace(db_session)
+        svc = OrchestratorService(db_session)
+        mission = await svc._precreate_mission_flush(
+            workspace_id=ws_id,
+            objective="团队目标",
+            created_by=uuid.uuid4(),
+            change_id=None,
+            constraints={"mode": "team"},
+            budget_usd=None,
+            worker_preset=None,
+            main_agent_config=None,
+        )
+        # flush 后 PK 已可用（不依赖 commit/refresh）
+        assert mission.id is not None
+        mid = mission.id
+        # flush-only：未 commit → 同事务 rollback 后无残留行
+        await db_session.rollback()
+        residue = (
+            (await db_session.execute(select(AgentMission).where(AgentMission.id == mid)))
+            .scalars()
+            .first()
+        )
+        assert residue is None
+
+    @pytest.mark.asyncio
+    async def test_helper_session_mode_requires_session_id(self, db_session: AsyncSession) -> None:
+        """session 预建模式必传 session_id 的 ValueError 校验随校验逻辑留在 helper。"""
+        ws_id = await _make_workspace(db_session)
+        svc = OrchestratorService(db_session)
+        with pytest.raises(ValueError, match="session_id"):
+            await svc._precreate_mission_flush(
+                workspace_id=ws_id,
+                objective="目标",
+                created_by=None,
+                change_id=None,
+                constraints=None,
+                budget_usd=None,
+                worker_preset=None,
+                main_agent_config=None,
+                orchestration_mode="session",
+                session_id=None,
+            )
+
+    @pytest.mark.asyncio
+    async def test_helper_plus_commit_session_mode_fields(self, db_session: AsyncSession) -> None:
+        """helper+commit 后 session 模式 mission 可读：session_id 落列、空 objective
+        落 SESSION_OBJECTIVE_PLACEHOLDER、scope_workspace_ids uuid→str、constraints 保留。"""
+        ws_id = await _make_workspace(db_session)
+        agent_session = AgentSession(user_id=uuid.uuid4(), provider="claude", status="active")
+        db_session.add(agent_session)
+        scope_ids = [uuid.uuid4(), uuid.uuid4()]
+        svc = OrchestratorService(db_session)
+        mission = await svc._precreate_mission_flush(
+            workspace_id=ws_id,
+            objective="   ",
+            created_by=uuid.uuid4(),
+            change_id=None,
+            constraints={"mode": "session"},
+            budget_usd=5.0,
+            worker_preset=[{"role": "impl"}],
+            main_agent_config={"provider": "claude"},
+            orchestration_mode="session",
+            scope_workspace_ids=scope_ids,
+            session_id=agent_session.id,
+        )
+        await db_session.commit()
+        await db_session.refresh(mission)
+
+        persisted = await db_session.get(AgentMission, mission.id)
+        assert persisted is not None
+        assert persisted.session_id == agent_session.id
+        assert persisted.objective == SESSION_OBJECTIVE_PLACEHOLDER
+        assert persisted.scope_workspace_ids == [str(sid) for sid in scope_ids]
+        assert (persisted.constraints or {}).get("mode") == "session"
+
+    @pytest.mark.asyncio
+    async def test_helper_plus_commit_external_constraints_merge(
+        self, db_session: AsyncSession
+    ) -> None:
+        """external 模式 constraints 合并 orchestration_mode 键；helper+commit 后可读。"""
+        ws_id = await _make_workspace(db_session)
+        svc = OrchestratorService(db_session)
+        mission = await svc._precreate_mission_flush(
+            workspace_id=ws_id,
+            objective="外部调度目标",
+            created_by=uuid.uuid4(),
+            change_id=None,
+            constraints={"source": "sillyspec"},
+            budget_usd=None,
+            worker_preset=None,
+            main_agent_config=None,
+            orchestration_mode="external",
+        )
+        await db_session.commit()
+
+        persisted = await db_session.get(AgentMission, mission.id)
+        assert persisted is not None
+        assert persisted.constraints == {"source": "sillyspec", "orchestration_mode": "external"}
+        assert persisted.session_id is None
+
+    @pytest.mark.asyncio
+    async def test_team_mode_end_to_end_after_flush_refactor(
+        self, db_session: AsyncSession
+    ) -> None:
+        """team 模式端到端（本体=helper+commit）：仍建 mission+main_run（role=orchestrator），
+        daemon 离线时 run 标 pending+error_code=no_online_daemon 的兜底语义不变。"""
+        ws_id = await _make_workspace(db_session)
+        svc = OrchestratorService(db_session)
+        mission, main_run = await svc.team_mission_entry(
+            workspace_id=ws_id,
+            objective="团队目标",
+            created_by=uuid.uuid4(),
+            change_id=None,
+            constraints={"mode": "team"},
+            budget_usd=None,
+            worker_preset=None,
+            main_agent_config=None,
+        )
+        assert main_run is not None
+        assert main_run.mission_id == mission.id
+
+        persisted_mission = await db_session.get(AgentMission, mission.id)
+        persisted_run = await db_session.get(AgentRun, main_run.id)
+        assert persisted_mission is not None
+        assert persisted_run is not None
+        assert persisted_run.role == "orchestrator"
+        assert persisted_run.status == "pending"
+        # workspace 无 binding → NoOnlineDaemonError 兜底：run 留 pending 待重派
+        assert persisted_run.error_code == "no_online_daemon"
 
 
 class TestScheduleLoopConvergence:

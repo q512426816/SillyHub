@@ -19,6 +19,15 @@ converge 语义重定义——分身 run（role!='orchestrator' 含 NULL）未�
 ``_get_main_run``/finalizer 锚点取该 mission**最新** orchestrator run；
 ``ConvergeResponse.status`` 收敛为 converged/busy/conflict/needs_manual 四值。
 
+task-03（2026-08-24-session-team-mission-context / FR-02 / D-005 / D-012）：
+新增常驻查询端点 ``GET /missions/status``（header-only，X-Session-Id 定位，实际
+URL /api/missions/status，对齐 hub-client ``_missionActionPath`` 缺参形态）与
+同构变体 ``GET /sessions/{sid}/missions/status``——定位不走
+``_resolve_session_mission``（无活跃 mission 抛 404 语义不符），直接
+``get_active_mission_for_session``：无活跃 → 200 ``active=false`` + hint；
+有活跃 → 权限复核后组装 ``MissionStatusResponse``（DTO 在 agent/schema.py，
+scope 实时探测、status 派生、workers 与 _list_workers_core 同源）。
+
 权限（task-09 P0 鉴权 gap 已闭合）：统一 ``WORKSPACE_WRITE``，经
 ``require_permission`` → ``get_current_principal``（auth_deps.py:154）双路径鉴权——
 浏览器/直调走 JWT（``Authorization: Bearer``），daemon MCP server 走长期 API Key
@@ -50,6 +59,11 @@ from app.modules.agent.model import (
     AgentRun,
     AgentRunLog,
     AgentSession,
+)
+from app.modules.agent.schema import (
+    MissionStatusResponse,
+    ScopeWorkspaceStatus,
+    WorkerListItem,
 )
 from app.modules.agent.service import _build_agent_profile_snapshot
 from app.modules.auth.model import User
@@ -159,14 +173,10 @@ class WorkerResultResponse(BaseModel):
     artifacts: list[dict] = []
 
 
-class WorkerListItem(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: uuid.UUID
-    role: str | None = None
-    status: str
-    objective: str | None = None
-    total_cost_usd: float | None = None
+# WorkerListItem（task-03 上移 agent/schema.py——schema 顶层 import mcp_tools 会
+# 成环，反向无环）：顶部 from-import 即模块级重导出，既有
+# ``from app.modules.agent.mcp_tools import WorkerListItem`` 消费方零改动；
+# 字段定义单源在 schema.py，此处禁止复制。
 
 
 class WorkerListResponse(BaseModel):
@@ -876,6 +886,10 @@ async def _dispatch_worker_core(
         agent_profile_snapshot=(
             _build_agent_profile_snapshot(profile) if profile is not None else None
         ),
+        # 分身 run 回填 session 锚点：X-Session-Id header 存在时写入，使
+        # get_agent_session_logs 能聚合分身日志；外部 dispatch 路径无 header → NULL
+        # 零回归。
+        agent_session_id=_request_session_id(request, None),
     )
     session.add(run)
     await session.commit()
@@ -1463,13 +1477,12 @@ async def report_progress_for_session(
 # 本族无任何路径锚 → 会话身份完全由 X-Session-Id header 承载（缺失 → 400）；
 # 仅 mid 族 header 缺席时按 mission 反解 + 锚工作区权限复核。
 #
-# 路由冲突注意：GET ``/missions/workers``（单段 GET）会被先注册的
-# ``GET /missions/{mission_id}``（router.py:1086，mcp_tools include 于 :1451 之后）
-# 按 Starlette 首个全匹配规则截走 → uuid 校验 422，本路由不可达。已注册留作
-# include 顺序调整（把 mcp_tools include 挪到 :1086 之前）后即生效的锚点，
-# 见 test_mcp_tools.py 的 xfail 用例与 task-05 报告。其余 9 条（POST 单段 /
-# 多段 GET）与既有路由无正则交叠，正常可达（单段 POST 依赖 Starlette 方法
-# 失配续扫语义）。
+# 路由冲突说明（task-03 / 2026-08-24 修正）：mcp_tools include（router.py:940）
+# **先于** ``GET /missions/{mission_id}``（router.py:946）注册——单段 GET
+# （``/missions/workers``、``/missions/status``）按 Starlette 先注册先匹配，
+# 在 mcp_tools 内命中，不会被 uuid 校验截走 422（旧注释所述「截走不可达 /
+# include 于 :1451 之后」已随 include 顺序调整过时；见 test_mission_status.py
+# 的单段可达性断言与 test_mcp_tools.py 原 xfail 用例转 XPASS）。
 # ---------------------------------------------------------------------------
 
 
@@ -1518,8 +1531,8 @@ async def get_worker_result_scoped(
 @router.get(
     "/missions/workers",
     response_model=WorkerListResponse,
-    # 见上方路由冲突注意：当前被 router.py:1086 的 /missions/{mission_id} 截走
-    # （首个全匹配 + uuid 校验 422），include 顺序调整后本路由生效。
+    # 单段 GET 可达：mcp_tools include（router.py:940）先于 GET /missions/{mission_id}
+    # （:946）注册，先注册先匹配（task-03 注释修正，详见上方路由族说明）。
 )
 async def list_workers_scoped(
     request: Request,
@@ -1677,3 +1690,135 @@ async def report_progress_by_mission(
         payload,
         agent_session_id=_request_session_id(request, None),
     )
+
+
+# ---------------------------------------------------------------------------
+# task-03（2026-08-24-session-team-mission-context / FR-02 / D-005@v1 / D-012@v1）：
+# mission_status 常驻查询端点——GET /missions/status（header-only，对齐 daemon
+# hub-client ``_missionActionPath`` 的 missionId 缺省形态，实际 URL
+# /api/missions/status）+ GET /sessions/{sid}/missions/status（三族同构变体）。
+# daemon 侧 mcp-server 工具注册归 task-11，本模块只提供 backend 路由。
+#
+# 定位**不走** _resolve_session_mission（其对无活跃 mission 抛 404，语义不符）：
+# session.get(AgentSession)（缺失 404）+ get_active_mission_for_session；无活跃 →
+# 200 active=false + hint（不泄露 scope/binding 信息，非 dispatch 端点不懒建）；
+# 有活跃 → _check_workspace_write 按锚工作区复核后组装 MissionStatusResponse。
+# ---------------------------------------------------------------------------
+
+# 无活跃 mission 的引导文案（D-005：优雅返回不报错；不含任何 scope/binding 信息）
+_NO_ACTIVE_MISSION_HINT = (
+    "该会话当前没有活跃团队任务：可经派团队弹层预建，或直接 dispatch_worker 派发"
+    "（将按会话绑定工作区懒建）。"
+)
+
+
+async def _mission_status_core(
+    session: AsyncSession, sid: uuid.UUID, user: User
+) -> MissionStatusResponse:
+    """mission_status 共用主体（header-only / 会话路由同构，task-03）。
+
+    组装口径（design §5.B / §7）：
+
+    - ``mission_id/objective/budget_usd`` 直取 mission 列（objective 占位符原样）。
+    - ``status`` 复用 ``mission.derive_status`` 派生口径（拉 mission runs，不新造
+      状态机；runs 含主控轮，活跃 turn 由其状态反映——口径同
+      ``agent/router._mission_to_response``，不另查会话活跃 turn）。
+    - ``scope_workspaces`` 经 task-01 ``collect_scope_workspace_statuses`` + task-02
+      ``probe_workspace_git_mode`` 探测回调**每次调用实时探测**（不缓存，R-02；
+      探测不可判定归 unknown，不向 caller 抛）；``anchor_workspace`` 取条目中
+      ``id == mission.workspace_id`` 者（会话 mission 的 anchor 恒 ∈ scope——
+      预建/懒建路径均自 scope 选锚，防御性缺失时为 None）。
+    - ``workers`` 复用 ``_list_workers_core`` 返回的 ``.workers``（同源零漂移）。
+    """
+    agent_session = await session.get(AgentSession, sid)
+    if agent_session is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "session not found")
+
+    from app.modules.agent.mission import derive_status, get_active_mission_for_session
+
+    mission = await get_active_mission_for_session(session, sid)
+    if mission is None:
+        # D-012：优雅返回 active=false（不走 _resolve_session_mission 的 404 语义）
+        return MissionStatusResponse(active=False, hint=_NO_ACTIVE_MISSION_HINT)
+
+    await _check_workspace_write(session, user, mission.workspace_id)
+
+    runs = list(
+        (await session.execute(select(AgentRun).where(AgentRun.mission_id == mission.id)))
+        .scalars()
+        .all()
+    )
+    status_value = derive_status(
+        runs,
+        cancelled=mission.cancelled_at is not None,
+        converged=mission.converged_at is not None,
+        has_session=mission.session_id is not None,
+    )
+
+    # git 三态探测回调（task-02 helper 注入 task-01 收集器；delegate per-request
+    # 构造，probe 内部把 transport 失败收敛为 "unknown" 不抛）
+    delegate = new_host_fs_delegate(session)
+    from app.modules.agent.orchestrator import collect_scope_workspace_statuses
+
+    entries = await collect_scope_workspace_statuses(
+        mission, session, git_probe=delegate.probe_workspace_git_mode
+    )
+    scope_items = [ScopeWorkspaceStatus.model_validate(entry) for entry in entries]
+    anchor_workspace = next(
+        (item for item in scope_items if item.id == str(mission.workspace_id)), None
+    )
+
+    worker_list = await _list_workers_core(session, mission)
+    return MissionStatusResponse(
+        active=True,
+        mission_id=str(mission.id),
+        status=status_value,
+        objective=mission.objective,
+        anchor_workspace=anchor_workspace,
+        scope_workspaces=scope_items,
+        workers=worker_list.workers,
+        budget_usd=mission.budget_usd,
+    )
+
+
+@router.get("/missions/status", response_model=MissionStatusResponse)
+async def missions_status_route(
+    request: Request,
+    session: SessionDep,
+    user: SessionMcpUser,
+) -> MissionStatusResponse:
+    """header-only mission_status（``GET /missions/status``）——X-Session-Id 定位。
+
+    本路由无任何路径锚，header 缺失 → 400（区别于仅 mid 族的显式回退路径）。
+    """
+    sid = _request_session_id(request, None)
+    if sid is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "缺少 X-Session-Id 会话头：mission_status 查询必须携带该头",
+        )
+    return await _mission_status_core(session, sid, user)
+
+
+@router.get(
+    "/sessions/{session_id}/missions/status",
+    response_model=MissionStatusResponse,
+)
+async def missions_status_for_session(
+    session_id: uuid.UUID,
+    request: Request,
+    session: SessionDep,
+    user: SessionMcpUser,
+) -> MissionStatusResponse:
+    """会话维度 mission_status（``GET /sessions/{sid}/missions/status``，三族同构）。
+
+    ``_request_session_id`` 既有 header>path 优先级（不一致 → 400 防歧义）。
+    """
+    sid = _request_session_id(request, session_id)
+    if sid is None:
+        # 防御分支：路径参数必在，正常流不可达
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "缺少 X-Session-Id 会话头：mission_status 查询必须携带该头",
+        )
+    return await _mission_status_core(session, sid, user)

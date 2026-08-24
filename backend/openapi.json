@@ -703,6 +703,52 @@
         }
       }
     },
+    "/api/workspaces/probe": {
+      "post": {
+        "tags": [
+          "workspace"
+        ],
+        "summary": "Probe Workspaces",
+        "description": "批量探测工作区 git 模式 + 绑定机器状态（task-10 / FR-03 / D-008@v2 / design §5.C）。\n\n弹层机器状态统一后端口径（任一成员 binding，含他人绑定，消除本人/他人\nbinding 展示不一致 UB-2）：``git_mode/daemon_name/daemon_online`` 三字段与\nmission_status 的 scope_workspaces 完全同源——逐工作区经\n``orchestrator.collect_single_workspace_status``（task-01 单 ws 收集共享\n函数，口径单一来源）+ ``probe_workspace_git_mode``（task-02 三态探测）组装。\n\n只读无状态变化（design §7.5）；每次调用实时探测不缓存（R-02）；探测 RPC\n失败/未绑 daemon 归 ``unknown`` 不抛 5xx（fail-safe）。查无行的 workspace_id\n跳过不报错（与 collect_scope 无效 id 跳过同语义）。",
+        "operationId": "probe_workspaces_api_workspaces_probe_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceProbeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WorkspaceProbeItem"
+                  },
+                  "type": "array",
+                  "title": "Response Probe Workspaces Api Workspaces Probe Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/activate": {
       "post": {
         "tags": [
@@ -6299,7 +6345,7 @@
           "agent"
         ],
         "summary": "List Workspace Agent Sessions",
-        "description": "工作区会话列表（2026-08-14-change-center-conversation-driven task-06 / D-002@v1）。\n\ninclude_ended=false（缺省）：现状——仅 active 会话最小字段 dict\n（id/status/mode/provider），供 approvals 审批中心聚合 scan 歧义决策。\ninclude_ended=true：工作区全量会话（含已结束），完整 AgentSessionListItem\n（id/provider/status/turn_count/author/last_active_at/title，对齐\ndaemon/schema.py:71-84），排序 coalesce(last_active_at, created_at) desc。\n权限/过滤保持现状（workspace 成员跨成员可见），不因 include_ended 改变。",
+        "description": "工作区会话列表（2026-08-14-change-center-conversation-driven task-06 / D-002@v1）。\n\ninclude_ended=false（缺省）：现状——仅 active 会话最小字段 dict\n（id/status/mode/provider），供 approvals 审批中心聚合 scan 歧义决策。\ninclude_ended=true：工作区会话（含已结束），完整 AgentSessionListItem\n（id/provider/status/turn_count/author/last_active_at/title，对齐\ndaemon/schema.py:71-84），排序 coalesce(last_active_at, created_at) desc；\nP5（2026-08-24 会话审查）：该分支原先无界全量返回，现按 limit/offset 分页\n（默认 200；mode 过滤在 Python 侧截断后执行，传 mode 时页内可能少于 limit）。\n权限/过滤保持现状（workspace 成员跨成员可见），不因 include_ended 改变。",
         "operationId": "list_workspace_agent_sessions_api_workspaces__workspace_id__agent_sessions_get",
         "parameters": [
           {
@@ -6337,6 +6383,33 @@
               "default": false,
               "title": "Include Ended"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "include_ended 分页页大小",
+              "default": 200,
+              "title": "Limit"
+            },
+            "description": "include_ended 分页页大小"
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "include_ended 分页偏移",
+              "default": 0,
+              "title": "Offset"
+            },
+            "description": "include_ended 分页偏移"
           }
         ],
         "responses": {
@@ -7692,6 +7765,74 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProgressResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/missions/status": {
+      "get": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Missions Status Route",
+        "description": "header-only mission_status（``GET /missions/status``）——X-Session-Id 定位。\n\n本路由无任何路径锚，header 缺失 → 400（区别于仅 mid 族的显式回退路径）。",
+        "operationId": "missions_status_route_api_missions_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MissionStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/sessions/{session_id}/missions/status": {
+      "get": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Missions Status For Session",
+        "description": "会话维度 mission_status（``GET /sessions/{sid}/missions/status``，三族同构）。\n\n``_request_session_id`` 既有 header>path 优先级（不一致 → 400 防歧义）。",
+        "operationId": "missions_status_for_session_api_sessions__session_id__missions_status_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MissionStatusResponse"
                 }
               }
             }
@@ -11979,7 +12120,7 @@
           "daemon"
         ],
         "summary": "Trigger Session Team Mission",
-        "description": "预建会话团队 mission（design §5 Phase 1 / §7）。\n\n- 归属校验：跨用户/不存在 → 404（``svc.get_agent_session``，同\n  get_session_detail 资源隐藏口径）；\n- 活跃冲突：会话已有活跃 mission（未收敛未取消）→ 409（R-07，经 task-02\n  ``get_active_mission_for_session`` 判活跃，与 uq_agent_missions_session_active\n  部分唯一索引同语义）；\n- scope 解析：未传 → 会话绑定工作区；会话无工作区且未传 → 422（CC-10 同款）；\n- 项目维度校验复用旧项目端点口径（agent/router.py:1239-1357，本卡迁移复用）：\n  非项目经理（非超管）→ 403；scope ⊄ 项目关联工作区 → 422；anchor 缺省取\n  scope 内 type=backend-code 优先否则第一个（DTO 不带 anchor，服务端派生）；\n- 落库走 ``OrchestratorService.team_mission_entry`` 的 ``\"session\"`` 预建模式\n  （不建主控 run / 不派 lease / objective 空落 SESSION_OBJECTIVE_PLACEHOLDER）。",
+        "description": "预建会话团队 mission（design §5 Phase 1 / §7）。\n\n- 归属校验：跨用户/不存在 → 404（``svc.get_agent_session``，同\n  get_session_detail 资源隐藏口径）；\n- 活跃冲突：会话已有活跃 mission（未收敛未取消）→ 409（R-07，经 task-02\n  ``get_active_mission_for_session`` 判活跃，与 uq_agent_missions_session_active\n  部分唯一索引同语义）；\n- scope 解析：未传 → 会话绑定工作区；会话无工作区且未传 → 422（CC-10 同款）；\n- 项目维度校验复用旧项目端点口径（agent/router.py:1239-1357，本卡迁移复用）：\n  非项目经理（非超管）→ 403；scope ⊄ 项目关联工作区 → 422；anchor 缺省取\n  scope 内 type=backend-code 优先否则第一个（DTO 不带 anchor，服务端派生）\n  ——以上经 ``validate_team_mission_block`` 共享函数（task-07 抽出，create\n  路径 task-09 复用同一实现）；\n- 落库走 ``OrchestratorService.team_mission_entry`` 的 ``\"session\"`` 预建模式\n  （不建主控 run / 不派 lease / objective 空落 SESSION_OBJECTIVE_PLACEHOLDER）。",
         "operationId": "trigger_session_team_mission_api_daemon_sessions__session_id__team_mission_post",
         "parameters": [
           {
@@ -37104,6 +37245,101 @@
         ],
         "title": "MissionResponse"
       },
+      "MissionStatusResponse": {
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hint"
+          },
+          "mission_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mission Id"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "objective": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objective"
+          },
+          "anchor_workspace": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScopeWorkspaceStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "scope_workspaces": {
+            "items": {
+              "$ref": "#/components/schemas/ScopeWorkspaceStatus"
+            },
+            "type": "array",
+            "title": "Scope Workspaces",
+            "default": []
+          },
+          "workers": {
+            "items": {
+              "$ref": "#/components/schemas/WorkerListItem"
+            },
+            "type": "array",
+            "title": "Workers",
+            "default": []
+          },
+          "budget_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Usd"
+          }
+        },
+        "type": "object",
+        "required": [
+          "active"
+        ],
+        "title": "MissionStatusResponse",
+        "description": "``GET /missions/status`` 响应（design §7，默认值逐字对齐）。\n\n无活跃 mission 时仅 ``active=false`` + ``hint``（D-005/D-012，不走 404），\n其余字段保持默认值，不泄露 scope/binding 信息。"
+      },
       "MissionWorkerRunResponse": {
         "properties": {
           "id": {
@@ -48770,6 +49006,71 @@
         ],
         "title": "ScanResponse"
       },
+      "ScopeWorkspaceStatus": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "daemon_online": {
+            "type": "boolean",
+            "title": "Daemon Online"
+          },
+          "daemon_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Name"
+          },
+          "git_mode": {
+            "type": "string",
+            "title": "Git Mode"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "type",
+          "description",
+          "daemon_online",
+          "daemon_name",
+          "git_mode"
+        ],
+        "title": "ScopeWorkspaceStatus",
+        "description": "scope 工作区状态条目（design §7 逐字）。\n\n组装源：``orchestrator.collect_scope_workspace_statuses``（task-01）——\n``daemon_name`` 取任一成员 binding 的 ``display_alias||hostname``（不限本人，\nUB-2 口径）；``git_mode`` 为 task-02 ``probe_workspace_git_mode`` 实时探测\n三态。"
+      },
       "SessionControlResponse": {
         "properties": {
           "session_id": {
@@ -48890,6 +49191,16 @@
               }
             ],
             "title": "Workspace Id"
+          },
+          "team_mission": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TeamMissionCreateBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -52296,6 +52607,105 @@
         "title": "TaskUpdateReq",
         "description": "看板任务更新请求 (FR-01)。\n\n仅更新非空字段;``status`` 接收 ``未开始`` / ``进行中`` / ``已完成``\n(PlanTask.status 实际枚举,中文;对齐 ``PlanTask.model`` default +\n``task/service.execute_plan`` 写入值,前端 ``taskStatusBadge`` 已识别)。"
       },
+      "TeamMissionCreateBlock": {
+        "properties": {
+          "objective": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 8000
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objective"
+          },
+          "scope_workspace_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "type": "array",
+                "maxItems": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Workspace Ids"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "budget_usd": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Usd"
+          },
+          "worker_preset": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array",
+                "maxItems": 20
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worker Preset"
+          },
+          "main_agent_config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Main Agent Config"
+          },
+          "orchestrator_workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orchestrator Workspace Id"
+          }
+        },
+        "type": "object",
+        "title": "TeamMissionCreateBlock",
+        "description": "``SessionCreateRequest.team_mission`` 内嵌块（design §5.E1/§7）。\n\n- ``objective`` 可空——create 路径为空时用首句 prompt 回填（task-09）；\n- 其余五字段与 TeamMissionTriggerRequest 同名同 annotation 同约束（上限\n  /ge=0/UUID 口径逐字一致），校验复用共享函数（单一实现无复制粘贴）；\n- ``orchestrator_workspace_id`` 本卡只透传不校验语义——∈ scope 与\n  (W, 创建者) binding 钉定归 create 消费侧（task-09）。"
+      },
       "TeamMissionSummary": {
         "properties": {
           "mission_id": {
@@ -52474,6 +52884,17 @@
               }
             ],
             "title": "Objective"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
           }
         },
         "type": "object",
@@ -54534,7 +54955,8 @@
           "id",
           "status"
         ],
-        "title": "WorkerListItem"
+        "title": "WorkerListItem",
+        "description": "mission worker run 概要（原居 mcp_tools.py，task-03 上移至此）。\n\n上移原因：schema.py 顶部 import mcp_tools 会成环（mcp_tools→service，\nservice.py 已反向 import schema），反向（mcp_tools→schema）无环。mcp_tools\n改 from-import 并保留模块级重导出，既有\n``from app.modules.agent.mcp_tools import WorkerListItem`` 消费方零改动；\n字段定义单源在此，禁止复制造成漂移。"
       },
       "WorkerListResponse": {
         "properties": {
@@ -55254,6 +55676,67 @@
           "is_current_user"
         ],
         "title": "WorkspaceMemberView"
+      },
+      "WorkspaceProbeItem": {
+        "properties": {
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "git_mode": {
+            "type": "string",
+            "enum": [
+              "git",
+              "direct",
+              "unknown"
+            ],
+            "title": "Git Mode"
+          },
+          "daemon_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Name"
+          },
+          "daemon_online": {
+            "type": "boolean",
+            "title": "Daemon Online"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspace_id",
+          "git_mode",
+          "daemon_online"
+        ],
+        "title": "WorkspaceProbeItem",
+        "description": "单工作区探测结果项（``POST /api/workspaces/probe`` 响应元素）。\n\n- ``git_mode``：三态 ``\"git\"|\"direct\"|\"unknown\"``（实时探测不缓存，R-02；\n  RPC 失败/未绑 daemon 归 unknown 不抛）。\n- ``daemon_name``：任一成员 binding daemon 的 ``display_alias or hostname``\n  （未绑/daemon 行缺失 → None）。\n- ``daemon_online``：该 binding daemon 的在线态。"
+      },
+      "WorkspaceProbeRequest": {
+        "properties": {
+          "workspace_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Workspace Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workspace_ids"
+        ],
+        "title": "WorkspaceProbeRequest",
+        "description": "Request body for ``POST /api/workspaces/probe``。\n\n``workspace_ids`` 非空、上限 20（对齐 mission scope 上限口径）；元素为\nUUID——非法格式由 Pydantic 422。查无行（缺失）的 id 由 handler 跳过不报错\n（与 collect_scope_workspace_statuses 无效 id 跳过同语义，fail-safe 不 5xx）。"
       },
       "WorkspaceRead": {
         "properties": {

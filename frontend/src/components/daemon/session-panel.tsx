@@ -124,6 +124,7 @@ import {
   type DaemonMachineRead,
   type InteractiveProvider,
   type SessionCreateResponse,
+  type SessionCreateTeamMission,
   type SessionDialogRead,
   type SessionPermissionRequest,
   type SessionRunRead,
@@ -388,6 +389,12 @@ interface TeamTriggerRowProps {
   onDismissChip: () => void;
   /** 弹层开关（父层 state）。 */
   popoverOpen: boolean;
+  /**
+   * task-13（FR-05）：预会话实例——true 时透传弹层 preSession（渲染主 agent
+   * 选择器 + 确认按钮文案「派团队（随首句创建生效）」+ payload 追加
+   * orchestrator_workspace_id，task-12 组件契约）；缺省 false 弹层零变化。
+   */
+  preSession?: boolean;
   /** 会话绑定工作区（弹层 scope 默认「当前工作区」数据源）。 */
   workspaceId: string | null;
   workspaceName: string | null;
@@ -408,6 +415,7 @@ function TeamTriggerRow({
   activeWorkers,
   onDismissChip,
   popoverOpen,
+  preSession = false,
   workspaceId,
   workspaceName,
   defaultObjective,
@@ -456,6 +464,7 @@ function TeamTriggerRow({
           workspaceId={workspaceId}
           workspaceName={workspaceName}
           defaultObjective={defaultObjective}
+          preSession={preSession}
           submitting={submitting}
           onTrigger={onTrigger}
           onClose={onClose}
@@ -570,6 +579,12 @@ function SessionPanelPage({
   const [preProviderId, setPreProviderId] = useState("");
   const [preProfileId, setPreProfileId] = useState("");
   const [preError, setPreError] = useState<string | null>(null);
+  // task-13（FR-05/D-009@v2）：预会话团队 payload 暂存——弹层确认后暂存（含
+  // task-12 主 agent 选择器落定的 orchestrator_workspace_id），首句 createSession
+  // 随 team_mission 上送；成功清空、失败保留可原地重试（R-02 语义延伸）。
+  const [preTeamMission, setPreTeamMission] = useState<SessionCreateTeamMission | null>(
+    null,
+  );
 
   // ── task-11（2026-08-22-team-session-unify）：会话内团队触发 + TeamTaskBlock ──
   // 任务列表/轮询共用 hook；弹层开关与预填、触发在途、错误文案、chip 收回为面板态。
@@ -1266,6 +1281,25 @@ function SessionPanelPage({
   );
 
   /**
+   * task-13（FR-05/D-010@v1）：预会话弹层确认——**不走** handleTeamTrigger
+   *（无 sessionId 可挂 mission，triggerSessionTeamMission 不可用）：payload
+   * 暂存 state（含主 agent 选择器落定的 orchestrator_workspace_id——task-12
+   * 弹层组件内类型交集运行时携带，弹层 onTrigger prop 仍窄化为
+   * TeamMissionTriggerRequest，此处按 lib 侧 create 块类型断言还原；task-14
+   * gen:types 后 SessionCreateTeamMission 已收敛为生成版
+   * TeamMissionCreateBlock，断言精确 → 宽松结构安全）+ 关弹层 + objective
+   * 回填输入框（非空时），等首句随 create 上送（handlePreSessionSend）。
+   */
+  const handlePreTeamTrigger = useCallback(
+    (payload: TeamMissionTriggerRequest) => {
+      setPreTeamMission(payload as SessionCreateTeamMission);
+      if (payload.objective) setInput(payload.objective);
+      closeTeamPopover();
+    },
+    [closeTeamPopover],
+  );
+
+  /**
    * task-03（D-102）：预会话首句创建——发送动作触发 createSession（后端 prompt
    * 首句约束由发送满足，零协议改动）。复用 dialog idle 先例（:2359-2421）但两处
    * 改造（Grill X-02）：① 传 runtime_id（机器+引擎已定）而非 dialog 的 provider；
@@ -1293,11 +1327,17 @@ function SessionPanelPage({
           // ql-20260823-008：预会话配置条暂存值随首句落为会话初始配置。
           ...(preProviderId ? { llm_provider_id: preProviderId } : {}),
           ...(preProfileId ? { agent_profile_id: preProfileId } : {}),
+          // task-13（FR-05/D-009@v2）：弹层确认暂存的团队 payload 随首句上送
+          //（有值才带；后端 create 路径预建 mission，objective 空时以首句回填）。
+          ...(preTeamMission ? { team_mission: preTeamMission } : {}),
         });
-        // R-02：成功才清空（失败路径输入保留在 catch 之外，可原地重试）。
+        // R-02：成功才清空（失败路径输入保留在 catch 之外，可原地重试——
+        // 暂存 team payload 同语义：失败保留，重试仍携带）。
         setInput("");
         setPendingAttachments([]);
         clearAttachmentsRef.current?.();
+        // task-13：成功清空暂存（mission 已随 create 预建，再发不重复上送）。
+        setPreTeamMission(null);
         onPreSessionCreated?.(resp);
       } catch (err) {
         setPreError(err instanceof ApiError ? err.message : "创建会话失败，请重试");
@@ -1305,7 +1345,14 @@ function SessionPanelPage({
         setPreCreating(false);
       }
     },
-    [preContext, preCreating, onPreSessionCreated, preProviderId, preProfileId],
+    [
+      preContext,
+      preCreating,
+      onPreSessionCreated,
+      preProviderId,
+      preProfileId,
+      preTeamMission,
+    ],
   );
 
   // task-03（design §3.3 状态机）：发送 = 统一 enqueue。active 且无 currentRun
@@ -1542,7 +1589,8 @@ function SessionPanelPage({
   // 区结构，用户硬约束"不要独立页面"），仅内容空 + 多锁定上下文行（原型
   // startPre：.ctx-line + .empty-hint）。会话作用域查询/effect 已在上方逐项
   // null 守卫（R-01：detailQuery 轮询 / SSE 建流 / dialogs 恢复 / 队列投递 /
-  // team missions）；team 触发行与配置条为会话绑定语义，预会话态不渲染。
+  // team missions）；配置条与团队触发行同构挂载（团队行 task-13 解禁，随首句
+  // 创建生效）。
   if (!sessionId) {
     const preSendingDisabled = !preContext || !preMachineOnline;
     const prePlaceholder = !preContext
@@ -1550,6 +1598,19 @@ function SessionPanelPage({
       : !preMachineOnline
         ? "机器离线，输入不可用…"
         : "发送第一句话开始对话…（Enter 发送 · Shift+Enter 换行）";
+    // task-13（FR-05）：预会话团队门控——与真会话同构（:1771 附近
+    // teamButtonDisabled/teamButtonTitle 先例）：引擎 claude（D-003 一期专属）
+    // + 所选机器在线；机器列表找不到不武断判离线（preMachineOnline 语义
+    // 保持）。tooltip 按未满足原因更新，可用时提示首句创建会话即预建团队任务。
+    const preTeamEngineOk = preEngine === "claude";
+    const preTeamButtonDisabled = !preContext || !preTeamEngineOk || !preMachineOnline;
+    const preTeamButtonTitle = !preContext
+      ? "请先选择机器与智能体"
+      : !preTeamEngineOk
+        ? "团队需要 Claude 引擎"
+        : !preMachineOnline
+          ? "所选机器离线，无法派团队"
+          : "派团队：首句创建会话时预建团队任务";
     return (
       <section
         ref={panelRef}
@@ -1652,22 +1713,25 @@ function SessionPanelPage({
               providerId={preProviderId || null}
             />
           </div>
-          {/* ql-20260823-008：团队触发行同构挂载（置灰——agent 未运行，用户定调
-              的唯一差异）；组件要求全 props，预会话给安全空值。 */}
+          {/* task-13（FR-05/D-009@v2）：预会话团队触发行解禁——门控与真会话
+              同构（claude 引擎 + 所选机器在线）；弹层确认后 payload 暂存
+              （handlePreTeamTrigger，含主 agent 选择器的 orchestrator_workspace_id），
+              首句 create 随 team_mission 上送（后端预建归 task-09）。 */}
           <TeamTriggerRow
-            disabled
-            tooltip="发送第一句话创建会话后可用"
+            disabled={preTeamButtonDisabled}
+            tooltip={preTeamButtonTitle}
             activeWorkers={null}
             onDismissChip={() => {}}
-            popoverOpen={false}
+            popoverOpen={teamPopover.open}
+            preSession
             workspaceId={preContext?.workspaceId ?? null}
             workspaceName={preWorkspaceName}
-            defaultObjective={null}
+            defaultObjective={teamPopover.objective}
             submitting={false}
             errorText={null}
-            onOpen={() => {}}
-            onTrigger={() => {}}
-            onClose={() => {}}
+            onOpen={() => openTeamPopover(null)}
+            onTrigger={handlePreTeamTrigger}
+            onClose={closeTeamPopover}
           />
           <SessionInputBar
             value={input}

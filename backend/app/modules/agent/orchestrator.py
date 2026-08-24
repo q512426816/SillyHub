@@ -15,8 +15,9 @@ worker 由主 agent 通过 ``mcp_tools`` endpoint 动态 dispatch（不预先拆
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +27,9 @@ from app.core.logging import get_logger
 from app.modules.agent.model import AgentMission, AgentRun, AgentSession
 from app.modules.agent.placement import NoOnlineDaemonError, RunPlacementService
 from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+
+if TYPE_CHECKING:
+    from app.modules.workspace.model import Workspace
 
 log = get_logger(__name__)
 
@@ -104,6 +108,215 @@ def _resolve_main_agent_config(
     }
 
 
+# 禁越权约束文案（2026-08-24-session-team-mission-context task-01 抽出）：
+# render_orchestrator_prompt 与 render_session_orchestrator_briefing 共用同一原文，
+# 收敛到单一常量避免两处漂移（task 卡要求复用 :215-224 既有文案，改文案须同步两消费方）。
+_ORCHESTRATOR_CONSTRAINTS_TEXT = (
+    "【硬性约束 — 禁止越权下场（必须遵守，违反即任务失败）】\n"
+    "你是项目经理（orchestrator），不是实现者。严禁自己用 Edit/Write/Bash 修改任何实现源码"
+    "（backend / frontend / sillyhub-daemon 的业务代码、测试、配置、迁移脚本）。需要写代码 → "
+    "必须 dispatch_worker 派 worker 去写（worker 在独立工作间产出 commit，由 converge 合并）。\n"
+    "唯一例外：当 converge_mission 返回 status=conflict（合并冲突）时，才允许用 Edit 修改冲突"
+    "文件解决冲突，且只动冲突标记涉及的行。\n"
+    "若 list_workers 发现 worker 全部 failed（如 worktree_create_failed / no_online_daemon，"
+    "说明无在线 daemon 承接 worker）→ 不要自己下场写代码！先 report_progress 说明失败原因，"
+    "再调 converge_mission 结束 mission，把决策交还用户处理 daemon。\n"
+    "Read / Glob / Grep 与只读 Bash（git log / ls / grep 等查询命令）仅用于调研，允许。\n"
+)
+
+# scope git 模式探测回调签名（task-01）：接收 Workspace 行、返回 "git"|"direct"|"unknown"。
+# 探测本身由 task-02 helper（host_fs/delegate.probe_workspace_git_mode）提供，task-03/06
+# 接线注入——本模块只消费回调结果，不引入 host_fs 依赖（patrol 路径永远不传）。
+GitModeProbe = Callable[[Any], Awaitable[str]]
+
+# git 模式三态 → 简报展示文案（design §5.D）。仅当调用方传入探测回调才渲染模式字段；
+# 未传时字段整体省略（不渲染「模式=未知」，CC-08 patrol 等价口径）。
+_GIT_MODE_LABELS = {"git": "git隔离", "direct": "直通", "unknown": "未知"}
+
+
+async def collect_single_workspace_status(
+    session: AsyncSession,
+    ws: Workspace,
+    *,
+    git_probe: GitModeProbe | None = None,
+) -> dict[str, Any]:
+    """收集单个工作区的结构化状态条目（task-01 收集口径的单一来源）。
+
+    ``collect_scope_workspace_statuses``（mission scope 循环）与 workspace
+    probe 端点（task-10，无 mission 上下文、直接对传入 workspace_ids 收集）
+    共用本函数——机器名/在线/git 模式三字段口径单一来源，禁两处复制粘贴
+    漂移（UB-2 / D-008@v2：probe 与简报/mission_status 完全同源）。
+
+    条目字段（与 collect_scope_workspace_statuses 文档一致）：
+
+    - ``id/name/type/description``：Workspace 行原样（id 转 str，JSON 友好）。
+    - ``daemon_online``：任一成员 WorkspaceMemberRuntime（daemon_id 非空首行）+
+      ``query_daemon_online_by_id`` + binding 属主 user_id（BE-P1-5 修正口径，
+      禁回退全零 UUID 占位）。
+    - ``daemon_name``：该 binding daemon 的 ``display_alias or hostname``（未绑 /
+      daemon 行缺失 → None）。「任一成员 binding，不限本人」与 §5.C probe 端点
+      同一口径（UB-2）。
+    - ``git_mode``：仅当调用方传入 ``git_probe`` 探测回调时存在（"git"|"direct"|
+      "unknown" 原始三态）——本模块不实现探测本身（task-02 helper，task-03/06
+      接线）。
+    """
+    from app.modules.daemon.model import DaemonInstance
+    from app.modules.workspace.member_runtimes.queries import query_daemon_online_by_id
+
+    # 任一成员 binding（daemon_id 非空首行）→ 该工作区源码宿主 daemon。
+    runtime = (
+        (
+            await session.execute(
+                select(WorkspaceMemberRuntime).where(
+                    WorkspaceMemberRuntime.workspace_id == ws.id,
+                    WorkspaceMemberRuntime.daemon_id.isnot(None),
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    daemon_online = False
+    daemon_name: str | None = None
+    if runtime is not None and runtime.daemon_id is not None:
+        # BE-P1-5（2026-08-21 审查）：query_daemon_online_by_id 的 SQL 含
+        # ``AND user_id = :uid``，必须传 binding 属主的 user_id——原全零 UUID
+        # 占位会恒 None，scope 清单一律误显示「离线」。
+        online_daemon = await query_daemon_online_by_id(session, runtime.daemon_id, runtime.user_id)
+        daemon_online = online_daemon is not None
+        daemon_row = await session.get(DaemonInstance, runtime.daemon_id)
+        if daemon_row is not None:
+            # 机器名口径：display_alias 优先，缺省回退 hostname（弹层/简报/probe 同源）。
+            daemon_name = daemon_row.display_alias or daemon_row.hostname
+    entry: dict[str, Any] = {
+        "id": str(ws.id),
+        "name": ws.name,
+        "type": ws.type,
+        "description": ws.description,
+        "daemon_online": daemon_online,
+        "daemon_name": daemon_name,
+    }
+    if git_probe is not None:
+        entry["git_mode"] = await git_probe(ws)
+    return entry
+
+
+async def collect_scope_workspace_statuses(
+    mission: AgentMission,
+    session: AsyncSession,
+    *,
+    git_probe: GitModeProbe | None = None,
+) -> list[dict[str, Any]]:
+    """收集 mission 派发范围工作区的结构化状态（task-01 / FR-01 / design §5.A、§5.C）。
+
+    遍历 ``mission.scope_workspace_ids``（无效 uuid 跳过，沿用原
+    render_orchestrator_prompt scope 段语义），逐工作区经
+    :func:`collect_single_workspace_status` 收集（口径单一来源，task-10 probe
+    端点共用同一函数）：
+
+    - ``id/name/type/description``：Workspace 行原样（id 转 str，JSON 友好）。
+    - ``daemon_online``：任一成员 binding 解析在线态（详见共享函数）。
+    - ``daemon_name``：binding daemon 的 ``display_alias or hostname``（任一
+      成员 binding，不限本人，UB-2）。
+    - ``git_mode``：仅当调用方传入 ``git_probe`` 探测回调时存在（"git"|"direct"|
+      "unknown" 原始三态）。
+
+    消费方：render_scope_brief / render_session_orchestrator_briefing（本文件）、
+    mission_status 路由（task-03）、probe 端点（task-10）。
+    """
+    from app.modules.workspace.model import Workspace
+
+    entries: list[dict[str, Any]] = []
+    if not mission.scope_workspace_ids:
+        return entries
+    for ws_id_str in mission.scope_workspace_ids:
+        try:
+            ws_id = uuid.UUID(ws_id_str)
+        except (ValueError, TypeError):
+            # 忽略无效的 workspace id（沿用原实现语义）
+            continue
+        ws = await session.get(Workspace, ws_id)
+        if ws is None:
+            continue
+        entries.append(await collect_single_workspace_status(session, ws, git_probe=git_probe))
+    return entries
+
+
+async def render_scope_brief(
+    mission: AgentMission,
+    session: AsyncSession,
+    *,
+    git_probe: GitModeProbe | None = None,
+) -> str:
+    """渲染派发范围工作区清单（每工作区一行，task-01 / design §5.A）。
+
+    行格式：``- <name>（id=..., type=..., desc=..., 机器=<display_alias||hostname>,
+    daemon=在线|离线[, 模式=git隔离|直通|未知]）``——type/description 为空时省略；
+    未绑机器显示「未绑机器」；``git_probe`` 未传时模式字段整体省略（不渲染
+    「模式=未知」）。返回值只含工作区行（无标题/尾注，调用方自行组装），
+    无有效工作区时返回空串。
+
+    render_orchestrator_prompt（patrol 路径）不传 git_probe——输出与改前结构等价，
+    仅新增机器名字段（design §9 CC-08 口径）。
+    """
+    entries = await collect_scope_workspace_statuses(mission, session, git_probe=git_probe)
+    lines: list[str] = []
+    for entry in entries:
+        line = f"- {entry['name']}（id={entry['id']}"
+        if entry["type"]:
+            line += f", type={entry['type']}"
+        if entry["description"]:
+            line += f", desc={entry['description']}"
+        line += f", 机器={entry['daemon_name'] or '未绑机器'}"
+        line += f", daemon={'在线' if entry['daemon_online'] else '离线'}"
+        git_mode = entry.get("git_mode")
+        if git_mode is not None:
+            line += f", 模式={_GIT_MODE_LABELS.get(git_mode, str(git_mode))}"
+        lines.append(line + "）")
+    return "\n".join(lines)
+
+
+async def render_session_orchestrator_briefing(
+    mission: AgentMission,
+    session: AsyncSession,
+    *,
+    git_probe: GitModeProbe | None = None,
+) -> str:
+    """渲染会话主控首轮任务简报（task-01 / FR-01 / D-004@v1，design §5.A、§7）。
+
+    预建 mission 后首个主控轮的 prompt 前缀（inject/create 两路径共用，task-06/08
+    接线组装 ``简报 + "\\n\\n---\\n\\n" + 用户消息``）：主控角色说明 + mission_id +
+    目标 + 锚点工作区（mission.workspace_id 对应 ws 名与 id）+ 派发范围（调
+    render_scope_brief，scope 行缩进两格）+ dispatch_worker 用法（跨工作区必传
+    target_workspace_id）+ mission_status 工具提示 + 禁越权约束（复用
+    ``_ORCHESTRATOR_CONSTRAINTS_TEXT``，与 render_orchestrator_prompt 同一原文）。
+    """
+    from app.modules.workspace.model import Workspace
+
+    anchor_ws = await session.get(Workspace, mission.workspace_id)
+    if anchor_ws is not None and anchor_ws.name:
+        anchor_line = f"{anchor_ws.name}（{mission.workspace_id}）"
+    else:
+        anchor_line = str(mission.workspace_id)
+
+    parts = [
+        "【团队任务简报（系统注入，仅此一次）】",
+        "你是本会话团队任务的主控（orchestrator/项目经理）。",
+        f"- mission_id: {mission.id}",
+        f"- 目标: {mission.objective}",
+        f"- 锚点工作区: {anchor_line}",
+    ]
+    scope_brief = await render_scope_brief(mission, session, git_probe=git_probe)
+    if scope_brief:
+        parts.append("- 派发范围:")
+        parts.extend(f"  {line}" for line in scope_brief.splitlines())
+    parts.append(
+        "派发: dispatch_worker(objective, role?, target_workspace_id=…)；跨工作区必传 target_workspace_id。"
+    )
+    parts.append("最新机器状态随时可查: mission_status 工具。")
+    return "\n".join(parts) + "\n" + _ORCHESTRATOR_CONSTRAINTS_TEXT
+
+
 async def render_orchestrator_prompt(
     mission: AgentMission,
     orchestrator_run: AgentRun,
@@ -145,54 +358,13 @@ async def render_orchestrator_prompt(
         if row and row[0]:
             project_context = f"\n项目名：{row[0]}"
 
-    # scope 清单（task-06）
+    # scope 清单（task-06；task-01 抽共享渲染——本路径不传 git_probe，模式字段省略，
+    # 输出与改前结构等价+新增机器名字段，patrol 调用零影响 / design §9 CC-08 口径）
     scope_context = ""
     if mission.scope_workspace_ids:
-        from app.modules.workspace.member_runtimes.queries import (
-            query_daemon_online_by_id,
-        )
-        from app.modules.workspace.model import Workspace
-
-        scope_list = []
-        for ws_id_str in mission.scope_workspace_ids:
-            try:
-                ws_id = uuid.UUID(ws_id_str)
-                ws = await session.get(Workspace, ws_id)
-                if ws:
-                    # 查询该 workspace 是否有在线 daemon
-                    online_daemon = None
-                    member_runtimes_result = await session.execute(
-                        select(WorkspaceMemberRuntime).where(
-                            WorkspaceMemberRuntime.workspace_id == ws_id,
-                            WorkspaceMemberRuntime.daemon_id.isnot(None),
-                        )
-                    )
-                    first_runtime = member_runtimes_result.first()
-                    if first_runtime and first_runtime[0].daemon_id:
-                        # BE-P1-5（2026-08-21 审查）：query_daemon_online_by_id 的 SQL 含
-                        # ``AND user_id = :uid``，原传全零 UUID 占位（注释误称"在线判定
-                        # 不依赖 user_id"）→ 查询恒 None，scope 清单一律显示"离线"，
-                        # 系统性误导主 agent 派发决策。改传 binding 属主的 user_id。
-                        online_daemon = await query_daemon_online_by_id(
-                            session,
-                            first_runtime[0].daemon_id,
-                            first_runtime[0].user_id,
-                        )
-
-                    online_status = "在线" if online_daemon else "离线"
-                    ws_info = f"- {ws.name}（id={ws_id}"
-                    if ws.type:
-                        ws_info += f", type={ws.type}"
-                    if ws.description:
-                        ws_info += f", desc={ws.description}"
-                    ws_info += f", daemon={online_status}）"
-                    scope_list.append(ws_info)
-            except (ValueError, TypeError):
-                # 忽略无效的 workspace id
-                pass
-
-        if scope_list:
-            scope_context = "\n派发范围（可落地的工作区）：\n" + "\n".join(scope_list)
+        scope_brief = await render_scope_brief(mission, session)
+        if scope_brief:
+            scope_context = "\n派发范围（可落地的工作区）：\n" + scope_brief
             scope_context += "\n按任务性质选工作区：前端任务传前端工作区 id，后端任务传后端工作区 id（通过 dispatch_worker 的 target_workspace_id 参数）。"
 
     return (
@@ -212,16 +384,7 @@ async def render_orchestrator_prompt(
         "- list_workers(workspace_id, mission_id)：列 mission 所有 worker 状态\n"
         "- converge_mission(workspace_id, mission_id)：全部 worker 终态后收敛\n"
         "- report_progress(workspace_id, mission_id, run_id, message, decision?)：落决策日志\n\n"
-        "【硬性约束 — 禁止越权下场（必须遵守，违反即任务失败）】\n"
-        "你是项目经理（orchestrator），不是实现者。严禁自己用 Edit/Write/Bash 修改任何实现源码"
-        "（backend / frontend / sillyhub-daemon 的业务代码、测试、配置、迁移脚本）。需要写代码 → "
-        "必须 dispatch_worker 派 worker 去写（worker 在独立工作间产出 commit，由 converge 合并）。\n"
-        "唯一例外：当 converge_mission 返回 status=conflict（合并冲突）时，才允许用 Edit 修改冲突"
-        "文件解决冲突，且只动冲突标记涉及的行。\n"
-        "若 list_workers 发现 worker 全部 failed（如 worktree_create_failed / no_online_daemon，"
-        "说明无在线 daemon 承接 worker）→ 不要自己下场写代码！先 report_progress 说明失败原因，"
-        "再调 converge_mission 结束 mission，把决策交还用户处理 daemon。\n"
-        "Read / Glob / Grep 与只读 Bash（git log / ls / grep 等查询命令）仅用于调研，允许。\n"
+        f"{_ORCHESTRATOR_CONSTRAINTS_TEXT}"
     )
 
 
@@ -232,6 +395,8 @@ class OrchestratorService:
     - ``team_mission_entry``：建 AgentMission（含 worker_preset/main_agent_config 落库）；
       team 模式另建主 agent AgentRun（role=orchestrator, mission_id 非空）+ 派
       daemon lease；external / session 模式只建 mission 不 spawn（见方法 docstring）。
+    - ``_precreate_mission_flush``（task-04 / D-009@v2）：flush-only 预建 helper
+      （add+flush 不 commit），``team_mission_entry`` 与 task-09 create 路径共用。
     - ``schedule_loop``：主 agent 调度循环骨架（三重收敛骨架，完整逻辑 task-11）。
 
     与 GLM planner 链路互斥：mode=team 走本服务，mode=single/None 走
@@ -240,6 +405,83 @@ class OrchestratorService:
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def _precreate_mission_flush(
+        self,
+        *,
+        workspace_id: uuid.UUID,
+        objective: str,
+        created_by: uuid.UUID | None,
+        change_id: uuid.UUID | None,
+        constraints: dict[str, Any] | None,
+        budget_usd: float | None,
+        worker_preset: list[dict] | None,
+        main_agent_config: dict[str, Any] | None,
+        orchestration_mode: str = "team",
+        scope_workspace_ids: list[uuid.UUID] | None = None,
+        project_id: uuid.UUID | None = None,
+        session_id: uuid.UUID | None = None,
+    ) -> AgentMission:
+        """flush-only 预建 mission：校验 + 构造 + ``add + flush``，**不 commit 不 refresh**。
+
+        task-04（2026-08-24-session-team-mission-context / D-009@v2 / Grill UB-1）：
+        从 ``team_mission_entry`` 抽出的预建 helper。承载原校验与构造——session
+        预建模式必传 session_id 的 ValueError、external 模式 constraints 合并
+        ``orchestration_mode``、session 模式空 objective 落
+        ``SESSION_OBJECTIVE_PLACEHOLDER``、scope_workspace_ids uuid→str——事务边界
+        收窄为 flush（PK 已可用），把 commit 决策权交还调用方：
+
+        - ``team_mission_entry``（本体 = helper + commit + refresh）：既有
+          trigger 端点 / 懒建 / external 调用方零回归；
+        - task-09 create 路径：在首 run 创建前调用，共用 ``create_session``
+          唯一 commit（service.py:1008 commit / :1011 rollback）——失败整体
+          回滚，无孤儿 session/mission（R-04 闭案）。
+
+        只做预建：不建主控 run、不派 lease、不渲染 prompt（orchestration_mode
+        分支逻辑留在 ``team_mission_entry`` 本体）。
+        """
+        if orchestration_mode == "session" and session_id is None:
+            raise ValueError("session 预建模式必须传 session_id（mission.session_id 锚点）")
+
+        merged = dict(constraints or {})
+        # external 模式（路径A / SillySpec 外部调度）：把 mode 落进 mission.constraints
+        # 供 converge 检测（task-03 finalizer 查 orchestration_mode=="external" 跳过
+        # finalize/cleanup）。team 模式不落——merged 与改动前字节一致（零回归）。
+        if orchestration_mode == "external":
+            merged["orchestration_mode"] = "external"
+
+        # session 预建模式（task-03 / CC-09）：objective 可空 → 落占位常量（首条
+        # inject 回填，task-04）。旧模式 objective 由 DTO 强制非空，不受影响。
+        effective_objective = objective
+        if orchestration_mode == "session" and not (objective and objective.strip()):
+            effective_objective = SESSION_OBJECTIVE_PLACEHOLDER
+
+        # 转换 scope_workspace_ids（uuid → str 存 JSON 列）
+        scope_workspace_ids_str: list[str] | None = None
+        if scope_workspace_ids:
+            scope_workspace_ids_str = [str(sid) for sid in scope_workspace_ids]
+
+        mission = AgentMission(
+            workspace_id=workspace_id,
+            # session 预建模式传会话锚点；team/external 模式 None 透传
+            # （验收返工 QA P1：session_id 已改 nullable，external mission
+            # 无会话，随机 uuid 会违反 FK 压断 PG 上的存量创建链路）。
+            session_id=session_id,
+            change_id=change_id,
+            objective=effective_objective,
+            constraints=merged or None,
+            budget_usd=budget_usd,
+            worker_preset=worker_preset,
+            main_agent_config=main_agent_config,
+            created_by=created_by,
+            scope_workspace_ids=scope_workspace_ids_str,
+            project_id=project_id,  # task-07：跨 workspace mission 项目关联
+        )
+        self._session.add(mission)
+        # flush-only（D-009@v2）：flush 后 PK 已可用；commit/refresh 留给调用方
+        # ——插入 create_session 单 commit 事务时不提前提交（无孤儿数据）。
+        await self._session.flush()
+        return mission
 
     async def team_mission_entry(
         self,
@@ -289,45 +531,25 @@ class OrchestratorService:
         接线，main.py lifespan startup 调用）。这与 single 模式 dispatch_worker
         失败语义一致（router.py:783-784）。external 模式不调 dispatch_to_daemon，
         不存在该异常路径。
+
+        task-04（D-009@v2）：mission 预建（校验+构造）抽到 flush-only helper
+        ``_precreate_mission_flush``，本体 = helper + commit + refresh——既有
+        调用方（trigger 端点 / mcp_tools 懒建 / external）零回归。
         """
-        if orchestration_mode == "session" and session_id is None:
-            raise ValueError("session 预建模式必须传 session_id（mission.session_id 锚点）")
-
-        merged = dict(constraints or {})
-        # external 模式（路径A / SillySpec 外部调度）：把 mode 落进 mission.constraints
-        # 供 converge 检测（task-03 finalizer 查 orchestration_mode=="external" 跳过
-        # finalize/cleanup）。team 模式不落——merged 与改动前字节一致（零回归）。
-        if orchestration_mode == "external":
-            merged["orchestration_mode"] = "external"
-
-        # session 预建模式（task-03 / CC-09）：objective 可空 → 落占位常量（首条
-        # inject 回填，task-04）。旧模式 objective 由 DTO 强制非空，不受影响。
-        effective_objective = objective
-        if orchestration_mode == "session" and not (objective and objective.strip()):
-            effective_objective = SESSION_OBJECTIVE_PLACEHOLDER
-
-        # 转换 scope_workspace_ids（uuid → str 存 JSON 列）
-        scope_workspace_ids_str: list[str] | None = None
-        if scope_workspace_ids:
-            scope_workspace_ids_str = [str(sid) for sid in scope_workspace_ids]
-
-        mission = AgentMission(
+        mission = await self._precreate_mission_flush(
             workspace_id=workspace_id,
-            # session 预建模式传会话锚点；team/external 模式 None 透传
-            # （验收返工 QA P1：session_id 已改 nullable，external mission
-            # 无会话，随机 uuid 会违反 FK 压断 PG 上的存量创建链路）。
-            session_id=session_id,
+            objective=objective,
+            created_by=created_by,
             change_id=change_id,
-            objective=effective_objective,
-            constraints=merged or None,
+            constraints=constraints,
             budget_usd=budget_usd,
             worker_preset=worker_preset,
             main_agent_config=main_agent_config,
-            created_by=created_by,
-            scope_workspace_ids=scope_workspace_ids_str,
-            project_id=project_id,  # task-07：跨 workspace mission 项目关联
+            orchestration_mode=orchestration_mode,
+            scope_workspace_ids=scope_workspace_ids,
+            project_id=project_id,
+            session_id=session_id,
         )
-        self._session.add(mission)
         await self._session.commit()
         await self._session.refresh(mission)
 
@@ -340,7 +562,7 @@ class OrchestratorService:
                 "orchestrator_mission_session_prebuilt",
                 mission_id=str(mission.id),
                 session_id=str(session_id),
-                scope_workspace_ids=scope_workspace_ids_str,
+                scope_workspace_ids=mission.scope_workspace_ids,
                 project_id=str(project_id) if project_id else None,
                 worker_preset_len=len(worker_preset) if worker_preset else 0,
             )

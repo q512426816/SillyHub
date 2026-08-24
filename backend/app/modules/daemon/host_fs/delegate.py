@@ -1,7 +1,10 @@
 """HostFsDelegate implementation — see ``__init__.py`` for module overview.
 
-Nine methods, all forwards over the daemon WS RPC
-(:meth:`HostFsDelegate._via_rpc_or_degrade` / :meth:`HostFsDelegate._via_rpc`).
+Nine contract methods, all forwards over the daemon WS RPC
+(:meth:`HostFsDelegate._via_rpc_or_degrade` / :meth:`HostFsDelegate._via_rpc`),
+plus the tri-state git-mode probe :meth:`HostFsDelegate.probe_workspace_git_mode`
+(change ``2026-08-24-session-team-mission-context`` task-02, design §5.D — a
+standalone helper beside the locked contract surface, not a §5.1 method).
 Change ``2026-07-10-remove-server-local-workspace-mode`` dropped the legacy
 column the old server-local branch keyed on, so the delegate is now a pure
 daemon-client RPC dispatcher.
@@ -650,6 +653,67 @@ class HostFsDelegate:
                         details={"command": command, "args": args, "flag": flag, "value": value},
                     )
             i += 2
+
+    # ------------------------------------------------------------------
+    # probe_workspace_git_mode（2026-08-24-session-team-mission-context
+    # task-02 / FR-04 / D-006@v2 / design §5.D —— 三态探测 helper，
+    # 位于 §5.1 锁死契约面之外的独立方法，不改既有 9 方法）
+    # ------------------------------------------------------------------
+    async def probe_workspace_git_mode(self, workspace: Workspace) -> str:
+        """Probe whether *workspace* root is a git checkout — tri-state string.
+
+        Returns ``"git" | "direct" | "unknown"``：
+
+        - ``"git"`` — daemon 真答 ``stat.exists=True``（.git 目录或文件均可：
+          worktree 检出的 .git 是文件，stat 的 lstat 语义照样可见）。
+        - ``"direct"`` — daemon 真答 ``exists=False``（工作区根下无 .git）。
+        - ``"unknown"`` — 探测不可判定：transport 异常（:data:`_RPC_DEGRADED_EXC`
+          四成员，超时含内）或 :class:`HostFsDelegateUnavailable`（ws_rpc 未
+          接线 / daemon 未绑）。一律 log.warning 归 unknown，不向 caller 抛。
+
+        走 :meth:`_via_rpc` **非降级**通道——不走
+        :meth:`_via_rpc_or_degrade`（其静默降级会把 RPC 故障误答成
+        ``exists=False``，把故障工作区误判 direct），异常在本方法内捕获归
+        unknown。stat path 为
+        ``resolve_root_path_for_daemon(workspace.root_path) + "/.git"`` 绝对
+        路径——daemon 侧 assertWithinAllowedRoots 先于 pathResolve
+        （host-fs-handler.ts），相对路径会解析到 daemon 进程 cwd 必被拒
+        （CC-06 / R-05）。send_rpc 用默认 30s 传输预算（不透传自定义
+        timeout）。
+
+        ``unknown`` 只报状态不决策：consumer（dispatch_worker 分流 /
+        mission_status / probe 端点）对 unknown 维持现状 worktree 路径，
+        本方法不得自行降级直通（design §5.D 约束）。
+        """
+        # 函数内延迟 import：host_fs 处于 daemon.service 早引用链上，
+        # workspace.service 顶层 import 面（agent/auth model + scanner…）大，
+        # 顶层互 import 有环风险（任务卡授权延迟 import）。
+        from app.modules.workspace.service import resolve_root_path_for_daemon
+
+        probe_path = resolve_root_path_for_daemon(workspace.root_path) + "/.git"
+        try:
+            result = await self._via_rpc(
+                method="stat",
+                workspace=workspace,
+                args={"path": probe_path},
+            )
+        except (*_RPC_DEGRADED_EXC, HostFsDelegateUnavailable) as exc:
+            # 仿 host_fs_rpc_failed 通道（D-006 warn-and-degrade 日志口径）：
+            # 探测失败绝不误判 direct——归 unknown，由 consumer 决策维持现状。
+            log.warning(
+                "host_fs_rpc_failed",
+                method="probe_workspace_git_mode",
+                workspace_id=str(getattr(workspace, "id", "")),
+                error=type(exc).__name__,
+            )
+            return "unknown"
+        if isinstance(result, dict):
+            if result.get("exists") is True:
+                return "git"
+            if result.get("exists") is False:
+                return "direct"
+        # daemon 答非约定形状（缺 exists 键）——按不可判定处理。
+        return "unknown"
 
     # ------------------------------------------------------------------
     # RPC dispatch (daemon-client)

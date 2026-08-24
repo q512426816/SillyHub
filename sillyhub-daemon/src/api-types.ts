@@ -347,6 +347,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Probe Workspaces
+         * @description 批量探测工作区 git 模式 + 绑定机器状态（task-10 / FR-03 / D-008@v2 / design §5.C）。
+         *
+         *     弹层机器状态统一后端口径（任一成员 binding，含他人绑定，消除本人/他人
+         *     binding 展示不一致 UB-2）：``git_mode/daemon_name/daemon_online`` 三字段与
+         *     mission_status 的 scope_workspaces 完全同源——逐工作区经
+         *     ``orchestrator.collect_single_workspace_status``（task-01 单 ws 收集共享
+         *     函数，口径单一来源）+ ``probe_workspace_git_mode``（task-02 三态探测）组装。
+         *
+         *     只读无状态变化（design §7.5）；每次调用实时探测不缓存（R-02）；探测 RPC
+         *     失败/未绑 daemon 归 ``unknown`` 不抛 5xx（fail-safe）。查无行的 workspace_id
+         *     跳过不报错（与 collect_scope 无效 id 跳过同语义）。
+         */
+        post: operations["probe_workspaces_api_workspaces_probe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/activate": {
         parameters: {
             query?: never;
@@ -2250,9 +2280,11 @@ export interface paths {
          *
          *     include_ended=false（缺省）：现状——仅 active 会话最小字段 dict
          *     （id/status/mode/provider），供 approvals 审批中心聚合 scan 歧义决策。
-         *     include_ended=true：工作区全量会话（含已结束），完整 AgentSessionListItem
+         *     include_ended=true：工作区会话（含已结束），完整 AgentSessionListItem
          *     （id/provider/status/turn_count/author/last_active_at/title，对齐
-         *     daemon/schema.py:71-84），排序 coalesce(last_active_at, created_at) desc。
+         *     daemon/schema.py:71-84），排序 coalesce(last_active_at, created_at) desc；
+         *     P5（2026-08-24 会话审查）：该分支原先无界全量返回，现按 limit/offset 分页
+         *     （默认 200；mode 过滤在 Python 侧截断后执行，传 mode 时页内可能少于 limit）。
          *     权限/过滤保持现状（workspace 成员跨成员可见），不因 include_ended 改变。
          */
         get: operations["list_workspace_agent_sessions_api_workspaces__workspace_id__agent_sessions_get"];
@@ -2836,6 +2868,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/missions/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Missions Status Route
+         * @description header-only mission_status（``GET /missions/status``）——X-Session-Id 定位。
+         *
+         *     本路由无任何路径锚，header 缺失 → 400（区别于仅 mid 族的显式回退路径）。
+         */
+        get: operations["missions_status_route_api_missions_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/missions/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Missions Status For Session
+         * @description 会话维度 mission_status（``GET /sessions/{sid}/missions/status``，三族同构）。
+         *
+         *     ``_request_session_id`` 既有 header>path 优先级（不一致 → 400 防歧义）。
+         */
+        get: operations["missions_status_for_session_api_sessions__session_id__missions_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agent/file-artifacts": {
         parameters: {
             query?: never;
@@ -2847,10 +2923,11 @@ export interface paths {
          * List File Artifacts
          * @description 按 session_id / run_id 列文件制品（FileMetaResp 含 description/created_at）。
          *
-         *     WORKSPACE_READ（读级鉴权）+ 锚 workspace 复核；按 created_at 倒序。前端 run
-         *     详情「产出文件」区与 daemon list_uploaded_files 工具共用本端点（D-010@v1，
-         *     不复用 /api/file/list——其非 admin owner 分支把 owner_id 当 workspace id
-         *     鉴权会 404）。
+         *     会话场景走会话归属人制（归属人放行，非归属人按 workspace 锚复核
+         *     WORKSPACE_READ，ql-20260823-013）；run 场景仍锚 workspace 复核 WORKSPACE_READ；
+         *     按 created_at 倒序。前端 run 详情「产出文件」区与 daemon list_uploaded_files
+         *     工具共用本端点（D-010@v1，不复用 /api/file/list——其非 admin owner 分支把
+         *     owner_id 当 workspace id 鉴权会 404）。
          */
         get: operations["list_file_artifacts_api_agent_file_artifacts_get"];
         put?: never;
@@ -2864,9 +2941,10 @@ export interface paths {
          *       owner_type=agent_run；锚 workspace 走 task-02 解析链。
          *     - 会话场景（``X-Session-Id``，与 mcp_tools 同名同源）：日志行挂当前活跃 run
          *       （无活跃取最新，均无 422 中文引导），owner_type=agent_session、owner_id=
-         *       会话 id；锚 workspace=AgentSession.workspace_id。
+         *       会话 id；授权走会话归属人制（ql-20260823-013）：归属人放行（无工作区会话
+         *       同样可传），非归属人按 AgentSession.workspace_id 锚复核 WORKSPACE_WRITE。
          *
-         *     两场景都按锚 workspace 复核 WORKSPACE_WRITE（越权 403）；重放防护：直写日志行
+         *     worker 场景按锚 workspace 复核 WORKSPACE_WRITE（越权 403）；重放防护：直写日志行
          *     撞 ``(run_id, dedup_key)`` 部分唯一索引（ux_agent_run_logs_dedup）的
          *     IntegrityError 视作已写入，不 500。
          */
@@ -4430,7 +4508,9 @@ export interface paths {
          *     - scope 解析：未传 → 会话绑定工作区；会话无工作区且未传 → 422（CC-10 同款）；
          *     - 项目维度校验复用旧项目端点口径（agent/router.py:1239-1357，本卡迁移复用）：
          *       非项目经理（非超管）→ 403；scope ⊄ 项目关联工作区 → 422；anchor 缺省取
-         *       scope 内 type=backend-code 优先否则第一个（DTO 不带 anchor，服务端派生）；
+         *       scope 内 type=backend-code 优先否则第一个（DTO 不带 anchor，服务端派生）
+         *       ——以上经 ``validate_team_mission_block`` 共享函数（task-07 抽出，create
+         *       路径 task-09 复用同一实现）；
          *     - 落库走 ``OrchestratorService.team_mission_entry`` 的 ``"session"`` 预建模式
          *       （不建主控 run / 不派 lease / objective 空落 SESSION_OBJECTIVE_PLACEHOLDER）。
          */
@@ -8339,6 +8419,130 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/agent-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Agent Logs
+         * @description GET agent 会话日志列表（design §3.2 读通道，会话详情页日志线索）。
+         *
+         *     鉴权 scope 复用 ``_read_args`` 翻译（shpsync_ → token 绑定 workspace；JWT/
+         *     shk_live_ → CHANGE_READ 并集，本表 workspace_id NOT NULL 无 NULL 桶）。可选
+         *     ``workspace_id`` query 参数再 AND 等值过滤：不在 scope 内（越权）→ 空列表，
+         *     不 403 不泄漏 workspace 存在性（D-004）。
+         *
+         *     2026-08-23-agent-activity-sessions task-04（design §3.3.6）：可选 ``session_id``
+         *     query 参数再 AND ``agent_session_id`` 等值——会话详情页只取该会话关联条目；
+         *     会话存在但不属 scope（越权）→ 空列表同既有语义（scope 过滤天然拦截）。
+         *     排序 ``last_seen_at DESC NULLS LAST``（显式 nulls_last 消除方言分叉 X-07；
+         *     ISO 8601 UTC 字典序 = 时间序 D-003）。响应字段 snake_case 原样（X-06，前端
+         *     类型以 gen:types 生成契约为准）。
+         */
+        get: operations["list_agent_logs_api_agent_logs_get"];
+        put?: never;
+        /**
+         * Push Agent Logs
+         * @description POST agent 会话日志元信息批量上报（协议 docs/platform-agent-log-protocol.md §1）。
+         *
+         *     CLI ``sillyspec run`` 每次入口探测本地 harness 会话日志后 best-effort POST
+         *     （5s 超时、失败只 warn 不阻断、本地 ``agent-session-log.json`` 留底）；上报只含
+         *     路径与元信息、不含日志内容。语义恒 200 成功体（幂等 upsert，``(workspace_id,
+         *     log_path)`` 整行覆盖 D-005，无乐观锁），CLI 不读 body、任意 2xx 即成功。
+         *
+         *     workspace_id 从 require_platform_sync_write 派生（仅 shpsync_ 可写，D-004@v1；
+         *     无凭据 401 / shk_live_·JWT 403，与 quicklog-entries 完全同款）；body 顶层
+         *     ``workspace_id`` 键被 extra=ignore 吞掉——token 派生唯一权威，不信任 body。
+         *
+         *     2026-08-23-agent-activity-sessions task-04（design §3.3.3）：透传鉴权 tuple 派生
+         *     的真实 User id（tool_report 会话 owner，R-02）与 body 级 ``hub_session_id``
+         *     （daemon env 注入的平台会话关联）给 service 做落库后归属——hub 未命中/跨 ws
+         *     静默降级（D-005），响应恒 200 不变。
+         */
+        post: operations["push_agent_logs_api_agent_logs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-logs/{entry_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Agent Log Content
+         * @description GET 单条 agent 日志的内容（design §3.3.5，读即弃不落库）。
+         *
+         *     鉴权 scope 校验 entry 可见（shpsync_ = token 绑定 workspace；JWT/shk_live_ =
+         *     CHANGE_READ 并集），不可见 404 中文（不泄漏存在性）。
+         *
+         *     读取链路（scope 校验 / format 黑名单 / daemon 定位 / 错误映射自 task-03 起
+         *     共享 ``_resolve_agent_log_read_target`` + ``_send_agent_log_rpc``，与 messages
+         *     端点同口径）：
+         *
+         *     1. format 黑名单（sqlite/zstd 子串）→ 409 中文「二进制暂不支持」。
+         *     2. 定位 daemon_id：会话 runtime→daemon_instance 优先；workspace 绑定回落；
+         *        都无 → 404 中文。
+         *     3. ``host_fs.read_file {path}`` RPC（默认 30s 超时）；daemon 拒 forbidden →
+         *        409 中文（含 allowed_roots 配置指引）/ not_found → 404 中文 / 其余远端
+         *        错 → 既有 502；机器离线 → 既有 ``DaemonRuntimeOffline``；RPC 超时 →
+         *        既有 ``DaemonRpcTimeout``（504）。
+         *     4. 尾部 262144 字节截断（``errors="ignore"`` 回解）后返回
+         *        ``{content, truncated, size_bytes}``。
+         */
+        get: operations["read_agent_log_content_api_agent_logs__entry_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-logs/{entry_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Agent Log Messages
+         * @description GET 单条 agent 日志的对话化归一化消息（design §7.2，读即弃不落库）。
+         *
+         *     scope 校验 / format 二进制 409 / daemon 定位 / RpcError→HTTP 映射全部复用
+         *     ``_resolve_agent_log_read_target`` + ``_send_agent_log_rpc``（与 content 端点
+         *     共享，防两口径漂移）。
+         *
+         *     调 ``host_fs.read_agent_log_messages {path, format, beforeSeq?}``（task-02
+         *     契约，默认 30s 传输预算）：daemon 全量读文件本地解析后只回 KB 级归一化消息
+         *     （FR-02，替代 content 端点 256KB 原文尾部口径）。外层 daemon 返回 camelCase
+         *     （``totalSegments``/``skippedLines``）→ 本端点转换层落 snake_case；messages
+         *     内层逐字段已对齐（design §7.1）无需改名。
+         *
+         *     status 四值（parsed/unsupported/parse_error/too_large）**一律 200 透传**——
+         *     「RPC 成功≠解析成功」，unsupported/parse_error/too_large 由前端判断回落原文
+         *     端点（design §7.2 / D-003@v1）；本端点零解析零改写（D-001@v1）。唯一 422：
+         *     老 daemon 未注册该方法（``method_not_found``）→
+         *     ``HTTP_422_AGENT_LOG_UNSUPPORTED``。``before_seq`` (int | None) 透传 daemon
+         *     侧 ``beforeSeq``（加载更早切片键，FR-05）。
+         */
+        get: operations["read_agent_log_messages_api_agent_logs__entry_id__messages_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/platform-sync-tokens": {
         parameters: {
             query?: never;
@@ -8422,6 +8626,291 @@ export interface components {
             id: string;
             /** Status */
             status: string;
+        };
+        /**
+         * AgentLogContentResponse
+         * @description GET /agent-logs/{entry_id}/content 200 响应。
+         *
+         *     daemon 侧 ``host_fs.read_file`` 整文件 utf8 读（无上限），后端按字节截断
+         *     **尾部** 262144 字节后返回（防大文件撑爆响应；尾部 = 最新内容，回解
+         *     ``errors="ignore"`` 防多字节字符被切出现乱码开头）。``size_bytes`` 是
+         *     daemon 读到的文件总字节数（截断前权威值，不回退用 entry.size_bytes 旧元
+         *     信息）。读即弃不落库（task-05 constraints）。
+         */
+        AgentLogContentResponse: {
+            /**
+             * Content
+             * @description 日志内容尾部文本（最多 262144 字节 UTF-8）
+             */
+            content: string;
+            /**
+             * Truncated
+             * @description 原始内容是否超过 262144 字节被截断
+             */
+            truncated: boolean;
+            /**
+             * Size Bytes
+             * @description daemon 侧读到的文件总字节数（截断前）
+             */
+            size_bytes: number;
+        };
+        /**
+         * AgentLogEntry
+         * @description POST /agent-logs 单条日志元信息（协议 docs/platform-agent-log-protocol.md §1）。
+         *
+         *     必填仅 ``harness`` + ``log_path``（复合幂等键之二维），其余 optional；字符串字段
+         *     ``max_length`` 与 ORM 列宽对齐——超长在 Pydantic 层先行 422（防 PG 超长 500，
+         *     X-08），其中 ``log_path`` 上限 1024 与列宽逐字一致。``extra=ignore`` 宽松吞掉
+         *     CLI schema 升版的未知字段（D-002：静默丢弃不 422，字段演进靠加列）。
+         */
+        AgentLogEntry: {
+            /** Harness */
+            harness: string;
+            /** Log Path */
+            log_path: string;
+            /** Format */
+            format?: string | null;
+            /** Session Id */
+            session_id?: string | null;
+            /** Originator */
+            originator?: string | null;
+            /** Detected Via */
+            detected_via?: string | null;
+            /** Agent Cwd */
+            agent_cwd?: string | null;
+            /** Exists */
+            exists?: boolean | null;
+            /** Size Bytes */
+            size_bytes?: number | null;
+            /** Mtime Ms */
+            mtime_ms?: number | null;
+            /** First Seen At */
+            first_seen_at?: string | null;
+            /** Last Seen At */
+            last_seen_at?: string | null;
+            /** Invocations */
+            invocations?: number | null;
+            /** Last Command */
+            last_command?: string | null;
+            /** Change Key */
+            change_key?: string | null;
+            /** Quick Id */
+            quick_id?: string | null;
+        };
+        /**
+         * AgentLogListItem
+         * @description GET /agent-logs 列表项——design §3.1 全列 snake_case 原样（X-06）。
+         *
+         *     ``from_attributes`` 支持 ORM 行直接 ``model_validate``（router 层零手工映射）；
+         *     字段即 ``platform_agent_logs`` 表全列（无 payload JSON，D-002）。
+         */
+        AgentLogListItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Log Path */
+            log_path: string;
+            /** Harness */
+            harness: string;
+            /** Format */
+            format?: string | null;
+            /** Session Id */
+            session_id?: string | null;
+            /** Originator */
+            originator?: string | null;
+            /** Detected Via */
+            detected_via?: string | null;
+            /** Agent Cwd */
+            agent_cwd?: string | null;
+            /** Exists */
+            exists: boolean;
+            /** Size Bytes */
+            size_bytes?: number | null;
+            /** Mtime Ms */
+            mtime_ms?: number | null;
+            /** First Seen At */
+            first_seen_at?: string | null;
+            /** Last Seen At */
+            last_seen_at?: string | null;
+            /** Invocations */
+            invocations?: number | null;
+            /** Last Command */
+            last_command?: string | null;
+            /** Scan Run Id */
+            scan_run_id?: string | null;
+            /** Pushed At */
+            pushed_at?: string | null;
+            /** Agent Session Id */
+            agent_session_id?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * AgentLogListResponse
+         * @description GET /agent-logs 200 响应（按 last_seen_at DESC NULLS LAST 排序，design §3.2）。
+         */
+        AgentLogListResponse: {
+            /** Items */
+            items?: components["schemas"]["AgentLogListItem"][];
+        };
+        /**
+         * AgentLogMessageItem
+         * @description GET /agent-logs/{entry_id}/messages 单条归一化消息（design §7.1）。
+         *
+         *     字段与 daemon 解析器产出的 ``NormalizedLogMessage``（parse-zcode-model-io.ts）
+         *     **逐字对齐 snake_case**（producer→consumer 全链：daemon → ws rpc JSON → 本
+         *     schema → openapi → 前端 api-types）。``tool_use_id`` 是 tool_use / tool_result
+         *     配对键（消息级 toolCalls[].id / toolCallId）；``tool_input``/``tool_result`` 是
+         *     摘要文本（首 2KB/4KB 截断）；``ts`` 为所属行 completedAt 原文。
+         *     ``extra=ignore`` 保证 daemon 字段演进而后端透传不炸（与 AgentLogEntry 同款宽松）。
+         */
+        AgentLogMessageItem: {
+            /**
+             * Seq
+             * @description 全局段序（加载更早切片键；窗口空洞跳过后重编号）
+             */
+            seq: number;
+            /**
+             * Kind
+             * @description 消息类别（前端渲染分支：气泡/Markdown/折叠/工具卡）
+             * @enum {string}
+             */
+            kind: "user_input" | "reply" | "thinking" | "tool_use" | "tool_result";
+            /**
+             * Text
+             * @description user_input/reply/thinking 正文
+             */
+            text?: string | null;
+            /**
+             * Tool Name
+             * @description tool_use 工具名
+             */
+            tool_name?: string | null;
+            /**
+             * Tool Use Id
+             * @description tool_use 与 tool_result 配对键
+             */
+            tool_use_id?: string | null;
+            /**
+             * Tool Input
+             * @description 工具入参摘要（JSON 串，首 2KB 截断）
+             */
+            tool_input?: string | null;
+            /**
+             * Tool Result
+             * @description 工具结果摘要（首 4KB 截断）
+             */
+            tool_result?: string | null;
+            /**
+             * Is Error
+             * @description tool_result 专用：是否报错
+             */
+            is_error?: boolean | null;
+            /**
+             * Ts
+             * @description 所属行 completedAt 原文
+             */
+            ts?: string | null;
+        };
+        /**
+         * AgentLogMessagesResponse
+         * @description GET /agent-logs/{entry_id}/messages 200 响应（design §7.2）。
+         *
+         *     daemon 侧 ``host_fs.read_agent_log_messages`` 外层 camelCase
+         *     （``totalSegments``/``skippedLines``）→ router 转换层落 snake_case；messages
+         *     内层逐字段已对齐无需改名。status 四值一律 200 透传——「RPC 成功≠解析成功」：
+         *     unsupported/parse_error/too_large 由前端判断回落原文端点（D-003@v1），backend
+         *     零解析零改写（D-001@v1）。
+         */
+        AgentLogMessagesResponse: {
+            /**
+             * Status
+             * @description 解析结果分层（parsed=渲染对话流；其余前端回落原文查看）
+             * @enum {string}
+             */
+            status: "parsed" | "unsupported" | "parse_error" | "too_large";
+            /**
+             * Messages
+             * @description 归一化消息（仅 status=parsed 非空）
+             */
+            messages?: components["schemas"]["AgentLogMessageItem"][];
+            /**
+             * Truncated
+             * @description 段窗口是否被截断（最近 200 段之外还有更早内容）
+             */
+            truncated: boolean;
+            /**
+             * Total Segments
+             * @description 解析出的总段数（仅 parsed 有意义）
+             */
+            total_segments: number;
+            /**
+             * Skipped Lines
+             * @description 解析中跳过的坏行数
+             */
+            skipped_lines: number;
+        };
+        /**
+         * AgentLogPushOk
+         * @description POST /agent-logs 200 响应（CLI best-effort 不读 body，任意 2xx 即成功）。
+         */
+        AgentLogPushOk: {
+            /**
+             * Ok
+             * @default true
+             */
+            ok: boolean;
+            /**
+             * Upserted
+             * @description 本次落库的日志行数（同请求去重后）
+             */
+            upserted: number;
+        };
+        /**
+         * AgentLogPushRequest
+         * @description POST /agent-logs 请求（CLI ``sillyspec run`` 入口 best-effort 批量推送，协议 §1）。
+         *
+         *     **不声明 workspace_id 字段**——body 里出现的值被 extra=ignore 吞掉，workspace
+         *     一律由 shpsync_ token 派生（token 派生唯一权威，协议 §1「不信任 body 里的
+         *     workspace_id」）。``entries`` 1..50 条防滥用；同请求内同 log_path 重复条目由
+         *     service 层去重取后者（design §3.2）。
+         *
+         *     2026-08-23-agent-activity-sessions task-04（design §3.3.2）：增 body 级
+         *     ``hub_session_id``——daemon 派发时经 env ``SILLYHUB_SESSION_ID`` 注入的平台会话
+         *     id（run 所属会话唯一，故 body 级而非 entry 级，D-008）；服务端校验 workspace
+         *     归属，未命中/跨 ws 静默降级（D-005 best-effort）。
+         */
+        AgentLogPushRequest: {
+            /**
+             * Schema Version
+             * @default 1
+             */
+            schema_version: number;
+            /** Pushed At */
+            pushed_at?: string | null;
+            /** Agent Cwd */
+            agent_cwd?: string | null;
+            /** Scan Run Id */
+            scan_run_id?: string | null;
+            /** Hub Session Id */
+            hub_session_id?: string | null;
+            /** Entries */
+            entries: components["schemas"]["AgentLogEntry"][];
         };
         /**
          * AgentProfileAggregatedItem
@@ -8692,6 +9181,8 @@ export interface components {
             depth?: number | null;
             /** Tool Kind */
             tool_kind?: string | null;
+            /** Edit Patch */
+            edit_patch?: string | null;
         };
         /** AgentRunResponse */
         AgentRunResponse: {
@@ -8864,6 +9355,13 @@ export interface components {
             config_snapshot?: {
                 [key: string]: unknown;
             } | null;
+            /** Owner Name */
+            owner_name?: string | null;
+            /**
+             * Origin
+             * @default chat
+             */
+            origin: string;
         };
         /** ApiKeyCreateRequest */
         ApiKeyCreateRequest: {
@@ -12063,6 +12561,38 @@ export interface components {
             workspace_name?: string | null;
             /** Workspace Type */
             workspace_type?: string | null;
+        };
+        /**
+         * MissionStatusResponse
+         * @description ``GET /missions/status`` 响应（design §7，默认值逐字对齐）。
+         *
+         *     无活跃 mission 时仅 ``active=false`` + ``hint``（D-005/D-012，不走 404），
+         *     其余字段保持默认值，不泄露 scope/binding 信息。
+         */
+        MissionStatusResponse: {
+            /** Active */
+            active: boolean;
+            /** Hint */
+            hint?: string | null;
+            /** Mission Id */
+            mission_id?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Objective */
+            objective?: string | null;
+            anchor_workspace?: components["schemas"]["ScopeWorkspaceStatus"] | null;
+            /**
+             * Scope Workspaces
+             * @default []
+             */
+            scope_workspaces: components["schemas"]["ScopeWorkspaceStatus"][];
+            /**
+             * Workers
+             * @default []
+             */
+            workers: components["schemas"]["WorkerListItem"][];
+            /** Budget Usd */
+            budget_usd?: number | null;
         };
         /** MissionWorkerRunResponse */
         MissionWorkerRunResponse: {
@@ -15656,6 +16186,31 @@ export interface components {
             /** Warnings */
             warnings?: string[];
         };
+        /**
+         * ScopeWorkspaceStatus
+         * @description scope 工作区状态条目（design §7 逐字）。
+         *
+         *     组装源：``orchestrator.collect_scope_workspace_statuses``（task-01）——
+         *     ``daemon_name`` 取任一成员 binding 的 ``display_alias||hostname``（不限本人，
+         *     UB-2 口径）；``git_mode`` 为 task-02 ``probe_workspace_git_mode`` 实时探测
+         *     三态。
+         */
+        ScopeWorkspaceStatus: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Type */
+            type: string | null;
+            /** Description */
+            description: string | null;
+            /** Daemon Online */
+            daemon_online: boolean;
+            /** Daemon Name */
+            daemon_name: string | null;
+            /** Git Mode */
+            git_mode: string;
+        };
         /** SessionControlResponse */
         SessionControlResponse: {
             /**
@@ -15704,6 +16259,7 @@ export interface components {
             change_id?: string | null;
             /** Workspace Id */
             workspace_id?: string | null;
+            team_mission?: components["schemas"]["TeamMissionCreateBlock"] | null;
         };
         /** SessionCreateResponse */
         SessionCreateResponse: {
@@ -17118,6 +17674,36 @@ export interface components {
             file_urls?: string[] | null;
         };
         /**
+         * TeamMissionCreateBlock
+         * @description ``SessionCreateRequest.team_mission`` 内嵌块（design §5.E1/§7）。
+         *
+         *     - ``objective`` 可空——create 路径为空时用首句 prompt 回填（task-09）；
+         *     - 其余五字段与 TeamMissionTriggerRequest 同名同 annotation 同约束（上限
+         *       /ge=0/UUID 口径逐字一致），校验复用共享函数（单一实现无复制粘贴）；
+         *     - ``orchestrator_workspace_id`` 本卡只透传不校验语义——∈ scope 与
+         *       (W, 创建者) binding 钉定归 create 消费侧（task-09）。
+         */
+        TeamMissionCreateBlock: {
+            /** Objective */
+            objective?: string | null;
+            /** Scope Workspace Ids */
+            scope_workspace_ids?: string[] | null;
+            /** Project Id */
+            project_id?: string | null;
+            /** Budget Usd */
+            budget_usd?: number | null;
+            /** Worker Preset */
+            worker_preset?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Main Agent Config */
+            main_agent_config?: {
+                [key: string]: unknown;
+            } | null;
+            /** Orchestrator Workspace Id */
+            orchestrator_workspace_id?: string | null;
+        };
+        /**
          * TeamMissionSummary
          * @description 触发/列表共用响应（design §7）。
          *
@@ -17188,6 +17774,8 @@ export interface components {
             status: string;
             /** Objective */
             objective?: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
         };
         /**
          * TokenPair
@@ -18013,7 +18601,16 @@ export interface components {
             /** Source */
             source: string;
         };
-        /** WorkerListItem */
+        /**
+         * WorkerListItem
+         * @description mission worker run 概要（原居 mcp_tools.py，task-03 上移至此）。
+         *
+         *     上移原因：schema.py 顶部 import mcp_tools 会成环（mcp_tools→service，
+         *     service.py 已反向 import schema），反向（mcp_tools→schema）无环。mcp_tools
+         *     改 from-import 并保留模块级重导出，既有
+         *     ``from app.modules.agent.mcp_tools import WorkerListItem`` 消费方零改动；
+         *     字段定义单源在此，禁止复制造成漂移。
+         */
         WorkerListItem: {
             /**
              * Id
@@ -18321,6 +18918,44 @@ export interface components {
             granted_at: string;
             /** Is Current User */
             is_current_user: boolean;
+        };
+        /**
+         * WorkspaceProbeItem
+         * @description 单工作区探测结果项（``POST /api/workspaces/probe`` 响应元素）。
+         *
+         *     - ``git_mode``：三态 ``"git"|"direct"|"unknown"``（实时探测不缓存，R-02；
+         *       RPC 失败/未绑 daemon 归 unknown 不抛）。
+         *     - ``daemon_name``：任一成员 binding daemon 的 ``display_alias or hostname``
+         *       （未绑/daemon 行缺失 → None）。
+         *     - ``daemon_online``：该 binding daemon 的在线态。
+         */
+        WorkspaceProbeItem: {
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /**
+             * Git Mode
+             * @enum {string}
+             */
+            git_mode: "git" | "direct" | "unknown";
+            /** Daemon Name */
+            daemon_name?: string | null;
+            /** Daemon Online */
+            daemon_online: boolean;
+        };
+        /**
+         * WorkspaceProbeRequest
+         * @description Request body for ``POST /api/workspaces/probe``。
+         *
+         *     ``workspace_ids`` 非空、上限 20（对齐 mission scope 上限口径）；元素为
+         *     UUID——非法格式由 Pydantic 422。查无行（缺失）的 id 由 handler 跳过不报错
+         *     （与 collect_scope_workspace_statuses 无效 id 跳过同语义，fail-safe 不 5xx）。
+         */
+        WorkspaceProbeRequest: {
+            /** Workspace Ids */
+            workspace_ids: string[];
         };
         /** WorkspaceRead */
         WorkspaceRead: {
@@ -19292,6 +19927,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    probe_workspaces_api_workspaces_probe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceProbeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceProbeItem"][];
                 };
             };
             /** @description Validation Error */
@@ -22723,6 +23391,10 @@ export interface operations {
             query?: {
                 mode?: string | null;
                 include_ended?: boolean;
+                /** @description include_ended 分页页大小 */
+                limit?: number;
+                /** @description include_ended 分页偏移 */
+                offset?: number;
             };
             header?: never;
             path: {
@@ -23578,6 +24250,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ProgressResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    missions_status_route_api_missions_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionStatusResponse"];
+                };
+            };
+        };
+    };
+    missions_status_for_session_api_sessions__session_id__missions_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionStatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -26050,7 +26773,10 @@ export interface operations {
     };
     get_session_logs_api_daemon_sessions__session_id__logs_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 增量游标（ISO timestamp，2026-08-24 会话审查 P4）：只返回 timestamp 严格更新的日志；不传返回全量。同批日志共用同一 timestamp，调用方应回退 1-2s 重叠窗口并按 log_id 去重 */
+                after?: string | null;
+            };
             header?: never;
             path: {
                 session_id: string;
@@ -34427,6 +35153,140 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuicklogPushOk"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_agent_logs_api_agent_logs_get: {
+        parameters: {
+            query?: {
+                /** @description 可选 workspace 过滤 */
+                workspace_id?: string | null;
+                /** @description 可选会话过滤（只回该会话关联条目） */
+                session_id?: string | null;
+                /** @description 返回条数，默认 20 上限 100 */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentLogListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_agent_logs_api_agent_logs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentLogPushRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentLogPushOk"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_agent_log_content_api_agent_logs__entry_id__content_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentLogContentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_agent_log_messages_api_agent_logs__entry_id__messages_get: {
+        parameters: {
+            query?: {
+                /** @description 加载更早段：返回 seq 严格小于该值的窗口切片 */
+                before_seq?: number | null;
+            };
+            header?: never;
+            path: {
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentLogMessagesResponse"];
                 };
             };
             /** @description Validation Error */

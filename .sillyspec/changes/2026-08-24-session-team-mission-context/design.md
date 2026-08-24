@@ -125,10 +125,12 @@ revision: 2
 | 修改 | backend/app/modules/daemon/host_fs/delegate.py | 新增 `probe_workspace_git_mode`（非降级通道 stat 绝对路径 `.git`，三态；HostFsDelegateUnavailable→unknown） |
 | 修改 | backend/app/modules/agent/execution.py | dispatch_worker worktree 块前三态探测分流（direct→跳过 worktree/root_path=工作区根/worktree_branch 保持 None/prompt 直通变体）；render_worker_prompt 直通约束变体 |
 | 修改 | backend/app/modules/daemon/schema.py | `SessionCreateRequest` 新增 `team_mission: TeamMissionCreateBlock \| None` + DTO。数据流：producer=前端预会话弹层（payload 暂存→createSession 请求）→ consumer=create_session 预建 mission（scope/orchestrator_workspace_id 校验与落库） |
-| 修改 | backend/app/modules/daemon/router.py | trigger 端点校验逻辑抽共享函数供 create 路径复用 |
+| 修改 | backend/app/modules/daemon/router.py | trigger 端点校验逻辑抽共享函数供 create 路径复用；create 端点透传 team_mission（task-09，仅此一处） |
+| 修改 | backend/app/modules/daemon/service.py | DaemonService facade 的 create_session 加 team_mission 参数转发（task-09 执行期补入：router 经 facade 调 service，无转发直接 TypeError；2026-08-14-sessions-portal runtime_id 先例，+5 行） |
 | 修改 | backend/app/modules/workspace/router.py（或 agent 域，plan 定） | `POST /api/workspaces/probe` 批量端点。数据流：producer=前端弹层打开时一次性请求 → backend（任一成员 binding 解析机器+D helper 探测）→ consumer=弹层机器名/在线 dot/git 模式标签 |
 | 修改 | sillyhub-daemon/src/mcp-server.ts | 注册第 6 个常驻工具 `mission_status`（参数可选+会话上下文定位，同 5 工具模式）+ 能力说明书描述 |
 | 修改 | sillyhub-daemon/src/hub-client.ts | `getMissionStatus` 方法（X-Session-Id 透传）。数据流：mcp-server 工具 handler → hub-client → backend status 路由 |
+| 修改 | sillyhub-daemon/tests/mcp-server-file.test.ts | ORCHESTRATION_TOOLS 精确名单断言追加 mission_status（task-11 执行期补入：该测试对工具名做精确相等断言，不加则全量红——related_tests 场景，非行为改动） |
 | 修改 | frontend/src/components/daemon/team-trigger-popover.tsx | 机器名+在线 dot+git 模式标签（统一走 POST /workspaces/probe 打开时一次）+ 主 agent 选择器（仅预会话实例） |
 | 修改 | frontend/src/components/daemon/session-panel.tsx | 预会话 TeamTriggerRow 解禁（门控=引擎+机器在线）+ payload 暂存 + handlePreSessionSend 携带 team_mission + 弹层 preSession 实例传参 |
 | 修改 | frontend/src/lib/daemon.ts | createSession 请求体扩展 team_mission；probeWorkspaces API client |

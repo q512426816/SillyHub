@@ -89,6 +89,7 @@ from app.modules.daemon.schema import (
     SessionCreateRequest,
     SessionInjectRequest,
     SessionReopenResponse,
+    TeamMissionCreateBlock,
     TeamMissionSummary,
     TeamMissionTriggerRequest,
     TeamMissionWorkerSummary,
@@ -2011,6 +2012,8 @@ async def create_session(
     # 2026-08-14-sessions-portal task-02：DTO 具名化迁 schema.py。runtime_id/
     # agent_profile_id/llm_provider_id 仅透传 service（解析归 task-03）；model
     # 字段已随 design §5 移除（由档案/默认派生）。
+    # task-09（2026-08-24-session-team-mission-context / FR-05/06）：预会话团队
+    # 任务块透传（共享校验/预建/简报归 service，本端点仅此一处路由改动）。
     result = await svc.create_session(
         user.id,
         provider=data.provider,
@@ -2022,6 +2025,7 @@ async def create_session(
         ask_user_only=data.ask_user_only,
         change_id=data.change_id,
         workspace_id=data.workspace_id,
+        team_mission=data.team_mission,
     )
     s = result.agent_session
     return SessionCreateResponse(
@@ -2411,7 +2415,11 @@ async def _team_mission_summary(
         budget_usd=mission.budget_usd,
         workers=[
             TeamMissionWorkerSummary(
-                run_id=r.id, role=r.role, status=r.status, objective=r.objective
+                run_id=r.id,
+                role=r.role,
+                status=r.status,
+                objective=r.objective,
+                workspace_id=str(r.target_workspace_id or mission.workspace_id),
             )
             for r in all_runs
             if r.role != "orchestrator"
@@ -2419,49 +2427,34 @@ async def _team_mission_summary(
     )
 
 
-@router.post(
-    "/sessions/{session_id}/team-mission",
-    response_model=TeamMissionSummary,
-    status_code=status.HTTP_201_CREATED,
-)
-async def trigger_session_team_mission(
-    session_id: uuid.UUID,
-    data: TeamMissionTriggerRequest,
-    session: SessionDep,
-    user: TaskRunAgentUser,
-) -> TeamMissionSummary:
-    """预建会话团队 mission（design §5 Phase 1 / §7）。
+async def validate_team_mission_block(
+    session: AsyncSession,
+    user: User,
+    block: TeamMissionTriggerRequest | TeamMissionCreateBlock,
+    *,
+    fallback_workspace_id: uuid.UUID | None,
+) -> tuple[list[uuid.UUID], uuid.UUID]:
+    """团队任务块 scope/项目维度共享校验（task-07 自 trigger 端点逐字抽出）。
 
-    - 归属校验：跨用户/不存在 → 404（``svc.get_agent_session``，同
-      get_session_detail 资源隐藏口径）；
-    - 活跃冲突：会话已有活跃 mission（未收敛未取消）→ 409（R-07，经 task-02
-      ``get_active_mission_for_session`` 判活跃，与 uq_agent_missions_session_active
-      部分唯一索引同语义）；
-    - scope 解析：未传 → 会话绑定工作区；会话无工作区且未传 → 422（CC-10 同款）；
-    - 项目维度校验复用旧项目端点口径（agent/router.py:1239-1357，本卡迁移复用）：
-      非项目经理（非超管）→ 403；scope ⊄ 项目关联工作区 → 422；anchor 缺省取
-      scope 内 type=backend-code 优先否则第一个（DTO 不带 anchor，服务端派生）；
-    - 落库走 ``OrchestratorService.team_mission_entry`` 的 ``"session"`` 预建模式
-      （不建主控 run / 不派 lease / objective 空落 SESSION_OBJECTIVE_PLACEHOLDER）。
+    trigger 端点（TeamMissionTriggerRequest）与 create 路径
+    （SessionCreateRequest.team_mission → TeamMissionCreateBlock，task-09）共用
+    同一实现——两 DTO 六字段同名同形态（schema.py），结构复用无复制粘贴。
+
+    - scope 解析：``block`` 未传 → ``fallback_workspace_id``（trigger=会话绑定
+      工作区）；两者皆无 → 422（CC-10 同款语义）；传了则去重保序；
+    - 项目维度（复用旧项目端点口径，agent/router.py:1239-1357）：非项目经理
+      （非超管）→ 403；scope ⊄ 项目关联工作区 → 422；
+    - anchor 派生：scope 内 type=backend-code 优先否则第一个（agent/router.py
+      :1295-1309 口径）；单工作区 anchor 即该工作区（免查 Workspace type）。
+
+    Returns:
+        ``(scope_ids, anchor_id)``——去重保序后的 scope 与派生 anchor。
     """
-    svc = DaemonService(session)
-    agent_session = await svc.get_agent_session(session_id, user.id)
-
-    # 活跃冲突（R-07 单活跃约束）。
-    from app.modules.agent.mission import get_active_mission_for_session
-
-    active_mission = await get_active_mission_for_session(session, session_id)
-    if active_mission is not None:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="该会话已有进行中的团队任务，请先收敛或取消后再发起新任务。",
-        )
-
     # scope 解析：未传取会话绑定工作区；两者皆无 → 422。
-    if data.scope_workspace_ids:
-        scope_ids = list(dict.fromkeys(data.scope_workspace_ids))  # 去重保序
-    elif agent_session.workspace_id is not None:
-        scope_ids = [agent_session.workspace_id]
+    if block.scope_workspace_ids:
+        scope_ids = list(dict.fromkeys(block.scope_workspace_ids))  # 去重保序
+    elif fallback_workspace_id is not None:
+        scope_ids = [fallback_workspace_id]
     else:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -2469,26 +2462,26 @@ async def trigger_session_team_mission(
         )
 
     anchor_id: uuid.UUID
-    if data.project_id is not None:
+    if block.project_id is not None:
         # 项目经理/超管校验（复用 ppm/common/data_scope 口径，非项目经理 403）。
         from app.modules.ppm.common.data_scope import is_super_admin, manager_project_ids
 
         if not (
             await is_super_admin(session, user)
-            or data.project_id in await manager_project_ids(session, user)
+            or block.project_id in await manager_project_ids(session, user)
         ):
             from app.core.errors import PermissionDenied
 
             raise PermissionDenied(
                 "仅项目经理可创建项目维度的会话团队任务。",
-                details={"project_id": str(data.project_id)},
+                details={"project_id": str(block.project_id)},
             )
 
         # scope ⊆ 项目关联工作区（复用 workspace link_service.list_by_project，越界 422）。
         from app.modules.workspace import link_service
 
         bound_workspaces = await link_service.list_by_project(
-            session, ppm_project_id=data.project_id
+            session, ppm_project_id=block.project_id
         )
         bound_ids = {w.workspace_id for w in bound_workspaces}
         invalid_ids = set(scope_ids) - bound_ids
@@ -2525,6 +2518,58 @@ async def trigger_session_team_mission(
             (sid for sid in scope_ids if type_by_id.get(sid) == "backend-code"),
             scope_ids[0],
         )
+
+    return scope_ids, anchor_id
+
+
+@router.post(
+    "/sessions/{session_id}/team-mission",
+    response_model=TeamMissionSummary,
+    status_code=status.HTTP_201_CREATED,
+)
+async def trigger_session_team_mission(
+    session_id: uuid.UUID,
+    data: TeamMissionTriggerRequest,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> TeamMissionSummary:
+    """预建会话团队 mission（design §5 Phase 1 / §7）。
+
+    - 归属校验：跨用户/不存在 → 404（``svc.get_agent_session``，同
+      get_session_detail 资源隐藏口径）；
+    - 活跃冲突：会话已有活跃 mission（未收敛未取消）→ 409（R-07，经 task-02
+      ``get_active_mission_for_session`` 判活跃，与 uq_agent_missions_session_active
+      部分唯一索引同语义）；
+    - scope 解析：未传 → 会话绑定工作区；会话无工作区且未传 → 422（CC-10 同款）；
+    - 项目维度校验复用旧项目端点口径（agent/router.py:1239-1357，本卡迁移复用）：
+      非项目经理（非超管）→ 403；scope ⊄ 项目关联工作区 → 422；anchor 缺省取
+      scope 内 type=backend-code 优先否则第一个（DTO 不带 anchor，服务端派生）
+      ——以上经 ``validate_team_mission_block`` 共享函数（task-07 抽出，create
+      路径 task-09 复用同一实现）；
+    - 落库走 ``OrchestratorService.team_mission_entry`` 的 ``"session"`` 预建模式
+      （不建主控 run / 不派 lease / objective 空落 SESSION_OBJECTIVE_PLACEHOLDER）。
+    """
+    svc = DaemonService(session)
+    agent_session = await svc.get_agent_session(session_id, user.id)
+
+    # 活跃冲突（R-07 单活跃约束）。
+    from app.modules.agent.mission import get_active_mission_for_session
+
+    active_mission = await get_active_mission_for_session(session, session_id)
+    if active_mission is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="该会话已有进行中的团队任务，请先收敛或取消后再发起新任务。",
+        )
+
+    # scope/项目维度/anchor 校验抽共享函数（task-07）：与 create 路径
+    # （SessionCreateRequest.team_mission，task-09）单一实现，行为逐字不变。
+    scope_ids, anchor_id = await validate_team_mission_block(
+        session,
+        user,
+        data,
+        fallback_workspace_id=agent_session.workspace_id,
+    )
 
     from app.modules.agent.orchestrator import OrchestratorService
 

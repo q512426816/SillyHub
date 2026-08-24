@@ -347,6 +347,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Probe Workspaces
+         * @description 批量探测工作区 git 模式 + 绑定机器状态（task-10 / FR-03 / D-008@v2 / design §5.C）。
+         *
+         *     弹层机器状态统一后端口径（任一成员 binding，含他人绑定，消除本人/他人
+         *     binding 展示不一致 UB-2）：``git_mode/daemon_name/daemon_online`` 三字段与
+         *     mission_status 的 scope_workspaces 完全同源——逐工作区经
+         *     ``orchestrator.collect_single_workspace_status``（task-01 单 ws 收集共享
+         *     函数，口径单一来源）+ ``probe_workspace_git_mode``（task-02 三态探测）组装。
+         *
+         *     只读无状态变化（design §7.5）；每次调用实时探测不缓存（R-02）；探测 RPC
+         *     失败/未绑 daemon 归 ``unknown`` 不抛 5xx（fail-safe）。查无行的 workspace_id
+         *     跳过不报错（与 collect_scope 无效 id 跳过同语义）。
+         */
+        post: operations["probe_workspaces_api_workspaces_probe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/activate": {
         parameters: {
             query?: never;
@@ -2838,6 +2868,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/missions/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Missions Status Route
+         * @description header-only mission_status（``GET /missions/status``）——X-Session-Id 定位。
+         *
+         *     本路由无任何路径锚，header 缺失 → 400（区别于仅 mid 族的显式回退路径）。
+         */
+        get: operations["missions_status_route_api_missions_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/sessions/{session_id}/missions/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Missions Status For Session
+         * @description 会话维度 mission_status（``GET /sessions/{sid}/missions/status``，三族同构）。
+         *
+         *     ``_request_session_id`` 既有 header>path 优先级（不一致 → 400 防歧义）。
+         */
+        get: operations["missions_status_for_session_api_sessions__session_id__missions_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/agent/file-artifacts": {
         parameters: {
             query?: never;
@@ -4328,46 +4402,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/daemon/sessions/{session_id}/archive": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Archive Session
-         * @description Archive an owned session (hide from default list view).
-         */
-        patch: operations["archive_session_api_daemon_sessions__session_id__archive_patch"];
-        trace?: never;
-    };
-    "/api/daemon/sessions/{session_id}/unarchive": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Unarchive Session
-         * @description Unarchive an owned session (restore to default list view).
-         */
-        patch: operations["unarchive_session_api_daemon_sessions__session_id__unarchive_patch"];
-        trace?: never;
-    };
     "/api/daemon/sessions/{session_id}/stream": {
         parameters: {
             query?: never;
@@ -4474,7 +4508,9 @@ export interface paths {
          *     - scope 解析：未传 → 会话绑定工作区；会话无工作区且未传 → 422（CC-10 同款）；
          *     - 项目维度校验复用旧项目端点口径（agent/router.py:1239-1357，本卡迁移复用）：
          *       非项目经理（非超管）→ 403；scope ⊄ 项目关联工作区 → 422；anchor 缺省取
-         *       scope 内 type=backend-code 优先否则第一个（DTO 不带 anchor，服务端派生）；
+         *       scope 内 type=backend-code 优先否则第一个（DTO 不带 anchor，服务端派生）
+         *       ——以上经 ``validate_team_mission_block`` 共享函数（task-07 抽出，create
+         *       路径 task-09 复用同一实现）；
          *     - 落库走 ``OrchestratorService.team_mission_entry`` 的 ``"session"`` 预建模式
          *       （不建主控 run / 不派 lease / objective 空落 SESSION_OBJECTIVE_PLACEHOLDER）。
          */
@@ -9145,6 +9181,8 @@ export interface components {
             depth?: number | null;
             /** Tool Kind */
             tool_kind?: string | null;
+            /** Edit Patch */
+            edit_patch?: string | null;
         };
         /** AgentRunResponse */
         AgentRunResponse: {
@@ -9305,8 +9343,6 @@ export interface components {
             title?: string | null;
             /** Deleted At */
             deleted_at?: string | null;
-            /** Archived At */
-            archived_at?: string | null;
             /** Current Run Id */
             current_run_id?: string | null;
             /** Terminating At */
@@ -12525,6 +12561,38 @@ export interface components {
             workspace_name?: string | null;
             /** Workspace Type */
             workspace_type?: string | null;
+        };
+        /**
+         * MissionStatusResponse
+         * @description ``GET /missions/status`` 响应（design §7，默认值逐字对齐）。
+         *
+         *     无活跃 mission 时仅 ``active=false`` + ``hint``（D-005/D-012，不走 404），
+         *     其余字段保持默认值，不泄露 scope/binding 信息。
+         */
+        MissionStatusResponse: {
+            /** Active */
+            active: boolean;
+            /** Hint */
+            hint?: string | null;
+            /** Mission Id */
+            mission_id?: string | null;
+            /** Status */
+            status?: string | null;
+            /** Objective */
+            objective?: string | null;
+            anchor_workspace?: components["schemas"]["ScopeWorkspaceStatus"] | null;
+            /**
+             * Scope Workspaces
+             * @default []
+             */
+            scope_workspaces: components["schemas"]["ScopeWorkspaceStatus"][];
+            /**
+             * Workers
+             * @default []
+             */
+            workers: components["schemas"]["WorkerListItem"][];
+            /** Budget Usd */
+            budget_usd?: number | null;
         };
         /** MissionWorkerRunResponse */
         MissionWorkerRunResponse: {
@@ -16118,6 +16186,31 @@ export interface components {
             /** Warnings */
             warnings?: string[];
         };
+        /**
+         * ScopeWorkspaceStatus
+         * @description scope 工作区状态条目（design §7 逐字）。
+         *
+         *     组装源：``orchestrator.collect_scope_workspace_statuses``（task-01）——
+         *     ``daemon_name`` 取任一成员 binding 的 ``display_alias||hostname``（不限本人，
+         *     UB-2 口径）；``git_mode`` 为 task-02 ``probe_workspace_git_mode`` 实时探测
+         *     三态。
+         */
+        ScopeWorkspaceStatus: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Type */
+            type: string | null;
+            /** Description */
+            description: string | null;
+            /** Daemon Online */
+            daemon_online: boolean;
+            /** Daemon Name */
+            daemon_name: string | null;
+            /** Git Mode */
+            git_mode: string;
+        };
         /** SessionControlResponse */
         SessionControlResponse: {
             /**
@@ -16166,6 +16259,7 @@ export interface components {
             change_id?: string | null;
             /** Workspace Id */
             workspace_id?: string | null;
+            team_mission?: components["schemas"]["TeamMissionCreateBlock"] | null;
         };
         /** SessionCreateResponse */
         SessionCreateResponse: {
@@ -17580,6 +17674,36 @@ export interface components {
             file_urls?: string[] | null;
         };
         /**
+         * TeamMissionCreateBlock
+         * @description ``SessionCreateRequest.team_mission`` 内嵌块（design §5.E1/§7）。
+         *
+         *     - ``objective`` 可空——create 路径为空时用首句 prompt 回填（task-09）；
+         *     - 其余五字段与 TeamMissionTriggerRequest 同名同 annotation 同约束（上限
+         *       /ge=0/UUID 口径逐字一致），校验复用共享函数（单一实现无复制粘贴）；
+         *     - ``orchestrator_workspace_id`` 本卡只透传不校验语义——∈ scope 与
+         *       (W, 创建者) binding 钉定归 create 消费侧（task-09）。
+         */
+        TeamMissionCreateBlock: {
+            /** Objective */
+            objective?: string | null;
+            /** Scope Workspace Ids */
+            scope_workspace_ids?: string[] | null;
+            /** Project Id */
+            project_id?: string | null;
+            /** Budget Usd */
+            budget_usd?: number | null;
+            /** Worker Preset */
+            worker_preset?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Main Agent Config */
+            main_agent_config?: {
+                [key: string]: unknown;
+            } | null;
+            /** Orchestrator Workspace Id */
+            orchestrator_workspace_id?: string | null;
+        };
+        /**
          * TeamMissionSummary
          * @description 触发/列表共用响应（design §7）。
          *
@@ -17650,6 +17774,8 @@ export interface components {
             status: string;
             /** Objective */
             objective?: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
         };
         /**
          * TokenPair
@@ -18475,7 +18601,16 @@ export interface components {
             /** Source */
             source: string;
         };
-        /** WorkerListItem */
+        /**
+         * WorkerListItem
+         * @description mission worker run 概要（原居 mcp_tools.py，task-03 上移至此）。
+         *
+         *     上移原因：schema.py 顶部 import mcp_tools 会成环（mcp_tools→service，
+         *     service.py 已反向 import schema），反向（mcp_tools→schema）无环。mcp_tools
+         *     改 from-import 并保留模块级重导出，既有
+         *     ``from app.modules.agent.mcp_tools import WorkerListItem`` 消费方零改动；
+         *     字段定义单源在此，禁止复制造成漂移。
+         */
         WorkerListItem: {
             /**
              * Id
@@ -18783,6 +18918,44 @@ export interface components {
             granted_at: string;
             /** Is Current User */
             is_current_user: boolean;
+        };
+        /**
+         * WorkspaceProbeItem
+         * @description 单工作区探测结果项（``POST /api/workspaces/probe`` 响应元素）。
+         *
+         *     - ``git_mode``：三态 ``"git"|"direct"|"unknown"``（实时探测不缓存，R-02；
+         *       RPC 失败/未绑 daemon 归 unknown 不抛）。
+         *     - ``daemon_name``：任一成员 binding daemon 的 ``display_alias or hostname``
+         *       （未绑/daemon 行缺失 → None）。
+         *     - ``daemon_online``：该 binding daemon 的在线态。
+         */
+        WorkspaceProbeItem: {
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /**
+             * Git Mode
+             * @enum {string}
+             */
+            git_mode: "git" | "direct" | "unknown";
+            /** Daemon Name */
+            daemon_name?: string | null;
+            /** Daemon Online */
+            daemon_online: boolean;
+        };
+        /**
+         * WorkspaceProbeRequest
+         * @description Request body for ``POST /api/workspaces/probe``。
+         *
+         *     ``workspace_ids`` 非空、上限 20（对齐 mission scope 上限口径）；元素为
+         *     UUID——非法格式由 Pydantic 422。查无行（缺失）的 id 由 handler 跳过不报错
+         *     （与 collect_scope_workspace_statuses 无效 id 跳过同语义，fail-safe 不 5xx）。
+         */
+        WorkspaceProbeRequest: {
+            /** Workspace Ids */
+            workspace_ids: string[];
         };
         /** WorkspaceRead */
         WorkspaceRead: {
@@ -19754,6 +19927,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    probe_workspaces_api_workspaces_probe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceProbeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceProbeItem"][];
                 };
             };
             /** @description Validation Error */
@@ -24057,6 +24263,57 @@ export interface operations {
             };
         };
     };
+    missions_status_route_api_missions_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionStatusResponse"];
+                };
+            };
+        };
+    };
+    missions_status_for_session_api_sessions__session_id__missions_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MissionStatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_file_artifacts_api_agent_file_artifacts_get: {
         parameters: {
             query?: {
@@ -26198,7 +26455,6 @@ export interface operations {
                 q?: string | null;
                 workspace_id?: string | null;
                 change_id?: string | null;
-                archived?: boolean;
             };
             header?: never;
             path?: never;
@@ -26441,64 +26697,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SessionControlResponse"];
                 };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    archive_session_api_daemon_sessions__session_id__archive_patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                session_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    unarchive_session_api_daemon_sessions__session_id__unarchive_patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                session_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
             /** @description Validation Error */
             422: {

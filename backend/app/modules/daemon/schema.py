@@ -82,6 +82,33 @@ class AgentSessionListResponse(BaseModel):
 # 交互式会话 provider 枚举（与原 router inline 版一致；Literal 校验保留）。
 InteractiveProviderLiteral = Literal["claude", "codex"]
 
+# ── 预会话团队任务块（2026-08-24-session-team-mission-context task-07 / design
+# §5.E1/§7 / FR-05/06）─────────────────────────────────────────────────────────
+# SessionCreateRequest.team_mission 的内嵌块。六字段形态**逐字对齐**下方
+# TeamMissionTriggerRequest（schema.py:713-730，list[dict]/dict/UUID 口径，不
+# 新造 WorkerPresetItem 等类），新增第七字段 orchestrator_workspace_id（主
+# agent 工作区 ∈ scope；null=当前会话默认）。scope/项目维度校验走 trigger
+# 端点同款共享函数（router.validate_team_mission_block）。
+
+
+class TeamMissionCreateBlock(BaseModel):
+    """``SessionCreateRequest.team_mission`` 内嵌块（design §5.E1/§7）。
+
+    - ``objective`` 可空——create 路径为空时用首句 prompt 回填（task-09）；
+    - 其余五字段与 TeamMissionTriggerRequest 同名同 annotation 同约束（上限
+      /ge=0/UUID 口径逐字一致），校验复用共享函数（单一实现无复制粘贴）；
+    - ``orchestrator_workspace_id`` 本卡只透传不校验语义——∈ scope 与
+      (W, 创建者) binding 钉定归 create 消费侧（task-09）。
+    """
+
+    objective: str | None = Field(default=None, max_length=8000)
+    scope_workspace_ids: list[uuid.UUID] | None = Field(default=None, max_length=20)
+    project_id: uuid.UUID | None = None
+    budget_usd: float | None = Field(default=None, ge=0)
+    worker_preset: list[dict] | None = Field(default=None, max_length=20)
+    main_agent_config: dict | None = None
+    orchestrator_workspace_id: uuid.UUID | None = None
+
 
 class SessionCreateRequest(BaseModel):
     """POST /api/daemon/sessions 请求体（FR-01 / design §5 Wave1）。
@@ -106,6 +133,11 @@ class SessionCreateRequest(BaseModel):
     ask_user_only: bool = True
     change_id: uuid.UUID | None = None
     workspace_id: uuid.UUID | None = None
+    # 预会话团队任务块（design §5.E1 / FR-05/06）：缺省 None——不带 team_mission
+    # 的旧请求体校验行为逐字节不变（不影响下方 runtime_id/provider 二选一）；
+    # 消费（预建 mission / orchestrator_workspace_id ∈ scope 校验）归 create
+    # 路径（task-09）。
+    team_mission: TeamMissionCreateBlock | None = None
 
     @model_validator(mode="after")
     def _require_runtime_or_provider(self) -> SessionCreateRequest:
@@ -737,6 +769,7 @@ class TeamMissionWorkerSummary(BaseModel):
     role: str | None = None
     status: str
     objective: str | None = None
+    workspace_id: str | None = None
 
 
 class TeamMissionSummary(BaseModel):

@@ -1,5 +1,7 @@
 // tests/mcp-server.test.ts
 // task-05 / D-007@v2: daemon 内置 stdio MCP server 5 tool 单测。
+// task-11（2026-08-24-session-team-mission-context / FR-02）：+mission_status
+// 第 6 常驻工具（只读查询，参数全可选，X-Session-Id 定位）。
 //
 // 测试策略：createMcpServer(mockClient) 注入 mock HubClient，用
 // InMemoryTransport 连接 MCP Client + server（不 spawn 子进程，比 spike-01 的
@@ -38,6 +40,7 @@ function makeMockClient(): {
     listWorkers: [],
     convergeMission: [],
     reportProgress: [],
+    getMissionStatus: [],
   };
   for (const m of Object.keys(calls) as (keyof typeof calls)[]) {
     calls[m] = [];
@@ -91,8 +94,8 @@ beforeEach(() => {
 
 // ── 1. tool 注册（listTools）──────────────────────────────────────────────
 
-describe('mcp-server: 5 tool 注册', () => {
-  it('listTools 暴露 5 tool（dispatch_worker/get_worker_result/list_workers/converge_mission/report_progress）', async () => {
+describe('mcp-server: 6 tool 注册（task-11 前为 5）', () => {
+  it('listTools 暴露 6 tool（dispatch_worker/get_worker_result/list_workers/converge_mission/report_progress + mission_status）', async () => {
     const { client } = makeMockClient();
     const { mcpClient, close } = await connect(client);
     try {
@@ -105,9 +108,10 @@ describe('mcp-server: 5 tool 注册', () => {
           'list_workers',
           'converge_mission',
           'report_progress',
+          'mission_status',
         ]),
       );
-      expect(names).toHaveLength(5);
+      expect(names).toHaveLength(6);
     } finally {
       await close();
     }
@@ -637,6 +641,212 @@ describe('mcp-server: 错误处理', () => {
       });
       expect(r2.isError).toBeFalsy();
       void calls; // calls 不用（spy 直接抛/返）
+    } finally {
+      await close();
+    }
+  });
+});
+
+// ── task-11（2026-08-24-session-team-mission-context / FR-02 / D-005@v1）：mission_status 第 6 工具 ──
+// 只读查询当前会话团队任务状态：mission 概要 / scope 工作区（绑定机器+在线+
+// git 模式）/ workers。参数全可选（X-Session-Id 会话上下文定位）；无活跃
+// mission → backend 200 active=false（非 404，D-012），工具不报错。
+
+describe('mcp-server: task-11 mission_status 第 6 工具', () => {
+  it('listTools 暴露 6 tool（既有 5 + mission_status）', async () => {
+    const { client } = makeMockClient();
+    const { mcpClient, close } = await connect(client);
+    try {
+      const tools = await mcpClient.listTools();
+      const names = tools.tools.map((t) => t.name);
+      expect(names).toEqual(
+        expect.arrayContaining([
+          'dispatch_worker',
+          'get_worker_result',
+          'list_workers',
+          'converge_mission',
+          'report_progress',
+          'mission_status',
+        ]),
+      );
+      expect(names).toHaveLength(6);
+    } finally {
+      await close();
+    }
+  });
+
+  it('mission_status inputSchema：仅 workspace_id/mission_id 且均可选（会话上下文定位）', async () => {
+    const { client } = makeMockClient();
+    const { mcpClient, close } = await connect(client);
+    try {
+      const tools = await mcpClient.listTools();
+      const tool = tools.tools.find((t) => t.name === 'mission_status');
+      expect(tool).toBeDefined();
+      const schema = tool?.inputSchema as {
+        properties?: Record<string, unknown>;
+        required?: string[];
+      };
+      // 参数全可选，无必填字段
+      expect(Object.keys(schema?.properties ?? {}).sort()).toEqual([
+        'mission_id',
+        'workspace_id',
+      ]);
+      expect(schema?.required ?? []).not.toContain('workspace_id');
+      expect(schema?.required ?? []).not.toContain('mission_id');
+    } finally {
+      await close();
+    }
+  });
+
+  it('mission_status 描述按能力说明书口径（无活跃任务 active=false / 可先查再派）', async () => {
+    const { client } = makeMockClient();
+    const { mcpClient, close } = await connect(client);
+    try {
+      const tools = await mcpClient.listTools();
+      const tool = tools.tools.find((t) => t.name === 'mission_status');
+      const desc = tool?.description ?? '';
+      expect(desc).toContain('当前会话团队任务状态');
+      expect(desc).toContain('mission 概要');
+      expect(desc).toContain('scope_workspaces');
+      expect(desc).toContain('workers');
+      expect(desc).toContain('无活跃任务返回 active=false');
+      expect(desc).toContain('可先查再派');
+    } finally {
+      await close();
+    }
+  });
+
+  it('mission_status → client.getMissionStatus(ws, mid)（显式传参透传越权校验锚）', async () => {
+    const { client, calls } = makeMockClient();
+    spyMethod(client, calls.getMissionStatus, 'getMissionStatus', {
+      active: true,
+      mission_id: 'mis-1',
+      status: 'running',
+      objective: 'team task',
+      anchor_workspace: {
+        id: 'ws-1',
+        name: 'main',
+        type: null,
+        description: null,
+        daemon_online: true,
+        daemon_name: 'dev-box',
+        git_mode: 'git',
+      },
+      scope_workspaces: [
+        {
+          id: 'ws-2',
+          name: 'sub',
+          type: null,
+          description: null,
+          daemon_online: false,
+          daemon_name: null,
+          git_mode: 'unknown',
+        },
+      ],
+      workers: [{ id: 'w-1', role: 'worker', status: 'running' }],
+      budget_usd: null,
+    });
+    const { mcpClient, close } = await connect(client);
+    try {
+      const result = await mcpClient.callTool({
+        name: 'mission_status',
+        arguments: { workspace_id: 'ws-1', mission_id: 'mis-1' },
+      });
+      expect(result.isError).toBeFalsy();
+      expect(calls.getMissionStatus).toHaveLength(1);
+      expect(calls.getMissionStatus[0]).toEqual(['ws-1', 'mis-1']);
+      // 回执：MissionStatusResponse 原样 JSON 透传
+      const block = result.content[0] as { type: string; text: string };
+      const receipt = JSON.parse(block.text);
+      expect(receipt).toMatchObject({ active: true, mission_id: 'mis-1' });
+      expect(receipt.scope_workspaces[0]).toMatchObject({
+        id: 'ws-2',
+        daemon_online: false,
+        git_mode: 'unknown',
+      });
+    } finally {
+      await close();
+    }
+  });
+
+  it('mission_status 缺省 workspace_id/mission_id → undefined 透传（X-Session-Id 定位）', async () => {
+    const { client, calls } = makeMockClient();
+    spyMethod(client, calls.getMissionStatus, 'getMissionStatus', {
+      active: true,
+      mission_id: 'mis-lazy',
+    });
+    const { mcpClient, close } = await connect(client);
+    try {
+      const result = await mcpClient.callTool({
+        name: 'mission_status',
+        arguments: {},
+      });
+      expect(result.isError).toBeFalsy();
+      expect(calls.getMissionStatus[0]).toEqual([undefined, undefined]);
+    } finally {
+      await close();
+    }
+  });
+
+  it('mission_status 无活跃 mission（active=false）→ 非 isError（D-005 优雅返回）', async () => {
+    const { client, calls } = makeMockClient();
+    spyMethod(client, calls.getMissionStatus, 'getMissionStatus', {
+      active: false,
+      hint: 'no active mission for this session',
+    });
+    const { mcpClient, close } = await connect(client);
+    try {
+      const result = await mcpClient.callTool({
+        name: 'mission_status',
+        arguments: {},
+      });
+      // active=false 是正常 2xx 响应，不是错误
+      expect(result.isError).toBeFalsy();
+      const block = result.content[0] as { type: string; text: string };
+      expect(JSON.parse(block.text)).toMatchObject({ active: false });
+    } finally {
+      await close();
+    }
+  });
+
+  it('mission_status backend 非 2xx → isError + error=http（errorContent 分支）', async () => {
+    const { client } = makeMockClient();
+    vi.spyOn(client, 'getMissionStatus').mockImplementation(async () => {
+      throw new HubHttpError(403, '{"detail":"denied"}', 'http://x/api/missions/status', 'GET');
+    });
+    const { mcpClient, close } = await connect(client);
+    try {
+      const result = await mcpClient.callTool({
+        name: 'mission_status',
+        arguments: {},
+      });
+      expect(result.isError).toBe(true);
+      const block = result.content[0] as { type: string; text: string };
+      const err = JSON.parse(block.text);
+      expect(err.error).toBe('http');
+      expect(err.tool).toBe('mission_status');
+      expect(err.status).toBe(403);
+    } finally {
+      await close();
+    }
+  });
+
+  it('mission_status 网络错误 → isError + error=network（不 crash server）', async () => {
+    const { client } = makeMockClient();
+    vi.spyOn(client, 'getMissionStatus').mockImplementation(async () => {
+      throw new TypeError('fetch failed');
+    });
+    const { mcpClient, close } = await connect(client);
+    try {
+      const result = await mcpClient.callTool({
+        name: 'mission_status',
+        arguments: {},
+      });
+      expect(result.isError).toBe(true);
+      const block = result.content[0] as { type: string; text: string };
+      const err = JSON.parse(block.text);
+      expect(err.error).toBe('network');
+      expect(err.message).toMatch(/fetch failed/);
     } finally {
       await close();
     }

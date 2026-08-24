@@ -847,3 +847,96 @@ describe('HubClient — task-10 X-Session-Id 会话上下文', () => {
   });
 });
 
+// ── task-11（2026-08-24-session-team-mission-context / FR-02 / D-005@v1）：getMissionStatus ──
+// mission_status 常驻工具的 client 方法：GET _missionActionPath action=status
+// （缺省 session-scoped 形态 /api/missions/status，backend 按 X-Session-Id 定位，
+// task-03 契约）。无活跃 mission 时 backend 200 { active: false, hint }（D-012
+// 不走 404）→ 2xx 原样返回，工具层不报错。
+
+describe('HubClient — task-11 getMissionStatus（mission_status 工具）', () => {
+  beforeEach(() => vi.stubGlobal('fetch', mockFetchOk({ ok: true })));
+
+  it('getMissionStatus: GET /api/missions/status（ws/mid 缺省 session-scoped）+ X-Session-Id', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetchOk({
+        active: true,
+        mission_id: 'mis-1',
+        status: 'running',
+        objective: 'team task',
+        anchor_workspace: {
+          id: 'ws-1',
+          name: 'main',
+          type: null,
+          description: null,
+          daemon_online: true,
+          daemon_name: 'dev-box',
+          git_mode: 'git',
+        },
+        scope_workspaces: [],
+        workers: [],
+        budget_usd: null,
+      }),
+    );
+    const c = new HubClient('http://x:8000', { token: 't', sessionId: 'sess-11' });
+    const r = await c.getMissionStatus(undefined, undefined);
+    expect(lastCall!.url).toBe('http://x:8000/api/missions/status');
+    expect(lastCall!.init.method).toBe('GET');
+    expect(lastCall!.init.body).toBeUndefined();
+    const headers = lastCall!.init.headers as Record<string, string>;
+    expect(headers['X-Session-Id']).toBe('sess-11');
+    expect(r).toMatchObject({ active: true, mission_id: 'mis-1' });
+  });
+
+  it('getMissionStatus: 显式 ws+mid → GET /api/workspaces/{ws}/missions/{mid}/status（越权校验锚）', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.getMissionStatus('ws-1', 'mis-1');
+    expect(lastCall!.url).toBe(
+      'http://x:8000/api/workspaces/ws-1/missions/mis-1/status',
+    );
+  });
+
+  it('getMissionStatus: 仅 mid → GET /api/missions/{mid}/status', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.getMissionStatus(undefined, 'mis-9');
+    expect(lastCall!.url).toBe('http://x:8000/api/missions/mis-9/status');
+  });
+
+  it('getMissionStatus: 无活跃 mission → 200 active=false 原样返回（不抛错，D-005）', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetchOk({
+        active: false,
+        hint: 'no active mission for this session',
+        mission_id: null,
+        status: null,
+        objective: null,
+        anchor_workspace: null,
+        scope_workspaces: [],
+        workers: [],
+        budget_usd: null,
+      }),
+    );
+    const c = new HubClient('http://x:8000', { token: 't', sessionId: 'sess-11' });
+    const r = await c.getMissionStatus(undefined, undefined);
+    expect(r).toMatchObject({ active: false, hint: 'no active mission for this session' });
+  });
+
+  it('getMissionStatus: sessionId 未设 → 不带 X-Session-Id 头（缺失不附）', async () => {
+    const c = new HubClient('http://x:8000', 't');
+    await c.getMissionStatus(undefined, undefined);
+    const headers = lastCall!.init.headers as Record<string, string>;
+    expect(headers['X-Session-Id']).toBeUndefined();
+  });
+
+  it('getMissionStatus: 非 2xx → HubHttpError（瘦客户端不缓存不重试，失败即抛）', async () => {
+    vi.stubGlobal('fetch', mockFetchStatus(403, '{"detail":"denied"}'));
+    const c = new HubClient('http://x:8000', 'bad');
+    await expect(c.getMissionStatus(undefined, undefined)).rejects.toMatchObject({
+      name: 'HubHttpError',
+      status: 403,
+      method: 'GET',
+    });
+  });
+});
+

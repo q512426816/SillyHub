@@ -9,7 +9,7 @@
  *   - 概要行常驻：状态徽标（中文映射）/「N 分身 · 成功 X / 失败 Y」计数 /
  *     预算（花费字段后端概要暂未下发，见 budgetText 注释）；
  *   - 点击头部折叠展开：主控行（mission objective）+ 范围徽标行 + 分身行
- *     （角色徽标 / 状态 / 目标摘要 / 日志·产物入口预留）；
+ *     （角色徽标 / 状态 / 目标摘要 / 日志·产物入口）；
  *   - 取消按钮（活跃态）：两步确认 → cancelTeamMission（保留端点
  *     POST /api/missions/{id}/cancel）→ onRefresh 由父层重拉列表；
  *   - 活跃态（planning/running/awaiting_input）默认展开、终态默认折叠，
@@ -25,8 +25,14 @@
  *（随 html data-theme 换肤，双主题铁律）。
  */
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  getAgentRunLogs,
+  listAgentFileArtifacts,
+  type AgentRunLogEntry,
+  type AgentFileArtifactMeta,
+} from "@/lib/agent";
 import { cancelTeamMission, type TeamMissionSummary } from "@/lib/daemon";
 import { ApiError } from "@/lib/api";
 import { workspaceTypeBadge } from "@/lib/workspace-types";
@@ -118,6 +124,13 @@ function WsBadge({ entry }: { entry: TeamWorkspaceMetaEntry }) {
   );
 }
 
+/** 文件大小格式化（B / KB / MB）。 */
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 /* ───────────────── props 契约（task-11 消费） ───────────────── */
 
 export interface TeamTaskBlockProps {
@@ -130,6 +143,8 @@ export interface TeamTaskBlockProps {
   onRefresh?: () => void;
   /** 工作区 id → 名称/类型（可选，徽标美化用，见 TeamWorkspaceMeta）。 */
   workspaceMeta?: TeamWorkspaceMeta;
+  /** 会话绑定工作区 ID（用于 per-run 日志/产物查询端点鉴权）。 */
+  workspaceId?: string | null;
 }
 
 /* ───────────────── 组件 ───────────────── */
@@ -138,6 +153,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
   summary,
   onRefresh,
   workspaceMeta,
+  workspaceId,
 }: TeamTaskBlockProps) {
   const active = isActiveTeamMission(summary.status);
   const [open, setOpen] = useState(active);
@@ -151,6 +167,70 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
   const [confirming, setConfirming] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ── 分身日志/产物展开状态 ──
+  const [expandedLogsRunId, setExpandedLogsRunId] = useState<string | null>(null);
+  const [logsData, setLogsData] = useState<AgentRunLogEntry[]>([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState<string | null>(null);
+
+  const [expandedArtifactsRunId, setExpandedArtifactsRunId] = useState<string | null>(null);
+  const [artifactsData, setArtifactsData] = useState<AgentFileArtifactMeta[]>([]);
+  const [artifactsLoading, setArtifactsLoading] = useState(false);
+  const [artifactsError, setArtifactsError] = useState<string | null>(null);
+
+  // 优先用 worker 自身的 workspace_id，回落 mission scope 第一项
+  const effectiveWorkspaceId =
+    workspaceId ?? summary.scope_workspace_ids[0] ?? null;
+
+  const handleToggleLogs = useCallback(
+    async (runId: string) => {
+      if (expandedLogsRunId === runId) {
+        setExpandedLogsRunId(null);
+        return;
+      }
+      if (!effectiveWorkspaceId) {
+        setLogsError("无可用工作区 ID，无法查询日志");
+        setExpandedLogsRunId(runId);
+        return;
+      }
+      setExpandedLogsRunId(runId);
+      setLogsLoading(true);
+      setLogsError(null);
+      try {
+        const logs = await getAgentRunLogs(effectiveWorkspaceId, runId);
+        setLogsData(logs);
+      } catch (e) {
+        setLogsError(e instanceof ApiError ? e.message : "加载日志失败");
+        setLogsData([]);
+      } finally {
+        setLogsLoading(false);
+      }
+    },
+    [expandedLogsRunId, effectiveWorkspaceId],
+  );
+
+  const handleToggleArtifacts = useCallback(
+    async (runId: string) => {
+      if (expandedArtifactsRunId === runId) {
+        setExpandedArtifactsRunId(null);
+        return;
+      }
+      setExpandedArtifactsRunId(runId);
+      setArtifactsLoading(true);
+      setArtifactsError(null);
+      try {
+        const files = await listAgentFileArtifacts(runId);
+        setArtifactsData(files);
+      } catch (e) {
+        setArtifactsError(e instanceof ApiError ? e.message : "加载产物失败");
+        setArtifactsData([]);
+      } finally {
+        setArtifactsLoading(false);
+      }
+    },
+    [expandedArtifactsRunId],
+  );
 
   const statusMeta =
     MISSION_STATUS_META[summary.status] ?? MISSION_STATUS_FALLBACK;
@@ -279,51 +359,129 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
                   ? summary.scope_workspace_ids[0]
                   : null;
               const entry = singleScope ? workspaceMeta?.[singleScope] : undefined;
+              const logsOpen = expandedLogsRunId === w.run_id;
+              const artifactsOpen = expandedArtifactsRunId === w.run_id;
               return (
-                <div
-                  key={w.run_id}
-                  className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[12.5px]"
-                >
-                  <span className="inline-flex h-[19px] shrink-0 items-center rounded border border-border bg-muted px-2 text-[11px] text-muted-foreground">
-                    {(w.role && ROLE_LABEL[w.role]) || w.role || "分身"}
-                  </span>
-                  <span className={cn("shrink-0 text-[12px]", wsMeta.cls)}>
-                    {wsMeta.label}
-                  </span>
-                  {singleScope && (
-                    <span className="shrink-0" title={singleScope}>
-                      {entry ? (
-                        <WsBadge entry={entry} />
-                      ) : (
-                        <span className="inline-flex h-5 items-center rounded border border-violet-200 bg-violet-50 px-1.5 font-mono text-[10px] font-semibold text-violet-700">
-                          #{singleScope.slice(0, 8)}
-                        </span>
-                      )}
+                <div key={w.run_id} className="flex flex-col">
+                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[12.5px]">
+                    <span className="inline-flex h-[19px] shrink-0 items-center rounded border border-border bg-muted px-2 text-[11px] text-muted-foreground">
+                      {(w.role && ROLE_LABEL[w.role]) || w.role || "分身"}
                     </span>
+                    <span className={cn("shrink-0 text-[12px]", wsMeta.cls)}>
+                      {wsMeta.label}
+                    </span>
+                    {singleScope && (
+                      <span className="shrink-0" title={singleScope}>
+                        {entry ? (
+                          <WsBadge entry={entry} />
+                        ) : (
+                          <span className="inline-flex h-5 items-center rounded border border-violet-200 bg-violet-50 px-1.5 font-mono text-[10px] font-semibold text-violet-700">
+                            #{singleScope.slice(0, 8)}
+                          </span>
+                        )}
+                      </span>
+                    )}
+                    <span
+                      className="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground"
+                      title={w.objective ?? undefined}
+                    >
+                      {w.objective || "—"}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleToggleLogs(w.run_id)}
+                      className={cn(
+                        "shrink-0 rounded border px-2 py-0.5 text-[11.5px] hover:bg-muted",
+                        logsOpen
+                          ? "border-violet-300 bg-violet-50 text-violet-700"
+                          : "border-border text-muted-foreground",
+                      )}
+                    >
+                      日志
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleToggleArtifacts(w.run_id)}
+                      className={cn(
+                        "shrink-0 rounded border px-2 py-0.5 text-[11.5px] hover:bg-muted",
+                        artifactsOpen
+                          ? "border-violet-300 bg-violet-50 text-violet-700"
+                          : "border-border text-muted-foreground",
+                      )}
+                    >
+                      产物
+                    </button>
+                  </div>
+
+                  {/* 日志展开区 */}
+                  {logsOpen && (
+                    <div className="ml-4 mt-1 overflow-hidden rounded-lg border border-violet-100 bg-violet-50/30">
+                      <div className="max-h-[320px] overflow-y-auto p-2">
+                        {logsLoading ? (
+                          <p className="text-[11px] text-muted-foreground">加载中…</p>
+                        ) : logsError ? (
+                          <p className="text-[11px] text-destructive">{logsError}</p>
+                        ) : logsData.length === 0 ? (
+                          <p className="text-[11px] text-muted-foreground">暂无日志</p>
+                        ) : (
+                          <pre className="whitespace-pre-wrap break-all font-mono text-[10.5px] leading-relaxed text-foreground">
+                            {logsData
+                              .map((l) => {
+                                const ts = l.timestamp
+                                  ? new Date(l.timestamp).toLocaleTimeString("zh-CN")
+                                  : "";
+                                const ch = l.channel === "tool_call"
+                                  ? `[工具]`
+                                  : l.channel === "user_input"
+                                    ? `[用户]`
+                                    : l.channel === "stdout"
+                                      ? `[输出]`
+                                      : "";
+                                const content = l.content_redacted ?? "";
+                                return `${ts} ${ch} ${content}`;
+                              })
+                              .join("\n")}
+                          </pre>
+                        )}
+                      </div>
+                    </div>
                   )}
-                  <span
-                    className="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground"
-                    title={w.objective ?? undefined}
-                  >
-                    {w.objective || "—"}
-                  </span>
-                  {/* 日志 / 产物入口预留（task-11 接线 change-agent-run-log / 产物面板） */}
-                  <button
-                    type="button"
-                    disabled
-                    title="分身日志入口（接线后开放）"
-                    className="shrink-0 rounded border border-border px-2 py-0.5 text-[11.5px] text-muted-foreground opacity-60"
-                  >
-                    日志
-                  </button>
-                  <button
-                    type="button"
-                    disabled
-                    title="分身产物入口（接线后开放）"
-                    className="shrink-0 rounded border border-border px-2 py-0.5 text-[11.5px] text-muted-foreground opacity-60"
-                  >
-                    产物
-                  </button>
+
+                  {/* 产物展开区 */}
+                  {artifactsOpen && (
+                    <div className="ml-4 mt-1 overflow-hidden rounded-lg border border-violet-100 bg-violet-50/30">
+                      <div className="max-h-[240px] overflow-y-auto p-2">
+                        {artifactsLoading ? (
+                          <p className="text-[11px] text-muted-foreground">加载中…</p>
+                        ) : artifactsError ? (
+                          <p className="text-[11px] text-destructive">{artifactsError}</p>
+                        ) : artifactsData.length === 0 ? (
+                          <p className="text-[11px] text-muted-foreground">暂无产物</p>
+                        ) : (
+                          <ul className="flex flex-col gap-1">
+                            {artifactsData.map((f) => (
+                              <li
+                                key={f.id}
+                                className="flex items-center gap-2 text-[11px]"
+                              >
+                                <span className="truncate font-medium text-foreground">
+                                  {f.original_name}
+                                </span>
+                                <span className="shrink-0 text-muted-foreground">
+                                  {formatFileSize(f.size)}
+                                </span>
+                                {f.description && (
+                                  <span className="truncate text-muted-foreground">
+                                    {f.description}
+                                  </span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })

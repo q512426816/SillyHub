@@ -362,3 +362,47 @@ class TestCleanupWorkspaceUnresolved:
 
         assert result == {"cleaned": [], "patch_artifact_id": None}
         delegate.git_worktree_remove.assert_not_called()
+
+
+# ── 混合 mission（task-14 / D-007@v1 直通+git 并存）────────────────────────
+
+
+class TestCleanupMixedDirectAndGitWorkers:
+    @pytest.mark.asyncio
+    async def test_mixed_mission_cleans_only_git_worker_worktree(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """直通 worker（worktree_branch=None，无隔离副本）+ git worker（branch 落列）
+        混合 mission → cleanup 只清后者的 .worktrees/<id[:8]> 副本：
+        git_worktree_remove 恰调一次（git worker 的 sibling_path），
+        cleaned 只含该路径（直通 worker 在工作区根直写，无副本可清）。
+
+        2026-08-24-session-team-mission-context task-14 收尾补例——与
+        test_finalize_execute_mission_merge 混合例共同构成 converge/finalize
+        侧「直通天然跳过」的合并+清理双断言。"""
+        monkeypatch.setenv("HOST_PATH_PREFIX", "")
+        monkeypatch.setenv("CONTAINER_PATH_PREFIX", "")
+
+        ws = await _make_workspace(db_session)
+        mission = await _make_mission(db_session, ws.id)
+        direct_worker = await _make_worker(
+            db_session, mission.id, worktree_branch=None, diff_summary="diff ..."
+        )
+        git_worker = await _make_worker(db_session, mission.id, worktree_branch="workers/dddddddd")
+        await _make_patch_artifact(db_session, git_worker.id)
+
+        delegate = MagicMock()
+        delegate.git_worktree_remove = AsyncMock(return_value={"ok": True, "error": None})
+        fin = FinalizerService(db_session, None, host_fs_delegate=delegate)
+
+        result = await fin.cleanup_mission(mission.id)
+
+        expected_git_sibling = _expected_sibling(ws.root_path, git_worker.id)
+        assert result["cleaned"] == [expected_git_sibling]
+        # 签名 git_worktree_remove(workspace, *, sibling_path)——恰一次且为 git worker 副本
+        delegate.git_worktree_remove.assert_awaited_once()
+        call_args = delegate.git_worktree_remove.await_args
+        assert call_args.args[0] is ws
+        assert call_args.kwargs["sibling_path"] == expected_git_sibling
+        assert _expected_sibling(ws.root_path, direct_worker.id) not in result["cleaned"]
+        assert result["patch_artifact_id"] is not None

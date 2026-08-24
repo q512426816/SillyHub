@@ -48,6 +48,8 @@ const ORCHESTRATION_TOOLS = [
   'list_workers',
   'converge_mission',
   'report_progress',
+  // task-11（2026-08-24-session-team-mission-context）：第 6 常驻工具
+  'mission_status',
 ];
 
 /** 每用例独立的临时 allowedRoot（真实文件系统，跨平台 mkdtemp）。 */

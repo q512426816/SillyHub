@@ -33,11 +33,32 @@
  * 铁律 R4——弹层在 page/dialog 两模式都挂载）；不用 antd（对齐段族惯例，规避
  * 中文按钮 autoLetterSpacing 拆分坑）；团队视觉 violet 固定阶 + brand-* 语义阶
  *（双主题铁律）；纯 props 受控，API 调用归父层。
+ *
+ * task-12（2026-08-24-session-team-mission-context / FR-03 / FR-06 / D-008@v2 /
+ * D-010@v1）追加：
+ *   - 弹层机器状态/git 模式统一走 POST /api/workspaces/probe（后端任一成员
+ *     binding 口径，与简报/mission_status 同源；不再用 useDaemonStatusMap——
+ *     其无机器名字段且仅覆盖本人 bindings）。mount 对候选集（workspaceId+
+ *     已加载项目工作区）拉一次存 state 静态快照，候选集变化（项目切换）事件
+ *     驱动补拉一次，无轮询（design §5.C）。probe 为只读展示数据源，组件内
+ *     module-level 函数直调允许（同 listProjects 先例）；task-13 迁
+ *     lib/daemon.ts probeWorkspaces client 后行为不变。
+ *   - 工作区行（scope 多选列表 + 当前工作区单选卡）meta：机器名
+ *     （daemon_name=display_alias||hostname 后端口径）+ 在线 dot（绿/灰，未绑
+ *     虚线，原型 .dot.on/.off/.none）+ git 模式标签（git 隔离/非 git · 直通/
+ *     弱化模式未知）；probe 失败 fail-safe：meta 缺失不阻断弹层可用。
+ *   - preSession?: boolean（缺省 false）——仅预会话实例渲染「主 agent（项目
+ *     经理）」选择器（原型场景③）：默认「当前会话」+ scope 已选工作区各行；
+ *     daemon_online=false/未绑 → option disabled；确认 payload 追加
+ *     orchestrator_workspace_id（选工作区=其 id、默认=null；组件内类型交集，
+ *     lib/daemon.ts 类型扩展归 task-13）。非 preSession 实例渲染与 payload
+ *     零变化（既有会话主 agent 恒=当前会话，跨机器迁移属 C 层非目标）。
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Settings, Users } from "lucide-react";
 
+import { apiFetch } from "@/lib/api";
 import type { TeamMissionTriggerRequest } from "@/lib/daemon";
 import type { MainAgentConfig, WorkerPresetItem } from "@/lib/agent";
 import { listProjects } from "@/lib/ppm/project";
@@ -82,6 +103,73 @@ function makeEmptyWorker(): WorkerPresetItem {
   return { agent_type: "claude_code", model: "", objective: "", role: "impl" };
 }
 
+/* ───────────────── task-12：工作区探测（POST /api/workspaces/probe，D-008@v2） ───────────────── */
+
+/** task-10 probe 契约响应项（本地类型；task-13 迁 lib/daemon.ts 时与 gen:types 对齐）。 */
+interface WorkspaceProbeItem {
+  workspace_id: string;
+  /** "git" | "direct" | "unknown"（后端三态探测，D-006@v2）。 */
+  git_mode: "git" | "direct" | "unknown";
+  /** display_alias||hostname（后端口径）；null = 未绑机器。 */
+  daemon_name: string | null;
+  daemon_online: boolean;
+}
+
+/**
+ * POST /api/workspaces/probe —— 弹层机器状态/git 模式唯一数据源（任一成员
+ * binding 口径，与简报/mission_status 同源）。只读展示数据源，组件内直调允许
+ *（同 listProjects 先例，trigger 类调用归父层的纪律不受影响）；task-13 迁
+ * lib/daemon.ts probeWorkspaces client，行为不变。
+ */
+async function probeWorkspaces(
+  workspaceIds: string[],
+): Promise<WorkspaceProbeItem[]> {
+  return apiFetch<WorkspaceProbeItem[]>("/api/workspaces/probe", {
+    method: "POST",
+    json: { workspace_ids: workspaceIds },
+  });
+}
+
+/**
+ * 工作区行 meta：机器名 + 在线 dot（原型 .dot.on 绿带光晕/.off 灰/.none 虚线）
+ * + git 模式标签（.tag.git 绿/.tag.direct 琥珀/unknown 弱化）。probe 无数据
+ *（未覆盖/失败 fail-safe）→ 不渲染，弹层照常可用。
+ */
+function WorkspaceProbeMeta({ probe }: { probe?: WorkspaceProbeItem }) {
+  if (!probe) return null;
+  const unbound = probe.daemon_name === null;
+  const dotState = unbound ? "none" : probe.daemon_online ? "on" : "off";
+  const tag =
+    probe.git_mode === "git"
+      ? { text: "git 隔离", cls: "border-emerald-300/60 bg-emerald-50 text-emerald-700" }
+      : probe.git_mode === "direct"
+        ? { text: "非 git · 直通", cls: "border-amber-300/60 bg-amber-50 text-amber-700" }
+        : { text: "模式未知", cls: "border-border bg-muted text-muted-foreground" };
+  return (
+    <span className="flex items-center gap-1.5 text-[10.5px] text-muted-foreground">
+      <span
+        aria-hidden
+        data-testid={`probe-dot-${probe.workspace_id}`}
+        data-state={dotState}
+        className={cn(
+          "h-[7px] w-[7px] shrink-0 rounded-full",
+          dotState === "on" && "bg-emerald-500 shadow-[0_0_6px] shadow-emerald-500/60",
+          dotState === "off" && "bg-muted-foreground/60",
+          dotState === "none" && "border border-dashed border-muted-foreground/60 bg-transparent",
+        )}
+      />
+      <span className="truncate">
+        {unbound ? "未绑机器" : `${probe.daemon_name} · ${probe.daemon_online ? "在线" : "离线"}`}
+      </span>
+      <span
+        className={`inline-flex h-[18px] shrink-0 items-center rounded-full border px-1.5 text-[10px] font-semibold ${tag.cls}`}
+      >
+        {tag.text}
+      </span>
+    </span>
+  );
+}
+
 /* ───────────────── props 契约（session-panel 两模式消费） ───────────────── */
 
 export interface TeamTriggerPopoverProps {
@@ -91,6 +179,12 @@ export interface TeamTriggerPopoverProps {
   workspaceName?: string | null;
   /** 目标预填（/team 指令文本 /「用团队分析」提示句）；确认后由父层回填输入框。 */
   defaultObjective?: string | null;
+  /**
+   * task-12：预会话实例（新会话派团队，session-panel task-13 传参）。仅 true
+   * 渲染「主 agent（项目经理）」选择器 + 确认按钮文案「派团队（随首句创建生效）」
+   * + payload 追加 orchestrator_workspace_id；缺省 false 渲染与 payload 零变化。
+   */
+  preSession?: boolean;
   /** 提交中（父层 triggerSessionTeamMission 在途 → 确认按钮禁用）。 */
   submitting?: boolean;
   /** 确认回调：payload 即 TeamMissionTriggerRequest，API 调用归父层。 */
@@ -99,12 +193,25 @@ export interface TeamTriggerPopoverProps {
   onClose: () => void;
 }
 
+/**
+ * preSession 实例 payload 构造类型（task-12 引入；task-14 gen:types 收敛后保留
+ * 为构造侧精确视图）：本组件状态用 WorkerPresetItem[]/MainAgentConfig 精确类型
+ * 组装，onTrigger prop 收窄为 TeamMissionTriggerRequest（trigger 路径契约）。
+ * lib 侧 create 块（SessionCreateTeamMission）已收敛为生成版
+ * TeamMissionCreateBlock（worker_preset/main_agent_config 为宽松 dict 形态）——
+ * 本交集（精确）→ 生成块（宽松）结构安全，session-panel 经 as 断言暂存。
+ */
+type TeamTriggerPayload = TeamMissionTriggerRequest & {
+  orchestrator_workspace_id?: string | null;
+};
+
 /* ───────────────── 组件 ───────────────── */
 
 export function TeamTriggerPopover({
   workspaceId,
   workspaceName,
   defaultObjective,
+  preSession = false,
   submitting = false,
   onTrigger,
   onClose,
@@ -134,6 +241,13 @@ export function TeamTriggerPopover({
   );
   const [workers, setWorkers] = useState<WorkerPresetItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // task-12：probe 静态快照（workspace_id → 项；null=未拉到/失败 fail-safe）。
+  const [probeMap, setProbeMap] = useState<Record<string, WorkspaceProbeItem>>({});
+  // task-12：主 agent 选择（""=当前会话默认；工作区 id=钉该工作区）。仅 preSession 实例。
+  const [orchestratorChoice, setOrchestratorChoice] = useState("");
+
+  const workspaceLabel =
+    workspaceName?.trim() || (workspaceId ? `#${workspaceId.slice(0, 8)}` : null);
 
   // 项目下拉：弹层打开即拉一次（PPM 数据范围=超管全部/经理+创建人，见文件头）。
   useEffect(() => {
@@ -178,6 +292,38 @@ export function TeamTriggerPopover({
   const projectSelectable = (projects?.length ?? 0) > 0;
   const projectsLoading = projects === null;
 
+  // task-12：probe 候选集 = 当前工作区 + 已加载的项目关联工作区（去重保序）。
+  const probeCandidateIds = useMemo(() => {
+    const ids = workspaceId ? [workspaceId] : [];
+    for (const w of projectWorkspaces ?? []) {
+      if (!ids.includes(w.workspace_id)) ids.push(w.workspace_id);
+    }
+    return ids;
+  }, [workspaceId, projectWorkspaces]);
+
+  // 同候选集只拉一次（弹层生命周期内静态快照；项目切换回已拉过的候选集不重复
+  // 拉——含加载中间态 list→null 回落 mount 集的场景）。无 setInterval/轮询。
+  const probedKeysRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (probeCandidateIds.length === 0) return;
+    const key = probeCandidateIds.join(",");
+    if (probedKeysRef.current.has(key)) return;
+    probedKeysRef.current.add(key);
+    void (async () => {
+      try {
+        const items = await probeWorkspaces(probeCandidateIds);
+        if (!Array.isArray(items)) return;
+        setProbeMap((prev) => {
+          const next = { ...prev };
+          for (const item of items) next[item.workspace_id] = item;
+          return next;
+        });
+      } catch {
+        // fail-safe（task-12 ⑤）：probe 失败保持既有快照，meta 缺失不阻断弹层。
+      }
+    })();
+  }, [probeCandidateIds]);
+
   /**
    * anchor 派生展示（scope 内 backend-code 优先否则第一个）——与后端触发端点
    * 逐字同规则，仅信息展示不进 payload（DTO 无 anchor 字段）。
@@ -190,6 +336,33 @@ export function TeamTriggerPopover({
     if (selected.length === 0) return null;
     return selected.find((w) => w.type === "backend-code") ?? selected[0]!;
   }, [scopeMode, projectWorkspaces, scopeIds]);
+
+  /**
+   * task-12：主 agent 选择器候选（scope 已选工作区）——项目模式=已勾选列表，
+   * 工作区模式=当前工作区（该工作区即 scope）。仅 preSession 实例渲染。
+   */
+  const orchestratorOptions = useMemo(() => {
+    if (scopeMode === "project") {
+      return (projectWorkspaces ?? []).filter((w) =>
+        scopeIds.includes(w.workspace_id),
+      );
+    }
+    return workspaceId
+      ? [
+          {
+            workspace_id: workspaceId,
+            name: workspaceLabel ?? `#${workspaceId.slice(0, 8)}`,
+          },
+        ]
+      : [];
+  }, [scopeMode, projectWorkspaces, scopeIds, workspaceId, workspaceLabel]);
+
+  // scope 变化（取消勾选/切模式）后所选工作区不在候选内 → 回落「当前会话」默认。
+  const orchestratorValue = orchestratorOptions.some(
+    (o) => o.workspace_id === orchestratorChoice,
+  )
+    ? orchestratorChoice
+    : "";
 
   const toggleScope = (id: string) => {
     setScopeIds((prev) =>
@@ -221,7 +394,7 @@ export function TeamTriggerPopover({
       return;
     }
 
-    const payload: TeamMissionTriggerRequest = {
+    const payload: TeamTriggerPayload = {
       objective: objective.trim() || null,
       budget_usd: budgetNum,
     };
@@ -234,10 +407,13 @@ export function TeamTriggerPopover({
       payload.main_agent_config = mainAgent;
       if (workers.length > 0) payload.worker_preset = workers;
     }
+    // task-12：仅 preSession 实例追加主 agent 工作区（选工作区=其 id、默认
+    // 「当前会话」=null）；非 preSession 实例 payload 不含该字段（零变化）。
+    if (preSession) {
+      payload.orchestrator_workspace_id = orchestratorValue || null;
+    }
     onTrigger(payload);
   };
-
-  const workspaceLabel = workspaceName?.trim() || (workspaceId ? `#${workspaceId.slice(0, 8)}` : null);
 
   return (
     <div
@@ -302,14 +478,20 @@ export function TeamTriggerPopover({
             aria-hidden
             className="h-3.5 w-3.5 shrink-0 rounded-full border-[1.5px] border-border-strong bg-card transition-colors peer-checked:border-[5px] peer-checked:border-primary peer-disabled:opacity-50"
           />
-          <span className="shrink-0 font-semibold text-foreground">
-            {workspaceLabel ?? "未绑定工作区"}
-          </span>
-          <span className="shrink-0 rounded-full bg-cyan-50 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-700">
-            当前工作区
-          </span>
-          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/70">
-            分身在本工作区绑定的机器上跑
+          {/* task-12：单列化，首行=名称+徽标+提示，次行=机器状态 meta（原型场景②） */}
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+            <span className="flex min-w-0 items-center gap-2">
+              <span className="shrink-0 font-semibold text-foreground">
+                {workspaceLabel ?? "未绑定工作区"}
+              </span>
+              <span className="shrink-0 rounded-full bg-cyan-50 px-1.5 py-0.5 text-[10px] font-semibold text-cyan-700">
+                当前工作区
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/70">
+                分身在本工作区绑定的机器上跑
+              </span>
+            </span>
+            {workspaceId && <WorkspaceProbeMeta probe={probeMap[workspaceId]} />}
           </span>
         </label>
 
@@ -417,14 +599,20 @@ export function TeamTriggerPopover({
                           >
                             <Check className="h-2.5 w-2.5" strokeWidth={3} />
                           </span>
-                          <span className="shrink-0 font-medium text-foreground">
-                            {w.name}
-                          </span>
-                          <span
-                            title={w.type ?? undefined}
-                            className={`inline-flex h-5 shrink-0 items-center rounded-full border px-1.5 text-[10px] font-semibold ${badge.className}`}
-                          >
-                            {badge.label}
+                          {/* task-12：单列化，首行=名称+类型徽标，次行=机器状态 meta（原型场景①） */}
+                          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                            <span className="flex min-w-0 items-center gap-2">
+                              <span className="shrink-0 font-medium text-foreground">
+                                {w.name}
+                              </span>
+                              <span
+                                title={w.type ?? undefined}
+                                className={`inline-flex h-5 shrink-0 items-center rounded-full border px-1.5 text-[10px] font-semibold ${badge.className}`}
+                              >
+                                {badge.label}
+                              </span>
+                            </span>
+                            <WorkspaceProbeMeta probe={probeMap[w.workspace_id]} />
                           </span>
                         </label>
                       </li>
@@ -450,6 +638,56 @@ export function TeamTriggerPopover({
               )}
             </>
           )}
+        </div>
+      )}
+
+      {/* task-12：主 agent（项目经理）选择器——仅 preSession 实例（原型场景③）。
+          既有会话实例不渲染（主 agent 恒=当前会话，进程 cwd/机器创建时钉定，
+          跨机器迁移属 C 层非目标——仅以选择器下方说明文案表达，不加交互）。 */}
+      {preSession && (
+        <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50/40 p-2.5">
+          <label className="block">
+            <span className="text-[10.5px] font-semibold text-violet-700">
+              主 agent（项目经理）
+            </span>
+            <select
+              aria-label="主 agent（项目经理）"
+              className="mt-1 h-8 w-full rounded-lg border border-input bg-card px-2 text-[12.5px] text-foreground focus:border-primary focus:outline-none"
+              value={orchestratorValue}
+              onChange={(e) => setOrchestratorChoice(e.target.value)}
+            >
+              <option value="">当前会话（默认：用上方选择的机器与智能体）</option>
+              {orchestratorOptions.map((w) => {
+                const probe = probeMap[w.workspace_id];
+                // fail-safe：无探测数据（未拉到/失败）同样禁选——机器状态不可
+                // 确证，回落「当前会话」默认仍可确认派发。
+                const selectable =
+                  probe !== undefined &&
+                  probe.daemon_name !== null &&
+                  probe.daemon_online;
+                const label = !probe
+                  ? `${w.name} · 机器状态未知`
+                  : probe.daemon_name === null
+                    ? `${w.name} · 未绑机器`
+                    : !probe.daemon_online
+                      ? `${w.name} · 机器离线`
+                      : `${w.name} · ${probe.daemon_name}（该工作区设备与智能体）`;
+                return (
+                  <option
+                    key={w.workspace_id}
+                    value={w.workspace_id}
+                    disabled={!selectable}
+                  >
+                    {label}
+                  </option>
+                );
+              })}
+            </select>
+          </label>
+          <p className="mt-1.5 text-[10.5px] leading-relaxed text-muted-foreground/80">
+            选工作区 → 会话创建在该工作区绑定的机器上，工作目录与智能体用该工作区默认。
+            既有会话中途派团队不提供此项（会话机器与目录创建时已定）。
+          </p>
         </div>
       )}
 
@@ -666,7 +904,12 @@ export function TeamTriggerPopover({
           disabled={submitting}
           className="h-[30px] rounded-lg bg-primary px-3.5 text-[12px] font-medium text-primary-foreground shadow-sm transition-shadow hover:shadow-primary disabled:opacity-60"
         >
-          {submitting ? "派发中…" : "就绪，随下条消息发出"}
+          {/* task-12：preSession 实例文案对齐原型场景③（随首句创建会话生效）。 */}
+          {submitting
+            ? "派发中…"
+            : preSession
+              ? "派团队（随首句创建生效）"
+              : "就绪，随下条消息发出"}
         </button>
         <span className="ml-auto text-[10.5px] text-muted-foreground/70">
           或直接在输入框说「派团队去…」

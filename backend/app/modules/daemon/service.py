@@ -14,7 +14,7 @@ from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.model_error import ModelErrorDTO
-from app.modules.daemon.schema import SessionReopenResponse
+from app.modules.daemon.schema import SessionReopenResponse, TeamMissionCreateBlock
 
 log = get_logger(__name__)
 
@@ -654,6 +654,9 @@ class DaemonService:
         runtime_id: str | None = None,
         agent_profile_id: str | None = None,
         llm_provider_id: str | None = None,
+        # task-09（2026-08-24-session-team-mission-context / FR-05/06）：预会话
+        # 团队任务块透传（校验/预建/简报归 SessionService，facade 仅转发）。
+        team_mission: TeamMissionCreateBlock | None = None,
     ) -> SessionDispatchResult:
         return await self._sess.create_session(
             user_id,
@@ -667,6 +670,7 @@ class DaemonService:
             runtime_id=runtime_id,
             agent_profile_id=agent_profile_id,
             llm_provider_id=llm_provider_id,
+            team_mission=team_mission,
         )
 
     async def inject_session(

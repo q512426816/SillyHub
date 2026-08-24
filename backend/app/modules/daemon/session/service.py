@@ -45,7 +45,7 @@ from app.modules.daemon.protocol import (
     DAEMON_MSG_SESSION_RESUME,
 )
 from app.modules.daemon.runtime.service import DaemonRuntimeOffline
-from app.modules.daemon.schema import SessionReopenResponse
+from app.modules.daemon.schema import SessionReopenResponse, TeamMissionCreateBlock
 
 log = get_logger(__name__)
 
@@ -373,6 +373,20 @@ class DaemonSessionConfigInvalid(AppError):
     """会话配置 id 形态非法（非 UUID）/ 属主用户缺失（422）。"""
 
     code = "HTTP_422_DAEMON_SESSION_CONFIG_INVALID"
+    http_status = 422
+
+
+class DaemonSessionTeamMissionInvalid(AppError):
+    """create 携 team_mission 的 E2 主 agent 工作区解析不可满足（422）。
+
+    task-09（2026-08-24-session-team-mission-context / design §5.E2 / D-014@v1）：
+    ``orchestrator_workspace_id`` ∉ scope，或 (W, 创建者) 的
+    WorkspaceMemberRuntime binding 缺失（无行 / runtime_id 空）——后者不借用
+    他人 binding 钉定，422 明确报「该工作区未绑定你的机器」。全部在事务
+    开始前抛出，无半成品落库。
+    """
+
+    code = "HTTP_422_DAEMON_SESSION_TEAM_MISSION_INVALID"
     http_status = 422
 
 
@@ -704,6 +718,11 @@ class SessionService:
         runtime_id: str | None = None,
         agent_profile_id: str | None = None,
         llm_provider_id: str | None = None,
+        # task-09（2026-08-24-session-team-mission-context / FR-05/06）：预会话
+        # 团队任务块——事务前共享校验 + E2 主 agent 工作区解析；事务内 flush-only
+        # 预建 mission + 首 run 双标记 + 首 prompt 团队简报前缀。缺省 None 零
+        # 分支进入（无 team_mission 的 create 行为逐字节不变）。
+        team_mission: TeamMissionCreateBlock | None = None,
     ) -> SessionDispatchResult:
         """Create an interactive session + first-turn run + interactive lease.
 
@@ -714,6 +733,9 @@ class SessionService:
 
         task-03 双入口：``runtime_id``（/sessions 新页面，Grill C-01 钉定）与
         ``provider``（/runtimes 弹窗旧路径，零回归）二选一，前者优先。
+
+        task-09：``team_mission`` 携带时预建 mission（session 模式 flush-only，
+        共用本方法唯一 commit）——详见函数内 task-09 分段注释。
         """
         if not prompt or not prompt.strip():
             raise DaemonSessionNotActive(
@@ -857,6 +879,76 @@ class SessionService:
             if _ws is not None:
                 cwd = _ws.root_path
 
+        # ── task-09（2026-08-24-session-team-mission-context / FR-05/06）：预会话
+        # 团队任务块解析（事务开始前，design §5.E1/E2）──共享校验
+        # ``validate_team_mission_block``（task-07：scope 去重保序/项目维度
+        # 403/scope 越界 422/anchor backend-code 优先派生）+ E2 主 agent 工作区
+        # （orchestrator_workspace_id）解析。全部前置到事务外：不可满足直接
+        # 4xx，无半成品落库。缺省 None 零分支进入（零回归）。
+        mission_scope_ids: list[uuid.UUID] | None = None
+        mission_anchor_id: uuid.UUID | None = None
+        if team_mission is not None:
+            from app.modules.auth.model import User as _User
+
+            _tm_actor = await self._session.get(_User, user_id)
+            if _tm_actor is None:
+                raise DaemonSessionConfigInvalid(
+                    "Session owner user not found.",
+                    details={"user_id": str(user_id)},
+                )
+            # 延迟 import：daemon.router 顶层 import 本模块（get_session_readiness），
+            # 函数内取 task-07 共享校验避免模块环（单一实现，无复制粘贴）。
+            from app.modules.daemon.router import validate_team_mission_block
+
+            mission_scope_ids, mission_anchor_id = await validate_team_mission_block(
+                self._session,
+                _tm_actor,
+                team_mission,
+                fallback_workspace_id=workspace_id,
+            )
+
+            # ── E2 主 agent 工作区（design §5.E2 / D-010@v1）──
+            _orch_ws_id = team_mission.orchestrator_workspace_id
+            if _orch_ws_id is not None:
+                assert mission_scope_ids is not None  # 上方已赋值，助 mypy 收窄
+                if _orch_ws_id not in mission_scope_ids:
+                    raise DaemonSessionTeamMissionInvalid(
+                        "主 agent 工作区必须在团队任务 scope 内。",
+                        details={"orchestrator_workspace_id": str(_orch_ws_id)},
+                    )
+                # (W, 创建者) 的 WorkspaceMemberRuntime binding（D-014@v1）：
+                # 行缺失或 runtime_id 空 → 422「该工作区未绑定你的机器」，
+                # 不借用他人 binding 钉定。
+                from app.modules.workspace.member_runtimes.model import (
+                    WorkspaceMemberRuntime,
+                )
+
+                _binding = await self._session.get(WorkspaceMemberRuntime, (_orch_ws_id, user_id))
+                if _binding is None or _binding.runtime_id is None:
+                    raise DaemonSessionTeamMissionInvalid(
+                        "该工作区未绑定你的机器，无法作为主 agent 工作区。",
+                        details={"orchestrator_workspace_id": str(_orch_ws_id)},
+                    )
+                # 命中：workspace_id 覆写 W + cwd=W.root_path（W ∈ scope 已验）。
+                from app.modules.workspace.model import Workspace as _E2Workspace
+
+                _w_row = await self._session.get(_E2Workspace, _orch_ws_id)
+                workspace_id = _orch_ws_id
+                cwd = _w_row.root_path if _w_row is not None else None
+                # binding.runtime_id 作 pinned_runtime_id 复用既有钉定链
+                # （placement 属主+在线复查，失联转 4xx 不静默换机）；用户显式
+                # 传 runtime_id 时显式优先（R-09：W 仅决定 workspace_id/cwd）。
+                if not runtime_id:
+                    pinned_runtime_id = _binding.runtime_id
+                # 用户未显式传 agent_profile_id/llm_provider_id/runtime_id 时
+                # provider/model 落 W.default_agent/W.default_model（显式选择
+                # 逐字节优先，R-09，后端不因不一致 422）。
+                if not (agent_profile_id or llm_provider_id or runtime_id):
+                    if _w_row is not None and _w_row.default_agent:
+                        provider = _w_row.default_agent
+                    if _w_row is not None and _w_row.default_model:
+                        model = _w_row.default_model
+
         now = datetime.now(UTC)
         # Copy config so the request dict is never mutated (boundary #16).
         config: dict = {
@@ -884,6 +976,32 @@ class SessionService:
             self._session.add(session)
             await self._session.flush()
 
+            # ── task-09 / D-009@v2（flush-only 预建，R-04）：team_mission 预建 ──
+            # session 行 add+flush 后、首 run 构造前调 task-04 helper（session
+            # 模式）；objective=block.objective 非空否则直取首句 prompt（create
+            # 路径不经 _inject_into_session 占位回填）；scope/project_id/budget/
+            # worker_preset/main_agent_config 透传。不 commit——共用本方法唯一
+            # commit（下方），中途任意环节异常走整体回滚，无孤儿 session/mission。
+            mission = None
+            if team_mission is not None:
+                from app.modules.agent.orchestrator import OrchestratorService
+
+                assert mission_anchor_id is not None and mission_scope_ids is not None
+                mission = await OrchestratorService(self._session)._precreate_mission_flush(
+                    workspace_id=mission_anchor_id,
+                    objective=team_mission.objective or prompt,
+                    created_by=user_id,
+                    change_id=change_id,
+                    constraints=None,
+                    budget_usd=team_mission.budget_usd,
+                    worker_preset=team_mission.worker_preset,
+                    main_agent_config=team_mission.main_agent_config,
+                    orchestration_mode="session",
+                    scope_workspace_ids=mission_scope_ids,
+                    project_id=team_mission.project_id,
+                    session_id=session.id,
+                )
+
             # task-03：首 run 带档案/供应商轮次快照（D-008）。
             from app.modules.agent.service import _build_agent_profile_snapshot
 
@@ -896,6 +1014,11 @@ class SessionService:
                 spec_strategy="interactive",
                 agent_session_id=session.id,
                 change_id=change_id,
+                # task-09 / FR-05：预建 mission 的首 run 双标记（mission_id +
+                # role='orchestrator'，字面量对齐 _inject_into_session 既有口径
+                # 与 orchestrator.py _ORCHESTRATOR_ROLE）；首 run 即主控轮。
+                mission_id=mission.id if mission is not None else None,
+                role="orchestrator" if mission is not None else None,
                 # ql-20260817-003：首轮发送者=会话创建者。
                 user_id=user_id,
                 agent_profile_id=profile.id if profile is not None else None,
@@ -917,7 +1040,21 @@ class SessionService:
             )
 
             preamble = await build_change_context_preamble(self._session, change_id)
-            dispatch_prompt = f"{preamble}\n\n---\n\n{prompt}" if preamble else prompt
+            # ── task-09 / FR-01 / D-004@v1：首 prompt 团队简报前缀（create 路径）──
+            # 叠加顺序定死（R-06）：变更前导（既有，在前）→ 团队简报（task-06
+            # build_orchestrator_briefing）→ "\n\n---\n\n" → 用户消息。lease
+            # metadata 经 dispatch_prompt 携带前缀（既有机制）；AgentRunLog
+            # (user_input)（下方）与首 turn SESSION_INJECT payload prompt（下发
+            # 段）仍写干净用户原文（对齐变更前导先例，展示层干净）。
+            briefing = None
+            if mission is not None:
+                from app.modules.agent.mission_context import build_orchestrator_briefing
+
+                briefing = await build_orchestrator_briefing(self._session, mission)
+            _prefix_parts = [part for part in (preamble, briefing) if part]
+            dispatch_prompt = (
+                "\n\n---\n\n".join([*_prefix_parts, prompt]) if _prefix_parts else prompt
+            )
 
             placement = RunPlacementService(self._session)
             try:
@@ -1694,6 +1831,24 @@ class SessionService:
             ):
                 active_mission.objective = prompt
                 self._session.add(active_mission)
+            # ── 2026-08-24 task-08 / FR-01 / D-004@v1：主控首轮简报判定（inject 侧）──
+            # task-06 组合入口（活跃 mission 查询 + 三条件判定 + 简报组装）：空
+            # prompt 切换轮不注入不消耗、已消耗 orchestrator run 不再注、failed
+            # 不烧断（D-013@v1）；简报内容单一来源在 mission_context，本处只做
+            # 判定调用。必须建 run 前判定——当轮 run 落库即 pending orchestrator，
+            # 判定会被自身短路（懒建回填同款机理，D-003@v1）。未命中返回 None →
+            # 下方 SESSION_INJECT payload 原样透传（无 mission 会话逐字节不变）。
+            from app.modules.agent.mission_context import resolve_first_turn_briefing
+
+            first_turn_briefing = await resolve_first_turn_briefing(
+                self._session, session_id, prompt
+            )
+            # task-08 / D-013@v1（Grill CC-12）：空 prompt 纯切换轮无 LLM turn，不是
+            # 主控轮——不落双标记。否则该轮 run 落库即 completed orchestrator run，
+            # 会烧断简报一次性名额（与「纯切换轮不注入也不消耗」的验收口径冲突，
+            # CC-12 关切正是"空 prompt 切换轮被双标记消耗一次性简报"）。带文本的
+            # 切换轮是真 LLM 轮，照常双标记。
+            silent_config_switch = config_switch and not prompt.strip()
             run = AgentRun(
                 id=uuid.uuid4(),
                 agent_type="claude_code",
@@ -1706,9 +1861,18 @@ class SessionService:
                 # 调用方注入：inject_session=实际 user；service 路径=会话属主）。
                 user_id=run_sender_user_id,
                 # task-04 / D-009：主控轮双标记——活跃 mission 命中时当轮回填
-                # （role 字面量同 orchestrator.py _ORCHESTRATOR_ROLE 存量语义）。
-                mission_id=active_mission.id if active_mission is not None else None,
-                role="orchestrator" if active_mission is not None else None,
+                # （role 字面量同 orchestrator.py _ORCHESTRATOR_ROLE 存量语义）；
+                # task-08：纯切换轮例外不标记（见上方 silent_config_switch 注释）。
+                mission_id=(
+                    active_mission.id
+                    if active_mission is not None and not silent_config_switch
+                    else None
+                ),
+                role=(
+                    "orchestrator"
+                    if active_mission is not None and not silent_config_switch
+                    else None
+                ),
             )
             # task-05 / D-008（ql-20260815-010 修正为每轮落快照）：新 run 带本轮
             # 生效配置——切换轮=新值；普通轮=会话当前值（沿用），无配置=NULL 如实。
@@ -1950,11 +2114,19 @@ class SessionService:
                     },
                 )
             else:
+                # task-08 / D-004@v1：命中首主控轮判定（first_turn_briefing 非空）时
+                # prompt 前缀简报（简报+\n\n---\n\n+用户消息，简报在前）；仅改本
+                # payload 的 prompt 内容，SESSION_INJECT 协议字段不变（零 daemon
+                # 改动）。AgentRunLog(user_input)/上方 SESSION_SWITCH_CONFIG 分支/
+                # 离线收敛 output_redacted 均保持用户原文（展示层干净）。
+                inject_prompt = (
+                    f"{first_turn_briefing}\n\n---\n\n{prompt}" if first_turn_briefing else prompt
+                )
                 inject_payload = {
                     "session_id": str(session.id),
                     "lease_id": str(session.lease_id),
                     "run_id": str(run.id),
-                    "prompt": prompt,
+                    "prompt": inject_prompt,
                     "claim_token": inject_claim_token,
                     "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
                 }

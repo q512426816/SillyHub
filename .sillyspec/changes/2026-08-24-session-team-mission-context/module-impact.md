@@ -24,7 +24,7 @@ created_at: 2026-08-24 19:35:00
 
 | 目标 | 操作 | 状态 |
 |---|---|---|
-| `modules/backend.md` | 待更新：简报注入链路/mission_status+probe 路由/三态直通/E1 预建+E2 解析（task-14 收尾同步） | pending |
-| `modules/sillyhub-daemon.md` | 待更新：mission_status 第 6 工具+hub-client getMissionStatus（task-14 收尾同步） | pending |
-| `modules/frontend.md` | 待更新：预会话解禁+弹层探测+client 扩展（task-14 收尾同步） | pending |
+| `modules/backend.md` | 已更新：变更索引新增本变更条目（简报注入链路/mission_status+probe 路由/三态直通/E1 预建+E2 解析/收尾，task-14 worktree 版+apply 时手工合入主仓最新版） | done |
+| `modules/sillyhub-daemon.md` | 已更新：变更索引新增本变更条目（mission_status 第 6 工具+hub-client getMissionStatus） | done |
+| `modules/frontend.md` | 已更新：变更索引新增本变更条目（预会话解禁+弹层探测+主 agent 选择器+client 扩展+类型收敛） | done |
 | `_module-map.yaml` | 无变化（未增删模块） | skipped |

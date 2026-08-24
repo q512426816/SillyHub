@@ -14,8 +14,18 @@
 //   4. R-02 失败保留输入 + 内联错误 + 原地重试成功；
 //   5. 门控派生：无 preContext / 机器离线 → 输入禁用。
 //
+// task-13（2026-08-24-session-team-mission-context / FR-05 / FR-06 / D-009@v2 /
+// D-010@v1）追加：
+//   6. 预会话团队触发行解禁——门控三态（claude+在线可点开弹层 / 非 claude 禁 /
+//      离线禁），tooltip 按未满足原因更新；
+//   7. 弹层确认（preSession 实例）→ payload 暂存 state + 关弹层 + objective
+//      回填输入框；首句 createSession 请求体携带 team_mission 块（含主 agent
+//      选择器落定的 orchestrator_workspace_id）且绝不调 triggerSessionTeamMission；
+//   8. 创建失败保留输入与暂存可重试（R-02 延伸）；成功后暂存清空（再发不带）。
+//
 // mock 风格照抄 session-panel-team.test.tsx（page 模式 QueryClientProvider +
-// 仅 mock 网络层；断言用 aria-label / 正则避开 antd 中文按钮拆分坑）。
+// 仅 mock 网络层；断言用 aria-label / 正则避开 antd 中文按钮拆分坑）。task-13
+// 追加 mock @/lib/api apiFetch（弹层 probe 数据源，fail-safe 默认空响应）。
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
@@ -97,6 +107,15 @@ vi.mock("@/lib/workspace", async () => {
     "@/lib/workspace",
   );
   return { ...actual, listProjectWorkspaces: workspaceApi.listProjectWorkspaces };
+});
+
+// task-13：弹层 probe 数据源（POST /api/workspaces/probe，组件内 module-level
+// 直调）——网络边界即 apiFetch；默认空响应（meta 不渲染，fail-safe 同线上）。
+// ApiError 等其余导出走 actual（R-02 失败用例构造依赖）。
+const apiFetchMock = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+  return { ...actual, apiFetch: apiFetchMock };
 });
 
 // page 模式 chrome（SessionConfigBar）数据 hook：无网络，空数据（转真会话态
@@ -218,6 +237,8 @@ function setupPre(
   });
   workspaceApi.listProjects.mockResolvedValue([]);
   workspaceApi.listProjectWorkspaces.mockResolvedValue([]);
+  // task-13：probe 默认空响应（用例按需覆盖为具体探测项）。
+  apiFetchMock.mockResolvedValue([]);
 
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -519,7 +540,7 @@ describe("SessionPanel 预会话首句创建失败（R-02）", () => {
 /* ───────── 6. ql-20260823-008：配置条/团队行同构挂载（provisional 暂存） ───────── */
 
 describe("SessionPanel 预会话配置条与团队行（ql-20260823-008 完全一致）", () => {
-  it("配置控件条渲染：机器/智能体只读（D-104 锁定同真会话），供应商/档案可选；派团队按钮置灰", () => {
+  it("配置控件条渲染：机器/智能体只读（D-104 锁定同真会话），供应商/档案可选；派团队按钮解禁可点（task-13，门控三态见下方专项）", () => {
     setupPre();
 
     // 配置条在（aria-label 同真会话）
@@ -542,9 +563,11 @@ describe("SessionPanel 预会话配置条与团队行（ql-20260823-008 完全�
     }) as HTMLButtonElement;
     expect(providerCtrl.disabled).toBe(false);
     expect(profileCtrl.disabled).toBe(false);
-    // 派团队按钮置灰（agent 未运行——用户定调的唯一差异）
+    // task-13（FR-05）：派团队按钮解禁——默认 preContext（claude + 在线）可点，
+    // 与真会话门控同构；tooltip 提示首句创建会话即预建团队任务。
     const teamBtn = screen.getByRole("button", { name: /派团队/ }) as HTMLButtonElement;
-    expect(teamBtn.disabled).toBe(true);
+    expect(teamBtn.disabled).toBe(false);
+    expect(teamBtn.title).toBe("派团队：首句创建会话时预建团队任务");
   });
 
   it("选供应商 → 暂存不 inject；首句 createSession 携带 llm_provider_id", async () => {
@@ -608,5 +631,275 @@ describe("SessionPanel 预会话配置条与团队行（ql-20260823-008 完全�
     const arg = sessionApi.createSession.mock.calls[0]![0] as Record<string, unknown>;
     expect(arg.llm_provider_id).toBeUndefined();
     expect(arg.agent_profile_id).toBeUndefined();
+  });
+});
+
+/* ───────── 7. task-13（FR-05）：预会话团队触发行门控三态 ───────── */
+
+describe("SessionPanel 预会话派团队门控（task-13 解禁）", () => {
+  it("claude 引擎 + 所选机器在线：按钮可点，点击打开 preSession 弹层（主 agent 选择器 + 确认文案）", async () => {
+    setupPre();
+
+    const teamBtn = screen.getByRole("button", {
+      name: /派团队/,
+    }) as HTMLButtonElement;
+    expect(teamBtn.disabled).toBe(false);
+    expect(teamBtn.title).toBe("派团队：首句创建会话时预建团队任务");
+
+    // 点击打开弹层——task-12 preSession 实例形态（选择器 + 确认按钮文案）。
+    fireEvent.click(teamBtn);
+    expect(
+      await screen.findByRole("dialog", { name: "派团队配置" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("主 agent（项目经理）")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /派团队（随首句创建生效）/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("非 claude 引擎（codex）：按钮禁用 + tooltip「团队需要 Claude 引擎」", () => {
+    setupPre({ preContext: { workspaceId: null, runtimeId: "rt-codex" } });
+
+    const teamBtn = screen.getByRole("button", {
+      name: /派团队/,
+    }) as HTMLButtonElement;
+    expect(teamBtn.disabled).toBe(true);
+    expect(teamBtn.title).toBe("团队需要 Claude 引擎");
+  });
+
+  it("所选机器离线：按钮禁用 + tooltip「所选机器离线」", () => {
+    setupPre({
+      machines: [makeMachine({ status: "offline", online_runtime_count: 0 })],
+    });
+
+    const teamBtn = screen.getByRole("button", {
+      name: /派团队/,
+    }) as HTMLButtonElement;
+    expect(teamBtn.disabled).toBe(true);
+    expect(teamBtn.title).toBe("所选机器离线，无法派团队");
+  });
+
+  it("无 preContext（空门户态）：按钮禁用 + tooltip「请先选择机器与智能体」", () => {
+    setupPre({ preContext: null });
+
+    const teamBtn = screen.getByRole("button", {
+      name: /派团队/,
+    }) as HTMLButtonElement;
+    expect(teamBtn.disabled).toBe(true);
+    expect(teamBtn.title).toBe("请先选择机器与智能体");
+  });
+});
+
+/* ───────── 8. task-13（FR-05/FR-06）：确认暂存 + team_mission 随首句上送 ───────── */
+
+describe("SessionPanel 预会话弹层确认 → 暂存 + 首句携带 team_mission（task-13）", () => {
+  /** 打开弹层并确认（目标回填输入框后返回输入框元素）。 */
+  async function confirmPopoverWith(objective: string) {
+    fireEvent.click(
+      screen.getByRole("button", { name: /^派团队$/ }) as HTMLButtonElement,
+    );
+    const objectiveInput = await screen.findByLabelText(
+      "目标（可选，随下条消息发出）",
+    );
+    fireEvent.change(objectiveInput, { target: { value: objective } });
+    fireEvent.click(
+      screen.getByRole("button", { name: /派团队（随首句创建生效）/ }),
+    );
+    // 弹层关闭 + objective 回填输入框（暂存待首句上送）。
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "派团队配置" }),
+      ).not.toBeInTheDocument(),
+    );
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    await waitFor(() => expect(input.value).toBe(objective));
+    return input;
+  }
+
+  it("确认后 payload 暂存：弹层关闭 + objective 回填输入框；首句 createSession 请求体携带 team_mission（默认当前会话 orchestrator_workspace_id=null），不调 triggerSessionTeamMission", async () => {
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-team-1",
+      run_id: "run-team-1",
+      lease_id: "l",
+      status: "active",
+      stream_url: "",
+    });
+    setupPre({
+      preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" },
+      workspacesItems: [{ id: "ws-1", name: "前端重构" }],
+    });
+
+    const input = await confirmPopoverWith("重构登录页");
+
+    // 首句发送 → createSession 携带 team_mission 块（含 orchestrator_workspace_id）。
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() =>
+      expect(sessionApi.createSession).toHaveBeenCalledTimes(1),
+    );
+    expect(sessionApi.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtime_id: "rt-claude",
+        prompt: "重构登录页",
+        workspace_id: "ws-1",
+        team_mission: {
+          objective: "重构登录页",
+          budget_usd: null,
+          orchestrator_workspace_id: null,
+        },
+      }),
+    );
+    // 预会话确认绝不调 triggerSessionTeamMission（无会话可挂 mission，卡约束）。
+    expect(sessionApi.triggerSessionTeamMission).not.toHaveBeenCalled();
+    // 弹层 probe 数据源不变（POST /api/workspaces/probe，task-12 组件内实现）。
+    expect(apiFetchMock).toHaveBeenCalledWith("/api/workspaces/probe", {
+      method: "POST",
+      json: { workspace_ids: ["ws-1"] },
+    });
+  });
+
+  it("主 agent 选择器钉工作区（probe 在线可选）：确认 payload.orchestrator_workspace_id=工作区 id 随首句上送", async () => {
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-team-2",
+      run_id: "run-team-2",
+      lease_id: "l",
+      status: "active",
+      stream_url: "",
+    });
+    setupPre({
+      preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" },
+      workspacesItems: [{ id: "ws-1", name: "前端重构" }],
+    });
+    // setupPre 内部把 probe 复位为空响应——弹层打开前覆盖为在线探测项
+    //（弹层挂载即 probe，时序在覆盖之后）。
+    apiFetchMock.mockResolvedValue([
+      {
+        workspace_id: "ws-1",
+        git_mode: "git",
+        daemon_name: "机器一",
+        daemon_online: true,
+      },
+    ]);
+
+    // 打开弹层，等主 agent 选择器出现可选工作区项（probe 在线）后选中。
+    fireEvent.click(
+      screen.getByRole("button", { name: /^派团队$/ }) as HTMLButtonElement,
+    );
+    const selector = await screen.findByLabelText("主 agent（项目经理）");
+    await screen.findByText("前端重构 · 机器一（该工作区设备与智能体）");
+    fireEvent.change(selector, { target: { value: "ws-1" } });
+    fireEvent.change(await screen.findByLabelText("目标（可选，随下条消息发出）"), {
+      target: { value: "重构登录页" },
+    });
+    fireEvent.click(
+      screen.getByRole("button", { name: /派团队（随首句创建生效）/ }),
+    );
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    await waitFor(() => expect(input.value).toBe("重构登录页"));
+
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() =>
+      expect(sessionApi.createSession).toHaveBeenCalledTimes(1),
+    );
+    const arg = sessionApi.createSession.mock.calls[0]![0] as {
+      team_mission?: { orchestrator_workspace_id?: string | null };
+    };
+    expect(arg.team_mission?.orchestrator_workspace_id).toBe("ws-1");
+  });
+
+  it("失败保留输入与暂存可原地重试（R-02 延伸）；成功后暂存清空——再发一句不带 team_mission", async () => {
+    const { ApiError } = await import("@/lib/api");
+    sessionApi.createSession
+      .mockRejectedValueOnce(
+        new ApiError(503, {
+          code: "DAEMON_UNAVAILABLE",
+          message: "daemon 暂不可用",
+          request_id: null,
+          details: null,
+        }),
+      )
+      .mockResolvedValueOnce({
+        session_id: "sess-team-3",
+        run_id: "run-team-3",
+        lease_id: "l",
+        status: "active",
+        stream_url: "",
+      })
+      .mockResolvedValueOnce({
+        session_id: "sess-team-4",
+        run_id: "run-team-4",
+        lease_id: "l",
+        status: "active",
+        stream_url: "",
+      });
+    setupPre({
+      preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" },
+      workspacesItems: [{ id: "ws-1", name: "前端重构" }],
+    });
+
+    const input = await confirmPopoverWith("重构登录页");
+
+    // 首句 → 失败：错误可见 + 输入保留（暂存同保留，重试仍携带）。
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() =>
+      expect(screen.getByLabelText("创建会话错误")).toBeInTheDocument(),
+    );
+    expect(input.value).toBe("重构登录页");
+    const first = sessionApi.createSession.mock.calls[0]![0] as {
+      team_mission?: unknown;
+    };
+    expect(first.team_mission).toBeDefined();
+
+    // 原地重试（输入与暂存均未丢）→ 第二次成功仍携带同一 team_mission 块。
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() =>
+      expect(sessionApi.createSession).toHaveBeenCalledTimes(2),
+    );
+    const second = sessionApi.createSession.mock.calls[1]![0] as {
+      team_mission?: unknown;
+    };
+    expect(second.team_mission).toEqual({
+      objective: "重构登录页",
+      budget_usd: null,
+      orchestrator_workspace_id: null,
+    });
+
+    // 成功清空暂存：面板仍预会话（父层未切 sessionId）→ 再发一句不带 team_mission。
+    fireEvent.change(input, { target: { value: "第二句追问" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() =>
+      expect(sessionApi.createSession).toHaveBeenCalledTimes(3),
+    );
+    const third = sessionApi.createSession.mock.calls[2]![0] as {
+      team_mission?: unknown;
+    };
+    expect(third.team_mission).toBeUndefined();
+  });
+
+  it("未确认弹层（无暂存）：首句 createSession 不带 team_mission 字段（既有语义保持）", async () => {
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-team-5",
+      run_id: "run-team-5",
+      lease_id: "l",
+      status: "active",
+      stream_url: "",
+    });
+    setupPre();
+
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "普通首句" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() =>
+      expect(sessionApi.createSession).toHaveBeenCalledTimes(1),
+    );
+    const arg = sessionApi.createSession.mock.calls[0]![0] as {
+      team_mission?: unknown;
+    };
+    expect(arg.team_mission).toBeUndefined();
   });
 });

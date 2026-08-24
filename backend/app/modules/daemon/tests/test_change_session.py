@@ -729,6 +729,97 @@ class TestCreateSessionChangeBinding:
         assert sess.workspace_id is None
         assert sess.cwd is None
 
+    async def test_create_with_change_and_team_mission_double_preamble_order(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        fresh_ws_hub: DaemonWsHub,
+    ) -> None:
+        """change_id + team_mission 同携（task-09 / R-06）：dispatch prompt 顺序
+        定死——变更前导（既有，在前）→ 团队简报 → ``\\n\\n---\\n\\n`` → 用户消息；
+        mission 行落库、首 run 双标记；AgentRunLog(user_input) 仍干净原文。"""
+        from app.modules.agent.model import AgentMission, AgentRun
+        from app.modules.daemon.model import DaemonTaskLease
+
+        admin = await _admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        ws = _connect_mock_ws(fresh_ws_hub, rt.id)
+        await fresh_ws_hub.connect(rt.id, ws)
+
+        ws_row = await _make_workspace(db_session, root_path="/tmp/double-preamble")
+        change = await _make_change(
+            db_session, workspace_id=ws_row.id, title="双前导变更", current_stage="execute"
+        )
+        await _make_doc(
+            db_session,
+            change_id=change.id,
+            doc_type="design",
+            path=f"changes/{change.change_key}/design.md",
+        )
+
+        user_prompt = "按简报开工"
+        resp = await client.post(
+            "/api/daemon/sessions",
+            json={
+                "provider": "claude",
+                "prompt": user_prompt,
+                "model": None,
+                "change_id": str(change.id),
+                "workspace_id": str(ws_row.id),
+                "team_mission": {
+                    "objective": "双前导目标",
+                    "scope_workspace_ids": [str(ws_row.id)],
+                },
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        session_id = uuid.UUID(body["session_id"])
+        run_id = uuid.UUID(body["run_id"])
+
+        # 1. mission 行落库 + 首 run 双标记。
+        missions = (await db_session.execute(select(AgentMission))).scalars().all()
+        assert len(missions) == 1
+        assert missions[0].session_id == session_id
+        assert missions[0].objective == "双前导目标"
+        run = await db_session.get(AgentRun, run_id)
+        assert run is not None
+        assert run.mission_id == missions[0].id
+        assert run.role == "orchestrator"
+
+        # 2. lease metadata prompt：变更前导 → 团队简报 → --- → 用户消息（顺序定死）。
+        lease = await db_session.get(DaemonTaskLease, uuid.UUID(body["lease_id"]))
+        assert lease is not None
+        meta_prompt = (lease.metadata_ or {}).get("prompt", "")
+        assert "【变更上下文】" in meta_prompt
+        assert "【团队任务简报" in meta_prompt
+        assert str(missions[0].id) in meta_prompt
+        i_change = meta_prompt.index("【变更上下文】")
+        i_brief = meta_prompt.index("【团队任务简报")
+        i_user = meta_prompt.index(user_prompt)
+        assert i_change < i_brief < i_user
+        assert "\n\n---\n\n" in meta_prompt
+
+        # 3. AgentRunLog(user_input) 干净用户原文。
+        log_row = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == run_id,
+                        AgentRunLog.channel == "user_input",
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert log_row is not None
+        assert log_row.content_redacted == user_prompt
+        assert "【团队任务简报" not in (log_row.content_redacted or "")
+        assert "【变更上下文】" not in (log_row.content_redacted or "")
+
 
 # ── D. DTO 具名化（2026-08-14-sessions-portal task-02 / FR-01 / D-010@v1）────
 # SessionCreateRequest/SessionInjectRequest 迁 schema.py 后的契约回归：
