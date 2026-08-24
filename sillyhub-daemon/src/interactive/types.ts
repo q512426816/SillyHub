@@ -65,8 +65,14 @@ export interface SessionSwitchConfigPayload {
   prompt: string;
   /** 新档案；null=不切档案（保留现 systemPrompt/mcpRefs/skillRefs）。 */
   profile: SessionSwitchProfilePayload | null;
-  /** 新供应商配置（结构同 lease claim payload 的 provider_config）；null=不切。 */
-  providerConfig: ProviderConfig | null;
+  /**
+   * 新供应商配置（结构同 lease claim payload 的 provider_config）。
+   * null=切回本机默认（清供应商 env，第 0 层跳过；ql-20260824-016 修正——
+   * 原「null=不切」与后端契约冲突，service.py 切回本机正是下发 null）；
+   * undefined（字段缺席）=不切该维度（保留现值）。daemon.ts 路由层不再把
+   * 缺席归一成 null，两层语义靠此区别承载。
+   */
+  providerConfig?: ProviderConfig | null;
 }
 
 /** session 生命周期状态。 */

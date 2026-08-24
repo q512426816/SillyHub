@@ -7,7 +7,8 @@
 // 调用契约），reload 空闲/生成中分支 + reloadWithConfig 见 session-manager
 // 系列测试（task-08）。覆盖：
 //   - snake_case / camelCase payload 归一化后构造 SessionSwitchConfigPayload 透传
-//   - profile=null / provider_config=null（不切语义，design §7.2）透传 null
+//   - profile=null / provider_config=null 透传 null（null=切回本机，ql-20260824-016
+//     新契约）；provider_config 字段缺席 → 透传 undefined 不归一（缺席=不切该维度）
 //   - 缺 run_id / claim_token → warn 丢弃不调；prompt 空串=静默切换正常路由（ql-20260817-011）
 //   - 缺 session_id → warn 丢弃不调
 //   - session 不在 SessionStore（迟到/重放）→ warn 丢弃不调（口径同 SESSION_INJECT）
@@ -238,7 +239,7 @@ describe('task-09 / FR-05 / D-012@v1: daemon SESSION_SWITCH_CONFIG WS handler �
     });
   });
 
-  it('profile=null / provider_config=null（不切语义，design §7.2）→ 透传 null 不拦截', async () => {
+  it('profile=null / provider_config=null → 透传 null 不拦截（null=切回本机，ql-20260824-016 新契约）', async () => {
     const sm = createMockSessionManager(makeState(SESSION_ID, LEASE_ID));
     const { daemon } = buildDaemon(sm);
     daemons.push(daemon);
@@ -260,6 +261,32 @@ describe('task-09 / FR-05 / D-012@v1: daemon SESSION_SWITCH_CONFIG WS handler �
     const arg = sm.markPendingConfigSwitch.mock.calls[0]![1] as SessionSwitchConfigPayload;
     expect(arg.profile).toBeNull();
     expect(arg.providerConfig).toBeNull();
+  });
+
+  it('provider_config 字段缺席 → 透传 undefined 不归一 null（缺席=不切该维度，ql-20260824-016）', async () => {
+    // 原 ?? null 归一把缺席塌缩成 null，叠加 reloadWithConfig 的 ?? 再塌缩回
+    // 旧供应商 → 「切回本机」永不生效。路由层保留 undefined 让下游区分语义。
+    const sm = createMockSessionManager(makeState(SESSION_ID, LEASE_ID));
+    const { daemon } = buildDaemon(sm);
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: SESSION_SWITCH_CONFIG_MSG,
+      payload: {
+        session_id: SESSION_ID,
+        run_id: RUN_ID,
+        claim_token: CLAIM_TOKEN,
+        prompt: '不带供应商维度',
+        profile: null,
+        // 无 provider_config / providerConfig 键。
+      },
+    });
+    await flushMicro();
+
+    expect(sm.markPendingConfigSwitch).toHaveBeenCalledTimes(1);
+    const arg = sm.markPendingConfigSwitch.mock.calls[0]![1] as SessionSwitchConfigPayload;
+    expect(arg.profile).toBeNull();
+    expect(arg.providerConfig).toBeUndefined();
   });
 
   it('缺 run_id → warn 丢弃，markPendingConfigSwitch 不被调', async () => {

@@ -24,7 +24,7 @@
  */
 
 import { readdir } from 'node:fs/promises';
-import { copyFileSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { CLAUDE_CONFIG_DIR } from '../config.js';
@@ -193,6 +193,55 @@ export function migrateClaudeTranscriptToIsolated(
     return true;
   } catch {
     // 复制失败（权限/磁盘等）→ 降级 home resume（调用方据 false 处理）。
+    return false;
+  }
+}
+
+/**
+ * ql-20260824-016：isolated transcript 迁移回宿主机 ~/.claude（migrate-
+ * ClaudeTranscriptToIsolated 的反向，切回本机默认时调用）。
+ *
+ * 为什么必须回迁：会话用平台供应商期间 jsonl 写在 daemon 隔离目录，切回本机后
+ * 仅清掉供应商 env 不够——applyTranscriptConfigDir 按 jsonl 实际位置判定
+ * （ql-20260822-009），隔离目录命中 → 强制 CLAUDE_CONFIG_DIR 隔离 → claude 读
+ * 不到宿主机 ~/.claude/settings.json（cc-switch / OpenCode Go 等本机供应商配置），
+ * 「本机默认」名不副实。回迁后 jsonl 仅在 home → 不隔离 → 本机会话语义闭环
+ * （与 create 未配供应商的会话一致）。
+ *
+ * 语义（自门控，调用方无需先探测；与正向迁移镜像）：
+ *   - isolated 无源 → false（本来就在 home，无需迁移）；
+ *   - home 已有旧副本（正向迁移是复制非移动，home 停留档）→ **覆盖**：该文件是
+ *     本会话自己的 transcript（UUID 文件名），isolated 副本含供应商期间新增 turn，
+ *     是最新真相源，旧副本回灌会丢增量；
+ *   - 复制成功后**删除 isolated 原件**——locateClaudeTranscript 双侧命中取
+ *     isolated，不删则永远回不到 home；isolated 是 daemon 自管目录，删除无用户
+ *     数据风险（home 侧从不删除，正向迁移同款约束）。
+ *
+ * @returns true=迁移成功且 isolated 原件已删（applyTranscriptConfigDir 将命中
+ *   home）；false=无需迁移或失败（复制/删除失败 → 调用方降级 isolated resume：
+ *   会话可用但读不到本机 settings.json，R-01 降级语义，绝不因迁移失败破坏会话）。
+ */
+export function migrateClaudeTranscriptToHost(
+  agentSessionId: string,
+  dirs: TranscriptDirs = defaultTranscriptDirs(),
+): boolean {
+  if (!SAFE_SESSION_ID.test(agentSessionId)) return false;
+  const src = findClaudeTranscriptPath(dirs.isolated, agentSessionId);
+  if (!src) return false;
+  try {
+    const dst = join(
+      dirs.home,
+      'projects',
+      basename(dirname(src)),
+      `${agentSessionId}.jsonl`,
+    );
+    mkdirSync(dirname(dst), { recursive: true });
+    copyFileSync(src, dst);
+    rmSync(src);
+    return true;
+  } catch {
+    // 复制或删除失败（权限/磁盘等）→ 降级 isolated resume（调用方据 false 处理；
+    // 复制成功但删除失败的中间态双侧命中取 isolated，同样落在 isolated 语义）。
     return false;
   }
 }

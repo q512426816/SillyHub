@@ -28,7 +28,7 @@
 //     ——被测对象是标记路由本身）。
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
@@ -458,8 +458,8 @@ describe('task-08 / reloadWithConfig（FR-05 / D-012@v1，claude）', () => {
     expect(state.claimToken).toBe('claim-new');
   });
 
-  it('CFG-2: profile=null & providerConfig=null —— 保持现人格 + 现供应商（null=不切）', async () => {
-    // Arrange：create 带人格 → 首次切换到供应商 A → 二次切换 payload 全 null。
+  it('CFG-2: profile=null & providerConfig=null —— 保持现人格 + 切回本机（ql-20260824-016 新契约）', async () => {
+    // Arrange：create 带人格 → 首次切换到供应商 A → 二次切换 providerConfig=null。
     const mock = makeMockClaudeDriver();
     const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
     await sm.create({ ...BASE_INPUT, systemPrompt: '原人格' });
@@ -479,7 +479,8 @@ describe('task-08 / reloadWithConfig（FR-05 / D-012@v1，claude）', () => {
     await flushMicrotasks();
     expect(readState(sm, BASE_INPUT.sessionId)!.status).toBe('active');
 
-    // Act：二次切换 payload 全 null（design §7.2：null=不切，非「回退本机」）。
+    // Act：二次切换 providerConfig=null（后端「切回本机默认」正是下发 null——
+    // 原 ?? 塌缩成沿用旧供应商，实测切回后 /model 仍显示旧供应商模型）。
     await sm.reloadWithConfig(BASE_INPUT.sessionId, {
       sessionId: BASE_INPUT.sessionId,
       runId: 'run-sw-2',
@@ -496,12 +497,55 @@ describe('task-08 / reloadWithConfig（FR-05 / D-012@v1，claude）', () => {
       preset: 'claude_code',
       append: '原人格',
     });
-    // 供应商保持 A（state.providerConfig 现值重建 env，非回退本机）。
+    // 供应商清空：env 无供应商注入（回本机凭证链）。
     const env3 = mock.startCalls[2].opts['env'] as NodeJS.ProcessEnv;
-    expect(env3.ANTHROPIC_BASE_URL).toBe('https://a.example.com');
+    expect(env3.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(env3.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
     const state = readState(sm, BASE_INPUT.sessionId)!;
     expect(state.systemPrompt).toBe('原人格');
-    expect(state.providerConfig?.base_url).toBe('https://a.example.com');
+    expect(state.providerConfig).toBeNull();
+  });
+
+  it('CFG-2b: providerConfig 字段缺席（undefined）→ 不切供应商，保持现值', async () => {
+    // Arrange：切到供应商 A 后，payload 不带 providerConfig 键（daemon.ts 路由层
+    // ql-20260824-016 起保留缺席为 undefined，不再归一 null）。
+    const mock = makeMockClaudeDriver();
+    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+    await sm.create({ ...BASE_INPUT });
+    mock.emitMessage(systemInitMessage('sdk-sess-cfg2b'));
+    await flushMicrotasks();
+    mock.emitResult(resultSuccess());
+    await flushMicrotasks();
+    await sm.reloadWithConfig(BASE_INPUT.sessionId, {
+      sessionId: BASE_INPUT.sessionId,
+      runId: 'run-sw-1',
+      claimToken: 'c1',
+      prompt: 'p1',
+      profile: null,
+      providerConfig: newProviderConfig('https://a.example.com'),
+    });
+    mock.emitResult(resultSuccess());
+    await flushMicrotasks();
+    expect(readState(sm, BASE_INPUT.sessionId)!.status).toBe('active');
+
+    // Act：不带 providerConfig 键（纯档案切换轮的后端兼容形态；
+    // 显式 undefined 与字段缺席在 !== undefined 判定下等价）。
+    await sm.reloadWithConfig(BASE_INPUT.sessionId, {
+      sessionId: BASE_INPUT.sessionId,
+      runId: 'run-sw-2',
+      claimToken: 'c2',
+      prompt: 'p2',
+      profile: null,
+      providerConfig: undefined,
+    });
+
+    // Assert —— 供应商保持 A（state.providerConfig 现值重建 env）。
+    expect(mock.startCalls).toHaveLength(3);
+    const env3 = mock.startCalls[2].opts['env'] as NodeJS.ProcessEnv;
+    expect(env3.ANTHROPIC_BASE_URL).toBe('https://a.example.com');
+    expect(readState(sm, BASE_INPUT.sessionId)!.providerConfig?.base_url).toBe(
+      'https://a.example.com',
+    );
   });
 
   it('CFG-3: profile 带空 systemPrompt（切到无人格）→ 清空注入', async () => {
@@ -943,6 +987,15 @@ describe('ql-20260822-001 / home 会话切供应商迁移 jsonl 到隔离目录'
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, `${sid}.jsonl`), '{}\n', 'utf8');
   };
+  const writeIsolatedJsonl = (
+    dirs: ReturnType<typeof buildDirs>,
+    sid: string,
+    content = '{}\n',
+  ) => {
+    const dir = join(dirs.isolated, 'projects', 'C--work');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${sid}.jsonl`), content, 'utf8');
+  };
 
   it('MIG-5: home jsonl + reload 切供应商 → 迁移生效：env 回隔离目录 + 隔离副本落盘', async () => {
     // Arrange：本机默认创建（jsonl 在 home）→ 首 turn 完成拿到 sid。
@@ -1062,6 +1115,68 @@ describe('ql-20260822-001 / home 会话切供应商迁移 jsonl 到隔离目录'
       expect(env.CLAUDE_CONFIG_DIR).toBe(dirs.isolated);
       expect(env.ANTHROPIC_BASE_URL).toBe('https://new.example.com');
       expect(readState(sm, BASE_INPUT.sessionId)!.status).toBe('active');
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('MIG-9: isolated jsonl + reloadWithConfig(null) 切回本机 → jsonl 回迁宿主机 + env 不隔离无供应商注入（ql-20260824-016）', async () => {
+    // Arrange：模拟「曾用平台供应商」的会话——jsonl 已在隔离目录（含供应商期间
+    // 增量 turn），state 挂着供应商配置。
+    const dirs = buildDirs();
+    try {
+      writeIsolatedJsonl(dirs, 'sdk-sess-mig9', '{"turns":["provider-period"]}\n');
+      const mock = makeMockClaudeDriver();
+      const sm = new SessionManager(
+        { driver: mock.driver, ...makeDeps() },
+        { resumeDirs: dirs },
+      );
+      await sm.create({ ...BASE_INPUT });
+      mock.emitMessage(systemInitMessage('sdk-sess-mig9'));
+      await flushMicrotasks();
+      mock.emitResult(resultSuccess());
+      await flushMicrotasks();
+      // 先切到供应商（复现用户路径：state.providerConfig 挂上）。
+      await sm.reloadWithConfig(BASE_INPUT.sessionId, {
+        sessionId: BASE_INPUT.sessionId,
+        runId: 'run-mig9-a',
+        claimToken: 'c-a',
+        prompt: 'p',
+        profile: null,
+        providerConfig: newProviderConfig('https://glm.example.com'),
+      });
+      mock.emitResult(resultSuccess());
+      await flushMicrotasks();
+      expect(readState(sm, BASE_INPUT.sessionId)!.status).toBe('active');
+
+      // Act：切回本机默认（后端下发 providerConfig:null 的修复路径）。
+      await sm.reloadWithConfig(BASE_INPUT.sessionId, {
+        sessionId: BASE_INPUT.sessionId,
+        runId: 'run-mig9-b',
+        claimToken: 'c-b',
+        prompt: 'p',
+        profile: null,
+        providerConfig: null,
+      });
+
+      // Assert —— jsonl 回迁宿主机（isolated 副本删除，home 拿到含增量的最新版）。
+      expect(
+        existsSync(join(dirs.isolated, 'projects', 'C--work', 'sdk-sess-mig9.jsonl')),
+      ).toBe(false);
+      expect(
+        readFileSync(
+          join(dirs.home, 'projects', 'C--work', 'sdk-sess-mig9.jsonl'),
+          'utf8',
+        ),
+      ).toBe('{"turns":["provider-period"]}\n');
+      // env：不隔离（读宿主机 ~/.claude/settings.json，本机供应商生效）+ 无供应商注入。
+      const env = mock.startCalls[2].opts['env'] as NodeJS.ProcessEnv;
+      expect(env.CLAUDE_CONFIG_DIR).toBeUndefined();
+      expect(env.ANTHROPIC_BASE_URL).toBeUndefined();
+      // resume key 不变 + 会话状态不破坏。
+      expect(mock.startCalls[2].opts['resume']).toBe('sdk-sess-mig9');
+      expect(readState(sm, BASE_INPUT.sessionId)!.providerConfig).toBeNull();
+      expect(readState(sm, BASE_INPUT.sessionId)!.status).toBe('running');
     } finally {
       rmSync(dirs.root, { recursive: true, force: true });
     }

@@ -45,6 +45,7 @@ import {
   locateClaudeTranscript,
   applyTranscriptConfigDir,
   findClaudeTranscriptPath,
+  migrateClaudeTranscriptToHost,
   migrateClaudeTranscriptToIsolated,
   type TranscriptDirs,
 } from '../../src/interactive/claude-transcript-dir.js';
@@ -263,6 +264,86 @@ describe('migrateClaudeTranscriptToIsolated', () => {
     const dirs = buildTmpDirs();
     try {
       expect(migrateClaudeTranscriptToIsolated('../evil', dirs)).toBe(false);
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── ql-20260824-016：migrateClaudeTranscriptToHost（切回本机默认的反向迁移）
+// 单测，与 migrateClaudeTranscriptToIsolated 镜像。──────────────────────────
+
+describe('migrateClaudeTranscriptToHost', () => {
+  it('MIG-H1: isolated jsonl 存在 → 复制回宿主机同子目录并删除 isolated 原件（移动语义）', () => {
+    const dirs = buildTmpDirs();
+    try {
+      writeJsonl(dirs.isolated, 'C--work', 'sid-h1', 'isolated-latest\n');
+      expect(migrateClaudeTranscriptToHost('sid-h1', dirs)).toBe(true);
+      expect(
+        readFileSync(join(dirs.home, 'projects', 'C--work', 'sid-h1.jsonl'), 'utf8'),
+      ).toBe('isolated-latest\n');
+      // 移动语义：isolated 是 daemon 自管目录，不删则 locate 双侧命中取
+      // isolated，永远回不到 home。
+      expect(
+        existsSync(join(dirs.isolated, 'projects', 'C--work', 'sid-h1.jsonl')),
+      ).toBe(false);
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('MIG-H2: home 已有旧副本（正向迁移复制非移动的停留档）→ 覆盖为 isolated 最新内容', () => {
+    const dirs = buildTmpDirs();
+    try {
+      writeJsonl(dirs.home, 'C--work', 'sid-h2', 'stale-home\n');
+      writeJsonl(dirs.isolated, 'C--work', 'sid-h2', 'fresh-isolated\n');
+      expect(migrateClaudeTranscriptToHost('sid-h2', dirs)).toBe(true);
+      expect(
+        readFileSync(join(dirs.home, 'projects', 'C--work', 'sid-h2.jsonl'), 'utf8'),
+      ).toBe('fresh-isolated\n');
+      expect(
+        existsSync(join(dirs.isolated, 'projects', 'C--work', 'sid-h2.jsonl')),
+      ).toBe(false);
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('MIG-H3: isolated 无源 jsonl（本来就在 home）→ false 无操作', () => {
+    const dirs = buildTmpDirs();
+    try {
+      writeJsonl(dirs.home, 'C--work', 'sid-h3');
+      expect(migrateClaudeTranscriptToHost('sid-h3', dirs)).toBe(false);
+      expect(
+        existsSync(join(dirs.home, 'projects', 'C--work', 'sid-h3.jsonl')),
+      ).toBe(true);
+      expect(existsSync(join(dirs.isolated, 'projects'))).toBe(false);
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('MIG-H4: agentSessionId 非法 → false 不迁移', () => {
+    const dirs = buildTmpDirs();
+    try {
+      expect(migrateClaudeTranscriptToHost('../evil', dirs)).toBe(false);
+    } finally {
+      rmSync(dirs.root, { recursive: true, force: true });
+    }
+  });
+
+  it('MIG-H5: 回迁后 jsonl 仅在 host（sync 探测命中 home、isolated 落空）', () => {
+    // 注：本文件 mock 了 node:fs/promises（async locate 用不了真实 tmp 目录），
+    // 「host 命中 → applyTranscriptConfigDir 不隔离」链路由上方 mocked 用例覆盖，
+    // 此处仅用 sync 探测锁迁移落点。
+    const dirs = buildTmpDirs();
+    try {
+      writeJsonl(dirs.isolated, 'C--work', 'sid-h5');
+      expect(migrateClaudeTranscriptToHost('sid-h5', dirs)).toBe(true);
+      expect(findClaudeTranscriptPath(dirs.home, 'sid-h5')).toBe(
+        join(dirs.home, 'projects', 'C--work', 'sid-h5.jsonl'),
+      );
+      expect(findClaudeTranscriptPath(dirs.isolated, 'sid-h5')).toBeNull();
     } finally {
       rmSync(dirs.root, { recursive: true, force: true });
     }
