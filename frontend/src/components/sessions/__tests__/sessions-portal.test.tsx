@@ -31,10 +31,15 @@
  *      入口在页头「新建会话（本变更）」）
  *   6. resolveDefaultMachineId 迁移用例（D-005 三级回退，语义照抄 new-session-
  *      form.test D-005 三用例；源文件 task-07 删，此处为新家）
+ *   7. 选中态 URL 同步（ql-20260824-001）
+ *   8. 会话列表变更信号订阅（2026-08-24-sessions-live-updates task-06 /
+ *      D-001 / D-006）：onEvent / onReconnected → invalidate ["agentSessions"]
+ *      前缀命中树查询重拉 listAgentSessions；unmount → sub.close() 关订阅
  *
  * mock 策略（对齐 sessions 页 page.test.tsx 既有结构——同一渲染树）：
  *   - @/lib/daemon 整模块 mock（列表 API + 面板/表单/控件条消费函数，
- *     streamSession 不建真实 EventSource；listWorkspaceAgentSessions /
+ *     streamSession 不建真实 EventSource；subscribeAgentSessionsEvents
+ *     （task-06）同 mock 捕获 opts——不建真实信号连接；listWorkspaceAgentSessions /
  *     listChangeSessions 仅剩 D-003@v2 零调用断言用途）
  *   - next/navigation mock（useSearchParams——深链用例可控 ?session=）
  *   - @/lib/use-daemon-machines、@/lib/agent-profiles（hook 部分）、
@@ -90,6 +95,10 @@ const mocks = vi.hoisted(() => ({
   fetchSessionDialogHistory: vi.fn(),
   listSessionRuns: vi.fn(),
   streamClose: vi.fn(),
+  // task-06（D-001/D-006）：会话列表变更信号订阅——捕获 opts（onEvent /
+  // onReconnected 触发 invalidate）+ close 调用断言（unmount 关订阅）。
+  subscribeAgentSessionsEvents: vi.fn(),
+  eventsClose: vi.fn(),
   deleteAgentSession: vi.fn(),
   machinesHook: vi.fn(),
   profilesHook: vi.fn(),
@@ -131,6 +140,9 @@ vi.mock("@/lib/daemon", () => ({
     mocks.fetchSessionDialogHistory(...args),
   listSessionRuns: (...args: unknown[]) => mocks.listSessionRuns(...args),
   deleteAgentSession: (...args: unknown[]) => mocks.deleteAgentSession(...args),
+  // task-06：门户挂载订阅的哑信号通道（opts 经包装转发捕获到 mocks）。
+  subscribeAgentSessionsEvents: (...args: unknown[]) =>
+    mocks.subscribeAgentSessionsEvents(...args),
 }));
 
 // task-08（D-004@v1）：门户挂载时 useSearchParams 解析 ?session=——jsdom 无
@@ -473,6 +485,11 @@ beforeEach(() => {
   mocks.streamSession.mockReturnValue({
     close: mocks.streamClose,
     getLastEventId: () => null,
+  });
+  // task-06：订阅 mock 返回 { close }（unmount 断言）；clearAllMocks 只清调用
+  // 记录不清返回值，此处随 beforeEach 统一重建（与上方 mockReturnValue 同款）。
+  mocks.subscribeAgentSessionsEvents.mockReturnValue({
+    close: mocks.eventsClose,
   });
   mocks.fetchPendingDialogs.mockResolvedValue([]);
   mocks.fetchSessionDialogHistory.mockResolvedValue([]);
@@ -1272,5 +1289,63 @@ describe("SessionsPortal 选中态 URL 同步（ql-20260824-001）", () => {
         { scroll: false },
       ),
     );
+  });
+});
+
+// ── 8. 会话列表变更信号订阅（2026-08-24-sessions-live-updates task-06 / D-001 / D-006） ──
+
+describe("SessionsPortal 会话列表变更信号订阅（task-06）", () => {
+  /** 取挂载时 subscribeAgentSessionsEvents 收到的 opts（mock 工厂捕获入参）。 */
+  function getSubscriptionOpts(): {
+    onEvent: () => void;
+    onReconnected?: () => void;
+  } {
+    const opts = mocks.subscribeAgentSessionsEvents.mock.calls[0]?.[0] as
+      | { onEvent: () => void; onReconnected?: () => void }
+      | undefined;
+    // 显式守卫窄化（tsc 不经 expect 收窄）；订阅 effect 随挂载同步跑，必命中。
+    if (!opts) throw new Error("subscription opts not captured on mount");
+    return opts;
+  }
+
+  it("onEvent（收到变更信号）→ invalidate agentSessions 前缀命中树查询，listAgentSessions 调用次数增加（D-001 lazy refresh：信号→重拉）", async () => {
+    renderPortal();
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalled());
+    const opts = getSubscriptionOpts();
+    const callsBefore = mocks.listAgentSessions.mock.calls.length;
+
+    act(() => {
+      opts.onEvent();
+    });
+    await waitFor(() =>
+      expect(mocks.listAgentSessions.mock.calls.length).toBeGreaterThan(
+        callsBefore,
+      ),
+    );
+  });
+
+  it("onReconnected（断线重连成功）→ 同样补一次 invalidate 重拉（D-006：不回放历史，重连补拉兜断连窗口）", async () => {
+    renderPortal();
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalled());
+    const opts = getSubscriptionOpts();
+    const callsBefore = mocks.listAgentSessions.mock.calls.length;
+
+    act(() => {
+      opts.onReconnected?.();
+    });
+    await waitFor(() =>
+      expect(mocks.listAgentSessions.mock.calls.length).toBeGreaterThan(
+        callsBefore,
+      ),
+    );
+  });
+
+  it("unmount → sub.close() 关闭订阅（卸载不留残留连接/幽灵 invalidate）", () => {
+    const { unmount } = renderPortal();
+    getSubscriptionOpts();
+    expect(mocks.eventsClose).not.toHaveBeenCalled();
+
+    unmount();
+    expect(mocks.eventsClose).toHaveBeenCalledTimes(1);
   });
 });

@@ -81,6 +81,7 @@ import { PageContainer, PageHeader } from "@/components/layout";
 import { listProviders } from "@/lib/api/llm-providers";
 import {
   getAgentSession,
+  subscribeAgentSessionsEvents,
   type AgentSessionRead,
   type DaemonMachineRead,
   type SessionCreateResponse,
@@ -180,6 +181,23 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   const refreshSessionLists = useCallback(() => {
     void qc.invalidateQueries({ queryKey: ["agentSessions"] });
   }, [qc]);
+
+  // 会话列表变更信号订阅（2026-08-24-sessions-live-updates task-06 / design
+  // §2.2 / D-001 / D-006）：backend 在会话创建/状态迁移/删除时经 Redis Pub/Sub
+  // 广播哑信号（SSE 已按当前用户过滤），前端不解析 payload——收到信号
+  // （onEvent，D-001 lazy refresh：信号→重拉）或断线重连成功（onReconnected，
+  // D-006：不回放历史、重连补一次 invalidate 兜断连窗口丢失的信号）即复用
+  // refreshSessionLists 前缀失效 ["agentSessions"] 重拉列表；scope 键在该前缀
+  // 之下，三入口（全局/workspace/change）共用本门户自动全量生效，无 per-入口
+  // 接线。卸载 close 终止订阅。deps 用 refreshSessionLists（自身 deps [qc]，
+  // 身份等价于卡片写的 [qc]——仅 qc 变化时重订阅）。
+  useEffect(() => {
+    const sub = subscribeAgentSessionsEvents({
+      onEvent: refreshSessionLists,
+      onReconnected: refreshSessionLists,
+    });
+    return () => sub.close();
+  }, [refreshSessionLists]);
 
   /** ql-20260823-005：?new=1 直达时预会话/兜底浮层的默认组——workspace/change
    *  scope 锁定本组，全局门户不指定（null，与组头「＋」非工作区分组同语义）。 */
