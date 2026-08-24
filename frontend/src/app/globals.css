@@ -655,6 +655,20 @@
 [data-theme="dark"] .text-lime-700 { color: #bef264; }
 [data-theme="dark"] .border-lime-200 { border-color: #365314; }
 
+/* ---- 第三方 markdown 库表格(ql-20260824-012,D-007@v1 同类收口) ----
+   @uiw/react-markdown-preview 的 markdown.css 给 table tr 写死库内 GitHub 变量
+   --color-canvas-default(浅色=白/深色=#0d1117),变量按系统 prefers-color-scheme
+   在 :root 媒体查询切换,不认本站 html data-theme——手动切 dark+系统浅色时
+   白底撞主题浅前景=白底白字。归位主题 token:行底透明随容器,边框走 --color-border
+   (dark=#334155);浅色两主题不覆盖,保留库默认观感。 */
+[data-theme="dark"] .wmde-markdown table tr {
+  background-color: transparent;
+}
+[data-theme="dark"] .wmde-markdown table th,
+[data-theme="dark"] .wmde-markdown table td {
+  border-color: var(--color-border);
+}
+
 /* ---- 扩展色族批有意豁免清单(非 dark 残留,留档备查) ----
    - 实心 bg-*-500 及更深实色状态/品牌块:bg-red-500/600(hover:bg-red-700 同)、
      bg-amber-500、bg-yellow-500、bg-green-500、bg-orange-500、

@@ -456,3 +456,13 @@
 方案：三处标题查询改 ROW_NUMBER() OVER (PARTITION BY session ORDER BY timestamp,id) 窗口函数每会话恒取 1 行（PG/SQLite 双方言）；include_ended 分支加 limit/offset Query（默认 200，FastAPI 校验 1-500）；新增 2 分页用例
 结果：include_ended 13 用例（含新增分页 2 用例+既有取最早标题守卫）全绿；daemon 会话相关 375 全绿；change 域 394 全绿；ruff/mypy 0 错；agent.md 同步
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/change/router.py
+
+## ql-20260824-012-5f7e | 2026-08-24 08:33:10 | 暗色主题会话 Markdown 表格白底白字修复
+状态：已完成
+关联变更：2026-08-23-frontend-dark-theme
+文件：
+- frontend/src/app/globals.css（D-007 覆盖层新增第三方 markdown 库表格小节（3 条规则））
+需求：暗色主题会话 Markdown 表格白底白字修复
+根因：@uiw/react-markdown-preview 的 markdown.css 给 table tr 写死库内 GitHub 变量 --color-canvas-default（按系统 prefers-color-scheme 切换，不认本站 html data-theme），手动 dark+系统浅色时白底撞主题浅前景
+方案：globals.css D-007 覆盖层补第三方库小节——[data-theme=dark] 下 .wmde-markdown table tr 行底透明随容器、th/td 边框走 var(--color-border)（特异度 0,2,2 胜库 0,1,2）；浅色两主题不覆盖保留库默认
+结果：Playwright 忠实级联测试（真实库 CSS chunk+表格探针+colorScheme=light 复现用户场景）dark 透明底+#334155 边框 PASS、ai-native/blue 白底库默认零回归 PASS；tsc 零错误；本地容器已重建生效
