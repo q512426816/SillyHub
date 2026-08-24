@@ -26,7 +26,7 @@
  */
 
 import { useMemo, useState } from "react";
-import { Check, HelpCircle } from "lucide-react";
+import { Check, HelpCircle, Minimize2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -131,11 +131,21 @@ export interface AskUserDialogCardProps {
   request: SessionPermissionRequest;
   /** 卡片被移除时回调（permission_resolved SSE / 父组件清空时触发）。 */
   onResolved?: (requestId: string, decision: "allow" | "deny") => void;
+  /**
+   * task-08（FR-04 / D-003@v1）：最小化受控态。true 时本组件渲染 null，但
+   * 保持挂载（父组件不卸载子树），已填的选项 / 手动输入 state 全部保留，
+   * 还原（切回 false）后继续作答。undefined = 现状零变化（默认展开）。
+   */
+  minimized?: boolean;
+  /** 点击卡头最小化按钮时回调（缺省不渲染按钮，向后兼容旧用法）。 */
+  onMinimize?: (requestId: string) => void;
 }
 
 export function AskUserDialogCard({
   request,
   onResolved,
+  minimized,
+  onMinimize,
 }: AskUserDialogCardProps) {
   const questions = useMemo(
     () => parseQuestions(request.dialog_payload),
@@ -236,6 +246,11 @@ export function AskUserDialogCard({
     }
   };
 
+  // task-08（FR-04）：最小化时渲染 null 但**不卸载组件**——上方 hooks（已选项 /
+  // 手动输入 state）随挂载保留，父组件把本卡收缩为右下角浮动胶囊，还原后已填
+  // 内容原样恢复。须放在全部 hooks 之后（hooks 调用不能条件化）。
+  if (minimized) return null;
+
   // dialog_payload 解析失败兜底：展示提示但不再崩溃（仍可被父组件通过 SSE 移除）。
   if (questions.length === 0) {
     return (
@@ -253,6 +268,17 @@ export function AskUserDialogCard({
           <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
             {request.dialog_kind ?? "ask_user"}
           </Badge>
+          {onMinimize && (
+            <button
+              type="button"
+              onClick={() => onMinimize(request.request_id)}
+              className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              title="最小化为右下角浮动胶囊"
+              aria-label="最小化提问卡片"
+            >
+              <Minimize2 className="h-3.5 w-3.5" />
+            </button>
+          )}
         </header>
         <div className="px-3 py-2 text-[11px] text-muted-foreground">
           无法解析提问内容（dialog_payload 缺失或格式不符），请刷新页面重试。
@@ -284,6 +310,17 @@ export function AskUserDialogCard({
             {request.request_id.slice(0, 12)}…
           </p>
         </div>
+        {onMinimize && (
+          <button
+            type="button"
+            onClick={() => onMinimize(request.request_id)}
+            className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            title="最小化为右下角浮动胶囊"
+            aria-label="最小化提问卡片"
+          >
+            <Minimize2 className="h-3.5 w-3.5" />
+          </button>
+        )}
       </header>
 
       <div className="space-y-3 px-3 py-3">
