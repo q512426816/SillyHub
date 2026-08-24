@@ -274,8 +274,9 @@
     /* @uiw/react-markdown-preview markdown.css 库内 GitHub 变量覆盖:
        库用 prefers-color-scheme 媒体查询切变量,不认 data-theme;
        手动切 dark+系统浅色时变量解析为浅色值→白底白字。
-       在此重定义,让库自身 nth-child(2n)/table tr 等规则自动解析到暗色值,
-       保留斑马纹观感;浅色两主题不覆盖,保留库默认。 */
+       ⚠️ 此组变量与库 :root 同特异度,库 CSS 后加载时系统浅色下会被库 light
+       值反超(仅系统暗色用户生效)——权威修复是下方覆盖层的 .markdown-text
+       元素级规则(ql-20260824-015),此处保留作系统暗色场景的一致性补充。 */
     --color-canvas-default: #0d1117;
     --color-canvas-subtle: #161b22;
     --color-fg-default: #c9d1d9;
@@ -669,12 +670,22 @@
 [data-theme="dark"] .text-lime-700 { color: #bef264; }
 [data-theme="dark"] .border-lime-200 { border-color: #365314; }
 
-/* ---- 第三方 markdown 库表格(ql-20260824-012,D-007@v1) ----
-   修复方式已升级:在 [data-theme="dark"] 块内重定义库内 GitHub CSS 变量
-   (--color-canvas-default/subtle/border-default 等),让库自身 nth-child(2n)/
-   table tr 等规则自动解析到暗色值,保留斑马纹;浅色两主题零覆盖。 */
-[data-theme="dark"] .wmde-markdown table th,
-[data-theme="dark"] .wmde-markdown table td {
+/* ---- 第三方 markdown 库表格(ql-20260824-015,修 012 及其变量重定义变体的残留;
+   D-007@v1 同类收口) ----
+   根因链:库 CSS 随组件 chunk 晚于 globals.css 加载,同特异度时源序后者胜——
+   ① 变量重定义方案(dark 块内 --color-canvas-*)与库 :root 媒体查询同特异度,
+     系统浅色时被库 light 值覆盖;② 偶数行斑马纹 .wmde-markdown table
+     tr:nth-child(2n) 与奇数行 tr 均回落库浅色值(白),撞 dark 浅前景=白底白字。
+   修法:经 .markdown-text(MarkdownText 组件恒定包装类)把特异度抬到 (0,4,3),
+     元素级覆盖与加载顺序无关——行底透明随容器气泡/卡片,边框走主题 token;
+     浅色两主题零覆盖,保留库默认观感。 */
+[data-theme="dark"] .markdown-text .wmde-markdown table tr,
+[data-theme="dark"] .markdown-text .wmde-markdown table tr:nth-child(2n),
+[data-theme="dark"] .markdown-text .wmde-markdown table th {
+  background-color: transparent;
+}
+[data-theme="dark"] .markdown-text .wmde-markdown table th,
+[data-theme="dark"] .markdown-text .wmde-markdown table td {
   border-color: var(--color-border);
 }
 
