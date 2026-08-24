@@ -8,6 +8,18 @@ tier: independent
 
 # 设计（Design）：会话列表 SSE 变更信号 + 轮询兜底
 
+## 背景与目标
+
+**背景**：会话页左侧树靠条件轮询刷新（ql-20260824-004：进行中 10s / 静默 30s），
+用户实测反馈不及时——轮询是「定时问」，新上报会话、远端结束的会话最坏要等一个
+周期；缩间隔治标且空转翻倍。
+
+**目标**：会话列表变化（created / status_changed / deleted）**秒级**反映到打开的
+会话页；推送失效时不得劣于现状（轮询兜底保留）。
+
+**问题边界**：不推 turn_count/last_active 增量（onTurnCompleted 已即时刷新）、
+不推机器在线状态、不回放断线历史、移动端不覆盖（详见 proposal Non-Goals）。
+
 ## 0. 决策总览
 
 | # | 决策 | 选择 | 依据 |
@@ -130,21 +142,24 @@ useEffect(() => {
 
 ## 4. 文件变更清单（File Changes）
 
-**backend（新增 1 / 修改 8 / 测试若干）**
-- 新增 `app/modules/daemon/session_events.py`（频道常量 + publish_sessions_changed）
-- 修改 `app/modules/daemon/session/service.py`（埋点：created/status_changed/deleted ~8 处）
-- 修改 `app/modules/daemon/run_sync/service.py`（close_interactive_run 埋点）
-- 修改 `app/modules/daemon/sweep.py`（两档埋点）
-- 修改 `app/modules/daemon/lease_service.py`（cancel_lease 埋点）
-- 修改 `app/modules/daemon/router.py`（新 SSE 端点 stream_sessions_changed）
-- 修改 `app/modules/agent/service.py`、`app/modules/agent/placement.py`（创建埋点）
-- 修改 `app/modules/platform_sync/service.py`（tool_report 插入分支埋点）
-- 测试：`app/modules/daemon/tests/test_session_events.py`（新，发布点+SSE 端点）
-
-**frontend（修改 2 / 测试若干）**
-- 修改 `src/lib/daemon.ts`（subscribeAgentSessionsEvents）
-- 修改 `src/components/sessions/sessions-portal.tsx`（useEffect 接线）
-- 测试：`src/components/sessions/__tests__/sessions-portal.test.tsx`（信号→失效/重连补失效/卸载关闭）
+| 操作 | 路径 | 说明 |
+|---|---|---|
+| 新增 | backend/app/modules/daemon/session_events.py | 频道常量 + publish_sessions_changed |
+| 修改 | backend/app/modules/daemon/session/service.py | SessionService 埋点（9 写入点） |
+| 修改 | backend/app/modules/daemon/run_sync/service.py | close_interactive_run 终态埋点 |
+| 修改 | backend/app/modules/daemon/sweep.py | 两档巡检埋点 |
+| 修改 | backend/app/modules/daemon/lease_service.py | cancel_lease 埋点 |
+| 修改 | backend/app/modules/daemon/router.py | 新 SSE 端点 /sessions/events |
+| 修改 | backend/app/modules/agent/service.py | 扫描派发创建埋点 |
+| 修改 | backend/app/modules/agent/placement.py | placement INSERT 埋点 |
+| 修改 | backend/app/modules/platform_sync/service.py | tool_report 插入分支埋点 |
+| 新增 | backend/app/modules/daemon/tests/test_session_events.py | 发布辅助 + SessionService 埋点断言 |
+| 新增 | backend/app/modules/daemon/tests/test_session_events_cross.py | 跨模块埋点断言 |
+| 新增 | backend/app/modules/daemon/tests/test_sessions_events_stream.py | SSE 端点测试 |
+| 修改 | frontend/src/lib/daemon.ts | subscribeAgentSessionsEvents + 常量提升导出 |
+| 新增 | frontend/src/lib/daemon.test.ts | 订阅客户端测试（若既有文件名不同以实际为准，卡片有说明） |
+| 修改 | frontend/src/components/sessions/sessions-portal.tsx | 门户接线 |
+| 修改 | frontend/src/components/sessions/__tests__/sessions-portal.test.tsx | 接线测试 |
 
 **不改动**：openapi.json / api-types.ts（SSE 端点无 JSON schema 契约，信号负载为
 内部协议，前端手写类型注释声明——先例：streamSession 的 envelope 类型）。
