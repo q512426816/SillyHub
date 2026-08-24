@@ -1,46 +1,46 @@
-﻿# install.ps1 -- SillyHub daemon 一键安装脚本（Windows PowerShell 版）。
+﻿# install.ps1 -- SillyHub daemon installer (Windows PowerShell).
 #
 # author: qinyi
 # created_at: 2026-07-14
 #
-# 用法（用户侧）：
+# Usage:
 #   irm <SERVER>/daemon/install.ps1 | iex
 #   $server="<url>"; $apiKey="<key>"; irm <SERVER>/daemon/install.ps1 | iex
 #
-# 功能（对齐 sillyhub-daemon/scripts/install.sh）：
-#   1. 检测 node >= 20（缺失则提示安装并退出）
-#   2. 拉取 <SERVER>/daemon/latest.json 获取最新版本号 + 下载 URL
-#   3. 下载 sillyhub-daemon.js + mcp-server.js 到 %USERPROFILE%\.sillyhub\daemon\bin\
-#   4. 创建 wrapper %USERPROFILE%\.sillyhub\daemon\bin\sillyhub-daemon.cmd
-#      （node.exe 绝对路径兜底 + %~dp0 自相对 bundle）
-#   5. 写 config.json（server_url 内嵌 + 新 runtime_id）
-#   6. 把 bin 目录加进用户 PATH（setx，幂等）
-#   7. 验证 sillyhub-daemon --version
-#   8. 打印下一步提示（不自动 start）
+# Features (aligned with sillyhub-daemon/scripts/install.sh):
+#   1. Detect node >= 20 (prompt install if missing)
+#   2. Fetch <SERVER>/daemon/latest.json for latest version + download URL
+#   3. Download sillyhub-daemon.js + mcp-server.js to %USERPROFILE%\.sillyhub\daemon\bin\
+#   4. Create wrapper %USERPROFILE%\.sillyhub\daemon\bin\sillyhub-daemon.cmd
+#      (node.exe absolute path fallback + %~dp0 relative bundle)
+#   5. Write config.json (server_url embedded + new runtime_id)
+#   6. Add bin dir to user PATH (setx, idempotent)
+#   7. Verify sillyhub-daemon --version
+#   8. Print next steps (no auto start)
 #
-# 关于 ExecutionPolicy：
-#   `irm | iex` 是在当前会话执行脚本内容，不受 ExecutionPolicy Restricted 限制
+# About ExecutionPolicy:
+#   `irm | iex` runs script content in current session, bypassing ExecutionPolicy Restricted
 #   （Restricted 只拦 .ps1 文件加载，不拦管道执行）。如果环境仍拦截
-#   （如组策略强制），先在会话内执行：
+#   (e.g. group policy), run this first:
 #       Set-ExecutionPolicy -Scope Process Bypass
 #
-# SERVER_URL 说明：
-#   脚本内用 `{{SERVER_URL}}` 占位，由后端 dist_router 在分发时动态替换为真实地址。
-#   用户也可在 iex 前先 $env:SILLYHUB_SERVER_URL="<url>" 覆盖，或在 iex 前
-#   $server="<url>" 变量传入。
+# SERVER_URL resolution:
+#   Script uses `{{SERVER_URL}}` placeholder, replaced by backend dist_router.
+#   Override with $env:SILLYHUB_SERVER_URL="<url>" before iex, or set
+#   $server="<url>" variable before iex.
 
 #Requires -Version 5.1
 
-# 强制 UTF-8 输出：PowerShell 默认按 OEM/GBK 输出，重定向（git-bash/CI 日志/管道捕获）
-# 时中文变乱码。设 UTF-8 + chcp 65001 让 Write-Host 中文在所有场景正常显示。
+# Force UTF-8 output: PowerShell defaults to OEM/GBK, garbling Chinese in redirects
+# Setting UTF-8 + chcp 65001 ensures Write-Host displays correctly everywhere.
 $OutputEncoding = [System.Text.UTF8Encoding]::new()
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
 try { chcp 65001 > $null } catch {}
 
-# ── SERVER_URL 推导（优先级从高到低）─────────────────────────────────────────
-#   a. $server 变量（用户在 iex 前赋值）
+# -- SERVER_URL resolution (priority high to low)─────────────────────────────────────────
+#   a. $server variable (set before iex)
 #   b. $env:SILLYHUB_SERVER_URL
-#   c. 内置 {{SERVER_URL}} 占位（后端 dist_router 动态替换）
+#   c. Built-in {{SERVER_URL}} placeholder (replaced by backend dist_router)
 $defaultServerUrl = '{{SERVER_URL}}'
 if ($server) {
   $script:SERVER_URL = $server
@@ -49,10 +49,10 @@ if ($server) {
 } else {
   $script:SERVER_URL = $defaultServerUrl
 }
-# 去掉末尾斜杠
+# Strip trailing slash
 $script:SERVER_URL = $script:SERVER_URL.TrimEnd('/')
 
-# ── 目录 / 文件名 ────────────────────────────────────────────────────────────
+# -- Directories / filenames ────────────────────────────────────────────────────────────
 $script:INSTALL_DIR = Join-Path $env:USERPROFILE '.sillyhub\daemon'
 $script:BIN_DIR     = Join-Path $script:INSTALL_DIR 'bin'
 $script:BUNDLE_NAME = 'sillyhub-daemon.js'
@@ -60,7 +60,7 @@ $script:MCP_NAME    = 'mcp-server.js'
 $script:WRAPPER_NAME = 'sillyhub-daemon.cmd'
 $script:NODE_BIN    = $null
 
-# ── 日志 ──────────────────────────────────────────────────────────────────────
+# -- Logging ──────────────────────────────────────────────────────────────────────
 function Write-Info { param([string]$Msg) Write-Host "[info]  $Msg" -ForegroundColor Cyan }
 function Write-Ok   { param([string]$Msg) Write-Host "[ok]    $Msg" -ForegroundColor Green }
 function Write-Warn { param([string]$Msg) Write-Host "[warn]  $Msg" -ForegroundColor Yellow }
@@ -70,20 +70,20 @@ function Die {
   exit 1
 }
 
-# ── 1. 检测 node >= 20 ─────────────────────────────────────────────────────────
-# 查找顺序：
-#   1a. Get-Command node（当前会话 PATH）
-#   1b. 常见安装路径直查
-#   1c. 注册表 PATH（HKLM Session Manager\Environment + HKCU Environment）兜底
-#       （当前进程 PATH 未刷新 / nvm 切换等场景，读注册表是最权威的 node 查找方式）
+# -- 1. Detect node >= 20 ─────────────────────────────────────────────────────────
+# Search order:
+#   1a. Get-Command node (current session PATH)
+#   1b. Common install paths
+#   1c. Registry PATH (HKLM + HKCU) fallback
+#       (most reliable when current PATH not refreshed / nvm switched)
 function Test-NodeVersion {
-  # 1a. 标准 PATH 查找
+  # 1a. Standard PATH lookup
   $cmd = Get-Command node -ErrorAction SilentlyContinue
   if ($cmd) {
     $script:NODE_BIN = $cmd.Source
   }
 
-  # 1b. 常见 Windows 安装路径直查
+  # 1b. Common Windows install paths
   if (-not $script:NODE_BIN) {
     $candidates = @(
       "$env:ProgramFiles\nodejs\node.exe",
@@ -95,15 +95,15 @@ function Test-NodeVersion {
     foreach ($p in $candidates) {
       if ($p -and (Test-Path -LiteralPath $p)) {
         $script:NODE_BIN = $p
-        Write-Info "找到 node（路径探测）: $($script:NODE_BIN)"
+        Write-Info "Found node (path scan): $($script:NODE_BIN)"
         break
       }
     }
   }
 
-  # 1c. 注册表 PATH 兜底
-  # 当当前 PowerShell 会话的 PATH 不含 node（1a/1b 都查不到）但系统注册表配了
-  # node 时，从这里救。读注册表不依赖当前进程 PATH。
+  # 1c. Registry PATH fallback
+  # When current session PATH lacks node (1a/1b miss) but registry has it:
+  # read from registry. Does not depend on current process PATH.
   if (-not $script:NODE_BIN) {
     $found = $null
     $regPaths = @(
@@ -122,24 +122,24 @@ function Test-NodeVersion {
           }
         }
       } catch {
-        # 注册表读失败静默继续
+        # Registry read failed, continue silently
       }
     }
     if ($found) {
       $script:NODE_BIN = $found
-      Write-Info "找到 node（注册表 PATH）: $($script:NODE_BIN)"
+      Write-Info "Found node (registry PATH): $($script:NODE_BIN)"
     }
   }
 
-  # 未找到 node
+  # node not found
   if (-not $script:NODE_BIN) {
-    Write-Warn "未检测到 node。请先安装 Node.js >= 20："
-    Write-Host "  方式一（nvm-windows）: https://github.com/coreybutler/nvm-windows/releases"
-    Write-Host "  方式二（官方）:        https://nodejs.org/en/download"
-    Die "缺少 node，安装中止。装好 node 后重新运行本脚本。"
+    Write-Warn "node not found. Please install Node.js >= 20:"
+    Write-Host "  Option 1 (nvm-windows): https://github.com/coreybutler/nvm-windows/releases"
+    Write-Host "  Option 2 (official):    https://nodejs.org/en/download"
+    Die "node is required. Install node and re-run this script."
   }
 
-  # 版本检查（>= 20）
+  # Version check (>= 20)
   try {
     $verOut = & $script:NODE_BIN -p 'process.versions.node' 2>$null
     $major = [int]($verOut.ToString().Split('.')[0])
@@ -148,16 +148,16 @@ function Test-NodeVersion {
   }
   if ($major -lt 20) {
     $vOut = (& $script:NODE_BIN -v 2>$null).ToString()
-    Die "node 版本过低 (v$vOut)，需要 >= 20。"
+    Die "node version too old (v$vOut), requires >= 20."
   }
   $vOut = (& $script:NODE_BIN -v 2>$null).ToString()
-  Write-Ok "node v$vOut 满足要求 (>= 20)"
+  Write-Ok "node v$vOut OK (>= 20)"
 }
 
-# ── 2. 拉取 latest.json ──────────────────────────────────────────────────────
+# -- 2. Fetch latest.json ──────────────────────────────────────────────────────
 function Get-LatestManifest {
   $url = "$($script:SERVER_URL)/daemon/latest.json"
-  Write-Info "获取最新版本信息: $url"
+  Write-Info "Fetching latest version: $url"
   $script:LATEST_VERSION = 'unknown'
   $script:DOWNLOAD_URL = "$($script:SERVER_URL)/daemon/latest/$($script:BUNDLE_NAME)"
   try {
@@ -166,62 +166,62 @@ function Get-LatestManifest {
     if ($resp.downloadUrl) {
       $dl = $resp.downloadUrl
       if ($dl -notmatch '^https?:') {
-        # 相对路径 → 拼接 SERVER_URL
+        # Relative path -> prepend SERVER_URL
         $script:DOWNLOAD_URL = "$($script:SERVER_URL)$dl"
       } else {
         $script:DOWNLOAD_URL = $dl
       }
     }
   } catch {
-    Write-Warn "无法获取 latest.json（$url），回退到默认下载路径。"
+    Write-Warn "Cannot fetch latest.json ($url), using default download path."
     return
   }
-  Write-Ok "最新版本: $($script:LATEST_VERSION)"
-  Write-Ok "下载地址: $($script:DOWNLOAD_URL)"
+  Write-Ok "Latest version: $($script:LATEST_VERSION)"
+  Write-Ok "Download URL: $($script:DOWNLOAD_URL)"
 }
 
-# ── 3. 下载 bundle ────────────────────────────────────────────────────────────
+# -- 3. Download bundle ────────────────────────────────────────────────────────────
 function Download-Bundle {
   if (-not (Test-Path -LiteralPath $script:BIN_DIR)) {
     New-Item -ItemType Directory -Path $script:BIN_DIR -Force | Out-Null
   }
 
-  # sillyhub-daemon.js（主 bundle）
+  # sillyhub-daemon.js (main bundle)
   $bundlePath = Join-Path $script:BIN_DIR $script:BUNDLE_NAME
-  Write-Info "下载 $($script:BUNDLE_NAME) -> $bundlePath"
+  Write-Info "Downloading $($script:BUNDLE_NAME) -> $bundlePath"
   try {
     Invoke-WebRequest -Uri $script:DOWNLOAD_URL -OutFile $bundlePath -UseBasicParsing -ErrorAction Stop
   } catch {
-    Die "下载失败: $($script:DOWNLOAD_URL)"
+    Die "Download failed: $($script:DOWNLOAD_URL)"
   }
-  Write-Ok "$($script:BUNDLE_NAME) 下载完成"
+  Write-Ok "$($script:BUNDLE_NAME) downloaded"
 
   # mcp-server.js（D-003：team 主 agent MCP server 子进程入口，与 sillyhub-daemon.js
-  # 同目录。buildDaemonMcpServerConfig 的 defaultMcpServerModulePath 据此定位。缺失则
+  # Same dir as sillyhub-daemon.js. Used by buildDaemonMcpServerConfig.
   # team 主 agent 注入的 MCP server spawn 失败 → 5 tool 链路断。）
   $mcpUrl = "$($script:SERVER_URL)/daemon/latest/$($script:MCP_NAME)"
   $mcpPath = Join-Path $script:BIN_DIR $script:MCP_NAME
-  Write-Info "下载 $($script:MCP_NAME) -> $mcpPath"
+  Write-Info "Downloading $($script:MCP_NAME) -> $mcpPath"
   try {
     Invoke-WebRequest -Uri $mcpUrl -OutFile $mcpPath -UseBasicParsing -ErrorAction Stop
-    Write-Ok "$($script:MCP_NAME) 下载完成"
+    Write-Ok "$($script:MCP_NAME) downloaded"
   } catch {
     Write-Warn "$($script:MCP_NAME) 下载失败（$mcpUrl）——team 主 agent MCP 注入将不可用"
   }
 }
 
-# ── 4. 创建 .cmd wrapper ──────────────────────────────────────────────────────
-# 写 sillyhub-daemon.cmd：
-#   @echo off + node.exe 绝对路径兜底（不依赖运行时 PATH 含 node）+ %~dp0 自相对 bundle
-#   Windows .cmd 必须 CRLF：Write-Out 默认 LF，用 -NoNewline + `r`n 手拼 CRLF。
+# -- 4. Create .cmd wrapper ──────────────────────────────────────────────────────
+# Write sillyhub-daemon.cmd:
+#   @echo off + node.exe absolute path fallback + %~dp0 relative bundle
+#   Windows .cmd must be CRLF: Write-Output defaults to LF, use -NoNewline + `r`n.
 function Write-CmdWrapper {
   $cmdPath = Join-Path $script:BIN_DIR $script:WRAPPER_NAME
-  Write-Info "创建 wrapper: $cmdPath"
+  Write-Info "Creating wrapper: $cmdPath"
 
   $nodeDir  = Split-Path $script:NODE_BIN -Parent
   $nodeExe  = Join-Path $nodeDir 'node.exe'
 
-  # 构造 .cmd 内容（CRLF 换行）
+  # Build .cmd content (CRLF line endings)
   $lines = @(
     '@echo off',
     'REM Auto-generated by SillyHub install.ps1 - do not edit.',
@@ -235,11 +235,11 @@ function Write-CmdWrapper {
   $content = ($lines -join "`r`n") + "`r`n"
   Set-Content -LiteralPath $cmdPath -Value $content -NoNewline -Encoding ASCII
 
-  Write-Ok ".cmd wrapper 已创建: $cmdPath"
+  Write-Ok ".cmd wrapper created: $cmdPath"
 }
 
-# ── 5. 保存 config.json ──────────────────────────────────────────────────────
-# 字段集对齐 install.sh save_server_url：
+# -- 5. Save config.json ──────────────────────────────────────────────────────
+# Fields aligned with install.sh save_server_url:
 #   server_url / token / api_key / runtime_id / profile / poll_interval /
 #   heartbeat_interval / max_concurrent_tasks / log_level / default_timeout_seconds
 function Save-Config {
@@ -249,20 +249,20 @@ function Save-Config {
   }
 
   if (Test-Path -LiteralPath $configFile) {
-    # 已存在 → 合并（仅覆盖 server_url，保留其余用户字段）
-    Write-Info "更新 config.json 中的 server_url"
+    # Exists -> merge (only overwrite server_url, keep other fields)
+    Write-Info "Updating server_url in config.json"
     try {
       $raw = Get-Content -LiteralPath $configFile -Raw -Encoding UTF8
       $c = $raw | ConvertFrom-Json
       $c.server_url = $script:SERVER_URL
       $c | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $configFile -Encoding UTF8
     } catch {
-      Write-Warn "config.json 更新失败（权限？），server_url 未持久化"
+      Write-Warn "config.json update failed (permission?), server_url not saved"
       return
     }
   } else {
-    # 新建（对齐 install.sh 字段集 + 默认值）
-    Write-Info "创建 config.json（server_url=$($script:SERVER_URL)）"
+    # New file (aligned with install.sh fields + defaults)
+    Write-Info "Creating config.json (server_url=$($script:SERVER_URL))"
     $c = [ordered]@{
       server_url             = $script:SERVER_URL
       token                  = $null
@@ -278,53 +278,53 @@ function Save-Config {
     try {
       $c | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $configFile -Encoding UTF8
     } catch {
-      Write-Warn "config.json 创建失败，server_url 未持久化"
+      Write-Warn "config.json creation failed, server_url not saved"
       return
     }
   }
-  Write-Ok "server_url 已保存到 config.json"
+  Write-Ok "server_url saved to config.json"
 }
 
-# ── 6. 加 PATH（setx，幂等）───────────────────────────────────────────────────
-# 把 bin 目录加到用户级 PATH（setx 永久写入，新开终端生效）。
-# 幂等：先 [Environment]::GetEnvironmentVariable('PATH','User') 查是否已含，已含则跳过。
+# -- 6. Add to PATH (setx, idempotent)───────────────────────────────────────────────────
+# Add bin dir to user-level PATH (setx persists, new terminals pick it up).
+# Idempotent: checks user PATH first, skips if already present.
 function Set-Path {
   $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
   $binDirWin = $script:BIN_DIR
 
-  # 当前会话 PATH 已含？
+  # Already in current session PATH?
   if ($env:PATH -split ';' -contains $binDirWin) {
-    Write-Ok "PATH 已包含 $binDirWin"
+    Write-Ok "PATH already contains $binDirWin"
   } else {
-    # 先加到当前会话（本次安装后续步骤可用）
+    # Add to current session (for remaining install steps)
     $env:PATH = "$binDirWin;$env:PATH"
   }
 
-  # 用户级注册表 PATH 是否已含？（幂等）
+  # Already in user registry PATH? (idempotent)
   if ($userPath -and (($userPath -split ';') -contains $binDirWin)) {
-    Write-Ok "Windows 用户 PATH 已含 $binDirWin（跳过 setx）"
+    Write-Ok "User PATH already contains $binDirWin (skipping setx)"
   } else {
-    Write-Info "将 $binDirWin 加入 Windows 用户 PATH"
+    Write-Info "Adding $binDirWin to user PATH"
     $newPath = if ($userPath) { "$userPath;$binDirWin" } else { $binDirWin }
     try {
       setx PATH $newPath | Out-Null
-      Write-Ok "Windows 用户 PATH 已更新（新开终端生效）"
+      Write-Ok "User PATH updated (new terminals will pick it up)"
     } catch {
-      Write-Warn "setx PATH 失败（可能权限不足），请手动添加 $binDirWin 到用户 PATH"
+      Write-Warn "setx PATH failed (permission?), manually add $binDirWin to user PATH"
     }
   }
 }
 
-# ── 7. 验证 --version ─────────────────────────────────────────────────────────
+# -- 7. Verify --version ─────────────────────────────────────────────────────────
 function Invoke-Verify {
-  Write-Info "验证 sillyhub-daemon --version"
+  Write-Info "Verifying sillyhub-daemon --version"
   $bundlePath = Join-Path $script:BIN_DIR $script:BUNDLE_NAME
   try {
     $verOut = & $script:NODE_BIN $bundlePath --version 2>$null
     if ($LASTEXITCODE -eq 0) {
-      Write-Ok "sillyhub-daemon $($verOut.ToString().Trim()) 运行正常"
+      Write-Ok "sillyhub-daemon $($verOut.ToString().Trim()) OK"
     } else {
-      Write-Warn "验证失败，bundle 可能需要 PATH 配置后才能运行。"
+      Write-Warn "Verification failed, bundle may need PATH to run."
       Write-Warn "请手动执行: `"$($script:NODE_BIN)`" `"$bundlePath`" --version"
     }
   } catch {
@@ -333,10 +333,10 @@ function Invoke-Verify {
   }
 }
 
-# ── 主流程 ────────────────────────────────────────────────────────────────────
+# -- Main ────────────────────────────────────────────────────────────────────
 function Main {
-  Write-Info "SillyHub daemon 安装脚本"
-  Write-Info "使用服务端地址: $($script:SERVER_URL)"
+  Write-Info "SillyHub daemon installer"
+  Write-Info "Server: $($script:SERVER_URL)"
   Test-NodeVersion
   Get-LatestManifest
   Download-Bundle
@@ -346,15 +346,15 @@ function Main {
   Invoke-Verify
 
   Write-Host ""
-  Write-Ok "安装完成！"
-  Write-Host "  服务器地址已保存: $($script:SERVER_URL)"
-  Write-Host "  下一步: sillyhub-daemon start --api-key <你的 API Key>"
-  Write-Host "  （server_url 已写入 config.json，无需再传 --server）"
-  Write-Host "  （新开 cmd/PowerShell 终端后 PATH 生效；或当前会话已临时加入）"
+  Write-Ok "Installation complete!"
+  Write-Host "  Server URL saved: $($script:SERVER_URL)"
+  Write-Host "  Next: sillyhub-daemon start --api-key <your API key>"
+  Write-Host "  (server_url in config.json, no need for --server)"
+  Write-Host "  (PATH active in new terminals; or already added to current session)"
   Write-Host ""
 
-  # DG-04：不自动 start。install.sh 在未提供 --server/--api-key/--token 时也跳过 start。
-  # PowerShell 版本保持一致，仅打印下一步提示，由用户手动 start。
+  # DG-04: no auto start. install.sh also skips start without --server/--api-key/--token.
+  # PowerShell version stays consistent, only prints next steps for manual start.
 }
 
 Main

@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>平台会话反馈优化原型</title>
+  <style>
+    :root {
+      --bg: #f3f4f6;
+      --panel: #ffffff;
+      --border: #e5e7eb;
+      --text: #111827;
+      --text-secondary: #6b7280;
+      --primary: #2563eb;
+      --primary-light: #eff6ff;
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --radius: 8px;
+      --shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      height: 100vh;
+    }
+    .sidebar {
+      background: var(--panel);
+      border-right: 1px solid var(--border);
+      padding: 16px;
+      overflow: auto;
+    }
+    .sidebar h2 { margin: 0 0 12px; font-size: 16px; }
+    .session-item {
+      padding: 10px 12px;
+      border-radius: var(--radius);
+      margin-bottom: 6px;
+      cursor: pointer;
+      border: 1px solid transparent;
+    }
+    .session-item:hover { background: #f9fafb; }
+    .session-item.active { background: var(--primary-light); border-color: #bfdbfe; }
+    .session-title { font-weight: 500; font-size: 14px; }
+    .session-meta { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+    .main {
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    .header {
+      height: 56px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: var(--success);
+    }
+    .content {
+      flex: 1;
+      overflow: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .message {
+      max-width: 760px;
+      padding: 14px 16px;
+      border-radius: var(--radius);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+    }
+    .message.assistant { align-self: flex-start; }
+    .message p { margin: 0; line-height: 1.6; }
+
+    /* Bash 进度卡片 */
+    .bash-card {
+      max-width: 760px;
+      background: var(--panel);
+      border: 1px solid #bfdbfe;
+      border-left: 4px solid var(--primary);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      box-shadow: var(--shadow);
+    }
+    .bash-header {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+    }
+    .bash-title { font-weight: 600; font-size: 14px; }
+    .bash-cmd {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      background: #f3f4f6;
+      padding: 8px 10px;
+      border-radius: 4px;
+      color: #374151;
+      margin-bottom: 10px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .bash-output {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      background: #111827;
+      color: #e5e7eb;
+      padding: 10px;
+      border-radius: 4px;
+      max-height: 180px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .bash-footer {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-top: 10px; font-size: 12px; color: var(--text-secondary);
+    }
+    .spinner {
+      width: 14px; height: 14px;
+      border: 2px solid #bfdbfe;
+      border-top-color: var(--primary);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Plan 确认卡片 */
+    .plan-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.35);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 50;
+    }
+    .plan-card {
+      width: 560px;
+      max-width: 90vw;
+      max-height: 80vh;
+      background: var(--panel);
+      border-radius: 12px;
+      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .plan-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .plan-header h3 { margin: 0; font-size: 16px; }
+    .plan-body {
+      padding: 20px;
+      overflow: auto;
+      flex: 1;
+    }
+    .plan-section { margin-bottom: 16px; }
+    .plan-section h4 { margin: 0 0 6px; font-size: 14px; color: var(--text-secondary); font-weight: 500; }
+    .plan-section p { margin: 0; font-size: 14px; line-height: 1.6; }
+    .plan-tasks { list-style: none; padding: 0; margin: 0; }
+    .plan-tasks li {
+      padding: 8px 10px;
+      background: #f9fafb;
+      border-radius: 4px;
+      margin-bottom: 6px;
+      font-size: 13px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .plan-tasks li::before {
+      content: "";
+      width: 6px; height: 6px; border-radius: 50%; background: var(--primary);
+    }
+    .plan-footer {
+      padding: 14px 20px;
+      border-top: 1px solid var(--border);
+      display: flex; justify-content: flex-end; gap: 10px;
+    }
+    .btn {
+      padding: 8px 16px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .btn-danger { color: var(--danger); border-color: #fecaca; background: #fef2f2; }
+
+    /* AskUser 弹窗 */
+    .askuser-dialog {
+      position: absolute;
+      right: 20px;
+      bottom: 80px;
+      width: 420px;
+      max-width: calc(100vw - 320px);
+      background: var(--panel);
+      border-radius: 12px;
+      box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1);
+      z-index: 40;
+      overflow: hidden;
+      transition: all 0.2s ease;
+    }
+    .askuser-dialog.minimized {
+      width: auto;
+      border-radius: 999px;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+    }
+    .askuser-dialog.minimized .askuser-body,
+    .askuser-dialog.minimized .askuser-footer { display: none; }
+    .askuser-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+      background: var(--primary-light);
+    }
+    .askuser-header h4 { margin: 0; font-size: 14px; }
+    .askuser-actions { display: flex; gap: 6px; }
+    .icon-btn {
+      width: 28px; height: 28px;
+      border: none; background: transparent;
+      border-radius: 4px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .icon-btn:hover { background: rgba(0,0,0,0.05); }
+    .askuser-body { padding: 16px; }
+    .askuser-options { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+    .askuser-option {
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .askuser-option:hover { border-color: var(--primary); background: var(--primary-light); }
+    .askuser-footer {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      display: flex; justify-content: flex-end; gap: 8px;
+    }
+    .input-bar {
+      height: 64px;
+      background: var(--panel);
+      border-top: 1px solid var(--border);
+      display: flex; align-items: center;
+      padding: 0 20px;
+      gap: 10px;
+    }
+    .input-bar input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <h2>会话</h2>
+      <div class="session-item active">
+        <div class="session-title">平台反馈修复</div>
+        <div class="session-meta">运行中 · 等待确认</div>
+      </div>
+      <div class="session-item">
+        <div class="session-title">前端样式迁移</div>
+        <div class="session-meta">已结束</div>
+      </div>
+    </aside>
+    <section class="main">
+      <header class="header">
+        <div class="header-left">
+          <div class="status-dot"></div>
+          <span style="font-weight:500">平台反馈修复</span>
+        </div>
+        <span style="font-size:12px;color:var(--text-secondary)">Claude · multi-agent-platform</span>
+      </header>
+
+      <div class="content">
+        <div class="message assistant">
+          <p>我先扫描项目结构，定位问题根因。</p>
+        </div>
+
+        <!-- Bash 进度卡片 -->
+        <div class="bash-card">
+          <div class="bash-header">
+            <div class="spinner"></div>
+            <span class="bash-title">正在执行 shell 命令</span>
+          </div>
+          <div class="bash-cmd">$ sillyspec agent-log --json</div>
+          <div class="bash-output">{
+  "detected": [
+    { "harness": "claude-code", "session_id": "3d4b..." },
+    { "harness": "claude-code", "session_id": "1550...", "change_key": "2026-08-24-sessions-live-updates" }
+  ]
+}</div>
+          <div class="bash-footer">
+            <span>已运行 3.2s</span>
+            <span style="color:var(--primary);cursor:pointer">展开完整日志 ↗</span>
+          </div>
+        </div>
+
+        <div class="message assistant">
+          <p>已定位到两个平台会话 ID，但本地 harness 会话与平台会话 ID 不同，需要新增事件通道把 plan/bash 状态推送到 Web 会话。</p>
+        </div>
+      </div>
+
+      <!-- Plan 确认弹窗 -->
+      <div class="plan-overlay" id="planOverlay">
+        <div class="plan-card">
+          <div class="plan-header">
+            <h3>📝 Agent 计划待确认</h3>
+            <button class="icon-btn" onclick="closePlan()">✕</button>
+          </div>
+          <div class="plan-body">
+            <div class="plan-section">
+              <h4>目标</h4>
+              <p>修复平台 Web 会话中 Bash 命令与 plan 模式缺失实时反馈的问题。</p>
+            </div>
+            <div class="plan-section">
+              <h4>关键任务</h4>
+              <ul class="plan-tasks">
+                <li>backend 新增 plan_mode_entered / bash_status 事件发布</li>
+                <li>daemon 在 Agent 进入 plan / 执行 Bash 时上报事件</li>
+                <li>前端渲染 PlanApprovalCard 与 BashProgressCard</li>
+                <li>askuser 弹窗支持最小化</li>
+              </ul>
+            </div>
+          </div>
+          <div class="plan-footer">
+            <button class="btn btn-danger" onclick="closePlan()">需要修改</button>
+            <button class="btn" onclick="closePlan()">取消</button>
+            <button class="btn btn-primary" onclick="closePlan()">确认计划</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- AskUser 弹窗 -->
+      <div class="askuser-dialog" id="askUserDialog">
+        <div class="askuser-header">
+          <h4>🤔 Agent 请求确认</h4>
+          <div class="askuser-actions">
+            <button class="icon-btn" onclick="toggleAskUser()" title="最小化">−</button>
+            <button class="icon-btn" onclick="closeAskUser()" title="关闭">✕</button>
+          </div>
+        </div>
+        <div class="askuser-body">
+          <p style="margin:0 0 8px;font-size:14px">请选择本次变更的交互级别：</p>
+          <div class="askuser-options">
+            <div class="askuser-option">A. 强确认弹窗</div>
+            <div class="askuser-option">B. 弱文字提示</div>
+            <div class="askuser-option">C. 两者都要</div>
+          </div>
+        </div>
+        <div class="askuser-footer">
+          <button class="btn">取消</button>
+          <button class="btn btn-primary">提交</button>
+        </div>
+      </div>
+
+      <div class="input-bar">
+        <input type="text" placeholder="输入消息..." />
+        <button class="btn btn-primary">发送</button>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    function closePlan() {
+      document.getElementById('planOverlay').classList.add('hidden');
+    }
+    function toggleAskUser() {
+      document.getElementById('askUserDialog').classList.toggle('minimized');
+    }
+    function closeAskUser() {
+      document.getElementById('askUserDialog').classList.add('hidden');
+    }
+  </script>
+</body>
+</html>
