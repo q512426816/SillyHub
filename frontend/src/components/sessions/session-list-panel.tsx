@@ -69,6 +69,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Button, Input, Modal, Select, Spin, Tag } from "antd";
 import { SearchOutlined } from "@ant-design/icons";
 import {
+  Archive,
+  ArchiveRestore,
   BookUser,
   Cloud,
   Command,
@@ -116,6 +118,7 @@ const STATUS_OPTIONS = [
   { label: "活跃", value: "active" },
   { label: "已结束", value: "ended" },
   { label: "已失败", value: "failed" },
+  { label: "已归档会话", value: "__archived__" },
 ] as const;
 
 /** 第二层智能体 tab 选项（D-107：claude/codex 固定两档，引擎标记线性图标）。 */
@@ -226,6 +229,9 @@ export interface SessionListPanelProps {
   onSelect?: (_session: AgentSessionRead) => void;
   /** ql-20260818-012：删除会话回调（单条/批量共用，软删后 invalidate 列表）。 */
   onDeleteSessions?: (_ids: string[]) => Promise<void>;
+  // 2026-08-24：归档/取消归档会话回调。
+  onArchiveSessions?: (_ids: string[]) => Promise<void>;
+  onUnarchiveSessions?: (_ids: string[]) => Promise<void>;
   /**
    * task-04（2026-08-22-workspace-sessions-portal）：可选 scope，锁定列表
    * 到工作区/变更级。D-003@v2：scope 仅给全局端点多传 workspace_id/change_id
@@ -437,6 +443,8 @@ function WorkspaceTreeList({
   selectedSessionId,
   onSelect,
   onDeleteSessions,
+  onArchiveSessions,
+  onUnarchiveSessions,
   scope,
   onNewInGroup,
   defaultExpandedWorkspaceId,
@@ -459,6 +467,9 @@ function WorkspaceTreeList({
   // 组内超 50 截断（R-03）的「显示全部」展开集合。
   const [showAllGroupIds, setShowAllGroupIds] = useState<Set<string>>(new Set());
 
+  // 2026-08-24：归档视图判定（哨兵值 __archived__ 触发服务端 archived=true 过滤）。
+  const isArchivedView = status === "__archived__";
+
   const { machines, workspaces, workspaceIdToName, runtimeToMachine } =
     useSessionListSharedData();
 
@@ -473,11 +484,12 @@ function WorkspaceTreeList({
       "agentSessions",
       "sessionsPortal",
       scope ?? null,
-      { limit: AGENT_SESSIONS_TREE_FETCH_LIMIT },
+      { limit: AGENT_SESSIONS_TREE_FETCH_LIMIT, archived: isArchivedView },
     ],
     queryFn: () =>
       listAgentSessions({
         limit: AGENT_SESSIONS_TREE_FETCH_LIMIT,
+        ...(isArchivedView ? { archived: true } : {}),
         ...(scope?.workspaceId ? { workspace_id: scope.workspaceId } : {}),
         // ql-20260823-003：change 树化后端点过滤参随树透传（D-003@v2）。
         ...(scope?.kind === "change" ? { change_id: scope.changeId } : {}),
@@ -575,11 +587,12 @@ function WorkspaceTreeList({
         }
         if (filterAgent && engineValueOf(s) !== filterAgent) return false;
       }
-      if (status && s.status !== status) return false;
+      // 2026-08-24：归档视图下跳过客户端 status 过滤（服务端已按 archived 过滤）。
+      if (!isArchivedView && status && s.status !== status) return false;
       if (q && !(s.title ?? "").toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [sessions, filterMachineId, filterAgent, status, appliedQuery, runtimeToMachine]);
+  }, [sessions, filterMachineId, filterAgent, status, appliedQuery, runtimeToMachine, isArchivedView]);
 
   /** 分组 id → 视图过滤后条目。 */
   const visibleByGroup = useMemo(() => {
@@ -753,6 +766,122 @@ function WorkspaceTreeList({
     });
   };
 
+  // ── 2026-08-24：归档/取消归档处理 ──────────────────────────────────
+
+  const [archiving, setArchiving] = useState(false);
+
+  const handleSingleArchive = (id: string, title: string) => {
+    if (!onArchiveSessions || archiving) return;
+    Modal.confirm({
+      title: "归档会话",
+      icon: (
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 text-white shadow-md">
+          <Archive aria-hidden className="h-4 w-4" />
+        </span>
+      ),
+      content: (
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          确定归档会话「{title}」吗？归档后将从默认列表隐藏，可在「已归档会话」筛选中查看。
+        </p>
+      ),
+      okText: "归档",
+      cancelText: "取消",
+      onOk: async () => {
+        setArchiving(true);
+        try {
+          await onArchiveSessions([id]);
+        } finally {
+          setArchiving(false);
+        }
+      },
+    });
+  };
+
+  const handleSingleUnarchive = (id: string, title: string) => {
+    if (!onUnarchiveSessions || archiving) return;
+    Modal.confirm({
+      title: "取消归档",
+      icon: (
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 text-white shadow-md">
+          <ArchiveRestore aria-hidden className="h-4 w-4" />
+        </span>
+      ),
+      content: (
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          确定取消归档会话「{title}」吗？会话将恢复到默认列表中。
+        </p>
+      ),
+      okText: "取消归档",
+      cancelText: "关闭",
+      onOk: async () => {
+        setArchiving(true);
+        try {
+          await onUnarchiveSessions([id]);
+        } finally {
+          setArchiving(false);
+        }
+      },
+    });
+  };
+
+  const handleBatchArchive = (groupName: string) => {
+    if (!onArchiveSessions || archiving || checkedIds.size === 0) return;
+    Modal.confirm({
+      title: "批量归档会话",
+      icon: (
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 text-white shadow-md">
+          <Archive aria-hidden className="h-4 w-4" />
+        </span>
+      ),
+      content: (
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          确定归档「{groupName}」中选中的 {checkedIds.size}{" "}
+          个会话吗？归档后将从默认列表隐藏。
+        </p>
+      ),
+      okText: `归档 ${checkedIds.size} 个`,
+      cancelText: "取消",
+      onOk: async () => {
+        setArchiving(true);
+        try {
+          await onArchiveSessions([...checkedIds]);
+          setCheckedIds(new Set());
+        } finally {
+          setArchiving(false);
+        }
+      },
+    });
+  };
+
+  const handleBatchUnarchive = (groupName: string) => {
+    if (!onUnarchiveSessions || archiving || checkedIds.size === 0) return;
+    Modal.confirm({
+      title: "批量取消归档",
+      icon: (
+        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 text-white shadow-md">
+          <ArchiveRestore aria-hidden className="h-4 w-4" />
+        </span>
+      ),
+      content: (
+        <p className="mt-2 text-xs leading-5 text-muted-foreground">
+          确定取消归档「{groupName}」中选中的 {checkedIds.size}{" "}
+          个会话吗？会话将恢复到默认列表中。
+        </p>
+      ),
+      okText: `取消归档 ${checkedIds.size} 个`,
+      cancelText: "关闭",
+      onOk: async () => {
+        setArchiving(true);
+        try {
+          await onUnarchiveSessions([...checkedIds]);
+          setCheckedIds(new Set());
+        } finally {
+          setArchiving(false);
+        }
+      },
+    });
+  };
+
   const visibleTotal = viewFiltered.length;
 
   /**
@@ -909,7 +1038,10 @@ function WorkspaceTreeList({
                   )
                 }
                 onBatchDelete={() => handleBatchDelete(group.name)}
+                onBatchArchive={() => handleBatchArchive(group.name)}
+                onBatchUnarchive={() => handleBatchUnarchive(group.name)}
                 deleting={deleting}
+                archiving={archiving}
                 checkedIds={checkedIds}
                 onToggleChecked={toggleChecked}
                 selectedSessionId={selectedSessionId}
@@ -917,6 +1049,16 @@ function WorkspaceTreeList({
                 onDelete={
                   onDeleteSessions
                     ? (id, title) => handleSingleDelete(id, title)
+                    : undefined
+                }
+                onArchive={
+                  onArchiveSessions
+                    ? (id, title) => handleSingleArchive(id, title)
+                    : undefined
+                }
+                onUnarchive={
+                  onUnarchiveSessions
+                    ? (id, title) => handleSingleUnarchive(id, title)
                     : undefined
                 }
                 showAll={showAllGroupIds.has(group.id)}
@@ -931,6 +1073,7 @@ function WorkspaceTreeList({
                 hideMachineTitles={filterMachineId !== ""}
                 hideEngineChip={filterAgent !== ""}
                 runtimeToMachine={runtimeToMachine}
+                isArchivedView={isArchivedView}
               />
             );
           })}
@@ -997,17 +1140,23 @@ function WorkspaceGroupNode({
   checkedCount,
   onToggleSelectAll,
   onBatchDelete,
+  onBatchArchive,
+  onBatchUnarchive,
   deleting,
+  archiving,
   checkedIds,
   onToggleChecked,
   selectedSessionId,
   onSelect,
   onDelete,
+  onArchive,
+  onUnarchive,
   showAll,
   onToggleShowAll,
   hideMachineTitles,
   hideEngineChip,
   runtimeToMachine,
+  isArchivedView,
 }: {
   group: TreeGroup;
   visibleSessions: AgentSessionRead[];
@@ -1023,12 +1172,17 @@ function WorkspaceGroupNode({
   checkedCount: number;
   onToggleSelectAll: () => void;
   onBatchDelete: () => void;
+  onBatchArchive: () => void;
+  onBatchUnarchive: () => void;
   deleting: boolean;
+  archiving: boolean;
   checkedIds: ReadonlySet<string>;
   onToggleChecked: (_id: string) => void;
   selectedSessionId?: string | null;
   onSelect?: (_session: AgentSessionRead) => void;
   onDelete?: (_id: string, _title: string) => void;
+  onArchive?: (_id: string, _title: string) => void;
+  onUnarchive?: (_id: string, _title: string) => void;
   showAll: boolean;
   onToggleShowAll: () => void;
   /** 筛选态隐藏机器小节标题（FR-02：已隐含——条目按机器过滤后小节名冗余）。 */
@@ -1036,6 +1190,8 @@ function WorkspaceGroupNode({
   /** ql-20260823-003：筛选智能体后条目隐藏引擎 chip（全部同引擎，冗余）。 */
   hideEngineChip: boolean;
   runtimeToMachine: RuntimeMachineIndex;
+  /** 2026-08-24：归档视图判定（控制批量操作按钮显隐）。 */
+  isArchivedView: boolean;
 }) {
   // 组内超 50 截断（R-03）：截断作用于分组（跨机器小节），小节由可见条目派生。
   const truncated = !showAll && visibleSessions.length > GROUP_ITEM_LIMIT;
@@ -1213,6 +1369,27 @@ function WorkspaceGroupNode({
               >
                 删除选中（{checkedCount}）
               </Button>
+              {/* 2026-08-24：归档/取消归档批量操作按钮 */}
+              {!isArchivedView && onBatchArchive && (
+                <Button
+                  size="small"
+                  disabled={checkedCount === 0 || archiving}
+                  loading={archiving}
+                  onClick={onBatchArchive}
+                >
+                  归档选中（{checkedCount}）
+                </Button>
+              )}
+              {isArchivedView && onBatchUnarchive && (
+                <Button
+                  size="small"
+                  disabled={checkedCount === 0 || archiving}
+                  loading={archiving}
+                  onClick={onBatchUnarchive}
+                >
+                  取消归档（{checkedCount}）
+                </Button>
+              )}
             </div>
           )}
           {sections.length === 0 ? (
@@ -1291,6 +1468,8 @@ function WorkspaceGroupNode({
                         checked={checkedIds.has(s.id)}
                         onToggleCheck={() => onToggleChecked(s.id)}
                         onDelete={onDelete ? () => onDelete(s.id, title) : undefined}
+                        onArchive={onArchive ? () => onArchive(s.id, title) : undefined}
+                        onUnarchive={onUnarchive ? () => onUnarchive(s.id, title) : undefined}
                       />
                     );
                   })}
@@ -1331,6 +1510,9 @@ interface SessionRowProps {
   checked?: boolean;
   onToggleCheck?: () => void;
   onDelete?: () => void;
+  // 2026-08-24：归档/取消归档回调。
+  onArchive?: () => void;
+  onUnarchive?: () => void;
   /** ql-20260823-003：树形态筛选智能体后隐藏引擎 chip（全组同引擎冗余）。 */
   hideEngineChip?: boolean;
 }
@@ -1349,6 +1531,8 @@ function SessionRow({
   checked,
   onToggleCheck,
   onDelete,
+  onArchive,
+  onUnarchive,
   hideEngineChip,
 }: SessionRowProps) {
   // chips 数据源：config_snapshot 直显免二次查询；快照缺省回退基础信息。
@@ -1463,19 +1647,50 @@ function SessionRow({
         <span className="shrink-0 text-[11px] text-muted-foreground">
           {formatRelativeTime(session.last_active_at ?? session.created_at)}
         </span>
-        {/* 单条删除按钮：hover 显示，阻止行点击冒泡 */}
-        {onDelete && !batchMode && (
-          <button
-            type="button"
-            aria-label={`删除 ${title}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-            className="ml-1 hidden h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive group-hover:flex"
-          >
-            <Trash2 className="h-3 w-3" />
-          </button>
+        {/* 单条操作按钮：hover 显示，阻止行点击冒泡 */}
+        {!batchMode && (
+          <span className="ml-1 flex hidden items-center group-hover:flex">
+            {/* 2026-08-24：归档/取消归档按钮（在删除按钮左侧） */}
+            {onArchive && (
+              <button
+                type="button"
+                aria-label={`归档 ${title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onArchive();
+                }}
+                className="h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-blue-500/10 hover:text-blue-500"
+              >
+                <Archive className="h-3 w-3" />
+              </button>
+            )}
+            {onUnarchive && (
+              <button
+                type="button"
+                aria-label={`取消归档 ${title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onUnarchive();
+                }}
+                className="h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-blue-500/10 hover:text-blue-500"
+              >
+                <ArchiveRestore className="h-3 w-3" />
+              </button>
+            )}
+            {onDelete && (
+              <button
+                type="button"
+                aria-label={`删除 ${title}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDelete();
+                }}
+                className="h-5 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            )}
+          </span>
         )}
       </div>
       {/* 第二行（树形态=2026-08-23 原型 .r2 降噪版）：引擎身份 chip

@@ -1286,6 +1286,8 @@ export interface AgentSessionListParams {
    * workspace_id，change 隐含 workspace），后端 SQL 层精确匹配。
    */
   change_id?: string;
+  /** 2026-08-24：按归档状态过滤（true=已归档，false=未归档）。 */
+  archived?: boolean;
 }
 
 /**
@@ -1308,6 +1310,8 @@ export async function listAgentSessions(
   // D-003@v2：scope 过滤参照 runtime_id 模式（真值才下发，缺省零回归）。
   if (options?.workspace_id) query.workspace_id = options.workspace_id;
   if (options?.change_id) query.change_id = options.change_id;
+  // 2026-08-24：archived 过滤参（布尔→字符串 "true"/"false"）。
+  if (options?.archived !== undefined) query.archived = options.archived ? "true" : "false";
   return apiFetch<AgentSessionListResponse>("/api/daemon/sessions", { query });
 }
 
@@ -1373,6 +1377,24 @@ export async function deleteAgentSession(sessionId: string): Promise<void> {
   await apiFetch(`/api/daemon/sessions/${encodeURIComponent(sessionId)}`, {
     method: "DELETE",
   });
+}
+
+// 2026-08-24：会话归档/取消归档 API。
+
+/** PATCH /api/daemon/sessions/{id}/archive — 归档会话（从默认列表隐藏）。 */
+export async function archiveAgentSession(sessionId: string): Promise<void> {
+  await apiFetch(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/archive`,
+    { method: "PATCH" },
+  );
+}
+
+/** PATCH /api/daemon/sessions/{id}/unarchive — 取消归档（恢复到默认列表）。 */
+export async function unarchiveAgentSession(sessionId: string): Promise<void> {
+  await apiFetch(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/unarchive`,
+    { method: "PATCH" },
+  );
 }
 
 /* ---------- Session reopen + detail (task-09 / FR-2 / D-002@v1) ---------- */

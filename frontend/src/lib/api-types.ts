@@ -2250,9 +2250,11 @@ export interface paths {
          *
          *     include_ended=false（缺省）：现状——仅 active 会话最小字段 dict
          *     （id/status/mode/provider），供 approvals 审批中心聚合 scan 歧义决策。
-         *     include_ended=true：工作区全量会话（含已结束），完整 AgentSessionListItem
+         *     include_ended=true：工作区会话（含已结束），完整 AgentSessionListItem
          *     （id/provider/status/turn_count/author/last_active_at/title，对齐
-         *     daemon/schema.py:71-84），排序 coalesce(last_active_at, created_at) desc。
+         *     daemon/schema.py:71-84），排序 coalesce(last_active_at, created_at) desc；
+         *     P5（2026-08-24 会话审查）：该分支原先无界全量返回，现按 limit/offset 分页
+         *     （默认 200；mode 过滤在 Python 侧截断后执行，传 mode 时页内可能少于 limit）。
          *     权限/过滤保持现状（workspace 成员跨成员可见），不因 include_ended 改变。
          */
         get: operations["list_workspace_agent_sessions_api_workspaces__workspace_id__agent_sessions_get"];
@@ -4324,6 +4326,46 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Archive Session
+         * @description Archive an owned session (hide from default list view).
+         */
+        patch: operations["archive_session_api_daemon_sessions__session_id__archive_patch"];
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/unarchive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Unarchive Session
+         * @description Unarchive an owned session (restore to default list view).
+         */
+        patch: operations["unarchive_session_api_daemon_sessions__session_id__unarchive_patch"];
         trace?: never;
     };
     "/api/daemon/sessions/{session_id}/stream": {
@@ -9263,6 +9305,8 @@ export interface components {
             title?: string | null;
             /** Deleted At */
             deleted_at?: string | null;
+            /** Archived At */
+            archived_at?: string | null;
             /** Current Run Id */
             current_run_id?: string | null;
             /** Terminating At */
@@ -23141,6 +23185,10 @@ export interface operations {
             query?: {
                 mode?: string | null;
                 include_ended?: boolean;
+                /** @description include_ended 分页页大小 */
+                limit?: number;
+                /** @description include_ended 分页偏移 */
+                offset?: number;
             };
             header?: never;
             path: {
@@ -26150,6 +26198,7 @@ export interface operations {
                 q?: string | null;
                 workspace_id?: string | null;
                 change_id?: string | null;
+                archived?: boolean;
             };
             header?: never;
             path?: never;
@@ -26392,6 +26441,64 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SessionControlResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_session_api_daemon_sessions__session_id__archive_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unarchive_session_api_daemon_sessions__session_id__unarchive_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

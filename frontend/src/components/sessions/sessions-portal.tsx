@@ -359,7 +359,26 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             void qc.invalidateQueries({ queryKey: ["agentSessions"] });
             if (ids.includes(selectedSessionId ?? "")) {
               setSelectedSessionId(null);
-              // ql-20260824-001：选中被删清空，同步移除 ?session=。
+              // ql-20260824-012：选中被删清空，同步移除 ?session=。
+              syncSessionParam(null);
+            }
+          }}
+          // 2026-08-24：归档/取消归档回调（照 onDeleteSessions 模式）。
+          onArchiveSessions={async (ids) => {
+            const { archiveAgentSession } = await import("@/lib/daemon");
+            await Promise.allSettled(ids.map((id) => archiveAgentSession(id)));
+            void qc.invalidateQueries({ queryKey: ["agentSessions"] });
+            if (ids.includes(selectedSessionId ?? "")) {
+              setSelectedSessionId(null);
+              syncSessionParam(null);
+            }
+          }}
+          onUnarchiveSessions={async (ids) => {
+            const { unarchiveAgentSession } = await import("@/lib/daemon");
+            await Promise.allSettled(ids.map((id) => unarchiveAgentSession(id)));
+            void qc.invalidateQueries({ queryKey: ["agentSessions"] });
+            if (ids.includes(selectedSessionId ?? "")) {
+              setSelectedSessionId(null);
               syncSessionParam(null);
             }
           }}

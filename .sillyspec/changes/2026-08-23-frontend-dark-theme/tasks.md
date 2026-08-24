@@ -15,3 +15,6 @@ created_at: 2026-08-23
 - [x] task-09: ECharts 主题感知（aggregations.ts 颜色入参化 + 3 图表组件订阅 useThemeStore）(depends_on: task-01)
 - [x] task-10: themes.test.ts 扩展 + 存量测试回归 (depends_on: task-01,task-02,task-03,task-04,task-05,task-06,task-07,task-08,task-09)
 - [x] task-11: 三主题浏览器实测与浅色回归目测 (depends_on: task-10)
+- [x] ql-20260824-012-5f7e 前端暗色主题与三主题切换
+- [x] ql-20260824-013-b820 前端暗色主题与三主题切换
+- [x] ql-20260824-014-f1bd 前端暗色主题与三主题切换

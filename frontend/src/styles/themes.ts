@@ -11,16 +11,17 @@
  * 新增颜色必须经本文件入口 (边界 #5,接替 tokens.ts 的 palette 入口职责)。
  * 例外 (D-003@v2): semantic.info 各主题统一取各自 accent 青,
  * blue 主题 info 不再是旧 tokens 的 #2563eb,保证状态语义跨主题一致 (design §9 例外声明)。
- * dark 取值 (变更 2026-08-23-frontend-dark-theme / D-004@v1): slate / brand 阶为
- * 浅色阶对称翻转 (slate 50↔900、100↔800、200↔700、300↔600、400↔500;
- * brand 50↔950、100↔900、200↔800、300↔700、400↔600、500 自映),
- * 主色与语义色较浅色主题提亮一档保证深底对比度,仍全部取 Tailwind v3 默认值
+ * dark 取值 (变更 2026-08-23-frontend-dark-theme / ql-20260824-014 用户定案去紫改青):
+ * 底换 zinc 中性黑 (bg/card/border=zinc-900/800/700,slate 阶换 zinc 对称翻转,
+ * 去蓝调与紫/青的振动),主色 cyan-600(hover cyan-500),brand 阶=cyan 阶翻转
+ * (50↔950、100↔900、200↔800、300↔700、400↔600、500 自映,text-brand-600=
+ * cyan-400 夜间低疲劳),语义色较浅色主题提亮一档;仍全部取 Tailwind v3 默认值
  * (design §5.1),DEFAULT_THEME 保持 ai-native 不变。
  */
 
 export type ThemeName = 'blue' | 'ai-native' | 'dark';
 
-/** 品牌色阶 50-950 十一档 (blue=Tailwind blue 阶 / ai-native=Tailwind violet 阶 / dark=violet 阶对称翻转) */
+/** 品牌色阶 50-950 十一档 (blue=Tailwind blue 阶 / ai-native=Tailwind violet 阶 / dark=Tailwind cyan 阶翻转 ql-20260824-014) */
 export type BrandScale = Record<
   '50' | '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900' | '950',
   string
@@ -66,24 +67,6 @@ const slate: ThemeColorDef['slate'] = {
   700: '#334155',
   800: '#1e293b',
   900: '#0f172a',
-};
-
-/**
- * 暗色 slate 阶:浅色 slate 阶对称翻转 (D-004@v1,变更 2026-08-23-frontend-dark-theme)
- * 翻转映射 50↔900、100↔800、200↔700、300↔600、400↔500,深浅语义互换
- * (浅底变深底/深字变浅字),取值仍全部为 Tailwind v3 默认值,禁止自调。
- */
-const darkSlate: ThemeColorDef['slate'] = {
-  50: slate[900],
-  100: slate[800],
-  200: slate[700],
-  300: slate[600],
-  400: slate[500],
-  500: slate[400],
-  600: slate[300],
-  700: slate[200],
-  800: slate[100],
-  900: slate[50],
 };
 
 const blueTheme: ThemeDef = {
@@ -161,45 +144,58 @@ const aiNativeTheme: ThemeDef = {
 
 /**
  * 暗夜主题 (变更 2026-08-23-frontend-dark-theme / D-004@v1 / design §5.1)
- * 取值策略:色阶翻转 (见文件头) —— ql-20260824-013 用户反馈对称翻转的亮紫端刺眼,
- * 亮端档 (600-950) 整体降一档 (violet-400→500、300→400、…),primary 同步降回
- * violet-600 (hover 提亮 violet-500,暗色 hover 变亮的常规方向);全 Tailwind v3 默认值。
+ * 取值策略:ql-20260824-014 用户定案「去紫改青」——蓝黑底(slate)与紫的振动是刺眼
+ * 根因,底换 zinc 中性黑(900/800/700),主色换 cyan-600(hover 提亮 cyan-500),
+ * 文字强调 brand-600=cyan-400(对比 8:1 夜间低疲劳,延续浅色主题交互青的品牌基因);
+ * brand 阶=cyan 阶翻转(50↔950…500 自映),slate 阶=zinc 阶对称翻转。
+ * 全部取值为 Tailwind v3 默认值,禁止自调。
  */
 const darkTheme: ThemeDef = {
   name: 'dark',
   label: '暗夜',
   color: {
-    primary: '#7c3aed', // violet-600 (ql-20260824-013:原 violet-500 反馈刺眼降一档)
-    primaryHover: '#8b5cf6', // violet-500 (hover 提亮一档)
-    accent: '#22d3ee', // cyan-400 (浅色主题 accent 为 cyan-600,提亮两档)
-    bg: '#0f172a', // slate-900
-    card: '#1e293b', // slate-800
-    border: '#334155', // slate-700
-    // violet 阶翻转+亮端降档 (ql-20260824-013):深紫档 (50-500) 供底色/填充不变,
-    // 亮紫档 (600-950) 各降一档供深底上的文字/强调——600 与 500 同取 violet-500
-    // (#8b5cf6,文字端起点与填充主档合流,单调无断层),往上逐档回落
+    primary: '#0891b2', // cyan-600 (ql-20260824-014 去紫改青;白字按钮对比 3.5:1)
+    primaryHover: '#06b6d4', // cyan-500 (hover 提亮一档)
+    accent: '#22d3ee', // cyan-400
+    bg: '#18181b', // zinc-900 中性黑(去蓝调,与青/灰均不振动)
+    card: '#27272a', // zinc-800
+    border: '#3f3f46', // zinc-700
+    // cyan 阶翻转 (50↔950、100↔900、200↔800、300↔700、400↔600、500 自映):
+    // 深青档 (50-500) 供底色/填充(选中底/表头),亮青档 (600-950) 供深底文字/强调
     brand: {
-      50: '#2e1065',
-      100: '#4c1d95',
-      200: '#5b21b6',
-      300: '#6d28d9',
-      400: '#7c3aed',
-      500: '#8b5cf6',
-      600: '#8b5cf6',
-      700: '#a78bfa',
-      800: '#c4b5fd',
-      900: '#ddd6fe',
-      950: '#ede9fe',
+      50: '#083344',
+      100: '#164e63',
+      200: '#155e75',
+      300: '#0e7490',
+      400: '#0891b2',
+      500: '#06b6d4',
+      600: '#22d3ee',
+      700: '#67e8f9',
+      800: '#a5f3fc',
+      900: '#cffafe',
+      950: '#ecfeff',
     },
-    slate: darkSlate,
+    // 中性阶换 zinc 对称翻转(50↔950…400↔500)——中性灰随中性黑底
+    slate: {
+      50: '#09090b',
+      100: '#18181b',
+      200: '#27272a',
+      300: '#3f3f46',
+      400: '#52525b',
+      500: '#71717a',
+      600: '#a1a1aa',
+      700: '#d4d4d8',
+      800: '#e4e4e7',
+      900: '#f4f4f5',
+    },
     // info 统一取 accent 青 (D-003@v2 口径延续);
-    // success/warning/error 为 500 系 (浅色主题 600 系提亮一档),neutral 取 slate-400
+    // success/warning/error 为 500 系 (浅色主题 600 系提亮一档),neutral 取 zinc-400
     semantic: {
       success: '#10b981',
       warning: '#f59e0b',
       error: '#ef4444',
       info: '#22d3ee',
-      neutral: '#94a3b8',
+      neutral: '#a1a1aa',
     },
   },
 };

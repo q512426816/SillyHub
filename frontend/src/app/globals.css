@@ -6,7 +6,7 @@
    三套主题 CSS 变量(2026-08-23-frontend-dark-theme 增补 dark 第三套,
    前身双套:task-02 / FR-01 / D-101@v1 / D-003@v2)
    - :root = ai-native(AI 紫,默认);[data-theme="blue"] = 现版旧蓝原样平移;
-     [data-theme="dark"] = 暗夜(slate-900 深底 + violet-500 提亮主色,D-001@v1),
+     [data-theme="dark"] = 暗夜(zinc-900 中性黑底 + cyan-600 青主色,ql-20260824-014 去紫改青,D-001@v1),
      html data-theme 切换时本文件全部主题变量即时换肤(CSS 半边,state 半边归 task-05)
    - 单一源原则:全部主题取值从 src/styles/themes.ts 派生
      (HSL 语义变量为 themes.ts hex 的等值换算,--color-* 为 hex 直写);
@@ -186,33 +186,34 @@
 
   /* 暗色主题覆盖块(2026-08-23-frontend-dark-theme / FR-01 / D-001@v1):
      [data-theme="dark"] 时生效,三主题(ai-native/blue/dark)之一,选择器与 blue 块同构。
-     取值=themes.ts darkTheme(design §5.1,全 Tailwind v3 默认色阶):bg/card/border=
-     slate-900/800/700,primary=violet-600(ql-20260824-013 刺眼反馈自 violet-500 降档),
-     semantic 提亮至 500 系,brand 阶翻转+亮端(600-950)降一档、slate 阶对称翻转
-     (slate 消费侧 tailwind config 走 var(--color-slate-*) 映射归另一 task,D-005@v1)。
+     取值=themes.ts darkTheme(全 Tailwind v3 默认色阶)。ql-20260824-014 用户定案:
+     去紫改青——bg/card/border=zinc-900/800/700 中性黑底(蓝黑底与紫振动是刺眼根因),
+     primary=cyan-600(白字按钮对比 3.5:1,hover 提亮 cyan-500),文字强调 brand-600=
+     cyan-400(对比 8:1,夜间低疲劳,延续浅色主题交互青的品牌基因);brand 阶=cyan 阶
+     翻转(50↔950…500 自映),slate 阶=zinc 阶对称翻转(slate 消费侧 tailwind config
+     走 var(--color-slate-*) 映射,D-005@v1);semantic 提亮至 500 系。
      HSL 语义变量为 hex 等值换算(行内注释标注对应 hex);
      共享 token(radius/font/spacing/动效)不在此重复声明;
-     改动须与 themes.ts 同步,禁止自行调色。
-     注:遗留暗色类选择器死块(蓝灰调,原 176-196 行)已随本变更删除。 */
+     改动须与 themes.ts 同步,禁止自行调色。 */
   [data-theme="dark"] {
-    --background: 222 47% 11%; /* =#0f172a slate-900 */
-    --foreground: 210 40% 96%; /* =#f1f5f9 slate-100 */
+    --background: 240 6% 10%; /* =#18181b zinc-900 中性黑 */
+    --foreground: 240 0% 96%; /* =#f4f4f5 zinc-100 */
 
-    --card: 217 33% 17%; /* =#1e293b slate-800 */
-    --card-foreground: 210 40% 96%; /* =#f1f5f9 同 foreground */
+    --card: 240 4% 16%; /* =#27272a zinc-800 */
+    --card-foreground: 240 0% 96%; /* =#f4f4f5 同 foreground */
 
-    --primary: 258 90% 58%; /* =#7c3aed violet-600,ql-20260824-013 亮紫刺眼降一档 */
+    --primary: 192 91% 36%; /* =#0891b2 cyan-600,ql-20260824-014 去紫改青 */
     --primary-foreground: 0 0% 100%; /* =#ffffff */
 
-    --muted: 215 25% 27%; /* =#334155 slate-700(蓝图 HSL 217 19% 27% 实为 gray-700 值,按 hex 等值规则修正) */
-    --muted-foreground: 215 20% 65%; /* =#94a3b8 slate-400 */
+    --muted: 240 5% 26%; /* =#3f3f46 zinc-700 */
+    --muted-foreground: 240 5% 65%; /* =#a1a1aa zinc-400 */
 
     --destructive: 0 72% 51%; /* 与两浅色主题同值保持(等值 #dc2626) */
     --destructive-foreground: 0 0% 100%;
 
-    --border: 215 25% 27%; /* =#334155 同 muted */
-    --input: 215 25% 27%; /* =#334155 同 border */
-    --ring: 258 90% 58%; /* =#7c3aed 同 primary */
+    --border: 240 5% 26%; /* =#3f3f46 同 muted */
+    --input: 240 5% 26%; /* =#3f3f46 同 border */
+    --ring: 192 91% 36%; /* =#0891b2 同 primary */
 
     --success: 160 84% 39%; /* =#10b981 emerald-500 */
     --success-foreground: 0 0% 100%;
@@ -223,52 +224,64 @@
     --info: 187 85% 53%; /* =#22d3ee cyan-400,与 accent 同值 */
     --info-foreground: 0 0% 100%;
 
-    --color-primary: #7c3aed;
-    --color-primary-hover: #8b5cf6; /* violet-500,暗色 hover 提亮一档 */
+    --color-primary: #0891b2;
+    --color-primary-hover: #06b6d4; /* cyan-500,暗色 hover 提亮一档 */
     --color-accent: #22d3ee; /* cyan-400 */
-    /* brand 阶:dark=violet 阶翻转+亮端降档(ql-20260824-013 刺眼反馈:
-       深紫档 50-500 供底色/填充不变,亮紫档 600-950 各降一档供文字/强调,
-       600 与 500 同取 #8b5cf6 合流),bg-brand-50/text-brand-600 等类名不改自动换肤 */
-    --color-brand-50: #2e1065;
-    --color-brand-100: #4c1d95;
-    --color-brand-200: #5b21b6;
-    --color-brand-300: #6d28d9;
-    --color-brand-400: #7c3aed;
-    --color-brand-500: #8b5cf6;
-    --color-brand-600: #8b5cf6;
-    --color-brand-700: #a78bfa;
-    --color-brand-800: #c4b5fd;
-    --color-brand-900: #ddd6fe;
-    --color-brand-950: #ede9fe;
-    /* slate 阶:dark 对称翻转(50↔900、100↔800…400↔500) */
-    --color-slate-50: #0f172a;
-    --color-slate-100: #1e293b;
-    --color-slate-200: #334155;
-    --color-slate-300: #475569;
-    --color-slate-400: #64748b;
-    --color-slate-500: #94a3b8;
-    --color-slate-600: #cbd5e1;
-    --color-slate-700: #e2e8f0;
-    --color-slate-800: #f1f5f9;
-    --color-slate-900: #f8fafc;
-    --color-bg: #0f172a;
-    --color-card: #1e293b;
-    --color-border: #334155;
+    /* brand 阶:dark=cyan 阶翻转(ql-20260824-014 去紫改青;50↔950、100↔900…
+       500 自映):深青档(50-500)供底色/填充(选中底/表头=深青),亮青档
+       (600-950)供深底上的文字/强调(text-brand-600=cyan-400 对比 8:1) */
+    --color-brand-50: #083344;
+    --color-brand-100: #164e63;
+    --color-brand-200: #155e75;
+    --color-brand-300: #0e7490;
+    --color-brand-400: #0891b2;
+    --color-brand-500: #06b6d4;
+    --color-brand-600: #22d3ee;
+    --color-brand-700: #67e8f9;
+    --color-brand-800: #a5f3fc;
+    --color-brand-900: #cffafe;
+    --color-brand-950: #ecfeff;
+    /* slate 阶:dark 换 zinc 阶对称翻转(50↔950、100↔800…400↔500)——
+       中性灰随中性黑底,去蓝调灰振动 */
+    --color-slate-50: #09090b;
+    --color-slate-100: #18181b;
+    --color-slate-200: #27272a;
+    --color-slate-300: #3f3f46;
+    --color-slate-400: #52525b;
+    --color-slate-500: #71717a;
+    --color-slate-600: #a1a1aa;
+    --color-slate-700: #d4d4d8;
+    --color-slate-800: #e4e4e7;
+    --color-slate-900: #f4f4f5;
+    --color-bg: #18181b;
+    --color-card: #27272a;
+    --color-border: #3f3f46;
     --color-success: #10b981;
     --color-warning: #f59e0b;
     --color-error: #ef4444;
     --color-info: #22d3ee;
-    --color-neutral: #94a3b8;
-    /* route-loading 修正键(dark):--muted-fg 次要文字取 slate-400,
+    --color-neutral: #a1a1aa;
+    /* route-loading 修正键(dark):--muted-fg 次要文字取 zinc-400,
        loading 轨道改白系半透明(黑底上可见) */
-    --muted-fg: #94a3b8;
+    --muted-fg: #a1a1aa;
     --color-loading-track: rgba(255, 255, 255, 0.12);
     /* 阴影:黑基调加深(暗色下阴影需更深才有层次,design §5.1),
-       primary 投影随提亮主色取 rgba(139,92,246,0.28) */
+       primary 投影随青主色取 rgba(8,145,178,0.28) */
     --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.35);
     --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.45);
     --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.6);
-    --shadow-primary: 0 4px 14px rgba(124, 58, 237, 0.28);
+    --shadow-primary: 0 4px 14px rgba(8, 145, 178, 0.28);
+    /* @uiw/react-markdown-preview markdown.css 库内 GitHub 变量覆盖:
+       库用 prefers-color-scheme 媒体查询切变量,不认 data-theme;
+       手动切 dark+系统浅色时变量解析为浅色值→白底白字。
+       在此重定义,让库自身 nth-child(2n)/table tr 等规则自动解析到暗色值,
+       保留斑马纹观感;浅色两主题不覆盖,保留库默认。 */
+    --color-canvas-default: #0d1117;
+    --color-canvas-subtle: #161b22;
+    --color-fg-default: #c9d1d9;
+    --color-fg-muted: #8b949e;
+    --color-border-default: #30363d;
+    --color-border-muted: #21262d;
   }
 
   * {
@@ -656,15 +669,10 @@
 [data-theme="dark"] .text-lime-700 { color: #bef264; }
 [data-theme="dark"] .border-lime-200 { border-color: #365314; }
 
-/* ---- 第三方 markdown 库表格(ql-20260824-012,D-007@v1 同类收口) ----
-   @uiw/react-markdown-preview 的 markdown.css 给 table tr 写死库内 GitHub 变量
-   --color-canvas-default(浅色=白/深色=#0d1117),变量按系统 prefers-color-scheme
-   在 :root 媒体查询切换,不认本站 html data-theme——手动切 dark+系统浅色时
-   白底撞主题浅前景=白底白字。归位主题 token:行底透明随容器,边框走 --color-border
-   (dark=#334155);浅色两主题不覆盖,保留库默认观感。 */
-[data-theme="dark"] .wmde-markdown table tr {
-  background-color: transparent;
-}
+/* ---- 第三方 markdown 库表格(ql-20260824-012,D-007@v1) ----
+   修复方式已升级:在 [data-theme="dark"] 块内重定义库内 GitHub CSS 变量
+   (--color-canvas-default/subtle/border-default 等),让库自身 nth-child(2n)/
+   table tr 等规则自动解析到暗色值,保留斑马纹;浅色两主题零覆盖。 */
 [data-theme="dark"] .wmde-markdown table th,
 [data-theme="dark"] .wmde-markdown table td {
   border-color: var(--color-border);

@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>暗色紫色替代方案对比 — SillyHub</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: Inter, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; font-size:14px; }
+
+/* ============ 基线：现状（降档后的紫+蓝黑底） ============ */
+:root, body[data-scheme="baseline"] {
+  --bg:#0f172a; --card:#1e293b; --border:#334155;
+  --primary:#7c3aed; --primary-hover:#8b5cf6; --fg:#f1f5f9; --muted:#94a3b8;
+  --brand-text:#8b5cf6; --brand-bg:#2e1065; --accent:#22d3ee;
+  --label:"① 现状·蓝黑底+纯紫（降档后）";
+}
+/* ============ A：莫兰迪紫（去饱和 55/45 混 slate，蓝黑底不动） ============ */
+body[data-scheme="morandi"] {
+  --bg:#0f172a; --card:#1e293b; --border:#334155;
+  --primary:#7154C1; --primary-hover:#8571CF; --fg:#f1f5f9; --muted:#94a3b8;
+  --brand-text:#8F75DA; --brand-bg:#291858; --accent:#38b2c8;
+  --label:"A 莫兰迪紫·蓝黑底";
+}
+/* ============ B：中性底（zinc）+ 纯紫不动 ============ */
+body[data-scheme="neutral"] {
+  --bg:#18181b; --card:#202024; --border:#303036;
+  --primary:#7c3aed; --primary-hover:#8b5cf6; --fg:#f4f4f5; --muted:#a1a1aa;
+  --brand-text:#8b5cf6; --brand-bg:#2a194f; --accent:#22d3ee;
+  --label:"B 中性黑底+纯紫";
+}
+/* ============ C：中性底 + 莫兰迪紫（组合） ============ */
+body[data-scheme="combo"] {
+  --bg:#18181b; --card:#202024; --border:#303036;
+  --primary:#7154C1; --primary-hover:#8571CF; --fg:#f4f4f5; --muted:#a1a1aa;
+  --brand-text:#9481D6; --brand-bg:#251647; --accent:#38b2c8;
+  --label:"C 中性黑底+莫兰迪紫";
+}
+/* ============ D：极简无彩（紫仅小面积点缀） ============ */
+body[data-scheme="mono"] {
+  --bg:#101012; --card:#1b1b1f; --border:#2c2c31;
+  --primary:#3f3f46; --primary-hover:#52525b; --fg:#f4f4f5; --muted:#9d9da4;
+  --brand-text:#b8b0d4; --brand-bg:#232330; --accent:#38b2c8;
+  --label:"D 极简无彩·紫只做点缀";
+}
+
+body { background:var(--bg); color:var(--fg); }
+
+/* 方案切换条 */
+.switcher { position:sticky; top:0; z-index:9; display:flex; gap:8px; padding:10px 16px;
+  background:var(--card); border-bottom:1px solid var(--border); flex-wrap:wrap; }
+.switcher button { padding:6px 14px; border-radius:8px; border:1px solid var(--border);
+  background:var(--bg); color:var(--fg); cursor:pointer; font-size:13px; }
+.switcher button.on { background:var(--brand-bg); color:var(--brand-text); font-weight:600; }
+.scheme-label { padding:10px 16px 0; font-size:15px; font-weight:700; color:var(--brand-text); }
+
+.layout { display:flex; }
+.side { width:180px; padding:10px 8px; border-right:1px solid var(--border); }
+.nav { padding:8px 12px; border-radius:8px; color:var(--muted); margin-bottom:2px; }
+.nav.active { background:var(--brand-bg); color:var(--brand-text); font-weight:600; }
+.main { flex:1; padding:18px; max-width:860px; }
+
+.card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px; }
+h3 { font-size:15px; margin-bottom:10px; }
+p.sample { line-height:1.9; margin-bottom:6px; }
+.brand-text { color:var(--brand-text); font-weight:600; }
+.muted { color:var(--muted); }
+
+.btn { display:inline-block; padding:6px 16px; border-radius:8px; margin-right:8px; font-size:13px;
+  border:1px solid var(--border); background:var(--card); color:var(--fg); cursor:pointer; }
+.btn.primary { background:var(--primary); border-color:var(--primary); color:#fff; font-weight:500; }
+.btn.primary:hover { background:var(--primary-hover); border-color:var(--primary-hover); }
+.link { color:var(--brand-text); text-decoration:underline; text-underline-offset:3px; }
+
+table { width:100%; border-collapse:separate; border-spacing:0; font-size:13px; margin-top:6px; }
+th { background:var(--brand-bg); color:var(--fg); text-align:left; padding:8px 12px;
+  border:1px solid var(--border); font-weight:600; }
+td { padding:8px 12px; border:1px solid var(--border); color:var(--fg); }
+td.accent-cell { color:var(--brand-text); font-weight:600; }
+tr:nth-child(even) td { background:color-mix(in srgb, var(--brand-bg) 40%, var(--card)); }
+
+.tag { display:inline-block; padding:1px 10px; border-radius:999px; font-size:12px; margin-right:6px;
+  border:1px solid var(--border); }
+.tag.purple { color:var(--brand-text); background:var(--brand-bg); }
+.tag.info { color:var(--accent); border-color:var(--accent); }
+
+.focus-demo { padding:8px 12px; border-radius:8px; outline:2px solid var(--brand-text); outline-offset:2px; display:inline-block; }
+.swatches { display:flex; gap:6px; margin-top:8px; }
+.sw { width:36px; height:20px; border-radius:5px; border:1px solid var(--border); }
+
+.hint { position:fixed; left:16px; bottom:14px; font-size:12px; color:var(--muted);
+  background:var(--card); border:1px solid var(--border); border-radius:8px; padding:6px 12px; }
+</style>
+</head>
+<body data-scheme="combo">
+
+<div class="switcher" id="switcher">
+  <button data-s="baseline">① 现状（参照）</button>
+  <button data-s="morandi">A 莫兰迪紫</button>
+  <button data-s="neutral">B 中性底+纯紫</button>
+  <button data-s="combo">C 中性底+莫兰迪（推荐）</button>
+  <button data-s="mono">D 极简无彩</button>
+</div>
+<div class="scheme-label" id="schemeLabel"></div>
+
+<div class="layout">
+  <div class="side">
+    <div class="nav">📋 任务</div>
+    <div class="nav active">💬 会话</div>
+    <div class="nav">📁 文件</div>
+    <div class="nav">🧠 知识库</div>
+  </div>
+  <div class="main">
+    <div class="card">
+      <h3>按钮与链接</h3>
+      <span class="btn primary">主要按钮</span>
+      <span class="btn">次要按钮</span>
+      <p class="sample" style="margin-top:12px">正文可读性：这句话检验普通文字的舒适度，
+        <span class="brand-text">紫色强调文字</span> 与
+        <span class="link">紫色链接文字</span> 不再扎眼，
+        <span class="muted">次要灰字保持可读</span>。</p>
+      <div style="margin-top:10px"><span class="focus-demo">焦点环（输入框聚焦态）</span></div>
+    </div>
+
+    <div class="card">
+      <h3>表格（表头/斑马纹/强调列）</h3>
+      <table>
+        <tr><th>会话</th><th>运行时</th><th>状态</th></tr>
+        <tr><td class="accent-cell">修复登录页样式</td><td>claude</td><td><span class="tag purple">已完成</span></td></tr>
+        <tr><td class="accent-cell">周报数据导入</td><td>codex</td><td><span class="tag info">运行中</span></td></tr>
+        <tr><td class="accent-cell">知识库索引重建</td><td>glm</td><td><span class="tag purple">已归档</span></td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>菜单选中态与色板</h3>
+      <div class="nav active" style="display:inline-block; margin-right:8px">选中中的菜单项</div>
+      <div class="nav" style="display:inline-block">未选中项</div>
+      <div class="swatches">
+        <div class="sw" style="background:var(--primary)"></div>
+        <div class="sw" style="background:var(--brand-text)"></div>
+        <div class="sw" style="background:var(--brand-bg)"></div>
+        <div class="sw" style="background:var(--accent)"></div>
+        <div class="sw" style="background:var(--bg)"></div>
+        <div class="sw" style="background:var(--card)"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="hint">顶部按钮切换方案实景对比 · 文件：prototype-dark-purple-alternatives.html</div>
+
+<script>
+var btns = document.querySelectorAll('#switcher button');
+var label = document.getElementById('schemeLabel');
+function apply(s) {
+  document.body.dataset.scheme = s;
+  btns.forEach(function (b) { b.classList.toggle('on', b.dataset.s === s); });
+  label.textContent = '当前方案：' + getComputedStyle(document.body).getPropertyValue('--label').trim();
+}
+btns.forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.s); }); });
+apply('combo');
+</script>
+</body>
+</html>

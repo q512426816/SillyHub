@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>暗色去紫·主色替代对比 — SillyHub</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: Inter, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; font-size:14px; }
+
+/* 统一中性黑底，只换主色——隔离变量便于横向对比 */
+:root, body[data-scheme="cyan"] {
+  --bg:#18181b; --card:#202024; --border:#303036; --fg:#f4f4f5; --muted:#a1a1aa;
+  --primary:#06b6d4; --primary-hover:#22d3ee; --primary-fg:#062a30;
+  --accent-text:#22d3ee; --accent-bg:#083344; --label:"A 青色 cyan（推荐·延续品牌交互青）";
+}
+body[data-scheme="sky"] {
+  --bg:#18181b; --card:#202024; --border:#303036; --fg:#f4f4f5; --muted:#a1a1aa;
+  --primary:#0ea5e9; --primary-hover:#38bdf8; --primary-fg:#082f49;
+  --accent-text:#38bdf8; --accent-bg:#082f49; --label:"B 柔和蓝 sky（GitHub 式经典）";
+}
+body[data-scheme="teal"] {
+  --bg:#18181b; --card:#202024; --border:#303036; --fg:#f4f4f5; --muted:#a1a1aa;
+  --primary:#14b8a6; --primary-hover:#2dd4bf; --primary-fg:#042f2e;
+  --accent-text:#2dd4bf; --accent-bg:#042f2e; --label:"C 青绿 teal（更沉稳的青）";
+}
+body[data-scheme="amber"] {
+  --bg:#18181b; --card:#202024; --border:#303036; --fg:#f4f4f5; --muted:#a1a1aa;
+  --primary:#f59e0b; --primary-hover:#fbbf24; --primary-fg:#431407;
+  --accent-text:#fbbf24; --accent-bg:#451a03; --label:"D 暖琥珀 amber（夜间暖感）";
+}
+
+body { background:var(--bg); color:var(--fg); }
+
+.switcher { position:sticky; top:0; z-index:9; display:flex; gap:8px; padding:10px 16px;
+  background:var(--card); border-bottom:1px solid var(--border); flex-wrap:wrap; }
+.switcher button { padding:6px 14px; border-radius:8px; border:1px solid var(--border);
+  background:var(--bg); color:var(--fg); cursor:pointer; font-size:13px; }
+.switcher button.on { background:var(--accent-bg); color:var(--accent-text); font-weight:600; }
+.scheme-label { padding:10px 16px 0; font-size:15px; font-weight:700; color:var(--accent-text); }
+
+.layout { display:flex; }
+.side { width:180px; padding:10px 8px; border-right:1px solid var(--border); }
+.nav { padding:8px 12px; border-radius:8px; color:var(--muted); margin-bottom:2px; }
+.nav.active { background:var(--accent-bg); color:var(--accent-text); font-weight:600; }
+.main { flex:1; padding:18px; max-width:860px; }
+
+.card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px; }
+h3 { font-size:15px; margin-bottom:10px; }
+p.sample { line-height:1.9; margin-bottom:6px; }
+.accent-text { color:var(--accent-text); font-weight:600; }
+.muted { color:var(--muted); }
+
+.btn { display:inline-block; padding:6px 16px; border-radius:8px; margin-right:8px; font-size:13px;
+  border:1px solid var(--border); background:var(--card); color:var(--fg); cursor:pointer; }
+.btn.primary { background:var(--primary); border-color:var(--primary); color:var(--primary-fg); font-weight:600; }
+.btn.primary:hover { background:var(--primary-hover); border-color:var(--primary-hover); }
+.link { color:var(--accent-text); text-decoration:underline; text-underline-offset:3px; }
+
+table { width:100%; border-collapse:separate; border-spacing:0; font-size:13px; margin-top:6px; }
+th { background:var(--accent-bg); color:var(--fg); text-align:left; padding:8px 12px;
+  border:1px solid var(--border); font-weight:600; }
+td { padding:8px 12px; border:1px solid var(--border); }
+td.accent-cell { color:var(--accent-text); font-weight:600; }
+tr:nth-child(even) td { background:color-mix(in srgb, var(--accent-bg) 40%, var(--card)); }
+
+.tag { display:inline-block; padding:1px 10px; border-radius:999px; font-size:12px; margin-right:6px;
+  border:1px solid var(--border); }
+.tag.accent { color:var(--accent-text); background:var(--accent-bg); }
+
+.focus-demo { padding:8px 12px; border-radius:8px; outline:2px solid var(--accent-text); outline-offset:2px; display:inline-block; }
+.swatches { display:flex; gap:6px; margin-top:8px; }
+.sw { width:36px; height:20px; border-radius:5px; border:1px solid var(--border); }
+
+.hint { position:fixed; left:16px; bottom:14px; font-size:12px; color:var(--muted);
+  background:var(--card); border:1px solid var(--border); border-radius:8px; padding:6px 12px; }
+</style>
+</head>
+<body data-scheme="cyan">
+
+<div class="switcher" id="switcher">
+  <button data-s="cyan">A 青色（推荐）</button>
+  <button data-s="sky">B 柔和蓝</button>
+  <button data-s="teal">C 青绿</button>
+  <button data-s="amber">D 暖琥珀</button>
+</div>
+<div class="scheme-label" id="schemeLabel"></div>
+
+<div class="layout">
+  <div class="side">
+    <div class="nav">📋 任务</div>
+    <div class="nav active">💬 会话</div>
+    <div class="nav">📁 文件</div>
+    <div class="nav">🧠 知识库</div>
+  </div>
+  <div class="main">
+    <div class="card">
+      <h3>按钮与链接</h3>
+      <span class="btn primary">主要按钮</span>
+      <span class="btn">次要按钮</span>
+      <p class="sample" style="margin-top:12px">正文可读性检验：
+        <span class="accent-text">主色强调文字</span> 与
+        <span class="link">主色链接</span> 在暗底上是否清晰不刺眼，
+        <span class="muted">次要灰字</span> 保持可读。</p>
+      <div style="margin-top:10px"><span class="focus-demo">焦点环（输入框聚焦态）</span></div>
+    </div>
+
+    <div class="card">
+      <h3>表格（表头/斑马纹/强调列）</h3>
+      <table>
+        <tr><th>会话</th><th>运行时</th><th>状态</th></tr>
+        <tr><td class="accent-cell">修复登录页样式</td><td>claude</td><td><span class="tag accent">已完成</span></td></tr>
+        <tr><td class="accent-cell">周报数据导入</td><td>codex</td><td><span class="tag accent">运行中</span></td></tr>
+        <tr><td class="accent-cell">知识库索引重建</td><td>glm</td><td><span class="tag accent">已归档</span></td></tr>
+      </table>
+    </div>
+
+    <div class="card">
+      <h3>菜单选中态与色板</h3>
+      <div class="nav active" style="display:inline-block; margin-right:8px">选中中的菜单项</div>
+      <div class="nav" style="display:inline-block">未选中项</div>
+      <div class="swatches">
+        <div class="sw" style="background:var(--primary)"></div>
+        <div class="sw" style="background:var(--accent-text)"></div>
+        <div class="sw" style="background:var(--accent-bg)"></div>
+        <div class="sw" style="background:var(--bg)"></div>
+        <div class="sw" style="background:var(--card)"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="hint">顶部按钮切换主色实景对比 · 文件：prototype-dark-accent-alternatives.html</div>
+
+<script>
+var btns = document.querySelectorAll('#switcher button');
+var label = document.getElementById('schemeLabel');
+function apply(s) {
+  document.body.dataset.scheme = s;
+  btns.forEach(function (b) { b.classList.toggle('on', b.dataset.s === s); });
+  label.textContent = '当前方案：' + getComputedStyle(document.body).getPropertyValue('--label').trim();
+}
+btns.forEach(function (b) { b.addEventListener('click', function () { apply(b.dataset.s); }); });
+apply('cyan');
+</script>
+</body>
+</html>

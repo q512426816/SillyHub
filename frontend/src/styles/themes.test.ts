@@ -178,39 +178,61 @@ describe("task-10: dark 主题取值完整性与对称翻转（2026-08-23-fronte
     }
   });
 
-  it("dark slate 阶对称翻转（D-004@v1）：50↔900、100↔800、200↔700、300↔600、400↔500", () => {
-    // 浅色两主题共用同一 slate 阶常量（themes.ts），取任一浅色主题对照即可
-    const light = themes.blue.color.slate;
-    const dark = themes.dark.color.slate;
-    expect(dark["50"]).toBe(light["900"]);
-    expect(dark["100"]).toBe(light["800"]);
-    expect(dark["200"]).toBe(light["700"]);
-    expect(dark["300"]).toBe(light["600"]);
-    expect(dark["400"]).toBe(light["500"]);
-    expect(dark["500"]).toBe(light["400"]);
-    expect(dark["600"]).toBe(light["300"]);
-    expect(dark["700"]).toBe(light["200"]);
-    expect(dark["800"]).toBe(light["100"]);
-    expect(dark["900"]).toBe(light["50"]);
+  it("dark slate 阶=zinc 阶对称翻转（ql-20260824-014 去紫改青随中性黑底）：50↔950、100↔900…400↔500", () => {
+    // 底换 zinc 中性黑后，slate 类名在中性灰阶上翻转（Tailwind v3 zinc 默认值逐档）
+    const TAILWIND_V3_ZINC = {
+      "50": "#fafafa",
+      "100": "#f4f4f5",
+      "200": "#e4e4e7",
+      "300": "#d4d4d8",
+      "400": "#a1a1aa",
+      "500": "#71717a",
+      "600": "#52525b",
+      "700": "#3f3f46",
+      "800": "#27272a",
+      "900": "#18181b",
+    } as const;
+    const zinc = themes.dark.color.slate;
+    expect(zinc["50"]).toBe("#09090b"); // zinc-950
+    expect(zinc["100"]).toBe(TAILWIND_V3_ZINC["900"]);
+    expect(zinc["200"]).toBe(TAILWIND_V3_ZINC["800"]);
+    expect(zinc["300"]).toBe(TAILWIND_V3_ZINC["700"]);
+    expect(zinc["400"]).toBe(TAILWIND_V3_ZINC["600"]);
+    expect(zinc["500"]).toBe(TAILWIND_V3_ZINC["500"]);
+    expect(zinc["600"]).toBe(TAILWIND_V3_ZINC["400"]);
+    expect(zinc["700"]).toBe(TAILWIND_V3_ZINC["300"]);
+    expect(zinc["800"]).toBe(TAILWIND_V3_ZINC["200"]);
+    expect(zinc["900"]).toBe(TAILWIND_V3_ZINC["100"]);
   });
 
-  it("dark brand 阶翻转+亮端降档（D-004@v1 + ql-20260824-013 刺眼反馈）：50-500 翻转不变、600-950 各降一档", () => {
-    // dark 是 AI 紫暗色版，brand 翻转基准取 ai-native 的 violet 阶（非 blue 的 blue 阶）。
-    // ql-20260824-013：对称翻转的亮紫端（600-950）反馈刺眼，各降一档——
-    // 600 与 500 同取 violet-500（#8b5cf6，文字端起点与填充主档合流），往上逐档回落
-    const light = themes["ai-native"].color.brand;
+  it("dark brand 阶=cyan 阶对称翻转（ql-20260824-014 去紫改青）：50↔950 … 500 自映，600=cyan-400 文字强调", () => {
+    // 用户定案暗色去紫：brand 换 Tailwind v3 cyan 阶翻转——
+    // 深青档(50-500)供底色/填充，text-brand-600=cyan-400(#22d3ee 对比 8:1 夜间低疲劳)
+    const CYAN = {
+      "50": "#ecfeff",
+      "100": "#cffafe",
+      "200": "#a5f3fc",
+      "300": "#67e8f9",
+      "400": "#22d3ee",
+      "500": "#06b6d4",
+      "600": "#0891b2",
+      "700": "#0e7490",
+      "800": "#155e75",
+      "900": "#164e63",
+      "950": "#083344",
+    } as const;
     const dark = themes.dark.color.brand;
-    expect(dark["50"]).toBe(light["950"]);
-    expect(dark["100"]).toBe(light["900"]);
-    expect(dark["200"]).toBe(light["800"]);
-    expect(dark["300"]).toBe(light["700"]);
-    expect(dark["400"]).toBe(light["600"]);
-    expect(dark["500"]).toBe(light["500"]);
-    expect(dark["600"]).toBe(light["500"]); // violet-500（原 light[400]，降一档）
-    expect(dark["700"]).toBe(light["400"]); // violet-400（原 light[300]）
-    expect(dark["800"]).toBe(light["300"]);
-    expect(dark["900"]).toBe(light["200"]);
-    expect(dark["950"]).toBe(light["100"]);
+    expect(dark["50"]).toBe(CYAN["950"]);
+    expect(dark["100"]).toBe(CYAN["900"]);
+    expect(dark["200"]).toBe(CYAN["800"]);
+    expect(dark["300"]).toBe(CYAN["700"]);
+    expect(dark["400"]).toBe(CYAN["600"]);
+    expect(dark["500"]).toBe(CYAN["500"]);
+    expect(dark["600"]).toBe(CYAN["400"]);
+    expect(dark["700"]).toBe(CYAN["300"]);
+    expect(dark["800"]).toBe(CYAN["200"]);
+    expect(dark["900"]).toBe(CYAN["100"]);
+    expect(dark["950"]).toBe(CYAN["50"]);
   });
 
   it("浅色零回归（D-005@v1）：blue 与 ai-native 的 slate 十档与 Tailwind v3 默认 hex 逐值相等", () => {
@@ -221,19 +243,19 @@ describe("task-10: dark 主题取值完整性与对称翻转（2026-08-23-fronte
     }
   });
 
-  it("dark 关键取值（design §5.1 + ql-20260824-013，全部 Tailwind v3 默认值）：主色 / 表面 / 边框 / 语义五色", () => {
-    expect(themes.dark.color.primary).toBe("#7c3aed");
-    expect(themes.dark.color.primaryHover).toBe("#8b5cf6");
+  it("dark 关键取值（design §5.1 + ql-20260824-014，全部 Tailwind v3 默认值）：主色 / 表面 / 边框 / 语义五色", () => {
+    expect(themes.dark.color.primary).toBe("#0891b2");
+    expect(themes.dark.color.primaryHover).toBe("#06b6d4");
     expect(themes.dark.color.accent).toBe("#22d3ee");
-    expect(themes.dark.color.bg).toBe("#0f172a");
-    expect(themes.dark.color.card).toBe("#1e293b");
-    expect(themes.dark.color.border).toBe("#334155");
+    expect(themes.dark.color.bg).toBe("#18181b");
+    expect(themes.dark.color.card).toBe("#27272a");
+    expect(themes.dark.color.border).toBe("#3f3f46");
     expect(themes.dark.color.semantic).toEqual({
       success: "#10b981",
       warning: "#f59e0b",
       error: "#ef4444",
       info: "#22d3ee",
-      neutral: "#94a3b8",
+      neutral: "#a1a1aa",
     });
   });
 });
