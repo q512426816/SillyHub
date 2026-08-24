@@ -47,6 +47,7 @@ from app.modules.daemon.protocol import (
 )
 from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 from app.modules.daemon.schema import (
+    PageContextCreateBlock,
     PlanResponseDecision,
     SessionReopenResponse,
     TeamMissionCreateBlock,
@@ -492,10 +493,15 @@ class SessionReadiness:
         """标记 session ready 并唤醒所有等待该 session 的 wait 协程。幂等。
 
         重复 mark 同一 session 不报错（set.add 幂等、event.set 幂等）。
+        P2（2026-08-25 会话审查）：set 完成后把 ``_events`` 键 pop 掉——已拿到
+        Event 引用的等待者不受影响（其 ``wait`` 已被 set 唤醒 / 立即通过），
+        新到的 ``wait`` 走 ``_ready`` 快速路径；键不残留，dict 规模以并发
+        等待者为上界（原实现每个 mark 过的 session 永占一个槽位，无界增长）。
         """
         self._ready.add(session_id)
         event = self._get_or_create_event(session_id)
         event.set()
+        self._events.pop(session_id, None)
 
     async def wait(self, session_id: uuid.UUID, timeout: float = 8) -> bool:
         """阻塞等 session ready event。
@@ -527,14 +533,15 @@ class SessionReadiness:
     def clear(self, session_id: uuid.UUID) -> None:
         """清除 session ready 状态（session end/failed 后调）。
 
-        用**新 ``asyncio.Event`` 替换** ``_events`` 槽位（不是简单
-        ``event.clear()``，也不是直接复用旧 event）—— 旧 event 已 ``set``，
-        若复用则 clear 后 ``wait`` 会立即返 ``True``（旧 set 残留），与设计
-        语义「clear 后须等下一次 mark_ready」不符。换新未 set 的 event，
-        下一次 ``wait`` 必须等下一次 ``mark_ready`` 才能 set 返 ``True``。
+        P2（2026-08-25 会话审查）：**直接 pop ``_events`` 键**（原实现用新
+        ``asyncio.Event`` 替换槽位，键永不消失 → dict 随会话数无界增长）。
+        语义不变：旧 event 若已 ``set``，已持有其引用的等待者早已通过；未
+        ``set`` 的（clear 时无人 mark）等待者本就要超时——下一次 ``wait`` 经
+        ``_get_or_create_event`` 建全新未 set 的 event，必须等下一次
+        ``mark_ready`` 才能 set 返 ``True``，与原「换新未 set event」一致。
         """
         self._ready.discard(session_id)
-        self._events[session_id] = asyncio.Event()
+        self._events.pop(session_id, None)
 
 
 _SessionReadiness: SessionReadiness | None = None
@@ -733,6 +740,9 @@ class SessionService:
         # 预建 mission + 首 run 双标记 + 首 prompt 团队简报前缀。缺省 None 零
         # 分支进入（无 team_mission 的 create 行为逐字节不变）。
         team_mission: TeamMissionCreateBlock | None = None,
+        # 2026-08-25-unified-floating-session（FR-5 / D-005）：悬浮入口页面上下文
+        # 块——仅 page_key 枚举 + 实体 id，前导数据服务端回查；缺省 None 零回归。
+        page_context: PageContextCreateBlock | None = None,
     ) -> SessionDispatchResult:
         """Create an interactive session + first-turn run + interactive lease.
 
@@ -1047,21 +1057,34 @@ class SessionService:
             # 仍写干净用户消息（列表标题 / 回放 / 展示干净）。零 daemon 改动。
             from app.modules.daemon.session.context import (
                 build_change_context_preamble,
+                build_page_context_preamble,
             )
 
             preamble = await build_change_context_preamble(self._session, change_id)
+            # ── 2026-08-25-unified-floating-session（FR-5 / D-005）：页面上下文前导 ──
+            # 数据服务端回查（build_page_context_preamble 内部 DB.get），客户端
+            # 仅 page_key 枚举 + project_id；查无/未传 → None 不注入。
+            page_preamble = (
+                await build_page_context_preamble(
+                    self._session, page_context.page_key, page_context.project_id
+                )
+                if page_context is not None
+                else None
+            )
             # ── task-09 / FR-01 / D-004@v1：首 prompt 团队简报前缀（create 路径）──
             # 叠加顺序定死（R-06）：变更前导（既有，在前）→ 团队简报（task-06
             # build_orchestrator_briefing）→ "\n\n---\n\n" → 用户消息。lease
             # metadata 经 dispatch_prompt 携带前缀（既有机制）；AgentRunLog
             # (user_input)（下方）与首 turn SESSION_INJECT payload prompt（下发
             # 段）仍写干净用户原文（对齐变更前导先例，展示层干净）。
+            # unified-floating-session：页面前导插在变更前导与团队简报之间
+            # （design §4 拼接顺序）。
             briefing = None
             if mission is not None:
                 from app.modules.agent.mission_context import build_orchestrator_briefing
 
                 briefing = await build_orchestrator_briefing(self._session, mission)
-            _prefix_parts = [part for part in (preamble, briefing) if part]
+            _prefix_parts = [part for part in (preamble, page_preamble, briefing) if part]
             dispatch_prompt = (
                 "\n\n---\n\n".join([*_prefix_parts, prompt]) if _prefix_parts else prompt
             )
@@ -2293,11 +2316,15 @@ class SessionService:
     ) -> SessionControlResult:
         """Single reconciliation of session/lease/currentRun (FR-05 / §8.5).
 
-        Locks the session, validates the bound interactive lease, sends a
-        best-effort SESSION_END, then in ONE transaction marks currentRun
-        killed, session ended, lease completed. Idempotent on already-ended
-        sessions. WS failure is a warning only — the local reconciliation
-        still succeeds so a daemon offline never strands an active session.
+        Locks the session, validates the bound interactive lease, then in ONE
+        transaction (still holding the row lock) marks currentRun killed,
+        session ended, lease completed and commits; AFTER the commit a
+        best-effort SESSION_END is sent to the daemon（P1 修复 2026-08-25：
+        对齐 interrupt_session 的「先 commit 释放行锁、再发 WS」模式，daemon
+        半死时 send_session_control 最长挂 10s，不再拖住会话行锁）. Idempotent on
+        already-terminal sessions (ended / failed). WS failure is a warning
+        only — the local reconciliation still succeeds so a daemon offline
+        never strands an active session.
 
         gap-4 修复（ql-20260623-004）：两种调用方共由此端点，按 ``actor`` 区分
         session 定位方式——
@@ -2319,8 +2346,9 @@ class SessionService:
             else:
                 session = await self._get_owned_session_for_update(session_id, user_id)
 
-            # Idempotent: already ended → no-op return.
-            if session.status == "ended":
+            # Idempotent: already terminal (ended/failed) → no-op return. failed
+            # 也是终态——不得被 end 翻成 ended（终态覆写，2026-08-25 会话审查 P2）。
+            if session.status in ("ended", "failed"):
                 await self._session.commit()
                 # task-09 / FR-04：ended 终态清理 ready 状态（防前次未清残留，
                 # clear 幂等多次调不报错），best-effort 不阻塞结束流程。
@@ -2359,33 +2387,12 @@ class SessionService:
             await self._session.rollback()
             raise
 
-        # Best-effort SESSION_END (kill currentRun + clear SessionStore on daemon).
-        if session.runtime_id is not None:
-            from app.modules.daemon.ws_hub import get_daemon_ws_hub
-
-            hub = get_daemon_ws_hub()
-            # task-06: resolve provider runtime_id → daemon_instance_id.
-            daemon_id = await _resolve_daemon_id_for_runtime(self._session, session.runtime_id)
-            end_ok = False
-            if daemon_id is not None:
-                end_ok = await hub.send_session_control(
-                    daemon_id,
-                    DAEMON_MSG_SESSION_END,
-                    {
-                        "session_id": str(session.id),
-                        "lease_id": str(session.lease_id),
-                        "runtime_id": str(session.runtime_id),
-                    },
-                )
-            if not end_ok:
-                log.warning(
-                    "session_end_control_send_failed",
-                    session_id=str(session.id),
-                    runtime_id=str(session.runtime_id),
-                    reason=reason,
-                )
-
-        # Single-transaction local reconciliation (§8.5 收口).
+        # Single-transaction local reconciliation (§8.5 收口)。P1 修复
+        # （2026-08-25 会话审查）：本地收口在持有 AgentSession FOR UPDATE 行锁的
+        # 事务内完成并 commit，SESSION_END WS 发送移到 commit 之后 best-effort
+        # （对齐 interrupt_session :2233 的「先 commit 释放行锁、再发 WS」模式）——
+        # ws_hub.send_session_control 最长挂 _SEND_TIMEOUT=10s，锁内等待会让 daemon
+        # 半死时同会话的全部操作阻塞在行锁上。
         now = datetime.now(UTC)
         try:
             if run is not None and run.status not in TERMINAL_TURN_STATUSES:
@@ -2394,19 +2401,25 @@ class SessionService:
                 run.exit_code = -1
                 self._session.add(run)
 
-            session.status = "ended"
-            session.ended_at = now
+            # 终态守卫（P2）：幂等早退已拦 ended/failed，此处必为活跃态；显式再
+            # 守卫一次防御状态机扩展，failed 等终态不被 end 翻成 ended。
+            if session.status not in ("ended", "failed"):
+                session.status = "ended"
+                session.ended_at = now
             session.last_active_at = now
             self._session.add(session)
 
-            lease.status = "completed"
-            lease.updated_at = now
-            # task-11 / FR-04 / D-007：daemon 回传 session_end（interactive ACK，
-            # POST /sessions/{id}/end = notifySessionEnd 收敛点）→ 清 terminating_at。
-            # cancel_lease 写 terminating_at 标记"等 daemon 回传"，本处即回传收敛点，
-            # 清空让 sweeper（lease_service.alert_stuck_terminating_leases）不再误告警。
-            # 幂等 None-set；仍在同一 try 单事务收口块内（commit 在下文）。
-            lease.terminating_at = None
+            # P2：lease 仅在非终态时收口 completed——已 cancelled（cancel_lease 抢先
+            # 收口）的 lease 不被改写；terminating_at 的清空同样只在收口分支内。
+            if lease.status not in ("completed", "cancelled", "expired"):
+                lease.status = "completed"
+                lease.updated_at = now
+                # task-11 / FR-04 / D-007：daemon 回传 session_end（interactive ACK，
+                # POST /sessions/{id}/end = notifySessionEnd 收敛点）→ 清 terminating_at。
+                # cancel_lease 写 terminating_at 标记"等 daemon 回传"，本处即回传收敛点，
+                # 清空让 sweeper（lease_service.alert_stuck_terminating_leases）不再误告警。
+                # 幂等 None-set；仍在同一 try 单事务收口块内（commit 在下文）。
+                lease.terminating_at = None
             self._session.add(lease)
 
             await self._session.commit()
@@ -2425,6 +2438,18 @@ class SessionService:
         except Exception:
             await self._session.rollback()
             raise
+
+        # Best-effort SESSION_END（commit 之后）：kill currentRun + 清 daemon 侧
+        # SessionStore。helper 内部吞掉一切异常（runtime/lease 缺失、daemon 离线、
+        # WS 超时），仅记 warning——本地收口已 commit，daemon 离线不阻断结束语义
+        # （与原锁内发送的 try 语义一致，只是不再占用会话行锁等待）。
+        await _send_session_end_best_effort(
+            self._session,
+            session_id=session.id,
+            lease_id=session.lease_id,
+            runtime_id=session.runtime_id,
+            reason=reason,
+        )
 
         # task-02：status→ended 已随上方 commit 落库，发布列表变更信号（user_id
         # 取会话属主——daemon 身份收口时刷新的仍是属主的列表视图）。
@@ -2599,6 +2624,9 @@ class SessionService:
                     session_id=str(session_id),
                     runtime_id=str(runtime_id),
                 )
+                # P2（2026-08-25 会话审查）：SELECT FOR UPDATE 后早退必须 rollback
+                # 释放行锁，否则事务悬挂到请求 teardown。
+                await self._session.rollback()
                 return SessionRecoveryResult(
                     session_id=session_id,
                     lease_id=lease_id,
@@ -2612,10 +2640,15 @@ class SessionService:
                     session_id=str(session_id),
                     status=session.status,
                 )
+                # rollback 前取标量（rollback 会过期 ORM 属性，异步下访问即炸）。
+                ended_session_id = session.id
+                ended_lease_id = session.lease_id
+                ended_status = session.status
+                await self._session.rollback()
                 return SessionRecoveryResult(
-                    session_id=session.id,
-                    lease_id=session.lease_id,
-                    status=session.status,
+                    session_id=ended_session_id,
+                    lease_id=ended_lease_id,
+                    status=ended_status,
                 )
 
             # Ownership guards: runtime/lease/provider/lease kind must all match.
@@ -2642,9 +2675,13 @@ class SessionService:
                     lease_id=str(lease_id),
                     lease_kind=lease.kind if lease else None,
                 )
+                # rollback 前取标量 + 释放行锁（同上 P2）。
+                rejected_session_id = session.id
+                rejected_lease_id = session.lease_id
+                await self._session.rollback()
                 return SessionRecoveryResult(
-                    session_id=session.id,
-                    lease_id=session.lease_id,
+                    session_id=rejected_session_id,
+                    lease_id=rejected_lease_id,
                     status="rejected",
                 )
 
@@ -2837,6 +2874,8 @@ class SessionService:
             )
             session = (await self._session.execute(stmt)).scalar_one_or_none()
             if session is None:
+                # P2（2026-08-25 会话审查）：FOR UPDATE 后早退 rollback 释放行锁。
+                await self._session.rollback()
                 return "rejected"
             if lease_id is not None and session.lease_id != lease_id:
                 # DS-4 stale-confirmation guard: idempotent skip — 迟到的旧
@@ -2848,10 +2887,15 @@ class SessionService:
                     current_lease_id=str(session.lease_id),
                     presented_lease_id=str(lease_id),
                 )
-                return session.status
+                # rollback 前取标量（rollback 过期 ORM 属性）。
+                stale_status = session.status
+                await self._session.rollback()
+                return stale_status
             if session.status != "reconnecting":
                 # Idempotent: already active (or terminal). Return current.
-                return session.status
+                current_status = session.status
+                await self._session.rollback()
+                return current_status
 
             session.status = "active"
             session.last_active_at = datetime.now(UTC)
@@ -2929,6 +2973,8 @@ class SessionService:
             )
             session = (await self._session.execute(stmt)).scalar_one_or_none()
             if session is None:
+                # P2（2026-08-25 会话审查）：FOR UPDATE 后早退 rollback 释放行锁。
+                await self._session.rollback()
                 return "rejected"
             if lease_id is not None and session.lease_id != lease_id:
                 # DS-4 stale-confirmation guard: idempotent skip — 迟到的旧
@@ -2940,9 +2986,14 @@ class SessionService:
                     current_lease_id=str(session.lease_id),
                     presented_lease_id=str(lease_id),
                 )
-                return session.status
+                # rollback 前取标量（rollback 过期 ORM 属性）。
+                stale_status = session.status
+                await self._session.rollback()
+                return stale_status
             if session.status in ("ended", "failed"):
-                return session.status
+                current_status = session.status
+                await self._session.rollback()
+                return current_status
 
             now = datetime.now(UTC)
             session.status = "failed"
@@ -3282,21 +3333,29 @@ class SessionService:
                     stale_lease.updated_at = now
                     self._session.add(stale_lease)
         # Runtime must be connected so the daemon can run the SDK resume.
+        # P2（2026-08-25 会话审查）：runtime_id 为 None 是会话级不变量违规
+        # （create/reopen 均写 runtime_id；NULL 意味着数据损坏）——原实现被
+        # ``if runtime_id is not None`` 短路静默跳过在线检查、下方 assert 兜底
+        # （python -O 下会被剥除），改为显式 raise 不变量违规错误。
         runtime_id = session.runtime_id
-        if runtime_id is not None:
-            from app.modules.daemon.ws_hub import get_daemon_ws_hub
+        if runtime_id is None:
+            raise DaemonSessionInvariantViolation(
+                f"Session '{session_id}' has no runtime binding; cannot reopen.",
+                details={"session_id": str(session_id), "runtime_id": None},
+            )
+        from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
-            hub = get_daemon_ws_hub()
-            # task-06: WS Hub routes by daemon_instance_id; resolve from runtime.
-            target_daemon_id = await _resolve_daemon_id_for_runtime(self._session, runtime_id)
-            if target_daemon_id is None or not hub.is_connected(target_daemon_id):
-                raise DaemonOffline(
-                    "执行代理当前不在线，无法恢复会话。请先启动 daemon 再重新打开。",
-                    details={
-                        "session_id": str(session_id),
-                        "runtime_id": str(runtime_id),
-                    },
-                )
+        hub = get_daemon_ws_hub()
+        # task-06: WS Hub routes by daemon_instance_id; resolve from runtime.
+        target_daemon_id = await _resolve_daemon_id_for_runtime(self._session, runtime_id)
+        if target_daemon_id is None or not hub.is_connected(target_daemon_id):
+            raise DaemonOffline(
+                "执行代理当前不在线，无法恢复会话。请先启动 daemon 再重新打开。",
+                details={
+                    "session_id": str(session_id),
+                    "runtime_id": str(runtime_id),
+                },
+            )
 
         # ── task-07: full reopen transition (design §6.1/§6.2/§6.4/§14) ───────
         # Do NOT revive the original (completed) lease — design §6.2: the ended
@@ -3306,8 +3365,9 @@ class SessionService:
         # recover_session_after_daemon_restart token rotation, task-10 §7).
         # ``now`` was hoisted above the pre-flight checks (DS-5) and is shared
         # by the window check + lease transition below.
-        target_runtime_id = session.runtime_id
-        assert target_runtime_id is not None  # offline check above guarantees online
+        # 上方不变量检查已保证 runtime_id 非 None（持有行锁，中途无人改写），
+        # 直接复用，不再用 ``python -O`` 下会被剥除的 assert 兜底。
+        target_runtime_id = runtime_id
 
         new_token = secrets.token_hex(32)
         new_lease = DaemonTaskLease(
@@ -3457,14 +3517,56 @@ class SessionService:
     async def _end_session_for_delete(self, session: AgentSession) -> None:
         """Internal end reconciliation used by delete_agent_session.
 
-        task-03 / D-003@v1: mirrors the core of :meth:`end_session` (WS +
-        run killed + lease completed) but never raises on WS failure and never
+        task-03 / D-003@v1: mirrors the core of :meth:`end_session` (run
+        killed + lease completed + WS) but never raises on WS failure and never
         touches ``session.status`` beyond the converged ``ended`` — the caller
         (delete) hard-deletes the row right after, so the session status is
         effectively throwaway; only the run/lease convergence matters for audit.
         Holds the same session row lock the caller already acquired.
+
+        P1 修复（2026-08-25 会话审查）：本地收口（run killed + lease completed）
+        先在本事务内 commit 释放行锁，SESSION_END WS 发送移到 commit 之后
+        best-effort——与 :meth:`end_session` / interrupt_session 同款「先 commit、
+        再发 WS」模式，锁内不等 ws_hub 最长 10s 的发送。
         """
         from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+        now = datetime.now(UTC)
+        # Kill the current non-terminal run if any (single-transaction convergence).
+        # P2：WHERE 直接过滤 ACTIVE_TURN_STATUSES（pending/running/pending_approval），
+        # 不再全量加载该会话所有 run——循环只为找非终态 run，历史 run 无需入内存。
+        runs = (
+            (
+                await self._session.execute(
+                    select(AgentRun)
+                    .where(AgentRun.agent_session_id == session.id)
+                    .where(col(AgentRun.status).in_(list(ACTIVE_TURN_STATUSES)))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for run in runs:
+            run.status = "killed"
+            run.finished_at = now
+            run.exit_code = -1
+            self._session.add(run)
+
+        # Complete the bound interactive lease (if any).
+        if session.lease_id is not None:
+            lease = await self._session.get(DaemonTaskLease, session.lease_id)
+            if lease is not None and lease.status not in (
+                "completed",
+                "cancelled",
+                "expired",
+            ):
+                lease.status = "completed"
+                lease.updated_at = now
+                self._session.add(lease)
+
+        # commit 释放调用方持有的会话行锁（原仅 flush 等 caller 一并提交），
+        # WS 发送挪到锁外。
+        await self._session.commit()
 
         # Best-effort SESSION_END (kill currentRun + clear SessionStore on daemon).
         if session.runtime_id is not None:
@@ -3497,38 +3599,6 @@ class SessionService:
                     exc_info=True,
                 )
 
-        now = datetime.now(UTC)
-        # Kill the current non-terminal run if any (single-transaction convergence).
-        runs = (
-            (
-                await self._session.execute(
-                    select(AgentRun).where(AgentRun.agent_session_id == session.id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        for run in runs:
-            if run.status not in TERMINAL_TURN_STATUSES:
-                run.status = "killed"
-                run.finished_at = now
-                run.exit_code = -1
-                self._session.add(run)
-
-        # Complete the bound interactive lease (if any).
-        if session.lease_id is not None:
-            lease = await self._session.get(DaemonTaskLease, session.lease_id)
-            if lease is not None and lease.status not in (
-                "completed",
-                "cancelled",
-                "expired",
-            ):
-                lease.status = "completed"
-                lease.updated_at = now
-                self._session.add(lease)
-
-        await self._session.flush()
-
     # ── 2026-08-24：会话归档/取消归档 ──────────────────────────────────
 
     async def archive_session(
@@ -3559,9 +3629,13 @@ class SessionService:
                 details={"session_id": str(session_id)},
             )
         if agent_session.archived_at is not None:
+            await self._session.rollback()  # 释放 FOR UPDATE 行锁（幂等早退不悬挂事务）
             return  # 幂等：已归档
         agent_session.archived_at = datetime.now(UTC)
         await self._session.commit()
+        # task-02：归档已落库（列表按 archived_at IS NULL 过滤），发布列表变更
+        # 信号——否则已打开 SSE 的其它客户端看不到该行从默认列表消失。
+        await publish_sessions_changed("status_changed", agent_session.id, agent_session.user_id)
 
     async def unarchive_session(
         self,
@@ -3589,9 +3663,13 @@ class SessionService:
                 details={"session_id": str(session_id)},
             )
         if agent_session.archived_at is None:
+            await self._session.rollback()  # 释放 FOR UPDATE 行锁（幂等早退不悬挂事务）
             return  # 幂等：未归档
         agent_session.archived_at = None
         await self._session.commit()
+        # task-02：取消归档已落库（行回到默认列表视图），发布列表变更信号——
+        # 与 archive_session 对称，SSE 客户端秒级看到该行重新出现。
+        await publish_sessions_changed("status_changed", agent_session.id, agent_session.user_id)
 
     async def get_agent_session_logs(
         self,
@@ -3689,3 +3767,40 @@ class SessionService:
         rows = list((await self._session.execute(stmt)).scalars().all())
         rows.reverse()
         return rows
+
+    async def get_session_for_runtime_owner(
+        self,
+        session_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+    ) -> AgentSession:
+        """只读校验：目标 session 绑定的 runtime 归属 ``actor_user_id``（2026-08-25）。
+
+        daemon 上行 5 端点越权修复（P1）：ready / plan-mode-entered /
+        bash-status / bash-chunk / agent-task-status 原先只做
+        ``get_current_principal``——任意已认证主体可向他人会话 mark_ready /
+        向 ``agent_session:{id}`` 频道发布伪造事件。参照 end_session 的
+        ``actor_runtime_owner_id`` 先例（ql-20260623-004：api-key owner =
+        runtime owner，admin 共享 runtime 场景 creator≠owner，不能比对
+        ``AgentSession.user_id``）：join ``daemon_runtimes`` 校验 runtime 归属。
+
+        只读版 :meth:`_get_session_by_runtime_owner_for_update`（无 FOR UPDATE
+        行锁，不阻塞并发收口事务）；缺失 / 跨 owner 一律 404，中文文案，
+        不泄露存在性。
+        """
+        from app.modules.daemon.model import DaemonRuntime
+
+        stmt = (
+            select(AgentSession)
+            .join(DaemonRuntime, AgentSession.runtime_id == DaemonRuntime.id)
+            .where(
+                AgentSession.id == session_id,
+                DaemonRuntime.user_id == actor_user_id,
+            )
+        )
+        agent_session = (await self._session.execute(stmt)).scalar_one_or_none()
+        if agent_session is None:
+            raise DaemonSessionNotFound(
+                "指定的会话不存在或无权访问。",
+                details={"session_id": str(session_id)},
+            )
+        return agent_session

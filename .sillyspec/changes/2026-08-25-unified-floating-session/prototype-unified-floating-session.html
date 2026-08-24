@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>SillyHub · 统一智能悬浮会话 · 交互原型（评审稿）</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+/* ============================================================
+   设计 Token —— 与 2026-08-20-frontend-ai-native-style 总纲同源
+   ============================================================ */
+:root {
+  --primary: #7C3AED;
+  --primary-hover: #6D28D9;
+  --primary-soft: #EDE9FE;
+  --primary-soft-2: #F5F3FF;
+  --secondary: #A78BFA;
+  --accent: #0891B2;
+  --accent-soft: #CFFAFE;
+  --accent-text: #0E7490;
+  --brand-gradient: linear-gradient(135deg, #7C3AED 0%, #0891B2 100%);
+  --bg: #FAF5FF;
+  --fg: #1E1B4B;
+  --card: #FFFFFF;
+  --muted: #ECEEF9;
+  --muted-fg: #475569;
+  --faint: #94A3B8;
+  --border: #DDD6FE;
+  --border-weak: #EEE9F8;
+  --success: #059669; --success-soft: #D1FAE5; --success-text: #065F46;
+  --warning: #D97706; --warning-soft: #FEF3C7; --warning-text: #92400E;
+  --error: #DC2626;   --error-soft: #FEE2E2;   --error-text: #991B1B;
+  --radius-sm: 6px; --radius-md: 8px; --radius-lg: 12px; --radius-xl: 16px;
+  --shadow-sm: 0 1px 2px rgba(30, 27, 75, .06);
+  --shadow-md: 0 4px 14px rgba(30, 27, 75, .08);
+  --shadow-primary: 0 4px 14px rgba(124, 58, 237, .32);
+  --shadow-lg: 0 16px 40px rgba(109, 40, 217, .16);
+  --dur-fast: 150ms; --dur: 200ms; --dur-slow: 300ms;
+  --ease: cubic-bezier(.2, 0, 0, 1);
+  --font-sans: Inter, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); background: var(--bg); color: var(--fg); font-size: 14px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+.num { font-variant-numeric: tabular-nums; }
+.ic { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.ic-sm { width: 13px; height: 13px; }
+.ic-lg { width: 20px; height: 20px; }
+button { font-family: inherit; }
+
+/* ---------- 页首 ---------- */
+.hero { position: relative; overflow: hidden; background: linear-gradient(135deg, #1E1B4B 0%, #6D28D9 52%, #0891B2 100%); color: #fff; padding: 30px 0 24px; }
+.hero::before { content: ""; position: absolute; inset: 0; background: radial-gradient(600px 240px at 85% 10%, rgba(8,145,178,.35), transparent 70%), radial-gradient(500px 260px at 12% 90%, rgba(167,139,250,.3), transparent 70%); pointer-events: none; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 0 24px; position: relative; }
+.hero-kicker { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; letter-spacing: .08em; background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.25); border-radius: 999px; padding: 4px 12px; margin-bottom: 14px; }
+.hero h1 { font-size: 27px; font-weight: 800; letter-spacing: -.02em; }
+.hero p.sub { margin-top: 8px; font-size: 13.5px; color: rgba(255,255,255,.82); max-width: 860px; }
+.hero-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.hero-meta span { font-size: 12px; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.2); border-radius: 999px; padding: 3px 10px; color: rgba(255,255,255,.9); }
+
+/* 场景切换 + 工具开关 */
+.stage-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
+.scenario-tabs { display: inline-flex; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.22); border-radius: 999px; padding: 3px; gap: 2px; }
+.scenario-tabs button { border: none; background: transparent; color: rgba(255,255,255,.85); font-size: 13px; font-weight: 500; padding: 6px 14px; border-radius: 999px; cursor: pointer; transition: all var(--dur) var(--ease); }
+.scenario-tabs button:hover { background: rgba(255,255,255,.14); }
+.scenario-tabs button.active { background: #fff; color: var(--primary-hover); font-weight: 700; }
+.toggle-btn { border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.1); color: #fff; font-size: 12.5px; padding: 6px 12px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all var(--dur) var(--ease); }
+.toggle-btn:hover { background: rgba(255,255,255,.2); }
+.toggle-btn.on { background: var(--accent); border-color: var(--accent); }
+
+/* ---------- 剧情说明条 ---------- */
+.scene-brief { margin-top: 12px; background: var(--card); border: 1px solid var(--border); border-left: 4px solid var(--primary); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 11px 16px; }
+.scene-brief b { font-size: 13.5px; }
+.scene-brief p { font-size: 13px; color: var(--muted-fg); margin-top: 2px; }
+.scene-steps { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.step-chip { font-size: 12px; background: var(--primary-soft-2); border: 1px solid var(--border); color: var(--fg); border-radius: 999px; padding: 4px 12px; display: inline-flex; gap: 6px; align-items: center; }
+.step-chip i { font-style: normal; width: 16px; height: 16px; border-radius: 50%; background: var(--primary); color: #fff; font-size: 10px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+
+/* ---------- 舞台（模拟浏览器） ---------- */
+.stage { margin-top: 16px; border-radius: var(--radius-xl); overflow: hidden; box-shadow: var(--shadow-lg); border: 1px solid var(--border); background: var(--card); }
+.browser-chrome { display: flex; align-items: center; gap: 12px; background: #F1EBFB; border-bottom: 1px solid var(--border); padding: 9px 14px; }
+.dots { display: flex; gap: 6px; }
+.dots i { width: 11px; height: 11px; border-radius: 50%; }
+.dots i:nth-child(1){background:#F87171}.dots i:nth-child(2){background:#FBBF24}.dots i:nth-child(3){background:#34D399}
+.urlbar { flex: 1; display: flex; align-items: center; gap: 8px; background: #fff; border: 1px solid var(--border); border-radius: 999px; padding: 5px 14px; font-size: 12px; color: var(--muted-fg); font-family: ui-monospace, Consolas, monospace; }
+.urlbar .lock { color: var(--success); }
+.urlbar b { color: var(--fg); font-weight: 600; }
+.browser-hint { font-size: 11px; color: var(--faint); white-space: nowrap; }
+
+.app { position: relative; display: flex; height: 620px; background: var(--bg); overflow: hidden; }
+
+/* 侧边栏 */
+.sidenav { width: 208px; flex: none; background: #fff; border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 1; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 14px 14px 12px; }
+.brand-mark { width: 32px; height: 32px; border-radius: 9px; background: var(--brand-gradient); color: #fff; display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-primary); }
+.brand-name { font-size: 15px; font-weight: 800; }
+.brand-ver { font-size: 10px; color: var(--faint); font-weight: 500; }
+.menu { flex: 1; padding: 4px 10px 10px; overflow-y: auto; }
+.menu-group { font-size: 11px; color: var(--faint); font-weight: 600; letter-spacing: .06em; padding: 12px 8px 4px; }
+.menu-item { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: var(--radius-md); color: var(--muted-fg); font-size: 13px; cursor: pointer; transition: background var(--dur) var(--ease), color var(--dur) var(--ease); position: relative; user-select: none; }
+.menu-item:hover { background: var(--primary-soft-2); color: var(--primary-hover); }
+.menu-item.active { background: var(--primary-soft); color: var(--primary-hover); font-weight: 600; }
+.menu-item .tag { margin-left: auto; font-size: 10px; background: var(--accent-soft); color: var(--accent-text); border-radius: 999px; padding: 1px 7px; font-weight: 600; }
+.menu-item.danger-hot { animation: menuPulse 1.6s ease-in-out infinite; }
+@keyframes menuPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(124,58,237,.0);} 50% { box-shadow: 0 0 0 4px rgba(124,58,237,.18);} }
+.side-foot { border-top: 1px solid var(--border-weak); padding: 10px; display: flex; align-items: center; gap: 8px; }
+.avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--brand-gradient); color: #fff; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex: none; }
+.side-foot .name { font-size: 12px; font-weight: 600; }
+
+/* 主页面区 */
+.main { flex: 1; position: relative; overflow-y: auto; z-index: 0; }
+.page { display: none; padding: 22px 26px; min-height: 100%; }
+.page.visible { display: block; }
+.page-title { font-size: 17px; font-weight: 700; margin-bottom: 2px; }
+.page-sub { font-size: 12.5px; color: var(--muted-fg); margin-bottom: 16px; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 16px 18px; margin-bottom: 14px; }
+.card h4 { font-size: 13.5px; margin-bottom: 8px; }
+.card .hintline { font-size: 12px; color: var(--muted-fg); }
+.kpi-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.kpi { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px 14px; }
+.kpi .k-label { font-size: 11.5px; color: var(--muted-fg); }
+.kpi .k-value { font-size: 20px; font-weight: 800; letter-spacing: -.01em; margin-top: 2px; }
+.kpi .k-delta { font-size: 11px; font-weight: 600; }
+.kpi .k-delta.warn { color: var(--warning); }
+.kpi .k-delta.ok { color: var(--success); }
+table.simple { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.simple th { text-align: left; font-size: 11.5px; color: var(--faint); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+table.simple td { padding: 7px 8px; border-bottom: 1px solid var(--border-weak); }
+.pill { font-size: 11px; border-radius: 999px; padding: 2px 9px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; }
+.pill.ok { background: var(--success-soft); color: var(--success-text); }
+.pill.warn { background: var(--warning-soft); color: var(--warning-text); }
+.pill.err { background: var(--error-soft); color: var(--error-text); }
+.pill.info { background: var(--accent-soft); color: var(--accent-text); }
+.pill.brand { background: var(--primary-soft); color: var(--primary-hover); }
+
+/* 全屏门户页（互斥演示） */
+.portal-banner { display: flex; align-items: center; gap: 10px; background: var(--accent-soft); border: 1px solid #A5F3FC; color: var(--accent-text); border-radius: var(--radius-md); padding: 9px 14px; font-size: 12.5px; margin-bottom: 14px; }
+.portal-grid { display: grid; grid-template-columns: 240px 1fr; gap: 14px; }
+.portal-list { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 10px; }
+.portal-list .li { font-size: 12.5px; padding: 8px 10px; border-radius: var(--radius-md); color: var(--muted-fg); display: flex; gap: 8px; align-items: center; }
+.portal-list .li.active { background: var(--primary-soft); color: var(--primary-hover); font-weight: 600; }
+.portal-list .li .st { margin-left: auto; }
+.portal-chat { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); height: 420px; display: flex; align-items: center; justify-content: center; color: var(--faint); font-size: 13px; flex-direction: column; gap: 8px; }
+
+/* ---------- 悬浮层 ---------- */
+/* 待审批胶囊（已有功能，占据右下角上层） */
+.approval-capsule { position: absolute; right: 18px; bottom: 88px; z-index: 40; display: none; flex-direction: column; gap: 8px; align-items: flex-end; }
+.approval-capsule.show { display: flex; }
+.cap { display: inline-flex; align-items: center; gap: 8px; background: #fff; border: 1px solid var(--border); box-shadow: var(--shadow-md); border-radius: 999px; padding: 7px 14px; font-size: 12.5px; font-weight: 600; cursor: pointer; transition: transform var(--dur) var(--ease); }
+.cap:hover { transform: translateY(-1px); }
+.cap .cnt { background: var(--warning-soft); color: var(--warning-text); border-radius: 999px; font-size: 11px; padding: 0 7px; font-weight: 700; }
+.cap.running { border-color: var(--secondary); color: var(--primary-hover); }
+.cap.running .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--primary); animation: blink 1.2s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:.35} 50%{opacity:1} }
+
+/* 悬浮球 */
+.fab { position: absolute; right: 18px; bottom: 20px; z-index: 45; width: 54px; height: 54px; border-radius: 50%; background: var(--brand-gradient); color: #fff; border: none; cursor: pointer; box-shadow: var(--shadow-primary); display: flex; align-items: center; justify-content: center; transition: transform var(--dur) var(--ease), box-shadow var(--dur) var(--ease); }
+.fab:hover { transform: scale(1.07); }
+.fab .fab-ic { width: 24px; height: 24px; stroke: #fff; fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.fab-badge { position: absolute; top: -3px; right: -3px; min-width: 19px; height: 19px; border-radius: 999px; background: var(--error); color: #fff; font-size: 11px; font-weight: 700; display: none; align-items: center; justify-content: center; padding: 0 5px; border: 2px solid #fff; }
+.fab-badge.show { display: inline-flex; }
+.fab-ring { position: absolute; inset: -5px; border-radius: 50%; border: 2px solid rgba(124,58,237,.45); opacity: 0; pointer-events: none; }
+.fab.running .fab-ring { animation: ring 1.8s ease-out infinite; }
+@keyframes ring { 0%{ transform: scale(.85); opacity:.8;} 100%{ transform: scale(1.25); opacity:0;} }
+
+/* 抽屉 */
+.drawer { position: absolute; top: 0; right: 0; bottom: 0; width: 620px; max-width: 92%; background: #fff; border-left: 1px solid var(--border); box-shadow: var(--shadow-lg); z-index: 50; display: flex; flex-direction: column; transform: translateX(105%); transition: transform 320ms var(--ease); }
+.drawer.open { transform: translateX(0); }
+.drawer.hidden-live { display: none !important; }
+.drawer-head { padding: 12px 16px 10px; border-bottom: 1px solid var(--border-weak); }
+.drawer-head-row { display: flex; align-items: center; gap: 8px; }
+.drawer-title { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+.drawer-title .mode-tag { font-size: 10.5px; font-weight: 600; background: var(--primary-soft); color: var(--primary-hover); border-radius: 999px; padding: 1px 8px; }
+.head-actions { margin-left: auto; display: flex; gap: 6px; }
+.mini-btn { height: 28px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border); background: #fff; color: var(--muted-fg); font-size: 12px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; transition: all var(--dur) var(--ease); }
+.mini-btn:hover { border-color: var(--secondary); color: var(--primary-hover); background: var(--primary-soft-2); }
+.mini-btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.mini-btn.primary:hover { background: var(--primary-hover); }
+.icon-btn { width: 28px; height: 28px; border-radius: var(--radius-md); border: 1px solid var(--border); background: #fff; color: var(--muted-fg); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; transition: all var(--dur) var(--ease); }
+.icon-btn:hover { color: var(--primary-hover); border-color: var(--secondary); background: var(--primary-soft-2); }
+
+/* 上下文条 */
+.ctx-bar { margin-top: 10px; background: var(--primary-soft-2); border: 1px dashed var(--secondary); border-radius: var(--radius-md); padding: 8px 12px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ctx-eye { width: 26px; height: 26px; border-radius: 8px; background: var(--brand-gradient); color: #fff; display: flex; align-items: center; justify-content: center; flex: none; }
+.ctx-label { font-size: 11px; color: var(--muted-fg); }
+.ctx-page { font-size: 12.5px; font-weight: 700; color: var(--primary-hover); }
+.ctx-chip { font-size: 11.5px; background: #fff; border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; cursor: pointer; transition: all var(--dur) var(--ease); position: relative; }
+.ctx-chip:hover { border-color: var(--secondary); color: var(--primary-hover); }
+.ctx-chip b { font-weight: 700; }
+.ctx-actions { margin-left: auto; display: flex; gap: 6px; }
+.link-btn { border: none; background: none; color: var(--accent-text); font-size: 11.5px; font-weight: 600; cursor: pointer; padding: 2px 4px; border-radius: 4px; }
+.link-btn:hover { text-decoration: underline; }
+
+/* AI 视角浮层 */
+.ai-view { position: absolute; inset: 0; background: rgba(30,27,75,.55); z-index: 60; display: none; align-items: center; justify-content: center; padding: 24px; }
+.ai-view.show { display: flex; }
+.ai-view-card { width: 460px; max-height: 88%; overflow-y: auto; background: #fff; border-radius: var(--radius-lg); border: 1px solid var(--border); box-shadow: var(--shadow-lg); }
+.ai-view-head { padding: 12px 16px; border-bottom: 1px solid var(--border-weak); display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 13.5px; }
+.ai-view-body { padding: 14px 16px; font-size: 12.5px; }
+.ai-pre { font-family: ui-monospace, Consolas, monospace; font-size: 11.8px; background: #1E1B4B; color: #E9E4FF; border-radius: var(--radius-md); padding: 14px 16px; line-height: 1.75; white-space: pre-wrap; }
+.ai-note { margin-top: 10px; font-size: 12px; color: var(--muted-fg); display: flex; gap: 8px; }
+.ai-note .ok-ic { color: var(--success); }
+
+/* 抽屉主体：紧凑列表 + 聊天 */
+.drawer-body { flex: 1; display: grid; grid-template-columns: 190px 1fr; min-height: 0; }
+.mini-list { border-right: 1px solid var(--border-weak); display: flex; flex-direction: column; min-height: 0; }
+.mini-list-head { padding: 10px 12px 6px; font-size: 11px; color: var(--faint); font-weight: 600; letter-spacing: .05em; }
+.scope-chip { margin: 0 10px 8px; font-size: 11px; background: var(--accent-soft); color: var(--accent-text); border-radius: 999px; padding: 3px 10px; text-align: center; font-weight: 600; }
+.mini-list-items { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+.mli { padding: 8px 10px; border-radius: var(--radius-md); font-size: 12px; cursor: pointer; color: var(--muted-fg); display: flex; gap: 7px; align-items: flex-start; line-height: 1.45; }
+.mli:hover { background: var(--primary-soft-2); }
+.mli.active { background: var(--primary-soft); color: var(--primary-hover); font-weight: 600; }
+.mli .dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; flex: none; }
+.dot.run { background: var(--primary); animation: blink 1.2s infinite; }
+.dot.done { background: var(--success); }
+.dot.idle { background: var(--faint); }
+.mli .t { font-size: 10px; color: var(--faint); font-weight: 400; }
+.new-btn { margin: 6px 10px 10px; height: 30px; border-radius: var(--radius-md); border: 1px dashed var(--secondary); background: var(--primary-soft-2); color: var(--primary-hover); font-size: 12px; font-weight: 600; cursor: pointer; }
+.new-btn:hover { background: var(--primary-soft); }
+
+.chat-col { display: flex; flex-direction: column; min-height: 0; }
+.chat-scroll { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.msg { max-width: 86%; font-size: 12.8px; }
+.msg.user { align-self: flex-end; background: var(--primary); color: #fff; border-radius: 14px 14px 4px 14px; padding: 9px 13px; }
+.msg.ai { align-self: flex-start; background: var(--muted); border-radius: 14px 14px 14px 4px; padding: 9px 13px; white-space: pre-wrap; }
+.msg.ai b { color: var(--primary-hover); }
+.typing { align-self: flex-start; display: inline-flex; gap: 4px; padding: 10px 14px; background: var(--muted); border-radius: 14px 14px 14px 4px; }
+.typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); animation: ty 1s infinite; }
+.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
+@keyframes ty { 0%,100%{transform:translateY(0);opacity:.5} 50%{transform:translateY(-3px);opacity:1} }
+
+/* 会话内卡片 */
+.tool-card { align-self: stretch; background: #fff; border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); overflow: hidden; }
+.tool-card-head { display: flex; align-items: center; gap: 8px; padding: 9px 13px; background: var(--primary-soft-2); border-bottom: 1px solid var(--border-weak); font-size: 12px; font-weight: 700; }
+.tool-card-head .mono { font-family: ui-monospace, Consolas, monospace; font-weight: 500; color: var(--muted-fg); font-size: 11.5px; }
+.tool-card-body { padding: 10px 13px; font-size: 12px; color: var(--muted-fg); }
+.bash-line { font-family: ui-monospace, Consolas, monospace; font-size: 11.3px; padding: 1.5px 0; color: var(--fg); white-space: pre-wrap; }
+.bash-line.out { color: var(--muted-fg); }
+.prog { height: 5px; border-radius: 999px; background: var(--muted); overflow: hidden; margin: 8px 0 4px; }
+.prog i { display: block; height: 100%; background: var(--brand-gradient); border-radius: 999px; transition: width .4s var(--ease); }
+.card-status { font-size: 11px; font-weight: 600; }
+.card-status.run { color: var(--primary-hover); }
+.card-status.done { color: var(--success); }
+.plan-opts { display: flex; gap: 8px; margin-top: 8px; }
+.plan-opts .mini-btn { flex: none; }
+.resolved-tag { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 700; color: var(--success-text); background: var(--success-soft); border-radius: 999px; padding: 3px 10px; margin-top: 8px; }
+.ask-opt { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 1px solid var(--border); background: #fff; border-radius: var(--radius-md); padding: 7px 11px; font-size: 12px; cursor: pointer; margin-top: 6px; transition: all var(--dur) var(--ease); }
+.ask-opt:hover { border-color: var(--secondary); background: var(--primary-soft-2); }
+.ask-opt.chosen { border-color: var(--success); background: var(--success-soft); cursor: default; font-weight: 600; }
+
+/* 建议条 */
+.suggest { display: flex; flex-wrap: wrap; gap: 7px; padding: 0 16px 8px; }
+.suggest button { font-size: 11.8px; border: 1px solid var(--border); background: var(--primary-soft-2); color: var(--primary-hover); border-radius: 999px; padding: 4px 12px; cursor: pointer; font-weight: 500; transition: all var(--dur) var(--ease); }
+.suggest button:hover { background: var(--primary-soft); }
+
+/* 输入条 */
+.input-bar { border-top: 1px solid var(--border-weak); padding: 10px 12px; display: flex; gap: 8px; align-items: flex-end; }
+.input-box { flex: 1; border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 8px 12px; font-size: 12.5px; font-family: inherit; resize: none; height: 38px; line-height: 1.5; outline: none; transition: border-color var(--dur) var(--ease); }
+.input-box:focus { border-color: var(--secondary); }
+.send-btn { width: 38px; height: 38px; border-radius: var(--radius-lg); border: none; background: var(--primary); color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; flex: none; transition: background var(--dur) var(--ease); }
+.send-btn:hover { background: var(--primary-hover); }
+.attach-btn { width: 38px; height: 38px; border-radius: var(--radius-lg); border: 1px solid var(--border); background: #fff; color: var(--muted-fg); cursor: pointer; display: flex; align-items: center; justify-content: center; flex: none; }
+.attach-btn:hover { color: var(--primary-hover); border-color: var(--secondary); }
+
+/* Toast */
+.toasts { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 70; display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none; }
+.toast { background: #1E1B4B; color: #fff; font-size: 12.5px; border-radius: 999px; padding: 8px 18px; box-shadow: var(--shadow-md); display: flex; align-items: center; gap: 8px; animation: toastIn .25s var(--ease); max-width: 80%; }
+.toast .t-ic { color: #A5F3FC; }
+@keyframes toastIn { from { opacity: 0; transform: translateY(8px);} to { opacity: 1; transform: none;} }
+.toast.out { opacity: 0; transform: translateY(6px); transition: all .3s var(--ease); }
+
+/* ---------- 标注系统 ---------- */
+.co { position: absolute; z-index: 65; width: 20px; height: 20px; border-radius: 50%; background: #0891B2; color: #fff; font-size: 11px; font-weight: 700; display: none; align-items: center; justify-content: center; cursor: help; box-shadow: 0 0 0 3px rgba(8,145,178,.25); border: 2px solid #fff; }
+body.show-co .co { display: inline-flex; }
+.co:hover .co-tip, .co:focus .co-tip { opacity: 1; transform: none; pointer-events: auto; }
+.co-tip { position: absolute; bottom: calc(100% + 8px); right: -4px; width: 250px; background: #0E7490; color: #fff; font-size: 11.5px; font-weight: 500; line-height: 1.55; border-radius: 10px; padding: 9px 12px; opacity: 0; pointer-events: none; transform: translateY(4px); transition: all var(--dur) var(--ease); text-align: left; box-shadow: var(--shadow-md); }
+.co-tip b { color: #A5F3FC; }
+.co-tip::after { content: ""; position: absolute; top: 100%; right: 8px; border: 6px solid transparent; border-top-color: #0E7490; }
+
+/* ---------- 场景 4：入口地图 ---------- */
+.entry-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(272px, 1fr)); gap: 12px; }
+.entry { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 13px 15px; cursor: pointer; transition: all var(--dur) var(--ease); position: relative; }
+.entry:hover { border-color: var(--secondary); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.entry .e-name { font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 7px; }
+.entry .e-old { font-size: 11.5px; color: var(--faint); margin-top: 5px; text-decoration: line-through; }
+.entry .e-new { font-size: 12px; color: var(--accent-text); margin-top: 3px; font-weight: 600; display: flex; gap: 5px; align-items: center; }
+.entry .e-ctx { font-size: 11px; color: var(--muted-fg); margin-top: 4px; background: var(--primary-soft-2); border-radius: 6px; padding: 2px 8px; display: inline-block; }
+.e-num { width: 20px; height: 20px; border-radius: 6px; background: var(--primary-soft); color: var(--primary-hover); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+
+/* ---------- 底部：决策卡 + 路线图 ---------- */
+main.wrap { padding-bottom: 60px; }
+section.sec { margin-top: 26px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); padding: 22px 24px; }
+.sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+.sec-num { font-size: 12px; font-weight: 700; color: var(--primary); background: var(--primary-soft); border-radius: 6px; padding: 2px 8px; }
+.sec-head h2 { font-size: 17px; font-weight: 700; }
+.sec-desc { font-size: 12.5px; color: var(--muted-fg); margin-bottom: 16px; }
+.dec-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.dec { border: 1px solid var(--border-weak); border-radius: var(--radius-lg); padding: 13px 15px; background: var(--primary-soft-2); }
+.dec b { font-size: 13px; display: flex; gap: 8px; align-items: center; }
+.dec p { font-size: 12px; color: var(--muted-fg); margin-top: 5px; }
+.dec .ref { font-size: 11px; color: var(--accent-text); font-weight: 600; margin-top: 6px; display: inline-block; }
+.road { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.road th { text-align: left; font-size: 11.5px; color: var(--faint); padding: 7px 10px; border-bottom: 1px solid var(--border); }
+.road td { padding: 8px 10px; border-bottom: 1px solid var(--border-weak); vertical-align: top; }
+.road .ph { font-weight: 700; color: var(--primary-hover); white-space: nowrap; }
+.road .done { color: var(--success); font-weight: 600; }
+
+@media (max-width: 900px) { .drawer-body { grid-template-columns: 1fr; } .mini-list { display: none; } .portal-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="hero-kicker">交互原型 · 评审稿 · 2026-08-25</div>
+    <h1>统一智能悬浮会话</h1>
+    <p class="sub">任何页面右下角常驻悬浮球 → 唤起会话抽屉；会话自动感知当前页面与数据（智能上下文）；最小化保活跨页面；与全屏门户互斥防双连；逐步收编全站 9 处会话入口。下方模拟浏览器可直接操作。</p>
+    <div class="hero-meta">
+      <span>基线 main@1e9491fc</span><span>一个内核 · 两种宿主</span><span>展示层干净</span><span>右下角与审批胶囊分层避让</span><span>移动端 /m/* 暂不纳入</span>
+    </div>
+    <div class="stage-controls">
+      <div class="scenario-tabs" id="scenarioTabs">
+        <button data-s="1" class="active">① 智能上下文</button>
+        <button data-s="2">② 最小化保活 · 跨页面</button>
+        <button data-s="3">③ 互斥协议</button>
+        <button data-s="4">④ 统一入口地图</button>
+      </div>
+      <button class="toggle-btn on" id="coToggle" title="显示/隐藏青色编号标注">
+        <svg class="ic ic-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/></svg>
+        设计标注：开
+      </button>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="scene-brief" id="sceneBrief"></div>
+
+  <div class="stage" id="stage">
+    <div class="browser-chrome">
+      <div class="dots"><i></i><i></i><i></i></div>
+      <div class="urlbar"><span class="lock">🔒</span><span>app.sillyhub.local<b id="urlText">/ppm/projects/P-001</b></span></div>
+      <div class="browser-hint">模拟浏览器 · 可点击侧边栏 / 悬浮球 / 卡片按钮</div>
+    </div>
+
+    <div class="app">
+      <!-- 侧边栏 -->
+      <nav class="sidenav">
+        <div class="brand">
+          <div class="brand-mark"><svg class="ic" viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z"/><path d="M12 12l8-4.5M12 12v9M12 12L4 7.5"/></svg></div>
+          <div><div class="brand-name">SillyHub</div><div class="brand-ver">多智能体平台</div></div>
+        </div>
+        <div class="menu">
+          <div class="menu-group">工作</div>
+          <div class="menu-item" data-page="workbench"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="2"/><rect x="13" y="3" width="8" height="8" rx="2"/><rect x="3" y="13" width="8" height="8" rx="2"/><rect x="13" y="13" width="8" height="8" rx="2"/></svg>工作台</div>
+          <div class="menu-item active" data-page="ppm"><svg class="ic" viewBox="0 0 24 24"><path d="M3 7h18M3 12h18M3 17h10"/></svg>项目 PPM<span class="tag">演示页</span></div>
+          <div class="menu-group">智能体</div>
+          <div class="menu-item" data-page="sessions" id="menuSessions"><svg class="ic" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/></svg>会话<span class="tag">全屏模式</span></div>
+          <div class="menu-item" data-page="runtimes"><svg class="ic" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M9 9h6v6H9z"/></svg>运行时</div>
+          <div class="menu-group">系统</div>
+          <div class="menu-item" data-page="settings"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z"/></svg>设置</div>
+        </div>
+        <div class="side-foot"><div class="avatar">秦</div><div><div class="name">秦毅</div><div style="font-size:10px;color:var(--faint)">管理员</div></div></div>
+      </nav>
+
+      <!-- 主页面区 -->
+      <div class="main" id="mainArea">
+        <!-- PPM 项目详情页 -->
+        <div class="page visible" id="page-ppm">
+          <div class="page-title">智慧园区一期 <span class="pill info" style="margin-left:6px">进行中</span></div>
+          <div class="page-sub">PPM · 项目详情 · PM-2024-001 · 经理：秦毅 · 周期 2026-03 ~ 2026-11</div>
+          <div class="kpi-row" style="margin-bottom:14px">
+            <div class="kpi"><div class="k-label">里程碑（本周）</div><div class="k-value num">3</div><div class="k-delta warn">▲ 1 延期</div></div>
+            <div class="kpi"><div class="k-label">问题单待处理</div><div class="k-value num">2</div><div class="k-delta warn">需跟进</div></div>
+            <div class="kpi"><div class="k-label">任务完成率</div><div class="k-value num">68%</div><div class="k-delta ok">+4% 本周</div></div>
+            <div class="kpi"><div class="k-label">成员</div><div class="k-value num">8</div><div class="k-delta ok">满编</div></div>
+          </div>
+          <div class="card">
+            <h4>本周里程碑</h4>
+            <table class="simple">
+              <tr><th>里程碑</th><th>计划完成</th><th>状态</th><th>负责人</th></tr>
+              <tr><td>门禁系统联调</td><td class="num">08-21</td><td><span class="pill warn">延期</span></td><td>李工</td></tr>
+              <tr><td>数据中台验收</td><td class="num">08-26</td><td><span class="pill ok">进行中</span></td><td>王工</td></tr>
+              <tr><td>园区 App 提测</td><td class="num">08-28</td><td><span class="pill ok">进行中</span></td><td>赵工</td></tr>
+            </table>
+          </div>
+          <div class="card">
+            <h4>项目操作</h4>
+            <div class="hintline">这是普通业务页面 —— 过去想问 AI 要跳去 /sessions 门户；现在右下角悬浮球直接带着本页上下文开聊（场景①演示）。</div>
+          </div>
+        </div>
+
+        <!-- 工作台 -->
+        <div class="page" id="page-workbench">
+          <div class="page-title">工作台</div>
+          <div class="page-sub">跨项目概览 · 我的待办 5 · 进行中任务 2</div>
+          <div class="card"><h4>我的待办</h4><div class="hintline">审批 PM-2024-018 · 更新周报 · 确认门禁联调延期原因 ……</div></div>
+          <div class="card"><h4>进行中的智能体任务</h4><div class="hintline">会话「扫描 multi-agent-platform」运行中 —— 最小化后在任何页面都能看到进度（场景②演示）。</div></div>
+        </div>
+
+        <!-- 全屏会话门户（互斥演示） -->
+        <div class="page" id="page-sessions">
+          <div class="page-title">会话 · 全屏模式</div>
+          <div class="page-sub">/sessions —— 与悬浮抽屉是同一内核组件的两种宿主；深链 ?session= 继续有效</div>
+          <div class="portal-banner" id="portalBanner" style="display:none">
+            <svg class="ic" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+            <span><b>互斥协议已触发</b>：检测到你进入全屏门户，悬浮抽屉已自动收起并释放会话连接 —— 同一会话永远只有一条 SSE，避免双连接 / 409 冲突。</span>
+          </div>
+          <div class="portal-grid">
+            <div class="portal-list">
+              <div style="font-size:11px;color:var(--faint);font-weight:600;padding:6px 10px 8px">全部会话（列表完整版）</div>
+              <div class="li active"><span class="dot run"></span>智慧园区风险分析<span class="st pill brand">运行中</span></div>
+              <div class="li"><span class="dot done"></span>代码扫描 · multi-agent…<span class="st pill ok">已完成</span></div>
+              <div class="li"><span class="dot idle"></span>周报草稿生成</div>
+              <div class="li"><span class="dot idle"></span>数据库选型讨论</div>
+            </div>
+            <div class="portal-chat">
+              <svg class="ic ic-lg" viewBox="0 0 24 24" style="stroke:var(--secondary)"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/></svg>
+              全屏门户 = 现有 /sessions 页（保留，不迁移不砍）<br>
+              <button class="mini-btn" id="backToFloat" style="margin-top:10px">↩ 在悬浮窗中继续该会话</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 运行时 -->
+        <div class="page" id="page-runtimes">
+          <div class="page-title">运行时</div>
+          <div class="page-sub">在线机器 2 · 现有会话弹窗在第 5 期收编为悬浮球唤起（钉定机器）</div>
+          <div class="card"><h4>win-dev-01 <span class="pill ok" style="margin-left:6px">在线</span></h4><div class="hintline">Claude Code · Codex · 闲置中 —— 机器卡上的「会话」按钮将改为唤起悬浮球并钉定本机。</div></div>
+        </div>
+
+        <!-- 设置 -->
+        <div class="page" id="page-settings">
+          <div class="page-title">设置</div>
+          <div class="page-sub">个人偏好 · 主题 · 通知</div>
+          <div class="card"><h4>会话助手偏好（新增）</h4><div class="hintline">悬浮球开关 · 上下文注入白名单（哪些页面允许把数据摘要给 AI）· 最小化行为。</div></div>
+        </div>
+
+        <!-- 入口地图（场景4） -->
+        <div class="page" id="page-entries">
+          <div class="page-title">统一入口地图</div>
+          <div class="page-sub">全站 9 处会话入口 · 收编后行为统一为「唤起悬浮球 + 携带入口上下文」· 点击任意卡片看演示</div>
+          <div class="entry-grid" id="entryGrid"></div>
+        </div>
+      </div>
+
+      <!-- ====== 悬浮层 ====== -->
+      <!-- 待审批胶囊（已有功能，先占右下角上层） -->
+      <div class="approval-capsule show" id="approvalCapsule">
+        <div class="cap" id="capApproval" title="这是平台已有功能：待答审批的最小化胶囊">
+          <svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          待答审批 <span class="cnt">2</span>
+        </div>
+        <span class="co" style="right:-8px;top:-6px" id="co1"><span class="co-tip"><b>① 右下角分层避让</b>：待审批胶囊（已有功能）占据右下角上层，悬浮球沉在它下方 —— 两层互不遮挡，胶囊有新待答时抖动提醒。</span></span>
+        <div class="cap running" id="capSession" style="display:none" title="点击恢复悬浮会话抽屉">
+          <span class="live-dot"></span>会话进行中 · 点击恢复
+        </div>
+        <span class="co" style="right:-8px;top:38px" id="co7"><span class="co-tip"><b>⑦ 最小化保活</b>：抽屉收起 = 隐藏（hidden）不卸载，SSE 连接、消息队列、运行中任务全部保活；胶囊点击即恢复现场。</span></span>
+      </div>
+
+      <!-- 悬浮球 -->
+      <span class="co" style="right:80px;bottom:40px" id="co2"><span class="co-tip"><b>② 悬浮球</b>：dashboard 全局布局常驻，所有页面可见；运行中会话有呼吸光环 + 角标（待答数/运行数）；与上方审批胶囊分层堆叠，不抢点击。</span></span>
+      <button class="fab" id="fab" title="智能会话助手">
+        <span class="fab-ring"></span>
+        <svg class="fab-ic" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/><path d="M9 11h.01M12 11h.01M15 11h.01"/></svg>
+        <span class="fab-badge" id="fabBadge">1</span>
+      </button>
+
+      <!-- 抽屉 -->
+      <div class="drawer" id="drawer">
+        <div class="drawer-head">
+          <div class="drawer-head-row">
+            <div class="drawer-title">
+              <svg class="ic" viewBox="0 0 24 24" style="stroke:var(--primary)"><path d="M21 12a8 8 0 0 1-8 8H4l2-3a8 8 0 1 1 15-5z"/></svg>
+              智能会话助手
+              <span class="mode-tag">悬浮模式</span>
+            </div>
+            <div class="head-actions">
+              <button class="mini-btn" id="fullscreenBtn" title="跳转 /sessions 全屏门户">
+                <svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+                全屏
+              </button>
+              <button class="mini-btn" id="minimizeBtn" title="收起为胶囊，会话保活">
+                <svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/></svg>
+                最小化
+              </button>
+              <button class="icon-btn" id="closeBtn" title="关闭抽屉（会话继续后台运行）">
+                <svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+              <span class="co" style="position:relative;display:inline-flex;bottom:auto;right:auto" id="co11"><span class="co-tip"><b>⑪ 抽屉头部</b>：全屏按钮=切换宿主（带互斥协议）；最小化=胶囊保活；关闭=收抽屉但运行中会话在球上继续亮角标。输入条支持附件与团队派发（page 模式完整能力）。</span></span>
+            </div>
+          </div>
+          <!-- 上下文条 -->
+          <div class="ctx-bar" id="ctxBar">
+            <div class="ctx-eye"><svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg></div>
+            <div>
+              <div class="ctx-label">已感知当前页面</div>
+              <div class="ctx-page" id="ctxPageName">PPM · 项目详情 · 智慧园区一期</div>
+            </div>
+            <span class="ctx-chip" data-snap="项目：智慧园区一期（进行中）· PM-2024-001 · 经理 秦毅 · 周期 2026-03~11">里程碑 <b class="num">3</b>（1 延期）</span>
+            <span class="ctx-chip" data-snap="问题单：PL-089 门禁闸机偶发离线（P1·李工）· PL-092 中台接口超时（P2·王工）">问题单 <b class="num">2</b> 待处理</span>
+            <span class="ctx-chip" data-snap="任务完成率 68%（本周 +4%）· 成员 8 人满编 · 最近操作：08-24 编辑了任务计划 P-123">完成率 <b class="num">68%</b></span>
+            <div class="ctx-actions">
+              <button class="link-btn" id="aiViewBtn">👁 AI 视角（看到了什么？）</button>
+            </div>
+            <span class="co" style="position:absolute;top:-8px;left:-8px" id="co3"><span class="co-tip"><b>③ 智能上下文条</b>：悬浮组件从当前页面 URL / 宿主页注入派生「页面 + 实体 + 数据快照」，chips 可点开看摘要明细；会话首轮自动注入，用户零操作。</span></span>
+            <span class="co" style="position:absolute;bottom:-8px;right:34px" id="co4"><span class="co-tip"><b>④ 展示层干净</b>：点「AI 视角」看注入的【页面上下文】前导 —— 只给 AI 看，用户消息气泡保持干净（沿用变更会话前导的既有契约）。</span></span>
+          </div>
+        </div>
+
+        <!-- 抽屉主体 -->
+        <div class="drawer-body">
+          <div class="mini-list">
+            <div class="mini-list-head">最近会话</div>
+            <div class="scope-chip">与本页相关 · 1</div>
+            <div class="mini-list-items">
+              <div class="mli active"><span class="dot run"></span><div>智慧园区风险分析<div class="t">运行中 · 刚刚</div></div></div>
+              <div class="mli"><span class="dot done"></span><div>代码扫描 · multi-agent…<div class="t">08-24</div></div></div>
+              <div class="mli"><span class="dot idle"></span><div>周报草稿生成<div class="t">08-23</div></div></div>
+            </div>
+            <button class="new-btn" id="newSessionBtn">＋ 新会话（自动带本页上下文）</button>
+            <span class="co" style="position:absolute;bottom:60px;left:-8px" id="co6"><span class="co-tip"><b>⑥ 紧凑列表变体</b>：全屏门户的 1805 行完整列表不做抽屉版；抽屉用轻量「最近 + 与本页相关」过滤，完整管理（批量归档/筛选）仍去全屏模式。</span></span>
+          </div>
+
+          <div class="chat-col">
+            <div class="chat-scroll" id="chatScroll"></div>
+            <div class="suggest" id="suggestRow"></div>
+            <div class="input-bar">
+              <button class="attach-btn" title="附件（图片/文件）"><svg class="ic" viewBox="0 0 24 24"><path d="M21 12.5l-8.5 8.5a5.5 5.5 0 0 1-7.8-7.8l8.9-8.9a3.7 3.7 0 0 1 5.2 5.2l-8.9 8.9a1.8 1.8 0 0 1-2.6-2.6l8.2-8.2"/></svg></button>
+              <textarea class="input-box" id="chatInput" placeholder="问点什么… AI 已知道你在哪个页面、看什么数据" rows="1"></textarea>
+              <button class="send-btn" id="sendBtn" title="发送"><svg class="ic" viewBox="0 0 24 24"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI 视角浮层 -->
+        <div class="ai-view" id="aiView">
+          <div class="ai-view-card">
+            <div class="ai-view-head">
+              <svg class="ic" viewBox="0 0 24 24" style="stroke:var(--primary)"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+              AI 视角：本轮注入的页面上下文
+              <button class="icon-btn" id="aiViewClose" style="margin-left:auto"><svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+            </div>
+            <div class="ai-view-body">
+              <div class="ai-pre" id="aiPre"></div>
+              <div class="ai-note">
+                <svg class="ic ok-ic" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg>
+                <span>这段前导只进入 AI 的提示词（dispatch_prompt 通道）；聊天记录里用户消息保持原文 —— <b>展示层干净</b>。快照字段来自服务端白名单回查（防客户端伪造注入），总长度有上限。</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Toast -->
+      <div class="toasts" id="toasts"></div>
+    </div>
+  </div>
+
+  <!-- ====== 决策卡 ====== -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">A</span><h2>五个必须先解决的设计题（评审遗留，原型中对应的交互）</h2></div>
+    <p class="sec-desc">来自对抗性评审的结论：方案骨架成立，但以下五题在 brainstorm 阶段必须给出正式答案。</p>
+    <div class="dec-grid">
+      <div class="dec"><b>1 · 双宿主互斥协议</b><p>进入任一全屏门户（/sessions 等）时强制收起并断开抽屉内会话面板 —— 不是藏球，是真正释放连接。否则同一会话双 SSE + 双队列 → 409 冲突、重复投递。</p><span class="ref">演示：场景③</span></div>
+      <div class="dec"><b>2 · 抽屉布局宿主层</b><p>门户是整页（56px 顶栏/全屏页头/320px 左栏/全屏遮罩选择器），进抽屉需新布局层 + 紧凑列表变体；右下角与待审批胶囊分层避让。</p><span class="ref">演示：标注①⑥⑪</span></div>
+      <div class="dec"><b>3 · 隐藏态降载</b><p>抽屉隐藏 ≠ 轮询暂停。收起时机器 15s 轮询 / 列表 10~30s 轮询 / events SSE 需降频或暂停，只保留活跃会话的 SSE。原型以「保活提示」表达。</p><span class="ref">演示：场景②</span></div>
+      <div class="dec"><b>4 · inject 追问轮前导通道</b><p>追问（SESSION_INJECT）没有"给 AI 的/给用户看的"分流通道，补上下文刷新需扩展 daemon 协议，是智能上下文期最硬的骨头。</p><span class="ref">演示：场景① AI 视角</span></div>
+      <div class="dec"><b>5 · page_context 安全设计</b><p>页面上下文是客户端可伪造字段：必须页面枚举白名单 + 服务端回查真实数据 + 拼接总长上限，防提示词注入。PPM 数据推快照与 mission_status 拉取并存取舍。</p><span class="ref">演示：标注⑤ + AI 视角说明</span></div>
+    </div>
+  </section>
+
+  <!-- ====== 路线图 ====== -->
+  <section class="sec">
+    <div class="sec-head"><span class="sec-num">B</span><h2>分期路线（评审修订版）</h2></div>
+    <p class="sec-desc">每期独立可验收；0 期已完成（main@1e9491fc），动工前确认无新在途并行变更。</p>
+    <table class="road">
+      <tr><th>期</th><th>内容</th><th>工作量</th><th>验收要点</th></tr>
+      <tr><td class="ph">0 ✅</td><td>合并 feedback-fix + sessions-live-updates</td><td class="done">已完成</td><td>最小化胶囊 / Plan 卡 / 列表 SSE 已在 main</td></tr>
+      <tr><td class="ph">1</td><td>门户宿主化：URL 同步等 7+ 处与页面环境解耦，门户页回归不变</td><td>中</td><td>三个门户页 + 全部既有测试零回归</td></tr>
+      <tr><td class="ph">2</td><td>悬浮宿主：球 + 抽屉 + 互斥协议 + 隐藏态降载 + 右下角避让</td><td><b>大（最重）</b></td><td>场景①②③全部成立；同会话永不双连</td></tr>
+      <tr><td class="ph">3</td><td>智能上下文：创建轮前导 + inject 协议扩展 + 快照白名单</td><td>中偏大</td><td>AI 视角/用户视角分离；注入内容服务端可信</td></tr>
+      <tr><td class="ph">4</td><td>入口收编 9 处（见场景④地图）</td><td>中</td><td>老深链 ?session= / ?new=1 全程有效</td></tr>
+      <tr><td class="ph">5</td><td>/runtimes 弹窗退役（连带审批页跳转契约）</td><td>中</td><td>机器卡按钮唤起球并钉定机器</td></tr>
+    </table>
+  </section>
+</div>
+
+<script>
+/* ============================================================
+   原型状态机（纯原生 JS，无依赖）
+   ============================================================ */
+const $ = (s, r=document) => r.querySelector(s);
+const $$ = (s, r=document) => Array.from(r.querySelectorAll(s));
+
+const state = {
+  scenario: 1,
+  page: 'ppm',
+  drawerOpen: false,
+  minimized: false,
+  sessionRunning: false,
+  mutexTaken: false,      // 全屏门户是否已接管
+  bashTimer: null,
+  typingTimer: null,
+};
+
+/* ---------- Toast ---------- */
+function toast(text, icon='✦') {
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.innerHTML = `<span class="t-ic">${icon}</span><span>${text}</span>`;
+  $('#toasts').appendChild(t);
+  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 350); }, 3400);
+}
+
+/* ---------- 场景剧本 ---------- */
+const SCENES = {
+  1: {
+    brief: '<b>场景① · 智能上下文</b> —— 在 PPM 项目详情页，直接问 AI 项目问题',
+    steps: '悬浮球已感知当前页面 → 点「AI 视角」看它看到了什么 → 点建议问题或自己输入 → 观察回答如何引用本页数据（而你没有提供任何背景）',
+    setup() {
+      switchPage('ppm', true);
+      openDrawer();
+      renderChat([
+        aiMsg('你好 👋 我已接入当前页面上下文 —— <b>智慧园区一期（PPM · 项目详情）</b>：本周里程碑 3 个（1 个延期）、问题单 2 个待处理、任务完成率 68%。可以直接问，不用给我背景资料。'),
+      ]);
+      renderSuggest(['这个项目本周有什么风险？', '帮我分析门禁联调延期的可能原因', '把待处理问题单整理成周报片段']);
+    },
+  },
+  2: {
+    brief: '<b>场景② · 最小化保活 + 跨页面</b> —— 会话在后台跑，你去别的页面干活',
+    steps: '点抽屉右上「最小化」→ 球亮起运行角标、出现保活胶囊 → 点侧边栏切到「工作台」或「设置」→ 会话仍在跑（Bash 卡片持续推进）→ 点胶囊恢复现场',
+    setup() {
+      switchPage('ppm', true);
+      openDrawer();
+      state.sessionRunning = true; updateFab();
+      renderChat([
+        userMsg('扫描 multi-agent-platform 仓库，统计测试覆盖情况'),
+        aiMsg('收到，开始扫描工作区 <b>multi-agent-platform</b>。我会先跑测试清单，再汇总覆盖率。'),
+        bashCard(),
+      ]);
+      startBash();
+      renderSuggest([]);
+    },
+  },
+  3: {
+    brief: '<b>场景③ · 双宿主互斥协议</b> —— 悬浮抽屉开着会话，再进全屏门户会怎样？',
+    steps: '抽屉开着运行中会话 → 点侧边栏「会话」进入全屏门户 → 抽屉被<b>强制收起并释放连接</b>（顶部出现互斥提示）→ 点「在悬浮窗中继续」又切回来',
+    setup() {
+      switchPage('ppm', true);
+      openDrawer();
+      state.sessionRunning = true; updateFab();
+      $('#menuSessions').classList.add('danger-hot');
+      renderChat([
+        userMsg('帮我把延期的门禁联调里程碑风险同步给项目组'),
+        aiMsg('正在起草风险通报。需要先确认：通报发给全体 8 名成员，还是只发给李工和王工？'),
+        askCard(),
+      ]);
+      renderSuggest([]);
+    },
+  },
+  4: {
+    brief: '<b>场景④ · 统一入口地图</b> —— 全站 9 处会话入口的收编对照',
+    steps: '每张卡片 = 一处现有入口：旧行为（划线）→ 新行为（唤起悬浮球 + 携带的上下文）。点击任意卡片体验「入口统一后」的唤起效果',
+    setup() {
+      closeDrawer(true);
+      switchPage('entries', true);
+      state.sessionRunning = false; updateFab();
+      $('#menuSessions').classList.remove('danger-hot');
+    },
+  },
+};
+
+/* ---------- 消息渲染 ---------- */
+function userMsg(text) { return { type:'user', text }; }
+function aiMsg(html) { return { type:'ai', html }; }
+
+function appendMsg(m) {
+  const el = document.createElement('div');
+  if (m.type === 'user') { el.className = 'msg user'; el.textContent = m.text; }
+  else if (m.type === 'raw') { el.innerHTML = m.html; }
+  else { el.className = 'msg ai'; el.innerHTML = m.html; }
+  $('#chatScroll').appendChild(el); scrollChat();
+  return el;
+}
+function scrollChat() { const c = $('#chatScroll'); c.scrollTop = c.scrollHeight; }
+function renderChat(items) { $('#chatScroll').innerHTML = ''; items.forEach(appendMsg); }
+function renderSuggest(list) {
+  $('#suggestRow').innerHTML = '';
+  list.forEach(txt => {
+    const b = document.createElement('button');
+    b.textContent = txt;
+    b.onclick = () => sendUser(txt);
+    $('#suggestRow').appendChild(b);
+  });
+}
+
+/* ---------- 会话内卡片 ---------- */
+function toolCardHtml(inner, label, mono) {
+  return `<div class="tool-card">
+    <div class="tool-card-head"><svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6M12 19h8"/></svg>${label}<span class="mono">${mono}</span>
+      <span style="margin-left:auto" class="card-status run">运行中…</span>
+      <span class="co" style="position:relative;display:inline-flex;bottom:auto;right:auto" id="co12"><span class="co-tip"><b>⑫ 实时会话卡片</b>：Bash 进度 / Plan 强确认 / agent_task 任务卡 / AskUser 问答 —— 全部来自已合入 main 的平台会话实时反馈能力，悬浮形态原样复用。</span></span>
+    </div>
+    <div class="tool-card-body">${inner}</div>
+  </div>`;
+}
+function bashCard() {
+  return { type:'raw', html: toolCardHtml(`
+    <div class="bash-line">pnpm -r test --coverage</div>
+    <div class="prog"><i style="width:8%"></i></div>
+    <div class="bash-line out" id="bashOut">backend · collecting…</div>
+    <div style="font-size:10.5px;color:var(--faint);margin-top:6px">抽屉最小化 / 切页面都不中断 —— SSE 保活</div>
+  `, 'Bash', 'scan-repo') };
+}
+function planCard() {
+  return { type:'raw', html: `<div class="tool-card">
+    <div class="tool-card-head"><svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>Plan 强确认<span class="mono">计划已就绪，等你批准</span></div>
+    <div class="tool-card-body">
+      <div style="margin-bottom:4px"><b>草拟动作（3 步）</b></div>
+      ① 汇总本周延期里程碑 → ② 生成风险通报草稿（引用问题单 PL-089）→ ③ @李工 @王工 确认整改日期
+      <div class="plan-opts">
+        <button class="mini-btn primary" onclick="resolvePlan(this,'已批准，开始执行')">批准执行</button>
+        <button class="mini-btn" onclick="resolvePlan(this,'已拒绝，AI 将调整方案')">需要修改</button>
+      </div>
+    </div>
+  </div>` };
+}
+function askCard() {
+  return { type:'raw', html: `<div class="tool-card">
+    <div class="tool-card-head"><svg class="ic ic-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01"/></svg>AI 提问<span class="mono">AskUser · 等你回答</span></div>
+    <div class="tool-card-body">
+      <b>风险通报发给谁？</b>
+      <button class="ask-opt" onclick="pickAsk(this)">全员（8 人项目组）</button>
+      <button class="ask-opt" onclick="pickAsk(this)">仅相关人（李工 + 王工）</button>
+    </div>
+  </div>` };
+}
+function agentTaskCard() {
+  return { type:'raw', html: toolCardHtml(`
+    <b>团队任务 · 派发 2 个子代理</b>
+    <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+      <span class="pill info">worker-1 · 扫描测试目录</span>
+      <span class="pill info">worker-2 · 汇总覆盖率</span>
+    </div>
+  `, 'agent_task', 'mission · 运行中') };
+}
+window.resolvePlan = function(btn, label) {
+  const body = btn.closest('.tool-card-body');
+  body.querySelector('.plan-opts').remove();
+  body.insertAdjacentHTML('beforeend', `<div class="resolved-tag">✓ ${label}</div>`);
+  const st = btn.closest('.tool-card').querySelector('.card-status');
+  if (st) { st.textContent = '已确认'; st.className = 'card-status done'; }
+  toast('Plan 决策已回传给 AI，它正在继续执行', '✓');
+  setTimeout(() => { appendMsg(aiMsg('收到，按批准的 3 步开始执行。执行完我会把通报草稿贴在这里。')); state.sessionRunning = true; updateFab(); }, 900);
+};
+window.pickAsk = function(btn) {
+  const body = btn.closest('.tool-card-body');
+  body.querySelectorAll('.ask-opt').forEach(o => { o.classList.remove('chosen'); o.disabled = true; });
+  btn.classList.add('chosen');
+  toast('回答已送达 AI', '✓');
+  setTimeout(() => appendMsg(aiMsg(`好的，通报将发送给「${btn.textContent.trim()}」。我来起草内容 —— 引用本页数据：门禁联调延期（PL-089）+ 中台接口超时（PL-092）。`)), 800);
+};
+
+/* ---------- Bash 进度模拟 ---------- */
+function startBash() {
+  clearInterval(state.bashTimer);
+  const lines = ['backend · 5311 passed', 'daemon · 2656 passed', 'frontend · collecting…', 'frontend · 2125 passed', 'coverage · 汇总中…'];
+  let i = 0;
+  const out = $('#bashOut'), prog = $('.prog i');
+  if (!out || !prog) return;
+  prog.parentElement.parentElement.parentElement.querySelector('.card-status');
+  state.bashTimer = setInterval(() => {
+    if (!document.body.contains(out)) { clearInterval(state.bashTimer); return; }
+    if (i < lines.length) {
+      out.textContent = lines[i]; prog.style.width = (8 + (i+1)/lines.length*88) + '%'; i++;
+    } else {
+      clearInterval(state.bashTimer);
+      prog.style.width = '100%';
+      const card = out.closest('.tool-card');
+      const st = card && card.querySelector('.card-status');
+      if (st) { st.textContent = '完成 ✓'; st.className = 'card-status done'; }
+      appendMsg(aiMsg('扫描完成：<b>backend 5311 / daemon 2656 / frontend 2125</b> 全绿，覆盖率报告已生成。需要我把结论整理进项目周报吗？'));
+      state.sessionRunning = false; updateFab();
+    }
+  }, 1600);
+}
+
+/* ---------- 发送消息 ---------- */
+function sendUser(text) {
+  if (!text || !text.trim()) return;
+  appendMsg(userMsg(text.trim()));
+  $('#chatInput').value = '';
+  renderSuggest([]);
+  const typing = document.createElement('div');
+  typing.className = 'typing'; typing.innerHTML = '<i></i><i></i><i></i>';
+  $('#chatScroll').appendChild(typing); scrollChat();
+  clearTimeout(state.typingTimer);
+  state.typingTimer = setTimeout(() => {
+    typing.remove();
+    state.sessionRunning = true; updateFab();
+    const onPage = state.page === 'ppm';
+    if (onPage && /风险|延期|问题|里程碑|项目/.test(text)) {
+      appendMsg(aiMsg('基于本页上下文（<b>智慧园区一期</b>），本周最大风险是 <b>门禁系统联调延期</b>（负责人李工，关联问题单 PL-089「闸机偶发离线」）；其次是<b>数据中台接口超时</b>（PL-092）可能影响 08-26 验收。我建议先出一份风险通报 —— 计划如下：'));
+      appendMsg(planCard());
+    } else if (/扫描|测试|覆盖/.test(text)) {
+      appendMsg(aiMsg('好，开始扫描当前工作区并统计测试情况。'));
+      appendMsg(bashCard()); startBash();
+    } else {
+      appendMsg(aiMsg(`（演示回复）我注意到你在 <b>${pageLabel()}</b> 页面。真实实现里，这轮会带上该页的上下文快照回答；上下文来源是服务端白名单回查，展示层保持干净。`));
+    }
+  }, 1100);
+}
+
+function pageLabel() {
+  return { ppm:'PPM · 项目详情', workbench:'工作台', sessions:'会话门户', runtimes:'运行时', settings:'设置', entries:'入口地图' }[state.page] || state.page;
+}
+
+/* ---------- 抽屉 / 球 / 胶囊 ---------- */
+function openDrawer() {
+  state.drawerOpen = true; state.minimized = false;
+  $('#drawer').classList.add('open');
+  $('#drawer').classList.remove('hidden-live');
+  $('#capSession').style.display = 'none';
+  updateCtxBar();
+}
+function closeDrawer(silent) {
+  state.drawerOpen = false;
+  $('#drawer').classList.remove('open');
+  if (!silent && state.sessionRunning) toast('抽屉已关闭，运行中会话在悬浮球上继续（保活）', '◈');
+}
+function minimizeDrawer() {
+  state.drawerOpen = false; state.minimized = true;
+  $('#drawer').classList.remove('open');
+  $('#capSession').style.display = '';
+  toast('已最小化：面板隐藏但<b>未卸载</b>，SSE 与队列保活', '◈');
+}
+function updateFab() {
+  const fab = $('#fab');
+  if (state.sessionRunning) { fab.classList.add('running'); $('#fabBadge').classList.add('show'); }
+  else { fab.classList.remove('running'); if (!state.minimized) $('#fabBadge').classList.remove('show'); }
+}
+function updateCtxBar() {
+  const name = { ppm:'PPM · 项目详情 · 智慧园区一期', workbench:'工作台 · 跨项目概览', runtimes:'运行时 · 机器列表', settings:'设置 · 会话助手偏好', sessions:'会话 · 全屏门户', entries:'入口地图' }[state.page] || state.page;
+  $('#ctxPageName').textContent = name;
+  const chips = $$('#ctxBar .ctx-chip');
+  const ppm = state.page === 'ppm';
+  chips[0].style.display = ppm ? '' : 'none';
+  chips[1].style.display = ppm ? '' : 'none';
+  chips[2].style.display = ppm ? '' : 'none';
+}
+function aiPreText() {
+  if (state.page === 'ppm') {
+    return `【页面上下文】（服务端白名单回查 · 只给 AI 看）
+- 页面：PPM · 项目详情
+- 项目：智慧园区一期（进行中）· PM-2024-001
+- 里程碑（本周）：3 个，其中「门禁系统联调」延期（08-21 → 未完成，负责人 李工）
+- 问题单待处理：2（PL-089 闸机偶发离线 P1 · PL-092 中台接口超时 P2）
+- 任务完成率：68%（本周 +4%）· 成员 8 人
+- 用户最近操作：08-24 编辑任务计划 P-123`;
+  }
+  return `【页面上下文】（服务端白名单回查 · 只给 AI 看）
+- 页面：${pageLabel()}
+- 该页未注册数据快照提供器 → 仅注入页面级信息；
+  AI 可通过 mission_status 等工具按需拉取。`;
+}
+
+/* ---------- 页面切换 ---------- */
+function switchPage(p, silent) {
+  state.page = p;
+  $$('.page').forEach(el => el.classList.remove('visible'));
+  const target = $('#page-' + p) || $('#page-workbench');
+  target.classList.add('visible');
+  $$('.menu-item').forEach(mi => mi.classList.toggle('active', mi.dataset.page === p));
+  const urls = { ppm:'/ppm/projects/P-001', workbench:'/workbench', sessions:'/sessions?session=9f3a', runtimes:'/runtimes', settings:'/settings', entries:'（原型 · 入口地图）' };
+  $('#urlText').textContent = urls[p] || '/' + p;
+  updateCtxBar();
+  if (state.minimized && !silent) toast(`已切到「${pageLabel()}」—— 后台会话不受影响，胶囊仍在`, '◈');
+  if (p === 'sessions' && state.drawerOpen) {
+    /* 互斥协议：全屏门户接管，强制收起抽屉 */
+    minimizeForMutex();
+  }
+}
+function minimizeForMutex() {
+  state.drawerOpen = false;
+  $('#drawer').classList.remove('open');
+  $('#portalBanner').style.display = 'flex';
+  $('#capSession').style.display = 'none';
+  state.minimized = false;
+  $('#fabBadge').classList.remove('show');
+  toast('互斥协议：全屏门户接管，抽屉已断开连接（同会话不双连）', '⚡');
+}
+
+/* ---------- 入口地图数据 ---------- */
+const ENTRIES = [
+  { n:'侧边栏「会话」菜单', old:'跳转 /sessions 全局门户', ctx:'无（保留全屏入口）', note:'保留：这是全屏模式的正门，与悬浮球并存' },
+  { n:'工作区「会话」tab', old:'跳转 /workspaces/[id]/sessions', ctx:'scope=工作区', note:'点击唤起球并锁定工作区 scope' },
+  { n:'变更详情 · 打开会话工作台', old:'跳转变更门户页', ctx:'scope=变更 + workspaceId', note:'ChangeSessionsCard 链接改造' },
+  { n:'变更卡 · 单会话深链', old:'?session=<id> 跳门户', ctx:'定位到该会话', note:'深链语义全程保留，落到悬浮宿主同样打开' },
+  { n:'变更列表空态 CTA', old:'跳工作区会话页', ctx:'scope=工作区', note:'评审新发现入口 ⑦' },
+  { n:'工作区概览「扫描」按钮', old:'创建会话后深链跳门户', ctx:'会话任务 + 工作区', note:'评审新发现：会创建会话的入口 ⑧' },
+  { n:'审批页待答卡上下文链接', old:'跳 /runtimes?session=', ctx:'定位待答会话', note:'评审新发现：随第 5 期收编 ⑨' },
+  { n:'/runtimes 机器卡会话弹窗', old:'页内弹窗（dialog 模式）', ctx:'钉定该机器', note:'第 5 期退役，弹窗能力由悬浮宿主承接' },
+  { n:'PPM 项目「发起团队」', old:'跳 /sessions?new=1', ctx:'项目快照 + 团队任务', note:'智能上下文示范入口：直接带项目数据唤起' },
+];
+
+/* ---------- 事件绑定 ---------- */
+$('#scenarioTabs').addEventListener('click', e => {
+  const btn = e.target.closest('button'); if (!btn) return;
+  $$('#scenarioTabs button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  state.scenario = +btn.dataset.s;
+  clearInterval(state.bashTimer); clearTimeout(state.typingTimer);
+  state.sessionRunning = false; state.minimized = false; state.mutexTaken = false;
+  $('#portalBanner').style.display = 'none';
+  $('#capSession').style.display = 'none';
+  $('#menuSessions').classList.remove('danger-hot');
+  $('#fabBadge').classList.remove('show'); updateFab();
+  const sc = SCENES[state.scenario];
+  $('#sceneBrief').innerHTML = `<div>${sc.brief}</div><p>${sc.steps}</p><div class="scene-steps">${sc.steps.split('→').map((s,i)=>`<span class="step-chip"><i>${i+1}</i>${s.trim()}</span>`).join('')}</div>`;
+  sc.setup();
+});
+
+$$('.menu-item').forEach(mi => mi.addEventListener('click', () => switchPage(mi.dataset.page)));
+
+$('#fab').addEventListener('click', () => {
+  if (state.page === 'sessions') { toast('当前在全屏门户（互斥中）—— 用门户内「在悬浮窗中继续」切回悬浮宿主', '⚡'); return; }
+  if (state.minimized) { openDrawer(); toast('已恢复现场：消息、进度、输入草稿都在', '◈'); return; }
+  state.drawerOpen ? closeDrawer() : openDrawer();
+});
+$('#capSession').addEventListener('click', () => { openDrawer(); toast('已恢复现场：消息、进度、输入草稿都在', '◈'); });
+$('#capApproval').addEventListener('click', () => toast('这是已有的「待答审批」胶囊（2 条待确认）—— 与悬浮球分层避让，互不遮挡', '🛡'));
+$('#minimizeBtn').addEventListener('click', minimizeDrawer);
+$('#closeBtn').addEventListener('click', () => closeDrawer());
+$('#fullscreenBtn').addEventListener('click', () => switchPage('sessions'));
+$('#backToFloat').addEventListener('click', () => { switchPage('ppm', true); openDrawer(); toast('已切回悬浮宿主，连接归还抽屉', '⚡'); });
+$('#sendBtn').addEventListener('click', () => sendUser($('#chatInput').value));
+$('#chatInput').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendUser(e.target.value); } });
+$('#newSessionBtn').addEventListener('click', () => {
+  renderChat([ aiMsg(`新会话已就绪，自动携带上下文：<b>${pageLabel()}</b>${state.page==='ppm'?'（项目快照已注入）':'（该页暂无数据快照，仅页面级信息）'}。直接说需求即可。`) ]);
+  renderSuggest(state.page==='ppm' ? ['这个项目本周有什么风险？','帮我写周报的项目进展部分'] : ['帮我总结当前页面该做什么','随便聊聊']);
+  toast('新会话已创建，页面上下文自动注入（AI 视角可查）', '✦');
+});
+$('#aiViewBtn').addEventListener('click', () => { $('#aiPre').textContent = aiPreText(); $('#aiView').classList.add('show'); });
+$('#aiViewClose').addEventListener('click', () => $('#aiView').classList.remove('show'));
+$('#aiView').addEventListener('click', e => { if (e.target === $('#aiView')) $('#aiView').classList.remove('show'); });
+$$('.ctx-chip').forEach(ch => ch.addEventListener('click', () => toast(ch.dataset.snap, '🧩')));
+$('.attach-btn').addEventListener('click', () => toast('附件上传（图片/文件）—— page 模式完整能力，悬浮宿主同享', '📎'));
+
+$('#coToggle').addEventListener('click', () => {
+  document.body.classList.toggle('show-co');
+  const on = document.body.classList.contains('show-co');
+  $('#coToggle').classList.toggle('on', on);
+  $('#coToggle').innerHTML = `<svg class="ic ic-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16.5v.01"/></svg> 设计标注：${on ? '开' : '关'}`;
+});
+
+/* 入口地图渲染 */
+ENTRIES.forEach((en, i) => {
+  const el = document.createElement('div');
+  el.className = 'entry';
+  el.innerHTML = `<div class="e-name"><span class="e-num">${i+1}</span>${en.n}</div>
+    <div class="e-old">${en.old}</div>
+    <div class="e-new">→ 唤起悬浮球<svg class="ic ic-sm" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+    <div class="e-ctx">携带：${en.ctx}</div>
+    <div style="font-size:11px;color:var(--faint);margin-top:5px">${en.note}</div>`;
+  el.addEventListener('click', () => {
+    switchPage('ppm', true);
+    openDrawer();
+    toast(`入口统一演示：从「${en.n}」唤起 —— 已携带上下文（${en.ctx}）`, '✦');
+  });
+  $('#entryGrid').appendChild(el);
+});
+
+/* 初始化 */
+document.body.classList.add('show-co');
+SCENES[1].setup();
+const sc1 = SCENES[1];
+$('#sceneBrief').innerHTML = `<div>${sc1.brief}</div><p>${sc1.steps}</p><div class="scene-steps">${sc1.steps.split('→').map((s,i)=>`<span class="step-chip"><i>${i+1}</i>${s.trim()}</span>`).join('')}</div>`;
+</script>
+</body>
+</html>

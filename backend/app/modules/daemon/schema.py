@@ -112,6 +112,18 @@ class TeamMissionCreateBlock(BaseModel):
     orchestrator_workspace_id: uuid.UUID | None = None
 
 
+class PageContextCreateBlock(BaseModel):
+    """``SessionCreateRequest.page_context`` 内嵌块（2026-08-25-unified-floating-session / FR-5 / D-005）。
+
+    悬浮会话入口的页面上下文通道 v1：客户端只允许声明「页面类型枚举 + 实体 id」，
+    前导文本的全部数据由服务端回查 DB 生成（防客户端伪造注入——自由文本字段
+    一律不收）。``page_key`` 当前仅一枚枚举，后续按页注册扩展。
+    """
+
+    page_key: Literal["ppm_project"]
+    project_id: uuid.UUID
+
+
 class SessionCreateRequest(BaseModel):
     """POST /api/daemon/sessions 请求体（FR-01 / design §5 Wave1）。
 
@@ -140,6 +152,8 @@ class SessionCreateRequest(BaseModel):
     # 消费（预建 mission / orchestrator_workspace_id ∈ scope 校验）归 create
     # 路径（task-09）。
     team_mission: TeamMissionCreateBlock | None = None
+    # 悬浮会话页面上下文（FR-5 / D-005）：缺省 None 零回归；数据服务端回查。
+    page_context: PageContextCreateBlock | None = None
 
     @model_validator(mode="after")
     def _require_runtime_or_provider(self) -> SessionCreateRequest:
@@ -584,10 +598,16 @@ class DaemonTaskLeaseRead(BaseModel):
 
 
 class LeaseSyncRequest(BaseModel):
-    """Request body for syncing AgentRun status from daemon."""
+    """Request body for syncing AgentRun status from daemon.
+
+    2026-08-25 会话审查 P1：``status`` 收紧为 Literal 枚举（原裸 ``str`` 任意
+    字符串可落库）。取值集与 service 处理分支一一对应（running / completed /
+    failed / killed）；daemon 侧唯一上报点 task-runner.ts 心跳 cancel 检测只发
+    ``'killed'``，枚举全集兼容既有合法路径，非法值由 Pydantic 直接 422。
+    """
 
     claim_token: str
-    status: str  # running, completed, failed, killed
+    status: Literal["running", "completed", "failed", "killed"]
     error: str | None = None
 
 

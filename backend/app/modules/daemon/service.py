@@ -14,7 +14,11 @@ from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.model_error import ModelErrorDTO
-from app.modules.daemon.schema import SessionReopenResponse, TeamMissionCreateBlock
+from app.modules.daemon.schema import (
+    PageContextCreateBlock,
+    SessionReopenResponse,
+    TeamMissionCreateBlock,
+)
 
 log = get_logger(__name__)
 
@@ -657,6 +661,9 @@ class DaemonService:
         # task-09（2026-08-24-session-team-mission-context / FR-05/06）：预会话
         # 团队任务块透传（校验/预建/简报归 SessionService，facade 仅转发）。
         team_mission: TeamMissionCreateBlock | None = None,
+        # 2026-08-25-unified-floating-session（FR-5）：页面上下文块透传（前导
+        # 构建归 SessionService create 路径，facade 仅转发）。
+        page_context: PageContextCreateBlock | None = None,
     ) -> SessionDispatchResult:
         return await self._sess.create_session(
             user_id,
@@ -671,6 +678,7 @@ class DaemonService:
             agent_profile_id=agent_profile_id,
             llm_provider_id=llm_provider_id,
             team_mission=team_mission,
+            page_context=page_context,
         )
 
     async def inject_session(

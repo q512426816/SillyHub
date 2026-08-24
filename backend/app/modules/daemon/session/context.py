@@ -111,3 +111,51 @@ async def build_change_context_preamble(
     if len(lines) <= 1:
         return None  # 无任何可用信息
     return "\n".join(lines)
+
+
+# ── 页面上下文前导（2026-08-25-unified-floating-session / FR-5 / D-005）──────
+#
+# 悬浮会话入口的「智能上下文」创建轮通道：客户端仅声明 page_key 枚举 + 实体
+# id，前导数据全部服务端回查（无自由文本，防伪造注入）。拼装模式与
+# build_change_context_preamble 同构（X-02 纯后端，零 daemon 改动）。
+
+# 前导单值截断上限（project_name 等业务字段可能超长，控制前导总长度）。
+_PAGE_VALUE_MAX: int = 120
+
+
+async def build_page_context_preamble(
+    db: AsyncSession,
+    page_key: str | None,
+    project_id: uuid.UUID | None,
+) -> str | None:
+    """拼装【页面上下文】前导字符串。
+
+    - ``page_key`` 非 "ppm_project" 或 ``project_id`` 为 None → None（不注入）。
+    - 回查 :class:`PpmProjectMaintenance`；查无 → None（静默不注入，与变更
+      前导「查无返回 None」语义一致）。
+    - 单值 ``[:120]`` 截断；数据只来自服务端 DB，不接受客户端文本。
+    """
+    if page_key != "ppm_project" or project_id is None:
+        return None
+
+    from app.modules.ppm.project.model import PpmProjectMaintenance
+
+    project = await db.get(PpmProjectMaintenance, project_id)
+    if project is None:
+        return None
+
+    lines: list[str] = ["【页面上下文】", "- 页面：PPM · 项目详情"]
+    if project.project_name:
+        lines.append(f"- 项目：{project.project_name[:_PAGE_VALUE_MAX]}")
+    if project.project_code:
+        lines.append(f"- 项目编码：{project.project_code[:_PAGE_VALUE_MAX]}")
+    if project.project_status:
+        lines.append(f"- 状态：{project.project_status[:_PAGE_VALUE_MAX]}")
+    if project.project_effective_start_time:
+        lines.append(f"- 周期起：{project.project_effective_start_time.date().isoformat()}")
+    if project.project_effective_end_time:
+        lines.append(f"- 周期止：{project.project_effective_end_time.date().isoformat()}")
+
+    if len(lines) <= 1:
+        return None
+    return "\n".join(lines)
