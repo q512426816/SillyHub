@@ -572,14 +572,18 @@ async def list_workspace_agent_sessions(
     user: Annotated[User, Depends(require_permission(Permission.TASK_READ))],
     mode: str | None = None,
     include_ended: bool = False,
+    limit: int = Query(200, ge=1, le=500, description="include_ended 分页页大小"),
+    offset: int = Query(0, ge=0, description="include_ended 分页偏移"),
 ) -> list[dict]:
     """工作区会话列表（2026-08-14-change-center-conversation-driven task-06 / D-002@v1）。
 
     include_ended=false（缺省）：现状——仅 active 会话最小字段 dict
     （id/status/mode/provider），供 approvals 审批中心聚合 scan 歧义决策。
-    include_ended=true：工作区全量会话（含已结束），完整 AgentSessionListItem
+    include_ended=true：工作区会话（含已结束），完整 AgentSessionListItem
     （id/provider/status/turn_count/author/last_active_at/title，对齐
-    daemon/schema.py:71-84），排序 coalesce(last_active_at, created_at) desc。
+    daemon/schema.py:71-84），排序 coalesce(last_active_at, created_at) desc；
+    P5（2026-08-24 会话审查）：该分支原先无界全量返回，现按 limit/offset 分页
+    （默认 200；mode 过滤在 Python 侧截断后执行，传 mode 时页内可能少于 limit）。
     权限/过滤保持现状（workspace 成员跨成员可见），不因 include_ended 改变。
     """
     if not include_ended:
@@ -594,7 +598,9 @@ async def list_workspace_agent_sessions(
             }
             for s in sessions
         ]
-    items = await _build_workspace_session_items(session, workspace_id, mode=mode)
+    items = await _build_workspace_session_items(
+        session, workspace_id, mode=mode, limit=limit, offset=offset
+    )
     return [item.model_dump() for item in items]
 
 
@@ -603,14 +609,16 @@ async def _build_workspace_session_items(
     workspace_id: uuid.UUID,
     *,
     mode: str | None = None,
+    limit: int = 200,
+    offset: int = 0,
 ) -> list[AgentSessionListItem]:
-    """include_ended=true 分支：工作区全量会话（含已结束）→ AgentSessionListItem。
+    """include_ended=true 分支：工作区会话（含已结束）→ AgentSessionListItem。
 
     过滤：AgentSession.workspace_id == workspace_id（工作区级会话，D-002@v1）+
     软删过滤（FR-07：deleted_at IS NULL）；跨成员可见（D-005@v1，不按 user_id 过滤）。
     mode 非空时按 config['mode'] 过滤（与 active-only 分支语义一致）。
     排序 coalesce(last_active_at, created_at) desc（NULL last_active_at 回落 created_at，
-    对齐 daemon/session/service.py:1499-1515 先例）。
+    对齐 daemon/session/service.py:1499-1515 先例）。P5：limit/offset 分页。
     """
     stmt = (
         select(AgentSession)
@@ -621,6 +629,8 @@ async def _build_workspace_session_items(
         .order_by(
             func.coalesce(AgentSession.last_active_at, AgentSession.created_at).desc(),
         )
+        .offset(offset)
+        .limit(limit)
     )
     sessions = list((await session.execute(stmt)).scalars().all())
     if mode:
@@ -647,30 +657,40 @@ async def _assemble_workspace_session_items(
     user_name_map: dict[uuid.UUID, str | None] = {u.id: u.display_name for u in users}
 
     # 批量取每个 session 的首条 user_input 标题：JOIN AgentRun 过滤
-    # agent_session_id IN (...) + AgentRunLog.channel='user_input'，按
-    # (agent_session_id, timestamp asc) 取首条。Python 侧 group + 取最早。
-    title_stmt = (
+    # agent_session_id IN (...) + AgentRunLog.channel='user_input'。
+    # P5（2026-08-24 会话审查）：窗口函数 ROW_NUMBER 分区取首条——原实现拉取
+    # 页内会话的**全部** user_input 行（每行上限 50KB 文本）在 Python 侧取最早，
+    # 几百会话×上百轮时单次列表请求额外扫数万行大文本。窗口函数 PG/SQLite
+    # 双方言支持（SQLite ≥3.25），每会话恒 1 行出参。
+    rn = (
+        func.row_number()
+        .over(
+            partition_by=AgentRun.agent_session_id,
+            order_by=(AgentRunLog.timestamp.asc(), AgentRunLog.id.asc()),
+        )
+        .label("rn")
+    )
+    title_subq = (
         select(
             AgentRun.agent_session_id.label("session_id"),
-            AgentRunLog.timestamp.label("ts"),
             AgentRunLog.content_redacted.label("content"),
+            rn,
         )
         .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
         .where(
             col(AgentRun.agent_session_id).in_(session_ids),
             col(AgentRunLog.channel) == "user_input",
         )
+        .subquery()
     )
-    title_rows = (await session.execute(title_stmt)).all()
-    first_input_by_session: dict[uuid.UUID, datetime] = {}
-    content_by_session: dict[uuid.UUID, str] = {}
-    for row in title_rows:
-        sid = row.session_id
-        ts = row.ts
-        prev = first_input_by_session.get(sid)
-        if prev is None or ts < prev:
-            first_input_by_session[sid] = ts
-            content_by_session[sid] = row.content or ""
+    title_rows = (
+        await session.execute(
+            select(title_subq.c.session_id, title_subq.c.content).where(title_subq.c.rn == 1)
+        )
+    ).all()
+    content_by_session: dict[uuid.UUID, str] = {
+        row.session_id: (row.content or "") for row in title_rows
+    }
 
     return [
         AgentSessionListItem(

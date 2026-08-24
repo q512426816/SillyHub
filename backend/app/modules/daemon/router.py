@@ -24,7 +24,9 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import func as sa_func
 from sqlalchemy import select
+from sqlalchemy import select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth_deps import get_current_principal, require_permission_any
@@ -1895,26 +1897,36 @@ async def list_sessions(
     # 逻辑与 change/router.py:list_change_sessions 保持同步（R-7），未来可抽共享 helper。
     if items:
         session_ids = [item.id for item in items]
-        title_stmt = (
-            select(
+        # P5（2026-08-24 会话审查）：窗口函数分区取每会话首条 user_input——
+        # 原实现拉页内会话全部 user_input 行（50KB 文本）Python 取最早，
+        # 长会话下列表请求随轮数线性放大。PG/SQLite 双方言支持。
+        rn = (
+            sa_func.row_number()
+            .over(
+                partition_by=AgentRun.agent_session_id,
+                order_by=(AgentRunLog.timestamp.asc(), AgentRunLog.id.asc()),
+            )
+            .label("rn")
+        )
+        title_subq = (
+            sa_select(
                 AgentRun.agent_session_id.label("session_id"),
-                AgentRunLog.timestamp.label("ts"),
                 AgentRunLog.content_redacted.label("content"),
+                rn,
             )
             .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
             .where(
                 AgentRun.agent_session_id.in_(session_ids),
                 AgentRunLog.channel == "user_input",
             )
+            .subquery()
         )
-        title_rows = (await session.execute(title_stmt)).all()
-        first_ts: dict[uuid.UUID, datetime] = {}
-        content_by: dict[uuid.UUID, str] = {}
-        for row in title_rows:
-            sid = row.session_id
-            if sid not in first_ts or row.ts < first_ts[sid]:
-                first_ts[sid] = row.ts
-                content_by[sid] = row.content or ""
+        title_rows = (
+            await session.execute(
+                sa_select(title_subq.c.session_id, title_subq.c.content).where(title_subq.c.rn == 1)
+            )
+        ).all()
+        content_by = {row.session_id: (row.content or "") for row in title_rows}
         title_map = {sid: (content or "")[:30] or None for sid, content in content_by.items()}
         # task-05（2026-08-23-agent-activity-sessions / design §3.3.4）：标题派生改
         # session.title（ORM 持久化列，tool_report 会话由 task-04 服务端写自动标题）

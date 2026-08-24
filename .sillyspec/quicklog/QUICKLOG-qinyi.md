@@ -441,3 +441,18 @@
 方案：get_agent_session_logs 加 after 过滤（timestamp 严格大于，门面层透传，router 暴露 Query 参数）；前端 streamSession 维护 lastLogTs 游标（实时 log 事件与回放共同推进），replayLogsFromDb 改拉 after=游标-2s 重叠窗口（兜 submit_messages 同批共用同一 timestamp 的边界，重复行由既有 seenLogIds/log_id 去重），首次仍全量；pnpm gen:types 同步 api-types.ts+openapi.json
 结果：后端 test_session_history 新增 2 用例（严格大于/未来时间空）全绿、daemon 域 895 全绿；前端新增增量回放用例（after=游标-2s 断言）全绿、lib+daemon 组件 798 全绿；tsc/ruff 0 错；daemon.md 同步
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/service.py
+
+## ql-20260824-011-3651 | 2026-08-24 07:58:46 | 会话列表标题查询有界化（窗口函数取首条）+ include_ended 分支分页
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/router.py（窗口函数+分页）
+- backend/app/modules/daemon/router.py（窗口函数）
+- backend/app/modules/change/router.py（窗口函数）
+- backend/app/modules/agent/tests/test_agent_sessions_include_ended.py（新增 2 分页用例）
+- .sillyspec/docs/SillyHub/modules/agent.md（agent-sessions 段同步）
+需求：会话列表标题查询有界化（窗口函数取首条）+ include_ended 分支分页
+根因：三处列表（workspace agent-sessions、daemon sessions、change sessions）标题派生都拉取页内会话的全部 user_input 日志行（单行上限 50KB）Python 侧取最早——几百会话×上百轮时单次列表请求额外扫数万行大文本；workspace include_ended 分支还会话本身都无分页无界返回
+方案：三处标题查询改 ROW_NUMBER() OVER (PARTITION BY session ORDER BY timestamp,id) 窗口函数每会话恒取 1 行（PG/SQLite 双方言）；include_ended 分支加 limit/offset Query（默认 200，FastAPI 校验 1-500）；新增 2 分页用例
+结果：include_ended 13 用例（含新增分页 2 用例+既有取最早标题守卫）全绿；daemon 会话相关 375 全绿；change 域 394 全绿；ruff/mypy 0 错；agent.md 同步
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/change/router.py

@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -348,30 +348,39 @@ async def list_change_sessions(
     user_name_map: dict[uuid.UUID, str | None] = {u.id: u.display_name for u in users}
 
     # 3. 批量取每个 session 的首条 user_input 标题：JOIN AgentRun 过滤
-    #    agent_session_id IN (...) + AgentRunLog.channel='user_input'，按
-    #    (agent_session_id, AgentRunLog.timestamp asc) 取首条。Python 侧 group + 取最早。
-    title_stmt = (
+    #    agent_session_id IN (...) + AgentRunLog.channel='user_input'。
+    #    P5（2026-08-24 会话审查）：窗口函数 ROW_NUMBER 分区取首条（与 agent/
+    #    daemon router 同步）——原实现拉全部 user_input 行 Python 取最早，
+    #    长会话下随轮数线性放大。
+    rn = (
+        func.row_number()
+        .over(
+            partition_by=AgentRun.agent_session_id,
+            order_by=(AgentRunLog.timestamp.asc(), AgentRunLog.id.asc()),
+        )
+        .label("rn")
+    )
+    title_subq = (
         select(
             AgentRun.agent_session_id.label("session_id"),
-            AgentRunLog.timestamp.label("ts"),
             AgentRunLog.content_redacted.label("content"),
+            rn,
         )
         .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
         .where(
             col(AgentRun.agent_session_id).in_(session_ids),
             col(AgentRunLog.channel) == "user_input",
         )
+        .subquery()
     )
-    title_rows = (await session.execute(title_stmt)).all()
-    first_input_by_session: dict[uuid.UUID, datetime] = {}
-    content_by_session: dict[uuid.UUID, str] = {}
-    for row in title_rows:
-        sid = row.session_id
-        ts = row.ts
-        prev = first_input_by_session.get(sid)
-        if prev is None or ts < prev:
-            first_input_by_session[sid] = ts
-            content_by_session[sid] = row.content or ""
+    title_rows = (
+        await session.execute(
+            select(title_subq.c.session_id, title_subq.c.content).where(title_subq.c.rn == 1)
+        )
+    ).all()
+    content_by_session: dict[uuid.UUID, str] = {
+        row.session_id: (row.content or "") for row in title_rows
+    }
 
     # 4. 组装 + 按 last_active_at desc 排序。
     items = [

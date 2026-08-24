@@ -488,3 +488,64 @@ async def test_empty_workspace_returns_empty_list(client, db_session, tmp_path):
     )
     assert resp.status_code == 200, resp.text
     assert resp.json() == []
+
+
+# ---- P5（2026-08-24 会话审查）：include_ended 分支分页 ------------------------
+
+
+async def test_include_ended_paginated_by_limit_offset(client, db_session, tmp_path):
+    """limit/offset 分页：按 coalesce(last_active_at, created_at) desc 截页。"""
+    owner, ws = await _seed_workspace(db_session, tmp_path)
+    now = datetime.now(UTC)
+    sessions = [
+        _add_session(
+            db_session,
+            ws_id=ws.id,
+            owner=owner,
+            status="ended",
+            created_at=now - timedelta(minutes=i),
+            user_log=f"会话{i}",
+        )
+        for i in range(4)  # created_at 递减 → 列表顺序 sess0..sess3
+    ]
+    await db_session.commit()
+
+    # limit=2 → 最新两条（sess0/sess1）
+    resp = await client.get(
+        f"/api/workspaces/{ws.id}/agent-sessions?include_ended=true&limit=2",
+        headers=_auth(_token(owner)),
+    )
+    assert resp.status_code == 200
+    ids = [item["id"] for item in resp.json()]
+    assert ids == [str(sessions[0].id), str(sessions[1].id)]
+
+    # offset=2 → 较旧两条（sess2/sess3）
+    resp2 = await client.get(
+        f"/api/workspaces/{ws.id}/agent-sessions?include_ended=true&limit=2&offset=2",
+        headers=_auth(_token(owner)),
+    )
+    assert resp2.status_code == 200
+    ids2 = [item["id"] for item in resp2.json()]
+    assert ids2 == [str(sessions[2].id), str(sessions[3].id)]
+
+
+async def test_include_ended_default_limit_bounds_query(client, db_session, tmp_path):
+    """缺省 limit=200：老 workspace 数千会话不再无界全量返回。"""
+    owner, ws = await _seed_workspace(db_session, tmp_path)
+    for i in range(3):  # 少量造数验证缺省参数不报错即可（上限 200 由 FastAPI 校验）
+        _add_session(
+            db_session,
+            ws_id=ws.id,
+            owner=owner,
+            status="ended",
+            created_at=datetime.now(UTC) - timedelta(minutes=i),
+            user_log=f"s{i}",
+        )
+    await db_session.commit()
+
+    resp = await client.get(
+        f"/api/workspaces/{ws.id}/agent-sessions?include_ended=true",
+        headers=_auth(_token(owner)),
+    )
+    assert resp.status_code == 200
+    assert len(resp.json()) == 3
