@@ -635,6 +635,28 @@ function parseBashChunkEvent(
   };
 }
 
+/** 把 SSE payload 归一化为 AgentTaskStatusEvent（verify P1 返工 / FR-03）。 */
+function parseAgentTaskStatusEvent(
+  data: unknown,
+  sessionId: string,
+): AgentTaskStatusEvent {
+  const evt = data as Record<string, unknown>;
+  const status =
+    evt.status === "completed" || evt.status === "failed"
+      ? evt.status
+      : "running";
+  return {
+    event: "agent_task_status",
+    session_id: sessionId,
+    run_id: String(evt.run_id),
+    task_id: typeof evt.task_id === "string" ? evt.task_id : "",
+    task_name: typeof evt.task_name === "string" ? evt.task_name : "",
+    status,
+    progress: typeof evt.progress === "number" ? evt.progress : null,
+    message: typeof evt.message === "string" ? evt.message : null,
+  };
+}
+
 /**
  * task-05：提交用户对 plan 的决策（confirm / revise / cancel）。
  * POST /api/daemon/sessions/{sessionId}/plan-response，body 字段 snake_case。
@@ -868,7 +890,8 @@ export type SessionEventKind =
   | "tokens"
   | "plan_mode_entered"
   | "bash_status"
-  | "bash_chunk";
+  | "bash_chunk"
+  | "agent_task_status";
 
 /** Plan 模式摘要（plan_mode_entered 事件 payload）。 */
 export interface PlanSummary {
@@ -906,6 +929,21 @@ export interface BashChunkEvent {
   channel: "stdout" | "stderr";
   content: string;
   is_final: boolean;
+}
+
+/**
+ * agent_task_status 事件：后台 Agent 任务（Task/Agent 工具派发的子代理）状态。
+ * verify P1 返工（FR-03）：daemon 在 Task/Agent tool_use 时上报，前端渲染任务卡片。
+ */
+export interface AgentTaskStatusEvent {
+  event: "agent_task_status";
+  session_id: string;
+  run_id: string;
+  task_id: string;
+  task_name: string;
+  status: "running" | "completed" | "failed";
+  progress: number | null;
+  message: string | null;
 }
 
 export interface SessionStreamEnvelope {
@@ -1026,6 +1064,11 @@ export interface SessionStreamHandlers {
    * task-05：Bash 命令实时输出片段（stdout / stderr）。
    */
   onBashChunk?(event: BashChunkEvent): void;
+  /**
+   * verify P1 返工（FR-03）：后台 Agent 任务状态（running / completed / failed）。
+   * 父组件按 task_id 维护任务卡片列表；存在 running 任务时会话不显示「已完成」。
+   */
+  onAgentTaskStatus?(event: AgentTaskStatusEvent): void;
 }
 
 export interface SessionStreamConnection {
@@ -1168,6 +1211,9 @@ export function streamSession(
         break;
       case "bash_chunk":
         handlers.onBashChunk?.(parseBashChunkEvent(parsed, sessionId));
+        break;
+      case "agent_task_status":
+        handlers.onAgentTaskStatus?.(parseAgentTaskStatusEvent(parsed, sessionId));
         break;
       case "session_status":
         // session_status 不进入专门 handler（无 status 变更时静默），可选扩展。

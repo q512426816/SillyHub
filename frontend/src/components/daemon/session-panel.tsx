@@ -102,6 +102,7 @@ import {
 } from "@/components/daemon/agent-log-card";
 import { PlanApprovalCard } from "@/components/daemon/plan-approval-card";
 import { BashProgressCard, type BashChunkItem } from "@/components/daemon/bash-progress-card";
+import { AgentTaskCard } from "@/components/daemon/agent-task-card";
 import type {
   PlanModeEnteredEvent,
   PlanSummary,
@@ -558,6 +559,17 @@ function SessionPanelPage({
     elapsedMs?: number | null;
     chunks: BashChunkItem[];
   } | null>(null);
+  // verify P1 返工（FR-03）：后台 Agent 任务状态（按 task_id upsert，保留终态供
+  // 回看；最多展示最近 6 条防长会话刷屏，会话结束清空）。
+  const [agentTasks, setAgentTasks] = useState<
+    {
+      taskId: string;
+      taskName: string;
+      status: "running" | "completed" | "failed";
+      progress: number | null;
+      message: string | null;
+    }[]
+  >([]);
   // gap-fix（FR-07 / FR-08）：run 级轮次快照（id → SessionRunRead），attach 时
   // 预取 + 每轮 turn_completed 后刷新，供 whoLine 注入与历史 usage 回填。
   const [runsMeta, setRunsMeta] = useState<Map<string, SessionRunRead>>(new Map());
@@ -645,6 +657,7 @@ function SessionPanelPage({
     setPendingRequests([]);
     setPlanPending(null);
     setBashProgress(null);
+    setAgentTasks([]);
     setRunsMeta(new Map());
     fetchedErrorRunIdsRef.current.clear();
     currentRunIdRef.current = null;
@@ -800,6 +813,7 @@ function SessionPanelPage({
         setPendingRequests([]);
         setPlanPending(null);
         setBashProgress(null);
+        setAgentTasks([]);
         streamRef.current = null;
         void qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
         onSessionListRefresh?.();
@@ -865,6 +879,23 @@ function SessionPanelPage({
               { channel: event.channel, content: event.content, is_final: event.is_final },
             ],
           };
+        });
+      },
+      // verify P1 返工（FR-03）：后台 Agent 任务状态 → AgentTaskCard（按 task_id upsert）。
+      onAgentTaskStatus: (event) => {
+        setAgentTasks((prev) => {
+          const next = {
+            taskId: event.task_id,
+            taskName: event.task_name,
+            status: event.status,
+            progress: event.progress,
+            message: event.message,
+          };
+          const idx = prev.findIndex((t) => t.taskId === event.task_id);
+          if (idx === -1) return [...prev, next].slice(-6);
+          const copy = [...prev];
+          copy[idx] = next;
+          return copy;
         });
       },
     });
@@ -2073,6 +2104,28 @@ function SessionPanelPage({
           />
         </div>
       )}
+      {/* verify P1 返工（FR-03）：后台 Agent 任务卡片。存在 running 任务且当前无
+          活跃 turn 时提示「后台任务仍在运行」——会话不提前标记完成。 */}
+      {agentTasks.length > 0 && (
+        <div className="shrink-0 space-y-2 border-t border-border bg-card px-5 py-3">
+          {turnState.currentRunId == null &&
+            agentTasks.some((t) => t.status === "running") && (
+              <p className="text-xs font-medium text-brand-700">
+                后台任务仍在运行，会话未结束
+              </p>
+            )}
+          {agentTasks.map((task) => (
+            <AgentTaskCard
+              key={task.taskId}
+              taskId={task.taskId}
+              taskName={task.taskName}
+              status={task.status}
+              progress={task.progress}
+              message={task.message}
+            />
+          ))}
+        </div>
+      )}
 
       {/* 输入区：ctx 用量行 + 输入框 + 配置控件条（原型 .input-zone） */}
       <div className="flex shrink-0 flex-col bg-card">
@@ -2367,6 +2420,16 @@ function SessionPanelDialog(props: SessionPanelProps) {
     elapsedMs?: number | null;
     chunks: BashChunkItem[];
   } | null>(null);
+  // verify P1 返工（FR-03）：后台 Agent 任务状态（按 task_id upsert，最近 6 条）。
+  const [agentTasks, setAgentTasks] = useState<
+    {
+      taskId: string;
+      taskName: string;
+      status: "running" | "completed" | "failed";
+      progress: number | null;
+      message: string | null;
+    }[]
+  >([]);
   // AskUserQuestion 问答历史（pending+answered），独立于实时卡片——卡片回答后
   // 即移除、failed/ended 会话不渲染卡片，历史靠 GET /dialogs/history 恢复展示。
   const [dialogHistory, setDialogHistory] = useState<SessionDialogRead[]>([]);
@@ -2511,6 +2574,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
           setPendingRequests([]);
           setPlanPending(null);
           setBashProgress(null);
+          setAgentTasks([]);
           streamConnRef.current = null;
         },
         onError: () => {
@@ -2578,6 +2642,23 @@ function SessionPanelDialog(props: SessionPanelProps) {
                 { channel: event.channel, content: event.content, is_final: event.is_final },
               ],
             };
+          });
+        },
+        // verify P1 返工（FR-03）：后台 Agent 任务状态 → AgentTaskCard（按 task_id upsert）。
+        onAgentTaskStatus: (event) => {
+          setAgentTasks((prev) => {
+            const next = {
+              taskId: event.task_id,
+              taskName: event.task_name,
+              status: event.status,
+              progress: event.progress,
+              message: event.message,
+            };
+            const idx = prev.findIndex((t) => t.taskId === event.task_id);
+            if (idx === -1) return [...prev, next].slice(-6);
+            const copy = [...prev];
+            copy[idx] = next;
+            return copy;
           });
         },
       },
@@ -3126,6 +3207,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
     setPendingRequests([]);
     setPlanPending(null);
     setBashProgress(null);
+    setAgentTasks([]);
     // 重置回 idle 时通知父级清除 URL ?session= / 清选中（触发 key 重挂载）
     onSessionReset?.();
   }, [closeStream, onSessionReset]);
@@ -3421,6 +3503,27 @@ function SessionPanelDialog(props: SessionPanelProps) {
             elapsedMs={bashProgress.elapsedMs}
             chunks={bashProgress.chunks}
           />
+        </div>
+      )}
+      {/* verify P1 返工（FR-03）：后台 Agent 任务卡片（dialog 模式，与 page 同款）。 */}
+      {agentTasks.length > 0 && (
+        <div className="shrink-0 space-y-2 border-t border-border bg-card px-5 py-3">
+          {view.currentRunId == null &&
+            agentTasks.some((t) => t.status === "running") && (
+              <p className="text-xs font-medium text-brand-700">
+                后台任务仍在运行，会话未结束
+              </p>
+            )}
+          {agentTasks.map((task) => (
+            <AgentTaskCard
+              key={task.taskId}
+              taskId={task.taskId}
+              taskName={task.taskName}
+              status={task.status}
+              progress={task.progress}
+              message={task.message}
+            />
+          ))}
         </div>
       )}
 
