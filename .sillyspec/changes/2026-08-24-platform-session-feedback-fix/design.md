@@ -140,6 +140,8 @@ class PlanResponseDecision(str, Enum):
     cancel = "cancel"
 
 class PlanResponseRequest(BaseModel):
+    session_id: uuid.UUID
+    run_id: uuid.UUID
     decision: PlanResponseDecision
     feedback: str | None = None  # revise/cancel 时必填
 ```
