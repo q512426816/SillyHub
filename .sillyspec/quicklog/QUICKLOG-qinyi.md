@@ -32,3 +32,14 @@
 方案：session-log-assembler.ts 分类器识别该前缀归新 kind=skill（仅 [ASSISTANT] 前缀形态，裸文本不误吞）；装配器 attachSkillInjection 把全文追加到同桶内最近 Skill 工具段 result（进度视图工具卡展开可见，多技能各挂最近不串段，子代理桶路由照常），无 Skill 工具段时退化文本段不丢内容
 结果：新增 6 测试用例 TDD 先红后绿；daemon+sessions 28 文件 403 测试全绿；tsc 0 错；eslint 仅存量 warning（520/577 行未改动代码）
 审计：📝 文档欠账（D-8）：2 个源码文件改动未同步任何模块文档（涉及模块：frontend）（已核对修正：模块文档 frontend.md 变更索引已同步本条，CLI 审计时该文件属 baseline 脏文件未计入本轮）
+
+## ql-20260824-018-7f80 | 2026-08-24 13:38:17 | 会话「进度」视图 Write/Edit 工具卡展开补参数详情（内容预览与 old/new 对比）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/turn-segment-views.tsx（WriteArgsDetail/EditArgsDetail 参数详情组件 + ToolRowView 展开区接线）
+- frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx（ToolRowView describe 追加 5 用例）
+需求：会话「进度」视图 Write/Edit 工具卡展开补参数详情（内容预览与 old/new 对比）
+根因：8-19 段模型改版后 ToolRowView 展开只渲染 tool_result，Write/Edit 仅显示一句成功消息，参数详情未从旧 agent-log/tool-renderers 日志渲染器迁移，用户看不到具体改动内容
+方案：turn-segment-views.tsx 展开区上半部按工具名渲染参数详情——Write 内容预览（5 万字符截断+标注+复制完整原文）、Edit 红-原文本/绿+新文本对比（line-clamp-6），下方保留原 result；非 Write/Edit 工具 result-only 零变化；配色走主题 token；复用 tool-renderers 导出的 CopyButton
+结果：新增 5 测试用例 TDD 先红后绿；daemon+sessions 28 文件 408 测试全绿；tsc 0 错；eslint 0 告警

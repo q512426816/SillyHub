@@ -11,7 +11,10 @@
  *                       点击整行展开 result，MarkdownText 渲染；复制按钮平移现有
  *                       turn-timeline parseToolRaw 的 copyText 规则；
  *                       task-12：团队 MCP 工具（dispatch_worker 等 5 个）泛化微调
- *                       ——短名 + mcp 标识 + 👥 图标 + 角色/目标主参数摘要）
+ *                       ——短名 + mcp 标识 + 👥 图标 + 角色/目标主参数摘要；
+ *                       ql-20260824-018：Write/Edit 展开区上半部渲染参数详情
+ *                       ——Write 内容预览（5 万字符截断+复制）/ Edit 红-绿+ 对比，
+ *                       规则搬自 agent-log/tool-renderers，下方接工具 result）
  *   - SubagentBlockView 子代理嵌套块（头部状态点/名称/类型/时长 + children 递归
  *                       渲染；运行中默认展开+头部扫动，完成默认折叠；subagent_stub
  *                       兜底段复用同组件）
@@ -51,6 +54,7 @@ import type { ReactNode } from "react";
 
 import { MarkdownText } from "@/components/ui/markdown-text";
 import { FileMessageCard } from "@/components/daemon/file-message-card";
+import { CopyButton } from "@/components/agent-log/tool-renderers";
 import type {
   StubTurnSegment,
   ToolTurnSegment,
@@ -225,6 +229,81 @@ const TOOL_ICON: Record<string, string> = {
 
 function toolIconOf(toolName: string | null): string {
   return (toolName && TOOL_ICON[toolName]) || "🔧";
+}
+
+/* ───────── ql-20260824-018：Write/Edit 参数详情预览（展开区上半部） ───────── */
+
+/**
+ * 解析 tool 段 raw（tool_call JSON）的 args 对象；解析失败 / 无 args → null。
+ * 与 toolCopyText 同容错口径（R-07：非 JSON 原样展示，不抛错）。
+ */
+function parseToolArgs(raw: string): Record<string, unknown> | null {
+  try {
+    const obj = JSON.parse(raw.trim()) as { args?: unknown } | null;
+    if (obj && typeof obj === "object" && obj.args && typeof obj.args === "object") {
+      return obj.args as Record<string, unknown>;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** 参数详情 pre 块样式（对齐旧渲染器 CODE_CLS 语义，配色走主题 token 适配双主题）。 */
+const ARGS_PRE_CLS =
+  "max-w-full whitespace-pre-wrap break-words rounded-md border border-border bg-background px-2 py-1 text-[11px] leading-5 text-foreground [overflow-wrap:anywhere]";
+
+/**
+ * Write 参数详情——内容预览。规则搬自 agent-log/tool-renderers WriteToolPreview：
+ * 超 5 万字符截断展示 + 标注（ql-20260709-002），复制按钮带完整原文（复制不截断）。
+ * content 缺失 / 非 JSON → 不渲染（回退 result-only 行为）。
+ */
+function WriteArgsDetail({ raw }: { raw: string }) {
+  const args = parseToolArgs(raw);
+  const content = typeof args?.content === "string" ? args.content : "";
+  if (!content) return null;
+  const lineCount = content.split("\n").length;
+  return (
+    <div className="mb-2">
+      <div className="mb-0.5 text-[10px] font-semibold text-muted-foreground">
+        写入内容（{lineCount} 行）
+      </div>
+      <pre className={ARGS_PRE_CLS}>
+        {content.length > 50000 ? `${content.slice(0, 50000)}\n... (截断)` : content}
+      </pre>
+      <div className="mt-1">
+        <CopyButton text={content} label="复制内容" />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Edit 参数详情——红 - 原文本 / 绿 + 新文本对比。规则搬自 EditToolPreview：
+ * 两侧各 line-clamp-6 折叠防超长撑爆展开区（看全量走行头复制或文件树）。
+ * old/new 均缺失 / 非 JSON → 不渲染（回退 result-only 行为）。
+ */
+function EditArgsDetail({ raw }: { raw: string }) {
+  const args = parseToolArgs(raw);
+  const oldStr = typeof args?.old_string === "string" ? args.old_string : "";
+  const newStr = typeof args?.new_string === "string" ? args.new_string : "";
+  if (!oldStr && !newStr) return null;
+  return (
+    <div className="mb-2 space-y-1.5">
+      {oldStr && (
+        <div>
+          <div className="mb-0.5 text-[10px] font-semibold text-red-600">- 原文本</div>
+          <pre className={`${ARGS_PRE_CLS} line-clamp-6`}>{oldStr}</pre>
+        </div>
+      )}
+      {newStr && (
+        <div>
+          <div className="mb-0.5 text-[10px] font-semibold text-emerald-600">+ 新文本</div>
+          <pre className={`${ARGS_PRE_CLS} line-clamp-6`}>{newStr}</pre>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** 工具状态徽章元数据（图标/颜色/提示文案平移现有 ToolEventCard）。 */
@@ -489,6 +568,12 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
       </div>
       {open && (
         <div className="mt-1 max-h-[200px] overflow-y-auto rounded-lg bg-muted px-3 py-2 text-[11px] leading-relaxed text-muted-foreground">
+          {/* ql-20260824-018：Write/Edit 展开优先渲染参数详情（内容预览 / old-new
+              对比，规则搬自 agent-log/tool-renderers），下方接工具 result——修复
+              段模型改版后「只有一句成功结果、看不到具体改动内容」。其余工具
+              result-only 行为零变化。 */}
+          {segment.toolName === "Write" && segment.raw && <WriteArgsDetail raw={segment.raw} />}
+          {segment.toolName === "Edit" && segment.raw && <EditArgsDetail raw={segment.raw} />}
           {result ? (
             <MarkdownText content={result} />
           ) : running ? (

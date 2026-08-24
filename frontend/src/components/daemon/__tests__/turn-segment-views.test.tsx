@@ -287,6 +287,129 @@ describe("ToolRowView 工具行", () => {
     expect(screen.getByText(/人类可读的工具摘要/)).toBeInTheDocument();
     expect(screen.queryByTitle("复制命令")).toBeNull();
   });
+
+  /* ql-20260824-018：Write/Edit 参数详情预览（规则搬自 agent-log/tool-renderers，
+     修复段模型改版后「只能看到一句成功结果、看不到具体改动内容」）。 */
+
+  const WRITE_RAW = JSON.stringify({
+    tool: "Write",
+    args: { file_path: "src/theme.ts", content: 'export const theme = {\n  primary: "cyan",\n};' },
+    tool_use_id: "call_w",
+    success: true,
+  });
+  const EDIT_RAW = JSON.stringify({
+    tool: "Edit",
+    args: {
+      file_path: "src/theme.ts",
+      old_string: 'primary: "violet"',
+      new_string: 'primary: "cyan"',
+    },
+    tool_use_id: "call_e",
+    success: true,
+  });
+
+  it("Write 展开：参数详情（内容预览 + 复制内容按钮）在上方，工具结果在下方", () => {
+    render(
+      <ToolRowView
+        segment={makeToolSeg({
+          id: "call_w",
+          raw: WRITE_RAW,
+          toolName: "Write",
+          primary: "src/theme.ts",
+          result: "The file src/theme.ts has been updated",
+        })}
+      />,
+    );
+    fireEvent.click(rowOf("Write"));
+    expect(screen.getByText(/export const theme/)).toBeInTheDocument();
+    expect(screen.getByTitle("复制内容")).toBeInTheDocument();
+    expect(screen.getByTestId("markdown-text").textContent).toBe(
+      "The file src/theme.ts has been updated",
+    );
+    // 参数详情块在 result 之前（DOM 序：pre 在 markdown-text 前；位掩码非零即跟随其后）
+    const detail = screen.getByText(/export const theme/).closest("pre");
+    const resultEl = screen.getByTestId("markdown-text");
+    expect(
+      detail && resultEl
+        ? detail.compareDocumentPosition(resultEl) & Node.DOCUMENT_POSITION_FOLLOWING
+        : 0,
+    ).toBeTruthy();
+  });
+
+  it("Write 超长内容 5 万字符截断（沿用 ql-20260709-002 规则），复制仍带完整原文", () => {
+    // CopyButton 依赖 writeText().then(...)，mock 必须返回 Promise（非 undefined）
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const long = "x".repeat(50_001);
+    render(
+      <ToolRowView
+        segment={makeToolSeg({
+          id: "call_w2",
+          raw: JSON.stringify({
+            tool: "Write",
+            args: { file_path: "big.ts", content: long },
+            tool_use_id: "call_w2",
+            success: true,
+          }),
+          toolName: "Write",
+          primary: "big.ts",
+          result: "ok",
+        })}
+      />,
+    );
+    fireEvent.click(rowOf("Write"));
+    const pre = screen.getByText(/\(截断\)/);
+    expect(pre.textContent).toBe(`${"x".repeat(50_000)}\n... (截断)`);
+    fireEvent.click(screen.getByTitle("复制内容"));
+    expect(writeText).toHaveBeenCalledWith(long); // 复制完整原文不截断
+  });
+
+  it("Edit 展开：红 - 原文本 / 绿 + 新文本对比块，工具结果在下方", () => {
+    render(
+      <ToolRowView
+        segment={makeToolSeg({
+          id: "call_e",
+          raw: EDIT_RAW,
+          toolName: "Edit",
+          primary: "src/theme.ts",
+          result: "The file src/theme.ts has been updated",
+        })}
+      />,
+    );
+    fireEvent.click(rowOf("Edit"));
+    expect(screen.getByText('primary: "violet"')).toBeInTheDocument();
+    expect(screen.getByText('primary: "cyan"')).toBeInTheDocument();
+    expect(screen.getByTestId("markdown-text").textContent).toBe(
+      "The file src/theme.ts has been updated",
+    );
+  });
+
+  it("Write 运行中（result 未配对）：展开仍显示内容预览 + 「执行中…」占位", () => {
+    render(
+      <ToolRowView
+        segment={makeToolSeg({
+          id: "call_w3",
+          raw: WRITE_RAW,
+          toolName: "Write",
+          primary: "src/theme.ts",
+          result: undefined,
+          status: "running",
+          endedAt: null,
+        })}
+      />,
+    );
+    fireEvent.click(rowOf("Write"));
+    expect(screen.getByText(/export const theme/)).toBeInTheDocument();
+    expect(screen.getByText("执行中…")).toBeInTheDocument();
+  });
+
+  it("非 Write/Edit 工具（Read）展开保持 result-only，无参数详情块（零回归）", () => {
+    render(<ToolRowView segment={makeToolSeg()} />);
+    fireEvent.click(rowOf("Read"));
+    expect(screen.getByTestId("markdown-text").textContent).toBe("文件内容 A");
+    expect(screen.queryByTitle("复制内容")).toBeNull();
+    expect(screen.queryByText(/原文本|新文本|写入内容/)).toBeNull();
+  });
 });
 
 describe("StderrRowView 警示行", () => {
