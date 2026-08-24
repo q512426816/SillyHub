@@ -1,4 +1,13 @@
 <!-- author: qinyi | created_at: 2026-08-25 03:10:00 -->
+<!--
+risk_level: contract-tested
+风险等级声明（verify 对账依据）：本变更零 daemon 进程侧改动——sillyhub-daemon/
+目录零文件触碰、SESSION_INJECT/lease 协议零变更、page_context 仅在 backend
+create 路径既有 dispatch_prompt 前导链追加文本。关键词命中（daemon/session/
+backend）来自模块名与文件路径，非跨进程/状态机改动。证据等级：真实 DB 的
+service 级集成测试（lease.metadata_ dispatch_prompt 断言）+ OpenAPI 契约
+对账（gen:types）；真实 daemon 进程联调未执行（见 verify-result 运行时证据节）。
+-->
 # 设计：统一智能悬浮会话 v1
 
 生命周期契约：无/N/A——本变更不新增或修改任何 lease / agent_run / daemon

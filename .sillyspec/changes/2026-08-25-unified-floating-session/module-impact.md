@@ -30,3 +30,9 @@ change: 2026-08-25-unified-floating-session
 - POST /api/daemon/sessions 请求体新增可选 page_context（PageContextCreateBlock：
   page_key 枚举 + project_id）——OpenAPI schema 变更，需 gen:types 同步（规则 21）。
 - 无新端点、无 daemon 协议变更、无生命周期事件变更。
+
+## verify 终态（2026-08-25 04:10）
+
+- 实测复核（verify 工具自动）：module[frontend,sillyhub-daemon,daemon,agent] 退出码 0（271.3s）；API parity 201 后端端点 0 前端失配。
+- 端点影响确认：POST /api/daemon/sessions 请求体 +page_context（可选），OpenAPI/api-types 已同步。
+- 风险等级：contract-tested（零 daemon 进程侧改动，sillyhub-daemon/ 零文件触碰）。
