@@ -187,6 +187,9 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
                 # 返回 None（前端 SessionStreamEnvelope.stale 默认 false，brownfield
                 # 安全）。前端据 stale=True 识别撤回令箭按 segmentId 撤回已渲染半截。
                 "stale": log_payload.get("stale"),
+                # ql-20260824-020：edit_patch 透传到 session channel，与 run channel
+                # published_logs 对齐。.get() 兼容 override envelope 与历史 payload。
+                "edit_patch": log_payload.get("edit_patch"),
             }
             await redis.publish(session_channel, json.dumps(session_payload))
         # ql-20260621：实时 token 透传到 session channel（onTokens）。
@@ -653,6 +656,9 @@ class RunSyncService:
                 # task-14 / FR-02：partial 行持久化 segment_id 供 override 跨调用 DELETE；
                 # complete 行（is_partial=False）写 None，DELETE by segment_id 不误删完整行。
                 segment_id=segment_id if is_partial else None,
+                # ql-20260824-020：Edit structuredPatch JSON（_extract_sdk_messages 注入
+                # flat record），落库供 REST 历史 + SSE 实时两路透传前端 diff 真实行号。
+                edit_patch=msg.get("edit_patch") if isinstance(msg, dict) else None,
             )
             self._session.add(log_entry)
             count += 1
@@ -679,6 +685,9 @@ class RunSyncService:
                     # 会让前端误判 complete 全文为半截触发错误撤回）。partial 行非空
                     # "main:msg_xxx:N"，complete/其他行 None。前端据「非空」识别半截。
                     "segment_id": log_entry.segment_id,
+                    # ql-20260824-020：edit_patch 透传到 SSE 实时流（run channel），
+                    # 与 DB 列一致；非 Edit 结果行为 None。
+                    "edit_patch": log_entry.edit_patch,
                 }
             )
 
@@ -2229,6 +2238,20 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
                 }
                 if result_tool_use_id:
                     rec["tool_use_id"] = result_tool_use_id
+                # ql-20260824-020：Edit 真实文件行号透传。SDK 把 Edit 结果放在
+                # ``msg.tool_use_result.structuredPatch``（hunks 带 oldStart/newStart
+                # 文件内行号），原实现只读 content 丢弃该字段。此处读出来序列化成
+                # ``edit_patch`` JSON 挂到 flat record 顶层，供前端 Edit 展开渲染
+                # 带文件内真实行号的 diff（缺则前端回退 LCS 自算）。仅 Edit（有
+                # structuredPatch）才附加，Bash/Read 等零变化。
+                tur = msg.get("tool_use_result")
+                if isinstance(tur, dict):
+                    patch = tur.get("structuredPatch")
+                    if isinstance(patch, list) and patch:
+                        try:
+                            rec["edit_patch"] = json.dumps(patch, ensure_ascii=False)
+                        except (TypeError, ValueError):
+                            pass
                 out.append(stamp(rec))
 
     # 2026-06-28-daemon-subagent-transcript task-08 / D-008@v1（Grill X-001）：

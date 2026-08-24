@@ -56,3 +56,13 @@
 根因：段模型改版后工具卡展开只有一句成功结果：Write/Edit 之外的参数详情整体缺失（Grep 参数/命中数、Agent Prompt、Bash 输出误走 Markdown、Read 复制不到内容、无 args JSON），且 Edit 只显示两个裸代码块没有行号与高亮
 方案：新建 tool-args-detail.tsx 收拢展开区内容（ToolExpandBody 单一入口）：Edit 行级 diff（computeLineDiff LCS + DiffView 双侧行号+红绿行底+超大回退两块+复制新文本）；Bash 输出纯文本 pre+复制输出+10 万截断；Read 行范围+复制内容；Grep 参数行+命中 N 条；Agent Prompt 预览+复制；其余工具通用参数 JSON pre 兜底；Write 预览保持。turn-segment-views 删上一轮内联组件改一行接线
 结果：新增 14 测试用例（diff 纯函数 5+DiffView 1+工具展开 8）；daemon+sessions 29 文件 422 测试全绿；tsc 0 错；eslint 0 告警
+
+## ql-20260824-020-6f01 | 2026-08-24 14:39:38 | 会话进度视图 Edit 展开 diff 显示文件内真实行号
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/run_sync/service.py, frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx, frontend/src/components/daemon/tool-args-detail.tsx
+需求：会话进度视图 Edit 展开 diff 显示文件内真实行号
+根因：Edit 展开的 computeLineDiff LCS 自算行号是 old_string/new_string 片段相对行号（1 起），不是文件内真实行号；SDK tool_use_result.structuredPatch 本就携带 oldStart/newStart 真实行号 hunks，但 _extract_sdk_messages 展开 tool_result 时丢弃未透传
+方案：方案 A 三端透传 structuredPatch：backend _extract_sdk_messages 提取注入 flat record edit_patch + AgentRunLog 加 edit_patch Text 列（migration 20260824130000 串行链接并行变更 20260824120000）+ SSE run/session 双 channel 透传 + AgentRunLogEntry DTO 自动透传三处 logs 端点；前端 AgentRunLogEntry/SessionStreamEnvelope/AssemblerLogInput/TurnSegment 四类型加字段 + 三处归一映射 + 装配器 tool_result 配对/孤儿两分支写段 editPatch + 新 parseStructuredPatch（真实行号起计、多 hunk 分隔、非法回退 null），EditArgsDetail 优先 patch 渲染、无 patch 回退 LCS 相对行号
+结果：backend daemon+agent 1785 passed（新增 test_extract_sdk_edit_patch 3 用例）；前端全量 183 文件 2063 绿（新增 7 用例：parseStructuredPatch 4 + ToolRowView 2 + 装配器 1）+ tsc 0 + eslint 0 error；openapi.json 重生成；随即重建 backend/frontend 容器部署（migration 容器启动自动应用）
+审计：⚖️ 归属切分：12 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/agent/model.py, backend/app/modules/agent/schema.py, backend/openapi.json, frontend/src/components/daemon/__tests__/session-log-assembler.test.ts, frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx, frontend/src/components/daemon/runtime-session-helpers.tsx, frontend/src/components/daemon/session-panel.tsx, frontend/src/lib/agent.ts, frontend/src/lib/daemon.ts, backend/app/modules/daemon/tests/test_extract_sdk_edit_patch.py, backend/migrations/versions/20260824120000_agent_session_archive.py, backend/migrations/versions/20260824130000_agent_run_log_edit_patch.py

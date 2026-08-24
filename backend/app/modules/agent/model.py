@@ -480,6 +480,15 @@ class AgentRunLog(BaseModel, table=True):
         default=None,
         sa_column=Column(String(200), nullable=True),
     )
+    # ql-20260824-020：Edit 工具结果的结构化 diff（SDK tool_use_result.structuredPatch
+    # JSON 串，hunks 含 oldStart/newStart 真实文件行号）。_extract_sdk_messages 从
+    # tool_result 消息提取注入 flat record，submit_messages 落库本列；前端进度视图
+    # Edit 工具卡展开区优先用它渲染带文件内真实行号的 diff（无值回退 LCS 自算）。
+    # None = 非 Edit 结果 / 旧数据 / 无 patch，不受影响。
+    edit_patch: str | None = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+    )
 
 
 class AgentSession(BaseModel, table=True):

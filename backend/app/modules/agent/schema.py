@@ -177,6 +177,9 @@ class AgentRunLogEntry(BaseModel):
     # 2026-07-05-agent-log-type-tags task-01 / D-003@v1 方案 B：结构化工具类型，
     # 经 model_validate 自动透传（落库侧 task-04/05 注入，调用点不改）。
     tool_kind: str | None = None
+    # ql-20260824-020：Edit 工具结果 structuredPatch JSON 串（真实文件行号 hunks），
+    # 经 model_validate 自动透传，调用点不改。
+    edit_patch: str | None = None
     model_config = {"from_attributes": True}
 
 

@@ -280,6 +280,10 @@ export interface AssemblerLogInput {
   /** 工具种类（AgentRunLog.tool_kind，归一层填入）。task-08：'FileUpload' 的
    *  tool_call 行经 classifySessionLog 第三参优先映射为 file 段。 */
   toolKind?: string | null;
+  /** ql-20260824-020：Edit 工具结果 structuredPatch JSON 串（backend 落库透传，
+   *  hunks 含真实文件行号）。仅 Edit tool_result 行携带；配对时写到 tool 段
+   *  editPatch，展开区优先于 LCS 自算。 */
+  editPatch?: string | null;
 }
 
 /** 结构化段模型（渲染与派生统计的唯一数据源，design §7）。 */
@@ -295,6 +299,9 @@ export type TurnSegment =
       raw: string;
       /** 归属桶内位置配对的 [TOOL_RESULT]（已剥前缀；undefined=尚未配对）。 */
       result?: string;
+      /** ql-20260824-020：Edit 结果 structuredPatch JSON（随 result 配对写入；
+       *  undefined=无 patch / 非 Edit，展开区回退 LCS 自算行号）。 */
+      editPatch?: string;
       status: "running" | "ok" | "deny";
       /** 解析自 raw 的工具名；解析失败 null。 */
       toolName: string | null;
@@ -840,6 +847,9 @@ export function applyLogToSegments(
               {
                 ...t,
                 result: seg.text,
+                // ql-20260824-020：structuredPatch 随配对写入（仅 Edit tool_result
+                // 行携带；undefined 不影响其他工具）。
+                editPatch: input.editPatch ?? undefined,
                 // result 拒绝优先覆盖 use 的 success（daemon success 恒 true 不可信，
                 // isToolResultDenied 注）；仅 running（success 未解析出）时兜底 ok。
                 status: isToolResultDenied(seg.text)
@@ -862,6 +872,7 @@ export function applyLogToSegments(
             id: makeUniqueSegmentId(segments, segmentIdBase(input, "tool", ts)),
             raw: "",
             result: seg.text,
+            editPatch: input.editPatch ?? undefined,
             status: isToolResultDenied(seg.text) ? "deny" : "ok",
             toolName: null,
             primary: null,

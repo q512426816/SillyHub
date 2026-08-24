@@ -78,6 +78,10 @@ export interface AgentRunLogEntry {
   // 透传。非工具调用 / 主 agent 历史日志（未升级 daemon）→ null/undefined，
   // viewer 按通用「工具」徽标渲染（toolKindMeta 灰色兜底）。
   tool_kind?: string | null;
+  // ql-20260824-020：Edit 工具结果 structuredPatch JSON 串（hunks 含 oldStart/
+  // newStart 真实文件行号）。仅 Edit tool_result 行有值；旧数据 / 其他工具 →
+  // null/undefined，进度视图 Edit 展开区回退 LCS 自算行号。
+  edit_patch?: string | null;
 }
 
 export interface CreateAgentRunInput {

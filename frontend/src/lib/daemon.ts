@@ -824,6 +824,12 @@ export interface SessionStreamEnvelope {
    * （与 lib/agent.ts AgentRunLogEntry.tool_kind 同语义）。
    */
   tool_kind?: string | null;
+  /**
+   * ql-20260824-020：Edit 工具结果 structuredPatch JSON 串（真实文件行号 hunks），
+   * backend run_sync session channel publish 透传。仅 Edit tool_result 行有值，
+   * 旧 backend / 其他工具 → null/undefined，Edit 展开区回退 LCS 自算。
+   */
+  edit_patch?: string | null;
 }
 
 export interface SessionStreamHandlers {

@@ -8,9 +8,10 @@
  * result 区）：
  *
  *   - Write  内容预览（5 万字符截断+标注，复制完整原文；ql-20260709-002 规则）
- *   - Edit   行级 diff（computeLineDiff LCS + DiffView 双侧行号 + 红/绿行底，
- *            用户要求「行号 + 高亮变化」取代两个裸代码块；replace_all 徽章 +
- *            复制新文本；超大输入回退红/绿两块）
+ *   - Edit   行级 diff——优先 SDK structuredPatch（tool_use_result 透传，
+ *            oldStart/newStart 为文件内真实行号；ql-20260824-020），无 patch
+ *            回退 computeLineDiff LCS 自算（片段相对行号）；DiffView 双侧行号
+ *            + 红/绿行底；replace_all 徽章 + 复制新文本；超大输入回退红/绿两块
  *   - Bash   完整命令 pre；result 区改纯文本 pre + 复制输出 + 10 万字符前端
  *            兜底截断（命令输出走 Markdown 会误渲染 #/* 语法）
  *   - Read   行范围标注（offset–limit）+ 复制内容（复制 result）
@@ -151,6 +152,60 @@ export function computeLineDiff(oldStr: string, newStr: string): DiffRow[] | nul
   return rows;
 }
 
+/**
+ * ql-20260824-020：SDK structuredPatch（Edit tool_use_result，backend edit_patch
+ * 列透传）→ DiffRow[]。hunks 带 oldStart/newStart 文件内真实行号（1 起始），
+ * lines 元素前缀 ' '/'-'/'+'（'\' 为 "\ No newline at end of file" 标记行，
+ * 不占行号跳过）；多 hunk 间插双侧空行号的「…」分隔行。JSON 非法 / hunk 形状
+ * 不符 → null（调用方回退 LCS 自算，行号退化为片段相对）。
+ */
+export function parseStructuredPatch(patchJson: string): DiffRow[] | null {
+  let hunks: unknown;
+  try {
+    hunks = JSON.parse(patchJson);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(hunks) || hunks.length === 0) return null;
+  const rows: DiffRow[] = [];
+  for (let h = 0; h < hunks.length; h += 1) {
+    const hunk = hunks[h] as {
+      oldStart?: unknown;
+      newStart?: unknown;
+      lines?: unknown;
+    } | null;
+    if (!hunk || typeof hunk !== "object") return null;
+    if (typeof hunk.oldStart !== "number" || typeof hunk.newStart !== "number") {
+      return null;
+    }
+    if (!Array.isArray(hunk.lines)) return null;
+    let oldNo = hunk.oldStart;
+    let newNo = hunk.newStart;
+    if (h > 0) rows.push({ type: "ctx", oldNo: null, newNo: null, text: "…" });
+    for (const line of hunk.lines) {
+      if (typeof line !== "string" || line.length === 0) return null;
+      const prefix = line[0];
+      const text = line.slice(1);
+      if (prefix === " ") {
+        rows.push({ type: "ctx", oldNo, newNo, text });
+        oldNo += 1;
+        newNo += 1;
+      } else if (prefix === "-") {
+        rows.push({ type: "del", oldNo, newNo: null, text });
+        oldNo += 1;
+      } else if (prefix === "+") {
+        rows.push({ type: "add", oldNo: null, newNo, text });
+        newNo += 1;
+      } else if (prefix === "\\") {
+        continue;
+      } else {
+        return null;
+      }
+    }
+  }
+  return rows;
+}
+
 /** diff 渲染行数上限（超长 diff 截断展示，取全量走「复制新文本」）。 */
 const DIFF_MAX_ROWS = 2000;
 
@@ -220,14 +275,16 @@ function WriteArgsDetail({ raw }: { raw: string }) {
   );
 }
 
-/** Edit：行级 diff（双侧行号 + 红/绿高亮）；超大输入回退红/绿两块。 */
-function EditArgsDetail({ raw }: { raw: string }) {
+/** Edit：行级 diff——优先 structuredPatch 真实文件行号（ql-20260824-020），
+ *  无 patch / 解析失败回退 LCS 自算；超大输入回退红/绿两块。 */
+function EditArgsDetail({ raw, editPatch }: { raw: string; editPatch?: string }) {
   const args = parseToolArgs(raw);
   const oldStr = strArg(args, "old_string");
   const newStr = strArg(args, "new_string");
   if (!oldStr && !newStr) return null;
   const replaceAll = Boolean(args?.replace_all);
-  const rows = oldStr && newStr ? computeLineDiff(oldStr, newStr) : null;
+  const patchRows = editPatch ? parseStructuredPatch(editPatch) : null;
+  const rows = patchRows ?? (oldStr && newStr ? computeLineDiff(oldStr, newStr) : null);
   return (
     <div className="mb-2">
       <div className={cn(DETAIL_LABEL_CLS, "flex items-center gap-2")}>
@@ -389,7 +446,7 @@ function argsDetailOf(segment: ToolTurnSegment, result: string): ReactNode {
     case "Write":
       return <WriteArgsDetail raw={raw} />;
     case "Edit":
-      return <EditArgsDetail raw={raw} />;
+      return <EditArgsDetail raw={raw} editPatch={segment.editPatch} />;
     case "Bash": {
       const args = parseToolArgs(raw);
       return typeof args?.command === "string" && args.command ? (

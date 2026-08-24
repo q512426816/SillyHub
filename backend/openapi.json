@@ -28563,6 +28563,17 @@
               }
             ],
             "title": "Tool Kind"
+          },
+          "edit_patch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Edit Patch"
           }
         },
         "type": "object",

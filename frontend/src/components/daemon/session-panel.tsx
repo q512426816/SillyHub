@@ -1967,6 +1967,7 @@ function SessionPanelPage({
               <TeamTaskBlock
                 key={m.mission_id}
                 summary={m}
+                workspaceId={session?.workspace_id ?? preContext?.workspaceId ?? null}
                 onRefresh={() => {
                   void refreshTeamMissions();
                 }}
@@ -2116,6 +2117,7 @@ function toAssemblerLogInput(env: SessionStreamEnvelope): AssemblerLogInput {
     subagentType: env.subagent_type ?? null,
     depth: env.depth ?? null,
     toolKind: env.tool_kind ?? null,
+    editPatch: env.edit_patch ?? null,
   };
 }
 
@@ -3226,6 +3228,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
               <TeamTaskBlock
                 key={m.mission_id}
                 summary={m}
+                workspaceId={workspaceId ?? null}
                 onRefresh={() => {
                   void refreshTeamMissions();
                 }}
@@ -3398,6 +3401,7 @@ function applyEnvelopeToTurn(
     subagentType: env.subagent_type ?? null,
     depth: env.depth ?? null,
     toolKind: env.tool_kind ?? null,
+    editPatch: env.edit_patch ?? null,
   };
   return { ...turn, ...applyLogToSegments(asAssembled(turn), input) };
 }

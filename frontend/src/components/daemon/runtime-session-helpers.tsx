@@ -192,6 +192,7 @@ function toAssemblerInput(entry: AgentRunLogEntry): AssemblerLogInput {
     subagentType: entry.subagent_type ?? null,
     depth: entry.depth ?? null,
     toolKind: entry.tool_kind ?? null,
+    editPatch: entry.edit_patch ?? null,
   };
 }
 

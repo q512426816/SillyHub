@@ -407,6 +407,33 @@ describe("归属桶配对（Grill X-02：同桶最后未配对，不跨桶误配
     });
   });
 
+  it("ql-20260824-020：tool_result 携带 editPatch 随配对写入 tool 段（孤儿段同）；无则 undefined", () => {
+    const raw =
+      '{"tool":"Edit","args":{"file_path":"a.ts","old_string":"x","new_string":"y"},"tool_use_id":"tu_E","success":true}';
+    const patch = JSON.stringify([
+      { oldStart: 55, newStart: 55, oldLines: 1, newLines: 1, lines: ["-x", "+y"] },
+    ]);
+    // 配对分支：editPatch 落到配对的 tool 段
+    const turn = applyAll([
+      makeLog("1", "tool_call", raw),
+      makeLog("2", "stdout", "[TOOL_RESULT] The file a.ts has been updated", {
+        editPatch: patch,
+      }),
+    ]);
+    expect(toolById(turn.segments, "tu_E").editPatch).toBe(patch);
+    // 孤儿分支：桶内无未配对 tool 时兜底段同样携带
+    const orphanTurn = applyAll([
+      makeLog("1", "stdout", "[TOOL_RESULT] 孤儿 Edit 结果", { editPatch: patch }),
+    ]);
+    expect(expectTool(orphanTurn.segments[0]).editPatch).toBe(patch);
+    // 无 editPatch 的普通结果：段上保持 undefined（不污染其他工具）
+    const plain = applyAll([
+      makeLog("1", "tool_call", raw),
+      makeLog("2", "stdout", "[TOOL_RESULT] The file a.ts has been updated"),
+    ]);
+    expect(toolById(plain.segments, "tu_E").editPatch).toBeUndefined();
+  });
+
   it("tool_call 非 JSON（R-07 容错）：id 退 logId 派生、toolName=null 原样 raw、status running 靠 result 配对兜底", () => {
     const turn = applyAll([
       makeLog("1", "tool_call", "Read a.ts"),

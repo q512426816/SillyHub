@@ -464,6 +464,58 @@ describe("ToolRowView 工具行", () => {
     expect(screen.getByText("全局替换")).toBeInTheDocument();
   });
 
+  /* ql-20260824-020：Edit 展开优先消费 structuredPatch（backend edit_patch 列
+     透传）的文件内真实行号，无 patch / 非法 patch 回退 LCS 片段相对行号。 */
+
+  it("Edit 展开：editPatch 优先，行号为文件内真实行号（55 起，非片段相对 1）", () => {
+    render(
+      <ToolRowView
+        segment={makeToolSeg({
+          id: "call_e4",
+          raw: EDIT_RAW,
+          toolName: "Edit",
+          primary: "src/theme.ts",
+          result: "The file src/theme.ts has been updated",
+          editPatch: JSON.stringify([
+            {
+              oldStart: 55,
+              newStart: 55,
+              oldLines: 1,
+              newLines: 1,
+              lines: ['-primary: "violet"', '+primary: "cyan"'],
+            },
+          ]),
+        })}
+      />,
+    );
+    fireEvent.click(rowOf("Edit"));
+    const delRow = screen.getByText('primary: "violet"').closest("div.flex");
+    const addRow = screen.getByText('primary: "cyan"').closest("div.flex");
+    expect(delRow?.textContent).toContain("55"); // 旧侧真实行号
+    expect(addRow?.textContent).toContain("55"); // 新侧真实行号
+    expect(delRow?.className).toContain("bg-red-500/10");
+    expect(addRow?.className).toContain("bg-emerald-500/10");
+  });
+
+  it("Edit 展开：editPatch 非法 JSON → 回退 LCS 片段相对行号（1 起）", () => {
+    render(
+      <ToolRowView
+        segment={makeToolSeg({
+          id: "call_e5",
+          raw: EDIT_RAW,
+          toolName: "Edit",
+          primary: "src/theme.ts",
+          result: "The file src/theme.ts has been updated",
+          editPatch: "{malformed",
+        })}
+      />,
+    );
+    fireEvent.click(rowOf("Edit"));
+    const delRow = screen.getByText('primary: "violet"').closest("div.flex");
+    expect(delRow?.textContent).toContain("1");
+    expect(delRow?.textContent).not.toContain("55");
+  });
+
   it("Grep 展开：参数行（路径/glob）+ 命中 N 条 + result 在下方", () => {
     render(
       <ToolRowView
