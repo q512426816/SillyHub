@@ -230,3 +230,30 @@
 根因：3c0c7914 给源文件加了 BOM，5b377fcf 又让 Dockerfile 构建时 printf 无条件再打一个 → 容器内 EF BB BF ×2（实测 od 证实）；另发现 dist_router read_text universal newlines 把 CRLF 归一成 LF 再吐（对 iex 字符串解析无影响，不修）
 方案：源文件去 BOM 保持仓库干净，BOM 单一来源 = Dockerfile 构建时打（与 CRLF 转换同层，唯一分发出口）
 结果：容器内 + LAN 端点 od 实测单 BOM；/api/health ok；daemon 心跳 200。顺手把 CC pin 2.1.158→2.1.241 一并验证（容器内 claude --version = 2.1.241）
+
+## ql-20260824-018-ecf9 | 2026-08-24 13:50:02 | 会话级供应商热切换「切回本机默认」不生效——DB 已切回本机但 cc 进程仍跑旧供应商（实测切回后 /model 显示 glm-5.1、流量烧旧供应商 key）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/daemon.ts（SESSION_SWITCH_CONFIG 路由 providerConfig 改 !== undefined 判键存在，保留缺席/显式 null 区别）
+- sillyhub-daemon/src/interactive/session-manager.ts（reloadWithConfig null=切回本机 + _reloadSession 挂 migrateClaudeTranscriptToHost 反向迁移）
+- sillyhub-daemon/src/interactive/claude-transcript-dir.ts（新增 migrateClaudeTranscriptToHost（覆盖回迁+删 isolated 原件））
+- sillyhub-daemon/src/interactive/types.ts（SessionSwitchConfigPayload.providerConfig 改可选 + 注释新语义）
+- sillyhub-daemon/tests/daemon-session-switch-config.test.ts（null 透传用例改新契约 + 缺席透传 undefined 新用例）
+- sillyhub-daemon/tests/interactive/session-manager-config-switch.test.ts（CFG-2 重写 + CFG-2b/MIG-9 新增）
+- sillyhub-daemon/tests/interactive/claude-transcript-dir.test.ts（MIG-H1~H5 新增）
+- sillyhub-daemon/tests/interactive/session-manager-resume-config-dir.test.ts（模块 mock 补 migrateClaudeTranscriptToHost 导出）
+需求：会话级供应商热切换「切回本机默认」不生效——DB 已切回本机但 cc 进程仍跑旧供应商（实测切回后 /model 显示 glm-5.1、流量烧旧供应商 key）。
+根因：providerConfig null 语义前后端冲突 + daemon 两层 ?? 塌缩。后端切回本机时 SESSION_SWITCH_CONFIG 下发 providerConfig:null（=切本机），daemon.ts 路由层 ?? null 把字段缺席也归一成 null（销毁缺席/显式 null 的区别），reloadWithConfig 里 payload.providerConfig ?? state.providerConfig 再把 null 塌缩成沿用旧供应商。连带第二根因：曾用平台供应商的会话 transcript 落在 daemon 隔离目录，即使清掉供应商 env，applyTranscriptConfigDir 按 jsonl 实际位置仍强制隔离 CLAUDE_CONFIG_DIR，cc 读不到宿主机 ~/.claude/settings.json（本机 OpenCode Go 等配置）。
+方案：① daemon.ts 路由 providerConfig 用 !== undefined 判键存在（snake 键含显式 null 优先，缺席保持 undefined）；② reloadWithConfig 改 payload.providerConfig !== undefined ? payload.providerConfig : (state.providerConfig ?? null)，null=切回本机；③ 新增 migrateClaudeTranscriptToHost（isolated jsonl 覆盖回宿主机旧副本并删 isolated 原件，自门控，失败降级 isolated 不破坏会话）；④ _reloadSession 在 providerConfig==null 分支挂反向迁移，与既有正向 migrateClaudeTranscriptToIsolated 对称；⑤ interactive/types.ts payload 类型改可选并同步注释。
+结果：daemon typecheck 通过；vitest 全量 152 文件/2650 测试全绿（9 skipped 同基线）。新增测试锁死新契约：CFG-2 重写（null=切回本机）、CFG-2b（缺席=不切）、MIG-9（隔离 jsonl 切回本机回迁宿主机+env 不隔离）、MIG-H1~H5（反向迁移单测）、路由缺席透传 undefined 用例。daemon.md 契约摘要+变更索引已同步。注意：存量带病会话（daemon sessions.json 已持久化旧供应商 config）需重新切换一次供应商或重启后重新切换才自愈。
+
+## ql-20260824-006-bom-fix | 2026-08-24 16:34:00 | install.ps1 零 BOM 修复——两个 agent 各修一半互相抵消
+状态：已完成
+关联变更：远端 09b43b3a（删 Dockerfile printf）+ 本地22808178（删源 BOM）
+文件：
+- backend/Dockerfile（补回 printf BOM 行）
+需求：另一台机器 irm install.ps1 | iex 因缺 BOM 致 PS5 解析报错
+根因：两个 agent 各修了双 BOM bug 的一半（一方删源 BOM，另一方删 Dockerfile printf），叠加后镜像里零 BOM
+方案：补回 Dockerfile printf BOM 行（源文件无 BOM 保持仓库干净，Dockerfile 为唯一分发点打 BOM）
+结果：容器内 + LAN 端点 od 实测单 BOM（EF BB BF）；/api/health ok；CC 2.1.241；daemon bundle 最新

@@ -50,6 +50,8 @@ vi.mock('../../src/interactive/claude-transcript-dir.js', () => ({
     home: '/fake-home/.claude',
   }),
   migrateClaudeTranscriptToIsolated: vi.fn(() => false),
+  // ql-20260824-016 切回本机反向迁移；本测试不触发真实 fs，与正向迁移同款 no-op。
+  migrateClaudeTranscriptToHost: vi.fn(() => false),
 }));
 
 // ── 辅助构造（对齐 config-switch / main-agent-mcp 测试）───────────────────────

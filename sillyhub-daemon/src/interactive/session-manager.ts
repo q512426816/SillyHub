@@ -93,6 +93,7 @@ import { buildSpawnEnv, type SpawnCredentialManager } from '../spawn-env.js';
 import {
   applyTranscriptConfigDir,
   defaultTranscriptDirs,
+  migrateClaudeTranscriptToHost,
   migrateClaudeTranscriptToIsolated,
   type TranscriptDirs,
 } from './claude-transcript-dir.js';
@@ -3031,8 +3032,11 @@ export class SessionManager {
    *   - ``profile`` 非 null → 切档案：state.systemPrompt/mcpRefs/skillRefs 更新为
    *     payload 值（systemPrompt 仅 claude 注入 preset+append；codex 只切配置不注
    *     人格，原 D-003 / NG-02）；null → 不切档案（保留现值）。
-   *   - ``providerConfig`` 非 null → 切供应商；null → 不切（保持 state.providerConfig
-   *     现值；与 reloadWithProvider(null)=「停止回退本机」语义不同）。
+   *   - ``providerConfig`` 非 null → 切供应商；**null → 切回本机默认**（清掉
+   *     state.providerConfig，第 0 层 env 跳过；ql-20260824-016 修正——原「null=
+   *     不切」语义与后端契约冲突：service.py 切回本机时正是下发 null，?? 塌缩导致
+   *     旧供应商 env 永远清不掉）；undefined（字段缺席）→ 不切（保持现值，
+   *     reloadWithProvider(null) 的「停止」与显式 null 同为切本机）。
    *   - ``claimToken`` 非空 → 刷新 state.claimToken（切换轮新 token）。
    *   - ``prompt`` 非空 → reload 成功后 push 进 inputQueue + currentRunId=runId +
    *     status=running（对齐 inject 语义，onTurnMessage/onTurnResult 据此路由）。
@@ -3070,8 +3074,15 @@ export class SessionManager {
             ? payload.profile.systemPrompt
             : CLEAR_PERSONA_PROMPT)
         : (state.systemPrompt ?? null);
+    // ql-20260824-016：显式区分 undefined 与 null——后端切回本机默认下发
+    // providerConfig:null，字段缺席才是「不切该维度」。原 ?? 写法把 null 塌缩成
+    // 沿用 state.providerConfig（旧供应商），「切回本机」永不生效（实测切回后
+    // /model 仍显示 glm-5.1、流量仍走旧供应商）。daemon.ts 路由层已同步保留
+    // undefined/null 区别（不再 ?? null 归一）。
     const nextProviderConfig =
-      payload.providerConfig ?? state.providerConfig ?? null;
+      payload.providerConfig !== undefined
+        ? payload.providerConfig
+        : (state.providerConfig ?? null);
 
     // ql-20260818-002/004：切档案（含取消）的 reload 走 forkSession（resume 时
     // systemPrompt 选项被 CLI 忽略，fork 新会话才生效）——置位 forkedInitPending
@@ -3206,14 +3217,24 @@ export class SessionManager {
       // 到隔离目录，让 applyTranscriptConfigDir 命中 isolated 回隔离 env。仅回
       // home 会把 claude 暴露给用户 ~/.claude/settings.json，其 env 块
       //（cc-switch）优先于进程注入的供应商 env，切了供应商流量仍串本机网关
-      //（E2E 实锤 BigModel 400[1214]）。切回本机默认（null）不迁移——本机会话
-      // 本来就要读本机 settings/凭证。迁移失败降级 home（会话可用，R-01）。
+      //（E2E 实锤 BigModel 400[1214]）。迁移失败降级 home（会话可用，R-01）。
+      // ql-20260824-016：对称补反向——切回本机默认（null）迁移 jsonl 回宿主机
+      // ~/.claude。否则隔离目录命中 → 强制隔离 env → claude 读不到本机
+      // settings.json（cc-switch / OpenCode Go），「本机默认」名不副实（原注释
+      // 「不迁移」的假设只对 jsonl 本就在 home 的会话成立）。迁移失败降级
+      // isolated resume（会话可用，R-01 同款）。
       if (
         providerConfig != null &&
         state.provider === 'claude' &&
         state.agentSessionId
       ) {
         migrateClaudeTranscriptToIsolated(state.agentSessionId, this._resumeDirs);
+      } else if (
+        providerConfig == null &&
+        state.provider === 'claude' &&
+        state.agentSessionId
+      ) {
+        migrateClaudeTranscriptToHost(state.agentSessionId, this._resumeDirs);
       }
       await applyTranscriptConfigDir(
         newEnv,

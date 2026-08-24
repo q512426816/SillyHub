@@ -3343,13 +3343,19 @@ export class Daemon {
       });
       return;
     }
-    // profile / provider_config 可 null（=不切，design §7.2）；缺省归一 null。
+    // profile：可 null（=不切，design §7.2）；缺省归一 null（null 与缺席同义）。
     const profile =
       ((raw.profile as SessionSwitchProfilePayload | null | undefined) ?? null);
+    // ql-20260824-016：providerConfig 缺省**不**归一 null——后端切回本机默认时
+    // 下发显式 null（service.py「会话供应商 NULL（本机默认）才发 null」），字段
+    // 缺席才是不切该维度。?? null 会把缺席塌缩成 null、下游再 ?? 回旧供应商，
+    // 两层塌缩叠加 = 「切回本机」永远不生效（实测 /model 仍显示 glm-5.1）。
+    // 保留 undefined 让 reloadWithConfig 区分两种语义；snake 键存在（含显式
+    // null）优先于 camel 键——?? 链会把显式 null 漏给第二键，须用 !== undefined。
     const providerConfig =
-      ((raw.provider_config as ProviderConfig | null | undefined) ??
-        (raw.providerConfig as ProviderConfig | null | undefined)) ??
-      null;
+      raw.provider_config !== undefined
+        ? (raw.provider_config as ProviderConfig | null)
+        : (raw.providerConfig as ProviderConfig | null | undefined);
     this._logger.info('session_switch_config_received', {
       session_id: sessionId,
       run_id: runId,
