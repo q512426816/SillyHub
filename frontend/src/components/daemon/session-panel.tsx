@@ -100,6 +100,14 @@ import {
   AgentLogCard,
   AgentLogSessionBody,
 } from "@/components/daemon/agent-log-card";
+import { PlanApprovalCard } from "@/components/daemon/plan-approval-card";
+import { BashProgressCard, type BashChunkItem } from "@/components/daemon/bash-progress-card";
+import type {
+  PlanModeEnteredEvent,
+  PlanSummary,
+  BashStatusEvent,
+  BashChunkEvent,
+} from "@/lib/daemon";
 import {
   type LlmProviderRead,
   type LlmProviderRoleMapping,
@@ -535,6 +543,21 @@ function SessionPanelPage({
     SessionPermissionRequest[]
   >([]);
   const [dialogHistory, setDialogHistory] = useState<SessionDialogRead[]>([]);
+  // task-09：plan 模式待确认卡片状态（按 runId 去重，一次只挂一张）。
+  const [planPending, setPlanPending] = useState<{
+    runId: string;
+    summary: PlanSummary;
+    requestedAt: string;
+  } | null>(null);
+  // task-09：bash 命令进度状态（running 期间追加 chunks，completed/failed 后冻结）。
+  const [bashProgress, setBashProgress] = useState<{
+    runId: string;
+    command: string;
+    status: "running" | "completed" | "failed";
+    exitCode?: number | null;
+    elapsedMs?: number | null;
+    chunks: BashChunkItem[];
+  } | null>(null);
   // gap-fix（FR-07 / FR-08）：run 级轮次快照（id → SessionRunRead），attach 时
   // 预取 + 每轮 turn_completed 后刷新，供 whoLine 注入与历史 usage 回填。
   const [runsMeta, setRunsMeta] = useState<Map<string, SessionRunRead>>(new Map());
@@ -620,6 +643,8 @@ function SessionPanelPage({
     setTurnState(INITIAL_TURN_STATE);
     setErrorMsg(null);
     setPendingRequests([]);
+    setPlanPending(null);
+    setBashProgress(null);
     setRunsMeta(new Map());
     fetchedErrorRunIdsRef.current.clear();
     currentRunIdRef.current = null;
@@ -773,6 +798,8 @@ function SessionPanelPage({
         // streamSession 内部已 close；收口本地态 + 刷新详情/列表。
         setTurnState((prev) => ({ ...prev, currentRunId: null }));
         setPendingRequests([]);
+        setPlanPending(null);
+        setBashProgress(null);
         streamRef.current = null;
         void qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
         onSessionListRefresh?.();
@@ -792,6 +819,53 @@ function SessionPanelPage({
         setPendingRequests((prev) =>
           prev.filter((r) => r.request_id !== resolved.request_id),
         );
+      },
+      // task-09：plan 模式进入 → 展示 PlanApprovalCard（按 runId 去重）。
+      onPlanModeEntered: (event) => {
+        setPlanPending((prev) => {
+          if (prev && prev.runId === event.run_id) return prev;
+          return {
+            runId: event.run_id,
+            summary: event.summary,
+            requestedAt: event.requested_at,
+          };
+        });
+      },
+      // task-09：bash 命令状态/输出 → BashProgressCard。
+      onBashStatus: (event) => {
+        setBashProgress((prev) => {
+          if (prev && prev.runId !== event.run_id) {
+            // 不同 runId：覆盖为新的 bash 任务（单卡片语义）。
+            return {
+              runId: event.run_id,
+              command: event.command,
+              status: event.status,
+              exitCode: event.exit_code,
+              elapsedMs: event.elapsed_ms,
+              chunks: prev?.runId === event.run_id ? prev.chunks : [],
+            };
+          }
+          return {
+            runId: event.run_id,
+            command: event.command,
+            status: event.status,
+            exitCode: event.exit_code,
+            elapsedMs: event.elapsed_ms,
+            chunks: prev?.runId === event.run_id ? prev.chunks : [],
+          };
+        });
+      },
+      onBashChunk: (event) => {
+        setBashProgress((prev) => {
+          if (!prev || prev.runId !== event.run_id) return prev;
+          return {
+            ...prev,
+            chunks: [
+              ...prev.chunks,
+              { channel: event.channel, content: event.content, is_final: event.is_final },
+            ],
+          };
+        });
       },
     });
 
@@ -1975,6 +2049,31 @@ function SessionPanelPage({
         </div>
       )}
 
+      {/* task-09：plan 模式待确认卡片——planPending 存在时渲染，用户操作后 onSubmitted 清除。 */}
+      {planPending && (
+        <div className="shrink-0 border-t border-border bg-card px-5 py-3">
+          <PlanApprovalCard
+            sessionId={sessionId}
+            runId={planPending.runId}
+            summary={planPending.summary}
+            requestedAt={planPending.requestedAt}
+            onSubmitted={() => setPlanPending(null)}
+          />
+        </div>
+      )}
+      {/* task-09：bash 命令进度卡片——bashProgress 存在时渲染。 */}
+      {bashProgress && (
+        <div className="shrink-0 border-t border-border bg-card px-5 py-3">
+          <BashProgressCard
+            command={bashProgress.command}
+            status={bashProgress.status}
+            exitCode={bashProgress.exitCode}
+            elapsedMs={bashProgress.elapsedMs}
+            chunks={bashProgress.chunks}
+          />
+        </div>
+      )}
+
       {/* 输入区：ctx 用量行 + 输入框 + 配置控件条（原型 .input-zone） */}
       <div className="flex shrink-0 flex-col bg-card">
         <div className="px-5 pt-3">
@@ -2253,6 +2352,21 @@ function SessionPanelDialog(props: SessionPanelProps) {
   // 存在的（AskUserDialogCard）；普通工具审批卡在本面板不展示（/runtimes 页的
   // PermissionApprovalsPanel 负责）。
   const [pendingRequests, setPendingRequests] = useState<SessionPermissionRequest[]>([]);
+  // task-09：plan 模式待确认卡片状态（按 runId 去重，一次只挂一张）。
+  const [planPending, setPlanPending] = useState<{
+    runId: string;
+    summary: PlanSummary;
+    requestedAt: string;
+  } | null>(null);
+  // task-09：bash 命令进度状态（running 期间追加 chunks，completed/failed 后冻结）。
+  const [bashProgress, setBashProgress] = useState<{
+    runId: string;
+    command: string;
+    status: "running" | "completed" | "failed";
+    exitCode?: number | null;
+    elapsedMs?: number | null;
+    chunks: BashChunkItem[];
+  } | null>(null);
   // AskUserQuestion 问答历史（pending+answered），独立于实时卡片——卡片回答后
   // 即移除、failed/ended 会话不渲染卡片，历史靠 GET /dialogs/history 恢复展示。
   const [dialogHistory, setDialogHistory] = useState<SessionDialogRead[]>([]);
@@ -2395,6 +2509,8 @@ function SessionPanelDialog(props: SessionPanelProps) {
             terminatingAt: null,
           }));
           setPendingRequests([]);
+          setPlanPending(null);
+          setBashProgress(null);
           streamConnRef.current = null;
         },
         onError: () => {
@@ -2416,6 +2532,53 @@ function SessionPanelDialog(props: SessionPanelProps) {
           setPendingRequests((prev) =>
             prev.filter((r) => r.request_id !== resolved.request_id),
           );
+        },
+        // task-09：plan 模式进入 → 展示 PlanApprovalCard（按 runId 去重）。
+        onPlanModeEntered: (event) => {
+          setPlanPending((prev) => {
+            if (prev && prev.runId === event.run_id) return prev;
+            return {
+              runId: event.run_id,
+              summary: event.summary,
+              requestedAt: event.requested_at,
+            };
+          });
+        },
+        // task-09：bash 命令状态/输出 → BashProgressCard。
+        onBashStatus: (event) => {
+          setBashProgress((prev) => {
+            if (prev && prev.runId !== event.run_id) {
+              // 不同 runId：覆盖为新的 bash 任务（单卡片语义）。
+              return {
+                runId: event.run_id,
+                command: event.command,
+                status: event.status,
+                exitCode: event.exit_code,
+                elapsedMs: event.elapsed_ms,
+                chunks: [],
+              };
+            }
+            return {
+              runId: event.run_id,
+              command: event.command,
+              status: event.status,
+              exitCode: event.exit_code,
+              elapsedMs: event.elapsed_ms,
+              chunks: prev?.runId === event.run_id ? prev.chunks : [],
+            };
+          });
+        },
+        onBashChunk: (event) => {
+          setBashProgress((prev) => {
+            if (!prev || prev.runId !== event.run_id) return prev;
+            return {
+              ...prev,
+              chunks: [
+                ...prev.chunks,
+                { channel: event.channel, content: event.content, is_final: event.is_final },
+              ],
+            };
+          });
         },
       },
     );
@@ -2961,6 +3124,8 @@ function SessionPanelDialog(props: SessionPanelProps) {
     setView(INITIAL_DIALOG_VIEW);
     setInput("");
     setPendingRequests([]);
+    setPlanPending(null);
+    setBashProgress(null);
     // 重置回 idle 时通知父级清除 URL ?session= / 清选中（触发 key 重挂载）
     onSessionReset?.();
   }, [closeStream, onSessionReset]);
@@ -3231,6 +3396,31 @@ function SessionPanelDialog(props: SessionPanelProps) {
                 }}
               />
             ))}
+        </div>
+      )}
+
+      {/* task-09：plan 模式待确认卡片——planPending 存在时渲染，用户操作后 onSubmitted 清除。 */}
+      {planPending && (
+        <div className="shrink-0 border-t border-border bg-card px-5 py-3">
+          <PlanApprovalCard
+            sessionId={view.sessionId ?? ""}
+            runId={planPending.runId}
+            summary={planPending.summary}
+            requestedAt={planPending.requestedAt}
+            onSubmitted={() => setPlanPending(null)}
+          />
+        </div>
+      )}
+      {/* task-09：bash 命令进度卡片——bashProgress 存在时渲染。 */}
+      {bashProgress && (
+        <div className="shrink-0 border-t border-border bg-card px-5 py-3">
+          <BashProgressCard
+            command={bashProgress.command}
+            status={bashProgress.status}
+            exitCode={bashProgress.exitCode}
+            elapsedMs={bashProgress.elapsedMs}
+            chunks={bashProgress.chunks}
+          />
         </div>
       )}
 
