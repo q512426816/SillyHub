@@ -43,3 +43,16 @@
 根因：8-19 段模型改版后 ToolRowView 展开只渲染 tool_result，Write/Edit 仅显示一句成功消息，参数详情未从旧 agent-log/tool-renderers 日志渲染器迁移，用户看不到具体改动内容
 方案：turn-segment-views.tsx 展开区上半部按工具名渲染参数详情——Write 内容预览（5 万字符截断+标注+复制完整原文）、Edit 红-原文本/绿+新文本对比（line-clamp-6），下方保留原 result；非 Write/Edit 工具 result-only 零变化；配色走主题 token；复用 tool-renderers 导出的 CopyButton
 结果：新增 5 测试用例 TDD 先红后绿；daemon+sessions 28 文件 408 测试全绿；tsc 0 错；eslint 0 告警
+
+## ql-20260824-019-03db | 2026-08-24 14:01:40 | 会话进度视图工具卡展开区补齐（Edit 行级 diff 行号+红绿高亮 + 各工具参数详情）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/tool-args-detail.tsx（新文件——ToolExpandBody 展开区单一入口 + computeLineDiff/DiffView 行级 diff + 各工具详情组件）
+- frontend/src/components/daemon/turn-segment-views.tsx（删 ql-018 内联预览组件，改一行 ToolExpandBody 接线）
+- frontend/src/components/daemon/__tests__/tool-args-detail.test.tsx（computeLineDiff 纯函数 5 用例 + DiffView 渲染 1 用例）
+- frontend/src/components/daemon/__tests__/turn-segment-views.test.tsx（ToolRowView describe 追加 8 用例：Edit diff/replace_all/Grep/MCP JSON/Bash pre+复制/10 万截断/Read 行范围+复制/Agent Prompt/非 JSON 零回归）
+需求：会话进度视图工具卡展开区补齐（Edit 行级 diff 行号+红绿高亮 + 各工具参数详情）
+根因：段模型改版后工具卡展开只有一句成功结果：Write/Edit 之外的参数详情整体缺失（Grep 参数/命中数、Agent Prompt、Bash 输出误走 Markdown、Read 复制不到内容、无 args JSON），且 Edit 只显示两个裸代码块没有行号与高亮
+方案：新建 tool-args-detail.tsx 收拢展开区内容（ToolExpandBody 单一入口）：Edit 行级 diff（computeLineDiff LCS + DiffView 双侧行号+红绿行底+超大回退两块+复制新文本）；Bash 输出纯文本 pre+复制输出+10 万截断；Read 行范围+复制内容；Grep 参数行+命中 N 条；Agent Prompt 预览+复制；其余工具通用参数 JSON pre 兜底；Write 预览保持。turn-segment-views 删上一轮内联组件改一行接线
+结果：新增 14 测试用例（diff 纯函数 5+DiffView 1+工具展开 8）；daemon+sessions 29 文件 422 测试全绿；tsc 0 错；eslint 0 告警

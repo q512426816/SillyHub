@@ -403,12 +403,227 @@ describe("ToolRowView 工具行", () => {
     expect(screen.getByText("执行中…")).toBeInTheDocument();
   });
 
-  it("非 Write/Edit 工具（Read）展开保持 result-only，无参数详情块（零回归）", () => {
-    render(<ToolRowView segment={makeToolSeg()} />);
+  /* ql-20260824-019：展开区详情继续补齐——Edit 行级 diff / Grep 参数+命中数 /
+     通用参数 JSON / Bash 纯文本输出+复制 / Read 行范围+复制 / Agent Prompt。 */
+
+  it("Edit 展开渲染行级 diff：红底 - 旧行 / 绿底 + 新行 + 双侧行号列，不再是两个裸代码块", () => {
+    render(
+      <ToolRowView
+        segment={makeToolSeg({
+          id: "call_e2",
+          raw: JSON.stringify({
+            tool: "Edit",
+            args: {
+              file_path: "src/theme.ts",
+              old_string: 'const primary = "violet";',
+              new_string: 'const primary = "cyan";',
+            },
+            tool_use_id: "call_e2",
+            success: true,
+          }),
+          toolName: "Edit",
+          primary: "src/theme.ts",
+          result: "The file src/theme.ts has been updated",
+        })}
+      />,
+    );
+    fireEvent.click(rowOf("Edit"));
+    const delRow = screen.getByText('const primary = "violet";').closest("div.flex");
+    const addRow = screen.getByText('const primary = "cyan";').closest("div.flex");
+    expect(delRow?.className).toContain("bg-red-500/10");
+    expect(addRow?.className).toContain("bg-emerald-500/10");
+    // 行号列（双侧各 1）与 -/+ 标记
+    expect(delRow?.textContent).toContain("1");
+    expect(delRow?.textContent).toContain("-");
+    expect(addRow?.textContent).toContain("+");
+    expect(screen.getByTestId("markdown-text").textContent).toContain("has been updated");
+  });
+
+  it("Edit replace_all=true：显示「全局替换」徽章", () => {
+    render(
+      <ToolRowView
+        segment={makeToolSeg({
+          id: "call_e3",
+          raw: JSON.stringify({
+            tool: "Edit",
+            args: {
+              file_path: "a.ts",
+              old_string: "x",
+              new_string: "y",
+              replace_all: true,
+            },
+            tool_use_id: "call_e3",
+            success: true,
+          }),
+          toolName: "Edit",
+          primary: "a.ts",
+        })}
+      />,
+    );
+    fireEvent.click(rowOf("Edit"));
+    expect(screen.getByText("全局替换")).toBeInTheDocument();
+  });
+
+  it("Grep 展开：参数行（路径/glob）+ 命中 N 条 + result 在下方", () => {
+    render(
+      <ToolRowView
+        segment={makeToolSeg({
+          id: "call_g",
+          raw: JSON.stringify({
+            tool: "Grep",
+            args: { pattern: "TODO", path: "src/lib", glob: "*.ts" },
+            tool_use_id: "call_g",
+            success: true,
+          }),
+          toolName: "Grep",
+          primary: "TODO",
+          result: "Found 3 matches",
+        })}
+      />,
+    );
+    fireEvent.click(rowOf("Grep"));
+    expect(screen.getByText(/src\/lib/)).toBeInTheDocument();
+    expect(screen.getByText(/\*\.ts/)).toBeInTheDocument();
+    // 「命中 N 条」数字在独立 span（跨元素文本，用正则按片段匹配）
+    expect(screen.getByText(/命中/)).toBeInTheDocument();
+    expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.getByTestId("markdown-text").textContent).toBe("Found 3 matches");
+  });
+
+  it("通用工具（MCP）展开：参数 JSON pre 可见 + 复制参数按钮", () => {
+    render(
+      <ToolRowView
+        segment={makeToolSeg({
+          id: "call_m",
+          raw: JSON.stringify({
+            tool: "mcp__srv__query",
+            args: { file_id: "f-9", question: "三季度数据" },
+            tool_use_id: "call_m",
+            success: true,
+          }),
+          toolName: "mcp__srv__query",
+          primary: null,
+          result: "答案…",
+        })}
+      />,
+    );
+    fireEvent.click(rowOf("mcp__srv__query"));
+    // 行首摘要 span（desc 回退 raw）与展开区参数 pre 都含该值——收窄到 pre 块断言
+    const argPre = screen.getByTitle("复制参数").closest("div.mb-2")?.querySelector("pre");
+    expect(argPre?.textContent).toContain("三季度数据");
+    expect(screen.getByTitle("复制参数")).toBeInTheDocument();
+  });
+
+  it("Bash 展开：输出为纯文本 pre（不走 Markdown）+ 复制输出收完整原文", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(
+      <ToolRowView
+        segment={makeToolSeg({
+          id: "call_b2",
+          raw: JSON.stringify({
+            tool: "Bash",
+            args: { command: "pnpm test" },
+            tool_use_id: "call_b2",
+            success: true,
+          }),
+          toolName: "Bash",
+          primary: "pnpm test",
+          result: "# 不是标题\nplain output *text*",
+        })}
+      />,
+    );
+    fireEvent.click(rowOf("pnpm test"));
+    expect(screen.queryByTestId("markdown-text")).toBeNull();
+    expect(screen.getByText(/plain output/)).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle("复制输出"));
+    expect(writeText).toHaveBeenCalledWith("# 不是标题\nplain output *text*");
+  });
+
+  it("Bash 超长输出 10 万字符前端兜底截断（复制仍带完整原文）", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const long = "y".repeat(100_001);
+    render(
+      <ToolRowView
+        segment={makeToolSeg({
+          id: "call_b3",
+          raw: JSON.stringify({ tool: "Bash", args: { command: "cat big.log" }, tool_use_id: "call_b3", success: true }),
+          toolName: "Bash",
+          primary: "cat big.log",
+          result: long,
+        })}
+      />,
+    );
+    fireEvent.click(rowOf("cat big.log"));
+    expect(screen.getByText(/已截断/)).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle("复制输出"));
+    expect(writeText).toHaveBeenCalledWith(long);
+  });
+
+  it("Read 展开：行范围标注（offset–limit）+ 复制内容按钮复制 result", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(
+      <ToolRowView
+        segment={makeToolSeg({
+          id: "call_r",
+          raw: JSON.stringify({
+            tool: "Read",
+            args: { file_path: "src/a.ts", offset: 10, limit: 20 },
+            tool_use_id: "call_r",
+            success: true,
+          }),
+          toolName: "Read",
+          primary: "src/a.ts",
+          result: "文件内容 A",
+        })}
+      />,
+    );
     fireEvent.click(rowOf("Read"));
+    expect(screen.getByText("行 10–30")).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle("复制内容"));
+    expect(writeText).toHaveBeenCalledWith("文件内容 A");
+  });
+
+  it("Agent 展开：Prompt 预览 + 复制 Prompt（完整原文）", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(
+      <ToolRowView
+        segment={makeToolSeg({
+          id: "call_ag",
+          raw: JSON.stringify({
+            tool: "Agent",
+            args: { description: "调研主题", prompt: "请分析主题配色方案" },
+            tool_use_id: "call_ag",
+            success: true,
+          }),
+          toolName: "Agent",
+          primary: "调研主题",
+          result: "调研完成",
+        })}
+      />,
+    );
+    fireEvent.click(rowOf("调研主题"));
+    expect(screen.getByText(/请分析主题配色方案/)).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle("复制 Prompt"));
+    expect(writeText).toHaveBeenCalledWith("请分析主题配色方案");
+  });
+
+  it("无专属详情且无 args 的工具（raw 解析失败）：展开保持 result-only 零回归", () => {
+    render(
+      <ToolRowView
+        segment={makeToolSeg({
+          raw: "人类可读的工具摘要（非 JSON）",
+          toolName: null,
+          primary: null,
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByText("工具调用"));
     expect(screen.getByTestId("markdown-text").textContent).toBe("文件内容 A");
-    expect(screen.queryByTitle("复制内容")).toBeNull();
-    expect(screen.queryByText(/原文本|新文本|写入内容/)).toBeNull();
+    expect(screen.queryByTitle("复制参数")).toBeNull();
   });
 });
 
