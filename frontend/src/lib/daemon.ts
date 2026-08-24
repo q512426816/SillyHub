@@ -1102,6 +1102,13 @@ export interface SessionStreamConnection {
 }
 
 /**
+ * SSE 断线重连退避档位（ql-20260820-009）。原为 streamSession 内局部常量，
+ * 2026-08-24-sessions-live-updates task-05 提升为模块级导出，供
+ * subscribeAgentSessionsEvents 复用同一张档位表（不再各持一份）。
+ */
+export const RECONNECT_BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000];
+
+/**
  * 订阅 session 级 SSE（贯穿整个会话多 turn）。
  *
  * - URL 走 Next route handler proxy（/api/daemon/sessions/{id}/stream），
@@ -1155,7 +1162,6 @@ export function streamSession(
   let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
   let postTurnTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const RECONNECT_BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000];
   const TERMINAL_RUN_STATUSES: ReadonlySet<string | null> = new Set([
     "completed",
     "failed",
@@ -1451,6 +1457,88 @@ export function streamSession(
       es?.close();
     },
     getLastEventId: () => lastEventId,
+  };
+}
+
+/* ---------- 会话列表变更信号订阅（2026-08-24-sessions-live-updates task-05） ----------
+ *
+ * GET /api/daemon/sessions/events：backend 在会话生命周期事件（创建 / 状态迁移 /
+ * 删除）时经 Redis Pub/Sub 广播的哑信号，SSE 侧已按当前用户过滤。前端不解析
+ * payload——收到即回调，由门户 invalidate ["agentSessions"] 前缀重拉列表
+ * （design §2.2）。退避重连骨架抄 streamSession 的收敛版：fetchSse 无自动重连
+ * （fetch-sse.ts 头注释），断连期间广播的信号对本连接永久丢失，靠 onReconnected
+ * 补拉兜缺口。
+ */
+
+/**
+ * 订阅会话列表变更信号（SSE，2026-08-24-sessions-live-updates task-05）。
+ *
+ * - onEvent：收到任一 data 帧（JSON 信号）触发一次。
+ * - onReconnected：仅断开过才调，每个断连-恢复周期恰一次——重连成功（下一次
+ *   连接建立 onopen 或首条消息，先到者）时触发，供调用方补拉断连期间丢失的
+ *   信号（Redis Pub/Sub 无补发 / 无 Last-Event-ID 重放）。
+ * - close()：幂等终止（关连接 + 清退避定时器），之后不再重连。
+ */
+export function subscribeAgentSessionsEvents(opts: {
+  onEvent: () => void;
+  onReconnected?: () => void;
+}): { close: () => void } {
+  const url = new URL(`${getApiBaseUrl()}/api/daemon/sessions/events`);
+
+  let es: FetchSseConnection | null = null;
+  let closed = false; // 调用方 close() 后不再重连
+  let retryCount = 0; // 退避档位（收到信号归零，对齐 streamSession）
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let hadDisconnection = false; // 断开过 → 下一次连接成功补发一次 onReconnected
+
+  /** 断开后首次「连接成功」（onopen 或首条消息，先到者）触发一次 onReconnected。 */
+  const fireReconnectedOnce = () => {
+    if (!hadDisconnection) return;
+    hadDisconnection = false;
+    opts.onReconnected?.();
+  };
+
+  const wireConnection = () => {
+    // token 每次重连现取（对齐 streamSession：长连接跨 token 刷新后重连不带旧值）。
+    const { accessToken } = useSession.getState();
+    es = fetchSse(url.toString(), accessToken ? { token: accessToken } : {});
+    es.onopen = () => {
+      fireReconnectedOnce();
+    };
+    // backend 信号统一发默认 data 帧（无 event: 行）→ onmessage 接收。
+    es.onmessage = () => {
+      retryCount = 0; // 收到信号 = 连接健康，退避档位归零
+      fireReconnectedOnce();
+      opts.onEvent();
+    };
+    es.onerror = () => {
+      hadDisconnection = true;
+      scheduleReconnect();
+    };
+  };
+
+  const scheduleReconnect = () => {
+    if (closed) return;
+    const delay =
+      RECONNECT_BACKOFF_MS[
+        Math.min(retryCount, RECONNECT_BACKOFF_MS.length - 1)
+      ]!;
+    retryCount += 1;
+    reconnectTimer = setTimeout(() => {
+      if (closed) return;
+      wireConnection();
+    }, delay);
+  };
+
+  wireConnection();
+
+  return {
+    close: () => {
+      if (closed) return; // 幂等
+      closed = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      es?.close();
+    },
   };
 }
 

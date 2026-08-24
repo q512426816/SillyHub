@@ -192,7 +192,7 @@ def test_agent_sessions_model_fields_unchanged() -> None:
     test_agent_session_model）。
 
     2026-08-23-agent-activity-sessions task-03 后加会话化三列
-    origin/aggregation_key/title（design §3.3.1），清单同步为 22 字段。
+    origin/aggregation_key/title（design §3.3.1）+ 2026-08-24 会话归档 archived_at，清单同步为 23 字段。
     """
     expected = {
         "id",
@@ -217,6 +217,8 @@ def test_agent_sessions_model_fields_unchanged() -> None:
         "origin",
         "aggregation_key",
         "title",
+        # 2026-08-24 会话归档（agent_session_archive）：archived_at 时间戳列。
+        "archived_at",
     }
     assert set(AgentSession.model_fields.keys()) == expected
 

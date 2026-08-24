@@ -31,6 +31,7 @@ from app.modules.agent.coordinator import ExecutionCoordinatorService
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.agent.placement import NoOnlineDaemonError, RunPlacementService
 from app.modules.agent.schema import AgentRunResponse, ToolFailureStats
+from app.modules.daemon.session_events import publish_sessions_changed
 from app.modules.task.model import Task
 from app.modules.workspace.model import AgentRunWorkspace, TaskWorkspace, Workspace
 from app.modules.worktree.model import WorktreeLease
@@ -1807,6 +1808,13 @@ class AgentService:
         # 的 user_input ×2 重复显示。保留 commit（run 绑定 session 仍需提交）。
         await self._session.commit()
         await self._session.refresh(run)
+
+        # task-03（design §3 生命周期契约表）：scan 会话 INSERT + 激活（pending→
+        # active）同 commit 落库后广播列表信号——created 表达新会话出现，
+        # status_changed 表达激活（对齐 task-02 create_session 的双发模式）。
+        # publish 内部静默容错；NoOnlineDaemonError 早退路径未激活、不发。
+        await publish_sessions_changed("created", session.id, user_id)
+        await publish_sessions_changed("status_changed", session.id, user_id)
 
         log.info(
             "start_scan_dispatch_interactive_prepared",

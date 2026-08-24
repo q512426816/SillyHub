@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.modules.agent.borrow_resolver import _resolve_borrowed_or_own_runtime
+from app.modules.daemon.session_events import publish_sessions_changed
 
 log = get_logger(__name__)
 
@@ -538,6 +539,12 @@ class RunPlacementService:
             {"sid": str(interactive_session_id), "rid": agent_run_id.hex},
         )
         await self._session.commit()
+
+        # task-03（design §3 生命周期契约表）：stage 会话 raw INSERT 落库后广播
+        # created（列表出现新行）。user_id 从插入参数取；非 UUID 形态（绑定层已
+        # 兜 str 的防御分支）取不到则不发。publish 内部静默容错。
+        if isinstance(user_id, uuid.UUID):
+            await publish_sessions_changed("created", interactive_session_id, user_id)
 
         log.info(
             "dispatch_daemon_lease_created",

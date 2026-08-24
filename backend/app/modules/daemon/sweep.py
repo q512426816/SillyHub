@@ -36,6 +36,7 @@ from app.core.redis import get_redis
 from app.modules.agent.model import AgentRun, AgentSession
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.session.service import RECONNECTING_RETRY_WINDOW_SEC
+from app.modules.daemon.session_events import publish_sessions_changed
 
 log = get_logger(__name__)
 
@@ -143,12 +144,18 @@ async def session_reconnect_sweep_once(session: AsyncSession) -> int:
     # 已非 failed，不发——避免向活会话误发 ended）。
     final_rows = (
         await session.execute(
-            select(AgentSession.id, AgentSession.status).where(AgentSession.id.in_(hit_ids))
+            select(AgentSession.id, AgentSession.status, AgentSession.user_id).where(
+                AgentSession.id.in_(hit_ids)
+            )
         )
     ).all()
     for row in final_rows:
         if row.status == "failed":
             await _publish_session_ended(row.id, reason="reconnect_window_expired")
+            # task-03（design §3）：终态收敛同步广播列表变更信号（status_changed），
+            # 会话列表秒级反映。逐行发（design 定案）；publish 内部静默容错，
+            # 巡检常驻协程不加重试（constraints）。
+            await publish_sessions_changed("status_changed", row.id, row.user_id)
     return converged
 
 
@@ -231,12 +238,16 @@ async def session_offline_sweep_once(session: AsyncSession) -> int:
 
     final_rows = (
         await session.execute(
-            select(AgentSession.id, AgentSession.status).where(AgentSession.id.in_(hit_ids))
+            select(AgentSession.id, AgentSession.status, AgentSession.user_id).where(
+                AgentSession.id.in_(hit_ids)
+            )
         )
     ).all()
     for row in final_rows:
         if row.status == "failed":
             await _publish_session_ended(row.id, reason="runtime_offline")
+            # task-03（design §3）：同 reconnecting 档——逐行广播列表变更信号。
+            await publish_sessions_changed("status_changed", row.id, row.user_id)
     return len([r for r in final_rows if r.status == "failed"])
 
 

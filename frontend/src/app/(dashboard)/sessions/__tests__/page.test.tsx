@@ -85,6 +85,11 @@ const mocks = vi.hoisted(() => ({
   notifyError: vi.fn(),
   notifySuccess: vi.fn(),
   notifyWarning: vi.fn(),
+  // 2026-08-24-sessions-live-updates（task-06）：门户挂载即订阅 SSE 信号——
+  // 本页用例不断言信号行为，mock 返回 no-op close 防卸载清理炸 jsdom。
+  subscribeAgentSessionsEvents: vi.fn((..._args: unknown[]) => ({
+    close: () => {},
+  })),
 }));
 
 vi.mock("@/lib/daemon", () => ({
@@ -108,6 +113,8 @@ vi.mock("@/lib/daemon", () => ({
     mocks.fetchSessionDialogHistory(...args),
   listSessionRuns: (...args: unknown[]) => mocks.listSessionRuns(...args),
   deleteAgentSession: vi.fn(),
+  subscribeAgentSessionsEvents: (...args: unknown[]) =>
+    mocks.subscribeAgentSessionsEvents(...args),
 }));
 
 vi.mock("@/lib/use-daemon-machines", () => ({

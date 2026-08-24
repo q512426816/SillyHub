@@ -39,6 +39,7 @@ from app.modules.daemon.session.service import (
     _apply_session_terminal_status,
     _send_session_end_best_effort,
 )
+from app.modules.daemon.session_events import publish_sessions_changed
 from app.modules.git_gateway.service import redact_output
 
 if TYPE_CHECKING:
@@ -1205,6 +1206,11 @@ class RunSyncService:
         # query，它在 commit 之后调用，回写不进同一事务）；D-005 幂等由
         # _apply_session_terminal_status 守卫（已 ended/failed 返 None）。
         _session_end_intent: tuple[uuid.UUID, uuid.UUID | None, uuid.UUID | None] | None = None
+        # task-03（2026-08-24-sessions-live-updates）：run 终态翻 session ended/failed
+        # 时记下列表信号意图（session_id + user_id），commit 后广播 status_changed——
+        # 多轮对话仅刷 last_active_at 的分支不置此意图（列表视图无状态变化，不发）。
+        # user_id 同样须在 expire_on_commit 前取标量。
+        _sessions_changed_intent: tuple[uuid.UUID, uuid.UUID | None] | None = None
         if agent_run.agent_session_id is not None:
             from app.modules.agent.model import AgentSession
 
@@ -1215,6 +1221,7 @@ class RunSyncService:
                     session.status = new_status
                     if new_status in ("ended", "failed"):
                         session.ended_at = now
+                        _sessions_changed_intent = (session.id, session.user_id)
                         # ql-20260823-006：会话被 run 终态翻成 ended/failed 时记下
                         # 发送意图，commit 后补发 SESSION_END 清理 daemon 内存副本——
                         # 否则 daemon SessionStore 残留活条目（backend 终态 ≠ daemon
@@ -1240,6 +1247,14 @@ class RunSyncService:
                 runtime_id=flip_runtime_id,
                 reason="run_terminal_flip",
             )
+
+        # task-03（design §3 生命周期契约表）：run 终态翻 session ended/failed →
+        # 广播列表变更信号（status_changed），打开的会话列表秒级收敛。publish 内部
+        # 静默容错（Redis 抖动不拖垮已 commit 的终态）；仅刷 last_active_at 的多轮
+        # 分支意图为 None，零发布。
+        if _sessions_changed_intent is not None:
+            changed_sid, changed_uid = _sessions_changed_intent
+            await publish_sessions_changed("status_changed", changed_sid, changed_uid)
 
         # task-10 / FR-06 / D-010@v1：借用 agent run 完成 → 方案文本落文件中心 +
         # 补 daemon_borrow_audit.usage_summary。仅 borrowed lease 生效（helper 内部
