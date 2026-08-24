@@ -234,7 +234,14 @@ worktree doctor 静默失败后手动补链时（上一条 junction 坑的修复
 - 根因：代码实现与测试必须在 worktree（隔离其它并发变更），但 SillySpec 进度产物（verify-result.md、tasks.md、review.json、模块文档变更索引）属于项目级文档，主仓库的 SillySpec 流程实时消费它们。
 - 规避：派发 regression/docs 类 task 时，在 prompt 里明确分层——源码/测试命令在 worktree 执行，`.sillyspec/changes/<change>/verify-result.md`、`.sillyspec/docs/.../modules/*.md` 等产物回写主仓库；或在子代理返回后由主代理复核并把产物从 worktree 同步到主仓库。不要依赖「worktree 分支合并后再消费」，否则主仓库 execute/verify 进度对账会缺证据。
 
-## FastAPI 字面量路径被同前缀参数路由遮蔽：三个盲区叠加（多行装饰器 grep 漏 + 直调函数绕过路由表 + 401 探针测不出）
+## 2026-08-24 — 后台子代理脱离平台 running turn 后权限回调 fail-closed 死锁
+
+> 来源：2026-08-24-platform-session-feedback-fix Wave 1 执行期（task-01 / task-08 后台子代理）。
+
+- 现象：子代理（`run_in_background: true`）在父 turn 派发后若干分钟完成读码/设计，开始写操作（Edit/Write/Bash 非只读/MCP sillyhub）时，全部被拒绝：`session not in running turn`。只读操作（Read/Grep/Glob/git status/ls/cat）正常。协调者（本 agent）通过监控循环「保活 turn」无法改变子代理绑定的平台 SessionState——子代理的 canUseTool 回调与父 turn 的 currentRunId 解耦，只有真实用户新消息开新 turn 才恢复写权限。
+- 根因：`sillyhub-daemon/src/interactive/session-manager.ts:811` 与 `:1585` 的 canUseTool 回调在 `state.status !== 'running' || !state.currentRunId` 时直接 deny；后台子代理存活到 turn 结束后，currentRunId 失效，所有写操作 fail-closed。当前平台无「子代理权限请求路由到父会话/排队重试」机制。
+- 规避：execute 阶段派耗时子代理时，改用 `run_in_background: false` 同步子代理，确保子代理在父 turn 的真实 run 窗口内完成全部写操作；若必须后台并行，则把「只读调研」放后台，写操作集中在主 turn 内由同步子代理机械应用。该现象本身也印证了本变更 FR-03（后台 Agent 任务进度可见）的痛点：会话不应在后台子代理仍在工作时提前失去 running 态。
+- 修复建议（平台侧）：canUseTool 对子代理或派生会话引入 grace period / 父会话委托 / 队列重试，避免正常后台工作被 turn 边界切断。
 > 来源：2026-08-24-sessions-live-updates verify 真实运行时冒烟（commit 0c7860f7 修复）。
 
 - 现象：`GET /api/daemon/sessions/events` 带鉴权请求返回 422 uuid_parsing——"events" 被两段式参数路由 `GET /sessions/{session_id}`（get_session_detail）当作 {session_id} 吞掉，端点在真实路由下不可达；task-04 注释只要求先于三段式 `/sessions/{id}/...`，漏了两段式详情路由。

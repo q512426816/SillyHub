@@ -82,3 +82,9 @@
 ## Uncategorized（暂存区，未加索引）
 
 `uncategorized.md` 存放项目特定架构经验、历史记录、尚未提炼成通用 pattern 的知识。条目成熟后应迁出到上述分类文件。当前内容包括：install.sh 分发机制、sync_stage_status / auto_dispatch / complete_stage stage 调度链路、Alembic migration 目录惯例、cursor-agent 版本探测、ETL 迁移顺序、单类拆 facade import 策略、Codex interactive driver 抽象、Windows spawn EINVAL、codex turn 收敛强契约、daemon allowed_roots 范围、Next.js rewrite proxy 等。直接读 `uncategorized.md` 浏览。
+
+## Decisions
+- unmapped|decision|决策 → [decisions/unmapped.md](decisions/unmapped.md)
+- backend|decision|决策 → [decisions/backend.md](decisions/backend.md)
+- frontend|decision|决策 → [decisions/frontend.md](decisions/frontend.md)
+- sillyhub-daemon|decision|决策 → [decisions/sillyhub-daemon.md](decisions/sillyhub-daemon.md)
