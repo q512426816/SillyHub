@@ -1946,6 +1946,37 @@ async def list_sessions(
     )
 
 
+# task-04 / FR：浏览器可订阅的会话列表变更信号流。固定路径 ``/sessions/events``
+# 必须注册在两段式参数路由 ``GET /sessions/{session_id}``（get_session_detail）
+# 之前——否则 "events" 会被当作 {session_id} 吞掉返回 422。2026-08-24 verify
+# 真实运行时冒烟实测踩中此坑（原只先于三段式 ``/sessions/{id}/...`` 不够）：
+# 未登录 401 探针测不出遮蔽——auth 依赖先于路径参数校验触发，回归须带鉴权
+# （test_sessions_events_stream.py::test_route_reachable_authenticated）。
+@router.get("/sessions/events")
+async def stream_sessions_events(
+    user: TaskRunAgentUser,
+) -> StreamingResponse:
+    """Stream list-change signals for the current user's sessions (task-04).
+
+    浏览器 EventSource 订阅 ``GET /api/daemon/sessions/events``，收到本人会话的
+    created / status_changed / deleted 信号后刷新列表视图（代替轮询 GET /sessions）。
+    data 帧 JSON：``event`` / ``session_id`` / ``user_id`` / ``at``（由 task-01
+    ``publish_sessions_changed`` 发布，原样透传，不做 Last-Event-ID 回放——D-006
+    Non-Goal）。
+
+    单频道 + 服务端过滤（D-005）：所有用户共享 ``SESSIONS_CHANGED_CHANNEL`` 全局
+    频道，本生成器只下发 ``user_id`` 等于当前用户的信号，他人信号静默丢弃。
+
+    连接池安全（对齐 stream_session_logs）：不注入请求级 DB session，生成器内
+    零 DB 访问——订阅期间不占用任何连接池 slot。
+    """
+    return StreamingResponse(
+        _stream_sessions_events(str(user.id)),
+        media_type="text/event-stream",
+        headers=_SESSION_SSE_HEADERS,
+    )
+
+
 @router.get(
     "/sessions/{session_id}",
     response_model=AgentSessionRead,
@@ -2223,34 +2254,6 @@ async def _inject_run_error_events(
             "error": run.error_detail,
         }
         yield f"data: {json.dumps(error_event, default=str)}\n\n"
-
-
-# task-04 / FR：浏览器可订阅的会话列表变更信号流。固定路径 ``/sessions/events``
-# 必须注册在参数化 ``/sessions/{session_id}/...`` 路由之前（照 GET /sessions 的
-# 注册顺序约定），否则 "events" 会被当作 {session_id} 吃掉。
-@router.get("/sessions/events")
-async def stream_sessions_events(
-    user: TaskRunAgentUser,
-) -> StreamingResponse:
-    """Stream list-change signals for the current user's sessions (task-04).
-
-    浏览器 EventSource 订阅 ``GET /api/daemon/sessions/events``，收到本人会话的
-    created / status_changed / deleted 信号后刷新列表视图（代替轮询 GET /sessions）。
-    data 帧 JSON：``event`` / ``session_id`` / ``user_id`` / ``at``（由 task-01
-    ``publish_sessions_changed`` 发布，原样透传，不做 Last-Event-ID 回放——D-006
-    Non-Goal）。
-
-    单频道 + 服务端过滤（D-005）：所有用户共享 ``SESSIONS_CHANGED_CHANNEL`` 全局
-    频道，本生成器只下发 ``user_id`` 等于当前用户的信号，他人信号静默丢弃。
-
-    连接池安全（对齐 stream_session_logs）：不注入请求级 DB session，生成器内
-    零 DB 访问——订阅期间不占用任何连接池 slot。
-    """
-    return StreamingResponse(
-        _stream_sessions_events(str(user.id)),
-        media_type="text/event-stream",
-        headers=_SESSION_SSE_HEADERS,
-    )
 
 
 async def _stream_sessions_events(user_id: str) -> AsyncGenerator[str, None]:

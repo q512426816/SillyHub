@@ -10,11 +10,15 @@
     unsubscribe(SESSIONS_CHANGED_CHANNEL) + close，无订阅连接泄漏。
   * 端点包装层：StreamingResponse 的 media_type / SSE headers（对齐
     /sessions/{id}/stream）；未登录 401。
+  * 路由可达性回归（2026-08-24 verify 真实运行时冒烟补）：带鉴权请求必须
+    命中本端点，而非被 ``GET /sessions/{session_id}`` 遮蔽成 422。
 
 Redis 全程 mock（AsyncMock / MagicMock 假 pubsub，可控消息序列）——照
 ``test_session_sse.py`` 先例，不需要真实 broker。端点级 200 流不通过 HTTP
-client 消费（信号流无终止事件，HTTP 读全量 body 会永久挂起），改为直接调
-路由函数并驱动 ``StreamingResponse.body_iterator``。
+client 消费（信号流无终止事件，HTTP 读全量 body 会永久挂起——ASGITransport
+会收完整个 body 才返回，``client.stream()`` 也逃不掉），改为直接调路由函数并
+驱动 ``StreamingResponse.body_iterator``。路由可达性回归走 app 路由表断言
+（首个 GET 匹配必须是本端点），同样不消费响应 body。
 """
 
 from __future__ import annotations
@@ -227,3 +231,29 @@ class TestSessionsEventsEndpoint:
         """未登录 → 401，不进入流（鉴权依赖与 list_sessions 同款）。"""
         resp = await client.get("/api/daemon/sessions/events")
         assert resp.status_code == 401
+
+    def test_route_registered_before_session_detail_param(self) -> None:
+        """路由表级回归：GET /api/daemon/sessions/events 的首个匹配必须是本端点。
+
+        2026-08-24 verify 真实运行时冒烟发现：本路由曾注册在两段式参数路由
+        ``GET /sessions/{session_id}``（get_session_detail）之后，鉴权请求被
+        遮蔽成 422 uuid_parsing——"events" 被当作 {session_id}。此前两个测试
+        盲区：直接调路由函数绕过路由表；未登录 401 探针测不出遮蔽（auth 依赖
+        先于路径参数校验触发）。本断言按注册序在 app 路由表找首个 GET 匹配，
+        不消费响应 body（ASGITransport 会收全量 body，无限 SSE 流会挂死）。
+        """
+        from app.main import app
+
+        target = "/api/daemon/sessions/events"
+        first_match = None
+        for route in app.routes:
+            methods = getattr(route, "methods", None)
+            regex = getattr(route, "path_regex", None)
+            if methods and regex and "GET" in methods and regex.match(target):
+                first_match = route
+                break
+        assert first_match is not None, "SSE 端点路由未注册"
+        assert first_match.endpoint is stream_sessions_events, (
+            f"首个 GET 匹配被 {getattr(first_match.endpoint, '__name__', first_match)} "
+            "遮蔽——/sessions/events 必须注册在 GET /sessions/{session_id} 之前"
+        )
