@@ -3726,7 +3726,7 @@ export class SessionManager {
   ): void {
     const cb = this.deps.onSessionEvent;
     if (!cb) return;
-    void Promise.resolve(cb(sessionId, runId, event)).catch((err) => {
+    void (async () => { await cb(sessionId, runId, event); })().catch((err) => {
       // eslint-disable-next-line no-console
       console.error('[session-manager] onSessionEvent failed', {
         sessionId,
