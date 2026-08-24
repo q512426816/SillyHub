@@ -226,3 +226,17 @@ session_id 列 NOT NULL + default_factory=uuid4（为兼容 ~50 处存量构造�
 
 ## Git Bash 下修 worktree node_modules junction：cmd mklink 传参必败，用 PowerShell New-Item Junction
 worktree doctor 静默失败后手动补链时（上一条 junction 坑的修复动作），Git Bash 里 `cmd //c mklink /J "<绝对路径>" "<目标>"` 两种写法都报「无效开关 - 路径」——MSYS 对反斜杠参数做了路径转换劫持，双反斜杠转义也救不回。可靠姿势：`powershell -NoProfile -Command "New-Item -ItemType Junction -Path '<win路径>' -Target '<win路径>'"`（路径先用 cygpath -w "$(pwd)/相对路径" 转绝对 Windows 路径），建完 `(Get-Item).LinkType` 应输出 Junction，再 ls .bin 抽查。补链后 worktree frontend 内 pnpm exec tsc/vitest 直接可用（同 lockfile 链主仓 node_modules）。来源：2026-08-22-session-panel-unify execute step3。
+
+## worktree 内执行回归/文档任务时 SillySpec 产物与主仓库分裂
+> 来源：2026-08-24-sessions-live-updates task-07。
+
+- 现象：子代理按「工作目录 = worktree」跑 task-07 全量回归 + 模块文档同步，把 verify-result.md、模块文档修改等产物写进 worktree 并提交到 worktree 分支；主仓库同路径文件未更新。SillySpec CLI 在主仓库运行，验收/归档阶段可能看不到 verify-result.md；未来合并 worktree 分支时，若主仓库也补了一份同内容文件，会触发 both-added 冲突。
+- 根因：代码实现与测试必须在 worktree（隔离其它并发变更），但 SillySpec 进度产物（verify-result.md、tasks.md、review.json、模块文档变更索引）属于项目级文档，主仓库的 SillySpec 流程实时消费它们。
+- 规避：派发 regression/docs 类 task 时，在 prompt 里明确分层——源码/测试命令在 worktree 执行，`.sillyspec/changes/<change>/verify-result.md`、`.sillyspec/docs/.../modules/*.md` 等产物回写主仓库；或在子代理返回后由主代理复核并把产物从 worktree 同步到主仓库。不要依赖「worktree 分支合并后再消费」，否则主仓库 execute/verify 进度对账会缺证据。
+
+## FastAPI 字面量路径被同前缀参数路由遮蔽：三个盲区叠加（多行装饰器 grep 漏 + 直调函数绕过路由表 + 401 探针测不出）
+> 来源：2026-08-24-sessions-live-updates verify 真实运行时冒烟（commit 0c7860f7 修复）。
+
+- 现象：`GET /api/daemon/sessions/events` 带鉴权请求返回 422 uuid_parsing——"events" 被两段式参数路由 `GET /sessions/{session_id}`（get_session_detail）当作 {session_id} 吞掉，端点在真实路由下不可达；task-04 注释只要求先于三段式 `/sessions/{id}/...`，漏了两段式详情路由。
+- 盲区三连：① 审查 grep 用单行模式 `@router.get("` 漏掉多行装饰器（路径在下一行）；② 端点测试直接调路由函数（`await stream_sessions_events(user=...)`）绕过路由表，路由顺序永不进入测试；③ 唯一路由级测试只断言未登录 401——FastAPI auth 依赖先于路径参数校验触发，遮蔽路由下同样 401，红不了。
+- 规避：新增字面量路径且同前缀存在参数路由时——审查用多行感知 grep（`grep -A1 '@router\.get($'`）；测试补路由表级断言（按注册序找首个方法+regex 匹配，断言 endpoint 是预期函数，不消费 body）；SSE/无限流端点测试勿走 httpx client 消费 body（ASGITransport 收全量 body 才返回，`client.stream()` 也挂死），路由可达性用路由表断言替代。真实运行时冒烟（真 uvicorn + curl）是最后防线——本缺陷单测 5186 全绿仍存在。

@@ -4,6 +4,7 @@ created_at: 2026-08-24 07:24:36
 change: 2026-08-24-sessions-live-updates
 scale: large
 tier: independent
+risk_level: unit-sufficient
 ---
 
 # 设计（Design）：会话列表 SSE 变更信号 + 轮询兜底
