@@ -75,7 +75,7 @@ services:
         daemon: ../sillyhub-daemon
         skills: ../.claude/skills
       args:
-        CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.158}
+        CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.241}
         # 空 → 取最新 sillyspec；填值 → pin。
         SILLYSPEC_VERSION: ${SILLYSPEC_VERSION:-}
         # Git SHA baked into the image; export COMMIT_SHA before `up --build`.

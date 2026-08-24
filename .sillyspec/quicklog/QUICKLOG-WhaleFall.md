@@ -210,3 +210,13 @@
 根因：61a1b709（2026-08-21-session-message-queue）在 page 模式 sendFromQueue 与 handleSend 两处把占位轮 displayPrompt 拼成标记行+换行+正文，无附件时 markerLines 为空串产出前导换行，气泡 whitespace-pre-wrap 原样渲染成空行；后端落库无此前缀且 SSE user_input 不回填，空行只存在于 live 占位轮、刷新即消失。
 方案：runtime-session-helpers 新增 joinAttachmentMarkers（parseAttachmentMarkers 逆操作，无附件原样返回正文，语义对齐 backend inject），两处拼接改走该函数。
 结果：新增 session-panel-prompt.test.tsx 4 例（纯函数 3 + page 模式组件 1）红绿对照验证——旧代码组件断言失败 expected ['\nsecond'] to include 'second'，新代码全绿；定向回归 session-panel 5 文件 81 例 + 队列/helper 4 文件 48 例全绿，tsc 零错，lint 仅存量 cn 未使用警告（非本次引入）。
+
+## ql-20260824-cc-upgrade | 2026-08-24 11:11:00 | backend 镜像内 Claude Code CLI 升级 2.1.158 → 2.1.241
+状态：已完成
+关联变更：（无）
+文件：
+- deploy/docker-compose.yml（CLAUDE_CODE_VERSION 默认 pin 2.1.158 → 2.1.241，npm 最新）
+需求：升级 backend 容器内 agent 运行用的 Claude Code CLI
+根因：（无缺陷，例行版本升级；2.1.158 为旧 pin）
+方案：改 compose build arg 默认值；node-tools 层 cache-miss 重装（npmmirror 源，~2 分钟）；重建 backend 容器
+结果：容器内 claude --version = 2.1.241 (Claude Code)；/api/health ok；daemon WS 已重连（心跳 200）。deploy/.env 无覆盖项，改默认即生效
