@@ -47,6 +47,11 @@ from app.modules.daemon.protocol import (
 from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 from app.modules.daemon.schema import SessionReopenResponse
 
+# task-02（2026-08-24-sessions-live-updates / design §1.1）：agent_sessions 列表
+# 变更信号发布入口。publish 自身静默容错（Redis 抖动不打断业务写路径），埋点
+# 只需 await 调用；user_id 一律取会话属主 AgentSession.user_id。
+from app.modules.daemon.session_events import publish_sessions_changed
+
 log = get_logger(__name__)
 
 # task-05（2026-08-14-sessions-portal / D-012@v1 / FR-05）：会话内配置热切换 WS
@@ -1012,6 +1017,14 @@ class SessionService:
             await self._session.rollback()
             raise
 
+        # task-02（2026-08-24-sessions-live-updates / design §3）：INSERT 与
+        # status→active 激活在同一事务内一体落库（生效点 = 上方 commit），此处
+        # 合并发布 created（行出现）+ status_changed（→active）两个列表信号；
+        # 若下方派发失败收敛为 failed，_converge_failed_dispatch 会再发一条
+        # status_changed，列表最终收敛到终态（轮询兜底语义不受影响）。
+        await publish_sessions_changed("created", session.id, session.user_id)
+        await publish_sessions_changed("status_changed", session.id, session.user_id)
+
         # Commit succeeded → wake the daemon. Failure here must converge the
         # just-committed triple to terminal failed states before raising.
         placement = RunPlacementService(self._session)
@@ -1119,6 +1132,10 @@ class SessionService:
             await self._session.commit()
             await self._session.refresh(session)
             await self._session.refresh(run)
+
+            # task-02：status→failed 收敛已落库，发布列表变更信号（publish
+            # 静默容错，不会改变本函数的错误收敛语义）。
+            await publish_sessions_changed("status_changed", session.id, session.user_id)
 
             # task-09 / FR-04：failed 终态清理 ready 状态（commit 后事务外，
             # best-effort；内层 try 隔离 clear 异常，不影响外层 commit/refresh
@@ -1269,6 +1286,10 @@ class SessionService:
         except Exception:
             await self._session.rollback()
             raise
+
+        # task-02：status→active（CLI 会话懒激活）已随上方 commit 落库，发布
+        # 列表变更信号（created 由 platform_sync 插入分支负责，此处只发激活）。
+        await publish_sessions_changed("status_changed", session.id, session.user_id)
 
         # commit 成功 → 唤醒 daemon（对齐 create_session :1001-1020：失败收敛
         # 刚提交的三元组为 failed 终态后抛 DaemonRuntimeOffline）。
@@ -2228,6 +2249,10 @@ class SessionService:
             await self._session.rollback()
             raise
 
+        # task-02：status→ended 已随上方 commit 落库，发布列表变更信号（user_id
+        # 取会话属主——daemon 身份收口时刷新的仍是属主的列表视图）。
+        await publish_sessions_changed("status_changed", session.id, session.user_id)
+
         await self._publish_session_event(
             session.id,
             {
@@ -2390,6 +2415,8 @@ class SessionService:
                     "interrupted_run_id": (str(interrupted_run_id) if interrupted_run_id else None),
                 },
             )
+            # task-02：status→reconnecting 已落库，发布全局列表变更信号。
+            await publish_sessions_changed("status_changed", session.id, session.user_id)
             log.info(
                 "session_recovered_reconnecting",
                 session_id=str(session.id),
@@ -2559,6 +2586,8 @@ class SessionService:
                 session.id,
                 {"event": "session_reconnected", "session_id": str(session.id)},
             )
+            # task-02：status→active 翻转已落库，发布全局列表变更信号。
+            await publish_sessions_changed("status_changed", session.id, session.user_id)
             # task-10 / FR-04：recover 主路径双保险（design Phase 4 / gap-1）。
             # reconnecting→active 翻转 + commit + publish 成功之后调 mark_ready，
             # 与 daemon restoreAndReconnect 上报构成双保险，防 daemon 上报丢失致
@@ -2676,6 +2705,8 @@ class SessionService:
                     "reason": reason,
                 },
             )
+            # task-02：status→failed 已落库，发布全局列表变更信号。
+            await publish_sessions_changed("status_changed", session.id, session.user_id)
             log.warning(
                 "session_recovery_failed",
                 session_id=str(session.id),
@@ -3026,6 +3057,11 @@ class SessionService:
         await self._session.refresh(session)
         await self._session.refresh(new_lease)
 
+        # task-02：status→reconnecting 已随上方 commit 落库，发布列表变更信号
+        # （下方 SESSION_RESUME WS best-effort 失败不回滚本地状态，信号语义
+        # 不受 WS 结果影响）。
+        await publish_sessions_changed("status_changed", session.id, session.user_id)
+
         # ── best-effort daemon:session_resume WS (design §6.4) ────────────────
         # WS failure does NOT roll back the local reconnecting state — the daemon
         # will converge on its own (pull/next-poll or recover-on-restart). The
@@ -3129,6 +3165,10 @@ class SessionService:
         # session.delete(agent_session) 两步（C-7 / R-4）。
         agent_session.deleted_at = datetime.now(UTC)
         await self._session.commit()
+
+        # task-02：软删已落库，发布列表删除信号（前端 invalidate 重拉后该行
+        # 被 deleted_at IS NULL 过滤，从列表消失）。
+        await publish_sessions_changed("deleted", agent_session.id, agent_session.user_id)
 
     async def _end_session_for_delete(self, session: AgentSession) -> None:
         """Internal end reconciliation used by delete_agent_session.
