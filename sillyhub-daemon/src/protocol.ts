@@ -164,6 +164,24 @@ export const MSG = {
   LEASE_CANCEL: 'daemon:lease_cancel',
 
   /**
+   * Server → Daemon：用户对 plan 模式的确认/修订/取消决策（change
+   * 2026-08-24-platform-session-feedback-fix task-02 / FR-02 / D-001@v1，
+   * verify P0 返工补齐接收端）。
+   *
+   * backend handle_plan_response 落库 session.config.plan_response 后经
+   * ws_hub.send_session_control best-effort 推送。daemon 收到后调
+   * ``SessionManager.resolvePlanResponse``：按 run_id 新旧校验后把决策格式化
+   * 成用户消息经 inject 注入 InputQueue（当前 turn 在跑则排队到下一 turn），
+   * Agent 据此继续执行 / 修订计划 / 终止。
+   *
+   * payload: PlanResponsePayload（snake_case，与 backend
+   * ``DAEMON_MSG_PLAN_RESPONSE = "daemon:plan_response"`` 同名常量逐字对齐）。
+   * 纯新增消息，旧 daemon 收到走 default 仅 warn（向后兼容）；daemon 离线时
+   * backend delivered=false，决策已落库，重连后可经 UI 重发。
+   */
+  PLAN_RESPONSE: 'daemon:plan_response',
+
+  /**
    * Server → Daemon：运行中会话的供应商热切换指令（change
    * 2026-08-06-provider-switch-live-session task-06 / FR-04 / D-002@v1 / design §5 Wave2）。
    *
@@ -277,6 +295,28 @@ export interface SessionInjectAttachment {
 export interface SessionControlPayload {
   session_id: string;
   lease_id: string;
+}
+
+/**
+ * PLAN_RESPONSE payload（Server → Daemon，FR-02 / D-001@v1，
+ * 2026-08-24-platform-session-feedback-fix task-02）。
+ *
+ * 用户在 Web 端 PlanApprovalCard 选择 confirm/revise/cancel 后，backend
+ * handle_plan_response 落库 session.config.plan_response 并经 WS Hub 推送。
+ * daemon 调 ``SessionManager.resolvePlanResponse`` 把决策注入 turn。
+ * 字段 snake_case 与 backend handle_plan_response 发送 payload 逐字对齐。
+ */
+export interface PlanResponsePayload {
+  /** 目标会话 ID（agent_sessions.id，UUID 字符串）。 */
+  session_id: string;
+  /** 触发 plan_mode_entered 的 AgentRun ID（daemon 侧做新旧校验）。 */
+  run_id: string;
+  /** 用户决策：confirm=确认执行 / revise=要求修改 / cancel=取消。 */
+  decision: 'confirm' | 'revise' | 'cancel';
+  /** revise/cancel 时的用户反馈文本（backend 强制非空；confirm 时 null/缺省）。 */
+  feedback?: string | null;
+  /** 发送方 runtime ID（backend 侧路由用，daemon 仅日志透传）。 */
+  runtime_id?: string;
 }
 
 /**

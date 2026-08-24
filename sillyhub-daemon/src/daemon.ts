@@ -2830,6 +2830,17 @@ export class Daemon {
         });
         break;
       }
+      // task-02 verify P0 返工（2026-08-24-platform-session-feedback-fix / FR-02）：
+      // 用户 plan 决策（backend handle_plan_response 落库后推送）→ 转交
+      // SessionManager.resolvePlanResponse 注入 turn。无 lease_id 字段，不走
+      // _routeSessionControl 的 lease 匹配校验，独立路由。
+      case MSG.PLAN_RESPONSE: {
+        // 非阻塞分发（同 SESSION_INJECT / SESSION_SWITCH_CONFIG 风格）。
+        void this._routePlanResponse(rawPayload).catch((e) => {
+          this._logger.error('plan_response_route_failed', { error: e });
+        });
+        break;
+      }
       // task-09（2026-08-14-sessions-portal / FR-05 / D-012@v1 / design §5 Wave2）：
       // backend inject_session（带新配置 + prompt）→ WS SESSION_SWITCH_CONFIG 下发。
       // daemon 收到后非阻塞调 sessionManager.markPendingConfigSwitch（task-08 实现）：
@@ -2915,6 +2926,55 @@ export class Daemon {
       default: {
         this._logger.warn('unknown_message_type', { type: msgType });
       }
+    }
+  }
+
+  /**
+   * task-02 verify P0 返工：路由 PLAN_RESPONSE 到 SessionManager.resolvePlanResponse。
+   *
+   * 字段名兼容 snake_case（backend 发 session_id/run_id/decision/feedback）。
+   * 校验：session_id/run_id 非空 + decision ∈ confirm/revise/cancel，否则 warn 丢弃。
+   * 未注入 sessionManager → warn 不崩（同 _routeSessionControl AC-14）。决策送达
+   * 结果（delivered true/false）记 info 日志——决策已在 backend 落库，失败可重发。
+   */
+  private async _routePlanResponse(raw: Record<string, unknown>): Promise<void> {
+    if (!this._sessionManager) {
+      this._logger.warn('plan_response_no_manager', {});
+      return;
+    }
+    const sessionId =
+      (raw.session_id as string | undefined) ?? (raw.sessionId as string | undefined) ?? '';
+    const runId = (raw.run_id as string | undefined) ?? (raw.runId as string | undefined) ?? '';
+    const decision = (raw.decision as string | undefined) ?? '';
+    const feedback = raw.feedback as string | null | undefined;
+    if (!sessionId || !runId) {
+      this._logger.warn('plan_response_missing_fields', {
+        session_id: sessionId,
+        run_id: runId,
+      });
+      return;
+    }
+    if (decision !== 'confirm' && decision !== 'revise' && decision !== 'cancel') {
+      this._logger.warn('plan_response_invalid_decision', {
+        session_id: sessionId,
+        decision,
+      });
+      return;
+    }
+    const delivered = await this._sessionManager.resolvePlanResponse(
+      sessionId,
+      runId,
+      decision,
+      feedback,
+    );
+    if (delivered) {
+      this._logger.info('plan_response_delivered', { session_id: sessionId, run_id: runId });
+    } else {
+      this._logger.warn('plan_response_not_delivered', {
+        session_id: sessionId,
+        run_id: runId,
+        decision,
+      });
     }
   }
 

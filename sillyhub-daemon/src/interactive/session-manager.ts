@@ -2197,6 +2197,82 @@ export class SessionManager {
   }
 
   /**
+   * task-02 verify P0 返工（FR-02 / D-001@v1）：用户 plan 决策送达当前会话。
+   *
+   * daemon 收到 WS ``daemon:plan_response``（用户在 Web 端 PlanApprovalCard 选择
+   * confirm/revise/cancel，backend 落库后推送）后经此方法把决策注入 turn：
+   * 决策格式化为用户消息，复用 inject 进 InputQueue——当前 turn 在跑则排队到
+   * 下一 turn（spike S1 语义），turn 已结束则直接开新 turn，Agent 据此继续执行 /
+   * 修订计划 / 终止。
+   *
+   * 新旧校验：run_id 与 state.currentRunId 不一致（决策属于更早的 plan 轮，会话
+   * 已推进到后续 turn）→ warn 丢弃返回 false，不回注旧消息（inject 会把
+   * currentRunId 切回旧 run，污染日志归属）。currentRunId 为空（恢复后尚未有
+   * turn）时放行——inject 会顺带回填。
+   *
+   * 全部失败路径（session 不存在 / 已终态 / inject 抛错）只 warn 返回 false，
+   * 不向上抛——决策已在 backend session.config 落库，可经 UI 重发。
+   */
+  async resolvePlanResponse(
+    sessionId: string,
+    runId: string,
+    decision: 'confirm' | 'revise' | 'cancel',
+    feedback?: string | null,
+  ): Promise<boolean> {
+    const state = this._store.get(sessionId);
+    if (!state) {
+      // eslint-disable-next-line no-console
+      console.warn('[session-manager] plan_response_session_not_found', { sessionId });
+      return false;
+    }
+    if (state.status === 'ended' || state.status === 'failed' || state.status === 'reconnecting') {
+      // eslint-disable-next-line no-console
+      console.warn('[session-manager] plan_response_session_inactive', {
+        sessionId,
+        status: state.status,
+      });
+      return false;
+    }
+    if (state.currentRunId && state.currentRunId !== runId) {
+      // eslint-disable-next-line no-console
+      console.warn('[session-manager] plan_response_stale_run', {
+        sessionId,
+        planRunId: runId,
+        currentRunId: state.currentRunId,
+      });
+      return false;
+    }
+    const trimmed = (feedback ?? '').trim();
+    let message: string;
+    if (decision === 'confirm') {
+      message = '【计划确认】用户已确认当前计划，请按计划继续执行。';
+    } else if (decision === 'revise') {
+      message =
+        '【计划修订】用户要求修改计划后再执行。修改意见：' +
+        (trimmed || '（未填写）') +
+        '。请据此调整计划；如需再次确认，请重新提交计划摘要。';
+    } else {
+      message =
+        '【计划取消】用户已取消当前计划。原因：' +
+        (trimmed || '（未填写）') +
+        '。请停止执行该计划的后续步骤，并简要总结当前进展。';
+    }
+    try {
+      await this.inject(sessionId, message, runId);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[session-manager] plan_response_inject_failed', {
+        sessionId,
+        runId,
+        decision,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
+    return true;
+  }
+
+  /**
    * spike D1：turn 级 interrupt。
    *   - session 不存在 / 无 query → no-op false
    *   - status=active（无 running turn）→ no-op false
