@@ -61,6 +61,9 @@
  *     解析失败 / 缺 file_id → 回退通用 tool_use 映射不丢行；未知 / 缺省 tool_kind
  *     一律走原 tool_use 映射（零回归）
  *   - kind=tool_result：[TOOL_RESULT] 前缀的 stdout 文本行（剥前缀，供配对最近 tool_use）
+ *   - kind=skill：[ASSISTANT] Base directory for this skill: 前缀行（ql-20260824-017，
+ *     Claude Code 技能装载注入——SKILL.md 全文以 assistant 文本块注入，属技能协议
+ *     载荷非用户答复，剥前缀后由装配器挂到最近 Skill 工具段 result，不进对话正文）
  *   - kind=stderr：channel=stderr
  *   - kind=reply：其余（剥 [ASSISTANT]/[LOG:\w+] 前缀）
  *
@@ -72,6 +75,7 @@ export type SessionLogSegmentKind =
   | "thinking"
   | "tool_use"
   | "tool_result"
+  | "skill"
   | "stderr"
   | "override"
   | "file";
@@ -198,6 +202,14 @@ export function classifySessionLog(
   }
   if (/^\[THINKING\]\s?/.test(trimmed)) {
     return { kind: "thinking", text: trimmed.replace(/^\[THINKING\]\s?/, "") };
+  }
+  // ql-20260824-017：Claude Code 技能装载注入行。Skill 工具的 tool_result 只有
+  // 「Launching skill: X」，SKILL.md 全文随后以 assistant 文本块注入（DB run
+  // d01bd6d2 实证）。该行是技能协议载荷而非给用户的答复，归过程信息（装配器挂到
+  // 最近 Skill 工具段 result），不进对话正文。仅匹配 [ASSISTANT] 前缀形态——
+  // 裸文本（用户手打 / codex 无前缀流）不误吞。
+  if (/^\[ASSISTANT\]\s*Base directory for this skill:/i.test(trimmed)) {
+    return { kind: "skill", text: trimmed.replace(/^\[ASSISTANT\]\s?/, "") };
   }
   return {
     kind: "reply",
@@ -810,6 +822,11 @@ export function applyLogToSegments(
         },
       ]);
       break;
+    case "skill":
+      // ql-20260824-017：技能装载注入行——挂到同桶最近 Skill 工具段 result（过程
+      // 信息，Skill 工具卡展开可见全文），无匹配段时退化文本段兜底（见函数注）。
+      segments = attachSkillInjection(segments, bucketId, routeSubagentType, seg.text, ts, input);
+      break;
     case "tool_result":
       // 归属桶内位置配对（§5 Phase1.4 / Grill X-02）：tool_result 行（SSE/DB）不携带
       // 自身 tool_use_id，沿用「最后一个未配对 tool 项」位置规则，但配对范围限定
@@ -891,7 +908,7 @@ export function applyLogToSegments(
       break;
     }
     default:
-      // classifySessionLog 仅产上述六类 + override（已提前 return），防御分支。
+      // classifySessionLog 仅产上述七类 + override（已提前 return），防御分支。
       break;
   }
 
@@ -937,6 +954,42 @@ export function finishTurn(turn: AssembledTurn): AssembledTurn {
   const res = clear(turn.segments);
   if (!res.changed) return turn;
   return { ...turn, segments: res.list };
+}
+
+/**
+ * ql-20260824-017：技能装载注入行装配——把 SKILL.md 全文挂到归属桶内**最近的**
+ * Skill 工具段 result（追加在「Launching skill: X」之后，进度视图 Skill 工具卡
+ * 展开可见全文），并把该段 endedAt 更新为注入时刻；状态不重判（保持配对 result
+ * 时的 ok/deny）。从桶尾向前找（同轮多次技能装载各自挂最近的，不串段）。
+ *
+ * 桶内无 Skill 工具段（tool_call JSON 丢失 / 注入先到的旧数据）→ 退化为普通
+ * 文本段追加（与修复前 reply 行为一致：宁进对话不丢内容）。
+ */
+function attachSkillInjection(
+  segments: TurnSegment[],
+  bucketId: string | null,
+  subagentType: string | null,
+  text: string,
+  ts: number | null,
+  input: AssemblerLogInput,
+): TurnSegment[] {
+  let attached = false;
+  const next = applyToBucket(segments, bucketId, subagentType, (children) => {
+    for (let i = children.length - 1; i >= 0; i -= 1) {
+      const t = children[i];
+      if (t && t.kind === "tool" && t.toolName === "Skill") {
+        attached = true;
+        return [
+          ...children.slice(0, i),
+          { ...t, result: t.result ? `${t.result}\n\n${text}` : text, endedAt: ts },
+          ...children.slice(i + 1),
+        ];
+      }
+    }
+    return children;
+  });
+  if (attached) return next;
+  return appendStreamText(segments, bucketId, subagentType, "text", text, ts, input);
 }
 
 /**

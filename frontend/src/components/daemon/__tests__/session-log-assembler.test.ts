@@ -15,12 +15,16 @@
  *   9. FileUpload 文件段（task-08 / 2026-08-23-agent-file-upload-mcp / FR-01 /
  *      design §7.3）：FileUpload 行 → file 段且不再产 tool_use 段 / 坏 JSON 回退
  *      通用映射 / 未知 tool_kind 策略保持 / 投影跳过 / 两路去重不受影响。
+ *  10. 技能装载注入行（ql-20260824-017）：[ASSISTANT] Base directory 前缀行归
+ *      kind=skill 挂最近 Skill 工具段 result（不进对话正文）/ 多次装载不串段 /
+ *      子代理桶路由 / 无 Skill 段退化文本段 / 历史路径一致。
  */
 
 import { describe, it, expect } from "vitest";
 
 import {
   applyLogToSegments,
+  classifySessionLog,
   createEmptyAssembledTurn,
   finishTurn,
   logsToSegments,
@@ -922,5 +926,138 @@ describe("FileUpload 文件段（task-08 / FR-01 / design §7.3）", () => {
     const tool = toolById(turn.segments, "tu_s");
     expect(tool.children.map((s) => s.kind)).toEqual(["file"]);
     expect(tool.children[0]).toMatchObject({ fileId: "f-1", ts: Date.parse(T1) });
+  });
+});
+
+/* ───────── 10. 技能装载注入行（ql-20260824-017） ───────── */
+
+// Claude Code 装载技能的日志序列（DB run d01bd6d2 实证）：
+//   [TOOL_USE] Skill: {json}（stdout，与 tool_call JSON 双发）
+//   {"tool":"Skill",...}（tool_call JSON，权威源）
+//   [TOOL_RESULT] Launching skill: sillyspec-execute
+//   [ASSISTANT] Base directory for this skill: ...\n<SKILL.md 全文>   ← 本组被测行
+// SKILL.md 全文以 assistant 文本块注入，修复前归 reply 进对话正文（用户投诉），
+// 修复后归过程信息：挂到同桶内最近 Skill 工具段的 result，对话视图不含。
+describe("技能装载注入行（ql-20260824-017：不进对话正文，挂 Skill 工具段 result）", () => {
+  const T_SKILL_USE = "2026-08-24T05:04:20.344Z";
+  const T_SKILL_BODY = "2026-08-24T05:04:20.410Z";
+  const SKILL_BODY =
+    "Base directory for this skill: C:\\repo\\.claude\\skills\\sillyspec-execute\n\n## 何时使用\n\n- 用户说\"开始写代码、执行任务、跑 execute、开干\"";
+
+  function makeSkillTurn(): AssembledTurn {
+    return applyAll([
+      makeLog("1", "stdout", `[TOOL_USE] Skill: {"skill":"sillyspec-execute"}`, {
+        timestamp: T_SKILL_USE,
+      }),
+      makeLog(
+        "2",
+        "tool_call",
+        '{"tool":"Skill","args":{"skill":"sillyspec-execute","args":"--change c1"},"tool_use_id":"tu_sk1","success":true}',
+        { timestamp: T_SKILL_USE },
+      ),
+      makeLog("3", "stdout", "[TOOL_RESULT] Launching skill: sillyspec-execute", {
+        timestamp: T_SKILL_USE,
+      }),
+      makeLog("4", "stdout", `[ASSISTANT] ${SKILL_BODY}`, { timestamp: T_SKILL_BODY }),
+    ]);
+  }
+
+  it("classifySessionLog：[ASSISTANT] Base directory 前缀行归 kind=skill（非 reply）；裸文本（用户手打）不受影响", () => {
+    expect(classifySessionLog(`[ASSISTANT] ${SKILL_BODY}`, "stdout")).toEqual({
+      kind: "skill",
+      text: SKILL_BODY,
+    });
+    // 无 [ASSISTANT] 前缀的裸文本（user_input / codex 无前缀流）不误吞
+    expect(classifySessionLog(SKILL_BODY, "user_input")?.kind).toBe("reply");
+    expect(classifySessionLog("[ASSISTANT] 正常答复", "stdout")?.kind).toBe("reply");
+  });
+
+  it("注入行不进对话正文（output 零贡献），全文追加到最近 Skill 工具段 result", () => {
+    const turn = makeSkillTurn();
+    expect(turn.output).toBe("");
+    expect(turn.segments.map((s) => s.kind)).toEqual(["tool"]);
+    const skillTool = toolById(turn.segments, "tu_sk1");
+    expect(skillTool.toolName).toBe("Skill");
+    expect(skillTool.result).toBe(`Launching skill: sillyspec-execute\n\n${SKILL_BODY}`);
+    expect(skillTool.status).toBe("ok");
+    expect(skillTool.endedAt).toBe(Date.parse(T_SKILL_BODY));
+  });
+
+  it("同轮多次技能装载：各自挂到最近的 Skill 工具段（不串段）", () => {
+    const turn = applyAll([
+      makeLog(
+        "1",
+        "tool_call",
+        '{"tool":"Skill","args":{"skill":"a"},"tool_use_id":"tu_sk_a","success":true}',
+      ),
+      makeLog("2", "stdout", "[ASSISTANT] Base directory for this skill: pa\n\nA", {}),
+      makeLog(
+        "3",
+        "tool_call",
+        '{"tool":"Skill","args":{"skill":"b"},"tool_use_id":"tu_sk_b","success":true}',
+      ),
+      makeLog("4", "stdout", "[ASSISTANT] Base directory for this skill: pb\n\nB", {}),
+    ]);
+    expect(toolById(turn.segments, "tu_sk_a").result).toBe("Base directory for this skill: pa\n\nA");
+    expect(toolById(turn.segments, "tu_sk_b").result).toBe("Base directory for this skill: pb\n\nB");
+    expect(turn.output).toBe("");
+  });
+
+  it("归属桶路由：子代理装载的技能注入行挂进该子代理 children 内的 Skill 工具段", () => {
+    const turn = applyAll([
+      makeLog(
+        "1",
+        "tool_call",
+        '{"tool":"Task","args":{"description":"子"},"tool_use_id":"tu_sub","success":true}',
+      ),
+      makeLog(
+        "2",
+        "tool_call",
+        '{"tool":"Skill","args":{"skill":"a"},"tool_use_id":"tu_sk_sub","success":true}',
+        { parentToolUseId: "tu_sub" },
+      ),
+      makeLog("3", "stdout", "[ASSISTANT] Base directory for this skill: p\n\nX", {
+        parentToolUseId: "tu_sub",
+      }),
+    ]);
+    const sub = toolById(turn.segments, "tu_sub");
+    const inner = toolById(sub.children, "tu_sk_sub");
+    expect(inner.result).toBe("Base directory for this skill: p\n\nX");
+    expect(turn.output).toBe("");
+  });
+
+  it("兜底：桶内无 Skill 工具段（tool_call JSON 丢失 / 注入先到的旧数据）→ 退化为文本段，不丢内容", () => {
+    const turn = applyAll([
+      makeLog("1", "stdout", "前文"),
+      makeLog("2", "stdout", `[ASSISTANT] ${SKILL_BODY}`),
+    ]);
+    // 前文与注入行同为无 segmentId 文本 → 续接同段直拼（与修复前 reply 行为一致）
+    expect(turn.segments).toHaveLength(1);
+    expect(turn.segments.map((s) => s.kind)).toEqual(["text"]);
+    expect(turn.output).toBe(`前文${SKILL_BODY}`);
+  });
+
+  it("历史批量路径（logsToSegments）与实时路径同一装配语义", () => {
+    const segments = logsToSegments([
+      makeLog(
+        "1",
+        "tool_call",
+        '{"tool":"Skill","args":{"skill":"a"},"tool_use_id":"tu_sk_h","success":true}',
+      ),
+      makeLog("2", "stdout", "[ASSISTANT] Base directory for this skill: p\n\nH"),
+    ]);
+    const tool = toolById(segments, "tu_sk_h");
+    expect(tool.result).toBe("Base directory for this skill: p\n\nH");
+    const legacy = segmentsToLegacy(segments);
+    expect(legacy.output).toBe("");
+    expect(legacy.processItems).toEqual([
+      {
+        kind: "tool",
+        raw: expect.stringContaining('"Skill"'),
+        result: "Base directory for this skill: p\n\nH",
+        status: "ok",
+        ts: undefined,
+      },
+    ]);
   });
 });
