@@ -84,17 +84,17 @@ scale: medium
 
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
-| 新增 | `backend/app/modules/daemon/schema.py` 新增 `PlanModeEnteredEvent` / `BashStatusEvent` / `BashChunkEvent` / `PlanResponseRequest` DTO | producer=daemon 上报 → backend router 校验 → Redis publish；consumer=frontend SSE 解析 |
-| 新增 | `backend/app/modules/daemon/router.py` 新增 `POST /api/daemon/sessions/{session_id}/plan-response` | producer=frontend PlanApprovalCard 提交 → backend session/service 写入 → WebSocket Hub 通知 daemon |
+| 新增 | `backend/app/modules/daemon/schema.py` | 新增 PlanModeEnteredEvent / BashStatusEvent / BashChunkEvent / AgentTaskStatusEvent / PlanSummary / PlanResponseDecision / PlanResponseRequest DTO；producer=daemon 上报 → backend router 校验 → Redis publish；consumer=frontend SSE 解析 |
+| 新增 | `backend/app/modules/daemon/router.py` | 新增 POST /api/daemon/sessions/{session_id}/plan-response 端点 + 4 个 daemon ingestion 端点（plan-mode-entered / bash-status / bash-chunk / agent-task-status，body 见接口定义，校验后经 run_sync publish helper 发布）；producer=frontend PlanApprovalCard 提交或 daemon notify 上报 → backend session/service 写入 → WebSocket Hub 通知 daemon / Redis 推前端 |
 | 修改 | `backend/app/modules/daemon/run_sync/service.py` | 扩展 `publish_submitted_messages`，新增 plan/bash 事件发布到 `agent_session:{id}` |
 | 修改 | `backend/app/modules/daemon/session/service.py` | 新增 `handle_plan_response` 方法，管理 plan 确认状态与 daemon 通知 |
-| 新增 | `sillyhub-daemon/src/hub-client.ts` 新增 `notifyPlanModeEntered` / `notifyBashStatus` / `notifyBashChunk` | producer=session-manager turn 事件 → HTTP POST backend → 触发 Redis publish → consumer=frontend |
+| 新增 | `sillyhub-daemon/src/hub-client.ts` | 新增 notifyPlanModeEntered / notifyBashStatus / notifyBashChunk / notifyAgentTaskStatus 方法；producer=session-manager turn 事件 → HTTP POST backend → 触发 Redis publish → consumer=frontend |
 | 修改 | `sillyhub-daemon/src/interactive/session-manager.ts` | 在 turn 事件流中识别 plan / Bash 并调用上报方法 |
 | 新增 | `frontend/src/components/daemon/plan-approval-card.tsx` | Plan 确认 UI |
 | 新增 | `frontend/src/components/daemon/bash-progress-card.tsx` | Bash 进度 UI |
 | 修改 | `frontend/src/lib/daemon.ts` | `streamSession` 与 `SessionStreamEnvelope` 新增 `plan_mode_entered` / `bash_status` / `bash_chunk` 事件解析 |
 | 修改 | `frontend/src/components/daemon/session-panel.tsx` | 接入 PlanApprovalCard、BashProgressCard 渲染与 plan-response 提交 |
-| 修改 | `frontend/src/components/permissions/ask-user-dialog-card.tsx` 或等效 askuser 弹窗组件 | 增加最小化/还原状态与浮动胶囊 UI |
+| 修改 | `frontend/src/components/ask-user-dialog-card.tsx` | askuser 弹窗增加最小化/还原状态与浮动胶囊 UI；配套 `frontend/src/components/permission-approval-card.tsx` 与 `frontend/src/components/permissions/session-permission-panel.tsx` 同步支持最小化 |
 | 新增 | `backend/app/modules/daemon/tests/test_session_plan_bash_events.py` | 后端事件发布与 plan-response 测试 |
 | 新增 | `sillyhub-daemon/tests/session-plan-bash-events.test.ts` | daemon 事件上报测试 |
 | 新增 | `frontend/src/components/daemon/__tests__/plan-approval-card.test.tsx` | Plan 卡片渲染与交互测试 |
@@ -171,6 +171,16 @@ interface NotifyBashChunkBody {
   channel: "stdout" | "stderr";
   content: string;
   is_final: boolean;
+}
+
+interface NotifyAgentTaskStatusBody {
+  session_id: string;
+  run_id: string;
+  task_id: string;
+  task_name: string;
+  status: "running" | "completed" | "failed";
+  progress?: number;
+  message?: string;
 }
 ```
 

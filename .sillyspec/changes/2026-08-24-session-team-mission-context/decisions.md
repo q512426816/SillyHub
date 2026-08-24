@@ -1,0 +1,183 @@
+---
+author: qinyi
+created_at: 2026-08-24 16:55:00
+---
+
+# 决策台账 — 2026-08-24-session-team-mission-context
+
+- D-001@v1
+  - type: solution
+  - status: accepted
+  - source: brainstorm step3/step4（AskUserQuestion 用户确认「方案一」）
+  - question: 会话团队任务主控盲区的修复方案形态？
+  - answer: 五层方案：A 主控首轮前导简报 + B mission_status 常驻工具 + C 弹层机器状态 + D 非 git 直通 + E 新会话派团队/主 agent 选择器。方案二（daemon 每轮动态注入，侵入大且与首轮一次相悖）与方案三（纯工具，不解决首轮盲区）被否。
+  - normalized_requirement: FR-01~FR-06
+  - impacts: backend agent/daemon 域 + sillyhub-daemon mcp-server + frontend 弹层/会话面板
+  - evidence: design §5；方案对比（AskUserQuestion 2026-08-24）
+  - priority: P0
+- D-002@v1
+  - type: behavior
+  - status: accepted
+  - source: brainstorm step3（AskUserQuestion 用户答「首轮一次+工具查询」）
+  - question: 简报注入时机（在线状态动态 vs 简报烤入对话）？
+  - answer: 仅主控首轮注入一次；后续时效靠 mission_status 工具按需查。
+  - normalized_requirement: FR-01/FR-02
+  - impacts: service.py inject/create 组装；mcp-server 工具描述
+  - evidence: AskUserQuestion 2026-08-24
+  - priority: P0
+- D-003@v1
+  - type: scope
+  - status: accepted
+  - source: brainstorm step3（AskUserQuestion 用户答「不增强响应，靠工具」）
+  - question: 懒建路径（dispatch_worker 自动建 mission）是否在响应回传 scope/机器概要？
+  - answer: 不增强响应；懒建轮不补简报（当轮已跑），统一靠 mission_status 工具。
+  - normalized_requirement: 非目标 §3
+  - impacts: mcp_tools 懒建分支零改动
+  - evidence: AskUserQuestion 2026-08-24
+  - priority: P2
+- D-004@v1
+  - type: mechanism
+  - status: accepted
+  - source: 代码调研（build_change_context_preamble 先例 service.py:910-920）
+  - question: 简报如何送达主控？
+  - answer: SESSION_INJECT/create 首 prompt 前缀（简报+---+用户消息）；AgentRunLog(user_input)/前端展示保持干净；零 daemon 改动。双前导顺序：变更前导→团队简报→---→用户消息。
+  - normalized_requirement: FR-01
+  - impacts: service.py inject/create 两路径
+  - evidence: design §5.A
+  - priority: P0
+- D-005@v1
+  - type: behavior
+  - status: accepted
+  - source: brainstorm step3
+  - question: mission_status 在无活跃 mission 时的行为？
+  - answer: 优雅返回 {active:false, hint}（200），不报错——工具常驻，派团队前也可查。
+  - normalized_requirement: FR-02
+  - impacts: mcp_tools status 路由；工具描述
+  - evidence: design §5.B
+  - priority: P1
+- D-006@v1
+  - type: mechanism
+  - status: superseded
+  - supersedes_by: D-006@v2
+  - source: 代码调研（delegate stat 降级混淆）
+  - question: 非 git 探测如何区分「确证非 git」与「RPC 不可用」？
+  - answer: （v1 表述：send_rpc 原生 stat——锚点失准，v2 修正）
+  - normalized_requirement: FR-04
+  - impacts: 见 D-006@v2
+  - evidence: design v1 §5.D；Grill CC-05/CC-06
+  - priority: P0
+- D-006@v2
+  - type: mechanism
+  - status: accepted
+  - supersedes: D-006@v1
+  - source: design-grill（CC-05/CC-06：send_rpc 是 _WsRpcLike Protocol 声明非公开方法；stat 相对路径被 assertWithinAllowedRoots 拒绝）
+  - question: 非 git 探测如何区分「确证非 git」与「RPC 不可用」？
+  - answer: 走非降级 RPC 通道（_via_rpc 语义，transport 失败抛异常）发 host_fs.stat，path 必须为绝对路径 resolve_root_path_for_daemon(ws.root_path)+"/.git"（daemon 侧 assertWithinAllowedRoots 先于 pathResolve）。daemon 真答 exists=True→git；真答 False→direct；transport 异常/HostFsDelegateUnavailable（未绑 daemon）/超时→unknown（走现状 worktree 路径，宁可 failed 不误直通）。零新增 daemon RPC。
+  - normalized_requirement: FR-04
+  - impacts: host_fs/delegate.py probe_workspace_git_mode；execution.py 分流
+  - evidence: design v2 §5.D；host-fs-handler.ts:455-457；delegate.py:657/:730
+  - priority: P0
+- D-007@v1
+  - type: mechanism
+  - status: accepted
+  - source: 代码调研（路径A 先例 execution.py:238-243 + finalizer.py:290-297 只合并非空分支）
+  - question: 直通 worker 的合并/清理语义？
+  - answer: worktree_branch 保持 None（路径A 语义）；finalizer/converge 零改动（天然跳过）；产物照常收集。
+  - normalized_requirement: FR-04
+  - impacts: execution.py（不写 worktree_branch）；finalizer 零改动
+  - evidence: design §5.D
+  - priority: P0
+- D-008@v1
+  - type: scope
+  - status: superseded
+  - supersedes_by: D-008@v2
+  - source: brainstorm step3（AskUserQuestion 用户答「顺带做」）
+  - question: 弹层是否顺带显示工作区绑定机器+在线状态？
+  - answer: （v1 表述：useWorkspaceDaemonStatus 现成聚合——锚点不存在，v2 修正数据源）
+  - normalized_requirement: FR-03
+  - impacts: 见 D-008@v2
+  - evidence: Grill CC-09/UB-2
+  - priority: P1
+- D-008@v2
+  - type: scope
+  - status: accepted
+  - supersedes: D-008@v1
+  - source: design-grill（UB-2：useWorkspaceDaemonStatus 全仓不存在；useDaemonStatusMap 无机器名字段且仅覆盖本人 bindings——他人绑定 scope 工作区误显「未绑机器」）
+  - question: 弹层机器状态+git 模式的数据源与口径？
+  - answer: 用户意图保留（顺带做）。数据源改为后端统一端点 POST /api/workspaces/probe（{workspace_ids}→[{workspace_id, git_mode, daemon_name, daemon_online}]）：后端按「任一成员 binding」解析机器（与 render_scope_brief 同一共享查询同口径），弹层打开时调用一次（静态快照，弹层生命周期短可接受）。弹层不再用 useDaemonStatusMap。
+  - normalized_requirement: FR-03
+  - impacts: workspace router 新端点；team-trigger-popover.tsx；workspace-daemon-status.ts 不动（既有消费方不变）
+  - evidence: design v2 §5.C；workspace-daemon-status.ts:39-43/:59/:110
+  - priority: P1
+- D-009@v1
+  - type: mechanism
+  - status: superseded
+  - supersedes_by: D-009@v2
+  - source: 用户追加反馈①（置灰根因 session-panel.tsx:1657-1669 ql-20260823-008）
+  - question: 新会话派团队如何解禁？
+  - answer: （v1 表述：直接调 team_mission_entry 同事务预建——其内部 commit()+refresh() 使断言失实，v2 修正）
+  - normalized_requirement: FR-05
+  - impacts: 见 D-009@v2
+  - evidence: Grill CC-04/UB-1（orchestrator.py:330-332）
+  - priority: P0
+- D-009@v2
+  - type: mechanism
+  - status: accepted
+  - supersedes: D-009@v1
+  - source: design-grill（UB-1：team_mission_entry 内部 commit+refresh，插入 create_session 单 commit 事务会提前提交 session+mission，失败回滚不覆盖）
+  - question: E1 预建的事务边界与 objective 回填？
+  - answer: 从 team_mission_entry 抽 flush-only 预建 helper（add+flush 不 commit）；create_session 在首 run 创建前调用，共用 :1008 唯一 commit（失败整体回滚无孤儿）；team_mission_entry 本体=helper+commit（既有调用方零回归）。objective：block.objective 优先，为空直接用首句 prompt 回填（create 路径不经 _inject_into_session 占位回填）。
+  - normalized_requirement: FR-05
+  - impacts: orchestrator.py 重构；daemon/schema.py；session/service.py create 路径；session-panel.tsx 预会话
+  - evidence: design v2 §5.E1；orchestrator.py:330-332；service.py:1008/:1011
+  - priority: P0
+- D-010@v1
+  - type: behavior
+  - status: accepted
+  - source: 用户追加反馈②（AskUserQuestion 确认）
+  - question: 主 agent（项目经理）可选工作区的边界？
+  - answer: 选择器仅预会话场景。默认 null=当前会话；选 scope 内工作区 W→session.workspace_id=W、机器钉定 W binding（在线预检，用户显式 runtime_id 优先）、cwd=W.root_path、智能体=W 默认（用户显式选择优先）。既有会话不提供（进程 cwd/机器创建时钉定）；跨机器主控迁移→C 层独立变更。
+  - normalized_requirement: FR-06
+  - impacts: create_session 解析；team-trigger-popover 选择器
+  - evidence: design §5.E2；AskUserQuestion 2026-08-24
+  - priority: P1
+- D-011@v1
+  - type: scope
+  - status: accepted
+  - source: 用户原始指令（「C 层可拆独立变更」）
+  - question: 多设备多工作区概念（C 层主体）的处置？
+  - answer: 本变更不实现，仅在设计与 proposal 记录评估与拆分建议：session↔workspace 集合模型、弹层非项目维度自由多选、per-daemon SPEC_TRANSPORT、既有会话跨机器主控迁移，均拆独立变更。
+  - normalized_requirement: 非目标 §3
+  - impacts: 无代码影响
+  - evidence: design §3
+  - priority: P2
+- D-012@v1
+  - type: consistency
+  - status: accepted
+  - source: design-grill（CC-11：_resolve_session_mission 无活跃 mission 抛 404 :455-458，与 active=false 200 语义冲突；active=false 时无 anchor 可供 enforce_workspace_permission 复核）
+  - question: mission_status 路由如何定位 mission？
+  - answer: 不走 _resolve_session_mission；直接 get_active_mission_for_session（mission.py:82）：无→{active:false, hint} 200；有→组装响应并做 session 归属校验（鉴权 SessionMcpUser=WORKSPACE_WRITE 同既有会话路由）。
+  - normalized_requirement: FR-02
+  - impacts: mcp_tools.py status 路由
+  - evidence: design v2 §5.B；mcp_tools.py:455-458/:73
+  - priority: P1
+- D-013@v1
+  - type: boundary
+  - status: accepted
+  - source: design-grill（CC-12：空 prompt 切换轮被双标记会消耗一次性简报；首轮派发失败 run→failed 烧断一次性）
+  - question: 简报一次性判定的边界？
+  - answer: 注入条件=活跃 mission ∧ 本轮 prompt 非空（纯切换轮不注入不消耗）∧ mission 无「已消耗」orchestrator run。已消耗=存在 status ∈ {pending, running, completed} 的 orchestrator run；failed 轮不烧断——下一条带文本消息重新注入。
+  - normalized_requirement: FR-01
+  - impacts: mission_context helper 判定逻辑；service inject/create
+  - evidence: design v2 §5.A；service.py:1654-1655/:1977-1979
+  - priority: P1
+- D-014@v1
+  - type: boundary
+  - status: accepted
+  - source: design-grill（CC-13：pinned runtime 校验要求属主=创建者 placement.py:651-652；W 仅他人有 binding 时无法钉定）
+  - question: E2 机器钉定的 binding 归属？
+  - answer: 取 (W, 创建者) 的 WorkspaceMemberRuntime binding 行钉定；缺失→422「该工作区未绑定你的机器」（不借用他人 binding 钉定）。非钉定路径不做机器约束。
+  - normalized_requirement: FR-06
+  - impacts: create_session E2 解析；R-11
+  - evidence: design v2 §5.E2；placement.py:651-652
+  - priority: P2

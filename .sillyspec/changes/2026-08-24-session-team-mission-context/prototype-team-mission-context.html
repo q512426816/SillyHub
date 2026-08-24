@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 — 派团队弹层·工作区机器状态（2026-08-24-session-team-mission-context）</title>
+<style>
+  /* 说明：静态原型，展示 team-trigger-popover 增强后的形态。
+     设计 token 参考 frontend/src/styles/themes.ts（ai-native 暗色为主，blue 为辅）。 */
+  :root {
+    --bg: #0f1117;
+    --panel: #161a23;
+    --panel-2: #1c2130;
+    --border: #2a3040;
+    --text: #e6e9f0;
+    --text-dim: #9aa3b5;
+    --brand: #7c6cf5;
+    --brand-weak: rgba(124, 108, 245, .14);
+    --green: #34d399;
+    --gray-dot: #6b7280;
+    --amber: #f5a623;
+    --red: #f87171;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 32px; gap: 48px; flex-wrap: wrap;
+  }
+  .stage { display: flex; flex-direction: column; gap: 14px; align-items: center; }
+  .stage-label { color: var(--text-dim); font-size: 12px; }
+  /* ── 弹层骨架（现有骨架不变，仅工作区行内容增强）── */
+  .popover {
+    width: 420px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 12px; box-shadow: 0 12px 40px rgba(0,0,0,.45);
+    padding: 18px; display: flex; flex-direction: column; gap: 14px;
+  }
+  .popover h3 { font-size: 15px; font-weight: 600; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 12px; color: var(--text-dim); }
+  .radio-row { display: flex; gap: 16px; font-size: 13px; }
+  .radio-row label { display: flex; align-items: center; gap: 6px; color: var(--text); cursor: pointer; }
+  textarea {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); font-size: 13px; padding: 8px 10px; resize: none; height: 52px;
+    font-family: inherit;
+  }
+  select {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); font-size: 13px; padding: 7px 10px; width: 100%;
+  }
+  .ws-list { display: flex; flex-direction: column; gap: 8px; }
+  .ws-row {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 9px 12px; font-size: 13px;
+  }
+  .ws-row input[type=checkbox] { accent-color: var(--brand); }
+  .ws-name { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .ws-name .n { font-weight: 500; }
+  .ws-name .meta { font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+  .dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot.off { background: var(--gray-dot); }
+  .dot.none { background: transparent; border: 1px dashed var(--gray-dot); }
+  .tag {
+    font-size: 10px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border);
+    color: var(--text-dim); white-space: nowrap;
+  }
+  .tag.direct { color: var(--amber); border-color: rgba(245,166,35,.4); }
+  .tag.git { color: var(--green); border-color: rgba(52,211,153,.35); }
+  .actions { display: flex; justify-content: flex-end; gap: 10px; }
+  button {
+    font-size: 13px; border-radius: 8px; padding: 7px 16px; cursor: pointer;
+    border: 1px solid var(--border); background: transparent; color: var(--text);
+  }
+  button.primary { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 500; }
+  .hint { font-size: 11px; color: var(--text-dim); line-height: 1.7; background: var(--brand-weak); border-radius: 8px; padding: 8px 10px; }
+  /* 注释标注（原型专用） */
+  .anno {
+    position: absolute; right: -8px; transform: translateX(100%);
+    font-size: 11px; color: var(--amber); white-space: nowrap; display: flex; align-items: center; gap: 6px;
+  }
+  .wrap { position: relative; }
+  .anno::before { content: "←"; }
+</style>
+</head>
+<body>
+
+  <div class="stage">
+    <div class="stage-label">① 项目范围模式 — 工作区行显示「绑定机器 + 在线徽标 + git 模式」</div>
+    <div class="wrap">
+      <div class="popover">
+        <h3>派团队</h3>
+        <div class="field">
+          <label>目标（可选，留空由首条消息定义）</label>
+          <textarea placeholder="例：帮我分析这两个项目的关系…"></textarea>
+        </div>
+        <div class="field">
+          <label>范围</label>
+          <div class="radio-row">
+            <label><input type="radio" name="s1"> 当前工作区</label>
+            <label><input type="radio" name="s1" checked> 项目</label>
+          </div>
+        </div>
+        <div class="field">
+          <label>项目</label>
+          <select><option>SillyHub 平台（2 个工作区）</option></select>
+        </div>
+        <div class="wrap">
+          <div class="field">
+            <label>项目工作区（scope）</label>
+            <div class="ws-list">
+              <div class="ws-row">
+                <input type="checkbox" checked>
+                <div class="ws-name">
+                  <span class="n">sillyspec</span>
+                  <span class="meta"><span class="dot on"></span>牛逼的电脑💻 · 在线 <span class="tag git">git 隔离</span></span>
+                </div>
+              </div>
+              <div class="ws-row">
+                <input type="checkbox" checked>
+                <div class="ws-name">
+                  <span class="n">multi-agent-platform</span>
+                  <span class="meta"><span class="dot on"></span>牛逼的电脑💻 · 在线 <span class="tag git">git 隔离</span></span>
+                </div>
+              </div>
+              <div class="ws-row">
+                <input type="checkbox">
+                <div class="ws-name">
+                  <span class="n">设计稿共享盘</span>
+                  <span class="meta"><span class="dot off"></span>DESKTOP-HJ0AM09 · 离线 <span class="tag direct">非 git · 直通</span></span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="anno">新增：机器名 + 在线点 + git 模式标签</div>
+        </div>
+        <div class="hint">非 git 工作区以「直通」模式运行：worker 直接在目录内工作，改动立即生效、无隔离副本。离线机器上的工作区无法承接分身。</div>
+        <div class="actions">
+          <button>取消</button>
+          <button class="primary">派团队</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-label">② 当前工作区模式 — 副标题显示机器状态</div>
+    <div class="popover">
+      <h3>派团队</h3>
+      <div class="field">
+        <label>目标（可选，留空由首条消息定义）</label>
+        <textarea placeholder="例：帮我分析这个项目是干什么的…"></textarea>
+      </div>
+      <div class="field">
+        <label>范围</label>
+        <div class="radio-row">
+          <label><input type="radio" checked> 当前工作区</label>
+          <label><input type="radio" name="s2" disabled> 项目</label>
+        </div>
+      </div>
+      <div class="wrap">
+        <div class="field">
+          <label>当前工作区</label>
+          <div class="ws-list">
+            <div class="ws-row" style="cursor:default">
+              <div class="ws-name">
+                <span class="n">multi-agent-platform</span>
+                <span class="meta"><span class="dot on"></span>牛逼的电脑💻 · 在线 <span class="tag git">git 隔离</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="anno">新增：单工作区同样显示</div>
+      </div>
+      <div class="field">
+        <label>预算上限（USD，可选）</label>
+        <input style="background:var(--panel-2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;padding:7px 10px;" placeholder="留空不限">
+      </div>
+      <div class="actions">
+        <button>取消</button>
+        <button class="primary">派团队</button>
+      </div>
+    </div>
+  </div>
+  <div class="stage">
+    <div class="stage-label">③ 新会话（预会话）— 派团队可用 + 主 agent（项目经理）选择器</div>
+    <div class="wrap">
+      <div class="popover">
+        <h3>派团队 · 新会话</h3>
+        <div class="field">
+          <label>目标（可选，留空由首条消息定义）</label>
+          <textarea placeholder="首句话发送时创建会话并预建团队任务…"></textarea>
+        </div>
+        <div class="field">
+          <label>范围</label>
+          <div class="radio-row">
+            <label><input type="radio" name="s3" checked> 项目</label>
+          </div>
+        </div>
+        <div class="field">
+          <label>项目工作区（scope）</label>
+          <div class="ws-list">
+            <div class="ws-row">
+              <input type="checkbox" checked>
+              <div class="ws-name">
+                <span class="n">sillyspec</span>
+                <span class="meta"><span class="dot on"></span>牛逼的电脑💻 · 在线 <span class="tag git">git 隔离</span></span>
+              </div>
+            </div>
+            <div class="ws-row">
+              <input type="checkbox" checked>
+              <div class="ws-name">
+                <span class="n">multi-agent-platform</span>
+                <span class="meta"><span class="dot on"></span>牛逼的电脑💻 · 在线 <span class="tag git">git 隔离</span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="wrap">
+          <div class="field">
+            <label>主 agent（项目经理）</label>
+            <select>
+              <option>当前会话（默认：用上方选择的机器与智能体）</option>
+              <option>sillyspec · 牛逼的电脑💻（该工作区设备与智能体）</option>
+              <option>multi-agent-platform · 牛逼的电脑💻（该工作区设备与智能体）</option>
+              <option disabled>设计稿共享盘 · 机器离线</option>
+            </select>
+            <div class="hint" style="margin-top:6px">选工作区 → 会话创建在该工作区绑定的机器上，工作目录与智能体用该工作区默认。既有会话中途派团队不提供此项（会话机器与目录创建时已定）。</div>
+          </div>
+          <div class="anno">新增：主 agent 选择器（仅新会话场景）</div>
+        </div>
+        <div class="actions">
+          <button>取消</button>
+          <button class="primary">派团队（随首句创建生效）</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

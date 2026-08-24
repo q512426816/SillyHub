@@ -5,8 +5,8 @@
 
 schema_version: 1
 project: multi-agent-platform
-source_commit: ba87eec
-generated_at: 2026-08-21T14:04:45+08:00
+source_commit: 04bb45fe
+generated_at: 2026-08-24T19:10:00+08:00
 generator: sillyspec-scan
 
 modules:
@@ -26,6 +26,8 @@ modules:
       - app (FastAPI)
       - MissionPatrolService (backend/app/modules/agent/patrol.py, mission 收敛巡检常驻协程)
       - session_reconnect_sweeper (backend/app/modules/daemon/sweep.py, reconnecting 超时收敛常驻协程, 2026-08-21-session-reopen-resume)
+      - publish_session_event / publish_bash_chunk_event (backend/app/modules/daemon/run_sync/service.py, 会话反馈事件 Redis 发布 helper 含 100ms 节流+8KB 截断, 2026-08-24-platform-session-feedback-fix)
+      - handle_plan_response (backend/app/modules/daemon/session/service.py, plan 决策落库+WS daemon:plan_response 下发)
       - workspace_router
       - members_router
       - auth_router
@@ -80,6 +82,7 @@ modules:
       - writeLocalYaml (src/local-yaml-writer.ts，2026-08-12 init 下发 local.yaml 用)
       - postSpecSync (src/spec-sync.ts，2026-08-13 增量 diff：本地清单缓存+旧 tar 回退+conflict 抛错)
       - postSpecSyncIncremental (src/hub-client.ts，2026-08-13 增量推送 JSON POST 客户端)
+      - resolvePlanResponse (src/interactive/session-manager.ts，plan 决策经 inject 注入 turn，2026-08-24-platform-session-feedback-fix verify P0 返工)
     depends_on: [backend]
     used_by: [deploy]
     needs_review: false
