@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +33,7 @@ from app.modules.change.dispatch import _run_gate_via_delegate
 from app.modules.daemon.lease.service import DaemonAgentRunNotFound
 from app.modules.daemon.model import DaemonTaskLease
 from app.modules.daemon.model_error import ModelErrorDTO
+from app.modules.daemon.schema import BashChunkEvent
 from app.modules.daemon.session.service import (
     TERMINAL_TURN_STATUSES,
     _apply_session_terminal_status,
@@ -213,6 +216,73 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
             agent_run_id=str(intent.agent_run_id),
             agent_session_id=str(intent.agent_session_id),
         )
+
+
+# ── Session 事件通用发布 helper（2026-08-24-platform-session-feedback-fix
+#    task-01 / design §接口定义）───────────────────────────────────────────────
+# plan_mode_entered / bash_status / bash_chunk / agent_task_status 四类事件经
+# 现有 agent_session:{id} 频道实时推送前端，不新增持久化表（design §数据模型）。
+
+# bash_chunk 节流间隔（秒）：同一 (session_id, command) 维度 100ms 内只发一条，
+# 防高频输出刷爆 Redis / 前端。
+BASH_CHUNK_THROTTLE_INTERVAL_S = 0.1
+# bash_chunk 单条 content 字符上限（8KB），超出截断后发布。
+BASH_CHUNK_MAX_CONTENT_CHARS = 8 * 1024
+# 节流状态 dict 超过该条数时清理 60 秒以上空闲键（防长会话 / 多命令内存增长）。
+_BASH_CHUNK_STATE_PRUNE_SIZE = 4096
+# bash_chunk 节流状态：(session_id, command) → 上次实际发布时刻（time.monotonic）。
+# asyncio 单线程事件循环内读-判-写无 await 穿插，天然原子，无需锁。
+_bash_chunk_last_publish: dict[tuple[uuid.UUID, str], float] = {}
+
+
+async def publish_session_event(session_id: uuid.UUID, payload: dict | BaseModel) -> None:
+    """把单条事件发布到 ``agent_session:{session_id}`` 频道（task-01）。
+
+    BaseModel payload 走 ``model_dump(mode="json")``（UUID / Literal 自动转 JSON
+    兼容形态），dict payload 原样透传；``json.dumps(..., default=str)`` 兜底不可
+    序列化对象（对齐 ``_publish_gate_status_changed`` 的容错风格）。Redis 获取
+    方式为 ``get_redis()``；发布失败仅 ``log.warning`` 不抛——Pub/Sub 无历史，
+    漏发实时事件不影响 DB 真相，前端重连即续流。
+    """
+    if isinstance(payload, BaseModel):
+        payload = payload.model_dump(mode="json")
+    try:
+        redis = get_redis()
+        await redis.publish(f"agent_session:{session_id}", json.dumps(payload, default=str))
+    except Exception:
+        log.warning(
+            "session_event_redis_publish_failed",
+            session_id=str(session_id),
+            event_type=payload.get("event") if isinstance(payload, dict) else None,
+        )
+
+
+async def publish_bash_chunk_event(event: BashChunkEvent) -> bool:
+    """发布 bash_chunk 事件（100ms 节流 + 8KB 截断），返回是否实际发布。
+
+    节流按 ``(session_id, command)`` 维度：同命令输出流合并、不同命令互不影响；
+    ``is_final=True`` 不节流必达（尾块被节流丢掉，命令就永远缺尾巴），但照常
+    刷新该键时间戳；命中节流返回 False（调用方据此丢弃，不视为错误）。
+    content 超 ``BASH_CHUNK_MAX_CONTENT_CHARS`` 截断后发布（model_copy 不改
+    调用方对象）。状态 dict 超 ``_BASH_CHUNK_STATE_PRUNE_SIZE`` 条时清理 60 秒
+    以上空闲键。计时用 ``time.monotonic()``——不受系统时钟调整影响，Windows /
+    Linux / macOS 行为一致。
+    """
+    key = (event.session_id, event.command)
+    now = time.monotonic()
+    if not event.is_final:
+        last = _bash_chunk_last_publish.get(key)
+        if last is not None and (now - last) < BASH_CHUNK_THROTTLE_INTERVAL_S:
+            return False
+    _bash_chunk_last_publish[key] = now
+    if len(_bash_chunk_last_publish) > _BASH_CHUNK_STATE_PRUNE_SIZE:
+        idle_cutoff = now - 60.0
+        for stale_key in [k for k, ts in _bash_chunk_last_publish.items() if ts < idle_cutoff]:
+            _bash_chunk_last_publish.pop(stale_key, None)
+    if len(event.content) > BASH_CHUNK_MAX_CONTENT_CHARS:
+        event = event.model_copy(update={"content": event.content[:BASH_CHUNK_MAX_CONTENT_CHARS]})
+    await publish_session_event(event.session_id, event)
+    return True
 
 
 class RunSyncService:
