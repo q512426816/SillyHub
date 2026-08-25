@@ -1226,6 +1226,10 @@ async def _dispatch_worker_core(
             objective=payload.objective,
             role=role,
             mode=briefing_mode,
+            # task-09 接线（task-08 契约）：非叶分身（new_tree_depth < 2）简报
+            # 追加「可派工到下一层」五件工具段；叶（=2）与无会话根挂（P1 形态
+            # 恒 1）恒 False，简报逐字节不变零回归。
+            can_dispatch=(new_tree_depth < MAX_DISPATCH_DEPTH),
         )
     )
 

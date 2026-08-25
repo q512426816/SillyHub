@@ -406,8 +406,11 @@ class TestSubsessionTriple:
         delegate.git_worktree_add.assert_not_awaited()
         lease = await _lease(db_session, uuid.UUID(resp.json()["lease_id"]))
         meta = _lease_meta(lease)
+        # task-09（can_dispatch 接线）：一层分身（new_tree_depth=1 < 2）非叶，
+        # 简报追加「可派工到下一层」段（task-08 契约，D-002@v1 非叶五件工具）。
+        assert "可派工到下一层" in meta["prompt"]
         assert meta["prompt"] == build_worker_briefing(
-            objective="直通任务", role="worker", mode="direct"
+            objective="直通任务", role="worker", mode="direct", can_dispatch=True
         )
         runs = await _worker_runs(db_session, mission.id)
         assert runs[0].worktree_branch is None  # direct 旁路不写 branch（D-007@v1）
