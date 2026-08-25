@@ -494,6 +494,16 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
                     >
                       {w.objective || "—"}
                     </span>
+                    {/* UX 走查③（2026-08-26）：运行中分身最新动作预览——不点进
+                        浮层即可见"正在干什么"（80 字符截断，仅 running 行有值） */}
+                    {w.status === "running" && w.latest_action && (
+                      <span
+                        className="w-full truncate text-[10.5px] text-muted-foreground/70"
+                        title={w.latest_action}
+                      >
+                        ↳ {w.latest_action}
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={(e) => {

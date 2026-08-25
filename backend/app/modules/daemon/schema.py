@@ -861,6 +861,11 @@ class TeamMissionWorkerSummary(BaseModel):
     sub_session_id: uuid.UUID | None = None
     first_run_id: uuid.UUID | None = None
     sub_workers_count: int | None = None
+    # UX 走查 ③（2026-08-26 前端易用性修复）：运行中分身的最新动作预览——
+    # 该子会话最新一条日志行的截断摘要（agent_run_logs 经 agent_runs.
+    # agent_session_id join，批量一次查询），让用户不点进浮层就能看到
+    # "正在干什么"。仅 running 行填值；completed/failed/存量 batch 行 None。
+    latest_action: str | None = None
 
 
 class TeamMissionSummary(BaseModel):

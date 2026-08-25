@@ -1188,7 +1188,7 @@ class TestTeamMissionSummaryQueryBudget:
     async def test_summary_query_count_bounded(
         self, db_session, tmp_path, auth_admin_token
     ) -> None:
-        """单 mission 查询预算 ≤6（旧 ≈14+Nd：三口径各自枚举 + mission 行重复
+        """单 mission 查询预算 ≤7（旧 ≈14+Nd：三口径各自枚举 + mission 行重复；审计 F03 后 ~6 + UX 走查③ latest_action 批量 1 条 = 7，仍恒定有界）
         get 4 次 + done 分身逐个查询）。
 
         场景：1 个 done 分身（旧 Nd=1）+ 1 个 idle 分身——新实现 6 条恒定：
@@ -1217,7 +1217,7 @@ class TestTeamMissionSummaryQueryBudget:
         )
         with _count_sql(db_session) as counter:
             summary = await _team_mission_summary(db_session, mission)
-        assert counter["n"] <= 6, f"summary 查询应 ≤6 条，实际 {counter['n']}"
+        assert counter["n"] <= 7, f"summary 查询应 ≤7 条，实际 {counter['n']}"
         # 行为不变：一层两行、done 分身 completed、idle 分身 running。
         by_sub = {str(w.sub_session_id): w.status for w in summary.workers}
         assert by_sub == {str(w1.id): "completed", str(w2.id): "running"}
@@ -1389,3 +1389,147 @@ async def test_summary_sub_workers_count_folded(client, auth_headers, db_session
     assert by_sub[str(w2.id)]["sub_workers_count"] is None
     # 存量 batch 行（无 sub_session）字段默认 None——无孙 mission 零变化
     assert all("sub_workers_count" in w for w in workers)
+
+
+# ── UX 走查③（2026-08-26）：运行中分身 latest_action 预览 ──
+
+
+class TestWorkerLatestAction:
+    async def _seed_running_sub(self, session, *, with_log: str | None):
+        """主控根会话 + 一个 running 分身子会话（可选最新日志行）。"""
+        from datetime import UTC, datetime
+
+        from app.modules.agent.model import AgentMission, AgentRun, AgentRunLog, AgentSession
+
+        now = datetime.now(UTC)
+        root = AgentSession(
+            user_id=self._uid,
+            provider="claude",
+            status="active",
+            config={},
+            turn_count=1,
+            tree_depth=0,
+            created_at=now,
+        )
+        session.add(root)
+        await session.flush()
+        sub = AgentSession(
+            user_id=self._uid,
+            provider="claude",
+            status="active",
+            config={},
+            turn_count=1,
+            parent_session_id=root.id,
+            tree_depth=1,
+            created_at=now,
+        )
+        session.add(sub)
+        await session.flush()
+        mission = AgentMission(
+            workspace_id=self._ws_id,
+            session_id=root.id,
+            objective="obj",
+            constraints=None,
+            created_by=self._uid,
+        )
+        session.add(mission)
+        await session.flush()
+        first = AgentRun(
+            mission_id=mission.id,
+            agent_type="claude_code",
+            status="running",
+            role="impl",
+            objective="do",
+            agent_session_id=sub.id,
+        )
+        session.add(first)
+        await session.flush()
+        if with_log is not None:
+            session.add(
+                AgentRunLog(
+                    run_id=first.id,
+                    timestamp=now,
+                    channel="assistant",
+                    content_redacted=with_log,
+                )
+            )
+        await session.commit()
+        return mission
+
+    _uid = None
+    _ws_id = None
+
+    async def test_running_sub_gets_latest_action(self, db_session):
+        """running 分身行带 latest_action（最新日志行截断 80 字符）。"""
+        from app.modules.auth.model import User
+        from app.modules.workspace.model import Workspace
+
+        uid = uuid.uuid4()
+        db_session.add(
+            User(
+                id=uid,
+                email=f"la-{uid}@x.com",
+                password_hash="x",
+                display_name="T",
+                status="active",
+            )
+        )
+        ws = Workspace(name="ws-la", slug=f"ws-la-{uid.hex[:6]}", root_path="C:/tmp")
+        db_session.add(ws)
+        await db_session.commit()
+        self._uid, self._ws_id = uid, ws.id
+        long_text = (
+            "正在修改 backend/app/modules/agent/mcp_tools.py 的第 1234 行附近逻辑，" + "x" * 100
+        )
+        from app.modules.daemon.router import _team_mission_summary
+
+        mission = await self._seed_running_sub(db_session, with_log=long_text)
+        await db_session.refresh(mission)
+
+        summary = await _team_mission_summary(db_session, mission)
+        running_rows = [w for w in summary.workers if w.sub_session_id is not None]
+        assert len(running_rows) == 1
+        assert running_rows[0].status == "running"
+        la = running_rows[0].latest_action
+        assert la is not None and la.startswith("正在修改")
+        assert len(la) == 80
+
+    async def test_no_log_or_terminal_rows_have_none(self, db_session):
+        """无日志的 running 行 / 存量 batch 行 latest_action 恒 None。"""
+        from app.modules.agent.model import AgentRun
+        from app.modules.auth.model import User
+        from app.modules.workspace.model import Workspace
+
+        uid = uuid.uuid4()
+        db_session.add(
+            User(
+                id=uid,
+                email=f"lb-{uid}@x.com",
+                password_hash="x",
+                display_name="T",
+                status="active",
+            )
+        )
+        ws = Workspace(name="ws-lb", slug=f"ws-lb-{uid.hex[:6]}", root_path="C:/tmp")
+        db_session.add(ws)
+        await db_session.commit()
+        self._uid, self._ws_id = uid, ws.id
+        from app.modules.daemon.router import _team_mission_summary
+
+        mission = await self._seed_running_sub(db_session, with_log=None)
+        # 追加一条存量 batch run（无子会话）
+        db_session.add(
+            AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                status="running",
+                role="test",
+                objective="legacy",
+            )
+        )
+        await db_session.commit()
+        await db_session.refresh(mission)
+
+        summary = await _team_mission_summary(db_session, mission)
+        for w in summary.workers:
+            assert w.latest_action is None

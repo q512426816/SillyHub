@@ -18791,6 +18791,8 @@ export interface components {
             first_run_id?: string | null;
             /** Sub Workers Count */
             sub_workers_count?: number | null;
+            /** Latest Action */
+            latest_action?: string | null;
         };
         /**
          * TeamWorkspaceRef

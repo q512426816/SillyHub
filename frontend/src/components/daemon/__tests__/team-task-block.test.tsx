@@ -23,7 +23,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 import { TeamTaskBlock, isActiveTeamMission } from "../team-task-block";
-import { cancelTeamMission, type TeamMissionSummary } from "@/lib/daemon";
+import { cancelTeamMission, type TeamMissionSummary, TeamMissionWorkerSummary } from "@/lib/daemon";
 import { getAgentRunLogs, getWorkerArtifacts } from "@/lib/agent";
 
 vi.mock("@/lib/daemon", () => ({
@@ -503,5 +503,56 @@ describe("TeamTaskBlock task-14 分身行点击入口", () => {
     // 既有交互不受影响：日志展开仍工作。
     fireEvent.click(screen.getAllByText("日志")[0]!);
     await waitFor(() => expect(logsMock).toHaveBeenCalled());
+  });
+});
+
+/* ── UX 走查③（2026-08-26）：运行中分身 latest_action 预览 ── */
+describe("TeamTaskBlock latest_action 预览（UX③）", () => {
+  function renderBlock(workers: TeamMissionWorkerSummary[]) {
+    render(
+      <TeamTaskBlock
+        summary={{
+          mission_id: "m-1",
+          status: "running",
+          objective: "目标",
+          scope_workspace_ids: [],
+          scope_workspaces: [],
+          budget_usd: null,
+          workers,
+        }}
+      />,
+    );
+  }
+
+  it("running 分身带 latest_action 时渲染预览行（↳ 前缀）", () => {
+    renderBlock([
+      {
+        run_id: "r-1",
+        role: "impl",
+        status: "running",
+        objective: "修 bug",
+        workspace_id: null,
+        sub_session_id: "sub-1",
+        first_run_id: "r-1",
+        latest_action: "正在编辑 app.py 第 10 行",
+      },
+    ]);
+    expandBlock();
+    expect(screen.getByText(/正在编辑 app.py 第 10 行/)).toBeVisible();
+  });
+
+  it("非 running 行 / 无 latest_action 行不渲染预览", () => {
+    renderBlock([
+      {
+        run_id: "r-2",
+        role: "impl",
+        status: "completed",
+        objective: "已完成",
+        workspace_id: null,
+        latest_action: null,
+      },
+    ]);
+    expandBlock();
+    expect(screen.queryByText(/↳/)).toBeNull();
   });
 });

@@ -3001,6 +3001,37 @@ async def _team_mission_summary(
                 sub_workers_count=sub_count if sub_count > 0 else None,
             )
         )
+    # UX 走查 ③（2026-08-26）：运行中分身最新动作预览——批量一次查询
+    # agent_run_logs（经 agent_runs.agent_session_id join，ix_agent_runs_
+    # agent_session_id 索引支撑），每会话取最新一条日志行截断 80 字符。
+    # 仅 running 行消费；completed/failed/存量行保持 None。
+    running_sub_ids = [
+        r.sub_session_id
+        for r in worker_rows
+        if r.status == "running" and r.sub_session_id is not None
+    ]
+    latest_by_session: dict[uuid.UUID, str] = {}
+    if running_sub_ids:
+        from app.modules.agent.model import AgentRunLog
+
+        # 直接 select AgentRun.agent_session_id（日志行可属会话任意 run——含
+        # 追问轮 run，经首 run id 映射会漏，禁用该形态）。
+        log_rows = (
+            await session.execute(
+                select(AgentRun.agent_session_id, AgentRunLog.content_redacted)
+                .join(AgentRunLog, AgentRunLog.run_id == AgentRun.id)
+                .where(AgentRun.agent_session_id.in_(running_sub_ids))
+                .order_by(AgentRunLog.timestamp.desc())
+                .limit(len(running_sub_ids) * 5)
+            )
+        ).all()
+        for sub_id, content_redacted in log_rows:
+            if sub_id is not None and sub_id not in latest_by_session and content_redacted:
+                latest_by_session[sub_id] = content_redacted[:80]
+        for row in worker_rows:
+            if row.sub_session_id is not None:
+                row.latest_action = latest_by_session.get(row.sub_session_id)
+
     # 存量回落：batch 分身 run 行（子会话首 run 已剔除防双计；**全树**会话 id
     # 集合剔除——task-08 孙层首 run（带 mission_id+role 双标记）同样不进
     # workers 行，孙层以 sub_workers_count 折叠呈现而非独立行，design §5.E

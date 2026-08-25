@@ -54908,6 +54908,17 @@
               }
             ],
             "title": "Sub Workers Count"
+          },
+          "latest_action": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Action"
           }
         },
         "type": "object",

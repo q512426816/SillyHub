@@ -181,11 +181,15 @@ export default function LoginPage() {
                   label="登录名"
                   name="account"
                   rules={[{ required: true, message: "请输入登录名" }]}
+                  /* ② 指路提示（UX 走查 2026-08-26）：登录名是邮箱 @ 前缀而非完整邮箱，
+                     新用户在 admin@sillyhub.local 场景极易输错且错误文案不指路 */
+                  extra="登录名即邮箱 @ 前缀（例如 admin），非完整邮箱地址"
                 >
                   <Input
                     placeholder="登录名"
                     autoComplete="username"
                     allowClear
+                    onPressEnter={() => form.submit()}
                   />
                 </Form.Item>
 
@@ -197,6 +201,9 @@ export default function LoginPage() {
                   <Input.Password
                     placeholder="请输入密码"
                     autoComplete="current-password"
+                    /* ① 回车兜底（UX 走查 2026-08-26）：实测部分场景 Enter 未触发
+                       antd Form 隐式提交，显式 submit 消除不稳定 */
+                    onPressEnter={() => form.submit()}
                   />
                 </Form.Item>
 
@@ -211,6 +218,11 @@ export default function LoginPage() {
                 {error && (
                   <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
                     {error}
+                    {error.includes("用户名或密码") && (
+                      <span className="mt-1 block text-red-500/80">
+                        提示：登录名是邮箱 @ 前缀（非完整邮箱）；连续失败多次会要求人机验证。
+                      </span>
+                    )}
                   </div>
                 )}
 

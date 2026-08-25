@@ -2093,6 +2093,8 @@ export interface TeamMissionWorkerSummary {
    */
   sub_session_id?: string | null;
   first_run_id?: string | null;
+  /** 运行中分身最新动作预览（UX 走查③）：最新日志行截断摘要，仅 running 行。 */
+  latest_action?: string | null;
 }
 
 /** scope 工作区引用（ql-20260825-003：id+名称 enriched 视图）。 */
