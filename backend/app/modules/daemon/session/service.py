@@ -28,7 +28,14 @@ from sqlmodel import col
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.core.redis import get_redis
-from app.modules.agent.model import ACTIVE_RUN_STATUSES, AgentRun, AgentRunLog, AgentSession
+from app.modules.agent.model import (
+    ACTIVE_RUN_STATUSES,
+    SESSION_QUEUE_MAX_PENDING,
+    AgentRun,
+    AgentRunLog,
+    AgentSession,
+    AgentSessionQueuedMessage,
+)
 from app.modules.auth.permissions import Permission
 
 # D-001@v1：create_session workspace 归属校验（口径与前端 listWorkspaces 一致）。
@@ -272,6 +279,22 @@ class DaemonSessionTurnConflict(AppError):
     http_status = 409
 
 
+class DaemonSessionQueueFull(AppError):
+    """会话排队消息满员（ql-20260825-011，后端真实排队）。
+
+    pending 条目数达 ``SESSION_QUEUE_MAX_PENDING``（5）后再入队即拒——
+    排队是「用户马上要接着说」的短队列，不是任务积压池。
+    """
+
+    code = "HTTP_409_DAEMON_SESSION_QUEUE_FULL"
+    http_status = 409
+
+
+class DaemonSessionQueueEntryNotFound(AppError):
+    code = "HTTP_404_DAEMON_SESSION_QUEUE_ENTRY_NOT_FOUND"
+    http_status = 404
+
+
 class DaemonSessionNoCurrentRun(AppError):
     code = "HTTP_409_DAEMON_SESSION_NO_CURRENT_RUN"
     http_status = 409
@@ -428,11 +451,19 @@ class ToolReportActivateNoDaemon(AppError):
 
 @dataclass(frozen=True, slots=True)
 class SessionDispatchResult:
-    """Result of create_session / inject_session (D-005@v1 triple)."""
+    """Result of create_session / inject_session (D-005@v1 triple).
+
+    ql-20260825-011（后端真实排队）：忙轮入队路径没有新 run——``queued=True``
+    时 ``agent_run`` / ``queue_entry_id`` 二选一有值（入队成功 → 只有
+    ``queue_entry_id``）。create_session / 空闲 inject 路径 ``queued`` 恒
+    False，三字段语义与既有完全一致（零回归）。
+    """
 
     agent_session: AgentSession
-    agent_run: AgentRun
-    lease_id: uuid.UUID
+    agent_run: AgentRun | None = None
+    lease_id: uuid.UUID | None = None
+    queued: bool = False
+    queue_entry_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1939,6 +1970,10 @@ class SessionService:
         attachment_ids: list[uuid.UUID] | None = None,
         # ql-20260825-004：每轮注入携带当前页面上下文。
         page_context: PageContextCreateBlock | None = None,
+        # ql-20260825-011：忙轮（已有活跃 run）时入队而不是 409 拒绝（后端真实
+        # 排队，刷新页面不丢）。默认 False 保持既有拒绝语义（service 身份路径 /
+        # 平台审批代写等调用方零回归）；前端会话 UI 置 True。
+        queue_when_busy: bool = False,
     ) -> SessionDispatchResult:
         """Append a new turn run to an active session (FR-02 / design §7.6 step 1).
 
@@ -2031,6 +2066,8 @@ class SessionService:
             prelocked_attachments=prelocked_attachments,
             # ql-20260825-004：页面上下文透传。
             page_context=page_context,
+            # ql-20260825-011：忙轮入队透传。
+            queue_when_busy=queue_when_busy,
         )
 
     async def inject_session_as_service(
@@ -2104,6 +2141,8 @@ class SessionService:
         # ql-20260825-004：每轮注入携带当前页面上下文（build_page_context_preamble
         # 服务端回查注入【页面上下文】前导，复用 create 路径逻辑）。
         page_context: PageContextCreateBlock | None = None,
+        # ql-20260825-011：忙轮入队开关（语义见 inject_session 同名参数）。
+        queue_when_busy: bool = False,
     ) -> SessionDispatchResult:
         """Shared inject-turn core (used by :meth:`inject_session` +
         :meth:`inject_session_as_service`).
@@ -2137,12 +2176,71 @@ class SessionService:
 
             current = await self._get_current_run(session.id)
             if current is not None:
-                raise DaemonSessionTurnConflict(
-                    f"Session '{session_id}' already has an active run '{current.id}'.",
-                    details={
-                        "session_id": str(session_id),
-                        "current_run_id": str(current.id),
+                # ql-20260825-011（后端真实排队）：忙轮不再无条件 409——
+                # queue_when_busy=True 的调用方（前端会话 UI）改落排队表，
+                # run 终态后由 dispatch_next_queued_message 自动派发；默认
+                # False 保持既有 DaemonSessionTurnConflict 拒绝语义（service
+                # 身份路径 / 平台审批代写零回归）。入队仍在锁内判定，满员
+                # 检查与写行原子（并发双发不会超上限）。
+                if not queue_when_busy:
+                    raise DaemonSessionTurnConflict(
+                        f"Session '{session_id}' already has an active run '{current.id}'.",
+                        details={
+                            "session_id": str(session_id),
+                            "current_run_id": str(current.id),
+                        },
+                    )
+                pending_count = len(
+                    (
+                        await self._session.execute(
+                            select(AgentSessionQueuedMessage.id).where(
+                                AgentSessionQueuedMessage.agent_session_id == session.id,
+                                AgentSessionQueuedMessage.status == "pending",
+                            )
+                        )
+                    ).all()
+                )
+                if pending_count >= SESSION_QUEUE_MAX_PENDING:
+                    raise DaemonSessionQueueFull(
+                        f"会话排队消息已达上限（{SESSION_QUEUE_MAX_PENDING} 条），"
+                        "请等当前本轮结束后再发送。",
+                        details={
+                            "session_id": str(session_id),
+                            "pending": pending_count,
+                        },
+                    )
+                entry = AgentSessionQueuedMessage(
+                    agent_session_id=session.id,
+                    sender_user_id=run_sender_user_id or session.user_id,
+                    prompt=prompt,
+                    attachment_ids=([str(a) for a in attachment_ids] if attachment_ids else None),
+                    page_context=(
+                        page_context.model_dump(mode="json", exclude_none=True)
+                        if page_context is not None
+                        else None
+                    ),
+                    agent_profile_id=agent_profile_id,
+                    llm_provider_id=llm_provider_id,
+                    status="pending",
+                )
+                self._session.add(entry)
+                await self._session.commit()
+                await self._session.refresh(entry)
+                await self._publish_session_event(
+                    session.id,
+                    {
+                        "event": "queue_changed",
+                        "session_id": str(session.id),
+                        "queue_entry_id": str(entry.id),
+                        "action": "enqueued",
                     },
+                )
+                return SessionDispatchResult(
+                    agent_session=session,
+                    agent_run=None,
+                    lease_id=None,
+                    queued=True,
+                    queue_entry_id=entry.id,
                 )
 
             # ── 2026-08-20 task-05：附件校验（D-6 引擎门控 / 归属 404 / 数量 422）──
@@ -2877,6 +2975,10 @@ class SessionService:
                 lease.terminating_at = None
             self._session.add(lease)
 
+            # ql-20260825-011：会话结束 → 未派发的排队消息一律转 failed（随本事务
+            # commit），队列表不再有永远 pending 的死条目。
+            await self._fail_pending_queued_messages(session.id, "会话已结束，排队消息未发送。")
+
             await self._session.commit()
             await self._session.refresh(session)
 
@@ -2922,6 +3024,225 @@ class SessionService:
         return SessionControlResult(
             agent_session=session,
             current_run_id=run.id if run else None,
+        )
+
+    # ── ql-20260825-011：会话排队消息（后端真实排队）──────────────────────
+
+    async def _fail_pending_queued_messages(self, session_id: uuid.UUID, error_msg: str) -> int:
+        """把会话的全部 pending 排队消息翻 failed（调用方事务内，不 commit）。
+
+        返回翻状态条数（观测用）。end_session / 派发遇不可恢复态时收口，
+        队列不留永远 pending 的死条目。
+        """
+        rows = (
+            (
+                await self._session.execute(
+                    select(AgentSessionQueuedMessage).where(
+                        AgentSessionQueuedMessage.agent_session_id == session_id,
+                        AgentSessionQueuedMessage.status == "pending",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        now = datetime.now(UTC)
+        for row in rows:
+            row.status = "failed"
+            row.error_msg = error_msg
+            row.updated_at = now
+            self._session.add(row)
+        return len(rows)
+
+    async def list_queued_messages(
+        self, session_id: uuid.UUID, user_id: uuid.UUID
+    ) -> list[AgentSessionQueuedMessage]:
+        """列出会话排队消息（created_at 升序 = 派发顺序）。
+
+        归属校验复用 :meth:`_get_owned_session_for_update` 后立即 rollback
+        释放行锁（排队列表是低频读，不占写锁）；owned_id 在 rollback 前取
+        标量，避免回滚后属性过期。
+        """
+        session = await self._get_owned_session_for_update(session_id, user_id)
+        owned_id = session.id
+        await self._session.rollback()
+        rows = (
+            (
+                await self._session.execute(
+                    select(AgentSessionQueuedMessage)
+                    .where(AgentSessionQueuedMessage.agent_session_id == owned_id)
+                    .order_by(col(AgentSessionQueuedMessage.created_at))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return list(rows)
+
+    async def delete_queued_message(
+        self, session_id: uuid.UUID, entry_id: uuid.UUID, user_id: uuid.UUID
+    ) -> None:
+        """删除一条排队消息（用户在队列条上点 ×）。发送中不可删的约束在
+        前端——后端派发是「取队头 pending → _inject_into_session → 成功即
+        删行」，这里删除 pending/failed 条目与派发路径在会话行锁上互斥，
+        不会删到正在派发的条目。
+        """
+        session = await self._get_owned_session_for_update(session_id, user_id)
+        entry = (
+            await self._session.execute(
+                select(AgentSessionQueuedMessage).where(
+                    AgentSessionQueuedMessage.id == entry_id,
+                    AgentSessionQueuedMessage.agent_session_id == session.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if entry is None:
+            await self._session.rollback()
+            raise DaemonSessionQueueEntryNotFound(
+                f"排队消息 '{entry_id}' 不存在或不属于会话 '{session_id}'。",
+                details={"session_id": str(session_id), "entry_id": str(entry_id)},
+            )
+        await self._session.delete(entry)
+        await self._session.commit()
+        await self._publish_session_event(
+            session.id,
+            {
+                "event": "queue_changed",
+                "session_id": str(session.id),
+                "queue_entry_id": str(entry_id),
+                "action": "deleted",
+            },
+        )
+
+    async def retry_queued_message(
+        self, session_id: uuid.UUID, entry_id: uuid.UUID, user_id: uuid.UUID
+    ) -> AgentSessionQueuedMessage:
+        """failed → pending 并立即尝试派发（忙则留队等 run 终态自动派发）。"""
+        session = await self._get_owned_session_for_update(session_id, user_id)
+        entry = (
+            await self._session.execute(
+                select(AgentSessionQueuedMessage).where(
+                    AgentSessionQueuedMessage.id == entry_id,
+                    AgentSessionQueuedMessage.agent_session_id == session.id,
+                )
+            )
+        ).scalar_one_or_none()
+        if entry is None:
+            await self._session.rollback()
+            raise DaemonSessionQueueEntryNotFound(
+                f"排队消息 '{entry_id}' 不存在或不属于会话 '{session_id}'。",
+                details={"session_id": str(session_id), "entry_id": str(entry_id)},
+            )
+        if entry.status == "failed":
+            entry.status = "pending"
+            entry.error_msg = None
+            entry.updated_at = datetime.now(UTC)
+            self._session.add(entry)
+            await self._session.commit()
+            await self._session.refresh(entry)
+        # 派发尝试复用会话行锁路径（忙则内部自然 no-op）。
+        await self.dispatch_queued_messages(session.id)
+        entry = await self._session.get(AgentSessionQueuedMessage, entry_id)
+        assert entry is not None
+        return entry
+
+    async def dispatch_queued_messages(self, session_id: uuid.UUID) -> None:
+        """派发会话排队消息（调用方须已持有会话行锁或接受竞态兜底）。
+
+        语义：取最早 pending 条目，无活跃 run 则重放 inject（成功即删行）；
+        失败（daemon 离线 / 附件失效 / 会话非 active）该条转 failed 留队，
+        不再尝试后续条目（同类失败大概率连环，交给用户重试）。每次至多
+        派发一条——派发成功后已有活跃 run，下一条等本轮 turn 终态钩子
+        再触发，天然串行。
+        """
+        session = (
+            await self._session.execute(
+                select(AgentSession).where(AgentSession.id == session_id).with_for_update()
+            )
+        ).scalar_one_or_none()
+        if session is None:
+            return
+        if session.status != "active":
+            await self._fail_pending_queued_messages(
+                session_id, f"会话当前状态为 {session.status}，排队消息未发送。"
+            )
+            await self._session.commit()
+            return
+        if await self._get_current_run(session.id) is not None:
+            await self._session.rollback()
+            return
+
+        entry = (
+            await self._session.execute(
+                select(AgentSessionQueuedMessage)
+                .where(
+                    AgentSessionQueuedMessage.agent_session_id == session.id,
+                    AgentSessionQueuedMessage.status == "pending",
+                )
+                .order_by(col(AgentSessionQueuedMessage.created_at))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if entry is None:
+            await self._session.rollback()
+            return
+
+        page_context: PageContextCreateBlock | None = None
+        if entry.page_context is not None:
+            try:
+                page_context = PageContextCreateBlock(**entry.page_context)
+            except Exception:
+                page_context = None
+        attachment_ids: list[uuid.UUID] | None = None
+        if entry.attachment_ids:
+            try:
+                attachment_ids = [uuid.UUID(str(a)) for a in entry.attachment_ids]
+            except (ValueError, AttributeError, TypeError):
+                attachment_ids = None
+
+        try:
+            await self._inject_into_session(
+                session,
+                prompt=entry.prompt,
+                run_sender_user_id=entry.sender_user_id,
+                agent_profile_id=entry.agent_profile_id,
+                llm_provider_id=entry.llm_provider_id,
+                attachment_ids=attachment_ids,
+                page_context=page_context,
+            )
+        except AppError as exc:
+            # 派发失败（daemon 离线 / 附件失效 / 配置失效等）：条目转 failed
+            # 留队供重试。_inject_into_session 内部已 rollback 事务。
+            entry.status = "failed"
+            entry.error_msg = str(exc)
+            entry.updated_at = datetime.now(UTC)
+            self._session.add(entry)
+            await self._session.commit()
+            await self._publish_session_event(
+                session.id,
+                {
+                    "event": "queue_changed",
+                    "session_id": str(session.id),
+                    "queue_entry_id": str(entry.id),
+                    "action": "failed",
+                },
+            )
+            return
+        # 派发成功：删除排队行（turn 已落 AgentRun，队列不重复存史）。
+        # _inject_into_session 内部已 commit；重新取行再删（identity map 里
+        # 的旧对象可能已过期）。
+        fresh = await self._session.get(AgentSessionQueuedMessage, entry.id)
+        if fresh is not None:
+            await self._session.delete(fresh)
+            await self._session.commit()
+        await self._publish_session_event(
+            session.id,
+            {
+                "event": "queue_changed",
+                "session_id": str(session.id),
+                "queue_entry_id": str(entry.id),
+                "action": "dispatched",
+            },
         )
 
     async def handle_plan_response(
@@ -4259,3 +4580,20 @@ class SessionService:
                 details={"session_id": str(session_id)},
             )
         return agent_session
+
+
+async def dispatch_next_queued_message(session_id: uuid.UUID) -> None:
+    """后台派发会话排队消息（ql-20260825-011，run 终态钩子调用）。
+
+    独立 DB session（H1，对齐 run_sync._run_gate_decision_task 模式）——
+    后台任务生命周期独立于触发它的 HTTP/WS 请求会话。异常 fail-loud 交
+    `_fire_background_task` 的 done_callback 记日志，不影响已提交的 run
+    终态。锁与「至多一个活跃 run」不变式由 dispatch_queued_messages 内部
+    的会话行锁 + current_run 复查保证。
+    """
+    from app.core.db import get_session_factory
+
+    session_factory = get_session_factory()
+    async with session_factory() as db:
+        svc = SessionService(db)
+        await svc.dispatch_queued_messages(session_id)

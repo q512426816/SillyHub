@@ -4483,6 +4483,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Session Queue
+         * @description 列出会话排队消息（ql-20260825-011，created_at 升序 = 派发顺序）。
+         */
+        get: operations["list_session_queue_api_daemon_sessions__session_id__queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/queue/{entry_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Session Queue Entry
+         * @description 删除一条排队消息（用户在队列条上点 ×）。
+         */
+        delete: operations["delete_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/queue/{entry_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Session Queue Entry
+         * @description failed 排队消息重试（翻 pending 并立即尝试派发，忙则留队）。
+         */
+        post: operations["retry_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/reopen": {
         parameters: {
             query?: never;
@@ -16792,20 +16852,66 @@ export interface components {
             attachment_ids?: string[];
             page_context?: components["schemas"]["PageContextCreateBlock"] | null;
         };
-        /** SessionInjectResponse */
+        /**
+         * SessionInjectResponse
+         * @description ql-20260825-011：``queued=True`` 时消息进服务端排队（run_id 为 None），
+         *     run 终态后自动派发；``queued=False`` 为既有即时派发语义。
+         */
         SessionInjectResponse: {
             /**
              * Session Id
              * Format: uuid
              */
             session_id: string;
-            /**
-             * Run Id
-             * Format: uuid
-             */
-            run_id: string;
+            /** Run Id */
+            run_id?: string | null;
             /** Status */
             status: string;
+            /**
+             * Queued
+             * @default false
+             */
+            queued: boolean;
+            /** Queue Entry Id */
+            queue_entry_id?: string | null;
+        };
+        /**
+         * SessionQueueEntry
+         * @description 排队消息条目（ql-20260825-011，GET /sessions/{id}/queue 项）。
+         */
+        SessionQueueEntry: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Prompt */
+            prompt: string;
+            /** Attachment Ids */
+            attachment_ids?: string[];
+            /** Agent Profile Id */
+            agent_profile_id?: string | null;
+            /** Llm Provider Id */
+            llm_provider_id?: string | null;
+            /** Status */
+            status: string;
+            /** Error Msg */
+            error_msg?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** SessionQueueResponse */
+        SessionQueueResponse: {
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /** Items */
+            items?: components["schemas"]["SessionQueueEntry"][];
         };
         /**
          * SessionRecoverRequest
@@ -27239,6 +27345,99 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionInjectResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_session_queue_api_daemon_sessions__session_id__queue_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionQueueResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionQueueEntry"];
                 };
             };
             /** @description Validation Error */

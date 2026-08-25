@@ -43,6 +43,10 @@ const sessionApi = vi.hoisted(() => ({
   // triggerSessionTeamMission 预建；TeamTaskBlock/chip 数据源 listSessionTeamMissions）。
   listSessionTeamMissions: vi.fn(),
   triggerSessionTeamMission: vi.fn(),
+  // ql-20260825-011：服务端排队三件套（GET/DELETE/retry）。
+  fetchSessionQueue: vi.fn(),
+  deleteSessionQueueEntry: vi.fn(),
+  retrySessionQueueEntry: vi.fn(),
 }));
 
 // task-11：触发弹层（TeamTriggerPopover）数据源——项目下拉 + 项目关联工作区。
@@ -66,6 +70,9 @@ vi.mock("@/lib/daemon", async () => {
     fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
     listSessionTeamMissions: sessionApi.listSessionTeamMissions,
     triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
+    fetchSessionQueue: sessionApi.fetchSessionQueue,
+    deleteSessionQueueEntry: sessionApi.deleteSessionQueueEntry,
+    retrySessionQueueEntry: sessionApi.retrySessionQueueEntry,
   };
 });
 
@@ -183,6 +190,19 @@ function setupPanel(overrides: Record<string, any> = {}) {
 describe("SessionPanel（dialog）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // ql-20260825-011：默认空队列（服务端排队三件套）。
+    sessionApi.fetchSessionQueue.mockResolvedValue([]);
+    sessionApi.deleteSessionQueueEntry.mockResolvedValue(undefined);
+    sessionApi.retrySessionQueueEntry.mockResolvedValue({
+      id: "entry-1",
+      prompt: "",
+      attachment_ids: [],
+      agent_profile_id: null,
+      llm_provider_id: null,
+      status: "pending",
+      error_msg: null,
+      created_at: "2026-08-25T10:00:00Z",
+    });
     // 默认无 pending dialog（改动二：fetchPendingDialogs 独立 effect）
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);
     sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
@@ -206,6 +226,19 @@ describe("SessionPanel（dialog）", () => {
   });
   afterEach(() => {
     vi.clearAllMocks();
+    // ql-20260825-011：默认空队列（服务端排队三件套）。
+    sessionApi.fetchSessionQueue.mockResolvedValue([]);
+    sessionApi.deleteSessionQueueEntry.mockResolvedValue(undefined);
+    sessionApi.retrySessionQueueEntry.mockResolvedValue({
+      id: "entry-1",
+      prompt: "",
+      attachment_ids: [],
+      agent_profile_id: null,
+      llm_provider_id: null,
+      status: "pending",
+      error_msg: null,
+      created_at: "2026-08-25T10:00:00Z",
+    });
   });
 
   it("AC-11-01 首发 prompt → 调 createSession + 建立 1 个 session SSE", async () => {
@@ -437,16 +470,30 @@ describe("SessionPanel（dialog）", () => {
   // D-001（design §3.3 / task-07 经 SessionPanel 有意变更）：旧「currentRun 运行中
   // 发送按钮禁用」改为「可输入 + 消息入队」；turn 级串行语义改由队列承载——
   // 运行中入队不投递，turn_completed 清 currentRun 后 hook 自动投递（一次只一条）。
-  it("turn 级串行（队列化）：currentRun 运行中输入可用、消息排队，本轮完成后才投递", async () => {
+  it("turn 级串行（服务端排队 ql-20260825-011）：忙轮消息直达后端入队，队列条渲染，轮终态后自动派发", async () => {
     const stream = makeStreamMock();
     sessionApi.streamSession.mockImplementation(stream.factory);
     sessionApi.createSession.mockResolvedValue({
       session_id: "sess-1", run_id: "run-1", lease_id: "l",
       status: "active", stream_url: "",
     });
+    // 忙轮 inject → 后端排队（queued=true，无 run）。
     sessionApi.injectSession.mockResolvedValue({
-      session_id: "sess-1", run_id: "run-2", status: "active",
+      session_id: "sess-1", run_id: null, status: "queued", queued: true,
+      queue_entry_id: "entry-1",
     });
+    sessionApi.fetchSessionQueue.mockResolvedValue([
+      {
+        id: "entry-1",
+        prompt: "second",
+        attachment_ids: [],
+        agent_profile_id: null,
+        llm_provider_id: null,
+        status: "pending",
+        error_msg: null,
+        created_at: "2026-08-25T10:00:00Z",
+      },
+    ]);
 
     setupPanel();
     const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
@@ -459,26 +506,28 @@ describe("SessionPanel（dialog）", () => {
       conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-1", turn: 1 }));
     });
 
-    // running：输入不禁用（D-001），placeholder 提示排队语义
+    // running：输入不禁用，placeholder 提示排队语义
     const input2 = screen.getByPlaceholderText(/消息将排队，等待本轮完成/) as HTMLTextAreaElement;
     expect(input2.disabled).toBe(false);
     fireEvent.change(input2, { target: { value: "second" } });
     fireEvent.click(screen.getByTitle("发送"));
-    // 入队成功：MessageQueueBar 出现「排队消息」，草稿清空
-    await waitFor(() => expect(screen.getByText(/排队消息（1）/)).toBeInTheDocument());
+    // 忙轮消息直达后端（服务端排队），成功后草稿清空
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
+    expect(sessionApi.injectSession).toHaveBeenCalledWith("sess-1", "second", undefined);
     expect((screen.getByPlaceholderText(/消息将排队，等待本轮完成/) as HTMLTextAreaElement).value).toBe("");
+    // 队列条渲染服务端条目（排队消息 1）
+    await waitFor(() => expect(screen.getByText(/排队消息（1）/)).toBeInTheDocument());
 
-    // 本轮未完成：不投递（turn 级串行由队列等价承载）
-    expect(sessionApi.injectSession).not.toHaveBeenCalled();
-
-    // turn_completed 清 currentRun → hook 自动投递队头
+    // 轮终态 → SSE 触发队列刷新（服务端已自动派发，队列清空）
+    sessionApi.fetchSessionQueue.mockResolvedValue([]);
     act(() => {
       conn.handlers.route(
         makeEnvelope("turn_completed", { run_id: "run-1", status: "completed" }),
       );
     });
-    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
-    expect(sessionApi.injectSession).toHaveBeenCalledWith("sess-1", "second");
+    await waitFor(() =>
+      expect(screen.queryByText(/排队消息（1）/)).not.toBeInTheDocument(),
+    );
   });
 
   it("AC-11-07 end → close SSE + ended；session_ended 幂等", async () => {
@@ -629,7 +678,7 @@ describe("SessionPanel（dialog）", () => {
     expect(sessionApi.getAgentSessionLogs).toHaveBeenCalledTimes(1);
   });
 
-  it("inject 返回 turn conflict 409 → 队头 failed 条目 + 重试/删除按钮（D-003）", async () => {
+  it("服务端 failed 排队条目（ql-20260825-011）→ 失败 chip + 重试/删除按钮 + 发送失败草稿保留", async () => {
     const stream = makeStreamMock();
     sessionApi.streamSession.mockImplementation(stream.factory);
     sessionApi.createSession.mockResolvedValue({
@@ -637,14 +686,28 @@ describe("SessionPanel（dialog）", () => {
       status: "active", stream_url: "",
     });
     const { ApiError } = await import("@/lib/api");
+    // 空闲态发送失败（满员 409）→ 草稿保留在输入框可改后重发。
     sessionApi.injectSession.mockRejectedValue(
       new ApiError(409, {
-        code: "DAEMON_SESSION_TURN_CONFLICT",
-        message: "turn running",
+        code: "DAEMON_SESSION_QUEUE_FULL",
+        message: "会话排队消息已达上限（5 条）",
         request_id: null,
         details: null,
       }),
     );
+    // 服务端队列里有一条历史 failed 条目（派发失败留队）。
+    sessionApi.fetchSessionQueue.mockResolvedValue([
+      {
+        id: "entry-9",
+        prompt: "retry-me",
+        attachment_ids: [],
+        agent_profile_id: null,
+        llm_provider_id: null,
+        status: "failed",
+        error_msg: "执行代理当前不在线",
+        created_at: "2026-08-25T10:00:00Z",
+      },
+    ]);
 
     setupPanel();
     const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
@@ -658,20 +721,22 @@ describe("SessionPanel（dialog）", () => {
       );
     });
 
-    const input2 = await screen.findByPlaceholderText(/继续追问/);
-    fireEvent.change(input2, { target: { value: "retry-me" } });
-    fireEvent.click(screen.getByTitle("发送"));
-    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalled());
-    // D-003（design §3.3 / task-07 经 SessionPanel 有意变更）：409 不再回填输入框
-    // 草稿——失败条目留队头（MessageQueueBar「发送失败」chip + 重试/删除按钮承载
-    // 重试语义）；占位 turn 已移除（retry-me 只出现在队列 chip，消息流无重复）。
+    // 服务端 failed 条目渲染：失败 chip + 重试/删除按钮。
     await waitFor(() =>
       expect(screen.getByLabelText(/发送失败，展开查看完整内容：retry-me/)).toBeInTheDocument(),
     );
     expect(screen.getByLabelText("重试发送该消息")).toBeInTheDocument();
     expect(screen.getByLabelText("从队列移除该消息")).toBeInTheDocument();
-    expect(screen.getAllByText(/retry-me/)).toHaveLength(1);
-    expect((screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement).value).toBe("");
+
+    // 空闲态发送失败（满员 409）→ 草稿保留（onSendSettled 不触发），错误提示。
+    const input2 = await screen.findByPlaceholderText(/继续追问/);
+    fireEvent.change(input2, { target: { value: "draft-keep" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.getByText(/会话排队消息已达上限/)).toBeInTheDocument(),
+    );
+    expect((screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement).value).toBe("draft-keep");
   });
 
   it("session_ended SSE 先到：收口 ended + close", async () => {
@@ -1604,6 +1669,19 @@ describe("SessionPanel（dialog）", () => {
 describe("SessionPanel（dialog）对话/进度视图切换（ql-20260729-005）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // ql-20260825-011：默认空队列（服务端排队三件套）。
+    sessionApi.fetchSessionQueue.mockResolvedValue([]);
+    sessionApi.deleteSessionQueueEntry.mockResolvedValue(undefined);
+    sessionApi.retrySessionQueueEntry.mockResolvedValue({
+      id: "entry-1",
+      prompt: "",
+      attachment_ids: [],
+      agent_profile_id: null,
+      llm_provider_id: null,
+      status: "pending",
+      error_msg: null,
+      created_at: "2026-08-25T10:00:00Z",
+    });
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);
     sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
     // task-11：会话团队默认无 mission（避免真实 fetch）。
@@ -1749,6 +1827,19 @@ describe("SessionPanel（dialog）对话/进度视图切换（ql-20260729-005）
 describe("SessionPanel（dialog）partial override 撤回（task-06/08）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // ql-20260825-011：默认空队列（服务端排队三件套）。
+    sessionApi.fetchSessionQueue.mockResolvedValue([]);
+    sessionApi.deleteSessionQueueEntry.mockResolvedValue(undefined);
+    sessionApi.retrySessionQueueEntry.mockResolvedValue({
+      id: "entry-1",
+      prompt: "",
+      attachment_ids: [],
+      agent_profile_id: null,
+      llm_provider_id: null,
+      status: "pending",
+      error_msg: null,
+      created_at: "2026-08-25T10:00:00Z",
+    });
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);
     sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
     // task-11：会话团队默认无 mission（避免真实 fetch）。
@@ -1995,6 +2086,19 @@ describe("SessionPanel（dialog）partial override 撤回（task-06/08）", () =
 describe("SessionPanel（dialog）终止中态显示（task-13 / FR-04）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // ql-20260825-011：默认空队列（服务端排队三件套）。
+    sessionApi.fetchSessionQueue.mockResolvedValue([]);
+    sessionApi.deleteSessionQueueEntry.mockResolvedValue(undefined);
+    sessionApi.retrySessionQueueEntry.mockResolvedValue({
+      id: "entry-1",
+      prompt: "",
+      attachment_ids: [],
+      agent_profile_id: null,
+      llm_provider_id: null,
+      status: "pending",
+      error_msg: null,
+      created_at: "2026-08-25T10:00:00Z",
+    });
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);
     sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
     // task-11：会话团队默认无 mission（避免真实 fetch）。

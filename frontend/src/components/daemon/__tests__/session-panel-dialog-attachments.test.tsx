@@ -55,6 +55,10 @@ const sessionApi = vi.hoisted(() => ({
   fetchSessionDialogHistory: vi.fn(),
   listSessionTeamMissions: vi.fn(),
   triggerSessionTeamMission: vi.fn(),
+  // ql-20260825-011：服务端排队三件套（GET/DELETE/retry）。
+  fetchSessionQueue: vi.fn(),
+  deleteSessionQueueEntry: vi.fn(),
+  retrySessionQueueEntry: vi.fn(),
 }));
 
 const popoverApi = vi.hoisted(() => ({
@@ -77,6 +81,9 @@ vi.mock("@/lib/daemon", async () => {
     fetchSessionDialogHistory: sessionApi.fetchSessionDialogHistory,
     listSessionTeamMissions: sessionApi.listSessionTeamMissions,
     triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
+    fetchSessionQueue: sessionApi.fetchSessionQueue,
+    deleteSessionQueueEntry: sessionApi.deleteSessionQueueEntry,
+    retrySessionQueueEntry: sessionApi.retrySessionQueueEntry,
   };
 });
 
@@ -188,6 +195,19 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // ql-20260825-011：默认空队列（服务端排队三件套）。
+    sessionApi.fetchSessionQueue.mockResolvedValue([]);
+    sessionApi.deleteSessionQueueEntry.mockResolvedValue(undefined);
+    sessionApi.retrySessionQueueEntry.mockResolvedValue({
+      id: "entry-1",
+      prompt: "",
+      attachment_ids: [],
+      agent_profile_id: null,
+      llm_provider_id: null,
+      status: "pending",
+      error_msg: null,
+      created_at: "2026-08-25T10:00:00Z",
+    });
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);
     sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
     sessionApi.getAgentSessionLogs.mockResolvedValue([]);
@@ -220,6 +240,19 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    // ql-20260825-011：默认空队列（服务端排队三件套）。
+    sessionApi.fetchSessionQueue.mockResolvedValue([]);
+    sessionApi.deleteSessionQueueEntry.mockResolvedValue(undefined);
+    sessionApi.retrySessionQueueEntry.mockResolvedValue({
+      id: "entry-1",
+      prompt: "",
+      attachment_ids: [],
+      agent_profile_id: null,
+      llm_provider_id: null,
+      status: "pending",
+      error_msg: null,
+      created_at: "2026-08-25T10:00:00Z",
+    });
   });
 
   /** 首发建会话并推进到指定态："active-idle"（首轮完成）或 "running"。 */
@@ -280,9 +313,26 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
     expect(screen.getByText(/看下这张图/)).toBeInTheDocument();
   });
 
-  it("running 排队：附件随消息入队（排队条显示 📎1），turn 完成后投递带 attachment_ids", async () => {
+  it("running 排队（服务端 ql-20260825-011）：忙轮附件消息直达后端入队（inject 带 attachment_ids），队列条显示 📎1", async () => {
     const conn = await reachState("running");
     const att = makeAtt("att-2", "note.md", "file");
+    // 忙轮 inject → 后端排队；队列条数据源 = GET /queue。
+    sessionApi.injectSession.mockResolvedValue({
+      session_id: "sess-1", run_id: null, status: "queued", queued: true,
+      queue_entry_id: "entry-2",
+    });
+    sessionApi.fetchSessionQueue.mockResolvedValue([
+      {
+        id: "entry-2",
+        prompt: "排队带附件",
+        attachment_ids: ["att-2"],
+        agent_profile_id: null,
+        llm_provider_id: null,
+        status: "pending",
+        error_msg: null,
+        created_at: "2026-08-25T10:00:00Z",
+      },
+    ]);
 
     const input = screen.getByPlaceholderText(/排队/) as HTMLTextAreaElement;
     pasteFile(input, att);
@@ -290,10 +340,13 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
     fireEvent.change(input, { target: { value: "排队带附件" } });
     fireEvent.click(screen.getByTitle("发送"));
 
-    // 入队未投递：injectSession 未调，排队条可见且带附件数（计数文本被插值
-    // 拆多节点，按 span 精确 textContent 断言；getAllByText 兜底同文案多处）。
-    expect(sessionApi.injectSession).not.toHaveBeenCalled();
-    const queueLabels = screen.getAllByText(
+    // 忙轮消息（含附件引用）直达后端入队。
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
+    expect(sessionApi.injectSession).toHaveBeenCalledWith("sess-1", "排队带附件", {
+      attachment_ids: ["att-2"],
+    });
+    // 排队条可见且带附件数（计数文本被插值拆多节点，按 span 精确断言）。
+    const queueLabels = await screen.findAllByText(
       (_, el) => el?.tagName === "SPAN" && el.textContent === "排队消息（1）",
     );
     expect(queueLabels.length).toBeGreaterThanOrEqual(1);
@@ -302,16 +355,20 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
     );
     expect(clipBadges.length).toBeGreaterThanOrEqual(1);
 
-    // 本轮完成 → 自动投递
+    // 本轮完成 → SSE 触发队列刷新（服务端自动派发，队列清空）。
+    sessionApi.fetchSessionQueue.mockResolvedValue([]);
     act(() => {
       conn.handlers.route(
         makeEnvelope("turn_completed", { run_id: "run-1", status: "completed" }),
       );
     });
-    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
-    expect(sessionApi.injectSession).toHaveBeenCalledWith("sess-1", "排队带附件", {
-      attachment_ids: ["att-2"],
-    });
+    await waitFor(() =>
+      expect(
+        screen.queryAllByText(
+          (_, el) => el?.tagName === "SPAN" && el.textContent === "排队消息（1）",
+        ),
+      ).toHaveLength(0),
+    );
   });
 
   it("D-7：附件非空豁免空文本（看图说话），发送按钮可点且 prompt 为空串", async () => {

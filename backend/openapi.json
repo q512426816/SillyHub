@@ -12120,6 +12120,151 @@
         }
       }
     },
+    "/api/daemon/sessions/{session_id}/queue": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "List Session Queue",
+        "description": "列出会话排队消息（ql-20260825-011，created_at 升序 = 派发顺序）。",
+        "operationId": "list_session_queue_api_daemon_sessions__session_id__queue_get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionQueueResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/queue/{entry_id}": {
+      "delete": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Delete Session Queue Entry",
+        "description": "删除一条排队消息（用户在队列条上点 ×）。",
+        "operationId": "delete_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__delete",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/queue/{entry_id}/retry": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Retry Session Queue Entry",
+        "description": "failed 排队消息重试（翻 pending 并立即尝试派发，忙则留队）。",
+        "operationId": "retry_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__retry_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionQueueEntry"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/sessions/{session_id}/reopen": {
       "post": {
         "tags": [
@@ -50229,22 +50374,139 @@
             "title": "Session Id"
           },
           "run_id": {
-            "type": "string",
-            "format": "uuid",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Run Id"
           },
           "status": {
             "type": "string",
             "title": "Status"
+          },
+          "queued": {
+            "type": "boolean",
+            "title": "Queued",
+            "default": false
+          },
+          "queue_entry_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue Entry Id"
           }
         },
         "type": "object",
         "required": [
           "session_id",
-          "run_id",
           "status"
         ],
-        "title": "SessionInjectResponse"
+        "title": "SessionInjectResponse",
+        "description": "ql-20260825-011：``queued=True`` 时消息进服务端排队（run_id 为 None），\nrun 终态后自动派发；``queued=False`` 为既有即时派发语义。"
+      },
+      "SessionQueueEntry": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "attachment_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Attachment Ids"
+          },
+          "agent_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Profile Id"
+          },
+          "llm_provider_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Llm Provider Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "error_msg": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Msg"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "prompt",
+          "status",
+          "created_at"
+        ],
+        "title": "SessionQueueEntry",
+        "description": "排队消息条目（ql-20260825-011，GET /sessions/{id}/queue 项）。"
+      },
+      "SessionQueueResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SessionQueueEntry"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "title": "SessionQueueResponse"
       },
       "SessionRecoverRequest": {
         "properties": {

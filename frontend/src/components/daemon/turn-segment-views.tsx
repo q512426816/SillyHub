@@ -163,6 +163,10 @@ export interface SubagentBlockViewProps {
 export interface StderrRowViewProps {
   segment: StderrTurnSegment;
 }
+/** ql-20260825-011：上下文前导段（默认收起、可展开）。 */
+export interface PreambleSegmentViewProps {
+  segment: Extract<TurnSegment, { kind: "preamble" }>;
+}
 
 /* ───────────────────────────── 内部工具（纯函数） ───────────────────────────── */
 
@@ -331,6 +335,17 @@ function isTeamDispatchTool(toolName: string | null): boolean {
   return teamMcpToolName(toolName) === "dispatch_worker";
 }
 
+/**
+ * ql-20260825-011：用户是否正在选中文字（选区非空）。可点击折叠行（思考/工具/
+ * 子代理/分身/前导）的 onClick 先查本函数——拖选文本松开鼠标触发的 click 不再
+ * 触发折叠/展开，选中内容可正常复制（用户反馈「聊天页选不了文字想复制不方便」）。
+ */
+function hasActiveTextSelection(): boolean {
+  if (typeof window === "undefined") return false;
+  const sel = window.getSelection();
+  return sel != null && !sel.isCollapsed && sel.toString().length > 0;
+}
+
 /* ───────────────────────────── 段组件（全部 memo） ───────────────────────────── */
 
 /**
@@ -367,9 +382,12 @@ export const ThinkingRowView = memo(function ThinkingRowView({ segment }: Thinki
     <div className="w-full">
       <button
         type="button"
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          if (hasActiveTextSelection()) return; // ql-20260825-011：拖选中不触发折叠
+          setOpen(!open);
+        }}
         aria-expanded={open}
-        className="flex w-full cursor-pointer select-none items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11.5px] text-muted-foreground hover:bg-muted"
+        className="flex w-full cursor-pointer select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11.5px] text-muted-foreground hover:bg-muted"
       >
         <span
           aria-hidden
@@ -432,7 +450,10 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
         role="button"
         tabIndex={0}
         aria-expanded={open}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          if (hasActiveTextSelection()) return; // ql-20260825-011：拖选中不触发折叠
+          setOpen(!open);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
@@ -440,7 +461,7 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
           }
         }}
         className={cn(
-          "relative flex w-full cursor-pointer items-center gap-2 overflow-hidden rounded-lg border border-brand-200 bg-brand-50 px-3 py-[5px] text-xs",
+          "relative flex w-full cursor-pointer select-text items-center gap-2 overflow-hidden rounded-lg border border-brand-200 bg-brand-50 px-3 py-[5px] text-xs",
           running && "seg-sweep",
         )}
       >
@@ -554,7 +575,10 @@ export const SubagentBlockView = memo(function SubagentBlockView({
         role="button"
         tabIndex={0}
         aria-expanded={open}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          if (hasActiveTextSelection()) return; // ql-20260825-011：拖选中不触发折叠
+          setOpen(!open);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
@@ -562,7 +586,7 @@ export const SubagentBlockView = memo(function SubagentBlockView({
           }
         }}
         className={cn(
-          "relative flex cursor-pointer items-center gap-2 overflow-hidden px-3.5 py-[7px] text-xs",
+          "relative flex cursor-pointer select-text items-center gap-2 overflow-hidden px-3.5 py-[7px] text-xs",
           running && "seg-sweep",
         )}
       >
@@ -604,6 +628,49 @@ export const StderrRowView = memo(function StderrRowView({ segment }: StderrRowV
         ⚠
       </span>
       <span className="min-w-0 whitespace-pre-wrap break-words">{segment.text}</span>
+    </div>
+  );
+});
+
+/**
+ * 上下文前导卡（ql-20260825-011 收紧展示）：进度视图专属（对话视图不渲染
+ * preamble 段），**默认收起**、点击头部展开原文——去除原「（创建轮，仅 AI
+ * 可见）」括号说明（用户反馈），标题带字符数提示。正文 select-text 可选中
+ * 复制；拖选不触发收起（hasActiveTextSelection 守卫）。
+ */
+export const PreambleSegmentView = memo(function PreambleSegmentView({
+  segment,
+}: PreambleSegmentViewProps) {
+  const [open, setOpen] = useState(false);
+  const charCount = segment.text.length;
+  return (
+    <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
+      <button
+        type="button"
+        onClick={() => {
+          if (hasActiveTextSelection()) return;
+          setOpen(!open);
+        }}
+        aria-expanded={open}
+        className="flex w-fit cursor-pointer select-text items-center gap-[7px] rounded-md px-1.5 py-[3px] text-left text-[11px] text-muted-foreground hover:bg-muted"
+      >
+        <span
+          aria-hidden
+          className={cn(
+            "shrink-0 text-[9px] transition-transform duration-150",
+            open && "rotate-90",
+          )}
+        >
+          ▶
+        </span>
+        <span className="shrink-0 font-medium">上下文注入</span>
+        <span className="shrink-0 opacity-75">{`（${charCount} 字，已随消息发送）`}</span>
+      </button>
+      {open && (
+        <div className="select-text whitespace-pre-wrap rounded-lg border border-dashed border-brand-300 bg-brand-50/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
+          {segment.text}
+        </div>
+      )}
     </div>
   );
 });
@@ -681,14 +748,17 @@ export const TeamWorkerBlockView = memo(function TeamWorkerBlockView({
         role="button"
         tabIndex={0}
         aria-expanded={open}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          if (hasActiveTextSelection()) return; // ql-20260825-011：拖选中不触发折叠
+          setOpen(!open);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             setOpen(!open);
           }
         }}
-        className="flex cursor-pointer select-none items-center gap-2 px-3 py-[7px] text-xs"
+        className="flex cursor-pointer select-text items-center gap-2 px-3 py-[7px] text-xs"
       >
         <span aria-hidden className="shrink-0">
           👥
@@ -790,16 +860,8 @@ export const SegmentView = memo(function SegmentView({ segment }: SegmentViewPro
       // 2026-08-25-unified-floating-session task-11（FR-7）：上下文前导卡——
       // 「全部（进度）」视图显示首轮注入的【变更/页面上下文】【团队任务简报】
       // 来源（对话视图保持干净，不渲染本段——时间线仅 all 视图纳入 preamble）。
-      return (
-        <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
-          <span className="select-none pl-0.5 text-[11px] text-muted-foreground">
-            上下文注入（创建轮，仅 AI 可见）
-          </span>
-          <div className="whitespace-pre-wrap rounded-lg border border-dashed border-brand-300 bg-brand-50/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
-            {segment.text}
-          </div>
-        </div>
-      );
+      // ql-20260825-011：默认收起、可展开（PreambleSegmentView）。
+      return <PreambleSegmentView segment={segment} />;
     case "file":
       // task-08（FR-01 / D-001@v1）：文件段 → FileMessageCard（图片缩略图 / 通用
       // 卡两形态，antd 仅经其间接使用）；本层只加「agent 上传了文件」标注行

@@ -789,8 +789,54 @@ export interface SessionCreateResponse {
 
 export interface SessionInjectResponse {
   session_id: string;
-  run_id: string;
+  /** ql-20260825-011：忙轮入队时为 null（消息进服务端排队，run 终态后派发）。 */
+  run_id: string | null;
   status: string;
+  /** ql-20260825-011：true = 已入服务端排队（刷新页面不丢）。 */
+  queued?: boolean;
+  queue_entry_id?: string | null;
+}
+
+/** ql-20260825-011：服务端排队消息条目（GET /sessions/{id}/queue）。 */
+export interface SessionQueueEntry {
+  id: string;
+  prompt: string;
+  attachment_ids?: string[];
+  agent_profile_id?: string | null;
+  llm_provider_id?: string | null;
+  status: string;
+  error_msg?: string | null;
+  created_at: string;
+}
+
+/** ql-20260825-011：列出会话排队消息（created_at 升序 = 派发顺序）。 */
+export async function fetchSessionQueue(sessionId: string): Promise<SessionQueueEntry[]> {
+  const resp = await apiFetch<{ items: SessionQueueEntry[] }>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/queue`,
+  );
+  return resp.items ?? [];
+}
+
+/** ql-20260825-011：删除一条排队消息（队列条上的 ×）。 */
+export async function deleteSessionQueueEntry(
+  sessionId: string,
+  entryId: string,
+): Promise<void> {
+  await apiFetch(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/queue/${encodeURIComponent(entryId)}`,
+    { method: "DELETE" },
+  );
+}
+
+/** ql-20260825-011：failed 条目重试（翻 pending 并立即尝试派发，忙则留队）。 */
+export async function retrySessionQueueEntry(
+  sessionId: string,
+  entryId: string,
+): Promise<SessionQueueEntry> {
+  return apiFetch<SessionQueueEntry>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/queue/${encodeURIComponent(entryId)}/retry`,
+    { method: "POST" },
+  );
 }
 
 export interface SessionControlResponse {

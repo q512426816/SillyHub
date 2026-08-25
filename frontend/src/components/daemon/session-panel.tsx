@@ -559,10 +559,9 @@ function SessionPanelPage({
   });
   const workspaceName = useMemo(() => {
     if (!session?.workspace_id) return null;
-    return (
-      workspacesQuery.data?.items.find((ws) => ws.id === session.workspace_id)
-        ?.name ?? null
-    );
+    const ws = workspacesQuery.data?.items.find((w) => w.id === session.workspace_id);
+    // ql-20260825-011：别名优先（先例 workspace-switcher / workspace-card）。
+    return ws ? (ws.display_alias ?? ws.name) : null;
   }, [session?.workspace_id, workspacesQuery.data]);
 
   // ── task-07（D-106）：change 入口预会话上下文行加显变更名 ────────────────
@@ -638,6 +637,25 @@ function SessionPanelPage({
   const clearAttachmentsRef = useRef<(() => void) | null>(null);
   const [reopening, setReopening] = useState(false);
 
+  // ── ql-20260825-011：输入框草稿持久化（刷新/切换会话不丢）──────────────────
+  // 回读：挂载 + sessionId 变化（预会话态无 id 用固定键 __pre__）。
+  // hydrated 门闩防「回读前先写空串」冲掉已存草稿：restore 先 setInput，rAF 后
+  // 才放行持久化 effect（该 commit 内 input 仍是旧会话的值，不写新会话键）。
+  const draftHydratedRef = useRef(false);
+  useEffect(() => {
+    draftHydratedRef.current = false;
+    setInput(readSessionDraft(sessionId));
+    const raf = requestAnimationFrame(() => {
+      draftHydratedRef.current = true;
+    });
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
+  useEffect(() => {
+    if (!draftHydratedRef.current) return;
+    writeSessionDraft(sessionId, input);
+  }, [sessionId, input]);
+
   // ── task-03（2026-08-23-sessions-workspace-hub）：预会话首句创建态 ────────
   // creating 在途（发送按钮 spinner + 防重复提交）；失败内联错误（R-02：输入
   // 保留可重试，不切真会话态）。dialog idle 先例是"先清输入再建、失败即丢"，
@@ -681,6 +699,10 @@ function SessionPanelPage({
   // 而占位轮合成标记行（ql-20260821-002 的 [附件:id|kind|name]）需要 kind/name
   // ——入队时在 handleSend 登记、投递时在 sendFromQueue 查表、成功/删条目后清除。
   const attachmentMetaRef = useRef(new Map<string, { kind: string; name: string }>());
+  // ql-20260825-011：发送中（inject 在途）的占位信息——「打断本轮」在发送窗口
+  // 期触发时用它回退消息到输入框；响应到达后据 placeholderId 是否仍匹配判定
+  // 是否已被打断（不匹配 = 已回退，需对真实 run 补发 interrupt）。
+  const inflightSendRef = useRef<{ placeholderId: string; prompt: string } | null>(null);
 
   // ── SSE 建流 + 历史预取（sessionId 驱动，切换会话即重建）────────────────
   // gap-fix（FR-07/FR-08）：runs 快照拉取失败不阻断——whoLine 不注入、历史
@@ -770,6 +792,9 @@ function SessionPanelPage({
 
     streamRef.current = streamSession(sessionId, {
       onTurnStarted: (env) => {
+        // ql-20260825-011：新轮开跑（含排队消息自动派发）→ 刷队列条（队头条目
+        // 已转正式轮，应从队列中消失）。
+        void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
         setTurnState((prev) =>
           upsertTurn(
             prev,
@@ -858,6 +883,10 @@ function SessionPanelPage({
         // gap-fix（D-008@v1）：每轮终态后刷新 run 快照——本轮 whoLine/usage 由
         // run 行（dispatch 冻结）注入，切换配置后的下一轮跟随新快照。
         refreshRunsMeta(sessionId);
+
+        // ql-20260825-011：轮终态 → 后台会自动派发下一条排队消息，刷队列条
+        // （新派发轮的 turn_started 事件也会再刷一次，双保险）。
+        void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
 
         // ql-20260824-004：每轮完成即时刷新左栏列表（轮数/相对时间/状态点，
         // 不等 10s 轮询兜底；dialog 模式不传 onSessionListRefresh 天然不受影响）。
@@ -1315,22 +1344,36 @@ function SessionPanelPage({
     [displayTurns],
   );
 
-  // ── 消息队列（2026-08-21-session-message-queue task-03 / design §3.3）──────
-  // 发送入口统一走 useMessageQueue：active 且无 currentRun 时 processQueue 立即
-  // 投递（等效原「立即发送」）；running / reconnecting / pending 时入队等待
-  // （D-001 前端队列等 active），turn_completed 清 currentRun / 轮询 status→active
-  // 均由 hook 内 effect 自动触发投递，面板不保留第二条直发路径。
+  // ── 消息发送 + 服务端排队（ql-20260825-011 后端真实排队重写）──────────────
+  // 空闲（无 currentRun）→ 占位轮直发（sendFromQueue）；忙轮 → 直接 POST
+  // inject（后端落 agent_session_queued_messages 排队，run 终态后自动派发，
+  // 刷新页面不丢）。队列展示/删除/重试走 useMessageQueue（GET/DELETE/retry
+  // 端点），面板不再持有前端投递状态机。
 
   /**
-   * 队列投递回调（hook onSend，接 injectSession）。
+   * 发送成功（直发建轮或入服务端队列）后收敛输入区：清草稿与附件 chips。
+   * ql-20260825-011 改为「响应成功后才清」（原入队即清）——失败路径草稿与
+   * 附件原地保留可改后重发；用户在发送窗口期新输入的内容不覆盖（仅清与
+   * 所发原文相同的草稿）。
+   */
+  const onSendSettled = useCallback((prompt: string, attachmentIds: string[]) => {
+    setInput((prev) => (prev === prompt ? "" : prev));
+    setPendingAttachments((prev) =>
+      attachmentIds.length === 0 ? prev : prev.filter((a) => !attachmentIds.includes(a.id)),
+    );
+    if (attachmentIds.length > 0) clearAttachmentsRef.current?.();
+    for (const id of attachmentIds) attachmentMetaRef.current.delete(id);
+  }, []);
+
+  /**
+   * 空闲路径直发（占位轮 + injectSession）。
    * 关键时序（design §3.4「inject 成功 → currentRunId = run_id」）：进入本函数
    * 即同步置占位 currentRunId（placeholder id），inject 响应到达后替换为真实
-   * run_id——两步都在 resolve 之前完成。若等 SSE turn_started 才置位，hook 的
-   * processQueue effect 会在 hasCurrentRun 仍为 false 的窗口期把下一条也发出，
-   * 同一 turn 连发两条破坏串行。
-   * 失败路径：占位轮回滚 + errorMsg 展示后继续向上抛出——hook 据此把条目标记
-   * failed 留在队头（D-003），用户点重试/删除，面板不再回填输入框（旧 409 回填
-   * 语义由队头 failed + 重试替代）。
+   * run_id——两步都在 resolve 之前完成。若等 SSE turn_started 才置位，发送
+   * 窗口期把下一条也发出，同一 turn 连发两条破坏串行。
+   * ql-20260825-011：响应 queued=true（发送瞬间上一轮尚未终结的竞态）→ 撤
+   * 占位轮 + 刷队列（消息转服务端排队条目）；发送中被打断（interruptDuringSend
+   * 置位）→ run 已创建则立即补发 interruptSession 真停（消息已回退输入框）。
    */
   const sendFromQueue = useCallback(
     async (prompt: string, attachmentIds: string[]) => {
@@ -1338,6 +1381,7 @@ function SessionPanelPage({
       // 不投递，此处防御性短路（对齐 dialog 版 ?? "" + status 守卫先例）。
       if (!sessionId) return;
       const placeholderId = `__pending_inject_${Date.now()}__`;
+      inflightSendRef.current = { placeholderId, prompt };
       // ql-20260821-002：占位轮合成标记行——与 handleSend 入队侧逐字同构
       // （后端落库标记行同款，真实日志到达后无感接管）；kind/name 查
       // attachmentMetaRef（D-004，入队时已登记，兜底值仅防御异常路径）。
@@ -1379,40 +1423,89 @@ function SessionPanelPage({
           // ql-20260825-004：每轮注入携带当前页面上下文（有值才带，零回归）。
           ...(pageContextOverride ? { page_context: pageContextOverride } : {}),
         });
+        if (inflightSendRef.current?.placeholderId !== placeholderId) {
+          // 发送窗口期被「打断本轮」回退：占位轮已移除、消息已回输入框。
+          // run 已创建 → 立即补发打断真停（run 未建/已完则 409 忽略）。
+          if (resp.run_id) {
+            try {
+              await interruptSession(sessionId);
+            } catch {
+              /* NO_CURRENT_RUN：run 已完结，无需处理 */
+            }
+          }
+          return;
+        }
+        if (resp.queued) {
+          // 竞态入队：上一轮尚未终结 → 撤占位轮，消息转服务端排队条目。
+          setTurnState((prev) => ({
+            currentRunId: null,
+            turns: prev.turns.filter((t) => t.runId !== placeholderId),
+          }));
+          setErrorMsg(null);
+          void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
+          onSendSettled(prompt, attachmentIds);
+          return;
+        }
         setTurnState((prev) => ({
           currentRunId: resp.run_id,
           turns: prev.turns.map((t) =>
             t.runId === placeholderId
-              ? { ...t, runId: resp.run_id, status: "running" }
+              ? { ...t, runId: resp.run_id!, status: "running" }
               : t,
           ),
         }));
         setErrorMsg(null);
-        // D-004：投递成功后清理附件元数据镜像（条目已出队，ids 不再被引用）。
-        for (const id of attachmentIds) attachmentMetaRef.current.delete(id);
+        onSendSettled(prompt, attachmentIds);
       } catch (err) {
         const apiErr = err as ApiError;
-        setTurnState((prev) => ({
-          currentRunId: null,
-          turns: prev.turns.filter((t) => t.runId !== placeholderId),
-        }));
-        setErrorMsg(apiErr instanceof ApiError ? apiErr.message : "发送失败");
-        throw err; // D-003：向上抛 → hook 标记 failed 留队头，不吞错
+        if (inflightSendRef.current?.placeholderId === placeholderId) {
+          setTurnState((prev) => ({
+            currentRunId: null,
+            turns: prev.turns.filter((t) => t.runId !== placeholderId),
+          }));
+          setErrorMsg(apiErr instanceof ApiError ? apiErr.message : "发送失败");
+        }
+      } finally {
+        if (inflightSendRef.current?.placeholderId === placeholderId) {
+          inflightSendRef.current = null;
+        }
       }
     },
-    [sessionId, pageContextOverride],
+    [sessionId, pageContextOverride, qc, onSendSettled],
   );
 
-  const { queue, enqueue, removeEntry, retryEntry, isQueueFull } =
-    useMessageQueue({
-      // task-03（R-01）：预会话态队列不激活不投递（sessionActive=false——
-      // session 为 null 时 status 派生 null；对齐 dialog 版 view.sessionId ?? ""
-      // + status!=="active" 先例）。
-      sessionId: sessionId ?? "",
-      sessionActive,
-      hasCurrentRun: running,
-      onSend: sendFromQueue,
-    });
+  /**
+   * 忙轮路径（ql-20260825-011）：直接 POST inject——后端忙轮自动入服务端排队。
+   * 不插占位轮（派发由后端在 run 终态后自动触发，SSE turn_started 自然建轮）。
+   * 失败（满员 409 / 离线）：errorMsg 提示，草稿与附件保留在输入框可改后重发。
+   */
+  const sendToServerQueue = useCallback(
+    async (prompt: string, attachmentIds: string[]) => {
+      if (!sessionId) return;
+      try {
+        const resp = await injectSession(sessionId, prompt, {
+          ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
+          ...(pageContextOverride ? { page_context: pageContextOverride } : {}),
+        });
+        setErrorMsg(null);
+        void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
+        onSendSettled(prompt, attachmentIds);
+        if (!resp.queued && resp.run_id) {
+          // 竞态直发：发送瞬间上一轮终结 → 后端已开新 run（SSE 会建轮）。
+        }
+      } catch (err) {
+        const apiErr = err as ApiError;
+        setErrorMsg(apiErr instanceof ApiError ? apiErr.message : "发送失败");
+      }
+    },
+    [sessionId, pageContextOverride, qc, onSendSettled],
+  );
+
+  const { queue, removeEntry, retryEntry, isQueueFull } = useMessageQueue({
+    // task-03（R-01）：预会话态不发队列查询（enabled 守卫）。
+    sessionId: sessionId ?? "",
+    sessionActive,
+  });
 
   // ── 操作 ───────────────────────────────────────────────────────────────
   // task-11：团队弹层开关（打开时清旧错误；objective 预填 /team 指令文本）。
@@ -1556,33 +1649,44 @@ function SessionPanelPage({
       return;
     }
     // design §3.3：仅终态（ended/failed）与离线禁发；running / reconnecting /
-    // pending 不再拦截（入队等待，D-001）。
+    // pending 不再拦截（忙轮入服务端排队，ql-20260825-011）。
     if (!session || ended || !machineOnline) return;
     if (isQueueFull) return; // D-002 满员拒收：提示见 placeholder，草稿与附件保留
     const attachmentIds = pendingAttachments.map((a) => a.id);
-    // ql-20260821-002：队列条目展示文本（MessageQueueBar 摘要/展开用）——附件
-    // 标记行 + 原文；投递侧占位轮标记行在 sendFromQueue 依 attachmentMetaRef
-    // 重建（与后端落库标记行逐字同构）。ql-20260824-004：无附件时不拼前导
-    // 换行（joinAttachmentMarkers，同 sendFromQueue 修复）。
-    const markerLines = pendingAttachments
-      .map((a) => `[附件:${a.id}|${a.kind}|${a.name}]`)
-      .join("\n");
-    const displayPrompt = joinAttachmentMarkers(markerLines, prompt);
-    // D-004：登记附件元数据（onSend 只携带 ids）——先登记再入队，保证投递时可查。
+    // D-004：登记附件元数据（投递只携带 ids）——先登记再发送，保证占位轮可查。
     for (const a of pendingAttachments) {
       attachmentMetaRef.current.set(a.id, { kind: a.kind, name: a.name });
     }
-    if (!enqueue(prompt, attachmentIds, displayPrompt)) return; // D-002 兜底
-    // 入队成功：草稿与附件 chips 即时清空（所有权移交队列条目，ids 已被引用）。
-    setInput("");
-    setPendingAttachments([]);
-    clearAttachmentsRef.current?.();
-  }, [input, sessionId, session, ended, machineOnline, isQueueFull, pendingAttachments, enqueue, sessionEngine, openTeamPopover, handlePreSessionSend]);
+    // ql-20260825-011：忙轮 → 服务端排队（无占位轮，后端 run 终态后派发）；
+    // 空闲 → 占位轮直发。草稿与附件改为发送成功后清（onSendSettled）。
+    if (running) {
+      void sendToServerQueue(prompt, attachmentIds);
+      return;
+    }
+    void sendFromQueue(prompt, attachmentIds);
+  }, [input, sessionId, session, ended, machineOnline, running, isQueueFull, pendingAttachments, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend]);
 
   const handleInterrupt = useCallback(async () => {
     // task-03（R-01）：预会话态无可打断轮（按钮本就禁用，防御性短路）。
     if (!sessionId || !session || session.status !== "active" || !turnState.currentRunId) return;
     const localRunId = turnState.currentRunId;
+    // ql-20260825-011：发送中（inject 在途，占位 id）打断——消息回退输入框；
+    // 请求不 abort（后端可能已建 run），响应到达后由 sendFromQueue 对真实
+    // run 补发 interruptSession 真停（见其 inflight 不匹配分支）。
+    if (localRunId.startsWith("__pending_inject_")) {
+      const inflight = inflightSendRef.current;
+      if (inflight && inflight.placeholderId === localRunId) {
+        inflightSendRef.current = null; // 标记已打断（响应侧据此走补发打断分支）
+        setTurnState((prev) => ({
+          ...prev,
+          currentRunId: null,
+          turns: prev.turns.filter((t) => t.runId !== localRunId),
+        }));
+        // 回退消息：不覆盖用户在发送窗口期新输入的内容。
+        setInput((prev) => (prev === "" ? inflight.prompt : prev));
+      }
+      return;
+    }
     setTurnState((prev) => ({
       ...prev,
       turns: prev.turns.map((t) =>
@@ -1678,11 +1782,22 @@ function SessionPanelPage({
       }));
       try {
         const resp = await injectSession(sessionId, trimmed);
+        const runId = resp.run_id;
+        if (resp.queued || !runId) {
+          // ql-20260825-011：重发瞬间已被占用（竞态）→ 撤占位轮转服务端排队。
+          setTurnState((prev) => ({
+            currentRunId: null,
+            turns: prev.turns.filter((t) => t.runId !== placeholderId),
+          }));
+          setErrorMsg(null);
+          void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
+          return;
+        }
         setTurnState((prev) => ({
-          currentRunId: resp.run_id,
+          currentRunId: runId,
           turns: prev.turns.map((t) =>
             t.runId === placeholderId
-              ? { ...t, runId: resp.run_id, status: "running" }
+              ? { ...t, runId: runId, status: "running" }
               : t,
           ),
         }));
@@ -2191,11 +2306,13 @@ function SessionPanelPage({
       {/* task-11：会话团队任务块（TeamTaskBlock）——消息流末尾/输入区上方渲染会话
           mission 列表（listSessionTeamMissions created_at 倒序全部渲染、活跃在前，
           R-07 单活跃约束下至多一个活跃）；取消成功 onRefresh 重拉，活跃期间父层
-          5s 轮询刷新（终态停止，见 useSessionTeamMissions）。 */}
+          5s 轮询刷新（终态停止，见 useSessionTeamMissions）。
+          ql-20260825-011：区域限高滚动（默认收起后多任务也只占概要行高度，
+          不再挤占聊天窗口）。 */}
       {teamMissions.length > 0 && (
         <div
           aria-label="会话团队任务列表"
-          className="flex shrink-0 flex-col gap-1.5 border-t border-border bg-card px-5 py-2"
+          className="flex max-h-[220px] shrink-0 flex-col gap-1.5 overflow-y-auto border-t border-border bg-card px-5 py-2"
         >
           {[...teamMissions]
             .sort(
@@ -2228,8 +2345,10 @@ function SessionPanelPage({
           />
         </div>
       )}
-      {/* task-09：bash 命令进度卡片——bashProgress 存在时渲染。 */}
-      {bashProgress && (
+      {/* task-09：bash 命令进度卡片——bashProgress 存在时渲染。
+          ql-20260825-011：仅「进度」视图渲染（Bash running 不占对话窗口，运行
+          概要看轮级状态条的 currentActivity，详情切进度视图点开）。 */}
+      {bashProgress && viewMode === "all" && (
         <div className="shrink-0 border-t border-border bg-card px-5 py-3">
           <BashProgressCard
             command={bashProgress.command}
@@ -2241,7 +2360,8 @@ function SessionPanelPage({
         </div>
       )}
       {/* verify P1 返工（FR-03）：后台 Agent 任务卡片。存在 running 任务且当前无
-          活跃 turn 时提示「后台任务仍在运行」——会话不提前标记完成。 */}
+          活跃 turn 时提示「后台任务仍在运行」——会话不提前标记完成。
+          ql-20260825-011：任务卡仅「进度」视图渲染（提示行两视图都保留）。 */}
       {agentTasks.length > 0 && (
         <div className="shrink-0 space-y-2 border-t border-border bg-card px-5 py-3">
           {turnState.currentRunId == null &&
@@ -2250,16 +2370,17 @@ function SessionPanelPage({
                 后台任务仍在运行，会话未结束
               </p>
             )}
-          {agentTasks.map((task) => (
-            <AgentTaskCard
-              key={task.taskId}
-              taskId={task.taskId}
-              taskName={task.taskName}
-              status={task.status}
-              progress={task.progress}
-              message={task.message}
-            />
-          ))}
+          {viewMode === "all" &&
+            agentTasks.map((task) => (
+              <AgentTaskCard
+                key={task.taskId}
+                taskId={task.taskId}
+                taskName={task.taskName}
+                status={task.status}
+                progress={task.progress}
+                message={task.message}
+              />
+            ))}
         </div>
       )}
 
@@ -2608,6 +2729,53 @@ function SessionPanelDialog(props: SessionPanelProps) {
   const [pendingAttachments, setPendingAttachments] = useState<AttachmentRead[]>([]);
   const clearAttachmentsRef = useRef<(() => void) | null>(null);
   const attachmentMetaRef = useRef(new Map<string, { kind: string; name: string }>());
+  // ql-20260825-011：发送中（inject 在途）占位信息——「打断本轮」发送窗口期
+  // 触发时回退消息到输入框（同 page 模式 inflightSendRef 语义）。
+  const inflightSendRef = useRef<{ placeholderId: string; prompt: string } | null>(null);
+  // ql-20260825-011：服务端排队刷新桥——establishStream（SSE 回调，定义早于
+  // useMessageQueue 调用）经 ref 触发队列刷新，避开 use-before-define。
+  const queueRefreshRef = useRef<() => void>(() => {});
+
+  // ql-20260825-011：输入草稿持久化（同 page 模式；dialog 会话键 = view.sessionId，
+  // idle 无会话用 __pre__ 固定键）。
+  const draftHydratedRef = useRef(false);
+  useEffect(() => {
+    draftHydratedRef.current = false;
+    setInput(readSessionDraft(view.sessionId ?? null));
+    const raf = requestAnimationFrame(() => {
+      draftHydratedRef.current = true;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [view.sessionId]);
+  useEffect(() => {
+    if (!draftHydratedRef.current) return;
+    writeSessionDraft(view.sessionId ?? null, input);
+  }, [view.sessionId, input]);
+
+  /**
+   * ql-20260825-011：发送成功（直发建轮或入服务端队列）后收敛输入区——清草稿
+   * 与附件 chips（失败路径原地保留可改后重发；不覆盖发送窗口期新输入的内容）。
+   */
+  const onSendSettled = useCallback((prompt: string, attachmentIds: string[]) => {
+    setInput((prev) => (prev === prompt ? "" : prev));
+    setPendingAttachments((prev) =>
+      attachmentIds.length === 0 ? prev : prev.filter((a) => !attachmentIds.includes(a.id)),
+    );
+    if (attachmentIds.length > 0) clearAttachmentsRef.current?.();
+    for (const id of attachmentIds) attachmentMetaRef.current.delete(id);
+  }, []);
+
+  // 消息队列（ql-20260825-011 服务端真实排队）：队列条目来自 GET /queue（刷新
+  // 不丢）；忙轮发送由 sendToServerQueue 直达后端入队。idle / creating 首条消息
+  // 绕过队列直发 createSession（handleSend idle 分支）。
+  const { queue, removeEntry, retryEntry, isQueueFull, refresh: refreshQueue } =
+    useMessageQueue({
+      sessionId: view.sessionId ?? "",
+      sessionActive: view.status === "active",
+    });
+  useEffect(() => {
+    queueRefreshRef.current = refreshQueue;
+  }, [refreshQueue]);
 
   // 当在线 provider 变化且当前选中的不再可用，回退到默认。
   useEffect(() => {
@@ -2656,6 +2824,8 @@ function SessionPanelDialog(props: SessionPanelProps) {
           sessionId,
           {
             onTurnStarted: (env) => {
+              // ql-20260825-011：新轮开跑（含排队消息自动派发）→ 刷队列条。
+              queueRefreshRef.current?.();
               setView((prev) => upsertDialogTurn(prev, env, (turn) => ({
                 ...turn,
                 turn: env.turn ?? turn.turn,
@@ -2683,6 +2853,8 @@ function SessionPanelDialog(props: SessionPanelProps) {
             },
             onTurnCompleted: (env) => {
               const terminal = deriveTurnTerminalStatus(env);
+              // ql-20260825-011：轮终态 → 后台会自动派发下一条排队消息，刷队列条。
+              queueRefreshRef.current?.();
               setView((prev) => upsertDialogTurn(prev, env, (turn) => {
                 // 终态清全部 text/thinking 段的 streaming 标记（finishTurn）——流式
                 // 光标与轮级状态条随之收起。segments 缺省的旧形状 turn 无 streaming
@@ -3053,6 +3225,8 @@ function SessionPanelDialog(props: SessionPanelProps) {
       const sid = view.sessionId;
       if (!sid) return;
       const placeholderId = `__pending_inject_${Date.now()}__`;
+      // ql-20260825-011：发送中打断回退标记（同 page 模式 inflightSendRef）。
+      inflightSendRef.current = { placeholderId, prompt };
       // 占位轮展示文本 = 标记行 + 原文（kind/name 查 attachmentMetaRef，D-004
       // 入队时已登记；无附件经 joinAttachmentMarkers 原样返回正文，不拼前导换行）。
       const markerLines = attachmentIds
@@ -3092,21 +3266,45 @@ function SessionPanelDialog(props: SessionPanelProps) {
           attachmentIds.length > 0
             ? await injectSession(sid, prompt, { attachment_ids: attachmentIds })
             : await injectSession(sid, prompt);
+        if (inflightSendRef.current?.placeholderId !== placeholderId) {
+          // ql-20260825-011：发送窗口期被「打断本轮」回退（占位轮已移除、消息
+          // 已回输入框）→ run 已创建则立即补发 interrupt 真停（409 忽略）。
+          if (resp.run_id) {
+            try {
+              await interruptSession(sid);
+            } catch {
+              /* NO_CURRENT_RUN：run 已完结 */
+            }
+          }
+          return;
+        }
+        if (resp.queued) {
+          // ql-20260825-011：竞态入队（上一轮尚未终结）→ 撤占位轮转服务端排队。
+          setView((prev) => ({
+            ...prev,
+            currentRunId: null,
+            turns: prev.turns.filter((t) => t.runId !== placeholderId),
+            errorMsg: null,
+          }));
+          queueRefreshRef.current?.();
+          onSendSettled(prompt, attachmentIds);
+          return;
+        }
         setView((prev) => ({
           ...prev,
           currentRunId: resp.run_id,
           turns: prev.turns.map((t) =>
             t.runId === placeholderId
-              ? { ...t, runId: resp.run_id, status: "running" }
+              ? { ...t, runId: resp.run_id!, status: "running" }
               : t,
           ),
           errorMsg: null,
         }));
-        // D-4：投递成功后清理附件元数据镜像（条目已出队，ids 不再被引用）。
-        for (const id of attachmentIds) attachmentMetaRef.current.delete(id);
+        onSendSettled(prompt, attachmentIds);
         // 不重建 SSE（贯穿多 turn）
       } catch (err) {
         const apiErr = err as ApiError;
+        if (inflightSendRef.current?.placeholderId !== placeholderId) return;
         // 移除未被接受的占位 turn；currentRunId 清空（inject 失败，无运行中 turn）。
         setView((prev) => ({
           ...prev,
@@ -3115,35 +3313,43 @@ function SessionPanelDialog(props: SessionPanelProps) {
           errorMsg: apiErr instanceof ApiError ? apiErr.message : "追问失败",
         }));
         throw err; // D-003：向上抛 → 调用方按路径处理（见函数头注释）
+      } finally {
+        if (inflightSendRef.current?.placeholderId === placeholderId) {
+          inflightSendRef.current = null;
+        }
       }
     },
-    [view.sessionId],
+    [view.sessionId, onSendSettled],
   );
 
   /**
-   * 队列投递回调（hook onSend，R2）：失败向上抛 → hook 标记 failed 留队头
-   * （D-003）。ql-20260825-007：附件 ids 透传 submitFollowup → injectSession
-   *（追问路径后端契约早已支持，此前 dialog 侧硬编码丢弃）。
+   * 忙轮路径（ql-20260825-011）：直接 POST inject——后端忙轮自动入服务端排队
+   * （无占位轮；run 终态后自动派发，SSE turn_started 自然建轮）。失败（满员
+   * 409 / 离线）errorMsg 提示，草稿与附件保留可改后重发。
    */
-  const sendFromQueue = useCallback(
+  const sendToServerQueue = useCallback(
     async (prompt: string, attachmentIds: string[]): Promise<void> => {
-      await submitFollowup(prompt, attachmentIds);
+      const sid = view.sessionId;
+      if (!sid) return;
+      try {
+        await injectSession(
+          sid,
+          prompt,
+          attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : undefined,
+        );
+        setView((prev) => ({ ...prev, errorMsg: null }));
+        queueRefreshRef.current?.();
+        onSendSettled(prompt, attachmentIds);
+      } catch (err) {
+        const apiErr = err as ApiError;
+        setView((prev) => ({
+          ...prev,
+          errorMsg: apiErr instanceof ApiError ? apiErr.message : "发送失败",
+        }));
+      }
     },
-    [submitFollowup],
+    [view.sessionId, onSendSettled],
   );
-
-  // 消息队列（design §3.3 / R2）：投递条件 = view.status === "active" &&
-  // !view.currentRunId（hook 内即此判断）；idle / creating 首条消息绕过队列直发
-  // createSession（handleSend idle 分支）。reconnecting 期间入队，attach 轮询转
-  // active 后 hook effect 自动投递（D-001）。sessionId 切换（attach → create /
-  // 新建重置）时 hook 清队——排队消息属于原会话。
-  const { queue, enqueue, removeEntry, retryEntry, isQueueFull } =
-    useMessageQueue({
-      sessionId: view.sessionId ?? "",
-      sessionActive: view.status === "active",
-      hasCurrentRun: view.currentRunId != null,
-      onSend: sendFromQueue,
-    });
 
   // ── task-11：会话内团队触发（弹层开关 + 预建回调，语义同 page 模式）──────
   const openTeamPopover = useCallback((objective: string | null) => {
@@ -3290,23 +3496,23 @@ function SessionPanelDialog(props: SessionPanelProps) {
       return;
     }
 
-    // 后续 turn（active / reconnecting）：入队等待投递（ql-20260825-007：附件随
-    // 消息入队，投递走 sendFromQueue → injectSession attachment_ids）。
+    // 后续 turn（active / reconnecting）：ql-20260825-011 改服务端排队——忙轮
+    // （有 currentRun）直接 POST inject 入队；空闲走 submitFollowup 占位轮直发。
+    // 草稿与附件改为发送成功后清（onSendSettled），失败原地保留可改后重发。
     const attachmentIds = pendingAttachments.map((a) => a.id);
-    // 标记行 + 原文（镜像 page 模式入队侧）；登记元数据镜像供投递侧占位轮拼行。
-    const markerLines = pendingAttachments
-      .map((a) => `[附件:${a.id}|${a.kind}|${a.name}]`)
-      .join("\n");
-    const displayPrompt = joinAttachmentMarkers(markerLines, prompt);
     for (const a of pendingAttachments) {
       attachmentMetaRef.current.set(a.id, { kind: a.kind, name: a.name });
     }
-    if (!enqueue(prompt, attachmentIds, displayPrompt)) return; // D-002 兜底
-    // 入队成功：清草稿 + 附件 chips（page 模式同款语义；队满失败时均保留）。
-    setInput("");
-    setPendingAttachments([]);
-    clearAttachmentsRef.current?.();
-  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.sessionId, isQueueFull, provider, changeId, workspaceId, establishStream, onSessionCreated, enqueue, openTeamPopover, pendingAttachments]);
+    if (view.currentRunId != null) {
+      await sendToServerQueue(prompt, attachmentIds);
+      return;
+    }
+    try {
+      await submitFollowup(prompt, attachmentIds);
+    } catch {
+      /* errorMsg 已写入 view（占位轮回滚），此路径不向上抛 */
+    }
+  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.sessionId, view.currentRunId, isQueueFull, provider, changeId, workspaceId, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments]);
 
   // 失败轮次「重新发送」——复用 submitFollowup 重新提交该 turn 的 prompt。受
   // turn 级串行 / active 守卫；retryable=false 的错误由 RunErrorItem 隐藏按钮
@@ -3339,6 +3545,23 @@ function SessionPanelDialog(props: SessionPanelProps) {
   const handleInterrupt = useCallback(async () => {
     if (!view.sessionId || !view.currentRunId || view.status !== "active") return;
     const localRunId = view.currentRunId;
+    // ql-20260825-011：发送中（inject 在途，占位 id）打断——消息回退输入框；
+    // 请求不 abort（后端可能已建 run），响应到达后由 submitFollowup 对真实
+    // run 补发 interruptSession 真停（见其 inflight 不匹配分支）。
+    if (localRunId.startsWith("__pending_inject_")) {
+      const inflight = inflightSendRef.current;
+      if (inflight && inflight.placeholderId === localRunId) {
+        inflightSendRef.current = null; // 标记已打断（响应侧据此走补发打断分支）
+        setView((prev) => ({
+          ...prev,
+          currentRunId: null,
+          turns: prev.turns.filter((t) => t.runId !== localRunId),
+        }));
+        // 回退消息：不覆盖用户在发送窗口期新输入的内容。
+        setInput((prev) => (prev === "" ? inflight.prompt : prev));
+      }
+      return;
+    }
     setView((prev) => ({
       ...prev,
       turns: prev.turns.map((t) =>
@@ -3691,7 +3914,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
       {teamMissions.length > 0 && (
         <div
           aria-label="会话团队任务列表"
-          className="flex shrink-0 flex-col gap-1.5 border-t border-border bg-card px-5 py-2"
+          className="flex max-h-[220px] shrink-0 flex-col gap-1.5 overflow-y-auto border-t border-border bg-card px-5 py-2"
         >
           {[...teamMissions]
             .sort(
@@ -3724,8 +3947,9 @@ function SessionPanelDialog(props: SessionPanelProps) {
           />
         </div>
       )}
-      {/* task-09：bash 命令进度卡片——bashProgress 存在时渲染。 */}
-      {bashProgress && (
+      {/* task-09：bash 命令进度卡片——bashProgress 存在时渲染。
+          ql-20260825-011：仅「进度」视图渲染（Bash running 不占对话窗口）。 */}
+      {bashProgress && viewMode === "all" && (
         <div className="shrink-0 border-t border-border bg-card px-5 py-3">
           <BashProgressCard
             command={bashProgress.command}
@@ -3736,7 +3960,8 @@ function SessionPanelDialog(props: SessionPanelProps) {
           />
         </div>
       )}
-      {/* verify P1 返工（FR-03）：后台 Agent 任务卡片（dialog 模式，与 page 同款）。 */}
+      {/* verify P1 返工（FR-03）：后台 Agent 任务卡片（dialog 模式，与 page 同款）。
+          ql-20260825-011：任务卡仅「进度」视图渲染（提示行两视图都保留）。 */}
       {agentTasks.length > 0 && (
         <div className="shrink-0 space-y-2 border-t border-border bg-card px-5 py-3">
           {view.currentRunId == null &&
@@ -3745,16 +3970,17 @@ function SessionPanelDialog(props: SessionPanelProps) {
                 后台任务仍在运行，会话未结束
               </p>
             )}
-          {agentTasks.map((task) => (
-            <AgentTaskCard
-              key={task.taskId}
-              taskId={task.taskId}
-              taskName={task.taskName}
-              status={task.status}
-              progress={task.progress}
-              message={task.message}
-            />
-          ))}
+          {viewMode === "all" &&
+            agentTasks.map((task) => (
+              <AgentTaskCard
+                key={task.taskId}
+                taskId={task.taskId}
+                taskName={task.taskName}
+                status={task.status}
+                progress={task.progress}
+                message={task.message}
+              />
+            ))}
         </div>
       )}
 
@@ -4019,6 +4245,35 @@ function writePersistedViewMode(
 ): void {
   try {
     window.localStorage.setItem(viewModeLsKey(sessionId), m);
+  } catch {
+    /* 静默容错 */
+  }
+}
+
+/* ── ql-20260825-011：输入框草稿按会话持久化（刷新/切换会话不丢）────────── */
+
+/** 预会话态（无 sessionId）的草稿固定键。 */
+const SESSION_DRAFT_PRE_KEY = "__pre__";
+
+function sessionDraftLsKey(sessionId: string | null): string {
+  return `sillyhub.sessions.draft.${sessionId ?? SESSION_DRAFT_PRE_KEY}`;
+}
+
+/** 挂载/切换会话回读草稿（SSR 或读取失败返回空串）。 */
+function readSessionDraft(sessionId: string | null): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(sessionDraftLsKey(sessionId)) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/** 每次输入变化写入（隐私模式等写入失败静默）。 */
+function writeSessionDraft(sessionId: string | null, draft: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(sessionDraftLsKey(sessionId), draft);
   } catch {
     /* 静默容错 */
   }

@@ -157,7 +157,9 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
   workspaceId,
 }: TeamTaskBlockProps) {
   const active = isActiveTeamMission(summary.status);
-  const [open, setOpen] = useState(active);
+  // ql-20260825-011：默认一律收起（原活跃任务自动展开，多任务并发时每个块都
+  // 铺满展开明细，会话被挤没）——进度看概要行，点开才看分身明细。
+  const [open, setOpen] = useState(false);
   // active → 终态过渡：自动收敛为折叠（终态默认折叠，对齐原型 §03 终态任务块）。
   const prevActiveRef = useRef(active);
   useEffect(() => {
@@ -300,19 +302,30 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
       className="w-full self-stretch overflow-hidden rounded-[10px] border border-violet-200 bg-violet-50/55"
       aria-label="团队任务"
     >
-      {/* 概要行（常驻，点击折叠/展开） */}
+      {/* 概要行（常驻，点击折叠/展开；ql-20260825-011：拖选文字不触发折叠） */}
       <div
         role="button"
         tabIndex={0}
         aria-expanded={open}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          if (
+            typeof window !== "undefined" &&
+            (() => {
+              const sel = window.getSelection();
+              return sel != null && !sel.isCollapsed && sel.toString().length > 0;
+            })()
+          ) {
+            return;
+          }
+          setOpen(!open);
+        }}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             setOpen(!open);
           }
         }}
-        className="flex w-full cursor-pointer select-none flex-wrap items-center gap-2 px-3 py-[7px] text-xs"
+        className="flex w-full cursor-pointer select-text flex-wrap items-center gap-2 px-3 py-[7px] text-xs"
       >
         <span className="inline-flex shrink-0 items-center gap-1 text-[12px] font-bold text-violet-700">
           <span aria-hidden>👥</span>团队任务

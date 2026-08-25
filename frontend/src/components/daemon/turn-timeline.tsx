@@ -272,6 +272,15 @@ export function TurnTimeline({
     const isNewPendingTurn =
       last !== null && last.status === "pending" && lastTurnKeyRef.current !== turnKey;
     lastTurnKeyRef.current = turnKey;
+    // ql-20260825-011：用户正在选中文字（复制中）时不自动滚底——流式 delta
+    // 每次更新 turns 都会拉底，反复破坏进行中的选区。
+    const selecting =
+      typeof window !== "undefined" &&
+      (() => {
+        const sel = window.getSelection();
+        return sel != null && !sel.isCollapsed && sel.toString().length > 0;
+      })();
+    if (selecting) return;
     if (isNewPendingTurn || isNearBottomRef.current) {
       el.scrollTo(0, el.scrollHeight);
     }

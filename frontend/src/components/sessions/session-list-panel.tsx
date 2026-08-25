@@ -418,7 +418,7 @@ function useSessionListSharedData() {
   const workspaceIdToName = useMemo(() => {
     const map = new Map<string, string>();
     for (const ws of workspacesQuery.data?.items ?? []) {
-      map.set(ws.id, ws.name);
+      map.set(ws.id, ws.display_alias ?? ws.name); // ql-20260825-011：别名优先
     }
     return map;
   }, [workspacesQuery.data]);
@@ -550,7 +550,7 @@ function WorkspaceTreeList({
         .map((ws) => ({
           id: ws.id,
           workspaceId: ws.id,
-          name: ws.name,
+          name: ws.display_alias ?? ws.name,
           canNew: false,
           sessions: byWs.get(ws.id) ?? [],
         }));
@@ -584,7 +584,7 @@ function WorkspaceTreeList({
     const result: TreeGroup[] = workspaces.map((ws) => ({
       id: ws.id,
       workspaceId: ws.id,
-      name: ws.name,
+      name: ws.display_alias ?? ws.name,
       canNew: true,
       sessions: byWs.get(ws.id) ?? [],
     }));

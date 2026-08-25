@@ -696,6 +696,8 @@ class DaemonService:
         # ql-20260825-004：每轮注入携带当前页面上下文（服务端回查注入
         # 【页面上下文】前导，组装归 session 子域 _inject_into_session）。
         page_context: PageContextCreateBlock | None = None,
+        # ql-20260825-011：忙轮入队透传（后端真实排队）。
+        queue_when_busy: bool = False,
     ) -> SessionDispatchResult:
         return await self._sess.inject_session(
             session_id,
@@ -705,6 +707,7 @@ class DaemonService:
             llm_provider_id=llm_provider_id,
             attachment_ids=attachment_ids,
             page_context=page_context,
+            queue_when_busy=queue_when_busy,
         )
 
     async def interrupt_session(
@@ -713,6 +716,40 @@ class DaemonService:
         user_id: uuid.UUID,
     ) -> SessionControlResult:
         return await self._sess.interrupt_session(session_id, user_id)
+
+    # ── ql-20260825-011：会话排队消息委托（后端真实排队） ─────────────────
+
+    async def list_queued_messages(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> list:
+        from app.modules.agent.model import AgentSessionQueuedMessage
+
+        entries: list[AgentSessionQueuedMessage] = await self._sess.list_queued_messages(
+            session_id, user_id
+        )
+        return entries
+
+    async def delete_queued_message(
+        self,
+        session_id: uuid.UUID,
+        entry_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> None:
+        await self._sess.delete_queued_message(session_id, entry_id, user_id)
+
+    async def retry_queued_message(
+        self,
+        session_id: uuid.UUID,
+        entry_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ):
+        return await self._sess.retry_queued_message(session_id, entry_id, user_id)
+
+    async def dispatch_queued_messages(self, session_id: uuid.UUID) -> None:
+        """派发会话排队消息（run 终态钩子 / retry 端点共用）。"""
+        await self._sess.dispatch_queued_messages(session_id)
 
     async def end_session(
         self,

@@ -696,6 +696,102 @@ class AgentSession(BaseModel, table=True):
     )
 
 
+# ql-20260825-011：会话排队消息上限（单会话 pending 条目数）。前后端同值，
+# 前端 use-message-queue / MessageQueueBar 的满员判定以本常量经 OpenAPI 类型
+# 对齐（前端硬编码同值 5，见 frontend/src/hooks/use-message-queue.ts）。
+SESSION_QUEUE_MAX_PENDING = 5
+
+
+class AgentSessionQueuedMessage(BaseModel, table=True):
+    """会话排队消息（ql-20260825-011，后端真实排队）。
+
+    忙轮（会话已有活跃 run）时用户发送的追问不再被 409 拒绝，而是落本表
+    排队；run 终态后由后台任务 ``dispatch_next_queued_message`` 依 created_at
+    顺序自动派发。排队是**会话级**的（单会话至多一个活跃 run 的不变式不变，
+    排队只是把「等上一轮结束」从浏览器内存挪到服务端——刷新页面不丢）。
+
+    - ``status``：pending（待派发）/ failed（派发失败，留在队列供用户重试或
+      删除）；派发成功即删行（turn 已落 AgentRun，队列不重复存史）。
+    - ``sender_user_id``：入队用户（派发时作为 run_sender_user_id 与归属
+      校验身份；多成员工作台同会话不同人排队各自记账）。
+    - ``attachment_ids`` / ``page_context`` / ``agent_profile_id`` /
+      ``llm_provider_id``：发送时的完整参数快照，派发时原样重放（页面上下文
+      取**发送时刻**的快照，语义与即时发送一致）。
+    """
+
+    __tablename__ = "agent_session_queued_messages"
+    __table_args__ = (
+        Index(
+            "ix_agent_session_queued_messages_session_status",
+            "agent_session_id",
+            "status",
+        ),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    agent_session_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_sessions.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    sender_user_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("users.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    prompt: str = Field(
+        sa_column=Column(Text, nullable=False),
+    )
+    # 附件引用快照（SessionAttachment id 的字符串列表；派发时转回 uuid 走
+    # _inject_into_session 的锁内附件校验兜底——附件可能已被删除，校验失败
+    # 该条目转 failed，不影响后续条目）。
+    attachment_ids: list | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    # 页面上下文快照（PageContextCreateBlock 的 dict 形态）。
+    page_context: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    # 切档案/切供应商快照（str 形态的 uuid；None = 发送时未携带）。
+    agent_profile_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    llm_provider_id: str | None = Field(
+        default=None,
+        sa_column=Column(String(64), nullable=True),
+    )
+    status: str = Field(
+        default="pending",
+        sa_column=Column(String(16), nullable=False, default="pending"),
+    )  # pending / failed
+    error_msg: str | None = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+    updated_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+
+
 class AgentMission(BaseModel, table=True):
     """Aggregation root for a multi-agent delegation.
 

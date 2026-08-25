@@ -4,7 +4,7 @@
 // 覆盖：
 //   1. 概要行常驻——状态徽标（中文映射）/ N 分身成功失败计数 / 预算；
 //   2. 展开明细——主控行 + 分身行（角色徽标 / 状态 / 目标 / 日志产物入口预留）；
-//   3. 折叠交互——活跃态默认展开、终态默认折叠、active→终态自动收敛、手动切换；
+//   3. 折叠交互——默认一律收起（ql-20260825-011）、active→终态保持折叠、手动切换；
 //   4. 取消——两步确认 → cancelTeamMission(mission_id) → onRefresh；失败显示错误；
 //      终态不渲染取消按钮；
 //   5. isActiveTeamMission 纯函数（planning/running/awaiting_input）；
@@ -49,6 +49,11 @@ const cancelMock = vi.mocked(cancelTeamMission);
 
 /* ───────── fixture ───────── */
 
+/** ql-20260825-011：块默认收起——断言明细内容的用例先点开概要行。 */
+function expandBlock() {
+  fireEvent.click(screen.getByText("展开 ▾"));
+}
+
 function makeSummary(
   overrides: Partial<TeamMissionSummary> = {},
 ): TeamMissionSummary {
@@ -81,8 +86,9 @@ beforeEach(() => {
 /* ───────── 1/2. 概要行 + 展开明细 ───────── */
 
 describe("TeamTaskBlock 概要行与明细", () => {
-  it("运行中：状态徽标 + 分身计数 + 预算；默认展开见主控行与分身行", () => {
+  it("运行中：状态徽标 + 分身计数 + 预算；点开后见主控行与分身行", () => {
     render(<TeamTaskBlock summary={makeSummary()} />);
+    expandBlock();
 
     // 概要行（badge / 统计 / 预算各为单一文本节点）。「运行中」出现两处：
     // 概要行徽标 + impl 分身行状态（主控行不重复 mission 状态）。
@@ -126,12 +132,14 @@ describe("TeamTaskBlock 概要行与明细", () => {
         }}
       />,
     );
+    expandBlock();
     // 单工作区范围：范围行 1 处 + 每个分身行各 1 处（原型 §01 分身行带目标工作区徽标）
     expect(screen.getAllByText("前端官网").length).toBe(4);
   });
 
   it("无分身：占位文案（主控接管后派发）", () => {
     render(<TeamTaskBlock summary={makeSummary({ workers: [] })} />);
+    expandBlock();
     expect(screen.getByText("暂无分身。主控接管后将按预设派发。")).toBeInTheDocument();
     expect(screen.getByText("0 分身 · 成功 0 / 失败 0")).toBeInTheDocument();
   });
@@ -167,7 +175,8 @@ describe("TeamTaskBlock 折叠交互", () => {
 
   it("active → 终态过渡自动收敛为折叠（父层 5s 轮询重渲染场景）", () => {
     const { rerender } = render(<TeamTaskBlock summary={makeSummary()} />);
-    expect(screen.getByText("🧠 主控")).toBeInTheDocument(); // 运行中默认展开
+    expandBlock();
+    expect(screen.getByText("🧠 主控")).toBeInTheDocument(); // 手动展开
 
     rerender(<TeamTaskBlock summary={makeSummary({ status: "done" })} />);
     expect(screen.queryByText("🧠 主控")).not.toBeInTheDocument(); // 过渡即折叠
@@ -181,6 +190,7 @@ describe("TeamTaskBlock 取消", () => {
     cancelMock.mockResolvedValue(undefined);
     const onRefresh = vi.fn();
     render(<TeamTaskBlock summary={makeSummary()} onRefresh={onRefresh} />);
+    expandBlock();
 
     // 第一步：进入确认态（不直接发请求）
     fireEvent.click(screen.getByRole("button", { name: "取消任务" }));
@@ -196,6 +206,7 @@ describe("TeamTaskBlock 取消", () => {
 
   it("确认态可返回（不发起取消）", () => {
     render(<TeamTaskBlock summary={makeSummary()} />);
+    expandBlock();
     fireEvent.click(screen.getByRole("button", { name: "取消任务" }));
     fireEvent.click(screen.getByRole("button", { name: "返回" }));
     expect(cancelMock).not.toHaveBeenCalled();
@@ -206,6 +217,7 @@ describe("TeamTaskBlock 取消", () => {
     cancelMock.mockRejectedValue(new Error("network down"));
     const onRefresh = vi.fn();
     render(<TeamTaskBlock summary={makeSummary()} onRefresh={onRefresh} />);
+    expandBlock();
 
     fireEvent.click(screen.getByRole("button", { name: "取消任务" }));
     fireEvent.click(screen.getByRole("button", { name: "确认取消" }));
@@ -241,6 +253,7 @@ describe("isActiveTeamMission（父层 5s 轮询启停判据）", () => {
 describe("TeamTaskBlock 引擎无关（Codex 置灰逻辑归 task-11 挂载层）", () => {
   it("纯 props 渲染，无 Claude/Codex 分支文案", () => {
     render(<TeamTaskBlock summary={makeSummary()} />);
+    expandBlock();
     expect(screen.queryByText(/Claude/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Codex/)).not.toBeInTheDocument();
     expect(screen.queryByText(/团队需要/)).not.toBeInTheDocument();
@@ -259,6 +272,7 @@ describe("TeamTaskBlock ql-20260825-003", () => {
       ],
     });
     render(<TeamTaskBlock summary={summary} />);
+    expandBlock();
     // 有名 → 名称徽标；无名 → #<id8> 原始徽标兜底
     expect(screen.getByText("sillyspec")).toBeTruthy();
     expect(screen.getByText("#aaaaaaaa")).toBeTruthy();
@@ -282,6 +296,7 @@ describe("TeamTaskBlock ql-20260825-003", () => {
       ],
     });
     render(<TeamTaskBlock summary={summary} />);
+    expandBlock();
     expect(screen.getAllByText("multi-agent-platform").length).toBe(2);
   });
 
@@ -300,6 +315,7 @@ describe("TeamTaskBlock ql-20260825-003", () => {
       ],
     });
     render(<TeamTaskBlock summary={summary} />);
+    expandBlock();
     fireEvent.click(screen.getByText("日志"));
     await waitFor(() =>
       expect(logsMock).toHaveBeenCalledWith(
@@ -320,6 +336,7 @@ describe("TeamTaskBlock ql-20260825-004 产物", () => {
       artifacts: [],
     });
     render(<TeamTaskBlock summary={makeSummary()} />);
+    expandBlock();
     fireEvent.click(screen.getAllByText("产物")[0]!);
     await waitFor(() => expect(artifactsMock).toHaveBeenCalled());
     expect(artifactsMock).toHaveBeenCalledWith(
@@ -338,6 +355,7 @@ describe("TeamTaskBlock ql-20260825-004 产物", () => {
       ],
     });
     render(<TeamTaskBlock summary={makeSummary()} />);
+    expandBlock();
     fireEvent.click(screen.getAllByText("产物")[0]!);
     await waitFor(() =>
       expect(screen.getByText("分析报告")).toBeInTheDocument(),
@@ -351,6 +369,7 @@ describe("TeamTaskBlock ql-20260825-004 产物", () => {
       artifacts: [],
     });
     render(<TeamTaskBlock summary={makeSummary()} />);
+    expandBlock();
     fireEvent.click(screen.getAllByText("产物")[0]!);
     await waitFor(() =>
       expect(screen.getByText("暂无产物")).toBeInTheDocument(),

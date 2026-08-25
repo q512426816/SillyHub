@@ -244,10 +244,35 @@
 方案：FilterPill 内层 span 改为 `inline-flex items-center gap-0.5 overflow-hidden`（flex 子项并排 + 溢出裁剪，保留 `max-w-[160px]` 截断），外层保持 `flex-wrap` 确保所有机器可见
 结果：vitest 2204/2204 绿；tsc 零错；Playwright DOM 验证：全部 5 个机器胶囊 `display:flex`、`pillH=21.6px`、`sameRow=true`；docker fix 镜像重建后容器内 API 代理正常（/api/health 200）
 
-## ql-20260825-011-76cf | 2026-08-25 18:21:40 | 会话聊天页 UX 修复：队列后端排队、发送中可打断+输入框本地缓存、文字可选中、上下文注入收进进度tab、团队/Bash/子代理折叠、左树工作区别名优先
-状态：进行中
+## ql-20260825-011-76cf | 2026-08-25 18:21:40 | 会话聊天页 6 项 UX 修复（后端真实排队/发送中打断回退/草稿缓存/文字可选中/上下文注入收进进度/团队与 Bash 折叠/左树别名）
+状态：已完成
 关联变更：（无）
-文件：（见实际改动）
+文件：
+- backend/app/modules/agent/model.py（新表 AgentSessionQueuedMessage+SESSION_QUEUE_MAX_PENDING）
+- backend/migrations/versions/20260825160000_agent_session_queued_messages.py（建表迁移）
+- backend/app/modules/daemon/session/service.py（忙轮入队+派发+队列管理+end 收口）
+- backend/app/modules/daemon/run_sync/service.py（turn 终态 fire 后台派发(先查 pending)）
+- backend/app/modules/daemon/router.py（inject 响应扩展+queue 三端点）
+- backend/app/modules/daemon/service.py（facade 委托）
+- backend/app/modules/daemon/tests/test_session_queue.py（新增 9 用例）
+- backend/app/modules/daemon/tests/test_session_router.py（409 契约改排队契约）
+- backend/openapi.json（gen 产物）
+- frontend/src/hooks/use-message-queue.ts（重写服务端队列）
+- frontend/src/hooks/__tests__/use-message-queue.test.ts（重写 8 用例）
+- frontend/src/lib/daemon.ts（队列 API 三件套+inject 类型）
+- frontend/src/lib/api-types.ts（gen 产物）
+- frontend/src/components/daemon/session-panel.tsx（两模式发送重构+打断回退+草稿持久化+SSE 刷队列+卡片门控+别名）
+- frontend/src/components/daemon/turn-segment-views.tsx（选中守卫+PreambleSegmentView）
+- frontend/src/components/daemon/turn-timeline.tsx（选中时暂停自动滚底）
+- frontend/src/components/daemon/team-task-block.tsx（默认收起+选中守卫）
+- frontend/src/components/daemon/session-log-assembler.ts（stripPreambleText）
+- frontend/src/components/daemon/runtime-session-helpers.tsx（历史 prompt 剥前导）
+- frontend/src/components/sessions/session-list-panel.tsx（左树别名优先）
+- frontend/src/components/daemon/__tests__/*.tsx（4 文件契约更新）
+需求：会话聊天页 6 项 UX 修复（后端真实排队/发送中打断回退/草稿缓存/文字可选中/上下文注入收进进度/团队与 Bash 折叠/左树别名）
+根因：队列原是浏览器内存态刷新即丢且后端忙轮 409；打断不支持发送窗口期且无回退；草稿无持久化；折叠行 select-none+整行点击吞选区；preamble 在对话气泡与进度视图重复且常驻展开；团队任务块活跃时自动展开挤占窗口；左树与面板头只显示工作区原名
+方案：后端新表 agent_session_queued_messages+迁移，inject 忙轮锁内入队、run 终态后台派发队头、end 收口 failed、新增 queue GET/DELETE/retry 端点；前端 use-message-queue 重写为服务端队列（轮询+SSE 事件刷新），session-panel 忙轮直发 inject、inflightSendRef 支持发送中打断回退输入框并对迟到 run 补发 interrupt，草稿按会话写 localStorage，折叠行加选中守卫与 select-text，PreambleSegmentView 默认收起+stripPreambleText 去对话重复，团队块默认收起+区域限高，Bash/后台任务卡仅进度视图渲染，左树与面板头 display_alias 优先
+结果：后端 pytest 排队 9 新用例+daemon 全量 1049+agent 1061+集成 998 全绿，ruff 清零；前端 vitest 全量 2186 全绿（重写 4 个受影响测试文件），tsc 清零，lint exit 0，pnpm gen:types 已提交 openapi.json+api-types.ts，PG 迁移已执行
 
 ## ql-20260825-012-89d6 | 2026-08-25 19:13:37 | daemon 会话恢复丢 stage 修复：validateRecord 补 stage/profile 三字段回填
 状态：已完成

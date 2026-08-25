@@ -47,6 +47,10 @@ const sessionApi = vi.hoisted(() => ({
   listSessionRuns: vi.fn(),
   listSessionTeamMissions: vi.fn(),
   triggerSessionTeamMission: vi.fn(),
+  // ql-20260825-011：服务端排队三件套（GET/DELETE/retry）。
+  fetchSessionQueue: vi.fn(),
+  deleteSessionQueueEntry: vi.fn(),
+  retrySessionQueueEntry: vi.fn(),
 }));
 
 vi.mock("@/lib/daemon", async () => {
@@ -65,6 +69,9 @@ vi.mock("@/lib/daemon", async () => {
     listSessionRuns: sessionApi.listSessionRuns,
     listSessionTeamMissions: sessionApi.listSessionTeamMissions,
     triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
+    fetchSessionQueue: sessionApi.fetchSessionQueue,
+    deleteSessionQueueEntry: sessionApi.deleteSessionQueueEntry,
+    retrySessionQueueEntry: sessionApi.retrySessionQueueEntry,
   };
 });
 
@@ -175,6 +182,19 @@ function setupDialog(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // ql-20260825-011：默认空队列（服务端排队三件套）。
+  sessionApi.fetchSessionQueue.mockResolvedValue([]);
+  sessionApi.deleteSessionQueueEntry.mockResolvedValue(undefined);
+  sessionApi.retrySessionQueueEntry.mockResolvedValue({
+    id: "entry-1",
+    prompt: "",
+    attachment_ids: [],
+    agent_profile_id: null,
+    llm_provider_id: null,
+    status: "pending",
+    error_msg: null,
+    created_at: "2026-08-25T10:00:00Z",
+  });
   // dialog attach 默认链路：prefetch 空 + fake SSE + 轮询 active。
   sessionApi.getAgentSessionLogs.mockResolvedValue([]);
   sessionApi.getAgentSession.mockResolvedValue(makeDetail("claude"));
@@ -292,9 +312,12 @@ describe("SessionPanel /team 指令拦截（dialog 模式）", () => {
     fireEvent.change(input2, { target: { value: `/team ${OBJECTIVE}` } });
     fireEvent.click(screen.getByTitle("发送"));
 
-    // 未拦截：消息进队列（MessageQueueBar），弹层不打开。
-    await waitFor(() =>
-      expect(screen.getByText(/排队消息（1）/)).toBeInTheDocument(),
+    // 未拦截：消息原样直达后端（忙轮服务端排队，ql-20260825-011），弹层不打开。
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
+    expect(sessionApi.injectSession).toHaveBeenCalledWith(
+      "sess-codex",
+      `/team ${OBJECTIVE}`,
+      undefined,
     );
     expect(screen.queryByText("派团队做这件事")).not.toBeInTheDocument();
   });

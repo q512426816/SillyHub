@@ -187,23 +187,49 @@ class TestSessionEndpointsErrors:
         assert resp.status_code == 201, resp.text
         return resp.json()
 
-    async def test_inject_conflict_409_when_active_run(
+    async def test_inject_busy_queues_message(
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],
         db_session: AsyncSession,
         fresh_ws_hub: DaemonWsHub,
     ) -> None:
+        """ql-20260825-011：忙轮 inject 不再 409，改入服务端排队（queued=true）。
+
+        原 test_inject_conflict_409_when_active_run 的 409 契约已被后端真实
+        排队取代：HTTP 端点恒 queue_when_busy=True，忙时返回 201 + queued。
+        409 TURN_CONFLICT 语义仍存在于 service 层（queue_when_busy=False 的
+        service 身份调用方），由 test_session_queue.py 守护。
+        """
         created = await self._seed_active_session(db_session, client, auth_headers, fresh_ws_hub)
-        # first run still pending → inject must conflict
+        # first run still pending → inject queues server-side
         resp = await client.post(
             f"/api/daemon/sessions/{created['session_id']}/inject",
             json={"prompt": "second"},
             headers=auth_headers,
         )
-        assert resp.status_code == 409, resp.text
+        assert resp.status_code == 201, resp.text
         body = resp.json()
-        assert "TURN_CONFLICT" in body.get("code", "") or body.get("code")
+        assert body["queued"] is True
+        assert body["run_id"] is None
+        assert body["queue_entry_id"]
+
+        # 队列读取端点能拿到该条目（刷新页面后的队列数据源）。
+        qresp = await client.get(
+            f"/api/daemon/sessions/{created['session_id']}/queue",
+            headers=auth_headers,
+        )
+        assert qresp.status_code == 200, qresp.text
+        items = qresp.json()["items"]
+        assert [i["prompt"] for i in items] == ["second"]
+        assert items[0]["status"] == "pending"
+
+        # 删除端点清队。
+        dresp = await client.delete(
+            f"/api/daemon/sessions/{created['session_id']}/queue/{body['queue_entry_id']}",
+            headers=auth_headers,
+        )
+        assert dresp.status_code == 204, dresp.text
 
     async def test_inject_404_wrong_user(
         self,

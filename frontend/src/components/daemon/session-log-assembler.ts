@@ -1447,3 +1447,17 @@ export function extractPreambleText(content: string): string | null {
   if (sep <= 0) return null;
   return trimmed.slice(0, sep);
 }
+
+/**
+ * ql-20260825-011：剥掉前导块，返回纯用户消息部分（与 extractPreambleText 同
+ * 判定）。历史回灌路径的 prompt 气泡用本函数——上下文注入信息只在「进度」
+ * 视图的 preamble 段展示（默认收起），对话视图不再重复显示前导全文。非前导
+ * 内容原样返回。
+ */
+export function stripPreambleText(content: string): string {
+  const trimmed = content.trim();
+  if (!PREAMBLE_HEADS.some((h) => trimmed.startsWith(h))) return content;
+  const sep = trimmed.indexOf("\n\n---\n\n");
+  if (sep <= 0) return content;
+  return trimmed.slice(sep + "\n\n---\n\n".length);
+}

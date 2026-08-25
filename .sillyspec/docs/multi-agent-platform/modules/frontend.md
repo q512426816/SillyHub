@@ -48,6 +48,7 @@ multi-agent-platform 的 Web 控制台，用户操作平台的唯一图形入口
 - **2026-08-19-cross-workspace-team-mission**（跨工作区团队执行 + 项目维度会话）：新增项目维度会话入口 `app/(dashboard)/projects/[id]/missions/page.tsx`；扩展 `components/mission-console.tsx` 支持 `projectMode`（scope 多选、anchor 单选、目标工作区徽标列、调用 `createProjectMission`/`listProjectMissions`）；`lib/agent.ts` 新增 `createProjectMission` / `listProjectMissions`（类型从 `api-types.ts` MissionResponse/MissionCreateRequest 导入）；`lib/api-types.ts` 随 backend OpenAPI 重新生成。 vitest 全量 1684 passed，tsc exit 0。
 
 ## 变更索引
+- ql-20260825-011-76cf | 会话聊天页 6 项 UX：①队列改服务端真实排队——use-message-queue 重写为 GET/queue+轮询+refresh（弃前端投递状态机；dialog 弹窗测试无 QueryClientProvider 故不用 react-query），session-panel 忙轮直发 inject（后端入队）+SSE turn 事件刷队列，daemon.ts 增队列三件套；②发送中可打断——inflightSendRef 占位标记，「打断本轮」在 inject 在途时回退消息进输入框并对迟到 run 补发 interruptSession；③输入草稿按会话存 localStorage（sillyhub.sessions.draft.<id>，预会话 __pre__ 键，rAF 门闩防回读前覆写）；④文字可选中——折叠行去 select-none/加 select-text+hasActiveTextSelection 拖选守卫（思考/工具/子代理/分身/团队块/前导），流式自动滚底遇选中暂停；⑤上下文注入收进进度视图——去「（创建轮，仅 AI 可见）」括号、PreambleSegmentView 默认收起可展开、历史 prompt 气泡 stripPreambleText 去重复展示；⑥团队任务块默认收起+列表区 max-h-220px 滚动、Bash/后台任务卡仅进度视图渲染、左树+面板头工作区 display_alias 优先。
 - ql-20260624-003-a7f1 | 优化 /runtimes 会话弹窗布局样式：扩大 RuntimeSessionDialog 工作区，改造会话列表为左侧栏，统一交互式会话与历史回看面板高度和输入栏间距。
 - ql-20260624-004-c8a2 | 优化 /settings/api-keys 页面和 API Key 创建弹窗：统一页面容器、标题区、卡片、状态和空态样式，补充统计概览与表格密度整理。
 - ql-20260625-003-4d7a | 优化 Agent/会话运行日志展示：默认突出用户消息、Agent 回复和思考缩略，补充 token/cache 用量、额外日志类型开关，以及会话实时/历史消息技术日志折叠。

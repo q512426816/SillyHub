@@ -1,34 +1,42 @@
 /**
- * useMessageQueue —— 会话消息排队 Hook（2026-08-21-session-message-queue task-01）。
+ * useMessageQueue —— 会话消息排队 Hook（ql-20260825-011 后端真实排队重写）。
  *
- * 设计依据（changes/2026-08-21-session-message-queue/design.md §2 / §3.1）：
- *   - D-001 前端队列等 active：running / reconnecting / pending 期间消息入队，
- *     等 sessionActive && !hasCurrentRun 后自动投递队头（后端 inject 守卫不动）；
- *   - D-002 队列上限默认 5 条：enqueue 满员返回 false；是否禁用输入框由调用方
- *     判断（hook 不做门禁，enqueue 只管入队返回布尔）；
- *   - D-003 失败留队头：投递抛错时条目标记 failed(errorMsg) 停在队头，不自动
- *     重试、不自动跳过（队头 failed 会阻塞后续投递），重试仅由用户点 retryEntry 触发；
- *   - D-004 附件排队：attachmentIds 只引用已落库附件 id，投递时随 prompt 一次带出。
+ * 演进：2026-08-21 版是纯前端内存队列（useState，刷新即丢、投递靠本地
+ * processQueue 轮询 sessionActive/hasCurrentRun）。现改为**服务端排队**：
+ *   - 入队 = 直接 POST inject（后端忙轮自动落 agent_session_queued_messages，
+ *     响应 queued=true）；run 终态后后台自动派发下一条；
+ *   - 队列展示 = GET /sessions/{id}/queue（刷新/重开页面不丢）；
+ *   - 删除/重试 = DELETE / POST retry 端点；
+ *   - 前端不再持有投递状态机（processQueue/sendingRef 删除）——串行不变式
+ *     由后端「单会话至多一个活跃 run + 行锁」保证。
  *
- * 防重入：sendingRef 保证同一时刻至多一条在投递（effect 重复触发直接返回）。
- * 卸载安全：mountedRef 防御，unmount 后不再 setState。
- * 状态镜像：queueRef 与 state 同步更新，processQueue 异步续段一律读 queueRef
- * （state 闭包是旧值）。
+ * 刷新时机：sessionActive 期间 5s 轮询兜底 + 调用方在 SSE turn_started /
+ * turn_completed 事件后调 refresh()。
+ *
+ * 实现约束：**不用 react-query**——dialog 模式弹窗测试无 QueryClientProvider
+ * （lib/query-keys.ts 头注释的不变式：dialog 适配层零 react-query），本 hook 为
+ * 两模式共享，故纯 useState + fetch 轮询（lib/query-keys.ts:12-14 先例）。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-/** 排队条目（design §3.1 逐字定义）。 */
+import {
+  deleteSessionQueueEntry,
+  fetchSessionQueue,
+  retrySessionQueueEntry,
+} from "@/lib/daemon";
+
+/** 排队条目（展示形态；与 MessageQueueBar 契约保持兼容）。 */
 export interface QueueEntry {
-  /** 唯一标识（入队时生成）。 */
+  /** 服务端条目 id（uuid）。 */
   id: string;
-  /** 消息文本（投递给 onSend 的原文）。 */
+  /** 消息文本（派发给 inject 的原文）。 */
   prompt: string;
-  /** 附件 ids（D-004：上传时已落库，排队仅引用 id）。 */
+  /** 附件 ids（仅引用已落库附件 id）。 */
   attachmentIds: string[];
-  /** 带附件标记行的展示文本（MessageQueueBar 展开查看用）。 */
+  /** 展示文本（服务端队列不含附件标记行，直接用 prompt）。 */
   displayPrompt: string;
-  /** 投递状态：pending 等待 / sending 投递中 / failed 失败留队（D-003）。 */
+  /** 状态：pending 等待派发 / failed 派发失败留队（sending 由后端派发吸收，不再出现）。 */
   status: "pending" | "sending" | "failed";
   /** 失败原因（status === "failed" 时有值）。 */
   errorMsg?: string;
@@ -37,75 +45,41 @@ export interface QueueEntry {
 }
 
 export interface UseMessageQueueOptions {
-  /** 会话 id（切换会话时清空队列——排队消息属于原会话，不携带到新会话）。 */
+  /** 会话 id（空串 = 预会话态，不发队列查询）。 */
   sessionId: string;
-  /** status === "active"（D-001：等 active 才投递）。 */
+  /** status === "active"（active 才轮询队列；终态会话队列冻结不刷）。 */
   sessionActive: boolean;
-  /** currentRunId != null（本轮运行中，直接投递会破坏 turn 串行）。 */
-  hasCurrentRun: boolean;
-  /** 实际发送（inject）：成功 resolve / 失败 throw，由调用方实现。 */
-  onSend: (prompt: string, attachmentIds: string[]) => Promise<void>;
-  /** 队列上限，默认 5（D-002）。 */
-  maxQueue?: number;
 }
 
 export interface UseMessageQueueReturn {
   /** 当前队列（驱动 MessageQueueBar 渲染）。 */
   queue: QueueEntry[];
-  /** 入队：满员返回 false（D-002），其余情况一律入队返回 true。 */
-  enqueue: (
-    prompt: string,
-    attachmentIds: string[],
-    displayPrompt: string,
-  ) => boolean;
-  /** 按 id 移除条目。 */
+  /** 按 id 移除条目（DELETE 端点 + 失效刷新）。 */
   removeEntry: (id: string) => void;
-  /** 重试失败条目：failed → pending 后立即尝试投递；条件不满足则等 effect 触发（D-003：仅用户触发）。 */
-  retryEntry: (id: string) => Promise<void>;
-  /** 队列是否已满（D-002）。 */
+  /** 重试失败条目（POST retry 端点：failed→pending 并立即尝试派发）。 */
+  retryEntry: (id: string) => void;
+  /** 队列是否已满（与后端 SESSION_QUEUE_MAX_PENDING 同值）。 */
   isQueueFull: boolean;
   /** 队列长度。 */
   queueCount: number;
+  /** 主动刷新（SSE turn_started/turn_completed 后调用）。 */
+  refresh: () => void;
 }
 
-/** 队列上限默认值（D-002）。 */
+/** 队列上限（D-002 沿用；与后端 SESSION_QUEUE_MAX_PENDING 同值，满员由后端 409 守卫）。 */
 const DEFAULT_MAX_QUEUE = 5;
 
-/**
- * 生成条目 id：浏览器优先 crypto.randomUUID；非安全上下文退时间戳+随机数
- * （与 lib/use-agent-run-stream.ts _safeRuntimeId 同义的本地兜底）。
- */
-function _entryId(): string {
-  if (typeof globalThis.crypto?.randomUUID === "function") {
-    return globalThis.crypto.randomUUID();
-  }
-  return `mq-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
+/** 轮询间隔（ms）：active 会话低频兜底（主要靠 SSE 事件触发的 refresh）。 */
+const POLL_INTERVAL_MS = 5000;
 
 export function useMessageQueue({
   sessionId,
   sessionActive,
-  hasCurrentRun,
-  onSend,
-  maxQueue = DEFAULT_MAX_QUEUE,
 }: UseMessageQueueOptions): UseMessageQueueReturn {
   const [queue, setQueue] = useState<QueueEntry[]>([]);
-  /** 队列镜像 ref：异步续段读最新队列，与 state 同步更新（见文件头注释）。 */
-  const queueRef = useRef<QueueEntry[]>([]);
-  /** 防重入：true = 有一条正在投递中。 */
-  const sendingRef = useRef(false);
-  /** 卸载安全：unmount 后不再 setState。 */
+  /** 卸载/换会话后迟到的响应丢弃（epoch 单调递增，响应携带发起时的 epoch）。 */
+  const epochRef = useRef(0);
   const mountedRef = useRef(true);
-
-  const updateQueue = useCallback(
-    (updater: (prev: QueueEntry[]) => QueueEntry[]) => {
-      queueRef.current = updater(queueRef.current);
-      if (mountedRef.current) setQueue(queueRef.current);
-    },
-    [],
-  );
-
-  // 卸载标记（StrictMode 双挂载下重复置 true 亦无害）。
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -113,100 +87,82 @@ export function useMessageQueue({
     };
   }, []);
 
-  // 会话切换：清空队列（排队消息属于原会话；投递到新会话等于串话）。
-  const sessionIdRef = useRef(sessionId);
-  useEffect(() => {
-    if (sessionIdRef.current === sessionId) return;
-    sessionIdRef.current = sessionId;
-    updateQueue(() => []);
-  }, [sessionId, updateQueue]);
-
-  const enqueue = useCallback(
-    (prompt: string, attachmentIds: string[], displayPrompt: string): boolean => {
-      if (queueRef.current.length >= maxQueue) return false; // D-002 满员拒收
-      const entry: QueueEntry = {
-        id: _entryId(),
-        prompt,
-        attachmentIds,
-        displayPrompt,
-        status: "pending",
-        createdAt: Date.now(),
-      };
-      updateQueue((prev) => [...prev, entry]);
-      return true;
+  const load = useCallback(
+    async (targetSessionId: string): Promise<void> => {
+      if (targetSessionId === "") {
+        setQueue([]);
+        return;
+      }
+      const epoch = ++epochRef.current;
+      try {
+        const items = await fetchSessionQueue(targetSessionId);
+        if (!mountedRef.current || epoch !== epochRef.current) return;
+        setQueue(
+          items.map((e) => ({
+            id: e.id,
+            prompt: e.prompt,
+            attachmentIds: e.attachment_ids ?? [],
+            displayPrompt: e.prompt,
+            status: e.status === "failed" ? ("failed" as const) : ("pending" as const),
+            errorMsg: e.error_msg ?? undefined,
+            createdAt: Date.parse(e.created_at) || 0,
+          })),
+        );
+      } catch {
+        /* 队列拉取失败静默（下轮轮询/refresh 重试），不打断聊天主流程 */
+      }
     },
-    [maxQueue, updateQueue],
+    [],
   );
+
+  // 会话切换 / 挂载：清旧队列 + 立即拉新。
+  useEffect(() => {
+    void load(sessionId);
+  }, [sessionId, load]);
+
+  // active 期间低频轮询兜底（派发/失败主要靠 SSE 事件触发的 refresh）。
+  useEffect(() => {
+    if (sessionId === "" || !sessionActive) return;
+    const timer = setInterval(() => {
+      void load(sessionId);
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [sessionId, sessionActive, load]);
+
+  const refresh = useCallback(() => {
+    void load(sessionId);
+  }, [load, sessionId]);
 
   const removeEntry = useCallback(
     (id: string) => {
-      updateQueue((prev) => prev.filter((e) => e.id !== id));
+      if (sessionId === "") return;
+      void deleteSessionQueueEntry(sessionId, id)
+        .catch(() => {
+          /* 删除失败仍刷新（以服务端为准） */
+        })
+        .then(() => load(sessionId));
     },
-    [updateQueue],
+    [sessionId, load],
   );
 
-  /**
-   * 投递队头一条（design §3.1 processQueue）：
-   * 条件 = active && 无 currentRun && 队列非空 && 队头 pending
-   * （队头 failed 停队不跳过 D-003；sending 由防重入兜底）。
-   * 成功 → 移除该条，下一条由 effect 依最新 sessionActive/hasCurrentRun 再触发
-   * （不就地连发：避免用陈旧的 hasCurrentRun 连续投递破坏 turn 串行）；
-   * 失败 → 标 failed(errorMsg) 留在队头（D-003），停住不自动跳过。
-   */
-  const processQueue = useCallback(async (): Promise<void> => {
-    if (sendingRef.current) return; // 防重入
-    if (!sessionActive || hasCurrentRun) return;
-    const head = queueRef.current[0];
-    if (!head || head.status !== "pending") return;
-    sendingRef.current = true;
-    updateQueue((prev) =>
-      prev.map((e) => (e.id === head.id ? { ...e, status: "sending" as const } : e)),
-    );
-    try {
-      await onSend(head.prompt, head.attachmentIds);
-      if (!mountedRef.current) return;
-      updateQueue((prev) => prev.filter((e) => e.id !== head.id));
-    } catch (err) {
-      if (!mountedRef.current) return;
-      const errorMsg = err instanceof Error ? err.message : "发送失败";
-      updateQueue((prev) =>
-        prev.map((e) =>
-          e.id === head.id ? { ...e, status: "failed" as const, errorMsg } : e,
-        ),
-      );
-    } finally {
-      sendingRef.current = false;
-    }
-  }, [sessionActive, hasCurrentRun, onSend, updateQueue]);
-
-  // 触发时机（design §3.1）：effect 监听 sessionActive / hasCurrentRun；
-  // 队列自身变化（入队 / 移除 / 投递完成 / 重试重置）也重新评估——
-  // active 且空闲时入队即自动投递，一条成功后接着评估下一条。
-  useEffect(() => {
-    void processQueue();
-  }, [processQueue, queue]);
-
   const retryEntry = useCallback(
-    async (id: string): Promise<void> => {
-      // failed → pending（清错误信息），随后立即尝试投递；条件不满足则留队等 effect。
-      updateQueue((prev) =>
-        prev.map((e) =>
-          e.id === id
-            ? { ...e, status: "pending" as const, errorMsg: undefined }
-            : e,
-        ),
-      );
-      await processQueue();
+    (id: string) => {
+      if (sessionId === "") return;
+      void retrySessionQueueEntry(sessionId, id)
+        .catch(() => {
+          /* 重试失败仍刷新（以服务端为准） */
+        })
+        .then(() => load(sessionId));
     },
-    [processQueue, updateQueue],
+    [sessionId, load],
   );
 
   return {
     queue,
-    enqueue,
     removeEntry,
     retryEntry,
-    isQueueFull: queue.length >= maxQueue,
+    isQueueFull: queue.length >= DEFAULT_MAX_QUEUE,
     queueCount: queue.length,
+    refresh,
   };
 }

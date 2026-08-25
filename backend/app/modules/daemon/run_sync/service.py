@@ -1378,6 +1378,31 @@ class RunSyncService:
             is_error=is_error,
             subtype=subtype,
         )
+
+        # ql-20260825-011（后端真实排队）：turn 终态 → 后台派发下一条排队消息。
+        # 先查有无 pending 条目（close 已 commit，读快照零锁）——绝大多数会话
+        # 无排队，不起空转任务；有才 fire（H4 强引用防 GC，独立 DB session H1）。
+        # 会话可能已被终态翻成 ended/failed（dispatch 内部自查自弃）。
+        if agent_run.agent_session_id is not None:
+            from app.modules.agent.model import AgentSessionQueuedMessage
+
+            has_pending = (
+                await self._session.execute(
+                    select(AgentSessionQueuedMessage.id)
+                    .where(
+                        AgentSessionQueuedMessage.agent_session_id == agent_run.agent_session_id,
+                        AgentSessionQueuedMessage.status == "pending",
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if has_pending is not None:
+                from app.modules.daemon.session.service import dispatch_next_queued_message
+
+                self._fire_background_task(
+                    dispatch_next_queued_message(agent_run.agent_session_id),
+                    run_id=agent_run.id,
+                )
         return agent_run
 
     # ── Driver Gate enqueue helpers（task-05 / design §5.1） ─────────────────

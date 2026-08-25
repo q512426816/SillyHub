@@ -1806,9 +1806,52 @@ class SessionCreateResponse(BaseModel):
 
 
 class SessionInjectResponse(BaseModel):
+    """ql-20260825-011：``queued=True`` 时消息进服务端排队（run_id 为 None），
+    run 终态后自动派发；``queued=False`` 为既有即时派发语义。"""
+
     session_id: uuid.UUID
-    run_id: uuid.UUID
+    run_id: uuid.UUID | None = None
     status: str
+    queued: bool = False
+    queue_entry_id: uuid.UUID | None = None
+
+
+class SessionQueueEntry(BaseModel):
+    """排队消息条目（ql-20260825-011，GET /sessions/{id}/queue 项）。"""
+
+    id: uuid.UUID
+    prompt: str
+    attachment_ids: list[uuid.UUID] = Field(default_factory=list)
+    agent_profile_id: str | None = None
+    llm_provider_id: str | None = None
+    status: str
+    error_msg: str | None = None
+    created_at: datetime
+
+
+def _queue_entry_dto(entry) -> SessionQueueEntry:
+    """ORM 行 → DTO（attachment_ids JSON 字符串列表宽容解析）。"""
+    parsed: list[uuid.UUID] = []
+    for raw in entry.attachment_ids or []:
+        try:
+            parsed.append(uuid.UUID(str(raw)))
+        except (ValueError, TypeError):
+            continue
+    return SessionQueueEntry(
+        id=entry.id,
+        prompt=entry.prompt,
+        attachment_ids=parsed,
+        agent_profile_id=entry.agent_profile_id,
+        llm_provider_id=entry.llm_provider_id,
+        status=entry.status,
+        error_msg=entry.error_msg,
+        created_at=entry.created_at,
+    )
+
+
+class SessionQueueResponse(BaseModel):
+    session_id: uuid.UUID
+    items: list[SessionQueueEntry] = Field(default_factory=list)
 
 
 class SessionControlResponse(BaseModel):
@@ -2263,12 +2306,66 @@ async def inject_session(
         attachment_ids=data.attachment_ids or None,
         # ql-20260825-004：每轮注入携带当前页面上下文。
         page_context=data.page_context,
+        # ql-20260825-011：忙轮入队（后端真实排队，前端 UI 语义）；服务身份
+        # 调用方不经本端点，保持 409 拒绝语义。
+        queue_when_busy=True,
     )
     return SessionInjectResponse(
         session_id=result.agent_session.id,
-        run_id=result.agent_run.id,
-        status=result.agent_run.status or "pending",
+        run_id=result.agent_run.id if result.agent_run is not None else None,
+        status=(result.agent_run.status or "pending" if result.agent_run is not None else "queued"),
+        queued=result.queued,
+        queue_entry_id=result.queue_entry_id,
     )
+
+
+@router.get(
+    "/sessions/{session_id}/queue",
+    response_model=SessionQueueResponse,
+)
+async def list_session_queue(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> SessionQueueResponse:
+    """列出会话排队消息（ql-20260825-011，created_at 升序 = 派发顺序）。"""
+    svc = DaemonService(session)
+    entries = await svc.list_queued_messages(session_id, user.id)
+    return SessionQueueResponse(
+        session_id=session_id,
+        items=[_queue_entry_dto(entry) for entry in entries],
+    )
+
+
+@router.delete(
+    "/sessions/{session_id}/queue/{entry_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_session_queue_entry(
+    session_id: uuid.UUID,
+    entry_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> None:
+    """删除一条排队消息（用户在队列条上点 ×）。"""
+    svc = DaemonService(session)
+    await svc.delete_queued_message(session_id, entry_id, user.id)
+
+
+@router.post(
+    "/sessions/{session_id}/queue/{entry_id}/retry",
+    response_model=SessionQueueEntry,
+)
+async def retry_session_queue_entry(
+    session_id: uuid.UUID,
+    entry_id: uuid.UUID,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+):
+    """failed 排队消息重试（翻 pending 并立即尝试派发，忙则留队）。"""
+    svc = DaemonService(session)
+    entry = await svc.retry_queued_message(session_id, entry_id, user.id)
+    return _queue_entry_dto(entry)
 
 
 @router.post(

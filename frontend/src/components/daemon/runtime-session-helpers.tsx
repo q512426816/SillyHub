@@ -14,6 +14,7 @@ import {
   extractPreambleText,
   logsToSegments,
   segmentsToLegacy,
+  stripPreambleText,
   type AssemblerLogInput,
   type TurnSegment,
 } from "@/components/daemon/session-log-assembler";
@@ -293,7 +294,11 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
             ts: entry.timestamp ? Date.parse(entry.timestamp) : null,
           });
         }
-        prompts.push(seg.text);
+        // ql-20260825-011：prompt 气泡剥掉前导块——上下文注入只在「进度」视图的
+        // preamble 段（默认收起）展示，对话视图不重复显示前导全文。
+        prompts.push(
+          preambleText ? stripPreambleText(seg.text) : seg.text,
+        );
         continue;
       }
       assemblerInputs.push(toAssemblerInput(entry));
