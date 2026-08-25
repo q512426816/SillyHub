@@ -40,7 +40,6 @@ import { resolveDefaultMachineId } from "@/components/sessions/sessions-portal";
 import {
   listAgentSessions,
   type AgentSessionRead,
-  type DaemonMachineRead,
   type SessionCreateResponse,
 } from "@/lib/daemon";
 import { listProviders } from "@/lib/api/llm-providers";
@@ -266,7 +265,7 @@ function FloatingDrawerBody({
               key={sessionId}
               mode="page"
               sessionId={sessionId}
-              machines={machines as DaemonMachineRead[]}
+              machines={machines}
               llmProviders={providers}
               onSessionListRefresh={refreshLists}
             />
@@ -275,7 +274,7 @@ function FloatingDrawerBody({
               key={`pre:${preContext.workspaceId ?? "-"}:${preContext.runtimeId}`}
               mode="page"
               sessionId={null}
-              machines={machines as DaemonMachineRead[]}
+              machines={machines}
               llmProviders={providers}
               preContext={preContext as SessionPreContext}
               onPreSessionCreated={handlePreSessionCreated}
@@ -306,7 +305,7 @@ function FloatingDrawerBody({
       {/* 机器兜底两步浮层（复用门户组件；fixed 全屏遮罩，v1 接受） */}
       <PreSessionPicker
         open={pickerOpen}
-        machines={machines as DaemonMachineRead[]}
+        machines={machines}
         onCancel={() => setPickerOpen(false)}
         onPick={(runtimeId) => {
           startPreSession({ runtimeId, workspaceId: null }, pageContext);
@@ -353,13 +352,14 @@ export function FloatingSessionHost() {
 
   return (
     <>
-      {/* 最小化保活胶囊（球上方分层，避开右下角待答审批胶囊语义区） */}
+      {/* 最小化保活胶囊（球上方分层；经门户互斥后恢复=面板重挂载回放，现场
+          语义仍是恢复选中会话——文案不承诺"连接未断"以免与互斥协议矛盾） */}
       {minimized && (
         <button
           type="button"
           data-testid="floating-capsule"
           onClick={restore}
-          title="恢复悬浮会话（现场保留，连接未断）"
+          title="恢复悬浮会话"
           className="fixed bottom-20 right-5 z-40 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-card px-4 py-1.5 text-xs font-semibold text-brand-700 shadow-md transition-transform hover:-translate-y-0.5"
         >
           <span className="h-2 w-2 animate-pulse rounded-full bg-brand-600" />
