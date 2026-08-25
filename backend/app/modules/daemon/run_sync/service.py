@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -39,6 +39,7 @@ from app.modules.daemon.session.service import (
     TERMINAL_TURN_STATUSES,
     _apply_session_terminal_status,
     _send_session_end_best_effort,
+    get_session_readiness,
 )
 from app.modules.daemon.session_events import publish_sessions_changed
 from app.modules.git_gateway.service import redact_output
@@ -1072,6 +1073,45 @@ class RunSyncService:
         )
         return agent_run
 
+    async def _is_gate_rejected_first_failure(
+        self, agent_run: AgentRun, session: AgentSession
+    ) -> bool:
+        """task-06 / FR-06 / D-006@v1（Grill M1-R 终版）：闸拒绝失败收口触发面判定。
+
+        daemon 会话闸（task-04 SessionManager.create 抛 SessionLimitReached）拒绝
+        的分身子会话：daemon notifyRunResult 标首 run failed 回传，但会话从未
+        mark_ready（闸拒绝发生在 create 阶段，daemon 从未上报 ready——探测口径
+        对齐 session/service.py :3021 clear 先例）。三条件齐备才命中，缺一不可：
+
+        ① ``run.status == "failed"``（首 run completed 不涉及）；
+        ② 首 run——该会话 AgentRun 行数恰 1（即本 run；调用点 pending 写入已
+           add，count 查询 autoflush 后本 run 在内，追问轮行数 > 1 不命中）；
+        ③ 会话从未 ready（readiness 单例只读直探 ``_ready`` 成员——不建
+           ``_events`` 残留槽位）且 ``parent_session_id`` 非空（分身子会话，
+           普通用户会话 NULL 不涉及）。
+
+        追问轮中途失败的存活分身（曾 mark_ready / 已有更早 run）、首 run
+        completed、parent NULL 普通会话均不命中（触发面收窄防误杀——turn 失败
+        ≠会话死亡，P1 原则）。命中由调用方覆写多轮 keep-active 为 failed（对齐
+        P1 ``_fail_worker_subsession`` 语义，非 ended），杜绝闸拒绝后子会话占
+        daemon 会话额度且 mission 卡死。
+
+        Note: 只读探测（readiness 单例 + 一次 count 查询），不改
+        daemon/session/service.py（约束铁律），不修改传入对象。
+        """
+        if agent_run.status != "failed":
+            return False
+        if session.parent_session_id is None:
+            return False
+        if session.id in get_session_readiness()._ready:
+            return False
+        run_count = await self._session.scalar(
+            select(func.count())
+            .select_from(AgentRun)
+            .where(AgentRun.agent_session_id == session.id)
+        )
+        return run_count == 1
+
     async def close_interactive_run(
         self,
         lease_id: uuid.UUID,
@@ -1315,6 +1355,18 @@ class RunSyncService:
             session = await self._session.get(AgentSession, agent_run.agent_session_id)
             if session is not None:
                 new_status = _apply_session_terminal_status(agent_run, session)
+                # task-06 / FR-06 / D-006@v1（Grill M1-R 终版）：闸拒绝失败收口
+                # ——命中优先于多轮 keep-active。daemon 会话闸拒绝的分身子会话首
+                # run 回传 failed 时，_apply_session_terminal_status 对 interactive
+                # 多轮返 active 会让子会话永驻 active（占 daemon 会话额度 + mission
+                # 卡死）；触发面三条件齐备（_is_gate_rejected_first_failure）则覆写
+                # 为 failed（非 ended），复用下方既有翻转块（ended_at + SESSION_END
+                # + publish 链）。幂等守卫不变：new_status=None（会话已 ended/
+                # failed）时下方整体跳过，本规则不复活终态会话。
+                if new_status == "active" and await self._is_gate_rejected_first_failure(
+                    agent_run, session
+                ):
+                    new_status = "failed"
                 if new_status is not None:
                     session.status = new_status
                     if new_status in ("ended", "failed"):
