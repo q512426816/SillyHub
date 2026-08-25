@@ -29,7 +29,8 @@ this service only enforces gates and mutates cancellation.
   ``_lookup_interactive_lease_by_run`` 回捞链发 SESSION_END（lease cancelled +
   子会话 ended），存量 batch run 路径不变。
 子会话完成判定唯一入口 ``mission.is_worker_complete``（task-08）、枚举唯一入口
-``model.mission_worker_sessions``（task-01），本模块不自写判据。
+``model.mission_worker_sessions_tree``（task-01，2026-08-26-team-subsession-recursion
+task-08 起治理口径换全树含孙层，design §5.E），本模块不自写判据。
 """
 
 from __future__ import annotations
@@ -49,7 +50,7 @@ from app.modules.agent.model import (
     AgentMission,
     AgentRun,
     AgentSession,
-    mission_worker_sessions,
+    mission_worker_sessions_tree,
 )
 
 log = get_logger(__name__)
@@ -111,12 +112,17 @@ class MissionControlService:
         存量口径 = ``non_orchestrator_runs`` 剔除 ``agent_session_id ∈ 分身子会话``
         的 run（即子会话首 run——design §5.A 双标记锚）——分身状态一律以子会话
         行（``is_worker_complete``）/ 子会话轮次 run 为准，避免同一分身在 run 与
-        会话两维度双计（对齐 ``mission_derive_status`` 虚拟映射的同款剔除）。
+        会话两维度双计（对齐 ``mission_derive_status`` 剔除口径）。
         无子会话 mission（session_id NULL / 无子行）返回空会话列表，全量回落
         存量口径（FR-09 零回归）。
+
+        2026-08-26-team-subsession-recursion task-08（design §5.E / FR-07）：
+        枚举单点换 ``mission_worker_sessions_tree`` **全树**（一层→含孙层）——
+        下方三口径（并发计数 / cost union / cancel kill 名单）全部经本方法取
+        会话集合，孙层分身自动计入治理；无孙树与一层枚举等价（FR-08 零回归）。
         """
         runs = await self.non_orchestrator_runs(mission_id)
-        sessions = await mission_worker_sessions(self._session, mission_id)
+        sessions = await mission_worker_sessions_tree(self._session, mission_id)
         session_ids = {s.id for s in sessions}
         legacy_runs = [r for r in runs if r.agent_session_id not in session_ids]
         return legacy_runs, sessions
@@ -138,9 +144,10 @@ class MissionControlService:
         task-07（D-009）：仅累计分身成本，主控轮不计入（审查 B3）。
 
         task-11（design §5.C.6）：输入扩为 union——存量分身 run ∪ 分身子会话
-        轮次 run（``agent_session_id ∈ mission_worker_sessions``），治理门预算
-        拦截覆盖子会话追问轮（无 mission_id 的轮次 run）成本。子会话首 run 已
-        从存量侧剔除（``_split_worker_forms``），union 天然去重不双计。
+        轮次 run（``agent_session_id ∈ mission_worker_sessions_tree`` 全树，task-08
+        起含孙层轮次 run），治理门预算拦截覆盖子会话追问轮（无 mission_id 的
+        轮次 run）成本。子会话首 run 已从存量侧剔除（``_split_worker_forms``），
+        union 天然去重不双计。
         ``cost_from_runs`` 静态求和公式不动（口径=传入 runs 本身）。
         """
         legacy_runs, sessions = await self._split_worker_forms(mission_id)

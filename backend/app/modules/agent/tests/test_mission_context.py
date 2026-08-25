@@ -484,3 +484,138 @@ class TestWorkersDoneNotify:
             agent_session.id, agent_session.id, completed=2, failed=1
         )
         assert ok2 is False and len(injected) == 1
+
+
+# ---------------------------------------------------------------------------
+# task-08（2026-08-26-team-subsession-recursion）：全树唤醒判定 + 非叶简报
+# design §5.E / FR-07——workers_all_terminal_with_stats 枚举换全树（防孙层
+# 未完成误发「全部终态」唤醒主控）；build_worker_briefing 增可选 can_dispatch。
+# ---------------------------------------------------------------------------
+
+
+async def _seed_worker_subsession(
+    session: AsyncSession,
+    mission: AgentMission,
+    parent: AgentSession,
+    *,
+    status: str = "active",
+    worker_done_at=None,
+    tree_depth: int = 1,
+) -> AgentSession:
+    """建分身子会话（parent 入参——根=一层分身、分身=孙层），可选首 run。"""
+    w = AgentSession(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        provider="claude",
+        status=status,
+        parent_session_id=parent.id,
+        tree_depth=tree_depth,
+        worker_done_at=worker_done_at,
+    )
+    session.add(w)
+    await session.commit()
+    await session.refresh(w)
+    return w
+
+
+class TestWorkersAllTerminalWholeTree:
+    async def test_grandchild_incomplete_blocks_wake(self, db_session: AsyncSession):
+        """孙层未完成（idle 未 done）不误发「全部终态」唤醒主控（design §5.E
+        ——一层全 done 但孙未完 → False）。"""
+        from datetime import UTC, datetime
+
+        from app.modules.agent.mission_context import workers_all_terminal_with_stats
+
+        ws = await _make_workspace(db_session)
+        root = await _seed_agent_session(db_session, ws.id)
+        mission = await _seed_active_mission(db_session, root)
+        await _seed_orchestrator_run(db_session, mission, status="completed")
+        # 一层分身 done（首 run 终态 + worker_done）
+        w = await _seed_worker_subsession(
+            db_session, mission, root, worker_done_at=datetime.now(UTC)
+        )
+        db_session.add(
+            AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                status="completed",
+                role="impl",
+                objective="o",
+                agent_session_id=w.id,
+            )
+        )
+        # 孙分身：首 run 已终态但未调 worker_done（未完成）
+        g = await _seed_worker_subsession(db_session, mission, w, tree_depth=2)
+        db_session.add(
+            AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                status="completed",
+                role="impl",
+                objective="o",
+                agent_session_id=g.id,
+            )
+        )
+        await db_session.commit()
+
+        done, ok, bad = await workers_all_terminal_with_stats(db_session, mission)
+        assert (done, ok, bad) == (False, 0, 0)
+
+    async def test_grandchild_stats_counted_when_all_terminal(self, db_session: AsyncSession):
+        """全分身（含孙）完成才判定全终态；成败统计含孙层（孙 failed 计失败）。"""
+        from datetime import UTC, datetime
+
+        from app.modules.agent.mission_context import workers_all_terminal_with_stats
+
+        ws = await _make_workspace(db_session)
+        root = await _seed_agent_session(db_session, ws.id)
+        mission = await _seed_active_mission(db_session, root)
+        await _seed_orchestrator_run(db_session, mission, status="completed")
+        w = await _seed_worker_subsession(
+            db_session, mission, root, worker_done_at=datetime.now(UTC)
+        )
+        # 孙分身 failed（终态）——成败统计按孙会话计失败
+        await _seed_worker_subsession(db_session, mission, w, status="failed", tree_depth=2)
+
+        done, ok, bad = await workers_all_terminal_with_stats(db_session, mission)
+        assert (done, ok, bad) == (True, 1, 1)
+
+
+class TestWorkerBriefingCanDispatch:
+    def test_default_off_keeps_output_byte_identical(self):
+        """can_dispatch 默认 False——输出与不传参逐字节一致，不渲染新段（零回归）。"""
+        from app.modules.agent.mission_context import build_worker_briefing
+
+        for mode in (None, "git", "direct"):
+            default_out = build_worker_briefing(objective="目标", role="impl", mode=mode)
+            explicit_off = build_worker_briefing(
+                objective="目标", role="impl", mode=mode, can_dispatch=False
+            )
+            assert default_out == explicit_off
+            assert "可派工到下一层" not in default_out
+
+    def test_can_dispatch_true_appends_dispatch_section(self):
+        """can_dispatch=True 追加「可派工到下一层」段（D-002@v1 非叶五件工具），
+        且默认段逐字节保持（新段只追加不改动既有内容）。"""
+        from app.modules.agent.mission_context import build_worker_briefing
+
+        base = build_worker_briefing(objective="目标", role="impl", mode="git")
+        leaf_like = build_worker_briefing(
+            objective="目标", role="impl", mode="git", can_dispatch=True
+        )
+
+        assert leaf_like.startswith(base)
+        assert leaf_like == base + "\n\n" + leaf_like[len(base) + 2 :]
+        section = leaf_like[len(base) :]
+        assert "可派工到下一层" in section
+        for tool in (
+            "dispatch_worker",
+            "list_workers",
+            "get_worker_result",
+            "mission_status",
+            "worker_done",
+        ):
+            assert tool in section, f"非叶简报段应含 {tool} 用法"
+        # 主控独有工具不在非叶段（design §5.C：converge 层 0 权）
+        assert "converge_mission" not in section
+        assert "report_progress" not in section

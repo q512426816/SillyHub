@@ -406,3 +406,103 @@ class TestCleanupMixedDirectAndGitWorkers:
         assert call_args.kwargs["sibling_path"] == expected_git_sibling
         assert _expected_sibling(ws.root_path, direct_worker.id) not in result["cleaned"]
         assert result["patch_artifact_id"] is not None
+
+
+# ── task-08（2026-08-26-team-subsession-recursion / design §5.E）：孙层副本清理 ──
+
+
+class TestCleanupGrandchildWorktrees:
+    """worker_sessions_by_id 换全树后：已完成孙分身的 worktree 副本同样清理，
+    未完成孙不动（idle 未 done 的孙 cwd 保留供后续轮次）。"""
+
+    @staticmethod
+    def _run_under_session(
+        session: AsyncSession, mission_id: uuid.UUID, session_id: uuid.UUID
+    ) -> AgentRun:
+        """挂在分身子会话下的终态 worker run（带 worktree_branch，待清副本）。"""
+        r = AgentRun(
+            mission_id=mission_id,
+            agent_type="claude_code",
+            provider="claude",
+            status="completed",
+            role="impl",
+            objective="impl objective",
+            worktree_branch="workers/gggggggg",
+            agent_session_id=session_id,
+        )
+        session.add(r)
+        return r
+
+    @pytest.mark.asyncio
+    async def test_completed_grandchild_cleaned_incomplete_kept(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """已完成孙分身副本清理 + 未完成孙分身副本保留（design §5.E）。"""
+        from datetime import UTC, datetime
+
+        from app.modules.agent.model import AgentSession
+
+        monkeypatch.setenv("HOST_PATH_PREFIX", "")
+        monkeypatch.setenv("CONTAINER_PATH_PREFIX", "")
+
+        ws = await _make_workspace(db_session, root_path="/tmp/repo")
+        root = AgentSession(
+            id=uuid.uuid4(), user_id=uuid.uuid4(), provider="claude", status="active"
+        )
+        db_session.add(root)
+        await db_session.commit()
+        mission = AgentMission(workspace_id=ws.id, objective="孙副本清理", session_id=root.id)
+        db_session.add(mission)
+        await db_session.commit()
+        await db_session.refresh(mission)
+
+        # 一层分身 done；两个孙：一个 done（副本清）一个未 done（副本留）
+        parent = AgentSession(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            provider="claude",
+            status="active",
+            parent_session_id=root.id,
+            tree_depth=1,
+            worker_done_at=datetime.now(UTC),
+        )
+        g_done = AgentSession(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            provider="claude",
+            status="active",
+            parent_session_id=parent.id,
+            tree_depth=2,
+            worker_done_at=datetime.now(UTC),
+        )
+        g_open = AgentSession(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            provider="claude",
+            status="active",
+            parent_session_id=parent.id,
+            tree_depth=2,
+        )
+        db_session.add_all([parent, g_done, g_open])
+        run_parent = self._run_under_session(db_session, mission.id, parent.id)
+        run_g_done = self._run_under_session(db_session, mission.id, g_done.id)
+        run_g_open = self._run_under_session(db_session, mission.id, g_open.id)
+        await db_session.commit()
+        for r in (run_parent, run_g_done, run_g_open):
+            await db_session.refresh(r)
+
+        delegate = MagicMock()
+        delegate.git_worktree_remove = AsyncMock(return_value={"ok": True, "error": None})
+        fin = FinalizerService(db_session, None, host_fs_delegate=delegate)
+
+        result = await fin.cleanup_mission(mission.id)
+
+        assert sorted(result["cleaned"]) == sorted(
+            [
+                _expected_sibling(ws.root_path, run_parent.id),
+                _expected_sibling(ws.root_path, run_g_done.id),
+            ]
+        )
+        # 未完成孙（idle 未 done）的副本不动（一层枚举下孙不可见会被误清——
+        # 全树枚举 + is_worker_complete 会话判定才拦得住，本卡验收点）
+        assert _expected_sibling(ws.root_path, run_g_open.id) not in result["cleaned"]

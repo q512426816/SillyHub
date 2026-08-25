@@ -28,6 +28,19 @@ mission 名单）找出已 converged/cancelled 终态 mission 下仍活跃
 （pending/active/reconnecting）的分身子会话，逐个补发 ``SessionService.end_session``
 收口——兜底 task-10 converge 批量收口 best-effort 部分失败与 cancel 链漏网，
 实现零孤儿。
+
+task-07（2026-08-26-team-subsession-recursion / FR-05 / FR-07 / design §5.D+§5.E
+/ D-005@v1）追加职责⑥预算强收 + 枚举换全树：
+
+- 职责⑥：独立扫描 budget_usd 非空的活跃 mission，``cost_so_far`` 触顶且存在
+  未完成分身（全树）→ **先**原子置位 ``constraints.budget_force_ended_at``
+  （R5 同款 UPDATE...WHERE 抢占，rowcount=0 本轮跳过）**再**复用 P1 收口链
+  批量 ``end_session(reason=mission_budget_exceeded)``——先标记后收口的时序
+  （Grill M2）保证 mission_derive_status 把「ended 且未 done」映 failed 终态，
+  强收后 derive degraded 可正常 converge（不强收卡死）。
+- 孤儿扫描（职责⑤）与强收名单的分身枚举从 ``mission_worker_sessions`` 一层
+  换 ``mission_worker_sessions_tree`` 全树（design §5.E——孙层孤儿同样补收口、
+  孙层未完成分身同样进强收名单）。
 """
 
 from __future__ import annotations
@@ -37,7 +50,7 @@ import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -49,7 +62,7 @@ from app.modules.agent.model import (
     AgentMission,
     AgentRun,
     AgentSession,
-    mission_worker_sessions,
+    mission_worker_sessions_tree,
 )
 from app.modules.agent.orchestrator import (
     _ORCHESTRATOR_ROLE,
@@ -71,7 +84,8 @@ ACTIVE_MISSION_LIMIT = 100
 _TERMINAL_RUN_STATUSES = ("completed", "failed", "killed")
 
 # run_once 返回 / round_done 日志共用的计数键（FR-04.2；task-12 追加
-# orphan_sessions_ended——职责⑤孤儿子会话补收口计数）。
+# orphan_sessions_ended——职责⑤孤儿子会话补收口计数；task-07 追加
+# budget_force_ended——职责⑥预算触顶强收的 mission 计数）。
 PATROL_COUNT_KEYS = (
     "checked",
     "converged",
@@ -80,6 +94,7 @@ PATROL_COUNT_KEYS = (
     "zombie_revived",
     "worker_recovered",
     "orphan_sessions_ended",
+    "budget_force_ended",
 )
 
 # 僵尸标记态（task-05 provides，task-06/07/08 消费）：主 agent run 判死后写
@@ -174,12 +189,13 @@ class MissionPatrolService:
         return list(rows)
 
     async def run_once(self) -> dict[str, int]:
-        """单轮巡检执行体：顺序跑三职责挂载点，返回五计数 dict（FR-04.2）。
+        """单轮巡检执行体：顺序跑六职责挂载点，返回计数 dict（FR-04.2）。
 
         - ``checked``：本轮活跃 mission 数。
-        - ``converged`` / ``redispatched`` / ``zombie_marked`` / ``zombie_revived``：
-          三职责计数（task-03/04/05/06 依次接线）。
-        - 三职责各自 try/except 互不阻断（design §2）：单职责崩溃只记
+        - ``converged`` / ``redispatched`` / ``zombie_marked`` / ``zombie_revived`` /
+          ``worker_recovered`` / ``orphan_sessions_ended`` / ``budget_force_ended``：
+          各职责计数（task-03/04/05/06/08、ql-20260825-003、task-12、task-07）。
+        - 各职责独立 try/except 互不阻断（design §2）：单职责崩溃只记
           ``mission_patrol_duty_failed``，同轮其它职责照常执行。
         """
         counts = dict.fromkeys(PATROL_COUNT_KEYS, 0)
@@ -222,10 +238,20 @@ class MissionPatrolService:
         # 独立查询终态 mission（converged/cancelled）的活跃分身子会话补发
         # end_session 收口——兜底 task-10 converge 批量收口 best-effort 部分
         # 失败与 cancel 链漏网，零孤儿。独立 try/except 互不阻断（对齐四职责）。
+        # task-07：枚举换 mission_worker_sessions_tree 全树（孙层孤儿计入）。
         try:
             counts["orphan_sessions_ended"] = await self._patrol_orphan_subsessions()
         except Exception:
             log.exception("mission_patrol_duty_failed", duty="orphan_subsessions")
+
+        # ── 职责⑥：预算强收（task-07 / FR-05 / FR-07 / design §5.D+§5.E）──
+        # 活跃 mission budget_usd 非空 + cost_so_far 触顶 + 存在未完成分身
+        # （全树）→ 先原子置位 budget_force_ended_at 标记再批量 end_session
+        # （reason=mission_budget_exceeded）。独立 try/except 互不阻断（对齐五职责）。
+        try:
+            counts["budget_force_ended"] = await self._patrol_budget_force_end()
+        except Exception:
+            log.exception("mission_patrol_duty_failed", duty="budget_force_end")
 
         return counts
 
@@ -689,8 +715,9 @@ class MissionPatrolService:
 
         独立查询（方向与 ``_active_mission_ids`` 相反，绝不共用名单——那是活跃
         mission 集合）：converged_at / cancelled_at 任一非空的**终态** mission，
-        经 ``mission_worker_sessions`` 一层枚举分身子会话（枚举单一真相源，
-        不过滤 status——过滤语义归调用方），取仍活跃者（词表复用
+        经 ``mission_worker_sessions_tree`` 全树枚举分身/孙子会话（task-07 /
+        design §5.E——孙层孤儿同样补收口；枚举单一真相源，不过滤 status——
+        过滤语义归调用方），取仍活跃者（词表复用
         ``control._ACTIVE_SESSION_STATUSES`` = pending/active/reconnecting，与
         task-11 cancel 沿树收口同源，不另写判据）逐个补发
         ``SessionService.end_session``（user_id=子会话属主 session.user_id，
@@ -735,8 +762,9 @@ class MissionPatrolService:
         svc = SessionService(self._session)
         ended = 0
         for mission_id in mission_ids:
-            workers = await mission_worker_sessions(self._session, mission_id)
-            # 只取仍活跃子会话；预取属主标量（MissingGreenlet 防护见 docstring）。
+            # 全树枚举（含孙层，task-07 / design §5.E）；只取仍活跃子会话；
+            # 预取属主标量（MissingGreenlet 防护见 docstring）。
+            workers = await mission_worker_sessions_tree(self._session, mission_id)
             active_workers = [
                 (w.id, w.user_id) for w in workers if w.status in _ACTIVE_SESSION_STATUSES
             ]
@@ -760,6 +788,146 @@ class MissionPatrolService:
                         error=str(exc),
                     )
         return ended
+
+    async def _patrol_budget_force_end(self) -> int:
+        """职责⑥：预算触顶强收（task-07 / FR-05 / FR-07 / design §5.D+§5.E）。
+
+        独立扫描 budget_usd 非空的**活跃** mission（未收敛未取消，自带
+        ``ACTIVE_MISSION_LIMIT`` limit + created_at 升序，对齐孤儿扫描惯例），
+        逐个判 ``MissionControlService.cost_so_far`` >= budget_usd（成本判据
+        单一真相源不自写；孙层成本计入依赖 control 三口径换点），再经
+        ``mission_worker_sessions_tree`` 全树枚举取未完成（``is_worker_complete``
+        =False）且会话活跃（``control._ACTIVE_SESSION_STATUSES``）的分身名单——
+        无未完成分身不强收（全完成待收敛归职责①兜底）。
+
+        **先标记后收口**（Grill M2 时序，顺序不可换）：命中后先原子置位
+        ``constraints.budget_force_ended_at``——R5 同款抢占语义
+        ``UPDATE...WHERE id + converged_at IS NULL + cancelled_at IS NULL``
+        （finalizer.py 先例；不用 with_for_update），新 dict 合成保留 zombie
+        等既有键（对齐 ZOMBIE_MARKED_AT_KEY 键复用模式），rowcount=0 视为并发
+        converge/cancel 抢占本轮跳过；置位成功且 commit 后才进收口。先标记的
+        原因：task-03 虚拟映射按标记把「会话 ended 且未 done」映 failed 终态
+        （而非 running）→ derive 出 degraded，强收后 mission 可正常 converge，
+        不出现 ended 未 done 卡死 running 的中间态。
+
+        收口复用 P1 收口链（``SessionService.end_session``，子会话 ended +
+        interactive lease completed + SESSION_END best-effort），逐个
+        ``end_session(分身 id, mission.created_by, reason=mission_budget_exceeded)``
+        （分身属主 = mission 创建者，D-004）；单个失败 log.warning 继续下一个，
+        残留活跃分身下轮重扫——标记键只查存在性，重扫重置位（时间戳刷新）无
+        副作用，保证部分失败可重入补收。预取 id/budget/属主标量后才进收口循环
+        （end_session 失败分支 rollback expire 全部实例，MissingGreenlet 防护，
+        task-12 同款）。
+
+        Returns:
+            本轮触顶强收的 mission 数（标记置位成功；对接 run_once
+            budget_force_ended 计数）。
+        """
+        # 延迟 import 对齐本文件既有防循环模式（control / mission /
+        # daemon.session.service 依赖链宽）。
+        from app.modules.agent.control import _ACTIVE_SESSION_STATUSES, MissionControlService
+        from app.modules.agent.mission import BUDGET_FORCE_ENDED_AT_KEY, is_worker_complete
+        from app.modules.daemon.session.service import SessionService
+
+        stmt = (
+            select(AgentMission)
+            .where(
+                AgentMission.converged_at.is_(None),
+                AgentMission.cancelled_at.is_(None),
+                AgentMission.budget_usd.is_not(None),
+            )
+            .order_by(AgentMission.created_at)
+            .limit(ACTIVE_MISSION_LIMIT)
+        )
+        missions = list((await self._session.execute(stmt)).scalars().all())
+
+        forced = 0
+        for mission in missions:
+            # 预取标量（MissingGreenlet 防护见 docstring）：进收口循环后只消费
+            # 这些标量，不再触碰 ORM 关系/懒加载属性。
+            mission_id = mission.id
+            budget = mission.budget_usd
+            owner_id = mission.created_by
+            existing_constraints = dict(mission.constraints or {})
+
+            cost = await MissionControlService(self._session).cost_so_far(mission_id)
+            if budget is None or cost < budget:
+                continue
+
+            # 全树枚举（含孙层）取「会话活跃且未完成」的分身名单。
+            workers = await mission_worker_sessions_tree(self._session, mission_id)
+            targets: list[uuid.UUID] = []
+            for w in workers:
+                if w.status not in _ACTIVE_SESSION_STATUSES:
+                    continue
+                if await is_worker_complete(self._session, w):
+                    continue
+                targets.append(w.id)
+            if not targets:
+                # 全完成（或无分身）待收敛：不强收，归职责①兜底。
+                continue
+            if owner_id is None:
+                # 分身属主锚缺失（脏数据）：无 end_session 属主可传，跳过不猜。
+                log.debug(
+                    "mission_patrol_budget_owner_missing",
+                    mission_id=str(mission_id),
+                )
+                continue
+
+            # 先标记（原子抢占，R5 同款；rowcount=0 = 并发 converge/cancel 抢占）。
+            now = datetime.now(UTC)
+            claim = await self._session.execute(
+                update(AgentMission)
+                .where(
+                    AgentMission.id == mission_id,
+                    AgentMission.converged_at.is_(None),
+                    AgentMission.cancelled_at.is_(None),
+                )
+                .values(
+                    constraints={
+                        **existing_constraints,
+                        BUDGET_FORCE_ENDED_AT_KEY: now.isoformat(),
+                    }
+                )
+            )
+            if claim.rowcount == 0:
+                log.info(
+                    "mission_patrol_budget_force_preempted",
+                    mission_id=str(mission_id),
+                )
+                continue
+            await self._session.commit()
+            forced += 1
+            log.info(
+                "mission_patrol_budget_force_marked",
+                mission_id=str(mission_id),
+                cost_usd=cost,
+                budget_usd=budget,
+                workers=len(targets),
+            )
+
+            # 后收口（标记已落库）：P1 收口链批量 end_session，best-effort。
+            svc = SessionService(self._session)
+            for worker_id in targets:
+                try:
+                    await svc.end_session(worker_id, owner_id, reason="mission_budget_exceeded")
+                    log.info(
+                        "mission_patrol_budget_force_session_ended",
+                        mission_id=str(mission_id),
+                        worker_session_id=str(worker_id),
+                        reason="mission_budget_exceeded",
+                    )
+                except Exception as exc:
+                    # 单个失败（lease 绑定异常 / daemon 离线抛出）只记 warning
+                    # 继续下一个；残留活跃分身下轮重扫重置位再补（标记键存在性
+                    # 语义下重入无副作用，见 docstring）。
+                    log.warning(
+                        "mission_patrol_budget_force_end_failed",
+                        mission_id=str(mission_id),
+                        worker_session_id=str(worker_id),
+                        error=str(exc),
+                    )
+        return forced
 
     async def _resolve_run_lease_for_sync(self, run_id: uuid.UUID) -> DaemonTaskLease | None:
         """worker 断线恢复的 lease 解析：取该 run 最新 lease（与

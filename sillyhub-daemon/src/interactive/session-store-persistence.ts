@@ -16,8 +16,8 @@
  *
  * **白名单**：仅写 PersistedSessionRecord（sessionId/leaseId/agentSessionId/cwd/
  * provider/currentRunId?/turnCount/lastActiveAt/model?/pathToClaudeCodeExecutable?/
- * pathToAgentExecutable?/manualApproval?/askUserOnly?/stage?/mcpRefs?/skillRefs?/
- * effectiveAllowedRoots?/systemPrompt?/providerConfig?）。
+ * pathToAgentExecutable?/manualApproval?/askUserOnly?/stage?/worker_depth?/
+ * mcpRefs?/skillRefs?/effectiveAllowedRoots?/systemPrompt?/providerConfig?）。
  * 禁止写 claim token / credential / prompt 轮次内容 / agent 输出 / Query 句柄 /
  * InputQueue（不可序列化或敏感）。
  * task-08（sessions-portal）例外：record.providerConfig 含 api_key——design §5 Wave2
@@ -214,6 +214,14 @@ function validateRecord(raw: unknown): PersistedSessionRecord | null {
   // 容错风格与可选字段一致：类型非法 → 丢字段保记录（损坏隔离，不丢整条）。
   if (typeof r.stage === 'string' && r.stage) {
     out.stage = r.stage;
+  }
+  // task-04（2026-08-26-team-subsession-recursion / design §5.C / Grill M3）：
+  // 分身深度回填——P0-1 修复的四字段链同款容错（Number.isFinite 才写，0 合法；
+  // 类型非法 → 丢字段保记录，损坏隔离不丢整条）。此处漏拷则重启后非叶分身
+  // worker_depth 变 undefined，task-05 的叶档兜底会把派工工具静默降级（宁少
+  // 勿多防越权，但非叶误降叶会砍掉合法递归派工能力）。
+  if (typeof r.worker_depth === 'number' && Number.isFinite(r.worker_depth)) {
+    out.worker_depth = r.worker_depth;
   }
   if (isStringArray(r.mcpRefs)) {
     out.mcpRefs = r.mcpRefs;

@@ -19,6 +19,8 @@
   （2026-08-25-team-subsession-governance task-04 / FR-02，供 task-05 三元组派发
   消费）：objective + 工作区协作约束（git/direct 双变体，文案对齐
   ``render_worker_prompt`` 既有口径）+ worker_done 工具用法；纯渲染函数不查 DB。
+  2026-08-26-team-subsession-recursion task-08 增可选 ``can_dispatch``（默认
+  False）——True 时追加「可派工到下一层」段（非叶五件工具用法，FR-07）。
 
 ⚠️ 口径区分：本模块的「已消耗」集合 ``_BRIEFING_CONSUMED_RUN_STATUSES`` 是**简报
 一次性语义专用**（含 completed、不含 pending_approval），与 ``agent.model.
@@ -165,6 +167,7 @@ def build_worker_briefing(
     objective: str,
     role: str | None = None,
     mode: str | None = None,
+    can_dispatch: bool = False,
 ) -> str:
     """渲染分身子会话首 prompt 任务简报（task-04 / FR-02 / design §5.B、§5.C）。
 
@@ -184,6 +187,15 @@ def build_worker_briefing(
     ③ worker_done 工具用法——干完即调（分身完成的唯一显式信号，summary 作
       产物挂首 run 供主控读取）、追问重开工后可再调（子会话在收敛前保持
       可追问，支持重复完成周期，design §5.F）。
+
+    2026-08-26-team-subsession-recursion task-08（FR-07 / design §5.E / Grill
+    minor）：新增可选参数 ``can_dispatch``（默认 False 不渲染新段——叶分身与
+    存量简报逐字节不变，零回归）。``True``（非叶分身，D-002@v1 非叶工具集）
+    时追加④「可派工到下一层」段：dispatch_worker / list_workers /
+    get_worker_result / mission_status / worker_done 五件用法提示——非叶分身
+    可把子任务拆给孙层分身再收敛汇总。接线（派发点按调用会话 tree_depth 传
+    ``can_dispatch=(new_depth < MAX_DISPATCH_DEPTH)``）归 mcp_tools 文件所有权
+    （task-02 时序说明，本卡只提供参数契约）。
     """
     worker_role = role or "worker"
     parts = [
@@ -223,6 +235,22 @@ def build_worker_briefing(
         "- 追问重开工后可再调：本会话在任务收敛前保持可追问——任务发起人可能"
         "追问或要求返工，回答/返工完成后再次调用 worker_done 报告新一轮完成。"
     )
+    if can_dispatch:
+        # ④ 非叶分身专属（task-08 / FR-07 / D-002@v1 非叶五件工具集）：可派工
+        # 指引段。仅 can_dispatch=True 渲染——叶分身（孙层）与存量简报不受
+        # 影响（默认 False 逐字节不变）。工具集与 daemon 分层注册两档一致
+        # （design §5.C：非叶 5 件 / 叶仅 worker_done；converge_mission 与
+        # report_progress 主控独有，不在段内误导非叶分身）。
+        parts.append(
+            "【可派工到下一层（你可以拆分任务）】\n"
+            "你是非叶分身——任务过大或需要并行时，可以把子任务拆给下一层分身：\n"
+            "- dispatch_worker：派发一个子分身执行子任务（objective 写清目标，"
+            "role 标注分工）；派发深度有限制，孙层分身不能再派工。\n"
+            "- list_workers：查看你已派发的子分身列表与状态。\n"
+            "- get_worker_result：读取子分身的完成产出（summary）。\n"
+            "- mission_status：查看团队任务整体状态。\n"
+            "- worker_done：你的任务（含子分身产出汇总）完成后调用报告完成。"
+        )
     return "\n\n".join(parts)
 
 
@@ -252,14 +280,19 @@ async def workers_all_terminal_with_stats(
     （且已完成）= 成功、其余完成形态（failed / ended 未 done）= 失败；存量
     run ``completed`` = 成功、failed/killed = 失败（原口径保留）。
 
+    2026-08-26-team-subsession-recursion task-08（design §5.E）：枚举换
+    ``mission_worker_sessions_tree`` **全树**——孙层未完成时不误发「全部
+    终态」唤醒主控（孙层分身计入成败统计；legacy 剔除口径随枚举自动覆盖
+    孙层轮次 run）。无孙树与一层枚举等价（FR-08 零回归）。
+
     纯查询：经传入 session 读取（lease 调用方在自身事务内可见本轮未提交的
     终态翻转——即时通知不漏当轮完成事件）。
     """
     from app.modules.agent.control import MissionControlService
     from app.modules.agent.mission import is_worker_complete
-    from app.modules.agent.model import mission_worker_sessions
+    from app.modules.agent.model import mission_worker_sessions_tree
 
-    worker_sessions = await mission_worker_sessions(db, mission.id)
+    worker_sessions = await mission_worker_sessions_tree(db, mission.id)
     worker_session_ids = {s.id for s in worker_sessions}
     legacy_runs = [
         r

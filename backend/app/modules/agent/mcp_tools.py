@@ -46,6 +46,18 @@ AgentArtifact（kind=summary）挂首 run（mission_id+role 双标记最早 run�
 ``X-API-Key`` header 发（task-09 修，非 Bearer——apiKey 非 JWT，Bearer 路径只解
 JWT 会 401），backend 解析 apiKey → User → ``has_permission(WORKSPACE_WRITE)``
 按 workspace 成员关系校验。两条路径都落同一 User 对象，权限模型一致。
+
+task-02（2026-08-26-team-subsession-recursion / FR-02 / FR-03 / FR-07 / design
+§5.B / §5.E）：递归派发链路——五端点（dispatch_worker / list_workers /
+get_worker_result / mission_status / worker_done）统一调用方解析（Grill B2：
+分身 parent 非空沿 parent 链爬根定位 mission、禁懒建 miss=404；主控/普通会话
+保留 P1 懒建语义）；``_dispatch_worker_core`` 递归派发（新子会话
+parent=调用会话 + tree_depth=调用方+1）+ 深度门（MAX_DISPATCH_DEPTH=2，孙是
+叶子，超深 400 中文零写入）+ 分身调用的 payload.worktree_path 一律忽略置 None；
+``_converge_core`` 增层 0 收口守卫（鉴权通道 header 嗅探：Bearer 豁免、
+X-Session-Id 命中会话 tree_depth>0 → 403、apiKey 无 Bearer 无 X-Session-Id
+裸调 403，D-007@v1）；worker_done 成员校验/全完成枚举与 converge busy 计数换
+``mission_worker_sessions_tree`` 全树（孙可达，Grill B3）。
 """
 
 from __future__ import annotations
@@ -77,6 +89,7 @@ from app.modules.agent.model import (
     AgentRunLog,
     AgentSession,
     mission_worker_sessions,
+    mission_worker_sessions_tree,
     resolve_mission_for_session,
 )
 from app.modules.agent.schema import (
@@ -97,6 +110,15 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 # worker run 的 role 默认（worker_preset 条目缺 role 时兜底）
 _DEFAULT_WORKER_ROLE = "worker"
+
+# 派发深度门（task-02 / 2026-08-26-team-subsession-recursion / D-001@v1 /
+# design §5.A-§5.B，**本文件单源**）：允许的子会话层深上限——主控 0、分身 1、
+# 孙 2，总深 3 层（D-001@v1）。``_dispatch_worker_core`` 按调用会话
+# ``tree_depth + 1`` 与本值比较，超限 → 400 中文零写入（孙是叶子，不再派工）。
+# 与 ``model.MAX_TREE_DEPTH``(=4) 不同名不同值勿混用——后者是
+# ``mission_worker_sessions_tree`` 递归 CTE 对脏数据深环的查询侧硬护栏
+# （合法树最深 2，4 是宽容余量），本值是业务侧派发闸。
+MAX_DISPATCH_DEPTH = 2
 
 # ── task-05（2026-08-22-team-session-unify）：X-Session-Id 会话定位 + 懒建 ──
 # 会话维度路由（/sessions/{sid}/missions/...）无 workspace_id 路径锚，鉴权走
@@ -464,6 +486,14 @@ async def _resolve_session_mission(
     ``enforce_workspace_permission``（无 workspace 路径锚的路由族用）：解析后按
     mission 锚工作区（懒建路径按会话工作区）复核 WORKSPACE_WRITE——对齐显式路由
     ``require_permission`` 的口径。
+
+    task-02（2026-08-26-team-subsession-recursion / Grill B2 / D-004@v1，design
+    §5.B）：**分身调用方统一爬根解析**——X-Session-Id 命中会话行后按 parent 判别，
+    ``parent_session_id`` 非空（分身/孙）→ 沿 ``resolve_mission_for_session`` 爬根
+    定位 mission 且**禁懒建**（爬根 miss=404——分身自身永远不该锚新 mission，P1
+    按「调用会话自身」懒建会在分身上误建平行 mission，树形治理失效）。原「只读
+    三工具口径不变」作废：五端点同构，分身调只读工具同样走爬根；``parent NULL``
+    （主控/普通会话）保留 P1 懒建语义不变。
     """
     sid = _request_session_id(request, path_session_id)
     if sid is None:
@@ -484,6 +514,26 @@ async def _resolve_session_mission(
         raise HTTPException(status.HTTP_404_NOT_FOUND, "session not found")
 
     from app.modules.agent.mission import get_active_mission_for_session
+
+    # ── 分身调用方（parent 非空）：爬根定位，禁懒建（task-02 / Grill B2）──
+    if agent_session.parent_session_id is not None:
+        mission = await resolve_mission_for_session(session, sid)
+        if mission is None:
+            # miss=404 是安全语义（防在分身误锚新 mission），勿放宽；显式
+            # mission_id 回退路径对分身同样不适用（勿让分身锚到任意 mission）。
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                "该会话所属会话树当前没有活跃团队任务（分身调用不做懒建，"
+                "请确认主控会话的团队任务仍在进行）",
+            )
+        # 显式参数仅作越权校验锚（口径同下方主控命中分支）
+        if mission_id is not None and mission_id != mission.id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "mission not found")
+        if workspace_id is not None:
+            await _get_mission(session, workspace_id, mission.id)
+        if enforce_workspace_permission:
+            await _check_workspace_write(session, user, mission.workspace_id)
+        return mission
 
     mission = await get_active_mission_for_session(session, sid)
     if mission is not None:
@@ -844,6 +894,7 @@ async def _dispatch_worker_core(
     payload: DispatchWorkerRequest,
     *,
     anchor_workspace_id: uuid.UUID,
+    path_session_id: uuid.UUID | None = None,
 ) -> WorkerRunResponse:
     """dispatch_worker 共用主体（显式路由 / 会话路由同构，task-05 抽取）。
 
@@ -871,7 +922,62 @@ async def _dispatch_worker_core(
     5. 唤醒 daemon（``notify_interactive_dispatch``）——投递不可达仅告警不收敛
        （lease pending 等 daemon 轮询自领取，与 batch 路径同口径）；档案键
        best-effort 补写。
+
+    task-02（2026-08-26-team-subsession-recursion / FR-02 / design §5.B）：
+    **递归派发**——``path_session_id``（会话路由路径参数，透传给
+    ``_request_session_id`` 做 header>path 优先级）定位调用会话行：
+
+    - 调用会话 parent 非空（分身，mission 已由 ``_resolve_session_mission``
+      爬根解析）→ 新子会话 ``parent=调用会话``、``tree_depth=调用方+1``（树形
+      展开，孙层）；``payload.worktree_path`` 一律忽略置 None（递归派发禁
+      caller worktree 透传，孙层一律自建副本）；
+    - 深度门（D-001@v1 总深 3 层）：``调用会话.tree_depth + 1 >
+      MAX_DISPATCH_DEPTH(=2)`` → 400 中文零写入（孙是叶子不派工）；
+    - 无会话上下文（显式路由 header 缺席，人工/主控直调）→ 沿用 P1 挂
+      ``mission.session_id`` 根，新子会话深度 = 根行 tree_depth+1；
+    - owner=mission.created_by 与首 run 双标记不变（D-004@v1）。
     """
+    # ── task-02：调用会话解析（递归派发上下文 + 深度门，先于一切写入）──
+    caller_sid = _request_session_id(request, path_session_id)
+    caller: AgentSession | None = None
+    if caller_sid is not None:
+        caller = await session.get(AgentSession, caller_sid)
+        if caller is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "session not found")
+
+    if caller is not None:
+        # 主控/分身调用：parent 挂调用会话本身（主控调用时与 mission 根同 id，
+        # P1 行为零回归；分身调用即递归派发）。
+        new_parent_session_id: uuid.UUID | None = caller.id
+        caller_tree_depth = caller.tree_depth
+    else:
+        # 无会话上下文（显式路由）：挂 mission 根（P1 语义）。根行缺失
+        # （external mission session_id 为 NULL / 脏数据）时 parent 落 NULL、
+        # 深度按 0 计——该形态不在任何会话树内，树枚举天然不可达。
+        new_parent_session_id = mission.session_id
+        root_session = (
+            await session.get(AgentSession, mission.session_id)
+            if mission.session_id is not None
+            else None
+        )
+        caller_tree_depth = root_session.tree_depth if root_session is not None else 0
+
+    new_tree_depth = caller_tree_depth + 1
+    if new_tree_depth > MAX_DISPATCH_DEPTH:
+        log.info(
+            "mcp_dispatch_worker_depth_rejected",
+            mission_id=str(mission.id),
+            caller_session_id=str(caller_sid) if caller_sid is not None else None,
+            caller_tree_depth=caller_tree_depth,
+        )
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "已达最大派发深度 3 层，孙分身不能再派工",
+        )
+    # 分身调用的 caller worktree 一律忽略（孙层 cwd 一律自建副本路径）。
+    caller_is_worker = caller is not None and caller.parent_session_id is not None
+    effective_worktree_path: str | None = None if caller_is_worker else payload.worktree_path
+
     role = payload.role or _DEFAULT_WORKER_ROLE
 
     # task-08：scope 校验（显式 target_workspace_id ∈ {anchor} ∪ scope）。
@@ -1024,9 +1130,13 @@ async def _dispatch_worker_core(
         created_at=now,
         change_id=mission.change_id,
         workspace_id=effective_target,
-        # task-04 / FR-02 / D-001@v1：会话树挂载——parent=主控会话
+        # task-04 / FR-02 / D-001@v1：会话树挂载——主控调用挂 mission 根
         # （mission.session_id；external mission 为 NULL 走存量回落）。
-        parent_session_id=mission.session_id,
+        # task-02（2026-08-26-team-subsession-recursion / design §5.B）：分身
+        # 调用（递归派发）parent=调用会话、tree_depth=调用方+1（树形展开，
+        # 孙层 2；无会话上下文时 = 根行 depth+1 = 1，P1 形态）。
+        parent_session_id=new_parent_session_id,
+        tree_depth=new_tree_depth,
         agent_profile_id=(profile.id if profile is not None else None),
     )
     session.add(sub_session)
@@ -1073,10 +1183,12 @@ async def _dispatch_worker_core(
     lease_branch = payload.branch
     if lease_branch is None:
         lease_branch = ws.default_branch if ws is not None else None
-    if payload.worktree_path:
+    if effective_worktree_path:
         # 路径A（caller worktree，D-008@v1）：caller 路径直接作子会话 cwd，
         # 跳过自建（helper 内部按 worktree_path 短路），不写 run.worktree_branch。
-        root_path = payload.worktree_path
+        # task-02：分身调用的 worktree_path 已在深度门旁置 None（本变量），
+        # 本分支仅主控/无会话上下文调用可达——孙层 cwd 一律自建副本。
+        root_path = effective_worktree_path
     wt_outcome = await prepare_worker_worktree(
         session,
         first_run,
@@ -1084,7 +1196,7 @@ async def _dispatch_worker_core(
         host_fs_delegate=host_fs_delegate,
         root_path=root_path,
         lease_branch=lease_branch,
-        worktree_path=payload.worktree_path,
+        worktree_path=effective_worktree_path,
     )
     if not wt_outcome.ok:
         log.info(
@@ -1114,6 +1226,10 @@ async def _dispatch_worker_core(
             objective=payload.objective,
             role=role,
             mode=briefing_mode,
+            # task-09 接线（task-08 契约）：非叶分身（new_tree_depth < 2）简报
+            # 追加「可派工到下一层」五件工具段；叶（=2）与无会话根挂（P1 形态
+            # 恒 1）恒 False，简报逐字节不变零回归。
+            can_dispatch=(new_tree_depth < MAX_DISPATCH_DEPTH),
         )
     )
 
@@ -1135,6 +1251,10 @@ async def _dispatch_worker_core(
             pinned_runtime_id=pinned_runtime_id,
             pinned_skip_owner_check=pinned_skip_owner_check,
             stage=MISSION_WORKER_STAGE,
+            # task-02（design §5.C / D-003@v2）：分身会话深度透传（task-04 形参
+            # 接线）——写 lease metadata.worker_depth → claim payload → daemon
+            # SessionManager 分层工具集档位判定（daemon 侧归 task-05/06）。
+            worker_depth=new_tree_depth,
         )
     except NoOnlineDaemonError as exc:
         # 钉定复查竞态（预检通过后 runtime 掉线）：按失败语义收敛，不崩 mission。
@@ -1456,11 +1576,60 @@ async def converge_mission(
     mission = await _resolve_session_mission(
         session, request, user, workspace_id=workspace_id, mission_id=mission_id
     )
-    return await _converge_core(session, mission)
+    return await _converge_core(session, mission, request=request)
 
 
-async def _converge_core(session: AsyncSession, mission: AgentMission) -> ConvergeResponse:
+async def _enforce_converge_layer0(
+    session: AsyncSession, request: Request, *, path_session_id: uuid.UUID | None = None
+) -> None:
+    """converge 层 0 收口守卫（task-02 / D-007@v1 / design §5.B）。
+
+    converge 是**层 0 权**（主控/人工干预口）——分身（含孙）不得收敛 mission。
+    判别按**鉴权通道 header 嗅探**（对齐 ``_dispatch_worker_core`` 的 Bearer 通道
+    判别先例），禁止按用户角色或 mission owner 实现（D-007@v1）：
+
+    - Bearer JWT 通道 → 豁免（人工干预口，浏览器/用户直调不受限）；
+    - X-Session-Id（header > 路径）在场 → 按会话行 ``tree_depth`` 判层：>0
+      （分身/孙）→ 403「只有主控会话可以收敛任务」；主控（0）放行；
+    - 无 Bearer 且无 X-Session-Id 的 apiKey 调用（daemon 显式 mission_id 回退
+      路径）→ 一律 403 防绕过（daemon 受限 server 永不注册 converge，apiKey
+      裸调只可能是误用通道——须带 X-Session-Id 且为主控会话才能收敛）；
+    - 三 header 皆无 → 放行（生产不可达——路由鉴权依赖先拦 401；仅保留直调
+      单测形态零回归）。
+    """
+    auth_header = request.headers.get("authorization") or ""
+    if auth_header.lower().startswith("bearer "):
+        return
+    sid = _request_session_id(request, path_session_id)
+    if sid is not None:
+        agent_session = await session.get(AgentSession, sid)
+        if agent_session is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "session not found")
+        if agent_session.tree_depth > 0:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "只有主控会话可以收敛任务",
+            )
+        return
+    if request.headers.get("x-api-key"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "只有主控会话可以收敛任务",
+        )
+
+
+async def _converge_core(
+    session: AsyncSession,
+    mission: AgentMission,
+    *,
+    request: Request,
+    path_session_id: uuid.UUID | None = None,
+) -> ConvergeResponse:
     """converge_mission 共用主体（task-05 抽取显式/会话路由同构；task-06 D-010 语义重定义）。
+
+    task-02（2026-08-26-team-subsession-recursion / D-007@v1）：入口先过
+    ``_enforce_converge_layer0`` 层 0 收口守卫（request 透传鉴权通道嗅探——
+    分身调用 403 / Bearer 豁免 / apiKey 裸调 403，见其 docstring）。
 
     判定序（design §5 Phase 1 / §7.5 converge 行）：
 
@@ -1469,7 +1638,9 @@ async def _converge_core(session: AsyncSession, mission: AgentMission) -> Conver
        done / 追问重开工中均为 running，不被首 run 终态遮蔽；主控轮剔除，D-010
        语义保留）→ 返 ``status=busy`` + 引导文案（message 携未完成计数，计数经
        ``is_worker_complete`` 按对象形态分发）；mission 状态不变、不置
-       ``converged_at``、不触发 finalize/merge（主 agent 等待后重试）。
+       ``converged_at``、不触发 finalize/merge（主 agent 等待后重试）。task-02 /
+       Grill B3：busy 计数的分身集合换 ``mission_worker_sessions_tree`` 全树
+       （孙层计入，孙 worker_done 后不再被 busy 遮蔽）。
     2. 分身全完成 → 以**最新 orchestrator run** 为锚调 ``converge_mission_for_completed_run``
        （``converge_explicit=True``：task-09 起内部判据同源 mission_derive_status
        (workers_only=True) + ``converged_at`` 原子抢占 UPDATE...WHERE IS NULL——
@@ -1482,6 +1653,8 @@ async def _converge_core(session: AsyncSession, mission: AgentMission) -> Conver
     响应 ``status`` 四值 converged/busy/conflict/needs_manual（ConvergeResponse
     docstring）；cancelled/planning 等防御性派生值原样透传（busy 已前置挡 running）。
     """
+    await _enforce_converge_layer0(session, request, path_session_id=path_session_id)
+
     from app.modules.agent.control import MissionControlService
     from app.modules.agent.mission import is_worker_complete, mission_derive_status
 
@@ -1495,7 +1668,9 @@ async def _converge_core(session: AsyncSession, mission: AgentMission) -> Conver
     derive_value = await mission_derive_status(session, mission.id, workers_only=True)
     if derive_value == "running":
         ctrl = MissionControlService(session)
-        worker_sessions = await mission_worker_sessions(session, mission.id)
+        # task-02 / Grill B3：分身集合换全树枚举（孙层计入——孙未完成同样挡
+        # converge；无孙树与一层枚举等价，零回归）。
+        worker_sessions = await mission_worker_sessions_tree(session, mission.id)
         worker_session_ids = {s.id for s in worker_sessions}
         # 子会话首 run（agent_session_id ∈ 分身子会话）从 run 维度剔除，同分身
         # run/会话不双计（对齐 mission_derive_status 虚拟映射的同款剔除口径）。
@@ -1841,12 +2016,13 @@ async def _worker_done_core(
     3. 显式参数仅作越权校验锚（mission_id 失配 404 资源隐藏；workspace_id
        复用 ``_get_mission`` anchor∪scope 口径；会话路由族按 mission 锚工作区
        复核 WORKSPACE_WRITE）；
-    4. 调用会话必须 ∈ ``mission_worker_sessions``（分身一层枚举）——主控根
-       会话 / 存量 batch 形态（无子会话）调用 → 422 拒绝零写入；
+    4. 调用会话必须 ∈ ``mission_worker_sessions_tree``（分身**全树**枚举，
+       task-02 / Grill B3——孙层同样可调；漏换全树则孙调 422、mission 永不可
+       收敛）——主控根会话 / 存量 batch 形态（无子会话）调用 → 422 拒绝零写入；
     5. 首 run 缺失（派发链路异常）→ fail-loud 404 零写入；
     6. 置位 ``worker_done_at=now()``（可重复置位取最新——追问重开工后再干
        再置位）+ summary 落 ``AgentArtifact(kind=summary)`` 挂首 run；
-    7. 全分身完成迁移唤醒：按 ``mission_worker_sessions`` 枚举经
+    7. 全分身完成迁移唤醒：按 ``mission_worker_sessions_tree`` 全树枚举经
        ``is_worker_complete``（§5.C.3 单一真相源，禁第三套口径）判定全完成；
        本调用构成**新完成信号**（首信号，或重开工周期——上一 done 置位后
        会话下出现更新 run）且置位后全完成 → 先 DEL
@@ -1904,8 +2080,9 @@ async def _worker_done_core(
     if enforce_workspace_permission:
         await _check_workspace_write(session, user, mission.workspace_id)
 
-    # ── 调用会话必须是本 mission 的分身子会话（一层枚举单一真相源）──
-    workers = await mission_worker_sessions(session, mission.id)
+    # ── 调用会话必须是本 mission 的分身子会话（全树枚举单一真相源，task-02 /
+    # Grill B3：孙层同样 ∈ 树——一层枚举会让孙调 422、mission 永不可收敛）──
+    workers = await mission_worker_sessions_tree(session, mission.id)
     if all(w.id != sid for w in workers):
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -2019,7 +2196,13 @@ async def dispatch_worker_for_session(
         enforce_workspace_permission=True,
     )
     return await _dispatch_worker_core(
-        session, request, user, mission, payload, anchor_workspace_id=mission.workspace_id
+        session,
+        request,
+        user,
+        mission,
+        payload,
+        anchor_workspace_id=mission.workspace_id,
+        path_session_id=session_id,
     )
 
 
@@ -2084,7 +2267,7 @@ async def converge_mission_for_session(
         path_session_id=session_id,
         enforce_workspace_permission=True,
     )
-    return await _converge_core(session, mission)
+    return await _converge_core(session, mission, request=request, path_session_id=session_id)
 
 
 @router.post(
@@ -2228,7 +2411,7 @@ async def converge_mission_scoped(
     mission = await _resolve_session_mission(
         session, request, user, enforce_workspace_permission=True
     )
-    return await _converge_core(session, mission)
+    return await _converge_core(session, mission, request=request)
 
 
 @router.post(
@@ -2348,7 +2531,7 @@ async def converge_mission_by_mission(
     mission = await _resolve_session_mission(
         session, request, user, mission_id=mission_id, enforce_workspace_permission=True
     )
-    return await _converge_core(session, mission)
+    return await _converge_core(session, mission, request=request)
 
 
 @router.post(
@@ -2409,6 +2592,10 @@ async def worker_done_by_mission(
 # session.get(AgentSession)（缺失 404）+ get_active_mission_for_session；无活跃 →
 # 200 active=false + hint（不泄露 scope/binding 信息，非 dispatch 端点不懒建）；
 # 有活跃 → _check_workspace_write 按锚工作区复核后组装 MissionStatusResponse。
+# task-02（2026-08-26-team-subsession-recursion / design §5.B）：分身调用方
+# （parent 非空）例外——统一解析规则走爬根（resolve_mission_for_session），
+# miss=404（见 _mission_status_core 内注释），D-12 优雅口径只对 parent NULL
+# 调用方保留。
 # ---------------------------------------------------------------------------
 
 # 无活跃 mission 的引导文案（D-005：优雅返回不报错；不含任何 scope/binding 信息）
@@ -2448,10 +2635,22 @@ async def _mission_status_core(
     # awaiting_input）。
     from app.modules.agent.mission import get_active_mission_for_session, mission_derive_status
 
-    mission = await get_active_mission_for_session(session, sid)
-    if mission is None:
-        # D-012：优雅返回 active=false（不走 _resolve_session_mission 的 404 语义）
-        return MissionStatusResponse(active=False, hint=_NO_ACTIVE_MISSION_HINT)
+    # task-02（2026-08-26-team-subsession-recursion / design §5.B 五端点统一解析）：
+    # 分身调用方（parent 非空）沿 parent 链爬根定位 mission——禁懒建 miss=404
+    # （主控/普通会话的 D-12 优雅 200 active=false 口径不适用于分身：分身存在
+    # 即意味着某棵树派发过，根上无活跃 mission 属异常态，fail-loud 404）。
+    if agent_session.parent_session_id is not None:
+        mission = await resolve_mission_for_session(session, sid)
+        if mission is None:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND,
+                "该会话所属会话树当前没有活跃团队任务（分身调用不做懒建）",
+            )
+    else:
+        mission = await get_active_mission_for_session(session, sid)
+        if mission is None:
+            # D-12：优雅返回 active=false（不走 _resolve_session_mission 的 404 语义）
+            return MissionStatusResponse(active=False, hint=_NO_ACTIVE_MISSION_HINT)
 
     await _check_workspace_write(session, user, mission.workspace_id)
 

@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     Uuid,
+    literal,
     select,
     text,
 )
@@ -546,6 +547,10 @@ class AgentSession(BaseModel, table=True):
         # resolve_mission_for_session 归属解析的查询键（迁移 20260825210000
         # 同步建；对齐 ix_agent_runs_mission_id 补声明惯例，防 autogenerate 漂移）。
         Index("ix_agent_sessions_parent", "parent_session_id"),
+        # 2026-08-26-team-subsession-recursion task-01（design §5.A）：会话树深度
+        # 索引——派发门 / 治理口径按深度过滤的查询键（迁移 20260826020000 同步建；
+        # 对齐 ix_agent_runs_mission_id 补声明惯例，防 autogenerate 漂移）。
+        Index("ix_agent_sessions_tree_depth", "tree_depth"),
     )
 
     id: uuid.UUID = Field(
@@ -721,19 +726,38 @@ class AgentSession(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    # 会话树深度（2026-08-26-team-subsession-recursion task-01，design §5.A）：
+    # 主控/普通会话 0、分身 1、孙 2——派发门 O(1) 深度读的落库口径。写入规则：
+    # 分身派发路径显式落 ``parent.tree_depth + 1``（task-02 消费）；daemon create
+    # 路径不传落默认 0（主控/普通会话）——server_default '0' 让 raw INSERT 不传
+    # 本列也落 0（placement.py stage 派发先例，对齐 origin 列 server_default 写法；
+    # 迁移 20260826020000 同值）。迁移全表 CASE 回填（parent NULL→0 / 非空→1），
+    # NOT NULL 保证无 NULL 读值——不写任何「NULL 按 1 计」运行时兜底规则（Grill B1）。
+    tree_depth: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, default=0, server_default=text("0")),
+    )
 
 
 # ── 会话树辅助查询（2026-08-25-team-subsession-governance task-01，design §5.A）──
 # 本模块保持叶子（顶层仅依赖 SQLAlchemy/Base）；需要 mission.py 的
 # get_active_mission_for_session 时走函数内延迟 import（先例见 finalizer.py）。
 
+# 会话树递归展开的深度截断上限（2026-08-26-team-subsession-recursion task-01，
+# design §5.A，model.py 单源）：``mission_worker_sessions_tree`` 递归 CTE 对脏数据
+# 深环（环 + UNION 去重仍会逐层加深）的硬护栏——深度 ≥ MAX_TREE_DEPTH 的子树不再
+# 展开。刻意大于业务侧派发门 MAX_DISPATCH_DEPTH（=2，task-02 定义）：合法树最深
+# 2（主控→分身→孙），4 是查询侧对脏数据的宽容余量，两者不同名不同值勿混用。
+MAX_TREE_DEPTH = 4
+
 
 async def mission_worker_sessions(db: AsyncSession, mission_id: uuid.UUID) -> list[AgentSession]:
     """枚举 mission 的分身子会话（design §5.A 单一真相源）。
 
     按 ``mission.session_id`` 取根会话（团队场景根 = 主控会话），返回
-    ``parent_session_id = 根`` 的**直接子会话**行——P1 深度 2 只查一层，
-    不做递归 CTE 与树深上限（P2 递归派发时再放开）。mission 不存在 /
+    ``parent_session_id = 根`` 的**直接子会话**行——热路径一层最快，刻意不递归；
+    治理口径的全树枚举（含孙层）用 ``mission_worker_sessions_tree``
+    （2026-08-26-team-subsession-recursion task-01，design §5.A）。mission 不存在 /
     external mission（session_id 为 NULL）/ 根下无子会话均返回空列表。
     按 created_at 升序稳定枚举。消费方：list_workers / 成本 union /
     converge·cancel 收口名单（task-09/13 等）。注意本查询不做
@@ -749,6 +773,66 @@ async def mission_worker_sessions(db: AsyncSession, mission_id: uuid.UUID) -> li
     stmt = (
         select(AgentSession)
         .where(col(AgentSession.parent_session_id) == mission.session_id)
+        .order_by(col(AgentSession.created_at))
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def mission_worker_sessions_tree(
+    db: AsyncSession, mission_id: uuid.UUID
+) -> list[AgentSession]:
+    """枚举 mission 的会话树全树分身（design §5.A / D-003@v2 方案A 双源之 DB 源）。
+
+    以 ``mission.session_id`` 为根，沿 ``parent_session_id`` 递归 CTE 展开
+    **全树**（分身 + 孙 + 更深后代），供治理口径消费（task-03/04/08：derive/
+    control/finalizer/patrol 等含孙层的分身全集）。与 P1 的
+    ``mission_worker_sessions``（一层枚举）并存——热路径子会话行化仍一层最快，
+    勿混用口径。
+
+    - **不含根（主控）会话行**：根是派发者非分身，枚举只含后代；
+    - **防环**：递归 CTE 用 ``UNION``（非 UNION ALL）按 (id, depth) 元组去重，
+      叠加 ``MAX_TREE_DEPTH``(=4) 深度截断兜底——脏数据 parent 成环时环上会话
+      逐层加深重入，UNION 元组去重 + 深度截断保证不死循环，末端 ``DISTINCT``
+      保证同一会话行不重复返回；parent 指向不存在的行 → 不可达即不入树；
+    - mission 不存在 / external mission（session_id 为 NULL）/ 根下无子树均
+      返回空列表；
+    - 按 created_at 升序稳定枚举；不做 status/deleted 过滤——过滤语义归调用方
+      （P1 口径，``mission_worker_sessions`` 同）。
+    """
+    mission = (
+        (await db.execute(select(AgentMission).where(col(AgentMission.id) == mission_id)))
+        .scalars()
+        .first()
+    )
+    if mission is None or mission.session_id is None:
+        return []
+    root_id = mission.session_id
+    # WITH RECURSIVE：锚=根会话(depth 0)；递归项=parent 指向已入树行的子会话
+    # (depth+1)，depth >= MAX_TREE_DEPTH 不再展开（脏数据深环截断）。UNION 去重
+    # 防（同深度）重复元组；双方言可执行（SQLite 测试方言 + PG 生产）。
+    tree = (
+        select(
+            col(AgentSession.id).label("sid"),
+            literal(0, type_=Integer).label("depth"),
+        )
+        .where(col(AgentSession.id) == root_id)
+        .cte(name="mission_session_tree", recursive=True)
+    )
+    tree = tree.union(
+        select(
+            col(AgentSession.id).label("sid"),
+            (tree.c.depth + 1).label("depth"),
+        ).where(
+            col(AgentSession.parent_session_id) == tree.c.sid,
+            tree.c.depth < MAX_TREE_DEPTH,
+        )
+    )
+    stmt = (
+        select(AgentSession)
+        .join(tree, col(AgentSession.id) == tree.c.sid)
+        .where(tree.c.sid != root_id)
+        .distinct()
         .order_by(col(AgentSession.created_at))
     )
     result = await db.execute(stmt)

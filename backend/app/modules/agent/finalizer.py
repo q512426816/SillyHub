@@ -39,7 +39,7 @@ from app.modules.agent.model import (
     AgentMission,
     AgentRun,
     AgentSession,
-    mission_worker_sessions,
+    mission_worker_sessions_tree,
 )
 from app.modules.daemon.host_fs import HostFsDelegate, new_host_fs_delegate
 from app.modules.workspace.model import Workspace
@@ -496,14 +496,15 @@ class FinalizerService:
             return {"cleaned": [], "patch_artifact_id": patch_artifact_id}
 
         # task-09（FR-05，design §5.C.5）：清理名单判据换 is_worker_complete——
-        # run 属于分身子会话（agent_session_id ∈ mission_worker_sessions）时按
-        # **会话**判定完成：首 run 终态 ≠ 分身完成，idle 未 done / 追问重开工中
-        # 的分身 cwd 不动（副本保留供后续轮次）。存量 batch run（无子会话归属）
-        # 的 is_worker_complete 即 run 终态，与 SQL 过滤等价，名单零回归（FR-09）。
+        # run 属于分身子会话（agent_session_id ∈ mission_worker_sessions_tree
+        # 全树，task-08 起含孙层）时按 **会话**判定完成：首 run 终态 ≠ 分身完成，
+        # idle 未 done / 追问重开工中的分身 cwd 不动（副本保留供后续轮次）；
+        # 已完成孙分身的 worktree 副本同样清理，未完成孙不动（design §5.E）。
+        # 存量 batch run（无子会话归属）的 is_worker_complete 即 run 终态，与
+        # SQL 过滤等价，名单零回归（FR-09）。
         from app.modules.agent.mission import is_worker_complete
-        from app.modules.agent.model import mission_worker_sessions
 
-        worker_sessions = await mission_worker_sessions(self._session, mission_id)
+        worker_sessions = await mission_worker_sessions_tree(self._session, mission_id)
         worker_sessions_by_id = {s.id: s for s in worker_sessions}
         rows: list[tuple[uuid.UUID, uuid.UUID | None]] = []
         for run_id, target_ws, agent_session_id in raw_rows:
@@ -635,8 +636,10 @@ async def _end_mission_worker_subsessions(
 ) -> int:
     """converge 成功后沿会话树批量收口分身子会话（task-10 / FR-06 / design §5.D）。
 
-    ``mission_worker_sessions(mission_id)`` 一层枚举分身子会话（收口名单单一
-    真相源），逐个复用 ``SessionService.end_session`` 既有链收口——子会话
+    ``mission_worker_sessions_tree(mission_id)`` **全树**枚举分身子会话
+    （2026-08-26-team-subsession-recursion task-08 起，design §5.E——converge
+    后孙层分身同样 end_session，best-effort 语义不变；无孙树与一层枚举等价，
+    FR-08 零回归），逐个复用 ``SessionService.end_session`` 既有链收口——子会话
     ended + interactive lease completed + P0-2 修好的 SESSION_END WS
     best-effort 下发。end_session 自带幂等（已 ended/failed 早退），重复调用
     零副作用；本 helper 不重造 kill 逻辑、不直接翻 DB 会话状态（TaskCard 约束）。
@@ -668,7 +671,7 @@ async def _end_mission_worker_subsessions(
         )
         return 0
     owner_id = mission.created_by
-    workers = await mission_worker_sessions(db, mission_id)
+    workers = await mission_worker_sessions_tree(db, mission_id)
     if not workers:
         return 0
     # 预取 id/属主标量：end_session 失败分支会 rollback（SQLAlchemy 随之 expire

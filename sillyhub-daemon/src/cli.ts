@@ -843,11 +843,13 @@ export async function startAction(opts: StartOptions): Promise<number> {
       // task-06（2026-08-25-team-subsession-governance / FR-03 / D-003@v1，design
       // §5.C.1）：分身受限 MCP 注入——谓词三态化的第三态。stage=mission_worker 的
       // 会话不进主控 5 工具 server（isMainAgentSession 对其返回 false，递归闸），
-      // 改注入仅含 worker_done 单工具的 sillyhub-worker server，让分身干完后能
-      // 显式上报完成信号（backend task-07 worker_done 端点，X-Session-Id 定位）。
+      // 改注入 sillyhub-worker server。task-05（2026-08-26-team-subsession-
+      // recursion / D-002@v1，design §5.C）起该 server 按分身深度两档：非叶
+      // （worker_depth<MAX_DISPATCH_DEPTH）派工集 5 件、叶仅 worker_done。
       //
       // isWorkerSession：provider=claude 且 stage='mission_worker'（codex 不注入，
-      // 对齐主控谓词口径）。判定发生在 session-manager _resolveMainAgentMcp 分身
+      // 对齐主控谓词口径；判据不变——stage 三态化结构不动，worker_depth 只影响
+      // 工具集档位不影响谓词）。判定发生在 session-manager _resolveMainAgentMcp 分身
       // 分支（优先于主控谓词），create / restore / reload 三路共用点生效。
       //
       // workerMcpConfigProvider：buildWorkerMcpServerConfig 组装受限条目（env
@@ -858,13 +860,23 @@ export async function startAction(opts: StartOptions): Promise<number> {
       isWorkerSession: (ctx) => {
         return ctx.provider === 'claude' && (ctx.stage ?? '') === 'mission_worker';
       },
-      workerMcpConfigProvider: () => {
+      workerMcpConfigProvider: (ctx) => {
         const mcpApiKey = config.api_key ?? '';
         const mcpToken = config.token ?? '';
-        const workerServer = buildWorkerMcpServerConfig(config.server_url, {
-          token: mcpToken,
-          apiKey: mcpApiKey || undefined,
-        });
+        const workerServer = buildWorkerMcpServerConfig(
+          config.server_url,
+          {
+            token: mcpToken,
+            apiKey: mcpApiKey || undefined,
+          },
+          // task-05（2026-08-26-team-subsession-recursion / design §5.C）：分身深度
+          // 透传——ctx.worker_depth 来自 lease.metadata.worker_depth（task-04 承载
+          // 链：claim payload → daemon → create/restore/reload 三路保档），经 env
+          // MCP_WORKER_DEPTH 传给受限 server；mcp-server 按 depth <
+          // MAX_DISPATCH_DEPTH 两档注册（非叶 5 件 / 叶 1 件）。undefined 不写键 =
+          // 叶档兜底（旧 lease 宁少勿多，design §7 风险表）。
+          { workerDepth: ctx.worker_depth },
+        );
         const merged = mergeMcpConfigs([], {
           mcpServers: { [WORKER_MCP_SERVER_NAME]: workerServer },
         });

@@ -537,5 +537,86 @@ class TestLegacyMissionNoSubsessions:
         assert captured == [], "无子会话零 WS 下发（收口 helper 空集 no-op）"
 
 
+# ── 4. task-08（2026-08-26-team-subsession-recursion）：converge 收口遍历含孙层 ──
+
+
+class TestConvergeClosesGrandchildren:
+    async def test_converge_ends_grandchild_sessions(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """design §5.E：converge 成功后孙层分身同样 end_session（全树收口遍历，
+        best-effort 语义不变）——孙会话 ended + lease completed + SESSION_END。"""
+        captured = _recording_ws_hub(monkeypatch)
+        _ws, root, mission, user_id, rt, anchor = await _seed_tree(db_session)
+        w1, l1 = await _seed_worker(
+            db_session,
+            root,
+            mission,
+            owner_id=user_id,
+            runtime=rt,
+            worker_done_at=datetime.now(UTC),
+        )
+        # 孙分身：parent 挂一层分身 w1、tree_depth=2，自带 interactive lease +
+        # 首 run（mission_id+role 双标记，completed）+ worker_done。
+        now = datetime.now(UTC)
+        g_lease = DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            agent_run_id=None,
+            status="claimed",
+            kind="interactive",
+            claimed_at=now,
+            lease_expires_at=None,
+            metadata_={"claim_token": "tok", "session_id": "pending"},
+            created_at=now,
+            updated_at=now,
+        )
+        db_session.add(g_lease)
+        grandchild = AgentSession(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            provider="claude",
+            status="active",
+            parent_session_id=w1.id,
+            tree_depth=2,
+            worker_done_at=datetime.now(UTC),
+            lease_id=g_lease.id,
+            runtime_id=rt.id,
+        )
+        db_session.add(grandchild)
+        db_session.add(
+            AgentRun(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                provider="claude",
+                status="completed",
+                role="impl",
+                agent_session_id=grandchild.id,
+                objective="孙分身任务",
+            )
+        )
+        await db_session.commit()
+        await db_session.refresh(grandchild)
+        _patch_finalize(monkeypatch, merged_branches=["workers/aaa"])
+
+        status = await converge_mission_for_completed_run(
+            db_session, anchor.id, None, converge_explicit=True
+        )
+
+        assert status == "done"
+        # 全树收口：一层分身 + 孙分身均 ended、lease completed
+        await db_session.refresh(w1)
+        assert w1.status == "ended"
+        await db_session.refresh(grandchild)
+        assert grandchild.status == "ended"
+        await db_session.refresh(l1)
+        assert l1.status == "completed"
+        await db_session.refresh(g_lease)
+        assert g_lease.status == "completed"
+        ends = _session_ends(captured)
+        assert {p["session_id"] for p in ends} == {str(w1.id), str(grandchild.id)}
+        assert {p["lease_id"] for p in ends} == {str(l1.id), str(g_lease.id)}
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -3558,7 +3558,9 @@ export class Daemon {
    */
   private async _startInteractiveSession(
     leaseId: string,
-    execPayload: LeasePayload,
+    // task-04：交叉类型承载 worker_depth（execPayload 归一化产物；LeaseCtx 未
+    // 声明该字段，见 _runLeaseStateMachine 注释）。
+    execPayload: LeasePayload & { worker_depth?: number },
   ): Promise<void> {
     // AC-09：重复 task_available（WS 重连/重放）→ 跳过，driver 只启动一次。
     if (this._interactiveSessionsByLease.has(leaseId)) {
@@ -3925,6 +3927,11 @@ export class Daemon {
         // SessionManager isMainAgentSession 谓词据此判定 → 注入 daemon MCP server 5 tool。
         // 普通会话 stage 未传/其他值 → 不注入（零回归）。
         stage: execPayload.stage,
+        // task-04（2026-08-26-team-subsession-recursion / design §5.C / FR-04）：
+        // 分身深度透传 SessionManager.create（state.worker_depth + snapshot 保档；
+        // MainAgentMcpContext 承载，工具集分档消费归 task-05）。undefined →
+        // 旧 lease / 主控 / 普通会话全链无键（零回归）。
+        worker_depth: execPayload.worker_depth,
         // task-10（C-12 / FR-10/11）：AgentProfile 三字段透传 SessionManager.create。
         // execPayload 已归一化（camelCase 优先 snake_case 兜底）；SessionManager 据
         // mcpRefs ∩ 过滤主 agent MCP 注入，skillRefs 承载（daemon spawn 前 link 子集），
@@ -4188,7 +4195,9 @@ export class Daemon {
     const rawExec: Record<string, unknown> = nestedPayload
       ? { ...(nestedPayload as object), ...(flatClaimResp as object) }
       : { ...(flatClaimResp as object) };
-    const execPayload: LeasePayload = {
+    // task-04：交叉类型承载 worker_depth（LeaseCtx 未声明本字段——src/types.ts 不在
+    // 本卡 allowed_paths；读取 + 透传见下方归一化注释）。
+    const execPayload: LeasePayload & { worker_depth?: number } = {
       ...payload,
       leaseId: (rawExec.leaseId as string | undefined) ?? (rawExec.lease_id as string | undefined) ?? payload.leaseId,
       runtimeId: (rawExec.runtimeId as string | undefined) ?? (rawExec.runtime_id as string | undefined) ?? runtimeId,
@@ -4302,6 +4311,17 @@ export class Daemon {
       stage:
         (rawExec.stage as string | undefined) ??
         payload.stage,
+      // task-04（2026-08-26-team-subsession-recursion / design §5.C / FR-04）：
+      // 分身会话深度归一化。backend placement 写 lease.metadata.worker_depth →
+      // context.py 白名单进 claim payload → 此处读取（snake 优先 camel 兜底 +
+      // 初始 payload 防御兜底，对齐 budget_tokens 归一化惯例）。undefined（旧
+      // lease / 主控 / 普通会话）→ 全链穿透不伪造默认值（零回归）。
+      // 注：LeaseCtx（src/types.ts）不在本卡 allowed_paths，以交叉类型随
+      // execPayload 承载，_startInteractiveSession 透传 CreateSessionInput。
+      worker_depth:
+        (rawExec.worker_depth as number | undefined) ??
+        (rawExec.workerDepth as number | undefined) ??
+        (payload as { worker_depth?: number }).worker_depth,
       // task-08 / task-09（D-004@v1 / D-005@v1）：LLM 供应商配置透传。backend
       // build_claim_payload 按 lease→user 解析默认 provider 解密 api_key 后下发；
       // daemon spawn-env 第 0 层据此注入 ANTHROPIC_* env。interactive 经 execPayload

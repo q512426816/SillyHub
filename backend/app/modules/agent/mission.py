@@ -9,6 +9,11 @@ Worker Runs. Worker *execution* (daemon dispatch) is Wave 3.
 2026-08-25-team-subsession-governance task-08（FR-05 / D-005@v1，design
 §5.C.3–5.C.4）：``is_worker_complete``（worker 完成判据单一真相源，双形态）
 + ``mission_derive_status``（derive_status 的 mission 级虚拟 run 映射包装）。
+
+2026-08-26-team-subsession-recursion task-03（FR-05 / FR-07 / design §5.E）：
+``mission_derive_status`` 分身集合换 ``mission_worker_sessions_tree`` 全树
+枚举（孙层计入）+ ``budget_force_ended_at`` 预算强收标记的虚拟映射增补
+（会话 ended 且未 done → failed 终态，强收后 mission 可收敛 degraded）。
 """
 
 from __future__ import annotations
@@ -28,7 +33,7 @@ from app.modules.agent.model import (
     AgentMission,
     AgentRun,
     AgentSession,
-    mission_worker_sessions,
+    mission_worker_sessions_tree,
 )
 
 log = get_logger(__name__)
@@ -100,6 +105,11 @@ _ORCHESTRATOR_ROLE = "orchestrator"
 _WORKER_SESSION_TERMINAL = frozenset({"failed", "ended"})
 # 存量 batch run 终态（= derive_status 词表 _DONE ∪ _FAILED，FR-09 存量判据零回归）。
 _WORKER_RUN_TERMINAL = frozenset({"completed", "failed", "killed"})
+# 预算强收标记键（2026-08-26-team-subsession-recursion task-03 / design §5.E，
+# mission.py 单源）：patrol 预算触顶批量强收前原子置位到 mission.constraints
+# （ISO 时间戳值，task-07 写）；本模块只读键存在性做虚拟映射——标记存在时
+# 「会话 ended 且未 done」映射 failed 终态，保证强收后 mission 可收敛 degraded。
+BUDGET_FORCE_ENDED_AT_KEY = "budget_force_ended_at"
 
 
 async def _sessions_with_active_turns(
@@ -161,25 +171,31 @@ async def mission_derive_status(
        主控在自己活跃轮内 derive 恒 running、converge 置位永败）。NULL role
        守卫同 ``control.non_orchestrator_runs``（SQL 三值逻辑 ``!=`` 漏 NULL
        行，存量分身 run 不容漏）。分身首 run（带 mission_id 但
-       agent_session_id ∈ 子会话）被剔除——分身状态一律以子会话行的虚拟映射
-       为准，避免同分身双计；
-    2. 每个分身子会话（``mission_worker_sessions`` 一层枚举，P1 深度 2）映射
-       虚拟 run，优先级从高到低：``worker_done_at`` 非空且无活跃 turn →
+       agent_session_id ∈ 子会话全树）被剔除——分身状态一律以子会话行的
+       虚拟映射为准，避免同分身双计（含孙首 run，按全树 id 集合剔除）；
+    2. 每个分身子会话（``mission_worker_sessions_tree`` 全树枚举，含孙层，
+       2026-08-26 task-03 / design §5.E——无孙树与一层枚举等价，FR-08 零回归）
+       映射虚拟 run，优先级从高到低：``worker_done_at`` 非空且无活跃 turn →
        ``completed``（优先于终态映射——converge end_session 后 done 分身仍
-       映射 done 而非 failed）；会话终态 ``failed`` → ``failed``；其余（含
-       idle 未 done、追问重开工中）→ ``running``；
+       映射 done 而非 failed）；mission.constraints 带
+       ``budget_force_ended_at`` 标记（预算强收置位，只读键存在性）时会话
+       ``ended`` 且未 done → ``failed``（终态而非 running——强收后 mission
+       可收敛 degraded，design §5.E Grill M2）；会话终态 ``failed`` →
+       ``failed``；其余（含 idle 未 done、追问重开工中、无标记 ended 未
+       done）→ ``running``；
     3. 两组合并喂 ``derive_status``。空集语义：有分身时虚拟集合非空，不会
        误判 planning。
 
     mission 不存在 / session_id 查无会话行（存量 external 形态）→ 输入按空集
-    宽限（对齐 ``mission_worker_sessions`` 缺行返 [] 口径），返回 planning。
+    宽限（对齐 ``mission_worker_sessions_tree`` 缺行返 [] 口径），返回
+    planning。
     """
     mission = (
         (await db.execute(select(AgentMission).where(col(AgentMission.id) == mission_id)))
         .scalars()
         .first()
     )
-    worker_sessions = await mission_worker_sessions(db, mission_id)
+    worker_sessions = await mission_worker_sessions_tree(db, mission_id)
     worker_session_ids = {s.id for s in worker_sessions}
 
     runs_stmt = select(AgentRun).where(col(AgentRun.mission_id) == mission_id)
@@ -191,12 +207,22 @@ async def mission_derive_status(
     runs = [r for r in raw_runs if r.agent_session_id not in worker_session_ids]
 
     active_worker_ids = await _sessions_with_active_turns(db, list(worker_session_ids))
+    # 预算强收标记只查键存在性（constraints None 安全）；置位归 task-07 patrol。
+    budget_force_ended = (
+        mission is not None
+        and mission.constraints is not None
+        and BUDGET_FORCE_ENDED_AT_KEY in mission.constraints
+    )
 
     def _virtual_status(s: AgentSession) -> str:
-        # 优先级：done 且无活跃 turn → completed > 会话终态 failed → failed
-        # > 其余（idle 未 done / 追问重开工中 / ended 未 done）→ running。
+        # 优先级：done 且无活跃 turn → completed > 预算强收标记下会话 ended
+        # 且未 done → failed（终态，可收敛 degraded）> 会话终态 failed →
+        # failed > 其余（idle 未 done / 追问重开工中 / 无标记 ended 未
+        # done）→ running。
         if s.worker_done_at is not None and s.id not in active_worker_ids:
             return "completed"
+        if budget_force_ended and s.status == "ended" and s.worker_done_at is None:
+            return "failed"
         if s.status == "failed":
             return "failed"
         return "running"

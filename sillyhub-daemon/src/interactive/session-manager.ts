@@ -73,6 +73,7 @@ import type {
 import {
   SessionAlreadyExistsError,
   SessionAttachmentTimeoutError,
+  SessionLimitReached,
   SessionNotFoundError,
   SessionNotActiveError,
   UnsupportedProviderError,
@@ -318,13 +319,24 @@ export interface MainAgentMcpContext {
    */
   stage?: string;
   /**
+   * task-04（2026-08-26-team-subsession-recursion / design §5.C / FR-04）：
+   * 分身会话深度（来自 lease.metadata.worker_depth）。
+   *
+   * create 路径从 ``CreateSessionInput.worker_depth``、restore 路径从
+   * ``PersistedSessionRecord.worker_depth`` 归一化填入。本卡只承载不分层——
+   * daemon 注入的 ``isWorkerSession`` 等谓词 / provider 据此分档（非叶
+   * depth < MAX_DISPATCH_DEPTH 拿派工五件、叶仅 worker_done）的判定归 task-05。
+   * undefined → 旧 lease / 主控 / 普通会话（缺键穿透不伪造默认值）。
+   */
+  worker_depth?: number;
+  /**
    * task-10（C-12 / FR-10）：profile 限定的 MCP server name 子集。
    *
    * create 路径从 ``CreateSessionInput.mcpRefs``、restore 路径从
    * ``PersistedSessionRecord.mcpRefs`` 归一化填入。非空时 ``_resolveMainAgentMcp``
    * 对 ``mainAgentMcpConfigProvider`` 返回的配置表按此 ∩ 过滤（mergeMcpConfigs
    * 第三层），只让 profile 引用的 MCP server 被 agent discover。undefined/空 →
-   * 不过滤（FR-15）。
+   * 不过滤（FR-15 向后兼容）。普通会话（非主 agent）无 MCP 注入，本字段无作用。
    */
   mcpRefs?: string[];
   /** task-10（C-12）：profile 限定的技能子集（承载，daemon 侧 link 收紧用）。 */
@@ -486,6 +498,14 @@ const CLEAR_PERSONA_PROMPT =
   '用户已取消此前设置的智能体档案（人格）。此前对话中出现的任何人格/角色设定均已失效：请停止继续扮演该角色，以默认的 AI 编程助手身份、基于通用能力回答后续问题。';
 /** 默认扫描周期（秒）。 */
 const DEFAULT_IDLE_SCAN_SEC = 60;
+
+/**
+ * task-04（2026-08-26-team-subsession-recursion / design §5.D / FR-06）：daemon
+ * 存活会话总数闸默认上限。env ``SILLYHUB_MAX_ACTIVE_SESSIONS`` 可配（0=不限），
+ * 防分身递归派工 + 普通会话叠加触发进程风暴。计数口径 = 内存 ``_store`` 活会话
+ * （status 非终态 ended/failed——终态延迟清理条目不计），不查 backend。
+ */
+const DEFAULT_MAX_ACTIVE_SESSIONS = 20;
 
 export class SessionManager {
   /** 内存 SessionStore。Wave1/2 内存态，daemon 重启丢失（D-003）。 */
@@ -684,6 +704,15 @@ export class SessionManager {
   private readonly _idleScanSec: number;
 
   /**
+   * task-04（design §5.D / FR-06）：存活会话总数闸上限（create 前置计数用）。
+   * 构造时从 ``process.env.SILLYHUB_MAX_ACTIVE_SESSIONS`` 读（读法对齐
+   * SESSION_IDLE_TIMEOUT_SEC 先例）；未配 / 非法（NaN / 负数）→ 默认 20，
+   * 0 = 不限。**闸只限 create**——restoreAndReconnect / 重连不读本字段（design
+   * §7 风险表「会话闸误伤 restore」）。
+   */
+  private readonly _maxActiveSessions: number;
+
+  /**
    * ql-20260822-001：resume transcript 目录对（探测 + home→隔离迁移共用）。
    * 缺省 { isolated: CLAUDE_CONFIG_DIR, home: ~/.claude }；测试注入 tmp 对。
    */
@@ -805,6 +834,12 @@ export class SessionManager {
       optsScan !== undefined && Number.isFinite(optsScan) && optsScan > 0
         ? optsScan
         : DEFAULT_IDLE_SCAN_SEC;
+    // task-04（design §5.D / FR-06）：会话总数闸 env 读法对齐 SESSION_IDLE_TIMEOUT_SEC
+    // 先例。Number(env) 未配/非法 → NaN → 默认 20；显式 0 = 不限（design §5.D）；
+    // 负数视为非法同落默认。计数口径 = _store 活会话（非终态），create 前置检查。
+    const gateRaw = Number(process.env.SILLYHUB_MAX_ACTIVE_SESSIONS);
+    this._maxActiveSessions =
+      Number.isFinite(gateRaw) && gateRaw >= 0 ? gateRaw : DEFAULT_MAX_ACTIVE_SESSIONS;
     // ql-20260822-001：resume transcript 目录对（测试注入 tmp 对，生产取缺省）。
     this._resumeDirs = opts.resumeDirs ?? defaultTranscriptDirs();
 
@@ -1093,6 +1128,7 @@ export class SessionManager {
    *
    * @throws {SessionAlreadyExistsError} 重复 sessionId
    * @throws {UnsupportedProviderError} provider driver 未注册
+   * @throws {SessionLimitReached} 活会话数达 SILLYHUB_MAX_ACTIVE_SESSIONS 上限（task-04 会话闸）
    * @throws {ClaudeExecutableNotFoundError} executable 缺失（driver.start 内抛，透传）
    */
   async create(input: CreateSessionInput & {
@@ -1107,6 +1143,21 @@ export class SessionManager {
     const driver = this._getDriver(input.provider);
     if (this._store.has(input.sessionId)) {
       throw new SessionAlreadyExistsError(input.sessionId);
+    }
+
+    // task-04（design §5.D / FR-06）：会话总数闸——create 前置计数内存 _store 活会话
+    // （status 非终态 ended/failed；终态延迟清理条目不计，见 _terminalCleanupTimers）。
+    // 活会话数 ≥ _maxActiveSessions（SILLYHUB_MAX_ACTIVE_SESSIONS，默认 20，0=不限）→
+    // 抛 SessionLimitReached（daemon _startInteractiveSession 既有 P2b catch 回传 run
+    // failed）。restoreAndReconnect 不走本闸（design §7「会话闸误伤 restore」）。
+    if (this._maxActiveSessions > 0) {
+      let activeCount = 0;
+      for (const s of this._store.values()) {
+        if (s.status !== 'ended' && s.status !== 'failed') activeCount++;
+      }
+      if (activeCount >= this._maxActiveSessions) {
+        throw new SessionLimitReached(activeCount, this._maxActiveSessions);
+      }
     }
 
     // D-009（task-02）：InputQueue 改 provider-neutral UserTurnInput。SessionManager
@@ -1142,6 +1193,10 @@ export class SessionManager {
       subagentDepth: new Map(), // task-02 / D-007@v1：子代理 depth 追踪。
       // task-06：lease stage 持久化（snapshotPersistable 输出，恢复用）。
       stage: input.stage,
+      // task-04（2026-08-26-team-subsession-recursion）：分身会话深度承载（来自
+      // CreateSessionInput.worker_depth，snapshotPersistable 输出 + restore 保档）。
+      // undefined → 旧 lease / 主控 / 普通会话（键穿透，档位判定归 task-05）。
+      worker_depth: input.worker_depth,
       // task-10（C-12）：profile 字段承载到 state（写守卫用 effectiveAllowedRoots；
       // mcpRefs/skillRefs 持久化恢复用）。undefined → 不写键（FR-15 行为同今天）。
       ...(input.mcpRefs !== undefined ? { mcpRefs: input.mcpRefs } : {}),
@@ -1187,6 +1242,9 @@ export class SessionManager {
         cwd: input.cwd,
         model: input.model,
         stage: input.stage,
+        // task-04：分身深度随 ctx 传入（受限分支谓词 / provider 消费；本卡只承载，
+        // 分档判定归 task-05——非叶 5 工具 / 叶仅 worker_done）。
+        worker_depth: input.worker_depth,
         mcpRefs: input.mcpRefs,
         skillRefs: input.skillRefs,
         effectiveAllowedRoots: input.effectiveAllowedRoots,
@@ -2939,6 +2997,12 @@ export class SessionManager {
       if (state.stage) {
         rec.stage = state.stage;
       }
+      // task-04（design §5.C / Grill M3）：分身深度保档——非 undefined 才写
+      //（0 合法）；缺键（旧 lease / 主控 / 普通会话）不落盘，恢复后 undefined
+      // 穿透不伪造默认值（防重启后非叶分身静默降级叶档）。
+      if (state.worker_depth !== undefined) {
+        rec.worker_depth = state.worker_depth;
+      }
       // task-10（C-12）：profile 字段持久化（恢复后重新过滤 MCP / 写守卫继续收紧）。
       // 仅对应字段非 undefined 时写（profile=None 的 session 不写，FR-15）。
       if (state.mcpRefs !== undefined) {
@@ -3045,6 +3109,9 @@ export class SessionManager {
       subagentDepth: new Map(), // task-02 / D-007@v1：恢复后从空开始（depth 不持久化）。
       // task-06：恢复主 agent stage（重新注入 MCP tool 用）。
       stage: record.stage,
+      // task-04：恢复分身深度（snapshot 保档链，M3——非叶不静默降级叶档）。
+      // 旧 sessions.json 无此字段 → undefined 穿透（档位判定归 task-05）。
+      worker_depth: record.worker_depth,
       // task-10（C-12）：恢复 profile 字段（mcpRefs 重新过滤主 agent MCP；skillRefs
       // 承载；effectiveAllowedRoots 写守卫继续收紧）。undefined → 不写键（FR-15）。
       ...(record.mcpRefs !== undefined ? { mcpRefs: record.mcpRefs } : {}),
@@ -3080,6 +3147,8 @@ export class SessionManager {
         cwd: record.cwd,
         model: record.model,
         stage: record.stage,
+        // task-04：恢复时分身深度随 ctx 传入（保档，谓词/provider 分档判定归 task-05）。
+        worker_depth: record.worker_depth,
         // task-10（C-12）：恢复时重新按 profile.mcpRefs 过滤主 agent MCP 注入。
         mcpRefs: record.mcpRefs,
         skillRefs: record.skillRefs,
@@ -3635,6 +3704,9 @@ export class SessionManager {
         provider: state.provider,
         cwd: state.cwd,
         ...(state.stage !== undefined ? { stage: state.stage } : {}),
+        // task-04：reload（人格/供应商热切换重建 query）时分身深度随 ctx 补字段，
+        // 保持 create / restore / reload 三路同一归一化口径（分档判定归 task-05）。
+        ...(state.worker_depth !== undefined ? { worker_depth: state.worker_depth } : {}),
         ...(state.mcpRefs !== undefined ? { mcpRefs: state.mcpRefs } : {}),
         ...(state.skillRefs !== undefined ? { skillRefs: state.skillRefs } : {}),
         ...(state.effectiveAllowedRoots !== undefined

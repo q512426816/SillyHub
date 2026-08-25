@@ -14,6 +14,11 @@ design §5.C.6 / §5.D / FR-07 / D-002@v1 / D-004@v1：
   活跃轮取首 run 调 ``cancel_lease``，命中 P0-2 ``_lookup_interactive_lease_by_run``
   回捞链发 SESSION_END，子会话 ended + lease cancelled）；主控轮仍不占额度/
   不计成本/不进 kill 名单；无子会话 mission 三口径回落现行为（FR-09）。
+
+task-08（2026-08-26-team-subsession-recursion / design §5.E / FR-07）：
+``_split_worker_forms`` 枚举单点换 ``mission_worker_sessions_tree`` 全树——
+三口径（并发计数 / cost union / cancel kill 名单）均含孙层分身（TestGrandchild
+Governance；无孙树与一层枚举等价，既有断言零改动全过）。
 """
 
 from __future__ import annotations
@@ -596,6 +601,143 @@ class TestLegacyFallback:
         ctrl = MissionControlService(db_session)
         assert await ctrl.running_worker_count(mission.id) == 1
         assert await ctrl.cost_so_far(mission.id) == pytest.approx(1.5)
+
+
+# ── 5. task-08（2026-08-26-team-subsession-recursion）：孙层计入治理三口径 ────
+# design §5.E / FR-07——_split_worker_forms 单点换 mission_worker_sessions_tree
+# 全树后：并发计数 / cost union / cancel kill 名单均含孙层分身。
+
+
+class TestGrandchildGovernance:
+    async def _make_grandchild_session(
+        self, db: AsyncSession, parent_worker: AgentSession, *, status: str = "active"
+    ) -> AgentSession:
+        """建孙分身子会话（parent 挂一层分身，tree_depth=2）。"""
+        g = AgentSession(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            provider="claude",
+            status=status,
+            parent_session_id=parent_worker.id,
+            tree_depth=2,
+        )
+        db.add(g)
+        await db.commit()
+        await db.refresh(g)
+        return g
+
+    @pytest.mark.asyncio
+    async def test_grandchild_incomplete_counts_toward_max_workers(
+        self, db_session: AsyncSession
+    ) -> None:
+        """孙分身未完成（idle 未 done）占 MAX_WORKERS 并发额度——主控补派被拦。"""
+        root, mission = await _make_root_and_mission(db_session)
+        # (MAX_WORKERS-1) 个未完成一层分身 + 1 个未完成孙分身（挂在已 done 的
+        # 一层分身下）→ 合计恰满 MAX_WORKERS——孙不计入则 gate 会放行。
+        parent = await _make_worker_session(db_session, root, worker_done_at=datetime.now(UTC))
+        await _make_run(
+            db_session,
+            status="completed",
+            mission_id=mission.id,
+            role="impl",
+            agent_session_id=parent.id,
+        )
+        for _ in range(MAX_WORKERS - 1):
+            w = await _make_worker_session(db_session, root)
+            await _make_run(
+                db_session,
+                status="completed",
+                mission_id=mission.id,
+                role="impl",
+                agent_session_id=w.id,
+            )
+        grandchild = await self._make_grandchild_session(db_session, parent)
+        await _make_run(
+            db_session,
+            status="completed",
+            mission_id=mission.id,
+            role="impl",
+            agent_session_id=grandchild.id,
+        )
+
+        ctrl = MissionControlService(db_session)
+        assert await ctrl.running_worker_count(mission.id) == MAX_WORKERS
+        allowed, reason = await ctrl.can_dispatch_worker(mission)
+        assert not allowed
+        assert reason == "max_workers_reached"
+
+    @pytest.mark.asyncio
+    async def test_grandchild_round_run_cost_counted(self, db_session: AsyncSession) -> None:
+        """孙层轮次 run（无 mission_id，仅挂孙会话）成本计入预算 union（§5.E）。"""
+        root, mission = await _make_root_and_mission(db_session, budget_usd=5.0)
+        parent = await _make_worker_session(db_session, root)
+        await _make_run(
+            db_session,
+            status="completed",
+            mission_id=mission.id,
+            role="impl",
+            agent_session_id=parent.id,
+            cost=1.0,
+        )
+        grandchild = await self._make_grandchild_session(db_session, parent)
+        await _make_run(
+            db_session,
+            status="completed",
+            agent_session_id=grandchild.id,
+            cost=5.0,
+        )  # 孙层追问轮：一层枚举不可见，全树 union 才计入
+
+        ctrl = MissionControlService(db_session)
+        assert await ctrl.cost_so_far(mission.id) == pytest.approx(6.0)
+        allowed, reason = await ctrl.can_dispatch_worker(mission)
+        assert not allowed
+        assert reason == "budget_exceeded"
+
+    @pytest.mark.asyncio
+    async def test_cancel_kill_list_includes_active_grandchild(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """cancel kill 名单含活跃孙分身——按其活跃轮 run 走 cancel_lease。"""
+        from app.modules.daemon import lease_service
+
+        cancelled_run_ids: list[uuid.UUID] = []
+
+        class _FakeLeaseService:
+            def __init__(self, session) -> None:
+                self._session = session
+
+            async def cancel_lease(self, agent_run_id: uuid.UUID) -> None:
+                cancelled_run_ids.append(agent_run_id)
+
+        monkeypatch.setattr(lease_service, "DaemonLeaseService", _FakeLeaseService)
+
+        root, mission = await _make_root_and_mission(db_session)
+        # 一层分身已 ended（终态不复活重杀）——孙分身活跃追问轮是唯一 kill 对象
+        # （一层枚举看不见孙，全树枚举才命中，本卡验收点）。
+        parent = await _make_worker_session(db_session, root, status="ended")
+        await _make_run(
+            db_session,
+            status="completed",
+            mission_id=mission.id,
+            role="impl",
+            agent_session_id=parent.id,
+        )
+        grandchild = await self._make_grandchild_session(db_session, parent)
+        await _make_run(
+            db_session,
+            status="completed",
+            mission_id=mission.id,
+            role="impl",
+            agent_session_id=grandchild.id,
+        )
+        grandchild_turn = await _make_run(
+            db_session, status="running", agent_session_id=grandchild.id
+        )
+
+        killed = await MissionControlService(db_session).cancel(mission)
+
+        assert killed == 1
+        assert cancelled_run_ids == [grandchild_turn.id]
 
 
 if __name__ == "__main__":

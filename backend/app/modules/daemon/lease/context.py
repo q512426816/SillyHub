@@ -478,6 +478,15 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         # → 主 agent 看不到 worker dispatch tool（e2e 2026-07-12 发现）。
         if lease_meta.get("stage") is not None:
             payload["stage"] = lease_meta["stage"]
+        # task-04（2026-08-26-team-subsession-recursion / design §5.C / FR-04）：
+        # 分身会话深度透传。placement.prepare_interactive_dispatch 写入
+        # lease.metadata.worker_depth（task-02 调用方接线传 tree_depth+1），此处
+        # 白名单透传进 claim payload，daemon execPayload 归一化后传 SessionManager
+        # （工具集分档消费归 task-05）。缺键短路不加 payload 键——存量 quick-chat /
+        # 主控 / 普通会话 / 旧 lease 全链 undefined 穿透（零回归，不伪造默认值）。
+        # ``is not None`` 守护（int 0 合法）；单键 snake_case，对齐 stage 先例。
+        if lease_meta.get("worker_depth") is not None:
+            payload["worker_depth"] = lease_meta["worker_depth"]
         # task-07 / C-13：透传 profile 字段（mcp_refs/skill_refs/effective_allowed_roots/
         # profile_version，双写 camelCase+snake_case）。置于 transport 分支之前，让 tar /
         # shared 两路 return 都携带（system_prompt 不在此，走 task-06 claudeMd prepend）。

@@ -18754,7 +18754,13 @@ export interface components {
          *       ``run_id`` = 首 run id、``first_run_id`` = 首 run id（design §6 实现级
          *       备注：供 ``get_worker_result`` 连续消费）、role/objective 取首 run 双标记、
          *       status 按 ``is_worker_complete`` / ``mission_derive_status`` 口径映射；
-         *     - 存量形态两新字段恒 None（存量响应字段零变化，FR-08/FR-09）。
+         *     - 存量形态两新字段恒 None（存量响应字段零变化，FR-08/FR-09）；
+         *     - ``sub_workers_count``（2026-08-26-team-subsession-recursion task-08 /
+         *       design §5.E）：一层分身的**孙后代折叠计数**——router 按
+         *       ``mission_worker_sessions_tree`` 全树枚举的 parent 关系聚合该分身在树中
+         *       的后代数（含孙及更深，脏数据截断内）。展示保持一层直查（workers 行不
+         *       展开孙层明细，门户分组等 UI 留 P3）；仅**有后代**的一层分身行填值，
+         *       存量 batch 行 / 无孙分身保持默认 None（FR-08 存量零变化）。
          */
         TeamMissionWorkerSummary: {
             /**
@@ -18774,6 +18780,8 @@ export interface components {
             sub_session_id?: string | null;
             /** First Run Id */
             first_run_id?: string | null;
+            /** Sub Workers Count */
+            sub_workers_count?: number | null;
         };
         /**
          * TeamWorkspaceRef
