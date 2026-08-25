@@ -20,7 +20,7 @@
  *
  * 壳层状态全部来自 stores/floating-session（D-002：壳态与 R6 边界见该文件头）。
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -60,7 +60,7 @@ const PORTAL_ROUTE_RE =
 function FloatingDrawerBody({
   onPreSessionCreated,
 }: {
-  onPreSessionCreated: (resp: SessionCreateResponse) => void;
+  onPreSessionCreated: (_resp: SessionCreateResponse) => void;
 }) {
   const router = useRouter();
   const qc = useQueryClient();
@@ -330,6 +330,60 @@ function FloatingDrawerBody({
   );
 }
 
+/**
+ * 悬浮宿主：球 + 最小化胶囊 + 抽屉 + 互斥门控。
+ *
+ * 2026-08-25 悬浮球增强（用户反馈三连）：
+ *   1. 可拖拽：球按住拖动到屏幕任意位置（拖拽阈值 6px，误触不误拖）；
+ *      位置/吸附态持久化 localStorage（刷新不丢）。
+ *   2. 边缘收起：松手时球心距左右边缘 ≤52px 自动吸附成「半藏发光条」
+ *      （露出 14px），点一下照常开抽屉，再拖走即脱离边缘。
+ *   3. 点外部自动收抽屉：open 时全局 pointerdown 捕获，落在抽屉/球之外
+ *      即 closeDrawer（radix/antd 弹出层 portal 到 body，白名单放行，
+ *      否则点面板内下拉会误收）。
+ *   抽屉/胶囊跟随球所在半屏开合（球在左半屏 → 抽屉从左侧滑出）。
+ */
+
+/** 球直径（h-12 w-12）。 */
+const BALL = 48;
+/** 自由停靠时与视口边缘间距（对齐原 bottom-5 right-5）。 */
+const EDGE_GAP = 20;
+/** 判定「拖拽」而非「点击」的位移阈值（px）。 */
+const DRAG_THRESHOLD = 6;
+/** 松手吸附余量：球心距边缘 ≤ BALL/2 + 此值 → 收起到该边缘。 */
+const DOCK_SLACK = 28;
+/** 吸附后露出边缘的宽度（px），其余半藏在屏外。 */
+const DOCK_VISIBLE = 14;
+/** 球位置持久化键。 */
+const BALL_STORAGE_KEY = "sillyhub:floating-ball";
+
+type DockSide = "left" | "right";
+
+/** 球锚点：x/y 为球心视口坐标（docked 时为「未隐藏时」的逻辑球心）。 */
+interface BallAnchor {
+  x: number;
+  y: number;
+  dock: DockSide | null;
+}
+
+/**
+ * 点外部关闭的 portal 白名单：抽屉内 SessionPanel 的 radix 弹出层（下拉/气泡/
+ * 对话框）与 antd 浮层均 portal 到 document.body，不在 drawerRef 子树内，
+ * 不放行会被误判成「点外部」。
+ */
+const OUTSIDE_SAFE_SELECTOR =
+  '[data-radix-popper-content-wrapper], [role="menu"], [role="listbox"], [role="tooltip"], [role="dialog"], [role="alertdialog"], .ant-dropdown, .ant-select-dropdown, .ant-popover, .ant-tooltip, .ant-modal, .ant-message, .ant-notification';
+
+function clampAnchor(a: BallAnchor): BallAnchor {
+  const vw = typeof window === "undefined" ? 1024 : window.innerWidth;
+  const vh = typeof window === "undefined" ? 768 : window.innerHeight;
+  return {
+    ...a,
+    x: Math.min(Math.max(a.x, BALL / 2), Math.max(vw - BALL / 2, BALL / 2)),
+    y: Math.min(Math.max(a.y, BALL / 2 + 8), Math.max(vh - BALL / 2, BALL / 2)),
+  };
+}
+
 /** 悬浮宿主：球 + 最小化胶囊 + 抽屉 + 互斥门控。 */
 export function FloatingSessionHost() {
   const pathname = usePathname();
@@ -359,10 +413,162 @@ export function FloatingSessionHost() {
     [preSessionCreated],
   );
 
+  // ── 悬浮球拖拽 / 边缘吸附 ────────────────────────────────────────────
+  const [anchor, setAnchor] = useState<BallAnchor | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const ballRef = useRef<HTMLButtonElement | null>(null);
+  const drawerRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    baseX: number;
+    baseY: number;
+    moved: boolean;
+  } | null>(null);
+  /** 拖拽松手时刻（click 抑制：松手后 250ms 内的 click 视为拖拽尾音吞掉；
+      时间窗比布尔位稳——拖出球外松手时 click 不触发，布尔位会误吞下一次真点击）。 */
+  const lastDragEndRef = useRef(0);
+
+  // 挂载后读持久化位置（放 effect 而非 useState 初值：避免 SSR/水合不一致）。
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(BALL_STORAGE_KEY);
+      if (!raw) return;
+      const v = JSON.parse(raw) as Partial<BallAnchor>;
+      if (typeof v.x === "number" && typeof v.y === "number") {
+        setAnchor(
+          clampAnchor({
+            x: v.x,
+            y: v.y,
+            dock: v.dock === "left" || v.dock === "right" ? v.dock : null,
+          }),
+        );
+      }
+    } catch {
+      // 损坏数据静默丢弃，回落默认右下角
+    }
+  }, []);
+
+  // 位置/吸附态持久化。
+  useEffect(() => {
+    if (!anchor) return;
+    try {
+      window.localStorage.setItem(BALL_STORAGE_KEY, JSON.stringify(anchor));
+    } catch {
+      // 隐私模式写失败不影响功能
+    }
+  }, [anchor]);
+
+  // 视口缩放时把球钳回屏内。
+  useEffect(() => {
+    const onResize = () => setAnchor((a) => (a ? clampAnchor(a) : a));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const defaultCenter = useCallback(() => {
+    const vw = typeof window === "undefined" ? 1024 : window.innerWidth;
+    const vh = typeof window === "undefined" ? 768 : window.innerHeight;
+    return { x: vw - EDGE_GAP - BALL / 2, y: vh - EDGE_GAP - BALL / 2 };
+  }, []);
+
+  const onBallPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLButtonElement>) => {
+      if (e.button !== 0) return;
+      const base = anchor ?? defaultCenter();
+      dragRef.current = {
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+        baseX: base.x,
+        baseY: base.y,
+        moved: false,
+      };
+      // move/up 挂 window：不依赖 pointer capture（jsdom 无实现），拖出球也连续。
+      window.addEventListener("pointermove", onBallPointerMove);
+      window.addEventListener("pointerup", onBallPointerUp);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [anchor, defaultCenter],
+  );
+
+  const onBallPointerMove = useCallback((e: PointerEvent) => {
+    const d = dragRef.current;
+    if (!d || e.pointerId !== d.pointerId) return;
+    const dx = e.clientX - d.startX;
+    const dy = e.clientY - d.startY;
+    if (!d.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+    d.moved = true;
+    setDragging(true);
+    // 一拖即脱离吸附（dock 清 null），球心跟手。
+    setAnchor(clampAnchor({ x: d.baseX + dx, y: d.baseY + dy, dock: null }));
+  }, []);
+
+  const onBallPointerUp = useCallback((e: PointerEvent) => {
+    const d = dragRef.current;
+    window.removeEventListener("pointermove", onBallPointerMove);
+    window.removeEventListener("pointerup", onBallPointerUp);
+    dragRef.current = null;
+    setDragging(false);
+    if (!d || e.pointerId !== d.pointerId || !d.moved) return;
+    lastDragEndRef.current = Date.now();
+    setAnchor((a) => {
+      if (!a) return a;
+      const vw = window.innerWidth;
+      const dock: DockSide | null =
+        a.x <= BALL / 2 + DOCK_SLACK
+          ? "left"
+          : a.x >= vw - BALL / 2 - DOCK_SLACK
+            ? "right"
+            : null;
+      // 吸附后逻辑球心贴边（渲染时再半藏），脱离边缘时从此处复出。
+      const x = dock === "left" ? BALL / 2 : dock === "right" ? vw - BALL / 2 : a.x;
+      return clampAnchor({ ...a, x, dock });
+    });
+  }, [onBallPointerMove]);
+
+  // ── 点击抽屉外自动收起 ───────────────────────────────────────────────
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target;
+      if (!(t instanceof Node)) return;
+      if (drawerRef.current?.contains(t)) return;
+      if (ballRef.current?.contains(t)) return;
+      if (t instanceof Element && t.closest(OUTSIDE_SAFE_SELECTOR)) return;
+      closeDrawer();
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [open, closeDrawer]);
+
   if (onPortal) return null;
 
   // 挂载门控（约束 3）：全关且无会话 → 只渲染球，抽屉主体不挂载。
   const mounted = open || minimized || Boolean(sessionId);
+
+  // 抽屉/胶囊跟随球所在半屏（吸附态优先；默认右下 → 右侧）。
+  const vw = typeof window === "undefined" ? 1024 : window.innerWidth;
+  const side: DockSide = anchor
+    ? (anchor.dock ?? (anchor.x < vw / 2 ? "left" : "right"))
+    : "right";
+
+  // 球定位：null → 默认右下（class）；否则 left/top 精确定位，吸附态半藏屏外。
+  const ballStyle: React.CSSProperties | undefined = anchor
+    ? anchor.dock === "left"
+      ? { left: -(BALL - DOCK_VISIBLE), top: anchor.y - BALL / 2 }
+      : anchor.dock === "right"
+        ? { right: -(BALL - DOCK_VISIBLE), top: anchor.y - BALL / 2 }
+        : { left: anchor.x - BALL / 2, top: anchor.y - BALL / 2 }
+    : undefined;
+
+  // 胶囊跟随球：贴同侧边缘、位于球下方（无锚点保持原 bottom-20 right-5）。
+  const capsuleStyle: React.CSSProperties | undefined = anchor
+    ? side === "left"
+      ? { left: EDGE_GAP, top: anchor.y + BALL / 2 + 10 }
+      : { right: EDGE_GAP, top: anchor.y + BALL / 2 + 10 }
+    : undefined;
 
   return (
     <>
@@ -374,46 +580,94 @@ export function FloatingSessionHost() {
           data-testid="floating-capsule"
           onClick={restore}
           title="恢复悬浮会话"
-          className="fixed bottom-20 right-5 z-40 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-card px-4 py-1.5 text-xs font-semibold text-brand-700 shadow-md transition-transform hover:-translate-y-0.5"
+          style={capsuleStyle}
+          className={cn(
+            "fixed z-40 inline-flex items-center gap-2 rounded-full border border-brand-200 bg-card px-4 py-1.5 text-xs font-semibold text-brand-700 shadow-md transition-transform hover:-translate-y-0.5",
+            // 无锚点（含 SSR/水合首帧）时保持原右下位（side 此时恒为 right）。
+            anchor ? "" : "bottom-20 right-5",
+          )}
         >
           <span className="h-2 w-2 animate-pulse rounded-full bg-brand-600" />
           会话进行中 · 点击恢复
         </button>
       )}
 
-      {/* 悬浮球 */}
+      {/* 悬浮球（可拖拽/边缘吸附；辉光环 + 呼吸浮动 + 高光三层叠出"能量球"质感） */}
       <button
+        ref={ballRef}
         type="button"
         data-testid="floating-ball"
+        data-dock={anchor?.dock ?? "none"}
         aria-label={minimized ? "恢复悬浮会话" : "打开悬浮会话助手"}
-        title="智能会话助手"
+        title="智能会话助手（可拖拽，拖到屏幕边缘自动收起）"
+        style={ballStyle}
+        onPointerDown={onBallPointerDown}
         onClick={() => {
+          if (Date.now() - lastDragEndRef.current < 250) return;
           if (open) closeDrawer();
           else if (minimized) restore();
           else openDrawer();
         }}
-        className="fixed bottom-5 right-5 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-brand-600 to-info text-white shadow-primary transition-transform hover:scale-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600"
+        className={cn(
+          "group fixed z-40 flex h-12 w-12 touch-none items-center justify-center rounded-full text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600",
+          anchor ? "" : "bottom-5 right-5",
+          dragging
+            ? "scale-110 cursor-grabbing"
+            : "cursor-grab transition-[left,right,top,transform,opacity] duration-300 hover:scale-105",
+          anchor?.dock && "opacity-75 hover:opacity-100",
+        )}
       >
-        <MessageSquare className="h-5 w-5" />
+        {/* 旋转辉光环（锥形渐变慢旋 + 模糊，内外双色 brand→info） */}
+        <span
+          aria-hidden
+          className={cn(
+            "absolute -inset-[3px] rounded-full opacity-70 blur-[3px] transition-opacity group-hover:opacity-100",
+            !dragging && "motion-safe:animate-spin-slower",
+          )}
+          style={{
+            background:
+              "conic-gradient(from 0deg, var(--color-brand-400), var(--color-info), var(--color-brand-600), var(--color-brand-400))",
+          }}
+        />
+        {/* 呼吸浮动载体（浮动与 hover 缩放分层，避免 transform 互相覆盖） */}
+        <span
+          aria-hidden
+          className={cn(
+            "absolute inset-0 rounded-full",
+            !dragging && "motion-safe:animate-float",
+          )}
+        >
+          {/* 内核渐变 + 描边 + 主题投影 */}
+          <span className="absolute inset-0 rounded-full bg-gradient-to-br from-brand-600 to-info shadow-primary ring-1 ring-white/30" />
+          {/* 顶部高光（玻璃感） */}
+          <span className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_30%_25%,rgba(255,255,255,0.5),transparent_55%)]" />
+        </span>
+        <MessageSquare className="relative h-5 w-5 drop-shadow-sm transition-transform duration-300 group-hover:rotate-12" />
         {(sessionId !== null || minimized) && (
           <span
             aria-hidden
             data-testid="floating-ball-badge"
             className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full border-2 border-card bg-info"
-          />
+          >
+            <span className="absolute inset-0 animate-ping rounded-full bg-info/70" />
+          </span>
         )}
       </button>
 
-      {/* 抽屉（约束 2：最小化 hidden 保挂载，SSE/队列不断） */}
+      {/* 抽屉（约束 2：最小化 hidden 保挂载，SSE/队列不断；跟随球所在半屏） */}
       {mounted && (
         <div
+          ref={drawerRef}
           role="dialog"
           aria-label="悬浮会话抽屉"
           data-testid="floating-drawer"
           data-open={open ? "true" : "false"}
+          data-side={side}
           className={cn(
-            "fixed inset-y-0 right-0 z-50 flex w-[min(720px,94vw)] flex-col border-l border-border bg-card shadow-lg transition-transform duration-300",
-            open ? "translate-x-0" : "translate-x-full",
+            "fixed inset-y-0 z-50 flex w-[min(720px,94vw)] flex-col bg-card shadow-lg transition-transform duration-300",
+            side === "right"
+              ? cn("right-0 border-l border-border", open ? "translate-x-0" : "translate-x-full")
+              : cn("left-0 border-r border-border", open ? "translate-x-0" : "-translate-x-full"),
           )}
           style={open ? undefined : { visibility: "hidden" }}
         >

@@ -4,8 +4,11 @@
  * 覆盖三条硬约束：互斥协议（门户路由卸载球+抽屉+落壳态）、最小化保活
  * （抽屉 hidden 不卸载 + 恢复胶囊）、挂载门控（全关无会话只渲染球）。
  * SessionPanel / PreSessionPicker / 数据查询全部 mock——本文件只测壳层。
+ *
+ * 2026-08-25 悬浮球增强补测：拖拽定位、边缘吸附收起、拖拽尾音 click 抑制、
+ * 点击抽屉外自动收起（portal 白名单放行）。
  */
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -90,6 +93,7 @@ describe("FloatingSessionHost", () => {
     pathnameRef.current = "/ppm/projects";
     machinesLoadingRef.current = false;
     pushMock.mockClear();
+    window.localStorage.clear();
   });
 
   it("非门户路由渲染悬浮球；全关无会话时抽屉主体不挂载（门控）", () => {
@@ -174,5 +178,86 @@ describe("FloatingSessionHost", () => {
     btn.click();
     expect(pushMock).toHaveBeenCalledWith("/sessions?session=s-77");
     pushMock.mockClear();
+  });
+
+  // ── 2026-08-25 悬浮球增强 ────────────────────────────────────────────
+
+  // jsdom 无 PointerEvent 构造器，fireEvent.pointerDown(type, init) 的
+  // clientX/button/pointerId 会被丢弃——构造 Event 后手动挂属性再派发。
+  function pointerEvt(type: string, props: Record<string, unknown>) {
+    const ev = new Event(type, { bubbles: true, cancelable: true });
+    Object.assign(ev, props);
+    return ev;
+  }
+
+  it("拖拽球到屏幕中部：位置跟手且不吸附", () => {
+    render(wrap(<FloatingSessionHost />));
+    const ball = screen.getByTestId("floating-ball");
+    // jsdom 视口 1024×768；默认球心 (980, 724)。
+    fireEvent(ball, pointerEvt("pointerdown", { button: 0, pointerId: 1, clientX: 980, clientY: 724 }));
+    fireEvent(window, pointerEvt("pointermove", { pointerId: 1, clientX: 500, clientY: 400 }));
+    fireEvent(window, pointerEvt("pointerup", { pointerId: 1, clientX: 500, clientY: 400 }));
+    expect(ball.dataset.dock).toBe("none");
+    expect(ball.style.left).toBe("476px"); // 500 - 24
+    expect(ball.style.top).toBe("376px"); // 400 - 24
+  });
+
+  it("拖拽球贴右缘松手：自动吸附半藏并持久化；吸附后位移不触发开合", () => {
+    render(wrap(<FloatingSessionHost />));
+    const ball = screen.getByTestId("floating-ball");
+    fireEvent(ball, pointerEvt("pointerdown", { button: 0, pointerId: 1, clientX: 980, clientY: 724 }));
+    fireEvent(window, pointerEvt("pointermove", { pointerId: 1, clientX: 1015, clientY: 300 }));
+    fireEvent(window, pointerEvt("pointerup", { pointerId: 1, clientX: 1015, clientY: 300 }));
+    // x 钳到 1000 ≥ 吸附阈 972 → 右缘半藏（right:-34px 露出 14px）。
+    expect(ball.dataset.dock).toBe("right");
+    expect(ball.style.right).toBe("-34px");
+    // 持久化含吸附态，刷新后可恢复。
+    const saved = JSON.parse(window.localStorage.getItem("sillyhub:floating-ball")!);
+    expect(saved.dock).toBe("right");
+    expect(saved.x).toBe(1000);
+    // 拖拽尾音 click（松手 250ms 内）被抑制：不开抽屉。
+    fireEvent.click(ball);
+    expect(useFloatingSessionStore.getState().open).toBe(false);
+  });
+
+  it("点击抽屉外自动收起；抽屉内部与 portal 白名单点击不收", async () => {
+    render(wrap(<FloatingSessionHost />));
+    const ball = screen.getByTestId("floating-ball");
+    fireEvent.click(ball);
+    const drawer = await screen.findByTestId("floating-drawer");
+    expect(drawer.dataset.open).toBe("true");
+
+    // 抽屉内部点击：不收。
+    fireEvent.pointerDown(drawer);
+    expect(useFloatingSessionStore.getState().open).toBe(true);
+
+    // radix/antd 浮层 portal（role=menu 例）：不收。
+    const menu = document.createElement("div");
+    menu.setAttribute("role", "menu");
+    document.body.appendChild(menu);
+    fireEvent.pointerDown(menu);
+    expect(useFloatingSessionStore.getState().open).toBe(true);
+    menu.remove();
+
+    // 真正的外部点击：closeDrawer（无会话 → 全清，抽屉卸载）。
+    fireEvent.pointerDown(document.body);
+    expect(useFloatingSessionStore.getState().open).toBe(false);
+    expect(screen.queryByTestId("floating-drawer")).not.toBeInTheDocument();
+  });
+
+  it("拖拽吸附左缘后：抽屉从左侧滑出（跟随球所在半屏）", async () => {
+    render(wrap(<FloatingSessionHost />));
+    const ball = screen.getByTestId("floating-ball");
+    fireEvent(ball, pointerEvt("pointerdown", { button: 0, pointerId: 1, clientX: 980, clientY: 724 }));
+    fireEvent(window, pointerEvt("pointermove", { pointerId: 1, clientX: 10, clientY: 400 }));
+    fireEvent(window, pointerEvt("pointerup", { pointerId: 1, clientX: 10, clientY: 400 }));
+    expect(ball.dataset.dock).toBe("left");
+
+    act(() => {
+      useFloatingSessionStore.getState().openDrawer();
+    });
+    const drawer = await screen.findByTestId("floating-drawer");
+    expect(drawer.dataset.side).toBe("left");
+    expect(drawer.className).toContain("left-0");
   });
 });

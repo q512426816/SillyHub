@@ -206,6 +206,9 @@ const config: Config = {
         "fade-in": "sh-fade-in 200ms ease-out",
         "slide-up": "sh-slide-up 240ms ease-out",
         "scale-in": "sh-scale-in 180ms ease-out",
+        // 悬浮会话球（2026-08-25 悬浮球拖拽/收起增强）：辉光环慢旋 + 待机呼吸浮动
+        "spin-slower": "sh-spin-slower 5s linear infinite",
+        float: "sh-float 3.2s ease-in-out infinite",
       },
       keyframes: {
         "sh-fade-in": {
@@ -219,6 +222,13 @@ const config: Config = {
         "sh-scale-in": {
           from: { opacity: "0", transform: "scale(0.96)" },
           to: { opacity: "1", transform: "scale(1)" },
+        },
+        "sh-spin-slower": {
+          to: { transform: "rotate(360deg)" },
+        },
+        "sh-float": {
+          "0%,100%": { transform: "translateY(0)" },
+          "50%": { transform: "translateY(-4px)" },
         },
       },
     },
