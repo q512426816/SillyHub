@@ -22,5 +22,5 @@ created_at: 2026-08-25 15:35:00
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `modules/frontend.md` | 更新 frontend 模块卡（悬浮助手锁定入口 + SessionListPanel runtime scope 能力） | pending |
+| `modules/frontend.md` | 更新 frontend 模块卡（悬浮助手锁定入口 + SessionListPanel runtime scope 能力） | done |
 | `_module-map.yaml` | 无变化（未增删模块） | skipped |
