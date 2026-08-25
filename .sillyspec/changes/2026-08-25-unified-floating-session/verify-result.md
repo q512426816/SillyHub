@@ -104,3 +104,20 @@ daemon 改动」设计的固有表现，page_context 行为与变更前导/团�
 **终态断言（terminal state）建议项**：create 成功路径的 session/run/lease 三
 元组落库断言沿用既有 test_session_team_mission 范式（60/60 绿）；本变更不改
 终态迁移，running→completed/failed 同步路径零触碰。
+
+## 用户实测反馈迭代（task-09/10，2026-08-25 补录）
+
+两轮用户真机反馈驱动的增量，均在部署栈完成端到端实证：
+
+- **task-09 通用页面上下文**（反馈：/settings/mcp 建会话无注入）：page_key
+  += generic_page（route_key 枚举键 + 服务端 PAGE_ROUTE_LABELS 注册表
+  Lookup，12 路由）；旧会话 cfef9ac3 为旧前端所建（有标签无注入，符合当时
+  v1 边界）；部署后 422/注册键行为由 15 项后端测试 + 21 项前端测试覆盖。
+- **task-10 工作区实体上下文 + 全屏深链**（反馈：工作区页只注入笼统标签 /
+  全屏后要重新找会话）：page_key += workspace（回查 Workspace 注入名称/
+  类型/路径）；全屏按钮带 ?session= 深链（测试断言）。部署栈实证（会话
+  34ce365e）：dispatch_prompt = 【页面上下文】页面：工作区详情/工作区：
+  multi-agent-platform/类型：fullstack/路径：C:\...\multi-agent-platform。
+- **事故记录**：task-10 首次提交误吞并行会话 stage 在共享索引的 39 个文件
+  （共享工作区竞态）——软重置剥离后干净重提交（f0a6a672，14 文件）；并行
+  文件内容零丢失（仅暂存态→未暂存）。
