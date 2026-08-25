@@ -11,6 +11,7 @@ import { SessionPanel } from "@/components/daemon/session-panel";
 import type { SessionTurnView } from "@/components/daemon/turn-timeline";
 import { classifySessionLog } from "@/components/daemon/session-log-sanitize";
 import {
+  extractPreambleText,
   logsToSegments,
   segmentsToLegacy,
   type AssemblerLogInput,
@@ -261,6 +262,7 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
   for (const [runId, entries] of Array.from(map.entries())) {
     turnIndex += 1;
     const prompts: string[] = [];
+    const preambleSegments: TurnSegment[] = [];
     const seenText = new Set<string>();
     const assemblerInputs: AssemblerLogInput[] = [];
     for (const entry of entries) {
@@ -279,6 +281,18 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
       }
       // user_input 是用户消息（prompt）——turn 级胶水，不装配进段（Grill X-05）。
       if (entry.channel === "user_input") {
+        // 2026-08-25-unified-floating-session task-11（FR-7）：daemon 回传的首条
+        // user_input 含完整 dispatch_prompt——提取前导块为 preamble 段（对话视图
+        // 不渲染，「全部」视图显示注入来源）；其余照原逻辑收 prompt。
+        const preambleText = extractPreambleText(seg.text);
+        if (preambleText) {
+          preambleSegments.push({
+            kind: "preamble",
+            id: `preamble:${entry.id ?? `idx${turnIndex}`}`,
+            text: preambleText,
+            ts: entry.timestamp ? Date.parse(entry.timestamp) : null,
+          });
+        }
         prompts.push(seg.text);
         continue;
       }
@@ -290,6 +304,7 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
     // 去重会误删同轮内合法的重复内容（两次相同工具输出等），而实时 SSE 路径
     // 只按 log_id 去重，形成「聊天时可见、刷新后消失」的路径不一致。
     const segments = logsToSegments(assemblerInputs, { seenTextDedup: false });
+    // task-11（FR-7）：前导段并入段序列首部（ts 排序在渲染层完成，此处按捕获序）。
     // 兼容投影（§9.4）：output / processItems 形状与改前手写路径等价。
     const legacy = segmentsToLegacy(segments);
     turns.push({
@@ -303,7 +318,7 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
       status: "completed",
       seenLogIds: new Set(entries.map((e) => e.id)),
       processItems: legacy.processItems,
-      segments,
+      segments: [...preambleSegments, ...segments],
       turnStartedAt: firstLogTimestampMs(entries),
       // ql-20260621：历史回看无实时 token（logs 接口不含 token），置 null。
       // 若后续 logs 接口补 token 字段可在此填充。

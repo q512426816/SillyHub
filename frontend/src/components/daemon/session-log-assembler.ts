@@ -345,6 +345,21 @@ export type TurnSegment =
   | { kind: "stderr"; id: string; text: string; ts: number | null }
   | {
       /**
+       * 上下文前导段（2026-08-25-unified-floating-session task-11）：首轮注入的
+       * 【变更上下文】/【页面上下文】/【团队任务简报】前导，从 transcript 中
+       * daemon 回传的完整 dispatch_prompt 首条 user_input 提取（与该 user_input
+       * 的用户消息部分分离——对话视图保持干净，「全部（进度）」视图显示来源，
+       * 解决"注入完全黑盒"问题）。装配器内不主动构造（条目在装配器前即被
+       * user_input 通道分流），仅作类型成员由 session-panel 显式构建。
+       */
+      kind: "preamble";
+      id: string;
+      /** 前导全文（含"【…上下文】"标题块，"---" 之前的部分）。 */
+      text: string;
+      ts: number | null;
+    }
+  | {
+      /**
        * 文件段（task-08 / 2026-08-23-agent-file-upload-mcp / design §7.3 / D-001@v1）：
        * tool_kind=FileUpload 日志行（D-007@v1）的分类映射产物——聊天流文件卡片
        * （FileMessageCard）的数据源，task-09 run 详情产出文件区复用同字段。
@@ -1412,4 +1427,23 @@ export function segmentsToLegacy(segments: TurnSegment[]): {
   };
   walk(segments);
   return { output, processItems };
+}
+
+/**
+ * 上下文前导检测（2026-08-25-unified-floating-session task-11 / FR-7）：
+ * daemon transcript 会把完整 dispatch_prompt（含服务端注入的前导）同步为
+ * 首条 user_input 日志。识别其前导块（"---" 之前部分）供「全部（进度）」
+ * 视图显示注入来源；对话视图保持干净（prompt 气泡用原文，本工具不消费）。
+ *
+ * 判定：内容以已知前导标题开头且含 "\n\n---\n\n" 分隔 → 返回分隔前文本；
+ * 否则 null（普通用户消息不误伤；仅同标题开头但无分隔的消息是用户自己
+ * 输入的原文，不算前导）。
+ */
+const PREAMBLE_HEADS = ["【变更上下文】", "【页面上下文】", "【团队任务简报"];
+export function extractPreambleText(content: string): string | null {
+  const trimmed = content.trim();
+  if (!PREAMBLE_HEADS.some((h) => trimmed.startsWith(h))) return null;
+  const sep = trimmed.indexOf("\n\n---\n\n");
+  if (sep <= 0) return null;
+  return trimmed.slice(0, sep);
 }

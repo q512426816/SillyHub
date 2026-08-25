@@ -67,6 +67,7 @@ import { buildErrorLogItem } from "@/components/agent-log/normalize";
 import {
   applyLogToSegments,
   createEmptyAssembledTurn,
+  extractPreambleText,
   finishTurn,
   transferAssemblerInternals,
   type AssembledTurn,
@@ -770,7 +771,39 @@ function SessionPanelPage({
         // user_input 是用户消息（attach 历史/占位 turn 已作 prompt），不进 output
         // （装配器内同语义双保险）。task-09（FR-05）：其余日志归一喂共享装配器，
         // 分类 / override 撤回 / tool 配对 / 子代理归属一律依赖装配器导出。
-        if (env.channel === "user_input") return;
+        if (env.channel === "user_input") {
+          // 2026-08-25-unified-floating-session task-11（FR-7）：daemon 回传的
+          // 首条 user_input 含完整 dispatch_prompt——提取前导为 preamble 段
+          // （对话视图不渲染，「全部」视图显示注入来源）。
+          const preambleText = extractPreambleText(env.content ?? "");
+          if (preambleText && env.run_id) {
+            setTurnState((prev) =>
+              upsertTurn(
+                prev,
+                env,
+                (turn) =>
+                  turn.segments?.some((s) => s.kind === "preamble")
+                    ? turn
+                    : {
+                        ...turn,
+                        segments: [
+                          {
+                            kind: "preamble",
+                            id: `preamble:${env.run_id}`,
+                            text: preambleText,
+                            ts: env.timestamp
+                              ? Date.parse(env.timestamp)
+                              : Date.now(),
+                          },
+                          ...(turn.segments ?? []),
+                        ],
+                      },
+                { setCurrentRun: env.run_id! },
+              ),
+            );
+          }
+          return;
+        }
         setTurnState((prev) =>
           upsertTurn(
             prev,
