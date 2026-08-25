@@ -5,6 +5,10 @@
  *
  * 动态 import docx-preview（避免进首屏静态包），renderAsync 渲染进容器。
  * 渲染异常 try/catch 降级为错误态 + 下载引导（R-01）。仅支持 OOXML（docx）。
+ *
+ * ql-20260825-005：容器 div 必须常驻挂载（loading 态也在 DOM）——旧版 loading
+ * 态只渲染 spinner，ref 容器未挂载，effect 里 renderAsync 前置守卫
+ * `!containerRef.current` 直接短路，永久卡在「正在渲染」。
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -44,15 +48,6 @@ export function DocxPreviewer({ blob, meta, onDownload }: PreviewerProps) {
     };
   }, [blob]);
 
-  if (status === "loading") {
-    return (
-      <div className="flex min-h-[420px] items-center justify-center p-8 text-slate-500">
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
-        <span className="ml-3">正在渲染 Word 文档…</span>
-      </div>
-    );
-  }
-
   if (status === "error") {
     return (
       <div className="flex min-h-[420px] flex-col items-center justify-center gap-4 p-8 text-center">
@@ -77,11 +72,20 @@ export function DocxPreviewer({ blob, meta, onDownload }: PreviewerProps) {
     );
   }
 
+  // 容器常驻（含 loading 态）——effect 的 ref 守卫依赖它在首帧就挂载。
   return (
-    <div
-      ref={containerRef}
-      className="docx-preview-container min-h-[420px] w-full bg-white p-6 text-slate-800"
-      data-testid="docx-preview-container"
-    />
+    <div className="relative min-h-[420px]">
+      <div
+        ref={containerRef}
+        className="docx-preview-container w-full bg-white p-6 text-slate-800"
+        data-testid="docx-preview-container"
+      />
+      {status === "loading" && (
+        <div className="absolute inset-0 flex items-center justify-center bg-white/70 text-slate-500">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
+          <span className="ml-3">正在渲染 Word 文档…</span>
+        </div>
+      )}
+    </div>
   );
 }

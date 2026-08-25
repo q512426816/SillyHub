@@ -140,9 +140,12 @@ export function XlsxPreviewer({ blob, meta, onDownload }: PreviewerProps) {
         </div>
       )}
 
-      {/* 表格内容 */}
+      {/* 表格内容（ql-20260825-005 样式修正）：
+          - sheet_to_html 全部输出 td（无 th），首行按表头处理（加粗+底色）；
+          - 数值单元格（data-t="n"）右对齐，文本不折行；
+          - 表宽 w-fit + min-w-full：窄表不强行拉伸变形，宽表横向滚动。 */}
       <div
-        className="p-4 [&_td]:border [&_td]:border-slate-200 [&_td]:px-3 [&_td]:py-1.5 [&_th]:border [&_th]:border-slate-200 [&_th]:bg-slate-50 [&_th]:px-3 [&_th]:py-1.5 [&_table]:w-full [&_table]:border-collapse"
+        className="p-4 [&_table]:min-w-full [&_table]:w-fit [&_table]:border-collapse [&_td]:border [&_td]:border-slate-200 [&_td]:px-3 [&_td]:py-1.5 [&_td]:whitespace-nowrap [&_td[data-t=n]]:text-right [&_tr:first-child_td]:bg-slate-50 [&_tr:first-child_td]:font-semibold"
         dangerouslySetInnerHTML={{ __html: sheetData.htmls[activeSheet] ?? "" }}
       />
     </div>

@@ -66,6 +66,11 @@ describe("DocxPreviewer", () => {
     render(<DocxPreviewer blob={mockBlob} url={mockUrl} meta={mockMeta} onDownload={mockOnDownload} />);
     expect(screen.getByText("正在渲染 Word 文档…")).toBeInTheDocument();
   });
+
+  it("ql-20260825-005：loading 态渲染容器已挂载（旧版容器只在 ok 态渲染，effect ref 守卫短路致永久 loading）", () => {
+    render(<DocxPreviewer blob={mockBlob} url={mockUrl} meta={mockMeta} onDownload={mockOnDownload} />);
+    expect(screen.getByTestId("docx-preview-container")).toBeInTheDocument();
+  });
 });
 
 describe("XlsxPreviewer", () => {
