@@ -204,7 +204,11 @@ class TestGenericPagePreamble:
 
         out = await build_page_context_preamble(db_session, "generic_page", None, "settings_mcp")
         assert out is not None
-        assert out == "【页面上下文】\n- 页面：设置 · MCP"
+        # task-13：标签 + 页面说明书（功能/使用）——AI 能回答"这是什么页面/怎么用"。
+        assert "- 页面：设置 · MCP" in out
+        assert "- 功能：" in out
+        assert "- 使用：" in out
+        assert "MCP" in out
 
     @pytest.mark.asyncio
     async def test_unknown_route_key_returns_none(self, db_session) -> None:
@@ -329,6 +333,9 @@ class TestWorkspacePreamble:
         assert "multi-agent-platform" in out
         assert "app" in out
         assert "C:/repo/map" in out
+        # task-13：实体 + 工作区页面说明书。
+        assert "- 功能：" in out
+        assert "- 使用：" in out
 
     @pytest.mark.asyncio
     async def test_workspace_unknown_id_returns_none(self, db_session) -> None:
