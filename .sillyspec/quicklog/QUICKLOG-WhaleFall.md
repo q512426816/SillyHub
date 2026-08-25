@@ -290,3 +290,11 @@
 根因：设计期把所有旧格式 Office 一刀切进 fallback，但 SheetJS 的 read 本就支持 BIFF5/7/8（.xls）——用户发 .doc 时顺带问到 .xls，发现该格式零成本可支持（写读往返实测：OLE2 魔数 D0CF 的真实 .xls 二进制解析、sheet_to_html 输出含数据）。
 方案：registry 归一映射，渲染器零改动。.doc/.ppt 维持 fallback（纯前端无保真方案，保持 D-001 纯前端路线）。
 结果：registry 测试 21/21 绿、files 域 42/42 绿、tsc 0 错；已提交 32a45b16。
+
+## ql-20260825-005 | 2026-08-25 22:32:00 | 预览器三处渲染问题修复（docx 永久 loading / PDF 高度 / 表格观感）
+状态：已完成
+关联变更：2026-08-25-session-attachment-preview（Wave2 渲染器缺陷修复）
+文件：previewers/docx-previewer.tsx（容器常驻+loading 覆盖层）、pdf-previewer.tsx（h-[70vh]）、xlsx-previewer.tsx（表格样式）、previewers-office.test.tsx（+锚点）
+根因：①docx 容器 div 仅 status=ok 渲染，effect 首帧 ref 为 null 被 `!containerRef.current` 短路，Promise 完成也无容器渲染→永久 loading；②PDF iframe height:100% 在 Modal overflow-auto（高度 auto）父链解析为 0/默认 150px；③SheetJS sheet_to_html 全输出 td（无 th），表头无区分+数值不右对齐+窄表强拉变形（xls/xlsx 同源，非 xls 特有）。
+方案：容器常驻挂载；固定视口高；首行表头样式+数值右对齐+w-fit min-w-full。
+结果：files 域 43/43、全量 2179 绿、tsc 0 错；提交（见 git log）。
