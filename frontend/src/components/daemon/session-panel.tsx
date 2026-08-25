@@ -162,7 +162,9 @@ export interface SessionPreContext {
    * D-006）：可选，缺省零回归；有值时随首句 createSession 上送 page_context
    * （后端服务端白名单回查注入【页面上下文】前导）。门户三入口不传。
    */
-  pageContext?: { page_key: "ppm_project"; project_id: string };
+  pageContext?:
+    | { page_key: "ppm_project"; project_id: string }
+    | { page_key: "generic_page"; route_key: string };
 }
 
 /**

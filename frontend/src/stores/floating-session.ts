@@ -27,11 +27,15 @@ export interface FloatingPreContext {
   changeId?: string | null;
 }
 
-/** 页面上下文（后端 PageContextCreateBlock 前端形态，v1 仅 ppm_project）。 */
-export interface FloatingPageContext {
-  page_key: "ppm_project";
-  project_id: string;
-}
+/**
+ * 页面上下文（后端 PageContextCreateBlock 前端形态）：
+ * - ppm_project：PPM 项目详情（显式入口携带，服务端回查项目数据）；
+ * - generic_page（task-09）：通用页面（URL 派生 route_key，服务端注册表
+ *   Lookup 页面中文名注入；未注册键静默不注入——枚举键，零自由文本）。
+ */
+export type FloatingPageContext =
+  | { page_key: "ppm_project"; project_id: string }
+  | { page_key: "generic_page"; route_key: string };
 
 /** 悬浮会话壳层状态与动作（design §3）。 */
 export interface FloatingSessionState {

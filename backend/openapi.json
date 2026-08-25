@@ -38507,22 +38507,44 @@
         "properties": {
           "page_key": {
             "type": "string",
-            "const": "ppm_project",
+            "enum": [
+              "ppm_project",
+              "generic_page"
+            ],
             "title": "Page Key"
           },
           "project_id": {
-            "type": "string",
-            "format": "uuid",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Project Id"
+          },
+          "route_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 60,
+                "pattern": "^[a-z0-9][a-z0-9_:-]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route Key"
           }
         },
         "type": "object",
         "required": [
-          "page_key",
-          "project_id"
+          "page_key"
         ],
         "title": "PageContextCreateBlock",
-        "description": "``SessionCreateRequest.page_context`` 内嵌块（2026-08-25-unified-floating-session / FR-5 / D-005）。\n\n悬浮会话入口的页面上下文通道 v1：客户端只允许声明「页面类型枚举 + 实体 id」，\n前导文本的全部数据由服务端回查 DB 生成（防客户端伪造注入——自由文本字段\n一律不收）。``page_key`` 当前仅一枚枚举，后续按页注册扩展。"
+        "description": "``SessionCreateRequest.page_context`` 内嵌块（2026-08-25-unified-floating-session / FR-5 / D-005）。\n\n悬浮会话入口的页面上下文通道：客户端只允许声明「页面类型枚举 + 键」，\n前导文本的全部数据由服务端生成（DB 回查 / 注册表 Lookup，防客户端伪造\n注入——自由文本字段一律不收）。两类：\n- ``ppm_project``：PPM 项目详情页（task-01），需 ``project_id``（服务端\n  回查 PpmProjectMaintenance 注入项目数据）；\n- ``generic_page``：通用页面（task-09，用户反馈\"任意页面都该知道\"），\n  需 ``route_key``——后端 ``PAGE_ROUTE_LABELS`` 注册表 Lookup 出页面\n  中文名注入；未注册 key → 静默不注入（枚举语义，零自由文本）。"
       },
       "Page_CustomerMaintenanceResp_": {
         "properties": {

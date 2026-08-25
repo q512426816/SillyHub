@@ -1066,7 +1066,10 @@ class SessionService:
             # 仅 page_key 枚举 + project_id；查无/未传 → None 不注入。
             page_preamble = (
                 await build_page_context_preamble(
-                    self._session, page_context.page_key, page_context.project_id
+                    self._session,
+                    page_context.page_key,
+                    page_context.project_id,
+                    page_context.route_key,
                 )
                 if page_context is not None
                 else None

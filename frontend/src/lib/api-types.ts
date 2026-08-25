@@ -13147,21 +13147,25 @@ export interface components {
          * PageContextCreateBlock
          * @description ``SessionCreateRequest.page_context`` 内嵌块（2026-08-25-unified-floating-session / FR-5 / D-005）。
          *
-         *     悬浮会话入口的页面上下文通道 v1：客户端只允许声明「页面类型枚举 + 实体 id」，
-         *     前导文本的全部数据由服务端回查 DB 生成（防客户端伪造注入——自由文本字段
-         *     一律不收）。``page_key`` 当前仅一枚枚举，后续按页注册扩展。
+         *     悬浮会话入口的页面上下文通道：客户端只允许声明「页面类型枚举 + 键」，
+         *     前导文本的全部数据由服务端生成（DB 回查 / 注册表 Lookup，防客户端伪造
+         *     注入——自由文本字段一律不收）。两类：
+         *     - ``ppm_project``：PPM 项目详情页（task-01），需 ``project_id``（服务端
+         *       回查 PpmProjectMaintenance 注入项目数据）；
+         *     - ``generic_page``：通用页面（task-09，用户反馈"任意页面都该知道"），
+         *       需 ``route_key``——后端 ``PAGE_ROUTE_LABELS`` 注册表 Lookup 出页面
+         *       中文名注入；未注册 key → 静默不注入（枚举语义，零自由文本）。
          */
         PageContextCreateBlock: {
             /**
              * Page Key
-             * @constant
+             * @enum {string}
              */
-            page_key: "ppm_project";
-            /**
-             * Project Id
-             * Format: uuid
-             */
-            project_id: string;
+            page_key: "ppm_project" | "generic_page";
+            /** Project Id */
+            project_id?: string | null;
+            /** Route Key */
+            route_key?: string | null;
         };
         /** Page[CustomerMaintenanceResp] */
         Page_CustomerMaintenanceResp_: {

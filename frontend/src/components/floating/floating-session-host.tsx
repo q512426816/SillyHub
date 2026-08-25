@@ -71,7 +71,11 @@ function FloatingDrawerBody({
   const closeDrawer = useFloatingSessionStore((s) => s.closeDrawer);
   const minimize = useFloatingSessionStore((s) => s.minimize);
   const startPreSession = useFloatingSessionStore((s) => s.startPreSession);
-  const { label: pageLabel } = usePageSessionContext();
+  // task-09：URL 派生通用页面上下文（generic_page/route_key）——显式入口
+  // （store.pageContext，如 PPM 项目块）优先，派生值兜底；均空则不上送。
+  const { pageContext: derivedPageCtx, label: derivedLabel } =
+    usePageSessionContext();
+  const effectivePageCtx = pageContext ?? derivedPageCtx;
 
   // 页面级数据（与门户同源）：machines 15s 轮询（SessionPanel 离线判定 +
   // 默认机器解析）；providers 30s（CtxUsageBar 分母）。
@@ -121,12 +125,12 @@ function FloatingDrawerBody({
     if (runtime) {
       startPreSession(
         { runtimeId: runtime.id, workspaceId: null },
-        pageContext,
+        effectivePageCtx,
       );
     } else {
       setPickerOpen(true);
     }
-  }, [machines, sessions, startPreSession, pageContext]);
+  }, [machines, sessions, startPreSession, effectivePageCtx]);
 
   const handlePreSessionCreated = useCallback(
     (resp: SessionCreateResponse) => {
@@ -194,18 +198,20 @@ function FloatingDrawerBody({
             </button>
           </div>
         </div>
-        {/* 上下文条：显式入口携带的页面上下文 > pathname 页面标签 > 降级文案 */}
+        {/* 上下文条：显式入口上下文（PPM 项目）> URL 派生页面 > 降级文案 */}
         <div
           data-testid="floating-ctx-bar"
           className="mt-2 flex items-center gap-2 rounded-lg border border-dashed border-brand-300 bg-brand-50/60 px-3 py-1.5"
         >
           <span className="text-[11px] text-muted-foreground">已感知页面</span>
           <span className="text-xs font-semibold text-brand-700">
-            {pageContext ? "PPM · 项目详情" : (pageLabel ?? "未注册页面上下文")}
+            {pageContext
+              ? "PPM · 项目详情"
+              : (derivedLabel ?? "未注册页面上下文")}
           </span>
-          {pageContext && (
+          {effectivePageCtx && (
             <span className="rounded-full border border-border bg-card px-2 py-0.5 text-[10px] text-muted-foreground">
-              项目上下文将随首句注入（仅 AI 可见）
+              {pageContext ? "项目上下文" : "页面上下文"}将随首句注入（仅 AI 可见）
             </span>
           )}
         </div>
@@ -308,7 +314,7 @@ function FloatingDrawerBody({
         machines={machines}
         onCancel={() => setPickerOpen(false)}
         onPick={(runtimeId) => {
-          startPreSession({ runtimeId, workspaceId: null }, pageContext);
+          startPreSession({ runtimeId, workspaceId: null }, effectivePageCtx);
           setPickerOpen(false);
         }}
       />

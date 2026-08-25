@@ -173,6 +173,49 @@ class TestPageContextSchema:
         with pytest.raises(ValidationError):
             PageContextCreateBlock(page_key="ppm_project")
 
+    # ── task-09：generic_page 通用页面块 ────────────────────────────────────
+
+    def test_generic_page_valid(self) -> None:
+        from app.modules.daemon.schema import PageContextCreateBlock
+
+        blk = PageContextCreateBlock(page_key="generic_page", route_key="settings_mcp")
+        assert blk.route_key == "settings_mcp"
+
+    def test_generic_page_route_key_required(self) -> None:
+        from app.modules.daemon.schema import PageContextCreateBlock
+
+        with pytest.raises(ValidationError):
+            PageContextCreateBlock(page_key="generic_page")
+
+    def test_generic_page_route_key_format_rejected(self) -> None:
+        from app.modules.daemon.schema import PageContextCreateBlock
+
+        # 大写/空格/中文等非法格式 → 422（枚举键语义约束）。
+        with pytest.raises(ValidationError):
+            PageContextCreateBlock(page_key="generic_page", route_key="Bad Key!")
+
+
+class TestGenericPagePreamble:
+    """task-09：generic_page 注册表 Lookup 前导。"""
+
+    @pytest.mark.asyncio
+    async def test_registered_route_key_produces_label(self, db_session) -> None:
+        from app.modules.daemon.session.context import build_page_context_preamble
+
+        out = await build_page_context_preamble(db_session, "generic_page", None, "settings_mcp")
+        assert out is not None
+        assert out == "【页面上下文】\n- 页面：设置 · MCP"
+
+    @pytest.mark.asyncio
+    async def test_unknown_route_key_returns_none(self, db_session) -> None:
+        from app.modules.daemon.session.context import build_page_context_preamble
+
+        assert (
+            await build_page_context_preamble(db_session, "generic_page", None, "not_a_page")
+            is None
+        )
+        assert await build_page_context_preamble(db_session, "generic_page", None, None) is None
+
 
 # ── C. create 路径拼接（t09 范式）────────────────────────────────────────────
 
