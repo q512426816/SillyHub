@@ -236,3 +236,69 @@ describe('InputQueue<UserTurnInput>（task-01 provider-neutral 队列）', () =>
     expect(got).toEqual([{ type: 'user', text: '' }]);
   });
 });
+
+// ── ql-20260825-f3#3：resetForResubscribe 的在途 waiter 关闭哨兵 ────────────────
+//
+// reload 热切换（ql-20260807-002）时 resetForResubscribe 让新 query 重新订阅，
+// 但旧 consume 可能正阻塞在 input.next() 上——旧实现只清 _pending 引用，旧
+// next() 的 Promise 永不 settle → 旧 consume 协程永久挂起（finally 清理不执行）。
+// 修复：resolve(null) 关闭哨兵 → 旧迭代器 {done:true} 干净退出。
+
+describe('resetForResubscribe（ql-20260825-f3#3 关闭哨兵）', () => {
+  it('在途 next() 收到 null 哨兵 → done=true（无悬挂 promise）', async () => {
+    const q = new InputQueue<UserTurnInput>();
+    const it = q[Symbol.asyncIterator]();
+    // 触发在途 waiter（buffer 空、未 close → next() 挂起等待 push）。
+    const pending = it.next();
+    q.resetForResubscribe();
+    // 旧迭代器必须 done（而非永久挂起）；用例本身若悬挂会超时失败。
+    const res = await pending;
+    expect(res.done).toBe(true);
+  });
+
+  it('旧 for-await consume 在 reset 后干净退出（finally 可执行）', async () => {
+    const q = new InputQueue<UserTurnInput>();
+    let finallyRan = false;
+    const consumeP = (async () => {
+      try {
+        // 消费一条已 push 消息后阻塞在下一条的 next()。
+        q.push(userTurn('first'));
+        for await (const _m of q) {
+          // 第一条 yield 后循环回到 next() 挂起（buffer 空）。
+        }
+      } finally {
+        finallyRan = true;
+      }
+    })();
+    // 等 consume 进入 next() 挂起（first 已 yield）。
+    await new Promise((r) => setTimeout(r, 10));
+    q.resetForResubscribe();
+    await consumeP;
+    expect(finallyRan).toBe(true);
+  });
+
+  it('reset 后新订阅合法，buffer 中的 pending inject 不丢', async () => {
+    const q = new InputQueue<UserTurnInput>();
+    const it1 = q[Symbol.asyncIterator]();
+    const pending = it1.next();
+    // 模拟 reload 期间到达的 inject：无 waiter（已清）→ 入 buffer。
+    q.resetForResubscribe();
+    q.push(userTurn('queued-during-reload'));
+    q.close();
+    expect(await pending).toEqual({ done: true, value: undefined });
+    // 新 query 订阅 → 吃到 buffer 中的消息。
+    const got = await drainTurns(q);
+    expect(got.map((t) => t.text)).toEqual(['queued-during-reload']);
+  });
+
+  it('reset 无在途 waiter 时不抛、不误伤后续订阅', async () => {
+    const q = new InputQueue<UserTurnInput>();
+    q[Symbol.asyncIterator](); // 订阅但无 waiter（未调 next）
+    expect(() => q.resetForResubscribe()).not.toThrow();
+    q.push(userTurn('after-reset'));
+    q.close();
+    // reset 已重置 _subscribed → 第二次订阅合法。
+    const got = await drainTurns(q);
+    expect(got.map((t) => t.text)).toEqual(['after-reset']);
+  });
+});

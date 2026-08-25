@@ -163,7 +163,10 @@ export function SessionConfigBar({
   onProvisionalSwitch,
 }: SessionConfigBarProps) {
   // 数据源与 task-12 同（机器/智能体展示下拉 + 供应商/档案切换选项）。
-  const { items: machines } = useDaemonMachines({});
+  // 2026-08-25：params 统一 { limit: 100 }——与 sessions-portal / session-list-panel
+  // 同 queryKey（["daemonMachines","list",{limit:100}]）共享缓存与 15s 轮询，不再
+  // 分叉成 {} 与 {limit:100} 两个键各自轮询双请求。
+  const { items: machines } = useDaemonMachines({ limit: 100 });
   const { profiles } = useMineAgentProfiles();
   const notify = useNotify();
   // useNotify 无 info 级方法,引擎切换引导提示经 App 上下文取 message.info

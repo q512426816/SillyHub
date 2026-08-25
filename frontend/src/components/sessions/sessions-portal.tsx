@@ -87,8 +87,13 @@ import {
   type SessionCreateResponse,
 } from "@/lib/daemon";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
+import { debounceLeadingTrailing } from "@/lib/utils";
 
 /* ────────────────────── 组件 ────────────────────── */
+
+/** 会话列表刷新去抖窗口（2026-08-25 P1）：SSE 变更信号风暴合并（leading 立即 +
+ *  trailing 合并），见 refreshSessionLists 注释。 */
+const SESSION_LIST_REFRESH_DEBOUNCE_MS = 400;
 
 export interface SessionsPortalProps {
   /**
@@ -177,10 +182,34 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   });
   const providers = useMemo(() => providersQ.data ?? [], [providersQ.data]);
 
-  /** 会话配置/状态变化后刷新左侧列表（含 useDaemonMachines 的 sessions 旁路）。 */
+  /** 会话配置/状态变化后刷新左侧列表：invalidate ["agentSessions"] 前缀（树
+   *  查询 + scope 过滤参全部命中）。注意 useDaemonMachines 的 sessions 旁路挂在
+   *  ["daemonMachines"] 键下，不在本前缀命中范围——由其自身 15s 轮询兜底（勿再
+   *  称「含旁路」，2026-08-25 修正过时注释）。
+   *
+   *  2026-08-25 P1 修复：经 debounceLeadingTrailing（leading+trailing，400ms）
+   *  去抖——SSE 变更哑信号一轮典型 2~3 帧 + onTurnCompleted 主动刷新 + 10s
+   *  轮询叠加，裸 invalidate 每帧触发 limit=500 全量重拉成风暴；首帧 leading
+   *  立即刷新（即时反馈），窗口期密集信号合并为一次 trailing。所有触发源
+   *  （SSE onEvent/onReconnected、面板 onSessionListRefresh、预会话创建成功）
+   *  统一汇入本函数，单点去抖不串联延迟。 */
+  const debouncedInvalidateSessions = useMemo(
+    () =>
+      debounceLeadingTrailing(
+        () => {
+          void qc.invalidateQueries({ queryKey: ["agentSessions"] });
+        },
+        SESSION_LIST_REFRESH_DEBOUNCE_MS,
+      ),
+    [qc],
+  );
+  useEffect(() => {
+    // 卸载清挂起的 trailing（防卸载后幽灵 invalidate）。
+    return () => debouncedInvalidateSessions.cancel();
+  }, [debouncedInvalidateSessions]);
   const refreshSessionLists = useCallback(() => {
-    void qc.invalidateQueries({ queryKey: ["agentSessions"] });
-  }, [qc]);
+    debouncedInvalidateSessions();
+  }, [debouncedInvalidateSessions]);
 
   // 会话列表变更信号订阅（2026-08-24-sessions-live-updates task-06 / design
   // §2.2 / D-001 / D-006）：backend 在会话创建/状态迁移/删除时经 Redis Pub/Sub

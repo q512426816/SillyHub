@@ -919,6 +919,11 @@ class RunSyncService:
         updates its status and timestamps, and publishes a Redis event.
 
         Returns the updated AgentRun, or None if no AgentRun is linked.
+
+        终态守卫（2026-08-25 会话审查 P1）：run 已处于终态
+        （completed/failed/killed）时忽略非终态回退——迟到的 ``running`` 上报
+        （daemon 重试 / 网络延迟）不得把已收口的 run 复活回 running；同值重发
+        幂等放行（finished_at 等字段仅在为 None 时补写，重发无副作用）。
         """
         lease = await self._facade._get_lease_and_verify_token(lease_id, claim_token)
 
@@ -938,6 +943,18 @@ class RunSyncService:
                     "agent_run_id": str(lease.agent_run_id),
                 },
             )
+
+        # 终态守卫：已终态的 run 收到非终态（running）回退 → 记 warning 并按
+        # 幂等处理直接返回当前行，不落库、不发布（迟到上报不复活终态）。
+        if agent_run.status in TERMINAL_TURN_STATUSES and status not in TERMINAL_TURN_STATUSES:
+            log.warning(
+                "daemon_sync_terminal_run_regression_ignored",
+                lease_id=str(lease_id),
+                agent_run_id=str(agent_run.id),
+                current_status=agent_run.status,
+                incoming_status=status,
+            )
+            return agent_run
 
         now = datetime.now(UTC)
         agent_run.status = status
@@ -1046,7 +1063,15 @@ class RunSyncService:
         lease_meta = lease.metadata_ or {}
         bound_session_id_raw = lease_meta.get("session_id")
 
-        agent_run = await self._session.get(AgentRun, run_id)
+        # P1 修复（2026-08-25 会话审查）：FOR UPDATE 行锁读 run——终态判定
+        # （下方 TERMINAL 守卫）与终态写入（completed/failed）原子化。原
+        # ``self._session.get`` 无锁，并发 end_session 先 commit killed 后，本处
+        # 基于未加锁的旧快照（running）过守卫并把 killed 覆写成 completed。
+        agent_run = (
+            await self._session.execute(
+                select(AgentRun).where(AgentRun.id == run_id).with_for_update()
+            )
+        ).scalar_one_or_none()
         if agent_run is None:
             raise DaemonAgentRunNotFound(
                 f"AgentRun '{run_id}' not found for lease '{lease_id}'.",
@@ -1084,6 +1109,10 @@ class RunSyncService:
                 agent_run_id=str(agent_run.id),
                 status=agent_run.status,
             )
+            # 已持 FOR UPDATE 行锁：rollback 释放（无写入可回滚），refresh 重取
+            # 属性供响应序列化读取（rollback 会过期 ORM 实例属性）。
+            await self._session.rollback()
+            await self._session.refresh(agent_run)
             return agent_run
 
         now = datetime.now(UTC)

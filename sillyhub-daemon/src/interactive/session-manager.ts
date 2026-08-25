@@ -463,6 +463,60 @@ export class SessionManager {
   private readonly _store = new Map<string, SessionState>();
 
   /**
+   * ql-20260825-f3#1：终态延迟清理定时器（sessionId → setTimeout 句柄）。
+   *
+   * `_terminateSession` 收尾链原本不删 `_store` 条目（全文件 `_store.delete` 仅
+   * create 失败 / restore 驱逐 / restore 失败三处）→ end/fail 后含凭证 env、
+   * subagentDepth Map、inputQueue buffer 的 SessionState 永久滞留，内存只增不减。
+   * 「结束后短期内可查」是有意行为（终态对账 / 立即 get 查询窗口，现有测试断言
+   * end 后 `get(id).status==='ended'`），故改为延迟 TERMINAL_CLEANUP_DELAY_MS 后
+   * 删除 `_store` 与关联 `_pendingInjectCount` 条目，兼顾短期可查与最终回收。
+   *
+   * 防误删：到点时条目若已被 restoreAndReconnect / create 重建（状态非终态）则
+   * 跳过（重建路径同时 `_cancelTerminalCleanup` 主动取消）；stop()（daemon
+   * shutdown）clearTimeout 全部。
+   */
+  private readonly _terminalCleanupTimers = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
+
+  /** 终态条目延迟清理时长（ms）：给终态对账 / 立即查询留 10 分钟窗口。 */
+  private static readonly TERMINAL_CLEANUP_DELAY_MS = 10 * 60 * 1000;
+
+  /**
+   * ql-20260825-f3#2：per-session reload 串行链（sessionId → 上一轮 reload 的
+   * settled promise）。
+   *
+   * `_reloadSession` 原无 per-session 串行化，空闲路径（markPendingSwitch /
+   * markPendingConfigSwitch）fire-and-forget 触发两次快速切换时 A/B 并发快照同一
+   * oldHandle：后完成者覆盖 `state.query`，先完成者的新句柄永不 close（每轮只
+   * close 各自快照的 oldHandle），其 consume `isAuthoritative()` 恒 false，背后
+   * 子进程无人 kill → 僵尸 claude 进程沉默烧 token。
+   *
+   * chain 模式保证 last-wins **顺序**执行而非交错：每轮进入核心段前 await 上一
+   * 轮同会话 reload 完成，oldHandle 快照取到上一轮完成后的最新句柄，逐轮 close
+   * 无孤儿。Map 存「永不 reject 的链尾」防后续链 await 已 reject 的 promise 重复
+   * 触发 unhandled rejection（失败已由各轮调用方 .catch 记日志）。
+   */
+  private readonly _reloadChains = new Map<string, Promise<void>>();
+
+  /**
+   * ql-20260825-f6#4：per-session 终态通知串行链（sessionId → 上一轮通知的
+   * settled promise），实现模式对齐 `_reloadChains`。
+   *
+   * `_onResult` 原先同步段先置 active/清 runId 后才 `await onTurnResult`；该 await
+   * 窗口内 end()/fail() 触发 `_terminateSession` → onSessionEnd——backend 收到
+   * session end 与 run result 的顺序不保证（end 先到会把刚要上报的 run 误翻终态 /
+   * 对账错乱）。本链把**同会话**的 onTurnResult 与 onSessionEnd 排进同一 FIFO：
+   * end 的通知必然 await 在飞 turn result 之后（backend 侧恒 result → end）。
+   *
+   * 范围控制：只串「终态通知对」（onTurnResult / onSessionEnd）；inject /
+   * onTurnMessage / reload 等常规路径不进链（inject 与 turn result 本就无顺序承诺，
+   * 串入会放大无关延迟）。同会话 turn result 天然顺序到达（consume 逐条 await），
+   * 链只新增与 end 通知的相对顺序。超时保护不加：onTurnResult 回调内部已有
+   * try/catch 异常隔离（上轮补），reject 语义与改造前一致向上抛。
+   * Map 存「永不 reject 的链尾」+ 自愈摘除，同 `_reloadChains` 注释。
    * task-07（R-conv 可观察性）：sessionId → 排队中的 inject 计数。
    *
    * 不写入 SessionState（types.ts 是 task-04 范围，本任务只补增量可观察字段，且
@@ -1001,6 +1055,9 @@ export class SessionManager {
         : {}),
     };
     this._store.set(input.sessionId, state);
+    // ql-20260825-f3#1：同 id 重建（end 后短窗口内 recreate）取消遗留的终态延迟
+    // 清理 timer，防到点误删新条目。
+    this._cancelTerminalCleanup(input.sessionId);
 
     // task-08（D-006 / D-009）：登记 session 级 budget_tokens（来自 LeaseCtx）。
     // 复用 _setBudgetTokensInternal 的校验（finite / >0），非法值 → 不登记 = 短路。
@@ -1065,6 +1122,14 @@ export class SessionManager {
     } catch (e) {
       // driver.start 抛错（executable 缺失等）：state 已在 store，标 failed。
       this._store.delete(input.sessionId);
+      // ql-20260825-f3#7：对称清理 budget 软切断登记——_setBudgetTokensInternal 在
+      // try 前已执行（上方第 2 步），失败路径不回收则 _sessionBudgetTokens 条目
+      // 只增不减（_destroyPartialBuffer 对无 partial buffer 的 session 早退、清不到
+      // budget，故显式删）。_destroyPartialBuffer 同调防御性兜底（理论上 driver.start
+      // 抛错前无 partial buffer，但保持成功/失败清理对称）。
+      this._destroyPartialBuffer(input.sessionId);
+      this._sessionBudgetTokens.delete(input.sessionId);
+      this._overBudgetSessions.delete(input.sessionId);
       // task-08：create 失败前若已注册 pending resolver（register 在 start 前，
       // 但 start 抛错发生在 register 之后极不可能），防御性 abortAll 清理。
       const r = this._resolversBySession.get(input.sessionId);
@@ -2382,6 +2447,12 @@ export class SessionManager {
       clearInterval(this._idleTimer);
       this._idleTimer = null;
     }
+    // ql-20260825-f3#1：清终态延迟清理定时器（进程即将退出，_store 内存随进程
+    // 消亡；不让 unref'd timer 在退出途中 fire 触发已销毁状态的访问）。
+    for (const timer of this._terminalCleanupTimers.values()) {
+      clearTimeout(timer);
+    }
+    this._terminalCleanupTimers.clear();
     // ql-20260621-partial：daemon shutdown 时销毁所有 partial buffer 的 timer，
     // 防止 unref'd timer 在进程退出途中 fire 触发已销毁 store 的访问。
     for (const sid of Array.from(this._partialBuffers.keys())) {
@@ -2554,6 +2625,48 @@ export class SessionManager {
 
     // 9. task-10：终态从落盘集合移除后 flush（不复活 ended/failed session）。
     this._scheduleFlush();
+
+    // 10. ql-20260825-f3#1：终态延迟清理——到点删 _store + _pendingInjectCount 条目
+    //     （含凭证 env / subagentDepth / inputQueue buffer 的 SessionState 不再永久
+    //     滞留）。到点时条目若已被重建（状态非终态）则跳过；stop() 时 clearTimeout。
+    this._scheduleTerminalCleanup(state.sessionId);
+  }
+
+  /**
+   * ql-20260825-f3#1：安排终态条目延迟删除（幂等：同 session 已有待清理 timer
+   * 不叠加——end→fail 重入、restore 驱逐后再 terminate 均复用同一 timer）。
+   */
+  private _scheduleTerminalCleanup(sessionId: string): void {
+    if (this._terminalCleanupTimers.has(sessionId)) return;
+    const timer = setTimeout(() => {
+      this._terminalCleanupTimers.delete(sessionId);
+      const current = this._store.get(sessionId);
+      if (!current) return;
+      // 重建守卫：restoreAndReconnect / create 重建的新条目（reconnecting/active/
+      // running）不动。重建路径正常会先 _cancelTerminalCleanup，此处状态守卫兜底
+      // 同 id 重建的时序竞态。
+      if (current.status !== 'ended' && current.status !== 'failed') return;
+      this._store.delete(sessionId);
+      this._pendingInjectCount.delete(sessionId);
+    }, SessionManager.TERMINAL_CLEANUP_DELAY_MS);
+    // node 标准：定时器不阻塞 daemon 退出。
+    if (typeof timer.unref === 'function') {
+      timer.unref();
+    }
+    this._terminalCleanupTimers.set(sessionId, timer);
+  }
+
+  /**
+   * ql-20260825-f3#1：取消终态延迟清理（restoreAndReconnect / create 重建同 id
+   * 条目时调用，防到点误删新条目——时间窗内新条目可能恰好又进入终态，但那次
+   * terminate 会重新 schedule，语义不受影响）。
+   */
+  private _cancelTerminalCleanup(sessionId: string): void {
+    const timer = this._terminalCleanupTimers.get(sessionId);
+    if (timer) {
+      clearTimeout(timer);
+      this._terminalCleanupTimers.delete(sessionId);
+    }
   }
 
   /**
@@ -2747,6 +2860,10 @@ export class SessionManager {
         : {}),
     };
     this._store.set(state.sessionId, state);
+    // ql-20260825-f3#1：重建条目取消上方驱逐可能遗留的终态延迟清理 timer（驱逐
+    // 的 _terminateSession 会 schedule，若不取消，timer 到点时新条目虽因状态守卫
+    // 不被删，但守卫前提是状态非终态——显式取消消除对时序的依赖）。
+    this._cancelTerminalCleanup(state.sessionId);
 
     try {
       // task-02（R7）：复用 _buildDriverOptions（含 canUseTool/onUserDialog 注入，
@@ -2802,7 +2919,8 @@ export class SessionManager {
         state.provider === 'claude' &&
         state.agentSessionId
       ) {
-        migrateClaudeTranscriptToIsolated(state.agentSessionId, this._resumeDirs);
+        // ql-20260825-f3#5：迁移已异步化（同步 copyFileSync 阻塞事件循环）。
+        await migrateClaudeTranscriptToIsolated(state.agentSessionId, this._resumeDirs);
       }
       await applyTranscriptConfigDir(
         restoreEnv,
@@ -2897,9 +3015,16 @@ export class SessionManager {
     }
     // 空闲：无在跑 turn（status=active 且 currentRunId 空）→ 立即 reload，不写标记。
     if (state.status === 'active' && !state.currentRunId) {
-      void this.reloadWithProvider(sessionId, providerConfig).catch(() => {
-        // reload 失败保留旧 query 不破坏会话（design §5 Wave3 / R-01）；
-        // task-08 实现真实错误上报，本处兜底吞错防 unhandled rejection。
+      void this.reloadWithProvider(sessionId, providerConfig).catch((err) => {
+        // reload 失败保留旧 query 不破坏会话（design §5 Wave3 / R-01）。
+        // ql-20260825-f3#2：静默吞错曾让「切换 toast 成功但实际没生效」无从排查
+        //（config switch 路径 ql-20260818-002 同款教训）——必须留 error 日志。
+        // eslint-disable-next-line no-console
+        console.error(
+          '[session-manager] idle provider switch reload failed',
+          sessionId,
+          err,
+        );
       });
       return;
     }
@@ -3167,6 +3292,43 @@ export class SessionManager {
       forkSession?: boolean;
     },
   ): Promise<void> {
+    // ql-20260825-f3#2：per-session 串行化（chain 模式）。等上一轮同会话 reload 完成
+    // 再开始本轮核心段——上一轮失败不阻塞本轮（错误已由其调用方 .catch 记日志，
+    // 这里只保证顺序），本轮失败照常向上抛给本调用方。state 查询移入核心段
+    //（_reloadSessionNow）：排队期间 session 可能已被删（终态清理 / restore 驱逐），
+    // 排队前查询会拿到陈旧 state 造成孤儿句柄。
+    const prev = this._reloadChains.get(sessionId);
+    const run = (
+      prev ? prev.catch(() => undefined) : Promise.resolve()
+    ).then(() => this._reloadSessionNow(sessionId, opts));
+    // 链尾永不 reject：存入 Map 供下一轮 await（下一轮 .catch(() => undefined) 兜底，
+    // 但 settled-with-rejection 的 promise 若无人 await 会在 Node 报 unhandled——
+    // 直接吞掉再存，安全且语义等价）。
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this._reloadChains.set(sessionId, tail);
+    void tail.then(() => {
+      // 自愈摘除：本轮回 finish 且没有更新一轮入链时，删掉链尾（有更新一轮则保留，
+      // 由那一轮负责删除——比较引用防误删后轮的 entry）。
+      if (this._reloadChains.get(sessionId) === tail) {
+        this._reloadChains.delete(sessionId);
+      }
+    });
+    await run;
+  }
+
+  /** `_reloadSession` 的串行化核心段（由 chain 包装器保证同会话顺序执行）。 */
+  private async _reloadSessionNow(
+    sessionId: string,
+    opts: {
+      systemPrompt?: string | null;
+      providerConfig?: ProviderConfig | null;
+      /** ql-20260818-002/004：档案维度切换（含取消）→ fork 新会话使人格生效。 */
+      forkSession?: boolean;
+    },
+  ): Promise<void> {
     const state = this._store.get(sessionId);
     if (!state) {
       throw new SessionNotFoundError(sessionId);
@@ -3228,13 +3390,14 @@ export class SessionManager {
         state.provider === 'claude' &&
         state.agentSessionId
       ) {
-        migrateClaudeTranscriptToIsolated(state.agentSessionId, this._resumeDirs);
+        // ql-20260825-f3#5：迁移已异步化（同步 copyFileSync 阻塞事件循环）。
+        await migrateClaudeTranscriptToIsolated(state.agentSessionId, this._resumeDirs);
       } else if (
         providerConfig == null &&
         state.provider === 'claude' &&
         state.agentSessionId
       ) {
-        migrateClaudeTranscriptToHost(state.agentSessionId, this._resumeDirs);
+        await migrateClaudeTranscriptToHost(state.agentSessionId, this._resumeDirs);
       }
       await applyTranscriptConfigDir(
         newEnv,
@@ -3517,8 +3680,15 @@ export class SessionManager {
     if (pendingSwitch) {
       state.pendingSwitch = undefined;
       void this.reloadWithProvider(state.sessionId, pendingSwitch.providerConfig).catch(
-        () => {
-          // task-08 实现真实错误上报；本处兜底吞错，不阻塞 _onResult 收尾路径。
+        (err) => {
+          // reload 失败保留旧 query 不破坏会话（R-01）；不阻塞 _onResult 收尾路径。
+          // ql-20260825-f3#2：补 error 日志（原静默吞错，reload 失败无从排查）。
+          // eslint-disable-next-line no-console
+          console.error(
+            '[session-manager] turn-boundary provider switch reload failed',
+            state.sessionId,
+            err,
+          );
         },
       );
     }

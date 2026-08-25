@@ -79,7 +79,8 @@ class _FakePubSub:
     """In-memory pub/sub multiplexing several channels onto one queue.
 
     Mirrors the subset of ``redis.asyncio.client.PubSub`` used by the SSE
-    generator: ``subscribe`` / ``unsubscribe`` / ``get_message`` / ``close``.
+    generator: ``subscribe`` / ``unsubscribe`` / ``get_message`` / ``aclose``
+    （``close`` 保留兼容旧调用方；redis-py 7.4 起 ``close`` 废弃、统一走 ``aclose``）.
     Messages are plain dicts shaped like real pub/sub frames
     (``{"type": "message", "channel": ..., "data": ...}``) so the production
     code path exercises its real parsing logic.
@@ -106,6 +107,9 @@ class _FakePubSub:
             return None
 
     async def close(self) -> None:
+        self.closed = True
+
+    async def aclose(self) -> None:
         self.closed = True
 
 

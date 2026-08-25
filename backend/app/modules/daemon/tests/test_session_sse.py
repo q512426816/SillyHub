@@ -290,7 +290,7 @@ def _build_mock_pubsub(messages: list[dict | None]) -> tuple[MagicMock, dict]:
     pubsub = MagicMock()
     pubsub.subscribe = AsyncMock()
     pubsub.unsubscribe = AsyncMock()
-    pubsub.close = AsyncMock()
+    pubsub.aclose = AsyncMock()
 
     async def fake_get_message(timeout=None):
         if state["remaining"]:
@@ -336,7 +336,7 @@ class TestStreamSessionLogs:
         assert collected[0] == ": connected\n\n"
         assert any(ev == f"data: {raw}\n\n" for ev in collected)
         pubsub.unsubscribe.assert_called_once()
-        pubsub.close.assert_called_once()
+        pubsub.aclose.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_session_ended_emits_done_and_returns(self, db_session) -> None:
@@ -365,7 +365,7 @@ class TestStreamSessionLogs:
         assert any(ev.startswith("event: done") for ev in collected)
         assert any('"status": "ended"' in ev for ev in collected)
         pubsub.unsubscribe.assert_called_once()
-        pubsub.close.assert_called_once()
+        pubsub.aclose.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_already_ended_session_emits_done_immediately(self, db_session) -> None:
@@ -451,7 +451,7 @@ class TestStreamSessionLogs:
         pubsub = MagicMock()
         pubsub.subscribe = AsyncMock(side_effect=ConnectionRefusedError("down"))
         pubsub.unsubscribe = AsyncMock()
-        pubsub.close = AsyncMock()
+        pubsub.aclose = AsyncMock()
         redis = MagicMock()
         redis.pubsub.return_value = pubsub
 
@@ -464,7 +464,7 @@ class TestStreamSessionLogs:
         assert any(ev.startswith("event: error") for ev in collected)
         assert any("redis connection failed" in ev for ev in collected)
         pubsub.unsubscribe.assert_called_once()
-        pubsub.close.assert_called_once()
+        pubsub.aclose.assert_called_once()
 
 
 # ── Router GET /sessions/{id}/stream (AC-08 / AC-09) ──────────────────────────
@@ -498,7 +498,7 @@ class TestStreamSessionEndpoint:
         mock_redis.pubsub.return_value = MagicMock(
             subscribe=AsyncMock(),
             unsubscribe=AsyncMock(),
-            close=AsyncMock(),
+            aclose=AsyncMock(),
             get_message=AsyncMock(return_value=None),
         )
         with patch("app.modules.agent.service.get_redis", return_value=mock_redis):
@@ -548,7 +548,7 @@ class TestStreamSessionEndpoint:
         pubsub = MagicMock()
         pubsub.subscribe = AsyncMock()
         pubsub.unsubscribe = AsyncMock()
-        pubsub.close = AsyncMock()
+        pubsub.aclose = AsyncMock()
         delivered = {"v": False}
 
         async def fake_get_message(timeout=None):

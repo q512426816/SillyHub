@@ -207,6 +207,32 @@ describe("streamSession — 会话反馈四事件分发（task-12 verify P2 返�
     });
   });
 
+  // 2026-08-25 P2 修复：agent_task_status 补入 run_id 必填白名单——缺 run_id 的
+  // 畸形 payload 事件整帧丢弃（onError），不再经 String(undefined) 归一成字符串
+  // "undefined" 挂到不存在的 run 上。
+  it("agent_task_status 缺 run_id → onError 丢弃整帧，不派发 onAgentTaskStatus", async () => {
+    const onAgentTaskStatus = vi.fn();
+    const onError = vi.fn();
+    streamSession("sess-1", { ...baseHandlers(), onError, onAgentTaskStatus });
+    await flushSse();
+    emitDefault(lastStream!, {
+      event: "agent_task_status",
+      session_id: "sess-1",
+      run_id: null,
+      task_id: "task-bad",
+      task_name: "畸形事件",
+      status: "running",
+      progress: null,
+      message: null,
+    });
+    await flushSse();
+
+    expect(onAgentTaskStatus).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({ message: expect.stringContaining("Missing run_id") }),
+    );
+  });
+
   it("未知 event 类型 → 静默忽略不抛错、无 handler 触发（向后兼容守卫）", async () => {
     const handlers: SessionStreamHandlers = {
       ...baseHandlers(),

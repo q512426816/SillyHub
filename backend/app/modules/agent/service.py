@@ -1183,10 +1183,20 @@ class AgentService:
         except Exception:
             yield 'event: error\ndata: {"error": "redis connection failed"}\n\n'
         finally:
-            if session_channel is not None:
-                await pubsub.unsubscribe(session_channel)
-            await pubsub.unsubscribe(channel)
-            await pubsub.close()
+            # 两步清理各自隔离：连接已死时 unsubscribe 可能抛 ConnectionError——
+            # 吞掉并记 warning，保证随后的 aclose（归还 Redis 连接）仍然执行；
+            # close 在 redis-py 7.4 已废弃，统一用 aclose。
+            try:
+                if session_channel is not None:
+                    await pubsub.unsubscribe(session_channel)
+                await pubsub.unsubscribe(channel)
+            except Exception:
+                log.warning(
+                    "agent_run_logs_unsubscribe_failed",
+                    channel=channel,
+                    exc_info=True,
+                )
+            await pubsub.aclose()
 
     async def stream_session_logs(
         self,
@@ -1266,8 +1276,16 @@ class AgentService:
         except Exception:
             yield 'event: error\ndata: {"error": "redis connection failed"}\n\n'
         finally:
-            await pubsub.unsubscribe(channel)
-            await pubsub.close()
+            # 同上：unsubscribe 异常隔离，aclose 必达（close 已废弃）。
+            try:
+                await pubsub.unsubscribe(channel)
+            except Exception:
+                log.warning(
+                    "agent_session_logs_unsubscribe_failed",
+                    channel=channel,
+                    exc_info=True,
+                )
+            await pubsub.aclose()
 
     # ------------------------------------------------------------------
     # Stale run cleanup

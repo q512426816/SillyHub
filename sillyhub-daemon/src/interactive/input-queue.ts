@@ -119,12 +119,23 @@ export class InputQueue<T = UserTurnInput> implements AsyncIterable<T> {
    * 本方法在 reload driver.start 前调，重置 ``_subscribed`` 让新 query 能合法订阅。
    *
    * 保留 ``_buffer``（reload 期间已 push 的 pending inject 不丢）+ ``_closed``（reload
-   * 不 close 队列，保持 false）。清 ``_pending``（旧 query 的 waiter 随旧 query
-   * close/abort 废弃，新 query 订阅后建新 waiter）。
+   * 不 close 队列，保持 false）。
+   *
+   * ql-20260825-f3#3：在途 waiter 必须 resolve「关闭哨兵」（null），不能只清引用。
+   * 旧实现 ``this._pending = null`` 直接丢弃旧 consume 的 next() Promise（永不
+   * settle）→ 阻塞在 ``input.next()`` 的旧 consume 协程（如 codex _takeNextTurn
+   * 的 await）永久挂起，finally（stdoutLogStream.end()/rl.close()/h.close()）永不
+   * 执行 → WriteStream fd 泄漏 + 子进程句柄滞留。resolve(null) 走 next() 的
+   * null 契约（msg===null → {done:true}）→ 旧 for-await 干净退出走 finally 完成
+   * 清理。新 waiter 由新订阅的 next() 重建。
    */
   resetForResubscribe(): void {
     this._subscribed = false;
+    const waiter = this._pending;
     this._pending = null;
+    if (waiter !== null) {
+      waiter(null);
+    }
   }
 
   /**

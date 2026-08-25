@@ -507,7 +507,8 @@ describe('TDD-2 commandExecution/requestApproval', () => {
     expect((resp!.result as { decision: string }).decision).toBe('accept');
 
     // 无 hook 调用
-    expect(handle.pendingServerRequests.length).toBeGreaterThanOrEqual(1);
+    // ql-20260825-f3#4：应答后条目摘除（原断言 >=1 是泄漏行为，pending 应清空）。
+    expect(handle.pendingServerRequests.length).toBe(0);
     // flat 日志含 auto_accept
     const log = messages.find(
       (m) =>

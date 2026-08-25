@@ -1340,6 +1340,32 @@ describe("SessionsPortal 会话列表变更信号订阅（task-06）", () => {
     );
   });
 
+  // 2026-08-25 P1 修复：SSE 变更信号去抖（leading+trailing，400ms）——一轮会话
+  // 活动典型 2~3 帧，裸 invalidate 每帧全量重拉 limit=500 列表成风暴。窗口期内
+  // 密集信号应合并为：leading 立即一次 + 窗口尾 trailing 一次。
+  it("onEvent 风暴去抖：400ms 窗口内 3 帧密集信号 → leading 立即 1 次 + trailing 合并 1 次（共 2 次重拉）", async () => {
+    renderPortal();
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalled());
+    const opts = getSubscriptionOpts();
+    const callsBefore = mocks.listAgentSessions.mock.calls.length;
+
+    act(() => {
+      opts.onEvent();
+      opts.onEvent();
+      opts.onEvent();
+    });
+    // leading：首帧信号立即触发一次刷新。
+    await waitFor(() =>
+      expect(mocks.listAgentSessions.mock.calls.length).toBe(callsBefore + 1),
+    );
+
+    // trailing：400ms 窗口关闭后合并的一次刷新（600ms 实等覆盖窗口）。
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 600));
+    });
+    expect(mocks.listAgentSessions.mock.calls.length).toBe(callsBefore + 2);
+  }, 10000);
+
   it("unmount → sub.close() 关闭订阅（卸载不留残留连接/幽灵 invalidate）", () => {
     const { unmount } = renderPortal();
     getSubscriptionOpts();

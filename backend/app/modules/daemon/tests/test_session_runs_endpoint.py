@@ -265,7 +265,7 @@ class TestStreamRunErrorEvent:
         pubsub = MagicMock()
         pubsub.subscribe = AsyncMock()
         pubsub.unsubscribe = AsyncMock()
-        pubsub.close = AsyncMock()
+        pubsub.aclose = AsyncMock()
         delivered = {"turn": False, "ended": False}
 
         async def fake_get_message(timeout=None):
@@ -337,7 +337,7 @@ class TestStreamRunErrorEvent:
         pubsub = MagicMock()
         pubsub.subscribe = AsyncMock()
         pubsub.unsubscribe = AsyncMock()
-        pubsub.close = AsyncMock()
+        pubsub.aclose = AsyncMock()
         delivered = {"turn": False, "ended": False}
 
         async def fake_get_message(timeout=None):
@@ -406,7 +406,7 @@ class TestStreamRunErrorEvent:
         pubsub = MagicMock()
         pubsub.subscribe = AsyncMock()
         pubsub.unsubscribe = AsyncMock()
-        pubsub.close = AsyncMock()
+        pubsub.aclose = AsyncMock()
         delivered = {"turn": False, "ended": False}
 
         async def fake_get_message(timeout=None):

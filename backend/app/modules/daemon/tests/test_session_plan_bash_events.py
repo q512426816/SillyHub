@@ -118,8 +118,12 @@ class TestSessionEventPublishing:
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],
+        db_session: AsyncSession,
     ) -> None:
-        session_id = uuid.uuid4()
+        user_id = await _admin_id(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ag_session, _run = await _create_session_with_run(db_session, user_id, rt.id)
+        session_id = ag_session.id
         run_id = uuid.uuid4()
         redis = _mock_redis()
 
@@ -156,8 +160,12 @@ class TestSessionEventPublishing:
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],
+        db_session: AsyncSession,
     ) -> None:
-        session_id = uuid.uuid4()
+        user_id = await _admin_id(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ag_session, _run = await _create_session_with_run(db_session, user_id, rt.id)
+        session_id = ag_session.id
         run_id = uuid.uuid4()
         redis = _mock_redis()
 
@@ -187,8 +195,12 @@ class TestSessionEventPublishing:
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],
+        db_session: AsyncSession,
     ) -> None:
-        session_id = uuid.uuid4()
+        user_id = await _admin_id(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ag_session, _run = await _create_session_with_run(db_session, user_id, rt.id)
+        session_id = ag_session.id
         run_id = uuid.uuid4()
         redis = _mock_redis()
 
@@ -256,8 +268,12 @@ class TestSessionEventPublishing:
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],
+        db_session: AsyncSession,
     ) -> None:
-        session_id = uuid.uuid4()
+        user_id = await _admin_id(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ag_session, _run = await _create_session_with_run(db_session, user_id, rt.id)
+        session_id = ag_session.id
         run_id = uuid.uuid4()
         redis = _mock_redis()
 
@@ -284,6 +300,170 @@ class TestSessionEventPublishing:
         assert payload["event"] == "agent_task_status"
         assert payload["task_id"] == "t-1"
         assert payload["progress"] == 42
+
+
+# ── daemon 上行端点会话归属校验（2026-08-25 越权注入防护 P1） ────────────────
+
+
+class TestUplinkOwnershipGuard:
+    """非 runtime owner 的已认证主体 → 404 且零发布；runtime owner → 200。
+
+    修复前 4 个事件上行端点只做 get_current_principal——任意已认证主体可向
+    他人会话的 ``agent_session:{id}`` 频道发布伪造事件。修复后发布前经
+    ``SessionService.get_session_for_runtime_owner`` 校验（join daemon_runtimes，
+    api-key owner = runtime owner；不匹配 / 不存在一律 404 不泄露存在性）。
+    ready 端点同款校验见 test_session_readiness.py。
+    """
+
+    async def _seed_foreign_session(self, db_session: AsyncSession) -> AgentSession:
+        """建一个属于「他人」（非调用方 admin）的 runtime + 会话。"""
+        from app.modules.auth.model import User
+
+        other_id = uuid.uuid4()
+        db_session.add(
+            User(
+                id=other_id,
+                email=f"foreign-{other_id}@example.com",
+                password_hash="x",
+                display_name="foreign",
+                status="active",
+            )
+        )
+        await db_session.commit()
+        rt = await _create_runtime(db_session, other_id)
+        ag_session, _run = await _create_session_with_run(db_session, other_id, rt.id)
+        return ag_session
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "suffix,payload_builder",
+        [
+            (
+                "plan-mode-entered",
+                lambda sid, rid: {
+                    "event": "plan_mode_entered",
+                    "session_id": str(sid),
+                    "run_id": str(rid),
+                    "summary": {"objective": "o", "tasks": [], "design_snippet": "d"},
+                    "requested_at": "2026-08-24T10:00:00Z",
+                },
+            ),
+            (
+                "bash-status",
+                lambda sid, rid: {
+                    "event": "bash_status",
+                    "session_id": str(sid),
+                    "run_id": str(rid),
+                    "command": "npm test",
+                    "status": "running",
+                },
+            ),
+            (
+                "bash-chunk",
+                lambda sid, rid: {
+                    "event": "bash_chunk",
+                    "session_id": str(sid),
+                    "run_id": str(rid),
+                    "command": "cat log",
+                    "channel": "stdout",
+                    "content": "x",
+                    "is_final": False,
+                },
+            ),
+            (
+                "agent-task-status",
+                lambda sid, rid: {
+                    "event": "agent_task_status",
+                    "session_id": str(sid),
+                    "run_id": str(rid),
+                    "task_id": "t-1",
+                    "task_name": "scan",
+                    "status": "running",
+                    "progress": 42,
+                },
+            ),
+        ],
+    )
+    async def test_non_owner_gets_404_and_no_publish(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        suffix: str,
+        payload_builder,
+    ) -> None:
+        """admin（非 runtime owner）向他人会话上报 → 404，零事件发布。"""
+        ag_session = await self._seed_foreign_session(db_session)
+        redis = _mock_redis()
+
+        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
+            resp = await client.post(
+                f"/api/daemon/sessions/{ag_session.id}/{suffix}",
+                json=payload_builder(ag_session.id, uuid.uuid4()),
+                headers=auth_headers,
+            )
+
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["code"] == "HTTP_404_DAEMON_SESSION_NOT_FOUND"
+        assert redis.publish.await_count == 0
+
+    @pytest.mark.asyncio
+    async def test_unknown_session_404_no_publish(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        """会话不存在 → 404（与跨 owner 同码，不泄露存在性），零发布。"""
+        session_id = uuid.uuid4()
+        redis = _mock_redis()
+
+        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
+            resp = await client.post(
+                f"/api/daemon/sessions/{session_id}/bash-status",
+                json={
+                    "event": "bash_status",
+                    "session_id": str(session_id),
+                    "run_id": str(uuid.uuid4()),
+                    "command": "npm test",
+                    "status": "running",
+                },
+                headers=auth_headers,
+            )
+
+        assert resp.status_code == 404, resp.text
+        assert redis.publish.await_count == 0
+
+    @pytest.mark.asyncio
+    async def test_runtime_owner_200(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """runtime owner（admin 本人，Bearer JWT）→ 200 且正常发布。"""
+        user_id = await _admin_id(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        ag_session, _run = await _create_session_with_run(db_session, user_id, rt.id)
+        redis = _mock_redis()
+
+        with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
+            resp = await client.post(
+                f"/api/daemon/sessions/{ag_session.id}/agent-task-status",
+                json={
+                    "event": "agent_task_status",
+                    "session_id": str(ag_session.id),
+                    "run_id": str(uuid.uuid4()),
+                    "task_id": "t-1",
+                    "task_name": "scan",
+                    "status": "running",
+                    "progress": 42,
+                },
+                headers=auth_headers,
+            )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["ok"] is True
+        assert len(_decode_publishes(redis)) == 1
 
 
 # ── plan-response endpoint ───────────────────────────────────────────────────

@@ -1197,7 +1197,9 @@ export function streamSession(
       handlers.onError(new Error(`Session id mismatch on ${kind} event`));
       return;
     }
-    // turn / plan / bash 类事件必须有 run_id
+    // turn / plan / bash / agent_task 类事件必须有 run_id（缺 run_id 的畸形
+    // payload 事件丢弃——否则 run_id: String(undefined) 归一成字符串 "undefined"
+    // 挂到不存在的 run 上）。agent_task_status 2026-08-25 补入白名单。
     if (
       (kind === "turn_started" ||
         kind === "log" ||
@@ -1205,7 +1207,8 @@ export function streamSession(
         kind === "tokens" ||
         kind === "plan_mode_entered" ||
         kind === "bash_status" ||
-        kind === "bash_chunk") &&
+        kind === "bash_chunk" ||
+        kind === "agent_task_status") &&
       !env.run_id
     ) {
       handlers.onError(new Error(`Missing run_id on ${kind} event`));

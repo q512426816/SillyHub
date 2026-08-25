@@ -1102,10 +1102,10 @@ function TurnStatusBadge({
       {showTokens && (
         <span className="ml-1.5 text-muted-foreground/80">
           {" · "}
-          {inTokens !== null ? `↑${inTokens.toLocaleString()}` : "↑0"}
+          {inTokens !== null ? `↑${inTokens.toLocaleString("zh-CN")}` : "↑0"}
           {" "}
           {outTokens !== null
-            ? `↓${outTokens.toLocaleString()}`
+            ? `↓${outTokens.toLocaleString("zh-CN")}`
             : isLive
               ? "↓执行中…"
               : "↓0"}

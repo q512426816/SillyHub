@@ -222,7 +222,7 @@ async def test_stream_running_run_sse_data_events(db_session):
     mock_pubsub = MagicMock()
     mock_pubsub.subscribe = AsyncMock()
     mock_pubsub.unsubscribe = AsyncMock()
-    mock_pubsub.close = AsyncMock()
+    mock_pubsub.aclose = AsyncMock()
 
     async def fake_get_message(timeout=None):
         return next(msg_iter)
@@ -243,7 +243,7 @@ async def test_stream_running_run_sse_data_events(db_session):
     assert "event: done" in collected[-1]
     assert '"status"' in collected[-1]
     mock_pubsub.unsubscribe.assert_called_once()
-    mock_pubsub.close.assert_called_once()
+    mock_pubsub.aclose.assert_called_once()
 
 
 async def test_stream_done_event_closes(db_session):
@@ -270,7 +270,7 @@ async def test_stream_done_event_closes(db_session):
     mock_pubsub = MagicMock()
     mock_pubsub.subscribe = AsyncMock()
     mock_pubsub.unsubscribe = AsyncMock()
-    mock_pubsub.close = AsyncMock()
+    mock_pubsub.aclose = AsyncMock()
     mock_pubsub.get_message = AsyncMock(return_value=done_msg)
 
     mock_redis = MagicMock()
@@ -284,7 +284,7 @@ async def test_stream_done_event_closes(db_session):
 
     assert "event: done" in collected[-1]
     mock_pubsub.unsubscribe.assert_called_once()
-    mock_pubsub.close.assert_called_once()
+    mock_pubsub.aclose.assert_called_once()
 
 
 async def test_stream_keepalive_on_no_message(db_session):
@@ -313,7 +313,7 @@ async def test_stream_keepalive_on_no_message(db_session):
     mock_pubsub = MagicMock()
     mock_pubsub.subscribe = AsyncMock()
     mock_pubsub.unsubscribe = AsyncMock()
-    mock_pubsub.close = AsyncMock()
+    mock_pubsub.aclose = AsyncMock()
 
     async def fake_get_message(timeout=None):
         nonlocal call_count
@@ -359,7 +359,7 @@ async def test_stream_redis_error_sends_error_event(db_session):
     mock_pubsub = MagicMock()
     mock_pubsub.subscribe = AsyncMock(side_effect=ConnectionRefusedError("redis down"))
     mock_pubsub.unsubscribe = AsyncMock()
-    mock_pubsub.close = AsyncMock()
+    mock_pubsub.aclose = AsyncMock()
 
     mock_redis = MagicMock()
     mock_redis.pubsub.return_value = mock_pubsub

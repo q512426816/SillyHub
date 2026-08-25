@@ -349,3 +349,34 @@ describe('task-08 / interactive budget 软切断（D-006 / D-009）', () => {
     expect(ev!.usage).toEqual({ input_tokens: 150, output_tokens: 60 });
   });
 });
+
+// ── ql-20260825-f3#7：create 失败路径对称清理 _sessionBudgetTokens ──────────────
+
+describe('ql-20260825-f3#7：create 失败回收 budget 登记', () => {
+  it('driver.start 抛错 → _sessionBudgetTokens / _overBudgetSessions 条目删除', async () => {
+    // start 必抛的 mock driver（executable 缺失等 create 失败场景）。
+    const driver = {
+      start: vi.fn(() => {
+        throw new Error('spawn failed');
+      }),
+      consume: vi.fn(async () => {}),
+      interrupt: vi.fn(async () => false),
+    } as unknown as ClaudeSdkDriver;
+    const deps = makeDeps();
+    const sm = new SessionManager({ driver, ...deps });
+
+    await expect(
+      sm.create({ ...BASE_INPUT, budget_tokens: 1000 }),
+    ).rejects.toThrow('spawn failed');
+
+    // 白盒断言：budget 软切断登记不残留（修复前 _sessionBudgetTokens 只增不减）。
+    const internal = sm as unknown as {
+      _sessionBudgetTokens: Map<string, number>;
+      _overBudgetSessions: Set<string>;
+    };
+    expect(internal._sessionBudgetTokens.has('sess-bg')).toBe(false);
+    expect(internal._overBudgetSessions.has('sess-bg')).toBe(false);
+    // store 也已回滚（既有行为）。
+    expect(sm.get('sess-bg')).toBeUndefined();
+  });
+});
