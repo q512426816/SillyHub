@@ -274,3 +274,11 @@
 根因：daemon create 即把 lease metadata 的 firstPrompt 入队提交并上报一条 user_input，backend create_session 又落一条 user_input 并 SESSION_INJECT 再提交同句——长期既有 bug（旧纯文本会话库中也是两条相同 user_input），agent 实际收到两次首句；带附件后一条 marker 版一条裸文本版，前端渲染两个气泡才暴露（[74b5531e / e6900bc2 会话实测]）。
 方案：deferred first prompt（create 不入队，挂起等权威 SESSION_INJECT）+ 删 daemon 侧重复上报 + 前端存量双日志归并显示。
 结果：daemon 新增 4 用例 + 全量 2711 绿（并发 inject 33/33 零回归）；frontend 新增 4 用例 + 全量 2173 绿；已提交 7cbcc362；daemon bundle 已重新构建。注：sillyspec CLI 3.27.5 的 quick --done 因 complete-handlers.js 引用 shared.js 不存在的导出 collectOtherQuickSessionDeclarations 而崩溃（工具缺陷，本条目由人工补写）。
+
+## ql-20260825-003 | 2026-08-25 18:03:00 | multiSelect 提问历史回看崩页修复——answer 数组归一
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/daemon/session-log-sanitize.ts（extractDialogQA answer 归一 string|string[]）、frontend/src/components/daemon/__tests__/session-log-sanitize.test.ts（+4 用例）
+根因：AskUserQuestion 多选提问的 answer 真实形态是 string[]（multiSelect: true），extractDialogQA 旧代码只按 string 处理——(answers[i]?.answer ?? "").trim() 在数组上抛「(intermediate value)….trim is not a function」，整页被 error boundary 拦截。触发条件为回看含已答多选提问卡的会话（e6900bc2 首次触达）。排查路径：DB 数据核对（全 text 无异常）→ 真实日志组件级复现（logsToTurns/TurnTimeline/SessionPanel 均不崩）→ 差异定位到 dialog_history（mock 空所以测试不崩）→ session_dialog_requests 表实数据 answer 为数组 → extractDialogQA 源码定位 → 红绿验证（stash 修复复现同款 TypeError）。
+方案：answer 归一——数组过滤非字符串成员、trim 后顿号 join 展示（answerText）；selected 判定改 label ∈ 选中列表。
+结果：新增 4 用例 + 既有 38 用例全绿；前端全量 2177 绿；tsc 0 错；红绿验证通过；已提交 83975883。注：sillyspec CLI quick --done 仍崩（ql-20260825-002 已记工具坑），本条目人工补写。
