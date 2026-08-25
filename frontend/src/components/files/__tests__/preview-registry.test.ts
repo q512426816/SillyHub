@@ -78,7 +78,12 @@ describe("matchRenderer", () => {
     expect(matchRenderer(null, "slides.pptx")).toBe("fallback");
   });
 
-  it("doc → fallback（旧格式不在范围）", () => {
+  it("xls → xlsx（ql-20260825-004：BIFF 旧格式经 SheetJS 渲染）", () => {
+    expect(matchRenderer("application/vnd.ms-excel", "legacy.xls")).toBe("xlsx");
+    expect(matchRenderer(null, "报表.xls")).toBe("xlsx");
+  });
+
+  it("doc → fallback（旧格式不在范围——纯前端无 Word 二进制保真渲染）", () => {
     expect(matchRenderer(null, "legacy.doc")).toBe("fallback");
   });
 });

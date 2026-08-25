@@ -18,6 +18,8 @@ const MIME_MAP: Record<string, RendererKey> = {
   "application/pdf": "pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  // ql-20260825-004：.xls 旧格式（BIFF）——SheetJS read 天然兼容，映射到 xlsx 渲染器。
+  "application/vnd.ms-excel": "xlsx",
   "text/markdown": "markdown",
 };
 
@@ -26,6 +28,9 @@ const EXT_MAP: Record<string, RendererKey> = {
   pdf: "pdf",
   docx: "docx",
   xlsx: "xlsx",
+  // ql-20260825-004：.xls 旧格式经 SheetJS 渲染（doc 旧格式仍 fallback——纯前端
+  // 无 Word 二进制保真渲染方案）。
+  xls: "xlsx",
   md: "markdown", markdown: "markdown",
 };
 

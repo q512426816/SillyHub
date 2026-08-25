@@ -5,7 +5,8 @@
  *
  * 动态 import xlsx（SheetJS），read 解析 workbook → sheet_to_html 渲染表格。
  * 多 sheet 支持 tab 切换；单表超 2000 行截断 + 提示完整内容请下载（R-03）。
- * 仅支持 OOXML（xlsx）。统一消费 PreviewerProps。
+ * 支持 xlsx（OOXML）与 xls（BIFF 旧格式，ql-20260825-004——SheetJS read 天然
+ * 兼容，registry 经扩展名/MIME 归一到本渲染器）。统一消费 PreviewerProps。
  */
 
 import { useEffect, useState } from "react";

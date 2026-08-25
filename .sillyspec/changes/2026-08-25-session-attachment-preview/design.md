@@ -52,8 +52,10 @@ prototype: prototype-session-attachment-preview.html
 ## 3. 非目标
 
 - **不做 pptx 在线渲染**：前端库保真度不足（D-001 取舍），fallback 下载引导；后续社区成熟可加 renderer；
-- **不做旧格式 Office**（.doc/.xls/.ppt 二进制格式）：仅支持 OOXML（docx/xlsx）；旧格式
-  允许上传（文件中心白名单含 .doc/.xls）但预览走 fallback 下载引导；
+- **不做旧格式 Word/PPT**（.doc/.ppt 二进制格式）：纯前端无保真渲染方案，预览走 fallback
+  下载引导。**例外（ql-20260825-004）**：.xls（BIFF 旧格式）经 SheetJS 渲染——其 read
+  天然兼容 BIFF5/7/8，registry 以扩展名 xls 与 MIME application/vnd.ms-excel 归一到
+  xlsx 渲染器（实测 OLE2 头二进制解析通过）；
 - **不做后端 Office→PDF 转换**：不装 LibreOffice，不改 Docker 镜像；
 - **不做协作编辑**：预览只读；
 - **不改后端任何 API / 表结构 / 鉴权**：仅消费既有只读内容端点；
