@@ -79,6 +79,14 @@ export class SessionPersistenceError extends Error {
 const VALID_PROVIDERS = new Set(['claude', 'codex']);
 
 /**
+ * P0-1：字符串数组字段守卫（mcpRefs/skillRefs/effectiveAllowedRoots 用）。
+ * Array.isArray 且元素全为 string 才通过；空数组合法（profile 显式空集语义）。
+ */
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((e) => typeof e === 'string');
+}
+
+/**
  * ql-20260825-f6#1：tmp 残留过期时长（ms）。flush 成功后顺手清理超过此时长的
  * `.tmp-*` 残留（并发在写的新鲜 tmp 不会被误删——save 队列串行，在写 tmp 仅数秒龄）。
  */
@@ -197,6 +205,24 @@ function validateRecord(raw: unknown): PersistedSessionRecord | null {
   }
   if (typeof r.askUserOnly === 'boolean') {
     out.askUserOnly = r.askUserOnly;
+  }
+  // P0-1（2026-08-25 team-subsession 路线图）：stage / profile 三字段回填。
+  // 落盘侧 snapshotPersistable 写、恢复侧 restoreAndReconnect 读，本函数此前漏拷
+  // → 重启后 mission_worker 会话 stage 变 undefined，isMainAgentSession 谓词
+  // stage ?? '' 命中空串分支被注入派工 MCP 工具（防递归防线失效），profile 的
+  // mcpRefs 过滤 / effectiveAllowedRoots 写守卫收紧恢复后也全部丢失。
+  // 容错风格与可选字段一致：类型非法 → 丢字段保记录（损坏隔离，不丢整条）。
+  if (typeof r.stage === 'string' && r.stage) {
+    out.stage = r.stage;
+  }
+  if (isStringArray(r.mcpRefs)) {
+    out.mcpRefs = r.mcpRefs;
+  }
+  if (isStringArray(r.skillRefs)) {
+    out.skillRefs = r.skillRefs;
+  }
+  if (isStringArray(r.effectiveAllowedRoots)) {
+    out.effectiveAllowedRoots = r.effectiveAllowedRoots;
   }
   // task-08（2026-08-14-sessions-portal / design §5 Wave2）：会话级配置快照容错透传。
   // systemPrompt 非空字符串才写；providerConfig 仅校验 object（结构由 backend 下发，

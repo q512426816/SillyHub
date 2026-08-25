@@ -182,6 +182,84 @@ describe('JsonSessionPersistence.load', () => {
     expect(records).toHaveLength(1);
     expect(records[0].sessionId).toBe('sess-1');
   });
+
+  // ── stage / profile 三字段回填（P0-1：validateRecord 漏回填修复）─────────────
+  // 落盘侧 snapshotPersistable 写、类型声明有、恢复侧 restoreAndReconnect 读，
+  // 唯独 load 校验白名单漏拷 → 重启后 mission_worker 会话 stage 丢失，被当普通
+  // 会话注入派工 MCP 工具（防递归防线失效）。以下测试锁定回填语义。
+
+  it('stage + mcpRefs/skillRefs/effectiveAllowedRoots 落盘后 load 完整回填', async () => {
+    const rec = mkRecord({
+      stage: 'mission_worker',
+      mcpRefs: ['sillyhub-daemon', 'sillyhub-file'],
+      skillRefs: ['sillyspec:quick'],
+      effectiveAllowedRoots: ['C:\\work', 'C:\\work\\sub'],
+    });
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: SESSION_FILE_VERSION,
+        savedAt: 'x',
+        sessions: [rec],
+      }),
+    );
+    const p = new JsonSessionPersistence(file);
+    const records = await p.load();
+    expect(records).toEqual([rec]);
+  });
+
+  it('save→load 往返：stage/profile 三字段不丢（原子性回归）', async () => {
+    const p = new JsonSessionPersistence(file);
+    const rec = mkRecord({
+      stage: 'orchestrator',
+      mcpRefs: ['sillyhub-daemon'],
+      skillRefs: [],
+      effectiveAllowedRoots: ['/home/x'],
+    });
+    await p.save([rec]);
+    const records = await p.load();
+    expect(records).toEqual([rec]);
+  });
+
+  it('mcpRefs 非法（非数组 / 元素非字符串）→ 该字段丢弃，记录保留', async () => {
+    const rec: Record<string, unknown> = {
+      ...mkRecord({ stage: 'mission_worker' }),
+      mcpRefs: 'not-an-array',
+      skillRefs: ['ok', 42],
+      effectiveAllowedRoots: ['C:\\work'],
+    };
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: SESSION_FILE_VERSION,
+        savedAt: 'x',
+        sessions: [rec],
+      }),
+    );
+    const p = new JsonSessionPersistence(file);
+    const records = await p.load();
+    expect(records).toHaveLength(1);
+    expect(records[0].stage).toBe('mission_worker');
+    expect(records[0].mcpRefs).toBeUndefined();
+    expect(records[0].skillRefs).toBeUndefined();
+    expect(records[0].effectiveAllowedRoots).toEqual(['C:\\work']);
+  });
+
+  it('stage 空串 → 字段丢弃（仅非空字符串落 record），记录保留', async () => {
+    const rec = mkRecord({ stage: '' });
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: SESSION_FILE_VERSION,
+        savedAt: 'x',
+        sessions: [rec],
+      }),
+    );
+    const p = new JsonSessionPersistence(file);
+    const records = await p.load();
+    expect(records).toHaveLength(1);
+    expect(records[0].stage).toBeUndefined();
+  });
 });
 
 // ── save ──────────────────────────────────────────────────────────────────────

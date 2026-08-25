@@ -243,3 +243,21 @@
 根因：Tailwind `truncate` 生成 `display:block`，SVG preflight 也是 `display:block`，block SVG 独占一行将文字推到第二行（pill 高度 33.6px → 应为 21.6px）；外层容器改 `nowrap`/`overflow-scroll` 导致部分机器被隐藏
 方案：FilterPill 内层 span 改为 `inline-flex items-center gap-0.5 overflow-hidden`（flex 子项并排 + 溢出裁剪，保留 `max-w-[160px]` 截断），外层保持 `flex-wrap` 确保所有机器可见
 结果：vitest 2204/2204 绿；tsc 零错；Playwright DOM 验证：全部 5 个机器胶囊 `display:flex`、`pillH=21.6px`、`sameRow=true`；docker fix 镜像重建后容器内 API 代理正常（/api/health 200）
+
+## ql-20260825-011-76cf | 2026-08-25 18:21:40 | 会话聊天页 UX 修复：队列后端排队、发送中可打断+输入框本地缓存、文字可选中、上下文注入收进进度tab、团队/Bash/子代理折叠、左树工作区别名优先
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
+
+## ql-20260825-012-89d6 | 2026-08-25 19:13:37 | daemon 会话恢复丢 stage 修复：validateRecord 补 stage/profile 三字段回填
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/session-store-persistence.ts（validateRecord 补 isStringArray 守卫 + stage/mcpRefs/skillRefs/effectiveAllowedRoots 四字段容错回填）
+- sillyhub-daemon/tests/interactive/session-store-persistence.test.ts（新增 4 用例：回填完整/save-load 往返/非法类型丢字段保记录/stage 空串丢弃）
+需求：daemon 会话恢复丢 stage 修复：validateRecord 补 stage/profile 三字段回填
+根因：落盘侧 snapshotPersistable 写了 stage/mcpRefs/skillRefs/effectiveAllowedRoots，恢复侧 restoreAndReconnect 也读，唯独 load 校验 validateRecord 漏拷四字段——重启后 mission_worker 会话 stage 变 undefined，isMainAgentSession 谓词命中空串分支被静默注入 5 个派工 MCP 工具，防递归防线失效；profile 的 MCP 过滤与写守卫收紧恢复后也丢失
+方案：validateRecord 新增 isStringArray 守卫（数组且元素全 string），stage 非空字符串回填、三数组字段守卫通过才回填，非法类型丢字段保记录（与既有损坏隔离风格一致）；测试先行补 4 个用例锁定回填语义
+结果：目标文件 26/26 passed，interactive 全量 45 文件 561/561 passed，pnpm typecheck 0 错误
+审计：📝 文档欠账（D-8）：2 个源码文件改动未同步任何模块文档
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/tests/interactive/session-store-persistence.test.ts
