@@ -131,3 +131,17 @@ runtime-session-helpers / 实时 SSE session-panel onLog）+ SegmentView 渲染
 「上下文注入」卡片。修复一处构建期 bug：turn-status-bar 独立 segmentTs 函数
 穷尽 switch 少 preamble 分支（构建时报错，已补）。测试：assembler 55 绿 +
 tsc 0（剩余 15 错误全部为并行会话 team-task-block 在途类型债，与本变更无关）。
+
+## task-12 创建轮上下文断链修复（用户反馈④：/workspaces 新建会话答非所问，2026-08-25 13:5x）
+
+用户实测会话 91fecbc1（最新部署版所建）：dispatch_prompt 无前导——定位为
+**宿主 props 断链**：store 的 preContext 与 pageContext 为独立字段，宿主
+直传 preContext 恒缺 pageContext，创建轮 createSession 拿不到上下文；此前
+三轮 API 级 E2E 均绕过 UI 故未暴露（测试盲区：宿主测试只断言 store 状态，
+未断言传给 SessionPanel 的 props）。修复：预会话面板 props 显式合并
+pageContext（0b502098，main）；堵盲区：mock 面板透出收到的 pageContext +
+双断言（PPM 显式 + /workspaces URL 派生）11/11 绿。部署重建（处置：部署
+worktree 被清→重建、Docker Desktop 停机→重启、3001 被宿主 dev server
+占用→停让位），容器时间戳 13:49 确认新版生效。另：功能分支已被并行会话
+完整合并进 main（be24345b）后清理，后续迭代在 main 进行；并行会话同期
+增强了悬浮球（拖拽/吸附）并把前导段复用至分身日志。
