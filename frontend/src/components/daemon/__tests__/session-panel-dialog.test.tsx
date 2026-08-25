@@ -555,6 +555,80 @@ describe("SessionPanel（dialog）", () => {
     expect(conn.closeSpy).toHaveBeenCalled();
   });
 
+  // 2026-08-25 P0 竞态修复：卸载发生在 establishStream 的 prefetch await 期间
+  // （cleanup 已跑、streamConnRef 还是 null close 落空）时，await 返回后必须
+  // 放弃建流——否则新建连接无人 close，streamSession 内建退避以 30s 封顶永久
+  // 重连成僵尸连接。
+  it("unmount 发生在 prefetch await 期间 → 不再建 SSE（无僵尸连接）", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.getAgentSession.mockResolvedValue({
+      id: "sess-attach", runtime_id: null, lease_id: null,
+      provider: "claude", status: "reconnecting", agent_session_id: "ag-1",
+      config: null, turn_count: 0, created_at: "t", last_active_at: null, ended_at: null,
+    });
+    // prefetch 挂起：手动 resolve，制造「卸载先于 await 返回」窗口。
+    let resolveLogs: (logs: unknown[]) => void = () => {};
+    sessionApi.getAgentSessionLogs.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveLogs = resolve;
+        }),
+    );
+
+    const { unmount } = setupPanel({ attachSessionId: "sess-attach" });
+    // establishStream 已发起、正在 await prefetch（streamSession 尚未调用）。
+    expect(sessionApi.streamSession).not.toHaveBeenCalled();
+
+    unmount();
+    resolveLogs([]);
+    // 冲刷微任务链（resolve → await 恢复 → 自查退出），不推进宏任务。
+    await act(async () => {
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    });
+
+    // 卸载后 prefetch 返回：不再建流（旧实现此处会新建永不关闭的连接）。
+    expect(sessionApi.streamSession).not.toHaveBeenCalled();
+  });
+
+  // 2026-08-25 P0 并发防御：同 sessionId 的并发 establishStream 复用 in-flight
+  // promise（入口 `if (streamConnRef.current) return` 守卫在 await 窗口失效），
+  // 只发一次 prefetch、只建一条流。
+  it("并发两次 establishStream（同 session，prefetch 在途）→ 复用 in-flight：单次 prefetch + 单条 SSE", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    let resolveLogs: (logs: unknown[]) => void = () => {};
+    sessionApi.getAgentSessionLogs.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveLogs = resolve;
+        }),
+    );
+
+    const { rerender } = setupPanel({ attachSessionId: "sess-attach" });
+    expect(sessionApi.getAgentSessionLogs).toHaveBeenCalledTimes(1);
+
+    // offlineReadOnly 翻转重跑 attach effect（同 sessionId 二次 establishStream，
+    // prefetch 仍在途）。
+    rerender(
+      <SessionPanel
+        mode="dialog"
+        sessionId="sess-attach"
+        providers={["claude", "codex"]}
+        defaultProvider="claude"
+        model={null}
+        onModelChange={vi.fn()}
+        hasOnlineProvider={true}
+        offlineReadOnly={false}
+      />,
+    );
+
+    resolveLogs([]);
+    await waitFor(() => expect(sessionApi.streamSession).toHaveBeenCalledTimes(1));
+    // prefetch 不因并发重复发起（复用 in-flight promise）。
+    expect(sessionApi.getAgentSessionLogs).toHaveBeenCalledTimes(1);
+  });
+
   it("inject 返回 turn conflict 409 → 队头 failed 条目 + 重试/删除按钮（D-003）", async () => {
     const stream = makeStreamMock();
     sessionApi.streamSession.mockImplementation(stream.factory);

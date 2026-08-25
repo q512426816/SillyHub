@@ -26,6 +26,7 @@ import {
   applyLogToSegments,
   classifySessionLog,
   createEmptyAssembledTurn,
+  extractPreambleText,
   finishTurn,
   logsToSegments,
   segmentsToLegacy,
@@ -1086,5 +1087,29 @@ describe("技能装载注入行（ql-20260824-017：不进对话正文，挂 Ski
         ts: undefined,
       },
     ]);
+  });
+});
+
+// ── 2026-08-25-unified-floating-session task-11：前导段提取（FR-7）──────────
+describe("extractPreambleText", () => {
+  it("含【页面上下文】+ 分隔线 → 提取前导块", () => {
+    const out = extractPreambleText(
+      "【页面上下文】\n- 页面：工作区详情\n- 工作区：map\n\n---\n\n你好",
+    );
+    expect(out).toBe("【页面上下文】\n- 页面：工作区详情\n- 工作区：map");
+  });
+
+  it("普通用户消息 → null（不误伤）", () => {
+    expect(extractPreambleText("你好")).toBeNull();
+  });
+
+  it("同标题开头但无分隔 → null（用户自己输入的原文不算前导）", () => {
+    expect(extractPreambleText("【页面上下文】\n- 页面：测试")).toBeNull();
+  });
+
+  it("【团队任务简报】开头同样识别", () => {
+    expect(
+      extractPreambleText("【团队任务简报】\n- 目标：x\n\n---\n\n开工"),
+    ).toBe("【团队任务简报】\n- 目标：x");
   });
 });

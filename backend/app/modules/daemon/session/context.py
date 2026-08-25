@@ -111,3 +111,98 @@ async def build_change_context_preamble(
     if len(lines) <= 1:
         return None  # 无任何可用信息
     return "\n".join(lines)
+
+
+# ── 页面上下文前导（2026-08-25-unified-floating-session / FR-5 / D-005）──────
+#
+# 悬浮会话入口的「智能上下文」创建轮通道：客户端仅声明 page_key 枚举 + 实体
+# id，前导数据全部服务端回查（无自由文本，防伪造注入）。拼装模式与
+# build_change_context_preamble 同构（X-02 纯后端，零 daemon 改动）。
+
+# 前导单值截断上限（project_name 等业务字段可能超长，控制前导总长度）。
+_PAGE_VALUE_MAX: int = 120
+
+# 通用页面注册表（task-09：route_key → 页面中文名）。前端 hooks/
+# use-page-session-context.ts 持有同键的路由→key 映射；两侧键必须一致，
+# 标签文案各自维护（前端用于上下文条展示，后端用于前导注入）。未注册键
+# 静默不注入（枚举语义，防伪造注入：客户端无法注入任意文本）。
+PAGE_ROUTE_LABELS: dict[str, str] = {
+    "settings_mcp": "设置 · MCP",
+    "settings_skills": "设置 · Skills",
+    "settings": "设置",
+    "runtimes": "运行时",
+    "workspaces": "工作区列表",
+    "workspace_detail": "工作区详情",
+    "agent_profiles": "智能体档案",
+    "sessions_portal": "会话门户",
+    "ppm_projects": "PPM · 项目列表",
+    "ppm_workbench": "PPM · 工作台",
+    "admin": "管理后台",
+    "account": "个人中心",
+}
+
+
+async def build_page_context_preamble(
+    db: AsyncSession,
+    page_key: str | None,
+    project_id: uuid.UUID | None,
+    route_key: str | None = None,
+    workspace_id: uuid.UUID | None = None,
+) -> str | None:
+    """拼装【页面上下文】前导字符串。
+
+    - ``ppm_project``：回查 :class:`PpmProjectMaintenance`；查无 → None
+      （静默不注入，与变更前导「查无返回 None」语义一致）；单值 ``[:120]``
+      截断；数据只来自服务端 DB，不接受客户端文本。
+    - ``generic_page``（task-09）：``PAGE_ROUTE_LABELS`` 注册表 Lookup 出
+      页面中文名；未注册 key → None（枚举语义）。
+    - ``workspace``（task-10）：回查 :class:`Workspace` 注入名称/类型/路径；
+      查无 → None。
+    - 其余 / 入参缺失 → None（不注入）。
+    """
+    if page_key == "workspace":
+        if workspace_id is None:
+            return None
+        ws = await db.get(Workspace, workspace_id)
+        if ws is None:
+            return None
+        lines = ["【页面上下文】", "- 页面：工作区详情"]
+        if ws.name:
+            lines.append(f"- 工作区：{ws.name[:_PAGE_VALUE_MAX]}")
+        if ws.type:
+            lines.append(f"- 类型：{ws.type[:_PAGE_VALUE_MAX]}")
+        if ws.root_path:
+            lines.append(f"- 路径：{ws.root_path[:_PAGE_VALUE_MAX]}")
+        if len(lines) <= 1:
+            return None
+        return "\n".join(lines)
+    if page_key == "generic_page":
+        label = PAGE_ROUTE_LABELS.get(route_key or "")
+        if label is None:
+            return None
+        return f"【页面上下文】\n- 页面：{label}"
+
+    if page_key != "ppm_project" or project_id is None:
+        return None
+
+    from app.modules.ppm.project.model import PpmProjectMaintenance
+
+    project = await db.get(PpmProjectMaintenance, project_id)
+    if project is None:
+        return None
+
+    proj_lines: list[str] = ["【页面上下文】", "- 页面：PPM · 项目详情"]
+    if project.project_name:
+        proj_lines.append(f"- 项目：{project.project_name[:_PAGE_VALUE_MAX]}")
+    if project.project_code:
+        proj_lines.append(f"- 项目编码：{project.project_code[:_PAGE_VALUE_MAX]}")
+    if project.project_status:
+        proj_lines.append(f"- 状态：{project.project_status[:_PAGE_VALUE_MAX]}")
+    if project.project_effective_start_time:
+        proj_lines.append(f"- 周期起：{project.project_effective_start_time.date().isoformat()}")
+    if project.project_effective_end_time:
+        proj_lines.append(f"- 周期止：{project.project_effective_end_time.date().isoformat()}")
+
+    if len(proj_lines) <= 1:
+        return None
+    return "\n".join(proj_lines)

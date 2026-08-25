@@ -1051,14 +1051,17 @@ class TestRecoveryLeaseGuard:
         rt = await _create_runtime(db_session, uid)
         sess, _lease = await _make_ended_session(db_session, uid, rt.id, status="active")
         stale_lease_id = uuid.uuid4()  # 与 session.lease_id 不匹配
+        # id 预取：幂等早退路径现在 rollback 释放 FOR UPDATE 行锁（2026-08-25
+        # 会话审查 P2），rollback 过期 ORM 属性后再访问会触发异步 lazy load 报错。
+        sess_id = sess.id
 
         svc = DaemonService(db_session)
         result = await svc.mark_session_recovery_failed(
-            sess.id, runtime_id=rt.id, lease_id=stale_lease_id
+            sess_id, runtime_id=rt.id, lease_id=stale_lease_id
         )
 
         assert result == "active"
         status_row = (
-            await db_session.execute(select(AgentSession.status).where(AgentSession.id == sess.id))
+            await db_session.execute(select(AgentSession.status).where(AgentSession.id == sess_id))
         ).scalar_one()
         assert status_row == "active"

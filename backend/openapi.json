@@ -11051,7 +11051,7 @@
           "daemon"
         ],
         "summary": "Notify Session Ready",
-        "description": "Receive daemon session-ready report (task-06 / D-001@v1).\n\ndaemon ``_startInteractiveSession``（fresh create）与 ``restoreAndReconnect``\n（recover）create 完成后调 ``hubClient.notifySessionReady`` → 这里。鉴权后调\n:func:`get_session_readiness` 单例的 ``mark_ready``，唤醒 ``inject_session`` 中\n等待 ready event 的协程（task-08），解 /model 等 inject 偶发空白。\n\n返回 200 + JSON ``{\"ok\": true}``（**非 204**）：daemon hub-client ``_request``\n固定 ``JSON.parse``，204 空 body 会抛 ``SyntaxError``（Reverse Sync 由 task-01\n发现）。daemon 不上报 payload，故无 body 模型。",
+        "description": "Receive daemon session-ready report (task-06 / D-001@v1).\n\ndaemon ``_startInteractiveSession``（fresh create）与 ``restoreAndReconnect``\n（recover）create 完成后调 ``hubClient.notifySessionReady`` → 这里。鉴权后调\n:func:`get_session_readiness` 单例的 ``mark_ready``，唤醒 ``inject_session`` 中\n等待 ready event 的协程（task-08），解 /model 等 inject 偶发空白。\n\n返回 200 + JSON ``{\"ok\": true}``（**非 204**）：daemon hub-client ``_request``\n固定 ``JSON.parse``，204 空 body 会抛 ``SyntaxError``（Reverse Sync 由 task-01\n发现）。daemon 不上报 payload，故无 body 模型。\n\n越权防护（2026-08-25 P1）：mark_ready 前校验会话绑定的 runtime 归属当前\n主体（api-key owner = runtime owner），否则任意已认证主体可向他人会话\n伪造 ready 信号；不匹配 / 不存在一律 404，不泄露存在性。",
         "operationId": "notify_session_ready_api_daemon_sessions__session_id__ready_post",
         "parameters": [
           {
@@ -11157,7 +11157,7 @@
           "daemon"
         ],
         "summary": "Notify Plan Mode Entered",
-        "description": "Receive daemon plan-mode-entered report and forward to frontend SSE (task-02).",
+        "description": "Receive daemon plan-mode-entered report and forward to frontend SSE (task-02).\n\n越权防护（2026-08-25 P1）：发布前校验会话绑定的 runtime 归属当前主体，\n否则任意已认证主体可向 ``agent_session:{id}`` 频道发布伪造事件；不匹配 /\n不存在一律 404，不泄露存在性。",
         "operationId": "notify_plan_mode_entered_api_daemon_sessions__session_id__plan_mode_entered_post",
         "parameters": [
           {
@@ -11215,7 +11215,7 @@
           "daemon"
         ],
         "summary": "Notify Bash Status",
-        "description": "Receive daemon bash-status report and forward to frontend SSE (task-02).",
+        "description": "Receive daemon bash-status report and forward to frontend SSE (task-02).\n\n越权防护（2026-08-25 P1）：同 notify_plan_mode_entered，发布前做 runtime\n归属校验（404 不泄露存在性）。",
         "operationId": "notify_bash_status_api_daemon_sessions__session_id__bash_status_post",
         "parameters": [
           {
@@ -11273,7 +11273,7 @@
           "daemon"
         ],
         "summary": "Notify Bash Chunk",
-        "description": "Receive daemon bash-chunk report and forward to frontend SSE (task-02).\n\n经 ``publish_bash_chunk_event`` 发布，内含 100ms 节流与 8KB 单条截断。",
+        "description": "Receive daemon bash-chunk report and forward to frontend SSE (task-02).\n\n经 ``publish_bash_chunk_event`` 发布，内含 100ms 节流与 8KB 单条截断。\n\n越权防护（2026-08-25 P1）：同 notify_plan_mode_entered，发布前做 runtime\n归属校验（404 不泄露存在性）。",
         "operationId": "notify_bash_chunk_api_daemon_sessions__session_id__bash_chunk_post",
         "parameters": [
           {
@@ -11331,7 +11331,7 @@
           "daemon"
         ],
         "summary": "Notify Agent Task Status",
-        "description": "Receive daemon agent-task-status report and forward to frontend SSE (task-02).",
+        "description": "Receive daemon agent-task-status report and forward to frontend SSE (task-02).\n\n越权防护（2026-08-25 P1）：同 notify_plan_mode_entered，发布前做 runtime\n归属校验（404 不泄露存在性）。",
         "operationId": "notify_agent_task_status_api_daemon_sessions__session_id__agent_task_status_post",
         "parameters": [
           {
@@ -11967,6 +11967,26 @@
         }
       }
     },
+    "/api/daemon/sessions/events": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Stream Sessions Events",
+        "description": "Stream list-change signals for the current user's sessions (task-04).\n\n浏览器 EventSource 订阅 ``GET /api/daemon/sessions/events``，收到本人会话的\ncreated / status_changed / deleted 信号后刷新列表视图（代替轮询 GET /sessions）。\ndata 帧 JSON：``event`` / ``session_id`` / ``user_id`` / ``at``（由 task-01\n``publish_sessions_changed`` 发布，原样透传，不做 Last-Event-ID 回放——D-006\nNon-Goal）。\n\n单频道 + 服务端过滤（D-005）：所有用户共享 ``SESSIONS_CHANGED_CHANNEL`` 全局\n频道，本生成器只下发 ``user_id`` 等于当前用户的信号，他人信号静默丢弃。\n\n连接池安全（对齐 stream_session_logs）：不注入请求级 DB session；鉴权链\n（get_current_user / require_permission_any）查库完成后即 rollback 归还\nDB 连接（2026-08-25 auth_deps 修复），生成器内零 DB 访问——流存续期间\n不占用任何连接池 slot。",
+        "operationId": "stream_sessions_events_api_daemon_sessions_events_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/sessions/{session_id}": {
       "get": {
         "tags": [
@@ -12339,7 +12359,7 @@
           "daemon"
         ],
         "summary": "Stream Session Logs",
-        "description": "Stream session-level SSE aggregating every AgentRun of the session.\n\nSingle connection survives across multiple turns (run_id changes); events\ncarry ``run_id`` so the frontend can delineate turn boundaries (FR-03 /\nD-005@v1 / R-08). Closes only on ``session_ended``.\n\nOwnership is verified here (``AgentSession.user_id == user.id``) so neither\na missing nor a cross-user session reaches the Redis subscription (no\nexistence leak). A terminal-status session still enters the generator,\nwhich emits ``event: done`` internally.\n\n连接池安全：不注入请求级 session（会贯穿整个 StreamingResponse 生命周期、\n长时间占用一个连接池 slot）。归属校验改用短 session——校验后立即归还；\nStreamingResponse 生成器内部用 get_session_factory() 自建独立短 session\n做逐次查询（见 AgentService.stream_session_logs）。",
+        "description": "Stream session-level SSE aggregating every AgentRun of the session.\n\nSingle connection survives across multiple turns (run_id changes); events\ncarry ``run_id`` so the frontend can delineate turn boundaries (FR-03 /\nD-005@v1 / R-08). Closes only on ``session_ended``.\n\nOwnership is verified here (``AgentSession.user_id == user.id``) so neither\na missing nor a cross-user session reaches the Redis subscription (no\nexistence leak). A terminal-status session still enters the generator,\nwhich emits ``event: done`` internally.\n\n连接池安全：不注入请求级 session（会贯穿整个 StreamingResponse 生命周期、\n长时间占用一个连接池 slot）。归属校验改用短 session——鉴权链（get_current_user）\n查库后即 rollback 归还连接（2026-08-25 auth_deps 修复），校验后立即归还；\nStreamingResponse 生成器内部用 get_session_factory() 自建独立短 session\n做逐次查询（见 AgentService.stream_session_logs）。",
         "operationId": "stream_session_logs_api_daemon_sessions__session_id__stream_get",
         "parameters": [
           {
@@ -36420,6 +36440,12 @@
           },
           "status": {
             "type": "string",
+            "enum": [
+              "running",
+              "completed",
+              "failed",
+              "killed"
+            ],
             "title": "Status"
           },
           "error": {
@@ -36440,7 +36466,7 @@
           "status"
         ],
         "title": "LeaseSyncRequest",
-        "description": "Request body for syncing AgentRun status from daemon."
+        "description": "Request body for syncing AgentRun status from daemon.\n\n2026-08-25 会话审查 P1：``status`` 收紧为 Literal 枚举（原裸 ``str`` 任意\n字符串可落库）。取值集与 service 处理分支一一对应（running / completed /\nfailed / killed）；daemon 侧唯一上报点 task-runner.ts 心跳 cancel 检测只发\n``'killed'``，枚举全集兼容既有合法路径，非法值由 Pydantic 直接 422。"
       },
       "LeaseSyncResponse": {
         "properties": {
@@ -38476,6 +38502,62 @@
         "type": "object",
         "title": "OrganizationUpdateRequest",
         "description": "Body of ``PATCH /api/admin/organizations/{org_id}``.\n\nAll fields optional. Service validates ``parent_id`` changes for\nself-loops and descendant cycles."
+      },
+      "PageContextCreateBlock": {
+        "properties": {
+          "page_key": {
+            "type": "string",
+            "enum": [
+              "ppm_project",
+              "generic_page",
+              "workspace"
+            ],
+            "title": "Page Key"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Project Id"
+          },
+          "route_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 60,
+                "pattern": "^[a-z0-9][a-z0-9_:-]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Route Key"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "page_key"
+        ],
+        "title": "PageContextCreateBlock",
+        "description": "``SessionCreateRequest.page_context`` 内嵌块（2026-08-25-unified-floating-session / FR-5 / D-005）。\n\n悬浮会话入口的页面上下文通道：客户端只允许声明「页面类型枚举 + 键」，\n前导文本的全部数据由服务端生成（DB 回查 / 注册表 Lookup，防客户端伪造\n注入——自由文本字段一律不收）。三类：\n- ``ppm_project``：PPM 项目详情页（task-01），需 ``project_id``（服务端\n  回查 PpmProjectMaintenance 注入项目数据）；\n- ``generic_page``：通用页面（task-09），需 ``route_key``——后端\n  ``PAGE_ROUTE_LABELS`` 注册表 Lookup 出页面中文名注入；未注册 key →\n  静默不注入（枚举语义，零自由文本）；\n- ``workspace``：工作区详情页（task-10，用户实测反馈\"工作区页只注入\n  笼统标签不知道是哪个\"），需 ``workspace_id``——服务端回查 Workspace\n  注入名称/类型/路径。"
       },
       "Page_CustomerMaintenanceResp_": {
         "properties": {
@@ -49886,6 +49968,16 @@
                 "type": "null"
               }
             ]
+          },
+          "page_context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PageContextCreateBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -53420,6 +53512,13 @@
             "type": "array",
             "title": "Scope Workspace Ids"
           },
+          "scope_workspaces": {
+            "items": {
+              "$ref": "#/components/schemas/TeamWorkspaceRef"
+            },
+            "type": "array",
+            "title": "Scope Workspaces"
+          },
           "budget_usd": {
             "anyOf": [
               {
@@ -53448,7 +53547,7 @@
           "budget_usd"
         ],
         "title": "TeamMissionSummary",
-        "description": "触发/列表共用响应（design §7）。\n\n``status`` 为扩展后 derive_status 派生值（含 awaiting_input 档，会话维度\n入参）；``workers`` 仅 role != orchestrator 的分身 run（主控轮 D-009 不进）；\n``scope_workspace_ids`` 为落库冻结快照（NULL 缺省回落 [anchor]）。"
+        "description": "触发/列表共用响应（design §7）。\n\n``status`` 为扩展后 derive_status 派生值（含 awaiting_input 档，会话维度\n入参）；``workers`` 仅 role != orchestrator 的分身 run（主控轮 D-009 不进）；\n``scope_workspace_ids`` 为落库冻结快照（NULL 缺省回落 [anchor]）；\n``scope_workspaces`` 为 id+名称 enriched 视图（ql-20260825-003）。"
       },
       "TeamMissionTriggerRequest": {
         "properties": {
@@ -53589,6 +53688,31 @@
         ],
         "title": "TeamMissionWorkerSummary",
         "description": "TeamMissionSummary.workers 单项——分身 run（role != orchestrator）概要。"
+      },
+      "TeamWorkspaceRef": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "TeamWorkspaceRef",
+        "description": "TeamMissionSummary.scope_workspaces 单项——scope 工作区 id+名称。\n\nql-20260825-003：范围徽标名称化（前端只拿 id 时回落 #<id8> 原始徽标）。\nname 查无 Workspace 行时为 None（前端回落 id 徽标）。"
       },
       "TokenPair": {
         "properties": {

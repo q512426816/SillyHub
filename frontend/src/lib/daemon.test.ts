@@ -457,6 +457,41 @@ describe("subscribeAgentSessionsEvents (task-05)", () => {
     sub.close();
   });
 
+  it("F7（B6 盲窗）：onConnected 每个连接周期恰一次——首次订阅建立即触发（补快照→订阅盲窗），重连后再触发", async () => {
+    vi.useFakeTimers();
+    const onConnected = vi.fn();
+    const onEvent = vi.fn();
+    const sub = subscribeAgentSessionsEvents({ onEvent, onConnected });
+    expect(sseConns).toHaveLength(1);
+
+    // 首次订阅建立（连接 onopen）→ 恰一次 onConnected（调用方据此补拉列表）
+    sseConns[0]!.onopen?.();
+    expect(onConnected).toHaveBeenCalledTimes(1);
+    // 同周期后续信号帧不重复触发（与 onEvent 独立）
+    sseConns[0]!.onmessage?.({ data: "{}", lastEventId: "" });
+    expect(onConnected).toHaveBeenCalledTimes(1);
+    expect(onEvent).toHaveBeenCalledTimes(1);
+
+    // 断连重连后：新连接周期再触发一次 onConnected
+    sseConns[0]!.onerror?.({});
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(sseConns).toHaveLength(2);
+    sseConns[1]!.onopen?.();
+    expect(onConnected).toHaveBeenCalledTimes(2);
+    sub.close();
+  });
+
+  it("F7（B6 盲窗）：onopen 未到时首条消息先到者也触发 onConnected（先到者语义）", () => {
+    const onConnected = vi.fn();
+    const sub = subscribeAgentSessionsEvents({ onEvent: vi.fn(), onConnected });
+    sseConns[0]!.onmessage?.({ data: "{}", lastEventId: "" });
+    expect(onConnected).toHaveBeenCalledTimes(1);
+    // 随后 onopen 到达不重复
+    sseConns[0]!.onopen?.();
+    expect(onConnected).toHaveBeenCalledTimes(1);
+    sub.close();
+  });
+
   it("close() 幂等：关连接清定时器，之后 onerror 不再重连", async () => {
     vi.useFakeTimers();
     const sub = subscribeAgentSessionsEvents({ onEvent: vi.fn() });

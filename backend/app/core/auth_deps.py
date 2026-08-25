@@ -93,6 +93,15 @@ async def get_current_user(
             "该账号的登录权限已被禁用。",
             details={"user_id": str(user.id)},
         )
+    # 连接池安全（2026-08-25 SSE P0）：``session.get`` autobegin 只读事务并
+    # checkout 一条连接；SSE 路由的 get_session teardown 要等全部帧发完才执行，
+    # 不在此归还则每个流连接钉死一条 PG 连接（50 并发流即打满池）。先 expunge
+    # （分离对象保留已加载属性，避免 rollback 过期属性在 async 下触发
+    # MissingGreenlet），再 rollback 结束事务归还连接。handler 复用同一 session
+    # 时 SQLAlchemy 自动重新开事务，语义不变；session.info 的 audit_context
+    # 不受影响。
+    session.expunge(user)
+    await session.rollback()
     return user
 
 
@@ -115,6 +124,9 @@ def require_permission(permission: Permission):
                     "workspace_id": str(workspace_id),
                 },
             )
+        # 权限查询结束即归还 DB 连接（同 get_current_user 的连接池安全注释；
+        # user 已由 get_current_principal expunge，无属性过期风险）。
+        await session.rollback()
         return user
 
     return _checker
@@ -133,6 +145,8 @@ def require_permission_any(permission: Permission):
                 "无权执行此操作。",
                 details={"permission": permission.value},
             )
+        # 权限查询结束即归还 DB 连接（同上）。
+        await session.rollback()
         return user
 
     return _checker
@@ -181,4 +195,8 @@ async def get_current_principal(
     user = await ApiKeyService(session, settings=settings).authenticate(plaintext=plaintext)
     if user is None:
         raise AuthTokenInvalid("API 密钥无效、已过期或已被吊销，请检查后重试。")
+    # 同 get_current_user：先 expunge 再 rollback，鉴权完成即归还 DB 连接
+    # （SSE 场景防连接钉死，详见其注释）。
+    session.expunge(user)
+    await session.rollback()
     return user

@@ -786,6 +786,20 @@ export const SegmentView = memo(function SegmentView({ segment }: SegmentViewPro
       return <SubagentBlockView segment={segment} />;
     case "stderr":
       return <StderrRowView segment={segment} />;
+    case "preamble":
+      // 2026-08-25-unified-floating-session task-11（FR-7）：上下文前导卡——
+      // 「全部（进度）」视图显示首轮注入的【变更/页面上下文】【团队任务简报】
+      // 来源（对话视图保持干净，不渲染本段——时间线仅 all 视图纳入 preamble）。
+      return (
+        <div className="flex w-full max-w-[86%] flex-col gap-1 self-start">
+          <span className="select-none pl-0.5 text-[11px] text-muted-foreground">
+            上下文注入（创建轮，仅 AI 可见）
+          </span>
+          <div className="whitespace-pre-wrap rounded-lg border border-dashed border-brand-300 bg-brand-50/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
+            {segment.text}
+          </div>
+        </div>
+      );
     case "file":
       // task-08（FR-01 / D-001@v1）：文件段 → FileMessageCard（图片缩略图 / 通用
       // 卡两形态，antd 仅经其间接使用）；本层只加「agent 上传了文件」标注行

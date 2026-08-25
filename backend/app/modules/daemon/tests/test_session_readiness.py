@@ -139,6 +139,7 @@ class TestSessionReadinessUnit:
     """SessionReadiness 四方法单元（直接 new 实例，不经单例，零污染）。"""
 
     async def test_mark_ready_adds_to_set_and_sets_event(self) -> None:
+        """mark 写 set + Event set；P2 修复后 set 完成即 pop 键（dict 有界）。"""
         readiness = SessionReadiness()
         sid = uuid.uuid4()
         assert sid not in readiness._ready
@@ -146,19 +147,20 @@ class TestSessionReadinessUnit:
         readiness.mark_ready(sid)
 
         assert sid in readiness._ready
-        event = readiness._events.get(sid)
-        assert event is not None
-        assert event.is_set()
+        # 已 mark 的 session：event set 后键即弃（等待者持引用不受影响，
+        # 后续 wait 走 _ready 快速路径）——2026-08-25 P2 无界增长修复。
+        assert sid not in readiness._events
+        assert await readiness.wait(sid, timeout=0.05) is True
 
     async def test_mark_ready_is_idempotent(self) -> None:
-        """重复 mark 同一 session 不报错（set.add / event.set 幂等）。"""
+        """重复 mark 同一 session 不报错（set.add / event.set / pop 幂等）。"""
         readiness = SessionReadiness()
         sid = uuid.uuid4()
         readiness.mark_ready(sid)
         readiness.mark_ready(sid)  # second mark must not raise
 
         assert sid in readiness._ready
-        assert readiness._events[sid].is_set()
+        assert sid not in readiness._events
 
     async def test_wait_already_ready_returns_true_immediately(self) -> None:
         """已 ready（sid ∈ _ready）立即返 True，零开销不进 wait_for。"""
@@ -180,20 +182,30 @@ class TestSessionReadinessUnit:
         assert result is False
 
     async def test_clear_removes_from_set_and_resets_event(self) -> None:
-        """clear 后 set 无该 id；用新 Event 替换（非 event.clear），下次 wait 须重新等。"""
+        """clear 后 set 无该 id 且键被 pop（非换新 Event 占槽），下次 wait 须重新等。"""
         readiness = SessionReadiness()
         sid = uuid.uuid4()
         readiness.mark_ready(sid)
         assert sid in readiness._ready
-        old_event = readiness._events[sid]
 
         readiness.clear(sid)
 
         assert sid not in readiness._ready
-        new_event = readiness._events[sid]
-        # 新 Event 对象（旧已 set，复用会立即返 True 与语义不符）—— design clear 注释。
-        assert new_event is not old_event
-        assert not new_event.is_set()
+        # P2 修复（2026-08-25）：clear 直接 pop 键（原实现换新 Event 占槽，
+        # dict 随会话数无界增长）；语义不变——下次 wait 建全新未 set 的 event。
+        assert sid not in readiness._events
+
+    async def test_events_dict_stays_bounded_after_mark_and_clear(self) -> None:
+        """P2 无界增长回归：多个 session mark / clear 循环后 _events 不残留键。"""
+        readiness = SessionReadiness()
+        for _ in range(5):
+            sid = uuid.uuid4()
+            readiness.mark_ready(sid)
+            assert await readiness.wait(sid, timeout=0.05) is True
+            readiness.clear(sid)
+
+        assert readiness._events == {}
+        assert readiness._ready == set()
 
     async def test_wait_after_clear_requires_remark(self) -> None:
         """clear 后 wait 不再立即返 True（需下一次 mark_ready 才能 set 返 True）。"""
@@ -347,22 +359,89 @@ class TestInjectTimeoutFallback:
 
 
 class TestNotifySessionReadyEndpoint:
-    """POST /sessions/{id}/ready：daemon auth + mark_ready + 返 200 ``{"ok": True}``。"""
+    """POST /sessions/{id}/ready：daemon auth + mark_ready + 返 200 ``{"ok": True}``。
+
+    2026-08-25 P1 越权修复：mark_ready 前经
+    ``SessionService.get_session_for_runtime_owner`` 校验会话绑定的 runtime
+    归属当前主体（api-key owner = runtime owner），非 owner / 不存在一律 404。
+    """
+
+    async def _admin_id(self, db_session: AsyncSession) -> uuid.UUID:
+        from sqlalchemy import select
+
+        from app.modules.auth.model import User
+
+        admin = (
+            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+            .scalars()
+            .first()
+        )
+        assert admin is not None
+        return admin.id
+
+    async def _seed_session(
+        self, db_session: AsyncSession, *, user_id: uuid.UUID, runtime: DaemonRuntime
+    ) -> AgentSession:
+        session = AgentSession(
+            id=uuid.uuid4(),
+            user_id=user_id,
+            runtime_id=runtime.id,
+            provider="claude",
+            status="active",
+        )
+        db_session.add(session)
+        await db_session.commit()
+        return session
 
     async def test_post_ready_200_marks_ready(
         self,
         client: AsyncClient,
         auth_headers: dict[str, str],
+        db_session: AsyncSession,
         fresh_readiness: SessionReadiness,
     ) -> None:
-        sid = uuid.uuid4()
+        uid = await self._admin_id(db_session)
+        rt = await _create_runtime(db_session, uid)
+        owned = await self._seed_session(db_session, user_id=uid, runtime=rt)
+        sid = owned.id
         resp = await client.post(f"/api/daemon/sessions/{sid}/ready", headers=auth_headers)
 
         assert resp.status_code == 200, resp.text
         assert resp.json() == {"ok": True}
-        # mark_ready 被调用 → readiness set 含 sid（唤醒等 ready 的 inject 协程）。
+        # mark_ready 被调用 → readiness set 含 sid（唤醒等 ready 的 inject 协程；
+        # event set 后键即 pop，2026-08-25 P2 有界化，不再断言 _events 槽位）。
         assert sid in fresh_readiness._ready
-        assert fresh_readiness._events[sid].is_set()
+
+    async def test_post_ready_non_runtime_owner_404(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        fresh_readiness: SessionReadiness,
+    ) -> None:
+        """admin（非 runtime owner）向他人会话上报 ready → 404，不 mark_ready。"""
+        other_uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, other_uid)
+        foreign = await self._seed_session(db_session, user_id=other_uid, runtime=rt)
+
+        resp = await client.post(f"/api/daemon/sessions/{foreign.id}/ready", headers=auth_headers)
+
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["code"] == "HTTP_404_DAEMON_SESSION_NOT_FOUND"
+        assert foreign.id not in fresh_readiness._ready
+
+    async def test_post_ready_unknown_session_404(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        fresh_readiness: SessionReadiness,
+    ) -> None:
+        """会话不存在 → 404（与跨 owner 同码，不泄露存在性）。"""
+        sid = uuid.uuid4()
+        resp = await client.post(f"/api/daemon/sessions/{sid}/ready", headers=auth_headers)
+
+        assert resp.status_code == 404, resp.text
+        assert sid not in fresh_readiness._ready
 
     async def test_post_ready_no_auth_returns_401(
         self,
@@ -483,13 +562,16 @@ class TestConfirmReconnectedMarkReady:
         )
         db_session.add_all([lease, active_session])
         await db_session.commit()
+        active_session_id = active_session.id
 
         svc = DaemonService(db_session)
-        result_status = await svc.confirm_session_reconnected(active_session.id, runtime_id=rt.id)
+        result_status = await svc.confirm_session_reconnected(active_session_id, runtime_id=rt.id)
 
         assert result_status == "active"
-        # 已 active → 不进 reconnecting 翻转分支 → 不调 mark_ready。
-        assert active_session.id not in fresh_readiness._ready
+        # 已 active → 不进 reconnecting 翻转分支 → 不调 mark_ready。（id 预取：
+        # confirm 幂等早退现在 rollback 释放行锁，rollback 过期 ORM 属性后再
+        # 访问会触发异步 lazy load 报错。）
+        assert active_session_id not in fresh_readiness._ready
 
     async def test_confirm_reconnected_runtime_mismatch_rejected(
         self,
@@ -501,12 +583,14 @@ class TestConfirmReconnectedMarkReady:
         uid = await _create_user(db_session)
         rt = await _create_runtime(db_session, uid)
         session, _lease = await _make_reconnecting_session(db_session, user_id=uid, runtime=rt)
+        session_id = session.id
 
         svc = DaemonService(db_session)
         result_status = await svc.confirm_session_reconnected(
-            session.id,
+            session_id,
             runtime_id=uuid.uuid4(),  # mismatched
         )
 
         assert result_status == "rejected"
-        assert session.id not in fresh_readiness._ready
+        # （id 预取：rejected 早退 rollback 过期 ORM 属性，见上。）
+        assert session_id not in fresh_readiness._ready

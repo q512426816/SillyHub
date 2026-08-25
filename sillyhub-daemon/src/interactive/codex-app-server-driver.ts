@@ -617,7 +617,13 @@ export class CodexAppServerDriver implements InteractiveDriver {
       if (finalized || turnReported) return;
       turnReported = true;
       h.currentTurnId = null;
-      void onResult(r);
+      // ql-20260825-f3#6：fire-and-forget 上报补 .catch——回调 reject 若无人接会成
+      // unhandled rejection（cli.ts 有全局兜底但会打 FATAL），记 error 日志即可。
+      // Promise.resolve 包裹：回调签名允许同步 void，统一成 Promise 再挂 catch。
+      Promise.resolve(onResult(r)).catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.error('[codex-app-server-driver] onTurnResult callback failed', err);
+      });
     };
 
     /** consume 终态收敛（进程异常退出 / consume 抛错）：上报 error result 后停整个循环。 */
@@ -628,7 +634,11 @@ export class CodexAppServerDriver implements InteractiveDriver {
       finalized = true;
       turnReported = true;
       h.currentTurnId = null;
-      void onResult(r);
+      // ql-20260825-f3#6：同 reportResult，补 .catch 防 unhandled rejection。
+      Promise.resolve(onResult(r)).catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.error('[codex-app-server-driver] onTurnResult callback failed', err);
+      });
     };
 
     // ── stderr 累积上报（边界 9，限流）──────────────────────────────────────
@@ -1104,6 +1114,26 @@ export class CodexAppServerDriver implements InteractiveDriver {
   }
 
   /**
+   * ql-20260825-f3#4：server request 应答后的统一收口清理。
+   *
+   * 原 `_maybeRespondServerRequest` 只往 `h.pendingServerRequests` push，应答路径
+   * （respond 闭包 / fail-closed / 未知 method）只删 `adapter.pendingMap` → handle
+   * 数组只增不减，长会话（每次 approval/elicitation 各一条）内存泄漏。所有写完
+   * JSON-RPC response 的出口都必须经本方法：adapter.pendingMap 删（TaskRunner
+   * 消费接口语义不变）+ handle 数组按 id 摘除（pending 语义 = 已登记未应答）。
+   */
+  private _markServerRequestResponded(
+    h: CodexHandle,
+    id: number | string,
+  ): void {
+    h.adapter.markResponded(id);
+    const idx = h.pendingServerRequests.findIndex((p) => p.id === id);
+    if (idx >= 0) {
+      h.pendingServerRequests.splice(idx, 1);
+    }
+  }
+
+  /**
    * task-05 §dispatch fail-closed 兜底：handler 抛异常（未被内层 try 包住）时，
    * 按 method 写对应拒绝 response，避免 app-server 收不到 response 卡死 turn。
    *   - commandExecution/fileChange → { decision: 'decline' }；
@@ -1150,7 +1180,8 @@ export class CodexAppServerDriver implements InteractiveDriver {
       const response: CodexJsonRpcResponse = { jsonrpc: '2.0', id, result };
       await this._writeLine(h, JSON.stringify(response));
     }
-    h.adapter.markResponded(id);
+    // ql-20260825-f3#4：应答后同步摘除 handle.pendingServerRequests 条目。
+    this._markServerRequestResponded(h, id);
   }
 
   /**
@@ -1176,7 +1207,8 @@ export class CodexAppServerDriver implements InteractiveDriver {
         result,
       };
       await this._writeLine(h, JSON.stringify(response));
-      h.adapter.markResponded(req.id);
+      // ql-20260825-f3#4：应答后同步摘除 handle.pendingServerRequests 条目。
+      this._markServerRequestResponded(h, req.id);
     };
 
     switch (req.method) {
@@ -1209,7 +1241,8 @@ export class CodexAppServerDriver implements InteractiveDriver {
           error: { code: -32601, message: `method not found: ${req.method}` },
         };
         await this._writeLine(h, JSON.stringify(errorResp));
-        h.adapter.markResponded(req.id);
+        // ql-20260825-f3#4：应答后同步摘除 handle.pendingServerRequests 条目。
+        this._markServerRequestResponded(h, req.id);
         log({
           event_type: 'error',
           content: `unhandled codex server request: ${req.method}`,

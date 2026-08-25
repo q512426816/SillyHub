@@ -33,7 +33,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.modules.agent.delegation import GLMConfig
-from app.modules.agent.model import AgentArtifact, AgentMission, AgentRun, AgentSession
+from app.modules.agent.model import (
+    ACTIVE_RUN_STATUSES,
+    AgentArtifact,
+    AgentMission,
+    AgentRun,
+    AgentSession,
+)
 from app.modules.daemon.host_fs import HostFsDelegate, new_host_fs_delegate
 from app.modules.workspace.model import Workspace
 from app.modules.workspace.service import resolve_root_path_for_daemon
@@ -561,17 +567,19 @@ class FinalizerService:
 
 
 async def _session_has_active_turn(db: AsyncSession, session_id: uuid.UUID) -> bool:
-    """会话当前是否有活跃 turn（run pending/running/interrupting）。
+    """会话当前是否有活跃 turn（ACTIVE_RUN_STATUSES 词表单源）。
 
     状态集合与 daemon/router._session_has_active_turn 同口径（task-02 契约的
     ``session_active_turn`` 入参来源）；finalizer 不能 import daemon.router
-    （循环依赖），此处同语义内联。
+    （循环依赖），2026-08-25 二审 #3 起改为共享 ``agent.model.ACTIVE_RUN_STATUSES``
+    常量（pending/running/pending_approval——修复审批中漏判；interrupting 为
+    前端展示态，backend 不落库，已剔除）。
     """
     stmt = (
         select(AgentRun.id)
         .where(
             AgentRun.agent_session_id == session_id,
-            AgentRun.status.in_(("pending", "running", "interrupting")),
+            AgentRun.status.in_(list(ACTIVE_RUN_STATUSES)),
         )
         .limit(1)
     )

@@ -495,9 +495,31 @@ export class ClaudeSdkDriver implements InteractiveDriver {
     try {
       for await (const msg of q) {
         if (msg !== null && typeof msg === 'object' && (msg as { type?: string }).type === 'result') {
-          await cb.onResult(msg as SDKResultMessage);
+          // ql-20260825-f3#6：业务回调异常隔离——原实现 await 回调 reject 会中断
+          // for-await 迭代进下方 catch → onError → fail() → 整会话终止 + 杀进程
+          //（单条消息的业务处理 bug 误伤整个会话与其背后子进程）。每次回调调用
+          // 独立 try/catch：记 error 日志后继续迭代；迭代器本身的错误仍走 onError。
+          try {
+            await cb.onResult(msg as SDKResultMessage);
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error(
+              '[claude-sdk-driver] onResult callback failed (iteration continues)',
+              (msg as { subtype?: string }).subtype,
+              err,
+            );
+          }
         } else if (cb.onMessage) {
-          await cb.onMessage(msg);
+          try {
+            await cb.onMessage(msg);
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error(
+              '[claude-sdk-driver] onMessage callback failed (iteration continues)',
+              (msg as { type?: string }).type,
+              err,
+            );
+          }
         }
       }
     } catch (err) {

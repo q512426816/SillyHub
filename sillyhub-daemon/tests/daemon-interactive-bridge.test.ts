@@ -569,3 +569,70 @@ describe('Wave2 task-04 gap-1 daemon 桥接 onTurnResult/onTurnMessage/onSession
     );
   });
 });
+
+// ── ql-20260825-f3#8：_interactiveFlatSeq 终态清理（原只增不减）─────────────────
+
+describe('ql-20260825-f3#8：_interactiveFlatSeq 终态按 session 回收', () => {
+  let daemons: Daemon[] = [];
+
+  afterEach(async () => {
+    for (const d of daemons) {
+      if (d.isRunning) {
+        await d.stop().catch(() => undefined);
+      }
+    }
+    daemons = [];
+  });
+
+  /** 白盒读取 flatSeq / owner 两个 Map。 */
+  function readSeqMaps(
+    daemon: Daemon,
+  ): {
+    seq: Map<string, number>;
+    owner: Map<string, string>;
+  } {
+    const d = daemon as unknown as {
+      _interactiveFlatSeq: Map<string, number>;
+      _interactiveFlatSeqOwner: Map<string, string>;
+    };
+    return { seq: d._interactiveFlatSeq, owner: d._interactiveFlatSeqOwner };
+  }
+
+  it('onTurnMessage 计数按 runId 递增；onSessionEnd 回收该 session 全部 run 条目', async () => {
+    const { daemon } = buildDaemon();
+    daemons.push(daemon);
+    const msg = { type: 'assistant', message: { role: 'assistant' } } as unknown as SDKMessage;
+
+    // sess-1 两个 run 各转发消息（run-1 两条、run-2 一条）+ sess-2 一个 run。
+    await daemon.onTurnMessage('sess-1', 'run-1', msg);
+    await daemon.onTurnMessage('sess-1', 'run-1', msg);
+    await daemon.onTurnMessage('sess-1', 'run-2', msg);
+    await daemon.onTurnMessage('sess-2', 'run-x', msg);
+
+    const { seq, owner } = readSeqMaps(daemon);
+    expect(seq.get('run-1')).toBe(2);
+    expect(seq.get('run-2')).toBe(1);
+    expect(seq.get('run-x')).toBe(1);
+    expect(owner.get('run-1')).toBe('sess-1');
+    expect(owner.get('run-x')).toBe('sess-2');
+
+    // sess-1 终态 → 其全部 run 条目回收；sess-2 的条目不受影响。
+    await daemon.onSessionEnd('sess-1', 'ended');
+    expect(seq.has('run-1')).toBe(false);
+    expect(seq.has('run-2')).toBe(false);
+    expect(owner.has('run-1')).toBe(false);
+    expect(seq.get('run-x')).toBe(1);
+    expect(owner.get('run-x')).toBe('sess-2');
+  });
+
+  it('onSessionEnd 幂等：重复终态不抛、无残留', async () => {
+    const { daemon } = buildDaemon();
+    daemons.push(daemon);
+    const msg = { type: 'assistant', message: { role: 'assistant' } } as unknown as SDKMessage;
+    await daemon.onTurnMessage('sess-1', 'run-1', msg);
+    await daemon.onSessionEnd('sess-1', 'ended');
+    await expect(daemon.onSessionEnd('sess-1', 'failed')).resolves.toBeUndefined();
+    const { seq } = readSeqMaps(daemon);
+    expect(seq.size).toBe(0);
+  });
+});

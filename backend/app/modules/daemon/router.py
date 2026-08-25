@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import re
@@ -274,6 +275,12 @@ _SESSION_SSE_HEADERS = {
     "Connection": "keep-alive",
     "X-Accel-Buffering": "no",
 }
+
+# /sessions/events keepalive 间隔（2026-08-25 P2 饥饿防护）：无论是否收到消息，
+# 超过该秒数未向客户端产出任何帧即补一条 ``: keepalive`` 注释帧。取 25s——
+# 早于 get_message 的 30s 轮询超时与常见代理的 60s 空闲断连线。模块级常量
+# 便于测试置 0 模拟「静默即 keepalive」。
+SESSIONS_EVENTS_KEEPALIVE_INTERVAL_SEC = 25.0
 
 router = APIRouter(prefix="/daemon", tags=["daemon"])
 
@@ -1407,6 +1414,7 @@ async def mark_session_recovery_failed(
 @router.post("/sessions/{session_id}/ready")
 async def notify_session_ready(
     session_id: uuid.UUID,
+    session: SessionDep,
     user: Annotated[User, Depends(get_current_principal)],
 ) -> dict[str, bool]:
     """Receive daemon session-ready report (task-06 / D-001@v1).
@@ -1419,7 +1427,12 @@ async def notify_session_ready(
     返回 200 + JSON ``{"ok": true}``（**非 204**）：daemon hub-client ``_request``
     固定 ``JSON.parse``，204 空 body 会抛 ``SyntaxError``（Reverse Sync 由 task-01
     发现）。daemon 不上报 payload，故无 body 模型。
+
+    越权防护（2026-08-25 P1）：mark_ready 前校验会话绑定的 runtime 归属当前
+    主体（api-key owner = runtime owner），否则任意已认证主体可向他人会话
+    伪造 ready 信号；不匹配 / 不存在一律 404，不泄露存在性。
     """
+    await SessionService(session).get_session_for_runtime_owner(session_id, user.id)
     get_session_readiness().mark_ready(session_id)
     log.info("daemon.session_ready_reported", session_id=str(session_id))
     return {"ok": True}
@@ -1463,14 +1476,21 @@ async def handle_plan_response(
 async def notify_plan_mode_entered(
     session_id: uuid.UUID,
     data: PlanModeEnteredEvent,
+    session: SessionDep,
     user: Annotated[User, Depends(get_current_principal)],
 ) -> dict[str, bool]:
-    """Receive daemon plan-mode-entered report and forward to frontend SSE (task-02)."""
+    """Receive daemon plan-mode-entered report and forward to frontend SSE (task-02).
+
+    越权防护（2026-08-25 P1）：发布前校验会话绑定的 runtime 归属当前主体，
+    否则任意已认证主体可向 ``agent_session:{id}`` 频道发布伪造事件；不匹配 /
+    不存在一律 404，不泄露存在性。
+    """
     if data.session_id != session_id:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="路径 session_id 与请求体 session_id 不一致",
         )
+    await SessionService(session).get_session_for_runtime_owner(session_id, user.id)
     await publish_session_event(session_id, data)
     return {"ok": True}
 
@@ -1482,14 +1502,20 @@ async def notify_plan_mode_entered(
 async def notify_bash_status(
     session_id: uuid.UUID,
     data: BashStatusEvent,
+    session: SessionDep,
     user: Annotated[User, Depends(get_current_principal)],
 ) -> dict[str, bool]:
-    """Receive daemon bash-status report and forward to frontend SSE (task-02)."""
+    """Receive daemon bash-status report and forward to frontend SSE (task-02).
+
+    越权防护（2026-08-25 P1）：同 notify_plan_mode_entered，发布前做 runtime
+    归属校验（404 不泄露存在性）。
+    """
     if data.session_id != session_id:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="路径 session_id 与请求体 session_id 不一致",
         )
+    await SessionService(session).get_session_for_runtime_owner(session_id, user.id)
     await publish_session_event(session_id, data)
     return {"ok": True}
 
@@ -1501,17 +1527,22 @@ async def notify_bash_status(
 async def notify_bash_chunk(
     session_id: uuid.UUID,
     data: BashChunkEvent,
+    session: SessionDep,
     user: Annotated[User, Depends(get_current_principal)],
 ) -> dict[str, bool]:
     """Receive daemon bash-chunk report and forward to frontend SSE (task-02).
 
     经 ``publish_bash_chunk_event`` 发布，内含 100ms 节流与 8KB 单条截断。
+
+    越权防护（2026-08-25 P1）：同 notify_plan_mode_entered，发布前做 runtime
+    归属校验（404 不泄露存在性）。
     """
     if data.session_id != session_id:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="路径 session_id 与请求体 session_id 不一致",
         )
+    await SessionService(session).get_session_for_runtime_owner(session_id, user.id)
     published = await publish_bash_chunk_event(data)
     return {"ok": True, "throttled": not published}
 
@@ -1523,14 +1554,20 @@ async def notify_bash_chunk(
 async def notify_agent_task_status(
     session_id: uuid.UUID,
     data: AgentTaskStatusEvent,
+    session: SessionDep,
     user: Annotated[User, Depends(get_current_principal)],
 ) -> dict[str, bool]:
-    """Receive daemon agent-task-status report and forward to frontend SSE (task-02)."""
+    """Receive daemon agent-task-status report and forward to frontend SSE (task-02).
+
+    越权防护（2026-08-25 P1）：同 notify_plan_mode_entered，发布前做 runtime
+    归属校验（404 不泄露存在性）。
+    """
     if data.session_id != session_id:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="路径 session_id 与请求体 session_id 不一致",
         )
+    await SessionService(session).get_session_for_runtime_owner(session_id, user.id)
     await publish_session_event(session_id, data)
     return {"ok": True}
 
@@ -2091,8 +2128,10 @@ async def stream_sessions_events(
     单频道 + 服务端过滤（D-005）：所有用户共享 ``SESSIONS_CHANGED_CHANNEL`` 全局
     频道，本生成器只下发 ``user_id`` 等于当前用户的信号，他人信号静默丢弃。
 
-    连接池安全（对齐 stream_session_logs）：不注入请求级 DB session，生成器内
-    零 DB 访问——订阅期间不占用任何连接池 slot。
+    连接池安全（对齐 stream_session_logs）：不注入请求级 DB session；鉴权链
+    （get_current_user / require_permission_any）查库完成后即 rollback 归还
+    DB 连接（2026-08-25 auth_deps 修复），生成器内零 DB 访问——流存续期间
+    不占用任何连接池 slot。
     """
     return StreamingResponse(
         _stream_sessions_events(str(user.id)),
@@ -2132,7 +2171,9 @@ async def get_session_detail(
         if lease_row is not None and lease_row[0] is not None:
             read.terminating_at = lease_row[0]
     # 查当前运行 run（attach 恢复 currentRunId，启用打断按钮；无运行 run 则 null）
-    from app.modules.agent.model import AgentRun
+    # P2（2026-08-25 二审 #3）：词表单源 agent.model.ACTIVE_RUN_STATUSES——修复
+    # pending_approval 审批中的 run 被漏判（interrupting backend 永不落库已剔除）。
+    from app.modules.agent.model import ACTIVE_RUN_STATUSES, AgentRun
 
     current_run = (
         (
@@ -2140,7 +2181,7 @@ async def get_session_detail(
                 select(AgentRun)
                 .where(
                     AgentRun.agent_session_id == session_id,
-                    AgentRun.status.in_(["pending", "running", "interrupting"]),
+                    AgentRun.status.in_(list(ACTIVE_RUN_STATUSES)),
                 )
                 .order_by(AgentRun.started_at.desc())
                 .limit(1)
@@ -2170,6 +2211,8 @@ async def create_session(
     # 字段已随 design §5 移除（由档案/默认派生）。
     # task-09（2026-08-24-session-team-mission-context / FR-05/06）：预会话团队
     # 任务块透传（共享校验/预建/简报归 service，本端点仅此一处路由改动）。
+    # 2026-08-25-unified-floating-session（FR-5）：页面上下文块透传（前导构建
+    # 归 service create 路径）。
     result = await svc.create_session(
         user.id,
         provider=data.provider,
@@ -2182,6 +2225,7 @@ async def create_session(
         change_id=data.change_id,
         workspace_id=data.workspace_id,
         team_mission=data.team_mission,
+        page_context=data.page_context,
     )
     s = result.agent_session
     return SessionCreateResponse(
@@ -2419,13 +2463,21 @@ async def _stream_sessions_events(user_id: str) -> AsyncGenerator[str, None]:
     * ``: connected`` 初始注释——立即冲掉代理缓冲，让 EventSource 尽快 open；
     * ``data: {raw}`` —— 本人信号原样透传（raw 即 publish 端 json.dumps 产物，
       保证 ``event/session_id/user_id/at`` 字段与发布侧零漂移）；
-    * ``: keepalive`` —— 静默约 30s（get_message timeout 到点返回 None）发一条
-      注释帧维持连接；
-    * finally —— 客户端断开（GeneratorExit）或异常时 unsubscribe + close，
+    * ``: keepalive`` —— 静默约 30s（get_message timeout 到点返回 None）或持续
+      他人信号（跳过不产出帧）超过约 25s 无产出时，发一条注释帧维持连接；
+    * finally —— 客户端断开（GeneratorExit）或异常时 unsubscribe + aclose，
       不泄漏 Redis 订阅连接。
     """
     redis = get_redis()
     pubsub = redis.pubsub()
+    # keepalive 饥饿防护（2026-08-25 P2）：单频道广播下他人信号被静默跳过时不
+    # 产出任何帧，全局频道持续有流量（但全是他人信号）时代理可能按空闲超时
+    # 掐断连接。记录上次向客户端产出帧的时刻（含 connected），循环内无论
+    # 是否收到消息，超过 ``SESSIONS_EVENTS_KEEPALIVE_INTERVAL_SEC`` 未产出即
+    # 补一条 keepalive。
+    keepalive_interval_sec = SESSIONS_EVENTS_KEEPALIVE_INTERVAL_SEC
+    loop = asyncio.get_running_loop()
+    last_frame_at = loop.time()
     try:
         yield ": connected\n\n"
 
@@ -2433,22 +2485,40 @@ async def _stream_sessions_events(user_id: str) -> AsyncGenerator[str, None]:
 
         while True:
             msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=30.0)
+            emitted = False
             if msg and msg.get("type") == "message":
                 raw = msg.get("data")
                 try:
                     payload = json.loads(raw)
                 except (json.JSONDecodeError, TypeError):
                     payload = {}
+                # 非对象 JSON（list / str / number…）没有 user_id 可过滤，按
+                # 非本人信号跳过；防御 payload.get 的 AttributeError 炸掉整条流。
+                if not isinstance(payload, dict):
+                    payload = {}
                 # 单频道广播（D-005）：只下发属于当前用户的信号，其余静默跳过
-                # （跳过不产出帧，继续等下一条，不发 keepalive）。
+                # （跳过不产出帧，继续等下一条）。
                 if payload.get("user_id") == user_id:
                     yield f"data: {raw}\n\n"
-            else:
-                # timeout 到点无消息 → keepalive 注释帧
+                    emitted = True
+            if emitted:
+                last_frame_at = loop.time()
+            elif loop.time() - last_frame_at >= keepalive_interval_sec:
                 yield ": keepalive\n\n"
+                last_frame_at = loop.time()
     finally:
-        await pubsub.unsubscribe(SESSIONS_CHANGED_CHANNEL)
-        await pubsub.close()
+        # 两步清理各自隔离：连接已死时 unsubscribe 可能抛 ConnectionError——
+        # 吞掉并记 warning，保证随后的 aclose（归还 Redis 连接）仍然执行；
+        # close 在 redis-py 7.4 已废弃，统一用 aclose。
+        try:
+            await pubsub.unsubscribe(SESSIONS_CHANGED_CHANNEL)
+        except Exception:
+            log.warning(
+                "sessions_events_unsubscribe_failed",
+                channel=SESSIONS_CHANGED_CHANNEL,
+                exc_info=True,
+            )
+        await pubsub.aclose()
 
 
 @router.get("/sessions/{session_id}/stream")
@@ -2468,7 +2538,8 @@ async def stream_session_logs(
     which emits ``event: done`` internally.
 
     连接池安全：不注入请求级 session（会贯穿整个 StreamingResponse 生命周期、
-    长时间占用一个连接池 slot）。归属校验改用短 session——校验后立即归还；
+    长时间占用一个连接池 slot）。归属校验改用短 session——鉴权链（get_current_user）
+    查库后即 rollback 归还连接（2026-08-25 auth_deps 修复），校验后立即归还；
     StreamingResponse 生成器内部用 get_session_factory() 自建独立短 session
     做逐次查询（见 AgentService.stream_session_logs）。
     """
@@ -2583,19 +2654,24 @@ async def get_session_logs(
 
 
 async def _session_has_active_turn(session: AsyncSession, session_id: uuid.UUID) -> bool:
-    """会话当前是否有活跃 turn（run pending/running/interrupting）。
+    """会话当前是否有活跃 turn（ACTIVE_RUN_STATUSES 词表单源）。
 
     扩展后 derive_status 的 ``session_active_turn`` 入参（task-02 契约）：主控轮
     还在跑 → 会话 mission 不进 awaiting_input 档。状态集合与 get_session_detail
     的 current_run 查询同口径。
+
+    P2（2026-08-25 二审 #3）：改用 ``agent.model.ACTIVE_RUN_STATUSES`` 单源词表
+    （pending/running/pending_approval）——修复审批中的主控轮（pending_approval）
+    被漏判致 mission 误入 awaiting_input 档；interrupting 为前端展示态、backend
+    不落库，已从词表剔除。
     """
-    from app.modules.agent.model import AgentRun
+    from app.modules.agent.model import ACTIVE_RUN_STATUSES, AgentRun
 
     stmt = (
         select(AgentRun.id)
         .where(
             AgentRun.agent_session_id == session_id,
-            AgentRun.status.in_(["pending", "running", "interrupting"]),
+            AgentRun.status.in_(list(ACTIVE_RUN_STATUSES)),
         )
         .limit(1)
     )

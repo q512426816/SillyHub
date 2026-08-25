@@ -814,3 +814,98 @@ describe("streamSession 断线重连（ql-20260820-009）", () => {
     conn.close();
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* streamSession resync REST 超时（F7：TCP 挂起不卡死重连循环）       */
+/* ------------------------------------------------------------------ */
+
+describe("streamSession resync REST 超时（F7）", () => {
+  // describe 体在收集期执行（fake timers 安装前）——此刻捕获真实 setTimeout，
+  // 供 AbortSignal.timeout（原生计时，不受 fake timers 控制）路径做真实等待。
+  const realSetTimeout = globalThis.setTimeout.bind(globalThis);
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    streams.length = 0;
+    lastStream = null;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("resync 快照拉取永挂起 → 注入毫秒级超时 abort → 失败退避分支继续重连循环", async () => {
+    // /runs、/logs 永挂起（模拟 TCP 半开）：仅响应 RequestInit.signal 的 abort
+    const restCalls: Array<RequestInit | undefined> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (input: URL | RequestInfo, init?: RequestInit): Promise<Response> => {
+        const u = typeof input === "string" ? input : input.toString();
+        if (u.includes("/stream")) {
+          let controller!: ReadableStreamDefaultController<Uint8Array>;
+          const body = new ReadableStream<Uint8Array>({
+            start(c) {
+              controller = c;
+            },
+          });
+          const encoder = new TextEncoder();
+          const stream: FakeSseStream = {
+            url: u,
+            init: (init ?? {}) as RequestInit,
+            push: (text) => controller.enqueue(encoder.encode(text)),
+            close: () => controller.close(),
+          };
+          streams.push(stream);
+          lastStream = stream;
+          return Promise.resolve(
+            new Response(body, {
+              status: 200,
+              headers: { "Content-Type": "text/event-stream" },
+            }),
+          );
+        }
+        restCalls.push(init);
+        return new Promise<Response>((_resolve, reject) => {
+          const signal = init?.signal;
+          if (signal?.aborted) {
+            reject(new Error("The operation was aborted"));
+          } else if (signal) {
+            signal.addEventListener("abort", () =>
+              reject(new Error("The operation was aborted")),
+            );
+          }
+        });
+      },
+    );
+
+    const handlers: SessionStreamHandlers = {
+      onTurnStarted: vi.fn(),
+      onLog: vi.fn(),
+      onTurnCompleted: vi.fn(),
+      onSessionEnded: vi.fn(),
+      onError: vi.fn(),
+    };
+    // 测试注入 30ms 超时（生产默认 10s，经 streamSession options 覆盖）
+    const conn = streamSession("sess-1", handlers, { resyncTimeoutMs: 30 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(streams).toHaveLength(1);
+
+    // 断连 → 1s 退避 → resync 发起（/runs 挂起）
+    streams[0]!.close!();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(restCalls.length).toBe(1);
+    expect(restCalls[0]?.signal).toBeInstanceOf(AbortSignal);
+
+    // 30ms 超时为原生计时（AbortSignal.timeout）：真实等待触发 abort → resync
+    // 失败 → 退避分支。退化路径（环境无 AbortSignal.timeout，手动 AbortController
+    // 走 fake timers）由下方 advance 兜住，两路都能推进断言。
+    await new Promise<void>((r) => realSetTimeout(r, 80));
+    await vi.advanceTimersByTimeAsync(200);
+    await vi.advanceTimersByTimeAsync(0);
+    // 第二轮退避（2s 档）后重试 resync：重连循环未被卡死
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(restCalls.length).toBe(2);
+    expect(restCalls[1]?.signal).toBeInstanceOf(AbortSignal);
+
+    conn.close();
+  });
+});

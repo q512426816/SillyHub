@@ -37,7 +37,7 @@ from sqlmodel import col
 from app.core.config import get_settings
 from app.core.db import get_session_factory
 from app.core.logging import get_logger
-from app.modules.agent.model import AgentMission, AgentRun, AgentSession
+from app.modules.agent.model import ACTIVE_RUN_STATUSES, AgentMission, AgentRun, AgentSession
 from app.modules.agent.orchestrator import (
     _ORCHESTRATOR_ROLE,
     OrchestratorService,
@@ -98,18 +98,20 @@ def _zombie_marked_at(mission: AgentMission) -> datetime | None:
 
 
 async def _session_has_active_turn(db: AsyncSession, session_id: uuid.UUID) -> bool:
-    """会话当前是否有活跃 turn（run pending/running/interrupting）——task-08。
+    """会话当前是否有活跃 turn（ACTIVE_RUN_STATUSES 词表单源）——task-08。
 
     状态集合与 daemon/router._session_has_active_turn、finalizer.
     _session_has_active_turn 同口径（task-02 契约的 ``session_active_turn``
     入参来源，task-04/05 同源判定）；patrol 不能 import daemon.router
-    （循环依赖），同语义内联（finalizer 同款处理）。
+    （循环依赖），2026-08-25 二审 #3 起改为共享 ``agent.model.ACTIVE_RUN_STATUSES``
+    常量（pending/running/pending_approval——修复审批中主控轮漏判致 awaiting_input
+    超时收敛误触发；interrupting 为前端展示态，backend 不落库，已剔除）。
     """
     stmt = (
         select(AgentRun.id)
         .where(
             AgentRun.agent_session_id == session_id,
-            AgentRun.status.in_(("pending", "running", "interrupting")),
+            AgentRun.status.in_(list(ACTIVE_RUN_STATUSES)),
         )
         .limit(1)
     )
@@ -247,7 +249,7 @@ class MissionPatrolService:
         - 会话 mission（``session_id`` 指向真实 AgentSession——存量 external/team
           的随机 uuid 查无会话行，不进此档，Grill NEW-4 零回归）；
         - 未 converge 未 cancel（活跃态）；
-        - 会话无活跃 turn（pending/running/interrupting，task-02/04/05 同源口径）；
+        - 会话无活跃 turn（ACTIVE_RUN_STATUSES 词表，task-02/04/05 同源口径）；
         - 主控轮 + 分身全终态（task-02 派生态 awaiting_input 的 run 维度前提）；
         - 时钟起点=最新 ``role='orchestrator'`` run 的 ``finished_at``（锚点与
           task-06 一致），距今持续超 ``mission_patrol_awaiting_input_timeout_minutes``；

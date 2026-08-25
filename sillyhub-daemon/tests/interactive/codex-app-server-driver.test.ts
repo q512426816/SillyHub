@@ -1127,7 +1127,7 @@ describe('TDD-12：turn/completed failed → error result', () => {
 // codex-app-server-driver-approval.test.ts 覆盖。
 
 describe('TDD-13：server request fail-closed（manualApproval=true 未注入 hook → decline）', () => {
-  it('commandExecution/requestApproval → 登记 pendingServerRequests + 回写 decline + 上报 approval flat message', async () => {
+  it('commandExecution/requestApproval → 应答后摘除 pendingServerRequests + 回写 decline + 上报 approval flat message', async () => {
     const child = createFakeChild();
     vi.mocked(spawn).mockReturnValue(child as never);
 
@@ -1168,13 +1168,14 @@ describe('TDD-13：server request fail-closed（manualApproval=true 未注入 ho
       (response!.result as { decision?: string }).decision,
     ).not.toBe('accept');
 
-    // 2. 登记到 pendingServerRequests
-    expect(handle.pendingServerRequests.length).toBeGreaterThanOrEqual(1);
+    // 2. ql-20260825-f3#4：应答后 pendingServerRequests 条目同步摘除（原只 push
+    //    不删 → 长会话数组只增不减；pending 语义 = 已登记未应答）。
+    expect(handle.pendingServerRequests.length).toBe(0);
     expect(
       handle.pendingServerRequests.some(
         (p) => p.id === 10 && p.method === 'item/commandExecution/requestApproval',
       ),
-    ).toBe(true);
+    ).toBe(false);
 
     // 3. 上报 approval flat message（kind=approval）
     const approvalMsg = messages.find(

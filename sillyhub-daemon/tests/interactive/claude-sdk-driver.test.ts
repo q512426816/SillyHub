@@ -556,6 +556,90 @@ describe('ClaudeSdkDriver.consume（spike H2 两轮 / D4 result 边界）', () =
       (onResult.mock.calls[0]![0] as SDKResultMessage).subtype,
     ).toBe('error_during_execution');
   });
+
+  // ── ql-20260825-f3#6：业务回调异常隔离（不得当 query 错误杀整会话）──────────
+
+  it('onResult 回调 reject → 记日志继续迭代，后续消息照常分发，onError 不触发', async () => {
+    const sessionId = 's3';
+    const q = makeFakeQuery([
+      resultSuccess('R1', sessionId),
+      assistantText('after-failed-result'),
+      resultSuccess('R2', sessionId),
+    ]);
+    const handle = { provider: 'claude', query: q } as ClaudeDriverHandle;
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const onResult = vi.fn(async (m: SDKResultMessage) => {
+        if (m.result === 'R1') throw new Error('business bug');
+      });
+      const onMessage = vi.fn();
+      const onError = vi.fn();
+      const driver = new ClaudeSdkDriver();
+      await driver.consume(handle, { onResult, onMessage, onError });
+
+      // 修复点：回调异常只影响那一条消息——迭代继续（修复前：中断迭代进
+      // onError → SessionManager fail() → 整会话 terminated + 杀子进程）。
+      expect(onResult).toHaveBeenCalledTimes(2);
+      expect(onMessage).toHaveBeenCalledTimes(1);
+      expect(onError).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[claude-sdk-driver] onResult callback failed (iteration continues)',
+        'success',
+        expect.any(Error),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('onMessage 回调 reject → 记日志继续迭代，后续 result 照常分发', async () => {
+    const sessionId = 's4';
+    const q = makeFakeQuery([
+      assistantText('boom-msg'),
+      resultSuccess('R-after', sessionId),
+    ]);
+    const handle = { provider: 'claude', query: q } as ClaudeDriverHandle;
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const onMessage = vi.fn(async () => {
+        throw new Error('message handler bug');
+      });
+      const onResult = vi.fn();
+      const onError = vi.fn();
+      const driver = new ClaudeSdkDriver();
+      await driver.consume(handle, { onResult, onMessage, onError });
+
+      expect(onMessage).toHaveBeenCalledTimes(1);
+      expect(onResult).toHaveBeenCalledTimes(1);
+      expect(onError).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[claude-sdk-driver] onMessage callback failed (iteration continues)',
+        'assistant',
+        expect.any(Error),
+      );
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
+  it('迭代器本身抛错仍走 onError（异常隔离不吞 query 错误）', async () => {
+    const gen = (async function* (): AsyncGenerator<SDKMessage, void> {
+      yield assistantText('ok');
+      throw new Error('query died');
+    })();
+    const q = {
+      [Symbol.asyncIterator]: () => gen,
+      interrupt: vi.fn(),
+    } as unknown as Query;
+    const handle = { provider: 'claude', query: q } as ClaudeDriverHandle;
+    const onMessage = vi.fn();
+    const onError = vi.fn();
+    const driver = new ClaudeSdkDriver();
+    await driver.consume(handle, { onMessage, onError });
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect((onError.mock.calls[0]![0] as Error).message).toBe('query died');
+    expect(onMessage).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ── ClaudeSdkDriver.interrupt ─────────────────────────────────────────────────

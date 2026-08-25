@@ -11,7 +11,7 @@
 //   - 0o600 权限调用（Windows 无效但保留）。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { JsonSessionPersistence } from '../../src/interactive/session-store-persistence.js';
@@ -286,5 +286,129 @@ describe('JsonSessionPersistence.quarantine', () => {
     const p = new JsonSessionPersistence(file);
     await expect(p.quarantine('none')).resolves.toBeUndefined();
     expect(existsSync(file)).toBe(false);
+  });
+});
+
+// ── ql-20260825-f6#1：tmp 残留恢复 / 回收 ─────────────────────────────────────
+
+describe('tmp 残留恢复与回收（ql-20260825-f6#1）', () => {
+  let dir: string;
+  let file: string;
+
+  beforeEach(() => {
+    dir = mkdtempDir();
+    file = join(dir, 'sessions.json');
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** 写一个 save 同命名的 tmp 残留文件。 */
+  function writeTmp(name: string, content: string, ageMs = 0): string {
+    const p = join(dir, name);
+    writeFileSync(p, content);
+    if (ageMs > 0) {
+      const at = new Date(Date.now() - ageMs);
+      utimesSync(p, at, at);
+    }
+    return p;
+  }
+
+  it('目标缺失 + tmp 存在（合法）→ load 恢复 tmp 记录 + 落位（tmp 被回收）', async () => {
+    const rec = mkRecord();
+    const tmp = writeTmp(
+      'sessions.json.tmp-1234-1700000000000',
+      JSON.stringify({
+        version: SESSION_FILE_VERSION,
+        savedAt: '2026-08-25T00:00:00Z',
+        sessions: [rec],
+      }),
+    );
+    const p = new JsonSessionPersistence(file);
+    const records = await p.load();
+    expect(records).toEqual([rec]);
+    // 落位：目标重建为 tmp 内容，tmp 残留被 rename 消费。
+    expect(existsSync(file)).toBe(true);
+    expect(existsSync(tmp)).toBe(false);
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    expect(raw.sessions).toEqual([rec]);
+  });
+
+  it('目标为空文件 + tmp 存在 → 同样恢复（空视同缺失，不产 .corrupt 垃圾）', async () => {
+    writeFileSync(file, '');
+    const rec = mkRecord();
+    writeTmp(
+      'sessions.json.tmp-1234-1700000000000',
+      JSON.stringify({
+        version: SESSION_FILE_VERSION,
+        savedAt: 'x',
+        sessions: [rec],
+      }),
+    );
+    const p = new JsonSessionPersistence(file);
+    const records = await p.load();
+    expect(records).toEqual([rec]);
+    const dirEntries = require('node:fs').readdirSync(dir) as string[];
+    expect(dirEntries.find((e) => e.startsWith('sessions.json.corrupt-'))).toBeUndefined();
+  });
+
+  it('tmp 损坏（截断 JSON）→ 忽略不炸，load 返回 []（不 quarantine）', async () => {
+    writeTmp('sessions.json.tmp-1234-1700000000000', '{ "version": 1, "sessions": [');
+    const p = new JsonSessionPersistence(file);
+    const records = await p.load();
+    expect(records).toEqual([]);
+    // 目标未被凭空创建；损坏 tmp 留给过期清理（不在此删，防误删并发在写）。
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it('多个 tmp → 取 mtime 最新的合法者', async () => {
+    const oldTmp = writeTmp(
+      'sessions.json.tmp-1000-1700000000000',
+      JSON.stringify({
+        version: SESSION_FILE_VERSION,
+        savedAt: 'x',
+        sessions: [mkRecord({ sessionId: 'old', agentSessionId: 'sdk-old' })],
+      }),
+      // 旧 10 分钟
+      10 * 60 * 1000,
+    );
+    const newTmp = writeTmp(
+      'sessions.json.tmp-2000-1700000900000',
+      JSON.stringify({
+        version: SESSION_FILE_VERSION,
+        savedAt: 'x',
+        sessions: [mkRecord({ sessionId: 'new', agentSessionId: 'sdk-new' })],
+      }),
+    );
+    const p = new JsonSessionPersistence(file);
+    const records = await p.load();
+    expect(records[0]?.sessionId).toBe('new');
+    // 新 tmp 被落位消费；旧 tmp 保留（恢复只消费选中的那个）。
+    expect(existsSync(newTmp)).toBe(false);
+    expect(existsSync(oldTmp)).toBe(true);
+  });
+
+  it('目标正常 + 过期 tmp（>1h）→ save 成功后 tmp 被清理', async () => {
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: SESSION_FILE_VERSION,
+        savedAt: 'x',
+        sessions: [mkRecord()],
+      }),
+    );
+    const staleTmp = writeTmp('sessions.json.tmp-999-1', 'anything', 2 * 60 * 60 * 1000);
+    expect(existsSync(staleTmp)).toBe(true);
+    const p = new JsonSessionPersistence(file);
+    await p.save([mkRecord()]);
+    expect(existsSync(staleTmp)).toBe(false);
+    expect(existsSync(file)).toBe(true);
+  });
+
+  it('新鲜 tmp（<1h）不被 save 清理（防误删并发在写）', async () => {
+    const freshTmp = writeTmp('sessions.json.tmp-999-2', 'in-flight');
+    const p = new JsonSessionPersistence(file);
+    await p.save([mkRecord()]);
+    expect(existsSync(freshTmp)).toBe(true);
   });
 });

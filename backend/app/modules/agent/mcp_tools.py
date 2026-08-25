@@ -54,6 +54,7 @@ from app.core.db import get_session
 from app.core.logging import get_logger
 from app.modules.agent.execution import MissionExecutionService, mark_worker_run_failed
 from app.modules.agent.model import (
+    ACTIVE_RUN_STATUSES,
     AgentArtifact,
     AgentMission,
     AgentRun,
@@ -92,11 +93,14 @@ _SESSION_ID_HEADER = "x-session-id"
 
 # 会话活跃 run 判定口径（与 daemon/router._session_has_active_turn、session/service
 # task-04 inject 同源）：懒建成功后按此取会话当前活跃 run 补回填主控轮双标记。
-_ACTIVE_RUN_STATUSES = ("pending", "running", "interrupting")
+# P2（2026-08-25 二审 #3）：单源 ``agent.model.ACTIVE_RUN_STATUSES``
+# （pending/running/pending_approval——审批中的 run 仍是当前活跃轮，可被回填/
+# 被 converge 定位；interrupting 为前端展示态，backend 不落库，已剔除）。
+_ACTIVE_RUN_STATUSES = ACTIVE_RUN_STATUSES
 
 # task-06（D-010）：converge busy 判定的分身 run 终态集合——与 derive_status 的
 # _DONE|_FAILED（mission.py）及 finalizer cleanup_mission 的终态过滤同口径
-# （pending/running/interrupting 均视为未终态）。
+# （ACTIVE_RUN_STATUSES 词表内均视为未终态；interrupting 为前端展示态不落库）。
 _TERMINAL_RUN_STATUSES = ("completed", "failed", "killed")
 
 # 懒建默认预算上限（design §5 Phase 1 / §10 R-02：防 agent 未被要求时自主派团队
@@ -308,7 +312,7 @@ async def _backfill_orchestrator_run(
 ) -> bool:
     """懒建成功后补回填会话当前活跃 run 的主控轮双标记（Grill NEW-1 / D-009）。
 
-    与 task-04 inject 双标记同语义：把会话当前活跃（pending/running/interrupting）
+    与 task-04 inject 双标记同语义：把会话当前活跃（ACTIVE_RUN_STATUSES 词表）
     run 回填 ``mission_id + role='orchestrator'``，保证懒建 mission 也有主控轮锚点
     （task-06 converge/_get_main_run、task-08 patrol 消费）。仅回填 ``mission_id``
     仍为 NULL 的最新一条活跃 run（已标记/分身 run 不动）；无活跃 run（如 dispatch

@@ -619,6 +619,9 @@ function segmentTsOf(seg: TurnSegment): number | null {
       return seg.startedAt;
     case "stderr":
       return seg.ts;
+    // 2026-08-25-unified-floating-session task-11：前导段取捕获时刻。
+    case "preamble":
+      return seg.ts;
     case "subagent_stub":
       return null;
     // task-08（agent-file-upload-mcp）：file 段渲染走 SegmentView（文件卡片），
@@ -1102,10 +1105,10 @@ function TurnStatusBadge({
       {showTokens && (
         <span className="ml-1.5 text-muted-foreground/80">
           {" · "}
-          {inTokens !== null ? `↑${inTokens.toLocaleString()}` : "↑0"}
+          {inTokens !== null ? `↑${inTokens.toLocaleString("zh-CN")}` : "↑0"}
           {" "}
           {outTokens !== null
-            ? `↓${outTokens.toLocaleString()}`
+            ? `↓${outTokens.toLocaleString("zh-CN")}`
             : isLive
               ? "↓执行中…"
               : "↓0"}

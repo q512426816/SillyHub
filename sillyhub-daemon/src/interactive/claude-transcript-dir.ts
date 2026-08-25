@@ -23,8 +23,7 @@
  * 所有 fs 访问吞错（权限 / 目录不存在 → 按 unknown 处理），探测绝不阻断 resume。
  */
 
-import { readdir } from 'node:fs/promises';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { copyFile, mkdir, readdir, rm, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { CLAUDE_CONFIG_DIR } from '../config.js';
@@ -52,6 +51,19 @@ export function defaultTranscriptDirs(): TranscriptDirs {
  * 字符时直接 unknown（不探测），杜绝 join 出越界路径。
  */
 const SAFE_SESSION_ID = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * ql-20260825-f3#5：异步存在性探测（替代 existsSync）。reload/restore 是热路径，
+ * 同步 fs 会让整个 daemon 事件循环停摆（所有会话的心跳/节流 flush 全卡）。
+ */
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await stat(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * projects 根目录下是否存在目标 transcript（扫一层子目录，免复刻 claude 的
@@ -127,20 +139,21 @@ export async function applyTranscriptConfigDir(
  * 绝对路径，未命中/IO 异常返回 null。
  *
  * encoded-cwd 编码规则非公开契约，故线性扫 projects 一层子目录（子目录数 =
- * 历史 cwd 数，个位数；existsSync 开销可忽略）。同步版供迁移路径使用（迁移
- * 本身是同步 fs，混入 async 探测会让调用链无谓拉长）。
+ * 历史 cwd 数，个位数；stat 开销可忽略）。ql-20260825-f3#5：改异步（原同步
+ * existsSync/readdirSync 在 reload/restore 热路径阻塞事件循环，与迁移函数
+ * 一并异步化——调用链 restoreAndReconnect/_reloadSession 本就 async）。
  */
-export function findClaudeTranscriptPath(
+export async function findClaudeTranscriptPath(
   configDir: string,
   agentSessionId: string,
-): string | null {
+): Promise<string | null> {
   if (!SAFE_SESSION_ID.test(agentSessionId)) return null;
   try {
     const projects = join(configDir, 'projects');
-    if (!existsSync(projects)) return null;
-    for (const entry of readdirSync(projects)) {
+    if (!(await pathExists(projects))) return null;
+    for (const entry of await readdir(projects)) {
       const p = join(projects, entry, `${agentSessionId}.jsonl`);
-      if (existsSync(p)) return p;
+      if (await pathExists(p)) return p;
     }
     return null;
   } catch {
@@ -172,14 +185,17 @@ export function findClaudeTranscriptPath(
  *   false=无需迁移或复制失败（权限/磁盘等 → 调用方降级 home resume：会话
  *   可用但供应商 env 可能被本机 settings.json 污染，R-01 降级语义，绝不因
  *   迁移失败破坏会话）。
+ *
+ * ql-20260825-f3#5：改异步（node:fs/promises）——同步 copyFileSync 复制数十 MB
+ * jsonl 期间整个 daemon 事件循环停摆（所有会话的心跳/节流 flush 全卡）。
  */
-export function migrateClaudeTranscriptToIsolated(
+export async function migrateClaudeTranscriptToIsolated(
   agentSessionId: string,
   dirs: TranscriptDirs = defaultTranscriptDirs(),
-): boolean {
+): Promise<boolean> {
   if (!SAFE_SESSION_ID.test(agentSessionId)) return false;
-  if (findClaudeTranscriptPath(dirs.isolated, agentSessionId)) return false;
-  const src = findClaudeTranscriptPath(dirs.home, agentSessionId);
+  if (await findClaudeTranscriptPath(dirs.isolated, agentSessionId)) return false;
+  const src = await findClaudeTranscriptPath(dirs.home, agentSessionId);
   if (!src) return false;
   try {
     const dst = join(
@@ -188,8 +204,8 @@ export function migrateClaudeTranscriptToIsolated(
       basename(dirname(src)),
       `${agentSessionId}.jsonl`,
     );
-    mkdirSync(dirname(dst), { recursive: true });
-    copyFileSync(src, dst);
+    await mkdir(dirname(dst), { recursive: true });
+    await copyFile(src, dst);
     return true;
   } catch {
     // 复制失败（权限/磁盘等）→ 降级 home resume（调用方据 false 处理）。
@@ -220,13 +236,15 @@ export function migrateClaudeTranscriptToIsolated(
  * @returns true=迁移成功且 isolated 原件已删（applyTranscriptConfigDir 将命中
  *   home）；false=无需迁移或失败（复制/删除失败 → 调用方降级 isolated resume：
  *   会话可用但读不到本机 settings.json，R-01 降级语义，绝不因迁移失败破坏会话）。
+ *
+ * ql-20260825-f3#5：改异步（node:fs/promises，与正向迁移同步异步化）。
  */
-export function migrateClaudeTranscriptToHost(
+export async function migrateClaudeTranscriptToHost(
   agentSessionId: string,
   dirs: TranscriptDirs = defaultTranscriptDirs(),
-): boolean {
+): Promise<boolean> {
   if (!SAFE_SESSION_ID.test(agentSessionId)) return false;
-  const src = findClaudeTranscriptPath(dirs.isolated, agentSessionId);
+  const src = await findClaudeTranscriptPath(dirs.isolated, agentSessionId);
   if (!src) return false;
   try {
     const dst = join(
@@ -235,9 +253,9 @@ export function migrateClaudeTranscriptToHost(
       basename(dirname(src)),
       `${agentSessionId}.jsonl`,
     );
-    mkdirSync(dirname(dst), { recursive: true });
-    copyFileSync(src, dst);
-    rmSync(src);
+    await mkdir(dirname(dst), { recursive: true });
+    await copyFile(src, dst);
+    await rm(src);
     return true;
   } catch {
     // 复制或删除失败（权限/磁盘等）→ 降级 isolated resume（调用方据 false 处理；

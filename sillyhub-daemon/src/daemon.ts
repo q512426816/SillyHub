@@ -769,10 +769,13 @@ export class Daemon {
    *     runId 维度，flatSeq 在 run 内单调递增即保证唯一。
    *   - 确定性：同一 run 同一条消息（相同调用顺序）始终拿到相同 flatSeq，重发命中去重。
    *   - 生命周期：跟随 session 存在（量级 = session 内 message 数，可控）；runId 全局
-   *     唯一不与其它 run 撞。不在此处加终态清理（避免扩散到 onSessionEnd 改动），task-09
-   *     范围限定 dedup_key 确定性，内存由后续 GC 任务兜底。
+   *     唯一不与其它 run 撞。ql-20260825-f3#8：终态清理已落地——onTurnMessage 记录
+   *     runId→sessionId 归属（_interactiveFlatSeqOwner），onSessionEnd 反查删除该
+   *     session 的全部条目（原注释「后续 GC 任务兜底」兑现），Map 不再只增不减。
    */
   private readonly _interactiveFlatSeq = new Map<string, number>();
+  /** ql-20260825-f3#8：runId → sessionId 归属（onSessionEnd 反查清理 flatSeq 条目用）。 */
+  private readonly _interactiveFlatSeqOwner = new Map<string, string>();
   /**
    * task-06（D-003@v1 tar 模式）：interactive lease.id → spec 同步上下文。
    * _startInteractiveSession tar 模式 pull 时 set(leaseId, {workspaceId})；
@@ -1756,6 +1759,9 @@ export class Daemon {
       // 已保证唯一；同一条消息重发拿到相同 flatSeq → 相同 dedup_key → 命中去重。
       const flatSeq = this._interactiveFlatSeq.get(runId) ?? 0;
       this._interactiveFlatSeq.set(runId, flatSeq + 1);
+      // ql-20260825-f3#8：记录 runId→sessionId 归属，onSessionEnd 据此反查清理
+      //（flatSeq 条目不再只增不减；同 session 多 run 各记一条，幂等覆盖）。
+      this._interactiveFlatSeqOwner.set(runId, sessionId);
       if (this._resilience) {
         const envelope: Envelope = {
           message: fwdMsg,
@@ -1864,6 +1870,16 @@ export class Daemon {
       }
     } catch {
       // state 查不到（sessionManager 已 dispose 等极端情况）——忽略。
+    }
+
+    // ql-20260825-f3#8：清理本 session 的 per-run flatSeq 计数条目（原只增不减）。
+    // flatSeq 以 runId 为 key，onTurnMessage 时已记 runId→sessionId 归属，此处反查
+    // 一次性回收该 session 全部 run 的条目（Map 迭代中 delete 当前项安全，ES 规范）。
+    for (const [rid, ownerSessionId] of this._interactiveFlatSeqOwner) {
+      if (ownerSessionId === sessionId) {
+        this._interactiveFlatSeqOwner.delete(rid);
+        this._interactiveFlatSeq.delete(rid);
+      }
     }
   }
 

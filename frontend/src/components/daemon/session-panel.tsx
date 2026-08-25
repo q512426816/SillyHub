@@ -67,7 +67,9 @@ import { buildErrorLogItem } from "@/components/agent-log/normalize";
 import {
   applyLogToSegments,
   createEmptyAssembledTurn,
+  extractPreambleText,
   finishTurn,
+  transferAssemblerInternals,
   type AssembledTurn,
   type AssemblerLogInput,
   type TurnSegment,
@@ -157,6 +159,15 @@ export interface SessionPreContext {
   changeId?: string | null;
   /** 目标 runtime id（首句 createSession 的 runtime_id）。 */
   runtimeId: string;
+  /**
+   * 悬浮入口页面上下文（2026-08-25-unified-floating-session task-06 / FR-5 /
+   * D-006）：可选，缺省零回归；有值时随首句 createSession 上送 page_context
+   * （后端服务端白名单回查注入【页面上下文】前导）。门户三入口不传。
+   */
+  pageContext?:
+    | { page_key: "ppm_project"; project_id: string }
+    | { page_key: "generic_page"; route_key: string }
+    | { page_key: "workspace"; workspace_id: string };
 }
 
 /**
@@ -357,10 +368,22 @@ function teamTriggerErrorText(err: unknown): string {
  */
 function useSessionTeamMissions(sessionId: string | null) {
   const [missions, setMissions] = useState<TeamMissionSummary[]>([]);
+  // F7（2026-08-25）：异步回写守卫——refresh 同时被 effect（挂载/切会话/轮询）与
+  // 外部回调（dialog 派团队后手动刷新）调用，effect 作用域 cancelled 覆盖不全，
+  // 用 hook 级 aliveRef 等价守卫：卸载后迟到的列表响应不再 setState。
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
   const refresh = useCallback(async () => {
     if (!sessionId) return;
     try {
-      setMissions(await listSessionTeamMissions(sessionId));
+      const items = await listSessionTeamMissions(sessionId);
+      if (!aliveRef.current) return;
+      setMissions(items);
     } catch {
       /* 列表拉取失败不阻断 */
     }
@@ -560,14 +583,9 @@ function SessionPanelPage({
     requestedAt: string;
   } | null>(null);
   // task-09：bash 命令进度状态（running 期间追加 chunks，completed/failed 后冻结）。
-  const [bashProgress, setBashProgress] = useState<{
-    runId: string;
-    command: string;
-    status: "running" | "completed" | "failed";
-    exitCode?: number | null;
-    elapsedMs?: number | null;
-    chunks: BashChunkItem[];
-  } | null>(null);
+  // 2026-08-25：状态归约统一走底部 applyBashStatusEvent / appendBashChunk（跨命令
+  // 重置 + 环形截断，page / dialog 两模式共用）。
+  const [bashProgress, setBashProgress] = useState<BashProgressState | null>(null);
   // verify P1 返工（FR-03）：后台 Agent 任务状态（按 task_id upsert，保留终态供
   // 回看；最多展示最近 6 条防长会话刷屏，会话结束清空）。
   const [agentTasks, setAgentTasks] = useState<
@@ -651,14 +669,18 @@ function SessionPanelPage({
   // ── SSE 建流 + 历史预取（sessionId 驱动，切换会话即重建）────────────────
   // gap-fix（FR-07/FR-08）：runs 快照拉取失败不阻断——whoLine 不注入、历史
   // usage 走实时 SSE 路径，与 logs 预取同一容错语义。
-  const refreshRunsMeta = useCallback((id: string) => {
-    void listSessionRuns(id)
-      .then((runs) => {
-        setRunsMeta(new Map(runs.map((r) => [r.id, r])));
-      })
-      .catch(() => {
-        /* 快照拉取失败不阻断主流程 */
-      });
+  // F7（2026-08-25）：refreshRunsMeta 定义移入下方建流 effect（唯一调用点在
+  // effect 内的 onTurnCompleted 回调）——共用既有 cancelled 标志，会话切换/
+  // 卸载后迟到的 runs 快照不再 setRunsMeta（旧会话 whoLine 数据覆盖新会话 +
+  // 卸载后 setState 卫生，React 18 no-op 但按既有 cancelled 模式收口）。
+  // F7：渲染作用域异步回调（onSwitched）的卸载守卫——effect 作用域 cancelled
+  // 覆盖不到 JSX 回调，用组件级 mountedRef 等价守卫。
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -717,6 +739,19 @@ function SessionPanelPage({
         /* 快照拉取失败不阻断 SSE */
       });
 
+    // F7：runs 快照刷新（onTurnCompleted 调用）——共用本 effect 的 cancelled
+    // 标志（语义同上：迟到快照丢弃，不写新会话 / 不卸载后 setState）。
+    const refreshRunsMeta = (id: string) => {
+      void listSessionRuns(id)
+        .then((runs) => {
+          if (cancelled) return;
+          setRunsMeta(new Map(runs.map((r) => [r.id, r])));
+        })
+        .catch(() => {
+          /* 快照拉取失败不阻断主流程 */
+        });
+    };
+
     streamRef.current = streamSession(sessionId, {
       onTurnStarted: (env) => {
         setTurnState((prev) =>
@@ -736,7 +771,39 @@ function SessionPanelPage({
         // user_input 是用户消息（attach 历史/占位 turn 已作 prompt），不进 output
         // （装配器内同语义双保险）。task-09（FR-05）：其余日志归一喂共享装配器，
         // 分类 / override 撤回 / tool 配对 / 子代理归属一律依赖装配器导出。
-        if (env.channel === "user_input") return;
+        if (env.channel === "user_input") {
+          // 2026-08-25-unified-floating-session task-11（FR-7）：daemon 回传的
+          // 首条 user_input 含完整 dispatch_prompt——提取前导为 preamble 段
+          // （对话视图不渲染，「全部」视图显示注入来源）。
+          const preambleText = extractPreambleText(env.content ?? "");
+          if (preambleText && env.run_id) {
+            setTurnState((prev) =>
+              upsertTurn(
+                prev,
+                env,
+                (turn) =>
+                  turn.segments?.some((s) => s.kind === "preamble")
+                    ? turn
+                    : {
+                        ...turn,
+                        segments: [
+                          {
+                            kind: "preamble",
+                            id: `preamble:${env.run_id}`,
+                            text: preambleText,
+                            ts: env.timestamp
+                              ? Date.parse(env.timestamp)
+                              : Date.now(),
+                          },
+                          ...(turn.segments ?? []),
+                        ],
+                      },
+                { setCurrentRun: env.run_id! },
+              ),
+            );
+          }
+          return;
+        }
         setTurnState((prev) =>
           upsertTurn(
             prev,
@@ -834,7 +901,8 @@ function SessionPanelPage({
         onSessionListRefresh?.();
       },
       onError: () => {
-        // 不伪造终态；浏览器携 Last-Event-ID 自动重连。
+        // 不伪造终态；fetch-sse 迁移后无浏览器自动重连，断线由 streamSession
+        // 内建指数退避 + resync 增量回放重建连接（onError 仅记录，见 lib/daemon.ts）。
       },
       onPermissionRequest: (req) => {
         if (!req.dialog_kind) return;
@@ -860,41 +928,21 @@ function SessionPanelPage({
           };
         });
       },
-      // task-09：bash 命令状态/输出 → BashProgressCard。
+      // task-09：bash 命令状态/输出 → BashProgressCard（归约统一走底部 helper：
+      // 新命令重置 chunks，防同 run 上一条命令的输出/is_final 污染）。
       onBashStatus: (event) => {
-        setBashProgress((prev) => {
-          if (prev && prev.runId !== event.run_id) {
-            // 不同 runId：覆盖为新的 bash 任务（单卡片语义）。
-            return {
-              runId: event.run_id,
-              command: event.command,
-              status: event.status,
-              exitCode: event.exit_code,
-              elapsedMs: event.elapsed_ms,
-              chunks: prev?.runId === event.run_id ? prev.chunks : [],
-            };
-          }
-          return {
-            runId: event.run_id,
-            command: event.command,
-            status: event.status,
-            exitCode: event.exit_code,
-            elapsedMs: event.elapsed_ms,
-            chunks: prev?.runId === event.run_id ? prev.chunks : [],
-          };
-        });
+        setBashProgress((prev) => applyBashStatusEvent(prev, event));
       },
       onBashChunk: (event) => {
-        setBashProgress((prev) => {
-          if (!prev || prev.runId !== event.run_id) return prev;
-          return {
-            ...prev,
-            chunks: [
-              ...prev.chunks,
-              { channel: event.channel, content: event.content, is_final: event.is_final },
-            ],
-          };
-        });
+        setBashProgress((prev) =>
+          !prev || prev.runId !== event.run_id
+            ? prev
+            : appendBashChunk(prev, {
+                channel: event.channel,
+                content: event.content,
+                is_final: event.is_final,
+              }),
+        );
       },
       // verify P1 返工（FR-03）：后台 Agent 任务状态 → AgentTaskCard（按 task_id upsert）。
       onAgentTaskStatus: (event) => {
@@ -1435,6 +1483,11 @@ function SessionPanelPage({
           // task-13（FR-05/D-009@v2）：弹层确认暂存的团队 payload 随首句上送
           //（有值才带；后端 create 路径预建 mission，objective 空时以首句回填）。
           ...(preTeamMission ? { team_mission: preTeamMission } : {}),
+          // 2026-08-25-unified-floating-session task-06（FR-5/D-006）：悬浮入口
+          // 页面上下文随首句上送（有值才带；后端服务端回查注入前导，缺省零回归）。
+          ...(preContext.pageContext
+            ? { page_context: preContext.pageContext }
+            : {}),
         });
         // R-02：成功才清空（失败路径输入保留在 catch 之外，可原地重试——
         // 暂存 team payload 同语义：失败保留，重试仍携带）。
@@ -2267,11 +2320,17 @@ function SessionPanelPage({
             engine={session.provider ?? null}
             onSwitched={() => {
               // 切换成功 → 刷新会话详情（三列快照）+ 左侧列表 chips + runsMeta
-              // （立即显示新 whoLine，不等重进页面）。
+              // （立即显示新 whoLine，不等重进页面）。F7：mountedRef 守卫——
+              // 渲染作用域回调等不到 effect 的 cancelled，卸载后迟到快照不再
+              // setState。
               void qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
               onSessionListRefresh?.();
               void listSessionRuns(sessionId)
-                .then((runs) => setRunsMeta(new Map(runs.map((r) => [r.id, r]))))
+                .then((runs) => {
+                  if (mountedRef.current) {
+                    setRunsMeta(new Map(runs.map((r) => [r.id, r])));
+                  }
+                })
                 .catch(() => {});
             }}
           />
@@ -2345,7 +2404,7 @@ function toAssemblerLogInput(env: SessionStreamEnvelope): AssemblerLogInput {
  * 正常路径（本面板占位 turn / logsToTurns 历史 turn）segments 均有值，不触发。
  */
 function assembledViewOf(turn: SessionTurnView): AssembledTurn {
-  return {
+  const view: AssembledTurn = {
     segments:
       turn.segments ?? bootstrapLegacySegments(turn.output, turn.processItems ?? []),
     output: turn.output,
@@ -2353,6 +2412,10 @@ function assembledViewOf(turn: SessionTurnView): AssembledTurn {
     turnStartedAt: turn.turnStartedAt ?? null,
     seenLogIds: turn.seenLogIds,
   };
+  // F7：视图与 turn 的 segments 同源（segments 有值时同引用），转移装配器增量
+  // 内部状态（投影 cell / 段 id 索引），保持 O(1) 增量链跨视图不断链。
+  transferAssemblerInternals(view, turn as AssembledTurn);
+  return view;
 }
 
 /**
@@ -2478,14 +2541,9 @@ function SessionPanelDialog(props: SessionPanelProps) {
     requestedAt: string;
   } | null>(null);
   // task-09：bash 命令进度状态（running 期间追加 chunks，completed/failed 后冻结）。
-  const [bashProgress, setBashProgress] = useState<{
-    runId: string;
-    command: string;
-    status: "running" | "completed" | "failed";
-    exitCode?: number | null;
-    elapsedMs?: number | null;
-    chunks: BashChunkItem[];
-  } | null>(null);
+  // 2026-08-25：状态归约统一走底部 applyBashStatusEvent / appendBashChunk（跨命令
+  // 重置 + 环形截断，page / dialog 两模式共用）。
+  const [bashProgress, setBashProgress] = useState<BashProgressState | null>(null);
   // verify P1 返工（FR-03）：后台 Agent 任务状态（按 task_id upsert，最近 6 条）。
   const [agentTasks, setAgentTasks] = useState<
     {
@@ -2504,6 +2562,22 @@ function SessionPanelDialog(props: SessionPanelProps) {
   // 不传 viewMode 受控对（diff-analysis §5.1），内部自持。
   const [viewMode, setViewMode] = useState<"conversation" | "all">("conversation");
   const streamConnRef = useRef<SessionStreamConnection | null>(null);
+  // P0 竞态修复（2026-08-25）：unmount cleanup 先置 disposed 再 close 当前连接——
+  // establishStream 的 prefetch await 窗口内卸载时（cleanup 已跑、streamConnRef 仍
+  // null），await 返回后据此放弃建流，防无人 close 的僵尸连接（streamSession 内建
+  // 退避以 30s 封顶永久重连）。remount（StrictMode 双挂载/复用实例）时由下次
+  // establishStream 入口重置为 false。
+  const disposedRef = useRef(false);
+  // 建流代际：attach 切换 / 重挂载发起更新建流时推进；旧 in-flight await 返回后
+  // 据此自查退出（不同 session 的并发建流不共享，见 establishingRef 注释）。
+  const streamEpochRef = useRef(0);
+  // in-flight 建流（同 sessionId 并发调用复用同一 promise）：入口的
+  // `if (streamConnRef.current) return` 守卫在 prefetch await 窗口失效，防两次
+  // 并发调用建双连接。不同 sessionId / 已卸载的 in-flight 不复用——前者由代际
+  // 推进让其自查退出，后者废弃。
+  const establishingRef = useRef<{ sessionId: string; promise: Promise<void> } | null>(
+    null,
+  );
   // attach 模式轮询句柄（unmount / 转出 attach 模式时清理）。
   const attachPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // 已拉取过 error_detail 的 failed run_id 集合，防 SSE 重连重发 turn_completed
@@ -2518,217 +2592,227 @@ function SessionPanelDialog(props: SessionPanelProps) {
   }, [providers, provider, defaultProvider]);
 
   // SSE 连接由 sessionId 驱动：createSession 成功后建立唯一 SSE，贯穿整个会话。
-  const establishStream = useCallback(async (sessionId: string) => {
+  const establishStream = useCallback(async (sessionId: string): Promise<void> => {
     // 防御：已有连接不重建（inject 不重建 EventSource）。
     if (streamConnRef.current) return;
-    // prefetch 先回灌历史（防 SSE 订阅前 daemon publish 丢事件）。必须 await 先
-    // 于 SSE 建连：否则 SSE 收到 turn_started 建空 turn 后 prev.turns 非空，
-    // prefetch 条件（prev.turns 空）不满足 → 不回灌 → output 空白。
-    try {
-      const logs = await getAgentSessionLogs(sessionId);
-      if (logs.length > 0) {
-        const turns = logsToTurns(logs);
-        if (turns.length > 0) {
-          setView((prev) =>
-            prev.turns.length > 0 ? prev : { ...prev, sessionId, turns },
-          );
-        }
-      }
-    } catch {
-      /* prefetch 失败不阻断 SSE */
+    // 并发防御（P0 竞态修复）：本守卫在下方 prefetch await 窗口失效——同
+    // sessionId 的并发调用复用 in-flight promise（防双连接 + 双 prefetch）；已
+    // 卸载（disposed，StrictMode 重挂载场景）或不同 sessionId 的 in-flight 不复用。
+    const inFlight = establishingRef.current;
+    if (inFlight && !disposedRef.current && inFlight.sessionId === sessionId) {
+      return inFlight.promise;
     }
-    streamConnRef.current = streamSession(
-      sessionId,
-      {
-        onTurnStarted: (env) => {
-          setView((prev) => upsertDialogTurn(prev, env, (turn) => ({
-            ...turn,
-            turn: env.turn ?? turn.turn,
-            // pending → running（首 turn 从 createSession 占位转正）；
-            // 已终态保持终态，不被 SSE 重连重发覆盖。
-            status: turn.status === "pending" ? "running" : turn.status,
-          }), { setCurrentRun: env.run_id! }));
-        },
-        onLog: (env) => {
-          // channel=user_input 是用户消息（attach 时 initialTurns 已作 prompt），
-          // 不追加到 agent output，避免 prompt 气泡与 output 气泡重复。
-          if (env.channel === "user_input") return;
-          setView((prev) => {
-            // 日志内容处理走共享装配器（归一 + 增量回写）。无内容变化（重复
-            // log_id / 分类丢弃 / override 无匹配段）时装配器原引用返回 → turn
-            // 原样（引用相等短路，R1——segments 缺省的旧形状 turn 不被切到 v2
-            // 渲染路径）。
-            return upsertDialogTurn(prev, env, (turn) => {
-              const assembled = assembledViewOf(turn);
-              const next = applyLogToSegments(assembled, toAssemblerLogInput(env));
-              if (next === assembled) return turn;
-              return { ...turn, ...next };
-            }, {});
-          });
-        },
-        onTurnCompleted: (env) => {
-          const terminal = deriveTurnTerminalStatus(env);
-          setView((prev) => upsertDialogTurn(prev, env, (turn) => {
-            // 终态清全部 text/thinking 段的 streaming 标记（finishTurn）——流式
-            // 光标与轮级状态条随之收起。segments 缺省的旧形状 turn 无 streaming
-            // 标记，不经装配器（保持旧渲染路径，R1 吸收 ISP 防御）。
-            const finished =
-              turn.segments !== undefined ? finishTurn(assembledViewOf(turn)) : null;
-            return {
-              ...turn,
-              ...(finished ?? {}),
-              // turn_completed 收敛到 deriveTurnTerminalStatus 推导的真实终态
-              // （completed/failed/killed），无论 prior 是 running 还是 interrupting。
-              status: terminal,
-              // 终态 token 同步写入（null 不覆盖执行中已收到的累积值）。
-              inputTokens: env.input_tokens ?? turn.inputTokens,
-              outputTokens: env.output_tokens ?? turn.outputTokens,
-            };
-          }, { clearCurrentRun: env.run_id! }));
-
-          // turn 终态=failed 时拉取该 run 的结构化错误详情（AgentRun.error_detail，
-          // GET /sessions/{id}/runs），buildErrorLogItem 安全映射写入对应 turn 供
-          // RunErrorItem 渲染。同 run_id 只拉一次（fetchedErrorRunIdsRef 去重）；
-          // 拉取失败 / error_detail 缺失 → 静默不崩，失败 turn 仍有状态徽标。
-          if (
-            terminal === "failed" &&
-            env.run_id &&
-            !fetchedErrorRunIdsRef.current.has(env.run_id)
-          ) {
-            const failedRunId = env.run_id;
-            fetchedErrorRunIdsRef.current.add(failedRunId);
-            void (async () => {
-              try {
-                const runs = await listSessionRuns(sessionId);
-                const matched = runs.find((r) => r.id === failedRunId);
-                const item = buildErrorLogItem(matched?.error_detail ?? null);
-                if (!item) return;
-                setView((prev) => ({
-                  ...prev,
-                  turns: prev.turns.map((t) =>
-                    t.runId === failedRunId && !t.errorDetail
-                      ? { ...t, errorDetail: item }
-                      : t,
-                  ),
-                }));
-              } catch {
-                // 拉取失败不阻塞：失败 turn 仍有状态徽标 + 通用 errorMsg
-              }
-            })();
+    // 新建流：重置卸载标志（remount 后可重建）+ 推进代际（旧 in-flight 自查退出）。
+    disposedRef.current = false;
+    const epoch = ++streamEpochRef.current;
+    const promise: Promise<void> = (async () => {
+      // prefetch 先回灌历史（防 SSE 订阅前 daemon publish 丢事件）。必须 await 先
+      // 于 SSE 建连：否则 SSE 收到 turn_started 建空 turn 后 prev.turns 非空，
+      // prefetch 条件（prev.turns 空）不满足 → 不回灌 → output 空白。
+      try {
+        const logs = await getAgentSessionLogs(sessionId);
+        if (logs.length > 0) {
+          const turns = logsToTurns(logs);
+          if (turns.length > 0) {
+            setView((prev) =>
+              prev.turns.length > 0 ? prev : { ...prev, sessionId, turns },
+            );
           }
-          // R7：dialog 模式不刷新 runsMeta（whoLine / 孤儿 turn 派生链不启用，
-          // turns 原样喂 TurnTimeline——ISP 现状）。
-        },
-        onTokens: (env) => {
-          // 执行中实时累积 token：按 run_id upsert 到对应 turn，UI 立刻刷新计数。
-          setView((prev) => upsertDialogTurn(prev, env, (turn) => ({
-            ...turn,
-            inputTokens: env.input_tokens ?? turn.inputTokens,
-            outputTokens: env.output_tokens ?? turn.outputTokens,
-          }), {}));
-        },
-        onSessionEnded: () => {
-          // 收口 ended + 清终止中态（streamSession 内部已 close）；清待答卡片。
-          // R9：dialog 侧无 react-query invalidate / onSessionListRefresh——
-          // 状态同步由 view 自身承载，父级经 onSessionReset 链路自理。
-          setView((prev) => ({
-            ...prev,
-            status: "ended",
-            currentRunId: null,
-            terminatingAt: null,
-          }));
-          setPendingRequests([]);
-          setPlanPending(null);
-          setBashProgress(null);
-          setAgentTasks([]);
-          streamConnRef.current = null;
-        },
-        onError: () => {
-          // 不伪造 session/run 终态；浏览器携 Last-Event-ID 自动重连。
-        },
-        // permission 事件：收卡只按 dialog_kind 存在性（不区分具体 kind 值，天然
-        // 支持 Claude ask_user / Codex codex_request_user_input / mcp_elicitation，
-        // 三者 payload 经 daemon 归一化后同构）。按 request_id 去重；普通工具审批
-        // （无 dialog_kind）交给 /runtimes 审批面板。
-        onPermissionRequest: (req) => {
-          if (!req.dialog_kind) return;
-          setPendingRequests((prev) =>
-            prev.some((r) => r.request_id === req.request_id)
-              ? prev
-              : [...prev, req],
-          );
-        },
-        onPermissionResolved: (resolved) => {
-          setPendingRequests((prev) =>
-            prev.filter((r) => r.request_id !== resolved.request_id),
-          );
-        },
-        // task-09：plan 模式进入 → 展示 PlanApprovalCard（按 runId 去重）。
-        onPlanModeEntered: (event) => {
-          setPlanPending((prev) => {
-            if (prev && prev.runId === event.run_id) return prev;
-            return {
-              runId: event.run_id,
-              summary: event.summary,
-              requestedAt: event.requested_at,
-            };
-          });
-        },
-        // task-09：bash 命令状态/输出 → BashProgressCard。
+        }
+      } catch {
+        /* prefetch 失败不阻断 SSE */
+      }
+        // await 窗口竞态自查：已卸载（cleanup 先跑过，streamConnRef 当时还是
+        // null 未 close 到）/ 已有连接（并发先建）/ 代际已推进（attach 切换或
+        // 重挂载发起更新建流）→ 放弃建流，不产生无人 close 的僵尸连接。
+        if (disposedRef.current || streamConnRef.current) return;
+        if (streamEpochRef.current !== epoch) return;
+        streamConnRef.current = streamSession(
+          sessionId,
+          {
+            onTurnStarted: (env) => {
+              setView((prev) => upsertDialogTurn(prev, env, (turn) => ({
+                ...turn,
+                turn: env.turn ?? turn.turn,
+                // pending → running（首 turn 从 createSession 占位转正）；
+                // 已终态保持终态，不被 SSE 重连重发覆盖。
+                status: turn.status === "pending" ? "running" : turn.status,
+              }), { setCurrentRun: env.run_id! }));
+            },
+            onLog: (env) => {
+              // channel=user_input 是用户消息（attach 时 initialTurns 已作 prompt），
+              // 不追加到 agent output，避免 prompt 气泡与 output 气泡重复。
+              if (env.channel === "user_input") return;
+              setView((prev) => {
+                // 日志内容处理走共享装配器（归一 + 增量回写）。无内容变化（重复
+                // log_id / 分类丢弃 / override 无匹配段）时装配器原引用返回 → turn
+                // 原样（引用相等短路，R1——segments 缺省的旧形状 turn 不被切到 v2
+                // 渲染路径）。
+                return upsertDialogTurn(prev, env, (turn) => {
+                  const assembled = assembledViewOf(turn);
+                  const next = applyLogToSegments(assembled, toAssemblerLogInput(env));
+                  if (next === assembled) return turn;
+                  return { ...turn, ...next };
+                }, {});
+              });
+            },
+            onTurnCompleted: (env) => {
+              const terminal = deriveTurnTerminalStatus(env);
+              setView((prev) => upsertDialogTurn(prev, env, (turn) => {
+                // 终态清全部 text/thinking 段的 streaming 标记（finishTurn）——流式
+                // 光标与轮级状态条随之收起。segments 缺省的旧形状 turn 无 streaming
+                // 标记，不经装配器（保持旧渲染路径，R1 吸收 ISP 防御）。
+                const finished =
+                  turn.segments !== undefined ? finishTurn(assembledViewOf(turn)) : null;
+                return {
+                  ...turn,
+                  ...(finished ?? {}),
+                  // turn_completed 收敛到 deriveTurnTerminalStatus 推导的真实终态
+                  // （completed/failed/killed），无论 prior 是 running 还是 interrupting。
+                  status: terminal,
+                  // 终态 token 同步写入（null 不覆盖执行中已收到的累积值）。
+                  inputTokens: env.input_tokens ?? turn.inputTokens,
+                  outputTokens: env.output_tokens ?? turn.outputTokens,
+                };
+              }, { clearCurrentRun: env.run_id! }));
+
+              // turn 终态=failed 时拉取该 run 的结构化错误详情（AgentRun.error_detail，
+              // GET /sessions/{id}/runs），buildErrorLogItem 安全映射写入对应 turn 供
+              // RunErrorItem 渲染。同 run_id 只拉一次（fetchedErrorRunIdsRef 去重）；
+              // 拉取失败 / error_detail 缺失 → 静默不崩，失败 turn 仍有状态徽标。
+              if (
+                terminal === "failed" &&
+                env.run_id &&
+                !fetchedErrorRunIdsRef.current.has(env.run_id)
+              ) {
+                const failedRunId = env.run_id;
+                fetchedErrorRunIdsRef.current.add(failedRunId);
+                void (async () => {
+                  try {
+                    const runs = await listSessionRuns(sessionId);
+                    const matched = runs.find((r) => r.id === failedRunId);
+                    const item = buildErrorLogItem(matched?.error_detail ?? null);
+                    if (!item) return;
+                    setView((prev) => ({
+                      ...prev,
+                      turns: prev.turns.map((t) =>
+                        t.runId === failedRunId && !t.errorDetail
+                          ? { ...t, errorDetail: item }
+                          : t,
+                      ),
+                    }));
+                  } catch {
+                    // 拉取失败不阻塞：失败 turn 仍有状态徽标 + 通用 errorMsg
+                  }
+                })();
+              }
+              // R7：dialog 模式不刷新 runsMeta（whoLine / 孤儿 turn 派生链不启用，
+              // turns 原样喂 TurnTimeline——ISP 现状）。
+            },
+            onTokens: (env) => {
+              // 执行中实时累积 token：按 run_id upsert 到对应 turn，UI 立刻刷新计数。
+              setView((prev) => upsertDialogTurn(prev, env, (turn) => ({
+                ...turn,
+                inputTokens: env.input_tokens ?? turn.inputTokens,
+                outputTokens: env.output_tokens ?? turn.outputTokens,
+              }), {}));
+            },
+            onSessionEnded: () => {
+              // 收口 ended + 清终止中态（streamSession 内部已 close）；清待答卡片。
+              // R9：dialog 侧无 react-query invalidate / onSessionListRefresh——
+              // 状态同步由 view 自身承载，父级经 onSessionReset 链路自理。
+              setView((prev) => ({
+                ...prev,
+                status: "ended",
+                currentRunId: null,
+                terminatingAt: null,
+              }));
+              setPendingRequests([]);
+              setPlanPending(null);
+              setBashProgress(null);
+              setAgentTasks([]);
+              streamConnRef.current = null;
+            },
+            onError: () => {
+              // 不伪造 session/run 终态；fetch-sse 迁移后无浏览器自动重连，断线
+              // 由 streamSession 内建指数退避 + resync 增量回放重建连接。
+            },
+            // permission 事件：收卡只按 dialog_kind 存在性（不区分具体 kind 值，天然
+            // 支持 Claude ask_user / Codex codex_request_user_input / mcp_elicitation，
+            // 三者 payload 经 daemon 归一化后同构）。按 request_id 去重；普通工具审批
+            // （无 dialog_kind）交给 /runtimes 审批面板。
+            onPermissionRequest: (req) => {
+              if (!req.dialog_kind) return;
+              setPendingRequests((prev) =>
+                prev.some((r) => r.request_id === req.request_id)
+                  ? prev
+                  : [...prev, req],
+              );
+            },
+            onPermissionResolved: (resolved) => {
+              setPendingRequests((prev) =>
+                prev.filter((r) => r.request_id !== resolved.request_id),
+              );
+            },
+            // task-09：plan 模式进入 → 展示 PlanApprovalCard（按 runId 去重）。
+            onPlanModeEntered: (event) => {
+              setPlanPending((prev) => {
+                if (prev && prev.runId === event.run_id) return prev;
+                return {
+                  runId: event.run_id,
+                  summary: event.summary,
+                  requestedAt: event.requested_at,
+                };
+              });
+            },
+        // task-09：bash 命令状态/输出 → BashProgressCard（归约统一走底部 helper：
+        // 新命令重置 chunks，防同 run 上一条命令的输出/is_final 污染）。
         onBashStatus: (event) => {
-          setBashProgress((prev) => {
-            if (prev && prev.runId !== event.run_id) {
-              // 不同 runId：覆盖为新的 bash 任务（单卡片语义）。
-              return {
-                runId: event.run_id,
-                command: event.command,
-                status: event.status,
-                exitCode: event.exit_code,
-                elapsedMs: event.elapsed_ms,
-                chunks: [],
-              };
-            }
-            return {
-              runId: event.run_id,
-              command: event.command,
-              status: event.status,
-              exitCode: event.exit_code,
-              elapsedMs: event.elapsed_ms,
-              chunks: prev?.runId === event.run_id ? prev.chunks : [],
-            };
-          });
+          setBashProgress((prev) => applyBashStatusEvent(prev, event));
         },
         onBashChunk: (event) => {
-          setBashProgress((prev) => {
-            if (!prev || prev.runId !== event.run_id) return prev;
-            return {
-              ...prev,
-              chunks: [
-                ...prev.chunks,
-                { channel: event.channel, content: event.content, is_final: event.is_final },
-              ],
-            };
-          });
+          setBashProgress((prev) =>
+            !prev || prev.runId !== event.run_id
+              ? prev
+              : appendBashChunk(prev, {
+                  channel: event.channel,
+                  content: event.content,
+                  is_final: event.is_final,
+                }),
+          );
         },
-        // verify P1 返工（FR-03）：后台 Agent 任务状态 → AgentTaskCard（按 task_id upsert）。
-        onAgentTaskStatus: (event) => {
-          setAgentTasks((prev) => {
-            const next = {
-              taskId: event.task_id,
-              taskName: event.task_name,
-              status: event.status,
-              progress: event.progress,
-              message: event.message,
-            };
-            const idx = prev.findIndex((t) => t.taskId === event.task_id);
-            if (idx === -1) return [...prev, next].slice(-6);
-            const copy = [...prev];
-            copy[idx] = next;
-            return copy;
-          });
-        },
-      },
-    );
+            // verify P1 返工（FR-03）：后台 Agent 任务状态 → AgentTaskCard（按 task_id upsert）。
+            onAgentTaskStatus: (event) => {
+              setAgentTasks((prev) => {
+                const next = {
+                  taskId: event.task_id,
+                  taskName: event.task_name,
+                  status: event.status,
+                  progress: event.progress,
+                  message: event.message,
+                };
+                const idx = prev.findIndex((t) => t.taskId === event.task_id);
+                if (idx === -1) return [...prev, next].slice(-6);
+                const copy = [...prev];
+                copy[idx] = next;
+                return copy;
+              });
+            },
+          },
+        );
+    })();
+    // in-flight 登记清理：promise settle 后仅当仍是本次 promise（未被后续建流
+    // 覆盖）时清空。挂在 promise 链上而非函数体内 finally——避免闭包引用自身
+    //（TS2454）；catch 吞错防未处理 rejection（effect 调用点不 await）。
+    promise
+      .finally(() => {
+        if (establishingRef.current?.promise === promise) {
+          establishingRef.current = null;
+        }
+      })
+      .catch(() => {});
+    establishingRef.current = { sessionId, promise };
+    return promise;
 
     // fetchPendingDialogs 从 establishStream 解耦为独立 effect（见下方
     // [view.sessionId] effect），避免恢复链路与建流链路绑定。
@@ -2906,6 +2990,10 @@ function SessionPanelDialog(props: SessionPanelProps) {
   // 组件生命周期，key 重挂载即全量重置）。
   useEffect(() => {
     return () => {
+      // P0 竞态修复：先置 disposed 再 close——establishStream 的 prefetch await
+      // 窗口内卸载时（此刻 streamConnRef 还是 null，close 落空），await 返回后
+      // 据此自查退出，不再新建无人 close 的僵尸连接。
+      disposedRef.current = true;
       if (attachPollRef.current) {
         clearInterval(attachPollRef.current);
         attachPollRef.current = null;
@@ -3727,13 +3815,16 @@ function upsertTurn(
  * `{ ...turn, ...next }` 回填（其余 turn 级字段不动）。
  */
 function asAssembled(turn: SessionTurnView): AssembledTurn {
-  return {
+  const view: AssembledTurn = {
     segments: turn.segments ?? [],
     output: turn.output,
     processItems: turn.processItems ?? [],
     turnStartedAt: turn.turnStartedAt ?? null,
     seenLogIds: turn.seenLogIds,
   };
+  // F7：同 assembledViewOf——转移增量内部状态，segments 有值时同源同引用。
+  transferAssemblerInternals(view, turn as AssembledTurn);
+  return view;
 }
 
 /**
@@ -3842,3 +3933,91 @@ function writePersistedViewMode(
     /* 静默容错 */
   }
 }
+
+/* ── bash 进度卡片状态归约（page / dialog 两模式共用，2026-08-25 修复）────── */
+
+/** BashProgressCard 聚合状态（bash_status + bash_chunk 事件归约产物）。 */
+export interface BashProgressState {
+  runId: string;
+  command: string;
+  status: "running" | "completed" | "failed";
+  exitCode?: number | null;
+  elapsedMs?: number | null;
+  chunks: BashChunkItem[];
+}
+
+/** chunks 环形截断上限：条数（后端 100ms/8KB 节流下 600 条已覆盖长跑输出窗口）。 */
+const BASH_CHUNKS_MAX_COUNT = 600;
+/** chunks 环形截断上限：累计 content 字节（约 256KB，防数 MB 输出常驻内存）。 */
+const BASH_CHUNKS_MAX_BYTES = 256 * 1024;
+
+/** chunk content 的 UTF-8 字节长度近似（BMP 内 1~3 字节/字符，与 TextEncoder 一致）。 */
+function bashChunkBytes(content: string): number {
+  let bytes = 0;
+  for (let i = 0; i < content.length; i++) {
+    const code = content.charCodeAt(i);
+    bytes += code <= 0x7f ? 1 : code <= 0x7ff ? 2 : 3;
+  }
+  return bytes;
+}
+
+/**
+ * bash_status 归约：按「新命令开始」判定是否重置 chunks。
+ *
+ * P1 修复：同一 run 内第二条 bash 命令（runId 不变、command 变化）不能沿用上一
+ * 条的输出 chunks——含 is_final 的旧 chunk 会让新命令 spinner 被提前终止
+ * （bash-progress-card 的 isRunning = status==="running" && 无 is_final chunk）、
+ * 输出拼接错乱。新命令判定 = runId / command 任一变化，或同命令 status 从终态
+ * 翻回 running（重跑兜底）。
+ */
+export function applyBashStatusEvent(
+  prev: BashProgressState | null,
+  event: Pick<
+    BashStatusEvent,
+    "run_id" | "command" | "status" | "exit_code" | "elapsed_ms"
+  >,
+): BashProgressState {
+  const isNewCommand =
+    !prev ||
+    prev.runId !== event.run_id ||
+    prev.command !== event.command ||
+    (prev.status !== "running" && event.status === "running");
+  return {
+    runId: event.run_id,
+    command: event.command,
+    status: event.status,
+    exitCode: event.exit_code,
+    elapsedMs: event.elapsed_ms,
+    chunks: isNewCommand ? [] : prev.chunks,
+  };
+}
+
+/**
+ * bash_chunk 归约：追加输出片段 + 环形截断。
+ *
+ * P1 修复：裸 `[...prev.chunks, chunk]` 无上限，长跑命令可数 MB 常驻内存且每次
+ * 触发全量重拼。截断策略：超条数上限先裁尾保最近 N 条；再超字节预算从头部丢弃
+ * 整条 chunk（保底留最后一条，防全空）。is_final 语义：最后一条 is_final 不丢
+ * （卡片靠它提前停 spinner；权威收敛仍由 bash_status 终态事件兜底）。
+ */
+export function appendBashChunk(
+  prev: BashProgressState,
+  chunk: BashChunkItem,
+): BashProgressState {
+  let chunks = [...prev.chunks, chunk];
+  if (chunks.length > BASH_CHUNKS_MAX_COUNT) {
+    chunks = chunks.slice(chunks.length - BASH_CHUNKS_MAX_COUNT);
+  }
+  let bytes = 0;
+  for (const c of chunks) bytes += bashChunkBytes(c.content);
+  let start = 0;
+  while (chunks.length - start > 1 && bytes > BASH_CHUNKS_MAX_BYTES) {
+    const head = chunks[start]!;
+    // 保最后一条 is_final：丢弃它会破坏「is_final 到达停 spinner」语义。
+    if (head.is_final && !chunks.slice(start + 1).some((c) => c.is_final)) break;
+    bytes -= bashChunkBytes(head.content);
+    start += 1;
+  }
+  return start > 0 ? { ...prev, chunks: chunks.slice(start) } : { ...prev, chunks };
+}
+

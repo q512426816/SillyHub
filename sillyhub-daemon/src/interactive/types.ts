@@ -508,6 +508,21 @@ export class UnsupportedProviderError extends Error {
   }
 }
 
+/**
+ * ql-20260825-f6#3：inject 附件下载超时（后端 / 网络挂起，60s 无响应）。
+ * inject 内部按「单文件失败降级标注」消费（不中断 turn）；抛出供日志 / 测试识别。
+ */
+export class SessionAttachmentTimeoutError extends Error {
+  readonly code = 'SESSION_ATTACHMENT_TIMEOUT' as const;
+  constructor(sessionId: string, attachmentId: string, timeoutMs: number) {
+    super(
+      `attachment download timed out: session=${sessionId} attachment=${attachmentId} ` +
+        `timeout=${timeoutMs}ms (SESSION_ATTACHMENT_TIMEOUT)`,
+    );
+    this.name = 'SessionAttachmentTimeoutError';
+  }
+}
+
 // ── task-09 §4.2：pending canUseTool registry handle（收敛/清理类型）─────────
 //
 // task-08 已落地 PermissionResolver（register / resolve / abortAll / pendingCount /

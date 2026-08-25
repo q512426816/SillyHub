@@ -36,6 +36,22 @@
  *
  * 不可变更新约定（FR-06 渲染经济性的数据层基础）：每次装配只克隆从根到被改段的
  * 路径（path-copy），未触及的段保持原对象引用稳定，供 task-05 段级 React.memo 依赖。
+ *
+ * F7（2026-08-25 frontend 第二轮优化）：applyLogToSegments 尾部「每条日志全量重投影
+ * （segmentsToLegacy 全树 DFS）+ 每条复制整个 seenLogIds Set + 每新段全树收集 id」
+ * 在流式 partial 逐条到达时累计 O(n²)。改为增量维护，导出 API 与产出值零变化：
+ *   - 兼容投影（output / processItems）仍是每次返回的急切 plain 字段（消费方
+ *     spread / 解构零改动——session-panel 有 16+ 处 `{...turn}` 展开，getter 方案
+ *     会被 displayTurns 每 render 强制求值，故弃用）；内部以 symbol 键 enumerable
+ *     的「投影 cell」（含 DFS 末位 text 段 / 末位过程项锚点）随 turn 链流转：
+ *     热路径（同源 partial 续接末位 text/thinking 段）O(1) 增量（output 尾接、
+ *     processItems 引用复用或尾项替换），结构变更 / 撤回 / 无 cell 才全量重投影；
+ *   - seenLogIds 改 turn 链共享同一可变 Set（turn 对象仍每条新建）；React 18
+ *     StrictMode（本项目已开）double-invoke setState updater 时，入口按 Set 身份
+ *     记忆「上次 (Set, logId) → 产物」直接复返，防共享 Set 被首次调用 add 后二次
+ *     重查误判重复而丢内容（真正迟到重放走集合命中原引用返回，语义不变）；
+ *   - 新段 id 唯一化走链内共享 id 索引 Set（O(1) has/add），撤回时同步移除，替代
+ *     每新段全树收集；索引缺失（外部构造 turn / 视图）回退全树收集，行为不变。
  */
 
 /* ───────────────── 分类（自 session-log-sanitize.ts 平移，语义不变） ───────────────── */
@@ -329,6 +345,21 @@ export type TurnSegment =
   | { kind: "stderr"; id: string; text: string; ts: number | null }
   | {
       /**
+       * 上下文前导段（2026-08-25-unified-floating-session task-11）：首轮注入的
+       * 【变更上下文】/【页面上下文】/【团队任务简报】前导，从 transcript 中
+       * daemon 回传的完整 dispatch_prompt 首条 user_input 提取（与该 user_input
+       * 的用户消息部分分离——对话视图保持干净，「全部（进度）」视图显示来源，
+       * 解决"注入完全黑盒"问题）。装配器内不主动构造（条目在装配器前即被
+       * user_input 通道分流），仅作类型成员由 session-panel 显式构建。
+       */
+      kind: "preamble";
+      id: string;
+      /** 前导全文（含"【…上下文】"标题块，"---" 之前的部分）。 */
+      text: string;
+      ts: number | null;
+    }
+  | {
+      /**
        * 文件段（task-08 / 2026-08-23-agent-file-upload-mcp / design §7.3 / D-001@v1）：
        * tool_kind=FileUpload 日志行（D-007@v1）的分类映射产物——聊天流文件卡片
        * （FileMessageCard）的数据源，task-09 run 详情产出文件区复用同字段。
@@ -417,18 +448,128 @@ function nonEmptyString(v: string | null | undefined): string | null {
   return t ? t : null;
 }
 
+/* ───────────────── F7 增量装配内部状态（symbol 键、enumerable，随 spread 流转） ───────────────── */
+
 /**
- * log_id 去重集合追加（内容变更路径调用，对齐现有 applyLogToTurn 的 nextSeen 语义：
- * 每次变更路径都复制新 Set，logId 缺失时同样复制——集合为 turn 级字段不参与段级
- * memo，无引用复用需求；无变更路径返回原 turn，不动本集合）。
+ * 兼容投影增量 cell（F7）：output / processItems 的当前值 + DFS 末位锚点，供
+ * applyLogToSegments 判定「partial 续接末位段」走 O(1) 增量。不变式：turn 携带
+ * cell 时，cell 值恒等于 segmentsToLegacy(turn.segments)（全量重算对拍测试锁定）。
  */
-function withSeenLogId(seen: Set<string>, logId: string | null | undefined): Set<string> {
-  const next = new Set(seen);
-  if (logId) next.add(logId);
-  return next;
+interface LegacyCell {
+  output: string;
+  processItems: SessionProcessItem[];
+  /** DFS 序最后一个 text 段 id（text partial 续接的增量判定锚）。 */
+  lastTextSegId: string | null;
+  /** DFS 平铺投影最后一个过程项的所属段 id（thinking partial 续接的增量判定锚）。 */
+  lastItemSegId: string | null;
 }
 
-/** 递归收集树内全部段 id（新段 id 去重用）。 */
+const LEGACY_CELL: unique symbol = Symbol("assemblerLegacyCell");
+const SEGMENT_ID_INDEX: unique symbol = Symbol("assemblerSegmentIds");
+
+interface AssemblerInternalsCarrier {
+  [LEGACY_CELL]?: LegacyCell;
+  [SEGMENT_ID_INDEX]?: Set<string>;
+}
+
+/**
+ * 全量重投影 + 末位锚点扫描（增量不适用时的兜底，值与急切投影逐字节一致）。
+ * legacyProjectionBuildCount 仅测试观测用（性质回归：partial 流不触发全量重投影）。
+ */
+let legacyProjectionBuildCount = 0;
+export function legacyProjectionBuildsForTest(): number {
+  return legacyProjectionBuildCount;
+}
+
+function buildLegacyCell(segments: TurnSegment[]): LegacyCell {
+  legacyProjectionBuildCount += 1;
+  const legacy = segmentsToLegacy(segments);
+  let lastTextSegId: string | null = null;
+  let lastItemSegId: string | null = null;
+  // 锚点扫描与 segmentsToLegacy 同一 DFS 顺序（tool 自身项先于 children 项）
+  const walk = (list: TurnSegment[]) => {
+    for (const s of list) {
+      switch (s.kind) {
+        case "text":
+          lastTextSegId = s.id;
+          break;
+        case "thinking":
+          lastItemSegId = s.id;
+          break;
+        case "tool":
+          lastItemSegId = s.id;
+          walk(s.children);
+          break;
+        case "subagent_stub":
+          walk(s.children);
+          break;
+        case "stderr":
+        case "file":
+          lastItemSegId = s.id;
+          break;
+      }
+    }
+  };
+  walk(segments);
+  return {
+    output: legacy.output,
+    processItems: legacy.processItems,
+    lastTextSegId,
+    lastItemSegId,
+  };
+}
+
+/** 把 cell / id 索引以 enumerable symbol 键挂到 target（对象展开自动随行）。 */
+function attachInternals(
+  target: AssembledTurn,
+  cell: LegacyCell,
+  idIndex: Set<string> | null,
+): void {
+  Object.defineProperty(target, LEGACY_CELL, {
+    value: cell,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
+  if (idIndex) {
+    Object.defineProperty(target, SEGMENT_ID_INDEX, {
+      value: idIndex,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+}
+
+/**
+ * 把 source 携带的装配器内部状态（投影 cell / 段 id 索引）转移到 segments 同源的
+ * target——消费方（session-panel asAssembled / assembledViewOf）构造收窄视图时
+ * 调用，保持增量链不断（symbol 键 enumerable，对象展开自动随行，直传视图除外）。
+ * source 未携带（外部构造 turn）时无副作用，applyLog 回退全量重投影。
+ */
+export function transferAssemblerInternals(target: AssembledTurn, source: AssembledTurn): void {
+  const carrier = source as AssembledTurn & AssemblerInternalsCarrier;
+  const cell = carrier[LEGACY_CELL];
+  const index = carrier[SEGMENT_ID_INDEX];
+  if (cell) attachInternals(target, cell, index ?? null);
+}
+
+/**
+ * 双调幂等记忆（F7，按 seenLogIds 身份单槽）：React StrictMode double-invoke
+ * updater 时第二次调用直接复返首次产物。见文件头 F7 注记。
+ */
+const applyResultMemo = new WeakMap<Set<string>, { logId: string; next: AssembledTurn }>();
+
+/**
+ * log_id 记入（F7）：turn 链共享同一可变 Set（turn 对象仍每条新建，引用沿链传递；
+ * 无消费方依赖 Set 身份判等做 memo，已核实）。无 logId 时不动集合。
+ */
+function recordSeenLogId(seen: Set<string>, logId: string | null | undefined): Set<string> {
+  if (logId) seen.add(logId);
+  return seen;
+}
+
+/** 递归收集树内全部段 id（id 索引缺失时的回退收集）。 */
 function collectSegmentIds(segments: TurnSegment[], ids: Set<string>): void {
   for (const s of segments) {
     ids.add(s.id);
@@ -439,17 +580,21 @@ function collectSegmentIds(segments: TurnSegment[], ids: Set<string>): void {
 }
 
 /**
- * 新段 id 派生：优先 segmentId / logId（design §7「tool id / segmentId / logId 派生」），
- * 均缺用 时间戳+内容长度 兜底；与树内既有 id 冲突时追加 -2/-3… 后缀（同一 segmentId
- * 的 partial 文本被工具段打断会分裂多段——R-06，段 id 必须按段唯一）。
+ * 新段 id 派生（F7：链内共享 id 索引 O(1)，替代全树收集）：优先 segmentId / logId
+ * （design §7「tool id / segmentId / logId 派生」），均缺用 时间戳+内容长度 兜底；
+ * 与索引内既有 id 冲突时追加 -2/-3… 后缀（同一 segmentId 的 partial 文本被工具段
+ * 打断会分裂多段——R-06，段 id 必须按段唯一）。
  */
-function makeUniqueSegmentId(segments: TurnSegment[], base: string): string {
-  const ids = new Set<string>();
-  collectSegmentIds(segments, ids);
-  if (!ids.has(base)) return base;
+function makeUniqueSegmentId(index: Set<string>, base: string): string {
+  if (!index.has(base)) {
+    index.add(base);
+    return base;
+  }
   let n = 2;
-  while (ids.has(`${base}-${n}`)) n += 1;
-  return `${base}-${n}`;
+  while (index.has(`${base}-${n}`)) n += 1;
+  const id = `${base}-${n}`;
+  index.add(id);
+  return id;
 }
 
 function segmentIdBase(input: AssemblerLogInput, kind: string, ts: number | null): string {
@@ -608,12 +753,17 @@ function revokePartialSegments(
   segments: TurnSegment[],
   segmentId: string,
   variant: "assistant" | "thinking",
+  removedIds: Set<string>,
 ): TurnSegment[] | null {
   const colon = segmentId.indexOf(":");
   const prefix = colon > 0 ? segmentId.slice(0, colon) : "main";
   const kind: "text" | "thinking" = variant === "assistant" ? "text" : "thinking";
   const removeAll = (children: TurnSegment[]): TurnSegment[] =>
-    children.filter((s) => !(s.kind === kind && derivesFromSegmentId(s.id, kind, segmentId)));
+    children.filter((s) => {
+      const hit = s.kind === kind && derivesFromSegmentId(s.id, kind, segmentId);
+      if (hit) removedIds.add(s.id);
+      return !hit;
+    });
 
   if (prefix === "main") {
     const next = removeAll(segments);
@@ -707,14 +857,23 @@ export function createEmptyAssembledTurn(turnStartedAt: number | null = null): A
   };
 }
 
+/** partial 续接上报（F7 增量投影判定用）：merge 目标段 id / kind / 合并后全文 / ts。 */
+interface StreamMergeReport {
+  id: string;
+  kind: "text" | "thinking";
+  text: string;
+  ts: number | null;
+}
+
 /**
  * SSE 增量：单条 log 落到 turn（替代现有两处 applyLogToTurn 副本，design §7）。
  *
  * 纯函数：不修改入参 turn（path-copy 产出新树），无内容变化（分类丢弃 / override
  * 无匹配段 / 重复 log_id / user_input）时原引用返回。内容变更路径记入 log_id 去重
- * 集合（task-02）；override 撤回（有匹配段）与各分段追加均重算投影（output /
- * processItems），无归属字段（parentToolUseId 空）时与现有 applyLogToTurn /
- * logsToTurns 产出等价（§9.1）。
+ * 集合（task-02）；override 撤回（有匹配段）与各分段追加均维护 output / processItems
+ * 投影（F7：热路径 partial 续接走 O(1) 增量，结构变更全量重投影，值与改前逐字节
+ * 一致），无归属字段（parentToolUseId 空）时与现有 applyLogToTurn / logsToTurns
+ * 产出等价（§9.1）。
  */
 export function applyLogToSegments(
   turn: AssembledTurn,
@@ -724,12 +883,31 @@ export function applyLogToSegments(
   // 提取 / 页面发送占位），不装配进段（design §7 logsToSegments 注 / Grill X-05）。
   if (input.channel === "user_input") return turn;
 
+  // F7 双调幂等（React StrictMode double-invoke setState updater）：同 (Set 身份,
+  // logId) 的立即重放直接复返首次产物——共享 seenLogIds 已被首次调用 add，重查会
+  // 被误判为重复事件而丢内容。真正的迟到重放（prev 已含该 log 内容）不在此列：
+  // 记忆为单槽，后续任何新 log 都会覆盖槽位，落回下方集合命中原引用返回。
+  const memo = applyResultMemo.get(turn.seenLogIds);
+  if (input.logId && memo && memo.logId === input.logId) return memo.next;
+
   // log_id 去重（SSE 实时路径，task-02）：重复事件原引用返回（R-01 重连 / 事件重放），
   // 对齐现有 applyLogToTurn 的 seenLogIds 入口检查。
   if (input.logId && turn.seenLogIds.has(input.logId)) return turn;
 
   const seg = classifySessionLog(input.content ?? "", input.channel, input.toolKind);
   if (!seg) return turn;
+
+  // 段 id 索引（F7）：链内共享 Set 惰性物化——纯 partial 续接不建新段，全程不触发
+  // 收集；索引随 turn 链流转（spread 自动复制），缺失时首条建新段的 log 全树收集一次。
+  const turnIndex = (turn as AssembledTurn & AssemblerInternalsCarrier)[SEGMENT_ID_INDEX];
+  let idIndex: Set<string> | null = turnIndex ?? null;
+  const ids = (): Set<string> => {
+    if (!idIndex) {
+      idIndex = new Set<string>();
+      collectSegmentIds(turn.segments, idIndex);
+    }
+    return idIndex;
+  };
 
   // override 撤回令箭（task-02）：撤回信号非内容，不渲染进段——按 segmentId 前缀路由
   // 定位桶，移除该 segmentId 派生的全部分裂段（R-06 跨段撤回；assistant 文本截断 /
@@ -738,21 +916,27 @@ export function applyLogToSegments(
   // 缺失属畸形令箭——静默 no-op 原引用返回（对齐现有 Map 未命中即 return）。
   if (seg.kind === "override") {
     if (!seg.segmentId || !seg.variant) return turn;
-    const revoked = revokePartialSegments(turn.segments, seg.segmentId, seg.variant);
+    const removedIds = new Set<string>();
+    const revoked = revokePartialSegments(turn.segments, seg.segmentId, seg.variant, removedIds);
     if (!revoked) return turn;
-    const legacy = segmentsToLegacy(revoked);
-    return {
+    removedIds.forEach((id) => ids().delete(id));
+    const cell = buildLegacyCell(revoked);
+    const next: AssembledTurn = {
       segments: revoked,
-      output: legacy.output,
-      processItems: legacy.processItems,
+      output: cell.output,
+      processItems: cell.processItems,
       turnStartedAt: turn.turnStartedAt,
-      seenLogIds: withSeenLogId(turn.seenLogIds, input.logId),
+      seenLogIds: recordSeenLogId(turn.seenLogIds, input.logId),
     };
+    attachInternals(next, cell, idIndex);
+    if (input.logId) applyResultMemo.set(turn.seenLogIds, { logId: input.logId, next });
+    return next;
   }
 
   const ts = parseLogTs(input.timestamp);
   const subagentType = nonEmptyString(input.subagentType);
   let segments = turn.segments;
+  let mergedInto: StreamMergeReport | null = null;
 
   // 1. tool_use 兜底合并（§9.5）：同 tool_use_id 的 subagent_stub 已存在（子消息先
   //    到）→ 摘除 stub，其 children / subagentType 随迁到即将创建的 tool 段。
@@ -783,6 +967,7 @@ export function applyLogToSegments(
         ...segments,
         { kind: "subagent_stub", id: parent, subagentType, children: [] },
       ];
+      ids().add(parent);
       bucketId = parent;
       // stub 创建时已写入 subagentType，容器无需再补。
       routeSubagentType = null;
@@ -796,26 +981,33 @@ export function applyLogToSegments(
       // 裸前缀行（剥后空文本）不产生空段（净效果同现有 applyLogToTurn 追加空串——
       // output 不变）；log_id 照记（去重语义不受影响，走尾部统一路径）。
       if (seg.text === "") break;
-      segments = appendStreamText(
-        segments,
-        bucketId,
-        routeSubagentType,
-        seg.kind === "reply" ? "text" : "thinking",
-        seg.text,
-        ts,
-        input,
-      );
+      {
+        const appended = appendStreamText(
+          segments,
+          bucketId,
+          routeSubagentType,
+          seg.kind === "reply" ? "text" : "thinking",
+          seg.text,
+          ts,
+          input,
+          ids,
+        );
+        segments = appended.segments;
+        mergedInto = appended.mergedInto;
+      }
       break;
-    case "tool_use":
+    case "tool_use": {
+      const toolSegId =
+        (parsedTool && parsedTool.toolUseId) ||
+        makeUniqueSegmentId(ids(), segmentIdBase(input, "tool", ts));
+      if (parsedTool && parsedTool.toolUseId) ids().add(parsedTool.toolUseId);
       segments = applyToBucket(segments, bucketId, routeSubagentType, (children) => [
         ...children,
         {
           kind: "tool",
           // 段 id = tool_use_id（result 配对 + 子代理路由 key）；解析失败用
           // logId 等兜底（toolName=null，渲染原样显示 raw，R-07）。
-          id:
-            (parsedTool && parsedTool.toolUseId) ||
-            makeUniqueSegmentId(segments, segmentIdBase(input, "tool", ts)),
+          id: toolSegId,
           raw: seg.text,
           // 初始状态取 tool_call JSON 的 success（权威源）；running 靠后续
           // result 配对兜底（statusFromToolUseRaw 注）。
@@ -829,10 +1021,23 @@ export function applyLogToSegments(
         },
       ]);
       break;
+    }
     case "skill":
       // ql-20260824-017：技能装载注入行——挂到同桶最近 Skill 工具段 result（过程
       // 信息，Skill 工具卡展开可见全文），无匹配段时退化文本段兜底（见函数注）。
-      segments = attachSkillInjection(segments, bucketId, routeSubagentType, seg.text, ts, input);
+      {
+        const attached = attachSkillInjection(
+          segments,
+          bucketId,
+          routeSubagentType,
+          seg.text,
+          ts,
+          input,
+          ids,
+        );
+        segments = attached.segments;
+        mergedInto = attached.mergedInto;
+      }
       break;
     case "tool_result":
       // 归属桶内位置配对（§5 Phase1.4 / Grill X-02）：tool_result 行（SSE/DB）不携带
@@ -869,7 +1074,7 @@ export function applyLogToSegments(
           ...children,
           {
             kind: "tool",
-            id: makeUniqueSegmentId(segments, segmentIdBase(input, "tool", ts)),
+            id: makeUniqueSegmentId(ids(), segmentIdBase(input, "tool", ts)),
             raw: "",
             result: seg.text,
             editPatch: input.editPatch ?? undefined,
@@ -889,7 +1094,7 @@ export function applyLogToSegments(
         ...children,
         {
           kind: "stderr",
-          id: makeUniqueSegmentId(segments, segmentIdBase(input, "stderr", ts)),
+          id: makeUniqueSegmentId(ids(), segmentIdBase(input, "stderr", ts)),
           text: seg.text,
           ts,
         },
@@ -906,7 +1111,7 @@ export function applyLogToSegments(
         ...children,
         {
           kind: "file",
-          id: makeUniqueSegmentId(segments, segmentIdBase(input, "file", ts)),
+          id: makeUniqueSegmentId(ids(), segmentIdBase(input, "file", ts)),
           fileId: seg.fileId ?? "",
           name: seg.name ?? "",
           size: seg.size ?? 0,
@@ -923,17 +1128,61 @@ export function applyLogToSegments(
       break;
   }
 
-  // 4. 兼容投影（§9.4）+ 计时锚点兜底（§7.5：live / attach 锚点由调用方置入
-  //    turnStartedAt，均缺时取首条有效 log timestamp）+ log_id 记入（内容变更路径，
-  //    task-02）。
-  const legacy = segmentsToLegacy(segments);
-  return {
+  // 4. 兼容投影（§9.4，F7 增量维护）+ 计时锚点兜底（§7.5：live / attach 锚点由调用
+  //    方置入 turnStartedAt，均缺时取首条有效 log timestamp）+ log_id 记入（内容变更
+  //    路径，task-02）。增量规则（消费方调研结论：投影在热路径只被透传/展开，无逐条
+  //    读取，增量值与全量重算逐字节一致，对拍测试锁定）：
+  //    - text partial 续接 DFS 末位 text 段 → output 尾接增量，processItems 引用复用；
+  //    - thinking partial 续接 DFS 末位过程项段 → 末项文本替换（数组浅拷贝）；
+  //    - 无结构变更（裸前缀空文本行）→ cell 原样；
+  //    - 其余（新建段 / 配对 / 撤回 / 无 cell 外部构造 turn）→ 全量重投影重建 cell。
+  const prevCell = (turn as AssembledTurn & AssemblerInternalsCarrier)[LEGACY_CELL];
+  let cell: LegacyCell;
+  if (
+    prevCell &&
+    mergedInto &&
+    mergedInto.kind === "text" &&
+    prevCell.lastTextSegId === mergedInto.id
+  ) {
+    cell = {
+      output: prevCell.output + seg.text,
+      processItems: prevCell.processItems,
+      lastTextSegId: prevCell.lastTextSegId,
+      lastItemSegId: prevCell.lastItemSegId,
+    };
+  } else if (
+    prevCell &&
+    mergedInto &&
+    mergedInto.kind === "thinking" &&
+    prevCell.lastItemSegId === mergedInto.id
+  ) {
+    const items = prevCell.processItems.slice();
+    items[items.length - 1] = {
+      kind: "thinking",
+      text: mergedInto.text,
+      ts: mergedInto.ts ?? undefined,
+    };
+    cell = {
+      output: prevCell.output,
+      processItems: items,
+      lastTextSegId: prevCell.lastTextSegId,
+      lastItemSegId: prevCell.lastItemSegId,
+    };
+  } else if (prevCell && segments === turn.segments) {
+    cell = prevCell;
+  } else {
+    cell = buildLegacyCell(segments);
+  }
+  const next: AssembledTurn = {
     segments,
-    output: legacy.output,
-    processItems: legacy.processItems,
+    output: cell.output,
+    processItems: cell.processItems,
     turnStartedAt: turn.turnStartedAt ?? ts,
-    seenLogIds: withSeenLogId(turn.seenLogIds, input.logId),
+    seenLogIds: recordSeenLogId(turn.seenLogIds, input.logId),
   };
+  attachInternals(next, cell, idIndex);
+  if (input.logId) applyResultMemo.set(turn.seenLogIds, { logId: input.logId, next });
+  return next;
 }
 
 /**
@@ -983,7 +1232,8 @@ function attachSkillInjection(
   text: string,
   ts: number | null,
   input: AssemblerLogInput,
-): TurnSegment[] {
+  ids: () => Set<string>,
+): { segments: TurnSegment[]; mergedInto: StreamMergeReport | null } {
   let attached = false;
   const next = applyToBucket(segments, bucketId, subagentType, (children) => {
     for (let i = children.length - 1; i >= 0; i -= 1) {
@@ -999,8 +1249,8 @@ function attachSkillInjection(
     }
     return children;
   });
-  if (attached) return next;
-  return appendStreamText(segments, bucketId, subagentType, "text", text, ts, input);
+  if (attached) return { segments: next, mergedInto: null };
+  return appendStreamText(segments, bucketId, subagentType, "text", text, ts, input, ids);
 }
 
 /**
@@ -1025,9 +1275,11 @@ function appendStreamText(
   text: string,
   ts: number | null,
   input: AssemblerLogInput,
-): TurnSegment[] {
+  ids: () => Set<string>,
+): { segments: TurnSegment[]; mergedInto: StreamMergeReport | null } {
   const segId = nonEmptyString(input.segmentId);
-  return applyToBucket(segments, bucketId, subagentType, (children) => {
+  let mergedInto: StreamMergeReport | null = null;
+  const next = applyToBucket(segments, bucketId, subagentType, (children) => {
     const last = children[children.length - 1];
     // ql-20260820-011：merge 按派生源对齐——partial（segId 非空）只续接同源派生段；
     // 完整行（segId 空）只 merge 进普通段（segId 空）。完整行若 merge 进 partial
@@ -1042,6 +1294,13 @@ function appendStreamText(
         : (last.segId ?? null) === null);
     if (last && canMerge) {
       const merged = kind === "text" ? last.text + text : `${last.text}\n${text}`;
+      // F7：上报续接目标（增量投影判定；ts 取 merge 保留的段 ts——thinking 项用）
+      mergedInto = {
+        id: last.id,
+        kind,
+        text: merged,
+        ts: last.kind === "thinking" ? last.ts : null,
+      };
       return [
         ...children.slice(0, -1),
         { ...last, text: merged, streaming: segId ? true : last.streaming },
@@ -1051,7 +1310,7 @@ function appendStreamText(
       kind === "text"
         ? {
             kind: "text",
-            id: makeUniqueSegmentId(segments, segmentIdBase(input, "text", ts)),
+            id: makeUniqueSegmentId(ids(), segmentIdBase(input, "text", ts)),
             text,
             // 带 segmentId 的 partial 追加 → streaming（§5 Phase3 置位规则）。
             streaming: !!segId,
@@ -1062,7 +1321,7 @@ function appendStreamText(
           }
         : {
             kind: "thinking",
-            id: makeUniqueSegmentId(segments, segmentIdBase(input, "thinking", ts)),
+            id: makeUniqueSegmentId(ids(), segmentIdBase(input, "thinking", ts)),
             text,
             streaming: !!segId,
             ts,
@@ -1070,6 +1329,7 @@ function appendStreamText(
           };
     return [...children, seg];
   });
+  return { segments: next, mergedInto };
 }
 
 /**
@@ -1167,4 +1427,23 @@ export function segmentsToLegacy(segments: TurnSegment[]): {
   };
   walk(segments);
   return { output, processItems };
+}
+
+/**
+ * 上下文前导检测（2026-08-25-unified-floating-session task-11 / FR-7）：
+ * daemon transcript 会把完整 dispatch_prompt（含服务端注入的前导）同步为
+ * 首条 user_input 日志。识别其前导块（"---" 之前部分）供「全部（进度）」
+ * 视图显示注入来源；对话视图保持干净（prompt 气泡用原文，本工具不消费）。
+ *
+ * 判定：内容以已知前导标题开头且含 "\n\n---\n\n" 分隔 → 返回分隔前文本；
+ * 否则 null（普通用户消息不误伤；仅同标题开头但无分隔的消息是用户自己
+ * 输入的原文，不算前导）。
+ */
+const PREAMBLE_HEADS = ["【变更上下文】", "【页面上下文】", "【团队任务简报"];
+export function extractPreambleText(content: string): string | null {
+  const trimmed = content.trim();
+  if (!PREAMBLE_HEADS.some((h) => trimmed.startsWith(h))) return null;
+  const sep = trimmed.indexOf("\n\n---\n\n");
+  if (sep <= 0) return null;
+  return trimmed.slice(0, sep);
 }

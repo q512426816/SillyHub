@@ -112,6 +112,38 @@ class TeamMissionCreateBlock(BaseModel):
     orchestrator_workspace_id: uuid.UUID | None = None
 
 
+class PageContextCreateBlock(BaseModel):
+    """``SessionCreateRequest.page_context`` 内嵌块（2026-08-25-unified-floating-session / FR-5 / D-005）。
+
+    悬浮会话入口的页面上下文通道：客户端只允许声明「页面类型枚举 + 键」，
+    前导文本的全部数据由服务端生成（DB 回查 / 注册表 Lookup，防客户端伪造
+    注入——自由文本字段一律不收）。三类：
+    - ``ppm_project``：PPM 项目详情页（task-01），需 ``project_id``（服务端
+      回查 PpmProjectMaintenance 注入项目数据）；
+    - ``generic_page``：通用页面（task-09），需 ``route_key``——后端
+      ``PAGE_ROUTE_LABELS`` 注册表 Lookup 出页面中文名注入；未注册 key →
+      静默不注入（枚举语义，零自由文本）；
+    - ``workspace``：工作区详情页（task-10，用户实测反馈"工作区页只注入
+      笼统标签不知道是哪个"），需 ``workspace_id``——服务端回查 Workspace
+      注入名称/类型/路径。
+    """
+
+    page_key: Literal["ppm_project", "generic_page", "workspace"]
+    project_id: uuid.UUID | None = None
+    route_key: str | None = Field(default=None, max_length=60, pattern=r"^[a-z0-9][a-z0-9_:-]*$")
+    workspace_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _require_kind_specific_field(self) -> "PageContextCreateBlock":
+        if self.page_key == "ppm_project" and self.project_id is None:
+            raise ValueError("project_id is required when page_key is ppm_project")
+        if self.page_key == "generic_page" and not self.route_key:
+            raise ValueError("route_key is required when page_key is generic_page")
+        if self.page_key == "workspace" and self.workspace_id is None:
+            raise ValueError("workspace_id is required when page_key is workspace")
+        return self
+
+
 class SessionCreateRequest(BaseModel):
     """POST /api/daemon/sessions 请求体（FR-01 / design §5 Wave1）。
 
@@ -140,6 +172,8 @@ class SessionCreateRequest(BaseModel):
     # 消费（预建 mission / orchestrator_workspace_id ∈ scope 校验）归 create
     # 路径（task-09）。
     team_mission: TeamMissionCreateBlock | None = None
+    # 悬浮会话页面上下文（FR-5 / D-005）：缺省 None 零回归；数据服务端回查。
+    page_context: PageContextCreateBlock | None = None
 
     @model_validator(mode="after")
     def _require_runtime_or_provider(self) -> SessionCreateRequest:
@@ -584,10 +618,16 @@ class DaemonTaskLeaseRead(BaseModel):
 
 
 class LeaseSyncRequest(BaseModel):
-    """Request body for syncing AgentRun status from daemon."""
+    """Request body for syncing AgentRun status from daemon.
+
+    2026-08-25 会话审查 P1：``status`` 收紧为 Literal 枚举（原裸 ``str`` 任意
+    字符串可落库）。取值集与 service 处理分支一一对应（running / completed /
+    failed / killed）；daemon 侧唯一上报点 task-runner.ts 心跳 cancel 检测只发
+    ``'killed'``，枚举全集兼容既有合法路径，非法值由 Pydantic 直接 422。
+    """
 
     claim_token: str
-    status: str  # running, completed, failed, killed
+    status: Literal["running", "completed", "failed", "killed"]
     error: str | None = None
 
 
@@ -764,6 +804,17 @@ class TeamMissionTriggerRequest(BaseModel):
     main_agent_config: dict | None = None
 
 
+class TeamWorkspaceRef(BaseModel):
+    """TeamMissionSummary.scope_workspaces 单项——scope 工作区 id+名称。
+
+    ql-20260825-003：范围徽标名称化（前端只拿 id 时回落 #<id8> 原始徽标）。
+    name 查无 Workspace 行时为 None（前端回落 id 徽标）。
+    """
+
+    id: str
+    name: str | None = None
+
+
 class TeamMissionWorkerSummary(BaseModel):
     """TeamMissionSummary.workers 单项——分身 run（role != orchestrator）概要。"""
 
@@ -779,13 +830,15 @@ class TeamMissionSummary(BaseModel):
 
     ``status`` 为扩展后 derive_status 派生值（含 awaiting_input 档，会话维度
     入参）；``workers`` 仅 role != orchestrator 的分身 run（主控轮 D-009 不进）；
-    ``scope_workspace_ids`` 为落库冻结快照（NULL 缺省回落 [anchor]）。
+    ``scope_workspace_ids`` 为落库冻结快照（NULL 缺省回落 [anchor]）；
+    ``scope_workspaces`` 为 id+名称 enriched 视图（ql-20260825-003）。
     """
 
     mission_id: uuid.UUID
     status: str  # planning|running|awaiting_input|done|degraded|failed|cancelled
     objective: str | None
     scope_workspace_ids: list[str]
+    scope_workspaces: list[TeamWorkspaceRef] = Field(default_factory=list)
     budget_usd: float | None
     workers: list[TeamMissionWorkerSummary] = Field(default_factory=list)
 

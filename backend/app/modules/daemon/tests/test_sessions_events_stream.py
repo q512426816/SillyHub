@@ -3,11 +3,16 @@
 覆盖：
   * 单频道 + 服务端过滤（D-005）：他人 ``user_id`` 的信号被静默丢弃不下发；
     本人信号原样 ``data:`` 帧透传（发布侧 JSON 零漂移）。
-  * 帧协议：``: connected`` 初始注释；静默约 30s（get_message timeout 返回
-    None）产出 ``: keepalive``；get_message 调用参数为
-    ``ignore_subscribe_messages=True, timeout=30.0``。
+  * 帧协议：``: connected`` 初始注释；静默（get_message timeout 返回 None）
+    或持续他人信号导致超过 keepalive 间隔无产出帧时产出 ``: keepalive``
+    （2026-08-25 P2 饥饿防护：间隔 ``SESSIONS_EVENTS_KEEPALIVE_INTERVAL_SEC``
+    默认 25s，测试 monkeypatch 置 0 模拟「立即饥饿」）；get_message 调用参数
+    为 ``ignore_subscribe_messages=True, timeout=30.0``。
+  * 非对象 JSON payload（list / str）不炸流（2026-08-25 P1：原实现
+    ``payload.get`` 抛 AttributeError 终止整条生成器）。
   * 断开清理：消费方断开后（aclose → GeneratorExit）finally 兜底
-    unsubscribe(SESSIONS_CHANGED_CHANNEL) + close，无订阅连接泄漏。
+    unsubscribe(SESSIONS_CHANGED_CHANNEL) + aclose；unsubscribe 抛
+    ConnectionError 时 aclose（归还 Redis 连接）仍被执行（2026-08-25 P1）。
   * 端点包装层：StreamingResponse 的 media_type / SSE headers（对齐
     /sessions/{id}/stream）；未登录 401。
   * 路由可达性回归（2026-08-24 verify 真实运行时冒烟补）：带鉴权请求必须
@@ -50,6 +55,12 @@ def _signal(user_id: str, event: str = "status_changed") -> str:
     )
 
 
+@pytest.fixture()
+def instant_keepalive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """keepalive 间隔置 0——测试进程内无真实 25s 等待，静默 / 跳过即触发。"""
+    monkeypatch.setattr("app.modules.daemon.router.SESSIONS_EVENTS_KEEPALIVE_INTERVAL_SEC", 0.0)
+
+
 def _build_mock_pubsub(messages: list[dict[str, Any] | None]) -> tuple[MagicMock, list[dict]]:
     """构造假 pubsub：get_message 依序吐出 ``messages``，耗尽后永远返回 None。
 
@@ -63,7 +74,7 @@ def _build_mock_pubsub(messages: list[dict[str, Any] | None]) -> tuple[MagicMock
     pubsub = MagicMock()
     pubsub.subscribe = AsyncMock()
     pubsub.unsubscribe = AsyncMock()
-    pubsub.close = AsyncMock()
+    pubsub.aclose = AsyncMock()
 
     async def fake_get_message(**kwargs: Any) -> dict[str, Any] | None:
         get_message_calls.append(kwargs)
@@ -89,7 +100,7 @@ async def _collect(gen: Any, limit: int) -> list[str]:
         if len(collected) >= limit:
             break
     # 消费方 break 只挂起 GeneratorExit 的投递；显式 aclose 让 finally
-    # （unsubscribe + close）确定性执行（先例 test_session_sse.py 同款）。
+    # （unsubscribe + aclose）确定性执行（先例 test_session_sse.py 同款）。
     await gen.aclose()
     return collected
 
@@ -99,7 +110,7 @@ async def _collect(gen: Any, limit: int) -> list[str]:
 
 class TestStreamSessionsEventsGenerator:
     @pytest.mark.asyncio
-    async def test_own_signal_delivered_other_user_filtered(self) -> None:
+    async def test_own_signal_delivered_other_user_filtered(self, instant_keepalive: None) -> None:
         """本人信号原样 data 帧下发；他人信号静默丢弃（D-005 服务端过滤）。"""
         me = str(uuid.uuid4())
         other = str(uuid.uuid4())
@@ -118,18 +129,18 @@ class TestStreamSessionsEventsGenerator:
             collected = await _collect(gen, limit=3)
 
         assert collected[0] == ": connected\n\n"
-        # 他人信号被消费但未产出帧 → 第 2 帧直接是本人的 data 帧
-        assert collected[1] == f"data: {own_raw}\n\n"
-        # 静默路径补一条 keepalive（凑满 limit=3）
-        assert collected[2] == ": keepalive\n\n"
+        # 他人信号被消费但未产出 data 帧（间隔 0 下补一条 keepalive）→
+        # 本人信号随后原样 data 帧透传。
+        assert collected[1] == ": keepalive\n\n"
+        assert collected[2] == f"data: {own_raw}\n\n"
         assert other_raw not in "".join(collected)
         pubsub.subscribe.assert_called_once_with(SESSIONS_CHANGED_CHANNEL)
-        # 断开清理：finally 兜底 unsubscribe + close 各一次
+        # 断开清理：finally 兜底 unsubscribe + aclose 各一次
         pubsub.unsubscribe.assert_called_once_with(SESSIONS_CHANGED_CHANNEL)
-        pubsub.close.assert_called_once()
+        pubsub.aclose.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_keepalive_on_silence(self) -> None:
+    async def test_keepalive_on_silence(self, instant_keepalive: None) -> None:
         """静默（get_message timeout 返回 None）→ ``: keepalive`` 注释帧。"""
         me = str(uuid.uuid4())
         pubsub, _ = _build_mock_pubsub([])  # 永远无消息
@@ -143,10 +154,44 @@ class TestStreamSessionsEventsGenerator:
         assert collected[1] == ": keepalive\n\n"
         assert collected[2] == ": keepalive\n\n"
         pubsub.unsubscribe.assert_called_once_with(SESSIONS_CHANGED_CHANNEL)
-        pubsub.close.assert_called_once()
+        pubsub.aclose.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_message_polling_contract(self) -> None:
+    async def test_keepalive_under_continuous_foreign_traffic(
+        self, instant_keepalive: None
+    ) -> None:
+        """饥饿防护（2026-08-25 P2）：全局频道持续有**他人**信号（get_message
+        永不 timeout 返回 None）时仍产出 keepalive 帧。
+
+        原实现只在 get_message 30s 超时才发 keepalive，他人消息被静默跳过时
+        零帧产出——全局频道持续有流量时代理按空闲超时掐断连接。修复后按
+        「距上次产出帧的时长」判定，与是否收到消息无关。
+        """
+        me = str(uuid.uuid4())
+        other_raw = _signal(str(uuid.uuid4()))
+        pubsub = MagicMock()
+        pubsub.subscribe = AsyncMock()
+        pubsub.unsubscribe = AsyncMock()
+        pubsub.aclose = AsyncMock()
+
+        async def fake_get_message(**kwargs: Any) -> dict[str, Any]:
+            # 永远有他人消息可读（模拟繁忙全局频道，永不走 timeout/None 路径）。
+            return {"type": "message", "data": other_raw}
+
+        pubsub.get_message = fake_get_message
+        redis = _mock_redis(pubsub)
+
+        gen = _stream_sessions_events(me)
+        with patch("app.modules.daemon.router.get_redis", return_value=redis):
+            collected = await _collect(gen, limit=3)
+
+        assert collected[0] == ": connected\n\n"
+        assert collected[1] == ": keepalive\n\n"
+        assert collected[2] == ": keepalive\n\n"
+        assert other_raw not in "".join(collected)
+
+    @pytest.mark.asyncio
+    async def test_get_message_polling_contract(self, instant_keepalive: None) -> None:
         """轮询参数钉死：ignore_subscribe_messages=True + timeout=30.0（约 30s keepalive）。"""
         me = str(uuid.uuid4())
         pubsub, calls = _build_mock_pubsub([])
@@ -162,8 +207,8 @@ class TestStreamSessionsEventsGenerator:
             assert kwargs.get("timeout") == 30.0
 
     @pytest.mark.asyncio
-    async def test_malformed_payload_silently_skipped(self) -> None:
-        """非 JSON payload 不炸流：既不下发也不 keepalive，跳过继续轮询。"""
+    async def test_malformed_payload_silently_skipped(self, instant_keepalive: None) -> None:
+        """非 JSON payload 不炸流：原始帧不下发，后续本人信号正常透传。"""
         me = str(uuid.uuid4())
         own_raw = _signal(me)
         pubsub, _ = _build_mock_pubsub(
@@ -176,11 +221,66 @@ class TestStreamSessionsEventsGenerator:
 
         gen = _stream_sessions_events(me)
         with patch("app.modules.daemon.router.get_redis", return_value=redis):
-            collected = await _collect(gen, limit=2)
+            collected = await _collect(gen, limit=3)
 
-        assert collected == [": connected\n\n", f"data: {own_raw}\n\n"]
+        assert collected[0] == ": connected\n\n"
+        # not-json 跳过（间隔 0 下补 keepalive），本人信号仍原样透传。
+        assert collected[1] == ": keepalive\n\n"
+        assert collected[2] == f"data: {own_raw}\n\n"
         assert "not-json{" not in "".join(collected)
-        pubsub.close.assert_called_once()
+        pubsub.aclose.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_nondict_payload_does_not_break_stream(self, instant_keepalive: None) -> None:
+        """非对象 JSON payload（list / str）不炸流（2026-08-25 P1）。
+
+        ``json.loads("[1,2,3]")`` 返回 list——原实现 ``payload.get("user_id")``
+        抛 AttributeError 终止整个生成器。修复后按非本人信号跳过，流继续。
+        """
+        me = str(uuid.uuid4())
+        own_raw = _signal(me)
+        pubsub, _ = _build_mock_pubsub(
+            [
+                {"type": "message", "data": "[1,2,3]"},
+                {"type": "message", "data": '"just a string"'},
+                {"type": "message", "data": own_raw},
+            ]
+        )
+        redis = _mock_redis(pubsub)
+
+        gen = _stream_sessions_events(me)
+        with patch("app.modules.daemon.router.get_redis", return_value=redis):
+            collected = await _collect(gen, limit=4)
+
+        assert collected[0] == ": connected\n\n"
+        assert f"data: {own_raw}\n\n" in collected
+        assert "[1,2,3]" not in "".join(collected)
+        assert '"just a string"' not in "".join(collected)
+        pubsub.aclose.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_unsubscribe_failure_still_closes_pubsub(self) -> None:
+        """finally 两步清理各自隔离（2026-08-25 P1）。
+
+        连接已死时 unsubscribe 抛 ConnectionError——原实现直接跳过后续的
+        close（归还 Redis 连接）造成连接泄漏。修复后 unsubscribe 异常被吞
+        （记 warning），aclose 仍然执行。
+        """
+        me = str(uuid.uuid4())
+        pubsub, _ = _build_mock_pubsub([])
+        pubsub.unsubscribe = AsyncMock(side_effect=ConnectionError("redis down"))
+        redis = _mock_redis(pubsub)
+
+        gen = _stream_sessions_events(me)
+        with patch("app.modules.daemon.router.get_redis", return_value=redis):
+            # 先驱动生成器启动（connected 帧）再断开——未启动的生成器 aclose
+            # 不执行 body / finally。断开触发 finally：unsubscribe 抛错不得
+            # 逃逸，aclose 必须被调。
+            assert await gen.__anext__() == ": connected\n\n"
+            await gen.aclose()
+
+        pubsub.unsubscribe.assert_called_once_with(SESSIONS_CHANGED_CHANNEL)
+        pubsub.aclose.assert_called_once()
 
 
 # ── 端点包装层 ────────────────────────────────────────────────────────────────
@@ -224,7 +324,7 @@ class TestSessionsEventsEndpoint:
         assert frames[0] == ": connected\n\n"
         assert frames[1] == f"data: {own_raw}\n\n"
         pubsub.unsubscribe.assert_called_once_with(SESSIONS_CHANGED_CHANNEL)
-        pubsub.close.assert_called_once()
+        pubsub.aclose.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_endpoint_401_unauthenticated(self, client: Any) -> None:

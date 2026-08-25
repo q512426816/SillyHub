@@ -17,8 +17,9 @@
   简报文本；任一不命中 / 无活跃 mission 返回 ``None``（调用方零注入）。
 
 ⚠️ 口径区分：本模块的「已消耗」集合 ``_BRIEFING_CONSUMED_RUN_STATUSES`` 是**简报
-一次性语义专用**（含 completed、不含 interrupting），与 ``mcp_tools._ACTIVE_RUN_STATUSES``
-的会话活跃轮口径（含 interrupting、不含 completed）语义不同，勿混用。
+一次性语义专用**（含 completed、不含 pending_approval），与 ``agent.model.
+ACTIVE_RUN_STATUSES`` 的会话活跃轮口径（含 pending_approval、不含 completed）
+语义不同，勿混用。
 
 纯查询语义：DB 访问全经传入 AsyncSession，不自行开事务 / 不 commit / 不写任何行。
 """
@@ -49,7 +50,7 @@ _ORCHESTRATOR_ROLE = "orchestrator"
 # - pending / running / completed：简报已（或正在）随某个主控轮注入——一次性名额烧断；
 # - failed / killed 落集合外：首轮派发失败后下一条带文本消息重新注入（不烧断）；
 # - 懒建回填的 orchestrator run 落库即 pending → 判定天然短路（D-003@v1）。
-# 注意与 mcp_tools._ACTIVE_RUN_STATUSES（活跃轮口径，含 interrupting 不含 completed）
+# 注意与 ACTIVE_RUN_STATUSES（活跃轮口径，含 pending_approval 不含 completed）
 # 语义不同，勿混用。
 _BRIEFING_CONSUMED_RUN_STATUSES = ("pending", "running", "completed")
 
