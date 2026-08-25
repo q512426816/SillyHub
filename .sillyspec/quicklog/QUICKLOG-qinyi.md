@@ -167,3 +167,17 @@
 方案：session-input-bar textarea 加 onPaste——clipboardData.files 非空则 preventDefault 并复用现有 handleFiles 上传管线（与 📎 完全等价，含 attachmentsDisabled 门控与 10 个上限），纯文本粘贴放行默认插入；📎 title 补粘贴提示
 结果：新增 4 粘贴用例（图片 kind=image+chip+父级回传+事件取消 / 普通文件 kind=file / 纯文本不拦截 / disabled 门控），先红后绿；daemon+sessions 关联套件 33 文件 494 passed；tsc 0 错；eslint 0 新告警
 审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx
+
+## ql-20260825-007-17cb | 2026-08-25 13:39:01 | dialog 弹窗会话输入框（含排队）接通附件管线
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel.tsx（dialog 组件附件三件套/门控派生/handleSend D-7+enqueue 附件/submitFollowup 透传/三处 meta 清理/排队条 onRemove 补清理）
+- frontend/src/components/daemon/session-input-bar.tsx（新 props attachmentsDisabledTitle（禁用原因文案））
+- frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx（新建 5 用例（门控×2/追问/排队/D-7））
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引登记 ql-20260825-007）
+需求：dialog 弹窗会话输入框（含排队）接通附件管线，Ctrl+V 粘贴附件真正发送
+根因：ql-006 粘贴是 SessionInputBar 组件级能力，page 模式全链路通，但 dialog 模式不传附件 props 且 enqueue 硬编码空数组——📎/粘贴能上传但发送被静默丢弃；后端 injectSession 早已支持 attachment_ids，仅前端断链
+方案：session-panel dialog 组件镜像 page 管线：附件状态三件套+门控（codex 引擎或无 sessionId 首句禁，新 attachmentsDisabledTitle 区分原因文案）+D-7 附件豁免空文本+enqueue 带 ids 与标记行+submitFollowup 透传 injectSession（无附件保持两参调用形态）+投递/移除/新建三处元数据清理+排队条 onRemove 补清理
+结果：新建 5 用例先红后绿；daemon+sessions 34 文件 499 passed；tsc 0 错；eslint 0 error
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/session-input-bar.tsx

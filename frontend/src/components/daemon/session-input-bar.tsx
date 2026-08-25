@@ -44,6 +44,9 @@ export interface SessionInputBarProps {
   creating: boolean;
   /** task-12：附件入口禁用（codex 引擎 D-6 三层门控第一层）。默认 false 兼容。 */
   attachmentsDisabled?: boolean;
+  /** ql-20260825-007：附件入口禁用时的悬停原因（缺省「当前引擎不支持附件」——
+   *  dialog 首句门控等非引擎场景传自定义文案，避免误导）。 */
+  attachmentsDisabledTitle?: string;
   /** task-12：降级提示（FR-10）：当前供应商判不支持多模态 → 图片转落盘模式。 */
   multimodalDowngraded?: boolean;
   /** task-12：待发送附件变化（回传完整对象——父级合成标记行/取 ids；发送成功后父级调 clearAttachments）。 */
@@ -65,6 +68,7 @@ export function SessionInputBar({
   placeholder,
   creating,
   attachmentsDisabled = false,
+  attachmentsDisabledTitle,
   multimodalDowngraded = false,
   onAttachmentsChange,
   registerClearAttachments,
@@ -184,7 +188,7 @@ export function SessionInputBar({
           className="h-10 w-10 shrink-0 self-center rounded-full p-0 text-muted-foreground"
           title={
             attachmentsDisabled
-              ? "当前引擎不支持附件"
+              ? (attachmentsDisabledTitle ?? "当前引擎不支持附件")
               : "添加图片/文件附件，支持 Ctrl+V 直接粘贴（图片直读需多模态模型）"
           }
         >

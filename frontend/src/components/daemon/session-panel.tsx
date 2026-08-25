@@ -2601,6 +2601,13 @@ function SessionPanelDialog(props: SessionPanelProps) {
   // 已拉取过 error_detail 的 failed run_id 集合，防 SSE 重连重发 turn_completed
   // 触发重复 listSessionRuns（同一 failed run 只拉一次）。
   const fetchedErrorRunIdsRef = useRef<Set<string>>(new Set());
+  // ql-20260825-007：dialog 附件三件套（镜像 page 模式 task-12 管线）——待发送
+  // 附件（SessionInputBar 📎/粘贴上传回传，随追问/排队消息走 injectSession
+  // attachment_ids）、chips 清理句柄、队列条目附件元数据镜像（D-004：投递侧
+  // 占位轮标记行用，入队时登记、出队/移除时清理）。
+  const [pendingAttachments, setPendingAttachments] = useState<AttachmentRead[]>([]);
+  const clearAttachmentsRef = useRef<(() => void) | null>(null);
+  const attachmentMetaRef = useRef(new Map<string, { kind: string; name: string }>());
 
   // 当在线 provider 变化且当前选中的不再可用，回退到默认。
   useEffect(() => {
@@ -3038,12 +3045,23 @@ function SessionPanelDialog(props: SessionPanelProps) {
    *     setInput(prompt) 语义）——失败统一向上抛，由调用方决定呈现：
    *     队列路径 sendFromQueue 透传 → hook 标记 failed 留队头 + 重试/删除；
    *     重发路径 handleResend 捕获吞错（errorMsg 已写入 view）。
+   *   - ql-20260825-007：attachmentIds 附件引用随 inject 上送（后端 task-05 契约，
+   *     D-7 豁免空 prompt）；占位轮 prompt 拼附件标记行（镜像 page sendFromQueue）。
    */
   const submitFollowup = useCallback(
-    async (prompt: string): Promise<void> => {
+    async (prompt: string, attachmentIds: string[] = []): Promise<void> => {
       const sid = view.sessionId;
       if (!sid) return;
       const placeholderId = `__pending_inject_${Date.now()}__`;
+      // 占位轮展示文本 = 标记行 + 原文（kind/name 查 attachmentMetaRef，D-004
+      // 入队时已登记；无附件经 joinAttachmentMarkers 原样返回正文，不拼前导换行）。
+      const markerLines = attachmentIds
+        .map((id) => {
+          const meta = attachmentMetaRef.current.get(id);
+          return `[附件:${id}|${meta?.kind ?? "file"}|${meta?.name ?? id}]`;
+        })
+        .join("\n");
+      const displayPrompt = joinAttachmentMarkers(markerLines, prompt);
       setView((prev) => ({
         ...prev,
         currentRunId: placeholderId,
@@ -3052,7 +3070,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
           {
             runId: placeholderId,
             turn: null,
-            prompt,
+            prompt: displayPrompt,
             output: "",
             status: "pending",
             seenLogIds: new Set(),
@@ -3068,7 +3086,12 @@ function SessionPanelDialog(props: SessionPanelProps) {
         ],
       }));
       try {
-        const resp = await injectSession(sid, prompt);
+        // 无附件保持两参调用（与既有形态逐字节一致）；有附件才带第三参
+        // options（attachment_ids）。
+        const resp =
+          attachmentIds.length > 0
+            ? await injectSession(sid, prompt, { attachment_ids: attachmentIds })
+            : await injectSession(sid, prompt);
         setView((prev) => ({
           ...prev,
           currentRunId: resp.run_id,
@@ -3079,6 +3102,8 @@ function SessionPanelDialog(props: SessionPanelProps) {
           ),
           errorMsg: null,
         }));
+        // D-4：投递成功后清理附件元数据镜像（条目已出队，ids 不再被引用）。
+        for (const id of attachmentIds) attachmentMetaRef.current.delete(id);
         // 不重建 SSE（贯穿多 turn）
       } catch (err) {
         const apiErr = err as ApiError;
@@ -3097,12 +3122,12 @@ function SessionPanelDialog(props: SessionPanelProps) {
 
   /**
    * 队列投递回调（hook onSend，R2）：失败向上抛 → hook 标记 failed 留队头
-   * （D-003）。dialog 无附件（R3：createSession 无 attachment_ids 入参、
-   * SessionInputBar 不传附件 props），attachmentIds 恒为空数组（对齐 hook 契约）。
+   * （D-003）。ql-20260825-007：附件 ids 透传 submitFollowup → injectSession
+   *（追问路径后端契约早已支持，此前 dialog 侧硬编码丢弃）。
    */
   const sendFromQueue = useCallback(
-    async (prompt: string, _attachmentIds: string[]): Promise<void> => {
-      await submitFollowup(prompt);
+    async (prompt: string, attachmentIds: string[]): Promise<void> => {
+      await submitFollowup(prompt, attachmentIds);
     },
     [submitFollowup],
   );
@@ -3169,9 +3194,15 @@ function SessionPanelDialog(props: SessionPanelProps) {
    */
   const handleSend = useCallback(async () => {
     const prompt = input.trim();
-    // R3：dialog 无附件，空文本一律拦截（ISP 现状；page 模式的「附件非空允许空
-    // 文本」分支不适用）。
-    if (!prompt || prompt.length > MAX_PROMPT_LEN) return;
+    // ql-20260825-007：D-7 对齐 page——附件非空豁免空文本（看图说话）；纯文本
+    // 仍要求非空。idle 首句走 createSession（无附件可带），但该态附件入口已被
+    // 门控（attachmentsDisabled），pendingAttachments 恒空。
+    if (
+      (!prompt && pendingAttachments.length === 0) ||
+      prompt.length > MAX_PROMPT_LEN
+    ) {
+      return;
+    }
     if (!hasOnlineProvider) return;
     if (offlineReadOnly) return;
     if (view.status === "ended" || view.status === "failed") return;
@@ -3259,11 +3290,23 @@ function SessionPanelDialog(props: SessionPanelProps) {
       return;
     }
 
-    // 后续 turn（active / reconnecting）：入队等待投递（空附件——R3）。
-    if (!enqueue(prompt, [], prompt)) return; // D-002 兜底
-    // 入队成功：清草稿（page 模式同款语义；队满失败时草稿保留）。
+    // 后续 turn（active / reconnecting）：入队等待投递（ql-20260825-007：附件随
+    // 消息入队，投递走 sendFromQueue → injectSession attachment_ids）。
+    const attachmentIds = pendingAttachments.map((a) => a.id);
+    // 标记行 + 原文（镜像 page 模式入队侧）；登记元数据镜像供投递侧占位轮拼行。
+    const markerLines = pendingAttachments
+      .map((a) => `[附件:${a.id}|${a.kind}|${a.name}]`)
+      .join("\n");
+    const displayPrompt = joinAttachmentMarkers(markerLines, prompt);
+    for (const a of pendingAttachments) {
+      attachmentMetaRef.current.set(a.id, { kind: a.kind, name: a.name });
+    }
+    if (!enqueue(prompt, attachmentIds, displayPrompt)) return; // D-002 兜底
+    // 入队成功：清草稿 + 附件 chips（page 模式同款语义；队满失败时均保留）。
     setInput("");
-  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.sessionId, isQueueFull, provider, changeId, workspaceId, establishStream, onSessionCreated, enqueue, openTeamPopover]);
+    setPendingAttachments([]);
+    clearAttachmentsRef.current?.();
+  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.sessionId, isQueueFull, provider, changeId, workspaceId, establishStream, onSessionCreated, enqueue, openTeamPopover, pendingAttachments]);
 
   // 失败轮次「重新发送」——复用 submitFollowup 重新提交该 turn 的 prompt。受
   // turn 级串行 / active 守卫；retryable=false 的错误由 RunErrorItem 隐藏按钮
@@ -3380,6 +3423,11 @@ function SessionPanelDialog(props: SessionPanelProps) {
     setPlanPending(null);
     setBashProgress(null);
     setAgentTasks([]);
+    // ql-20260825-007：随新建重置丢弃待发送附件与元数据镜像（hook 同按
+    // sessionId 切换清队，对齐 page 模式会话切换清理语义）。
+    setPendingAttachments([]);
+    clearAttachmentsRef.current?.();
+    attachmentMetaRef.current.clear();
     // 重置回 idle 时通知父级清除 URL ?session= / 清选中（触发 key 重挂载）
     onSessionReset?.();
   }, [closeStream, onSessionReset]);
@@ -3405,6 +3453,16 @@ function SessionPanelDialog(props: SessionPanelProps) {
     view.status === "failed" ||
     !hasOnlineProvider ||
     offlineReadOnly;
+
+  // ql-20260825-007：附件门控（D-6 引擎门控同构 + 首句门控）——codex 引擎禁；
+  // 无 sessionId（idle 首句 / creating）禁：createSession 契约无 attachment_ids
+  //（R3），放开会出现「上传成功但发不出去」。attach 模式进入即有 sessionId，
+  // 追问/排队路径（injectSession）已支持附件，正常开放。
+  const attachmentsDisabled = provider !== "claude" || !view.sessionId;
+  const attachmentsDisabledTitle =
+    provider === "claude" && !view.sessionId
+      ? "发送首条消息创建会话后可添加附件"
+      : undefined;
 
   const interruptDisabled =
     view.status !== "active" || !view.currentRunId ||
@@ -3701,12 +3759,18 @@ function SessionPanelDialog(props: SessionPanelProps) {
       )}
 
       {/* 排队消息条（design §3.2 / 目标 3：dialog 与 page 共用；空队列组件自返回
-          null 不占位）。dialog 附件能力关闭（R3），条目无附件元数据镜像可清，
-          onRemove 直通；onRetry 仅用户触发（D-003，hook 内 failed→pending 后条件
-          满足即投递）。 */}
+          null 不占位）。ql-20260825-007：条目可带附件（📎 数展示），onRemove 顺带
+          清理附件元数据镜像防残留（镜像 page 模式）；onRetry 仅用户触发（D-003，
+          hook 内 failed→pending 后条件满足即投递）。 */}
       <MessageQueueBar
         entries={queue}
-        onRemove={removeEntry}
+        onRemove={(id) => {
+          const entry = queue.find((e) => e.id === id);
+          for (const aid of entry?.attachmentIds ?? []) {
+            attachmentMetaRef.current.delete(aid);
+          }
+          removeEntry(id);
+        }}
         onRetry={(id) => {
           void retryEntry(id);
         }}
@@ -3734,8 +3798,10 @@ function SessionPanelDialog(props: SessionPanelProps) {
         onClose={closeTeamPopover}
       />
 
-      {/* 输入区共享子组件。R3：dialog 不传附件 props（createSession 无
-          attachment_ids 入参——附件会「上传成功但发不出去」），与 ISP 现状一致。 */}
+      {/* 输入区共享子组件。ql-20260825-007：接通附件管线（此前 R3 不传附件
+          props——📎/粘贴能上传但发送被丢，因 createSession 无 attachment_ids 只
+          限制首句；追问/排队走 injectSession 早已支持）。首句门控见
+          attachmentsDisabled 派生。 */}
       <SessionInputBar
         value={input}
         onChange={setInput}
@@ -3745,6 +3811,12 @@ function SessionPanelDialog(props: SessionPanelProps) {
         disabled={sendingDisabled}
         placeholder={placeholder}
         creating={view.status === "creating"}
+        attachmentsDisabled={attachmentsDisabled}
+        attachmentsDisabledTitle={attachmentsDisabledTitle}
+        onAttachmentsChange={setPendingAttachments}
+        registerClearAttachments={(fn) => {
+          clearAttachmentsRef.current = fn;
+        }}
       />
     </section>
   );
