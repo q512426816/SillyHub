@@ -74,6 +74,15 @@ export interface PageSessionContext {
 export function usePageSessionContext(): PageSessionContext {
   const pathname = usePathname();
   return useMemo(() => {
+    // task-10：工作区详情页实体级派生——pathname 提取 :id，服务端回查注入
+    // 工作区名称/类型/路径（用户实测反馈：笼统标签不知道用户问的是哪个）。
+    const wsMatch = pathname?.match(/^\/workspaces\/([^/]+)(\/|$)/);
+    if (wsMatch?.[1]) {
+      return {
+        pageContext: { page_key: "workspace", workspace_id: wsMatch[1] },
+        label: ROUTE_LABELS.workspace_detail ?? null,
+      };
+    }
     const routeKey = pathname ? deriveRouteKey(pathname) : null;
     if (!routeKey) return { pageContext: null, label: null };
     return {

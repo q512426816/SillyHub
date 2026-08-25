@@ -38509,7 +38509,8 @@
             "type": "string",
             "enum": [
               "ppm_project",
-              "generic_page"
+              "generic_page",
+              "workspace"
             ],
             "title": "Page Key"
           },
@@ -38537,6 +38538,18 @@
               }
             ],
             "title": "Route Key"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
           }
         },
         "type": "object",
@@ -38544,7 +38557,7 @@
           "page_key"
         ],
         "title": "PageContextCreateBlock",
-        "description": "``SessionCreateRequest.page_context`` 内嵌块（2026-08-25-unified-floating-session / FR-5 / D-005）。\n\n悬浮会话入口的页面上下文通道：客户端只允许声明「页面类型枚举 + 键」，\n前导文本的全部数据由服务端生成（DB 回查 / 注册表 Lookup，防客户端伪造\n注入——自由文本字段一律不收）。两类：\n- ``ppm_project``：PPM 项目详情页（task-01），需 ``project_id``（服务端\n  回查 PpmProjectMaintenance 注入项目数据）；\n- ``generic_page``：通用页面（task-09，用户反馈\"任意页面都该知道\"），\n  需 ``route_key``——后端 ``PAGE_ROUTE_LABELS`` 注册表 Lookup 出页面\n  中文名注入；未注册 key → 静默不注入（枚举语义，零自由文本）。"
+        "description": "``SessionCreateRequest.page_context`` 内嵌块（2026-08-25-unified-floating-session / FR-5 / D-005）。\n\n悬浮会话入口的页面上下文通道：客户端只允许声明「页面类型枚举 + 键」，\n前导文本的全部数据由服务端生成（DB 回查 / 注册表 Lookup，防客户端伪造\n注入——自由文本字段一律不收）。三类：\n- ``ppm_project``：PPM 项目详情页（task-01），需 ``project_id``（服务端\n  回查 PpmProjectMaintenance 注入项目数据）；\n- ``generic_page``：通用页面（task-09），需 ``route_key``——后端\n  ``PAGE_ROUTE_LABELS`` 注册表 Lookup 出页面中文名注入；未注册 key →\n  静默不注入（枚举语义，零自由文本）；\n- ``workspace``：工作区详情页（task-10，用户实测反馈\"工作区页只注入\n  笼统标签不知道是哪个\"），需 ``workspace_id``——服务端回查 Workspace\n  注入名称/类型/路径。"
       },
       "Page_CustomerMaintenanceResp_": {
         "properties": {
@@ -53499,6 +53512,13 @@
             "type": "array",
             "title": "Scope Workspace Ids"
           },
+          "scope_workspaces": {
+            "items": {
+              "$ref": "#/components/schemas/TeamWorkspaceRef"
+            },
+            "type": "array",
+            "title": "Scope Workspaces"
+          },
           "budget_usd": {
             "anyOf": [
               {
@@ -53527,7 +53547,7 @@
           "budget_usd"
         ],
         "title": "TeamMissionSummary",
-        "description": "触发/列表共用响应（design §7）。\n\n``status`` 为扩展后 derive_status 派生值（含 awaiting_input 档，会话维度\n入参）；``workers`` 仅 role != orchestrator 的分身 run（主控轮 D-009 不进）；\n``scope_workspace_ids`` 为落库冻结快照（NULL 缺省回落 [anchor]）。"
+        "description": "触发/列表共用响应（design §7）。\n\n``status`` 为扩展后 derive_status 派生值（含 awaiting_input 档，会话维度\n入参）；``workers`` 仅 role != orchestrator 的分身 run（主控轮 D-009 不进）；\n``scope_workspace_ids`` 为落库冻结快照（NULL 缺省回落 [anchor]）；\n``scope_workspaces`` 为 id+名称 enriched 视图（ql-20260825-003）。"
       },
       "TeamMissionTriggerRequest": {
         "properties": {
@@ -53668,6 +53688,31 @@
         ],
         "title": "TeamMissionWorkerSummary",
         "description": "TeamMissionSummary.workers 单项——分身 run（role != orchestrator）概要。"
+      },
+      "TeamWorkspaceRef": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "TeamWorkspaceRef",
+        "description": "TeamMissionSummary.scope_workspaces 单项——scope 工作区 id+名称。\n\nql-20260825-003：范围徽标名称化（前端只拿 id 时回落 #<id8> 原始徽标）。\nname 查无 Workspace 行时为 None（前端回落 id 徽标）。"
       },
       "TokenPair": {
         "properties": {

@@ -1070,6 +1070,7 @@ class SessionService:
                     page_context.page_key,
                     page_context.project_id,
                     page_context.route_key,
+                    page_context.workspace_id,
                 )
                 if page_context is not None
                 else None

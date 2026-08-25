@@ -170,8 +170,16 @@ function FloatingDrawerBody({
           <div className="ml-auto flex items-center gap-1.5">
             <button
               type="button"
-              title="去 /sessions 全屏门户（与悬浮互斥，抽屉自动收起）"
-              onClick={() => router.push("/sessions")}
+              title="去 /sessions 全屏门户（当前会话经 ?session= 深链直接打开）"
+              data-testid="floating-fullscreen"
+              // task-10（用户实测反馈：全屏后要重新找会话）：门户 ?session=
+              // 深链直达当前会话（sessions-portal.tsx 深链恢复契约）；无选中
+              // 会话（预会话/空态）落空门户由用户自选。
+              onClick={() =>
+                router.push(
+                  sessionId ? `/sessions?session=${encodeURIComponent(sessionId)}` : "/sessions",
+                )
+              }
               className="inline-flex h-7 items-center gap-1 rounded-full border border-border bg-card px-3 text-xs font-medium text-muted-foreground transition-colors hover:border-brand-400 hover:text-brand-700"
             >
               <Maximize2 className="h-3.5 w-3.5" />

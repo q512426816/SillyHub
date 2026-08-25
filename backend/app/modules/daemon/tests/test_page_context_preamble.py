@@ -301,3 +301,46 @@ class TestCreatePathInjection:
         lease = await db_session.get(DaemonTaskLease, result.lease_id)
         assert lease is not None
         assert (lease.metadata_ or {}).get("prompt") == user_prompt
+
+
+class TestWorkspacePreamble:
+    """task-10：workspace 实体回查前导（用户实测反馈迭代）。"""
+
+    @pytest.mark.asyncio
+    async def test_workspace_hit_produces_entity_preamble(self, db_session) -> None:
+        from app.modules.daemon.session.context import build_page_context_preamble
+        from app.modules.workspace.model import Workspace
+
+        ws = Workspace(
+            id=uuid.uuid4(),
+            name="multi-agent-platform",
+            slug="map",
+            root_path="C:/repo/map",
+            status="active",
+            type="app",
+        )
+        db_session.add(ws)
+        await db_session.commit()
+
+        out = await build_page_context_preamble(db_session, "workspace", None, None, ws.id)
+        assert out is not None
+        assert "【页面上下文】" in out
+        assert "工作区详情" in out
+        assert "multi-agent-platform" in out
+        assert "app" in out
+        assert "C:/repo/map" in out
+
+    @pytest.mark.asyncio
+    async def test_workspace_unknown_id_returns_none(self, db_session) -> None:
+        from app.modules.daemon.session.context import build_page_context_preamble
+
+        assert (
+            await build_page_context_preamble(db_session, "workspace", None, None, uuid.uuid4())
+            is None
+        )
+
+    def test_workspace_block_requires_workspace_id(self) -> None:
+        from app.modules.daemon.schema import PageContextCreateBlock
+
+        with pytest.raises(ValidationError):
+            PageContextCreateBlock(page_key="workspace")

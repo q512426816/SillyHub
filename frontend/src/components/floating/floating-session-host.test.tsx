@@ -11,10 +11,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 
 const pathnameRef = { current: "/ppm/projects" };
+const pushMock = vi.fn();
 
 vi.mock("next/navigation", () => ({
   usePathname: () => pathnameRef.current,
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ push: pushMock, replace: vi.fn() }),
 }));
 
 vi.mock("@/components/daemon/session-panel", () => ({
@@ -88,6 +89,7 @@ describe("FloatingSessionHost", () => {
     resetStore();
     pathnameRef.current = "/ppm/projects";
     machinesLoadingRef.current = false;
+    pushMock.mockClear();
   });
 
   it("非门户路由渲染悬浮球；全关无会话时抽屉主体不挂载（门控）", () => {
@@ -161,5 +163,16 @@ describe("FloatingSessionHost", () => {
     pathnameRef.current = "/workspaces/abc/sessions";
     render(wrap(<FloatingSessionHost />));
     expect(screen.queryByTestId("floating-ball")).not.toBeInTheDocument();
+  });
+
+  it("全屏按钮携带 ?session= 深链直达当前会话（task-10 用户反馈修复）", async () => {
+    render(wrap(<FloatingSessionHost />));
+    act(() => {
+      useFloatingSessionStore.getState().selectSession("s-77");
+    });
+    const btn = await screen.findByTestId("floating-fullscreen");
+    btn.click();
+    expect(pushMock).toHaveBeenCalledWith("/sessions?session=s-77");
+    pushMock.mockClear();
   });
 });

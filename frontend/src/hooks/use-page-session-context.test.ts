@@ -31,11 +31,14 @@ describe("usePageSessionContext", () => {
     });
   });
 
-  it("工作区详情页派生 workspace_detail", () => {
+  it("工作区详情页派生 workspace 实体上下文（task-10）", () => {
     pathnameRef.current = "/workspaces/abc/changes";
     const { result } = renderHook(() => usePageSessionContext());
     expect(result.current.label).toBe("工作区详情");
-    expect(result.current.pageContext?.page_key).toBe("generic_page");
+    expect(result.current.pageContext).toEqual({
+      page_key: "workspace",
+      workspace_id: "abc",
+    });
   });
 
   it("工作区列表精确匹配（/workspaces 本体）", () => {

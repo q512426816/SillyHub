@@ -117,17 +117,21 @@ class PageContextCreateBlock(BaseModel):
 
     悬浮会话入口的页面上下文通道：客户端只允许声明「页面类型枚举 + 键」，
     前导文本的全部数据由服务端生成（DB 回查 / 注册表 Lookup，防客户端伪造
-    注入——自由文本字段一律不收）。两类：
+    注入——自由文本字段一律不收）。三类：
     - ``ppm_project``：PPM 项目详情页（task-01），需 ``project_id``（服务端
       回查 PpmProjectMaintenance 注入项目数据）；
-    - ``generic_page``：通用页面（task-09，用户反馈"任意页面都该知道"），
-      需 ``route_key``——后端 ``PAGE_ROUTE_LABELS`` 注册表 Lookup 出页面
-      中文名注入；未注册 key → 静默不注入（枚举语义，零自由文本）。
+    - ``generic_page``：通用页面（task-09），需 ``route_key``——后端
+      ``PAGE_ROUTE_LABELS`` 注册表 Lookup 出页面中文名注入；未注册 key →
+      静默不注入（枚举语义，零自由文本）；
+    - ``workspace``：工作区详情页（task-10，用户实测反馈"工作区页只注入
+      笼统标签不知道是哪个"），需 ``workspace_id``——服务端回查 Workspace
+      注入名称/类型/路径。
     """
 
-    page_key: Literal["ppm_project", "generic_page"]
+    page_key: Literal["ppm_project", "generic_page", "workspace"]
     project_id: uuid.UUID | None = None
     route_key: str | None = Field(default=None, max_length=60, pattern=r"^[a-z0-9][a-z0-9_:-]*$")
+    workspace_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def _require_kind_specific_field(self) -> "PageContextCreateBlock":
@@ -135,6 +139,8 @@ class PageContextCreateBlock(BaseModel):
             raise ValueError("project_id is required when page_key is ppm_project")
         if self.page_key == "generic_page" and not self.route_key:
             raise ValueError("route_key is required when page_key is generic_page")
+        if self.page_key == "workspace" and self.workspace_id is None:
+            raise ValueError("workspace_id is required when page_key is workspace")
         return self
 
 
@@ -798,6 +804,17 @@ class TeamMissionTriggerRequest(BaseModel):
     main_agent_config: dict | None = None
 
 
+class TeamWorkspaceRef(BaseModel):
+    """TeamMissionSummary.scope_workspaces 单项——scope 工作区 id+名称。
+
+    ql-20260825-003：范围徽标名称化（前端只拿 id 时回落 #<id8> 原始徽标）。
+    name 查无 Workspace 行时为 None（前端回落 id 徽标）。
+    """
+
+    id: str
+    name: str | None = None
+
+
 class TeamMissionWorkerSummary(BaseModel):
     """TeamMissionSummary.workers 单项——分身 run（role != orchestrator）概要。"""
 
@@ -813,13 +830,15 @@ class TeamMissionSummary(BaseModel):
 
     ``status`` 为扩展后 derive_status 派生值（含 awaiting_input 档，会话维度
     入参）；``workers`` 仅 role != orchestrator 的分身 run（主控轮 D-009 不进）；
-    ``scope_workspace_ids`` 为落库冻结快照（NULL 缺省回落 [anchor]）。
+    ``scope_workspace_ids`` 为落库冻结快照（NULL 缺省回落 [anchor]）；
+    ``scope_workspaces`` 为 id+名称 enriched 视图（ql-20260825-003）。
     """
 
     mission_id: uuid.UUID
     status: str  # planning|running|awaiting_input|done|degraded|failed|cancelled
     objective: str | None
     scope_workspace_ids: list[str]
+    scope_workspaces: list[TeamWorkspaceRef] = Field(default_factory=list)
     budget_usd: float | None
     workers: list[TeamMissionWorkerSummary] = Field(default_factory=list)
 

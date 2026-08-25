@@ -147,6 +147,7 @@ async def build_page_context_preamble(
     page_key: str | None,
     project_id: uuid.UUID | None,
     route_key: str | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> str | None:
     """拼装【页面上下文】前导字符串。
 
@@ -155,8 +156,26 @@ async def build_page_context_preamble(
       截断；数据只来自服务端 DB，不接受客户端文本。
     - ``generic_page``（task-09）：``PAGE_ROUTE_LABELS`` 注册表 Lookup 出
       页面中文名；未注册 key → None（枚举语义）。
+    - ``workspace``（task-10）：回查 :class:`Workspace` 注入名称/类型/路径；
+      查无 → None。
     - 其余 / 入参缺失 → None（不注入）。
     """
+    if page_key == "workspace":
+        if workspace_id is None:
+            return None
+        ws = await db.get(Workspace, workspace_id)
+        if ws is None:
+            return None
+        lines = ["【页面上下文】", "- 页面：工作区详情"]
+        if ws.name:
+            lines.append(f"- 工作区：{ws.name[:_PAGE_VALUE_MAX]}")
+        if ws.type:
+            lines.append(f"- 类型：{ws.type[:_PAGE_VALUE_MAX]}")
+        if ws.root_path:
+            lines.append(f"- 路径：{ws.root_path[:_PAGE_VALUE_MAX]}")
+        if len(lines) <= 1:
+            return None
+        return "\n".join(lines)
     if page_key == "generic_page":
         label = PAGE_ROUTE_LABELS.get(route_key or "")
         if label is None:
