@@ -48,10 +48,16 @@
 
 ### P2 递归开闸（独立开关，P1 之后）
 
-- [ ] 深度上限（stage 编码深度或 metadata 新字段；daemon 谓词 + backend 派发门双保险）。
-- [ ] converge 权限收口：只许第 0 层主控收敛（现状任何 apiKey 身份可对任意 mission 调）。
-- [ ] 预算树上聚合（现状 mission.budget_tokens 原样塞每个子会话各自为限 → N 倍超支）。
-- [ ] daemon 级存活会话/进程上限（现状无总闸；每会话 ≈3 常驻子进程）。
+> **P2 已实现并 verify 通过（2026-08-26）**：变更 `2026-08-26-team-subsession-recursion`
+> 全流程完成（brainstorm Grill 两轮 → plan 独立审查一次 pass → execute 5 波 9 任务 →
+> verify PASS WITH NOTES → archive）。实现合并 d6b1426b。三端全量 4694/2855/2268。
+> 递归形态：总深 3 层（主控 0/分身 1/孙 2），非叶分身 5 件工具（派工集+收敛收口），
+> converge/report_progress 主控独有；预算强收+会话闸+失败即收口配套齐备。
+
+- [x] 深度上限（tree_depth 列 NOT NULL DEFAULT 0 + lease worker_depth 透传；backend 400 门 + daemon 叶档单工具双保险，双侧常量=2 有锁漂移断言）。
+- [x] converge 权限收口：层 0 四通道守卫（分身 403/apiKey 裸调 403/Bearer 豁免/主控过）。
+- [x] 预算树聚合：patrol 职责⑥强收（budget_force_ended_at 原子标记 + 批量收口 + 强收后可收敛 degraded 映射）。
+- [x] daemon 级存活会话上限：SILLYHUB_MAX_ACTIVE_SESSIONS 默认 20（0 不限，restore 豁免）+ run_sync 失败即收口。
 
 ### P3 UI
 
