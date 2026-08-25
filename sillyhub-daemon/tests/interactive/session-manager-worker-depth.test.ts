@@ -316,3 +316,32 @@ describe('task-04: SessionManager 会话总数闸', () => {
     expect(sm.get('cap-restore')?.status).toBe('reconnecting');
   });
 });
+
+// ── 审计修复回归（2026-08-26）：F1 env 空串 / F3 budget Map 泄漏 ──
+
+describe("审计 F1/F3 回归", () => {
+  it("F1：SILLYHUB_MAX_ACTIVE_SESSIONS 空串回落默认 20（不被 Number('')===0 解析为不限）", async () => {
+    process.env.SILLYHUB_MAX_ACTIVE_SESSIONS = "";
+    const mock = makeMockDriver();
+    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+
+    // 空串 → 默认 20：第 21 个 create 拒绝（若被解析为 0=不限则会成功——回归锚）
+    for (let i = 0; i < 20; i++) {
+      await sm.create({ ...BASE_INPUT, sessionId: `f1-${i}` });
+    }
+    await expect(
+      sm.create({ ...BASE_INPUT, sessionId: "f1-over" }),
+    ).rejects.toBeInstanceOf(SessionLimitReached);
+  });
+
+  it("F3：无 partial buffer 的会话 end 后 budget Map 条目同样被回收", async () => {
+    const { SessionManager } = await import("../../src/interactive/session-manager.js");
+    const mgr = new SessionManager({ isWorkerSession: () => false });
+    mgr["_sessionBudgetTokens"].set("sess-f3", 1000);
+    mgr["_overBudgetSessions"].add("sess-f3");
+    // 无 partial buffer 的会话直接销毁
+    mgr["_destroyPartialBuffer"]("sess-f3");
+    expect(mgr["_sessionBudgetTokens"].has("sess-f3")).toBe(false);
+    expect(mgr["_overBudgetSessions"].has("sess-f3")).toBe(false);
+  });
+});

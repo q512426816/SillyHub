@@ -837,7 +837,11 @@ export class SessionManager {
     // task-04（design §5.D / FR-06）：会话总数闸 env 读法对齐 SESSION_IDLE_TIMEOUT_SEC
     // 先例。Number(env) 未配/非法 → NaN → 默认 20；显式 0 = 不限（design §5.D）；
     // 负数视为非法同落默认。计数口径 = _store 活会话（非终态），create 前置检查。
-    const gateRaw = Number(process.env.SILLYHUB_MAX_ACTIVE_SESSIONS);
+    // 审计修复 F1（2026-08-26）：Number('') === 0 —— Compose `${VAR:-}` 缺省展开
+    // 为空串时曾被解析为「0=不限」，进程风暴闸静默失效。trim 后空串视为未配置
+    // 回落默认；非法/负数同落默认；显式 0 仍为不限（design §5.D）。
+    const gateEnv = (process.env.SILLYHUB_MAX_ACTIVE_SESSIONS ?? '').trim();
+    const gateRaw = gateEnv === '' ? NaN : Number(gateEnv);
     this._maxActiveSessions =
       Number.isFinite(gateRaw) && gateRaw >= 0 ? gateRaw : DEFAULT_MAX_ACTIVE_SESSIONS;
     // ql-20260822-001：resume transcript 目录对（测试注入 tmp 对，生产取缺省）。
@@ -4913,6 +4917,11 @@ export class SessionManager {
   private _destroyPartialBuffer(sessionId: string): void {
     // task-03 / D-002：销毁整个 session 的所有桶（主 + 各子代理）。每个桶有独立 timer，
     // 全部 clearTimeout 防泄漏。
+    // 审计修复 F3（2026-08-26）：budget 软切断状态清理移到 partial buffer 早退**之前**
+    // ——无 partial buffer 的会话（预算会话未必有 partial 流）end/fail 后同样要回收
+    // 两个 Map 条目，原实现早退跳过清理致泄漏（注释宣称会清，实现不清）。
+    this._sessionBudgetTokens.delete(sessionId);
+    this._overBudgetSessions.delete(sessionId);
     const sessionMap = this._partialBuffers.get(sessionId);
     if (!sessionMap) return;
     for (const buf of sessionMap.values()) {
@@ -4922,8 +4931,5 @@ export class SessionManager {
       }
     }
     this._partialBuffers.delete(sessionId);
-    // task-08：清理 budget 软切断状态（session 已 end/fail，不再可能 inject）。
-    this._sessionBudgetTokens.delete(sessionId);
-    this._overBudgetSessions.delete(sessionId);
   }
 }

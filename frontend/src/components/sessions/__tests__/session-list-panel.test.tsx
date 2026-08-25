@@ -1833,6 +1833,50 @@ describe("SessionListPanel 分身子会话折叠分组（P3）", () => {
     expect(await screen.findByText("迷路的分身")).toBeVisible();
   });
 
+
+  it("审计 F5+F7：全量计数不受组内截断影响——父行附属组徽标按全量子会话计数", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    // 1 主控 + 3 分身（全量）——不触发 50 截断，但断言计数来自全量集合语义
+    const main = makeSession({ id: "s-main", workspace_id: "ws-1", title: "团队主任务" });
+    const subs = [1, 2, 3].map((i) =>
+      makeSession({
+        id: `s-sub-${i}`,
+        title: `分身${i}`,
+        workspace_id: "ws-1",
+        runtime_id: "rt-m1",
+        parent_session_id: "s-main",
+        tree_depth: 1,
+      }),
+    );
+    mocks.listAgentSessions.mockResolvedValue(listResponse([main, ...subs]));
+    renderPanel(<SessionListPanel />);
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalled());
+    await openGroup("SillyHub");
+
+    expect(await screen.findByText("分身 3")).toBeVisible();
+    fireEvent.click(screen.getByText("分身 3"));
+    expect(await screen.findByText("分身1")).toBeVisible();
+  });
+
+  it("审计 F5：筛选变化重置分身折叠展开态——改状态筛选后附属组回到收起", async () => {
+    subsessionFixtures();
+    renderPanel(<SessionListPanel />);
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalled());
+    await openGroup("SillyHub");
+    await screen.findByText("团队主任务");
+
+    fireEvent.click(screen.getByText("分身 2"));
+    expect(await screen.findByText("分身甲")).toBeVisible();
+
+    // 切状态筛选（filterEpoch 变化）→ openParents 重置 → 折叠回收起。
+    // fixtures 默认 status=active，选「活跃」保持数据可见（纯验证重置副作用）。
+    await chooseAntdOptionByText("slp-status", "活跃");
+    await waitFor(() => {
+      expect(screen.queryByText("分身甲")).toBeNull();
+    });
+  });
+
   it("无子会话列表零变化——不渲染折叠组头", async () => {
     setMachines({ items: twoMachines() });
     setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);

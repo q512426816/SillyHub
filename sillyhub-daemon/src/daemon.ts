@@ -41,6 +41,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { type DaemonConfig, DEFAULT_CONFIG_DIR, normalizeAllowedRoots } from './config.js';
+import { normalizeWorkerDepth } from './mcp-config.js';
 import { MSG } from './protocol.js';
 // 2026-08-20-session-multimodal-attachments task-09：SESSION_INJECT 附件类型。
 import type { SessionInjectAttachment } from './protocol.js';
@@ -4318,10 +4319,14 @@ export class Daemon {
       // lease / 主控 / 普通会话）→ 全链穿透不伪造默认值（零回归）。
       // 注：LeaseCtx（src/types.ts）不在本卡 allowed_paths，以交叉类型随
       // execPayload 承载，_startInteractiveSession 透传 CreateSessionInput。
-      worker_depth:
+      // 审计修复 F4（2026-08-26）：入口即归一化（normalizeWorkerDepth 单源）——
+      // 字符串/非法形态若靠运行期 normalize 救回，落盘 snapshot 会被
+      // validateRecord 拒收致重启非叶静默降级叶档；此处提前归一杜绝。
+      worker_depth: normalizeWorkerDepth(
         (rawExec.worker_depth as number | undefined) ??
-        (rawExec.workerDepth as number | undefined) ??
-        (payload as { worker_depth?: number }).worker_depth,
+          (rawExec.workerDepth as number | undefined) ??
+          (payload as { worker_depth?: number }).worker_depth,
+      ),
       // task-08 / task-09（D-004@v1 / D-005@v1）：LLM 供应商配置透传。backend
       // build_claim_payload 按 lease→user 解析默认 provider 解密 api_key 后下发；
       // daemon spawn-env 第 0 层据此注入 ANTHROPIC_* env。interactive 经 execPayload

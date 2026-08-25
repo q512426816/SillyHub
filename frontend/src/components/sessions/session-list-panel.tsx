@@ -1043,7 +1043,8 @@ function WorkspaceTreeList({
    * R-05 筛选纪元（ql-20260824-001）：任一筛选值变化即翻新——「本地 Agent」
    * 小节据此丢弃旧覆盖值回到默认折叠（与组级 resetExpansionForFilter 同步）。
    */
-  const filterEpoch = `${filterMachineId}|${filterAgent}|${status}|${appliedQuery}`;
+  // 审计修复 F5：JSON 序列化防值含分隔符的理论碰撞（重置失效）。
+  const filterEpoch = JSON.stringify([filterMachineId, filterAgent, status, appliedQuery]);
 
   return (
     <div
@@ -1369,9 +1370,12 @@ function WorkspaceGroupNode({
 }) {
   // 组内超 50 截断（R-03）：截断作用于分组（跨机器小节），小节由可见条目派生。
   const truncated = !showAll && visibleSessions.length > GROUP_ITEM_LIMIT;
-  const shownSessions = truncated
-    ? visibleSessions.slice(0, GROUP_ITEM_LIMIT)
-    : visibleSessions;
+  // 审计修复 F2（2026-08-26）：截断 slice 移入 useMemo——原 render 内联生成新数组，
+  // 引用不稳致 subGrouping/sections 每渲染重算（10s 轮询与任意 state 变化均触发）。
+  const shownSessions = useMemo(
+    () => (truncated ? visibleSessions.slice(0, GROUP_ITEM_LIMIT) : visibleSessions),
+    [truncated, visibleSessions],
+  );
 
   // 机器小节：首现序分桶（后端按最近活跃倒序 → 最近活跃的机器排前）。
   // origin=tool_report（本地 Agent，SillySpec CLI 自动上报）不进机器分桶，
@@ -1381,25 +1385,32 @@ function WorkspaceGroupNode({
   // （parent_session_id 非空）不进机器分桶——按父聚合为父行附属组（父行在
   // 当前列表时）；父不可见（分页边界/筛选）的落孤儿小节兜底，绝不丢行。
   const subGrouping = useMemo(() => {
+    // 审计修复 F5+F7（2026-08-26）：byParent 按**全量** visibleSessions 聚合——
+    // 「分身 N」计数不被组内 50 截断切小，且截断边界漂移（轮询新增行）时
+    // 父行附属归属稳定不闪跳；orphans 按 shownSessions 判定——只有父不在
+    // **已渲染**主行集合的子会话才进孤儿小节（父在但被截断不显示时，
+    // 其子会话本就不渲染，无需孤儿兜底）。
+    const allMainIds = new Set(
+      visibleSessions.filter((s) => !s.parent_session_id).map((s) => s.id),
+    );
     const byParent = new Map<string, AgentSessionRead[]>();
-    const orphans: AgentSessionRead[] = [];
-    const mainIds = new Set(
+    for (const s of visibleSessions) {
+      // 仅父存在于全量主行集合才建附属组（父真不存在的子会话走孤儿口径）。
+      if (!s.parent_session_id || !allMainIds.has(s.parent_session_id)) continue;
+      const arr = byParent.get(s.parent_session_id) ?? [];
+      arr.push(s);
+      byParent.set(s.parent_session_id, arr);
+    }
+    const shownMainIds = new Set(
+      shownSessions.filter((s) => !s.parent_session_id).map((s) => s.id),
+    );
+    const orphanIds = new Set(
       shownSessions
-        .filter((s) => !s.parent_session_id)
+        .filter((s) => s.parent_session_id && !shownMainIds.has(s.parent_session_id))
         .map((s) => s.id),
     );
-    for (const s of shownSessions) {
-      if (!s.parent_session_id) continue;
-      if (mainIds.has(s.parent_session_id)) {
-        const arr = byParent.get(s.parent_session_id) ?? [];
-        arr.push(s);
-        byParent.set(s.parent_session_id, arr);
-      } else {
-        orphans.push(s);
-      }
-    }
-    return { byParent, orphans };
-  }, [shownSessions]);
+    return { byParent, orphanIds };
+  }, [visibleSessions, shownSessions]);
 
   const sections = useMemo(() => {
     const list: GroupSection[] = [];
@@ -1408,9 +1419,9 @@ function WorkspaceGroupNode({
     let subOrphanSection: GroupSection | null = null;
     for (const s of shownSessions) {
       if (s.parent_session_id) {
-        // 分身子会话：父在列表 → 附属组（subGrouping.byParent）；父不可见
-        // → 孤儿小节兜底。均不进机器分桶。
-        if (!subGrouping.byParent.has(s.parent_session_id)) {
+        // 分身子会话：父在已渲染主行 → 附属组（subGrouping.byParent）；父不可见
+        // → 孤儿小节兜底（orphanIds 按 shown 判定，见 subGrouping 注释）。
+        if (subGrouping.orphanIds.has(s.id)) {
           if (!subOrphanSection) {
             subOrphanSection = {
               key: SUB_ORPHAN_SECTION_KEY,
