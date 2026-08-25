@@ -25,7 +25,11 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agent.mission import is_worker_complete, mission_derive_status
+from app.modules.agent.mission import (
+    WORKER_FORCE_ENDED_AT_KEY,
+    is_worker_complete,
+    mission_derive_status,
+)
 from app.modules.agent.model import AgentMission, AgentRun, AgentSession
 
 
@@ -535,6 +539,123 @@ class TestBudgetForceEndedMapping:
         await _add_session(db_session, status="ended", parent_session_id=worker.id)  # 孙被强收
 
         assert await mission_derive_status(db_session, mission.id) == "degraded"
+
+
+# ── 6. worker_force_ended_at 虚拟映射（审计修复 F01 / §A.6-1）────────────────
+#
+# 「ended 未 done」死分身的预算强收外生成源（手动 end_session / 空闲清扫 / 终态
+# 清扫）同样需要 failed 终态映射出口：mission.constraints 带
+# worker_force_ended_at 键（patrol 职责⑦置位，本模块只读键存在性）时与 budget
+# 标记同象——「会话 ended 且未 done」映射 failed（终态）而非 running → derive
+# 可落 degraded/failed，mission 可正常 converge（非预算 mission 不再死锁在
+# 唯一出口人工 cancel）。优先级与 budget 标记共用同一分支，无标记时零漂移。
+
+
+_WORKER_MARKER: dict = {WORKER_FORCE_ENDED_AT_KEY: "2026-08-26T05:00:00+00:00"}
+
+
+class TestWorkerForceEndedMapping:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("marker", [_BUDGET_MARKER, _WORKER_MARKER])
+    async def test_either_marker_ended_not_done_maps_failed(
+        self, db_session: AsyncSession, marker: dict
+    ) -> None:
+        """budget 或 worker_force_ended 任一标记 + 单分身 ended 未 done → 虚拟
+        failed → failed（终态，非 running 卡死）——两标记映射同象（F01）。"""
+        root = await _add_session(db_session)
+        mission = await _add_mission(
+            db_session,
+            root_session_id=root.id,
+            converged_at=_ts(),
+            constraints=marker,
+        )
+        await _add_session(db_session, status="ended", parent_session_id=root.id)
+
+        assert await mission_derive_status(db_session, mission.id) == "failed"
+
+    @pytest.mark.asyncio
+    async def test_worker_marker_all_terminal_not_running(self, db_session: AsyncSession) -> None:
+        """worker 标记 + 全 ended 未 done（未 converge）→ 虚拟全 failed → 不再
+        running：会话 mission 回落 awaiting_input（等主控 converge 收尾）。"""
+        root = await _add_session(db_session)
+        mission = await _add_mission(
+            db_session, root_session_id=root.id, constraints=_WORKER_MARKER
+        )
+        await _add_session(db_session, status="ended", parent_session_id=root.id)
+        await _add_session(db_session, status="ended", parent_session_id=root.id)
+
+        assert await mission_derive_status(db_session, mission.id) != "running"
+        assert await mission_derive_status(db_session, mission.id) == "awaiting_input"
+
+    @pytest.mark.asyncio
+    async def test_worker_marker_mixed_done_derives_degraded(
+        self, db_session: AsyncSession
+    ) -> None:
+        """worker 标记 + 一 done 分身 + 一 ended 未 done 分身 → completed+failed
+        → degraded（可收敛，收尾但不圆满）。"""
+        root = await _add_session(db_session)
+        mission = await _add_mission(
+            db_session,
+            root_session_id=root.id,
+            converged_at=_ts(),
+            constraints=_WORKER_MARKER,
+        )
+        await _add_session(db_session, parent_session_id=root.id, worker_done_at=_ts())
+        await _add_session(db_session, status="ended", parent_session_id=root.id)
+
+        assert await mission_derive_status(db_session, mission.id) == "degraded"
+
+    @pytest.mark.asyncio
+    async def test_worker_marker_done_worker_priority(self, db_session: AsyncSession) -> None:
+        """worker 标记下 done 分身（ended + worker_done 已置 + 无活跃 turn）仍
+        优先映射 completed → done（done 优先级在标记分支之前，不误杀）。"""
+        root = await _add_session(db_session)
+        mission = await _add_mission(
+            db_session,
+            root_session_id=root.id,
+            converged_at=_ts(),
+            constraints=_WORKER_MARKER,
+        )
+        await _add_session(
+            db_session,
+            status="ended",
+            parent_session_id=root.id,
+            worker_done_at=_ts(),
+        )
+
+        assert await mission_derive_status(db_session, mission.id) == "done"
+
+    @pytest.mark.asyncio
+    async def test_worker_marker_active_session_still_running(
+        self, db_session: AsyncSession
+    ) -> None:
+        """worker 标记只改 ended 未 done 的映射：会话仍 active → running
+        （标记不误伤未终态分身）。"""
+        root = await _add_session(db_session)
+        mission = await _add_mission(
+            db_session,
+            root_session_id=root.id,
+            converged_at=_ts(),
+            constraints=_WORKER_MARKER,
+        )
+        await _add_session(db_session, status="active", parent_session_id=root.id)
+
+        assert await mission_derive_status(db_session, mission.id) == "running"
+
+    @pytest.mark.asyncio
+    async def test_both_markers_coexist_same_mapping(self, db_session: AsyncSession) -> None:
+        """两标记并存（预算强收后 patrol 职责⑦又扫到异源死分身的理论形态）→
+        映射不冲突：ended 未 done → failed。"""
+        root = await _add_session(db_session)
+        mission = await _add_mission(
+            db_session,
+            root_session_id=root.id,
+            converged_at=_ts(),
+            constraints={**_BUDGET_MARKER, **_WORKER_MARKER},
+        )
+        await _add_session(db_session, status="ended", parent_session_id=root.id)
+
+        assert await mission_derive_status(db_session, mission.id) == "failed"
 
 
 if __name__ == "__main__":

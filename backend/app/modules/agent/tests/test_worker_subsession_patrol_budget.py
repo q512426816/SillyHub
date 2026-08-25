@@ -513,6 +513,59 @@ class TestBudgetForceAtomicity:
         )
 
 
+# ── 3.5 F05：抢占 UPDATE 走 DB 侧 JSON 合并（不丢并发键）─────────────────────
+
+
+class TestBudgetClaimMergesConstraints:
+    async def test_claim_preserves_concurrent_constraint_keys(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """审计修复 F05：budget 抢占 UPDATE 不得用早前读的整体 dict 覆盖
+        constraints——扫描读到 constraints 之后、置位之前并发提交的
+        conflict_attempts（``_bump_conflict_attempts`` 同款整体写）必须保留：
+        UPDATE 改 DB 侧 JSON 合并（只并入 budget 标记键，其余键以库内现值为准）。"""
+        captured = _recording_ws_hub(monkeypatch)
+        from app.modules.agent import control as control_mod
+
+        root, mission, user_id, rt = await _seed_tree(
+            db_session, budget_usd=5.0, constraints={"coordinator_summary": "拆解"}
+        )
+        w, lease = await _seed_worker(db_session, root, owner_id=user_id, runtime=rt)
+        await _seed_cost_run(db_session, mission.id, w.id, total_cost_usd=6.0)
+
+        async def _racing_conflict_bump(
+            self: control_mod.MissionControlService, mission_id: uuid.UUID
+        ) -> float:
+            # 模拟并发写者（_bump_conflict_attempts 同款整体 dict 写）：在 patrol
+            # 扫描与置位之间提交 conflict_attempts —— 旧实现（早前读的整体覆盖）
+            # 会把该键抹掉。
+            await db_session.execute(
+                update(AgentMission)
+                .where(AgentMission.id == mission_id)
+                .values(constraints={"conflict_attempts": 1})
+            )
+            await db_session.commit()
+            return 6.0
+
+        monkeypatch.setattr(control_mod.MissionControlService, "cost_so_far", _racing_conflict_bump)
+
+        counts = await MissionPatrolService(db_session).run_once()
+
+        assert counts["budget_force_ended"] == 1
+        await db_session.refresh(mission)
+        merged = mission.constraints or {}
+        assert merged.get("conflict_attempts") == 1, (
+            "并发提交的 conflict_attempts 不得被 budget 抢占覆盖丢失（F05）"
+        )
+        assert BUDGET_FORCE_ENDED_AT_KEY in merged, "budget 标记必须照常置位"
+        # 强收链路照常（收口动作不受合并语义影响）。
+        await db_session.refresh(w)
+        assert w.status == "ended"
+        await db_session.refresh(lease)
+        assert lease.status == "completed"
+        assert {p["session_id"] for p in _session_ends(captured)} == {str(w.id)}
+
+
 # ── 4. 全树枚举：孙层计入（强收 + 孤儿扫描，design §5.E）───────────────────
 
 

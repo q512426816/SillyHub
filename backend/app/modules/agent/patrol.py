@@ -41,16 +41,33 @@ task-07（2026-08-26-team-subsession-recursion / FR-05 / FR-07 / design §5.D+§
 - 孤儿扫描（职责⑤）与强收名单的分身枚举从 ``mission_worker_sessions`` 一层
   换 ``mission_worker_sessions_tree`` 全树（design §5.E——孙层孤儿同样补收口、
   孙层未完成分身同样进强收名单）。
+
+审计修复（docs/qa/subsession-backend-audit-2026-08-26.md §3，死锁族）：
+
+- F01（P1）职责⑦死分身扫描置标：「会话 ended/failed 且未 done」存在预算强收
+  之外的生成源（属主手动 end_session / 空闲清扫 / 终态清扫），无标记时虚拟
+  映射恒 running → converge 永久 busy、非预算 mission 唯一出口人工 cancel。
+  新增职责⑦：活跃 mission 下超宽限（默认 30 分钟，env 可调）的死分身 →
+  原子置位 ``constraints.worker_force_ended_at`` → mission.py 虚拟映射扩为
+  「budget **或** worker 标记存在时 ended 未 done → failed 终态」。
+- F02（P1）职责⑤名单排序：``created_at ASC LIMIT 100`` 无时间窗，终态 mission
+  超 100 后新终态 mission 的孤儿永远扫不到（饥饿）——改「最新终态优先」
+  （COALESCE(converged_at, cancelled_at) DESC；老 mission 孤儿已被历史轮扫过）。
+- F05（P2）constraints JSON 合并语义：强收标记抢占 UPDATE 不再用早前读的
+  整体 dict 覆盖（会丢并发提交的 conflict_attempts 等键）——改 DB 侧 JSON
+  合并（PG jsonb ``||`` / SQLite ``json_patch``），只并入标记键。
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import TextClause, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -85,7 +102,8 @@ _TERMINAL_RUN_STATUSES = ("completed", "failed", "killed")
 
 # run_once 返回 / round_done 日志共用的计数键（FR-04.2；task-12 追加
 # orphan_sessions_ended——职责⑤孤儿子会话补收口计数；task-07 追加
-# budget_force_ended——职责⑥预算触顶强收的 mission 计数）。
+# budget_force_ended——职责⑥预算触顶强收的 mission 计数；审计修复 F01 追加
+# worker_force_ended——职责⑦死分身置标的 mission 计数）。
 PATROL_COUNT_KEYS = (
     "checked",
     "converged",
@@ -95,6 +113,7 @@ PATROL_COUNT_KEYS = (
     "worker_recovered",
     "orphan_sessions_ended",
     "budget_force_ended",
+    "worker_force_ended",
 )
 
 # 僵尸标记态（task-05 provides，task-06/07/08 消费）：主 agent run 判死后写
@@ -106,6 +125,53 @@ ZOMBIE_MARKED_AT_KEY = "zombie_marked_at"
 # schedule_loop 信号 1 对 zombie 主 run 的豁免（下轮按终态 failed 正常收敛）；
 # 置位后保留 zombie_marked_at 作审计。
 ZOMBIE_CONVERGED_KEY = "zombie_converged"
+
+# 死分身宽限（审计修复 F01 / §A.6-1）：会话终态（ended/failed）后持续超宽限
+# 才置 worker_force_ended_at 标记——刚终态的会话可能正处收口语义中，保守宽限
+# 防误杀。命名对齐 config.py mission_patrol_* 家族；本卡 allowed_paths 不含
+# config.py，按 mcp_tools._LAZY_MISSION_BUDGET_USD_DEFAULT 先例以模块级常量 +
+# env 覆盖落地，后续变更可迁 Settings（mission_patrol_worker_force_end_grace_minutes）。
+_WORKER_FORCE_END_GRACE_MINUTES_DEFAULT = 30.0
+_WORKER_FORCE_END_GRACE_MINUTES_ENV = "MISSION_PATROL_WORKER_FORCE_END_GRACE_MINUTES"
+
+
+def _worker_force_end_grace_minutes() -> float:
+    """读死分身宽限分钟数（默认 30；env 可覆盖，非法 / 非正值回默认不猜）。"""
+    raw = os.environ.get(_WORKER_FORCE_END_GRACE_MINUTES_ENV)
+    if raw is None:
+        return _WORKER_FORCE_END_GRACE_MINUTES_DEFAULT
+    try:
+        value = float(raw)
+    except ValueError:
+        return _WORKER_FORCE_END_GRACE_MINUTES_DEFAULT
+    return value if value > 0 else _WORKER_FORCE_END_GRACE_MINUTES_DEFAULT
+
+
+def _json_merge_expr(dialect_name: str) -> TextClause:
+    """constraints JSON 的 DB 侧合并 SQL 片段（审计修复 F05，作 UPDATE ... SET
+    值用；绑定参数 ``:__constraints_merge_patch`` = json.dumps 后的补丁串）。
+
+    合并语义 = 只并入补丁键、其余键以库内现值为准——替代「早前读的整体 dict
+    覆盖」：patrol 抢占置位与并发写者（mcp_tools._bump_conflict_attempts /
+    _mark_mission_needs_manual、zombie 标记等 read-modify-write）交错时不再互
+    相抹键（F05：如 conflict_attempts 被预算抢占覆盖丢失 → R-07 计数漂移）。
+
+    方言分支（先例 daemon/runtime/service._dialect_name；constraints 列为通用
+    ``sqlalchemy.JSON``——生产 PG 落 json 类型（migration 202607060900），单测
+    conftest 用 SQLite 内存库）：
+
+    - PostgreSQL：json 无 ``||`` 合并操作符，显式 CAST 到 jsonb 合并后回 json
+      （``CAST(CAST(COALESCE(constraints,'{}') AS JSONB) || CAST(:p AS JSONB)
+      AS JSON)``）；
+    - SQLite（及其它方言兜底）：``json_patch``（JSON1 扩展，Python 3.9+ 自带
+      SQLite ≥ 3.28 均内置）。
+    """
+    if dialect_name == "postgresql":
+        return text(
+            "CAST(CAST(COALESCE(constraints, '{}') AS JSONB) "
+            "|| CAST(:__constraints_merge_patch AS JSONB) AS JSON)"
+        )
+    return text("json_patch(COALESCE(constraints, '{}'), :__constraints_merge_patch)")
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -189,12 +255,13 @@ class MissionPatrolService:
         return list(rows)
 
     async def run_once(self) -> dict[str, int]:
-        """单轮巡检执行体：顺序跑六职责挂载点，返回计数 dict（FR-04.2）。
+        """单轮巡检执行体：顺序跑七职责挂载点，返回计数 dict（FR-04.2）。
 
         - ``checked``：本轮活跃 mission 数。
         - ``converged`` / ``redispatched`` / ``zombie_marked`` / ``zombie_revived`` /
-          ``worker_recovered`` / ``orphan_sessions_ended`` / ``budget_force_ended``：
-          各职责计数（task-03/04/05/06/08、ql-20260825-003、task-12、task-07）。
+          ``worker_recovered`` / ``orphan_sessions_ended`` / ``budget_force_ended`` /
+          ``worker_force_ended``：各职责计数（task-03/04/05/06/08、
+          ql-20260825-003、task-12、task-07、审计修复 F01）。
         - 各职责独立 try/except 互不阻断（design §2）：单职责崩溃只记
           ``mission_patrol_duty_failed``，同轮其它职责照常执行。
         """
@@ -252,6 +319,16 @@ class MissionPatrolService:
             counts["budget_force_ended"] = await self._patrol_budget_force_end()
         except Exception:
             log.exception("mission_patrol_duty_failed", duty="budget_force_end")
+
+        # ── 职责⑦：死分身扫描置标（审计修复 F01 / §A.6-1）──
+        # 活跃 mission 下「会话终态（ended/failed）且未 done 且终态超宽限」的
+        # 死分身 → 原子置位 constraints.worker_force_ended_at（mission.py 虚拟
+        # 映射据标记落 failed 终态，derive 不再恒 running——非预算 mission 不再
+        # 死锁在唯一出口人工 cancel）。独立 try/except 互不阻断（对齐六职责）。
+        try:
+            counts["worker_force_ended"] = await self._patrol_worker_force_end()
+        except Exception:
+            log.exception("mission_patrol_duty_failed", duty="worker_force_end")
 
         return counts
 
@@ -727,7 +804,11 @@ class MissionPatrolService:
         兜底 task-10 converge 批量收口 best-effort 部分失败与 cancel 链漏网。
 
         - 查询自带 limit（对齐 ``ACTIVE_MISSION_LIMIT`` 惯例）：终态 mission 持续
-          积累，防单轮过载；created_at 升序 = 老 mission 先补，溢出留待下轮。
+          积累，防单轮过载；**最新终态优先**（审计修复 F02：``COALESCE(
+          converged_at, cancelled_at) DESC`` + created_at DESC 并列稳定键）——
+          旧排序 ``created_at ASC`` 无时间窗，终态 mission 超 limit 后新终态
+          mission 的孤儿永远扫不到（饥饿，零孤儿承诺失效）；老 mission 的孤儿
+          已被历史轮扫过，最新终态优先即可覆盖增量，溢出留待下轮。
         - best-effort：单个收口失败 log.warning 继续下一个（对齐 task-10
           收口语义）；职责整体异常由 run_once 的 try/except 兜底，不阻断同轮
           其余职责。预取 (id, user_id) 标量后才进收口循环——end_session 失败
@@ -752,7 +833,12 @@ class MissionPatrolService:
                     AgentMission.cancelled_at.is_not(None),
                 )
             )
-            .order_by(AgentMission.created_at)
+            # 审计修复 F02：最新终态优先（COALESCE 取终态时间戳，converged 与
+            # cancelled 互斥非空），created_at DESC 作并列稳定键。
+            .order_by(
+                func.coalesce(AgentMission.converged_at, AgentMission.cancelled_at).desc(),
+                AgentMission.created_at.desc(),
+            )
             .limit(ACTIVE_MISSION_LIMIT)
         )
         mission_ids = list((await self._session.execute(stmt)).scalars().all())
@@ -803,12 +889,14 @@ class MissionPatrolService:
         **先标记后收口**（Grill M2 时序，顺序不可换）：命中后先原子置位
         ``constraints.budget_force_ended_at``——R5 同款抢占语义
         ``UPDATE...WHERE id + converged_at IS NULL + cancelled_at IS NULL``
-        （finalizer.py 先例；不用 with_for_update），新 dict 合成保留 zombie
-        等既有键（对齐 ZOMBIE_MARKED_AT_KEY 键复用模式），rowcount=0 视为并发
-        converge/cancel 抢占本轮跳过；置位成功且 commit 后才进收口。先标记的
-        原因：task-03 虚拟映射按标记把「会话 ended 且未 done」映 failed 终态
-        （而非 running）→ derive 出 degraded，强收后 mission 可正常 converge，
-        不出现 ended 未 done 卡死 running 的中间态。
+        （finalizer.py 先例；不用 with_for_update），置位走 ``_claim_constraints_
+        marker`` 的 **DB 侧 JSON 合并**（审计修复 F05：只并入标记键，库内既有
+        键——含并发写者刚提交的 conflict_attempts 等——原样保留，不再用早前
+        读的整体 dict 覆盖），rowcount=0 视为并发 converge/cancel 抢占本轮
+        跳过；置位成功且 commit 后才进收口。先标记的原因：task-03 虚拟映射按
+        标记把「会话 ended 且未 done」映 failed 终态（而非 running）→ derive
+        出 degraded，强收后 mission 可正常 converge，不出现 ended 未 done
+        卡死 running 的中间态。
 
         收口复用 P1 收口链（``SessionService.end_session``，子会话 ended +
         interactive lease completed + SESSION_END best-effort），逐个
@@ -848,7 +936,6 @@ class MissionPatrolService:
             mission_id = mission.id
             budget = mission.budget_usd
             owner_id = mission.created_by
-            existing_constraints = dict(mission.constraints or {})
 
             cost = await MissionControlService(self._session).cost_so_far(mission_id)
             if budget is None or cost < budget:
@@ -875,22 +962,13 @@ class MissionPatrolService:
                 continue
 
             # 先标记（原子抢占，R5 同款；rowcount=0 = 并发 converge/cancel 抢占）。
+            # F05：置位走 _claim_constraints_marker 的 DB 侧 JSON 合并——只并入
+            # budget 标记键，并发提交的 conflict_attempts 等键不再被覆盖丢失。
             now = datetime.now(UTC)
-            claim = await self._session.execute(
-                update(AgentMission)
-                .where(
-                    AgentMission.id == mission_id,
-                    AgentMission.converged_at.is_(None),
-                    AgentMission.cancelled_at.is_(None),
-                )
-                .values(
-                    constraints={
-                        **existing_constraints,
-                        BUDGET_FORCE_ENDED_AT_KEY: now.isoformat(),
-                    }
-                )
+            claimed = await self._claim_constraints_marker(
+                mission_id, BUDGET_FORCE_ENDED_AT_KEY, now.isoformat()
             )
-            if claim.rowcount == 0:
+            if not claimed:
                 log.info(
                     "mission_patrol_budget_force_preempted",
                     mission_id=str(mission_id),
@@ -928,6 +1006,132 @@ class MissionPatrolService:
                         error=str(exc),
                     )
         return forced
+
+    def _dialect_name(self) -> str:
+        """检测当前 session 绑定的 DB 方言名（postgresql / sqlite / ...）。
+
+        先例 ``daemon/runtime/service._dialect_name``：AsyncSession.bind 返回
+        AsyncEngine，其 ``.dialect.name`` 同步暴露（单测 + 生产均如此）；bind
+        为 None（理论不可达）按生产 PG 口径兜底。
+        """
+        bind = self._session.bind
+        return bind.dialect.name if bind is not None else "postgresql"
+
+    async def _claim_constraints_marker(self, mission_id: uuid.UUID, key: str, value: str) -> bool:
+        """强收标记的原子合并置位（职责⑥ budget 键 / 职责⑦ worker 键共用）。
+
+        ``UPDATE agent_missions SET constraints = <DB 侧 JSON 合并> WHERE id
+        AND converged_at IS NULL AND cancelled_at IS NULL``——
+
+        - 合并语义（审计修复 F05）：只并入 ``{key: value}`` 新键，其余键以库内
+          现值为准（方言分支见 ``_json_merge_expr``），不再用早前读的整体 dict
+          覆盖——与并发写者（conflict_attempts / needs_manual / zombie 标记等
+          read-modify-write）交错不互相抹键；
+        - 抢占语义（R5 同款，finalizer.py 先例，不用 with_for_update）：
+          rowcount=0 = mission 已被并发 converge/cancel 终态化，调用方本轮跳过。
+
+        Returns:
+            True = 置位成功（未 commit，调用方决定提交时机）；False = 并发抢占。
+        """
+        patch_json = json.dumps({key: value})
+        claim = await self._session.execute(
+            update(AgentMission)
+            .where(
+                AgentMission.id == mission_id,
+                AgentMission.converged_at.is_(None),
+                AgentMission.cancelled_at.is_(None),
+            )
+            .values(constraints=_json_merge_expr(self._dialect_name())),
+            {"__constraints_merge_patch": patch_json},
+        )
+        return claim.rowcount != 0
+
+    async def _patrol_worker_force_end(self) -> int:
+        """职责⑦：活跃 mission 死分身扫描置标（审计修复 F01 / §A.6-1）。
+
+        「会话 ended/failed 且未 done」存在预算强收之外的生成源（属主门户手动
+        end_session / reconnecting 空闲清扫 / 终态清扫残留），无标记时虚拟映射
+        恒 running → converge 永久 busy、awaiting_input 超时收敛永不触发——
+        非预算 mission 唯一出口是人工 cancel（死锁态）。本职责补该出口：
+
+        - 扫描对象：**活跃** mission（未收敛未取消，``ACTIVE_MISSION_LIMIT``
+          limit + created_at 升序，对齐职责⑥惯例）经
+          ``mission_worker_sessions_tree`` 全树枚举（含孙层）；
+        - 死分身判据（全格）：会话终态（ended/failed，词表单源
+          ``mission._WORKER_SESSION_TERMINAL``）+ 未 done（``worker_done_at``
+          空）+ 终态超宽限（``ended_at`` 起算 ≥ 宽限分钟数，见
+          ``_worker_force_end_grace_minutes``；``ended_at`` NULL 脏数据跳过
+          不猜——对齐判死链路断链语义，防误杀刚终态的会话）；
+        - 动作：**只置标记不收口**——死分身会话已终态，无 end_session 收口
+          需求（区别于职责⑥「先标记后收口」两步）。``_claim_constraints_marker``
+          原子置位 ``constraints.worker_force_ended_at``（F05 同款 DB 侧合并；
+          rowcount=0 = 并发 converge/cancel 抢占跳过）；mission_derive_status
+          据标记把「ended 未 done」映 failed 终态（与 budget 标记同象）→
+          derive 不再恒 running，converge busy 门可过、awaiting_input 超时
+          收敛可触发；
+        - 幂等防重复计数：constraints 已带 budget 或 worker 任一强收标记的
+          mission 跳过（failed 映射已武装，重置位无意义——标记只查存在性）。
+
+        Returns:
+            本轮置标的 mission 数（对接 run_once worker_force_ended 计数）。
+        """
+        from app.modules.agent.mission import (
+            _WORKER_SESSION_TERMINAL,
+            BUDGET_FORCE_ENDED_AT_KEY,
+            WORKER_FORCE_ENDED_AT_KEY,
+        )
+
+        stmt = (
+            select(AgentMission)
+            .where(
+                AgentMission.converged_at.is_(None),
+                AgentMission.cancelled_at.is_(None),
+            )
+            .order_by(AgentMission.created_at)
+            .limit(ACTIVE_MISSION_LIMIT)
+        )
+        missions = list((await self._session.execute(stmt)).scalars().all())
+
+        grace = timedelta(minutes=_worker_force_end_grace_minutes())
+        now = datetime.now(UTC)
+        marked = 0
+        for mission in missions:
+            mission_id = mission.id
+            constraints = mission.constraints if isinstance(mission.constraints, dict) else {}
+            if BUDGET_FORCE_ENDED_AT_KEY in constraints or WORKER_FORCE_ENDED_AT_KEY in constraints:
+                # failed 映射已武装（预算强收 / 本职责已置位）——幂等跳过。
+                continue
+
+            workers = await mission_worker_sessions_tree(self._session, mission_id)
+            dead_worker_count = sum(
+                1
+                for w in workers
+                if w.status in _WORKER_SESSION_TERMINAL
+                and w.worker_done_at is None
+                and w.ended_at is not None
+                and now - _as_utc(w.ended_at) >= grace
+            )
+            if dead_worker_count == 0:
+                continue
+
+            claimed = await self._claim_constraints_marker(
+                mission_id, WORKER_FORCE_ENDED_AT_KEY, now.isoformat()
+            )
+            if not claimed:
+                log.info(
+                    "mission_patrol_worker_force_preempted",
+                    mission_id=str(mission_id),
+                )
+                continue
+            await self._session.commit()
+            marked += 1
+            log.info(
+                "mission_patrol_worker_force_marked",
+                mission_id=str(mission_id),
+                dead_workers=dead_worker_count,
+                grace_minutes=_worker_force_end_grace_minutes(),
+            )
+        return marked
 
     async def _resolve_run_lease_for_sync(self, run_id: uuid.UUID) -> DaemonTaskLease | None:
         """worker 断线恢复的 lease 解析：取该 run 最新 lease（与

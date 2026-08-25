@@ -14,6 +14,13 @@ Worker Runs. Worker *execution* (daemon dispatch) is Wave 3.
 ``mission_derive_status`` 分身集合换 ``mission_worker_sessions_tree`` 全树
 枚举（孙层计入）+ ``budget_force_ended_at`` 预算强收标记的虚拟映射增补
 （会话 ended 且未 done → failed 终态，强收后 mission 可收敛 degraded）。
+
+审计修复 F01（docs/qa/subsession-backend-audit-2026-08-26.md §A.6-1）：
+``worker_force_ended_at`` 死分身标记键——「会话 ended/failed 且未 done」存在
+预算强收之外的生成源（手动 end_session / 空闲清扫 / 终态清扫），无标记时映射
+running 使非预算 mission 死锁（converge 永久 busy）。patrol 职责⑦对超宽限
+死分身置位；本模块映射规则扩为「budget 或 worker 任一标记存在时 ended 未
+done → failed 终态」（两标记同象，F01）。
 """
 
 from __future__ import annotations
@@ -110,6 +117,14 @@ _WORKER_RUN_TERMINAL = frozenset({"completed", "failed", "killed"})
 # （ISO 时间戳值，task-07 写）；本模块只读键存在性做虚拟映射——标记存在时
 # 「会话 ended 且未 done」映射 failed 终态，保证强收后 mission 可收敛 degraded。
 BUDGET_FORCE_ENDED_AT_KEY = "budget_force_ended_at"
+# 死分身强收标记键（审计修复 F01 / docs/qa/subsession-backend-audit-2026-08-26.md
+# §A.6-1，mission.py 单源）：「会话 ended/failed 且未 done」存在预算强收之外的
+# 生成源（属主门户手动 end_session / reconnecting 空闲清扫 / 终态清扫残留），
+# 无标记时该形态映射 running → derive 恒 running → converge 永久 busy、
+# awaiting_input 超时收敛永不触发（非预算 mission 唯一出口人工 cancel 的死锁态）。
+# patrol 职责⑦对超宽限的死分身原子置位（ISO 时间戳值）；本模块只读键存在性
+# 做虚拟映射——与 budget 标记同象：「会话 ended 且未 done」→ failed 终态。
+WORKER_FORCE_ENDED_AT_KEY = "worker_force_ended_at"
 
 
 async def _sessions_with_active_turns(
@@ -177,12 +192,13 @@ async def mission_derive_status(
        2026-08-26 task-03 / design §5.E——无孙树与一层枚举等价，FR-08 零回归）
        映射虚拟 run，优先级从高到低：``worker_done_at`` 非空且无活跃 turn →
        ``completed``（优先于终态映射——converge end_session 后 done 分身仍
-       映射 done 而非 failed）；mission.constraints 带
-       ``budget_force_ended_at`` 标记（预算强收置位，只读键存在性）时会话
-       ``ended`` 且未 done → ``failed``（终态而非 running——强收后 mission
-       可收敛 degraded，design §5.E Grill M2）；会话终态 ``failed`` →
-       ``failed``；其余（含 idle 未 done、追问重开工中、无标记 ended 未
-       done）→ ``running``；
+       映射 done 而非 failed）；mission.constraints 带强收标记
+       （``budget_force_ended_at`` 预算强收 / ``worker_force_ended_at`` 死分身
+       扫描，审计修复 F01——只读键存在性，任一存在即生效）时会话 ``ended``
+       且未 done → ``failed``（终态而非 running——强收后 mission 可收敛
+       degraded，design §5.E Grill M2）；会话终态 ``failed`` → ``failed``；
+       其余（含 idle 未 done、追问重开工中、无标记 ended 未 done）→
+       ``running``；
     3. 两组合并喂 ``derive_status``。空集语义：有分身时虚拟集合非空，不会
        误判 planning。
 
@@ -207,21 +223,32 @@ async def mission_derive_status(
     runs = [r for r in raw_runs if r.agent_session_id not in worker_session_ids]
 
     active_worker_ids = await _sessions_with_active_turns(db, list(worker_session_ids))
-    # 预算强收标记只查键存在性（constraints None 安全）；置位归 task-07 patrol。
+    # 强收标记只查键存在性（constraints None 安全）；置位归 patrol（budget 键=
+    # 职责⑥预算触顶，worker 键=职责⑦死分身扫描，审计修复 F01）。两键同象：
+    # 任一存在即武装「ended 未 done → failed」终态映射。
     budget_force_ended = (
         mission is not None
         and mission.constraints is not None
         and BUDGET_FORCE_ENDED_AT_KEY in mission.constraints
     )
+    worker_force_ended = (
+        mission is not None
+        and mission.constraints is not None
+        and WORKER_FORCE_ENDED_AT_KEY in mission.constraints
+    )
 
     def _virtual_status(s: AgentSession) -> str:
-        # 优先级：done 且无活跃 turn → completed > 预算强收标记下会话 ended
-        # 且未 done → failed（终态，可收敛 degraded）> 会话终态 failed →
-        # failed > 其余（idle 未 done / 追问重开工中 / 无标记 ended 未
-        # done）→ running。
+        # 优先级：done 且无活跃 turn → completed > 强收标记（budget 或 worker
+        # 任一，F01）下会话 ended 且未 done → failed（终态，可收敛 degraded）>
+        # 会话终态 failed → failed > 其余（idle 未 done / 追问重开工中 / 无标记
+        # ended 未 done）→ running。
         if s.worker_done_at is not None and s.id not in active_worker_ids:
             return "completed"
-        if budget_force_ended and s.status == "ended" and s.worker_done_at is None:
+        if (
+            (budget_force_ended or worker_force_ended)
+            and s.status == "ended"
+            and s.worker_done_at is None
+        ):
             return "failed"
         if s.status == "failed":
             return "failed"

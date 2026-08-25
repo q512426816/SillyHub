@@ -46,11 +46,14 @@ async def _seed_tree(
     *,
     terminal: str,
     created_at: datetime | None = None,
+    terminal_at: datetime | None = None,
 ) -> tuple[AgentSession, AgentMission, uuid.UUID, DaemonRuntime]:
     """建 user + workspace + 主控根会话 + 会话 mission（created_by=user）+ 在线 runtime。
 
     ``terminal`` 控制 mission 形态：converged / cancelled（孤儿扫描应命中）/
-    active（绝不命中）。``created_at`` 显式控制用于 limit 轮询顺序验证。
+    active（绝不命中）。``created_at`` 显式控制用于 limit 轮询顺序验证；
+    ``terminal_at`` 显式控制终态时间（converged_at / cancelled_at 列值）——
+    审计修复 F02 后名单按「最新终态优先」排序，终态时间需可精确播种。
     """
     user_id = uuid.uuid4()
     db.add(
@@ -79,11 +82,12 @@ async def _seed_tree(
     )
     db.add(root)
     now = datetime.now(UTC)
+    terminal_ts = terminal_at if terminal_at is not None else now
     extra: dict = {}
     if terminal == "converged":
-        extra["converged_at"] = now
+        extra["converged_at"] = terminal_ts
     elif terminal == "cancelled":
-        extra["cancelled_at"] = now
+        extra["cancelled_at"] = terminal_ts
     if created_at is not None:
         extra["created_at"] = created_at
     mission = AgentMission(
@@ -357,22 +361,27 @@ class TestOrphanScanBestEffort:
         )
 
 
-# ── 4. 独立查询 limit（防终态 mission 积压单轮过载）──────────────────────────
+# ── 4. 独立查询 limit（防终态 mission 积压单轮过载）+ 最新终态优先（F02）────
 
 
 class TestOrphanScanLimit:
     async def test_scan_limit_caps_terminal_missions_per_round(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """终态 mission 查询自带 limit（对齐 ACTIVE_MISSION_LIMIT 惯例）：
-        limit=2 时只收口最老两个 mission 的孤儿，第三个留待下轮。"""
+        """终态 mission 查询自带 limit（对齐 ``ACTIVE_MISSION_LIMIT`` 惯例）+
+        **最新终态优先**（审计修复 F02：``created_at ASC`` 无时间窗在终态 mission
+        超 limit 后饥饿——新终态 mission 的孤儿永远扫不到）：limit=2 时先收口
+        终态时间最新的两个 mission 的孤儿，最老的一个留待下轮。"""
         captured = _recording_ws_hub(monkeypatch)
         monkeypatch.setattr(patrol, "ACTIVE_MISSION_LIMIT", 2)
         base = datetime(2026, 8, 25, 12, 0, 0, tzinfo=UTC)
         workers: list[AgentSession] = []
         for i in range(3):
             root, _mission, user_id, rt = await _seed_tree(
-                db_session, terminal="converged", created_at=base + timedelta(minutes=i)
+                db_session,
+                terminal="converged",
+                created_at=base + timedelta(minutes=i),
+                terminal_at=base + timedelta(minutes=20 + i),
             )
             w, _l = await _seed_worker(db_session, root, owner_id=user_id, runtime=rt)
             workers.append(w)
@@ -380,12 +389,49 @@ class TestOrphanScanLimit:
         ended = await MissionPatrolService(db_session)._patrol_orphan_subsessions()
 
         assert ended == 2
-        for w in workers[:2]:
+        # 最新终态优先：终态时间 12:22 / 12:21 的两个先收口，12:20 最老的留待下轮。
+        for w in workers[1:]:
             await db_session.refresh(w)
             assert w.status == "ended"
-        await db_session.refresh(workers[2])
-        assert workers[2].status == "active", "limit 之外的孤儿留待下一轮"
+        await db_session.refresh(workers[0])
+        assert workers[0].status == "active", "limit 之外的孤儿留待下一轮"
         assert len(_session_ends(captured)) == 2
+
+    async def test_newest_terminal_mission_not_starved_by_backlog(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """F02 饥饿修复核心验收：终态 mission 积压超 limit（3 条老终态占满
+        limit=3 的名单）时，**最新**终态 mission 的孤儿仍必须被扫到——
+        ``created_at ASC`` 旧行为下新 mission 永远排在名单外，孤儿永不被收口
+        （零孤儿承诺失效）。"""
+        captured = _recording_ws_hub(monkeypatch)
+        monkeypatch.setattr(patrol, "ACTIVE_MISSION_LIMIT", 3)
+        base = datetime(2026, 8, 25, 10, 0, 0, tzinfo=UTC)
+        # 3 条老终态 mission（无分身，纯名单占位）。
+        for i in range(3):
+            await _seed_tree(
+                db_session,
+                terminal="converged",
+                created_at=base + timedelta(minutes=i),
+                terminal_at=base + timedelta(minutes=10 + i),
+            )
+        # 最新终态 mission（终态时间最新 → 必须排进名单）带一个活跃孤儿。
+        latest_root, _latest, latest_user, latest_rt = await _seed_tree(
+            db_session,
+            terminal="converged",
+            created_at=base + timedelta(hours=1),
+            terminal_at=base + timedelta(hours=2),
+        )
+        orphan, _lo = await _seed_worker(
+            db_session, latest_root, owner_id=latest_user, runtime=latest_rt
+        )
+
+        ended = await MissionPatrolService(db_session)._patrol_orphan_subsessions()
+
+        assert ended == 1, "最新终态 mission 的孤儿不得被老积压 mission 饥饿"
+        await db_session.refresh(orphan)
+        assert orphan.status == "ended"
+        assert len(_session_ends(captured)) == 1
 
 
 if __name__ == "__main__":

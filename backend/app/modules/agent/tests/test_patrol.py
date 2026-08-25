@@ -590,7 +590,7 @@ class TestRedispatchDuty:
 class TestRunOnce:
     @pytest.mark.asyncio
     async def test_skeleton_returns_five_zero_counts(self, db_session: AsyncSession) -> None:
-        """空库骨架轮：返回全部计数键（task-07 起八键）、值全 0（checked 为真实活跃数 0）。"""
+        """空库骨架轮：返回全部计数键（审计修复 F01 起九键）、值全 0（checked 为真实活跃数 0）。"""
         svc = MissionPatrolService(db_session)
 
         counts = await svc.run_once()
@@ -604,6 +604,7 @@ class TestRunOnce:
             "worker_recovered": 0,
             "orphan_sessions_ended": 0,
             "budget_force_ended": 0,
+            "worker_force_ended": 0,
         }
 
     @pytest.mark.asyncio
