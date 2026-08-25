@@ -11,11 +11,13 @@ import { ApiError } from "@/lib/api";
 import { useSession } from "@/stores/session";
 import {
   AgentSessionListResponseSchema,
+  createSession,
   deleteAgentSession,
   deleteDaemonRuntime,
   getAgentSession,
   getAgentSessionLogs,
   listAgentSessions,
+  listQuicklogSessions,
   parseSessionPermissionEvent,
   reopenSession,
   respondSessionPermission,
@@ -145,6 +147,29 @@ describe("listAgentSessions", () => {
     expect(url.searchParams.get("q")).toBe("重构");
   });
 
+  // 2026-08-25-session-spec-binding task-09 / FR-05：ql_id 短码透传 query string
+  // （对齐 change_id 先例：真值才下发，缺省零回归）。
+  it("passes ql_id filter into query and omits it when absent (task-09)", async () => {
+    const h = mockFetch({
+      status: 200,
+      body: { items: [], total: 0, limit: 20, offset: 0 },
+    });
+    await listAgentSessions({ ql_id: "ql-20260824-014" });
+    const url = new URL(h.lastUrl());
+    expect(url.pathname).toBe("/api/daemon/sessions");
+    expect(url.searchParams.get("ql_id")).toBe("ql-20260824-014");
+
+    // 不传 ql_id 时 query 不带该参（其余过滤参不受影响）
+    const h2 = mockFetch({
+      status: 200,
+      body: { items: [], total: 0, limit: 20, offset: 0 },
+    });
+    await listAgentSessions({ change_id: "ch-1" });
+    const url2 = new URL(h2.lastUrl());
+    expect(url2.searchParams.get("change_id")).toBe("ch-1");
+    expect(url2.searchParams.has("ql_id")).toBe(false);
+  });
+
   it("throws ApiError on non-2xx", async () => {
     mockFetch({
       status: 422,
@@ -156,6 +181,45 @@ describe("listAgentSessions", () => {
       },
     });
     await expect(listAgentSessions()).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+// ── 2026-08-25-session-spec-binding task-09: createSession quicklog_id 透传 ──
+
+describe("createSession (task-09 / FR-06)", () => {
+  const createResp = {
+    session_id: "s1",
+    run_id: "run-1",
+    lease_id: "lease-1",
+    status: "active",
+    stream_url: "/api/daemon/sessions/s1/stream",
+  };
+
+  it("POST /sessions carries quicklog_id in body when provided", async () => {
+    const h = mockFetch({ status: 200, body: createResp });
+
+    const result = await createSession({
+      prompt: "修一下登录跳转",
+      provider: "claude",
+      quicklog_id: "ql-20260825-011",
+    });
+
+    expect(result.session_id).toBe("s1");
+    const url = new URL(h.lastUrl());
+    expect(url.pathname).toBe("/api/daemon/sessions");
+    expect(h.lastInit()?.method).toBe("POST");
+    const body = JSON.parse(String(h.lastInit()?.body)) as Record<string, unknown>;
+    expect(body.prompt).toBe("修一下登录跳转");
+    expect(body.quicklog_id).toBe("ql-20260825-011");
+  });
+
+  it("omits quicklog_id from body when not provided（缺省零回归）", async () => {
+    const h = mockFetch({ status: 200, body: createResp });
+
+    await createSession({ prompt: "普通会话", provider: "claude" });
+
+    const body = JSON.parse(String(h.lastInit()?.body)) as Record<string, unknown>;
+    expect("quicklog_id" in body).toBe(false);
   });
 });
 
@@ -352,6 +416,53 @@ describe("AgentSessionListResponseSchema guard", () => {
       offset: 0,
     });
     expect(parsed.total).toBe(0);
+  });
+});
+
+// ── 2026-08-25-session-spec-binding task-09 / FR-04: listQuicklogSessions ────
+
+describe("listQuicklogSessions (task-09)", () => {
+  it("GET quicklog-entries/{qlId}/sessions and returns AgentSessionListItem[]", async () => {
+    const body = [
+      {
+        id: "s1",
+        provider: "claude",
+        status: "active",
+        turn_count: 3,
+        mode: null,
+        author: { user_id: "u1", display_name: "张三" },
+        last_active_at: "2026-08-24T10:00:00Z",
+        title: "修复会话标题",
+      },
+    ];
+    const h = mockFetch({ status: 200, body });
+
+    const result = await listQuicklogSessions(
+      "00000000-0000-0000-0000-000000000001",
+      "ql-20260824-014",
+    );
+
+    // 返回解析：AgentSessionListItem 数组字段直取
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe("s1");
+    expect(result[0]?.title).toBe("修复会话标题");
+    expect(result[0]?.author.display_name).toBe("张三");
+    const url = new URL(h.lastUrl());
+    expect(url.pathname).toBe(
+      "/api/workspaces/00000000-0000-0000-0000-000000000001/quicklog-entries/ql-20260824-014/sessions",
+    );
+    expect(h.lastInit()?.method ?? "GET").toBe("GET");
+  });
+
+  it("encodes both path segments（workspaceId 与 qlId 双段编码）", async () => {
+    const h = mockFetch({ status: 200, body: [] });
+
+    await listQuicklogSessions("ws a/b", "ql id/1");
+
+    const url = new URL(h.lastUrl());
+    expect(url.pathname).toBe(
+      "/api/workspaces/ws%20a%2Fb/quicklog-entries/ql%20id%2F1/sessions",
+    );
   });
 });
 

@@ -38,6 +38,7 @@ from sqlmodel import col
 
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentSession
+from app.modules.change.binding import bind_session_to_change, bind_session_to_quicklog
 from app.modules.daemon.session_events import publish_sessions_changed
 from app.modules.platform_sync.model import (
     AgentSessionLogORM,
@@ -64,6 +65,31 @@ _TOOL_REPORT_PROVIDER_BY_HARNESS: dict[str, str] = {
 def _tool_report_provider(harness: str) -> str:
     """D-007：claude-code→'claude'、codex→'codex'、其余（zcode 等）→'claude'。"""
     return _TOOL_REPORT_PROVIDER_BY_HARNESS.get(harness, "claude")
+
+
+# ── 2026-08-25-session-spec-binding task-06（design §5.W2.2/W2.3 / D-003）──
+async def _bind_entry_ctx(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    change_key: str | None,
+    quick_id: str | None,
+    target_session_id: uuid.UUID,
+) -> None:
+    """agent-logs entry ctx → 会话绑定（hub / 聚合两分支共用消费规则）。
+
+    - 两键按 schema 互斥（``schema.py`` AgentLogEntry 注释「互斥：CLI quick
+      优先」），并存时以 ``quick_id`` 为准只落 quicklog 绑定（防御 CLI 异常双写；
+      聚合分组键虽是 ``change_key or quick_id``，组级绑定仍统一 quick 优先口径）。
+    - ``change_key == "default"`` 伪键不在本层判断——``bind_session_to_change``
+      内部守卫兜底（D-005@v2 / X-004：命令解析与 agent-logs 两通道统一）。
+    - 两 bind 均 savepoint best-effort（失败仅 log.warning 不抛、不自行 commit），
+      跟随调用方事务在 ``upsert_agent_log_entries`` 唯一一次 commit 前落盘，
+      绑定失败不影响 agent-logs 上报主流程。
+    """
+    if quick_id:
+        await bind_session_to_quicklog(session, workspace_id, quick_id, target_session_id)
+    elif change_key:
+        await bind_session_to_change(session, workspace_id, change_key, target_session_id)
 
 
 @dataclass
@@ -615,6 +641,7 @@ class PlatformSyncService:
 
     # ── Change 2026-08-23-platform-agent-log-ingest task-02（design §3.2 API 契约）──
     # ── 2026-08-23-agent-activity-sessions task-04（design §3.3.3 归属扩展）──
+    # ── 2026-08-25-session-spec-binding task-06（design §5.W2.2/W2.3 双分支 ctx 绑定）──
 
     async def upsert_agent_log_entries(
         self,
@@ -647,6 +674,13 @@ class PlatformSyncService:
            派生 user，provider 走 D-007 映射，title=``{harness} · {ctx 或 '本地活动'}``，
            quick_id 显示为原样短码）。find 命中也刷新 ``last_active_at``，不改
            status（生命周期契约：已有活跃/终态会话只刷活跃时间）。
+
+        归属后双分支均按 entry 级 ctx 落自动绑定（task-06 / design §5.W2.2/W2.3，
+        D-003 检测双通道）：``quick_id`` → quicklog_session_links（quick 绑定唯一
+        可靠通道，FR-02；并存时 quick 优先）、``change_key`` → change_session_links
+        （变更不存在建 placeholder；default 伪键由 bind 内部守卫跳过，D-005@v2）。
+        绑定与归属同事务（本方法唯一一次 commit 前完成）且 best-effort，失败
+        不影响上报主流程。
 
         返回落库行数（去重后）。
         """
@@ -723,17 +757,29 @@ class PlatformSyncService:
                 )
             ).scalar_one_or_none()
             if hub_session is not None:
-                for _entry, log_row in persisted:
+                for entry, log_row in persisted:
                     log_row.agent_session_id = hub_session.id
-            # D-005 best-effort：hub 会话不存在/跨 workspace/已软删 → 静默跳过归属，
-            # entries 仍入库（不抛错不 4xx），目标会话 status 也不受影响。
+                    # task-06（design §5.W2.2 / D-003）：hub 命中补消费 entry 级 ctx
+                    # （quick 绑定唯一可靠通道）——绑定主体为 hub 会话，与归属同事务
+                    # （唯一一次 commit 前完成）；bind 内部 best-effort 不影响本流程。
+                    await _bind_entry_ctx(
+                        self._session,
+                        workspace_id,
+                        entry.change_key,
+                        entry.quick_id,
+                        hub_session.id,
+                    )
+            # D-005 best-effort：hub 会话不存在/跨 workspace/已软删 → 静默跳过归属
+            # 与绑定，entries 仍入库（不抛错不 4xx），目标会话 status 也不受影响。
         else:
             # D-009 entry 级 ctx 分组：变更 B 的日志不因全量重推挂到变更 A 的会话。
-            groups: dict[tuple[str, str], list[AgentSessionLogORM]] = {}
+            # task-06：分组值改留 (entry, log_row) 配对——组级绑定需要留存原始
+            # change_key / quick_id（design §5.W2.3）。
+            groups: dict[tuple[str, str], list[tuple[AgentLogEntry, AgentSessionLogORM]]] = {}
             for entry, log_row in persisted:
                 ctx = entry.change_key or entry.quick_id or ""
-                groups.setdefault((entry.harness, ctx), []).append(log_row)
-            for (harness, ctx), group_rows in groups.items():
+                groups.setdefault((entry.harness, ctx), []).append((entry, log_row))
+            for (harness, ctx), group_items in groups.items():
                 agg_key = f"{harness}|{ctx}"
                 # D-006 find-then-insert：普通索引非唯一，极小概率并发重复行按
                 # last_active_at 最新取一，后续上报自然收敛到该行。
@@ -774,8 +820,23 @@ class PlatformSyncService:
                         )
                     )
                     created_group_sessions.append((group_session_id, user_id))
-                for log_row in group_rows:
+                for _entry, log_row in group_items:
                     log_row.agent_session_id = group_session_id
+                # task-06（design §5.W2.3 / D-003）：tool_report 会话同款 ctx 绑定——
+                # 组级一次（同组 entries 的 coalesce ctx 相同，bind 幂等无需逐条）；
+                # 空 ctx 组（本地活动单桶）两键皆 None，_bind_entry_ctx 天然跳过不落
+                # 任何绑定；两键并存 quick 优先与 hub 分支同口径。
+                group_change_key = next(
+                    (e.change_key for e, _row in group_items if e.change_key), None
+                )
+                group_quick_id = next((e.quick_id for e, _row in group_items if e.quick_id), None)
+                await _bind_entry_ctx(
+                    self._session,
+                    workspace_id,
+                    group_change_key,
+                    group_quick_id,
+                    group_session_id,
+                )
         await self._session.commit()
         # task-03（design §3）：仅新 INSERT 的 tool_report 会话广播 created（列表
         # 出现新行）；publish 内部静默容错，Redis 抖动不影响 CLI 上报主流程。

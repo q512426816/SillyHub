@@ -54,6 +54,8 @@ spec-sync: row.version != op.base_version → conflict=true（另有同内容豁
 - spec-manifest 读清单也收紧为写权限（清单是增量写协议一部分，防探测文件布局）；`scope.workspace_id is None` 一律 403 fail-closed。
 - 消费链是 CLI（写）+ change 投影（读），前端不直接调写端点；改响应字段前先对 sillyspec 仓 sync.js 契约，别单侧改。
 
+- agent-logs 会话绑定（2026-08-25-session-spec-binding）：upsert_agent_log_entries hub 分支补消费 entry 的 change_key/quick_id（原完全忽略）绑到 hub 会话；聚合分支 tool_report 会话组级落绑定；两键互斥并存 quick 优先；default 伪键由 bind_session_to_change 内部守卫兜底不建 placeholder。
+
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->

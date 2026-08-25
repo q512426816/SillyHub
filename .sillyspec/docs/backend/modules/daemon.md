@@ -116,6 +116,8 @@ stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
 - change_writer 的 `proxy_create_change` 经本模块 change-write 队列代写变更
   （占坑/回滚语义见 change_writer 卡片）；GC 回灌语义保证 daemon 中断不丢任务。
 
+- 会话↔spec 绑定三入口（2026-08-25-session-spec-binding）：①run_sync.submit_messages 入库时解析 tool_kind='sillyspec' 命令自动绑变更（agent_session_id None/会话缺失/workspace None 三守卫，X-002）；②创建会话 change_id 补写 link（D-002 双写）+ quicklog_id 新参数落 quicklog 绑定（facade 需同步透传，否则 500）；③GET /sessions 筛选 change_id 改 M:N 子查询、新增 ql_id（(workspace_id, ql_id) 双条件防跨工作区串扰）。
+
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->

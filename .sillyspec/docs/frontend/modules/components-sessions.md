@@ -97,6 +97,8 @@ CtxUsageRing 分母: roleMapping.one_m → 1_000_000
 - 空值统一显示 `—`、日期显式 `zh-CN`（项目规则）；机器多选过滤（change 平铺分支）受后端仅支持单 machine_id 限制。
 - NewSessionForm/WorkspaceSessionPicker 已删（2026-08-23-sessions-workspace-hub）：旧 import/测试引用须改走 PreSessionPicker + 预会话态链路，勿复活表单形态。
 
+- QuicklogScope 第四态（2026-08-25-session-spec-binding）：session-list-panel 判别联合加 {kind:'quicklog', workspaceId, qlId}（六处 if-chain 消费点需逐一补齐，TS 不做穷尽检查）；「关联」筛选下拉仅 scope?.kind==='workspace' 渲染（分组选项变更/快速修复，透传 change_id/ql_id 服务端过滤）；sessions-portal quicklog 分支合成 preContext {workspaceId, quickId, runtimeId}。
+
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->

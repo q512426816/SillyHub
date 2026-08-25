@@ -83,6 +83,9 @@ const mocks = vi.hoisted(() => ({
   machinesHook: vi.fn(),
   machinesRefetch: vi.fn(),
   listWorkspaces: vi.fn(),
+  // task-10（X-009）：「关联」下拉选项数据源（变更列表 + 快速修复列表）。
+  listChanges: vi.fn(),
+  listQuicklogEntries: vi.fn(),
 }));
 
 // 组件只消费 listAgentSessions + 树拉取上限常量（类型导入编译期擦除），
@@ -101,6 +104,16 @@ vi.mock("@/lib/use-daemon-machines", () => ({
 
 vi.mock("@/lib/workspaces", () => ({
   listWorkspaces: (...args: unknown[]) => mocks.listWorkspaces(...args),
+}));
+
+// task-10（X-009）：「关联」下拉选项数据源 mock（组件仅消费两个列表函数）。
+vi.mock("@/lib/changes", () => ({
+  listChanges: (...args: unknown[]) => mocks.listChanges(...args),
+}));
+
+vi.mock("@/lib/quicklog", () => ({
+  listQuicklogEntries: (...args: unknown[]) =>
+    mocks.listQuicklogEntries(...args),
 }));
 
 // ── jsdom 虚拟滚动桩：change 分支 scroll 容器给出非零视口 ────────────────
@@ -354,6 +367,9 @@ beforeEach(() => {
   mocks.listWorkspaceAgentSessions.mockReset().mockResolvedValue([]);
   mocks.listChangeSessions.mockReset().mockResolvedValue([]);
   mocks.listWorkspaces.mockReset();
+  // task-10（X-009）：选项数据源默认成功空集（workspace scope 既有用例零干扰）。
+  mocks.listChanges.mockReset().mockResolvedValue({ items: [], total: 0 });
+  mocks.listQuicklogEntries.mockReset().mockResolvedValue({ items: [], total: 0 });
   setWorkspaces();
   setMachines();
   mocks.machinesRefetch.mockReset();
@@ -950,6 +966,13 @@ const CHANGE_SCOPE: SessionListScope = {
   workspaceId: "ws-1",
   changeId: "chg-1",
 };
+// task-10（FR-04 / D-006@v1）：quicklog scope 固件（qlId 为 QUICKLOG 短码）。
+const QUICKLOG_SCOPE: SessionListScope = {
+  kind: "quicklog",
+  workspaceId: "ws-1",
+  qlId: "ql-20260825-001",
+};
+const RUNTIME_SCOPE: SessionListScope = { kind: "runtime", runtimeId: "rt-1" };
 
 describe("SessionListPanel workspace scope（树单组，端点过滤维持）", () => {
   it("listAgentSessions 带 {limit:500, workspace_id}；仅渲染该工作区单组；v2 两 scope 端点零调用", async () => {
@@ -1524,5 +1547,210 @@ describe("SessionListPanel 列表条件轮询（ql-20260824-004）", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ── 12. quicklog scope（task-10 / FR-04 / D-006@v1，X-008 消费分支补齐） ────
+
+describe("SessionListPanel quicklog scope（task-10 / X-008）", () => {
+  it("queryFn 透传 {limit:500, workspace_id, ql_id}；单组渲染 + 组头「＋」在；X-009 不渲染「关联」下拉", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-ql", workspace_id: "ws-1", title: "快速修复会话" }),
+      ]),
+    );
+    renderPanel(
+      <SessionListPanel
+        scope={QUICKLOG_SCOPE}
+        defaultExpandedWorkspaceId="ws-1"
+        onNewInGroup={vi.fn()}
+      />,
+    );
+
+    // X-008 消费点一（queryFn 透传）：workspace_id 走既有 in 判定 + ql_id 显式分支
+    expect(
+      await screen.findByRole("button", { name: "会话 快速修复会话" }),
+    ).toBeInTheDocument();
+    expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
+    expect(lastCallArgs()).toEqual({
+      limit: 500,
+      workspace_id: "ws-1",
+      ql_id: "ql-20260825-001",
+    });
+    // X-008 消费点二（groups 单组模板）：组 id=workspaceId、canNew 真、名称解析命中
+    expect(groupHeadLabels()).toEqual(["工作区分组 SillyHub"]);
+    expect(
+      screen.getByRole("button", { name: "在 SillyHub 新建会话" }),
+    ).toBeInTheDocument();
+    // X-009：quicklog scope 自身已按关联过滤，不叠加「关联」下拉与选项查询
+    expect(document.getElementById("slp-assoc")).toBeNull();
+    expect(mocks.listChanges).not.toHaveBeenCalled();
+    expect(mocks.listQuicklogEntries).not.toHaveBeenCalled();
+  });
+
+  it("名称解析失败（工作区列表缺席）→ 兜底「当前工作区」单组，组头「＋」仍可新建", async () => {
+    setWorkspaces([]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-ql", workspace_id: "ws-1", title: "快速修复会话" }),
+      ]),
+    );
+    renderPanel(
+      <SessionListPanel
+        scope={QUICKLOG_SCOPE}
+        defaultExpandedWorkspaceId="ws-1"
+        onNewInGroup={vi.fn()}
+      />,
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "工作区分组 当前工作区" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "在 当前工作区 新建会话" }),
+    ).toBeInTheDocument();
+  });
+});
+
+// ── 13. 「关联」筛选下拉（task-10 / FR-05 / X-009 门控 + 服务端过滤透传） ────
+
+describe("SessionListPanel「关联」筛选下拉（task-10 / X-009）", () => {
+  /** 选项数据固件：一条 title 变更 + 一条 title=null（change_key 回退）变更；
+   * 快速修复一条非占位 + 一条占位（应被剔除）。 */
+  function assocFixtures() {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listChanges.mockResolvedValue({
+      items: [
+        {
+          id: "chg-a",
+          change_key: "2026-08-25-session-spec-binding",
+          title: "会话规范绑定",
+          status: "execute",
+          location: "active",
+          change_type: null,
+          affected_components: [],
+          owner_id: null,
+          updated_at: "2026-08-25T10:00:00Z",
+        },
+        {
+          id: "chg-b",
+          change_key: "2026-08-23-frontend-dark-theme",
+          title: null,
+          status: "plan",
+          location: "active",
+          change_type: null,
+          affected_components: [],
+          owner_id: null,
+          updated_at: "2026-08-23T10:00:00Z",
+        },
+      ],
+      total: 2,
+    });
+    mocks.listQuicklogEntries.mockResolvedValue({
+      items: [
+        {
+          ql_id: "ql-20260824-014",
+          title: "悬浮球去紫改青",
+          status: "completed",
+          placeholder: false,
+        },
+        {
+          ql_id: "ql-20260824-999",
+          title: "占位行",
+          status: "stale",
+          placeholder: true,
+        },
+      ],
+      total: 2,
+    });
+  }
+
+  it("X-009 门控：全局/change/quicklog/runtime scope 均不渲染下拉且选项查询零发起", async () => {
+    // 全局（缺省 scope）
+    const globalView = renderPanel(<SessionListPanel />);
+    await screen.findByText("没有符合条件的会话");
+    expect(document.getElementById("slp-assoc")).toBeNull();
+    globalView.unmount();
+
+    for (const sc of [CHANGE_SCOPE, QUICKLOG_SCOPE, RUNTIME_SCOPE]) {
+      const view = renderPanel(<SessionListPanel scope={sc} />);
+      await screen.findByText("没有符合条件的会话");
+      expect(document.getElementById("slp-assoc")).toBeNull();
+      view.unmount();
+    }
+    expect(mocks.listChanges).not.toHaveBeenCalled();
+    expect(mocks.listQuicklogEntries).not.toHaveBeenCalled();
+  });
+
+  it("workspace scope 渲染分组选项（变更 title 优先/change_key 回退、快速修复剔占位行）；选中变更 → change_id 透传；清除恢复", async () => {
+    assocFixtures();
+    renderPanel(<SessionListPanel scope={WORKSPACE_SCOPE} />);
+
+    // 下拉渲染 + 选项查询参（变更组取活跃未归档 location=active）
+    expect(document.getElementById("slp-assoc")).not.toBeNull();
+    await waitFor(() => {
+      expect(mocks.listChanges).toHaveBeenCalledWith("ws-1", {
+        location: "active",
+        pageSize: 100,
+      });
+      expect(mocks.listQuicklogEntries).toHaveBeenCalledWith("ws-1", {
+        page_size: 100,
+      });
+    });
+
+    // 打开下拉核对分组与选项（占位行被客户端过滤剔除）
+    openAntdSelect("slp-assoc");
+    await waitFor(() => {
+      const groupTexts = [...document.querySelectorAll(".ant-select-item-group")].map(
+        (el) => el.textContent,
+      );
+      expect(groupTexts).toEqual(["变更", "快速修复"]);
+    });
+    const optionTexts = [
+      ...document.querySelectorAll(".ant-select-item-option-content"),
+    ].map((el) => el.textContent);
+    expect(optionTexts).toContain("会话规范绑定"); // title 优先
+    expect(optionTexts).toContain("2026-08-23-frontend-dark-theme"); // title null → change_key
+    expect(optionTexts).toContain("ql-20260824-014 悬浮球去紫改青"); // 短码 + 标题
+    expect(optionTexts.some((t) => t?.includes("ql-20260824-999"))).toBe(false); // 占位剔除
+
+    // 选中变更 → queryKey 槽位变化自动重拉，服务端过滤参 change_id 透传
+    await chooseAntdOptionByText("slp-assoc", "会话规范绑定");
+    await waitFor(() => {
+      expect(lastCallArgs()).toEqual({
+        limit: 500,
+        workspace_id: "ws-1",
+        change_id: "chg-a",
+      });
+    });
+
+    // allowClear 清除 → 恢复无关联过滤参（clear 图标在 #slp-assoc 所属
+    // .ant-select 根下锚定，避免误点其它下拉）
+    const assocRoot = (document.getElementById("slp-assoc") as HTMLElement)
+      .closest(".ant-select");
+    if (!assocRoot) throw new Error(".ant-select for #slp-assoc not found");
+    const clearBtn = assocRoot.querySelector(".ant-select-clear");
+    if (!clearBtn) throw new Error("assoc clear button not found");
+    fireEvent.mouseDown(clearBtn);
+    fireEvent.click(clearBtn);
+    await waitFor(() => {
+      expect(lastCallArgs()).toEqual({ limit: 500, workspace_id: "ws-1" });
+    });
+  });
+
+  it("选中快速修复 → ql_id 透传（M:N 命中服务端过滤）", async () => {
+    assocFixtures();
+    renderPanel(<SessionListPanel scope={WORKSPACE_SCOPE} />);
+    await waitFor(() => expect(mocks.listQuicklogEntries).toHaveBeenCalled());
+
+    await chooseAntdOptionByText("slp-assoc", "ql-20260824-014 悬浮球去紫改青");
+    await waitFor(() => {
+      expect(lastCallArgs()).toEqual({
+        limit: 500,
+        workspace_id: "ws-1",
+        ql_id: "ql-20260824-014",
+      });
+    });
   });
 });

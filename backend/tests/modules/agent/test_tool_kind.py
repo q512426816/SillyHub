@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.modules.agent.tool_kind import TOOL_KIND_VALUES, classify_tool_kind
+from app.modules.agent.tool_kind import TOOL_KIND_VALUES, classify_tool_kind, iter_command_segments
 
 # ---------------------------------------------------------------------------
 # 共享用例表（task-03 TS 版逐字对照）：(tool_name, args, expected)
@@ -173,3 +173,44 @@ def test_cron_prefix_and_schedule_wakeup() -> None:
     assert classify_tool_kind("ScheduleWakeup", {}) == "schedule"
     # 仅前缀含 cron 但非开头 → other
     assert classify_tool_kind("Recron", {}) == "other"
+
+
+# ---------------------------------------------------------------------------
+# iter_command_segments 直接用例（2026-08-25-session-spec-binding task-02 /
+# design §5 W1.4：自 _is_sillyspec_command 原样提取，行为不变——上方共享用例
+# 锁 _is_sillyspec_command 行为，此处锁分段函数本身的分段/剥包装/空白归一）。
+# ---------------------------------------------------------------------------
+
+
+def test_iter_command_segments_splits_and_strips_wrappers() -> None:
+    """分段 + 剥包装 + 空白归一：&&/;/| 三种分隔、连续包装前缀逐个跳过。"""
+    cmd = "cd x && pnpm sillyspec run plan; sudo node sillyspec status | grep foo"
+    assert iter_command_segments(cmd) == [
+        "cd x",
+        "sillyspec run plan",
+        "sillyspec status",
+        "grep foo",
+    ]
+
+
+def test_iter_command_segments_skips_empty_and_normalizes_ws() -> None:
+    """空段跳过（|| 产生空段）、首尾/多余空白归一为单空格。"""
+    assert iter_command_segments("  git add .   &&  sillyspec run execute ") == [
+        "git add .",
+        "sillyspec run execute",
+    ]
+    assert iter_command_segments("ls || cat a.txt") == ["ls", "cat a.txt"]
+
+
+def test_iter_command_segments_wrapper_only_token_kept() -> None:
+    """段只剩一个 token 时守卫（idx < len(parts)-1）不动剥除：裸 pnpm 不是命令。
+
+    另：exec 不在剥除集合，包装剥除后残留 ``exec sillyspec …``（与提取前
+    ``parts[idx]`` 判定逐字一致——exec 段主命令不是 sillyspec）。
+    """
+    assert iter_command_segments("pnpm") == ["pnpm"]
+    assert iter_command_segments("pnpm exec sillyspec run verify --change c-d") == [
+        "exec sillyspec run verify --change c-d"
+    ]
+    assert iter_command_segments("") == []
+    assert iter_command_segments("   ") == []

@@ -167,6 +167,13 @@ class SessionCreateRequest(BaseModel):
     ask_user_only: bool = True
     change_id: uuid.UUID | None = None
     workspace_id: uuid.UUID | None = None
+    # task-08（2026-08-25-session-spec-binding / FR-04 / FR-06）：快速修复短码
+    # quicklog_id——ql_id 字符串（``ql-YYYYMMDD-NNN-后缀``，非 UUID，D-001@v1
+    # 自然键）。携带时创建落库点补写 quicklog_session_links（bind_session_to_
+    # quicklog savepoint best-effort，失败不阻断 201）；max_length=128 对齐
+    # QuicklogSessionLink.ql_id 列宽。不做条目存在性校验（无 FK，条目行后到
+    # 合法，D-001@v1）。缺省 None 零分支进入（零回归，不影响二选一校验）。
+    quicklog_id: str | None = Field(default=None, max_length=128)
     # 预会话团队任务块（design §5.E1 / FR-05/06）：缺省 None——不带 team_mission
     # 的旧请求体校验行为逐字节不变（不影响下方 runtime_id/provider 二选一）；
     # 消费（预建 mission / orchestrator_workspace_id ∈ scope 校验）归 create

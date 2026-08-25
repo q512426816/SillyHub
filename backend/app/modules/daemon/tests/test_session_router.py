@@ -157,6 +157,104 @@ class TestCreateSessionEndpoint:
         )
         assert resp.status_code == 422
 
+    async def test_create_with_quicklog_id_binds_link(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        fresh_ws_hub: DaemonWsHub,
+    ) -> None:
+        """task-08（2026-08-25-session-spec-binding / FR-04/FR-06）：带
+        quicklog_id+workspace_id 创建 → 201 且 quicklog_session_links 出现
+        (workspace, ql_id, session) 绑定行（供 task-07 端点回读）。"""
+        from app.modules.auth.model import User
+        from app.modules.change.model import QuicklogSessionLink
+        from app.modules.workspace.model import Workspace
+
+        admin = (
+            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+            .scalars()
+            .first()
+        )
+        assert admin is not None
+        await _create_runtime(db_session, admin.id)
+        await _connect_mock(fresh_ws_hub, (await _first_runtime(db_session, admin.id)).id)
+
+        ws = Workspace(
+            id=uuid.uuid4(),
+            name="ql-http-ws",
+            slug=f"ql-http-{uuid.uuid4().hex[:8]}",
+            root_path="/tmp/ql-http",
+            status="active",
+        )
+        db_session.add(ws)
+        await db_session.commit()
+        await db_session.refresh(ws)
+
+        ql_id = "ql-20260825-003-http"
+        resp = await client.post(
+            "/api/daemon/sessions",
+            json={
+                "provider": "claude",
+                "prompt": "快速修复上下文开局",
+                "workspace_id": str(ws.id),
+                "quicklog_id": ql_id,
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        sid = uuid.UUID(resp.json()["session_id"])
+
+        link = (
+            (
+                await db_session.execute(
+                    select(QuicklogSessionLink).where(
+                        QuicklogSessionLink.workspace_id == ws.id,
+                        QuicklogSessionLink.ql_id == ql_id,
+                        QuicklogSessionLink.session_id == sid,
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert link is not None
+
+    async def test_create_quicklog_without_workspace_still_201(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        fresh_ws_hub: DaemonWsHub,
+    ) -> None:
+        """task-08：quicklog_id 无 workspace_id → 记 warning 跳过绑定，创建仍
+        201 且零 quicklog link 行（link 行 workspace_id NOT NULL）。"""
+        from app.modules.auth.model import User
+        from app.modules.change.model import QuicklogSessionLink
+
+        admin = (
+            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+            .scalars()
+            .first()
+        )
+        assert admin is not None
+        await _create_runtime(db_session, admin.id)
+        await _connect_mock(fresh_ws_hub, (await _first_runtime(db_session, admin.id)).id)
+
+        resp = await client.post(
+            "/api/daemon/sessions",
+            json={
+                "provider": "claude",
+                "prompt": "无工作区的快速修复上下文",
+                "quicklog_id": "ql-20260825-004-nows",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+
+        links = (await db_session.execute(select(QuicklogSessionLink))).scalars().all()
+        assert links == []
+
 
 # ── inject / interrupt / end error mapping ───────────────────────────────────
 

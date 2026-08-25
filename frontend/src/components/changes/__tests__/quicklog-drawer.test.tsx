@@ -6,6 +6,8 @@
  *   2. 「原始 md」切换：raw_block <pre> 直出 / 切回结构化视图
  *   3. 优雅降级：无正文段（暂无正文记录）/ 无文件（无）/ 无关联（无）
  *   4. 错误态（404 网络失败文案）
+ *   5. task-12 关联会话卡挂载：结构化视图底部出现（数据源透传双 id、
+ *      卡尾链接指向快速修复门户路由），原始 md 视图不出现
  *
  * mock 范式照 quicklog-table.test：importActual 部分 mock + QueryClientProvider。
  */
@@ -18,6 +20,7 @@ import type { QuicklogEntryListItem, QuicklogEntryRead } from "@/lib/quicklog";
 
 const mocks = vi.hoisted(() => ({
   getQuicklogDetail: vi.fn(),
+  listQuicklogSessions: vi.fn(),
 }));
 
 vi.mock("@/lib/quicklog", async () => {
@@ -25,6 +28,14 @@ vi.mock("@/lib/quicklog", async () => {
     "@/lib/quicklog",
   );
   return { ...actual, getQuicklogDetail: mocks.getQuicklogDetail };
+});
+
+// task-12：抽屉底部挂载的关联会话卡数据源（部分 mock，默认空列表走空态）。
+vi.mock("@/lib/daemon", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/daemon")>(
+    "@/lib/daemon",
+  );
+  return { ...actual, listQuicklogSessions: mocks.listQuicklogSessions };
 });
 
 vi.mock("next/link", () => ({
@@ -105,6 +116,8 @@ function renderDrawer(entry: QuicklogEntryListItem | null) {
 
 beforeEach(() => {
   mocks.getQuicklogDetail.mockReset();
+  mocks.listQuicklogSessions.mockReset();
+  mocks.listQuicklogSessions.mockResolvedValue([]);
 });
 
 afterEach(cleanup);
@@ -131,6 +144,19 @@ describe("QuicklogDrawer", () => {
       "ws-1",
       "ql-20260817-001-abcd",
     );
+    // task-12：结构化视图底部挂载关联会话卡——数据源透传双 id，卡尾链接
+    // 指向快速修复门户路由（不带参），空列表走空态文案。
+    expect(await screen.findByText("关联会话")).toBeInTheDocument();
+    const portalLink = screen.getByRole("link", { name: "打开会话工作台" });
+    expect(portalLink.getAttribute("href")).toBe(
+      "/workspaces/ws-1/quicklog/ql-20260817-001-abcd/sessions",
+    );
+    await waitFor(() =>
+      expect(mocks.listQuicklogSessions).toHaveBeenCalledWith(
+        "ws-1",
+        "ql-20260817-001-abcd",
+      ),
+    );
   });
 
   it("「原始 md」切换：Switch 开 → raw_block 直出，关 → 回结构化", async () => {
@@ -142,14 +168,17 @@ describe("QuicklogDrawer", () => {
     const sw = screen.getByTestId("raw-switch");
     fireEvent.click(sw);
     expect(await screen.findByText(/## ql-20260817-001-abcd/)).toBeTruthy();
-    // 结构化视图隐藏
+    // 结构化视图隐藏（task-12：关联会话卡对齐 section 门控一并隐藏）
     expect(screen.queryByTestId("body-需求")).toBeNull();
+    expect(screen.queryByText("关联会话")).toBeNull();
     // 切回
     fireEvent.click(sw);
     await waitFor(() =>
       expect(screen.getByTestId("body-需求")).toBeTruthy(),
     );
     expect(screen.queryByText(/## ql-20260817-001-abcd/)).toBeNull();
+    // 关联会话卡随结构化视图恢复
+    expect(screen.getByText("关联会话")).toBeTruthy();
   });
 
   it("优雅降级：无正文/无文件/无关联变更", async () => {

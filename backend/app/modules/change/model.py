@@ -19,6 +19,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     text,
 )
@@ -284,6 +285,61 @@ class ChangeSessionLink(BaseModel, table=True):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+
+class QuicklogSessionLink(BaseModel, table=True):
+    """快速修复-会话绑定（change 2026-08-25-session-spec-binding / D-001@v1）。
+
+    会话内执行 ``sillyspec run quick``（agent-logs 上报 quick_id）或从快速修复
+    门户/悬浮球发起会话时写 link 行（design §5 W2/W4 写入口）。多对多：一条
+    快速修复可关联多会话、一会话可关联多条目，幂等 upsert 由
+    ``unique(workspace_id, ql_id, session_id)`` 兜底（design §8）。
+
+    - ``ql_id`` 为自然键（``ql-YYYYMMDD-NNN-后缀``），**无 FK 到 quicklog_entries**
+      （D-001@v1）：quicklog 条目双源合并（DB 推送行 + QUICKLOG.md 文件解析行），
+      文件源条目没有 DB 行；且 agent-logs（带 quick_id）与条目推送到达顺序不
+      保证——条目行不存在也允许先绑。
+    - ``workspace_id`` FK→workspaces(id) CASCADE、``session_id`` FK→
+      agent_sessions(id) CASCADE：会话删除清绑定，workspace 级联经 FK 保证。
+    - 索引：``ix_quicklog_session_link_ql(workspace_id, ql_id)`` 供条目→会话
+      列表查询；``ix_quicklog_session_link_session(session_id)`` 供会话侧反查。
+    """
+
+    __tablename__ = "quicklog_session_links"
+    __table_args__ = (
+        UniqueConstraint(
+            "workspace_id",
+            "ql_id",
+            "session_id",
+            name="uq_quicklog_session_link_pair",
+        ),
+        Index("ix_quicklog_session_link_ql", "workspace_id", "ql_id"),
+        Index("ix_quicklog_session_link_session", "session_id"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("workspaces.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    ql_id: str = Field(sa_column=Column(String(128), nullable=False))
+    session_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_sessions.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False, server_default=text("now()")),
     )
 
 

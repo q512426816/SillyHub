@@ -9,6 +9,12 @@
 D-007/D-009）：hub_session_id 关联命中与跨 ws 降级、无 hub 按 (harness, entry.ctx)
 分组 find-or-create tool_report 会话（幂等收敛 / entry 级 ctx 分组 / 无 ctx 单桶 /
 字段断言含 provider 映射）、GET session_id 过滤与越权空列表。
+
+2026-08-25-session-spec-binding task-06（design §5.W2.2/W2.3 / D-003 / D-005@v2）：
+双分支 ctx 自动绑定——hub 命中补消费 entry 级 change_key/quick_id（quick_id 落
+quicklog_session_links、change_key 落 change_session_links、并存 quick 优先、
+default 伪键无 placeholder 无绑定）、聚合分支 tool_report 会话同款绑定、空 ctx
+单桶不落、降级路径不产生绑定。
 """
 
 from __future__ import annotations
@@ -21,6 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.model import AgentSession
+from app.modules.change.model import Change, ChangeSessionLink, QuicklogSessionLink
 from app.modules.platform_sync.model import AgentSessionLogORM
 
 # 协议 §1 示例风格的两条 entry（codex rollout + claude-code transcript）。
@@ -417,6 +424,24 @@ async def _all_log_rows(db_session: AsyncSession) -> list[AgentSessionLogORM]:
     return list((await db_session.execute(stmt)).scalars().all())
 
 
+async def _change_links(db_session: AsyncSession) -> list[ChangeSessionLink]:
+    """查全部 change_session_links（task-06 绑定断言；populate_existing 惯例）。"""
+    stmt = select(ChangeSessionLink).execution_options(populate_existing=True)
+    return list((await db_session.execute(stmt)).scalars().all())
+
+
+async def _quicklog_links(db_session: AsyncSession) -> list[QuicklogSessionLink]:
+    """查全部 quicklog_session_links（task-06 绑定断言；populate_existing 惯例）。"""
+    stmt = select(QuicklogSessionLink).execution_options(populate_existing=True)
+    return list((await db_session.execute(stmt)).scalars().all())
+
+
+async def _all_changes(db_session: AsyncSession) -> list[Change]:
+    """查全部 changes 行（task-06 placeholder 断言；populate_existing 惯例）。"""
+    stmt = select(Change).execution_options(populate_existing=True)
+    return list((await db_session.execute(stmt)).scalars().all())
+
+
 @pytest.mark.asyncio
 async def test_push_hub_session_hit_links_entries(
     client: AsyncClient,
@@ -439,7 +464,15 @@ async def test_push_hub_session_hit_links_entries(
 
     resp = await client.post(
         "/api/agent-logs",
-        json={**SAMPLE_BODY, "hub_session_id": str(hub.id)},
+        json={
+            **SAMPLE_BODY,
+            "hub_session_id": str(hub.id),
+            "entries": [
+                # task-06：两键并存防御——quick 优先只落 quicklog 绑定（schema 互斥注释）。
+                {**CODEX_ENTRY, "change_key": "change-hub-both", "quick_id": "ql-20260825-hit"},
+                {**CLAUDE_ENTRY, "change_key": "change-hub-claude"},
+            ],
+        },
         headers=headers,
     )
     assert resp.status_code == 200
@@ -459,6 +492,20 @@ async def test_push_hub_session_hit_links_entries(
     assert hub_after.status == "active"  # 目标会话 status 不变，仅 entries 挂接
     assert await _tool_report_sessions(db_session) == []  # hub 分支不建聚合会话
 
+    # task-06 ctx 断言（design §5.W2.2 / D-003）：quick_id 落 quicklog link、
+    # change_key 落 change link（placeholder）；并存条目只落 quicklog 不落 change。
+    quicklog_links = await _quicklog_links(db_session)
+    assert [(ln.workspace_id, ln.ql_id, ln.session_id) for ln in quicklog_links] == [
+        (ws_id, "ql-20260825-hit", hub.id)
+    ]
+    changes = await _all_changes(db_session)
+    by_key = {c.change_key: c for c in changes}
+    assert set(by_key) == {"change-hub-claude"}  # 并存条目无 change placeholder
+    change_links = await _change_links(db_session)
+    assert [(ln.change_id, ln.session_id) for ln in change_links] == [
+        (by_key["change-hub-claude"].id, hub.id)
+    ]
+
 
 @pytest.mark.asyncio
 async def test_push_hub_session_random_uuid_degrades(
@@ -472,7 +519,15 @@ async def test_push_hub_session_random_uuid_degrades(
     _ws_id, headers = shpsync_headers
     resp = await client.post(
         "/api/agent-logs",
-        json={**SAMPLE_BODY, "hub_session_id": str(_uuid.uuid4())},
+        json={
+            **SAMPLE_BODY,
+            "hub_session_id": str(_uuid.uuid4()),
+            # task-06：带 ctx 也降级——hub 未命中不产生任何绑定。
+            "entries": [
+                {**CODEX_ENTRY, "change_key": "change-degrade-random"},
+                {**CLAUDE_ENTRY, "quick_id": "ql-20260825-degrade"},
+            ],
+        },
         headers=headers,
     )
     assert resp.status_code == 200
@@ -482,6 +537,10 @@ async def test_push_hub_session_random_uuid_degrades(
     assert len(rows) == 2
     assert all(r.agent_session_id is None for r in rows)  # 静默降级，仍入库
     assert await _tool_report_sessions(db_session) == []
+    # task-06：降级路径无 placeholder、无两类绑定行。
+    assert await _all_changes(db_session) == []
+    assert await _change_links(db_session) == []
+    assert await _quicklog_links(db_session) == []
 
 
 @pytest.mark.asyncio
@@ -505,15 +564,24 @@ async def test_push_hub_session_cross_workspace_degrades(
 
     resp = await client.post(
         "/api/agent-logs",
-        json={**SAMPLE_BODY, "hub_session_id": str(other_ws_session.id)},
+        json={
+            **SAMPLE_BODY,
+            "hub_session_id": str(other_ws_session.id),
+            # task-06：带 ctx 也降级——跨 ws 不产生任何绑定。
+            "entries": [{**CODEX_ENTRY, "change_key": "change-degrade-cross-ws"}],
+        },
         headers=headers,
     )
     assert resp.status_code == 200
 
     rows = await _all_log_rows(db_session)
-    assert len(rows) == 2
+    assert len(rows) == 1
     assert all(r.agent_session_id is None for r in rows)
     assert await _tool_report_sessions(db_session) == []
+    # task-06：降级路径无 placeholder、无两类绑定行。
+    assert await _all_changes(db_session) == []
+    assert await _change_links(db_session) == []
+    assert await _quicklog_links(db_session) == []
 
 
 @pytest.mark.asyncio
@@ -536,6 +604,12 @@ async def test_push_aggregation_idempotent_single_session(
     first = sessions1[0]
     assert first.aggregation_key == "codex|change-aggregate"
     first_active_at = first.last_active_at
+    # task-06（design §5.W2.3）：change ctx 组落 change link（placeholder 变更行）。
+    changes = await _all_changes(db_session)
+    assert [c.change_key for c in changes] == ["change-aggregate"]
+    assert [(ln.change_id, ln.session_id) for ln in await _change_links(db_session)] == [
+        (changes[0].id, first.id)
+    ]
 
     resp2 = await client.post("/api/agent-logs", json=body, headers=headers)
     assert resp2.status_code == 200
@@ -552,6 +626,8 @@ async def test_push_aggregation_idempotent_single_session(
     rows = await _all_log_rows(db_session)
     assert len(rows) == 1
     assert rows[0].agent_session_id == second.id
+    # task-06：二推幂等——change link 仍恰一条（bind 查存在即返回）。
+    assert len(await _change_links(db_session)) == 1
 
 
 @pytest.mark.asyncio
@@ -596,6 +672,15 @@ async def test_push_entry_level_ctx_groups_two_sessions(
         )
         assert row.agent_session_id == by_key[expected_key].id  # 各挂一条
 
+    # task-06（design §5.W2.3）：两组各落 change link（placeholder 对应组会话）。
+    changes = await _all_changes(db_session)
+    change_by_key = {c.change_key: c for c in changes}
+    assert set(change_by_key) == {"change-a", "change-b"}
+    assert {(ln.change_id, ln.session_id) for ln in await _change_links(db_session)} == {
+        (change_by_key["change-a"].id, by_key["codex|change-a"].id),
+        (change_by_key["change-b"].id, by_key["codex|change-b"].id),
+    }
+
 
 @pytest.mark.asyncio
 async def test_push_no_ctx_single_bucket_session(
@@ -624,6 +709,11 @@ async def test_push_no_ctx_single_bucket_session(
     rows = await _all_log_rows(db_session)
     assert len(rows) == 2
     assert {r.agent_session_id for r in rows} == {bucket.id}
+
+    # task-06（design §5.W2.3）：空 ctx 单桶（本地活动）不落任何绑定。
+    assert await _all_changes(db_session) == []
+    assert await _change_links(db_session) == []
+    assert await _quicklog_links(db_session) == []
 
 
 @pytest.mark.asyncio
@@ -741,3 +831,193 @@ async def test_push_tool_report_session_fields_and_provider_mapping(
     ).scalar_one()
     assert codex_session.user_id == token.created_by
     assert zcode_session.user_id == token.created_by
+
+    # task-06（design §5.W2.3）：聚合分支双 ctx 落绑定——change_key 组落 change
+    # link（placeholder）、quick_id 组落 quicklog link（绑定主体为各组会话）。
+    changes = await _all_changes(db_session)
+    assert [c.change_key for c in changes] == ["provider-map-check"]
+    assert [(ln.change_id, ln.session_id) for ln in await _change_links(db_session)] == [
+        (changes[0].id, codex_session.id)
+    ]
+    assert [
+        (ln.workspace_id, ln.ql_id, ln.session_id) for ln in await _quicklog_links(db_session)
+    ] == [(ws_id, "ql-20260823-001", zcode_session.id)]
+
+
+# ── 2026-08-25-session-spec-binding task-06：双分支 ctx 自动绑定专测（design §5.W2.2/W2.3 / D-003）──
+
+
+@pytest.mark.asyncio
+async def test_push_hub_hit_quick_id_binds_quicklog_link(
+    client: AsyncClient,
+    shpsync_headers: tuple[Any, dict[str, str]],
+    db_session: AsyncSession,
+) -> None:
+    """task-06 ①（design §5.W2.2 / D-003）：hub 命中 + entry.quick_id → quicklog_session_links（FR-02 唯一可靠通道）。"""
+    import uuid as _uuid
+
+    ws_id, headers = shpsync_headers
+    hub = AgentSession(
+        id=_uuid.uuid4(),
+        user_id=_uuid.uuid4(),
+        workspace_id=ws_id,
+        provider="claude",
+        status="active",
+    )
+    db_session.add(hub)
+    await db_session.commit()
+
+    body = {
+        **SAMPLE_BODY,
+        "hub_session_id": str(hub.id),
+        "entries": [{**CODEX_ENTRY, "quick_id": "ql-20260825-001"}],
+    }
+    resp = await client.post("/api/agent-logs", json=body, headers=headers)
+    assert resp.status_code == 200
+
+    # D-001@v1：quicklog 条目行不存在也先绑（agent-logs 与条目推送到达顺序不保证）。
+    quicklog_links = await _quicklog_links(db_session)
+    assert [(ln.workspace_id, ln.ql_id, ln.session_id) for ln in quicklog_links] == [
+        (ws_id, "ql-20260825-001", hub.id)
+    ]
+    assert await _change_links(db_session) == []
+    assert await _all_changes(db_session) == []
+
+
+@pytest.mark.asyncio
+async def test_push_hub_hit_change_key_binds_change_link_with_placeholder(
+    client: AsyncClient,
+    shpsync_headers: tuple[Any, dict[str, str]],
+    db_session: AsyncSession,
+) -> None:
+    """task-06 ②（design §5.W2.2）：hub 命中 + entry.change_key（变更不存在）→ placeholder 建行 + change link。"""
+    import uuid as _uuid
+
+    ws_id, headers = shpsync_headers
+    hub = AgentSession(
+        id=_uuid.uuid4(),
+        user_id=_uuid.uuid4(),
+        workspace_id=ws_id,
+        provider="claude",
+        status="active",
+    )
+    db_session.add(hub)
+    await db_session.commit()
+
+    body = {
+        **SAMPLE_BODY,
+        "hub_session_id": str(hub.id),
+        "entries": [{**CODEX_ENTRY, "change_key": "change-hub-placeholder"}],
+    }
+    resp = await client.post("/api/agent-logs", json=body, headers=headers)
+    assert resp.status_code == 200
+
+    changes = await _all_changes(db_session)
+    assert len(changes) == 1
+    ch = changes[0]
+    assert ch.workspace_id == ws_id
+    assert ch.change_key == "change-hub-placeholder"
+    # placeholder defaults 对齐 _ensure_change_row（binding.py task-02 同款）。
+    assert ch.status == "draft"
+    assert ch.location == "active"
+    assert ch.path == "changes/change-hub-placeholder"
+
+    change_links = await _change_links(db_session)
+    assert [(ln.change_id, ln.session_id) for ln in change_links] == [(ch.id, hub.id)]
+    assert await _quicklog_links(db_session) == []
+
+
+@pytest.mark.asyncio
+async def test_push_hub_hit_default_change_key_no_placeholder_no_link(
+    client: AsyncClient,
+    shpsync_headers: tuple[Any, dict[str, str]],
+    db_session: AsyncSession,
+) -> None:
+    """task-06 ③（D-005@v2 / X-004）：hub 命中 + change_key='default' 伪键 → 无 placeholder 无绑定，归属不受影响。"""
+    import uuid as _uuid
+
+    ws_id, headers = shpsync_headers
+    hub = AgentSession(
+        id=_uuid.uuid4(),
+        user_id=_uuid.uuid4(),
+        workspace_id=ws_id,
+        provider="claude",
+        status="active",
+    )
+    db_session.add(hub)
+    await db_session.commit()
+
+    body = {
+        **SAMPLE_BODY,
+        "hub_session_id": str(hub.id),
+        "entries": [{**CODEX_ENTRY, "change_key": "default"}],
+    }
+    resp = await client.post("/api/agent-logs", json=body, headers=headers)
+    assert resp.status_code == 200
+
+    # 归属主流程不受绑定守卫影响（entry 仍挂 hub 会话）。
+    rows = await _all_log_rows(db_session)
+    assert {r.agent_session_id for r in rows} == {hub.id}
+
+    # default 伪键：bind_session_to_change 内部守卫直接返回——无 placeholder 行、
+    # 无任何绑定行（D-005@v2 收敛在 bind 函数内，agent-logs 通道统一生效）。
+    assert await _all_changes(db_session) == []
+    assert await _change_links(db_session) == []
+    assert await _quicklog_links(db_session) == []
+
+
+@pytest.mark.asyncio
+async def test_push_aggregation_change_key_binds_tool_report_session(
+    client: AsyncClient,
+    shpsync_headers: tuple[Any, dict[str, str]],
+    db_session: AsyncSession,
+) -> None:
+    """task-06 ④（design §5.W2.3）：无 hub + entry.change_key → tool_report 会话 + change link（placeholder）。"""
+    _ws_id, headers = shpsync_headers
+    body = {
+        **SAMPLE_BODY,
+        "entries": [{**CODEX_ENTRY, "change_key": "change-agg-bind"}],
+    }
+    resp = await client.post("/api/agent-logs", json=body, headers=headers)
+    assert resp.status_code == 200
+
+    sessions = await _tool_report_sessions(db_session)
+    assert len(sessions) == 1
+    group_session = sessions[0]
+    assert group_session.aggregation_key == "codex|change-agg-bind"
+
+    changes = await _all_changes(db_session)
+    assert [c.change_key for c in changes] == ["change-agg-bind"]
+    change_links = await _change_links(db_session)
+    assert [(ln.change_id, ln.session_id) for ln in change_links] == [
+        (changes[0].id, group_session.id)
+    ]
+    assert await _quicklog_links(db_session) == []
+
+
+@pytest.mark.asyncio
+async def test_push_aggregation_quick_id_binds_quicklog_link(
+    client: AsyncClient,
+    shpsync_headers: tuple[Any, dict[str, str]],
+    db_session: AsyncSession,
+) -> None:
+    """task-06 ⑤（design §5.W2.3）：无 hub + entry.quick_id → tool_report 会话 + quicklog link（绑定主体为组会话）。"""
+    ws_id, headers = shpsync_headers
+    body = {
+        **SAMPLE_BODY,
+        "entries": [{**CODEX_ENTRY, "quick_id": "ql-20260825-002"}],
+    }
+    resp = await client.post("/api/agent-logs", json=body, headers=headers)
+    assert resp.status_code == 200
+
+    sessions = await _tool_report_sessions(db_session)
+    assert len(sessions) == 1
+    group_session = sessions[0]
+    assert group_session.aggregation_key == "codex|ql-20260825-002"
+
+    quicklog_links = await _quicklog_links(db_session)
+    assert [(ln.workspace_id, ln.ql_id, ln.session_id) for ln in quicklog_links] == [
+        (ws_id, "ql-20260825-002", group_session.id)
+    ]
+    assert await _change_links(db_session) == []
+    assert await _all_changes(db_session) == []

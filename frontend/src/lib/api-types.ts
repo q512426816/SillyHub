@@ -1425,8 +1425,13 @@ export interface paths {
          * @description 列出某变更下的全部会话（2026-07-09-change-detail-session task-09）。
          *
          *     跨成员可见（D-005@v1，不加 user_id 过滤），鉴权复用 CHANGE_READ（X-03）。
-         *     标题取该会话最早一条 channel=user_input 的 AgentRunLog 摘要（前 30 字，X-04）。
-         *     按 last_active_at desc 排序（Python 排序规避 PG/SQLite 方言差异）。
+         *     task-03（2026-08-25-session-spec-binding / FR-03 / D-002@v1）：数据源从
+         *     ``AgentSession.change_id`` 单 FK 切换为 ``change_session_links`` M:N JOIN——
+         *     links 为唯一关联真相，存量单 FK 由迁移播种成 link 行（design §5.W1.2）不丢；
+         *     ``AgentSession.change_id`` 列继续写入不动（D-002@v1 冻结语义）。
+         *     标题取该会话最早一条 channel=user_input 的 AgentRunLog 摘要（前 30 字，X-04，
+         *     共享 helper ``_fetch_session_titles``）。按 last_active_at desc 排序（Python
+         *     排序规避 PG/SQLite 方言差异）。
          */
         get: operations["list_change_sessions_api_workspaces__workspace_id__changes__change_id__sessions_get"];
         put?: never;
@@ -1804,6 +1809,38 @@ export interface paths {
          * @description GET 快速修复单条详情（FR-06：四段正文 + raw_block；404 未命中）。
          */
         get: operations["get_quicklog_entry_api_workspaces__workspace_id__quicklog_entries__ql_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/quicklog-entries/{ql_id}/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Quicklog Sessions
+         * @description 列出某快速修复条目下绑定的全部会话（2026-08-25-session-spec-binding task-07）。
+         *
+         *     FR-04 数据源：读 ``quicklog_session_links`` M:N JOIN ``agent_sessions``。
+         *     跨成员可见（对齐 ``list_change_sessions`` 现状——列表跨成员、stream
+         *     owner-only 不变，不加 user_id 过滤），鉴权复用 CHANGE_READ。``ql_id`` 为
+         *     自然键（D-001@v1：无 FK 到 quicklog_entries——条目双源合并且与 agent-logs
+         *     到达顺序不保证，绑定行不依赖条目行存在），故查询按 (workspace_id, ql_id)
+         *     匹配 link 且不校验条目存在：无绑定返回空列表不 404（快速修复刚建、尚无
+         *     会话是常态，design §5.W3.2）；工作区隔离由 link 行 workspace_id 保证。
+         *     为快速修复级会话门户路由（D-006@v1，与变更门户同构）提供数据面。
+         *     标题经共享 helper ``_fetch_session_titles`` 与变更侧同源复用（X-013 禁止
+         *     复制 window-function 代码），按 last_active_at desc 排序（Python 排序规避
+         *     PG/SQLite 方言差异，对齐 ``list_change_sessions``）。
+         */
+        get: operations["list_quicklog_sessions_api_workspaces__workspace_id__quicklog_entries__ql_id__sessions_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4447,6 +4484,12 @@ export interface paths {
          *     2026-08-22-workspace-sessions-portal / D-003@v2：新增可选 workspace_id /
          *     change_id（AgentSession 冗余绑定列精确匹配），供 workspace/change 级会话
          *     门户复用全局端点做 scope 过滤；不传 = 现状（零回归）。
+         *     2026-08-25-session-spec-binding task-04 / FR-05（design §5.W3.3 / §9）：
+         *     change_id 语义从单 FK 精确匹配扩大为 change_session_links M:N 子查询
+         *     命中（存量单 FK 已播种为 link 行，原命中集是新命中集子集，参数名/类型
+         *     不变向后兼容）；新增可选 ql_id（快速修复短码，走 quicklog_session_links
+         *     按 (workspace_id, ql_id) 双条件子查询，防跨工作区同 ql_id 串扰），不传
+         *     = 现状（零回归）。
          */
         get: operations["list_sessions_api_daemon_sessions_get"];
         put?: never;
@@ -17054,6 +17097,8 @@ export interface components {
             change_id?: string | null;
             /** Workspace Id */
             workspace_id?: string | null;
+            /** Quicklog Id */
+            quicklog_id?: string | null;
             team_mission?: components["schemas"]["TeamMissionCreateBlock"] | null;
             page_context?: components["schemas"]["PageContextCreateBlock"] | null;
         };
@@ -23371,6 +23416,38 @@ export interface operations {
             };
         };
     };
+    list_quicklog_sessions_api_workspaces__workspace_id__quicklog_entries__ql_id__sessions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                ql_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSessionListItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_scan_docs_api_workspaces__workspace_id__scan_docs_get: {
         parameters: {
             query?: {
@@ -27606,6 +27683,7 @@ export interface operations {
                 q?: string | null;
                 workspace_id?: string | null;
                 change_id?: string | null;
+                ql_id?: string | null;
                 archived?: boolean;
             };
             header?: never;

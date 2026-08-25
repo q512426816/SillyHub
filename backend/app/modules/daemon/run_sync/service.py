@@ -27,8 +27,9 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.core.db import get_session_factory
 from app.core.logging import get_logger
 from app.core.redis import get_redis
-from app.modules.agent.model import AgentRun, AgentRunLog
+from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.agent.tool_kind import classify_tool_kind
+from app.modules.change.binding import bind_session_to_change, extract_spec_bindings
 from app.modules.change.dispatch import _run_gate_via_delegate
 from app.modules.daemon.lease.service import DaemonAgentRunNotFound
 from app.modules.daemon.model import DaemonTaskLease
@@ -472,6 +473,12 @@ class RunSyncService:
         # 第二层 SillySpec 筛选才能命中 sillyspec 的 ✅ Step 进度等（d751a871 根因）。
         # 缓存单次调用内有效；跨调用的 tool_result 查不到则保持 None（兼容不报错）。
         tool_kind_by_tool_use_id: dict[str, str] = {}
+        # 2026-08-25-session-spec-binding task-05 / FR-01 / D-003@v1：落库循环中
+        # 收集的 sillyspec 命令原文（tool_kind=sillyspec 且 channel=tool_call 的
+        # 入库行），循环后经 run 二跳定位会话再走 change.binding 落绑定
+        # （design §5 W2.1 / §7.5 生命周期契约表第 1 行）。仅 sillyspec 行触发
+        # 收集（R-03 低频热路径），空列表时循环后零额外查询。
+        sillyspec_commands: list[str] = []
 
         for msg in flat_messages:
             # ql-20260616-003：daemon _eventToMessage 不发 channel/timestamp/log_id，
@@ -690,6 +697,29 @@ class RunSyncService:
                 # 显式归一 None，避免下游 publish 拿到非预期类型。
                 tool_kind = tool_kind if isinstance(tool_kind, str) and tool_kind else None
 
+            # 2026-08-25-session-spec-binding task-05 / FR-01 / D-003@v1：sillyspec
+            # 命令收集（仅 tool_kind=sillyspec 且 channel=tool_call 的**入库**行
+            # 触发——dedup 跳过 / override 信号行已在上方 continue，不进本分支，
+            # R-03 禁全量消息扫描）。content 两路径同构：batch 为 daemon tc_content
+            # JSON，interactive 为 _extract_sdk_messages 产出的 {"tool","args",...}
+            # JSON，均取 json.loads(content)["args"]["command"]；解析失败 / 结构
+            # 不符静默跳过（不抛错不落绑定）。同命令去重，减少循环后重复解析。
+            if channel == "tool_call" and tool_kind == "sillyspec" and isinstance(content, str):
+                try:
+                    parsed_call = json.loads(content)
+                    call_args = parsed_call.get("args") if isinstance(parsed_call, dict) else None
+                    raw_command = call_args.get("command") if isinstance(call_args, dict) else None
+                    if (
+                        isinstance(raw_command, str)
+                        and raw_command
+                        and raw_command not in sillyspec_commands
+                    ):
+                        sillyspec_commands.append(raw_command)
+                except Exception:
+                    # JSON 解析失败等异常静默吞（与上方 classify_tool_kind 兜底同款
+                    # 防御口径），不影响落库主流程。
+                    pass
+
             # ql-20260706-002：tool_kind 跨消息继承——tool_result（命令输出 stdout 行）
             # 继承配对 tool_use（命令调用 tool_call 行）的 tool_kind。tool_use 行
             # （带 tool_kind + tool_use_id）登记 id→kind 缓存；tool_result 行（stdout，
@@ -838,14 +868,53 @@ class RunSyncService:
             # 由同会话下一次上报自愈（design DS-1 审查修订，不加去重复杂度）。
             # 事务：与消息落库走同一 commit()（含 IntegrityError 幂等回滚分支）。
             if latest_session_id and agent_run.agent_session_id is not None:
-                from app.modules.agent.model import AgentSession
-
+                # task-05 注：AgentSession 已提到模块顶部 import（下方 sillyspec
+                # 绑定块也要用）；此处原局部 import 会把名字变函数局部作用域，
+                # 导致绑定块引用 UnboundLocalError，故移除。
                 session_row = await self._session.get(AgentSession, agent_run.agent_session_id)
                 # get 返回 None（理论不应发生：会话行在 create_session 的 commit 后
                 # 必然已存在）静默跳过；值相同不写（避免无谓 dirty）。
                 if session_row is not None and session_row.agent_session_id != latest_session_id:
                     session_row.agent_session_id = latest_session_id
                     self._session.add(session_row)
+
+            # 2026-08-25-session-spec-binding task-05 / FR-01 / D-003@v1：sillyspec
+            # 命令自动绑定——落库循环收集的命令经 run 二跳定位平台会话
+            # （AgentRun.agent_session_id → AgentSession.workspace_id）后，走
+            # change/binding 公共入口落 change_session_links（design §5 W2.1 /
+            # §7.5 生命周期契约表第 1 行；禁止在 run_sync 重复实现 placeholder /
+            # default 守卫 / savepoint）。守卫（X-002）：agent_session_id 为 None
+            # （batch run 无会话 / 会话被删 FK 置空）、会话行不存在或会话无
+            # workspace_id → 静默跳过全部绑定，消息照常入库。绑定全程 best-effort：
+            # bind 函数自带 savepoint + log.warning 不抛（task-02 契约），外层再兜
+            # try/except，任何异常不阻断 AgentRunLog 落库与 SubmittedMessages 返回；
+            # 不自行 commit，跟随本方法末尾既有 commit 事务边界。
+            if sillyspec_commands and agent_run.agent_session_id is not None:
+                binding_session_row = await self._session.get(
+                    AgentSession, agent_run.agent_session_id
+                )
+                if binding_session_row is not None and binding_session_row.workspace_id is not None:
+                    for sillyspec_command in sillyspec_commands:
+                        # extract_spec_bindings 解析规则：quick 子命令 / 非 run 子
+                        # 命令无产出（D-004），--change default 解析层跳过 + bind
+                        # 函数内兜底双保险（D-005@v2）。
+                        for spec_binding in extract_spec_bindings(sillyspec_command):
+                            try:
+                                await bind_session_to_change(
+                                    self._session,
+                                    binding_session_row.workspace_id,
+                                    spec_binding.change_key,
+                                    binding_session_row.id,
+                                )
+                            except Exception as exc:
+                                # 外层兜底：bind 自身已 best-effort，此处仅防御
+                                # 意外（如 ORM 状态异常），绑定失败不影响消息入库。
+                                log.warning(
+                                    "daemon_messages_spec_bind_failed",
+                                    agent_run_id=str(agent_run_id),
+                                    change_key=spec_binding.change_key,
+                                    error=str(exc),
+                                )
 
         # QueuePool 修复 3：commit 前从 agent_run 提取 publish 所需标量。commit()
         # 后 SQLAlchemy 默认 expire_on_commit 会令 ORM 属性失效，再读会触发 lazy

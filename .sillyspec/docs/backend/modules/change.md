@@ -119,6 +119,8 @@ review 四方法(通过/打回):
 - change↔workspace 多对多（ChangeWorkspace），跨工作区变更注意同步语义。
 - 用户可见错误文案中文（error-message-l10n）；守护测试 `test_error_message_l10n.py`。
 
+- 会话↔spec 记录多对多绑定（2026-08-25-session-spec-binding）：`change_session_links` 为变更侧关联唯一真相（list_change_sessions 改 links JOIN，标题提取共享 `_fetch_session_titles` 供两端点复用）；`QuicklogSessionLink`（自然键 workspace_id+ql_id+session_id，无 FK 到 quicklog_entries——双源合并/到达顺序不保证）；`binding.py` 提供命令解析（`extract_spec_bindings`：quick 子命令 --change 是 CLI 内部会话 id 不绑、default 伪键跳过）与幂等绑定（savepoint best-effort）；新端点 `GET /workspaces/{wid}/quicklog-entries/{ql_id}/sessions`。
+
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->

@@ -59,6 +59,7 @@ import {
   Square,
   TriangleAlert,
   Users,
+  Zap,
 } from "lucide-react";
 import { Badge, Button, Spin, Tag } from "antd";
 
@@ -117,6 +118,8 @@ import {
 } from "@/lib/api/llm-providers";
 import { listWorkspaces } from "@/lib/workspaces";
 import { getChange } from "@/lib/changes";
+// task-11（2026-08-25-session-spec-binding / FR-06）：quickId 标题解析数据源。
+import { getQuicklogDetail } from "@/lib/quicklog";
 import {
   createSession,
   endSession,
@@ -157,6 +160,13 @@ export interface SessionPreContext {
   workspaceId: string | null;
   /** 变更入口独立页传入（change 级隐含 workspace，调用方须显式双传，X-13）。 */
   changeId?: string | null;
+  /**
+   * 快速修复入口传入（task-11 / 2026-08-25-session-spec-binding FR-06）：ql_id
+   * 短码（D-001 自然键，前端不校验存在性只透传——条目行允许后到），随首句
+   * createSession 上送 quicklog_id 落 quicklog_session_links 绑定。quicklog 级
+   * 隐含 workspace，调用方须显式双传（对齐 changeId X-13 契约）。
+   */
+  quickId?: string | null;
   /** 目标 runtime id（首句 createSession 的 runtime_id）。 */
   runtimeId: string;
   /**
@@ -581,6 +591,29 @@ function SessionPanelPage({
       return getChange(preContext.workspaceId, preContext.changeId);
     },
     enabled: Boolean(preContext?.workspaceId && preContext?.changeId),
+    staleTime: 60_000,
+  });
+
+  // ── task-11（2026-08-25-session-spec-binding / FR-06）：quicklog 入口预会话
+  // 上下文行加显快速修复标题 ─────────────────────────────────────────────────
+  // 对齐 preChangeQuery 模式：单条语义调 getQuicklogDetail（按 ql_id 精确取）；
+  // 双传契约同 X-13（quickId 存在时 workspaceId 必在）；真会话态 / 无 quickId
+  // 预会话 enabled 守卫停请求；解析失败静默回退 ql_id 短码展示（D-001：双源
+  // 合并条目允许后到，不校验存在性）。
+  const preQuicklogQuery = useQuery({
+    queryKey: [
+      "quicklog",
+      "preSessionCtx",
+      preContext?.workspaceId,
+      preContext?.quickId,
+    ],
+    queryFn: () => {
+      if (!preContext?.workspaceId || !preContext.quickId) {
+        throw new Error("快速修复标题解析缺 workspaceId/quickId（双传契约，对齐 X-13）");
+      }
+      return getQuicklogDetail(preContext.workspaceId, preContext.quickId);
+    },
+    enabled: Boolean(preContext?.workspaceId && preContext?.quickId),
     staleTime: 60_000,
   });
 
@@ -1132,6 +1165,12 @@ function SessionPanelPage({
     if (!preContext?.changeId) return null;
     return preChangeQuery.data?.title ?? preChangeQuery.data?.change_key ?? null;
   }, [preContext?.changeId, preChangeQuery.data]);
+  // 上下文行快速修复名（task-11 / FR-06）：quicklog 入口加显——title 回退
+  // ql_id 短码（查询中/失败均显短码，不显 —：变更行回退 change_key 的同构）。
+  const preQuicklogName = useMemo(() => {
+    if (!preContext?.quickId) return null;
+    return preQuicklogQuery.data?.title ?? preContext.quickId;
+  }, [preContext?.quickId, preQuicklogQuery.data]);
   // 附件门控（D-6 引擎门控同构）：预会话无会话实体，按目标 runtime 引擎判定。
   const preAttachmentsDisabled = preEngine !== "claude";
 
@@ -1588,6 +1627,10 @@ function SessionPanelPage({
             ? { workspace_id: preContext.workspaceId }
             : {}),
           ...(preContext.changeId ? { change_id: preContext.changeId } : {}),
+          // task-11（2026-08-25-session-spec-binding / FR-06）：quicklog 入口
+          // quickId 随首句上送 quicklog_id（对齐 change_id 展开形态；后端创建
+          // 即落 quicklog_session_links 绑定，缺省不进请求体零回归）。
+          ...(preContext.quickId ? { quicklog_id: preContext.quickId } : {}),
           // ql-20260823-008：预会话配置条暂存值随首句落为会话初始配置。
           ...(preProviderId ? { llm_provider_id: preProviderId } : {}),
           ...(preProfileId ? { agent_profile_id: preProfileId } : {}),
@@ -1954,6 +1997,13 @@ function SessionPanelPage({
             <span className="inline-flex items-center gap-1">
               <Puzzle aria-hidden className="h-3 w-3" />
               {preChangeName ?? "—"}
+            </span>
+          )}
+          {/* task-11（FR-06）：快速修复锁定行——展示形态对齐变更行（⚡→Zap）。 */}
+          {preContext?.quickId && (
+            <span className="inline-flex items-center gap-1">
+              <Zap aria-hidden className="h-3 w-3" />
+              {preQuicklogName ?? "—"}
             </span>
           )}
           <span className="inline-flex items-center gap-1">

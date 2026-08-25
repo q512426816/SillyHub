@@ -80,6 +80,8 @@ conn.onmessage = (raw) => {
 - `AgentSessionListResponseSchema`（zod）仅 dev-time 校验，不进业务层。
 - 测试分布：`lib/daemon.test.ts` + `lib/__tests__/daemon-session.test.ts`（会话/SSE）、`daemon-permission.test.ts`（权限事件解析）、`daemon-usage.test.ts`（用量聚合）。
 
+- 会话绑定客户端三入口（2026-08-25-session-spec-binding）：listAgentSessions options 加 ql_id；createSession input 加 quicklog_id；新增 listQuicklogSessions(workspaceId, qlId)（类型经 gen:types 从后端生成，禁止手写）。
+
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->

@@ -38,6 +38,13 @@
  *   preContext 继承）。NewSessionForm/WorkspaceSessionPicker 本卡全量退役
  *   （D-109，文件与 import 已删，X-12 起渲染分支即空）。
  *
+ * quicklog 入口（task-10 / 2026-08-25-session-spec-binding / FR-04 / D-006@v1）：
+ *   QuicklogScope（workspaceId+qlId）与 change 入口同构——scope 消费分支
+ *   if-chain 判等逐一补齐（X-008）：portalTitle/scopedPickerWorkspaceId/
+ *   defaultExpandedWorkspaceId/空态文案；组头「＋」与两步浮层 onPick 合成
+ *   preContext { workspaceId, quickId, runtimeId }（X-13 双传语义 quicklog
+ *   版，quickId 首句经 task-11 上送 quicklog_id 落自动绑定）。
+ *
  * 状态机（FR-03 零残留）：
  *   - 组头＋ → 浮层开（当前选中态保持，取消零影响）；
  *   - onPick → preContext 置位 + 清 selectedSessionId（右侧三分支优先级：
@@ -234,9 +241,14 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   }, [refreshSessionLists]);
 
   /** ql-20260823-005：?new=1 直达时预会话/兜底浮层的默认组——workspace/change
-   *  scope 锁定本组，全局门户不指定（null，与组头「＋」非工作区分组同语义）。 */
+   *  scope 锁定本组，全局门户不指定（null，与组头「＋」非工作区分组同语义）。
+   *  task-10（X-008 消费点四）：quicklog scope 同锁定本工作区。 */
   const scopedPickerWorkspaceId = useCallback(() => {
-    if (scope?.kind === "workspace" || scope?.kind === "change") {
+    if (
+      scope?.kind === "workspace" ||
+      scope?.kind === "change" ||
+      scope?.kind === "quicklog"
+    ) {
       return scope.workspaceId;
     }
     return null;
@@ -244,7 +256,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
 
   /** 合成 preContext 切预会话态（清选中——右侧三分支优先级真会话 > 预会话）；
    *  change scope 显式双传 workspaceId + changeId（X-13）——handlePickerPick 与
-   *  ?new=1 直达两入口共用（ql-20260823-005 自原 handlePickerPick 主体提取）。 */
+   *  ?new=1 直达两入口共用（ql-20260823-005 自原 handlePickerPick 主体提取）。
+   *  task-10（FR-04）：quicklog scope 同款双传 workspaceId + quickId
+   * （quickId 字段类型由 task-11 同 Wave 落地，两卡 constraints 已声明耦合）。 */
   const enterPreSession = useCallback(
     (runtimeId: string, workspaceId: string | null) => {
       setPreContext(
@@ -254,7 +268,13 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
               changeId: scope.changeId,
               runtimeId,
             }
-          : { workspaceId, runtimeId },
+          : scope?.kind === "quicklog"
+            ? {
+                workspaceId: scope.workspaceId,
+                quickId: scope.qlId,
+                runtimeId,
+              }
+            : { workspaceId, runtimeId },
       );
       setSelectedSessionId(null);
       // ql-20260824-001：清选中同步清 ?session=（刷新不恢复已离开的会话）。
@@ -305,12 +325,20 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
     scopedPickerWorkspaceId,
   ]);
 
-  // scope 派生（design §4.A 三处路由之二）：标题范围后缀（固定文案，不拉
-  // workspace 名）。创建绑定锁（原 NewSessionForm bindWorkspaceId/bindChangeId）
-  // 已由 preContext 解析继承（workspace 入口=组 workspaceId；change 入口=页头
-  // 按钮双传，task-07 接线）。
+  // scope 派生（design §4.A）：标题范围后缀（固定文案，不拉 workspace 名）。
+  // task-10（FR-04 / X-008 消费点三）：quicklog 后缀「 · 快速修复」并附 ql
+  // 短码（scope.qlId 本身即短码，零额外查询；原型场景B .portal-head 方向）。
+  // 创建绑定锁（原 NewSessionForm bindWorkspaceId/bindChangeId）已由
+  // preContext 解析继承（workspace 入口=组 workspaceId；change/quicklog 入口
+  // =scope 双传，task-07/task-10 接线）。
   const portalTitle = `智能体会话${
-    scope?.kind === "workspace" ? " · 工作区" : scope?.kind === "change" ? " · 变更" : ""
+    scope?.kind === "workspace"
+      ? " · 工作区"
+      : scope?.kind === "change"
+        ? " · 变更"
+        : scope?.kind === "quicklog"
+          ? ` · 快速修复 · ${scope.qlId}`
+          : ""
   }`;
   // change scope（task-07 / FR-06 / D-106）：左侧平铺列表无组头「＋」，预会话
   // 入口由页头 actions 承载（X-12 的例外，仅此 scope 有页头按钮）。
@@ -333,7 +361,11 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             scope?.kind === "change"
               ? // change 入口组头不出现，保守与 handlePickerPick 双传语义对齐（X-13）。
                 { workspaceId: scope.workspaceId, changeId: scope.changeId, runtimeId: runtime.id }
-              : { workspaceId, runtimeId: runtime.id },
+              : scope?.kind === "quicklog"
+                ? // task-10（FR-04）：quicklog 入口双传 workspaceId + quickId
+                  //（X-13 语义 quicklog 版，quickId 类型由 task-11 落地）。
+                  { workspaceId: scope.workspaceId, quickId: scope.qlId, runtimeId: runtime.id }
+                : { workspaceId, runtimeId: runtime.id },
           );
           // ql-20260824-001：清选中同步清 ?session=（同 enterPreSession）。
           syncSessionParam(null);
@@ -397,7 +429,9 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
           }}
           onNewInGroup={handleNewInGroup}
           defaultExpandedWorkspaceId={
-            scope?.kind === "workspace" || scope?.kind === "change"
+            scope?.kind === "workspace" ||
+            scope?.kind === "change" ||
+            scope?.kind === "quicklog"
               ? scope.workspaceId
               : undefined
           }
@@ -475,7 +509,11 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             <p className="max-w-[380px] text-xs leading-6 text-muted-foreground">
               {scope?.kind === "change"
                 ? "在左侧工作区分组点「＋」选择机器与智能体，发送第一句话即在当前变更下创建会话；也可以从列表选择一个既有会话继续对话。"
-                : "在左侧工作区分组点「＋」选择机器与智能体，发送第一句话即创建会话；也可以从列表选择一个既有会话继续对话。"}
+                : scope?.kind === "quicklog"
+                  ? // task-10（FR-04 / X-008 消费点六）：quicklog 空态提示在
+                    // 当前快速修复下创建会话（首句经 quickId 落自动绑定）。
+                    "在左侧工作区分组点「＋」选择机器与智能体，发送第一句话即在当前快速修复下创建会话；也可以从列表选择一个既有会话继续对话。"
+                  : "在左侧工作区分组点「＋」选择机器与智能体，发送第一句话即创建会话；也可以从列表选择一个既有会话继续对话。"}
             </p>
             <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
               <button

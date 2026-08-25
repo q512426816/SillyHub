@@ -23,9 +23,15 @@
 //      选择器落定的 orchestrator_workspace_id）且绝不调 triggerSessionTeamMission；
 //   8. 创建失败保留输入与暂存可重试（R-02 延伸）；成功后暂存清空（再发不带）。
 //
+// task-11（2026-08-25-session-spec-binding / FR-06）追加：
+//   9. quickId 预会话——首句 createSession 请求体双向断言（带 quickId 含
+//      quicklog_id、缺省不含，零回归）+ 锁定行快速修复标题渲染（mock
+//      getQuicklogDetail）与解析失败回退 ql_id 短码（D-001 不校验存在性）。
+//
 // mock 风格照抄 session-panel-team.test.tsx（page 模式 QueryClientProvider +
 // 仅 mock 网络层；断言用 aria-label / 正则避开 antd 中文按钮拆分坑）。task-13
-// 追加 mock @/lib/api apiFetch（弹层 probe 数据源，fail-safe 默认空响应）。
+// 追加 mock @/lib/api apiFetch（弹层 probe 数据源，fail-safe 默认空响应）；
+// task-11 追加 mock @/lib/quicklog getQuicklogDetail（标题解析数据源）。
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
@@ -107,6 +113,18 @@ vi.mock("@/lib/workspace", async () => {
     "@/lib/workspace",
   );
   return { ...actual, listProjectWorkspaces: workspaceApi.listProjectWorkspaces };
+});
+
+// task-11（FR-06）：快速修复标题解析数据源（preQuicklogQuery 单条 detail）。
+const quicklogApi = vi.hoisted(() => ({
+  getQuicklogDetail: vi.fn(),
+}));
+
+vi.mock("@/lib/quicklog", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/quicklog")>(
+    "@/lib/quicklog",
+  );
+  return { ...actual, getQuicklogDetail: quicklogApi.getQuicklogDetail };
 });
 
 // task-13：弹层 probe 数据源（POST /api/workspaces/probe，组件内 module-level
@@ -212,6 +230,25 @@ function makeDetail() {
   };
 }
 
+/** 快速修复详情（task-11 / FR-06：preQuicklogQuery 数据，关键字段对齐 QuicklogEntryRead）。 */
+function makeQuicklogDetail(
+  overrides: Partial<{ ql_id: string; title: string }> = {},
+) {
+  return {
+    ql_id: "ql-20260825-001-x1",
+    title: "修复登录跳转",
+    status: "completed",
+    status_note: null,
+    timestamp: "2026-08-25T10:00:00Z",
+    placeholder: false,
+    author_raw: "qinyi",
+    author_name: "qinyi",
+    owner_name: null,
+    linked_changes: [],
+    ...overrides,
+  };
+}
+
 function setupPre(
   overrides: {
     sessionId?: string | null;
@@ -237,6 +274,8 @@ function setupPre(
   });
   workspaceApi.listProjects.mockResolvedValue([]);
   workspaceApi.listProjectWorkspaces.mockResolvedValue([]);
+  // task-11（FR-06）：标题解析默认成功响应（用例按需覆盖为失败/别名）。
+  quicklogApi.getQuicklogDetail.mockResolvedValue(makeQuicklogDetail());
   // task-13：probe 默认空响应（用例按需覆盖为具体探测项）。
   apiFetchMock.mockResolvedValue([]);
 
@@ -434,11 +473,57 @@ describe("SessionPanel 预会话首句创建（D-102）", () => {
         ask_user_only: true,
       }),
     );
+    // task-11（FR-06 零回归）：不带 quickId → 请求体不含 quicklog_id。
+    const arg = sessionApi.createSession.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg.quicklog_id).toBeUndefined();
     // 上报父层（resp 完整对象）——父层切 sessionId 的接线依据。
     await waitFor(() =>
       expect(onPreSessionCreated).toHaveBeenCalledWith(
         expect.objectContaining({ session_id: "sess-pre-2", run_id: "run-pre-2" }),
       ),
+    );
+  });
+
+  it("preContext 带 workspaceId + quickId → createSession 上送 quicklog_id（task-11 / FR-06）", async () => {
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-pre-q1",
+      run_id: "run-pre-q1",
+      lease_id: "l",
+      status: "active",
+      stream_url: "",
+    });
+    setupPre({
+      preContext: {
+        workspaceId: "ws-1",
+        quickId: "ql-20260825-001-x1",
+        runtimeId: "rt-codex",
+      },
+    });
+
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "快速修复入口首句" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
+    expect(sessionApi.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtime_id: "rt-codex",
+        prompt: "快速修复入口首句",
+        workspace_id: "ws-1",
+        quicklog_id: "ql-20260825-001-x1",
+        manual_approval: true,
+        ask_user_only: true,
+      }),
+    );
+    // 不带 changeId → 请求体不含 change_id（quicklog 入口独立，缺省零回归）。
+    const arg = sessionApi.createSession.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg.change_id).toBeUndefined();
+    // 标题解析 query 已按双传契约发起（单条 detail，对齐变更解析单条语义）。
+    expect(quicklogApi.getQuicklogDetail).toHaveBeenCalledWith(
+      "ws-1",
+      "ql-20260825-001-x1",
     );
   });
 
@@ -901,5 +986,54 @@ describe("SessionPanel 预会话弹层确认 → 暂存 + 首句携带 team_miss
       team_mission?: unknown;
     };
     expect(arg.team_mission).toBeUndefined();
+  });
+});
+
+/* ───────── 9. task-11（FR-06）：quickId 锁定行快速修复标题解析 ───────── */
+
+describe("SessionPanel 预会话快速修复上下文行（task-11 / FR-06）", () => {
+  it("quickId 存在：锁定行渲染快速修复标题（getQuicklogDetail 解析，chip 对齐变更行形态且只读）", async () => {
+    setupPre({
+      preContext: {
+        workspaceId: "ws-1",
+        quickId: "ql-20260825-001-x1",
+        runtimeId: "rt-claude",
+      },
+    });
+
+    const ctx = await screen.findByTestId("pre-session-context");
+    // 标题来自 getQuicklogDetail 解析（非 ql_id 短码直显）。
+    await waitFor(() => expect(ctx.textContent).toContain("修复登录跳转"));
+    expect(quicklogApi.getQuicklogDetail).toHaveBeenCalledWith(
+      "ws-1",
+      "ql-20260825-001-x1",
+    );
+    // D-104：快速修复 chip 同样纯文本（锁定行无任何可交互元素）。
+    expect(within(ctx).queryAllByRole("button")).toHaveLength(0);
+    expect(within(ctx).queryAllByRole("link")).toHaveLength(0);
+  });
+
+  it("标题解析失败：静默回退 ql_id 短码展示不报错（D-001 条目行允许后到，不校验存在性）", async () => {
+    quicklogApi.getQuicklogDetail.mockRejectedValue(new Error("not found"));
+    setupPre({
+      preContext: {
+        workspaceId: "ws-1",
+        quickId: "ql-20260824-009-z9",
+        runtimeId: "rt-claude",
+      },
+    });
+
+    const ctx = await screen.findByTestId("pre-session-context");
+    await waitFor(() => expect(ctx.textContent).toContain("ql-20260824-009-z9"));
+    // 解析失败不冒泡为创建会话错误（标题解析与首句创建互不影响）。
+    expect(screen.queryByLabelText("创建会话错误")).not.toBeInTheDocument();
+  });
+
+  it("无 quickId：锁定行不渲染快速修复条目、标题解析零调用（缺省零回归）", () => {
+    setupPre({ preContext: { workspaceId: "ws-1", runtimeId: "rt-claude" } });
+
+    const ctx = screen.getByTestId("pre-session-context");
+    expect(ctx.textContent).not.toContain("修复登录跳转");
+    expect(quicklogApi.getQuicklogDetail).not.toHaveBeenCalled();
   });
 });

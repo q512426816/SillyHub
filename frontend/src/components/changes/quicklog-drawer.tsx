@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Drawer, Switch } from "antd";
 
+import { QuicklogSessionsCard } from "@/components/changes/quicklog-sessions-card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
 import { getQuicklogDetail, type QuicklogEntryListItem } from "@/lib/quicklog";
@@ -221,6 +222,14 @@ export function QuicklogDrawer({
                   <p className="text-xs text-muted-foreground">（无）</p>
                 )}
               </section>
+
+              {/* 关联会话卡（task-12 / FR-04 / D-006）：结构化视图底部挂载，
+                  条目深链快速修复门户选中态；原始 md 切换视图不渲染
+                  （对齐既有 section 门控）。 */}
+              <QuicklogSessionsCard
+                workspaceId={workspaceId}
+                qlId={entry.ql_id}
+              />
 
               {detail.truncated && (
                 <p className="text-[11px] text-muted-foreground">

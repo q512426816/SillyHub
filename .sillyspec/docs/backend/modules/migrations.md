@@ -32,6 +32,8 @@ alembic upgrade head                       # head = 20260817100000（单 head）
 - 迁移文件会被 pre-commit 的 ruff 重排格式，首次 commit 后核对文件真的落盘（历史上有 ruff 重排致 commit 静默不落地先例）。
 - 本项目除 PPM 外未正式上线，不要求历史兼容与完整 down-grade，以 head 前进为准。
 
+- 20260825230000_add_quicklog_session_links（2026-08-25-session-spec-binding）：建表 + agent_sessions.change_id 存量播种至 change_session_links（ON CONFLICT DO NOTHING）；downgrade drop 表、播种行保留无害。
+
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->

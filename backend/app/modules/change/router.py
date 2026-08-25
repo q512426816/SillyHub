@@ -18,6 +18,7 @@ from app.core.logging import get_logger
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
+from app.modules.change.model import ChangeSessionLink, QuicklogSessionLink
 from app.modules.change.quicklog_service import QuicklogQueryService
 from app.modules.change.schema import (
     ApprovalRead,
@@ -307,51 +308,23 @@ async def list_change_files(
     )
 
 
-@router.get(
-    "/changes/{change_id}/sessions",
-    response_model=list[AgentSessionListItem],
-)
-async def list_change_sessions(
-    workspace_id: uuid.UUID,
-    change_id: uuid.UUID,
-    session: SessionDep,
-    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
-) -> list[AgentSessionListItem]:
-    """列出某变更下的全部会话（2026-07-09-change-detail-session task-09）。
+async def _fetch_session_titles(
+    db: AsyncSession, session_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str | None]:
+    """批量取会话标题：每会话最早一条 channel=user_input 摘要（前 30 字）。
 
-    跨成员可见（D-005@v1，不加 user_id 过滤），鉴权复用 CHANGE_READ（X-03）。
-    标题取该会话最早一条 channel=user_input 的 AgentRunLog 摘要（前 30 字，X-04）。
-    按 last_active_at desc 排序（Python 排序规避 PG/SQLite 方言差异）。
+    task-03（2026-08-25-session-spec-binding / X-013）：自 ``list_change_sessions``
+    提取为共享 helper——本端点与 task-07 快速修复会话端点（GET
+    ``/quicklog-entries/{ql_id}/sessions``）两个消费方同在本文件，标题口径必须
+    同源。窗口函数 ROW_NUMBER 分区取首条（P5 2026-08-24 会话审查，与 agent/
+    daemon router 同步）——拉全部 user_input 行 Python 取最早会随轮数线性放大。
+
+    返回映射只含命中的会话（值已按前 30 字截断；空文本归一为 None）；未命中
+    会话不出现在映射，调用方 ``get`` 默认 None，与旧实现
+    ``(content or "")[:30] or None`` 语义一致。
     """
-    # 1. AgentSession where change_id=change_id（跨成员）。用 col(AgentSession.change_id)
-    #    显式限定列名，避免与函数参数 change_id 同名遮蔽。
-    sessions = (
-        (
-            await session.execute(
-                select(AgentSession).where(
-                    col(AgentSession.change_id) == change_id,
-                    col(AgentSession.deleted_at).is_(None),  # FR-07 软删过滤
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    if not sessions:
-        return []
-
-    session_ids = [s.id for s in sessions]
-    user_ids = {s.user_id for s in sessions}
-
-    # 2. 批量取作者展示名（避免 N+1）。
-    users = (await session.execute(select(User).where(col(User.id).in_(user_ids)))).scalars().all()
-    user_name_map: dict[uuid.UUID, str | None] = {u.id: u.display_name for u in users}
-
-    # 3. 批量取每个 session 的首条 user_input 标题：JOIN AgentRun 过滤
-    #    agent_session_id IN (...) + AgentRunLog.channel='user_input'。
-    #    P5（2026-08-24 会话审查）：窗口函数 ROW_NUMBER 分区取首条（与 agent/
-    #    daemon router 同步）——原实现拉全部 user_input 行 Python 取最早，
-    #    长会话下随轮数线性放大。
+    if not session_ids:
+        return {}
     rn = (
         func.row_number()
         .over(
@@ -374,13 +347,62 @@ async def list_change_sessions(
         .subquery()
     )
     title_rows = (
-        await session.execute(
+        await db.execute(
             select(title_subq.c.session_id, title_subq.c.content).where(title_subq.c.rn == 1)
         )
     ).all()
-    content_by_session: dict[uuid.UUID, str] = {
-        row.session_id: (row.content or "") for row in title_rows
-    }
+    return {row.session_id: (row.content or "")[:30] or None for row in title_rows}
+
+
+@router.get(
+    "/changes/{change_id}/sessions",
+    response_model=list[AgentSessionListItem],
+)
+async def list_change_sessions(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+) -> list[AgentSessionListItem]:
+    """列出某变更下的全部会话（2026-07-09-change-detail-session task-09）。
+
+    跨成员可见（D-005@v1，不加 user_id 过滤），鉴权复用 CHANGE_READ（X-03）。
+    task-03（2026-08-25-session-spec-binding / FR-03 / D-002@v1）：数据源从
+    ``AgentSession.change_id`` 单 FK 切换为 ``change_session_links`` M:N JOIN——
+    links 为唯一关联真相，存量单 FK 由迁移播种成 link 行（design §5.W1.2）不丢；
+    ``AgentSession.change_id`` 列继续写入不动（D-002@v1 冻结语义）。
+    标题取该会话最早一条 channel=user_input 的 AgentRunLog 摘要（前 30 字，X-04，
+    共享 helper ``_fetch_session_titles``）。按 last_active_at desc 排序（Python
+    排序规避 PG/SQLite 方言差异）。
+    """
+    # 1. links JOIN agent_sessions（跨成员）。unique(change_id, session_id) 使
+    #    同一 (变更, 会话) 至多一行 link，JOIN 不会产生重复会话行，无需 distinct。
+    sessions = (
+        (
+            await session.execute(
+                select(AgentSession)
+                .join(ChangeSessionLink, ChangeSessionLink.session_id == AgentSession.id)
+                .where(
+                    ChangeSessionLink.change_id == change_id,
+                    col(AgentSession.deleted_at).is_(None),  # FR-07 软删过滤
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not sessions:
+        return []
+
+    session_ids = [s.id for s in sessions]
+    user_ids = {s.user_id for s in sessions}
+
+    # 2. 批量取作者展示名（避免 N+1）。
+    users = (await session.execute(select(User).where(col(User.id).in_(user_ids)))).scalars().all()
+    user_name_map: dict[uuid.UUID, str | None] = {u.id: u.display_name for u in users}
+
+    # 3. 批量取标题（共享 helper，task-07 快速修复会话端点同源复用，X-013）。
+    titles = await _fetch_session_titles(session, session_ids)
 
     # 4. 组装 + 按 last_active_at desc 排序。
     items = [
@@ -394,7 +416,7 @@ async def list_change_sessions(
                 user_id=s.user_id, display_name=user_name_map.get(s.user_id)
             ),
             last_active_at=s.last_active_at,
-            title=(content_by_session.get(s.id, "") or "")[:30] or None,
+            title=titles.get(s.id),
         )
         for s in sessions
     ]
@@ -1128,3 +1150,81 @@ async def get_quicklog_entry(
         raw_block=e.raw_block,
         truncated=e.truncated,
     )
+
+
+@router.get(
+    "/quicklog-entries/{ql_id}/sessions",
+    response_model=list[AgentSessionListItem],
+)
+async def list_quicklog_sessions(
+    workspace_id: uuid.UUID,
+    ql_id: str,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+) -> list[AgentSessionListItem]:
+    """列出某快速修复条目下绑定的全部会话（2026-08-25-session-spec-binding task-07）。
+
+    FR-04 数据源：读 ``quicklog_session_links`` M:N JOIN ``agent_sessions``。
+    跨成员可见（对齐 ``list_change_sessions`` 现状——列表跨成员、stream
+    owner-only 不变，不加 user_id 过滤），鉴权复用 CHANGE_READ。``ql_id`` 为
+    自然键（D-001@v1：无 FK 到 quicklog_entries——条目双源合并且与 agent-logs
+    到达顺序不保证，绑定行不依赖条目行存在），故查询按 (workspace_id, ql_id)
+    匹配 link 且不校验条目存在：无绑定返回空列表不 404（快速修复刚建、尚无
+    会话是常态，design §5.W3.2）；工作区隔离由 link 行 workspace_id 保证。
+    为快速修复级会话门户路由（D-006@v1，与变更门户同构）提供数据面。
+    标题经共享 helper ``_fetch_session_titles`` 与变更侧同源复用（X-013 禁止
+    复制 window-function 代码），按 last_active_at desc 排序（Python 排序规避
+    PG/SQLite 方言差异，对齐 ``list_change_sessions``）。
+    """
+    # 1. links JOIN agent_sessions（跨成员）。unique(workspace_id, ql_id,
+    #    session_id) 使同一 (条目, 会话) 至多一行 link，JOIN 不会产生重复
+    #    会话行，无需 distinct。
+    sessions = (
+        (
+            await session.execute(
+                select(AgentSession)
+                .join(QuicklogSessionLink, QuicklogSessionLink.session_id == AgentSession.id)
+                .where(
+                    QuicklogSessionLink.workspace_id == workspace_id,
+                    QuicklogSessionLink.ql_id == ql_id,
+                    col(AgentSession.deleted_at).is_(None),  # 软删过滤（对齐变更侧）
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not sessions:
+        return []
+
+    session_ids = [s.id for s in sessions]
+    user_ids = {s.user_id for s in sessions}
+
+    # 2. 批量取作者展示名（避免 N+1）。
+    users = (await session.execute(select(User).where(col(User.id).in_(user_ids)))).scalars().all()
+    user_name_map: dict[uuid.UUID, str | None] = {u.id: u.display_name for u in users}
+
+    # 3. 批量取标题（共享 helper，与 list_change_sessions 同源复用，X-013）。
+    titles = await _fetch_session_titles(session, session_ids)
+
+    # 4. 组装 + 按 last_active_at desc 排序（与 list_change_sessions 同构）。
+    items = [
+        AgentSessionListItem(
+            id=s.id,
+            provider=s.provider,
+            status=s.status,
+            turn_count=s.turn_count,
+            mode=(s.config or {}).get("mode"),
+            author=ChangeSessionAuthor(
+                user_id=s.user_id, display_name=user_name_map.get(s.user_id)
+            ),
+            last_active_at=s.last_active_at,
+            title=titles.get(s.id),
+        )
+        for s in sessions
+    ]
+    items.sort(
+        key=lambda x: x.last_active_at or datetime.min,
+        reverse=True,
+    )
+    return items

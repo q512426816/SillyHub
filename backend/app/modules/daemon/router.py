@@ -2032,6 +2032,11 @@ async def list_sessions(
     # 门户复用本端点，SQL 层精确匹配（照 runtime_id 模式，可选零回归）。
     workspace_id: uuid.UUID | None = Query(default=None),
     change_id: uuid.UUID | None = Query(default=None),
+    # 2026-08-25-session-spec-binding task-04 / FR-05：快速修复级关联筛选——
+    # ql_id 短码（非 UUID，如 ql-20260824-014），service 层走 quicklog_session_
+    # links (workspace_id, ql_id) 子查询；max_length 对齐 links 表 ql_id 列
+    # String(128)。不传 = 现状（零回归）。
+    ql_id: str | None = Query(default=None, max_length=128),
     # 2026-08-24：会话归档过滤（True=只看已归档，False=只看未归档）。
     archived: bool = Query(default=False),
 ) -> AgentSessionListResponse:
@@ -2045,6 +2050,12 @@ async def list_sessions(
     2026-08-22-workspace-sessions-portal / D-003@v2：新增可选 workspace_id /
     change_id（AgentSession 冗余绑定列精确匹配），供 workspace/change 级会话
     门户复用全局端点做 scope 过滤；不传 = 现状（零回归）。
+    2026-08-25-session-spec-binding task-04 / FR-05（design §5.W3.3 / §9）：
+    change_id 语义从单 FK 精确匹配扩大为 change_session_links M:N 子查询
+    命中（存量单 FK 已播种为 link 行，原命中集是新命中集子集，参数名/类型
+    不变向后兼容）；新增可选 ql_id（快速修复短码，走 quicklog_session_links
+    按 (workspace_id, ql_id) 双条件子查询，防跨工作区同 ql_id 串扰），不传
+    = 现状（零回归）。
     """
     from app.modules.agent.model import AgentRun, AgentRunLog
 
@@ -2060,6 +2071,7 @@ async def list_sessions(
         q=q,
         workspace_id=workspace_id,
         change_id=change_id,
+        ql_id=ql_id,
         archived=archived,
     )
     reads = [AgentSessionRead.model_validate(item) for item in items]
@@ -2256,6 +2268,8 @@ async def create_session(
     # 任务块透传（共享校验/预建/简报归 service，本端点仅此一处路由改动）。
     # 2026-08-25-unified-floating-session（FR-5）：页面上下文块透传（前导构建
     # 归 service create 路径）。
+    # task-08（2026-08-25-session-spec-binding / FR-04 / FR-06）：quicklog_id
+    # 透传（对齐 change_id 既有透传形态；落绑定归 service 创建落库点）。
     result = await svc.create_session(
         user.id,
         provider=data.provider,
@@ -2267,6 +2281,7 @@ async def create_session(
         ask_user_only=data.ask_user_only,
         change_id=data.change_id,
         workspace_id=data.workspace_id,
+        quicklog_id=data.quicklog_id,
         team_mission=data.team_mission,
         page_context=data.page_context,
     )

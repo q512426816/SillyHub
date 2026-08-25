@@ -3,7 +3,9 @@
 覆盖三组：
 - A. ``build_change_context_preamble`` 纯逻辑单测（FR-03 / D-004@v1）
 - B. ``GET /workspaces/{wid}/changes/{cid}/sessions`` 列表端点（task-09 / D-005@v1
-  跨成员可见 + 标题取首条 user_input + 旧 session 不出现）
+  跨成员可见 + 标题取首条 user_input + 旧 session 不出现；2026-08-25-
+  session-spec-binding task-03 起数据源为 change_session_links M:N——D-002@v1
+  links 为唯一关联真相，建数据须造 link 行）
 - C. ``POST /api/daemon/sessions`` 带 change_id 的绑定 + 前导注入（task-04/08）
   及未带 change_id 零回归
 
@@ -28,7 +30,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.auth.model import User
-from app.modules.change.model import Change, ChangeDocument
+from app.modules.change.model import (
+    Change,
+    ChangeDocument,
+    ChangeSessionLink,
+    QuicklogSessionLink,
+)
 from app.modules.daemon import ws_hub as ws_hub_module
 from app.modules.daemon.model import DaemonRuntime
 from app.modules.daemon.ws_hub import DaemonWsHub
@@ -154,6 +161,7 @@ async def _make_session(
     status: str = "ended",
     turn_count: int = 1,
     last_active_at: datetime | None = None,
+    deleted_at: datetime | None = None,
 ) -> AgentSession:
     now = datetime.now(UTC)
     sess = AgentSession(
@@ -168,11 +176,34 @@ async def _make_session(
         created_at=now,
         last_active_at=last_active_at or now,
         ended_at=now if status in ("ended", "failed") else None,
+        deleted_at=deleted_at,
     )
     session.add(sess)
     await session.commit()
     await session.refresh(sess)
     return sess
+
+
+async def _make_change_session_link(
+    session: AsyncSession,
+    *,
+    change_id: uuid.UUID,
+    session_id: uuid.UUID,
+) -> ChangeSessionLink:
+    """造 change_session_links 绑定行（task-03 起列表端点数据源为 links M:N）。
+
+    D-002@v1：单 FK ``AgentSession.change_id`` 冻结为冗余提示，读取一律走
+    links——测试里出现在列表中的会话必须经本 helper（或等价 link 行）绑定。
+    """
+    link = ChangeSessionLink(
+        id=uuid.uuid4(),
+        change_id=change_id,
+        session_id=session_id,
+    )
+    session.add(link)
+    await session.commit()
+    await session.refresh(link)
+    return link
 
 
 async def _make_run(session: AsyncSession, *, agent_session_id: uuid.UUID) -> AgentRun:
@@ -363,17 +394,25 @@ class TestListChangeSessions:
             db_session, workspace_id=ws.id, change_key=f"other-{uuid.uuid4().hex[:6]}"
         )
 
-        # 该变更：admin + member2 各一会话（跨成员可见 D-005）
+        # 该变更：admin + member2 各一会话（跨成员可见 D-005）。task-03 起数据源
+        # 为 change_session_links（D-002@v1），会话须造 link 行才命中（单 FK 照写
+        # 模拟迁移播种后的存量行）。
         s_admin = await _make_session(
             db_session, user_id=admin.id, runtime_id=rt_a.id, change_id=change.id
         )
         s_mem = await _make_session(
             db_session, user_id=member2.id, runtime_id=rt_b.id, change_id=change.id
         )
-        # 噪声：旧会话 change_id=None + 另一变更的会话
+        await _make_change_session_link(db_session, change_id=change.id, session_id=s_admin.id)
+        await _make_change_session_link(db_session, change_id=change.id, session_id=s_mem.id)
+        # 噪声：旧会话 change_id=None（无 link）+ 另一变更的会话（link 绑到
+        # other_change——link 级隔离，证明过滤发生在 links 而非单 FK）。
         await _make_session(db_session, user_id=admin.id, runtime_id=rt_a.id, change_id=None)
-        await _make_session(
+        s_other = await _make_session(
             db_session, user_id=admin.id, runtime_id=rt_a.id, change_id=other_change.id
+        )
+        await _make_change_session_link(
+            db_session, change_id=other_change.id, session_id=s_other.id
         )
 
         resp = await client.get(
@@ -404,8 +443,14 @@ class TestListChangeSessions:
         rt_b = await _make_runtime(db_session, member2.id)
         ws = await _make_workspace(db_session, root_path=f"/tmp/ws-{uuid.uuid4()}")
         change = await _make_change(db_session, workspace_id=ws.id)
-        await _make_session(db_session, user_id=admin.id, runtime_id=rt_a.id, change_id=change.id)
-        await _make_session(db_session, user_id=member2.id, runtime_id=rt_b.id, change_id=change.id)
+        s_a = await _make_session(
+            db_session, user_id=admin.id, runtime_id=rt_a.id, change_id=change.id
+        )
+        s_b = await _make_session(
+            db_session, user_id=member2.id, runtime_id=rt_b.id, change_id=change.id
+        )
+        await _make_change_session_link(db_session, change_id=change.id, session_id=s_a.id)
+        await _make_change_session_link(db_session, change_id=change.id, session_id=s_b.id)
 
         resp = await client.get(
             f"/api/workspaces/{ws.id}/changes/{change.id}/sessions",
@@ -435,6 +480,7 @@ class TestListChangeSessions:
         sess = await _make_session(
             db_session, user_id=admin.id, runtime_id=rt.id, change_id=change.id
         )
+        await _make_change_session_link(db_session, change_id=change.id, session_id=sess.id)
         run = await _make_run(db_session, agent_session_id=sess.id)
         # 较早的 user_input 应作为标题来源
         await _make_log(
@@ -481,6 +527,7 @@ class TestListChangeSessions:
         sess = await _make_session(
             db_session, user_id=admin.id, runtime_id=rt.id, change_id=change.id
         )
+        await _make_change_session_link(db_session, change_id=change.id, session_id=sess.id)
         # 只有 stdout 日志
         run = await _make_run(db_session, agent_session_id=sess.id)
         await _make_log(db_session, run_id=run.id, content="some output", channel="stdout")
@@ -523,6 +570,8 @@ class TestListChangeSessions:
             change_id=change.id,
             last_active_at=base,
         )
+        await _make_change_session_link(db_session, change_id=change.id, session_id=s_old.id)
+        await _make_change_session_link(db_session, change_id=change.id, session_id=s_new.id)
 
         resp = await client.get(
             f"/api/workspaces/{ws.id}/changes/{change.id}/sessions",
@@ -546,6 +595,57 @@ class TestListChangeSessions:
         )
         assert resp.status_code == 200
         assert resp.json() == []
+
+    async def test_link_only_session_listed_others_excluded(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """task-03 M:N 语义（FR-03 / D-002@v1）：
+
+        - 仅 link 绑定（无单 FK）的会话**出现在**结果中——M:N 命中是新数据源的
+          核心语义（一会话可关联多变更，本端点只认 links）；
+        - 单 FK 无 link（迁移播种前的裸 FK 行）**不出现**——锁定数据源已从
+          ``AgentSession.change_id`` 切到 links，防止实现回退到单 FK 过滤；
+        - 软删会话（deleted_at 非空）即使有 link **不出现**（FR-07 软删过滤）。
+
+        「FK+link 双写行命中」由本组其余用例覆盖（均按播种后形态建数据）。
+        """
+        admin = (
+            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+            .scalars()
+            .first()
+        )
+        assert admin is not None
+        rt = await _make_runtime(db_session, admin.id)
+        ws = await _make_workspace(db_session, root_path=f"/tmp/ws-{uuid.uuid4()}")
+        change = await _make_change(db_session, workspace_id=ws.id)
+
+        # 仅 link 无单 FK：会话 change_id=None，但 link 绑到本变更 → 应命中
+        s_link_only = await _make_session(
+            db_session, user_id=admin.id, runtime_id=rt.id, change_id=None
+        )
+        await _make_change_session_link(db_session, change_id=change.id, session_id=s_link_only.id)
+        # 单 FK 无 link：裸 FK 行（播种迁移前的存量形态）→ 不出现
+        await _make_session(db_session, user_id=admin.id, runtime_id=rt.id, change_id=change.id)
+        # 软删：有 link 但 deleted_at 非空 → 不出现
+        s_deleted = await _make_session(
+            db_session,
+            user_id=admin.id,
+            runtime_id=rt.id,
+            change_id=change.id,
+            deleted_at=datetime.now(UTC),
+        )
+        await _make_change_session_link(db_session, change_id=change.id, session_id=s_deleted.id)
+
+        resp = await client.get(
+            f"/api/workspaces/{ws.id}/changes/{change.id}/sessions",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        ids = {i["id"] for i in resp.json()}
+        assert ids == {str(s_link_only.id)}
 
     async def test_mode_from_session_config(
         self,
@@ -576,6 +676,8 @@ class TestListChangeSessions:
         sess_b = await _make_session(
             db_session, user_id=admin.id, runtime_id=rt.id, change_id=change.id
         )
+        await _make_change_session_link(db_session, change_id=change.id, session_id=sess_a.id)
+        await _make_change_session_link(db_session, change_id=change.id, session_id=sess_b.id)
 
         resp = await client.get(
             f"/api/workspaces/{ws.id}/changes/{change.id}/sessions",
@@ -667,12 +769,28 @@ class TestCreateSessionChangeBinding:
         run_id = body["run_id"]
         lease_id = body["lease_id"]
 
-        # 1. AgentSession 绑定
+        # 1. AgentSession 绑定（单 FK 照写，D-002@v1 冻结语义）
         sess = await db_session.get(AgentSession, uuid.UUID(session_id))
         assert sess is not None
         assert sess.change_id == change.id
         assert sess.workspace_id == ws_row.id
         assert sess.cwd == "/tmp/change-proj"
+
+        # 1b. task-08 / D-002@v1 双写：change_session_links 同步出现绑定行
+        # （创建落库点补写；links 是关联唯一真相，单 FK 仅为冗余提示）。
+        c_link = (
+            (
+                await db_session.execute(
+                    select(ChangeSessionLink).where(
+                        ChangeSessionLink.change_id == change.id,
+                        ChangeSessionLink.session_id == uuid.UUID(session_id),
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert c_link is not None
 
         # 2. AgentRun.change_id 一致
         run = await db_session.get(AgentRun, uuid.UUID(run_id))
@@ -710,7 +828,8 @@ class TestCreateSessionChangeBinding:
         db_session: AsyncSession,
         fresh_ws_hub: DaemonWsHub,
     ) -> None:
-        """未带 change_id → AgentSession.change_id/workspace_id 为 None（零回归）。"""
+        """未带 change_id → AgentSession.change_id/workspace_id 为 None（零回归）；
+        task-08：change_id/quicklog_id 两参都空 → 零 link 副作用（既有行为）。"""
         admin = await _admin(db_session)
         rt = await _make_runtime(db_session, admin.id)
         ws = _connect_mock_ws(fresh_ws_hub, rt.id)
@@ -728,6 +847,29 @@ class TestCreateSessionChangeBinding:
         assert sess.change_id is None
         assert sess.workspace_id is None
         assert sess.cwd is None
+
+        # task-08 零 link 副作用：无 change_session_links / quicklog_session_links 行。
+        sid = uuid.UUID(session_id)
+        c_links = (
+            (
+                await db_session.execute(
+                    select(ChangeSessionLink).where(ChangeSessionLink.session_id == sid)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert c_links == []
+        q_links = (
+            (
+                await db_session.execute(
+                    select(QuicklogSessionLink).where(QuicklogSessionLink.session_id == sid)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert q_links == []
 
     async def test_create_with_change_and_team_mission_double_preamble_order(
         self,

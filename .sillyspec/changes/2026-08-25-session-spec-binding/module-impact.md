@@ -24,7 +24,13 @@ change: 2026-08-25-session-spec-binding
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `modules/backend.md` | 补记 change 域 binding.py/QuicklogSessionLink、daemon 域筛选与创建落绑定、platform_sync 域 agent-logs 绑定 | pending |
-| `modules/frontend.md` | 补记 QuicklogScope 门户路由、quicklog-sessions-card、关联筛选 | pending |
+| `backend/modules/change.md` | 补记 links 唯一真相/binding.py/QuicklogSessionLink/quicklog sessions 端点 | done |
+| `backend/modules/daemon.md` | 补记三绑定入口（run_sync 检测/创建落绑定+facade 坑/筛选 M:N+ql_id） | done |
+| `backend/modules/platform_sync.md` | 补记 agent-logs 双分支绑定（hub 补消费 ctx） | done |
+| `backend/modules/migrations.md` | 补记 20260825230000 迁移与播种语义 | done |
+| `frontend/modules/components-sessions.md` | 补记 QuicklogScope 四元联合/六消费点/筛选门控/preContext | done |
+| `frontend/modules/components-changes.md` | 补记 quicklog-sessions-card 与 drawer 挂载 | done |
+| `frontend/modules/lib-daemon.md` | 补记客户端三入口（ql_id/quicklog_id/listQuicklogSessions） | done |
+| `frontend/modules/app-workspace-pages.md` | 新路由页 quicklog/[qlId]/sessions 为 components-sessions 卡 QuicklogScope 条目覆盖（薄壳零逻辑，不单开条目） | skipped |
 | `_module-map.yaml` | 无变化（未增删模块，仅既有模块内文件新增/修改） | skipped |
 | `modules/sillyhub-daemon.md` | 无变化（零改动） | skipped |

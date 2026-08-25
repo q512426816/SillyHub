@@ -113,6 +113,8 @@ stage-team-config / team-progress）。派生脉络：2026-08-11-change-detail-l
 - 测试：`changes/__tests__/`（session-section / step-badge / quicklog-drawer / table）
   + `detail/__tests__/` 8 套（9 卡中仅 quicklog-linked-card 无专属测试，其余全覆盖）。
 
+- 快速修复关联会话卡（2026-08-25-session-spec-binding）：quicklog-sessions-card 镜像 change-sessions-card（listQuicklogSessions 取数/仅本人过滤/前3条预览/?session= 深链到 /workspaces/[id]/quicklog/[qlId]/sessions）；挂在 quicklog-drawer 结构化视图底部（原始 md 视图不渲染）。
+
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->

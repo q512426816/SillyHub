@@ -40,6 +40,12 @@ from app.modules.auth.permissions import Permission
 
 # D-001@v1：create_session workspace 归属校验（口径与前端 listWorkspaces 一致）。
 from app.modules.auth.rbac import allowed_workspace_ids
+
+# 2026-08-25-session-spec-binding task-04 / D-002@v1 / D-001@v1：会话列表
+# change_id / ql_id 关联筛选的数据源（links 表是关联唯一真相）。change.model
+# 只依赖 app.models.base，不 import daemon——无循环导入（daemon/session/
+# context.py 顶部 import 先例同款）。
+from app.modules.change.model import ChangeSessionLink, QuicklogSessionLink
 from app.modules.daemon.model import (
     DaemonInstance,
     DaemonRuntime,
@@ -802,6 +808,11 @@ class SessionService:
         # 2026-08-25-unified-floating-session（FR-5 / D-005）：悬浮入口页面上下文
         # 块——仅 page_key 枚举 + 实体 id，前导数据服务端回查；缺省 None 零回归。
         page_context: PageContextCreateBlock | None = None,
+        # task-08（2026-08-25-session-spec-binding / FR-04 / FR-06）：快速修复
+        # 短码——创建落库点 bind_session_to_quicklog 补写 quicklog_session_links
+        # （savepoint best-effort，失败仅 warning 不阻断创建主事务与 201）。
+        # 缺省 None 零分支进入（零回归）。
+        quicklog_id: str | None = None,
     ) -> SessionDispatchResult:
         """Create an interactive session + first-turn run + interactive lease.
 
@@ -1089,6 +1100,65 @@ class SessionService:
             )
             self._session.add(session)
             await self._session.flush()
+
+            # ── task-08（2026-08-25-session-spec-binding / FR-04 / FR-06 / D-002@v1）：
+            # 创建落绑定（best-effort 双写，共用本方法唯一 commit；行级 savepoint
+            # 吞异常，失败不阻断会话创建的 201 语义）──
+            # ① change_id 非空：补写 change_session_links。**不走** binding.py 的
+            #    bind_session_to_change——它按 change_key（变更名）解析且查无会建
+            #    placeholder 行，而这里的 change_id 来自请求、已是 Change 行 UUID，
+            #    直接按 (change_id, session_id) 幂等查插 link 即可（unique 兜底
+            #    并发；Change 行不存在时 FK 失败被 savepoint 吞掉仅 warning）。
+            #    agent_sessions.change_id 单 FK 列上方照写（D-002@v1 冻结语义：
+            #    双写冗余提示，links 是关联唯一真相）。
+            if change_id is not None:
+                try:
+                    async with self._session.begin_nested():
+                        _c_link = (
+                            (
+                                await self._session.execute(
+                                    select(ChangeSessionLink).where(
+                                        ChangeSessionLink.change_id == change_id,
+                                        ChangeSessionLink.session_id == session.id,
+                                    )
+                                )
+                            )
+                            .scalars()
+                            .first()
+                        )
+                        if _c_link is None:
+                            self._session.add(
+                                ChangeSessionLink(
+                                    id=uuid.uuid4(),
+                                    change_id=change_id,
+                                    session_id=session.id,
+                                )
+                            )
+                            await self._session.flush()
+                except Exception as exc:
+                    log.warning(
+                        "session_change_link_bind_failed",
+                        change_id=str(change_id),
+                        session_id=str(session.id),
+                        error=str(exc),
+                    )
+            # ② quicklog_id 非空：bind_session_to_quicklog 写 quicklog_session_links
+            #    （task-02 契约：自带 savepoint + log.warning 不抛，绑定失败不回滚
+            #    创建主事务）。link 行 workspace_id NOT NULL——缺失时记 warning
+            #    跳过（悬浮球/门户入口正常必带 workspace_id）。
+            if quicklog_id:
+                if workspace_id is None:
+                    log.warning(
+                        "session_quicklog_bind_skipped_no_workspace",
+                        quicklog_id=quicklog_id,
+                        session_id=str(session.id),
+                    )
+                else:
+                    from app.modules.change.binding import bind_session_to_quicklog
+
+                    await bind_session_to_quicklog(
+                        self._session, workspace_id, quicklog_id, session.id
+                    )
 
             # ── task-09 / D-009@v2（flush-only 预建，R-04）：team_mission 预建 ──
             # session 行 add+flush 后、首 run 构造前调 task-04 helper（session
@@ -3842,6 +3912,9 @@ class SessionService:
         # 门户复用全局列表做 scope 过滤（照 runtime_id 模式，可选零回归）。
         workspace_id: uuid.UUID | None = None,
         change_id: uuid.UUID | None = None,
+        # 2026-08-25-session-spec-binding task-04 / FR-05：快速修复级关联筛选
+        # （ql_id 为自然键短码 ``ql-YYYYMMDD-NNN-后缀``，非 UUID）。
+        ql_id: str | None = None,
         # 2026-08-24：会话归档过滤（archived=True 只看已归档，False 只看未归档）。
         archived: bool = False,
     ) -> tuple[list[AgentSession], int]:
@@ -3868,8 +3941,23 @@ class SessionService:
 
         - ``workspace_id``：``AgentSession.workspace_id`` 冗余绑定列精确匹配
           （未绑定 workspace 的旧会话不匹配）。
-        - ``change_id``：``AgentSession.change_id`` 精确匹配；scope=change 的
-          门户查询形态为 ``workspace_id`` + ``change_id`` 双传取交集。
+
+        2026-08-25-session-spec-binding task-04 / FR-05 升级 + 新增（design
+        §5.W3.3 / §9 兼容策略）：
+
+        - ``change_id``：语义从「单 FK（``AgentSession.change_id``）精确匹配」
+          扩大为「M:N 命中」——改为 ``AgentSession.id IN (change_session_links
+          的 session_id WHERE change_id=传入值)`` 子查询。links 表是变更↔会话
+          关联的唯一真相（D-002@v1），存量单 FK 已由迁移播种为 link 行，原
+          命中集是新命中集的子集（参数名/类型不变，向后兼容）；含「仅 link
+          无单 FK」的自动绑定会话。scope=change 门户查询形态仍为
+          ``workspace_id`` + ``change_id`` 双传取交集。
+        - ``ql_id``：快速修复短码（非 UUID），走 ``quicklog_session_links``
+          按 (workspace_id, ql_id) 双条件子查询命中（D-001@v1：自然键无 FK）。
+          workspace 限定防跨工作区同 ql_id 串扰（R-05）：``workspace_id`` 筛选
+          参数非空时子查询同步收紧到该工作区；为空时按 ql_id 全工作区命中
+          （列表本身 owner-scoped，串扰面已受限，design §5.W3.3 允许）。
+          与其余筛选 AND 交集组合（``change_id`` + ``ql_id`` 同传即双关联交集）。
         """
         from sqlalchemy import exists, func
 
@@ -3890,7 +3978,28 @@ class SessionService:
         if workspace_id is not None:
             base_filters.append(AgentSession.workspace_id == workspace_id)
         if change_id is not None:
-            base_filters.append(AgentSession.change_id == change_id)
+            # 2026-08-25-session-spec-binding task-04 / D-002@v1 / design
+            # §5.W3.3：change_id 从单 FK 精确匹配升级为 M:N 子查询命中——
+            # links 表是变更↔会话关联的唯一真相，存量单 FK 已播种为 link 行
+            # （§9：原命中集是新命中集的子集，参数名/类型不变向后兼容）。
+            base_filters.append(
+                AgentSession.id.in_(
+                    select(ChangeSessionLink.session_id).where(
+                        ChangeSessionLink.change_id == change_id
+                    )
+                )
+            )
+        if ql_id is not None:
+            # 2026-08-25-session-spec-binding task-04 / FR-05 / D-001@v1：按
+            # links 表 (workspace_id, ql_id) 双条件命中，防跨工作区同 ql_id
+            # 串扰（R-05）。workspace_id 筛选参数非空 → 收紧到该工作区；为空
+            # → 按 ql_id 全工作区命中（owner-scoped 列表，串扰面已受限）。
+            ql_filters = [QuicklogSessionLink.ql_id == ql_id]
+            if workspace_id is not None:
+                ql_filters.append(QuicklogSessionLink.workspace_id == workspace_id)
+            base_filters.append(
+                AgentSession.id.in_(select(QuicklogSessionLink.session_id).where(*ql_filters))
+            )
         if machine_id is not None:
             base_filters.append(
                 exists().where(

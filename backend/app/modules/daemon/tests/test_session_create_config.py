@@ -611,3 +611,102 @@ class TestConfigSnapshot:
             "machine_name": "host-c",
             "agent_name": "CC",
         }
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# 7. quicklog_id 落绑定（task-08 / 2026-08-25-session-spec-binding / FR-04/06）
+# ════════════════════════════════════════════════════════════════════════════
+
+
+async def _create_workspace(session: AsyncSession, *, root_path: str = "/tmp/ql-ws"):
+    """task-08：quicklog link 行的 workspace 维度落盘（对齐 test_change_session
+    的 _make_workspace 形态）。"""
+    from app.modules.workspace.model import Workspace
+
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="ql-ws",
+        slug=f"ql-ws-{uuid.uuid4().hex[:8]}",
+        root_path=root_path,
+        status="active",
+    )
+    session.add(ws)
+    await session.commit()
+    return ws
+
+
+class TestQuicklogIdBinding:
+    @pytest.mark.asyncio
+    async def test_quicklog_id_writes_link(self, db_session, mocked_hub, mocked_redis) -> None:
+        """带 quicklog_id+workspace_id 创建（经 DaemonService facade 透传）→
+        quicklog_session_links 出现 (workspace, ql_id, session) 绑定行。"""
+        from app.modules.change.model import QuicklogSessionLink
+
+        uid = await _create_user(db_session, admin=True)
+        rt = await _create_runtime(db_session, uid, provider="claude")
+        ws = await _create_workspace(db_session)
+
+        svc = DaemonService(db_session)
+        ql_id = "ql-20260825-001-abc"
+        result = await svc.create_session(
+            uid,
+            provider=None,
+            prompt="hi",
+            runtime_id=str(rt.id),
+            workspace_id=ws.id,
+            quicklog_id=ql_id,
+        )
+        sid = result.agent_session.id
+
+        link = (
+            (
+                await db_session.execute(
+                    select(QuicklogSessionLink).where(
+                        QuicklogSessionLink.workspace_id == ws.id,
+                        QuicklogSessionLink.ql_id == ql_id,
+                        QuicklogSessionLink.session_id == sid,
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert link is not None
+
+    @pytest.mark.asyncio
+    async def test_quicklog_id_without_workspace_skipped(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """quicklog_id 但无 workspace_id（link 行 NOT NULL）→ 记 warning 跳过，
+        创建本身不受影响（无异常、无 link 行，201 语义保持）。"""
+        from app.modules.change.model import QuicklogSessionLink
+
+        uid = await _create_user(db_session, admin=True)
+        await _create_runtime(db_session, uid, provider="claude")
+
+        svc = DaemonService(db_session)
+        result = await svc.create_session(
+            uid,
+            provider="claude",
+            prompt="hi",
+            quicklog_id="ql-20260825-002-xyz",
+        )
+        assert result.agent_session.id is not None
+
+        links = (await db_session.execute(select(QuicklogSessionLink))).scalars().all()
+        assert links == []
+
+    @pytest.mark.asyncio
+    async def test_plain_create_zero_links(self, db_session, mocked_hub, mocked_redis) -> None:
+        """不带 quicklog_id/change_id 创建 → 两张 link 表零副作用（零回归）。"""
+        from app.modules.change.model import ChangeSessionLink, QuicklogSessionLink
+
+        uid = await _create_user(db_session, admin=True)
+        await _create_runtime(db_session, uid, provider="claude")
+
+        svc = DaemonService(db_session)
+        result = await svc.create_session(uid, provider="claude", prompt="hi")
+        assert result.agent_session.change_id is None
+
+        assert await _count(db_session, QuicklogSessionLink) == 0
+        assert await _count(db_session, ChangeSessionLink) == 0

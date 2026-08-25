@@ -108,12 +108,21 @@ const mocks = vi.hoisted(() => ({
   fetchMyBindings: vi.fn(),
   // task-07（D-106）：预会话上下文行变更名解析（session-panel getChange）。
   getChange: vi.fn(),
+  // task-10（X-009）：SessionListPanel「关联」下拉选项数据源。
+  listChanges: vi.fn(),
+  listQuicklogEntries: vi.fn(),
+  // task-10/task-11：quicklog 预会话标题解析（session-panel getQuicklogDetail，
+  // task-11 落地后渲染树消费；本卡 mock 前向兼容）。
+  getQuicklogDetail: vi.fn(),
   // D-004@v1 深链：useSearchParams 返回值（每用例可改写）
   searchParams: new URLSearchParams(),
   // ql-20260824-001：选中态 URL 同步（?session= 写入/移除）的 replace 捕获
   routerReplace: vi.fn(),
   // task-06：SessionListPanel props 捕获（defaultExpandedWorkspaceId 断言用）
   lastListPanelProps: null as Record<string, unknown> | null,
+  // task-10：SessionPanel props 捕获（quicklog preContext 合成断言用——
+  // quickId 首句上送链属 task-11，本卡经 props 层断言不依赖其落地时序）。
+  lastSessionPanelProps: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@/lib/daemon", () => ({
@@ -188,10 +197,37 @@ vi.mock("@/lib/workspace-binding", () => ({
   fetchMyBindings: (...args: unknown[]) => mocks.fetchMyBindings(...args),
 }));
 
-// task-07（D-106）：session-panel 上下文行变更名解析数据源。
+// task-07（D-106）：session-panel 上下文行变更名解析数据源；
+// task-10（X-009）：SessionListPanel「关联」下拉变更选项数据源。
 vi.mock("@/lib/changes", () => ({
   getChange: (...args: unknown[]) => mocks.getChange(...args),
+  listChanges: (...args: unknown[]) => mocks.listChanges(...args),
 }));
+
+// task-10：SessionListPanel「关联」下拉快速修复选项数据源；task-11 起
+// session-panel 标题解析消费 getQuicklogDetail（mock 前向兼容）。
+vi.mock("@/lib/quicklog", () => ({
+  listQuicklogEntries: (...args: unknown[]) =>
+    mocks.listQuicklogEntries(...args),
+  getQuicklogDetail: (...args: unknown[]) => mocks.getQuicklogDetail(...args),
+}));
+
+// task-10：SessionPanel 包一层 props 捕获（渲染真实组件零行为差异）——
+// quicklog preContext 合成（{workspaceId, quickId, runtimeId}）经 props 层
+// 断言，不依赖 task-11 的 quicklog_id 请求链落地时序。
+vi.mock("@/components/daemon/session-panel", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/components/daemon/session-panel")
+  >("@/components/daemon/session-panel");
+  const ActualSessionPanel = actual.SessionPanel;
+  return {
+    ...actual,
+    SessionPanel: (props: Parameters<typeof ActualSessionPanel>[0]) => {
+      mocks.lastSessionPanelProps = props as unknown as Record<string, unknown>;
+      return <ActualSessionPanel {...props} />;
+    },
+  };
+});
 
 // task-06：SessionListPanel 包一层 props 捕获（渲染真实组件零行为差异）——
 // defaultExpandedWorkspaceId 在 workspace scope 单组形态下无 DOM 差异，传参
@@ -361,6 +397,12 @@ const CHANGE_SCOPE: SessionListScope = {
   workspaceId: "ws-1",
   changeId: "chg-1",
 };
+// task-10（FR-04 / D-006@v1）：quicklog scope 固件（qlId 为 QUICKLOG 短码）。
+const QUICKLOG_SCOPE: SessionListScope = {
+  kind: "quicklog",
+  workspaceId: "ws-1",
+  qlId: "ql-20260824-014",
+};
 
 function renderPortal(scope?: SessionListScope) {
   const client = new QueryClient({
@@ -415,6 +457,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.searchParams = new URLSearchParams();
   mocks.lastListPanelProps = null;
+  mocks.lastSessionPanelProps = null;
   mocks.machinesHook.mockReturnValue({
     items: [
       makeMachine(),
@@ -452,6 +495,16 @@ beforeEach(() => {
   mocks.getProviderQuota.mockResolvedValue({ quota: null });
   mocks.listWorkspaces.mockResolvedValue({ items: [], total: 0 });
   mocks.fetchMyBindings.mockResolvedValue([]);
+  // task-10（X-009）：「关联」下拉选项数据源默认成功空集（workspace scope
+  // 既有用例渲染下拉但选项为空，零干扰）。
+  mocks.listChanges.mockResolvedValue({ items: [], total: 0 });
+  mocks.listQuicklogEntries.mockResolvedValue({ items: [], total: 0 });
+  mocks.getQuicklogDetail.mockResolvedValue({
+    ql_id: "ql-20260824-014",
+    title: "悬浮球去紫改青",
+    status: "completed",
+    placeholder: false,
+  });
   // task-07（D-106）：变更名解析（title 优先，change_key 回退——见下方用例）。
   mocks.getChange.mockResolvedValue({
     id: "chg-1",
@@ -655,6 +708,68 @@ describe("SessionsPortal scope 过滤参透传（D-003@v2：过滤是端点职�
       screen.getByRole("button", { name: "会话 同事的会话" }),
     ).toBeTruthy();
     expect(screen.getByText("共 2 个")).toBeTruthy();
+  });
+});
+
+// ── 2.5 quicklog scope（task-10 / FR-04 / D-006@v1，X-008 消费分支补齐） ─────
+
+describe("SessionsPortal quicklog scope（task-10 / D-006@v1）", () => {
+  it("标题「智能体会话 · 快速修复 · <qlId>」；列表 {limit:500, workspace_id, ql_id} 三传；defaultExpandedWorkspaceId 预展开；空态文案提示快速修复；X-009 不渲染「关联」下拉", async () => {
+    renderPortal(QUICKLOG_SCOPE);
+
+    // X-008 消费点三（portalTitle）：固定后缀 + ql 短码（scope.qlId 本身即短码）
+    expect(
+      screen.getByRole("heading", {
+        name: "智能体会话 · 快速修复 · ql-20260824-014",
+      }),
+    ).toBeTruthy();
+    // X-008 消费点一（queryFn 透传）：workspace_id + ql_id 双传（树一次拉取 500）
+    await waitFor(() => {
+      expect(mocks.listAgentSessions).toHaveBeenCalledWith({
+        limit: 500,
+        workspace_id: "ws-1",
+        ql_id: "ql-20260824-014",
+      });
+    });
+    // X-008 消费点五（defaultExpandedWorkspaceId）：quicklog 同 workspace/change 预展开
+    expect(mocks.lastListPanelProps?.defaultExpandedWorkspaceId).toBe("ws-1");
+    // X-008 消费点六（空态文案）：提示在当前快速修复下创建会话
+    expect(screen.getByLabelText("门户空态")).toBeTruthy();
+    expect(screen.getByText(/在当前快速修复下创建会话/)).toBeTruthy();
+    // X-009：quicklog scope 自身已按关联过滤，选项查询零发起
+    expect(mocks.listChanges).not.toHaveBeenCalled();
+    expect(mocks.listQuicklogEntries).not.toHaveBeenCalled();
+  });
+
+  it("组头「＋」→ 两步浮层选完 → preContext 合成 {workspaceId, quickId, runtimeId}（X-13 双传语义 quicklog 版；经 props 捕获断言，不依赖 task-11 落地时序）", async () => {
+    renderPortal(QUICKLOG_SCOPE);
+
+    // quicklog 树单组组头「＋」（组名解析失败兜底「当前工作区」）
+    fireEvent.click(
+      await screen.findByRole("button", { name: "在 当前工作区 新建会话" }),
+    );
+    // 同一两步浮层（①机器 ②智能体）
+    fireEvent.click(
+      await screen.findByRole("button", { name: "选择机器 machine-1" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "选择智能体 Claude Code" }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByTestId("pre-session-picker-mask")).toBeNull(),
+    );
+    expect(screen.getByTestId("session-pre-session-panel")).toBeTruthy();
+
+    // preContext 三字段合成（quickId 传 scope.qlId；quickId 首句上送
+    // quicklog_id 属 task-11 契约，本卡仅断言门户合成层）
+    await waitFor(() => {
+      expect(mocks.lastSessionPanelProps?.preContext).toEqual({
+        workspaceId: "ws-1",
+        quickId: "ql-20260824-014",
+        runtimeId: "rt-1",
+      });
+    });
+    expect(mocks.createSession).not.toHaveBeenCalled(); // 首句未发零残留
   });
 });
 

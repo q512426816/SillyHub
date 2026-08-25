@@ -98,6 +98,7 @@ prototype: prototype-session-spec-binding.html
 | 修改 | backend/app/modules/daemon/router.py | GET sessions 加 `ql_id` 查询参数；POST sessions 透传 `quicklog_id`。**数据流**：`quicklog_id` producer=前端 preContext.quickId → `lib/daemon.ts createSession` body → 本路由 → `daemon/session/service` 创建后 `bind_session_to_quicklog` → consumer=`quicklog_session_links` 行（经 quicklog sessions API 回读） |
 | 修改 | backend/app/modules/daemon/schema.py | `SessionCreateRequest.quicklog_id: str|None`（producer/consumer 链见上行）；sessions 列表查询参数 `ql_id` |
 | 修改 | backend/app/modules/daemon/session/service.py | 列表筛选：change_id 改 M:N 子查询 + 新增 ql_id 子查询；创建落库补写 link（change_id 双写、quicklog_id 新写） |
+| 修改 | backend/app/modules/daemon/service.py | DaemonService facade 显式签名同步透传（ql_id 筛选 + quicklog_id 创建——task-04 实证 facade 漏传即 500，QA 确认的实现必需项，首版清单遗漏已补） |
 | 修改 | backend/app/modules/daemon/tests/（既有会话列表/创建测试文件） | 筛选语义变更断言更新 + 新增用例 |
 | 修改 | frontend/src/lib/daemon.ts | `listAgentSessions` 加 ql_id；新增 `listQuicklogSessions`；`createSession` 加 quicklog_id（producer 链见上） |
 | 修改 | frontend/src/components/sessions/session-list-panel.tsx | `QuicklogScope` 类型 + 查询透传 ql_id + 「关联」筛选下拉（workspace 树列表） |

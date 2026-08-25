@@ -10,6 +10,13 @@ provider / q（标题模糊，实现为 user_input 内容 ilike）四个过滤�
 change_id scope 过滤参数——workspace 级命中与不匹配剔除、不传零回归、
 change 级命中与 workspace_id+change_id 双传交集（scope=change 查询形态）。
 
+再追加（change 2026-08-25-session-spec-binding task-04 / FR-05 / D-002@v1 /
+D-001@v1，design §5.W3.3 / §9）：change_id 筛选升级为 change_session_links
+M:N 子查询命中——命中集扩大（含「仅 link 无单 FK」的自动绑定会话与「单 FK
++ 播种 link」双写形态），原单 FK 用例 setup 补种 link 行；新增 ql_id 筛选
+（quicklog_session_links 按 (workspace_id, ql_id) 双条件命中）——命中/排除
+未绑定/跨工作区同 ql_id 不串扰/与 change_id 交集。
+
 夹具范式镜像 ``test_session_history.py``（in-memory SQLite + httpx client）。
 """
 
@@ -24,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.auth.model import User
-from app.modules.change.model import Change
+from app.modules.change.model import Change, ChangeSessionLink, QuicklogSessionLink
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime
 from app.modules.workspace.model import Workspace
 
@@ -134,6 +141,45 @@ async def _make_change(
     await session.commit()
     await session.refresh(change)
     return change
+
+
+async def _make_change_link(
+    session: AsyncSession,
+    *,
+    change_id: uuid.UUID,
+    agent_session_id: uuid.UUID,
+) -> ChangeSessionLink:
+    """变更↔会话 M:N 绑定行（2026-08-25-session-spec-binding task-04：change_id
+    筛选升级为 links 子查询命中后的命中来源；唯一约束 (change_id, session_id)
+    幂等，测试各自造不重复对）。"""
+    link = ChangeSessionLink(
+        id=uuid.uuid4(),
+        change_id=change_id,
+        session_id=agent_session_id,
+    )
+    session.add(link)
+    await session.commit()
+    return link
+
+
+async def _make_quicklog_link(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    ql_id: str,
+    agent_session_id: uuid.UUID,
+) -> QuicklogSessionLink:
+    """快速修复↔会话 M:N 绑定行（ql_id 自然键短码，按 workspace 归属，
+    D-001@v1 无 FK 到 quicklog_entries——条目行不需要存在）。"""
+    link = QuicklogSessionLink(
+        id=uuid.uuid4(),
+        workspace_id=workspace_id,
+        ql_id=ql_id,
+        session_id=agent_session_id,
+    )
+    session.add(link)
+    await session.commit()
+    return link
 
 
 async def _make_session(
@@ -695,7 +741,12 @@ class TestWorkspaceIdFilter:
 
 
 class TestChangeIdFilter:
-    """``GET /sessions?change_id=`` 精确匹配 AgentSession.change_id。"""
+    """``GET /sessions?change_id=`` change_session_links M:N 子查询命中。
+
+    2026-08-25-session-spec-binding task-04 / D-002@v1：语义从单 FK
+    （AgentSession.change_id）精确匹配扩大为 links 子查询命中——「仅 link 无
+    单 FK」的自动绑定会话同样出现；「单 FK + 播种 link」双写形态（迁移后
+    存量）继续命中（§9：原命中集是新命中集子集）。"""
 
     async def test_hit_and_miss(
         self,
@@ -708,24 +759,37 @@ class TestChangeIdFilter:
         ws = await _make_workspace(db_session, root_path="D:/repo-a")
         change_a = await _make_change(db_session, workspace_id=ws.id)
         change_b = await _make_change(db_session, workspace_id=ws.id)
+        # 双写形态：单 FK + link（迁移播种后的存量形状）→ 命中
         s_ca = await _make_session(
             db_session, admin.id, rt.id, workspace_id=ws.id, change_id=change_a.id
         )
+        await _make_change_link(db_session, change_id=change_a.id, agent_session_id=s_ca.id)
+        # 仅 link 无单 FK（会话内跑 sillyspec 命令的自动绑定形状）→ 同样命中
+        s_link_only = await _make_session(db_session, admin.id, rt.id, workspace_id=ws.id)
+        await _make_change_link(db_session, change_id=change_a.id, agent_session_id=s_link_only.id)
         s_cb = await _make_session(
             db_session, admin.id, rt.id, workspace_id=ws.id, change_id=change_b.id
         )
-        # 绑 workspace 但未绑 change 的会话不命中 change_id 过滤
+        await _make_change_link(db_session, change_id=change_b.id, agent_session_id=s_cb.id)
+        # 绑 workspace 但无任何 change 关联（既无单 FK 也无 link）的会话不命中
         s_ws_only = await _make_session(db_session, admin.id, rt.id, workspace_id=ws.id)
+        # 单 FK 指向 change_a 但无 link 行（迁移前脏形状，D-002 冻结列不再参与
+        # 筛选）→ 不命中（links 是唯一关联真相）
+        s_fk_only = await _make_session(
+            db_session, admin.id, rt.id, workspace_id=ws.id, change_id=change_a.id
+        )
 
         resp = await client.get(
             "/api/daemon/sessions", params={"change_id": str(change_a.id)}, headers=auth_headers
         )
         assert resp.status_code == 200, resp.text
         body = resp.json()
-        assert body["total"] == 1
-        assert [i["id"] for i in body["items"]] == [str(s_ca.id)]
-        assert str(s_cb.id) not in [i["id"] for i in body["items"]]
-        assert str(s_ws_only.id) not in [i["id"] for i in body["items"]]
+        assert body["total"] == 2
+        got_ids = {i["id"] for i in body["items"]}
+        assert got_ids == {str(s_ca.id), str(s_link_only.id)}
+        assert str(s_cb.id) not in got_ids
+        assert str(s_ws_only.id) not in got_ids
+        assert str(s_fk_only.id) not in got_ids
 
         # 不存在的 change → 空结果（不是 500）
         resp_miss = await client.get(
@@ -752,15 +816,18 @@ class TestChangeIdFilter:
         s_a = await _make_session(
             db_session, admin.id, rt.id, workspace_id=ws_a.id, change_id=change_a.id
         )
+        await _make_change_link(db_session, change_id=change_a.id, agent_session_id=s_a.id)
         # 同 workspace 不同 change：被 change_id 剔除
-        await _make_session(
+        s_b = await _make_session(
             db_session, admin.id, rt.id, workspace_id=ws_a.id, change_id=change_b.id
         )
+        await _make_change_link(db_session, change_id=change_b.id, agent_session_id=s_b.id)
         # 同 change_key 不可能跨 workspace（FK 同源），构造另一 ws 的 change 会话
         change_c = await _make_change(db_session, workspace_id=ws_b.id)
-        await _make_session(
+        s_c = await _make_session(
             db_session, admin.id, rt.id, workspace_id=ws_b.id, change_id=change_c.id
         )
+        await _make_change_link(db_session, change_id=change_c.id, agent_session_id=s_c.id)
 
         resp = await client.get(
             "/api/daemon/sessions",
@@ -771,3 +838,166 @@ class TestChangeIdFilter:
         body = resp.json()
         assert body["total"] == 1
         assert [i["id"] for i in body["items"]] == [str(s_a.id)]
+
+
+# ── ql_id 关联过滤（2026-08-25-session-spec-binding task-04 / FR-05）──────
+
+
+class TestQlIdFilter:
+    """``GET /sessions?ql_id=`` quicklog_session_links (workspace_id, ql_id)
+    双条件子查询命中（D-001@v1：自然键短码，无 FK 到条目行）。"""
+
+    async def test_hit_and_miss(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        admin = await _get_admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        ws = await _make_workspace(db_session, root_path="D:/repo-a")
+        ql_id = f"ql-{uuid.uuid4().hex[:6]}"
+        s_bound = await _make_session(db_session, admin.id, rt.id, workspace_id=ws.id)
+        await _make_quicklog_link(
+            db_session, workspace_id=ws.id, ql_id=ql_id, agent_session_id=s_bound.id
+        )
+        # 同 workspace 未绑定的会话不命中
+        s_unbound = await _make_session(db_session, admin.id, rt.id, workspace_id=ws.id)
+        # 绑的是别的 ql_id → 不命中
+        s_other_ql = await _make_session(db_session, admin.id, rt.id, workspace_id=ws.id)
+        await _make_quicklog_link(
+            db_session, workspace_id=ws.id, ql_id="ql-other", agent_session_id=s_other_ql.id
+        )
+
+        resp = await client.get(
+            "/api/daemon/sessions", params={"ql_id": ql_id}, headers=auth_headers
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["total"] == 1
+        assert [i["id"] for i in body["items"]] == [str(s_bound.id)]
+        assert str(s_unbound.id) not in [i["id"] for i in body["items"]]
+        assert str(s_other_ql.id) not in [i["id"] for i in body["items"]]
+
+        # 不存在的 ql_id → 空结果（不是 500）
+        resp_miss = await client.get(
+            "/api/daemon/sessions",
+            params={"ql_id": "ql-20990101-999-x"},
+            headers=auth_headers,
+        )
+        assert resp_miss.status_code == 200
+        assert resp_miss.json()["total"] == 0
+
+    async def test_workspace_scoped_no_cross_workspace_bleed(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """跨工作区同 ql_id 不串扰：子查询按 (workspace_id, ql_id) 双条件命中。
+
+        R-05 形态：link 行的 workspace（条目归属）与会话的 workspace 可能不同
+        ——即使会话本身在 ws_a，挂在 ws_b 名下同 ql_id 的 link 也不得把该会话
+        带进 ws_a + ql_id 的筛选结果。
+        """
+        admin = await _get_admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        ws_a = await _make_workspace(db_session, root_path="D:/repo-a")
+        ws_b = await _make_workspace(db_session, root_path="D:/repo-b")
+        ql_id = f"ql-{uuid.uuid4().hex[:6]}"
+        s_a = await _make_session(db_session, admin.id, rt.id, workspace_id=ws_a.id)
+        await _make_quicklog_link(
+            db_session, workspace_id=ws_a.id, ql_id=ql_id, agent_session_id=s_a.id
+        )
+        # 串扰探针：会话在 ws_a，但 link 挂在 ws_b 名下的同 ql_id 上
+        s_cross = await _make_session(db_session, admin.id, rt.id, workspace_id=ws_a.id)
+        await _make_quicklog_link(
+            db_session, workspace_id=ws_b.id, ql_id=ql_id, agent_session_id=s_cross.id
+        )
+
+        resp = await client.get(
+            "/api/daemon/sessions",
+            params={"workspace_id": str(ws_a.id), "ql_id": ql_id},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["total"] == 1
+        assert [i["id"] for i in body["items"]] == [str(s_a.id)]
+        assert str(s_cross.id) not in [i["id"] for i in body["items"]]
+
+    async def test_ql_id_without_workspace_hits_across_workspaces(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """workspace_id 不传时按 ql_id 全工作区命中（owner-scoped，可接受语义，
+        见 service 层 docstring / design §5.W3.3）。"""
+        admin = await _get_admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        ws_a = await _make_workspace(db_session, root_path="D:/repo-a")
+        ws_b = await _make_workspace(db_session, root_path="D:/repo-b")
+        ql_id = f"ql-{uuid.uuid4().hex[:6]}"
+        s_a = await _make_session(db_session, admin.id, rt.id, workspace_id=ws_a.id)
+        await _make_quicklog_link(
+            db_session, workspace_id=ws_a.id, ql_id=ql_id, agent_session_id=s_a.id
+        )
+        s_b = await _make_session(db_session, admin.id, rt.id, workspace_id=ws_b.id)
+        await _make_quicklog_link(
+            db_session, workspace_id=ws_b.id, ql_id=ql_id, agent_session_id=s_b.id
+        )
+
+        resp = await client.get(
+            "/api/daemon/sessions", params={"ql_id": ql_id}, headers=auth_headers
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["total"] == 2
+        assert {i["id"] for i in body["items"]} == {str(s_a.id), str(s_b.id)}
+
+    async def test_change_id_and_ql_id_intersection(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """change_id + ql_id 同传取交集：仅双关联会话命中，单关联剔除。"""
+        admin = await _get_admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        ws = await _make_workspace(db_session, root_path="D:/repo-a")
+        change = await _make_change(db_session, workspace_id=ws.id)
+        ql_id = f"ql-{uuid.uuid4().hex[:6]}"
+        # 双关联：change link + quicklog link
+        s_both = await _make_session(db_session, admin.id, rt.id, workspace_id=ws.id)
+        await _make_change_link(db_session, change_id=change.id, agent_session_id=s_both.id)
+        await _make_quicklog_link(
+            db_session, workspace_id=ws.id, ql_id=ql_id, agent_session_id=s_both.id
+        )
+        # 仅 quicklog 关联：被 change_id 剔除
+        s_ql_only = await _make_session(db_session, admin.id, rt.id, workspace_id=ws.id)
+        await _make_quicklog_link(
+            db_session, workspace_id=ws.id, ql_id=ql_id, agent_session_id=s_ql_only.id
+        )
+        # 仅 change 关联：被 ql_id 剔除
+        s_change_only = await _make_session(db_session, admin.id, rt.id, workspace_id=ws.id)
+        await _make_change_link(db_session, change_id=change.id, agent_session_id=s_change_only.id)
+
+        resp = await client.get(
+            "/api/daemon/sessions",
+            params={"workspace_id": str(ws.id), "change_id": str(change.id), "ql_id": ql_id},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["total"] == 1
+        assert [i["id"] for i in body["items"]] == [str(s_both.id)]
+
+    async def test_ql_id_too_long_422(
+        self, client: AsyncClient, auth_headers: dict[str, str]
+    ) -> None:
+        """ql_id 超过 links 表列宽 String(128) → 422（Query max_length 校验）。"""
+        resp = await client.get(
+            "/api/daemon/sessions", params={"ql_id": "x" * 129}, headers=auth_headers
+        )
+        assert resp.status_code == 422

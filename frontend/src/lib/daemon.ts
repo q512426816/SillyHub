@@ -758,6 +758,10 @@ export type InteractiveProvider = "claude" | "codex";
  * 预建已由 task-09 落地）。task-14 gen:types 后生成版 SessionCreateRequest 已
  * 自带 team_mission?: TeamMissionCreateBlock——本类型的 team_mission 局部扩展
  * 已收敛（不再覆写，直接继承生成字段），漂移由 tsc 暴露。
+ *
+ * 2026-08-25-session-spec-binding task-09 / FR-06：可选 quicklog_id 短码
+ * （创建即落 quicklog 绑定），同为生成版自带字段（本卡 gen:types 引入），
+ * 直接继承不覆写。
  */
 export type SessionCreateRequest = Omit<
   components["schemas"]["SessionCreateRequest"],
@@ -870,6 +874,9 @@ export async function createSession(
     body.ask_user_only = input.ask_user_only;
   }
   if (input.change_id !== undefined) body.change_id = input.change_id;
+  // 2026-08-25-session-spec-binding task-09 / FR-06：快速修复短码绑定
+  // （对齐 change_id 先例：有值才带；后端创建落库点写 quicklog_session_links）。
+  if (input.quicklog_id !== undefined) body.quicklog_id = input.quicklog_id;
   if (input.workspace_id !== undefined) body.workspace_id = input.workspace_id;
   // task-13（FR-05）：预会话团队任务块透传（有值才带；后端 create 路径预建
   // 归 task-09——flush-only 同事务，失败整体回滚）。
@@ -1729,6 +1736,12 @@ export interface AgentSessionListParams {
    * workspace_id，change 隐含 workspace），后端 SQL 层精确匹配。
    */
   change_id?: string;
+  /**
+   * 按快速修复过滤（2026-08-25-session-spec-binding task-09 / FR-05）：ql_id
+   * 短码（``ql-YYYYMMDD-NNN-后缀``，非 UUID），后端走 quicklog_session_links
+   * M:N 子查询命中；纯透传不做本地过滤（命中集全在服务端，D-001@v1）。
+   */
+  ql_id?: string;
   /** 2026-08-24：按归档状态过滤（true=已归档，false=未归档）。 */
   archived?: boolean;
 }
@@ -1753,6 +1766,9 @@ export async function listAgentSessions(
   // D-003@v2：scope 过滤参照 runtime_id 模式（真值才下发，缺省零回归）。
   if (options?.workspace_id) query.workspace_id = options.workspace_id;
   if (options?.change_id) query.change_id = options.change_id;
+  // 2026-08-25-session-spec-binding task-09 / FR-05：快速修复短码过滤参
+  // （对齐 change_id 先例：真值才下发，缺省零回归）。
+  if (options?.ql_id) query.ql_id = options.ql_id;
   // 2026-08-24：archived 过滤参（布尔→字符串 "true"/"false"）。
   if (options?.archived !== undefined) query.archived = options.archived ? "true" : "false";
   return apiFetch<AgentSessionListResponse>("/api/daemon/sessions", { query });
@@ -1792,6 +1808,22 @@ export async function listChangeSessions(
 ): Promise<AgentSessionListItem[]> {
   return apiFetch<AgentSessionListItem[]>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/changes/${encodeURIComponent(changeId)}/sessions`,
+  );
+}
+
+/**
+ * GET /api/workspaces/{wid}/quicklog-entries/{ql_id}/sessions — 快速修复级
+ * 会话列表（2026-08-25-session-spec-binding task-07 端点 / FR-04 数据源，
+ * task-09 客户端封装）。与 listChangeSessions 同源 schema（AgentSessionListItem
+ * 数组，标题经共享 helper 同源提取）；无绑定返回空列表不 404（D-001@v1：
+ * 条目行允许后到），跨成员可见。
+ */
+export async function listQuicklogSessions(
+  workspaceId: string,
+  qlId: string,
+): Promise<AgentSessionListItem[]> {
+  return apiFetch<AgentSessionListItem[]>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/quicklog-entries/${encodeURIComponent(qlId)}/sessions`,
   );
 }
 

@@ -3586,7 +3586,7 @@
           "change"
         ],
         "summary": "List Change Sessions",
-        "description": "列出某变更下的全部会话（2026-07-09-change-detail-session task-09）。\n\n跨成员可见（D-005@v1，不加 user_id 过滤），鉴权复用 CHANGE_READ（X-03）。\n标题取该会话最早一条 channel=user_input 的 AgentRunLog 摘要（前 30 字，X-04）。\n按 last_active_at desc 排序（Python 排序规避 PG/SQLite 方言差异）。",
+        "description": "列出某变更下的全部会话（2026-07-09-change-detail-session task-09）。\n\n跨成员可见（D-005@v1，不加 user_id 过滤），鉴权复用 CHANGE_READ（X-03）。\ntask-03（2026-08-25-session-spec-binding / FR-03 / D-002@v1）：数据源从\n``AgentSession.change_id`` 单 FK 切换为 ``change_session_links`` M:N JOIN——\nlinks 为唯一关联真相，存量单 FK 由迁移播种成 link 行（design §5.W1.2）不丢；\n``AgentSession.change_id`` 列继续写入不动（D-002@v1 冻结语义）。\n标题取该会话最早一条 channel=user_input 的 AgentRunLog 摘要（前 30 字，X-04，\n共享 helper ``_fetch_session_titles``）。按 last_active_at desc 排序（Python\n排序规避 PG/SQLite 方言差异）。",
         "operationId": "list_change_sessions_api_workspaces__workspace_id__changes__change_id__sessions_get",
         "parameters": [
           {
@@ -4999,6 +4999,63 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/QuicklogEntryRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/quicklog-entries/{ql_id}/sessions": {
+      "get": {
+        "tags": [
+          "change"
+        ],
+        "summary": "List Quicklog Sessions",
+        "description": "列出某快速修复条目下绑定的全部会话（2026-08-25-session-spec-binding task-07）。\n\nFR-04 数据源：读 ``quicklog_session_links`` M:N JOIN ``agent_sessions``。\n跨成员可见（对齐 ``list_change_sessions`` 现状——列表跨成员、stream\nowner-only 不变，不加 user_id 过滤），鉴权复用 CHANGE_READ。``ql_id`` 为\n自然键（D-001@v1：无 FK 到 quicklog_entries——条目双源合并且与 agent-logs\n到达顺序不保证，绑定行不依赖条目行存在），故查询按 (workspace_id, ql_id)\n匹配 link 且不校验条目存在：无绑定返回空列表不 404（快速修复刚建、尚无\n会话是常态，design §5.W3.2）；工作区隔离由 link 行 workspace_id 保证。\n为快速修复级会话门户路由（D-006@v1，与变更门户同构）提供数据面。\n标题经共享 helper ``_fetch_session_titles`` 与变更侧同源复用（X-013 禁止\n复制 window-function 代码），按 last_active_at desc 排序（Python 排序规避\nPG/SQLite 方言差异，对齐 ``list_change_sessions``）。",
+        "operationId": "list_quicklog_sessions_api_workspaces__workspace_id__quicklog_entries__ql_id__sessions_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "ql_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ql Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AgentSessionListItem"
+                  },
+                  "title": "Response List Quicklog Sessions Api Workspaces  Workspace Id  Quicklog Entries  Ql Id  Sessions Get"
                 }
               }
             }
@@ -11948,7 +12005,7 @@
           "daemon"
         ],
         "summary": "List Sessions",
-        "description": "List the current user's AgentSessions (owner-scoped, stable paging).\n\ntask-06 / FR-02 / D-003@v1：可选过滤参数 runtime_id / machine_id（经\ndaemon_runtimes 关联）/ provider / q（标题模糊，实现为 user_input 的内容\nilike，见 service 层 docstring）；全部可选，不传时查询与现状一致（零回归）。\n过滤在 SQL 层完成，total 为过滤后总数（R-04 真分页），分页 limit/offset\n作用于过滤结果。machine_id 不匹配 runtime 缺失的旧会话（无 runtime 即无机器）。\n2026-08-22-workspace-sessions-portal / D-003@v2：新增可选 workspace_id /\nchange_id（AgentSession 冗余绑定列精确匹配），供 workspace/change 级会话\n门户复用全局端点做 scope 过滤；不传 = 现状（零回归）。",
+        "description": "List the current user's AgentSessions (owner-scoped, stable paging).\n\ntask-06 / FR-02 / D-003@v1：可选过滤参数 runtime_id / machine_id（经\ndaemon_runtimes 关联）/ provider / q（标题模糊，实现为 user_input 的内容\nilike，见 service 层 docstring）；全部可选，不传时查询与现状一致（零回归）。\n过滤在 SQL 层完成，total 为过滤后总数（R-04 真分页），分页 limit/offset\n作用于过滤结果。machine_id 不匹配 runtime 缺失的旧会话（无 runtime 即无机器）。\n2026-08-22-workspace-sessions-portal / D-003@v2：新增可选 workspace_id /\nchange_id（AgentSession 冗余绑定列精确匹配），供 workspace/change 级会话\n门户复用全局端点做 scope 过滤；不传 = 现状（零回归）。\n2026-08-25-session-spec-binding task-04 / FR-05（design §5.W3.3 / §9）：\nchange_id 语义从单 FK 精确匹配扩大为 change_session_links M:N 子查询\n命中（存量单 FK 已播种为 link 行，原命中集是新命中集子集，参数名/类型\n不变向后兼容）；新增可选 ql_id（快速修复短码，走 quicklog_session_links\n按 (workspace_id, ql_id) 双条件子查询，防跨工作区同 ql_id 串扰），不传\n= 现状（零回归）。",
         "operationId": "list_sessions_api_daemon_sessions_get",
         "parameters": [
           {
@@ -12100,6 +12157,23 @@
                 }
               ],
               "title": "Change Id"
+            }
+          },
+          {
+            "name": "ql_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 128
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ql Id"
             }
           },
           {
@@ -50691,6 +50765,18 @@
               }
             ],
             "title": "Workspace Id"
+          },
+          "quicklog_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quicklog Id"
           },
           "team_mission": {
             "anyOf": [

@@ -664,6 +664,10 @@ class DaemonService:
         # 2026-08-25-unified-floating-session（FR-5）：页面上下文块透传（前导
         # 构建归 SessionService create 路径，facade 仅转发）。
         page_context: PageContextCreateBlock | None = None,
+        # task-08（2026-08-25-session-spec-binding / FR-04 / FR-06）：快速修复
+        # 短码透传（落 quicklog_session_links 归 SessionService 创建落库点，
+        # facade 显式签名同步——漏透传会 500，见 task-04 facade 教训）。
+        quicklog_id: str | None = None,
     ) -> SessionDispatchResult:
         return await self._sess.create_session(
             user_id,
@@ -679,6 +683,7 @@ class DaemonService:
             llm_provider_id=llm_provider_id,
             team_mission=team_mission,
             page_context=page_context,
+            quicklog_id=quicklog_id,
         )
 
     async def inject_session(
@@ -826,6 +831,9 @@ class DaemonService:
         # 2026-08-22-workspace-sessions-portal / D-003@v2：scope 过滤参透传。
         workspace_id: uuid.UUID | None = None,
         change_id: uuid.UUID | None = None,
+        # 2026-08-25-session-spec-binding task-04 / FR-05：快速修复级关联筛选透传
+        # （facade 签名需与 SessionService.list_agent_sessions 同步，缺省会 500）。
+        ql_id: str | None = None,
         # 2026-08-24：会话归档过滤。
         archived: bool = False,
     ) -> tuple[list[AgentSession], int]:
@@ -841,6 +849,7 @@ class DaemonService:
             q=q,
             workspace_id=workspace_id,
             change_id=change_id,
+            ql_id=ql_id,
             archived=archived,
         )
 

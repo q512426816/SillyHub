@@ -19,7 +19,12 @@
  *     （D-003@v2 只多传 workspace_id），树形态为 task-06 workspace 入口
  *     「深链预展开+滚动到该分组」（FR-06，经 defaultExpandedWorkspaceId）预留；
  *   - change scope：ql-20260823-003 起同走工作区树（用户要求三入口一致，
- *     D-106 修订——平铺分支 ChangeScopeFlatList 已退役删除）。
+ *     D-106 修订——平铺分支 ChangeScopeFlatList 已退役删除）；
+ *   - quicklog scope（task-10 / FR-04 / D-006@v1）：与 change 同构工作区树
+ *     （端点过滤 ql_id+workspace_id 单组形态；scope 消费分支为 if-chain 判等，
+ *     X-008 逐一补齐，漏分支会静默退化）；workspace 树筛选区新增「关联」下拉
+ *     （FR-05 / X-009 门控：仅 workspace scope 渲染，选中透传 change_id/ql_id
+ *     服务端过滤，选项分组「变更」（活跃未归档）/「快速修复」（非占位））。
  *
  * 工作区树（全局/workspace 形态）结构：
  *   筛选区：
@@ -85,6 +90,8 @@ import {
   Zap,
 } from "lucide-react";
 import { ApiError } from "@/lib/api";
+import { listChanges } from "@/lib/changes";
+import { listQuicklogEntries } from "@/lib/quicklog";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import { listWorkspaces } from "@/lib/workspaces";
 import {
@@ -115,8 +122,24 @@ export type ChangeScope = {
  */
 export type RuntimeScope = { kind: "runtime"; runtimeId: string };
 
+/**
+ * 快速修复范围（task-10 / FR-04 / D-006@v1，对齐 ChangeScope 形态）：workspace
+ * 级超集再绑定单个快速修复条目（quicklog 级隐含 workspace）；qlId 为 QUICKLOG
+ * 短码（``ql-YYYYMMDD-NNN-后缀``，非 UUID）。门户新建经 preContext.quickId
+ * 双传（X-13 语义 quicklog 版，对齐 change 分支）。
+ */
+export type QuicklogScope = {
+  kind: "quicklog";
+  workspaceId: string;
+  qlId: string;
+};
+
 /** scope 判别联合（缺省不传 = 全局门户现状）。 */
-export type SessionListScope = WorkspaceScope | ChangeScope | RuntimeScope;
+export type SessionListScope =
+  | WorkspaceScope
+  | ChangeScope
+  | RuntimeScope
+  | QuicklogScope;
 
 /** 状态下拉选项（active/ended/failed；空串=不过滤）。 */
 const STATUS_OPTIONS = [
@@ -472,17 +495,85 @@ function WorkspaceTreeList({
   const [deleting, setDeleting] = useState(false);
   // 组内超 50 截断（R-03）的「显示全部」展开集合。
   const [showAllGroupIds, setShowAllGroupIds] = useState<Set<string>>(new Set());
+  // X-009「关联」筛选下拉（task-10 / FR-05）：选中值编码 kind:id
+  //（change:<uuid> / quicklog:<ql_id>），undefined = 未筛。仅 workspace scope
+  // 渲染下拉与发起选项查询（门控谓词显式化：change/quicklog scope 自身已按
+  // 关联过滤再叠加会互相冲突；全局门户跨工作区选项过杂均不提供）。
+  const [assocFilter, setAssocFilter] = useState<string | undefined>(undefined);
 
   // 2026-08-24：归档视图判定（哨兵值 __archived__ 触发服务端 archived=true 过滤）。
   const isArchivedView = status === "__archived__";
 
+  // X-009 门控谓词：「关联」筛选仅 workspace scope 提供（含选项查询 enabled）。
+  const isWorkspaceScope = scope?.kind === "workspace";
+  const assocWorkspaceId = isWorkspaceScope ? scope.workspaceId : null;
+
   const { machines, workspaces, workspaceIdToName, runtimeToMachine } =
     useSessionListSharedData();
 
+  // X-009：「关联」下拉选项数据源（enabled 同门控——非 workspace scope 零请求）。
+  // 变更组取活跃未归档（location=active 服务端过滤）；快速修复组剔占位行
+  //（placeholder=true 的 QUICKLOG 占位条目，客户端过滤兜底）。
+  const assocChangesQuery = useQuery({
+    queryKey: ["changes", "sessionAssocFilter", assocWorkspaceId],
+    queryFn: () =>
+      listChanges(assocWorkspaceId ?? "", { location: "active", pageSize: 100 }),
+    enabled: isWorkspaceScope,
+    staleTime: 60_000,
+  });
+  const assocQuicklogQuery = useQuery({
+    queryKey: ["quicklogEntries", "sessionAssocFilter", assocWorkspaceId],
+    queryFn: () =>
+      listQuicklogEntries(assocWorkspaceId ?? "", { page_size: 100 }),
+    enabled: isWorkspaceScope,
+    staleTime: 60_000,
+  });
+
+  /** 「关联」下拉分组选项（antd Select 分组形态；value 编码 kind:id）。 */
+  const assocOptions = useMemo(() => {
+    if (!isWorkspaceScope) return [];
+    const groups: {
+      label: string;
+      options: { value: string; label: string }[];
+    }[] = [];
+    const changeOpts = (assocChangesQuery.data?.items ?? []).map((c) => ({
+      value: `change:${c.id}`,
+      // 变更名 title 优先，change_key 回退（对齐 getChange 消费方惯例）。
+      label: c.title?.trim() || c.change_key,
+    }));
+    if (changeOpts.length > 0) {
+      groups.push({ label: "变更", options: changeOpts });
+    }
+    const quicklogOpts = (assocQuicklogQuery.data?.items ?? [])
+      .filter((q) => !q.placeholder)
+      .map((q) => ({
+        value: `quicklog:${q.ql_id}`,
+        // 短码 + 标题并列（原型场景C .dd-item：mono 短码 + muted 标题）。
+        label: q.title?.trim() ? `${q.ql_id} ${q.title.trim()}` : q.ql_id,
+      }));
+    if (quicklogOpts.length > 0) {
+      groups.push({ label: "快速修复", options: quicklogOpts });
+    }
+    return groups;
+  }, [isWorkspaceScope, assocChangesQuery.data, assocQuicklogQuery.data]);
+
+  /** 「关联」选中值 → listAgentSessions 服务端过滤参（清除/未筛 = 空对象）。 */
+  const assocParams = useMemo<{ change_id?: string; ql_id?: string }>(() => {
+    if (!assocFilter) return {};
+    const sep = assocFilter.indexOf(":");
+    if (sep <= 0) return {};
+    const kind = assocFilter.slice(0, sep);
+    const id = assocFilter.slice(sep + 1);
+    if (kind === "change") return { change_id: id };
+    if (kind === "quicklog") return { ql_id: id };
+    return {};
+  }, [assocFilter]);
+
   // D-103：一次拉取 limit=500，客户端按 workspace_id 分组；workspace scope
   // 维持既有端点过滤（D-003@v2 只多传 workspace_id）。queryKey 沿用全局键
-  // 结构（scope 槽位 + 参数对象），门户软删后按前缀 ["agentSessions"]
-  // invalidate 继续全覆盖。
+  // 结构（scope 槽位 + 参数对象，X-009 关联筛选进参数对象槽位——选中值变化
+  // 即键变化自动重拉，且仍在 ["agentSessions"] 前缀下被门户 invalidate 全覆盖），
+  // 门户软删后按前缀 ["agentSessions"] invalidate 继续全覆盖。
   // ql-20260824-004：函数式条件轮询（间隔按最近一次数据推导，先例
   // quicklog-table quicklogPollInterval）——聊天中 10s / 静默 30s。
   const sessionsQuery = useQuery<AgentSessionListResponse, ApiError>({
@@ -490,20 +581,29 @@ function WorkspaceTreeList({
       "agentSessions",
       "sessionsPortal",
       scope ?? null,
-      { limit: AGENT_SESSIONS_TREE_FETCH_LIMIT, archived: isArchivedView },
+      {
+        limit: AGENT_SESSIONS_TREE_FETCH_LIMIT,
+        archived: isArchivedView,
+        assoc: assocFilter ?? null,
+      },
     ],
     queryFn: () =>
       listAgentSessions({
         limit: AGENT_SESSIONS_TREE_FETCH_LIMIT,
         ...(isArchivedView ? { archived: true } : {}),
-        // workspace/change scope 透传 workspace_id（RuntimeScope 无此字段，跳过）。
+        // workspace/change/quicklog scope 透传 workspace_id（RuntimeScope 无此字段，跳过）。
         ...(scope && "workspaceId" in scope && scope.workspaceId
           ? { workspace_id: scope.workspaceId }
           : {}),
         // ql-20260823-003：change 树化后端点过滤参随树透传（D-003@v2）。
         ...(scope?.kind === "change" ? { change_id: scope.changeId } : {}),
+        // task-10（FR-04 / X-008 消费点一）：quicklog 树化端点过滤参
+        //（task-09 已落 ql_id，M:N 命中含播种行）。
+        ...(scope?.kind === "quicklog" ? { ql_id: scope.qlId } : {}),
         // FR-02：runtime scope 端点过滤（lib/daemon.ts:1669 既有 runtime_id 参）。
         ...(scope?.kind === "runtime" ? { runtime_id: scope.runtimeId } : {}),
+        // X-009：「关联」筛选（仅 workspace scope 有值）服务端过滤参透传。
+        ...assocParams,
       }),
     refetchInterval: (query) =>
       sessionListPollInterval(query.state.data?.items),
@@ -571,6 +671,20 @@ function WorkspaceTreeList({
     // ql-20260823-003：change 同款单组（端点已过滤 change_id+workspace_id，
     // 组头「＋」经门户 handleNewInGroup 双传 change 上下文）。
     if (scope?.kind === "change") {
+      return [
+        {
+          id: scope.workspaceId,
+          workspaceId: scope.workspaceId,
+          name: workspaceIdToName.get(scope.workspaceId) ?? "当前工作区",
+          canNew: true,
+          sessions: byWs.get(scope.workspaceId) ?? [],
+        },
+      ];
+    }
+    // task-10（FR-04 / X-008 消费点二）：quicklog 同款单组（端点已过滤
+    // ql_id+workspace_id，组头「＋」经门户 handleNewInGroup 双传 quicklog
+    // 上下文；组 id 取 workspaceId、canNew 为真、名称解析失败兜底当前工作区）。
+    if (scope?.kind === "quicklog") {
       return [
         {
           id: scope.workspaceId,
@@ -939,7 +1053,8 @@ function WorkspaceTreeList({
         </span>
       </div>
 
-      {/* 筛选区：搜索（回车应用）+ 状态下拉（X-11 保留）+ 两层筛选 tab（D-107） */}
+      {/* 筛选区：搜索（回车应用）+ 状态下拉（X-11 保留）+「关联」下拉
+          （X-009，仅 workspace scope）+ 两层筛选 tab（D-107） */}
       <div className="flex flex-col gap-2 border-b border-border px-3 py-2">
         <div className="flex items-center gap-1.5">
           <Input
@@ -961,6 +1076,24 @@ function WorkspaceTreeList({
             options={STATUS_OPTIONS.map((o) => ({ ...o }))}
           />
         </div>
+        {/* X-009：「关联」筛选下拉（task-10 / FR-05）——服务端过滤（与上方
+            状态/机器层的纯视图过滤不同，选中即换查询键重拉）；选项分组
+            「变更」（活跃未归档）/「快速修复」（非占位），allowClear 清除恢复。 */}
+        {isWorkspaceScope && (
+          <Select
+            id="slp-assoc"
+            size="small"
+            showSearch
+            allowClear
+            className="w-full"
+            placeholder="关联：变更/快速修复"
+            aria-label="关联筛选"
+            value={assocFilter}
+            onChange={(v) => setAssocFilter(v)}
+            optionFilterProp="label"
+            options={assocOptions}
+          />
+        )}
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="shrink-0 text-[11px] text-muted-foreground">机器</span>
           <FilterPill

@@ -25,6 +25,12 @@ export interface FloatingPreContext {
   runtimeId: string;
   workspaceId: string | null;
   changeId?: string | null;
+  /**
+   * 快速修复入口传入（2026-08-25-session-spec-binding task-11 / FR-06）：ql_id
+   * 短码，经宿主展开透传进 SessionPanel preContext.quickId，随首句 createSession
+   * 上送 quicklog_id 落绑定。缺省零回归（对齐 changeId 语义）。
+   */
+  quickId?: string | null;
 }
 
 /**

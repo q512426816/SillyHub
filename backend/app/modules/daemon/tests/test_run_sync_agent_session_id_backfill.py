@@ -16,10 +16,17 @@ batch run（会话 FK None）不触碰 agent_sessions 表、AgentRun.session_id 
 回归 + 会话行缺失（理论不应发生）静默跳过。
 
 参照 test_submit_messages_no_overwrite_terminal._seed_pending_interactive_session 范式。
+
+task-05（变更 2026-08-25-session-spec-binding）追加绑定用例组
+TestSpecCommandAutoBinding：sillyspec tool_call 消息入库 → change_session_links
+自动绑定（FR-01 / D-003@v1，经 AgentRun.agent_session_id 二跳定位会话）；default
+伪键 / quick 子命令 / batch run（agent_session_id None，X-002）/ 非 sillyspec
+bash 命令均零副作用。
 """
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
@@ -30,8 +37,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.agent.placement import RunPlacementService
+from app.modules.change.model import Change, ChangeSessionLink
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.service import DaemonService
+from app.modules.workspace.model import Workspace
 
 # ── Fixtures（对齐 test_submit_messages_no_overwrite_terminal） ────────────────
 
@@ -72,11 +81,14 @@ async def _seed_interactive_run(
     db_session: AsyncSession,
     *,
     session_agent_session_id: str | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, str]:
     """建 interactive session + lease + pending run（会话 FK 非空）。
 
     ``session_agent_session_id``：会话行 agent_session_id 的初始值（None = 全新
     会话；非 None = 模拟 fork 前已有旧 key / 已回填过）。
+    ``workspace_id``：task-05 绑定用例注入——run 二跳定位会话后取该列作绑定
+    workspace（None = 既有 task-01 用例原状，无工作区会话）。
     返回 (agent_session_id, lease_id, run_id, claim_token)。
     """
     uid = await _create_user(db_session)
@@ -102,6 +114,7 @@ async def _seed_interactive_run(
         runtime_id=rt.id,
         lease_id=dispatch.lease_id,
         agent_session_id=session_agent_session_id,
+        workspace_id=workspace_id,
         last_active_at=datetime.now(UTC),
         created_at=datetime.now(UTC),
     )
@@ -381,3 +394,187 @@ class TestAgentSessionIdBackfill:
             .all()
         )
         assert len(logs) == 1
+
+
+# ── task-05（2026-08-25-session-spec-binding）sillyspec 命令自动绑定 ───────────
+
+
+async def _create_workspace(db_session: AsyncSession) -> Workspace:
+    """建绑定目标 workspace（对齐 change/tests/test_spec_binding.py._make_ws 范式）。"""
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="spec binding ws",
+        slug=f"rsb-{uuid.uuid4().hex[:8]}",
+        root_path=f"/tmp/run-sync-binding-{uuid.uuid4().hex[:12]}",
+        status="active",
+        component_key="comp",
+    )
+    db_session.add(ws)
+    await db_session.commit()
+    await db_session.refresh(ws)
+    return ws
+
+
+def _bash_tool_call(command: str) -> dict:
+    """batch 路径 tool_call 消息（daemon tc_content JSON 形态，task 卡 FR-01）。
+
+    故意不带顶层 tool_kind —— 让 submit_messages 走 classify_tool_kind 的
+    JSON.parse 兜底打标路径（旧 daemon 兼容分支），sillyspec 命令被打为
+    tool_kind='sillyspec' 后进收集分支。
+    """
+    return {
+        "event_type": "tool_use",
+        "content": json.dumps({"tool": "Bash", "args": {"command": command}}),
+    }
+
+
+async def _links_of(db_session: AsyncSession) -> list[ChangeSessionLink]:
+    return list((await db_session.execute(select(ChangeSessionLink))).scalars().all())
+
+
+async def _changes_of(db_session: AsyncSession, ws_id: uuid.UUID) -> list[Change]:
+    return list(
+        (await db_session.execute(select(Change).where(Change.workspace_id == ws_id)))
+        .scalars()
+        .all()
+    )
+
+
+class TestSpecCommandAutoBinding:
+    """task-05 / FR-01 / D-003@v1：submit_messages 消息入库 sillyspec 命令检测
+    自动绑定 change_session_links（经 run.agent_session_id 二跳定位会话）。"""
+
+    @pytest.mark.asyncio
+    async def test_sillyspec_change_command_binds_idempotent(
+        self, db_session: AsyncSession, mocked_redis
+    ) -> None:
+        """①会话型 run + sillyspec --change X → placeholder 变更 + link 行；重放幂等。"""
+        ws = await _create_workspace(db_session)
+        session_id, lease_id, run_id, token = await _seed_interactive_run(
+            db_session, workspace_id=ws.id
+        )
+        change_key = "2026-08-25-demo-change"
+        svc = DaemonService(db_session)
+
+        result = await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [_bash_tool_call(f"sillyspec run execute --change {change_key}")],
+        )
+        assert result == 1  # 消息照常入库，绑定不阻断
+
+        # placeholder 变更行已建（task-02 defaults：draft/active/changes/<key>）。
+        changes = await _changes_of(db_session, ws.id)
+        assert [c.change_key for c in changes] == [change_key]
+        assert changes[0].status == "draft"
+        assert changes[0].location == "active"
+        # link 行：变更 ↔ 平台会话（经 run.agent_session_id 二跳）。
+        links = await _links_of(db_session)
+        assert len(links) == 1
+        assert links[0].change_id == changes[0].id
+        assert links[0].session_id == session_id
+
+        # 重放同命令（含既有变更场景）→ 幂等，无重复行。
+        result2 = await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [_bash_tool_call(f"sillyspec run plan --change {change_key}")],
+        )
+        assert result2 == 1
+        assert len(await _links_of(db_session)) == 1
+        assert len(await _changes_of(db_session, ws.id)) == 1
+
+    @pytest.mark.asyncio
+    async def test_change_default_no_binding_no_placeholder(
+        self, db_session: AsyncSession, mocked_redis
+    ) -> None:
+        """②--change default 伪键 → 无绑定无 placeholder 变更行（D-005@v2）。"""
+        ws = await _create_workspace(db_session)
+        _session_id, lease_id, run_id, token = await _seed_interactive_run(
+            db_session, workspace_id=ws.id
+        )
+        svc = DaemonService(db_session)
+        result = await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [_bash_tool_call("sillyspec run scan --done --change default")],
+        )
+        assert result == 1  # 消息照常入库
+        assert await _links_of(db_session) == []
+        assert await _changes_of(db_session, ws.id) == []
+
+    @pytest.mark.asyncio
+    async def test_quick_subcommand_no_change_binding(
+        self, db_session: AsyncSession, mocked_redis
+    ) -> None:
+        """③quick 子命令 --change quick-xxx（CLI quick 会话短码）→ 无变更绑定（D-004）。"""
+        ws = await _create_workspace(db_session)
+        _session_id, lease_id, run_id, token = await _seed_interactive_run(
+            db_session, workspace_id=ws.id
+        )
+        svc = DaemonService(db_session)
+        result = await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [_bash_tool_call('sillyspec run quick --done --change quick-990f8c09 --output "修复"')],
+        )
+        assert result == 1
+        assert await _links_of(db_session) == []
+        assert await _changes_of(db_session, ws.id) == []
+
+    @pytest.mark.asyncio
+    async def test_batch_run_fk_none_zero_side_effects(
+        self, db_session: AsyncSession, mocked_redis
+    ) -> None:
+        """④agent_session_id 为 None（batch run）→ 零副作用，消息照常入库（X-002）。"""
+        lease_id, run_id, token, _decoy = await _seed_batch_run(db_session)
+        svc = DaemonService(db_session)
+        result = await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [_bash_tool_call("sillyspec run execute --change should-not-bind")],
+        )
+        assert result == 1
+        assert await _links_of(db_session) == []
+        # 全库无该 key 的 Change 行（placeholder 也未建）。
+        stray = (
+            (await db_session.execute(select(Change).where(Change.change_key == "should-not-bind")))
+            .scalars()
+            .all()
+        )
+        assert stray == []
+
+    @pytest.mark.asyncio
+    async def test_non_sillyspec_bash_zero_side_effects(
+        self, db_session: AsyncSession, mocked_redis
+    ) -> None:
+        """⑤非 sillyspec bash 命令（tool_kind='bash'）→ 零副作用。"""
+        ws = await _create_workspace(db_session)
+        ws_id = ws.id  # 先取标量：下方 expire_all 后再取 ws.id 会触发同步懒加载
+        _session_id, lease_id, run_id, token = await _seed_interactive_run(
+            db_session, workspace_id=ws_id
+        )
+        svc = DaemonService(db_session)
+        result = await svc.submit_messages(
+            lease_id,
+            token,
+            run_id,
+            [_bash_tool_call("git status && pnpm build")],
+        )
+        assert result == 1
+        # 落库行 tool_kind 打标为 bash（兜底路径验证），未进 sillyspec 收集分支。
+        db_session.expire_all()
+        logs = (
+            (await db_session.execute(select(AgentRunLog).where(AgentRunLog.run_id == run_id)))
+            .scalars()
+            .all()
+        )
+        assert len(logs) == 1
+        assert logs[0].tool_kind == "bash"
+        assert await _links_of(db_session) == []
+        assert await _changes_of(db_session, ws_id) == []
