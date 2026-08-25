@@ -17,9 +17,11 @@ from sqlalchemy import (
     String,
     Text,
     Uuid,
+    select,
     text,
 )
-from sqlmodel import Field
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import Field, col
 
 from app.models.base import BaseModel
 
@@ -539,6 +541,11 @@ class AgentSession(BaseModel, table=True):
         # tool_report 会话 find-or-create 查找键。普通索引非唯一——workspace_id
         # nullable 无法建复合唯一，并发撞键容错见 aggregation_key 列注释。
         Index("ix_agent_sessions_ws_agg", "workspace_id", "aggregation_key"),
+        # 2026-08-25-team-subsession-governance task-01（design §5.A / D-001@v1）：
+        # 会话树父指针索引——mission_worker_sessions 按根查直接子会话 /
+        # resolve_mission_for_session 归属解析的查询键（迁移 20260825210000
+        # 同步建；对齐 ix_agent_runs_mission_id 补声明惯例，防 autogenerate 漂移）。
+        Index("ix_agent_sessions_parent", "parent_session_id"),
     )
 
     id: uuid.UUID = Field(
@@ -694,6 +701,109 @@ class AgentSession(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+    # ── 会话树两列（2026-08-25-team-subsession-governance task-01，design §5.A）──
+    # 分身子会话挂载（D-001@v1 会话树）：指向父会话（团队场景父 = 主控会话）；
+    # NULL = 非分身会话（存量 chat/会话形态零回归，不回填）。自引用 FK 无
+    # ondelete——会话软删不硬删（同 agent_missions.session_id 先例）；脏数据
+    # 成环由 resolve_mission_for_session visited 截断兜底。
+    parent_session_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_sessions.id"),
+            nullable=True,
+        ),
+    )
+    # 分身完成信号落点（D-002@v1 显式标记，否决 run 终态/会话 end 判据）：
+    # 分身经受限 MCP worker_done 工具置位；可重复置位（追问重开工后再完成，
+    # 取最新时间）；非分身会话恒 NULL。
+    worker_done_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+
+
+# ── 会话树辅助查询（2026-08-25-team-subsession-governance task-01，design §5.A）──
+# 本模块保持叶子（顶层仅依赖 SQLAlchemy/Base）；需要 mission.py 的
+# get_active_mission_for_session 时走函数内延迟 import（先例见 finalizer.py）。
+
+
+async def mission_worker_sessions(db: AsyncSession, mission_id: uuid.UUID) -> list[AgentSession]:
+    """枚举 mission 的分身子会话（design §5.A 单一真相源）。
+
+    按 ``mission.session_id`` 取根会话（团队场景根 = 主控会话），返回
+    ``parent_session_id = 根`` 的**直接子会话**行——P1 深度 2 只查一层，
+    不做递归 CTE 与树深上限（P2 递归派发时再放开）。mission 不存在 /
+    external mission（session_id 为 NULL）/ 根下无子会话均返回空列表。
+    按 created_at 升序稳定枚举。消费方：list_workers / 成本 union /
+    converge·cancel 收口名单（task-09/13 等）。注意本查询不做
+    status/deleted 过滤——过滤语义归调用方。
+    """
+    mission = (
+        (await db.execute(select(AgentMission).where(col(AgentMission.id) == mission_id)))
+        .scalars()
+        .first()
+    )
+    if mission is None or mission.session_id is None:
+        return []
+    stmt = (
+        select(AgentSession)
+        .where(col(AgentSession.parent_session_id) == mission.session_id)
+        .order_by(col(AgentSession.created_at))
+    )
+    result = await db.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def resolve_mission_for_session(
+    db: AsyncSession, session_id: uuid.UUID, *, include_terminal: bool = False
+) -> AgentMission | None:
+    """会话 → mission 归属解析（design §5.A，沿 parent 链爬根）。
+
+    分身子会话自身不落 ``AgentMission.session_id``——本函数沿
+    ``parent_session_id`` 链逐级爬到根会话（parent 为 NULL 的会话），
+    根按 ``get_active_mission_for_session`` 既有口径命中 mission
+    （活跃 = converged_at / cancelled_at 均 NULL，命中多条取 created_at
+    最新，无命中返回 None）。
+
+    - 环检测：visited 集合逐级记录；parent 指向自身/后代（脏数据成环）或
+      parent 指向不存在的会话行时**截断返回 None 不抛异常**；
+    - ``include_terminal=False``（默认）：只匹配活跃 mission（既有口径，
+      不动 get_active_mission_for_session 签名与语义）；``include_terminal=True``：
+      含已终态 mission（取根上最新一条）——task-07 worker_done 迟到调用用
+      于区分 404（无 mission）与 409（mission 已终态）；
+    - 传入会话即根（parent NULL）时等价 get_active_mission_for_session 直查。
+    """
+    # 延迟 import 避免循环（model 是叶子，mission.py 顶层 import 本模块）
+    from app.modules.agent.mission import get_active_mission_for_session
+
+    current: uuid.UUID = session_id
+    visited: set[uuid.UUID] = set()
+    while True:
+        if current in visited:
+            return None  # 环：脏数据 parent 指向后代，截断不抛
+        visited.add(current)
+        session = (
+            (await db.execute(select(AgentSession).where(col(AgentSession.id) == current)))
+            .scalars()
+            .first()
+        )
+        if session is None:
+            return None  # parent 指向不存在的行（脏数据），截断不抛
+        if session.parent_session_id is None:
+            root_id = session.id
+            break
+        current = session.parent_session_id
+
+    if not include_terminal:
+        return await get_active_mission_for_session(db, root_id)
+    stmt = (
+        select(AgentMission)
+        .where(col(AgentMission.session_id) == root_id)
+        .order_by(col(AgentMission.created_at).desc())
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalars().first()
 
 
 # ql-20260825-011：会话排队消息上限（单会话 pending 条目数）。前后端同值，

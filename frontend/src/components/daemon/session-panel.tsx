@@ -521,6 +521,82 @@ function TeamTriggerRow({
   );
 }
 
+/**
+ * task-14（2026-08-25-team-subsession-governance / FR-08 / design §5.E）：分身
+ * 会话浮层——TeamTaskBlock 分身行（有 sub_session_id）点击后，以浮层复用
+ * SessionPanel（mode=dialog、sessionId=分身 sub_session_id、attach 续聊形态）
+ * 打开该分身子会话；实时流与追问全走面板既有链路（constraints：不新建分身
+ * 专用面板/流渲染组件，流与追问逻辑零复制）。page/dialog 两模式共用；关闭
+ * 只卸浮层——主控面板常驻不动（流/输入 state 原样保留，验收「关闭返回主控」）。
+ *
+ * 嵌套安全：worker 子会话非 mission 锚定会话，listSessionTeamMissions 对其
+ * 恒空（后端按 AgentMission.session_id 直查），浮层面板不会再渲染团队块，
+ * 无递归嵌套。样式走 AI-Native 双主题 token（brand-* 语义阶 + shadow-lg
+ * 主题投影，FRONTEND_PAGE_STYLE §0.5 铁律）；黑色半透明遮罩为中性色（同
+ * workspace-member-add-dialog 既有浮层惯例）。
+ */
+interface WorkerSessionOverlayProps {
+  /** 分身子会话 id（TeamTaskBlock onOpenWorkerSession 上抛）。 */
+  subSessionId: string;
+  /** 关闭浮层（返回主控面板）。 */
+  onClose: () => void;
+  /** dialog 模式 SessionPanel 必需 props（按消费方上下文透传，见接口注释）。 */
+  providers: string[];
+  defaultProvider: string;
+  model?: string | null;
+  onModelChange?: (next: string | null) => void;
+  hasOnlineProvider: boolean;
+}
+
+function WorkerSessionOverlay({
+  subSessionId,
+  onClose,
+  providers,
+  defaultProvider,
+  model,
+  onModelChange,
+  hasOnlineProvider,
+}: WorkerSessionOverlayProps) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="分身会话"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 md:p-8"
+    >
+      <div className="flex h-full min-h-0 w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-border bg-card shadow-lg">
+        <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2">
+          <span className="text-sm font-semibold text-foreground">分身会话</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-muted-foreground">
+            #{subSessionId.slice(0, 8)}
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="关闭分身会话"
+            className="shrink-0 rounded-md border border-border px-2.5 py-0.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            返回主控
+          </button>
+        </div>
+        {/* key 按分身会话驱动整体 remount（R6 同款契约：切换分身即重建建流）。 */}
+        <div className="min-h-0 flex-1">
+          <SessionPanel
+            key={subSessionId}
+            mode="dialog"
+            sessionId={subSessionId}
+            providers={providers}
+            defaultProvider={defaultProvider}
+            model={model}
+            onModelChange={onModelChange}
+            hasOnlineProvider={hasOnlineProvider}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SessionPanelPage({
   sessionId,
   machines,
@@ -684,6 +760,10 @@ function SessionPanelPage({
   const [teamTriggering, setTeamTriggering] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
   const [teamChipDismissedId, setTeamChipDismissedId] = useState<string | null>(null);
+  // task-14（FR-08 / design §5.E）：查看分身子会话——TeamTaskBlock 分身行点击
+  // 后置为该分身 sub_session_id，浮层（WorkerSessionOverlay）复用 SessionPanel
+  // 打开；null = 关闭（主控面板 state 不动，关闭即原样返回）。
+  const [workerSessionId, setWorkerSessionId] = useState<string | null>(null);
 
   const streamRef = useRef<SessionStreamConnection | null>(null);
   // 面板根 ref（task-09 / FR-04）：子代理目录跳转的 DOM 定位查询范围（限面板内）。
@@ -2328,6 +2408,10 @@ function SessionPanelPage({
                 onRefresh={() => {
                   void refreshTeamMissions();
                 }}
+                // task-14：分身行点击 → 浮层复用 SessionPanel 打开分身子会话。
+                onOpenWorkerSession={(subSessionId) => {
+                  setWorkerSessionId(subSessionId);
+                }}
               />
             ))}
         </div>
@@ -2475,6 +2559,21 @@ function SessionPanelPage({
           />
         </div>
       </div>
+
+      {/* task-14：分身会话浮层——复用 SessionPanel（dialog/attach 形态）打开分身
+          子会话；引擎信息取主控会话（分身派发自同一 claude 主控，D-003 门控
+          上游已保证），在线性沿用主控机器判定。 */}
+      {workerSessionId != null && (
+        <WorkerSessionOverlay
+          subSessionId={workerSessionId}
+          onClose={() => {
+            setWorkerSessionId(null);
+          }}
+          providers={sessionEngine != null ? [sessionEngine] : []}
+          defaultProvider={sessionEngine ?? ""}
+          hasOnlineProvider={machineOnline}
+        />
+      )}
     </section>
   );
 }
@@ -2669,6 +2768,10 @@ function SessionPanelDialog(props: SessionPanelProps) {
   const [teamTriggering, setTeamTriggering] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
   const [teamChipDismissedId, setTeamChipDismissedId] = useState<string | null>(null);
+  // task-14（FR-08 / design §5.E）：查看分身子会话——TeamTaskBlock 分身行点击
+  // 后置为该分身 sub_session_id，浮层（WorkerSessionOverlay）复用 SessionPanel
+  // 打开；null = 关闭（主控面板 state 不动，关闭即原样返回）。
+  const [workerSessionId, setWorkerSessionId] = useState<string | null>(null);
   // AskUserQuestion / 普通 permission_request 待答卡片队列。仅渲染 dialog_kind
   // 存在的（AskUserDialogCard）；普通工具审批卡在本面板不展示（/runtimes 页的
   // PermissionApprovalsPanel 负责）。
@@ -3930,6 +4033,10 @@ function SessionPanelDialog(props: SessionPanelProps) {
                 onRefresh={() => {
                   void refreshTeamMissions();
                 }}
+                // task-14：分身行点击 → 浮层复用 SessionPanel 打开分身子会话。
+                onOpenWorkerSession={(subSessionId) => {
+                  setWorkerSessionId(subSessionId);
+                }}
               />
             ))}
         </div>
@@ -4044,6 +4151,22 @@ function SessionPanelDialog(props: SessionPanelProps) {
           clearAttachmentsRef.current = fn;
         }}
       />
+
+      {/* task-14：分身会话浮层——复用 SessionPanel（dialog/attach 形态）打开分身
+          子会话；dialog 必需 props 按本面板透传（模型覆盖受控对共用父级 state）。 */}
+      {workerSessionId != null && (
+        <WorkerSessionOverlay
+          subSessionId={workerSessionId}
+          onClose={() => {
+            setWorkerSessionId(null);
+          }}
+          providers={providers}
+          defaultProvider={defaultProvider}
+          model={model}
+          onModelChange={onModelChange}
+          hasOnlineProvider={hasOnlineProvider}
+        />
+      )}
     </section>
   );
 }

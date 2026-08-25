@@ -802,6 +802,19 @@ class SessionService:
         # 2026-08-25-unified-floating-session（FR-5 / D-005）：悬浮入口页面上下文
         # 块——仅 page_key 枚举 + 实体 id，前导数据服务端回查；缺省 None 零回归。
         page_context: PageContextCreateBlock | None = None,
+        # task-04（2026-08-25-team-subsession-governance / FR-02 / design §5.B）：
+        # 分身子会话形态参数组（task-05 dispatch_worker 换三元组派发时传入）：
+        # parent_session_id 写 AgentSession.parent_session_id（会话树挂载，
+        # D-001@v1）；stage 透传 prepare_interactive_dispatch 写 lease
+        # metadata.stage（软依赖 task-03 的扩展形参——仅显式传入才透传）；
+        # first_run_mission_id / first_run_role 为首 run 双标记（缺省回落
+        # team_mission 预建的 mission.id + 'orchestrator' 原值）。owner 不另设
+        # 参数——分身形态归属即 user_id 入参本身（task-05 传 mission.created_by，
+        # D-004@v1）。全缺省 None 时本方法行为逐字节不变（既有三路零回归）。
+        parent_session_id: uuid.UUID | None = None,
+        stage: str | None = None,
+        first_run_mission_id: uuid.UUID | None = None,
+        first_run_role: str | None = None,
     ) -> SessionDispatchResult:
         """Create an interactive session + first-turn run + interactive lease.
 
@@ -815,6 +828,13 @@ class SessionService:
 
         task-09：``team_mission`` 携带时预建 mission（session 模式 flush-only，
         共用本方法唯一 commit）——详见函数内 task-09 分段注释。
+
+        task-04（2026-08-25-team-subsession-governance / FR-02 / design §5.B）：
+        ``parent_session_id`` / ``stage`` / ``first_run_mission_id`` /
+        ``first_run_role`` 显式传入时进入分身子会话形态——AgentSession 挂
+        parent、首 run 带双标记、stage 进 lease metadata；归属即 ``user_id``
+        入参（调用方传 mission.created_by，D-004@v1）。全缺省 None 零分支进入
+        （既有 quick-chat / 变更会话 / 团队主控三路行为逐字节不变）。
         """
         if not prompt or not prompt.strip():
             raise DaemonSessionNotActive(
@@ -1086,6 +1106,9 @@ class SessionService:
                 # task-03（FR-04/D-008）：会话配置三列（未选 = None = 现状，零回归）。
                 agent_profile_id=profile.id if profile is not None else None,
                 llm_provider_id=(llm_provider_row.id if llm_provider_row is not None else None),
+                # task-04 / FR-02 / design §5.B：分身子会话挂 parent（D-001@v1 会话
+                # 树）；缺省 None = 现状（非分身会话恒 NULL，零回归）。
+                parent_session_id=parent_session_id,
             )
             self._session.add(session)
             await self._session.flush()
@@ -1131,8 +1154,19 @@ class SessionService:
                 # task-09 / FR-05：预建 mission 的首 run 双标记（mission_id +
                 # role='orchestrator'，字面量对齐 _inject_into_session 既有口径
                 # 与 orchestrator.py _ORCHESTRATOR_ROLE）；首 run 即主控轮。
-                mission_id=mission.id if mission is not None else None,
-                role="orchestrator" if mission is not None else None,
+                # task-04 / FR-02 / design §5.A：双标记参数化——显式传入
+                # first_run_* 优先（分身子会话首 run 带 mission_id + 分身 role），
+                # 缺省回落 task-09 原值（team_mission 预建主控口径，零回归）。
+                mission_id=(
+                    first_run_mission_id
+                    if first_run_mission_id is not None
+                    else (mission.id if mission is not None else None)
+                ),
+                role=(
+                    first_run_role
+                    if first_run_role is not None
+                    else ("orchestrator" if mission is not None else None)
+                ),
                 # ql-20260817-003：首轮发送者=会话创建者。
                 user_id=user_id,
                 agent_profile_id=profile.id if profile is not None else None,
@@ -1165,6 +1199,14 @@ class SessionService:
             )
 
             placement = RunPlacementService(self._session)
+            # task-04 / FR-02 / design §5.B：stage 透传（软依赖 task-03 的
+            # prepare_interactive_dispatch 扩展形参——stage 写 lease
+            # metadata.stage → claim payload → daemon 谓词）。仅显式传入时追加
+            # kwargs：缺省 None 不传 = 存量调用逐字节不变（含 placement 尚未
+            # 扩展形参的并行合并窗口，不会对既有三路 TypeError）。
+            _dispatch_extra: dict[str, str] = {}
+            if stage is not None:
+                _dispatch_extra["stage"] = stage
             try:
                 dispatch = await placement.prepare_interactive_dispatch(
                     agent_session_id=session.id,
@@ -1178,6 +1220,7 @@ class SessionService:
                     workspace_id=workspace_id,
                     cwd=cwd,
                     pinned_runtime_id=pinned_runtime_id,
+                    **_dispatch_extra,
                 )
             except NoOnlineDaemonError as exc:
                 # task-03 / Grill C-01（P0）：钉定路径的竞态防线失联（校验后、

@@ -2757,7 +2757,9 @@ async def _session_has_active_turn(session: AsyncSession, session_id: uuid.UUID)
 
     扩展后 derive_status 的 ``session_active_turn`` 入参（task-02 契约）：主控轮
     还在跑 → 会话 mission 不进 awaiting_input 档。状态集合与 get_session_detail
-    的 current_run 查询同口径。
+    的 current_run 查询同口径。task-09 起 ``_team_mission_summary`` 改经
+    ``mission_derive_status``（内部同词表查明）后本 helper 无生产调用方，保留
+    作口径文档锚点与守护测试入口（test_session_optimize_round2 三处同源断言）。
 
     P2（2026-08-25 二审 #3）：改用 ``agent.model.ACTIVE_RUN_STATUSES`` 单源词表
     （pending/running/pending_approval）——修复审批中的主控轮（pending_approval）
@@ -2780,31 +2782,104 @@ async def _session_has_active_turn(session: AsyncSession, session_id: uuid.UUID)
 async def _team_mission_summary(
     session: AsyncSession,
     mission: AgentMission,
-    *,
-    session_active_turn: bool,
 ) -> TeamMissionSummary:
     """AgentMission + 全量 run → TeamMissionSummary（触发/列表共用组装）。
 
-    - status 用扩展后 ``derive_status``（task-02 契约：converged/has_session/
-      session_active_turn 会话维度入参，含 awaiting_input 档）；
-    - workers 仅 ``role != orchestrator`` 分身 run（D-009：主控轮不进概要；
-      Python 比较 None != 'orchestrator' 为 True，NULL role 分身天然保留）；
+    - status 用 task-08 包装 ``mission_derive_status``（design §5.C.4，task-09
+      换源）：分身子会话映射虚拟 run（idle 未 done → running，不被首 run 终态
+      遮蔽），会话维度入参（converged/has_session/session_active_turn）由包装
+      内部查明——分身 idle 未 done 不再误显 awaiting_input（防 patrol 超时
+      收敛时钟误启动）；
+    - workers 双形态行化（task-13 / design §5.C.5 / §5.E）：分身列表 =
+      子会话行（新形态，经 ``mission_worker_sessions`` 单一真相源枚举——
+      ``sub_session_id`` 取子会话 id、``run_id``/``first_run_id`` 取首 run id
+      （首 run 双标记锚，供 get_worker_result 连续消费）、role/objective 取
+      首 run 双标记、status 按 ``is_worker_complete`` 完成判定映射为
+      ``mission_derive_status`` 虚拟 run 同款三值）∪ 存量 batch 分身 run 行
+      （无子会话 mission 回落，行内容逐字节不变、两新字段 None）；
+      追问轮次 run 不写 mission_id 天然不进（轮次 run 不混入），主控轮
+      ``role != orchestrator`` 过滤语义保留（D-009：Python 比较 None !=
+      'orchestrator' 为 True，NULL role 分身天然保留）；子会话首 run 从
+      存量侧剔除防同分身双计（对齐 ``mission_derive_status`` 虚拟映射同款
+      剔除口径）；同根上一场已收敛 mission 的子会话（无本场首 run）不是
+      本场分身，不进行；
     - scope 概要读落库冻结快照，NULL 缺省回落 [anchor]（单 ws 语义）。
 
     mission 模块延迟 import（与 orchestrator.schedule_loop 同款，避免循环
     import；task-02 并行时序下也保证本模块可 import）。
     """
     from app.modules.agent.control import MissionControlService
-    from app.modules.agent.mission import derive_status
+    from app.modules.agent.mission import is_worker_complete, mission_derive_status
+    from app.modules.agent.model import AgentRun, mission_worker_sessions
 
     ctrl = MissionControlService(session)
     all_runs = await ctrl.worker_runs(mission.id)
-    status = derive_status(
-        all_runs,
-        cancelled=mission.cancelled_at is not None,
-        converged=mission.converged_at is not None,
-        has_session=mission.session_id is not None,
-        session_active_turn=session_active_turn,
+    status = await mission_derive_status(session, mission.id)
+    # task-13：新形态子会话行——首 run 双标记锚（design §5.A：派发三元组写
+    # mission_id + role 的最早 run；追问轮 run 无 mission_id 天然不命中）。
+    worker_sessions = await mission_worker_sessions(session, mission.id)
+    sub_session_ids = {s.id for s in worker_sessions}
+    first_run_by_session: dict[uuid.UUID, AgentRun] = {}
+    if sub_session_ids:
+        first_run_rows = (
+            (
+                await session.execute(
+                    select(AgentRun)
+                    .where(
+                        AgentRun.mission_id == mission.id,
+                        AgentRun.role.is_not(None),
+                        AgentRun.agent_session_id.in_(sub_session_ids),
+                    )
+                    .order_by(AgentRun.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for run in first_run_rows:
+            if run.agent_session_id is not None:
+                first_run_by_session.setdefault(run.agent_session_id, run)
+    worker_rows: list[TeamMissionWorkerSummary] = []
+    for worker_session in worker_sessions:
+        first_run = first_run_by_session.get(worker_session.id)
+        if first_run is None:
+            continue
+        # status 三值映射对齐 mission_derive_status 虚拟 run 优先级（§5.C.4）：
+        # worker_done 且无活跃 turn（is_worker_complete=True）→ completed
+        # （优先于终态映射——converge end_session 后 done 分身仍映射 done）>
+        # 会话终态 failed → failed > 其余（idle 未 done / 追问重开工中）→
+        # running；完成判定经 is_worker_complete 单一真相源（§5.C.3）。
+        if worker_session.worker_done_at is not None and await is_worker_complete(
+            session, worker_session
+        ):
+            row_status = "completed"
+        elif worker_session.status == "failed":
+            row_status = "failed"
+        else:
+            row_status = "running"
+        worker_rows.append(
+            TeamMissionWorkerSummary(
+                run_id=first_run.id,
+                role=first_run.role,
+                status=row_status,
+                objective=first_run.objective,
+                workspace_id=str(first_run.target_workspace_id or mission.workspace_id),
+                sub_session_id=worker_session.id,
+                first_run_id=first_run.id,
+            )
+        )
+    # 存量回落：batch 分身 run 行（子会话首 run 已剔除防双计；存量 mission 无
+    # 子会话 → sub_session_ids 空 → 行内容与改动前逐字节一致）。
+    worker_rows.extend(
+        TeamMissionWorkerSummary(
+            run_id=r.id,
+            role=r.role,
+            status=r.status,
+            objective=r.objective,
+            workspace_id=str(r.target_workspace_id or mission.workspace_id),
+        )
+        for r in all_runs
+        if r.role != "orchestrator" and r.agent_session_id not in sub_session_ids
     )
     # ql-20260825-003：scope 名称 enriched 视图（批量一次查询；查无行的条目
     # name=None，前端回落 id 徽标）。
@@ -2828,17 +2903,7 @@ async def _team_mission_summary(
             TeamWorkspaceRef(id=ws_id, name=_ws_names.get(ws_id)) for ws_id in scope_ids
         ],
         budget_usd=mission.budget_usd,
-        workers=[
-            TeamMissionWorkerSummary(
-                run_id=r.id,
-                role=r.role,
-                status=r.status,
-                objective=r.objective,
-                workspace_id=str(r.target_workspace_id or mission.workspace_id),
-            )
-            for r in all_runs
-            if r.role != "orchestrator"
-        ],
+        workers=worker_rows,
     )
 
 
@@ -3010,11 +3075,9 @@ async def trigger_session_team_mission(
         anchor_workspace_id=str(anchor_id),
         project_id=str(data.project_id) if data.project_id else None,
     )
-    return await _team_mission_summary(
-        session,
-        mission,
-        session_active_turn=await _session_has_active_turn(session, session_id),
-    )
+    # task-09：status 源换 mission_derive_status（会话活跃 turn 由包装内部
+    # 按同源词表判定），触发端点不再单独预查 _session_has_active_turn。
+    return await _team_mission_summary(session, mission)
 
 
 @router.get(
@@ -3028,9 +3091,10 @@ async def list_session_team_missions(
 ) -> list[TeamMissionSummary]:
     """列出会话全部团队 mission（created_at 倒序）+ 分身概要（TeamTaskBlock 数据源）。
 
-    归属校验同 POST（404 资源隐藏）；workers 仅 ``role != orchestrator`` 分身
-    run（D-009）；status 用扩展后 derive_status（含 awaiting_input，会话维度入参
-    ——session_active_turn 对整个列表只需一次查询）。
+    归属校验同 POST（404 资源隐藏）；workers 双形态行（task-13：子会话行含
+    sub_session_id/first_run_id ∪ 存量 batch 分身 run，主控轮 D-009 不进、
+    轮次 run 不混入）；status 用 task-08 包装 ``mission_derive_status``（task-09
+    换源——会话维度入参由包装内部查明，列表不再统一预查会话活跃 turn）。
     """
     svc = DaemonService(session)
     await svc.get_agent_session(session_id, user.id)
@@ -3048,11 +3112,7 @@ async def list_session_team_missions(
         .scalars()
         .all()
     )
-    session_active_turn = await _session_has_active_turn(session, session_id)
-    return [
-        await _team_mission_summary(session, m, session_active_turn=session_active_turn)
-        for m in missions
-    ]
+    return [await _team_mission_summary(session, m) for m in missions]
 
 
 # ── llm-proxy 透传端点（task-04 / FR-03 / D-003@v1）───────────────────────────

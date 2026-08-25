@@ -6982,7 +6982,7 @@
           "agent-mcp"
         ],
         "summary": "Converge Mission",
-        "description": "主 agent 触发 mission 收敛（task-06 D-010 语义重定义，design §5 / §7 / §7.5）。\n\n状态机（per mission，无新列——计数存 ``AgentMission.constraints`` JSON）：\n\n0. **busy 前置**：分身 run（``role!='orchestrator'`` 含 NULL）未全终态 → 返\n   ``status=busy`` + message 引导文案，零状态变更（不置位/不 finalize）。\n1. 分身全终态 → 以最新 orchestrator run 为锚调 ``converge_mission_for_completed_run``\n   （``converge_explicit=True``：分身维度判据 + converged_at 原子抢占置位，\n   不依赖主控 run 状态；保留 artifact 回灌 + bootstrap/execute 路由；冲突时\n   入口内回滚置位保重入）。\n2. 复用 ``FinalizerService.finalize_execute_mission`` 拿 ``FinalizerMergeResult``\n   （merged_branches / pending_conflicts）——见 ``_finalize_merge_for_mission``\n   注释（为何不直接改 converge_mission_for_completed_run 返回值）。\n3. ``pending_conflicts`` 非空 → 返 ``status=conflict`` + conflicts 给主 agent；\n   主 agent 自己 SDK Read/Write 解决（X-004，backend 不写文件）+ git add 后重入。\n4. 重入：``finalize_execute_mission`` 重跑，已 merged 分支幂等（already-up-to-date），\n   主 agent 解决后的内容被下次 git 合进去；全 merged → ``status=converged`` +\n   调 ``_cleanup_mission``（task-07 cleanup_mission）清 worker 副本。\n5. R-07：每次返 conflict 时计数 +1（``_bump_conflict_attempts``）；超限（默认 3）\n   → ``_mark_mission_needs_manual`` 标 ``needs_manual`` + 返\n   ``status=needs_manual``，副本保留供排查（X-003）。\n\n简化（task-06 决策，见 ``_mark_mission_needs_manual``）：不实际 ``git merge --abort``——\nworkspace root 工作区状态在 daemon 侧，backend 不可控，强行 abort 可能误清主 agent 已\n写的解决内容；改为标 needs_manual 让用户/主 agent 手动处理。\n\ntask-05（2026-08-22-team-session-unify）：mission 解析接入 X-Session-Id 会话\n定位（header 命中活跃 mission 时显式参数仅作越权校验锚；header 缺席零回归）。",
+        "description": "主 agent 触发 mission 收敛（task-06 D-010 语义重定义，design §5 / §7 / §7.5）。\n\n状态机（per mission，无新列——计数存 ``AgentMission.constraints`` JSON）：\n\n0. **busy 前置**：分身未全完成（task-09 判据 = ``mission_derive_status(\n   workers_only=True)`` 派生 running；分身 idle 未 done 不算全完成）→ 返\n   ``status=busy`` + message 引导文案，零状态变更（不置位/不 finalize）。\n1. 分身全终态 → 以最新 orchestrator run 为锚调 ``converge_mission_for_completed_run``\n   （``converge_explicit=True``：分身维度判据 + converged_at 原子抢占置位，\n   不依赖主控 run 状态；保留 artifact 回灌 + bootstrap/execute 路由；冲突时\n   入口内回滚置位保重入）。\n2. 复用 ``FinalizerService.finalize_execute_mission`` 拿 ``FinalizerMergeResult``\n   （merged_branches / pending_conflicts）——见 ``_finalize_merge_for_mission``\n   注释（为何不直接改 converge_mission_for_completed_run 返回值）。\n3. ``pending_conflicts`` 非空 → 返 ``status=conflict`` + conflicts 给主 agent；\n   主 agent 自己 SDK Read/Write 解决（X-004，backend 不写文件）+ git add 后重入。\n4. 重入：``finalize_execute_mission`` 重跑，已 merged 分支幂等（already-up-to-date），\n   主 agent 解决后的内容被下次 git 合进去；全 merged → ``status=converged`` +\n   调 ``_cleanup_mission``（task-07 cleanup_mission）清 worker 副本。\n5. R-07：每次返 conflict 时计数 +1（``_bump_conflict_attempts``）；超限（默认 3）\n   → ``_mark_mission_needs_manual`` 标 ``needs_manual`` + 返\n   ``status=needs_manual``，副本保留供排查（X-003）。\n\n简化（task-06 决策，见 ``_mark_mission_needs_manual``）：不实际 ``git merge --abort``——\nworkspace root 工作区状态在 daemon 侧，backend 不可控，强行 abort 可能误清主 agent 已\n写的解决内容；改为标 needs_manual 让用户/主 agent 手动处理。\n\ntask-05（2026-08-22-team-session-unify）：mission 解析接入 X-Session-Id 会话\n定位（header 命中活跃 mission 时显式参数仅作越权校验锚；header 缺席零回归）。",
         "operationId": "converge_mission_api_workspaces__workspace_id__missions__mission_id__converge_post",
         "parameters": [
           {
@@ -7078,6 +7078,71 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProgressResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/missions/{mission_id}/worker_done": {
+      "post": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Worker Done",
+        "description": "分身显式完成信号（task-07 / FR-04 / D-002@v1，design §5.C.2）。\n\n会话定位同 report_progress 模式（X-Session-Id 承载分身子会话身份，\nmission 解析沿 parent 链爬根）；置位 ``worker_done_at``、summary 落\nAgentArtifact 挂首 run、全分身完成迁移唤醒主控；迟到（mission 终态）409。",
+        "operationId": "worker_done_api_workspaces__workspace_id__missions__mission_id__worker_done_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Mission Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerDoneRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerDoneResponse"
                 }
               }
             }
@@ -7350,6 +7415,61 @@
         }
       }
     },
+    "/api/sessions/{session_id}/missions/worker_done": {
+      "post": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Worker Done For Session",
+        "description": "会话维度 worker_done——X-Session-Id（header > 路径）承载分身子会话身份\n（design §5.C.2；task-07 分身受限 server 缺参调用形态的主路由）。",
+        "operationId": "worker_done_for_session_api_sessions__session_id__missions_worker_done_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerDoneRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerDoneResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/missions/dispatch_worker": {
       "post": {
         "tags": [
@@ -7510,6 +7630,49 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProgressResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/missions/worker_done": {
+      "post": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Worker Done Scoped",
+        "description": "header-only worker_done（``POST /missions/worker_done``）——会话身份完全由\nX-Session-Id header 承载（缺失 → 400）；payload 显式参数仅作越权校验锚。",
+        "operationId": "worker_done_scoped_api_missions_worker_done_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerDoneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerDoneResponse"
                 }
               }
             }
@@ -7765,6 +7928,61 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ProgressResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/missions/{mission_id}/worker_done": {
+      "post": {
+        "tags": [
+          "agent",
+          "agent-mcp"
+        ],
+        "summary": "Worker Done By Mission",
+        "description": "仅 mid worker_done（``/missions/{mid}/worker_done``）——mid 为越权校验锚，\n分身会话身份仍由 X-Session-Id 承载（缺失 → 400）。",
+        "operationId": "worker_done_by_mission_api_missions__mission_id__worker_done_post",
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Mission Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkerDoneRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerDoneResponse"
                 }
               }
             }
@@ -12713,7 +12931,7 @@
           "daemon"
         ],
         "summary": "List Session Team Missions",
-        "description": "列出会话全部团队 mission（created_at 倒序）+ 分身概要（TeamTaskBlock 数据源）。\n\n归属校验同 POST（404 资源隐藏）；workers 仅 ``role != orchestrator`` 分身\nrun（D-009）；status 用扩展后 derive_status（含 awaiting_input，会话维度入参\n——session_active_turn 对整个列表只需一次查询）。",
+        "description": "列出会话全部团队 mission（created_at 倒序）+ 分身概要（TeamTaskBlock 数据源）。\n\n归属校验同 POST（404 资源隐藏）；workers 双形态行（task-13：子会话行含\nsub_session_id/first_run_id ∪ 存量 batch 分身 run，主控轮 D-009 不进、\n轮次 run 不混入）；status 用 task-08 包装 ``mission_derive_status``（task-09\n换源——会话维度入参由包装内部查明，列表不再统一预查会话活跃 turn）。",
         "operationId": "list_session_team_missions_api_daemon_sessions__session_id__team_missions_get",
         "parameters": [
           {
@@ -53830,7 +54048,7 @@
           "budget_usd"
         ],
         "title": "TeamMissionSummary",
-        "description": "触发/列表共用响应（design §7）。\n\n``status`` 为扩展后 derive_status 派生值（含 awaiting_input 档，会话维度\n入参）；``workers`` 仅 role != orchestrator 的分身 run（主控轮 D-009 不进）；\n``scope_workspace_ids`` 为落库冻结快照（NULL 缺省回落 [anchor]）；\n``scope_workspaces`` 为 id+名称 enriched 视图（ql-20260825-003）。"
+        "description": "触发/列表共用响应（design §7）。\n\n``status`` 为扩展后 derive_status 派生值（含 awaiting_input 档，会话维度\n入参）；``workers`` 为分身行——子会话形态行（含 sub_session_id）∪ 存量\nbatch 分身 run（role != orchestrator，主控轮 D-009 不进；task-13 双形态）；\n``scope_workspace_ids`` 为落库冻结快照（NULL 缺省回落 [anchor]）；\n``scope_workspaces`` 为 id+名称 enriched 视图（ql-20260825-003）。"
       },
       "TeamMissionTriggerRequest": {
         "properties": {
@@ -53962,6 +54180,30 @@
               }
             ],
             "title": "Workspace Id"
+          },
+          "sub_session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sub Session Id"
+          },
+          "first_run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "First Run Id"
           }
         },
         "type": "object",
@@ -53970,7 +54212,7 @@
           "status"
         ],
         "title": "TeamMissionWorkerSummary",
-        "description": "TeamMissionSummary.workers 单项——分身 run（role != orchestrator）概要。"
+        "description": "TeamMissionSummary.workers 单项——分身行（双形态）概要。\n\n- 存量 batch 形态：分身 run（role != orchestrator）逐行，``run_id`` = run id；\n- 新形态（task-13 / design §5.E，2026-08-25-team-subsession-governance）：\n  分身**子会话**行——``sub_session_id`` = 子会话 id（定名避开与\n  ``AgentSession.agent_session_id``（SDK 字符串 id）同名异义，Grill P2⑨）；\n  ``run_id`` = 首 run id、``first_run_id`` = 首 run id（design §6 实现级\n  备注：供 ``get_worker_result`` 连续消费）、role/objective 取首 run 双标记、\n  status 按 ``is_worker_complete`` / ``mission_derive_status`` 口径映射；\n- 存量形态两新字段恒 None（存量响应字段零变化，FR-08/FR-09）。"
       },
       "TeamWorkspaceRef": {
         "properties": {
@@ -55996,6 +56238,93 @@
         ],
         "title": "WorkbenchTodoItem",
         "description": "待办列表条目。\n\n``type`` 标识来源类型(如 task / problem / work-hour 审批等);\n``source`` 标识来源子系统标识(用于前端跳转回源)。"
+      },
+      "WorkerDoneRequest": {
+        "properties": {
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
+          },
+          "mission_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mission Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "summary"
+        ],
+        "title": "WorkerDoneRequest",
+        "description": "分身显式完成信号请求体（task-07 / FR-04 / D-002@v1，design §5.C.2）。\n\n会话定位同 report_progress 模式：``X-Session-Id``（header 优先，路径\nsession_id 兜底）承载分身子会话身份；``workspace_id`` / ``mission_id``\n显式参数仅作越权校验锚（daemon 受限 server 缺参调用形态，对齐\ntask-10 五工具可选化先例）。"
+      },
+      "WorkerDoneResponse": {
+        "properties": {
+          "mission_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Mission Id"
+          },
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "artifact_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Artifact Id"
+          },
+          "worker_done_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Worker Done At"
+          },
+          "all_workers_done": {
+            "type": "boolean",
+            "title": "All Workers Done"
+          },
+          "orchestrator_notified": {
+            "type": "boolean",
+            "title": "Orchestrator Notified"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mission_id",
+          "session_id",
+          "run_id",
+          "artifact_id",
+          "worker_done_at",
+          "all_workers_done",
+          "orchestrator_notified"
+        ],
+        "title": "WorkerDoneResponse",
+        "description": "worker_done 响应契约：置位落点 + 全完成迁移结果。"
       },
       "WorkerListItem": {
         "properties": {

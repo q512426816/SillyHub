@@ -314,9 +314,10 @@ class TestMissionsStatusRoute:
         # anchor_workspace = 条目中 id == mission.workspace_id 者
         assert data["anchor_workspace"] == anchor_item
 
-        # workers 与 _list_workers_core 同源（mission 全部 run，含主控轮）
-        assert {w["role"] for w in data["workers"]} == {"orchestrator", "arch"}
-        assert len(data["workers"]) == 2
+        # workers 与 _list_workers_core 同源（FR-09 补漏后主控轮不混入——分身
+        # 行化口径对齐 _team_mission_summary / non_orchestrator_runs）
+        assert {w["role"] for w in data["workers"]} == {"arch"}
+        assert len(data["workers"]) == 1
 
     @pytest.mark.asyncio
     async def test_forbidden_without_anchor_workspace_write_403(self, client, db_session) -> None:

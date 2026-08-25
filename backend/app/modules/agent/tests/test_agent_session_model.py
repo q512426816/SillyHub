@@ -19,7 +19,7 @@ def test_agent_session_tablename() -> None:
     assert AgentSession.__tablename__ == "agent_sessions"
 
 
-def test_agent_session_has_all_23_fields() -> None:
+def test_agent_session_has_all_25_fields() -> None:
     expected = {
         "id",
         "user_id",
@@ -48,12 +48,17 @@ def test_agent_session_has_all_23_fields() -> None:
         "title",
         # 2026-08-24 会话归档（agent_session_archive）：archived_at 时间戳列。
         "archived_at",
+        # 2026-08-25-team-subsession-governance task-01（design §5.A）：会话树
+        # 两列——parent_session_id（分身挂载父指针）+ worker_done_at（分身
+        # 显式完成信号）。
+        "parent_session_id",
+        "worker_done_at",
     }
     actual = set(AgentSession.model_fields.keys())
     assert actual == expected, (
         f"AgentSession field mismatch. missing={expected - actual}, extra={actual - expected}"
     )
-    assert len(AgentSession.model_fields) == 23
+    assert len(AgentSession.model_fields) == 25
 
 
 def test_agent_session_defaults() -> None:

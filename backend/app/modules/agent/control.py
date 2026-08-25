@@ -16,6 +16,20 @@ this service only enforces gates and mutates cancellation.
 （``non_orchestrator_runs``，NULL role 三值逻辑守卫）——主控轮
 （role='orchestrator'）回填 mission_id 后不占 MAX_WORKERS、不计分身成本、
 不进 cancel kill 名单；``worker_runs`` 保持全量供主控锚点 / derive 消费。
+
+2026-08-25-team-subsession-governance task-11（FR-07 / design §5.C.6 + §5.D）：
+治理三口径换子会话新形态（混跑双形态并存，FR-09 存量零回归）：
+- 并发计数 = 存量 running/pending 分身 run + ``is_worker_complete=False`` 的
+  分身子会话合计（子会话首 run 从 run 维度剔除，防同分身双计——对齐
+  ``mission_derive_status`` 虚拟映射的剔除口径）；
+- ``cost_so_far`` 输入 union = 存量分身 run ∪ 分身子会话轮次 run
+  （``agent_session_id ∈ mission_worker_sessions``），预算治理门覆盖追问轮成本；
+- ``cancel`` kill 名单 = 活跃存量分身 run ∪ 活跃分身子会话——子会话按其活跃轮
+  run（无活跃轮取首 run）调 ``cancel_lease``，命中 P0-2
+  ``_lookup_interactive_lease_by_run`` 回捞链发 SESSION_END（lease cancelled +
+  子会话 ended），存量 batch run 路径不变。
+子会话完成判定唯一入口 ``mission.is_worker_complete``（task-08）、枚举唯一入口
+``model.mission_worker_sessions``（task-01），本模块不自写判据。
 """
 
 from __future__ import annotations
@@ -29,7 +43,14 @@ from sqlmodel import col
 
 from app.core.logging import get_logger
 from app.modules.agent.delegation import MAX_WORKERS
-from app.modules.agent.model import AgentMission, AgentRun
+from app.modules.agent.mission import is_worker_complete
+from app.modules.agent.model import (
+    ACTIVE_RUN_STATUSES,
+    AgentMission,
+    AgentRun,
+    AgentSession,
+    mission_worker_sessions,
+)
 
 log = get_logger(__name__)
 
@@ -38,6 +59,11 @@ _ACTIVE = ("pending", "running")
 # 主控轮标记（2026-08-22-team-session-unify task-07 / D-009，design §5 核心机制）：
 # role='orchestrator' 的 mission run 是主控轮（存量 external mission 同标记）。
 _ORCHESTRATOR_ROLE = "orchestrator"
+
+# 可收口的会话状态（task-11 / design §5.D cancel 沿树收口）：与
+# lease_service.cancel_lease 的会话收口词表同源（pending/active/reconnecting）——
+# 已终态（ended/failed）子会话不复活重杀。
+_ACTIVE_SESSION_STATUSES = ("pending", "active", "reconnecting")
 
 
 class MissionControlService:
@@ -77,6 +103,24 @@ class MissionControlService:
         )
         return list((await self._session.execute(stmt)).scalars().all())
 
+    async def _split_worker_forms(
+        self, mission_id: uuid.UUID
+    ) -> tuple[list[AgentRun], list[AgentSession]]:
+        """混跑双形态拆分（task-11）：存量 batch 分身 run + 分身子会话行。
+
+        存量口径 = ``non_orchestrator_runs`` 剔除 ``agent_session_id ∈ 分身子会话``
+        的 run（即子会话首 run——design §5.A 双标记锚）——分身状态一律以子会话
+        行（``is_worker_complete``）/ 子会话轮次 run 为准，避免同一分身在 run 与
+        会话两维度双计（对齐 ``mission_derive_status`` 虚拟映射的同款剔除）。
+        无子会话 mission（session_id NULL / 无子行）返回空会话列表，全量回落
+        存量口径（FR-09 零回归）。
+        """
+        runs = await self.non_orchestrator_runs(mission_id)
+        sessions = await mission_worker_sessions(self._session, mission_id)
+        session_ids = {s.id for s in sessions}
+        legacy_runs = [r for r in runs if r.agent_session_id not in session_ids]
+        return legacy_runs, sessions
+
     @staticmethod
     def cost_from_runs(runs: list[AgentRun]) -> float:
         """第六批：从内存 runs 直接求 cost（与 cost_so_far 同公式），供调用方复用
@@ -91,13 +135,36 @@ class MissionControlService:
     async def cost_so_far(self, mission_id: uuid.UUID) -> float:
         """Sum of ``total_cost_usd`` across the Mission's Worker Runs.
 
-        task-07（D-009）：仅累计分身 run 成本，主控轮不计入（审查 B3）。
+        task-07（D-009）：仅累计分身成本，主控轮不计入（审查 B3）。
+
+        task-11（design §5.C.6）：输入扩为 union——存量分身 run ∪ 分身子会话
+        轮次 run（``agent_session_id ∈ mission_worker_sessions``），治理门预算
+        拦截覆盖子会话追问轮（无 mission_id 的轮次 run）成本。子会话首 run 已
+        从存量侧剔除（``_split_worker_forms``），union 天然去重不双计。
+        ``cost_from_runs`` 静态求和公式不动（口径=传入 runs 本身）。
         """
-        return self.cost_from_runs(await self.non_orchestrator_runs(mission_id))
+        legacy_runs, sessions = await self._split_worker_forms(mission_id)
+        runs = list(legacy_runs)
+        if sessions:
+            stmt = select(AgentRun).where(
+                col(AgentRun.agent_session_id).in_([s.id for s in sessions])
+            )
+            runs.extend((await self._session.execute(stmt)).scalars().all())
+        return self.cost_from_runs(runs)
 
     async def active_worker_count(self, mission_id: uuid.UUID) -> int:
-        runs = await self.non_orchestrator_runs(mission_id)
-        return sum(1 for r in runs if r.status in _ACTIVE)
+        """活跃分身计数（pending+running，cancel 漏杀防护视角）。
+
+        task-11 混跑口径：存量 pending/running 分身 run + 未完成子会话（经
+        ``is_worker_complete``，pending 子会话——首 run pending 未 claim——天然
+        计入）合计；子会话首 run 从 run 维度剔除防双计。
+        """
+        legacy_runs, sessions = await self._split_worker_forms(mission_id)
+        count = sum(1 for r in legacy_runs if r.status in _ACTIVE)
+        for s in sessions:
+            if not await is_worker_complete(self._session, s):
+                count += 1
+        return count
 
     async def running_worker_count(self, mission_id: uuid.UUID) -> int:
         """Count Workers already claimed by a daemon (``running``) — concurrency basis.
@@ -107,11 +174,19 @@ class MissionControlService:
         (not-yet-dispatched) Runs — otherwise a flat mission of N pending Workers
         trips ``max_workers`` before any dispatch happens (2026-06-28 D-008@v1).
 
-        task-07（D-009 / 审查 B3）：仅统计分身 run——主控轮（role='orchestrator'，
-        含 running 态）不占 MAX_WORKERS 并发额度。
+        task-07（D-009 / 审查 B3）：仅统计分身——主控轮不占 MAX_WORKERS 并发额度。
+
+        task-11 混跑口径（design §5.C.6 / FR-07）：存量 running 分身 run +
+        ``is_worker_complete=False`` 且会话非终态的分身子会话数合计——子会话形态
+        分身只要未显式完成（worker_done）即占并发额度（追问重开工中也占），
+        子会话首 run 从 run 维度剔除防同分身双计。
         """
-        runs = await self.non_orchestrator_runs(mission_id)
-        return sum(1 for r in runs if r.status == "running")
+        legacy_runs, sessions = await self._split_worker_forms(mission_id)
+        count = sum(1 for r in legacy_runs if r.status == "running")
+        for s in sessions:
+            if not await is_worker_complete(self._session, s):
+                count += 1
+        return count
 
     async def can_dispatch_worker(self, mission: AgentMission) -> tuple[bool, str]:
         """Pre-dispatch gate. Returns ``(allowed, reason)``.
@@ -133,6 +208,36 @@ class MissionControlService:
             return False, "budget_exceeded"
         return True, "ok"
 
+    async def _cancel_target_run_for_session(self, session_id: uuid.UUID) -> uuid.UUID | None:
+        """取子会话的 cancel_lease 入参 run（task-11 / design §5.D）。
+
+        优先活跃轮 run（``ACTIVE_RUN_STATUSES`` 词表单源）——cancel_lease 沿
+        ``run.agent_session_id → AgentSession.lease_id`` 回捞 interactive lease
+        并 kill 该活跃轮；无活跃轮（已 done 待收敛 / 轮间隙）取首 run（最早
+        run）——目标仍是收口子会话（lease cancelled + SESSION_END + 会话
+        ended），首 run 已终态时 ``_mark_agent_run_killed_if_pending`` 幂等跳过。
+        会话无任何 run 行（脏数据）返回 None，调用方跳过并告警。
+        """
+        active_stmt = (
+            select(AgentRun.id)
+            .where(
+                AgentRun.agent_session_id == session_id,
+                AgentRun.status.in_(list(ACTIVE_RUN_STATUSES)),
+            )
+            .order_by(AgentRun.created_at)
+            .limit(1)
+        )
+        run_id = (await self._session.execute(active_stmt)).scalars().first()
+        if run_id is not None:
+            return run_id
+        first_stmt = (
+            select(AgentRun.id)
+            .where(AgentRun.agent_session_id == session_id)
+            .order_by(AgentRun.created_at)
+            .limit(1)
+        )
+        return (await self._session.execute(first_stmt)).scalars().first()
+
     async def cancel(self, mission: AgentMission) -> int:
         """Cancel a Mission: mark ``cancelled_at`` + kill active child Runs.
 
@@ -145,9 +250,16 @@ class MissionControlService:
 
         Returns the number of Runs killed.
 
-        task-07（D-009 / design §7.5）：kill 对象仅为分身 run（``non_orchestrator_runs``，
+        task-07（D-009 / design §7.5）：kill 对象仅为分身（``non_orchestrator_runs``，
         含 NULL role）——主控轮非分身，不进 kill 名单；存量 external mission 规则
         同步统一（R-08）。
+
+        task-11（design §5.D）：kill 名单扩活跃分身子会话——统一走 ``cancel_lease``
+        （含 SESSION_END 的 P0-2 链，不重造 kill 逻辑）：子会话按其活跃轮 run
+        （无活跃轮取首 run，``_cancel_target_run_for_session``）入参，命中
+        ``_lookup_interactive_lease_by_run`` 回捞链 → lease cancelled +
+        SESSION_END 下发 + 子会话 ended，daemon 无僵尸。已终态子会话不复活重杀；
+        无子会话 mission 名单回落存量 batch run（FR-09 零回归）。
         """
         # lazy import：agent.control → daemon.lease_service，避免顶层循环 import
         from app.modules.daemon.lease_service import DaemonLeaseService
@@ -158,7 +270,8 @@ class MissionControlService:
 
         lease_svc = DaemonLeaseService(self._session)
         killed = 0
-        for r in await self.non_orchestrator_runs(mission.id):
+        legacy_runs, sessions = await self._split_worker_forms(mission.id)
+        for r in legacy_runs:
             if r.status not in _ACTIVE:
                 continue
             try:
@@ -169,6 +282,28 @@ class MissionControlService:
                     "mission_cancel_worker_failed",
                     mission_id=str(mission.id),
                     run_id=str(r.id),
+                    error=str(exc),
+                )
+        for s in sessions:
+            if s.status not in _ACTIVE_SESSION_STATUSES:
+                continue
+            target_run_id = await self._cancel_target_run_for_session(s.id)
+            if target_run_id is None:
+                log.warning(
+                    "mission_cancel_worker_session_no_run",
+                    mission_id=str(mission.id),
+                    session_id=str(s.id),
+                )
+                continue
+            try:
+                await lease_svc.cancel_lease(target_run_id)
+                killed += 1
+            except Exception as exc:
+                log.warning(
+                    "mission_cancel_worker_failed",
+                    mission_id=str(mission.id),
+                    session_id=str(s.id),
+                    run_id=str(target_run_id),
                     error=str(exc),
                 )
         log.info("mission_cancelled", mission_id=str(mission.id), killed=killed)

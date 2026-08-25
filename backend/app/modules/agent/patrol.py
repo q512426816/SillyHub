@@ -21,6 +21,13 @@ run 常驻 running」改为「会话活跃 turn」：
 - 职责③判死分流：会话 mission 判死对象从主 run 改为分身 run（非终态 + 承载
   daemon 离线超时 + 主控会话无活跃 turn）；存量 external 保持原主 run 判定链路
   零回归。
+
+task-12（2026-08-25-team-subsession-governance / FR-06 / design §5.D 末行）追加
+职责⑤孤儿子会话扫描：独立查询（方向与 ``_active_mission_ids`` 相反——那是活跃
+mission 名单）找出已 converged/cancelled 终态 mission 下仍活跃
+（pending/active/reconnecting）的分身子会话，逐个补发 ``SessionService.end_session``
+收口——兜底 task-10 converge 批量收口 best-effort 部分失败与 cancel 链漏网，
+实现零孤儿。
 """
 
 from __future__ import annotations
@@ -37,7 +44,13 @@ from sqlmodel import col
 from app.core.config import get_settings
 from app.core.db import get_session_factory
 from app.core.logging import get_logger
-from app.modules.agent.model import ACTIVE_RUN_STATUSES, AgentMission, AgentRun, AgentSession
+from app.modules.agent.model import (
+    ACTIVE_RUN_STATUSES,
+    AgentMission,
+    AgentRun,
+    AgentSession,
+    mission_worker_sessions,
+)
 from app.modules.agent.orchestrator import (
     _ORCHESTRATOR_ROLE,
     OrchestratorService,
@@ -57,7 +70,8 @@ ACTIVE_MISSION_LIMIT = 100
 # awaiting_input 超时收敛的「全终态」判据与分身僵尸判死的「非终态」判据共用。
 _TERMINAL_RUN_STATUSES = ("completed", "failed", "killed")
 
-# run_once 返回 / round_done 日志共用的五计数键（FR-04.2）。
+# run_once 返回 / round_done 日志共用的计数键（FR-04.2；task-12 追加
+# orphan_sessions_ended——职责⑤孤儿子会话补收口计数）。
 PATROL_COUNT_KEYS = (
     "checked",
     "converged",
@@ -65,6 +79,7 @@ PATROL_COUNT_KEYS = (
     "zombie_marked",
     "zombie_revived",
     "worker_recovered",
+    "orphan_sessions_ended",
 )
 
 # 僵尸标记态（task-05 provides，task-06/07/08 消费）：主 agent run 判死后写
@@ -202,6 +217,15 @@ class MissionPatrolService:
             counts["worker_recovered"] = await self._patrol_worker_recovery()
         except Exception:
             log.exception("mission_patrol_duty_failed", duty="worker_recovery")
+
+        # ── 职责⑤：孤儿子会话扫描（task-12 / FR-06 / design §5.D 末行）──
+        # 独立查询终态 mission（converged/cancelled）的活跃分身子会话补发
+        # end_session 收口——兜底 task-10 converge 批量收口 best-effort 部分
+        # 失败与 cancel 链漏网，零孤儿。独立 try/except 互不阻断（对齐四职责）。
+        try:
+            counts["orphan_sessions_ended"] = await self._patrol_orphan_subsessions()
+        except Exception:
+            log.exception("mission_patrol_duty_failed", duty="orphan_subsessions")
 
         return counts
 
@@ -659,6 +683,83 @@ class MissionPatrolService:
                     error=str(exc),
                 )
         return recovered
+
+    async def _patrol_orphan_subsessions(self) -> int:
+        """职责⑤：孤儿子会话扫描补收口（task-12 / FR-06 / design §5.D 末行）。
+
+        独立查询（方向与 ``_active_mission_ids`` 相反，绝不共用名单——那是活跃
+        mission 集合）：converged_at / cancelled_at 任一非空的**终态** mission，
+        经 ``mission_worker_sessions`` 一层枚举分身子会话（枚举单一真相源，
+        不过滤 status——过滤语义归调用方），取仍活跃者（词表复用
+        ``control._ACTIVE_SESSION_STATUSES`` = pending/active/reconnecting，与
+        task-11 cancel 沿树收口同源，不另写判据）逐个补发
+        ``SessionService.end_session``（user_id=子会话属主 session.user_id，
+        reason=``mission_terminal_orphan``）——子会话 ended + interactive lease
+        completed + P0-2 SESSION_END WS best-effort 下发（end_session 自带幂等
+        与收口链，不重造 kill 逻辑、不直接翻 DB 会话状态，TaskCard 约束）。
+        兜底 task-10 converge 批量收口 best-effort 部分失败与 cancel 链漏网。
+
+        - 查询自带 limit（对齐 ``ACTIVE_MISSION_LIMIT`` 惯例）：终态 mission 持续
+          积累，防单轮过载；created_at 升序 = 老 mission 先补，溢出留待下轮。
+        - best-effort：单个收口失败 log.warning 继续下一个（对齐 task-10
+          收口语义）；职责整体异常由 run_once 的 try/except 兜底，不阻断同轮
+          其余职责。预取 (id, user_id) 标量后才进收口循环——end_session 失败
+          分支 rollback 会 expire 会话内全部实例，循环内再访问 ORM 属性触发
+          隐式同步 refresh（asyncio 下 MissingGreenlet，task-10 同款防护）。
+        - 存量 mission（session_id 查无会话行 / 根下无子会话）枚举空集 no-op
+          返 0（FR-09 零行为变化）；活跃 mission 不进查询名单，子会话绝不被碰。
+
+        Returns:
+            本轮成功补收口的孤儿子会话数（对接 run_once orphan_sessions_ended）。
+        """
+        # 延迟 import 对齐本文件 control / daemon.session.service 既有防循环
+        # 模式（task-10 helper 同款：SessionService 依赖链宽）。
+        from app.modules.agent.control import _ACTIVE_SESSION_STATUSES
+        from app.modules.daemon.session.service import SessionService
+
+        stmt = (
+            select(AgentMission.id)
+            .where(
+                or_(
+                    AgentMission.converged_at.is_not(None),
+                    AgentMission.cancelled_at.is_not(None),
+                )
+            )
+            .order_by(AgentMission.created_at)
+            .limit(ACTIVE_MISSION_LIMIT)
+        )
+        mission_ids = list((await self._session.execute(stmt)).scalars().all())
+        if not mission_ids:
+            return 0
+
+        svc = SessionService(self._session)
+        ended = 0
+        for mission_id in mission_ids:
+            workers = await mission_worker_sessions(self._session, mission_id)
+            # 只取仍活跃子会话；预取属主标量（MissingGreenlet 防护见 docstring）。
+            active_workers = [
+                (w.id, w.user_id) for w in workers if w.status in _ACTIVE_SESSION_STATUSES
+            ]
+            for worker_id, owner_id in active_workers:
+                try:
+                    await svc.end_session(worker_id, owner_id, reason="mission_terminal_orphan")
+                    ended += 1
+                    log.info(
+                        "mission_patrol_orphan_session_ended",
+                        mission_id=str(mission_id),
+                        worker_session_id=str(worker_id),
+                        reason="mission_terminal_orphan",
+                    )
+                except Exception as exc:
+                    # best-effort：单个失败（lease 绑定异常 / daemon 离线抛出）只记
+                    # warning 继续下一个，残留孤儿下轮扫描再补（TaskCard 约束）。
+                    log.warning(
+                        "mission_patrol_orphan_end_failed",
+                        mission_id=str(mission_id),
+                        worker_session_id=str(worker_id),
+                        error=str(exc),
+                    )
+        return ended
 
     async def _resolve_run_lease_for_sync(self, run_id: uuid.UUID) -> DaemonTaskLease | None:
         """worker 断线恢复的 lease 解析：取该 run 最新 lease（与

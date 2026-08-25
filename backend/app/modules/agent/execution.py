@@ -34,6 +34,7 @@ enforced per-Worker tool policy.
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -187,6 +188,201 @@ def render_worker_prompt(run: AgentRun, *, mode: str = "git") -> str:
     )
 
 
+@dataclass(frozen=True)
+class WorkerWorktreeOutcome:
+    """worktree 共享 helper 输出契约（task-02 / design §5.B）。
+
+    dispatch_worker 现路径与 task-05 子会话派发同源复用；输入输出闭合、无隐藏
+    全局态。``ok=False`` 表示 run 已按既有语义统一 mark_worker_run_failed 标
+    failed（hostfs_unavailable / worktree_create_failed），调用方直接返回失败
+    结果、不进派发段，不崩 mission（design §9）。
+    """
+
+    ok: bool
+    # 三态探测结果（git / direct / unknown）——供 prompt 变体选择与诊断日志。
+    git_mode: str
+    # daemon root_path / worker cwd：自建副本成功 → 副本路径；其余 = 入参原样
+    # （工作区根或 caller worktree 路径）。
+    root_path: str | None
+    # 自建副本分支（成功创建时同值写 run.worktree_branch）；direct / 路径A /
+    # 未建副本恒 None（D-008：仅自建路径可写该列）。
+    worktree_branch: str | None
+    # lease metadata 分支：direct 旁路置 None（不写 ws.default_branch 回退）；
+    # 其余 = 入参原样（caller branch 与 default_branch 回退由调用方先行解析）。
+    lease_branch: str | None
+
+
+async def prepare_worker_worktree(
+    db: AsyncSession,
+    run: AgentRun,
+    ws: Workspace | None,
+    *,
+    host_fs_delegate: HostFsDelegate | None,
+    root_path: str | None,
+    lease_branch: str | None,
+    worktree_path: str | None = None,
+) -> WorkerWorktreeOutcome:
+    """dispatch worktree 块共享 helper（task-02 / design §5.B，纯抽取零语义变更）。
+
+    三段自 dispatch_worker 原 worktree 块逐字节等价迁移（2026-08-25 抽取）：
+
+    1. 三态 git 模式探测——仅 delegate 注入且非 caller worktree 形态
+       （worktree_path 为空——路径A 短路语义不动）时探测；任何异常恒归
+       unknown 不抛（probe 契约内部已归 unknown，此处 except 是防御性兜底，
+       绝不归 direct——D-006@v2 宁可走现状 worktree 路径 /
+       worktree_create_failed 也不误直通）；
+    2. direct 旁路——确证非 git checkout 时跳过副本创建：root_path 保持
+       入参工作区根、lease_branch 置 None、run.worktree_branch 保持 None；
+    3. per-worker worktree 创建——git / unknown 照旧进入（unknown=维持现状，
+       失败按既有语义标 failed，绝不降级直通）。
+
+    失败语义原样保留：HostFsDelegateUnavailable 归 hostfs_unavailable、
+    ok=False 归 worktree_create_failed，统一 mark_worker_run_failed 标 failed
+    后返回 ``ok=False``（不崩 mission，主 agent 决策补派）。
+    """
+    # task-05（2026-08-24-session-team-mission-context / FR-04 / D-006@v2 /
+    # D-007@v1 / design §5.D）：worktree 块前三态 git 模式探测分流。仅当
+    # delegate 注入、ws/root_path 就绪、且非 caller worktree 形态
+    # （worktree_path 为空——路径A :242-243 语义不动，caller worktree 与
+    # worker_prompt 覆写两形态不受探测影响）时探测；其余情形（含
+    # delegate=None）一律视 unknown 走现状。probe 契约（task-02）内部已把
+    # transport 异常 / HostFsDelegateUnavailable / 超时归 unknown 不向 caller
+    # 抛；此处 except 是防御性兜底（如 delegate 替身未实现 probe），任何
+    # 意外异常同样归 unknown——绝不归 direct（D-006@v2：宁可走现状
+    # worktree 路径 / worktree_create_failed 也不误直通）。
+    git_mode: str = "unknown"
+    if host_fs_delegate is not None and ws is not None and root_path and not worktree_path:
+        try:
+            git_mode = await host_fs_delegate.probe_workspace_git_mode(ws)
+        except Exception as exc:
+            log.warning(
+                "mission_worker_git_mode_probe_failed",
+                run_id=str(run.id),
+                workspace_id=str(ws.id),
+                error=type(exc).__name__,
+            )
+            git_mode = "unknown"
+    effective_lease_branch = lease_branch
+    if git_mode == "direct":
+        # direct（daemon 真答 .git exists=False，确证非 git checkout）：跳过
+        # 下方 worktree 创建块——root_path 保持入参工作区根
+        # （resolve_root_path_for_daemon(ws.root_path)，工作区根即 worker cwd）；
+        # run.worktree_branch 保持 None（路径A 语义，D-007@v1：finalizer 合并/
+        # 清理只选 NOT NULL，直通 worker 天然跳过）；lease metadata 不写
+        # branch——ws.default_branch 回退在 direct 分支旁路，dispatch_to_daemon
+        # 传 branch=None。
+        effective_lease_branch = None
+        log.info(
+            "mission_worker_direct_mode",
+            run_id=str(run.id),
+            workspace_id=str(ws.id) if ws is not None else None,
+        )
+
+    # task-03（D-001@v2 / D-005@v2）：per-worker worktree 隔离。
+    # worktree 放 workspace 内 ``.worktrees/<run.id 短8>/``（非父目录 sibling
+    # ——daemon ``allowed_roots`` 只含 ``ws.root_path``，父目录会被
+    # ``assertWithinAllowedRoots`` 拒绝，design §7 路径策略）。
+    # workspace 需在 ``.gitignore`` 排除 ``.worktrees/`` 防污染（运行时产物，
+    # 非 backend 代码，本变更不动 backend/.gitignore）。
+    # task-05：git / unknown 照旧进入本块（unknown=维持现状，失败按
+    # worktree_create_failed 既有语义，绝不降级直通）；direct 旁路。
+    worktree_branch: str | None = None
+    if (
+        host_fs_delegate is not None
+        and ws is not None
+        and root_path
+        and not worktree_path
+        and git_mode != "direct"
+    ):
+        run_id_short = str(run.id)[:8]
+        sibling_path = f"{root_path}/.worktrees/{run_id_short}"
+        worktree_branch = f"workers/{run_id_short}"
+        # X-001 空值兜底：ws.default_branch 可空（execution.py:122 同款语义），
+        # 空 → "HEAD"（工作区未提交改动不带入副本，design §7）。
+        base_ref = ws.default_branch or "HEAD"
+        # BE-P1-2（2026-08-21 审查）：git_worktree_add 走 _via_rpc 通道时，目标
+        # workspace 无 bound daemon 会直接抛 HostFsDelegateUnavailable（不走
+        # _via_rpc_or_degrade 的降级 dict 路径）。原先该异常冒泡回 mcp 端点 re-raise
+        # 503，run 已落库 pending 且无终态化路径 → derive_status 永远 running、
+        # mission 挂死（scope 缺 binding 是创建预检明确放行的场景）。此处与下方
+        # ok=False 分支同语义收敛：failed + error_code，主 agent 收 503 后仍可重试。
+        try:
+            wt_result = await host_fs_delegate.git_worktree_add(
+                ws,
+                sibling_path=sibling_path,
+                branch=worktree_branch,
+                base_ref=base_ref,
+            )
+        except HostFsDelegateUnavailable as exc:
+            log.warning(
+                "mission_worker_worktree_delegate_unavailable",
+                run_id=str(run.id),
+                workspace_id=str(ws.id),
+                sibling_path=sibling_path,
+                error=str(exc),
+            )
+            await mark_worker_run_failed(
+                db,
+                run,
+                error_code="hostfs_unavailable",
+                message=f"目标工作区暂无可用机器绑定：{exc}",
+            )
+            return WorkerWorktreeOutcome(
+                ok=False,
+                git_mode=git_mode,
+                root_path=root_path,
+                worktree_branch=None,
+                lease_branch=effective_lease_branch,
+            )
+        if not (isinstance(wt_result, dict) and wt_result.get("ok") is True):
+            # design §9：worktree 创建失败（daemon 离线 / RPC 失败 / git 错）
+            # → worker run 标 failed，主 agent 决策补派（worker_preset 内重
+            # dispatch 或收敛），不崩 mission。不抛，不进派发段（worker
+            # 没拿到独立副本 cwd 就不该派 lease）。
+            # 诊断 36b9b475：补全 error_code/finished_at/output_redacted（原只标
+            # failed 致 worker 1c6b126f 无原因不可诊断），统一走 mark_worker_run_failed。
+            wt_error = wt_result.get("error") if isinstance(wt_result, dict) else "unknown"
+            log.warning(
+                "mission_worker_worktree_add_failed",
+                run_id=str(run.id),
+                workspace_id=str(ws.id),
+                sibling_path=sibling_path,
+                error=wt_error,
+            )
+            await mark_worker_run_failed(
+                db,
+                run,
+                error_code="worktree_create_failed",
+                message=f"per-worker worktree 创建失败：{wt_error}",
+            )
+            return WorkerWorktreeOutcome(
+                ok=False,
+                git_mode=git_mode,
+                root_path=root_path,
+                worktree_branch=None,
+                lease_branch=effective_lease_branch,
+            )
+        # 成功：副本路径作 root_path（worker cwd=副本）+ 填 worktree_branch
+        # （converge 时 finalizer 读取合并，design §5.1 步骤3）。
+        root_path = sibling_path
+        run.worktree_branch = worktree_branch
+        db.add(run)
+        await db.commit()
+        log.info(
+            "mission_worker_worktree_created",
+            run_id=str(run.id),
+            sibling_path=sibling_path,
+            branch=worktree_branch,
+        )
+    return WorkerWorktreeOutcome(
+        ok=True,
+        git_mode=git_mode,
+        root_path=root_path,
+        worktree_branch=worktree_branch,
+        lease_branch=effective_lease_branch,
+    )
+
+
 class MissionExecutionService:
     """Dispatches mission Worker Runs to a daemon + collects their Artifacts."""
 
@@ -295,130 +491,26 @@ class MissionExecutionService:
         provider = (ws.default_agent if ws else None) or "claude"
         model = ws.default_model if ws else None
 
-        # task-05（2026-08-24-session-team-mission-context / FR-04 / D-006@v2 /
-        # D-007@v1 / design §5.D）：worktree 块前三态 git 模式探测分流。仅当
-        # delegate 注入、ws/root_path 就绪、且非 caller worktree 形态
-        # （worktree_path 为空——路径A :242-243 语义不动，caller worktree 与
-        # worker_prompt 覆写两形态不受探测影响）时探测；其余情形（含
-        # delegate=None）一律视 unknown 走现状。probe 契约（task-02）内部已把
-        # transport 异常 / HostFsDelegateUnavailable / 超时归 unknown 不向 caller
-        # 抛；此处 except 是防御性兜底（如 delegate 替身未实现 probe），任何
-        # 意外异常同样归 unknown——绝不归 direct（D-006@v2：宁可走现状
-        # worktree 路径 / worktree_create_failed 也不误直通）。
-        git_mode: str = "unknown"
-        if (
-            self._host_fs_delegate is not None
-            and ws is not None
-            and root_path
-            and not worktree_path
-        ):
-            try:
-                git_mode = await self._host_fs_delegate.probe_workspace_git_mode(ws)
-            except Exception as exc:
-                log.warning(
-                    "mission_worker_git_mode_probe_failed",
-                    run_id=str(run.id),
-                    workspace_id=str(effective_target),
-                    error=type(exc).__name__,
-                )
-                git_mode = "unknown"
-        if git_mode == "direct":
-            # direct（daemon 真答 .git exists=False，确证非 git checkout）：跳过
-            # 下方 worktree 创建块——root_path 保持上方 resolve_root_path_for_daemon
-            # (ws.root_path)（工作区根即 worker cwd）；run.worktree_branch 保持
-            # None（路径A 语义，D-007@v1：finalizer 合并/清理只选 NOT NULL，直通
-            # worker 天然跳过）；lease metadata 不写 branch——ws.default_branch
-            # 回退在 direct 分支旁路，dispatch_to_daemon 传 branch=None。
-            branch = None
-            log.info(
-                "mission_worker_direct_mode",
-                run_id=str(run.id),
-                workspace_id=str(effective_target),
-            )
-
-        # task-03（D-001@v2 / D-005@v2）：per-worker worktree 隔离。
-        # worktree 放 workspace 内 ``.worktrees/<run.id 短8>/``（非父目录 sibling
-        # ——daemon ``allowed_roots`` 只含 ``ws.root_path``，父目录会被
-        # ``assertWithinAllowedRoots`` 拒绝，design §7 路径策略）。
-        # workspace 需在 ``.gitignore`` 排除 ``.worktrees/`` 防污染（运行时产物，
-        # 非 backend 代码，本变更不动 backend/.gitignore）。
-        # task-05：git / unknown 照旧进入本块（unknown=维持现状，失败按
-        # worktree_create_failed 既有语义，绝不降级直通）；direct 旁路。
-        if (
-            self._host_fs_delegate is not None
-            and ws is not None
-            and root_path
-            and not worktree_path
-            and git_mode != "direct"
-        ):
-            run_id_short = str(run.id)[:8]
-            sibling_path = f"{root_path}/.worktrees/{run_id_short}"
-            worktree_branch = f"workers/{run_id_short}"
-            # X-001 空值兜底：ws.default_branch 可空（execution.py:122 同款语义），
-            # 空 → "HEAD"（工作区未提交改动不带入副本，design §7）。
-            base_ref = ws.default_branch or "HEAD"
-            # BE-P1-2（2026-08-21 审查）：git_worktree_add 走 _via_rpc 通道时，目标
-            # workspace 无 bound daemon 会直接抛 HostFsDelegateUnavailable（不走
-            # _via_rpc_or_degrade 的降级 dict 路径）。原先该异常冒泡回 mcp 端点 re-raise
-            # 503，run 已落库 pending 且无终态化路径 → derive_status 永远 running、
-            # mission 挂死（scope 缺 binding 是创建预检明确放行的场景）。此处与下方
-            # ok=False 分支同语义收敛：failed + error_code，主 agent 收 503 后仍可重试。
-            try:
-                wt_result = await self._host_fs_delegate.git_worktree_add(
-                    ws,
-                    sibling_path=sibling_path,
-                    branch=worktree_branch,
-                    base_ref=base_ref,
-                )
-            except HostFsDelegateUnavailable as exc:
-                log.warning(
-                    "mission_worker_worktree_delegate_unavailable",
-                    run_id=str(run.id),
-                    workspace_id=str(effective_target),
-                    sibling_path=sibling_path,
-                    error=str(exc),
-                )
-                await mark_worker_run_failed(
-                    self._session,
-                    run,
-                    error_code="hostfs_unavailable",
-                    message=f"目标工作区暂无可用机器绑定：{exc}",
-                )
-                return None
-            if not (isinstance(wt_result, dict) and wt_result.get("ok") is True):
-                # design §9：worktree 创建失败（daemon 离线 / RPC 失败 / git 错）
-                # → worker run 标 failed，主 agent 决策补派（worker_preset 内重
-                # dispatch 或收敛），不崩 mission。不抛，不调 dispatch_to_daemon
-                # （worker 没拿到独立副本 cwd 就不该派 lease）。
-                # 诊断 36b9b475：补全 error_code/finished_at/output_redacted（原只标
-                # failed 致 worker 1c6b126f 无原因不可诊断），统一走 mark_worker_run_failed。
-                wt_error = wt_result.get("error") if isinstance(wt_result, dict) else "unknown"
-                log.warning(
-                    "mission_worker_worktree_add_failed",
-                    run_id=str(run.id),
-                    workspace_id=str(effective_target),
-                    sibling_path=sibling_path,
-                    error=wt_error,
-                )
-                await mark_worker_run_failed(
-                    self._session,
-                    run,
-                    error_code="worktree_create_failed",
-                    message=f"per-worker worktree 创建失败：{wt_error}",
-                )
-                return None
-            # 成功：副本路径作 root_path（worker cwd=副本）+ 填 worktree_branch
-            # （converge 时 finalizer 读取合并，design §5.1 步骤3）。
-            root_path = sibling_path
-            run.worktree_branch = worktree_branch
-            self._session.add(run)
-            await self._session.commit()
-            log.info(
-                "mission_worker_worktree_created",
-                run_id=str(run.id),
-                sibling_path=sibling_path,
-                branch=worktree_branch,
-            )
+        # task-02（2026-08-25-team-subsession-governance / design §5.B）：worktree
+        # 三段（三态 git 模式探测 + direct 旁路 + per-worker worktree 创建）抽为
+        # 共享 helper ``prepare_worker_worktree``——本路径行为逐字节等价，task-05
+        # 子会话派发同源复用（消除双实现漂移）。失败语义在 helper 内统一收敛
+        # （mark_worker_run_failed 标 failed + ok=False），此处直接返回 None
+        # 不进派发段，不崩 mission。
+        wt_outcome = await prepare_worker_worktree(
+            self._session,
+            run,
+            ws,
+            host_fs_delegate=self._host_fs_delegate,
+            root_path=root_path,
+            lease_branch=branch,
+            worktree_path=worktree_path,
+        )
+        if not wt_outcome.ok:
+            return None
+        root_path = wt_outcome.root_path
+        branch = wt_outcome.lease_branch
+        git_mode = wt_outcome.git_mode
 
         # task-02（D-001@v1 方案A）：caller 全权覆写 worker prompt（含"不 commit /
         # 不越界 allowedPaths"指令）；不传 → render_worker_prompt（含 commit 协作

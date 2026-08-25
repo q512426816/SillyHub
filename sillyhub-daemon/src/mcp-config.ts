@@ -296,6 +296,14 @@ export const DAEMON_MCP_SERVER_NAME = 'sillyhub-daemon';
 export const FILE_MCP_SERVER_NAME = 'sillyhub-file';
 
 /**
+ * task-06（2026-08-25-team-subsession-governance / FR-03 / D-003@v1，design §5.C.1）：
+ * 分身受限 MCP server 对外名称（与 ``src/mcp-server.ts`` ``WORKER_MCP_SERVER_NAME``
+ * 对齐）。白名单惯例同上：``workerMcpConfigProvider`` 产物并入 platform 位配置即
+ * 自动入 ``mergeMcpConfigs`` 白名单。
+ */
+export const WORKER_MCP_SERVER_NAME = 'sillyhub-worker';
+
+/**
  * task-05（本变更）：file 模式三个 per-server env 键名（mcp-config 写侧与
  * mcp-server ``readEnv`` 读侧共用的单一来源；对齐 ``MCP_SESSION_ID_ENV`` 惯例）。
  * MCP 子进程只继承白名单 env + per-server env（spike-01 结论），上下文必须走
@@ -445,6 +453,58 @@ export function buildFileMcpServerConfig(
   // resolve+前缀校验基准漂移到 MCP 子进程 cwd，跨平台不稳定）。
   if (ctx.allowedRoot) {
     env[MCP_ALLOWED_ROOT_ENV] = resolve(ctx.allowedRoot);
+  }
+  return {
+    command: 'node',
+    args: [serverModulePath ?? defaultMcpServerModulePath()],
+    env,
+  };
+}
+
+// ── task-06（2026-08-25-team-subsession-governance）：分身受限 server 工厂 ────
+
+/**
+ * task-06（2026-08-25-team-subsession-governance / FR-03 / D-003@v1，design §5.C.1）：
+ * 构造分身受限 MCP server 条目（``mcpServers[WORKER_MCP_SERVER_NAME]`` 值）。
+ *
+ * 与 ``buildDaemonMcpServerConfig`` 共用 ``node dist/mcp-server.js`` 入口与鉴权链
+ * （MCP_SERVER_BACKEND_URL / MCP_SERVER_DAEMON_API_KEY 优先 / MCP_SERVER_DAEMON_TOKEN
+ * 回落，task-09 P0 口径），差异：
+ *   - ``MCP_TOOLSET=mission_worker``——mcp-server ``readEnv`` 切受限模式，仅注册
+ *     ``worker_done`` 单工具（递归闸：无任何派发 / 编排工具，design §3 非目标）；
+ *   - 供 cli.ts ``workerMcpConfigProvider`` 组装，session-manager 分身分支
+ *     （stage=mission_worker）注入 create / restore / reload 三路；
+ *   - 会话 id（可选 ctx.sessionId）经 per-server env 写 MCP_SESSION_ID——生产链路
+ *     由 session-manager ``injectMcpSessionId(config, sessionId, WORKER_MCP_SERVER_NAME)``
+ *     统一补写（provider 不拼，闭包配置不被污染），本参数留给非注入链路（如测试）。
+ *
+ * 空凭证仍构造配置（server 启动后 tool 调用返回结构化错误便于诊断，与
+ * buildDaemonMcpServerConfig 容错一致）；sessionId 空值不写键（守卫风格）。
+ *
+ * @param backendUrl        backend 根 URL（如 http://localhost:8000）
+ * @param auth              daemon 凭证（apiKey 优先 / token 回落）
+ * @param ctx               可选上下文（sessionId；生产注入链路缺省不传）
+ * @param serverModulePath  可选，覆盖默认 ``dist/mcp-server.js`` 编译产物路径（测试用）
+ */
+export function buildWorkerMcpServerConfig(
+  backendUrl: string,
+  auth: DaemonMcpAuth,
+  ctx: { sessionId?: string } = {},
+  serverModulePath?: string,
+): McpServerConfig {
+  const env: Record<string, string> = {
+    MCP_SERVER_BACKEND_URL: backendUrl.replace(/\/+$/, ''),
+    [MCP_TOOLSET_ENV]: 'mission_worker',
+  };
+  if (auth.token) {
+    env.MCP_SERVER_DAEMON_TOKEN = auth.token;
+  }
+  // 鉴权链同 buildDaemonMcpServerConfig：apiKey（X-API-Key）优先，token 回落。
+  if (auth.apiKey) {
+    env.MCP_SERVER_DAEMON_API_KEY = auth.apiKey;
+  }
+  if (ctx.sessionId) {
+    env[MCP_SESSION_ID_ENV] = ctx.sessionId;
   }
   return {
     command: 'node',

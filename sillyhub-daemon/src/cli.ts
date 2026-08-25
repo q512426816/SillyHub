@@ -87,9 +87,11 @@ import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sd
 import {
   buildDaemonMcpServerConfig,
   buildFileMcpServerConfig,
+  buildWorkerMcpServerConfig,
   DAEMON_MCP_SERVER_NAME,
   FILE_MCP_SERVER_NAME,
   mergeMcpConfigs,
+  WORKER_MCP_SERVER_NAME,
 } from './mcp-config.js';
 import type { McpServerConfigForDriver } from './interactive/driver.js';
 
@@ -763,8 +765,10 @@ export async function startAction(opts: StartOptions): Promise<number> {
       //     普通 Claude 会话不传 stage（常驻注入）；存量 external 主控
       //     stage='orchestrator'（orchestrator.py dispatch_to_daemon）照常注入。
       //   - provider=claude 且 stage='mission_worker'（backend execution.py
-      //     MISSION_WORKER_STAGE 常量派发）→ false：分身不注入（防 worker 递归
-      //     派发与 converge 干扰，审查 CC-12）；其它非空 stage 值同样不注入。
+      //     MISSION_WORKER_STAGE 常量派发）→ false：分身不进主控分支（防 worker
+      //     递归派发与 converge 干扰，审查 CC-12）——但改走下方 isWorkerSession
+      //     分支注入受限 server（task-06 2026-08-25-team-subsession-governance
+      //     / D-003@v1，谓词三态化：普通 / 主控 / 分身）；其它非空 stage 值不注入。
       //   - provider=codex → 一律 false（D-003@v1：团队需要 Claude 引擎，codex
       //     不消费 mcpServers，另立后续变更）。
       //
@@ -834,6 +838,44 @@ export async function startAction(opts: StartOptions): Promise<number> {
         // CreateSessionInput.model），driver 已在 _buildDriverOptions 单独透传 model
         // 到 SDK options.model，此处 MCP 配置不需重复（MCP server 不读 model）。
         // ctx 现读 cwd（sillyhub-file allowedRoot，task-06）；其余字段留未来扩展。
+        return Object.keys(result).length > 0 ? result : undefined;
+      },
+      // task-06（2026-08-25-team-subsession-governance / FR-03 / D-003@v1，design
+      // §5.C.1）：分身受限 MCP 注入——谓词三态化的第三态。stage=mission_worker 的
+      // 会话不进主控 5 工具 server（isMainAgentSession 对其返回 false，递归闸），
+      // 改注入仅含 worker_done 单工具的 sillyhub-worker server，让分身干完后能
+      // 显式上报完成信号（backend task-07 worker_done 端点，X-Session-Id 定位）。
+      //
+      // isWorkerSession：provider=claude 且 stage='mission_worker'（codex 不注入，
+      // 对齐主控谓词口径）。判定发生在 session-manager _resolveMainAgentMcp 分身
+      // 分支（优先于主控谓词），create / restore / reload 三路共用点生效。
+      //
+      // workerMcpConfigProvider：buildWorkerMcpServerConfig 组装受限条目（env
+      // MCP_TOOLSET=mission_worker + backend URL + apiKey 优先 token 回落，鉴权链
+      // 同 buildDaemonMcpServerConfig）。sessionId 不在此拼——session-manager 在
+      // provider 返回后按 ctx.sessionId 调 injectMcpSessionId 补写受限 server 名
+      // （MCP_SESSION_ID → hub-client X-Session-Id，backend 沿 parent 链定位 mission）。
+      isWorkerSession: (ctx) => {
+        return ctx.provider === 'claude' && (ctx.stage ?? '') === 'mission_worker';
+      },
+      workerMcpConfigProvider: () => {
+        const mcpApiKey = config.api_key ?? '';
+        const mcpToken = config.token ?? '';
+        const workerServer = buildWorkerMcpServerConfig(config.server_url, {
+          token: mcpToken,
+          apiKey: mcpApiKey || undefined,
+        });
+        const merged = mergeMcpConfigs([], {
+          mcpServers: { [WORKER_MCP_SERVER_NAME]: workerServer },
+        });
+        const result: Record<string, McpServerConfigForDriver> = {};
+        for (const [name, cfg] of Object.entries(merged.config.mcpServers)) {
+          result[name] = {
+            command: cfg.command,
+            ...(cfg.args ? { args: cfg.args } : {}),
+            ...(cfg.env ? { env: cfg.env } : {}),
+          };
+        }
         return Object.keys(result).length > 0 ? result : undefined;
       },
       // task-08（FR-05 / D-004@v1）：reloadWithProvider 构造新 env 的本机凭证管理器。

@@ -28,6 +28,17 @@ URL /api/missions/status，对齐 hub-client ``_missionActionPath`` 缺参形态
 有活跃 → 权限复核后组装 ``MissionStatusResponse``（DTO 在 agent/schema.py，
 scope 实时探测、status 派生、workers 与 _list_workers_core 同源）。
 
+task-07（2026-08-25-team-subsession-governance / FR-04 / D-002@v1 / design
+§5.C.2）：新增分身显式完成信号端点 ``POST .../worker_done``（四路由族同
+report_progress 形态）——会话定位 X-Session-Id → 子会话行 →
+``resolve_mission_for_session`` 沿 parent 链爬根（活跃 miss 时含终态二次解析
+区分 409/404）；置位 ``worker_done_at``（可重复置位取最新）；summary 落
+AgentArtifact（kind=summary）挂首 run（mission_id+role 双标记最早 run，
+``_worker_artifacts`` / ``get_worker_result`` / Finalizer 合并链零新查询路径
+可见）；全分身完成迁移（is_worker_complete 单源判定）时先 DEL
+``_WORKERS_DONE_NOTIFY_KEY`` 再 SETNX 唤醒主控（重复完成周期可再次唤醒）；
+迟到（mission 终态）409 零写入。
+
 权限（task-09 P0 鉴权 gap 已闭合）：统一 ``WORKSPACE_WRITE``，经
 ``require_permission`` → ``get_current_principal``（auth_deps.py:154）双路径鉴权——
 浏览器/直调走 JWT（``Authorization: Bearer``），daemon MCP server 走长期 API Key
@@ -52,7 +63,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth_deps import require_permission, require_permission_any
 from app.core.db import get_session
 from app.core.logging import get_logger
-from app.modules.agent.execution import MissionExecutionService, mark_worker_run_failed
+from app.modules.agent.execution import (
+    MISSION_WORKER_STAGE,
+    mark_worker_run_failed,
+    prepare_worker_worktree,
+    worker_tool_config,
+)
 from app.modules.agent.model import (
     ACTIVE_RUN_STATUSES,
     AgentArtifact,
@@ -60,6 +76,8 @@ from app.modules.agent.model import (
     AgentRun,
     AgentRunLog,
     AgentSession,
+    mission_worker_sessions,
+    resolve_mission_for_session,
 )
 from app.modules.agent.schema import (
     MissionStatusResponse,
@@ -70,7 +88,6 @@ from app.modules.agent.service import _build_agent_profile_snapshot
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.daemon.host_fs import new_host_fs_delegate
-from app.modules.daemon.host_fs.delegate import HostFsDelegateUnavailable
 
 log = get_logger(__name__)
 
@@ -97,11 +114,6 @@ _SESSION_ID_HEADER = "x-session-id"
 # （pending/running/pending_approval——审批中的 run 仍是当前活跃轮，可被回填/
 # 被 converge 定位；interrupting 为前端展示态，backend 不落库，已剔除）。
 _ACTIVE_RUN_STATUSES = ACTIVE_RUN_STATUSES
-
-# task-06（D-010）：converge busy 判定的分身 run 终态集合——与 derive_status 的
-# _DONE|_FAILED（mission.py）及 finalizer cleanup_mission 的终态过滤同口径
-# （ACTIVE_RUN_STATUSES 词表内均视为未终态；interrupting 为前端展示态不落库）。
-_TERMINAL_RUN_STATUSES = ("completed", "failed", "killed")
 
 # 懒建默认预算上限（design §5 Phase 1 / §10 R-02：防 agent 未被要求时自主派团队
 # 失控）。命名对齐 config.py mission_* 家族；本卡 allowed_paths 不含 config.py，
@@ -239,6 +251,35 @@ class ProgressRequest(BaseModel):
 class ProgressResponse(BaseModel):
     run_id: uuid.UUID
     log_id: uuid.UUID
+
+
+class WorkerDoneRequest(BaseModel):
+    """分身显式完成信号请求体（task-07 / FR-04 / D-002@v1，design §5.C.2）。
+
+    会话定位同 report_progress 模式：``X-Session-Id``（header 优先，路径
+    session_id 兜底）承载分身子会话身份；``workspace_id`` / ``mission_id``
+    显式参数仅作越权校验锚（daemon 受限 server 缺参调用形态，对齐
+    task-10 五工具可选化先例）。
+    """
+
+    summary: str
+    workspace_id: uuid.UUID | None = None
+    mission_id: uuid.UUID | None = None
+
+
+class WorkerDoneResponse(BaseModel):
+    """worker_done 响应契约：置位落点 + 全完成迁移结果。"""
+
+    mission_id: uuid.UUID
+    session_id: uuid.UUID
+    # 首 run（mission_id+role 双标记最早 run）——summary artifact 挂载点
+    run_id: uuid.UUID
+    artifact_id: uuid.UUID
+    worker_done_at: datetime
+    # 置位后全分身完成判定（is_worker_complete 单源，design §5.C.3）
+    all_workers_done: bool
+    # 本次调用是否触发主控唤醒（false→true 迁移 / 重开工重复完成周期）
+    orchestrator_notified: bool
 
 
 # ---------------------------------------------------------------------------
@@ -727,17 +768,20 @@ async def dispatch_worker(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
 ) -> WorkerRunResponse:
-    """主 agent 动态派一个 worker run（D-002@v2）。
+    """主 agent 动态派一个 worker run（D-002@v2；task-05 2026-08-25 起为子会话形态）。
 
-    建 AgentRun(role 从 payload 或 preset 对应条目, status=pending) + 调
-    ``MissionExecutionService.dispatch_worker`` 派 daemon lease。daemon 离线 /
-    未绑定时 lease 失败但 run 仍建（pending + error_code=no_online_daemon），
-    主 agent 可读 worker 状态决定重派。
+    task-05（2026-08-25-team-subsession-governance / FR-02 / design §5.B）：执行段
+    整体换子会话三元组——AgentSession(parent=主控会话, owner=mission.created_by) +
+    interactive lease(metadata.stage=mission_worker, metadata.role) + 首 run
+    (mission_id+role 双标记)，前置治理段逐项保留（scope / BE-P0-2 / 档案 / 治理门 /
+    在线预检）；worktree 失败 / 派发失败按 mark_worker_run_failed 同款收敛（首 run
+    failed + error_code，子会话收口终态），不崩 mission 主 agent 可补派。
 
     task-08（2026-08-19-cross-workspace-team-mission / §7.2 链路A）：
     - 新增 target_workspace_id 参数（payload.target_workspace_id）
     - 服务端校验 target ∈ scope（含 anchor），越界抛 400 mission_target_out_of_scope
-    - 有效 target 传 exec_svc.dispatch_worker 的 target_workspace_id 形参
+    - 有效 target 作为分身落地工作区（worktree / runtime 钉定 / AgentRunWorkspace
+      双关联全按 target 路由）
 
     task-05（2026-08-22-team-session-unify）：mission 解析接入 X-Session-Id 会话
     定位（design §5 Phase 1 / §7）——header 命中会话活跃 mission 时显式路径参数
@@ -759,6 +803,39 @@ async def dispatch_worker(
     )
 
 
+async def _fail_worker_subsession(
+    session: AsyncSession,
+    sub_session: AgentSession,
+    run: AgentRun,
+    *,
+    error_code: str,
+    message: str,
+    run_already_failed: bool = False,
+) -> None:
+    """子会话派发失败统一收敛终态（task-05 / design §5.B 失败语义）。
+
+    首 run 复用 ``mark_worker_run_failed`` 同款口径（failed + error_code +
+    finished_at + output_redacted——``run_already_failed=True`` 表示 helper 已标，
+    如 worktree 失败路径）；子会话收口 failed+ended_at（不残留活跃态，形态对齐
+    ``session/service._converge_failed_dispatch``）。调用点均在 lease 创建前/无
+    lease 在途，无 lease 收口需求。不抛——主 agent 从
+    WorkerRunResponse.error_code 读原因自主决策补派/收敛，不崩 mission。
+    """
+    from app.modules.daemon.session_events import publish_sessions_changed
+
+    if not run_already_failed:
+        await mark_worker_run_failed(session, run, error_code=error_code, message=message)
+    now = datetime.now(UTC)
+    sub_session.status = "failed"
+    sub_session.ended_at = now
+    sub_session.last_active_at = now
+    session.add(sub_session)
+    await session.commit()
+    await session.refresh(run)
+    # publish 内部静默容错（redis 不可达不阻断失败收敛）
+    await publish_sessions_changed("status_changed", sub_session.id, sub_session.user_id)
+
+
 async def _dispatch_worker_core(
     session: AsyncSession,
     request: Request,
@@ -772,6 +849,28 @@ async def _dispatch_worker_core(
 
     ``anchor_workspace_id``：工作区派发锚——显式路由为路径 workspace_id（已过
     ``_get_mission`` anchor∪scope 校验），会话路由为 mission.workspace_id。
+
+    task-05（2026-08-25-team-subsession-governance / FR-02 / design §5.B）：执行段
+    从「建 batch AgentRun + MissionExecutionService.dispatch_worker」整体换子会话
+    三元组——前置治理段逐项保留（scope 校验 / BE-P0-2 越权 / 档案校验 / 治理门 /
+    resolve_representative_binding 在线预检），执行段：
+
+    1. runtime 解析（D-004@v1）：anchor 本机自有 runtime 在线优先，无自有 →
+       预检解析的代表 binding 以钉定模式传入（``pinned_skip_owner_check=True``，
+       task-03 原语——代表机器属主常非 mission.created_by）；
+    2. 子会话 + 首 run 落行（flush）：AgentSession(parent=mission.session_id,
+       owner=mission.created_by) + 首 run(mission_id+role 双标记) + AgentRunWorkspace
+       anchor∪target 双关联 + 首 prompt 的 user_input 日志行；
+    3. ``prepare_worker_worktree``（task-02 共享 helper）三形态定 worker cwd——
+       失败已由 helper 统一标 failed，此处收口子会话终态后返回失败响应；
+    4. ``placement.prepare_interactive_dispatch``（flush-only 原语，task-03 扩展）
+       建 interactive lease——stage=MISSION_WORKER_STAGE、worktree 副本路径作
+       lease metadata cwd（claim payload root_path 源，创建时即定无补丁竞态）；
+       事务内 ``_merge_lease_metadata`` 补 metadata.role + tool_config
+       （read_only 物制口径与 batch 路径同源），回填三元组绑定字段后单 commit；
+    5. 唤醒 daemon（``notify_interactive_dispatch``）——投递不可达仅告警不收敛
+       （lease pending 等 daemon 轮询自领取，与 batch 路径同口径）；档案键
+       best-effort 补写。
     """
     role = payload.role or _DEFAULT_WORKER_ROLE
 
@@ -872,73 +971,290 @@ async def _dispatch_worker_core(
             "工作区范围。",
         )
 
-    run = AgentRun(
+    # ── task-05（2026-08-25-team-subsession-governance / FR-02 / design §5.B）──
+    # 执行段：子会话三元组派发（不再建 batch AgentRun / 不再调
+    # MissionExecutionService.dispatch_worker / placement.dispatch_to_daemon；
+    # 存量 batch 路径保留不删，bootstrap 等仍用）。
+    from app.modules.agent.mission_context import build_worker_briefing
+    from app.modules.agent.placement import NoOnlineDaemonError, RunPlacementService
+    from app.modules.workspace.model import AgentRunWorkspace, Workspace
+    from app.modules.workspace.service import resolve_root_path_for_daemon
+
+    effective_target = dispatch_target
+    # D-004@v1：分身归属 = mission 创建者（追问/权限卡片/门户/审计 owner-only 机制
+    # 全部因归属正确而自然通）；存量 mission（bootstrap/external）created_by 可空，
+    # 回落派发主体保底（行 NOT NULL）。
+    owner_id = mission.created_by or user.id
+
+    ws = await session.get(Workspace, effective_target)
+
+    # 1) runtime 解析（D-004@v1）：anchor 本机自有在线优先（用户级 first-online，
+    # provider 按 target workspace default_agent 匹配 + fallback）→ 无自有用上方
+    # 预检解析的代表 binding 钉定。两条路都经 prepare_interactive_dispatch 的
+    # 钉定复查（在线不可满足抛 NoOnlineDaemonError 绝不静默换机，Grill C-01）。
+    placement_svc = RunPlacementService(session)
+    target_provider = (ws.default_agent if ws is not None else None) or "claude"
+
+    def _runtime_uuid(raw: object) -> uuid.UUID:
+        return raw if isinstance(raw, uuid.UUID) else uuid.UUID(str(raw))
+
+    own_rt = await placement_svc._get_online_runtime(owner_id, provider=target_provider)
+    if own_rt is not None:
+        pinned_runtime_id = _runtime_uuid(own_rt["id"])
+        pinned_skip_owner_check = False  # 自有机器：属主校验天然通过
+        lease_provider = own_rt.get("provider") or target_provider
+    else:
+        # 代表钉定：resolve_representative_binding 已保证在线；属主跳过由
+        # pinned_skip_owner_check 表达（跨 ws 代表机器属主常非 mission.created_by）。
+        pinned_runtime_id = _runtime_uuid(binding["id"])
+        pinned_skip_owner_check = True
+        lease_provider = binding.get("provider") or target_provider
+
+    # delegate 构造前置（构造失败 fail-loud 503，零半成品行）。
+    host_fs_delegate = new_host_fs_delegate(session)
+
+    # 2) 子会话 + 首 run 落行（flush；与 lease 同事务收口，见 4) 的唯一 commit）。
+    now = datetime.now(UTC)
+    sub_session = AgentSession(
+        user_id=owner_id,
+        provider=lease_provider,
+        status="pending",
+        config={"manual_approval": False},
+        turn_count=0,
+        created_at=now,
+        change_id=mission.change_id,
+        workspace_id=effective_target,
+        # task-04 / FR-02 / D-001@v1：会话树挂载——parent=主控会话
+        # （mission.session_id；external mission 为 NULL 走存量回落）。
+        parent_session_id=mission.session_id,
+        agent_profile_id=(profile.id if profile is not None else None),
+    )
+    session.add(sub_session)
+    await session.flush()
+
+    first_run = AgentRun(
         mission_id=mission.id,
         change_id=mission.change_id,
         agent_type=payload.agent_type or "claude_code",
-        provider=None,
-        model=payload.model,
+        provider=lease_provider,
+        model=payload.model or (ws.default_model if ws is not None else None),
         status="pending",
+        # 子会话形态首 run 与 create_session 首 turn 同款（interactive 驱动）。
+        spec_strategy="interactive",
         role=role,
         objective=payload.objective,
-        # task-09：read_only 落 run 记录（FR-06 / D-005@v2）。列在 task-01 已建
-        # （agent_runs.read_only nullable bool），execution.py 已按 run.read_only
-        # 流转 worker_tool_config，此处补 dispatch 落列这一缺口。
         read_only=payload.read_only,
-        # task-10：profile 绑定 + 冻结快照（含 version，复用 service 既有构造）。
+        # task-04（D-001@v2）：显式 target 落列供 finalizer merge/cleanup 分组。
+        target_workspace_id=explicit_target,
         agent_profile_id=(profile.id if profile is not None else None),
         agent_profile_snapshot=(
             _build_agent_profile_snapshot(profile) if profile is not None else None
         ),
-        # 分身 run 回填 session 锚点：X-Session-Id header 存在时写入，使
-        # get_agent_session_logs 能聚合分身日志；外部 dispatch 路径无 header → NULL
-        # 零回归。
-        agent_session_id=_request_session_id(request, None),
+        # task-04 / FR-02 / design §5.A：首 run 双标记（mission_id + 分身 role）。
+        agent_session_id=sub_session.id,
+        user_id=owner_id,
     )
-    session.add(run)
-    await session.commit()
-    await session.refresh(run)
+    session.add(first_run)
+    await session.flush()
 
-    exec_svc = MissionExecutionService(session, host_fs_delegate=new_host_fs_delegate(session))
+    # AgentRunWorkspace 关联行（ql-20260825-003 口径，对齐 execution.py 既有写法）：
+    # anchor 与显式 target 都关联——前端 per-run 端点可能以任一 workspace 为路径
+    # 前缀（_require_run_workspace 按 AgentRunWorkspace 授权）。
+    for _link_ws_id in {anchor_workspace_id, effective_target}:
+        session.add(AgentRunWorkspace(agent_run_id=first_run.id, workspace_id=_link_ws_id))
+    await session.commit()
+
+    # 3) worktree（task-02 共享 helper 三形态：git 探测 / direct 旁路 / worktree_add）。
+    # 失败语义在 helper 内统一收敛（mark_worker_run_failed 标 failed + ok=False），
+    # 此处收口子会话终态后直接返回失败响应，不进 lease 段（design §9 不崩 mission）。
+    root_path = (
+        resolve_root_path_for_daemon(ws.root_path) if ws is not None and ws.root_path else None
+    )
+    lease_branch = payload.branch
+    if lease_branch is None:
+        lease_branch = ws.default_branch if ws is not None else None
+    if payload.worktree_path:
+        # 路径A（caller worktree，D-008@v1）：caller 路径直接作子会话 cwd，
+        # 跳过自建（helper 内部按 worktree_path 短路），不写 run.worktree_branch。
+        root_path = payload.worktree_path
+    wt_outcome = await prepare_worker_worktree(
+        session,
+        first_run,
+        ws,
+        host_fs_delegate=host_fs_delegate,
+        root_path=root_path,
+        lease_branch=lease_branch,
+        worktree_path=payload.worktree_path,
+    )
+    if not wt_outcome.ok:
+        log.info(
+            "mcp_dispatch_worker_worktree_failed",
+            mission_id=str(mission.id),
+            run_id=str(first_run.id),
+            git_mode=wt_outcome.git_mode,
+        )
+        await _fail_worker_subsession(
+            session,
+            sub_session,
+            first_run,
+            run_already_failed=True,
+            error_code="worktree_create_failed",
+            message="per-worker worktree 创建失败",
+        )
+        return WorkerRunResponse.model_validate(first_run)
+
+    # 首 prompt：task-04 分身任务简报（objective + worktree/direct 约束变体 +
+    # worker_done 用法；git 探测 unknown 时省略模式段）；caller 显式覆写优先
+    # （路径A caller 注入约束，D-001 方案A）。
+    briefing_mode = wt_outcome.git_mode if wt_outcome.git_mode in ("git", "direct") else None
+    prompt = (
+        payload.worker_prompt
+        if payload.worker_prompt is not None
+        else build_worker_briefing(
+            objective=payload.objective,
+            role=role,
+            mode=briefing_mode,
+        )
+    )
+
+    # 4) interactive lease（task-03 扩展形参：stage / pinned 钉定）。flush-only
+    # 原语——lease 与上方行同事务，回填绑定字段后单 commit 收口三元组（无孤儿）。
+    # worktree 副本路径经 cwd 参数在 lease 创建时即落 metadata（claim payload
+    # root_path 源，context.build_claim_payload interactive 分支 cwd 优先），
+    # 无 post-hoc 补丁竞态。
     try:
-        await exec_svc.dispatch_worker(
-            run,
-            workspace_id=anchor_workspace_id,
-            user_id=user.id,
-            read_only=payload.read_only,
-            # task-05 路径A 透传（design §7.3）：caller worktree 三参，默认 None
-            # → execution 走原 team 模式自建 worktree 逻辑（§9 零回归）。字段名 branch
-            # 对齐链路B + 跨仓契约（D-009）。
-            worktree_path=payload.worktree_path,
-            branch=payload.branch,
-            worker_prompt=payload.worker_prompt,
-            # task-08：跨工作区派发目标工作区（design §7.2 链路A）。
-            # 单 workspace 模式传 None，保持 target_workspace_id 列 NULL 零回归。
-            target_workspace_id=explicit_target,
+        dispatch = await placement_svc.prepare_interactive_dispatch(
+            agent_session_id=sub_session.id,
+            agent_run_id=first_run.id,
+            user_id=owner_id,
+            provider=lease_provider,
+            prompt=prompt,
+            model=first_run.model,
+            workspace_id=effective_target,
+            cwd=wt_outcome.root_path,
+            pinned_runtime_id=pinned_runtime_id,
+            pinned_skip_owner_check=pinned_skip_owner_check,
+            stage=MISSION_WORKER_STAGE,
         )
-    except HostFsDelegateUnavailable:
-        # delegate wiring 错误（workspace 无 bound daemon）fail-loud 503
-        # （ql-20260713-002 契约，delegate.py:734 不 degrade）——不吞，主 agent 收到
-        # 503 知道是 binding 问题，区别于 worktree_create_failed/no_online_daemon
-        # （execution 内部已收敛为 run failed，可重试/收敛）。
-        raise
+    except NoOnlineDaemonError as exc:
+        # 钉定复查竞态（预检通过后 runtime 掉线）：按失败语义收敛，不崩 mission。
+        log.warning(
+            "mcp_dispatch_worker_no_online_runtime",
+            mission_id=str(mission.id),
+            pinned_runtime_id=str(pinned_runtime_id),
+            error=str(exc),
+        )
+        await _fail_worker_subsession(
+            session,
+            sub_session,
+            first_run,
+            error_code="no_online_daemon",
+            message=str(exc),
+        )
+        return WorkerRunResponse.model_validate(first_run)
     except Exception as exc:
-        # 诊断 36b9b475：execution 内部已统一收敛 worktree/daemon 失败（failed +
-        # error_code + finished_at），不再冒泡 NoOnlineDaemonError。此处仅兜底未预期
-        # 异常，同样写 error_code 杜绝静默 failed（原 NoOnlineDaemon 分支设 pending
-        # 语义错——pending 让 derive_status 永远 running、mission 永不收敛）。
-        await mark_worker_run_failed(
-            session, run, error_code="dispatch_exception", message=str(exc)
-        )
+        # 兜底未预期异常（诊断 36b9b475 口径：杜绝静默 failed——首 run 带
+        # error_code 终态，主 agent 可读原因决策补派，mission 不崩）。
+        await session.rollback()
         log.warning(
             "mcp_dispatch_worker_exception",
             mission_id=str(mission.id),
-            run_id=str(run.id),
+            run_id=str(first_run.id),
             error=str(exc),
         )
+        await _fail_worker_subsession(
+            session,
+            sub_session,
+            first_run,
+            error_code="dispatch_exception",
+            message=str(exc),
+        )
+        return WorkerRunResponse.model_validate(first_run)
+
+    # 事务内补 lease metadata（_merge_lease_metadata 不 commit，随三元组唯一
+    # commit 原子落库）：
+    # - role：stage 固定 MISSION_WORKER_STAGE 后 role 语义的落点（task-09 口径）；
+    # - tool_config：read_only 物制（claim payload 透传，2026-08-06 verify 修复口径
+    #   ——interactive lease 缺 tool_config 时 read_only 分身 Write/Bash 全放行），
+    #   与 batch 路径 worker_tool_config 同源。
+    from app.modules.daemon.session.service import _merge_lease_metadata
+
+    _lease_meta_updates: dict = {
+        "role": role,
+        "tool_config": worker_tool_config(payload.read_only),
+    }
+    await _merge_lease_metadata(session, dispatch.lease_id, _lease_meta_updates)
+
+    # 回填三元组绑定字段 + 激活（对齐 create_session 收口形态）。
+    sub_session.runtime_id = dispatch.runtime_id
+    sub_session.lease_id = dispatch.lease_id
+    sub_session.status = "active"
+    sub_session.turn_count = 1
+    sub_session.last_active_at = now
+    if wt_outcome.root_path:
+        sub_session.cwd = wt_outcome.root_path
+    session.add(sub_session)
+    first_run.lease_id = dispatch.lease_id
+    session.add(first_run)
+    # 首 prompt 落一条 user_input 日志行（历史回看与 create_session 首 turn 同源）。
+    session.add(
+        AgentRunLog(
+            run_id=first_run.id,
+            channel="user_input",
+            content_redacted=prompt[:5000],
+            timestamp=now,
+        )
+    )
     await session.commit()
-    await session.refresh(run)
-    return WorkerRunResponse.model_validate(run)
+    await session.refresh(first_run)
+    await session.refresh(sub_session)
+
+    # 5) 唤醒 daemon + 列表信号。唤醒不可达不收敛——worker 派发对投递失败
+    # 容忍（与 batch 路径同口径：lease pending 等 daemon 轮询/重连自领取，
+    # runtime 在线判定已由预检+钉定复查把守；区别于用户会话 create_session 的
+    # DaemonRuntimeOffline 收敛链——那是人对反馈即时性的要求）。
+    from app.modules.daemon.session_events import publish_sessions_changed
+
+    await publish_sessions_changed("created", sub_session.id, sub_session.user_id)
+    await publish_sessions_changed("status_changed", sub_session.id, sub_session.user_id)
+
+    delivered = await placement_svc.notify_interactive_dispatch(dispatch)
+    if not delivered:
+        log.warning(
+            "mission_worker_subsession_wakeup_undelivered",
+            mission_id=str(mission.id),
+            run_id=str(first_run.id),
+            lease_id=str(dispatch.lease_id),
+            runtime_id=str(dispatch.runtime_id),
+        )
+
+    # 档案键 best-effort 补写（lease 在途，失败仅告警不收敛——与 batch 路径
+    # _apply_worker_profile_to_lease 的兜底风格一致，不崩 mission）。
+    if profile is not None:
+        try:
+            from app.modules.agent.service import AgentService
+
+            await AgentService(session)._apply_profile_to_lease(dispatch.lease_id, profile)
+        except Exception as exc:
+            log.warning(
+                "mcp_dispatch_worker_profile_apply_failed",
+                mission_id=str(mission.id),
+                run_id=str(first_run.id),
+                lease_id=str(dispatch.lease_id),
+                error=str(exc),
+            )
+
+    log.info(
+        "mission_worker_subsession_dispatched",
+        mission_id=str(mission.id),
+        run_id=str(first_run.id),
+        sub_session_id=str(sub_session.id),
+        lease_id=str(dispatch.lease_id),
+        runtime_id=str(dispatch.runtime_id),
+        role=role,
+        read_only=payload.read_only,
+    )
+    return WorkerRunResponse.model_validate(first_run)
 
 
 @router.get(
@@ -995,10 +1311,11 @@ async def list_workers(
     session: SessionDep,
     user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
 ) -> WorkerListResponse:
-    """列 mission 下所有 worker runs 状态（含主 agent run）。
+    """列 mission 分身状态（双形态：子会话行 / 存量 batch run 行，主控轮不混入）。
 
     task-05：接入 X-Session-Id 会话定位（header 命中活跃 mission 时显式参数仅作
-    越权校验锚；header 缺席零回归）。
+    越权校验锚；header 缺席零回归）。FR-09 补漏：行化口径见
+    ``_list_workers_core``（与 ``_team_mission_summary`` workers 同源语义）。
     """
     mission = await _resolve_session_mission(
         session, request, user, workspace_id=workspace_id, mission_id=mission_id
@@ -1007,13 +1324,92 @@ async def list_workers(
 
 
 async def _list_workers_core(session: AsyncSession, mission: AgentMission) -> WorkerListResponse:
-    """list_workers 共用主体（显式路由 / 会话路由同构，task-05 抽取）。"""
+    """list_workers 共用主体（显式路由 / 会话路由同构，task-05 抽取）。
+
+    FR-09 验收补漏（2026-08-25-team-subsession-governance / design §1 痛点 1 /
+    §5.C.5 / §5.E）：workers 数据源子会话行化，与 ``daemon/router.
+    _team_mission_summary``（task-13）同口径双形态——
+
+    - 新形态子会话行：``mission_worker_sessions``（task-01 单一真相源）一层
+      枚举，每分身一行，行取首 run 双标记锚（mission_id+role 的最早 run）：
+      ``id`` = 首 run id（供 ``get_worker_result`` 连续消费，对齐
+      ``TeamMissionWorkerSummary.run_id`` 口径）、role/objective 取首 run、
+      status 按 ``is_worker_complete``（task-08 单一真相源）映射三值——
+      worker_done 且无活跃 turn → completed > 会话终态 failed → failed >
+      其余（idle 未 done / 追问重开工中）→ running（idle 未 done 分身不再被
+      首 run 终态遮蔽）；同根上一场已收敛 mission 的子会话（无本场首 run）
+      不是本场分身，不进行；
+    - 存量回落 batch run 行：mission run 剔除主控轮（``role !=
+      'orchestrator'``，Python 比较 None != 'orchestrator' 为 True，NULL role
+      分身天然保留——主控轮不混入，design §1 痛点 1 修复）与子会话 run
+      （首 run 防同分身双计），行内容与既有形态一致（run 原始 status 透传）；
+      追问轮次 run 无 mission_id 天然不进。
+
+    ``WorkerListItem`` 现无 sub_session_id/first_run_id 字段（schema.py 单源，
+    本卡不动）——新形态行 ``id`` 即首 run id 承担同语义。mission.py 延迟
+    import（与 _converge_core 同款，避免循环 import）。
+    """
+    from app.modules.agent.mission import is_worker_complete
+
     stmt = select(AgentRun).where(AgentRun.mission_id == mission.id).order_by(AgentRun.created_at)
     runs = list((await session.execute(stmt)).scalars().all())
-    return WorkerListResponse(
-        mission_id=mission.id,
-        workers=[WorkerListItem.model_validate(r) for r in runs],
+
+    worker_sessions = await mission_worker_sessions(session, mission.id)
+    sub_session_ids = {s.id for s in worker_sessions}
+    first_run_by_session: dict[uuid.UUID, AgentRun] = {}
+    if sub_session_ids:
+        first_run_rows = (
+            (
+                await session.execute(
+                    select(AgentRun)
+                    .where(
+                        AgentRun.mission_id == mission.id,
+                        AgentRun.role.is_not(None),
+                        AgentRun.agent_session_id.in_(sub_session_ids),
+                    )
+                    .order_by(AgentRun.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for run in first_run_rows:
+            if run.agent_session_id is not None:
+                first_run_by_session.setdefault(run.agent_session_id, run)
+
+    workers: list[WorkerListItem] = []
+    for worker_session in worker_sessions:
+        first_run = first_run_by_session.get(worker_session.id)
+        if first_run is None:
+            continue
+        # status 三值映射对齐 mission_derive_status 虚拟 run 优先级（§5.C.4，
+        # 与 _team_mission_summary 逐分支同构）：完成判定经 is_worker_complete
+        # 单一真相源（§5.C.3，禁第三套口径）。
+        if worker_session.worker_done_at is not None and await is_worker_complete(
+            session, worker_session
+        ):
+            row_status = "completed"
+        elif worker_session.status == "failed":
+            row_status = "failed"
+        else:
+            row_status = "running"
+        workers.append(
+            WorkerListItem(
+                id=first_run.id,
+                role=first_run.role,
+                status=row_status,
+                objective=first_run.objective,
+                total_cost_usd=first_run.total_cost_usd,
+            )
+        )
+
+    # 存量回落：主控轮 + 子会话 run（含首 run）剔除后的 batch 分身 run 行。
+    workers.extend(
+        WorkerListItem.model_validate(r)
+        for r in runs
+        if r.role != "orchestrator" and r.agent_session_id not in sub_session_ids
     )
+    return WorkerListResponse(mission_id=mission.id, workers=workers)
 
 
 @router.post(
@@ -1031,7 +1427,8 @@ async def converge_mission(
 
     状态机（per mission，无新列——计数存 ``AgentMission.constraints`` JSON）：
 
-    0. **busy 前置**：分身 run（``role!='orchestrator'`` 含 NULL）未全终态 → 返
+    0. **busy 前置**：分身未全完成（task-09 判据 = ``mission_derive_status(
+       workers_only=True)`` 派生 running；分身 idle 未 done 不算全完成）→ 返
        ``status=busy`` + message 引导文案，零状态变更（不置位/不 finalize）。
     1. 分身全终态 → 以最新 orchestrator run 为锚调 ``converge_mission_for_completed_run``
        （``converge_explicit=True``：分身维度判据 + converged_at 原子抢占置位，
@@ -1067,16 +1464,17 @@ async def _converge_core(session: AsyncSession, mission: AgentMission) -> Conver
 
     判定序（design §5 Phase 1 / §7.5 converge 行）：
 
-    1. **busy 前置判定**：分身 run（``role!='orchestrator'``，含 NULL role 守卫——
-       SQL 三值逻辑下 ``!=`` 漏 NULL 行，统一走 ``non_orchestrator_runs``）未全
-       终态 → 返 ``status=busy`` + 引导文案（message 携未完成计数）；mission
-       状态不变、不置 ``converged_at``、不触发 finalize/merge（主 agent 等待后
-       重试）。
-    2. 分身全终态 → 以**最新 orchestrator run** 为锚调 ``converge_mission_for_completed_run``
-       （``converge_explicit=True``：derive 判据只看分身 run + ``converged_at``
-       原子抢占 UPDATE...WHERE IS NULL——**不依赖主控 run 状态**，会话 mission
-       主控轮当轮 running 也能收敛；execute 冲突未解决时该入口回滚置位，保住
-       会话活跃 mission 重入）。
+    1. **busy 前置判定**（task-09 / FR-05）：``mission_derive_status(
+       workers_only=True)`` 派生 running（分身子会话经虚拟 run 映射——idle 未
+       done / 追问重开工中均为 running，不被首 run 终态遮蔽；主控轮剔除，D-010
+       语义保留）→ 返 ``status=busy`` + 引导文案（message 携未完成计数，计数经
+       ``is_worker_complete`` 按对象形态分发）；mission 状态不变、不置
+       ``converged_at``、不触发 finalize/merge（主 agent 等待后重试）。
+    2. 分身全完成 → 以**最新 orchestrator run** 为锚调 ``converge_mission_for_completed_run``
+       （``converge_explicit=True``：task-09 起内部判据同源 mission_derive_status
+       (workers_only=True) + ``converged_at`` 原子抢占 UPDATE...WHERE IS NULL——
+       **不依赖主控 run 状态**，会话 mission 主控轮当轮 running 也能收敛；execute
+       冲突未解决时该入口回滚置位，保住会话活跃 mission 重入）。
     3. merge 结果（``_finalize_merge_for_mission``）有 pending_conflicts → 可重入
        conflict 状态机（attempt 计数 / R-07 超限 → ``needs_manual``，语义保留）；
        全 merged → cleanup + ``status=converged``。
@@ -1085,17 +1483,35 @@ async def _converge_core(session: AsyncSession, mission: AgentMission) -> Conver
     docstring）；cancelled/planning 等防御性派生值原样透传（busy 已前置挡 running）。
     """
     from app.modules.agent.control import MissionControlService
+    from app.modules.agent.mission import is_worker_complete, mission_derive_status
 
-    # --- 1. busy 前置判定（D-010：分身未全终态 → 引导等待，零状态变更）---
-    ctrl = MissionControlService(session)
-    worker_runs = await ctrl.non_orchestrator_runs(mission.id)
-    active_workers = [r for r in worker_runs if r.status not in _TERMINAL_RUN_STATUSES]
-    if active_workers:
+    # --- 1. busy 前置判定（task-09 / FR-05：判据换 task-08 单一真相源）---
+    # mission_derive_status(workers_only=True)：分身子会话映射虚拟 run（idle 未
+    # done / 追问重开工中 → running，不被首 run 终态遮蔽）+ 存量 batch run 原样、
+    # 主控轮剔除（D-010 语义保留）——非全终态派生 running → busy（零状态变更）；
+    # planning（尚无分身）/ cancelled 原样透传，不进 busy 档。未完成计数文案口径
+    # 保留：经 is_worker_complete 按对象形态分发（子会话 AgentSession / 存量
+    # AgentRun）逐一判定，本处不再自持终态词表（design §5.C.5 / taskcard 铁律）。
+    derive_value = await mission_derive_status(session, mission.id, workers_only=True)
+    if derive_value == "running":
+        ctrl = MissionControlService(session)
+        worker_sessions = await mission_worker_sessions(session, mission.id)
+        worker_session_ids = {s.id for s in worker_sessions}
+        # 子会话首 run（agent_session_id ∈ 分身子会话）从 run 维度剔除，同分身
+        # run/会话不双计（对齐 mission_derive_status 虚拟映射的同款剔除口径）。
+        legacy_runs = [
+            r
+            for r in await ctrl.non_orchestrator_runs(mission.id)
+            if r.agent_session_id not in worker_session_ids
+        ]
+        workers: list[AgentSession | AgentRun] = [*worker_sessions, *legacy_runs]
+        active_workers = [w for w in workers if not await is_worker_complete(session, w)]
+        total_workers = len(workers)
         log.info(
             "converge_mission_busy",
             mission_id=str(mission.id),
             active_workers=len(active_workers),
-            total_workers=len(worker_runs),
+            total_workers=total_workers,
         )
         return ConvergeResponse(
             mission_id=mission.id,
@@ -1106,13 +1522,13 @@ async def _converge_core(session: AsyncSession, mission: AgentMission) -> Conver
             conflicts=[],
             attempt=_read_conflict_attempts(mission),
             message=(
-                f"还有 {len(active_workers)} 个分身任务未完成（共 {len(worker_runs)} 个），"
+                f"还有 {len(active_workers)} 个分身任务未完成（共 {total_workers} 个），"
                 "尚不能收敛：请等待全部分身到达终态后重试 converge，"
                 "或先用 list_workers 查看各分身进度。"
             ),
         )
 
-    # --- 2. 分身全终态 → 收敛（锚点=最新 orchestrator run，不依赖主控 run 状态）---
+    # --- 2. 分身全完成 → 收敛（锚点=最新 orchestrator run，不依赖主控 run 状态）---
     main_run = await _get_main_run(session, mission.id)
 
     from app.modules.agent.delegation import GLMConfig
@@ -1122,7 +1538,7 @@ async def _converge_core(session: AsyncSession, mission: AgentMission) -> Conver
     result_status = await converge_mission_for_completed_run(
         session, main_run.id, cfg, converge_explicit=True
     )
-    # done/degraded/failed 均为分身全终态（failed=无一 completed 的全终态），
+    # done/degraded/failed 均为分身全完成（failed=无一 completed 的全完成），
     # 置位与合并已由 converge_explicit 入口完成；running/planning/cancelled 未置位。
     base_converged = result_status in ("done", "degraded", "failed")
 
@@ -1270,6 +1686,34 @@ async def report_progress(
     )
 
 
+@router.post(
+    "/workspaces/{workspace_id}/missions/{mission_id}/worker_done",
+    response_model=WorkerDoneResponse,
+)
+async def worker_done(
+    workspace_id: uuid.UUID,
+    mission_id: uuid.UUID,
+    payload: WorkerDoneRequest,
+    request: Request,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+) -> WorkerDoneResponse:
+    """分身显式完成信号（task-07 / FR-04 / D-002@v1，design §5.C.2）。
+
+    会话定位同 report_progress 模式（X-Session-Id 承载分身子会话身份，
+    mission 解析沿 parent 链爬根）；置位 ``worker_done_at``、summary 落
+    AgentArtifact 挂首 run、全分身完成迁移唤醒主控；迟到（mission 终态）409。
+    """
+    return await _worker_done_core(
+        session,
+        request,
+        user,
+        payload,
+        workspace_id=workspace_id,
+        mission_id=mission_id,
+    )
+
+
 async def _report_progress_core(
     session: AsyncSession,
     mission: AgentMission,
@@ -1336,6 +1780,204 @@ async def _report_progress_core(
     await session.commit()
     await session.refresh(log_entry)
     return ProgressResponse(run_id=run.id, log_id=log_entry.id)
+
+
+# ---------------------------------------------------------------------------
+# task-07（2026-08-25-team-subsession-governance / FR-04 / D-002@v1 / design §5.C.2）：
+# worker_done——分身显式完成信号（分身受限 MCP server 的唯一写入落点）。
+# ---------------------------------------------------------------------------
+
+
+async def _worker_first_run(
+    session: AsyncSession, worker_session_id: uuid.UUID, mission_id: uuid.UUID
+) -> AgentRun | None:
+    """取分身子会话在 mission 下的**首 run**（design §5.A 双标记锚）。
+
+    首 run = 该子会话下 ``mission_id=本 mission`` 且带 ``role`` 的最早 run
+    （派发三元组写入的双标记，design §5.B）——summary artifact 挂载点，经
+    ``mission_id`` join 使 ``_worker_artifacts`` / ``get_worker_result`` /
+    Finalizer 合并链全部既有可见（零新查询路径）。追问轮 run 不写
+    mission_id（归会话管），天然不命中。
+    """
+    stmt = (
+        select(AgentRun)
+        .where(
+            AgentRun.agent_session_id == worker_session_id,
+            AgentRun.mission_id == mission_id,
+            AgentRun.role.is_not(None),
+        )
+        .order_by(AgentRun.created_at)
+        .limit(1)
+    )
+    return (await session.execute(stmt)).scalars().first()
+
+
+async def _worker_done_core(
+    session: AsyncSession,
+    request: Request,
+    user: User,
+    payload: WorkerDoneRequest,
+    *,
+    path_session_id: uuid.UUID | None = None,
+    workspace_id: uuid.UUID | None = None,
+    mission_id: uuid.UUID | None = None,
+    enforce_workspace_permission: bool = False,
+) -> WorkerDoneResponse:
+    """worker_done 共用主体（四路由族同构，task-07 抽取，design §5.C.2）。
+
+    会话定位与 report_progress 模式的差异：调用方是**分身子会话**（非主控
+    会话）——子会话自身不落 ``AgentMission.session_id``，mission 解析走 task-01
+    ``resolve_mission_for_session`` 沿 parent 链爬根，不复用
+    ``_resolve_session_mission``（其按调用会话自身查活跃 mission，对子会话
+    恒 miss 且无懒建语义）。
+
+    判定序：
+
+    1. X-Session-Id（header > 路径）缺席 → 400（worker_done 必须由分身会话
+       发起，无显式路径回退形态）；
+    2. 活跃 resolve miss 时含终态二次解析（``include_terminal=True``）：
+       根上最新 mission 已 converged/cancelled → 记 warning 返 **409** 零写入
+       零唤醒（迟到调用；区分 404=根上无 mission）；
+    3. 显式参数仅作越权校验锚（mission_id 失配 404 资源隐藏；workspace_id
+       复用 ``_get_mission`` anchor∪scope 口径；会话路由族按 mission 锚工作区
+       复核 WORKSPACE_WRITE）；
+    4. 调用会话必须 ∈ ``mission_worker_sessions``（分身一层枚举）——主控根
+       会话 / 存量 batch 形态（无子会话）调用 → 422 拒绝零写入；
+    5. 首 run 缺失（派发链路异常）→ fail-loud 404 零写入；
+    6. 置位 ``worker_done_at=now()``（可重复置位取最新——追问重开工后再干
+       再置位）+ summary 落 ``AgentArtifact(kind=summary)`` 挂首 run；
+    7. 全分身完成迁移唤醒：按 ``mission_worker_sessions`` 枚举经
+       ``is_worker_complete``（§5.C.3 单一真相源，禁第三套口径）判定全完成；
+       本调用构成**新完成信号**（首信号，或重开工周期——上一 done 置位后
+       会话下出现更新 run）且置位后全完成 → 先 DEL
+       ``_WORKERS_DONE_NOTIFY_KEY``（``clear_workers_done_notify_key`` 单源）
+       再调 ``notify_orchestrator_workers_done``（内部 SETNX），重复完成周期
+       可再次唤醒；冗余重复调用（无新 turn）不重复唤醒。
+    """
+    sid = _request_session_id(request, path_session_id)
+    if sid is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "缺少 X-Session-Id 会话头：worker_done 必须由分身子会话发起",
+        )
+    # 越权校验锚：路径参数优先，缺省回落 payload 显式参数（header-only 形态）
+    anchor_workspace_id = workspace_id or payload.workspace_id
+    anchor_mission_id = mission_id or payload.mission_id
+
+    worker = await session.get(AgentSession, sid)
+    if worker is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "session not found")
+
+    # ── mission 解析：活跃 resolve miss → 含终态二次解析区分 409/404 ──
+    mission = await resolve_mission_for_session(session, sid)
+    if mission is None:
+        terminal_mission = await resolve_mission_for_session(session, sid, include_terminal=True)
+        if terminal_mission is not None and (
+            terminal_mission.converged_at is not None or terminal_mission.cancelled_at is not None
+        ):
+            if anchor_mission_id is not None and anchor_mission_id != terminal_mission.id:
+                raise HTTPException(status.HTTP_404_NOT_FOUND, "mission not found")
+            if anchor_workspace_id is not None:
+                await _get_mission(session, anchor_workspace_id, terminal_mission.id)
+            if enforce_workspace_permission:
+                await _check_workspace_write(session, user, terminal_mission.workspace_id)
+            log.warning(
+                "worker_done_late_rejected",
+                mission_id=str(terminal_mission.id),
+                session_id=str(sid),
+            )
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "该团队任务已收敛或已取消：worker_done 迟到调用被拒绝，未写入任何状态。",
+            )
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "该会话当前没有活跃团队任务，无法调用 worker_done",
+        )
+
+    # ── 越权校验锚（活跃 mission）──
+    if anchor_mission_id is not None and anchor_mission_id != mission.id:
+        # 显式 mission_id 仅作越权校验锚：失配 → 404 资源隐藏（同 _resolve_session_mission）
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "mission not found")
+    if anchor_workspace_id is not None:
+        await _get_mission(session, anchor_workspace_id, mission.id)
+    if enforce_workspace_permission:
+        await _check_workspace_write(session, user, mission.workspace_id)
+
+    # ── 调用会话必须是本 mission 的分身子会话（一层枚举单一真相源）──
+    workers = await mission_worker_sessions(session, mission.id)
+    if all(w.id != sid for w in workers):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "该会话不是本团队任务的分身子会话，无法调用 worker_done",
+        )
+
+    # ── 首 run 锚（缺失 = 派发链路异常，fail-loud 零写入）──
+    first_run = await _worker_first_run(session, sid, mission.id)
+    if first_run is None:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            "分身首 run 不存在（派发链路异常），worker_done 拒绝写入",
+        )
+
+    # ── 置位 + summary 挂首 run（可重复置位取最新）──
+    old_done_at = worker.worker_done_at
+    now = datetime.now(UTC)
+    worker.worker_done_at = now
+    artifact = AgentArtifact(run_id=first_run.id, kind="summary", content_ref=payload.summary)
+    session.add(worker)
+    session.add(artifact)
+    await session.commit()
+    await session.refresh(worker)
+    await session.refresh(artifact)
+
+    # ── 全分身完成迁移唤醒（is_worker_complete 单源，design §5.C.3）──
+    from app.modules.agent.mission import is_worker_complete
+
+    all_done = all([await is_worker_complete(session, w) for w in workers])
+    notified = False
+    if all_done and mission.session_id is not None:
+        # 本调用构成新完成信号的判定（false→true 迁移的完整覆盖）：
+        # - 首信号：old_done_at 为 None（多分身首波 = 最后完成分身恰好一次触发）；
+        # - 重开工周期：上一 done 置位后本会话出现更新的 run（追问轮），本轮
+        #   done 是对新 turn 的完成信号——DEL 后 SETNX 支持重复完成周期再唤醒；
+        # - 冗余重复调用（无新 turn）不重复唤醒（防烧主控 token）。
+        is_new_signal = old_done_at is None
+        if not is_new_signal:
+            newer_stmt = (
+                select(AgentRun.id)
+                .where(AgentRun.agent_session_id == sid, AgentRun.created_at > old_done_at)
+                .limit(1)
+            )
+            is_new_signal = (await session.execute(newer_stmt)).first() is not None
+        if is_new_signal:
+            # 成败统计口径同 is_worker_complete 词表：会话终态 failed/ended =
+            # 失败，其余（done 且无活跃 turn，全完成判定已保证）= 成功。
+            from app.modules.agent.mission import _WORKER_SESSION_TERMINAL
+            from app.modules.agent.mission_context import (
+                clear_workers_done_notify_key,
+                notify_orchestrator_workers_done,
+            )
+
+            failed = sum(1 for w in workers if w.status in _WORKER_SESSION_TERMINAL)
+            completed = len(workers) - failed
+            await clear_workers_done_notify_key(mission.id)
+            notified = await notify_orchestrator_workers_done(
+                mission.id,
+                mission.session_id,
+                completed=completed,
+                failed=failed,
+            )
+
+    return WorkerDoneResponse(
+        mission_id=mission.id,
+        session_id=sid,
+        run_id=first_run.id,
+        artifact_id=artifact.id,
+        worker_done_at=worker.worker_done_at or now,
+        all_workers_done=all_done,
+        orchestrator_notified=notified,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1413,7 +2055,7 @@ async def list_workers_for_session(
     session: SessionDep,
     user: SessionMcpUser,
 ) -> WorkerListResponse:
-    """会话维度 list_workers——按会话活跃 mission 列 run 状态。"""
+    """会话维度 list_workers——按会话活跃 mission 列分身（``_list_workers_core`` 双形态）。"""
     mission = await _resolve_session_mission(
         session,
         request,
@@ -1470,6 +2112,29 @@ async def report_progress_for_session(
         mission,
         payload,
         agent_session_id=_request_session_id(request, session_id),
+    )
+
+
+@router.post(
+    "/sessions/{session_id}/missions/worker_done",
+    response_model=WorkerDoneResponse,
+)
+async def worker_done_for_session(
+    session_id: uuid.UUID,
+    payload: WorkerDoneRequest,
+    request: Request,
+    session: SessionDep,
+    user: SessionMcpUser,
+) -> WorkerDoneResponse:
+    """会话维度 worker_done——X-Session-Id（header > 路径）承载分身子会话身份
+    （design §5.C.2；task-07 分身受限 server 缺参调用形态的主路由）。"""
+    return await _worker_done_core(
+        session,
+        request,
+        user,
+        payload,
+        path_session_id=session_id,
+        enforce_workspace_permission=True,
     )
 
 
@@ -1589,6 +2254,20 @@ async def report_progress_scoped(
     )
 
 
+@router.post("/missions/worker_done", response_model=WorkerDoneResponse)
+async def worker_done_scoped(
+    payload: WorkerDoneRequest,
+    request: Request,
+    session: SessionDep,
+    user: SessionMcpUser,
+) -> WorkerDoneResponse:
+    """header-only worker_done（``POST /missions/worker_done``）——会话身份完全由
+    X-Session-Id header 承载（缺失 → 400）；payload 显式参数仅作越权校验锚。"""
+    return await _worker_done_core(
+        session, request, user, payload, enforce_workspace_permission=True
+    )
+
+
 @router.post(
     "/missions/{mission_id}/dispatch_worker",
     response_model=WorkerRunResponse,
@@ -1696,6 +2375,29 @@ async def report_progress_by_mission(
     )
 
 
+@router.post(
+    "/missions/{mission_id}/worker_done",
+    response_model=WorkerDoneResponse,
+)
+async def worker_done_by_mission(
+    mission_id: uuid.UUID,
+    payload: WorkerDoneRequest,
+    request: Request,
+    session: SessionDep,
+    user: SessionMcpUser,
+) -> WorkerDoneResponse:
+    """仅 mid worker_done（``/missions/{mid}/worker_done``）——mid 为越权校验锚，
+    分身会话身份仍由 X-Session-Id 承载（缺失 → 400）。"""
+    return await _worker_done_core(
+        session,
+        request,
+        user,
+        payload,
+        mission_id=mission_id,
+        enforce_workspace_permission=True,
+    )
+
+
 # ---------------------------------------------------------------------------
 # task-03（2026-08-24-session-team-mission-context / FR-02 / D-005@v1 / D-012@v1）：
 # mission_status 常驻查询端点——GET /missions/status（header-only，对齐 daemon
@@ -1724,9 +2426,10 @@ async def _mission_status_core(
     组装口径（design §5.B / §7）：
 
     - ``mission_id/objective/budget_usd`` 直取 mission 列（objective 占位符原样）。
-    - ``status`` 复用 ``mission.derive_status`` 派生口径（拉 mission runs，不新造
-      状态机；runs 含主控轮，活跃 turn 由其状态反映——口径同
-      ``agent/router._mission_to_response``，不另查会话活跃 turn）。
+    - ``status`` 复用 task-08 包装 ``mission_derive_status``（design §5.C.4：
+      分身子会话映射虚拟 run 后合并喂 ``derive_status``，子会话形态不被主控轮
+      run 状态遮蔽；不新造状态机）——口径同 ``agent/router._mission_to_response``
+      消费的派生家族。
     - ``scope_workspaces`` 经 task-01 ``collect_scope_workspace_statuses`` + task-02
       ``probe_workspace_git_mode`` 探测回调**每次调用实时探测**（不缓存，R-02；
       探测不可判定归 unknown，不向 caller 抛）；``anchor_workspace`` 取条目中
@@ -1738,7 +2441,12 @@ async def _mission_status_core(
     if agent_session is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "session not found")
 
-    from app.modules.agent.mission import derive_status, get_active_mission_for_session
+    # task-09（FR-05）：status 源换 task-08 单一真相源 mission_derive_status——
+    # 分身子会话经虚拟 run 映射（idle 未 done → running），子会话形态不再被
+    # 主控轮 run 状态遮蔽；cancelled/converged/has_session/session_active_turn
+    # 由包装内部查明（对齐 finalizer 口径：session_id 查无会话行 → 永不
+    # awaiting_input）。
+    from app.modules.agent.mission import get_active_mission_for_session, mission_derive_status
 
     mission = await get_active_mission_for_session(session, sid)
     if mission is None:
@@ -1747,17 +2455,7 @@ async def _mission_status_core(
 
     await _check_workspace_write(session, user, mission.workspace_id)
 
-    runs = list(
-        (await session.execute(select(AgentRun).where(AgentRun.mission_id == mission.id)))
-        .scalars()
-        .all()
-    )
-    status_value = derive_status(
-        runs,
-        cancelled=mission.cancelled_at is not None,
-        converged=mission.converged_at is not None,
-        has_session=mission.session_id is not None,
-    )
+    status_value = await mission_derive_status(session, mission.id)
 
     # git 三态探测回调（task-02 helper 注入 task-01 收集器；delegate per-request
     # 构造，probe 内部把 transport 失败收敛为 "unknown" 不抛）

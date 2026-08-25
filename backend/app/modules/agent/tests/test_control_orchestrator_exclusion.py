@@ -10,6 +10,12 @@ design §5 核心机制 D-009 / 审查 B3 / D-007@v2：
   （``next(r for r in all_runs if r.role == _ORCHESTRATOR_ROLE)``）与
   finalizer.py converge derive 输入依赖全量 run；治理口径经 non_orchestrator_runs
   收窄（卡片"单点收窄 worker_runs"与源码消费方不符，见任务报告）。
+
+task-11（2026-08-25-team-subsession-governance / design §5.C.6 + §5.D）追加
+子会话形态口径守卫（TestSubsessionFormOrchestratorExclusion）：治理三口径换
+「存量 run + 未完成子会话」混跑形态后，主控轮排除保证在新形态下不变——
+不占并发额度、不计分身成本、不进 kill 名单；无子会话 mission 的既有断言
+全部回落现行为（FR-09，本文件 11 条既有断言零改动全绿）。
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.control import MissionControlService
 from app.modules.agent.delegation import MAX_WORKERS
-from app.modules.agent.model import AgentMission, AgentRun
+from app.modules.agent.model import AgentMission, AgentRun, AgentSession
 
 
 async def _make_mission(session: AsyncSession, *, budget_usd: float | None = None):
@@ -39,7 +45,10 @@ async def _make_run(
     role: str | None = "arch",
     status: str = "running",
     cost: float = 0.0,
+    agent_session_id: uuid.UUID | None = None,
 ) -> AgentRun:
+    """建 mission run；``agent_session_id`` 供 task-11 子会话形态播种（首 run
+    双标记 / 追问轮只挂会话）。"""
     r = AgentRun(
         mission_id=mission_id,
         agent_type="claude_code",
@@ -48,6 +57,7 @@ async def _make_run(
         role=role,
         objective=f"{role or 'legacy'} objective",
         total_cost_usd=cost,
+        agent_session_id=agent_session_id,
     )
     session.add(r)
     await session.commit()
@@ -225,6 +235,115 @@ class TestOrchestratorRunsInWorkerRunsGuard:
         main_run = next((r for r in runs if r.role == "orchestrator"), None)
 
         assert main_run is not None and main_run.id == main.id
+
+
+class TestSubsessionFormOrchestratorExclusion:
+    """task-11 混跑形态下的主控轮排除守卫（D-009 在子会话新形态下不变）。"""
+
+    async def _make_root_mission(self, session: AsyncSession, *, budget: float | None = None):
+        root = AgentSession(
+            id=uuid.uuid4(), user_id=uuid.uuid4(), provider="claude", status="active"
+        )
+        session.add(root)
+        await session.commit()
+        mission = AgentMission(
+            workspace_id=uuid.uuid4(),
+            objective="团队目标",
+            session_id=root.id,
+            budget_usd=budget,
+        )
+        session.add(mission)
+        await session.commit()
+        await session.refresh(mission)
+        return root, mission
+
+    async def _make_worker(self, session: AsyncSession, root: AgentSession) -> AgentSession:
+        w = AgentSession(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            provider="claude",
+            status="active",
+            parent_session_id=root.id,
+        )
+        session.add(w)
+        await session.commit()
+        await session.refresh(w)
+        return w
+
+    @pytest.mark.asyncio
+    async def test_orchestrator_run_not_counted_with_subsessions(self, db_session: AsyncSession):
+        """MAX_WORKERS 个 running 主控轮 + 1 个未完成子会话 → 计数=1（主控轮
+        不占额度，子会话占）；can_dispatch 放行。"""
+        root, mission = await self._make_root_mission(db_session)
+        for _ in range(MAX_WORKERS):
+            await _make_run(db_session, mission.id, role="orchestrator", status="running")
+        w = await self._make_worker(db_session, root)
+        await _make_run(
+            db_session,
+            mission.id,
+            role="impl",
+            status="completed",
+            agent_session_id=w.id,
+        )
+
+        ctrl = MissionControlService(db_session)
+        assert await ctrl.running_worker_count(mission.id) == 1
+        assert await ctrl.active_worker_count(mission.id) == 1
+        allowed, reason = await ctrl.can_dispatch_worker(mission)
+        assert allowed, f"主控轮不应占并发额度，got reason={reason}"
+
+    @pytest.mark.asyncio
+    async def test_orchestrator_cost_excluded_with_subsessions(self, db_session: AsyncSession):
+        """主控轮成本不计分身预算（子会话形态）：仅子会话轮次 run 成本计入。"""
+        root, mission = await self._make_root_mission(db_session, budget=10.0)
+        await _make_run(db_session, mission.id, role="orchestrator", status="running", cost=9.9)
+        w = await self._make_worker(db_session, root)
+        await _make_run(
+            db_session, mission.id, role="impl", status="completed", agent_session_id=w.id, cost=1.0
+        )
+        # 追问轮 run（无 mission_id，仅挂子会话）——union 成本来源
+        await _make_run(db_session, None, status="completed", agent_session_id=w.id, cost=2.0)
+
+        ctrl = MissionControlService(db_session)
+        assert await ctrl.cost_so_far(mission.id) == pytest.approx(3.0)
+        allowed, reason = await ctrl.can_dispatch_worker(mission)
+        assert allowed, f"主控轮成本不应计入预算，got reason={reason}"
+
+    @pytest.mark.asyncio
+    async def test_cancel_excludes_orchestrator_run_with_subsessions(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ):
+        """cancel kill 名单含子会话（首 run 兜底）但排除主控轮。"""
+        from app.modules.daemon import lease_service
+
+        cancelled_run_ids: list[uuid.UUID] = []
+
+        class _FakeLeaseService:
+            def __init__(self, session) -> None:
+                self._session = session
+
+            async def cancel_lease(self, agent_run_id: uuid.UUID) -> None:
+                cancelled_run_ids.append(agent_run_id)
+
+        monkeypatch.setattr(lease_service, "DaemonLeaseService", _FakeLeaseService)
+
+        root, mission = await self._make_root_mission(db_session)
+        main = await _make_run(db_session, mission.id, role="orchestrator", status="running")
+        w = await self._make_worker(db_session, root)
+        first_run = await _make_run(
+            db_session,
+            mission.id,
+            role="impl",
+            status="completed",
+            agent_session_id=w.id,
+        )
+
+        killed = await MissionControlService(db_session).cancel(mission)
+
+        assert killed == 1
+        assert cancelled_run_ids == [first_run.id]
+        assert main.id not in cancelled_run_ids
+        assert mission.cancelled_at is not None
 
 
 if __name__ == "__main__":

@@ -59,6 +59,7 @@ import {
   FILE_MCP_SERVER_NAME,
   injectMcpSessionId,
   mergeMcpConfigs,
+  WORKER_MCP_SERVER_NAME,
   type McpConfig,
 } from '../mcp-config.js';
 import type {
@@ -242,6 +243,33 @@ export interface SessionManagerOptions {
    * model）供闭包按需读（如 codex 主 agent 需要不同 server 配置，未来扩展）。
    */
   mainAgentMcpConfigProvider?: (
+    ctx: MainAgentMcpContext,
+  ) => Record<string, McpServerConfigForDriver> | undefined;
+  /**
+   * task-06（2026-08-25-team-subsession-governance / FR-03 / D-003@v1，design
+   * §5.C.1）：是否分身（mission worker）会话。
+   *
+   * daemon 生产路径注入谓词：``ctx.provider === 'claude' && ctx.stage ===
+   * 'mission_worker'``（lease metadata.stage 由 backend 派发写入，claim payload
+   * 透传）。分身会话**不走**主控注入（``isMainAgentSession`` 对 mission_worker
+   * 返回 false 不变——5 编排工具不进分身，递归闸），改走 ``workerMcpConfigProvider``
+   * 注入仅含 worker_done 单工具的受限 server（sillyhub-worker）。
+   *
+   * 判定优先于主控谓词（``_resolveMainAgentMcp`` 分身分支在前）；未注入
+   * （undefined）= 所有 session 按原逻辑处理（mission_worker 不注入任何 server，
+   * 旧行为零回归，向后兼容）。create / restore / reload 三路共用点生效。
+   */
+  isWorkerSession?: (ctx: MainAgentMcpContext) => boolean;
+  /**
+   * task-06（design §5.C.1）：分身受限 MCP server 配置构造器。
+   *
+   * daemon 生产路径注入闭包：``buildWorkerMcpServerConfig`` 组装 sillyhub-worker
+   * 条目（env MCP_TOOLSET=mission_worker + backend URL + apiKey 优先 token 回落）。
+   * 仅 ``isWorkerSession`` 判定为分身的 session 调用；返回 undefined / 空对象 /
+   * provider 未注入 → 不注入（容错）。工具集硬编码 worker_done 单工具——递归闸
+   * 保持，禁含派发 / 编排工具（design §3 非目标，P2 独立决策才开闸）。
+   */
+  workerMcpConfigProvider?: (
     ctx: MainAgentMcpContext,
   ) => Record<string, McpServerConfigForDriver> | undefined;
   /**
@@ -724,6 +752,24 @@ export class SessionManager {
       ) => Record<string, McpServerConfigForDriver> | undefined)
     | undefined;
   /**
+   * task-06（2026-08-25-team-subsession-governance / FR-03 / D-003@v1）：分身
+   * （mission worker）会话判定谓词。未注入 = 永远 false（mission_worker 不注入
+   * 任何 server，旧语义零回归）。与 ``SessionManagerOptions.isWorkerSession`` 对齐，
+   * 签名同 ``MainAgentMcpContext``（create / restore / reload 三路共用归一化 ctx）。
+   */
+  private readonly _isWorkerSession:
+    | ((ctx: MainAgentMcpContext) => boolean)
+    | undefined;
+  /**
+   * task-06（design §5.C.1）：分身受限 MCP server 配置构造器（sillyhub-worker，
+   * 仅 worker_done 单工具）。仅分身 session 调用；未注入 = 不注入受限 server。
+   */
+  private readonly _workerMcpConfigProvider:
+    | ((
+        ctx: MainAgentMcpContext,
+      ) => Record<string, McpServerConfigForDriver> | undefined)
+    | undefined;
+  /**
    * task-08（FR-05 / D-004@v1）：本机凭证管理器（reloadWithProvider 构造新 env 用）。
    * 缺省 null：reload 用 noopCredential fallback（层 2 token 自然跳过，层 0 provider_config
    * 仍独立生效，对齐 daemon.ts:3050）。
@@ -812,6 +858,10 @@ export class SessionManager {
     // task-06（D-007@v2 / R-01）：主 agent MCP tool 注入。未注入 = 普通会话零回归。
     this._isMainAgentSession = opts.isMainAgentSession;
     this._mainAgentMcpConfigProvider = opts.mainAgentMcpConfigProvider;
+    // task-06（2026-08-25-team-subsession-governance / D-003@v1）：分身受限 MCP
+    // 注入（design §5.C.1）。未注入 = mission_worker 不注入任何 server（零回归）。
+    this._isWorkerSession = opts.isWorkerSession;
+    this._workerMcpConfigProvider = opts.workerMcpConfigProvider;
     // task-08（FR-05 / D-004@v1）：reloadWithProvider 构造新 env 的凭证管理器。未注入
     // → null → reload 时 fallback noopCredential（对齐 daemon.ts:3050）。
     this._credentialManager = opts.credentialManager ?? null;
@@ -1201,6 +1251,13 @@ export class SessionManager {
    * 各自抽出 sessionId/leaseId/provider/cwd/model 构造 ctx（两者都含这些字段），
    * 再统一调 ``isMainAgentSession`` 判定 + ``mainAgentMcpConfigProvider`` 取配置。
    *
+   * task-06（2026-08-25-team-subsession-governance / D-003@v1，design §5.C.1）：
+   * 分身分支在最前——``isWorkerSession`` 判定为 mission_worker 时取
+   * ``workerMcpConfigProvider`` 的受限配置表（仅 worker_done 单工具的
+   * sillyhub-worker server），**不进**主控分支（5 编排工具不进分身，递归闸）。
+   * 与主控注入同机制（谓词 + provider）、不同工具集；create / restore / reload
+   * 三路共用本方法，一处分支三路生效。
+   *
    * 返回 undefined 的三种情况（均不注入，普通会话零回归）：
    *   1. 谓词未注入 / 返回 false（非主 agent session）；
    *   2. provider 未注入；
@@ -1209,6 +1266,20 @@ export class SessionManager {
   private _resolveMainAgentMcp(ctx: MainAgentMcpContext):
     | Record<string, McpServerConfigForDriver>
     | undefined {
+    // ── 分身受限分支（task-06 / design §5.C.1，优先于主控判定）──
+    if (this._isWorkerSession?.(ctx) === true) {
+      const workerConfig = this._workerMcpConfigProvider?.(ctx);
+      if (!workerConfig) return undefined;
+      // injectMcpSessionId 补写受限 server 名（WORKER_MCP_SERVER_NAME）的
+      // MCP_SESSION_ID——受限 server 的 worker_done 调用靠 X-Session-Id 定位分身
+      // 子会话（backend 沿 parent 链爬根解析 mission，缺头 400）。浅拷贝语义，
+      // provider 闭包持有的配置不被污染（与主控分支同机制）。
+      return injectMcpSessionId(
+        workerConfig,
+        ctx.sessionId,
+        WORKER_MCP_SERVER_NAME,
+      );
+    }
     if (this._isMainAgentSession?.(ctx) !== true) return undefined;
     const config = this._mainAgentMcpConfigProvider?.(ctx);
     if (!config) return undefined;

@@ -12,6 +12,15 @@
  *     server 条目由 mcp-config.ts ``buildFileMcpServerConfig`` 构造（env 注入
  *     MCP_TOOLSET=file + 上下文），会话注入归 task-06、worker 注入归 task-07。
  *
+ * task-06（2026-08-25-team-subsession-governance / FR-03 / D-003@v1，design §5.C.1）：
+ *   - ``mission_worker``：分身受限模式——仅注册 ``worker_done`` 单工具（调 backend
+ *     task-07 worker_done 端点，X-Session-Id 会话定位），六处全量 registerTool
+ *     （orchestration + file 工具）全部不注册。递归闸保持：分身拿不到
+ *     dispatch_worker / converge 等派发工具。sillyhub-worker server 条目由
+ *     mcp-config.ts ``buildWorkerMcpServerConfig`` 构造（env 注
+ *     MCP_TOOLSET=mission_worker），cli.ts ``workerMcpConfigProvider`` 组装、
+ *     session-manager 分身分支（stage=mission_worker）注入。
+ *
  * spike-01（spikes/06-mcp-server）验证了 stdio MCP server + 1 tool 的协议链路；
  * 本文件扩展到生产 5 tool，handler 调 HubClient 方法（非 spike 的直接 fetch），
  * 鉴权 / 非 2xx / snake_case body 全复用 hub-client 既有语义。
@@ -40,7 +49,8 @@
  *     mcpServers['sillyhub-daemon'].env per-server 注入（spike-01 管道），
  *     hub-client 给 MCP 5 端点附 X-Session-Id，backend 按会话定位活跃 mission）
  *   MCP_TOOLSET  工具集模式（task-05 本变更）：'file' = 仅文件 2 工具；
- *     未设 / 其它值 = orchestration（5 编排工具，缺省零回归）
+ *     'mission_worker' = 分身受限（仅 worker_done，task-06）；未设 / 其它值 =
+ *     orchestration（编排常驻工具，缺省零回归）
  *   MCP_RUN_ID  worker run id（file 模式：批任务 worker 场景，上传时作 multipart
  *     run_id 字段、列表时作 run_id query；task-07 task-runner 注入）
  *   MCP_ALLOWED_ROOT  上传允许根目录（file 模式；会话=cwd、worker=worktree 根，
@@ -73,8 +83,21 @@ export const DAEMON_MCP_SERVER_NAME = 'sillyhub-daemon';
  */
 export const FILE_MCP_SERVER_NAME = 'sillyhub-file';
 
-/** 工具集模式：orchestration（5 编排工具，缺省）| file（文件 2 工具）。 */
-export type McpToolset = 'orchestration' | 'file';
+/**
+ * 分身受限 MCP server 对外名称（task-06 2026-08-25-team-subsession-governance /
+ * FR-03 / D-003@v1，design §5.C.1）。mcp-config.ts ``buildWorkerMcpServerConfig``
+ * 用同名 key 构造 server 条目（env 注 MCP_TOOLSET=mission_worker），cli.ts
+ * ``workerMcpConfigProvider`` 组装后经 session-manager 分身分支注入
+ * stage=mission_worker 会话——与主控 server（DAEMON_MCP_SERVER_NAME，5 编排工具）
+ * 同机制、不同工具集，server 名区分供客户端 / 日志识别。
+ */
+export const WORKER_MCP_SERVER_NAME = 'sillyhub-worker';
+
+/**
+ * 工具集模式：orchestration（缺省，6 编排常驻工具）| file（文件 2 工具）|
+ * mission_worker（分身受限：仅 worker_done 单工具，task-06）。
+ */
+export type McpToolset = 'orchestration' | 'file' | 'mission_worker';
 
 interface McpServerEnv {
   backendUrl: string;
@@ -82,7 +105,8 @@ interface McpServerEnv {
   daemonApiKey: string;
   /** task-10（2026-08-22-team-session-unify / FR-04）：主 agent 会话 id。 */
   sessionId: string;
-  /** task-05（本变更）：工具集模式；仅 'file' 显式开启文件工具，其余归 orchestration。 */
+  /** task-05（本变更）：工具集模式；'file' / 'mission_worker' 显式开启，
+   *  其余归 orchestration（拼写错误容错回落，不 crash）。 */
   toolset: McpToolset;
   /** task-05（本变更）：worker run id（file 模式，MCP_RUN_ID 注入）。 */
   runId: string;
@@ -107,7 +131,12 @@ export function readEnv(): McpServerEnv {
     daemonApiKey: process.env.MCP_SERVER_DAEMON_API_KEY ?? '',
     daemonToken: process.env.MCP_SERVER_DAEMON_TOKEN ?? '',
     sessionId: process.env.MCP_SESSION_ID ?? '',
-    toolset: process.env.MCP_TOOLSET === 'file' ? 'file' : 'orchestration',
+    toolset:
+      process.env.MCP_TOOLSET === 'file'
+        ? 'file'
+        : process.env.MCP_TOOLSET === 'mission_worker'
+          ? 'mission_worker'
+          : 'orchestration',
     runId: process.env.MCP_RUN_ID ?? '',
     allowedRoot: process.env.MCP_ALLOWED_ROOT ?? '',
   };
@@ -243,16 +272,24 @@ export interface FileToolsetContext {
  * 工具，零回归）。
  */
 export interface CreateMcpServerOptions extends FileToolsetContext {
-  /** 工具集模式，缺省 'orchestration'；'file' = 仅文件 2 工具。 */
+  /**
+   * 工具集模式，缺省 'orchestration'（编排常驻工具，零回归）；'file' = 仅文件
+   * 2 工具；'mission_worker' = 分身受限（仅 worker_done 单工具，task-06）。
+   */
   toolset?: McpToolset;
 }
 
 /**
- * 构造 daemon MCP server 并注册工具（双模式，task-05）。
+ * 构造 daemon MCP server 并注册工具（三模式）。
  *
- * - ``orchestration``（缺省）：5 编排工具（本方法内既有注册，行为零变化）；
+ * - ``orchestration``（缺省）：6 编排常驻工具（本方法内既有注册，行为零变化）；
  * - ``file``：仅 ``upload_file`` / ``list_uploaded_files``（D-003@v1），server
- *   名切换为 ``FILE_MCP_SERVER_NAME``（sillyhub-file，供客户端/日志识别）。
+ *   名切换为 ``FILE_MCP_SERVER_NAME``（sillyhub-file，供客户端/日志识别）；
+ * - ``mission_worker``（task-06 2026-08-25-team-subsession-governance / D-003@v1，
+ *   design §5.C.1）：分身受限模式，仅 ``worker_done`` 单工具（``registerWorkerTools``），
+ *   server 名切换为 ``WORKER_MCP_SERVER_NAME``（sillyhub-worker）。**递归闸铁律**：
+ *   受限模式不注册 dispatch_worker / converge_mission 等任何编排工具——递归下放
+ *   是 P2 独立决策（design §3 非目标），本模式禁开闸。
  *
  * @param client  HubClient 实例（测试可传 mock）；生产由 ``runMcpServer`` 用 env
  *   构造。tool handler 全部经此 client 调 backend。
@@ -270,7 +307,12 @@ export function createMcpServer(
   const toolset: McpToolset = opts.toolset ?? 'orchestration';
   const server = new McpServer(
     {
-      name: toolset === 'file' ? FILE_MCP_SERVER_NAME : DAEMON_MCP_SERVER_NAME,
+      name:
+        toolset === 'file'
+          ? FILE_MCP_SERVER_NAME
+          : toolset === 'mission_worker'
+            ? WORKER_MCP_SERVER_NAME
+            : DAEMON_MCP_SERVER_NAME,
       version: '0.1.0',
     },
     { capabilities: { tools: {} } },
@@ -282,6 +324,13 @@ export function createMcpServer(
       runId: opts.runId,
       allowedRoot: opts.allowedRoot,
     });
+    return { server };
+  }
+
+  // task-06（design §5.C.1）：分身受限模式——仅 worker_done 单工具，六处全量
+  // registerTool（orchestration 6 工具 + file 2 工具）在此模式全部不注册。
+  if (toolset === 'mission_worker') {
+    registerWorkerTools(server, client);
     return { server };
   }
 
@@ -739,6 +788,72 @@ function registerFileTools(
   );
 }
 
+// ── mission_worker 受限工具集（task-06 2026-08-25-team-subsession-governance）──
+
+/**
+ * 注册分身受限工具集（仅 ``MCP_TOOLSET=mission_worker`` 模式调用）。
+ *
+ * 工具集**硬编码单工具** ``worker_done``（design §5.C.1 / D-003@v1）：分身干完后
+ * 显式上报完成信号——backend 置位 ``worker_done_at`` + summary 落 AgentArtifact
+ * 挂首 run + 全分身完成时唤醒主控（task-07 ``_worker_done_core``）。
+ *
+ * **递归闸铁律**（design §3 非目标 / §7 风险表）：本函数禁含 dispatch_worker /
+ * get_worker_result / list_workers / converge_mission / report_progress /
+ * mission_status 等任何编排工具——分身拿不到派发能力，递归下放是 P2 独立决策。
+ *
+ * 契约对齐 backend ``WorkerDoneRequest``（task-07 落地）：``summary`` 必填；
+ * ``workspace_id`` / ``mission_id`` 可选（仅作越权校验锚）；会话定位由
+ * X-Session-Id 承载（``MCP_SESSION_ID`` per-session env → hub-client
+ * ``auth.sessionId`` 附头，缺失时 backend 400）。
+ */
+function registerWorkerTools(server: McpServer, client: HubClient): void {
+  server.registerTool(
+    'worker_done',
+    {
+      title: 'Worker Done',
+      description:
+        '上报本分身任务完成（分身受限工具，唯一写入落点）。' +
+        '【何时调用】把派发给你的子任务目标全部完成（含产出落盘 / 自测）后调用，' +
+        'summary 一段话说明：做了什么、产出文件路径（如有）、关键结论。' +
+        '【重要】调用后平台会把你的 summary 转交主控并可能触发团队收敛——' +
+        '确保真的干完再调；追问重开工后干完可再次调用（取最新置位）。' +
+        '【不要】调用派发 / 收敛类工具（本受限环境没有，也不需要）——完成信号' +
+        '上报后即可结束本轮等待主控收敛。' +
+        '响应 { mission_id, session_id, run_id, artifact_id, worker_done_at,' +
+        ' all_workers_done, orchestrator_notified }。',
+      inputSchema: {
+        summary: z
+          .string()
+          .describe(
+            'Completion summary: what was done, output file paths (if any), and key conclusions',
+          ),
+        workspace_id: z
+          .string()
+          .optional()
+          .describe(
+            'Optional anchor workspace UUID (validation anchor only; session context is used when omitted)',
+          ),
+        mission_id: z
+          .string()
+          .optional()
+          .describe(
+            'Optional mission UUID (validation anchor only; resolved from the session parent chain when omitted)',
+          ),
+      },
+    },
+    async (args: { summary: string; workspace_id?: string; mission_id?: string }) => {
+      try {
+        const result = await client.workerDone(args.workspace_id, args.mission_id, {
+          summary: args.summary,
+        });
+        return okContent(result);
+      } catch (e) {
+        return errorContent('worker_done', e);
+      }
+    },
+  );
+}
+
 // ── 启动入口（生产：env 构造 HubClient + stdio transport）─────────────────────
 
 /**
@@ -795,9 +910,14 @@ export async function runMcpServer(): Promise<void> {
   }
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(
-    `[mcp-server] ${env.toolset === 'file' ? FILE_MCP_SERVER_NAME : DAEMON_MCP_SERVER_NAME} MCP server started (stdio)`,
-  );
+  // task-06：mission_worker 模式日志也打受限 server 名（sillyhub-worker）。
+  const startedName =
+    env.toolset === 'file'
+      ? FILE_MCP_SERVER_NAME
+      : env.toolset === 'mission_worker'
+        ? WORKER_MCP_SERVER_NAME
+        : DAEMON_MCP_SERVER_NAME;
+  console.error(`[mcp-server] ${startedName} MCP server started (stdio)`);
 }
 
 // ── 直接运行入口（node dist/mcp-server.js）──────────────────────────────────

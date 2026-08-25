@@ -1610,6 +1610,49 @@ export class HubClient {
     );
   }
 
+  /**
+   * task-06（2026-08-25-team-subsession-governance / FR-03 / D-003@v1，design
+   * §5.C.1→§5.C.2）：分身显式完成信号（分身受限 MCP server 的唯一转发方法）。
+   *
+   * 端点：POST _missionActionPath(action='worker_done')——backend task-07 四路由族
+   * 同构（``mcp_tools._worker_done_core``）：
+   *   - ws+mid → ``/api/workspaces/{ws}/missions/{mid}/worker_done``
+   *   - 仅 mid → ``/api/missions/{mid}/worker_done``
+   *   - 均缺省 → ``/api/missions/worker_done``（分身受限 server 缺参调用主形态）
+   *
+   * body（snake_case，对齐 backend ``WorkerDoneRequest``）：``{ summary,
+   * workspace_id?, mission_id? }``。**会话定位由 X-Session-Id 承载**（``auth.sessionId``
+   * → ``_sessionIdHeaders``；backend 缺头 400，沿 parent 链爬根解析 mission）；显式
+   * ws/mid 同时写进 body 作越权校验锚——仅 workspaceId 缺 missionId 时路径回落
+   * header-only 形态（``_missionActionPath`` 忽略 workspaceId），锚必须靠 body 字段
+   * 保住（backend ``anchor_workspace_id = workspace_id or payload.workspace_id``）。
+   *
+   * 响应（``WorkerDoneResponse``）：``{ mission_id, session_id, run_id, artifact_id,
+   * worker_done_at, all_workers_done, orchestrator_notified }``。非 2xx 抛
+   * HubHttpError（迟到 mission 终态 409 / 非分身会话 422 等，由 mcp-server
+   * ``errorContent`` 转结构化回执）；网络/超时透传 fetch 原始异常（同既有方法）。
+   */
+  async workerDone(
+    workspaceId: string | undefined,
+    missionId: string | undefined,
+    body: { summary: string },
+  ): Promise<Record<string, unknown>> {
+    const payload: Record<string, unknown> = { summary: body.summary };
+    // 显式参数作越权校验锚：undefined / 空串不写入 body（守卫风格，零回归）。
+    if (workspaceId !== undefined && workspaceId !== '') {
+      payload.workspace_id = workspaceId;
+    }
+    if (missionId !== undefined && missionId !== '') {
+      payload.mission_id = missionId;
+    }
+    return this._request<Record<string, unknown>>(
+      'POST',
+      this._missionActionPath(workspaceId, missionId, 'worker_done'),
+      payload,
+      this._sessionIdHeaders(),
+    );
+  }
+
   // -- task-05（2026-08-23-agent-file-upload-mcp / D-005@v1）：agent 文件制品通道 --
   //
   // 端点挂在 agent router（/api 前缀，非 REST_PREFIX=/api/daemon），与 5 个编排
