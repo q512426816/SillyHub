@@ -30,6 +30,6 @@ created_at: 2026-08-26 03:20:00
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| modules/backend.md | 待 execute 完成后更新（递归治理链） | pending |
-| modules/sillyhub-daemon.md（interactive.md） | 待 execute 完成后更新（分层工具集+会话闸） | pending |
+| modules/backend.md | agent.md + daemon.md 补递归治理链/五端点解析/预算强收/失败即收口 | done |
+| modules/sillyhub-daemon.md（interactive.md） | 补分层工具集/worker_depth 保档/会话闸 | done |
 | _module-map.yaml | 无变化（未增删模块） | skipped |
