@@ -1798,17 +1798,8 @@ class TestHeaderOnlyRoutes:
         assert resp.json()["worker_id"] == str(worker.id)
 
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        reason=(
-            "GET /missions/workers 被先注册的 GET /missions/{mission_id}"
-            "（router.py:1086，mcp_tools include 于 :1451 之后）按首个全匹配截走 → "
-            "uuid 校验 422，本路由不可达；router.py 把 mcp_tools include 挪到"
-            " :1086 之前后本用例自动转 XPASS 生效（非 strict）"
-        ),
-        strict=False,
-    )
     async def test_list_workers_via_header_only(self, client, db_session, auth_headers) -> None:
-        """GET /missions/workers + header → 按会话活跃 mission 列 run（冲突 canary）。"""
+        """GET /missions/workers + header → 按会话活跃 mission 列 run。"""
         agent_session, _ws_id = await _seed_agent_session(db_session)
         mission = await _seed_session_mission(db_session, agent_session)
         db_session.add(

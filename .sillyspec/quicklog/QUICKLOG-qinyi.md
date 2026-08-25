@@ -336,3 +336,13 @@
 根因：FilePreview 分发矩阵缺原生渲染分支：html 只走 Prism 源码高亮、pdf binary 落元信息卡完全不预览，浏览器可原生渲染的文件看不到实际效果
 方案：file-preview.tsx 加 BROWSER_PREVIEW_EXTENSIONS（pdf/html/htm）+ NativePreviewFrame（fetchDownload 鉴权取 Blob 按扩展名重设 MIME 转 objectURL → iframe 原生渲染；html sandbox 隔离不设 allow-same-origin 防脚本摸父页面，pdf 走浏览器内置查看器；卸载/切换 revoke），sourceMode 默认预览态 + 头部「源码⇄预览」切换（html 源码=markup 高亮、pdf=元信息卡），filePath 变化重置默认态
 结果：新增 8 用例全绿，前端全量 194 文件 2195 用例通过，tsc 0 错误，eslint 0 告警
+
+## ql-20260826-001-ab4a | 2026-08-26 00:30:20 | 清理 test_mcp_tools 陈旧 xfail 金丝雀标记
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/tests/test_mcp_tools.py（移除 :1801 失效 xfail 金丝雀装饰器（条件已满足持续 XPASS））
+需求：清理 test_mcp_tools 陈旧 xfail 金丝雀标记
+根因：test_list_workers_via_header_only 的非严格 xfail 注明路由注册顺序修复后自动转 XPASS，该条件已满足且最近三次 backend CI 摘要持续 1 xpassed，标记失效
+方案：移除 @pytest.mark.xfail 装饰器使用例回归普通 PASS 守卫，docstring 去掉失效的「冲突 canary」括注
+结果：test_mcp_tools.py 全文件 51 passed 0 xfailed、ruff check/format 过、mypy 该文件 0 问题
