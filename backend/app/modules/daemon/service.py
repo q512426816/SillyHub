@@ -668,6 +668,8 @@ class DaemonService:
         # 短码透传（落 quicklog_session_links 归 SessionService 创建落库点，
         # facade 显式签名同步——漏透传会 500，见 task-04 facade 教训）。
         quicklog_id: str | None = None,
+        # ql-20260825-001：预会话首句附件透传（校验/标记行/组装归 SessionService）。
+        attachment_ids: list[uuid.UUID] | None = None,
     ) -> SessionDispatchResult:
         return await self._sess.create_session(
             user_id,
@@ -684,6 +686,7 @@ class DaemonService:
             team_mission=team_mission,
             page_context=page_context,
             quicklog_id=quicklog_id,
+            attachment_ids=attachment_ids,
         )
 
     async def inject_session(

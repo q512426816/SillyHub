@@ -1689,11 +1689,12 @@ function SessionPanelPage({
    * ② 成功后才清空输入（dialog 现状先清后建、失败输入即丢）——失败保留输入 +
    * 内联错误可重试（R-02），不切真会话态。成功经 onPreSessionCreated 上报父层
    * （父层切 sessionId → 本组件状态机自然接管，门户接线归 task-06）。
-   * 注：createSession 契约无 attachment_ids（R3 先例）——附件 chips 随成功清空，
-   * 首句只发文本。
+   * ql-20260825-001：首句附件随 create 上送（后端补 attachment_ids 契约——标记
+   * 行回显/session_id 回填/SESSION_INJECT attachments 均在后端 create 路径）；
+   * 附件非空允许空 prompt（D-7 看图说话对齐）。失败保留附件可重试（R-02 同义）。
    */
   const handlePreSessionSend = useCallback(
-    async (prompt: string) => {
+    async (prompt: string, attachmentIds: string[]) => {
       if (!preContext || preCreating) return;
       setPreCreating(true);
       setPreError(null);
@@ -1722,6 +1723,8 @@ function SessionPanelPage({
           ...(preContext.pageContext
             ? { page_context: preContext.pageContext }
             : {}),
+          // ql-20260825-001：首句附件（有值才带）。
+          ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
         });
         // R-02：成功才清空（失败路径输入保留在 catch 之外，可原地重试——
         // 暂存 team payload 同语义：失败保留，重试仍携带）。
@@ -1757,10 +1760,15 @@ function SessionPanelPage({
     // 2026-08-20 task-12（D-7）：附件非空允许空文本（看图说话）；纯文本仍守卫。
     if ((!prompt && pendingAttachments.length === 0) || prompt.length > MAX_PROMPT_LEN) return;
     // task-03（D-102）：预会话首句 → createSession 直发（不走队列——无既有
-    // session 可附着，R2 先例）；首句必须非空（后端 prompt 首句约束）。
+    // session 可附着，R2 先例）。
+    // ql-20260825-001（D-7 对齐）：附件非空允许空 prompt（看图说话）；首句
+    // 附件随 create 上送（此前被静默丢弃——回显缺失的根因）。
     if (!sessionId) {
-      if (!prompt) return;
-      void handlePreSessionSend(prompt);
+      if (!prompt && pendingAttachments.length === 0) return;
+      void handlePreSessionSend(
+        prompt,
+        pendingAttachments.map((a) => a.id),
+      );
       return;
     }
     // task-11（D-004 四路等价）：/team 前缀拦截——不直接发送，弹层确认后目标文本

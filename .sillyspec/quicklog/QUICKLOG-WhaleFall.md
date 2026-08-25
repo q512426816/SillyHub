@@ -257,3 +257,8 @@
 根因：两个 agent 各修了双 BOM bug 的一半（一方删源 BOM，另一方删 Dockerfile printf），叠加后镜像里零 BOM
 方案：补回 Dockerfile printf BOM 行（源文件无 BOM 保持仓库干净，Dockerfile 为唯一分发点打 BOM）
 结果：容器内 + LAN 端点 od 实测单 BOM（EF BB BF）；/api/health ok；CC 2.1.241；daemon bundle 最新
+
+## ql-20260825-001-f076 | 2026-08-25 13:50:27 | (quick 任务)
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）

@@ -162,9 +162,13 @@ class SessionCreateRequest(BaseModel):
     pydantic 默认忽略多余字段，旧前端继续上送 model 不会 422，仅不再生效。
     ``agent_profile_id``/``llm_provider_id`` 由 service 层解析（task-03），
     本 DTO 只透传 str（llm_provider_id 空串/"none" 语义=切回本机默认，task-05）。
+
+    ql-20260825-001：``attachment_ids`` 预会话首句附件（对齐 SessionInjectRequest
+    的 D-7 豁免——附件非空时 prompt 可为空，看图说话；上限 10 = 图 5 + 文 5，
+    逐 kind 校验归 service）。缺省空列表 = 旧请求体行为逐字节不变。
     """
 
-    prompt: str = Field(min_length=1, max_length=8000)
+    prompt: str = Field(min_length=0, max_length=8000)
     # 新页面双入口：指定 runtime（优先于 provider；解析归 task-03）。
     runtime_id: str | None = None
     # /runtimes 弹窗旧路径（D-002 零回归）：值非空时仍只收 claude/codex。
@@ -190,6 +194,8 @@ class SessionCreateRequest(BaseModel):
     team_mission: TeamMissionCreateBlock | None = None
     # 悬浮会话页面上下文（FR-5 / D-005）：缺省 None 零回归；数据服务端回查。
     page_context: PageContextCreateBlock | None = None
+    # ql-20260825-001：首句附件引用（session-attachments 上传端点产出的 id）。
+    attachment_ids: list[uuid.UUID] = Field(default_factory=list, max_length=10)
 
     @model_validator(mode="after")
     def _require_runtime_or_provider(self) -> SessionCreateRequest:
@@ -197,6 +203,14 @@ class SessionCreateRequest(BaseModel):
         # 防止 provider=None 落到 NOT NULL 的 agent_sessions.provider 列。
         if not self.runtime_id and not self.provider:
             raise ValueError("either runtime_id or provider must be provided")
+        return self
+
+    @model_validator(mode="after")
+    def _require_prompt_or_attachments(self) -> SessionCreateRequest:
+        # ql-20260825-001（D-7 对齐）：纯文本首句需非空 prompt；附件非空允许
+        # 空 prompt（看图说话）。旧请求体（无附件字段）行为不变。
+        if not self.prompt.strip() and not self.attachment_ids:
+            raise ValueError("prompt is required when no attachments are provided")
         return self
 
 

@@ -826,6 +826,10 @@ class SessionService:
         stage: str | None = None,
         first_run_mission_id: uuid.UUID | None = None,
         first_run_role: str | None = None,
+        # ql-20260825-001：预会话首句附件——校验/标记行/组装/回填复用 inject 路径
+        # 既有逻辑（D-6 引擎门控 / 归属 404 / 数量 422 / marker 行回显 /
+        # SESSION_INJECT attachments）。缺省 None = 旧调用行为逐字节不变。
+        attachment_ids: list[uuid.UUID] | None = None,
     ) -> SessionDispatchResult:
         """Create an interactive session + first-turn run + interactive lease.
 
@@ -847,7 +851,9 @@ class SessionService:
         入参（调用方传 mission.created_by，D-004@v1）。全缺省 None 零分支进入
         （既有 quick-chat / 变更会话 / 团队主控三路行为逐字节不变）。
         """
-        if not prompt or not prompt.strip():
+        # ql-20260825-001（D-7 对齐 inject）：纯文本首句需非空 prompt；附件
+        # 非空允许空 prompt（看图说话）。
+        if (not prompt or not prompt.strip()) and not attachment_ids:
             raise DaemonSessionNotActive(
                 "prompt must not be empty.",
                 details={"reason": "empty_prompt"},
@@ -893,6 +899,47 @@ class SessionService:
                 "either runtime_id or provider must be provided.",
                 details={"reason": "missing_provider"},
             )
+
+        # ── ql-20260825-001：首句附件校验（对齐 inject 路径 task-05 段）──
+        # D-6 引擎门控（仅 Claude 支持附件）/ 归属+存在 404 / 数量 422（图≤5、
+        # 文≤5）/ 保序。整体拒绝不部分生效：任一失败 raise → 无半成品落库。
+        validated_attachments: list = []
+        if attachment_ids:
+            if provider != "claude":
+                raise DaemonSessionAttachmentsUnsupported(
+                    "此引擎不支持会话附件（仅 Claude 支持多模态与文件注入）。",
+                    details={"provider": provider},
+                )
+            from app.modules.session_attachment.model import SessionAttachment
+
+            _att_rows = (
+                (
+                    await self._session.execute(
+                        select(SessionAttachment).where(
+                            SessionAttachment.id.in_(attachment_ids),
+                            SessionAttachment.user_id == user_id,
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if len(_att_rows) != len(set(attachment_ids)):
+                raise DaemonSessionNotFound(
+                    "部分附件不存在或无权访问。",
+                    details={"reason": "attachment_not_found"},
+                )
+            _image_n = sum(1 for r in _att_rows if r.kind == "image")
+            _file_n = sum(1 for r in _att_rows if r.kind == "file")
+            if _image_n > 5 or _file_n > 5 or (_image_n + _file_n) != len(_att_rows):
+                raise DaemonSessionAttachmentInvalid(
+                    "附件数量超限（图片≤5、文件≤5）或类型非法。",
+                    details={"image_count": _image_n, "file_count": _file_n},
+                )
+            _att_by_id = {r.id: r for r in _att_rows}
+            validated_attachments = [
+                _att_by_id[i] for i in dict.fromkeys(attachment_ids) if i in _att_by_id
+            ]
 
         # ── task-03：档案解析（D-013：只消费提示词维度，不做引擎过滤）──
         # 复用 AgentProfileService.get 的读可见性校验（与 GET /agent-profiles
@@ -1323,6 +1370,43 @@ class SessionService:
                     {"session_llm_provider_id": str(llm_provider_row.id)},
                 )
 
+            # ── ql-20260825-001：附件回填与组装（对齐 inject 路径 task-06 段）──
+            # 同事务完成：①session_id 回填（draft→bound 唯一前进迁移）；②多模态
+            # 门控判定 + payload 组装（D-4 闸门/降级路由），供下方首 turn
+            # SESSION_INJECT 携带（daemon 侧组装多模态块/落盘，2087 行契约）。
+            # 无附件路径零分支进入（与现状逐字节一致）。
+            create_inject_attachments: list[dict] = []
+            if validated_attachments:
+                from app.modules.session_attachment.capability import (
+                    resolve_session_gate,
+                )
+                from app.modules.session_attachment.service import (
+                    assemble_inject_attachments,
+                )
+                from app.modules.session_attachment.storage import (
+                    SessionAttachmentStorage,
+                )
+                from app.modules.storage.factory import get_storage_backend
+
+                for _att in validated_attachments:
+                    if _att.session_id is None:
+                        _att.session_id = session.id
+                        self._session.add(_att)
+
+                _gate = await resolve_session_gate(
+                    self._session,
+                    user_id=user_id,
+                    session_llm_provider_id=(
+                        llm_provider_row.id if llm_provider_row is not None else None
+                    ),
+                    agent_kind=provider,
+                )
+                create_inject_attachments = await assemble_inject_attachments(
+                    validated_attachments,
+                    supports_multimodal=_gate.supports_multimodal,
+                    storage=SessionAttachmentStorage(get_storage_backend()),
+                )
+
             # Backfill the triple binding fields + activate the session.
             session.runtime_id = dispatch.runtime_id
             session.lease_id = dispatch.lease_id
@@ -1356,11 +1440,25 @@ class SessionService:
             # （与 submit_messages 一致的 ``[:5000]`` 截断），user_input channel
             # 显式写、不经 _channel_from_event_type（与 agent service 的
             # USER_INPUT_CHANNEL 标准保持一致）。
+            # ql-20260825-001：附件标记行插头部（对齐 inject 路径 task-06 D-3，
+            # 前端 chips 回显数据源）——[附件:id|kind|name] 逐附件一行。
+            _user_input_content = prompt
+            if validated_attachments:
+                from app.modules.session_attachment.service import (
+                    attachment_marker_line,
+                )
+
+                _marker_lines = "\n".join(
+                    attachment_marker_line(r) for r in validated_attachments
+                )
+                _user_input_content = (
+                    f"{_marker_lines}\n{prompt}" if prompt else _marker_lines
+                )
             self._session.add(
                 AgentRunLog(
                     run_id=run.id,
                     channel="user_input",
-                    content_redacted=prompt[:5000],
+                    content_redacted=_user_input_content[:5000],
                     timestamp=now,
                 )
             )
@@ -1418,21 +1516,26 @@ class SessionService:
             log.warning("session_ready_timeout", session_id=str(session.id))
         control_ok = False
         if daemon_id is not None:
+            _create_inject_payload = {
+                "session_id": str(session.id),
+                "lease_id": str(dispatch.lease_id),
+                "run_id": str(run.id),
+                "prompt": prompt,
+                # gap-2：首 turn SESSION_INJECT 携带 lease 级 claim_token，
+                # daemon 存入 SessionState.claimToken。
+                "claim_token": dispatch.claim_token,
+                # design §5.3: payload carries the provider runtime_id so
+                # the daemon dispatches to the correct SessionManager.
+                "runtime_id": str(dispatch.runtime_id),
+            }
+            # ql-20260825-001：首句附件随首 turn 下发（对齐 inject 路径——仅
+            # 有附件时附加，旧 daemon 忽略未知键，协议向后兼容）。
+            if create_inject_attachments:
+                _create_inject_payload["attachments"] = create_inject_attachments
             control_ok = await hub.send_session_control(
                 daemon_id,
                 DAEMON_MSG_SESSION_INJECT,
-                {
-                    "session_id": str(session.id),
-                    "lease_id": str(dispatch.lease_id),
-                    "run_id": str(run.id),
-                    "prompt": prompt,
-                    # gap-2：首 turn SESSION_INJECT 携带 lease 级 claim_token，
-                    # daemon 存入 SessionState.claimToken。
-                    "claim_token": dispatch.claim_token,
-                    # design §5.3: payload carries the provider runtime_id so
-                    # the daemon dispatches to the correct SessionManager.
-                    "runtime_id": str(dispatch.runtime_id),
-                },
+                _create_inject_payload,
             )
         if not control_ok:
             # Wake-up delivered but control send failed: the daemon will still

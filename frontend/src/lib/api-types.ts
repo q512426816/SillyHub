@@ -17173,6 +17173,10 @@ export interface components {
          *     pydantic 默认忽略多余字段，旧前端继续上送 model 不会 422，仅不再生效。
          *     ``agent_profile_id``/``llm_provider_id`` 由 service 层解析（task-03），
          *     本 DTO 只透传 str（llm_provider_id 空串/"none" 语义=切回本机默认，task-05）。
+         *
+         *     ql-20260825-001：``attachment_ids`` 预会话首句附件（对齐 SessionInjectRequest
+         *     的 D-7 豁免——附件非空时 prompt 可为空，看图说话；上限 10 = 图 5 + 文 5，
+         *     逐 kind 校验归 service）。缺省空列表 = 旧请求体行为逐字节不变。
          */
         SessionCreateRequest: {
             /** Prompt */
@@ -17203,6 +17207,8 @@ export interface components {
             quicklog_id?: string | null;
             team_mission?: components["schemas"]["TeamMissionCreateBlock"] | null;
             page_context?: components["schemas"]["PageContextCreateBlock"] | null;
+            /** Attachment Ids */
+            attachment_ids?: string[];
         };
         /** SessionCreateResponse */
         SessionCreateResponse: {

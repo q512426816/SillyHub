@@ -2270,6 +2270,7 @@ async def create_session(
     # 归 service create 路径）。
     # task-08（2026-08-25-session-spec-binding / FR-04 / FR-06）：quicklog_id
     # 透传（对齐 change_id 既有透传形态；落绑定归 service 创建落库点）。
+    # ql-20260825-001：首句附件透传（校验/标记行/组装归 service）。
     result = await svc.create_session(
         user.id,
         provider=data.provider,
@@ -2284,6 +2285,7 @@ async def create_session(
         quicklog_id=data.quicklog_id,
         team_mission=data.team_mission,
         page_context=data.page_context,
+        attachment_ids=data.attachment_ids,
     )
     s = result.agent_session
     return SessionCreateResponse(

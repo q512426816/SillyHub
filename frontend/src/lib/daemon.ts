@@ -884,6 +884,11 @@ export async function createSession(
   // 2026-08-25-unified-floating-session（FR-5）：悬浮入口页面上下文透传（有值
   // 才带；后端服务端回查注入【页面上下文】前导，缺省零回归）。
   if (input.page_context !== undefined) body.page_context = input.page_context;
+  // ql-20260825-001：预会话首句附件透传（有值才带；校验/标记行/组装归后端
+  // create 路径，对齐 inject 的 attachment_ids 语义）。
+  if (input.attachment_ids !== undefined && input.attachment_ids.length > 0) {
+    body.attachment_ids = input.attachment_ids;
+  }
   return apiFetch<SessionCreateResponse>("/api/daemon/sessions", {
     method: "POST",
     json: body,
