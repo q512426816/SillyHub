@@ -304,6 +304,56 @@ export const FILE_MCP_SERVER_NAME = 'sillyhub-file';
 export const WORKER_MCP_SERVER_NAME = 'sillyhub-worker';
 
 /**
+ * task-05（2026-08-26-team-subsession-recursion / FR-04 / D-002@v1，design §5.C）：
+ * daemon 侧最大派发深度——分身工具集两档分层依据。
+ *
+ * **单源口径（与 backend 同值，改值必须两侧同步防漂移）**：backend
+ * ``app/modules/agent/mcp_tools.py`` ``MAX_DISPATCH_DEPTH``（task-02 定义，
+ * ``_dispatch_worker_core`` 派发门 O(1) 拒绝超深）与本常量各守一端——backend
+ * 拦「派得出但超深」的增量请求，daemon 拦「叶分身物理拿不到 dispatch_worker」
+ * 的工具面（双保险，design §7 递归风暴缓解行）。
+ *
+ * 语义：``worker_depth < MAX_DISPATCH_DEPTH`` → 非叶分身（1 层，可派孙层，
+ * 派工集 5 件）；``worker_depth >= MAX_DISPATCH_DEPTH`` → 叶（2 层孙，仅
+ * worker_done）。总深 3 层（主控 0 / 分身 1 / 孙 2，D-001@v1）。
+ */
+export const MAX_DISPATCH_DEPTH = 2;
+
+/**
+ * task-05（本卡）：分身深度 per-server env 键名（单一来源，mcp-config 写侧
+ * ``buildWorkerMcpServerConfig`` 与 mcp-server ``readEnv`` 读侧共用，对齐
+ * ``MCP_SESSION_ID_ENV`` 惯例）。**undefined 不写键 = 叶档兜底**（旧 lease 无
+ * worker_depth 宁少勿多，design §7 风险表）。
+ */
+export const MCP_WORKER_DEPTH_ENV = 'MCP_WORKER_DEPTH';
+
+/**
+ * task-05（本卡）：归一化分身深度——非负整数原样返回；undefined / 非整数 /
+ * 负数 / 空串 / 非数字字符串一律 ``undefined``（= 叶档兜底，宁少勿多）。
+ *
+ * 写侧（builder 收 ``ctx.workerDepth``）与读侧（mcp-server ``readEnv`` 解
+ * ``MCP_WORKER_DEPTH`` env 字符串）共用同一口径，防「写侧放行读侧拒绝」漂移。
+ */
+export function normalizeWorkerDepth(raw: unknown): number | undefined {
+  const n =
+    typeof raw === 'string'
+      ? raw.trim() === ''
+        ? Number.NaN
+        : Number(raw)
+      : raw;
+  return typeof n === 'number' && Number.isInteger(n) && n >= 0 ? n : undefined;
+}
+
+/**
+ * task-05（本卡）：非叶分身判定——深度有效且 ``< MAX_DISPATCH_DEPTH``（design
+ * §5.C 两档分层）。``depth`` 应先经 ``normalizeWorkerDepth`` 归一（本函数只做
+ * 档位比较，重复防御 ``>= 0`` 以容直接传入裸值）。
+ */
+export function isNonLeafWorkerDepth(depth: number | undefined): boolean {
+  return depth !== undefined && depth >= 0 && depth < MAX_DISPATCH_DEPTH;
+}
+
+/**
  * task-05（本变更）：file 模式三个 per-server env 键名（mcp-config 写侧与
  * mcp-server ``readEnv`` 读侧共用的单一来源；对齐 ``MCP_SESSION_ID_ENV`` 惯例）。
  * MCP 子进程只继承白名单 env + per-server env（spike-01 结论），上下文必须走
@@ -470,26 +520,33 @@ export function buildFileMcpServerConfig(
  * 与 ``buildDaemonMcpServerConfig`` 共用 ``node dist/mcp-server.js`` 入口与鉴权链
  * （MCP_SERVER_BACKEND_URL / MCP_SERVER_DAEMON_API_KEY 优先 / MCP_SERVER_DAEMON_TOKEN
  * 回落，task-09 P0 口径），差异：
- *   - ``MCP_TOOLSET=mission_worker``——mcp-server ``readEnv`` 切受限模式，仅注册
- *     ``worker_done`` 单工具（递归闸：无任何派发 / 编排工具，design §3 非目标）；
+ *   - ``MCP_TOOLSET=mission_worker``——mcp-server ``readEnv`` 切受限模式；task-05
+ *     （2026-08-26-team-subsession-recursion / D-002@v1，design §5.C）起按深度两档：
+ *     非叶（depth < MAX_DISPATCH_DEPTH）注册派工集 5 件，叶（depth 达上限或无键）
+ *     仅 ``worker_done``（P1 形态）；
  *   - 供 cli.ts ``workerMcpConfigProvider`` 组装，session-manager 分身分支
  *     （stage=mission_worker）注入 create / restore / reload 三路；
  *   - 会话 id（可选 ctx.sessionId）经 per-server env 写 MCP_SESSION_ID——生产链路
  *     由 session-manager ``injectMcpSessionId(config, sessionId, WORKER_MCP_SERVER_NAME)``
  *     统一补写（provider 不拼，闭包配置不被污染），本参数留给非注入链路（如测试）。
+ *   - 分身深度（可选 ctx.workerDepth，task-05 本卡）经 per-server env 写
+ *     MCP_WORKER_DEPTH——cli.ts provider 从 ``ctx.worker_depth``（task-04 链路，
+ *     lease.metadata.worker_depth → claim payload → daemon → snapshot 保档）透传；
+ *     **非负整数才写键，undefined / 非法值不写键 = 叶档兜底**（旧 lease 宁少勿多）。
  *
  * 空凭证仍构造配置（server 启动后 tool 调用返回结构化错误便于诊断，与
- * buildDaemonMcpServerConfig 容错一致）；sessionId 空值不写键（守卫风格）。
+ * buildDaemonMcpServerConfig 容错一致）；sessionId/workerDepth 非法或缺省不写键
+ * （守卫风格）。
  *
  * @param backendUrl        backend 根 URL（如 http://localhost:8000）
  * @param auth              daemon 凭证（apiKey 优先 / token 回落）
- * @param ctx               可选上下文（sessionId；生产注入链路缺省不传）
+ * @param ctx               可选上下文（sessionId / workerDepth；生产注入链路缺省不传 sessionId）
  * @param serverModulePath  可选，覆盖默认 ``dist/mcp-server.js`` 编译产物路径（测试用）
  */
 export function buildWorkerMcpServerConfig(
   backendUrl: string,
   auth: DaemonMcpAuth,
-  ctx: { sessionId?: string } = {},
+  ctx: { sessionId?: string; workerDepth?: number } = {},
   serverModulePath?: string,
 ): McpServerConfig {
   const env: Record<string, string> = {
@@ -505,6 +562,12 @@ export function buildWorkerMcpServerConfig(
   }
   if (ctx.sessionId) {
     env[MCP_SESSION_ID_ENV] = ctx.sessionId;
+  }
+  // task-05（本卡）：分身深度 env——normalizeWorkerDepth 非负整数才写键；
+  // undefined 不写键 = mcp-server 侧叶档兜底（旧 lease 兼容，宁少勿多）。
+  const workerDepth = normalizeWorkerDepth(ctx.workerDepth);
+  if (workerDepth !== undefined) {
+    env[MCP_WORKER_DEPTH_ENV] = String(workerDepth);
   }
   return {
     command: 'node',

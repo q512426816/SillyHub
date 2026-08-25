@@ -13,13 +13,26 @@
  *     MCP_TOOLSET=file + 上下文），会话注入归 task-06、worker 注入归 task-07。
  *
  * task-06（2026-08-25-team-subsession-governance / FR-03 / D-003@v1，design §5.C.1）：
- *   - ``mission_worker``：分身受限模式——仅注册 ``worker_done`` 单工具（调 backend
+ *   - ``mission_worker``：分身受限模式（P1 为仅 ``worker_done`` 单工具，调 backend
  *     task-07 worker_done 端点，X-Session-Id 会话定位），六处全量 registerTool
  *     （orchestration + file 工具）全部不注册。递归闸保持：分身拿不到
  *     dispatch_worker / converge 等派发工具。sillyhub-worker server 条目由
  *     mcp-config.ts ``buildWorkerMcpServerConfig`` 构造（env 注
  *     MCP_TOOLSET=mission_worker），cli.ts ``workerMcpConfigProvider`` 组装、
  *     session-manager 分身分支（stage=mission_worker）注入。
+ *
+ * task-05（2026-08-26-team-subsession-recursion / FR-04 / D-002@v1 / D-003@v2，
+ * design §5.C）：``mission_worker`` 工具集按分身深度两档硬编码——
+ *   - 非叶（``worker_depth < MAX_DISPATCH_DEPTH``，1 层分身）：注册派工集恰 5 件
+ *     （dispatch_worker / list_workers / get_worker_result / mission_status /
+ *     worker_done）——前 4 件复用 orchestration 既有注册（per-tool helper 共享，
+ *     禁第二份拷贝漂移）；hub-client 转发零改动（分身与主控同端点同链路，backend
+ *     靠调用方解析区分）；
+ *   - 叶（``worker_depth >= MAX_DISPATCH_DEPTH`` 或无键——旧 lease 兜底宁少勿多）：
+ *     维持 P1 形态仅 ``worker_done`` 单工具；
+ *   - converge_mission / report_progress 任何档位不注册（层 0 权不下放，D-002@v1）；
+ *   - 深度经 per-server env ``MCP_WORKER_DEPTH`` 注入（cli.ts provider 从
+ *     ctx.worker_depth 透传，task-04 链路），键缺席 = 叶档。
  *
  * spike-01（spikes/06-mcp-server）验证了 stdio MCP server + 1 tool 的协议链路；
  * 本文件扩展到生产 5 tool，handler 调 HubClient 方法（非 spike 的直接 fetch），
@@ -49,8 +62,10 @@
  *     mcpServers['sillyhub-daemon'].env per-server 注入（spike-01 管道），
  *     hub-client 给 MCP 5 端点附 X-Session-Id，backend 按会话定位活跃 mission）
  *   MCP_TOOLSET  工具集模式（task-05 本变更）：'file' = 仅文件 2 工具；
- *     'mission_worker' = 分身受限（仅 worker_done，task-06）；未设 / 其它值 =
- *     orchestration（编排常驻工具，缺省零回归）
+ *     'mission_worker' = 分身受限（task-05 P2 起按深度两档：非叶 5 件 / 叶仅
+ *     worker_done）；未设 / 其它值 = orchestration（编排常驻工具，缺省零回归）
+ *   MCP_WORKER_DEPTH  分身会话深度（task-05 2026-08-26-team-subsession-recursion，
+ *     mission_worker 模式两档分档依据；非负整数有效，未设 / 非法值 = 叶档兜底）
  *   MCP_RUN_ID  worker run id（file 模式：批任务 worker 场景，上传时作 multipart
  *     run_id 字段、列表时作 run_id query；task-07 task-runner 注入）
  *   MCP_ALLOWED_ROOT  上传允许根目录（file 模式；会话=cwd、worker=worktree 根，
@@ -66,6 +81,11 @@ import { readFile } from 'node:fs/promises';
 import { basename, extname, resolve as resolvePath, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { HubClient, HubHttpError, type HubClientAuth } from './hub-client.js';
+import {
+  isNonLeafWorkerDepth,
+  normalizeWorkerDepth,
+  MCP_WORKER_DEPTH_ENV,
+} from './mcp-config.js';
 
 // ── 配置（env）─────────────────────────────────────────────────────────────
 
@@ -95,7 +115,8 @@ export const WORKER_MCP_SERVER_NAME = 'sillyhub-worker';
 
 /**
  * 工具集模式：orchestration（缺省，6 编排常驻工具）| file（文件 2 工具）|
- * mission_worker（分身受限：仅 worker_done 单工具，task-06）。
+ * mission_worker（分身受限：task-05 P2 起按深度两档——非叶派工集 5 件 / 叶
+ * 仅 worker_done 单工具）。
  */
 export type McpToolset = 'orchestration' | 'file' | 'mission_worker';
 
@@ -112,6 +133,12 @@ interface McpServerEnv {
   runId: string;
   /** task-05（本变更）：上传允许根目录（file 模式，MCP_ALLOWED_ROOT 注入；缺失拒一切）。 */
   allowedRoot: string;
+  /**
+   * task-05（2026-08-26-team-subsession-recursion / design §5.C）：分身会话深度
+   * （mission_worker 模式，MCP_WORKER_DEPTH 注入）。undefined = 未设 / 非法值
+   * （旧 lease 兜底叶档，宁少勿多）。
+   */
+  workerDepth: number | undefined;
 }
 
 /**
@@ -139,6 +166,10 @@ export function readEnv(): McpServerEnv {
           : 'orchestration',
     runId: process.env.MCP_RUN_ID ?? '',
     allowedRoot: process.env.MCP_ALLOWED_ROOT ?? '',
+    // task-05（2026-08-26-team-subsession-recursion）：MCP_WORKER_DEPTH 经
+    // per-server env 注入（builder 写侧同款 normalize 口径），未设 / 非法值 →
+    // undefined（叶档兜底，宁少勿多）。
+    workerDepth: normalizeWorkerDepth(process.env[MCP_WORKER_DEPTH_ENV]),
   };
 }
 
@@ -274,27 +305,43 @@ export interface FileToolsetContext {
 export interface CreateMcpServerOptions extends FileToolsetContext {
   /**
    * 工具集模式，缺省 'orchestration'（编排常驻工具，零回归）；'file' = 仅文件
-   * 2 工具；'mission_worker' = 分身受限（仅 worker_done 单工具，task-06）。
+   * 2 工具；'mission_worker' = 分身受限（task-05 P2 起按深度两档：非叶派工集
+   * 5 件 / 叶仅 worker_done 单工具）。
    */
   toolset?: McpToolset;
+  /**
+   * task-05（2026-08-26-team-subsession-recursion / design §5.C）：分身会话深度
+   * （mission_worker 模式两档分档依据）。非负整数且 < MAX_DISPATCH_DEPTH →
+   * 非叶档（派工集 5 件）；达上限 / undefined / 非法值 → 叶档兜底（仅
+   * worker_done，P1 形态，宁少勿多）。生产由 ``runMcpServer`` 从 env
+   * ``MCP_WORKER_DEPTH`` 读入注入（cli.ts provider → mcp-config builder 写入）；
+   * 测试直接传。
+   */
+  workerDepth?: number;
 }
 
 /**
  * 构造 daemon MCP server 并注册工具（三模式）。
  *
- * - ``orchestration``（缺省）：6 编排常驻工具（本方法内既有注册，行为零变化）；
+ * - ``orchestration``（缺省）：6 编排常驻工具（per-tool helper 注册，行为零变化）；
  * - ``file``：仅 ``upload_file`` / ``list_uploaded_files``（D-003@v1），server
  *   名切换为 ``FILE_MCP_SERVER_NAME``（sillyhub-file，供客户端/日志识别）；
- * - ``mission_worker``（task-06 2026-08-25-team-subsession-governance / D-003@v1，
- *   design §5.C.1）：分身受限模式，仅 ``worker_done`` 单工具（``registerWorkerTools``），
- *   server 名切换为 ``WORKER_MCP_SERVER_NAME``（sillyhub-worker）。**递归闸铁律**：
- *   受限模式不注册 dispatch_worker / converge_mission 等任何编排工具——递归下放
- *   是 P2 独立决策（design §3 非目标），本模式禁开闸。
+ * - ``mission_worker``（task-06 / D-003@v1，task-05 2026-08-26-team-
+ *   subsession-recursion 起两档分层 / D-002@v1，design §5.C）：分身受限模式，
+ *   按分身深度两档硬编码——非叶（``opts.workerDepth < MAX_DISPATCH_DEPTH``）
+ *   注册派工集 5 件（dispatch_worker / list_workers / get_worker_result /
+ *   mission_status / worker_done，前 4 件复用 orchestration per-tool helper）；
+ *   叶（depth 达上限或无键）仅 ``worker_done``（P1 形态）。server 名切换为
+ *   ``WORKER_MCP_SERVER_NAME``（sillyhub-worker）。**层 0 权铁律**：
+ *   converge_mission / report_progress 任何档位不注册——只有主控（层 0）能
+ *   收敛整棵树；工具集是 depth 决定的固定治理面，非 profile 可配置能力
+ *   （D-003@v2）。
  *
  * @param client  HubClient 实例（测试可传 mock）；生产由 ``runMcpServer`` 用 env
  *   构造。tool handler 全部经此 client 调 backend。
- * @param opts    可选：toolset / sessionId / runId / allowedRoot（file 模式上下文，
- *   生产由 ``runMcpServer`` 从 env 读入注入；测试直接传）
+ * @param opts    可选：toolset / sessionId / runId / allowedRoot（file 模式上下文）
+ *   / workerDepth（mission_worker 两档分档依据）；生产由 ``runMcpServer`` 从
+ *   env 读入注入；测试直接传
  * @returns ``{ server, transport }``，调用方 ``await server.connect(transport)``
  *   启动。分离构造与连接便于测试断言 tool 注册（``listTools``）无需 stdio。
  */
@@ -327,14 +374,50 @@ export function createMcpServer(
     return { server };
   }
 
-  // task-06（design §5.C.1）：分身受限模式——仅 worker_done 单工具，六处全量
-  // registerTool（orchestration 6 工具 + file 2 工具）在此模式全部不注册。
+  // task-05（2026-08-26-team-subsession-recursion / FR-04 / D-002@v1，design
+  // §5.C）：分身受限模式两档硬编码分层——
+  //   - 非叶（worker_depth < MAX_DISPATCH_DEPTH，1 层分身）：派工集恰 5 件
+  //     （dispatch_worker / list_workers / get_worker_result / mission_status /
+  //     worker_done）——前 4 件复用 orchestration 既有注册（per-tool helper
+  //     共享，禁第二份拷贝漂移）；hub-client 转发零改动（分身调 dispatch_worker
+  //     与主控同端点同链路，backend 靠调用方解析区分）；
+  //   - 叶（depth 达上限或无键——旧 lease 兜底宁少勿多）：维持 P1 形态仅
+  //     worker_done（registerWorkerTools）；
+  //   - converge_mission / report_progress 任何档位不注册（层 0 权不下放，
+  //     D-002@v1）。
   if (toolset === 'mission_worker') {
+    if (isNonLeafWorkerDepth(normalizeWorkerDepth(opts.workerDepth))) {
+      registerDispatchWorkerTool(server, client);
+      registerListWorkersTool(server, client);
+      registerGetWorkerResultTool(server, client);
+      registerMissionStatusTool(server, client);
+    }
     registerWorkerTools(server, client);
     return { server };
   }
 
-  // ── dispatch_worker ──────────────────────────────────────────────────────
+  // ── orchestration（缺省）：6 编排常驻工具——task-05（2026-08-26-
+  // team-subsession-recursion）把内联 registerTool 抽成 per-tool helper，与
+  // mission_worker 非叶档共享同一注册实现（单一实现零拷贝）；注册内容与
+  // task-05 前内联形态逐字节一致（orchestration 零回归）。
+  registerDispatchWorkerTool(server, client);
+  registerGetWorkerResultTool(server, client);
+  registerListWorkersTool(server, client);
+  registerConvergeMissionTool(server, client);
+  registerReportProgressTool(server, client);
+  registerMissionStatusTool(server, client);
+
+  return { server };
+}
+
+// ── orchestration 编排工具注册（task-05 抽 per-tool helper：orchestration
+//    与 mission_worker 非叶档共享，注册实现单源禁拷贝）────────────────────────
+
+/**
+ * 注册 dispatch_worker（派工）——orchestration 缺省注册；mission_worker 非叶
+ * 档复用本注册（design §5.C 派工集 5 件之一，分身递归派孙层用）。
+ */
+function registerDispatchWorkerTool(server: McpServer, client: HubClient): void {
   // task-10（2026-08-22-team-session-unify / 审查 B1）：mission_id/workspace_id
   // 转可选——backend 按 X-Session-Id 定位活跃 mission（懒建兜底），显式传参仅作
   // 越权校验锚。objective 仍必填。描述重写为「能力说明书」（何时派团队 / 如何拆解 /
@@ -442,8 +525,13 @@ export function createMcpServer(
       }
     },
   );
+}
 
-  // ── get_worker_result ────────────────────────────────────────────────────
+/**
+ * 注册 get_worker_result（读单个分身产出）——orchestration 缺省注册；
+ * mission_worker 非叶档复用本注册（design §5.C：分身对下一层只读自查）。
+ */
+function registerGetWorkerResultTool(server: McpServer, client: HubClient): void {
   // task-10（审查 B1）：ws/mid 转可选（会话上下文定位），worker_id 仍必填。
   server.registerTool(
     'get_worker_result',
@@ -485,8 +573,13 @@ export function createMcpServer(
       }
     },
   );
+}
 
-  // ── list_workers ─────────────────────────────────────────────────────────
+/**
+ * 注册 list_workers（列分身状态）——orchestration 缺省注册；mission_worker
+ * 非叶档复用本注册（design §5.C：分身核对下一层子任务进展）。
+ */
+function registerListWorkersTool(server: McpServer, client: HubClient): void {
   // task-10（审查 B1）：ws/mid 转可选（会话上下文定位）。
   server.registerTool(
     'list_workers',
@@ -521,8 +614,14 @@ export function createMcpServer(
       }
     },
   );
+}
 
-  // ── converge_mission ─────────────────────────────────────────────────────
+/**
+ * 注册 converge_mission（收敛合并）——**仅 orchestration 注册**：mission_worker
+ * 任何档位不注册（层 0 权不下放，design §5.C / D-002@v1——只有主控会话或人工
+ * JWT 能收敛整棵树）。
+ */
+function registerConvergeMissionTool(server: McpServer, client: HubClient): void {
   // task-10（审查 B1 / D-010）：ws/mid 转可选；converge 按会话上下文解析 mission，
   // 分身未全终态时 backend 返回 status=busy（等待后重试），全终态置 converged。
   server.registerTool(
@@ -559,8 +658,13 @@ export function createMcpServer(
       }
     },
   );
+}
 
-  // ── report_progress ──────────────────────────────────────────────────────
+/**
+ * 注册 report_progress（主控决策日志）——**仅 orchestration 注册**：
+ * mission_worker 任何档位不注册（主控审计轨迹专属，design §5.C / D-002@v1）。
+ */
+function registerReportProgressTool(server: McpServer, client: HubClient): void {
   // task-10（审查 B1）：ws/mid/run_id 转可选——backend 按 X-Session-Id 解析活跃
   // mission 与主控 run；message 仍必填。
   server.registerTool(
@@ -612,8 +716,13 @@ export function createMcpServer(
       }
     },
   );
+}
 
-  // ── mission_status ────────────────────────────────────────────────────────
+/**
+ * 注册 mission_status（团队任务状态只读查询）——orchestration 缺省注册；
+ * mission_worker 非叶档复用本注册（design §5.C 派工集 5 件之一）。
+ */
+function registerMissionStatusTool(server: McpServer, client: HubClient): void {
   // task-11（2026-08-24-session-team-mission-context / FR-02 / D-005@v1）：第 6
   // 个常驻工具——只读查询当前会话团队任务状态。参数全可选（X-Session-Id 会话
   // 上下文定位，显式传参仅作越权校验锚，同 task-10 审查 B1 模式）。无活跃
@@ -655,8 +764,6 @@ export function createMcpServer(
       }
     },
   );
-
-  return { server };
 }
 
 // ── file 工具集注册（task-05 2026-08-23-agent-file-upload-mcp / D-003@v1）─────
@@ -791,15 +898,18 @@ function registerFileTools(
 // ── mission_worker 受限工具集（task-06 2026-08-25-team-subsession-governance）──
 
 /**
- * 注册分身受限工具集（仅 ``MCP_TOOLSET=mission_worker`` 模式调用）。
+ * 注册分身受限工具集 ``worker_done``（仅 ``MCP_TOOLSET=mission_worker`` 模式调用）。
  *
- * 工具集**硬编码单工具** ``worker_done``（design §5.C.1 / D-003@v1）：分身干完后
+ * 工具集**硬编码单工具** ``worker_done``（design §5.C / D-003@v1）：分身干完后
  * 显式上报完成信号——backend 置位 ``worker_done_at`` + summary 落 AgentArtifact
  * 挂首 run + 全分身完成时唤醒主控（task-07 ``_worker_done_core``）。
  *
- * **递归闸铁律**（design §3 非目标 / §7 风险表）：本函数禁含 dispatch_worker /
- * get_worker_result / list_workers / converge_mission / report_progress /
- * mission_status 等任何编排工具——分身拿不到派发能力，递归下放是 P2 独立决策。
+ * task-05（2026-08-26-team-subsession-recursion / D-002@v1，design §5.C）：本函数
+ * 是**叶档**（depth 达上限或无键——旧 lease 兜底）的完整工具集，也是非叶档
+ * （5 件派工集）的第 5 件——``createMcpServer`` 非叶分支先注册 4 个派工/只读
+ * helper 后仍调本函数收尾。converge_mission / report_progress 永不进本函数
+ * （层 0 权不下放）；叶分身拿不到 dispatch_worker——物理不可再派（深度双保险
+ * 的 daemon 端，backend 派发门 400 是另一端）。
  *
  * 契约对齐 backend ``WorkerDoneRequest``（task-07 落地）：``summary`` 必填；
  * ``workspace_id`` / ``mission_id`` 可选（仅作越权校验锚）；会话定位由
@@ -817,8 +927,8 @@ function registerWorkerTools(server: McpServer, client: HubClient): void {
         'summary 一段话说明：做了什么、产出文件路径（如有）、关键结论。' +
         '【重要】调用后平台会把你的 summary 转交主控并可能触发团队收敛——' +
         '确保真的干完再调；追问重开工后干完可再次调用（取最新置位）。' +
-        '【不要】调用派发 / 收敛类工具（本受限环境没有，也不需要）——完成信号' +
-        '上报后即可结束本轮等待主控收敛。' +
+        '【不要】调用 converge_mission / report_progress（分身受限环境永不提供，' +
+        '收敛是主控层 0 权）——完成信号上报后即可结束本轮等待主控收敛。' +
         '响应 { mission_id, session_id, run_id, artifact_id, worker_done_at,' +
         ' all_workers_done, orchestrator_notified }。',
       inputSchema: {
@@ -894,13 +1004,15 @@ export async function runMcpServer(): Promise<void> {
     ...(env.sessionId ? { sessionId: env.sessionId } : {}),
   };
   const client = new HubClient(env.backendUrl || 'http://localhost:8000', auth);
-  // task-05（本变更）：双模式——env 全量透传（toolset + file 上下文），
-  // 缺省 orchestration 与旧调用完全一致（零回归）。
+  // task-05（2026-08-23 双模式；2026-08-26-team-subsession-recursion 增深度档）：
+  // env 全量透传（toolset + file 上下文 + worker_depth），缺省 orchestration 与
+  // 旧调用完全一致（零回归）。
   const { server } = createMcpServer(client, {
     toolset: env.toolset,
     sessionId: env.sessionId,
     runId: env.runId,
     allowedRoot: env.allowedRoot,
+    workerDepth: env.workerDepth,
   });
   if (env.toolset === 'file' && !env.allowedRoot) {
     // R-01 fail-closed 提示：server 照常启动，upload_file 一律结构化报错。
