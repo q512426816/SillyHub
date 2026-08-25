@@ -214,7 +214,7 @@ worker_done 成为唯一正确唤醒源）。
 
 | 操作 | 文件路径 | 说明 |
 |---|---|---|
-| 新增 | backend/migrations/versions/<new>_agent_session_parent_worker_done.py | agent_sessions 加 parent_session_id/worker_done_at + 索引 |
+| 新增 | backend/migrations/versions/20260825210000_agent_session_parent_worker_done.py | agent_sessions 加 parent_session_id/worker_done_at + 索引 |
 | 修改 | backend/app/modules/agent/model.py | AgentSession 加两列；mission_worker_sessions / resolve_mission_for_session 辅助查询 |
 | 修改 | backend/app/modules/agent/mcp_tools.py | _dispatch_worker_core 换三元组；worker_done 端点（summary 挂首 run，迟到 409）；_converge_core busy 判据；list_workers 子会话行化 |
 | 修改 | backend/app/modules/agent/mission.py | is_worker_complete / mission_derive_status（虚拟 run 映射包装） |
