@@ -137,6 +137,8 @@ class TestBuildPageContextPreamble:
         assert "智慧园区一期" in preamble
         assert "PM-2026-001" in preamble
         assert "进行中" in preamble
+        # ql-20260825-008：ppm 实体页说明书同样来自 page_docs/*.md。
+        assert "## 功能定位" in preamble
 
     @pytest.mark.asyncio
     async def test_long_values_truncated_to_120(self, db_session) -> None:
@@ -205,9 +207,9 @@ class TestGenericPagePreamble:
         out = await build_page_context_preamble(db_session, "generic_page", None, "settings_mcp")
         assert out is not None
         # task-13：标签 + 页面说明书（功能/使用）——AI 能回答"这是什么页面/怎么用"。
+        # ql-20260825-008：说明书升级为 page_docs/*.md 结构化文档（功能定位等章节）。
         assert "- 页面：设置 · MCP" in out
-        assert "- 功能：" in out
-        assert "- 使用：" in out
+        assert "## 功能定位" in out
         assert "MCP" in out
 
     @pytest.mark.asyncio
@@ -219,6 +221,24 @@ class TestGenericPagePreamble:
             is None
         )
         assert await build_page_context_preamble(db_session, "generic_page", None, None) is None
+
+
+class TestPageManualsIntegrity:
+    """ql-20260825-008：page_docs/*.md 知识库完整性守护——每个注册页面
+    （含 ppm_project 实体页）都必须有非空说明书，且为结构化专业文档
+    （含「功能定位」章节），防"加了注册键忘了写说明书"静默退化。"""
+
+    def test_every_registered_page_has_structured_manual(self) -> None:
+        from app.modules.daemon.session.context import (
+            PAGE_MANUALS,
+            PAGE_ROUTE_LABELS,
+            PPM_PROJECT_MANUAL_KEY,
+        )
+
+        expected_keys = {*PAGE_ROUTE_LABELS, PPM_PROJECT_MANUAL_KEY}
+        assert set(PAGE_MANUALS) == expected_keys
+        for key, text in PAGE_MANUALS.items():
+            assert "## 功能定位" in text, key
 
 
 # ── C. create 路径拼接（t09 范式）────────────────────────────────────────────
@@ -333,9 +353,8 @@ class TestWorkspacePreamble:
         assert "multi-agent-platform" in out
         assert "app" in out
         assert "C:/repo/map" in out
-        # task-13：实体 + 工作区页面说明书。
-        assert "- 功能：" in out
-        assert "- 使用：" in out
+        # task-13：实体 + 工作区页面说明书（ql-20260825-008 起为 md 结构化文档）。
+        assert "## 功能定位" in out
 
     @pytest.mark.asyncio
     async def test_workspace_unknown_id_returns_none(self, db_session) -> None:

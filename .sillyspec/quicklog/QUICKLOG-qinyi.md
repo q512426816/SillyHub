@@ -206,3 +206,16 @@
 方案：session-panel dialog 组件镜像 page 管线：附件状态三件套+门控（codex 引擎或无 sessionId 首句禁，新 attachmentsDisabledTitle 区分原因文案）+D-7 附件豁免空文本+enqueue 带 ids 与标记行+submitFollowup 透传 injectSession（无附件保持两参调用形态）+投递/移除/新建三处元数据清理+排队条 onRemove 补清理
 结果：新建 5 用例先红后绿；daemon+sessions 34 文件 499 passed；tsc 0 错；eslint 0 error
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/session-input-bar.tsx
+
+## ql-20260825-008-e1a2 | 2026-08-25 15:06:16 | 页面说明书知识库升级：内联小抄 → page_docs/*.md 结构化专业文档
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/session/page_docs/*.md（新建 13 份说明书：12 注册页 + ppm_project_detail 实体页，结构=功能定位/核心概念/页面结构与操作/典型工作流/常见问题）
+- backend/app/modules/daemon/session/context.py（PAGE_MANUALS 内联字典 → _load_page_manuals() 从 page_docs/ 读文件，缺失页 log.warning 降级仅标签；ppm 分支硬编码"功能/使用"两行改走 ppm_project_detail.md；新增 PPM_PROJECT_MANUAL_KEY 常量）
+- backend/app/modules/daemon/tests/test_page_context_preamble.py（断言从"- 功能：/- 使用："改为"## 功能定位"；新增 TestPageManualsIntegrity 键覆盖+结构完整性守护）
+需求：用户反馈说明书"太简单了，要专业点"，并提议集成 .sillyspec/docs+knowledge 文档（经评估 dev 视角文档不适合直接注入用户会话，用户拍板先只完成说明书升级；向量检索留作二期）
+根因：ae00176b 首版为 12 条 ≤6 行内联小抄，信息密度不足以支撑专业使用指导；且内联在 .py 里不便持续维护
+方案：说明书落盘为独立 markdown（与代码同仓演进，backend Dockerfile `COPY . .` 整树进镜像，部署零额外配置）；加载在模块 import 时一次完成（OSError 静默降级不阻断会话）；完整性由测试守护防"加注册键忘写说明书"
+结果：19/19 前导测试绿（含新增完整性守护）；daemon 模块全量 1152 passed；ruff/mypy 0 问题
+审计：⚖️ 工作区存在并行会话未提交改动（daemon/service.py、session/service.py、前端多文件属 ql-002/004/006/007 在途），本次仅范围提交本条目文件
