@@ -31,10 +31,7 @@ import {
   X,
 } from "lucide-react";
 
-import {
-  SessionPanel,
-  type SessionPreContext,
-} from "@/components/daemon/session-panel";
+import { SessionPanel } from "@/components/daemon/session-panel";
 import { PreSessionPicker } from "@/components/sessions/pre-session-picker";
 import { resolveDefaultMachineId } from "@/components/sessions/sessions-portal";
 import {
@@ -289,7 +286,15 @@ function FloatingDrawerBody({
               sessionId={null}
               machines={machines}
               llmProviders={providers}
-              preContext={preContext as SessionPreContext}
+              // task-12（用户实测反馈③：/workspaces 新建会话仍无注入）：store 的
+              // preContext 与 pageContext 是两个独立字段——创建轮（预会话首句
+              // createSession）读 preContext.pageContext，此前直传 store.preContext
+              // 恒缺 pageContext，导致 UI 新建会话一律不注入（API 级 E2E 绕过
+              // UI 故未暴露）。此处显式合并（显式入口上下文 ?? URL 派生兜底）。
+              preContext={{
+                ...preContext,
+                pageContext: effectivePageCtx ?? undefined,
+              }}
               onPreSessionCreated={handlePreSessionCreated}
               pageContextOverride={derivedPageCtx}
             />

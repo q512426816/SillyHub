@@ -22,8 +22,17 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/components/daemon/session-panel", () => ({
-  SessionPanel: (props: { sessionId: string | null }) => (
-    <div data-testid="mock-session-panel" data-session={props.sessionId ?? "null"}>
+  // task-12：透出收到的 preContext.pageContext——创建轮上下文是否真正送达
+  // 面板（用户实测反馈③：UI 新建会话恒不注入的根因即此 props 断链）。
+  SessionPanel: (props: {
+    sessionId: string | null;
+    preContext?: { pageContext?: unknown } | null;
+  }) => (
+    <div
+      data-testid="mock-session-panel"
+      data-session={props.sessionId ?? "null"}
+      data-pagectx={JSON.stringify(props.preContext?.pageContext ?? null)}
+    >
       panel
     </div>
   ),
@@ -114,10 +123,33 @@ describe("FloatingSessionHost", () => {
     expect(drawer).toBeInTheDocument();
     expect(drawer.dataset.open).toBe("true");
     // 自动解析默认机器（m-1 → rt-1 claude）进预会话。
-    await screen.findByTestId("mock-session-panel");
+    const panel = await screen.findByTestId("mock-session-panel");
     const s = useFloatingSessionStore.getState();
     expect(s.preContext?.runtimeId).toBe("rt-1");
     expect(s.pageContext).toEqual({ page_key: "ppm_project", project_id: "p-1" });
+    // task-12（用户实测反馈③回归锚）：pageContext 必须真正进入面板的
+    // preContext props（创建轮 createSession 的数据源）——此前断链致 UI
+    // 新建会话恒不注入。
+    expect(panel.dataset.pagectx).toBe(
+      JSON.stringify({ page_key: "ppm_project", project_id: "p-1" }),
+    );
+  });
+
+  it("URL 派生上下文同样送达面板（/workspaces 新建会话注入锚点）", async () => {
+    pathnameRef.current = "/workspaces";
+    render(wrap(<FloatingSessionHost />));
+    act(() => {
+      useFloatingSessionStore.getState().openDrawer();
+    });
+    // 空态点「新会话」→ 默认机器解析进预会话。
+    const btn = await screen.findByTestId("floating-new-session", undefined, {
+      timeout: 2000,
+    });
+    btn.click();
+    const panel = await screen.findByTestId("mock-session-panel");
+    expect(panel.dataset.pagectx).toBe(
+      JSON.stringify({ page_key: "generic_page", route_key: "workspaces" }),
+    );
   });
 
   it("最小化保活：抽屉隐藏但不卸载，胶囊出现，恢复后展开", () => {
