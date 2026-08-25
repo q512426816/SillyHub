@@ -248,10 +248,11 @@ export default function LoginPage() {
 function BrandPanel() {
   return (
     <section className="relative hidden flex-1 flex-col overflow-hidden lg:flex">
-      {/* 品牌渐变底(brand-700 → brand-800 → 深 slate-950;blue 主题=原深蓝观感) */}
+      {/* 品牌渐变底(brand-700 → brand-800 → 深 slate-950;blue 主题=原深蓝观感;
+          brand-panel-gradient=暗色深青渐变覆盖钩子 ql-20260824-017) */}
       <div
         aria-hidden
-        className="absolute inset-0 bg-gradient-to-br from-brand-700 via-brand-800 to-slate-950"
+        className="brand-panel-gradient absolute inset-0 bg-gradient-to-br from-brand-700 via-brand-800 to-slate-950"
       />
       {/* 细网格纹理 */}
       <div

@@ -21,7 +21,9 @@ export function WorkspaceHeroHeader({
   return (
     <section
       className={cn(
-        "relative overflow-hidden rounded-lg bg-gradient-to-br from-brand-700 via-brand-800 to-slate-950 px-6 py-6 text-white shadow-sm",
+        // brand-panel-gradient：暗色下深青渐变覆盖钩子（ql-20260824-017，
+        // from-brand-700/800 在 dark 映射亮青档，白字标题发白）
+        "brand-panel-gradient relative overflow-hidden rounded-lg bg-gradient-to-br from-brand-700 via-brand-800 to-slate-950 px-6 py-6 text-white shadow-sm",
       )}
     >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">

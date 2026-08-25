@@ -311,3 +311,16 @@
 根因：四处页面（变更文件树/知识库/扫描文档/团队任务块）裸渲染 MarkdownPreview 未经 MarkdownText 包装，暗色下库默认画布白底漏出且表格覆盖规则不命中
 方案：统一改走 MarkdownText 组件（文件预览用 reading 尺寸、团队任务块用 compact），自带透明底与主题前景并命中表格覆盖规则；清理四处 dynamic 与插件散引用
 结果：tsc 零错误；受影响 3 测试文件 14 用例绿；前端全量 194 文件 2186 用例全绿
+
+## ql-20260825-015-a2a7 | 2026-08-25 20:52:51 | 暗色工作区标题偏白修复
+状态：已完成
+关联变更：2026-08-23-frontend-dark-theme
+文件：
+- frontend/src/components/workspace/hero-header.tsx（加 brand-panel-gradient 钩子类）
+- frontend/src/app/(auth)/login/page.tsx（同）
+- frontend/src/app/globals.css（dark 深青渐变覆盖规则）
+需求：暗色工作区标题偏白修复
+根因：hero 头图与登录品牌面板的 from-brand-700 via-brand-800 渐变在青色暗色下映射亮青档 cyan-300/200，白字标题压亮青发白发灰
+方案：两处加 brand-panel-gradient 标记类，dark 下 CSS 覆盖为深青渐变 cyan-700 到 800 到 950 系（方向对齐 bg-gradient-to-br），白字对比恢复约 5:1；浅色两主题零覆盖
+结果：tsc 零错误；组件测试 23 文件 203 用例全绿；容器重建后实测登录面板 dark 渐变 rgb(14,116,144)→(2,6,23) 生效
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/floating/floating-session-host.tsx

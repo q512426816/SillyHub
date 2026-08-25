@@ -689,6 +689,15 @@
   border-color: var(--color-border);
 }
 
+/* ---- 品牌大面板渐变(ql-20260824-017,用户反馈工作区标题偏白) ----
+   hero 头图/登录 BrandPanel 的 from-brand-700 via-brand-800 在 dark 映射到
+   亮青档(cyan-300 #67e8f9 / cyan-200 #a5f3fc),白字压亮青=标题发白发灰;
+   dark 下改深青渐变(cyan-700→800→950 系,白字对比恢复 ~5:1),
+   方向对齐 bg-gradient-to-br(135deg);浅色两主题不覆盖。 */
+[data-theme="dark"] .brand-panel-gradient {
+  background-image: linear-gradient(to bottom right, #0e7490, #155e75, #020617);
+}
+
 /* ---- 扩展色族批有意豁免清单(非 dark 残留,留档备查) ----
    - 实心 bg-*-500 及更深实色状态/品牌块:bg-red-500/600(hover:bg-red-700 同)、
      bg-amber-500、bg-yellow-500、bg-green-500、bg-orange-500、
