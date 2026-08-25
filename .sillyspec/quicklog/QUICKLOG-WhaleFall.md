@@ -267,7 +267,10 @@
 方案：后端 SessionCreateRequest 补 attachment_ids（D-7 对齐允许空 prompt 看图说话）+ create_session 复用 inject 附件逻辑（校验/标记行回显/回填/SESSION_INJECT attachments）+ facade/router 透传；前端 createSession 上送 + 预会话放开纯附件首句；gen:types 成对更新
 结果：新增 9 后端测试全绿 + 既有 create 15 用例零回归 + 前端全量 2169 绿 + ruff/mypy 通过；已提交 ac43cd50；Docker 待重新部署
 
-## ql-20260825-002-b479 | 2026-08-25 14:32:00 | 首句双提交修复——daemon create 即推 firstPrompt + backend SESSION_INJECT 再提交同句（智能体收到两次、user_input 双日志），改为 deferred first prompt（cr…
-状态：进行中
+## ql-20260825-002-b479 | 2026-08-25 15:05:00 | 首句双提交修复——deferred first prompt + 前端存量显示归并
+状态：已完成
 关联变更：（无）
-文件：（见实际改动）
+文件：sillyhub-daemon/src/interactive/session-manager.ts（deferred first prompt：create 挂起 firstPrompt 等 SESSION_INJECT 消费、10s fallback 兜底、end/fail 清 timer）、sillyhub-daemon/src/daemon.ts（删 user_input 重复上报）、frontend/src/components/daemon/runtime-session-helpers.tsx（logsToTurns 按剥标记行主体归组、marker 版优先）
+根因：daemon create 即把 lease metadata 的 firstPrompt 入队提交并上报一条 user_input，backend create_session 又落一条 user_input 并 SESSION_INJECT 再提交同句——长期既有 bug（旧纯文本会话库中也是两条相同 user_input），agent 实际收到两次首句；带附件后一条 marker 版一条裸文本版，前端渲染两个气泡才暴露（[74b5531e / e6900bc2 会话实测]）。
+方案：deferred first prompt（create 不入队，挂起等权威 SESSION_INJECT）+ 删 daemon 侧重复上报 + 前端存量双日志归并显示。
+结果：daemon 新增 4 用例 + 全量 2711 绿（并发 inject 33/33 零回归）；frontend 新增 4 用例 + 全量 2173 绿；已提交 7cbcc362；daemon bundle 已重新构建。注：sillyspec CLI 3.27.5 的 quick --done 因 complete-handlers.js 引用 shared.js 不存在的导出 collectOtherQuickSessionDeclarations 而崩溃（工具缺陷，本条目由人工补写）。
