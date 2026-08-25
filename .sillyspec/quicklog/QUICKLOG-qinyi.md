@@ -347,7 +347,11 @@
 方案：移除 @pytest.mark.xfail 装饰器使用例回归普通 PASS 守卫，docstring 去掉失效的「冲突 canary」括注
 结果：test_mcp_tools.py 全文件 51 passed 0 xfailed、ruff check/format 过、mypy 该文件 0 问题
 
-## ql-20260826-002-1db8 | 2026-08-26 01:51:38 | P1 verify NOTES 次要跟进清偿：前端 lib/daemon.ts TeamMissionWorkerSummary 补 sub_session_id/first_run_id 手写类型字段 + control.py activ…
-状态：进行中
+## ql-20260826-002-1db8 | 2026-08-26 01:51:38 | P1 verify NOTES 次要跟进清偿：前端手写类型补字段 + control 计数去重
+状态：已完成
 关联变更：（无）
 文件：frontend/src/lib/daemon.ts, backend/app/modules/agent/control.py
+需求：P1 verify NOTES 次要跟进清偿：前端手写类型补字段 + control 计数去重
+根因：QA reviewerNotes 两项次要跟进：手写类型源落后组件内临时补齐；双计数实现逐行重复
+方案：daemon.ts 补 sub_session_id/first_run_id；control 抽 _worker_form_count 统一
+结果：28 passed + mypy/ruff/tsc 零错，已提交（ql-20260826-002）
