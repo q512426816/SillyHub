@@ -17,12 +17,16 @@
 
 ### P0 存量 bug 修复（与子会话解耦，先行）
 
-- [ ] **P0-1** daemon 会话持久化恢复丢 stage：`session-store-persistence.ts`
+- [x] **P0-1** daemon 会话持久化恢复丢 stage：`session-store-persistence.ts`
   `validateRecord` 不回填 `stage/mcpRefs/skillRefs/effectiveAllowedRoots`，与
   `interactive/types.ts:646` 声明矛盾。后果：重启后 mission_worker 会话 stage 变空 →
   谓词命中 → 被静默注入派工工具，防递归防线重启即失效。
-- [ ] **P0-2** backend `cancel_lease` 对 interactive 的 lease-None 分支不发
+  **已完成（ql-20260825-012-89d6，commit 91227636）**：isStringArray 守卫 + 四字段容错回填。
+- [x] **P0-2** backend `cancel_lease` 对 interactive 的 lease-None 分支不发
   SESSION_END（`lease_service.py:432-448`，注释自认是内存僵尸缺口）。
+  **已完成（ql-20260825-013-c299，commit 6e0b6396）**：by-run miss 后沿
+  run→session→lease_id 回捞 interactive lease 复用主路径；测试 fixture 一并改回
+  生产形态（原误写 agent_run_id=run_id 掩盖盲区）。
 
 ### P1 子会话治理地基（主变更，brainstorm 后实施）
 
