@@ -382,3 +382,8 @@
 方案：F1 trim 回落默认；F3 清理前移；F4 normalizeWorkerDepth 单源；F2 useMemo；F5+F7 双口径分组+JSON 加固；补 5 个回归与边界测试
 结果：daemon interactive 633 passed 与 panel 49 passed 与 daemon tsc 零错，已提交
 审计：⚖️ 归属切分：6 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_page_context_preamble.py, frontend/src/components/daemon/session-panel.tsx, frontend/src/hooks/use-page-session-context.test.ts, frontend/src/hooks/use-page-session-context.ts, frontend/src/stores/floating-session.ts, backend/app/modules/daemon/session/page_docs/_platform_map.md
+
+## ql-20260826-005-5ef5 | 2026-08-26 07:17:51 | 前端易用性三处修复：登录回车兜底提交/登录名指路提示/运行中分身最新动作预览（后端 latest_action 字段）
+状态：进行中
+关联变更：（无）
+文件：frontend/src/app/(auth)/login/page.tsx, backend/app/modules/daemon/router.py, backend/app/modules/daemon/schema.py, backend/openapi.json, frontend/src/lib/api-types.ts, frontend/src/components/daemon/team-task-block.tsx, frontend/src/lib/daemon.ts
