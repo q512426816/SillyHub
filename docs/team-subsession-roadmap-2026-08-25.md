@@ -30,6 +30,14 @@
 
 ### P1 子会话治理地基（主变更，brainstorm 后实施）
 
+> **brainstorm 已完成（2026-08-25）**：变更 `2026-08-25-team-subsession-governance`
+> 四件套 + decisions.md 落盘（会话树 parent_session_id / worker_done 完成信号 /
+> 分身受限 MCP server 仅含 worker_done / converge-cancel 沿树批量收口 /
+> owner=mission 创建者 / 虚拟 run 映射判据包装；独立 Grill 两轮 pass）。
+> 下一步 `sillyspec run plan --change 2026-08-25-team-subsession-governance` →
+> execute → verify → archive。注意：并发会话（session-queue）未提交改动与
+> P1 文件清单重叠（daemon/session/service.py、daemon/router.py），execute 前先落地。
+
 - [ ] 子会话↔mission 挂载链（AgentSession 加 mission 锚或 parent_session_id；
   现状 `get_active_mission_for_session` 只认第 0 层主会话，子会话 turn run 挂不上
   mission_id/role → 治理门/成本/kill 名单漏算；worker 会话无 workspace_id）。
