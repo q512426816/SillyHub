@@ -693,6 +693,9 @@ class DaemonService:
         # 2026-08-20-session-multimodal-attachments task-05：附件引用透传
         # （校验/组装在 session 子域 _inject_into_session）。
         attachment_ids: list[uuid.UUID] | None = None,
+        # ql-20260825-004：每轮注入携带当前页面上下文（服务端回查注入
+        # 【页面上下文】前导，组装归 session 子域 _inject_into_session）。
+        page_context: PageContextCreateBlock | None = None,
     ) -> SessionDispatchResult:
         return await self._sess.inject_session(
             session_id,
@@ -701,6 +704,7 @@ class DaemonService:
             agent_profile_id=agent_profile_id,
             llm_provider_id=llm_provider_id,
             attachment_ids=attachment_ids,
+            page_context=page_context,
         )
 
     async def interrupt_session(

@@ -1006,6 +1006,41 @@ class SessionService:
             config["model"] = model
 
         try:
+            # ── ql-20260825-002-3e67（P2 二审 #5）：前导组装提前到写事务外 ──
+            # change/page 前导 = 只读查询 + asyncio.to_thread 磁盘遍历；组装完毕
+            # 立即 commit 收口只读事务，首个写 flush（AgentSession INSERT）晚于该
+            # commit——磁盘 IO 不落在写事务窗口内（回归守卫：
+            # test_session_optimize_round2.py::TestCreateSessionPreambleBeforeWrite）。
+            # expire_on_commit=False（app/core/db.py:94），收口后上方已加载的
+            # profile/provider/workspace 行仍可安全取属性。写块共用方法末尾的
+            # 唯一 commit，中途异常整体回滚，无孤儿 session/mission。
+            from app.modules.daemon.session.context import (
+                build_change_context_preamble,
+                build_page_context_preamble,
+            )
+
+            # 2026-07-09-change-detail-session / D-004@v1（X-02/X-04）：变更会话首轮
+            # 注入【变更上下文】前导。dispatch prompt = 前导+用户消息，经 lease
+            # metadata 的 prompt 字段透传到 daemon _startInteractiveSession 构造
+            # 首条 user 消息。AgentRunLog(user_input) 与 SESSION_INJECT 的 prompt
+            # 仍写干净用户消息（列表标题 / 回放 / 展示干净）。零 daemon 改动。
+            preamble = await build_change_context_preamble(self._session, change_id)
+            # ── 2026-08-25-unified-floating-session（FR-5 / D-005）：页面上下文前导 ──
+            # 数据服务端回查（build_page_context_preamble 内部 DB.get），客户端
+            # 仅 page_key 枚举 + project_id；查无/未传 → None 不注入。
+            page_preamble = (
+                await build_page_context_preamble(
+                    self._session,
+                    page_context.page_key,
+                    page_context.project_id,
+                    page_context.route_key,
+                    page_context.workspace_id,
+                )
+                if page_context is not None
+                else None
+            )
+            await self._session.commit()
+
             session = AgentSession(
                 id=uuid.uuid4(),
                 user_id=user_id,
@@ -1028,8 +1063,8 @@ class SessionService:
             # session 行 add+flush 后、首 run 构造前调 task-04 helper（session
             # 模式）；objective=block.objective 非空否则直取首句 prompt（create
             # 路径不经 _inject_into_session 占位回填）；scope/project_id/budget/
-            # worker_preset/main_agent_config 透传。不 commit——共用本方法唯一
-            # commit（下方），中途任意环节异常走整体回滚，无孤儿 session/mission。
+            # worker_preset/main_agent_config 透传。不 commit——共用写事务的
+            # 唯一 commit（下方），中途任意环节异常走整体回滚，无孤儿 session/mission。
             mission = None
             if team_mission is not None:
                 from app.modules.agent.orchestrator import OrchestratorService
@@ -1078,31 +1113,6 @@ class SessionService:
             self._session.add(run)
             await self._session.flush()
 
-            # 2026-07-09-change-detail-session / D-004@v1（X-02/X-04）：变更会话首轮
-            # 注入【变更上下文】前导。dispatch prompt = 前导+用户消息，经 lease
-            # metadata 的 prompt 字段透传到 daemon _startInteractiveSession 构造
-            # 首条 user 消息。AgentRunLog(user_input) 与 SESSION_INJECT 的 prompt
-            # 仍写干净用户消息（列表标题 / 回放 / 展示干净）。零 daemon 改动。
-            from app.modules.daemon.session.context import (
-                build_change_context_preamble,
-                build_page_context_preamble,
-            )
-
-            preamble = await build_change_context_preamble(self._session, change_id)
-            # ── 2026-08-25-unified-floating-session（FR-5 / D-005）：页面上下文前导 ──
-            # 数据服务端回查（build_page_context_preamble 内部 DB.get），客户端
-            # 仅 page_key 枚举 + project_id；查无/未传 → None 不注入。
-            page_preamble = (
-                await build_page_context_preamble(
-                    self._session,
-                    page_context.page_key,
-                    page_context.project_id,
-                    page_context.route_key,
-                    page_context.workspace_id,
-                )
-                if page_context is not None
-                else None
-            )
             # ── task-09 / FR-01 / D-004@v1：首 prompt 团队简报前缀（create 路径）──
             # 叠加顺序定死（R-06）：变更前导（既有，在前）→ 团队简报（task-06
             # build_orchestrator_briefing）→ "\n\n---\n\n" → 用户消息。lease
@@ -1110,7 +1120,9 @@ class SessionService:
             # (user_input)（下方）与首 turn SESSION_INJECT payload prompt（下发
             # 段）仍写干净用户原文（对齐变更前导先例，展示层干净）。
             # unified-floating-session：页面前导插在变更前导与团队简报之间
-            # （design §4 拼接顺序）。
+            # （design §4 拼接顺序）。change/page 前导已在写事务外组装（见方法
+            # try 块顶部）；简报依赖写事务内预建的 mission，且为纯 DB 读（无
+            # 磁盘遍历），留在写块后组装。
             briefing = None
             if mission is not None:
                 from app.modules.agent.mission_context import build_orchestrator_briefing

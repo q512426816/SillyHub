@@ -925,54 +925,56 @@ function WorkspaceTreeList({
             options={STATUS_OPTIONS.map((o) => ({ ...o }))}
           />
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="shrink-0 text-[11px] text-muted-foreground">机器</span>
-          <FilterPill
-            label="机器tab 全部"
-            active={filterMachineId === ""}
-            onClick={() => pickMachineTab("")}
-          >
-            全部
-          </FilterPill>
-          {machines.map((m) => (
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+          <span className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground whitespace-nowrap">
+            <span className="shrink-0">机器</span>
             <FilterPill
-              key={m.id}
-              label={`机器tab ${machineLabel(m)}`}
-              active={filterMachineId === m.id}
-              onClick={() => pickMachineTab(m.id)}
+              label="机器tab 全部"
+              active={filterMachineId === ""}
+              onClick={() => pickMachineTab("")}
             >
-              <Monitor aria-hidden className="h-3 w-3 shrink-0" />
-              {machineLabel(m)}
+              全部
             </FilterPill>
-          ))}
+            {machines.map((m) => (
+              <FilterPill
+                key={m.id}
+                label={`机器tab ${machineLabel(m)}`}
+                active={filterMachineId === m.id}
+                onClick={() => pickMachineTab(m.id)}
+              >
+                <Monitor aria-hidden className="h-3 w-3 shrink-0" />
+                {machineLabel(m)}
+              </FilterPill>
+            ))}
+          </span>
         </div>
         {/* 第二层：选中机器后出现（原型 #agentTabs display 语义）；「全部」清空智能体 */}
         {filterMachineId !== "" && (
           <div
-            className="flex flex-wrap items-center gap-1.5"
+            className="flex flex-wrap items-center gap-x-2 gap-y-1.5"
             aria-label="智能体筛选层"
           >
-            <span className="shrink-0 text-[11px] text-muted-foreground">
-              智能体
-            </span>
-            <FilterPill
-              label="智能体tab 全部"
-              active={filterAgent === ""}
-              onClick={() => pickAgentTab("")}
-            >
-              全部
-            </FilterPill>
-            {AGENT_TABS.map((t) => (
+            <span className="inline-flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground whitespace-nowrap">
+              <span className="shrink-0">智能体</span>
               <FilterPill
-                key={t.value}
-                label={`智能体tab ${t.label}`}
-                active={filterAgent === t.value}
-                onClick={() => pickAgentTab(t.value)}
+                label="智能体tab 全部"
+                active={filterAgent === ""}
+                onClick={() => pickAgentTab("")}
               >
-                <EngineMark provider={t.value} />
-                {t.label}
+                全部
               </FilterPill>
-            ))}
+              {AGENT_TABS.map((t) => (
+                <FilterPill
+                  key={t.value}
+                  label={`智能体tab ${t.label}`}
+                  active={filterAgent === t.value}
+                  onClick={() => pickAgentTab(t.value)}
+                >
+                  <EngineMark provider={t.value} />
+                  {t.label}
+                </FilterPill>
+              ))}
+            </span>
           </div>
         )}
       </div>

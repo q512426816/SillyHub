@@ -31,7 +31,7 @@
  * TextSegmentView 的 .seg-caret 承担，双路径语义一致）。数据逻辑 / SSE 零改动。
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { BookUser, Bot, Cloud, Settings, Wrench } from "lucide-react";
 import { Badge } from "antd";
 
@@ -63,6 +63,12 @@ function formatTurnTime(iso: string): string {
 }
 import { ErrorBoundary } from "@/components/error-boundary";
 import { MarkdownText } from "@/components/ui/markdown-text";
+// ql-20260825-006：会话页提问卡最小化——右下角浮动胶囊 + 标题推导（与 approvals
+// 聚合页 SessionPermissionPanel 共用一套 UI）。
+import {
+  MinimizedDialogCapsule,
+  resolvePendingTitle,
+} from "@/components/permissions/minimized-dialog-capsule";
 import type { SessionDialogRead, SessionPermissionRequest } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
 import { extractDialogQA } from "@/components/daemon/session-log-sanitize";
@@ -271,7 +277,54 @@ export function TurnTimeline({
     }
   }, [turns]);
 
+  // ── ql-20260825-006：pending 提问卡最小化（对齐 SessionPermissionPanel 的
+  // task-08 FR-04 / D-003 交互）───────────────────────────────────────────
+  // 最小化集合（会话内存态）：AskUserDialogCard 收 minimized=true 渲染 null 但
+  // 保持挂载 → 已选选项 / 手动输入 state 保留，还原后继续作答。
+  const [minimizedIds, setMinimizedIds] = useState<Set<string>>(new Set());
+
+  const handleMinimize = useCallback((requestId: string) => {
+    setMinimizedIds((prev) => {
+      if (prev.has(requestId)) return prev;
+      const next = new Set(prev);
+      next.add(requestId);
+      return next;
+    });
+  }, []);
+
+  const handleRestore = useCallback((requestId: string) => {
+    setMinimizedIds((prev) => {
+      if (!prev.has(requestId)) return prev;
+      const next = new Set(prev);
+      next.delete(requestId);
+      return next;
+    });
+  }, []);
+
+  // 卡片移除（提交成功 / permission_resolved SSE 由父级过滤 pendingRequests）
+  // 后同步清最小化集合，胶囊计数不残留。集合为空时跳过（避免无谓重渲染）。
+  useEffect(() => {
+    setMinimizedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const alive = new Set(pendingRequests.map((r) => r.request_id));
+      const next = new Set([...prev].filter((id) => alive.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [pendingRequests]);
+
+  // ended/failed 会话不回显 pending 卡（既有门控）→ 胶囊同步不渲染。
+  const showPending =
+    pendingRequests.length > 0 &&
+    sessionStatus !== "ended" &&
+    sessionStatus !== "failed";
+  const minimizedPending = showPending
+    ? pendingRequests.filter((r) => minimizedIds.has(r.request_id))
+    : [];
+  // 全部最小化时 sticky 容器只剩挂载占位（保卡片 state），去掉视觉框。
+  const visiblePendingCount = pendingRequests.length - minimizedPending.length;
+
   return (
+    <>
     <div
       ref={scrollRef}
       onScroll={handleScroll}
@@ -287,9 +340,17 @@ export function TurnTimeline({
           sticky top-0 让用户在长日志滚动时仍可见、可作答；提交 / SSE resolved
           后自动移除。普通工具审批（无 dialog_kind）不在本面板展示。
           ql-20260623（改动三）：ended/failed 会话不回显 pending dialog 卡片
-         （session 已终止，残留 pending 行为死卡；onSessionEnded 也会清空）。 */}
-      {pendingRequests.length > 0 && sessionStatus !== "ended" && sessionStatus !== "failed" && (
-        <div className="sticky top-0 z-10 mb-3 space-y-2 border-b border-indigo-300 bg-indigo-50/95 px-3 py-2 shadow-sm backdrop-blur-sm">
+         （session 已终止，残留 pending 行为死卡；onSessionEnded 也会清空）。
+          ql-20260825-006：卡头最小化按钮 → 收缩为右下角浮动胶囊（下方渲染），
+          已填内容随挂载保留；全部最小化时本容器仅作挂载占位（去视觉框）。 */}
+      {showPending && (
+        <div
+          className={
+            visiblePendingCount > 0
+              ? "sticky top-0 z-10 mb-3 space-y-2 border-b border-indigo-300 bg-indigo-50/95 px-3 py-2 shadow-sm backdrop-blur-sm"
+              : undefined
+          }
+        >
           {pendingRequests.map((req) => (
             <ErrorBoundary
               key={req.request_id}
@@ -302,6 +363,8 @@ export function TurnTimeline({
             >
               <AskUserDialogCard
                 request={req}
+                minimized={minimizedIds.has(req.request_id)}
+                onMinimize={handleMinimize}
                 onResolved={onDialogResolved}
               />
             </ErrorBoundary>
@@ -567,6 +630,21 @@ export function TurnTimeline({
         </div>
       )}
     </div>
+    {/* ql-20260825-006：最小化 pending 提问卡的右下角浮动胶囊——渲染在滚动
+        容器外（fixed 定位锚 viewport，不随日志滚动），点击主体还原最近一条，
+        chevron 展开明细定点还原。会话页 pending 卡恒为 AskUser 提问（无普通
+        工具审批），isDialog 按请求实际携带判断以保持组件契约。 */}
+    {minimizedPending.length > 0 && (
+      <MinimizedDialogCapsule
+        items={minimizedPending.map((req) => ({
+          requestId: req.request_id,
+          title: resolvePendingTitle(req),
+          isDialog: Boolean(req.dialog_kind),
+        }))}
+        onRestore={handleRestore}
+      />
+    )}
+    </>
   );
 }
 

@@ -150,10 +150,25 @@
 关联变更：2026-08-24-session-team-mission-context
 文件：（见实际改动）
 
-## ql-20260825-004-7ef6 | 2026-08-25 11:23:48 | 悬浮会话页面上下文两 bug：显示不随页面切换更新+后续追问不携带当前页面 context
-状态：进行中
+## ql-20260825-004-7ef6 | 2026-08-25 11:23:48 | 悬浮会话页面上下文每轮注入——inject 不携带+显示不随页面更新
+状态：已完成
 关联变更：（无）
-文件：backend/app/modules/daemon/schema.py, backend/app/modules/daemon/router.py, backend/app/modules/daemon/session/service.py, frontend/src/lib/daemon.ts, frontend/src/components/daemon/session-panel.tsx, frontend/src/components/floating/floating-session-host.tsx, frontend/src/hooks/use-page-session-context.ts, frontend/src/stores/floating-session.ts
+文件：backend/app/modules/daemon/router.py, backend/app/modules/daemon/schema.py, backend/app/modules/daemon/session/service.py, frontend/src/components/daemon/session-panel.tsx, frontend/src/components/floating/floating-session-host.tsx, frontend/src/lib/daemon.ts
+需求：悬浮会话页面上下文每轮注入——inject 不携带+显示不随页面更新
+根因：injectSession 不携带 page_context，后续追问 AI 不知道用户当前页面；上下文条用 store.pageContext 持久值不随 URL 变化
+方案：后端 SessionInjectRequest/inject_session/_inject_into_session 加 page_context 字段+每轮 build_page_context_preamble；前端 sendFromQueue 每轮从 URL 派生 context 传入 injectSession；上下文条改用 derivedLabel 实时显示
+结果：backend 18 page_context 测试绿+frontend 2185 测试全绿+tsc 零错误+gen:types 已同步
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/sessions/session-list-panel.tsx
+
+## ql-20260825-005-5c1f | 2026-08-25 12:37:55 | CI 修复：create_session 前导提前实现补回（66bbccc5 剥离 hunk 致 main 红）+ inject 门面 page_context 补漏 + backend-ci 超时 45m
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/session/service.py, backend/app/modules/daemon/service.py, .github/workflows/backend-ci.yml
+需求：扫描最近 CI 运行，列出失败/不稳定测试并完整修复
+根因：①66bbccc5 提交了 test_preamble_assembled_before_write_txn 但「前导组装提前到写事务外」实现 hunk 按当时惯例剥离工作区未随提交（service.py 66bbccc5→2732239e 零差异佐证），be24345b 合并进 main 后 backend-ci 持续红（断言 ['flush','flush','preamble'] ≠ ['preamble','commit','flush']）；②ql-004 暂存半成品漏改 DaemonService.inject_session 门面签名，router 传 page_context 致 2 个 router 测试 TypeError；③backend-ci 30m 裕量被 5300+ 用例再次撞顶（7df39644 run 30:19 取消）；④frontend-ci 7df39644 的 typecheck 错误已在 2732239e 前修复无需处理
+方案：create_session try 块顶部组装 change/page 前导（只读+to_thread 磁盘 IO）后立即 commit 收口只读事务再开写块（expire_on_commit=False 保证跨收口取属性安全，写块仍共用末尾唯一 commit）；DaemonService.inject_session 门面补 page_context 透传；backend-ci timeout-minutes 30→45
+结果：test_session_optimize_round2 12 绿 / daemon 模块 1052 绿 / tests/modules/daemon 78 绿 / agent 域 946 绿 / 全量 5382 passed 0 failed 0 rerun（-n auto --reruns 2 与 CI 同参）/ mypy 706 文件零错 / ruff check+format 过
+审计：工作区含 ql-004 暂存改动（inject page_context），本次修复以未暂存增量叠加未覆盖；全量绿同时覆盖两批改动
 
 ## ql-20260825-006-57c4 | 2026-08-25 13:16:48 | 会话输入框支持 Ctrl+V 粘贴图片/文件直接作为附件发送
 状态：已完成
@@ -167,6 +182,16 @@
 方案：session-input-bar textarea 加 onPaste——clipboardData.files 非空则 preventDefault 并复用现有 handleFiles 上传管线（与 📎 完全等价，含 attachmentsDisabled 门控与 10 个上限），纯文本粘贴放行默认插入；📎 title 补粘贴提示
 结果：新增 4 粘贴用例（图片 kind=image+chip+父级回传+事件取消 / 普通文件 kind=file / 纯文本不拦截 / disabled 门控），先红后绿；daemon+sessions 关联套件 33 文件 494 passed；tsc 0 错；eslint 0 新告警
 审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx
+
+## ql-20260825-006-9d4c | 2026-08-25 13:20:05 | 会话页 AskUserQuestion 提问卡补最小化（task-08 只接了 approvals 聚合页，TurnTimeline 漏接）
+状态：已完成
+关联变更：2026-08-24-platform-session-feedback-fix（task-08 FR-04 / D-003 同款交互）
+文件：frontend/src/components/permissions/minimized-dialog-capsule.tsx（共享胶囊组件（新增））, frontend/src/components/permissions/session-permission-panel.tsx（胶囊抽共享+resolvePendingTitle re-export）, frontend/src/components/daemon/turn-timeline.tsx（最小化状态+接线+胶囊）, frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx（6 用例（新增））
+需求：会话页面 AskUserQuestion 这个弹窗还是没有最小化按钮操作
+根因：task-08 的最小化（FR-04 / D-003@v1）当时只给 approvals 聚合页 SessionPermissionPanel 接线（passing minimized/onMinimize + 内联右下角胶囊）；会话页提问卡渲染在 TurnTimeline（page/dialog 两模式共用），AskUserDialogCard 未传 onMinimize——卡组件契约是「缺省不渲染最小化按钮」（向后兼容），故会话页恒无按钮
+方案：①SessionPermissionPanel 内联胶囊 + resolvePendingTitle 抽为共享组件 minimized-dialog-capsule.tsx（DOM 逐节点等价，既有 session-permission-minimize 测试口径零改动全过；resolvePendingTitle 原地 re-export 保持导出面）；②TurnTimeline 内接同款交互：minimizedIds 内存态（卡收 minimized=true 渲染 null 但保持挂载→已选选项/手动输入保留）+ handleMinimize/handleRestore + pendingRequests 变化 prune effect（父级移除卡→胶囊计数同步清，覆盖提交与 permission_resolved 两条路径）+ ended/failed 门控同步胶囊 + 全部最小化时 sticky 容器去视觉框仅作挂载占位 + 胶囊渲染在滚动容器外（fixed 锚 viewport 不随日志滚）
+结果：新增 turn-timeline-dialog-minimize 6 用例（默认按钮/最小化胶囊+角标+sticky 框移除/还原保留已填内容/多卡明细定点还原/父级移除 prune/ended 门控）全绿；回归 session-permission-minimize 8 + session-permission-panel 12 + turn-timeline-session-input-bar 14 绿；frontend 全量 195 文件 2194 测试绿 + tsc 0 错误
+审计：未提交（工作区含 ql-003 进行中与 ql-004/005 暂存改动，待用户侧统一提交）
 
 ## ql-20260825-007-17cb | 2026-08-25 13:39:01 | dialog 弹窗会话输入框（含排队）接通附件管线
 状态：已完成
