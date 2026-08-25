@@ -64,6 +64,12 @@ class AgentSessionRead(BaseModel):
     # 「本地 Agent」徽标 + 纯日志主体）。from_attributes 直接映射（列表/详情
     # 同一映射路径自动下发）；默认 'chat' 守护列缺失的旧行。
     origin: str = "chat"
+    # 2026-08-26-subsession-portal-grouping（P3 / design §4.A）：会话树归属两列
+    # （P1 迁移 20260825210000 落列）——parent_session_id 非空即分身子会话（门户
+    # 列表据此折叠进父行附属组）；tree_depth 0=主控/普通、1=分身、2=孙（P2）。
+    # from_attributes 直接映射，零查询改动；默认值守护映射前的旧响应。
+    parent_session_id: uuid.UUID | None = None
+    tree_depth: int = 0
 
     model_config = {"from_attributes": True}
 

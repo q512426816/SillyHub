@@ -175,6 +175,8 @@ const NO_WORKSPACE_GROUP_ID = "__no_workspace__";
 const UNKNOWN_WORKSPACE_GROUP_ID = "__unknown_workspace__";
 /** 组内「本地 Agent」合并小节 key（origin=tool_report 会话统一落此，不进机器分桶）。 */
 const TOOL_REPORT_SECTION_KEY = "__tool_report__";
+/** 组内「团队分身」孤儿小节 key（2026-08-26-subsession-portal-grouping：父不可见的分身子会话收纳）。 */
+const SUB_ORPHAN_SECTION_KEY = "__sub_orphan__";
 
 /* ────────── 展开记忆（ql-20260824-002：localStorage 持久化用户手动展开） ────────── */
 
@@ -413,6 +415,9 @@ interface GroupSection {
   online: boolean;
   /** true = origin=tool_report 合并小节（可折叠，默认收起）。 */
   isToolReport: boolean;
+  /** true = 分身孤儿小节（2026-08-26-subsession-portal-grouping：父会话不在
+   * 当前可见列表的分身子会话收纳，可折叠默认收起，防分页边界丢行）。 */
+  isSubOrphan?: boolean;
   sessions: AgentSessionRead[];
 }
 
@@ -1372,11 +1377,54 @@ function WorkspaceGroupNode({
   // origin=tool_report（本地 Agent，SillySpec CLI 自动上报）不进机器分桶，
   // 统一合并进组内末尾「本地 Agent」小节（ql-20260824-001 用户要求收纳，
   // 默认折叠）——批量上报条目不再刷屏机器小节。
+  // 2026-08-26-subsession-portal-grouping（P3 / design §4.B）：分身子会话
+  // （parent_session_id 非空）不进机器分桶——按父聚合为父行附属组（父行在
+  // 当前列表时）；父不可见（分页边界/筛选）的落孤儿小节兜底，绝不丢行。
+  const subGrouping = useMemo(() => {
+    const byParent = new Map<string, AgentSessionRead[]>();
+    const orphans: AgentSessionRead[] = [];
+    const mainIds = new Set(
+      shownSessions
+        .filter((s) => !s.parent_session_id)
+        .map((s) => s.id),
+    );
+    for (const s of shownSessions) {
+      if (!s.parent_session_id) continue;
+      if (mainIds.has(s.parent_session_id)) {
+        const arr = byParent.get(s.parent_session_id) ?? [];
+        arr.push(s);
+        byParent.set(s.parent_session_id, arr);
+      } else {
+        orphans.push(s);
+      }
+    }
+    return { byParent, orphans };
+  }, [shownSessions]);
+
   const sections = useMemo(() => {
     const list: GroupSection[] = [];
     const index = new Map<string, GroupSection>();
     let toolSection: GroupSection | null = null;
+    let subOrphanSection: GroupSection | null = null;
     for (const s of shownSessions) {
+      if (s.parent_session_id) {
+        // 分身子会话：父在列表 → 附属组（subGrouping.byParent）；父不可见
+        // → 孤儿小节兜底。均不进机器分桶。
+        if (!subGrouping.byParent.has(s.parent_session_id)) {
+          if (!subOrphanSection) {
+            subOrphanSection = {
+              key: SUB_ORPHAN_SECTION_KEY,
+              label: "团队分身",
+              online: false,
+              isToolReport: false,
+              isSubOrphan: true,
+              sessions: [],
+            };
+          }
+          subOrphanSection.sessions.push(s);
+        }
+        continue;
+      }
       if (s.origin === "tool_report") {
         if (!toolSection) {
           toolSection = {
@@ -1406,8 +1454,9 @@ function WorkspaceGroupNode({
       sec.sessions.push(s);
     }
     if (toolSection) list.push(toolSection);
+    if (subOrphanSection) list.push(subOrphanSection);
     return list;
-  }, [shownSessions, runtimeToMachine]);
+  }, [shownSessions, runtimeToMachine, subGrouping]);
 
   // 「本地 Agent」小节折叠态（ql-20260824-001）：覆盖值带筛选纪元——epoch
   // 变化（R-05 筛选重置）时旧覆盖被丢弃回到默认（收起；选中会话在小节内 →
@@ -1423,6 +1472,27 @@ function WorkspaceGroupNode({
       ? { epoch: filterEpoch, open: true }
       : null;
   });
+  // 2026-08-26-subsession-portal-grouping：分身附属组/孤儿小节展开态——
+  // 默认收起；选中会话是某父的子会话时渲染期兜底展开（对齐 tool_report 语义）。
+  // 筛选纪元变化重置（R-05 同语义的简化版：直接清空）。
+  const [openParents, setOpenParents] = useState<Set<string>>(new Set());
+  const [subOrphanOpen, setSubOrphanOpen] = useState(false);
+  useEffect(() => {
+    setOpenParents(new Set());
+    setSubOrphanOpen(false);
+  }, [filterEpoch]);
+  const toggleParentSubs = (parentId: string) => {
+    setOpenParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(parentId)) next.delete(parentId);
+      else next.add(parentId);
+      return next;
+    });
+  };
+  const subOrphanSection = sections.find((s) => s.isSubOrphan) ?? null;
+  const subOrphanEffectiveOpen =
+    subOrphanOpen ||
+    Boolean(subOrphanSection?.sessions.some((c) => c.id === selectedSessionId));
   const toolSection = sections.find((s) => s.isToolReport) ?? null;
   const toolSectionOpen =
     (toolOpenState && toolOpenState.epoch === filterEpoch
@@ -1566,7 +1636,40 @@ function WorkspaceGroupNode({
           ) : (
             sections.map((sec) => (
               <div key={sec.key} className="px-2 pb-1">
-                {sec.isToolReport ? (
+                {sec.isSubOrphan ? (
+                  // 「团队分身」孤儿小节头（2026-08-26-subsession-portal-grouping）：
+                  // 父不可见的分身子会话收纳，可折叠默认收起（tool_report 同款交互）。
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={subOrphanEffectiveOpen}
+                    aria-label="团队分身小节"
+                    onClick={() => setSubOrphanOpen(!subOrphanEffectiveOpen)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") setSubOrphanOpen(!subOrphanEffectiveOpen);
+                    }}
+                    className="flex cursor-pointer select-none items-center gap-1.5 px-1.5 pb-0.5 pt-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    <span
+                      aria-hidden
+                      className={`text-[10px] text-muted-foreground transition-transform ${
+                        subOrphanEffectiveOpen ? "rotate-90" : ""
+                      }`}
+                    >
+                      ▶
+                    </span>
+                    <span
+                      aria-hidden
+                      className="inline-flex h-3 w-3 shrink-0 items-center justify-center rounded-full bg-violet-100 text-[9px] font-bold text-violet-600 dark:bg-violet-500/20 dark:text-violet-300"
+                    >
+                      子
+                    </span>
+                    <span className="truncate">{sec.label}</span>
+                    <span className="shrink-0 text-muted-foreground/80">
+                      {sec.sessions.length} 个
+                    </span>
+                  </div>
+                ) : sec.isToolReport ? (
                   // 「本地 Agent」小节头（ql-20260824-001）：可折叠（默认收起，
                   // 折叠态计数可见）。它是折叠控件而非冗余标题，机器筛选态
                   // （hideMachineTitles）不隐藏。
@@ -1620,26 +1723,80 @@ function WorkspaceGroupNode({
                     </div>
                   )
                 )}
-                {(sec.isToolReport ? toolSectionOpen : true) &&
+                {(sec.isToolReport ? toolSectionOpen : sec.isSubOrphan ? subOrphanEffectiveOpen : true) &&
                   sec.sessions.map((s) => {
                     const title = s.title?.trim() || "未命名会话";
+                    const childSubs = subGrouping.byParent.get(s.id);
+                    const parentOpen =
+                      openParents.has(s.id) ||
+                      Boolean(childSubs?.some((c) => c.id === selectedSessionId));
                     return (
-                      <SessionRow
-                        key={s.id}
-                        variant="tree"
-                        session={s}
-                        title={title}
-                        selected={s.id === selectedSessionId}
-                        runtimeToMachine={runtimeToMachine}
-                        hideEngineChip={hideEngineChip}
-                        onSelect={onSelect}
-                        batchMode={batchActive}
-                        checked={checkedIds.has(s.id)}
-                        onToggleCheck={() => onToggleChecked(s.id)}
-                        onDelete={onDelete ? () => onDelete(s.id, title) : undefined}
-                        onArchive={onArchive ? () => onArchive(s.id, title) : undefined}
-                        onUnarchive={onUnarchive ? () => onUnarchive(s.id, title) : undefined}
-                      />
+                      <div key={s.id}>
+                        <SessionRow
+                          variant="tree"
+                          session={s}
+                          title={title}
+                          selected={s.id === selectedSessionId}
+                          runtimeToMachine={runtimeToMachine}
+                          hideEngineChip={hideEngineChip}
+                          onSelect={onSelect}
+                          batchMode={batchActive}
+                          checked={checkedIds.has(s.id)}
+                          onToggleCheck={() => onToggleChecked(s.id)}
+                          onDelete={onDelete ? () => onDelete(s.id, title) : undefined}
+                          onArchive={onArchive ? () => onArchive(s.id, title) : undefined}
+                          onUnarchive={onUnarchive ? () => onUnarchive(s.id, title) : undefined}
+                        />
+                        {/* 2026-08-26-subsession-portal-grouping：父行附属分身
+                            折叠组（组级 violet 徽标 + 子行缩进，design §4.B） */}
+                        {childSubs && childSubs.length > 0 && (
+                          <div className="ml-3 border-l border-violet-300/60 pl-2 dark:border-violet-500/40">
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              aria-expanded={parentOpen}
+                              aria-label="分身折叠组"
+                              onClick={() => toggleParentSubs(s.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") toggleParentSubs(s.id);
+                              }}
+                              className="flex cursor-pointer select-none items-center gap-1.5 px-1.5 py-0.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                            >
+                              <span
+                                aria-hidden
+                                className={`text-[10px] transition-transform ${parentOpen ? "rotate-90" : ""}`}
+                              >
+                                ▶
+                              </span>
+                              <span
+                                aria-hidden
+                                className="inline-flex items-center rounded px-1 py-px text-[10px] font-medium text-violet-600 dark:text-violet-300"
+                              >
+                                分身 {childSubs.length}
+                              </span>
+                            </div>
+                            {parentOpen &&
+                              childSubs.map((c) => (
+                                <SessionRow
+                                  key={c.id}
+                                  variant="tree"
+                                  session={c}
+                                  title={c.title?.trim() || "未命名分身"}
+                                  selected={c.id === selectedSessionId}
+                                  runtimeToMachine={runtimeToMachine}
+                                  hideEngineChip={hideEngineChip}
+                                  onSelect={onSelect}
+                                  batchMode={batchActive}
+                                  checked={checkedIds.has(c.id)}
+                                  onToggleCheck={() => onToggleChecked(c.id)}
+                                  onDelete={onDelete ? () => onDelete(c.id, c.title ?? "分身") : undefined}
+                                  onArchive={onArchive ? () => onArchive(c.id, c.title ?? "分身") : undefined}
+                                  onUnarchive={onUnarchive ? () => onUnarchive(c.id, c.title ?? "分身") : undefined}
+                                />
+                              ))}
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
               </div>

@@ -1754,3 +1754,96 @@ describe("SessionListPanel「关联」筛选下拉（task-10 / X-009）", () => 
     });
   });
 });
+
+/* ───── 2026-08-26-subsession-portal-grouping（P3）：分身子会话折叠分组 ───── */
+
+
+
+describe("SessionListPanel 分身子会话折叠分组（P3）", () => {
+  /** 主控会话 + 两分身（parent 挂主控）。 */
+  function subsessionFixtures() {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    const main = makeSession({ id: "s-main", workspace_id: "ws-1", title: "团队主任务" });
+    const sub1 = makeSession({
+      id: "s-sub-1",
+      title: "分身甲",
+      workspace_id: "ws-1",
+      runtime_id: "rt-m1",
+      parent_session_id: "s-main",
+      tree_depth: 1,
+    });
+    const sub2 = makeSession({
+      id: "s-sub-2",
+      title: "分身乙",
+      workspace_id: "ws-1",
+      runtime_id: "rt-m1",
+      parent_session_id: "s-main",
+      tree_depth: 1,
+    });
+    mocks.listAgentSessions.mockResolvedValue(listResponse([main, sub1, sub2]));
+  }
+
+  it("子会话默认折叠——主列表只见父行与「分身 2」折叠组头，子行不可见", async () => {
+    subsessionFixtures();
+    renderPanel(<SessionListPanel />);
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalled());
+    await openGroup("SillyHub");
+
+    expect(await screen.findByText("团队主任务")).toBeVisible();
+    expect(screen.getByText("分身 2")).toBeVisible();
+    expect(screen.queryByText("分身甲")).toBeNull();
+    expect(screen.queryByText("分身乙")).toBeNull();
+  });
+
+  it("点击折叠组头展开——子行出现且可点击选中", async () => {
+    subsessionFixtures();
+    renderPanel(<SessionListPanel />);
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalled());
+    await openGroup("SillyHub");
+    await screen.findByText("团队主任务");
+
+    fireEvent.click(screen.getByText("分身 2"));
+    expect(await screen.findByText("分身甲")).toBeVisible();
+    expect(screen.getByText("分身乙")).toBeVisible();
+  });
+
+  it("孤儿小节兜底——父不在列表时子会话进「团队分身」小节不丢行", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    const orphan = makeSession({
+      id: "s-orphan",
+      title: "迷路的分身",
+      workspace_id: "ws-1",
+      runtime_id: "rt-m1",
+      parent_session_id: "s-not-here",
+      tree_depth: 1,
+    });
+    const normal = makeSession({ id: "s-normal", workspace_id: "ws-1", runtime_id: "rt-m1", title: "普通会话" });
+    mocks.listAgentSessions.mockResolvedValue(listResponse([normal, orphan]));
+    renderPanel(<SessionListPanel />);
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalled());
+    await openGroup("SillyHub");
+
+    expect(await screen.findByText("普通会话")).toBeVisible();
+    expect(screen.getByText("团队分身")).toBeVisible();
+    // 默认收起：孤儿子行不可见，展开后可见。
+    expect(screen.queryByText("迷路的分身")).toBeNull();
+    fireEvent.click(screen.getByText("团队分身"));
+    expect(await screen.findByText("迷路的分身")).toBeVisible();
+  });
+
+  it("无子会话列表零变化——不渲染折叠组头", async () => {
+    setMachines({ items: twoMachines() });
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([makeSession({ id: "s-a", workspace_id: "ws-1", runtime_id: "rt-m1", title: "普通甲" })]),
+    );
+    renderPanel(<SessionListPanel />);
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalled());
+    await openGroup("SillyHub");
+    await screen.findByText("普通甲");
+    expect(screen.queryByText(/分身 \d/)).toBeNull();
+    expect(screen.queryByText("团队分身")).toBeNull();
+  });
+});

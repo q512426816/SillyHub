@@ -30496,6 +30496,23 @@
             "type": "string",
             "title": "Origin",
             "default": "chat"
+          },
+          "parent_session_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Session Id"
+          },
+          "tree_depth": {
+            "type": "integer",
+            "title": "Tree Depth",
+            "default": 0
           }
         },
         "type": "object",

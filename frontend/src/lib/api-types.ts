@@ -9818,6 +9818,13 @@ export interface components {
              * @default chat
              */
             origin: string;
+            /** Parent Session Id */
+            parent_session_id?: string | null;
+            /**
+             * Tree Depth
+             * @default 0
+             */
+            tree_depth: number;
         };
         /**
          * AgentTaskStatusEvent

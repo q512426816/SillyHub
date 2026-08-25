@@ -898,6 +898,8 @@ function makeSession(
     agent_session_id: null,
     config: null,
     turn_count: 0,
+    parent_session_id: null,
+    tree_depth: 0,
     created_at: "2026-08-23T05:00:00Z",
     last_active_at: new Date(Date.now() - 3 * 60 * 1000).toISOString(),
     ended_at: null,
