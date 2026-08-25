@@ -199,17 +199,22 @@ async def build_page_context_preamble(
         ws = await db.get(Workspace, workspace_id)
         if ws is None:
             return None
-        lines = ["【页面上下文】", "- 页面：工作区详情"]
+        # 用户反馈⑦：指令式前导（"当前用户正在访问…请参考"）+ 不注入本机
+        # root_path（宿主机路径对他人无意义且属环境信息泄露）；只保留
+        # 名称/类型。
+        lines = [
+            "【页面上下文】",
+            "当前用户正在访问本平台的「工作区详情」页面，可能基于此页面内容向你提问；"
+            "本页面包含的功能和说明如下，请优先据此回答（与页面无关的问题按常规理解作答）。",
+        ]
         if ws.name:
-            lines.append(f"- 工作区：{ws.name[:_PAGE_VALUE_MAX]}")
+            lines.append(f"- 当前工作区：{ws.name[:_PAGE_VALUE_MAX]}")
         if ws.type:
             lines.append(f"- 类型：{ws.type[:_PAGE_VALUE_MAX]}")
-        if ws.root_path:
-            lines.append(f"- 路径：{ws.root_path[:_PAGE_VALUE_MAX]}")
         manual = PAGE_MANUALS.get("workspace_detail")
         if manual:
             lines.append(manual)
-        if len(lines) <= 1:
+        if len(lines) <= 2:
             return None
         return "\n".join(lines)
     if page_key == "generic_page":
@@ -217,8 +222,14 @@ async def build_page_context_preamble(
         label = PAGE_ROUTE_LABELS.get(key)
         if label is None:
             return None
+        # 用户反馈⑦：指令式前导——直接告诉 AI"用户在这个页面、可能问页面
+        # 内容、参考以下说明回答"。
+        parts = [
+            "【页面上下文】",
+            f"当前用户正在访问本平台的「{label}」页面，可能基于此页面内容向你提问；"
+            "本页面包含的功能和说明如下，请优先据此回答（与页面无关的问题按常规理解作答）。",
+        ]
         manual = PAGE_MANUALS.get(key)
-        parts = [f"【页面上下文】\n- 页面：{label}"]
         if manual:
             parts.append(manual)
         return "\n".join(parts)
@@ -232,9 +243,15 @@ async def build_page_context_preamble(
     if project is None:
         return None
 
-    proj_lines: list[str] = ["【页面上下文】", "- 页面：PPM · 项目详情"]
+    # 用户反馈⑦：指令式前导 + 业务字段（名称/编码/状态/周期是平台业务数据，
+    # 保留；不含任何本机路径）。
+    proj_lines = [
+        "【页面上下文】",
+        "当前用户正在访问本平台的「PPM · 项目详情」页面，可能基于此页面内容向你提问；"
+        "本页面包含的功能和说明如下，请优先据此回答（与页面无关的问题按常规理解作答）。",
+    ]
     if project.project_name:
-        proj_lines.append(f"- 项目：{project.project_name[:_PAGE_VALUE_MAX]}")
+        proj_lines.append(f"- 当前项目：{project.project_name[:_PAGE_VALUE_MAX]}")
     if project.project_code:
         proj_lines.append(f"- 项目编码：{project.project_code[:_PAGE_VALUE_MAX]}")
     if project.project_status:
@@ -247,6 +264,6 @@ async def build_page_context_preamble(
     if proj_manual:
         proj_lines.append(proj_manual)
 
-    if len(proj_lines) <= 1:
+    if len(proj_lines) <= 2:
         return None
     return "\n".join(proj_lines)

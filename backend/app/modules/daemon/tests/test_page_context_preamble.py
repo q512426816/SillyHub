@@ -206,10 +206,11 @@ class TestGenericPagePreamble:
 
         out = await build_page_context_preamble(db_session, "generic_page", None, "settings_mcp")
         assert out is not None
-        # task-13：标签 + 页面说明书（功能/使用）——AI 能回答"这是什么页面/怎么用"。
-        # ql-20260825-008：说明书升级为 page_docs/*.md 结构化文档（功能定位等章节）。
-        assert "- 页面：设置 · MCP" in out
+        # 用户反馈⑦：指令式前导 + 专业说明书结构。
+        assert "当前用户正在访问本平台的「设置 · MCP」页面" in out
+        assert "请优先据此回答" in out
         assert "## 功能定位" in out
+        assert "## 页面结构与操作" in out
         assert "MCP" in out
 
     @pytest.mark.asyncio
@@ -352,7 +353,10 @@ class TestWorkspacePreamble:
         assert "工作区详情" in out
         assert "multi-agent-platform" in out
         assert "app" in out
-        assert "C:/repo/map" in out
+        # 用户反馈⑦：指令式前导 + 本机路径不再注入（环境信息不外泄）。
+        assert "当前用户正在访问本平台的「工作区详情」页面" in out
+        assert "请优先据此回答" in out
+        assert "C:/repo/map" not in out
         # task-13：实体 + 工作区页面说明书（ql-20260825-008 起为 md 结构化文档）。
         assert "## 功能定位" in out
 
