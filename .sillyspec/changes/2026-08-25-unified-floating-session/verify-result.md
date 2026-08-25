@@ -83,11 +83,23 @@
 PageContextCreateBlock×3）→ pnpm gen:types → api-types.ts 含 page_context×4；
 tsc 0 error 证明前后端类型 parity。
 
-**真实 daemon↔backend 进程联调：未执行（如实声明）**。依据 design 风险等级
-声明（contract-tested）：sillyhub-daemon/ 零文件改动、协议零变更（page_context
-只走 backend 侧既有 dispatch_prompt 通道，daemon 进程消费行为不变），进程级
-E2E 留待用户本机起服务手测（见手测路径 2——首句创建后在会话流中核对 AI 回答
-是否引用项目数据，即为最直接的真实联调验证）。
+**真实 daemon↔backend 进程联调：已执行（部署栈实证，2026-08-25 08:4x 补录）**。
+本地 Docker 部署（本分支已提交代码 @1d1c29b9）上的端到端：
+1. 真实登录（captcha 流程）→ 在线机器 DESKTOP-HJ0AM09（claude runtime online）；
+2. 非法 page_key → **422**（契约在部署栈生效）；
+3. 真实创建会话 `c1046ba2-80ae-41d8-b6be-413f20a0c1d1`（runtime_id + page_context
+   指向真实项目「2026年浦镇EHS及门禁深化项目」）→ 201/active；
+4. 部署库 postgres 直查 lease `metadata->>'prompt'`：**【页面上下文】含项目名/
+   编码 05260001309/状态 ongoing/周期 2026-06-01~2027-07-31 + --- + 用户消息**
+   （全部服务端回查注入）；
+5. backend AgentRunLog(user_input) = 干净用户原文（展示层干净契约）；
+6. daemon 真实唤醒消费：`[ASSISTANT] OK`（Claude 真实跑完本轮并按要求回复）。
+
+**运行时观察（非缺陷，与既有前导行为一致）**：daemon transcript 同步会把完整
+dispatch_prompt（含前导）也记一条 user_input 日志——查证既有变更会话
+（e9ea95ab/bdec91a4）同样存在【变更上下文】user_input 条目，系 X-02「零
+daemon 改动」设计的固有表现，page_context 行为与变更前导/团队简报完全一致；
+若未来要在 UI 隐藏前导条目，属三类前导的横切改进，非本变更范围。
 
 **终态断言（terminal state）建议项**：create 成功路径的 session/run/lease 三
 元组落库断言沿用既有 test_session_team_mission 范式（60/60 绿）；本变更不改
