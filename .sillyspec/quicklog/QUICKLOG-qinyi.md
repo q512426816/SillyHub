@@ -356,7 +356,15 @@
 方案：daemon.ts 补 sub_session_id/first_run_id；control 抽 _worker_form_count 统一
 结果：28 passed + mypy/ruff/tsc 零错，已提交（ql-20260826-002）
 
-## ql-20260826-003-3407 | 2026-08-26 04:49:44 | P3 分身子会话门户折叠分组 + 开流审计：schema 双字段自动映射 + 前端折叠组 + gen:types（design.md 为背景）
-状态：进行中
+## ql-20260826-003-3407 | 2026-08-26 04:49:44 | P3 分身子会话门户折叠分组与按需开流审计收尾
+状态：已完成
 关联变更：2026-08-26-subsession-portal-grouping
-文件：backend/app/modules/daemon/schema.py, frontend/src/components/sessions/session-list-panel.tsx, frontend/src/lib/daemon.ts, backend/openapi.json, frontend/src/lib/api-types.ts
+文件：
+- backend/app/modules/daemon/schema.py（AgentSessionRead 加两字段）
+- frontend/src/components/sessions/session-list-panel.tsx（折叠分组与孤儿小节）
+- backend/openapi.json + frontend/src/lib/api-types.ts（gen:types）
+- session-list-panel.test.tsx（4 新用例）
+需求：P3 分身子会话门户折叠分组与按需开流审计收尾。
+根因：P1/P2 落地后子会话在门户平铺混排噪音大且无归属表达，开流上限担忧需闭环。
+方案：AgentSessionRead 加 parent_session_id/tree_depth 自动映射加 gen:types；门户父行附属折叠组（violet 徽标+缩进+选中兜底展开+筛选纪元重置）与孤儿小节兜底；开流审计结论为浮层按需开流上限内无需代码。
+结果：前端全量 200 文件 passed 含 4 新用例、backend 15 passed、ruff 与 mypy 与 tsc 零错、已提交。
