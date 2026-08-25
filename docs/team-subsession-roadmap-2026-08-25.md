@@ -36,14 +36,14 @@
 > 三端全量 4618/2268/2821 零失败。剩余：**人工确认后 archive**；Docker 部署实例
 > 需重建镜像后新能力才在 8001 入口生效。
 
-- [ ] 子会话↔mission 挂载链（AgentSession 加 mission 锚或 parent_session_id；
+- [x] 子会话↔mission 挂载链（AgentSession 加 mission 锚或 parent_session_id；
   现状 `get_active_mission_for_session` 只认第 0 层主会话，子会话 turn run 挂不上
   mission_id/role → 治理门/成本/kill 名单漏算；worker 会话无 workspace_id）。
-- [ ] 「子会话完成」显式信号：替换"run 终态=分身完结"判据（busy 判定/
+- [x] 「子会话完成」显式信号：替换"run 终态=分身完结"判据（busy 判定/
   awaiting_input 时钟/patrol 超时/worktree 清理时机全建立在旧判据上）。
-- [ ] converge/cancel → 批量 end_session(SESSION_END) 链路（converge 现在不关任何
+- [x] converge/cancel → 批量 end_session(SESSION_END) 链路（converge 现在不关任何
   会话；interactive lease 永不过期 → 孤儿烧 token）。
-- [ ] 归属决策：子会话 owner = mission 创建者还是 daemon/apiKey 属主
+- [x] 归属决策：子会话 owner = mission 创建者还是 daemon/apiKey 属主
   （影响追问 owner-only、权限卡片 owner-only、门户可见性、审计）。
 
 ### P2 递归开闸（独立开关，P1 之后）
