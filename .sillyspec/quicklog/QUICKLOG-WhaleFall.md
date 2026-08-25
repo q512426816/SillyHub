@@ -298,3 +298,11 @@
 根因：①docx 容器 div 仅 status=ok 渲染，effect 首帧 ref 为 null 被 `!containerRef.current` 短路，Promise 完成也无容器渲染→永久 loading；②PDF iframe height:100% 在 Modal overflow-auto（高度 auto）父链解析为 0/默认 150px；③SheetJS sheet_to_html 全输出 td（无 th），表头无区分+数值不右对齐+窄表强拉变形（xls/xlsx 同源，非 xls 特有）。
 方案：容器常驻挂载；固定视口高；首行表头样式+数值右对齐+w-fit min-w-full。
 结果：files 域 43/43、全量 2179 绿、tsc 0 错；提交（见 git log）。
+
+## ql-20260825-006 | 2026-08-25 22:50:00 | Excel 长文本单元格撑爆表格修正
+状态：已完成
+关联变更：2026-08-25-session-attachment-preview
+文件：frontend/src/components/files/previewers/xlsx-previewer.tsx（表格 CSS）
+根因：ql-20260825-005 引入的全局 whitespace-nowrap 在含大段汇报文字的报表 xls 上把单元格撑到数千像素宽（用户实测「员工月度绩效考核汇报表.xls」），其余列全部挤变形。
+方案：文本单元格恢复换行（max-w-[420px] + break-words），仅数值单元格不折行右对齐，表宽 w-full。注：SheetJS sheet_to_html 为纯数据投影，不含原文件的合并居中/列宽/字号/颜色样式——完整样式还原超出纯前端路线范围（design D-001 非目标），当前定位为「内容完整、结构正确、不炸版」的数据级预览。
+结果：files 域 43/43 绿、tsc 0 错；已提交并部署。
