@@ -193,6 +193,7 @@ async def collect_single_workspace_status(
         "name": ws.name,
         "type": ws.type,
         "description": ws.description,
+        "root_path": ws.root_path,
         "daemon_online": daemon_online,
         "daemon_name": daemon_name,
     }
@@ -250,7 +251,7 @@ async def render_scope_brief(
 ) -> str:
     """渲染派发范围工作区清单（每工作区一行，task-01 / design §5.A）。
 
-    行格式：``- <name>（id=..., type=..., desc=..., 机器=<display_alias||hostname>,
+    行格式：``- <name>（id=..., path=<root_path>, type=..., desc=..., 机器=<display_alias||hostname>,
     daemon=在线|离线[, 模式=git隔离|直通|未知]）``——type/description 为空时省略；
     未绑机器显示「未绑机器」；``git_probe`` 未传时模式字段整体省略（不渲染
     「模式=未知」）。返回值只含工作区行（无标题/尾注，调用方自行组装），
@@ -262,7 +263,7 @@ async def render_scope_brief(
     entries = await collect_scope_workspace_statuses(mission, session, git_probe=git_probe)
     lines: list[str] = []
     for entry in entries:
-        line = f"- {entry['name']}（id={entry['id']}"
+        line = f"- {entry['name']}（id={entry['id']}, path={entry['root_path']}"
         if entry["type"]:
             line += f", type={entry['type']}"
         if entry["description"]:
@@ -295,7 +296,7 @@ async def render_session_orchestrator_briefing(
 
     anchor_ws = await session.get(Workspace, mission.workspace_id)
     if anchor_ws is not None and anchor_ws.name:
-        anchor_line = f"{anchor_ws.name}（{mission.workspace_id}）"
+        anchor_line = f"{anchor_ws.name}（{mission.workspace_id}, 路径: {anchor_ws.root_path}）"
     else:
         anchor_line = str(mission.workspace_id)
 

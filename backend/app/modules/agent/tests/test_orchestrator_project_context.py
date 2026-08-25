@@ -529,6 +529,7 @@ class TestCollectScopeWorkspaceStatuses:
         assert entry["name"] == "前端工作区"
         assert entry["type"] == "frontend"
         assert entry["description"] == "前端代码仓"
+        assert entry["root_path"] == f"/tmp/{ws_id.hex}"
         assert entry["daemon_online"] is True
         # daemon_name 口径 = display_alias || hostname（display_alias 优先）
         assert entry["daemon_name"] == "我的主力机"
@@ -697,7 +698,7 @@ class TestRenderSessionOrchestratorBriefing:
         assert "你是本会话团队任务的主控（orchestrator/项目经理）" in briefing
         assert f"mission_id: {mission.id}" in briefing
         assert "目标: 团队目标" in briefing
-        assert f"锚点工作区: 锚点工作区（{anchor_id}）" in briefing
+        assert f"锚点工作区: 锚点工作区（{anchor_id}" in briefing
         # 派发范围（调 render_scope_brief，含机器/在线字段）
         assert "- 派发范围:" in briefing
         assert "范围工作区A" in briefing

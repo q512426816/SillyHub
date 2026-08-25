@@ -219,3 +219,17 @@
 方案：说明书落盘为独立 markdown（与代码同仓演进，backend Dockerfile `COPY . .` 整树进镜像，部署零额外配置）；加载在模块 import 时一次完成（OSError 静默降级不阻断会话）；完整性由测试守护防"加注册键忘写说明书"
 结果：19/19 前导测试绿（含新增完整性守护）；daemon 模块全量 1152 passed；ruff/mypy 0 问题
 审计：⚖️ 工作区存在并行会话未提交改动（daemon/service.py、session/service.py、前端多文件属 ql-002/004/006/007 在途），本次仅范围提交本条目文件
+
+## ql-20260825-009-ca4d | 2026-08-25 15:17:17 | 团队任务简报注入 workspace root_path
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/orchestrator.py（collect_single_workspace_status 返回 dict 加 root_path、render_scope_brief 行格式加 path= 字段、render_session_orchestrator_briefing 锚点行加路径）
+- backend/app/modules/agent/schema.py（ScopeWorkspaceStatus DTO 加 root_path 字段）
+- backend/app/modules/agent/tests/test_mission_context.py（简报组装测试补 root_path 断言 + token 预算 1500→1600）
+- backend/app/modules/agent/tests/test_mission_status.py（scope 条目测试补 root_path 断言）
+- backend/app/modules/agent/tests/test_orchestrator_project_context.py（collect_scope_workspace_statuses 结构化字段测试补 root_path 断言）
+需求：团队任务简报注入 workspace root_path
+根因：主控 agent 拿到 workspace ID 后缺本地路径无法只读调研，Workspace 模型已有 root_path 但简报渲染未带上
+方案：collect_single_workspace_status 返回 dict 加 root_path、ScopeWorkspaceStatus schema 加 root_path 字段、render_scope_brief 渲染行加 path= 字段、render_session_orchestrator_briefing 锚点行加路径；简报 token 预算 1500→1600
+结果：42 针对性测试全绿、agent 模块全量回归中本次改动的 3 个测试文件零失败零错误、ruff 0 告警、mypy 无新增错误

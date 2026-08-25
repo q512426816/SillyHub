@@ -288,6 +288,7 @@ class ScopeWorkspaceStatus(BaseModel):
     name: str
     type: str | None
     description: str | None
+    root_path: str | None = None  # 工作区本地绝对路径（供主控 agent 只读调研定位）
     daemon_online: bool
     daemon_name: str | None  # display_alias||hostname（任一成员 binding）
     git_mode: str  # "git"|"direct"|"unknown"

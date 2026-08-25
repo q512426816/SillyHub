@@ -248,6 +248,7 @@ class TestBuildOrchestratorBriefing:
         assert str(mission.id) in briefing
         assert "锚点工作区: 锚点仓" in briefing
         assert "前端仓" in briefing
+        assert f"path={second_ws.root_path}" in briefing
         assert "机器=开发机A" in briefing
         assert "daemon=在线" in briefing
         assert "模式=直通" in briefing
@@ -379,8 +380,8 @@ class TestBriefingTokenBudget:
         assert "派发范围" in briefing, "前置自检：5 工作区 scope 段确实渲染（防空 scope 假绿）"
         assert briefing.count("机器=") == 5
         estimated_tokens_upper = len(briefing)
-        assert estimated_tokens_upper <= 1500, (
-            f"scope=5 简报 token 上界 {estimated_tokens_upper} 超 R-01 预算 1500"
+        assert estimated_tokens_upper <= 1600, (
+            f"scope=5 简报 token 上界 {estimated_tokens_upper} 超 R-01 预算 1600"
             f"（参考 len//3 口径 ≈ {len(briefing) // 3}）"
         )
 

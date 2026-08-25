@@ -302,6 +302,7 @@ class TestMissionsStatusRoute:
         assert anchor_item["daemon_online"] is False  # 无 binding
         assert anchor_item["daemon_name"] is None
         assert anchor_item["git_mode"] == "git"
+        assert anchor_item["root_path"] == f"/tmp/{anchor_ws_id.hex}"
         second_item = by_id[str(second_ws_id)]
         assert second_item["type"] == "frontend"
         assert second_item["daemon_online"] is True
