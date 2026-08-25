@@ -10,7 +10,8 @@
  *   task-13 的 fetch→objectURL 路径处理；此 URL 形态供日志/降级场景。
  */
 
-import { getApiBaseUrl } from "@/lib/api";
+import { ApiError, getApiBaseUrl, safeUUID } from "@/lib/api";
+import { ensureFreshAccessToken } from "@/lib/token-refresh";
 import { useSession } from "@/stores/session";
 import type { components } from "@/lib/api-types";
 
@@ -64,4 +65,34 @@ export async function fetchAttachmentObjectUrl(id: string): Promise<string> {
   );
   if (!resp.ok) throw new Error(`附件拉取失败（${resp.status}）`);
   return URL.createObjectURL(await resp.blob());
+}
+
+/**
+ * 附件内容鉴权拉取（预览 Modal 用；返回 Blob，401 时单飞刷新重试一次，对齐 fetchFileBlob）。
+ * 与 fetchAttachmentObjectUrl 的区别：本函数返回原始 Blob（docx/xlsx/md 渲染需 ArrayBuffer/text），
+ * 且 401 时经 ensureFreshAccessToken 刷新后重试一次。
+ */
+export async function fetchAttachmentBlob(id: string): Promise<Blob> {
+  const url = `${getApiBaseUrl()}/api/daemon/session-attachments/${encodeURIComponent(id)}/content`;
+  const doFetch = (token: string | null) =>
+    fetch(url, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
+
+  let token = useSession.getState().accessToken ?? null;
+  let resp = await doFetch(token);
+  if (resp.status === 401) {
+    const fresh = await ensureFreshAccessToken();
+    if (fresh) {
+      token = fresh;
+      resp = await doFetch(token);
+    }
+  }
+  if (!resp.ok) {
+    throw new ApiError(resp.status, {
+      code: "attachment_fetch_failed",
+      message: `附件拉取失败（HTTP ${resp.status}）`,
+      request_id: safeUUID(),
+      details: null,
+    });
+  }
+  return resp.blob();
 }

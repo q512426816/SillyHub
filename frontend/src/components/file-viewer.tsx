@@ -18,11 +18,13 @@ import { DownloadOutlined } from "@ant-design/icons";
 
 import {
   downloadFile,
+  fetchFileBlob,
   fetchFileMetaBatch,
   type FileMetaResp,
 } from "@/lib/file/api";
 import { FileImage } from "@/components/file-image";
 import { FileTypeIcon, formatFileSize, isImageMime } from "@/lib/file/utils";
+import { FilePreviewModal } from "@/components/files/file-preview-modal";
 
 const { Text, Link } = Typography;
 
@@ -35,6 +37,8 @@ export function FileViewer({ fileIds = [] }: FileViewerProps) {
   const ids = useMemo(() => (Array.isArray(fileIds) ? fileIds : []), [fileIds]);
   const [metas, setMetas] = useState<FileMetaResp[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [previewTarget, setPreviewTarget] = useState<FileMetaResp | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   useEffect(() => {
     if (!ids.length) {
@@ -115,6 +119,17 @@ export function FileViewer({ fileIds = [] }: FileViewerProps) {
                 </div>
               </div>
               <Link
+                className="flex-none text-xs"
+                aria-label={`预览 ${m.original_name}`}
+                onClick={(e) => {
+                  e.preventDefault();
+                  setPreviewTarget(m);
+                  setPreviewOpen(true);
+                }}
+              >
+                预览
+              </Link>
+              <Link
                 className="flex-none"
                 aria-label={`下载 ${m.original_name}`}
                 onClick={(e) => {
@@ -128,6 +143,20 @@ export function FileViewer({ fileIds = [] }: FileViewerProps) {
           ))}
         </ul>
       )}
+
+      <FilePreviewModal
+        target={previewTarget ? {
+          fetch: () => fetchFileBlob(previewTarget.id),
+          meta: {
+            name: previewTarget.original_name,
+            mime: previewTarget.mime_type,
+            size: previewTarget.size,
+          },
+          download: () => downloadFile(previewTarget.id, previewTarget.original_name),
+        } : null}
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+      />
     </div>
   );
 }

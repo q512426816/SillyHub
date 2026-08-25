@@ -19,11 +19,12 @@
  * 间接使用（本文件不直接引 antd）。
  */
 
-import { memo } from "react";
+import { memo, useState } from "react";
 
 import { FileImage } from "@/components/file-image";
-import { downloadFile } from "@/lib/file/api";
+import { downloadFile, fetchFileBlob } from "@/lib/file/api";
 import { FileTypeIcon, formatFileSize, isImageMime } from "@/lib/file/utils";
+import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
 import { cn } from "@/lib/utils";
 
 export interface FileMessageCardProps {
@@ -83,7 +84,7 @@ function FileThumbCard({ fileId, name, size, ts, className }: FileMessageCardPro
   );
 }
 
-/** 通用形态（原型 .file-card）：FileTypeIcon + 名称/描述 + 大小 + 下载按钮。 */
+/** 通用形态（原型 .file-card）：FileTypeIcon + 名称/描述 + 大小 + 下载按钮；主体可点击弹预览。 */
 function FilePlainCard({
   fileId,
   name,
@@ -95,38 +96,66 @@ function FilePlainCard({
 }: FileMessageCardProps) {
   const desc = description?.trim();
   const meta = fileMetaText(size, ts);
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  const handleDownload = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    void downloadFile(fileId, name);
+  };
+
   return (
-    <div
-      className={cn(
-        "flex w-full items-center gap-3 self-start rounded-xl border bg-card px-3 py-2.5 shadow-sm",
-        className,
-      )}
-    >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50">
-        <FileTypeIcon mime={mime} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] font-semibold text-foreground" title={name}>
-          {name}
-        </div>
-        {desc && (
-          <div className="truncate text-[11.5px] text-muted-foreground" title={desc}>
-            {desc}
-          </div>
+    <>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={() => setPreviewOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setPreviewOpen(true);
+          }
+        }}
+        className={cn(
+          "flex w-full items-center gap-3 self-start rounded-xl border bg-card px-3 py-2.5 shadow-sm text-left transition-colors hover:border-brand-300 hover:shadow-md cursor-pointer",
+          className,
         )}
-      </div>
-      <span className="shrink-0 whitespace-nowrap font-mono text-[11px] text-muted-foreground">
-        {meta}
-      </span>
-      <button
-        type="button"
-        onClick={() => void downloadFile(fileId, name)}
-        className="shrink-0 rounded-md border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100"
-        aria-label={`下载 ${name}`}
+        title={`${name}（点击在线预览）`}
       >
-        下载 ⭳
-      </button>
-    </div>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-brand-50">
+          <FileTypeIcon mime={mime} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[13px] font-semibold text-foreground" title={name}>
+            {name}
+          </div>
+          {desc && (
+            <div className="truncate text-[11.5px] text-muted-foreground" title={desc}>
+              {desc}
+            </div>
+          )}
+        </div>
+        <span className="shrink-0 whitespace-nowrap font-mono text-[11px] text-muted-foreground">
+          {meta}
+        </span>
+        <button
+          type="button"
+          onClick={handleDownload}
+          className="shrink-0 rounded-md border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100"
+          aria-label={`下载 ${name}`}
+        >
+          下载 ⭳
+        </button>
+      </div>
+      <FilePreviewModal
+        target={{
+          fetch: () => fetchFileBlob(fileId),
+          meta: { name, mime, size },
+          download: () => downloadFile(fileId, name),
+        }}
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+      />
+    </>
   );
 }
 

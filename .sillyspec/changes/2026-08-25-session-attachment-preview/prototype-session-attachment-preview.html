@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会话附件在线预览 · 原型 — 2026-08-25-session-attachment-preview</title>
+<style>
+/* ============ 三主题 CSS 变量（取值对照 frontend/src/styles/themes.ts，禁止自调） ============ */
+:root, [data-theme="ai-native"] {
+  --primary: #7C3AED; --primary-hover: #6D28D9; --accent: #0891B2;
+  --bg: #FAF5FF; --card: #FFFFFF; --border: #DDD6FE;
+  --brand-50: #f5f3ff; --brand-100: #ede9fe; --brand-200: #ddd6fe; --brand-300: #c4b5fd;
+  --brand-600: #7c3aed; --brand-700: #6d28d9;
+  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1;
+  --slate-400: #94a3b8; --slate-500: #64748b; --slate-600: #475569; --slate-700: #334155;
+  --slate-800: #1e293b; --slate-900: #0f172a;
+  --success: #059669; --warning: #D97706; --error: #DC2626;
+  --shadow-md: 0 4px 6px -1px rgb(124 58 237 / 0.08), 0 2px 4px -2px rgb(124 58 237 / 0.06);
+  --shadow-lg: 0 10px 15px -3px rgb(124 58 237 / 0.10), 0 4px 6px -4px rgb(124 58 237 / 0.08);
+  --preview-surface: #ffffff; --preview-paper: #f1f5f9;
+}
+[data-theme="blue"] {
+  --primary: #2563EB; --primary-hover: #1d4ed8; --accent: #06b6d4;
+  --bg: #f8fafc; --card: #FFFFFF; --border: #e2e8f0;
+  --brand-50: #eff6ff; --brand-100: #dbeafe; --brand-200: #bfdbfe; --brand-300: #93c5fd;
+  --brand-600: #2563eb; --brand-700: #1d4ed8;
+  --shadow-md: 0 4px 6px -1px rgb(37 99 235 / 0.08), 0 2px 4px -2px rgb(37 99 235 / 0.06);
+  --shadow-lg: 0 10px 15px -3px rgb(37 99 235 / 0.10), 0 4px 6px -4px rgb(37 99 235 / 0.08);
+  --preview-surface: #ffffff; --preview-paper: #f1f5f9;
+}
+[data-theme="dark"] {
+  --primary: #0891b2; --primary-hover: #06b6d4; --accent: #22d3ee;
+  --bg: #18181b; --card: #27272a; --border: #3f3f46;
+  --brand-50: #083344; --brand-100: #164e63; --brand-200: #155e75; --brand-300: #0e7490;
+  --brand-600: #22d3ee; --brand-700: #67e8f9;
+  --slate-50: #09090b; --slate-100: #18181b; --slate-200: #27272a; --slate-300: #3f3f46;
+  --slate-400: #52525b; --slate-500: #71717a; --slate-600: #a1a1aa; --slate-700: #d4d4d8;
+  --slate-800: #e4e4e7; --slate-900: #f4f4f5;
+  --success: #34d399; --warning: #fbbf24; --error: #f87171;
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4); --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5);
+  --preview-surface: #27272a; --preview-paper: #18181b;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg); color: var(--slate-800); font-size: 14px; line-height: 1.6;
+  transition: background .25s;
+}
+button { font-family: inherit; cursor: pointer; }
+
+/* ============ 顶栏：原型说明 + 主题切换 ============ */
+.proto-topbar {
+  position: sticky; top: 0; z-index: 40; height: 56px;
+  display: flex; align-items: center; gap: 16px; padding: 0 20px;
+  background: var(--card); border-bottom: 1px solid var(--border);
+}
+.proto-topbar .title { font-weight: 600; font-size: 14px; color: var(--slate-800); }
+.proto-topbar .title small { font-weight: 400; color: var(--slate-500); margin-left: 8px; }
+.theme-switch { margin-left: auto; display: flex; gap: 6px; }
+.theme-switch button {
+  padding: 4px 12px; border-radius: 8px; font-size: 12px;
+  border: 1px solid var(--border); background: var(--card); color: var(--slate-600);
+}
+.theme-switch button.active { background: var(--brand-600); border-color: var(--brand-600); color: #fff; }
+
+/* ============ 会话面板容器（模拟工作台会话流） ============ */
+.session-wrap { max-width: 860px; margin: 24px auto 60px; padding: 0 16px; }
+.panel {
+  background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+  box-shadow: var(--shadow-md); overflow: hidden;
+}
+.panel-head {
+  padding: 12px 18px; border-bottom: 1px solid var(--border);
+  font-weight: 600; font-size: 13px; color: var(--slate-700);
+  display: flex; align-items: center; gap: 8px;
+}
+.panel-head .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+.chat { padding: 18px; display: flex; flex-direction: column; gap: 16px; }
+
+/* 用户消息（右侧） */
+.msg-user { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.msg-user .bubble {
+  background: var(--brand-600); color: #fff; border-radius: 14px 14px 4px 14px;
+  padding: 8px 14px; max-width: 70%; font-size: 13.5px;
+}
+.attachment-row { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+
+/* ★ 附件 chip —— 改造后：所有 chip 可点击（hover 出现预览遮罩/下划线） */
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: var(--slate-100); border: 1px solid var(--border);
+  color: var(--slate-700); border-radius: 10px; padding: 6px 10px;
+  font-size: 12px; cursor: pointer; transition: all .15s;
+}
+.chip:hover { border-color: var(--brand-300); background: var(--brand-50); color: var(--brand-700); }
+.chip svg { width: 14px; height: 14px; flex: none; }
+.chip .name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chip img.thumb {
+  height: 96px; max-width: 150px; object-fit: cover; border-radius: 8px;
+  border: 1px solid var(--border); display: block;
+}
+.chip-image { padding: 4px; }
+.chip-image:hover img.thumb { border-color: var(--brand-300); }
+
+/* agent 消息（左侧） */
+.msg-agent { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.msg-agent .avatar {
+  width: 28px; height: 28px; border-radius: 8px; background: var(--brand-100);
+  color: var(--brand-700); display: flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 600; margin-bottom: 2px;
+}
+.msg-agent .bubble {
+  background: var(--slate-50); border: 1px solid var(--border);
+  border-radius: 14px 14px 14px 4px; padding: 10px 14px; max-width: 76%; font-size: 13.5px;
+}
+
+/* ★ agent 文件卡片（file-message-card 通用形态）—— 名称区改为可点击预览 */
+.file-card {
+  display: flex; align-items: center; gap: 12px; width: 380px; max-width: 100%;
+  background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+  padding: 10px 12px; box-shadow: var(--shadow-md); cursor: pointer; transition: all .15s;
+}
+.file-card:hover { border-color: var(--brand-300); box-shadow: var(--shadow-lg); }
+.file-card .icon {
+  width: 36px; height: 36px; border-radius: 10px; background: var(--brand-50);
+  color: var(--brand-600); display: flex; align-items: center; justify-content: center;
+}
+.file-card .icon svg { width: 18px; height: 18px; }
+.file-card .meta { flex: 1; min-width: 0; }
+.file-card .meta .name { font-size: 13px; font-weight: 600; color: var(--slate-800); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-card .meta .sub { font-size: 11px; color: var(--slate-500); font-family: ui-monospace, monospace; }
+.file-card .dl {
+  flex: none; font-size: 12px; color: var(--brand-600); border: 1px solid var(--brand-200);
+  background: var(--brand-50); border-radius: 8px; padding: 4px 10px;
+}
+.file-card .dl:hover { background: var(--brand-100); }
+
+/* ============ ★ 统一预览 Modal（FilePreviewModal 壳） ============ */
+.modal-mask {
+  position: fixed; inset: 0; z-index: 100; background: rgb(0 0 0 / 0.55);
+  display: none; align-items: center; justify-content: center; padding: 28px;
+}
+.modal-mask.open { display: flex; }
+.modal {
+  background: var(--card); border: 1px solid var(--border); border-radius: 16px;
+  width: min(960px, 94vw); max-height: calc(100vh - 56px);
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: var(--shadow-lg);
+  animation: pop .18s ease-out;
+}
+@keyframes pop { from { transform: scale(.96); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+.modal-head {
+  display: flex; align-items: center; gap: 10px; padding: 12px 18px;
+  border-bottom: 1px solid var(--border); flex: none;
+}
+.modal-head .icon { width: 32px; height: 32px; border-radius: 8px; background: var(--brand-50); color: var(--brand-600); display: flex; align-items: center; justify-content: center; }
+.modal-head .icon svg { width: 16px; height: 16px; }
+.modal-head .fname { font-weight: 600; font-size: 14px; color: var(--slate-800); max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.modal-head .fmeta { font-size: 11.5px; color: var(--slate-500); font-family: ui-monospace, monospace; }
+.modal-head .actions { margin-left: auto; display: flex; gap: 8px; }
+.btn {
+  border-radius: 8px; font-size: 12.5px; padding: 6px 14px; border: 1px solid var(--border);
+  background: var(--card); color: var(--slate-600);
+}
+.btn:hover { border-color: var(--brand-300); color: var(--brand-700); }
+.btn-primary { background: var(--brand-600); border-color: var(--brand-600); color: #fff; }
+.btn-primary:hover { background: var(--brand-700); border-color: var(--brand-700); color: #fff; }
+
+/* 演示格式切换条（原型专用，真实实现为自动按 MIME 分发） */
+.demo-tabs {
+  display: flex; gap: 6px; padding: 10px 18px 0; flex-wrap: wrap;
+}
+.demo-tabs button {
+  font-size: 12px; padding: 4px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--card); color: var(--slate-500);
+}
+.demo-tabs button.active { background: var(--brand-50); border-color: var(--brand-300); color: var(--brand-700); font-weight: 600; }
+
+.modal-body {
+  flex: 1; min-height: 420px; max-height: calc(100vh - 210px); overflow: auto;
+  background: var(--preview-surface); padding: 18px;
+}
+
+/* —— 图片渲染器 —— */
+.pv-image { display: flex; align-items: center; justify-content: center; min-height: 420px; }
+.pv-image img { max-width: 100%; max-height: 560px; border-radius: 8px; box-shadow: var(--shadow-md); }
+.pv-image .zoom-hint { margin-top: 8px; font-size: 11.5px; color: var(--slate-400); }
+
+/* —— PDF 渲染器（iframe 内嵌，原型以纸张模拟） —— */
+.pv-pdf { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.pv-pdf .page {
+  width: 620px; max-width: 100%; background: #fff; border: 1px solid var(--slate-300);
+  border-radius: 4px; padding: 48px 52px; color: #1e293b;
+  box-shadow: var(--shadow-md); font-size: 13px;
+}
+[data-theme="dark"] .pv-pdf .page { filter: brightness(.92); }
+.pv-pdf .page h2 { font-size: 18px; margin-bottom: 14px; color: #0f172a; }
+.pv-pdf .page p { margin-bottom: 10px; }
+.pv-pdf .page .sig { margin-top: 24px; text-align: right; color: #475569; }
+
+/* —— Word 渲染器（docx-preview 输出，原型模拟还原样式） —— */
+.pv-docx { max-width: 720px; margin: 0 auto; background: #fff; border: 1px solid var(--slate-300); border-radius: 4px; padding: 48px 56px; color: #1e293b; box-shadow: var(--shadow-md); }
+.pv-docx h1 { font-size: 21px; color: #0f172a; margin-bottom: 6px; }
+.pv-docx .sub { font-size: 12px; color: #64748b; margin-bottom: 20px; }
+.pv-docx h2 { font-size: 15px; color: #0f172a; margin: 18px 0 8px; border-left: 3px solid var(--brand-600); padding-left: 10px; }
+.pv-docx p { font-size: 13px; margin-bottom: 10px; }
+.pv-docx table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 12px 0; }
+.pv-docx th, .pv-docx td { border: 1px solid #cbd5e1; padding: 6px 10px; text-align: left; }
+.pv-docx th { background: #f1f5f9; }
+
+/* —— Excel 渲染器（SheetJS sheet→HTML 表格 + sheet 切换） —— */
+.pv-xlsx { border: 1px solid var(--slate-300); border-radius: 8px; overflow: hidden; background: #fff; color: #1e293b; }
+.pv-xlsx .sheetbar { display: flex; gap: 2px; padding: 8px 10px 0; background: var(--slate-100); border-bottom: 1px solid var(--slate-200); }
+.pv-xlsx .sheetbar span { font-size: 12px; padding: 5px 14px; border-radius: 6px 6px 0 0; color: #64748b; cursor: pointer; }
+.pv-xlsx .sheetbar span.active { background: #fff; color: #0f172a; font-weight: 600; border: 1px solid var(--slate-200); border-bottom-color: #fff; }
+.pv-xlsx table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.pv-xlsx th, .pv-xlsx td { border: 1px solid #e2e8f0; padding: 5px 10px; white-space: nowrap; }
+.pv-xlsx th { background: #f8fafc; color: #334155; font-weight: 600; }
+.pv-xlsx td.num { text-align: right; font-family: ui-monospace, monospace; }
+.pv-xlsx .grip { color: #cbd5e1; font-size: 11px; }
+
+/* —— Markdown 渲染器（@uiw/react-markdown-preview） —— */
+.pv-md { max-width: 720px; margin: 0 auto; font-size: 13.5px; }
+.pv-md h1 { font-size: 20px; margin: 4px 0 12px; color: var(--slate-900); }
+.pv-md h2 { font-size: 16px; margin: 18px 0 8px; color: var(--slate-800); }
+.pv-md p { margin-bottom: 10px; color: var(--slate-700); }
+.pv-md code { background: var(--slate-100); border-radius: 4px; padding: 1px 6px; font-size: 12px; color: var(--error); font-family: ui-monospace, monospace; }
+.pv-md pre { background: var(--slate-800); color: var(--slate-100); border-radius: 10px; padding: 14px 16px; overflow: auto; font-size: 12px; margin: 10px 0; }
+.pv-md blockquote { border-left: 3px solid var(--brand-300); padding: 2px 14px; color: var(--slate-500); margin: 10px 0; background: var(--brand-50); border-radius: 0 8px 8px 0; }
+
+/* —— 不支持格式 fallback —— */
+.pv-fallback { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 420px; gap: 10px; }
+.pv-fallback .big-icon {
+  width: 64px; height: 64px; border-radius: 18px; background: var(--brand-50);
+  color: var(--brand-600); display: flex; align-items: center; justify-content: center;
+}
+.pv-fallback .big-icon svg { width: 30px; height: 30px; }
+.pv-fallback .t1 { font-size: 14.5px; font-weight: 600; color: var(--slate-700); }
+.pv-fallback .t2 { font-size: 12.5px; color: var(--slate-500); max-width: 380px; text-align: center; }
+
+/* —— 加载 / 错误态 —— */
+.pv-loading { display: flex; align-items: center; justify-content: center; min-height: 420px; gap: 10px; color: var(--slate-500); font-size: 13px; }
+.spinner { width: 18px; height: 18px; border: 2px solid var(--brand-200); border-top-color: var(--brand-600); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.pv-error { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 420px; gap: 8px; color: var(--error); }
+
+/* 原型注释徽标 */
+.note {
+  font-size: 11.5px; color: var(--slate-500); background: var(--slate-100);
+  border: 1px dashed var(--slate-300); border-radius: 8px; padding: 8px 12px; margin: 0 18px 14px;
+}
+.note b { color: var(--brand-700); }
+</style>
+</head>
+<body>
+
+<div class="proto-topbar">
+  <span class="title">会话附件在线预览 · 交互原型<small>2026-08-25-session-attachment-preview</small></span>
+  <div class="theme-switch">
+    <button data-t="ai-native" class="active">AI 紫</button>
+    <button data-t="blue">明亮蓝</button>
+    <button data-t="dark">暗夜</button>
+  </div>
+</div>
+
+<div class="session-wrap">
+  <div class="panel">
+    <div class="panel-head"><span class="dot"></span>会话 · 运行时会话面板（改造后：附件可点击在线查看）</div>
+    <div class="chat">
+
+      <!-- 用户消息：带附件（图片 + 各类文件） -->
+      <div class="msg-user">
+        <div class="attachment-row">
+          <span class="chip chip-image" data-preview="image" title="点击在线预览">
+            <img class="thumb" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='200'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%237C3AED'/%3E%3Cstop offset='1' stop-color='%230891B2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='300' height='200' fill='url(%23g)'/%3E%3Ctext x='150' y='108' fill='white' font-size='16' text-anchor='middle' font-family='sans-serif'%3E界面截图.png%3C/text%3E%3C/svg%3E" alt="界面截图.png">
+          </span>
+          <button class="chip" data-preview="docx" title="点击在线预览">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+            <span class="name">需求规格说明.docx</span>
+          </button>
+          <button class="chip" data-preview="xlsx" title="点击在线预览">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h8M8 13v4"/></svg>
+            <span class="name">测试用例清单.xlsx</span>
+          </button>
+          <button class="chip" data-preview="md" title="点击在线预览">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 15l3-3 3 3"/></svg>
+            <span class="name">会议纪要.md</span>
+          </button>
+          <button class="chip" data-preview="pdf" title="点击在线预览">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+            <span class="name">审计报告.pdf</span>
+          </button>
+          <button class="chip" data-preview="pptx" title="点击查看（暂不支持在线预览）">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+            <span class="name">汇报材料.pptx</span>
+          </button>
+        </div>
+        <div class="bubble">这几个文件帮我分析一下，给出风险点和改进建议。</div>
+      </div>
+
+      <!-- agent 回复：文件卡片（名称区可点击预览） -->
+      <div class="msg-agent">
+        <span class="avatar">A</span>
+        <div class="bubble">已完成分析。详细结论我整理成了一份报告，点击文件名可在线查看：</div>
+        <div class="file-card" data-preview="docx" title="点击在线预览">
+          <span class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></span>
+          <span class="meta">
+            <span class="name">风险分析报告.docx</span>
+            <span class="sub">48.2 KB · agent 上传</span>
+          </span>
+          <span class="dl" onclick="event.stopPropagation()">下载 ⭳</span>
+        </div>
+      </div>
+
+    </div>
+    <div class="note" style="margin-top:4px">
+      ★ 改造点：上图 <b>用户消息附件 chips</b> 与上方 <b>agent 文件卡片</b> 全部可点击，弹出统一预览窗（图片放大 / PDF 内嵌 / Word·Excel 在线渲染 / Markdown 渲染 / 其余格式引导下载）。<b>点击任一附件体验 →</b>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 统一预览 Modal ============ -->
+<div class="modal-mask" id="mask">
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <span class="icon" id="mIcon"></span>
+      <span class="fname" id="mName"></span>
+      <span class="fmeta" id="mMeta"></span>
+      <span class="actions">
+        <button class="btn" onclick="alert('（真实实现：fetch blob → a[download] 保存）')">⭳ 下载</button>
+        <button class="btn" onclick="closeModal()">✕ 关闭</button>
+      </span>
+    </div>
+    <div class="demo-tabs" id="demoTabs">
+      <button data-f="image" class="active">图片</button>
+      <button data-f="pdf">PDF</button>
+      <button data-f="docx">Word</button>
+      <button data-f="xlsx">Excel</button>
+      <button data-f="md">Markdown</button>
+      <button data-f="pptx">不支持格式</button>
+    </div>
+    <div class="modal-body" id="mBody"></div>
+  </div>
+</div>
+
+<script>
+/* ---------- 主题切换（三主题对照 themes.ts） ---------- */
+document.querySelectorAll('.theme-switch button').forEach(b => {
+  b.onclick = () => {
+    document.documentElement.dataset.theme = b.dataset.t;
+    document.querySelectorAll('.theme-switch button').forEach(x => x.classList.toggle('active', x === b));
+  };
+});
+
+/* ---------- 演示内容 ---------- */
+const fileIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>';
+const files = {
+  image: { name: '界面截图.png',  meta: 'PNG · 384.6 KB', body: `
+    <div class="pv-image"><div style="text-align:center">
+      <img src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='760' height='440'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%237C3AED'/%3E%3Cstop offset='1' stop-color='%230891B2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='760' height='440' fill='url(%23g)'/%3E%3Crect x='40' y='40' width='680' height='360' rx='14' fill='white' opacity='.14'/%3E%3Ctext x='380' y='226' fill='white' font-size='22' text-anchor='middle' font-family='sans-serif'%3E图片渲染器 · antd Image（可缩放/旋转）%3C/text%3E%3C/svg%3E" alt="界面截图.png">
+      <div class="zoom-hint">真实实现：antd &lt;Image&gt; 内嵌渲染，支持点击放大 / 缩放 / 旋转（与现有 file-image.tsx 同源交互）</div>
+    </div></div>` },
+  pdf: { name: '审计报告.pdf', meta: 'PDF · 1.2 MB', body: `
+    <div class="pv-pdf">
+      <div class="page"><h2>2026 Q2 平台安全审计报告（节选）</h2>
+        <p>本季度共审计 29 个模块、94 张数据表与 4 条鉴权轨道。总体结论：核心链路无高危漏洞，3 项中危已全部修复。</p>
+        <p>四轨鉴权（JWT / shk_live_ / shpsync_ / shmcp_）边界清晰；platform_sync 写通道 token 作用域符合最小权限原则。</p>
+        <p class="sig">—— 审计组 · 2026-08-20</p></div>
+      <div class="page" style="opacity:.75"><h2>附录 A：整改进度</h2><p>…（滚动查看多页，浏览器原生 PDF 视图器支持缩放与页码跳转）…</p></div>
+    </div>` },
+  docx: { name: '需求规格说明.docx', meta: 'DOCX · 96.4 KB', body: `
+    <div class="pv-docx">
+      <h1>会话附件在线预览 · 需求规格说明</h1>
+      <div class="sub">版本 v1.0 · 2026-08-25 · SillyHub</div>
+      <h2>1. 背景</h2>
+      <p>用户在智能体会话中发送文件后，无法回看文件内容。本期为所有文件入口提供统一在线预览能力。</p>
+      <h2>2. 支持范围</h2>
+      <table><tr><th>格式</th><th>渲染方式</th><th>备注</th></tr>
+        <tr><td>图片 png/jpeg/webp/gif</td><td>antd Image</td><td>放大/缩放/旋转</td></tr>
+        <tr><td>PDF</td><td>iframe 内嵌</td><td>浏览器原生视图器</td></tr>
+        <tr><td>docx</td><td>docx-preview</td><td>保真渲染</td></tr>
+        <tr><td>xlsx</td><td>SheetJS</td><td>多 sheet 切换</td></tr></table>
+      <p>不支持的格式（如 pptx）提供醒目下载入口，不渲染空白。</p>
+    </div>` },
+  xlsx: { name: '测试用例清单.xlsx', meta: 'XLSX · 32.1 KB', body: `
+    <div class="pv-xlsx">
+      <div class="sheetbar"><span class="active">用例总览</span><span>边界用例</span><span>回归结果</span></div>
+      <table>
+        <tr><th>ID</th><th>模块</th><th>用例名</th><th>优先级</th><th>状态</th></tr>
+        <tr><td>TC-001</td><td>预览弹窗</td><td>图片点击放大与旋转</td><td>P0</td><td>通过</td></tr>
+        <tr><td>TC-002</td><td>预览弹窗</td><td>PDF 多页滚动与缩放</td><td>P0</td><td>通过</td></tr>
+        <tr><td>TC-003</td><td>预览弹窗</td><td>docx 表格与图片渲染</td><td>P0</td><td>通过</td></tr>
+        <tr><td>TC-004</td><td>预览弹窗</td><td>xlsx 多 sheet 切换</td><td>P1</td><td>通过</td></tr>
+        <tr><td>TC-005</td><td>预览弹窗</td><td>pptx fallback 下载引导</td><td>P1</td><td>通过</td></tr>
+      </table>
+    </div>` },
+  md: { name: '会议纪要.md', meta: 'MD · 6.8 KB', body: `
+    <div class="pv-md">
+      <h1>评审会议纪要 · 附件在线预览</h1>
+      <p>本期评审通过 <code>纯前端渲染</code> 技术路线，覆盖三个文件入口。</p>
+      <blockquote>结论：docx-preview + SheetJS 前端渲染；PPT 转下载引导，待社区渲染库成熟后再纳入。</blockquote>
+      <h2>行动项</h2>
+      <p>1. 统一 <code>FilePreviewModal</code> 壳组件 + 格式注册表分发；</p>
+      <p>2. blob 拉取统一 <code>useObjectUrl</code>，卸载自动释放防内存泄漏。</p>
+      <pre>registry.match('file.docx')  →  DocxPreviewer
+registry.match('用例.xlsx')  →  XlsxPreviewer</pre>
+    </div>` },
+  pptx: { name: '汇报材料.pptx', meta: 'PPTX · 8.6 MB', body: `
+    <div class="pv-fallback">
+      <span class="big-icon">${fileIcon}</span>
+      <span class="t1">该格式暂不支持在线预览</span>
+      <span class="t2">PowerPoint 幻灯片暂无高质量浏览器渲染方案（保真度不足），可下载后用本地 Office / WPS 打开。其余 Office 格式（docx / xlsx）已支持在线查看。</span>
+      <button class="btn btn-primary" style="margin-top:6px" onclick="alert('（真实实现：fetch blob → a[download] 保存）')">⭳ 下载文件</button>
+    </div>` },
+};
+
+/* ---------- 打开/关闭/切换 ---------- */
+const mask = document.getElementById('mask');
+const mIcon = document.getElementById('mIcon'), mName = document.getElementById('mName'),
+      mMeta = document.getElementById('mMeta'), mBody = document.getElementById('mBody');
+let current = 'image';
+
+function render(fmt) {
+  current = fmt;
+  const f = files[fmt];
+  mIcon.innerHTML = fileIcon;
+  mName.textContent = f.name; mMeta.textContent = f.meta;
+  mBody.innerHTML = fmt === 'md'
+    ? `<div class="pv-loading"><span class="spinner"></span>加载文件中…（真实实现：约 200ms 内呈现）</div>` : f.body;
+  document.querySelectorAll('#demoTabs button').forEach(b => b.classList.toggle('active', b.dataset.f === fmt));
+  if (fmt === 'md') setTimeout(() => { if (current === 'md') mBody.innerHTML = f.body; }, 600);
+}
+function openModal(fmt) { render(fmt); mask.classList.add('open'); }
+function closeModal() { mask.classList.remove('open'); }
+mask.addEventListener('click', e => { if (e.target === mask) closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+document.querySelectorAll('[data-preview]').forEach(el => el.addEventListener('click', () => openModal(el.dataset.preview)));
+document.querySelectorAll('#demoTabs button').forEach(b => b.onclick = () => render(b.dataset.f));
+</script>
+</body>
+</html>
