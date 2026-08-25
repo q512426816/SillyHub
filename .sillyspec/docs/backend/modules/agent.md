@@ -104,6 +104,13 @@ mission external 三重防御: ①入口跳过 orchestrator/lease spawn
   worker_done 端点（mcp_tools 四路由族）写 worker_done_at + summary 挂首 run + DEL→SETNX
   重开工唤醒 + 迟到 409；converge 成功后沿树批量 end_session（冲突/needs_manual 不收口），
   patrol 职责⑤孤儿扫描兜底；存量 batch 分身双判据兼容（is_worker_complete 内置 AgentRun 形态）。
+- 分身递归开闸（2026-08-26-team-subsession-recursion）：tree_depth 列（NOT NULL DEFAULT 0，主控 0/分身 1/孙 2）
+  + mission_worker_sessions_tree 递归 CTE 全树枚举（治理口径单一真相源，UNION 去重+深度 4 截断）；
+  五端点统一调用方解析（parent 非空爬根禁懒建 miss=404，防分身误锚新 mission）；递归派发
+  parent=调用会话 + MAX_DISPATCH_DEPTH=2（mcp_tools.py 单源，daemon mcp-config.ts 同值有锁漂移断言）；
+  converge 层 0 收口（_enforce_converge_layer0 通道嗅探：Bearer 豁免/分身 403/apiKey 裸调 403）；
+  patrol 职责⑥预算强收（先原子置位 constraints.budget_force_ended_at 后批量收口，虚拟映射
+  「标记存在时 ended 未 done→failed」保证强收后可收敛 degraded）；分身调用 worktree_path 一律忽略。
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->

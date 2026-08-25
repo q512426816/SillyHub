@@ -122,6 +122,9 @@ stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
   parent_session_id/stage/first_run_mission_id/first_run_role 可选参数（缺省逐字节零回归），
   分身形态由 agent 模块 dispatch_worker 经 prepare_interactive_dispatch 原语直连消费
   （create_session 的 runtime 属主校验与跨 ws 代表钉定冲突，见该变更实现偏离记录）。
+- 会话闸失败收口（2026-08-26-team-subsession-recursion）：run_sync close_interactive_run 增「失败即收口」
+  ——首 run failed + 会话从未 ready + parent 非空三条件缺一不可 → 子会话置 failed+ended_at
+  （对齐 _fail_worker_subsession 语义），防 daemon 会话闸拒绝后子会话永久 active；追问轮中途失败不命中。
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->
