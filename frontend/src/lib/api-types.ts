@@ -16620,6 +16620,8 @@ export interface components {
             type: string | null;
             /** Description */
             description: string | null;
+            /** Root Path */
+            root_path?: string | null;
             /** Daemon Online */
             daemon_online: boolean;
             /** Daemon Name */

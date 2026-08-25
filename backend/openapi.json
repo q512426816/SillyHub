@@ -49805,6 +49805,17 @@
             ],
             "title": "Description"
           },
+          "root_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Path"
+          },
           "daemon_online": {
             "type": "boolean",
             "title": "Daemon Online"
