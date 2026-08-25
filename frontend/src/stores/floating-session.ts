@@ -28,6 +28,20 @@ export interface FloatingPreContext {
 }
 
 /**
+ * runtime 锁定壳态（FR-01/FR-02，/runtimes 入口唤起抽屉时携带）。
+ * 锁定后：抽屉头部显示锁定徽标、树按 runtime scope 过滤、新建钉死该 runtime。
+ * 不随 closeDrawer 自动清——下次 openRuntimeSession 或显式 closeRuntimeLock 覆盖。
+ */
+export interface FloatingLockedRuntime {
+  /** runtime id（传给 SessionListPanel scope.runtimeId + preContext.runtimeId）。 */
+  id: string;
+  /** 展示用：机器显示名。 */
+  machineLabel: string;
+  /** 展示用：智能体/提供方显示名。 */
+  providerLabel: string;
+}
+
+/**
  * 页面上下文（后端 PageContextCreateBlock 前端形态）：
  * - ppm_project：PPM 项目详情（显式入口携带，服务端回查项目数据）；
  * - generic_page（task-09）：通用页面（URL 派生 route_key，服务端注册表
@@ -57,6 +71,13 @@ export interface FloatingSessionState {
    * 挂载后解析默认机器进预会话并清除（未命中机器弹两步浮层兜底）。
    */
   autoNewPending: boolean;
+  /**
+   * FR-01/FR-02：runtime 锁定态（/runtimes 入口唤起时携带）。非空=锁定，
+   * 抽屉头部渲染锁定徽标、树按 runtime scope 过滤、新建钉死该 runtime。
+   * 不随 closeDrawer 自动清（运行中会话保活时保留；下次 openRuntimeSession
+   * 或 closeRuntimeLock 覆盖）。
+   */
+  lockedRuntime: FloatingLockedRuntime | null;
 
   openDrawer: () => void;
   minimize: () => void;
@@ -70,6 +91,13 @@ export interface FloatingSessionState {
   clearAutoNew: () => void;
   /** 预会话首句创建成功（SessionPanel onPreSessionCreated → 宿主回调）。 */
   preSessionCreated: (_sessionId: string) => void;
+  /**
+   * FR-01：/runtimes 入口唤起锁定态抽屉——置 lockedRuntime + open + 清
+   * sessionId/preContext（新会话从空态或 preContext 开始，不继承旧选中）。
+   */
+  openRuntimeSession: (_lock: FloatingLockedRuntime) => void;
+  /** FR-01：显式清锁定态（锁定随抽屉关闭或下次 openRuntimeSession 覆盖）。 */
+  closeRuntimeLock: () => void;
 }
 
 export const useFloatingSessionStore = create<FloatingSessionState>((set) => ({
@@ -79,6 +107,7 @@ export const useFloatingSessionStore = create<FloatingSessionState>((set) => ({
   preContext: null,
   pageContext: null,
   autoNewPending: false,
+  lockedRuntime: null,
 
   openDrawer: () => set({ open: true, minimized: false }),
 
@@ -96,6 +125,7 @@ export const useFloatingSessionStore = create<FloatingSessionState>((set) => ({
           preContext: null,
           pageContext: null,
           autoNewPending: false,
+          // lockedRuntime 不清（运行中会话保活时保留锁定）。
         };
       }
       // 有会话：等同最小化（SSE 保活，不因关抽屉断连）。
@@ -135,4 +165,15 @@ export const useFloatingSessionStore = create<FloatingSessionState>((set) => ({
 
   preSessionCreated: (sessionId) =>
     set({ sessionId, preContext: null, open: true, minimized: false, autoNewPending: false }),
+
+  openRuntimeSession: (lock) =>
+    set({
+      lockedRuntime: lock,
+      sessionId: null,
+      preContext: null,
+      open: true,
+      minimized: false,
+    }),
+
+  closeRuntimeLock: () => set({ lockedRuntime: null }),
 }));

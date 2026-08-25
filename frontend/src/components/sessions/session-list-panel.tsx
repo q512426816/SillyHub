@@ -109,8 +109,14 @@ export type ChangeScope = {
   changeId: string;
 };
 
+/**
+ * runtime 范围（FR-02/FR-03，/runtimes 入口唤起悬浮助手时锁定）：列表只看
+ * 该 runtime 的会话（跨工作区按组展示），组头新建禁用（锁定态新建归宿主头部）。
+ */
+export type RuntimeScope = { kind: "runtime"; runtimeId: string };
+
 /** scope 判别联合（缺省不传 = 全局门户现状）。 */
-export type SessionListScope = WorkspaceScope | ChangeScope;
+export type SessionListScope = WorkspaceScope | ChangeScope | RuntimeScope;
 
 /** 状态下拉选项（active/ended/failed；空串=不过滤）。 */
 const STATUS_OPTIONS = [
@@ -490,9 +496,14 @@ function WorkspaceTreeList({
       listAgentSessions({
         limit: AGENT_SESSIONS_TREE_FETCH_LIMIT,
         ...(isArchivedView ? { archived: true } : {}),
-        ...(scope?.workspaceId ? { workspace_id: scope.workspaceId } : {}),
+        // workspace/change scope 透传 workspace_id（RuntimeScope 无此字段，跳过）。
+        ...(scope && "workspaceId" in scope && scope.workspaceId
+          ? { workspace_id: scope.workspaceId }
+          : {}),
         // ql-20260823-003：change 树化后端点过滤参随树透传（D-003@v2）。
         ...(scope?.kind === "change" ? { change_id: scope.changeId } : {}),
+        // FR-02：runtime scope 端点过滤（lib/daemon.ts:1669 既有 runtime_id 参）。
+        ...(scope?.kind === "runtime" ? { runtime_id: scope.runtimeId } : {}),
       }),
     refetchInterval: (query) =>
       sessionListPollInterval(query.state.data?.items),
@@ -531,6 +542,31 @@ function WorkspaceTreeList({
           sessions: byWs.get(scope.workspaceId) ?? [],
         },
       ];
+    }
+    // FR-02：runtime scope 同款单组——跨工作区按组展示，组头「＋」禁用（锁定态新建归宿主）。
+    if (scope?.kind === "runtime") {
+      const result: TreeGroup[] = workspaces
+        .filter((ws) => byWs.has(ws.id))
+        .map((ws) => ({
+          id: ws.id,
+          workspaceId: ws.id,
+          name: ws.name,
+          canNew: false,
+          sessions: byWs.get(ws.id) ?? [],
+        }));
+      // 工作区列表外残留（端点按 runtime_id 过滤后仍可能有 workspace_id 已删的会话）。
+      for (const [wsId, list] of byWs) {
+        if (!workspaceIdToName.has(wsId)) {
+          result.push({
+            id: UNKNOWN_WORKSPACE_GROUP_ID,
+            workspaceId: null,
+            name: "未知工作区",
+            canNew: false,
+            sessions: list,
+          });
+        }
+      }
+      return result;
     }
     // ql-20260823-003：change 同款单组（端点已过滤 change_id+workspace_id，
     // 组头「＋」经门户 handleNewInGroup 双传 change 上下文）。

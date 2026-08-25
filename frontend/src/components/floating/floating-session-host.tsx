@@ -33,10 +33,10 @@ import {
 
 import { SessionPanel } from "@/components/daemon/session-panel";
 import { PreSessionPicker } from "@/components/sessions/pre-session-picker";
+// FR-02/FR-03：抽屉左栏由紧凑列表换成 /sessions 同款工作区树。
+import { SessionListPanel } from "@/components/sessions/session-list-panel";
 import { resolveDefaultMachineId } from "@/components/sessions/sessions-portal";
 import {
-  listAgentSessions,
-  type AgentSessionRead,
   type SessionCreateResponse,
 } from "@/lib/daemon";
 import { listProviders } from "@/lib/api/llm-providers";
@@ -64,6 +64,7 @@ function FloatingDrawerBody({
   const sessionId = useFloatingSessionStore((s) => s.sessionId);
   const preContext = useFloatingSessionStore((s) => s.preContext);
   const pageContext = useFloatingSessionStore((s) => s.pageContext);
+  const lockedRuntime = useFloatingSessionStore((s) => s.lockedRuntime);
   const selectSession = useFloatingSessionStore((s) => s.selectSession);
   const closeDrawer = useFloatingSessionStore((s) => s.closeDrawer);
   const minimize = useFloatingSessionStore((s) => s.minimize);
@@ -88,21 +89,6 @@ function FloatingDrawerBody({
     [providersQ.data],
   );
 
-  // 紧凑最近会话列表（最近 10 条活跃会话，last_active_at 优先）。
-  const recentQ = useQuery({
-    queryKey: ["agentSessions", "floating-recent"],
-    queryFn: () => listAgentSessions({ limit: 10, archived: false }),
-    refetchInterval: 30_000,
-  });
-  const recent: AgentSessionRead[] = useMemo(() => {
-    const items = recentQ.data?.items ?? [];
-    return [...items].sort(
-      (a, b) =>
-        Date.parse(b.last_active_at ?? b.created_at ?? "0") -
-        Date.parse(a.last_active_at ?? a.created_at ?? "0"),
-    );
-  }, [recentQ.data]);
-
   const refreshLists = useCallback(() => {
     void qc.invalidateQueries({ queryKey: ["agentSessions"] });
   }, [qc]);
@@ -110,6 +96,14 @@ function FloatingDrawerBody({
   // 新会话：D-005 三级回退解析默认机器（默认 Claude），未命中弹两步浮层兜底。
   const [pickerOpen, setPickerOpen] = useState(false);
   const handleNewSession = useCallback(() => {
+    // FR-02：lockedRuntime 时钉死该 runtime，不弹 PreSessionPicker 两步浮层。
+    if (lockedRuntime) {
+      startPreSession(
+        { runtimeId: lockedRuntime.id, workspaceId: null },
+        effectivePageCtx,
+      );
+      return;
+    }
     const machineId = resolveDefaultMachineId(machines, sessions);
     const runtimes = (
       machines.find((m) => m.id === machineId)?.runtimes ?? []
@@ -127,7 +121,7 @@ function FloatingDrawerBody({
     } else {
       setPickerOpen(true);
     }
-  }, [machines, sessions, startPreSession, effectivePageCtx]);
+  }, [lockedRuntime, machines, sessions, startPreSession, effectivePageCtx]);
 
   const handlePreSessionCreated = useCallback(
     (resp: SessionCreateResponse) => {
@@ -164,6 +158,16 @@ function FloatingDrawerBody({
           <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold text-brand-700">
             悬浮模式
           </span>
+          {/* FR-01：runtime 锁定态——从 /runtimes 入口唤起时显示锁定徽标。 */}
+          {lockedRuntime && (
+            <span
+              data-testid="floating-lock-badge"
+              className="rounded-full bg-warning/10 px-2 py-0.5 text-[10px] font-semibold text-warning"
+              title={`锁定到 ${lockedRuntime.machineLabel} · ${lockedRuntime.providerLabel}`}
+            >
+              🔒 {lockedRuntime.machineLabel} · {lockedRuntime.providerLabel}
+            </span>
+          )}
           <div className="ml-auto flex items-center gap-1.5">
             <button
               type="button"
@@ -220,53 +224,19 @@ function FloatingDrawerBody({
         </div>
       </div>
 
-      {/* 主体：紧凑列表 + 面板 */}
-      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[200px_minmax(0,1fr)]">
-        <aside className="hidden min-h-0 flex-col border-r border-border-weak lg:flex">
-          <div className="px-3 pb-1 pt-3 text-[11px] font-semibold text-muted-foreground/70">
-            最近会话
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2" data-testid="floating-session-list">
-            {recent.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => selectSession(s.id)}
-                title={s.title?.trim() || "未命名会话"}
-                className={cn(
-                  "mb-0.5 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors",
-                  sessionId === s.id
-                    ? "bg-brand-50 font-semibold text-brand-700"
-                    : "text-muted-foreground hover:bg-brand-50/60 hover:text-brand-700",
-                )}
-              >
-                <span
-                  aria-hidden
-                  className={cn(
-                    "h-1.5 w-1.5 flex-none rounded-full",
-                    s.status === "active" ? "bg-brand-600" : "bg-muted-foreground/40",
-                  )}
-                />
-                <span className="truncate">
-                  {s.title?.trim() || "未命名会话"}
-                </span>
-              </button>
-            ))}
-            {recent.length === 0 && (
-              <div className="px-2 py-3 text-xs text-muted-foreground/60">
-                暂无会话
-              </div>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={handleNewSession}
-            data-testid="floating-new-session"
-            className="mx-3 mb-3 h-8 rounded-md border border-dashed border-brand-300 bg-brand-50/60 text-xs font-semibold text-brand-700 transition-colors hover:bg-brand-50"
-          >
-            ＋ 新会话
-          </button>
-        </aside>
+      {/* 主体：工作区树 + 面板（FR-02/FR-03：加宽至 960px，树栏固定 320px，
+          无 md: 视口断点前缀——知识库坑：md: 是视口断点非容器断点，嵌入抽屉用固定 grid）。 */}
+      <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)]">
+        {/* FR-02/FR-03：左栏换 /sessions 同款工作区树 SessionListPanel。
+            lockedRuntime 时传 scope=runtime（仅显示该 runtime 会话，组头新建禁用）；
+            无锁时传全局 scope（对齐 ql-20260823-003 三入口一致裁决）。 */}
+        <div className="hidden min-h-0 flex-col border-r border-border-weak md:flex">
+          <SessionListPanel
+            selectedSessionId={sessionId}
+            onSelect={(s) => selectSession(s.id)}
+            scope={lockedRuntime ? { kind: "runtime", runtimeId: lockedRuntime.id } : undefined}
+          />
+        </div>
 
         <div className="min-h-0 min-w-0">
           {sessionId ? (
@@ -669,7 +639,7 @@ export function FloatingSessionHost() {
           data-open={open ? "true" : "false"}
           data-side={side}
           className={cn(
-            "fixed inset-y-0 z-50 flex w-[min(720px,94vw)] flex-col bg-card shadow-lg transition-transform duration-300",
+            "fixed inset-y-0 z-50 flex w-[min(960px,92vw)] flex-col bg-card shadow-lg transition-transform duration-300",
             side === "right"
               ? cn("right-0 border-l border-border", open ? "translate-x-0" : "translate-x-full")
               : cn("left-0 border-r border-border", open ? "translate-x-0" : "-translate-x-full"),

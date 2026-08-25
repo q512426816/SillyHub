@@ -17,6 +17,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import RuntimesPage from "@/app/(dashboard)/runtimes/page";
 import { useSession } from "@/stores/session";
+// FR-01：点「会话」按钮断言改用 store 状态（不再断言 Radix dialog 渲染）。
+import { useFloatingSessionStore } from "@/stores/floating-session";
 
 // task-10（react-query-migration）：page 顶层调 useQueryClient()/useDaemonRuntimes，需包
 // QueryClientProvider。每测试独立 QueryClient（retry:false/gcTime:0）防缓存串。
@@ -216,20 +218,19 @@ describe("RuntimesPage（弹窗化后，task-04/05）", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("点 runtime 卡片「会话」按钮 → 弹出 RuntimeSessionDialog（D-001 单例）", async () => {
-    daemon.listDaemonMachines.mockResolvedValue(wrapMachines([makeRuntime({ name: "MyClaude" })]));
+  it("点 runtime 卡片「会话」按钮 → 唤起悬浮会话助手并锁定 runtime（FR-01）", async () => {
+    daemon.listDaemonMachines.mockResolvedValue(wrapMachines([makeRuntime({ id: "rt-sess", name: "MyClaude", provider: "claude" })]));
     renderPage(<RuntimesPage />);
     // task-09：runtime 卡默认折叠，先展开 machine。
     await expandFirstMachine();
     const sessionBtn = await screen.findByRole("button", { name: /^会话$/ });
     fireEvent.click(sessionBtn);
-    // 弹窗打开（Radix DialogContent role=dialog）— 点卡片「会话」按钮弹出 RuntimeSessionDialog
-    const dialog = await screen.findByRole("dialog");
-    expect(dialog).toBeInTheDocument();
-    // 弹窗内含 runtime 名（header h2 / sr-only title；用 within 限定弹窗作用域，避开卡片同名）
-    await waitFor(() =>
-      expect(within(dialog).getAllByText(/MyClaude/).length).toBeGreaterThan(0),
-    );
+    // FR-01：不再弹 RuntimeSessionDialog，改为调用 useFloatingSessionStore.openRuntimeSession
+    // 断言 store lockedRuntime 被置（不再断言 Radix dialog 渲染）。
+    const storeState = useFloatingSessionStore.getState();
+    expect(storeState.lockedRuntime).not.toBeNull();
+    expect(storeState.lockedRuntime?.id).toBe("rt-sess");
+    expect(storeState.open).toBe(true);
   });
 
   // task-06 / task-07：删除流程从 window.confirm + setError 改为 antd Modal.confirm
@@ -316,7 +317,7 @@ describe("RuntimesPage（弹窗化后，task-04/05）", () => {
     expect(screen.getByText("stay")).toBeInTheDocument();
   });
 
-  it("URL ?session=<active> mount → 自动开弹窗（D-003 恢复）", async () => {
+  it("URL ?session=<active> mount → 自动开抽屉并选中会话（FR-05 恢复）", async () => {
     daemon.listDaemonMachines.mockResolvedValue(wrapMachines([makeRuntime({ id: "rt-1" })]));
     daemon.listAgentSessions.mockResolvedValue({
       items: [
@@ -354,8 +355,12 @@ describe("RuntimesPage（弹窗化后，task-04/05）", () => {
     nav.searchParams = new URLSearchParams("session=sess-url");
 
     renderPage(<RuntimesPage />);
-    // URL active → page effect setDialogRuntime → 弹窗 open
-    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+    // FR-05：URL active → page effect openRuntimeSession + selectSession → store lockedRuntime 置 + sessionId 置
+    await waitFor(() => {
+      const s = useFloatingSessionStore.getState();
+      expect(s.lockedRuntime).not.toBeNull();
+      expect(s.sessionId).toBe("sess-url");
+    });
   });
 
   it("URL ?session=<ended> → 不开弹窗 + 清 param（D-003 降级）", async () => {
@@ -518,8 +523,8 @@ describe("RuntimesPage 机器级两级结构（task-10 加强）", () => {
     await waitFor(() => expect(screen.getByText("host-m-2")).toBeInTheDocument());
   });
 
-  it("?session=<id> 自动展开所属 machine（跨 machine flatMap 查找后开弹窗）", async () => {
-    // runtime rt-2 在第二个 machine m-2 内；URL ?session=sess-rt2 应展开 m-2 开弹窗。
+  it("?session=<id> 自动展开所属 machine 并锁定 runtime（FR-05 跨 machine）", async () => {
+    // runtime rt-2 在第二个 machine m-2 内；URL ?session=sess-rt2 应展开 m-2 并锁定 rt-2。
     daemon.listDaemonMachines.mockResolvedValue({
       items: [
         makeMachine("m-1", "online", [makeRuntime({ id: "rt-1" })]),
@@ -565,10 +570,13 @@ describe("RuntimesPage 机器级两级结构（task-10 加强）", () => {
     nav.searchParams = new URLSearchParams("session=sess-rt2");
 
     renderPage(<RuntimesPage />);
-    // URL active + runtime rt-2 在 m-2 → page effect 展开所属 machine + 开弹窗
-    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
-    // m-2 已自动展开（rt-2 的 runtime 卡在 m-2 展开体内）。弹窗内含 runtime 信息。
-    // 注：不直接断 aria-expanded（page 受控态），改验证弹窗 open 即可证明展开+开弹窗链路通。
+    // FR-05：URL active + runtime rt-2 在 m-2 → page effect openRuntimeSession + selectSession
+    await waitFor(() => {
+      const s = useFloatingSessionStore.getState();
+      expect(s.lockedRuntime?.id).toBe("rt-2");
+      expect(s.sessionId).toBe("sess-rt2");
+    });
+    // m-2 已自动展开（rt-2 的 runtime 卡在 m-2 展开体内）。
   });
 
   it("机器级状态筛选：选「离线」→ listDaemonMachines 带 status=offline", async () => {

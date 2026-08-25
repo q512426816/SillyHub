@@ -43,6 +43,24 @@ vi.mock("@/components/sessions/pre-session-picker", () => ({
     open ? <div data-testid="mock-picker">picker</div> : null,
 }));
 
+// FR-02/FR-03：抽屉左栏换成 SessionListPanel，需 mock 避免真实数据查询。
+vi.mock("@/components/sessions/session-list-panel", () => ({
+  SessionListPanel: (props: {
+    selectedSessionId?: string | null;
+    onSelect?: (s: { id: string }) => void;
+    scope?: { kind: string; runtimeId?: string };
+  }) => (
+    <div
+      data-testid="mock-session-list-panel"
+      data-scope-kind={props.scope?.kind ?? "global"}
+      data-runtime-id={props.scope?.runtimeId ?? ""}
+      data-selected={props.selectedSessionId ?? ""}
+    >
+      session-list-panel
+    </div>
+  ),
+}));
+
 vi.mock("@/components/sessions/sessions-portal", () => ({
   resolveDefaultMachineId: () => "m-1",
 }));
@@ -141,10 +159,8 @@ describe("FloatingSessionHost", () => {
     act(() => {
       useFloatingSessionStore.getState().openDrawer();
     });
-    // 空态点「新会话」→ 默认机器解析进预会话。
-    const btn = await screen.findByTestId("floating-new-session", undefined, {
-      timeout: 2000,
-    });
+    // 空态点右侧面板「新会话」按钮 → 默认机器解析进预会话。
+    const btn = await screen.findByRole("button", { name: /新会话/ });
     btn.click();
     const panel = await screen.findByTestId("mock-session-panel");
     expect(panel.dataset.pagectx).toBe(

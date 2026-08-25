@@ -23,7 +23,8 @@ import {
 import {
   isActiveSession,
 } from "@/components/daemon/runtime-session-helpers";
-import { RuntimeSessionDialog } from "@/components/daemon/runtime-session-dialog";
+// FR-01：旧 RuntimeSessionDialog 已退役（2026-08-25-runtimes-entry-unified-floating），
+// 「会话」按钮改为唤起全局悬浮会话助手（FloatingSessionHost）。
 // task-09：MachineCard 两级手风琴（machine + 内嵌 RuntimeCard 网格）。
 // RuntimeCard 不再在 page 内联渲染，仅由 MachineCard 展开体透传 props 调用。
 import { MachineCard } from "@/components/daemon/machine-card";
@@ -58,6 +59,8 @@ import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 import { useSession } from "@/stores/session";
+// FR-01：/runtimes「会话」按钮唤起全局悬浮会话助手（2026-08-25-runtimes-entry-unified-floating）。
+import { useFloatingSessionStore } from "@/stores/floating-session";
 // task-06 / FR-03 / D-003@v1：antd Modal.confirm（删除二次确认）+ useNotify（成功/失败 toast）。
 // Modal 走 App.useApp().modal 拿到主题上下文实例（非静态 Modal），由 antd-providers.tsx 的 <AntApp> 注入。
 import { App, Input, Modal } from "antd";
@@ -413,11 +416,8 @@ export default function RuntimesPage() {
   // task-09：daemon 升级中标记（机器卡按钮 loading，按 instance.id 记）。
   const [upgradeActionId, setUpgradeActionId] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
-  // task-04 / D-001：单例弹窗 runtime（null=关闭）。切换 runtime 即替换 dialogRuntime，
-  // RuntimeSessionDialog 内部 key 随 runtime.id 重 mount 清旧状态。
-  const [dialogRuntime, setDialogRuntime] = useState<DaemonRuntimeRead | null>(null);
-  // task-04 / D-003：URL ?session= 恢复点，仅 URL 恢复时传入弹窗默认态 attach。
-  const [initialSessionId, setInitialSessionId] = useState<string | null>(null);
+  // FR-01：旧 dialogRuntime / initialSessionId 已退役（2026-08-25-runtimes-entry-unified-floating），
+  // 「会话」按钮唤起全局悬浮会话助手（useFloatingSessionStore.openRuntimeSession）。
   // task-09：展开态记忆（Set<machine.id>），切页/刷新不丢。
   const [expandedMachineIds, setExpandedMachineIds] = useState<Set<string>>(() => new Set());
 
@@ -448,11 +448,8 @@ export default function RuntimesPage() {
     router.replace(target, { scroll: false });
   }, [router, searchParams]);
 
-  // task-04 / D-003 C-3：用户主动关闭 = 放弃恢复点。先清 state（关弹窗触发 dialog
-  // 内部 SSE/轮询 cleanup，FR-05 / R-02），再清 param（刷新不再自动弹出）。
+  // FR-01：用户关闭抽屉 = 放弃恢复点。清 URL ?session=（刷新不再自动弹出）。
   const handleCloseDialog = useCallback(() => {
-    setDialogRuntime(null);
-    setInitialSessionId(null);
     clearSessionParam();
   }, [clearSessionParam]);
 
@@ -637,7 +634,10 @@ export default function RuntimesPage() {
               return { ...old, items };
             });
             patchSessions((prev) => prev.filter((s) => s.runtime_id !== runtime.id));
-            if (dialogRuntime?.id === runtime.id) setDialogRuntime(null);
+            // FR-01：runtime 被删时若悬浮抽屉锁定该 runtime，清锁定态。
+            if (useFloatingSessionStore.getState().lockedRuntime?.id === runtime.id) {
+              useFloatingSessionStore.getState().closeRuntimeLock();
+            }
             notify.success("运行时已移除");
           } catch (err) {
             notify.error(err, "移除运行时失败");
@@ -647,14 +647,21 @@ export default function RuntimesPage() {
         },
       });
     },
-    [dialogRuntime?.id, listParams, modal, notify, patchSessions, queryClient],
+    [listParams, modal, notify, patchSessions, queryClient],
   );
 
-  // task-04 / D-001：卡片「会话」→ 打开单例弹窗。
+  // FR-01：卡片「会话」→ 唤起全局悬浮会话助手并锁定 runtime。
   const handleOpenSession = useCallback((runtime: DaemonRuntimeRead) => {
-    setInitialSessionId(null);
-    setDialogRuntime(runtime);
-  }, []);
+    const runtimeProvider = runtime.provider ?? "unknown";
+    const ownerMachine = machines.find((m) =>
+      m.runtimes.some((r) => r.id === runtime.id),
+    );
+    useFloatingSessionStore.getState().openRuntimeSession({
+      id: runtime.id,
+      machineLabel: ownerMachine?.display_alias ?? ownerMachine?.hostname ?? "未知机器",
+      providerLabel: PROVIDER_META[runtimeProvider]?.label ?? runtimeProvider,
+    });
+  }, [machines]);
 
   // task-07 / FR-04：改筛选条件时重置到第一页，避免筛选后停在空页。
   const updateFilter = useCallback(
@@ -791,10 +798,9 @@ export default function RuntimesPage() {
     [machines],
   );
 
-  // task-04 / FR-06 / D-003：mount 读 ?session=<id> → 查 status，活跃 → 开对应 runtime
-  // 弹窗（initialSessionId 接弹窗默认态 attach）；ended/failed/不存在/已删 → 清 param
-  // 降级不开。urlRestoreDoneRef 保证只执行一次。
-  // task-09：matched 从 machines.flatMap(m=>m.runtimes) 查找，命中则展开所属 machine。
+  // FR-05 / D-003：mount 读 ?session=<id> → 查 status，活跃 → 开抽屉并选中该会话
+  // （store.openRuntimeSession 锁定 runtime + store.selectSession 选中）；
+  // ended/failed/不存在/已删 → 清 param 降级不开。urlRestoreDoneRef 保证只执行一次。
   useEffect(() => {
     if (urlRestoreDoneRef.current) return;
     const sessionId = searchParams.get("session");
@@ -815,7 +821,8 @@ export default function RuntimesPage() {
       if (session && isActiveSession(session)) {
         const matched = allRuntimes.find((r) => r.id === session!.runtime_id) ?? null;
         if (matched) {
-          // task-09：找到所属 machine 并展开，再开弹窗。
+          const runtimeProvider = matched.provider ?? "unknown";
+          // 展开所属 machine（保持卡片展开态）。
           const ownerMachine = machines.find((m) =>
             m.runtimes.some((r) => r.id === matched.id),
           );
@@ -826,8 +833,13 @@ export default function RuntimesPage() {
               return next;
             });
           }
-          setInitialSessionId(session.id);
-          setDialogRuntime(matched);
+          // 唤起悬浮抽屉并锁定该 runtime，再选中该会话。
+          useFloatingSessionStore.getState().openRuntimeSession({
+            id: matched.id,
+            machineLabel: ownerMachine?.display_alias ?? ownerMachine?.hostname ?? "未知机器",
+            providerLabel: PROVIDER_META[runtimeProvider]?.label ?? runtimeProvider,
+          });
+          useFloatingSessionStore.getState().selectSession(session.id);
         } else {
           // runtime 已离线/删除 → 降级清 param（R-03 兜底）
           clearSessionParam();
@@ -1094,14 +1106,9 @@ export default function RuntimesPage() {
         </>
       )}
 
-      <RuntimeSessionDialog
-        key={dialogRuntime?.id ?? "closed"}
-        runtime={dialogRuntime}
-        open={dialogRuntime !== null}
-        onClose={handleCloseDialog}
-        runtimes={allRuntimes}
-        initialSessionId={initialSessionId ?? undefined}
-      />
+      {/* FR-01：旧 RuntimeSessionDialog 已退役（2026-08-25-runtimes-entry-unified-floating），
+          「会话」按钮改为唤起全局悬浮会话助手（FloatingSessionHost 在 layout.tsx 常驻挂载）。
+          URL ?session= 恢复改为 store.selectSession（见 useEffect 下方）。 */}
 
       {/* task-09：机器别名编辑 modal（MachineCard onEditAlias 触发，改调 updateDaemonMachine）。 */}
       <Modal
