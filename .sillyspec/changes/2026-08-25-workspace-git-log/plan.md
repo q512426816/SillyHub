@@ -33,7 +33,7 @@ change: 2026-08-25-workspace-git-log
 | 编号 | 任务 | Wave | 优先级 | 依赖 | 覆盖 FR/D | 说明 |
 |---|---|---|---|---|---|---|
 | task-01 | daemon host-fs 四只读方法（git_log/git_refs/git_show/git_diff_file）+ daemon.ts 平名注册 + 解析边界单测 | W1 | P0 | — | FR-01, FR-05, FR-07, D-002@v1, D-003@v1, D-006@v1 | %x00/%x1e 解析、peeled 回退、空态结构、64KB 截断、binary 检测；只读 argv；vitest |
-| task-02 | backend git_log 模块骨架（router/service/schema + main.py 挂载） | W1 | P0 | — | FR-05, FR-07, D-002@v1 | 权限门控 WORKSPACE_READ、模块本地 AppError 错误族（404/403/502/504/422）、Pydantic schema（§7.4 契约含 git_mode 两态/branches[]/seq 全局序）、超时常量 |
+| task-02 | backend git_log 模块骨架（router/service/schema + main.py 挂载 + local.yaml modules 映射） | W1 | P0 | — | FR-05, FR-07, D-002@v1 | 权限门控 WORKSPACE_READ、模块本地 AppError 错误族（404/403/502/504/422）、Pydantic schema（§7.4 契约含 git_mode 两态/branches[]/seq 全局序）、超时常量；local.yaml 补 git_log→pytest 映射（Plan Review I-1，防 verify 模块对账 fallback 全量） |
 | task-03 | graph_layout lane 计算器（纯函数）+ 七类拓扑单测 | W1 | P0 | — | FR-01, FR-06, D-004@v1 | Gitea 算法移植：有序活跃槽 + 最左空闲 + 回收；确定性；窗口截取；lookahead 退化（边不绘制 lane 不变） |
 | task-04 | backend service 数据链路完整化 + router 集成测试 | W2 | P0 | task-01, task-02, task-03 | FR-01, FR-04, FR-05, FR-06, FR-07, D-005@v1, D-006@v1 | MemberBindingResolver 直连平名 RPC、probe 两态映射（unknown→502）、refs 合并（HEAD/tag peeled）、branch/author 过滤透传、skip/limit/lookahead 分页、参数校验（sha/branch/author/path）；mock daemon RPC 七分支集成测试 |
 | task-05 | pnpm gen:types 再生成 + 前端 lib/git-log.ts hooks | W3 | P0 | task-04 | FR-01, FR-04, FR-06 | api-types + openapi.json 提交；queryKey（skip/limit/branch/author）+ useQuery hooks + 详情/diff 两个按需 hook |

@@ -1062,6 +1062,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/git-log/commits": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Git Log Commits
+         * @description 提交列表 + 泳道 lane/edges（design §7.1 端点 ①，RPC 超时 30s）。
+         */
+        get: operations["list_git_log_commits_api_workspaces__workspace_id__git_log_commits_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/git-log/commits/{sha}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Git Log Commit
+         * @description 提交详情 + 变更文件列表（design §7.1 端点 ②，RPC 超时 30s）。
+         */
+        get: operations["get_git_log_commit_api_workspaces__workspace_id__git_log_commits__sha__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/git-log/commits/{sha}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Git Log Diff
+         * @description 单文件 unified diff（design §7.1 端点 ③，RPC 超时 30s，超 64KB 截断）。
+         */
+        get: operations["get_git_log_diff_api_workspaces__workspace_id__git_log_commits__sha__diff_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/login": {
         parameters: {
             query?: never;
@@ -11903,6 +11963,263 @@ export interface components {
             created_at: string;
         };
         /**
+         * GitLogBranchItem
+         * @description 分支下拉项（top-level 全量分支列表，git_refs 结果，与分页窗口无关，CC-07）。
+         */
+        GitLogBranchItem: {
+            /**
+             * Name
+             * @description 分支短名
+             */
+            name: string;
+            /**
+             * Kind
+             * @description branch=本地分支 / remote=远程分支
+             * @enum {string}
+             */
+            kind: "branch" | "remote";
+        };
+        /**
+         * GitLogCommitDetailResponse
+         * @description GET /api/workspaces/{wid}/git-log/commits/{sha} 响应（详情 + 变更文件列表）。
+         */
+        GitLogCommitDetailResponse: {
+            /**
+             * Hash
+             * @description 全长提交哈希
+             */
+            hash: string;
+            /**
+             * Short
+             * @description 短哈希
+             */
+            short: string;
+            /**
+             * Parents
+             * @description 父提交全长哈希列表（merge 提交多条）
+             */
+            parents: string[];
+            /**
+             * Message
+             * @description 提交说明全文（含 body）
+             */
+            message: string;
+            /**
+             * Author Name
+             * @description 作者名
+             */
+            author_name: string;
+            /**
+             * Author Email
+             * @description 作者邮箱
+             */
+            author_email: string;
+            /**
+             * Author Date
+             * @description 作者时间（ISO 8601）
+             */
+            author_date: string;
+            /**
+             * Committer Date
+             * @description 提交者时间（ISO 8601，详情独有字段）
+             */
+            committer_date: string;
+            /**
+             * Refs
+             * @description 提交上的引用装饰（分支/远程/tag/HEAD）
+             */
+            refs: components["schemas"]["GitLogRefItem"][];
+            /**
+             * Files
+             * @description 变更文件统计列表（--numstat --no-renames）
+             */
+            files: components["schemas"]["GitLogFileStatItem"][];
+        };
+        /**
+         * GitLogCommitItem
+         * @description 提交列表项（lane/edges 由 backend graph_layout 计算，前端纯渲染，D-004）。
+         */
+        GitLogCommitItem: {
+            /**
+             * Seq
+             * @description 全局绝对序（skip + 窗口内偏移）
+             */
+            seq: number;
+            /**
+             * Hash
+             * @description 全长提交哈希
+             */
+            hash: string;
+            /**
+             * Short
+             * @description 短哈希
+             */
+            short: string;
+            /**
+             * Parents
+             * @description 父提交全长哈希列表（merge 提交多条）
+             */
+            parents: string[];
+            /**
+             * Message
+             * @description 提交说明全文（含 body）
+             */
+            message: string;
+            /**
+             * Author Name
+             * @description 作者名
+             */
+            author_name: string;
+            /**
+             * Author Email
+             * @description 作者邮箱
+             */
+            author_email: string;
+            /**
+             * Author Date
+             * @description 作者时间（ISO 8601）
+             */
+            author_date: string;
+            /**
+             * Lane
+             * @description 泳道编号（从 0 起，紧凑分配）
+             */
+            lane: number;
+            /**
+             * Edges
+             * @description 父边列表（目标在结果集窗口可见范围内）
+             */
+            edges: components["schemas"]["GitLogEdgeItem"][];
+            /**
+             * Refs
+             * @description 提交上的引用装饰（分支/远程/tag/HEAD）
+             */
+            refs: components["schemas"]["GitLogRefItem"][];
+        };
+        /**
+         * GitLogCommitsResponse
+         * @description GET /api/workspaces/{wid}/git-log/commits 响应（提交列表 + 泳道）。
+         */
+        GitLogCommitsResponse: {
+            /**
+             * Git Mode
+             * @description git=git 仓库（含 worktree 检出）/ no_git=非 git 工作区（前端渲染空态卡）
+             * @enum {string}
+             */
+            git_mode: "git" | "no_git";
+            /**
+             * Commits
+             * @description 提交窗口列表（新→旧序）
+             */
+            commits: components["schemas"]["GitLogCommitItem"][];
+            /**
+             * Branches
+             * @description 全量分支列表（供工具栏分支下拉）
+             */
+            branches: components["schemas"]["GitLogBranchItem"][];
+            /**
+             * Head
+             * @description HEAD 提交全长哈希（空仓库为 null）
+             */
+            head: string | null;
+            /**
+             * Has More
+             * @description 窗口之后是否还有更多提交（分页依据）
+             */
+            has_more: boolean;
+            /**
+             * Total In Window
+             * @description 本次实际返回条数（过滤后可能小于 limit）
+             */
+            total_in_window: number;
+        };
+        /**
+         * GitLogDiffResponse
+         * @description GET /api/workspaces/{wid}/git-log/commits/{sha}/diff 响应（单文件 unified diff）。
+         */
+        GitLogDiffResponse: {
+            /**
+             * Diff
+             * @description unified diff 文本（--unified=3 --no-color；二进制文件为空串）
+             */
+            diff: string;
+            /**
+             * Truncated
+             * @description 是否超 64KB 上限被截断
+             */
+            truncated: boolean;
+            /**
+             * Binary
+             * @description 是否二进制文件（true 时前端直接提示「二进制文件」）
+             */
+            binary: boolean;
+        };
+        /**
+         * GitLogEdgeItem
+         * @description 泳道父边（graph_layout 计算；目标在窗口可见范围内才输出，§5.3 lookahead 退化）。
+         */
+        GitLogEdgeItem: {
+            /**
+             * To Seq
+             * @description 父提交的全局绝对序（边绘制目标基准）
+             */
+            to_seq: number;
+            /**
+             * To Lane
+             * @description 父提交所在泳道编号
+             */
+            to_lane: number;
+            /**
+             * Kind
+             * @description 边类型：straight=同泳道直线 / curve=换泳道曲线
+             * @enum {string}
+             */
+            kind: "straight" | "curve";
+        };
+        /**
+         * GitLogFileStatItem
+         * @description 变更文件统计项（git_show --numstat --no-renames 输出）。
+         */
+        GitLogFileStatItem: {
+            /**
+             * Path
+             * @description 仓库内相对路径（重命名呈现为删+增两条，§3 非目标）
+             */
+            path: string;
+            /**
+             * Add
+             * @description 新增行数（二进制文件为 0）
+             */
+            add: number;
+            /**
+             * Del
+             * @description 删除行数（二进制文件为 0）
+             */
+            del: number;
+            /**
+             * Binary
+             * @description 是否二进制文件（numstat 输出「-」时为 true）
+             */
+            binary: boolean;
+        };
+        /**
+         * GitLogRefItem
+         * @description 提交装饰引用（service 由 git_refs 结果按 sha 合并写入；HEAD 亦入对应提交）。
+         */
+        GitLogRefItem: {
+            /**
+             * Name
+             * @description 引用短名（refname:short）
+             */
+            name: string;
+            /**
+             * Kind
+             * @description 引用类型：branch=本地分支 / remote=远程分支 / tag=标签 / head=HEAD
+             * @enum {string}
+             */
+            kind: "branch" | "remote" | "tag" | "head";
+        };
+        /**
          * GitOperationListResponse
          * @description Paginated list of git operation audit logs.
          */
@@ -21682,6 +21999,113 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ExplorerSearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_git_log_commits_api_workspaces__workspace_id__git_log_commits_get: {
+        parameters: {
+            query?: {
+                /** @description 跳过条数（全局绝对序起点，上限 2000） */
+                skip?: number;
+                /** @description 窗口大小（1 到 200） */
+                limit?: number;
+                /** @description 分支过滤（空 = 全部分支 --all） */
+                branch?: string;
+                /** @description 作者过滤（git --author 匹配语义） */
+                author?: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitLogCommitsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_git_log_commit_api_workspaces__workspace_id__git_log_commits__sha__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                sha: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitLogCommitDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_git_log_diff_api_workspaces__workspace_id__git_log_commits__sha__diff_get: {
+        parameters: {
+            query: {
+                /** @description 仓库内文件相对路径（必填） */
+                path: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+                sha: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitLogDiffResponse"];
                 };
             };
             /** @description Validation Error */

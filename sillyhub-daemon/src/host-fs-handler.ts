@@ -39,6 +39,13 @@
  *   - assertWithinAllowedRoots 内部已做 Windows 盘符大小写归一 + 反斜杠处理（file-rpc.ts:82-95）。
  *   - git 命令用 `execFile`（非 shell）+ `cwd:workdir`，不依赖 shell，防注入。
  *
+ * **task-01（2026-08-25-workspace-git-log）git 只读四方法**：gitLog / gitRefs /
+ *   gitShow / gitDiffFile（design §5.2 四方法命令表 + §7.2 RPC 契约）。实现同骨架
+ *   （assertWithinAllowedRoots 白名单守卫 → runCmd('git', args) 独立 argv → 失败
+ *   结构化回传不抛），但经 daemon.ts **平名注册**（git_log / git_refs / git_show /
+ *   git_diff_file，不走 host_fs. 前缀通道，CC-02），供 backend git_log 模块直连消费。
+ *   全部只读子命令（log / for-each-ref / show / rev-parse），空仓库捕获转空态（CC-17）。
+ *
  * **非目标**：
  *   - 不做权限精细化裁决（per-runtime PolicyEngine 是 list_dir 专属；host_fs 走 daemon
  *     实体级 allowed_roots，与 list_dir RPC handler 等价）。
@@ -147,6 +154,92 @@ export interface GitRevParseResult {
   /** HEAD commit hash；非 git 仓库 / git 不可用时为 null。 */
   commit: string | null;
   /** 失败原因代号（not_git_repo / git_timeout / git_not_found / <exception str>）；成功为 null。 */
+  error: string | null;
+}
+
+// ── task-01（2026-08-25-workspace-git-log）git 只读四方法返回结构（design §7.2）──
+
+/** git_log / git_show 共用的单条 commit 记录（%x00 分隔 8 字段的解析产物）。 */
+export interface GitLogCommit {
+  /** 全长哈希（%H）。 */
+  hash: string;
+  /** 短哈希（%h）。 */
+  short: string;
+  /** 父提交哈希列表（%P 按空格切分；根提交为 []）。 */
+  parents: string[];
+  /** 作者名（%an）。 */
+  author_name: string;
+  /** 作者邮箱（%ae）。 */
+  author_email: string;
+  /** 作者时间 ISO 8601（%aI）。 */
+  author_date: string;
+  /** 提交者时间 ISO 8601（%cI）。 */
+  committer_date: string;
+  /** message 全文（%B，内部多行保留、去尾部换行）。 */
+  message: string;
+}
+
+/** git_log 返回结构：`{ commits, truncated, error }`（design §7.2）。 */
+export interface GitLogResult {
+  /** 提交列表（新→旧，git log 输出序）。 */
+  commits: GitLogCommit[];
+  /** true = 达到 -n 上限（可能还有更多提交）或存在解析跳过（结果不完整）。 */
+  truncated: boolean;
+  /** 失败文案；成功 / 空仓库空态为 null。 */
+  error: string | null;
+}
+
+/** git_refs 单条 ref 记录（for-each-ref 解析产物）。 */
+export interface GitRefEntry {
+  /** 完整 ref 名（refs/heads/main 等）。 */
+  name: string;
+  /** 短名（%(refname:short)，如 main / origin/main / v1.0.0）。 */
+  short: string;
+  /** 指向的 commit sha（annotated tag 取 peeled，CC-04）。 */
+  sha: string;
+  /** ref 类别（按 refname 前缀判定）。 */
+  kind: 'branch' | 'remote' | 'tag';
+}
+
+/** git_refs 返回结构：`{ refs, head, error }`（design §7.2）。 */
+export interface GitRefsResult {
+  refs: GitRefEntry[];
+  /** HEAD commit sha；空仓库 / 解析失败为 null（CC-17 空态）。 */
+  head: string | null;
+  /** 失败文案；成功 / 空仓库空态为 null。 */
+  error: string | null;
+}
+
+/** git_show 单个变更文件（--numstat 行解析产物）。 */
+export interface GitShowFileEntry {
+  /** 仓库相对路径（numstat 原样保留，含空格；特殊字符保持 git C 引号形态）。 */
+  path: string;
+  /** 新增行数；二进制为 null。 */
+  add: number | null;
+  /** 删除行数；二进制为 null。 */
+  del: number | null;
+  /** 是否二进制文件（numstat `-` 行）。 */
+  binary: boolean;
+}
+
+/** git_show 返回结构：`{ commit, files, error }`（design §7.2）。 */
+export interface GitShowResult {
+  /** 提交详情；命令失败为 null。 */
+  commit: GitLogCommit | null;
+  files: GitShowFileEntry[];
+  /** 失败文案；成功为 null。 */
+  error: string | null;
+}
+
+/** git_diff_file 返回结构：`{ diff, truncated, binary, error }`（design §7.2）。 */
+export interface GitDiffFileResult {
+  /** unified diff 文本（git show 原样 stdout；超限截断）。 */
+  diff: string;
+  /** true = 超 64KB 截断（CC-05 独立选定上限）。 */
+  truncated: boolean;
+  /** true = 二进制文件（stdout 含 "Binary files"）。 */
+  binary: boolean;
+  /** 失败文案；成功为 null。 */
   error: string | null;
 }
 
@@ -428,6 +521,98 @@ async function runGitRevParse(
   return { commit: first.commit, error: first.error ?? 'not_git_repo' };
 }
 
+// ── task-01（2026-08-25-workspace-git-log）git 只读四方法：常量 + 入参守卫 + 解析 ──
+//
+// design §5.2 四方法命令表 + §7.2 RPC 契约 + R-01 安全约束 / R-03 解析边界。
+// 与既有 git 方法的差异：只读子命令（log / for-each-ref / show / rev-parse），
+// daemon.ts 平名注册（不走 host_fs. 前缀，CC-02），空仓库捕获转空态（CC-17）。
+
+/** git 只读命令超时：对齐 design §5.3 backend 侧 log/show/diff 30s 超时——daemon 不先于 backend 失败，否则 504 语义错位。 */
+const GIT_READ_TIMEOUT_MS = 30_000;
+
+/** git_log -n 条数硬上限（R-02：backend skip≤2000 + limit≤200 + lookahead 50，此处放宽到 5000 留余量）。 */
+const GIT_LOG_MAX_COUNT = 5_000;
+
+/** git_log / git_show 共用 pretty 格式：%x00 字段分隔 + %x1e 记录分隔，不按行切（R-03）。 */
+const GIT_LOG_PRETTY_FORMAT =
+  '%H%x00%h%x00%P%x00%an%x00%ae%x00%aI%x00%cI%x00%B%x1e';
+
+/** git_diff_file 输出字节上限（64KB，design §5.2 CC-05 独立选定——diff 按行渲染的合理量级，非对齐 explorer 读文件 10MB）。 */
+const GIT_DIFF_MAX_BYTES = 64 * 1024;
+
+/** sha 白名单（R-01）：4~40 位十六进制（短哈希前缀与全长哈希均可查）。 */
+const GIT_SHA_RE = /^[0-9a-fA-F]{4,40}$/;
+
+/** branch 白名单（R-01 / CC-09）：首字符禁 `-`（防 git 把 -n/-O 当选项劫持语义），其余限字母数字 . _ / -。 */
+const GIT_BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+
+/** branch 最大长度（R-01）。 */
+const GIT_BRANCH_MAX_LEN = 200;
+
+/** author 最大长度（R-01）。 */
+const GIT_AUTHOR_MAX_LEN = 120;
+
+/** author 拒控制字符（R-01「可打印」：C0 控制符与 DEL 全拒，含换行/制表）。 */
+const GIT_AUTHOR_CTRL_RE = /[\u0000-\u001f\u007f]/;
+
+/** 校验 sha（R-01）：非 4~40 位十六进制（含空串）→ forbidden。 */
+function assertGitSha(sha: string): void {
+  if (!GIT_SHA_RE.test(sha)) {
+    throw new RpcError('forbidden', `invalid git sha: ${sha.slice(0, 24)}`);
+  }
+}
+
+/** 校验 branch（R-01 / CC-09）：超 200 字符 / 首字符 `-` / 白名单外字符 → forbidden。 */
+function assertGitBranch(branch: string): void {
+  if (branch.length > GIT_BRANCH_MAX_LEN || !GIT_BRANCH_RE.test(branch)) {
+    throw new RpcError('forbidden', 'invalid git branch');
+  }
+}
+
+/** 校验 author（R-01）：超 120 字符或含控制字符 → forbidden。 */
+function assertGitAuthor(author: string): void {
+  if (author.length > GIT_AUTHOR_MAX_LEN || GIT_AUTHOR_CTRL_RE.test(author)) {
+    throw new RpcError('forbidden', 'invalid git author');
+  }
+}
+
+/** 校验 pathspec（R-01）：空串 / `:(` 开头的 pathspec magic → forbidden。 */
+function assertGitPathspec(path: string): void {
+  if (path.length === 0) {
+    throw new RpcError('forbidden', 'path is empty');
+  }
+  if (path.startsWith(':(')) {
+    throw new RpcError('forbidden', 'pathspec magic not allowed');
+  }
+}
+
+/**
+ * 解析一条 `%x00` 分隔的 commit 记录（git_log / git_show 共用，R-03）。
+ *
+ * 字段序 = GIT_LOG_PRETTY_FORMAT：%H / %h / %P / %an / %ae / %aI / %cI / %B。
+ * 字段数不足 8 或 %H 为空 → null（调用方跳过该条并计数，不整页失败）。
+ * message（%B）去尾部换行：git 对象消息必以 \n 收尾，保留会污染下游渲染。
+ */
+function parseGitLogRecord(rec: string): GitLogCommit | null {
+  const fields = rec.split('\x00');
+  const hash = fields[0] ?? '';
+  if (fields.length < 8 || hash.length === 0) return null;
+  const parentField = fields[2] ?? '';
+  return {
+    hash,
+    short: fields[1] ?? '',
+    parents:
+      parentField.length > 0
+        ? parentField.split(' ').filter((p) => p.length > 0)
+        : [],
+    author_name: fields[3] ?? '',
+    author_email: fields[4] ?? '',
+    author_date: fields[5] ?? '',
+    committer_date: fields[6] ?? '',
+    message: (fields[7] ?? '').replace(/\n+$/, ''),
+  };
+}
+
 // ── HostFsHandler：十方法宿主实现 ─────────────────────────────────────────────
 
 /**
@@ -436,6 +621,10 @@ async function runGitRevParse(
  *
  * 十方法 1:1 对齐 design §5.1 / §5.3 / backend HostFsDelegate 签名（跨任务契约锁死）。
  * 由 daemon.ts:_registerHostFsRpcHandler 包装成 RpcHandler 注册到 WsClient。
+ *
+ * 另含 task-01（2026-08-25-workspace-git-log）git 只读四方法 gitLog / gitRefs /
+ * gitShow / gitDiffFile——由 daemon.ts:_registerGitLogRpcHandler 平名注册
+ * （git_log 等，不走 host_fs. 前缀通道，design §5.2 CC-02）。
  */
 export class HostFsHandler {
   private readonly _rootsProvider: () => string[];
@@ -793,6 +982,289 @@ export class HostFsHandler {
     assertWithinAllowedRoots(params.root, this._rootsProvider());
     const root = pathResolve(params.root);
     return runGitRevParse(root, params.ref && params.ref.length > 0 ? params.ref : 'HEAD');
+  }
+
+  // ── git_log / git_refs / git_show / git_diff_file（task-01 2026-08-25-workspace-git-log）──
+
+  /**
+   * `git_log({ root, branch?, author?, count }) → { commits, truncated, error }`
+   * （design §5.2 / §7.2；backend git_log 模块平名 RPC 直连消费，task-04）。
+   *
+   * 命令：`git -C <root> log (--all | <branch>) [--author=<v>] -n <count>
+   * --date=iso-strict --pretty=format:<%x00/%x1e 分隔>`（--all 与分支过滤互斥）。
+   *
+   * 解析（R-03）：%x1e 分记录、%x00 分字段，**不按行切**（中文 message / 引号 /
+   * 多行 body 天然安全）；单条解析失败跳过并计数，不整页失败。
+   *
+   * truncated 语义：达到 -n 上限（可能还有更多提交，backend 据此判 has_more）
+   * 或存在解析跳过（结果不完整）。
+   *
+   * 空仓库（CC-17）：exit 128 且 stderr 含 "does not have any commits yet" →
+   * `{commits: [], truncated: false, error: null}` 空态（不走红通道）；其余失败
+   * （非 git 目录 / 超时 / 分支不存在）→ commits 空表 + error 文案（不抛）。
+   *
+   * **不抛**（对齐 gitApply 语义）；仅 root 越界与入参非法走 RpcError forbidden。
+   */
+  async gitLog(params: {
+    root: string;
+    branch?: string;
+    author?: string;
+    count: number;
+  }): Promise<GitLogResult> {
+    // 1. 白名单守卫（与既有方法同款）+ 入参校验（R-01；非法入参走 forbidden 红通道）。
+    assertWithinAllowedRoots(params.root, this._rootsProvider());
+    const root = pathResolve(params.root);
+    const branch = params.branch ?? '';
+    const author = params.author ?? '';
+    const count = params.count;
+    if (
+      typeof count !== 'number' ||
+      !Number.isInteger(count) ||
+      count < 1 ||
+      count > GIT_LOG_MAX_COUNT
+    ) {
+      throw new RpcError('forbidden', `invalid git_log count: ${String(count)}`);
+    }
+    if (branch.length > 0) assertGitBranch(branch);
+    if (author.length > 0) assertGitAuthor(author);
+
+    // 2. 独立 argv 构造（execFile 不经 shell；branch/author 只作单 argv，R-01 无注入面）。
+    const args: string[] = ['-C', root, 'log'];
+    args.push(branch.length > 0 ? branch : '--all');
+    if (author.length > 0) args.push(`--author=${author}`);
+    args.push(
+      '-n',
+      String(count),
+      '--date=iso-strict',
+      `--pretty=format:${GIT_LOG_PRETTY_FORMAT}`,
+    );
+
+    const r = await runCmd('git', args, { timeout: GIT_READ_TIMEOUT_MS });
+    if (!r.ok) {
+      if (/does not have any commits yet/i.test(r.stderr)) {
+        return { commits: [], truncated: false, error: null };
+      }
+      return {
+        commits: [],
+        truncated: false,
+        error: r.stderr.trim() || r.stdout.trim() || 'git log failed',
+      };
+    }
+
+    // 3. %x1e 记录分隔 / %x00 字段分隔解析（git 在相邻记录间补 \n，剥掉后再切字段）。
+    let skipped = 0;
+    const commits: GitLogCommit[] = [];
+    for (const raw of r.stdout.split('\x1e')) {
+      const rec = raw.replace(/^\n+/, '');
+      if (rec.trim().length === 0) continue; // %x1e 之后的尾部残余空段
+      const commit = parseGitLogRecord(rec);
+      if (commit === null) {
+        skipped += 1; // 解析失败条目跳过并计数（R-03），不整页失败
+        continue;
+      }
+      commits.push(commit);
+    }
+    return {
+      commits,
+      truncated: commits.length >= count || skipped > 0,
+      error: null,
+    };
+  }
+
+  /**
+   * `git_refs({ root }) → { refs, head, error }`（design §5.2 / §7.2）。
+   *
+   * 命令：`git -C <root> for-each-ref --format=%(refname)%00%(objectname)%00%(*objectname)%00%(refname:short)
+   * refs/heads refs/remotes refs/tags` + `git -C <root> rev-parse HEAD`。
+   *
+   * tag 的 sha 取 `%(*objectname)`（annotated tag peeled 到 commit sha，CC-04——
+   * tag 对象的 objectname ≠ commit sha），无 peeled（轻量 tag / 分支 / 远程）回退
+   * `%(objectname)`；kind 按 refname 前缀映射 branch / remote / tag。
+   *
+   * 空仓库（CC-17）：for-each-ref 对无 ref 仓库 exit 0 输出空 → refs:[]；
+   * rev-parse 失败 → head:null（空态，不走红通道）。其余失败 → error 文案（不抛）。
+   *
+   * rev-parse 不复用 runGitRevParse：其 dubious ownership 重试会写
+   * `git config --global`（落宿主状态），违反本方法严格只读约束（D-003）。
+   */
+  async gitRefs(params: { root: string }): Promise<GitRefsResult> {
+    assertWithinAllowedRoots(params.root, this._rootsProvider());
+    const root = pathResolve(params.root);
+
+    const r = await runCmd(
+      'git',
+      [
+        '-C',
+        root,
+        'for-each-ref',
+        '--format=%(refname)%00%(objectname)%00%(*objectname)%00%(refname:short)',
+        'refs/heads',
+        'refs/remotes',
+        'refs/tags',
+      ],
+      { timeout: GIT_READ_TIMEOUT_MS },
+    );
+    if (!r.ok) {
+      return {
+        refs: [],
+        head: null,
+        error: r.stderr.trim() || 'git for-each-ref failed',
+      };
+    }
+
+    const refs: GitRefEntry[] = [];
+    for (const line of r.stdout.split('\n')) {
+      if (line.trim().length === 0) continue;
+      const fields = line.split('\x00');
+      const name = fields[0] ?? '';
+      const peeled = fields[2] ?? '';
+      if (fields.length < 4 || name.length === 0) continue; // 畸形行跳过（防御）
+      let kind: GitRefEntry['kind'];
+      if (name.startsWith('refs/heads/')) kind = 'branch';
+      else if (name.startsWith('refs/remotes/')) kind = 'remote';
+      else if (name.startsWith('refs/tags/')) kind = 'tag';
+      else continue; // 查询 pattern 只含三种前缀，此处防御兜底
+      refs.push({
+        name,
+        short: fields[3] ?? '',
+        // annotated tag 的 objectname 是 tag 对象 sha ≠ commit sha：peeled 优先（CC-04）。
+        sha: peeled.length > 0 ? peeled : fields[1] ?? '',
+        kind,
+      });
+    }
+
+    // rev-parse HEAD：空仓库 / 非 git 目录失败 → head:null（CC-17 空态），error 不因此置位。
+    const head = await runCmd('git', ['-C', root, 'rev-parse', 'HEAD'], {
+      timeout: GIT_READ_TIMEOUT_MS,
+    });
+    return {
+      refs,
+      head: head.ok ? head.stdout.trim() || null : null,
+      error: null,
+    };
+  }
+
+  /**
+   * `git_show({ root, sha }) → { commit, files, error }`（design §5.2 / §7.2）。
+   *
+   * 命令：`git -C <root> show <sha> --numstat --no-renames --pretty=format:<同 git_log>`。
+   *
+   * 分区解析（可靠性设计）：pretty 记录以 %x1e 收尾，其后整段即 numstat 区——
+   * 以 stdout 中第一个 %x1e 切两段（commit 记录 / numstat 行），不猜行数；numstat
+   * 行 `^<add>\t<del>\t<path>` 为文本变更，`-\t-\t<path>` 表二进制（binary:true，
+   * add/del:null）；非 numstat 形状的行（pretty 与 numstat 间的分隔空行等）跳过。
+   *
+   * 失败（sha 不存在 / 非 git 目录）→ `{commit: null, files: [], error}`（不抛）。
+   */
+  async gitShow(params: { root: string; sha: string }): Promise<GitShowResult> {
+    assertWithinAllowedRoots(params.root, this._rootsProvider());
+    const root = pathResolve(params.root);
+    assertGitSha(params.sha);
+
+    const r = await runCmd(
+      'git',
+      [
+        '-C',
+        root,
+        'show',
+        params.sha,
+        '--numstat',
+        '--no-renames',
+        `--pretty=format:${GIT_LOG_PRETTY_FORMAT}`,
+      ],
+      { timeout: GIT_READ_TIMEOUT_MS },
+    );
+    if (!r.ok) {
+      return {
+        commit: null,
+        files: [],
+        error: r.stderr.trim() || r.stdout.trim() || 'git show failed',
+      };
+    }
+
+    const sepIdx = r.stdout.indexOf('\x1e');
+    const commit =
+      sepIdx >= 0 ? parseGitLogRecord(r.stdout.slice(0, sepIdx)) : null;
+    const numstatZone = sepIdx >= 0 ? r.stdout.slice(sepIdx + 1) : '';
+
+    const files: GitShowFileEntry[] = [];
+    for (const line of numstatZone.split('\n')) {
+      const m = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(line);
+      if (m === null) continue; // 空行 / 分隔噪声行
+      const binary = m[1] === '-' && m[2] === '-';
+      files.push({
+        // 匹配成功时三捕获组必在（noUncheckedIndexedAccess 下 ?? '' 兜底类型）。
+        path: m[3] ?? '',
+        add: binary ? null : Number(m[1]),
+        del: binary ? null : Number(m[2]),
+        binary,
+      });
+    }
+    if (commit === null) {
+      return { commit: null, files, error: 'git show parse failed' };
+    }
+    return { commit, files, error: null };
+  }
+
+  /**
+   * `git_diff_file({ root, sha, path }) → { diff, truncated, binary, error }`
+   * （design §5.2 / §7.2 / R-06）。
+   *
+   * 命令：`git -C <root> show <sha> --pretty=format: --unified=3 --no-color -- <path>`
+   * （`--pretty=format:` 空 pretty 去 commit 头——stdout 即纯 unified diff，前端
+   * 消费无 author/message 前导噪声；主代理批准的 design §5.2 勘误，2026-08-25。
+   * `--` 后 path 为独立 argv pathspec，assertGitPathspec 拒 `:(` magic 后无注入面）。
+   *
+   * stdout 含 "Binary files" → binary:true；超 64KB（CC-05 独立上限）按字节截断标
+   * truncated:true（边界处多字节字符可能出现替换符，前端已按 truncated 提示截断）。
+   *
+   * 失败（sha 不存在 / path 无匹配 / 非 git 目录）→ error 文案（不抛）。
+   */
+  async gitDiffFile(params: {
+    root: string;
+    sha: string;
+    path: string;
+  }): Promise<GitDiffFileResult> {
+    assertWithinAllowedRoots(params.root, this._rootsProvider());
+    const root = pathResolve(params.root);
+    assertGitSha(params.sha);
+    assertGitPathspec(params.path);
+
+    const r = await runCmd(
+      'git',
+      [
+        '-C',
+        root,
+        'show',
+        params.sha,
+        '--pretty=format:',
+        '--unified=3',
+        '--no-color',
+        '--',
+        params.path,
+      ],
+      { timeout: GIT_READ_TIMEOUT_MS },
+    );
+    if (!r.ok) {
+      return {
+        diff: '',
+        truncated: false,
+        binary: false,
+        error: r.stderr.trim() || r.stdout.trim() || 'git show diff failed',
+      };
+    }
+
+    const binary = r.stdout.includes('Binary files');
+    const bytes = Buffer.from(r.stdout, 'utf8');
+    if (bytes.length <= GIT_DIFF_MAX_BYTES) {
+      return { diff: r.stdout, truncated: false, binary, error: null };
+    }
+    return {
+      diff: bytes.subarray(0, GIT_DIFF_MAX_BYTES).toString('utf8'),
+      truncated: true,
+      binary,
+      error: null,
+    };
   }
 
   // ── pollution_archive ─────────────────────────────────────────────────────

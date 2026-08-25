@@ -40,4 +40,5 @@ multi-agent-platform 采用的文档驱动变更管理规范体系，落地在�
 ## 人工备注
 <!-- MANUAL_NOTES_START -->
 - 2026-08-20-runtime-readpoint-repo-first | local.yaml（gitignored 每设备）modules 块补 `runtime` 子模块映射（backend/app/modules/runtime/ → pytest，同 2026-08-01/08-08/08-10 三次先例）供 verify 按 module 对账收窄；另：install 命令改 `uv sync --all-extras --project backend` 白名单形态（worktree deps 供给白名单拒 cd 链式，见 docs/sillyspec/worktree-deps-install-whitelist-rejects-chained-commands.md）。
+- 2026-08-25-workspace-git-log | local.yaml（gitignored 每设备）modules 块补 `git_log` 子模块映射（backend/app/modules/git_log/ → 模块级 pytest，同 runtime 先例；Plan Review I-1——test_strategy=module 按命中模块收窄跑测试的前提，漏配则新模块测试不被命中）。
 <!-- MANUAL_NOTES_END -->

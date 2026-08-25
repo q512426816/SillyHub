@@ -2602,6 +2602,216 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/git-log/commits": {
+      "get": {
+        "tags": [
+          "git-log"
+        ],
+        "summary": "List Git Log Commits",
+        "description": "提交列表 + 泳道 lane/edges（design §7.1 端点 ①，RPC 超时 30s）。",
+        "operationId": "list_git_log_commits_api_workspaces__workspace_id__git_log_commits_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "skip",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "跳过条数（全局绝对序起点，上限 2000）",
+              "default": 0,
+              "title": "Skip"
+            },
+            "description": "跳过条数（全局绝对序起点，上限 2000）"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "description": "窗口大小（1 到 200）",
+              "default": 100,
+              "title": "Limit"
+            },
+            "description": "窗口大小（1 到 200）"
+          },
+          {
+            "name": "branch",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "分支过滤（空 = 全部分支 --all）",
+              "default": "",
+              "title": "Branch"
+            },
+            "description": "分支过滤（空 = 全部分支 --all）"
+          },
+          {
+            "name": "author",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "作者过滤（git --author 匹配语义）",
+              "default": "",
+              "title": "Author"
+            },
+            "description": "作者过滤（git --author 匹配语义）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitLogCommitsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/git-log/commits/{sha}": {
+      "get": {
+        "tags": [
+          "git-log"
+        ],
+        "summary": "Get Git Log Commit",
+        "description": "提交详情 + 变更文件列表（design §7.1 端点 ②，RPC 超时 30s）。",
+        "operationId": "get_git_log_commit_api_workspaces__workspace_id__git_log_commits__sha__get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "sha",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Sha"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitLogCommitDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/git-log/commits/{sha}/diff": {
+      "get": {
+        "tags": [
+          "git-log"
+        ],
+        "summary": "Get Git Log Diff",
+        "description": "单文件 unified diff（design §7.1 端点 ③，RPC 超时 30s，超 64KB 截断）。",
+        "operationId": "get_git_log_diff_api_workspaces__workspace_id__git_log_commits__sha__diff_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "sha",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Sha"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "仓库内文件相对路径（必填）",
+              "title": "Path"
+            },
+            "description": "仓库内文件相对路径（必填）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitLogDiffResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/login": {
       "post": {
         "tags": [
@@ -35340,6 +35550,373 @@
           "created_at"
         ],
         "title": "GitIdentityRead"
+      },
+      "GitLogBranchItem": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "分支短名"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "branch",
+              "remote"
+            ],
+            "title": "Kind",
+            "description": "branch=本地分支 / remote=远程分支"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind"
+        ],
+        "title": "GitLogBranchItem",
+        "description": "分支下拉项（top-level 全量分支列表，git_refs 结果，与分页窗口无关，CC-07）。"
+      },
+      "GitLogCommitDetailResponse": {
+        "properties": {
+          "hash": {
+            "type": "string",
+            "title": "Hash",
+            "description": "全长提交哈希"
+          },
+          "short": {
+            "type": "string",
+            "title": "Short",
+            "description": "短哈希"
+          },
+          "parents": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Parents",
+            "description": "父提交全长哈希列表（merge 提交多条）"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "提交说明全文（含 body）"
+          },
+          "author_name": {
+            "type": "string",
+            "title": "Author Name",
+            "description": "作者名"
+          },
+          "author_email": {
+            "type": "string",
+            "title": "Author Email",
+            "description": "作者邮箱"
+          },
+          "author_date": {
+            "type": "string",
+            "title": "Author Date",
+            "description": "作者时间（ISO 8601）"
+          },
+          "committer_date": {
+            "type": "string",
+            "title": "Committer Date",
+            "description": "提交者时间（ISO 8601，详情独有字段）"
+          },
+          "refs": {
+            "items": {
+              "$ref": "#/components/schemas/GitLogRefItem"
+            },
+            "type": "array",
+            "title": "Refs",
+            "description": "提交上的引用装饰（分支/远程/tag/HEAD）"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/GitLogFileStatItem"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "变更文件统计列表（--numstat --no-renames）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "hash",
+          "short",
+          "parents",
+          "message",
+          "author_name",
+          "author_email",
+          "author_date",
+          "committer_date",
+          "refs",
+          "files"
+        ],
+        "title": "GitLogCommitDetailResponse",
+        "description": "GET /api/workspaces/{wid}/git-log/commits/{sha} 响应（详情 + 变更文件列表）。"
+      },
+      "GitLogCommitItem": {
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "title": "Seq",
+            "description": "全局绝对序（skip + 窗口内偏移）"
+          },
+          "hash": {
+            "type": "string",
+            "title": "Hash",
+            "description": "全长提交哈希"
+          },
+          "short": {
+            "type": "string",
+            "title": "Short",
+            "description": "短哈希"
+          },
+          "parents": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Parents",
+            "description": "父提交全长哈希列表（merge 提交多条）"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "提交说明全文（含 body）"
+          },
+          "author_name": {
+            "type": "string",
+            "title": "Author Name",
+            "description": "作者名"
+          },
+          "author_email": {
+            "type": "string",
+            "title": "Author Email",
+            "description": "作者邮箱"
+          },
+          "author_date": {
+            "type": "string",
+            "title": "Author Date",
+            "description": "作者时间（ISO 8601）"
+          },
+          "lane": {
+            "type": "integer",
+            "title": "Lane",
+            "description": "泳道编号（从 0 起，紧凑分配）"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GitLogEdgeItem"
+            },
+            "type": "array",
+            "title": "Edges",
+            "description": "父边列表（目标在结果集窗口可见范围内）"
+          },
+          "refs": {
+            "items": {
+              "$ref": "#/components/schemas/GitLogRefItem"
+            },
+            "type": "array",
+            "title": "Refs",
+            "description": "提交上的引用装饰（分支/远程/tag/HEAD）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "seq",
+          "hash",
+          "short",
+          "parents",
+          "message",
+          "author_name",
+          "author_email",
+          "author_date",
+          "lane",
+          "edges",
+          "refs"
+        ],
+        "title": "GitLogCommitItem",
+        "description": "提交列表项（lane/edges 由 backend graph_layout 计算，前端纯渲染，D-004）。"
+      },
+      "GitLogCommitsResponse": {
+        "properties": {
+          "git_mode": {
+            "type": "string",
+            "enum": [
+              "git",
+              "no_git"
+            ],
+            "title": "Git Mode",
+            "description": "git=git 仓库（含 worktree 检出）/ no_git=非 git 工作区（前端渲染空态卡）"
+          },
+          "commits": {
+            "items": {
+              "$ref": "#/components/schemas/GitLogCommitItem"
+            },
+            "type": "array",
+            "title": "Commits",
+            "description": "提交窗口列表（新→旧序）"
+          },
+          "branches": {
+            "items": {
+              "$ref": "#/components/schemas/GitLogBranchItem"
+            },
+            "type": "array",
+            "title": "Branches",
+            "description": "全量分支列表（供工具栏分支下拉）"
+          },
+          "head": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head",
+            "description": "HEAD 提交全长哈希（空仓库为 null）"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More",
+            "description": "窗口之后是否还有更多提交（分页依据）"
+          },
+          "total_in_window": {
+            "type": "integer",
+            "title": "Total In Window",
+            "description": "本次实际返回条数（过滤后可能小于 limit）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "git_mode",
+          "commits",
+          "branches",
+          "head",
+          "has_more",
+          "total_in_window"
+        ],
+        "title": "GitLogCommitsResponse",
+        "description": "GET /api/workspaces/{wid}/git-log/commits 响应（提交列表 + 泳道）。"
+      },
+      "GitLogDiffResponse": {
+        "properties": {
+          "diff": {
+            "type": "string",
+            "title": "Diff",
+            "description": "unified diff 文本（--unified=3 --no-color；二进制文件为空串）"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "description": "是否超 64KB 上限被截断"
+          },
+          "binary": {
+            "type": "boolean",
+            "title": "Binary",
+            "description": "是否二进制文件（true 时前端直接提示「二进制文件」）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "diff",
+          "truncated",
+          "binary"
+        ],
+        "title": "GitLogDiffResponse",
+        "description": "GET /api/workspaces/{wid}/git-log/commits/{sha}/diff 响应（单文件 unified diff）。"
+      },
+      "GitLogEdgeItem": {
+        "properties": {
+          "to_seq": {
+            "type": "integer",
+            "title": "To Seq",
+            "description": "父提交的全局绝对序（边绘制目标基准）"
+          },
+          "to_lane": {
+            "type": "integer",
+            "title": "To Lane",
+            "description": "父提交所在泳道编号"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "straight",
+              "curve"
+            ],
+            "title": "Kind",
+            "description": "边类型：straight=同泳道直线 / curve=换泳道曲线"
+          }
+        },
+        "type": "object",
+        "required": [
+          "to_seq",
+          "to_lane",
+          "kind"
+        ],
+        "title": "GitLogEdgeItem",
+        "description": "泳道父边（graph_layout 计算；目标在窗口可见范围内才输出，§5.3 lookahead 退化）。"
+      },
+      "GitLogFileStatItem": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "仓库内相对路径（重命名呈现为删+增两条，§3 非目标）"
+          },
+          "add": {
+            "type": "integer",
+            "title": "Add",
+            "description": "新增行数（二进制文件为 0）"
+          },
+          "del": {
+            "type": "integer",
+            "title": "Del",
+            "description": "删除行数（二进制文件为 0）"
+          },
+          "binary": {
+            "type": "boolean",
+            "title": "Binary",
+            "description": "是否二进制文件（numstat 输出「-」时为 true）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "add",
+          "del",
+          "binary"
+        ],
+        "title": "GitLogFileStatItem",
+        "description": "变更文件统计项（git_show --numstat --no-renames 输出）。"
+      },
+      "GitLogRefItem": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "引用短名（refname:short）"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "branch",
+              "remote",
+              "tag",
+              "head"
+            ],
+            "title": "Kind",
+            "description": "引用类型：branch=本地分支 / remote=远程分支 / tag=标签 / head=HEAD"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind"
+        ],
+        "title": "GitLogRefItem",
+        "description": "提交装饰引用（service 由 git_refs 结果按 sha 合并写入；HEAD 亦入对应提交）。"
       },
       "GitOperationListResponse": {
         "properties": {

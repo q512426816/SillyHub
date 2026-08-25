@@ -70,18 +70,16 @@ daemon host-fs-handler（宿主机）
 | `git_log` | `git log [--all \| <branch>] [--author=<v>] -n <count> --date=iso-strict --pretty=format:<见 7.2>` | count 由 backend 传入（= skip + limit + lookahead，见 5.3）；`--all` 与分支过滤互斥 |
 | `git_refs` | `git for-each-ref --format=<%(refname)%00%(objectname)%00%(*objectname)%00%(refname:short)> refs/heads refs/remotes refs/tags` + `git rev-parse HEAD` | 分支/远程/tag 装饰 + HEAD；**annotated tag 用 `%(*objectname)`（peeled commit sha）回退映射**——tag 对象的 objectname ≠ commit sha，无 peeled 则回退 objectname |
 | `git_show` | `git show <sha> --numstat --no-renames --pretty=format:<同上>` | 详情 + 变更文件列表（numstat 机器可解析，避开 `--stat` 终端宽度问题） |
-| `git_diff_file` | `git show <sha> --unified=3 --no-color -- <path>` | 单文件 unified diff；二进制检测（`Binary files` 输出）；64KB 截断（**独立选定的上限**，非对齐 explorer 读文件 10MB 上限——diff 文本按行渲染，64KB 已是浏览器侧的合理量级） |
+| `git_diff_file` | `git show <sha> --pretty=format: --unified=3 --no-color -- <path>` | 单文件 unified diff（空 `--pretty=format:` 去 commit 头，纯 diff 输出——execute 期勘误）；二进制检测（`Binary files` 输出）；64KB 截断（**独立选定的上限**，非对齐 explorer 读文件 10MB 上限——diff 文本按行渲染，64KB 已是浏览器侧的合理量级） |
 
 空仓库边界（CC-17）：`git log` 在无提交仓库 exit 128、`git rev-parse HEAD` 失败——daemon 侧**捕获并转空态结构**（`commits: []` / `head: null` / refs 正常返回空表），不走红通道 error，前端渲染空列表而非报错。
 
-**RPC 通道与命名（CC-02 澄清）**：四方法实现在 `host-fs-handler.ts`（复用其骨架与 `runCmd`），但**不走 `HostFsDelegate` 的 `host_fs.` 前缀降级通道**——在 daemon.ts 注册为**平名方法**（`git_log` / `git_refs` / `git_show` / `git_diff_file`，对齐 explorer 系 `explorer_list_dir` 的平名注册形态）；backend service 经 MemberBindingResolver 解析绑定后直连 RPC（显式超时 + 自持错误映射），offline/timeout 走 502/504 而非静默降级 dict。
+**RPC 通道与命名（CC-02 澄清）**：四方法实现在 `host-fs-handler.ts`（复用其骨架与 `runCmd`），但**不走 `HostFsDelegate` 的 `host_fs.` 前缀降级通道**——在 daemon.ts 以 `ws.registerRpcHandler` **平名注册**（`git_log` / `git_refs` / `git_show` / `git_diff_file`，对齐 explorer 系 `explorer_list_dir` 的平名注册形态；protocol.ts 仅定义 RPC 帧格式、无方法注册表，无需改动）；backend service 经 MemberBindingResolver 解析绑定后直连 RPC（显式超时 + 自持错误映射），offline/timeout 走 502/504 而非静默降级 dict。
 
 安全约束（对齐 git_gateway 拦截面与 explorer containment）：
 
 - sha 白名单正则 `^[0-9a-fA-F]{4,40}$`；branch 值限 `^[A-Za-z0-9][A-Za-z0-9._\-/]*$`（**首字符禁 `-`**，防 git 把 `-n`/`-O` 等当选项劫持语义）且 ≤200 字符；author 限可打印 ASCII+Unicode 字母且 ≤120 字符；path 拒绝 pathspec magic 前缀（`:(` 开头）并沿用 explorer `_join_within_root` 的 join 语义（root+path join 后 containment 断言，backend 预检 + daemon `assertWithinAllowedRoots` 双重校验）；branch/author 只作为**独立 argv** 传 `execFile`（不经 shell，无注入面）；
 - 全部只读子命令（log / for-each-ref / show / rev-parse），不落任何状态。
-
-`protocol.ts`/注册表同步加方法名（对齐 daemon.ts 包装 RpcHandler 的既有方式）。
 
 ### 5.3 Phase 2 — backend `git_log` 模块 + lane 计算器
 
@@ -104,7 +102,7 @@ daemon host-fs-handler（宿主机）
 
 ### 5.4 Phase 3 — 前端
 
-- `workspace-tabs.tsx` TABS 加 `{ key: 'git-log', label: 'Git 日志', path: '/git-log' }`（三字段形态对齐现有 15 项条目；图标 GitBranch）；
+- `workspace-tabs.tsx` TABS 加 `{ key: 'git-log', label: 'Git 日志', path: '/git-log' }`（纯三字段追加，对齐现有 14 项条目形态；不扩展 icon 字段——现有渲染层无此字段，最小改动）；
 - `workspaces/[id]/git-log/page.tsx`：PageHeader（标题 + 副标题工作区名/已加载 N 条——**不显示仓库提交总数**，避免为此增加 `rev-list --count` 第 5 个 RPC）+ 工具栏（**分支下拉**（数据源 = 响应 top-level `branches[]`，git_refs 全量）+ **作者文本输入框**（回车触发，git `--author` 前缀/子串匹配语义；不做作者下拉——候选列表随分页窗口漂移，无稳定数据源）+ 刷新）+ 卡片列表，页面骨架对齐 explorer page（三降级错误卡同款）；
 - 列表主体：左侧**泳道 SVG**（绝对定位覆盖行左列，随 react-virtual 可视区 ± overscan 重绘；commit 圆点按 lane 取色板，HEAD 虚线环）+ 行内容（message / 作者 / 短哈希 / refs 标签 / 时间）；
 - 点击行 → 右侧 Drawer：详情 + **变更文件目录树**（`git show --numstat` 平铺路径前端按 `/` 聚合，参考 `change-file-tree.tsx` 的树交互模式；目录节点聚合 +x/-y；叶子点击展开 diff，diff 按需请求 ③）；
@@ -130,9 +128,11 @@ daemon host-fs-handler（宿主机）
 | 新增 | `backend/app/modules/git_log/service.py` | 绑定解析 + probe 三态 + RPC 转发（显式超时常量）+ 解析合并 + 错误映射（模块本地 AppError 子类，对齐 explorer/service.py） |
 | 新增 | `backend/app/modules/git_log/schema.py` | Pydantic 响应模型（§7.4）。数据流：producer=service 组装（含 lane/edges/refs 合并）→ FastAPI JSON → consumer=前端 api-types 生成类型 |
 | 新增 | `backend/app/modules/git_log/graph_layout.py` | lane 计算器纯函数（§7.3），无 IO 依赖 |
-| 新增 | `backend/app/modules/git_log/tests/test_graph_layout.py` | 六类拓扑单测 |
+| 新增 | `backend/app/modules/git_log/tests/__init__.py` | 测试包初始化（空文件，pytest 收集模块内测试目录所需，对齐 git_gateway 等既有模块惯例；execute 期补录清单） |
+| 新增 | `backend/app/modules/git_log/tests/test_graph_layout.py` | 七类拓扑单测（含窗口一致性与 lookahead 退化） |
 | 新增 | `backend/app/modules/git_log/tests/test_router.py` | 集成测试（mock daemon RPC 七分支） |
 | 修改 | `backend/app/main.py` | include_router 一行（对齐既有挂载约定） |
+| 修改 | `.sillyspec/local.yaml` | modules 块补 git_log 映射（`path: backend/app/modules/git_log/` + 模块级 pytest 命令）——test_strategy=module 按命中模块跑测试的前提；本仓已有三次同型失败先例（change_writer / mcp_gateway / platform_sync），Plan Review I-1 要求 |
 | 修改 | `frontend/src/components/workspace-tabs.tsx` | TABS 加 git-log 项 |
 | 新增 | `frontend/src/app/(dashboard)/workspaces/[id]/git-log/page.tsx` | 页面骨架（PageHeader + 工具栏 + 列表卡片 + 三降级卡） |
 | 新增 | `frontend/src/components/git-log/commit-graph.tsx` | 泳道 SVG 渲染（lane 色板 + 视口重绘） |

@@ -30,6 +30,7 @@ SillyHub 前端的 Next.js App Router 页面路由层（frontend/src/app/** + mi
   - 变更域：`changes`（列表+详情）、`approvals`、`audit`
   - spec 域：`components`、`scan-docs`、`knowledge`、`skills`
   - 平台配置：`agent-profiles`、`members`、`mcp`、`mcp-tokens`、`files`、`incidents`、`releases`
+  - Git 源码：`git-log` — 工作区 Git 日志视图（类 IDEA Git Log：SVG 泳道拓扑 + 虚拟滚动提交列表 + 提交详情 Drawer/单文件 diff；组件 `components/git-log/`、取数 `lib/git-log.ts`，2026-08-25-workspace-git-log）
 - 移动端 `m/`：`login` / `account` / `workspaces`（列表）
   （workspaces 筛选换词表+未分类、创建提交体补 type:other，最小收口）
   - `ppm/{workbench, project-plans, milestone-details, task-plans, problem-list}` — ppm 移动五页。

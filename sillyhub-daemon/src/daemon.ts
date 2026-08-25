@@ -2393,6 +2393,10 @@ export class Daemon {
     // RPC（工作区文件浏览器，design §7.1）。roots 每次 RPC 现取 _effectiveAllowedRoots()，
     // **不**照抄裸 list_dir 的空 roots 跳校验写法（design §5 关键安全设计 1 警示条）。
     this._registerExplorerRpcHandler(ws);
+    // task-01（2026-08-25-workspace-git-log）：注册 git_log 系四只读 RPC（平名，
+    // design §5.2 CC-02 / §7.2 契约），供 backend git_log 模块经 MemberBindingResolver
+    // 解析绑定后直连（不走 host_fs. 前缀降级通道）。
+    this._registerGitLogRpcHandler(ws);
     // task-09（2026-08-19-runtime-live-daemon-read）：注册 runtime.* 四方法只读
     // RPC（运行时状态实时读取，design §6.1）。业务全在 RuntimeHandler（D-005@v1
     // 独立命名空间，不污染 host_fs 九方法契约）；RpcError code 经 _dispatchRpc
@@ -2684,6 +2688,60 @@ export class Daemon {
           ? EXPLORER_DEFAULT_MAX_RESULTS
           : (params.max_results as number);
       return explorerSearch(root, query, this._effectiveAllowedRoots(), maxResults);
+    });
+  }
+
+  /**
+   * task-01（2026-08-25-workspace-git-log / design §5.2 CC-02 + §7.2）：注册
+   * git_log / git_refs / git_show / git_diff_file 四只读 RPC handler——**平名注册**
+   * （对齐 explorer 系 explorer_list_dir 形态，不走 host_fs. 前缀通道；protocol.ts
+   * 仅定义 RPC 帧格式无方法注册表，无需改动）。
+   *
+   * backend git_log 模块经 MemberBindingResolver 解析绑定 + resolve_root_path_for_daemon
+   * 改写路径后直连本 RPC（显式超时 + 自持错误映射）；老 daemon 未注册 → method
+   * not-found 语义由 backend 映射 422「daemon 版本过旧」。
+   *
+   * 业务实现复用 HostFsHandler（gitLog/gitRefs/gitShow/gitDiffFile，design §5.2
+   * 骨架：assertWithinAllowedRoots 白名单 → runCmd('git') 独立 argv 只读子命令 →
+   * 失败结构化回传不抛；空仓库捕获转空态 CC-17）。
+   *
+   * params 归一对齐既有 handler 写法：root/branch/author/sha/path 非字符串或缺省
+   * 归一为空串（由方法入口断言拒 forbidden）；count 缺省 100（对齐 explorer
+   * max_results 缺省形态），显式非法值原样透传由 handler 统一拒 forbidden——不静默
+   * 钳制。roots 每次 RPC 现取 _effectiveAllowedRoots()（explorer 同模式）。
+   */
+  private _registerGitLogRpcHandler(ws: WsClientLike): void {
+    if (typeof ws.registerRpcHandler !== 'function') {
+      this._logger.warn('ws_no_rpc_support', { daemon_local_id: this._config.runtime_id });
+      return;
+    }
+    const handler = new HostFsHandler({ rootsProvider: () => this._effectiveAllowedRoots() });
+
+    ws.registerRpcHandler('git_log', async (params) => {
+      const root = typeof params.root === 'string' ? params.root : '';
+      const branch = typeof params.branch === 'string' ? params.branch : '';
+      const author = typeof params.author === 'string' ? params.author : '';
+      // 缺省 100；显式非法值（非正整数/超上限）透传由 handler 拒 forbidden（同 explorer_search）。
+      const count =
+        params.count === undefined || params.count === null
+          ? 100
+          : (params.count as number);
+      return handler.gitLog({ root, branch, author, count });
+    });
+    ws.registerRpcHandler('git_refs', async (params) => {
+      const root = typeof params.root === 'string' ? params.root : '';
+      return handler.gitRefs({ root });
+    });
+    ws.registerRpcHandler('git_show', async (params) => {
+      const root = typeof params.root === 'string' ? params.root : '';
+      const sha = typeof params.sha === 'string' ? params.sha : '';
+      return handler.gitShow({ root, sha });
+    });
+    ws.registerRpcHandler('git_diff_file', async (params) => {
+      const root = typeof params.root === 'string' ? params.root : '';
+      const sha = typeof params.sha === 'string' ? params.sha : '';
+      const path = typeof params.path === 'string' ? params.path : '';
+      return handler.gitDiffFile({ root, sha, path });
     });
   }
 

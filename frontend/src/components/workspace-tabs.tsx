@@ -23,6 +23,8 @@ const TABS = [
   { key: "mcp-tokens", label: "MCP 令牌", path: "/mcp-tokens" },
   { key: "members", label: "成员", path: "/members" },
   { key: "files", label: "方案文件", path: "/files" },
+  // 2026-08-25-workspace-git-log task-06：Git 日志（纯三字段追加，不扩展 icon 字段）
+  { key: "git-log", label: "Git 日志", path: "/git-log" },
 ] as const;
 
 export function WorkspaceTabs({
