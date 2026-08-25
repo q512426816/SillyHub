@@ -584,6 +584,7 @@ class TestRedispatchDuty:
         assert counts["converged"] == 1, "职责②异常不得阻断职责①计数"
         assert counts["redispatched"] == 0
         log_spy.exception.assert_called_once_with("mission_patrol_duty_failed", duty="redispatch")
+        assert counts["worker_recovered"] == 0
 
 
 class TestRunOnce:
@@ -600,6 +601,7 @@ class TestRunOnce:
             "redispatched": 0,
             "zombie_marked": 0,
             "zombie_revived": 0,
+            "worker_recovered": 0,
         }
 
     @pytest.mark.asyncio
@@ -676,6 +678,7 @@ class TestRunOnce:
         assert counts["converged"] == 3, "职责②崩溃不得阻断职责①计数"
         assert counts["redispatched"] == 0
         log_spy.exception.assert_called_once_with("mission_patrol_duty_failed", duty="redispatch")
+        assert counts["worker_recovered"] == 0
 
 
 class TestZombieMark:

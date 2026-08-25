@@ -153,3 +153,110 @@ async def resolve_first_turn_briefing(
         return None
     assert mission is not None  # 判定通过蕴含 mission 非 None（条件①），助 mypy 收窄
     return await build_orchestrator_briefing(db, mission)
+
+
+# ── ql-20260825-003：分身全部完成 → 系统通知唤醒主控（反 list_workers 轮询）──
+# 语义：主控派发分身后应结束本轮等待；全部分身进入终态时由平台注入一条系统
+# 通知轮唤醒主控去读产出/收敛，取代主控在单轮内反复调 list_workers 烧 token。
+# 双触发点（lease complete_lease 即时 + patrol awaiting_input 巡检兜底）共用本
+# 助手；Redis SETNX 幂等（每 mission 至多通知一次），投递失败不抛不重试风暴。
+
+_WORKERS_DONE_TERMINAL_STATUSES = frozenset({"completed", "failed", "killed"})
+_WORKERS_DONE_NOTIFY_TTL_SECONDS = 6 * 3600
+_WORKERS_DONE_NOTIFY_KEY = "mission:workers_done_notified:{mission_id}"
+
+
+async def workers_all_terminal_with_stats(
+    db: AsyncSession,
+    mission: AgentMission,
+) -> tuple[bool, int, int]:
+    """分身维度全终态判定 + 成败统计（不含主控轮；planning 空集=未全终态）。
+
+    纯查询：经传入 session 读取（lease 调用方在自身事务内可见本轮未提交的
+    终态翻转——即时通知不漏当轮完成事件）。
+    """
+    from app.modules.agent.control import MissionControlService
+
+    runs = await MissionControlService(db).non_orchestrator_runs(mission.id)
+    if not runs:
+        return False, 0, 0
+    if any(r.status not in _WORKERS_DONE_TERMINAL_STATUSES for r in runs):
+        return False, 0, 0
+    ok = sum(1 for r in runs if r.status == "completed")
+    return True, ok, len(runs) - ok
+
+
+async def notify_orchestrator_workers_done(
+    mission_id: uuid.UUID,
+    session_id: uuid.UUID,
+    *,
+    completed: int,
+    failed: int,
+) -> bool:
+    """向主控会话注入「分身全部完成」系统通知（幂等，独立事务，失败只记日志）。
+
+    Redis SETNX 抢占 ``_WORKERS_DONE_NOTIFY_KEY``（TTL 6h）——双触发点并发 /
+    patrol 兜底重入至多投递一次；抢不到返回 False（已通知过）。注入走
+    ``inject_session_as_service``（独立 session 工厂，不搭调用方事务）：turn
+    冲突（主控轮仍在跑）/ 会话非活跃等 AppError 视为主控自会收敛，记 info
+    不视为失败、不释放锁。返回 True = 通知轮已派发。
+
+    ⚠️ 本方法内部自开事务（get_session_factory），调用方事务状态无关——
+    判定请先用 :func:`workers_all_terminal_with_stats`（调用方事务内）完成。
+    """
+    from app.core.db import get_session_factory
+    from app.core.errors import AppError
+    from app.core.redis import get_redis
+    from app.modules.daemon.session.service import SessionService
+
+    try:
+        redis = get_redis()
+        acquired = await redis.set(
+            _WORKERS_DONE_NOTIFY_KEY.format(mission_id=mission_id),
+            "1",
+            nx=True,
+            ex=_WORKERS_DONE_NOTIFY_TTL_SECONDS,
+        )
+    except Exception as exc:  # Redis 不可用：退化为「可能重复通知」，不阻断
+        log.warning("workers_done_notify_redis_failed", mission_id=str(mission_id), error=str(exc))
+        acquired = True
+
+    if not acquired:
+        return False
+
+    prompt = (
+        "【系统通知·团队任务】全部分身已进入终态："
+        f"成功 {completed} 个、失败 {failed} 个。\n"
+        "这是平台在分身完成时自动注入的通知轮（非用户消息）——无需再轮询 "
+        "list_workers 等待。请用 list_workers 核对明细、get_worker_result 读取"
+        "产出，然后 converge_mission 收敛，并向用户汇报结果。"
+    )
+    try:
+        async with get_session_factory()() as ndb:
+            await SessionService(ndb).inject_session_as_service(session_id, prompt=prompt)
+    except AppError as exc:
+        # 主控轮进行中（turn 冲突）/ 会话已结束等：主控醒着或已不可唤醒，
+        # 通知缺失由 patrol awaiting_input 超时自动收敛兜底（§7.5）。
+        log.info(
+            "workers_done_notify_inject_skipped",
+            mission_id=str(mission_id),
+            session_id=str(session_id),
+            reason=str(exc),
+        )
+        return False
+    except Exception as exc:
+        log.warning(
+            "workers_done_notify_inject_failed",
+            mission_id=str(mission_id),
+            session_id=str(session_id),
+            error=str(exc),
+        )
+        return False
+    log.info(
+        "workers_done_notified",
+        mission_id=str(mission_id),
+        session_id=str(session_id),
+        completed=completed,
+        failed=failed,
+    )
+    return True

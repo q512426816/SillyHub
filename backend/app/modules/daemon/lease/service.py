@@ -18,6 +18,7 @@ task-06，Wave 6）。与 ``lease_service.py`` 的 ``DaemonLeaseService`` 并存
 
 from __future__ import annotations
 
+import asyncio
 import json
 import secrets
 import uuid
@@ -738,6 +739,54 @@ class LeaseService:
             except Exception as exc:
                 log.warning(
                     "complete_lease_webhook_failed",
+                    lease_id=str(lease_id),
+                    agent_run_id=str(lease.agent_run_id),
+                    error=str(exc),
+                )
+
+        # ql-20260825-003：分身全部完成 → 系统通知唤醒主控（反 list_workers
+        # 轮询）。本处只在 mission 分身 run 终态锚点做「判定」（调用方事务内，
+        # 可见本轮未提交的终态翻转），投递走 fire-and-forget 独立事务（Redis
+        # SETNX 幂等，inject 拖慢 complete_lease 端点响应的风险隔离在后台任务）；
+        # 漏报（并发完成互不可见）由 patrol awaiting_input 巡检兜底。任何异常
+        # 不得冒泡破坏 lease 完成流程（与上方 webhook 同风格）。
+        if lease.agent_run_id is not None:
+            try:
+                from app.modules.agent.mission_context import (
+                    notify_orchestrator_workers_done,
+                    workers_all_terminal_with_stats,
+                )
+                from app.modules.agent.model import AgentMission as _Mission
+
+                _nt_run = await self._session.get(AgentRun, lease.agent_run_id)
+                _nt_mission_id = _nt_run.mission_id if _nt_run is not None else None
+                if (
+                    _nt_run is not None
+                    and _nt_mission_id is not None
+                    and _nt_run.role != "orchestrator"
+                ):
+                    _nt_mission = await self._session.get(_Mission, _nt_mission_id)
+                    if (
+                        _nt_mission is not None
+                        and _nt_mission.session_id is not None
+                        and _nt_mission.converged_at is None
+                        and _nt_mission.cancelled_at is None
+                    ):
+                        _all_done, _ok, _bad = await workers_all_terminal_with_stats(
+                            self._session, _nt_mission
+                        )
+                        if _all_done:
+                            asyncio.create_task(
+                                notify_orchestrator_workers_done(
+                                    _nt_mission_id,
+                                    _nt_mission.session_id,
+                                    completed=_ok,
+                                    failed=_bad,
+                                )
+                            )
+            except Exception as exc:
+                log.warning(
+                    "complete_lease_workers_done_notify_failed",
                     lease_id=str(lease_id),
                     agent_run_id=str(lease.agent_run_id),
                     error=str(exc),

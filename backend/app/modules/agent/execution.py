@@ -247,6 +247,21 @@ class MissionExecutionService:
         # 单 workspace 模式形参为 None → 列保持 NULL（零回归，mission_schema.py:65）。
         run.target_workspace_id = target_workspace_id
 
+        # ql-20260825-003：写 run↔workspace 关联行（对齐 agent/service.py 三处
+        # 既有派发路径的 M:N 语义）。缺这行会让 per-workspace 日志/产物端点
+        # （_require_run_workspace 按 AgentRunWorkspace 授权）对 worker 一律 403
+        # ——会话团队的派发路径此前从未落关联。anchor 与显式 target 都关联：
+        # 前端 per-run 端点可能以任一 workspace 为路径前缀（scope[0] 常为 anchor）。
+        from app.modules.workspace.model import AgentRunWorkspace
+
+        for _link_ws_id in {workspace_id, effective_target}:
+            self._session.add(
+                AgentRunWorkspace(
+                    agent_run_id=run.id,
+                    workspace_id=_link_ws_id,
+                )
+            )
+
         ws = await self._session.get(Workspace, effective_target)
         repo_url = ws.repo_url if ws else None
         # task-02（D-009@v1）：caller（路径A）提供 branch 则用其 worktree 分支
