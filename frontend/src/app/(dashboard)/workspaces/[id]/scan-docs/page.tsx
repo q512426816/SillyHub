@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tree, type TreeProps } from "antd";
 import type { DataNode } from "antd/es/tree";
@@ -13,11 +12,10 @@ import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { PanelResizer, usePanelWidth } from "@/components/ui/panel-resizer";
 import { TreeBox } from "@/components/ui/tree-box";
 // 复用统一 sanitize 插件（task-13 / FR-13）：扫描文档内容源自 daemon 上报的仓库文件，不可信
-import { markdownRehypePlugins } from "@/components/ui/markdown-text";
+import { MarkdownText } from "@/components/ui/markdown-text";
 import { ApiError } from "@/lib/api";
 import "@uiw/react-markdown-preview/markdown.css";
 
-const MarkdownPreview = dynamic(() => import("@uiw/react-markdown-preview"), { ssr: false });
 import {
   listScanDocs,
   reparseScanDocs,
@@ -368,7 +366,7 @@ export default function ScanDocsPage({ params }: Props) {
                   <p className="text-[11px] text-muted-foreground">最后修改：{new Date(selectedDoc.last_modified_at).toLocaleString("zh-CN")}</p>
                 )}
                 {selectedDoc.content ? (
-                  <div className="max-h-[60vh] overflow-auto rounded-md bg-muted/50 p-3">{selectedDoc.path.endsWith(".md") ? (<MarkdownPreview source={selectedDoc.content} rehypePlugins={markdownRehypePlugins} />) : (<pre className="text-xs leading-relaxed whitespace-pre-wrap">{selectedDoc.content}</pre>)}</div>
+                  <div className="max-h-[60vh] overflow-auto rounded-md bg-muted/50">{selectedDoc.path.endsWith(".md") ? (<MarkdownText content={selectedDoc.content} size="reading" />) : (<pre className="text-xs leading-relaxed whitespace-pre-wrap">{selectedDoc.content}</pre>)}</div>
                 ) : (
                   <p className="text-xs text-muted-foreground">（无内容）</p>
                 )}

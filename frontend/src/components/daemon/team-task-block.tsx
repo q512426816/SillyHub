@@ -26,7 +26,6 @@
  */
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import dynamic from "next/dynamic";
 
 import {
   getAgentRunLogs,
@@ -38,13 +37,13 @@ import { cancelTeamMission, type TeamMissionSummary } from "@/lib/daemon";
 import { ApiError } from "@/lib/api";
 import { workspaceTypeBadge } from "@/lib/workspace-types";
 import { cn } from "@/lib/utils";
+
+import { MarkdownText } from "@/components/ui/markdown-text";
 import { logsToTurns } from "./runtime-session-helpers";
 import { SegmentView } from "./turn-segment-views";
 
 // ql-20260825-004：分身 summary 产物是 Markdown 全文，用与知识库页同款渲染器。
-const MarkdownPreview = dynamic(() => import("@uiw/react-markdown-preview"), {
-  ssr: false,
-});
+// ql-20260824-016：改经统一 MarkdownText（暗色下裸渲染器库默认白底漏出）。
 
 /* ───────────────── 状态 / 角色映射（纯常量） ───────────────── */
 
@@ -503,7 +502,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
                                     分析报告
                                   </div>
                                   <div className="px-1 py-1 text-[12px] [&_.markdown-preview]:bg-transparent">
-                                    <MarkdownPreview source={a.content_ref} />
+                                    <MarkdownText content={a.content_ref} />
                                   </div>
                                 </div>
                               ) : (

@@ -1,6 +1,5 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
@@ -9,8 +8,10 @@ import { Badge } from "@/components/ui/badge";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
-// 复用统一 sanitize 插件（task-13 / FR-13）：文件预览内容不可信，渲染管线必须过滤
-import { markdownRehypePlugins } from "@/components/ui/markdown-text";
+// MD 预览走统一 MarkdownText（ql-20260824-016）：裸 MarkdownPreview 无 .markdown-text
+// 包装，暗色下库默认白底漏出且表格覆盖规则不命中；reading 尺寸适合文件预览，
+// sanitize 管线组件内自带（task-13 / FR-13 口径不变）
+import { MarkdownText } from "@/components/ui/markdown-text";
 import { ApiError } from "@/lib/api";
 import {
   buildChangeFileTree,
@@ -22,9 +23,6 @@ import {
   type ChangeFileTreeNode,
   type PendingFileEntry,
 } from "@/lib/change-files";
-
-// Markdown 预览按需加载（jsdom 测试 vi.mock 降级，见 CONVENTIONS）
-const MarkdownPreview = dynamic(() => import("@uiw/react-markdown-preview"), { ssr: false });
 
 interface Props {
   workspaceId: string;
@@ -61,8 +59,9 @@ function isPreviewableHtml(path: string): boolean {
 function FilePreview({ path, name, content }: { path: string; name: string; content: string }) {
   if (path.endsWith(".md")) {
     return (
-      <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40 p-3 text-sm">
-        <MarkdownPreview source={content} rehypePlugins={markdownRehypePlugins} />
+      // reading 尺寸自带 p-2/text-sm/leading-7，容器仅留 muted 底与圆角滚动
+      <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40">
+        <MarkdownText content={content} size="reading" />
       </div>
     );
   }

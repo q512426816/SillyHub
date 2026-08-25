@@ -298,3 +298,16 @@
 方案：by-run miss 后沿 run.agent_session_id → AgentSession.lease_id 回捞 kind=interactive 且 status∈(claimed,pending) 的 lease 复用主路径（cancelled+terminating_at+SESSION_END）；测试 fixture 改回生产形态（lease_agent_run_id=None，原误写掩盖盲区）+ 新增 2 用例
 结果：目标文件 6/6 passed；回归 61+200 passed（cancel/lease/session_end 相关）；ruff 0 告警；mypy 0 错误
 审计：⚖️ 归属切分：5 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_cancel_lease_session_end_integration.py, frontend/src/components/daemon/runtime-session-helpers.tsx, frontend/src/components/daemon/turn-segment-views.tsx, frontend/src/components/daemon/turn-timeline.tsx, frontend/src/hooks/__tests__/use-message-queue.test.ts
+
+## ql-20260825-014-176f | 2026-08-25 20:37:01 | 暗色下变更文件页等四处 MD 预览白底修复
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/change-file-tree.tsx（md 分支改 MarkdownText reading）
+- frontend/src/app/(dashboard)/workspaces/[id]/knowledge/page.tsx（同）
+- frontend/src/app/(dashboard)/workspaces/[id]/scan-docs/page.tsx（同）
+- frontend/src/components/daemon/team-task-block.tsx（分身报告改 MarkdownText compact）
+需求：暗色下变更文件页等四处 MD 预览白底修复
+根因：四处页面（变更文件树/知识库/扫描文档/团队任务块）裸渲染 MarkdownPreview 未经 MarkdownText 包装，暗色下库默认画布白底漏出且表格覆盖规则不命中
+方案：统一改走 MarkdownText 组件（文件预览用 reading 尺寸、团队任务块用 compact），自带透明底与主题前景并命中表格覆盖规则；清理四处 dynamic 与插件散引用
+结果：tsc 零错误；受影响 3 测试文件 14 用例绿；前端全量 194 文件 2186 用例全绿

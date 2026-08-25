@@ -14,7 +14,6 @@
  */
 
 import Link from "next/link";
-import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import { Tree, type TreeProps } from "antd";
 import type { DataNode } from "antd/es/tree";
@@ -22,14 +21,13 @@ import type { ReactNode } from "react";
 
 import { PageContainer, PageHeader, SectionCard } from "@/components/layout";
 import { FileNodeIcon } from "@/components/ui/file-node-icon";
-import { markdownRehypePlugins } from "@/components/ui/markdown-text";
+import { MarkdownText } from "@/components/ui/markdown-text";
 import { PanelResizer, usePanelWidth } from "@/components/ui/panel-resizer";
 import { TreeBox } from "@/components/ui/tree-box";
 import { ApiError } from "@/lib/api";
 import { getKnowledge, listKnowledge, type KnowledgeEntry } from "@/lib/knowledge";
 import "@uiw/react-markdown-preview/markdown.css";
 
-const MarkdownPreview = dynamic(() => import("@uiw/react-markdown-preview"), { ssr: false });
 
 interface Props {
   params: { id: string };
@@ -262,8 +260,8 @@ export default function KnowledgePage({ params }: Props) {
                   <h3 className="text-base font-semibold">{selectedTitle}</h3>
                 </div>
                 {isMarkdown ? (
-                  <div className="max-h-[70vh] overflow-auto rounded-md bg-muted/50 p-3">
-                    <MarkdownPreview source={selectedContent} rehypePlugins={markdownRehypePlugins} />
+                  <div className="max-h-[70vh] overflow-auto rounded-md bg-muted/50">
+                    <MarkdownText content={selectedContent} size="reading" />
                   </div>
                 ) : (
                   <pre className="max-h-[70vh] overflow-auto whitespace-pre-wrap break-words rounded border bg-muted/30 p-3 text-[11px] leading-4">
