@@ -370,3 +370,20 @@ class TestWorkspacePreamble:
 
         with pytest.raises(ValidationError):
             PageContextCreateBlock(page_key="workspace")
+
+
+class TestPageDocsDockerignoreGuard:
+    """ql-20260825-008 追加（用户实测会话 1ad69ea4 根因）：page_docs/*.md 必须
+    能进 Docker 镜像——backend/.dockerignore 的 `**/*.md` 排除规则会吃掉全部
+    markdown，说明书文件"源码在、镜像丢"，加载器静默降级为仅标签。守护 =
+    白名单行必须存在（与 change/prompts 同款先例）。"""
+
+    def test_dockerignore_whitelists_page_docs(self) -> None:
+        from pathlib import Path
+
+        di = Path(__file__).resolve().parents[4] / ".dockerignore"
+        text = di.read_text(encoding="utf-8")
+        assert "!app/modules/daemon/session/page_docs/*.md" in text, (
+            "backend/.dockerignore 缺 page_docs 白名单——说明书文件进不了镜像，"
+            "运行时静默降级为仅标签（用户实测 1ad69ea4 根因）"
+        )

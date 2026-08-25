@@ -14,3 +14,4 @@ tests/
 **/*.md
 !README.md
 !app/modules/change/prompts/*.md
+!app/modules/daemon/session/page_docs/*.md
