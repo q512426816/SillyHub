@@ -355,3 +355,8 @@
 根因：QA reviewerNotes 两项次要跟进：手写类型源落后组件内临时补齐；双计数实现逐行重复
 方案：daemon.ts 补 sub_session_id/first_run_id；control 抽 _worker_form_count 统一
 结果：28 passed + mypy/ruff/tsc 零错，已提交（ql-20260826-002）
+
+## ql-20260826-003-3407 | 2026-08-26 04:49:44 | P3 分身子会话门户折叠分组 + 开流审计：schema 双字段自动映射 + 前端折叠组 + gen:types（design.md 为背景）
+状态：进行中
+关联变更：2026-08-26-subsession-portal-grouping
+文件：backend/app/modules/daemon/schema.py, frontend/src/components/sessions/session-list-panel.tsx, frontend/src/lib/daemon.ts, backend/openapi.json, frontend/src/lib/api-types.ts
