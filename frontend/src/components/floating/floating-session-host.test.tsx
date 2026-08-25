@@ -49,12 +49,23 @@ vi.mock("@/components/sessions/session-list-panel", () => ({
     selectedSessionId?: string | null;
     onSelect?: (s: { id: string }) => void;
     scope?: { kind: string; runtimeId?: string };
+    // 用户反馈⑤回归锚：四个操作回调必须接线（缺任一则抽屉失去新建/删除/归档）。
+    onNewInGroup?: unknown;
+    onDeleteSessions?: unknown;
+    onArchiveSessions?: unknown;
+    onUnarchiveSessions?: unknown;
   }) => (
     <div
       data-testid="mock-session-list-panel"
       data-scope-kind={props.scope?.kind ?? "global"}
       data-runtime-id={props.scope?.runtimeId ?? ""}
       data-selected={props.selectedSessionId ?? ""}
+      data-ops-wired={
+        [props.onNewInGroup, props.onDeleteSessions, props.onArchiveSessions, props.onUnarchiveSessions]
+          .every(Boolean)
+          ? "true"
+          : "false"
+      }
     >
       session-list-panel
     </div>
@@ -151,6 +162,15 @@ describe("FloatingSessionHost", () => {
     expect(panel.dataset.pagectx).toBe(
       JSON.stringify({ page_key: "ppm_project", project_id: "p-1" }),
     );
+  });
+
+  it("左栏操作回调全接线：组头新建/删除/归档/取消归档（用户反馈⑤回归锚）", async () => {
+    render(wrap(<FloatingSessionHost />));
+    act(() => {
+      useFloatingSessionStore.getState().openDrawer();
+    });
+    const list = await screen.findByTestId("mock-session-list-panel");
+    expect(list.dataset.opsWired).toBe("true");
   });
 
   it("URL 派生上下文同样送达面板（/workspaces 新建会话注入锚点）", async () => {

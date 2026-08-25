@@ -131,6 +131,60 @@ function FloatingDrawerBody({
     [onPreSessionCreated, refreshLists],
   );
 
+  // ── 左栏工作区树操作对齐全屏门户（用户反馈⑤：抽屉里会话新增操作没了）────
+  // ca3a83ad 起左栏复用 SessionListPanel，但未接 onNewInGroup → 组头「＋」
+  // 新建入口失效（选中会话后无任何新建路径）。此处按门户 handleNewInGroup
+  // 同语义接线：筛选两层齐备直进预会话（携带页面上下文），否则两步浮层兜底
+  // （pickerWorkspaceId 传组上下文，对齐门户 picker 语义）。
+  const [pickerWorkspaceId, setPickerWorkspaceId] = useState<string | null>(null);
+  const handleNewInGroup = useCallback(
+    (workspaceId: string | null, filter?: { machineId: string; agent: string }) => {
+      if (lockedRuntime) return; // runtime 锁定 scope 组头新建禁用（同 ca3a83ad 语义）
+      if (filter?.machineId && filter.agent) {
+        const machine = machines.find((m) => m.id === filter.machineId);
+        const runtime = machine?.runtimes?.find(
+          (r) => r.status === "online" && r.provider === filter.agent,
+        );
+        if (runtime) {
+          startPreSession({ workspaceId, runtimeId: runtime.id }, effectivePageCtx);
+          return;
+        }
+      }
+      setPickerWorkspaceId(workspaceId);
+      setPickerOpen(true);
+    },
+    [lockedRuntime, machines, startPreSession, effectivePageCtx],
+  );
+
+  /** 批量删除/归档/取消归档（门户同款：逐条调用 + invalidate + 选中被删则清）。 */
+  const handleDeleteSessions = useCallback(
+    async (ids: string[]) => {
+      const { deleteAgentSession } = await import("@/lib/daemon");
+      await Promise.allSettled(ids.map((id) => deleteAgentSession(id)));
+      refreshLists();
+      if (ids.includes(sessionId ?? "")) selectSession(null);
+    },
+    [refreshLists, sessionId, selectSession],
+  );
+  const handleArchiveSessions = useCallback(
+    async (ids: string[]) => {
+      const { archiveAgentSession } = await import("@/lib/daemon");
+      await Promise.allSettled(ids.map((id) => archiveAgentSession(id)));
+      refreshLists();
+      if (ids.includes(sessionId ?? "")) selectSession(null);
+    },
+    [refreshLists, sessionId, selectSession],
+  );
+  const handleUnarchiveSessions = useCallback(
+    async (ids: string[]) => {
+      const { unarchiveAgentSession } = await import("@/lib/daemon");
+      await Promise.allSettled(ids.map((id) => unarchiveAgentSession(id)));
+      refreshLists();
+      if (ids.includes(sessionId ?? "")) selectSession(null);
+    },
+    [refreshLists, sessionId, selectSession],
+  );
+
   // 页面入口一键唤起（task-07）：requestNewSession 挂起 → 机器数据就绪后
   // 自动解析默认机器进预会话（未命中弹两步浮层兜底，pageContext 已在壳态）。
   const autoNewPending = useFloatingSessionStore((s) => s.autoNewPending);
@@ -235,6 +289,10 @@ function FloatingDrawerBody({
             selectedSessionId={sessionId}
             onSelect={(s) => selectSession(s.id)}
             scope={lockedRuntime ? { kind: "runtime", runtimeId: lockedRuntime.id } : undefined}
+            onNewInGroup={handleNewInGroup}
+            onDeleteSessions={handleDeleteSessions}
+            onArchiveSessions={handleArchiveSessions}
+            onUnarchiveSessions={handleUnarchiveSessions}
           />
         </div>
 
@@ -297,7 +355,10 @@ function FloatingDrawerBody({
         machines={machines}
         onCancel={() => setPickerOpen(false)}
         onPick={(runtimeId) => {
-          startPreSession({ runtimeId, workspaceId: null }, effectivePageCtx);
+          startPreSession(
+            { runtimeId, workspaceId: pickerWorkspaceId },
+            effectivePageCtx,
+          );
           setPickerOpen(false);
         }}
       />
