@@ -282,3 +282,11 @@
 根因：AskUserQuestion 多选提问的 answer 真实形态是 string[]（multiSelect: true），extractDialogQA 旧代码只按 string 处理——(answers[i]?.answer ?? "").trim() 在数组上抛「(intermediate value)….trim is not a function」，整页被 error boundary 拦截。触发条件为回看含已答多选提问卡的会话（e6900bc2 首次触达）。排查路径：DB 数据核对（全 text 无异常）→ 真实日志组件级复现（logsToTurns/TurnTimeline/SessionPanel 均不崩）→ 差异定位到 dialog_history（mock 空所以测试不崩）→ session_dialog_requests 表实数据 answer 为数组 → extractDialogQA 源码定位 → 红绿验证（stash 修复复现同款 TypeError）。
 方案：answer 归一——数组过滤非字符串成员、trim 后顿号 join 展示（answerText）；selected 判定改 label ∈ 选中列表。
 结果：新增 4 用例 + 既有 38 用例全绿；前端全量 2177 绿；tsc 0 错；红绿验证通过；已提交 83975883。注：sillyspec CLI quick --done 仍崩（ql-20260825-002 已记工具坑），本条目人工补写。
+
+## ql-20260825-004 | 2026-08-25 22:16:00 | .xls 旧格式在线预览支持（SheetJS BIFF 兼容）
+状态：已完成
+关联变更：2026-08-25-session-attachment-preview（非目标条款更新 + docHash 重算）
+文件：frontend/src/components/files/preview-registry.ts（xls 扩展名 + application/vnd.ms-excel MIME → xlsx 渲染器）、previewers/xlsx-previewer.tsx（注释）、__tests__/preview-registry.test.ts（+用例）
+根因：设计期把所有旧格式 Office 一刀切进 fallback，但 SheetJS 的 read 本就支持 BIFF5/7/8（.xls）——用户发 .doc 时顺带问到 .xls，发现该格式零成本可支持（写读往返实测：OLE2 魔数 D0CF 的真实 .xls 二进制解析、sheet_to_html 输出含数据）。
+方案：registry 归一映射，渲染器零改动。.doc/.ppt 维持 fallback（纯前端无保真方案，保持 D-001 纯前端路线）。
+结果：registry 测试 21/21 绿、files 域 42/42 绿、tsc 0 错；已提交 32a45b16。
