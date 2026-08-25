@@ -121,3 +121,13 @@ daemon 改动」设计的固有表现，page_context 行为与变更前导/团�
 - **事故记录**：task-10 首次提交误吞并行会话 stage 在共享索引的 39 个文件
   （共享工作区竞态）——软重置剥离后干净重提交（f0a6a672，14 文件）；并行
   文件内容零丢失（仅暂存态→未暂存）。
+
+## task-11 前导段「全部」视图可见（用户反馈迭代 3，2026-08-25 补录）
+
+用户反馈"注入完全黑盒"：对话 tab 保持干净，「全部（进度）」tab 显示首轮
+注入的上下文前导来源。实现：TurnSegment += preamble（text/ts）+ assembler
+extractPreambleText（三类前导标题 + --- 分隔识别）+ 双通道提取（attach 历史
+runtime-session-helpers / 实时 SSE session-panel onLog）+ SegmentView 渲染
+「上下文注入」卡片。修复一处构建期 bug：turn-status-bar 独立 segmentTs 函数
+穷尽 switch 少 preamble 分支（构建时报错，已补）。测试：assembler 55 绿 +
+tsc 0（剩余 15 错误全部为并行会话 team-task-block 在途类型债，与本变更无关）。

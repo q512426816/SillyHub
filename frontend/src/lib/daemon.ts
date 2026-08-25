@@ -2002,6 +2002,14 @@ export interface TeamMissionWorkerSummary {
   role: string | null;
   status: string;
   objective: string | null;
+  /** 分身执行工作区（ql-20260825-003：跨工作区派发后日志/产物端点按此鉴权）。 */
+  workspace_id?: string | null;
+}
+
+/** scope 工作区引用（ql-20260825-003：id+名称 enriched 视图）。 */
+export interface TeamWorkspaceRef {
+  id: string;
+  name: string | null;
 }
 
 /**
@@ -2020,6 +2028,8 @@ export interface TeamMissionSummary {
   status: TeamMissionStatus;
   objective: string | null;
   scope_workspace_ids: string[];
+  /** scope 工作区 id+名称 enriched 视图（ql-20260825-003，前端范围徽标名称化）。 */
+  scope_workspaces?: TeamWorkspaceRef[];
   budget_usd: number | null;
   workers: TeamMissionWorkerSummary[];
 }

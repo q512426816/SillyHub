@@ -191,18 +191,18 @@ async def build_page_context_preamble(
     if project is None:
         return None
 
-    lines: list[str] = ["【页面上下文】", "- 页面：PPM · 项目详情"]
+    proj_lines: list[str] = ["【页面上下文】", "- 页面：PPM · 项目详情"]
     if project.project_name:
-        lines.append(f"- 项目：{project.project_name[:_PAGE_VALUE_MAX]}")
+        proj_lines.append(f"- 项目：{project.project_name[:_PAGE_VALUE_MAX]}")
     if project.project_code:
-        lines.append(f"- 项目编码：{project.project_code[:_PAGE_VALUE_MAX]}")
+        proj_lines.append(f"- 项目编码：{project.project_code[:_PAGE_VALUE_MAX]}")
     if project.project_status:
-        lines.append(f"- 状态：{project.project_status[:_PAGE_VALUE_MAX]}")
+        proj_lines.append(f"- 状态：{project.project_status[:_PAGE_VALUE_MAX]}")
     if project.project_effective_start_time:
-        lines.append(f"- 周期起：{project.project_effective_start_time.date().isoformat()}")
+        proj_lines.append(f"- 周期起：{project.project_effective_start_time.date().isoformat()}")
     if project.project_effective_end_time:
-        lines.append(f"- 周期止：{project.project_effective_end_time.date().isoformat()}")
+        proj_lines.append(f"- 周期止：{project.project_effective_end_time.date().isoformat()}")
 
-    if len(lines) <= 1:
+    if len(proj_lines) <= 1:
         return None
-    return "\n".join(lines)
+    return "\n".join(proj_lines)

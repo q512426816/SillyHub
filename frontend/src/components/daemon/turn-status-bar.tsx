@@ -64,6 +64,9 @@ function segmentTs(seg: TurnSegment): number {
       return seg.startedAt ?? Number.NEGATIVE_INFINITY;
     case "stderr":
       return seg.ts ?? Number.NEGATIVE_INFINITY;
+    // 2026-08-25-unified-floating-session task-11：前导段非 running 候选，取捕获 ts。
+    case "preamble":
+      return seg.ts ?? Number.NEGATIVE_INFINITY;
     case "subagent_stub":
       return Number.NEGATIVE_INFINITY;
     // task-08（agent-file-upload-mcp）：file 段非 running 候选，时间戳取 log ts。

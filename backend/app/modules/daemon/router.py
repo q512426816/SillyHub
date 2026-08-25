@@ -104,6 +104,7 @@ from app.modules.daemon.schema import (
     TeamMissionSummary,
     TeamMissionTriggerRequest,
     TeamMissionWorkerSummary,
+    TeamWorkspaceRef,
 )
 from app.modules.daemon.service import (
     DaemonLeaseNotFound,
@@ -2706,11 +2707,27 @@ async def _team_mission_summary(
         has_session=mission.session_id is not None,
         session_active_turn=session_active_turn,
     )
+    # ql-20260825-003：scope 名称 enriched 视图（批量一次查询；查无行的条目
+    # name=None，前端回落 id 徽标）。
+    scope_ids = list(mission.scope_workspace_ids or [str(mission.workspace_id)])
+    from sqlmodel import col as _col
+
+    from app.modules.workspace.model import Workspace as _Ws
+
+    _ws_rows = (
+        await session.execute(
+            select(_Ws.id, _Ws.name).where(_col(_Ws.id).in_([uuid.UUID(sid) for sid in scope_ids]))
+        )
+    ).all()
+    _ws_names = {str(row[0]): row[1] for row in _ws_rows}
     return TeamMissionSummary(
         mission_id=mission.id,
         status=status,
         objective=mission.objective,
-        scope_workspace_ids=list(mission.scope_workspace_ids or [str(mission.workspace_id)]),
+        scope_workspace_ids=scope_ids,
+        scope_workspaces=[
+            TeamWorkspaceRef(id=ws_id, name=_ws_names.get(ws_id)) for ws_id in scope_ids
+        ],
         budget_usd=mission.budget_usd,
         workers=[
             TeamMissionWorkerSummary(

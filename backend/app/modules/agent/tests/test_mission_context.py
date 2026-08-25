@@ -383,3 +383,103 @@ class TestBriefingTokenBudget:
             f"scope=5 简报 token 上界 {estimated_tokens_upper} 超 R-01 预算 1500"
             f"（参考 len//3 口径 ≈ {len(briefing) // 3}）"
         )
+
+
+# ---------------------------------------------------------------------------
+# ql-20260825-003：分身全部完成 → 系统通知唤醒主控（判定 + 幂等投递）
+# ---------------------------------------------------------------------------
+
+
+class TestWorkersDoneNotify:
+    async def test_workers_all_terminal_with_stats(self, db_session):
+        """全终态判定 + 成败统计（planning 空集 / 有非终态 → False）。"""
+        from app.modules.agent.mission_context import workers_all_terminal_with_stats
+
+        ws = await _make_workspace(db_session)
+        agent_session = await _seed_agent_session(db_session, ws.id)
+        mission = await _seed_active_mission(db_session, agent_session)
+        await _seed_orchestrator_run(db_session, mission, status="completed")
+        from app.modules.agent.model import AgentRun as _Run
+
+        async def _worker(status):
+            r = _Run(
+                mission_id=mission.id,
+                agent_type="claude_code",
+                status=status,
+                role="impl",
+                objective="x",
+            )
+            db_session.add(r)
+            await db_session.commit()
+            return r
+
+        await _worker("completed")
+        await _worker("failed")
+        done, ok, bad = await workers_all_terminal_with_stats(db_session, mission)
+        assert (done, ok, bad) == (True, 1, 1)
+
+        m2_sess = await _seed_agent_session(db_session, ws.id)
+        mission2 = await _seed_active_mission(db_session, m2_sess)
+        r_running = _Run(
+            mission_id=mission2.id,
+            agent_type="claude_code",
+            status="running",
+            role="impl",
+            objective="x",
+        )
+        db_session.add(r_running)
+        await db_session.commit()
+        done2, _, _ = await workers_all_terminal_with_stats(db_session, mission2)
+        assert done2 is False
+
+        m3_sess = await _seed_agent_session(db_session, ws.id)
+        mission3 = await _seed_active_mission(db_session, m3_sess)
+        done3, _, _ = await workers_all_terminal_with_stats(db_session, mission3)
+        assert done3 is False
+
+    async def test_notify_idempotent_and_prompt_shape(self, db_session, monkeypatch):
+        """SETNX 抢到才投递一次；二次调用（锁已占）直接 False；prompt 含系统通知标记。"""
+        from app.modules.agent import mission_context as mc
+
+        ws = await _make_workspace(db_session)
+        agent_session = await _seed_agent_session(db_session, ws.id)
+
+        class _FakeRedis:
+            def __init__(self):
+                self.keys = {}
+
+            async def set(self, key, val, nx=None, ex=None):
+                if nx and key in self.keys:
+                    return None
+                self.keys[key] = val
+                return True
+
+        fake_redis = _FakeRedis()
+        import app.core.redis as _redis_mod
+
+        monkeypatch.setattr(_redis_mod, "get_redis", lambda: fake_redis)
+
+        injected = []
+
+        class _FakeSessionService:
+            def __init__(self, db):
+                pass
+
+            async def inject_session_as_service(self, session_id, *, prompt):
+                injected.append((session_id, prompt))
+
+        import app.modules.daemon.session.service as _svc_mod
+
+        monkeypatch.setattr(_svc_mod, "SessionService", _FakeSessionService)
+
+        ok1 = await mc.notify_orchestrator_workers_done(
+            agent_session.id, agent_session.id, completed=2, failed=1
+        )
+        assert ok1 is True and len(injected) == 1
+        assert "系统通知·团队任务" in injected[0][1]
+        assert "成功 2" in injected[0][1] and "失败 1" in injected[0][1]
+
+        ok2 = await mc.notify_orchestrator_workers_done(
+            agent_session.id, agent_session.id, completed=2, failed=1
+        )
+        assert ok2 is False and len(injected) == 1

@@ -32,6 +32,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from app.core.config import get_settings
 from app.core.db import get_session_factory
@@ -63,6 +64,7 @@ PATROL_COUNT_KEYS = (
     "redispatched",
     "zombie_marked",
     "zombie_revived",
+    "worker_recovered",
 )
 
 # 僵尸标记态（task-05 provides，task-06/07/08 消费）：主 agent run 判死后写
@@ -192,6 +194,15 @@ class MissionPatrolService:
         except Exception:
             log.exception("mission_patrol_duty_failed", duty="zombie")
 
+        # ── 职责④：worker 断线恢复（ql-20260825-003）──
+        # 断线 failed/killed worker：可补发（checkpoint_data 有产物快照）→
+        # sync_agent_run_status 补发终态（幂等，不重跑）；未完成才 resume
+        # 重置 pending 让 daemon 重跑。统计进 worker_recovered。
+        try:
+            counts["worker_recovered"] = await self._patrol_worker_recovery()
+        except Exception:
+            log.exception("mission_patrol_duty_failed", duty="worker_recovery")
+
         return counts
 
     async def _patrol_convergence(self, mission_ids: list[uuid.UUID]) -> int:
@@ -268,6 +279,28 @@ class MissionPatrolService:
         if not all_runs or any(r.status not in _TERMINAL_RUN_STATUSES for r in all_runs):
             # 空集合=planning；有非终态 run=running——均不属 awaiting_input。
             return 0
+
+        # ql-20260825-003：awaiting_input 即「分身全完成、等主控下一轮」——先尝试
+        # 系统通知唤醒主控（幂等，lease complete_lease 即时钩子漏报时的兜底）。
+        # 通知成功后主控大概率自行收敛，超时自动收敛逻辑保持不变（双保险）。
+        try:
+            from app.modules.agent.mission_context import (
+                notify_orchestrator_workers_done,
+                workers_all_terminal_with_stats,
+            )
+
+            _done, _ok, _bad = await workers_all_terminal_with_stats(self._session, mission)
+            if _done:
+                await notify_orchestrator_workers_done(
+                    mission_id, mission.session_id, completed=_ok, failed=_bad
+                )
+        except Exception as exc:
+            log.warning(
+                "mission_patrol_workers_done_notify_failed",
+                mission_id=str(mission_id),
+                error=str(exc),
+            )
+
         anchor = max(
             (r for r in all_runs if r.role == _ORCHESTRATOR_ROLE),
             key=lambda r: r.created_at,
@@ -533,6 +566,117 @@ class MissionPatrolService:
             await self._session.commit()
 
         return zombie_marked, zombie_revived
+
+    async def _patrol_worker_recovery(self) -> int:
+        """职责④：worker 断线恢复（ql-20260825-003 / 设计：恢复优先于重派）。
+
+        背景：worker 的 per-lease 运行（``daemon_task_leases.kind='batch'``）在
+        daemon 网络断开时会被后端标 failed/killed，但 daemon 侧实际可能已跑完
+        （stdout/产物已写 checkpoint）。直接 ``resume_run`` 重置 pending 会让
+        daemon 重跑一次——浪费。正确序：①若 run 已有 ``checkpoint_data`` 且其
+        中捕获了终态（网络断开前已写到 checkpoint 的产物），→ 补发终态（经
+        ``DaemonService.sync_agent_run_status``，幂等，非终态回退被守卫）；②
+        否则才走 ``ExecutionCoordinator.resume_run``（重置 pending，daemon 恢复
+        后重跑）。
+
+        候选 run 判据：``status ∈ {failed, killed}`` 且 ``mission_id`` 非空且
+        属于「会话 mission」（session_id 指向真实 AgentSession——本次主修的
+        会话团队场景；存量 external/team mission 的 worker 仍由 legacy 僵尸
+        链路管，不重复处理）且 ``role != 'orchestrator'``（主控轮专属
+        redispatch_pending_main_runs 链路负责，不重复）。
+
+        恢复只按本职责计数进 ``worker_recovered``；简历定的 run 由 daemon
+        侧重连后 outbox drain 补发终态（FileOutbox 持久化，R-07/R-10 既有
+        语义）。
+
+        Returns:
+            本轮恢复的 run 数（补发 + resume 合计）。
+        """
+        from app.modules.agent.coordinator import ExecutionCoordinatorService
+        from app.modules.agent.model import AgentMission as _Mission
+        from app.modules.daemon.service import DaemonService
+
+        stmt = (
+            select(AgentRun)
+            .where(
+                col(AgentRun.status).in_(["failed", "killed"]),
+                col(AgentRun.mission_id).is_not(None),
+                col(AgentRun.role) != "orchestrator",
+                col(AgentRun.agent_session_id).is_not(None),  # 会话 mission 锚
+            )
+            .order_by(AgentRun.created_at.desc())
+            .limit(50)
+        )
+        runs = list((await self._session.execute(stmt)).scalars().all())
+        if not runs:
+            return 0
+
+        recovered = 0
+        coord = ExecutionCoordinatorService(self._session)
+        for run in runs:
+            # 会话 mission 判别（Grill NEW-4 口径：session_id 查真实会话行）。
+            mission = await self._session.get(_Mission, run.mission_id)
+            if mission is None or mission.session_id is None:
+                continue
+            if await _mission_bound_session(self._session, mission) is None:
+                continue
+            if mission.converged_at is not None or mission.cancelled_at is not None:
+                continue
+
+            # ① 补发终态（不重跑）：checkpoint_data 快照里已有 daemon 完成的产物。
+            if run.checkpoint_data and isinstance(run.checkpoint_data, dict):
+                cp_status = run.checkpoint_data.get("status")
+                if cp_status in ("completed", "failed", "killed"):
+                    lease = await self._resolve_run_lease_for_sync(run.id)
+                    if lease is not None:
+                        try:
+                            await DaemonService(self._session).sync_agent_run_status(
+                                lease.id,
+                                lease.claim_token or "",
+                                cp_status,
+                                error=run.checkpoint_data.get("error"),
+                            )
+                            recovered += 1
+                            continue
+                        except Exception as exc:
+                            log.warning(
+                                "mission_patrol_worker_sync_failed",
+                                run_id=str(run.id),
+                                error=str(exc),
+                            )
+
+            # ② 未完成（无 checkpoint 终态快照）→ resume 重置 pending，daemon
+            # 恢复后重跑。resume_run 仅接 failed/killed（显式守卫，不猜）。
+            try:
+                await coord.resume_run(run.id, run.resume_token or "")
+                recovered += 1
+            except Exception as exc:
+                # resume_token 缺失 / 状态不符 / token 校验失败：记 warn 跳过，
+                # 下轮 patrol 或人工介入；不翻转既有 failed/killed 终态。
+                log.warning(
+                    "mission_patrol_worker_resume_failed",
+                    run_id=str(run.id),
+                    error=str(exc),
+                )
+        return recovered
+
+    async def _resolve_run_lease_for_sync(self, run_id: uuid.UUID) -> DaemonTaskLease | None:
+        """worker 断线恢复的 lease 解析：取该 run 最新 lease（与
+        ``_resolve_run_daemon`` 同款按 updated_at 倒序），链路断链返回 None
+        由调用方跳过（不猜不崩，同 Grill P2-2）。
+        """
+        return (
+            (
+                await self._session.execute(
+                    select(DaemonTaskLease)
+                    .where(DaemonTaskLease.agent_run_id == run_id)
+                    .order_by(DaemonTaskLease.updated_at.desc())
+                    .limit(1)
+                )
+            )
+            .scalars()
+            .first()
+        )
 
     async def _resolve_run_daemon(self, agent_run_id: uuid.UUID) -> DaemonInstance | None:
         """判死/复活动作共用的链路解析：run → 最新 lease → runtime → daemon 实体。

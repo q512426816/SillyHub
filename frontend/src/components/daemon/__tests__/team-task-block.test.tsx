@@ -20,11 +20,15 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 import { TeamTaskBlock, isActiveTeamMission } from "../team-task-block";
 import { cancelTeamMission, type TeamMissionSummary } from "@/lib/daemon";
+import { getAgentRunLogs } from "@/lib/agent";
 
 vi.mock("@/lib/daemon", () => ({
   cancelTeamMission: vi.fn(),
 }));
 
+vi.mock("@/lib/agent", () => ({
+  getAgentRunLogs: vi.fn(async () => [] as unknown[]),
+}));
 const cancelMock = vi.mocked(cancelTeamMission);
 
 /* ───────── fixture ───────── */
@@ -39,9 +43,9 @@ function makeSummary(
     scope_workspace_ids: ["11111111-2222-3333-4444-555555555555"],
     budget_usd: 5,
     workers: [
-      { run_id: "r-1", role: "impl", status: "running", objective: "修按钮溢出" },
-      { run_id: "r-2", role: "test", status: "completed", objective: "补回归用例" },
-      { run_id: "r-3", role: "risk", status: "failed", objective: "扫描同类问题" },
+      { run_id: "r-1", role: "impl", status: "running", objective: "修按钮溢出", workspace_id: "11111111-2222-3333-4444-555555555555" },
+      { run_id: "r-2", role: "test", status: "completed", objective: "补回归用例", workspace_id: "11111111-2222-3333-4444-555555555555" },
+      { run_id: "r-3", role: "risk", status: "failed", objective: "扫描同类问题", workspace_id: "11111111-2222-3333-4444-555555555555" },
     ],
     ...overrides,
   };
@@ -224,5 +228,68 @@ describe("TeamTaskBlock 引擎无关（Codex 置灰逻辑归 task-11 挂载层�
     expect(screen.queryByText(/Claude/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Codex/)).not.toBeInTheDocument();
     expect(screen.queryByText(/团队需要/)).not.toBeInTheDocument();
+  });
+});
+
+/* ───────── ql-20260825-003：scope 名称链 + 分身自身工作区徽标 + 日志按分身工作区 ───────── */
+
+describe("TeamTaskBlock ql-20260825-003", () => {
+  it("范围徽标：无 workspaceMeta 时回落 summary.scope_workspaces 名称", () => {
+    const summary = makeSummary({
+      scope_workspace_ids: ["aaaaaaaa-0000-0000-0000-000000000001", "aaaaaaaa-0000-0000-0000-000000000002"],
+      scope_workspaces: [
+        { id: "aaaaaaaa-0000-0000-0000-000000000001", name: "sillyspec" },
+        { id: "aaaaaaaa-0000-0000-0000-000000000002", name: null },
+      ],
+    });
+    render(<TeamTaskBlock summary={summary} />);
+    // 有名 → 名称徽标；无名 → #<id8> 原始徽标兜底
+    expect(screen.getByText("sillyspec")).toBeTruthy();
+    expect(screen.getByText("#aaaaaaaa")).toBeTruthy();
+  });
+
+  it("分身行显示自身工作区徽标（多 scope 也显示）", () => {
+    const summary = makeSummary({
+      scope_workspace_ids: ["aaaaaaaa-0000-0000-0000-000000000001", "aaaaaaaa-0000-0000-0000-000000000002"],
+      scope_workspaces: [
+        { id: "aaaaaaaa-0000-0000-0000-000000000001", name: "sillyspec" },
+        { id: "aaaaaaaa-0000-0000-0000-000000000002", name: "multi-agent-platform" },
+      ],
+      workers: [
+        {
+          run_id: "r-cross",
+          role: "impl",
+          status: "running",
+          objective: "跨区任务",
+          workspace_id: "aaaaaaaa-0000-0000-0000-000000000002",
+        },
+      ],
+    });
+    render(<TeamTaskBlock summary={summary} />);
+    expect(screen.getAllByText("multi-agent-platform").length).toBe(2);
+  });
+
+  it("日志请求按分身自身 workspace（跨区分身不再打 scope[0]）", async () => {
+    const logsMock = vi.mocked(getAgentRunLogs).mockResolvedValue([]);
+    const summary = makeSummary({
+      scope_workspace_ids: ["aaaaaaaa-0000-0000-0000-000000000001", "aaaaaaaa-0000-0000-0000-000000000002"],
+      workers: [
+        {
+          run_id: "r-cross",
+          role: "impl",
+          status: "completed",
+          objective: "跨区任务",
+          workspace_id: "aaaaaaaa-0000-0000-0000-000000000002",
+        },
+      ],
+    });
+    render(<TeamTaskBlock summary={summary} />);
+    fireEvent.click(screen.getByText("日志"));
+    await waitFor(() =>
+      expect(logsMock).toHaveBeenCalledWith(
+        "aaaaaaaa-0000-0000-0000-000000000002",
+        "r-cross",
+      ),
+    );
   });
 });

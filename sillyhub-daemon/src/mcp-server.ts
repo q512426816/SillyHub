@@ -301,7 +301,10 @@ export function createMcpServer(
         '【如何拆解】把任务拆成目标明确、可独立验收的子任务，每个分身一条自包含 ' +
         'objective（含上下文、目标、验收标准）；子任务之间尽量无依赖，有依赖则先做前置。' +
         '【何时收敛】全部分身终态后调 converge_mission 合并产出；未全终态时 converge ' +
-        '返回 busy，等待即可。派发后可用 list_workers 轮询进度、get_worker_result 读产出。' +
+        '返回 busy，等待即可。【等待方式】派发完分身后直接结束本轮等待——全部分身完成时' +
+        '平台会自动向本会话注入一条【系统通知·团队任务】唤醒你，届时再 list_workers ' +
+        '核对、get_worker_result 读产出并收敛。不要在单轮内反复调 list_workers 轮询烧' +
+        'token（每轮询问都是一次模型往返）。' +
         '【预算提示】每个分身消耗真实 token 费用，控制数量（建议 ≤5）；' +
         '只有目标较大（小时级以上）或可并行的任务才值得派团队。' +
         '【定位】优先按当前会话上下文定位 mission（无则懒建）；' +
@@ -401,7 +404,8 @@ export function createMcpServer(
         '读取单个分身 run 的结构化产出（artifacts：patch/summary 等）。' +
         'worker_id 必填（dispatch_worker 响应返回的 run id）。' +
         '优先按当前会话上下文定位 mission；mission_id/workspace_id 可选，仅作显式越权校验锚。' +
-        '分身可能仍在运行（status 非 completed）——此时先等待或轮询 list_workers。',
+        '分身可能仍在运行（status 非 completed）——此时不要轮询等待：结束本轮，' +
+        '等平台注入的【系统通知·团队任务】（全部分身完成时自动到达）后再来读。',
       inputSchema: {
         workspace_id: z
           .string()
@@ -436,7 +440,9 @@ export function createMcpServer(
       title: 'List Workers',
       description:
         '列出当前 mission 下全部分身 run 状态（含主控行，role=orchestrator）。' +
-        '用于轮询分身进度：全部终态（completed/failed）后即可调 converge_mission 收敛。' +
+        '【使用时机】①派发前核对已有分身；②收到平台注入的【系统通知·团队任务】' +
+        '（全部分身完成时自动唤醒）后核对明细并调 converge_mission 收敛。' +
+        '不要在等待分身期间反复调用本工具轮询——结束本轮等系统通知即可。' +
         '优先按当前会话上下文定位 mission；mission_id/workspace_id 可选，仅作显式越权校验锚。',
       inputSchema: {
         workspace_id: z

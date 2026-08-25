@@ -183,13 +183,30 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
   const effectiveWorkspaceId =
     workspaceId ?? summary.scope_workspace_ids[0] ?? null;
 
+  // ql-20260825-003：scope 徽标名称化——父层 workspaceMeta 优先，次选后端
+  // summary.scope_workspaces（enriched id+name），都缺才回落 #<id8> 原始徽标。
+  const wsEntryOf = useCallback(
+    (id: string | null | undefined): TeamWorkspaceMetaEntry | null => {
+      if (!id) return null;
+      const meta = workspaceMeta?.[id];
+      if (meta?.name) return meta;
+      const ref = summary.scope_workspaces?.find((w) => w.id === id);
+      if (ref?.name) return { name: ref.name, type: meta?.type ?? null };
+      return null;
+    },
+    [workspaceMeta, summary.scope_workspaces],
+  );
+
   const handleToggleLogs = useCallback(
-    async (runId: string) => {
+    async (runId: string, runWorkspaceId?: string | null) => {
       if (expandedLogsRunId === runId) {
         setExpandedLogsRunId(null);
         return;
       }
-      if (!effectiveWorkspaceId) {
+      // ql-20260825-003：per-run 端点按 run 自身工作区鉴权（跨工作区分身用
+      // scope[0] 会 403"不属于当前工作区"），回落链：分身自身 → 会话 → scope[0]。
+      const wsForRun = runWorkspaceId ?? effectiveWorkspaceId;
+      if (!wsForRun) {
         setLogsError("无可用工作区 ID，无法查询日志");
         setExpandedLogsRunId(runId);
         return;
@@ -198,7 +215,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
       setLogsLoading(true);
       setLogsError(null);
       try {
-        const logs = await getAgentRunLogs(effectiveWorkspaceId, runId);
+        const logs = await getAgentRunLogs(wsForRun, runId);
         setLogsData(logs);
       } catch (e) {
         setLogsError(e instanceof ApiError ? e.message : "加载日志失败");
@@ -330,7 +347,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
               </span>
             ) : (
               summary.scope_workspace_ids.map((id) => {
-                const entry = workspaceMeta?.[id];
+                const entry = wsEntryOf(id);
                 return entry ? (
                   <WsBadge key={id} entry={entry} />
                 ) : (
@@ -354,11 +371,6 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
           ) : (
             summary.workers.map((w) => {
               const wsMeta = WORKER_STATUS_META[w.status] ?? WORKER_STATUS_FALLBACK;
-              const singleScope =
-                summary.scope_workspace_ids.length === 1
-                  ? summary.scope_workspace_ids[0]
-                  : null;
-              const entry = singleScope ? workspaceMeta?.[singleScope] : undefined;
               const logsOpen = expandedLogsRunId === w.run_id;
               const artifactsOpen = expandedArtifactsRunId === w.run_id;
               return (
@@ -370,15 +382,20 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
                     <span className={cn("shrink-0 text-[12px]", wsMeta.cls)}>
                       {wsMeta.label}
                     </span>
-                    {singleScope && (
-                      <span className="shrink-0" title={singleScope}>
-                        {entry ? (
-                          <WsBadge entry={entry} />
-                        ) : (
-                          <span className="inline-flex h-5 items-center rounded border border-violet-200 bg-violet-50 px-1.5 font-mono text-[10px] font-semibold text-violet-700">
-                            #{singleScope.slice(0, 8)}
-                          </span>
-                        )}
+                    {/* ql-20260825-003：分身自身工作区徽标（多 scope 也显示，
+                        跨工作区分身可辨识归属；名称链 wsEntryOf，缺名回落 #id） */}
+                    {w.workspace_id && (
+                      <span className="shrink-0" title={w.workspace_id}>
+                        {(() => {
+                          const wEntry = wsEntryOf(w.workspace_id);
+                          return wEntry ? (
+                            <WsBadge entry={wEntry} />
+                          ) : (
+                            <span className="inline-flex h-5 items-center rounded border border-violet-200 bg-violet-50 px-1.5 font-mono text-[10px] font-semibold text-violet-700">
+                              #{w.workspace_id.slice(0, 8)}
+                            </span>
+                          );
+                        })()}
                       </span>
                     )}
                     <span
@@ -389,7 +406,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
                     </span>
                     <button
                       type="button"
-                      onClick={() => void handleToggleLogs(w.run_id)}
+                      onClick={() => void handleToggleLogs(w.run_id, w.workspace_id)}
                       className={cn(
                         "shrink-0 rounded border px-2 py-0.5 text-[11.5px] hover:bg-muted",
                         logsOpen

@@ -1080,3 +1080,28 @@ class TestCreateSessionOrchestratorWorkspaceE2:
         # W 仍决定 workspace_id / cwd。
         assert s.workspace_id == ws.id
         assert s.cwd == "/e2/explicit-root"
+
+
+async def test_summary_scope_workspaces_enriched(
+    client, auth_headers, db_session, tmp_path
+) -> None:
+    """ql-20260825-003：summary.scope_workspaces 带 id+name（范围徽标名称化）。"""
+    env = await _seed_env(db_session, tmp_path)
+    sid = env["session_id"]
+    missing_id = uuid.uuid4()  # 无 Workspace 行的 scope 条目
+    m = AgentMission(
+        workspace_id=env["backend_ws"].id,
+        session_id=sid,
+        objective="范围名称化",
+        scope_workspace_ids=[str(env["backend_ws"].id), str(missing_id)],
+    )
+    db_session.add(m)
+    await db_session.commit()
+
+    resp = await client.get(f"/api/daemon/sessions/{sid}/team-missions", headers=auth_headers)
+    assert resp.status_code == 200
+    summary = next(x for x in resp.json() if x["mission_id"] == str(m.id))
+    refs = {w["id"]: w["name"] for w in summary["scope_workspaces"]}
+    assert refs[str(env["backend_ws"].id)] == "backend Workspace"
+    # 查无行的条目 name=None（前端回落 #id 徽标）
+    assert refs[str(missing_id)] is None

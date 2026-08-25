@@ -314,3 +314,47 @@ async def test_no_delegate_stays_legacy_path_with_default_branch(
     assert run.worktree_branch is None
     # prompt 既有变体
     assert "worktree 协作约束" in kwargs["prompt"]
+
+
+# ---------------------------------------------------------------------------
+# ql-20260825-003：dispatch 写 run↔workspace 关联行（per-run 日志/产物端点授权依据）
+# ---------------------------------------------------------------------------
+
+
+async def test_dispatch_writes_run_workspace_links(db_session: AsyncSession) -> None:
+    """派发后 run↔workspace 关联行落库（anchor + 显式 target 都关联）。
+
+    缺关联行会让 /api/workspaces/{ws}/agent/runs/{id}/logs 等 per-run 端点
+    （_require_run_workspace 按 AgentRunWorkspace 授权）对分身一律 403。
+    """
+    from sqlalchemy import select as _select
+    from sqlmodel import col as _col
+
+    from app.modules.workspace.model import AgentRunWorkspace
+
+    ws_id, run = await _seed(db_session)
+    delegate = _make_delegate_mock(probe="git")
+    placement = _make_placement()
+    svc = MissionExecutionService(db_session, placement=placement, host_fs_delegate=delegate)
+
+    other_ws = uuid.UUID(int=42)
+    lease_id = await svc.dispatch_worker(
+        run,
+        workspace_id=ws_id,
+        user_id=uuid.uuid4(),
+        read_only=False,
+        target_workspace_id=other_ws,
+    )
+    assert lease_id is not None
+    rows = (
+        (
+            await db_session.execute(
+                _select(AgentRunWorkspace.workspace_id).where(
+                    _col(AgentRunWorkspace.agent_run_id) == run.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert set(rows) == {ws_id, other_ws}
