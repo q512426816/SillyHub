@@ -368,3 +368,17 @@
 根因：P1/P2 落地后子会话在门户平铺混排噪音大且无归属表达，开流上限担忧需闭环。
 方案：AgentSessionRead 加 parent_session_id/tree_depth 自动映射加 gen:types；门户父行附属折叠组（violet 徽标+缩进+选中兜底展开+筛选纪元重置）与孤儿小节兜底；开流审计结论为浮层按需开流上限内无需代码。
 结果：前端全量 200 文件 passed 含 4 新用例、backend 15 passed、ruff 与 mypy 与 tsc 零错、已提交。
+
+## ql-20260826-004-db12 | 2026-08-26 05:49:12 | 子会话系统审计修复 daemon/前端 TOP5
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/session-manager.ts（F1 env 空串 + F3 budget Map 前移）
+- sillyhub-daemon/src/daemon.ts（F4 入口归一化）
+- frontend/src/components/sessions/session-list-panel.tsx（F2+F5+F7 memo/双口径/JSON 加固）
+- 两个测试文件（F1 F3 回归锚 + 3 边界测试）
+需求：子会话系统审计修复 daemon/前端 TOP5
+根因：审计发现闸 env 空串静默失效与 budget Map 泄漏与入口类型未归一化；前端 memo 反模式与分组截断口径缺陷
+方案：F1 trim 回落默认；F3 清理前移；F4 normalizeWorkerDepth 单源；F2 useMemo；F5+F7 双口径分组+JSON 加固；补 5 个回归与边界测试
+结果：daemon interactive 633 passed 与 panel 49 passed 与 daemon tsc 零错，已提交
+审计：⚖️ 归属切分：6 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_page_context_preamble.py, frontend/src/components/daemon/session-panel.tsx, frontend/src/hooks/use-page-session-context.test.ts, frontend/src/hooks/use-page-session-context.ts, frontend/src/stores/floating-session.ts, backend/app/modules/daemon/session/page_docs/_platform_map.md
