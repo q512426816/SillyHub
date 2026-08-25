@@ -261,3 +261,15 @@
 结果：目标文件 26/26 passed，interactive 全量 45 文件 561/561 passed，pnpm typecheck 0 错误
 审计：📝 文档欠账（D-8）：2 个源码文件改动未同步任何模块文档
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/tests/interactive/session-store-persistence.test.ts
+
+## ql-20260825-013-c299 | 2026-08-25 19:17:14 | cancel_lease 对 interactive 会话补发 SESSION_END：按 session 链回捞 lease 修内存僵尸
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/lease_service.py（cancel_lease 新增 _lookup_interactive_lease_by_run 回捞 + by-run miss 后接入）
+- backend/app/modules/daemon/tests/test_cancel_lease_session_end_integration.py（fixture 对齐生产形态（lease agent_run_id=None）+ 新增生产形态回归/终态 lease 守卫 2 用例）
+需求：cancel_lease 对 interactive 会话补发 SESSION_END：按 session 链回捞 lease 修内存僵尸
+根因：interactive lease agent_run_id=NULL（D-005@v1 绑 session 不绑 run），cancel_lease 按 run_id 查 lease 恒 miss → lease-None 早退只翻 DB 不发 SESSION_END；interactive 会话无心跳循环感知不到 cancelled，daemon 内存 SDK 会话成僵尸继续烧 token
+方案：by-run miss 后沿 run.agent_session_id → AgentSession.lease_id 回捞 kind=interactive 且 status∈(claimed,pending) 的 lease 复用主路径（cancelled+terminating_at+SESSION_END）；测试 fixture 改回生产形态（lease_agent_run_id=None，原误写掩盖盲区）+ 新增 2 用例
+结果：目标文件 6/6 passed；回归 61+200 passed（cancel/lease/session_end 相关）；ruff 0 告警；mypy 0 错误
+审计：⚖️ 归属切分：5 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_cancel_lease_session_end_integration.py, frontend/src/components/daemon/runtime-session-helpers.tsx, frontend/src/components/daemon/turn-segment-views.tsx, frontend/src/components/daemon/turn-timeline.tsx, frontend/src/hooks/__tests__/use-message-queue.test.ts

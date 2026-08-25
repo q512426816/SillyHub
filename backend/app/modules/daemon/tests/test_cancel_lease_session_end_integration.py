@@ -104,8 +104,18 @@ async def _create_interactive_run(
     user_id: uuid.UUID,
     *,
     session_status: str = "active",
+    lease_agent_run_id: uuid.UUID | None = None,
+    lease_status: str = "claimed",
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
-    """构造 interactive lease + AgentSession + AgentRun，返回 (lease_id, run_id, sess_id)。"""
+    """构造 interactive lease + AgentSession + AgentRun，返回 (lease_id, run_id, sess_id)。
+
+    P0-2（2026-08-25 team-subsession 路线图）：``lease_agent_run_id`` 默认 None =
+    生产形态（D-005@v1，placement.InteractiveDispatch：interactive lease 建时
+    agent_run_id=NULL，首 turn run_id 只存 lease metadata）——本 helper 原先误写
+    ``agent_run_id=run_id``，与生产相反，掩盖了 cancel_lease by-run 查询对
+    interactive 恒 miss 的 SESSION_END 盲区。显式传 run_id 可构造旧形态对比。
+    ``lease_status`` 供终态 lease 守卫用例。
+    """
     now = datetime.now(UTC)
     run_id = uuid.uuid4()
     sess_id = uuid.uuid4()
@@ -113,8 +123,8 @@ async def _create_interactive_run(
     lease = DaemonTaskLease(
         id=uuid.uuid4(),
         runtime_id=runtime_id,
-        agent_run_id=run_id,
-        status="claimed",
+        agent_run_id=lease_agent_run_id,
+        status=lease_status,
         kind="interactive",
         claimed_at=now,
         lease_expires_at=None,
@@ -316,3 +326,80 @@ class TestCancelLeaseSessionEndIntegration:
 
         session_control_calls = [c for c in captured if c[0] == "session_control"]
         assert len(session_control_calls) == 1
+
+    # ── P0-2（2026-08-25 team-subsession 路线图）：生产 lease 形态回归 ──────────
+    # 生产 interactive lease agent_run_id=NULL（D-005@v1，绑 session 不绑 run），
+    # cancel_lease 的 by-run 查询对 interactive 恒 miss。下方用例锁定：
+    # miss 后按 run.agent_session_id → AgentSession.lease_id 回捞 interactive
+    # lease，SESSION_END 照发（否则 daemon 内存 SDK 会话成僵尸继续烧 token）。
+
+    @pytest.mark.asyncio
+    async def test_cancel_interactive_production_lease_shape_sends_session_end(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """P0-2 回归：lease agent_run_id=None（生产形态）→ 经 session.lease_id
+        回捞后 SESSION_END 照发，lease=cancelled / run=killed / session=ended
+        三态收敛与 by-run 命中路径完全一致。"""
+        from app.modules.daemon.protocol import DAEMON_MSG_SESSION_END
+
+        captured: list = []
+        _patch_hub(monkeypatch, captured)
+
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease_id, run_id, sess_id = await _create_interactive_run(
+            db_session, rt.id, user_id, session_status="active"
+        )
+        # fixture 默认已是生产形态（lease_agent_run_id=None），此处显式断言前提。
+        lease_before = await db_session.get(DaemonTaskLease, lease_id)
+        assert lease_before is not None and lease_before.agent_run_id is None
+
+        svc = DaemonLeaseService(db_session)
+        await svc.cancel_lease(run_id)
+
+        session_control_calls = [c for c in captured if c[0] == "session_control"]
+        assert len(session_control_calls) == 1
+        _kind, _daemon_id, msg_type, payload = session_control_calls[0]
+        assert msg_type == DAEMON_MSG_SESSION_END
+        assert payload["session_id"] == str(sess_id)
+        assert payload["lease_id"] == str(lease_id)
+        assert payload["runtime_id"] == str(rt.id)
+
+        lease = await db_session.get(DaemonTaskLease, lease_id)
+        assert lease is not None and lease.status == "cancelled"
+        assert lease.terminating_at is not None
+        ar = await db_session.get(AgentRun, run_id)
+        assert ar is not None and ar.status == "killed"
+        sess = await db_session.get(AgentSession, sess_id)
+        assert sess is not None and sess.status == "ended"
+
+    @pytest.mark.asyncio
+    async def test_cancel_interactive_terminal_lease_not_resurrected(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """守卫：session 绑定的 lease 已终态（completed）→ 不回捞、不改 lease
+        （终态 lease 不被复活重取消），走 lease-None 早退：run killed / session
+        ended 照常，但不发 SESSION_END（daemon 侧会话已结束，无僵尸可杀）。"""
+        captured: list = []
+        _patch_hub(monkeypatch, captured)
+
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease_id, run_id, sess_id = await _create_interactive_run(
+            db_session, rt.id, user_id, session_status="active", lease_status="completed"
+        )
+
+        svc = DaemonLeaseService(db_session)
+        await svc.cancel_lease(run_id)
+
+        # 无 WS 消息（终态 lease 不发 SESSION_END / LEASE_CANCEL）
+        assert captured == []
+
+        # lease 保持 completed 不被改写
+        lease = await db_session.get(DaemonTaskLease, lease_id)
+        assert lease is not None and lease.status == "completed"
+        # DB 收口照常（早退分支职责）
+        ar = await db_session.get(AgentRun, run_id)
+        assert ar is not None and ar.status == "killed"
+        sess = await db_session.get(AgentSession, sess_id)
+        assert sess is not None and sess.status == "ended"

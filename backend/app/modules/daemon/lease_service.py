@@ -405,6 +405,15 @@ class DaemonLeaseService:
         )
         lease = (await self._session.execute(stmt)).scalars().first()
 
+        # P0-2（2026-08-25 team-subsession 路线图）：interactive lease 绑 session
+        # 不绑 run（D-005@v1，agent_run_id=NULL），by-run 查询对 interactive 恒
+        # miss——原 lease-None 早退只翻 DB 不发 SESSION_END，interactive 会话无
+        # 心跳循环感知不到 cancelled，daemon 内存 SDK 会话成僵尸继续烧 token。
+        # 按 run.agent_session_id → AgentSession.lease_id 回捞活跃 interactive
+        # lease 复用主路径（cancelled + terminating_at + SESSION_END）。
+        if lease is None:
+            lease = await self._lookup_interactive_lease_by_run(agent_run_id)
+
         # task-04 fix（verify e2e 发现）：interactive lease 的 agent_run_id=NULL
         # （D-005@v1 session↔lease 1:1，lease 绑 session 不绑 run），上面 by
         # agent_run_id 查 lease 会查不到（lease None 早返回）。session 收口必须
@@ -599,6 +608,34 @@ class DaemonLeaseService:
             )
 
         return lease
+
+    async def _lookup_interactive_lease_by_run(
+        self, agent_run_id: uuid.UUID
+    ) -> DaemonTaskLease | None:
+        """P0-2：按 run→session→lease 链回捞 interactive lease。
+
+        interactive lease 的 agent_run_id=NULL（D-005@v1 绑 session 不绑 run），
+        cancel_lease 的 by-run 查询对 interactive 恒 miss。本 helper 沿
+        ``run.agent_session_id → AgentSession.lease_id`` 找回该 run 所属会话
+        绑定的 interactive lease（session↔lease 1:1，end_session 同款链路）。
+
+        守卫：仅接受 kind=interactive 且 status ∈ (claimed, pending) 的 lease
+        ——终态（completed/cancelled/…）不复活重取消，非 interactive（batch，
+        batch lease 有 agent_run_id 不会被 by-run miss）不误伤；链上任一环缺失
+        返回 None，调用方走原 lease-None 早退。
+        """
+        run = await self._session.get(AgentRun, agent_run_id)
+        if run is None or run.agent_session_id is None:
+            return None
+        agent_session = await self._session.get(AgentSession, run.agent_session_id)
+        if agent_session is None or agent_session.lease_id is None:
+            return None
+        candidate = await self._session.get(DaemonTaskLease, agent_session.lease_id)
+        if candidate is None or candidate.kind != "interactive":
+            return None
+        if candidate.status not in ("claimed", "pending"):
+            return None
+        return candidate
 
     async def _send_interactive_cancel(self, lease: DaemonTaskLease) -> None:
         """向 daemon 下发 SESSION_END 终止 interactive lease（硬杀链）。
