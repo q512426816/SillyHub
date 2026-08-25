@@ -24,9 +24,12 @@ Governance；无孙树与一层枚举等价，既有断言零改动全过）。
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.agent.control import MissionControlService
@@ -738,6 +741,181 @@ class TestGrandchildGovernance:
 
         assert killed == 1
         assert cancelled_run_ids == [grandchild_turn.id]
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 2026-08-26 审计修复 B 组守护测试（docs/qa/subsession-backend-audit-2026-08-26.md）：
+# F07 治理门一次枚举（查询计数）+ F09 批量完成判定与单源 is_worker_complete 等价。
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+@contextmanager
+def _count_sql(db: AsyncSession) -> Iterator[dict[str, int]]:
+    """统计 db 会话执行期发出的 SQL 条数（before_cursor_execute 事件计数）。"""
+    counter = {"n": 0}
+
+    def _incr(*_args, **_kwargs) -> None:
+        counter["n"] += 1
+
+    engine = db.bind.sync_engine  # AsyncSession.bind → AsyncEngine → sync_engine
+    event.listen(engine, "before_cursor_execute", _incr)
+    try:
+        yield counter
+    finally:
+        event.remove(engine, "before_cursor_execute", _incr)
+
+
+class TestAuditFixGovernanceGateQueryBudget:
+    @pytest.mark.asyncio
+    async def test_can_dispatch_worker_uses_single_enumeration(
+        self, db_session: AsyncSession
+    ) -> None:
+        """F07：治理门一次枚举喂并发 + 预算两闸。
+
+        场景：带预算 mission + 1 个 done 分身（旧实现逐分身 is_worker_complete
+        查询的 N+1 点）+ 1 个 idle 未完成分身 + 1 条存量 running 分身 run。
+
+        查询预算（审计 §A.1/A.4）：新实现恒定 4 条 SQL——
+        non_orchestrator_runs 1 + 树 CTE 1（root 透传省 mission get）+ 批量活跃
+        turn 1 + 子会话轮次成本 SQL SUM 1。旧实现（running_worker_count +
+        cost_so_far 各自 ``_split_worker_forms`` 枚举 + done 分身逐个查询 +
+        子会话轮次 run 全行加载）同场景 ≈ 8+ 条且随 done 分身数线性放大。
+        """
+        root, mission = await _make_root_and_mission(db_session, budget_usd=100.0)
+        w_done = await _make_worker_session(db_session, root, worker_done_at=datetime.now(UTC))
+        await _make_run(
+            db_session,
+            status="completed",
+            mission_id=mission.id,
+            role="impl",
+            agent_session_id=w_done.id,
+            cost=1.5,
+        )
+        w_idle = await _make_worker_session(db_session, root)
+        await _make_run(
+            db_session,
+            status="completed",
+            mission_id=mission.id,
+            role="impl",
+            agent_session_id=w_idle.id,
+        )
+        await _make_run(db_session, status="running", mission_id=mission.id, role="arch", cost=2.0)
+        await db_session.refresh(mission)
+
+        ctrl = MissionControlService(db_session)
+        with _count_sql(db_session) as counter:
+            allowed, reason = await ctrl.can_dispatch_worker(mission)
+        assert (allowed, reason) == (True, "ok")
+        assert counter["n"] == 4, f"治理门应恒定 4 条 SQL，实际 {counter['n']}"
+
+        # 预算拦截路径同预算（SUM 口径正确性由既有 cost 断言覆盖）。
+        mission.budget_usd = 3.0
+        db_session.add(mission)
+        await db_session.commit()
+        with _count_sql(db_session) as counter:
+            allowed, reason = await ctrl.can_dispatch_worker(mission)
+        assert (allowed, reason) == (False, "budget_exceeded")
+        assert counter["n"] == 4
+
+    @pytest.mark.asyncio
+    async def test_cost_so_far_union_sum_unchanged_with_followup_turns(
+        self, db_session: AsyncSession
+    ) -> None:
+        """F07 SUM 化行为等价：存量 run 成本 + 子会话首 run + 追问轮 run 合计
+        （SQL SUM 与旧全行加载求和同值；主控轮不计入）。"""
+        root, mission = await _make_root_and_mission(db_session)
+        w = await _make_worker_session(db_session, root)
+        await _make_run(
+            db_session,
+            status="completed",
+            mission_id=mission.id,
+            role="impl",
+            agent_session_id=w.id,
+            cost=1.0,
+        )
+        await _make_run(db_session, status="completed", agent_session_id=w.id, cost=2.0)
+        await _make_run(
+            db_session, status="running", mission_id=mission.id, role="orchestrator", cost=99.0
+        )
+        await _make_run(db_session, status="running", mission_id=mission.id, role=None, cost=0.5)
+
+        cost = await MissionControlService(db_session).cost_so_far(mission.id)
+        assert cost == pytest.approx(3.5)  # 1.0 + 2.0 + 0.5（存量 NULL role 分身）
+
+
+class TestAuditFixBatchCompletionEquivalence:
+    @pytest.mark.asyncio
+    async def test_batch_completion_matches_single_source_verdicts(
+        self, db_session: AsyncSession
+    ) -> None:
+        """F09 守护：``is_worker_complete_from_active``（批量纯函数）与
+        ``mission.is_worker_complete``（§5.C.3 单一真相源）逐分支等价。
+
+        覆盖六形态：done 且无活跃 turn / done 但追问轮活跃 / idle 未 done /
+        会话 failed / 会话 ended / 存量 batch run（completed·running·pending）。
+        mission.py 归审计 A 组并行修复——本守护测试防两套判据漂移。
+        """
+        from app.modules.agent.control import (
+            is_worker_complete_from_active,
+            sessions_with_active_turns,
+        )
+        from app.modules.agent.mission import is_worker_complete
+
+        root, mission = await _make_root_and_mission(db_session)
+        w_done = await _make_worker_session(db_session, root, worker_done_at=datetime.now(UTC))
+        await _make_run(
+            db_session,
+            status="completed",
+            mission_id=mission.id,
+            role="impl",
+            agent_session_id=w_done.id,
+        )
+        w_done_active = await _make_worker_session(
+            db_session, root, worker_done_at=datetime.now(UTC)
+        )
+        await _make_run(
+            db_session,
+            status="completed",
+            mission_id=mission.id,
+            role="impl",
+            agent_session_id=w_done_active.id,
+        )
+        await _make_run(db_session, status="running", agent_session_id=w_done_active.id)
+        w_idle = await _make_worker_session(db_session, root)
+        await _make_run(
+            db_session,
+            status="completed",
+            mission_id=mission.id,
+            role="impl",
+            agent_session_id=w_idle.id,
+        )
+        w_failed = await _make_worker_session(db_session, root, status="failed")
+        w_ended = await _make_worker_session(db_session, root, status="ended")
+        r_completed = await _make_run(
+            db_session, status="completed", mission_id=mission.id, role="arch"
+        )
+        r_running = await _make_run(
+            db_session, status="running", mission_id=mission.id, role="arch"
+        )
+        r_pending = await _make_run(
+            db_session, status="pending", mission_id=mission.id, role="arch"
+        )
+
+        sessions = [w_done, w_done_active, w_idle, w_failed, w_ended]
+        active_ids = await sessions_with_active_turns(db_session, [s.id for s in sessions])
+        for w in sessions:
+            assert await is_worker_complete(db_session, w) == is_worker_complete_from_active(
+                w, active_ids
+            ), f"子会话 {w.id} 批量判定与单源不一致"
+        for r in (r_completed, r_running, r_pending):
+            assert await is_worker_complete(db_session, r) == is_worker_complete_from_active(
+                r, active_ids
+            ), f"存量 run {r.id} 批量判定与单源不一致"
+
+        # 与计数口径的联动：done 无活跃轮 / failed / ended 三分身不占并发额度；
+        # 占额度的 = done 但追问轮活跃 + idle 未完成（子会话侧 2）+ 存量 running
+        # 分身 run（role=arch，1）→ 共 3（r_pending 不占 running 档，D-008）。
+        assert await MissionControlService(db_session).running_worker_count(mission.id) == 3
 
 
 if __name__ == "__main__":

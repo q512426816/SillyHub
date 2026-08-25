@@ -163,18 +163,29 @@ def _isolate_glm(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class _FakeRedis:
-    """记录操作序列的 Redis 假体（SETNX / DELETE），唤醒幂等键断言用。"""
+    """记录操作序列的 Redis 假体（SETNX / GET / SET 覆盖），唤醒幂等键断言用。
+
+    2026-08-26 审计 F04：唤醒幂等从「DEL → SETNX」改「SETNX + 新波时间戳比较
+    （GET 后严格大于才 SET 覆盖）」——假体提供 get 与无 nx 的 set（记录为
+    ``set_overwrite``），键值即时间戳字符串。
+    """
 
     def __init__(self) -> None:
         self.store: dict[str, str] = {}
         self.ops: list[tuple[str, str]] = []
 
     async def set(self, key, val, nx=None, ex=None):
-        self.ops.append(("set_nx", key))
-        if nx and key in self.store:
-            return None
+        if nx:
+            self.ops.append(("set_nx", key))
+            if key in self.store:
+                return None
+        else:
+            self.ops.append(("set_overwrite", key))
         self.store[key] = val
         return True
+
+    async def get(self, key):
+        return self.store.get(key)
 
     async def delete(self, *keys):
         for key in keys:
@@ -387,7 +398,10 @@ class TestWorkerSubsessionLifecycle:
         assert r2.json()["orchestrator_notified"] is True
         notify_key = f"mission:workers_done_notified:{mission.id}"
         assert fake_redis.ops.count(("set_nx", notify_key)) == 2
-        assert ("delete", notify_key) in fake_redis.ops
+        # 2026-08-26 审计 F04：新波（二轮 done_at 严格更大）经时间戳比较覆盖重投
+        # ——无 DEL，第二次 SETNX 失败后 GET 比较 + SET 覆盖。
+        assert ("delete", notify_key) not in fake_redis.ops
+        assert fake_redis.ops.count(("set_overwrite", notify_key)) == 1
         assert len(injected) == 2
         await db_session.refresh(sub)
         assert (

@@ -9,15 +9,18 @@ design §5.C.2 / FR-04 / D-002@v1——分身显式完成信号（分身受限 M
   可读（零新查询路径）；
 - 最后完成分身触发恰好一次主控唤醒（is_worker_complete 单源全完成判定）；
 - 追问重开工（新轮 run 无 mission_id）后再次 worker_done——worker_done_at
-  刷新、唤醒幂等键经 DEL 后 SETNX 可再次触发（重复完成周期，D-002@v1）；
+  刷新、唤醒幂等键经时间戳比较（新波 done_at 严格大于键值 → 覆盖重投）可
+  再次触发（重复完成周期，D-002@v1；2026-08-26 审计 F04：替代旧 DEL→SETNX
+  两步非原子，同波双完成不再双注入主控）；
 - 迟到调用（mission 已 converged/cancelled）409 且零写入零唤醒；
 - 存量 mission（batch run 形态，无子会话）既有端点与收敛行为零回归（FR-09）。
 """
 
 from __future__ import annotations
 
+import asyncio
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -110,18 +113,29 @@ async def _add_run(
 
 
 class _FakeRedis:
-    """记录操作序列的 Redis 假体（SETNX / DELETE），断言 DEL→SETNX 顺序用。"""
+    """记录操作序列的 Redis 假体（SETNX / GET / SET 覆盖），断言时间戳比较唤醒序用。
+
+    2026-08-26 审计 F04：唤醒幂等从「DEL → SETNX」改「SETNX + 新波时间戳比较
+    （GET 后严格大于才 SET 覆盖）」——假体随之提供 get 与无 nx 的 set（记录为
+    ``set_overwrite``），键值即时间戳字符串（notify 内统一格式）。
+    """
 
     def __init__(self) -> None:
         self.store: dict[str, str] = {}
         self.ops: list[tuple[str, str]] = []
 
     async def set(self, key, val, nx=None, ex=None):
-        self.ops.append(("set_nx", key))
-        if nx and key in self.store:
-            return None
+        if nx:
+            self.ops.append(("set_nx", key))
+            if key in self.store:
+                return None
+        else:
+            self.ops.append(("set_overwrite", key))
         self.store[key] = val
         return True
+
+    async def get(self, key):
+        return self.store.get(key)
 
     async def delete(self, *keys):
         for key in keys:
@@ -302,17 +316,19 @@ class TestWorkerDoneSetsFlagAndSummary:
         assert len(arts) == 1
 
 
-# ── 2. 追问重开工 → 重复完成周期（DEL 后 SETNX 再唤醒）──────────────────────
+# ── 2. 追问重开工 → 重复完成周期（时间戳比较新波覆盖重投）───────────────────
 
 
 class TestRepeatedCompletionCycle:
     @pytest.mark.asyncio
-    async def test_rework_cycle_refreshes_and_renotifies_via_del_then_setnx(
+    async def test_rework_cycle_refreshes_and_renotifies_via_timestamp_compare(
         self, client, db_session, auth_headers, notify_env
     ) -> None:
         """重复完成周期：done → 追问重开工（新轮 run 无 mission_id）→ 干完再
-        worker_done——done_at 刷新、唤醒键先 DEL 再 SETNX 二次唤醒主控。
+        worker_done——done_at 刷新、唤醒键值（时间戳）被新波覆盖后二次唤醒主控。
 
+        2026-08-26 审计 F04：幂等机制从「DEL → SETNX」改「SETNX + 新波时间戳
+        比较」——新波 done_at 严格大于键内时间戳 → SET 覆盖重投；无 DEL。
         header-only 路由（``POST /api/missions/worker_done``）覆盖。
         """
         fake_redis, injected = notify_env
@@ -326,7 +342,7 @@ class TestRepeatedCompletionCycle:
             role="impl",
         )
 
-        # 第一轮完成 → 唤醒 #1（SETNX 抢到）
+        # 第一轮完成 → 唤醒 #1（SETNX 抢到，键值=本波 done_at 时间戳）
         r1 = await client.post(
             "/api/missions/worker_done",
             json={"summary": "round 1 done"},
@@ -344,7 +360,7 @@ class TestRepeatedCompletionCycle:
         db_session.add(followup)
         await db_session.commit()
 
-        # 重开工干完（turn 终态）→ 再次 worker_done → 刷新 + DEL 后 SETNX 再唤醒
+        # 重开工干完（turn 终态）→ 再次 worker_done → 刷新 + 时间戳覆盖再唤醒
         r2 = await client.post(
             "/api/missions/worker_done",
             json={"summary": "round 2 done"},
@@ -357,19 +373,17 @@ class TestRepeatedCompletionCycle:
         done_at_2 = datetime.fromisoformat(body["worker_done_at"])
         assert done_at_2 > done_at_1, "worker_done_at 应刷新为更新的时间"
 
-        # 唤醒 #2 经 DEL → SETNX（键被删后重新抢占）
+        # 唤醒 #2 经 SETNX 失败 → GET 比较（新波 done_at 更大）→ SET 覆盖；无 DEL
         assert len(injected) == 2
+        key = f"mission:workers_done_notified:{mission.id}"
         ops = fake_redis.ops
-        assert ops.count(("set_nx", f"mission:workers_done_notified:{mission.id}")) == 2
-        assert ("delete", f"mission:workers_done_notified:{mission.id}") in ops
-        # 第二次 set_nx 之前必须先 delete（DEL 重置后 SETNX 才能再次抢占）
-        last_set_idx = (
-            len(ops)
-            - 1
-            - ops[::-1].index(("set_nx", f"mission:workers_done_notified:{mission.id}"))
-        )
-        first_del_idx = ops.index(("delete", f"mission:workers_done_notified:{mission.id}"))
-        assert first_del_idx < last_set_idx
+        assert ops.count(("set_nx", key)) == 2  # 两波各一次 SETNX 尝试
+        assert ops.count(("set_overwrite", key)) == 1  # 第二波覆盖重投
+        assert ("delete", key) not in ops  # F04：不再 DEL
+        # 键值即时间戳（可比较），且第二波覆盖后为更大值
+        assert float(fake_redis.store[key]) > done_at_1.timestamp() - 1
+        # 覆盖发生在第二波 set_nx 之后（SETNX 失败才比较覆盖）
+        assert ops.index(("set_overwrite", key)) > ops.index(("set_nx", key))
 
         # summary 两轮各落一条（均挂首 run）
         first_run_id = uuid.UUID(body["run_id"])
@@ -595,6 +609,79 @@ class TestLegacyBatchFormRegression:
         assert resp.status_code == 404, resp.text
         await db_session.refresh(worker)
         assert worker.worker_done_at is None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 2026-08-26 审计修复 F04 守护测试（docs/qa/subsession-backend-audit-2026-08-26.md
+# §A.5-1）：同波双完成竞态——两个「最后完成」分身并发（各自 all_done 判定都过、
+# 都是新信号）时，二者算得的 signal_at（本波 done_at 最大值）必然相同（任一
+# 判定方都必须读到对方已提交的 done_at）→ notify 侧时间戳比较（相等不覆盖）
+# 恰好一次注入；旧「DEL → SETNX」两步非原子会双双成功 → 主控双唤醒。
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestSameWaveDoubleSignalRace:
+    @pytest.mark.asyncio
+    async def test_same_wave_equal_signals_inject_exactly_once(
+        self, db_session, notify_env
+    ) -> None:
+        """同波等 signal_at 双触发 → 恰好一次注入（时间戳比较相等不覆盖）。"""
+        _fake_redis, injected = notify_env
+        from app.modules.agent.mission_context import notify_orchestrator_workers_done
+
+        mission_id = uuid.uuid4()
+        root_id = uuid.uuid4()
+        signal = datetime.now(UTC)
+        results = await asyncio.gather(
+            notify_orchestrator_workers_done(
+                mission_id, root_id, completed=2, failed=0, signal_at=signal
+            ),
+            notify_orchestrator_workers_done(
+                mission_id, root_id, completed=2, failed=0, signal_at=signal
+            ),
+        )
+        assert results.count(True) == 1, f"同波双信号只允许一次注入，实际 {results}"
+        assert len(injected) == 1
+
+        # 相同 signal_at 的第三次触发（迟到的并发副本）仍被挡。
+        again = await notify_orchestrator_workers_done(
+            mission_id, root_id, completed=2, failed=0, signal_at=signal
+        )
+        assert again is False
+        assert len(injected) == 1
+
+    @pytest.mark.asyncio
+    async def test_newer_signal_wave_renotifies(self, db_session, notify_env) -> None:
+        """重开工新波（signal_at 严格更大）→ 覆盖键值重投；兜底触发（无
+        signal_at）维持 SETNX「至多一次」。"""
+        fake_redis, injected = notify_env
+        from app.modules.agent.mission_context import notify_orchestrator_workers_done
+
+        mission_id = uuid.uuid4()
+        root_id = uuid.uuid4()
+        wave1 = datetime.now(UTC)
+        assert (
+            await notify_orchestrator_workers_done(
+                mission_id, root_id, completed=1, failed=0, signal_at=wave1
+            )
+            is True
+        )
+        # 兜底触发（patrol / lease 钩子形态，无 signal_at）：键已占 → False。
+        assert (
+            await notify_orchestrator_workers_done(mission_id, root_id, completed=1, failed=0)
+            is False
+        )
+        # 新波 done_at 严格大于键内时间戳 → 覆盖重投。
+        wave2 = wave1 + timedelta(seconds=30)
+        assert (
+            await notify_orchestrator_workers_done(
+                mission_id, root_id, completed=1, failed=0, signal_at=wave2
+            )
+            is True
+        )
+        assert len(injected) == 2
+        key = f"mission:workers_done_notified:{mission_id}"
+        assert float(fake_redis.store[key]) == pytest.approx(wave2.timestamp(), abs=1e-3)
 
 
 if __name__ == "__main__":

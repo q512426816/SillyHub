@@ -583,6 +583,81 @@ class TestWorktreeFailure:
 
 
 # ---------------------------------------------------------------------------
+# 2026-08-26 审计修复 F06（docs/qa/subsession-backend-audit-2026-08-26.md §A.9）：
+# commit#1 之后的元数据合并 / 绑定回填 / 末次 commit 段异常 → 收敛终态，
+# 不残留「pending session + run 无 lease」半孤儿。
+# ---------------------------------------------------------------------------
+
+
+class TestDispatchFinalizeFailure:
+    @pytest.mark.asyncio
+    async def test_finalize_exception_converges_terminal_no_half_orphan(
+        self, client, db_session, auth_headers, monkeypatch
+    ) -> None:
+        """``_merge_lease_metadata`` 抛异常（commit#1 之后）→ rollback 掉未提交
+        lease/metadata 后按 ``_fail_worker_subsession`` 收敛：run failed
+        （dispatch_finalize_exception）+ session failed 终态，无 lease 行、无首
+        prompt user_input 日志行——不占 MAX_WORKERS、不阻塞 converge。"""
+        import app.modules.daemon.session.service as _lease_svc_mod
+
+        async def _boom(*_args, **_kwargs):
+            raise RuntimeError("lease metadata merge exploded")
+
+        monkeypatch.setattr(_lease_svc_mod, "_merge_lease_metadata", _boom)
+        ws, main_session, mission, _owner, _rt = await _seed_context(db_session)
+        _mock_worktree_delegate(monkeypatch)
+        _mock_wake_delivered(monkeypatch)
+
+        resp = await client.post(
+            f"/api/workspaces/{ws.id}/missions/{mission.id}/dispatch_worker",
+            json={"objective": "o", "role": "arch"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        data = resp.json()
+        assert data["status"] == "failed"
+        assert data["error_code"] == "dispatch_finalize_exception"
+
+        # 首 run：failed 终态 + error_code + finished_at（不残留 pending 占额度）
+        runs = await _worker_runs(db_session, mission.id)
+        assert len(runs) == 1
+        run = runs[0]
+        assert run.status == "failed"
+        assert run.error_code == "dispatch_finalize_exception"
+        assert run.finished_at is not None
+
+        # 子会话：failed + ended_at（不残留活跃/待定态）
+        sub_sessions = (
+            (
+                await db_session.execute(
+                    select(AgentSession).where(AgentSession.parent_session_id == main_session.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(sub_sessions) == 1
+        assert sub_sessions[0].status == "failed"
+        assert sub_sessions[0].ended_at is not None
+        assert sub_sessions[0].lease_id is None
+
+        # lease（flush-only 未提交）随 rollback 消失——无「pending 无 lease」孤儿
+        assert (await db_session.execute(select(DaemonTaskLease))).scalars().first() is None
+
+        # 首 prompt 的 user_input 日志行未提交（无残留半成品）
+        from app.modules.agent.model import AgentRunLog
+
+        assert (
+            await db_session.execute(select(AgentRunLog).where(AgentRunLog.run_id == run.id))
+        ).scalars().first() is None
+
+        # mission 不崩（仍活跃未收敛），可继续派发
+        await db_session.refresh(mission)
+        assert mission.converged_at is None
+        assert mission.cancelled_at is None
+
+
+# ---------------------------------------------------------------------------
 # runtime 解析：anchor 自有优先 / 跨 ws 代表钉定
 # ---------------------------------------------------------------------------
 

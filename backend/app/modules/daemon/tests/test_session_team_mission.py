@@ -20,10 +20,12 @@ from __future__ import annotations
 
 import inspect
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from app.modules.agent.model import AgentMission, AgentRun, AgentRunLog, AgentSession
 from app.modules.daemon.model import DaemonTaskLease
@@ -1145,6 +1147,210 @@ async def _t08_seed_worker_first_run(
     db_session.add(r)
     await db_session.commit()
     return r
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 2026-08-26 审计修复 F03 守护测试（docs/qa/subsession-backend-audit-2026-08-26.md
+# §A.3）：_team_mission_summary 批量化——查询预算（≈14+Nd → ~6）+ status 口径
+# 与 mission_derive_status 等价（本地展开防 A 组 mission.py 漂移）。
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+@contextmanager
+def _count_sql(session) -> Iterator[dict[str, int]]:
+    """统计会话执行期发出的 SQL 条数（before_cursor_execute 事件计数）。"""
+    counter = {"n": 0}
+
+    def _incr(*_args, **_kwargs) -> None:
+        counter["n"] += 1
+
+    engine = session.bind.sync_engine
+    event.listen(engine, "before_cursor_execute", _incr)
+    try:
+        yield counter
+    finally:
+        event.remove(engine, "before_cursor_execute", _incr)
+
+
+async def _f03_seed_mission(db_session, sid: uuid.UUID, ws_id: uuid.UUID) -> AgentMission:
+    m = AgentMission(
+        workspace_id=ws_id,
+        session_id=sid,
+        objective="F03 批量化",
+        scope_workspace_ids=[str(ws_id)],
+    )
+    db_session.add(m)
+    await db_session.commit()
+    return m
+
+
+class TestTeamMissionSummaryQueryBudget:
+    async def test_summary_query_count_bounded(
+        self, db_session, tmp_path, auth_admin_token
+    ) -> None:
+        """单 mission 查询预算 ≤6（旧 ≈14+Nd：三口径各自枚举 + mission 行重复
+        get 4 次 + done 分身逐个查询）。
+
+        场景：1 个 done 分身（旧 Nd=1）+ 1 个 idle 分身——新实现 6 条恒定：
+        全量 run 1 + 全树 1 + 批量活跃 turn 1 + 根会话 get（identity map 命中
+        则免，这里播种后同会话命中 → 0）+ 首 run 批查 1 + scope 名称 1。
+        """
+        from app.modules.daemon.router import _team_mission_summary
+
+        env = await _seed_env(db_session, tmp_path)
+        sid = env["session_id"]
+        ws_id = env["backend_ws"].id
+        m = await _f03_seed_mission(db_session, sid, ws_id)
+
+        w1 = await _t08_seed_worker_session(db_session, sid)
+        w1.worker_done_at = datetime.now(UTC)
+        db_session.add(w1)
+        await _t08_seed_worker_first_run(db_session, m, w1)
+        w2 = await _t08_seed_worker_session(db_session, sid)
+        await _t08_seed_worker_first_run(db_session, m, w2)
+        await db_session.commit()
+
+        mission = (
+            (await db_session.execute(select(AgentMission).where(AgentMission.id == m.id)))
+            .scalars()
+            .one()
+        )
+        with _count_sql(db_session) as counter:
+            summary = await _team_mission_summary(db_session, mission)
+        assert counter["n"] <= 6, f"summary 查询应 ≤6 条，实际 {counter['n']}"
+        # 行为不变：一层两行、done 分身 completed、idle 分身 running。
+        by_sub = {str(w.sub_session_id): w.status for w in summary.workers}
+        assert by_sub == {str(w1.id): "completed", str(w2.id): "running"}
+
+
+class TestTeamMissionSummaryDeriveEquivalence:
+    """F03 等价守护：summary 的本地 derive 展开与 mission.mission_derive_status
+    同数据同结果（mission.py 归审计 A 组并行修复，本测试防两套口径漂移）。"""
+
+    async def _summary_status(self, db_session, mission_id) -> str:
+        from app.modules.daemon.router import _team_mission_summary
+
+        mission = (
+            (await db_session.execute(select(AgentMission).where(AgentMission.id == mission_id)))
+            .scalars()
+            .one()
+        )
+        return (await _team_mission_summary(db_session, mission)).status
+
+    async def _derive_status(self, db_session, mission_id) -> str:
+        from app.modules.agent.mission import mission_derive_status
+
+        return await mission_derive_status(db_session, mission_id)
+
+    async def test_status_shapes_equivalent(self, db_session, tmp_path, auth_admin_token) -> None:
+        from app.modules.agent.mission import (
+            BUDGET_FORCE_ENDED_AT_KEY,
+            WORKER_FORCE_ENDED_AT_KEY,
+        )
+
+        env = await _seed_env(db_session, tmp_path)
+        sid = env["session_id"]
+        ws_id = env["backend_ws"].id
+
+        # 形态 1：idle 未 done 分身 → running
+        m1 = await _f03_seed_mission(db_session, sid, ws_id)
+        w = await _t08_seed_worker_session(db_session, sid)
+        await _t08_seed_worker_first_run(db_session, m1, w)
+        assert await self._summary_status(db_session, m1.id) == "running"
+        assert await self._summary_status(db_session, m1.id) == await self._derive_status(
+            db_session, m1.id
+        )
+
+        # 形态 2：全 done 未收敛、根无活跃 turn → awaiting_input
+        w.worker_done_at = datetime.now(UTC)
+        db_session.add(w)
+        await db_session.commit()
+        assert await self._summary_status(db_session, m1.id) == "awaiting_input"
+        assert await self._summary_status(db_session, m1.id) == await self._derive_status(
+            db_session, m1.id
+        )
+
+        # 形态 3：一成一败（预算强收 ended 未 done）→ degraded
+        # （R-07 单活跃约束：同会话下一场前先终态化上一场）
+        m1.converged_at = datetime.now(UTC)
+        db_session.add(m1)
+        await db_session.commit()
+        m2 = await _f03_seed_mission(db_session, sid, ws_id)
+        m2.constraints = {BUDGET_FORCE_ENDED_AT_KEY: datetime.now(UTC).isoformat()}
+        db_session.add(m2)
+        w_ok = await _t08_seed_worker_session(db_session, sid)
+        w_ok.worker_done_at = datetime.now(UTC)
+        db_session.add(w_ok)
+        await _t08_seed_worker_first_run(db_session, m2, w_ok)
+        w_dead = await _t08_seed_worker_session(db_session, sid)
+        w_dead.status = "ended"
+        db_session.add(w_dead)
+        await _t08_seed_worker_first_run(db_session, m2, w_dead)
+        # 会话 mission 全终态但未收敛时 awaiting_input 先于 degraded（derive
+        # 判据矩阵序）——收敛后落 degraded。
+        assert await self._summary_status(db_session, m2.id) == "awaiting_input"
+        assert await self._summary_status(db_session, m2.id) == await self._derive_status(
+            db_session, m2.id
+        )
+        m2.converged_at = datetime.now(UTC)
+        db_session.add(m2)
+        await db_session.commit()
+        assert await self._summary_status(db_session, m2.id) == "degraded"
+        assert await self._summary_status(db_session, m2.id) == await self._derive_status(
+            db_session, m2.id
+        )
+
+        # 形态 3b：worker_force_ended_at 标记（审计 F01，与 budget 标记同象）——
+        # ended 未 done 分身映射 failed，收敛后 degraded。
+        m2b = await _f03_seed_mission(db_session, sid, ws_id)
+        m2b.constraints = {WORKER_FORCE_ENDED_AT_KEY: datetime.now(UTC).isoformat()}
+        db_session.add(m2b)
+        w_ok2 = await _t08_seed_worker_session(db_session, sid)
+        w_ok2.worker_done_at = datetime.now(UTC)
+        db_session.add(w_ok2)
+        await _t08_seed_worker_first_run(db_session, m2b, w_ok2)
+        w_dead2 = await _t08_seed_worker_session(db_session, sid)
+        w_dead2.status = "ended"
+        db_session.add(w_dead2)
+        await _t08_seed_worker_first_run(db_session, m2b, w_dead2)
+        m2b.converged_at = datetime.now(UTC)
+        db_session.add(m2b)
+        await db_session.commit()
+        assert await self._summary_status(db_session, m2b.id) == "degraded"
+        assert await self._summary_status(db_session, m2b.id) == await self._derive_status(
+            db_session, m2b.id
+        )
+
+        # 形态 4：无分身 run 的空 mission → planning；主控轮活跃 → running。
+        # （新根会话——树枚举按根挂载，同根旧 mission 的子会话会进新 mission 的
+        # 树口径（治理枚举按会话树不按 mission 归属），换根隔离形态。）
+        sid4 = uuid.uuid4()
+        db_session.add(
+            AgentSession(
+                id=sid4,
+                user_id=(await _admin_id(db_session)),
+                provider="claude",
+                status="active",
+                workspace_id=ws_id,
+            )
+        )
+        await db_session.commit()
+        m3 = await _f03_seed_mission(db_session, sid4, ws_id)
+        assert await self._summary_status(db_session, m3.id) == "planning"
+        db_session.add(
+            AgentRun(
+                mission_id=m3.id,
+                agent_type="claude_code",
+                status="running",
+                role="orchestrator",
+                objective="主控轮",
+            )
+        )
+        await db_session.commit()
+        assert await self._summary_status(db_session, m3.id) == "running"
+        assert await self._summary_status(db_session, m3.id) == await self._derive_status(
+            db_session, m3.id
+        )
 
 
 async def test_summary_sub_workers_count_folded(client, auth_headers, db_session, tmp_path) -> None:

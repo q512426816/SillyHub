@@ -33,6 +33,7 @@ ACTIVE_RUN_STATUSES`` 的会话活跃轮口径（含 pending_approval、不含 c
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -258,7 +259,8 @@ def build_worker_briefing(
 # 语义：主控派发分身后应结束本轮等待；全部分身进入终态时由平台注入一条系统
 # 通知轮唤醒主控去读产出/收敛，取代主控在单轮内反复调 list_workers 烧 token。
 # 双触发点（lease complete_lease 即时 + patrol awaiting_input 巡检兜底）共用本
-# 助手；Redis SETNX 幂等（每 mission 至多通知一次），投递失败不抛不重试风暴。
+# 助手；Redis 幂等（每完成波次至多通知一次，见下方 F04 注释），投递失败不抛
+# 不重试风暴。
 
 _WORKERS_DONE_NOTIFY_TTL_SECONDS = 6 * 3600
 _WORKERS_DONE_NOTIFY_KEY = "mission:workers_done_notified:{mission_id}"
@@ -285,11 +287,18 @@ async def workers_all_terminal_with_stats(
     终态」唤醒主控（孙层分身计入成败统计；legacy 剔除口径随枚举自动覆盖
     孙层轮次 run）。无孙树与一层枚举等价（FR-08 零回归）。
 
+    2026-08-26 审计 F09：逐分身 ``is_worker_complete`` 判定批量化——一次
+    批量活跃 turn 查询 + ``control.is_worker_complete_from_active`` 纯函数
+    （判据等价，test_worker_subsession_control 守护测试锁定）。
+
     纯查询：经传入 session 读取（lease 调用方在自身事务内可见本轮未提交的
     终态翻转——即时通知不漏当轮完成事件）。
     """
-    from app.modules.agent.control import MissionControlService
-    from app.modules.agent.mission import is_worker_complete
+    from app.modules.agent.control import (
+        MissionControlService,
+        is_worker_complete_from_active,
+        sessions_with_active_turns,
+    )
     from app.modules.agent.model import mission_worker_sessions_tree
 
     worker_sessions = await mission_worker_sessions_tree(db, mission.id)
@@ -303,7 +312,8 @@ async def workers_all_terminal_with_stats(
     if not workers:
         # planning 空集=未全完成（语义保留）。
         return False, 0, 0
-    if not all([await is_worker_complete(db, w) for w in workers]):
+    active_ids = await sessions_with_active_turns(db, list(worker_session_ids))
+    if not all(is_worker_complete_from_active(w, active_ids) for w in workers):
         return False, 0, 0
     ok = sum(
         1
@@ -315,20 +325,44 @@ async def workers_all_terminal_with_stats(
     return True, ok, len(workers) - ok
 
 
+# ── 2026-08-26 审计 F04（docs/qa/subsession-backend-audit-2026-08-26.md §A.5-1）──
+# 唤醒幂等键的值从固定 "1" 改为「时间戳」：worker_done 显式信号路径携带
+# ``signal_at``（本波全部已完成分身的 ``worker_done_at`` 最大值），SETNX 抢占
+# 失败后比较「signal_at > 键内时间戳」才覆盖重投——同波两个「最后完成」分身
+# 并发（各自 all_done 判定都过）时，二者算得的 max(done_at) 必然相同（任一
+# 判定方都必须读到对方已提交的 done_at），后者比较相等不覆盖 → 恰好一次注入；
+# 旧的「DEL → SETNX」两步非原子，同波可双双成功造成主控双唤醒（烧 token /
+# 可能双 converge）。重复完成周期（重开工后再 done）的 done_at 严格大于上一
+# 波键值 → 覆盖重投，语义保留（不再需要 DEL 重置，`clear_workers_done_notify_key`
+# 随之移除）。兜底触发（patrol / lease 钩子）不携带 signal_at，维持纯 SETNX
+# 「至多一次」语义（键值同样落时间戳，供后续显式信号比较）。
+
+
+def _notify_ts_value(signal_at: datetime | None) -> str:
+    """唤醒键值统一格式（unix 秒，微秒精度字符串）。"""
+    return f"{(signal_at or datetime.now(UTC)).timestamp():.6f}"
+
+
 async def notify_orchestrator_workers_done(
     mission_id: uuid.UUID,
     session_id: uuid.UUID,
     *,
     completed: int,
     failed: int,
+    signal_at: datetime | None = None,
 ) -> bool:
     """向主控会话注入「分身全部完成」系统通知（幂等，独立事务，失败只记日志）。
 
-    Redis SETNX 抢占 ``_WORKERS_DONE_NOTIFY_KEY``（TTL 6h）——双触发点并发 /
-    patrol 兜底重入至多投递一次；抢不到返回 False（已通知过）。注入走
-    ``inject_session_as_service``（独立 session 工厂，不搭调用方事务）：turn
-    冲突（主控轮仍在跑）/ 会话非活跃等 AppError 视为主控自会收敛，记 info
-    不视为失败、不释放锁。返回 True = 通知轮已派发。
+    Redis 抢占 ``_WORKERS_DONE_NOTIFY_KEY``（TTL 6h，键值=时间戳，见模块头
+    F04 注释）——双触发点并发 / patrol 兜底重入至多投递一次；抢不到返回 False
+    （已通知过）。注入走 ``inject_session_as_service``（独立 session 工厂，
+    不搭调用方事务）：turn 冲突（主控轮仍在跑）/ 会话非活跃等 AppError 视为
+    主控自会收敛，记 info 不视为失败、不释放锁。返回 True = 通知轮已派发。
+
+    ``signal_at``（F04，worker_done 显式信号路径专用）：本波完成信号时间戳
+    （分身 ``worker_done_at`` 的最大值）。携带时 SETNX 失败还会做「新波比较」
+    ——仅当严格大于键内时间戳（新完成波）才覆盖重投；缺省（patrol / lease
+    兜底触发）纯 SETNX「至多一次」。
 
     ⚠️ 本方法内部自开事务（get_session_factory），调用方事务状态无关——
     判定请先用 :func:`workers_all_terminal_with_stats`（调用方事务内）完成。
@@ -338,14 +372,28 @@ async def notify_orchestrator_workers_done(
     from app.core.redis import get_redis
     from app.modules.daemon.session.service import SessionService
 
+    key = _WORKERS_DONE_NOTIFY_KEY.format(mission_id=mission_id)
+    ts_value = _notify_ts_value(signal_at)
     try:
         redis = get_redis()
-        acquired = await redis.set(
-            _WORKERS_DONE_NOTIFY_KEY.format(mission_id=mission_id),
-            "1",
-            nx=True,
-            ex=_WORKERS_DONE_NOTIFY_TTL_SECONDS,
-        )
+        acquired = await redis.set(key, ts_value, nx=True, ex=_WORKERS_DONE_NOTIFY_TTL_SECONDS)
+        if not acquired and signal_at is not None:
+            # F04 新波比较：键内时间戳 < 本次信号时间戳（重复完成周期——重开工后
+            # 新 done 严格晚于上一波）才覆盖重投；同波并发双触发算得的 max(done_at)
+            # 相等 → 不覆盖（恰好一次注入）。redis-py 返回 bytes，float() 不收
+            # bytes 须先 decode。
+            current = await redis.get(key)
+            if current is None:
+                acquired = True
+            else:
+                current_text = current.decode() if isinstance(current, bytes) else str(current)
+                try:
+                    newer = float(ts_value) > float(current_text)
+                except ValueError:
+                    newer = False
+                if newer:
+                    await redis.set(key, ts_value, ex=_WORKERS_DONE_NOTIFY_TTL_SECONDS)
+                    acquired = True
     except Exception as exc:  # Redis 不可用：退化为「可能重复通知」，不阻断
         log.warning("workers_done_notify_redis_failed", mission_id=str(mission_id), error=str(exc))
         acquired = True
@@ -389,28 +437,3 @@ async def notify_orchestrator_workers_done(
         failed=failed,
     )
     return True
-
-
-async def clear_workers_done_notify_key(mission_id: uuid.UUID) -> None:
-    """DEL「分身全部完成」唤醒幂等键（task-07 重复完成周期重置，design §5.C.2）。
-
-    ``notify_orchestrator_workers_done`` 的 Redis SETNX 键（TTL 6h）只防**同一
-    完成波次**内双触发点重复投递；「追问重开工 → 再次完成」的重复完成周期
-    （D-002@v1）需要重新唤醒主控——新一轮 worker_done 触发迁移唤醒前先 DEL
-    再走 notify 内部 SETNX 重新抢占，第二个周期能再次投递。key 与
-    ``_WORKERS_DONE_NOTIFY_KEY`` 单源（防格式漂移）。
-
-    Redis 不可用退化不阻断（既有语义）：DEL 失败只记 warning，notify 的 SETNX
-    同样走「视为抢占成功」降级路径。
-    """
-    from app.core.redis import get_redis
-
-    try:
-        redis = get_redis()
-        await redis.delete(_WORKERS_DONE_NOTIFY_KEY.format(mission_id=mission_id))
-    except Exception as exc:  # Redis 不可用：退化不阻断（调用方继续 SETNX 唤醒）
-        log.warning(
-            "workers_done_notify_key_clear_failed",
-            mission_id=str(mission_id),
-            error=str(exc),
-        )

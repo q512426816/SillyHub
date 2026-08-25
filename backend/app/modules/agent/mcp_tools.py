@@ -35,8 +35,9 @@ report_progress 形态）——会话定位 X-Session-Id → 子会话行 →
 区分 409/404）；置位 ``worker_done_at``（可重复置位取最新）；summary 落
 AgentArtifact（kind=summary）挂首 run（mission_id+role 双标记最早 run，
 ``_worker_artifacts`` / ``get_worker_result`` / Finalizer 合并链零新查询路径
-可见）；全分身完成迁移（is_worker_complete 单源判定）时先 DEL
-``_WORKERS_DONE_NOTIFY_KEY`` 再 SETNX 唤醒主控（重复完成周期可再次唤醒）；
+可见）；全分身完成迁移（is_worker_complete 单源判定）时唤醒主控
+（2026-08-26 审计 F04 起经 notify 内时间戳比较——同波幂等 + 重复完成周期
+可再次唤醒，替代旧 DEL→SETNX 两步非原子）；
 迟到（mission 终态）409 零写入。
 
 权限（task-09 P0 鉴权 gap 已闭合）：统一 ``WORKSPACE_WRITE``，经
@@ -1297,35 +1298,70 @@ async def _dispatch_worker_core(
     # - tool_config：read_only 物制（claim payload 透传，2026-08-06 verify 修复口径
     #   ——interactive lease 缺 tool_config 时 read_only 分身 Write/Bash 全放行），
     #   与 batch 路径 worker_tool_config 同源。
+    #
+    # 2026-08-26 审计 F06：commit#1（上方三元组落库）之后的元数据合并、绑定字段
+    # 回填与末次 commit 原先落在 try 外——任何异常/进程崩溃会残留「session
+    # pending + run pending + 无 lease」半孤儿（永久占 MAX_WORKERS 槽 + 阻塞
+    # converge，无 TTL 清理）。本段全程兜底：异常时 rollback 掉未提交的
+    # lease/metadata（flush-only 原语尚未 commit），再按 _fail_worker_subsession
+    # 同款收敛终态（run failed + session failed），is_worker_complete 对 failed
+    # 会话即 True——不占并发额度、不遮蔽 derive，兑现「单事务无孤儿」承诺。
+    # commit 成功后的 refresh 保持在 try 外：彼时三元组 + lease 已一致落库，
+    # refresh 失败（连接抖动等）冒泡为 500 也不是孤儿态（lease pending 等
+    # daemon 轮询自领取），不误翻已成功派发为 failed。
     from app.modules.daemon.session.service import _merge_lease_metadata
 
     _lease_meta_updates: dict = {
         "role": role,
         "tool_config": worker_tool_config(payload.read_only),
     }
-    await _merge_lease_metadata(session, dispatch.lease_id, _lease_meta_updates)
+    # F06 补充：异常路径的日志/收敛入参全部用**前置捕获的本地标量**——rollback
+    # 会 expire 会话内全部 ORM 对象，过期属性访问触发隐式刷新在 greenlet 外炸
+    # MissingGreenlet（同上方 user_id 懒建竞态注释的已知陷阱）。
+    _fin_mission_id = mission.id
+    _fin_run_id = first_run.id
+    _fin_lease_id = dispatch.lease_id
+    try:
+        await _merge_lease_metadata(session, dispatch.lease_id, _lease_meta_updates)
 
-    # 回填三元组绑定字段 + 激活（对齐 create_session 收口形态）。
-    sub_session.runtime_id = dispatch.runtime_id
-    sub_session.lease_id = dispatch.lease_id
-    sub_session.status = "active"
-    sub_session.turn_count = 1
-    sub_session.last_active_at = now
-    if wt_outcome.root_path:
-        sub_session.cwd = wt_outcome.root_path
-    session.add(sub_session)
-    first_run.lease_id = dispatch.lease_id
-    session.add(first_run)
-    # 首 prompt 落一条 user_input 日志行（历史回看与 create_session 首 turn 同源）。
-    session.add(
-        AgentRunLog(
-            run_id=first_run.id,
-            channel="user_input",
-            content_redacted=prompt[:5000],
-            timestamp=now,
+        # 回填三元组绑定字段 + 激活（对齐 create_session 收口形态）。
+        sub_session.runtime_id = dispatch.runtime_id
+        sub_session.lease_id = dispatch.lease_id
+        sub_session.status = "active"
+        sub_session.turn_count = 1
+        sub_session.last_active_at = now
+        if wt_outcome.root_path:
+            sub_session.cwd = wt_outcome.root_path
+        session.add(sub_session)
+        first_run.lease_id = dispatch.lease_id
+        session.add(first_run)
+        # 首 prompt 落一条 user_input 日志行（历史回看与 create_session 首 turn 同源）。
+        session.add(
+            AgentRunLog(
+                run_id=first_run.id,
+                channel="user_input",
+                content_redacted=prompt[:5000],
+                timestamp=now,
+            )
         )
-    )
-    await session.commit()
+        await session.commit()
+    except Exception as exc:
+        await session.rollback()
+        log.warning(
+            "mcp_dispatch_worker_finalize_exception",
+            mission_id=str(_fin_mission_id),
+            run_id=str(_fin_run_id),
+            lease_id=str(_fin_lease_id),
+            error=str(exc),
+        )
+        await _fail_worker_subsession(
+            session,
+            sub_session,
+            first_run,
+            error_code="dispatch_finalize_exception",
+            message=str(exc),
+        )
+        return WorkerRunResponse.model_validate(first_run)
     await session.refresh(first_run)
     await session.refresh(sub_session)
 
@@ -1469,13 +1505,23 @@ async def _list_workers_core(session: AsyncSession, mission: AgentMission) -> Wo
     本卡不动）——新形态行 ``id`` 即首 run id 承担同语义。mission.py 延迟
     import（与 _converge_core 同款，避免循环 import）。
     """
-    from app.modules.agent.mission import is_worker_complete
+    from app.modules.agent.control import (
+        is_worker_complete_from_active,
+        sessions_with_active_turns,
+    )
 
     stmt = select(AgentRun).where(AgentRun.mission_id == mission.id).order_by(AgentRun.created_at)
     runs = list((await session.execute(stmt)).scalars().all())
 
     worker_sessions = await mission_worker_sessions(session, mission.id)
     sub_session_ids = {s.id for s in worker_sessions}
+    # F09：done 分身完成判定批量化——一次批量活跃 turn 查询喂下方逐行三值
+    # 映射（替代逐分身 is_worker_complete 的 N+1），判据等价（守护测试锁定）。
+    active_sub_ids = (
+        await sessions_with_active_turns(session, list(sub_session_ids))
+        if sub_session_ids
+        else set()
+    )
     first_run_by_session: dict[uuid.UUID, AgentRun] = {}
     if sub_session_ids:
         first_run_rows = (
@@ -1503,10 +1549,10 @@ async def _list_workers_core(session: AsyncSession, mission: AgentMission) -> Wo
         if first_run is None:
             continue
         # status 三值映射对齐 mission_derive_status 虚拟 run 优先级（§5.C.4，
-        # 与 _team_mission_summary 逐分支同构）：完成判定经 is_worker_complete
-        # 单一真相源（§5.C.3，禁第三套口径）。
-        if worker_session.worker_done_at is not None and await is_worker_complete(
-            session, worker_session
+        # 与 _team_mission_summary 逐分支同构）：完成判定经
+        # is_worker_complete_from_active（§5.C.3 单一真相源的批量形态）。
+        if worker_session.worker_done_at is not None and is_worker_complete_from_active(
+            worker_session, active_sub_ids
         ):
             row_status = "completed"
         elif worker_session.status == "failed":
@@ -1655,16 +1701,20 @@ async def _converge_core(
     """
     await _enforce_converge_layer0(session, request, path_session_id=path_session_id)
 
-    from app.modules.agent.control import MissionControlService
-    from app.modules.agent.mission import is_worker_complete, mission_derive_status
+    from app.modules.agent.control import (
+        MissionControlService,
+        is_worker_complete_from_active,
+        sessions_with_active_turns,
+    )
+    from app.modules.agent.mission import mission_derive_status
 
     # --- 1. busy 前置判定（task-09 / FR-05：判据换 task-08 单一真相源）---
     # mission_derive_status(workers_only=True)：分身子会话映射虚拟 run（idle 未
     # done / 追问重开工中 → running，不被首 run 终态遮蔽）+ 存量 batch run 原样、
     # 主控轮剔除（D-010 语义保留）——非全终态派生 running → busy（零状态变更）；
     # planning（尚无分身）/ cancelled 原样透传，不进 busy 档。未完成计数文案口径
-    # 保留：经 is_worker_complete 按对象形态分发（子会话 AgentSession / 存量
-    # AgentRun）逐一判定，本处不再自持终态词表（design §5.C.5 / taskcard 铁律）。
+    # 保留：经 is_worker_complete_from_active（§5.C.3 单一真相源的批量形态，
+    # 2026-08-26 审计 F09——一次批量活跃 turn 查询替代逐分身 N+1）。
     derive_value = await mission_derive_status(session, mission.id, workers_only=True)
     if derive_value == "running":
         ctrl = MissionControlService(session)
@@ -1680,7 +1730,8 @@ async def _converge_core(
             if r.agent_session_id not in worker_session_ids
         ]
         workers: list[AgentSession | AgentRun] = [*worker_sessions, *legacy_runs]
-        active_workers = [w for w in workers if not await is_worker_complete(session, w)]
+        active_ids = await sessions_with_active_turns(session, list(worker_session_ids))
+        active_workers = [w for w in workers if not is_worker_complete_from_active(w, active_ids)]
         total_workers = len(workers)
         log.info(
             "converge_mission_busy",
@@ -2023,12 +2074,13 @@ async def _worker_done_core(
     6. 置位 ``worker_done_at=now()``（可重复置位取最新——追问重开工后再干
        再置位）+ summary 落 ``AgentArtifact(kind=summary)`` 挂首 run；
     7. 全分身完成迁移唤醒：按 ``mission_worker_sessions_tree`` 全树枚举经
-       ``is_worker_complete``（§5.C.3 单一真相源，禁第三套口径）判定全完成；
-       本调用构成**新完成信号**（首信号，或重开工周期——上一 done 置位后
-       会话下出现更新 run）且置位后全完成 → 先 DEL
-       ``_WORKERS_DONE_NOTIFY_KEY``（``clear_workers_done_notify_key`` 单源）
-       再调 ``notify_orchestrator_workers_done``（内部 SETNX），重复完成周期
-       可再次唤醒；冗余重复调用（无新 turn）不重复唤醒。
+       ``is_worker_complete_from_active``（§5.C.3 单一真相源的批量形态，禁第三
+       套口径）判定全完成；本调用构成**新完成信号**（首信号，或重开工周期
+       ——上一 done 置位后会话下出现更新 run）且置位后全完成 → 调
+       ``notify_orchestrator_workers_done``（携带 ``signal_at``=本波 done_at
+       最大值；2026-08-26 审计 F04 起内部按时间戳比较实现同波幂等 + 新波
+       再唤醒，替代旧 DEL→SETNX），重复完成周期可再次唤醒；冗余重复调用
+       （无新 turn）不重复唤醒。
     """
     sid = _request_session_id(request, path_session_id)
     if sid is None:
@@ -2109,15 +2161,21 @@ async def _worker_done_core(
     await session.refresh(artifact)
 
     # ── 全分身完成迁移唤醒（is_worker_complete 单源，design §5.C.3）──
-    from app.modules.agent.mission import is_worker_complete
+    # F09（2026-08-26 审计）：逐分身 is_worker_complete 批量化——一次批量活跃
+    # turn 查询 + 纯函数判定（判据等价，守护测试锁定）。
+    from app.modules.agent.control import (
+        is_worker_complete_from_active,
+        sessions_with_active_turns,
+    )
 
-    all_done = all([await is_worker_complete(session, w) for w in workers])
+    active_ids = await sessions_with_active_turns(session, [w.id for w in workers])
+    all_done = all(is_worker_complete_from_active(w, active_ids) for w in workers)
     notified = False
     if all_done and mission.session_id is not None:
         # 本调用构成新完成信号的判定（false→true 迁移的完整覆盖）：
         # - 首信号：old_done_at 为 None（多分身首波 = 最后完成分身恰好一次触发）；
         # - 重开工周期：上一 done 置位后本会话出现更新的 run（追问轮），本轮
-        #   done 是对新 turn 的完成信号——DEL 后 SETNX 支持重复完成周期再唤醒；
+        #   done 是对新 turn 的完成信号——时间戳比较支持重复完成周期再唤醒；
         # - 冗余重复调用（无新 turn）不重复唤醒（防烧主控 token）。
         is_new_signal = old_done_at is None
         if not is_new_signal:
@@ -2131,19 +2189,25 @@ async def _worker_done_core(
             # 成败统计口径同 is_worker_complete 词表：会话终态 failed/ended =
             # 失败，其余（done 且无活跃 turn，全完成判定已保证）= 成功。
             from app.modules.agent.mission import _WORKER_SESSION_TERMINAL
-            from app.modules.agent.mission_context import (
-                clear_workers_done_notify_key,
-                notify_orchestrator_workers_done,
-            )
+            from app.modules.agent.mission_context import notify_orchestrator_workers_done
 
             failed = sum(1 for w in workers if w.status in _WORKER_SESSION_TERMINAL)
             completed = len(workers) - failed
-            await clear_workers_done_notify_key(mission.id)
+            # F04（2026-08-26 审计）：signal_at = 本波全部已完成分身 done_at 的
+            # 最大值（含本调用刚置位的 now——workers 与 worker 是同一 identity
+            # map 对象，置位已可见）。notify 侧以「严格大于键内时间戳才覆盖重投」
+            # 实现同波幂等 + 新波再唤醒（替代旧的 DEL→SETNX 两步非原子，同波
+            # 双完成不再双注入主控）。
+            signal_at = max(
+                (w.worker_done_at for w in workers if w.worker_done_at is not None),
+                default=None,
+            )
             notified = await notify_orchestrator_workers_done(
                 mission.id,
                 mission.session_id,
                 completed=completed,
                 failed=failed,
+                signal_at=signal_at,
             )
 
     return WorkerDoneResponse(

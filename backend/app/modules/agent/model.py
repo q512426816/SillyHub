@@ -780,7 +780,10 @@ async def mission_worker_sessions(db: AsyncSession, mission_id: uuid.UUID) -> li
 
 
 async def mission_worker_sessions_tree(
-    db: AsyncSession, mission_id: uuid.UUID
+    db: AsyncSession,
+    mission_id: uuid.UUID,
+    *,
+    root_session_id: uuid.UUID | None = None,
 ) -> list[AgentSession]:
     """枚举 mission 的会话树全树分身（design §5.A / D-003@v2 方案A 双源之 DB 源）。
 
@@ -793,21 +796,37 @@ async def mission_worker_sessions_tree(
     - **不含根（主控）会话行**：根是派发者非分身，枚举只含后代；
     - **防环**：递归 CTE 用 ``UNION``（非 UNION ALL）按 (id, depth) 元组去重，
       叠加 ``MAX_TREE_DEPTH``(=4) 深度截断兜底——脏数据 parent 成环时环上会话
-      逐层加深重入，UNION 元组去重 + 深度截断保证不死循环，末端 ``DISTINCT``
-      保证同一会话行不重复返回；parent 指向不存在的行 → 不可达即不入树；
+      逐层加深重入，UNION 元组去重 + 深度截断保证不死循环，末端回表按 PK
+      集合成员（IN 子查询）保证同一会话行不重复返回；parent 指向不存在的行
+      → 不可达即不入树；
     - mission 不存在 / external mission（session_id 为 NULL）/ 根下无子树均
       返回空列表；
     - 按 created_at 升序稳定枚举；不做 status/deleted 过滤——过滤语义归调用方
       （P1 口径，``mission_worker_sessions`` 同）。
+
+    2026-08-26 审计 F03/F08（docs/qa/subsession-backend-audit-2026-08-26.md）：
+
+    - ``root_session_id`` 可选参——调用方已持有 mission 行时直接传
+      ``mission.session_id`` 跳过内部 mission get（同一请求内多次树口径的
+      查询复用锚）；缺省（None）保持旧行为：内部查 mission 行取根，
+      external / mission 缺失返回 []。
+    - 末端 join 从 ``JOIN tree ON id = sid`` 改 ``id IN (SELECT sid FROM tree
+      WHERE sid != root)``——EXPLAIN 实证旧形态在 PG 走 Hash Join + Seq Scan
+      on agent_sessions（树结果集小、sessions 表大时每次树调用退化 O(全表)
+      哈希扫描）；IN 形态由 PK 索引驱动，代价 O(树大小)。语义等价：同一
+      sid 集合（UNION 元组去重 → IN 成员天然去重，原 DISTINCT 随之不再需要）。
     """
-    mission = (
-        (await db.execute(select(AgentMission).where(col(AgentMission.id) == mission_id)))
-        .scalars()
-        .first()
-    )
-    if mission is None or mission.session_id is None:
-        return []
-    root_id = mission.session_id
+    if root_session_id is None:
+        mission = (
+            (await db.execute(select(AgentMission).where(col(AgentMission.id) == mission_id)))
+            .scalars()
+            .first()
+        )
+        if mission is None or mission.session_id is None:
+            return []
+        root_id = mission.session_id
+    else:
+        root_id = root_session_id
     # WITH RECURSIVE：锚=根会话(depth 0)；递归项=parent 指向已入树行的子会话
     # (depth+1)，depth >= MAX_TREE_DEPTH 不再展开（脏数据深环截断）。UNION 去重
     # 防（同深度）重复元组；双方言可执行（SQLite 测试方言 + PG 生产）。
@@ -828,11 +847,14 @@ async def mission_worker_sessions_tree(
             tree.c.depth < MAX_TREE_DEPTH,
         )
     )
+    # F08：PK 驱动回表——IN 子查询（半连接）形态在大表下让规划器走
+    # Nested Loop + Index Scan using agent_sessions_pkey（本机 PG EXPLAIN 实证；
+    # 小表时哈希半连接代价本就低，规划器按成本择优），不再固定 Hash Join +
+    # Seq Scan O(全表)；IN 成员测试天然去重（替代原 DISTINCT，顺带免疫
+    # ``config`` 等 json 列在 PG 下无相等算子导致 DISTINCT 报错的问题）。
     stmt = (
         select(AgentSession)
-        .join(tree, col(AgentSession.id) == tree.c.sid)
-        .where(tree.c.sid != root_id)
-        .distinct()
+        .where(col(AgentSession.id).in_(select(tree.c.sid).where(tree.c.sid != root_id)))
         .order_by(col(AgentSession.created_at))
     )
     result = await db.execute(stmt)

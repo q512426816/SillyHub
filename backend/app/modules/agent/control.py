@@ -36,15 +36,20 @@ task-08 起治理口径换全树含孙层，design §5.E），本模块不自写
 from __future__ import annotations
 
 import uuid
+from collections.abc import Iterable
 from datetime import UTC, datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.core.logging import get_logger
 from app.modules.agent.delegation import MAX_WORKERS
-from app.modules.agent.mission import is_worker_complete
+from app.modules.agent.mission import (
+    _WORKER_RUN_TERMINAL,
+    _WORKER_SESSION_TERMINAL,
+    _sessions_with_active_turns,
+)
 from app.modules.agent.model import (
     ACTIVE_RUN_STATUSES,
     AgentMission,
@@ -65,6 +70,55 @@ _ORCHESTRATOR_ROLE = "orchestrator"
 # lease_service.cancel_lease 的会话收口词表同源（pending/active/reconnecting）——
 # 已终态（ended/failed）子会话不复活重杀。
 _ACTIVE_SESSION_STATUSES = ("pending", "active", "reconnecting")
+
+
+# ── 2026-08-26 审计 F09（docs/qa/subsession-backend-audit-2026-08-26.md §A.1）──
+# is_worker_complete 的批量化形态：循环消费点（派发门计数 / busy / worker_done
+# 全完成判定 / summary 行化）先**一次**批量查明活跃 turn 集合，再经纯函数逐
+# worker 判定——把「每 done 分身 1 查询」的 N+1 压成恒定 1 查询。
+# 判据与 mission.is_worker_complete 逐分支等价（词表直接 import 单源，不复制）；
+# mission.py 归审计 A 组并行修复，本模块只读借用（禁改 mission.py）。
+
+# 批量活跃 turn 判定：只读借用 mission._sessions_with_active_turns（口径单一
+# 真相源在 mission.py，勿在本模块复制实现防漂移）。
+sessions_with_active_turns = _sessions_with_active_turns
+
+
+def is_worker_complete_from_active(
+    worker: AgentSession | AgentRun,
+    active_session_ids: frozenset[uuid.UUID] | set[uuid.UUID],
+) -> bool:
+    """``mission.is_worker_complete`` 的纯函数形态（活跃 turn 集合外注入）。
+
+    双形态判据逐分支等价（task-08 单一真相源的批量展开）：
+
+    - 子会话（``AgentSession``）：会话终态（failed/ended）→ True；
+      ``worker_done_at`` 空 → False；否则「无活跃 turn」→ True；
+    - 存量 batch run（``AgentRun``）：run 终态 completed/failed/killed。
+
+    ``active_session_ids`` 须由调用方经 :data:`sessions_with_active_turns`
+    一次性查明（覆盖所判定的全部子会话 id）；集合不含某会话 id 即视为该会话
+    无活跃 turn。等价性由 test_worker_subsession_control 守护测试锁定。
+    """
+    if isinstance(worker, AgentSession):
+        if worker.status in _WORKER_SESSION_TERMINAL:
+            return True
+        if worker.worker_done_at is None:
+            return False
+        return worker.id not in active_session_ids
+    return worker.status in _WORKER_RUN_TERMINAL
+
+
+async def _incomplete_session_count(db: AsyncSession, sessions: Iterable[AgentSession]) -> int:
+    """批量统计未完成（``is_worker_complete=False``）子会话数（F09）。
+
+    一次批量活跃 turn 查询 + 纯函数判定；空集零查询。
+    """
+    session_list = list(sessions)
+    if not session_list:
+        return 0
+    active_ids = await sessions_with_active_turns(db, [s.id for s in session_list])
+    return sum(1 for s in session_list if not is_worker_complete_from_active(s, active_ids))
 
 
 class MissionControlService:
@@ -105,7 +159,10 @@ class MissionControlService:
         return list((await self._session.execute(stmt)).scalars().all())
 
     async def _split_worker_forms(
-        self, mission_id: uuid.UUID
+        self,
+        mission_id: uuid.UUID,
+        *,
+        root_session_id: uuid.UUID | None = None,
     ) -> tuple[list[AgentRun], list[AgentSession]]:
         """混跑双形态拆分（task-11）：存量 batch 分身 run + 分身子会话行。
 
@@ -120,9 +177,15 @@ class MissionControlService:
         枚举单点换 ``mission_worker_sessions_tree`` **全树**（一层→含孙层）——
         下方三口径（并发计数 / cost union / cancel kill 名单）全部经本方法取
         会话集合，孙层分身自动计入治理；无孙树与一层枚举等价（FR-08 零回归）。
+
+        2026-08-26 审计 F03/F07：``root_session_id`` 可选参透传树枚举——调用方
+        已持有 mission 行时传入可省掉树内部的一次 mission get（治理门两闸共用
+        一次枚举时同步省一次）；缺省行为不变。
         """
         runs = await self.non_orchestrator_runs(mission_id)
-        sessions = await mission_worker_sessions_tree(self._session, mission_id)
+        sessions = await mission_worker_sessions_tree(
+            self._session, mission_id, root_session_id=root_session_id
+        )
         session_ids = {s.id for s in sessions}
         legacy_runs = [r for r in runs if r.agent_session_id not in session_ids]
         return legacy_runs, sessions
@@ -138,6 +201,22 @@ class MissionControlService:
         """
         return sum(r.total_cost_usd or 0.0 for r in runs)
 
+    async def _sum_session_runs_cost(self, session_ids: list[uuid.UUID]) -> float:
+        """子会话轮次 run 的 ``total_cost_usd`` SQL SUM（F07：不 ORM 全行加载）。
+
+        union 侧集合大小 = 分身数×历史轮数、随 mission 生命期单调增长，逐行
+        实体化只为求和是纯浪费；``agent_session_id`` 有
+        ``ix_agent_runs_agent_session_id`` 索引支撑，SUM 下推到库端。空集零查询
+        返回 0.0。
+        """
+        if not session_ids:
+            return 0.0
+        stmt = select(func.sum(col(AgentRun.total_cost_usd))).where(
+            col(AgentRun.agent_session_id).in_(session_ids)
+        )
+        total = (await self._session.execute(stmt)).scalar_one_or_none()
+        return float(total or 0.0)
+
     async def cost_so_far(self, mission_id: uuid.UUID) -> float:
         """Sum of ``total_cost_usd`` across the Mission's Worker Runs.
 
@@ -148,16 +227,15 @@ class MissionControlService:
         起含孙层轮次 run），治理门预算拦截覆盖子会话追问轮（无 mission_id 的
         轮次 run）成本。子会话首 run 已从存量侧剔除（``_split_worker_forms``），
         union 天然去重不双计。
-        ``cost_from_runs`` 静态求和公式不动（口径=传入 runs 本身）。
+
+        2026-08-26 审计 F07：子会话轮次侧改 SQL SUM（``_sum_session_runs_cost``，
+        不再 ORM 全行加载）；存量侧 runs 本就要加载（计数/取消口径复用），
+        内存求和公式 ``cost_from_runs`` 不动。
         """
         legacy_runs, sessions = await self._split_worker_forms(mission_id)
-        runs = list(legacy_runs)
-        if sessions:
-            stmt = select(AgentRun).where(
-                col(AgentRun.agent_session_id).in_([s.id for s in sessions])
-            )
-            runs.extend((await self._session.execute(stmt)).scalars().all())
-        return self.cost_from_runs(runs)
+        return self.cost_from_runs(legacy_runs) + await self._sum_session_runs_cost(
+            [s.id for s in sessions]
+        )
 
     async def _worker_form_count(
         self, mission_id: uuid.UUID, *, legacy_statuses: frozenset[str]
@@ -168,12 +246,14 @@ class MissionControlService:
         子会话合计；子会话首 run 已被 ``_split_worker_forms`` 从 run 侧剔除
         防双计。active（_ACTIVE）/running（{"running"}）两口径仅存量侧过滤集
         不同，子会话语义一致（未完成即计入）。
+
+        2026-08-26 审计 F09：子会话完成判定批量化——一次批量活跃 turn 查询
+        （``sessions_with_active_turns``）+ 纯函数
+        （``is_worker_complete_from_active``），不再逐分身查询（N+1）。
         """
         legacy_runs, sessions = await self._split_worker_forms(mission_id)
         count = sum(1 for r in legacy_runs if r.status in legacy_statuses)
-        for s in sessions:
-            if not await is_worker_complete(self._session, s):
-                count += 1
+        count += await _incomplete_session_count(self._session, sessions)
         return count
 
     async def active_worker_count(self, mission_id: uuid.UUID) -> int:
@@ -210,16 +290,28 @@ class MissionControlService:
 
         Concurrency uses ``running_worker_count`` (claimed by daemon), NOT
         ``active_worker_count`` (pending+running) — see D-008@v1.
+
+        2026-08-26 审计 F07：门内**一次** ``_split_worker_forms`` 枚举同时喂
+        并发与预算两闸（旧实现 running_worker_count + cost_so_far 各自枚举——
+        同一 mission 行被 get 3 次、树 CTE 跑 2 次）；计数走批量活跃 turn
+        （F09），子会话轮次成本走 SQL SUM——不重复执行树 CTE、不逐分身查询。
+        判定序（cancelled → max_workers → budget）与拒绝 reason 语义不变。
         """
         if mission.cancelled_at is not None:
             return False, "mission_cancelled"
-        if await self.running_worker_count(mission.id) >= MAX_WORKERS:
+        legacy_runs, sessions = await self._split_worker_forms(
+            mission.id, root_session_id=mission.session_id
+        )
+        running = sum(1 for r in legacy_runs if r.status == "running")
+        running += await _incomplete_session_count(self._session, sessions)
+        if running >= MAX_WORKERS:
             return False, "max_workers_reached"
-        if (
-            mission.budget_usd is not None
-            and await self.cost_so_far(mission.id) >= mission.budget_usd
-        ):
-            return False, "budget_exceeded"
+        if mission.budget_usd is not None:
+            cost = self.cost_from_runs(legacy_runs) + await self._sum_session_runs_cost(
+                [s.id for s in sessions]
+            )
+            if cost >= mission.budget_usd:
+                return False, "budget_exceeded"
         return True, "ok"
 
     async def _cancel_target_run_for_session(self, session_id: uuid.UUID) -> uuid.UUID | None:

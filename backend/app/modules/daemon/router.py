@@ -2800,59 +2800,138 @@ async def _team_mission_summary(
 ) -> TeamMissionSummary:
     """AgentMission + 全量 run → TeamMissionSummary（触发/列表共用组装）。
 
-    - status 用 task-08 包装 ``mission_derive_status``（design §5.C.4，task-09
-      换源）：分身子会话映射虚拟 run（idle 未 done → running，不被首 run 终态
-      遮蔽），会话维度入参（converged/has_session/session_active_turn）由包装
-      内部查明——分身 idle 未 done 不再误显 awaiting_input（防 patrol 超时
-      收敛时钟误启动）；
+    - status 用 task-08 包装 ``mission_derive_status`` 的**同口径本地展开**
+      （design §5.C.4，task-09 换源；2026-08-26 审计 F03 批量化）：分身子会话
+      映射虚拟 run（idle 未 done → running，不被首 run 终态遮蔽），会话维度
+      入参（converged/has_session/session_active_turn）在本函数内一次查明——
+      分身 idle 未 done 不再误显 awaiting_input（防 patrol 超时收敛时钟误启动）；
     - workers 双形态行化（task-13 / design §5.C.5 / §5.E）：分身列表 =
-      子会话行（新形态，经 ``mission_worker_sessions`` 单一真相源枚举——
-      ``sub_session_id`` 取子会话 id、``run_id``/``first_run_id`` 取首 run id
-      （首 run 双标记锚，供 get_worker_result 连续消费）、role/objective 取
-      首 run 双标记、status 按 ``is_worker_complete`` 完成判定映射为
-      ``mission_derive_status`` 虚拟 run 同款三值）∪ 存量 batch 分身 run 行
-      （无子会话 mission 回落，行内容逐字节不变、两新字段 None）；
-      追问轮次 run 不写 mission_id 天然不进（轮次 run 不混入），主控轮
-      ``role != orchestrator`` 过滤语义保留（D-009：Python 比较 None !=
-      'orchestrator' 为 True，NULL role 分身天然保留）；子会话首 run 从
-      存量侧剔除防同分身双计（对齐 ``mission_derive_status`` 虚拟映射同款
-      剔除口径）；同根上一场已收敛 mission 的子会话（无本场首 run）不是
-      本场分身，不进行；
+      子会话行（新形态，``parent_session_id = 根`` 的**一层**行——自全树结果
+      过滤，与 ``mission_worker_sessions`` 单一真相源同口径；``sub_session_id``
+      取子会话 id、``run_id``/``first_run_id`` 取首 run id（首 run 双标记锚，
+      供 get_worker_result 连续消费）、role/objective 取首 run双标记、status
+      按 ``is_worker_complete`` 完成判定映射为 ``mission_derive_status`` 虚拟
+      run 同款三值）∪ 存量 batch 分身 run 行（无子会话 mission 回落，行内容
+      逐字节不变、两新字段 None）；追问轮次 run 不写 mission_id 天然不进
+      （轮次 run 不混入），主控轮 ``role != orchestrator`` 过滤语义保留
+      （D-009：Python 比较 None != 'orchestrator' 为 True，NULL role 分身天然
+      保留）；子会话首 run 从存量侧剔除防同分身双计（对齐
+      ``mission_derive_status`` 虚拟映射同款剔除口径）；同根上一场已收敛
+      mission 的子会话（无本场首 run）不是本场分身，不进行；
     - task-08（2026-08-26-team-subsession-recursion / design §5.E）：workers
-      行化保持一层直查（展示细节留 P3，status 已由 task-03 全树 derive 正确
-      含孙），另经 ``mission_worker_sessions_tree`` 全树枚举的 parent 关系
-      聚合一层分身的孙后代数填 ``sub_workers_count``（孙层折叠计数——无孙
-      分身 / 存量 batch 行保持默认 None，FR-08 零回归）；
+      行化保持一层（展示细节留 P3，status 已由全树 derive 正确含孙），另经
+      全树枚举的 parent 关系聚合一层分身的孙后代数填 ``sub_workers_count``
+      （孙层折叠计数——无孙分身 / 存量 batch 行保持默认 None，FR-08 零回归）；
     - scope 概要读落库冻结快照，NULL 缺省回落 [anchor]（单 ws 语义）。
+
+    **2026-08-26 审计 F03 批量化**（docs/qa/subsession-backend-audit-2026-08-26.md
+    §A.3）：旧实现每 mission ≈14+Nd 查询（mission 行被重复 get 4 次、derive/
+    一层/树三口径各自枚举、done 分身逐个查询）。本函数现为：
+
+    | 步骤 | 查询数 |
+    |---|---|
+    | 全量 run（worker_runs，derive 输入 + 存量行化复用） | 1 |
+    | 全树枚举一次（``root_session_id`` 透传跳过内部 mission get） | 1 |
+    | 批量活跃 turn（树会话 ∪ 根，一次查询） | 1 |
+    | 根会话存在性 get（identity map 命中则免） | ≤1 |
+    | 首 run IN 批查 | 1 |
+    | scope 名称 IN 批查 | 1 |
+
+    合计 ~6 查询/mission（``GET /sessions/{sid}/team-missions`` 列表 M 倍放大
+    同步受益）。status 口径与 ``mission.mission_derive_status`` 逐分支等价
+    （虚拟映射优先级复刻 + ``derive_status`` 纯函数单源 import）——等价性由
+    test_session_team_mission 守护测试锁定；mission.py 归审计 A 组并行修复，
+    本地展开漂移由守护测试兜住。
 
     mission 模块延迟 import（与 orchestrator.schedule_loop 同款，避免循环
     import；task-02 并行时序下也保证本模块可 import）。
     """
-    from app.modules.agent.control import MissionControlService
-    from app.modules.agent.mission import is_worker_complete, mission_derive_status
-    from app.modules.agent.model import (
-        AgentRun,
-        mission_worker_sessions,
-        mission_worker_sessions_tree,
+    from app.modules.agent.control import (
+        MissionControlService,
+        is_worker_complete_from_active,
+        sessions_with_active_turns,
     )
+    from app.modules.agent.mission import (
+        BUDGET_FORCE_ENDED_AT_KEY,
+        WORKER_FORCE_ENDED_AT_KEY,
+        derive_status,
+    )
+    from app.modules.agent.model import AgentRun, AgentSession, mission_worker_sessions_tree
 
-    ctrl = MissionControlService(session)
-    all_runs = await ctrl.worker_runs(mission.id)
-    status = await mission_derive_status(session, mission.id)
-    # task-13：新形态子会话行——首 run 双标记锚（design §5.A：派发三元组写
-    # mission_id + role 的最早 run；追问轮 run 无 mission_id 天然不命中）。
-    worker_sessions = await mission_worker_sessions(session, mission.id)
-    # task-08：孙层折叠计数——全树枚举建 parent→children 邻接表，按一层分身
-    # 起点沿树数后代（含孙及更深）；树枚举自身已 UNION 去重 + 深度截断，此处
-    # visited 仅脏环双保险。无子树 mission（存量 external / 无孙）树枚举与
-    # 一层等价，计数恒 0 → 字段保持 None。全树 id 集合同时供下方存量行剔除
-    # （孙层首 run 不进 workers 行，折叠呈现）。
+    root_id = mission.session_id
+
+    # 1) 全量 run：derive 输入与存量 workers 行化共用一次查询。
+    all_runs = await MissionControlService(session).worker_runs(mission.id)
+
+    # 2) 全树一次（root 透传省掉内部 mission get）：喂 derive 虚拟映射、一层
+    #    workers 行化（parent==根 过滤——一层集合 ⊆ 全树，等价
+    #    mission_worker_sessions）与孙折叠计数三口径。
+    tree_sessions: list[AgentSession] = []
+    if root_id is not None:
+        tree_sessions = await mission_worker_sessions_tree(
+            session, mission.id, root_session_id=root_id
+        )
+    tree_session_ids = {s.id for s in tree_sessions}
     tree_children: dict[uuid.UUID, list[uuid.UUID]] = {}
-    tree_session_ids: set[uuid.UUID] = set()
-    for tree_session in await mission_worker_sessions_tree(session, mission.id):
-        tree_session_ids.add(tree_session.id)
+    for tree_session in tree_sessions:
         if tree_session.parent_session_id is not None:
             tree_children.setdefault(tree_session.parent_session_id, []).append(tree_session.id)
+    worker_sessions = [
+        s for s in tree_sessions if root_id is not None and s.parent_session_id == root_id
+    ]
+
+    # 3) status 本地展开（= mission_derive_status 同口径）：批量活跃 turn 一次
+    #    查询覆盖「树会话 done 判定 + 根会话活跃 turn」两用途。
+    active_ids: set[uuid.UUID] = set()
+    if root_id is not None:
+        probe_ids = list(tree_session_ids | {root_id})
+        active_ids = await sessions_with_active_turns(session, probe_ids)
+    budget_force_ended = (
+        mission.constraints is not None and BUDGET_FORCE_ENDED_AT_KEY in mission.constraints
+    )
+    worker_force_ended = (
+        mission.constraints is not None and WORKER_FORCE_ENDED_AT_KEY in mission.constraints
+    )
+
+    def _virtual_status(s: AgentSession) -> str:
+        # 优先级复刻 mission.mission_derive_status._virtual_status（§5.C.4）：
+        # done 且无活跃 turn → completed > 强收标记（budget 或 worker 任一，
+        # 审计 F01 两键同象）下会话 ended 且未 done → failed（终态，可收敛
+        # degraded）> 会话终态 failed → failed > 其余（idle 未 done / 追问
+        # 重开工中 / 无标记 ended 未 done）→ running。
+        if s.worker_done_at is not None and s.id not in active_ids:
+            return "completed"
+        if (
+            (budget_force_ended or worker_force_ended)
+            and s.status == "ended"
+            and s.worker_done_at is None
+        ):
+            return "failed"
+        if s.status == "failed":
+            return "failed"
+        return "running"
+
+    virtual_runs = [
+        AgentRun(agent_type="claude_code", status=_virtual_status(s)) for s in tree_sessions
+    ]
+    derive_runs = [r for r in all_runs if r.agent_session_id not in tree_session_ids]
+    has_session = False
+    session_active_turn = False
+    if root_id is not None:
+        # 会话 mission 判别同 mission_derive_status 口径：session_id 列对存量
+        # 构造路径可能是随机 uuid，按「该 id 的 AgentSession 真实存在」判别，
+        # 查无行 → has_session=False（永不进 awaiting_input，存量零回归）。
+        bound_session = await session.get(AgentSession, root_id)
+        if bound_session is not None:
+            has_session = True
+            session_active_turn = root_id in active_ids
+    status = derive_status(
+        [*derive_runs, *virtual_runs],
+        cancelled=mission.cancelled_at is not None,
+        converged=mission.converged_at is not None,
+        has_session=has_session,
+        session_active_turn=session_active_turn,
+    )
 
     def _sub_workers_count(start_id: uuid.UUID) -> int:
         count = 0
@@ -2866,6 +2945,8 @@ async def _team_mission_summary(
                     count += 1
         return count
 
+    # 4) 一层分身行化：首 run 双标记锚（design §5.A：派发三元组写 mission_id
+    #    + role 的最早 run；追问轮 run 无 mission_id 天然不命中）。
     sub_session_ids = {s.id for s in worker_sessions}
     first_run_by_session: dict[uuid.UUID, AgentRun] = {}
     if sub_session_ids:
@@ -2896,9 +2977,10 @@ async def _team_mission_summary(
         # worker_done 且无活跃 turn（is_worker_complete=True）→ completed
         # （优先于终态映射——converge end_session 后 done 分身仍映射 done）>
         # 会话终态 failed → failed > 其余（idle 未 done / 追问重开工中）→
-        # running；完成判定经 is_worker_complete 单一真相源（§5.C.3）。
-        if worker_session.worker_done_at is not None and await is_worker_complete(
-            session, worker_session
+        # running；完成判定经 is_worker_complete_from_active（§5.C.3 单一
+        # 真相源的批量形态，active_ids 一次查明，F09）。
+        if worker_session.worker_done_at is not None and is_worker_complete_from_active(
+            worker_session, active_ids
         ):
             row_status = "completed"
         elif worker_session.status == "failed":
