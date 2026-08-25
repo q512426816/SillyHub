@@ -12,6 +12,10 @@
  * 文本（D-7）、attachmentsDisabled 门控（codex 引擎 D-6）、降级提示条（FR-10
  * D-9：当前供应商 multimodal 判不支持 → 图片将落盘供 agent 工具读）。
  *
+ * ql-20260825-006：输入框支持 Ctrl+V 粘贴剪贴板图片/文件——textarea onPaste 读
+ * clipboardData.files，非空则拦截默认插入并复用 handleFiles 上传管线（与 📎 完全
+ * 等价，含 attachmentsDisabled 门控与 10 个上限）；纯文本粘贴走默认行为不受影响。
+ *
  * 本组件无弹窗上下文依赖，/runtimes 弹窗与 /sessions 新页面均可独立 import 组装。
  */
 
@@ -181,7 +185,7 @@ export function SessionInputBar({
           title={
             attachmentsDisabled
               ? "当前引擎不支持附件"
-              : "添加图片/文件附件（图片直读需多模态模型）"
+              : "添加图片/文件附件，支持 Ctrl+V 直接粘贴（图片直读需多模态模型）"
           }
         >
           <Paperclip className="h-5 w-5" />
@@ -189,6 +193,15 @@ export function SessionInputBar({
         <textarea
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          onPaste={(e) => {
+            // ql-20260825-006：剪贴板带文件（截图/复制的文件）→ 与 📎 同上传管线；
+            // 空文件列表（纯文本粘贴）直接放行默认插入。
+            if (attachmentsDisabled) return;
+            const files = e.clipboardData?.files;
+            if (!files || files.length === 0) return;
+            e.preventDefault();
+            void handleFiles(files);
+          }}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();

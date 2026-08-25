@@ -11,11 +11,16 @@
 // 已知坑：MarkdownText 用 next/dynamic ssr:false，jsdom 同步 render 得 null，
 // mock 成纯文本渲染（与既有 panel 测试一致）。
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 
 import { TurnTimeline, type SessionTurnView } from "../turn-timeline";
 import { SessionInputBar } from "../session-input-bar";
+import {
+  removeSessionAttachment,
+  uploadSessionAttachment,
+  type AttachmentRead,
+} from "@/lib/api/session-attachments";
 import type { SessionPermissionRequest } from "@/lib/daemon";
 import type { TurnSegment } from "@/components/daemon/session-log-assembler";
 
@@ -23,6 +28,14 @@ vi.mock("@/components/ui/markdown-text", () => ({
   MarkdownText: ({ content }: { content: string }) => (
     <div data-testid="markdown-text">{content}</div>
   ),
+}));
+
+// ql-20260825-006：粘贴上传走 mock（不真打 fetch）。attachment-chips（TurnTimeline
+// 渲染链）也 import 本模块，factory 须含 fetchAttachmentObjectUrl 否则命名导出缺失。
+vi.mock("@/lib/api/session-attachments", () => ({
+  uploadSessionAttachment: vi.fn(),
+  removeSessionAttachment: vi.fn(),
+  fetchAttachmentObjectUrl: vi.fn(),
 }));
 
 function makeTurn(overrides: Partial<SessionTurnView> = {}): SessionTurnView {
@@ -416,5 +429,81 @@ describe("SessionInputBar（task-13 抽取共享子组件）", () => {
     // enabled 但空输入：发送按钮仍禁用（!value.trim()）
     setupBar({ disabled: false, value: "   " });
     expect((screen.getByTitle("发送") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("SessionInputBar 附件粘贴（ql-20260825-006）", () => {
+  /** AttachmentRead 构造（api-types 9770：id/kind/media_type/bytes/name/created_at）。 */
+  function makeAtt(id: string, name: string, kind: "image" | "file"): AttachmentRead {
+    return {
+      id,
+      kind,
+      media_type: kind === "image" ? "image/png" : "text/plain",
+      bytes: 2048,
+      name,
+      created_at: "2026-08-25T00:00:00Z",
+    };
+  }
+
+  /** fireEvent.paste：dom-testing-library 支持 clipboardData 伪对象（jsdom 无 DataTransfer）。 */
+  function pasteTo(input: Element, files: File[]) {
+    return fireEvent.paste(input, {
+      clipboardData: { files, getData: () => "" },
+    });
+  }
+
+  beforeEach(() => {
+    vi.mocked(uploadSessionAttachment).mockReset();
+    vi.mocked(removeSessionAttachment).mockReset();
+  });
+
+  function renderBar(overrides: Record<string, unknown> = {}) {
+    const props = {
+      value: "",
+      onChange: vi.fn(),
+      onSend: vi.fn(),
+      disabled: false,
+      placeholder: "输入首条消息创建会话",
+      creating: false,
+      ...overrides,
+    };
+    return { props, ...render(<SessionInputBar {...(props as any)} />) };
+  }
+
+  it("Ctrl+V 粘贴图片 → 拦截默认插入、走附件上传（kind=image）、chip 预览与父级回传", async () => {
+    const onAttachmentsChange = vi.fn();
+    const att = makeAtt("a1", "shot.png", "image");
+    vi.mocked(uploadSessionAttachment).mockResolvedValue(att);
+    renderBar({ onAttachmentsChange });
+
+    const file = new File(["xx"], "shot.png", { type: "image/png" });
+    // fireEvent 返回 false = cancelable 事件被 preventDefault（文件不插进输入框）
+    expect(pasteTo(screen.getByPlaceholderText("输入首条消息创建会话"), [file])).toBe(false);
+    expect(uploadSessionAttachment).toHaveBeenCalledWith(file, "image");
+    expect(await screen.findByTitle("shot.png · 2KB")).toBeInTheDocument();
+    expect(onAttachmentsChange).toHaveBeenCalledWith([att]);
+  });
+
+  it("粘贴普通文件 → 与 📎 同管线（kind=file）", async () => {
+    vi.mocked(uploadSessionAttachment).mockResolvedValue(makeAtt("a2", "note.md", "file"));
+    renderBar();
+    const file = new File(["# hi"], "note.md", { type: "text/markdown" });
+    pasteTo(screen.getByPlaceholderText("输入首条消息创建会话"), [file]);
+    expect(uploadSessionAttachment).toHaveBeenCalledWith(file, "file");
+    expect(await screen.findByTitle("note.md · 2KB")).toBeInTheDocument();
+  });
+
+  it("粘贴纯文本 → 不拦截默认插入、不触发上传", () => {
+    renderBar();
+    // files 为空 → 原生文本粘贴路径：事件未被取消
+    expect(pasteTo(screen.getByPlaceholderText("输入首条消息创建会话"), [])).toBe(true);
+    expect(uploadSessionAttachment).not.toHaveBeenCalled();
+  });
+
+  it("attachmentsDisabled（codex 引擎）→ 粘贴文件不上传、不拦截（与 📎 门控同口径）", () => {
+    renderBar({ attachmentsDisabled: true });
+    const file = new File(["xx"], "shot.png", { type: "image/png" });
+    expect(pasteTo(screen.getByPlaceholderText("输入首条消息创建会话"), [file])).toBe(true);
+    expect(uploadSessionAttachment).not.toHaveBeenCalled();
   });
 });

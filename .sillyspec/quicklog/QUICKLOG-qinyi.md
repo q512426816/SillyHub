@@ -154,3 +154,16 @@
 状态：进行中
 关联变更：（无）
 文件：backend/app/modules/daemon/schema.py, backend/app/modules/daemon/router.py, backend/app/modules/daemon/session/service.py, frontend/src/lib/daemon.ts, frontend/src/components/daemon/session-panel.tsx, frontend/src/components/floating/floating-session-host.tsx, frontend/src/hooks/use-page-session-context.ts, frontend/src/stores/floating-session.ts
+
+## ql-20260825-006-57c4 | 2026-08-25 13:16:48 | 会话输入框支持 Ctrl+V 粘贴图片/文件直接作为附件发送
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-input-bar.tsx（textarea onPaste 读 clipboardData.files 非空 preventDefault+复用 handleFiles；📎 title 补粘贴提示；头注释登记 ql）
+- frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx（+4 粘贴用例；模块级 mock @/lib/api/session-attachments（factory 含 fetchAttachmentObjectUrl））
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引登记 ql-20260825-006-57c4）
+需求：会话输入框支持 Ctrl+V 粘贴图片/文件直接作为附件发送
+根因：无，纯新增——附件此前仅 📎 按钮选文件一个入口，用户复制截图/文件后需先落盘再选文件，链路长
+方案：session-input-bar textarea 加 onPaste——clipboardData.files 非空则 preventDefault 并复用现有 handleFiles 上传管线（与 📎 完全等价，含 attachmentsDisabled 门控与 10 个上限），纯文本粘贴放行默认插入；📎 title 补粘贴提示
+结果：新增 4 粘贴用例（图片 kind=image+chip+父级回传+事件取消 / 普通文件 kind=file / 纯文本不拦截 / disabled 门控），先红后绿；daemon+sessions 关联套件 33 文件 494 passed；tsc 0 错；eslint 0 新告警
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx, frontend/src/components/daemon/__tests__/turn-timeline-dialog-minimize.test.tsx
