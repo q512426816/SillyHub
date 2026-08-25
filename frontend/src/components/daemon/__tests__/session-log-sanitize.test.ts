@@ -265,3 +265,56 @@ describe("extractDialogQA", () => {
     expect(result).toEqual([{ question: "(无问题文本)", options: [], answerText: null }]);
   });
 });
+
+describe("extractDialogQA ql-20260825-003（multiSelect 数组 answer 修复）", () => {
+  it("answer 为数组（multiSelect）：不崩，join 展示 + 按 label 判定选中", () => {
+    const result = extractDialogQA({
+      dialog_payload: {
+        questions: [
+          {
+            question: "接下来想让我做什么？",
+            options: [
+              { label: "解码二维码+核实链接", description: "d1" },
+              { label: "整理成规范申报附件", description: "d2" },
+              { label: "了解内容就够了", description: "d3" },
+            ],
+          },
+        ],
+      },
+      answer: { answers: [{ answer: ["整理成规范申报附件", "了解内容就够了"] }] },
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0]!.answerText).toBe("整理成规范申报附件、了解内容就够了");
+    expect(result[0]!.options.map((o) => o.selected)).toEqual([false, true, true]);
+  });
+
+  it("answer 为单元素数组（multiSelect 单选形态）等价 string 语义", () => {
+    const result = extractDialogQA({
+      dialog_payload: {
+        questions: [{ question: "q", options: [{ label: "甲" }, { label: "乙" }] }],
+      },
+      answer: { answers: [{ answer: ["乙"] }] },
+    });
+    expect(result[0]!.answerText).toBe("乙");
+    expect(result[0]!.options[1]!.selected).toBe(true);
+  });
+
+  it("answer 混入非字符串成员：过滤不崩，空数组归 null（未回答语义）", () => {
+    const result = extractDialogQA({
+      dialog_payload: { questions: [{ question: "q" }] },
+      answer: { answers: [{ answer: [123, null, "  "] }] },
+    });
+    expect(result[0]!.answerText).toBeNull();
+  });
+
+  it("回归：string answer（单选）行为不变", () => {
+    const result = extractDialogQA({
+      dialog_payload: {
+        questions: [{ question: "q", options: [{ label: "甲" }] }],
+      },
+      answer: { answers: [{ answer: "甲" }] },
+    });
+    expect(result[0]!.answerText).toBe("甲");
+    expect(result[0]!.options[0]!.selected).toBe(true);
+  });
+});

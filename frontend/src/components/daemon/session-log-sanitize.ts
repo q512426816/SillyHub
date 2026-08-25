@@ -92,20 +92,29 @@ export function extractDialogQA(dialog: {
       options?: { label?: string; description?: string }[];
     }[];
   } | null;
+  // ql-20260825-003：answer.answer 真实形态是 string（单选）或 string[]（multiSelect）——
+  // 旧代码只按 string 处理，multiSelect 会话历史回看时 [数组].trim() 直接崩页面
+  // （「(intermediate value)….trim is not a function」）。归一为 label 列表。
   const answer = (dialog?.answer ?? null) as {
-    answers?: { answer?: string }[];
+    answers?: { answer?: string | string[] }[];
   } | null;
   const questions = payload?.questions ?? [];
   const answers = answer?.answers ?? [];
   if (questions.length === 0) return [];
   return questions.map((q, i) => {
-    const chosen = (answers[i]?.answer ?? "").trim();
+    const raw = answers[i]?.answer;
+    const chosenList = Array.isArray(raw)
+      ? raw.filter((x): x is string => typeof x === "string")
+      : typeof raw === "string"
+        ? [raw]
+        : [];
+    const chosen = chosenList.map((s) => s.trim()).filter(Boolean).join("、");
     const options: DialogOption[] = (q.options ?? []).map((o) => ({
       label: o.label ?? "(无标签)",
       description: o.description,
       // AskUserQuestion 推荐项 label 常带 "(Recommended)" 后缀，answer 存的是完整 label，
-      // 原样比较即可；trim 仅容忍两端空白。
-      selected: chosen.length > 0 && (o.label ?? "").trim() === chosen,
+      // 原样比较即可；trim 仅容忍两端空白。multiSelect 按 label ∈ 选中列表判定。
+      selected: chosenList.length > 0 && chosenList.includes((o.label ?? "").trim()),
     }));
     return {
       question: q.question ?? "(无问题文本)",
