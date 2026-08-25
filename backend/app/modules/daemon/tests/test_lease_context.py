@@ -313,3 +313,90 @@ class TestBuildClaimPayloadProfileBatch:
         assert payload["effectiveAllowedRoots"] == ["/a"]
         assert "mcp_refs" not in payload and "mcpRefs" not in payload
         assert "profile_version" not in payload and "profileVersion" not in payload
+
+
+# ---------------------------------------------------------------------------
+# task-04（2026-08-26-team-subsession-recursion / design §5.C / FR-04）：
+# worker_depth claim payload 白名单透传
+# ---------------------------------------------------------------------------
+
+
+class TestBuildClaimPayloadWorkerDepth:
+    """task-04：interactive claim payload 透传 ``lease.metadata.worker_depth``。
+
+    白名单位置在 stage 先例旁（context.py build_claim_payload interactive 分支）。
+    缺键短路不加 payload 键——存量 quick-chat / 主控 / 普通会话 / 旧 lease 全链
+    undefined 穿透（零回归，不伪造默认值）。单键 snake_case，对齐 stage 先例
+    （daemon 侧归一化 worker_depth ?? workerDepth 双兜底）。
+    """
+
+    @pytest.mark.asyncio
+    async def test_interactive_payload_contains_worker_depth(
+        self, db_session: AsyncSession
+    ) -> None:
+        """含：lease.metadata.worker_depth=1 → payload["worker_depth"] == 1。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease = await _create_interactive_lease(
+            db_session,
+            rt.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(uuid.uuid4()),
+                "prompt": "hi",
+                "provider": "claude_code",
+                "claim_token": "tok",
+                "worker_depth": 1,
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        assert payload["worker_depth"] == 1
+
+    @pytest.mark.asyncio
+    async def test_interactive_payload_worker_depth_zero_passthrough(
+        self, db_session: AsyncSession
+    ) -> None:
+        """0 是合法深度值：``is not None`` 守护下照样透传（不被真值判断吞）。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease = await _create_interactive_lease(
+            db_session,
+            rt.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(uuid.uuid4()),
+                "prompt": "hi",
+                "provider": "claude_code",
+                "claim_token": "tok",
+                "worker_depth": 0,
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        assert payload["worker_depth"] == 0
+
+    @pytest.mark.asyncio
+    async def test_interactive_payload_omits_worker_depth_when_absent(
+        self, db_session: AsyncSession
+    ) -> None:
+        """缺键：payload 不出现 worker_depth（存量 lease 零回归）。"""
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        lease = await _create_interactive_lease(
+            db_session,
+            rt.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(uuid.uuid4()),
+                "prompt": "hi",
+                "provider": "claude_code",
+                "claim_token": "tok",
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        assert "worker_depth" not in payload

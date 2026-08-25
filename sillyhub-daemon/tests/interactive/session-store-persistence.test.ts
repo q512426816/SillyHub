@@ -490,3 +490,81 @@ describe('tmp 残留恢复与回收（ql-20260825-f6#1）', () => {
     expect(existsSync(freshTmp)).toBe(true);
   });
 });
+
+// ── task-04（2026-08-26-team-subsession-recursion / design §5.C / Grill M3）────
+// worker_depth 回填（P0-1 修复的四字段链同款容错）。
+
+describe('worker_depth 回填（task-04 保档链）', () => {
+  let dir: string;
+  let file: string;
+
+  beforeEach(() => {
+    dir = mkdtempDir();
+    file = join(dir, 'sessions.json');
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('落盘记录带 worker_depth → load 完整回填（含 0 合法值）', async () => {
+    const rec1 = mkRecord({ sessionId: 's-w1', worker_depth: 1 });
+    const rec2 = mkRecord({ sessionId: 's-w0', worker_depth: 0 });
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: SESSION_FILE_VERSION,
+        savedAt: 'x',
+        sessions: [rec1, rec2],
+      }),
+    );
+    const p = new JsonSessionPersistence(file);
+    const records = await p.load();
+    expect(records).toHaveLength(2);
+    expect(records[0].worker_depth).toBe(1);
+    expect(records[1].worker_depth).toBe(0);
+  });
+
+  it('save→load 往返：worker_depth 不丢（原子性回归）', async () => {
+    const p = new JsonSessionPersistence(file);
+    await p.save([mkRecord({ sessionId: 's-round', stage: 'mission_worker', worker_depth: 2 })]);
+    const records = await p.load();
+    expect(records[0].worker_depth).toBe(2);
+    expect(records[0].stage).toBe('mission_worker');
+  });
+
+  it('worker_depth 非法（字符串）→ 丢字段保记录（损坏隔离不丢整条）', async () => {
+    const raw = {
+      ...mkRecord({ sessionId: 's-bad' }),
+      worker_depth: 'not-a-number',
+    };
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: SESSION_FILE_VERSION,
+        savedAt: 'x',
+        sessions: [raw],
+      }),
+    );
+    const p = new JsonSessionPersistence(file);
+    const records = await p.load();
+    expect(records).toHaveLength(1);
+    expect(records[0].sessionId).toBe('s-bad');
+    expect(records[0]).not.toHaveProperty('worker_depth');
+  });
+
+  it('旧文件无 worker_depth → 缺省容错（字段缺席，记录保留）', async () => {
+    const rec = mkRecord({ sessionId: 's-old' });
+    writeFileSync(
+      file,
+      JSON.stringify({
+        version: SESSION_FILE_VERSION,
+        savedAt: 'x',
+        sessions: [rec],
+      }),
+    );
+    const p = new JsonSessionPersistence(file);
+    const records = await p.load();
+    expect(records).toEqual([rec]);
+    expect(records[0]).not.toHaveProperty('worker_depth');
+  });
+});

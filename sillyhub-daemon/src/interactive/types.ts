@@ -231,6 +231,17 @@ export interface SessionState {
    */
   stage?: string;
   /**
+   * task-04（2026-08-26-team-subsession-recursion / design §5.C / FR-04 /
+   * D-003@v2）：分身会话深度（来自 lease.metadata.worker_depth）。
+   *
+   * create 时从 ``CreateSessionInput.worker_depth`` 写入；snapshotPersistable 输出
+   * 到 record.worker_depth，restoreAndReconnect 从 record 保档（M3：防 daemon 重启
+   * 后非叶分身静默降级叶档）。本卡只承载不分层——工具集按 depth 分档（非叶 5 工具
+   * / 叶仅 worker_done）的判定归 task-05。undefined → 旧 lease / 主控 / 普通会话
+   * （缺键穿透不伪造默认值，叶档兜底宁少勿多归 task-05）。
+   */
+  worker_depth?: number;
+  /**
    * task-10（C-12 / FR-10）：profile 限定的 MCP server name 子集。
    *
    * 来自 claim payload.mcpRefs（context.py task-07 透传 lease.metadata.mcp_refs，
@@ -375,6 +386,16 @@ export interface CreateSessionInput {
    */
   stage?: string;
   /**
+   * task-04（2026-08-26-team-subsession-recursion / design §5.C / FR-04）：
+   * 分身会话深度（来自 lease.metadata.worker_depth，经 claim payload →
+   * daemon execPayload 归一化 → 此处透传）。
+   *
+   * SessionManager.create 写 state.worker_depth 并归一化进 MainAgentMcpContext
+   * （工具集分档判定归 task-05：非叶 depth < MAX_DISPATCH_DEPTH 注入派工五件、
+   * 叶仅 worker_done）。undefined → 旧 lease / 主控 / 普通会话（零回归）。
+   */
+  worker_depth?: number;
+  /**
    * task-10（C-12 / FR-10）：profile 限定的 MCP server name 子集。
    *
    * daemon ``_startInteractiveSession`` 从 execPayload.mcpRefs 透传（claim payload
@@ -503,7 +524,9 @@ export class SessionNotActiveError extends Error {
   }
 }
 
-/** provider 不支持（codex 后续独立，D-002@v3 不 Big Bang）。 */
+/**
+ * provider 不支持（codex 后续独立，D-002@v3 不 Big Bang）。
+ */
 export class UnsupportedProviderError extends Error {
   readonly code = 'UNSUPPORTED_PROVIDER' as const;
   constructor(provider: string) {
@@ -511,6 +534,28 @@ export class UnsupportedProviderError extends Error {
       `unsupported provider: ${provider}; only 'claude' supported in Wave1/2 (UNSUPPORTED_PROVIDER)`,
     );
     this.name = 'UnsupportedProviderError';
+  }
+}
+
+/**
+ * task-04（2026-08-26-team-subsession-recursion / design §5.D / FR-06）：daemon
+ * 存活会话总数闸拒绝（防进程风暴）。
+ *
+ * ``SessionManager.create`` 前置计数内存 _store 活会话（status 非终态 ended/failed，
+ * 终态延迟清理条目不计）≥ ``SILLYHUB_MAX_ACTIVE_SESSIONS``（默认 20，0=不限）时
+ * 抛出。**闸只限 create**——restoreAndReconnect / 重连路径不计数不拒绝（design
+ * §7 风险表「会话闸误伤 restore」）。daemon ``_startInteractiveSession`` 既有 P2b
+ * catch 捕获后 notifyRunResult error_during_execution 回传 run failed（backend
+ * run_sync 侧首 run failed + 从未 ready 收口规则归本变更 run_sync 任务）。
+ */
+export class SessionLimitReached extends Error {
+  readonly code = 'SESSION_LIMIT_REACHED' as const;
+  constructor(activeCount: number, maxActive: number) {
+    super(
+      `active session limit reached: ${activeCount} active >= ${maxActive} max ` +
+        `(SILLYHUB_MAX_ACTIVE_SESSIONS, SESSION_LIMIT_REACHED)`,
+    );
+    this.name = 'SessionLimitReached';
   }
 }
 
@@ -660,6 +705,16 @@ export interface PersistedSessionRecord {
    * stage/chat session 不写（undefined）→ 恢复后不注入 MCP（零回归）。
    */
   stage?: string;
+  /**
+   * task-04（2026-08-26-team-subsession-recursion / design §5.C / Grill M3）：
+   * 分身会话深度保档（防 daemon 重启后非叶分身静默降级叶档）。
+   *
+   * create 时经 ``CreateSessionInput.worker_depth`` 写 state → snapshotPersistable
+   * 输出到本字段（非 undefined 才写，0 合法）；restoreAndReconnect 读 record 保档
+   * 进恢复后的 state 与 MainAgentMcpContext。旧 sessions.json 无此字段 → 缺省容错
+   * （undefined，分档判定归 task-05 的叶档兜底宁少勿多）。
+   */
+  worker_depth?: number;
   /**
    * task-10（C-12）：profile MCP 子集（恢复后重新过滤主 agent MCP 注入用）。
    * create 时从 ``CreateSessionInput.mcpRefs`` 写入；恢复时 ``_resolveMainAgentMcp``

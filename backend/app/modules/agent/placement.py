@@ -625,6 +625,16 @@ class RunPlacementService:
         # daemon 谓词（daemon 侧消费归 task-06）。缺省 None 不写键——存量
         # quick-chat 与变更会话创建零回归。
         stage: str | None = None,
+        # task-04（2026-08-26-team-subsession-recursion / design §5.C / FR-04 /
+        # D-003@v2）：分身会话深度透传。分身/孙子会话派发传 worker_depth
+        # （= 调用会话 tree_depth + 1，调用方接线归 task-02，本方法只提供参数），
+        # 写 lease metadata.worker_depth → build_claim_payload 白名单（context.py
+        # stage 旁）→ daemon execPayload 归一化 → CreateSessionInput →
+        # SessionManager（state.worker_depth + MainAgentMcpContext 承载，档位判定
+        # 归 task-05）。写法用 ``is not None``（对齐 timeout_seconds 先例 :416——
+        # int 字段 0 是合法值不被吞）；缺省 None 不写键——存量 quick-chat / 主控 /
+        # 普通会话 / 旧 lease 全链无键（undefined 穿透不伪造默认值，零回归）。
+        worker_depth: int | None = None,
     ) -> "RunPlacementService.InteractiveDispatch":
         """Create the long-lived interactive lease for a new session.
 
@@ -766,6 +776,16 @@ class RunPlacementService:
         # 缺省 None 不写 → 存量 quick-chat / 变更会话零回归。
         if stage:
             metadata["stage"] = stage
+        # task-04（2026-08-26-team-subsession-recursion / design §5.C）：worker_depth
+        # 透传。分身/孙子会话派发传 worker_depth（调用方接线归 task-02，本卡只提供
+        # 参数），写 lease metadata.worker_depth → build_claim_payload（context.py
+        # stage 白名单旁）→ daemon execPayload 归一化 → CreateSessionInput /
+        # SessionState / snapshot 保档（M3：防重启非叶分身静默降级叶档）。
+        # ``is not None`` 守护（int 字段 0 是合法值不被吞，对齐 timeout_seconds
+        # 先例 :416）；缺省 None 不写键 → 存量 quick-chat / 主控 / 普通会话 / 旧
+        # lease 全链无键（undefined 穿透不伪造默认值，零回归）。
+        if worker_depth is not None:
+            metadata["worker_depth"] = worker_depth
         # D-008@v1（task-06 provides BorrowedLeaseFlag）：借用 lease 标记 borrowed=True
         # + lender_user_id，供 task-09 沙箱（按 lease 隔离只读 root_path）+ task-10 落 file
         # 判别。自有 daemon 路径 borrowed=False 不写（零回归）。

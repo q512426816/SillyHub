@@ -261,6 +261,109 @@ class TestPrepareInteractiveDispatch:
         assert "cwd" not in meta2
 
 
+# ── task-04（2026-08-26-team-subsession-recursion）：worker_depth 透传 ─────────
+
+
+class TestWorkerDepthMetadata:
+    """task-04 / design §5.C / FR-04：``prepare_interactive_dispatch`` 的
+    ``worker_depth`` 可选参数写 lease ``metadata.worker_depth``。
+
+    写法对齐 stage 先例（真值才写键）：None 不写——存量 quick-chat / 主控 / 普通
+    会话 / 旧 lease 的 metadata 无 worker_depth 键（undefined 全链穿透不伪造默认
+    值，零回归）。守卫用 ``is not None``（int 字段 0 是合法值不被吞，对齐
+    timeout_seconds 先例）。调用方接线（mcp_tools 派发传 tree_depth+1）归 task-02。
+    """
+
+    @pytest.mark.asyncio
+    async def test_worker_depth_written_to_metadata(self, db_session: AsyncSession) -> None:
+        """传 worker_depth=1（分身）→ metadata["worker_depth"] == 1。"""
+        uid = await _create_user(db_session)
+        await _create_runtime(db_session, uid)
+        placement = RunPlacementService(db_session)
+        dispatch = await placement.prepare_interactive_dispatch(
+            agent_session_id=uuid.uuid4(),
+            agent_run_id=uuid.uuid4(),
+            user_id=uid,
+            provider="claude",
+            prompt="hi",
+            model=None,
+            worker_depth=1,
+        )
+        lease = await db_session.get(DaemonTaskLease, dispatch.lease_id)
+        meta = lease.metadata_ or {}
+        assert meta["worker_depth"] == 1
+
+    @pytest.mark.asyncio
+    async def test_worker_depth_grandchild_layer_two(self, db_session: AsyncSession) -> None:
+        """孙层 depth=2 同样落键（递归派工链路）。"""
+        uid = await _create_user(db_session)
+        await _create_runtime(db_session, uid)
+        placement = RunPlacementService(db_session)
+        dispatch = await placement.prepare_interactive_dispatch(
+            agent_session_id=uuid.uuid4(),
+            agent_run_id=uuid.uuid4(),
+            user_id=uid,
+            provider="claude",
+            prompt="hi",
+            model=None,
+            worker_depth=2,
+        )
+        lease = await db_session.get(DaemonTaskLease, dispatch.lease_id)
+        meta = lease.metadata_ or {}
+        assert meta["worker_depth"] == 2
+
+    @pytest.mark.asyncio
+    async def test_worker_depth_zero_is_written(self, db_session: AsyncSession) -> None:
+        """``is not None`` 守护：0 是合法深度值不被真值判断吞掉。"""
+        uid = await _create_user(db_session)
+        await _create_runtime(db_session, uid)
+        placement = RunPlacementService(db_session)
+        dispatch = await placement.prepare_interactive_dispatch(
+            agent_session_id=uuid.uuid4(),
+            agent_run_id=uuid.uuid4(),
+            user_id=uid,
+            provider="claude",
+            prompt="hi",
+            model=None,
+            worker_depth=0,
+        )
+        lease = await db_session.get(DaemonTaskLease, dispatch.lease_id)
+        meta = lease.metadata_ or {}
+        assert meta["worker_depth"] == 0
+
+    @pytest.mark.asyncio
+    async def test_worker_depth_absent_by_default(self, db_session: AsyncSession) -> None:
+        """不传 / 显式 None → metadata 无 worker_depth 键（存量会话零回归）。"""
+        uid = await _create_user(db_session)
+        await _create_runtime(db_session, uid)
+        placement = RunPlacementService(db_session)
+        # 1) 缺省不传
+        dispatch = await placement.prepare_interactive_dispatch(
+            agent_session_id=uuid.uuid4(),
+            agent_run_id=uuid.uuid4(),
+            user_id=uid,
+            provider="claude",
+            prompt="hi",
+            model=None,
+        )
+        lease = await db_session.get(DaemonTaskLease, dispatch.lease_id)
+        meta = lease.metadata_ or {}
+        assert "worker_depth" not in meta
+        # 2) 显式 None 同样不写键
+        dispatch2 = await placement.prepare_interactive_dispatch(
+            agent_session_id=uuid.uuid4(),
+            agent_run_id=uuid.uuid4(),
+            user_id=uid,
+            provider="claude",
+            prompt="hi",
+            model=None,
+            worker_depth=None,
+        )
+        lease2 = await db_session.get(DaemonTaskLease, dispatch2.lease_id)
+        meta2 = lease2.metadata_ or {}
+        assert "worker_depth" not in meta2
+
+
 # ── notify_interactive_dispatch ──────────────────────────────────────────────
 
 
