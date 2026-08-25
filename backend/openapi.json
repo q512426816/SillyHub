@@ -54867,6 +54867,17 @@
               }
             ],
             "title": "First Run Id"
+          },
+          "sub_workers_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sub Workers Count"
           }
         },
         "type": "object",
@@ -54875,7 +54886,7 @@
           "status"
         ],
         "title": "TeamMissionWorkerSummary",
-        "description": "TeamMissionSummary.workers 单项——分身行（双形态）概要。\n\n- 存量 batch 形态：分身 run（role != orchestrator）逐行，``run_id`` = run id；\n- 新形态（task-13 / design §5.E，2026-08-25-team-subsession-governance）：\n  分身**子会话**行——``sub_session_id`` = 子会话 id（定名避开与\n  ``AgentSession.agent_session_id``（SDK 字符串 id）同名异义，Grill P2⑨）；\n  ``run_id`` = 首 run id、``first_run_id`` = 首 run id（design §6 实现级\n  备注：供 ``get_worker_result`` 连续消费）、role/objective 取首 run 双标记、\n  status 按 ``is_worker_complete`` / ``mission_derive_status`` 口径映射；\n- 存量形态两新字段恒 None（存量响应字段零变化，FR-08/FR-09）。"
+        "description": "TeamMissionSummary.workers 单项——分身行（双形态）概要。\n\n- 存量 batch 形态：分身 run（role != orchestrator）逐行，``run_id`` = run id；\n- 新形态（task-13 / design §5.E，2026-08-25-team-subsession-governance）：\n  分身**子会话**行——``sub_session_id`` = 子会话 id（定名避开与\n  ``AgentSession.agent_session_id``（SDK 字符串 id）同名异义，Grill P2⑨）；\n  ``run_id`` = 首 run id、``first_run_id`` = 首 run id（design §6 实现级\n  备注：供 ``get_worker_result`` 连续消费）、role/objective 取首 run 双标记、\n  status 按 ``is_worker_complete`` / ``mission_derive_status`` 口径映射；\n- 存量形态两新字段恒 None（存量响应字段零变化，FR-08/FR-09）；\n- ``sub_workers_count``（2026-08-26-team-subsession-recursion task-08 /\n  design §5.E）：一层分身的**孙后代折叠计数**——router 按\n  ``mission_worker_sessions_tree`` 全树枚举的 parent 关系聚合该分身在树中\n  的后代数（含孙及更深，脏数据截断内）。展示保持一层直查（workers 行不\n  展开孙层明细，门户分组等 UI 留 P3）；仅**有后代**的一层分身行填值，\n  存量 batch 行 / 无孙分身保持默认 None（FR-08 存量零变化）。"
       },
       "TeamWorkspaceRef": {
         "properties": {

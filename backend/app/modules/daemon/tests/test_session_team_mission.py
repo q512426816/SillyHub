@@ -1105,3 +1105,81 @@ async def test_summary_scope_workspaces_enriched(
     assert refs[str(env["backend_ws"].id)] == "backend Workspace"
     # 查无行的条目 name=None（前端回落 #id 徽标）
     assert refs[str(missing_id)] is None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# task-08（2026-08-26-team-subsession-recursion / design §5.E / FR-08）：
+# workers 保持一层直查 + 孙层折叠计数 sub_workers_count
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+async def _t08_seed_worker_session(
+    db_session, parent_id: uuid.UUID, *, tree_depth: int = 1
+) -> AgentSession:
+    """建分身子会话行（parent 入参——根=一层 / 一层=孙），无 run。"""
+    s = AgentSession(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        provider="claude",
+        status="active",
+        parent_session_id=parent_id,
+        tree_depth=tree_depth,
+    )
+    db_session.add(s)
+    await db_session.commit()
+    return s
+
+
+async def _t08_seed_worker_first_run(
+    db_session, mission: AgentMission, worker_session: AgentSession, *, role: str = "impl"
+) -> AgentRun:
+    """建分身首 run（mission_id + role 双标记，行化锚）。"""
+    r = AgentRun(
+        mission_id=mission.id,
+        agent_type="claude_code",
+        status="completed",
+        role=role,
+        objective=f"{role} 任务",
+        agent_session_id=worker_session.id,
+    )
+    db_session.add(r)
+    await db_session.commit()
+    return r
+
+
+async def test_summary_sub_workers_count_folded(client, auth_headers, db_session, tmp_path) -> None:
+    """task-08：workers 行保持一层（孙不展开成行），一层分身的孙后代数折进
+    sub_workers_count；无孙分身 / 存量 batch 行保持默认 None（FR-08 零回归）。"""
+    env = await _seed_env(db_session, tmp_path)
+    sid = env["session_id"]
+    m = AgentMission(
+        workspace_id=env["backend_ws"].id,
+        session_id=sid,
+        objective="孙折叠计数",
+        scope_workspace_ids=[str(env["backend_ws"].id)],
+    )
+    db_session.add(m)
+    await db_session.commit()
+
+    # w1（一层分身）带 2 个孙（g1/g2，孙首 run 带 mission_id+role 也不独立成行）
+    w1 = await _t08_seed_worker_session(db_session, sid)
+    await _t08_seed_worker_first_run(db_session, m, w1)
+    g1 = await _t08_seed_worker_session(db_session, w1.id, tree_depth=2)
+    g2 = await _t08_seed_worker_session(db_session, w1.id, tree_depth=2)
+    for g in (g1, g2):
+        await _t08_seed_worker_first_run(db_session, m, g, role="sub")
+    # w2（一层分身）无孙 → sub_workers_count None
+    w2 = await _t08_seed_worker_session(db_session, sid)
+    await _t08_seed_worker_first_run(db_session, m, w2, role="solo")
+
+    resp = await client.get(f"/api/daemon/sessions/{sid}/team-missions", headers=auth_headers)
+    assert resp.status_code == 200
+    summary = next(x for x in resp.json() if x["mission_id"] == str(m.id))
+    workers = summary["workers"]
+    # 行保持一层：仅 w1/w2 两行（孙 g1/g2 折叠不独立成行）
+    assert {w["sub_session_id"] for w in workers} == {str(w1.id), str(w2.id)}
+    by_sub = {w["sub_session_id"]: w for w in workers}
+    assert by_sub[str(w1.id)]["sub_workers_count"] == 2
+    assert by_sub[str(w2.id)]["sub_workers_count"] is None
+    # 存量 batch 行（无 sub_session）字段默认 None——无孙 mission 零变化
+    assert all("sub_workers_count" in w for w in workers)

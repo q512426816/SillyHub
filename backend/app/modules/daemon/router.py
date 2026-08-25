@@ -2818,6 +2818,11 @@ async def _team_mission_summary(
       存量侧剔除防同分身双计（对齐 ``mission_derive_status`` 虚拟映射同款
       剔除口径）；同根上一场已收敛 mission 的子会话（无本场首 run）不是
       本场分身，不进行；
+    - task-08（2026-08-26-team-subsession-recursion / design §5.E）：workers
+      行化保持一层直查（展示细节留 P3，status 已由 task-03 全树 derive 正确
+      含孙），另经 ``mission_worker_sessions_tree`` 全树枚举的 parent 关系
+      聚合一层分身的孙后代数填 ``sub_workers_count``（孙层折叠计数——无孙
+      分身 / 存量 batch 行保持默认 None，FR-08 零回归）；
     - scope 概要读落库冻结快照，NULL 缺省回落 [anchor]（单 ws 语义）。
 
     mission 模块延迟 import（与 orchestrator.schedule_loop 同款，避免循环
@@ -2825,7 +2830,11 @@ async def _team_mission_summary(
     """
     from app.modules.agent.control import MissionControlService
     from app.modules.agent.mission import is_worker_complete, mission_derive_status
-    from app.modules.agent.model import AgentRun, mission_worker_sessions
+    from app.modules.agent.model import (
+        AgentRun,
+        mission_worker_sessions,
+        mission_worker_sessions_tree,
+    )
 
     ctrl = MissionControlService(session)
     all_runs = await ctrl.worker_runs(mission.id)
@@ -2833,6 +2842,30 @@ async def _team_mission_summary(
     # task-13：新形态子会话行——首 run 双标记锚（design §5.A：派发三元组写
     # mission_id + role 的最早 run；追问轮 run 无 mission_id 天然不命中）。
     worker_sessions = await mission_worker_sessions(session, mission.id)
+    # task-08：孙层折叠计数——全树枚举建 parent→children 邻接表，按一层分身
+    # 起点沿树数后代（含孙及更深）；树枚举自身已 UNION 去重 + 深度截断，此处
+    # visited 仅脏环双保险。无子树 mission（存量 external / 无孙）树枚举与
+    # 一层等价，计数恒 0 → 字段保持 None。全树 id 集合同时供下方存量行剔除
+    # （孙层首 run 不进 workers 行，折叠呈现）。
+    tree_children: dict[uuid.UUID, list[uuid.UUID]] = {}
+    tree_session_ids: set[uuid.UUID] = set()
+    for tree_session in await mission_worker_sessions_tree(session, mission.id):
+        tree_session_ids.add(tree_session.id)
+        if tree_session.parent_session_id is not None:
+            tree_children.setdefault(tree_session.parent_session_id, []).append(tree_session.id)
+
+    def _sub_workers_count(start_id: uuid.UUID) -> int:
+        count = 0
+        visited = {start_id}
+        queue = [start_id]
+        while queue:
+            for child_id in tree_children.get(queue.pop(), []):
+                if child_id not in visited:
+                    visited.add(child_id)
+                    queue.append(child_id)
+                    count += 1
+        return count
+
     sub_session_ids = {s.id for s in worker_sessions}
     first_run_by_session: dict[uuid.UUID, AgentRun] = {}
     if sub_session_ids:
@@ -2872,6 +2905,7 @@ async def _team_mission_summary(
             row_status = "failed"
         else:
             row_status = "running"
+        sub_count = _sub_workers_count(worker_session.id)
         worker_rows.append(
             TeamMissionWorkerSummary(
                 run_id=first_run.id,
@@ -2881,10 +2915,15 @@ async def _team_mission_summary(
                 workspace_id=str(first_run.target_workspace_id or mission.workspace_id),
                 sub_session_id=worker_session.id,
                 first_run_id=first_run.id,
+                # 折叠计数：有后代才填（无孙 → None，与存量行同形）。
+                sub_workers_count=sub_count if sub_count > 0 else None,
             )
         )
-    # 存量回落：batch 分身 run 行（子会话首 run 已剔除防双计；存量 mission 无
-    # 子会话 → sub_session_ids 空 → 行内容与改动前逐字节一致）。
+    # 存量回落：batch 分身 run 行（子会话首 run 已剔除防双计；**全树**会话 id
+    # 集合剔除——task-08 孙层首 run（带 mission_id+role 双标记）同样不进
+    # workers 行，孙层以 sub_workers_count 折叠呈现而非独立行，design §5.E
+    # 「孙折叠计数」；存量 mission 无子会话 → 树集合空 → 行内容与改动前
+    # 逐字节一致，FR-08/FR-09 零回归）。
     worker_rows.extend(
         TeamMissionWorkerSummary(
             run_id=r.id,
@@ -2894,7 +2933,7 @@ async def _team_mission_summary(
             workspace_id=str(r.target_workspace_id or mission.workspace_id),
         )
         for r in all_runs
-        if r.role != "orchestrator" and r.agent_session_id not in sub_session_ids
+        if r.role != "orchestrator" and r.agent_session_id not in tree_session_ids
     )
     # ql-20260825-003：scope 名称 enriched 视图（批量一次查询；查无行的条目
     # name=None，前端回落 id 徽标）。
