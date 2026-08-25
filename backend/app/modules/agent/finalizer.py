@@ -39,6 +39,7 @@ from app.modules.agent.model import (
     AgentMission,
     AgentRun,
     AgentSession,
+    mission_worker_sessions,
 )
 from app.modules.daemon.host_fs import HostFsDelegate, new_host_fs_delegate
 from app.modules.workspace.model import Workspace
@@ -424,8 +425,11 @@ class FinalizerService:
         2. 采 patch artifact：**复用 task-04 既有采集**（``collect_completed_artifacts``
            在 converge 前已把各 worker ``diff_summary`` 采成 ``kind=patch`` artifact），
            取首个 patch artifact id（避免新读 diff 方法，task-07 授权）；无则 None。
-        3. 取 mission 各 completed worker 的 ``(run_id, target_workspace_id)`` 二元组
-           （target 为 NULL 时回退 mission.workspace_id 即 anchor）。
+        3. 取 mission 各终态 worker 的 ``(run_id, target_workspace_id)`` 二元组
+           （target 为 NULL 时回退 mission.workspace_id 即 anchor）；task-09 起
+           run 归属分身子会话时按 ``is_worker_complete`` 会话判定过滤——只清
+           **已完成分身**的副本，未完成分身（idle 未 done / 追问重开工中）cwd
+           不动（design §5.C.5）。
         4. 按 target_workspace_id 分组（defaultdict(list)）——每组共享一个 Workspace。
         5. 每组：resolve Workspace → 逐个 ``git_worktree_remove(ws, sibling_path)``；
            sibling_path 按 D-001@v2 公式算（``resolve_root_path_for_daemon(ws.root_path)
@@ -476,17 +480,54 @@ class FinalizerService:
         worker_stmt = select(
             AgentRun.id,
             AgentRun.target_workspace_id,
+            AgentRun.agent_session_id,
         ).where(
             AgentRun.mission_id == mission_id,
             AgentRun.status.in_(("completed", "failed", "killed")),
             AgentRun.worktree_branch.is_not(None),
         )
-        rows = (await self._session.execute(worker_stmt)).all()
-
-        if not rows:
+        raw_rows = (await self._session.execute(worker_stmt)).all()
+        if not raw_rows:
             log.info(
                 "finalizer_cleanup_no_worktree_branches",
                 mission_id=str(mission_id),
+                patch_artifact_id=str(patch_artifact_id) if patch_artifact_id else None,
+            )
+            return {"cleaned": [], "patch_artifact_id": patch_artifact_id}
+
+        # task-09（FR-05，design §5.C.5）：清理名单判据换 is_worker_complete——
+        # run 属于分身子会话（agent_session_id ∈ mission_worker_sessions）时按
+        # **会话**判定完成：首 run 终态 ≠ 分身完成，idle 未 done / 追问重开工中
+        # 的分身 cwd 不动（副本保留供后续轮次）。存量 batch run（无子会话归属）
+        # 的 is_worker_complete 即 run 终态，与 SQL 过滤等价，名单零回归（FR-09）。
+        from app.modules.agent.mission import is_worker_complete
+        from app.modules.agent.model import mission_worker_sessions
+
+        worker_sessions = await mission_worker_sessions(self._session, mission_id)
+        worker_sessions_by_id = {s.id: s for s in worker_sessions}
+        rows: list[tuple[uuid.UUID, uuid.UUID | None]] = []
+        for run_id, target_ws, agent_session_id in raw_rows:
+            owner_session = (
+                worker_sessions_by_id.get(agent_session_id)
+                if agent_session_id is not None
+                else None
+            )
+            if owner_session is not None and not await is_worker_complete(
+                self._session, owner_session
+            ):
+                log.info(
+                    "finalizer_cleanup_worker_incomplete_skip",
+                    mission_id=str(mission_id),
+                    run_id=str(run_id),
+                    agent_session_id=str(agent_session_id),
+                )
+                continue
+            rows.append((run_id, target_ws))
+        if not rows:
+            log.info(
+                "finalizer_cleanup_all_workers_incomplete",
+                mission_id=str(mission_id),
+                raw_candidates=len(raw_rows),
                 patch_artifact_id=str(patch_artifact_id) if patch_artifact_id else None,
             )
             return {"cleaned": [], "patch_artifact_id": patch_artifact_id}
@@ -586,6 +627,81 @@ async def _session_has_active_turn(db: AsyncSession, session_id: uuid.UUID) -> b
     return (await db.execute(stmt)).first() is not None
 
 
+async def _end_mission_worker_subsessions(
+    db: AsyncSession,
+    mission_id: uuid.UUID,
+    *,
+    trigger_run_id: uuid.UUID | None = None,
+) -> int:
+    """converge 成功后沿会话树批量收口分身子会话（task-10 / FR-06 / design §5.D）。
+
+    ``mission_worker_sessions(mission_id)`` 一层枚举分身子会话（收口名单单一
+    真相源），逐个复用 ``SessionService.end_session`` 既有链收口——子会话
+    ended + interactive lease completed + P0-2 修好的 SESSION_END WS
+    best-effort 下发。end_session 自带幂等（已 ended/failed 早退），重复调用
+    零副作用；本 helper 不重造 kill 逻辑、不直接翻 DB 会话状态（TaskCard 约束）。
+
+    - 属主校验：``user_id=mission.created_by``（分身子会话 user_id = mission
+      创建者，design §5.E / D-004@v1，owner-only 校验自然通过）；reason 固定
+      ``mission_converged``。mission 不存在 / created_by 缺失（脏数据）整体
+      跳过，孤儿交 task-12 patrol 兜底。
+    - best-effort：单个收口失败 ``log.warning`` 继续下一个，整体不抛出——
+      时序契约（TaskCard）：end_session 在 converged_at 与 merge 结果已落库
+      **之后**执行，收口失败不影响置位与 converge 返回值；残留孤儿子会话由
+      task-12 patrol 扫描兜底。
+    - 仅由 converge 成功路径（R5 抢占命中 + finalize 无 pending_conflicts）
+      调用；冲突回滚 / needs_manual / finalize 异常回滚三分支零调用（design
+      §5.D 铁律——子会话保持活跃供解冲突参考）。
+
+    返回成功收口条数（观测用）；无分身（存量 mission）枚举空集 no-op 返 0。
+    """
+    # 延迟 import 对齐 converge_mission_for_completed_run 既有防循环模式
+    # （daemon.session.service 依赖链宽，agent.finalizer 被 daemon.lease 消费）。
+    from app.modules.daemon.session.service import SessionService
+
+    mission = await db.get(AgentMission, mission_id)
+    if mission is None or mission.created_by is None:
+        log.warning(
+            "converge_close_workers_owner_unresolved",
+            mission_id=str(mission_id),
+            trigger_run_id=str(trigger_run_id) if trigger_run_id else None,
+        )
+        return 0
+    owner_id = mission.created_by
+    workers = await mission_worker_sessions(db, mission_id)
+    if not workers:
+        return 0
+    # 预取 id/属主标量：end_session 失败分支会 rollback（SQLAlchemy 随之 expire
+    # 会话内全部实例），循环内再访问 ORM 属性会触发隐式同步 refresh（asyncio
+    # 下 MissingGreenlet）——best-effort 循环只消费标量。
+    worker_ids = [w.id for w in workers]
+
+    svc = SessionService(db)
+    ended = 0
+    for worker_id in worker_ids:
+        try:
+            await svc.end_session(worker_id, owner_id, reason="mission_converged")
+            ended += 1
+        except Exception as exc:
+            # best-effort：单个失败（owner 不匹配 / lease 绑定异常 / daemon 离线
+            # 抛出）只记 warning 继续下一个，不阻断 converge 返回（TaskCard）。
+            log.warning(
+                "converge_close_worker_failed",
+                mission_id=str(mission_id),
+                worker_session_id=str(worker_id),
+                trigger_run_id=str(trigger_run_id) if trigger_run_id else None,
+                error=str(exc),
+            )
+    log.info(
+        "converge_close_workers_done",
+        mission_id=str(mission_id),
+        workers=len(workers),
+        ended=ended,
+        trigger_run_id=str(trigger_run_id) if trigger_run_id else None,
+    )
+    return ended
+
+
 async def converge_mission_for_completed_run(
     session: AsyncSession,
     run_id: uuid.UUID,
@@ -604,10 +720,14 @@ async def converge_mission_for_completed_run(
     ``converge_explicit``（显式收敛入口——mcp_tools._converge_core MCP converge /
     task-08 patrol awaiting_input 超时收敛复用）：
 
-    - 显式路径：``derive_status`` 输入收窄为**分身 run**（``non_orchestrator_runs``，
-      NULL role 守卫）——置位/合并**不依赖主控 run 状态**（会话 mission 主控轮
-      当轮 running 也要能收敛）；判据含 ``failed``（分身全终态但无一 completed
-      仍属「全终态」→ 置位 converged_at，design §7.5 converge 行）。
+    - 显式路径（task-09 判据换 task-08 单一真相源）：``mission_derive_status(
+      workers_only=True)``——输入收窄为**分身维度**（存量 batch run 原样 +
+      分身子会话虚拟 run 映射；主控轮剔除、NULL role 守卫同
+      ``non_orchestrator_runs`` 口径），置位/合并**不依赖主控 run 状态**（会话
+      mission 主控轮当轮 running 也要能收敛）；判据含 ``failed``（分身全完成但
+      无一 completed 仍属「全完成」→ 置位 converged_at，design §7.5 converge
+      行）与 ``awaiting_input``（分身全完成 + 会话空档，patrol 超时路径），置位
+      后重派生落到终态档。
     - 非显式路径（complete_lease / schedule_loop）对会话 mission（``session_id``
       指向真实存在的 ``AgentSession``，查表判别）**不自动收敛**：contract 表
       （design §7.5）会话
@@ -624,6 +744,12 @@ async def converge_mission_for_completed_run(
     返回收敛后的 mission status（``done``/``degraded``/``running``/...），或 None
     表示 run 不属于 mission。任何异常由调用方（complete_lease）try/except 兜底，
     不阻塞 lease 完成。
+
+    task-10（2026-08-25-team-subsession-governance / FR-06 / design §5.D）：收敛
+    成功（置位已落库 + merge 无 pending_conflicts，bootstrap 分支与 execute 全
+    merged 分支均算）后沿会话树逐个 ``end_session`` 收口分身子会话（
+    ``_end_mission_worker_subsessions``，best-effort 不抛出）；冲突回滚 /
+    needs_manual / finalize 异常回滚三分支零收口——子会话保持活跃供解冲突参考。
     """
     run = await session.get(AgentRun, run_id)
     if run is None or run.mission_id is None:
@@ -632,7 +758,7 @@ async def converge_mission_for_completed_run(
     # 延迟 import 避免与 execution/mission/control 的循环 import 风险
     from app.modules.agent.control import MissionControlService
     from app.modules.agent.execution import MissionExecutionService
-    from app.modules.agent.mission import derive_status
+    from app.modules.agent.mission import derive_status, mission_derive_status
 
     mission_id = run.mission_id
     exec_svc = MissionExecutionService(session, host_fs_delegate=new_host_fs_delegate(session))
@@ -642,11 +768,15 @@ async def converge_mission_for_completed_run(
     mission = await session.get(AgentMission, mission_id)
     cancelled = mission is not None and mission.cancelled_at is not None
     if converge_explicit:
-        # D-010：显式收敛判据只看分身 run（主控轮当轮 running 不挡收敛）；
-        # ``failed``（分身全终态无一 completed）也在置位集合内。
-        runs = await ctrl.non_orchestrator_runs(mission_id)
-        status = derive_status(runs, cancelled=cancelled)
-        should_converge = status in ("done", "degraded", "failed")
+        # task-09（FR-05）：判据换 task-08 单一真相源 mission_derive_status
+        # (workers_only=True)——分身子会话经虚拟 run 映射（idle 未 done →
+        # running，不被首 run 终态遮蔽）、主控轮剔除（D-010 置位不依赖主控 run
+        # 状态，NULL role 守卫同 non_orchestrator_runs 口径）。should_converge 的
+        # done/degraded/failed 语义不变；awaiting_input（分身全完成 + 会话空档）
+        # 同属「分身全完成」档——patrol 超时收敛路径会话必 idle，不收该档会永久
+        # 卡 awaiting_input；置位成功后 converged=True 重派生自然落到终态档。
+        status = await mission_derive_status(session, mission_id, workers_only=True)
+        should_converge = status in ("done", "degraded", "failed", "awaiting_input")
     else:
         runs = await ctrl.worker_runs(mission_id)
         # 会话 mission 判别：session_id 列对存量构造路径 default_factory 兜底随机
@@ -711,6 +841,11 @@ async def converge_mission_for_completed_run(
             )
             return status
         await session.commit()
+        if status == "awaiting_input":
+            # task-09：置位已落库（converged_at 非空）→ 重派生落到终态档
+            # （done/degraded/failed），消费方（mcp busy 前置透传 / patrol 收敛
+            # 计数）拿到的仍是收敛终态值，不泄漏 awaiting_input 中间档。
+            status = await mission_derive_status(session, mission_id, workers_only=True)
 
         finalizer = FinalizerService(
             session, glm_config, host_fs_delegate=new_host_fs_delegate(session)
@@ -778,6 +913,16 @@ async def converge_mission_for_completed_run(
                 pending_conflicts=len(merge_result.pending_conflicts),
             )
             return status
+        # task-10（FR-06 / design §5.D 生命周期契约表 converge 行）：merge 成功
+        # （置位已 commit + 无 pending_conflicts）→ 沿树逐个 end_session 收口
+        # 分身子会话。execute 无冲突分支（含 BE-P1-4b cleanup 后）与 bootstrap
+        # 分支（finalize_bootstrap_mission 后）在此汇合；helper 整体 best-effort
+        # 不抛出——收口失败不影响已落库的 converged_at 与 converge 返回值（孤儿
+        # 由 task-12 patrol 兜底）。冲突回滚（上文 early return）/ needs_manual
+        # （mcp_tools 冲突状态机，置位已被上文回滚）/ finalize 异常回滚（上文
+        # raise）三分支均到不了这里，零收口调用——子会话保持活跃供解冲突参考。
+        if not merge_result.pending_conflicts:
+            await _end_mission_worker_subsessions(session, mission_id, trigger_run_id=run_id)
         log.info(
             "mission_converged",
             mission_id=str(mission_id),

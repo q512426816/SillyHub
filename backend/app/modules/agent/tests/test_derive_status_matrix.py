@@ -25,8 +25,12 @@ from datetime import UTC, datetime
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agent.mission import derive_status, get_active_mission_for_session
-from app.modules.agent.model import AgentMission, AgentRun
+from app.modules.agent.mission import (
+    derive_status,
+    get_active_mission_for_session,
+    mission_derive_status,
+)
+from app.modules.agent.model import AgentMission, AgentRun, AgentSession
 
 
 def _run(status: str, *, role: str | None = None) -> AgentRun:
@@ -322,3 +326,309 @@ class TestGetActiveMissionForSession:
         """按 session_id 精确过滤，别的会话的活跃 mission 不串。"""
         await _add_mission(db_session, session_id=uuid.uuid4())
         assert await get_active_mission_for_session(db_session, uuid.uuid4()) is None
+
+
+# ── 6. mission_derive_status 虚拟 run 映射（task-08 / design §5.C.4）─────────
+#
+# derive_status 纯函数本身零回归由上方 1–4 节矩阵全格守护（签名与判定未动，
+# D-005@v1）；本节验证包装层的虚拟映射优先级矩阵：done 优先 failed、idle→
+# running、workers_only 排除主控轮（NULL role 守卫）、空集 planning 语义。
+
+
+async def _add_session_mission(
+    db: AsyncSession,
+    *,
+    root_session_id: uuid.UUID | None = None,
+    converged_at: datetime | None = None,
+    cancelled_at: datetime | None = None,
+) -> AgentMission:
+    m = AgentMission(
+        workspace_id=uuid.uuid4(),
+        objective="团队目标",
+        session_id=root_session_id,
+        converged_at=converged_at,
+        cancelled_at=cancelled_at,
+    )
+    db.add(m)
+    await db.commit()
+    await db.refresh(m)
+    return m
+
+
+async def _add_session(
+    db: AsyncSession,
+    *,
+    status: str = "active",
+    parent_session_id: uuid.UUID | None = None,
+    worker_done_at: datetime | None = None,
+) -> AgentSession:
+    s = AgentSession(
+        user_id=uuid.uuid4(),
+        provider="claude",
+        status=status,
+        parent_session_id=parent_session_id,
+        worker_done_at=worker_done_at,
+    )
+    db.add(s)
+    await db.commit()
+    await db.refresh(s)
+    return s
+
+
+async def _add_run_row(
+    db: AsyncSession,
+    *,
+    status: str,
+    role: str | None = None,
+    mission_id: uuid.UUID | None = None,
+    agent_session_id: uuid.UUID | None = None,
+) -> AgentRun:
+    r = AgentRun(
+        mission_id=mission_id,
+        agent_type="claude_code",
+        status=status,
+        role=role,
+        objective="o",
+        agent_session_id=agent_session_id,
+    )
+    db.add(r)
+    await db.commit()
+    await db.refresh(r)
+    return r
+
+
+def _ts() -> datetime:
+    return datetime.now(UTC)
+
+
+class TestMissionDeriveStatusVirtualMapping:
+    @pytest.mark.asyncio
+    async def test_worker_idle_not_done_maps_running_not_planning(
+        self, db_session: AsyncSession
+    ) -> None:
+        """分身 idle 未 done（无 worker_done_at）→ 虚拟 running；有分身时虚拟
+        集合非空，无任何 run 行也不误判 planning（FR-05 验收核心）。"""
+        root = await _add_session(db_session)
+        mission = await _add_session_mission(db_session, root_session_id=root.id)
+        await _add_session(db_session, parent_session_id=root.id)  # idle 未 done
+
+        assert await mission_derive_status(db_session, mission.id) == "running"
+
+    @pytest.mark.asyncio
+    async def test_no_workers_no_runs_maps_planning(self, db_session: AsyncSession) -> None:
+        """无分身无 run（mission 刚建）→ planning 空集语义不变。"""
+        root = await _add_session(db_session)
+        mission = await _add_session_mission(db_session, root_session_id=root.id)
+
+        assert await mission_derive_status(db_session, mission.id) == "planning"
+
+    @pytest.mark.asyncio
+    async def test_all_done_workers_map_completed_when_converged(
+        self, db_session: AsyncSession
+    ) -> None:
+        """全分身 done 且无活跃 turn → 虚拟全 completed → done（mission 已收敛
+        视角，converged 置位不回落 awaiting_input）。"""
+        root = await _add_session(db_session)
+        mission = await _add_session_mission(
+            db_session, root_session_id=root.id, converged_at=_ts()
+        )
+        await _add_session(db_session, parent_session_id=root.id, worker_done_at=_ts())
+        await _add_session(db_session, parent_session_id=root.id, worker_done_at=_ts())
+
+        assert await mission_derive_status(db_session, mission.id) == "done"
+
+    @pytest.mark.asyncio
+    async def test_all_done_active_mission_maps_awaiting_input(
+        self, db_session: AsyncSession
+    ) -> None:
+        """全分身 done 但 mission 未收敛、主控无活跃 turn → awaiting_input
+        （等主控 converge 的中间档语义保留，不被虚拟 completed 越过）。"""
+        root = await _add_session(db_session)
+        mission = await _add_session_mission(db_session, root_session_id=root.id)
+        await _add_session(db_session, parent_session_id=root.id, worker_done_at=_ts())
+
+        assert await mission_derive_status(db_session, mission.id) == "awaiting_input"
+
+    @pytest.mark.asyncio
+    async def test_done_worker_priority_over_ended_session(self, db_session: AsyncSession) -> None:
+        """converge end_session 后（会话 ended）done 分身仍优先映射 completed
+        而非 failed/running——优先级 1（done）> 终态映射（验收核心）。"""
+        root = await _add_session(db_session)
+        mission = await _add_session_mission(
+            db_session, root_session_id=root.id, converged_at=_ts()
+        )
+        await _add_session(
+            db_session,
+            status="ended",
+            parent_session_id=root.id,
+            worker_done_at=_ts(),
+        )
+
+        assert await mission_derive_status(db_session, mission.id) == "done"
+
+    @pytest.mark.asyncio
+    async def test_done_worker_priority_over_failed_session(self, db_session: AsyncSession) -> None:
+        """会话终态 failed 但 worker_done 已置且无活跃 turn → completed 优先于
+        failed（done 优先级矩阵），不落 degraded/failed。"""
+        root = await _add_session(db_session)
+        mission = await _add_session_mission(
+            db_session, root_session_id=root.id, converged_at=_ts()
+        )
+        await _add_session(
+            db_session,
+            status="failed",
+            parent_session_id=root.id,
+            worker_done_at=_ts(),
+        )
+
+        assert await mission_derive_status(db_session, mission.id) == "done"
+
+    @pytest.mark.asyncio
+    async def test_failed_worker_session_without_done_maps_failed(
+        self, db_session: AsyncSession
+    ) -> None:
+        """会话终态 failed 且未 done → 虚拟 failed；单一分身全 failed → failed。"""
+        root = await _add_session(db_session)
+        mission = await _add_session_mission(
+            db_session, root_session_id=root.id, converged_at=_ts()
+        )
+        await _add_session(db_session, status="failed", parent_session_id=root.id)
+
+        assert await mission_derive_status(db_session, mission.id) == "failed"
+
+    @pytest.mark.asyncio
+    async def test_ended_worker_without_done_maps_running(self, db_session: AsyncSession) -> None:
+        """ended 未 done（非 failed 终态）→ running（保守：不进终态集合，
+        不给「全部终态请收敛」类判据喂错误信号）。"""
+        root = await _add_session(db_session)
+        mission = await _add_session_mission(
+            db_session, root_session_id=root.id, converged_at=_ts()
+        )
+        await _add_session(db_session, status="ended", parent_session_id=root.id)
+
+        assert await mission_derive_status(db_session, mission.id) == "running"
+
+    @pytest.mark.asyncio
+    async def test_mixed_done_and_failed_workers_map_degraded(
+        self, db_session: AsyncSession
+    ) -> None:
+        """一 done + 一 failed（未 done）→ 虚拟 completed+failed → degraded。"""
+        root = await _add_session(db_session)
+        mission = await _add_session_mission(
+            db_session, root_session_id=root.id, converged_at=_ts()
+        )
+        await _add_session(db_session, parent_session_id=root.id, worker_done_at=_ts())
+        await _add_session(db_session, status="failed", parent_session_id=root.id)
+
+        assert await mission_derive_status(db_session, mission.id) == "degraded"
+
+    @pytest.mark.asyncio
+    async def test_followup_rework_rolls_back_to_running(self, db_session: AsyncSession) -> None:
+        """追问重开工：worker_done_at 已置但新轮 run 活跃 → 虚拟映射回到
+        running（追问轮 run 不写 mission_id，仅会话维度可见）。"""
+        root = await _add_session(db_session)
+        mission = await _add_session_mission(db_session, root_session_id=root.id)
+        worker = await _add_session(db_session, parent_session_id=root.id, worker_done_at=_ts())
+        await _add_run_row(
+            db_session,
+            status="running",
+            agent_session_id=worker.id,  # 追问轮活跃
+        )
+
+        assert await mission_derive_status(db_session, mission.id) == "running"
+
+    @pytest.mark.asyncio
+    async def test_workers_only_excludes_orchestrator_active_round(
+        self, db_session: AsyncSession
+    ) -> None:
+        """主控在自己活跃轮内（orchestrator run running）derive 不恒 running：
+
+        - workers_only=True：主控轮被排除，全 done 分身虚拟 completed；主控
+          会话有活跃 turn → 不进 awaiting_input → done（D-010 置位可成功）；
+        - workers_only=False（对照）：主控轮 running 原样计入 → running。
+        """
+        root = await _add_session(db_session)
+        mission = await _add_session_mission(db_session, root_session_id=root.id)
+        await _add_run_row(
+            db_session,
+            status="running",
+            role="orchestrator",
+            mission_id=mission.id,
+            agent_session_id=root.id,
+        )
+        await _add_session(db_session, parent_session_id=root.id, worker_done_at=_ts())
+
+        assert await mission_derive_status(db_session, mission.id, workers_only=True) == "done"
+        assert await mission_derive_status(db_session, mission.id) == "running"
+
+    @pytest.mark.asyncio
+    async def test_workers_only_keeps_null_role_legacy_runs(self, db_session: AsyncSession) -> None:
+        """NULL role 守卫：存量 batch run（role=NULL running）在 workers_only
+        下保留（SQL 三值逻辑 != 会漏 NULL 行）→ running。"""
+        root = await _add_session(db_session)
+        mission = await _add_session_mission(db_session, root_session_id=root.id)
+        await _add_run_row(db_session, status="running", role=None, mission_id=mission.id)
+
+        assert await mission_derive_status(db_session, mission.id, workers_only=True) == "running"
+
+    @pytest.mark.asyncio
+    async def test_subsession_first_run_not_double_counted(self, db_session: AsyncSession) -> None:
+        """分身首 run（mission_id + agent_session_id=子会话）被剔除不与虚拟映射
+        双计：首 run failed + worker_done 已置 → 只算虚拟 completed → done
+        （若双计则会误落 degraded）。"""
+        root = await _add_session(db_session)
+        mission = await _add_session_mission(
+            db_session, root_session_id=root.id, converged_at=_ts()
+        )
+        worker = await _add_session(db_session, parent_session_id=root.id, worker_done_at=_ts())
+        await _add_run_row(
+            db_session,
+            status="failed",  # 首 run 终态 failed（不构成活跃 turn）
+            role="arch",
+            mission_id=mission.id,
+            agent_session_id=worker.id,
+        )
+
+        assert await mission_derive_status(db_session, mission.id) == "done"
+
+    @pytest.mark.asyncio
+    async def test_cancelled_flag_short_circuits_virtual_mapping(
+        self, db_session: AsyncSession
+    ) -> None:
+        """cancelled_at 置位最高优先——虚拟映射（running）不改变 cancelled 判定。"""
+        root = await _add_session(db_session)
+        mission = await _add_session_mission(
+            db_session, root_session_id=root.id, cancelled_at=_ts()
+        )
+        await _add_session(db_session, parent_session_id=root.id)  # idle 未 done
+
+        assert await mission_derive_status(db_session, mission.id) == "cancelled"
+
+    @pytest.mark.asyncio
+    async def test_legacy_batch_mission_zero_regression(self, db_session: AsyncSession) -> None:
+        """存量 batch mission（session_id 随机 uuid 查无会话行，无子会话）：
+        runs 原样喂纯函数，与既有调用方 derive_status(runs, cancelled=...) 结论
+        逐字节一致，has_session=False 永不 awaiting_input（FR-09 零回归）。"""
+        mission = await _add_session_mission(db_session, root_session_id=uuid.uuid4())
+        r1 = await _add_run_row(db_session, status="completed", role="arch", mission_id=mission.id)
+        r2 = await _add_run_row(db_session, status="failed", role="impl", mission_id=mission.id)
+
+        assert await mission_derive_status(db_session, mission.id) == derive_status([r1, r2])
+        assert await mission_derive_status(db_session, mission.id) == "degraded"
+        assert await mission_derive_status(db_session, mission.id) != "awaiting_input"
+
+    @pytest.mark.asyncio
+    async def test_legacy_batch_pending_run_still_running(self, db_session: AsyncSession) -> None:
+        """存量 batch run 判据：任一 pending/running → running（非子会话形态
+        判据路径零回归）。"""
+        mission = await _add_session_mission(db_session, root_session_id=uuid.uuid4())
+        await _add_run_row(db_session, status="completed", role="arch", mission_id=mission.id)
+        await _add_run_row(db_session, status="pending", role="impl", mission_id=mission.id)
+
+        assert await mission_derive_status(db_session, mission.id) == "running"
+
+    @pytest.mark.asyncio
+    async def test_missing_mission_graceful_planning(self, db_session: AsyncSession) -> None:
+        """mission 不存在 → 输入空集宽限（对齐 mission_worker_sessions 缺行
+        返 [] 口径），返回 planning 不抛。"""
+        assert await mission_derive_status(db_session, uuid.uuid4()) == "planning"

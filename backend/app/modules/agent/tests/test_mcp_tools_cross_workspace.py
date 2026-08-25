@@ -8,12 +8,22 @@ scope 放行 / target 越界 400 / profile 归属，均止步于 503 fail-loud �
 通过）互补——本文件覆盖**组合流**，一次请求内同时穿过 ``_get_mission`` scope
 放宽 + ``dispatch_worker`` target 透传到 execution 的完整链路：
 
+task-15（2026-08-25-team-subsession-governance）：task-05 后 dispatch_worker
+执行段整体换子会话三元组（AgentSession + interactive lease + 首 run，不再调
+batch ``placement.dispatch_to_daemon``）。本文件的「target 透传到 execution」
+实证断言从 mock dispatch_to_daemon kwargs 机械迁移到新形态——派发走真实
+``prepare_interactive_dispatch``（lease 落库，零网络），透传证据改从 interactive
+lease 断言：``metadata.cwd``（worktree 副本路径）、``metadata.workspace_id``
+（按目标 ws 路由）、``runtime_id``（代表机器钉定）、``metadata.stage``。
+旧 ``representative_fallback`` 旗标随 batch 路径退场（D-004@v1 runtime 解析
+固定「自有在线优先 → 代表 binding 钉定」）。
+
 1. member workspace 上下文（URL 用 scope 内非 anchor ws）驱动 dispatch_worker
    + list_workers（_get_mission 放宽 × MCP 工具同一入口的组合）；
-2. target ∈ scope 时 dispatch 成功（假 delegate + 假 placement）：worktree 按
-   target 建、lease root_path 落 target root 的 .worktrees 副本、placement 收
-   ``representative_fallback=True``——target 参数真正透传到 execution 的实证
-   （既有用例只到 503，未证明透传）；
+2. target ∈ scope 时 dispatch 成功（假 delegate；lease 真实落库）：worktree 按
+   target 建、lease metadata cwd 落 target root 的 .worktrees 副本、lease
+   workspace_id 按目标 ws 路由 + runtime 钉定代表机器——target 参数真正
+   透传到派发执行段的实证（既有用例只到 503，未证明透传）；
 3. target ∉ scope 拒绝时**不落 run**（400 先于建 run 的组合断言）；
 4. profile 归属放宽（P2-1）：profile 属 anchor ws 也能被 scope 内 target 派发
    使用（组合：anchor profile × target=member ws；既有用例只测 profile@target
@@ -26,17 +36,19 @@ test_integration_cross_workspace.py 文件头注释与主流程报告。
 
 from __future__ import annotations
 
+import json
 import uuid
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.agent.execution import MISSION_WORKER_STAGE
 from app.modules.agent.model import AgentMission, AgentRun
 from app.modules.agent.profile.model import AgentProfile, AgentProfileVisibility
+from app.modules.daemon.model import DaemonTaskLease
 from app.modules.workspace.model import Workspace
-
-_PLACEMENT_PATH = "app.modules.agent.placement.RunPlacementService.dispatch_to_daemon"
 
 
 async def _make_ws(session: AsyncSession, *, name: str, ws_type: str, root_path: str) -> Workspace:
@@ -81,15 +93,16 @@ async def _seed_cross_ws_pair(session: AsyncSession) -> tuple[Workspace, Workspa
 
 
 def _fake_delegate() -> MagicMock:
-    """HostFsDelegate mock：git_worktree_add 恒 ok（dispatch 成功路径）。"""
+    """HostFsDelegate mock：probe 恒 git + git_worktree_add 恒 ok（dispatch 成功路径）。"""
     delegate: MagicMock = MagicMock()
+    delegate.probe_workspace_git_mode = AsyncMock(return_value="git")
     delegate.git_worktree_add = AsyncMock(
         return_value={"ok": True, "worktree_path": None, "error": None}
     )
     return delegate
 
 
-async def _stub_representative_binding(session: AsyncSession, ws_id: uuid.UUID) -> None:
+async def _stub_representative_binding(session: AsyncSession, ws_id: uuid.UUID) -> uuid.UUID:
     """给工作区造一条在线机器绑定（ql-20260822-008 派发前在线绑定预检用例）。
 
     与 test_mcp_tools._stub_representative_binding 同款：daemon_instances(online)
@@ -97,10 +110,14 @@ async def _stub_representative_binding(session: AsyncSession, ws_id: uuid.UUID) 
     resolve_representative_binding 分支2「任意在线」）。raw SQL 注意 SQLite
     兼容：无 ::json 转换、显式 created_at/updated_at 字符串。本文件派发目标
     均为 member ws（显式 target），stub 的 ws 须与 target_workspace_id 一致。
+
+    task-15：返回绑定 runtime id——子会话派发（task-05）后透传证据从
+    dispatch_to_daemon kwargs 迁到 interactive lease（runtime 钉定断言用）。
     """
     from sqlalchemy import text
 
     di_id = uuid.uuid4()
+    rt_id = uuid.uuid4()
     member_uid = uuid.uuid4()
     ts = "2026-08-22T00:00:00+00:00"
     await session.execute(
@@ -115,7 +132,7 @@ async def _stub_representative_binding(session: AsyncSession, ws_id: uuid.UUID) 
             "INSERT INTO daemon_runtimes (id, user_id, daemon_instance_id, provider, status, created_at, updated_at)"
             " VALUES (:id, :uid, :di, 'claude', 'online', :ts, :ts)"
         ),
-        {"id": uuid.uuid4().hex, "uid": member_uid.hex, "di": di_id.hex, "ts": ts},
+        {"id": rt_id.hex, "uid": member_uid.hex, "di": di_id.hex, "ts": ts},
     )
     await session.execute(
         text(
@@ -125,12 +142,26 @@ async def _stub_representative_binding(session: AsyncSession, ws_id: uuid.UUID) 
         {"wid": ws_id.hex, "uid": member_uid.hex, "di": di_id.hex, "ts": ts},
     )
     await session.commit()
+    return rt_id
 
 
 async def _fetch_mission_run(session: AsyncSession, mission_id: uuid.UUID) -> AgentRun:
     """mission 下（唯一）worker run，从 DB 现查。"""
     stmt = select(AgentRun).where(AgentRun.mission_id == mission_id)
     return (await session.execute(stmt)).scalars().one()
+
+
+async def _fetch_worker_lease(session: AsyncSession, run: AgentRun) -> DaemonTaskLease:
+    """取分身首 run 绑定的 interactive lease（task-05 子会话派发形态）。"""
+    assert run.lease_id is not None, "子会话派发应回填首 run.lease_id"
+    lease = await session.get(DaemonTaskLease, run.lease_id)
+    assert lease is not None
+    return lease
+
+
+def _lease_meta(lease: DaemonTaskLease) -> dict[str, Any]:
+    raw = lease.metadata_
+    return json.loads(raw) if isinstance(raw, str) else dict(raw or {})
 
 
 # ---------------------------------------------------------------------------
@@ -146,14 +177,10 @@ class TestMemberContextDispatchFlow:
         同一 member 上下文可读（_get_mission 放宽 × 工具入口的组合）。"""
         _anchor, member, mission = await _seed_cross_ws_pair(db_session)
         # ql-20260822-008：派发前在线绑定预检查派发目标（target=member）的绑定
-        await _stub_representative_binding(db_session, member.id)
+        rep_rt_id = await _stub_representative_binding(db_session, member.id)
 
         fake = _fake_delegate()
-        placement: AsyncMock = AsyncMock(return_value=uuid.uuid4())
-        with (
-            patch("app.modules.agent.mcp_tools.new_host_fs_delegate", return_value=fake),
-            patch(_PLACEMENT_PATH, new=placement),
-        ):
+        with patch("app.modules.agent.mcp_tools.new_host_fs_delegate", return_value=fake):
             resp = await client.post(
                 f"/api/workspaces/{member.id}/missions/{mission.id}/dispatch_worker",
                 json={"objective": "前端改动", "target_workspace_id": str(member.id)},
@@ -170,12 +197,16 @@ class TestMemberContextDispatchFlow:
         assert len(workers) == 1
         assert workers[0]["objective"] == "前端改动"
 
-        # run 落库 + 派发链路真实走通（placement 被调，非 503/400 短路）
-        placement.assert_awaited_once()
+        # run 落库 + 派发链路真实走通（task-15：interactive lease 落库 +
+        # runtime 钉定代表机器，非 503/400 短路）
         run = await _fetch_mission_run(db_session, mission.id)
         assert run.status == "pending"
         assert run.error_code is None
         assert run.worktree_branch == f"workers/{str(run.id)[:8]}"
+        lease = await _fetch_worker_lease(db_session, run)
+        assert lease.kind == "interactive"
+        assert lease.runtime_id == rep_rt_id
+        assert _lease_meta(lease)["stage"] == MISSION_WORKER_STAGE
 
 
 # ---------------------------------------------------------------------------
@@ -192,14 +223,10 @@ class TestTargetTransparentForwarding:
         placement 收 member 路由 + representative_fallback=True。"""
         anchor, member, mission = await _seed_cross_ws_pair(db_session)
         # ql-20260822-008：派发前在线绑定预检查派发目标（target=member）的绑定
-        await _stub_representative_binding(db_session, member.id)
+        rep_rt_id = await _stub_representative_binding(db_session, member.id)
 
         fake = _fake_delegate()
-        placement: AsyncMock = AsyncMock(return_value=uuid.uuid4())
-        with (
-            patch("app.modules.agent.mcp_tools.new_host_fs_delegate", return_value=fake),
-            patch(_PLACEMENT_PATH, new=placement),
-        ):
+        with patch("app.modules.agent.mcp_tools.new_host_fs_delegate", return_value=fake):
             resp = await client.post(
                 f"/api/workspaces/{anchor.id}/missions/{mission.id}/dispatch_worker",
                 json={
@@ -215,15 +242,19 @@ class TestTargetTransparentForwarding:
 
         run = await _fetch_mission_run(db_session, mission.id)
 
-        # 透传实证 1：worktree 按目标 ws 建（execution git_worktree_add 收 member）
+        # 透传实证 1：worktree 按目标 ws 建（git_worktree_add 收 member）
         fake.git_worktree_add.assert_awaited_once()
         assert fake.git_worktree_add.await_args.args[0].id == member.id
-        # 透传实证 2：lease root_path 落 target root 的 .worktrees 副本（worker cwd）
-        wk = placement.call_args.kwargs
-        assert wk["root_path"] == f"{member.root_path}/.worktrees/{str(run.id)[:8]}"
-        # 透传实证 3：placement 按目标 ws 路由 + representative 旗标开（代表 binding）
-        assert wk["workspace_id"] == member.id
-        assert wk["representative_fallback"] is True
+        # 透传实证 2（task-15 迁移）：lease metadata cwd 落 target root 的
+        # .worktrees 副本（worker cwd，claim payload root_path 源）
+        lease = await _fetch_worker_lease(db_session, run)
+        meta = _lease_meta(lease)
+        assert meta["cwd"] == f"{member.root_path}/.worktrees/{str(run.id)[:8]}"
+        # 透传实证 3（task-15 迁移）：lease 按目标 ws 路由 + runtime 钉定代表机器
+        # （D-004@v1：创建者无自有在线 runtime → 代表 binding 钉定）
+        assert uuid.UUID(meta["workspace_id"]) == member.id
+        assert lease.runtime_id == rep_rt_id
+        assert meta["stage"] == MISSION_WORKER_STAGE
         # team 模式自建 worktree 分支按 task-03 公式落 run（converge 分组键的 branch 半边）
         assert run.worktree_branch == f"workers/{str(run.id)[:8]}"
 

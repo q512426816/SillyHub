@@ -610,6 +610,21 @@ class RunPlacementService:
         # first-online 选择与 provider 不在线 fallback（:1329），也不走
         # workspace 借用兜底——钉定不可满足时明确抛错，绝不静默换机。
         pinned_runtime_id: uuid.UUID | None = None,
+        # task-03（2026-08-25-team-subsession-governance / design §5.B / D-004@v1）：
+        # 代表 binding 钉定旗标。True 时钉定复查（_query_pinned_online_runtime）
+        # 只按 id + status='online' 校验，跳过 user_id 属主谓词——跨 ws 场景
+        # mission.created_by 常非代表机器属主（resolve_representative_binding 解析出
+        # 的 runtime 由调用方 task-05 以钉定模式传入）。**仅与 pinned_runtime_id
+        # 搭配生效**；普通用户自选机器钉定（默认 False）属主校验保持不变。
+        # 钉定不可满足（离线/不存在）仍抛 NoOnlineDaemonError，绝不静默换机。
+        pinned_skip_owner_check: bool = False,
+        # task-03（design §5.B stage 透传）：分身子会话派发用。非空时写 lease
+        # metadata 的 stage 键（写法对齐 dispatch_to_daemon 既有 stage 写入 :421），
+        # 值复用 execution.py 的 MISSION_WORKER_STAGE 常量（不建副本），经
+        # lease/context.build_claim_payload 既有 stage 透传（context.py:479）带给
+        # daemon 谓词（daemon 侧消费归 task-06）。缺省 None 不写键——存量
+        # quick-chat 与变更会话创建零回归。
+        stage: str | None = None,
     ) -> "RunPlacementService.InteractiveDispatch":
         """Create the long-lived interactive lease for a new session.
 
@@ -656,7 +671,16 @@ class RunPlacementService:
         borrowed = False
         lender_user_id: uuid.UUID | None = None
         if pinned_runtime_id is not None:
-            runtime = await self._query_pinned_online_runtime(user_id, pinned_runtime_id)
+            # task-03（2026-08-25-team-subsession-governance / D-004@v1）：代表钉定
+            # 模式（pinned_skip_owner_check=True）跳过属主复查——resolve_representative_binding
+            # 解析出的代表 runtime 属主常非 mission.created_by。属主跳过仅限本显式
+            # 旗标；普通钉定（False）传给 _query_pinned_online_runtime 的行为与原
+            # 实现逐字一致（零回归）。
+            runtime = await self._query_pinned_online_runtime(
+                user_id,
+                pinned_runtime_id,
+                skip_owner_check=pinned_skip_owner_check,
+            )
             if runtime is None:
                 log.warning(
                     "interactive_dispatch_pinned_runtime_unavailable",
@@ -672,6 +696,15 @@ class RunPlacementService:
                     ),
                 )
         else:
+            # task-03：旗标误用守卫——pinned_skip_owner_check 只在钉定分支生效，
+            # 单独传旗标不传 pinned_runtime_id 属调用方 bug（task-05 两者成对传），
+            # 记 warning 便于排查；不改既有 first-online / 借用兜底行为。
+            if pinned_skip_owner_check:
+                log.warning(
+                    "interactive_dispatch_skip_owner_without_pinned_runtime",
+                    agent_session_id=str(agent_session_id),
+                    user_id=str(user_id),
+                )
             runtime = await self._get_online_runtime(user_id, provider=provider)
             if runtime is None and workspace_id is not None:
                 rt, borrowed, lender_user_id = await _resolve_borrowed_or_own_runtime(
@@ -726,6 +759,13 @@ class RunPlacementService:
             metadata["workspace_id"] = str(workspace_id)
         if cwd:
             metadata["cwd"] = cwd
+        # task-03（2026-08-25-team-subsession-governance / design §5.B）：stage 透传。
+        # 分身子会话派发传 stage=MISSION_WORKER_STAGE（execution.py 常量，调用方传入），
+        # 写 lease metadata.stage → build_claim_payload（context.py:479）→ daemon 谓词
+        # （daemon 侧消费归 task-06）。真值才写键（对齐 dispatch_to_daemon :421），
+        # 缺省 None 不写 → 存量 quick-chat / 变更会话零回归。
+        if stage:
+            metadata["stage"] = stage
         # D-008@v1（task-06 provides BorrowedLeaseFlag）：借用 lease 标记 borrowed=True
         # + lender_user_id，供 task-09 沙箱（按 lease 隔离只读 root_path）+ task-10 落 file
         # 判别。自有 daemon 路径 borrowed=False 不写（零回归）。
@@ -1427,6 +1467,8 @@ class RunPlacementService:
         self,
         user_id: uuid.UUID,
         runtime_id: uuid.UUID,
+        *,
+        skip_owner_check: bool = False,
     ) -> dict | None:
         """task-03（2026-08-14-sessions-portal / Grill C-01 P0）：按 id 精确复查钉定 runtime。
 
@@ -1434,18 +1476,32 @@ class RunPlacementService:
         ``id + 属主 + status='online'`` 三者同时满足；否则 None（调用方
         ``prepare_interactive_dispatch`` 抛错，不 fallback）。与 first-online
         路径的关键差异：无 provider fallback、无 ORDER BY 心跳择优、无借用。
+
+        task-03（2026-08-25-team-subsession-governance / design §5.B / D-004@v1）：
+        ``skip_owner_check=True``（代表 binding 钉定模式）时只按 ``id +
+        status='online'`` 复查，跳过 ``user_id`` 属主谓词——跨 ws 代表机器场景
+        mission.created_by 常非代表机器属主，钉定的是
+        ``resolve_representative_binding`` 解析出的 runtime（调用方 task-05 传入）。
+        属主跳过仅限本显式旗标；默认 False 时 SQL 与原实现逐字一致（零回归）。
+        不满足钉定（离线/不存在）仍返回 None（上层抛 NoOnlineDaemonError）。
         """
+        # 属主谓词按旗标裁剪（f-string 拼 WHERE 与 _query_online :1465 同款范式，
+        # ruff select 无 S 规则；绑定参数仍走 :rid/:uid 占位符，无注入面）。
+        owner_predicate = "" if skip_owner_check else "AND user_id = :uid"
+        params: dict = {"rid": runtime_id.hex}
+        if not skip_owner_check:
+            params["uid"] = user_id.hex
         result = await self._session.execute(
             text(
-                """
+                f"""
                 SELECT id, user_id, provider, status, daemon_instance_id
                 FROM daemon_runtimes
                 WHERE id = :rid
-                  AND user_id = :uid
+                  {owner_predicate}
                   AND status = 'online'
                 """
             ),
-            {"rid": runtime_id.hex, "uid": user_id.hex},
+            params,
         )
         row = result.mappings().first()
         return dict(row) if row else None

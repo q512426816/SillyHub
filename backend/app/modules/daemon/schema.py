@@ -826,20 +826,33 @@ class TeamWorkspaceRef(BaseModel):
 
 
 class TeamMissionWorkerSummary(BaseModel):
-    """TeamMissionSummary.workers 单项——分身 run（role != orchestrator）概要。"""
+    """TeamMissionSummary.workers 单项——分身行（双形态）概要。
+
+    - 存量 batch 形态：分身 run（role != orchestrator）逐行，``run_id`` = run id；
+    - 新形态（task-13 / design §5.E，2026-08-25-team-subsession-governance）：
+      分身**子会话**行——``sub_session_id`` = 子会话 id（定名避开与
+      ``AgentSession.agent_session_id``（SDK 字符串 id）同名异义，Grill P2⑨）；
+      ``run_id`` = 首 run id、``first_run_id`` = 首 run id（design §6 实现级
+      备注：供 ``get_worker_result`` 连续消费）、role/objective 取首 run 双标记、
+      status 按 ``is_worker_complete`` / ``mission_derive_status`` 口径映射；
+    - 存量形态两新字段恒 None（存量响应字段零变化，FR-08/FR-09）。
+    """
 
     run_id: uuid.UUID
     role: str | None = None
     status: str
     objective: str | None = None
     workspace_id: str | None = None
+    sub_session_id: uuid.UUID | None = None
+    first_run_id: uuid.UUID | None = None
 
 
 class TeamMissionSummary(BaseModel):
     """触发/列表共用响应（design §7）。
 
     ``status`` 为扩展后 derive_status 派生值（含 awaiting_input 档，会话维度
-    入参）；``workers`` 仅 role != orchestrator 的分身 run（主控轮 D-009 不进）；
+    入参）；``workers`` 为分身行——子会话形态行（含 sub_session_id）∪ 存量
+    batch 分身 run（role != orchestrator，主控轮 D-009 不进；task-13 双形态）；
     ``scope_workspace_ids`` 为落库冻结快照（NULL 缺省回落 [anchor]）；
     ``scope_workspaces`` 为 id+名称 enriched 视图（ql-20260825-003）。
     """

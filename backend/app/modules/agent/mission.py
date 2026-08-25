@@ -5,6 +5,10 @@ AgentRuns so the source of truth stays AgentRun + Lease (no second state system)
 Wave 2: ``MissionService.start_mission`` — create a Mission, plan Worker
 delegations via a direct GLM call (CoordinatorPlanner), and persist pending
 Worker Runs. Worker *execution* (daemon dispatch) is Wave 3.
+
+2026-08-25-team-subsession-governance task-08（FR-05 / D-005@v1，design
+§5.C.3–5.C.4）：``is_worker_complete``（worker 完成判据单一真相源，双形态）
++ ``mission_derive_status``（derive_status 的 mission 级虚拟 run 映射包装）。
 """
 
 from __future__ import annotations
@@ -13,13 +17,19 @@ import uuid
 from collections.abc import Iterable
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.core.logging import get_logger
 from app.modules.agent.delegation import CoordinatorPlanner, DelegationError
-from app.modules.agent.model import AgentMission, AgentRun
+from app.modules.agent.model import (
+    ACTIVE_RUN_STATUSES,
+    AgentMission,
+    AgentRun,
+    AgentSession,
+    mission_worker_sessions,
+)
 
 log = get_logger(__name__)
 
@@ -77,6 +87,145 @@ def derive_status(
     if has_completed:
         return "done"
     return "failed"
+
+
+# ── 分身完成判据单一真相源（2026-08-25-team-subsession-governance task-08，
+#    FR-05 / D-005@v1 / design §5.C.3–5.C.4）──────────────────────────────────
+
+# 主控轮标记（字面量对齐 control._ORCHESTRATOR_ROLE / D-009：role='orchestrator'
+# 的 mission run 是主控轮；NULL role 是存量分身 run——workers_only 收窄不可漏）。
+_ORCHESTRATOR_ROLE = "orchestrator"
+# 分身会话终态（AgentSession.status 词表子集：failed / ended；pending / active /
+# reconnecting 均为进行中）。
+_WORKER_SESSION_TERMINAL = frozenset({"failed", "ended"})
+# 存量 batch run 终态（= derive_status 词表 _DONE ∪ _FAILED，FR-09 存量判据零回归）。
+_WORKER_RUN_TERMINAL = frozenset({"completed", "failed", "killed"})
+
+
+async def _sessions_with_active_turns(
+    db: AsyncSession, session_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """批量查明哪些会话当前有活跃 turn（ACTIVE_RUN_STATUSES 单源词表）。
+
+    判定口径与 ``finalizer._session_has_active_turn`` 同款（会话下存在
+    status ∈ ACTIVE_RUN_STATUSES 的 run 即活跃，含 pending_approval，不含前端
+    展示态 interrupting——backend 不落库）；状态集合从 ``agent.model`` 单源
+    import 不另抄（task-08 约束）。批量 IN 查询避免逐会话 N+1；空集直接返回。
+    """
+    if not session_ids:
+        return set()
+    stmt = select(AgentRun.agent_session_id).where(
+        AgentRun.agent_session_id.in_(session_ids),
+        AgentRun.status.in_(list(ACTIVE_RUN_STATUSES)),
+    )
+    rows = (await db.execute(stmt)).all()
+    return {session_id for (session_id,) in rows if session_id is not None}
+
+
+async def is_worker_complete(db: AsyncSession, worker: AgentSession | AgentRun) -> bool:
+    """worker 完成判据单一真相源（FR-05 / D-005@v1，design §5.C.3）。
+
+    双形态并存即双判据兼容（task-09 替换五处判据点时按对象形态分发：
+    子会话形态传 ``AgentSession``、存量 batch 形态传 ``AgentRun``）：
+
+    - **子会话形态**（``AgentSession``，D-002@v1 显式标记）：
+      - 完成 = ``worker_done_at IS NOT NULL`` **且**该会话无活跃 turn——追问
+        重开工期间（新一轮 run 活跃）自动回未完成，干完再调 worker_done 回到
+        完成，可重复完成周期语义自洽；
+      - 失败/终结 = 会话终态（``failed`` / ``ended``）。
+    - **存量 batch 形态**（``AgentRun``）：run 终态集合 completed / failed /
+      killed（无子会话的存量 mission 判据路径零回归，FR-09）。
+    """
+    if isinstance(worker, AgentSession):
+        if worker.status in _WORKER_SESSION_TERMINAL:
+            return True
+        if worker.worker_done_at is None:
+            return False
+        active_ids = await _sessions_with_active_turns(db, [worker.id])
+        return worker.id not in active_ids
+    return worker.status in _WORKER_RUN_TERMINAL
+
+
+async def mission_derive_status(
+    db: AsyncSession, mission_id: uuid.UUID, *, workers_only: bool = False
+) -> str:
+    """``derive_status`` 的 mission 级包装（design §5.C.4 虚拟 run 映射）。
+
+    纯函数 ``derive_status`` 的 run 级签名与判定不动（D-005@v1）——本包装
+    查明 mission 维度事实（cancelled / converged / has_session /
+    session_active_turn）并把分身子会话映射为虚拟 run 后合并喂给纯函数：
+
+    1. 收集 mission 下**非子会话** run（主控轮 + 存量 batch run）原样；
+       ``workers_only=True`` 时排除 ``role='orchestrator'``（对齐 D-010
+       「置位不依赖主控 run 状态」与 schedule_loop 信号 1 现行收窄——否则
+       主控在自己活跃轮内 derive 恒 running、converge 置位永败）。NULL role
+       守卫同 ``control.non_orchestrator_runs``（SQL 三值逻辑 ``!=`` 漏 NULL
+       行，存量分身 run 不容漏）。分身首 run（带 mission_id 但
+       agent_session_id ∈ 子会话）被剔除——分身状态一律以子会话行的虚拟映射
+       为准，避免同分身双计；
+    2. 每个分身子会话（``mission_worker_sessions`` 一层枚举，P1 深度 2）映射
+       虚拟 run，优先级从高到低：``worker_done_at`` 非空且无活跃 turn →
+       ``completed``（优先于终态映射——converge end_session 后 done 分身仍
+       映射 done 而非 failed）；会话终态 ``failed`` → ``failed``；其余（含
+       idle 未 done、追问重开工中）→ ``running``；
+    3. 两组合并喂 ``derive_status``。空集语义：有分身时虚拟集合非空，不会
+       误判 planning。
+
+    mission 不存在 / session_id 查无会话行（存量 external 形态）→ 输入按空集
+    宽限（对齐 ``mission_worker_sessions`` 缺行返 [] 口径），返回 planning。
+    """
+    mission = (
+        (await db.execute(select(AgentMission).where(col(AgentMission.id) == mission_id)))
+        .scalars()
+        .first()
+    )
+    worker_sessions = await mission_worker_sessions(db, mission_id)
+    worker_session_ids = {s.id for s in worker_sessions}
+
+    runs_stmt = select(AgentRun).where(col(AgentRun.mission_id) == mission_id)
+    if workers_only:
+        runs_stmt = runs_stmt.where(
+            or_(col(AgentRun.role).is_(None), col(AgentRun.role) != _ORCHESTRATOR_ROLE)
+        )
+    raw_runs = (await db.execute(runs_stmt)).scalars().all()
+    runs = [r for r in raw_runs if r.agent_session_id not in worker_session_ids]
+
+    active_worker_ids = await _sessions_with_active_turns(db, list(worker_session_ids))
+
+    def _virtual_status(s: AgentSession) -> str:
+        # 优先级：done 且无活跃 turn → completed > 会话终态 failed → failed
+        # > 其余（idle 未 done / 追问重开工中 / ended 未 done）→ running。
+        if s.worker_done_at is not None and s.id not in active_worker_ids:
+            return "completed"
+        if s.status == "failed":
+            return "failed"
+        return "running"
+
+    virtual_runs = [
+        AgentRun(agent_type="claude_code", status=_virtual_status(s)) for s in worker_sessions
+    ]
+
+    cancelled = mission is not None and mission.cancelled_at is not None
+    converged = mission is not None and mission.converged_at is not None
+    has_session = False
+    session_active_turn = False
+    if mission is not None and mission.session_id is not None:
+        # 会话 mission 判别同 finalizer 口径：session_id 列对存量构造路径可能
+        # 是随机 uuid，按「该 id 的 AgentSession 真实存在」判别，查无行 →
+        # has_session=False（永不进 awaiting_input，存量零回归）。
+        bound_session = await db.get(AgentSession, mission.session_id)
+        if bound_session is not None:
+            has_session = True
+            session_active_turn = mission.session_id in await _sessions_with_active_turns(
+                db, [mission.session_id]
+            )
+    return derive_status(
+        [*runs, *virtual_runs],
+        cancelled=cancelled,
+        converged=converged,
+        has_session=has_session,
+        session_active_turn=session_active_turn,
+    )
 
 
 async def get_active_mission_for_session(

@@ -225,7 +225,9 @@ export interface SessionState {
   /**
    * task-06（D-007@v2）：lease stage 标记（来自 CreateSessionInput.stage）。
    * snapshotPersistable 输出到 PersistedSessionRecord.stage；restoreAndReconnect
-   * 从 record.stage 恢复。主 agent（stage='orchestrator'）据此重新注入 MCP tool。
+   * 从 record.stage 恢复。主 agent（stage='orchestrator'）据此重新注入 MCP tool；
+   * 分身（stage='mission_worker'，task-06 2026-08-25-team-subsession-governance
+   * / D-003@v1）据此重新注入仅含 worker_done 的受限 server。
    */
   stage?: string;
   /**
@@ -366,6 +368,10 @@ export interface CreateSessionInput {
    * daemon ``_startInteractiveSession`` 从 execPayload.stage 透传。SessionManager
    * 注入的 ``isMainAgentSession`` 谓词读本字段判定是否主 agent（``stage==='orchestrator'``）
    * → 主 agent 注入 daemon MCP server 5 tool。普通 scan/stage/chat 不传或其他值 → 不注入。
+   *
+   * task-06（2026-08-25-team-subsession-governance / D-003@v1）：``stage==='mission_worker'``
+   * 时 ``isWorkerSession`` 谓词命中分身分支 → 注入仅含 worker_done 单工具的受限
+   * server（sillyhub-worker，design §5.C.1）；主控 5 工具不进分身（递归闸）。
    */
   stage?: string;
   /**
@@ -644,11 +650,13 @@ export interface PersistedSessionRecord {
    */
   askUserOnly?: boolean;
   /**
-   * task-06（D-007@v2）：lease stage 标记（主 agent 恢复用）。
+   * task-06（D-007@v2）：lease stage 标记（主 agent / 分身恢复用）。
    *
    * create 时从 ``CreateSessionInput.stage`` 写入 state.stage；snapshotPersistable
-   * 输出到 record.stage，让 restoreAndReconnect 跨 daemon 重启恢复主 agent 身份
-   *（``stage==='orchestrator'`` → 重新注入 daemon MCP server 5 tool）。普通 scan/
+   * 输出到 record.stage，让 restoreAndReconnect 跨 daemon 重启恢复身份：
+   * ``stage==='orchestrator'`` → 重新注入 daemon MCP server 5 tool；
+   * ``stage==='mission_worker'``（task-06 2026-08-25-team-subsession-governance）
+   * → 重新注入仅含 worker_done 的受限 server（sillyhub-worker）。普通 scan/
    * stage/chat session 不写（undefined）→ 恢复后不注入 MCP（零回归）。
    */
   stage?: string;

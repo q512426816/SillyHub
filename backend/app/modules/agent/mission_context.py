@@ -15,6 +15,10 @@
   task-02 ``probe_workspace_git_mode`` 作 git 探测回调接进 scope 条目模式字段。
 - :func:`resolve_first_turn_briefing`——组合入口：查活跃 mission → 判定 → 命中返回
   简报文本；任一不命中 / 无活跃 mission 返回 ``None``（调用方零注入）。
+- :func:`build_worker_briefing`——分身（worker）子会话首 prompt 任务简报渲染
+  （2026-08-25-team-subsession-governance task-04 / FR-02，供 task-05 三元组派发
+  消费）：objective + 工作区协作约束（git/direct 双变体，文案对齐
+  ``render_worker_prompt`` 既有口径）+ worker_done 工具用法；纯渲染函数不查 DB。
 
 ⚠️ 口径区分：本模块的「已消耗」集合 ``_BRIEFING_CONSUMED_RUN_STATUSES`` 是**简报
 一次性语义专用**（含 completed、不含 pending_approval），与 ``agent.model.
@@ -156,13 +160,78 @@ async def resolve_first_turn_briefing(
     return await build_orchestrator_briefing(db, mission)
 
 
+def build_worker_briefing(
+    *,
+    objective: str,
+    role: str | None = None,
+    mode: str | None = None,
+) -> str:
+    """渲染分身子会话首 prompt 任务简报（task-04 / FR-02 / design §5.B、§5.C）。
+
+    纯渲染函数——objective / role / mode 全部入参传入，不查 DB 不写行（对齐
+    ``render_worker_prompt``（execution.py）的纯函数形态），供 task-05
+    dispatch_worker 三元组派发作子会话首 prompt。三段结构（验收口径）：
+
+    ① 角色与目标——``objective`` 必传（空值回落「(未指定目标)」占位，同
+      ``render_worker_prompt``）；``role`` 缺省 "worker"。
+    ② 工作区协作约束——``mode="git"`` 渲染 worktree 隔离约束、``mode="direct"``
+      渲染直通约束，两变体文案复用 ``render_worker_prompt`` 的既有双变体口径
+      （本模块不另造句式，仅把「收尾消息」交叉引用替换为 worker_done 用法——
+      分身收尾信号从收尾消息迁移到 worker_done 工具，design §5.C.2）；
+      ``mode`` 为 None/"unknown"（git 探测未知）时整体省略该段不抛（对齐
+      ``render_scope_brief`` 对 git_probe=None 省略模式字段、不渲染「未知」
+      的既定口径）。
+    ③ worker_done 工具用法——干完即调（分身完成的唯一显式信号，summary 作
+      产物挂首 run 供主控读取）、追问重开工后可再调（子会话在收敛前保持
+      可追问，支持重复完成周期，design §5.F）。
+    """
+    worker_role = role or "worker"
+    parts = [
+        "【分身任务简报（系统注入）】",
+        f"你是多 Agent 团队中的一个分身（角色：{worker_role}），由主控会话派发执行以下任务。",
+        f"你的目标：{objective or '(未指定目标)'}",
+    ]
+    if mode == "git":
+        parts.append(
+            "【worktree 协作约束（必须遵守）】\n"
+            "1. 只写代码，不跑测试、不跑构建：你当前在自己的 git worktree 副本中，"
+            "副本没有 node_modules / .venv 等依赖，跑测试或构建必然失败；所有验证"
+            "（测试、lint、build）留给主 agent 合并（converge）后在工作区统一执行。\n"
+            '2. 完成后必须提交：写完代码务必执行 `git add -A && git commit -m "<简述>"`，'
+            "你的产出以 commit 形式存在，主 agent 会把你的分支 merge 回工作区——"
+            "没有 commit 就没有可合并的产物。提交后调用 worker_done 工具报告完成"
+            "（见下方完成信号约束）。\n"
+            "3. 按文件分工，不要越界：主 agent 派发任务时已指示你负责的文件/模块范围，"
+            "严格在该范围内修改，不要动其他 worker 负责的文件，"
+            "以减少 converge 合并时的冲突。"
+        )
+    elif mode == "direct":
+        parts.append(
+            "【直通工作区约束（必须遵守）】\n"
+            "你直接在工作区目录内工作，改动立即生效、无隔离副本"
+            "（没有待合并的分支副本，改动直接落在工作区）；"
+            "同目录可能有其它分身并行工作，避免并行写同一文件——"
+            "严格在主 agent 指示你负责的文件/模块范围内修改，"
+            "不要动其他 worker 负责的文件。完成后调用 worker_done 工具报告完成"
+            "（见下方完成信号约束）。"
+        )
+    parts.append(
+        "【完成信号 worker_done（必须遵守）】\n"
+        "- 干完即调：目标完成后立即调用 worker_done 工具提交结构化 summary"
+        "（发现/结论/产出文件路径/风险）——它是你完成任务的唯一显式信号，"
+        "summary 会作为产物供主控读取；只在对话里说「做完了」不算完成。\n"
+        "- 追问重开工后可再调：本会话在任务收敛前保持可追问——任务发起人可能"
+        "追问或要求返工，回答/返工完成后再次调用 worker_done 报告新一轮完成。"
+    )
+    return "\n\n".join(parts)
+
+
 # ── ql-20260825-003：分身全部完成 → 系统通知唤醒主控（反 list_workers 轮询）──
 # 语义：主控派发分身后应结束本轮等待；全部分身进入终态时由平台注入一条系统
 # 通知轮唤醒主控去读产出/收敛，取代主控在单轮内反复调 list_workers 烧 token。
 # 双触发点（lease complete_lease 即时 + patrol awaiting_input 巡检兜底）共用本
 # 助手；Redis SETNX 幂等（每 mission 至多通知一次），投递失败不抛不重试风暴。
 
-_WORKERS_DONE_TERMINAL_STATUSES = frozenset({"completed", "failed", "killed"})
 _WORKERS_DONE_NOTIFY_TTL_SECONDS = 6 * 3600
 _WORKERS_DONE_NOTIFY_KEY = "mission:workers_done_notified:{mission_id}"
 
@@ -171,20 +240,46 @@ async def workers_all_terminal_with_stats(
     db: AsyncSession,
     mission: AgentMission,
 ) -> tuple[bool, int, int]:
-    """分身维度全终态判定 + 成败统计（不含主控轮；planning 空集=未全终态）。
+    """分身维度全完成判定 + 成败统计（不含主控轮；planning 空集=未全完成）。
+
+    task-09（FR-05 / design §5.C.5）：判据换 task-08 单一真相源
+    ``is_worker_complete``——分身枚举 = 分身子会话行 + 存量 batch 分身 run
+    （``non_orchestrator_runs`` 剔除 ``agent_session_id ∈ 分身子会话`` 的首
+    run，同分身不双计，对齐 ``mission_derive_status`` 剔除口径）；子会话按
+    会话判定（idle 未 done / 追问重开工中 = 未完成——子会话首 run 终态不再
+    误发「全部终态请收敛」，worker_done 成为唯一正确唤醒源），存量 run 形态
+    按 run 终态（FR-09 零回归）。成败统计：子会话 ``worker_done_at`` 非空
+    （且已完成）= 成功、其余完成形态（failed / ended 未 done）= 失败；存量
+    run ``completed`` = 成功、failed/killed = 失败（原口径保留）。
 
     纯查询：经传入 session 读取（lease 调用方在自身事务内可见本轮未提交的
     终态翻转——即时通知不漏当轮完成事件）。
     """
     from app.modules.agent.control import MissionControlService
+    from app.modules.agent.mission import is_worker_complete
+    from app.modules.agent.model import mission_worker_sessions
 
-    runs = await MissionControlService(db).non_orchestrator_runs(mission.id)
-    if not runs:
+    worker_sessions = await mission_worker_sessions(db, mission.id)
+    worker_session_ids = {s.id for s in worker_sessions}
+    legacy_runs = [
+        r
+        for r in await MissionControlService(db).non_orchestrator_runs(mission.id)
+        if r.agent_session_id not in worker_session_ids
+    ]
+    workers: list[AgentSession | AgentRun] = [*worker_sessions, *legacy_runs]
+    if not workers:
+        # planning 空集=未全完成（语义保留）。
         return False, 0, 0
-    if any(r.status not in _WORKERS_DONE_TERMINAL_STATUSES for r in runs):
+    if not all([await is_worker_complete(db, w) for w in workers]):
         return False, 0, 0
-    ok = sum(1 for r in runs if r.status == "completed")
-    return True, ok, len(runs) - ok
+    ok = sum(
+        1
+        for w in workers
+        if (
+            w.worker_done_at is not None if isinstance(w, AgentSession) else w.status == "completed"
+        )
+    )
+    return True, ok, len(workers) - ok
 
 
 async def notify_orchestrator_workers_done(
@@ -261,3 +356,28 @@ async def notify_orchestrator_workers_done(
         failed=failed,
     )
     return True
+
+
+async def clear_workers_done_notify_key(mission_id: uuid.UUID) -> None:
+    """DEL「分身全部完成」唤醒幂等键（task-07 重复完成周期重置，design §5.C.2）。
+
+    ``notify_orchestrator_workers_done`` 的 Redis SETNX 键（TTL 6h）只防**同一
+    完成波次**内双触发点重复投递；「追问重开工 → 再次完成」的重复完成周期
+    （D-002@v1）需要重新唤醒主控——新一轮 worker_done 触发迁移唤醒前先 DEL
+    再走 notify 内部 SETNX 重新抢占，第二个周期能再次投递。key 与
+    ``_WORKERS_DONE_NOTIFY_KEY`` 单源（防格式漂移）。
+
+    Redis 不可用退化不阻断（既有语义）：DEL 失败只记 warning，notify 的 SETNX
+    同样走「视为抢占成功」降级路径。
+    """
+    from app.core.redis import get_redis
+
+    try:
+        redis = get_redis()
+        await redis.delete(_WORKERS_DONE_NOTIFY_KEY.format(mission_id=mission_id))
+    except Exception as exc:  # Redis 不可用：退化不阻断（调用方继续 SETNX 唤醒）
+        log.warning(
+            "workers_done_notify_key_clear_failed",
+            mission_id=str(mission_id),
+            error=str(exc),
+        )

@@ -749,12 +749,13 @@ class OrchestratorService:
         状态 / 不触发 converge），收敛入口仅 MCP converge 与 patrol awaiting_input
         超时（task-06 契约）；存量 external/team mission 走原三重信号链路零回归。
 
-        重要：``derive_status``（mission.py:29）把 mission 下**所有** AgentRun
+        重要：``derive_status``（mission.py）把 mission 下**所有** AgentRun
         （含主 agent run 自己）算进状态。主 agent run 通常 long-lived running，
-        若直接喂 derive_status 永远返回 ``running``——本方法只对 **worker runs**
-        （role != orchestrator）判收敛，再用 ``converge_mission_for_completed_run``
-        以主 agent run 为锚点触发（finalizer 内部仍按全 run derive，主 agent 此时
-        已 completed/被收敛路径标记终态，derive 一致）。
+        若直接喂 derive_status 永远返回 ``running``——本方法信号 1 只按分身维度
+        判收敛（task-09 起 = ``mission_derive_status(workers_only=True)`` 单一
+        真相源），再用 ``converge_mission_for_completed_run`` 以主 agent run 为
+        锚点触发（finalizer 内部仍按全 run derive，主 agent 此时已 completed/
+        被收敛路径标记终态，derive 一致）。
 
         本方法是 backend **兜底巡检入口**——主 agent 实际驱动靠 daemon MCP tool
         （task-05/06）反向调 backend endpoint，循环主体在 daemon 端。调用方
@@ -797,7 +798,7 @@ class OrchestratorService:
         # finalizer.converge_mission_for_completed_run 同款）。
         from app.modules.agent.control import MissionControlService
         from app.modules.agent.finalizer import converge_mission_for_completed_run
-        from app.modules.agent.mission import derive_status
+        from app.modules.agent.mission import derive_status, mission_derive_status
 
         ctrl = MissionControlService(self._session)
         all_runs = await ctrl.worker_runs(mission_id)
@@ -838,11 +839,15 @@ class OrchestratorService:
                     budget_usd=mission.budget_usd,
                 )
 
-        # 信号 1（worker 全终态）：所有 worker run 都到终态。空 worker 集合（主 agent
-        # 还没派任何 worker）不算——否则 mission 刚建就空收敛。
-        all_workers_terminal = bool(worker_runs) and all(
-            r.status in _WORKER_TERMINAL for r in worker_runs
-        )
+        # 信号 1（worker 全终态）：task-09 判据换 task-08 单一真相源
+        # mission_derive_status(workers_only=True)——全完成派生 done/degraded/
+        # failed；空 worker 集（主 agent 还没派任何 worker）派生 planning 不算，
+        # 否则 mission 刚建就空收敛（语义保留）；有分身未完成派生 running。
+        # 本方法对会话 mission 已上方分流跳过，此处仅存量 mission（无分身子
+        # 会话），包装对存量输入与 run 终态集合判定逐字节等价（FR-09）。
+        all_workers_terminal = await mission_derive_status(
+            self._session, mission_id, workers_only=True
+        ) in ("done", "degraded", "failed")
 
         if not forced_degraded and not all_workers_terminal:
             # 三重信号本次巡检均未达成，不收敛。budget「未触顶 + worker 未全终态」

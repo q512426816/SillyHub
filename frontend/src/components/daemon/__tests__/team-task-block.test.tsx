@@ -8,7 +8,11 @@
 //   4. 取消——两步确认 → cancelTeamMission(mission_id) → onRefresh；失败显示错误；
 //      终态不渲染取消按钮；
 //   5. isActiveTeamMission 纯函数（planning/running/awaiting_input）；
-//   6. 引擎无关——纯 props 渲染，不依赖 Claude/Codex 分支（Codex 置灰逻辑归 task-11）。
+//   6. 引擎无关——纯 props 渲染，不依赖 Claude/Codex 分支（Codex 置灰逻辑归 task-11）；
+//   7. task-14（2026-08-25-team-subsession-governance / FR-08 / design §5.E）：
+//      子会话形态分身行（sub_session_id 非空）行主体可点击 → onOpenWorkerSession；
+//      存量 batch 行（无字段）与未传回调时不可点击零回归；行尾日志/产物按钮
+//      stopPropagation 不误触打开（嵌套可点元素互不干扰，constraints）。
 //
 // 测试纪律：FIRST / AAA / 每用例独立 fixture / 零 mock 被测组件内部；仅 mock
 // lib/daemon 的 cancelTeamMission（网络层已由 lib/__tests__/daemon-team-mission.test.ts
@@ -374,5 +378,130 @@ describe("TeamTaskBlock ql-20260825-004 产物", () => {
     await waitFor(() =>
       expect(screen.getByText("暂无产物")).toBeInTheDocument(),
     );
+  });
+});
+
+/* ───────── task-14：分身行点击打开子会话（FR-08 / design §5.E） ───────── */
+
+describe("TeamTaskBlock task-14 分身行点击入口", () => {
+  /**
+   * 混合分身 fixture：r-sub 为子会话形态（sub_session_id 非空，可点击），
+   * r-legacy 为存量 batch 行（无字段，不可点击）。
+   * lib/daemon 手写类型暂未含新字段（本卡 allowed_paths 不含 lib/daemon.ts，
+   * 组件内以 WorkerRowView intersect 消费）——此处 as 断言补齐，与组件同口径。
+   */
+  const MIXED_WORKERS = [
+    {
+      run_id: "r-sub",
+      role: "impl",
+      status: "running",
+      objective: "子会话形态分身",
+      workspace_id: null,
+      sub_session_id: "sub-sess-1",
+    },
+    {
+      run_id: "r-legacy",
+      role: "test",
+      status: "completed",
+      objective: "存量 batch 分身",
+      workspace_id: null,
+    },
+  ] as TeamMissionSummary["workers"];
+
+  it("有 sub_session_id 的分身行：行主体可点击触发 onOpenWorkerSession(subSessionId)，附「查看会话」标识", () => {
+    const onOpenWorkerSession = vi.fn();
+    render(
+      <TeamTaskBlock
+        summary={makeSummary({ workers: MIXED_WORKERS })}
+        onOpenWorkerSession={onOpenWorkerSession}
+      />,
+    );
+    expandBlock();
+
+    // 行主体 role=button（键盘可达语义）+ 行尾「查看会话」入口标识。
+    const row = screen.getByRole("button", { name: "查看分身会话：实现" });
+    expect(screen.getByText("查看会话 ›")).toBeInTheDocument();
+
+    fireEvent.click(row);
+    expect(onOpenWorkerSession).toHaveBeenCalledTimes(1);
+    expect(onOpenWorkerSession).toHaveBeenCalledWith("sub-sess-1");
+  });
+
+  it("键盘可达：行本体 Enter 触发打开", () => {
+    const onOpenWorkerSession = vi.fn();
+    render(
+      <TeamTaskBlock
+        summary={makeSummary({ workers: MIXED_WORKERS })}
+        onOpenWorkerSession={onOpenWorkerSession}
+      />,
+    );
+    expandBlock();
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "查看分身会话：实现" }), {
+      key: "Enter",
+    });
+    expect(onOpenWorkerSession).toHaveBeenCalledWith("sub-sess-1");
+  });
+
+  it("存量 batch 分身行（无 sub_session_id）不渲染点击态，点击不触发回调", () => {
+    const onOpenWorkerSession = vi.fn();
+    render(
+      <TeamTaskBlock
+        summary={makeSummary({ workers: MIXED_WORKERS })}
+        onOpenWorkerSession={onOpenWorkerSession}
+      />,
+    );
+    expandBlock();
+
+    // 存量行无 role=button 行主体；入口标识全块仅 1 处（r-sub）。
+    expect(
+      screen.queryByRole("button", { name: "查看分身会话：测试" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getAllByText("查看会话 ›").length).toBe(1);
+
+    // 点击存量行目标文本不触发回调。
+    fireEvent.click(screen.getByText("存量 batch 分身"));
+    expect(onOpenWorkerSession).not.toHaveBeenCalled();
+  });
+
+  it("行尾日志/产物按钮 stopPropagation：点击展开明细不误触打开分身会话", async () => {
+    const logsMock = vi.mocked(getAgentRunLogs).mockResolvedValue([]);
+    const onOpenWorkerSession = vi.fn();
+    render(
+      <TeamTaskBlock
+        summary={makeSummary({ workers: MIXED_WORKERS })}
+        onOpenWorkerSession={onOpenWorkerSession}
+      />,
+    );
+    expandBlock();
+
+    // r-sub（第 1 个）的日志/产物按钮：点击只走自身逻辑，不上冒行主体。
+    //（workspace 回落链：分身自身 null → scope[0]，见 handleToggleLogs。）
+    fireEvent.click(screen.getAllByText("日志")[0]!);
+    await waitFor(() =>
+      expect(logsMock).toHaveBeenCalledWith(
+        "11111111-2222-3333-4444-555555555555",
+        "r-sub",
+      ),
+    );
+    expect(onOpenWorkerSession).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getAllByText("产物")[0]!);
+    expect(onOpenWorkerSession).not.toHaveBeenCalled();
+  });
+
+  it("未传回调零回归：有 sub_session_id 的行也不渲染点击态，日志入口照常可用", async () => {
+    const logsMock = vi.mocked(getAgentRunLogs).mockResolvedValue([]);
+    render(<TeamTaskBlock summary={makeSummary({ workers: MIXED_WORKERS })} />);
+    expandBlock();
+
+    expect(
+      screen.queryByRole("button", { name: "查看分身会话：实现" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("查看会话 ›")).not.toBeInTheDocument();
+
+    // 既有交互不受影响：日志展开仍工作。
+    fireEvent.click(screen.getAllByText("日志")[0]!);
+    await waitFor(() => expect(logsMock).toHaveBeenCalled());
   });
 });

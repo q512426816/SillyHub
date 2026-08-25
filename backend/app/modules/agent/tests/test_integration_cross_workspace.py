@@ -12,19 +12,33 @@ task-13（2026-08-22-team-session-unify / D-011）：``POST /api/workspaces/{id}
 锚定 ``_get_main_run``）；派发/收敛走保留的 MCP 端点（dispatch_worker /
 converge），本文件继续钉住这两段的跨 ws 路由与分组行为。
 
+task-15（2026-08-25-team-subsession-governance）：task-05 后 dispatch_worker
+执行段整体换子会话三元组（AgentSession + interactive lease + 首 run，不再建
+batch run / 不再调 ``placement.dispatch_to_daemon``）。本文件的派发路由断言
+从「mock dispatch_to_daemon kwargs」机械迁移到新形态——派发走真实
+``prepare_interactive_dispatch``（lease 落库，零网络），路由证据改从 interactive
+lease 行断言：``metadata.workspace_id``（按 target/anchor 路由）、
+``metadata.model``（按目标 ws 默认值）、``runtime_id``（钉定代表机器）、
+``metadata.stage=mission_worker``、``metadata.cwd``（worktree 副本路径）。
+旧 ``representative_fallback`` 旗标已随 batch 路径退场——新形态 runtime 解析
+固定「自有在线优先 → 代表 binding 钉定」（D-004@v1），本文件两形态均落代表
+机器。收敛断言不动：external mission（session_id NULL）分身不进
+``mission_worker_sessions`` 枚举，derive/converge/cleanup 判据维持 run 维度。
+
 用例组 A（验收 1 单 ws 零回归）``TestSingleWorkspaceZeroRegression``：
 - 直建单 ws mission（不传 scope/target）→ mission 落库 project_id/scope NULL；
 - MCP ``dispatch_worker`` 不带 target → ``AgentRun.target_workspace_id`` NULL、
-  worktree 建 anchor root、provider/model 按 anchor、placement
-  ``representative_fallback=False``（旧行为逐点对齐）；
+  worktree 建 anchor root、lease metadata 按 anchor 路由（workspace_id/model）
+  且 runtime 钉定 anchor 代表机器（旧行为逐点对齐到子会话形态）；
 - converge 全 completed → merge / cleanup 单组（git_merge 与
   git_worktree_remove 都只收 anchor workspace）。
 
 用例组 B（验收 3/5 跨 ws 冒烟）``TestCrossWorkspaceSmoke``：
 - 直建 scope 两 ws mission（project 维度，anchor 显式落 backend-code）；
-- dispatch_worker target=member（∈ scope）→ worktree/provider/placement 全按
-  target 路由 + placement ``representative_fallback=True``（走代表 binding）；
-- 不带 target 的 worker 维持 anchor 路由（旗标 False，零回归）；
+- dispatch_worker target=member（∈ scope）→ worktree/lease metadata 全按
+  target 路由 + runtime 钉定代表机器；
+- 不带 target 的 worker 维持 anchor 路由（lease metadata workspace_id=anchor，
+  零回归）；
 - target ∉ scope → 400 ``mission_target_out_of_scope`` 且不落 run（拒绝先于建 run）；
 - converge 全 completed → merge 按 (target, branch) 分组各 ws 调 git_merge、
   cleanup 分组各调 git_worktree_remove（D-011）；
@@ -42,6 +56,7 @@ dispatch 落列缺口报告回主流程处理。
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -52,9 +67,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import password_hasher
+from app.modules.agent.execution import MISSION_WORKER_STAGE
 from app.modules.agent.model import AgentMission, AgentRun
 from app.modules.auth.model import User
-from app.modules.daemon.model import DaemonInstance, DaemonRuntime
+from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
 from app.modules.ppm.project.model import PpmProjectMaintenance
 from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
 from app.modules.workspace.model import PpmProjectWorkspace, Workspace
@@ -101,11 +117,13 @@ def _fake_delegate(
 ) -> Any:
     """HostFsDelegate mock。
 
+    - ``probe_workspace_git_mode`` 恒 git（task-05 后派发段三态探测的确定性桩）；
     - ``git_worktree_add`` / ``git_worktree_remove`` 恒 ok；
     - ``git_merge`` 按 ``(ws.id, worker_branch)`` 派发结果（未命中默认 ok），
       调用记录挂 ``merge_calls`` 供分组断言。
     """
     mock: Any = MagicMock()
+    mock.probe_workspace_git_mode = AsyncMock(return_value="git")
     mock.git_worktree_add = AsyncMock(
         return_value={"ok": True, "worktree_path": None, "error": None}
     )
@@ -151,7 +169,7 @@ async def _make_workspace(
     return ws
 
 
-async def _stub_representative_binding(session: AsyncSession, ws_id: uuid.UUID) -> None:
+async def _stub_representative_binding(session: AsyncSession, ws_id: uuid.UUID) -> uuid.UUID:
     """给工作区造一条在线机器绑定（ql-20260822-008 派发前在线绑定预检用例）。
 
     与 test_mcp_tools._stub_representative_binding 同款：daemon_instances(online)
@@ -159,10 +177,14 @@ async def _stub_representative_binding(session: AsyncSession, ws_id: uuid.UUID) 
     resolve_representative_binding 分支2「任意在线」）。raw SQL 注意 SQLite
     兼容：无 ::json 转换、显式 created_at/updated_at 字符串。跨 ws 项目用例
     （_setup_cross_ws_project）自带双 binding，仅单 ws 用例需要本 helper。
+
+    task-15：返回绑定 runtime id——子会话派发（task-05）后路由证据从
+    dispatch_to_daemon kwargs 迁到 interactive lease（runtime 钉定断言用）。
     """
     from sqlalchemy import text
 
     di_id = uuid.uuid4()
+    rt_id = uuid.uuid4()
     member_uid = uuid.uuid4()
     ts = "2026-08-22T00:00:00+00:00"
     await session.execute(
@@ -177,7 +199,7 @@ async def _stub_representative_binding(session: AsyncSession, ws_id: uuid.UUID) 
             "INSERT INTO daemon_runtimes (id, user_id, daemon_instance_id, provider, status, created_at, updated_at)"
             " VALUES (:id, :uid, :di, 'claude', 'online', :ts, :ts)"
         ),
-        {"id": uuid.uuid4().hex, "uid": member_uid.hex, "di": di_id.hex, "ts": ts},
+        {"id": rt_id.hex, "uid": member_uid.hex, "di": di_id.hex, "ts": ts},
     )
     await session.execute(
         text(
@@ -187,6 +209,7 @@ async def _stub_representative_binding(session: AsyncSession, ws_id: uuid.UUID) 
         {"wid": ws_id.hex, "uid": member_uid.hex, "di": di_id.hex, "ts": ts},
     )
     await session.commit()
+    return rt_id
 
 
 async def _setup_cross_ws_project(db_session: AsyncSession, tmp_path) -> dict[str, Any]:
@@ -282,14 +305,32 @@ async def _setup_cross_ws_project(db_session: AsyncSession, tmp_path) -> dict[st
         "target_id": target.id,
         "anchor_root": anchor.root_path,
         "target_root": target.root_path,
+        # task-15：双 ws 共享的代表 runtime（子会话派发钉定断言用）
+        "runtime_id": runtime_id,
     }
 
 
 # ---------------------------------------------------------------------------
-# HTTP 动作 helper（统一 mock placement / delegate）
+# HTTP 动作 helper（统一 mock delegate；lease 行为真实落库）
 # ---------------------------------------------------------------------------
 
-_PLACEMENT_PATH = "app.modules.agent.placement.RunPlacementService.dispatch_to_daemon"
+
+async def _fetch_worker_lease(db_session: AsyncSession, run: AgentRun) -> DaemonTaskLease:
+    """取分身首 run 绑定的 interactive lease（task-05 子会话派发形态）。
+
+    task-15：dispatch 不再走 batch ``dispatch_to_daemon``，路由证据从其 kwargs
+    迁到真实 ``prepare_interactive_dispatch`` 落库的 lease 行（零网络——无 WS
+    连接时唤醒仅告警不收敛）。
+    """
+    assert run.lease_id is not None, "子会话派发应回填首 run.lease_id"
+    lease = await db_session.get(DaemonTaskLease, run.lease_id)
+    assert lease is not None
+    return lease
+
+
+def _lease_meta(lease: DaemonTaskLease) -> dict[str, Any]:
+    raw = lease.metadata_
+    return json.loads(raw) if isinstance(raw, str) else dict(raw or {})
 
 
 async def _create_mission_direct(
@@ -342,24 +383,25 @@ async def _dispatch_worker(
     target: uuid.UUID | None = None,
     extra: dict[str, Any] | None = None,
 ):
-    """MCP dispatch_worker（假 delegate + 假 placement）→ (resp, fake, placement)。"""
+    """MCP dispatch_worker（假 delegate；lease 真实落库）→ (resp, fake)。
+
+    task-15：不再 mock ``dispatch_to_daemon``（task-05 后子会话派发不调它），
+    派发链路走真实 ``prepare_interactive_dispatch``——lease 落库供路由断言，
+    唤醒段无 WS 连接仅告警（零网络）。
+    """
     fake = _fake_delegate()
-    placement: AsyncMock = AsyncMock(return_value=uuid.uuid4())
     body: dict[str, Any] = {"objective": objective, "role": "impl"}
     if target is not None:
         body["target_workspace_id"] = str(target)
     if extra:
         body.update(extra)
-    with (
-        patch("app.modules.agent.mcp_tools.new_host_fs_delegate", return_value=fake),
-        patch(_PLACEMENT_PATH, new=placement),
-    ):
+    with patch("app.modules.agent.mcp_tools.new_host_fs_delegate", return_value=fake):
         resp = await client.post(
             f"/api/workspaces/{ws_id}/missions/{mission_id}/dispatch_worker",
             json=body,
             headers=headers,
         )
-    return resp, fake, placement
+    return resp, fake
 
 
 async def _converge(
@@ -454,9 +496,9 @@ class TestSingleWorkspaceZeroRegression:
 
         # 2) worker 派发不带 target
         # ql-20260822-008：派发前在线绑定预检——单 ws 用例无 binding 会被 422
-        # 前置拦截，给 anchor 造在线绑定（delegate/placement 仍 mock，零网络）
-        await _stub_representative_binding(db_session, ws.id)
-        resp, fake, placement = await _dispatch_worker(
+        # 前置拦截，给 anchor 造在线绑定（delegate 仍 mock，零网络）
+        rep_rt_id = await _stub_representative_binding(db_session, ws.id)
+        resp, fake = await _dispatch_worker(
             client, auth_headers, ws.id, mission_id, objective="改按钮文案"
         )
         assert resp.status_code == 201, resp.text
@@ -466,18 +508,26 @@ class TestSingleWorkspaceZeroRegression:
         # worktree 建 anchor root（旧路径一致）
         fake.git_worktree_add.assert_awaited_once()
         assert fake.git_worktree_add.await_args.args[0].id == ws.id
-        # placement 按 anchor 路由 + representative_fallback=False（borrow 维持）
-        placement.assert_awaited_once()
-        wk = placement.call_args.kwargs
-        assert wk["workspace_id"] == ws.id
-        assert wk["representative_fallback"] is False
-        assert wk["provider"] == "claude_single"
-        assert wk["model"] == "model_single"
 
-        # DB：target_workspace_id NULL（旧行为）+ worktree_branch 按 task-03 公式填值
+        # task-15 断言迁移：不再 mock dispatch_to_daemon，路由证据改从子会话
+        # interactive lease 断言——按 anchor 路由（metadata.workspace_id）、
+        # model 按 anchor ws 默认值、runtime 钉定到 anchor 代表机器、
+        # stage=mission_worker、cwd=worktree 副本路径。
         workers = await _fetch_worker_runs(db_session, mid)
         assert len(workers) == 1
         worker = workers[0]
+        lease = await _fetch_worker_lease(db_session, worker)
+        assert lease.kind == "interactive"
+        assert lease.runtime_id == rep_rt_id
+        meta = _lease_meta(lease)
+        assert meta["stage"] == MISSION_WORKER_STAGE
+        assert uuid.UUID(meta["workspace_id"]) == ws.id
+        assert meta["model"] == "model_single"
+        # D-004@v1 解析序：lease provider 取代表 binding runtime 的 provider
+        assert meta["provider"] == "claude"
+        assert meta["cwd"] == f"{ws.root_path}/.worktrees/{str(worker.id)[:8]}"
+
+        # DB：target_workspace_id NULL（旧行为）+ worktree_branch 按 task-03 公式填值
         assert worker.target_workspace_id is None
         assert worker.worktree_branch == f"workers/{str(worker.id)[:8]}"
 
@@ -550,7 +600,7 @@ class TestCrossWorkspaceSmoke:
         mid = mission.id
 
         # 2) 主 agent 派 worker 到 target ws（∈ scope 放行）
-        resp, fake, placement = await _dispatch_worker(
+        resp, fake = await _dispatch_worker(
             client,
             auth_headers,
             anchor_id,
@@ -564,13 +614,6 @@ class TestCrossWorkspaceSmoke:
         # worktree 落 target root（非 anchor）
         fake.git_worktree_add.assert_awaited_once()
         assert fake.git_worktree_add.await_args.args[0].id == target_id
-        # placement 按 target 路由 + representative_fallback=True（代表 binding）
-        placement.assert_awaited_once()
-        wk = placement.call_args.kwargs
-        assert wk["workspace_id"] == target_id
-        assert wk["representative_fallback"] is True
-        assert wk["provider"] == "claude_target"
-        assert wk["model"] == "model_target"
 
         # task-16 review 追补：dispatch_worker 已把显式 target 落 run.target_workspace_id，
         # 供 finalizer converge/cleanup 按 (target or anchor) 分组读取。
@@ -588,16 +631,40 @@ class TestCrossWorkspaceSmoke:
         assert fe_run.target_workspace_id == target_id
         assert fe_run.worktree_branch == f"workers/{str(fe_run.id)[:8]}"
 
-        # 3) 不带 target 的 worker 维持 anchor 路由（旗标 False，零回归）
-        resp2, _fake2, placement2 = await _dispatch_worker(
+        # task-15 断言迁移：路由证据改从子会话 interactive lease 断言——按
+        # target 路由（metadata.workspace_id=target）、model 按 target ws 默认值、
+        # runtime 钉定代表机器（D-004@v1，创建者无自有在线 runtime）。
+        fe_lease = await _fetch_worker_lease(db_session, fe_run)
+        assert fe_lease.kind == "interactive"
+        assert fe_lease.runtime_id == env["runtime_id"]
+        fe_meta = _lease_meta(fe_lease)
+        assert fe_meta["stage"] == MISSION_WORKER_STAGE
+        assert uuid.UUID(fe_meta["workspace_id"]) == target_id
+        assert fe_meta["model"] == "model_target"
+        assert fe_meta["cwd"] == f"{env['target_root']}/.worktrees/{str(fe_run.id)[:8]}"
+
+        # 3) 不带 target 的 worker 维持 anchor 路由（零回归）
+        resp2, _fake2 = await _dispatch_worker(
             client, auth_headers, anchor_id, mission_id, objective="后端任务"
         )
         assert resp2.status_code == 201, resp2.text
-        placement2.assert_awaited_once()
-        wk2 = placement2.call_args.kwargs
-        assert wk2["workspace_id"] == anchor_id
-        assert wk2["representative_fallback"] is False
-        assert wk2["provider"] == "claude_anchor"
+        be_run = (
+            (
+                await db_session.execute(
+                    select(AgentRun).where(
+                        AgentRun.mission_id == mid, AgentRun.objective == "后端任务"
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert be_run.target_workspace_id is None
+        be_lease = await _fetch_worker_lease(db_session, be_run)
+        be_meta = _lease_meta(be_lease)
+        assert uuid.UUID(be_meta["workspace_id"]) == anchor_id
+        assert be_meta["model"] == "model_anchor"
+        assert be_lease.runtime_id == env["runtime_id"]
 
         # 4) target=ws3 ∉ scope → 400 mission_target_out_of_scope 且不落 run
         resp3 = await client.post(
@@ -630,7 +697,7 @@ class TestCrossWorkspaceSmoke:
         mission_id = str(mission.id)
         mid = mission.id
 
-        resp_fe, _fake_fe, placement_fe = await _dispatch_worker(
+        resp_fe, _fake_fe = await _dispatch_worker(
             client,
             auth_headers,
             anchor_id,
@@ -639,15 +706,22 @@ class TestCrossWorkspaceSmoke:
             target=target_id,
         )
         assert resp_fe.status_code == 201, resp_fe.text
-        resp_be, _fake_be, placement_be = await _dispatch_worker(
+        resp_be, _fake_be = await _dispatch_worker(
             client, auth_headers, anchor_id, mission_id, objective="后端任务"
         )
         assert resp_be.status_code == 201, resp_be.text
-        # 派发路由抽检：FE→target 旗标开、BE→anchor 旗标关
-        assert placement_fe.call_args.kwargs["workspace_id"] == target_id
-        assert placement_fe.call_args.kwargs["representative_fallback"] is True
-        assert placement_be.call_args.kwargs["workspace_id"] == anchor_id
-        assert placement_be.call_args.kwargs["representative_fallback"] is False
+        # 派发路由抽检（task-15 断言迁移）：FE→target、BE→anchor（lease metadata
+        # workspace_id；旧 representative_fallback 旗标随 batch 路径退场）
+        _workers_probe = await _fetch_worker_runs(db_session, mid)
+        _by_obj_probe = {w.objective: w for w in _workers_probe}
+        fe_meta_probe = _lease_meta(
+            await _fetch_worker_lease(db_session, _by_obj_probe["前端任务"])
+        )
+        be_meta_probe = _lease_meta(
+            await _fetch_worker_lease(db_session, _by_obj_probe["后端任务"])
+        )
+        assert uuid.UUID(fe_meta_probe["workspace_id"]) == target_id
+        assert uuid.UUID(be_meta_probe["workspace_id"]) == anchor_id
 
         # task-16 review 追补：dispatch 已落 target_workspace_id，无需 harness 侧补齐；
         # 仅模拟完成 worker，终态保持 design 语义（FE 显式 target，BE 单 ws 模式 NULL）。
@@ -706,7 +780,7 @@ class TestCrossWorkspaceSmoke:
         mission_id = str(mission.id)
         mid = mission.id
 
-        resp_fe, _, _ = await _dispatch_worker(
+        resp_fe, _ = await _dispatch_worker(
             client,
             auth_headers,
             anchor_id,
@@ -715,7 +789,7 @@ class TestCrossWorkspaceSmoke:
             target=target_id,
         )
         assert resp_fe.status_code == 201, resp_fe.text
-        resp_be, _, _ = await _dispatch_worker(
+        resp_be, _ = await _dispatch_worker(
             client, auth_headers, anchor_id, mission_id, objective="后端任务"
         )
         assert resp_be.status_code == 201, resp_be.text

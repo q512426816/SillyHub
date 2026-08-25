@@ -219,7 +219,9 @@ class TestGetWorkerResult:
 class TestListWorkers:
     @pytest.mark.asyncio
     async def test_list_returns_all_runs(self, client, db_session, auth_headers) -> None:
-        """GET workers → 列 mission 下所有 run（含主 agent + worker）。"""
+        """GET workers → 列 mission 分身 run（存量 batch 形态；主控轮不混入——
+        FR-09 补漏后 workers 数据源子会话行化，主控轮剔除对齐
+        ``_team_mission_summary`` / ``non_orchestrator_runs`` 口径）。"""
         ws_id, mission_id, _main_run = await _seed_workspace_and_mission(db_session)
         worker = AgentRun(
             mission_id=mission_id,
@@ -239,10 +241,9 @@ class TestListWorkers:
         assert resp.status_code == 200, resp.text
         data = resp.json()
         assert data["mission_id"] == str(mission_id)
-        roles = {w["role"] for w in data["workers"]}
-        assert "orchestrator" in roles
-        assert "arch" in roles
-        assert len(data["workers"]) == 2
+        assert [w["role"] for w in data["workers"]] == ["arch"]
+        assert data["workers"][0]["status"] == "completed"
+        assert data["workers"][0]["total_cost_usd"] == 0.5
 
 
 class TestConvergeMission:

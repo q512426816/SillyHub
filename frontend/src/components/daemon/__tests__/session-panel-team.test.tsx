@@ -10,7 +10,11 @@
 //      objective 预填去前缀文本 + 输入框清空；codex 会话不拦截（正常入队）；
 //   3. TeamTaskBlock 挂载冒烟：listSessionTeamMissions 列表全部渲染（活跃在前）+
 //      活跃 chip「团队进行中 · N 分身」+ chip 可关闭收回（块仍在）；
-//   4. page 模式 /team 拦截（独立代码路径同断言）。
+//   4. page 模式 /team 拦截（独立代码路径同断言）；
+//   5. task-14（2026-08-25-team-subsession-governance / FR-08 / design §5.E）：
+//      分身行（sub_session_id）点击 → WorkerSessionOverlay 浮层复用 SessionPanel
+//      （dialog/attach 形态）打开该子会话（attach 轮询打到 sub_session_id）；
+//      关闭浮层还原主控面板（团队列表 + 输入框不丢）；page/dialog 两渲染点等价。
 //
 // 测试纪律：FIRST / AAA / 仅 mock 网络层（@/lib/daemon 会话 API + 团队 client、
 // @/lib/workspaces、@/lib/ppm/project、@/lib/workspace、page chrome 数据 hook）；
@@ -139,8 +143,17 @@ function makeMission(
   };
 }
 
-function makeWorker(runId: string, status: string) {
-  return { run_id: runId, role: "impl", status, objective: "分工目标" };
+function makeWorker(runId: string, status: string, subSessionId?: string) {
+  // task-14：sub_session_id 可选——子会话形态分身行（lib/daemon 手写类型暂未含
+  // 新字段，返回值非字面量直赋不受 excess property check，与组件 WorkerRowView
+  // intersect 同口径）。
+  return {
+    run_id: runId,
+    role: "impl",
+    status,
+    objective: "分工目标",
+    ...(subSessionId ? { sub_session_id: subSessionId } : {}),
+  };
 }
 
 /** attach 详情（dialog 轮询 / page detailQuery 共用形状）。 */
@@ -419,5 +432,100 @@ describe("SessionPanel page 模式团队入口", () => {
     );
     expect(sessionApi.injectSession).not.toHaveBeenCalled();
     expect(screen.queryByText(/排队消息/)).not.toBeInTheDocument();
+  });
+});
+
+/* ───────── 5. task-14：分身行点击 → 浮层复用 SessionPanel 打开子会话 ───────── */
+
+describe("SessionPanel task-14 分身会话浮层（FR-08 / design §5.E）", () => {
+  const SUB_SESSION_ID = "sub-worker-1";
+
+  /**
+   * 主控会话（sess-team）返回带 sub_session_id 分身行的活跃 mission；分身
+   * 子会话（sub-worker-1）非 mission 锚定会话，列表恒空（后端按
+   * AgentMission.session_id 直查）——嵌套浮层不会再渲染团队块，无递归嵌套。
+   */
+  function mockMissionsWithSubSession() {
+    sessionApi.listSessionTeamMissions.mockImplementation(async (sid: string) =>
+      sid === "sess-team"
+        ? [
+            makeMission("m-run", "running", [
+              makeWorker("w-1", "running", SUB_SESSION_ID),
+            ]),
+          ]
+        : [],
+    );
+  }
+
+  /** 展开团队块并点击子会话形态分身行（触发 onOpenWorkerSession 上抛）。 */
+  async function openWorkerSessionOverlay() {
+    fireEvent.click(await screen.findByText("展开 ▾"));
+    fireEvent.click(
+      screen.getByRole("button", { name: "查看分身会话：实现" }),
+    );
+    // 浮层出现（role=dialog「分身会话」）+ 头部短 id 标识（#sub-work…）。
+    const overlay = await screen.findByRole("dialog", { name: "分身会话" });
+    expect(screen.getByText(`#${SUB_SESSION_ID.slice(0, 8)}`)).toBeInTheDocument();
+    return overlay;
+  }
+
+  it("dialog 模式：浮层复用 SessionPanel（attach 到 sub_session_id）→ 关闭还原主控面板", async () => {
+    mockMissionsWithSubSession();
+    setupDialog();
+
+    await openWorkerSessionOverlay();
+
+    // 嵌套 SessionPanel 以分身子会话 attach：轮询 getAgentSession 打到子会话 id
+    //（实时流与追问全走面板既有链路，constraints：零新建面板/零复制）。
+    await waitFor(() =>
+      expect(sessionApi.getAgentSession).toHaveBeenCalledWith(SUB_SESSION_ID),
+    );
+
+    // 关闭浮层：返回主控——浮层卸载、主控团队列表 + 输入框原样保留（state 不丢）。
+    fireEvent.click(screen.getByRole("button", { name: "关闭分身会话" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "分身会话" }),
+      ).not.toBeInTheDocument(),
+    );
+    expect(screen.getByLabelText("会话团队任务列表")).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText(/消息将排队|继续追问/),
+    ).toBeInTheDocument();
+  });
+
+  it("page 模式：分身行点击同样打开浮层（两渲染点等价接线）→ 关闭还原", async () => {
+    sessionApi.getAgentSession.mockResolvedValue(makeDetail("claude"));
+    sessionApi.listSessionRuns.mockResolvedValue([]);
+    workspaceApi.listWorkspaces.mockResolvedValue({ items: [] });
+    mockMissionsWithSubSession();
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={qc}>
+        <SessionPanel
+          mode="page"
+          sessionId="sess-team"
+          machines={[]}
+          llmProviders={[]}
+        />
+      </QueryClientProvider>,
+    );
+
+    await openWorkerSessionOverlay();
+    await waitFor(() =>
+      expect(sessionApi.getAgentSession).toHaveBeenCalledWith(SUB_SESSION_ID),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "关闭分身会话" }));
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "分身会话" }),
+      ).not.toBeInTheDocument(),
+    );
+    // 主控面板未卸载：团队列表 + 主输入仍在（流与输入状态不丢）。
+    expect(screen.getByLabelText("会话团队任务列表")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/继续追问/)).toBeInTheDocument();
   });
 });

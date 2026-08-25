@@ -23,9 +23,15 @@
  * 团队视觉用 violet 固定阶（主题不变量，「团队/主控专用」，对齐现有
  * team-progress.tsx mission 视觉与原型），运行态文字走 brand-* 语义阶
  *（随 html data-theme 换肤，双主题铁律）。
+ *
+ * task-14（2026-08-25-team-subsession-governance / FR-08 / design §5.E）：
+ * 子会话形态分身行（workers[].sub_session_id 非空）行主体可点击 →
+ * onOpenWorkerSession(subSessionId) 上抛，父层（session-panel 两模式）以浮层
+ * 复用 SessionPanel 打开该分身会话（实时流 + 追问）；存量 batch 分身行无该
+ * 字段不渲染点击态，未传回调时全部行为零变化（纯 props 契约不变）。
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import {
   getAgentRunLogs,
@@ -33,7 +39,11 @@ import {
   type AgentRunLogEntry,
   type WorkerArtifact,
 } from "@/lib/agent";
-import { cancelTeamMission, type TeamMissionSummary } from "@/lib/daemon";
+import {
+  cancelTeamMission,
+  type TeamMissionSummary,
+  type TeamMissionWorkerSummary,
+} from "@/lib/daemon";
 import { ApiError } from "@/lib/api";
 import { workspaceTypeBadge } from "@/lib/workspace-types";
 import { cn } from "@/lib/utils";
@@ -133,6 +143,19 @@ function WsBadge({ entry }: { entry: TeamWorkspaceMetaEntry }) {
 
 /* ───────────────── props 契约（task-11 消费） ───────────────── */
 
+/**
+ * task-14（FR-08 / design §5.E）：子会话形态分身行扩展字段——后端
+ * TeamMissionWorkerSummary 已下发 sub_session_id / first_run_id（api-types
+ * 生成版已同步），手写 lib/daemon 类型按其注释惯例另行维护、暂未含新字段
+ *（本卡 allowed_paths 不含 lib/daemon.ts）——组件内 intersect 补齐，消费面最小。
+ */
+type WorkerRowView = TeamMissionWorkerSummary & {
+  /** 分身子会话 id（新形态行非空；存量 batch 行恒 null）。 */
+  sub_session_id?: string | null;
+  /** 首 run id（与 run_id 同值，design §6 实现级备注，本组件暂未消费）。 */
+  first_run_id?: string | null;
+};
+
 export interface TeamTaskBlockProps {
   /** 团队任务概要（listSessionTeamMissions 列表项）。 */
   summary: TeamMissionSummary;
@@ -145,6 +168,13 @@ export interface TeamTaskBlockProps {
   workspaceMeta?: TeamWorkspaceMeta;
   /** 会话绑定工作区 ID（用于 per-run 日志/产物查询端点鉴权）。 */
   workspaceId?: string | null;
+  /**
+   * task-14（FR-08）：分身行点击打开该分身子会话——有 sub_session_id 的分身行
+   * 行主体可点击触发（父层以浮层复用 SessionPanel 打开，实时流 + 追问）。
+   * 缺省不传 = 全部分身行不可点击（零回归）；存量 batch 分身行无该字段，
+   * 传了回调也不渲染点击态。
+   */
+  onOpenWorkerSession?: (subSessionId: string) => void;
 }
 
 /* ───────────────── 组件 ───────────────── */
@@ -154,6 +184,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
   onRefresh,
   workspaceMeta,
   workspaceId,
+  onOpenWorkerSession,
 }: TeamTaskBlockProps) {
   const active = isActiveTeamMission(summary.status);
   // ql-20260825-011：默认一律收起（原活跃任务自动展开，多任务并发时每个块都
@@ -397,14 +428,46 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
             </p>
           ) : (
             summary.workers.map((w) => {
+              const row: WorkerRowView = w;
               const wsMeta = WORKER_STATUS_META[w.status] ?? WORKER_STATUS_FALLBACK;
               const logsOpen = expandedLogsRunId === w.run_id;
               const artifactsOpen = expandedArtifactsRunId === w.run_id;
+              const roleLabel = (w.role && ROLE_LABEL[w.role]) || w.role || "分身";
+              // task-14（FR-08）：子会话形态分身行可点击打开会话——行主体
+              // role=button（键盘可达），行尾日志/产物按钮 stopPropagation 不误触
+              //（嵌套可点元素互不干扰，constraints）；存量 batch 行（无
+              // sub_session_id）或父层未传回调时不渲染点击态（零回归）。
+              const subSessionId = row.sub_session_id ?? null;
+              const workerSessionOpenable = subSessionId != null && onOpenWorkerSession != null;
               return (
                 <div key={w.run_id} className="flex flex-col">
-                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[12.5px]">
+                  <div
+                    className={cn(
+                      "flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[12.5px]",
+                      // hover 高亮走 brand-* 语义阶（AI-Native 双主题 token，
+                      // FRONTEND_PAGE_STYLE §0.5 铁律；violet 仅团队固定身份色沿用）。
+                      workerSessionOpenable &&
+                        "cursor-pointer transition-colors hover:border-brand-300 hover:bg-brand-50/60 focus-visible:border-brand-400 focus-visible:bg-brand-50/60 focus-visible:outline-none",
+                    )}
+                    {...(workerSessionOpenable && {
+                      role: "button" as const,
+                      tabIndex: 0,
+                      "aria-label": `查看分身会话：${roleLabel}`,
+                      onClick: () => {
+                        if (subSessionId) onOpenWorkerSession?.(subSessionId);
+                      },
+                      onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
+                        // 焦点在行内日志/产物按钮时的按键不劫持（只认行本体）。
+                        if (e.target !== e.currentTarget) return;
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          if (subSessionId) onOpenWorkerSession?.(subSessionId);
+                        }
+                      },
+                    })}
+                  >
                     <span className="inline-flex h-[19px] shrink-0 items-center rounded border border-border bg-muted px-2 text-[11px] text-muted-foreground">
-                      {(w.role && ROLE_LABEL[w.role]) || w.role || "分身"}
+                      {roleLabel}
                     </span>
                     <span className={cn("shrink-0 text-[12px]", wsMeta.cls)}>
                       {wsMeta.label}
@@ -433,7 +496,11 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
                     </span>
                     <button
                       type="button"
-                      onClick={() => void handleToggleLogs(w.run_id, w.workspace_id)}
+                      onClick={(e) => {
+                        // task-14：行主体可点击时日志按钮不冒泡（不误触打开分身会话）。
+                        e.stopPropagation();
+                        void handleToggleLogs(w.run_id, w.workspace_id);
+                      }}
                       className={cn(
                         "shrink-0 rounded border px-2 py-0.5 text-[11.5px] hover:bg-muted",
                         logsOpen
@@ -445,7 +512,11 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
                     </button>
                     <button
                       type="button"
-                      onClick={() => void handleToggleArtifacts(w.run_id, w.workspace_id)}
+                      onClick={(e) => {
+                        // task-14：同日志按钮——产物按钮不冒泡。
+                        e.stopPropagation();
+                        void handleToggleArtifacts(w.run_id, w.workspace_id);
+                      }}
                       className={cn(
                         "shrink-0 rounded border px-2 py-0.5 text-[11.5px] hover:bg-muted",
                         artifactsOpen
@@ -455,6 +526,13 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
                     >
                       产物
                     </button>
+                    {/* task-14：可点击分身行的「查看会话」入口标识（brand-* 语义阶；
+                        行本体即按钮，此处纯视觉指示不重复可聚焦语义）。 */}
+                    {workerSessionOpenable && (
+                      <span className="shrink-0 text-[11.5px] font-medium text-brand-600">
+                        查看会话 ›
+                      </span>
+                    )}
                   </div>
 
                   {/* 日志展开区——ql-20260825-004 富渲染（与主会话「进度」视图同形态） */}
