@@ -12,6 +12,8 @@ decision_ids: [D-001@v1]
 allowed_paths:
   - backend/app/modules/agent/model.py
   - backend/migrations/versions/20260825210000_agent_session_parent_worker_done.py
+  - backend/app/modules/agent/tests/test_agent_session_model.py
+  - backend/app/modules/agent/tests/test_mission_session_id.py
 provides:
   - contract: agent_session_worker_columns
     fields: [worker_done_at, parent_session_id, mission_id]
@@ -35,6 +37,11 @@ verify:
   - cd backend && uv run alembic upgrade head
   - cd backend && uv run pytest -q --no-cov app/modules/agent/tests/test_agent_session_model.py app/modules/agent/tests/test_mission_session_id.py
   - cd backend && uv run mypy app && uv run ruff check .
+related_tests:
+  - path: backend/app/modules/agent/tests/test_agent_session_model.py
+    reason: 严格字段集断言（23→25 字段），加列必然失效，机械更新
+  - path: backend/app/modules/agent/tests/test_mission_session_id.py
+    reason: 同上（字段清单断言）
 constraints:
   - 两列均 nullable 不回填——存量 mission 不迁子会话形态，双判据兼容由后续任务负责（design §3 非目标）。
   - P1 只查一层直接子会话，不做递归 CTE 与树深上限（P2 递归派发时再放开，design §5.A）。

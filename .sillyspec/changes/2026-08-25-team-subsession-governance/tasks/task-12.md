@@ -12,6 +12,7 @@ decision_ids: [D-001@v1]
 allowed_paths:
   - backend/app/modules/agent/patrol.py
   - backend/app/modules/agent/tests/test_worker_subsession_patrol_orphan.py
+  - backend/app/modules/agent/tests/test_patrol.py
 expects_from:
   - 'task-01 mission_worker_sessions(mission_id) 一层枚举分身子会话——孤儿扫描的子会话枚举来源（独立查询不复用 _active_mission_ids）'
   - 'task-08 is_worker_complete / mission_derive_status 单一真相源口径——「子会话仍活跃」判定与活跃 turn 词表（agent.model.ACTIVE_RUN_STATUSES）同源，禁 patrol 另写判据'

@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 · 会话与变更/快速修复绑定 · 2026-08-25-session-spec-binding</title>
+<style>
+  :root{
+    --brand-50:#f5f3ff;--brand-100:#ede9fe;--brand-200:#ddd6fe;--brand-300:#c4b5fd;
+    --brand-500:#8b5cf6;--brand-600:#7c3aed;--brand-700:#6d28d9;
+    --accent:#0891b2;--accent-light:#06b6d4;
+    --bg:#fafafa;--card:#ffffff;--muted:#f4f4f5;--muted-fg:#71717a;
+    --fg:#18181b;--border:#e4e4e7;
+    --success:#16a34a;--warning:#d97706;--error:#dc2626;--info:#0891b2;
+    --shadow-sm:0 1px 2px 0 rgb(0 0 0 / .05);
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fg);font-size:13px;}
+  /* ── 场景切换器 ── */
+  .scene-bar{position:sticky;top:0;z-index:50;display:flex;gap:8px;align-items:center;
+    background:var(--card);border-bottom:1px solid var(--border);padding:10px 20px;box-shadow:var(--shadow-sm);}
+  .scene-bar .title{font-weight:600;margin-right:12px;}
+  .scene-tab{border:1px solid var(--border);background:var(--card);border-radius:6px;padding:5px 12px;cursor:pointer;font-size:12px;color:var(--muted-fg);}
+  .scene-tab.active{background:var(--brand-600);border-color:var(--brand-600);color:#fff;}
+  .scene{display:none;padding:20px;max-width:1280px;margin:0 auto;}
+  .scene.active{display:block;}
+  .hint{background:var(--brand-50);border:1px solid var(--brand-200);border-radius:8px;padding:10px 14px;margin-bottom:16px;color:var(--brand-700);font-size:12px;line-height:1.7;}
+  .hint b{color:var(--brand-600);}
+  .badge{display:inline-flex;align-items:center;border-radius:999px;padding:1px 8px;font-size:11px;border:1px solid;}
+  .badge.success{color:var(--success);border-color:color-mix(in srgb,var(--success) 35%,white);background:color-mix(in srgb,var(--success) 8%,white);}
+  .badge.info{color:var(--info);border-color:color-mix(in srgb,var(--info) 35%,white);background:color-mix(in srgb,var(--info) 8%,white);}
+  .badge.warning{color:var(--warning);border-color:color-mix(in srgb,var(--warning) 35%,white);background:color-mix(in srgb,var(--warning) 8%,white);}
+  .badge.neutral{color:var(--muted-fg);border-color:var(--border);background:var(--muted);}
+  .btn{display:inline-flex;align-items:center;gap:6px;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;border:1px solid var(--border);background:var(--card);}
+  .btn.primary{background:var(--brand-600);border-color:var(--brand-600);color:#fff;}
+  .btn.outline{background:var(--card);}
+  .btn.block{width:100%;justify-content:center;}
+  .mono{font-family:ui-monospace,Consolas,monospace;}
+  .muted{color:var(--muted-fg);}
+
+  /* ── 场景A：快速修复抽屉 ── */
+  .drawer-wrap{display:flex;justify-content:flex-end;height:640px;background:rgba(24,24,27,.25);border-radius:10px;overflow:hidden;position:relative;}
+  .drawer{width:520px;background:var(--card);border-left:1px solid var(--border);height:100%;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px;}
+  .drawer h3{font-size:14px;font-weight:600;}
+  .drawer .ql-meta{display:flex;flex-wrap:wrap;gap-x-14:0;gap:4px 16px;font-size:11px;color:var(--muted-fg);}
+  .sec-label{font-size:11px;font-weight:600;color:var(--muted-fg);margin-bottom:4px;}
+  .body-block{background:var(--muted);border-radius:6px;padding:8px 10px;font-size:12px;line-height:1.6;}
+  .new-card{border:2px dashed var(--brand-300);border-radius:8px;padding:10px;background:var(--brand-50);}
+  .new-tag{background:var(--brand-600);color:#fff;border-radius:4px;padding:1px 6px;font-size:10px;margin-left:6px;vertical-align:1px;}
+  .sess-row{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-radius:6px;font-size:11px;cursor:pointer;}
+  .sess-row:hover{background:var(--muted);}
+  .sess-row .right{display:flex;gap:8px;color:var(--muted-fg);align-items:center;}
+
+  /* ── 场景B：快速修复会话工作台（门户） ── */
+  .portal{display:flex;gap:0;border:1px solid var(--border);border-radius:10px;overflow:hidden;height:680px;background:var(--card);}
+  .portal-left{width:320px;border-right:1px solid var(--border);display:flex;flex-direction:column;background:var(--card);}
+  .portal-head{padding:12px 14px;border-bottom:1px solid var(--border);}
+  .portal-head .ctx-chip{display:inline-flex;align-items:center;gap:6px;background:var(--brand-50);border:1px solid var(--brand-200);color:var(--brand-700);border-radius:6px;padding:3px 8px;font-size:11px;margin-top:6px;}
+  .tree{flex:1;overflow-y:auto;padding:8px;}
+  .tree-group{border-radius:8px;margin-bottom:6px;}
+  .tree-group-head{display:flex;align-items:center;gap:6px;padding:6px 8px;font-weight:600;font-size:12px;cursor:pointer;}
+  .tree-group-head .cnt{color:var(--muted-fg);font-weight:400;font-size:11px;}
+  .tree-group-head .plus{margin-left:auto;width:20px;height:20px;display:flex;align-items:center;justify-content:center;border-radius:4px;color:var(--muted-fg);border:1px solid transparent;}
+  .tree-group-head .plus:hover{border-color:var(--brand-300);color:var(--brand-600);background:var(--brand-50);}
+  .tree-item{display:flex;align-items:center;gap:8px;padding:6px 8px 6px 22px;border-radius:6px;font-size:12px;cursor:pointer;color:var(--muted-fg);}
+  .tree-item:hover{background:var(--muted);}
+  .tree-item.sel{background:var(--brand-50);color:var(--brand-700);font-weight:500;}
+  .tree-item .bind-icons{margin-left:auto;display:flex;gap:3px;}
+  .bind-dot{width:14px;height:14px;border-radius:4px;font-size:9px;display:flex;align-items:center;justify-content:center;color:#fff;}
+  .bind-dot.change{background:var(--brand-500);}
+  .bind-dot.quick{background:var(--accent);}
+  .filter-bar{display:flex;gap:6px;padding:8px;border-top:1px solid var(--border);background:var(--muted);}
+  .filter-sel{flex:1;border:1px solid var(--border);border-radius:6px;background:var(--card);padding:4px 8px;font-size:11px;color:var(--fg);}
+  .portal-right{flex:1;display:flex;flex-direction:column;}
+  .panel-head{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;}
+  .chat{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px;}
+  .msg{max-width:78%;border-radius:10px;padding:8px 12px;font-size:12px;line-height:1.7;}
+  .msg.user{align-self:flex-end;background:var(--brand-600);color:#fff;}
+  .msg.ai{align-self:flex-start;background:var(--muted);border:1px solid var(--border);}
+  .msg .tool-line{font-family:ui-monospace,Consolas,monospace;font-size:11px;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:4px 8px;margin-top:6px;color:var(--muted-fg);}
+  .bind-toast{align-self:center;display:flex;align-items:center;gap:8px;background:var(--brand-50);border:1px solid var(--brand-200);color:var(--brand-700);border-radius:999px;padding:4px 14px;font-size:11px;}
+  .composer{border-top:1px solid var(--border);padding:10px 14px;display:flex;gap:8px;}
+  .composer input{flex:1;border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-size:12px;}
+
+  /* ── 场景C：会话列表筛选 ── */
+  .filter-demo{border:1px solid var(--border);border-radius:10px;background:var(--card);width:420px;overflow:hidden;}
+  .filter-demo .hd{padding:10px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;font-weight:600;}
+  .filter-toolbar{padding:10px 12px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;}
+  .sel{border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;background:var(--card);color:var(--muted-fg);cursor:pointer;}
+  .sel.filled{border-color:var(--brand-300);background:var(--brand-50);color:var(--brand-700);}
+  .dropdown{position:relative;display:inline-block;}
+  .dd-menu{display:none;position:absolute;top:110%;left:0;z-index:30;width:260px;background:var(--card);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 20px rgba(0,0,0,.12);padding:4px;}
+  .dropdown.open .dd-menu{display:block;}
+  .dd-group{font-size:10px;color:var(--muted-fg);padding:6px 8px 2px;font-weight:600;}
+  .dd-item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;font-size:12px;cursor:pointer;}
+  .dd-item:hover{background:var(--muted);}
+  .dd-item .mono{font-size:11px;}
+  .list{padding:6px;}
+  .list-row{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;font-size:12px;cursor:pointer;}
+  .list-row:hover{background:var(--muted);}
+  .list-row .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+</style>
+</head>
+<body>
+
+<div class="scene-bar">
+  <span class="title">原型 · 会话与变更/快速修复绑定</span>
+  <button class="scene-tab active" data-scene="a">A · 快速修复抽屉（补会话卡）</button>
+  <button class="scene-tab" data-scene="b">B · 快速修复会话工作台（新路由）</button>
+  <button class="scene-tab" data-scene="c">C · 会话列表筛选（变更/快速修复）</button>
+</div>
+
+<!-- ══════════ 场景A：快速修复抽屉 ══════════ -->
+<div class="scene active" id="scene-a">
+  <div class="hint">快速修复详情抽屉<b>新增「关联会话」卡</b>（对齐变更详情的「会话调试」卡）：会话中跑过 <span class="mono">sillyspec run quick xxx</span> 的会话自动出现在这里；卡尾「打开会话工作台」进入快速修复级会话门户（场景B）。</div>
+  <div class="drawer-wrap">
+    <div class="drawer">
+      <div>
+        <span class="badge success">已完成</span>
+        <span class="mono muted" style="margin-left:8px;font-size:11px;">ql-20260824-014</span>
+        <h3 style="margin-top:6px;">悬浮球去紫改青（白字按钮对比 3.5:1）</h3>
+      </div>
+      <div class="ql-meta">
+        <span>作者：qinyi</span><span>时间：2026-08-24</span>
+        <span>关联变更：2026-08-23-frontend-dark-theme</span><span>来源：推送</span>
+      </div>
+      <div>
+        <div class="sec-label">需求</div>
+        <div class="body-block">ai-native 主题下品牌紫按钮白字对比度不足，交互色改青 …</div>
+      </div>
+      <div>
+        <div class="sec-label">结果</div>
+        <div class="body-block">themes.ts blue 主题 primary 改 cyan-600，全部按钮统一 …</div>
+      </div>
+
+      <!-- ★ 新增：关联会话卡 -->
+      <div class="new-card">
+        <div style="display:flex;align-items:center;">
+          <span class="sec-label" style="margin:0;">关联会话</span><span class="new-tag">新增</span>
+        </div>
+        <p class="muted" style="font-size:11px;margin:4px 0 6px;">本快速修复的执行会话（自动绑定，点击直达选中）</p>
+        <div class="sess-row">
+          <span class="mono">#a54fa0e4</span>
+          <span class="right"><span class="badge info">进行中</span><span>3 分钟前</span></span>
+        </div>
+        <div class="sess-row">
+          <span class="mono">#45613a33</span>
+          <span class="right"><span class="badge neutral">已结束</span><span>昨天</span></span>
+        </div>
+        <div style="margin-top:8px;">
+          <button class="btn outline block">打开会话工作台</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 场景B：快速修复会话工作台 ══════════ -->
+<div class="scene" id="scene-b">
+  <div class="hint">新路由 <span class="mono">/workspaces/{id}/quicklog/{qlId}/sessions</span>（QuicklogScope 门户，与变更级门户同构）：左侧工作区会话树，右侧会话面板；组头「＋」新建的会话<b>自动绑定本快速修复</b>；会话内首次执行 <span class="mono">sillyspec run quick</span> 后也会自动回绑（绑定提示见对话中部）。</div>
+  <div class="portal">
+    <div class="portal-left">
+      <div class="portal-head">
+        <div style="font-weight:600;font-size:13px;">会话 · 快速修复</div>
+        <span class="ctx-chip">⚡ ql-20260824-014 悬浮球去紫改青</span>
+      </div>
+      <div class="tree">
+        <div class="tree-group">
+          <div class="tree-group-head">▾ multi-agent-platform <span class="cnt">3</span>
+            <span class="plus" title="新建会话（本快速修复）">＋</span>
+          </div>
+          <div class="tree-item sel">
+            <span class="mono">#a54fa0e4</span>
+            <span class="bind-icons"><span class="bind-dot quick" title="绑定快速修复">Q</span></span>
+          </div>
+          <div class="tree-item">
+            <span class="mono">#45613a33</span>
+            <span class="bind-icons"><span class="bind-dot quick">Q</span><span class="bind-dot change" title="绑定变更">C</span></span>
+          </div>
+        </div>
+        <div class="tree-group">
+          <div class="tree-group-head">▸ ppm-workspace <span class="cnt">1</span>
+            <span class="plus">＋</span>
+          </div>
+        </div>
+      </div>
+      <div class="filter-bar">
+        <select class="filter-sel"><option>全部状态</option><option>进行中</option><option>已结束</option></select>
+        <select class="filter-sel"><option>全部智能体</option><option>Claude</option><option>Codex</option></select>
+      </div>
+    </div>
+    <div class="portal-right">
+      <div class="panel-head">
+        <span class="mono">#a54fa0e4</span>
+        <span class="badge info">进行中</span>
+        <span class="muted" style="font-size:11px;">claude · 12 轮</span>
+        <span class="ctx-chip" style="background:var(--brand-50);border:1px solid var(--brand-200);color:var(--brand-700);border-radius:6px;padding:2px 8px;font-size:11px;">⚡ ql-20260824-014</span>
+      </div>
+      <div class="chat">
+        <div class="msg user">帮我修一下悬浮球按钮的对比度问题</div>
+        <div class="msg ai">好的，我用快速修复流程处理。
+          <div class="tool-line">$ sillyspec run quick "悬浮球去紫改青"</div>
+        </div>
+        <div class="bind-toast">🔗 已自动绑定到快速修复 ql-20260824-014</div>
+        <div class="msg ai">已完成修改，快速修复记录已登记。
+          <div class="tool-line">$ sillyspec run quick --done --change quick-990f8c09 --output "四段摘要"</div>
+        </div>
+        <div class="msg user">跑一下前端测试确认没破坏别的</div>
+        <div class="msg ai">前端相关测试 20 绿，未影响其他用例。</div>
+      </div>
+      <div class="composer">
+        <input placeholder="发送首句即创建会话（已绑定本快速修复）…">
+        <button class="btn primary">发送</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════ 场景C：会话列表筛选 ══════════ -->
+<div class="scene" id="scene-c">
+  <div class="hint">工作区会话列表<b>新增「关联」筛选下拉</b>：按变更（<span class="bind-dot change" style="display:inline-flex;vertical-align:-2px;">C</span>）或快速修复（<span class="bind-dot quick" style="display:inline-flex;vertical-align:-2px;">Q</span>）筛选会话，多对多命中（会话绑定任一命中项即显示）。点开下拉体验分组选项。</div>
+  <div class="filter-demo">
+    <div class="hd"><span>会话</span><span class="muted" style="font-weight:400;font-size:11px;">multi-agent-platform</span></div>
+    <div class="filter-toolbar">
+      <div class="dropdown" id="dd">
+        <div class="sel filled" onclick="document.getElementById('dd').classList.toggle('open')">
+          关联：⚡ ql-20260824-014 ▾
+        </div>
+        <div class="dd-menu">
+          <div class="dd-group">变更</div>
+          <div class="dd-item"><span class="bind-dot change">C</span><span class="mono">2026-08-25-session-spec-binding</span></div>
+          <div class="dd-item"><span class="bind-dot change">C</span><span class="mono">2026-08-23-frontend-dark-theme</span></div>
+          <div class="dd-item"><span class="bind-dot change">C</span><span class="mono">2026-08-22-team-session-unify</span></div>
+          <div class="dd-group">快速修复</div>
+          <div class="dd-item"><span class="bind-dot quick">Q</span><span class="mono">ql-20260824-014</span><span class="muted">悬浮球去紫改青</span></div>
+          <div class="dd-item"><span class="bind-dot quick">Q</span><span class="mono">ql-20260823-001</span><span class="muted">补齐四个操作回调</span></div>
+          <div class="dd-item muted">清除筛选</div>
+        </div>
+      </div>
+      <div class="sel">全部状态 ▾</div>
+      <div class="sel">全部智能体 ▾</div>
+    </div>
+    <div class="list">
+      <div class="list-row"><span class="mono">#a54fa0e4</span><span class="t">帮我修一下悬浮球按钮的对比度问题</span><span class="bind-dot quick">Q</span></div>
+      <div class="list-row"><span class="mono">#45613a33</span><span class="t">页面上下文前导改指令式+去本机路径</span><span class="bind-dot quick">Q</span><span class="bind-dot change">C</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.querySelectorAll('.scene-tab').forEach(function(tab){
+    tab.addEventListener('click',function(){
+      document.querySelectorAll('.scene-tab').forEach(function(t){t.classList.remove('active');});
+      tab.classList.add('active');
+      document.querySelectorAll('.scene').forEach(function(s){s.classList.remove('active');});
+      document.getElementById('scene-'+tab.dataset.scene).classList.add('active');
+    });
+  });
+  document.addEventListener('click',function(e){
+    var dd=document.getElementById('dd');
+    if(dd && !dd.contains(e.target)) dd.classList.remove('open');
+  });
+</script>
+</body>
+</html>
