@@ -205,6 +205,9 @@ class SessionInjectRequest(BaseModel):
     agent_profile_id: str | None = None
     llm_provider_id: str | None = None
     attachment_ids: list[uuid.UUID] = Field(default_factory=list, max_length=10)
+    # ql-20260825-004：每轮注入携带当前页面上下文——客户端传页面类型枚举+键，
+    # 服务端回查注入【页面上下文】前导（复用 create 路径 build_page_context_preamble）。
+    page_context: PageContextCreateBlock | None = None
 
     @model_validator(mode="after")
     def _require_prompt_or_switch(self) -> "SessionInjectRequest":

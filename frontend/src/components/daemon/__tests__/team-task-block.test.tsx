@@ -20,7 +20,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 import { TeamTaskBlock, isActiveTeamMission } from "../team-task-block";
 import { cancelTeamMission, type TeamMissionSummary } from "@/lib/daemon";
-import { getAgentRunLogs } from "@/lib/agent";
+import { getAgentRunLogs, getWorkerArtifacts } from "@/lib/agent";
 
 vi.mock("@/lib/daemon", () => ({
   cancelTeamMission: vi.fn(),
@@ -28,6 +28,22 @@ vi.mock("@/lib/daemon", () => ({
 
 vi.mock("@/lib/agent", () => ({
   getAgentRunLogs: vi.fn(async () => [] as unknown[]),
+  getWorkerArtifacts: vi.fn(async () => ({
+    worker_id: "",
+    status: "completed",
+    artifacts: [],
+  })),
+}));
+
+vi.mock("next/dynamic", () => ({
+  default: (loader: unknown) => {
+    // ql-20260825-004：MarkdownPreview 动态导入在 jsdom 测试中以加载态占位
+    //（富渲染日志/产物的形态断言不依赖 Markdown 内容本身）。
+    const Fake = () => null;
+    Fake.displayName = "DynamicMock";
+    Fake.preload = () => Promise.resolve();
+    return Fake;
+  },
 }));
 const cancelMock = vi.mocked(cancelTeamMission);
 
@@ -290,6 +306,54 @@ describe("TeamTaskBlock ql-20260825-003", () => {
         "aaaaaaaa-0000-0000-0000-000000000002",
         "r-cross",
       ),
+    );
+  });
+});
+
+/* ───────── ql-20260825-004：产物数据源改 worker result 端点 + 富渲染 ───────── */
+
+describe("TeamTaskBlock ql-20260825-004 产物", () => {
+  it("产物按钮调 getWorkerArtifacts(mission_id, worker) 而非文件上传端点", async () => {
+    const artifactsMock = vi.mocked(getWorkerArtifacts).mockResolvedValue({
+      worker_id: "r-1",
+      status: "completed",
+      artifacts: [],
+    });
+    render(<TeamTaskBlock summary={makeSummary()} />);
+    fireEvent.click(screen.getAllByText("产物")[0]!);
+    await waitFor(() => expect(artifactsMock).toHaveBeenCalled());
+    expect(artifactsMock).toHaveBeenCalledWith(
+      "11111111-2222-3333-4444-555555555555",
+      "m-1",
+      "r-1",
+    );
+  });
+
+  it("summary 产物渲染为「分析报告」卡（Markdown）", async () => {
+    vi.mocked(getWorkerArtifacts).mockResolvedValue({
+      worker_id: "r-1",
+      status: "completed",
+      artifacts: [
+        { id: "a-1", kind: "summary", content_ref: "## 分析结果\n内容…" },
+      ],
+    });
+    render(<TeamTaskBlock summary={makeSummary()} />);
+    fireEvent.click(screen.getAllByText("产物")[0]!);
+    await waitFor(() =>
+      expect(screen.getByText("分析报告")).toBeInTheDocument(),
+    );
+  });
+
+  it("无产物时显示「暂无产物」", async () => {
+    vi.mocked(getWorkerArtifacts).mockResolvedValue({
+      worker_id: "r-1",
+      status: "completed",
+      artifacts: [],
+    });
+    render(<TeamTaskBlock summary={makeSummary()} />);
+    fireEvent.click(screen.getAllByText("产物")[0]!);
+    await waitFor(() =>
+      expect(screen.getByText("暂无产物")).toBeInTheDocument(),
     );
   });
 });

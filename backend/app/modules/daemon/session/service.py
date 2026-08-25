@@ -1925,6 +1925,8 @@ class SessionService:
         # 2026-08-20-session-multimodal-attachments task-05：附件引用（D-7 豁免
         # 空 prompt；引擎/归属/数量校验见 _inject_into_session；组装下发归 task-06）。
         attachment_ids: list[uuid.UUID] | None = None,
+        # ql-20260825-004：每轮注入携带当前页面上下文。
+        page_context: PageContextCreateBlock | None = None,
     ) -> SessionDispatchResult:
         """Append a new turn run to an active session (FR-02 / design §7.6 step 1).
 
@@ -2015,6 +2017,8 @@ class SessionService:
             attachment_ids=list(attachment_ids) if attachment_ids else None,
             # P1（二审 #1）：取锁前预组装产物（rows + payload + gate 快照）。
             prelocked_attachments=prelocked_attachments,
+            # ql-20260825-004：页面上下文透传。
+            page_context=page_context,
         )
 
     async def inject_session_as_service(
@@ -2085,6 +2089,9 @@ class SessionService:
         # 附件产物（校验过的 rows + payload + gate 快照）；None = 调用方未预组
         # 装（service 身份路径 / 直调），走锁内原校验兜底。
         prelocked_attachments: _PrelockedInjectAttachments | None = None,
+        # ql-20260825-004：每轮注入携带当前页面上下文（build_page_context_preamble
+        # 服务端回查注入【页面上下文】前导，复用 create 路径逻辑）。
+        page_context: PageContextCreateBlock | None = None,
     ) -> SessionDispatchResult:
         """Shared inject-turn core (used by :meth:`inject_session` +
         :meth:`inject_session_as_service`).
@@ -2581,9 +2588,32 @@ class SessionService:
                 # payload 的 prompt 内容，SESSION_INJECT 协议字段不变（零 daemon
                 # 改动）。AgentRunLog(user_input)/上方 SESSION_SWITCH_CONFIG 分支/
                 # 离线收敛 output_redacted 均保持用户原文（展示层干净）。
-                inject_prompt = (
-                    f"{first_turn_briefing}\n\n---\n\n{prompt}" if first_turn_briefing else prompt
-                )
+                # ql-20260825-004：每轮注入构建当前页面上下文前导（复用 create 路径
+                # build_page_context_preamble，服务端 DB 回查；查无/未传 → None 不注入）。
+                page_preamble = None
+                if page_context is not None:
+                    from app.modules.daemon.session.context import (
+                        build_page_context_preamble,
+                    )
+
+                    page_preamble = await build_page_context_preamble(
+                        self._session,
+                        page_context.page_key,
+                        page_context.project_id,
+                        page_context.route_key,
+                        page_context.workspace_id,
+                    )
+                # 拼接顺序：页面前导（本轮实时）→ 团队简报（首主控轮一次性）→ 用户消息。
+                parts = []
+                if page_preamble:
+                    parts.append(page_preamble)
+                if first_turn_briefing:
+                    parts.append(first_turn_briefing)
+                if parts:
+                    parts.append(prompt)
+                    inject_prompt = "\n\n---\n\n".join(parts)
+                else:
+                    inject_prompt = prompt
                 inject_payload = {
                     "session_id": str(session.id),
                     "lease_id": str(session.lease_id),

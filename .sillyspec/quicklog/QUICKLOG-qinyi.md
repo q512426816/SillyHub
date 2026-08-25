@@ -149,3 +149,8 @@
 状态：进行中
 关联变更：2026-08-24-session-team-mission-context
 文件：（见实际改动）
+
+## ql-20260825-004-7ef6 | 2026-08-25 11:23:48 | 悬浮会话页面上下文两 bug：显示不随页面切换更新+后续追问不携带当前页面 context
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/daemon/schema.py, backend/app/modules/daemon/router.py, backend/app/modules/daemon/session/service.py, frontend/src/lib/daemon.ts, frontend/src/components/daemon/session-panel.tsx, frontend/src/components/floating/floating-session-host.tsx, frontend/src/hooks/use-page-session-context.ts, frontend/src/stores/floating-session.ts

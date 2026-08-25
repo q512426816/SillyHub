@@ -214,6 +214,14 @@ export interface SessionPanelProps {
    *  面板状态机自然接管（门户接线归 task-06）。〔prop〕 */
   onPreSessionCreated?: (_resp: SessionCreateResponse) => void;
 
+  /** 悬浮宿主每轮注入页面上下文（ql-20260825-004）：从 URL 实时派生，
+   *  随每轮 injectSession 上送后端，服务端回查注入【页面上下文】前导。 */
+  pageContextOverride?:
+    | { page_key: "ppm_project"; project_id: string }
+    | { page_key: "generic_page"; route_key: string }
+    | { page_key: "workspace"; workspace_id: string }
+    | null;
+
   // ── dialog 模式专属（对应 InteractiveSessionPanelProps）────────────
   /** dialog 必需：在线引擎名列表（claude/codex）。〔prop〕消费方从 runtimes 派生
    *  （4 个渲染点同源逻辑），面板不自持。 */
@@ -272,6 +280,7 @@ export function SessionPanel(props: SessionPanelProps) {
         onSessionListRefresh={props.onSessionListRefresh}
         preContext={props.preContext}
         onPreSessionCreated={props.onPreSessionCreated}
+        pageContextOverride={props.pageContextOverride}
       />
     );
   }
@@ -296,6 +305,12 @@ interface SessionPanelPageProps {
   preContext?: SessionPreContext;
   /** 预会话首句创建成功上报（父层切 sessionId → 状态机自然接管）。 */
   onPreSessionCreated?: (_resp: SessionCreateResponse) => void;
+  /** ql-20260825-004：每轮注入携带当前页面上下文。 */
+  pageContextOverride?:
+    | { page_key: "ppm_project"; project_id: string }
+    | { page_key: "generic_page"; route_key: string }
+    | { page_key: "workspace"; workspace_id: string }
+    | null;
 }
 
 const MAX_PROMPT_LEN = 8000;
@@ -513,6 +528,7 @@ function SessionPanelPage({
   onSessionListRefresh,
   preContext,
   onPreSessionCreated,
+  pageContextOverride,
 }: SessionPanelPageProps) {
   const qc = useQueryClient();
   const notify = useNotify();
@@ -1360,6 +1376,8 @@ function SessionPanelPage({
         const resp = await injectSession(sessionId, prompt, {
           // 2026-08-20 task-12：附件引用（空数组不进 body，保持既有 payload 形态）。
           ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
+          // ql-20260825-004：每轮注入携带当前页面上下文（有值才带，零回归）。
+          ...(pageContextOverride ? { page_context: pageContextOverride } : {}),
         });
         setTurnState((prev) => ({
           currentRunId: resp.run_id,
@@ -1382,7 +1400,7 @@ function SessionPanelPage({
         throw err; // D-003：向上抛 → hook 标记 failed 留队头，不吞错
       }
     },
-    [sessionId],
+    [sessionId, pageContextOverride],
   );
 
   const { queue, enqueue, removeEntry, retryEntry, isQueueFull } =

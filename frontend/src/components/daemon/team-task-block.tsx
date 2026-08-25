@@ -25,18 +25,26 @@
  *（随 html data-theme 换肤，双主题铁律）。
  */
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 
 import {
   getAgentRunLogs,
-  listAgentFileArtifacts,
+  getWorkerArtifacts,
   type AgentRunLogEntry,
-  type AgentFileArtifactMeta,
+  type WorkerArtifact,
 } from "@/lib/agent";
 import { cancelTeamMission, type TeamMissionSummary } from "@/lib/daemon";
 import { ApiError } from "@/lib/api";
 import { workspaceTypeBadge } from "@/lib/workspace-types";
 import { cn } from "@/lib/utils";
+import { logsToTurns } from "./runtime-session-helpers";
+import { SegmentView } from "./turn-segment-views";
+
+// ql-20260825-004：分身 summary 产物是 Markdown 全文，用与知识库页同款渲染器。
+const MarkdownPreview = dynamic(() => import("@uiw/react-markdown-preview"), {
+  ssr: false,
+});
 
 /* ───────────────── 状态 / 角色映射（纯常量） ───────────────── */
 
@@ -124,13 +132,6 @@ function WsBadge({ entry }: { entry: TeamWorkspaceMetaEntry }) {
   );
 }
 
-/** 文件大小格式化（B / KB / MB）。 */
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 /* ───────────────── props 契约（task-11 消费） ───────────────── */
 
 export interface TeamTaskBlockProps {
@@ -175,7 +176,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
   const [logsError, setLogsError] = useState<string | null>(null);
 
   const [expandedArtifactsRunId, setExpandedArtifactsRunId] = useState<string | null>(null);
-  const [artifactsData, setArtifactsData] = useState<AgentFileArtifactMeta[]>([]);
+  const [artifactsData, setArtifactsData] = useState<WorkerArtifact[]>([]);
   const [artifactsLoading, setArtifactsLoading] = useState(false);
   const [artifactsError, setArtifactsError] = useState<string | null>(null);
 
@@ -227,18 +228,32 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
     [expandedLogsRunId, effectiveWorkspaceId],
   );
 
+  // ql-20260825-004：日志富渲染——复用主会话的历史日志→turns→segment 管线
+  //（logsToTurns + SegmentView），与主会话「进度」视图同形态的工具卡/思考块/
+  // 文本段，取代此前整块 <pre> 纯文本（用户反馈"日志纯文本不友好"）。
+  const logsTurns = useMemo(() => logsToTurns(logsData), [logsData]);
+
   const handleToggleArtifacts = useCallback(
-    async (runId: string) => {
+    async (runId: string, runWorkspaceId?: string | null) => {
       if (expandedArtifactsRunId === runId) {
         setExpandedArtifactsRunId(null);
+        return;
+      }
+      // ql-20260825-004：数据源改 agent_artifacts（worker result 端点，summary
+      // 产物 content_ref 为 Markdown 全文）——此前误调文件上传产物端点（分身
+      // 不走文件上传，恒为空，用户反馈"产物为什么没有"）。工作区回落链同日志。
+      const wsForRun = runWorkspaceId ?? effectiveWorkspaceId;
+      if (!wsForRun) {
+        setArtifactsError("无可用工作区 ID，无法查询产物");
+        setExpandedArtifactsRunId(runId);
         return;
       }
       setExpandedArtifactsRunId(runId);
       setArtifactsLoading(true);
       setArtifactsError(null);
       try {
-        const files = await listAgentFileArtifacts(runId);
-        setArtifactsData(files);
+        const result = await getWorkerArtifacts(wsForRun, summary.mission_id, runId);
+        setArtifactsData(result.artifacts ?? []);
       } catch (e) {
         setArtifactsError(e instanceof ApiError ? e.message : "加载产物失败");
         setArtifactsData([]);
@@ -246,7 +261,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
         setArtifactsLoading(false);
       }
     },
-    [expandedArtifactsRunId],
+    [expandedArtifactsRunId, effectiveWorkspaceId, summary.mission_id],
   );
 
   const statusMeta =
@@ -418,7 +433,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
                     </button>
                     <button
                       type="button"
-                      onClick={() => void handleToggleArtifacts(w.run_id)}
+                      onClick={() => void handleToggleArtifacts(w.run_id, w.workspace_id)}
                       className={cn(
                         "shrink-0 rounded border px-2 py-0.5 text-[11.5px] hover:bg-muted",
                         artifactsOpen
@@ -430,44 +445,33 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
                     </button>
                   </div>
 
-                  {/* 日志展开区 */}
+                  {/* 日志展开区——ql-20260825-004 富渲染（与主会话「进度」视图同形态） */}
                   {logsOpen && (
                     <div className="ml-4 mt-1 overflow-hidden rounded-lg border border-violet-100 bg-violet-50/30">
-                      <div className="max-h-[320px] overflow-y-auto p-2">
+                      <div className="max-h-[420px] overflow-y-auto p-2">
                         {logsLoading ? (
                           <p className="text-[11px] text-muted-foreground">加载中…</p>
                         ) : logsError ? (
                           <p className="text-[11px] text-destructive">{logsError}</p>
-                        ) : logsData.length === 0 ? (
+                        ) : logsTurns.length === 0 ? (
                           <p className="text-[11px] text-muted-foreground">暂无日志</p>
                         ) : (
-                          <pre className="whitespace-pre-wrap break-all font-mono text-[10.5px] leading-relaxed text-foreground">
-                            {logsData
-                              .map((l) => {
-                                const ts = l.timestamp
-                                  ? new Date(l.timestamp).toLocaleTimeString("zh-CN")
-                                  : "";
-                                const ch = l.channel === "tool_call"
-                                  ? `[工具]`
-                                  : l.channel === "user_input"
-                                    ? `[用户]`
-                                    : l.channel === "stdout"
-                                      ? `[输出]`
-                                      : "";
-                                const content = l.content_redacted ?? "";
-                                return `${ts} ${ch} ${content}`;
-                              })
-                              .join("\n")}
-                          </pre>
+                          <div className="flex flex-col gap-2">
+                            {logsTurns.flatMap((turn) =>
+                              (turn.segments ?? []).map((seg) => (
+                                <SegmentView key={seg.id} segment={seg} />
+                              )),
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
                   )}
 
-                  {/* 产物展开区 */}
+                  {/* 产物展开区——ql-20260825-004 agent_artifacts（summary=Markdown） */}
                   {artifactsOpen && (
                     <div className="ml-4 mt-1 overflow-hidden rounded-lg border border-violet-100 bg-violet-50/30">
-                      <div className="max-h-[240px] overflow-y-auto p-2">
+                      <div className="max-h-[420px] overflow-y-auto p-2">
                         {artifactsLoading ? (
                           <p className="text-[11px] text-muted-foreground">加载中…</p>
                         ) : artifactsError ? (
@@ -475,26 +479,35 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
                         ) : artifactsData.length === 0 ? (
                           <p className="text-[11px] text-muted-foreground">暂无产物</p>
                         ) : (
-                          <ul className="flex flex-col gap-1">
-                            {artifactsData.map((f) => (
-                              <li
-                                key={f.id}
-                                className="flex items-center gap-2 text-[11px]"
-                              >
-                                <span className="truncate font-medium text-foreground">
-                                  {f.original_name}
-                                </span>
-                                <span className="shrink-0 text-muted-foreground">
-                                  {formatFileSize(f.size)}
-                                </span>
-                                {f.description && (
-                                  <span className="truncate text-muted-foreground">
-                                    {f.description}
+                          <div className="flex flex-col gap-2">
+                            {artifactsData.map((a) =>
+                              a.kind === "summary" && a.content_ref ? (
+                                <div
+                                  key={a.id}
+                                  className="overflow-hidden rounded-lg border border-border bg-card"
+                                >
+                                  <div className="border-b border-border bg-muted/60 px-2.5 py-1 text-[11px] font-medium text-muted-foreground">
+                                    分析报告
+                                  </div>
+                                  <div className="px-1 py-1 text-[12px] [&_.markdown-preview]:bg-transparent">
+                                    <MarkdownPreview source={a.content_ref} />
+                                  </div>
+                                </div>
+                              ) : (
+                                <div
+                                  key={a.id}
+                                  className="rounded-lg border border-border bg-card px-2.5 py-1.5"
+                                >
+                                  <span className="text-[11px] font-medium text-foreground">
+                                    {a.kind === "patch" ? "代码补丁" : a.kind}
                                   </span>
-                                )}
-                              </li>
-                            ))}
-                          </ul>
+                                  <pre className="mt-1 max-h-[200px] overflow-y-auto whitespace-pre-wrap break-all rounded bg-muted/50 p-2 font-mono text-[10.5px] leading-relaxed text-foreground">
+                                    {a.content_ref}
+                                  </pre>
+                                </div>
+                              ),
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>

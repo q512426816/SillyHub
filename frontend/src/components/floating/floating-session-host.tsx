@@ -213,13 +213,11 @@ function FloatingDrawerBody({
         >
           <span className="text-[11px] text-muted-foreground">已感知页面</span>
           <span className="text-xs font-semibold text-brand-700">
-            {pageContext
-              ? "PPM · 项目详情"
-              : (derivedLabel ?? "未注册页面上下文")}
+            {derivedLabel ?? "未注册页面上下文"}
           </span>
           {effectivePageCtx && (
             <span className="rounded-full border border-border bg-card px-2 py-0.5 text-[10px] text-muted-foreground">
-              {pageContext ? "项目上下文" : "页面上下文"}将随首句注入（仅 AI 可见）
+              页面上下文将随每句注入（仅 AI 可见）
             </span>
           )}
         </div>
@@ -282,6 +280,7 @@ function FloatingDrawerBody({
               machines={machines}
               llmProviders={providers}
               onSessionListRefresh={refreshLists}
+              pageContextOverride={derivedPageCtx}
             />
           ) : preContext ? (
             <SessionPanel
@@ -292,6 +291,7 @@ function FloatingDrawerBody({
               llmProviders={providers}
               preContext={preContext as SessionPreContext}
               onPreSessionCreated={handlePreSessionCreated}
+              pageContextOverride={derivedPageCtx}
             />
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">

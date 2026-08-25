@@ -16788,6 +16788,7 @@ export interface components {
             llm_provider_id?: string | null;
             /** Attachment Ids */
             attachment_ids?: string[];
+            page_context?: components["schemas"]["PageContextCreateBlock"] | null;
         };
         /** SessionInjectResponse */
         SessionInjectResponse: {

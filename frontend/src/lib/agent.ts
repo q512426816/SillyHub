@@ -123,6 +123,33 @@ export function getAgentRunLogs(workspaceId: string, runId: string, after?: stri
   );
 }
 
+// ── Mission worker 结构化产物（ql-20260825-004：TeamTaskBlock 产物数据源）──
+
+/** worker 结构化产物条目（agent_artifacts 行；summary 的 content_ref 为 Markdown 全文）。 */
+export interface WorkerArtifact {
+  id: string;
+  kind: string;
+  content_ref: string;
+}
+
+/** worker 结果响应（GET /workspaces/{ws}/missions/{mid}/workers/{wid}/result）。 */
+export interface WorkerResultResponse {
+  worker_id: string;
+  status: string;
+  artifacts: WorkerArtifact[];
+}
+
+/** 读单个分身 run 的结构化产物（AgentArtifact kind=patch/summary/...）。 */
+export function getWorkerArtifacts(
+  workspaceId: string,
+  missionId: string,
+  workerId: string,
+) {
+  return apiFetch<WorkerResultResponse>(
+    `/api/workspaces/${workspaceId}/missions/${missionId}/workers/${workerId}/result`,
+  );
+}
+
 // ── Agent File Artifacts（2026-08-23-agent-file-upload-mcp task-09）──
 
 /**

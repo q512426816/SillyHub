@@ -50194,6 +50194,16 @@
             "type": "array",
             "maxItems": 10,
             "title": "Attachment Ids"
+          },
+          "page_context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PageContextCreateBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",

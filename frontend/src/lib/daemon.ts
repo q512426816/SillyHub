@@ -870,6 +870,10 @@ export async function injectSession(
   if (options?.attachment_ids && options.attachment_ids.length > 0) {
     body.attachment_ids = options.attachment_ids;
   }
+  // ql-20260825-004：每轮注入携带当前页面上下文。
+  if (options?.page_context !== undefined) {
+    body.page_context = options.page_context;
+  }
   return apiFetch<SessionInjectResponse>(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/inject`,
     { method: "POST", json: body },
