@@ -4,6 +4,10 @@
  * FilePreview — 工作区文件浏览器右侧预览组件（FR-02/FR-03，D-004@v1）。
  *
  * 按 ``filePath`` 经 ``useExplorerFile`` 取数后按类型分发渲染：
+ * - 浏览器可原生预览扩展名（pdf/html/htm，ql-20260825-016）→ 默认原生预览态：
+ *   ``NativePreviewFrame`` 鉴权取 Blob → 按扩展名重设 MIME → objectURL → iframe
+ *   原生渲染；头部「源码」按钮切换看源码（html→高亮源码 / pdf→元信息卡），
+ *   切换文件回默认预览态
  * - 图片扩展名 → ``fetchDownload`` 取 Blob → objectURL 内联 ``<img>``（鉴权流，
  *   裸 URL 会 401，design R-06）；卸载/切换文件时 revoke 防泄漏（file-image.tsx 先例）
  * - ``binary=true`` → 元信息卡（名称/大小/修改时间 + 「二进制文件不预览」）
@@ -25,7 +29,7 @@ import dynamic from "next/dynamic";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { Alert, Button, Spin, Typography } from "antd";
-import { DownloadOutlined, FileOutlined } from "@ant-design/icons";
+import { CodeOutlined, DownloadOutlined, EyeOutlined, FileOutlined } from "@ant-design/icons";
 
 import { MarkdownText } from "@/components/ui/markdown-text";
 import { formatFileSize } from "@/lib/file/utils";
@@ -81,6 +85,18 @@ function fileExtension(name: string): string {
   // 无扩展名（含 .gitignore 这类点开头文件）一律返回空串 → 走纯文本分支
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
+
+/** 浏览器可原生预览的扩展名——头部「预览」按钮仅对这些类型出现。
+ *  图片已内联预览、文本/代码走源码分支，均不需要原生预览入口。 */
+const BROWSER_PREVIEW_EXTENSIONS = new Set(["pdf", "html", "htm"]);
+
+/** 按扩展名重设 Blob MIME：下载端点回的 Content-Type 多为 octet-stream，浏览器会
+ *  当下载处理而非渲染；iframe 原生预览（PDF 查看器 / HTML 引擎）依赖正确 MIME。 */
+const BROWSER_PREVIEW_MIME: Record<string, string> = {
+  pdf: "application/pdf",
+  html: "text/html",
+  htm: "text/html",
+};
 
 // ── 代码高亮：Prism Light + 按需注册语言 + dynamic import（ssr:false）──
 // 语言注册收敛在 loader 内一次完成（import() 集合保持静态可分析，webpack 可分包）；
@@ -213,6 +229,74 @@ function ImagePreview({
   );
 }
 
+// ── 浏览器原生预览：鉴权 Blob → 重设 MIME → objectURL → iframe（ql-20260825-016）──
+
+/**
+ * 浏览器原生预览（pdf/html/htm 默认态）：``fetchDownload`` 鉴权取 Blob →
+ * 按扩展名重设 MIME（下载端点多回 octet-stream，浏览器会当下载而非渲染）→
+ * objectURL → iframe 原生渲染。卸载/切换文件 revoke 防泄漏（同 ImagePreview）。
+ *
+ * sandbox 策略：html/htm 加 ``allow-scripts allow-popups`` 且不设 allow-same-origin
+ * ——iframe 被当作唯一源，工作区文件里的脚本可跑（交互原型可见）但摸不到父页面
+ * cookie/storage/DOM（change-file-tree.tsx 先例）；pdf 交给浏览器内置查看器渲染，
+ * sandbox 会禁用查看器，不设置。
+ */
+function NativePreviewFrame({
+  workspaceId,
+  filePath,
+  name,
+  ext,
+}: {
+  workspaceId: string;
+  filePath: string;
+  name: string;
+  ext: string;
+}) {
+  const [src, setSrc] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setSrc(null);
+    setFailed(false);
+    fetchDownload(workspaceId, filePath)
+      .then((blob) => {
+        // 卸载/切换后不再落地 objectURL，避免无人 revoke 的泄漏
+        if (cancelled) return;
+        const typed = new Blob([blob], { type: BROWSER_PREVIEW_MIME[ext] });
+        objectUrl = URL.createObjectURL(typed);
+        setSrc(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setFailed(true);
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [workspaceId, filePath, ext]);
+
+  if (failed) {
+    return <Alert type="warning" showIcon title="文件加载失败，请下载后查看" />;
+  }
+  if (!src) {
+    return (
+      <div className="flex items-center justify-center py-8">
+        <Spin size="small" />
+      </div>
+    );
+  }
+  return (
+    <iframe
+      title={`${name} 浏览器预览`}
+      src={src}
+      sandbox={ext === "pdf" ? undefined : "allow-scripts allow-popups"}
+      className="h-full min-h-0 w-full rounded-md border border-border bg-card"
+    />
+  );
+}
+
 // ── 二进制元信息卡（不渲染内容）───────────────────────────────────────
 
 function BinaryMetaCard({ name, size, mtime }: { name: string; size: number; mtime: string }) {
@@ -248,6 +332,12 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
   const query = useExplorerFile(workspaceId, filePath);
   const [downloading, setDownloading] = useState(false);
   const [downloadFailed, setDownloadFailed] = useState(false);
+  /** 原生预览扩展名的源码模式（ql-20260825-016）：默认 false=原生预览态，
+   *  头部「源码」切换；切换文件回默认预览态（模式不跨文件残留）。 */
+  const [sourceMode, setSourceMode] = useState(false);
+  useEffect(() => {
+    setSourceMode(false);
+  }, [filePath]);
 
   const handleDownload = useCallback(async () => {
     if (filePath == null || downloading) return;
@@ -299,12 +389,23 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
   const name = data.name || filePath.split(/[\\/]/).filter(Boolean).pop() || filePath;
   const ext = fileExtension(name);
   const isImage = IMAGE_EXTENSIONS.has(ext);
+  const isNativePreview = BROWSER_PREVIEW_EXTENSIONS.has(ext);
   const isMarkdown = MARKDOWN_EXTENSIONS.has(ext);
   const language = CODE_LANGUAGES[ext];
 
-  // 内容区分发（图片优先于 binary 判定：图片文件 binary=true 但可内联渲染）
+  // 内容区分发（原生预览默认态优先：pdf/html/htm 直接 iframe 渲染，「源码」切换
+  // 后走原分支——html→高亮源码、pdf→binary 元信息卡；图片优先于 binary 判定）
   let body: ReactNode;
-  if (isImage) {
+  if (isNativePreview && !sourceMode) {
+    body = (
+      <NativePreviewFrame
+        workspaceId={workspaceId}
+        filePath={filePath}
+        name={name}
+        ext={ext}
+      />
+    );
+  } else if (isImage) {
     body = <ImagePreview workspaceId={workspaceId} filePath={filePath} name={name} />;
   } else if (data.binary) {
     body = <BinaryMetaCard name={name} size={data.size} mtime={data.mtime} />;
@@ -330,8 +431,9 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
     );
   }
 
-  // 截断警示仅对实际渲染文本内容的分支展示（图片/二进制不渲染 content，无截断可言）
-  const showTruncatedTip = data.truncated && !data.binary && !isImage;
+  // 截断警示仅对实际渲染文本内容的分支展示（原生预览/图片/二进制不渲染 content，无截断可言）
+  const showTruncatedTip =
+    data.truncated && !data.binary && !isImage && !(isNativePreview && !sourceMode);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -346,15 +448,26 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
         {downloadFailed && (
           <span className="flex-none text-[11px] text-red-500">下载失败，请重试</span>
         )}
-        <Button
-          className="ml-auto flex-none"
-          size="small"
-          icon={<DownloadOutlined />}
-          loading={downloading}
-          onClick={() => void handleDownload()}
-        >
-          下载
-        </Button>
+        {/* 右侧操作组：原生预览扩展名带「源码⇄预览」切换（ql-20260825-016），下载全类型可用 */}
+        <div className="ml-auto flex flex-none items-center gap-2">
+          {isNativePreview && (
+            <Button
+              size="small"
+              icon={sourceMode ? <EyeOutlined /> : <CodeOutlined />}
+              onClick={() => setSourceMode((v) => !v)}
+            >
+              {sourceMode ? "预览" : "源码"}
+            </Button>
+          )}
+          <Button
+            size="small"
+            icon={<DownloadOutlined />}
+            loading={downloading}
+            onClick={() => void handleDownload()}
+          >
+            下载
+          </Button>
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {showTruncatedTip && (

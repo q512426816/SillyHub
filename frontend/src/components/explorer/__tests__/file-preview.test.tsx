@@ -40,8 +40,9 @@ vi.mock("react-syntax-highlighter/dist/esm/prism-light", () => {
 });
 
 // jsdom 未实现 URL.createObjectURL/revokeObjectURL——用可控替身追踪生命周期
+// （声明 Blob 入参类型，供 MIME 重设断言从 mock.calls 读取 .type）
 let objectUrlSeq = 0;
-const createObjectURL = vi.fn(() => `blob:preview-${++objectUrlSeq}`);
+const createObjectURL = vi.fn((_blob: Blob) => `blob:preview-${++objectUrlSeq}`);
 const revokeObjectURL = vi.fn();
 
 beforeAll(() => {
@@ -251,5 +252,155 @@ describe("FilePreview", () => {
     await waitFor(() =>
       expect(explorerMocks.downloadExplorerFile).toHaveBeenCalledTimes(2),
     );
+  });
+
+  // ── 浏览器原生预览（ql-20260825-016：html/pdf 默认原生渲染，「源码」按钮切换看源码）──
+
+  it("浏览器可原生预览扩展名（pdf/html/htm）才显示「源码」切换按钮，其余类型不显示", () => {
+    // 原生预览分支挂载即取 Blob，可见性用例也给个兜底返回（防 undefined.then 崩溃）
+    explorerMocks.fetchDownload.mockResolvedValue(new Blob(["x"]));
+    // 普通代码 / 图片（已内联预览）：无切换按钮
+    mockQueryResult(makeFile({ name: "main.py" }));
+    const t1 = render(<FilePreview workspaceId="ws-1" filePath="a/main.py" />);
+    expect(screen.queryByRole("button", { name: /源码|预览/ })).not.toBeInTheDocument();
+    t1.unmount();
+
+    mockQueryResult(makeFile({ name: "logo.png", binary: true, content: "" }));
+    const t2 = render(<FilePreview workspaceId="ws-1" filePath="a/logo.png" />);
+    expect(screen.queryByRole("button", { name: /源码|预览/ })).not.toBeInTheDocument();
+    t2.unmount();
+
+    // pdf（二进制）与 html（文本）：切换按钮出现在下载旁
+    mockQueryResult(makeFile({ name: "report.pdf", binary: true, content: "" }));
+    const t3 = render(<FilePreview workspaceId="ws-1" filePath="docs/report.pdf" />);
+    expect(screen.getByRole("button", { name: /源码/ })).toBeInTheDocument();
+    t3.unmount();
+
+    mockQueryResult(makeFile({ name: "index.htm", content: "<p>hi</p>" }));
+    render(<FilePreview workspaceId="ws-1" filePath="site/index.htm" />);
+    expect(screen.getByRole("button", { name: /源码/ })).toBeInTheDocument();
+  });
+
+  it("pdf 默认原生预览：鉴权取 Blob → 按扩展名重设 MIME → iframe 原生渲染（不加 sandbox）", async () => {
+    mockQueryResult(makeFile({ name: "report.pdf", binary: true, content: "" }));
+    // 下载端点默认回 octet-stream，组件须按扩展名重设 MIME 否则 iframe 会触发下载而非渲染
+    explorerMocks.fetchDownload.mockResolvedValue(
+      new Blob(["%pdf"], { type: "application/octet-stream" }),
+    );
+    render(<FilePreview workspaceId="ws-1" filePath="docs/report.pdf" />);
+
+    const iframe = await screen.findByTitle("report.pdf 浏览器预览");
+    expect(explorerMocks.fetchDownload).toHaveBeenCalledWith("ws-1", "docs/report.pdf");
+    // objectURL 序号是全文件共享计数器（beforeEach 只 mockClear 不清零），动态取值断言
+    expect(iframe).toHaveAttribute("src", createObjectURL.mock.results.at(-1)!.value);
+    expect(createObjectURL.mock.calls.at(-1)![0].type).toBe("application/pdf");
+    // pdf 交给浏览器内置查看器渲染，sandbox 会禁用查看器 → 不设置
+    expect(iframe.getAttribute("sandbox")).toBeNull();
+    // 默认预览态：不渲染元信息卡
+    expect(screen.queryByText(/二进制文件不预览/)).not.toBeInTheDocument();
+  });
+
+  it("html 默认原生预览且 iframe 带 sandbox 隔离（不含 allow-same-origin，防脚本摸父页面）", async () => {
+    mockQueryResult(makeFile({ name: "demo.html", content: "<script>1</script>" }));
+    explorerMocks.fetchDownload.mockResolvedValue(new Blob(["<html></html>"]));
+    render(<FilePreview workspaceId="ws-1" filePath="site/demo.html" />);
+
+    const iframe = await screen.findByTitle("demo.html 浏览器预览");
+    expect(iframe.getAttribute("sandbox")).toBe("allow-scripts allow-popups");
+    expect(createObjectURL.mock.calls.at(-1)![0].type).toBe("text/html");
+    // 默认预览态：不走源码高亮分支
+    expect(screen.queryByTestId("code-highlight")).not.toBeInTheDocument();
+  });
+
+  it("点「源码」切换到源码视图（html→高亮源码 / pdf→元信息卡），再点「预览」切回 iframe", async () => {
+    // html：源码 = Prism markup 高亮
+    mockQueryResult(makeFile({ name: "demo.html", content: "<p>hi</p>" }));
+    explorerMocks.fetchDownload.mockResolvedValue(new Blob(["<html></html>"]));
+    render(<FilePreview workspaceId="ws-1" filePath="site/demo.html" />);
+    await screen.findByTitle("demo.html 浏览器预览");
+
+    fireEvent.click(screen.getByRole("button", { name: /源码/ }));
+    expect(await screen.findByTestId("code-highlight")).toHaveAttribute(
+      "data-language",
+      "markup",
+    );
+    expect(screen.queryByTitle("demo.html 浏览器预览")).not.toBeInTheDocument();
+
+    // 切回预览：iframe 恢复（objectURL 生命周期由 effect 管理，重新打开重新取数）
+    fireEvent.click(screen.getByRole("button", { name: /预览/ }));
+    expect(await screen.findByTitle("demo.html 浏览器预览")).toBeInTheDocument();
+  });
+
+  it("pdf 源码视图为二进制元信息卡", async () => {
+    mockQueryResult(makeFile({ name: "report.pdf", binary: true, size: 2048, content: "" }));
+    explorerMocks.fetchDownload.mockResolvedValue(new Blob(["%pdf"]));
+    render(<FilePreview workspaceId="ws-1" filePath="docs/report.pdf" />);
+    await screen.findByTitle("report.pdf 浏览器预览");
+
+    fireEvent.click(screen.getByRole("button", { name: /源码/ }));
+    expect(await screen.findByText(/二进制文件不预览/)).toBeInTheDocument();
+    expect(screen.queryByTitle("report.pdf 浏览器预览")).not.toBeInTheDocument();
+  });
+
+  it("切换文件后回到默认预览态（源码模式不跨文件残留）", async () => {
+    mockQueryResult(makeFile({ name: "demo.html", content: "<p>hi</p>" }));
+    explorerMocks.fetchDownload.mockResolvedValue(new Blob(["<html></html>"]));
+    const { rerender } = render(<FilePreview workspaceId="ws-1" filePath="site/demo.html" />);
+    await screen.findByTitle("demo.html 浏览器预览");
+
+    // 进入源码模式后切换到另一个 html 文件
+    fireEvent.click(screen.getByRole("button", { name: /源码/ }));
+    expect(await screen.findByTestId("code-highlight")).toBeInTheDocument();
+
+    explorerMocks.useExplorerFile.mockReturnValue({
+      data: makeFile({ name: "other.html", content: "<p>other</p>" }),
+      isPending: false,
+      isError: false,
+      error: null,
+    });
+    rerender(<FilePreview workspaceId="ws-1" filePath="site/other.html" />);
+    // 新文件默认回到原生预览态
+    expect(await screen.findByTitle("other.html 浏览器预览")).toBeInTheDocument();
+    expect(screen.queryByTestId("code-highlight")).not.toBeInTheDocument();
+  });
+
+  it("预览取数失败：降级提示且可切「源码」查看，objectURL 切换/卸载均 revoke", async () => {
+    mockQueryResult(makeFile({ name: "demo.html", content: "<p>hi</p>" }));
+    explorerMocks.fetchDownload.mockRejectedValue(new Error("daemon 离线"));
+    const { unmount } = render(<FilePreview workspaceId="ws-1" filePath="site/demo.html" />);
+
+    expect(await screen.findByText("文件加载失败，请下载后查看")).toBeInTheDocument();
+    expect(document.querySelector("iframe")).toBeNull();
+    // 失败不阻断源码兜底
+    fireEvent.click(screen.getByRole("button", { name: /源码/ }));
+    expect(await screen.findByTestId("code-highlight")).toBeInTheDocument();
+
+    unmount();
+  });
+
+  it("原生预览 objectURL 生命周期：切换文件 revoke 旧链，卸载 revoke 当前链", async () => {
+    mockQueryResult(makeFile({ name: "a.html", content: "<p>a</p>" }));
+    explorerMocks.fetchDownload.mockResolvedValue(new Blob(["<html>a</html>"]));
+    const { rerender, unmount } = render(
+      <FilePreview workspaceId="ws-1" filePath="site/a.html" />,
+    );
+    await screen.findByTitle("a.html 浏览器预览");
+    const url1 = createObjectURL.mock.results.at(-1)!.value;
+    expect(revokeObjectURL).not.toHaveBeenCalled();
+
+    explorerMocks.useExplorerFile.mockReturnValue({
+      data: makeFile({ name: "b.html", content: "<p>b</p>" }),
+      isPending: false,
+      isError: false,
+      error: null,
+    });
+    rerender(<FilePreview workspaceId="ws-1" filePath="site/b.html" />);
+    await screen.findByTitle("b.html 浏览器预览");
+    const url2 = createObjectURL.mock.results.at(-1)!.value;
+    expect(url2).not.toBe(url1);
+    expect(revokeObjectURL).toHaveBeenCalledWith(url1);
+
+    unmount();
+    expect(revokeObjectURL).toHaveBeenCalledWith(url2);
   });
 });
