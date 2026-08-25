@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>原型：/runtimes 会话操作 → 智能会话助手（锁定 runtime）+ 工作区树列表</title>
+<style>
+  :root {
+    --brand-600: #7c3aed; --brand-700: #6d28d9; --brand-100: #ede9fe; --brand-50: #f5f3ff;
+    --info: #0891b2; --success: #16a34a; --warning: #d97706; --destructive: #dc2626;
+    --border: #e2e8f0; --muted: #64748b; --bg: #f8fafc; --card: #ffffff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: "PingFang SC","Microsoft YaHei",sans-serif; background: #eef2f7; color: #1e293b; }
+  .page { padding: 24px; max-width: 1280px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .sub { font-size: 13px; color: var(--muted); margin-bottom: 20px; }
+  /* 背景页：/runtimes 机器卡简化版 */
+  .machine-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; width: 420px; }
+  .machine-head { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 12px; }
+  .rt-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 8px; }
+  .rt-name { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success); }
+  .btn-session { background: var(--brand-600); color: #fff; border: none; border-radius: 8px; padding: 6px 14px; font-size: 12px; cursor: pointer; }
+  .btn-session:hover { background: var(--brand-700); }
+
+  /* 悬浮抽屉（本原型核心） */
+  .overlay { position: fixed; inset: 0; background: rgba(15,23,42,.35); }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: 960px; max-width: 92vw; background: var(--bg); box-shadow: -12px 0 40px rgba(15,23,42,.25); display: flex; flex-direction: column; }
+  .drawer-head { padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--card); display: flex; align-items: center; gap: 8px; }
+  .drawer-title { font-size: 14px; font-weight: 700; }
+  .badge-lock { background: var(--brand-100); color: var(--brand-700); font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+  .badge-mode { background: var(--brand-50); color: var(--brand-700); font-size: 10px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+  .drawer-acts { margin-left: auto; display: flex; gap: 6px; }
+  .chip-btn { border: 1px solid var(--border); background: var(--card); border-radius: 999px; font-size: 12px; padding: 4px 12px; color: var(--muted); cursor: pointer; }
+  .ctx-bar { margin-top: 8px; padding: 6px 12px; border: 1px dashed #c4b5fd; background: #faf5ff; border-radius: 8px; font-size: 12px; display: flex; gap: 8px; align-items: center; }
+  .ctx-bar .k { color: var(--muted); font-size: 11px; }
+  .ctx-bar .v { color: var(--brand-700); font-weight: 600; }
+
+  .drawer-body { flex: 1; display: grid; grid-template-columns: 320px minmax(0,1fr); min-height: 0; }
+  /* 左：工作区树（/sessions 同款） */
+  .tree { border-right: 1px solid var(--border); background: var(--card); display: flex; flex-direction: column; min-height: 0; }
+  .tree-head { padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .tree-head h3 { font-size: 13px; }
+  .count { background: var(--brand-100); color: var(--brand-700); font-size: 10px; padding: 1px 8px; border-radius: 999px; font-weight: 700; }
+  .tree-filter { padding: 8px 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+  .filter-row { display: flex; gap: 6px; }
+  .input { flex: 1; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; padding: 4px 8px; }
+  .select { border: 1px solid var(--border); border-radius: 6px; font-size: 12px; padding: 4px 6px; background: #fff; width: 96px; }
+  .pills { display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; align-items: center; }
+  .pill { border: 1px solid var(--border); background: #f1f5f9; color: var(--muted); font-size: 11px; padding: 2px 10px; border-radius: 999px; white-space: nowrap; }
+  .pill.on { border-color: var(--brand-600); background: var(--brand-50); color: var(--brand-700); font-weight: 600; }
+  .pill-label { font-size: 11px; color: var(--muted); }
+  .tree-scroll { flex: 1; overflow-y: auto; padding: 8px; min-height: 0; }
+  .ws-group { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; overflow: hidden; }
+  .ws-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; font-size: 13px; font-weight: 600; }
+  .ws-head:hover { background: #f8fafc; }
+  .ws-head .arrow { font-size: 10px; color: var(--muted); transition: transform .15s; }
+  .ws-head.open .arrow { transform: rotate(90deg); }
+  .ws-count { margin-left: auto; font-size: 11px; color: var(--muted); font-weight: 400; }
+  .ws-plus { width: 22px; height: 22px; border: 1px solid #c4b5fd; background: var(--brand-100); color: var(--brand-700); border-radius: 6px; font-size: 13px; cursor: pointer; line-height: 1; }
+  .machine-sec { padding: 2px 8px 6px; }
+  .machine-title { display: flex; gap: 6px; align-items: center; font-size: 11px; color: var(--muted); padding: 4px 6px 2px; }
+  .s-row { display: flex; flex-direction: column; gap: 3px; padding: 6px 12px; border-left: 3px solid transparent; border-radius: 8px; margin-bottom: 2px; cursor: pointer; }
+  .s-row:hover { background: #f8fafc; }
+  .s-row.on { border-left-color: var(--brand-600); background: var(--brand-100); }
+  .r1 { display: flex; align-items: center; gap: 6px; }
+  .r1 .t { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+  .s-row.on .r1 .t { color: var(--brand-700); }
+  .r1 .time { font-size: 11px; color: var(--muted); flex-shrink: 0; }
+  .r2 { display: flex; align-items: center; gap: 6px; padding-left: 14px; font-size: 10px; color: var(--muted); overflow: hidden; white-space: nowrap; }
+  .eng { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; flex-shrink: 0; }
+  .eng.claude { background: #fef3c7; color: var(--warning); }
+  .eng.codex { background: var(--brand-100); color: var(--brand-700); }
+
+  /* 右：会话面板（简化示意） */
+  .panel { display: flex; flex-direction: column; min-height: 0; background: var(--card); margin: 12px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .panel-head { padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .panel-body { flex: 1; padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; background: var(--bg); }
+  .msg { max-width: 78%; padding: 8px 12px; border-radius: 10px; font-size: 13px; line-height: 1.6; }
+  .msg.user { align-self: flex-end; background: var(--brand-600); color: #fff; }
+  .msg.ai { align-self: flex-start; background: #fff; border: 1px solid var(--border); }
+  .panel-input { border-top: 1px solid var(--border); padding: 10px 14px; display: flex; gap: 8px; }
+  .panel-input .input { flex: 1; padding: 8px 10px; }
+  .send { background: var(--brand-600); color: #fff; border: none; border-radius: 8px; padding: 0 18px; font-size: 13px; }
+
+  .note { margin-top: 18px; font-size: 12px; color: var(--muted); line-height: 1.8; background: #fff; border: 1px dashed var(--border); border-radius: 8px; padding: 10px 14px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>原型：/runtimes「会话操作」→ 智能会话助手（锁定 runtime）+ 工作区树列表</h1>
+  <p class="sub">变更 2026-08-25-runtimes-entry-unified-floating · 方案A：全树复用 + runtimeId 锁定</p>
+
+  <!-- 背景：/runtimes 机器卡 -->
+  <div class="machine-card">
+    <div class="machine-head"><span class="dot"></span> 我的开发机（DESKTOP-ABC）</div>
+    <div class="rt-row">
+      <span class="rt-name"><span class="dot"></span> Claude Code（claude）</span>
+      <button class="btn-session" onclick="document.getElementById('drawer').style.display='flex'">会话</button>
+    </div>
+    <div class="rt-row">
+      <span class="rt-name"><span class="dot"></span> Codex（codex）</span>
+      <button class="btn-session" onclick="document.getElementById('drawer').style.display='flex'">会话</button>
+    </div>
+  </div>
+
+  <!-- 悬浮抽屉 -->
+  <div class="overlay" id="drawer" style="display:none" onclick="if(event.target===this)this.style.display='none'">
+    <div class="drawer" onclick="event.stopPropagation()">
+      <div class="drawer-head" style="flex-wrap:wrap">
+        <span style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#7c3aed,#0891b2);display:inline-flex;align-items:center;justify-content:center;color:#fff;font-size:14px">💬</span>
+        <span class="drawer-title">智能会话助手</span>
+        <span class="badge-mode">悬浮模式</span>
+        <span class="badge-lock">🔒 我的开发机 · Claude Code</span>
+        <div class="drawer-acts">
+          <button class="chip-btn">全屏</button>
+          <button class="chip-btn">最小化</button>
+          <button class="chip-btn" onclick="document.getElementById('drawer').style.display='none'">✕</button>
+        </div>
+        <div class="ctx-bar" style="width:100%">
+          <span class="k">已感知页面</span><span class="v">运行实例</span>
+          <span style="font-size:10px;border:1px solid var(--border);background:#fff;border-radius:999px;padding:1px 8px;color:var(--muted)">页面上下文将随每句注入（仅 AI 可见）</span>
+        </div>
+      </div>
+      <div class="drawer-body">
+        <!-- 左：工作区树（/sessions 同款，仅含当前 runtime 会话） -->
+        <div class="tree">
+          <div class="tree-head"><h3>会话</h3><span class="count">共 4 个</span></div>
+          <div class="tree-filter">
+            <div class="filter-row"><input class="input" placeholder="搜索会话标题…（回车搜索）"/><select class="select"><option>全部状态</option><option>活跃</option></select></div>
+            <div class="pills"><span class="pill-label">机器</span><span class="pill on">🔒 我的开发机</span></div>
+            <div class="pills"><span class="pill-label">智能体</span><span class="pill on">🔒 Claude Code</span></div>
+          </div>
+          <div class="tree-scroll">
+            <div class="ws-group">
+              <div class="ws-head open"><span class="arrow">▶</span> 📂 multi-agent-platform <span class="ws-count">3 个会话</span><button class="ws-plus">＋</button></div>
+              <div class="machine-sec">
+                <div class="machine-title"><span class="dot"></span> 我的开发机</div>
+                <div class="s-row on"><div class="r1"><span class="dot" style="background:var(--info);box-shadow:0 0 0 3px rgba(8,145,178,.2)"></span><span class="t">修会话列表样式</span><span class="time">刚刚</span></div><div class="r2"><span class="eng claude">Claude</span><span>qinyi · 开发档案 · 12 轮</span></div></div>
+                <div class="s-row"><div class="r1"><span class="dot" style="background:var(--success)"></span><span class="t">悬浮球拖动边界</span><span class="time">2 小时前</span></div><div class="r2"><span class="eng claude">Claude</span><span>qinyi · 开发档案 · 8 轮</span></div></div>
+                <div class="s-row"><div class="r1"><span class="dot" style="background:var(--success)"></span><span class="t">归档功能联调</span><span class="time">昨天</span></div><div class="r2"><span class="eng claude">Claude</span><span>qinyi · 开发档案 · 21 轮</span></div></div>
+              </div>
+            </div>
+            <div class="ws-group">
+              <div class="ws-head open"><span class="arrow">▶</span> 📂 非工作区 <span class="ws-count">1 个会话</span><button class="ws-plus">＋</button></div>
+              <div class="machine-sec">
+                <div class="machine-title"><span class="dot"></span> 我的开发机</div>
+                <div class="s-row"><div class="r1"><span class="dot" style="background:var(--success)"></span><span class="t">临时问题排查</span><span class="time">3 天前</span></div><div class="r2"><span class="eng claude">Claude</span><span>qinyi · 4 轮</span></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- 右：会话面板 -->
+        <div class="panel">
+          <div class="panel-head"><span class="dot" style="background:var(--info)"></span> 修会话列表样式 <span style="font-size:11px;color:var(--muted);font-weight:400">我的开发机 · Claude Code</span></div>
+          <div class="panel-body">
+            <div class="msg user">左侧列表能不能按 /sessions 页的树样式展示？</div>
+            <div class="msg ai">可以。抽屉左侧将复用 SessionListPanel 工作区树（分组+机器小节+紧凑两行条目），仅按当前 runtime 过滤……</div>
+          </div>
+          <div class="panel-input"><input class="input" placeholder="继续提问…"/><button class="send">发送</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>原型说明（对照要点）：</b><br/>
+    1. 点机器卡「会话」→ 不再弹旧 RuntimeSessionDialog，改为唤起右下角悬浮抽屉（智能会话助手），头部出现「🔒 机器·智能体」锁定徽标。<br/>
+    2. 抽屉加宽至 ~960px，左栏 320px 换成 /sessions 页同款工作区树（搜索 + 状态下拉 + 机器/智能体两层 tab 锁定态 + 分组手风琴 + 紧凑两行条目 + 组头＋）。<br/>
+    3. 树内只出现当前 runtime 的会话（跨工作区按组展示）；「＋」新建会话钉死该 runtime，不再弹机器选择浮层。<br/>
+    4. 点任意条目右侧 attach 续聊；空态引导「新建会话开始提问」。
+  </div>
+</div>
+</body>
+</html>
