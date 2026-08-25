@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 · 工作区 Git 日志（类 IDEA Git Log）— 2026-08-25-workspace-git-log</title>
+<!--
+  原型说明（execute 阶段对照复用）：
+  - 三主题切换（blue / ai-native / dark），取值单一源 themes.ts，本文件 :root 段为镜像快照
+  - 泳道 SVG 由 JS 按模拟 commit 数据（lane + 父边）绘制，演示"后端算 lane、前端纯渲染"的最终形态
+  - 点击行 → 右侧 Drawer：commit 详情 + 变更文件列表 + 文件级 unified diff
+  - 顶栏含"模拟非 git 工作区"切换，演示 probe_workspace_git_mode 三态降级空态
+  - 列表底部"加载更多"演示服务端分页 + react-virtual 虚拟滚动
+-->
+<style>
+/* ===== 主题 token 镜像（frontend/src/styles/themes.ts）===== */
+:root[data-theme="blue"] {
+  --primary: #2563EB; --primary-hover: #1d4ed8; --accent: #06b6d4;
+  --bg: #f8fafc; --card: #ffffff; --border: #e2e8f0;
+  --brand-50: #eff6ff; --brand-100: #dbeafe; --brand-600: #2563eb;
+  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1;
+  --slate-400: #94a3b8; --slate-500: #64748b; --slate-600: #475569; --slate-700: #334155;
+  --slate-800: #1e293b; --slate-900: #0f172a;
+  --success: #10b981; --warning: #f59e0b; --error: #ef4444; --info: #06b6d4; --neutral: #64748b;
+  --diff-add-bg: rgba(16,185,129,.12); --diff-del-bg: rgba(239,68,68,.10);
+  --shadow: 0 1px 2px rgba(15,23,42,.05), 0 1px 3px rgba(15,23,42,.06);
+}
+:root[data-theme="ai-native"] {
+  --primary: #7C3AED; --primary-hover: #6D28D9; --accent: #0891B2;
+  --bg: #FAF5FF; --card: #FFFFFF; --border: #DDD6FE;
+  --brand-50: #f5f3ff; --brand-100: #ede9fe; --brand-600: #7c3aed;
+  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1;
+  --slate-400: #94a3b8; --slate-500: #64748b; --slate-600: #475569; --slate-700: #334155;
+  --slate-800: #1e293b; --slate-900: #0f172a;
+  --success: #059669; --warning: #D97706; --error: #DC2626; --info: #0891B2; --neutral: #64748b;
+  --diff-add-bg: rgba(5,150,105,.10); --diff-del-bg: rgba(220,38,38,.08);
+  --shadow: 0 1px 2px rgba(46,16,101,.05), 0 1px 3px rgba(46,16,101,.07);
+}
+:root[data-theme="dark"] {
+  --primary: #0891b2; --primary-hover: #06b6d4; --accent: #22d3ee;
+  --bg: #18181b; --card: #27272a; --border: #3f3f46;
+  --brand-50: #083344; --brand-100: #164e63; --brand-600: #22d3ee;
+  --slate-50: #09090b; --slate-100: #18181b; --slate-200: #27272a; --slate-300: #3f3f46;
+  --slate-400: #52525b; --slate-500: #71717a; --slate-600: #a1a1aa; --slate-700: #d4d4d8;
+  --slate-800: #e4e4e7; --slate-900: #f4f4f5;
+  --success: #10b981; --warning: #f59e0b; --error: #ef4444; --info: #22d3ee; --neutral: #a1a1aa;
+  --diff-add-bg: rgba(16,185,129,.16); --diff-del-bg: rgba(239,68,68,.12);
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 1px 3px rgba(0,0,0,.5);
+}
+/* 泳道 lane 色板：跨主题可读，dark 用提亮档 */
+:root[data-theme="blue"] .lane-palette, :root[data-theme="ai-native"] .lane-palette { --lane0:#7c3aed; --lane1:#0891b2; --lane2:#059669; --lane3:#D97706; --lane4:#DC2626; }
+:root[data-theme="dark"] .lane-palette { --lane0:#22d3ee; --lane1:#a78bfa; --lane2:#10b981; --lane3:#f59e0b; --lane4:#f87171; }
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg); color: var(--slate-800); font-size: 13px; }
+.hidden { display: none !important; }
+
+/* ===== 工作区 tab 条（模拟 WorkspaceTabs）===== */
+.ws-tabs { display: flex; gap: 4px; padding: 0 24px; background: var(--card);
+  border-bottom: 1px solid var(--border); overflow-x: auto; }
+.ws-tab { padding: 10px 14px; color: var(--slate-500); cursor: pointer; white-space: nowrap;
+  border-bottom: 2px solid transparent; font-size: 13px; }
+.ws-tab:hover { color: var(--slate-700); }
+.ws-tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 500; }
+
+/* ===== 页头 + 工具栏 ===== */
+.page { max-width: 1280px; margin: 0 auto; padding: 20px 24px 48px; }
+.page-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.page-title { font-size: 20px; font-weight: 600; color: var(--slate-900); }
+.page-sub { font-size: 12px; color: var(--slate-500); margin-top: 2px; }
+.toolbar { display: flex; gap: 8px; align-items: center; }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--card); color: var(--slate-600);
+  cursor: pointer; font-size: 13px; box-shadow: var(--shadow); }
+.btn:hover { color: var(--primary); border-color: var(--primary); }
+.btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.btn.primary:hover { background: var(--primary-hover); }
+select.btn { padding: 5px 8px; }
+
+/* ===== 主题切换（仅原型演示用）===== */
+.theme-switch { position: fixed; right: 16px; top: 12px; z-index: 300; display: flex; gap: 4px;
+  background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 4px; box-shadow: var(--shadow); }
+.theme-switch button { border: none; background: transparent; color: var(--slate-500); cursor: pointer;
+  padding: 4px 10px; border-radius: 5px; font-size: 12px; }
+.theme-switch button.on { background: var(--brand-100); color: var(--brand-600); font-weight: 500; }
+
+/* ===== 提交列表卡片 ===== */
+.log-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow); overflow: hidden; }
+.log-head { display: flex; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--border);
+  font-size: 12px; color: var(--slate-500); font-weight: 500; background: var(--slate-50); }
+.log-body { position: relative; overflow-y: auto; max-height: 560px; }
+.col-graph { width: 148px; flex: none; text-align: center; }
+.col-msg { flex: 1 1 auto; min-width: 0; }
+.col-author { width: 150px; flex: none; }
+.col-hash { width: 86px; flex: none; }
+.col-refs { width: 210px; flex: none; }
+.col-time { width: 160px; flex: none; text-align: right; padding-right: 16px; }
+
+.commit-row { display: flex; align-items: center; height: 36px; cursor: pointer;
+  border-bottom: 1px solid var(--border); position: relative; z-index: 1; }
+.commit-row:hover { background: var(--brand-50); }
+.commit-row.selected { background: var(--brand-50); }
+.commit-row .msg { color: var(--slate-700); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 12px; }
+.commit-row .author { color: var(--slate-600); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commit-row .hash { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; color: var(--accent); }
+.commit-row .time { color: var(--slate-500); font-size: 12px; }
+
+/* refs 标签：分支 / tag / HEAD */
+.refs { display: flex; gap: 4px; overflow: hidden; }
+.ref { font-size: 11px; padding: 1px 7px; border-radius: 4px; white-space: nowrap; max-width: 96px;
+  overflow: hidden; text-overflow: ellipsis; }
+.ref.branch { background: var(--brand-100); color: var(--brand-600); }
+.ref.remote { background: var(--slate-100); color: var(--slate-600); }
+.ref.tag { background: var(--diff-add-bg); color: var(--success); border: 1px solid var(--success); }
+.ref.head { background: var(--primary); color: #fff; font-weight: 600; }
+
+/* 泳道 SVG 画布：绝对定位覆盖全部行的左侧列 */
+.graph-canvas { position: absolute; left: 0; top: 0; z-index: 0; pointer-events: none; }
+
+.load-more { display: flex; justify-content: center; padding: 10px 0; }
+.virt-hint { text-align: center; color: var(--slate-400); font-size: 11px; padding: 6px 0 10px; }
+
+/* ===== 空态（非 git 工作区降级）===== */
+.empty { padding: 64px 24px; text-align: center; }
+.empty .icon { font-size: 40px; margin-bottom: 12px; }
+.empty .t { font-size: 15px; font-weight: 600; color: var(--slate-700); margin-bottom: 6px; }
+.empty .d { color: var(--slate-500); font-size: 12px; line-height: 1.8; }
+
+/* ===== 右侧 Drawer（commit 详情）===== */
+.drawer-mask { position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 200; }
+.drawer { position: fixed; right: 0; top: 0; bottom: 0; width: 560px; max-width: 92vw; z-index: 201;
+  background: var(--card); border-left: 1px solid var(--border); box-shadow: -6px 0 24px rgba(0,0,0,.12);
+  display: flex; flex-direction: column; animation: slideIn .18s ease-out; }
+@keyframes slideIn { from { transform: translateX(40px); opacity: .4; } to { transform: none; opacity: 1; } }
+.drawer-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 18px;
+  border-bottom: 1px solid var(--border); }
+.drawer-head .t { font-weight: 600; color: var(--slate-800); }
+.drawer-close { border: none; background: transparent; color: var(--slate-400); font-size: 16px; cursor: pointer; }
+.drawer-close:hover { color: var(--error); }
+.drawer-body { flex: 1; overflow-y: auto; padding: 16px 18px; }
+.detail-grid { display: grid; grid-template-columns: 64px 1fr; gap: 6px 12px; margin-bottom: 14px; font-size: 12px; }
+.detail-grid .k { color: var(--slate-500); }
+.detail-grid .v { color: var(--slate-700); word-break: break-all; }
+.detail-msg { background: var(--slate-50); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; white-space: pre-wrap; color: var(--slate-800); font-size: 12px; line-height: 1.7; margin-bottom: 16px; }
+.section-t { font-size: 13px; font-weight: 600; color: var(--slate-800); margin: 14px 0 8px;
+  display: flex; align-items: center; gap: 6px; }
+.file-item { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--border);
+  border-radius: 7px; margin-bottom: 6px; cursor: pointer; font-size: 12px; }
+.file-item:hover { border-color: var(--primary); background: var(--brand-50); }
+.file-item .f { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: ui-monospace, Consolas, monospace; color: var(--slate-700); }
+.file-item .add { color: var(--success); font-weight: 600; }
+.file-item .del { color: var(--error); font-weight: 600; }
+.diff-box { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-top: 8px;
+  font-family: ui-monospace, Consolas, monospace; font-size: 12px; line-height: 1.55; }
+.diff-hunk { background: var(--slate-100); color: var(--slate-600); padding: 3px 10px; font-size: 11px; }
+.diff-line { display: flex; padding: 0 8px; white-space: pre; }
+.diff-line .no { width: 40px; flex: none; text-align: right; padding-right: 10px; color: var(--slate-400);
+  user-select: none; font-size: 11px; }
+.diff-line.add { background: var(--diff-add-bg); color: var(--success); }
+.diff-line.del { background: var(--diff-del-bg); color: var(--error); }
+.diff-line.ctx { color: var(--slate-600); }
+</style>
+</head>
+<body class="lane-palette">
+
+<div class="theme-switch">
+  <button data-t="blue">明亮蓝</button>
+  <button data-t="ai-native" class="on">AI 紫</button>
+  <button data-t="dark">暗夜</button>
+</div>
+
+<!-- 模拟工作区 tab 条 -->
+<div class="ws-tabs">
+  <div class="ws-tab">概览</div><div class="ws-tab">变更</div><div class="ws-tab">会话</div>
+  <div class="ws-tab">文件</div><div class="ws-tab">知识库</div><div class="ws-tab">组件</div>
+  <div class="ws-tab">扫描文档</div><div class="ws-tab">运行时</div><div class="ws-tab">Git 日志</div>
+</div>
+
+<div class="page">
+  <div class="page-head">
+    <div>
+      <div class="page-title">Git 日志</div>
+      <div class="page-sub">multi-agent-platform · 全部分支 · 36 / 4,812 个提交</div>
+    </div>
+    <div class="toolbar">
+      <select class="btn"><option>全部分支</option><option>main</option><option>origin/main</option><option>feat/team-session</option></select>
+      <button class="btn" id="btn-empty-demo">模拟非 git 工作区</button>
+      <button class="btn">⟳ 刷新</button>
+    </div>
+  </div>
+
+  <!-- 正常态：泳道 + 提交列表 -->
+  <div class="log-card" id="normal-view">
+    <div class="log-head">
+      <div class="col-graph">图形</div><div class="col-msg">提交信息</div><div class="col-author">作者</div>
+      <div class="col-hash">哈希</div><div class="col-refs">分支 / 标签</div><div class="col-time">提交时间</div>
+    </div>
+    <div class="log-body lane-palette" id="log-body">
+      <svg class="graph-canvas" id="graph"></svg>
+      <!-- commit 行由 JS 渲染 -->
+      <div class="load-more"><button class="btn" onclick="alert('演示：加载下一页（服务端分页 skip/limit + lane lookahead）')">加载更多（每页 100 条）</button></div>
+      <div class="virt-hint">长列表由 @tanstack/react-virtual 虚拟滚动，泳道 SVG 按视口重绘</div>
+    </div>
+  </div>
+
+  <!-- 降级空态：非 git 工作区 -->
+  <div class="log-card hidden" id="empty-view">
+    <div class="empty">
+      <div class="icon">📂</div>
+      <div class="t">该工作区不是 Git 仓库</div>
+      <div class="d">探测结果（probe_workspace_git_mode）：目录下未发现 .git<br>
+        无法展示提交历史。可先在本地初始化仓库并关联后重试。</div>
+    </div>
+  </div>
+</div>
+
+<!-- Drawer：commit 详情 + diff -->
+<div class="drawer-mask hidden" id="drawer-mask"></div>
+<div class="drawer hidden" id="drawer">
+  <div class="drawer-head">
+    <span class="t">提交详情</span>
+    <button class="drawer-close" id="drawer-close">✕</button>
+  </div>
+  <div class="drawer-body" id="drawer-body"></div>
+</div>
+
+<script>
+/* ===== 模拟数据（真实实现来自 GET /api/workspaces/{id}/git-log/commits，后端算好 lane）===== */
+const ROW_H = 36, LANE_W = 14, LANE_X0 = 12, DOT_R = 4.5;
+const laneColors = ['var(--lane0)','var(--lane1)','var(--lane2)','var(--lane3)','var(--lane4)'];
+
+const authors = ['qinyi','qinyi','agent-bot','qinyi','agent-bot'];
+const msgPool = [
+  'docs: 路线图 P1 brainstorm 完成标记 + execute 前置约束（并发会话文件重叠）',
+  'feat(session): 会话聊天页 6 项 UX 修复——后端真实排队/发送中打断回退/草稿缓存',
+  'fix(daemon): cancel_lease 经 session 链回捞 interactive lease 补发 SESSION_END',
+  'feat(worktree): lease 白名单扩充 log/diff 只读操作',
+  'refactor(explorer): 文件树虚拟滚动与懒加载目录合并',
+  'docs(sillyspec): 团队分身子会话 brainstorm 四件套 + 决策记录',
+  'test(backend): git_log 模块 router 集成测试补 daemon 超时分支',
+  'feat(frontend): 工作区 Git 日志 tab（泳道图 + 虚拟滚动）',
+  'chore(deps): pnpm lockfile 同步 csstype 间接依赖',
+  'fix(ppm): 项目周报跨工作区数据范围过滤',
+];
+/* commits[i] = { lane, edges: [toRow], hash, refs:[{t,cls}], msg, author, time }
+   edges: 本行 commit 点向「更早行」的连线（目标行号），曲线跨 lane 时画弧 */
+const commits = [];
+function h(i){ return (0xa809fb00 + i*0x01000110).toString(16).slice(0,8); }
+function t(hoursAgo){
+  const d = new Date(Date.now() - hoursAgo*3600e3);
+  return d.toLocaleDateString('zh-CN')+' '+d.toTimeString().slice(0,5);
+}
+let hours = 2;
+for (let i = 0; i < 36; i++) {
+  const c = { lane: 0, edges: [i+1], hash: h(i), msg: msgPool[i % msgPool.length],
+    author: authors[i % authors.length], time: t(hours), refs: [] };
+  hours += 3 + (i % 5) * 4;
+  /* 构造两条侧分支：lane1 在行 8~14 分叉合并；lane2 在行 20~26 分叉合并 */
+  if (i === 8)  { c.lane = 1; c.edges = [9]; }
+  if (i > 8 && i < 14) { c.lane = 1; c.edges = [i+1]; }
+  if (i === 14) { c.lane = 1; c.edges = [15, 6]; } /* merge：lane1 并回主线 */
+  if (i === 20) { c.lane = 2; c.edges = [21]; }
+  if (i > 20 && i < 26) { c.lane = 2; c.edges = [i+1]; }
+  if (i === 26) { c.lane = 2; c.edges = [27, 18]; }
+  if (i === 0) c.refs = [{t:'HEAD',cls:'head'},{t:'main',cls:'branch'},{t:'origin/main',cls:'remote'}];
+  if (i === 8) c.refs = [{t:'feat/team-session',cls:'branch'}];
+  if (i === 30) c.refs = [{t:'v0.9.2',cls:'tag'}];
+  commits.push(c);
+}
+commits[35].edges = []; /* 最旧一行，向下出界线 */
+
+/* ===== 渲染行 ===== */
+const body = document.getElementById('log-body');
+commits.forEach((c, i) => {
+  const row = document.createElement('div');
+  row.className = 'commit-row'; row.dataset.i = i;
+  row.innerHTML = `
+    <div class="col-graph"></div>
+    <div class="col-msg"><span class="msg">${c.msg}</span></div>
+    <div class="col-author"><span class="author">${c.author}</span></div>
+    <div class="col-hash"><span class="hash">${c.hash}</span></div>
+    <div class="col-refs"><span class="refs">${c.refs.map(r=>`<span class="ref ${r.cls}">${r.t}</span>`).join('')}</span></div>
+    <div class="col-time"><span class="time">${c.time}</span></div>`;
+  row.onclick = () => openDetail(c, row);
+  body.insertBefore(row, body.querySelector('.load-more'));
+});
+
+/* ===== 泳道 SVG（前端纯渲染；真实实现中此画布随虚拟滚动视口重绘）===== */
+const svg = document.getElementById('graph');
+const W = 148, H = commits.length * ROW_H;
+svg.setAttribute('width', W); svg.setAttribute('height', H);
+svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+const cx = lane => LANE_X0 + lane * LANE_W + DOT_R;
+const cy = row => row * ROW_H + ROW_H / 2;
+function path(d, color, w = 2) {
+  const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  p.setAttribute('d', d); p.setAttribute('stroke', color); p.setAttribute('fill', 'none');
+  p.setAttribute('stroke-width', w); p.setAttribute('stroke-linecap', 'round'); svg.appendChild(p);
+}
+commits.forEach((c, i) => {
+  const color = laneColors[c.lane % laneColors.length];
+  c.edges.forEach(to => {
+    if (to >= commits.length) { path(`M ${cx(c.lane)} ${cy(i)} V ${cy(i) + ROW_H / 2}`, color, 2); return; }
+    const tl = commits[to].lane;
+    if (tl === c.lane) { path(`M ${cx(c.lane)} ${cy(i)} V ${cy(to)}`, color); }
+    else { /* 跨 lane：弧线（分叉向下 / 合并向下并弧入目标 lane）*/
+      const x1 = cx(c.lane), y1 = cy(i), x2 = cx(tl), y2 = cy(to);
+      const my = (y1 + y2) / 2;
+      path(`M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`, color);
+    }
+  });
+  /* commit 点 */
+  const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+  circle.setAttribute('cx', cx(c.lane)); circle.setAttribute('cy', cy(i)); circle.setAttribute('r', DOT_R);
+  circle.setAttribute('fill', color); circle.setAttribute('stroke', 'var(--card)'); circle.setAttribute('stroke-width', 1.5);
+  svg.appendChild(circle);
+  if (c.refs.some(r => r.cls === 'head')) { /* HEAD 空心环 */
+    const ring = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    ring.setAttribute('cx', cx(c.lane)); ring.setAttribute('cy', cy(i)); ring.setAttribute('r', DOT_R + 3);
+    ring.setAttribute('fill', 'none'); ring.setAttribute('stroke', color); ring.setAttribute('stroke-width', 1.2);
+    ring.setAttribute('stroke-dasharray', '2.5 2'); svg.appendChild(ring);
+  }
+});
+
+/* ===== 详情 Drawer ===== */
+const detailFiles = [
+  { f: 'frontend/src/app/(dashboard)/workspaces/[id]/git-log/page.tsx', add: 186, del: 0 },
+  { f: 'frontend/src/lib/git-log.ts', add: 92, del: 0 },
+  { f: 'frontend/src/components/git-log/graph.tsx', add: 210, del: 0 },
+  { f: 'frontend/src/components/workspace-tabs.tsx', add: 2, del: 0 },
+  { f: 'backend/app/main.py', add: 3, del: 0 },
+];
+const diffSample = [
+  { t: 'hunk', s: '@@ -8,6 +8,7 @@ export const TABS: WorkspaceTab[] = [' },
+  { t: 'ctx',  n: '8',  s: "  { key: 'knowledge', label: '知识库' }," },
+  { t: 'ctx',  n: '9',  s: "  { key: 'components', label: '组件' }," },
+  { t: 'add',  n: '10', s: "  { key: 'git-log', label: 'Git 日志' }," },
+  { t: 'ctx',  n: '11', s: "  { key: 'scan-docs', label: '扫描文档' }," },
+  { t: 'del',  n: '10', s: "  { key: 'runtime', label: '运行时' }," },
+  { t: 'ctx',  n: '12', s: "]" },
+];
+function openDetail(c, rowEl) {
+  document.querySelectorAll('.commit-row.selected').forEach(r => r.classList.remove('selected'));
+  rowEl.classList.add('selected');
+  const body = document.getElementById('drawer-body');
+  body.innerHTML = `
+    <div class="detail-grid">
+      <span class="k">哈希</span><span class="v">${c.hash}</span>
+      <span class="k">作者</span><span class="v">${c.author} &lt;qinyi@example.com&gt;</span>
+      <span class="k">提交于</span><span class="v">${c.time}（+08:00）</span>
+      <span class="k">分支</span><span class="v">${c.refs.map(r => r.t).join('、') || '—'}</span>
+    </div>
+    <div class="section-t">提交说明</div>
+    <div class="detail-msg">${c.msg}\n\nCo-Authored-By: Claude 5.3 &lt;noreply@anthropic.com&gt;</div>
+    <div class="section-t">变更文件（5）<span style="color:var(--slate-400);font-weight:400;font-size:11px">点击查看文件级 diff</span></div>
+    ${detailFiles.map((f, idx) => `
+      <div class="file-item" onclick="this.nextElementSibling.classList.toggle('hidden')">
+        <span style="color:var(--slate-400)">cat</span>
+        <span class="f">${f.f}</span>
+        <span class="add">+${f.add}</span><span class="del">-${f.del}</span>
+      </div>
+      ${idx === 3 ? `<div class="diff-box ${idx === 3 ? '' : 'hidden'}">
+        ${diffSample.map(l => l.t === 'hunk'
+          ? `<div class="diff-hunk">${l.s}</div>`
+          : `<div class="diff-line ${l.t}"><span class="no">${l.n}</span><span>${l.s}</span></div>`).join('')}
+      </div>` : '<div class="diff-box hidden"></div>'}`).join('')}
+  `;
+  document.getElementById('drawer').classList.remove('hidden');
+  document.getElementById('drawer-mask').classList.remove('hidden');
+}
+document.getElementById('drawer-close').onclick = document.getElementById('drawer-mask').onclick = () => {
+  document.getElementById('drawer').classList.add('hidden');
+  document.getElementById('drawer-mask').classList.add('hidden');
+  document.querySelectorAll('.commit-row.selected').forEach(r => r.classList.remove('selected'));
+};
+
+/* ===== 原型演示：主题切换 / 空态切换 ===== */
+document.querySelectorAll('.theme-switch button').forEach(b => b.onclick = () => {
+  document.documentElement.dataset.theme = b.dataset.t;
+  document.querySelectorAll('.theme-switch button').forEach(x => x.classList.toggle('on', x === b));
+});
+document.getElementById('btn-empty-demo').onclick = function () {
+  const n = document.getElementById('normal-view'), e = document.getElementById('empty-view');
+  const showEmpty = n.classList.toggle('hidden');
+  e.classList.toggle('hidden', !showEmpty);
+  this.textContent = showEmpty ? '返回正常视图' : '模拟非 git 工作区';
+};
+</script>
+</body>
+</html>

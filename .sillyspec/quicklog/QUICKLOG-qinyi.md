@@ -324,3 +324,15 @@
 方案：两处加 brand-panel-gradient 标记类，dark 下 CSS 覆盖为深青渐变 cyan-700 到 800 到 950 系（方向对齐 bg-gradient-to-br），白字对比恢复约 5:1；浅色两主题零覆盖
 结果：tsc 零错误；组件测试 23 文件 203 用例全绿；容器重建后实测登录面板 dark 渐变 rgb(14,116,144)→(2,6,23) 生效
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/floating/floating-session-host.tsx
+
+## ql-20260825-016-b100 | 2026-08-25 21:08:38 | explorer 右栏浏览器原生预览——pdf/html 默认渲染预览
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/explorer/file-preview.tsx（BROWSER_PREVIEW_EXTENSIONS+NativePreviewFrame+sourceMode 源码切换）
+- frontend/src/components/explorer/__tests__/file-preview.test.tsx（+8 用例（可见性/MIME/sandbox/切换/重置/失败/revoke））
+- .sillyspec/docs/multi-agent-platform/modules/frontend.md（变更索引补 ql-20260825-016-b100 条目）
+需求：explorer 右栏浏览器原生预览——pdf/html 默认渲染预览，源码按钮切换
+根因：FilePreview 分发矩阵缺原生渲染分支：html 只走 Prism 源码高亮、pdf binary 落元信息卡完全不预览，浏览器可原生渲染的文件看不到实际效果
+方案：file-preview.tsx 加 BROWSER_PREVIEW_EXTENSIONS（pdf/html/htm）+ NativePreviewFrame（fetchDownload 鉴权取 Blob 按扩展名重设 MIME 转 objectURL → iframe 原生渲染；html sandbox 隔离不设 allow-same-origin 防脚本摸父页面，pdf 走浏览器内置查看器；卸载/切换 revoke），sourceMode 默认预览态 + 头部「源码⇄预览」切换（html 源码=markup 高亮、pdf=元信息卡），filePath 变化重置默认态
+结果：新增 8 用例全绿，前端全量 194 文件 2195 用例通过，tsc 0 错误，eslint 0 告警

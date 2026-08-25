@@ -803,18 +803,20 @@ describe("完整行与 partial 派生段隔离（ql-20260820-011）", () => {
       turn,
       makeLog("full-1", "stdout", "[ASSISTANT] 半截流式内容完整版，全文在此。"),
     );
-    // 完整行独立成段（不 merge 进 partial 派生段）→ 两段并存
+    // 用户反馈⑥修订契约：完整行文本是 partial 前缀 → 立即收编（移除 partial、
+    // 全文承载），不再等 override——实锾示范 override 可能丢失，旧"两段并存
+    // 等 override"会让重复显示留到轮末（会话 a54fa0e4 实证）。分叉（非前缀）
+    // 时保守并存由「重复显示防御」用例覆盖。
     const textSegs = withFull.segments.filter((s) => s.kind === "text");
-    expect(textSegs).toHaveLength(2);
-    // classify 剥 [ASSISTANT] 前缀，output = 半截 partial + 完整行全文
-    expect(withFull.output).toBe("半截流式内半截流式内容完整版，全文在此。");
+    expect(textSegs).toHaveLength(1);
+    expect(withFull.output).toBe("半截流式内容完整版，全文在此。");
 
-    // override 在完整行之后到达（session-manager fire-and-forget 时序）
+    // override 在完整行之后到达（session-manager fire-and-forget 时序）→ 幂等
+    // 空操作（partial 已收编，无撤回目标），终态不变。
     const after = applyLogToSegments(
       withFull,
       makeLog("ov-1", null, "[ASSISTANT_OVERRIDE] main:msg_7:1"),
     );
-    // 只撤 partial 派生段；完整行段保留 → 直播不再丢最终答复
     expect(after.segments.filter((s) => s.kind === "text")).toHaveLength(1);
     expect(after.output).toBe("半截流式内容完整版，全文在此。");
   });
@@ -1111,5 +1113,26 @@ describe("extractPreambleText", () => {
     expect(
       extractPreambleText("【团队任务简报】\n- 目标：x\n\n---\n\n开工"),
     ).toBe("【团队任务简报】\n- 目标：x");
+  });
+});
+
+// ── 用户反馈⑥：会话重复显示（partial+全文双气泡防御）────────────────────
+describe("重复显示防御（用户反馈⑥）", () => {
+  it("完整回复行到达时移除同文本前缀的直播 partial 段（override 丢失场景）", () => {
+    const turn = applyAll([
+      makeLog("l1", "stdout", "[ASSISTANT] 这是 multi-agent", { segmentId: "main:seg-1" }),
+      makeLog("l2", "stdout", "[ASSISTANT] 这是 multi-agent-platform 工作区的详情页面。"),
+    ]);
+    const texts = turn.segments.filter((s) => s.kind === "text");
+    expect(texts).toHaveLength(1);
+    expect((texts[0] as TextTurnSegment).text).toContain("详情页面");
+  });
+
+  it("partial 与全文内容分叉（非前缀）时保守保留双方", () => {
+    const turn = applyAll([
+      makeLog("l3", "stdout", "[ASSISTANT] 完全不同的开头", { segmentId: "main:seg-2" }),
+      makeLog("l4", "stdout", "[ASSISTANT] 这是另一个完整回答"),
+    ]);
+    expect(turn.segments.filter((s) => s.kind === "text").length).toBe(2);
   });
 });

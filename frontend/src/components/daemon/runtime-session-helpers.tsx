@@ -296,9 +296,12 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
         }
         // ql-20260825-011：prompt 气泡剥掉前导块——上下文注入只在「进度」视图的
         // preamble 段（默认收起）展示，对话视图不重复显示前导全文。
-        prompts.push(
-          preambleText ? stripPreambleText(seg.text) : seg.text,
-        );
+        // 用户反馈⑥修正：含前导的全文条剥完与干净条文本相同，两者都 push 会让
+        // prompt 气泡显示两次同一问题——前导条只产 preamble 段，prompt 一律由
+        // 干净条承载（backend 恒写干净 user_input，见 create/inject 路径）。
+        if (!preambleText) {
+          prompts.push(seg.text);
+        }
         continue;
       }
       assemblerInputs.push(toAssemblerInput(entry));

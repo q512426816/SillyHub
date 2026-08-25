@@ -982,6 +982,17 @@ export function applyLogToSegments(
       // output 不变）；log_id 照记（去重语义不受影响，走尾部统一路径）。
       if (seg.text === "") break;
       {
+        // 用户反馈⑥防御：完整回复行 + 遗留 partial（override 丢失）前缀命中 →
+        // 先移除 partial（ql-20260820-011 的 override 协同不受影响：override 正常
+        // 到达时 partial 已被撤走，此处为空操作）。
+        if (seg.kind === "reply" && !nonEmptyString(input.segmentId)) {
+          segments = dropPrefixPartialReply(
+            segments,
+            bucketId,
+            routeSubagentType,
+            seg.text,
+          );
+        }
         const appended = appendStreamText(
           segments,
           bucketId,
@@ -1267,6 +1278,33 @@ function attachSkillInjection(
  *   true；无 segmentId 追加不改变原值（续接保留 / 新建为 false）；清除走 override
  *   （派生段移除）或 finishTurn（turn 终态）。
  */
+/**
+ * 用户反馈⑥防御（2026-08-25）：完整回复行（无 segmentId）到达时，直播 partial
+ * 派生段仍在（override 撤回丢失/未发）且其文本是全文前缀 → 先移除该 partial 段
+ * 再落全文，避免「partial（可能截断）+ 全文」双气泡重复显示。partial 非前缀
+ * （内容已分叉）时保守保留双方。仅处理同桶尾部单个 text partial——partial 链
+ * 按源合并恒为一段（appendStreamText 语义）。
+ */
+function dropPrefixPartialReply(
+  segments: TurnSegment[],
+  bucketId: string | null,
+  subagentType: string | null,
+  fullText: string,
+): TurnSegment[] {
+  return applyToBucket(segments, bucketId, subagentType, (children) => {
+    const last = children[children.length - 1];
+    if (
+      last != null &&
+      last.kind === "text" &&
+      last.segId != null &&
+      fullText.startsWith(last.text)
+    ) {
+      return children.slice(0, -1);
+    }
+    return children;
+  });
+}
+
 function appendStreamText(
   segments: TurnSegment[],
   bucketId: string | null,
