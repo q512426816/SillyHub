@@ -140,12 +140,13 @@ export function XlsxPreviewer({ blob, meta, onDownload }: PreviewerProps) {
         </div>
       )}
 
-      {/* 表格内容（ql-20260825-005 样式修正）：
-          - sheet_to_html 全部输出 td（无 th），首行按表头处理（加粗+底色）；
-          - 数值单元格（data-t="n"）右对齐，文本不折行；
-          - 表宽 w-fit + min-w-full：窄表不强行拉伸变形，宽表横向滚动。 */}
+      {/* 表格内容（ql-20260825-006 样式再修正）：
+          - 上一版全局 whitespace-nowrap 对含大段文字的报表是灾难（长文本单元格
+            撑到数千像素宽、其余列全被挤变形）——文本单元格恢复换行并限制最大宽
+            度（max-w + break-words），仅数值单元格（data-t=n）不折行右对齐；
+          - sheet_to_html 全输出 td（无 th），首行按表头处理（加粗+底色）。 */}
       <div
-        className="p-4 [&_table]:min-w-full [&_table]:w-fit [&_table]:border-collapse [&_td]:border [&_td]:border-slate-200 [&_td]:px-3 [&_td]:py-1.5 [&_td]:whitespace-nowrap [&_td[data-t=n]]:text-right [&_tr:first-child_td]:bg-slate-50 [&_tr:first-child_td]:font-semibold"
+        className="p-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-slate-200 [&_td]:break-words [&_td]:max-w-[420px] [&_td]:px-3 [&_td]:py-1.5 [&_td[data-t=n]]:text-right [&_td[data-t=n]]:whitespace-nowrap [&_tr:first-child_td]:bg-slate-50 [&_tr:first-child_td]:font-semibold"
         dangerouslySetInnerHTML={{ __html: sheetData.htmls[activeSheet] ?? "" }}
       />
     </div>
