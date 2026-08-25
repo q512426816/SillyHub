@@ -401,8 +401,13 @@ export function createMcpServer(
     {
       title: 'Get Worker Result',
       description:
-        '读取单个分身 run 的结构化产出（artifacts：patch/summary 等）。' +
-        'worker_id 必填（dispatch_worker 响应返回的 run id）。' +
+        '读取单个分身 run 的结构化产出。worker_id 必填（dispatch_worker 响应返回的 run id）。' +
+        '【产出双通道——向用户汇报时两条都要看】①artifacts[].kind=summary：分身收尾时写的' +
+        '结论文本（通常含产出文件路径与 commit 号）；②文件通道：分身在隔离 worktree 分支' +
+        '（workers/<run_id 前 8 位>）上的 git 提交——summary 里提到的文件（如 results.md）' +
+        '就是它的产物，调 converge_mission 后平台自动把分支合并进工作区主分支。' +
+        'artifacts 只有 summary 而没有独立的"文件条目"是正常的——文件产出在分支上，' +
+        '不要因此向用户说"无文件产出"，按 summary 里写明的文件路径如实汇报即可。' +
         '优先按当前会话上下文定位 mission；mission_id/workspace_id 可选，仅作显式越权校验锚。' +
         '分身可能仍在运行（status 非 completed）——此时不要轮询等待：结束本轮，' +
         '等平台注入的【系统通知·团队任务】（全部分身完成时自动到达）后再来读。',
