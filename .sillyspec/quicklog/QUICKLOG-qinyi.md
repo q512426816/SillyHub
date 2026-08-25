@@ -383,7 +383,11 @@
 结果：daemon interactive 633 passed 与 panel 49 passed 与 daemon tsc 零错，已提交
 审计：⚖️ 归属切分：6 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_page_context_preamble.py, frontend/src/components/daemon/session-panel.tsx, frontend/src/hooks/use-page-session-context.test.ts, frontend/src/hooks/use-page-session-context.ts, frontend/src/stores/floating-session.ts, backend/app/modules/daemon/session/page_docs/_platform_map.md
 
-## ql-20260826-005-5ef5 | 2026-08-26 07:17:51 | 前端易用性三处修复：登录回车兜底提交/登录名指路提示/运行中分身最新动作预览（后端 latest_action 字段）
-状态：进行中
+## ql-20260826-005-5ef5 | 2026-08-26 07:17:51 | UX 走查三处修复（登录回车与指路、分身动作预览）
+状态：已完成
 关联变更：（无）
 文件：frontend/src/app/(auth)/login/page.tsx, backend/app/modules/daemon/router.py, backend/app/modules/daemon/schema.py, backend/openapi.json, frontend/src/lib/api-types.ts, frontend/src/components/daemon/team-task-block.tsx, frontend/src/lib/daemon.ts
+需求：UX 走查三处修复（登录回车与指路、分身动作预览）。
+根因：走查发现 Enter 部分场景不提交无反馈、登录名与邮箱前缀易混淆且错误不指路、运行中分身要点进浮层才知道在干什么。
+方案：onPressEnter 显式 submit 与 extra 及错误第二行指路；latest_action 批量 join 查询 80 截断仅 running 行加分身行预览与 gen:types。
+结果：backend daemon 1198 passed 与前端 26+75 passed 与 mypy 731 files 与 ruff 与 tsc 零错，已提交。
