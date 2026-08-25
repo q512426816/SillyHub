@@ -118,6 +118,10 @@ stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
 
 - 会话↔spec 绑定三入口（2026-08-25-session-spec-binding）：①run_sync.submit_messages 入库时解析 tool_kind='sillyspec' 命令自动绑变更（agent_session_id None/会话缺失/workspace None 三守卫，X-002）；②创建会话 change_id 补写 link（D-002 双写）+ quicklog_id 新参数落 quicklog 绑定（facade 需同步透传，否则 500）；③GET /sessions 筛选 change_id 改 M:N 子查询、新增 ql_id（(workspace_id, ql_id) 双条件防跨工作区串扰）。
 
+- 会话树参数（2026-08-25-team-subsession-governance）：SessionService.create_session 追加
+  parent_session_id/stage/first_run_mission_id/first_run_role 可选参数（缺省逐字节零回归），
+  分身形态由 agent 模块 dispatch_worker 经 prepare_interactive_dispatch 原语直连消费
+  （create_session 的 runtime 属主校验与跨 ws 代表钉定冲突，见该变更实现偏离记录）。
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->

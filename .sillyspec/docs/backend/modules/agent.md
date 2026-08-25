@@ -97,6 +97,13 @@ mission external 三重防御: ①入口跳过 orchestrator/lease spawn
   （本机 shell 网关变量会泄进 pytest）。
 - 用户可见错误文案中文（error-message-l10n）；守护测试防回退。
 
+- 分身子会话（2026-08-25-team-subsession-governance）：dispatch_worker 派的是子会话三元组
+  （AgentSession.parent_session_id 挂主控 + owner=mission.created_by + interactive lease
+  stage=mission_worker + 首 run mission_id/role 双标记）；完成判据单一真相源
+  is_worker_complete/mission_derive_status（mission.py，虚拟 run 映射），七处判据点禁自建口径；
+  worker_done 端点（mcp_tools 四路由族）写 worker_done_at + summary 挂首 run + DEL→SETNX
+  重开工唤醒 + 迟到 409；converge 成功后沿树批量 end_session（冲突/needs_manual 不收口），
+  patrol 职责⑤孤儿扫描兜底；存量 batch 分身双判据兼容（is_worker_complete 内置 AgentRun 形态）。
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->

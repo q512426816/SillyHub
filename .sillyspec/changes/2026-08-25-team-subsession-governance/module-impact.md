@@ -38,7 +38,7 @@ created_at: 2026-08-25 21:20:00
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `modules/backend.md` | 待 execute 完成后更新（分身子会话派发链路 + worker_done 信号） | pending |
-| `modules/sillyhub-daemon.md` | 待 execute 完成后更新（分身受限 MCP server） | pending |
-| `modules/frontend.md` | 待 execute 完成后更新（分身行点击入口） | pending |
+| `modules/backend.md` | agent.md + daemon.md 补分身子会话派发链路/判据单一真相源/worker_done/create_session 参数化注意事项 | done |
+| `modules/sillyhub-daemon.md`（interactive.md 细卡） | 补受限注入分支/三路生效/递归闸注意事项 | done |
+| `modules/frontend.md` | 补分身行点击入口/浮层复用/零回归注意事项 | done |
 | `_module-map.yaml` | 无变化（未增删模块，仅既有模块内改） | skipped |
