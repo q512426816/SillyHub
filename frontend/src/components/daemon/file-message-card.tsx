@@ -24,7 +24,7 @@ import { memo, useState } from "react";
 import { FileImage } from "@/components/file-image";
 import { downloadFile, fetchFileBlob } from "@/lib/file/api";
 import { FileTypeIcon, formatFileSize, isImageMime } from "@/lib/file/utils";
-import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
+import { FilePreviewModal } from "@/components/files/file-preview-modal";
 import { cn } from "@/lib/utils";
 
 export interface FileMessageCardProps {

@@ -172,6 +172,12 @@ frontend/src/components/files/
 useObjectUrl → 各 renderer（image/pdf 用 objectURL；docx/xlsx/md 用 Blob 取 ArrayBuffer/text）。
 无后端字段/DTO 变更，`pnpm gen:types` 无需重跑（OpenAPI 无改动）。
 
+**探针 5 豁免声明（verify）**：verify-probes 的 API parity 全仓扫描报 145 条 missing
+（admin/auth/ppm/daemon 等 lib 旧文件）——均为平台既有前端调用与 endpoints.json 收录范围的
+错配（全仓旧扫描噪音），与本变更无关：本变更零后端端点改动（§9），仅消费 2 个既有只读
+端点（session-attachments content、file content），二者主分支长期工作。豁免判定依据
+verify-result.md 探针 5 节。
+
 ## 7. 接口定义
 
 ```ts

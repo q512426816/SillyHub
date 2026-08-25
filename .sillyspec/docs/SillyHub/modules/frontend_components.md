@@ -61,6 +61,7 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
 - 其余独立件：
   - 审批与权限：`permission-approval-card`
   - 文件中心：`file-upload` / `file-viewer` / `file-image`
+  - 统一文件预览（2026-08-25-session-attachment-preview）：`files/` 目录——`file-preview-modal`（antd Modal 壳：标题栏元信息+下载+关闭、loading/error 重试态，body 按注册表分发）+ `preview-registry`（matchRenderer：blob.type > meta.mime > 扩展名 → 六 RendererKey）+ `use-object-url`（blob 拉取/竞态防护/卸载自动 revoke）+ `previewers/` 六渲染器（image=antd Image、pdf=iframe 零依赖、docx=docx-preview 动态 import+异常降级、xlsx=SheetJS 多 sheet+2000 行截断、markdown=必经 MarkdownText 防 XSS、fallback=下载引导）。三入口：`daemon/attachment-chips`（chips 全部可点击弹预览）、`daemon/file-message-card`（通用卡片主体可点击，下载 stopPropagation，图片形态不动）、`file-viewer`（非图片项加预览入口）
   - 令牌：`mcp-token-create-dialog` / `api-key-create-dialog`
   - 技能：`custom-skill-edit-dialog` / `skill-content-drawer`
   - admin-*（用户抽屉 / 组织树 / 角色权限选择器）、ppm-*（资源表格 / 子表 / 状态动作 / 字典选择等）

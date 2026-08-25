@@ -26,6 +26,6 @@ created_at: 2026-08-25 10:55:00
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `modules/frontend_components.md` | 更新前端组件层模块卡（新增 files/ 统一预览组件族、三入口组件行为变化） | pending |
-| `modules/frontend_lib.md` | 更新 lib 模块卡（session-attachments.ts 新增 fetchAttachmentBlob 导出） | pending |
+| `modules/frontend_components.md` | 更新前端组件层模块卡（新增 files/ 统一预览组件族、三入口组件行为变化） | done |
+| `modules/frontend_lib.md` | 更新 lib 模块卡（session-attachments.ts 新增 fetchAttachmentBlob 导出） | done |
 | `_module-map.yaml` | 无变化（未增删模块，新增文件均落入现有 paths glob） | skipped |
