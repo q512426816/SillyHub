@@ -1222,9 +1222,35 @@ export function finishTurn(turn: AssembledTurn): AssembledTurn {
     });
     return { list: changed ? out : list, changed };
   };
-  const res = clear(turn.segments);
-  if (!res.changed) return turn;
-  return { ...turn, segments: res.list };
+  const cleared = clear(turn.segments);
+  // 用户反馈⑥续（会话 e3b86010：直播重复、刷新正常）：终态收敛去重——同桶内
+  // 两条 text 段互为前缀（流式残段与完整行任意到达顺序，含乱序 full→partial）
+  // 时丢弃较短者，保证「直播结束态 == 刷新（attach）视图」；相等文本（对账
+  // 重放同内容异 id 的极端情形）同样收敛。非前缀（真实多段回复）不动。
+  const dedup = (list: TurnSegment[]): { list: TurnSegment[]; changed: boolean } => {
+    const texts = list.filter(
+      (s): s is Extract<TurnSegment, { kind: "text" }> => s.kind === "text" && s.text !== "",
+    );
+    const drop = new Set<TurnSegment>();
+    for (const a of texts) {
+      for (const b of texts) {
+        if (a === b || drop.has(a)) continue;
+        if (a.text.startsWith(b.text)) drop.add(b);
+      }
+    }
+    if (drop.size === 0) return { list, changed: false };
+    return {
+      list: list.filter((s) => !drop.has(s)),
+      changed: true,
+    };
+  };
+  const dd = dedup(cleared.list);
+  const changed = cleared.changed || dd.changed;
+  if (!changed) return turn;
+  // 去重改变了段序列 → 重算兼容投影（output/processItems），否则页面胶水读到
+  // 去重前的旧投影（含已丢弃段的内容）。
+  const legacy = segmentsToLegacy(dd.list);
+  return { ...turn, segments: dd.list, output: legacy.output, processItems: legacy.processItems };
 }
 
 /**
@@ -1324,12 +1350,15 @@ function appendStreamText(
     // 派生段，daemon 在完整行**之后** emit 的 override 撤回（session-manager
     // fire-and-forget）会按 segmentId 把派生段连同 merge 进去的全文一并移除——
     // 长文本直播消失、重进（历史无 partial）正常的根因。
+    // 用户反馈⑥续：partial（segId 非空）只并入携带**相同 segId** 的派生段——
+    // 原 derivesFromSegmentId 前缀判定会把 logId 派生的全文段 id（text:<logId>）
+    // 误判为同源（-<数字> 后缀歧义），乱序到达的残段被拼进全文段内造成段内
+    // 文本翻倍（会话 e3b86010 直播重复根因）。同源分裂续段均携带原 segId
+    // （appendStreamText 建段规则），严格相等不破坏 R-06 续接。
     const canMerge =
       last != null &&
       last.kind === kind &&
-      (segId
-        ? derivesFromSegmentId(last.id, kind, segId)
-        : (last.segId ?? null) === null);
+      (segId ? (last.segId ?? null) === segId : (last.segId ?? null) === null);
     if (last && canMerge) {
       const merged = kind === "text" ? last.text + text : `${last.text}\n${text}`;
       // F7：上报续接目标（增量投影判定；ts 取 merge 保留的段 ts——thinking 项用）

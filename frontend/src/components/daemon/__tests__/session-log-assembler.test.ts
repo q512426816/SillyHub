@@ -1136,3 +1136,38 @@ describe("重复显示防御（用户反馈⑥）", () => {
     expect(turn.segments.filter((s) => s.kind === "text").length).toBe(2);
   });
 });
+
+// ── 用户反馈⑥续（e3b86010）：终态收敛去重，任意到达顺序 ────────────────────
+describe("finishTurn 终态前缀去重（用户反馈⑥续）", () => {
+  it("乱序：完整行先到、流式残段后到 → 终态收敛为单段", () => {
+    const turn = applyAll([
+      makeLog("f1", "stdout", "[ASSISTANT] 完整回答全文在此。"),
+      makeLog("p1", "stdout", "完整回答", { segmentId: "main:late:1" }),
+    ]);
+    const finished = finishTurn(turn);
+    const texts = finished.segments.filter((s) => s.kind === "text");
+    expect(texts).toHaveLength(1);
+    expect(finished.output).toBe("完整回答全文在此。");
+  });
+
+  it("连续完整行按设计合并为单段（多行回复累积，非前缀去重误伤）", () => {
+    const turn = applyAll([
+      makeLog("m1", "stdout", "[ASSISTANT] 第一段独立回答。"),
+      makeLog("m2", "stdout", "[ASSISTANT] 第二段独立回答。"),
+    ]);
+    const finished = finishTurn(turn);
+    const texts = finished.segments.filter((s) => s.kind === "text");
+    expect(texts).toHaveLength(1);
+    expect(finished.output).toContain("第一段独立回答。");
+    expect(finished.output).toContain("第二段独立回答。");
+  });
+
+  it("空文本段不参与去重判定（不误删合法结构）", () => {
+    const turn = applyAll([
+      makeLog("e1", "stdout", "[ASSISTANT] 唯一回答。"),
+      makeLog("e2", "stdout", "[ASSISTANT]", { segmentId: "main:x:1" }),
+    ]);
+    const finished = finishTurn(turn);
+    expect(finished.output).toBe("唯一回答。");
+  });
+});
