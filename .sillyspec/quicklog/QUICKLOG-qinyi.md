@@ -346,3 +346,8 @@
 根因：test_list_workers_via_header_only 的非严格 xfail 注明路由注册顺序修复后自动转 XPASS，该条件已满足且最近三次 backend CI 摘要持续 1 xpassed，标记失效
 方案：移除 @pytest.mark.xfail 装饰器使用例回归普通 PASS 守卫，docstring 去掉失效的「冲突 canary」括注
 结果：test_mcp_tools.py 全文件 51 passed 0 xfailed、ruff check/format 过、mypy 该文件 0 问题
+
+## ql-20260826-002-1db8 | 2026-08-26 01:51:38 | P1 verify NOTES 次要跟进清偿：前端 lib/daemon.ts TeamMissionWorkerSummary 补 sub_session_id/first_run_id 手写类型字段 + control.py activ…
+状态：进行中
+关联变更：（无）
+文件：frontend/src/lib/daemon.ts, backend/app/modules/agent/control.py

@@ -2086,6 +2086,13 @@ export interface TeamMissionWorkerSummary {
   objective: string | null;
   /** 分身执行工作区（ql-20260825-003：跨工作区派发后日志/产物端点按此鉴权）。 */
   workspace_id?: string | null;
+  /**
+   * 分身子会话形态（2026-08-25-team-subsession-governance）：子会话行非空，
+   * 分身行点击据此打开 session-panel；存量 batch 行缺省。first_run_id 与
+   * run_id 同源（首 run 双标记锚），get_worker_result 消费。
+   */
+  sub_session_id?: string | null;
+  first_run_id?: string | null;
 }
 
 /** scope 工作区引用（ql-20260825-003：id+名称 enriched 视图）。 */

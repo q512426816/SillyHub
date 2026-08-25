@@ -152,6 +152,23 @@ class MissionControlService:
             runs.extend((await self._session.execute(stmt)).scalars().all())
         return self.cost_from_runs(runs)
 
+    async def _worker_form_count(
+        self, mission_id: uuid.UUID, *, legacy_statuses: frozenset[str]
+    ) -> int:
+        """混跑形态统一计数（task-11，verify NOTES 去重抽取）。
+
+        存量分身 run 按 ``legacy_statuses`` 过滤 + ``is_worker_complete=False``
+        子会话合计；子会话首 run 已被 ``_split_worker_forms`` 从 run 侧剔除
+        防双计。active（_ACTIVE）/running（{"running"}）两口径仅存量侧过滤集
+        不同，子会话语义一致（未完成即计入）。
+        """
+        legacy_runs, sessions = await self._split_worker_forms(mission_id)
+        count = sum(1 for r in legacy_runs if r.status in legacy_statuses)
+        for s in sessions:
+            if not await is_worker_complete(self._session, s):
+                count += 1
+        return count
+
     async def active_worker_count(self, mission_id: uuid.UUID) -> int:
         """活跃分身计数（pending+running，cancel 漏杀防护视角）。
 
@@ -159,12 +176,7 @@ class MissionControlService:
         ``is_worker_complete``，pending 子会话——首 run pending 未 claim——天然
         计入）合计；子会话首 run 从 run 维度剔除防双计。
         """
-        legacy_runs, sessions = await self._split_worker_forms(mission_id)
-        count = sum(1 for r in legacy_runs if r.status in _ACTIVE)
-        for s in sessions:
-            if not await is_worker_complete(self._session, s):
-                count += 1
-        return count
+        return await self._worker_form_count(mission_id, legacy_statuses=_ACTIVE)
 
     async def running_worker_count(self, mission_id: uuid.UUID) -> int:
         """Count Workers already claimed by a daemon (``running``) — concurrency basis.
@@ -181,12 +193,7 @@ class MissionControlService:
         分身只要未显式完成（worker_done）即占并发额度（追问重开工中也占），
         子会话首 run 从 run 维度剔除防同分身双计。
         """
-        legacy_runs, sessions = await self._split_worker_forms(mission_id)
-        count = sum(1 for r in legacy_runs if r.status == "running")
-        for s in sessions:
-            if not await is_worker_complete(self._session, s):
-                count += 1
-        return count
+        return await self._worker_form_count(mission_id, legacy_statuses=frozenset({"running"}))
 
     async def can_dispatch_worker(self, mission: AgentMission) -> tuple[bool, str]:
         """Pre-dispatch gate. Returns ``(allowed, reason)``.
