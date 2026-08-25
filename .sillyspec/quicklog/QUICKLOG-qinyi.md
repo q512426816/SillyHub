@@ -233,3 +233,13 @@
 根因：主控 agent 拿到 workspace ID 后缺本地路径无法只读调研，Workspace 模型已有 root_path 但简报渲染未带上
 方案：collect_single_workspace_status 返回 dict 加 root_path、ScopeWorkspaceStatus schema 加 root_path 字段、render_scope_brief 渲染行加 path= 字段、render_session_orchestrator_briefing 锚点行加路径；简报 token 预算 1500→1600
 结果：42 针对性测试全绿、agent 模块全量回归中本次改动的 3 个测试文件零失败零错误、ruff 0 告警、mypy 无新增错误
+
+## ql-20260825-010-db67 | 2026-08-25 15:34:25 | 会话页筛选胶囊 SVG 图标与文字换行修复
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/sessions/session-list-panel.tsx（FilterPill 内层 `<span class="min-w-0 truncate">` → `<span class="inline-flex min-w-0 items-center gap-0.5 overflow-hidden">`；两层筛选行容器恢复 `flex flex-wrap gap-1.5`）
+需求：机器/智能体筛选胶囊内 SVG 图标与文字显示在同一行，同时所有机器胶囊全部可见
+根因：Tailwind `truncate` 生成 `display:block`，SVG preflight 也是 `display:block`，block SVG 独占一行将文字推到第二行（pill 高度 33.6px → 应为 21.6px）；外层容器改 `nowrap`/`overflow-scroll` 导致部分机器被隐藏
+方案：FilterPill 内层 span 改为 `inline-flex items-center gap-0.5 overflow-hidden`（flex 子项并排 + 溢出裁剪，保留 `max-w-[160px]` 截断），外层保持 `flex-wrap` 确保所有机器可见
+结果：vitest 2204/2204 绿；tsc 零错；Playwright DOM 验证：全部 5 个机器胶囊 `display:flex`、`pillH=21.6px`、`sameRow=true`；docker fix 镜像重建后容器内 API 代理正常（/api/health 200）
