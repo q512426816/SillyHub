@@ -39581,6 +39581,19 @@
               }
             ],
             "title": "Workspace Id"
+          },
+          "tab_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 60,
+                "pattern": "^[a-z0-9][a-z0-9_:-]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tab Key"
           }
         },
         "type": "object",

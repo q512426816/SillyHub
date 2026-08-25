@@ -234,9 +234,10 @@ class TestPageManualsIntegrity:
             PAGE_MANUALS,
             PAGE_ROUTE_LABELS,
             PPM_PROJECT_MANUAL_KEY,
+            WORKSPACE_TAB_LABELS,
         )
 
-        expected_keys = {*PAGE_ROUTE_LABELS, PPM_PROJECT_MANUAL_KEY}
+        expected_keys = {*PAGE_ROUTE_LABELS, PPM_PROJECT_MANUAL_KEY, *WORKSPACE_TAB_LABELS}
         assert set(PAGE_MANUALS) == expected_keys
         for key, text in PAGE_MANUALS.items():
             assert "## 功能定位" in text, key
@@ -391,3 +392,60 @@ class TestPageDocsDockerignoreGuard:
             "backend/.dockerignore 缺 page_docs 白名单——说明书文件进不了镜像，"
             "运行时静默降级为仅标签（用户实测 1ad69ea4 根因）"
         )
+
+
+class TestWorkspaceTabManuals:
+    """用户反馈⑧/⑨：工作区子菜单说明书 + 全局地图。"""
+
+    @pytest.mark.asyncio
+    async def test_tab_key_selects_tab_manual_with_subpage_line(self, db_session) -> None:
+        from app.modules.daemon.session.context import build_page_context_preamble
+        from app.modules.workspace.model import Workspace
+
+        ws = Workspace(
+            id=uuid.uuid4(),
+            name="map",
+            slug="map",
+            root_path="C:/x",
+            status="active",
+            type="app",
+        )
+        db_session.add(ws)
+        await db_session.commit()
+
+        out = await build_page_context_preamble(
+            db_session, "workspace", None, None, ws.id, "workspace_changes"
+        )
+        assert out is not None
+        assert "- 当前子页面：变更" in out
+        assert "规范驱动开发" in out  # 变更 tab 说明书内容特征
+
+    @pytest.mark.asyncio
+    async def test_unknown_tab_falls_back_to_overview(self, db_session) -> None:
+        from app.modules.daemon.session.context import build_page_context_preamble
+        from app.modules.workspace.model import Workspace
+
+        ws = Workspace(
+            id=uuid.uuid4(),
+            name="map2",
+            slug="map2",
+            root_path="C:/y",
+            status="active",
+            type="app",
+        )
+        db_session.add(ws)
+        await db_session.commit()
+
+        out = await build_page_context_preamble(
+            db_session, "workspace", None, None, ws.id, "no_such_tab"
+        )
+        assert out is not None
+        assert "当前子页面" not in out
+        assert "## 功能定位" in out  # 回落总览说明书
+
+    def test_platform_map_loaded_and_injected(self) -> None:
+        from app.modules.daemon.session.context import PLATFORM_MAP
+
+        assert "平台全局地图" in PLATFORM_MAP
+        assert "主使用动线" in PLATFORM_MAP
+        assert "PPM 业务链" in PLATFORM_MAP

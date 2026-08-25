@@ -13691,6 +13691,8 @@ export interface components {
             route_key?: string | null;
             /** Workspace Id */
             workspace_id?: string | null;
+            /** Tab Key */
+            tab_key?: string | null;
         };
         /** Page[CustomerMaintenanceResp] */
         Page_CustomerMaintenanceResp_: {

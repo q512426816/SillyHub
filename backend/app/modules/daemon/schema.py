@@ -138,6 +138,9 @@ class PageContextCreateBlock(BaseModel):
     project_id: uuid.UUID | None = None
     route_key: str | None = Field(default=None, max_length=60, pattern=r"^[a-z0-9][a-z0-9_:-]*$")
     workspace_id: uuid.UUID | None = None
+    # 用户反馈⑧：工作区详情子页面键（WORKSPACE_TAB_LABELS 注册表 Lookup；
+    # 缺省 None → workspace_detail 总览说明书）。
+    tab_key: str | None = Field(default=None, max_length=60, pattern=r"^[a-z0-9][a-z0-9_:-]*$")
 
     @model_validator(mode="after")
     def _require_kind_specific_field(self) -> "PageContextCreateBlock":

@@ -58,7 +58,7 @@ export interface FloatingLockedRuntime {
 export type FloatingPageContext =
   | { page_key: "ppm_project"; project_id: string }
   | { page_key: "generic_page"; route_key: string }
-  | { page_key: "workspace"; workspace_id: string };
+  | { page_key: "workspace"; workspace_id: string; tab_key?: string };
 
 /** 悬浮会话壳层状态与动作（design §3）。 */
 export interface FloatingSessionState {

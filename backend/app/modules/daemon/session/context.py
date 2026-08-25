@@ -133,16 +133,68 @@ _PAGE_VALUE_MAX: int = 120
 PAGE_ROUTE_LABELS: dict[str, str] = {
     "settings_mcp": "设置 · MCP",
     "settings_skills": "设置 · Skills",
+    "settings_providers": "设置 · 模型供应商",
+    "settings_api_keys": "设置 · API 密钥",
+    "settings_git_identities": "设置 · Git 身份",
     "settings": "设置",
     "runtimes": "运行时",
+    "runtimes_audit": "运行时 · 机器审计",
     "workspaces": "工作区列表",
     "workspace_detail": "工作区详情",
     "agent_profiles": "智能体档案",
     "sessions_portal": "会话门户",
+    "ppm_home": "PPM · 项目管理",
     "ppm_projects": "PPM · 项目列表",
     "ppm_workbench": "PPM · 工作台",
+    "ppm_milestone_details": "PPM · 里程碑详情",
+    "ppm_problem_list": "PPM · 问题单",
+    "ppm_task_plans": "PPM · 任务计划",
+    "ppm_task_execute": "PPM · 任务执行",
+    "ppm_project_plans": "PPM · 项目计划",
+    "ppm_plan_nodes": "PPM · 计划节点",
+    "ppm_weekly_plan": "PPM · 周计划",
+    "ppm_kanban": "PPM · 看板",
+    "ppm_work_hours": "PPM · 工时填报",
+    "ppm_work_hour_statistics": "PPM · 工时统计",
+    "ppm_project_members": "PPM · 项目成员",
+    "ppm_project_stakeholders": "PPM · 干系人",
+    "ppm_customers": "PPM · 客户",
     "admin": "管理后台",
+    "admin_organizations": "管理后台 · 组织",
+    "admin_users": "管理后台 · 用户",
+    "admin_roles": "管理后台 · 角色权限",
     "account": "个人中心",
+}
+
+# 工作区详情子页面（tab）注册表（用户反馈⑧：每个子菜单独立说明书）：
+# tab_key → 子页面中文名。前端 hook 从 /workspaces/:id/<tab> 路径段派生
+# tab_key 随 workspace 块上送；说明书优先取 tab 文档，未命中回落
+# workspace_detail 总览。tabs 不进 PAGE_ROUTE_LABELS（无独立路由键语义），
+# 完整性守护测试覆盖 PPM_PROJECT_MANUAL_KEY 与本表。
+WORKSPACE_TAB_LABELS: dict[str, str] = {
+    "workspace_overview": "概览",
+    "workspace_changes": "变更",
+    "workspace_change_detail": "变更详情",
+    "workspace_change_sessions": "变更会话",
+    "workspace_sessions_tab": "会话",
+    "workspace_explorer": "文件",
+    "workspace_knowledge": "知识库",
+    "workspace_components": "组件",
+    "workspace_topology": "组件拓扑",
+    "workspace_scan_docs": "扫描文档",
+    "workspace_runtime_tab": "运行时",
+    "workspace_agent_profiles_tab": "智能体档案",
+    "workspace_agent": "Agent 总览",
+    "workspace_skills_tab": "Skills",
+    "workspace_mcp_tab": "MCP",
+    "workspace_mcp_tokens_tab": "MCP 令牌",
+    "workspace_members": "成员",
+    "workspace_files": "方案文件",
+    "workspace_approvals": "审批中心",
+    "workspace_audit": "审计日志",
+    "workspace_git_log": "Git 提交记录",
+    "workspace_incidents": "事件",
+    "workspace_releases": "发布",
 }
 
 # 页面说明书知识库（task-13 起步为内联小抄，ql-20260825-008 升级为独立文档
@@ -158,9 +210,24 @@ _PAGE_DOCS_DIR = Path(__file__).resolve().parent / "page_docs"
 PPM_PROJECT_MANUAL_KEY = "ppm_project_detail"
 
 
+# 用户反馈⑨（全局意识）：平台全局地图——跨页面逻辑关系与主使用动线，
+# 随所有【页面上下文】前导附注（page_docs/_platform_map.md，下划线前缀
+# 非路由键；读失败 → 空串不附注）。AI 据此可做跨页引导（"这个功能在哪个
+# 页面/接下来该去哪"）。
+def _load_platform_map() -> str:
+    try:
+        return (_PAGE_DOCS_DIR / "_platform_map.md").read_text(encoding="utf-8").strip()
+    except OSError:
+        log.warning("page_manual.platform_map_missing")
+        return ""
+
+
+PLATFORM_MAP: str = _load_platform_map()
+
+
 def _load_page_manuals() -> dict[str, str]:
     manuals: dict[str, str] = {}
-    for key in (*PAGE_ROUTE_LABELS, PPM_PROJECT_MANUAL_KEY):
+    for key in (*PAGE_ROUTE_LABELS, *WORKSPACE_TAB_LABELS, PPM_PROJECT_MANUAL_KEY):
         try:
             text = (_PAGE_DOCS_DIR / f"{key}.md").read_text(encoding="utf-8").strip()
         except OSError:
@@ -180,6 +247,7 @@ async def build_page_context_preamble(
     project_id: uuid.UUID | None,
     route_key: str | None = None,
     workspace_id: uuid.UUID | None = None,
+    tab_key: str | None = None,
 ) -> str | None:
     """拼装【页面上下文】前导字符串。
 
@@ -202,6 +270,12 @@ async def build_page_context_preamble(
         # 用户反馈⑦：指令式前导（"当前用户正在访问…请参考"）+ 不注入本机
         # root_path（宿主机路径对他人无意义且属环境信息泄露）；只保留
         # 名称/类型。
+        # 用户反馈⑧：子页面说明书优先（tab_key 注册表 Lookup），未命中回落
+        # workspace_detail 总览；子页面行标注当前 tab；全局地图见 PLATFORM_MAP。
+        tab_label = WORKSPACE_TAB_LABELS.get(tab_key or "")
+        manual = (
+            PAGE_MANUALS.get(tab_key or "") if tab_label is not None else None
+        ) or PAGE_MANUALS.get("workspace_detail")
         lines = [
             "【页面上下文】",
             "当前用户正在访问本平台的「工作区详情」页面，可能基于此页面内容向你提问；"
@@ -211,9 +285,12 @@ async def build_page_context_preamble(
             lines.append(f"- 当前工作区：{ws.name[:_PAGE_VALUE_MAX]}")
         if ws.type:
             lines.append(f"- 类型：{ws.type[:_PAGE_VALUE_MAX]}")
-        manual = PAGE_MANUALS.get("workspace_detail")
+        if tab_label is not None:
+            lines.append(f"- 当前子页面：{tab_label}")
         if manual:
             lines.append(manual)
+        if PLATFORM_MAP:
+            lines.append(PLATFORM_MAP)
         if len(lines) <= 2:
             return None
         return "\n".join(lines)
@@ -232,6 +309,8 @@ async def build_page_context_preamble(
         manual = PAGE_MANUALS.get(key)
         if manual:
             parts.append(manual)
+        if PLATFORM_MAP:
+            parts.append(PLATFORM_MAP)
         return "\n".join(parts)
 
     if page_key != "ppm_project" or project_id is None:
@@ -263,6 +342,8 @@ async def build_page_context_preamble(
     proj_manual = PAGE_MANUALS.get(PPM_PROJECT_MANUAL_KEY)
     if proj_manual:
         proj_lines.append(proj_manual)
+    if PLATFORM_MAP:
+        proj_lines.append(PLATFORM_MAP)
 
     if len(proj_lines) <= 2:
         return None

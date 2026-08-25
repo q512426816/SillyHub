@@ -1097,6 +1097,7 @@ class SessionService:
                     page_context.project_id,
                     page_context.route_key,
                     page_context.workspace_id,
+                    page_context.tab_key,
                 )
                 if page_context is not None
                 else None
@@ -2825,6 +2826,7 @@ class SessionService:
                         page_context.project_id,
                         page_context.route_key,
                         page_context.workspace_id,
+                        page_context.tab_key,
                     )
                 # 拼接顺序：页面前导（本轮实时）→ 团队简报（首主控轮一次性）→ 用户消息。
                 parts = []
