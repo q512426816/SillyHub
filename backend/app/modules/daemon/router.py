@@ -2170,7 +2170,9 @@ async def get_session_detail(
         if lease_row is not None and lease_row[0] is not None:
             read.terminating_at = lease_row[0]
     # 查当前运行 run（attach 恢复 currentRunId，启用打断按钮；无运行 run 则 null）
-    from app.modules.agent.model import AgentRun
+    # P2（2026-08-25 二审 #3）：词表单源 agent.model.ACTIVE_RUN_STATUSES——修复
+    # pending_approval 审批中的 run 被漏判（interrupting backend 永不落库已剔除）。
+    from app.modules.agent.model import ACTIVE_RUN_STATUSES, AgentRun
 
     current_run = (
         (
@@ -2178,7 +2180,7 @@ async def get_session_detail(
                 select(AgentRun)
                 .where(
                     AgentRun.agent_session_id == session_id,
-                    AgentRun.status.in_(["pending", "running", "interrupting"]),
+                    AgentRun.status.in_(list(ACTIVE_RUN_STATUSES)),
                 )
                 .order_by(AgentRun.started_at.desc())
                 .limit(1)
@@ -2651,19 +2653,24 @@ async def get_session_logs(
 
 
 async def _session_has_active_turn(session: AsyncSession, session_id: uuid.UUID) -> bool:
-    """会话当前是否有活跃 turn（run pending/running/interrupting）。
+    """会话当前是否有活跃 turn（ACTIVE_RUN_STATUSES 词表单源）。
 
     扩展后 derive_status 的 ``session_active_turn`` 入参（task-02 契约）：主控轮
     还在跑 → 会话 mission 不进 awaiting_input 档。状态集合与 get_session_detail
     的 current_run 查询同口径。
+
+    P2（2026-08-25 二审 #3）：改用 ``agent.model.ACTIVE_RUN_STATUSES`` 单源词表
+    （pending/running/pending_approval）——修复审批中的主控轮（pending_approval）
+    被漏判致 mission 误入 awaiting_input 档；interrupting 为前端展示态、backend
+    不落库，已从词表剔除。
     """
-    from app.modules.agent.model import AgentRun
+    from app.modules.agent.model import ACTIVE_RUN_STATUSES, AgentRun
 
     stmt = (
         select(AgentRun.id)
         .where(
             AgentRun.agent_session_id == session_id,
-            AgentRun.status.in_(["pending", "running", "interrupting"]),
+            AgentRun.status.in_(list(ACTIVE_RUN_STATUSES)),
         )
         .limit(1)
     )

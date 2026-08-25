@@ -5,8 +5,12 @@
  *   - load：从 ~/.sillyhub/daemon/sessions.json 加载可恢复 interactive session 元数据。
  *     文件不存在 → []（不创建）。损坏 JSON / version 不支持 → quarantine + []（不崩 daemon）。
  *     单条记录 schema 非法 → 该条丢弃（损坏隔离），其余保留。
+ *     ql-20260825-f6#1：目标缺失 / 为空时先尝试从同目录 tmp 残留恢复（mtime 最新
+ *     合法者，rename 落位），无合法 tmp 才返回 []——防 Windows unlink→rename 崩溃
+ *     窗口导致全部会话不可恢复。
  *   - save：原子写（同目录 tmp + rename）整批记录；单一 promise queue 串行化，保证
  *     并发 save 顺序与最终一致性（最后一条 win）。0o600 权限（Windows 无效但保留）。
+ *     ql-20260825-f6#1：成功后顺手清理超过 1h 的过期 tmp 残留。
  *   - quarantine：把当前文件重命名为 sessions.json.corrupt-<epoch>（隔离损坏文件，
  *     下次 load 不再触发损坏路径）。
  *
@@ -34,11 +38,12 @@ import {
   mkdir,
   readdir,
   rename,
+  stat,
   unlink,
   writeFile,
 } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import {
   SESSION_FILE_VERSION,
   type PersistedSessionFile,
@@ -72,6 +77,57 @@ export class SessionPersistenceError extends Error {
 }
 
 const VALID_PROVIDERS = new Set(['claude', 'codex']);
+
+/**
+ * ql-20260825-f6#1：tmp 残留过期时长（ms）。flush 成功后顺手清理超过此时长的
+ * `.tmp-*` 残留（并发在写的新鲜 tmp 不会被误删——save 队列串行，在写 tmp 仅数秒龄）。
+ */
+const STALE_TMP_MS = 60 * 60 * 1000;
+
+/**
+ * ql-20260825-f6#1：文件内容解析结果（load 主路径与 tmp 恢复共用）。
+ * ok=false 时 reason 供 load 主路径决定 quarantine 语义；tmp 恢复视任何 !ok 为
+ * 「解析失败则忽略」（换下一个候选）。
+ */
+type ParseOutcome =
+  | { ok: true; records: PersistedSessionRecord[] }
+  | {
+      ok: false;
+      reason:
+        | 'corrupt_json'
+        | 'invalid_root'
+        | 'unsupported_version'
+        | 'invalid_sessions_array';
+    };
+
+/** ql-20260825-f6#1：解析 + 逐条校验文件文本（load / tmp 恢复共用，无副作用）。 */
+function parseContent(raw: string): ParseOutcome {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, reason: 'corrupt_json' };
+  }
+  if (!parsed || typeof parsed !== 'object') {
+    return { ok: false, reason: 'invalid_root' };
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (obj.version !== SESSION_FILE_VERSION) {
+    return { ok: false, reason: 'unsupported_version' };
+  }
+  if (!Array.isArray(obj.sessions)) {
+    return { ok: false, reason: 'invalid_sessions_array' };
+  }
+  // 损坏隔离：单条 schema 非法 → 丢弃该条，其余保留。
+  const records: PersistedSessionRecord[] = [];
+  for (const item of obj.sessions) {
+    const rec = validateRecord(item);
+    if (rec !== null) {
+      records.push(rec);
+    }
+  }
+  return { ok: true, records };
+}
 
 /**
  * 单条记录 schema 校验（白名单字段 + 类型）。非法 → 返回 null（load 时丢弃该条）。
@@ -159,9 +215,11 @@ function validateRecord(raw: unknown): PersistedSessionRecord | null {
  * JSON 文件持久化实现。
  *
  * 行为：
- *   - load：不存在 → []；损坏 → quarantine + []；version 不支持 → quarantine + []；
+ *   - load：不存在 / 空文件 → 尝试 tmp 残留恢复（ql-20260825-f6#1），无合法 tmp → []；
+ *     损坏 → quarantine + []；version 不支持 → quarantine + []；
  *     单条 schema 非法 → 该条丢弃（其余保留）。
- *   - save：tmp + rename 原子写；单一 promise queue 串行；0o600（Windows no-op）。
+ *   - save：tmp + rename 原子写；单一 promise queue 串行；0o600（Windows no-op）；
+ *     成功后清理 >1h 过期 tmp 残留（ql-20260825-f6#1）。
  *   - quarantine：把当前文件重命名为 sessions.json.corrupt-<epoch>，不存在则 no-op。
  */
 export class JsonSessionPersistence {
@@ -179,53 +237,35 @@ export class JsonSessionPersistence {
   }
 
   async load(): Promise<PersistedSessionRecord[]> {
-    if (!existsSync(this._filePath)) {
-      // 文件不存在：不 warn、不创建。
-      return [];
-    }
-
-    let raw: string;
-    try {
-      raw = readFileSync(this._filePath, 'utf8');
-    } catch {
-      // 读失败（权限等）：当损坏隔离，quarantine + 空集合。
-      await this.quarantine('read_failed').catch(() => undefined);
-      return [];
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      // 损坏 JSON：quarantine + 空集合（不抛、不崩 daemon）。
-      await this.quarantine('corrupt_json').catch(() => undefined);
-      return [];
-    }
-
-    if (!parsed || typeof parsed !== 'object') {
-      await this.quarantine('invalid_root').catch(() => undefined);
-      return [];
-    }
-    const obj = parsed as Record<string, unknown>;
-    if (obj.version !== SESSION_FILE_VERSION) {
-      // version 缺失 / 不支持：quarantine（不复活半条记录）。
-      await this.quarantine('unsupported_version').catch(() => undefined);
-      return [];
-    }
-    if (!Array.isArray(obj.sessions)) {
-      await this.quarantine('invalid_sessions_array').catch(() => undefined);
-      return [];
-    }
-
-    // 损坏隔离：单条 schema 非法 → 丢弃该条，其余保留。
-    const records: PersistedSessionRecord[] = [];
-    for (const item of obj.sessions) {
-      const rec = validateRecord(item);
-      if (rec !== null) {
-        records.push(rec);
+    // ql-20260825-f6#1：目标缺失 / 空文件（Windows unlink→rename 两步窗口崩溃 /
+    // rename 兜底直写中途死）→ 尝试从同目录 tmp 残留恢复（mtime 最新优先），
+    // 而非直接 []（旧行为下全部会话不可恢复）。
+    let raw: string | null = null;
+    if (existsSync(this._filePath)) {
+      try {
+        raw = readFileSync(this._filePath, 'utf8');
+      } catch {
+        // 读失败（权限等）：当损坏隔离，quarantine + 空集合。
+        await this.quarantine('read_failed').catch(() => undefined);
+        return [];
+      }
+      if (raw.trim() === '') {
+        // 空文件视同缺失（写入未完成），不当损坏 quarantine（避免产 .corrupt 垃圾）。
+        raw = null;
       }
     }
-    return records;
+    if (raw === null) {
+      return this._recoverFromTmp();
+    }
+
+    const outcome = parseContent(raw);
+    if (!outcome.ok) {
+      // 损坏 JSON / 根非法 / version 不支持 / sessions 非数组：quarantine + 空集合
+      //（不抛、不崩 daemon）。
+      await this.quarantine(outcome.reason).catch(() => undefined);
+      return [];
+    }
+    return outcome.records;
   }
 
   /**
@@ -278,6 +318,9 @@ export class JsonSessionPersistence {
           );
         }
       }
+      // ql-20260825-f6#1：flush 成功后顺手清理过期 tmp 残留（>STALE_TMP_MS）。
+      // 失败忽略（下次 flush 再试）；不会误删在写 tmp（save 队列串行 + 时长阈值）。
+      await this._cleanupStaleTmp().catch(() => undefined);
     };
     // 串行化：每次 save 排到 queue 尾，前一个 settle 后才执行。
     const next = this._saveQueue.then(run, run);
@@ -318,5 +361,84 @@ export class JsonSessionPersistence {
     if (!existsSync(dir)) return [];
     const entries = await readdir(dir);
     return entries.filter((e) => e.startsWith('sessions.json.corrupt-'));
+  }
+
+  // ── ql-20260825-f6#1：tmp 残留恢复 / 回收 ────────────────────────────────────
+
+  /**
+   * 同目录 tmp 残留清单（mtime 新→旧）。目录不存在 / stat 失败（并发消失等）→ 跳过。
+   * 仅匹配本文件自己的 `<basename>.tmp-` 前缀（save 产出的命名），不碰其他文件。
+   */
+  private async _listTmpEntries(): Promise<
+    Array<{ path: string; mtimeMs: number }>
+  > {
+    const dir = dirname(this._filePath);
+    if (!existsSync(dir)) return [];
+    const prefix = `${basename(this._filePath)}.tmp-`;
+    const entries = await readdir(dir);
+    const out: Array<{ path: string; mtimeMs: number }> = [];
+    for (const e of entries) {
+      if (!e.startsWith(prefix)) continue;
+      const p = join(dir, e);
+      try {
+        const st = await stat(p);
+        if (st.isFile()) {
+          out.push({ path: p, mtimeMs: st.mtimeMs });
+        }
+      } catch {
+        // 竞态消失 / 权限：跳过该条（不影响其余候选）。
+      }
+    }
+    out.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    return out;
+  }
+
+  /**
+   * ql-20260825-f6#1：目标缺失 / 为空时从 tmp 残留恢复。
+   *
+   * 取 mtime 最新的**合法** tmp（完整解析 + 逐条校验通过），rename 到目标完成落位
+   *（顺手回收该 tmp）；解析失败的候选忽略、继续尝试更旧的。无合法候选 → []。
+   * 落位失败（rename + 直写都失败）不抛——记录已解析可返回，落位留给下次 load 重试。
+   */
+  private async _recoverFromTmp(): Promise<PersistedSessionRecord[]> {
+    const candidates = await this._listTmpEntries().catch(() => []);
+    for (const cand of candidates) {
+      let content: string;
+      try {
+        content = readFileSync(cand.path, 'utf8');
+      } catch {
+        continue;
+      }
+      const outcome = parseContent(content);
+      if (!outcome.ok) continue; // 损坏 tmp：忽略（残留待过期清理）
+      // 落位：目标为空时先删（对齐 save 的 Windows unlink→rename 模式）再 rename。
+      if (existsSync(this._filePath)) {
+        await unlink(this._filePath).catch(() => undefined);
+      }
+      try {
+        await rename(cand.path, this._filePath);
+      } catch {
+        try {
+          await writeFile(this._filePath, content, 'utf8');
+          await chmod(this._filePath, 0o600).catch(() => undefined);
+          await unlink(cand.path).catch(() => undefined);
+        } catch {
+          // 落位失败：记录仍可返回（下次 load 重试恢复），不抛。
+        }
+      }
+      return outcome.records;
+    }
+    return [];
+  }
+
+  /** ql-20260825-f6#1：清理超过 STALE_TMP_MS 的 tmp 残留（失败忽略，幂等）。 */
+  private async _cleanupStaleTmp(): Promise<void> {
+    const candidates = await this._listTmpEntries();
+    const now = Date.now();
+    for (const cand of candidates) {
+      if (now - cand.mtimeMs > STALE_TMP_MS) {
+        await unlink(cand.path).catch(() => undefined);
+      }
+    }
   }
 }

@@ -23,6 +23,19 @@ from sqlmodel import Field
 
 from app.models.base import BaseModel
 
+# 活跃 run 状态词表（2026-08-25 会话路径二审 #3）：单一定义、全 backend 共享。
+#
+# 语义：AgentRun 处于「会话活跃轮」——``pending``（已派发未 claim）/
+# ``running`` / ``pending_approval``（coordinator 写入，等待用户审批，仍是
+# 当前轮）。注意 **不含** ``interrupting``（仅前端展示态，backend 从不落库，
+# 词表里的 "interrupting" 恒不命中）与 ``completed`` 等终态。
+#
+# 消费点统一 import 本常量（daemon/session/service.ACTIVE_TURN_STATUSES 为其
+# 别名；daemon/router current_run 查询与 _session_has_active_turn、agent/
+# finalizer、agent/patrol、agent/mcp_tools 均同源），勿再内联状态元组。本模块
+# 是叶子（仅依赖 SQLAlchemy/Base），各消费方 import 方向安全无环。
+ACTIVE_RUN_STATUSES = frozenset({"pending", "running", "pending_approval"})
+
 
 class AgentRun(BaseModel, table=True):
     """Tracks a single agent execution within a task lease."""

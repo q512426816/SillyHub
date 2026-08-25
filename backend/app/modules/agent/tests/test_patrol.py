@@ -1323,7 +1323,7 @@ class TestAwaitingInputAutoConverge:
     async def test_session_active_turn_not_converged(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """会话有活跃 turn（pending/running/interrupting，task-04/05 同源口径）→
+        """会话有活跃 turn（ACTIVE_RUN_STATUSES 词表，task-04/05 同源口径）→
         主控新一轮进行中，不属 awaiting_input，不超时收敛。"""
         monkeypatch.setattr(patrol, "get_settings", lambda: _stub_settings())
         calls = _patch_explicit_converge_recorder(monkeypatch)

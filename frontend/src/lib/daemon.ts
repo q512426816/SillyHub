@@ -1112,6 +1112,23 @@ export interface SessionStreamConnection {
 export const RECONNECT_BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000];
 
 /**
+ * resync REST 快照拉取默认超时（F7 / 2026-08-25）：重连前的 runs/logs 拉取无
+ * 超时时，TCP 半开 / 后端挂起会让 resync 流程停摆数分钟（退避循环卡死在
+ * await）。10s 足够覆盖正常快照拉取；超时视为 resync 失败走既有 catch 退避
+ * 分支（直接进入下一轮重连），不动 apiFetch 全局默认。测试可经
+ * streamSession options.resyncTimeoutMs 注入毫秒级超时。
+ */
+const RESYNC_REST_TIMEOUT_MS = 10_000;
+
+/** 超时信号（AbortSignal.timeout 缺失环境（旧 jsdom）退化为手动 AbortController）。 */
+function timeoutSignal(ms: number): AbortSignal {
+  if (typeof AbortSignal.timeout === "function") return AbortSignal.timeout(ms);
+  const ctrl = new AbortController();
+  setTimeout(() => ctrl.abort(), ms);
+  return ctrl.signal;
+}
+
+/**
  * 订阅 session 级 SSE（贯穿整个会话多 turn）。
  *
  * - URL 走 Next route handler proxy（/api/daemon/sessions/{id}/stream），
@@ -1127,7 +1144,7 @@ export const RECONNECT_BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000];
  *   backend Redis Pub/Sub 无补发，断连期间事件对本连接永久丢失；重连前经
  *   listSessionRuns + getAgentSessionLogs 全量回放/终态合成补齐缺口（调用方
  *   按 log_id 去重，合成 turn 事件在页面侧终态幂等）。close()/session_ended
- *   后不再重连。
+ *   后不再重连。F7：resync 快照拉取带 10s 超时（options.resyncTimeoutMs 可覆盖）。
  *
  * P0-1（2026-06-18）：从 addEventListener(kind) 改为 onmessage 单通道 dispatch，
  * 与 backend stream_session_logs 的 default data: 帧对齐。done/error 仍走命名事件
@@ -1137,7 +1154,7 @@ export const RECONNECT_BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000];
 export function streamSession(
   sessionId: string,
   handlers: SessionStreamHandlers,
-  options?: { cursor?: string },
+  options?: { cursor?: string; resyncTimeoutMs?: number },
 ): SessionStreamConnection {
   const base = getApiBaseUrl();
   const url = new URL(
@@ -1356,8 +1373,9 @@ export function streamSession(
   /** DB 日志 → log 事件回放（resync 与轮后对账共用；调用方 seenLogIds 去重）。
    *
    * P4：已有游标（lastLogTs）时改增量拉取（after = 游标 - 2s 重叠，后端
-   * `timestamp > after` 严格过滤）；首次（无游标）仍全量。 */
-  const replayLogsFromDb = async () => {
+   * `timestamp > after` 严格过滤）；首次（无游标）仍全量。
+   * F7：signal 仅 resync 路径传入（超时防卡死）；轮后对账不设超时（行为不变）。 */
+  const replayLogsFromDb = async (signal?: AbortSignal) => {
     let afterParam: string | undefined;
     if (lastLogTs) {
       const ts = Date.parse(lastLogTs);
@@ -1365,7 +1383,10 @@ export function streamSession(
         afterParam = new Date(Math.max(0, ts - REPLAY_OVERLAP_MS)).toISOString();
       }
     }
-    const logs = await getAgentSessionLogs(sessionId, afterParam ? { after: afterParam } : {});
+    const logs = await getAgentSessionLogs(
+      sessionId,
+      afterParam ? { after: afterParam, signal } : signal ? { signal } : {},
+    );
     if (closed) return;
     for (const log of logs) {
       if (log.timestamp && (!lastLogTs || log.timestamp > lastLogTs)) {
@@ -1413,15 +1434,18 @@ export function streamSession(
    */
   const resyncAndReconnect = async () => {
     if (closed) return;
+    // F7：resync 快照拉取带超时——TCP 挂起时 abort 视为 resync 失败，走既有
+    // catch 退避分支继续重连循环（不停摆数分钟）。仅作用于本轮两个 REST 调用。
+    const signal = timeoutSignal(options?.resyncTimeoutMs ?? RESYNC_REST_TIMEOUT_MS);
     try {
-      const runs = await listSessionRuns(sessionId);
+      const runs = await listSessionRuns(sessionId, { signal });
       if (closed) return;
       for (const run of runs) {
         if (!TERMINAL_RUN_STATUSES.has(run.status)) {
           dispatchRunSynth(run, "turn_started");
         }
       }
-      await replayLogsFromDb();
+      await replayLogsFromDb(signal);
       if (closed) return;
       for (const run of runs) {
         if (TERMINAL_RUN_STATUSES.has(run.status)) {
@@ -1483,11 +1507,16 @@ export function streamSession(
  * - onReconnected：仅断开过才调，每个断连-恢复周期恰一次——重连成功（下一次
  *   连接建立 onopen 或首条消息，先到者）时触发，供调用方补拉断连期间丢失的
  *   信号（Redis Pub/Sub 无补发 / 无 Last-Event-ID 重放）。
+ * - onConnected：F7（2026-08-25 后端审查遗留 B6）：每个连接周期恰一次（含**首次**
+ *   订阅建立，onopen 或首条消息先到者）——调用方在订阅建立后补拉一次列表，兜
+ *   「先拉快照（useQuery）后订阅（effect 建 SSE）」窗口内丢失的变更；重连建立
+ *   时与 onReconnected 同点触发（调用方经同一去抖单点合并，不叠加刷新风暴）。
  * - close()：幂等终止（关连接 + 清退避定时器），之后不再重连。
  */
 export function subscribeAgentSessionsEvents(opts: {
   onEvent: () => void;
   onReconnected?: () => void;
+  onConnected?: () => void;
 }): { close: () => void } {
   const url = new URL(`${getApiBaseUrl()}/api/daemon/sessions/events`);
 
@@ -1496,6 +1525,7 @@ export function subscribeAgentSessionsEvents(opts: {
   let retryCount = 0; // 退避档位（收到信号归零，对齐 streamSession）
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let hadDisconnection = false; // 断开过 → 下一次连接成功补发一次 onReconnected
+  let connectedFired = false; // 本连接周期 onConnected 已发（onopen / 首条消息先到者）
 
   /** 断开后首次「连接成功」（onopen 或首条消息，先到者）触发一次 onReconnected。 */
   const fireReconnectedOnce = () => {
@@ -1504,17 +1534,26 @@ export function subscribeAgentSessionsEvents(opts: {
     opts.onReconnected?.();
   };
 
+  /** 连接建立恰一次 onConnected（含首次订阅；fireReconnectedOnce 语义独立叠加）。 */
+  const fireConnectedOnce = () => {
+    fireReconnectedOnce();
+    if (connectedFired) return;
+    connectedFired = true;
+    opts.onConnected?.();
+  };
+
   const wireConnection = () => {
+    connectedFired = false; // 新连接周期重置（onopen / 首条消息先到者触发）
     // token 每次重连现取（对齐 streamSession：长连接跨 token 刷新后重连不带旧值）。
     const { accessToken } = useSession.getState();
     es = fetchSse(url.toString(), accessToken ? { token: accessToken } : {});
     es.onopen = () => {
-      fireReconnectedOnce();
+      fireConnectedOnce();
     };
     // backend 信号统一发默认 data 帧（无 event: 行）→ onmessage 接收。
     es.onmessage = () => {
       retryCount = 0; // 收到信号 = 连接健康，退避档位归零
-      fireReconnectedOnce();
+      fireConnectedOnce();
       opts.onEvent();
     };
     es.onerror = () => {
@@ -1791,15 +1830,18 @@ export async function getAgentSession(
 
 /**
  * GET /api/daemon/sessions/{id}/logs — 跨 AgentRun 的只读历史回看。
- * 日志按 run 分组返回，run_id 完整保留以便前端区分 turn 边界（D-005@v1）。
+ * 日志按 run_id 分组返回，run_id 完整保留以便前端区分 turn 边界（D-005@V1）。
+ * F7（2026-08-25）：opts.signal 透传 apiFetch（AbortSignal）——仅 resync 重连路径
+ * 传入超时信号（TCP 挂起防卡死），其余调用方缺省不设超时，行为不变。
  */
 export async function getAgentSessionLogs(
   sessionId: string,
-  opts?: { after?: string },
+  opts?: { after?: string; signal?: AbortSignal },
 ): Promise<AgentRunLogEntry[]> {
   const qs = opts?.after ? `?after=${encodeURIComponent(opts.after)}` : "";
   return apiFetch<AgentRunLogEntry[]>(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/logs${qs}`,
+    { signal: opts?.signal },
   );
 }
 
@@ -1838,12 +1880,16 @@ export interface SessionRunRead {
 /**
  * GET /api/daemon/sessions/{id}/runs — 列出 session 的 AgentRun，每项含 error_detail。
  * 会话页 run 失败时拉取，按 run_id 匹配取结构化错误详情（task-07 端点）。
+ * F7（2026-08-25）：opts.signal 透传 apiFetch（AbortSignal）——仅 resync 重连路径
+ * 传入超时信号，其余调用方缺省不设超时，行为不变。
  */
 export async function listSessionRuns(
   sessionId: string,
+  opts?: { signal?: AbortSignal },
 ): Promise<SessionRunRead[]> {
   return apiFetch<SessionRunRead[]>(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/runs`,
+    { signal: opts?.signal },
   );
 }
 

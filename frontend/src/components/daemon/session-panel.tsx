@@ -68,6 +68,7 @@ import {
   applyLogToSegments,
   createEmptyAssembledTurn,
   finishTurn,
+  transferAssemblerInternals,
   type AssembledTurn,
   type AssemblerLogInput,
   type TurnSegment,
@@ -366,10 +367,22 @@ function teamTriggerErrorText(err: unknown): string {
  */
 function useSessionTeamMissions(sessionId: string | null) {
   const [missions, setMissions] = useState<TeamMissionSummary[]>([]);
+  // F7（2026-08-25）：异步回写守卫——refresh 同时被 effect（挂载/切会话/轮询）与
+  // 外部回调（dialog 派团队后手动刷新）调用，effect 作用域 cancelled 覆盖不全，
+  // 用 hook 级 aliveRef 等价守卫：卸载后迟到的列表响应不再 setState。
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
   const refresh = useCallback(async () => {
     if (!sessionId) return;
     try {
-      setMissions(await listSessionTeamMissions(sessionId));
+      const items = await listSessionTeamMissions(sessionId);
+      if (!aliveRef.current) return;
+      setMissions(items);
     } catch {
       /* 列表拉取失败不阻断 */
     }
@@ -655,14 +668,18 @@ function SessionPanelPage({
   // ── SSE 建流 + 历史预取（sessionId 驱动，切换会话即重建）────────────────
   // gap-fix（FR-07/FR-08）：runs 快照拉取失败不阻断——whoLine 不注入、历史
   // usage 走实时 SSE 路径，与 logs 预取同一容错语义。
-  const refreshRunsMeta = useCallback((id: string) => {
-    void listSessionRuns(id)
-      .then((runs) => {
-        setRunsMeta(new Map(runs.map((r) => [r.id, r])));
-      })
-      .catch(() => {
-        /* 快照拉取失败不阻断主流程 */
-      });
+  // F7（2026-08-25）：refreshRunsMeta 定义移入下方建流 effect（唯一调用点在
+  // effect 内的 onTurnCompleted 回调）——共用既有 cancelled 标志，会话切换/
+  // 卸载后迟到的 runs 快照不再 setRunsMeta（旧会话 whoLine 数据覆盖新会话 +
+  // 卸载后 setState 卫生，React 18 no-op 但按既有 cancelled 模式收口）。
+  // F7：渲染作用域异步回调（onSwitched）的卸载守卫——effect 作用域 cancelled
+  // 覆盖不到 JSX 回调，用组件级 mountedRef 等价守卫。
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -720,6 +737,19 @@ function SessionPanelPage({
       .catch(() => {
         /* 快照拉取失败不阻断 SSE */
       });
+
+    // F7：runs 快照刷新（onTurnCompleted 调用）——共用本 effect 的 cancelled
+    // 标志（语义同上：迟到快照丢弃，不写新会话 / 不卸载后 setState）。
+    const refreshRunsMeta = (id: string) => {
+      void listSessionRuns(id)
+        .then((runs) => {
+          if (cancelled) return;
+          setRunsMeta(new Map(runs.map((r) => [r.id, r])));
+        })
+        .catch(() => {
+          /* 快照拉取失败不阻断主流程 */
+        });
+    };
 
     streamRef.current = streamSession(sessionId, {
       onTurnStarted: (env) => {
@@ -2257,11 +2287,17 @@ function SessionPanelPage({
             engine={session.provider ?? null}
             onSwitched={() => {
               // 切换成功 → 刷新会话详情（三列快照）+ 左侧列表 chips + runsMeta
-              // （立即显示新 whoLine，不等重进页面）。
+              // （立即显示新 whoLine，不等重进页面）。F7：mountedRef 守卫——
+              // 渲染作用域回调等不到 effect 的 cancelled，卸载后迟到快照不再
+              // setState。
               void qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
               onSessionListRefresh?.();
               void listSessionRuns(sessionId)
-                .then((runs) => setRunsMeta(new Map(runs.map((r) => [r.id, r]))))
+                .then((runs) => {
+                  if (mountedRef.current) {
+                    setRunsMeta(new Map(runs.map((r) => [r.id, r])));
+                  }
+                })
                 .catch(() => {});
             }}
           />
@@ -2335,7 +2371,7 @@ function toAssemblerLogInput(env: SessionStreamEnvelope): AssemblerLogInput {
  * 正常路径（本面板占位 turn / logsToTurns 历史 turn）segments 均有值，不触发。
  */
 function assembledViewOf(turn: SessionTurnView): AssembledTurn {
-  return {
+  const view: AssembledTurn = {
     segments:
       turn.segments ?? bootstrapLegacySegments(turn.output, turn.processItems ?? []),
     output: turn.output,
@@ -2343,6 +2379,10 @@ function assembledViewOf(turn: SessionTurnView): AssembledTurn {
     turnStartedAt: turn.turnStartedAt ?? null,
     seenLogIds: turn.seenLogIds,
   };
+  // F7：视图与 turn 的 segments 同源（segments 有值时同引用），转移装配器增量
+  // 内部状态（投影 cell / 段 id 索引），保持 O(1) 增量链跨视图不断链。
+  transferAssemblerInternals(view, turn as AssembledTurn);
+  return view;
 }
 
 /**
@@ -3742,13 +3782,16 @@ function upsertTurn(
  * `{ ...turn, ...next }` 回填（其余 turn 级字段不动）。
  */
 function asAssembled(turn: SessionTurnView): AssembledTurn {
-  return {
+  const view: AssembledTurn = {
     segments: turn.segments ?? [],
     output: turn.output,
     processItems: turn.processItems ?? [],
     turnStartedAt: turn.turnStartedAt ?? null,
     seenLogIds: turn.seenLogIds,
   };
+  // F7：同 assembledViewOf——转移增量内部状态，segments 有值时同源同引用。
+  transferAssemblerInternals(view, turn as AssembledTurn);
+  return view;
 }
 
 /**

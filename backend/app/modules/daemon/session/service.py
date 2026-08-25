@@ -28,7 +28,7 @@ from sqlmodel import col
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.core.redis import get_redis
-from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
+from app.modules.agent.model import ACTIVE_RUN_STATUSES, AgentRun, AgentRunLog, AgentSession
 from app.modules.auth.permissions import Permission
 
 # D-001@v1：create_session workspace 归属校验（口径与前端 listWorkspaces 一致）。
@@ -70,7 +70,13 @@ DAEMON_MSG_SESSION_SWITCH_CONFIG = "daemon:session_switch_config"
 
 
 ACTIVE_SESSION_STATUSES = frozenset({"pending", "active", "reconnecting"})
-ACTIVE_TURN_STATUSES = frozenset({"pending", "running", "pending_approval"})
+# P2（2026-08-25 会话路径二审 #3）：词表单源化——真实定义在 ``agent.model.
+# ACTIVE_RUN_STATUSES``（叶子模块，各消费方 import 方向安全），本名保留为
+# 别名供既有导入方（permission_service / daemon.service facade）零改动。
+# 统一后各判定点（router current_run / _session_has_active_turn、finalizer、
+# patrol、mcp_tools）开始把 ``pending_approval`` 算活跃（修复：审批中的 run
+# 此前被漏判），并去掉 DB 永不落库的 ``interrupting``（前端展示态）。
+ACTIVE_TURN_STATUSES = ACTIVE_RUN_STATUSES
 TERMINAL_TURN_STATUSES = frozenset({"completed", "failed", "killed", "cancelled"})
 
 # DS-4 / DS-5 / DS-6（2026-08-21-session-reopen-resume）：reconnecting 手动重试
@@ -215,22 +221,27 @@ async def _merge_lease_metadata(
     task-05 加 ``removals``：切换分支清空维度时需**删键**而非写值（如切回
     本机默认要移除 ``session_llm_provider_id``，切到无提示词档案要移除
     ``system_prompt``），纯 merge 无法表达「键消失」。
+
+    P2（2026-08-25 会话路径二审 #4）：读行加 ``FOR UPDATE``（经 SQLAlchemy
+    ``with_for_update``，SQLite 方言自动忽略、PG 渲染行锁）。原 raw SELECT →
+    merge → raw UPDATE 无锁，与 daemon claim 路径并发写 lease metadata（如
+    claim 落 ``claim_token``）存在丢更新窗口——claim 不持 AgentSession 行锁，
+    二者不互斥，必须靠 lease 行本身串行。UPDATE 仍走 raw text（与原实现
+    逐字节同参数形态），行锁由同事务的 SELECT ... FOR UPDATE 持有到 commit。
     """
     import json as _json
 
     from sqlalchemy import text as _sa_text
 
-    meta_row = (
-        (
-            await db_session.execute(
-                _sa_text("SELECT metadata FROM daemon_task_leases WHERE id = :id"),
-                {"id": lease_id.hex},
-            )
+    # with_for_update 走 ORM select（方言感知：PG 渲染 FOR UPDATE，SQLite 忽略
+    # 提示不报语法错——raw text 拼 "FOR UPDATE" 会让 SQLite 测试全炸）。
+    raw_meta = (
+        await db_session.execute(
+            select(DaemonTaskLease.metadata_)
+            .where(DaemonTaskLease.id == lease_id)
+            .with_for_update()
         )
-        .mappings()
-        .first()
-    )
-    raw_meta = meta_row["metadata"] if meta_row else None
+    ).scalar_one_or_none()
     if isinstance(raw_meta, str):
         meta: dict = _json.loads(raw_meta) if raw_meta else {}
     elif isinstance(raw_meta, dict):
@@ -457,6 +468,23 @@ class SessionRecoveryResult:
     lease_id: uuid.UUID | None
     status: Literal["active", "ended", "failed", "reconnecting", "rejected"]
     interrupted_run_status: Literal["failed"] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _PrelockedInjectAttachments:
+    """P1（2026-08-25 会话路径二审 #1）：取锁前预组装的附件载荷快照。
+
+    ``rows`` = 已过引擎/归属/数量校验的 SessionAttachment 行（保留入参顺序）；
+    ``inject_attachments`` = SESSION_INJECT payload 的 attachments 列表（MinIO
+    组装产物）；``gate_*`` = 预组装时的多模态 gate 快照——锁内复核「预读与取锁
+    之间会话供应商/引擎是否漂移」用，漂移且 supports 翻转才在锁内重组装。
+    """
+
+    rows: list
+    inject_attachments: list[dict]
+    gate_supports_multimodal: bool
+    gate_provider_id_basis: uuid.UUID | None
+    agent_kind: str
 
 
 class SessionReadiness:
@@ -1331,6 +1359,16 @@ class SessionService:
         user_id: uuid.UUID,
         *,
         prompt: str,
+        # P1（2026-08-25 会话路径二审 #2）：切换字段 + 附件透传——原实现只透传
+        # prompt，上游「带切换字段或附件豁免空 prompt」后空 prompt 被当首条消息
+        # 建首轮，用户附件与切换要求被静默丢弃。现照 create_session 同款语义在
+        # 激活事务内应用（校验错误同款：profile 404/403、provider 404/422）。
+        agent_profile_id: str | None = None,
+        llm_provider_id: str | None = None,
+        attachment_ids: list[uuid.UUID] | None = None,
+        # 二审 #1：inject_session 主路径取锁前预组装的附件产物（rows/payload/
+        # gate 快照）；激活分支复用（gate 基准复核见下方组装段）。
+        prelocked_attachments: _PrelockedInjectAttachments | None = None,
     ) -> SessionDispatchResult:
         """懒激活一个未绑定机器的 tool_report 会话（task-05 / design §3.3.4）。
 
@@ -1349,6 +1387,14 @@ class SessionService:
         - **provider**：保持 task-04 创建时的 D-007 映射，不覆盖。
         - **无在线机器**：``NoOnlineDaemonError``（裸 Exception）转
           :class:`ToolReportActivateNoDaemon`（409 中文），不裸抛 500。
+        - **配置/附件（2026-08-25 二审 #2）**：``agent_profile_id`` /
+          ``llm_provider_id`` 照 create_session 语义落会话三列 + 首轮 run 快照 +
+          lease metadata（``apply_session_profile_to_lease`` /
+          ``session_llm_provider_id``）+ config_snapshot 展示键；空串 = "none"
+          对未激活会话（本就 NULL）等价不动。附件走 inject 主路径同款机制：
+          标记行进 user_input 日志 + draft→bound 回填 + SESSION_INJECT payload
+          attachments 键。空 prompt 一律拒绝——daemon ``_startInteractiveSession``
+          拒建空 prompt 会话（切换字段/附件必须随首条消息一起发送）。
 
         Caller（:meth:`inject_session`）已持会话行锁并完成归属校验（user_id 必须
         是会话属主）；本方法成功后直接返回首轮派发结果（不回落
@@ -1360,6 +1406,122 @@ class SessionService:
             RunPlacementService,
         )
         from app.modules.platform_sync.model import AgentSessionLogORM
+
+        # ── 二审 #2：激活分支输入守卫——空 prompt 一律拒绝 ─────────────────────
+        # 上游对「带切换字段/附件」豁免空 prompt（ql-20260817-010 / D-7），但激活的
+        # 首轮由 lease metadata prompt 驱动 daemon 建 SDK 会话——daemon
+        # ``_startInteractiveSession`` 对空 prompt 直接拒建（SESSION_INJECT 路由
+        # 同样丢弃空 prompt），空 prompt 激活会留下 pending 死轮。故激活必须携带
+        # 首条消息；切换字段/附件随消息一起生效（不再静默丢弃，也不再误建空轮）。
+        if not prompt.strip():
+            raise DaemonSessionNotActive(
+                "该会话尚未激活，请先发送一条消息启动会话（切换配置或附件需随消息一起发送）。",
+                details={
+                    "session_id": str(session.id),
+                    "reason": "activation_requires_message",
+                },
+            )
+
+        # ── 二审 #2：切换字段解析（校验口径与 create_session 逐字对齐）────────
+        # agent_profile_id 空串 = "none" 取消档案：未激活会话本就 NULL，等价不动。
+        profile = None
+        if agent_profile_id:
+            from app.modules.agent.profile.service import AgentProfileService
+            from app.modules.auth.model import User as _User
+
+            try:
+                _profile_uuid = uuid.UUID(agent_profile_id)
+            except (ValueError, AttributeError, TypeError) as exc:
+                raise DaemonSessionConfigInvalid(
+                    f"Invalid agent_profile_id '{agent_profile_id}'.",
+                    details={"agent_profile_id": agent_profile_id},
+                ) from exc
+            _actor = await self._session.get(_User, user_id)
+            if _actor is None:
+                raise DaemonSessionConfigInvalid(
+                    "Session owner user not found.",
+                    details={"user_id": str(user_id)},
+                )
+            # 读可见性与 GET /agent-profiles?scope=mine 同口径（同 create/inject）。
+            profile = await AgentProfileService(self._session).get(
+                profile_id=_profile_uuid, actor=_actor
+            )
+
+        # llm_provider_id 空串 = "none" 清空：未激活会话本就 NULL，等价不动。
+        llm_provider_row = None
+        if llm_provider_id:
+            from app.modules.llm_provider.model import LlmProvider
+
+            try:
+                _provider_uuid = uuid.UUID(llm_provider_id)
+            except (ValueError, AttributeError, TypeError) as exc:
+                raise DaemonSessionConfigInvalid(
+                    f"Invalid llm_provider_id '{llm_provider_id}'.",
+                    details={"llm_provider_id": llm_provider_id},
+                ) from exc
+            llm_provider_row = await self._session.get(LlmProvider, _provider_uuid)
+            # 归属按会话属主（激活注入者即属主，inject_session 已过归属校验）。
+            if llm_provider_row is None or llm_provider_row.user_id != user_id:
+                raise DaemonSessionLlmProviderNotFound(
+                    f"LlmProvider '{llm_provider_id}' not found.",
+                    details={"llm_provider_id": llm_provider_id},
+                )
+            # FR-06：agent_kind 与会话引擎不匹配 → 422，不静默降级（同 create）。
+            if llm_provider_row.agent_kind != session.provider:
+                raise DaemonSessionLlmProviderKindMismatch(
+                    "LlmProvider agent_kind does not match the session engine.",
+                    details={
+                        "llm_provider_id": llm_provider_id,
+                        "agent_kind": llm_provider_row.agent_kind,
+                        "engine": session.provider,
+                    },
+                )
+
+        # ── 二审 #1/#2：附件解析（预组装复用 / 无预组装兜底，口径同主路径）────
+        validated_attachments: list = []
+        inject_attachments: list[dict] = []
+        if attachment_ids:
+            if prelocked_attachments is not None:
+                validated_attachments = list(prelocked_attachments.rows)
+                # gate 基准复核（对齐 _inject_into_session 组装段）：激活事务内
+                # 会话供应商将被本轮参数改写（llm_provider_row.id 或保持 NULL），
+                # 与预组装基准一致且引擎不变 → 复用锁外产物；漂移且 supports
+                # 翻转 → 锁内重解析重组装（罕见竞态兜底）。
+                gate_basis = llm_provider_row.id if llm_provider_row is not None else None
+                if (
+                    prelocked_attachments.gate_provider_id_basis == gate_basis
+                    and prelocked_attachments.agent_kind == session.provider
+                ):
+                    inject_attachments = list(prelocked_attachments.inject_attachments)
+                else:
+                    supports = await self._resolve_inject_gate(
+                        user_id=session.user_id,
+                        gate_provider_id_basis=gate_basis,
+                        agent_kind=session.provider or "",
+                    )
+                    if supports == prelocked_attachments.gate_supports_multimodal:
+                        inject_attachments = list(prelocked_attachments.inject_attachments)
+                    else:
+                        inject_attachments = await self._assemble_inject_attachment_payload(
+                            validated_attachments, supports_multimodal=supports
+                        )
+            else:
+                validated_attachments = await self._validate_inject_attachment_rows(
+                    session_id=session.id,
+                    session_user_id=session.user_id,
+                    session_provider=session.provider or "",
+                    attachment_ids=attachment_ids,
+                )
+                supports = await self._resolve_inject_gate(
+                    user_id=session.user_id,
+                    gate_provider_id_basis=(
+                        llm_provider_row.id if llm_provider_row is not None else None
+                    ),
+                    agent_kind=session.provider or "",
+                )
+                inject_attachments = await self._assemble_inject_attachment_payload(
+                    validated_attachments, supports_multimodal=supports
+                )
 
         now = datetime.now(UTC)
         # ── cwd 解析（design §3.3.4 第 2 点）：最新关联 entry.agent_cwd 优先，
@@ -1386,6 +1548,9 @@ class SessionService:
         try:
             # 首轮 run（对齐 create_session :876-894；首轮发送者=激活注入者，
             # 即会话属主——inject_session 已过 _get_owned_session_for_update）。
+            # 二审 #2：切换字段照 create_session 落首轮快照（D-008）。
+            from app.modules.agent.service import _build_agent_profile_snapshot
+
             run = AgentRun(
                 id=uuid.uuid4(),
                 agent_type="claude_code",
@@ -1395,6 +1560,11 @@ class SessionService:
                 spec_strategy="interactive",
                 agent_session_id=session.id,
                 user_id=user_id,
+                agent_profile_id=profile.id if profile is not None else None,
+                agent_profile_snapshot=(
+                    _build_agent_profile_snapshot(profile) if profile is not None else None
+                ),
+                llm_provider_id=(llm_provider_row.id if llm_provider_row is not None else None),
             )
             self._session.add(run)
             await self._session.flush()
@@ -1418,8 +1588,33 @@ class SessionService:
                     details={"session_id": str(session.id)},
                 ) from exc
 
+            # ── 二审 #1：附件 draft→bound 回填（同事务，唯一前进迁移）──────────
+            for att_row in validated_attachments:
+                if att_row.session_id is None:
+                    att_row.session_id = session.id
+                    self._session.add(att_row)
+
+            # ── 二审 #2：切换字段落 lease metadata（同 create_session 口径）────
+            # 档案：system_prompt + mcp/skill 维度键（apply_session_profile_to_lease
+            # 非 commit 变体）；供应商：独立 key session_llm_provider_id（claim 端
+            # _inject_provider_config 最高优先级分支消费）。
+            if profile is not None:
+                from app.modules.agent.service import AgentService
+
+                await AgentService(self._session).apply_session_profile_to_lease(
+                    dispatch.lease_id, profile
+                )
+            if llm_provider_row is not None:
+                await _merge_lease_metadata(
+                    self._session,
+                    dispatch.lease_id,
+                    {"session_llm_provider_id": str(llm_provider_row.id)},
+                )
+
             # 回填三元组 + 激活（对齐 create_session :954-958：turn_count 置 1，
-            # 首条消息即首轮）。
+            # 首条消息即首轮）。二审 #2：会话配置三列 + config_snapshot 展示键
+            # （profile_name/provider_name/model，仅选中才写；machine/agent 名
+            # 为既有必写键）。
             session.runtime_id = dispatch.runtime_id
             session.lease_id = dispatch.lease_id
             session.status = "active"
@@ -1427,22 +1622,44 @@ class SessionService:
             session.last_active_at = now
             if cwd is not None:
                 session.cwd = cwd
+            session.agent_profile_id = profile.id if profile is not None else None
+            session.llm_provider_id = llm_provider_row.id if llm_provider_row is not None else None
             # config_snapshot 补 machine_name/agent_name（design §3.3.4 第 4 点，
             # 展示用）：保留 task-04 写入的 harness 等既有键。
             machine_name, agent_name = await self._resolve_runtime_labels(dispatch.runtime_id)
             snapshot = dict(session.config_snapshot or {})
             snapshot["machine_name"] = machine_name
             snapshot["agent_name"] = agent_name
+            if profile is not None or llm_provider_row is not None:
+                snapshot["profile_name"] = profile.name if profile is not None else None
+                snapshot["provider_name"] = (
+                    llm_provider_row.name if llm_provider_row is not None else None
+                )
+                snapshot["model"] = (
+                    (llm_provider_row.model or llm_provider_row.default_fallback_model)
+                    if llm_provider_row is not None
+                    else None
+                )
+                snapshot["engine"] = session.provider
             session.config_snapshot = snapshot
             self._session.add(session)
 
             # 首 turn user_input 日志（对齐 create_session :986-993，列表标题派生
-            # 与历史回放依赖该行）。
+            # 与历史回放依赖该行）。二审 #2：附件标记行插头部（D-3，口径与
+            # _inject_into_session 主路径一致——[附件:id|kind|name] 逐附件一行）。
+            user_input_content = prompt
+            if validated_attachments:
+                from app.modules.session_attachment.service import (
+                    attachment_marker_line,
+                )
+
+                marker_lines = "\n".join(attachment_marker_line(r) for r in validated_attachments)
+                user_input_content = f"{marker_lines}\n{prompt}" if prompt else marker_lines
             self._session.add(
                 AgentRunLog(
                     run_id=run.id,
                     channel="user_input",
-                    content_redacted=prompt[:5000],
+                    content_redacted=user_input_content[:5000],
                     timestamp=now,
                 )
             )
@@ -1492,18 +1709,23 @@ class SessionService:
             log.warning("session_ready_timeout", session_id=str(session.id))
         control_ok = False
         if daemon_id is not None:
+            inject_payload = {
+                "session_id": str(session.id),
+                "lease_id": str(dispatch.lease_id),
+                "run_id": str(run.id),
+                "prompt": prompt,
+                # gap-2：首 turn SESSION_INJECT 携带 lease 级 claim_token。
+                "claim_token": dispatch.claim_token,
+                "runtime_id": str(dispatch.runtime_id),
+            }
+            # 二审 #2：附件随激活首轮下发（D-4，同主路径 inject——仅在有附件时
+            # 附加，旧 daemon 忽略未知键，协议向后兼容）。
+            if inject_attachments:
+                inject_payload["attachments"] = inject_attachments
             control_ok = await hub.send_session_control(
                 daemon_id,
                 DAEMON_MSG_SESSION_INJECT,
-                {
-                    "session_id": str(session.id),
-                    "lease_id": str(dispatch.lease_id),
-                    "run_id": str(run.id),
-                    "prompt": prompt,
-                    # gap-2：首 turn SESSION_INJECT 携带 lease 级 claim_token。
-                    "claim_token": dispatch.claim_token,
-                    "runtime_id": str(dispatch.runtime_id),
-                },
+                inject_payload,
             )
         if not control_ok:
             # 唤醒已送达但控制消息发送失败：daemon 仍会 claim lease（metadata 含
@@ -1523,6 +1745,171 @@ class SessionService:
             agent_session=session,
             agent_run=run,
             lease_id=dispatch.lease_id,
+        )
+
+    async def _validate_inject_attachment_rows(
+        self,
+        *,
+        session_id: uuid.UUID,
+        session_user_id: uuid.UUID,
+        session_provider: str,
+        attachment_ids: list[uuid.UUID],
+    ) -> list:
+        """附件校验（2026-08-20 task-05 D-6 三层门控：引擎 / 归属 404 / 数量 422）。
+
+        P1（2026-08-25 会话路径二审 #1）：从 _inject_into_session 锁内抽出为共享
+        helper——取锁前预组装（:meth:`_preassemble_inject_attachments`）与锁内
+        兜底（service 身份路径 / 直调方不带预组装时）复用同一判定，语义不变。
+        附件归属约束在附件行自身（``user_id``）、引擎建后不可变，均不依赖会话
+        行可变状态，前后置判定等价。
+        """
+        if session_provider != "claude":
+            raise DaemonSessionAttachmentsUnsupported(
+                "此引擎不支持会话附件（仅 Claude 支持多模态与文件注入）。",
+                details={"session_id": str(session_id), "provider": session_provider},
+            )
+        from app.modules.session_attachment.model import SessionAttachment
+
+        rows = (
+            (
+                await self._session.execute(
+                    select(SessionAttachment).where(
+                        SessionAttachment.id.in_(attachment_ids),
+                        SessionAttachment.user_id == session_user_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # 缺失/跨用户归一 404（资源隐藏语义，不泄露存在性）。
+        if len(rows) != len(set(attachment_ids)):
+            raise DaemonSessionNotFound(
+                "部分附件不存在或无权访问。",
+                details={"session_id": str(session_id)},
+            )
+        image_n = sum(1 for r in rows if r.kind == "image")
+        file_n = sum(1 for r in rows if r.kind == "file")
+        if image_n > 5 or file_n > 5 or (image_n + file_n) != len(rows):
+            raise DaemonSessionAttachmentInvalid(
+                "附件数量超限（图片≤5、文件≤5）或类型非法。",
+                details={"image_count": image_n, "file_count": file_n},
+            )
+        # 保留入参顺序（payload/标记行按用户勾选顺序稳定）。
+        by_id = {r.id: r for r in rows}
+        return [by_id[i] for i in dict.fromkeys(attachment_ids) if i in by_id]
+
+    async def _resolve_inject_gate(
+        self,
+        *,
+        user_id: uuid.UUID,
+        gate_provider_id_basis: uuid.UUID | None,
+        agent_kind: str,
+    ) -> bool:
+        """多模态门控判定（D-9）。返回 ``supports_multimodal``。
+
+        ``gate_provider_id_basis`` = 本轮将生效的会话供应商 id（切换轮为新值、
+        激活轮为激活参数值、否则当前值）——预组装与锁内复核用同一口径计算基准，
+        两者比较即「预读与取锁之间供应商是否漂移」。
+        """
+        from app.modules.session_attachment.capability import resolve_session_gate
+
+        gate = await resolve_session_gate(
+            self._session,
+            user_id=user_id,
+            session_llm_provider_id=gate_provider_id_basis,
+            agent_kind=agent_kind,
+        )
+        return gate.supports_multimodal
+
+    async def _assemble_inject_attachment_payload(
+        self,
+        rows: list,
+        *,
+        supports_multimodal: bool,
+    ) -> list[dict]:
+        """附件 → SESSION_INJECT payload attachments 列表（D-4 闸门/降级路由）。
+
+        内部经对象存储读字节（MinIO）——P1（二审 #1）后本调用只出现在取锁前的
+        预组装段，或锁内 gate 漂移且 supports 翻转的罕见竞态兜底。
+        """
+        from app.modules.session_attachment.service import assemble_inject_attachments
+        from app.modules.session_attachment.storage import SessionAttachmentStorage
+        from app.modules.storage.factory import get_storage_backend
+
+        return await assemble_inject_attachments(
+            rows,
+            supports_multimodal=supports_multimodal,
+            storage=SessionAttachmentStorage(get_storage_backend()),
+        )
+
+    async def _preassemble_inject_attachments(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        llm_provider_id: str | None,
+        attachment_ids: list[uuid.UUID] | None,
+    ) -> _PrelockedInjectAttachments | None:
+        """P1（2026-08-25 会话路径二审 #1）：附件校验 + gate 解析 + MinIO 组装
+        **移到会话行锁之前**。
+
+        原路径在 FOR UPDATE 行锁内做 ``storage.read_bytes``（附件上限 5MB×5
+        图片 + 20MB×5 文件），对象存储慢时同会话的并发 inject/interrupt/end 全部
+        在行锁上排队、长事务占连接。附件归属/引擎/数量校验不依赖会话行可变状态
+        → 安全前置；会话可注入状态（status / lease / 活跃 turn / 切换决策）不
+        在此判定，取锁后由 ``_inject_into_session`` / 激活分支**重校验**兜住
+        「预读与取锁之间被并发 end/interrupt 改状态」的竞态。
+
+        归属校验用普通读（无 FOR UPDATE）：缺失/跨用户仍 :class:`DaemonSessionNotFound`
+        404 不泄露存在性（与 ``_get_owned_session_for_update`` 同错误）。
+
+        gate 基准 = 本轮将生效的会话供应商 id：携带 ``llm_provider_id``（切换/
+        激活参数）且可解析时为新值，否则取当前值——与锁内切换列刷新后 / 激活
+        事务内回填后的 ``session.llm_provider_id`` 同口径。非法 id 不在此报错
+        （保持锁内 ``DaemonSessionConfigInvalid`` 原语义），基准退回当前值；锁内
+        复核发现基准漂移会重解析 gate，正确性不依赖预读。
+        """
+        if not attachment_ids:
+            return None
+        pre = (
+            await self._session.execute(
+                select(AgentSession).where(
+                    AgentSession.id == session_id,
+                    AgentSession.user_id == user_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if pre is None:
+            raise DaemonSessionNotFound(
+                f"AgentSession '{session_id}' not found.",
+                details={"session_id": str(session_id)},
+            )
+        rows = await self._validate_inject_attachment_rows(
+            session_id=session_id,
+            session_user_id=pre.user_id,
+            session_provider=pre.provider or "",
+            attachment_ids=attachment_ids,
+        )
+        gate_basis = pre.llm_provider_id
+        if llm_provider_id:
+            try:
+                gate_basis = uuid.UUID(llm_provider_id)
+            except (ValueError, AttributeError, TypeError):
+                # 非法 id 由锁内 DaemonSessionConfigInvalid 拒绝；基准保持当前值。
+                pass
+        supports = await self._resolve_inject_gate(
+            user_id=pre.user_id,
+            gate_provider_id_basis=gate_basis,
+            agent_kind=pre.provider or "",
+        )
+        payload = await self._assemble_inject_attachment_payload(rows, supports_multimodal=supports)
+        return _PrelockedInjectAttachments(
+            rows=rows,
+            inject_attachments=payload,
+            gate_supports_multimodal=supports,
+            gate_provider_id_basis=gate_basis,
+            agent_kind=pre.provider or "",
         )
 
     async def inject_session(
@@ -1557,6 +1944,10 @@ class SessionService:
         语义见 :meth:`_inject_into_session` docstring；``llm_provider_id`` 空串 =
         "none" → 清空回本机默认）。都 None → 原有 inject 行为零回归；send 失败
         按既有收敛（Grill C-11）。
+
+        P1（2026-08-25 会话路径二审 #1）：附件校验 + gate 解析 + MinIO 组装在
+        取锁前完成（:meth:`_preassemble_inject_attachments`，普通读）——行锁窗口
+        只含可注入状态判定 + 写入；锁内复核 gate 基准漂移（见组装段）。
         """
         # ql-20260817-010：静默切换——携带切换字段时允许空 prompt（切换轮无用户
         # 消息/模型回应，daemon 只 reload 配置）；纯追问仍要求非空（DTO 已 422，
@@ -1571,6 +1962,21 @@ class SessionService:
             prompt = ""
 
         try:
+            # ── P1（2026-08-25 会话路径二审 #1）：附件校验 + gate 解析 + MinIO
+            # 组装移到会话行锁之前（对象存储慢读不再占用 FOR UPDATE 行锁，同会话
+            # 并发 inject/interrupt/end 不在锁上排队）。锁内 _inject_into_session
+            # / 激活分支重校验会话可注入状态 + gate 基准漂移（见其组装段注释）。
+            prelocked_attachments = await self._preassemble_inject_attachments(
+                session_id,
+                user_id,
+                llm_provider_id=llm_provider_id,
+                attachment_ids=list(attachment_ids) if attachment_ids else None,
+            )
+            if prelocked_attachments is not None:
+                # 收口预读只读事务（释放快照/事务占用，expire_on_commit=False 下
+                # 预读 rows 仍可用）：FOR UPDATE 锁窗口只含锁定 + 依赖可变状态的
+                # 判定与写入，尽快 commit。
+                await self._session.commit()
             session = await self._get_owned_session_for_update(session_id, user_id)
         except AppError:
             await self._session.rollback()
@@ -1585,8 +1991,18 @@ class SessionService:
         # 并下发 SESSION_INJECT），激活成功直接返回激活派发结果；已激活（lease
         # 存在）的 tool_report 会话与 origin 缺省的 chat 会话不进本分支，走既有
         # inject 路径零回归（design §3.3.4 第 5 点）。
+        # 二审 #2：切换字段（agent_profile_id/llm_provider_id）与附件透传进激活
+        # 事务（照 create_session 语义落 config，附件随首轮下发），不再静默丢弃。
         if getattr(session, "origin", "chat") == "tool_report" and session.lease_id is None:
-            return await self._activate_tool_report_session(session, user_id, prompt=prompt)
+            return await self._activate_tool_report_session(
+                session,
+                user_id,
+                prompt=prompt,
+                agent_profile_id=agent_profile_id,
+                llm_provider_id=llm_provider_id,
+                attachment_ids=list(attachment_ids) if attachment_ids else None,
+                prelocked_attachments=prelocked_attachments,
+            )
         return await self._inject_into_session(
             session,
             prompt=prompt,
@@ -1597,6 +2013,8 @@ class SessionService:
             llm_provider_id=llm_provider_id,
             # 2026-08-20 task-05：附件透传（None → 空列表零回归）。
             attachment_ids=list(attachment_ids) if attachment_ids else None,
+            # P1（二审 #1）：取锁前预组装产物（rows + payload + gate 快照）。
+            prelocked_attachments=prelocked_attachments,
         )
 
     async def inject_session_as_service(
@@ -1663,6 +2081,10 @@ class SessionService:
         # 2026-08-20-session-multimodal-attachments task-05：附件引用（None → 零
         # 回归）。校验（引擎门控/归属/数量）在本方法事务内；组装下发归 task-06。
         attachment_ids: list[uuid.UUID] | None = None,
+        # P1（2026-08-25 会话路径二审 #1）：inject_session 主路径取锁前预组装的
+        # 附件产物（校验过的 rows + payload + gate 快照）；None = 调用方未预组
+        # 装（service 身份路径 / 直调），走锁内原校验兜底。
+        prelocked_attachments: _PrelockedInjectAttachments | None = None,
     ) -> SessionDispatchResult:
         """Shared inject-turn core (used by :meth:`inject_session` +
         :meth:`inject_session_as_service`).
@@ -1705,47 +2127,22 @@ class SessionService:
                 )
 
             # ── 2026-08-20 task-05：附件校验（D-6 引擎门控 / 归属 404 / 数量 422）──
+            # P1（2026-08-25 二审 #1）：inject_session 主路径已在取锁前完成校验
+            # （prelocked_attachments.rows），锁内直接复用行；不带预组装的调用方
+            # （inject_session_as_service / 直调）走原地校验兜底（:meth:
+            # `_validate_inject_attachment_rows`，判定与原实现逐字节一致）。
             # 组装（base64 内联/降级路由/标记行/回填）见下方 task-06 段；
             # 本段只做整体拒绝（不部分生效）：任一校验失败 raise → 事务回滚。
             validated_attachments: list = []
-            if attachment_ids:
-                if session.provider != "claude":
-                    raise DaemonSessionAttachmentsUnsupported(
-                        "此引擎不支持会话附件（仅 Claude 支持多模态与文件注入）。",
-                        details={"session_id": str(session_id), "provider": session.provider},
-                    )
-                from app.modules.session_attachment.model import SessionAttachment
-
-                rows = (
-                    (
-                        await self._session.execute(
-                            select(SessionAttachment).where(
-                                SessionAttachment.id.in_(attachment_ids),
-                                SessionAttachment.user_id == session.user_id,
-                            )
-                        )
-                    )
-                    .scalars()
-                    .all()
+            if attachment_ids and prelocked_attachments is None:
+                validated_attachments = await self._validate_inject_attachment_rows(
+                    session_id=session_id,
+                    session_user_id=session.user_id,
+                    session_provider=session.provider or "",
+                    attachment_ids=attachment_ids,
                 )
-                # 缺失/跨用户归一 404（资源隐藏语义，不泄露存在性）。
-                if len(rows) != len(set(attachment_ids)):
-                    raise DaemonSessionNotFound(
-                        "部分附件不存在或无权访问。",
-                        details={"session_id": str(session_id)},
-                    )
-                image_n = sum(1 for r in rows if r.kind == "image")
-                file_n = sum(1 for r in rows if r.kind == "file")
-                if image_n > 5 or file_n > 5 or (image_n + file_n) != len(rows):
-                    raise DaemonSessionAttachmentInvalid(
-                        "附件数量超限（图片≤5、文件≤5）或类型非法。",
-                        details={"image_count": image_n, "file_count": file_n},
-                    )
-                # 保留入参顺序（payload/标记行按用户勾选顺序稳定）。
-                by_id = {r.id: r for r in rows}
-                validated_attachments = [
-                    by_id[i] for i in dict.fromkeys(attachment_ids) if i in by_id
-                ]
+            elif prelocked_attachments is not None:
+                validated_attachments = list(prelocked_attachments.rows)
 
             # ── task-05：配置切换解析（FR-05/FR-06 / Grill C-05 / D-013）────────
             # 维度语义：入参 None=不动；profile 非空且≠当前 → 切；provider 非空且
@@ -1994,36 +2391,48 @@ class SessionService:
             # 校验已过（上方 task-05 段）：本段在**同事务**内完成——①session_id
             # 回填（draft→bound 唯一前进迁移；已 bound 附件再次引用不改状态）；
             # ②多模态门控判定（D-9）+ payload 组装（D-4 闸门/降级路由）。
-            # 组装读对象（MinIO）为 IO 较重，但附件总量受 5MB×5/20MB×5 上限约束。
+            # P1（2026-08-25 二审 #1）：MinIO 组装已移到取锁前（预组装路径）——
+            # 锁内只做 gate 基准复核：此刻 ``session.llm_provider_id`` 已被上方
+            # 切换分支刷新为本轮生效值，与预组装基准一致且引擎不变 → 直接复用
+            # 锁外产物；漂移（预读与取锁之间被并发切换/激活改写）→ 锁内重解析
+            # gate，仅 supports 翻转才重组装（罕见竞态兜底，正确性不依赖预读）。
+            # 无预组装的调用方（service 身份路径）在此原地组装，行为与原实现
+            # 一致（组装读对象受 5MB×5/20MB×5 上限约束，原文档口径保留）。
             inject_attachments: list[dict] = []
             if validated_attachments:
-                from app.modules.session_attachment.capability import (
-                    resolve_session_gate,
-                )
-                from app.modules.session_attachment.service import (
-                    assemble_inject_attachments,
-                )
-                from app.modules.session_attachment.storage import (
-                    SessionAttachmentStorage,
-                )
-                from app.modules.storage.factory import get_storage_backend
-
                 for att_row in validated_attachments:
                     if att_row.session_id is None:
                         att_row.session_id = session.id
                         self._session.add(att_row)
 
-                gate = await resolve_session_gate(
-                    self._session,
-                    user_id=session.user_id,
-                    session_llm_provider_id=session.llm_provider_id,
-                    agent_kind=session.provider,
-                )
-                inject_attachments = await assemble_inject_attachments(
-                    validated_attachments,
-                    supports_multimodal=gate.supports_multimodal,
-                    storage=SessionAttachmentStorage(get_storage_backend()),
-                )
+                if prelocked_attachments is not None:
+                    basis_same = (
+                        prelocked_attachments.gate_provider_id_basis == session.llm_provider_id
+                        and prelocked_attachments.agent_kind == session.provider
+                    )
+                    if basis_same:
+                        inject_attachments = list(prelocked_attachments.inject_attachments)
+                    else:
+                        supports = await self._resolve_inject_gate(
+                            user_id=session.user_id,
+                            gate_provider_id_basis=session.llm_provider_id,
+                            agent_kind=session.provider or "",
+                        )
+                        if supports == prelocked_attachments.gate_supports_multimodal:
+                            inject_attachments = list(prelocked_attachments.inject_attachments)
+                        else:
+                            inject_attachments = await self._assemble_inject_attachment_payload(
+                                validated_attachments, supports_multimodal=supports
+                            )
+                else:
+                    supports = await self._resolve_inject_gate(
+                        user_id=session.user_id,
+                        gate_provider_id_basis=session.llm_provider_id,
+                        agent_kind=session.provider or "",
+                    )
+                    inject_attachments = await self._assemble_inject_attachment_payload(
+                        validated_attachments, supports_multimodal=supports
+                    )
 
             if config_switch:
                 # task-05：lease metadata 同步（同事务，保持 DB 与会话列一致——

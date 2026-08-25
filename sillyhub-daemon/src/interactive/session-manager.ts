@@ -41,7 +41,7 @@ import type {
 } from './driver.js';
 import { basename, join } from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { InputQueue } from './input-queue.js';
+import { InputQueue, SessionQueueClosedError } from './input-queue.js';
 import { PermissionResolver } from './permission-resolver.js';
 import type { PermissionSendFn } from './permission-resolver.js';
 import type { CanUseToolDecision } from './types.js';
@@ -71,6 +71,7 @@ import type {
 } from './types.js';
 import {
   SessionAlreadyExistsError,
+  SessionAttachmentTimeoutError,
   SessionNotFoundError,
   SessionNotActiveError,
   UnsupportedProviderError,
@@ -517,6 +518,57 @@ export class SessionManager {
    * 链只新增与 end 通知的相对顺序。超时保护不加：onTurnResult 回调内部已有
    * try/catch 异常隔离（上轮补），reject 语义与改造前一致向上抛。
    * Map 存「永不 reject 的链尾」+ 自愈摘除，同 `_reloadChains` 注释。
+   */
+  private readonly _notifyChains = new Map<string, Promise<void>>();
+
+  /**
+   * ql-20260825-f6#4：把终态通知（onTurnResult / onSessionEnd）排入 per-session
+   * 串行链执行。返回值保留原 promise 的 settle 语义（含 rejection，向上传播不变）。
+   *
+   * 空链时**同步直调** fn（与改造前直调时序逐字一致——consume 逐条 await 下同会话
+   * turn result 本就顺序执行，空链排队只多一跳 microtask 无增益，且既有调用方 /
+   * 测试依赖 emitResult 后同步可见）；有在飞通知时排队（等其 settle 再执行 fn）。
+   */
+  private _runNotifyChain<T>(
+    sessionId: string,
+    fn: () => T | Promise<T>,
+  ): Promise<T> {
+    const settleTail = (run: Promise<T>): void => {
+      // 链尾永不 reject（供下一轮 await；rejection 已由调用方 await run 传播）。
+      const tail = run.then(
+        () => undefined,
+        () => undefined,
+      );
+      this._notifyChains.set(sessionId, tail);
+      void tail.then(() => {
+        // 自愈摘除：本轮回 finish 且没有更新一轮入链时删掉链尾（比较引用防误删后轮）。
+        if (this._notifyChains.get(sessionId) === tail) {
+          this._notifyChains.delete(sessionId);
+        }
+      });
+    };
+
+    const prev = this._notifyChains.get(sessionId);
+    if (!prev) {
+      // 空链：同步执行（Promise.resolve 容忍 fn 返回非 promise，对齐 await 语义）。
+      // fn 同步抛 → 链尾直接放行（空跳，下一轮通知不等错）+ 向上重抛
+      //（与直调的同步抛时序一致）。
+      let run: Promise<T>;
+      try {
+        run = Promise.resolve(fn());
+      } catch (err) {
+        settleTail(Promise.resolve() as Promise<T>);
+        throw err;
+      }
+      settleTail(run);
+      return run;
+    }
+    const run = prev.catch(() => undefined).then(fn);
+    settleTail(run);
+    return run;
+  }
+
+  /**
    * task-07（R-conv 可观察性）：sessionId → 排队中的 inject 计数。
    *
    * 不写入 SessionState（types.ts 是 task-04 范围，本任务只补增量可观察字段，且
@@ -2030,6 +2082,51 @@ export class SessionManager {
     state.claimToken = claimToken;
   }
 
+  /**
+   * ql-20260825-f6#3：附件下载超时（ms）。downloadAttachment 闭包由 backend WS 注入，
+   * 无信号参数可传，后端 / 网络挂起时 inject 会永久卡在 await——60s 强制收口，
+   * 超时抛 SessionAttachmentTimeoutError（带会话 id），由 inject 的单附件 catch
+   * 降级为「下载失败: <name>」标注（不中断 turn）。
+   */
+  private static readonly ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 60_000;
+
+  /**
+   * ql-20260825-f6#3：带超时的附件下载。Promise.race 输家（超时后到达的下载
+   * settle）由 race 已安装的 handler 吞掉，不产生 unhandled rejection。
+   */
+  private _downloadAttachmentWithTimeout(
+    sessionId: string,
+    downloadAttachment: (id: string) => Promise<Buffer>,
+    attachmentId: string,
+  ): Promise<Buffer> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    return Promise.race([
+      downloadAttachment(attachmentId),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () =>
+            reject(
+              new SessionAttachmentTimeoutError(
+                sessionId,
+                attachmentId,
+                SessionManager.ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
+              ),
+            ),
+          SessionManager.ATTACHMENT_DOWNLOAD_TIMEOUT_MS,
+        );
+        // node 标准：超时定时器不阻塞 daemon 退出。
+        if (typeof timer.unref === 'function') {
+          timer.unref();
+        }
+      }),
+    ]).finally(() => {
+      // 下载先到（成功 / 失败）：取消等待中的超时定时器。
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+    });
+  }
+
   // ── task-08（D-006 / D-009）：interactive budget 软切断 ─────────────────────
 
   /**
@@ -2181,6 +2278,9 @@ export class SessionManager {
     // backend 全权决策）。block=多模态块（内联 data 或经下载闭包回拉）；disk=落盘
     // {cwd}/attachments/（同名加序号）+ text 追加路径清单；单文件失败降级标注不
     // 中断 turn。无附件路径与原 push 逐字一致（零回归）。
+    // ql-20260825-f6#3：下载闭包 60s 超时（挂起不卡死 inject）；下载 await 窗口内
+    // 会话被 end/fail 收口（queue 已 close）→ push 抛 SessionQueueClosedError，
+    // 此处转译为 SessionNotActiveError（不把队列内部错误类泄漏给 WS 调用方）。
     let turnText = prompt;
     let blocks: UserTurnInput['blocks'];
     let filesToFetch: UserTurnInput['filesToFetch'];
@@ -2194,7 +2294,15 @@ export class SessionManager {
           if (att.deliver === 'block') {
             let b64 = att.data;
             if (!b64 && downloadAttachment) {
-              b64 = (await downloadAttachment(att.id)).toString('base64');
+              // ql-20260825-f6#3：60s 超时（后端挂起不卡死 inject），超时抛
+              // SessionAttachmentTimeoutError → 下方 catch 降级标注。
+              b64 = (
+                await this._downloadAttachmentWithTimeout(
+                  sessionId,
+                  downloadAttachment,
+                  att.id,
+                )
+              ).toString('base64');
             }
             if (!b64) {
               failedNames.push(att.name);
@@ -2210,7 +2318,11 @@ export class SessionManager {
               failedNames.push(att.name);
               continue;
             }
-            const buf = await downloadAttachment(att.id);
+            const buf = await this._downloadAttachmentWithTimeout(
+              sessionId,
+              downloadAttachment,
+              att.id,
+            );
             const rel = await this._writeAttachmentFile(state.cwd, att.name, buf);
             savedPaths.push(rel);
             fetched.push({ id: att.id, name: att.name });
@@ -2231,11 +2343,22 @@ export class SessionManager {
         turnText = (prompt ? prompt + '\n\n' : '') + lines.join('\n');
       }
     }
-    state.inputQueue.push(
-      blocks || filesToFetch
-        ? { type: 'user', text: turnText, ...(blocks ? { blocks } : {}), ...(filesToFetch ? { filesToFetch } : {}) }
-        : { type: 'user', text: turnText },
-    );
+    try {
+      state.inputQueue.push(
+        blocks || filesToFetch
+          ? { type: 'user', text: turnText, ...(blocks ? { blocks } : {}), ...(filesToFetch ? { filesToFetch } : {}) }
+          : { type: 'user', text: turnText },
+      );
+    } catch (err) {
+      if (err instanceof SessionQueueClosedError) {
+        // ql-20260825-f6#3：附件下载 await 窗口内 end()/fail() 已收口（inputQueue
+        // 被 close）→ 转译为既有「会话已结束」语义错误（WS 调用方按
+        // SessionNotActiveError 统一处理），不把队列内部错误类泄漏给上层。
+        // status 此刻已是终态（queue 仅 terminate 链会 close），如实透传。
+        throw new SessionNotActiveError(sessionId, state.status);
+      }
+      throw err;
+    }
     state.currentRunId = runId;
     state.status = 'running';
     state.lastActiveAt = Date.now();
@@ -2616,11 +2739,19 @@ export class SessionManager {
     }
 
     // 8. 通知 backend 终态（原 end→'ended' / fail→'failed'）。
+    //    ql-20260825-f6#4：onSessionEnd 入 per-session 终态通知链——若同会话有
+    //    在飞的 onTurnResult（_onResult 的 await 窗口），本通知必排在其后，
+    //    backend 侧顺序恒 result → end。
     //    ql-20260823-006：notifyBackend=false 供 restoreAndReconnect 驱逐内存
     //    残留条目用——backend 正推进 reconnecting→active，回发终态会与之竞态
     //    把刚要恢复的会话误翻 failed。
     if (opts.notifyBackend !== false) {
-      await this.deps.onSessionEnd(state.sessionId, isManual ? 'ended' : 'failed');
+      await this._runNotifyChain(state.sessionId, () =>
+        this.deps.onSessionEnd(
+          state.sessionId,
+          isManual ? 'ended' : 'failed',
+        ),
+      );
     }
 
     // 9. task-10：终态从落盘集合移除后 flush（不复活 ended/failed session）。
@@ -3650,7 +3781,12 @@ export class SessionManager {
           resultRecord['modelError'] = modelError;
         }
       }
-      await this.deps.onTurnResult(state.sessionId, runId, result);
+      // ql-20260825-f6#4：onTurnResult 入 per-session 终态通知链——同会话后续的
+      // onSessionEnd（end/fail 收口）必 await 在本通知之后，backend 侧顺序恒
+      // result → end。settle 语义（含 rejection 向上抛）与直调一致。
+      await this._runNotifyChain(state.sessionId, () =>
+        this.deps.onTurnResult(state.sessionId, runId, result),
+      );
     }
     // task-10：turn result 收尾后排队 flush（currentRunId 已清空）。
     this._scheduleFlush();
@@ -3670,6 +3806,9 @@ export class SessionManager {
     if (runId) {
       this._checkBudgetCutoff(state, runId);
     }
+    // ql-20260825-f6#2：turn 收尾收缩子代理桶 + subagentDepth（在 _checkBudgetCutoff
+    // 之后——预算聚合跨桶求和，先删会丢子代理 token 造成漏计）。
+    this._shrinkSubagentBuffers(state);
     // task-07（provider-switch-live-session / D-002@v1）：turn 边界检测 pendingSwitch。
     // 生成中 turn 收到切换时 markPendingSwitch 仅覆盖写 state.pendingSwitch 不中断；
     // 此处 turn 已收尾（status→active / currentRunId 清空），安全触发受控 reload。
@@ -4068,6 +4207,60 @@ export class SessionManager {
       sessionMap.set(parentKey, buf);
     }
     return buf;
+  }
+
+  /**
+   * ql-20260825-f6#2：turn 收尾收缩子代理 partial 桶 + subagentDepth（`_onResult` 调）。
+   *
+   * 背景：`_getOrCreateBuffer` 每个子代理 parentKey（tool_use_id）懒建桶，turn 边界
+   * 原只重置 completedSegments 不删桶；`subagentDepth.set(tId, ...)` 同样跨 turn 不清。
+   * 主 agent 长会话（lease 永不过期）每 spawn 一个子代理多一个桶 + 一条 depth，数月
+   * 线性膨胀。
+   *
+   * 语义与时机（选「turn 收尾清整轮桶」而非按 tool_result 精确清——SDK 契约下 turn
+   * result 前本轮所有子代理已结束，整轮回收无需解析 tool_result、无 mid-turn 误删风险）：
+   *   - 在 `_checkBudgetCutoff` **之后**调：`_aggregateSessionUsage` 跨桶求和，先删桶
+   *     会丢子代理 token 造成预算漏计。删除前把子桶的 sessionInput/OutputTokens 折算
+   *     进 'main' 桶（这两维是 per-API-call 增量累加，求和语义成立；cache_* 是会话级
+   *     replace 快照，不求和、保留 main 现值——子代理运行期的 cache 值已随 partial
+   *     flush 实时上报过 backend）。
+   *   - 子代理桶的 pending timer clearTimeout 后删除（late fire 由 `_flushPartial` 的
+   *     桶缺失早退兜底）；残留未 flush 的 thinking/assistant 文本随之丢弃——turn 已
+   *     result，完整 assistant message 早已覆盖（segment 守卫语义同 turn 边界重置）。
+   *   - `subagentDepth.clear()`：本轮 tool_use 登记表整体清空；下轮子代理消息前必有
+   *     其 tool_use 的 assistant message 重新登记（SDK 顺序：tool_use → 子消息 →
+   *     tool_result），跨 turn 无依赖。
+   *   - 'main' 桶保留（下 turn 复用）；无子代理桶时仅清 depth（幂等 no-op）。
+   *   - 会话终态另有 `_destroyPartialBuffer` 整清（含 timer），本方法不涉及。
+   */
+  private _shrinkSubagentBuffers(state: SessionState): void {
+    const sessionMap = this._partialBuffers.get(state.sessionId);
+    if (sessionMap) {
+      let hasSubagentBucket = false;
+      for (const key of sessionMap.keys()) {
+        if (key !== 'main') {
+          hasSubagentBucket = true;
+          break;
+        }
+      }
+      if (hasSubagentBucket) {
+        // 折算承接桶：main 不存在则懒建（仅承接会话级累计计数，正常流 main 早已建）。
+        const main = this._getOrCreateBuffer(state.sessionId, 'main');
+        for (const [key, buf] of sessionMap) {
+          if (key === 'main') continue;
+          main.sessionInputTokens += buf.sessionInputTokens || 0;
+          main.sessionOutputTokens += buf.sessionOutputTokens || 0;
+          if (buf.timer) {
+            clearTimeout(buf.timer);
+            buf.timer = null;
+          }
+          sessionMap.delete(key);
+        }
+      }
+    }
+    // ?.：旧测试替身 / 过渡态 state 可能缺 subagentDepth 字段（对齐 consume 退出处
+    // resolver 同款防御），缺字段时仅跳过 depth 清理。
+    state.subagentDepth?.clear();
   }
 
   /**

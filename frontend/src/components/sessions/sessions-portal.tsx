@@ -220,10 +220,15 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   // 之下，三入口（全局/workspace/change）共用本门户自动全量生效，无 per-入口
   // 接线。卸载 close 终止订阅。deps 用 refreshSessionLists（自身 deps [qc]，
   // 身份等价于卡片写的 [qc]——仅 qc 变化时重订阅）。
+  // F7（后端审查遗留 B6）：onConnected——订阅**首次建立**即补拉一次列表，兜
+  // 「先拉快照（useQuery）后订阅（effect 建 SSE）」盲窗内丢失的变更（此前纯靠
+  // 10s 轮询兜底）；重连建立时与 onReconnected 同点触发，经同一 400ms 去抖单点
+  // 天然合并不成风暴。
   useEffect(() => {
     const sub = subscribeAgentSessionsEvents({
       onEvent: refreshSessionLists,
       onReconnected: refreshSessionLists,
+      onConnected: refreshSessionLists,
     });
     return () => sub.close();
   }, [refreshSessionLists]);
