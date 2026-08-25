@@ -2512,17 +2512,20 @@ export interface paths {
         put?: never;
         /**
          * Dispatch Worker
-         * @description 主 agent 动态派一个 worker run（D-002@v2）。
+         * @description 主 agent 动态派一个 worker run（D-002@v2；task-05 2026-08-25 起为子会话形态）。
          *
-         *     建 AgentRun(role 从 payload 或 preset 对应条目, status=pending) + 调
-         *     ``MissionExecutionService.dispatch_worker`` 派 daemon lease。daemon 离线 /
-         *     未绑定时 lease 失败但 run 仍建（pending + error_code=no_online_daemon），
-         *     主 agent 可读 worker 状态决定重派。
+         *     task-05（2026-08-25-team-subsession-governance / FR-02 / design §5.B）：执行段
+         *     整体换子会话三元组——AgentSession(parent=主控会话, owner=mission.created_by) +
+         *     interactive lease(metadata.stage=mission_worker, metadata.role) + 首 run
+         *     (mission_id+role 双标记)，前置治理段逐项保留（scope / BE-P0-2 / 档案 / 治理门 /
+         *     在线预检）；worktree 失败 / 派发失败按 mark_worker_run_failed 同款收敛（首 run
+         *     failed + error_code，子会话收口终态），不崩 mission 主 agent 可补派。
          *
          *     task-08（2026-08-19-cross-workspace-team-mission / §7.2 链路A）：
          *     - 新增 target_workspace_id 参数（payload.target_workspace_id）
          *     - 服务端校验 target ∈ scope（含 anchor），越界抛 400 mission_target_out_of_scope
-         *     - 有效 target 传 exec_svc.dispatch_worker 的 target_workspace_id 形参
+         *     - 有效 target 作为分身落地工作区（worktree / runtime 钉定 / AgentRunWorkspace
+         *       双关联全按 target 路由）
          *
          *     task-05（2026-08-22-team-session-unify）：mission 解析接入 X-Session-Id 会话
          *     定位（design §5 Phase 1 / §7）——header 命中会话活跃 mission 时显式路径参数
@@ -2569,10 +2572,11 @@ export interface paths {
         };
         /**
          * List Workers
-         * @description 列 mission 下所有 worker runs 状态（含主 agent run）。
+         * @description 列 mission 分身状态（双形态：子会话行 / 存量 batch run 行，主控轮不混入）。
          *
          *     task-05：接入 X-Session-Id 会话定位（header 命中活跃 mission 时显式参数仅作
-         *     越权校验锚；header 缺席零回归）。
+         *     越权校验锚；header 缺席零回归）。FR-09 补漏：行化口径见
+         *     ``_list_workers_core``（与 ``_team_mission_summary`` workers 同源语义）。
          */
         get: operations["list_workers_api_workspaces__workspace_id__missions__mission_id__workers_get"];
         put?: never;
@@ -2736,7 +2740,7 @@ export interface paths {
         };
         /**
          * List Workers For Session
-         * @description 会话维度 list_workers——按会话活跃 mission 列 run 状态。
+         * @description 会话维度 list_workers——按会话活跃 mission 列分身（``_list_workers_core`` 双形态）。
          */
         get: operations["list_workers_for_session_api_sessions__session_id__missions_workers_get"];
         put?: never;

@@ -7064,7 +7064,7 @@
           "agent-mcp"
         ],
         "summary": "Dispatch Worker",
-        "description": "主 agent 动态派一个 worker run（D-002@v2）。\n\n建 AgentRun(role 从 payload 或 preset 对应条目, status=pending) + 调\n``MissionExecutionService.dispatch_worker`` 派 daemon lease。daemon 离线 /\n未绑定时 lease 失败但 run 仍建（pending + error_code=no_online_daemon），\n主 agent 可读 worker 状态决定重派。\n\ntask-08（2026-08-19-cross-workspace-team-mission / §7.2 链路A）：\n- 新增 target_workspace_id 参数（payload.target_workspace_id）\n- 服务端校验 target ∈ scope（含 anchor），越界抛 400 mission_target_out_of_scope\n- 有效 target 传 exec_svc.dispatch_worker 的 target_workspace_id 形参\n\ntask-05（2026-08-22-team-session-unify）：mission 解析接入 X-Session-Id 会话\n定位（design §5 Phase 1 / §7）——header 命中会话活跃 mission 时显式路径参数\n仅作越权校验锚；会话无活跃 mission 且无显式 mission_id 时懒建兜底（scope=\n会话工作区、objective=dispatch 上下文、预算=默认上限 R-02 + 补回填双标记 +\n并发守卫）。header 缺席走 ``_get_mission`` 显式路径，行为零回归。",
+        "description": "主 agent 动态派一个 worker run（D-002@v2；task-05 2026-08-25 起为子会话形态）。\n\ntask-05（2026-08-25-team-subsession-governance / FR-02 / design §5.B）：执行段\n整体换子会话三元组——AgentSession(parent=主控会话, owner=mission.created_by) +\ninteractive lease(metadata.stage=mission_worker, metadata.role) + 首 run\n(mission_id+role 双标记)，前置治理段逐项保留（scope / BE-P0-2 / 档案 / 治理门 /\n在线预检）；worktree 失败 / 派发失败按 mark_worker_run_failed 同款收敛（首 run\nfailed + error_code，子会话收口终态），不崩 mission 主 agent 可补派。\n\ntask-08（2026-08-19-cross-workspace-team-mission / §7.2 链路A）：\n- 新增 target_workspace_id 参数（payload.target_workspace_id）\n- 服务端校验 target ∈ scope（含 anchor），越界抛 400 mission_target_out_of_scope\n- 有效 target 作为分身落地工作区（worktree / runtime 钉定 / AgentRunWorkspace\n  双关联全按 target 路由）\n\ntask-05（2026-08-22-team-session-unify）：mission 解析接入 X-Session-Id 会话\n定位（design §5 Phase 1 / §7）——header 命中会话活跃 mission 时显式路径参数\n仅作越权校验锚；会话无活跃 mission 且无显式 mission_id 时懒建兜底（scope=\n会话工作区、objective=dispatch 上下文、预算=默认上限 R-02 + 补回填双标记 +\n并发守卫）。header 缺席走 ``_get_mission`` 显式路径，行为零回归。",
         "operationId": "dispatch_worker_api_workspaces__workspace_id__missions__mission_id__dispatch_worker_post",
         "parameters": [
           {
@@ -7194,7 +7194,7 @@
           "agent-mcp"
         ],
         "summary": "List Workers",
-        "description": "列 mission 下所有 worker runs 状态（含主 agent run）。\n\ntask-05：接入 X-Session-Id 会话定位（header 命中活跃 mission 时显式参数仅作\n越权校验锚；header 缺席零回归）。",
+        "description": "列 mission 分身状态（双形态：子会话行 / 存量 batch run 行，主控轮不混入）。\n\ntask-05：接入 X-Session-Id 会话定位（header 命中活跃 mission 时显式参数仅作\n越权校验锚；header 缺席零回归）。FR-09 补漏：行化口径见\n``_list_workers_core``（与 ``_team_mission_summary`` workers 同源语义）。",
         "operationId": "list_workers_api_workspaces__workspace_id__missions__mission_id__workers_get",
         "parameters": [
           {
@@ -7544,7 +7544,7 @@
           "agent-mcp"
         ],
         "summary": "List Workers For Session",
-        "description": "会话维度 list_workers——按会话活跃 mission 列 run 状态。",
+        "description": "会话维度 list_workers——按会话活跃 mission 列分身（``_list_workers_core`` 双形态）。",
         "operationId": "list_workers_for_session_api_sessions__session_id__missions_workers_get",
         "parameters": [
           {
