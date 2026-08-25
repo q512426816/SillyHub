@@ -626,6 +626,26 @@ export class SessionManager {
   private readonly _pendingInjectCount = new Map<string, number>();
 
   /**
+   * ql-20260825-002：sessionId → 挂起中的首句（deferred first prompt）。
+   *
+   * 根因（长期既有 bug）：create 时把 lease metadata 的 firstPrompt 直接入队提交，
+   * 随后 backend 的首条 SESSION_INJECT 又提交同句 → agent 收到两次首句、
+   * user_input 双日志（纯文本时两条相同未被发现，带附件后 marker 版 + 裸文本版
+   * 视觉差异明显才暴露）。
+   *
+   * 修复：create 不再直接 push firstPrompt——挂起到本 Map，等首条 SESSION_INJECT
+   * 到达时由 inject() 消费（inject 的 prompt/attachments 版本才是权威首句）；
+   * PENDING_FIRST_FALLBACK_MS 超时未达（SESSION_INJECT 丢失 / 旧 backend）则
+   * fallback 提交 metadata prompt（原设计意图：metadata prompt 是控制消息失败
+   * 时的兜底）。同 _pendingInjectCount 范式：独立内部 Map，不写入 SessionState
+   * （不持久化——现状 create 的 queue 也不 flush，崩溃丢首句语义与旧版一致）。
+   */
+  private readonly _pendingFirstPrompt = new Map<
+    string,
+    { prompt: string; timer: ReturnType<typeof setTimeout> }
+  >();
+
+  /**
    * task-08（D-006 / D-009 / FR-05 / FR-07）：interactive budget 软切断状态。
    *
    * 不写入 SessionState（interactive/types.ts 不在本任务 allowed_paths；且 budget
@@ -1166,8 +1186,20 @@ export class SessionManager {
 
     // D-009（task-02）：InputQueue 改 provider-neutral UserTurnInput。SessionManager
     // 不再构造 SDKUserMessage；Claude driver 内部做形态转换（task-03）。
+    // ql-20260825-002：firstPrompt 不再直接入队（防与首条 SESSION_INJECT 双提交），
+    // 挂起等 inject 消费；超时 fallback 提交（见 _pendingFirstPrompt 注释）。
     const inputQueue = new InputQueue<UserTurnInput>();
-    inputQueue.push({ type: 'user', text: input.firstPrompt });
+    const PENDING_FIRST_FALLBACK_MS = 10_000;
+    const pendingTimer = setTimeout(() => {
+      this._pendingFirstPrompt.delete(input.sessionId);
+      const st = this._store.get(input.sessionId);
+      if (!st || st.status === 'ended' || st.status === 'failed') return;
+      st.inputQueue.push({ type: 'user', text: input.firstPrompt });
+    }, PENDING_FIRST_FALLBACK_MS);
+    this._pendingFirstPrompt.set(input.sessionId, {
+      prompt: input.firstPrompt,
+      timer: pendingTimer,
+    });
 
     // 2. 写 SessionState（status=running，首 turn 的 currentRunId=firstRunId）。
     // scan 真阻塞（generic-wibbling-whisper 改造点 C/B/D）：求值 effective
@@ -2398,6 +2430,14 @@ export class SessionManager {
       throw new SessionNotActiveError(sessionId, 'ended');
     }
 
+    // ql-20260825-002：消费挂起的首句——本条 inject 即权威首句（prompt/attachments
+    // 版本），清除 create 挂起的 metadata fallback（防双提交）。
+    const pendingFirst = this._pendingFirstPrompt.get(sessionId);
+    if (pendingFirst) {
+      clearTimeout(pendingFirst.timer);
+      this._pendingFirstPrompt.delete(sessionId);
+    }
+
     // task-07 排队检测：在切换 status 前抓取「前一 turn 是否未 result」。
     // status=running（driver 正在跑 turn）→ 本条 inject 排队到下一 turn（spike S1）。
     const wasRunningBeforeInject = state.status === 'running';
@@ -2828,6 +2868,13 @@ export class SessionManager {
     const isManual = reason === 'manual';
 
     // 保留原 end()/fail() 步骤的原始顺序（design §12 铁律，不得丢弃任何既有步骤）：
+
+    // 0. ql-20260825-002：清挂起首句的 fallback timer（终态会话不再提交）。
+    const _pf = this._pendingFirstPrompt.get(state.sessionId);
+    if (_pf) {
+      clearTimeout(_pf.timer);
+      this._pendingFirstPrompt.delete(state.sessionId);
+    }
 
     // 1. 设终态 status（原 end→'ended' / fail→'failed'）。
     state.status = isManual ? 'ended' : 'failed';

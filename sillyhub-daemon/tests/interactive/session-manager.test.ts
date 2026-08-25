@@ -620,3 +620,88 @@ describe('task-12: assistant override emit [ASSISTANT_OVERRIDE] 删 partial', ()
     expect(asstMeta.thinking).toBeUndefined();
   });
 });
+
+// ── ql-20260825-002：deferred first prompt（首句双提交修复）─────────────────────
+
+describe('SessionManager deferred first prompt（ql-20260825-002）', () => {
+  /** spy 拦截 inputQueue.push（driver 未真实消费，push 是可控观测点）。 */
+  function makePushSpy(sm: SessionManager, sessionId: string): string[] {
+    const state = sm.get(sessionId)!;
+    const pushedTexts: string[] = [];
+    const orig = state.inputQueue.push.bind(state.inputQueue);
+    state.inputQueue.push = ((msg: { type: 'user'; text: string }) => {
+      pushedTexts.push(msg.text);
+      return orig(msg);
+    }) as typeof state.inputQueue.push;
+    return pushedTexts;
+  }
+
+  it('create 后 firstPrompt 不入队；首条 inject 消费 pending（无双提交）', async () => {
+    const { driver } = makeMockDriver();
+    const sm = new SessionManager({ driver, ...makeDeps() });
+    await sm.create(BASE_INPUT);
+    const pushed = makePushSpy(sm, 'sess-1');
+
+    // create 后 firstPrompt 未入队（deferred——pending 等待 SESSION_INJECT）。
+    expect(pushed).toEqual([]);
+    expect(sm.get('sess-1')!.currentRunId).toBe('run-1');
+
+    // 首条 inject（权威首句）到达 → 消费 pending，只入队一次。
+    await sm.inject('sess-1', '看下附件', 'run-2');
+    expect(pushed).toEqual(['看下附件']);
+    expect(sm.get('sess-1')!.currentRunId).toBe('run-2');
+  });
+
+  it('inject 消费后 fallback timer 已清（超时不再补发 firstPrompt）', async () => {
+    vi.useFakeTimers();
+    try {
+      const { driver } = makeMockDriver();
+      const sm = new SessionManager({ driver, ...makeDeps() });
+      await sm.create(BASE_INPUT);
+      const pushed = makePushSpy(sm, 'sess-1');
+      await sm.inject('sess-1', '权威首句', 'run-2');
+      expect(pushed).toHaveLength(1);
+
+      // 前进超 fallback 时限：timer 已清，不补发 metadata prompt。
+      await vi.advanceTimersByTimeAsync(11_000);
+      expect(pushed).toHaveLength(1);
+      expect(pushed[0]).toBe('权威首句');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('SESSION_INJECT 超时未达 → fallback 提交 metadata firstPrompt', async () => {
+    vi.useFakeTimers();
+    try {
+      const { driver } = makeMockDriver();
+      const sm = new SessionManager({ driver, ...makeDeps() });
+      await sm.create(BASE_INPUT);
+      const pushed = makePushSpy(sm, 'sess-1');
+      expect(pushed).toEqual([]);
+
+      await vi.advanceTimersByTimeAsync(11_000);
+      expect(pushed).toEqual(['hi']); // metadata firstPrompt fallback
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('end 清理 pending timer（终态会话不再 fallback 提交）', async () => {
+    vi.useFakeTimers();
+    try {
+      const { driver } = makeMockDriver();
+      const sm = new SessionManager({ driver, ...makeDeps() });
+      await sm.create(BASE_INPUT);
+      const pushed = makePushSpy(sm, 'sess-1');
+      await sm.end('sess-1');
+
+      await vi.advanceTimersByTimeAsync(11_000);
+      // end 清 timer + 终态守卫双重保险：无任何 push。
+      expect(pushed).toEqual([]);
+      expect(sm.get('sess-1')!.status).toBe('ended');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

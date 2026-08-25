@@ -344,6 +344,46 @@ describe("logsToTurns 去重收窄（ql-20260822-010）", () => {
     ]);
     expect(turns[0]!.prompt).toBe("帮我看看");
   });
+
+  it("ql-20260825-002：同主体 marker 版 + 裸文本版（首句双提交存量）归并为一条，marker 版优先", () => {
+    const turns = logsToTurns([
+      makeLog("1", "run-1", "user_input", "[附件:11111111-1111-1111-1111-111111111111|file|准备材料.doc]\n分析一下"),
+      makeLog("2", "run-1", "user_input", "分析一下"),
+    ]);
+    // 归并后 prompt 只剩 marker 版（chips 回显数据源），不出现「分析一下 分析一下」。
+    expect(turns[0]!.prompt).toBe(
+      "[附件:11111111-1111-1111-1111-111111111111|file|准备材料.doc]\n分析一下",
+    );
+  });
+
+  it("ql-20260825-002：marker 版后到时同样归并（顺序无关）", () => {
+    const turns = logsToTurns([
+      makeLog("1", "run-1", "user_input", "分析一下"),
+      makeLog("2", "run-1", "user_input", "[附件:11111111-1111-1111-1111-111111111111|image|图.png]\n分析一下"),
+    ]);
+    expect(turns[0]!.prompt).toBe(
+      "[附件:11111111-1111-1111-1111-111111111111|image|图.png]\n分析一下",
+    );
+  });
+
+  it("ql-20260825-002：用户真实连发不同消息不并组（各自保留）", () => {
+    const turns = logsToTurns([
+      makeLog("1", "run-1", "user_input", "第一条"),
+      makeLog("2", "run-1", "user_input", "第二条"),
+    ]);
+    expect(turns[0]!.prompt).toBe("第一条\n第二条");
+  });
+
+  it("ql-20260825-002：纯附件双提交（空主体）归并为一条 marker 版", () => {
+    const turns = logsToTurns([
+      makeLog("1", "run-1", "user_input", "[附件:11111111-1111-1111-1111-111111111111|image|图.png]"),
+      makeLog("2", "run-1", "user_input", "[附件:11111111-1111-1111-1111-111111111111|image|图.png]"),
+    ]);
+    // 完全相同的两条先被 seenText 精确去重（既有行为），保留一条 marker 版。
+    expect(turns[0]!.prompt).toBe(
+      "[附件:11111111-1111-1111-1111-111111111111|image|图.png]",
+    );
+  });
 });
 
 describe("runTerminalTurnStatus（ql-20260822-010）", () => {

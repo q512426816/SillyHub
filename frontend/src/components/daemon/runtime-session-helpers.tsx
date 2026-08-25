@@ -262,7 +262,21 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
   let turnIndex = 0;
   for (const [runId, entries] of Array.from(map.entries())) {
     turnIndex += 1;
-    const prompts: string[] = [];
+    // ql-20260825-002：prompt 收集从「逐条 push + 相同文本去重」改「二阶段归并」——
+    // 先按「文本主体」（剥掉 [附件:...] 标记行）归一，同主体组内 marker 版优先
+    // （含附件标记行的版本才能回显 chips）、无 marker 版取首条。修存量显示：daemon
+    // 历史上双提交首句（backend 落 marker 版 + daemon 落裸文本版，同 run 同 turn
+    // 两条 user_input），按组并合后只显示一条。用户真实连发多条不同消息：主体
+    // 不同各自成组，全部保留。
+    const promptGroups: Array<{
+      key: string;
+      withMarker: string | null;
+      plain: string | null;
+    }> = [];
+    const promptGroupIndex = new Map<string, number>();
+    // 2026-08-25-unified-floating-session task-11（FR-7）：daemon 回传首条
+    // user_input 的前导块（dispatch_prompt 注入段）提取为 preamble 段（对话
+    // 视图不渲染，「全部」视图显示注入来源）。
     const preambleSegments: TurnSegment[] = [];
     const seenText = new Set<string>();
     const assemblerInputs: AssemblerLogInput[] = [];
@@ -299,13 +313,40 @@ export function logsToTurns(logs: AgentRunLogEntry[]): SessionTurnView[] {
         // 用户反馈⑥修正：含前导的全文条剥完与干净条文本相同，两者都 push 会让
         // prompt 气泡显示两次同一问题——前导条只产 preamble 段，prompt 一律由
         // 干净条承载（backend 恒写干净 user_input，见 create/inject 路径）。
-        if (!preambleText) {
-          prompts.push(seg.text);
+        if (preambleText) {
+          continue;
+        }
+        // ql-20260825-002：剥标记行得文本主体为归一键（附件行不影响主体判定）。
+        const lines = seg.text.split("\n");
+        const markerLines: string[] = [];
+        let bodyStart = 0;
+        const MARKER_RE = /^\[附件:[0-9a-fA-F-]{36}\|/;
+        while (bodyStart < lines.length && MARKER_RE.test(lines[bodyStart] ?? "")) {
+          markerLines.push(lines[bodyStart] ?? "");
+          bodyStart += 1;
+        }
+        const body = lines.slice(bodyStart).join("\n").trim();
+        const key = body; // 空主体（纯附件）也按空串归一——纯附件双提交同组
+        const gi = promptGroupIndex.get(key);
+        if (gi === undefined) {
+          promptGroupIndex.set(key, promptGroups.length);
+          promptGroups.push({
+            key,
+            withMarker: markerLines.length > 0 ? seg.text : null,
+            plain: markerLines.length > 0 ? null : seg.text,
+          });
+        } else {
+          const group = promptGroups[gi];
+          if (group && markerLines.length > 0 && group.withMarker === null) {
+            // 同主体组内后到的 marker 版替换位置（marker 版优先保留）。
+            group.withMarker = seg.text;
+          }
         }
         continue;
       }
       assemblerInputs.push(toAssemblerInput(entry));
     }
+    const prompts = promptGroups.map((g) => g.withMarker ?? g.plain ?? "");
     // task-11：按 run 分组后逐组喂入共享装配器（段不跨 run）。
     // ql-20260822-010：seenTextDedup: false——内容级去重收敛到上方预过滤
     // （user_input / reply 防御性去重）单层。装配器默认开启的第二层 kind:text

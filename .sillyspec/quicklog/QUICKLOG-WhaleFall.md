@@ -258,7 +258,16 @@
 方案：补回 Dockerfile printf BOM 行（源文件无 BOM 保持仓库干净，Dockerfile 为唯一分发点打 BOM）
 结果：容器内 + LAN 端点 od 实测单 BOM（EF BB BF）；/api/health ok；CC 2.1.241；daemon bundle 最新
 
-## ql-20260825-001-f076 | 2026-08-25 13:50:27 | (quick 任务)
+## ql-20260825-001-f076 | 2026-08-25 13:50:27 | 预会话首句附件丢失修复——createSession 补 attachment_ids 契约
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+需求：预会话首句附件丢失修复——createSession 补 attachment_ids 契约
+根因：createSession 契约无 attachment_ids 而 UI 允许上传，首句附件发送时被静默丢弃（无回显且智能体收不到），后续消息走 inject 正常
+方案：后端 SessionCreateRequest 补 attachment_ids（D-7 对齐允许空 prompt 看图说话）+ create_session 复用 inject 附件逻辑（校验/标记行回显/回填/SESSION_INJECT attachments）+ facade/router 透传；前端 createSession 上送 + 预会话放开纯附件首句；gen:types 成对更新
+结果：新增 9 后端测试全绿 + 既有 create 15 用例零回归 + 前端全量 2169 绿 + ruff/mypy 通过；已提交 ac43cd50；Docker 待重新部署
+
+## ql-20260825-002-b479 | 2026-08-25 14:32:00 | 首句双提交修复——daemon create 即推 firstPrompt + backend SESSION_INJECT 再提交同句（智能体收到两次、user_input 双日志），改为 deferred first prompt（cr…
 状态：进行中
 关联变更：（无）
 文件：（见实际改动）
