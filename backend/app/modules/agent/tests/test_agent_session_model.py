@@ -9,8 +9,9 @@ from __future__ import annotations
 import uuid
 
 import pytest
+from sqlalchemy import Integer
 
-from app.modules.agent.model import AgentRun, AgentSession
+from app.modules.agent.model import MAX_TREE_DEPTH, AgentRun, AgentSession
 
 # ── AgentSession table contract ──────────────────────────────────────────────
 
@@ -19,7 +20,7 @@ def test_agent_session_tablename() -> None:
     assert AgentSession.__tablename__ == "agent_sessions"
 
 
-def test_agent_session_has_all_25_fields() -> None:
+def test_agent_session_has_all_26_fields() -> None:
     expected = {
         "id",
         "user_id",
@@ -53,12 +54,15 @@ def test_agent_session_has_all_25_fields() -> None:
         # 显式完成信号）。
         "parent_session_id",
         "worker_done_at",
+        # 2026-08-26-team-subsession-recursion task-01（design §5.A）：会话树
+        # 深度列——派发门 O(1) 深度读（主控/普通 0、分身 1、孙 2）。
+        "tree_depth",
     }
     actual = set(AgentSession.model_fields.keys())
     assert actual == expected, (
         f"AgentSession field mismatch. missing={expected - actual}, extra={actual - expected}"
     )
-    assert len(AgentSession.model_fields) == 25
+    assert len(AgentSession.model_fields) == 26
 
 
 def test_agent_session_defaults() -> None:
@@ -147,6 +151,43 @@ def test_agent_run_agent_session_id_index_present() -> None:
     table = AgentRun.__table__
     index_names = {idx.name for idx in table.indexes}
     assert "ix_agent_runs_agent_session_id" in index_names
+
+
+# ── 会话树深度列（2026-08-26-team-subsession-recursion task-01，design §5.A）──
+
+
+def test_agent_session_tree_depth_column_contract() -> None:
+    """tree_depth：Integer NOT NULL，Python 默认 0 + server_default '0'。
+
+    口径：主控/普通会话 0、分身 1、孙 2；派发时 ``parent.tree_depth + 1`` 落库
+    （task-02 消费）。server_default '0'（对齐 origin 列写法 + 迁移同值）使
+    raw INSERT 不传本列也落 0——daemon 会话 create 路径（placement.py stage
+    派发先例）不传 depth 的默认语义，双方言（SQLite create_all / PG 迁移）一致。
+    """
+    field = AgentSession.model_fields["tree_depth"]
+    assert field.default == 0
+    sa_column = field.sa_column
+    assert isinstance(sa_column.type, Integer)
+    assert sa_column.nullable is False
+    assert sa_column.server_default is not None
+    assert str(sa_column.server_default.arg) == "0"
+
+
+def test_agent_session_tree_depth_index_declared() -> None:
+    """ix_agent_sessions_tree_depth 声明在 __table_args__（防 autogenerate 漂移，
+    迁移 20260826020000 同步建）。"""
+    table = AgentSession.__table__
+    index_names = {idx.name for idx in table.indexes}
+    assert "ix_agent_sessions_tree_depth" in index_names
+
+
+def test_max_tree_depth_constant_single_source() -> None:
+    """MAX_TREE_DEPTH=4（model.py 单源）：递归 CTE 脏数据深环的截断上限。
+
+    与派发门 MAX_DISPATCH_DEPTH（=2，task-02 定义）刻意不同名不同值——前者是
+    查询侧脏数据护栏，后者是业务侧派发深度门。
+    """
+    assert MAX_TREE_DEPTH == 4
 
 
 if __name__ == "__main__":

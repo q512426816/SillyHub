@@ -22,13 +22,19 @@ from __future__ import annotations
 import importlib
 import os
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.agent.model import AgentMission, AgentRun, AgentSession
+from app.modules.agent.model import (
+    AgentMission,
+    AgentRun,
+    AgentSession,
+    mission_worker_sessions,
+    mission_worker_sessions_tree,
+)
 
 REVISION_ID = "20260822090000"
 DOWN_REVISION_ID = "20260821130000"  # 执行时 alembic heads 确认的单 head
@@ -194,7 +200,8 @@ def test_agent_sessions_model_fields_unchanged() -> None:
     2026-08-23-agent-activity-sessions task-03 后加会话化三列
     origin/aggregation_key/title（design §3.3.1）+ 2026-08-24 会话归档 archived_at +
     2026-08-25-team-subsession-governance task-01 会话树两列（parent_session_id /
-    worker_done_at，design §5.A），清单同步为 25 字段。
+    worker_done_at，design §5.A）+ 2026-08-26-team-subsession-recursion task-01
+    tree_depth（design §5.A），清单同步为 26 字段。
     """
     expected = {
         "id",
@@ -224,6 +231,8 @@ def test_agent_sessions_model_fields_unchanged() -> None:
         # 2026-08-25-team-subsession-governance task-01（design §5.A）：会话树两列。
         "parent_session_id",
         "worker_done_at",
+        # 2026-08-26-team-subsession-recursion task-01（design §5.A）：会话树深度列。
+        "tree_depth",
     }
     assert set(AgentSession.model_fields.keys()) == expected
 
@@ -306,6 +315,201 @@ def test_migration_downgrade_symmetric() -> None:
     assert '"session_id"' in src
     # 对称顺序：唯一索引在普通索引之前 drop（与 upgrade 创建顺序相反）
     assert src.index(f'"{UNIQUE_INDEX}"') < src.index(f'"{PLAIN_INDEX}"')
+
+
+# ── 5. mission_worker_sessions_tree 递归 CTE（2026-08-26-team-subsession-recursion
+#    task-01，design §5.A / FR-08）─────────────────────────────────────────────
+
+# tree_depth 迁移（task-01）：revision / down_revision 与回填/索引静态断言用常量。
+TREE_DEPTH_REVISION = "20260826020000"
+TREE_DEPTH_DOWN_REVISION = "20260825230000"  # 执行时 alembic heads 确认的单 head
+TREE_DEPTH_INDEX = "ix_agent_sessions_tree_depth"
+TREE_DEPTH_BACKFILL = (
+    "UPDATE agent_sessions SET tree_depth = CASE WHEN parent_session_id IS NULL THEN 0 ELSE 1 END"
+)
+
+# 种子时间基点（显式 created_at 保证 created_at 升序枚举可断言）。
+_TTS0 = datetime(2026, 8, 26, 0, 0, 0, tzinfo=UTC)
+_TTS1 = datetime(2026, 8, 26, 0, 0, 1, tzinfo=UTC)
+_TTS2 = datetime(2026, 8, 26, 0, 0, 2, tzinfo=UTC)
+_TTS3 = datetime(2026, 8, 26, 0, 0, 3, tzinfo=UTC)
+_TTS4 = datetime(2026, 8, 26, 0, 0, 4, tzinfo=UTC)
+
+
+async def _mk_session(
+    session: AsyncSession,
+    *,
+    parent: uuid.UUID | None = None,
+    created_at: datetime = _TTS0,
+) -> AgentSession:
+    """建一行 agent_sessions（parent 挂点显式传入，SQLite 不强制 FK 可造脏数据）。"""
+    s = AgentSession(
+        id=uuid.uuid4(),
+        user_id=uuid.uuid4(),
+        provider="claude",
+        status="active",
+        parent_session_id=parent,
+        created_at=created_at,
+    )
+    session.add(s)
+    await session.commit()
+    await session.refresh(s)
+    return s
+
+
+class TestMissionWorkerSessionsTree:
+    @pytest.mark.asyncio
+    async def test_full_tree_three_levels_excludes_root(self, db_session: AsyncSession) -> None:
+        """主控→分身→孙三层：返回分身+孙全树（created_at 升序），不含主控行。"""
+        root = await _mk_session(db_session, created_at=_TTS0)
+        mission = await _make_mission(db_session, session_id=root.id)
+        w1 = await _mk_session(db_session, parent=root.id, created_at=_TTS1)
+        w2 = await _mk_session(db_session, parent=root.id, created_at=_TTS2)
+        g1 = await _mk_session(db_session, parent=w1.id, created_at=_TTS3)
+
+        tree = await mission_worker_sessions_tree(db_session, mission.id)
+        assert [s.id for s in tree] == [w1.id, w2.id, g1.id]
+        assert root.id not in {s.id for s in tree}
+        # 一层枚举（P1 保留）只含直接子会话——两层口径并存不互染。
+        one_layer = await mission_worker_sessions(db_session, mission.id)
+        assert [s.id for s in one_layer] == [w1.id, w2.id]
+
+    @pytest.mark.asyncio
+    async def test_no_grandchildren_equivalent_to_one_layer(self, db_session: AsyncSession) -> None:
+        """无孙时全树与一层结果逐行等价（FR-08 零回归口径）。"""
+        root = await _mk_session(db_session, created_at=_TTS0)
+        mission = await _make_mission(db_session, session_id=root.id)
+        w1 = await _mk_session(db_session, parent=root.id, created_at=_TTS1)
+        w2 = await _mk_session(db_session, parent=root.id, created_at=_TTS2)
+
+        tree = await mission_worker_sessions_tree(db_session, mission.id)
+        one_layer = await mission_worker_sessions(db_session, mission.id)
+        assert [s.id for s in tree] == [w1.id, w2.id]
+        assert [s.id for s in tree] == [s.id for s in one_layer]
+
+    @pytest.mark.asyncio
+    async def test_missing_mission_returns_empty(self, db_session: AsyncSession) -> None:
+        """mission 不存在 → 空列表（对齐一层枚举宽容口径）。"""
+        assert await mission_worker_sessions_tree(db_session, uuid.uuid4()) == []
+
+    @pytest.mark.asyncio
+    async def test_external_mission_returns_empty(self, db_session: AsyncSession) -> None:
+        """external mission（session_id NULL）→ 空列表。"""
+        mission = await _make_mission(db_session, session_id=None)
+        assert await mission_worker_sessions_tree(db_session, mission.id) == []
+
+    @pytest.mark.asyncio
+    async def test_root_without_children_returns_empty(self, db_session: AsyncSession) -> None:
+        """无子树 → 空列表。"""
+        root = await _mk_session(db_session)
+        mission = await _make_mission(db_session, session_id=root.id)
+        assert await mission_worker_sessions_tree(db_session, mission.id) == []
+
+    @pytest.mark.asyncio
+    async def test_cycle_dirty_data_no_hang_no_duplicates(self, db_session: AsyncSession) -> None:
+        """脏数据成环（root 指向后代、后代指回 root）：UNION 去重 + MAX_TREE_DEPTH
+        截断——不死循环、不重复行。"""
+        # 2-环：root.parent=Y、Y.parent=root（脏数据，SQLite 不强制 FK/一致性）。
+        y = await _mk_session(db_session, created_at=_TTS1)
+        root = AgentSession(
+            id=uuid.uuid4(),
+            user_id=uuid.uuid4(),
+            provider="claude",
+            status="active",
+            parent_session_id=y.id,
+            created_at=_TTS0,
+        )
+        db_session.add(root)
+        await db_session.commit()
+        y.parent_session_id = root.id
+        db_session.add(y)
+        await db_session.commit()
+        mission = await _make_mission(db_session, session_id=root.id)
+        w = await _mk_session(db_session, parent=root.id, created_at=_TTS2)
+
+        tree = await mission_worker_sessions_tree(db_session, mission.id)
+        ids = [s.id for s in tree]
+        assert len(ids) == len(set(ids)), f"重复行：{ids}"
+        # 可达集：分身 w + 环上的 y（root 自身按契约剔除，重复出现被去重）
+        assert set(ids) == {w.id, y.id}
+        assert ids == [y.id, w.id]  # created_at 升序稳定
+
+    @pytest.mark.asyncio
+    async def test_dangling_parent_unreachable_not_included(self, db_session: AsyncSession) -> None:
+        """脏数据 parent 指向不存在的行：不可达即不入树，不抛异常。"""
+        root = await _mk_session(db_session, created_at=_TTS0)
+        mission = await _make_mission(db_session, session_id=root.id)
+        w = await _mk_session(db_session, parent=root.id, created_at=_TTS1)
+        await _mk_session(db_session, parent=uuid.uuid4(), created_at=_TTS2)  # 悬挂 parent
+
+        tree = await mission_worker_sessions_tree(db_session, mission.id)
+        assert [s.id for s in tree] == [w.id]
+
+    @pytest.mark.asyncio
+    async def test_depth_beyond_max_truncated(self, db_session: AsyncSession) -> None:
+        """深度超过 MAX_TREE_DEPTH(=4) 的脏链被截断（depth 1..4 保留，5+ 不入树）。"""
+        root = await _mk_session(db_session, created_at=_TTS0)
+        mission = await _make_mission(db_session, session_id=root.id)
+        chain: list[AgentSession] = []
+        parent = root.id
+        for i in range(6):
+            node = await _mk_session(
+                db_session, parent=parent, created_at=_TTS4 + timedelta(seconds=i)
+            )
+            chain.append(node)
+            parent = node.id
+
+        tree = await mission_worker_sessions_tree(db_session, mission.id)
+        assert [s.id for s in tree] == [n.id for n in chain[:4]]
+
+
+# ── 6. tree_depth 迁移静态链检查（先例：上方 §4 / test_session_agent_session_id_migration.py）──
+
+
+def _load_tree_depth_migration():
+    from pathlib import Path
+
+    backend_root = Path(__file__).resolve().parents[4]
+    versions_dir = backend_root / "migrations" / "versions"
+    for f in os.listdir(str(versions_dir)):
+        if f.endswith(".py") and f != "__init__.py" and TREE_DEPTH_REVISION in f:
+            return importlib.import_module(f"migrations.versions.{f[:-3]}")
+    raise ImportError(f"No migration found for revision {TREE_DEPTH_REVISION}")
+
+
+def test_tree_depth_migration_revision_chain() -> None:
+    """迁移挂 20260825230000（执行时 alembic heads 确认的单 head）之后。"""
+    mod = _load_tree_depth_migration()
+    assert mod.revision == TREE_DEPTH_REVISION
+    assert mod.down_revision == TREE_DEPTH_DOWN_REVISION
+
+
+def test_tree_depth_migration_upgrade_source() -> None:
+    """upgrade 三件套：add_column NOT NULL server_default 0 + 全表 CASE 回填 + 索引。
+
+    回填是硬要求（Grill B1）：存量主控/普通=0（parent NULL）、存量分身=1，
+    NOT NULL 保证迁移后无 NULL 读值。
+    """
+    import inspect
+
+    mod = _load_tree_depth_migration()
+    src = inspect.getsource(mod.upgrade)
+    assert 'sa.Column("tree_depth", sa.Integer(), nullable=False' in src
+    assert "server_default" in src
+    assert TREE_DEPTH_BACKFILL in src
+    assert f'"{TREE_DEPTH_INDEX}"' in src
+    # 对称顺序：回填在建索引之前（索引一次成型，不因回填重复维护）
+    assert src.index(TREE_DEPTH_BACKFILL) < src.index(f'"{TREE_DEPTH_INDEX}"')
+
+
+def test_tree_depth_migration_downgrade_symmetric() -> None:
+    """downgrade 对称：drop 索引 → drop 列。"""
+    import inspect
+
+    src = inspect.getsource(_load_tree_depth_migration().downgrade)
+    assert f'"{TREE_DEPTH_INDEX}"' in src
+    assert '"tree_depth"' in src
+    assert src.index(f'"{TREE_DEPTH_INDEX}"') < src.index('"tree_depth"')
 
 
 if __name__ == "__main__":
