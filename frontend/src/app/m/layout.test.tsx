@@ -49,7 +49,7 @@ vi.mock("@/components/mobile/mobile-app-shell", () => ({
   },
 }));
 
-import MobileLayoutShell from "@/app/m/layout";
+import MobileLayoutShell, { isDrillRoute } from "@/app/m/layout";
 
 function renderLayout() {
   return render(
@@ -169,6 +169,73 @@ describe("MobileLayoutShell activeTab 推断（strip /m + isTabActive）", () =>
     renderLayout();
     // 未裹 Shell → activeTab 锚点保持初始值
     expect(shell.activeTab).toBe("<none>");
+    expect(screen.queryByTestId("mobile-app-shell")).toBeNull();
+  });
+});
+
+describe("isDrillRoute 钻取正则（DRILL_ROUTES / design §5.5，task-01）", () => {
+  it("变更详情 /workspaces/w1/changes/c1 → true（含 /m 前缀两形态等价）", () => {
+    expect(isDrillRoute("/workspaces/w1/changes/c1")).toBe(true);
+    expect(isDrillRoute("/m/workspaces/w1/changes/c1")).toBe(true);
+  });
+
+  it("会话对话 /workspaces/w1/sessions/s1 → true（含 /m 前缀两形态等价）", () => {
+    expect(isDrillRoute("/workspaces/w1/sessions/s1")).toBe(true);
+    expect(isDrillRoute("/m/workspaces/w1/sessions/s1")).toBe(true);
+  });
+
+  it("列表页无第四段不命中：/workspaces/w1/changes、/workspaces/w1/sessions → false", () => {
+    expect(isDrillRoute("/workspaces/w1/changes")).toBe(false);
+    expect(isDrillRoute("/workspaces/w1/sessions")).toBe(false);
+    expect(isDrillRoute("/m/workspaces/w1/changes")).toBe(false);
+    expect(isDrillRoute("/m/workspaces/w1/sessions")).toBe(false);
+  });
+
+  it("既有 /m 页面零命中：/login、/workspaces、/ppm/workbench → false", () => {
+    expect(isDrillRoute("/login")).toBe(false);
+    expect(isDrillRoute("/m/login")).toBe(false);
+    expect(isDrillRoute("/workspaces")).toBe(false);
+    expect(isDrillRoute("/m/workspaces")).toBe(false);
+    expect(isDrillRoute("/ppm/workbench")).toBe(false);
+    expect(isDrillRoute("/m/ppm/workbench")).toBe(false);
+  });
+});
+
+describe("MobileLayoutShell 钻取页渲染分支（DRILL_ROUTES，task-01）", () => {
+  it("钻取路径 /m/workspaces/w1/changes/c1 → children 直出且无 mobile-app-shell", () => {
+    nav.pathname = "/m/workspaces/w1/changes/c1";
+    renderLayout();
+    expect(screen.getByTestId("page-content")).toBeTruthy();
+    expect(screen.queryByTestId("mobile-app-shell")).toBeNull();
+  });
+
+  it("钻取路径 /m/workspaces/w1/sessions/s1 → 同样裸容器直出", () => {
+    nav.pathname = "/m/workspaces/w1/sessions/s1";
+    renderLayout();
+    expect(screen.getByTestId("page-content")).toBeTruthy();
+    expect(screen.queryByTestId("mobile-app-shell")).toBeNull();
+  });
+
+  it("列表页 /m/workspaces/w1/changes（无第四段）不命中 → 仍裹 MobileAppShell", () => {
+    nav.pathname = "/m/workspaces/w1/changes";
+    renderLayout();
+    const sh = screen.getByTestId("mobile-app-shell");
+    expect(sh).toBeTruthy();
+    expect(sh.querySelector('[data-testid="page-content"]')).toBeTruthy();
+  });
+
+  it("列表页 /m/workspaces/w1/sessions 同样仍裹 MobileAppShell", () => {
+    nav.pathname = "/m/workspaces/w1/sessions";
+    renderLayout();
+    expect(screen.getByTestId("mobile-app-shell")).toBeTruthy();
+    expect(screen.getByTestId("page-content")).toBeTruthy();
+  });
+
+  it("钻取页 + 无 token → 仍不渲染（DRILL_ROUTES 分支在 !accessToken 判空之后）", () => {
+    useSession.setState({ accessToken: null, hydrated: true } as never);
+    nav.pathname = "/m/workspaces/w1/changes/c1";
+    renderLayout();
+    expect(screen.queryByTestId("page-content")).toBeNull();
     expect(screen.queryByTestId("mobile-app-shell")).toBeNull();
   });
 });
