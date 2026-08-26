@@ -341,7 +341,9 @@ class Settings(BaseSettings):
         description="Gotenberg（LibreOffice 无头转换）地址；空 = Word 预览走 OnlyOffice（现状）。",
     )
     gotenberg_timeout_seconds: int = Field(
-        default=120, ge=10, le=600,
+        default=120,
+        ge=10,
+        le=600,
         description="LibreOffice 转换超时（秒）；大文档首转较慢，缓存命中后不再触发。",
     )
     file_allowed_types: str = Field(

@@ -65,9 +65,7 @@ async def get_preview_file(token: str) -> Response:
     # 原文件走 octet-stream（DS 自带文件名）；LO 转换的 PDF 必须给真 MIME——
     # 浏览器对 octet-stream blob 不做内联渲染，iframe 会触发下载（ql-20260826-012）。
     media = (
-        "application/pdf"
-        if object_key.startswith("preview-pdf/")
-        else "application/octet-stream"
+        "application/pdf" if object_key.startswith("preview-pdf/") else "application/octet-stream"
     )
     return StreamingResponse(
         stream(),

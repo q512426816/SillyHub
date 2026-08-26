@@ -220,6 +220,7 @@ class TestBuildConfig:
             await svc.issue_file_token(object_key="attachments/x.bin", settings=s)
         broken.set.assert_awaited_once()
 
+
 # ── 3. build_preview 双模式（ql-20260826-011：Word→LibreOffice→PDF）────────────
 
 

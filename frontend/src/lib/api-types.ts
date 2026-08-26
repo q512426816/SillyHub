@@ -532,8 +532,63 @@ export interface paths {
          */
         get: operations["list_workspace_skills_api_workspaces__workspace_id__skills_get"];
         put?: never;
-        post?: never;
+        /**
+         * Create Workspace Skill
+         * @description 新建 workspace 自定义 skill（2026-08-26-workspace-skill-edit task-02）。
+         *
+         *     生成 ``skills/<name>/SKILL.md``（frontmatter name/description）；skill 名白名单
+         *     校验（D-003@v1）；重名 409。鉴权 WorkspaceWriter（同 MCP PUT 模式）。
+         */
+        post: operations["create_workspace_skill_api_workspaces__workspace_id__skills_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/skills/{skill_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Workspace Skill
+         * @description 删除整个 skill 目录（symlink 防护 + 审计，D-003@v1/R-02）。
+         */
+        delete: operations["delete_workspace_skill_api_workspaces__workspace_id__skills__skill_name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/skills/{skill_name}/files/{file_path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Workspace Skill File
+         * @description 读 skill 内文本文件（UTF-8 探测 + 512KB 上限 + 路径穿越 fail-closed）。
+         */
+        get: operations["read_workspace_skill_file_api_workspaces__workspace_id__skills__skill_name__files__file_path__get"];
+        /**
+         * Write Workspace Skill File
+         * @description 写 skill 内文本文件（新建/覆盖，原子写 + 父目录自动创建限一层 + 审计）。
+         */
+        put: operations["write_workspace_skill_file_api_workspaces__workspace_id__skills__skill_name__files__file_path__put"];
+        post?: never;
+        /**
+         * Delete Workspace Skill File
+         * @description 删 skill 内文件（SKILL.md 入口保护 409 + 审计）。
+         */
+        delete: operations["delete_workspace_skill_file_api_workspaces__workspace_id__skills__skill_name__files__file_path__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -556,7 +611,17 @@ export interface paths {
          *     ``_redact_mcp_env``）。无文件返回空 ``{mcpServers: {}}`` 不报错。
          */
         get: operations["get_workspace_mcp_config_api_workspaces__workspace_id__mcp_config_get"];
-        put?: never;
+        /**
+         * Update Workspace Mcp Config
+         * @description 写 workspace specDir/.mcp.json（2026-08-26-workspace-mcp-edit task-01）。
+         *
+         *     鉴权 WorkspaceWriter（``require_permission(WORKSPACE_WRITE)`` 自动取路径
+         *     ``{workspace_id}`` 做成员校验，非成员 403，同 mcp_gateway/router.py:114 模式）。
+         *     service 层完成：仅 stdio 校验（D-005@v2）+ ``<set>`` 服务端还原（D-003@v2）+
+         *     原子写（R-01）+ 审计上下文注入；错误经 AppError 全局 handler 序列化，router
+         *     不手写 HTTPException。成功返回写后脱敏视图（与 GET 同构）。
+         */
+        put: operations["update_workspace_mcp_config_api_workspaces__workspace_id__mcp_config_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -5204,6 +5269,12 @@ export interface paths {
          *
          *     无配置时返回空结构 ``{"platform_default": {"mcpServers": {}}, "whitelist": []}``，
          *     不报错（daemon 按"无平台默认"处理）。
+         *
+         *     2026-08-26-workspace-mcp-edit task-03：可选 query ``workspace_id``（UUID），
+         *     提供时响应追加 ``"workspace": {"mcpServers": {...}}``（读该工作区
+         *     ``specDir/.mcp.json`` 明文，见 ``_read_mcp_config_raw``）；不传时响应
+         *     结构与旧版完全一致（R-07 向后兼容，旧 daemon 忽略新字段）。非法 UUID
+         *     → 422（全局校验处理器中文报错）。
          */
         get: operations["get_daemon_mcp_config_api_daemon_mcp_config_get"];
         put?: never;
@@ -13203,6 +13274,16 @@ export interface components {
             captcha_token?: string | null;
         };
         /**
+         * McpConfigUpdateRequest
+         * @description ``PUT /api/workspaces/{id}/mcp-config`` 请求体（wire 格式同 claude .mcp.json）。
+         */
+        McpConfigUpdateRequest: {
+            /** Mcpservers */
+            mcpServers?: {
+                [key: string]: components["schemas"]["McpServerEntryPut"];
+            };
+        };
+        /**
          * McpConfigViewResponse
          * @description ``GET /api/workspaces/{id}/mcp-config`` 响应（env secret 已脱敏）。
          *
@@ -13219,6 +13300,27 @@ export interface components {
          * @description 单个 MCP server 定义（仿 claude ``.mcp.json`` 结构）。
          */
         McpServerEntry: {
+            /** Command */
+            command: string;
+            /** Args */
+            args?: string[];
+            /** Env */
+            env?: {
+                [key: string]: string;
+            } | null;
+        };
+        /**
+         * McpServerEntryPut
+         * @description PUT mcp-config 单个 server 条目（仅 stdio，D-005@v2 安全边界）。
+         *
+         *     ``type`` 缺省 ``"stdio"``；未知字段拒绝（``extra="forbid"``，防拼写错键静默落盘）。
+         */
+        McpServerEntryPut: {
+            /**
+             * Type
+             * @default stdio
+             */
+            type: string;
             /** Command */
             command: string;
             /** Args */
@@ -17675,6 +17777,31 @@ export interface components {
             shared: boolean;
         };
         /**
+         * SkillCreateRequest
+         * @description ``POST /skills`` 请求体。
+         */
+        SkillCreateRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+        };
+        /**
+         * SkillFileContentResponse
+         * @description ``GET /skills/{name}/files/{path}`` 响应。
+         */
+        SkillFileContentResponse: {
+            /** Path */
+            path: string;
+            /** Content */
+            content: string;
+            /** Size */
+            size: number;
+        };
+        /**
          * SkillFileEntry
          * @description 单个 workspace 自定义 skill 的只读视图。
          */
@@ -17683,6 +17810,32 @@ export interface components {
             name: string;
             /** Files */
             files?: string[];
+        };
+        /**
+         * SkillFileWriteRequest
+         * @description ``PUT /skills/{name}/files/{path}`` 请求体。
+         */
+        SkillFileWriteRequest: {
+            /** Content */
+            content: string;
+        };
+        /**
+         * SkillFileWriteResponse
+         * @description ``PUT`` 文件响应。
+         */
+        SkillFileWriteResponse: {
+            /** Path */
+            path: string;
+            /** Size */
+            size: number;
+        };
+        /**
+         * SkillMutationResponse
+         * @description 删除类写操作响应。
+         */
+        SkillMutationResponse: {
+            /** Deleted */
+            deleted: boolean;
         };
         /**
          * SkillsViewResponse
@@ -21398,6 +21551,176 @@ export interface operations {
             };
         };
     };
+    create_workspace_skill_api_workspaces__workspace_id__skills_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillsViewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_workspace_skill_api_workspaces__workspace_id__skills__skill_name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                skill_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_workspace_skill_file_api_workspaces__workspace_id__skills__skill_name__files__file_path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                skill_name: string;
+                file_path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillFileContentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_workspace_skill_file_api_workspaces__workspace_id__skills__skill_name__files__file_path__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                skill_name: string;
+                file_path: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillFileWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillFileWriteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_workspace_skill_file_api_workspaces__workspace_id__skills__skill_name__files__file_path__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                skill_name: string;
+                file_path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_workspace_mcp_config_api_workspaces__workspace_id__mcp_config_get: {
         parameters: {
             query?: never;
@@ -21408,6 +21731,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConfigViewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_workspace_mcp_config_api_workspaces__workspace_id__mcp_config_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpConfigUpdateRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -28943,7 +29301,9 @@ export interface operations {
     };
     get_daemon_mcp_config_api_daemon_mcp_config_get: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -28959,6 +29319,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

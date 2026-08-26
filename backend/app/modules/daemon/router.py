@@ -9,6 +9,7 @@ import re
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import httpx
@@ -4058,10 +4059,67 @@ async def get_skill_content(
 # ---------------------------------------------------------------------------
 
 
+async def _read_mcp_config_raw(session: AsyncSession, workspace_id: uuid.UUID) -> dict[str, Any]:
+    """读 workspace ``specDir/.mcp.json`` **明文不脱敏**（design §7.2，task-03）。
+
+    daemon 需要真实 env 真值注入 agent 会话，故不复用
+    ``SkillsViewService.get_mcp_config`` 的脱敏视图（D-004）。定位 specDir 与
+    skills_view_service 同法：``SpecWorkspace.spec_root`` + platform_managed
+    扁平根（backend 容器本地直读，不经 RPC）。
+
+    容错：无 spec_ws / spec_root 缺失 / 文件缺失 / JSON 解析失败 / 非 dict
+    结构 → 返回空 ``{"mcpServers": {}}`` 不抛错（daemon 侧回落空 workspace
+    配置，R-03；非 stdio 条目的预净化兜底在 daemon fetchMcpBundle，task-05）。
+    workspace 不存在/已软删 → ``WorkspaceNotFound``（404 中文，经全局
+    AppError 处理器序列化）。
+    """
+    from app.core.spec_paths import SpecPathResolver
+    from app.modules.spec_workspace.model import SpecWorkspace
+    from app.modules.workspace.service import WorkspaceService
+
+    # 不存在/已软删 → WorkspaceNotFound（404），复用既有中文报错文案。
+    await WorkspaceService(session).get(workspace_id)
+
+    stmt = select(SpecWorkspace).where(SpecWorkspace.workspace_id == workspace_id)
+    spec_ws = (await session.execute(stmt)).scalars().first()
+    if spec_ws is None or not spec_ws.spec_root:
+        return {"mcpServers": {}}
+
+    resolver = SpecPathResolver(spec_ws.spec_root, platform_managed=True)
+    mcp_path = resolver._spec_root() / ".mcp.json"
+    return await asyncio.to_thread(_read_mcp_json_sync, mcp_path)
+
+
+def _read_mcp_json_sync(mcp_path: Path) -> dict[str, Any]:
+    """``_read_mcp_config_raw`` 同步读+解析段（文件 IO 移出事件循环）。
+
+    容错集与 ``skills_view_service._read_mcp_config_sync`` 一致，差异：
+    **不脱敏**（daemon 注入需 env 真值，task-03 design §7.2）。
+    """
+    empty: dict[str, Any] = {"mcpServers": {}}
+    if not mcp_path.is_file():
+        return empty
+    try:
+        raw = mcp_path.read_text(encoding="utf-8")
+    except (OSError, PermissionError):
+        return empty
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError):
+        return empty
+    if not isinstance(data, dict):
+        return empty
+    mcp_servers = data.get("mcpServers")
+    if not isinstance(mcp_servers, dict):
+        mcp_servers = {}
+    return {"mcpServers": mcp_servers}
+
+
 @router.get("/mcp/config")
 async def get_daemon_mcp_config(
     session: SessionDep,
     user: Annotated[Any, Depends(get_current_principal)],
+    workspace_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     """返回平台默认 MCP 配置 + server 白名单（**原值不脱敏**，design D-004）。
 
@@ -4072,6 +4130,12 @@ async def get_daemon_mcp_config(
 
     无配置时返回空结构 ``{"platform_default": {"mcpServers": {}}, "whitelist": []}``，
     不报错（daemon 按"无平台默认"处理）。
+
+    2026-08-26-workspace-mcp-edit task-03：可选 query ``workspace_id``（UUID），
+    提供时响应追加 ``"workspace": {"mcpServers": {...}}``（读该工作区
+    ``specDir/.mcp.json`` 明文，见 ``_read_mcp_config_raw``）；不传时响应
+    结构与旧版完全一致（R-07 向后兼容，旧 daemon 忽略新字段）。非法 UUID
+    → 422（全局校验处理器中文报错）。
     """
     from app.modules.settings.router import (
         MCP_PLATFORM_DEFAULT_KEY,
@@ -4092,7 +4156,11 @@ async def get_daemon_mcp_config(
     raw_whitelist = await _read_setting_json(session, MCP_WHITELIST_KEY, [])
     whitelist = [str(x) for x in raw_whitelist] if isinstance(raw_whitelist, list) else []
 
-    return {
+    payload: dict[str, Any] = {
         "platform_default": platform_default,
         "whitelist": whitelist,
     }
+    # 带 workspace_id → 追加明文 workspace 配置；不带 → payload 与旧结构完全一致。
+    if workspace_id is not None:
+        payload["workspace"] = await _read_mcp_config_raw(session, workspace_id)
+    return payload
