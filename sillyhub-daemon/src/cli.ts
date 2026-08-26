@@ -84,6 +84,8 @@ import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sd
 // mergeMcpConfigs 合并 platform_default + daemon MCP server。injectMcpConfig 写
 // 临时 .mcp.json 供 spawn --mcp-config；但 Claude SDK 经 options.mcpServers 直接
 // 注入（不走 --mcp-config 文件），故此处只用 buildDaemonMcpServerConfig + merge。
+// task-07（2026-08-26-workspace-mcp-edit）：合并源升格三件套（platform + workspace
+// + 内置双 server），见 mainAgentMcpConfigProvider 注释块。
 import {
   buildDaemonMcpServerConfig,
   buildFileMcpServerConfig,
@@ -93,6 +95,9 @@ import {
   mergeMcpConfigs,
   WORKER_MCP_SERVER_NAME,
 } from './mcp-config.js';
+// task-07（2026-08-26-workspace-mcp-edit / D-007@v2）：会话级 MCP 三件套缓存类型 +
+// merge 返回类型（rejected warn 用）。
+import type { McpBundle, MergedMcpResult } from './mcp-config.js';
 import type { McpServerConfigForDriver } from './interactive/driver.js';
 
 // ── 路径访问（可测试性：函数返回，task-22 vi.spyOn 可 mock）──────────────────
@@ -640,6 +645,16 @@ export async function startAction(opts: StartOptions): Promise<number> {
   );
   const policyEngine = new PolicyEngine(policyCache, auditSink);
   let daemon: Daemon;
+  // task-07（2026-08-26-workspace-mcp-edit / design §5 Wave2 第 5 条 / D-007@v2）：
+  // 会话级 MCP 三件套缓存（Map<sessionId, McpBundle>）。cli 装配处创建、同一引用
+  // 两头共享——daemon._startInteractiveSession 按 execPayload.workspaceId 预取
+  // fetchMcpBundle 写入（经 DaemonOptions.mcpBundleCache 注入）；下方
+  // mainAgentMcpConfigProvider 同步读（provider 同步签名不能 await，只能读缓存）。
+  // 生命周期=会话（daemon.onSessionEnd 清理，create 失败 catch 兜底删）。
+  // 放 cli 装配处而非 daemon.ts 模块级单例：daemon 与 provider 共享引用经构造
+  // 注入显式化（无跨模块可变全局态）；tests 对 daemon.js 的 vi.mock 工厂只导出
+  // Daemon，provider 读本 Map 不依赖 daemon.js 运行时导出（mock 下依旧可用）。
+  const mcpBundleBySession = new Map<string, McpBundle>();
   const sessionManager = new SessionManager(
     {
       // task-06（D-001@v1）：显式 drivers registry（claude + codex）。task-02 保留
@@ -773,13 +788,14 @@ export async function startAction(opts: StartOptions): Promise<number> {
       //     不消费 mcpServers，另立后续变更）。
       //
       // mainAgentMcpConfigProvider：构造主 agent spawn 时要注入的 MCP server 配置表。
-      // 用 buildDaemonMcpServerConfig 构造 daemon 内置 MCP server（command=node +
-      // args=[dist/mcp-server.js] + env={MCP_SERVER_BACKEND_URL, MCP_SERVER_DAEMON_TOKEN}），
-      // 经 mergeMcpConfigs 与空 platform_default 合并（白名单自动加入 DAEMON_MCP_SERVER_NAME，
-      // 见 mcp-config.ts:188）。返回双 server 表（sillyhub-daemon 编排 5 tool +
-      // task-06 sillyhub-file 上传 2 tool），
-      // SessionManager 透传到 driverOpts.mcpServers → ClaudeSdkDriver.start 写入
-      // SDK options.mcpServers → 主 agent discover 全部 MCP tool。
+      // task-07（2026-08-26-workspace-mcp-edit）起为三件套合并注入：读会话级缓存
+      // bundle（daemon.ts _startInteractiveSession 按 workspaceId 预取写入，上方
+      // mcpBundleBySession 同一引用），mergeMcpConfigs 按 platform < workspace < 内置
+      // 优先级合并（同名后者覆盖前者，D-006@v2）；内置双 server（sillyhub-daemon 编排
+      // 5 tool + task-06 sillyhub-file 上传 2 tool）名并入白名单参数。SessionManager
+      // 透传到 driverOpts.mcpServers → ClaudeSdkDriver.start 写入 SDK options.mcpServers
+      // → 主 agent discover 全部 MCP tool。缓存 miss（quick-chat 无 workspaceId /
+      // daemon 重启 restore 内存缓存丢失）→ 回落空 bundle，行为与 task-06 现状一致。
       //
       // **token 来源（task-09 P0 闭合）**：task-06 用 daemon apiKey（config.api_key
       // 优先，回落 config.token）但旧实现经 MCP_SERVER_DAEMON_TOKEN 单 env 把 apiKey
@@ -817,14 +833,69 @@ export async function startAction(opts: StartOptions): Promise<number> {
           { token: mcpToken, apiKey: mcpApiKey || undefined },
           { allowedRoot: ctx.cwd },
         );
-        // mergeMcpConfigs：空 platform_default + daemon/file 两个内置 server。二者都
-        // 在 configs[0]（platform 位）自动入白名单（mcp-config.ts:188），无需额外配白名单。
-        const merged = mergeMcpConfigs([], {
+        // task-07（2026-08-26-workspace-mcp-edit / D-007@v2）：读会话级缓存 bundle。
+        // daemon.ts _startInteractiveSession 在 create（本 provider 被调）前按
+        // workspaceId await fetchMcpBundle 写入缓存。缓存 miss 两源：① quick-chat/
+        // legacy shared 无 workspaceId 未预取（预期常态）；② daemon 重启 restore
+        // 内存缓存丢失（provider 同步签名不能重取，且 PersistedSessionRecord /
+        // SESSION_RESUME payload 均不携带 workspaceId，无从重取——后续增强点：restore
+        // 链路补 workspace 下发 + 异步重取供下次 reload 用，D-007@v2 完整形态）。
+        // 回落空 bundle（platform/workspace 全空、白名单 []）= 行为与现状一致。
+        const bundle = mcpBundleBySession.get(ctx.sessionId);
+        if (!bundle) {
+          // eslint-disable-next-line no-console
+          console.warn('[cli] mcp_bundle_cache_miss', {
+            sessionId: ctx.sessionId,
+            fallback: 'empty_bundle',
+          });
+        }
+        const platformCfg = bundle?.platform ?? { mcpServers: {} };
+        const workspaceCfg = bundle?.workspace ?? { mcpServers: {} };
+        const bundleWhitelist = bundle?.whitelist ?? [];
+        // 内置双 server 固定进最后一个 config 位（优先级最高，防被 workspace 同名
+        // 覆盖，D-006@v2）。
+        const builtinConfig = {
           mcpServers: {
             [DAEMON_MCP_SERVER_NAME]: daemonServer,
             [FILE_MCP_SERVER_NAME]: fileServer,
           },
-        });
+        };
+        // mergeMcpConfigs：[platform, workspace, 内置] 依次合并（后者覆盖前者）。
+        // **内置名必须并入白名单参数**（D-006@v2 / Grill CC-02）：mergeMcpConfigs
+        // 只把 configs[0]（platform 位）的 server 名自动入白名单，内置在第 3 个
+        // config 位不会被自动放行——不并入会被白名单剔除、破坏既有注入链。
+        // platform 位的 server 仍走 configs[0] 自动白名单（既有语义不变）。
+        // 防御 catch（R-03）：platform 配置未经 task-05 预净化（只有 workspace 维度
+        // 有非 stdio 预净化），混入非 stdio 条目时 assertMcpServerType 抛错——回落
+        // 仅内置双 server（= task-06 现状行为），绝不阻塞会话创建。
+        let merged: MergedMcpResult;
+        try {
+          merged = mergeMcpConfigs(
+            [...bundleWhitelist, DAEMON_MCP_SERVER_NAME, FILE_MCP_SERVER_NAME],
+            platformCfg,
+            workspaceCfg,
+            builtinConfig,
+          );
+        } catch (e) {
+          // eslint-disable-next-line no-console
+          console.warn('[cli] mcp_merge_failed_fallback_builtin', {
+            sessionId: ctx.sessionId,
+            error: e instanceof Error ? e.message : String(e),
+          });
+          merged = mergeMcpConfigs(
+            [DAEMON_MCP_SERVER_NAME, FILE_MCP_SERVER_NAME],
+            builtinConfig,
+          );
+        }
+        // 白名单外的 server（workspace 配了但 admin 未放行）被剔除 → rejected 记
+        // warn（R-05 可观测：不静默丢弃，前端提示文案配合见 design §7.4）。
+        if (merged.rejected.length > 0) {
+          // eslint-disable-next-line no-console
+          console.warn('[cli] mcp_servers_rejected_by_whitelist', {
+            sessionId: ctx.sessionId,
+            rejected: merged.rejected,
+          });
+        }
         // 转为 driver 契约类型（McpServerConfig → McpServerConfigForDriver，结构兼容）。
         const result: Record<string, McpServerConfigForDriver> = {};
         for (const [name, cfg] of Object.entries(merged.config.mcpServers)) {
@@ -837,7 +908,8 @@ export async function startAction(opts: StartOptions): Promise<number> {
         // provider/model 透传：ctx.model 含主 agent configured model（来自
         // CreateSessionInput.model），driver 已在 _buildDriverOptions 单独透传 model
         // 到 SDK options.model，此处 MCP 配置不需重复（MCP server 不读 model）。
-        // ctx 现读 cwd（sillyhub-file allowedRoot，task-06）；其余字段留未来扩展。
+        // ctx 现读 cwd（sillyhub-file allowedRoot，task-06）+ sessionId（task-07 会话
+        // 级缓存 key）；其余字段留未来扩展。
         return Object.keys(result).length > 0 ? result : undefined;
       },
       // task-06（2026-08-25-team-subsession-governance / FR-03 / D-003@v1，design
@@ -957,6 +1029,10 @@ export async function startAction(opts: StartOptions): Promise<number> {
     lockManager,
     resilience,
     policyCache,
+    // task-07（2026-08-26-workspace-mcp-edit / D-007@v2）：会话级 MCP 三件套缓存
+    // 共享引用（与上方 mainAgentMcpConfigProvider 闭包同一 Map）——daemon 预取
+    // 写入 / provider 读，生命周期=会话。
+    mcpBundleCache: mcpBundleBySession,
     // task-01：进程启动时间注入（register/heartbeat 上报 started_at 用）。
     startedAt: processStartTime,
   });

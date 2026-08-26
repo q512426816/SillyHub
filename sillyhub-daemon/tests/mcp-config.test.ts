@@ -419,3 +419,169 @@ describe('mcp-config: McpServerConfig type 校验（task-08 / D-017 防 SSRF）'
     ).toThrow(/unsupported type "sse"/);
   });
 });
+
+// ── task-05（2026-08-26-workspace-mcp-edit）：fetchMcpBundle 三件套拉取 ──────
+
+import {
+  fetchMcpBundle,
+  type McpConfigLogger,
+} from '../src/mcp-config.js';
+
+describe('mcp-config: fetchMcpBundle（task-05 三件套拉取）', () => {
+  it('200 + workspace_id → 三件套齐全，URL 带 query + Bearer 头', async () => {
+    const wsId = '11111111-1111-1111-1111-111111111111';
+    const body = {
+      platform_default: { mcpServers: { web: { command: 'w', args: [] } } },
+      whitelist: ['web', 'db'],
+      workspace: {
+        mcpServers: { db: { type: 'stdio', command: 'd', args: ['--x'] } },
+      },
+    };
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(body), { status: 200 }),
+    );
+    const bundle = await fetchMcpBundle('http://hub:8000', 'tok', wsId);
+    expect(bundle.platform.mcpServers.web).toBeDefined();
+    expect(bundle.whitelist).toEqual(['web', 'db']);
+    expect(bundle.workspace.mcpServers.db).toBeDefined();
+    expect(bundle.workspace.mcpServers.db.command).toBe('d');
+    // URL 精确断言：同 base url 拼接 + query 参数
+    expect(String(spy.mock.calls[0]?.[0])).toBe(
+      `http://hub:8000/api/daemon/mcp/config?workspace_id=${wsId}`,
+    );
+    // 同 Bearer 头（与 fetchPlatformMcpConfig 一致）
+    const init = spy.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect((init?.headers as Record<string, string>)['Authorization']).toBe(
+      'Bearer tok',
+    );
+    spy.mockRestore();
+  });
+
+  it('workspaceId 缺省（undefined/null）→ URL 不带 query 参数', async () => {
+    const body = { platform_default: { mcpServers: {} }, whitelist: [] };
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(body), { status: 200 }),
+    );
+    const b1 = await fetchMcpBundle('http://hub:8000', 'tok');
+    expect(b1.workspace.mcpServers).toEqual({});
+    const b2 = await fetchMcpBundle(
+      'http://hub:8000',
+      'tok',
+      null as unknown as undefined,
+    );
+    expect(b2.workspace.mcpServers).toEqual({});
+    // 两次调用 URL 均不带 query（quick-chat/legacy shared 场景，D-008@v1）
+    expect(String(spy.mock.calls[0]?.[0])).toBe(
+      'http://hub:8000/api/daemon/mcp/config',
+    );
+    expect(String(spy.mock.calls[1]?.[0])).toBe(
+      'http://hub:8000/api/daemon/mcp/config',
+    );
+    spy.mockRestore();
+  });
+
+  it('预净化：非 stdio 剔除 + warn（带 server 名），type 缺省/stdio 保留，不抛错', async () => {
+    const body = {
+      platform_default: { mcpServers: {} },
+      whitelist: [],
+      workspace: {
+        mcpServers: {
+          good_stdio: { type: 'stdio', command: 'a', args: [] },
+          good_default: { command: 'b', args: [] }, // type 缺省视为 stdio（D-005@v2）
+          bad_sse: { type: 'sse', command: 'x', args: [], url: 'http://evil' },
+          bad_http: { type: 'http', command: 'y', args: [] },
+        },
+      },
+    };
+    const logs: { level: string; msg: string; data?: Record<string, unknown> }[] =
+      [];
+    const logger: McpConfigLogger = (level, msg, data) =>
+      logs.push({ level, msg, data });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(body), { status: 200 }),
+    );
+    const bundle = await fetchMcpBundle(
+      'http://hub:8000',
+      'tok',
+      'ws-1',
+      logger,
+    );
+    expect(Object.keys(bundle.workspace.mcpServers).sort()).toEqual([
+      'good_default',
+      'good_stdio',
+    ]);
+    const purgeWarns = logs.filter((l) => l.msg === 'mcp_server_prepurged_non_stdio');
+    expect(purgeWarns).toHaveLength(2);
+    expect(purgeWarns.every((l) => l.level === 'warn')).toBe(true);
+    expect(purgeWarns.map((l) => l.data?.server).sort()).toEqual([
+      'bad_http',
+      'bad_sse',
+    ]);
+    // 不抛错、无 error 级日志（会话创建路径安全，R-03）
+    expect(logs.every((l) => l.level !== 'error')).toBe(true);
+    vi.spyOn(globalThis, 'fetch').mockRestore();
+  });
+
+  it('回落①：fetch reject（网络不可达）→ platform 本地文件、whitelist 空、workspace 空，仅 warn', async () => {
+    const logs: { level: string; msg: string }[] = [];
+    const logger: McpConfigLogger = (level, msg) => logs.push({ level, msg });
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('net'));
+    const bundle = await fetchMcpBundle('http://hub:8000', 'tok', 'ws-1', logger);
+    // platform 回落本地 ~/.sillyhub/daemon/mcp.json（文件不存在 → 空配置不抛）
+    expect(bundle.platform.mcpServers).toBeDefined();
+    expect(bundle.whitelist).toEqual([]);
+    expect(bundle.workspace.mcpServers).toEqual({});
+    expect(logs.some((l) => l.msg === 'mcp_bundle_fetch_unreachable')).toBe(true);
+    expect(logs.every((l) => l.level !== 'error')).toBe(true);
+    vi.spyOn(globalThis, 'fetch').mockRestore();
+  });
+
+  it('回落②：非 200 → 同回落三态', async () => {
+    const logs: { level: string; msg: string }[] = [];
+    const logger: McpConfigLogger = (level, msg) => logs.push({ level, msg });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('x', { status: 500 }));
+    const bundle = await fetchMcpBundle('http://hub:8000', 'tok', 'ws-1', logger);
+    expect(bundle.platform.mcpServers).toBeDefined();
+    expect(bundle.whitelist).toEqual([]);
+    expect(bundle.workspace.mcpServers).toEqual({});
+    expect(logs.some((l) => l.msg === 'mcp_bundle_fetch_failed')).toBe(true);
+    vi.spyOn(globalThis, 'fetch').mockRestore();
+  });
+
+  it('回落③：非法 JSON → 解析失败被吞，同回落三态', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('not-json{{', { status: 200 }),
+    );
+    const bundle = await fetchMcpBundle('http://hub:8000', 'tok', 'ws-1');
+    expect(bundle.platform.mcpServers).toBeDefined();
+    expect(bundle.whitelist).toEqual([]);
+    expect(bundle.workspace.mcpServers).toEqual({});
+    vi.spyOn(globalThis, 'fetch').mockRestore();
+  });
+
+  it('回落④：响应缺 platform_default/whitelist 键 → 整体回落', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ foo: 1 }), { status: 200 }),
+    );
+    const bundle = await fetchMcpBundle('http://hub:8000', 'tok', 'ws-1');
+    expect(bundle.platform.mcpServers).toBeDefined();
+    expect(bundle.whitelist).toEqual([]);
+    expect(bundle.workspace.mcpServers).toEqual({});
+    vi.spyOn(globalThis, 'fetch').mockRestore();
+  });
+
+  it('响应缺 workspace 键（旧 backend，R-07）→ 仅 workspace 空，platform/whitelist 照常', async () => {
+    const body = {
+      platform_default: { mcpServers: { web: { command: 'w', args: [] } } },
+      whitelist: ['web'],
+    };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(body), { status: 200 }),
+    );
+    const bundle = await fetchMcpBundle('http://hub:8000', 'tok', 'ws-1');
+    expect(bundle.platform.mcpServers.web).toBeDefined();
+    expect(bundle.whitelist).toEqual(['web']);
+    expect(bundle.workspace.mcpServers).toEqual({});
+    vi.spyOn(globalThis, 'fetch').mockRestore();
+  });
+});

@@ -45,6 +45,7 @@ from app.modules.workspace.schema import (
 )
 from app.modules.workspace.service import WorkspaceService
 from app.modules.workspace.skills_view_service import (
+    McpConfigUpdateRequest,
     McpConfigViewResponse,
     SkillsViewResponse,
     SkillsViewService,
@@ -395,6 +396,25 @@ async def get_workspace_mcp_config(
     """
     service = SkillsViewService(session)
     return await service.get_mcp_config(workspace_id)
+
+
+@router.put("/{workspace_id}/mcp-config", response_model=McpConfigViewResponse)
+async def update_workspace_mcp_config(
+    workspace_id: uuid.UUID,
+    payload: McpConfigUpdateRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+) -> McpConfigViewResponse:
+    """写 workspace specDir/.mcp.json（2026-08-26-workspace-mcp-edit task-01）。
+
+    鉴权 WorkspaceWriter（``require_permission(WORKSPACE_WRITE)`` 自动取路径
+    ``{workspace_id}`` 做成员校验，非成员 403，同 mcp_gateway/router.py:114 模式）。
+    service 层完成：仅 stdio 校验（D-005@v2）+ ``<set>`` 服务端还原（D-003@v2）+
+    原子写（R-01）+ 审计上下文注入；错误经 AppError 全局 handler 序列化，router
+    不手写 HTTPException。成功返回写后脱敏视图（与 GET 同构）。
+    """
+    service = SkillsViewService(session)
+    return await service.update_mcp_config(workspace_id, payload, actor=user)
 
 
 @router.post("/{workspace_id}/rescan", response_model=ScanResponse)
