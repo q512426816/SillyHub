@@ -60,6 +60,17 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
 - 版本分发（dist_router.py，无 /api 前缀）：`/daemon/install.sh`、`/daemon/install.ps1`、
   `/daemon/latest.json`、`/daemon/latest/sillyhub-daemon.js`、
   `/daemon/latest/mcp-server.js`。
+  - `install.ps1` 编码契约（ql-20260826-006-cbf2）：源文件 `sillyhub-daemon/scripts/install.ps1`
+    带 **UTF-8 BOM**（WinPS 5.1 对无 BOM 文件按 GBK 解码致中文乱码切碎引号）；dist_router
+    用 `read_text(utf-8-sig)` 读模板以**剥掉 BOM**（防 `\ufeff` 污染 `irm | iex` 管道），
+    响应 `application/x-powershell; charset=utf-8`。
+  - nginx 部署契约（2026-08-26 修复）：宿主机 nginx（`/etc/nginx/sites-enabled/crrcdt`）
+    `location /daemon/` 用 `alias /var/www/sillyhub/daemon/` 直出静态目录（install.sh /
+    latest.json / .js bundle 走这份静态，无 server_url 注入需求）；但 `install.ps1` 必须
+    走后端（注入 `{{SERVER_URL}}` + 补 charset），故加精确匹配
+    `location = /daemon/install.ps1 { proxy_pass http://127.0.0.1:8001; ... }`（精确匹配
+    优先于 `/daemon/` 前缀）。曾踩坑：install.ps1 也走静态目录 → 吐无 BOM 旧副本 + 占位符
+    未替换 → 用户下载即 GBK 乱码解析失败。
 - 审计子域（audit/）：`POST /api/daemon/audit/batch`（daemon 批量审计上行）+ 查询端点。
 - 其它：`GET|POST /llm-proxy/{path:path}`（daemon 侧 LLM 网关转发）、
   `GET /skills/latest/manifest`（skills bundle 分发，agent 模块消费）。

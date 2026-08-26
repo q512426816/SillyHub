@@ -391,3 +391,15 @@
 根因：走查发现 Enter 部分场景不提交无反馈、登录名与邮箱前缀易混淆且错误不指路、运行中分身要点进浮层才知道在干什么。
 方案：onPressEnter 显式 submit 与 extra 及错误第二行指路；latest_action 批量 join 查询 80 截断仅 running 行加分身行预览与 gen:types。
 结果：backend daemon 1198 passed 与前端 26+75 passed 与 mypy 731 files 与 ruff 与 tsc 零错，已提交。
+
+## ql-20260826-006-cbf2 | 2026-08-26 08:50:14 | install.ps1 转 UTF-8 with BOM
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/scripts/install.ps1（头部加 UTF-8 BOM 供 WinPS5.1 正确按 UTF-8 解析）
+- backend/app/modules/daemon/dist_router.py（read_text 改 utf-8-sig 剥 BOM 防污染 iex）
+- .sillyspec/docs/backend/modules/daemon.md（补 install.ps1 编码契约）
+需求：install.ps1 转 UTF-8 with BOM，修复 WinPS5.1 GBK 误读解析报错
+根因：服务器 nginx 把 /daemon/install.ps1 当静态文件直出（application/octet-stream 无 charset）且源文件为 UTF-8 无 BOM，WinPS5.1 对无 BOM .ps1 按 GBK 解码，中文乱码切碎字符串引号致解析报错
+方案：install.ps1 头部加 UTF-8 BOM（保留 CRLF）；dist_router.py read_text 由 utf-8 改 utf-8-sig 剥 BOM 防 ufeff 污染 iex 管道；daemon.md 补编码契约文档
+结果：磁盘文件带 BOM 通过；后端读出首字符 # 无 BOM 残留通过；占位符替换 server_url 通过；body re-encode 无 BOM(iex 安全)通过；PowerShell ParseFile/ParseInput 均 0 解析错误（原无 BOM 报多个错）；body 7 行中文正常可读；dist_router.py 语法 OK。现成 pytest 因本地缺 aiobotocore（既有环境债与本改无关）跑不了，已用 stub 应用直测 get_install_ps1 真实行为代替

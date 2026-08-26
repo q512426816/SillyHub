@@ -102,7 +102,10 @@ async def get_install_ps1(request: Request) -> Response:
     if not path.is_file():
         raise HTTPException(status_code=404, detail="install.ps1 not bundled in image")
     server_url = _derive_server_url(request)
-    body = path.read_text(encoding="utf-8").replace("{{SERVER_URL}}", server_url)
+    # utf-8-sig：源文件 install.ps1 已带 UTF-8 BOM（供 Windows PowerShell 5.1 按 UTF-8
+    # 正确解析，否则 PS5.1 对无 BOM 文件按 GBK 解码致中文乱码切碎引号）。此处须剥掉 BOM，
+    # 否则 \ufeff 混入 body 首字符，``irm | iex`` 管道执行时损坏脚本。
+    body = path.read_text(encoding="utf-8-sig").replace("{{SERVER_URL}}", server_url)
     return Response(
         content=body,
         # 显式 charset=utf-8：``application/x-powershell`` 非 text/* ，starlette 不自动补
