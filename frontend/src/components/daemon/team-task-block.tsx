@@ -505,6 +505,16 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
                         ↳ {w.latest_action}
                       </span>
                     )}
+                    {/* UX 优化（2026-08-27）：completed 分身结论摘要——不用点浮层
+                        就能看到分身干了什么（worker_done 上报的 summary 前缀） */}
+                    {w.status === "completed" && w.result_summary && (
+                      <span
+                        className="w-full truncate text-[10.5px] text-success/80"
+                        title={w.result_summary}
+                      >
+                        ✓ {w.result_summary}
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={(e) => {

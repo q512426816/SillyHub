@@ -1,5 +1,5 @@
 /**
- * 工作区 Git 日志（git-log）— 前端取数入口（只读三端点）。
+ * 工作区 Git 日志（git-log）— 前端取数入口（只读端点）。
  *
  * - ``fetchGitLogCommits`` / ``fetchGitLogCommitDetail`` / ``fetchGitLogDiff``：
  *   走 ``apiFetch``（相对路径经 Next.js rewrite proxy，自带 401 单飞刷新），
@@ -11,9 +11,14 @@
  *   （``enabled`` 由组件层随选中/文件树展开态传入，对齐 ``useExplorerFile`` 形态）。
  * - queryKey 含 skip/limit/branch/author 与 sha/path 维度——分页或过滤条件变更
  *   天然换 key 失效缓存。
+ * - ``fetchGitLogStatus`` / ``useGitLogStatus``（2026-08-26-workspace-git-status
+ *   task-03 增量）：第四端点 status 的取数与 hook——staleTime 60s 显式覆盖全局
+ *   15s（每次请求含 daemon 侧远程 git fetch，两页共享缓存单次远程同步），
+ *   queryKey 追加 ``"status"`` 维度。
  *
  * 类型一律引用 ``@/lib/api-types`` 生成 schema（pnpm gen:types 产出），禁止手写。
- * 依据：design.md §7.1 / §7.4 + tasks/task-05.md。
+ * 依据：design.md §7.1 / §7.4 + tasks/task-05.md；
+ *       status 增量 design.md（2026-08-26-workspace-git-status）§5.4。
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -29,6 +34,12 @@ export type GitLogCommitDetailResponse =
   components["schemas"]["GitLogCommitDetailResponse"];
 export type GitLogFileStatItem = components["schemas"]["GitLogFileStatItem"];
 export type GitLogDiffResponse = components["schemas"]["GitLogDiffResponse"];
+// status 系三类型（2026-08-26-workspace-git-status task-03）：同样零手写，
+// 全部经 components.schemas 引用。
+export type GitLogStatusResponse =
+  components["schemas"]["GitLogStatusResponse"];
+export type GitLogDirtyItem = components["schemas"]["GitLogDirtyItem"];
+export type GitLogFetchItem = components["schemas"]["GitLogFetchItem"];
 
 /** git-log 查询 key（本文件内定义，供 hook 与组件层失效/复用缓存）。 */
 export const gitLogQueryKeys = {
@@ -43,6 +54,9 @@ export const gitLogQueryKeys = {
     ["git-log", workspaceId, "detail", sha] as const,
   diff: (workspaceId: string, sha: string, path: string) =>
     ["git-log", workspaceId, "diff", sha, path] as const,
+  // status（task-03）：workspaceId 维度下的轻状态——git-log 页刷新按钮
+  // invalidate 的 ["git-log", wid] 前缀天然覆盖本 key（commits 前缀兼容不变）。
+  status: (workspaceId: string) => ["git-log", workspaceId, "status"] as const,
 };
 
 // ── fetch 封装 ────────────────────────────────────────────────────────
@@ -92,6 +106,20 @@ export function fetchGitLogDiff(
   return apiFetch<GitLogDiffResponse>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/git-log/commits/${encodeURIComponent(sha)}/diff`,
     { query: { path } },
+  );
+}
+
+/**
+ * 工作区 Git 健康状态（GET /api/workspaces/{wid}/git-log/status，
+ * 2026-08-26-workspace-git-status task-03）：分支/未推送↑/远程新提交↓/
+ * 未提交改动 ±/未跟踪计数/自动 fetch 结果。status 端点经 daemon 侧
+ * ``git fetch``（15s 超时降级），非 git 工作区返回 ``git_mode="no_git"`` 空态。
+ */
+export function fetchGitLogStatus(
+  workspaceId: string,
+): Promise<GitLogStatusResponse> {
+  return apiFetch<GitLogStatusResponse>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/git-log/status`,
   );
 }
 
@@ -151,5 +179,24 @@ export function useGitLogDiff(
     queryKey: gitLogQueryKeys.diff(workspaceId, sha, path),
     queryFn: () => fetchGitLogDiff(workspaceId, sha, path),
     enabled: enabled && workspaceId !== "" && sha !== "" && path !== "",
+  });
+}
+
+/**
+ * 工作区 Git 状态查询——git-log 页与 sessions 门户共享缓存（D-003）。
+ *
+ * - ``staleTime`` 60s **显式覆盖**全局 15s（query-client.ts）：status 端点
+ *   每次请求都会触发 daemon 侧 ``git fetch``（网络同步），两页 60s 内共享
+ *   一次结果只 fetch 一次远程；``refetchOnWindowFocus`` 沿用全局——超 60s
+ *   后窗口聚焦再取一次（含远程 fetch）属预期（design §5.4 / Grill CC-09）；
+ * - 不设 ``refetchInterval``（design §3 非目标：无自动轮询，新鲜度由
+ *   staleTime + git-log 页刷新按钮 ``["git-log", wid]`` 前缀 invalidate 控制）。
+ */
+export function useGitLogStatus(workspaceId: string) {
+  return useQuery<GitLogStatusResponse, ApiError>({
+    queryKey: gitLogQueryKeys.status(workspaceId),
+    queryFn: () => fetchGitLogStatus(workspaceId),
+    enabled: workspaceId !== "",
+    staleTime: 60_000,
   });
 }

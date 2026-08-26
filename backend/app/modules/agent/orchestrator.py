@@ -422,6 +422,8 @@ async def render_session_orchestrator_briefing(
         "派发: dispatch_worker(objective, role?, target_workspace_id=…)；跨工作区必传 target_workspace_id。"
     )
     parts.append("最新机器状态随时可查: mission_status 工具。")
+    # UX: decisive orchestrator guidelines
+    parts.append("\n【行为准则】分身全完成后立即converge并给结果，不要先问。简单目标派1个分身。\n")
     return "\n".join(parts) + "\n" + _ORCHESTRATOR_CONSTRAINTS_TEXT
 
 

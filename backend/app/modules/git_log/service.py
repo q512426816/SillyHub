@@ -10,7 +10,8 @@
   CC-01）：git→继续查询 / direct→``git_mode=no_git`` 空态响应（非报错，前端
   渲染空态卡）/ unknown（传输失败）→按 offline 502 处理、不入枚举；
 - 平名 RPC 直连（design §5.2 CC-02）：``ws_hub.send_rpc`` 显式超时转发
-  ``git_log`` / ``git_refs`` / ``git_show`` / ``git_diff_file`` 四方法，不经
+  ``git_log`` / ``git_refs`` / ``git_show`` / ``git_diff_file`` / ``git_status``
+  五方法，不经
   ``HostFsDelegate`` 的 ``host_fs.`` 前缀降级通道、不走静默降级（offline/timeout
   显式 502/504；probe 是 delegate 的独立 helper、异常自持归 unknown，例外）；
 - refs 合并（design §7.4）：git_refs 结果按 sha 映射进各 commit 的 refs[]
@@ -25,13 +26,16 @@
   method_not_found→422（daemon 版本过旧）/ 契约缺口→502 显式上报。
 
 设计依据：``.sillyspec/changes/2026-08-25-workspace-git-log/design.md``
-（§5.2 安全约束 / §5.3 模块形态与错误映射 / §7.2 RPC 契约 / §7.4 数据结构）。
+（§5.2 安全约束 / §5.3 模块形态与错误映射 / §7.2 RPC 契约 / §7.4 数据结构）；
+status 端点另见 ``.sillyspec/changes/2026-08-26-workspace-git-status/design.md``
+（§5.3 端点形态 / §7.2 十四字段契约）。
 """
 
 from __future__ import annotations
 
 import re
 import uuid
+from datetime import UTC, datetime
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, Final, Literal
 
@@ -51,19 +55,25 @@ from app.modules.git_log.schema import (
     GitLogCommitItem,
     GitLogCommitsResponse,
     GitLogDiffResponse,
+    GitLogDirtyItem,
     GitLogEdgeItem,
+    GitLogFetchErrorCode,
+    GitLogFetchItem,
     GitLogFileStatItem,
     GitLogRefItem,
+    GitLogStatusResponse,
 )
 from app.modules.workspace.member_runtimes.resolver import MemberBindingResolver
 from app.modules.workspace.model import Workspace
 from app.modules.workspace.service import resolve_root_path_for_daemon
 
-# 显式超时（design §5.3）：log/show/diff 三档各 30s，常量风格对齐
-# explorer/service.py（send_rpc 默认 RPC_DEFAULT_TIMEOUT=10s 不够用）。
+# 显式超时（design §5.3）：log/show/diff/status 四档各 30s，常量风格对齐
+# explorer/service.py（send_rpc 默认 RPC_DEFAULT_TIMEOUT=10s 不够用）；status
+# 的 30s 为 daemon 侧整体兜底档（git fetch 的 15s 在 daemon 内部，§5.1/R-05）。
 LOG_RPC_TIMEOUT_SECONDS: Final[float] = 30.0
 SHOW_RPC_TIMEOUT_SECONDS: Final[float] = 30.0
 DIFF_RPC_TIMEOUT_SECONDS: Final[float] = 30.0
+STATUS_RPC_TIMEOUT_SECONDS: Final[float] = 30.0
 
 # 参数校验上限（design §7.1 / R-02 / §5.2 安全约束）。
 MAX_SKIP: Final[int] = 2000
@@ -288,7 +298,7 @@ def _check_repo_rel_path(path: str, root_path: str, workspace_id: uuid.UUID) -> 
 
 # ── daemon RPC 结果模型（design §7.2 契约的 backend 侧严格校验面）────────────
 #
-# 与 explorer 的「响应模型即 daemon 结果」不同：git_log 系四方法的结果结构与
+# 与 explorer 的「响应模型即 daemon 结果」不同：git_log 系五方法的结果结构与
 # HTTP 响应（§7.4）不同形（含 error 文案、add/del 二进制可空等），故在 service
 # 内私有建模；缺字段 / 类型不符一律 ValidationError → GitLogContractGap 502
 # 显式上报（explorer 同纪律，禁止 ``.get()`` 默认值掩盖契约缺口）。
@@ -355,6 +365,30 @@ class _DaemonDiffResult(BaseModel):
     diff: str
     truncated: bool
     binary: bool
+    error: str | None
+
+
+class _DaemonGitStatusResult(BaseModel):
+    """git_status 结果（2026-08-26-workspace-git-status §7.2 十四字段契约）。
+
+    fetch 失败走 ``fetch_error`` 代号降级（不置 error、不阻断其余字段）；
+    ``error`` 仅 git 命令真失败时非空。空仓库：branch/upstream/ahead/behind/
+    dirty 四计数/head_short 全 null + empty=true（§5.2）。
+    """
+
+    branch: str | None
+    detached: bool
+    upstream: str | None
+    ahead: int | None
+    behind: int | None
+    files_changed: int | None
+    additions: int | None
+    deletions: int | None
+    untracked_count: int | None
+    head_short: str | None
+    empty: bool
+    fetch_performed: bool
+    fetch_error: GitLogFetchErrorCode | None
     error: str | None
 
 
@@ -555,7 +589,7 @@ class GitLogService:
                 exc, daemon_id=daemon_id, method=method, context=context
             ) from exc
 
-    # ── 三个查询方法（design §7.1 三端点逐一对齐）────────────────────────────
+    # ── 四个查询方法（design §7.1 端点逐一对齐）──────────────────────────────
 
     async def list_commits(
         self,
@@ -867,4 +901,87 @@ class GitLogService:
             diff=diff_result.diff,
             truncated=diff_result.truncated,
             binary=diff_result.binary,
+        )
+
+    async def get_status(
+        self,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> GitLogStatusResponse:
+        """工作区 Git 健康状态（status 变更 §7.1；git_status RPC 30s）。
+
+        链路（status 变更 §5.3）：绑定解析 → probe 三态映射（direct→no_git
+        空态 200，字段全空、同 commits 端点语义）→ 平名 RPC git_status →
+        十四字段契约校验（缺字段 → GitLogContractGap 502）→ §7.2 → §5.3
+        映射：fetch_performed / fetch_error 拆进 fetch.performed / fetch.error
+        嵌套，其余直传；synced_at = backend 组装时刻。fetch 降级（fetch_error
+        非空）时 behind 仍返回 stale 值 + fetch.performed=false（前端黄条依据）。
+        """
+        daemon_id, root_path = await self._resolve_binding(workspace_id, user_id)
+        workspace = await self._fetch_workspace(workspace_id)
+        if await self._probe_git_mode(workspace) == "direct":
+            # 非 git 工作区 → 200 空态（字段全空，非报错，同 commits 语义）。
+            return GitLogStatusResponse(
+                git_mode="no_git",
+                branch=None,
+                detached=False,
+                upstream=None,
+                ahead=None,
+                behind=None,
+                dirty=GitLogDirtyItem(
+                    files_changed=None,
+                    additions=None,
+                    deletions=None,
+                    untracked_count=None,
+                ),
+                head_short=None,
+                empty=False,
+                fetch=GitLogFetchItem(performed=False, error=None),
+                synced_at=datetime.now(UTC).isoformat(),
+            )
+
+        daemon_root = resolve_root_path_for_daemon(root_path)
+        result = _validate_result(
+            await self._send_git_rpc(
+                daemon_id,
+                "git_status",
+                {"root": daemon_root},
+                timeout=STATUS_RPC_TIMEOUT_SECONDS,
+                context={"workspace_id": str(workspace_id)},
+            ),
+            _DaemonGitStatusResult,
+            method="git_status",
+            daemon_id=daemon_id,
+        )
+        if result.error:
+            # daemon 只在 git 命令真失败时置 error（fetch 失败已由 fetch_error
+            # 降级承载、不进此分支）→ 统一 502，原始 stderr 文案保 details。
+            raise GitLogDaemonRemoteError(
+                "守护进程查询 Git 状态失败，请稍后重试。",
+                details={
+                    "daemon_id": str(daemon_id),
+                    "method": "git_status",
+                    "daemon_message": result.error,
+                    "workspace_id": str(workspace_id),
+                },
+            )
+        return GitLogStatusResponse(
+            git_mode="git",
+            branch=result.branch,
+            detached=result.detached,
+            upstream=result.upstream,
+            ahead=result.ahead,
+            behind=result.behind,
+            dirty=GitLogDirtyItem(
+                files_changed=result.files_changed,
+                additions=result.additions,
+                deletions=result.deletions,
+                untracked_count=result.untracked_count,
+            ),
+            head_short=result.head_short,
+            empty=result.empty,
+            # §7.2 → §5.3 改名映射（§7.3）：fetch_performed/fetch_error 拆进
+            # fetch 嵌套；fetch_error 非空时 behind 已是 stale 值，直传即降级形态。
+            fetch=GitLogFetchItem(performed=result.fetch_performed, error=result.fetch_error),
+            synced_at=datetime.now(UTC).isoformat(),
         )

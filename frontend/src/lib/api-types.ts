@@ -362,9 +362,10 @@ export interface paths {
          *
          *     弹层机器状态统一后端口径（任一成员 binding，含他人绑定，消除本人/他人
          *     binding 展示不一致 UB-2）：``git_mode/daemon_name/daemon_online`` 三字段与
-         *     mission_status 的 scope_workspaces 完全同源——逐工作区经
-         *     ``orchestrator.collect_single_workspace_status``（task-01 单 ws 收集共享
-         *     函数，口径单一来源）+ ``probe_workspace_git_mode``（task-02 三态探测）组装。
+         *     mission_status 的 scope_workspaces 完全同源——经
+         *     ``orchestrator.collect_many_workspace_statuses``（ql-20260826-012 批量收集，
+         *     3 条固定查询替代原逐 ws 4 条；条目组装与单 ws 路径共享函数，口径单一来源）
+         *     + ``probe_workspace_git_mode``（task-02 三态探测）组装。
          *
          *     只读无状态变化（design §7.5）；每次调用实时探测不缓存（R-02）；探测 RPC
          *     失败/未绑 daemon 归 ``unknown`` 不抛 5xx（fail-safe）。查无行的 workspace_id
@@ -940,11 +941,12 @@ export interface paths {
         };
         /**
          * Get Office Config
-         * @description Office 家族文件的 DS 预览配置（FR-01/03/04/05）。
+         * @description Office 家族文件预览配置（FR-01/03/04/05；ql-20260826-011 扩展双模式）。
          *
-         *     返回 ``{ds_url, config}``——config 为可直接交给 ``DocsAPI.DocEditor`` 的完整
-         *     对象（document.url 已指向一次性文件令牌端点，顶层 token 为 DS 签名）。
-         *     503 = 未启用（前端降级本地渲染器）。
+         *     返回 ``{"mode": "pdf", "pdf_path"}``（Word 走 LibreOffice→PDF，docGrid 排版
+         *     保真）或 ``{"mode": "ds", "ds_url", "config"}``——config 可直接交给
+         *     ``DocsAPI.DocEditor``（document.url 已指向一次性文件令牌端点，顶层 token 为
+         *     DS 签名）。503 = 未启用（前端降级本地渲染器）。
          */
         get: operations["get_office_config_api_preview_office_config_get"];
         put?: never;
@@ -1225,6 +1227,30 @@ export interface paths {
          * @description 单文件 unified diff（design §7.1 端点 ③，RPC 超时 30s，超 64KB 截断）。
          */
         get: operations["get_git_log_diff_api_workspaces__workspace_id__git_log_commits__sha__diff_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/git-log/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Git Log Status
+         * @description 工作区 Git 健康状态（status 变更 §7.1 端点 ④，RPC 超时 30s，无 query 参数）。
+         *
+         *     分支/upstream/ahead-behind/未提交改动汇总 + 自动 fetch 结果（失败降级
+         *     不阻断：fetch.performed=false + error 代号 + behind stale 值），
+         *     synced_at 为 backend 组装时刻（status 变更 §5.3）。
+         */
+        get: operations["get_git_log_status_api_workspaces__workspace_id__git_log_status_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1543,6 +1569,11 @@ export interface paths {
          *     标题取该会话最早一条 channel=user_input 的 AgentRunLog 摘要（前 30 字，X-04，
          *     共享 helper ``_fetch_session_titles``）。按 last_active_at desc 排序（Python
          *     排序规避 PG/SQLite 方言差异）。
+         *
+         *     ql-20260826-012：原查询无界全量（变更挂的会话无限增长）。SQL 侧加
+         *     ``last_active_at desc + nulls_last + limit`` 取数窗口（显式 nulls_last 消除
+         *     PG/SQLite 方言分叉，nulls_last 两方言 3.30+ 均原生支持），下方的 Python
+         *     最终排序保留（幂等，口径不变）——超窗的远古会话不再返回。
          */
         get: operations["list_change_sessions_api_workspaces__workspace_id__changes__change_id__sessions_get"];
         put?: never;
@@ -12442,6 +12473,32 @@ export interface components {
             binary: boolean;
         };
         /**
+         * GitLogDirtyItem
+         * @description 未提交改动汇总（git diff HEAD --numstat 单源口径，CC-05；空仓库全 null）。
+         */
+        GitLogDirtyItem: {
+            /**
+             * Files Changed
+             * @description 变更文件数（≡ numstat 行数，staged+unstaged 合并；空仓库为 null）
+             */
+            files_changed: number | null;
+            /**
+             * Additions
+             * @description 新增行数合计（staged+unstaged 合并；空仓库为 null）
+             */
+            additions: number | null;
+            /**
+             * Deletions
+             * @description 删除行数合计（staged+unstaged 合并；空仓库为 null）
+             */
+            deletions: number | null;
+            /**
+             * Untracked Count
+             * @description 未跟踪文件数（porcelain v2「?」条目计数；空仓库为 null）
+             */
+            untracked_count: number | null;
+        };
+        /**
          * GitLogEdgeItem
          * @description 泳道父边（graph_layout 计算；目标在窗口可见范围内才输出，§5.3 lookahead 退化）。
          */
@@ -12462,6 +12519,22 @@ export interface components {
              * @enum {string}
              */
             kind: "straight" | "curve";
+        };
+        /**
+         * GitLogFetchItem
+         * @description 自动 fetch 结果（D-001：失败降级不阻断其余字段，前端黄条依据）。
+         */
+        GitLogFetchItem: {
+            /**
+             * Performed
+             * @description 本次是否成功完成 git fetch（false 时 behind 为上次同步的 stale 值）
+             */
+            performed: boolean;
+            /**
+             * Error
+             * @description fetch 失败代号：fetch_timeout=超时 / fetch_failed=命令失败 / no_remote=无远程仓库；成功为 null
+             */
+            error: ("fetch_timeout" | "fetch_failed" | "no_remote") | null;
         };
         /**
          * GitLogFileStatItem
@@ -12505,6 +12578,62 @@ export interface components {
              * @enum {string}
              */
             kind: "branch" | "remote" | "tag" | "head";
+        };
+        /**
+         * GitLogStatusResponse
+         * @description GET /api/workspaces/{wid}/git-log/status 响应（工作区 Git 健康状态，§5.3）。
+         */
+        GitLogStatusResponse: {
+            /**
+             * Git Mode
+             * @description git=git 仓库 / no_git=非 git 工作区（空态，字段全空）
+             * @enum {string}
+             */
+            git_mode: "git" | "no_git";
+            /**
+             * Branch
+             * @description 当前分支名（detached HEAD 时为 HEAD 短哈希；空仓库/非 git 为 null）
+             */
+            branch: string | null;
+            /**
+             * Detached
+             * @description 是否 detached HEAD（true 时 branch 即短哈希）
+             */
+            detached: boolean;
+            /**
+             * Upstream
+             * @description 上游跟踪分支短名（如 origin/main；本地新分支无跟踪为 null）
+             */
+            upstream: string | null;
+            /**
+             * Ahead
+             * @description 未推送提交数（无 upstream 为 null）
+             */
+            ahead: number | null;
+            /**
+             * Behind
+             * @description 远程新提交数（fetch 失败时为上次同步的 stale 值，配 fetch.error 提示）
+             */
+            behind: number | null;
+            /** @description 未提交改动汇总（staged+unstaged 合并口径） */
+            dirty: components["schemas"]["GitLogDirtyItem"];
+            /**
+             * Head Short
+             * @description HEAD 短哈希（branch.oid 前 8 位；空仓库/非 git 为 null）
+             */
+            head_short: string | null;
+            /**
+             * Empty
+             * @description 是否空仓库（无任何提交，前端空态提示）
+             */
+            empty: boolean;
+            /** @description 自动 fetch 结果（performed=false + error 代号 → 前端黄条降级提示） */
+            fetch: components["schemas"]["GitLogFetchItem"];
+            /**
+             * Synced At
+             * @description 状态组装时刻（ISO 8601 UTC，backend 生成；前端显示「已同步 · HH:MM」）
+             */
+            synced_at: string;
         };
         /**
          * GitOperationListResponse
@@ -19025,6 +19154,8 @@ export interface components {
             sub_workers_count?: number | null;
             /** Latest Action */
             latest_action?: string | null;
+            /** Result Summary */
+            result_summary?: string | null;
         };
         /**
          * TeamWorkspaceRef
@@ -22834,6 +22965,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GitLogDiffResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_git_log_status_api_workspaces__workspace_id__git_log_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitLogStatusResponse"];
                 };
             };
             /** @description Validation Error */

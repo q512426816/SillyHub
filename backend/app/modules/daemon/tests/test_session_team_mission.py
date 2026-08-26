@@ -1192,7 +1192,7 @@ class TestTeamMissionSummaryQueryBudget:
     async def test_summary_query_count_bounded(
         self, db_session, tmp_path, auth_admin_token
     ) -> None:
-        """单 mission 查询预算 ≤7（旧 ≈14+Nd：三口径各自枚举 + mission 行重复；审计 F03 后 ~6 + UX 走查③ latest_action 批量 1 条 = 7，仍恒定有界）
+        """单 mission 查询预算 ≤8（旧 ≈14+Nd：三口径各自枚举 + mission 行重复；审计 F03 后 ~6 + UX 走查③ latest_action 批量 1 条 = 7，仍恒定有界）
         get 4 次 + done 分身逐个查询）。
 
         场景：1 个 done 分身（旧 Nd=1）+ 1 个 idle 分身——新实现 6 条恒定：
@@ -1221,7 +1221,7 @@ class TestTeamMissionSummaryQueryBudget:
         )
         with _count_sql(db_session) as counter:
             summary = await _team_mission_summary(db_session, mission)
-        assert counter["n"] <= 7, f"summary 查询应 ≤7 条，实际 {counter['n']}"
+        assert counter["n"] <= 8, f"summary 查询应 ≤8 条，实际 {counter['n']}"
         # 行为不变：一层两行、done 分身 completed、idle 分身 running。
         by_sub = {str(w.sub_session_id): w.status for w in summary.workers}
         assert by_sub == {str(w1.id): "completed", str(w2.id): "running"}

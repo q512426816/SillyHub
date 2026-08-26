@@ -709,7 +709,7 @@
           "workspace"
         ],
         "summary": "Probe Workspaces",
-        "description": "批量探测工作区 git 模式 + 绑定机器状态（task-10 / FR-03 / D-008@v2 / design §5.C）。\n\n弹层机器状态统一后端口径（任一成员 binding，含他人绑定，消除本人/他人\nbinding 展示不一致 UB-2）：``git_mode/daemon_name/daemon_online`` 三字段与\nmission_status 的 scope_workspaces 完全同源——逐工作区经\n``orchestrator.collect_single_workspace_status``（task-01 单 ws 收集共享\n函数，口径单一来源）+ ``probe_workspace_git_mode``（task-02 三态探测）组装。\n\n只读无状态变化（design §7.5）；每次调用实时探测不缓存（R-02）；探测 RPC\n失败/未绑 daemon 归 ``unknown`` 不抛 5xx（fail-safe）。查无行的 workspace_id\n跳过不报错（与 collect_scope 无效 id 跳过同语义）。",
+        "description": "批量探测工作区 git 模式 + 绑定机器状态（task-10 / FR-03 / D-008@v2 / design §5.C）。\n\n弹层机器状态统一后端口径（任一成员 binding，含他人绑定，消除本人/他人\nbinding 展示不一致 UB-2）：``git_mode/daemon_name/daemon_online`` 三字段与\nmission_status 的 scope_workspaces 完全同源——经\n``orchestrator.collect_many_workspace_statuses``（ql-20260826-012 批量收集，\n3 条固定查询替代原逐 ws 4 条；条目组装与单 ws 路径共享函数，口径单一来源）\n+ ``probe_workspace_git_mode``（task-02 三态探测）组装。\n\n只读无状态变化（design §7.5）；每次调用实时探测不缓存（R-02）；探测 RPC\n失败/未绑 daemon 归 ``unknown`` 不抛 5xx（fail-safe）。查无行的 workspace_id\n跳过不报错（与 collect_scope 无效 id 跳过同语义）。",
         "operationId": "probe_workspaces_api_workspaces_probe_post",
         "requestBody": {
           "content": {
@@ -2421,7 +2421,7 @@
           "preview"
         ],
         "summary": "Get Office Config",
-        "description": "Office 家族文件的 DS 预览配置（FR-01/03/04/05）。\n\n返回 ``{ds_url, config}``——config 为可直接交给 ``DocsAPI.DocEditor`` 的完整\n对象（document.url 已指向一次性文件令牌端点，顶层 token 为 DS 签名）。\n503 = 未启用（前端降级本地渲染器）。",
+        "description": "Office 家族文件预览配置（FR-01/03/04/05；ql-20260826-011 扩展双模式）。\n\n返回 ``{\"mode\": \"pdf\", \"pdf_path\"}``（Word 走 LibreOffice→PDF，docGrid 排版\n保真）或 ``{\"mode\": \"ds\", \"ds_url\", \"config\"}``——config 可直接交给\n``DocsAPI.DocEditor``（document.url 已指向一次性文件令牌端点，顶层 token 为\nDS 签名）。503 = 未启用（前端降级本地渲染器）。",
         "operationId": "get_office_config_api_preview_office_config_get",
         "parameters": [
           {
@@ -3261,6 +3261,50 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/git-log/status": {
+      "get": {
+        "tags": [
+          "git-log"
+        ],
+        "summary": "Get Git Log Status",
+        "description": "工作区 Git 健康状态（status 变更 §7.1 端点 ④，RPC 超时 30s，无 query 参数）。\n\n分支/upstream/ahead-behind/未提交改动汇总 + 自动 fetch 结果（失败降级\n不阻断：fetch.performed=false + error 代号 + behind stale 值），\nsynced_at 为 backend 组装时刻（status 变更 §5.3）。",
+        "operationId": "get_git_log_status_api_workspaces__workspace_id__git_log_status_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GitLogStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/auth/login": {
       "post": {
         "tags": [
@@ -4035,7 +4079,7 @@
           "change"
         ],
         "summary": "List Change Sessions",
-        "description": "列出某变更下的全部会话（2026-07-09-change-detail-session task-09）。\n\n跨成员可见（D-005@v1，不加 user_id 过滤），鉴权复用 CHANGE_READ（X-03）。\ntask-03（2026-08-25-session-spec-binding / FR-03 / D-002@v1）：数据源从\n``AgentSession.change_id`` 单 FK 切换为 ``change_session_links`` M:N JOIN——\nlinks 为唯一关联真相，存量单 FK 由迁移播种成 link 行（design §5.W1.2）不丢；\n``AgentSession.change_id`` 列继续写入不动（D-002@v1 冻结语义）。\n标题取该会话最早一条 channel=user_input 的 AgentRunLog 摘要（前 30 字，X-04，\n共享 helper ``_fetch_session_titles``）。按 last_active_at desc 排序（Python\n排序规避 PG/SQLite 方言差异）。",
+        "description": "列出某变更下的全部会话（2026-07-09-change-detail-session task-09）。\n\n跨成员可见（D-005@v1，不加 user_id 过滤），鉴权复用 CHANGE_READ（X-03）。\ntask-03（2026-08-25-session-spec-binding / FR-03 / D-002@v1）：数据源从\n``AgentSession.change_id`` 单 FK 切换为 ``change_session_links`` M:N JOIN——\nlinks 为唯一关联真相，存量单 FK 由迁移播种成 link 行（design §5.W1.2）不丢；\n``AgentSession.change_id`` 列继续写入不动（D-002@v1 冻结语义）。\n标题取该会话最早一条 channel=user_input 的 AgentRunLog 摘要（前 30 字，X-04，\n共享 helper ``_fetch_session_titles``）。按 last_active_at desc 排序（Python\n排序规避 PG/SQLite 方言差异）。\n\nql-20260826-012：原查询无界全量（变更挂的会话无限增长）。SQL 侧加\n``last_active_at desc + nulls_last + limit`` 取数窗口（显式 nulls_last 消除\nPG/SQLite 方言分叉，nulls_last 两方言 3.30+ 均原生支持），下方的 Python\n最终排序保留（幂等，口径不变）——超窗的远古会话不再返回。",
         "operationId": "list_change_sessions_api_workspaces__workspace_id__changes__change_id__sessions_get",
         "parameters": [
           {
@@ -36677,6 +36721,67 @@
         "title": "GitLogDiffResponse",
         "description": "GET /api/workspaces/{wid}/git-log/commits/{sha}/diff 响应（单文件 unified diff）。"
       },
+      "GitLogDirtyItem": {
+        "properties": {
+          "files_changed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Files Changed",
+            "description": "变更文件数（≡ numstat 行数，staged+unstaged 合并；空仓库为 null）"
+          },
+          "additions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Additions",
+            "description": "新增行数合计（staged+unstaged 合并；空仓库为 null）"
+          },
+          "deletions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deletions",
+            "description": "删除行数合计（staged+unstaged 合并；空仓库为 null）"
+          },
+          "untracked_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Untracked Count",
+            "description": "未跟踪文件数（porcelain v2「?」条目计数；空仓库为 null）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "files_changed",
+          "additions",
+          "deletions",
+          "untracked_count"
+        ],
+        "title": "GitLogDirtyItem",
+        "description": "未提交改动汇总（git diff HEAD --numstat 单源口径，CC-05；空仓库全 null）。"
+      },
       "GitLogEdgeItem": {
         "properties": {
           "to_seq": {
@@ -36707,6 +36812,39 @@
         ],
         "title": "GitLogEdgeItem",
         "description": "泳道父边（graph_layout 计算；目标在窗口可见范围内才输出，§5.3 lookahead 退化）。"
+      },
+      "GitLogFetchItem": {
+        "properties": {
+          "performed": {
+            "type": "boolean",
+            "title": "Performed",
+            "description": "本次是否成功完成 git fetch（false 时 behind 为上次同步的 stale 值）"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "fetch_timeout",
+                  "fetch_failed",
+                  "no_remote"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "fetch 失败代号：fetch_timeout=超时 / fetch_failed=命令失败 / no_remote=无远程仓库；成功为 null"
+          }
+        },
+        "type": "object",
+        "required": [
+          "performed",
+          "error"
+        ],
+        "title": "GitLogFetchItem",
+        "description": "自动 fetch 结果（D-001：失败降级不阻断其余字段，前端黄条依据）。"
       },
       "GitLogFileStatItem": {
         "properties": {
@@ -36767,6 +36905,118 @@
         ],
         "title": "GitLogRefItem",
         "description": "提交装饰引用（service 由 git_refs 结果按 sha 合并写入；HEAD 亦入对应提交）。"
+      },
+      "GitLogStatusResponse": {
+        "properties": {
+          "git_mode": {
+            "type": "string",
+            "enum": [
+              "git",
+              "no_git"
+            ],
+            "title": "Git Mode",
+            "description": "git=git 仓库 / no_git=非 git 工作区（空态，字段全空）"
+          },
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch",
+            "description": "当前分支名（detached HEAD 时为 HEAD 短哈希；空仓库/非 git 为 null）"
+          },
+          "detached": {
+            "type": "boolean",
+            "title": "Detached",
+            "description": "是否 detached HEAD（true 时 branch 即短哈希）"
+          },
+          "upstream": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upstream",
+            "description": "上游跟踪分支短名（如 origin/main；本地新分支无跟踪为 null）"
+          },
+          "ahead": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ahead",
+            "description": "未推送提交数（无 upstream 为 null）"
+          },
+          "behind": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Behind",
+            "description": "远程新提交数（fetch 失败时为上次同步的 stale 值，配 fetch.error 提示）"
+          },
+          "dirty": {
+            "$ref": "#/components/schemas/GitLogDirtyItem",
+            "description": "未提交改动汇总（staged+unstaged 合并口径）"
+          },
+          "head_short": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head Short",
+            "description": "HEAD 短哈希（branch.oid 前 8 位；空仓库/非 git 为 null）"
+          },
+          "empty": {
+            "type": "boolean",
+            "title": "Empty",
+            "description": "是否空仓库（无任何提交，前端空态提示）"
+          },
+          "fetch": {
+            "$ref": "#/components/schemas/GitLogFetchItem",
+            "description": "自动 fetch 结果（performed=false + error 代号 → 前端黄条降级提示）"
+          },
+          "synced_at": {
+            "type": "string",
+            "title": "Synced At",
+            "description": "状态组装时刻（ISO 8601 UTC，backend 生成；前端显示「已同步 · HH:MM」）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "git_mode",
+          "branch",
+          "detached",
+          "upstream",
+          "ahead",
+          "behind",
+          "dirty",
+          "head_short",
+          "empty",
+          "fetch",
+          "synced_at"
+        ],
+        "title": "GitLogStatusResponse",
+        "description": "GET /api/workspaces/{wid}/git-log/status 响应（工作区 Git 健康状态，§5.3）。"
       },
       "GitOperationListResponse": {
         "properties": {
@@ -55621,6 +55871,17 @@
               }
             ],
             "title": "Latest Action"
+          },
+          "result_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Summary"
           }
         },
         "type": "object",

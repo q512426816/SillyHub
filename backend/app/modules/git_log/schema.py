@@ -8,10 +8,15 @@
 - ``seq`` 为全局绝对序（skip + 窗口内偏移），追加页 SVG y 坐标与边目标
   均以 seq 为基准（CC-10）；
 - ``del`` 是 Python 关键字，Python 侧字段名用 ``del_`` + alias 序列化为
-  ``del``（FastAPI response 默认 by_alias=True，JSON 契约不变）。
+  ``del``（FastAPI response 默认 by_alias=True，JSON 契约不变）；
+- status 系三模型（GitLogStatusResponse + dirty/fetch 嵌套）为
+  2026-08-26-workspace-git-status 增量：daemon 契约（§7.2）的
+  fetch_performed / fetch_error 在 backend 侧拆进 fetch.performed /
+  fetch.error 嵌套（§7.3）；synced_at 为 backend 组装时刻（非 daemon 数据）。
 
 设计依据：``.sillyspec/changes/2026-08-25-workspace-git-log/design.md``
-§5.3 / §7.4。
+§5.3 / §7.4；status 模型另见
+``.sillyspec/changes/2026-08-26-workspace-git-status/design.md`` §5.3 / §7.2。
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ GitLogMode = Literal["git", "no_git"]
 GitLogEdgeKind = Literal["straight", "curve"]
 GitLogRefKind = Literal["branch", "remote", "tag", "head"]
 GitLogBranchKind = Literal["branch", "remote"]
+GitLogFetchErrorCode = Literal["fetch_timeout", "fetch_failed", "no_remote"]
 
 
 class GitLogEdgeItem(BaseModel):
@@ -115,3 +121,66 @@ class GitLogDiffResponse(BaseModel):
     )
     truncated: bool = Field(..., description="是否超 64KB 上限被截断")
     binary: bool = Field(..., description="是否二进制文件（true 时前端直接提示「二进制文件」）")
+
+
+class GitLogDirtyItem(BaseModel):
+    """未提交改动汇总（git diff HEAD --numstat 单源口径，CC-05；空仓库全 null）。"""
+
+    files_changed: int | None = Field(
+        ..., description="变更文件数（≡ numstat 行数，staged+unstaged 合并；空仓库为 null）"
+    )
+    additions: int | None = Field(
+        ..., description="新增行数合计（staged+unstaged 合并；空仓库为 null）"
+    )
+    deletions: int | None = Field(
+        ..., description="删除行数合计（staged+unstaged 合并；空仓库为 null）"
+    )
+    untracked_count: int | None = Field(
+        ..., description="未跟踪文件数（porcelain v2「?」条目计数；空仓库为 null）"
+    )
+
+
+class GitLogFetchItem(BaseModel):
+    """自动 fetch 结果（D-001：失败降级不阻断其余字段，前端黄条依据）。"""
+
+    performed: bool = Field(
+        ..., description="本次是否成功完成 git fetch（false 时 behind 为上次同步的 stale 值）"
+    )
+    error: GitLogFetchErrorCode | None = Field(
+        ...,
+        description=(
+            "fetch 失败代号：fetch_timeout=超时 / fetch_failed=命令失败 / "
+            "no_remote=无远程仓库；成功为 null"
+        ),
+    )
+
+
+class GitLogStatusResponse(BaseModel):
+    """GET /api/workspaces/{wid}/git-log/status 响应（工作区 Git 健康状态，§5.3）。"""
+
+    git_mode: GitLogMode = Field(
+        ..., description="git=git 仓库 / no_git=非 git 工作区（空态，字段全空）"
+    )
+    branch: str | None = Field(
+        ..., description="当前分支名（detached HEAD 时为 HEAD 短哈希；空仓库/非 git 为 null）"
+    )
+    detached: bool = Field(..., description="是否 detached HEAD（true 时 branch 即短哈希）")
+    upstream: str | None = Field(
+        ..., description="上游跟踪分支短名（如 origin/main；本地新分支无跟踪为 null）"
+    )
+    ahead: int | None = Field(..., description="未推送提交数（无 upstream 为 null）")
+    behind: int | None = Field(
+        ..., description="远程新提交数（fetch 失败时为上次同步的 stale 值，配 fetch.error 提示）"
+    )
+    dirty: GitLogDirtyItem = Field(..., description="未提交改动汇总（staged+unstaged 合并口径）")
+    head_short: str | None = Field(
+        ..., description="HEAD 短哈希（branch.oid 前 8 位；空仓库/非 git 为 null）"
+    )
+    empty: bool = Field(..., description="是否空仓库（无任何提交，前端空态提示）")
+    fetch: GitLogFetchItem = Field(
+        ..., description="自动 fetch 结果（performed=false + error 代号 → 前端黄条降级提示）"
+    )
+    synced_at: str = Field(
+        ...,
+        description="状态组装时刻（ISO 8601 UTC，backend 生成；前端显示「已同步 · HH:MM」）",
+    )

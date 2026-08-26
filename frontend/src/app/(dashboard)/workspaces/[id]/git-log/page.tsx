@@ -31,6 +31,7 @@ import { FolderX, GitBranch, RefreshCw } from "lucide-react";
 
 import { CommitDetailDrawer } from "@/components/git-log/commit-detail-drawer";
 import { CommitList } from "@/components/git-log/commit-list";
+import { GitStatusBar } from "@/components/git-log/git-status-bar";
 import { PageContainer, PageHeader } from "@/components/layout";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ErrorBanner } from "@/components/ui/error-banner";
@@ -182,6 +183,11 @@ export default function WorkspaceGitLogPage() {
   return (
     <PageContainer size="full" className="gap-3">
       <PageHeader title="Git 日志" subtitle={subtitle} />
+
+      {/* task-03（2026-08-26-workspace-git-status）：工作区 Git 状态条完整态
+          （分支/↑↓/改动行数/同步时刻，staleTime 60s 与 sessions 门户紧凑态
+          共享缓存；no_git/查询失败时组件自渲染 null，不与下方空态卡重复） */}
+      <GitStatusBar workspaceId={workspaceId} variant="full" />
 
       {degradeCard}
 

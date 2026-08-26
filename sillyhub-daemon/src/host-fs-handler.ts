@@ -46,6 +46,14 @@
  *   git_diff_file，不走 host_fs. 前缀通道，CC-02），供 backend git_log 模块直连消费。
  *   全部只读子命令（log / for-each-ref / show / rev-parse），空仓库捕获转空态（CC-17）。
  *
+ * **task-01（2026-08-26-workspace-git-status）git_status 第 5 个平名 git 方法**
+ *   （Grill CC-11 更正计数）：十四字段只读状态（branch/detached/upstream/ahead/
+ *   behind/dirty 三计数/head_short/empty + fetch 降级双字段 + error，design §5.2 /
+ *   §7.2）。骨架同上（root 唯一入参 + 只读子命令 fetch/remote/status/diff 独立
+ *   argv）；差异仅 fetch：runCmd 超时丢弃 killed/signal 无法判超时 → 改用本文件
+ *   runCommand 同款局部 execFile（15s 超时，Grill CC-02），失败记 fetch_error
+ *   不阻断后续采集。
+ *
  * **非目标**：
  *   - 不做权限精细化裁决（per-runtime PolicyEngine 是 list_dir 专属；host_fs 走 daemon
  *     实体级 allowed_roots，与 list_dir RPC handler 等价）。
@@ -240,6 +248,48 @@ export interface GitDiffFileResult {
   /** true = 二进制文件（stdout 含 "Binary files"）。 */
   binary: boolean;
   /** 失败文案；成功为 null。 */
+  error: string | null;
+}
+
+// ── task-01（2026-08-26-workspace-git-status）git_status 返回结构（design §7.2 十四字段）──
+
+/**
+ * git_status 返回结构：十四字段与 design §7.2 逐字一致
+ * （branch/detached/upstream/ahead/behind/files_changed/additions/deletions/
+ * untracked_count/head_short/empty/fetch_performed/fetch_error/error）。
+ *
+ * 空仓库（branch.oid == "(initial)"）空态：empty=true，branch/upstream/ahead/
+ * behind/files_changed/additions/deletions/untracked_count/head_short 全 null
+ * （前端空态提示「仓库还没有任何提交」，design §5.2）。
+ */
+export interface GitStatusResult {
+  /** 当前分支名；detached HEAD 时为 head_short（§5.2 detached 形态）；空仓库/失败为 null。 */
+  branch: string | null;
+  /** 是否 detached HEAD（porcelain `# branch.head (detached)`）。 */
+  detached: boolean;
+  /** upstream 跟踪名（如 origin/main）；无 upstream / 空仓库为 null。 */
+  upstream: string | null;
+  /** 未推送提交数（`# branch.ab +A`）；无 upstream / 空仓库为 null。 */
+  ahead: number | null;
+  /** 远程新提交数（`# branch.ab -B`，fetch 后新鲜）；无 upstream / 空仓库为 null。 */
+  behind: number | null;
+  /** 未提交改动文件数（≡ numstat 行数，CC-05 单源）；空仓库 / diff 失败为 null。 */
+  files_changed: number | null;
+  /** 未提交新增行数（numstat 求和，二进制 `-` 行不计）；空仓库 / diff 失败为 null。 */
+  additions: number | null;
+  /** 未提交删除行数（numstat 求和，二进制 `-` 行不计）；空仓库 / diff 失败为 null。 */
+  deletions: number | null;
+  /** untracked 文件数（porcelain `? ` 条目，CC-05 单源化后唯一职责）；空仓库 / 失败为 null。 */
+  untracked_count: number | null;
+  /** HEAD 短哈希（`# branch.oid` 前 8 位截断，CC-04）；空仓库为 null。 */
+  head_short: string | null;
+  /** 空仓库判据（branch.oid == "(initial)"，兼作 CC-07 diff 容错语境）。 */
+  empty: boolean;
+  /** fetch 是否实际执行成功（D-001 自动 fetch 语义）。 */
+  fetch_performed: boolean;
+  /** fetch 失败代号：fetch_timeout | fetch_failed | no_remote | null（失败不阻断其余字段）。 */
+  fetch_error: string | null;
+  /** 整体失败文案（porcelain / numstat 真失败）；成功 / 空态为 null。 */
   error: string | null;
 }
 
@@ -613,6 +663,60 @@ function parseGitLogRecord(rec: string): GitLogCommit | null {
   };
 }
 
+// ── task-01（2026-08-26-workspace-git-status）git_status 常量 + fetch 局部 execFile ──
+//
+// design §5.2 / §7.2 十四字段契约 + D-001 fetch 降级语义（Grill CC-02 / CC-07）。
+// git_status 为第 5 个平名 git 方法，骨架对齐既有四方法（assertWithinAllowedRoots →
+// 只读子命令独立 argv → 失败结构化回传不抛）；差异仅 fetch：runCmd 超时把 killed/
+// signal 丢弃且 --quiet 下 stderr 为空串，无法判别「超时」与「失败」——改用本文件
+// runCommand 同款局部 execFile 读 err.killed/signal 判超时（Grill CC-02）。
+
+/** git fetch 超时（D-001：15s；独立于 GIT_READ_TIMEOUT_MS——网络慢只降级 fetch 不拖垮 ②③ 采集）。 */
+const GIT_FETCH_TIMEOUT_MS = 15_000;
+
+/**
+ * 空仓库下 `git diff HEAD` 的 128 族失败文案（HEAD 不存在）——容错转空态不走红
+ * 通道（Grill CC-07）。porcelain 已把 "(initial)" 判为 empty，此处只兜底退出码。
+ */
+const GIT_DIFF_HEAD_MISSING_RE =
+  /ambiguous argument 'HEAD'|unknown revision|bad revision|does not have any commits yet/i;
+
+/**
+ * `git -C <root> fetch --quiet` 单独执行（design §5.2 D-001 / Grill CC-02）。
+ *
+ * **不经 runCmd**：runCmd 把超时（err.killed/signal）混入 ok:false 且 stderr 为空串
+ * 无法判别——改用 runCommand 同款局部 execFile，从 err.killed / err.signal 判超时。
+ * stdout/stderr **不外发**（--quiet 本就近静默），只回传三态代号。
+ *
+ * @returns `'ok'`（成功）/ `'fetch_timeout'`（err.killed 或 signal=SIGTERM）/
+ *          `'fetch_failed'`（其余非零退出）。
+ */
+function runGitFetch(
+  root: string,
+): Promise<'ok' | 'fetch_timeout' | 'fetch_failed'> {
+  return new Promise((resolve) => {
+    execFile(
+      'git',
+      ['-C', root, 'fetch', '--quiet'],
+      { timeout: GIT_FETCH_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        void stdout;
+        void stderr; // 不外发（design §5.2：fetch 输出只判三态代号）
+        if (err !== null && typeof err === 'object') {
+          // execFile 超时：Node 自动 SIGTERM，err.signal === 'SIGTERM' / err.killed === true
+          //（与 runCommand :1519 同款判定，读 killed/signal 而非 stderr 文案）。
+          const timedOut =
+            ('signal' in err && (err as { signal?: string }).signal === 'SIGTERM') ||
+            ('killed' in err && (err as { killed?: boolean }).killed === true);
+          resolve(timedOut ? 'fetch_timeout' : 'fetch_failed');
+          return;
+        }
+        resolve('ok');
+      },
+    );
+  });
+}
+
 // ── HostFsHandler：十方法宿主实现 ─────────────────────────────────────────────
 
 /**
@@ -625,6 +729,8 @@ function parseGitLogRecord(rec: string): GitLogCommit | null {
  * 另含 task-01（2026-08-25-workspace-git-log）git 只读四方法 gitLog / gitRefs /
  * gitShow / gitDiffFile——由 daemon.ts:_registerGitLogRpcHandler 平名注册
  * （git_log 等，不走 host_fs. 前缀通道，design §5.2 CC-02）。
+ * 及 task-01（2026-08-26-workspace-git-status）gitStatus——同一注册器第 5 个平名
+ * 方法 git_status（design §5.2 / §7.2 十四字段契约）。
  */
 export class HostFsHandler {
   private readonly _rootsProvider: () => string[];
@@ -1264,6 +1370,186 @@ export class HostFsHandler {
       truncated: true,
       binary,
       error: null,
+    };
+  }
+
+  // ── git_status（task-01 2026-08-26-workspace-git-status，第 5 个平名 git 方法）──
+
+  /**
+   * `git_status({ root }) → 十四字段`（design §5.2 / §7.2 逐字契约）。
+   *
+   * 三步采集（§5.1 数据流 ①②③，root 唯一入参，全部只读子命令独立 argv）：
+   *
+   *   ① `git remote` 预检（空输出 → fetch_error='no_remote' 不执行 fetch——无 remote
+   *      时 `fetch --quiet` 静默 exit 0 探测不到，Grill CC-07）+ 局部 execFile 跑
+   *      `git fetch --quiet`（15s 超时读 err.killed/signal 判 fetch_timeout，非零
+   *      退出 fetch_failed，Grill CC-02 不经 runCmd）；失败仅记 fetch_error，
+   *      **不阻断 ②③**（behind 基于 stale tracking 数据，backend 标 degraded）。
+   *   ② `git status --porcelain=v2 --branch --no-show-stash`（runCmd 只读采集）：
+   *      branch.head（"(detached)" → detached=true 且 branch=head_short）/
+   *      branch.upstream（缺失 → null）/ branch.ab（缺失 → ahead/behind=null）/
+   *      "? " 条目计 untracked_count（CC-05 单源化后 porcelain 仅负责 untracked）/
+   *      branch.oid 前 8 位 → head_short（CC-04），"(initial)" → empty=true。
+   *   ③ `git diff HEAD --numstat --no-renames`（--no-renames 对齐 git_show 纪律
+   *      CC-03）：additions/deletions 求和（`-` 二进制行计 files_changed 不计行数）；
+   *      files_changed ≡ numstat 行数（CC-05 单源无 fallback，porcelain 1/2 条目
+   *      不参与）；空仓库 exit 128 容错转空态不走红通道（CC-07）。
+   *
+   * 空仓库空态：empty=true，branch/upstream/ahead/behind/dirty 计数/head_short
+   * 全 null（前端提示「仓库还没有任何提交」）。
+   *
+   * **不抛**（对齐既有四 git 方法）；仅 root 越界走 RpcError forbidden。
+   */
+  async gitStatus(params: { root: string }): Promise<GitStatusResult> {
+    // 1. 白名单守卫（与既有四方法同款）。
+    assertWithinAllowedRoots(params.root, this._rootsProvider());
+    const root = pathResolve(params.root);
+
+    // ── ① fetch 降级（D-001）：预检 no_remote → fetch（局部 execFile）→ 失败不阻断 ──
+    let fetchPerformed = false;
+    let fetchError: string | null = null;
+    const remote = await runCmd('git', ['-C', root, 'remote'], {
+      timeout: GIT_READ_TIMEOUT_MS,
+    });
+    if (!remote.ok) {
+      // 预检自身失败（非 git 目录等）→ 归入 fetch_failed（fetch 确未执行成功；
+      // 真因由 ② porcelain 的 error 通道报告）。
+      fetchError = 'fetch_failed';
+    } else if (remote.stdout.trim().length === 0) {
+      // 无 remote：fetch --quiet 静默 exit 0 探测不到，靠预检判定（Grill CC-07）。
+      fetchError = 'no_remote';
+    } else {
+      const fetchOutcome = await runGitFetch(root);
+      if (fetchOutcome === 'ok') {
+        fetchPerformed = true;
+      } else {
+        fetchError = fetchOutcome; // fetch_timeout | fetch_failed
+      }
+    }
+
+    // ── ② porcelain v2 解析（runCmd 只读采集；R-02 条目按前缀字节严格匹配）──
+    const status = await runCmd(
+      'git',
+      ['-C', root, 'status', '--porcelain=v2', '--branch', '--no-show-stash'],
+      { timeout: GIT_READ_TIMEOUT_MS },
+    );
+    if (!status.ok) {
+      // porcelain 真失败（非 git 目录 / git 不可用）→ 全 null + error 文案（不抛）。
+      return {
+        branch: null,
+        detached: false,
+        upstream: null,
+        ahead: null,
+        behind: null,
+        files_changed: null,
+        additions: null,
+        deletions: null,
+        untracked_count: null,
+        head_short: null,
+        empty: false,
+        fetch_performed: fetchPerformed,
+        fetch_error: fetchError,
+        error: status.stderr.trim() || status.stdout.trim() || 'git status failed',
+      };
+    }
+
+    let branch: string | null = null;
+    let upstream: string | null = null;
+    let ahead: number | null = null;
+    let behind: number | null = null;
+    let untrackedCount = 0;
+    let headShort: string | null = null;
+    let empty = false;
+    for (const line of status.stdout.split('\n')) {
+      if (line.startsWith('# branch.oid ')) {
+        const oid = line.slice('# branch.oid '.length).trim();
+        if (oid === '(initial)') {
+          empty = true; // 空仓库判据（CC-04 兼作，无 HEAD）
+        } else {
+          headShort = oid.slice(0, 8); // 前 8 位截断（CC-04）
+        }
+      } else if (line.startsWith('# branch.head ')) {
+        branch = line.slice('# branch.head '.length).trim();
+      } else if (line.startsWith('# branch.upstream ')) {
+        upstream = line.slice('# branch.upstream '.length).trim();
+      } else if (line.startsWith('# branch.ab ')) {
+        // 形如 `# branch.ab +2 -1`；无 upstream 时整行缺失 → ahead/behind 保持 null。
+        const m = /^# branch\.ab \+(\d+) -(\d+)$/.exec(line);
+        if (m !== null) {
+          ahead = Number(m[1]);
+          behind = Number(m[2]);
+        }
+      } else if (line.startsWith('? ')) {
+        untrackedCount += 1; // porcelain 仅负责 untracked（CC-05 单源化）
+      }
+      // 其余 `#` 头行（stash 计数等）与 1/2/u 条目：files_changed 单源在 ③（CC-05），跳过。
+    }
+    const detached = branch === '(detached)';
+
+    // ── ③ numstat 汇总（git diff HEAD 覆盖 staged+unstaged；--no-renames 防计数破坏）──
+    const diff = await runCmd(
+      'git',
+      ['-C', root, 'diff', 'HEAD', '--numstat', '--no-renames'],
+      { timeout: GIT_READ_TIMEOUT_MS },
+    );
+    let filesChanged: number | null = null;
+    let additions: number | null = null;
+    let deletions: number | null = null;
+    let diffError: string | null = null;
+    if (diff.ok) {
+      filesChanged = 0;
+      additions = 0;
+      deletions = 0;
+      for (const line of diff.stdout.split('\n')) {
+        const m = /^(\d+|-)\t(\d+|-)\t(.+)$/.exec(line);
+        if (m === null) continue; // 空行 / 噪声行不计数
+        filesChanged += 1; // files_changed ≡ numstat 行数（CC-05 单源，二进制行也计文件）
+        if (m[1] !== '-') additions += Number(m[1]); // 二进制 `-` 不计行数
+        if (m[2] !== '-') deletions += Number(m[2]);
+      }
+    } else if (GIT_DIFF_HEAD_MISSING_RE.test(diff.stderr)) {
+      // 空仓库 exit 128 族 → 容错转空态，counts 保持 null（CC-07 不走红通道）。
+    } else {
+      diffError = diff.stderr.trim() || diff.stdout.trim() || 'git diff HEAD failed';
+    }
+
+    // ── 空态 / 常态组装 ──
+    if (empty) {
+      // 空仓库：计数全 null（② 的 untracked 也归空态，前端走「还没有任何提交」提示）。
+      return {
+        branch: null,
+        detached: false,
+        upstream: null,
+        ahead: null,
+        behind: null,
+        files_changed: null,
+        additions: null,
+        deletions: null,
+        untracked_count: null,
+        head_short: null,
+        empty: true,
+        fetch_performed: fetchPerformed,
+        fetch_error: fetchError,
+        error: null,
+      };
+    }
+    return {
+      // detached 形态：branch 字段返回 HEAD 短哈希（§5.2；branch.ab/upstream 在
+      // detached 下 porcelain 不输出，天然 null）。
+      branch: detached ? headShort : branch,
+      detached,
+      upstream,
+      ahead,
+      behind,
+      files_changed: filesChanged,
+      additions,
+      deletions,
+      untracked_count: untrackedCount,
+      head_short: headShort,
+      empty: false,
+      fetch_performed: fetchPerformed,
+      fetch_error: fetchError,
+      error: diffError,
     };
   }
 

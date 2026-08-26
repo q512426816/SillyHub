@@ -84,6 +84,7 @@ import {
   SessionListPanel,
   type SessionListScope,
 } from "@/components/sessions/session-list-panel";
+import { GitStatusBar } from "@/components/git-log/git-status-bar";
 import { PageContainer, PageHeader } from "@/components/layout";
 import { listProviders } from "@/lib/api/llm-providers";
 import {
@@ -410,10 +411,18 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
       aria-label={portalTitle}
     >
       {/* X-12：页头「新建会话」按钮移除——新建入口收敛到组头「＋」，actions 空；
-          ql-20260823-003：change 亦树形态，页头按钮移除（D-106 修订）。 */}
+          ql-20260823-003：change 亦树形态，页头按钮移除（D-106 修订）。
+          task-03（2026-08-26-workspace-git-status）：workspace scope 挂紧凑态
+          Git 状态条（CC-08——change/quicklog scope 虽携带 workspaceId，但语义
+          是「围绕某变更的会话」，挂工作区健康状态偏离主题，不挂）。 */}
       <PageHeader
         title={portalTitle}
         subtitle="跨机器、跨智能体的统一会话入口：左侧选择会话，右侧继续对话或新建"
+        actions={
+          scope?.kind === "workspace" ? (
+            <GitStatusBar workspaceId={scope.workspaceId} variant="compact" />
+          ) : undefined
+        }
       />
       {/* 原型 .main-grid：左 320px 列表 + 右面板 */}
       <div className="grid min-h-0 flex-1 grid-cols-[320px_minmax(0,1fr)] gap-3.5">

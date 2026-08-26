@@ -1,4 +1,4 @@
-"""Git 日志三端点 router 集成测试（task-04，design §5.5 / §7.1）。
+"""Git 日志模块 router 集成测试（task-04 三端点 + task-02 status 端点）。
 
 仿 ``backend/tests/modules/explorer/test_explorer.py`` 的 hermetic fixture 打法：
 每用例自建 roles/users/workspace/binding（per-test 内存 SQLite，见
@@ -20,12 +20,18 @@
 另含：分页窗口（RPC count=skip+limit+lookahead / seq 全局绝对序 / has_more /
 truncated）、branch/author 过滤透传、空仓库空态（CC-17）、契约缺口 502、
 git_show/git_diff_file 正常路径与 404、未绑定 404、三端点鉴权门控（401 / 403）。
+
+status 端点六分支（task-02，2026-08-26-workspace-git-status design §5.5；mock
+按 §7.2 十四字段契约 fixture）：正常字段映射（fetch 嵌套 + synced_at）/ 无
+upstream（ahead/behind null）/ fetch 降级（stale behind + performed=false）/
+no_git 空态 / 离线 502 / 契约缺口 502。
 """
 
 from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import pytest
@@ -41,6 +47,7 @@ from app.modules.git_log.service import (
     LOG_RPC_TIMEOUT_SECONDS,
     LOOKAHEAD,
     SHOW_RPC_TIMEOUT_SECONDS,
+    STATUS_RPC_TIMEOUT_SECONDS,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -867,7 +874,7 @@ async def test_binding_daemon_id_null_returns_404_not_bound(client: AsyncClient,
 
 
 # ────────────────────────────────────────────────────────────────────────────
-# 鉴权门控：三端点均受 WORKSPACE_READ 保护
+# 鉴权门控：四端点均受 WORKSPACE_READ 保护
 # ────────────────────────────────────────────────────────────────────────────
 
 
@@ -875,12 +882,13 @@ _ALL_ENDPOINTS = [
     "/git-log/commits",
     f"/git-log/commits/{_C0}",
     f"/git-log/commits/{_C0}/diff?path=a.txt",
+    "/git-log/status",
 ]
 
 
 @pytest.mark.parametrize("suffix", _ALL_ENDPOINTS)
 async def test_endpoints_require_auth_401(client: AsyncClient, setup_gitlog, suffix: str):
-    """不带 token → 401（三端点逐一验证）。"""
+    """不带 token → 401（四端点逐一验证）。"""
     env = await setup_gitlog()
     resp = await client.get(f"/api/workspaces/{env.workspace_id}{suffix}")
     assert resp.status_code == 401, resp.text
@@ -893,3 +901,172 @@ async def test_endpoint_non_member_403(client: AsyncClient, setup_gitlog, user_f
     resp = await client.get(f"{_base(env)}/commits", headers=_bearer(stranger_token))
     assert resp.status_code == 403, resp.text
     assert resp.json()["code"] == "HTTP_403_PERMISSION_DENIED"
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# status 端点六分支（task-02，design §5.5；mock RPC 按 §7.2 十四字段契约）
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def _git_status_result(**overrides: Any) -> dict[str, Any]:
+    """构造 daemon git_status 结果（§7.2 十四字段契约形状；overrides 覆写分支差异）。"""
+    base: dict[str, Any] = {
+        "branch": "main",
+        "detached": False,
+        "upstream": "origin/main",
+        "ahead": 2,
+        "behind": 1,
+        "files_changed": 3,
+        "additions": 10,
+        "deletions": 4,
+        "untracked_count": 1,
+        "head_short": "1a2b3c4d",
+        "empty": False,
+        "fetch_performed": True,
+        "fetch_error": None,
+        "error": None,
+    }
+    base.update(overrides)
+    return base
+
+
+async def test_openapi_lists_status_path_with_response_model():
+    """验收前置（task-02）：openapi 出现 status 路径且 200 响应有模型。
+
+    WORKSPACE_READ 门控不在 OpenAPI 中显式标注（require_permission 依赖
+    形态），由 401/403 用例实证（status 已入 _ALL_ENDPOINTS）。
+    """
+    from app.main import app
+
+    paths = app.openapi()["paths"]
+    op = paths["/api/workspaces/{workspace_id}/git-log/status"]["get"]
+    assert "200" in op["responses"]
+
+
+async def test_status_200_field_mapping_and_rpc_contract(client: AsyncClient, setup_gitlog):
+    """分支 ① 正常：十四字段 → §5.3 映射全量断言（fetch 嵌套改名 + synced_at）。"""
+    env = await setup_gitlog()
+    env.hub.on("git_status", result=_git_status_result())
+
+    resp = await client.get(f"{_base(env)}/status", headers=_bearer(env.token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert body["git_mode"] == "git"
+    assert body["branch"] == "main"
+    assert body["detached"] is False
+    assert body["upstream"] == "origin/main"
+    assert body["ahead"] == 2
+    assert body["behind"] == 1
+    assert body["dirty"] == {
+        "files_changed": 3,
+        "additions": 10,
+        "deletions": 4,
+        "untracked_count": 1,
+    }
+    assert body["head_short"] == "1a2b3c4d"
+    assert body["empty"] is False
+    # §7.2 → §5.3 字段映射（§7.3）：fetch_performed/fetch_error 拆进 fetch 嵌套。
+    assert body["fetch"] == {"performed": True, "error": None}
+    # synced_at = backend 组装时刻（ISO 8601 可解析，非 daemon 数据）。
+    assert datetime.fromisoformat(body["synced_at"]) is not None
+
+    # RPC 契约：probe（host_fs.stat）→ 平名 git_status；root 唯一入参；STATUS 30s。
+    assert _methods(env) == ["host_fs.stat", "git_status"]
+    call = env.hub.calls[1]
+    assert call["daemon_id"] == env.daemon_id
+    assert call["params"] == {"root": env.root_path}
+    assert call["timeout"] == STATUS_RPC_TIMEOUT_SECONDS
+
+
+async def test_status_200_no_upstream_ahead_behind_null(client: AsyncClient, setup_gitlog):
+    """分支 ② 无 upstream（本地新分支）：upstream/ahead/behind 均 null，其余正常。"""
+    env = await setup_gitlog()
+    env.hub.on(
+        "git_status",
+        result=_git_status_result(upstream=None, ahead=None, behind=None),
+    )
+
+    resp = await client.get(f"{_base(env)}/status", headers=_bearer(env.token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["upstream"] is None
+    assert body["ahead"] is None
+    assert body["behind"] is None
+    assert body["branch"] == "main"
+    assert body["dirty"]["files_changed"] == 3
+    assert body["fetch"] == {"performed": True, "error": None}
+
+
+async def test_status_200_fetch_degraded_keeps_stale_behind(client: AsyncClient, setup_gitlog):
+    """分支 ③ fetch 降级：fetch_error=fetch_timeout → 200 + fetch.performed=false
+    + error 代号，behind 返回 stale 值不阻断其余字段（前端黄条依据，§5.3）。"""
+    env = await setup_gitlog()
+    env.hub.on(
+        "git_status",
+        result=_git_status_result(fetch_performed=False, fetch_error="fetch_timeout", behind=1),
+    )
+
+    resp = await client.get(f"{_base(env)}/status", headers=_bearer(env.token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["fetch"] == {"performed": False, "error": "fetch_timeout"}
+    # behind 为上次同步的 stale 值（daemon 未刷新 tracking），仍直传返回。
+    assert body["behind"] == 1
+    assert body["branch"] == "main"
+
+
+async def test_status_no_git_workspace_returns_empty_state_200(client: AsyncClient, setup_gitlog):
+    """分支 ④ 非 git 工作区：probe=direct → no_git 空态 200（字段全空，无 git RPC）。"""
+    env = await setup_gitlog(probe="direct")
+
+    resp = await client.get(f"{_base(env)}/status", headers=_bearer(env.token))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    synced_at = body.pop("synced_at")
+    assert datetime.fromisoformat(synced_at) is not None  # 组装时刻恒存在
+    assert body == {
+        "git_mode": "no_git",
+        "branch": None,
+        "detached": False,
+        "upstream": None,
+        "ahead": None,
+        "behind": None,
+        "dirty": {
+            "files_changed": None,
+            "additions": None,
+            "deletions": None,
+            "untracked_count": None,
+        },
+        "head_short": None,
+        "empty": False,
+        "fetch": {"performed": False, "error": None},
+    }
+    # probe 后不再发 git RPC。
+    assert _methods(env) == ["host_fs.stat"]
+
+
+async def test_status_daemon_offline_maps_502(client: AsyncClient, setup_gitlog):
+    """分支 ⑤ daemon 离线：git_status RPC 抛 DaemonRuntimeOffline → 502。"""
+    env = await setup_gitlog()
+    env.hub.on(
+        "git_status",
+        exc=DaemonRuntimeOffline("daemon 'x' is offline (no WS connection)."),
+    )
+    resp = await client.get(f"{_base(env)}/status", headers=_bearer(env.token))
+    assert resp.status_code == 502, resp.text
+    assert resp.json()["code"] == "HTTP_502_GIT_LOG_DAEMON_OFFLINE"
+
+
+async def test_status_malformed_result_maps_502_contract_gap(client: AsyncClient, setup_gitlog):
+    """分支 ⑥ 契约缺口：daemon 缺字段（fetch_performed/fetch_error/error）→ 502。"""
+    env = await setup_gitlog()
+    result = _git_status_result()
+    del result["fetch_performed"], result["fetch_error"], result["error"]
+    env.hub.on("git_status", result=result)
+
+    resp = await client.get(f"{_base(env)}/status", headers=_bearer(env.token))
+    assert resp.status_code == 502, resp.text
+    body = resp.json()
+    assert body["code"] == "HTTP_502_GIT_LOG_CONTRACT_GAP"
+    assert "契约" in body["message"]

@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 · 工作区移动端（变更中心 + 会话）</title>
+<style>
+  /* ============================================================
+     设计 token：对齐 frontend/src/styles/themes.ts「AI 紫」浅色主题
+     （2026-08-20-frontend-ai-native-style 总纲），全部取值不自调
+     ============================================================ */
+  :root {
+    --primary: #7C3AED;        /* violet-600 AI 紫 */
+    --primary-hover: #6D28D9;  /* violet-700 */
+    --accent: #0891B2;         /* 交互青 cyan-600 */
+    --accent-light: #ECFEFF;
+    --bg: #FAF5FF;             /* 淡紫页面底 */
+    --card: #FFFFFF;
+    --border: #DDD6FE;         /* violet-200 */
+    --brand-50: #f5f3ff;
+    --brand-100: #ede9fe;
+    --brand-200: #ddd6fe;
+    --brand-600: #7c3aed;
+    --text: #0f172a;           /* slate-900 */
+    --muted: #64748b;          /* slate-500 */
+    --muted-2: #94a3b8;        /* slate-400 */
+    --success: #10b981;
+    --warning: #f59e0b;
+    --error: #ef4444;
+    --info: #06b6d4;
+    --shadow-card: 0 1px 2px rgba(80,50,140,.06), 0 1px 6px rgba(80,50,140,.05);
+    --shadow-pop: 0 8px 30px rgba(60,30,120,.18);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { height:100%; }
+  body {
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:#1c1230; color:var(--text); display:flex; overflow:hidden;
+  }
+
+  /* ── 桌面查看器：左侧屏幕导航 + 手机壳 ─────────────────── */
+  .viewer { width:240px; height:100%; overflow-y:auto; padding:20px 14px; background:#150d26; color:#d8ccf5; flex-shrink:0; }
+  .viewer h1 { font-size:14px; font-weight:600; color:#fff; margin-bottom:4px; }
+  .viewer .sub { font-size:11px; color:#8f7fc0; margin-bottom:14px; line-height:1.6; }
+  .viewer .grp { font-size:10px; letter-spacing:.12em; color:#7a68ab; margin:14px 0 6px; }
+  .nav-btn { display:block; width:100%; text-align:left; padding:9px 10px; margin-bottom:4px; border:0; border-radius:9px; background:transparent; color:#cbbcf0; font-size:12.5px; cursor:pointer; line-height:1.45; }
+  .nav-btn small { display:block; font-size:10px; color:#7a68ab; }
+  .nav-btn.on { background:rgba(124,58,237,.35); color:#fff; }
+  .nav-btn.on small { color:#c9b8f2; }
+
+  /* ── 手机壳（iPhone 14 尺寸 390×844，还原 max-w-[480px] 容器约束）── */
+  .phone-wrap { flex:1; display:flex; align-items:center; justify-content:center; height:100%; }
+  .phone { position:relative; width:390px; height:844px; background:#000; border-radius:54px; padding:12px; box-shadow:0 30px 80px rgba(0,0,0,.55), inset 0 0 0 2px #333; flex-shrink:0; }
+  .phone .screen-area { position:relative; width:100%; height:100%; background:var(--bg); border-radius:42px; overflow:hidden; display:flex; flex-direction:column; }
+  .statusbar { position:absolute; top:0; left:0; right:0; height:44px; z-index:60; display:flex; align-items:flex-end; justify-content:space-between; padding:0 26px 4px; font-size:13px; font-weight:600; color:var(--text); pointer-events:none; }
+  .statusbar .island { position:absolute; top:10px; left:50%; transform:translateX(-50%); width:118px; height:32px; background:#000; border-radius:20px; }
+  .home-indicator { position:absolute; bottom:7px; left:50%; transform:translateX(-50%); width:130px; height:5px; border-radius:3px; background:var(--text); opacity:.85; z-index:60; pointer-events:none; }
+
+  /* ── 屏幕切换 ─────────────────────────────────────────── */
+  .screen { position:absolute; inset:0; display:none; flex-direction:column; background:var(--bg); }
+  .screen.on { display:flex; }
+
+  /* ── 通用：三段式外壳对齐 MobileAppShell ───────────────── */
+  .app-top { flex-shrink:0; padding:52px 16px 0; background:var(--card); border-bottom:1px solid var(--border); }
+  .app-top .bar { display:flex; align-items:center; gap:10px; min-height:44px; }
+  .app-top .back { width:36px; height:36px; margin-left:-8px; border:0; background:transparent; border-radius:10px; font-size:19px; color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center; }
+  .app-top .title { font-size:16px; font-weight:600; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .app-top .title small { display:block; font-size:11px; font-weight:400; color:var(--muted); margin-top:1px; }
+  .icon-btn { width:36px; height:36px; border:1px solid var(--border); background:var(--card); border-radius:10px; font-size:15px; cursor:pointer; color:var(--muted); display:flex; align-items:center; justify-content:center; }
+  .app-main { flex:1; min-height:0; overflow-y:auto; padding:12px 14px 20px; }
+  .app-main::-webkit-scrollbar, .drawer-body::-webkit-scrollbar, .chat-stream::-webkit-scrollbar { width:0; }
+
+  /* ── 底部 TabBar（复用 mobile-tab-bar 5 Tab）───────────── */
+  .tabbar { flex-shrink:0; display:flex; background:var(--card); border-top:1px solid var(--border); padding:6px 4px 22px; }
+  .tabbar .t { flex:1; display:flex; flex-direction:column; align-items:center; gap:2px; padding:4px 0; font-size:10px; color:var(--muted-2); cursor:pointer; min-height:44px; justify-content:center; }
+  .tabbar .t .ic { font-size:19px; line-height:1; }
+  .tabbar .t.on { color:var(--brand-600); font-weight:600; }
+  .hidden-tabbar .tabbar { display:none; }  /* 钻取页隐藏底部 Tab（设计 §导航） */
+
+  /* ── 工作区主页：段控双 Tab ────────────────────────────── */
+  .seg { display:flex; gap:4px; background:var(--brand-50); border:1px solid var(--border); border-radius:12px; padding:3px; margin:10px 0 12px; }
+  .seg button { flex:1; border:0; background:transparent; border-radius:9px; padding:8px 0; font-size:14px; color:var(--muted); cursor:pointer; min-height:40px; font-weight:500; }
+  .seg button.on { background:var(--card); color:var(--primary); font-weight:600; box-shadow:var(--shadow-card); }
+
+  /* ── 变更列表：三 Tab + 搜索 + 筛选 ────────────────────── */
+  .list-tabs { display:flex; gap:8px; margin-bottom:10px; }
+  .list-tabs button { border:1px solid var(--border); background:var(--card); border-radius:999px; padding:6px 13px; font-size:13px; color:var(--muted); cursor:pointer; min-height:36px; }
+  .list-tabs button.on { background:var(--primary); border-color:var(--primary); color:#fff; font-weight:500; }
+  .list-tabs .cnt { display:inline-block; min-width:17px; margin-left:4px; padding:0 4px; border-radius:999px; background:rgba(0,0,0,.08); font-size:10.5px; line-height:17px; text-align:center; }
+  .list-tabs button.on .cnt { background:rgba(255,255,255,.28); }
+  .search-row { display:flex; gap:8px; margin-bottom:12px; }
+  .search { flex:1; display:flex; align-items:center; gap:7px; background:var(--card); border:1px solid var(--border); border-radius:11px; padding:0 12px; min-height:44px; color:var(--muted-2); font-size:14px; }
+  .filter-btn { width:44px; height:44px; border:1px solid var(--border); background:var(--card); border-radius:11px; cursor:pointer; font-size:17px; color:var(--muted); position:relative; display:flex; align-items:center; justify-content:center; }
+  .filter-btn .dot { position:absolute; top:8px; right:9px; width:7px; height:7px; border-radius:50%; background:var(--primary); }
+
+  /* ── 通用卡片（对齐 mobile-card-list 触摸热区 ≥44px）────── */
+  .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:13px 14px; margin-bottom:10px; box-shadow:var(--shadow-card); cursor:pointer; }
+  .card .row1 { display:flex; align-items:flex-start; gap:8px; }
+  .card .name { flex:1; min-width:0; font-size:14.5px; font-weight:600; line-height:1.4; }
+  .card .meta { display:flex; flex-wrap:wrap; gap:6px 10px; margin-top:8px; font-size:11.5px; color:var(--muted); align-items:center; }
+  .badge { display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:500; line-height:18px; white-space:nowrap; }
+  .b-stage { background:var(--brand-100); color:var(--brand-600); }
+  .b-warn { background:#FEF3C7; color:#B45309; }
+  .b-ok { background:#D1FAE5; color:#047857; }
+  .b-gray { background:#F1F5F9; color:var(--muted); }
+  .b-acc { background:var(--accent-light); color:#0E7490; }
+  .dot-live { width:7px; height:7px; border-radius:50%; background:var(--success); display:inline-block; }
+  .dot-busy { width:7px; height:7px; border-radius:50%; background:var(--warning); display:inline-block; }
+  .group-h { font-size:12px; font-weight:600; color:var(--muted); margin:14px 2px 8px; display:flex; align-items:center; gap:6px; }
+  .group-h::after { content:""; flex:1; height:1px; background:var(--border); }
+  .arrow { color:var(--muted-2); font-size:15px; }
+
+  /* ── 变更详情 ─────────────────────────────────────────── */
+  .stage-steps { display:flex; gap:0; background:var(--card); border:1px solid var(--border); border-radius:14px; padding:12px 6px; margin-bottom:10px; overflow-x:auto; }
+  .step { flex:1; min-width:58px; text-align:center; position:relative; }
+  .step .b { width:22px; height:22px; margin:0 auto 5px; border-radius:50%; background:#F1F5F9; color:var(--muted-2); font-size:11px; display:flex; align-items:center; justify-content:center; border:1.5px solid transparent; }
+  .step.done .b { background:var(--success); color:#fff; }
+  .step.cur .b { background:var(--card); border-color:var(--primary); color:var(--primary); box-shadow:0 0 0 4px var(--brand-100); }
+  .step .n { font-size:10.5px; color:var(--muted); }
+  .step.cur .n { color:var(--primary); font-weight:600; }
+  .step::before { content:""; position:absolute; top:11px; left:-50%; width:100%; height:2px; background:#E9E4F8; }
+  .step.done::before { background:var(--success); }
+  .step:first-child::before { display:none; }
+  .sec-card { background:var(--card); border:1px solid var(--border); border-radius:14px; margin-bottom:10px; overflow:hidden; }
+  .sec-card > .h { display:flex; align-items:center; gap:8px; padding:12px 14px; font-size:14px; font-weight:600; cursor:pointer; min-height:46px; }
+  .sec-card > .h .chev { margin-left:auto; color:var(--muted-2); font-size:12px; transition:.15s; }
+  .sec-card.open > .h .chev { transform:rotate(180deg); }
+  .sec-card > .bd { display:none; padding:0 14px 13px; }
+  .sec-card.open > .bd { display:block; }
+  .btn-row { display:flex; gap:9px; }
+  .btn { flex:1; border-radius:11px; border:0; padding:11px 0; font-size:14px; font-weight:500; cursor:pointer; min-height:44px; }
+  .btn-primary { background:var(--primary); color:#fff; }
+  .btn-ghost { background:var(--card); border:1px solid var(--border); color:var(--muted); }
+  .btn-danger { background:#FEE2E2; color:#B91C1C; }
+  .tl { position:relative; padding-left:18px; }
+  .tl::before { content:""; position:absolute; left:5px; top:6px; bottom:6px; width:2px; background:var(--brand-100); }
+  .tl-item { position:relative; padding:0 0 13px; }
+  .tl-item::before { content:""; position:absolute; left:-17px; top:4px; width:10px; height:10px; border-radius:50%; background:var(--card); border:2.5px solid var(--brand-300, #c4b5fd); }
+  .tl-item.done::before { border-color:var(--success); }
+  .tl-item.cur::before { border-color:var(--primary); box-shadow:0 0 0 3px var(--brand-100); }
+  .tl-item .t { font-size:13px; font-weight:600; }
+  .tl-item .d { font-size:11px; color:var(--muted); margin-top:2px; line-height:1.5; }
+  .file-chip { display:flex; align-items:center; gap:8px; padding:10px 11px; border:1px solid var(--border); border-radius:11px; margin-bottom:7px; font-size:13px; background:var(--card); cursor:pointer; min-height:44px; }
+  .file-chip .fi { width:30px; height:30px; border-radius:8px; background:var(--brand-50); color:var(--brand-600); display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; }
+  .file-chip small { display:block; color:var(--muted); font-size:10.5px; }
+  .log-line { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:10.5px; color:var(--muted); background:#F8F5FF; border:1px solid var(--brand-100); border-radius:8px; padding:8px 10px; line-height:1.65; overflow-x:auto; white-space:pre; }
+  .desktop-guide { display:flex; align-items:center; gap:10px; padding:12px 13px; border-radius:12px; background:var(--brand-50); border:1px dashed var(--brand-200); font-size:12.5px; color:var(--muted); line-height:1.5; }
+
+  /* ── 会话列表 ─────────────────────────────────────────── */
+  .fab { position:absolute; right:16px; bottom:96px; width:52px; height:52px; border-radius:50%; border:0; background:var(--primary); color:#fff; font-size:23px; box-shadow:var(--shadow-pop); cursor:pointer; z-index:20; }
+  .ses-title { font-size:14px; font-weight:600; line-height:1.4; }
+  .ses-sub { font-size:11.5px; color:var(--muted); margin-top:3px; line-height:1.5; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; }
+
+  /* ── 会话对话（SessionPanel 移动形态）──────────────────── */
+  .chat-wrap { flex:1; min-height:0; display:flex; flex-direction:column; background:var(--bg); }
+  .chat-head { flex-shrink:0; display:flex; align-items:center; gap:8px; padding:52px 12px 8px; background:var(--card); border-bottom:1px solid var(--border); }
+  .chat-head .info { flex:1; min-width:0; }
+  .chat-head .info .n { font-size:14.5px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .chat-head .info .s { font-size:11px; color:var(--muted); display:flex; gap:8px; margin-top:2px; }
+  .chat-more { position:relative; }
+  .chat-stream { flex:1; min-height:0; overflow-y:auto; padding:12px 12px 8px; }
+  .msg { display:flex; margin-bottom:12px; }
+  .msg.user { justify-content:flex-end; }
+  .msg .av { width:28px; height:28px; border-radius:9px; flex-shrink:0; display:flex; align-items:center; justify-content:center; font-size:13px; margin-top:2px; }
+  .msg.ai .av { background:linear-gradient(135deg,#7C3AED,#0891B2); color:#fff; margin-right:8px; }
+  .msg.user .av { background:#EDE9FE; color:var(--brand-600); margin-left:8px; order:2; }
+  .bubble { max-width:78%; border-radius:14px; padding:9px 12px; font-size:14px; line-height:1.6; }
+  .msg.ai .bubble { background:var(--card); border:1px solid var(--border); border-top-left-radius:4px; }
+  .msg.user .bubble { background:var(--primary); color:#fff; border-top-right-radius:4px; }
+  .tool-call { margin:6px 0 6px 36px; border:1px solid var(--brand-100); background:#FDFBFF; border-radius:11px; overflow:hidden; }
+  .tool-call .th { display:flex; align-items:center; gap:6px; padding:8px 11px; font-size:11.5px; color:var(--muted); cursor:pointer; }
+  .tool-call .th .tw { color:var(--accent); }
+  .tool-call .tb { display:none; padding:0 11px 9px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:10.5px; color:var(--muted); white-space:pre-wrap; }
+  .tool-call.open .tb { display:block; }
+  .streaming { display:inline-flex; gap:3px; align-items:center; margin-left:2px; }
+  .streaming i { width:5px; height:5px; border-radius:50%; background:var(--accent); animation:blink 1.2s infinite; }
+  .streaming i:nth-child(2){ animation-delay:.2s } .streaming i:nth-child(3){ animation-delay:.4s }
+  @keyframes blink { 0%,80%,100%{opacity:.25} 40%{opacity:1} }
+  .queue-bar { flex-shrink:0; display:flex; align-items:center; gap:8px; margin:0 12px; padding:7px 12px; border:1px solid var(--border); background:var(--brand-50); border-radius:11px; font-size:11.5px; color:var(--muted); }
+  .queue-bar .qx { margin-left:auto; border:0; background:transparent; color:var(--error); font-size:11.5px; cursor:pointer; }
+  .chat-input { flex-shrink:0; display:flex; align-items:flex-end; gap:8px; padding:8px 12px 26px; background:var(--card); border-top:1px solid var(--border); }
+  .chat-input textarea { flex:1; resize:none; border:1px solid var(--border); border-radius:12px; padding:10px 12px; font-size:14px; font-family:inherit; line-height:1.5; background:var(--card); color:var(--text); outline:none; min-height:42px; max-height:100px; }
+  .send-btn { width:44px; height:44px; border-radius:12px; border:0; background:var(--primary); color:#fff; font-size:17px; cursor:pointer; flex-shrink:0; }
+  .send-btn.stop { background:#FEE2E2; color:#B91C1C; font-size:13px; }
+
+  /* ── 筛选抽屉（MobileFilterDrawer 半屏）───────────────── */
+  .mask { position:absolute; inset:0; background:rgba(15,10,30,.45); z-index:40; display:none; }
+  .mask.on { display:block; }
+  .drawer { position:absolute; left:0; right:0; bottom:0; max-height:72%; background:var(--card); border-radius:22px 22px 0 0; z-index:45; transform:translateY(105%); transition:transform .22s ease; display:flex; flex-direction:column; box-shadow:0 -8px 40px rgba(50,20,100,.25); }
+  .drawer.on { transform:translateY(0); }
+  .drawer .grab { width:38px; height:4.5px; border-radius:3px; background:var(--border); margin:10px auto 2px; }
+  .drawer .dh { display:flex; align-items:center; padding:8px 18px 10px; font-size:15px; font-weight:600; }
+  .drawer .dh button { margin-left:auto; border:0; background:transparent; font-size:13px; color:var(--muted); cursor:pointer; }
+  .drawer-body { overflow-y:auto; padding:0 18px 16px; }
+  .f-label { font-size:12px; font-weight:600; color:var(--muted); margin:12px 0 8px; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; }
+  .chips button { border:1px solid var(--border); background:var(--card); border-radius:999px; padding:7px 14px; font-size:13px; color:var(--muted); cursor:pointer; min-height:38px; }
+  .chips button.on { background:var(--brand-50); border-color:var(--primary); color:var(--primary); font-weight:500; }
+  .switch-row { display:flex; align-items:center; justify-content:space-between; padding:12px 0; font-size:14px; }
+  .sw { width:46px; height:27px; border-radius:999px; background:#E2E8F0; position:relative; cursor:pointer; transition:.15s; }
+  .sw::after { content:""; position:absolute; top:2.5px; left:2.5px; width:22px; height:22px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.25); transition:.15s; }
+  .sw.on { background:var(--primary); } .sw.on::after { left:21px; }
+  .drawer .btn-row { padding:8px 18px 22px; border-top:1px solid var(--brand-50); }
+
+  /* ── 新建会话两步浮层（PreSessionPicker 移动化：底部抽屉）── */
+  .picker .opt { display:flex; align-items:center; gap:11px; width:100%; padding:13px 4px; border:0; border-bottom:1px solid var(--brand-50); background:transparent; text-align:left; cursor:pointer; }
+  .picker .opt .oi { width:38px; height:38px; border-radius:11px; background:var(--brand-50); display:flex; align-items:center; justify-content:center; font-size:17px; flex-shrink:0; }
+  .picker .opt .ot b { font-size:14px; font-weight:600; display:block; }
+  .picker .opt .ot small { font-size:11px; color:var(--muted); }
+  .picker .opt .arrow { margin-left:auto; }
+  .crumb { display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); margin-bottom:2px; }
+
+  /* ── 屏内 toast / 空态 ────────────────────────────────── */
+  .empty { text-align:center; padding:52px 30px; color:var(--muted); }
+  .empty .e-ic { font-size:34px; margin-bottom:10px; }
+  .empty p { font-size:13px; line-height:1.7; }
+</style>
+</head>
+<body>
+
+<!-- ══════════ 桌面查看器导航 ══════════ -->
+<div class="viewer">
+  <h1>工作区移动端原型</h1>
+  <div class="sub">变更中心 + 会话移植 · 方案A 独立移动渲染层<br>AI 紫浅色主题 · 390×844</div>
+  <div class="grp">入口 / 导航</div>
+  <button class="nav-btn on" data-s="workspaces">工作区选择器<small>/m/workspaces（解除门禁）</small></button>
+  <button class="nav-btn" data-s="home-changes">工作区主页 · 变更Tab<small>/m/workspaces/[id]/changes</small></button>
+  <button class="nav-btn" data-s="home-sessions">工作区主页 · 会话Tab<small>/m/workspaces/[id]/sessions</small></button>
+  <div class="grp">变更中心</div>
+  <button class="nav-btn" data-s="change-detail">变更详情（钻取）<small>/changes/[cid] 全屏</small></button>
+  <button class="nav-btn" data-s="quicklog">快速修复 Tab<small>quicklog 卡片列表</small></button>
+  <button class="nav-btn" data-s="filter">筛选抽屉<small>阶段 + 只看待我处理</small></button>
+  <div class="grp">会话</div>
+  <button class="nav-btn" data-s="chat">会话对话（SessionPanel）<small>/sessions/[sid] 完整内核</small></button>
+  <button class="nav-btn" data-s="new-session">新建会话 · 两步<small>机器 → 智能体</small></button>
+</div>
+
+<!-- ══════════ 手机壳 ══════════ -->
+<div class="phone-wrap">
+<div class="phone">
+<div class="screen-area">
+  <div class="statusbar"><span>23:27</span><span>▮▮▮ ⌁ 86%</span><div class="island"></div></div>
+
+  <!-- ── 屏幕1：工作区选择器（已有页面，改动=解除门禁）── -->
+  <div class="screen on" id="scr-workspaces">
+    <div class="app-top"><div class="bar"><div class="title">工作区<small>qinyi · 3 个工作区</small></div></div></div>
+    <div class="app-main">
+      <div class="search-row"><div class="search">🔍 搜索工作区</div></div>
+      <div class="card" onclick="go('home-changes')">
+        <div class="row1"><div class="name">multi-agent-platform</div><span class="arrow">›</span></div>
+        <div class="meta"><span class="badge b-ok"><span class="dot-live"></span>守护进程在线</span><span>Claude</span><span>今日 12 次会话</span></div>
+      </div>
+      <div class="card" onclick="go('home-changes')">
+        <div class="row1"><div class="name">ppm-portal</div><span class="arrow">›</span></div>
+        <div class="meta"><span class="badge b-gray"><span class="dot-busy"></span>守护进程离线</span><span>Codex</span></div>
+      </div>
+      <div class="card" onclick="go('home-changes')">
+        <div class="row1"><div class="name">docs-site</div><span class="arrow">›</span></div>
+        <div class="meta"><span class="badge b-ok"><span class="dot-live"></span>守护进程在线</span><span>Gemini</span></div>
+      </div>
+    </div>
+    <div class="tabbar">
+      <div class="t"><span class="ic">▦</span>工作台</div>
+      <div class="t"><span class="ic">◳</span>计划任务</div>
+      <div class="t"><span class="ic">◈</span>问题清单</div>
+      <div class="t"><span class="ic">◉</span>我的</div>
+      <div class="t on"><span class="ic">⌘</span>平台切换</div>
+    </div>
+    <div class="home-indicator"></div>
+  </div>
+
+  <!-- ── 屏幕2：工作区主页 · 变更 Tab（变更列表）── -->
+  <div class="screen" id="scr-home-changes">
+    <div class="app-top">
+      <div class="bar">
+        <button class="back" onclick="go('workspaces')">‹</button>
+        <div class="title">multi-agent-platform<small>工作区</small></div>
+        <button class="icon-btn">ⓘ</button>
+      </div>
+      <div class="seg">
+        <button class="on" onclick="go('home-changes')">变更中心</button>
+        <button onclick="go('home-sessions')">会话</button>
+      </div>
+    </div>
+    <div class="app-main">
+      <div class="list-tabs">
+        <button class="on">进行中<span class="cnt">4</span></button>
+        <button>已归档<span class="cnt">36</span></button>
+        <button onclick="go('quicklog')">快速修复<span class="cnt">9</span></button>
+      </div>
+      <div class="search-row">
+        <div class="search">🔍 搜索变更名 / 关键词</div>
+        <button class="filter-btn" onclick="openDrawer('f-drawer')">☰<span class="dot"></span></button>
+      </div>
+
+      <div class="card" onclick="go('change-detail')">
+        <div class="row1">
+          <div class="name">2026-08-26-mobile-workspace-page</div><span class="arrow">›</span>
+        </div>
+        <div class="meta">
+          <span class="badge b-stage">◆ 需求分析</span>
+          <span class="badge b-warn">待提案审核</span>
+          <span>刚刚 · qinyi</span>
+        </div>
+      </div>
+      <div class="card" onclick="go('change-detail')">
+        <div class="row1"><div class="name">2026-08-26-workspace-git-status</div><span class="arrow">›</span></div>
+        <div class="meta"><span class="badge b-stage">◆ 执行</span><span>Wave 2/3 · 12 分钟前</span></div>
+      </div>
+      <div class="card" onclick="go('change-detail')">
+        <div class="row1"><div class="name">2026-08-26-session-input-mention</div><span class="arrow">›</span></div>
+        <div class="meta"><span class="badge b-stage">◆ 验证</span><span>待人工测试 · 1 小时前</span></div>
+      </div>
+      <div class="card" onclick="go('change-detail')">
+        <div class="row1"><div class="name">2026-08-25-session-attachment-preview</div><span class="arrow">›</span></div>
+        <div class="meta"><span class="badge b-ok">✓ 已验证</span><span>待归档确认 · 3 小时前</span></div>
+      </div>
+    </div>
+    <div class="tabbar">
+      <div class="t"><span class="ic">▦</span>工作台</div>
+      <div class="t"><span class="ic">◳</span>计划任务</div>
+      <div class="t"><span class="ic">◈</span>问题清单</div>
+      <div class="t"><span class="ic">◉</span>我的</div>
+      <div class="t on"><span class="ic">⌘</span>平台切换</div>
+    </div>
+    <div class="home-indicator"></div>
+  </div>
+
+  <!-- ── 屏幕3：变更详情（全屏钻取，隐藏底部Tab）── -->
+  <div class="screen hidden-tabbar" id="scr-change-detail">
+    <div class="app-top">
+      <div class="bar">
+        <button class="back" onclick="go('home-changes')">‹</button>
+        <div class="title">2026-08-26-mobile-workspace-page<small>需求分析 · 进行中</small></div>
+        <button class="icon-btn" onclick="toast('更多：重解析 / 复制变更名')">⋯</button>
+      </div>
+    </div>
+    <div class="app-main">
+      <!-- 阶段步骤条（横向滚动）-->
+      <div class="stage-steps">
+        <div class="step done"><div class="b">✓</div><div class="n">扫描</div></div>
+        <div class="step cur"><div class="b">2</div><div class="n">需求</div></div>
+        <div class="step"><div class="b">3</div><div class="n">规划</div></div>
+        <div class="step"><div class="b">4</div><div class="n">执行</div></div>
+        <div class="step"><div class="b">5</div><div class="n">验证</div></div>
+        <div class="step"><div class="b">6</div><div class="n">归档</div></div>
+      </div>
+
+      <!-- 审批操作卡（唯一操作区，默认展开）-->
+      <div class="sec-card open">
+        <div class="h">⏳ 待提案审核 · 需要你确认<span class="chev">▾</span></div>
+        <div class="bd">
+          <div style="font-size:12.5px;color:var(--muted);line-height:1.7;margin-bottom:10px">
+            design.md 已生成并同步（12 分钟前）。审查通过后进入「实现计划」阶段；驳回将回退到需求澄清。
+          </div>
+          <div class="btn-row">
+            <button class="btn btn-ghost" onclick="toast('已驳回 → 回退需求澄清')">✕ 驳回</button>
+            <button class="btn btn-primary" onclick="toast('已通过 → 进入实现计划')">✓ 通过并推进</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 规范文档（点击全屏预览，复用 FilePreviewModal）-->
+      <div class="sec-card open">
+        <div class="h">📄 规范文档 · 4<span class="chev">▾</span></div>
+        <div class="bd">
+          <div class="file-chip" onclick="toast('打开全屏文档预览（复用 FilePreviewModal）')">
+            <div class="fi">📐</div><div style="flex:1;min-width:0">design.md<small>23 KB · 刚刚更新</small></div><span class="arrow">›</span>
+          </div>
+          <div class="file-chip" onclick="toast('打开全屏文档预览')">
+            <div class="fi">📋</div><div style="flex:1;min-width:0">proposal.md<small>6 KB · 刚刚更新</small></div><span class="arrow">›</span>
+          </div>
+          <div class="file-chip" onclick="toast('打开全屏文档预览')">
+            <div class="fi">🧩</div><div style="flex:1;min-width:0">requirements.md<small>4 KB</small></div><span class="arrow">›</span>
+          </div>
+          <div class="file-chip" onclick="toast('打开全屏文档预览')">
+            <div class="fi">🗂</div><div style="flex:1;min-width:0">tasks.md<small>3 KB</small></div><span class="arrow">›</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 步骤时间线（折叠）-->
+      <div class="sec-card open">
+        <div class="h">🧭 阶段时间线<span class="chev">▾</span></div>
+        <div class="bd">
+          <div class="tl">
+            <div class="tl-item done"><div class="t">代码扫描完成</div><div class="d">08-26 23:12 · 7 份文档刷新</div></div>
+            <div class="tl-item cur"><div class="t">需求探索 · Step 6/8</div><div class="d">对话式澄清已完成 2 轮，方案 A 已拍板（D-001@V1）</div></div>
+            <div class="tl-item"><div class="t">实现计划</div><div class="d">待提案审核通过</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 智能体执行日志（折叠，默认收起）-->
+      <div class="sec-card">
+        <div class="h" onclick="this.parentElement.classList.toggle('open')">🤖 智能体执行日志 · 3 条<span class="chev">▾</span></div>
+        <div class="bd">
+          <div class="log-line">[23:12:04] sillyspec run brainstorm --done ✓
+[23:15:41] sillyspec run brainstorm --wait ✓
+[23:27:11] 设计文档自审通过，等待 Grill 审查…</div>
+        </div>
+      </div>
+
+      <!-- 会话入口卡（跳会话 Tab）-->
+      <div class="sec-card open">
+        <div class="h" onclick="go('home-sessions')">💬 关联会话 · 2<span class="arrow" style="margin-left:auto">›</span></div>
+        <div class="bd" style="padding-top:0">
+          <div class="ses-sub">含 1 个进行中会话（主控 brainstorm）· 点击进入会话列表</div>
+        </div>
+      </div>
+
+      <!-- 任务区 → 引导桌面（D-002 核心版范围裁剪）-->
+      <div class="desktop-guide">
+        <span style="font-size:18px">🖥</span>
+        <div>任务看板与任务执行页请到电脑端操作（工作区 → 变更 → 任务）</div>
+      </div>
+    </div>
+    <div class="home-indicator"></div>
+  </div>
+
+  <!-- ── 屏幕4：快速修复 Tab ── -->
+  <div class="screen" id="scr-quicklog">
+    <div class="app-top">
+      <div class="bar">
+        <button class="back" onclick="go('home-changes')">‹</button>
+        <div class="title">multi-agent-platform<small>快速修复</small></div>
+      </div>
+      <div class="seg">
+        <button class="on" onclick="go('home-changes')">变更中心</button>
+        <button onclick="go('home-sessions')">会话</button>
+      </div>
+    </div>
+    <div class="app-main">
+      <div class="list-tabs">
+        <button onclick="go('home-changes')">进行中<span class="cnt">4</span></button>
+        <button>已归档<span class="cnt">36</span></button>
+        <button class="on">快速修复<span class="cnt">9</span></button>
+      </div>
+      <div class="group-h">今天</div>
+      <div class="card" onclick="toast('打开 quicklog 详情（MobileDetailSheet 全屏）')">
+        <div class="row1"><div class="name">ql-20260826-012 · 首轮注入简报修复</div><span class="arrow">›</span></div>
+        <div class="meta"><span class="badge b-ok">✓ 已完成</span><span>23:04 · 主控 agent · 4 文件</span></div>
+      </div>
+      <div class="card" onclick="toast('打开 quicklog 详情')">
+        <div class="row1"><div class="name">ql-20260826-011 · 会话输入框 @提及防抖</div><span class="arrow">›</span></div>
+        <div class="meta"><span class="badge b-warn">执行中</span><span>22:47 · worker agent</span></div>
+      </div>
+      <div class="group-h">昨天</div>
+      <div class="card" onclick="toast('打开 quicklog 详情')">
+        <div class="row1"><div class="name">ql-20260825-008 · 附件预览白屏</div><span class="arrow">›</span></div>
+        <div class="meta"><span class="badge b-ok">✓ 已完成</span><span>18:22 · 2 文件</span></div>
+      </div>
+    </div>
+    <div class="tabbar">
+      <div class="t"><span class="ic">▦</span>工作台</div>
+      <div class="t"><span class="ic">◳</span>计划任务</div>
+      <div class="t"><span class="ic">◈</span>问题清单</div>
+      <div class="t"><span class="ic">◉</span>我的</div>
+      <div class="t on"><span class="ic">⌘</span>平台切换</div>
+    </div>
+    <div class="home-indicator"></div>
+  </div>
+
+  <!-- ── 屏幕5：工作区主页 · 会话 Tab（会话列表）── -->
+  <div class="screen" id="scr-home-sessions">
+    <div class="app-top">
+      <div class="bar">
+        <button class="back" onclick="go('workspaces')">‹</button>
+        <div class="title">multi-agent-platform<small>工作区</small></div>
+        <button class="icon-btn" onclick="go('new-session')">＋</button>
+      </div>
+      <div class="seg">
+        <button onclick="go('home-changes')">变更中心</button>
+        <button class="on" onclick="go('home-sessions')">会话</button>
+      </div>
+    </div>
+    <div class="app-main">
+      <div class="list-tabs">
+        <button class="on">全部<span class="cnt">12</span></button>
+        <button>进行中<span class="cnt">3</span></button>
+        <button>已归档</button>
+      </div>
+
+      <div class="group-h"><span class="dot-live"></span>QINYI-DESKTOP · 在线</div>
+      <div class="card" onclick="go('chat')">
+        <div class="row1"><div class="ses-title">2026-08-26-mobile-workspace-page · 主控</div><span class="arrow">›</span></div>
+        <div class="ses-sub">Claude · 进行中 · 刚刚活跃</div>
+        <div class="meta"><span class="badge b-acc">◆ brainstorm</span><span>最后：Step 6/8 写设计文档并自审…</span></div>
+      </div>
+      <div class="card" onclick="go('chat')">
+        <div class="row1"><div class="ses-title">workspace-git-status · worker</div><span class="arrow">›</span></div>
+        <div class="ses-sub">Codex · 空闲 · 25 分钟前</div>
+        <div class="meta"><span class="badge b-gray">Wave 2 任务3 完成</span></div>
+      </div>
+
+      <div class="group-h"><span class="dot-busy"></span>MAC-MINI · 离线</div>
+      <div class="card" style="opacity:.62" onclick="go('chat')">
+        <div class="row1"><div class="ses-title">docs-site 扫描 · worker</div><span class="arrow">›</span></div>
+        <div class="ses-sub">Gemini · 已结束 · 昨天</div>
+        <div class="meta"><span class="badge b-gray">✓ 7 文档已同步</span></div>
+      </div>
+      <div class="card" style="opacity:.62" onclick="go('chat')">
+        <div class="row1"><div class="ses-title">依赖升级预检</div><span class="arrow">›</span></div>
+        <div class="ses-sub">Claude · 已归档 · 08-24</div>
+        <div class="meta"><span class="badge b-gray">已归档</span></div>
+      </div>
+    </div>
+    <div class="tabbar">
+      <div class="t"><span class="ic">▦</span>工作台</div>
+      <div class="t"><span class="ic">◳</span>计划任务</div>
+      <div class="t"><span class="ic">◈</span>问题清单</div>
+      <div class="t"><span class="ic">◉</span>我的</div>
+      <div class="t on"><span class="ic">⌘</span>平台切换</div>
+    </div>
+    <div class="home-indicator"></div>
+  </div>
+
+  <!-- ── 屏幕6：会话对话（SessionPanel 第四宿主，隐藏底部Tab）── -->
+  <div class="screen hidden-tabbar" id="scr-chat">
+    <div class="chat-wrap">
+      <div class="chat-head">
+        <button class="back" onclick="go('home-sessions')">‹</button>
+        <div class="info">
+          <div class="n">2026-08-26-mobile-workspace-page · 主控</div>
+          <div class="s"><span>Claude</span><span>·</span><span style="color:var(--success)">● 流式输出中</span><span>·</span><span>ctx 42%</span></div>
+        </div>
+        <button class="icon-btn" onclick="toast('面板：查看模式 / 中断 / 结束 / 重开 / 配置')">⋯</button>
+      </div>
+      <div class="chat-stream">
+        <div class="msg user"><div class="bubble">把变更中心和会话移植到手机端，复用核心组件，样式重做</div><div class="av">👤</div></div>
+        <div class="msg ai"><div class="av">✦</div><div style="min-width:0">
+          <div class="bubble">好的，我先按 SillySpec 流程走 brainstorm。已完成代码调研：<br>· 移动端骨架已就绪（/m/ 路由 + UA 分流）<br>· 变更中心数据层 lib/changes.ts 可 100% 复用<br>· 会话内核 SessionPanel 已验证一内核多宿主模式</div>
+          <div class="tool-call" onclick="this.classList.toggle('open')">
+            <div class="th"><span class="tw">⚙ Explore</span><span>调研前端变更中心与会话页面</span><span style="margin-left:auto">42 步 · ▾</span></div>
+            <div class="tb">搜索 frontend/src/app、components/sessions、
+components/mobile …
+命中：sessions-portal.tsx · session-panel.tsx
+mobile-app-shell.tsx · mobile-card-list.tsx</div>
+          </div>
+          <div class="bubble">三个方案已列出，推荐 A（独立移动渲染层）。<br>决策已落盘 decisions.md（D-001@V1）<span class="streaming"><i></i><i></i><i></i></span></div>
+        </div></div>
+      </div>
+      <div class="queue-bar">
+        <span>📤 排队 1 条：开始写 design.md 吧</span>
+        <button class="qx" onclick="this.closest('.queue-bar').remove()">✕ 撤回</button>
+      </div>
+      <div class="chat-input">
+        <textarea rows="1" placeholder="输入消息，Enter 发送"></textarea>
+        <button class="send-btn stop" onclick="toast('中断当前输出')">■</button>
+      </div>
+    </div>
+    <div class="home-indicator"></div>
+  </div>
+
+  <!-- ── 屏幕7：新建会话两步浮层（底部抽屉形态）── -->
+  <div class="screen" id="scr-new-session">
+    <div class="app-top">
+      <div class="bar"><button class="back" onclick="go('home-sessions')">‹</button><div class="title">新建会话</div></div>
+    </div>
+    <div class="app-main" style="opacity:.5">
+      <div class="card"><div class="row1"><div class="ses-title">会话列表（被浮层遮盖）</div></div></div>
+    </div>
+    <div class="mask on"></div>
+    <div class="drawer picker on" style="max-height:78%">
+      <div class="grab"></div>
+      <div class="dh"><div class="crumb">① 选择机器 › <b style="color:var(--primary)">② 选择智能体</b></div><button onclick="go('home-sessions')">取消</button></div>
+      <div class="drawer-body">
+        <div class="f-label">qinyi-desktop · Claude 协议</div>
+        <button class="opt" onclick="toast('已选智能体 → 合成 preContext 进入预会话')">
+          <div class="oi">🤖</div><div class="ot"><b>主控 · team-lead</b><small>默认智能体 · 团队编排 / 流程推进</small></div><span class="arrow">›</span>
+        </button>
+        <button class="opt" onclick="toast('已选智能体 → 进入预会话')">
+          <div class="oi">🧑‍💻</div><div class="ot"><b>worker · code-writer</b><small>编码执行 / 测试补齐</small></div><span class="arrow">›</span>
+        </button>
+        <button class="opt" onclick="toast('已选智能体 → 进入预会话')">
+          <div class="oi">🔍</div><div class="ot"><b>explore · researcher</b><small>只读调研 / 方案比较</small></div><span class="arrow">›</span>
+        </button>
+        <button class="opt" style="opacity:.55">
+          <div class="oi">⚙️</div><div class="ot"><b>自定义智能体</b><small>从 AgentProfile 列表选择</small></div><span class="arrow">›</span>
+        </button>
+      </div>
+    </div>
+    <div class="home-indicator"></div>
+  </div>
+
+  <!-- ── 筛选抽屉（叠加在变更列表上）── -->
+  <div class="screen" id="scr-filter">
+    <div class="app-top">
+      <div class="bar">
+        <button class="back" onclick="go('workspaces')">‹</button>
+        <div class="title">multi-agent-platform<small>工作区</small></div>
+      </div>
+      <div class="seg">
+        <button class="on">变更中心</button>
+        <button onclick="go('home-sessions')">会话</button>
+      </div>
+    </div>
+    <div class="app-main" style="opacity:.5">
+      <div class="list-tabs"><button class="on">进行中<span class="cnt">4</span></button><button>已归档<span class="cnt">36</span></button><button>快速修复<span class="cnt">9</span></button></div>
+      <div class="card"><div class="row1"><div class="name">…（被抽屉遮盖）</div></div></div>
+    </div>
+    <div class="tabbar" style="opacity:.5">
+      <div class="t"><span class="ic">▦</span>工作台</div><div class="t"><span class="ic">◳</span>计划任务</div><div class="t"><span class="ic">◈</span>问题清单</div><div class="t"><span class="ic">◉</span>我的</div><div class="t on"><span class="ic">⌘</span>平台切换</div>
+    </div>
+    <div class="mask on"></div>
+    <div class="drawer on" id="f-drawer">
+      <div class="grab"></div>
+      <div class="dh">筛选<button onclick="go('home-changes')">取消</button></div>
+      <div class="drawer-body">
+        <div class="f-label">阶段</div>
+        <div class="chips">
+          <button class="on">全部阶段</button><button>需求分析</button><button>规划</button><button>执行</button><button>验证</button><button>归档</button>
+        </div>
+        <div class="f-label">其它</div>
+        <div class="switch-row">
+          <span>只看待我处理</span>
+          <div class="sw on" onclick="this.classList.toggle('on')"></div>
+        </div>
+      </div>
+      <div class="btn-row"><button class="btn btn-primary" onclick="go('home-changes')">应用筛选</button></div>
+    </div>
+    <div class="home-indicator"></div>
+  </div>
+
+  <!-- 屏内 toast -->
+  <div id="toast" style="position:absolute;left:50%;bottom:120px;transform:translateX(-50%);background:rgba(15,10,30,.85);color:#fff;font-size:12.5px;padding:9px 16px;border-radius:999px;z-index:80;display:none;max-width:80%;text-align:center"></div>
+
+</div>
+</div>
+</div>
+
+<script>
+  // 屏幕切换（原型内导航模拟真实路由跳转）
+  function go(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('on'));
+    document.getElementById('scr-' + id).classList.add('on');
+    document.querySelectorAll('.nav-btn').forEach(b =>
+      b.classList.toggle('on', b.dataset.s === id));
+  }
+  document.querySelectorAll('.nav-btn').forEach(b =>
+    b.addEventListener('click', () => go(b.dataset.s)));
+  function openDrawer(id) { /* 筛选抽屉独立屏幕呈现 */ go('filter'); }
+  // 折叠面板
+  document.querySelectorAll('.sec-card > .h').forEach(h => {
+    if (!h.onclick && !h.style.cursor) h.addEventListener('click', () =>
+      h.parentElement.classList.toggle('open'));
+  });
+  // toast
+  let tTimer;
+  function toast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.style.display = 'block';
+    clearTimeout(tTimer); tTimer = setTimeout(() => t.style.display = 'none', 1800);
+  }
+</script>
+</body>
+</html>

@@ -22,7 +22,7 @@ SillyHub 前端的 Next.js App Router 页面路由层（frontend/src/app/** + mi
   - `(dashboard)/workspaces` — 工作区列表（选择器页）+ `[id]` 详情（列表带类型徽标+词表筛选/未分类；
     详情含 type/role/description 基本信息编辑区，2026-08-18-workspace-role-type）
   - `(dashboard)/runtimes` — daemon 运行时管理（列表 + `[id]` 详情/审计）
-  - `(dashboard)/sessions` — 智能体会话总入口（平台级跨工作区，两栏布局；2026-08-19-session-stream-ux：SSE 走装配器 + 头部子代理目录 + viewMode「进度」视图）
+  - `(dashboard)/sessions` — 智能体会话总入口（平台级跨工作区，两栏布局；2026-08-19-session-stream-ux：SSE 走装配器 + 头部子代理目录 + viewMode「进度」视图；sessions-portal 页头 actions 槽仅 workspace scope 挂紧凑态 Git 状态条 `variant="compact"`（Tooltip 展开细节，2026-08-26-workspace-git-status））
   - `(dashboard)/agent-profiles` — 智能体档案全局页（跨工作区聚合，独立一级菜单）
   - `(dashboard)/settings` / `admin` / `account` / `ppm` — 设置 / 管理台 / 个人中心 / 独立项目管理系统（/ppm redirect 到 /ppm/projects）
 - `workspaces/[id]/` 嵌套布局（含 layout.tsx + error.tsx），子路由按域分组：
@@ -30,7 +30,7 @@ SillyHub 前端的 Next.js App Router 页面路由层（frontend/src/app/** + mi
   - 变更域：`changes`（列表+详情）、`approvals`、`audit`
   - spec 域：`components`、`scan-docs`、`knowledge`、`skills`
   - 平台配置：`agent-profiles`、`members`、`mcp`、`mcp-tokens`、`files`、`incidents`、`releases`
-  - Git 源码：`git-log` — 工作区 Git 日志视图（类 IDEA Git Log：SVG 泳道拓扑 + 虚拟滚动提交列表 + 提交详情 Drawer/单文件 diff；组件 `components/git-log/`、取数 `lib/git-log.ts`，2026-08-25-workspace-git-log）
+  - Git 源码：`git-log` — 工作区 Git 日志视图（类 IDEA Git Log：SVG 泳道拓扑 + 虚拟滚动提交列表 + 提交详情 Drawer/单文件 diff；组件 `components/git-log/`、取数 `lib/git-log.ts`，2026-08-25-workspace-git-log）；PageHeader 下挂完整态 Git 状态条 `<GitStatusBar variant="full">`（分支⎇/↑↓/±改动/同步时刻，2026-08-26-workspace-git-status）
 - 移动端 `m/`：`login` / `account` / `workspaces`（列表）
   （workspaces 筛选换词表+未分类、创建提交体补 type:other，最小收口）
   - `ppm/{workbench, project-plans, milestone-details, task-plans, problem-list}` — ppm 移动五页。

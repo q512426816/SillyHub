@@ -39,7 +39,7 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
   - 入口件：`workspace-card` / `workspace-scan-dialog` / `workspace-switcher` / `workspace-tabs`
     （workspace-card 带类型徽标、workspace-scan-dialog 带类型必选下拉+描述
     textarea，均消费 lib/workspace-types，2026-08-18-workspace-role-type）
-  - git-log/（工作区 Git 日志视图，2026-08-25-workspace-git-log）：`commit-graph`（SVG 泳道渲染 + lanePalette 三主题色板）/ `commit-list`（react-virtual 虚拟滚动行）/ `commit-detail-drawer`（提交详情 + diff 按需展开）/ `file-tree`（变更文件按 `/` 聚合目录树、目录节点 +x/-y）；workspace-tabs TABS 追加「Git 日志」项（纯三字段）
+  - git-log/（工作区 Git 日志视图，2026-08-25-workspace-git-log）：`commit-graph`（SVG 泳道渲染 + lanePalette 三主题色板）/ `commit-list`（react-virtual 虚拟滚动行）/ `commit-detail-drawer`（提交详情 + diff 按需展开）/ `file-tree`（变更文件按 `/` 聚合目录树、目录节点 +x/-y）/ `git-status-bar`（共享 Git 状态条 full/compact 双形态：git-log 页完整态 + sessions 门户紧凑态 Tooltip 展开；自治取数 useGitLogStatus，状态色经 statusBarPalette → 组件级 `--sb-*` 变量注入零硬编码 hex；五边界形态——fetch 降级黄条/无 upstream/detached HEAD/空仓库/no_git 返 null，2026-08-26-workspace-git-status）；workspace-tabs TABS 追加「Git 日志」项（纯三字段）
   - 绑定与成员：`workspace-binding-dialog` / `workspace-binding-guard` / `workspace-member-row` / `workspace-member-add-dialog`
   - 配置与路径：`workspace-config-card` / `workspace-path-picker` / `workspace-path-fields` / `workspace-daemon-switcher` / `workspace-access-guide` / `workspace-session-section`
   - workspace/ 目录：`LinkWorkspaceDialog` / `LinkedProjectsSection`（PPM 项目链接）、`shared-daemon-manager` / `shared-daemon-toggle`（共享 daemon 管理与成员视图）；LinkWorkspaceDialog 已关联/可选两侧均按词表徽标渲染

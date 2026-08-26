@@ -46,11 +46,15 @@ vi.mock("next/link", () => ({
 }));
 
 // ── mock @/lib/git-log：fetchGitLogCommits（useQueries 逐页取数）+ hooks ──
+// task-03（2026-08-26-workspace-git-status / Plan Review I-1）：PageHeader 下
+// 挂完整态 Git 状态条，...actual 透传处补 useGitLogStatus mock（默认 data=null
+// 零 DOM 噪声，组件渲染 null——status 条自身行为归 git-status-bar.test.tsx）。
 
 const gitLogMock = vi.hoisted(() => ({
   fetchGitLogCommits: vi.fn(),
   useGitLogCommitDetail: vi.fn(),
   useGitLogDiff: vi.fn(),
+  useGitLogStatus: vi.fn(),
 }));
 vi.mock("@/lib/git-log", async () => {
   const actual = await vi.importActual<typeof import("@/lib/git-log")>(
@@ -61,6 +65,7 @@ vi.mock("@/lib/git-log", async () => {
     fetchGitLogCommits: gitLogMock.fetchGitLogCommits,
     useGitLogCommitDetail: gitLogMock.useGitLogCommitDetail,
     useGitLogDiff: gitLogMock.useGitLogDiff,
+    useGitLogStatus: gitLogMock.useGitLogStatus,
   };
 });
 
@@ -158,6 +163,14 @@ beforeEach(() => {
     error: null,
   });
   gitLogMock.useGitLogDiff.mockReturnValue({
+    data: null,
+    isPending: false,
+    isError: false,
+    error: null,
+  });
+  // task-03：status hook 默认已就绪空数据（data=null → 状态条渲染 null，
+  // 不产生加载文案噪声；既有页面断言零影响）。
+  gitLogMock.useGitLogStatus.mockReturnValue({
     data: null,
     isPending: false,
     isError: false,

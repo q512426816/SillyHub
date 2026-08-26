@@ -2100,6 +2100,8 @@ export interface TeamMissionWorkerSummary {
   first_run_id?: string | null;
   /** 运行中分身最新动作预览（UX 走查③）：最新日志行截断摘要，仅 running 行。 */
   latest_action?: string | null;
+  /** 已完成分身的结论摘要（UX 优化 2026-08-27）：worker_done 上报的 summary 前 120 字符。 */
+  result_summary?: string | null;
 }
 
 /** scope 工作区引用（ql-20260825-003：id+名称 enriched 视图）。 */

@@ -81,7 +81,7 @@ daemon host-fs git_status({root})（平名注册，第 15 方法）
 
 - daemon：porcelain v2 解析单测（正常/无 upstream/detached/空仓库/untracked 混合/binary numstat 行）、fetch 降级三分支（超时/失败/no_remote）、命令构造只读断言。
 - backend：集成测试六分支（正常/无 upstream/fetch 失败降级 200+error/no_git 空态/离线 502/契约缺口 502）。
-- 前端：git-status-bar 组件测试（完整/紧凑两形态渲染断言、fetch 失败黄条、staleTime 下两实例单请求——用两个组件同屏断言 fetch 调用次数=1）。
+- 前端：git-status-bar 组件测试（完整/紧凑两形态渲染断言、fetch 失败黄条、staleTime 下两实例单请求——用两个组件同屏断言 fetch 调用次数=1）；**两页既有测试 mock 层同步补 git-log status mock**（sessions-portal.test.tsx 未 mock @/lib/git-log、git-log-page.test.tsx 为 ...actual 透传——挂载后会产生未 mock 的 status 请求噪声，补固定 fixture 或 loading 态 mock，Plan Review I-1）。
 
 ## 6. 文件变更清单
 

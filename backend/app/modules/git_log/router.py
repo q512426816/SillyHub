@@ -1,16 +1,18 @@
-"""HTTP routes for the git_log module — 工作区 Git 日志（类 IDEA Git Log）三端点。
+"""HTTP routes for the git_log module — 工作区 Git 日志 + Git 健康状态，共四端点。
 
 「浏览器 → backend → daemon → 宿主机 git」只读查询链路的 HTTP 层（design §7.1）：
 
-- 三 GET 端点统一 ``require_permission(Permission.WORKSPACE_READ)`` 门控，
+- 四 GET 端点统一 ``require_permission(Permission.WORKSPACE_READ)`` 门控，
   依赖形态沿用 explorer/router.py 先例（``Annotated[User, Depends(...)]``）；
-- router 层做参数静态校验（skip/limit 窗口、sha/branch/author/path 白名单），
-  helper 为 service 层模块内共享函数，非法统一 ``GitLogInvalidParam`` 422；
+- router 层做参数静态校验（skip/limit 窗口、sha/branch/author/path 白名单；
+  status 端点无参数），helper 为 service 层模块内共享函数，非法统一
+  ``GitLogInvalidParam`` 422；
 - 显式超时与全量错误映射（AppError 子类中文文案）在 service 层收口，
   router 直接透传、不二次映射（explorer/router.py 同款）。
 
 设计依据：``.sillyspec/changes/2026-08-25-workspace-git-log/design.md``
-（§7.1 端点表 / §5.3 模块形态）。
+（§7.1 端点表 / §5.3 模块形态）；status 端点另见
+``.sillyspec/changes/2026-08-26-workspace-git-status/design.md`` §5.3 / §7.1。
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from app.modules.git_log.schema import (
     GitLogCommitDetailResponse,
     GitLogCommitsResponse,
     GitLogDiffResponse,
+    GitLogStatusResponse,
 )
 from app.modules.git_log.service import (
     GitLogService,
@@ -93,3 +96,19 @@ async def get_git_log_diff(
     _validate_diff_path(path)
     service = GitLogService(session)
     return await service.get_file_diff(workspace_id, user.id, sha, path)
+
+
+@router.get("/status", response_model=GitLogStatusResponse)
+async def get_git_log_status(
+    workspace_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+) -> GitLogStatusResponse:
+    """工作区 Git 健康状态（status 变更 §7.1 端点 ④，RPC 超时 30s，无 query 参数）。
+
+    分支/upstream/ahead-behind/未提交改动汇总 + 自动 fetch 结果（失败降级
+    不阻断：fetch.performed=false + error 代号 + behind stale 值），
+    synced_at 为 backend 组装时刻（status 变更 §5.3）。
+    """
+    service = GitLogService(session)
+    return await service.get_status(workspace_id, user.id)

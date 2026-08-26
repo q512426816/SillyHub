@@ -46,6 +46,25 @@ tier: independent
   workspace+change_key，缺行建 placeholder）/`bind_session_to_quicklog`（按 ql_id）
   位于 change/binding.py:109/188。`default` 是 CLI 伪 change_key，联想与绑定均跳过。
 
+## 2.1 决策记录（决策/方案选择）
+
+- **D-001 方案选择**：三方案对比后定为 **方案 B（前端联想 + 后端最小扩展）**，
+  用户于 brainstorm Step 4 确认（进度库可回放）；方案 A（纯前端）降为 W1 子集，
+  方案 C（消息级 mention 实体化）因需迁移消息表+改渲染协议否决。依据：
+  proposal.md 方案对比表。
+- **D-002 透传格式**：`/技能` 原样透传不剥离（区别于 /team 平台指令的剥离），
+  依赖 daemon 已把技能落盘 `<workdir>/.claude/skills/`；平台技能冒号名风险以
+  manifest 新增 `invoke_name` 根治（§4.1）。
+- **D-003 绑定通道**：@ 关联走既有 M:N link + 幂等 binder，**不碰消息模型**；
+  inject 新增 `bind_change_key`/`bind_quick_id` 仿 `page_context` 可选字段模式，
+  插入点在行锁后、tool_report 早退前以覆盖忙轮排队路径（§4.2）。
+- **D-004 跨 workspace 语义**：保持 binder 既有 placeholder 行为（仅在会话自有
+  工作区建行，与 run_sync 通道暴露面一致），不为 inject 单开分歧分支（§4.2）。
+- **D-005 字段约束对齐**：`bind_quick_id` max_length=128 对齐 create 通道
+  `quicklog_id` 契约与列宽，同语义同约束（Design Grill 修正）。
+- **D-006 非目标边界**：不做消息 chip/↑ 历史回溯/工作区技能联想/解绑 UI
+  （proposal 非目标清单，tasks 无越界任务）。
+
 ## 3. 交互设计
 
 ### 3.1 触发与关闭
@@ -172,49 +191,43 @@ tier: independent
             （挂载 prefetch，staleTime 5min，workspaceId 为空时 @ 联想禁用）
 ```
 
-## 6. 文件变更清单（File Changes / 文件清单；复核命题 7/8 修订）
+## 6. 文件变更清单（File Changes / 文件清单）
 
-新增：
-- `frontend/src/lib/session-mention.ts`（detectMention/回填纯函数）
-- `frontend/src/components/daemon/session-mention-popover.tsx`
-- `frontend/src/lib/__tests__/session-mention.test.ts`
-- `frontend/src/components/daemon/__tests__/session-mention-popover.test.tsx`
+新增（前端）：
+- `frontend/src/lib/session-mention.ts`（detectMention 与选中回填纯函数）
+- `frontend/src/lib/session-mention-sources.ts`（useMentionSources 联想数据 hooks）
+- `frontend/src/components/daemon/session-mention-popover.tsx`（联想浮层组件）
+- `frontend/src/lib/__tests__/session-mention.test.ts`（纯函数单测）
+- `frontend/src/lib/__tests__/session-mention-sources.test.tsx`（hooks 单测）
+- `frontend/src/lib/__tests__/daemon-session.test.ts`（injectSession bind 断言）
+- `frontend/src/components/daemon/__tests__/session-mention-popover.test.tsx`（浮层单测）
+- `frontend/src/components/daemon/__tests__/session-input-bar-mention.test.tsx`（接入单测）
 
 修改（前端）：
-- `frontend/src/components/daemon/session-input-bar.tsx`（接入检测/浮层/IME/
-  onMentionsChange/placeholder/光标回填模式）
-- `frontend/src/components/daemon/session-panel.tsx`（3 渲染点接线；**7 个发送
-  组装点位**：createSession page :1719 / dialog :3635，injectSession
-  sendFromQueue :1546 / page sendToServerQueue :1612 / page 重发 :1952（不带
-  mentions，R-7 取舍）/ dialog submitFollowup :3428 / **dialog sendToServerQueue
-  :3496**）
-- `frontend/src/lib/daemon.ts`（injectSession 请求体 + 2 字段；经 Omit<
-  SessionInjectRequest> 类型自动获得新字段，只需组装处理）
-- `frontend/src/lib/custom-skills.ts`（PlatformSkillSummary 手写加
-  `invoke_name?: string | null`，注释标注来源——manifest 类型不在生成管线内）
+- `frontend/src/components/daemon/session-input-bar.tsx`（检测驱动浮层与 IME 与光标回填与 onMentionsChange）
+- `frontend/src/components/daemon/session-panel.tsx`（3 渲染点接线与 7 发送组装点位与 placeholder 文案）
+- `frontend/src/lib/daemon.ts`（injectSession 请求体透传 bind 字段）
+- `frontend/src/lib/custom-skills.ts`（PlatformSkillSummary 手写加 invoke_name）
+- `frontend/src/lib/query-keys.ts`（联想数据缓存键）
 
 修改（后端）：
-- `backend/app/modules/daemon/schema.py`（SessionInjectRequest + 2 字段，
-  bind_quick_id max_length=128 对齐 create 契约）
-- `backend/app/modules/daemon/router.py` + `backend/app/modules/daemon/service.py`
-  Facade（三层透传同步，见 §4.2）
-- `backend/app/modules/daemon/session/service.py`（SessionService.inject_session
-  插入 binder 调用：行锁后、tool_report 早退前，None 守卫 + 结果日志）
+- `backend/app/modules/daemon/schema.py`（SessionInjectRequest 加 bind 字段）
+- `backend/app/modules/daemon/router.py`（inject 路由层透传）
+- `backend/app/modules/daemon/service.py`（Facade 层透传）
+- `backend/app/modules/daemon/session/service.py`（binder 插入与 None 守卫）
 - `backend/app/modules/agent/skills_bundle_service.py`（invoke_name 聚合透传）
 
-测试：
-- `backend/app/modules/daemon/tests/test_session_service.py`（binder 调用/None
-  守卫/跨 workspace 语义/bind 失败不阻断消息发送用例）
-- `backend/app/modules/daemon/tests/test_session_router.py`（/inject 端点新字段）
-- `backend/app/modules/daemon/tests/test_session_queue.py`（**忙轮排队路径仍绑定**
-  ——命题 3 验收载体）
-- `backend/app/modules/daemon/tests/test_skills_bundle.py`（invoke_name；既有
-  文件并入，非新建——Design Grill 修正路径）
+测试（后端）：
+- `backend/app/modules/daemon/tests/test_session_service.py`（binder 与 None 与跨 workspace 用例）
+- `backend/app/modules/daemon/tests/test_session_router.py`（inject 端点字段校验）
+- `backend/app/modules/daemon/tests/test_session_queue.py`（忙轮排队路径仍绑定）
+- `backend/app/modules/daemon/tests/test_skills_bundle.py`（invoke_name 用例）
 
 生成产物（随变更提交）：
-- `frontend/src/lib/api-types.ts`、`backend/openapi.json`（`pnpm gen:types`）
+- `frontend/src/lib/api-types.ts`（pnpm gen:types 生成）
+- `backend/openapi.json`（pnpm gen:types 生成）
 
-不改动：消息模型（AgentRunLog）、渲染协议、`/team` 语义、team popover、附件流。
+不修改文件：消息模型（AgentRunLog）、渲染协议、`/team` 语义、team popover、附件流。
 
 ## 7. 风险（Risk / 风险登记；复核后更新）
 

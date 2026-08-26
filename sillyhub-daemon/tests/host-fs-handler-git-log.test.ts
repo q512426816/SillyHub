@@ -16,6 +16,18 @@
 //   - 只读命令断言：子命令仅 log / for-each-ref / show / rev-parse；branch /
 //     author / path 全部独立 argv 经 execFile（记录 cmd+args 逐 token 断言）。
 //
+// task-01（2026-08-26-workspace-git-status / FR-02 FR-03 FR-06 / design §5.2 + §7.2）
+// 追加 git_status（第 5 个平名 git 方法）用例 GL34~GL45：
+//   - porcelain v2 六类形态：正常（upstream+branch.ab）/ 无 upstream（ahead/behind
+//     null）/ detached（branch=head_short）/ 空仓库 "(initial)"（empty=true 计数全
+//     null，diff HEAD exit 128 容错）/ untracked 混合（1/2/u 条目不参与）/ binary
+//     numstat 行（计文件不计行）。
+//   - fetch 三分支降级：超时走 err.killed/signal 判定（stderr 空串）/ 非零退出
+//     fetch_failed / git remote 预检 no_remote；失败不阻断 ②③ 字段。
+//   - 命令构造只读断言：remote/fetch/status/diff 只读子命令 + --no-show-stash +
+//     --no-renames 逐 token（FR-06 独立 argv 不经 shell）。
+//   - daemon.ts：第 5 个平名 git 方法 git_status 注册断言。
+//
 // 风格对齐 tests/host-fs-handler-worktree.test.ts：vi.mock('node:child_process')
 // 拦截 execFile（队列 + 记录每次调用 cmd/args）+ 真实临时目录（mkdtemp）。
 // 注册器测试对齐 tests/file-rpc-explorer.test.ts：Object.create(Daemon.prototype)
@@ -32,11 +44,17 @@ const IS_WIN = platform() === 'win32';
 /**
  * mock 队列：每次 execFile 调用 pop 一项；记录传给 execFile 的 cmd + args，
  * 断言「只读子命令 + branch/author/path 独立 argv」（R-01 验收关键）。
+ *
+ * errKilled / errSignal：失败时挂到回调 Error 上的属性——git_status 的 fetch
+ * 超时判定读 err.killed/signal 而非 stderr（Grill CC-02，真实 execFile 超时
+ * Node 自动 SIGTERM，两属性同时置位）。
  */
 const glExecQueue: Array<{
   ok: boolean;
   stdout?: string;
   stderr?: string;
+  errKilled?: boolean;
+  errSignal?: string;
 }> = [];
 
 /** 记录所有 execFile 调用的 (cmd, args)，命令构造断言用。 */
@@ -68,7 +86,13 @@ vi.mock('node:child_process', async (importOriginal) => {
         if (next.ok) {
           cb(null, next.stdout ?? '', next.stderr ?? '');
         } else {
-          cb(new Error(next.stderr ?? 'mock exec failure'), next.stdout ?? '', next.stderr ?? '');
+          const err = new Error(next.stderr ?? 'mock exec failure') as Error & {
+            killed?: boolean;
+            signal?: string;
+          };
+          if (next.errKilled !== undefined) err.killed = next.errKilled;
+          if (next.errSignal !== undefined) err.signal = next.errSignal;
+          cb(err, next.stdout ?? '', next.stderr ?? '');
         }
       });
       return {
@@ -135,6 +159,39 @@ function logStdout(entries: string[]): string {
 /** git show stdout：pretty 记录（\x1e 收尾）+ numstat 区两段拼接。 */
 function showStdout(entry: string, numstat: string[]): string {
   return `${entry}\n\x1e\n${numstat.join('\n')}\n`;
+}
+
+// ── git_status porcelain v2 输出构造（task-01 2026-08-26-workspace-git-status）──
+
+/** 40 位测试用 oid（head_short 取前 8 位 = a1b2c3d4）。 */
+const GS_OID = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2';
+
+/** porcelain v2 stdout：行数组拼整段（行形状对齐 git status --porcelain=v2 --branch）。 */
+function porcelainV2(lines: string[]): string {
+  return lines.join('\n') + '\n';
+}
+
+/** 正常形态 porcelain 头三行（oid + head main + upstream + ab）。 */
+function gsNormalHeaders(): string[] {
+  return [
+    `# branch.oid ${GS_OID}`,
+    '# branch.head main',
+    '# branch.upstream origin/main',
+    '# branch.ab +2 -1',
+  ];
+}
+
+/**
+ * git_status 队列快捷填装：remote 预检（有 origin）+ fetch 成功 + porcelain + numstat。
+ * 便于各用例只覆写关心的段（fetch 三分支用例自行逐项 push）。
+ */
+function gsQueue(statusOut: string, diffOut: string): void {
+  glExecQueue.push(
+    { ok: true, stdout: 'origin\n', stderr: '' }, // ① git remote 预检
+    { ok: true, stdout: '', stderr: '' }, // ① git fetch --quiet
+    { ok: true, stdout: statusOut, stderr: '' }, // ② porcelain v2
+    { ok: true, stdout: diffOut, stderr: '' }, // ③ numstat
+  );
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -689,6 +746,285 @@ describe('HostFsHandler — gitDiffFile（task-01 GL26~GL29，CC-05 / R-06）', 
 });
 
 // ──────────────────────────────────────────────────────────────────────────────
+// git_status（task-01 2026-08-26-workspace-git-status —— porcelain v2 解析 /
+// fetch 三分支降级 / numstat 单源 / 空仓库空态，design §5.2 + §7.2）
+// ──────────────────────────────────────────────────────────────────────────────
+
+describe('HostFsHandler — gitStatus porcelain v2 解析（task-01 GL34~GL39，§5.2）', () => {
+  let root: string;
+  let handler: HostFsHandler;
+
+  beforeEach(async () => {
+    root = await makeRoot();
+    handler = new HostFsHandler({ rootsProvider: () => [root] });
+  });
+
+  afterEach(async () => {
+    glExecQueue.length = 0;
+    glCalls.length = 0;
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('GL34: 正常形态 —— upstream + branch.ab + fetch 成功 + numstat 求和（十四字段全量）', async () => {
+    gsQueue(
+      porcelainV2([
+        ...gsNormalHeaders(),
+        '1 .M N... 100644 100644 100644 1111111 2222222 src/a.ts',
+        '? notes/new.md',
+      ]),
+      '12\t3\tsrc/a.ts\n5\t0\tdocs/b.md\n',
+    );
+    const r = await handler.gitStatus({ root });
+    expect(r).toEqual({
+      branch: 'main',
+      detached: false,
+      upstream: 'origin/main',
+      ahead: 2,
+      behind: 1,
+      files_changed: 2,
+      additions: 17, // 12 + 5
+      deletions: 3, // 3 + 0
+      untracked_count: 1,
+      head_short: 'a1b2c3d4', // branch.oid 前 8 位（CC-04）
+      empty: false,
+      fetch_performed: true,
+      fetch_error: null,
+      error: null,
+    });
+  });
+
+  it('GL35: 无 upstream（本地新分支）—— upstream/ahead/behind=null，计数照常', async () => {
+    gsQueue(
+      porcelainV2([
+        `# branch.oid ${GS_OID}`,
+        '# branch.head feature/x.y-z',
+        // 无 branch.upstream / branch.ab 行（porcelain 无 upstream 时整行缺失）
+        '1 .M N... 100644 100644 100644 1111111 2222222 wip.ts',
+      ]),
+      '4\t1\twip.ts\n',
+    );
+    const r = await handler.gitStatus({ root });
+    expect(r.branch).toBe('feature/x.y-z');
+    expect(r.upstream).toBeNull();
+    expect(r.ahead).toBeNull();
+    expect(r.behind).toBeNull();
+    expect(r.files_changed).toBe(1);
+    expect(r.additions).toBe(4);
+    expect(r.deletions).toBe(1);
+    expect(r.untracked_count).toBe(0);
+    expect(r.error).toBeNull();
+  });
+
+  it('GL36: detached HEAD（branch.head "(detached)"）—— detached=true 且 branch=head_short', async () => {
+    gsQueue(
+      porcelainV2([
+        `# branch.oid ${GS_OID}`,
+        '# branch.head (detached)',
+        // detached 下 porcelain 不输出 branch.upstream / branch.ab
+      ]),
+      '',
+    );
+    const r = await handler.gitStatus({ root });
+    expect(r.detached).toBe(true);
+    expect(r.branch).toBe('a1b2c3d4'); // branch 字段返回 HEAD 短哈希（§5.2）
+    expect(r.head_short).toBe('a1b2c3d4');
+    expect(r.upstream).toBeNull();
+    expect(r.ahead).toBeNull();
+    expect(r.behind).toBeNull();
+    expect(r.error).toBeNull();
+  });
+
+  it('GL37: 空仓库 "(initial)" —— empty=true 计数全 null + diff HEAD exit 128 容错不走红通道', async () => {
+    glExecQueue.push(
+      { ok: true, stdout: 'origin\n', stderr: '' }, // remote 预检
+      { ok: true, stdout: '', stderr: '' }, // fetch
+      {
+        ok: true,
+        stdout: porcelainV2([
+          '# branch.oid (initial)',
+          '# branch.head main',
+          '? readme.md', // 空仓库有 untracked，但空态下计数归 null（§5.2）
+        ]),
+        stderr: '',
+      },
+      {
+        // 空仓库 git diff HEAD exit 128 —— 容错转空态，不走红通道（CC-07）
+        ok: false,
+        stdout: '',
+        stderr: "fatal: ambiguous argument 'HEAD': unknown revision or path not in the working tree.",
+      },
+    );
+    const r = await handler.gitStatus({ root });
+    expect(r).toEqual({
+      branch: null,
+      detached: false,
+      upstream: null,
+      ahead: null,
+      behind: null,
+      files_changed: null,
+      additions: null,
+      deletions: null,
+      untracked_count: null, // 空态覆盖 "? " 计数
+      head_short: null,
+      empty: true,
+      fetch_performed: true,
+      fetch_error: null,
+      error: null, // 不走红通道
+    });
+    // diff 确已执行（exit 128 容错路径真实走到，而非提前跳过）。
+    expect(glCalls.map((c) => c.args[2])).toEqual(['remote', 'fetch', 'status', 'diff']);
+  });
+
+  it('GL38: untracked 混合 —— "? " 计数、1/2/u 条目不参与 files_changed（CC-05 单源）', async () => {
+    gsQueue(
+      porcelainV2([
+        ...gsNormalHeaders(),
+        '1 .M N... 100644 100644 100644 1111111 2222222 modified.ts',
+        '2 RM N... 100644 100644 100644 1111111 2222222 R100\trenamed\tnew-name.ts',
+        'u AA N... 100644 100644 100644 1111111 2222222 conflict.txt',
+        '? a.txt',
+        '? dir/b c.txt', // 路径含空格仍单条目
+        '? 中文路径.txt',
+      ]),
+      // numstat 空输出 —— files_changed=0 证明 porcelain 1/2 条目不参与（CC-05）
+      '',
+    );
+    const r = await handler.gitStatus({ root });
+    expect(r.untracked_count).toBe(3);
+    expect(r.files_changed).toBe(0);
+    expect(r.additions).toBe(0);
+    expect(r.deletions).toBe(0);
+    expect(r.error).toBeNull();
+  });
+
+  it('GL39: binary numstat 行（-\\t-\\t）—— 计 files_changed 不计行数', async () => {
+    gsQueue(
+      porcelainV2(gsNormalHeaders()),
+      '10\t2\tsrc/a.ts\n-\t-\tassets/logo.png\n0\t7\tdocs/c.md\n',
+    );
+    const r = await handler.gitStatus({ root });
+    expect(r.files_changed).toBe(3); // 二进制行也计文件数（≡ numstat 行数）
+    expect(r.additions).toBe(10); // 10 + 0，binary `-` 不计行
+    expect(r.deletions).toBe(9); // 2 + 7
+    expect(r.error).toBeNull();
+  });
+});
+
+describe('HostFsHandler — gitStatus fetch 三分支降级（task-01 GL40~GL44，D-001 / Grill CC-02 CC-07）', () => {
+  let root: string;
+  let handler: HostFsHandler;
+
+  beforeEach(async () => {
+    root = await makeRoot();
+    handler = new HostFsHandler({ rootsProvider: () => [root] });
+  });
+
+  afterEach(async () => {
+    glExecQueue.length = 0;
+    glCalls.length = 0;
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('GL40: 超时 —— err.killed/signal 判定（stderr 空串）→ fetch_timeout，不阻断 ②③', async () => {
+    glExecQueue.push(
+      { ok: true, stdout: 'origin\n', stderr: '' }, // remote 预检
+      // fetch 超时：真实 execFile 超时 Node SIGTERM 后 killed+signal 同时置位，
+      // stderr 为空串——判定只能走 killed/signal（Grill CC-02，非 stderr 文案）。
+      { ok: false, stdout: '', stderr: '', errKilled: true, errSignal: 'SIGTERM' },
+      { ok: true, stdout: porcelainV2(gsNormalHeaders()), stderr: '' },
+      { ok: true, stdout: '3\t1\tsrc/a.ts\n', stderr: '' },
+    );
+    const r = await handler.gitStatus({ root });
+    expect(r.fetch_error).toBe('fetch_timeout');
+    expect(r.fetch_performed).toBe(false);
+    // 失败不阻断 ②③：branch/dirty 字段仍正常返回。
+    expect(r.branch).toBe('main');
+    expect(r.upstream).toBe('origin/main');
+    expect(r.ahead).toBe(2);
+    expect(r.behind).toBe(1);
+    expect(r.files_changed).toBe(1);
+    expect(r.additions).toBe(3);
+    expect(r.deletions).toBe(1);
+    expect(r.error).toBeNull();
+  });
+
+  it('GL41: 非零退出（exit 1）→ fetch_failed，不阻断 ②③', async () => {
+    glExecQueue.push(
+      { ok: true, stdout: 'origin\n', stderr: '' },
+      { ok: false, stdout: '', stderr: 'error: RPC failed; curl 28 timed out' }, // killed 未置位 → 非超时
+      { ok: true, stdout: porcelainV2(gsNormalHeaders()), stderr: '' },
+      { ok: true, stdout: '', stderr: '' },
+    );
+    const r = await handler.gitStatus({ root });
+    expect(r.fetch_error).toBe('fetch_failed');
+    expect(r.fetch_performed).toBe(false);
+    expect(r.branch).toBe('main'); // ②③ 照常
+    expect(r.error).toBeNull();
+  });
+
+  it('GL42: no_remote 预检 —— git remote 空输出 → 不执行 fetch（calls 无 fetch 子命令）', async () => {
+    glExecQueue.push(
+      { ok: true, stdout: '\n', stderr: '' }, // git remote 空输出（无任何 remote）
+      { ok: true, stdout: porcelainV2(gsNormalHeaders()), stderr: '' },
+      { ok: true, stdout: '', stderr: '' },
+    );
+    const r = await handler.gitStatus({ root });
+    expect(r.fetch_error).toBe('no_remote');
+    expect(r.fetch_performed).toBe(false);
+    expect(r.branch).toBe('main'); // 失败不阻断
+    expect(r.error).toBeNull();
+    // 仅 remote/status/diff 三条命令，无 fetch（CC-07：静默 exit 0 探测不到）。
+    expect(glCalls.map((c) => c.args[2])).toEqual(['remote', 'status', 'diff']);
+  });
+
+  it('GL43: 命令构造 —— remote/fetch/status/diff 只读子命令 + --no-show-stash + --no-renames 逐 token（FR-06）', async () => {
+    gsQueue(porcelainV2(gsNormalHeaders()), '');
+    await handler.gitStatus({ root });
+    expect(glCalls).toHaveLength(4);
+    expect(glCalls.every((c) => c.cmd === 'git')).toBe(true);
+    const [remote, fetch, status, diff] = glCalls.map((c) => c.args);
+    expect(remote).toEqual(['-C', root, 'remote']); // 只读预检子命令
+    expect(fetch).toEqual(['-C', root, 'fetch', '--quiet']); // fetch 独立 argv + --quiet
+    expect(status).toEqual([
+      '-C',
+      root,
+      'status', // 只读子命令
+      '--porcelain=v2',
+      '--branch',
+      '--no-show-stash', // CC-01：--show-stash=no 为非法 flag 的实测修正
+    ]);
+    expect(diff).toEqual([
+      '-C',
+      root,
+      'diff', // 只读子命令
+      'HEAD',
+      '--numstat',
+      '--no-renames', // CC-03：防 rename 检测破坏计数
+    ]);
+    // 全部独立 argv 经 execFile 不经 shell：无注入面。
+    for (const c of glCalls) {
+      expect(c.args.join(' ')).not.toMatch(/;|&&|\$\(/);
+    }
+  });
+
+  it('GL44: numstat 真失败（非 exit 128 族）→ error 文案不抛，branch 字段保留、行计数 null', async () => {
+    glExecQueue.push(
+      { ok: true, stdout: 'origin\n', stderr: '' },
+      { ok: true, stdout: '', stderr: '' },
+      { ok: true, stdout: porcelainV2(gsNormalHeaders()), stderr: '' },
+      { ok: false, stdout: '', stderr: 'error: mmap failed while reading object' }, // 非 HEAD 缺失族
+    );
+    const r = await handler.gitStatus({ root });
+    expect(r.branch).toBe('main'); // porcelain 段照常保留
+    expect(r.upstream).toBe('origin/main');
+    expect(r.files_changed).toBeNull();
+    expect(r.additions).toBeNull();
+    expect(r.deletions).toBeNull();
+    expect(r.error).toContain('mmap failed');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────────────
 // daemon.ts 平名注册（design §5.2 CC-02 —— 对齐 explorer 注册形态，不走 host_fs. 前缀）
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -758,13 +1094,14 @@ describe('daemon 注册器 — _registerGitLogRpcHandler（task-01 GL30~GL33，C
     await rm(root, { recursive: true, force: true });
   });
 
-  it('GL30: 注册且仅注册四个平名方法（无 host_fs. 前缀，CC-02）', () => {
+  it('GL30: 注册且仅注册五个平名方法（无 host_fs. 前缀，CC-02；git_status 为第 5 个）', () => {
     const h = makeHarness(['/tmp/whatever-root']);
     expect([...h.methods.keys()].sort()).toEqual([
       'git_diff_file',
       'git_log',
       'git_refs',
       'git_show',
+      'git_status', // task-01 2026-08-26-workspace-git-status（CC-11 计数更正）
     ]);
   });
 
@@ -812,5 +1149,27 @@ describe('daemon 注册器 — _registerGitLogRpcHandler（task-01 GL30~GL33，C
     expect(glCalls[0].cmd).toBe('git');
     expect(glCalls[0].args[2]).toBe('show');
     expect(glCalls[0].args[glCalls[0].args.indexOf('--') + 1]).toBe('a.txt');
+  });
+
+  it('GL45: 经注册路径 —— git_status 全链路（params 归一 + 只读命令序列 + 十四字段回传）', async () => {
+    const h = makeHarness([root]);
+    // 队列按真实执行序：remote 预检 → fetch → status → diff。
+    gsQueue(porcelainV2(gsNormalHeaders()), '2\t1\tsrc/a.ts\n');
+    const r = (await h.call('git_status', { root })) as {
+      branch: string | null;
+      fetch_performed: boolean;
+      fetch_error: string | null;
+      files_changed: number | null;
+      error: string | null;
+    };
+    expect(r.branch).toBe('main');
+    expect(r.fetch_performed).toBe(true);
+    expect(r.fetch_error).toBeNull();
+    expect(r.files_changed).toBe(1);
+    expect(r.error).toBeNull();
+    // 经注册路径复验只读命令序列（remote/fetch/status/diff）。
+    expect(glCalls.map((c) => c.args[2])).toEqual(['remote', 'fetch', 'status', 'diff']);
+    // root 非字符串归一空串 → assertWithinAllowedRoots 拒 forbidden（同 GL32 归一语义）。
+    await expectRpcError(h.call('git_status', { root: 123 }), 'forbidden');
   });
 });

@@ -24,7 +24,7 @@ change: 2026-08-26-workspace-git-status
 |---|---|---|---|---|---|---|
 | task-01 | daemon git_status 方法 + 平名注册 + 单测 | W1 | P0 | — | FR-02, FR-03, FR-06, D-001@v1 | fetch 15s 局部 execFile（killed/signal 判超时，runCommand :1497 先例）；porcelain v2 解析（detached/无 upstream/branch.oid 截断/'(initial)' empty）；numstat --no-renames 单源；no_remote 靠 git remote 预检；vitest |
 | task-02 | backend GET /git-log/status + schema + 集成测试 | W1 | P0 | — | FR-01, FR-05, FR-06, D-002@v1 | 复用四私有方法；GitLogStatusResponse（fetch/dirty 嵌套 + synced_at）；六分支集成测试（mock RPC 按 design §7.2 契约） |
-| task-03 | gen:types + useGitLogStatus + git-status-bar 组件 + 两页挂载 + 组件测试 | W2 | P0 | task-01, task-02 | FR-04, FR-07, D-003@v1 | staleTime 60s 共享缓存；full/compact 双形态；sessions-portal actions 槽仅 workspace scope；主题 token 零 hex；双实例单请求断言 |
+| task-03 | gen:types + useGitLogStatus + git-status-bar 组件 + 两页挂载 + 组件测试 | W2 | P0 | task-01, task-02 | FR-04, FR-07, D-003@v1 | staleTime 60s 共享缓存；full/compact 双形态；sessions-portal actions 槽仅 workspace scope；主题 token 零 hex；双实例单请求断言；两页既有测试 mock 层补 status mock（Plan Review I-1） |
 
 ## 关键路径
 

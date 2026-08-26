@@ -114,6 +114,10 @@ const mocks = vi.hoisted(() => ({
   // task-10/task-11：quicklog 预会话标题解析（session-panel getQuicklogDetail，
   // task-11 落地后渲染树消费；本卡 mock 前向兼容）。
   getQuicklogDetail: vi.fn(),
+  // task-03（2026-08-26-workspace-git-status / Plan Review I-1）：页头 workspace
+  // scope 挂紧凑态 Git 状态条，消费 @/lib/git-log 的 useGitLogStatus——固定
+  // fixture mock，消除未 mock 的 status 请求噪声。
+  useGitLogStatus: vi.fn(),
   // D-004@v1 深链：useSearchParams 返回值（每用例可改写）
   searchParams: new URLSearchParams(),
   // ql-20260824-001：选中态 URL 同步（?session= 写入/移除）的 replace 捕获
@@ -210,6 +214,13 @@ vi.mock("@/lib/quicklog", () => ({
   listQuicklogEntries: (...args: unknown[]) =>
     mocks.listQuicklogEntries(...args),
   getQuicklogDetail: (...args: unknown[]) => mocks.getQuicklogDetail(...args),
+}));
+
+// task-03（2026-08-26-workspace-git-status / Plan Review I-1）：页头紧凑态
+// Git 状态条（workspace scope 条件挂载）消费 useGitLogStatus——整模块 mock
+// 固定 fixture（渲染树仅消费此 hook），消除未 mock 的 status 请求噪声。
+vi.mock("@/lib/git-log", () => ({
+  useGitLogStatus: (...args: unknown[]) => mocks.useGitLogStatus(...args),
 }));
 
 // task-10：SessionPanel 包一层 props 捕获（渲染真实组件零行为差异）——
@@ -547,6 +558,26 @@ beforeEach(() => {
   mocks.fetchPendingDialogs.mockResolvedValue([]);
   mocks.fetchSessionDialogHistory.mockResolvedValue([]);
   mocks.listSessionRuns.mockResolvedValue([]);
+  // task-03：Git 状态条固定 fixture（干净工作区常态——分支 main/零计数，
+  // 紧凑态只渲染分支徽标，零文本噪声不干扰既有断言）。
+  mocks.useGitLogStatus.mockReturnValue({
+    data: {
+      git_mode: "git",
+      branch: "main",
+      detached: false,
+      upstream: "origin/main",
+      ahead: 0,
+      behind: 0,
+      dirty: { files_changed: 0, additions: 0, deletions: 0, untracked_count: 0 },
+      head_short: "abcd1234",
+      empty: false,
+      fetch: { performed: true, error: null },
+      synced_at: "2026-08-26T00:31:00Z",
+    },
+    isPending: false,
+    isError: false,
+    error: null,
+  });
   window.localStorage.clear();
 });
 
@@ -583,6 +614,8 @@ describe("SessionsPortal 三 scope 渲染", () => {
     ).toBeNull();
     // 全局 scope 不传预展开（FR-06 仅 workspace 入口）
     expect(mocks.lastListPanelProps?.defaultExpandedWorkspaceId).toBeUndefined();
+    // task-03：全局 scope 页头不挂 Git 状态条（CC-08：仅 workspace scope 挂载）
+    expect(screen.queryByTestId("git-status-bar")).toBeNull();
   });
 
   it("workspace scope：列表走 listAgentSessions({limit, workspace_id})，标题「智能体会话 · 工作区」，空门户态 + defaultExpandedWorkspaceId 预展开传参（FR-06）", async () => {
@@ -608,6 +641,15 @@ describe("SessionsPortal 三 scope 渲染", () => {
     expect(screen.queryByLabelText("新建会话表单")).toBeNull();
     // FR-06 workspace 入口预展开：scope.workspaceId 传受控展开 prop
     expect(mocks.lastListPanelProps?.defaultExpandedWorkspaceId).toBe("ws-1");
+    // task-03：workspace scope 页头 actions 槽挂紧凑态 Git 状态条（CC-08；
+    // fixture 干净工作区 → 紧凑态只出分支徽标「⎇ main」）
+    expect(screen.getByTestId("git-status-bar")).toHaveAttribute(
+      "data-variant",
+      "compact",
+    );
+    expect(screen.getByTestId("git-status-bar-branch")).toHaveTextContent(
+      "⎇ main",
+    );
     // 组头「＋」已接线（组名解析失败兜底「当前工作区」；随树渲染到达）
     expect(
       await screen.findByRole("button", { name: "在 当前工作区 新建会话" }),
@@ -634,6 +676,9 @@ describe("SessionsPortal 三 scope 渲染", () => {
     // 右侧空门户态；树单组组头「＋」（新建入口，经门户双传 change 上下文）
     expect(screen.getByLabelText("门户空态")).toBeTruthy();
     expect(screen.queryByLabelText("新建会话表单")).toBeNull();
+    // task-03：change scope 不挂 Git 状态条（CC-08：虽携带 workspaceId，
+    // 「围绕某变更的会话」语义偏离工作区健康状态主题）
+    expect(screen.queryByTestId("git-status-bar")).toBeNull();
     expect(
       await screen.findByRole("button", { name: "在 当前工作区 新建会话" }),
     ).toBeTruthy();
@@ -733,6 +778,8 @@ describe("SessionsPortal quicklog scope（task-10 / D-006@v1）", () => {
     });
     // X-008 消费点五（defaultExpandedWorkspaceId）：quicklog 同 workspace/change 预展开
     expect(mocks.lastListPanelProps?.defaultExpandedWorkspaceId).toBe("ws-1");
+    // task-03：quicklog scope 不挂 Git 状态条（CC-08，同 change scope 排除理由）
+    expect(screen.queryByTestId("git-status-bar")).toBeNull();
     // X-008 消费点六（空态文案）：提示在当前快速修复下创建会话
     expect(screen.getByLabelText("门户空态")).toBeTruthy();
     expect(screen.getByText(/在当前快速修复下创建会话/)).toBeTruthy();

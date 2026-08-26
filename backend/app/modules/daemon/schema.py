@@ -880,6 +880,10 @@ class TeamMissionWorkerSummary(BaseModel):
     # agent_session_id join，批量一次查询），让用户不点进浮层就能看到
     # "正在干什么"。仅 running 行填值；completed/failed/存量 batch 行 None。
     latest_action: str | None = None
+    # UX 优化（2026-08-27）：completed 分身的结论摘要——从 worker_done 上报的
+    # summary artifact 截取前 120 字符，在团队任务块直接可见（不用点进浮层）。
+    # running 行用 latest_action，completed 行用 result_summary，互补。
+    result_summary: str | None = None
 
 
 class TeamMissionSummary(BaseModel):

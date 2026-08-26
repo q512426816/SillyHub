@@ -3051,6 +3051,42 @@ async def _team_mission_summary(
             if row.sub_session_id is not None:
                 row.latest_action = latest_by_session.get(row.sub_session_id)
 
+    # UX 优化（2026-08-27）：completed 分身的 result_summary——从 worker_done 上报
+    # 的 summary artifact 取前 120 字符，团队任务块直接展示结论（不用点浮层）。
+    completed_sub_ids = [
+        r.sub_session_id
+        for r in worker_rows
+        if r.status == "completed" and r.sub_session_id is not None
+    ]
+    if completed_sub_ids:
+        from app.modules.agent.model import AgentArtifact
+
+        summary_rows = (
+            await session.execute(
+                select(AgentArtifact.run_id, AgentArtifact.content_ref)
+                .join(AgentRun, AgentArtifact.run_id == AgentRun.id)
+                .where(
+                    AgentRun.agent_session_id.in_(completed_sub_ids),
+                    AgentArtifact.kind == "summary",
+                )
+                .order_by(AgentArtifact.created_at.desc())
+                .limit(len(completed_sub_ids) * 3)
+            )
+        ).all()
+        summary_by_session: dict[uuid.UUID, str] = {}
+        for run_id, content_ref in summary_rows:
+            if content_ref is None:
+                continue
+            # run_id → sub_session_id 需经 first_run 映射（summary artifact 挂首 run）
+            for ws in worker_sessions:
+                fr = first_run_by_session.get(ws.id)
+                if fr is not None and fr.id == run_id and ws.id not in summary_by_session:
+                    summary_by_session[ws.id] = content_ref[:120]
+                    break
+        for row in worker_rows:
+            if row.sub_session_id is not None:
+                row.result_summary = summary_by_session.get(row.sub_session_id)
+
     # 存量回落：batch 分身 run 行（子会话首 run 已剔除防双计；**全树**会话 id
     # 集合剔除——task-08 孙层首 run（带 mission_id+role 双标记）同样不进
     # workers 行，孙层以 sub_workers_count 折叠呈现而非独立行，design §5.E

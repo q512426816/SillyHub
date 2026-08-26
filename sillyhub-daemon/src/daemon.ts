@@ -2429,7 +2429,8 @@ export class Daemon {
     this._registerExplorerRpcHandler(ws);
     // task-01（2026-08-25-workspace-git-log）：注册 git_log 系四只读 RPC（平名，
     // design §5.2 CC-02 / §7.2 契约），供 backend git_log 模块经 MemberBindingResolver
-    // 解析绑定后直连（不走 host_fs. 前缀降级通道）。
+    // 解析绑定后直连（不走 host_fs. 前缀降级通道）。task-01（2026-08-26-
+    // workspace-git-status）追加第 5 个平名方法 git_status。
     this._registerGitLogRpcHandler(ws);
     // task-09（2026-08-19-runtime-live-daemon-read）：注册 runtime.* 四方法只读
     // RPC（运行时状态实时读取，design §6.1）。业务全在 RuntimeHandler（D-005@v1
@@ -2731,6 +2732,9 @@ export class Daemon {
    * （对齐 explorer 系 explorer_list_dir 形态，不走 host_fs. 前缀通道；protocol.ts
    * 仅定义 RPC 帧格式无方法注册表，无需改动）。
    *
+   * + task-01（2026-08-26-workspace-git-status）：同注册器追加第 5 个平名 git 方法
+   * git_status（十四字段状态契约，design §5.2 / §7.2；Grill CC-11 计数更正）。
+   *
    * backend git_log 模块经 MemberBindingResolver 解析绑定 + resolve_root_path_for_daemon
    * 改写路径后直连本 RPC（显式超时 + 自持错误映射）；老 daemon 未注册 → method
    * not-found 语义由 backend 映射 422「daemon 版本过旧」。
@@ -2776,6 +2780,12 @@ export class Daemon {
       const sha = typeof params.sha === 'string' ? params.sha : '';
       const path = typeof params.path === 'string' ? params.path : '';
       return handler.gitDiffFile({ root, sha, path });
+    });
+    // task-01（2026-08-26-workspace-git-status）：第 5 个平名 git 方法 git_status
+    //（design §5.2 / §7.2 十四字段契约；fetch 15s 降级 + porcelain v2 + numstat 单源）。
+    ws.registerRpcHandler('git_status', async (params) => {
+      const root = typeof params.root === 'string' ? params.root : '';
+      return handler.gitStatus({ root });
     });
   }
 
