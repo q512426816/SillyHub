@@ -261,13 +261,13 @@ describe("FloatingSessionHost", () => {
   it("拖拽球到屏幕中部：位置跟手且不吸附", () => {
     render(wrap(<FloatingSessionHost />));
     const ball = screen.getByTestId("floating-ball");
-    // jsdom 视口 1024×768；默认球心 (980, 724)。
+    // jsdom 视口 1024×768；BALL=52 → 默认球心 (978, 722)，left=498-26、top=398-26。
     fireEvent(ball, pointerEvt("pointerdown", { button: 0, pointerId: 1, clientX: 980, clientY: 724 }));
     fireEvent(window, pointerEvt("pointermove", { pointerId: 1, clientX: 500, clientY: 400 }));
     fireEvent(window, pointerEvt("pointerup", { pointerId: 1, clientX: 500, clientY: 400 }));
     expect(ball.dataset.dock).toBe("none");
-    expect(ball.style.left).toBe("476px"); // 500 - 24
-    expect(ball.style.top).toBe("376px"); // 400 - 24
+    expect(ball.style.left).toBe("472px"); // 498 - 26
+    expect(ball.style.top).toBe("372px"); // 398 - 26
   });
 
   it("拖拽球贴右缘松手：自动吸附半藏并持久化；吸附后位移不触发开合", () => {
@@ -276,13 +276,13 @@ describe("FloatingSessionHost", () => {
     fireEvent(ball, pointerEvt("pointerdown", { button: 0, pointerId: 1, clientX: 980, clientY: 724 }));
     fireEvent(window, pointerEvt("pointermove", { pointerId: 1, clientX: 1015, clientY: 300 }));
     fireEvent(window, pointerEvt("pointerup", { pointerId: 1, clientX: 1015, clientY: 300 }));
-    // x 钳到 1000 ≥ 吸附阈 972 → 右缘半藏（right:-34px 露出 14px）。
+    // x 钳到 998 ≥ 吸附阈 970 → 右缘半藏（right:-38px 露出 14px）。
     expect(ball.dataset.dock).toBe("right");
-    expect(ball.style.right).toBe("-34px");
+    expect(ball.style.right).toBe("-38px");
     // 持久化含吸附态，刷新后可恢复。
     const saved = JSON.parse(window.localStorage.getItem("sillyhub:floating-ball")!);
     expect(saved.dock).toBe("right");
-    expect(saved.x).toBe(1000);
+    expect(saved.x).toBe(998); // 1024 - 26
     // 拖拽尾音 click（松手 250ms 内）被抑制：不开抽屉。
     fireEvent.click(ball);
     expect(useFloatingSessionStore.getState().open).toBe(false);
