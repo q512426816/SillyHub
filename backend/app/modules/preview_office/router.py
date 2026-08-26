@@ -62,10 +62,16 @@ async def get_preview_file(token: str) -> Response:
         async for chunk in backend.get_object_stream(object_key):
             yield chunk
 
-    # 展示名不可信（令牌不携带），统一 octet-stream inline（DS 自带文件名）。
+    # 原文件走 octet-stream（DS 自带文件名）；LO 转换的 PDF 必须给真 MIME——
+    # 浏览器对 octet-stream blob 不做内联渲染，iframe 会触发下载（ql-20260826-012）。
+    media = (
+        "application/pdf"
+        if object_key.startswith("preview-pdf/")
+        else "application/octet-stream"
+    )
     return StreamingResponse(
         stream(),
-        media_type="application/octet-stream",
+        media_type=media,
         headers={
             "Content-Disposition": 'inline; filename="preview"',
             "Cache-Control": "no-store",

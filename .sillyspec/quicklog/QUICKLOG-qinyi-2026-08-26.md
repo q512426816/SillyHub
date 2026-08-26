@@ -532,3 +532,14 @@
 根因：OnlyOffice 编辑器引擎不支持中文文档行网格 docGrid（sdk-all.js 28MB 源码 linePitch/docGrid 零命中实证）——公文封面空段撑页/行高吸附全部失效；字体度量放大补丁实验证明其行高不读 hhea/OS/2 表（1.5x em 零布局变化），字体侧无杠杆。对照实验：LibreOffice（Gotenberg 容器）转同一文档 46 页且封面独立一页、目录在第二页、使用说明第三页——docGrid 完整支持
 方案：混合渲染管线——Word(doc/docx) 走 Gotenberg(LibreOffice) 转 PDF + MinIO 内容寻址缓存（源文件不变转换一次永久复用）+ 前端 iframe 原生 PDF 视图；Excel/PPT 仍走 OnlyOffice 交互预览；Gotenberg 未配置/转换失败自动回落 OnlyOffice（预览不断）；中文字体（方正内嵌子集+标准 Office 字体）挂载进 Gotenberg 容器保证公文保真
 结果：backend 13/13 + mypy/ruff 0 错；frontend 12/12 + tsc 0 错；Gotenberg 容器实测该 docx 目录回到第二页
+
+## ql-20260826-012-e4b7 | 2026-08-26 19:45:00 | Word→PDF 预览点击触发下载修复——/api/preview/file 对 PDF 缓存对象仍返回 octet-stream
+状态：已完成
+关联变更：2026-08-26-onlyoffice-preview
+文件：
+- backend/app/modules/preview_office/router.py（get_preview_file 按 object_key 前缀 preview-pdf/ 返回 application/pdf，其余维持 octet-stream）
+- frontend/src/components/files/file-preview-modal.tsx（mode=pdf blob 兜底重打 application/pdf——代理层丢 Content-Type 时仍可内联渲染）
+需求：ql-20260826-011 部署后点击 docx 预览触发浏览器下载而非弹窗渲染
+根因：/api/preview/file/{token} 原为 DS 容器回拉设计，硬编码 media_type=application/octet-stream；前端 fetch 得到 octet-stream blob → URL.createObjectURL → iframe src，浏览器对无类型二进制不做内联渲染，直接下载
+方案：服务端按缓存键前缀给正确 MIME + 前端 blob 类型兜底重打（双保险）；已部署验证经 Next 代理返回 content-type: application/pdf
+结果：backend 13/13、ruff 0 错；frontend tsc 0 错 + modal 测试通过；已重建部署

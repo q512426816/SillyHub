@@ -103,8 +103,11 @@ export function FilePreviewModal({ target, open, onClose }: FilePreviewModalProp
         if (!resp.ok) throw new Error(`preview pdf HTTP ${resp.status}`);
         return resp.blob();
       })
-      .then((blob) => {
+      .then((raw) => {
         if (cancelled) return;
+        // 兜底重打 MIME：octet-stream 的 blob 会被浏览器当下载而非内联渲染
+        // （ql-20260826-012，代理层可能丢 Content-Type）。
+        const blob = raw.type === "application/pdf" ? raw : new Blob([raw], { type: "application/pdf" });
         objectUrl = URL.createObjectURL(blob);
         setPdfBlobUrl(objectUrl);
       })
