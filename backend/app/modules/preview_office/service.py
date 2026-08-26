@@ -210,6 +210,11 @@ async def build_office_config(
             "permissions": {"read": True, "edit": False, "download": True, "print": True},
         },
         "documentType": _DOCUMENT_TYPE_BY_EXT[file_type],
+        # width/height 必须在签名内（DS 9 严格 JWT：提交 config 的字段须被 token
+        # 覆盖，前端事后注入会校验拒绝——实测 onError → 降级）。events 除外（DS
+        # 校验忽略回调函数）。
+        "width": "100%",
+        "height": "100%",
         "editorConfig": {
             "mode": "view",
             "lang": "zh",

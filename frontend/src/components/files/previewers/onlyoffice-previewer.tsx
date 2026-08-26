@@ -73,12 +73,11 @@ export function OnlyofficePreviewer({ officeConfig, onFallback }: OnlyofficePrev
       try {
         await loadDsApi(officeConfig.ds_url);
         if (cancelled || !window.DocsAPI || !holderRef.current) return;
+        // config 整体来自后端签名（width/height 已含——DS 9 严格 JWT 校验提交
+        // config 字段须被 token 覆盖，此处仅追加 events 回调（DS 校验忽略）。
         const editor = new window.DocsAPI.DocEditor(holderRef.current.id, {
           ...officeConfig.config,
-          width: "100%",
-          height: "100%",
           events: {
-            // DS 约定：容器由脚本就地替换为 iframe，本组件只保留占位 div。
             onError: () => fallbackRef.current(),
           },
         });
