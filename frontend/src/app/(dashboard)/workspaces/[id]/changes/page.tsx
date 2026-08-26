@@ -60,7 +60,7 @@ type ChangesTab = "active" | "archive" | "quicklog";
 // task-06 / design §7：待办徽标映射（替代死代码 GATE_LABELS）。
 // 数据源 = ChangeSummary.pending_review（PG 镜像 _map 投影，task-03）+ status=blocked。
 // 纯前端展示映射，后端 task-03 已统一投影为 4 个新取值（不再 need_* 兼容）。
-const PENDING_REVIEW_LABEL: Record<string, string> = {
+export const PENDING_REVIEW_LABEL: Record<string, string> = {
   proposal_review: "待提案审核",
   plan_review: "待计划审核",
   human_test: "待人工测试",
