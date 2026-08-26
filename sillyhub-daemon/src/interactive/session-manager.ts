@@ -2451,6 +2451,26 @@ export class SessionManager {
 
     // task-07 排队检测：在切换 status 前抓取「前一 turn 是否未 result」。
     // status=running（driver 正在跑 turn）→ 本条 inject 排队到下一 turn（spike S1）。
+    // P0 修复（2026-08-27，服务器重启死锁）：running 态超时（60s 无 result）→
+    // 前一 turn 可能已被 backend 终态化（service restart cleanup），SDK query
+    // 挂死或 WS 断后 result 永远不会到达 → 排队消息永远不被消费（死锁）。
+    // 超时阈值 60s：正常 turn 可跑几分钟，但 result 事件（含长时间思考的
+    // heartbeat）不会间隔 60s 无任何回调——超时说明 SDK 通道已断。
+    // 强制重置为 active 让本条 inject 直接消费，自愈死锁。
+    if (
+      state.status === 'running' &&
+      Date.now() - state.lastActiveAt > 60_000
+    ) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[session-manager] inject: stale running state detected (>60s no result), ' +
+          'resetting to active. Possible backend restart while turn was running.',
+        { sessionId, lastActiveAt: state.lastActiveAt },
+      );
+      state.status = 'active';
+      // 清理可能挂起的 pending 计数（旧 turn 的排队消息已无意义）。
+      this._pendingInjectCount.delete(sessionId);
+    }
     const wasRunningBeforeInject = state.status === 'running';
 
     // spike S1：push 永远进 InputQueue（turn 级串行由 SDK result 边界保证），不拒绝。
