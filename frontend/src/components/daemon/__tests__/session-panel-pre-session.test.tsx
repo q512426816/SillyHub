@@ -820,8 +820,9 @@ describe("SessionPanel 预会话弹层确认 → 暂存 + 首句携带 team_miss
     const input = await confirmPopoverWith("重构登录页");
 
     // 首句发送 → createSession 携带 team_mission 块（含 orchestrator_workspace_id）。
-    // ql-20260826-010：回填前置 /team → 首句 prompt 带 /team 前缀（mission
-    // objective 仍是纯文本，来自弹层 payload）。
+    // ql-20260826-013：回填前置 /team 但首句上送剥前缀文本（原文会被 Claude
+    // Code 当 slash command 报 Unknown command）；mission objective 仍是弹层
+    // payload 纯文本。
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() =>
       expect(sessionApi.createSession).toHaveBeenCalledTimes(1),
@@ -829,7 +830,7 @@ describe("SessionPanel 预会话弹层确认 → 暂存 + 首句携带 team_miss
     expect(sessionApi.createSession).toHaveBeenCalledWith(
       expect.objectContaining({
         runtime_id: "rt-claude",
-        prompt: "/team 重构登录页",
+        prompt: "重构登录页",
         workspace_id: "ws-1",
         team_mission: {
           objective: "重构登录页",

@@ -336,11 +336,13 @@ describe("SessionPanel /team 指令拦截（dialog 模式）", () => {
     fireEvent.change(input2, { target: { value: `/team ${OBJECTIVE}` } });
     fireEvent.click(screen.getByTitle("发送"));
 
-    // 未拦截：消息原样直达后端（忙轮服务端排队，ql-20260825-011），弹层不打开。
+    // 未拦截：ql-20260826-013 起 /team 前缀剥离后直达后端（忙轮服务端排队，
+    // ql-20260825-011；原文会被 Claude Code 当 slash command 报 Unknown command），
+    // 弹层不打开。
     await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
     expect(sessionApi.injectSession).toHaveBeenCalledWith(
       "sess-codex",
-      `/team ${OBJECTIVE}`,
+      OBJECTIVE,
       undefined,
     );
     expect(screen.queryByText("派团队做这件事")).not.toBeInTheDocument();

@@ -71,6 +71,12 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
     ③ `/team` 前缀拦截在**已有活跃 mission 时放行直发**（handleSend 判
     `teamMissions.some(isActiveTeamMission)`）——否则确认回填的 /team 再发送
     会被拦截重开弹层死循环；无活跃 mission 时拦截弹层行为不变。
+    ④ ql-20260826-013：/team 是**平台 UI 指令，永不作为 agent 消息原文**——拦截
+    弹层外的所有放行路径（预会话首句 / 活跃 mission 主控轮直发 / 非拦截引擎）
+    统一剥离前缀发送（effectivePrompt），裸 /team 剥后无内容不发送；原文直达
+    Claude Code 会被当 slash command 报「Unknown command: /team」（会话
+    2eac7c91 实证，主控轮空转不派发）。onSendSettled 草稿清空同步加
+    parseTeamCommand 剥离比对（带前缀草稿 vs 剥离后发送文本对上即清）。
 - ~~`InteractiveSessionPanel`（`interactive-session-panel.tsx`）~~：**已删除**
   （2026-08-22-session-panel-unify task-01）——127 行薄适配层退役，消费方直连
   `SessionPanel mode="dialog"`；其类型 re-export（turn-timeline 5 类型）由消费方

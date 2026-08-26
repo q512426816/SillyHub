@@ -471,3 +471,22 @@
 方案：incident/release 各新增对象级校验 helper（has_permission(workspace_id=obj.workspace_id) 对齐 agent/file 惯例，approvals 收紧 WORKSPACE_READ）；令牌登记失败改 fail-fast 503 新错误类；diff_collector 补 kill+wait；parser 写侧持 threading.Lock；llm-proxy 转发客户端改进程级共享单例（lifespan 关停回收）；run_sync 两路 channel 各自 pipeline 批量发布保序；commit_sha 探测结果 PrivateAttr 缓存
 结果：全量 pytest 5770 passed 0 failed（基线 5756 + 新增 14 用例，含 IDOR 拒绝/放行、令牌 fail-fast、kill、锁串行化、缓存单次探测）；ruff check+format 全过；mypy 737 文件 0 问题；不改 OpenAPI/DTO/migration 无需 gen:types；未提交待收尾
 审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_run_sync_assistant_override.py, backend/app/modules/daemon/tests/test_session_sse.py
+
+## ql-20260826-012-2802 | 2026-08-26 20:35:12 | incident 表时区修复（tz-aware 列+默认值+迁移，数据可重置）+ 性能批次二：platform_sync upsert N+1 改 IN 批量预取、workspace 状态收集 N+1 批量化（scope+probe 两入口…
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/incident/model.py, backend/app/modules/platform_sync/service.py, backend/app/modules/agent/orchestrator.py, backend/app/modules/workspace/router.py, backend/app/modules/daemon/permission_service.py, backend/app/modules/daemon/router.py, backend/app/modules/change/router.py, backend/app/modules/platform_sync/tests/test_agent_log_push.py, backend/app/modules/agent/tests/test_mission_status.py, backend/app/modules/daemon/tests/test_session_runs_endpoint.py, backend/app/modules/daemon/tests/test_session_permissions.py, backend/app/modules/incident/tests/test_service.py
+
+## ql-20260826-013-668f | 2026-08-26 20:37:10 | 修复 /team 指令直发 Claude Code 报 Unknown command（发送前剥离平台指令前缀）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel.tsx（两模式 effectivePrompt 剥离 + onSendSettled 剥离比对）
+- frontend/src/components/daemon/__tests__/session-panel-ux-fixes.test.tsx（剥离断言+裸/team 用例）
+- frontend/src/components/daemon/__tests__/session-panel-team.test.tsx（codex 剥离断言）
+- frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx（首句剥离断言）
+- .sillyspec/docs/frontend/modules/components-daemon.md（④剥离契约）
+需求：修复 /team 指令直发 Claude Code 报 Unknown command（发送前剥离平台指令前缀）
+根因：ql-20260826-010 放行修复后，带活跃 mission 的 /team 消息原文直达后端，被 Claude Code 当 slash command 报 Unknown command，主控轮空转不派发（会话 2eac7c91 三个 orchestrator run 空转、mission 带前缀 objective 收敛）
+方案：两模式 handleSend 把 /team 定性为平台 UI 指令：拦截弹层外所有放行路径统一剥离前缀发送 effectivePrompt，裸 /team 剥后无内容不发送；onSendSettled 草稿清空加 parseTeamCommand 剥离比对
+结果：vitest 全量 212 文件 2358 用例全绿（新增裸 /team 用例 + 3 文件断言同步剥离语义），tsc 零错，lint exit 0，前端容器已重建部署待验证

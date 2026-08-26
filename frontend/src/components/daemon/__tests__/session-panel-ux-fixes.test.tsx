@@ -271,7 +271,7 @@ describe("派团队确认回填 /team 前缀（ql-20260826-010）", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("活跃 mission 下发送回填的 /team 指令 → 直达 inject 不再拦截弹层", async () => {
+  it("活跃 mission 下发送回填的 /team 指令 → 剥离前缀直达 inject，弹层不重开（ql-20260826-013）", async () => {
     sessionApi.listSessionTeamMissions.mockResolvedValue([
       makeMission("m-run", "running"),
     ]);
@@ -282,12 +282,28 @@ describe("派团队确认回填 /team 前缀（ql-20260826-010）", () => {
     });
     fireEvent.click(screen.getByTitle("发送"));
 
-    // 放行直发（主控轮 briefing 派发），弹层不重开。
+    // 放行直发，但 /team 前缀剥离（原文直达 Claude Code 会被当 slash command
+    // 报 Unknown command——会话 2eac7c91 实证）；弹层不重开。
     await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
-    expect(sessionApi.injectSession).toHaveBeenCalledWith(
-      "sess-ux",
-      `/team ${OBJECTIVE}`,
-    );
+    expect(sessionApi.injectSession).toHaveBeenCalledWith("sess-ux", OBJECTIVE);
+    expect(
+      screen.queryByText("派团队做这件事"),
+    ).not.toBeInTheDocument();
+    // 草稿清空：带前缀草稿与剥离后发送文本比对命中。
+    await waitFor(() => expect(input.value).toBe(""));
+  });
+
+  it("裸 /team（活跃 mission 下）→ 无可发内容不 inject", async () => {
+    sessionApi.listSessionTeamMissions.mockResolvedValue([
+      makeMission("m-run", "running"),
+    ]);
+    const input = await setupActiveSession();
+
+    fireEvent.change(input, { target: { value: "/team" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(input.value).toBe("/team"));
+    expect(sessionApi.injectSession).not.toHaveBeenCalled();
     expect(
       screen.queryByText("派团队做这件事"),
     ).not.toBeInTheDocument();
