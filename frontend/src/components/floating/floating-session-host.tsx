@@ -386,8 +386,8 @@ function FloatingDrawerBody({
  *   抽屉/胶囊跟随球所在半屏开合（球在左半屏 → 抽屉从左侧滑出）。
  */
 
-/** 球直径（h-12 w-12）。 */
-const BALL = 48;
+/** 宠物按钮直径（h-[52px] w-[52px]，2026-08-26 宠物化放大）。 */
+const BALL = 52;
 /** 自由停靠时与视口边缘间距（对齐原 bottom-5 right-5）。 */
 const EDGE_GAP = 20;
 /** 判定「拖拽」而非「点击」的位移阈值（px）。 */
@@ -671,7 +671,7 @@ export function FloatingSessionHost() {
           else openDrawer();
         }}
         className={cn(
-          "group fixed z-40 flex h-12 w-12 touch-none items-center justify-center rounded-full text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600",
+          "group fixed z-40 flex h-[52px] w-[52px] touch-none items-end justify-center rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-600",
           anchor ? "" : "bottom-5 right-5",
           dragging
             ? "scale-110 cursor-grabbing"
@@ -679,32 +679,10 @@ export function FloatingSessionHost() {
           anchor?.dock && "opacity-75 hover:opacity-100",
         )}
       >
-        {/* 旋转辉光环（锥形渐变慢旋 + 模糊，内外双色 brand→info） */}
-        <span
-          aria-hidden
-          className={cn(
-            "absolute -inset-[3px] rounded-full opacity-70 blur-[3px] transition-opacity group-hover:opacity-100",
-            !dragging && "motion-safe:animate-spin-slower",
-          )}
-          style={{
-            background:
-              "conic-gradient(from 0deg, var(--color-brand-400), var(--color-info), var(--color-brand-600), var(--color-brand-400))",
-          }}
-        />
-        {/* 呼吸浮动载体（浮动与 hover 缩放分层，避免 transform 互相覆盖） */}
-        <span
-          aria-hidden
-          className={cn(
-            "absolute inset-0 rounded-full",
-            !dragging && "motion-safe:animate-float",
-          )}
-        >
-          {/* 内核渐变 + 描边 + 主题投影 */}
-          <span className="absolute inset-0 rounded-full bg-gradient-to-br from-brand-600 to-info shadow-primary ring-1 ring-white/30" />
-          {/* 顶部高光（玻璃感） */}
-          <span className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_30%_25%,rgba(255,255,255,0.5),transparent_55%)]" />
-        </span>
-        <FloatingMascot pet={pet} active={Boolean(sessionId) || minimized} />
+        {/* 2026-08-26 用户需求②：去能量球——按钮就是一整只宠物（自带浮动/
+            投影/地面阴影与全部动画，见 floating-mascot.tsx）。items-end 让
+            宠物脚下的地面阴影贴按钮底缘。 */}
+        <FloatingMascot pet={pet} active={Boolean(sessionId) || minimized} size={50} />
         {(sessionId !== null || minimized) && (
           <span
             aria-hidden
