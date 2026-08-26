@@ -147,6 +147,8 @@ export function FileViewer({ fileIds = [] }: FileViewerProps) {
       <FilePreviewModal
         target={previewTarget ? {
           fetch: () => fetchFileBlob(previewTarget.id),
+          // 2026-08-26-onlyoffice-preview：office 家族先试 DS（失败降级本地）。
+          officeSource: { source: "file", id: previewTarget.id },
           meta: {
             name: previewTarget.original_name,
             mime: previewTarget.mime_type,

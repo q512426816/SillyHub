@@ -10,10 +10,11 @@
  * 依据：design.md §5 数据流 + §7 接口定义。
  */
 
-import type { ComponentType } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { Modal } from "antd";
 import { DownloadOutlined, ReloadOutlined } from "@ant-design/icons";
 
+import { apiFetch } from "@/lib/api";
 import { FileTypeIcon, formatFileSize } from "@/lib/file/utils";
 import { useObjectUrl } from "./use-object-url";
 import { matchRenderer } from "./preview-registry";
@@ -26,6 +27,7 @@ import {
   FallbackPreviewer,
   type PreviewerProps,
 } from "./previewers";
+import { OnlyofficePreviewer } from "./previewers/onlyoffice-previewer";
 
 export interface FilePreviewTarget {
   fetch: () => Promise<Blob>;
@@ -35,6 +37,15 @@ export interface FilePreviewTarget {
     size?: number | null;
   };
   download?: () => void | Promise<void>;
+  /**
+   * 2026-08-26-onlyoffice-preview：office 家族文件的可选来源标识——携带时预览窗
+   * 先尝试 OnlyOffice 高保真渲染（GET /api/preview/office-config），DS 未启用/
+   * 失败自动回落本地渲染器（FR-02 降级链）。不携带 = 恒本地渲染（零回归）。
+   */
+  officeSource?: {
+    source: "session_attachment" | "file";
+    id: string;
+  };
 }
 
 export interface FilePreviewModalProps {
@@ -52,8 +63,57 @@ const RENDERER_MAP: Record<string, ComponentType<PreviewerProps>> = {
   fallback: FallbackPreviewer,
 };
 
+/** office 家族扩展名（DS 优先尝试集合，含旧格式 doc/xls/ppt）。 */
+const OFFICE_EXTS = new Set(["doc", "docx", "xls", "xlsx", "ppt", "pptx"]);
+
+function extOf(name: string): string {
+  const dot = name.lastIndexOf(".");
+  return dot >= 0 ? name.slice(dot + 1).toLowerCase() : "";
+}
+
+interface OfficeConfigResp {
+  ds_url: string;
+  config: Record<string, unknown>;
+}
+
+/** office 家族 + 携带来源标识 → 尝试 DS（纯函数，供 hook 依赖序使用）。 */
+function officeEligibleStatic(t: FilePreviewTarget | null): boolean {
+  return Boolean(t?.officeSource && OFFICE_EXTS.has(extOf(t?.meta.name ?? "")));
+}
+
 export function FilePreviewModal({ target, open, onClose }: FilePreviewModalProps) {
-  const { blob, url, status, retry } = useObjectUrl(open && target ? target.fetch : null);
+  // ── OnlyOffice 前置尝试层（2026-08-26-onlyoffice-preview / FR-01/02）──
+  const [officeCfg, setOfficeCfg] = useState<OfficeConfigResp | null>(null);
+  const [officeFailed, setOfficeFailed] = useState(false);
+  const officeEligible = officeEligibleStatic(target) && !officeFailed;
+
+  // DS 路径不需要本地 blob（DS 容器自拉一次性 URL）；officeFailed 降级瞬间
+  // fetcher 重新挂载拉取本地对象（useObjectUrl 依赖变化自然重跑）。
+  const { blob, url, status, retry } = useObjectUrl(
+    open && target && !officeEligible ? target.fetch : null,
+  );
+
+  useEffect(() => {
+    setOfficeCfg(null);
+    setOfficeFailed(false);
+    if (!open || !officeEligibleStatic(target) || !target?.officeSource) return;
+    let cancelled = false;
+    // 预取 DS 配置：503（未启用）/任何失败 → officeFailed（降级本地渲染）。
+    apiFetch<OfficeConfigResp>(
+      `/api/preview/office-config?source=${target.officeSource.source}&id=${target.officeSource.id}`,
+    )
+      .then((resp) => {
+        if (!cancelled) setOfficeCfg(resp);
+      })
+      .catch(() => {
+        if (!cancelled) setOfficeFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // officeEligible 不进依赖（含 officeFailed 会自激振荡）；以静态资格 + 标识为锚。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, target?.officeSource?.source, target?.officeSource?.id, target?.meta.name]);
 
   const handleDownload = () => {
     if (target?.download) {
@@ -70,6 +130,28 @@ export function FilePreviewModal({ target, open, onClose }: FilePreviewModalProp
 
   const renderBody = () => {
     if (!target) return null;
+
+    // OnlyOffice 高保真优先：配置就绪 → DS 渲染；预取中 → 轻加载态；失败 → 落回下方本地链。
+    if (officeEligible && !officeFailed) {
+      if (officeCfg) {
+        return (
+          <OnlyofficePreviewer
+            blob={blob ?? new Blob()}
+            url={url ?? ""}
+            meta={target.meta}
+            onDownload={handleDownload}
+            officeConfig={officeCfg}
+            onFallback={() => setOfficeFailed(true)}
+          />
+        );
+      }
+      return (
+        <div className="flex min-h-[420px] items-center justify-center">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
+          <span className="ml-3 text-slate-500">正在准备高保真预览…</span>
+        </div>
+      );
+    }
 
     if (status === "loading") {
       return (

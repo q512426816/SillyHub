@@ -82,6 +82,8 @@ export function AttachmentChips({
     setPreviewTarget({
       fetch: () => fetchAttachmentBlob(att.id),
       meta: { name: att.name },
+      // 2026-08-26-onlyoffice-preview：office 家族先试 DS 高保真（失败降级本地）。
+      officeSource: { source: "session_attachment", id: att.id },
     });
     setPreviewOpen(true);
   };

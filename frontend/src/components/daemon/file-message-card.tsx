@@ -149,6 +149,8 @@ function FilePlainCard({
       <FilePreviewModal
         target={{
           fetch: () => fetchFileBlob(fileId),
+          // 2026-08-26-onlyoffice-preview：office 家族先试 DS（失败降级本地）。
+          officeSource: { source: "file", id: fileId },
           meta: { name, mime, size },
           download: () => downloadFile(fileId, name),
         }}

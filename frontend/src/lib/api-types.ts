@@ -866,6 +866,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/preview/office-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Office Config
+         * @description Office 家族文件的 DS 预览配置（FR-01/03/04/05）。
+         *
+         *     返回 ``{ds_url, config}``——config 为可直接交给 ``DocsAPI.DocEditor`` 的完整
+         *     对象（document.url 已指向一次性文件令牌端点，顶层 token 为 DS 签名）。
+         *     503 = 未启用（前端降级本地渲染器）。
+         */
+        get: operations["get_office_config_api_preview_office_config_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/preview/file/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Preview File
+         * @description 一次性令牌文件回拉（DS 容器匿名访问；FR-03）。
+         *
+         *     无 JWT——安全性完全由令牌承担（HS256 + 5min TTL + redis jti 一次性）。
+         */
+        get: operations["get_preview_file_api_preview_file__token__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/my-binding": {
         parameters: {
             query?: never;
@@ -21898,6 +21944,73 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FileMetaResp"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_office_config_api_preview_office_config_get: {
+        parameters: {
+            query: {
+                /** @description session_attachment | file */
+                source: string;
+                /** @description 附件/文件 id */
+                id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_preview_file_api_preview_file__token__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

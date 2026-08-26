@@ -2066,6 +2066,106 @@
         }
       }
     },
+    "/api/preview/office-config": {
+      "get": {
+        "tags": [
+          "preview"
+        ],
+        "summary": "Get Office Config",
+        "description": "Office 家族文件的 DS 预览配置（FR-01/03/04/05）。\n\n返回 ``{ds_url, config}``——config 为可直接交给 ``DocsAPI.DocEditor`` 的完整\n对象（document.url 已指向一次性文件令牌端点，顶层 token 为 DS 签名）。\n503 = 未启用（前端降级本地渲染器）。",
+        "operationId": "get_office_config_api_preview_office_config_get",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "session_attachment | file",
+              "title": "Source"
+            },
+            "description": "session_attachment | file"
+          },
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "附件/文件 id",
+              "title": "Id"
+            },
+            "description": "附件/文件 id"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Office Config Api Preview Office Config Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/preview/file/{token}": {
+      "get": {
+        "tags": [
+          "preview"
+        ],
+        "summary": "Get Preview File",
+        "description": "一次性令牌文件回拉（DS 容器匿名访问；FR-03）。\n\n无 JWT——安全性完全由令牌承担（HS256 + 5min TTL + redis jti 一次性）。",
+        "operationId": "get_preview_file_api_preview_file__token__get",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/my-binding": {
       "get": {
         "tags": [

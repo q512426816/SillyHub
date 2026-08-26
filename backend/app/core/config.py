@@ -306,6 +306,30 @@ class Settings(BaseSettings):
     file_max_size_mb: int = Field(
         default=50, ge=1, description="单文件上传大小上限（MB），超限 413。"
     )
+
+    # ── 2026-08-26-onlyoffice-preview：OnlyOffice DS 高保真预览（D-006 复用
+    # bsp-onlyoffice 容器）。enabled=false → config 端点 503 → 前端降级本地渲染器
+    # （未配置环境行为与现状逐字节一致）。──
+    onlyoffice_enabled: bool = Field(
+        default=False,
+        description="OnlyOffice 高保真预览开关（DS 不可用时前端自动降级本地渲染器）。",
+    )
+    onlyoffice_public_url: str = Field(
+        default="http://127.0.0.1:8080",
+        description="浏览器可达的 DS 地址（局域网访问改为局域网 IP；经 config 端点下发，改 .env 重启即生效免重构建）。",
+    )
+    onlyoffice_jwt_secret: str = Field(
+        default="",
+        description="DS 的 JWT_SECRET（共用实例时与 DS 侧一致，如 bsp-onlyoffice 的 dev_secret_change_me）。",
+    )
+    onlyoffice_file_base_url: str = Field(
+        default="http://host.docker.internal:8000",
+        description="DS 容器回拉平台文件的 base URL（跨 compose 网络走宿主机地址；同网络可改 http://backend:8000）。",
+    )
+    onlyoffice_file_token_ttl_seconds: int = Field(
+        default=300, ge=30, le=1800,
+        description="预览文件一次性令牌 TTL（秒）；redis jti 防重放。",
+    )
     file_allowed_types: str = Field(
         default=(
             "image/jpeg,image/png,image/gif,image/webp,"
