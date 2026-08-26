@@ -82,3 +82,6 @@ backend/*.db-journal
 .sillyspec-platform-managed
 .sillyspec-platform-cleaned
 meta.json
+
+# ql-20260826-011：DS/Gotenberg 中文字体挂载目录（微软/方正商用许可，不入库）
+deploy/onlyoffice-fonts/

@@ -4,7 +4,7 @@
  * useObjectUrl 已 mock（直接控制状态），渲染器已 mock（断言分发）。
  */
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { FilePreviewModal, type FilePreviewTarget } from "../file-preview-modal";
@@ -82,5 +82,47 @@ describe("FilePreviewModal", () => {
     mockUseObjectUrl.mockReturnValue({ blob: null, url: null, status: "loading", retry: vi.fn() });
     render(<FilePreviewModal target={mockTarget} open onClose={vi.fn()} />);
     expect(screen.getByRole("button", { name: /下载/ })).toBeInTheDocument();
+  });
+});
+
+// ── ql-20260826-011：office-config mode=pdf（LibreOffice→PDF）分支 ──
+
+vi.mock("@/lib/api", () => ({ apiFetch: (...a: unknown[]) => mockApiFetch(...a) }));
+const mockApiFetch = vi.fn();
+
+const officeDocxTarget: FilePreviewTarget = {
+  fetch: mockFetch,
+  meta: { name: "指南.docx", mime: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", size: 2048 },
+  officeSource: { source: "session_attachment", id: "att-1" },
+};
+
+describe("FilePreviewModal office mode=pdf（LibreOffice→PDF）", () => {
+  beforeEach(() => {
+    mockApiFetch.mockReset();
+    mockUseObjectUrl.mockReturnValue({ blob: null, url: null, status: "idle", retry: vi.fn() });
+    // jsdom 无 createObjectURL/fetch，桩掉
+    (URL as unknown as { createObjectURL: unknown }).createObjectURL = vi.fn(() => "blob:mock-pdf");
+    (URL as unknown as { revokeObjectURL: unknown }).revokeObjectURL = vi.fn();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve({ ok: true, blob: () => Promise.resolve(new Blob(["pdf"], { type: "application/pdf" })) })),
+    );
+  });
+
+  it("mode=pdf：office-config 返回 pdf_path → fetch blob → iframe 展示", async () => {
+    mockApiFetch.mockResolvedValue({ mode: "pdf", pdf_path: "/api/preview/file/tok" });
+    render(<FilePreviewModal target={officeDocxTarget} open onClose={vi.fn()} />);
+    const frame = await screen.findByTitle("指南.docx PDF 预览");
+    expect(frame).toHaveAttribute("src", "blob:mock-pdf");
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/preview/file/tok");
+  });
+
+  it("pdf 拉取失败 → 降级本地渲染链（officeFailed）", async () => {
+    mockApiFetch.mockResolvedValue({ mode: "pdf", pdf_path: "/api/preview/file/tok" });
+    vi.stubGlobal("fetch", vi.fn(() => Promise.resolve({ ok: false, status: 410 })));
+    render(<FilePreviewModal target={officeDocxTarget} open onClose={vi.fn()} />);
+    // 降级后 useObjectUrl 以本地 fetcher 重新挂载（拉 MinIO 原文件），PDF iframe 不出现
+    await waitFor(() => expect(mockUseObjectUrl).toHaveBeenLastCalledWith(mockFetch));
+    expect(screen.queryByTitle("指南.docx PDF 预览")).not.toBeInTheDocument();
   });
 });

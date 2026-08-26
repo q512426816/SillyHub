@@ -98,6 +98,7 @@ def _settings(**over):
     s = get_settings()
     s.onlyoffice_enabled = over.pop("enabled", True)
     s.onlyoffice_jwt_secret = over.pop("jwt_secret", "ds-test-secret")
+    s.gotenberg_url = over.pop("gotenberg_url", "")
     return s
 
 
@@ -218,3 +219,127 @@ class TestBuildConfig:
         ):
             await svc.issue_file_token(object_key="attachments/x.bin", settings=s)
         broken.set.assert_awaited_once()
+
+# ── 3. build_preview 双模式（ql-20260826-011：Word→LibreOffice→PDF）────────────
+
+
+class _FakeStorage:
+    """head miss→raise / get→固定字节 / put 记录调用 的存储桩。"""
+
+    def __init__(self, *, cached: bool = False) -> None:
+        self.cached = cached
+        self.put_keys: list[str] = []
+
+    async def head_object(self, key: str):
+        if not self.cached:
+            raise FileNotFoundError(key)
+        from app.modules.storage.base import ObjectStat
+
+        return ObjectStat(size=8, content_type="application/pdf")
+
+    async def get_object_stream(self, key: str):
+        yield b"docx-bytes"
+
+    async def put_object(self, key: str, data: bytes, content_type: str) -> None:
+        self.put_keys.append(key)
+
+
+def _mock_convert(pdf: bytes = b"%PDF-1.7 fake"):
+    """桩 httpx.AsyncClient：post → 200 + content=pdf。"""
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.content = pdf
+    resp.raise_for_status = MagicMock()
+    client = MagicMock()
+    client.post = AsyncMock(return_value=resp)
+    client_cls = MagicMock()
+    client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
+    client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+    return client_cls, client
+
+
+class TestBuildPreview:
+    @pytest.mark.asyncio
+    async def test_word_lo_pdf_mode(self, db_session, mocked_redis) -> None:
+        """docx + Gotenberg 配置 → mode=pdf（转换结果入缓存，URL 同源一次性）。"""
+        _settings(gotenberg_url="http://gotenberg:3000")
+        uid = await _create_user(db_session)
+        aid = await _seed_attachment(db_session, uid, name="指南.docx")
+        storage = _FakeStorage()
+        client_cls, client = _mock_convert()
+        with (
+            patch("app.modules.storage.factory.get_storage_backend", return_value=storage),
+            patch("app.modules.preview_office.service.httpx.AsyncClient", client_cls),
+        ):
+            resp = await svc.build_preview(
+                db_session, source="session_attachment", object_id=aid, user_id=uid
+            )
+        assert resp["mode"] == "pdf"
+        assert resp["pdf_path"].startswith("/api/preview/file/")
+        client.post.assert_awaited_once()
+        assert storage.put_keys and storage.put_keys[0].startswith("preview-pdf/")
+
+    @pytest.mark.asyncio
+    async def test_word_lo_cache_hit_skips_convert(self, db_session, mocked_redis) -> None:
+        """缓存命中（head ok）不再触发转换。"""
+        _settings(gotenberg_url="http://gotenberg:3000")
+        uid = await _create_user(db_session)
+        aid = await _seed_attachment(db_session, uid, name="指南.docx")
+        storage = _FakeStorage(cached=True)
+        client_cls, client = _mock_convert()
+        with (
+            patch("app.modules.storage.factory.get_storage_backend", return_value=storage),
+            patch("app.modules.preview_office.service.httpx.AsyncClient", client_cls),
+        ):
+            resp = await svc.build_preview(
+                db_session, source="session_attachment", object_id=aid, user_id=uid
+            )
+        assert resp["mode"] == "pdf"
+        client.post.assert_not_awaited()
+        assert storage.put_keys == []
+
+    @pytest.mark.asyncio
+    async def test_word_lo_failure_falls_back_to_ds(self, db_session, mocked_redis) -> None:
+        """Gotenberg 转换异常 → 回落 mode=ds（OnlyOffice config 完整）。"""
+        _settings(gotenberg_url="http://gotenberg:3000")
+        uid = await _create_user(db_session)
+        aid = await _seed_attachment(db_session, uid, name="指南.docx")
+        storage = _FakeStorage()
+        client = MagicMock()
+        client.post = AsyncMock(side_effect=RuntimeError("gotenberg down"))
+        client_cls = MagicMock()
+        client_cls.return_value.__aenter__ = AsyncMock(return_value=client)
+        client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        with (
+            patch("app.modules.storage.factory.get_storage_backend", return_value=storage),
+            patch("app.modules.preview_office.service.httpx.AsyncClient", client_cls),
+        ):
+            resp = await svc.build_preview(
+                db_session, source="session_attachment", object_id=aid, user_id=uid
+            )
+        assert resp["mode"] == "ds"
+        assert resp["config"]["documentType"] == "word"
+
+    @pytest.mark.asyncio
+    async def test_non_word_stays_ds(self, db_session, mocked_redis) -> None:
+        """xlsx 即使配置了 Gotenberg 也走 DS（Excel 交互预览保留）。"""
+        _settings(gotenberg_url="http://gotenberg:3000")
+        uid = await _create_user(db_session)
+        aid = await _seed_attachment(db_session, uid, name="考核.xlsx")
+        with patch("app.modules.storage.factory.get_storage_backend", return_value=_FakeStorage()):
+            resp = await svc.build_preview(
+                db_session, source="session_attachment", object_id=aid, user_id=uid
+            )
+        assert resp["mode"] == "ds"
+        assert resp["config"]["documentType"] == "cell"
+
+    @pytest.mark.asyncio
+    async def test_gotenberg_unset_stays_ds(self, db_session, mocked_redis) -> None:
+        """未配置 Gotenberg（默认）→ 行为与现状一致（mode=ds）。"""
+        _settings()
+        uid = await _create_user(db_session)
+        aid = await _seed_attachment(db_session, uid, name="指南.docx")
+        resp = await svc.build_preview(
+            db_session, source="session_attachment", object_id=aid, user_id=uid
+        )
+        assert resp["mode"] == "ds"

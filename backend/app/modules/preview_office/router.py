@@ -37,20 +37,14 @@ async def get_office_config(
     source: str = Query(description="session_attachment | file"),
     id: uuid.UUID = Query(description="附件/文件 id"),
 ) -> dict:
-    """Office 家族文件的 DS 预览配置（FR-01/03/04/05）。
+    """Office 家族文件预览配置（FR-01/03/04/05；ql-20260826-011 扩展双模式）。
 
-    返回 ``{ds_url, config}``——config 为可直接交给 ``DocsAPI.DocEditor`` 的完整
-    对象（document.url 已指向一次性文件令牌端点，顶层 token 为 DS 签名）。
-    503 = 未启用（前端降级本地渲染器）。
+    返回 ``{"mode": "pdf", "pdf_path"}``（Word 走 LibreOffice→PDF，docGrid 排版
+    保真）或 ``{"mode": "ds", "ds_url", "config"}``——config 可直接交给
+    ``DocsAPI.DocEditor``（document.url 已指向一次性文件令牌端点，顶层 token 为
+    DS 签名）。503 = 未启用（前端降级本地渲染器）。
     """
-    settings = get_settings()
-    config = await service.build_office_config(
-        session, source=source, object_id=id, user_id=user.id
-    )
-    return {
-        "ds_url": settings.onlyoffice_public_url,
-        "config": config,
-    }
+    return await service.build_preview(session, source=source, object_id=id, user_id=user.id)
 
 
 @router.get("/file/{token}")

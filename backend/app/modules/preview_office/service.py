@@ -4,7 +4,11 @@
 1. 归属校验取 object_key（source=session_attachment 走 SessionAttachment 表、
    source=file 走 File 表 get 语义——404 资源隐藏，与既有端点一致）；
 2. 一次性 file token（HS256 typ=preview_file + jti redis SETNX 一次性消费）；
-3. DS 编辑器配置组装与签名（payload=完整 config，DS 校验顶层 token 字段）。
+3. DS 编辑器配置组装与签名（payload=完整 config，DS 校验顶层 token 字段）；
+4. Word→LibreOffice 转 PDF 管线（ql-20260826-011：OnlyOffice 不支持中文文档
+   行网格 docGrid，公文空段撑页/目录位置漂移；LibreOffice 完整支持——Excel/
+   PPT 仍走 DS，Word 走 LO，转换结果 MinIO 缓存内容寻址键一次转换永久复用，
+   未配置/失败自动回落 DS 路径）。
 
 doc_key 随机（D-004：不做 DS 侧文档缓存，换实现简单）。
 """
@@ -15,6 +19,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import httpx
 from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +42,9 @@ _DOCUMENT_TYPE_BY_EXT: dict[str, str] = {
     "ppt": "slide",
     "pptx": "slide",
 }
+
+# 走 LibreOffice→PDF 管线的扩展名（docGrid 排版保真；ql-20260826-011）。
+_LO_PDF_EXTS = frozenset({"doc", "docx"})
 
 
 class PreviewOfficeDisabled(AppError):
@@ -237,3 +245,72 @@ async def build_office_config(
     }
     config["token"] = jwt.encode(config, ds_secret, algorithm="HS256")
     return config
+
+
+async def _lo_word_pdf_path(ref: _ObjectRef, *, settings: Settings) -> str | None:
+    """Word → LibreOffice 转 PDF → 同源一次性 URL（ql-20260826-011）。
+
+    缓存键 preview-pdf/{object_key}.pdf——object_key 内容寻址（D-5），源文件
+    不变则转换一次永久复用。任何失败返回 None（调用方回落 DS 路径，预览不断）。
+    """
+    from app.modules.storage.factory import get_storage_backend
+
+    backend = get_storage_backend()
+    cache_key = f"preview-pdf/{ref.object_key}.pdf"
+    try:
+        try:
+            await backend.head_object(cache_key)
+            cached = True
+        except Exception:
+            cached = False
+        if not cached:
+            data = b"".join([chunk async for chunk in backend.get_object_stream(ref.object_key)])
+            async with httpx.AsyncClient(timeout=settings.gotenberg_timeout_seconds) as client:
+                resp = await client.post(
+                    f"{settings.gotenberg_url.rstrip('/')}/forms/libreoffice/convert",
+                    files={"files": (ref.name, data, ref.media_type)},
+                )
+                resp.raise_for_status()
+            pdf = resp.content
+            if not pdf.startswith(b"%PDF"):
+                raise ValueError(f"Gotenberg 返回非 PDF：{pdf[:20]!r}")
+            await backend.put_object(cache_key, pdf, "application/pdf")
+        token = await issue_file_token(object_key=cache_key, settings=settings)
+        return f"/api/preview/file/{token}"
+    except Exception:
+        log.warning(
+            "LibreOffice Word→PDF 转换失败，回落 OnlyOffice（object=%s）",
+            ref.object_key,
+            exc_info=True,
+        )
+        return None
+
+
+async def build_preview(
+    session: AsyncSession,
+    *,
+    source: str,
+    object_id: uuid.UUID,
+    user_id: uuid.UUID,
+) -> dict[str, Any]:
+    """预览配置统一入口：Word 优先 LO→PDF，其余/失败走 DS（ql-20260826-011）。
+
+    返回 ``{"mode": "pdf", "pdf_path": "/api/preview/file/{token}"}`` 或
+    ``{"mode": "ds", "ds_url", "config"}``（前端按 mode 分发渲染器）。
+    """
+    settings = get_settings()
+
+    if settings.gotenberg_url and settings.onlyoffice_enabled and settings.onlyoffice_jwt_secret:
+        # 复用 build_office_config 的启用校验/归属校验/扩展名校验（含 503/404 语义）。
+        ref = await resolve_object(session, source=source, object_id=object_id, user_id=user_id)
+        if _ext_of(ref.name) in _LO_PDF_EXTS:
+            pdf_path = await _lo_word_pdf_path(ref, settings=settings)
+            if pdf_path is not None:
+                return {"mode": "pdf", "pdf_path": pdf_path}
+
+    config = await build_office_config(session, source=source, object_id=object_id, user_id=user_id)
+    return {
+        "mode": "ds",
+        "ds_url": settings.onlyoffice_public_url,
+        "config": config,
+    }

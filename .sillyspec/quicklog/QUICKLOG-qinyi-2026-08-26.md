@@ -516,3 +516,19 @@
 方案：字体链修复——docx 自带 8 个内嵌字体子集（word/fonts/*.odttf，WPS 嵌入），ODTTF 前 32 字节按 fontKey GUID 异或解混淆还原真 TTF（魔数校验），与 Windows 标准公文字体（simsun/simfang/simkai/simhei/msyh）一起装入容器 /usr/share/fonts/truetype/{founder,office-cn}，fc-cache + 重启重建 AllFonts.js（FZXiaoBiaoSong/FZFangSong/FZHei/FZKai/FZDAHEI/仿宋/楷体/微软雅黑 全部入索引）；转换 PDF 验证字形已按方正字体嵌入。试过字体垂直度量放大补丁（hhea/OS/2 拉到 1.65x em）逼空段撑页，x2t 转换布局零变化证明其行高不取这些表，补丁已回滚。持久化：字体备份 ~/onlyoffice-fonts-backup + deploy/scripts/onlyoffice-restore-fonts.sh 一键恢复
 结果：字形渲染正确（方正公文字体 + 标准中文 Office 字体全命中）；封面/目录分页与 Word 的精确一致不可达——docGrid 行网格引擎不支持，属 OnlyOffice 固有边界（精确排版走下载本地打开）；端到端验证走 ConvertService.ashx + pypdf 页文本断言 + PDF 内嵌字体表
 审计：字体文件不入库（微软/方正商用许可）；bsp-onlyoffice 为外部容器，重建后需重跑恢复脚本
+
+## ql-20260826-011-6e0f | 2026-08-26 18:35:00 | Word 预览换 LibreOffice→PDF 管线——OnlyOffice 不支持 docGrid 行网格（公文目录/封面分页漂移根治）
+状态：已完成
+关联变更：2026-08-26-onlyoffice-preview
+文件：
+- backend/app/modules/preview_office/service.py（新增 _lo_word_pdf_path + build_preview 双模式入口：Word→Gotenberg LO 转 PDF→MinIO 内容寻址缓存 preview-pdf/{object_key}.pdf，失败/未配置回落 DS 路径）
+- backend/app/modules/preview_office/router.py（office-config 改走 build_preview，返回 mode=pdf|ds）
+- backend/app/core/config.py（gotenberg_url/gotenberg_timeout_seconds）
+- frontend/src/components/files/file-preview-modal.tsx（mode=pdf 分支：fetch 一次性 URL 成 blob→iframe 原生 PDF 视图，拉取失败降级本地渲染器）
+- deploy/docker-compose.yml（gotenberg 服务 + ./onlyoffice-fonts 字体只读挂载 + healthcheck + mem_limit 1g）
+- deploy/.env（GOTENBERG_URL=http://gotenberg:3000）/ .gitignore（字体目录不入库）
+- backend preview_office 测试 13 用例（新增 5：LO 成功/缓存命中跳转/失败回落/非 word 仍 DS/未配置仍 DS）；前端 file-preview-modal 测试 12 用例（新增 2：mode=pdf iframe 渲染/拉取失败降级）
+需求：Word 预览目录跑到第一页 + 44 页 vs Word 42 页（ql-20260826-010 字体修复后仍存在）
+根因：OnlyOffice 编辑器引擎不支持中文文档行网格 docGrid（sdk-all.js 28MB 源码 linePitch/docGrid 零命中实证）——公文封面空段撑页/行高吸附全部失效；字体度量放大补丁实验证明其行高不读 hhea/OS/2 表（1.5x em 零布局变化），字体侧无杠杆。对照实验：LibreOffice（Gotenberg 容器）转同一文档 46 页且封面独立一页、目录在第二页、使用说明第三页——docGrid 完整支持
+方案：混合渲染管线——Word(doc/docx) 走 Gotenberg(LibreOffice) 转 PDF + MinIO 内容寻址缓存（源文件不变转换一次永久复用）+ 前端 iframe 原生 PDF 视图；Excel/PPT 仍走 OnlyOffice 交互预览；Gotenberg 未配置/转换失败自动回落 OnlyOffice（预览不断）；中文字体（方正内嵌子集+标准 Office 字体）挂载进 Gotenberg 容器保证公文保真
+结果：backend 13/13 + mypy/ruff 0 错；frontend 12/12 + tsc 0 错；Gotenberg 容器实测该 docx 目录回到第二页

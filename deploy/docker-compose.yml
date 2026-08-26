@@ -59,6 +59,23 @@ services:
       retries: 20
     mem_limit: 256m
 
+  # ql-20260826-011：Word 预览 LibreOffice→PDF 转换（OnlyOffice 不支持中文文档
+  # 行网格 docGrid，公文空段撑页/目录位置与 Word 漂移；LibreOffice 完整支持）。
+  # Excel/PPT 预览仍走 OnlyOffice；backend 侧 Gotenberg 不可用/转换失败自动回落。
+  # 中文字体经 ./onlyoffice-fonts 只读挂载（宋体/仿宋/楷体/黑体/微软雅黑 + 方正
+  # 内嵌子集；商用许可不入 Git——目录缺失时 LO 用替代字体，公文还原度下降）。
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    restart: unless-stopped
+    volumes:
+      - ./onlyoffice-fonts:/usr/share/fonts/truetype/office-custom:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    mem_limit: 1g
+
   backend:
     # 固定 tag：本地 build / 服务器 docker load / compose up 三者复用同一镜像名。
     # 部署改用 save/load（见 deploy/scripts/build-and-save.sh + load-and-up.sh），服务器不再现场构建。

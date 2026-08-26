@@ -332,6 +332,18 @@ class Settings(BaseSettings):
         le=1800,
         description="预览文件一次性令牌 TTL（秒）；redis jti 防重放。",
     )
+
+    # ── ql-20260826-011：Word 预览走 LibreOffice→PDF（OnlyOffice 不支持中文
+    # 文档行网格 docGrid，公文封面空段撑页/目录位置与 Word 漂移；LibreOffice
+    # 完整支持）。Gotenberg 未配置/转换失败自动回落 OnlyOffice 路径。──
+    gotenberg_url: str = Field(
+        default="",
+        description="Gotenberg（LibreOffice 无头转换）地址；空 = Word 预览走 OnlyOffice（现状）。",
+    )
+    gotenberg_timeout_seconds: int = Field(
+        default=120, ge=10, le=600,
+        description="LibreOffice 转换超时（秒）；大文档首转较慢，缓存命中后不再触发。",
+    )
     file_allowed_types: str = Field(
         default=(
             "image/jpeg,image/png,image/gif,image/webp,"

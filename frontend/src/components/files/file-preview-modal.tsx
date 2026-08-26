@@ -72,8 +72,12 @@ function extOf(name: string): string {
 }
 
 interface OfficeConfigResp {
-  ds_url: string;
-  config: Record<string, unknown>;
+  /** ql-20260826-011：pdf = Word 走 LibreOffice→PDF（docGrid 排版保真）；ds = OnlyOffice。 */
+  mode?: "pdf" | "ds";
+  /** mode=pdf：同源一次性 PDF URL（fetch 一次成 blob 再交给 iframe，规避浏览器区间请求重放一次性令牌）。 */
+  pdf_path?: string;
+  ds_url?: string;
+  config?: Record<string, unknown>;
 }
 
 /** office 家族 + 携带来源标识 → 尝试 DS（纯函数，供 hook 依赖序使用）。 */
@@ -85,7 +89,33 @@ export function FilePreviewModal({ target, open, onClose }: FilePreviewModalProp
   // ── OnlyOffice 前置尝试层（2026-08-26-onlyoffice-preview / FR-01/02）──
   const [officeCfg, setOfficeCfg] = useState<OfficeConfigResp | null>(null);
   const [officeFailed, setOfficeFailed] = useState(false);
+  const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   const officeEligible = officeEligibleStatic(target) && !officeFailed;
+
+  // ── ql-20260826-011：mode=pdf（LibreOffice 转换）→ 拉 blob 交 iframe ──
+  useEffect(() => {
+    setPdfBlobUrl(null);
+    if (!officeCfg || officeCfg.mode !== "pdf" || !officeCfg.pdf_path) return;
+    let cancelled = false;
+    let objectUrl = "";
+    fetch(officeCfg.pdf_path)
+      .then((resp) => {
+        if (!resp.ok) throw new Error(`preview pdf HTTP ${resp.status}`);
+        return resp.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setPdfBlobUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setOfficeFailed(true); // 拉取失败 → 降级本地渲染器
+      });
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [officeCfg]);
 
   // DS 路径不需要本地 blob（DS 容器自拉一次性 URL）；officeFailed 降级瞬间
   // fetcher 重新挂载拉取本地对象（useObjectUrl 依赖变化自然重跑）。
@@ -133,14 +163,33 @@ export function FilePreviewModal({ target, open, onClose }: FilePreviewModalProp
 
     // OnlyOffice 高保真优先：配置就绪 → DS 渲染；预取中 → 轻加载态；失败 → 落回下方本地链。
     if (officeEligible && !officeFailed) {
-      if (officeCfg) {
+      // ql-20260826-011：Word → LibreOffice→PDF（OnlyOffice 不支持中文行网格，
+      // 公文目录/封面分页与 Word 漂移；PDF 视图保真，浏览器原生查看器展示）。
+      if (officeCfg?.mode === "pdf") {
+        if (pdfBlobUrl) {
+          return (
+            <iframe
+              src={pdfBlobUrl}
+              title={`${target.meta.name} PDF 预览`}
+              className="h-[74vh] w-full bg-white"
+            />
+          );
+        }
+        return (
+          <div className="flex min-h-[420px] items-center justify-center">
+            <div className="h-6 w-6 animate-spin rounded-full border-2 border-brand-200 border-t-brand-600" />
+            <span className="ml-3 text-slate-500">正在转换为 PDF 视图…（首次约需数秒，之后走缓存）</span>
+          </div>
+        );
+      }
+      if (officeCfg && officeCfg.ds_url && officeCfg.config) {
         return (
           <OnlyofficePreviewer
             blob={blob ?? new Blob()}
             url={url ?? ""}
             meta={target.meta}
             onDownload={handleDownload}
-            officeConfig={officeCfg}
+            officeConfig={{ ds_url: officeCfg.ds_url, config: officeCfg.config }}
             onFallback={() => setOfficeFailed(true)}
           />
         );
