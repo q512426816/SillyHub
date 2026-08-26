@@ -15,6 +15,12 @@ SyntaxError: The requested module './shared.js' does not provide an export named
 
 quick 阶段前两步（理解/实现）正常；末步 --done 写 QUICKLOG 语义内容时必崩，任务无法经 CLI 收尾。
 
+## 影响升级（2026-08-26）
+
+CLI 3.27.5 该缺陷已影响**所有 stage 启动**（sillyspec run brainstorm/change 等均在模块加载期崩
+溃，不再限于 quick --done）——工具全阶段不可用。新变更需按文档规范手工产出四件套，
+进度库无法登记（change 目录手工创建）。
+
 ## 复现
 
 ```bash
