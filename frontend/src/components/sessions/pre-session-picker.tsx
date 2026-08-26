@@ -20,6 +20,11 @@
  *   - 选完智能体立即 onPick(runtimeId) 关闭，无确认按钮（两步即达）；
  *   - 取消/遮罩点击仅回调 onCancel，不清父层状态（open 受控于父层）；
  *   - 空态引导：无在线机器 / 该机器无可用智能体。
+ *   - 容器双形态 variant（task-13 / 2026-08-26-mobile-workspace-page / FR-08 / FR-11）：
+ *     center=居中卡（默认，既有调用点不传 → 桌面零回归）；bottomSheet=移动贴底抽屉
+ *     （items-end 满宽 + rounded-t-2xl + max-h-[80dvh] 滚动 + 底部安全区留白，选项
+ *     min-h-[44px] 触摸热区，对齐原型 prototype-mobile-workspace.html 屏幕7）——
+ *     仅容器定位/外观类差异，两步选择逻辑零分叉。
  *
  * 门户接线（何时打开/上下文合成 onPick → preContext）归 task-06。
  */
@@ -39,6 +44,11 @@ import { cn } from "@/lib/utils";
 const SESSION_SUPPORTED_PROVIDERS = new Set(["claude", "codex"]);
 
 export interface PreSessionPickerProps {
+  /**
+   * 容器形态（task-13 / FR-08 / FR-11）：center=居中卡（默认，桌面零回归）；
+   * bottomSheet=移动贴底抽屉（仅容器定位/外观类差异，两步逻辑零分叉）。
+   */
+  variant?: "center" | "bottomSheet";
   /** 受控开关（父层持有；取消/遮罩点击仅回调 onCancel）。 */
   open: boolean;
   /** 机器列表（父层注入，本组件零数据请求）。 */
@@ -83,6 +93,7 @@ function engineIcon(provider: string | null): React.ReactNode {
 /* ────────────────────── 组件 ────────────────────── */
 
 export function PreSessionPicker({
+  variant = "center",
   open,
   machines,
   onCancel,
@@ -118,11 +129,24 @@ export function PreSessionPicker({
 
   if (!open) return null;
 
+  // 容器双形态（task-13）：仅定位/外观类差异——center 原类逐字不动（桌面零回归）；
+  // bottomSheet 贴底抽屉（items-end + 满宽 + 顶圆角 + 80dvh 滚动 + 安全区留白），
+  // 两步状态机/过滤白名单/受控语义零分叉（同一逻辑路径）。
+  const isSheet = variant === "bottomSheet";
+  const maskCls = isSheet
+    ? "fixed inset-0 z-50 flex items-end bg-brand-950/30 backdrop-blur-[2px]"
+    : "fixed inset-0 z-50 flex items-center justify-center bg-brand-950/30 p-4 backdrop-blur-[2px]";
+  const cardCls = isSheet
+    ? "w-full max-h-[80dvh] overflow-y-auto rounded-t-2xl border border-border bg-card p-4 pb-[env(safe-area-inset-bottom)] shadow-lg"
+    : "w-full max-w-[360px] rounded-2xl border border-border bg-card p-4 shadow-lg";
+  // 移动触摸热区（FR-08 ≥44px 抽检锚）：bottomSheet 下两步选项行补 min-h，外观类不改逻辑。
+  const touchCls = isSheet ? "min-h-[44px]" : "";
+
   return (
     <div
       data-testid="pre-session-picker-mask"
       aria-label="新建会话选择浮层"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-brand-950/30 p-4 backdrop-blur-[2px]"
+      className={maskCls}
       onClick={(e) => {
         // 遮罩自身点击才取消（浮层内点击不冒泡取消）。
         if (e.target === e.currentTarget) onCancel();
@@ -132,7 +156,7 @@ export function PreSessionPicker({
         role="dialog"
         aria-modal="true"
         aria-label="新建会话 · 选择运行位置"
-        className="w-full max-w-[360px] rounded-2xl border border-border bg-card p-4 shadow-lg"
+        className={cardCls}
       >
         <div className="flex items-start justify-between gap-2">
           {/* 原型 .dlg-head：渐变图标头（2026-08-23-sessions-page-style）。 */}
@@ -176,7 +200,10 @@ export function PreSessionPicker({
                     type="button"
                     aria-label={`选择机器 ${machineLabel(m)}`}
                     onClick={() => setMachineId(m.id)}
-                    className="flex flex-col gap-1 rounded-lg border border-border bg-card px-3 py-2 text-left transition-all hover:border-brand-300 hover:shadow-sm"
+                    className={cn(
+                      "flex flex-col gap-1 rounded-lg border border-border bg-card px-3 py-2 text-left transition-all hover:border-brand-300 hover:shadow-sm",
+                      touchCls,
+                    )}
                   >
                     <span className="flex items-center gap-2">
                       <span
@@ -226,6 +253,7 @@ export function PreSessionPicker({
                       onClick={() => onPick(r.id)}
                       className={cn(
                         "flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-left text-sm transition-all",
+                        touchCls,
                         isDefault
                           ? "border-primary bg-brand-50 text-foreground ring-2 ring-brand-100"
                           : "border-border bg-card text-foreground hover:border-brand-300",
