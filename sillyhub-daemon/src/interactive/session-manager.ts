@@ -1175,9 +1175,20 @@ export class SessionManager {
     // 抛 SessionLimitReached（daemon _startInteractiveSession 既有 P2b catch 回传 run
     // failed）。restoreAndReconnect 不走本闸（design §7「会话闸误伤 restore」）。
     if (this._maxActiveSessions > 0) {
+      // P0 修复（2026-08-26，会话 2eac7c91 实证）：restoreAndReconnect 恢复的历史
+      // 会话在 idle 回收默认关闭（_idleTimeoutSec=0）时永不释放，占满额度后新派
+      // 分身一律 SESSION_LIMIT_REACHED——闸形同全局禁用团队派发。计数口径收窄为
+      // **真活跃**：非终态 且（正在跑 turn 或 近期有活动，窗口 30 分钟）。长期
+      // idle 的恢复会话不占额度（它们没有进程成本，只是内存态 + 可被 inject 唤醒；
+      // 真正的进程风暴防护由"正在跑 turn"承担）。窗口常量与终态清理延迟同量级。
+      const GATE_ACTIVE_WINDOW_MS = 30 * 60 * 1000;
+      const now = Date.now();
       let activeCount = 0;
       for (const s of this._store.values()) {
-        if (s.status !== 'ended' && s.status !== 'failed') activeCount++;
+        if (s.status === 'ended' || s.status === 'failed') continue;
+        const running = s.status === 'running' || this._pendingInjectCount.has(s.sessionId);
+        const recent = s.lastActiveAt > 0 && now - s.lastActiveAt < GATE_ACTIVE_WINDOW_MS;
+        if (running || recent) activeCount++;
       }
       if (activeCount >= this._maxActiveSessions) {
         throw new SessionLimitReached(activeCount, this._maxActiveSessions);

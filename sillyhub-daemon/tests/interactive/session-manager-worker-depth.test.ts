@@ -345,3 +345,67 @@ describe("审计 F1/F3 回归", () => {
     expect(mgr["_overBudgetSessions"].has("sess-f3")).toBe(false);
   });
 });
+
+
+// ── P0 修复回归（2026-08-26，会话 2eac7c91）：恢复的历史 idle 会话不占闸额度 ──
+
+describe('审计 P0：会话闸只计真活跃会话', () => {
+  it('20 个长期 idle 的恢复态会话不占额度——新 create 正常通过（旧实现 SESSION_LIMIT_REACHED）', async () => {
+    const mock = makeMockDriver();
+    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+    // 直塞 _store：20 个 active 但 lastActiveAt 是 2 小时前（restore 恢复的僵尸态）
+    const old = Date.now() - 2 * 60 * 60 * 1000;
+    for (let i = 0; i < 20; i++) {
+      const st = {
+        sessionId: `idle-${i}`,
+        leaseId: `l-${i}`,
+        provider: 'claude',
+        cwd: '/tmp',
+        status: 'active',
+        lastActiveAt: old,
+      } as never;
+      sm['_store'].set(`idle-${i}`, st);
+    }
+    // 默认闸 20：旧实现计数 20 → 拒；新实现真活跃 0 → 通过
+    await sm.create({ ...BASE_INPUT, sessionId: 'fresh-1' });
+    expect(sm.get('fresh-1')).toBeDefined();
+  });
+
+  it('20 个近期活跃会话仍触发闸（防进程风暴语义保留）', async () => {
+    const mock = makeMockDriver();
+    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+    const now = Date.now();
+    for (let i = 0; i < 20; i++) {
+      sm['_store'].set(`hot-${i}`, {
+        sessionId: `hot-${i}`,
+        leaseId: `l2-${i}`,
+        provider: 'claude',
+        cwd: '/tmp',
+        status: 'active',
+        lastActiveAt: now - 60_000,
+      } as never);
+    }
+    await expect(
+      sm.create({ ...BASE_INPUT, sessionId: 'fresh-2' }),
+    ).rejects.toMatchObject({ name: 'SessionLimitReached' });
+  });
+
+  it('running turn 会话即使 lastActiveAt 陈旧也计入（进行中必有进程）', async () => {
+    const mock = makeMockDriver();
+    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+    const old = Date.now() - 2 * 60 * 60 * 1000;
+    for (let i = 0; i < 20; i++) {
+      sm['_store'].set(`run-${i}`, {
+        sessionId: `run-${i}`,
+        leaseId: `l3-${i}`,
+        provider: 'claude',
+        cwd: '/tmp',
+        status: i === 0 ? 'running' : 'active',
+        lastActiveAt: old,
+      } as never);
+    }
+    // 只有 1 个 running：其余 idle active 不计 → 通过
+    await sm.create({ ...BASE_INPUT, sessionId: 'fresh-3' });
+    expect(sm.get('fresh-3')).toBeDefined();
+  });
+});
