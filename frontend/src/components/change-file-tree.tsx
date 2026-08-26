@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import { Image } from "antd";
 import { ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -12,9 +13,16 @@ import { Button } from "@/components/ui/button";
 // 包装，暗色下库默认白底漏出且表格覆盖规则不命中；reading 尺寸适合文件预览，
 // sanitize 管线组件内自带（task-13 / FR-13 口径不变）
 import { MarkdownText } from "@/components/ui/markdown-text";
+import { FileNodeIcon, fileExt } from "@/components/ui/file-node-icon";
+// 统一预览弹窗 + objectURL hook（2026-08-26-file-fullscreen-preview task-02/04
+// 交付物，仅按契约消费，不改本体）
+import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
+import { useObjectUrl } from "@/components/files/use-object-url";
 import { ApiError } from "@/lib/api";
+import { formatFileSize } from "@/lib/file/utils";
 import {
   buildChangeFileTree,
+  fetchChangeFileRaw,
   getChangeFileContent,
   listChangeFiles,
   listPendingChangeFiles,
@@ -84,6 +92,105 @@ function FilePreview({ path, name, content }: { path: string; name: string; cont
     <pre className="min-w-0 flex-1 overflow-auto rounded-md border border-input bg-background p-3 font-mono text-xs leading-relaxed whitespace-pre">
       {content || "（空文件）"}
     </pre>
+  );
+}
+
+// ── 非文本选中态（2026-08-26-file-fullscreen-preview / FR-03a）──────────
+// 内联图片扩展名集合（小写比较，fileExt 统一取小写扩展名）：与 preview-registry
+// IMAGE_MIMES 口径对齐（svg/bmp/ico 含内，Grill C-05）。命中走内联 antd Image，
+// 其余非文本走文件卡片。
+const INLINE_IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "svg", "bmp", "ico"]);
+
+function isInlineImage(name: string): boolean {
+  return INLINE_IMAGE_EXTS.has(fileExt(name));
+}
+
+/**
+ * 非文本选中态视图（替代旧「非文本文件，暂不支持预览/编辑」占位）：
+ * - 图片扩展名 → fetchChangeFileRaw 拉 raw blob 经 useObjectUrl 构造鉴权
+ *   objectURL，内联 antd Image（点击内建 lightbox 放大/缩小/旋转，FR-02）；
+ *   失败态给提示 + 重试 + 「全屏预览」引导（design §9：未部署新后端时 raw 404）。
+ * - 其余非文本 → 文件卡片（类型图标 + 名称 + 大小 + 「全屏预览」引导按钮）。
+ *
+ * 取数恒走 raw 端点（D-009：预览不走 content 端点）；useObjectUrl 托管
+ * 卸载/切换 revoke 与竞态防护。min-w-0/min-h-0 对齐 ql-20260818-008 限高链。
+ */
+function NonTextFileView({
+  workspaceId,
+  changeId,
+  doc,
+  onOpenFullscreen,
+}: {
+  workspaceId: string;
+  changeId: string;
+  doc: ChangeFileEntry;
+  onOpenFullscreen: () => void;
+}) {
+  const isImage = isInlineImage(doc.name);
+  // fetcher 依赖仅 path 原语：父组件无关重渲染（pending 轮询 setPending 等）不触发重复拉取
+  const fetcher = useMemo(
+    () => (isImage ? () => fetchChangeFileRaw(workspaceId, changeId, doc.path) : null),
+    [isImage, workspaceId, changeId, doc.path],
+  );
+  const { url, status, retry } = useObjectUrl(fetcher);
+
+  if (!isImage) {
+    // 其他非文本：文件卡片 + 全屏预览引导（全屏弹窗内 docx/xlsx/pdf 本地渲染器可用）
+    return (
+      <div className="flex min-h-0 flex-1 items-center justify-center rounded-md border border-dashed border-border bg-muted/30 p-6">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <FileNodeIcon name={doc.name} type="file" size="h-10 w-10" />
+          <div>
+            <p className="text-sm font-medium text-foreground">{doc.name}</p>
+            <p className="mt-1 font-mono text-[11px] text-muted-foreground">
+              {formatFileSize(doc.size)} · 非文本文件
+            </p>
+          </div>
+          <Button size="sm" onClick={onOpenFullscreen}>
+            全屏预览
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  let body: ReactNode;
+  if (status === "error") {
+    body = (
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 py-8 text-center">
+        <p className="text-xs text-muted-foreground">图片加载失败（文件可能尚未同步到平台镜像）</p>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={retry}>
+            重试
+          </Button>
+          <Button size="sm" onClick={onOpenFullscreen}>
+            全屏预览
+          </Button>
+        </div>
+      </div>
+    );
+  } else if (!url) {
+    // idle/loading 均视为加载中（fetcher 非 null，effect 随即进入 loading）
+    body = <p className="py-8 text-center text-xs text-muted-foreground">图片加载中…</p>;
+  } else {
+    body = (
+      <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center overflow-auto rounded-md border border-border bg-background p-3">
+        {/* antd Image：点击内建 lightbox 放大/缩小/旋转（FR-02），objectURL 由 useObjectUrl 托管 revoke */}
+        <Image src={url} alt={doc.name} className="max-h-[60vh] max-w-full rounded-md object-contain" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{doc.path}</span>
+        <Button size="sm" variant="outline" onClick={onOpenFullscreen}>
+          全屏预览
+        </Button>
+      </div>
+      {body}
+    </div>
   );
 }
 
@@ -201,6 +308,10 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [pending, setPending] = useState<PendingFileEntry[]>([]);
+  // 统一预览弹窗态（2026-08-26-file-fullscreen-preview / FR-03b）：target 常驻
+  // state、关闭仅收 open，避免弹窗内容闪重建；以 defaultFullscreen 打开即全屏。
+  const [previewTarget, setPreviewTarget] = useState<FilePreviewTarget | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const pendingPaths = new Set(pending.map((p) => p.path));
@@ -311,6 +422,32 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
     }
   };
 
+  // 打开统一预览弹窗（2026-08-26-file-fullscreen-preview / FR-03b）。
+  // D-009：预览取数恒走 raw 端点——文本同样不走 content 端点（规避其 1MB 截断
+  // 导致大文件全屏静默截断），blob.type/扩展名统一经 matchRenderer 分发；
+  // meta.mime 留 null 靠后端 Content-Type 兜底。下载用 raw blob + a[download] 即抛即 revoke。
+  const openFullscreenPreview = useCallback(
+    (doc: ChangeFileEntry) => {
+      setPreviewTarget({
+        fetch: () => fetchChangeFileRaw(workspaceId, changeId, doc.path),
+        meta: { name: doc.name, mime: null, size: doc.size },
+        download: async () => {
+          const blob = await fetchChangeFileRaw(workspaceId, changeId, doc.path);
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = doc.name;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        },
+      });
+      setPreviewOpen(true);
+    },
+    [workspaceId, changeId],
+  );
+
   const statusLabel: Record<SaveStatus, { text: string; color: string }> = {
     idle: { text: "", color: "" },
     saving: { text: "保存中…", color: "text-primary" },
@@ -375,9 +512,14 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
           {!selected ? (
             <p className="py-8 text-center text-xs text-muted-foreground">点击左侧文件查看内容</p>
           ) : !selected.is_text ? (
-            <div className="py-8 text-center text-xs text-muted-foreground">
-              <p>{selected.name}（非文本文件，暂不支持预览/编辑）</p>
-            </div>
+            // 2026-08-26-file-fullscreen-preview / FR-03a：非文本不再是一行
+            // 「暂不支持」占位——图片内联 antd Image 可缩放、其余文件卡片带全屏入口
+            <NonTextFileView
+              workspaceId={workspaceId}
+              changeId={changeId}
+              doc={selected}
+              onOpenFullscreen={() => openFullscreenPreview(selected)}
+            />
           ) : loadingDoc ? (
             <p className="py-8 text-center text-xs text-muted-foreground">加载中…</p>
           ) : (
@@ -390,6 +532,12 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
                       {statusLabel[saveStatus].text}
                     </span>
                   )}
+                  {/* 全屏预览（2026-08-26-file-fullscreen-preview / FR-03b）：以
+                      defaultFullscreen 打开统一弹窗，文本/图片/HTML 原型均可全屏；
+                      置于模式按钮组（预览/编辑）之前 */}
+                  <Button size="sm" variant="outline" onClick={() => openFullscreenPreview(selected)}>
+                    全屏预览
+                  </Button>
                   {mode === "preview" ? (
                     <Button size="sm" onClick={() => setMode("edit")}>
                       编辑
@@ -435,6 +583,15 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
           )}
         </div>
       </div>
+
+      {/* 统一预览弹窗（2026-08-26-file-fullscreen-preview / FR-03b）：打开即全屏，
+          取数/下载恒走 raw 端点（D-009），见 openFullscreenPreview */}
+      <FilePreviewModal
+        target={previewTarget}
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        defaultFullscreen
+      />
     </section>
   );
 }

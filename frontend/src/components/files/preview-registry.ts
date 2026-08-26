@@ -10,23 +10,37 @@
  * 依据：design.md §5 + §7。
  */
 
-export type RendererKey = "image" | "pdf" | "docx" | "xlsx" | "markdown" | "fallback";
+export type RendererKey = "image" | "pdf" | "docx" | "xlsx" | "markdown" | "html" | "fallback";
 
-const IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+// svg/bmp/ico（2026-08-26-file-fullscreen-preview）：explorer 内联图片含这三类，
+// 统一预览需一致可看（Design Grill C-05）。
+const IMAGE_MIMES = new Set([
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "image/svg+xml",
+  "image/bmp",
+  "image/x-icon",
+]);
 
 const MIME_MAP: Record<string, RendererKey> = {
   "application/pdf": "pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
   "text/markdown": "markdown",
+  // 2026-08-26-file-fullscreen-preview：HTML 原型走 iframe sandbox 渲染（此前落 fallback）
+  "text/html": "html",
 };
 
 const EXT_MAP: Record<string, RendererKey> = {
   png: "image", jpg: "image", jpeg: "image", webp: "image", gif: "image",
+  svg: "image", bmp: "image", ico: "image",
   pdf: "pdf",
   docx: "docx",
   // ql-20260826-013：Excel 取消在线渲染（xls/xlsx → fallback 下载引导）——
   // SheetJS 表格还原度差、OnlyOffice 已退役；预览弹窗内下载本机查看。
   md: "markdown", markdown: "markdown",
+  html: "html", htm: "html",
 };
 
 function matchByMime(mime: string): RendererKey | null {

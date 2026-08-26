@@ -28,6 +28,7 @@ SillyHub 前端 API 客户端层与基础设施库（frontend/src/lib/**）。�
   - 已知例外债：lib/api/llm-providers.ts 手写 DTO（文件头显式登记，整体迁移到生成类型是独立坑）。
 - `agent-logs.ts`：本地 Agent 会话日志双通道（2026-08-23-agent-log-conversation-view）——`readAgentLogMessages(entryId, beforeSeq?)` 对话化归一化消息（status 四值均 200 分层，仅 parsed 可渲染，蛇形字段原样）；`readAgentLogContent` 原文尾部 256KB（回落与二进制格式唯一通道）；ApiError 一律抛出交调用方回落。
 - `api/session-attachments.ts`：`fetchAttachmentBlob(id)`（2026-08-25-session-attachment-preview）——预览 Modal 用的 Blob 拉取（docx/xlsx/md 渲染需 ArrayBuffer/text），401 经 ensureFreshAccessToken 单飞刷新重试一次（对齐 file/api.ts 的 fetchFileBlob 语义）；既有 `fetchAttachmentObjectUrl`（objectURL 版）行为不变。
+- `change-files.ts`：`fetchChangeFileRaw(workspaceId, changeId, path)`（2026-08-26-file-fullscreen-preview，D-009）——变更文件二进制 Blob 拉取（GET files/raw），裸 fetch+Bearer+401 单飞重试（对齐 explorer.ts fetchDownload 范式）；变更文件预览（全屏弹窗/图片内联）恒走此函数，不走 1MB 截断的 getChangeFileContent（编辑流仍走 content 端点）。
 - react-query 装配：
   - `query-client.ts` `makeQueryClient()` — freshness-first 默认：staleTime 15s + refetchOnWindowFocus（仅对 >15s 数据重取）；retry 仅 ApiError 5xx ≤3 次（4xx 含 401/403/404 不重试）；全局不设 refetchInterval。
   - `providers.tsx` `AppProviders` — QueryClientProvider 用 useState 工厂建每会话实例（禁模块级单例，防 SSR 跨请求泄漏缓存）；DevTools 仅 dev。

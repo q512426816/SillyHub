@@ -4,21 +4,31 @@
  * FilePreviewModal — 统一文件预览弹窗壳。
  *
  * antd Modal（FRONTEND_PAGE_STYLE.md §6：弹窗不用 Drawer），标题栏含 FileTypeIcon +
- * 文件名 + 大小/MIME + 下载 + 关闭；body 经 useObjectUrl 拉 blob 后按 matchRenderer
- * 分发到六渲染器。内置 loading spinner / error 重试态（R-07）。
+ * 文件名 + 大小/MIME + 全屏切换 + 下载 + 关闭；body 经 useObjectUrl 拉 blob 后按
+ * matchRenderer 分发到七渲染器。内置 loading spinner / error 重试态（R-07）。
+ *
+ * 2026-08-26-file-fullscreen-preview / FR-01/FR-02 / D-004@v1：CSS 伪全屏态——
+ * defaultFullscreen 决定 open 时的初始态，工具栏按钮随时切换；全屏下渲染器收
+ * fill=true 撑满剩余高度。Esc 不拦截（D-008），保持 antd 默认直接关窗。
  *
  * 依据：design.md §5 数据流 + §7 接口定义。
  */
 
 import { useEffect, useState, type ComponentType } from "react";
 import { Modal } from "antd";
-import { DownloadOutlined, ReloadOutlined } from "@ant-design/icons";
+import {
+  CompressOutlined,
+  DownloadOutlined,
+  ExpandOutlined,
+  ReloadOutlined,
+} from "@ant-design/icons";
 
 import { apiFetch } from "@/lib/api";
 import { FileTypeIcon, formatFileSize } from "@/lib/file/utils";
 import { useObjectUrl } from "./use-object-url";
 import { matchRenderer } from "./preview-registry";
 import {
+  HtmlPreviewer,
   ImagePreviewer,
   PdfPreviewer,
   DocxPreviewer,
@@ -52,6 +62,13 @@ export interface FilePreviewModalProps {
   target: FilePreviewTarget | null;
   open: boolean;
   onClose: () => void;
+  /**
+   * open 时的初始全屏态（FR-02）：缺省 false = 现状普通态，既有四类入口
+   * （attachment-chips/file-message-card/run-file-artifacts/file-viewer）
+   * 不传即零回归。打开后用户可经工具栏自由切换；target 切换不重置，
+   * 关闭再开重新按本值初始化。
+   */
+  defaultFullscreen?: boolean;
 }
 
 const RENDERER_MAP: Record<string, ComponentType<PreviewerProps>> = {
@@ -60,6 +77,7 @@ const RENDERER_MAP: Record<string, ComponentType<PreviewerProps>> = {
   docx: DocxPreviewer,
   xlsx: XlsxPreviewer,
   markdown: MarkdownPreviewer,
+  html: HtmlPreviewer,
   fallback: FallbackPreviewer,
 };
 
@@ -89,7 +107,34 @@ function officeEligibleStatic(t: FilePreviewTarget | null): boolean {
   return Boolean(t?.officeSource && OFFICE_EXTS.has(extOf(t?.meta.name ?? "")));
 }
 
-export function FilePreviewModal({ target, open, onClose }: FilePreviewModalProps) {
+export function FilePreviewModal({
+  target,
+  open,
+  onClose,
+  defaultFullscreen = false,
+}: FilePreviewModalProps) {
+  // ── 全屏态（2026-08-26-file-fullscreen-preview / FR-01/FR-02 / D-004@v1）──
+  // CSS 伪全屏（非 Fullscreen API）：open 变 true 时按 defaultFullscreen 初始化；
+  // 仅锚定 open/prop，target 切换不重置；关闭再开自然重新初始化。
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    if (open) setFullscreen(defaultFullscreen);
+  }, [open, defaultFullscreen]);
+
+  // 进入全屏锁 body 滚动、退出/卸载还原（agent-log-viewer.tsx L836-842 先例）。
+  // antd Modal 打开本身已锁滚动，此处仅兜底嵌套二次弹层场景；open=false 时
+  // 立即解锁，防 Esc 直接关窗后 fullscreen 残留 hidden。
+  useEffect(() => {
+    if (open && fullscreen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [open, fullscreen]);
+
   // ── OnlyOffice 前置尝试层（2026-08-26-onlyoffice-preview / FR-01/02）──
   const [officeCfg, setOfficeCfg] = useState<OfficeConfigResp | null>(null);
   const [officeFailed, setOfficeFailed] = useState(false);
@@ -198,6 +243,7 @@ export function FilePreviewModal({ target, open, onClose }: FilePreviewModalProp
             onDownload={handleDownload}
             officeConfig={{ ds_url: officeCfg.ds_url, config: officeCfg.config }}
             onFallback={() => setOfficeFailed(true)}
+            fill={fullscreen}
           />
         );
       }
@@ -257,6 +303,7 @@ export function FilePreviewModal({ target, open, onClose }: FilePreviewModalProp
         url={url}
         meta={target.meta}
         onDownload={handleDownload}
+        fill={fullscreen}
       />
     );
   };
@@ -270,8 +317,36 @@ export function FilePreviewModal({ target, open, onClose }: FilePreviewModalProp
       open={open}
       onCancel={onClose}
       footer={null}
-      width="min(960px, 94vw)"
-      styles={{ body: { padding: 0 } }}
+      width={fullscreen ? "100vw" : "min(960px, 94vw)"}
+      // 全屏需一并覆盖 .ant-modal 根默认的 top:100 与 max-width: calc(100vw-32px)
+      // （antd v6 中 width 挂根节点 style，但被默认 max-width 截窄）。普通态不传 style。
+      style={fullscreen ? { top: 0, maxWidth: "100vw" } : undefined}
+      styles={
+        fullscreen
+          ? {
+              // container = 可见白盒（antd v6 语义键）：撑满视口、圆角清零，
+              // flex 纵向布局让 body 拿到剩余高度（header 自然高）。
+              container: {
+                height: "100vh",
+                borderRadius: 0,
+                padding: 0,
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+              },
+              // body 纵向 flex-1：工具栏自然高 + 预览区 flex-1 撑满剩余（R-02 单滚动）。
+              body: {
+                padding: 0,
+                flex: 1,
+                minHeight: 0,
+                display: "flex",
+                flexDirection: "column",
+                overflow: "hidden",
+              },
+            }
+          : // 普通态与现状完全一致（零回归）。
+            { body: { padding: 0 } }
+      }
       title={
         <div className="flex items-center gap-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
@@ -287,6 +362,17 @@ export function FilePreviewModal({ target, open, onClose }: FilePreviewModalProp
       }
     >
       <div className="flex items-center justify-end gap-2 border-b border-border px-4 py-2">
+        {/* 全屏切换（D-004@v1 CSS 伪全屏）：唯一退出全屏入口——Esc 走 antd 默认
+            直接关窗不拦截（D-008），故不注册任何 keydown 监听。置于下载按钮左侧。 */}
+        <button
+          type="button"
+          onClick={() => setFullscreen((v) => !v)}
+          className="flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-slate-600 hover:bg-slate-50"
+          aria-label={fullscreen ? "退出全屏" : "全屏"}
+        >
+          {fullscreen ? <CompressOutlined /> : <ExpandOutlined />}
+          {fullscreen ? "退出全屏" : "全屏"}
+        </button>
         <button
           type="button"
           onClick={handleDownload}
@@ -297,7 +383,11 @@ export function FilePreviewModal({ target, open, onClose }: FilePreviewModalProp
           下载
         </button>
       </div>
-      <div className="max-h-[calc(100vh-220px)] overflow-auto">{renderBody()}</div>
+      {/* 普通态维持 max-h-[calc(100vh-220px)] 不变；全屏态改 flex-1 撑满
+          （container/body 已是纵向 flex，min-h-0 防内容撑破）。 */}
+      <div className={fullscreen ? "min-h-0 flex-1 overflow-auto" : "max-h-[calc(100vh-220px)] overflow-auto"}>
+        {renderBody()}
+      </div>
     </Modal>
   );
 }

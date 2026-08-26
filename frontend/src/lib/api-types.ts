@@ -1506,6 +1506,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/files/raw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Change File Raw
+         * @description 读变更文件原始字节（2026-08-26-file-fullscreen-preview task-01 / FR-04）。
+         *
+         *     供前端构造 Blob 全屏预览镜像目录里的图片/文档（D-001）：Content-Type 由
+         *     service 按扩展名推断（未知回 application/octet-stream）；错误语义——穿越/不
+         *     存在 404、超 50MB 413 均在 service 层收口。权限与 files/content 一致
+         *     （CHANGE_READ）。Content-Disposition 用 inline（浏览器内联展示而非下载），
+         *     RFC 5987 ``filename*`` 写法对齐 explorer/router.py download 端点（ASCII
+         *     回退 + quote 编码原名）。
+         */
+        get: operations["get_change_file_raw_api_workspaces__workspace_id__changes__change_id__files_raw_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/changes/{change_id}/files/pending": {
         parameters: {
             query?: never;
@@ -23038,6 +23065,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeFileWriteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_change_file_raw_api_workspaces__workspace_id__changes__change_id__files_raw_get: {
+        parameters: {
+            query: {
+                /** @description 相对变更目录的文件路径 */
+                path: string;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

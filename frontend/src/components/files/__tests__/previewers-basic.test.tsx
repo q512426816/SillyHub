@@ -4,13 +4,26 @@
  * jsdom 无 createObjectURL，需 mock；antd Image 在 jsdom 下部分功能受限，仅测渲染结构。
  */
 
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+
+// jsdom Blob 缺 text()，补 polyfill（同 markdown-previewer.test.tsx 既有范式）
+if (typeof Blob !== "undefined" && !Blob.prototype.text) {
+  Blob.prototype.text = function () {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsText(this);
+    });
+  };
+}
 
 import {
   ImagePreviewer,
   PdfPreviewer,
   FallbackPreviewer,
+  HtmlPreviewer,
 } from "../previewers";
 
 const mockBlob = new Blob(["test"], { type: "image/png" });
@@ -66,5 +79,91 @@ describe("FallbackPreviewer", () => {
   it("显示文件大小", () => {
     render(<FallbackPreviewer blob={mockBlob} url={mockUrl} meta={mockMeta} />);
     expect(screen.getByText("1.0 KB")).toBeInTheDocument();
+  });
+});
+
+describe("HtmlPreviewer（2026-08-26-file-fullscreen-preview）", () => {
+  const htmlBlob = new Blob(["<h1>原型标题</h1>"], { type: "text/html" });
+  const htmlMeta = { name: "proto.html", mime: "text/html", size: 20 };
+
+  it("读取期间先渲染 loading 态（iframe 未挂载）", () => {
+    render(<HtmlPreviewer blob={htmlBlob} url={mockUrl} meta={htmlMeta} />);
+    expect(screen.getByText(/正在读取 HTML/)).toBeInTheDocument();
+    expect(document.querySelector("iframe")).not.toBeInTheDocument();
+  });
+
+  it("blob 文本读出后经 iframe srcDoc 渲染，sandbox 不含 allow-same-origin", async () => {
+    const { container } = render(
+      <HtmlPreviewer blob={htmlBlob} url={mockUrl} meta={htmlMeta} />,
+    );
+    const iframe = await waitFor(() => {
+      const el = document.querySelector("iframe");
+      expect(el).toBeInTheDocument();
+      return el as HTMLIFrameElement;
+    });
+    expect(iframe.getAttribute("srcdoc")).toBe("<h1>原型标题</h1>");
+    expect(iframe.getAttribute("sandbox")).toBe("allow-scripts allow-popups");
+    expect(iframe.getAttribute("sandbox")).not.toContain("allow-same-origin");
+    expect(iframe.title).toBe("proto.html 渲染预览");
+    // fill 缺省：固定视口高（与 PdfPreviewer 非 fill 行为一致）
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toContain("h-[70vh]");
+  });
+});
+
+describe("fill 透传（2026-08-26-file-fullscreen-preview）", () => {
+  it("PdfPreviewer fill=true：根容器 h-full 替代 h-[70vh]", () => {
+    const { container } = render(
+      <PdfPreviewer blob={mockBlob} url={mockUrl} meta={mockMeta} fill />,
+    );
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toContain("h-full");
+    expect(root.className).not.toContain("h-[70vh]");
+  });
+
+  it("PdfPreviewer fill 缺省：维持 h-[70vh] 不含 h-full（零回归）", () => {
+    const { container } = render(
+      <PdfPreviewer blob={mockBlob} url={mockUrl} meta={mockMeta} />,
+    );
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toContain("h-[70vh]");
+    expect(root.className).not.toContain("h-full");
+  });
+
+  it("ImagePreviewer fill=true：容器 h-full、img max-h-full", () => {
+    const { container } = render(
+      <ImagePreviewer blob={mockBlob} url={mockUrl} meta={mockMeta} fill />,
+    );
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toContain("h-full");
+    const img = container.querySelector("img");
+    expect(img?.className).toContain("max-h-full");
+    expect(img?.className).not.toContain("max-h-[560px]");
+  });
+
+  it("ImagePreviewer fill 缺省：img 维持 max-h-[560px] 不含 max-h-full（零回归）", () => {
+    const { container } = render(
+      <ImagePreviewer blob={mockBlob} url={mockUrl} meta={mockMeta} />,
+    );
+    const img = container.querySelector("img");
+    expect(img?.className).toContain("max-h-[560px]");
+    expect(img?.className).not.toContain("max-h-full");
+  });
+
+  it("HtmlPreviewer fill=true：根容器 h-full", async () => {
+    const { container } = render(
+      <HtmlPreviewer
+        blob={new Blob(["<p>x</p>"], { type: "text/html" })}
+        url={mockUrl}
+        meta={{ name: "a.html", mime: "text/html", size: 1 }}
+        fill
+      />,
+    );
+    await waitFor(() => {
+      expect(document.querySelector("iframe")).toBeInTheDocument();
+    });
+    const root = container.firstElementChild as HTMLElement;
+    expect(root.className).toContain("h-full");
+    expect(root.className).not.toContain("h-[70vh]");
   });
 });

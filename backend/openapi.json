@@ -3861,6 +3861,69 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/changes/{change_id}/files/raw": {
+      "get": {
+        "tags": [
+          "change"
+        ],
+        "summary": "Get Change File Raw",
+        "description": "读变更文件原始字节（2026-08-26-file-fullscreen-preview task-01 / FR-04）。\n\n供前端构造 Blob 全屏预览镜像目录里的图片/文档（D-001）：Content-Type 由\nservice 按扩展名推断（未知回 application/octet-stream）；错误语义——穿越/不\n存在 404、超 50MB 413 均在 service 层收口。权限与 files/content 一致\n（CHANGE_READ）。Content-Disposition 用 inline（浏览器内联展示而非下载），\nRFC 5987 ``filename*`` 写法对齐 explorer/router.py download 端点（ASCII\n回退 + quote 编码原名）。",
+        "operationId": "get_change_file_raw_api_workspaces__workspace_id__changes__change_id__files_raw_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "change_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Change Id"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "相对变更目录的文件路径",
+              "title": "Path"
+            },
+            "description": "相对变更目录的文件路径"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/changes/{change_id}/files/pending": {
       "get": {
         "tags": [

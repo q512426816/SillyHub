@@ -25,6 +25,9 @@ quicklog 双源合并查询（平台上行条目 × 文件条目）也在本模�
   rename 检测仅全量模式（见关键逻辑）。
 - 文件子域：`GET /{change_id}/files`（变更文件树）、
   `GET|PUT /{change_id}/files/content`（读/写文件内容）、
+  `GET /{change_id}/files/raw`（二进制原字节流，2026-08-26-file-fullscreen-preview：
+  StreamingResponse + guess_type Content-Type + inline RFC5987 filename*，CHANGE_READ，
+  守卫与 content 端点共用 `_resolve_change_file`，50MB 上限 413）、
   `GET /{change_id}/files/pending`（待同步文件）。
 - 会话/执行面：`GET /{change_id}/sessions`（绑定会话列表）、
   `GET /{change_id}/agent-status`（当前执行 agent 状态）、

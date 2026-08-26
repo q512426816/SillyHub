@@ -10,12 +10,14 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
+import mimetypes
 import os
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from fastapi import HTTPException
 from sqlalchemy import func, or_, select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,6 +55,11 @@ from app.modules.workspace.service import WorkspaceService
 log = get_logger(__name__)
 
 MAX_CONTENT_BYTES = 1_000_000  # 1 MB
+
+# 2026-08-26-file-fullscreen-preview task-01（FR-04 / D-006@v1）：raw 二进制读取端点
+# 的单文件大小上限（50MB，图片/文档全屏预览足够）。独立于文本端点的
+# MAX_CONTENT_BYTES（1MB 截断语义），不复用不互改。
+MAX_RAW_BYTES = 50 * 1024 * 1024  # 50 MB
 
 # 2026-08-19-spec-mirror-tombstone-sync FR-03：占位行保护时效窗。progress 上行
 # 超过该天数仍无文档的占位行不再被保护，全量 reparse 正常删除其 changes 行。
@@ -342,6 +349,25 @@ class ChangeService:
         return rel_path, content, True
 
     @staticmethod
+    def _read_file_raw_sync(full_path: Path, rel_path: str) -> bytes:
+        """``read_file_raw`` 同步读段（移出事件循环，照 ``_read_file_sync`` 范式）。
+
+        不存在抛 ``ChangeDocNotFound``（与穿越同款 404 语义）；先 stat 查大小再读，
+        超 ``MAX_RAW_BYTES``（50MB）抛 ``HTTPException(413)``，避免把超限文件整读进内存。
+        """
+        if not full_path.is_file():
+            raise ChangeDocNotFound(
+                "文件不存在。",
+                details={"path": rel_path},
+            )
+        if full_path.stat().st_size > MAX_RAW_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"文件超过大小限制（{MAX_RAW_BYTES // (1024 * 1024)}MB），无法预览。",
+            )
+        return full_path.read_bytes()
+
+    @staticmethod
     def _write_text_sync(full_path: Path, content: str) -> None:
         """写 UTF-8 文本（Wave C 续：``write_file`` / ``sync_documents`` 共用，移出事件循环）。"""
         full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -359,16 +385,18 @@ class ChangeService:
         change_dir = await self._resolve_change_dir(workspace, change)
         return await asyncio.to_thread(self._list_files_sync, change_dir)
 
-    async def read_file(
+    async def _resolve_change_file(
         self,
         workspace_id: uuid.UUID,
         change_id: uuid.UUID,
         rel_path: str,
-    ) -> tuple[str, str | None, bool]:
-        """按相对 path 读单文件（task-04 / FR-04 / D-004）。
+    ) -> Path:
+        """解析 ``rel_path`` 在变更目录内的绝对路径（read_file / read_file_raw 共用）。
 
-        路径穿越守卫：resolve 后必须落在变更目录内（覆盖 ../ 、绝对路径、符号链接）。
-        返回 ``(path, content, exists)``，content > MAX_CONTENT_BYTES 截断。
+        2026-08-26-file-fullscreen-preview task-01：从 read_file 原地提取的路径守卫，
+        语义零变更——get change → workspace → _resolve_change_dir → 拼路径 →
+        ``relative_to`` 穿越守卫（覆盖 ../ 、绝对路径、符号链接），越界抛
+        ``ChangeDocNotFound``（404，与不存在同款守卫语义）。
         """
         change = await self.get(workspace_id, change_id)
         workspace = await self._workspace_service.get(workspace_id)
@@ -381,8 +409,40 @@ class ChangeService:
                 "非法路径：不允许访问变更目录之外的文件。",
                 details={"path": rel_path},
             ) from None
+        return full_path
+
+    async def read_file(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        rel_path: str,
+    ) -> tuple[str, str | None, bool]:
+        """按相对 path 读单文件（task-04 / FR-04 / D-004）。
+
+        路径穿越守卫：resolve 后必须落在变更目录内（覆盖 ../ 、绝对路径、符号链接）。
+        返回 ``(path, content, exists)``，content > MAX_CONTENT_BYTES 截断。
+        """
+        full_path = await self._resolve_change_file(workspace_id, change_id, rel_path)
 
         return await asyncio.to_thread(self._read_file_sync, full_path, rel_path)
+
+    async def read_file_raw(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        rel_path: str,
+    ) -> tuple[bytes, str]:
+        """按相对 path 读文件原始字节（task-01 / FR-04 / D-001/006@v1）。
+
+        供前端构造 Blob 全屏预览图片/文档：返回 ``(文件字节, media_type)``，
+        media_type 由 ``mimetypes.guess_type`` 按扩展名推断（未知回
+        ``application/octet-stream``）。穿越/不存在抛 ``ChangeDocNotFound``（404），
+        超过 ``MAX_RAW_BYTES``（50MB）抛 ``HTTPException(413)``。
+        """
+        full_path = await self._resolve_change_file(workspace_id, change_id, rel_path)
+        data = await asyncio.to_thread(self._read_file_raw_sync, full_path, rel_path)
+        media_type = mimetypes.guess_type(rel_path)[0] or "application/octet-stream"
+        return data, media_type
 
     async def write_file(
         self,

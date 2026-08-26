@@ -1,4 +1,6 @@
-"""Tests for change file tree endpoints (task-13/14, 2026-07-02-change-detail-file-tree-editor)."""
+"""Tests for change file tree endpoints (task-13/14, 2026-07-02-change-detail-file-tree-editor).
+
+含 raw 二进制端点用例（2026-08-26-file-fullscreen-preview task-01 / FR-04）。"""
 
 from __future__ import annotations
 
@@ -143,6 +145,129 @@ async def test_pending_files_empty_server_local(
     )
     assert resp.status_code == 200
     assert resp.json()["items"] == []
+
+
+# ── raw 二进制端点（2026-08-26-file-fullscreen-preview task-01 / FR-04）────
+
+
+async def _change_dir_of(
+    client, workspace_with_changes: dict, auth_headers: dict[str, str]
+) -> Path:
+    """取 fixture 里首个 change 的镜像目录（spec_root + change.path，对齐 _resolve_change_dir）。"""
+    ws_id = workspace_with_changes["ws_id"]
+    detail = await client.get(
+        f"/api/workspaces/{ws_id}/changes/{workspace_with_changes['change_id']}",
+        headers=auth_headers,
+    )
+    assert detail.status_code == 200, detail.text
+    return Path(workspace_with_changes["spec_root"]) / detail.json()["path"]
+
+
+async def test_read_file_raw_png(
+    client, workspace_with_changes: dict, auth_headers: dict[str, str]
+) -> None:
+    """正常图片：200 + Content-Type=image/png + body 字节一致 + inline filename* 头。"""
+    ws_id = workspace_with_changes["ws_id"]
+    change_id = workspace_with_changes["change_id"]
+    change_dir = await _change_dir_of(client, workspace_with_changes, auth_headers)
+    # PNG 魔数 + IHDR 片段（Content-Type 按扩展名推断，不要求完整合法图片）
+    png_bytes = b"\x89PNG\r\n\x1a\nIHDR" + bytes(16)
+    (change_dir / "shot.png").write_bytes(png_bytes)
+
+    resp = await client.get(
+        f"/api/workspaces/{ws_id}/changes/{change_id}/files/raw",
+        params={"path": "shot.png"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"] == "image/png"
+    assert resp.content == png_bytes
+    assert resp.headers["content-length"] == str(len(png_bytes))
+    disposition = resp.headers["content-disposition"]
+    assert disposition.startswith("inline;")
+    assert "filename*=UTF-8''shot.png" in disposition
+
+
+async def test_read_file_raw_traversal_rejected(
+    client, workspace_with_changes: dict, auth_headers: dict[str, str]
+) -> None:
+    """路径穿越（../ 与绝对路径）→ 404（与 files/content 同款守卫语义）。"""
+    ws_id = workspace_with_changes["ws_id"]
+    change_id = workspace_with_changes["change_id"]
+    for evil in ["../../../etc/passwd", "/etc/passwd"]:
+        resp = await client.get(
+            f"/api/workspaces/{ws_id}/changes/{change_id}/files/raw",
+            params={"path": evil},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 404, f"{evil} should be rejected"
+
+
+async def test_read_file_raw_not_found(
+    client, workspace_with_changes: dict, auth_headers: dict[str, str]
+) -> None:
+    """文件不存在 → 404。"""
+    ws_id = workspace_with_changes["ws_id"]
+    change_id = workspace_with_changes["change_id"]
+    resp = await client.get(
+        f"/api/workspaces/{ws_id}/changes/{change_id}/files/raw",
+        params={"path": "no-such-file.bin"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 404, resp.text
+
+
+async def test_read_file_raw_too_large(
+    client,
+    workspace_with_changes: dict,
+    auth_headers: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """超过 MAX_RAW_BYTES → 413（monkeypatch 缩小上限，避免真写 50MB 文件）。"""
+    from app.modules.change import service as change_service_module
+
+    monkeypatch.setattr(change_service_module, "MAX_RAW_BYTES", 8)
+    change_dir = await _change_dir_of(client, workspace_with_changes, auth_headers)
+    (change_dir / "big.bin").write_bytes(b"x" * 16)
+
+    resp = await client.get(
+        f"/api/workspaces/{workspace_with_changes['ws_id']}/changes"
+        f"/{workspace_with_changes['change_id']}/files/raw",
+        params={"path": "big.bin"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 413, resp.text
+
+
+async def test_read_file_raw_forbidden(client, workspace_with_changes: dict, db_session) -> None:
+    """无 CHANGE_READ 权限（非管理员且无任何授权）→ 403（require_permission 拦截）。"""
+    from app.core.config import get_settings
+    from app.core.security import create_access_token
+    from app.modules.auth.model import User
+
+    stranger = User(
+        id=uuid.uuid4(),
+        email="raw-stranger@example.com",
+        password_hash="x",
+        display_name="S",
+        status="active",
+        is_platform_admin=False,
+    )
+    db_session.add(stranger)
+    await db_session.commit()
+    token, _ = create_access_token(
+        user_id=stranger.id,
+        email=stranger.email,
+        is_admin=False,
+        settings=get_settings(),
+    )
+    resp = await client.get(
+        f"/api/workspaces/{workspace_with_changes['ws_id']}/changes"
+        f"/{workspace_with_changes['change_id']}/files/raw",
+        params={"path": "proposal.md"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert resp.status_code == 403, resp.text
 
 
 # ── outbox 合并 + 离线续传（task-14 / D-001/002）service 级 ──────────────

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import io
 import uuid
 from datetime import datetime
+from pathlib import PurePosixPath
 from typing import Annotated, Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Query, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -453,6 +457,41 @@ async def get_change_file_content(
     service = ChangeService(session)
     rel, content, exists = await service.read_file(workspace_id, change_id, path)
     return ChangeFileContent(path=rel, content=content, exists=exists)
+
+
+@router.get("/changes/{change_id}/files/raw")
+async def get_change_file_raw(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+    path: str = Query(..., description="相对变更目录的文件路径"),
+) -> StreamingResponse:
+    """读变更文件原始字节（2026-08-26-file-fullscreen-preview task-01 / FR-04）。
+
+    供前端构造 Blob 全屏预览镜像目录里的图片/文档（D-001）：Content-Type 由
+    service 按扩展名推断（未知回 application/octet-stream）；错误语义——穿越/不
+    存在 404、超 50MB 413 均在 service 层收口。权限与 files/content 一致
+    （CHANGE_READ）。Content-Disposition 用 inline（浏览器内联展示而非下载），
+    RFC 5987 ``filename*`` 写法对齐 explorer/router.py download 端点（ASCII
+    回退 + quote 编码原名）。
+    """
+    service = ChangeService(session)
+    data, media_type = await service.read_file_raw(workspace_id, change_id, path)
+    # RFC 5987：filename* 承载原始文件名，filename 给 ASCII 回退（防头注入去引号）。
+    name = PurePosixPath(path).name or "file"
+    ascii_name = name.encode("ascii", "ignore").decode() or "file"
+    ascii_name = ascii_name.replace('"', "").strip() or "file"
+    disposition = f"inline; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(name)}"
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=media_type,
+        headers={
+            "Content-Disposition": disposition,
+            # Content-Length 必须等于实际 body 字节数（body 就是完整文件字节）
+            "Content-Length": str(len(data)),
+        },
+    )
 
 
 @router.post(

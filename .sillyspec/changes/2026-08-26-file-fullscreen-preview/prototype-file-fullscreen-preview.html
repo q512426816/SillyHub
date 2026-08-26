@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>SillyHub · 文件全屏预览交互原型（评审稿）</title>
+<style>
+/* ============================================================
+   SillyHub AI-Native 设计 Token（取自 2026-08-20-frontend-ai-native-style 单一源）
+   ============================================================ */
+:root {
+  --primary: #7C3AED; --primary-hover: #6D28D9;
+  --primary-soft: #EDE9FE; --primary-soft-2: #F5F3FF;
+  --secondary: #A78BFA; --accent: #0891B2; --accent-soft: #CFFAFE; --accent-text: #0E7490;
+  --brand-gradient: linear-gradient(135deg, #7C3AED 0%, #0891B2 100%);
+  --bg: #FAF5FF; --fg: #1E1B4B; --card: #FFFFFF;
+  --muted: #ECEEF9; --muted-fg: #475569; --faint: #94A3B8;
+  --border: #DDD6FE; --border-weak: #EEE9F8;
+  --radius-sm: 6px; --radius-md: 8px; --radius-lg: 12px; --radius-xl: 16px;
+  --shadow-md: 0 4px 14px rgba(30, 27, 75, .08);
+  --shadow-primary: 0 4px 14px rgba(124, 58, 237, .32);
+  --shadow-lg: 0 16px 40px rgba(109, 40, 217, .16);
+  --dur: 200ms; --ease: cubic-bezier(.2, 0, 0, 1);
+  --font-sans: Inter, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); background: var(--bg); color: var(--fg); min-height: 100vh; }
+button { font-family: inherit; cursor: pointer; }
+
+/* ── 演示页骨架 ── */
+.page { max-width: 1180px; margin: 0 auto; padding: 28px 24px 80px; }
+.demo-header { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+.brand-mark { width: 34px; height: 34px; border-radius: 10px; background: var(--brand-gradient); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 15px; font-weight: 800; box-shadow: var(--shadow-primary); }
+h1 { font-size: 19px; font-weight: 800; }
+.sub { color: var(--muted-fg); font-size: 13px; margin-bottom: 22px; }
+.scenario-tabs { display: flex; gap: 8px; margin-bottom: 18px; flex-wrap: wrap; }
+.tab { border: 1px solid var(--border); background: var(--card); color: var(--muted-fg); border-radius: 999px; padding: 7px 16px; font-size: 13px; font-weight: 600; transition: all var(--dur) var(--ease); }
+.tab.active { background: var(--primary); border-color: var(--primary); color: #fff; box-shadow: var(--shadow-primary); }
+.hint { background: var(--accent-soft); color: var(--accent-text); border-radius: var(--radius-md); padding: 10px 14px; font-size: 12.5px; line-height: 1.7; margin-bottom: 18px; }
+.hint b { font-weight: 700; }
+
+/* ── 场景 1：应用背景（变更详情页示意，垫底） ── */
+.app-bg { border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--card); box-shadow: var(--shadow-md); overflow: hidden; }
+.app-topbar { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--border-weak); font-size: 12.5px; color: var(--muted-fg); }
+.app-body { display: grid; grid-template-columns: 250px 1fr; min-height: 420px; }
+.tree-pane { border-right: 1px solid var(--border-weak); padding: 10px; font-size: 12.5px; }
+.tree-item { display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: var(--radius-sm); color: var(--muted-fg); }
+.tree-item.sel { background: var(--primary-soft); color: var(--primary); font-weight: 600; }
+.tree-item .ico { width: 15px; text-align: center; flex: none; }
+.file-stage { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.stage-toolbar { display: flex; align-items: center; gap: 10px; }
+.stage-path { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: var(--muted-fg); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn { border: 1px solid var(--border); background: var(--card); color: var(--fg); border-radius: var(--radius-md); padding: 6px 14px; font-size: 12.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; transition: all var(--dur) var(--ease); }
+.btn:hover { border-color: var(--secondary); color: var(--primary); }
+.btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+.btn.primary:hover { background: var(--primary-hover); }
+.btn.sm { padding: 4px 10px; font-size: 12px; }
+.nontext-card { flex: 1; display: flex; align-items: center; justify-content: center; gap: 24px; border: 1px dashed var(--border); border-radius: var(--radius-lg); padding: 26px; background: var(--primary-soft-2); }
+.nontext-thumb { width: 190px; height: 130px; border-radius: var(--radius-md); object-fit: cover; border: 1px solid var(--border); background: #fff; box-shadow: var(--shadow-md); cursor: zoom-in; }
+.nontext-info { display: flex; flex-direction: column; gap: 8px; max-width: 300px; }
+.nontext-info .nm { font-weight: 700; font-size: 14px; }
+.nontext-info .mt { font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--faint); }
+.nontext-info p { font-size: 12.5px; color: var(--muted-fg); line-height: 1.6; }
+
+/* ── 场景 2：workspace 文件浏览器示意 ── */
+.exp-body { display: grid; grid-template-columns: 230px 1fr; min-height: 380px; }
+.exp-preview { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.exp-img-wrap { flex: 1; display: flex; align-items: center; justify-content: center; border: 1px solid var(--border-weak); border-radius: var(--radius-lg); background: repeating-conic-gradient(#f4effc 0% 25%, #ffffff 0% 50%) 50% / 22px 22px; padding: 12px; }
+.exp-img { max-height: 250px; max-width: 100%; border-radius: var(--radius-sm); box-shadow: var(--shadow-md); cursor: zoom-in; transition: transform var(--dur) var(--ease); }
+.exp-img:hover { transform: scale(1.02); }
+.exp-tip { font-size: 12px; color: var(--faint); text-align: center; }
+
+/* ── 统一预览弹窗（普通态） ── */
+.modal-mask { position: fixed; inset: 0; background: rgba(30, 27, 75, .45); backdrop-filter: blur(2px); display: none; align-items: flex-start; justify-content: center; z-index: 100; }
+.modal-mask.show { display: flex; }
+.fp-modal { background: var(--card); border-radius: var(--radius-xl); box-shadow: var(--shadow-lg); width: min(860px, 94vw); margin-top: 6vh; display: flex; flex-direction: column; overflow: hidden; animation: pop var(--dur) var(--ease); }
+@keyframes pop { from { transform: translateY(14px) scale(.98); opacity: 0; } }
+.fp-head { display: flex; align-items: center; gap: 12px; padding: 14px 18px 10px; }
+.fp-ico { width: 36px; height: 36px; border-radius: 10px; background: var(--primary-soft); color: var(--primary); display: flex; align-items: center; justify-content: center; font-size: 16px; flex: none; }
+.fp-title { flex: 1; min-width: 0; }
+.fp-title .nm { font-size: 14px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-title .mt { font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: var(--faint); }
+.fp-tools { display: flex; align-items: center; gap: 8px; padding: 0 18px 10px; border-bottom: 1px solid var(--border-weak); justify-content: flex-end; }
+.tool-btn { border: 1px solid var(--border); background: var(--card); color: var(--muted-fg); border-radius: var(--radius-sm); padding: 5px 11px; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; transition: all var(--dur) var(--ease); }
+.tool-btn:hover { border-color: var(--secondary); color: var(--primary); }
+.tool-btn.brand { background: var(--primary-soft); border-color: transparent; color: var(--primary); }
+.tool-btn.brand:hover { background: #e2d9fd; }
+.fp-body { padding: 16px; overflow: auto; max-height: calc(100vh - 320px); display: flex; align-items: center; justify-content: center; background: repeating-conic-gradient(#f6f2fd 0% 25%, #ffffff 0% 50%) 50% / 26px 26px; }
+.fp-body img { max-width: 100%; max-height: 52vh; border-radius: var(--radius-md); box-shadow: var(--shadow-md); cursor: zoom-in; }
+
+/* ── 全屏态：同一弹窗撑满视口 ── */
+.modal-mask.fs .fp-modal { width: 100vw; margin-top: 0; border-radius: 0; height: 100vh; }
+.modal-mask.fs .fp-body { max-height: none; flex: 1; }
+.modal-mask.fs .fp-body img { max-height: none; height: 88%; }
+body.locked { overflow: hidden; }
+
+/* ── 图片 lightbox（antd Image 内建能力示意：放大/缩小/旋转） ── */
+.lightbox { position: fixed; inset: 0; background: rgba(15, 12, 40, .88); z-index: 200; display: none; align-items: center; justify-content: center; flex-direction: column; gap: 18px; }
+.lightbox.show { display: flex; }
+.lightbox img { max-width: 86vw; max-height: 76vh; border-radius: var(--radius-md); transition: transform var(--dur) var(--ease); box-shadow: 0 24px 70px rgba(0,0,0,.5); }
+.lb-ops { display: flex; gap: 10px; }
+.lb-op { width: 38px; height: 38px; border-radius: 50%; border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.08); color: #fff; font-size: 16px; display: flex; align-items: center; justify-content: center; transition: all var(--dur) var(--ease); }
+.lb-op:hover { background: rgba(255,255,255,.2); }
+.lb-zoom-val { color: rgba(255,255,255,.75); font-size: 12.5px; width: 48px; text-align: center; font-family: ui-monospace, Consolas, monospace; }
+.lb-close { position: absolute; top: 22px; right: 26px; color: rgba(255,255,255,.8); font-size: 22px; background: none; border: none; }
+.lb-name { color: rgba(255,255,255,.6); font-size: 12px; }
+
+/* ── 注释徽标 ── */
+.note { position: relative; }
+.note::after { content: attr(data-note); position: absolute; top: -9px; right: -9px; background: var(--accent); color: #fff; font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; box-shadow: var(--shadow-md); }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 14px 0 4px; font-size: 12px; color: var(--muted-fg); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="demo-header">
+    <div class="brand-mark">S</div>
+    <h1>文件全屏预览 · 交互原型</h1>
+  </div>
+  <p class="sub">2026-08-26-file-fullscreen-preview ｜ 统一预览弹窗升级为预览中心：全屏切换 + 图片放大缩小（antd Image 内建能力）</p>
+
+  <div class="scenario-tabs">
+    <button class="tab active" data-scene="s1">① 变更文件 · 非文本预览 + 全屏入口</button>
+    <button class="tab" data-scene="s2">② 工作区文件浏览器 · 图片缩放</button>
+  </div>
+
+  <div class="hint">
+    <b>怎么玩：</b>场景① 选中图片文件 → 右侧出现图片卡片（缩略图可点击放大）→ 点「全屏预览」直接以全屏态打开统一预览窗 → 弹窗内点右上角 ⛶ / ⛟ 可在普通 ⇄ 全屏间切换 → 点图片本体体验 antd Image 的放大/缩小/旋转。场景② 为文件浏览器同款交互。蓝色小徽标 = 本次新增。
+  </div>
+
+  <div class="legend">
+    <span><span class="dot"></span>新增交互</span>
+    <span>弹窗样式复用现有 FilePreviewModal（AI-Native token）</span>
+    <span>图片 lightbox 行为 = antd Image 内建，零新依赖</span>
+  </div>
+
+  <!-- 场景 1：变更详情页（示意背景） -->
+  <div class="app-bg" id="s1">
+    <div class="app-topbar">工作区 / 变更 2026-08-26-file-fullscreen-preview / 变更文件</div>
+    <div class="app-body">
+      <div class="tree-pane">
+        <div class="tree-item"><span class="ico">📁</span>design</div>
+        <div class="tree-item"><span class="ico">📁</span>tasks</div>
+        <div class="tree-item"><span class="ico">📄</span>proposal.md</div>
+        <div class="tree-item sel"><span class="ico">🖼️</span>prototype.png <span style="font-size:10px;color:var(--faint)">只读</span></div>
+        <div class="tree-item"><span class="ico">📄</span>requirements.md</div>
+      </div>
+      <div class="file-stage">
+        <div class="stage-toolbar">
+          <span class="stage-path">prototype.png</span>
+          <button class="btn primary sm note" data-note="新增" onclick="openPreview(true)">⛶ 全屏预览</button>
+        </div>
+        <div class="nontext-card">
+          <img class="nontext-thumb note" data-note="新增" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='380' height='260'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%237C3AED'/%3E%3Cstop offset='1' stop-color='%230891B2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='380' height='260' fill='url(%23g)' rx='0'/%3E%3Ccircle cx='315' cy='52' r='26' fill='rgba(255,255,255,.35)'/%3E%3Crect x='36' y='150' width='220' height='14' rx='7' fill='rgba(255,255,255,.5)'/%3E%3Crect x='36' y='178' width='150' height='14' rx='7' fill='rgba(255,255,255,.32)'/%3E%3Ctext x='36' y='88' font-family='sans-serif' font-size='30' font-weight='800' fill='white'%3EPrototype%3C/text%3E%3C/svg%3E" alt="原型图" onclick="openLightbox(this.src)">
+          <div class="nontext-info">
+            <div class="nm">prototype.png</div>
+            <div class="mt">PNG · 380 KB · 1920×1310</div>
+            <p>非文本文件不再显示「暂不支持预览」：图片直接内联展示（点击可放大），其他类型（PDF 等）引导用全屏预览打开。</p>
+            <button class="btn primary sm" onclick="openPreview(true)">⛶ 全屏预览</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 场景 2：workspace 文件浏览器（示意背景） -->
+  <div class="app-bg" id="s2" style="display:none; margin-top:16px;">
+    <div class="app-topbar">工作区 / 文件浏览器 / assets</div>
+    <div class="exp-body">
+      <div class="tree-pane">
+        <div class="tree-item"><span class="ico">📁</span>docs</div>
+        <div class="tree-item sel"><span class="ico">📁</span>assets</div>
+        <div class="tree-item"><span class="ico">🖼️</span>banner.png</div>
+        <div class="tree-item"><span class="ico">📄</span>report.pdf</div>
+      </div>
+      <div class="exp-preview">
+        <div class="stage-toolbar">
+          <span class="stage-path">assets/banner.png</span>
+          <button class="btn primary sm note" data-note="新增" onclick="openPreview(true)">⛶ 全屏预览</button>
+        </div>
+        <div class="exp-img-wrap">
+          <img class="exp-img note" data-note="改造" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='520' height='300'%3E%3Cdefs%3E%3ClinearGradient id='g2' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%230891B2'/%3E%3Cstop offset='1' stop-color='%237C3AED'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='520' height='300' fill='url(%23g2)'/%3E%3Ccircle cx='90' cy='240' r='40' fill='rgba(255,255,255,.25)'/%3E%3Ccircle cx='430' cy='60' r='30' fill='rgba(255,255,255,.35)'/%3E%3Ctext x='180' y='160' font-family='sans-serif' font-size='34' font-weight='800' fill='white'%3Ebanner.png%3C/text%3E%3C/svg%3E" alt="banner" onclick="openLightbox(this.src)">
+        </div>
+        <div class="exp-tip">原生 &lt;img&gt; 改为 antd Image：点击放大 / 滚轮缩放 / 旋转（内建 lightbox），窄区看不全时用右上「全屏预览」</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 统一预览弹窗（普通态 ⇄ 全屏态 同一组件） -->
+<div class="modal-mask" id="fpMask" onclick="if(event.target===this) closePreview()">
+  <div class="fp-modal" role="dialog" aria-label="文件预览">
+    <div class="fp-head">
+      <div class="fp-ico">🖼️</div>
+      <div class="fp-title">
+        <div class="nm" id="fpName">prototype.png</div>
+        <div class="mt">PNG · 380 KB</div>
+      </div>
+    </div>
+    <div class="fp-tools">
+      <button class="tool-btn brand note" data-note="新增" id="fsBtn" onclick="toggleFs()">⛶ 全屏</button>
+      <button class="tool-btn">⤓ 下载</button>
+    </div>
+    <div class="fp-body">
+      <img id="fpImg" src="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='800'%3E%3Cdefs%3E%3ClinearGradient id='g3' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%237C3AED'/%3E%3Cstop offset='1' stop-color='%230891B2'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='1200' height='800' fill='url(%23g3)'/%3E%3Ccircle cx='990' cy='160' r='80' fill='rgba(255,255,255,.3)'/%3E%3Crect x='110' y='470' width='700' height='40' rx='20' fill='rgba(255,255,255,.5)'/%3E%3Crect x='110' y='560' width='480' height='40' rx='20' fill='rgba(255,255,255,.32)'/%3E%3Ctext x='110' y='270' font-family='sans-serif' font-size='88' font-weight='800' fill='white'%3EFull Screen%3C/text%3E%3C/svg%3E" alt="预览大图" onclick="openLightbox(this.src)">
+    </div>
+  </div>
+</div>
+
+<!-- antd Image 内建 lightbox 行为示意（放大/缩小/旋转） -->
+<div class="lightbox" id="lightbox">
+  <button class="lb-close" onclick="closeLightbox()" aria-label="关闭">✕</button>
+  <img id="lbImg" src="" alt="放大查看">
+  <div class="lb-name">prototype.png</div>
+  <div class="lb-ops">
+    <button class="lb-op" onclick="lbZoom(-25)" aria-label="缩小">−</button>
+    <span class="lb-zoom-val" id="lbVal">100%</span>
+    <button class="lb-op" onclick="lbZoom(25)" aria-label="放大">＋</button>
+    <button class="lb-op" onclick="lbRotate()" aria-label="旋转">⟳</button>
+    <button class="lb-op" onclick="lbReset()" aria-label="重置">⟲</button>
+  </div>
+</div>
+
+<script>
+/* 场景切换 */
+document.querySelectorAll('.tab').forEach(function (t) {
+  t.addEventListener('click', function () {
+    document.querySelectorAll('.tab').forEach(function (x) { x.classList.remove('active'); });
+    t.classList.add('active');
+    document.getElementById('s1').style.display = t.dataset.scene === 's1' ? '' : 'none';
+    document.getElementById('s2').style.display = t.dataset.scene === 's2' ? '' : 'none';
+  });
+});
+
+/* 统一预览弹窗：open(defaultFullscreen) */
+function openPreview(fs) {
+  document.getElementById('fpMask').classList.add('show');
+  document.body.classList.add('locked');
+  setFs(!!fs);
+}
+function closePreview() {
+  document.getElementById('fpMask').classList.remove('show', 'fs');
+  document.body.classList.remove('locked');
+  document.getElementById('fsBtn').textContent = '⛶ 全屏';
+}
+function setFs(on) {
+  document.getElementById('fpMask').classList.toggle('fs', on);
+  document.getElementById('fsBtn').textContent = on ? '◵ 退出全屏' : '⛶ 全屏';
+}
+function toggleFs() { setFs(!document.getElementById('fpMask').classList.contains('fs')); }
+
+/* antd Image lightbox 示意 */
+var lbScale = 1, lbDeg = 0;
+function applyLb() {
+  document.getElementById('lbImg').style.transform = 'scale(' + lbScale + ') rotate(' + lbDeg + 'deg)';
+  document.getElementById('lbVal').textContent = Math.round(lbScale * 100) + '%';
+}
+function openLightbox(src) {
+  document.getElementById('lbImg').src = src;
+  lbScale = 1; lbDeg = 0; applyLb();
+  document.getElementById('lightbox').classList.add('show');
+}
+function closeLightbox() { document.getElementById('lightbox').classList.remove('show'); }
+function lbZoom(d) { lbScale = Math.min(8, Math.max(0.25, lbScale + d / 100)); applyLb(); }
+function lbRotate() { lbDeg += 90; applyLb(); }
+function lbReset() { lbScale = 1; lbDeg = 0; applyLb(); }
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') {
+    if (document.getElementById('lightbox').classList.contains('show')) { closeLightbox(); return; }
+    if (document.getElementById('fpMask').classList.contains('show')) {
+      if (document.getElementById('fpMask').classList.contains('fs')) { setFs(false); } else { closePreview(); }
+    }
+  }
+});
+</script>
+</body>
+</html>

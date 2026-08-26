@@ -17,7 +17,7 @@ import { DownloadOutlined } from "@ant-design/icons";
 import { formatFileSize } from "@/lib/file/utils";
 import type { PreviewerProps } from "./index";
 
-export function DocxPreviewer({ blob, meta, onDownload }: PreviewerProps) {
+export function DocxPreviewer({ blob, meta, onDownload, fill }: PreviewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
@@ -73,8 +73,9 @@ export function DocxPreviewer({ blob, meta, onDownload }: PreviewerProps) {
   }
 
   // 容器常驻（含 loading 态）——effect 的 ref 守卫依赖它在首帧就挂载。
+  // fill 态加 h-full 撑满全屏 body（min-h 保留作下限）。
   return (
-    <div className="relative min-h-[420px]">
+    <div className={fill ? "relative h-full min-h-[420px]" : "relative min-h-[420px]"}>
       <div
         ref={containerRef}
         className="docx-preview-container w-full bg-white p-6 text-slate-800"

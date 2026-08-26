@@ -1,4 +1,6 @@
-import { apiFetch } from "./api";
+import { ApiError, apiFetch, safeUUID } from "./api";
+import { ensureFreshAccessToken } from "@/lib/token-refresh";
+import { useSession } from "@/stores/session";
 
 // ── Types（对齐 backend change/schema.py file tree DTOs）──────────────
 
@@ -85,6 +87,44 @@ export function listPendingChangeFiles(workspaceId: string, changeId: string) {
   return apiFetch<PendingFileList>(
     `/api/workspaces/${workspaceId}/changes/${changeId}/files/pending`,
   );
+}
+
+/**
+ * 取变更文件原始字节（GET .../files/raw?path=）——裸 fetch 带 Bearer 头取
+ * ``Blob``，401 单飞刷新重试一次，失败抛 ``ApiError``（范式对齐 explorer.ts
+ * ``fetchDownload``：apiFetch 是 JSON 封装，不适用二进制流）。调用方按
+ * ``blob.type`` 分发渲染器（预览恒走 raw 端点，design D-009）。
+ */
+export async function fetchChangeFileRaw(
+  workspaceId: string,
+  changeId: string,
+  path: string,
+): Promise<Blob> {
+  const url =
+    `/api/workspaces/${workspaceId}/changes/${changeId}/files/raw` +
+    `?path=${encodeURIComponent(path)}`;
+  const doFetch = (token: string | null) =>
+    fetch(url, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
+
+  let token = useSession.getState().accessToken ?? null;
+  let resp = await doFetch(token);
+  if (resp.status === 401) {
+    // 单飞刷新（并发 401 由 token-refresh 模块级 inflight 保证只发一次）。
+    const fresh = await ensureFreshAccessToken();
+    if (fresh) {
+      token = fresh;
+      resp = await doFetch(token);
+    }
+  }
+  if (!resp.ok) {
+    throw new ApiError(resp.status, {
+      code: "raw_fetch_failed",
+      message: `文件拉取失败（HTTP ${resp.status}）`,
+      request_id: safeUUID(),
+      details: null,
+    });
+  }
+  return resp.blob();
 }
 
 // ── 文件树构造（task-09 / FR-09）──────────────────────────────────────

@@ -21,12 +21,15 @@ vi.mock("@/lib/api", () => ({
 }));
 
 // Mock 本地渲染器（断言降级目标）+ OnlyofficePreviewer（断言 DS 路径）。
+// 枚举式工厂须随桶文件新导出同步补齐（HtmlPreviewer，2026-08-26-file-fullscreen-preview
+// task-04 的 RENDERER_MAP 引用）——缺导出会让 mock 在模块作用域炸掉，整套件收集失败。
 vi.mock("../previewers", () => ({
   ImagePreviewer: () => <div data-testid="image-previewer" />,
   PdfPreviewer: () => <div data-testid="pdf-previewer" />,
   DocxPreviewer: () => <div data-testid="docx-previewer" />,
   XlsxPreviewer: () => <div data-testid="xlsx-previewer" />,
   MarkdownPreviewer: () => <div data-testid="markdown-previewer" />,
+  HtmlPreviewer: () => <div data-testid="html-previewer" />,
   FallbackPreviewer: () => <div data-testid="fallback-previewer" />,
 }));
 vi.mock("../previewers/onlyoffice-previewer", () => ({

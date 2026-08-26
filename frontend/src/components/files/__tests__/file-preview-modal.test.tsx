@@ -1,10 +1,11 @@
 /**
- * FilePreviewModal 单测：弹窗壳的 loading / error / 分发 / 下载路径。
+ * FilePreviewModal 单测：弹窗壳的 loading / error / 分发 / 下载路径 +
+ * 全屏态（2026-08-26-file-fullscreen-preview / FR-01/FR-02）。
  *
- * useObjectUrl 已 mock（直接控制状态），渲染器已 mock（断言分发）。
+ * useObjectUrl 已 mock（直接控制状态），渲染器已 mock（断言分发与 fill 透传）。
  */
 
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { FilePreviewModal, type FilePreviewTarget } from "../file-preview-modal";
@@ -15,13 +16,16 @@ vi.mock("../use-object-url", () => ({
   useObjectUrl: (fetcher: unknown) => mockUseObjectUrl(fetcher),
 }));
 
-// Mock 渲染器（仅验证分发）
+// Mock 渲染器（仅验证分发）；PdfPreviewer 顺带回显 fill 供透传断言
 vi.mock("../previewers", () => ({
   ImagePreviewer: () => <div data-testid="image-previewer" />,
-  PdfPreviewer: () => <div data-testid="pdf-previewer" />,
+  PdfPreviewer: (props: { fill?: boolean }) => (
+    <div data-testid="pdf-previewer" data-fill={props.fill ? "true" : "false"} />
+  ),
   DocxPreviewer: () => <div data-testid="docx-previewer" />,
   XlsxPreviewer: () => <div data-testid="xlsx-previewer" />,
   MarkdownPreviewer: () => <div data-testid="markdown-previewer" />,
+  HtmlPreviewer: () => <div data-testid="html-previewer" />,
   FallbackPreviewer: () => <div data-testid="fallback-previewer" />,
 }));
 
@@ -30,6 +34,11 @@ const mockTarget: FilePreviewTarget = {
   fetch: mockFetch,
   meta: { name: "test.pdf", mime: "application/pdf", size: 1024 },
 };
+
+/** status=ok + pdf blob 的 useObjectUrl 返回值（分发/全屏用例共用）。 */
+function mockOk(blob: Blob) {
+  mockUseObjectUrl.mockReturnValue({ blob, url: "blob:mock", status: "ok", retry: vi.fn() });
+}
 
 beforeEach(() => {
   mockUseObjectUrl.mockClear();
@@ -82,6 +91,51 @@ describe("FilePreviewModal", () => {
     mockUseObjectUrl.mockReturnValue({ blob: null, url: null, status: "loading", retry: vi.fn() });
     render(<FilePreviewModal target={mockTarget} open onClose={vi.fn()} />);
     expect(screen.getByRole("button", { name: /下载/ })).toBeInTheDocument();
+  });
+
+  // ── 全屏态（2026-08-26-file-fullscreen-preview / FR-01/FR-02）──
+
+  it("缺省 defaultFullscreen 时为普通态：全屏按钮文案与 fill=false", () => {
+    mockOk(new Blob(["fake-pdf"], { type: "application/pdf" }));
+    render(<FilePreviewModal target={mockTarget} open onClose={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "全屏" })).toBeInTheDocument();
+    expect(screen.getByTestId("pdf-previewer")).toHaveAttribute("data-fill", "false");
+  });
+
+  it("defaultFullscreen=true 打开即全屏：按钮为退出全屏、fill=true 且锁 body 滚动", () => {
+    mockOk(new Blob(["fake-pdf"], { type: "application/pdf" }));
+    render(<FilePreviewModal target={mockTarget} open defaultFullscreen onClose={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "退出全屏" })).toBeInTheDocument();
+    expect(screen.getByTestId("pdf-previewer")).toHaveAttribute("data-fill", "true");
+    expect(document.body.style.overflow).toBe("hidden");
+  });
+
+  it("点击全屏按钮可来回切换：按钮文案与 fill 随态翻转", () => {
+    mockOk(new Blob(["fake-pdf"], { type: "application/pdf" }));
+    render(<FilePreviewModal target={mockTarget} open onClose={vi.fn()} />);
+
+    // 普通态 → 全屏
+    fireEvent.click(screen.getByRole("button", { name: "全屏" }));
+    expect(screen.getByRole("button", { name: "退出全屏" })).toBeInTheDocument();
+    expect(screen.getByTestId("pdf-previewer")).toHaveAttribute("data-fill", "true");
+
+    // 全屏 → 退出还原普通态（body 滚动同步解锁）
+    fireEvent.click(screen.getByRole("button", { name: "退出全屏" }));
+    expect(screen.getByRole("button", { name: "全屏" })).toBeInTheDocument();
+    expect(screen.getByTestId("pdf-previewer")).toHaveAttribute("data-fill", "false");
+    expect(document.body.style.overflow).toBe("");
+  });
+
+  it("html blob 分发到 HtmlPreviewer（RENDERER_MAP html 条目）", () => {
+    mockOk(new Blob(["<p>hi</p>"], { type: "text/html" }));
+    render(
+      <FilePreviewModal
+        target={{ fetch: mockFetch, meta: { name: "index.html", mime: "text/html", size: 16 } }}
+        open
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("html-previewer")).toBeInTheDocument();
   });
 });
 

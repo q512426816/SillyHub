@@ -59,7 +59,7 @@ export interface OnlyofficePreviewerProps extends PreviewerProps {
   onFallback: () => void;
 }
 
-export function OnlyofficePreviewer({ officeConfig, onFallback }: OnlyofficePreviewerProps) {
+export function OnlyofficePreviewer({ officeConfig, onFallback, fill }: OnlyofficePreviewerProps) {
   const holderRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<{ destroyEditor: () => void } | null>(null);
   const fallbackRef = useRef(onFallback);
@@ -116,7 +116,7 @@ export function OnlyofficePreviewer({ officeConfig, onFallback }: OnlyofficePrev
   }, [officeConfig]);
 
   return (
-    <div className="h-[74vh] w-full bg-white">
+    <div className={fill ? "h-full w-full bg-white" : "h-[74vh] w-full bg-white"}>
       <div ref={holderRef} id="onlyoffice-editor-holder" className="h-full w-full" />
     </div>
   );

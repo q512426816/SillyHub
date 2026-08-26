@@ -17,7 +17,7 @@ import type { PreviewerProps } from "./index";
 
 const MAX_ROWS = 2000;
 
-export function XlsxPreviewer({ blob, meta, onDownload }: PreviewerProps) {
+export function XlsxPreviewer({ blob, meta, onDownload, fill }: PreviewerProps) {
   const [activeSheet, setActiveSheet] = useState(0);
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
@@ -111,8 +111,13 @@ export function XlsxPreviewer({ blob, meta, onDownload }: PreviewerProps) {
 
   if (!sheetData) return null;
 
+  // fill 态加 h-full 撑满全屏 body（滚动仍由本容器 overflow-auto 承担）
   return (
-    <div className="min-h-[420px] w-full overflow-auto">
+    <div
+      className={
+        fill ? "h-full min-h-[420px] w-full overflow-auto" : "min-h-[420px] w-full overflow-auto"
+      }
+    >
       {/* Sheet 切换 */}
       {sheetData.names.length > 1 && (
         <div className="flex gap-1 border-b border-border bg-slate-50 px-4 pt-3">

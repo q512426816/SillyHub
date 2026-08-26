@@ -247,3 +247,11 @@ worktree doctor 静默失败后手动补链时（上一条 junction 坑的修复
 - 现象：`GET /api/daemon/sessions/events` 带鉴权请求返回 422 uuid_parsing——"events" 被两段式参数路由 `GET /sessions/{session_id}`（get_session_detail）当作 {session_id} 吞掉，端点在真实路由下不可达；task-04 注释只要求先于三段式 `/sessions/{id}/...`，漏了两段式详情路由。
 - 盲区三连：① 审查 grep 用单行模式 `@router.get("` 漏掉多行装饰器（路径在下一行）；② 端点测试直接调路由函数（`await stream_sessions_events(user=...)`）绕过路由表，路由顺序永不进入测试；③ 唯一路由级测试只断言未登录 401——FastAPI auth 依赖先于路径参数校验触发，遮蔽路由下同样 401，红不了。
 - 规避：新增字面量路径且同前缀存在参数路由时——审查用多行感知 grep（`grep -A1 '@router\.get($'`）；测试补路由表级断言（按注册序找首个方法+regex 匹配，断言 endpoint 是预期函数，不消费 body）；SSE/无限流端点测试勿走 httpx client 消费 body（ASGITransport 收全量 body 才返回，`client.stream()` 也挂死），路由可达性用路由表断言替代。真实运行时冒烟（真 uvicorn + curl）是最后防线——本缺陷单测 5186 全绿仍存在。
+
+## 2026-08-26 — antd v6 实测三坑：Image 无 wrapperClassName、Modal 语义 styles.container、枚举式 vi.mock 须随桶导出同步（待确认）
+
+> 来源：2026-08-26-file-fullscreen-preview execute（task-03/04 实现期实测 + QA 验收抓回归）。
+
+- Image：v6 已删 `wrapperClassName`，撑高外层 wrapper 用语义槽 `classNames={{ root: "..." }}`（grep @rc-component/image 确认 root 落 wrapper div）；img 的百分比 max-h 需 wrapper 有高度基准，否则解析不了。
+- Modal：v6 语义键是 `styles.container`（v5 的 `styles.content` 不再命中内容容器）；`style+width` 挂 `.ant-modal` 根，默认 `top:100/max-width:calc(100vw-32px)`，做全屏需同时覆盖 `width=100vw + style={{top:0, maxWidth:"100vw"}}`。
+- 测试：枚举式 `vi.mock("桶文件", () => ({...}))` 工厂在桶文件新增导出时会让模块作用域引用（如 RENDERER_MAP）直接炸套件（"No X export is defined on the mock"）——桶加导出必须同步补 mock 工厂，且这类断裂是套件级（0 test 收集），vitest 汇总里表现为 1 test file failed 而非用例 failed。

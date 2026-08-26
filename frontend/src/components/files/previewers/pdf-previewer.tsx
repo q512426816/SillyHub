@@ -6,16 +6,17 @@
  * iframe 内嵌 objectURL，走浏览器原生 PDF 视图器（缩放/翻页/打印）。
  * 零新依赖（D-003@v1）。统一消费 PreviewerProps。
  *
- * ql-20260825-005：高度改固定视口高（h-[70vh]）——Modal body 是
+ * ql-20260825-005：非 fill 高度用固定视口高（h-[70vh]）——Modal body 是
  * max-h + overflow-auto 容器，height:100% 在高度 auto 的父链上解析不了
- * （iframe 塌成 ~150px 默认高）。
+ * （iframe 塌成 ~150px 默认高）。fill 态由全屏弹窗 body（flex-1 确定高）
+ * 提供父级高度，h-full 才可解析。
  */
 
 import type { PreviewerProps } from "./index";
 
-export function PdfPreviewer({ url }: PreviewerProps) {
+export function PdfPreviewer({ url, fill }: PreviewerProps) {
   return (
-    <div className="h-[70vh] w-full">
+    <div className={fill ? "h-full w-full" : "h-[70vh] w-full"}>
       <iframe
         src={url}
         className="h-full w-full rounded-lg border border-border"

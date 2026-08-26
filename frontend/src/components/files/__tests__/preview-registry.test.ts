@@ -10,12 +10,18 @@ import { matchRenderer, type RendererKey } from "../preview-registry";
 
 describe("matchRenderer", () => {
   // ---- 图片 ----
-  it.each(["image/png", "image/jpeg", "image/webp", "image/gif"])(
-    "image MIME %s → image",
-    (mime) => {
-      expect(matchRenderer(mime, "file.bin")).toBe("image" satisfies RendererKey);
-    },
-  );
+  it.each([
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+    // svg/bmp/ico（2026-08-26-file-fullscreen-preview，Grill C-05）
+    "image/svg+xml",
+    "image/bmp",
+    "image/x-icon",
+  ])("image MIME %s → image", (mime) => {
+    expect(matchRenderer(mime, "file.bin")).toBe("image" satisfies RendererKey);
+  });
 
   // ---- PDF ----
   it("application/pdf MIME → pdf", () => {
@@ -47,10 +53,22 @@ describe("matchRenderer", () => {
     expect(matchRenderer("text/markdown", "file.txt")).toBe("markdown");
   });
 
+  // ---- html（2026-08-26-file-fullscreen-preview：交互原型走 iframe sandbox 渲染） ----
+  it("text/html MIME → html", () => {
+    expect(matchRenderer("text/html", "file.bin")).toBe("html");
+  });
+
+  it.each(["file.html", "file.htm"])("%s 扩展名 → html", (filename) => {
+    expect(matchRenderer(null, filename)).toBe("html");
+  });
+
   // ---- 扩展名兜底（mime 为空 / 未命中时） ----
   it.each([
     ["file.png", "image"],
     ["file.jpg", "image"],
+    ["file.svg", "image"],
+    ["file.bmp", "image"],
+    ["file.ico", "image"],
     ["file.pdf", "pdf"],
     ["file.docx", "docx"],
     ["file.md", "markdown"],

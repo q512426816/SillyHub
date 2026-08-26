@@ -8,8 +8,9 @@
  *   ``NativePreviewFrame`` 鉴权取 Blob → 按扩展名重设 MIME → objectURL → iframe
  *   原生渲染；头部「源码」按钮切换看源码（html→高亮源码 / pdf→元信息卡），
  *   切换文件回默认预览态
- * - 图片扩展名 → ``fetchDownload`` 取 Blob → objectURL 内联 ``<img>``（鉴权流，
- *   裸 URL 会 401，design R-06）；卸载/切换文件时 revoke 防泄漏（file-image.tsx 先例）
+ * - 图片扩展名 → ``fetchDownload`` 取 Blob → objectURL 内联 antd ``<Image>``（鉴权流，
+ *   裸 URL 会 401，design R-06；内建 lightbox 支持点击放大/缩放/旋转，FR-05）；
+ *   卸载/切换文件时 revoke 防泄漏（file-image.tsx 先例）
  * - ``binary=true`` → 元信息卡（名称/大小/修改时间 + 「二进制文件不预览」）
  * - .md/.markdown → 复用 ``MarkdownText``（size=reading，sanitize 已内建不另起管线）
  * - 其余文本 → react-syntax-highlighter Prism Light（dynamic import + ssr:false 防
@@ -22,15 +23,28 @@
  * 头部展示文件名/大小/修改时间 + 下载按钮（全类型可用，loading 态防重复点击）；
  * 下载走 ``downloadExplorerFile``（fetch Blob → a download → revoke，R-06）。
  *
- * 依据：design.md §7.2/§7.3、R-06、D-004@v1 + tasks/task-07.md。
+ * 全屏预览（2026-08-26-file-fullscreen-preview / FR-05 / D-007@v1）：头部「全屏预览」
+ * 按钮全类型可用（docx/xlsx/pdf 窄区看不全时全屏可看，含二进制元信息卡场景），点击
+ * 以 defaultFullscreen 打开统一 ``FilePreviewModal``；target.fetch 直连 ``fetchDownload``，
+ * meta.mime 传 null（下载端点 blob.type 多为 octet-stream，靠扩展名经 matchRenderer
+ * 分发，R-05），不携带 officeSource（explorer 文件无平台 id，恒本地渲染）。
+ *
+ * 依据：design.md §5 Phase 4/§7.2/§7.3、R-05/R-06、D-004@v1、D-007@v1 + tasks/task-07.md。
  */
 
 import dynamic from "next/dynamic";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
-import { Alert, Button, Spin, Typography } from "antd";
-import { CodeOutlined, DownloadOutlined, EyeOutlined, FileOutlined } from "@ant-design/icons";
+import { Alert, Button, Image, Spin, Typography } from "antd";
+import {
+  CodeOutlined,
+  DownloadOutlined,
+  ExpandOutlined,
+  EyeOutlined,
+  FileOutlined,
+} from "@ant-design/icons";
 
+import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
 import { MarkdownText } from "@/components/ui/markdown-text";
 import { formatFileSize } from "@/lib/file/utils";
 import { downloadExplorerFile, fetchDownload, useExplorerFile } from "@/lib/explorer";
@@ -215,15 +229,18 @@ function ImagePreview({
       </div>
     );
   }
-  // objectURL 无法走 next/image（非静态资源且需鉴权），此处必须原生 img。
+  // antd Image（FR-05）：内建 lightbox 点击放大/缩放/旋转；数据流不变——objectURL
+  // 无法走 next/image（非静态资源且需鉴权），仍走 fetchDownload 鉴权链。
+  // antd v6 语义：className 落 img、classNames.root 落外层 wrapper——wrapper 撑高后
+  // img 的 max-h-full 百分比才有解析基准（image-previewer.tsx fill 态同款）；
   // max-h-full 自适应预览区可视高度（旧 540px 魔法数在小屏溢出，ql-20260818-010-f551）。
   return (
     <div className="flex h-full min-h-0 items-center justify-center overflow-auto p-4">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
+      <Image
         src={src}
         alt={name}
         className="max-h-full max-w-full rounded-md border border-border object-contain"
+        classNames={{ root: "flex h-full items-center justify-center" }}
       />
     </div>
   );
@@ -332,6 +349,11 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
   const query = useExplorerFile(workspaceId, filePath);
   const [downloading, setDownloading] = useState(false);
   const [downloadFailed, setDownloadFailed] = useState(false);
+  // 统一预览弹窗态（2026-08-26-file-fullscreen-preview / FR-05）：target 常驻 state、
+  // 关闭仅收 open（attachment-chips/change-file-tree 先例，避免弹窗内容闪重建）；
+  // 以 defaultFullscreen 打开即全屏。
+  const [previewTarget, setPreviewTarget] = useState<FilePreviewTarget | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
   /** 原生预览扩展名的源码模式（ql-20260825-016）：默认 false=原生预览态，
    *  头部「源码」切换；切换文件回默认预览态（模式不跨文件残留）。 */
   const [sourceMode, setSourceMode] = useState(false);
@@ -459,6 +481,24 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
               {sourceMode ? "预览" : "源码"}
             </Button>
           )}
+          {/* 全屏预览（FR-05）：全类型可用（含二进制元信息卡场景——docx/xlsx/pdf 窄区
+              看不全时全屏可看）。target 约束：fetch 直连 fetchDownload；mime 传 null 靠
+              扩展名经 matchRenderer 分发（R-05：下载端点 blob.type 多为 octet-stream）；
+              不携带 officeSource（D-007：explorer 文件无平台 id，恒本地渲染）。 */}
+          <Button
+            size="small"
+            icon={<ExpandOutlined />}
+            onClick={() => {
+              setPreviewTarget({
+                fetch: () => fetchDownload(workspaceId, filePath),
+                meta: { name, mime: null, size: data.size },
+                download: () => void handleDownload(),
+              });
+              setPreviewOpen(true);
+            }}
+          >
+            全屏预览
+          </Button>
           <Button
             size="small"
             icon={<DownloadOutlined />}
@@ -480,6 +520,15 @@ export function FilePreview({ workspaceId, filePath }: FilePreviewProps) {
         )}
         {body}
       </div>
+      {/* 统一预览弹窗（2026-08-26-file-fullscreen-preview / FR-05）：打开即全屏，
+          target 构造见头部「全屏预览」按钮（不携带 officeSource，D-007）。Modal 经
+          Portal 渲染到 body，作为根 div 的 JSX 子节点不影响 flex 布局 */}
+      <FilePreviewModal
+        target={previewTarget}
+        open={previewOpen}
+        onClose={() => setPreviewOpen(false)}
+        defaultFullscreen
+      />
     </div>
   );
 }

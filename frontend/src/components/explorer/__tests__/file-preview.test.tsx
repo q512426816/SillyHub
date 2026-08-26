@@ -1,13 +1,14 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FilePreview } from "@/components/explorer/file-preview";
 
 /**
- * 黑盒测试：mock 取数层（@/lib/explorer）、MarkdownText 与代码高亮模块，
- * 只验 FilePreview 的分发矩阵 / 截断警示 / 下载行为 / objectURL 生命周期
- * （jsdom 不做真实高亮与 markdown 解析，断言分支路由而非库行为）。
+ * 黑盒测试：mock 取数层（@/lib/explorer）、统一预览弹窗（@/components/files）、
+ * MarkdownText 与代码高亮模块，只验 FilePreview 的分发矩阵 / 截断警示 / 下载行为 /
+ * objectURL 生命周期 / 全屏预览入口（jsdom 不做真实高亮与弹窗渲染链，断言分支
+ * 路由与契约而非库行为）。
  */
 
 // ── mock：explorer 取数层（useExplorerFile / fetchDownload / downloadExplorerFile）──
@@ -17,6 +18,26 @@ const explorerMocks = vi.hoisted(() => ({
   downloadExplorerFile: vi.fn(),
 }));
 vi.mock("@/lib/explorer", () => explorerMocks);
+
+// ── mock：FilePreviewModal → 回显 props 的替身（全屏入口只验契约：open/
+//    defaultFullscreen/target 构造，不在 jsdom 里跑真实弹窗与七渲染器链）──
+const previewModalSpy = vi.hoisted(() => vi.fn());
+vi.mock("@/components/files/file-preview-modal", () => ({
+  FilePreviewModal: (props: {
+    target: {
+      fetch: () => Promise<Blob>;
+      meta: { name: string; mime?: string | null; size?: number | null };
+      download?: () => void;
+      officeSource?: { source: string; id: string };
+    } | null;
+    open: boolean;
+    onClose: () => void;
+    defaultFullscreen?: boolean;
+  }) => {
+    previewModalSpy(props);
+    return <div data-testid="file-preview-modal" data-open={String(props.open)} />;
+  },
+}));
 
 // ── mock：MarkdownText → 纯文本（next/dynamic 在 jsdom 下渲染 null，见 memory）──
 vi.mock("@/components/ui/markdown-text", () => ({
@@ -94,9 +115,15 @@ beforeEach(() => {
   explorerMocks.fetchDownload.mockReset();
   explorerMocks.downloadExplorerFile.mockReset();
   explorerMocks.downloadExplorerFile.mockResolvedValue(undefined);
+  previewModalSpy.mockClear();
   createObjectURL.mockClear();
   revokeObjectURL.mockClear();
 });
+
+/** 「源码⇄预览」切换按钮查询（ql-20260825-016）：可访问名须以「源码/预览」结尾，
+ *  负向先行排除「全屏预览」（FR-05 新增的全类型全屏入口，可访问名含“预览”子串
+ *  但语义不同——打开统一预览弹窗，不参与源码模式切换）。 */
+const TOGGLE_BUTTON_NAME = /^(?!.*全屏).*(源码|预览)$/;
 
 describe("FilePreview", () => {
   it("filePath=null 显示空态占位，透传 null 给 useExplorerFile", () => {
@@ -147,6 +174,9 @@ describe("FilePreview", () => {
     );
     const img1 = await screen.findByRole("img", { name: "logo.png" });
     expect(img1).toHaveAttribute("src", "blob:preview-1");
+    // antd Image（FR-05，可点击放大/缩放/旋转）：img 落 .ant-image wrapper 内且带语义类
+    expect(img1.closest(".ant-image")).not.toBeNull();
+    expect(img1.className).toContain("ant-image-img");
     expect(explorerMocks.fetchDownload).toHaveBeenCalledWith("ws-1", "docs/logo.png");
 
     // 切换文件：旧 objectURL revoke、新文件重新取 Blob
@@ -254,6 +284,55 @@ describe("FilePreview", () => {
     );
   });
 
+  // ── 全屏预览（2026-08-26-file-fullscreen-preview / FR-05 / D-007@v1）──────────
+
+  it("头部「全屏预览」按钮以 defaultFullscreen 打开统一弹窗，target 不携带 officeSource", async () => {
+    mockQueryResult(makeFile({ name: "main.py" }));
+    render(<FilePreview workspaceId="ws-1" filePath="backend/main.py" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /全屏预览/ }));
+    expect(await screen.findByTestId("file-preview-modal")).toHaveAttribute(
+      "data-open",
+      "true",
+    );
+    const props = previewModalSpy.mock.calls.at(-1)![0];
+    expect(props.defaultFullscreen).toBe(true);
+    expect(props.target).not.toBeNull();
+    // D-007：explorer 文件无平台 id，不携带 officeSource（恒本地渲染）
+    expect(props.target!.officeSource).toBeUndefined();
+    // R-05：mime 传 null（下载端点 blob.type 多为 octet-stream，靠扩展名经 matchRenderer 分发）
+    expect(props.target!.meta).toEqual({ name: "main.py", mime: null, size: 4300 });
+    // fetch 直连下载端点（fetchDownload）
+    void props.target!.fetch();
+    expect(explorerMocks.fetchDownload).toHaveBeenCalledWith("ws-1", "backend/main.py");
+    // download 复用头部既有下载逻辑（downloadExplorerFile）
+    act(() => {
+      props.target!.download?.();
+    });
+    expect(explorerMocks.downloadExplorerFile).toHaveBeenCalledWith("ws-1", "backend/main.py");
+
+    // onClose 仅收 open（target 常驻 state，防弹窗内容闪重建）
+    act(() => {
+      props.onClose();
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("file-preview-modal")).toHaveAttribute("data-open", "false"),
+    );
+  });
+
+  it("二进制分支同样有全屏入口（元信息卡场景 docx/xlsx/pdf 全屏可看）", () => {
+    mockQueryResult(makeFile({ name: "report.docx", binary: true, size: 97584, content: "" }));
+    render(<FilePreview workspaceId="ws-1" filePath="docs/report.docx" />);
+
+    // 元信息卡场景当前只能下载，头部按钮提供全屏入口（本地渲染器全屏可看）
+    fireEvent.click(screen.getByRole("button", { name: /全屏预览/ }));
+    const props = previewModalSpy.mock.calls.at(-1)![0];
+    expect(props.open).toBe(true);
+    expect(props.defaultFullscreen).toBe(true);
+    expect(props.target!.meta).toEqual({ name: "report.docx", mime: null, size: 97584 });
+    expect(props.target!.officeSource).toBeUndefined();
+  });
+
   // ── 浏览器原生预览（ql-20260825-016：html/pdf 默认原生渲染，「源码」按钮切换看源码）──
 
   it("浏览器可原生预览扩展名（pdf/html/htm）才显示「源码」切换按钮，其余类型不显示", () => {
@@ -262,12 +341,12 @@ describe("FilePreview", () => {
     // 普通代码 / 图片（已内联预览）：无切换按钮
     mockQueryResult(makeFile({ name: "main.py" }));
     const t1 = render(<FilePreview workspaceId="ws-1" filePath="a/main.py" />);
-    expect(screen.queryByRole("button", { name: /源码|预览/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: TOGGLE_BUTTON_NAME })).not.toBeInTheDocument();
     t1.unmount();
 
     mockQueryResult(makeFile({ name: "logo.png", binary: true, content: "" }));
     const t2 = render(<FilePreview workspaceId="ws-1" filePath="a/logo.png" />);
-    expect(screen.queryByRole("button", { name: /源码|预览/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: TOGGLE_BUTTON_NAME })).not.toBeInTheDocument();
     t2.unmount();
 
     // pdf（二进制）与 html（文本）：切换按钮出现在下载旁
@@ -327,7 +406,7 @@ describe("FilePreview", () => {
     expect(screen.queryByTitle("demo.html 浏览器预览")).not.toBeInTheDocument();
 
     // 切回预览：iframe 恢复（objectURL 生命周期由 effect 管理，重新打开重新取数）
-    fireEvent.click(screen.getByRole("button", { name: /预览/ }));
+    fireEvent.click(screen.getByRole("button", { name: TOGGLE_BUTTON_NAME }));
     expect(await screen.findByTitle("demo.html 浏览器预览")).toBeInTheDocument();
   });
 
