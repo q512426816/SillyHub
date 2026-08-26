@@ -94,6 +94,11 @@ class WorkspaceSlugDuplicate(AppError):
     http_status = status.HTTP_409_CONFLICT
 
 
+class WorkspaceSlugImmutable(AppError):
+    code = "HTTP_400_WORKSPACE_SLUG_IMMUTABLE"
+    http_status = status.HTTP_400_BAD_REQUEST
+
+
 class SpecWorkspaceNotFound(AppError):
     code = "HTTP_404_SPEC_WORKSPACE_NOT_FOUND"
     http_status = status.HTTP_404_NOT_FOUND

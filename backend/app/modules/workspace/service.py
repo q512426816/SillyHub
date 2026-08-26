@@ -32,6 +32,7 @@ from app.core.errors import (
     WorkspacePathNotFound,
     WorkspacePermissionDenied,
     WorkspaceSlugDuplicate,
+    WorkspaceSlugImmutable,
 )
 from app.core.logging import get_logger
 from app.core.permission_cache import invalidate_all_permissions
@@ -533,27 +534,20 @@ class WorkspaceService:
         """Update an existing workspace with only the fields provided by the caller.
 
         Uses ``exclude_unset=True`` so omitted fields are left untouched.
+        slug 创建后不可变（ql-20260826-007-8666）：显式传同值视为幂等 no-op，
+        传不同值抛 :class:`WorkspaceSlugImmutable`（400）。
         """
         ws = await self.get(workspace_id)
         changes = payload.model_dump(exclude_unset=True)
+        # ql-20260826-007-8666：slug 是下游 mirror 目录名 / lease 元数据 / 跨模块
+        # 引用的稳定键，创建后锁定；同值重传幂等放行。
+        new_slug = changes.get("slug")
+        if new_slug is not None and new_slug != ws.slug:
+            raise WorkspaceSlugImmutable(
+                "slug 创建后不可修改。",
+                details={"slug": new_slug, "current_slug": ws.slug},
+            )
         if changes:
-            # Pre-check slug uniqueness before mutating to avoid rollback issues
-            # with SQLite sessions.
-            new_slug = changes.get("slug")
-            if new_slug is not None and new_slug != ws.slug:
-                slug_stmt = (
-                    select(Workspace)
-                    .where(col(Workspace.slug) == new_slug)
-                    .where(col(Workspace.deleted_at).is_(None))
-                )
-                existing = (await self._session.execute(slug_stmt)).scalars().first()
-                if existing is not None:
-                    raise WorkspaceSlugDuplicate(
-                        "该 slug 已被其他工作区使用，请更换后重试。",
-                        details={"slug": new_slug},
-                    )
-
-            _upd_slug = changes.get("slug")
             _upd_root = changes.get("root_path")
             for field, value in changes.items():
                 setattr(ws, field, value)
@@ -561,13 +555,13 @@ class WorkspaceService:
             try:
                 await self._session.commit()
             except IntegrityError as exc:
-                # R14（并发修复，2026-07-24）：并发 update 把两个 workspace 改成同 slug
-                # （或 root_path）时预检双通过、commit 撞唯一约束。rollback 后复用
+                # R14（并发修复，2026-07-24）：并发 update 撞 root_path 唯一约束时
+                # （slug 已不可变，uq_workspaces_slug 不再可能触发）rollback 后复用
                 # _translate_integrity_error 转友好 409（对齐 create 路径 :218-223），而非 500。
                 await self._session.rollback()
                 self._translate_integrity_error(
                     exc,
-                    slug=_upd_slug or ws.slug,
+                    slug=ws.slug,
                     root_path=_upd_root or ws.root_path,
                 )
                 raise  # 不可达：_translate_integrity_error 必 raise

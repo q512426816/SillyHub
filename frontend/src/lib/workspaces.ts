@@ -87,6 +87,23 @@ export async function listWorkspaces(
   });
 }
 
+// Schemas 派生区 ────────────────────────────────────────────────
+
+/**
+ * 从工作区名称派生默认 slug（ql-20260826-007-8666）。
+ *
+ * 与后端 schema.slugify 逐行为对齐：非字母数字段折叠为单个连字符、去首尾
+ * 连字符、转小写、无有效字符兜底 "workspace"、截断 100。创建对话框用它做
+ * slug 输入框的默认值（未手动编辑时实时跟随名称）。
+ */
+export function slugifyWorkspaceName(name: string): string {
+  const base = name
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .toLowerCase();
+  return (base || "workspace").slice(0, 100);
+}
+
 export interface CreateWorkspaceInput {
   name: string;
   root_path: string;

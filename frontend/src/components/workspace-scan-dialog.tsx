@@ -15,6 +15,7 @@ import {
 import { errMessage, useNotify } from "@/lib/errors";
 import {
   createWorkspace,
+  slugifyWorkspaceName,
 } from "@/lib/workspaces";
 // task-06 / 2026-08-18-workspace-role-type / FR-02 / D-002@v1：
 // 创建路径接 8 值受控词表（task-05 产物，禁止组件内重复硬编码）。
@@ -39,6 +40,15 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
   const [wsType, setWsType] = useState<WorkspaceType | "">("");
   // task-06 / FR-03：描述选填（≤2000 字符，全文留详情页展示）。
   const [description, setDescription] = useState("");
+  // ql-20260826-007-8666：slug 默认从名称实时派生，允许手动改；手动编辑过
+  // （slugEdited）后不再跟随名称。创建后后端锁定不可改，提交体只在非空时带。
+  const [slugEdited, setSlugEdited] = useState(false);
+  const [slugDraft, setSlugDraft] = useState("");
+  const effectiveSlug = slugEdited
+    ? slugDraft
+    : name
+      ? slugifyWorkspaceName(name)
+      : "";
 
   // daemon-entity-binding task-10/11 补遗：创建对话框从 runtime 维度改为 daemon 实体维度。
   // 下拉展示守护进程实体（含全部 provider），value=inst.id；不再按 runtime 一项一条。
@@ -71,6 +81,8 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
       const ws = await createWorkspace({
         name: name.trim() || normalizedRoot.split(/[\\/]/).filter(Boolean).at(-1) || normalizedRoot,
         root_path: normalizedRoot,
+        // ql-20260826-007-8666：非空才带（空 = 省略，后端从最终名称派生）。
+        ...(effectiveSlug.trim() ? { slug: effectiveSlug.trim() } : {}),
         daemon_id: daemonId,
         spec_strategy: specStrategy,
         // task-06 / FR-02/FR-03：提交体带必选 type + 可选 description。
@@ -163,6 +175,31 @@ export function WorkspaceScanDialog({ onCreated, onCancel }: Props) {
                 placeholder="my-workspace"
                 disabled={phase === "creating"}
               />
+            </div>
+          )}
+          {daemonRootPath && (
+            <div className="space-y-1.5">
+              <label
+                className="text-xs font-medium text-muted-foreground"
+                htmlFor="ws-slug-d"
+              >
+                slug（创建后不可修改）
+              </label>
+              <Input
+                id="ws-slug-d"
+                value={effectiveSlug}
+                onChange={(e) => {
+                  setSlugDraft(e.target.value);
+                  setSlugEdited(true);
+                }}
+                placeholder="默认从工作区名称生成"
+                maxLength={100}
+                disabled={phase === "creating"}
+                className="font-mono"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                默认随名称自动生成，可手动修改；仅小写字母、数字、连字符。创建后不可再改。
+              </p>
             </div>
           )}
           {daemonRootPath && (

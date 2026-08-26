@@ -43,8 +43,14 @@ class TestWorkerToolConfigFileMcpWhitelist:
         assert cfg["max_turns"] == 25
         for tool in ("Read", "Glob", "Grep"):
             assert tool in cfg["allowed_tools"]
-        # 纯追加语义：除新增服务器名外白名单不多不少
-        assert set(cfg["allowed_tools"]) == {"Read", "Glob", "Grep", _FILE_MCP_SERVER}
+        # 纯追加语义（P0 修复后）：白名单不多不少（含两个 MCP 服务器名）
+        assert set(cfg["allowed_tools"]) == {
+            "Read",
+            "Glob",
+            "Grep",
+            _FILE_MCP_SERVER,
+            _WORKER_MCP_SERVER,
+        }
 
     def test_write_baseline_tools_unchanged(self) -> None:
         """write 分支其余键值不变：mode=acceptEdits、max_turns=30、六工具仍在。"""
@@ -61,6 +67,7 @@ class TestWorkerToolConfigFileMcpWhitelist:
             "Write",
             "Bash",
             _FILE_MCP_SERVER,
+            _WORKER_MCP_SERVER,
         }
 
     def test_whitelist_uses_exact_server_name_not_wildcard(self) -> None:
@@ -70,3 +77,27 @@ class TestWorkerToolConfigFileMcpWhitelist:
             assert not any(str(t).endswith("*") for t in cfg["allowed_tools"]), (
                 "不得使用 mcp__sillyhub-file__* 通配写法"
             )
+
+
+# ── P0 修复（2026-08-26）：worker_done 通道放行 ──
+
+_WORKER_MCP_SERVER = "mcp__sillyhub-worker"
+
+
+class TestWorkerMcpServerAllowed:
+    """P0（阿里云会话 6603bec3 实证）：两分支白名单必须含整服务器名
+    ``mcp__sillyhub-worker``——daemon 受限 server 注入的 worker_done 等
+    工具全名带该前缀，白名单缺失会被 --allowedTools 物理拒绝，
+    worker 永远无法上报完成（mission 死锁 running）。"""
+
+    def test_read_only_branch_allows_worker_server(self):
+        cfg = worker_tool_config(read_only=True)
+        assert _WORKER_MCP_SERVER in cfg["allowed_tools"]
+
+    def test_write_branch_allows_worker_server(self):
+        cfg = worker_tool_config(read_only=False)
+        assert _WORKER_MCP_SERVER in cfg["allowed_tools"]
+
+    def test_file_server_still_allowed(self):
+        for ro in (True, False):
+            assert _FILE_MCP_SERVER in worker_tool_config(read_only=ro)["allowed_tools"]

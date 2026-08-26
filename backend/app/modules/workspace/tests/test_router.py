@@ -365,11 +365,14 @@ async def test_patch_validates_slug_format(
     assert resp.status_code == 422
 
 
-async def test_patch_slug_conflict_returns_409(
+async def test_patch_slug_immutable_returns_400(
     client: AsyncClient, tmp_path: Path, auth_headers: dict[str, str]
 ) -> None:
-    """Boundary: updating slug to an already-taken slug returns 409."""
-    # Create first workspace
+    """Boundary: slug 创建后不可修改——改不同值返回 400（ql-20260826-007-8666）。
+
+    旧语义（改 slug 撞他人占用返 409）随不可变语义废弃：现在无论目标 slug
+    是否被占用，只要是「不同值」一律 400 slug_immutable。
+    """
     root1 = _make_workspace(tmp_path, "ws-a")
     resp1 = await client.post(
         "/api/workspaces",
@@ -377,10 +380,8 @@ async def test_patch_slug_conflict_returns_409(
         headers=auth_headers,
     )
     assert resp1.status_code == 201
-    _ws_a_id = resp1.json()["id"]
     ws_a_slug = resp1.json()["slug"]  # "ws-a"
 
-    # Create second workspace
     root2 = _make_workspace(tmp_path, "ws-b")
     resp2 = await client.post(
         "/api/workspaces",
@@ -390,13 +391,39 @@ async def test_patch_slug_conflict_returns_409(
     assert resp2.status_code == 201
     ws_b_id = resp2.json()["id"]
 
-    # Try to update WS B's slug to WS A's slug
+    # Try to update WS B's slug to WS A's slug → immutable 400（不是 409）
     resp = await client.patch(
         f"/api/workspaces/{ws_b_id}",
         json={"slug": ws_a_slug},
         headers=auth_headers,
     )
-    assert resp.status_code == 409
+    assert resp.status_code == 400
+    assert resp.json()["code"] == "HTTP_400_WORKSPACE_SLUG_IMMUTABLE"
+
+    # 改成未被占用的全新 slug 同样拒绝
+    resp_free = await client.patch(
+        f"/api/workspaces/{ws_b_id}",
+        json={"slug": "totally-free-slug"},
+        headers=auth_headers,
+    )
+    assert resp_free.status_code == 400
+    assert resp_free.json()["code"] == "HTTP_400_WORKSPACE_SLUG_IMMUTABLE"
+
+
+async def test_patch_slug_same_value_is_noop(
+    client: AsyncClient, workspace_root: Path, auth_headers: dict[str, str]
+) -> None:
+    """Boundary: 显式重传当前 slug 视为幂等 no-op，200 放行不误伤。"""
+    created = await _create_workspace(client, workspace_root, auth_headers)
+    ws_id = created["id"]
+
+    resp = await client.patch(
+        f"/api/workspaces/{ws_id}",
+        json={"slug": created["slug"]},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["slug"] == created["slug"]
 
 
 # ── Init endpoint (POST /{workspace_id}/init) ──────────────────────────────

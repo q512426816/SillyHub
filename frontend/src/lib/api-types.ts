@@ -20140,7 +20140,8 @@ export interface components {
          *
          *     All fields are optional — only those explicitly provided by the caller are
          *     applied.  Uses ``exclude_unset=True`` at the service layer so omitted fields
-         *     are left untouched.
+         *     are left untouched.  ``slug`` 创建后不可变（ql-20260826-007-8666）：字段保留
+         *     供格式校验与同值幂等重传，service 层拒绝不同值（400 slug_immutable）。
          */
         WorkspaceUpdate: {
             /** Name */

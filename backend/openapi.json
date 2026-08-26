@@ -58425,7 +58425,7 @@
         },
         "type": "object",
         "title": "WorkspaceUpdate",
-        "description": "Request body for ``PATCH /api/workspaces/{workspace_id}``.\n\nAll fields are optional — only those explicitly provided by the caller are\napplied.  Uses ``exclude_unset=True`` at the service layer so omitted fields\nare left untouched."
+        "description": "Request body for ``PATCH /api/workspaces/{workspace_id}``.\n\nAll fields are optional — only those explicitly provided by the caller are\napplied.  Uses ``exclude_unset=True`` at the service layer so omitted fields\nare left untouched.  ``slug`` 创建后不可变（ql-20260826-007-8666）：字段保留\n供格式校验与同值幂等重传，service 层拒绝不同值（400 slug_immutable）。"
       },
       "WorktreeAcquireRequest": {
         "properties": {

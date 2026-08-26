@@ -102,11 +102,24 @@ def worker_tool_config(read_only: bool) -> dict[str, object]:
     各追加整服务器名 ``mcp__sillyhub-file``（不用 ``mcp__sillyhub-file__*``
     通配写法——claude CLI 通配行为未验证），否则显式 allowed_tools 会物理禁掉
     worker 的上传/列表工具（FR-02）。无白名单（bypassPermissions）模式不动。
+
+    P0 修复（2026-08-26，阿里云会话 6603bec3 实证）：两分支再追加整服务器名
+    ``mcp__sillyhub-worker``——daemon 侧受限 server（P1 task-06 / P2 task-05
+    按深度注入 worker_done 等）注入的工具有全名前缀 ``mcp__sillyhub-worker__*``，
+    不在 allowed_tools 白名单内会被 claude CLI ``--allowedTools`` 物理拒绝。
+    实际后果：worker 无法调 worker_done 上报完成 → worker_done_at 永远 NULL →
+    is_worker_complete 恒 False → mission 永久显示 running（死锁）。
     """
     if read_only:
         return {
             "mode": "plan",
-            "allowed_tools": ["Read", "Glob", "Grep", "mcp__sillyhub-file"],
+            "allowed_tools": [
+                "Read",
+                "Glob",
+                "Grep",
+                "mcp__sillyhub-file",
+                "mcp__sillyhub-worker",
+            ],
             "max_turns": 25,
         }
     return {
@@ -119,6 +132,7 @@ def worker_tool_config(read_only: bool) -> dict[str, object]:
             "Write",
             "Bash",
             "mcp__sillyhub-file",
+            "mcp__sillyhub-worker",
         ],
         "max_turns": 30,
     }
