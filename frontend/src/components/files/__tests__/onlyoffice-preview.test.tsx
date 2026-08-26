@@ -3,9 +3,10 @@
  *
  * 覆盖：
  * 1. FilePreviewModal：office 家族 + officeSource → 预取 config 成功 → DS 渲染器挂载；
- * 2. 降级：config 请求失败（503）→ 自动回落本地渲染器（xls→XlsxPreviewer）；
+ * 2. 降级：config 请求失败（503）→ 自动回落本地渲染器（docx→DocxPreviewer）；
  * 3. pptx（仅 DS 能渲染）：config 失败 → FallbackPreviewer（下载引导）；
- * 4. 非 office 文件（png）不触发 config 预取（零回归锚点）。
+ * 4. xls/xlsx 不再发起 office 尝试 → 直接 fallback 下载引导（ql-20260826-013）；
+ * 5. 非 office 文件（png）不触发 config 预取（零回归锚点）。
  */
 
 import { render, screen, waitFor, act } from "@testing-library/react";
@@ -54,14 +55,15 @@ afterEach(() => {
 describe("FilePreviewModal OnlyOffice 链路（2026-08-26）", () => {
   it("office 家族 + config 成功 → DS 渲染器挂载（FR-01）", async () => {
     apiFetchMock.mockResolvedValue({
+      mode: "ds",
       ds_url: "http://127.0.0.1:8080",
-      config: { document: { fileType: "xls" } },
+      config: { document: { fileType: "docx" } },
     });
     render(
       <FilePreviewModal
         target={{
           fetch: () => Promise.resolve(mockBlob),
-          meta: { name: "考核.xls" },
+          meta: { name: "指南.docx" },
           officeSource: { source: "session_attachment", id: "att-1" },
         }}
         open
@@ -76,13 +78,13 @@ describe("FilePreviewModal OnlyOffice 链路（2026-08-26）", () => {
     );
   });
 
-  it("config 失败（DS 未启用 503）→ 降级本地 XlsxPreviewer（FR-02）", async () => {
+  it("config 失败（DS 未启用 503）→ 降级本地 DocxPreviewer（FR-02）", async () => {
     apiFetchMock.mockRejectedValue(new Error("503"));
     render(
       <FilePreviewModal
         target={{
           fetch: () => Promise.resolve(mockBlob),
-          meta: { name: "考核.xls" },
+          meta: { name: "指南.docx" },
           officeSource: { source: "session_attachment", id: "att-1" },
         }}
         open
@@ -90,7 +92,7 @@ describe("FilePreviewModal OnlyOffice 链路（2026-08-26）", () => {
       />,
     );
     await waitFor(() => {
-      expect(screen.getByTestId("xlsx-previewer")).toBeInTheDocument();
+      expect(screen.getByTestId("docx-previewer")).toBeInTheDocument();
     });
   });
 
@@ -110,6 +112,22 @@ describe("FilePreviewModal OnlyOffice 链路（2026-08-26）", () => {
     await waitFor(() => {
       expect(screen.getByTestId("fallback-previewer")).toBeInTheDocument();
     });
+  });
+
+  it("xls 不触发 config 预取 → 直接 FallbackPreviewer（ql-20260826-013：Excel 取消在线渲染）", async () => {
+    render(
+      <FilePreviewModal
+        target={{
+          fetch: () => Promise.resolve(mockBlob),
+          meta: { name: "考核.xls" },
+          officeSource: { source: "session_attachment", id: "att-2" },
+        }}
+        open
+        onClose={vi.fn()}
+      />,
+    );
+    expect(await screen.findByTestId("fallback-previewer")).toBeInTheDocument();
+    expect(apiFetchMock).not.toHaveBeenCalled();
   });
 
   it("非 office 文件不触发 config 预取（零回归锚点）", async () => {

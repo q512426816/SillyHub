@@ -63,8 +63,12 @@ const RENDERER_MAP: Record<string, ComponentType<PreviewerProps>> = {
   fallback: FallbackPreviewer,
 };
 
-/** office 家族扩展名（DS 优先尝试集合，含旧格式 doc/xls/ppt）。 */
-const OFFICE_EXTS = new Set(["doc", "docx", "xls", "xlsx", "ppt", "pptx"]);
+/**
+ * office 家族扩展名（DS 优先尝试集合，含旧格式 doc/xls/ppt）。
+ * ql-20260826-013：xls/xlsx 移出——Excel 取消在线渲染（OnlyOffice 退役后无网格
+ * 渲染方案），直接走本地链（registry → fallback 下载引导）。
+ */
+const OFFICE_EXTS = new Set(["doc", "docx", "ppt", "pptx"]);
 
 function extOf(name: string): string {
   const dot = name.lastIndexOf(".");

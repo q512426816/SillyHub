@@ -32,14 +32,14 @@ describe("matchRenderer", () => {
     ).toBe("docx");
   });
 
-  // ---- xlsx ----
-  it("xlsx MIME → xlsx", () => {
+  // ---- xlsx：ql-20260826-013 取消在线渲染 → fallback（下载引导） ----
+  it("xlsx MIME → fallback（ql-20260826-013：Excel 取消在线渲染）", () => {
     expect(
       matchRenderer(
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "file.bin",
       ),
-    ).toBe("xlsx");
+    ).toBe("fallback");
   });
 
   // ---- markdown ----
@@ -53,7 +53,6 @@ describe("matchRenderer", () => {
     ["file.jpg", "image"],
     ["file.pdf", "pdf"],
     ["file.docx", "docx"],
-    ["file.xlsx", "xlsx"],
     ["file.md", "markdown"],
     ["file.markdown", "markdown"],
   ] as const)("%s 扩展名 → %s", (filename, expected) => {
@@ -78,9 +77,10 @@ describe("matchRenderer", () => {
     expect(matchRenderer(null, "slides.pptx")).toBe("fallback");
   });
 
-  it("xls → xlsx（ql-20260825-004：BIFF 旧格式经 SheetJS 渲染）", () => {
-    expect(matchRenderer("application/vnd.ms-excel", "legacy.xls")).toBe("xlsx");
-    expect(matchRenderer(null, "报表.xls")).toBe("xlsx");
+  it("xls/xlsx → fallback（ql-20260826-013：Excel 取消在线渲染，下载引导）", () => {
+    expect(matchRenderer("application/vnd.ms-excel", "legacy.xls")).toBe("fallback");
+    expect(matchRenderer(null, "报表.xls")).toBe("fallback");
+    expect(matchRenderer(null, "file.xlsx")).toBe("fallback");
   });
 
   it("doc → fallback（旧格式不在范围——纯前端无 Word 二进制保真渲染）", () => {

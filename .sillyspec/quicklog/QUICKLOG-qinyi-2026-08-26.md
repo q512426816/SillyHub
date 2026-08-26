@@ -543,3 +543,17 @@
 根因：/api/preview/file/{token} 原为 DS 容器回拉设计，硬编码 media_type=application/octet-stream；前端 fetch 得到 octet-stream blob → URL.createObjectURL → iframe src，浏览器对无类型二进制不做内联渲染，直接下载
 方案：服务端按缓存键前缀给正确 MIME + 前端 blob 类型兜底重打（双保险）；已部署验证经 Next 代理返回 content-type: application/pdf
 结果：backend 13/13、ruff 0 错；frontend tsc 0 错 + modal 测试通过；已重建部署
+
+## ql-20260826-013-a2c4 | 2026-08-26 20:05:00 | OnlyOffice 退役 + Excel 取消在线渲染——预览整体回归本地渲染方案（用户决策）
+状态：已完成
+关联变更：2026-08-26-onlyoffice-preview
+文件：
+- frontend/src/components/files/preview-registry.ts（xls/xlsx 映射移除 → fallback 下载引导；MIME_MAP 同步移除 spreadsheetml/ms-excel）
+- frontend/src/components/files/file-preview-modal.tsx（OFFICE_EXTS 移出 xls/xlsx——Excel 不再发起 office-config 尝试）
+- frontend/src/components/files/__tests__/preview-registry.test.ts（xlsx/xls 断言改 fallback）
+- frontend/src/components/files/__tests__/onlyoffice-preview.test.tsx（DS 挂载/降级夹具 xls→docx；新增 xls 不触发 config 预取用例）
+- deploy/docker-compose.yml（移除 gotenberg 服务块）/ deploy/.env（ONLYOFFICE_ENABLED=false、GOTENBERG_URL 删除）
+需求：用户决策——不要 OnlyOffice（Word 也回归本地 docx 渲染），Excel 不要在线预览，下载查看即可
+根因：非缺陷，用户对 DS 链路复杂度（容器/字体/JWT/重启弹窗）与 Excel 展示效果的整体取舍；预览降级链按设计天然支持配置级退役
+方案：① ONLYOFFICE_ENABLED=false → office-config 503 → 前端自动降级本地渲染器（代码路径保留，未来可 env 一键恢复）；② registry 移除 xls/xlsx 映射 + OFFICE_EXTS 移出 excel → Excel 直接 FallbackPreviewer 下载引导（不浪费一次 503 请求）；③ compose 移除 gotenberg 服务 + GOTENBERG_URL 清空（LO→PDF 管线代码休眠）
+结果：files 测试 49/49 绿 + tsc 0 错；已部署验证 office-config 503；bsp-onlyoffice 容器保留（另一项目 bsp 在用，平台侧已不再调用）

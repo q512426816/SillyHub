@@ -17,9 +17,6 @@ const IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif
 const MIME_MAP: Record<string, RendererKey> = {
   "application/pdf": "pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
-  // ql-20260825-004：.xls 旧格式（BIFF）——SheetJS read 天然兼容，映射到 xlsx 渲染器。
-  "application/vnd.ms-excel": "xlsx",
   "text/markdown": "markdown",
 };
 
@@ -27,10 +24,8 @@ const EXT_MAP: Record<string, RendererKey> = {
   png: "image", jpg: "image", jpeg: "image", webp: "image", gif: "image",
   pdf: "pdf",
   docx: "docx",
-  xlsx: "xlsx",
-  // ql-20260825-004：.xls 旧格式经 SheetJS 渲染（doc 旧格式仍 fallback——纯前端
-  // 无 Word 二进制保真渲染方案）。
-  xls: "xlsx",
+  // ql-20260826-013：Excel 取消在线渲染（xls/xlsx → fallback 下载引导）——
+  // SheetJS 表格还原度差、OnlyOffice 已退役；预览弹窗内下载本机查看。
   md: "markdown", markdown: "markdown",
 };
 
