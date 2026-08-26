@@ -404,10 +404,26 @@
 方案：install.ps1 头部加 UTF-8 BOM（保留 CRLF）；dist_router.py read_text 由 utf-8 改 utf-8-sig 剥 BOM 防 ufeff 污染 iex 管道；daemon.md 补编码契约文档
 结果：磁盘文件带 BOM 通过；后端读出首字符 # 无 BOM 残留通过；占位符替换 server_url 通过；body re-encode 无 BOM(iex 安全)通过；PowerShell ParseFile/ParseInput 均 0 解析错误（原无 BOM 报多个错）；body 7 行中文正常可读；dist_router.py 语法 OK。现成 pytest 因本地缺 aiobotocore（既有环境债与本改无关）跑不了，已用 stub 应用直测 get_install_ps1 真实行为代替
 
-## ql-20260826-007-8666 | 2026-08-26 10:12:16 | 工作区slug新建时可编辑（默认从名称派生）创建后不可修改
-状态：进行中
+## ql-20260826-007-8666 | 2026-08-26 10:12:16 | 工作区 slug 新建时可编辑（默认从名称派生）创建后不可修改
+状态：已完成
 关联变更：（无）
-文件：frontend/src/components/workspace-scan-dialog.tsx, frontend/src/lib/workspaces.ts, backend/app/modules/workspace/service.py, backend/app/modules/workspace/schema.py
+文件：
+- backend/app/core/errors.py（新增 WorkspaceSlugImmutable 400 异常）
+- backend/app/modules/workspace/service.py（update slug 不可变（同值幂等/异值 400））
+- backend/app/modules/workspace/schema.py（WorkspaceUpdate docstring 声明 slug 不可变）
+- backend/app/modules/workspace/tests/test_router.py（409 用例改写不可变 400 + 同值 no-op 新增）
+- frontend/src/lib/workspaces.ts（新增 slugifyWorkspaceName（对齐后端 slugify））
+- frontend/src/components/workspace-scan-dialog.tsx（slug 输入框（名称实时派生/手动脱离跟随/非空才提交））
+- frontend/src/components/__tests__/workspace-scan-dialog.test.tsx（新增 5 用例）
+- backend/openapi.json（gen:types 描述透传同步）
+- frontend/src/lib/api-types.ts（同左）
+- .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md（索引条目）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md（索引条目）
+需求：工作区 slug 新建时可编辑（默认从名称派生）创建后不可修改
+根因：创建对话框原本无 slug 输入（仅后端从名称自动派生），且后端 PATCH /api/workspaces/{id} 允许随时改 slug，与 slug 作为 mirror 目录名/lease 元数据稳定键的定位冲突
+方案：前端 workspace-scan-dialog 加 slug 输入框（lib/workspaces 新增 slugifyWorkspaceName 与后端 schema.slugify 逐行对齐做名称实时派生默认值，手动编辑后脱离跟随，提交体非空才带）；后端 errors.py 新增 WorkspaceSlugImmutable(400)，service.update 改为显式传不同 slug 即拒绝、同值幂等放行，旧 409 冲突用例改写并新增同值 no-op 用例
+结果：后端 workspace 模块+platform_sync 路由 163 测试绿、ruff/mypy 0 错；前端新增 workspace-scan-dialog 单测 5 用例绿+相关页面组件 42 用例绿、tsc 0 错；gen:types 同步（仅描述透传零形状变化）
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/__tests__/workspace-scan-dialog.test.tsx
 
 ## ql-20260826-008-55ce | 2026-08-26 10:12:55 | 修复团队任务块展开后分身列表被裁剪且无滚动条
 状态：已完成
@@ -421,3 +437,8 @@
 方案：team-task-block.tsx 根 section 补 shrink-0 保持自然高度，父层限高滚动真正生效；补回归用例断言根节点含 shrink-0；新建 frontend.changelog.md sidecar 记变更索引（backend 同款先例）
 结果：team-task-block 27 + session-panel-team 12 共 39 测试全绿（含新增回归用例），tsc --noEmit 0 错误，未跑 lint/部署
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/__tests__/team-task-block.test.tsx
+
+## ql-20260826-009-707a | 2026-08-26 10:23:01 | P0 修复：worker_tool_config 两档白名单缺 mcp__sillyhub-worker，worker_done 被 --allowedTools 物理拒绝，mission 永久 running（阿里云会话 6603bec3…
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/agent/execution.py, backend/app/modules/agent/tests/test_worker_tool_config.py
