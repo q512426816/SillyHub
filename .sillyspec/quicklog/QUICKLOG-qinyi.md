@@ -442,3 +442,27 @@
 状态：进行中
 关联变更：（无）
 文件：backend/app/modules/agent/execution.py, backend/app/modules/agent/tests/test_worker_tool_config.py
+
+## ql-20260826-010-b06d | 2026-08-26 18:58:41 | 会话页 4 项 UX 修复（输入框高度可拖拽/发送后残留清空/后台任务收编头部下拉/派团队确认回填 /team 前缀）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-input-bar.tsx（高度拖拽手柄+持久化）
+- frontend/src/components/daemon/activity-catalog.tsx（新建头部后台下拉）
+- frontend/src/components/daemon/session-panel.tsx（两模式 trim 清空//team 回填/拦截放行/三段常驻区删除）
+- frontend/src/components/daemon/__tests__/activity-catalog.test.tsx（新建 4 用例）
+- frontend/src/components/daemon/__tests__/session-input-bar-height.test.tsx（新建 4 用例）
+- frontend/src/components/daemon/__tests__/session-panel-ux-fixes.test.tsx（新建 4 用例）
+- frontend/src/components/daemon/__tests__/session-panel-team.test.tsx（适配下拉收编）
+- frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx（适配 /team 回填与下拉）
+- frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx（适配 /team 首句前缀）
+- .sillyspec/docs/frontend/modules/components-daemon.md（契约摘要+源文件数同步）
+需求：会话页 4 项 UX 修复（输入框高度可拖拽/发送后残留清空/后台任务收编头部下拉/派团队确认回填 /team 前缀）
+根因：① 输入框 resize-none 固定 rows=2 不可调；② onSendSettled 用 prev===prompt 精确比对而 handleSend 发送 input.trim()，粘贴带尾随空白时永不清空且被草稿持久化放大；③ Bash/后台任务/团队任务三段常驻消息流与输入区之间挤占聊天窗口；④ 弹层确认仅回填裸 objective 纯文本，主控 agent 常当普通聊天不派发分身
+方案：① session-input-bar 胶囊上缘拖拽手柄 + localStorage 持久化 + 双击恢复；② 两模式 onSendSettled 改 trim 比对；③ 新建 activity-catalog.tsx 头部「后台」下拉收编三段卡片（两模式头部挂载、删常驻区、留一行运行中提示）；④ 派团队确认回填 /team <objective> 前缀 + handleSend 拦截在活跃 mission 时放行直发（防弹层死循环）
+结果：vitest 全量 212 文件 2357 用例全绿（新增 12 用例 + 适配 3 个既有文件断言），tsc 零错，lint exit 0（仅 kanban.ts 预存 warning），模块文档 components-daemon.md 已同步
+
+## ql-20260826-011-da0a | 2026-08-26 19:12:40 | 后端缺陷与性能批量修复：incident/release 跨工作区越权（IDOR）、preview 令牌登记失败仍签发、diff_collector 超时子进程泄漏、parser 缓存竞态、LLM proxy 连接复用、Redis pipe…
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/incident/router.py, backend/app/modules/release/router.py, backend/app/modules/preview_office/service.py, backend/app/modules/agent/diff_collector.py, backend/app/modules/change/parser.py, backend/app/modules/daemon/router.py, backend/app/modules/daemon/run_sync/service.py, backend/app/core/config.py, backend/app/main.py, backend/app/modules/incident/tests/test_router.py, backend/app/modules/release/tests/test_router.py, backend/app/modules/preview_office/tests/test_service.py, backend/app/modules/agent/tests/test_diff_collector.py, backend/app/modules/change/tests/test_parser.py, backend/app/core/tests/test_config_auth.py, backend/app/modules/daemon/tests/test_llm_proxy.py

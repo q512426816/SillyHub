@@ -1604,14 +1604,19 @@ describe("SessionPanel（dialog）", () => {
     );
     expect(onTeamMissionCreated).toHaveBeenCalledWith("m-team-1");
 
-    // 刷新后的 mission 列表：TeamTaskBlock 挂载 + 活跃 chip。
+    // 刷新后的 mission 列表：ql-20260826-010 收编头部「后台」下拉（默认收起）——
+    // 点开展开后 TeamTaskBlock 挂载；活跃 chip 在输入区上方常驻。
+    fireEvent.click(
+      await screen.findByRole("button", { name: /^后台任务目录/ }),
+    );
     expect(await screen.findByLabelText("团队任务")).toBeInTheDocument();
     const chip = await screen.findByTestId("team-active-chip");
     expect(chip.textContent).toContain("团队进行中 · 2 分身");
 
-    // objective 回填输入框（「就绪，随下条消息发出」——CC-09 首条 inject 回填）。
+    // objective 回填输入框——ql-20260826-010 起前置 /team 指令（裸 objective
+    // 常被 agent 当普通聊天不派发；主控轮 briefing 语义）。
     expect(
-      (screen.getByDisplayValue("团队分析当前会话上下文") as HTMLTextAreaElement)
+      (screen.getByDisplayValue("/team 团队分析当前会话上下文") as HTMLTextAreaElement)
         .tagName,
     ).toBe("TEXTAREA");
     // 弹层关闭。

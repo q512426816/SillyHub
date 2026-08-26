@@ -778,7 +778,8 @@ describe("SessionPanel 预会话派团队门控（task-13 解禁）", () => {
 /* ───────── 8. task-13（FR-05/FR-06）：确认暂存 + team_mission 随首句上送 ───────── */
 
 describe("SessionPanel 预会话弹层确认 → 暂存 + 首句携带 team_mission（task-13）", () => {
-  /** 打开弹层并确认（目标回填输入框后返回输入框元素）。 */
+  /** 打开弹层并确认（目标回填输入框后返回输入框元素）。
+   *  ql-20260826-010：回填前置 /team 指令（首句带团队指令语义直送 create）。 */
   async function confirmPopoverWith(objective: string) {
     fireEvent.click(
       screen.getByRole("button", { name: /^派团队$/ }) as HTMLButtonElement,
@@ -790,7 +791,7 @@ describe("SessionPanel 预会话弹层确认 → 暂存 + 首句携带 team_miss
     fireEvent.click(
       screen.getByRole("button", { name: /派团队（随首句创建生效）/ }),
     );
-    // 弹层关闭 + objective 回填输入框（暂存待首句上送）。
+    // 弹层关闭 + 「/team <objective>」回填输入框（暂存待首句上送）。
     await waitFor(() =>
       expect(
         screen.queryByRole("dialog", { name: "派团队配置" }),
@@ -799,7 +800,7 @@ describe("SessionPanel 预会话弹层确认 → 暂存 + 首句携带 team_miss
     const input = screen.getByPlaceholderText(
       /发送第一句话开始对话/,
     ) as HTMLTextAreaElement;
-    await waitFor(() => expect(input.value).toBe(objective));
+    await waitFor(() => expect(input.value).toBe(`/team ${objective}`));
     return input;
   }
 
@@ -819,6 +820,8 @@ describe("SessionPanel 预会话弹层确认 → 暂存 + 首句携带 team_miss
     const input = await confirmPopoverWith("重构登录页");
 
     // 首句发送 → createSession 携带 team_mission 块（含 orchestrator_workspace_id）。
+    // ql-20260826-010：回填前置 /team → 首句 prompt 带 /team 前缀（mission
+    // objective 仍是纯文本，来自弹层 payload）。
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() =>
       expect(sessionApi.createSession).toHaveBeenCalledTimes(1),
@@ -826,7 +829,7 @@ describe("SessionPanel 预会话弹层确认 → 暂存 + 首句携带 team_miss
     expect(sessionApi.createSession).toHaveBeenCalledWith(
       expect.objectContaining({
         runtime_id: "rt-claude",
-        prompt: "重构登录页",
+        prompt: "/team 重构登录页",
         workspace_id: "ws-1",
         team_mission: {
           objective: "重构登录页",
@@ -883,7 +886,7 @@ describe("SessionPanel 预会话弹层确认 → 暂存 + 首句携带 team_miss
     const input = screen.getByPlaceholderText(
       /发送第一句话开始对话/,
     ) as HTMLTextAreaElement;
-    await waitFor(() => expect(input.value).toBe("重构登录页"));
+    await waitFor(() => expect(input.value).toBe("/team 重构登录页"));
 
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() =>
@@ -932,7 +935,7 @@ describe("SessionPanel 预会话弹层确认 → 暂存 + 首句携带 team_miss
     await waitFor(() =>
       expect(screen.getByLabelText("创建会话错误")).toBeInTheDocument(),
     );
-    expect(input.value).toBe("重构登录页");
+    expect(input.value).toBe("/team 重构登录页");
     const first = sessionApi.createSession.mock.calls[0]![0] as {
       team_mission?: unknown;
     };

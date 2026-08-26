@@ -128,6 +128,17 @@ vi.mock("@/lib/api/llm-providers", async () => {
 
 const OBJECTIVE = "修掉登录页三处移动端问题并补回归用例";
 
+/**
+ * ql-20260826-010：团队任务块收编进头部 ActivityCatalog 下拉——先点「后台」
+ * 触发按钮展开，再对块内容断言/交互。等待列表挂载后才返回。
+ */
+async function openActivityCatalog() {
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^后台任务目录/ }),
+  );
+  await screen.findByLabelText("会话团队任务列表");
+}
+
 function makeMission(
   id: string,
   status: TeamMissionSummary["status"],
@@ -349,8 +360,14 @@ describe("SessionPanel TeamTaskBlock 挂载与活跃 chip（dialog 模式）", (
     ]);
     setupDialog();
 
-    // 列表挂载：两个任务块，活跃（running）排在前。
-    const list = await screen.findByLabelText("会话团队任务列表");
+    // ql-20260826-010：默认收起（点开前不渲染任务块——不挤占会话窗口）。
+    expect(
+      screen.queryByLabelText("会话团队任务列表"),
+    ).not.toBeInTheDocument();
+
+    // 点开头部「后台」下拉：两个任务块，活跃（running）排在前。
+    await openActivityCatalog();
+    const list = screen.getByLabelText("会话团队任务列表");
     const blocks = screen.getAllByLabelText("团队任务");
     expect(blocks).toHaveLength(2);
     expect(blocks[0]!.textContent).toContain("运行中");
@@ -361,11 +378,13 @@ describe("SessionPanel TeamTaskBlock 挂载与活跃 chip（dialog 模式）", (
     const chip = await screen.findByTestId("team-active-chip");
     expect(chip.textContent).toContain("团队进行中 · 2 分身");
 
-    // chip 可关闭收回（只藏提示条，不取消任务——任务块仍在）。
+    // chip 可关闭收回（只藏提示条，不取消任务——任务块仍在下拉内）。
+    // 注：chip 在下拉外，点击经 document 冒泡会顺带收起下拉 → 重开再断言。
     fireEvent.click(screen.getByLabelText("收起团队状态提示"));
     await waitFor(() =>
       expect(screen.queryByTestId("team-active-chip")).not.toBeInTheDocument(),
     );
+    await openActivityCatalog();
     expect(screen.getAllByLabelText("团队任务")).toHaveLength(2);
   });
 
@@ -374,7 +393,7 @@ describe("SessionPanel TeamTaskBlock 挂载与活跃 chip（dialog 模式）", (
       makeMission("m-done", "done", [makeWorker("w-1", "completed")]),
     ]);
     setupDialog();
-    await screen.findByLabelText("会话团队任务列表");
+    await openActivityCatalog();
     expect(screen.queryByTestId("team-active-chip")).not.toBeInTheDocument();
   });
 });
@@ -457,8 +476,10 @@ describe("SessionPanel task-14 分身会话浮层（FR-08 / design §5.E）", ()
     );
   }
 
-  /** 展开团队块并点击子会话形态分身行（触发 onOpenWorkerSession 上抛）。 */
+  /** 展开团队块并点击子会话形态分身行（触发 onOpenWorkerSession 上抛）。
+   *  ql-20260826-010：块收编进头部下拉，先展开「后台」目录再进块。 */
   async function openWorkerSessionOverlay() {
+    await openActivityCatalog();
     fireEvent.click(await screen.findByText("展开 ▾"));
     fireEvent.click(
       screen.getByRole("button", { name: "查看分身会话：实现" }),
@@ -481,14 +502,13 @@ describe("SessionPanel task-14 分身会话浮层（FR-08 / design §5.E）", ()
       expect(sessionApi.getAgentSession).toHaveBeenCalledWith(SUB_SESSION_ID),
     );
 
-    // 关闭浮层：返回主控——浮层卸载、主控团队列表 + 输入框原样保留（state 不丢）。
+    // 关闭浮层：返回主控——浮层卸载、主控团队列表 + 输入框原样保留（state 不丢；
+    // ql-20260826-010 关闭按钮点击经 document 收起过下拉，重展开核对列表仍在）。
     fireEvent.click(screen.getByRole("button", { name: "关闭分身会话" }));
     await waitFor(() =>
-      expect(
-        screen.queryByRole("dialog", { name: "分身会话" }),
-      ).not.toBeInTheDocument(),
+      expect(screen.queryByRole("dialog", { name: "分身会话" })).not.toBeInTheDocument(),
     );
-    expect(screen.getByLabelText("会话团队任务列表")).toBeInTheDocument();
+    await openActivityCatalog();
     expect(
       screen.getByPlaceholderText(/消息将排队|继续追问/),
     ).toBeInTheDocument();
@@ -520,12 +540,10 @@ describe("SessionPanel task-14 分身会话浮层（FR-08 / design §5.E）", ()
 
     fireEvent.click(screen.getByRole("button", { name: "关闭分身会话" }));
     await waitFor(() =>
-      expect(
-        screen.queryByRole("dialog", { name: "分身会话" }),
-      ).not.toBeInTheDocument(),
+      expect(screen.queryByRole("dialog", { name: "分身会话" })).not.toBeInTheDocument(),
     );
-    // 主控面板未卸载：团队列表 + 主输入仍在（流与输入状态不丢）。
-    expect(screen.getByLabelText("会话团队任务列表")).toBeInTheDocument();
+    // 主控面板未卸载：团队列表（重展开下拉核对）+ 主输入仍在（流与输入状态不丢）。
+    await openActivityCatalog();
     expect(screen.getByPlaceholderText(/继续追问/)).toBeInTheDocument();
   });
 });

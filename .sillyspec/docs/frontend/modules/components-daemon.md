@@ -4,13 +4,13 @@ doc_type: module-card
 module_id: components-daemon
 author: qinyi
 created_at: 2026-08-18 01:45:00
-updated_at: 2026-08-23 10:10:26
+updated_at: 2026-08-26 19:45:00
 ---
 
 # Daemon 运行时交互组件（components-daemon）
 
 ## 定位
-Daemon 运行时 / 机器 / 会话交互组件（`components/daemon/`，12 源文件 + 十余套测试）。三块职责：
+Daemon 运行时 / 机器 / 会话交互组件（`components/daemon/`，13 源文件 + 十余套测试）。三块职责：
 ① 运行时管理页展示（machine-card 手风琴机器卡 + runtime-card 运行时卡 + helpers 格式化件）；
 ② 会话交互（session-panel 共享双模式面板【2026-08-21-session-message-queue 起，sessions 页与弹窗统一实现 + useMessageQueue 排队；2026-08-22-session-panel-unify 起适配层已删、chrome 统一 antd】、runtime-session-dialog 统一弹窗、
 turn-timeline 消息流、session-input-bar 输入区、session-list-layout 公共列表）；
@@ -61,6 +61,16 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
     completed 的伪态不再遮蔽失败轮；viewMode（对话/进度）按会话 localStorage
     持久化（page 模式，挂载 effect 回读防 hydration mismatch；dialog 无刷新
     恢复场景不持久化）。
+  - ql-20260826-010 三项行为修正（两模式同步）：
+    ① 发送成功清草稿改 **trim 比对**（`onSendSettled`：`prev.trim() === prompt`）——
+    handleSend 发的是 `input.trim()`，粘贴带尾随空白时精确比对永不清空，已发送
+    消息残留输入框并被草稿持久化放大；发送窗口期新输入仍不覆盖（trim 不等即保留）。
+    ② 派团队弹层确认后输入框回填 **前置 /team 指令**（`/team <objective>`，空目标
+    裸 `/team`）——裸 objective 纯文本常被主控 agent 当普通聊天不派发分身；
+    回填前 await mission 刷新，activeTeamMission 已就位。
+    ③ `/team` 前缀拦截在**已有活跃 mission 时放行直发**（handleSend 判
+    `teamMissions.some(isActiveTeamMission)`）——否则确认回填的 /team 再发送
+    会被拦截重开弹层死循环；无活跃 mission 时拦截弹层行为不变。
 - ~~`InteractiveSessionPanel`（`interactive-session-panel.tsx`）~~：**已删除**
   （2026-08-22-session-panel-unify task-01）——127 行薄适配层退役，消费方直连
   `SessionPanel mode="dialog"`；其类型 re-export（turn-timeline 5 类型）由消费方
@@ -80,6 +90,17 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
   新增 pending 轮（用户刚发送）例外强制回底。
 - `SessionInputBar`（`session-input-bar.tsx`）：输入区（发送=antd primary、📎=
   antd text，2026-08-22-session-panel-unify；chips 删除为原生 button）。
+  ql-20260826-010：胶囊上缘高度拖拽手柄（mousedown+document mousemove 实时
+  调高，clamp 44px~min(480,视口60%)，`sillyhub.sessions.inputBarHeight` 全局
+  持久化，双击恢复默认清键；挂载懒读回显）。
+- `ActivityCatalog`（`activity-catalog.tsx`，ql-20260826-010）：头部「后台 ▾」
+  下拉（与 SubagentCatalog 同款开合交互：外部点击/Escape 收起），收编原三段
+  常驻区——Bash 命令进度卡（BashProgressCard）/ 后台 Agent 任务卡
+  （AgentTaskCard）/ 会话团队任务块（TeamTaskBlock，取消与分身子会话经 props
+  透传父层）；三源全空返回 null 零占位；运行中触发按钮带脉冲点。session-panel
+  两模式头部挂载（page 在 SubagentCatalog 旁、dialog 在视图切换 tab 前），
+  原消息流与输入区之间的三段常驻 JSX 已删（仅保留一行「后台任务仍在运行」
+  提示，无活跃 turn 且有 running 任务时显示）。
 - `SessionListLayout`（`session-list-layout.tsx`）：公共会话列表（2026-08-22-workspace-sessions-portal 起消费面随 ChangeSessionSection 退役收敛，现仅 runtimes 弹窗使用）；调用方 fetch 后 map 成 `SessionListEntry`
   （id/title/statusBadge/secondaryText/lastActiveAt）传入；`onDelete` 可选
   （runtimes 传删除按钮）；title 空回退 shortId。

@@ -97,15 +97,15 @@ import { SessionConfigBar } from "@/components/sessions/session-config-bar";
 import { SubagentCatalog } from "@/components/sessions/subagent-catalog";
 import { ApiError } from "@/lib/api";
 import { useNotify } from "@/lib/errors";
-import { TeamTaskBlock, isActiveTeamMission } from "@/components/daemon/team-task-block";
+import { isActiveTeamMission } from "@/components/daemon/team-task-block";
+import { ActivityCatalog } from "@/components/daemon/activity-catalog";
 import { TeamTriggerPopover } from "@/components/daemon/team-trigger-popover";
 import {
   AgentLogCard,
   AgentLogSessionBody,
 } from "@/components/daemon/agent-log-card";
 import { PlanApprovalCard } from "@/components/daemon/plan-approval-card";
-import { BashProgressCard, type BashChunkItem } from "@/components/daemon/bash-progress-card";
-import { AgentTaskCard } from "@/components/daemon/agent-task-card";
+import { type BashChunkItem } from "@/components/daemon/bash-progress-card";
 import type {
   PlanModeEnteredEvent,
   PlanSummary,
@@ -1473,10 +1473,12 @@ function SessionPanelPage({
    * 发送成功（直发建轮或入服务端队列）后收敛输入区：清草稿与附件 chips。
    * ql-20260825-011 改为「响应成功后才清」（原入队即清）——失败路径草稿与
    * 附件原地保留可改后重发；用户在发送窗口期新输入的内容不覆盖（仅清与
-   * 所发原文相同的草稿）。
+   * 所发原文相同的草稿）。ql-20260826-010：精确比对改 trim 比对——handleSend
+   * 发送的是 input.trim()，粘贴多行文本带尾随换行时 prev !== prompt 永不清空，
+   * 已发送消息残留在输入框并被草稿持久化放大（切换会话/刷新回显）。
    */
   const onSendSettled = useCallback((prompt: string, attachmentIds: string[]) => {
-    setInput((prev) => (prev === prompt ? "" : prev));
+    setInput((prev) => (prev.trim() === prompt ? "" : prev));
     setPendingAttachments((prev) =>
       attachmentIds.length === 0 ? prev : prev.filter((a) => !attachmentIds.includes(a.id)),
     );
@@ -1642,6 +1644,10 @@ function SessionPanelPage({
    * 成功：关弹层 + 刷新 mission 列表（TeamTaskBlock/chip 即时呈现）+ objective
    * 回填输入框（「就绪，随下条消息发出」——CC-09 首条 inject 回填 mission objective）。
    * 失败：弹层保持打开，行内中文文案提示（409 活跃冲突/403 项目权限/422 参数）。
+   * ql-20260826-010：回填文本前置 /team 指令——裸 objective 纯文本发给 agent 时
+   * 常被当普通聊天回复不派发分身；/team 前缀让主控轮明确收到团队指令语义。
+   * 刷新 mission 在回填前 await——回填时 activeTeamMission 已就位，紧接发送
+   * 不会被 /team 拦截重开弹层（拦截放行见 handleSend）。
    */
   const handleTeamTrigger = useCallback(
     async (payload: TeamMissionTriggerRequest) => {
@@ -1653,7 +1659,9 @@ function SessionPanelPage({
         await triggerSessionTeamMission(sessionId, payload);
         closeTeamPopover();
         await refreshTeamMissions();
-        if (payload.objective) setInput(payload.objective);
+        setInput(
+          payload.objective ? `/team ${payload.objective.trim()}` : "/team",
+        );
       } catch (err) {
         setTeamError(teamTriggerErrorText(err));
       } finally {
@@ -1672,11 +1680,15 @@ function SessionPanelPage({
    * gen:types 后 SessionCreateTeamMission 已收敛为生成版
    * TeamMissionCreateBlock，断言精确 → 宽松结构安全）+ 关弹层 + objective
    * 回填输入框（非空时），等首句随 create 上送（handlePreSessionSend）。
+   * ql-20260826-010：回填前置 /team 指令（同 handleTeamTrigger——首句带团队
+   * 指令语义，预会话无拦截回路，直接随 create 上送）。
    */
   const handlePreTeamTrigger = useCallback(
     (payload: TeamMissionTriggerRequest) => {
       setPreTeamMission(payload as SessionCreateTeamMission);
-      if (payload.objective) setInput(payload.objective);
+      setInput(
+        payload.objective ? `/team ${payload.objective.trim()}` : "/team",
+      );
       closeTeamPopover();
     },
     [closeTeamPopover],
@@ -1773,8 +1785,18 @@ function SessionPanelPage({
     }
     // task-11（D-004 四路等价）：/team 前缀拦截——不直接发送，弹层确认后目标文本
     // 随下条消息发出（objective 预填去前缀文本）。仅 Claude 会话且可发消息时拦截。
+    // ql-20260826-010：已有活跃 mission（弹层确认预建/R-07 单活跃）时放行直发——
+    // 确认后回填的 /team 指令若再被拦截会陷入「弹层⇄回填」死循环，且该轮本就
+    // 该走主控轮 briefing 注入派发分身。
     const teamCmd = parseTeamCommand(prompt);
-    if (teamCmd !== null && sessionEngine === "claude" && !ended && machineOnline) {
+    const hasActiveMission = teamMissions.some((m) => isActiveTeamMission(m.status));
+    if (
+      teamCmd !== null &&
+      !hasActiveMission &&
+      sessionEngine === "claude" &&
+      !ended &&
+      machineOnline
+    ) {
       openTeamPopover(teamCmd || null);
       setInput("");
       return;
@@ -1795,7 +1817,7 @@ function SessionPanelPage({
       return;
     }
     void sendFromQueue(prompt, attachmentIds);
-  }, [input, sessionId, session, ended, machineOnline, running, isQueueFull, pendingAttachments, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend]);
+  }, [input, sessionId, session, ended, machineOnline, running, isQueueFull, pendingAttachments, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions]);
 
   const handleInterrupt = useCallback(async () => {
     // task-03（R-01）：预会话态无可打断轮（按钮本就禁用，防御性短路）。
@@ -2332,6 +2354,22 @@ function SessionPanelPage({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {/* ql-20260826-010：后台活动目录——bash/后台任务/团队任务收编头部下拉
+              （原三段常驻消息流与输入区之间挤占聊天窗口）。 */}
+          <ActivityCatalog
+            bashProgress={bashProgress}
+            agentTasks={agentTasks}
+            missions={teamMissions}
+            workspaceId={
+              session.workspace_id ?? preContext?.workspaceId ?? null
+            }
+            onRefreshMissions={() => {
+              void refreshTeamMissions();
+            }}
+            onOpenWorkerSession={(subSessionId) => {
+              setWorkerSessionId(subSessionId);
+            }}
+          />
           {/* task-09（FR-04 / Grill X-09）：子代理目录——仅 page 模式头部挂载
               （dialog 模式不挂）；无子代理段时组件返回 null 不占位。 */}
           <SubagentCatalog turns={displayTurns} onJumpTo={handleJumpToSubagent} />
@@ -2441,39 +2479,9 @@ function SessionPanelPage({
       />
       )}
 
-      {/* task-11：会话团队任务块（TeamTaskBlock）——消息流末尾/输入区上方渲染会话
-          mission 列表（listSessionTeamMissions created_at 倒序全部渲染、活跃在前，
-          R-07 单活跃约束下至多一个活跃）；取消成功 onRefresh 重拉，活跃期间父层
-          5s 轮询刷新（终态停止，见 useSessionTeamMissions）。
-          ql-20260825-011：区域限高滚动（默认收起后多任务也只占概要行高度，
-          不再挤占聊天窗口）。 */}
-      {teamMissions.length > 0 && (
-        <div
-          aria-label="会话团队任务列表"
-          className="flex max-h-[220px] shrink-0 flex-col gap-1.5 overflow-y-auto border-t border-border bg-card px-5 py-2"
-        >
-          {[...teamMissions]
-            .sort(
-              (a, b) =>
-                Number(isActiveTeamMission(b.status)) -
-                Number(isActiveTeamMission(a.status)),
-            )
-            .map((m) => (
-              <TeamTaskBlock
-                key={m.mission_id}
-                summary={m}
-                workspaceId={session?.workspace_id ?? preContext?.workspaceId ?? null}
-                onRefresh={() => {
-                  void refreshTeamMissions();
-                }}
-                // task-14：分身行点击 → 浮层复用 SessionPanel 打开分身子会话。
-                onOpenWorkerSession={(subSessionId) => {
-                  setWorkerSessionId(subSessionId);
-                }}
-              />
-            ))}
-        </div>
-      )}
+      {/* task-11：会话团队任务块（TeamTaskBlock）——ql-20260826-010 起收编进头部
+          ActivityCatalog 下拉（原常驻区挤占聊天窗口）；取消/分身子会话交互经
+          ActivityCatalog props 透传，活跃期间父层 5s 轮询刷新不变（终态停止）。 */}
 
       {/* task-09：plan 模式待确认卡片——planPending 存在时渲染，用户操作后 onSubmitted 清除。 */}
       {planPending && (
@@ -2487,43 +2495,14 @@ function SessionPanelPage({
           />
         </div>
       )}
-      {/* task-09：bash 命令进度卡片——bashProgress 存在时渲染。
-          ql-20260825-011：仅「进度」视图渲染（Bash running 不占对话窗口，运行
-          概要看轮级状态条的 currentActivity，详情切进度视图点开）。 */}
-      {bashProgress && viewMode === "all" && (
-        <div className="shrink-0 border-t border-border bg-card px-5 py-3">
-          <BashProgressCard
-            command={bashProgress.command}
-            status={bashProgress.status}
-            exitCode={bashProgress.exitCode}
-            elapsedMs={bashProgress.elapsedMs}
-            chunks={bashProgress.chunks}
-          />
-        </div>
-      )}
-      {/* verify P1 返工（FR-03）：后台 Agent 任务卡片。存在 running 任务且当前无
-          活跃 turn 时提示「后台任务仍在运行」——会话不提前标记完成。
-          ql-20260825-011：任务卡仅「进度」视图渲染（提示行两视图都保留）。 */}
-      {agentTasks.length > 0 && (
-        <div className="shrink-0 space-y-2 border-t border-border bg-card px-5 py-3">
-          {turnState.currentRunId == null &&
-            agentTasks.some((t) => t.status === "running") && (
-              <p className="text-xs font-medium text-brand-700">
-                后台任务仍在运行，会话未结束
-              </p>
-            )}
-          {viewMode === "all" &&
-            agentTasks.map((task) => (
-              <AgentTaskCard
-                key={task.taskId}
-                taskId={task.taskId}
-                taskName={task.taskName}
-                status={task.status}
-                progress={task.progress}
-                message={task.message}
-              />
-            ))}
-        </div>
+      {/* task-09：bash 命令进度卡片 + verify P1 后台 Agent 任务卡——ql-20260826-010
+          起收编进头部 ActivityCatalog 下拉（原「进度」视图常驻区挤占聊天窗口），
+          详情点头部「后台」展开。此处仅保留一行「后台任务仍在运行」提示
+          （无活跃 turn 且有 running 任务时会话不能提前标记完成）。 */}
+      {turnState.currentRunId == null && agentTasks.some((t) => t.status === "running") && (
+        <p className="shrink-0 px-5 pb-1 pt-2 text-xs font-medium text-brand-700">
+          后台任务仍在运行，会话未结束（详情见头部「后台」）
+        </p>
       )}
 
       {/* 输入区：ctx 用量行 + 输入框 + 配置控件条（原型 .input-zone） */}
@@ -2916,9 +2895,11 @@ function SessionPanelDialog(props: SessionPanelProps) {
   /**
    * ql-20260825-011：发送成功（直发建轮或入服务端队列）后收敛输入区——清草稿
    * 与附件 chips（失败路径原地保留可改后重发；不覆盖发送窗口期新输入的内容）。
+   * ql-20260826-010：trim 比对（同 page 模式——prompt 是 input.trim()，尾随
+   * 空白不比对会导致已发送消息残留输入框）。
    */
   const onSendSettled = useCallback((prompt: string, attachmentIds: string[]) => {
-    setInput((prev) => (prev === prompt ? "" : prev));
+    setInput((prev) => (prev.trim() === prompt ? "" : prev));
     setPendingAttachments((prev) =>
       attachmentIds.length === 0 ? prev : prev.filter((a) => !attachmentIds.includes(a.id)),
     );
@@ -3526,6 +3507,9 @@ function SessionPanelDialog(props: SessionPanelProps) {
    * 弹层确认 → triggerSessionTeamMission 预建；成功刷新 mission 列表 +
    * onTeamMissionCreated 上报（透传位保留，父级可挂 TeamProgress）+ objective
    * 回填输入框；失败弹层保持打开，行内中文文案（409/403/422）。
+   * ql-20260826-010：回填前置 /team 指令（同 page 模式——裸 objective 常被
+   * agent 当普通聊天不派发；刷新 mission 在回填前 await，回填时 activeTeamMission
+   * 已就位，紧接发送不被 /team 拦截重开弹层）。
    */
   const handleTeamTrigger = useCallback(
     async (payload: TeamMissionTriggerRequest) => {
@@ -3538,7 +3522,9 @@ function SessionPanelDialog(props: SessionPanelProps) {
         closeTeamPopover();
         onTeamMissionCreated?.(summary.mission_id);
         await refreshTeamMissions();
-        if (payload.objective) setInput(payload.objective);
+        setInput(
+          payload.objective ? `/team ${payload.objective.trim()}` : "/team",
+        );
       } catch (err) {
         setTeamError(teamTriggerErrorText(err));
       } finally {
@@ -3579,9 +3565,13 @@ function SessionPanelDialog(props: SessionPanelProps) {
     // task-11（D-004 四路等价）：/team 前缀拦截——不发送，弹层确认后目标随下条
     // 消息发出（objective 预填去前缀文本）。仅 Claude 引擎且已有 active 会话时
     // 拦截（idle 无会话可挂 mission / 非 active 原路发送）。
+    // ql-20260826-010：已有活跃 mission（弹层确认预建）时放行直发——确认后
+    // 回填的 /team 指令若再被拦截会陷入「弹层⇄回填」死循环（同 page 模式）。
     const teamCmd = parseTeamCommand(prompt);
+    const hasActiveMission = teamMissions.some((m) => isActiveTeamMission(m.status));
     if (
       teamCmd !== null &&
+      !hasActiveMission &&
       provider === "claude" &&
       view.sessionId &&
       view.status === "active"
@@ -3673,7 +3663,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
     } catch {
       /* errorMsg 已写入 view（占位轮回滚），此路径不向上抛 */
     }
-  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.sessionId, view.currentRunId, isQueueFull, provider, changeId, workspaceId, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments]);
+  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.sessionId, view.currentRunId, isQueueFull, provider, changeId, workspaceId, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, teamMissions]);
 
   // 失败轮次「重新发送」——复用 submitFollowup 重新提交该 turn 的 prompt。受
   // turn 级串行 / active 守卫；retryable=false 的错误由 RunErrorItem 隐藏按钮
@@ -3939,6 +3929,20 @@ function SessionPanelDialog(props: SessionPanelProps) {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            {/* ql-20260826-010：后台活动目录（bash/后台任务/团队任务头部下拉，
+                同 page 模式——原三段常驻区挤占会话窗口）。 */}
+            <ActivityCatalog
+              bashProgress={bashProgress}
+              agentTasks={agentTasks}
+              missions={teamMissions}
+              workspaceId={workspaceId ?? null}
+              onRefreshMissions={() => {
+                void refreshTeamMissions();
+              }}
+              onOpenWorkerSession={(subSessionId) => {
+                setWorkerSessionId(subSessionId);
+              }}
+            />
             {/* 对话/进度二态切换（仅在有消息时出现；page 模式同款 JSX）。 */}
             {view.turns.length > 0 && (
               <div
@@ -4069,36 +4073,8 @@ function SessionPanelDialog(props: SessionPanelProps) {
         emptyProviderLabel={getProviderLabel(provider)}
       />
 
-      {/* task-11：会话团队任务块（TeamTaskBlock）——消息流末尾/输入区上方渲染会话
-          mission 列表（倒序全部渲染、活跃在前）；取消成功 onRefresh 重拉，活跃期间
-          5s 轮询刷新（终态停止）。 */}
-      {teamMissions.length > 0 && (
-        <div
-          aria-label="会话团队任务列表"
-          className="flex max-h-[220px] shrink-0 flex-col gap-1.5 overflow-y-auto border-t border-border bg-card px-5 py-2"
-        >
-          {[...teamMissions]
-            .sort(
-              (a, b) =>
-                Number(isActiveTeamMission(b.status)) -
-                Number(isActiveTeamMission(a.status)),
-            )
-            .map((m) => (
-              <TeamTaskBlock
-                key={m.mission_id}
-                summary={m}
-                workspaceId={workspaceId ?? null}
-                onRefresh={() => {
-                  void refreshTeamMissions();
-                }}
-                // task-14：分身行点击 → 浮层复用 SessionPanel 打开分身子会话。
-                onOpenWorkerSession={(subSessionId) => {
-                  setWorkerSessionId(subSessionId);
-                }}
-              />
-            ))}
-        </div>
-      )}
+      {/* task-11：会话团队任务块——ql-20260826-010 起收编进头部 ActivityCatalog
+          下拉（同 page 模式）；取消/分身子会话交互经 props 透传，活跃 5s 轮询不变。 */}
 
       {/* task-09：plan 模式待确认卡片——planPending 存在时渲染，用户操作后 onSubmitted 清除。 */}
       {planPending && (
@@ -4112,41 +4088,12 @@ function SessionPanelDialog(props: SessionPanelProps) {
           />
         </div>
       )}
-      {/* task-09：bash 命令进度卡片——bashProgress 存在时渲染。
-          ql-20260825-011：仅「进度」视图渲染（Bash running 不占对话窗口）。 */}
-      {bashProgress && viewMode === "all" && (
-        <div className="shrink-0 border-t border-border bg-card px-5 py-3">
-          <BashProgressCard
-            command={bashProgress.command}
-            status={bashProgress.status}
-            exitCode={bashProgress.exitCode}
-            elapsedMs={bashProgress.elapsedMs}
-            chunks={bashProgress.chunks}
-          />
-        </div>
-      )}
-      {/* verify P1 返工（FR-03）：后台 Agent 任务卡片（dialog 模式，与 page 同款）。
-          ql-20260825-011：任务卡仅「进度」视图渲染（提示行两视图都保留）。 */}
-      {agentTasks.length > 0 && (
-        <div className="shrink-0 space-y-2 border-t border-border bg-card px-5 py-3">
-          {view.currentRunId == null &&
-            agentTasks.some((t) => t.status === "running") && (
-              <p className="text-xs font-medium text-brand-700">
-                后台任务仍在运行，会话未结束
-              </p>
-            )}
-          {viewMode === "all" &&
-            agentTasks.map((task) => (
-              <AgentTaskCard
-                key={task.taskId}
-                taskId={task.taskId}
-                taskName={task.taskName}
-                status={task.status}
-                progress={task.progress}
-                message={task.message}
-              />
-            ))}
-        </div>
+      {/* task-09 bash 进度卡 + verify P1 后台任务卡——ql-20260826-010 起收编进头部
+          ActivityCatalog 下拉（同 page 模式），此处仅保留运行中提示行。 */}
+      {view.currentRunId == null && agentTasks.some((t) => t.status === "running") && (
+        <p className="shrink-0 px-5 pb-1 pt-2 text-xs font-medium text-brand-700">
+          后台任务仍在运行，会话未结束（详情见头部「后台」）
+        </p>
       )}
 
       {/* 排队消息条（design §3.2 / 目标 3：dialog 与 page 共用；空队列组件自返回
