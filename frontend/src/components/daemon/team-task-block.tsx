@@ -329,7 +329,11 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
 
   return (
     <section
-      className="w-full self-stretch overflow-hidden rounded-[10px] border border-violet-200 bg-violet-50/55"
+      // ql-20260826-008：shrink-0 必须有——父层（session-panel 会话团队任务列表）
+      // 是 flex-col + max-h + overflow-y-auto，flex 子项默认 shrink:1 会被压到
+      // 容器高内（配合本节点 overflow-hidden 裁掉底部分身行，且父层永不溢出、
+      // 滚动条不出现）；保持自然高度才能让父层限高滚动真正生效。
+      className="w-full shrink-0 self-stretch overflow-hidden rounded-[10px] border border-violet-200 bg-violet-50/55"
       aria-label="团队任务"
     >
       {/* 概要行（常驻，点击折叠/展开；ql-20260825-011：拖选文字不触发折叠） */}

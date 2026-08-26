@@ -556,3 +556,18 @@ describe("TeamTaskBlock latest_action 预览（UX③）", () => {
     expect(screen.queryByText(/↳/)).toBeNull();
   });
 });
+
+/* ── ql-20260826-008：展开后内容被裁剪无滚动条（flex shrink 压扁） ── */
+describe("TeamTaskBlock 布局回归（ql-20260826-008）", () => {
+  // jsdom 不做真实布局，滚动/裁剪无法直接观测；本用例断言根节点
+  // flex-shrink: 0（shrink-0）——它决定了父层（session-panel 会话团队任务
+  // 列表 flex-col + max-h + overflow-y-auto）的限高滚动能否生效：
+  // shrink:1 时块被压进容器高内，自身 overflow-hidden 裁掉底部分身行
+  // 且父层永不溢出（滚动条不出现），即用户反馈的 bug 形态。
+  it("根节点 shrink-0：展开多分身不被 flex 容器压扁，父层限高滚动生效", () => {
+    render(<TeamTaskBlock summary={makeSummary()} />);
+    expandBlock();
+    const section = screen.getByLabelText("团队任务");
+    expect(section.className).toContain("shrink-0");
+  });
+});

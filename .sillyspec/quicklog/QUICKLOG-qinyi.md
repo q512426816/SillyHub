@@ -403,3 +403,21 @@
 根因：服务器 nginx 把 /daemon/install.ps1 当静态文件直出（application/octet-stream 无 charset）且源文件为 UTF-8 无 BOM，WinPS5.1 对无 BOM .ps1 按 GBK 解码，中文乱码切碎字符串引号致解析报错
 方案：install.ps1 头部加 UTF-8 BOM（保留 CRLF）；dist_router.py read_text 由 utf-8 改 utf-8-sig 剥 BOM 防 ufeff 污染 iex 管道；daemon.md 补编码契约文档
 结果：磁盘文件带 BOM 通过；后端读出首字符 # 无 BOM 残留通过；占位符替换 server_url 通过；body re-encode 无 BOM(iex 安全)通过；PowerShell ParseFile/ParseInput 均 0 解析错误（原无 BOM 报多个错）；body 7 行中文正常可读；dist_router.py 语法 OK。现成 pytest 因本地缺 aiobotocore（既有环境债与本改无关）跑不了，已用 stub 应用直测 get_install_ps1 真实行为代替
+
+## ql-20260826-007-8666 | 2026-08-26 10:12:16 | 工作区slug新建时可编辑（默认从名称派生）创建后不可修改
+状态：进行中
+关联变更：（无）
+文件：frontend/src/components/workspace-scan-dialog.tsx, frontend/src/lib/workspaces.ts, backend/app/modules/workspace/service.py, backend/app/modules/workspace/schema.py
+
+## ql-20260826-008-55ce | 2026-08-26 10:12:55 | 修复团队任务块展开后分身列表被裁剪且无滚动条
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/team-task-block.tsx（根 section 加 shrink-0 + 注释说明父层限高滚动依赖）
+- frontend/src/components/daemon/__tests__/team-task-block.test.tsx（补 ql-20260826-008 布局回归用例（shrink-0 class 断言））
+- .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md（新建 frontend 变更索引 sidecar（backend 同款先例））
+需求：修复团队任务块展开后分身列表被裁剪且无滚动条
+根因：session-panel 会话团队任务列表容器是 flex-col + max-h-220px + overflow-y-auto，TeamTaskBlock 根节点缺 shrink-0 被 flex 默认 shrink:1 压扁，配合块自身 overflow-hidden 把底部分身行裁掉，且父层因子项被压缩而永不溢出、滚动条不出现
+方案：team-task-block.tsx 根 section 补 shrink-0 保持自然高度，父层限高滚动真正生效；补回归用例断言根节点含 shrink-0；新建 frontend.changelog.md sidecar 记变更索引（backend 同款先例）
+结果：team-task-block 27 + session-panel-team 12 共 39 测试全绿（含新增回归用例），tsc --noEmit 0 错误，未跑 lint/部署
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/__tests__/team-task-block.test.tsx
