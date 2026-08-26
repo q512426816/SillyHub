@@ -824,7 +824,11 @@ class TestCreateSessionTeamMissionPrebuild:
             and call.args[1] == DAEMON_MSG_SESSION_INJECT
             and call.args[2].get("run_id") == str(result.agent_run.id)
         )
-        assert payload["prompt"] == user_prompt
+        # P0 修复（2026-08-26）：首轮 SESSION_INJECT 发 dispatch_prompt（含简报前缀）
+        # 而非裸用户原文——主控必须收到简报才能当项目经理（原裸 prompt 致
+        # Unknown command: /team，真实派团队测试实证）。
+        assert "【团队任务简报" in payload["prompt"]
+        assert payload["prompt"].endswith(user_prompt)
 
     @pytest.mark.asyncio
     async def test_create_midway_failure_rolls_back_all_rows(

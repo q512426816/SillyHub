@@ -1516,7 +1516,13 @@ class SessionService:
                 "session_id": str(session.id),
                 "lease_id": str(dispatch.lease_id),
                 "run_id": str(run.id),
-                "prompt": prompt,
+                # P0 修复（2026-08-26，真实派团队测试发现）：首轮 SESSION_INJECT
+                # 必须发 **dispatch_prompt**（含团队简报/变更前导/页面前导拼接），
+                # 而非裸 prompt——daemon inject() 消费 SESSION_INJECT 后会清掉
+                # firstPrompt 挂起（session-manager _pendingFirstPrompt），lease
+                # metadata 的简报版 prompt 永远不会被 fallback 消费。原裸 prompt
+                # 导致主控收不到团队简报，把 /team 当普通命令回 Unknown command。
+                "prompt": dispatch_prompt,
                 # gap-2：首 turn SESSION_INJECT 携带 lease 级 claim_token，
                 # daemon 存入 SessionState.claimToken。
                 "claim_token": dispatch.claim_token,
