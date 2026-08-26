@@ -55,3 +55,24 @@ created_at: 2026-08-26 09:10:00
 - impacts: [R-01, tasks task-04]
 - evidence: 2026-08-26 AskUserQuestion（用户选"先设计，部署时再调"）
 - priority: P0
+
+## D-006@v1: 复用既有 bsp-onlyoffice 容器（不新增 DS 实例）
+- type: architecture
+- status: accepted
+- source: user
+- question: Docker 里已有另一个项目的 OnlyOffice 容器，复用还是新下载？
+- answer: 复用 bsp-onlyoffice（onlyoffice/documentserver:latest，healthcheck 200，api.js 宿主机 8080 可达，JWT_ENABLED=true）。收益：免下载 3GB 镜像、免新增 2GB 内存（R-01 硬阻塞消除——DS 已占 1.24GB 含在现有 3.8GB 内）、免维护第二实例。
+- normalized_requirement: backend 经 .env 三项接入（PUBLIC_URL=http://127.0.0.1:8080 局域网改 IP、JWT_SECRET=dev_secret_change_me、FILE_BASE_URL=http://host.docker.internal:8000 供 DS 容器回拉）；compose 不加 onlyoffice 服务。
+- impacts: [design §5/§9 R-01 消除、task-02 改为接入配置、task-04 免内存门禁]
+- evidence: docker inspect/stats 实测（2026-08-26）；用户 2026-08-26 提出
+- priority: P0
+
+## D-007@v1: 共用实例风险登记（bsp 侧变更波及）
+- type: risk
+- status: accepted
+- source: code
+- question: DS 属 bsp 项目，其停机/升级影响？
+- answer: 前端三层降级链兜底（config 503/api.js 失败/onError → 本地渲染器），用户最多回到朴素预览不阻断；文档提示：bsp 停 DS 前告知。dev_secret_change_me 为弱密钥，内网可接受，稳定后建议两项目同步换强密钥。
+- impacts: [FR-02, R-04]
+- evidence: 设计权衡
+- priority: P1

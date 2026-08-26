@@ -112,12 +112,13 @@ export function OnlyofficePreviewer(props: PreviewerProps & {
 
 | 编号 | 风险 | 等级 | 应对 |
 |---|---|---|---|
-| R-01 | Docker VM 内存 3.8GB < DS 需求 | P0 | 部署前置检查（docker info ≥6GB 才起容器）；用户已确认部署时手动调 8GB |
+| R-01 | ~~Docker VM 内存不足~~ | ~~P0~~ | **已消除（D-006 复用 bsp-onlyoffice，DS 内存 1.24GB 已含在现有额度内）** |
 | R-02 | file token 重放 | P1 | 5min TTL + redis jti 一次性消费 + HS256 签名绑定 object_key |
 | R-03 | 局域网 IP 变更致 ds_url 失效 | P1 | ds_url 经 config 端点下发（.env 改即生效，免重 build） |
 | R-04 | DS 容器故障拖垮预览 | P1 | 全链路降级（端点 503/api.js 失败/onError 三层兜底） |
 | R-05 | AGPL 对外边界 | P2 | 内部使用合规；对外（PPM 暴露预览）前需法务复核——文档登记 |
-| R-06 | DS 大版本升级 breaking | P2 | 镜像 tag 固定 9.x；升级走变更流程 |
+| R-06 | DS 大版本升级 breaking | P2 | 镜像 tag 由 bsp 侧管理（latest，升级需联测）；升级走变更流程 |
+| R-07 | 共用 bsp 实例：bsp 停机/升级波及本平台预览 | P1 | 三层降级链兜底（D-007）；dev 弱密钥建议后续两项目同步换强密钥 |
 
 ## 10. 决策追踪
 
