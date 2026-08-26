@@ -68,7 +68,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import password_hasher
 from app.modules.agent.execution import MISSION_WORKER_STAGE
-from app.modules.agent.model import AgentMission, AgentRun
+from app.modules.agent.model import AgentMission, AgentRun, AgentSession
 from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
 from app.modules.ppm.project.model import PpmProjectMaintenance
@@ -318,12 +318,13 @@ async def _setup_cross_ws_project(db_session: AsyncSession, tmp_path) -> dict[st
 async def _fetch_worker_lease(db_session: AsyncSession, run: AgentRun) -> DaemonTaskLease:
     """取分身首 run 绑定的 interactive lease（task-05 子会话派发形态）。
 
-    task-15：dispatch 不再走 batch ``dispatch_to_daemon``，路由证据从其 kwargs
-    迁到真实 ``prepare_interactive_dispatch`` 落库的 lease 行（零网络——无 WS
-    连接时唤醒仅告警不收敛）。
+    agent_runs.lease_id FK → worktree_leases（不写 daemon lease id），
+    需通过 sub_session.lease_id（FK → daemon_task_leases）获取。
     """
-    assert run.lease_id is not None, "子会话派发应回填首 run.lease_id"
-    lease = await db_session.get(DaemonTaskLease, run.lease_id)
+    assert run.agent_session_id is not None
+    sub = await db_session.get(AgentSession, run.agent_session_id)
+    assert sub is not None and sub.lease_id is not None, "子会话 lease_id 不应为 None"
+    lease = await db_session.get(DaemonTaskLease, sub.lease_id)
     assert lease is not None
     return lease
 

@@ -239,6 +239,21 @@ async def _count_subsessions(db: AsyncSession, main_session_id: uuid.UUID) -> in
     return len(list(rows))
 
 
+async def _sub_session_lease_id(db: AsyncSession, parent_id: uuid.UUID) -> uuid.UUID:
+    """获取最新子会话的 lease_id（dispatch 后验证 lease 细节用）。
+
+    agent_runs.lease_id FK → worktree_leases（不写 daemon lease id），
+    需通过 sub_session.lease_id（FK → daemon_task_leases）获取。
+    """
+    sub = (
+        (await db.execute(select(AgentSession).where(AgentSession.parent_session_id == parent_id)))
+        .scalars()
+        .all()
+    )[-1]
+    assert sub.lease_id is not None, "子会话 lease_id 不应为 None"
+    return sub.lease_id
+
+
 async def _worker_runs(db: AsyncSession, mission_id: uuid.UUID) -> list[AgentRun]:
     rows = (
         (
@@ -280,7 +295,9 @@ class TestSubsessionTriple:
         assert data["role"] == "arch"
         assert data["objective"] == "扫描架构"
         assert data["status"] == "pending"
-        assert data["lease_id"]
+        # agent_runs.lease_id FK → worktree_leases（非 daemon_task_leases），
+        # 分身 run 不写 lease_id——锚点走 sub_session.lease_id。
+        assert data.get("lease_id") is None
 
         # 子会话行：parent=主控会话、owner=mission.created_by、三元组绑定字段已回填
         sub_sessions = (
@@ -296,12 +313,12 @@ class TestSubsessionTriple:
         sub = sub_sessions[0]
         assert sub.user_id == owner_id
         assert sub.status == "active"
-        assert sub.lease_id == uuid.UUID(data["lease_id"])
+        assert sub.lease_id is not None
         assert sub.runtime_id == own_rt["runtime_id"]
         assert sub.worker_done_at is None
 
         # interactive lease：kind/stage/role/prompt（分身简报）
-        lease = await _lease(db_session, uuid.UUID(data["lease_id"]))
+        lease = await _lease(db_session, sub.lease_id)
         assert lease.kind == "interactive"
         assert lease.runtime_id == own_rt["runtime_id"]
         meta = _lease_meta(lease)
@@ -358,7 +375,7 @@ class TestSubsessionTriple:
         assert len(runs) == 1
         assert runs[0].role == "worker"  # role 缺省兜底 _DEFAULT_WORKER_ROLE
         assert runs[0].mission_id == mission.id
-        lease = await _lease(db_session, uuid.UUID(resp.json()["lease_id"]))
+        lease = await _lease(db_session, await _sub_session_lease_id(db_session, main_session.id))
         assert _lease_meta(lease)["stage"] == MISSION_WORKER_STAGE
 
     @pytest.mark.asyncio
@@ -380,7 +397,7 @@ class TestSubsessionTriple:
             headers=auth_headers,
         )
         assert resp.status_code == 201, resp.text
-        lease = await _lease(db_session, uuid.UUID(resp.json()["lease_id"]))
+        lease = await _lease(db_session, await _sub_session_lease_id(db_session, _main.id))
         meta = _lease_meta(lease)
         assert meta["prompt"] == "不 commit"
         # 路径A：caller worktree 直接作子会话 cwd（lease metadata cwd）
@@ -404,7 +421,7 @@ class TestSubsessionTriple:
         )
         assert resp.status_code == 201, resp.text
         delegate.git_worktree_add.assert_not_awaited()
-        lease = await _lease(db_session, uuid.UUID(resp.json()["lease_id"]))
+        lease = await _lease(db_session, await _sub_session_lease_id(db_session, _main.id))
         meta = _lease_meta(lease)
         # task-09（can_dispatch 接线）：一层分身（new_tree_depth=1 < 2）非叶，
         # 简报追加「可派工到下一层」段（task-08 契约，D-002@v1 非叶五件工具）。
@@ -696,7 +713,7 @@ class TestRuntimePinning:
             headers=auth_headers,
         )
         assert resp.status_code == 201, resp.text
-        lease = await _lease(db_session, uuid.UUID(resp.json()["lease_id"]))
+        lease = await _lease(db_session, await _sub_session_lease_id(db_session, _main.id))
         assert lease.runtime_id == rep_rt["runtime_id"], "代表钉定应落目标工作区代表机器"
 
         # 首 run 落 target 列 + anchor/target 双关联行
@@ -741,5 +758,5 @@ class TestRuntimePinning:
         )
         assert resp.status_code == 201, resp.text
         assert own_rt is not None
-        lease = await _lease(db_session, uuid.UUID(resp.json()["lease_id"]))
+        lease = await _lease(db_session, await _sub_session_lease_id(db_session, _main.id))
         assert lease.runtime_id == own_rt["runtime_id"]

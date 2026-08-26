@@ -152,9 +152,17 @@ async def _fetch_mission_run(session: AsyncSession, mission_id: uuid.UUID) -> Ag
 
 
 async def _fetch_worker_lease(session: AsyncSession, run: AgentRun) -> DaemonTaskLease:
-    """取分身首 run 绑定的 interactive lease（task-05 子会话派发形态）。"""
-    assert run.lease_id is not None, "子会话派发应回填首 run.lease_id"
-    lease = await session.get(DaemonTaskLease, run.lease_id)
+    """取分身首 run 绑定的 interactive lease（task-05 子会话派发形态）。
+
+    agent_runs.lease_id FK → worktree_leases（不写 daemon lease id），
+    需通过 sub_session.lease_id（FK → daemon_task_leases）获取。
+    """
+    from app.modules.agent.model import AgentSession
+
+    assert run.agent_session_id is not None
+    sub = await session.get(AgentSession, run.agent_session_id)
+    assert sub is not None and sub.lease_id is not None, "子会话 lease_id 不应为 None"
+    lease = await session.get(DaemonTaskLease, sub.lease_id)
     assert lease is not None
     return lease
 

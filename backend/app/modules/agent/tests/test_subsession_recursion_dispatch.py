@@ -381,7 +381,7 @@ class TestRecursiveDispatch:
         assert grandchild.tree_depth == 2
         assert grandchild.parent_session_id == worker.id
         assert grandchild.user_id == owner_id  # D-004@v1：owner=mission.created_by
-        assert grandchild.lease_id == uuid.UUID(data["lease_id"])
+        assert grandchild.lease_id is not None
 
         # 首 run 双标记（mission_id + role）+ 子会话锚
         runs = await _worker_runs(db_session, mission.id)
@@ -392,7 +392,7 @@ class TestRecursiveDispatch:
         assert runs[0].role == "leaf"
 
         # interactive lease：stage + worker_depth=2（task-04 形参接线）
-        lease = await _lease(db_session, uuid.UUID(data["lease_id"]))
+        lease = await _lease(db_session, grandchild.lease_id)
         meta = _lease_meta(lease)
         assert meta["stage"] == MISSION_WORKER_STAGE
         assert meta["role"] == "leaf"
@@ -426,7 +426,7 @@ class TestRecursiveDispatch:
         )
         assert len(sub_rows) == 1
         assert sub_rows[0].tree_depth == 1
-        lease = await _lease(db_session, uuid.UUID(resp.json()["lease_id"]))
+        lease = await _lease(db_session, sub_rows[0].lease_id)
         assert _lease_meta(lease)["worker_depth"] == 1
 
     @pytest.mark.asyncio
@@ -483,7 +483,20 @@ class TestRecursiveDispatch:
 
         # 自建副本被触发（caller worktree 短路未生效）
         delegate.git_worktree_add.assert_awaited_once()
-        lease = await _lease(db_session, uuid.UUID(data["lease_id"]))
+        # WorkerRunResponse.lease_id 为 None（FK→worktree_leases 不写 daemon lease），
+        # 通过子会话获取 lease_id。
+        child_rows = (
+            (
+                await db_session.execute(
+                    select(AgentSession).where(AgentSession.parent_session_id == worker.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(child_rows) == 1
+        child_session = child_rows[0]
+        lease = await _lease(db_session, child_session.lease_id)
         meta = _lease_meta(lease)
         assert meta["cwd"] != "/tmp/caller-wt"
         assert meta["cwd"].endswith(f".worktrees/{data['id'][:8]}")

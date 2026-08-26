@@ -1333,8 +1333,11 @@ async def _dispatch_worker_core(
         if wt_outcome.root_path:
             sub_session.cwd = wt_outcome.root_path
         session.add(sub_session)
-        first_run.lease_id = dispatch.lease_id
-        session.add(first_run)
+        # agent_runs.lease_id FK → worktree_leases，不是 daemon_task_leases；
+        # 写入 daemon lease id 会触发 ForeignKeyViolation（见 placement.py:446
+        # / service.py:1821 / bootstrap.py:554 同款警告）。分身 run 的 lease
+        # 锚点走 sub_session.lease_id（FK → daemon_task_leases ✓），不走 run。
+        # first_run.lease_id 保持 None——勿写 dispatch.lease_id。
         # 首 prompt 落一条 user_input 日志行（历史回看与 create_session 首 turn 同源）。
         session.add(
             AgentRunLog(
