@@ -65,12 +65,12 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
     用 `read_text(utf-8-sig)` 读模板以**剥掉 BOM**（防 `\ufeff` 污染 `irm | iex` 管道），
     响应 `application/x-powershell; charset=utf-8`。
   - nginx 部署契约（2026-08-26 修复）：宿主机 nginx（`/etc/nginx/sites-enabled/crrcdt`）
-    `location /daemon/` 用 `alias /var/www/sillyhub/daemon/` 直出静态目录（install.sh /
-    latest.json / .js bundle 走这份静态，无 server_url 注入需求）；但 `install.ps1` 必须
-    走后端（注入 `{{SERVER_URL}}` + 补 charset），故加精确匹配
-    `location = /daemon/install.ps1 { proxy_pass http://127.0.0.1:8001; ... }`（精确匹配
-    优先于 `/daemon/` 前缀）。曾踩坑：install.ps1 也走静态目录 → 吐无 BOM 旧副本 + 占位符
-    未替换 → 用户下载即 GBK 乱码解析失败。
+    把整个 `location /daemon/` **代理到后端 8001**（install.sh / install.ps1 / latest.json /
+    *.js bundle 统一由 dist_router 从镜像 `/app/daemon-dist/` 吐最新版）。曾踩坑：原配置用
+    `alias /var/www/sillyhub/daemon/` 直出静态目录，那份是 7月旧版——bundle 0.1.0、
+    latest.json `fd0314c`、install.ps1 无 BOM 且 `{{SERVER_URL}}` 占位未替换 → 用户下载
+    install.ps1 即 GBK 乱码解析失败、装到的是 0.1.0 旧 bundle。修复后该静态目录已弃用
+    （文件仍残留在 `/var/www/sillyhub/daemon/`，无害，可后续清理）。
 - 审计子域（audit/）：`POST /api/daemon/audit/batch`（daemon 批量审计上行）+ 查询端点。
 - 其它：`GET|POST /llm-proxy/{path:path}`（daemon 侧 LLM 网关转发）、
   `GET /skills/latest/manifest`（skills bundle 分发，agent 模块消费）。
