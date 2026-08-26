@@ -1151,6 +1151,58 @@
             }
           }
         }
+      },
+      "put": {
+        "tags": [
+          "workspace"
+        ],
+        "summary": "Update Workspace Mcp Config",
+        "description": "写 workspace specDir/.mcp.json（2026-08-26-workspace-mcp-edit task-01）。\n\n鉴权 WorkspaceWriter（``require_permission(WORKSPACE_WRITE)`` 自动取路径\n``{workspace_id}`` 做成员校验，非成员 403，同 mcp_gateway/router.py:114 模式）。\nservice 层完成：仅 stdio 校验（D-005@v2）+ ``<set>`` 服务端还原（D-003@v2）+\n原子写（R-01）+ 审计上下文注入；错误经 AppError 全局 handler 序列化，router\n不手写 HTTPException。成功返回写后脱敏视图（与 GET 同构）。",
+        "operationId": "update_workspace_mcp_config_api_workspaces__workspace_id__mcp_config_put",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpConfigUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/McpConfigViewResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/workspaces/{workspace_id}/rescan": {
@@ -13581,17 +13633,46 @@
           "daemon"
         ],
         "summary": "Get Daemon Mcp Config",
-        "description": "返回平台默认 MCP 配置 + server 白名单（**原值不脱敏**，design D-004）。\n\ndaemon 启动 skill-manager / mcp-config 时拉取，用于：\n  * ``platform_default.mcpServers`` → 注入 claude 启动 ``env``（真实值，\n    secret 类 env key 不遮蔽，区别 admin GET D-008）；\n  * ``whitelist`` → 仅放行白名单内的 server。\n\n无配置时返回空结构 ``{\"platform_default\": {\"mcpServers\": {}}, \"whitelist\": []}``，\n不报错（daemon 按\"无平台默认\"处理）。",
+        "description": "返回平台默认 MCP 配置 + server 白名单（**原值不脱敏**，design D-004）。\n\ndaemon 启动 skill-manager / mcp-config 时拉取，用于：\n  * ``platform_default.mcpServers`` → 注入 claude 启动 ``env``（真实值，\n    secret 类 env key 不遮蔽，区别 admin GET D-008）；\n  * ``whitelist`` → 仅放行白名单内的 server。\n\n无配置时返回空结构 ``{\"platform_default\": {\"mcpServers\": {}}, \"whitelist\": []}``，\n不报错（daemon 按\"无平台默认\"处理）。\n\n2026-08-26-workspace-mcp-edit task-03：可选 query ``workspace_id``（UUID），\n提供时响应追加 ``\"workspace\": {\"mcpServers\": {...}}``（读该工作区\n``specDir/.mcp.json`` 明文，见 ``_read_mcp_config_raw``）；不传时响应\n结构与旧版完全一致（R-07 向后兼容，旧 daemon 忽略新字段）。非法 UUID\n→ 422（全局校验处理器中文报错）。",
         "operationId": "get_daemon_mcp_config_api_daemon_mcp_config_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workspace Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Daemon Mcp Config Api Daemon Mcp Config Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -38310,6 +38391,21 @@
         ],
         "title": "LoginRequest"
       },
+      "McpConfigUpdateRequest": {
+        "properties": {
+          "mcpServers": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/McpServerEntryPut"
+            },
+            "type": "object",
+            "title": "Mcpservers"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "McpConfigUpdateRequest",
+        "description": "``PUT /api/workspaces/{id}/mcp-config`` 请求体（wire 格式同 claude .mcp.json）。"
+      },
       "McpConfigViewResponse": {
         "properties": {
           "mcpServers": {
@@ -38357,6 +38453,48 @@
         ],
         "title": "McpServerEntry",
         "description": "单个 MCP server 定义（仿 claude ``.mcp.json`` 结构）。"
+      },
+      "McpServerEntryPut": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": "stdio"
+          },
+          "command": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Command"
+          },
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Args"
+          },
+          "env": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Env"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "command"
+        ],
+        "title": "McpServerEntryPut",
+        "description": "PUT mcp-config 单个 server 条目（仅 stdio，D-005@v2 安全边界）。\n\n``type`` 缺省 ``\"stdio\"``；未知字段拒绝（``extra=\"forbid\"``，防拼写错键静默落盘）。"
       },
       "McpServersSchema": {
         "properties": {

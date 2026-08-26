@@ -41,7 +41,10 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { type DaemonConfig, DEFAULT_CONFIG_DIR, normalizeAllowedRoots } from './config.js';
-import { normalizeWorkerDepth } from './mcp-config.js';
+// task-07（2026-08-26-workspace-mcp-edit / D-007@v2）：会话级 MCP 三件套预取
+// （fetchMcpBundle）+ bundle 类型（会话级缓存值）。
+import { fetchMcpBundle, normalizeWorkerDepth } from './mcp-config.js';
+import type { McpBundle } from './mcp-config.js';
 import { MSG } from './protocol.js';
 // 2026-08-20-session-multimodal-attachments task-09：SESSION_INJECT 附件类型。
 import type { SessionInjectAttachment } from './protocol.js';
@@ -587,6 +590,18 @@ export interface DaemonOptions {
    */
   sessionManager?: SessionManager | null;
   /**
+   * task-07（2026-08-26-workspace-mcp-edit / design §5 Wave2 第 5 条 / D-007@v2）：
+   * 会话级 MCP 三件套缓存（``Map<sessionId, McpBundle>``）。
+   *
+   * cli.ts 装配处创建并与 ``mainAgentMcpConfigProvider`` 共享同一引用：daemon
+   * ``_startInteractiveSession`` 按 ``execPayload.workspaceId`` 调 ``fetchMcpBundle``
+   * 预取写入（create 前 await 完成），provider（同步签名）create/restore/reload
+   * 三路读缓存合并注入；``onSessionEnd`` / create 失败 catch 清理（生命周期=会话）。
+   * 默认 undefined：daemon 内部自建私有 Map（行为等价，仅 provider 侧读不到——
+   * 生产装配必经 cli.ts 注入共享引用；现有测试构造点零改动）。
+   */
+  mcpBundleCache?: Map<string, McpBundle> | null;
+  /**
    * task-10（FR-08）：sessions.json 元数据持久化端口。注入后在 daemon.start
    * 启动时加载可恢复记录 + 状态变更排队 flush。默认 undefined：不持久化
    *（Wave1/2 内存态行为，回退路径：删 sessions.json 即回到 failed 默认路径）。
@@ -788,6 +803,17 @@ export class Daemon {
     string,
     { workspaceId: string }
   >();
+  /**
+   * task-07（2026-08-26-workspace-mcp-edit / D-007@v2）：会话级 MCP 三件套缓存
+   * （sessionId → McpBundle）。
+   *
+   * ``_startInteractiveSession`` 按 workspaceId ``fetchMcpBundle`` 预取 set（create
+   * 前，provider 读到的一定是已预取结果）；``onSessionEnd`` / create 失败 catch
+   * delete（生命周期=会话，防泄漏；幂等）。构造注入优先（cli.ts 与
+   * ``mainAgentMcpConfigProvider`` 共享同一 Map 引用）；未注入自建（现有测试
+   * 构造点零改动，仅 provider 侧读不到缓存——回落空 bundle，见 cli.ts）。
+   */
+  private readonly _mcpBundleBySession: Map<string, McpBundle>;
 
   /**
    * P1-1（2026-06-18）：恢复成功（markReconnected + confirm）后正在 active 运行的
@@ -893,6 +919,8 @@ export class Daemon {
     this._policyCache = options?.policyCache ?? null;
     // task-09（D-007@v2 候选 B）：借用沙箱管理器，构造期注入优先；未注入走 lazy。
     this._borrowWorkspaceManager = options?.borrowWorkspaceManager ?? null;
+    // task-07（D-007@v2）：会话级 MCP bundle 缓存——注入共享引用优先，未注入自建。
+    this._mcpBundleBySession = options?.mcpBundleCache ?? new Map();
     this._persistence = options?.persistence ?? null;
     this._recoveryClient = options?.recoveryClient ?? null;
     this._recoveryConcurrency =
@@ -1872,6 +1900,11 @@ export class Daemon {
     } catch {
       // state 查不到（sessionManager 已 dispose 等极端情况）——忽略。
     }
+
+    // task-07（2026-08-26-workspace-mcp-edit / D-007@v2）：清理会话级 MCP bundle
+    // 缓存（生命周期=会话，防泄漏）。onSessionEnd 是会话终态统一收口（end/fail/
+    // SESSION_END WS 路径均经 SessionManager 终态走到这里），幂等 delete。
+    this._mcpBundleBySession.delete(sessionId);
 
     // ql-20260825-f3#8：清理本 session 的 per-run flatSeq 计数条目（原只增不减）。
     // flatSeq 以 runId 为 key，onTurnMessage 时已记 runId→sessionId 归属，此处反查
@@ -3889,6 +3922,57 @@ export class Daemon {
     }
     // transport !== 'tar'（shared）→ 跳过 pull + 不 set specSyncCtx（onSessionEnd 自然跳过 sync）。
 
+    // task-07（2026-08-26-workspace-mcp-edit / design §5 Wave2 第 5 条 / D-007@v2）：
+    // 会话级 MCP 三件套预取。有 workspaceId（工作区会话，覆盖普通对话 + 主控，
+    // D-008@v1；与 transport 无关）时在 _sessionManager.create（driver spawn，
+    // provider 随 create 被同步调用）**之前** await fetchMcpBundle 拉取「平台默认
+    // + 白名单 + 工作区配置」写入会话级缓存（key=sessionId，与 cli.ts
+    // mainAgentMcpConfigProvider 共享同一 Map 引用——provider 同步签名不能
+    // await，只能读缓存，故必须 create 前完成）。fetchMcpBundle 全链路容错回落
+    // （platform→本地文件 / workspace→空 / whitelist→[]）且设计永不抛，任何失败
+    // 仅 warn 不阻塞会话创建（R-03）。无 workspaceId（quick-chat/legacy shared）
+    // 不预取——provider 缓存 miss 回落空 bundle，行为与现状一致。
+    // restore/reload：reload（会话存活期）缓存条目仍在 → 命中；daemon 重启
+    // restore 内存缓存必然缺失 → provider 回落空 + warn（cli.ts 侧记
+    // mcp_bundle_cache_miss）。同步重取不可行（provider 同步签名 +
+    // PersistedSessionRecord/SESSION_RESUME payload 均不携带 workspaceId，无从
+    // 定向重取）——后续增强点：restore 链路补 workspace 下发 + 异步重取供下次
+    // reload 用（D-007@v2 完整形态，本任务最小实现先回落）。
+    if (workspaceId) {
+      try {
+        const bundle = await fetchMcpBundle(
+          this._config.server_url,
+          this._config.token,
+          workspaceId,
+          (level, msg, data) => {
+            this._logger[level](msg, data);
+          },
+        );
+        this._mcpBundleBySession.set(sessionId, bundle);
+        this._logger.debug('mcp_bundle_prefetched', {
+          session_id: sessionId,
+          workspace_id: workspaceId,
+          platform_servers: Object.keys(bundle.platform.mcpServers).length,
+          workspace_servers: Object.keys(bundle.workspace.mcpServers).length,
+          whitelist_size: bundle.whitelist.length,
+        });
+      } catch (e) {
+        // 防御性兜底（fetchMcpBundle 设计永不抛，此处防意外异常）：写空 bundle
+        // + warn，绝不阻塞会话创建（R-03 / 验收 1）——provider 读到空 bundle
+        // 时仅注入内置双 server，等价现状行为。
+        this._mcpBundleBySession.set(sessionId, {
+          platform: { mcpServers: {} },
+          whitelist: [],
+          workspace: { mcpServers: {} },
+        });
+        this._logger.warn('mcp_bundle_prefetch_failed', {
+          session_id: sessionId,
+          workspace_id: workspaceId,
+          error: (e as Error)?.message ?? String(e),
+        });
+      }
+    }
+
     // ql-20260825-002：原 2026-07-08「派发 prompt 记入 agent 日志」的 user_input
     // 上报已删除——backend create_session 已落一条 user_input（带附件标记行版本，
     // 无论 daemon 死活都在库），daemon 再报一条裸文本造成双日志 + 双回显（首句
@@ -3974,6 +4058,9 @@ export class Daemon {
       // rethrow（不触发 onSessionEnd）——此前注释称「已标 failed（onSessionEnd）」
       // 与实现不符（2026-08-24 会话审查 P2b/daemon H4 修正）。
       this._interactiveSessionsByLease.delete(leaseId);
+      // task-07（D-007@v2）：create 失败路径不经 onSessionEnd，显式清会话级 MCP
+      // bundle 缓存（防泄漏；WS 重放重试时会重新预取，幂等安全）。
+      this._mcpBundleBySession.delete(sessionId);
       const code =
         (e as Error & { code?: string })?.code ??
         (e instanceof Error ? e.name : 'UNKNOWN');

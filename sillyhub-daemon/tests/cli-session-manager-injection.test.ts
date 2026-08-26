@@ -492,3 +492,139 @@ describe('task-06: mainAgentMcpConfigProvider 并入 sillyhub-file（双 server 
     expect(result!['sillyhub-file']!.env?.MCP_SESSION_ID).toBeUndefined();
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// task-08（2026-08-26-workspace-mcp-edit / FR-04 / D-006@v2 + D-007@v2）：
+// mainAgentMcpConfigProvider 三件套合并注入全分支。
+//
+// 覆盖：优先级链（platform < workspace < 内置）、白名单剔除 + rejected warn、
+// admin 白名单为空时内置仍注入（内置名并入白名单参数的回归锚）、缓存 miss
+// （quick-chat / daemon 重启 restore）回落仅内置双 server（= 现状行为）、
+// platform 维度含非 stdio 条目（fetchMcpBundle 仅净化 workspace 维度）时
+// merge 抛错防御回落内置（R-03：会话创建路径永不因配置内容抛错）。
+//
+// 桩策略：沿 task-06 describe——startAction 捕获 provider 与 Daemon 构造
+// options.mcpBundleCache（cli 装配处与 provider 闭包共享同一 Map 引用，
+// task-07 D-007@v2）；测试直接 set bundle 模拟 daemon.ts 预取产物。
+// ════════════════════════════════════════════════════════════════════════════
+
+describe('task-08: 三件套合并注入（platform + workspace + 内置）', () => {
+  let tmpDir = '';
+  let _origArgv: string[];
+  let _origExit: typeof process.exit;
+  let _warnSpy: ReturnType<typeof vi.spyOn>;
+
+  type ProviderCtx = { sessionId: string; leaseId: string; provider: string; cwd: string };
+  type ProviderFn = (ctx: ProviderCtx) =>
+    | Record<string, { command: string; args?: string[]; env?: Record<string, string>; type?: string }>
+    | undefined;
+  type BundleMap = Map<string, { platform: { mcpServers: Record<string, unknown> }; whitelist: string[]; workspace: { mcpServers: Record<string, unknown> } }>;
+
+  beforeEach(async () => {
+    tmpDir = await makeTmpDir('cli-injection-bundle');
+    resetCaptured();
+    _origArgv = process.argv;
+    _origExit = process.exit;
+    process.argv = ['node', 'sillyhub-daemon'];
+    process.exit = ((code?: number) => {
+      void code;
+      return undefined as never;
+    }) as never;
+    _warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(async () => {
+    process.argv = _origArgv;
+    process.exit = _origExit;
+    vi.restoreAllMocks();
+    if (tmpDir) {
+      await cleanupDir(tmpDir);
+    }
+  });
+
+  /** startAction 后取 provider 与共享 bundle 缓存（daemon 构造 options 注入的同一 Map）。 */
+  async function getProviderAndCache(): Promise<{ provider: ProviderFn; cache: BundleMap }> {
+    await cli.startAction({ token: 'test-token' });
+    const provider = captured.sessionManagerInstances[0]!.opts!.mainAgentMcpConfigProvider as ProviderFn;
+    expect(typeof provider).toBe('function');
+    const cache = captured.daemonCtorArgs!.options!.mcpBundleCache as BundleMap;
+    expect(cache).toBeInstanceOf(Map);
+    return { provider, cache };
+  }
+
+  const stdio = (command: string): { type: string; command: string; args: string[] } => ({
+    type: 'stdio',
+    command,
+    args: [],
+  });
+
+  const CTX: ProviderCtx = { sessionId: 'sess-bundle', leaseId: 'lease-1', provider: 'claude', cwd: '/tmp/ws' };
+
+  it('优先级链：workspace 同名覆盖 platform，内置双 server 最高不可覆盖', async () => {
+    const { provider, cache } = await getProviderAndCache();
+    cache.set(CTX.sessionId, {
+      platform: { mcpServers: { shared: stdio('cmd-platform'), 'plat-only': stdio('cmd-plat') } },
+      whitelist: ['shared', 'plat-only', 'ws-only'],
+      workspace: { mcpServers: { shared: stdio('cmd-workspace'), 'ws-only': stdio('cmd-ws') } },
+    });
+    const result = provider(CTX)!;
+    expect(result['shared']!.command).toBe('cmd-workspace'); // workspace 覆盖 platform（D-006@v2）
+    expect(result['plat-only']!.command).toBe('cmd-plat');
+    expect(result['ws-only']!.command).toBe('cmd-ws');
+    // 内置双 server 仍在且为 node 形态（同名配置无法覆盖——内置位最高）
+    expect(result['sillyhub-daemon']!.command).toBe('node');
+    expect(result['sillyhub-file']!.command).toBe('node');
+  });
+
+  it('白名单外 workspace server 被剔除并记 rejected warn（R-05 可观测）', async () => {
+    const { provider, cache } = await getProviderAndCache();
+    cache.set(CTX.sessionId, {
+      platform: { mcpServers: {} },
+      whitelist: ['allowed-ws'],
+      workspace: { mcpServers: { 'allowed-ws': stdio('ok'), rogue: stdio('bad') } },
+    });
+    const result = provider(CTX)!;
+    expect(result['allowed-ws']).toBeDefined();
+    expect(result['rogue']).toBeUndefined(); // 白名单外剔除
+    expect(_warnSpy).toHaveBeenCalledWith(
+      '[cli] mcp_servers_rejected_by_whitelist',
+      expect.objectContaining({ sessionId: CTX.sessionId, rejected: ['rogue'] }),
+    );
+  });
+
+  it('admin 白名单为空时内置双 server 仍注入（内置名并入白名单参数的回归锚，D-006@v2）', async () => {
+    const { provider, cache } = await getProviderAndCache();
+    cache.set(CTX.sessionId, {
+      platform: { mcpServers: {} },
+      whitelist: [],
+      workspace: { mcpServers: {} },
+    });
+    const result = provider(CTX)!;
+    expect(Object.keys(result).sort()).toEqual(['sillyhub-daemon', 'sillyhub-file']);
+  });
+
+  it('缓存 miss（quick-chat 无 workspaceId / daemon 重启 restore）回落仅内置双 server（= 现状行为）+ warn', async () => {
+    const { provider } = await getProviderAndCache();
+    const result = provider({ ...CTX, sessionId: 'sess-cold' })!; // 无缓存条目
+    expect(Object.keys(result).sort()).toEqual(['sillyhub-daemon', 'sillyhub-file']);
+    expect(_warnSpy).toHaveBeenCalledWith(
+      '[cli] mcp_bundle_cache_miss',
+      expect.objectContaining({ sessionId: 'sess-cold', fallback: 'empty_bundle' }),
+    );
+  });
+
+  it('platform 维度含非 stdio 条目（未预净化）时防御回落内置，不抛错不阻塞（R-03）', async () => {
+    const { provider, cache } = await getProviderAndCache();
+    cache.set(CTX.sessionId, {
+      platform: { mcpServers: { 'remote-sse': { type: 'sse', command: 'x', args: [] } } },
+      whitelist: ['remote-sse'],
+      workspace: { mcpServers: {} },
+    });
+    const result = provider(CTX)!; // 不抛错（防御 catch 回落）
+    expect(Object.keys(result).sort()).toEqual(['sillyhub-daemon', 'sillyhub-file']);
+    expect(_warnSpy).toHaveBeenCalledWith(
+      '[cli] mcp_merge_failed_fallback_builtin',
+      expect.objectContaining({ sessionId: CTX.sessionId }),
+    );
+  });
+});

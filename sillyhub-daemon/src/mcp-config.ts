@@ -1,11 +1,21 @@
 /**
- * mcp-config.ts —— MCP 配置合并 + 白名单过滤 + 注入（task-05）。
+ * mcp-config.ts —— MCP 三件套拉取 + 预净化 + 白名单过滤合并 + 内置 server 工厂。
  *
- * 平台默认 MCP（admin 全局）+ workspace 级 `.mcp.json`，按白名单过滤后合并，
- * spawn claude 时注入（写临时 `.mcp.json` 供 `--mcp-config`）。
+ * 真实链路（2026-08-26-workspace-mcp-edit 修正旧「未接线」宣称，规则 18）：
+ *   1. 拉取：``fetchMcpBundle`` 一次调 ``GET /api/daemon/mcp/config?workspace_id=``
+ *      取「平台默认 + 白名单 + 工作区配置」三件套（daemon token 认证）；全链路
+ *      容错回落——platform → 本地 ``~/.sillyhub/daemon/mcp.json``、workspace →
+ *      空配置、whitelist → []，任何失败仅 warn 不阻塞会话创建（R-03）。
+ *   2. 预净化：workspace 配置中非 stdio server 剔除 + warn 不抛错（D-005@v2，
+ *      防存量/手改 ``.mcp.json`` 含 sse/http 条目在会话创建路径抛错）。
+ *   3. 合并注入：daemon.ts 会话创建路径按 workspaceId 预取 bundle 存会话级
+ *      缓存，cli.ts ``mainAgentMcpConfigProvider`` 消费缓存，``mergeMcpConfigs``
+ *      按 platform < workspace < 内置（sillyhub-daemon/sillyhub-file）优先级
+ *      合并 + 白名单过滤后注入 spawn 的 claude（task-07 已接线）。
  *
  * 设计依据：2026-07-07-daemon-skill-execution design.md §5.3（MCP 配置注入）、
- * §7（接口定义）、D-003（平台+workspace 合并策略）。
+ * §7（接口定义）、D-003（平台+workspace 合并策略）；2026-08-26-workspace-mcp-edit
+ * design.md §5 Wave2 / §7.3（fetchMcpBundle）、D-005@v2（非 stdio 预净化）。
  *
  * @module mcp-config
  */
@@ -125,6 +135,138 @@ async function loadMcpConfigFile(path: string, logger?: McpConfigLogger): Promis
   }
 }
 
+// ── 三件套拉取（2026-08-26-workspace-mcp-edit task-05）───────────────────────
+
+/**
+ * MCP「三件套」bundle（design §7.3）：一次拉取的完整 MCP 配置视图。
+ *
+ * daemon.ts 会话创建路径按 workspaceId 预取存会话级缓存、cli.ts provider
+ * 消费（task-07 接线）；quick-chat/legacy shared 无 workspaceId → workspace
+ * 为空配置（D-007@v2/D-008@v1）。
+ */
+export interface McpBundle {
+  /** 平台默认（admin 全局）；拉取失败回落本地 ~/.sillyhub/daemon/mcp.json。 */
+  platform: McpConfig;
+  /** admin 白名单（设置 → MCP）；失败回落 []。 */
+  whitelist: string[];
+  /** 工作区配置（specDir/.mcp.json 明文真值，不脱敏——注入需 env 真值）；失败/
+   *  缺省回落 {mcpServers:{}}；产出前已经预净化（非 stdio 条目剔除，D-005@v2）。 */
+  workspace: McpConfig;
+}
+
+/**
+ * task-05（2026-08-26-workspace-mcp-edit / design §5 Wave2 第 4 条 / §7.3）：
+ * 一次拉取「平台默认 + 白名单 + 工作区配置」三件套。
+ *
+ * 复用 ``fetchPlatformMcpConfig`` 的 fetch 范式（同 base url 拼接
+ * ``/api/daemon/mcp/config``、同 Bearer 头）；workspaceId 有值时带 query 参数
+ * （backend 响应追加 workspace 键，task-03），缺省（undefined/null/空串）不带——
+ * quick-chat/legacy shared 场景 workspace 维度自然为空（D-008@v1）。
+ *
+ * 预净化（D-005@v2，Grill CC-03）：``workspace.mcpServers`` 中 type 非
+ * undefined 且非 'stdio'（sse/http 等）的条目剔除 + logger warn（事件
+ * ``mcp_server_prepurged_non_stdio``，带 server 名），**不抛错**——防存量/
+ * 手改 .mcp.json 含非 stdio 条目时 ``assertMcpServerType`` 在会话创建路径抛错
+ * 阻塞（R-03）。type 缺省视为 stdio 保留（与 ``assertMcpServerType`` 向后
+ * 兼容口径一致）。
+ *
+ * 回落链（R-03：任何失败不阻塞会话创建，仅 warn）：fetch 失败 / 非 200 /
+ * 解析失败 / 响应缺 platform_default|whitelist 键 → platform 回落本地
+ * ``~/.sillyhub/daemon/mcp.json``（``loadPlatformMcpConfig``）、whitelist=[]
+ * 、workspace={mcpServers:{}}。响应仅缺 workspace 键（旧 backend，R-07）→
+ * 只 workspace 维度回落空配置，platform/whitelist 照常用。
+ *
+ * @param serverUrl   backend 根 URL
+ * @param token       daemon Bearer token（与 lease/heartbeat 同源）
+ * @param workspaceId 可选工作区 UUID；缺省不带 query 参数
+ * @param logger      可选结构化日志（事件名蛇形）
+ */
+export async function fetchMcpBundle(
+  serverUrl: string,
+  token: string | null,
+  workspaceId?: string,
+  logger?: McpConfigLogger,
+): Promise<McpBundle> {
+  const base = serverUrl.replace(/\/$/, '');
+  const url = workspaceId
+    ? `${base}/api/daemon/mcp/config?workspace_id=${encodeURIComponent(workspaceId)}`
+    : `${base}/api/daemon/mcp/config`;
+  try {
+    const headers: Record<string, string> = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const resp = await fetch(url, { headers });
+    if (!resp.ok) {
+      logger?.('warn', 'mcp_bundle_fetch_failed', { url, status: resp.status });
+      return fallbackMcpBundle(logger);
+    }
+    const body = await parseJsonFromResponse<{
+      platform_default?: { mcpServers?: Record<string, unknown> };
+      whitelist?: unknown;
+      workspace?: { mcpServers?: Record<string, unknown> };
+    }>(resp);
+    // 响应缺键（非预期结构）→ 整体回落（platform → 本地文件）。
+    if (body.platform_default === undefined || !Array.isArray(body.whitelist)) {
+      logger?.('warn', 'mcp_bundle_response_invalid', { url });
+      return fallbackMcpBundle(logger);
+    }
+    const platformServers = (body.platform_default.mcpServers ?? {}) as Record<
+      string,
+      McpServerConfig
+    >;
+    const whitelist = body.whitelist.filter((x): x is string => typeof x === 'string');
+    // 缺 workspace 键（旧 backend，R-07）→ 空配置；有则取 mcpServers（子键缺容错 {}）。
+    const workspaceServers = (body.workspace?.mcpServers ?? {}) as Record<
+      string,
+      McpServerConfig
+    >;
+    return {
+      platform: { mcpServers: platformServers },
+      whitelist,
+      workspace: { mcpServers: prepurgeNonStdioServers(workspaceServers, logger) },
+    };
+  } catch (e) {
+    logger?.('warn', 'mcp_bundle_fetch_unreachable', { url, error: String(e) });
+    return fallbackMcpBundle(logger);
+  }
+}
+
+/**
+ * 三件套回落 bundle（R-03）：platform 走本地文件，其余维度空值。
+ * ``loadPlatformMcpConfig`` 对文件不存在/解析失败也返回空配置，故本函数永不抛。
+ */
+async function fallbackMcpBundle(logger?: McpConfigLogger): Promise<McpBundle> {
+  logger?.('debug', 'mcp_bundle_fallback_local');
+  return {
+    platform: await loadPlatformMcpConfig(logger),
+    whitelist: [],
+    workspace: { mcpServers: {} },
+  };
+}
+
+/**
+ * workspace 配置预净化（D-005@v2）：type 非 undefined 且非 'stdio' 的条目剔除
+ * + warn（事件 ``mcp_server_prepurged_non_stdio``，带 server 名）；type 缺省视为
+ * stdio 保留。返回新对象（不改入参）；**永不抛错**（会话创建路径安全，R-03）。
+ */
+function prepurgeNonStdioServers(
+  servers: Record<string, McpServerConfig>,
+  logger?: McpConfigLogger,
+): Record<string, McpServerConfig> {
+  const kept: Record<string, McpServerConfig> = {};
+  for (const [name, cfg] of Object.entries(servers)) {
+    const t = cfg?.type;
+    if (t !== undefined && t !== 'stdio') {
+      logger?.('warn', 'mcp_server_prepurged_non_stdio', {
+        server: name,
+        type: String(t),
+      });
+      continue;
+    }
+    kept[name] = cfg;
+  }
+  return kept;
+}
+
 // ── 白名单过滤 ────────────────────────────────────────────────────────────────
 
 /**
@@ -175,8 +317,9 @@ function assertMcpServerType(name: string, cfg: McpServerConfig): void {
  *   6. task-08/D-017：若提供 mcp_refs（profile 子集），merge 结果再 ∩ mcp_refs。
  *
  * **向后兼容**：旧调用 `mergeMcpConfigs(whitelist, ...configs)` 不传 mcp_refs，
- * 等价不过滤（行为同 task-08 前）。cli.ts:709 `mergeMcpConfigs([], { mcpServers })`
- * 不需改动。
+ * 等价不过滤（行为同 task-08 前）。cli.ts ``workerMcpConfigProvider`` 的
+ * `mergeMcpConfigs([], { mcpServers })` 不需改动（主控 provider 的调用形自
+ * 2026-08-26-workspace-mcp-edit task-07 起升格为三件套 + 内置名显式入白名单）。
  *
  * @param whitelist admin 配置的白名单 server 名列表。
  * @param configs   MCP 配置列表，按优先级从低到高（mergeMcpConfigs(wl, platform, workspace)）。
@@ -279,8 +422,14 @@ export function hasAnyMcpServers(...configs: McpConfig[]): boolean {
 
 /**
  * daemon 内置 MCP server 对外名称（与 ``src/mcp-server.ts`` ``DAEMON_MCP_SERVER_NAME``
- * 对齐）。``mergeMcpConfigs`` 平台默认 server 自动入白名单（:188），故本 server
- * 放进 platform_config 即隐式允许，无需额外改白名单逻辑。
+ * 对齐）。
+ *
+ * 白名单口径（task-07 / 2026-08-26-workspace-mcp-edit 起的会话注入链）：cli.ts
+ * ``mainAgentMcpConfigProvider`` 把内置 server 放**最后一个** config 位（优先级
+ * 最高防覆盖，D-006@v2），``mergeMcpConfigs`` 的 configs[0]（platform 位）自动
+ * 加白覆盖不到 → 调用方必须把本名字**显式并入白名单参数**（D-006@v2 / Grill
+ * CC-02，漏并会把内置剔除、破坏注入链）。旧「并入 platform_config 即隐式允许」
+ * 惯例仅剩历史参考。
  */
 export const DAEMON_MCP_SERVER_NAME = 'sillyhub-daemon';
 
@@ -288,18 +437,21 @@ export const DAEMON_MCP_SERVER_NAME = 'sillyhub-daemon';
  * task-05（2026-08-23-agent-file-upload-mcp / D-005@v1）：文件 MCP server 对外
  * 名称（与 ``src/mcp-server.ts`` ``FILE_MCP_SERVER_NAME`` 对齐）。
  *
- * 白名单惯例（同 DAEMON_MCP_SERVER_NAME）：``mergeMcpConfigs`` 把**首个配置**
- * （platform config）里的 server 名自动加白（:233-237）——调用方（task-06 会话
- * 注入 / task-07 worker .mcp.json）把 ``buildFileMcpServerConfig`` 产物并入
- * platform_default 即隐式允许，无需改白名单逻辑。
+ * 白名单口径按链路二分（task-07 / 2026-08-26-workspace-mcp-edit 起修正旧宣称）：
+ *   - 会话注入（cli.ts ``mainAgentMcpConfigProvider``）：与 DAEMON_MCP_SERVER_NAME
+ *     同位——内置放最后一个 config 位，名字**显式并入白名单参数**（D-006@v2）；
+ *   - worker .mcp.json（task-runner ``_writeFileMcpTmpConfig``）：直接写文件
+ *     （``--mcp-config``，不走 ``mergeMcpConfigs``），无白名单环节。
  */
 export const FILE_MCP_SERVER_NAME = 'sillyhub-file';
 
 /**
  * task-06（2026-08-25-team-subsession-governance / FR-03 / D-003@v1，design §5.C.1）：
  * 分身受限 MCP server 对外名称（与 ``src/mcp-server.ts`` ``WORKER_MCP_SERVER_NAME``
- * 对齐）。白名单惯例同上：``workerMcpConfigProvider`` 产物并入 platform 位配置即
- * 自动入 ``mergeMcpConfigs`` 白名单。
+ * 对齐）。白名单口径：cli.ts ``workerMcpConfigProvider`` 调
+ * ``mergeMcpConfigs([], { mcpServers: { [本名]: ... } })``——worker server 即
+ * configs[0]（platform 位），走既有自动入白名单路径（与主控内置的显式白名单
+ * 参数不同形，两者语义等价）。
  */
 export const WORKER_MCP_SERVER_NAME = 'sillyhub-worker';
 

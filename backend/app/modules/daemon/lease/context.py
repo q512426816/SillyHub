@@ -5,6 +5,11 @@
 batch 分支 agent_run_id NULL 校验（DaemonLeaseNoAgentRun）、AgentRun 字段提取、
 workspace_id、lease metadata 透传（prompt/provider/model/repo_url/branch/tool_config/
 workspace_*/root_path 等）、runtime capabilities（cmd_path/protocol）。
+
+2026-08-26-workspace-mcp-edit task-06（D-008 前置）：interactive 分支新增 team 模式
+主控 lease 的 ws 兜底——stage=='orchestrator' 且 metadata 无 workspace_id 时按
+``lease.agent_run_id → mission → AgentMission.workspace_id``（anchor）解析，补齐
+execPayload.workspaceId 下发（quick-chat / mission_worker 分身 / stage run 不触发）。
 """
 
 from __future__ import annotations
@@ -536,6 +541,31 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
                 ws_id = uuid.UUID(ws_id_raw) if isinstance(ws_id_raw, str) else ws_id_raw
             except (ValueError, AttributeError, TypeError):
                 ws_id = None
+
+        # task-06（2026-08-26-workspace-mcp-edit / D-008 前置核查补齐）：team 模式
+        # 主控 lease 的 ws 兜底。主 agent run 经 ``dispatch_to_daemon`` 派发
+        # （orchestrator.py team_mission_entry / patrol 僵尸复活 / 启动重派），lease
+        # metadata 不写 workspace_id（placement 只写 workspace_name/slug，见
+        # placement.py:432-436）→ tar 模式 execPayload.workspaceId 缺失 → daemon 端
+        # D-008 三件套预取对主控回落空配置。按 ``lease.agent_run_id →
+        # AgentRun.mission_id → AgentMission.workspace_id``（anchor，NOT NULL，语义
+        # =主 agent 运行的工作区，agent/model.py:1048-1050）解析。
+        # 仅 ``stage=='orchestrator'`` 触发（字面量对齐 _ORCHESTRATOR_ROLE /
+        # session/service.py:1286 先例）：quick-chat（无 stage）、分身
+        # （mission_worker，D-008@v1 维持治理受限注入，明确不补）、stage run
+        # （scan/plan/execute 等非 D-008@v1 命名范围）零行为变化。解析点置于
+        # SpecWorkspace 版本查询之前：latestSpecVersion 与 session 模式主控同口径
+        # 解析（daemon shouldRefreshSpec 保鲜比对不误判）。
+        if (
+            ws_id is None
+            and lease_meta.get("stage") == "orchestrator"
+            and lease.agent_run_id is not None
+        ):
+            _orch_run = await session.get(AgentRun, lease.agent_run_id)
+            if _orch_run is not None and _orch_run.mission_id is not None:
+                _orch_mission = await session.get(AgentMission, _orch_run.mission_id)
+                if _orch_mission is not None:
+                    ws_id = _orch_mission.workspace_id
 
         # task-09（2026-07-10-remove-server-local-workspace-mode）：单一 daemon-client
         # 后 transport 永远走全局 settings.spec_transport（task-07 已删

@@ -556,7 +556,17 @@ export interface paths {
          *     ``_redact_mcp_env``）。无文件返回空 ``{mcpServers: {}}`` 不报错。
          */
         get: operations["get_workspace_mcp_config_api_workspaces__workspace_id__mcp_config_get"];
-        put?: never;
+        /**
+         * Update Workspace Mcp Config
+         * @description 写 workspace specDir/.mcp.json（2026-08-26-workspace-mcp-edit task-01）。
+         *
+         *     鉴权 WorkspaceWriter（``require_permission(WORKSPACE_WRITE)`` 自动取路径
+         *     ``{workspace_id}`` 做成员校验，非成员 403，同 mcp_gateway/router.py:114 模式）。
+         *     service 层完成：仅 stdio 校验（D-005@v2）+ ``<set>`` 服务端还原（D-003@v2）+
+         *     原子写（R-01）+ 审计上下文注入；错误经 AppError 全局 handler 序列化，router
+         *     不手写 HTTPException。成功返回写后脱敏视图（与 GET 同构）。
+         */
+        put: operations["update_workspace_mcp_config_api_workspaces__workspace_id__mcp_config_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -5177,6 +5187,12 @@ export interface paths {
          *
          *     无配置时返回空结构 ``{"platform_default": {"mcpServers": {}}, "whitelist": []}``，
          *     不报错（daemon 按"无平台默认"处理）。
+         *
+         *     2026-08-26-workspace-mcp-edit task-03：可选 query ``workspace_id``（UUID），
+         *     提供时响应追加 ``"workspace": {"mcpServers": {...}}``（读该工作区
+         *     ``specDir/.mcp.json`` 明文，见 ``_read_mcp_config_raw``）；不传时响应
+         *     结构与旧版完全一致（R-07 向后兼容，旧 daemon 忽略新字段）。非法 UUID
+         *     → 422（全局校验处理器中文报错）。
          */
         get: operations["get_daemon_mcp_config_api_daemon_mcp_config_get"];
         put?: never;
@@ -13176,6 +13192,16 @@ export interface components {
             captcha_token?: string | null;
         };
         /**
+         * McpConfigUpdateRequest
+         * @description ``PUT /api/workspaces/{id}/mcp-config`` 请求体（wire 格式同 claude .mcp.json）。
+         */
+        McpConfigUpdateRequest: {
+            /** Mcpservers */
+            mcpServers?: {
+                [key: string]: components["schemas"]["McpServerEntryPut"];
+            };
+        };
+        /**
          * McpConfigViewResponse
          * @description ``GET /api/workspaces/{id}/mcp-config`` 响应（env secret 已脱敏）。
          *
@@ -13192,6 +13218,27 @@ export interface components {
          * @description 单个 MCP server 定义（仿 claude ``.mcp.json`` 结构）。
          */
         McpServerEntry: {
+            /** Command */
+            command: string;
+            /** Args */
+            args?: string[];
+            /** Env */
+            env?: {
+                [key: string]: string;
+            } | null;
+        };
+        /**
+         * McpServerEntryPut
+         * @description PUT mcp-config 单个 server 条目（仅 stdio，D-005@v2 安全边界）。
+         *
+         *     ``type`` 缺省 ``"stdio"``；未知字段拒绝（``extra="forbid"``，防拼写错键静默落盘）。
+         */
+        McpServerEntryPut: {
+            /**
+             * Type
+             * @default stdio
+             */
+            type: string;
             /** Command */
             command: string;
             /** Args */
@@ -21402,6 +21449,41 @@ export interface operations {
             };
         };
     };
+    update_workspace_mcp_config_api_workspaces__workspace_id__mcp_config_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpConfigUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["McpConfigViewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     rescan_workspace_api_workspaces__workspace_id__rescan_post: {
         parameters: {
             query?: never;
@@ -28881,7 +28963,9 @@ export interface operations {
     };
     get_daemon_mcp_config_api_daemon_mcp_config_get: {
         parameters: {
-            query?: never;
+            query?: {
+                workspace_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -28897,6 +28981,15 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
