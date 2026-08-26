@@ -43,6 +43,12 @@ import { listProviders } from "@/lib/api/llm-providers";
 import type { LlmProviderRead } from "@/lib/api/llm-providers";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import { usePageSessionContext } from "@/hooks/use-page-session-context";
+import {
+  FloatingMascot,
+  getFloatingPet,
+  setFloatingPet,
+  type FloatingPet,
+} from "@/components/floating/floating-mascot";
 import { useFloatingSessionStore } from "@/stores/floating-session";
 import { cn } from "@/lib/utils";
 
@@ -466,6 +472,20 @@ export function FloatingSessionHost() {
       时间窗比布尔位稳——拖出球外松手时 click 不触发，布尔位会误吞下一次真点击）。 */
   const lastDragEndRef = useRef(0);
 
+  // ── 宠物形象（2026-08-26 用户需求：小狗/小猫双选 + 本地记忆 + 宠物交互）──
+  const [pet, setPet] = useState<FloatingPet>("dog");
+  /** 宠物选择器（右键球唤起；存 {x,y} 菜单位）。null = 关闭。 */
+  const [petPicker, setPetPicker] = useState<{ x: number; y: number } | null>(null);
+  // 挂载后读本地选择（effect 而非初值：SSR/水合一致，同球位置先例）。
+  useEffect(() => {
+    setPet(getFloatingPet());
+  }, []);
+  const pickPet = useCallback((next: FloatingPet) => {
+    setPet(next);
+    setFloatingPet(next);
+    setPetPicker(null);
+  }, []);
+
   // 挂载后读持久化位置（放 effect 而非 useState 初值：避免 SSR/水合不一致）。
   useEffect(() => {
     try {
@@ -638,6 +658,12 @@ export function FloatingSessionHost() {
         title="智能会话助手（可拖拽，拖到屏幕边缘自动收起）"
         style={ballStyle}
         onPointerDown={onBallPointerDown}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (dragging) return;
+          setPetPicker({ x: e.clientX, y: e.clientY });
+        }}
         onClick={() => {
           if (Date.now() - lastDragEndRef.current < 250) return;
           if (open) closeDrawer();
@@ -678,7 +704,7 @@ export function FloatingSessionHost() {
           {/* 顶部高光（玻璃感） */}
           <span className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_30%_25%,rgba(255,255,255,0.5),transparent_55%)]" />
         </span>
-        <MessageSquare className="relative h-5 w-5 drop-shadow-sm transition-transform duration-300 group-hover:rotate-12" />
+        <FloatingMascot pet={pet} active={Boolean(sessionId) || minimized} />
         {(sessionId !== null || minimized) && (
           <span
             aria-hidden
@@ -689,6 +715,62 @@ export function FloatingSessionHost() {
           </span>
         )}
       </button>
+
+      {/* 宠物选择器（右键球唤起）：透明遮罩点外关闭 + 两个选项卡 */}
+      {petPicker && (
+        <>
+          <div
+            className="fixed inset-0 z-[55]"
+            onClick={() => setPetPicker(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setPetPicker(null);
+            }}
+            aria-hidden
+          />
+          <div
+            role="menu"
+            aria-label="选择悬浮助手形象"
+            data-testid="pet-picker"
+            className="fixed z-[56] w-44 rounded-xl border border-border bg-card p-2 shadow-lg"
+            style={{
+              left: Math.min(petPicker.x, (typeof window !== "undefined" ? window.innerWidth : 1024) - 190),
+              top: Math.max(8, petPicker.y - 96),
+            }}
+          >
+            <div className="px-1.5 pb-1.5 text-[11px] font-semibold text-muted-foreground">
+              选择你的小伙伴
+            </div>
+            {([
+              { key: "dog" as FloatingPet, label: "小狗", emoji: "🐶" },
+              { key: "cat" as FloatingPet, label: "小猫", emoji: "🐱" },
+            ]).map((opt) => (
+              <button
+                key={opt.key}
+                type="button"
+                role="menuitemradio"
+                aria-checked={pet === opt.key}
+                data-testid={`pet-option-${opt.key}`}
+                onClick={() => pickPet(opt.key)}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors",
+                  pet === opt.key
+                    ? "bg-brand-50 font-semibold text-brand-700"
+                    : "text-muted-foreground hover:bg-brand-50/60 hover:text-brand-700",
+                )}
+              >
+                <span className="text-base leading-none">{opt.emoji}</span>
+                {opt.label}
+                {pet === opt.key && (
+                  <span className="ml-auto text-brand-600" aria-hidden>
+                    ✓
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* 抽屉（约束 2：最小化 hidden 保挂载，SSE/队列不断；跟随球所在半屏） */}
       {mounted && (

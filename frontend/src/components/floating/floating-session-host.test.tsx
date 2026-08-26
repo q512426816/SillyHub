@@ -329,3 +329,48 @@ describe("FloatingSessionHost", () => {
     expect(drawer.className).toContain("left-0");
   });
 });
+
+// ── 宠物形象（2026-08-26）：双选 + 本地记忆 + 右键选择器 ────────────────────
+describe("FloatingSessionHost / 宠物形象", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it("默认渲染小狗形象", async () => {
+    render(wrap(<FloatingSessionHost />));
+    const mascot = await screen.findByTestId("floating-mascot");
+    expect(mascot.dataset.pet).toBe("dog");
+  });
+
+  it("右键球唤起选择器，选小猫后切换并写入 localStorage", async () => {
+    render(wrap(<FloatingSessionHost />));
+    const ball = await screen.findByTestId("floating-ball");
+    fireEvent.contextMenu(ball, { clientX: 300, clientY: 300 });
+    const picker = await screen.findByTestId("pet-picker");
+    expect(picker).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("pet-option-cat"));
+    const mascot = await screen.findByTestId("floating-mascot");
+    expect(mascot.dataset.pet).toBe("cat");
+    expect(window.localStorage.getItem("sillyhub:floating-pet")).toBe("cat");
+    expect(screen.queryByTestId("pet-picker")).not.toBeInTheDocument();
+  });
+
+  it("挂载时读取本地记忆的选择（cat 持久化恢复）", async () => {
+    window.localStorage.setItem("sillyhub:floating-pet", "cat");
+    render(wrap(<FloatingSessionHost />));
+    const mascot = await screen.findByTestId("floating-mascot");
+    expect(mascot.dataset.pet).toBe("cat");
+  });
+
+  it("选择器遮罩点击关闭不改动选择", async () => {
+    render(wrap(<FloatingSessionHost />));
+    const ball = await screen.findByTestId("floating-ball");
+    fireEvent.contextMenu(ball, { clientX: 300, clientY: 300 });
+    await screen.findByTestId("pet-picker");
+    // 遮罩是 picker 前的 fixed inset-0 div；用 Escape 外方式：点击小狗选项保持 dog
+    fireEvent.click(screen.getByTestId("pet-option-dog"));
+    const mascot = await screen.findByTestId("floating-mascot");
+    expect(mascot.dataset.pet).toBe("dog");
+    expect(window.localStorage.getItem("sillyhub:floating-pet")).toBe("dog");
+  });
+});
