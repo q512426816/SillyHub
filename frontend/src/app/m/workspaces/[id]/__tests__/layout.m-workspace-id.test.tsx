@@ -92,13 +92,15 @@ describe("m/workspaces/[id] layout 工作区上下文 Provider", () => {
 
   function renderLayout(id: string, children?: ReactNode) {
     return render(
-      createElement(QueryClientProvider, {
-        client: queryClient,
-        children: createElement(MobileWorkspaceLayout, {
-          params: { id },
-          children: children ?? createElement(ContextProbe),
-        }),
-      }),
+      createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        createElement(
+          MobileWorkspaceLayout,
+          { params: { id } },
+          children ?? createElement(ContextProbe),
+        ),
+      ),
     );
   }
 
