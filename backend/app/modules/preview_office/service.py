@@ -21,7 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.core.errors import AppError
+from app.core.logging import get_logger
 from app.core.redis import get_redis
+
+log = get_logger(__name__)
 
 _FILE_TOKEN_TYPE = "preview_file"
 
@@ -60,6 +63,14 @@ class PreviewSourceNotFound(AppError):
     http_status = 404
     code = "PREVIEW_SOURCE_NOT_FOUND"
     message = "文件不存在或无权访问。"
+
+
+class PreviewFileTokenStoreUnavailable(AppError):
+    """Redis 登记失败：一次性令牌无法落地，fail-fast 拒签（503）。"""
+
+    http_status = 503
+    code = "PREVIEW_FILE_TOKEN_STORE_UNAVAILABLE"
+    message = "预览服务暂不可用，请稍后重试。"
 
 
 def _ext_of(name: str) -> str:
@@ -131,7 +142,9 @@ async def issue_file_token(
 ) -> str:
     """签一次性文件令牌（jti 入 redis EX；消费端 DELETE 保证一次性）。
 
-    redis 登记失败仅失去一次性保证（TTL 仍兜底），不阻断预览主链路。
+    Redis 登记失败 fail-fast 拒签（503）：消费端 consume_file_token 要求
+    jti 键存在（DELETE 计数为 0 即判重放 410），登记失败仍签发只会产出
+    必然 410 的死令牌，OnlyOffice 静默打不开且无日志——宁可此刻 503。
     """
     now = datetime.now(UTC)
     ttl = ttl_seconds or settings.onlyoffice_file_token_ttl_seconds
@@ -146,7 +159,8 @@ async def issue_file_token(
     try:
         await get_redis().set(f"preview_file_jti:{jti}", "1", ex=ttl)
     except Exception:
-        pass
+        log.exception("preview_file_token_redis_register_failed")
+        raise PreviewFileTokenStoreUnavailable() from None
     return jwt.encode(payload, settings.secret_key, algorithm="HS256")
 
 

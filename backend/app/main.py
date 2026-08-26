@@ -33,6 +33,7 @@ from app.modules.auth.router import router as auth_router
 from app.modules.change import change_router
 from app.modules.change_writer.router import router as change_writer_router
 from app.modules.daemon.dist_router import router as daemon_dist_router
+from app.modules.daemon.router import close_llm_proxy_client
 from app.modules.daemon.router import router as daemon_router
 from app.modules.explorer.router import router as explorer_router
 from app.modules.git_gateway.router import router as git_gateway_router
@@ -255,6 +256,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         except Exception:
             log.exception("storage.close_failed")
         await dispose_engine()
+        # llm-proxy 进程级共享转发客户端连接池回收（懒加载单例，见 daemon/router）。
+        await close_llm_proxy_client()
         await close_redis()
 
 

@@ -19,7 +19,7 @@
  * 本组件无弹窗上下文依赖，/runtimes 弹窗与 /sessions 新页面均可独立 import 组装。
  */
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FileText, Image as ImageIcon, Paperclip, RefreshCw, Send, X } from "lucide-react";
 import { Button } from "antd";
 
@@ -28,6 +28,28 @@ import {
   uploadSessionAttachment,
   type AttachmentRead,
 } from "@/lib/api/session-attachments";
+
+/* ── ql-20260826-010：输入框高度拖拽调节（全局持久化）────────────────────── */
+
+/** localStorage key（先例 sillyhub.sessions.* 前缀；高度是全局偏好不分会话）。 */
+const INPUT_HEIGHT_LS_KEY = "sillyhub.sessions.inputBarHeight";
+/** 下限 = 默认单行高度 min-h-11（44px）；上限固定 480px 与视口 60% 取小。 */
+const INPUT_HEIGHT_MIN = 44;
+const INPUT_HEIGHT_MAX = 480;
+
+/** 回读持久化高度（SSR / 无值 / 非法值 → null 走默认自适应）。 */
+function readPersistedInputHeight(): number | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(INPUT_HEIGHT_LS_KEY);
+    const n = raw == null ? Number.NaN : Number(raw);
+    return Number.isFinite(n)
+      ? Math.min(INPUT_HEIGHT_MAX, Math.max(INPUT_HEIGHT_MIN, Math.round(n)))
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface SessionInputBarProps {
   /** 输入框当前值（受控）。 */
@@ -74,10 +96,60 @@ export function SessionInputBar({
   registerClearAttachments,
 }: SessionInputBarProps) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   /** 上传完成的附件（chips 数据源）。上传中/失败以 id=null 占位行内呈现。 */
   const [attachments, setAttachments] = useState<AttachmentRead[]>([]);
   const [uploading, setUploading] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // ql-20260826-010：用户拖拽调节的输入框高度（null = 默认自适应）。拖拽中经
+  // setInputHeight 实时生效；effect 落盘（拖完才有的稳定值也覆盖）；双击手柄
+  // 恢复默认并清键。上限取 min(480, 视口 60%)，拖拽时按当次视口动态算。
+  const [inputHeight, setInputHeight] = useState<number | null>(readPersistedInputHeight);
+  useEffect(() => {
+    if (inputHeight == null) return;
+    try {
+      window.localStorage.setItem(INPUT_HEIGHT_LS_KEY, String(inputHeight));
+    } catch {
+      /* 隐私模式等写入失败静默 */
+    }
+  }, [inputHeight]);
+
+  const dragStateRef = useRef<{ startY: number; startHeight: number } | null>(null);
+
+  const handleHeightDragStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    // 实测高度兜底：jsdom / 未布局时 offsetHeight 为 0，按默认下限起步。
+    const measured = textareaRef.current?.offsetHeight ?? 0;
+    const current = inputHeight ?? (measured > 0 ? measured : INPUT_HEIGHT_MIN);
+    dragStateRef.current = { startY: e.clientY, startHeight: current };
+    const onMove = (ev: MouseEvent) => {
+      const d = dragStateRef.current;
+      if (!d) return;
+      const max = Math.min(INPUT_HEIGHT_MAX, Math.round(window.innerHeight * 0.6));
+      const next = Math.min(
+        Math.max(INPUT_HEIGHT_MIN, d.startHeight + (d.startY - ev.clientY)),
+        max,
+      );
+      setInputHeight(next);
+    };
+    const onUp = () => {
+      dragStateRef.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const handleHeightReset = () => {
+    setInputHeight(null);
+    try {
+      window.localStorage.removeItem(INPUT_HEIGHT_LS_KEY);
+    } catch {
+      /* 静默容错 */
+    }
+  };
 
   const syncToParent = (next: AttachmentRead[]) => {
     onAttachmentsChange?.(next);
@@ -170,6 +242,19 @@ export function SessionInputBar({
           )}
         </div>
       )}
+      {/* 高度拖拽手柄（ql-20260826-010）：输入胶囊上缘细条——按下沿竖向拖动
+          增减高度（实时生效 + 落盘），双击恢复默认。 */}
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="拖动调节输入框高度（双击恢复默认）"
+        title="拖动调节输入框高度，双击恢复默认"
+        onMouseDown={handleHeightDragStart}
+        onDoubleClick={handleHeightReset}
+        className="group -mb-0.5 flex h-3 cursor-ns-resize touch-none items-center justify-center"
+      >
+        <span className="h-[3px] w-10 rounded-full bg-muted-foreground/30 transition-colors group-hover:bg-brand-500" />
+      </div>
       {/* 胶囊输入区（2026-08-23-sessions-page-style 原型 .input-row）：圆角容器
           聚焦光环 + 附件按钮内嵌 + 渐变圆形发送按钮；Enter/附件/disabled 交互
           契约原样（task-13 / D-7）。 */}
@@ -195,6 +280,7 @@ export function SessionInputBar({
           <Paperclip className="h-5 w-5" />
         </Button>
         <textarea
+          ref={textareaRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onPaste={(e) => {
@@ -216,6 +302,7 @@ export function SessionInputBar({
           className="min-h-11 flex-1 resize-none bg-transparent px-1 py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-60"
           rows={2}
           disabled={disabled}
+          style={inputHeight != null ? { height: inputHeight } : undefined}
         />
         <Button
           type="primary"

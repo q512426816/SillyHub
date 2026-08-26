@@ -204,6 +204,28 @@ class TestCollectDiff:
         assert result is ZERO_DIFF_RESULT
 
     @pytest.mark.asyncio
+    async def test_timeout_kills_orphan_process(self, tmp_path: Path):
+        """ql-20260826-011：超时路径必须 kill+wait 子进程，防孤儿 git 与 PIPE 泄漏。
+
+        运行中的进程 returncode 为 None；_kill_proc 应调 kill() 并 await wait()。
+        """
+        (tmp_path / "repo").mkdir()
+        (tmp_path / "repo" / ".git").mkdir()
+
+        fake_proc = MagicMock()
+        fake_proc.returncode = None  # 进程仍在运行
+        fake_proc.communicate = AsyncMock(side_effect=TimeoutError)
+        fake_proc.kill = MagicMock()
+        fake_proc.wait = AsyncMock()
+
+        with patch("asyncio.create_subprocess_exec", return_value=fake_proc):
+            result = await collect_diff(tmp_path)
+
+        assert result is ZERO_DIFF_RESULT
+        fake_proc.kill.assert_called_once()
+        fake_proc.wait.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_oserror(self, tmp_path: Path):
         """create_subprocess_exec raises OSError."""
         (tmp_path / "repo").mkdir()

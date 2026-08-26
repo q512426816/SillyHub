@@ -3327,6 +3327,30 @@ _LLM_PROXY_METHODS = ["GET", "POST", "OPTIONS", "HEAD"]
 # 上游 LiteLLM 转发超时（对齐 R-02 应对策略；read 放宽给 SSE 逐 token 长流）。
 _LLM_PROXY_TIMEOUT = httpx.Timeout(connect=10.0, read=300.0, write=60.0, pool=10.0)
 
+# 进程级共享转发客户端（连接池复用）：本代理是所有 daemon 子进程 LLM 推理的
+# 唯一出站通道，逐请求 new AsyncClient 意味着每次推理都做 TCP+TLS 握手、零
+# 连接复用，高并发 agent 会话下握手延迟与 TIME_WAIT socket 线性累积。懒加载
+# 单例 + app lifespan shutdown 关闭（对齐 core/redis.py 的 get_redis /
+# close_redis 模式）；测试经 monkeypatch 替换 httpx.AsyncClient 时须先复位
+# 本单例（见 test_llm_proxy.py 的 reset fixture）。
+_LLM_PROXY_CLIENT: httpx.AsyncClient | None = None
+
+
+def _get_llm_proxy_client() -> httpx.AsyncClient:
+    """Return (and lazily create) the process-wide upstream forward client."""
+    global _LLM_PROXY_CLIENT
+    if _LLM_PROXY_CLIENT is None:
+        _LLM_PROXY_CLIENT = httpx.AsyncClient(timeout=_LLM_PROXY_TIMEOUT)
+    return _LLM_PROXY_CLIENT
+
+
+async def close_llm_proxy_client() -> None:
+    """Close the shared forward client on application shutdown."""
+    global _LLM_PROXY_CLIENT
+    if _LLM_PROXY_CLIENT is not None:
+        await _LLM_PROXY_CLIENT.aclose()
+    _LLM_PROXY_CLIENT = None
+
 
 def _extract_proxy_model_name(body_bytes: bytes, path: str) -> str | None:
     """从 POST body（JSON ``model`` 字段）或 path 中提取 model 名（task-04）。
@@ -3454,21 +3478,23 @@ async def _llm_proxy_impl(path: str, request: Request) -> StreamingResponse:
     upstream_meta: dict[str, Any] = {}
 
     async def _forward() -> AsyncGenerator[bytes]:
-        async with httpx.AsyncClient(timeout=_LLM_PROXY_TIMEOUT) as client:
-            upstream_request = client.build_request(
-                request.method,
-                upstream_url,
-                headers=fwd_headers,
-                content=body_bytes if body_bytes else None,
-            )
-            upstream_response = await client.send(upstream_request, stream=True)
-            upstream_meta["status_code"] = upstream_response.status_code
-            upstream_meta["headers"] = upstream_response.headers
-            try:
-                async for chunk in upstream_response.aiter_raw():
-                    yield chunk
-            finally:
-                await upstream_response.aclose()
+        # 共享连接池客户端：不 per-request 关闭（shutdown 统一 close）；上游响应
+        # 流仍逐请求 aclose（finally），连接归还池中复用。
+        client = _get_llm_proxy_client()
+        upstream_request = client.build_request(
+            request.method,
+            upstream_url,
+            headers=fwd_headers,
+            content=body_bytes if body_bytes else None,
+        )
+        upstream_response = await client.send(upstream_request, stream=True)
+        upstream_meta["status_code"] = upstream_response.status_code
+        upstream_meta["headers"] = upstream_response.headers
+        try:
+            async for chunk in upstream_response.aiter_raw():
+                yield chunk
+        finally:
+            await upstream_response.aclose()
 
     # 先探一块拿到上游状态码 / 头（在返回 StreamingResponse 之前，此处抛错可
     # 落 502 而不是吞成 200 空响应）；空响应体（HEAD）走 StopAsyncIteration 分支。

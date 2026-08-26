@@ -75,6 +75,21 @@ def _parse_stat_numbers(stat_output: str) -> tuple[int, int, int]:
     )
 
 
+async def _kill_proc(proc: asyncio.subprocess.Process | None) -> None:
+    """超时/异常路径回收子进程，防孤儿 git 进程与 PIPE 句柄泄漏。
+
+    对齐 git_gateway.service 超时链的 ``kill() + wait()`` 惯例；进程已退出
+    （returncode 非 None）或未启动（None）时为 no-op。
+    """
+    if proc is None or proc.returncode is not None:
+        return
+    try:
+        proc.kill()
+    except ProcessLookupError:
+        pass
+    await proc.wait()
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -104,6 +119,7 @@ async def collect_diff(
         return ZERO_DIFF_RESULT
 
     # 2. git diff --stat
+    proc_stat: asyncio.subprocess.Process | None = None
     try:
         proc_stat = await asyncio.create_subprocess_exec(
             "git",
@@ -118,6 +134,7 @@ async def collect_diff(
             timeout=15,
         )
     except (TimeoutError, FileNotFoundError, OSError) as exc:
+        await _kill_proc(proc_stat)
         log.warning("diff_collector_stat_failed", error=str(exc))
         return ZERO_DIFF_RESULT
 
@@ -131,6 +148,7 @@ async def collect_diff(
     stat_raw = stdout_stat.decode("utf-8", errors="replace")
 
     # 3. git diff (full)
+    proc_diff: asyncio.subprocess.Process | None = None
     try:
         proc_diff = await asyncio.create_subprocess_exec(
             "git",
@@ -144,6 +162,7 @@ async def collect_diff(
             timeout=30,
         )
     except (TimeoutError, FileNotFoundError, OSError) as exc:
+        await _kill_proc(proc_diff)
         log.warning("diff_collector_diff_failed", error=str(exc))
         # git itself may be broken — discard stat too
         return ZERO_DIFF_RESULT

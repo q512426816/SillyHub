@@ -199,3 +199,22 @@ class TestBuildConfig:
         decoded = jwt.decode(config["token"], "ds-test-secret", algorithms=["HS256"])
         assert decoded["document"]["fileType"] == "xls"
         assert decoded["document"]["url"] == config["document"]["url"]
+
+    @pytest.mark.asyncio
+    async def test_redis_register_failure_fails_fast(self, db_session) -> None:
+        """ql-20260826-011：Redis SET 失败 → 拒签 503，不再产出必然 410 的死令牌。
+
+        原实现吞掉 SET 异常仍签发，但 consume_file_token 要求 jti 键存在
+        （DELETE 计数为 0 判重放），登记失败的令牌消费时恒 410 且无日志。
+        """
+        from app.modules.preview_office.service import PreviewFileTokenStoreUnavailable
+
+        broken = MagicMock()
+        broken.set = AsyncMock(side_effect=RuntimeError("redis down"))
+        s = _settings()
+        with (
+            patch("app.modules.preview_office.service.get_redis", return_value=broken),
+            pytest.raises(PreviewFileTokenStoreUnavailable),
+        ):
+            await svc.issue_file_token(object_key="attachments/x.bin", settings=s)
+        broken.set.assert_awaited_once()
