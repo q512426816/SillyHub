@@ -505,3 +505,14 @@
 根因：下拉收起机制（document click 一律收+stopPropagation 拦截）在真实浏览器时序下误关 + TeamTaskBlock 终态过渡自动折叠在 5s 轮询送达时强制收起正在查看的明细
 方案：ActivityCatalog 改 containment 收起（根容器 ref+mousedown 落点在外才收）；TeamTaskBlock 移除自动收敛折叠
 结果：vitest 全量 2359 用例全绿，tsc 零错，lint exit 0，模块文档已更新，前端容器重建部署完成
+
+## ql-20260826-010-6fcb | 2026-08-26 15:20:00 | OnlyOffice Word 目录跑到第一页：根因双链——方正字体全缺失替换 + 引擎不支持 docGrid 行网格
+状态：已完成
+关联变更：2026-08-26-onlyoffice-preview
+文件：
+- deploy/scripts/onlyoffice-restore-fonts.sh（新建：容器重建后恢复中文字体一键脚本，字体本体因版权不入库）
+需求：用户反馈 0-6教师温暖行为指南.docx 在 OnlyOffice 预览中目录跑到第一页（本地 Word 目录在第二页）
+根因：双链。① 该 docx（WPS 公文排版）全文用方正小标宋_GBK/方正黑体_GBK/方正仿宋_GBK（2152 处），DS 容器 5 个中文字体（思源系）无一命中 → 全量字体替换 → 行高度量漂移；封面是 24 个空段落撑页（段 0-22 无硬分页符），Word 里 sectPr docGrid type=lines linePitch=312 行网格吸附恰好撑满第一页，DS 空段按替换字体自然行高 → 封面欠高 → 目录被拉上第一页。② 源码证据：sdk-all.js（28MB 编辑器引擎）linePitch/docGrid 零命中——OnlyOffice 不实现中文文档行网格，属引擎级限制（社区已知 GitHub issue #2521 同族）
+方案：字体链修复——docx 自带 8 个内嵌字体子集（word/fonts/*.odttf，WPS 嵌入），ODTTF 前 32 字节按 fontKey GUID 异或解混淆还原真 TTF（魔数校验），与 Windows 标准公文字体（simsun/simfang/simkai/simhei/msyh）一起装入容器 /usr/share/fonts/truetype/{founder,office-cn}，fc-cache + 重启重建 AllFonts.js（FZXiaoBiaoSong/FZFangSong/FZHei/FZKai/FZDAHEI/仿宋/楷体/微软雅黑 全部入索引）；转换 PDF 验证字形已按方正字体嵌入。试过字体垂直度量放大补丁（hhea/OS/2 拉到 1.65x em）逼空段撑页，x2t 转换布局零变化证明其行高不取这些表，补丁已回滚。持久化：字体备份 ~/onlyoffice-fonts-backup + deploy/scripts/onlyoffice-restore-fonts.sh 一键恢复
+结果：字形渲染正确（方正公文字体 + 标准中文 Office 字体全命中）；封面/目录分页与 Word 的精确一致不可达——docGrid 行网格引擎不支持，属 OnlyOffice 固有边界（精确排版走下载本地打开）；端到端验证走 ConvertService.ashx + pypdf 页文本断言 + PDF 内嵌字体表
+审计：字体文件不入库（微软/方正商用许可）；bsp-onlyoffice 为外部容器，重建后需重跑恢复脚本
