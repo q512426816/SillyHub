@@ -47,6 +47,11 @@ from app.modules.workspace.service import WorkspaceService
 from app.modules.workspace.skills_view_service import (
     McpConfigUpdateRequest,
     McpConfigViewResponse,
+    SkillCreateRequest,
+    SkillFileContentResponse,
+    SkillFileWriteRequest,
+    SkillFileWriteResponse,
+    SkillMutationResponse,
     SkillsViewResponse,
     SkillsViewService,
 )
@@ -379,6 +384,87 @@ async def list_workspace_skills(
     """
     service = SkillsViewService(session)
     return await service.list_skills(workspace_id)
+
+
+@router.post(
+    "/{workspace_id}/skills",
+    response_model=SkillsViewResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_workspace_skill(
+    workspace_id: uuid.UUID,
+    payload: SkillCreateRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+) -> SkillsViewResponse:
+    """新建 workspace 自定义 skill（2026-08-26-workspace-skill-edit task-02）。
+
+    生成 ``skills/<name>/SKILL.md``（frontmatter name/description）；skill 名白名单
+    校验（D-003@v1）；重名 409。鉴权 WorkspaceWriter（同 MCP PUT 模式）。
+    """
+    service = SkillsViewService(session)
+    return await service.create_skill(workspace_id, payload, actor=user)
+
+
+@router.delete("/{workspace_id}/skills/{skill_name}", response_model=SkillMutationResponse)
+async def delete_workspace_skill(
+    workspace_id: uuid.UUID,
+    skill_name: str,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+) -> SkillMutationResponse:
+    """删除整个 skill 目录（symlink 防护 + 审计，D-003@v1/R-02）。"""
+    service = SkillsViewService(session)
+    return await service.delete_skill(workspace_id, skill_name, actor=user)
+
+
+@router.get(
+    "/{workspace_id}/skills/{skill_name}/files/{file_path:path}",
+    response_model=SkillFileContentResponse,
+)
+async def read_workspace_skill_file(
+    workspace_id: uuid.UUID,
+    skill_name: str,
+    file_path: str,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_READ))],
+) -> SkillFileContentResponse:
+    """读 skill 内文本文件（UTF-8 探测 + 512KB 上限 + 路径穿越 fail-closed）。"""
+    service = SkillsViewService(session)
+    return await service.read_skill_file(workspace_id, skill_name, file_path)
+
+
+@router.put(
+    "/{workspace_id}/skills/{skill_name}/files/{file_path:path}",
+    response_model=SkillFileWriteResponse,
+)
+async def write_workspace_skill_file(
+    workspace_id: uuid.UUID,
+    skill_name: str,
+    file_path: str,
+    payload: SkillFileWriteRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+) -> SkillFileWriteResponse:
+    """写 skill 内文本文件（新建/覆盖，原子写 + 父目录自动创建限一层 + 审计）。"""
+    service = SkillsViewService(session)
+    return await service.write_skill_file(workspace_id, skill_name, file_path, payload, actor=user)
+
+
+@router.delete(
+    "/{workspace_id}/skills/{skill_name}/files/{file_path:path}",
+    response_model=SkillMutationResponse,
+)
+async def delete_workspace_skill_file(
+    workspace_id: uuid.UUID,
+    skill_name: str,
+    file_path: str,
+    session: SessionDep,
+    user: Annotated[User, Depends(require_permission(Permission.WORKSPACE_WRITE))],
+) -> SkillMutationResponse:
+    """删 skill 内文件（SKILL.md 入口保护 409 + 审计）。"""
+    service = SkillsViewService(session)
+    return await service.delete_skill_file(workspace_id, skill_name, file_path, actor=user)
 
 
 @router.get("/{workspace_id}/mcp-config", response_model=McpConfigViewResponse)

@@ -14,8 +14,11 @@
  *
  * D-001@v2（变更 2026-08-26-workspace-mcp-edit task-09，推翻旧变更 D-006 的只读
  * 约束）：mcp-config 可编辑——新增 updateWorkspaceMcpConfig fetch +
- * useUpdateWorkspaceMcpConfig mutation，成功后失效 workspaceMcpConfig.detail；
- * skills 仍只读。
+ * useUpdateWorkspaceMcpConfig mutation，成功后失效 workspaceMcpConfig.detail。
+ *
+ * 2026-08-26-workspace-skill-edit task-05：skills 亦升级完整文件编辑——
+ * skill 建删 + 文件读/写/删五组 fetch/hooks，写后失效 workspaceSkillsView
+ * 与 workspaceSkillFile 双键。
  * 两个查询独立（不同端点、不同失效节奏），各自 refetchInterval 对齐 workspace 详情页
  * 静态视图的轻量轮询（30s），可被父组件按需关闭。
  */
@@ -152,5 +155,155 @@ export function useUpdateWorkspaceMcpConfig(workspaceId: string) {
         queryKey: queryKeys.workspaceMcpConfig.detail(workspaceId),
       });
     },
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/*  skills 完整文件编辑（2026-08-26-workspace-skill-edit task-05）      */
+/* ------------------------------------------------------------------ */
+
+/** POST /skills 请求体。 */
+export type SkillCreateRequest = components["schemas"]["SkillCreateRequest"];
+
+/** GET 文件内容响应。 */
+export type SkillFileContentResponse =
+  components["schemas"]["SkillFileContentResponse"];
+
+/** PUT 文件请求体。 */
+export type SkillFileWriteRequest =
+  components["schemas"]["SkillFileWriteRequest"];
+
+/** 删除类写操作响应。 */
+export type SkillMutationResponse =
+  components["schemas"]["SkillMutationResponse"];
+
+/** PUT 文件响应。 */
+export type SkillFileWriteResponse =
+  components["schemas"]["SkillFileWriteResponse"];
+
+export async function createWorkspaceSkill(
+  workspaceId: string,
+  body: SkillCreateRequest,
+): Promise<SkillsViewResponse> {
+  return apiFetch<SkillsViewResponse>(`/api/workspaces/${workspaceId}/skills`, {
+    method: "POST",
+    json: body,
+  });
+}
+
+export async function deleteWorkspaceSkill(
+  workspaceId: string,
+  skillName: string,
+): Promise<SkillMutationResponse> {
+  return apiFetch<SkillMutationResponse>(
+    `/api/workspaces/${workspaceId}/skills/${encodeURIComponent(skillName)}`,
+    { method: "DELETE" },
+  );
+}
+
+export async function readWorkspaceSkillFile(
+  workspaceId: string,
+  skillName: string,
+  path: string,
+): Promise<SkillFileContentResponse> {
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  return apiFetch<SkillFileContentResponse>(
+    `/api/workspaces/${workspaceId}/skills/${encodeURIComponent(skillName)}/files/${encoded}`,
+  );
+}
+
+export async function writeWorkspaceSkillFile(
+  workspaceId: string,
+  skillName: string,
+  path: string,
+  body: SkillFileWriteRequest,
+): Promise<SkillFileWriteResponse> {
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  return apiFetch<SkillFileWriteResponse>(
+    `/api/workspaces/${workspaceId}/skills/${encodeURIComponent(skillName)}/files/${encoded}`,
+    { method: "PUT", json: body },
+  );
+}
+
+export async function deleteWorkspaceSkillFile(
+  workspaceId: string,
+  skillName: string,
+  path: string,
+): Promise<SkillMutationResponse> {
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  return apiFetch<SkillMutationResponse>(
+    `/api/workspaces/${workspaceId}/skills/${encodeURIComponent(skillName)}/files/${encoded}`,
+    { method: "DELETE" },
+  );
+}
+
+/** skill 单文件内容查询（编辑器数据源，无轮询——按需手动 refetch）。 */
+export function useWorkspaceSkillFile(
+  workspaceId: string,
+  skillName: string,
+  path: string | null,
+) {
+  return useQuery<SkillFileContentResponse, ApiError>({
+    queryKey: queryKeys.workspaceSkillFile.detail(
+      workspaceId,
+      skillName,
+      path ?? "",
+    ),
+    queryFn: () =>
+      readWorkspaceSkillFile(workspaceId, skillName, path as string),
+    enabled: path !== null,
+  });
+}
+
+/** skill 级/文件级写操作统一失效：列表 + 单文件双键。 */
+function useInvalidateSkillQueries(workspaceId: string) {
+  const qc = useQueryClient();
+  return () => {
+    void qc.invalidateQueries({
+      queryKey: queryKeys.workspaceSkillsView.detail(workspaceId),
+    });
+    void qc.invalidateQueries({ queryKey: ["workspaceSkillFile"] });
+  };
+}
+
+export function useCreateWorkspaceSkill(workspaceId: string) {
+  const invalidate = useInvalidateSkillQueries(workspaceId);
+  return useMutation<SkillsViewResponse, ApiError, SkillCreateRequest>({
+    mutationFn: (body) => createWorkspaceSkill(workspaceId, body),
+    onSuccess: invalidate,
+  });
+}
+
+export function useDeleteWorkspaceSkill(workspaceId: string) {
+  const invalidate = useInvalidateSkillQueries(workspaceId);
+  return useMutation<SkillMutationResponse, ApiError, string>({
+    mutationFn: (skillName) => deleteWorkspaceSkill(workspaceId, skillName),
+    onSuccess: invalidate,
+  });
+}
+
+export function useWriteWorkspaceSkillFile(workspaceId: string) {
+  const invalidate = useInvalidateSkillQueries(workspaceId);
+  return useMutation<
+    SkillFileWriteResponse,
+    ApiError,
+    { skillName: string; path: string; body: SkillFileWriteRequest }
+  >({
+    mutationFn: ({ skillName, path, body }) =>
+      writeWorkspaceSkillFile(workspaceId, skillName, path, body),
+    onSuccess: invalidate,
+  });
+}
+
+export function useDeleteWorkspaceSkillFile(workspaceId: string) {
+  const invalidate = useInvalidateSkillQueries(workspaceId);
+  return useMutation<
+    SkillMutationResponse,
+    ApiError,
+    { skillName: string; path: string }
+  >({
+    mutationFn: ({ skillName, path }) =>
+      deleteWorkspaceSkillFile(workspaceId, skillName, path),
+    onSuccess: invalidate,
   });
 }

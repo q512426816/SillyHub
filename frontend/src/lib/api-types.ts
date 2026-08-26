@@ -532,8 +532,63 @@ export interface paths {
          */
         get: operations["list_workspace_skills_api_workspaces__workspace_id__skills_get"];
         put?: never;
-        post?: never;
+        /**
+         * Create Workspace Skill
+         * @description 新建 workspace 自定义 skill（2026-08-26-workspace-skill-edit task-02）。
+         *
+         *     生成 ``skills/<name>/SKILL.md``（frontmatter name/description）；skill 名白名单
+         *     校验（D-003@v1）；重名 409。鉴权 WorkspaceWriter（同 MCP PUT 模式）。
+         */
+        post: operations["create_workspace_skill_api_workspaces__workspace_id__skills_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/skills/{skill_name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Workspace Skill
+         * @description 删除整个 skill 目录（symlink 防护 + 审计，D-003@v1/R-02）。
+         */
+        delete: operations["delete_workspace_skill_api_workspaces__workspace_id__skills__skill_name__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/skills/{skill_name}/files/{file_path}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Workspace Skill File
+         * @description 读 skill 内文本文件（UTF-8 探测 + 512KB 上限 + 路径穿越 fail-closed）。
+         */
+        get: operations["read_workspace_skill_file_api_workspaces__workspace_id__skills__skill_name__files__file_path__get"];
+        /**
+         * Write Workspace Skill File
+         * @description 写 skill 内文本文件（新建/覆盖，原子写 + 父目录自动创建限一层 + 审计）。
+         */
+        put: operations["write_workspace_skill_file_api_workspaces__workspace_id__skills__skill_name__files__file_path__put"];
+        post?: never;
+        /**
+         * Delete Workspace Skill File
+         * @description 删 skill 内文件（SKILL.md 入口保护 409 + 审计）。
+         */
+        delete: operations["delete_workspace_skill_file_api_workspaces__workspace_id__skills__skill_name__files__file_path__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -17695,6 +17750,31 @@ export interface components {
             shared: boolean;
         };
         /**
+         * SkillCreateRequest
+         * @description ``POST /skills`` 请求体。
+         */
+        SkillCreateRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+        };
+        /**
+         * SkillFileContentResponse
+         * @description ``GET /skills/{name}/files/{path}`` 响应。
+         */
+        SkillFileContentResponse: {
+            /** Path */
+            path: string;
+            /** Content */
+            content: string;
+            /** Size */
+            size: number;
+        };
+        /**
          * SkillFileEntry
          * @description 单个 workspace 自定义 skill 的只读视图。
          */
@@ -17703,6 +17783,32 @@ export interface components {
             name: string;
             /** Files */
             files?: string[];
+        };
+        /**
+         * SkillFileWriteRequest
+         * @description ``PUT /skills/{name}/files/{path}`` 请求体。
+         */
+        SkillFileWriteRequest: {
+            /** Content */
+            content: string;
+        };
+        /**
+         * SkillFileWriteResponse
+         * @description ``PUT`` 文件响应。
+         */
+        SkillFileWriteResponse: {
+            /** Path */
+            path: string;
+            /** Size */
+            size: number;
+        };
+        /**
+         * SkillMutationResponse
+         * @description 删除类写操作响应。
+         */
+        SkillMutationResponse: {
+            /** Deleted */
+            deleted: boolean;
         };
         /**
          * SkillsViewResponse
@@ -21405,6 +21511,176 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SkillsViewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_workspace_skill_api_workspaces__workspace_id__skills_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillsViewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_workspace_skill_api_workspaces__workspace_id__skills__skill_name__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                skill_name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_workspace_skill_file_api_workspaces__workspace_id__skills__skill_name__files__file_path__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                skill_name: string;
+                file_path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillFileContentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_workspace_skill_file_api_workspaces__workspace_id__skills__skill_name__files__file_path__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                skill_name: string;
+                file_path: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillFileWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillFileWriteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_workspace_skill_file_api_workspaces__workspace_id__skills__skill_name__files__file_path__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                skill_name: string;
+                file_path: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillMutationResponse"];
                 };
             };
             /** @description Validation Error */

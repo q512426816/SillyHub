@@ -9,6 +9,8 @@ backend 容器路径，RPC 打到 daemon 宿主会读不到——daemon 宿主�
 2026-07-11 spec sync 修复（ql-20260711-001）：skills_view 回归 backend 本地直读。
 2026-08-26-workspace-mcp-edit task-01：新增 ``update_mcp_config`` 写路径（仅 stdio +
 ``<set>`` 服务端还原 + 原子写 + 审计）。
+2026-08-26-workspace-skill-edit task-01：新增 skills 写路径（skill 建删 + 文件读/写/
+删，路径穿越 fail-closed + 文本/大小约束 + SKILL.md 入口保护 + 手工审计）。
 
 参考：
 - daemon skill-manager.ts：workspace 自定义 skills 源 = ``specDir/skills/``
@@ -20,6 +22,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
+import shutil
 import uuid
 from pathlib import Path
 
@@ -111,6 +115,135 @@ class McpConfigSecretUnresolvable(AppError):
             f"密钥占位符无法还原：server {server} 的 env {env_key}，请重新输入明文",
             details={"server": server, "env_key": env_key},
         )
+
+
+# ── skills 编辑（2026-08-26-workspace-skill-edit task-01 / D-003@v1 安全约束）──
+
+_SKILL_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+"""skill 名与文件路径段白名单（防分隔符/穿越注入；额外拒绝 ``..`` 字面量）。"""
+
+_SKILL_MAX_FILE_BYTES = 512 * 1024
+"""单文件读/写大小上限（512KB，防大文件拖垮编辑器与请求体）。"""
+
+_SKILL_ENTRY_FILENAME = "SKILL.md"
+"""skill 入口文件名（禁止删除——agent 按 SKILL.md 发现 skill）。"""
+
+
+class SkillNameInvalid(AppError):
+    """skill 名/文件路径段不在白名单或含 ``..``（路径穿越 fail-closed）。"""
+
+    code = "HTTP_422_SKILL_NAME_INVALID"
+    http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    def __init__(self, *, value: str) -> None:
+        super().__init__(
+            "名称仅允许字母、数字、点、下划线和连字符，且不能是 ..",
+            details={"value": value[:80]},
+        )
+
+
+class SkillPathInvalid(AppError):
+    """文件路径不合法（越界/绝对路径/超两层/编码变体穿越）。"""
+
+    code = "HTTP_422_SKILL_PATH_INVALID"
+    http_status = status.HTTP_422_UNPROCESSABLE_ENTITY
+
+    def __init__(self, *, path: str) -> None:
+        super().__init__(
+            "文件路径不合法（仅允许 skill 目录内两层层级）",
+            details={"path": path[:160]},
+        )
+
+
+class SkillAlreadyExists(AppError):
+    """新建 skill 时同名目录已存在。"""
+
+    code = "HTTP_409_SKILL_ALREADY_EXISTS"
+    http_status = status.HTTP_409_CONFLICT
+
+    def __init__(self, *, name: str) -> None:
+        super().__init__(f"skill {name} 已存在", details={"name": name})
+
+
+class SkillNotFound(AppError):
+    """skill 或文件不存在。"""
+
+    code = "HTTP_404_SKILL_NOT_FOUND"
+    http_status = status.HTTP_404_NOT_FOUND
+
+    def __init__(self, *, message: str, skill: str, path: str | None = None) -> None:
+        super().__init__(message, details={"skill": skill, "path": path})
+
+
+class SkillFileNotText(AppError):
+    """目标文件不是 UTF-8 文本（二进制拒绝编辑）。"""
+
+    code = "HTTP_415_SKILL_FILE_NOT_TEXT"
+    http_status = status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+
+    def __init__(self, *, path: str) -> None:
+        super().__init__("该文件不是文本文件，无法在线编辑", details={"path": path})
+
+
+class SkillFileTooLarge(AppError):
+    """文件超过读写大小上限。"""
+
+    code = "HTTP_413_SKILL_FILE_TOO_LARGE"
+    http_status = status.HTTP_413_REQUEST_ENTITY_TOO_LARGE
+
+    def __init__(self, *, path: str, size: int) -> None:
+        super().__init__(
+            f"文件超过 {_SKILL_MAX_FILE_BYTES // 1024}KB 上限，无法在线编辑",
+            details={"path": path, "size": size, "limit": _SKILL_MAX_FILE_BYTES},
+        )
+
+
+class SkillEntryProtected(AppError):
+    """SKILL.md 是 skill 入口文件，禁止删除。"""
+
+    code = "HTTP_409_SKILL_ENTRY_PROTECTED"
+    http_status = status.HTTP_409_CONFLICT
+
+    def __init__(self) -> None:
+        super().__init__("SKILL.md 是 skill 入口文件，不可删除")
+
+
+class SkillCreateRequest(BaseModel):
+    """``POST /skills`` 请求体。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=100)
+    description: str = Field(default="", max_length=500)
+
+
+class SkillFileWriteRequest(BaseModel):
+    """``PUT /skills/{name}/files/{path}`` 请求体。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: str
+
+
+class SkillFileContentResponse(BaseModel):
+    """``GET /skills/{name}/files/{path}`` 响应。"""
+
+    path: str
+    content: str
+    size: int
+
+
+class SkillMutationResponse(BaseModel):
+    """删除类写操作响应。"""
+
+    deleted: bool
+
+
+class SkillFileWriteResponse(BaseModel):
+    """``PUT`` 文件响应。"""
+
+    path: str
+    size: int
 
 
 class SkillsViewService:
@@ -354,3 +487,193 @@ class SkillsViewService:
         except OSError:
             tmp_path.unlink(missing_ok=True)
             raise
+
+    # ── skills 写路径（2026-08-26-workspace-skill-edit task-01）──────────────────
+
+    async def _skills_root(self, workspace_id: uuid.UUID) -> Path:
+        """定位 specDir/skills/（无 spec 工作区则抛 SpecWorkspaceNotFound，不静默）。"""
+        ws, spec_ws = await self._get_base(workspace_id)
+        resolver = self._resolver_for(ws, spec_ws)
+        if resolver is None:
+            raise SpecWorkspaceNotFound(
+                "未找到该工作区对应的 spec 工作区。",
+                details={"workspace_id": str(workspace_id)},
+            )
+        return resolver._spec_root() / "skills"
+
+    @staticmethod
+    def _validate_segment(value: str) -> str:
+        """校验 skill 名/路径段（白名单 + 拒 ``..``）；返回原值（链式用）。"""
+        if value == ".." or not _SKILL_NAME_RE.match(value):
+            raise SkillNameInvalid(value=value)
+        return value
+
+    @staticmethod
+    def _resolve_skill_file_path(skills_root: Path, skill_name: str, file_path: str) -> Path:
+        """文件路径 → skill 目录内绝对 Path（穿越 fail-closed）。
+
+        三重防线（D-003@v1）：①段白名单（每段过 ``_validate_segment``，天然拒
+        分隔符/``..``/盘符）；②层数 ≤2（对齐 ``_list_files_local`` 平铺清单）；
+        ③resolve 后 commonpath 必须仍是 skill 目录（防编码/链接变体绕过）。
+        """
+        if not file_path or file_path.startswith(("/", "\\")) or ":" in file_path:
+            raise SkillPathInvalid(path=file_path)
+        parts = file_path.replace("\\", "/").split("/")
+        if len(parts) > 2:
+            raise SkillPathInvalid(path=file_path)
+        for seg in parts:
+            SkillsViewService._validate_segment(seg)
+        skill_dir = (skills_root / SkillsViewService._validate_segment(skill_name)).resolve()
+        target = (skill_dir.joinpath(*parts)).resolve()
+        try:
+            if os.path.commonpath((str(skill_dir), str(target))) != str(skill_dir):
+                raise SkillPathInvalid(path=file_path)
+        except ValueError:
+            # Windows 跨盘符等 commonpath 异常 → 一律拒绝
+            raise SkillPathInvalid(path=file_path) from None
+        return target
+
+    async def _audit_skill_write(
+        self, actor: User, workspace_id: uuid.UUID, action: str, skill: str, path: str | None
+    ) -> None:
+        """skills 写操作审计（纯文件写不触发 audit_hooks，手工插行，D-006@v1）。"""
+        self._session.add(
+            AuditLog(
+                action=action,
+                resource_type="workspace_skill",
+                resource_id=AUDIT_PLACEHOLDER_ID,
+                workspace_id=workspace_id,
+                actor_id=actor.id,
+                details_json=json.dumps({"skill": skill, "path": path}, ensure_ascii=False),
+            )
+        )
+        await self._session.commit()
+
+    async def create_skill(
+        self, workspace_id: uuid.UUID, payload: SkillCreateRequest, actor: User
+    ) -> SkillsViewResponse:
+        """新建 skill：生成 ``skills/<name>/SKILL.md``（frontmatter name/description）。"""
+        name = self._validate_segment(payload.name)
+        skills_root = await self._skills_root(workspace_id)
+        skill_dir = skills_root / name
+        if skill_dir.exists():
+            raise SkillAlreadyExists(name=name)
+
+        frontmatter = f"---\nname: {name}\n"
+        if payload.description:
+            frontmatter += f"description: {payload.description}\n"
+        frontmatter += "---\n\n# {name}\n\n（在此编写该 skill 的使用说明）\n".replace(
+            "{name}", name
+        )
+
+        def _write() -> None:
+            skill_dir.mkdir(parents=True, exist_ok=False)
+            # newline 固定 LF：Windows 文本写会把 LF 翻译成 CRLF（task-03 发现）。
+            (skill_dir / _SKILL_ENTRY_FILENAME).write_text(
+                frontmatter, encoding="utf-8", newline="\n"
+            )
+
+        await asyncio.to_thread(_write)
+        await self._audit_skill_write(
+            actor, workspace_id, "workspace_skill.create", name, _SKILL_ENTRY_FILENAME
+        )
+        return await self.list_skills(workspace_id)
+
+    async def delete_skill(
+        self, workspace_id: uuid.UUID, skill_name: str, actor: User
+    ) -> SkillMutationResponse:
+        """删除整个 skill 目录（symlink 防护：非常规条目拒绝，防逃逸）。"""
+        name = self._validate_segment(skill_name)
+        skills_root = await self._skills_root(workspace_id)
+        skill_dir = (skills_root / name).resolve()
+        if os.path.commonpath((str(skills_root.resolve()), str(skill_dir))) != str(
+            skills_root.resolve()
+        ):
+            raise SkillPathInvalid(path=skill_name)
+        if not skill_dir.is_dir():
+            raise SkillNotFound(message=f"skill {name} 不存在", skill=name)
+
+        def _rmtree() -> None:
+            # symlink 防护：目录内任一符号链接条目 → 拒绝删除（防链接逃逸删除外部文件）
+            for child in skill_dir.rglob("*"):
+                if child.is_symlink():
+                    raise SkillPathInvalid(path=f"{name}/{child.relative_to(skill_dir)}")
+            shutil.rmtree(skill_dir)
+
+        await asyncio.to_thread(_rmtree)
+        await self._audit_skill_write(actor, workspace_id, "workspace_skill.delete", name, None)
+        return SkillMutationResponse(deleted=True)
+
+    async def read_skill_file(
+        self, workspace_id: uuid.UUID, skill_name: str, file_path: str
+    ) -> SkillFileContentResponse:
+        """读 skill 内文本文件（UTF-8 探测 + 大小上限）。"""
+        skills_root = await self._skills_root(workspace_id)
+        target = self._resolve_skill_file_path(skills_root, skill_name, file_path)
+        if not target.is_file():
+            raise SkillNotFound(
+                message=f"文件 {file_path} 不存在", skill=skill_name, path=file_path
+            )
+        size = target.stat().st_size
+        if size > _SKILL_MAX_FILE_BYTES:
+            raise SkillFileTooLarge(path=file_path, size=size)
+        raw = await asyncio.to_thread(target.read_bytes)
+        try:
+            content = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            raise SkillFileNotText(path=file_path) from None
+        return SkillFileContentResponse(path=file_path, content=content, size=size)
+
+    async def write_skill_file(
+        self,
+        workspace_id: uuid.UUID,
+        skill_name: str,
+        file_path: str,
+        payload: SkillFileWriteRequest,
+        actor: User,
+    ) -> SkillFileWriteResponse:
+        """写 skill 内文本文件（新建/覆盖；原子写；父目录自动创建限一层）。"""
+        skills_root = await self._skills_root(workspace_id)
+        target = self._resolve_skill_file_path(skills_root, skill_name, file_path)
+        if not (skills_root / self._validate_segment(skill_name)).is_dir():
+            raise SkillNotFound(message=f"skill {skill_name} 不存在", skill=skill_name)
+        size = len(payload.content.encode("utf-8"))
+        if size > _SKILL_MAX_FILE_BYTES:
+            raise SkillFileTooLarge(path=file_path, size=size)
+
+        def _write() -> None:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = target.with_name(f"{target.name}.tmp-{uuid.uuid4().hex[:12]}")
+            try:
+                # newline 固定 LF：Windows 文本写会把 LF 翻译成 CRLF，导致 PUT
+                # size 与 GET 内容往返不保真（task-03 发现）。
+                tmp_path.write_text(payload.content, encoding="utf-8", newline="\n")
+                os.replace(tmp_path, target)
+            except OSError:
+                tmp_path.unlink(missing_ok=True)
+                raise
+
+        await asyncio.to_thread(_write)
+        await self._audit_skill_write(
+            actor, workspace_id, "workspace_skill.update_file", skill_name, file_path
+        )
+        return SkillFileWriteResponse(path=file_path, size=size)
+
+    async def delete_skill_file(
+        self, workspace_id: uuid.UUID, skill_name: str, file_path: str, actor: User
+    ) -> SkillMutationResponse:
+        """删 skill 内文件（SKILL.md 入口保护）。"""
+        normalized = file_path.replace("\\", "/")
+        if normalized == _SKILL_ENTRY_FILENAME:
+            raise SkillEntryProtected()
+        skills_root = await self._skills_root(workspace_id)
+        target = self._resolve_skill_file_path(skills_root, skill_name, file_path)
+        if not target.is_file():
+            raise SkillNotFound(
+                message=f"文件 {file_path} 不存在", skill=skill_name, path=file_path
+            )
+        await asyncio.to_thread(target.unlink)
+        await self._audit_skill_write(
+            actor, workspace_id, "workspace_skill.delete_file", skill_name, file_path
+        )
+        return SkillMutationResponse(deleted=True)

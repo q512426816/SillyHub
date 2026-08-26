@@ -41,6 +41,11 @@ export const queryKeys = {
     detail: (workspaceId: string) =>
       ["workspaceSkillsView", "detail", workspaceId] as const,
   },
+  // 2026-08-26-workspace-skill-edit task-05：skill 单文件内容（编辑器查询缓存键）。
+  workspaceSkillFile: {
+    detail: (workspaceId: string, skill: string, path: string) =>
+      ["workspaceSkillFile", "detail", workspaceId, skill, path] as const,
+  },
   workspaceMcpConfig: {
     all: ["workspaceMcpConfig"] as const,
     detail: (workspaceId: string) =>
