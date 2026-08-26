@@ -16,3 +16,8 @@
 根因：completed 分身结论需点浮层才能看到；主控分身全完成后仍问用户是否收敛。
 方案：result_summary 字段展示 worker_done 上报摘要前120字符加简报行为准则让主控立即收敛。
 结果：backend 全量 4785 passed 与前端 27 passed 与 E2E 真实验证 mission done 且 result_summary 可见且主控果断收敛已提交推送。
+
+## ql-20260827-002-25d5 | 2026-08-27 07:12:53 | P0 修复：backend 重启后 running session 死锁——daemon 端 status=running 排队等永不结束的 turn，inject 需检测 turn 超时强制重置
+状态：进行中
+关联变更：（无）
+文件：sillyhub-daemon/src/interactive/session-manager.ts, sillyhub-daemon/tests/interactive/session-manager-worker-depth.test.ts
