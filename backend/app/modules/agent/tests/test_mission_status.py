@@ -375,3 +375,77 @@ class TestMissionsStatusSessionVariant:
             headers={**auth_headers, "X-Session-Id": str(uuid.uuid4())},
         )
         assert resp.status_code == 400, resp.text
+
+
+# ── ql-20260826-012：scope 收集批量化（原每 ws 4 条查询 → 3 条固定查询）────────
+
+
+@pytest.mark.asyncio
+async def test_collect_scope_batched_matches_single(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """批量收集与逐 ws collect_single_workspace_status 结果一致 + 查询数恒定。
+
+    3 个工作区三种形态：在线 daemon / 离线 daemon / 未绑。原实现每 ws 4 条
+    查询（Workspace get + binding select + online 查询 + daemon get），批量化后
+    整个 scope 收集固定 3 条（workspaces IN + bindings IN + daemons IN）。
+    """
+    from app.modules.agent.orchestrator import (
+        collect_scope_workspace_statuses,
+        collect_single_workspace_status,
+    )
+
+    ws_online = await _make_workspace(db_session, name="ws-online")
+    ws_offline = await _make_workspace(db_session, name="ws-offline")
+    ws_unbound = await _make_workspace(db_session, name="ws-unbound")
+    await _make_binding_with_named_daemon(db_session, ws_online, display_alias="主机A")
+    await _make_binding_with_named_daemon(db_session, ws_offline, daemon_status="offline")
+
+    mission = AgentMission(
+        workspace_id=ws_online,
+        objective="batch equivalence",
+        scope_workspace_ids=[
+            str(ws_online),
+            str(ws_offline),
+            str(ws_unbound),
+            "not-a-uuid",  # 无效 id 跳过（沿用原语义）
+        ],
+    )
+    db_session.add(mission)
+    await db_session.commit()
+
+    counter = {"n": 0}
+    orig_execute = db_session.execute
+
+    async def counting_execute(*args: object, **kwargs: object):
+        counter["n"] += 1
+        return await orig_execute(*args, **kwargs)
+
+    monkeypatch.setattr(db_session, "execute", counting_execute)
+    try:
+        entries = await collect_scope_workspace_statuses(mission, db_session)
+    finally:
+        monkeypatch.setattr(db_session, "execute", orig_execute)
+
+    assert len(entries) == 3
+    # 顺序契约：条目跟随 scope_workspace_ids 声明序（IN 查询不保证返回顺序，
+    # 简报渲染依赖声明序；无效 uuid 跳过不占位）。
+    assert [e["name"] for e in entries] == ["ws-online", "ws-offline", "ws-unbound"]
+    by_name = {e["name"]: e for e in entries}
+    assert by_name["ws-online"]["daemon_online"] is True
+    assert by_name["ws-online"]["daemon_name"] == "主机A"
+    assert by_name["ws-offline"]["daemon_online"] is False
+    assert by_name["ws-offline"]["daemon_name"] is not None  # 离线但机器名仍返回
+    assert by_name["ws-unbound"]["daemon_online"] is False
+    assert by_name["ws-unbound"]["daemon_name"] is None
+
+    # 口径一致性：与单 ws 收集逐字段相等（含 id/type/description/root_path）。
+    for ws_id in (ws_online, ws_offline, ws_unbound):
+        ws_row = await db_session.get(Workspace, ws_id)
+        assert ws_row is not None
+        single = await collect_single_workspace_status(db_session, ws_row)
+        assert single == by_name[single["name"]], f"批量与单查口径漂移：{single['name']}"
+
+    # 查询数恒定：workspaces IN + bindings IN + daemons IN = 3。
+    assert counter["n"] == 3, f"批量收集应为 3 条固定查询，实际 {counter['n']}"

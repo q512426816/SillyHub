@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, String, Text, Uuid
 from sqlmodel import Field
@@ -26,7 +26,14 @@ class Incident(BaseModel, table=True):
     resolution: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     affected_components: list = Field(default=[], sa_column=Column(JSON, nullable=False))
     reporter_id: uuid.UUID = Field(sa_column=Column(Uuid, ForeignKey("users.id"), nullable=False))
-    resolved_at: datetime | None = Field(default=None, sa_column=Column(DateTime, nullable=True))
+    resolved_at: datetime | None = Field(
+        default=None,
+        # ql-20260826-012：时区对齐全仓口径（DateTime(timezone=True) + aware
+        # now(UTC)——release 等模块同款）。原 naive utcnow 默认值 + 无 tz 列与
+        # service 层 aware 写混存（全仓唯一例外），列类型迁移见
+        # 20260826210000_incident_tz_aware.py。
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     resolved_by: uuid.UUID | None = Field(
         default=None, sa_column=Column(Uuid, ForeignKey("users.id"), nullable=True)
     )
@@ -34,10 +41,12 @@ class Incident(BaseModel, table=True):
         default=None, sa_column=Column(Uuid, ForeignKey("releases.id"), nullable=True)
     )
     created_at: datetime = Field(
-        default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False)
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     updated_at: datetime = Field(
-        default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False)
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
     __table_args__ = (Index("ix_incidents_workspace_status", "workspace_id", "status"),)
@@ -57,8 +66,10 @@ class Postmortem(BaseModel, table=True):
     lessons_learned: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
     author_id: uuid.UUID = Field(sa_column=Column(Uuid, ForeignKey("users.id"), nullable=False))
     created_at: datetime = Field(
-        default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False)
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     updated_at: datetime = Field(
-        default_factory=datetime.utcnow, sa_column=Column(DateTime, nullable=False)
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
     )

@@ -961,3 +961,54 @@ class TestOrphanDialogCancellation:
                 dialog_result={"answers": []},
             )
         assert "cancelled" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_list_dialog_history_capped_to_latest(
+        self, db_session, mocked_redis, monkeypatch
+    ) -> None:
+        """ql-20260826-012：历史固定取最近 N 条再反转为创建序（原无界全量）。
+
+        常量降到 3，种 5 个 dialog（created_at 显式递增）→ 只返回最新 3 个
+        且按创建序（旧 → 新）排列。
+        """
+        from datetime import UTC as _UTC
+        from datetime import datetime as _datetime
+        from datetime import timedelta as _timedelta
+
+        from sqlalchemy import update
+
+        from app.modules.daemon import permission_service as perm_mod
+        from app.modules.daemon.model import SessionDialogRequest
+
+        monkeypatch.setattr(perm_mod, "_DIALOG_HISTORY_MAX", 3)
+
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        sess, run = await _create_session(db_session, uid, rt.id)
+
+        svc = DaemonService(db_session)
+        hub = MagicMock()
+        hub.send_permission_response = AsyncMock(return_value=True)
+        perm = DaemonPermissionService(svc, hub, timeout_sec=30.0)
+
+        for i in range(5):
+            await perm.handle_permission_request(
+                rt.id,
+                _make_dialog_payload(
+                    sess, run, request_id=f"cap-{i}", dialog_kind="AskUserQuestion"
+                ),
+            )
+        # created_at 显式递增，规避 rapid-insert 微秒碰撞导致的裁剪不确定。
+        base = _datetime.now(_UTC) - _timedelta(minutes=5)
+        for i in range(5):
+            await db_session.execute(
+                update(SessionDialogRequest)
+                .where(SessionDialogRequest.request_id == f"cap-{i}")
+                .values(created_at=base + _timedelta(seconds=i))
+            )
+        await db_session.commit()
+
+        history = await perm.list_dialog_history(uid, sess.id)
+        assert [d.request_id for d in history] == ["cap-2", "cap-3", "cap-4"], (
+            "只返回最新 3 条且按创建序（旧 → 新）"
+        )

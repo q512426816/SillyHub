@@ -86,6 +86,10 @@ async def cancel_pending_dialogs_for_run(db: AsyncSession, run_id: uuid.UUID) ->
 # tolerance, so a missing/dropped backend deny still fail-closes on the daemon.
 PERMISSION_TIMEOUT_SEC = 5 * 60
 
+# ql-20260826-012：list_dialog_history 固定取最近 N 条（原无界全量，会话越久
+# 每次打开面板拉得越多）；200 覆盖长会话可视历史。
+_DIALOG_HISTORY_MAX = 200
+
 
 # ── Domain errors ────────────────────────────────────────────────────────────
 
@@ -541,13 +545,18 @@ class DaemonPermissionService:
         user_id: uuid.UUID,
         session_id: uuid.UUID,
     ) -> list[SessionDialogRead]:
-        """Return ALL dialog requests for a session (pending + answered).
+        """Return the dialog Q&A history for a session (pending + answered, newest capped).
 
         Unlike ``list_pending_dialogs`` (page-refresh recovery, pending only),
-        this returns the full AskUserQuestion Q&A history so the interactive
+        this returns the AskUserQuestion Q&A history so the interactive
         session panel can render past questions and answers even after the live
         card is resolved or the session has ended/failed. Ownership enforced
         the same way (cross-user → 404, no existence leak).
+
+        ql-20260826-012：原「Return ALL」无界全量加载（会话越久 Q&A 越多，
+        每次打开会话面板全量拉 ORM 实体）——固定取最近 ``_DIALOG_HISTORY_MAX``
+        条再反转为创建序（面板渲染从旧到新，行为不变；仅超出上限的远古
+        Q&A 不再返回）。
         """
         # Read-only ownership check (same as list_pending_dialogs).
         await self._svc._get_owned_session_for_update(session_id, user_id)
@@ -558,12 +567,14 @@ class DaemonPermissionService:
                 await self._svc._session.execute(
                     select(SessionDialogRequest)
                     .where(SessionDialogRequest.session_id == session_id)
-                    .order_by(SessionDialogRequest.created_at)
+                    .order_by(SessionDialogRequest.created_at.desc())
+                    .limit(_DIALOG_HISTORY_MAX)
                 )
             )
             .scalars()
             .all()
         )
+        rows.reverse()  # 恢复创建序（旧 → 新），与原全量加载的展示顺序一致
         return [SessionDialogRead.from_model(r) for r in rows]
 
     # ── Workspace-level read: GET /api/workspaces/{id}/dialogs（task-02 / D-001 只读）──

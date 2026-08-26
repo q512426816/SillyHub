@@ -263,3 +263,39 @@ async def test_update_valid_severity(db_session):
 
     updated = await svc.update(incident.id, IncidentUpdate(severity="critical"))
     assert updated.severity == "critical"
+
+
+async def test_timestamps_are_tz_aware(db_session):
+    """ql-20260826-012：incident 域时间默认值统一 aware UTC（原 naive utcnow 全仓唯一例外）。
+
+    直接构造 ORM 实体断言 default_factory 产出 aware + UTC 零偏移（钉死
+    naive utcnow 回归）；服务层 resolved_at/updated_at 本就写 aware now(UTC)。
+    SQLite（aiosqlite）方言往返丢 tz 是已知测试库差异，生产 PG timestamptz
+    列保 aware（迁移 20260826210000_incident_tz_aware），不做读回断言。
+    """
+    from datetime import timedelta
+
+    from app.modules.incident.model import Incident, Postmortem
+    from app.modules.incident.schema import IncidentCreate, IncidentUpdate
+
+    ws_id = await _make_workspace(db_session)
+    reporter = await _make_user(db_session)
+
+    incident = Incident(
+        workspace_id=ws_id, title="tz defaults", severity="low", reporter_id=reporter
+    )
+    assert incident.created_at.tzinfo is not None, "created_at 默认值必须是 aware UTC"
+    assert incident.updated_at.tzinfo is not None, "updated_at 默认值必须是 aware UTC"
+    assert incident.created_at.utcoffset() == timedelta(0), "默认值必须是 UTC 零偏移"
+
+    postmortem = Postmortem(incident_id=uuid.uuid4(), author_id=reporter)
+    assert postmortem.created_at.tzinfo is not None
+    assert postmortem.updated_at.tzinfo is not None
+
+    # 服务层 resolve 链路写 resolved_at（aware 源头，SQLite 读回丢 tz 不阻断）。
+    svc = IncidentService(db_session)
+    created = await svc.create(ws_id, reporter, IncidentCreate(title="svc tz", severity="low"))
+    resolved = await svc.update(
+        created.id, IncidentUpdate(status="resolved", resolved_by=str(reporter))
+    )
+    assert resolved.resolved_at is not None

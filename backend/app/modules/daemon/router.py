@@ -2697,6 +2697,11 @@ async def stream_session_logs(
     )
 
 
+# ql-20260826-012：list_session_runs 固定取最新 N 条（原无界全量，长会话每 turn
+# 一条 run 无限增长）；200 覆盖会话面板可视历史。
+_SESSION_RUNS_MAX = 200
+
+
 @router.get(
     "/sessions/{session_id}/runs",
     response_model=list[SessionRunRead],
@@ -2725,7 +2730,11 @@ async def list_session_runs(
             select(AgentRun, AuthUser.display_name)
             .join(AuthUser, AuthUser.id == AgentRun.user_id, isouter=True)
             .where(AgentRun.agent_session_id == session_id)
+            # ql-20260826-012：长生命周期交互会话每 turn 一条 run 无限增长，
+            # 原全量加载——固定取最新 _SESSION_RUNS_MAX 条（已按 started_at
+            # desc，前端 error_detail 按最近 turn 映射，旧 turn 裁剪无损）。
             .order_by(AgentRun.started_at.desc())
+            .limit(_SESSION_RUNS_MAX)
         )
     ).all()
     return [

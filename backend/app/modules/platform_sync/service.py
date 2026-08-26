@@ -654,11 +654,12 @@ class PlatformSyncService:
     ) -> int:
         """POST /agent-logs：批量幂等 upsert + 落库后归属（design §3.2/§3.3.3）。
 
-        落库部分逐条按 ``(workspace_id, log_path)`` select：无则 INSERT、有则整行
-        覆盖——``invocations`` / ``first_seen_at`` 等一律以 CLI 值为准整行写入，
-        服务端**不自行累加**（CLI 留底文件是计数权威，D-005）；``created_at`` 首插
-        后保留不动，仅刷 ``updated_at``。同请求内重复 ``log_path`` 先按首现位置去重
-        保序、以靠后条目为准（design §3.2）。
+        落库部分按 ``(workspace_id, log_path)`` 复合键 IN 批量预取（ql-20260826-012
+        前为逐条 select）：无则 INSERT、有则整行覆盖——``invocations`` /
+        ``first_seen_at`` 等一律以 CLI 值为准整行写入，服务端**不自行累加**（CLI
+        留底文件是计数权威，D-005）；``created_at`` 首插后保留不动，仅刷
+        ``updated_at``。同请求内重复 ``log_path`` 先按首现位置去重保序、以靠后
+        条目为准（design §3.2）。
 
         归属部分（task-04，同事务——归属写在本方法唯一一次 commit 之前）：
 
@@ -687,14 +688,29 @@ class PlatformSyncService:
         # dict 化去重：键保留首现顺序（保序），值被靠后条目覆盖（后者为准）。
         deduped: dict[str, AgentLogEntry] = {entry.log_path: entry for entry in entries}
         now = datetime.now(UTC)
+        # ql-20260826-012：IN 批量预取替代逐 entry SELECT（N+1）——tool_report
+        # 全量重推一批几百条 entries 原来要几百条串行查询；(workspace_id,
+        # log_path) 复合唯一约束保证至多一行/键（model.py:200），dict 命中与原
+        # scalar_one_or_none 语义等价。
+        existing_by_path: dict[str, AgentSessionLogORM] = {}
+        if deduped:
+            existing_rows = (
+                (
+                    await self._session.execute(
+                        select(AgentSessionLogORM).where(
+                            col(AgentSessionLogORM.workspace_id) == workspace_id,
+                            col(AgentSessionLogORM.log_path).in_(deduped.keys()),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            existing_by_path = {row.log_path: row for row in existing_rows}
         # (entry, ORM 行) 配对留存：归属阶段需要 entry 级 harness/ctx 对应到落库行。
         persisted: list[tuple[AgentLogEntry, AgentSessionLogORM]] = []
         for entry in deduped.values():
-            stmt = select(AgentSessionLogORM).where(
-                col(AgentSessionLogORM.workspace_id) == workspace_id,
-                col(AgentSessionLogORM.log_path) == entry.log_path,
-            )
-            row = (await self._session.execute(stmt)).scalar_one_or_none()
+            row = existing_by_path.get(entry.log_path)
             if row is None:
                 row = AgentSessionLogORM(
                     id=uuid.uuid4(),

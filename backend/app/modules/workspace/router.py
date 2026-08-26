@@ -170,28 +170,39 @@ async def probe_workspaces(
 
     弹层机器状态统一后端口径（任一成员 binding，含他人绑定，消除本人/他人
     binding 展示不一致 UB-2）：``git_mode/daemon_name/daemon_online`` 三字段与
-    mission_status 的 scope_workspaces 完全同源——逐工作区经
-    ``orchestrator.collect_single_workspace_status``（task-01 单 ws 收集共享
-    函数，口径单一来源）+ ``probe_workspace_git_mode``（task-02 三态探测）组装。
+    mission_status 的 scope_workspaces 完全同源——经
+    ``orchestrator.collect_many_workspace_statuses``（ql-20260826-012 批量收集，
+    3 条固定查询替代原逐 ws 4 条；条目组装与单 ws 路径共享函数，口径单一来源）
+    + ``probe_workspace_git_mode``（task-02 三态探测）组装。
 
     只读无状态变化（design §7.5）；每次调用实时探测不缓存（R-02）；探测 RPC
     失败/未绑 daemon 归 ``unknown`` 不抛 5xx（fail-safe）。查无行的 workspace_id
     跳过不报错（与 collect_scope 无效 id 跳过同语义）。
     """
-    from app.modules.agent.orchestrator import collect_single_workspace_status
+    from sqlalchemy import select
+
+    from app.modules.agent.orchestrator import collect_many_workspace_statuses
     from app.modules.daemon.host_fs import new_host_fs_delegate
 
     # delegate per-request 构造 + 探测回调注入——与 mission_status 路由
     # （mcp_tools._mission_status_core）同款接线，三字段口径完全同源。
     delegate = new_host_fs_delegate(session)
+    # ql-20260826-012：workspaces IN 一次取齐 + 批量状态收集（N ws 4N 条查询 →
+    # 3 条固定查询）；空列表 in_([]) 恒空结果，天然短路。
+    workspaces = (
+        (await session.execute(select(Workspace).where(Workspace.id.in_(payload.workspace_ids))))
+        .scalars()
+        .all()
+    )
+    entries = await collect_many_workspace_statuses(
+        session, list(workspaces), git_probe=delegate.probe_workspace_git_mode
+    )
+    entry_by_id = {uuid.UUID(entry["id"]): entry for entry in entries}
     items: list[WorkspaceProbeItem] = []
     for ws_id in payload.workspace_ids:
-        ws = await session.get(Workspace, ws_id)
-        if ws is None:
+        entry = entry_by_id.get(ws_id)
+        if entry is None:
             continue
-        entry = await collect_single_workspace_status(
-            session, ws, git_probe=delegate.probe_workspace_git_mode
-        )
         items.append(
             WorkspaceProbeItem(
                 workspace_id=ws_id,

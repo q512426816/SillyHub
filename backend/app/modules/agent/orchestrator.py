@@ -147,12 +147,15 @@ async def collect_single_workspace_status(
     共用本函数——机器名/在线/git 模式三字段口径单一来源，禁两处复制粘贴
     漂移（UB-2 / D-008@v2：probe 与简报/mission_status 完全同源）。
 
+    批量场景（多工作区一次收集）走 :func:`collect_many_workspace_statuses`
+    （3 条固定查询），单工作区场景走本函数（条目组装共享
+    :func:`_workspace_status_entry`，口径不漂移）。
+
     条目字段（与 collect_scope_workspace_statuses 文档一致）：
 
     - ``id/name/type/description``：Workspace 行原样（id 转 str，JSON 友好）。
-    - ``daemon_online``：任一成员 WorkspaceMemberRuntime（daemon_id 非空首行）+
-      ``query_daemon_online_by_id`` + binding 属主 user_id（BE-P1-5 修正口径，
-      禁回退全零 UUID 占位）。
+    - ``daemon_online``：任一成员 WorkspaceMemberRuntime（daemon_id 非空首行）
+      + daemon 行属主匹配 + 在线态（BE-P1-5 修正口径，禁回退全零 UUID 占位）。
     - ``daemon_name``：该 binding daemon 的 ``display_alias or hostname``（未绑 /
       daemon 行缺失 → None）。「任一成员 binding，不限本人」与 §5.C probe 端点
       同一口径（UB-2）。
@@ -161,7 +164,6 @@ async def collect_single_workspace_status(
       接线）。
     """
     from app.modules.daemon.model import DaemonInstance
-    from app.modules.workspace.member_runtimes.queries import query_daemon_online_by_id
 
     # 任一成员 binding（daemon_id 非空首行）→ 该工作区源码宿主 daemon。
     runtime = (
@@ -176,19 +178,38 @@ async def collect_single_workspace_status(
         .scalars()
         .first()
     )
-    daemon_online = False
-    daemon_name: str | None = None
+    daemon_row = None
     if runtime is not None and runtime.daemon_id is not None:
-        # BE-P1-5（2026-08-21 审查）：query_daemon_online_by_id 的 SQL 含
-        # ``AND user_id = :uid``，必须传 binding 属主的 user_id——原全零 UUID
-        # 占位会恒 None，scope 清单一律误显示「离线」。
-        online_daemon = await query_daemon_online_by_id(session, runtime.daemon_id, runtime.user_id)
-        daemon_online = online_daemon is not None
         daemon_row = await session.get(DaemonInstance, runtime.daemon_id)
-        if daemon_row is not None:
-            # 机器名口径：display_alias 优先，缺省回退 hostname（弹层/简报/probe 同源）。
-            daemon_name = daemon_row.display_alias or daemon_row.hostname
-    entry: dict[str, Any] = {
+    entry = _workspace_status_entry(ws, runtime, daemon_row)
+    if git_probe is not None:
+        entry["git_mode"] = await git_probe(ws)
+    return entry
+
+
+def _workspace_status_entry(
+    ws: Workspace,
+    runtime: WorkspaceMemberRuntime | None,
+    daemon_row: Any,
+) -> dict[str, Any]:
+    """由已取回的 Workspace / binding / daemon 行组装状态条目（纯函数）。
+
+    在线判定 ``daemon_row.user_id == runtime.user_id AND status == 'online'``
+    等价 ``query_daemon_online_by_id(daemon_id, runtime.user_id)`` 的 SQL 语义
+    （BE-P1-5：属主必须是 binding 属主 user_id）；daemon 行缺失（None）→ 离线、
+    机器名 None，与单查路径「query 返回 None」同语义。
+    """
+    daemon_online = (
+        runtime is not None
+        and daemon_row is not None
+        and daemon_row.user_id == runtime.user_id
+        and daemon_row.status == "online"
+    )
+    daemon_name: str | None = None
+    if daemon_row is not None:
+        # 机器名口径：display_alias 优先，缺省回退 hostname（弹层/简报/probe 同源）。
+        daemon_name = daemon_row.display_alias or daemon_row.hostname
+    return {
         "id": str(ws.id),
         "name": ws.name,
         "type": ws.type,
@@ -197,9 +218,83 @@ async def collect_single_workspace_status(
         "daemon_online": daemon_online,
         "daemon_name": daemon_name,
     }
-    if git_probe is not None:
-        entry["git_mode"] = await git_probe(ws)
-    return entry
+
+
+async def collect_many_workspace_statuses(
+    session: AsyncSession,
+    workspaces: list[Workspace],
+    *,
+    git_probe: GitModeProbe | None = None,
+) -> list[dict[str, Any]]:
+    """批量收集多个工作区的状态条目（ql-20260826-012 性能批次二）。
+
+    原 ``collect_scope_workspace_statuses`` / probe 端点逐 ws 调
+    ``collect_single_workspace_status``，每工作区 4 条查询（Workspace get +
+    MemberRuntime select + query_daemon_online_by_id + DaemonInstance get），
+    N 工作区 = 4N 条串行查询且两处都是前端轮询入口。本函数固定 3 条查询：
+
+    1. 成员 binding IN 预取（每工作区取 daemon_id 非空首行——批次内按返回
+       顺序取首行，与原逐 ws ``.first()`` 同等口径）；
+    2. daemon 行 IN 预取（在线判定 + 机器名同源，等价
+       ``query_daemon_online_by_id`` 的 id+属主+online 语义，见
+       ``_workspace_status_entry``）；
+    3. （Workspace 行由调用方 IN 取齐后传入。）
+
+    ``git_probe`` 仍逐工作区回调（探测本身是 per-daemon RPC，无法批量）。
+    条目字段与 ``collect_single_workspace_status`` 完全一致（共享组装函数）。
+    """
+    from app.modules.daemon.model import DaemonInstance
+
+    if not workspaces:
+        return []
+    ws_ids = [ws.id for ws in workspaces]
+    runtime_rows = (
+        (
+            await session.execute(
+                select(WorkspaceMemberRuntime).where(
+                    WorkspaceMemberRuntime.workspace_id.in_(ws_ids),
+                    WorkspaceMemberRuntime.daemon_id.isnot(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    runtime_by_ws: dict[uuid.UUID, WorkspaceMemberRuntime] = {}
+    for rt in runtime_rows:
+        runtime_by_ws.setdefault(rt.workspace_id, rt)
+    daemon_ids = {rt.daemon_id for rt in runtime_by_ws.values() if rt.daemon_id is not None}
+    daemon_by_id: dict[uuid.UUID, DaemonInstance] = {}
+    if daemon_ids:
+        try:
+            daemon_rows = (
+                (
+                    await session.execute(
+                        select(DaemonInstance).where(DaemonInstance.id.in_(daemon_ids))
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            daemon_by_id = {row.id: row for row in daemon_rows}
+        except Exception:
+            # 对齐 query_daemon_online_by_id 的容错口径：daemon 查询失败按全部
+            # 离线降级（daemon_by_id 空 → online=False / name=None），不阻断
+            # 状态收集主流程。
+            log.warning("workspace_status_daemon_prefetch_failed", count=len(daemon_ids))
+    entries: list[dict[str, Any]] = []
+    for ws in workspaces:
+        runtime = runtime_by_ws.get(ws.id)
+        daemon_row = (
+            daemon_by_id.get(runtime.daemon_id)
+            if runtime is not None and runtime.daemon_id is not None
+            else None
+        )
+        entry = _workspace_status_entry(ws, runtime, daemon_row)
+        if git_probe is not None:
+            entry["git_mode"] = await git_probe(ws)
+        entries.append(entry)
+    return entries
 
 
 async def collect_scope_workspace_statuses(
@@ -224,23 +319,35 @@ async def collect_scope_workspace_statuses(
 
     消费方：render_scope_brief / render_session_orchestrator_briefing（本文件）、
     mission_status 路由（task-03）、probe 端点（task-10）。
+
+    ql-20260826-012 性能批次二：workspaces IN 一次取齐 +
+    :func:`collect_many_workspace_statuses` 批量收集（原逐 ws 4 条查询 → 3 条
+    固定查询），条目口径与 ``collect_single_workspace_status`` 共享组装函数。
     """
     from app.modules.workspace.model import Workspace
 
     entries: list[dict[str, Any]] = []
     if not mission.scope_workspace_ids:
         return entries
+    valid_ids: list[uuid.UUID] = []
     for ws_id_str in mission.scope_workspace_ids:
         try:
-            ws_id = uuid.UUID(ws_id_str)
+            valid_ids.append(uuid.UUID(ws_id_str))
         except (ValueError, TypeError):
             # 忽略无效的 workspace id（沿用原实现语义）
             continue
-        ws = await session.get(Workspace, ws_id)
-        if ws is None:
-            continue
-        entries.append(await collect_single_workspace_status(session, ws, git_probe=git_probe))
-    return entries
+    if not valid_ids:
+        return entries
+    workspaces = (
+        (await session.execute(select(Workspace).where(Workspace.id.in_(valid_ids))))
+        .scalars()
+        .all()
+    )
+    # IN 查询不保证返回顺序（SQLite/PG 按索引/存储序），条目必须跟随
+    # scope_workspace_ids 声明序（原逐 ws get 的顺序契约，简报渲染依赖）。
+    ws_by_id = {ws.id: ws for ws in workspaces}
+    ordered = [ws_by_id[w] for w in valid_ids if w in ws_by_id]
+    return await collect_many_workspace_statuses(session, ordered, git_probe=git_probe)
 
 
 async def render_scope_brief(

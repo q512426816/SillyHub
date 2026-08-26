@@ -70,6 +70,10 @@ SessionDep = Annotated[AsyncSession, Depends(get_session)]
 
 log = get_logger(__name__)
 
+# ql-20260826-012：list_change_sessions 固定取最新 N 条（原无界全量，变更挂的
+# 会话随使用无限增长）；200 覆盖变更详情页可视列表。
+_CHANGE_SESSIONS_MAX = 200
+
 
 def _get_user_role(user: User) -> str:
     if getattr(user, "is_platform_admin", False):
@@ -374,6 +378,11 @@ async def list_change_sessions(
     标题取该会话最早一条 channel=user_input 的 AgentRunLog 摘要（前 30 字，X-04，
     共享 helper ``_fetch_session_titles``）。按 last_active_at desc 排序（Python
     排序规避 PG/SQLite 方言差异）。
+
+    ql-20260826-012：原查询无界全量（变更挂的会话无限增长）。SQL 侧加
+    ``last_active_at desc + nulls_last + limit`` 取数窗口（显式 nulls_last 消除
+    PG/SQLite 方言分叉，nulls_last 两方言 3.30+ 均原生支持），下方的 Python
+    最终排序保留（幂等，口径不变）——超窗的远古会话不再返回。
     """
     # 1. links JOIN agent_sessions（跨成员）。unique(change_id, session_id) 使
     #    同一 (变更, 会话) 至多一行 link，JOIN 不会产生重复会话行，无需 distinct。
@@ -386,6 +395,9 @@ async def list_change_sessions(
                     ChangeSessionLink.change_id == change_id,
                     col(AgentSession.deleted_at).is_(None),  # FR-07 软删过滤
                 )
+                # ql-20260826-012：最新 N 条取数窗口（见 docstring）。
+                .order_by(col(AgentSession.last_active_at).desc().nulls_last())
+                .limit(_CHANGE_SESSIONS_MAX)
             )
         )
         .scalars()

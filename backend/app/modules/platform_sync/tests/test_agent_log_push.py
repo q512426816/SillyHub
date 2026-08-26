@@ -1021,3 +1021,94 @@ async def test_push_aggregation_quick_id_binds_quicklog_link(
     ]
     assert await _change_links(db_session) == []
     assert await _all_changes(db_session) == []
+
+
+# ── ql-20260826-012：upsert IN 批量预取（N+1 修复）─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_upsert_prefetch_query_count_constant(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """落库查询数与条目数解耦：3 条 vs 12 条同组 upsert 的 execute 次数相同。
+
+    原实现逐 entry select（N+1），12 条比 3 条多 9 次查询；IN 批量预取后为
+    常数（预取 1 次 + 归属组 find 1 次）。断言上限放宽 ±1 防实现细节微调。
+    """
+    import uuid as _uuid
+
+    from app.modules.auth.model import User
+    from app.modules.platform_sync.schema import AgentLogEntry
+    from app.modules.platform_sync.service import PlatformSyncService
+    from app.modules.workspace.model import Workspace
+
+    ws = Workspace(
+        id=_uuid.uuid4(),
+        name=f"ws-batch-{_uuid.uuid4().hex[:8]}",
+        slug=f"ws-batch-{_uuid.uuid4().hex[:8]}",
+        root_path=f"/tmp/ws-batch-{_uuid.uuid4().hex[:8]}",
+        status="active",
+    )
+    user = User(
+        id=_uuid.uuid4(),
+        email=f"batch-{_uuid.uuid4().hex[:6]}@example.com",
+        password_hash="x",
+        status="active",
+    )
+    db_session.add_all([ws, user])
+    await db_session.commit()
+
+    def _entries(n: int, tag: str) -> list[AgentLogEntry]:
+        return [
+            AgentLogEntry(
+                harness="codex",
+                log_path=f"C:/Users/qinyi/.codex/{tag}-{i}.jsonl",
+                format="codex-rollout-jsonl",
+                session_id=f"{i:032x}",
+                exists=True,
+            )
+            for i in range(n)
+        ]
+
+    svc = PlatformSyncService(db_session)
+
+    async def _upsert_counted(entries: list[AgentLogEntry]) -> int:
+        counter = {"n": 0}
+        orig_execute = db_session.execute
+
+        async def counting_execute(*args: Any, **kwargs: Any):
+            counter["n"] += 1
+            return await orig_execute(*args, **kwargs)
+
+        monkeypatch.setattr(db_session, "execute", counting_execute)
+        try:
+            await svc.upsert_agent_log_entries(
+                ws.id,
+                entries,
+                pushed_at="2026-08-26T00:00:00.000Z",
+                scan_run_id=None,
+                user_id=user.id,
+            )
+        finally:
+            monkeypatch.setattr(db_session, "execute", orig_execute)
+        return counter["n"]
+
+    count_small = await _upsert_counted(_entries(3, "small"))
+    count_large = await _upsert_counted(_entries(12, "large"))
+
+    # 原实现 count_large - count_small == 9（逐条 select）；预取后不随 N 增长。
+    assert count_large - count_small <= 1, (
+        f"批量预取后查询数应与条目数解耦：small={count_small}, large={count_large}"
+    )
+
+    rows = (
+        (
+            await db_session.execute(
+                select(AgentSessionLogORM).where(AgentSessionLogORM.workspace_id == ws.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 15, "两轮 upsert 共 15 条独立 log_path 全部落库"

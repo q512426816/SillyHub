@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -429,3 +429,46 @@ class TestStreamRunErrorEvent:
         assert f"data: {turn_completed_raw}\n\n" in body
         # 无 error_detail → 不追加 run_error
         assert "run_error" not in body
+
+    @pytest.mark.asyncio
+    async def test_runs_capped_to_latest(
+        self, client, auth_headers, db_session, monkeypatch
+    ) -> None:
+        """ql-20260826-012：run 列表固定取最新 N 条（原无界全量）。
+
+        常量降到 5，种 8 个 run（started_at 递增）→ 只返回最新 5 个且按
+        started_at desc 排序（第一个是最新）。
+        """
+        from app.modules.daemon import router as daemon_router
+
+        monkeypatch.setattr(daemon_router, "_SESSION_RUNS_MAX", 5)
+
+        admin = await _admin_id(db_session)
+        sid = uuid.uuid4()
+        db_session.add(
+            AgentSession(
+                id=sid,
+                user_id=admin,
+                provider="claude",
+                status="active",
+            )
+        )
+        base = datetime.now(UTC) - timedelta(minutes=10)
+        for i in range(8):
+            db_session.add(
+                AgentRun(
+                    id=uuid.uuid4(),
+                    agent_type="claude_code",
+                    status="completed",
+                    agent_session_id=sid,
+                    started_at=base + timedelta(seconds=i),
+                )
+            )
+        await db_session.commit()
+
+        resp = await client.get(f"/api/daemon/sessions/{sid}/runs", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        items = resp.json()
+        assert len(items) == 5
+        started = [it["started_at"] for it in items]
+        assert started == sorted(started, reverse=True), "按 started_at desc 排序"
