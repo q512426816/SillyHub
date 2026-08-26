@@ -386,6 +386,23 @@ async def test_session_channel_payload_contains_tool_kind(monkeypatch: pytest.Mo
             captured.append((channel, payload))
             return 1
 
+        def pipeline(self) -> "_FakePipeline":
+            return _FakePipeline(self)
+
+    class _FakePipeline:
+        """ql-20260826-011：publish_submitted_messages 改 pipeline 批量发布，execute
+        时把入队消息按序经 fake publish 落进 captured（与直接 publish 同口径）。"""
+
+        def __init__(self, redis: "_FakeRedis") -> None:
+            self._redis = redis
+            self._queued: list[tuple[str, str]] = []
+
+        def publish(self, channel: str, payload: str) -> None:
+            self._queued.append((channel, payload))
+
+        async def execute(self) -> list:
+            return [await self._redis.publish(ch, p) for ch, p in self._queued]
+
     monkeypatch.setattr(rss, "get_redis", lambda: _FakeRedis())
 
     intent = rss.PublishIntent(

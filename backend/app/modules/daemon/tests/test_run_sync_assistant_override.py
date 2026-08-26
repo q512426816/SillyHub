@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy import select
@@ -75,6 +75,30 @@ async def _create_runtime(session: AsyncSession, user_id: uuid.UUID) -> DaemonRu
 def _mock_redis() -> AsyncMock:
     redis = AsyncMock()
     redis.publish = AsyncMock()
+    _install_pipeline_fake(redis)
+    return redis
+
+
+def _install_pipeline_fake(redis: AsyncMock) -> AsyncMock:
+    """ql-20260826-011：给 AsyncMock redis 补 pipeline() 假件。
+
+    publish_submitted_messages 改为 pipeline 批量发布后，发布调用走
+    ``pipe.publish(...)``（同步入队）+ ``await pipe.execute()``。假件把入队
+    调用记录进 ``redis.pipe_publish``（MagicMock，同步记录无未 await 协程），
+    供 ``_session_log_payloads`` 等断言侧读取；``redis.publish`` 保持 AsyncMock
+    不变（session/service.py 等仍直接 ``await redis.publish`` 的路径继续可用）。
+    """
+    pipe_publish = MagicMock()
+
+    class _FakePipeline:
+        def publish(self, channel: str, payload: str) -> None:
+            pipe_publish(channel, payload)
+
+        async def execute(self) -> list:
+            return []
+
+    redis.pipeline = MagicMock(return_value=_FakePipeline())
+    redis.pipe_publish = pipe_publish
     return redis
 
 
@@ -705,18 +729,24 @@ class TestCrossCallOverrideDeletesCommittedPartial:
 
 
 def _session_log_payloads(mocked_redis: AsyncMock) -> list[dict]:
-    """从 mocked_redis.publish 调用里挑出 session channel 的 log 事件 payload。
+    """从 mocked redis 的发布调用里挑出 session channel 的 log 事件 payload。
 
-    publish_submitted_messages 对每条 log 发两类 publish：
+    publish_submitted_messages 对每条 log 发两类发布：
       1. agent_run:{run_id} channel —— 整个 published_logs entry（扁平 StreamLogEvent）。
       2. agent_session:{session_id} channel —— session_payload（带 event/session_id/run_id）。
     本 helper 只取 session channel（topic 以 "agent_session:" 开头）且 event=='log'
-    的 payload，解析 JSON 返回 dict 列表。
+    的 payload，解析 JSON 返回 dict 列表。ql-20260826-011 起批量发布走
+    pipeline（``redis.pipe_publish``），单条路径仍走 ``redis.publish``，两者都读。
     """
     import json
 
+    calls = [*mocked_redis.publish.call_args_list]
+    pipe_publish = getattr(mocked_redis, "pipe_publish", None)
+    if pipe_publish is not None:
+        calls.extend(pipe_publish.call_args_list)
+
     out: list[dict] = []
-    for call in mocked_redis.publish.call_args_list:
+    for call in calls:
         args, _ = call
         if len(args) < 2:
             continue

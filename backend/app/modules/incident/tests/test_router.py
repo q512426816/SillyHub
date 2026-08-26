@@ -3,11 +3,66 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.security import password_hasher
-from app.modules.auth.model import User
+from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
 from app.modules.workspace.model import Workspace
+
+
+async def _make_user(db_session, *, name: str, is_platform_admin: bool = False) -> User:
+    uid = uuid.uuid4()
+    user = User(
+        id=uid,
+        email=f"{name}-{uid.hex[:8]}@example.com",
+        password_hash=password_hasher.hash("Pass123!"),
+        display_name=name,
+        status="active",
+        is_platform_admin=is_platform_admin,
+    )
+    db_session.add(user)
+    return user
+
+
+async def _grant_ws_permission(
+    db_session: AsyncSession, *, user: User, workspace_id: uuid.UUID, permission: str
+) -> None:
+    """给用户在指定 workspace 授一个只含单权限的角色（test_mission_access_control 同款）。"""
+    role_id = uuid.uuid4()
+    db_session.add(
+        Role(
+            id=role_id,
+            key=f"role-{role_id.hex[:8]}",
+            name=f"Role {role_id.hex[:8]}",
+            description="test role",
+        )
+    )
+    db_session.add(RolePermission(role_id=role_id, permission=permission))
+    db_session.add(
+        UserWorkspaceRole(
+            user_id=user.id,
+            workspace_id=workspace_id,
+            role_id=role_id,
+            granted_by=None,
+            granted_at=datetime.now(UTC),
+        )
+    )
+
+
+def _token_for(user: User) -> str:
+    from app.core.config import get_settings
+    from app.core.security import create_access_token
+
+    token, _ = create_access_token(
+        user_id=user.id,
+        email=user.email,
+        is_admin=bool(user.is_platform_admin),
+        settings=get_settings(),
+    )
+    return token
 
 
 async def _setup(db_session, tmp_path: Path) -> dict:
@@ -166,3 +221,93 @@ async def test_incident_no_auth_401(client, db_session, tmp_path):
         json={"title": "No auth"},
     )
     assert resp.status_code == 401
+
+
+# ── ql-20260826-011：对象级鉴权（跨工作区越权 / IDOR）─────────────────────────
+
+
+async def _seed_two_workspaces_with_incident(db_session, tmp_path: Path) -> dict:
+    """A 工作区（仅 INCIDENT_READ 用户）+ B 工作区（含一条故障单 + DEPLOY_PRODUCTION 用户）。"""
+    from app.modules.incident.schema import IncidentCreate
+    from app.modules.incident.service import IncidentService
+
+    ws_a = Workspace(
+        id=uuid.uuid4(),
+        name="WS A",
+        slug=f"ws-a-{uuid.uuid4().hex[:8]}",
+        root_path=str(tmp_path / "a"),
+        status="active",
+    )
+    ws_b = Workspace(
+        id=uuid.uuid4(),
+        name="WS B",
+        slug=f"ws-b-{uuid.uuid4().hex[:8]}",
+        root_path=str(tmp_path / "b"),
+        status="active",
+    )
+    db_session.add_all([ws_a, ws_b])
+
+    reader_a = await _make_user(db_session, name="reader-a")
+    await _grant_ws_permission(
+        db_session, user=reader_a, workspace_id=ws_a.id, permission="incident:read"
+    )
+    admin_b = await _make_user(db_session, name="admin-b")
+    await db_session.commit()
+
+    incident = await IncidentService(db_session).create(
+        ws_b.id,
+        admin_b.id,
+        IncidentCreate(title="B 工作区故障", severity="high"),
+    )
+    await db_session.commit()
+    return {
+        "ws_a": ws_a.id,
+        "ws_b": ws_b.id,
+        "reader_a_token": _token_for(reader_a),
+        "admin_b_token": _token_for(admin_b),
+        "incident_id": incident.id,
+    }
+
+
+async def test_get_incident_cross_workspace_403(client, db_session, tmp_path):
+    """A 工作区 INCIDENT_READ 用户读 B 工作区故障单 → 403（原 require_permission_any 会放行）。"""
+    refs = await _seed_two_workspaces_with_incident(db_session, tmp_path)
+    resp = await client.get(
+        f"/api/incidents/{refs['incident_id']}",
+        headers=_auth(refs["reader_a_token"]),
+    )
+    assert resp.status_code == 403
+
+
+async def test_update_incident_cross_workspace_403(client, db_session, tmp_path):
+    """A 工作区用户改 B 工作区故障单 → 403。"""
+    refs = await _seed_two_workspaces_with_incident(db_session, tmp_path)
+    resp = await client.patch(
+        f"/api/incidents/{refs['incident_id']}",
+        json={"status": "investigating"},
+        headers=_auth(refs["reader_a_token"]),
+    )
+    assert resp.status_code == 403
+
+
+async def test_postmortem_cross_workspace_403(client, db_session, tmp_path):
+    """A 工作区用户读 B 工作区故障单复盘 → 403。"""
+    refs = await _seed_two_workspaces_with_incident(db_session, tmp_path)
+    resp = await client.get(
+        f"/api/incidents/{refs['incident_id']}/postmortem",
+        headers=_auth(refs["reader_a_token"]),
+    )
+    assert resp.status_code == 403
+
+
+async def test_platform_admin_still_allowed(client, db_session, tmp_path):
+    """平台管理员不受对象级校验影响（has_permission 短路），跨工作区仍放行。"""
+    refs = await _seed_two_workspaces_with_incident(db_session, tmp_path)
+    admin = await _make_user(db_session, name="plat-admin", is_platform_admin=True)
+    await db_session.commit()
+    resp = await client.get(
+        f"/api/incidents/{refs['incident_id']}",
+        headers=_auth(_token_for(admin)),
+    )
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "B 工作区故障"

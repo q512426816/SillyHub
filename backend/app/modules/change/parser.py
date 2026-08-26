@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import re
+import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,7 +24,11 @@ log = get_logger(__name__)
 # resolved 绝对路径, mtime) 复合键（仅按 mtime 会跨 workspace 串结果，Grill B-3），
 # 值不可变（命中回 deepcopy 拷贝，调用方 mutate 不污染缓存）。这是 parser 唯一
 # 的模块级可变状态（design 段 4 / R-01 对「无状态」前提的明示例外）。
+# 写侧（插入 + stale 清理的迭代）持锁：_parse_module_map 经 asyncio.to_thread
+# 并发执行，多线程同时迭代+插入同一 dict 会抛「dictionary changed size during
+# iteration」打断 reparse；读侧 .get / 单键赋值 GIL 原子，无锁。
 _MODULE_MAP_CACHE: dict[tuple[str, float], dict[str, list[str]]] = {}
+_MODULE_MAP_CACHE_LOCK = threading.Lock()
 
 # Re-export constants from SpecPathResolver for backward compatibility
 STANDARD_DOC_TYPES: frozenset[str] = SpecPathResolver.STANDARD_DOC_TYPES
@@ -444,12 +449,14 @@ class ChangeParser:
             return copy.deepcopy(cached)
 
         parsed = ChangeParser._parse_module_map_yaml(map_file)
-        _MODULE_MAP_CACHE[map_key] = parsed
-        # 清掉同路径旧 mtime 的条目，防缓存无界增长（reparse 生命周期内 map 文件
-        # 版本数有限，但跨大量工作区常驻进程时仍收敛为每文件至多 1 条）
-        stale = [k for k in _MODULE_MAP_CACHE if k[0] == map_key[0] and k[1] != map_key[1]]
-        for k in stale:
-            _MODULE_MAP_CACHE.pop(k, None)
+        with _MODULE_MAP_CACHE_LOCK:
+            _MODULE_MAP_CACHE[map_key] = parsed
+            # 清掉同路径旧 mtime 的条目，防缓存无界增长（reparse 生命周期内 map 文件
+            # 版本数有限，但跨大量工作区常驻进程时仍收敛为每文件至多 1 条）。迭代必须
+            # 持锁（见 _MODULE_MAP_CACHE 声明处注释）。
+            stale = [k for k in _MODULE_MAP_CACHE if k[0] == map_key[0] and k[1] != map_key[1]]
+            for k in stale:
+                _MODULE_MAP_CACHE.pop(k, None)
         return copy.deepcopy(parsed)
 
     @staticmethod

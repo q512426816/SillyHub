@@ -377,3 +377,49 @@ class TestLoadModuleMapPlatformManaged:
         assert wrapped == tmp_path
         result = ChangeParser._load_module_map(tmp_path)
         assert "wrapped" in result and "flat" not in result
+
+    def test_stale_cleanup_holds_lock(self, tmp_path: Path) -> None:
+        """ql-20260826-011：写侧（插入 + stale 迭代清理）必须持 _MODULE_MAP_CACHE_LOCK。
+
+        _parse_module_map 经 asyncio.to_thread 多线程并发；主线程持锁期间，
+        另一线程的未命中路径（插入 + 迭代清理）必须阻塞等锁，而不是与迭代
+        并发改 dict（dictionary changed size during iteration → reparse 500）。
+        验证方式：主线程持锁 sleep 150ms，工作线程同时 _load_module_map，
+        其耗时被锁串行化 >= 100ms。
+        """
+        import threading
+        import time
+
+        root = _make_map(
+            tmp_path,
+            "modules:\n  agent:\n    paths:\n      - backend/app/modules/agent/**\n",
+        )
+
+        acquired = threading.Event()
+
+        def _hold_lock() -> None:
+            with parser_mod._MODULE_MAP_CACHE_LOCK:
+                acquired.set()
+                time.sleep(0.15)
+
+        parser_mod._MODULE_MAP_CACHE.clear()
+        try:
+            holder = threading.Thread(target=_hold_lock)
+            holder.start()
+            assert acquired.wait(timeout=2), "持锁线程应先拿到锁"
+
+            def _worker() -> None:
+                ChangeParser._load_module_map(root)
+
+            worker = threading.Thread(target=_worker)
+            start = time.monotonic()
+            worker.start()
+            worker.join(timeout=5)
+            holder.join(timeout=5)
+            elapsed = time.monotonic() - start
+
+            assert not worker.is_alive(), "工作线程应完成（未死锁）"
+            assert elapsed >= 0.1, f"写侧应被锁阻塞串行化，实际 {elapsed:.3f}s"
+            assert ChangeParser._load_module_map(root) == {"agent": ["backend/app/modules/agent/"]}
+        finally:
+            parser_mod._MODULE_MAP_CACHE.clear()

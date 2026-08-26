@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, ValidationInfo, field_validator, model_validator
+from pydantic import Field, PrivateAttr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from app.core.paths import resolve_spec_data_root
@@ -502,26 +502,36 @@ class Settings(BaseSettings):
             raise ValueError("platform_bootstrap_admin_password 不能与登录名相同")
         return v
 
+    # ql-20260826-011：git 探测结果缓存。resolved_commit_sha 未显式配置时每次
+    # access 都同步 spawn ``git rev-parse``（阻塞事件循环），而 /health、
+    # /version 高频轮询端点每次请求都会读它——首次探测后缓存，进程生命周期内
+    # HEAD 不会变（部署即新进程）。
+    _probed_commit_sha: str | None = PrivateAttr(default=None)
+
     @property
     def resolved_commit_sha(self) -> str:
-        """Return ``commit_sha`` if explicitly set, otherwise probe ``git``.
+        """Return ``commit_sha`` if explicitly set, otherwise probe ``git`` once.
 
         Falls back to ``"unknown"`` so that the health endpoint always has a
-        non-empty string to return.
+        non-empty string to return. The probed value is cached for the process
+        lifetime (see ``_probed_commit_sha``).
         """
         if self.commit_sha:
             return self.commit_sha
-        try:
-            return (
-                subprocess.check_output(
-                    ["git", "rev-parse", "--short=12", "HEAD"],
-                    stderr=subprocess.DEVNULL,
+        if self._probed_commit_sha is None:
+            try:
+                self._probed_commit_sha = (
+                    subprocess.check_output(
+                        ["git", "rev-parse", "--short=12", "HEAD"],
+                        stderr=subprocess.DEVNULL,
+                    )
+                    .decode()
+                    .strip()
+                    or "unknown"
                 )
-                .decode()
-                .strip()
-            )
-        except Exception:
-            return "unknown"
+            except Exception:
+                self._probed_commit_sha = "unknown"
+        return self._probed_commit_sha
 
 
 @lru_cache(maxsize=1)

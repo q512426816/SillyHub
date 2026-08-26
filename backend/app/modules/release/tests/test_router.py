@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
 from app.core.security import password_hasher
@@ -207,3 +208,158 @@ async def test_promote_release_succeeds(client, db_session, tmp_path):
     # 修复前：恒 422（路径无 workspace_id 占位符但依赖声明必填）。修复后：200 draft→staging。
     assert resp.status_code == 200
     assert resp.json()["status"] == "staging"
+
+
+# ── ql-20260826-011：对象级鉴权（跨工作区越权 / IDOR）─────────────────────────
+
+
+async def _seed_two_workspaces_with_release(db_session, tmp_path: Path) -> dict:
+    """A 工作区（仅 DEPLOY_PRODUCTION 用户）+ B 工作区（含一张 staging 发布单）。"""
+    from app.modules.release.schema import ReleaseCreate
+    from app.modules.release.service import ReleaseService
+
+    ws_a = Workspace(
+        id=uuid.uuid4(),
+        name="WS A",
+        slug=f"ws-a-{uuid.uuid4().hex[:8]}",
+        root_path=str(tmp_path / "a"),
+        status="active",
+    )
+    ws_b = Workspace(
+        id=uuid.uuid4(),
+        name="WS B",
+        slug=f"ws-b-{uuid.uuid4().hex[:8]}",
+        root_path=str(tmp_path / "b"),
+        status="active",
+    )
+    db_session.add_all([ws_a, ws_b])
+
+    deployer_a = User(
+        id=uuid.uuid4(),
+        email=f"deployer-a-{uuid.uuid4().hex[:8]}@example.com",
+        password_hash=password_hasher.hash("Pass123!"),
+        display_name="deployer-a",
+        status="active",
+    )
+    member_b = User(
+        id=uuid.uuid4(),
+        email=f"member-b-{uuid.uuid4().hex[:8]}@example.com",
+        password_hash=password_hasher.hash("Pass123!"),
+        display_name="member-b",
+        status="active",
+    )
+    db_session.add_all([deployer_a, member_b])
+
+    from app.modules.auth.model import Role, RolePermission, UserWorkspaceRole
+
+    role_a = Role(
+        id=uuid.uuid4(),
+        key=f"role-a-{uuid.uuid4().hex[:8]}",
+        name="Role A",
+        description="test role",
+    )
+    db_session.add(role_a)
+    db_session.add(RolePermission(role_id=role_a.id, permission="deploy:production"))
+    db_session.add(
+        UserWorkspaceRole(
+            user_id=deployer_a.id,
+            workspace_id=ws_a.id,
+            role_id=role_a.id,
+            granted_by=None,
+            granted_at=datetime.now(UTC),
+        )
+    )
+    await db_session.commit()
+
+    release = await ReleaseService(db_session).create(
+        ws_b.id,
+        member_b.id,
+        ReleaseCreate(version="v1.0.0", title="B 工作区发布"),
+    )
+
+    from app.core.config import get_settings
+    from app.core.security import create_access_token
+
+    settings = get_settings()
+    token_a, _ = create_access_token(
+        user_id=deployer_a.id,
+        email=deployer_a.email,
+        is_admin=False,
+        settings=settings,
+    )
+    token_b, _ = create_access_token(
+        user_id=member_b.id,
+        email=member_b.email,
+        is_admin=False,
+        settings=settings,
+    )
+    return {
+        "ws_a": ws_a.id,
+        "ws_b": ws_b.id,
+        "deployer_a_token": token_a,
+        "member_b_token": token_b,
+        "release_id": release.id,
+    }
+
+
+async def test_approve_release_cross_workspace_403(client, db_session, tmp_path):
+    """A 工作区 DEPLOY_PRODUCTION 用户审批 B 工作区发布单 → 403（原 require_permission_any 放行）。"""
+    refs = await _seed_two_workspaces_with_release(db_session, tmp_path)
+    resp = await client.post(
+        f"/api/releases/{refs['release_id']}/approve",
+        json={"verdict": "approve"},
+        headers=_auth(refs["deployer_a_token"]),
+    )
+    assert resp.status_code == 403
+
+
+async def test_deploy_release_cross_workspace_403(client, db_session, tmp_path):
+    """A 工作区 DEPLOY_PRODUCTION 用户部署 B 工作区发布单 → 403。"""
+    refs = await _seed_two_workspaces_with_release(db_session, tmp_path)
+    resp = await client.post(
+        f"/api/releases/{refs['release_id']}/deploy",
+        headers=_auth(refs["deployer_a_token"]),
+    )
+    assert resp.status_code == 403
+
+
+async def test_list_approvals_cross_workspace_403(client, db_session, tmp_path):
+    """无 B 工作区成员身份的登录用户枚举 B 发布单审批记录 → 403（原仅登录校验）。"""
+    refs = await _seed_two_workspaces_with_release(db_session, tmp_path)
+    outsider = User(
+        id=uuid.uuid4(),
+        email=f"outsider-{uuid.uuid4().hex[:8]}@example.com",
+        password_hash=password_hasher.hash("Pass123!"),
+        display_name="outsider",
+        status="active",
+    )
+    db_session.add(outsider)
+    await db_session.commit()
+
+    from app.core.config import get_settings
+    from app.core.security import create_access_token
+
+    token, _ = create_access_token(
+        user_id=outsider.id,
+        email=outsider.email,
+        is_admin=False,
+        settings=get_settings(),
+    )
+    resp = await client.get(
+        f"/api/releases/{refs['release_id']}/approvals",
+        headers=_auth(token),
+    )
+    assert resp.status_code == 403
+
+
+async def test_promote_release_cross_workspace_403(client, db_session, tmp_path):
+    """A 工作区 DEPLOY_PRODUCTION（无 DEPLOY_STAGING）用户 promote B 发布单 → 403。
+
+    注意 DEPLOY_PRODUCTION 与 DEPLOY_STAGING 是独立权限；A 用户只授了前者。
+    """
+    refs = await _seed_two_workspaces_with_release(db_session, tmp_path)
+    resp = await client.post(
+        f"/api/releases/{refs['release_id']}/promote",
+        headers=_auth(refs["deployer_a_token"]),
+    )
+    assert resp.status_code == 403

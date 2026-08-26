@@ -124,11 +124,16 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
     # ql-20260616-003：每条已持久化的 log 单独 publish 成扁平 StreamLogEvent
     # 形态，前端 SSE onmessage 直接当 StreamLogEvent 用；仍保留一条聚合 messages
     # 事件做计数/审计。
+    # ql-20260826-011 之前的实现逐条 ``await redis.publish``：一个 turn 几百条
+    # 流式日志 = 上千次串行 RTT，且发生在 daemon ``POST messages`` 请求处理路径
+    # 上直接拉长上报回路。现两路 channel 各自 pipeline 一次往返批量发出（pipeline
+    # 内命令保序，消费端所见顺序不变）；两路独立 try/except 的失败隔离语义不变。
     try:
         redis = get_redis()
         channel_name = f"agent_run:{intent.agent_run_id}"
+        pipe = redis.pipeline()
         for log_payload in intent.published_logs:
-            await redis.publish(channel_name, json.dumps(log_payload))
+            pipe.publish(channel_name, json.dumps(log_payload))
         # task-01 / D-003 / FR-01：run channel 的 published_logs payload 本就含
         # segment_id（service.py submit_messages 内 append 时已加）；session channel
         # 见下方 session_payload 同步透传。
@@ -149,7 +154,8 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
             summary_payload["cache_read_tokens"] = intent.cache_read_tokens
         if intent.cache_creation_tokens is not None:
             summary_payload["cache_creation_tokens"] = intent.cache_creation_tokens
-        await redis.publish(channel_name, json.dumps(summary_payload))
+        pipe.publish(channel_name, json.dumps(summary_payload))
+        await pipe.execute()
     except Exception:
         log.warning(
             "daemon_messages_redis_publish_failed",
@@ -166,6 +172,7 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
     try:
         redis = get_redis()
         session_channel = f"agent_session:{intent.agent_session_id}"
+        pipe = redis.pipeline()
         for log_payload in intent.published_logs:
             session_payload = {
                 "event": "log",
@@ -197,7 +204,7 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
                 # published_logs 对齐。.get() 兼容 override envelope 与历史 payload。
                 "edit_patch": log_payload.get("edit_patch"),
             }
-            await redis.publish(session_channel, json.dumps(session_payload))
+            pipe.publish(session_channel, json.dumps(session_payload))
         # ql-20260621：实时 token 透传到 session channel（onTokens）。
         if intent.input_tokens is not None or intent.output_tokens is not None:
             token_payload: dict = {
@@ -214,7 +221,8 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
                 token_payload["cache_read_tokens"] = intent.cache_read_tokens
             if intent.cache_creation_tokens is not None:
                 token_payload["cache_creation_tokens"] = intent.cache_creation_tokens
-            await redis.publish(session_channel, json.dumps(token_payload, default=str))
+            pipe.publish(session_channel, json.dumps(token_payload, default=str))
+        await pipe.execute()
     except Exception:
         log.warning(
             "daemon_messages_session_redis_publish_failed",

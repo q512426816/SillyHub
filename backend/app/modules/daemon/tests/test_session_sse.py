@@ -131,10 +131,39 @@ def _messages(*contents: str) -> list[dict]:
     return [{"event_type": "text", "content": c, "channel": "stdout"} for c in contents]
 
 
+def _install_pipeline_fake(redis: AsyncMock) -> AsyncMock:
+    """ql-20260826-011：给 AsyncMock redis 补 pipeline() 假件。
+
+    publish_submitted_messages 改为 pipeline 批量发布（``pipe.publish`` 同步
+    入队 + ``await pipe.execute``），入队调用记录进 ``redis.pipe_publish``
+    （MagicMock），与 ``redis.publish`` 单条路径共用 _classify_publishes 口径。
+    """
+    pipe_publish = MagicMock()
+
+    class _FakePipeline:
+        def publish(self, channel: str, payload: str) -> None:
+            pipe_publish(channel, payload)
+
+        async def execute(self) -> list:
+            return []
+
+    redis.pipeline = MagicMock(return_value=_FakePipeline())
+    redis.pipe_publish = pipe_publish
+    return redis
+
+
 def _classify_publishes(redis_mock: AsyncMock) -> dict[str, list[str]]:
-    """Split redis.publish calls into {channel: [raw_json_payload, ...]}."""
+    """Split redis publish calls into {channel: [raw_json_payload, ...]}.
+
+    ql-20260826-011 起批量发布走 pipeline（``pipe_publish`` 同步记录），单条
+    路径仍走 ``await redis.publish``，两者都读。
+    """
     buckets: dict[str, list[str]] = {}
-    for call in redis_mock.publish.await_args_list:
+    calls = list(redis_mock.publish.await_args_list)
+    pipe_publish = getattr(redis_mock, "pipe_publish", None)
+    if pipe_publish is not None:
+        calls.extend(pipe_publish.call_args_list)
+    for call in calls:
         channel, raw = call.args
         buckets.setdefault(channel, []).append(raw)
     return buckets
@@ -170,6 +199,7 @@ class TestSubmitMessagesDualPublish:
         )
 
         redis = AsyncMock()
+        _install_pipeline_fake(redis)
         with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
             svc = DaemonService(db_session)
             count = await svc.submit_messages(lease.id, "tok", run.id, _messages("a", "b"))
@@ -210,6 +240,7 @@ class TestSubmitMessagesDualPublish:
         run, lease = await _make_batch_run(db_session, runtime_id=rt.id)
 
         redis = AsyncMock()
+        _install_pipeline_fake(redis)
         with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
             svc = DaemonService(db_session)
             result = await svc.submit_messages(lease.id, "tok", run.id, _messages("x"))
@@ -241,16 +272,28 @@ class TestSubmitMessagesDualPublish:
             runtime_id=rt.id,
         )
 
-        call_log: list[str] = []
+        # ql-20260826-011：批量发布走 pipeline，失败注入改在 execute 时按批次
+        # 抛错（对应原 flaky_publish 对 session channel 逐条抛错）；run 批与
+        # session 批是两个独立 pipeline，session 批失败不影响 run 批（AC-06）。
+        attempted: list[list[str]] = []
+        executed: list[list[str]] = []
 
-        async def flaky_publish(channel: str, payload: str) -> int:
-            call_log.append(channel)
-            if channel.startswith("agent_session:"):
-                raise RuntimeError("session broker down")
-            return 1
+        class _FlakyPipeline:
+            def __init__(self) -> None:
+                self.channels: list[str] = []
+
+            def publish(self, channel: str, payload: str) -> None:
+                self.channels.append(channel)
+
+            async def execute(self) -> list:
+                attempted.append(list(self.channels))
+                if any(c.startswith("agent_session:") for c in self.channels):
+                    raise RuntimeError("session broker down")
+                executed.append(list(self.channels))
+                return []
 
         redis = AsyncMock()
-        redis.publish = AsyncMock(side_effect=flaky_publish)
+        redis.pipeline = MagicMock(return_value=_FlakyPipeline())
         with patch("app.modules.daemon.run_sync.service.get_redis", return_value=redis):
             svc = DaemonService(db_session)
             # Must not raise
@@ -258,13 +301,15 @@ class TestSubmitMessagesDualPublish:
             await publish_submitted_messages(count.publish_intent)
 
         assert count == 2
-        # run channel publishes happened before the session publish attempt
-        run_calls = [c for c in call_log if c.startswith("agent_run:")]
-        session_calls = [c for c in call_log if c.startswith("agent_session:")]
-        # run channel got its 2 logs + 1 summary
-        assert len(run_calls) == 3
-        # session channel was attempted
-        assert len(session_calls) >= 1
+        # run channel 批（2 logs + 1 summary）在 session 批失败前已成功执行
+        run_batches = [ch for ch in executed if ch and ch[0].startswith("agent_run:")]
+        assert run_batches, "run channel 批应执行成功"
+        assert len(run_batches[0]) == 3
+        # session channel 批被尝试过（但整体失败）
+        session_attempted = [
+            ch for ch in attempted if any(c.startswith("agent_session:") for c in ch)
+        ]
+        assert session_attempted, "session channel 批应被尝试"
         # AgentRunLog rows persisted despite session publish failure
         from app.modules.agent.model import AgentRunLog
 

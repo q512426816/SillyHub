@@ -134,6 +134,21 @@ def _install_fake_upstream(
     return captured
 
 
+@pytest.fixture(autouse=True)
+def _reset_llm_proxy_client():
+    """ql-20260826-011：转发客户端改进程级单例后，测试间必须复位。
+
+    上游假客户端经 monkeypatch 替换 httpx.AsyncClient 构造——若上一用例的
+    假实例残留在单例里，后续用例（monkeypatch 已还原）会继续用旧假客户端，
+    破坏隔离。每用例前后清空单例。
+    """
+    from app.modules.daemon import router as daemon_router
+
+    daemon_router._LLM_PROXY_CLIENT = None
+    yield
+    daemon_router._LLM_PROXY_CLIENT = None
+
+
 @pytest.fixture()
 def proxy_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """隔离 LiteLLM 网关 settings（env 覆盖 + 清 settings 缓存重建）。
