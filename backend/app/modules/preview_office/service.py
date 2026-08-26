@@ -201,30 +201,33 @@ async def build_office_config(
         raise PreviewSourceNotFound(details={"reason": "not_office_format", "ext": file_type})
 
     token = await issue_file_token(object_key=ref.object_key, settings=settings)
-    config: dict[str, Any] = {
-        "document": {
-            "fileType": file_type,
-            "key": uuid.uuid4().hex,  # D-004：随机 key 不做 DS 缓存
-            "title": ref.name,
-            "url": f"{settings.onlyoffice_file_base_url}/api/preview/file/{token}",
-            "permissions": {"read": True, "edit": False, "download": True, "print": True},
-        },
-        "documentType": _DOCUMENT_TYPE_BY_EXT[file_type],
-        # width/height 必须在签名内（DS 9 严格 JWT：提交 config 的字段须被 token
-        # 覆盖，前端事后注入会校验拒绝——实测 onError → 降级）。events 除外（DS
-        # 校验忽略回调函数）。
-        "width": "100%",
-        "height": "100%",
-        "editorConfig": {
-            "mode": "view",
-            "lang": "zh",
-            "customization": {
-                "forcesave": False,
-                "compactHeader": True,
-                "hideRightMenus": True,
-            },
+    ds_secret = settings.onlyoffice_jwt_secret
+    document_block: dict[str, Any] = {
+        "fileType": file_type,
+        "key": uuid.uuid4().hex,  # D-004：随机 key 不做 DS 缓存
+        "title": ref.name,
+        "url": f"{settings.onlyoffice_file_base_url}/api/preview/file/{token}",
+        "permissions": {"read": True, "edit": False, "download": True, "print": True},
+    }
+    editor_block: dict[str, Any] = {
+        "mode": "view",
+        "lang": "zh",
+        "customization": {
+            "forcesave": False,
+            "compactHeader": True,
+            "hideRightMenus": True,
         },
     }
-    # DS JWT 规范：payload=完整 config，顶层 token 字段携带签名。
-    config["token"] = jwt.encode(config, settings.onlyoffice_jwt_secret, algorithm="HS256")
+    # DS 9 JWT（helpcenter docs-configure-jwt）：顶层 token=整 config 签名；
+    # document / editorConfig 各自内嵌 token（严格模式分段校验）。三处同 secret。
+    document_block["token"] = jwt.encode(document_block, ds_secret, algorithm="HS256")
+    editor_block["token"] = jwt.encode(editor_block, ds_secret, algorithm="HS256")
+    config: dict[str, Any] = {
+        "document": document_block,
+        "documentType": _DOCUMENT_TYPE_BY_EXT[file_type],
+        "width": "100%",
+        "height": "100%",
+        "editorConfig": editor_block,
+    }
+    config["token"] = jwt.encode(config, ds_secret, algorithm="HS256")
     return config
