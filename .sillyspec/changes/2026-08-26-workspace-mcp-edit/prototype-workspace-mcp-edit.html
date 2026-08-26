@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型：工作区 MCP 配置页（查看 + 编辑）</title>
+<style>
+  /* 简化版项目主题 token（对照 frontend/src/styles/themes.ts ai-native 主题） */
+  :root[data-theme="ai-native"] {
+    --bg: #0d1117; --surface: #161b22; --surface-2: #1c2128;
+    --border: #30363d; --border-strong: #484f58;
+    --fg: #e6edf3; --fg-muted: #8b949e;
+    --brand: #7c9cff; --brand-strong: #5b7fff;
+    --success: #3fb950; --warning: #d29922; --danger: #f85149;
+    --shadow: 0 2px 8px rgba(0,0,0,.35);
+  }
+  :root[data-theme="blue"] {
+    --bg: #f5f7fa; --surface: #ffffff; --surface-2: #f0f3f7;
+    --border: #e1e6ec; --border-strong: #c9d2dc;
+    --fg: #1f2733; --fg-muted: #6b7684;
+    --brand: #2f6fed; --brand-strong: #1d5fd6;
+    --success: #1f9d55; --warning: #c98a06; --danger: #dc3545;
+    --shadow: 0 2px 8px rgba(31,39,51,.08);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--fg); font: 13px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; padding: 24px; }
+  .theme-toggle { position: fixed; top: 12px; right: 16px; font-size: 12px; color: var(--fg-muted); cursor: pointer; border: 1px solid var(--border); border-radius: 6px; padding: 2px 8px; background: var(--surface); }
+  .page { max-width: 760px; margin: 0 auto; }
+  header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 16px; }
+  h1 { font-size: 18px; font-weight: 600; }
+  .subtitle { font-size: 12px; color: var(--fg-muted); margin-top: 2px; }
+  .actions { display: flex; gap: 8px; align-items: center; }
+  .link-back { font-size: 12px; color: var(--fg-muted); text-decoration: none; }
+  .link-back:hover { color: var(--fg); }
+  button { font: inherit; border-radius: 6px; cursor: pointer; padding: 5px 14px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--fg); }
+  button.primary { background: var(--brand); border-color: var(--brand); color: #fff; }
+  button.primary:hover { background: var(--brand-strong); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; box-shadow: var(--shadow); }
+  .card .name { font-weight: 600; font-size: 14px; }
+  .badge { display: inline-block; font-size: 11px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--fg-muted); margin-left: 8px; vertical-align: 1px; }
+  .kv { display: grid; grid-template-columns: 7rem 1fr; gap: 2px 0; font-size: 12px; margin-top: 8px; }
+  .kv dt { color: var(--fg-muted); }
+  .kv dd { font-family: Consolas, monospace; word-break: break-all; }
+  .env-box { display: grid; grid-template-columns: 8rem 1fr; gap: 2px 0; font-size: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); padding: 6px 10px; }
+  .set-mark { color: var(--warning); margin-left: 4px; }
+  .empty { text-align: center; padding: 40px 0; color: var(--fg-muted); font-size: 13px; }
+  .empty .plug { font-size: 22px; display: block; margin-bottom: 6px; }
+  textarea { width: 100%; min-height: 260px; background: var(--surface-2); color: var(--fg); border: 1px solid var(--border-strong); border-radius: 8px; padding: 12px; font: 12px/1.6 Consolas, monospace; resize: vertical; }
+  textarea:focus { outline: 2px solid var(--brand); outline-offset: -1px; }
+  .hint { font-size: 12px; color: var(--fg-muted); background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin: 10px 0; }
+  .hint b { color: var(--fg); }
+  .hint .warn-ico { color: var(--warning); margin-right: 4px; }
+  .error-line { color: var(--danger); font-size: 12px; margin-top: 6px; min-height: 18px; font-family: Consolas, monospace; }
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--surface); color: var(--fg); border: 1px solid var(--success); border-radius: 8px; padding: 8px 18px; font-size: 13px; box-shadow: var(--shadow); opacity: 0; transition: opacity .25s; }
+  .toast.show { opacity: 1; }
+  .toolbar-edit { display: flex; gap: 8px; align-items: center; }
+  .saving { color: var(--fg-muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="theme-toggle" onclick="toggleTheme()">切换主题（ai-native / blue）</div>
+<div class="page">
+  <header>
+    <div>
+      <h1>MCP 配置</h1>
+      <div class="subtitle" id="subtitle">查看工作区 .mcp.json 的 MCP 服务器配置（只读，env 密钥已脱敏）</div>
+    </div>
+    <div class="actions" id="viewActions">
+      <a class="link-back" href="#">← 工作区</a>
+      <button onclick="location.reload()">刷新</button>
+      <button class="primary" id="btnEdit">编辑</button>
+    </div>
+    <div class="actions toolbar-edit" id="editActions" style="display:none">
+      <button onclick="cancelEdit()">取消</button>
+      <button class="primary" id="btnSave" onclick="save()">保存</button>
+    </div>
+  </header>
+
+  <!-- ══ 查看态 ══ -->
+  <div id="viewMode">
+    <div class="card" id="cardCtx"></div>
+    <div class="empty" id="emptyState" style="display:none">
+      <span class="plug">🔌</span>
+      暂无 MCP 服务器配置<br>specDir/.mcp.json 不存在或未配置 mcpServers。
+    </div>
+  </div>
+
+  <!-- ══ 编辑态 ══ -->
+  <div id="editMode" style="display:none">
+    <div class="hint">
+      <b>编辑说明</b>：直接编辑 JSON（结构与 Claude <code>.mcp.json</code> 一致）。仅支持 <code>stdio</code> 类型（command + args + env）；
+      env 密钥值显示为 <code>&lt;set&gt;</code> 表示已脱敏，<b>保留 <code>&lt;set&gt;</code> 保存即表示不修改该密钥</b>。
+    </div>
+    <div class="hint">
+      <span class="warn-ico">⚠</span>仅支持本地命令型（stdio）server；server 名需在<b>平台白名单</b>（设置 → MCP）中才会对 agent 生效，未放行的会在注入时被剔除。
+    </div>
+    <textarea id="editor" spellcheck="false"></textarea>
+    <div class="error-line" id="errLine"></div>
+  </div>
+</div>
+<div class="toast" id="toast">✓ 已保存（密钥已脱敏显示）</div>
+
+<script>
+// 模拟 GET /api/workspaces/{id}/mcp-config 返回（secret 已脱敏为 <set>）
+const sample = {
+  mcpServers: {
+    context7: { type: "stdio", command: "npx", args: ["-y", "@upstash/context7-mcp"] },
+    mysql_local: {
+      type: "stdio", command: "npx", args: ["-y", "@benborla29/mcp-server-mysql"],
+      env: { MYSQL_HOST: "127.0.0.1", MYSQL_PASSWORD: "<set>" }
+    }
+  }
+};
+const SECRET = "<set>";
+
+function renderView() {
+  const names = Object.keys(sample.mcpServers);
+  const card = document.getElementById("cardCtx");
+  if (names.length === 0) { card.style.display = "none"; document.getElementById("emptyState").style.display = ""; return; }
+  card.style.display = ""; document.getElementById("emptyState").style.display = "none";
+  const name = names[1];
+  const s = sample.mcpServers[name];
+  const rows = Object.entries(s).map(([k, v]) => {
+    if (v && typeof v === "object" && !Array.isArray(v)) {
+      const env = Object.entries(v).map(([ek, ev]) =>
+        `<div style="display:contents"><dt style="font-family:monospace;color:var(--fg-muted)">${ek}</dt><dd style="font-family:monospace">${ev}${ev === SECRET ? '<span class="set-mark">（密钥已脱敏）</span>' : ""}</dd></div>`).join("");
+      return `<dt>${k}</dt><dd><dl class="env-box">${env}</dl></dd>`;
+    }
+    return `<dt>${k}</dt><dd>${JSON.stringify(v)}</dd>`;
+  }).join("");
+  card.innerHTML = `<span class="name">${name}</span><span class="badge">${Object.keys(s).length} 项</span>
+    <dl class="kv">${rows}</dl>
+    <p style="margin-top:10px;font-size:11px;color:var(--fg-muted)">（示意：其余 server 卡片同现有只读样式）</p>`;
+}
+
+function enterEdit() {
+  document.getElementById("viewMode").style.display = "none";
+  document.getElementById("viewActions").style.display = "none";
+  document.getElementById("editMode").style.display = "";
+  document.getElementById("editActions").style.display = "";
+  document.getElementById("subtitle").textContent = "编辑工作区 .mcp.json 的 MCP 服务器配置（保存后写入 specDir/.mcp.json）";
+  document.getElementById("editor").value = JSON.stringify(sample, null, 2);
+}
+function cancelEdit() { location.reload(); }
+function save() {
+  const err = document.getElementById("errLine");
+  err.textContent = "";
+  let parsed;
+  try { parsed = JSON.parse(document.getElementById("editor").value); }
+  catch (e) { err.textContent = "JSON 语法错误：" + e.message; return; }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || parsed.mcpServers === undefined) {
+    err.textContent = '校验失败：顶层必须含 "mcpServers" 对象'; return;
+  }
+  for (const [n, cfg] of Object.entries(parsed.mcpServers)) {
+    if (!cfg || typeof cfg.command !== "string" || !cfg.command) { err.textContent = `校验失败：server "${n}" 缺少非空 command`; return; }
+    if (cfg.type !== undefined && cfg.type !== "stdio") { err.textContent = `校验失败：server "${n}" 仅支持 stdio 类型`; return; }
+    if (cfg.args !== undefined && !Array.isArray(cfg.args)) { err.textContent = `校验失败：server "${n}" 的 args 必须是数组`; return; }
+  }
+  const btn = document.getElementById("btnSave");
+  btn.disabled = true; btn.textContent = "保存中…";
+  setTimeout(() => { // 模拟 PUT /api/workspaces/{id}/mcp-config
+    Object.assign(sample.mcpServers, parsed.mcpServers);
+    for (const k of Object.keys(sample.mcpServers)) if (!(k in parsed.mcpServers)) delete sample.mcpServers[k];
+    document.getElementById("toast").classList.add("show");
+    setTimeout(() => location.reload(), 900);
+  }, 600);
+}
+document.getElementById("btnEdit").onclick = enterEdit;
+function toggleTheme() {
+  const r = document.documentElement;
+  r.dataset.theme = r.dataset.theme === "ai-native" ? "blue" : "ai-native";
+}
+renderView();
+</script>
+</body>
+</html>

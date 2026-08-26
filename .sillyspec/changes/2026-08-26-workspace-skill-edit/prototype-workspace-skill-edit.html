@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<title>原型：工作区自定义 Skills 页（查看 + 完整文件编辑）</title>
+<style>
+  :root[data-theme="ai-native"]{--bg:#0d1117;--surface:#161b22;--surface2:#1c2128;--border:#30363d;--border2:#484f58;--fg:#e6edf3;--muted:#8b949e;--brand:#7c9cff;--brand2:#5b7fff;--ok:#3fb950;--warn:#d29922;--danger:#f85149}
+  :root[data-theme="blue"]{--bg:#f5f7fa;--surface:#fff;--surface2:#f0f3f7;--border:#e1e6ec;--border2:#c9d2dc;--fg:#1f2733;--muted:#6b7684;--brand:#2f6fed;--brand2:#1d5fd6;--ok:#1f9d55;--warn:#c98a06;--danger:#dc3545}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--fg);font:13px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;padding:20px}
+  .tg{position:fixed;top:12px;right:16px;font-size:12px;color:var(--muted);cursor:pointer;border:1px solid var(--border);border-radius:6px;padding:2px 8px;background:var(--surface)}
+  .page{max-width:1000px;margin:0 auto}
+  header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px}
+  h1{font-size:18px;font-weight:600}
+  .sub{font-size:12px;color:var(--muted);margin-top:2px}
+  button{font:inherit;border-radius:6px;cursor:pointer;padding:5px 12px;border:1px solid var(--border2);background:var(--surface);color:var(--fg)}
+  button.primary{background:var(--brand);border-color:var(--brand);color:#fff}
+  button.primary:hover{background:var(--brand2)}
+  button.danger{color:var(--danger);border-color:var(--danger)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .cols{display:grid;grid-template-columns:280px 1fr;gap:12px;align-items:start}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px}
+  .skill-item{border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:8px;cursor:pointer;background:var(--surface2)}
+  .skill-item.active{border-color:var(--brand)}
+  .skill-item .nm{font-weight:600;font-size:13px}
+  .skill-item .ct{font-size:11px;color:var(--muted)}
+  .file-tree{margin-top:6px;padding-left:14px;font-size:12px;font-family:Consolas,monospace}
+  .file-tree div{padding:2px 6px;border-radius:4px;cursor:pointer;color:var(--muted)}
+  .file-tree div:hover{background:var(--surface);color:var(--fg)}
+  .file-tree div.sel{background:var(--surface);color:var(--brand);font-weight:600}
+  .toolbar{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+  .editor-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+  .fn{font-family:Consolas,monospace;font-size:12px;color:var(--muted)}
+  .dirty{color:var(--warn);font-size:11px;margin-left:8px}
+  textarea{width:100%;min-height:300px;background:var(--surface2);color:var(--fg);border:1px solid var(--border2);border-radius:8px;padding:12px;font:12px/1.7 Consolas,monospace;resize:vertical}
+  textarea:focus{outline:2px solid var(--brand);outline-offset:-1px}
+  .hint{font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;margin-top:10px}
+  .dlg{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center}
+  .dlg.show{display:flex}
+  .dlg .box{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;width:380px}
+  .dlg h3{font-size:14px;margin-bottom:12px}
+  .dlg label{font-size:12px;color:var(--muted);display:block;margin:10px 0 4px}
+  .dlg input{width:100%;padding:6px 10px;border:1px solid var(--border2);border-radius:6px;background:var(--surface2);color:var(--fg);font:inherit}
+  .dlg .row{display:flex;gap:8px;justify-content:flex-end;margin-top:16px}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--surface);border:1px solid var(--ok);border-radius:8px;padding:8px 18px;font-size:13px;opacity:0;transition:.25s}
+  .toast.show{opacity:1}
+  .empty{text-align:center;color:var(--muted);padding:24px 0;font-size:12px}
+</style>
+</head>
+<body>
+<div class="tg" onclick="toggleTheme()">切换主题</div>
+<div class="page">
+  <header>
+    <div><h1>自定义 Skills</h1><div class="sub">编辑工作区 specDir/skills/ 下的自定义 skill（保存后写入，下次同步对新会话生效）</div></div>
+    <div style="display:flex;gap:8px">
+      <a href="#" style="font-size:12px;color:var(--muted);text-decoration:none;align-self:center">← 工作区</a>
+      <button onclick="openDlg()">＋ 新建 Skill</button>
+    </div>
+  </header>
+
+  <div class="cols">
+    <!-- ══ 左栏：skill 列表 + 文件树 ══ -->
+    <div class="card">
+      <div class="skill-item active" onclick="pickSkill(0)">
+        <div class="nm">deploy-guide</div>
+        <div class="ct">3 个文件</div>
+        <div class="file-tree">
+          <div class="sel" onclick="pickFile(this,'SKILL.md',event)">SKILL.md</div>
+          <div onclick="pickFile(this,'scripts/check.sh',event)">scripts/check.sh</div>
+          <div onclick="pickFile(this,'reference.md',event)">reference.md</div>
+        </div>
+      </div>
+      <div class="skill-item" onclick="pickSkill(1)">
+        <div class="nm">pdf-export</div><div class="ct">1 个文件</div>
+      </div>
+      <div class="toolbar">
+        <button onclick="newFile()" style="font-size:12px">＋ 新建文件</button>
+        <button onclick="delFile()" class="danger" style="font-size:12px">删除文件</button>
+        <button onclick="delSkill()" class="danger" style="font-size:12px">删除 Skill</button>
+      </div>
+    </div>
+
+    <!-- ══ 右栏：编辑器 ══ -->
+    <div class="card">
+      <div class="editor-head">
+        <div><span class="fn">deploy-guide / SKILL.md</span><span class="dirty" id="dirty">● 未保存</span></div>
+        <div style="display:flex;gap:8px">
+          <button onclick="resetFile()">重置</button>
+          <button class="primary" id="saveBtn" onclick="saveFile()">保存</button>
+        </div>
+      </div>
+      <textarea id="editor" spellcheck="false">---
+name: deploy-guide
+description: 部署本项目的操作指引
+---
+
+# 部署指引
+
+1. 运行 `pnpm build`
+2. 执行 scripts/check.sh 校验
+3. 上传产物…
+</textarea>
+      <div class="hint">⚠ 仅支持文本文件（≤512KB）；SKILL.md 是 skill 的入口文件（不可删除）；文件名仅限字母/数字/点/下划线/连字符。</div>
+    </div>
+  </div>
+</div>
+
+<div class="dlg" id="dlg"><div class="box">
+  <h3>新建 Skill</h3>
+  <label>Skill 名（字母/数字/点/下划线/连字符）</label><input id="skName" placeholder="my-skill"/>
+  <label>描述（写入 SKILL.md frontmatter）</label><input id="skDesc" placeholder="这个 skill 做什么"/>
+  <div class="row"><button onclick="closeDlg()">取消</button><button class="primary" onclick="createSkill()">创建</button></div>
+</div></div>
+<div class="toast" id="toast">✓ 已保存（下次同步对新会话生效）</div>
+
+<script>
+const orig="---\nname: deploy-guide\ndescription: 部署本项目的操作指引\n---\n\n# 部署指引\n\n1. 运行 `pnpm build`\n2. 执行 scripts/check.sh 校验\n3. 上传产物…\n";
+const ed=document.getElementById('editor');
+ed.addEventListener('input',()=>{document.getElementById('dirty').style.display=ed.value===orig?'none':'';document.getElementById('saveBtn').disabled=ed.value===orig;});
+function pickSkill(i){document.querySelectorAll('.skill-item').forEach((e,j)=>e.classList.toggle('active',i===j));}
+function pickFile(el,name,ev){ev.stopPropagation();document.querySelectorAll('.file-tree div').forEach(e=>e.classList.remove('sel'));el.classList.add('sel');document.querySelector('.fn').textContent='deploy-guide / '+name;}
+function resetFile(){ed.value=orig;ed.dispatchEvent(new Event('input'));}
+function saveFile(){if(ed.value===orig)return;document.getElementById('toast').classList.add('show');setTimeout(()=>document.getElementById('toast').classList.remove('show'),1500);ed.dispatchEvent(new Event('input'));}
+function newFile(){alert('（原型示意）弹出输入文件名 → 左侧文件树新增条目 → 右侧空白编辑器');}
+function delFile(){alert('（原型示意）确认后删除该文件并刷新文件树；SKILL.md 不可删除');}
+function delSkill(){alert('（原型示意）确认后删除整个 skill 目录');}
+function openDlg(){document.getElementById('dlg').classList.add('show');}
+function closeDlg(){document.getElementById('dlg').classList.remove('show');}
+function createSkill(){closeDlg();document.getElementById('toast').classList.add('show');setTimeout(()=>document.getElementById('toast').classList.remove('show'),1500);}
+function toggleTheme(){const r=document.documentElement;r.dataset.theme=r.dataset.theme==='ai-native'?'blue':'ai-native';}
+</script>
+</body>
+</html>
