@@ -472,10 +472,14 @@
 结果：全量 pytest 5770 passed 0 failed（基线 5756 + 新增 14 用例，含 IDOR 拒绝/放行、令牌 fail-fast、kill、锁串行化、缓存单次探测）；ruff check+format 全过；mypy 737 文件 0 问题；不改 OpenAPI/DTO/migration 无需 gen:types；未提交待收尾
 审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_run_sync_assistant_override.py, backend/app/modules/daemon/tests/test_session_sse.py
 
-## ql-20260826-012-2802 | 2026-08-26 20:35:12 | incident 表时区修复（tz-aware 列+默认值+迁移，数据可重置）+ 性能批次二：platform_sync upsert N+1 改 IN 批量预取、workspace 状态收集 N+1 批量化（scope+probe 两入口…
-状态：进行中
+## ql-20260826-012-2802 | 2026-08-26 20:35:12 | 性能批次二（platform_sync IN 预取 / workspace 状态批量 / 三列表上限）+ incident 时区修复
+状态：已完成
 关联变更：（无）
-文件：backend/app/modules/incident/model.py, backend/app/modules/platform_sync/service.py, backend/app/modules/agent/orchestrator.py, backend/app/modules/workspace/router.py, backend/app/modules/daemon/permission_service.py, backend/app/modules/daemon/router.py, backend/app/modules/change/router.py, backend/app/modules/platform_sync/tests/test_agent_log_push.py, backend/app/modules/agent/tests/test_mission_status.py, backend/app/modules/daemon/tests/test_session_runs_endpoint.py, backend/app/modules/daemon/tests/test_session_permissions.py, backend/app/modules/incident/tests/test_service.py
+文件：backend/app/modules/agent/orchestrator.py, backend/app/modules/agent/tests/test_mission_status.py, backend/app/modules/change/router.py, backend/app/modules/change/tests/test_change_sessions_cap.py, backend/app/modules/daemon/permission_service.py, backend/app/modules/daemon/router.py, backend/app/modules/daemon/tests/test_session_permissions.py, backend/app/modules/daemon/tests/test_session_runs_endpoint.py, backend/app/modules/incident/model.py, backend/app/modules/incident/tests/test_service.py, backend/app/modules/platform_sync/service.py, backend/app/modules/platform_sync/tests/test_agent_log_push.py, backend/app/modules/workspace/router.py, backend/migrations/versions/20260826210000_incident_tz_aware.py
+需求：性能批次二（platform_sync IN 预取 / workspace 状态批量 / 三列表上限）+ incident 时区修复
+根因：incident 域 5 时间列是全仓唯一 naive utcnow+无 tz 列例外，service 层 aware 写入致混比风险，用户确认数据可重置可直接改口径；platform_sync upsert 与 workspace 状态收集存在 N+1（几百条 entries 逐条查询、每 ws 4 条串行且都是前端轮询入口）；dialogs/runs/change-sessions 三个列表无界全量随使用增长
+方案：model 5 列改 tz-aware+now(UTC) 默认值配 USING AT TIME ZONE UTC 迁移；upsert 改复合键 IN 预取；新增 collect_many_workspace_statuses 3 条固定查询+共享组装函数（scope/probe 两入口接入，条目按 scope 声明序重排保渲染契约）；三个列表补固定上限 200 常量注入不动 OpenAPI
+结果：全量 pytest 5776 passed 0 failed（+6 新用例：查询计数解耦、口径等价+顺序契约、三处裁剪、tz 默认值）；ruff check/format 全过；mypy 738 文件 0 问题；迁移 offline SQL 已验证；未提交待收尾
 
 ## ql-20260826-013-668f | 2026-08-26 20:37:10 | 修复 /team 指令直发 Claude Code 报 Unknown command（发送前剥离平台指令前缀）
 状态：已完成

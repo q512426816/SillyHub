@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<title>原型 · Git 状态徽标条（git-log 页 + 会话页头部）— 2026-08-26-workspace-git-status</title>
+<style>
+:root[data-theme="ai-native"]{--primary:#7C3AED;--accent:#0891B2;--bg:#FAF5FF;--card:#fff;--border:#DDD6FE;--success:#059669;--warning:#D97706;--error:#DC2626;--slate-500:#64748b;--slate-700:#334155;--slate-800:#1e293b;--brand-50:#f5f3ff;--brand-100:#ede9fe;--brand-600:#7c3aed;}
+:root[data-theme="dark"]{--primary:#0891b2;--accent:#22d3ee;--bg:#18181b;--card:#27272a;--border:#3f3f46;--success:#10b981;--warning:#f59e0b;--error:#ef4444;--slate-500:#71717a;--slate-700:#d4d4d8;--slate-800:#e4e4e7;--brand-50:#083344;--brand-100:#164e63;--brand-600:#22d3ee;}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--slate-800);font-size:13px;padding:24px}
+.theme-switch{position:fixed;right:16px;top:12px;display:flex;gap:4px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:4px}
+.theme-switch button{border:none;background:transparent;color:var(--slate-500);cursor:pointer;padding:4px 10px;border-radius:5px;font-size:12px}
+.theme-switch button.on{background:var(--brand-100);color:var(--brand-600);font-weight:500}
+h3{margin:18px 0 8px;color:var(--slate-700);font-size:13px}
+.demo-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:10px}
+.page-title{font-size:17px;font-weight:600;margin-bottom:8px}
+/* ── 状态条（共享组件 git-status-bar）── */
+.status-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);font-size:12.5px}
+.sb-item{display:inline-flex;align-items:center;gap:5px;color:var(--slate-700)}
+.sb-branch{display:inline-flex;align-items:center;gap:5px;background:var(--brand-100);color:var(--brand-600);padding:2px 9px;border-radius:5px;font-weight:600;font-size:12px}
+.sb-ahead{color:var(--accent);font-weight:600}
+.sb-behind{color:var(--warning);font-weight:600}
+.sb-add{color:var(--success);font-weight:600}
+.sb-del{color:var(--error);font-weight:600}
+.sb-dim{color:var(--slate-500)}
+.sb-sync{margin-left:auto;color:var(--slate-500);font-size:11.5px}
+.sb-warn{display:flex;align-items:center;gap:5px;color:var(--warning);font-size:11.5px}
+.loading{color:var(--slate-500);padding:8px 12px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="theme-switch">
+  <button data-t="ai-native" class="on">AI 紫</button>
+  <button data-t="dark">暗夜</button>
+</div>
+
+<h3>① Git 日志页 —— PageHeader 下状态条（常态：有分支跟踪 + 有未推送 + 远程有更新 + 有未提交改动）</h3>
+<div class="demo-card">
+  <div class="page-title">Git 日志</div>
+  <div class="status-bar">
+    <span class="sb-branch">⎇ main</span>
+    <span class="sb-item sb-dim">跟踪 origin/main</span>
+    <span class="sb-item"><span class="sb-ahead">↑ 2 未推送</span></span>
+    <span class="sb-item"><span class="sb-behind">↓ 1 远程新提交</span></span>
+    <span class="sb-dim">·</span>
+    <span class="sb-item">改动 <span class="sb-add">+45</span> / <span class="sb-del">−12</span>（8 个文件）</span>
+    <span class="sb-item sb-dim">未跟踪 3</span>
+    <span class="sb-sync">↻ 已同步远程 · 00:31</span>
+  </div>
+</div>
+
+<h3>② 会话页 —— 标题行右侧同款紧凑形态（hover 有 Tooltip 展开细节）</h3>
+<div class="demo-card">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+    <div class="page-title">智能体会话 · demo-workspace</div>
+    <div class="status-bar" style="padding:4px 10px">
+      <span class="sb-branch">⎇ main</span>
+      <span class="sb-ahead">↑2</span>
+      <span class="sb-behind">↓1</span>
+      <span class="sb-item"><span class="sb-add">+45</span>/<span class="sb-del">−12</span></span>
+    </div>
+  </div>
+  <div class="sb-dim" style="font-size:12px">（会话列表区域……状态条数据与 Git 日志页共享同一 query 缓存，staleTime 内两页只 fetch 一次远程）</div>
+</div>
+
+<h3>③ 降级形态 —— fetch 失败（凭证/网络）：behind 隐藏 + 黄色提示，其余照常</h3>
+<div class="demo-card">
+  <div class="status-bar">
+    <span class="sb-branch">⎇ feat/team-session</span>
+    <span class="sb-item sb-dim">跟踪 origin/feat/team-session</span>
+    <span class="sb-item"><span class="sb-ahead">↑ 5 未推送</span></span>
+    <span class="sb-warn">⚠ 无法连接远程，显示上次同步数据</span>
+    <span class="sb-item">改动 <span class="sb-add">+120</span> / <span class="sb-del">−3</span>（2 个文件）</span>
+  </div>
+</div>
+
+<h3>④ 边界形态 —— 无 upstream（本地新分支）/ detached HEAD</h3>
+<div class="demo-card">
+  <div class="status-bar" style="margin-bottom:8px">
+    <span class="sb-branch">⎇ feat/new-local</span>
+    <span class="sb-item sb-dim">未设置远程跟踪（无 ↑↓）</span>
+    <span class="sb-item">改动 <span class="sb-add">+10</span> / <span class="sb-del">−0</span>（1 个文件）</span>
+    <span class="sb-sync">↻ 已同步远程 · 00:29</span>
+  </div>
+  <div class="status-bar">
+    <span class="sb-branch">⎇ 8a29e78</span>
+    <span class="sb-item sb-dim">detached HEAD（游离头指针）</span>
+  </div>
+</div>
+
+<h3>⑤ 加载中 / 非 git 工作区</h3>
+<div class="demo-card">
+  <div class="loading">Git 状态加载中…（fetch 远程最长 15s，期间可先渲列表）</div>
+</div>
+
+<script>
+document.querySelectorAll('.theme-switch button').forEach(b=>b.onclick=()=>{
+  document.documentElement.dataset.theme=b.dataset.t;
+  document.querySelectorAll('.theme-switch button').forEach(x=>x.classList.toggle('on',x===b));
+});
+</script>
+</body>
+</html>

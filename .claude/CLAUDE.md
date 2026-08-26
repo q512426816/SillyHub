@@ -5,6 +5,7 @@
 
 ## 核心规则
 
+0. 禁止跑全量测试，仅跑自己修改相关的测试，全量测试留给CI。
 1. 禁止绕过本文件规则和 SillySpec 流程。
 2. 修改代码前，必须先说明依据的文档路径或现有代码依据。
 3. 新功能 / 大改动必须走完整 SillySpec 流程技能：`brainstorm → plan → execute → verify → （人工确认再执行）archive`。
@@ -27,6 +28,7 @@
     - **永不重置 / reset / 清零已存在的 change**。多个活跃 change 各自 `--change <名>` 隔离,不重叠。代码不重叠 = 新 `--change`,不是清旧 change。
     - quick:同一 QUICKLOG 文件按 ql-ID 条目追加,不是单槽位,不冲突。
 20. 前端样式统一参考（2026-08-20 起为 AI-Native 双主题系统）：
+21. 
   * `.sillyspec/changes/2026-08-20-frontend-ai-native-style/prototype-frontend-ai-native-style.html`（设计系统总纲·原型）
   * `.sillyspec/changes/2026-08-20-frontend-ai-native-style/design.md`（设计系统总纲·设计决策）
   * `.sillyspec/docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md`（页面级实现规范，改其它页面照这个；§0.5 主题系统为多主题必读）
