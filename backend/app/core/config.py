@@ -327,7 +327,9 @@ class Settings(BaseSettings):
         description="DS 容器回拉平台文件的 base URL（跨 compose 网络走宿主机地址；同网络可改 http://backend:8000）。",
     )
     onlyoffice_file_token_ttl_seconds: int = Field(
-        default=300, ge=30, le=1800,
+        default=300,
+        ge=30,
+        le=1800,
         description="预览文件一次性令牌 TTL（秒）；redis jti 防重放。",
     )
     file_allowed_types: str = Field(

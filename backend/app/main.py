@@ -721,6 +721,7 @@ def create_app() -> FastAPI:
     app.include_router(ppm_project_link_router, prefix="/api", tags=["workspace-ppm-links"])
     # 平台级文件中心（2026-07-22-platform-file-center）：通用上传/预览/元数据/软删。
     from app.modules.file.router import router as file_router
+
     # 2026-08-26-onlyoffice-preview：Office 高保真预览（config + 一次性文件令牌端点）。
     from app.modules.preview_office.router import router as preview_office_router
 

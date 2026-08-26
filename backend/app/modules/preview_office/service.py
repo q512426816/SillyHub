@@ -27,9 +27,12 @@ _FILE_TOKEN_TYPE = "preview_file"
 
 # 扩展名 → DS documentType（word/cell/slide；ppt 家族含旧格式）。
 _DOCUMENT_TYPE_BY_EXT: dict[str, str] = {
-    "doc": "word", "docx": "word",
-    "xls": "cell", "xlsx": "cell",
-    "ppt": "slide", "pptx": "slide",
+    "doc": "word",
+    "docx": "word",
+    "xls": "cell",
+    "xlsx": "cell",
+    "ppt": "slide",
+    "pptx": "slide",
 }
 
 
@@ -108,7 +111,9 @@ async def _resolve_file(
     if user is None:
         raise PreviewSourceNotFound(details={"source": "file"})
     row = await FileService(session).get_meta(object_id, user=user)
-    return _ObjectRef(row.stored_key, row.original_name, row.mime_type or "application/octet-stream")
+    return _ObjectRef(
+        row.stored_key, row.original_name, row.mime_type or "application/octet-stream"
+    )
 
 
 async def resolve_object(

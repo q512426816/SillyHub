@@ -1448,12 +1448,8 @@ class SessionService:
                     attachment_marker_line,
                 )
 
-                _marker_lines = "\n".join(
-                    attachment_marker_line(r) for r in validated_attachments
-                )
-                _user_input_content = (
-                    f"{_marker_lines}\n{prompt}" if prompt else _marker_lines
-                )
+                _marker_lines = "\n".join(attachment_marker_line(r) for r in validated_attachments)
+                _user_input_content = f"{_marker_lines}\n{prompt}" if prompt else _marker_lines
             self._session.add(
                 AgentRunLog(
                     run_id=run.id,

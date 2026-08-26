@@ -82,7 +82,10 @@ def mocked_redis():
         return True
 
     async def delete_key(key: str) -> int:
-        return 1 if key in seen and seen.discard(key) is None else 0
+        if key not in seen:
+            return 0
+        seen.discard(key)
+        return 1
 
     redis = MagicMock()
     redis.set = AsyncMock(side_effect=set_key)
@@ -193,8 +196,6 @@ class TestBuildConfig:
         )
         assert config["editorConfig"]["mode"] == "view"
         # 顶层 token 可用 DS secret 验签且 payload 与 config 一致（DS 校验契约）。
-        decoded = jwt.decode(
-            config["token"], "ds-test-secret", algorithms=["HS256"]
-        )
+        decoded = jwt.decode(config["token"], "ds-test-secret", algorithms=["HS256"])
         assert decoded["document"]["fileType"] == "xls"
         assert decoded["document"]["url"] == config["document"]["url"]

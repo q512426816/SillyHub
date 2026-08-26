@@ -86,9 +86,7 @@ def mocked_storage():
     """附件对象存储读打桩（assemble 多模态块读 bytes，不打桩会打真 MinIO）。"""
     backend = MagicMock()
     backend.read_bytes = AsyncMock(return_value=b"x" * 16)
-    with patch(
-        "app.modules.storage.factory.get_storage_backend", return_value=backend
-    ):
+    with patch("app.modules.storage.factory.get_storage_backend", return_value=backend):
         yield backend
 
 
@@ -99,9 +97,7 @@ def mocked_storage():
 
 class TestCreateRequestSchema:
     def test_attachments_allow_empty_prompt(self) -> None:
-        req = SessionCreateRequest(
-            prompt="", provider="claude", attachment_ids=[uuid.uuid4()]
-        )
+        req = SessionCreateRequest(prompt="", provider="claude", attachment_ids=[uuid.uuid4()])
         assert len(req.attachment_ids) == 1
 
     def test_empty_prompt_without_attachments_rejected(self) -> None:
@@ -143,9 +139,7 @@ class TestCreateAttachmentValidation:
         assert rows == []
 
     @pytest.mark.asyncio
-    async def test_over_limit_rejected(
-        self, db_session, mocked_hub, mocked_redis
-    ) -> None:
+    async def test_over_limit_rejected(self, db_session, mocked_hub, mocked_redis) -> None:
         uid = await _create_user(db_session)
         await _create_runtime(db_session, uid, provider="claude")
         ids = [
@@ -155,14 +149,10 @@ class TestCreateAttachmentValidation:
 
         svc = DaemonService(db_session)
         with pytest.raises(DaemonSessionAttachmentInvalid):
-            await svc.create_session(
-                uid, provider="claude", prompt="超量", attachment_ids=ids
-            )
+            await svc.create_session(uid, provider="claude", prompt="超量", attachment_ids=ids)
 
     @pytest.mark.asyncio
-    async def test_non_claude_engine_rejected(
-        self, db_session, mocked_hub, mocked_redis
-    ) -> None:
+    async def test_non_claude_engine_rejected(self, db_session, mocked_hub, mocked_redis) -> None:
         uid = await _create_user(db_session)
         rt = await _create_runtime(db_session, uid, provider="codex")
         att = await _seed_attachment(db_session, uid)
@@ -234,8 +224,7 @@ class TestCreateWithAttachmentsHappyPath:
         # SESSION_INJECT payload 携带 attachments。
         calls = mocked_hub.send_session_control.await_args_list
         inject_payloads = [
-            c.kwargs.get("payload") or (c.args[2] if len(c.args) > 2 else None)
-            for c in calls
+            c.kwargs.get("payload") or (c.args[2] if len(c.args) > 2 else None) for c in calls
         ]
         assert any(p and "attachments" in p for p in inject_payloads)
 

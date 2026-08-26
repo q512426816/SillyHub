@@ -306,3 +306,11 @@
 根因：ql-20260825-005 引入的全局 whitespace-nowrap 在含大段汇报文字的报表 xls 上把单元格撑到数千像素宽（用户实测「员工月度绩效考核汇报表.xls」），其余列全部挤变形。
 方案：文本单元格恢复换行（max-w-[420px] + break-words），仅数值单元格不折行右对齐，表宽 w-full。注：SheetJS sheet_to_html 为纯数据投影，不含原文件的合并居中/列宽/字号/颜色样式——完整样式还原超出纯前端路线范围（design D-001 非目标），当前定位为「内容完整、结构正确、不炸版」的数据级预览。
 结果：files 域 43/43 绿、tsc 0 错；已提交并部署。
+
+## ql-20260826-001 | 2026-08-26 13:23:00 | backend-ci 修复——0bd08e88 批量推送积压的 ruff/mypy 债清零
+状态：已完成
+关联变更：2026-08-26-onlyoffice-preview（其 task-01/03 提交引入 I001 + 未格式化新文件）
+文件：backend/app/main.py（I001：preview_office import 与 file import 间补空行）、backend/app/core/config.py、app/modules/preview_office/service.py、app/modules/preview_office/tests/test_service.py、app/modules/daemon/session/service.py、app/modules/daemon/tests/test_session_create_attachments.py（ruff format 归位；test_service.py 另修 mocked_redis.delete_key 的 set.discard 当返回值用，mypy func-returns-value）
+根因：0bd08e88（OnlyOffice）与其后打包推送的 11e712fc（预会话附件修复）各带 lint 债——02:30 的 backend-ci 死在 ruff check（I001）这步，format check / mypy 从未执行，I001 身后还压着 5 个未格式化文件 + 1 个 mypy 错误，逐层修完才能真绿。
+方案：I001 手工补空行（ruff --diff 建议项）+ ruff format 5 文件 + delete_key 改显式 if 分支（语义不变：key 在 set 中返回 1 否则 0）。
+结果：ruff check / ruff format --check 全绿、mypy 737 文件 0 错、受影响测试 29/29 绿（preview_office + create_attachments + session_optimize_round2）；CI 失败史梳理：8/22-8/25 的 10 次 backend-ci 失败均为「提交引入→后续提交修复」的确定性破坏（合并冲突 page_context / alembic 双头 / mypy / ruff format），非不稳定测试；--reruns 2 兜底的已知 flaky 见 backend-ci.yml 注释。已提交（见 git log）。注：sillyspec CLI quick 仍崩（docs/sillyspec 已记），本条目人工补写。
