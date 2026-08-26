@@ -12,6 +12,10 @@ tier: independent
 对应 proposal.md 推荐方案 B（前端联想 + 后端最小扩展）。方案 A = 本设计去掉 W2
 后端部分的子集；方案 C 已否决。
 
+> **行号基准**：文中 file:line 为 2026-08-26 工作区快照（多 agent 并行编辑会漂移，
+> plan/execute 阶段以符号 grep 重新定位为准；两处已知漂移：sillyhub-daemon
+> daemon.ts linkSkillsToWorkdir 调用 ≈:3780、session/service.py 行锁 ≈:2259）。
+
 ## 1. 背景与目标
 
 见 proposal.md。一句话：把「平台已有的技能、变更、快速修复」在输入框里变成可发现、
@@ -77,10 +81,13 @@ tier: independent
   `useEffect` 中 `textareaRef.current.setSelectionRange(pos, pos)` 延迟执行
   （同步调用会被 React 受控 value 的 DOM 更新覆盖，光标跳末尾）；jsdom 用例断言
   回填后光标位置。
-- **发送组装实际 6 个点位**（复核命题 5）：createSession ×2（page 预会话
-  :1719 / dialog :3636）+ injectSession ×4（page sendFromQueue :1546 /
-  sendToServerQueue :1612 / page 重发 :1952 / dialog submitFollowup :3428）。
-  重发链路不携带 mentions（与草稿恢复同列已知取舍 R-7）。
+- **发送组装实际 7 个点位**（Design Grill 修正：原记 6 处漏 dialog 版
+  sendToServerQueue）：createSession ×2（page 预会话 :1719 / dialog :3635）+
+  injectSession ×5（page sendFromQueue :1546 / page sendToServerQueue :1612 /
+  page 重发 :1952（不带 mentions，R-7 取舍）/ dialog submitFollowup :3428 /
+  **dialog sendToServerQueue :3496**，定义 :3491，由 dialog handleSend 的
+  running 分支 :3684 调用——dialog 忙轮场景，漏改则 FR-06 在该场景静默失效）。
+  dialog 重发（≈:3706）复用 submitFollowup，随该点位一并生效。
 
 ### 3.4 发送语义（SessionPanel handleSend 三处）
 
@@ -118,7 +125,10 @@ tier: independent
 
 - `SessionInjectRequest`（daemon/schema.py:217-251）新增：
   - `bind_change_key: str | None = Field(default=None, max_length=200)`
-  - `bind_quick_id: str | None = Field(default=None, max_length=40, pattern=r"^ql-[\w-]+$")`
+  - `bind_quick_id: str | None = Field(default=None, max_length=128, pattern=r"^ql-[\w-]+$")`
+    （Design Grill 修正：128 对齐 create 通道 quicklog_id 契约（schema.py:189）与
+    QuicklogSessionLink.ql_id 列宽 String(128)（model.py:332），同语义字段同约束，
+    不引入双标准）
   - `_require_prompt_or_switch`（:242-251）**不得**把 bind 字段纳入空 prompt 豁免。
 - **三层透传同步**（router inject_session :2305-2336 → Facade
   `DaemonService.inject_session` :692-719 → `SessionService.inject_session`
@@ -130,8 +140,13 @@ tier: independent
   `sendToServerQueue`（session-panel.tsx:1830-1832）恰是排队路径 → 绑定静默丢失
   且前端已清 pendingMentions。
 - binder 调用：显式传 `session.workspace_id`；**None 守卫**（照抄 create 先例
-  session/service.py:1220-1232：记 warning 跳过）。bind 失败（savepoint 吞掉的
-  约束冲突等）降级 best-effort 日志告警，不阻断消息发送。
+  session/service.py:1220-1232：记 warning 跳过）。失败语义：binder 自身已用
+  savepoint + log.warning 保证不抛（binding.py:178-185/:223-230），SessionService
+  侧无需重复 try/except 包裹，仅在调用后按返回值记结构化日志即可——「best-effort
+  失败不阻断消息发送」由此天然成立（T2.2 有对应用例）。
+- 边界澄清：`inject_session_as_service`（session/service.py:≈2292，平台 service
+  身份旁路）不消费 SessionInjectRequest、不经三层链路，**无需改动**；行锁窗口内
+  做 savepoint 查询+插入会轻微拉长锁持有时长，可接受（绑定操作轻量，无外部 IO）。
 - **跨 workspace 语义（写死）**：保持 binder 既有 placeholder 行为——别的工作区
   的 change_key 在会话**自有**工作区查不到行时建 placeholder（binder 按
   (workspace_id, change_key) 过滤，binding.py:131-138，placeholder 的 workspace_id
@@ -168,30 +183,33 @@ tier: independent
 修改（前端）：
 - `frontend/src/components/daemon/session-input-bar.tsx`（接入检测/浮层/IME/
   onMentionsChange/placeholder/光标回填模式）
-- `frontend/src/components/daemon/session-panel.tsx`（3 渲染点接线；**6 个发送
-  组装点位**：createSession page :1719 / dialog :3636，injectSession
-  sendFromQueue :1546 / sendToServerQueue :1612 / 重发 :1952（不带 mentions，
-  R-7 取舍）/ dialog submitFollowup :3428）
+- `frontend/src/components/daemon/session-panel.tsx`（3 渲染点接线；**7 个发送
+  组装点位**：createSession page :1719 / dialog :3635，injectSession
+  sendFromQueue :1546 / page sendToServerQueue :1612 / page 重发 :1952（不带
+  mentions，R-7 取舍）/ dialog submitFollowup :3428 / **dialog sendToServerQueue
+  :3496**）
 - `frontend/src/lib/daemon.ts`（injectSession 请求体 + 2 字段；经 Omit<
   SessionInjectRequest> 类型自动获得新字段，只需组装处理）
 - `frontend/src/lib/custom-skills.ts`（PlatformSkillSummary 手写加
   `invoke_name?: string | null`，注释标注来源——manifest 类型不在生成管线内）
 
 修改（后端）：
-- `backend/app/modules/daemon/schema.py`（SessionInjectRequest + 2 字段）
+- `backend/app/modules/daemon/schema.py`（SessionInjectRequest + 2 字段，
+  bind_quick_id max_length=128 对齐 create 契约）
 - `backend/app/modules/daemon/router.py` + `backend/app/modules/daemon/service.py`
   Facade（三层透传同步，见 §4.2）
 - `backend/app/modules/daemon/session/service.py`（SessionService.inject_session
-  插入 binder 调用：:2242 后 :2258 前，None 守卫 + best-effort）
+  插入 binder 调用：行锁后、tool_report 早退前，None 守卫 + 结果日志）
 - `backend/app/modules/agent/skills_bundle_service.py`（invoke_name 聚合透传）
 
 测试：
 - `backend/app/modules/daemon/tests/test_session_service.py`（binder 调用/None
-  守卫/跨 workspace 语义用例）
+  守卫/跨 workspace 语义/bind 失败不阻断消息发送用例）
 - `backend/app/modules/daemon/tests/test_session_router.py`（/inject 端点新字段）
 - `backend/app/modules/daemon/tests/test_session_queue.py`（**忙轮排队路径仍绑定**
   ——命题 3 验收载体）
-- `backend/app/modules/agent/tests/test_skills_bundle.py`（invoke_name）
+- `backend/app/modules/daemon/tests/test_skills_bundle.py`（invoke_name；既有
+  文件并入，非新建——Design Grill 修正路径）
 
 生成产物（随变更提交）：
 - `frontend/src/lib/api-types.ts`、`backend/openapi.json`（`pnpm gen:types`）
@@ -206,12 +224,12 @@ tier: independent
 | R-2 | Enter 语义冲突（浮层激活时 Enter 误发送） | 拦截规则集中在 onKeyDown 首位 + jsdom 用例覆盖 |
 | R-3 | 中文 IME 组合期误弹/误选 | composition 标记 + compositionend 重检，用例覆盖 |
 | R-4 | inject 绑定越权面 | **复核已验证**：binder 按 (workspace_id, change_key) 过滤 + inject 传 session.workspace_id + None 守卫；残余面 = 自有工作区 placeholder 垃圾行，与 run_sync 通道一致，接受（§4.2 写死）；用例固化「跨 workspace 只污染会话工作区」 |
-| R-5 | 浮层与 team popover / 附件降级提示条叠层冲突 | 同锚区互斥规则 + z-index 同层族；用例覆盖 |
+| R-5 | 浮层与 team popover / 附件降级提示条叠层冲突 | 同锚区互斥规则 + z-index 同层族；T1.2/T1.3 叠层与互斥用例（Design Grill 补落点） |
 | R-6 | manifest/changes 频繁查询拖慢输入 | 挂载 prefetch + staleTime，输入零请求 |
 | R-7 | 草稿恢复/重发链路 pendingMentions 丢失（@ 文本在但绑定失效） | 已知取舍：文本保留提示用户重选；二期可草稿带 mentions |
 | R-8 | 与 2026-08-26-workspace-skill-edit（worktree 未合）并行冲突 | 双方都动 workspace/skills 相关面极小；本变更不触其 5 个写端点；合并顺序执行期再评估 |
 | R-9 | manifest 手写类型漂移（custom-skills.ts 不在生成管线） | invoke_name 手写同步 + 注释标注来源；后端字段改名时此文件需人肉跟改（既有惯例，非本变更新增） |
-| R-10 | 忙轮排队路径绑定丢失 | **设计已消除**：binder 插入点在排队早退分支之前（§4.2）；test_session_queue.py 用例守护防回归 |
+| R-10 | 忙轮排队路径绑定丢失（page 与 dialog 双变体） | **设计已消除**：binder 插入点在排队早退分支之前（§4.2）+ **7 个发送点位清单含 dialog sendToServerQueue :3496**（Design Grill 修正）；test_session_queue.py 用例守护防回归 |
 
 ## 8. 自审（Self-Review；含独立复核回执）
 

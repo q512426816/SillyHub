@@ -2285,6 +2285,13 @@ async def create_session(
         workspace_id=data.workspace_id,
         quicklog_id=data.quicklog_id,
         team_mission=data.team_mission,
+        # P0 修复（2026-08-26，E2E 实证）：team_mission 预建主控会话必须写
+        # stage='orchestrator' → daemon isMainAgentSession 谓词命中 → 注入
+        # dispatch_worker 等 5 工具。当前谓词对 stage==='' 也放行是普通会话的
+        # 兼容口径，但 create_session 内部 placement:762 的 hardcoded
+        # ask_user_only=True 在无 tool_config 白名单时不拦 MCP 工具——真正缺的
+        # 是主控身份标记（无 stage → 前端 inject 侧简报/工具注入语义断裂）。
+        stage="orchestrator" if data.team_mission is not None else None,
         page_context=data.page_context,
         attachment_ids=data.attachment_ids,
     )

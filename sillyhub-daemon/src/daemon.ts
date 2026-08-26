@@ -3117,6 +3117,20 @@ export class Daemon {
       return;
     }
 
+    // P0 修复（2026-08-26，真实派团队 E2E 发现）：SESSION_INJECT 与 create 写
+    // store 存在竞态——backend 等 ready（8s 超时 fallback 发 inject）可能在
+    // daemon create 流程完成前到达（特别是 ready 上报慢/超时时），session_not_found
+    // 直接丢弃 → 首轮 prompt 丢失（靠 10s firstPrompt fallback 兜底裸 metadata
+    // 版，简报丢失）。修：SESSION_INJECT 遇 not_found 短重试 3 次×100ms（create
+    // 通常毫秒级完成，重试窗口覆盖足够）；其余控制消息维持原语义不重试。
+    if (msgType === MSG.SESSION_INJECT) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        if (this._sessionManager!.get(sessionId)) break;
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 100));
+        }
+      }
+    }
     const state = this._sessionManager.get(sessionId);
     if (!state) {
       this._logger.warn('session_control_session_not_found', {

@@ -28,7 +28,8 @@ status: brainstorm
   快速修复映射为 `SessionCreateRequest.change_id` / `quicklog_id` 上送（既有契约，
   零后端改动）；每类型以最后一次选择为准，文本中多个 @ 全部保留。
 - FR-06（中途绑定，方案 B）：`SessionInjectRequest` 新增可选 `bind_change_key`
-  （≤200 字符）与 `bind_quick_id`（≤40，`ql-*` 模式）；inject 处理中有值即调用
+  （≤200 字符）与 `bind_quick_id`（≤128，`ql-*` 模式，长度对齐 create 通道
+  quicklog_id 契约与列宽）；inject 处理中有值即调用
   `bind_session_to_change` / `bind_session_to_quicklog`（幂等，复用 2026-08-25
   session-spec-binding 既有 binder），不注入 prompt 前导、不改动消息渲染。
 - FR-07（manifest invoke_name，方案 B）：`GET /api/daemon/skills/latest/manifest`

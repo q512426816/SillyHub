@@ -661,6 +661,7 @@ class DaemonService:
         # task-09（2026-08-24-session-team-mission-context / FR-05/06）：预会话
         # 团队任务块透传（校验/预建/简报归 SessionService，facade 仅转发）。
         team_mission: TeamMissionCreateBlock | None = None,
+        stage: str | None = None,
         # 2026-08-25-unified-floating-session（FR-5）：页面上下文块透传（前导
         # 构建归 SessionService create 路径，facade 仅转发）。
         page_context: PageContextCreateBlock | None = None,
@@ -684,6 +685,7 @@ class DaemonService:
             agent_profile_id=agent_profile_id,
             llm_provider_id=llm_provider_id,
             team_mission=team_mission,
+            stage=stage,
             page_context=page_context,
             quicklog_id=quicklog_id,
             attachment_ids=attachment_ids,

@@ -57,7 +57,8 @@ inject 仿 `page_context`/`attachment_ids` 模式加可选字段）就同时解�
 - 不做手动解绑 UI（延续 2026-08-25-session-spec-binding 的非目标）。
 - 不改动 `/team` 现有拦截/剥离语义，仅把它纳入 `/` 联想列表作为内置指令展示。
 
-## 待用户确认
+## 决策记录
 
-1. 方案选择：A / B / C（推荐 B）。
-2. 优化项范围：IME 保护 + placeholder 必做；历史回溯已列非目标，如需要请提出。
+1. 方案选择：**用户已确认方案 B**（brainstorm Step 4 记录于进度库，2026-08-26）。
+2. 设计确认：**用户已确认**（brainstorm Step 5，含交互原型，2026-08-26）。
+3. 优化项范围：IME 保护 + placeholder 必做；历史回溯已列非目标。

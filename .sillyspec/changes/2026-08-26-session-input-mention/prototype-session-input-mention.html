@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="blue">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>原型：会话输入框智能联想（/ 技能 · @ 关联）— 2026-08-26-session-input-mention</title>
+<style>
+  /* ── 语义 token（对齐 frontend/src/styles/themes.ts：blue / ai-native 双主题）── */
+  :root[data-theme="blue"] {
+    --bg: #f8fafc; --card: #ffffff; --muted: #f1f5f9; --muted-fg: #64748b;
+    --border: #e2e8f0; --fg: #0f172a; --primary: #2563EB; --primary-hover: #1d4ed8;
+    --brand-100: #dbeafe; --brand-600: #2563EB; --brand-700: #1d4ed8;
+    --info: #0ea5e9; --amber-bg: #fef3c7; --amber-bd: #fcd34d; --amber-fg: #b45309;
+    --pop-bd: #bfdbfe;
+  }
+  :root[data-theme="ai-native"] {
+    --bg: #f5f3ff; --card: #ffffff; --muted: #ede9fe; --muted-fg: #6d28d9;
+    --border: #ddd6fe; --fg: #1e1b4b; --primary: #7C3AED; --primary-hover: #6D28D9;
+    --brand-100: #ede9fe; --brand-600: #7C3AED; --brand-700: #6D28D9;
+    --info: #8b5cf6; --amber-bg: #fef3c7; --amber-bd: #fcd34d; --amber-fg: #b45309;
+    --pop-bd: #ddd6fe;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--fg); min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .topbar { width: 100%; display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 20px; font-size: 12px; color: var(--muted-fg); border-bottom: 1px solid var(--border); background: var(--card); }
+  .topbar button { font-size: 12px; padding: 4px 10px; border-radius: 9999px; border: 1px solid var(--border);
+    background: var(--card); color: var(--fg); cursor: pointer; }
+  .stage { width: 100%; max-width: 760px; flex: 1; display: flex; flex-direction: column; }
+  .hint { font-size: 12px; color: var(--muted-fg); padding: 14px 20px 0; line-height: 1.8; }
+  .hint b { color: var(--brand-700); }
+  .sendlog { margin: 10px 20px 0; font-size: 12px; line-height: 1.7; color: var(--muted-fg);
+    background: var(--muted); border: 1px dashed var(--border); border-radius: 10px; padding: 8px 12px; min-height: 20px; }
+  .sendlog code { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; font-size: 11px; }
+
+  /* ── 输入区（复刻 session-input-bar 胶囊 + 上方联想浮层）── */
+  footer { margin-top: auto; padding: 0 20px 24px; position: relative; }
+  .handle { display: flex; justify-content: center; padding: 6px 0 2px; cursor: ns-resize; }
+  .handle span { width: 40px; height: 3px; border-radius: 9999px; background: color-mix(in srgb, var(--muted-fg) 30%, transparent); }
+  .capsule { display: flex; align-items: flex-end; gap: 8px; border-radius: 16px;
+    border: 1px solid var(--border); background: color-mix(in srgb, var(--muted) 40%, var(--card));
+    padding: 8px 10px; transition: all .15s; position: relative; }
+  .capsule:focus-within { border-color: var(--primary); background: var(--card);
+    box-shadow: 0 0 0 4px var(--brand-100); }
+  .capsule .attach { width: 40px; height: 40px; flex: none; align-self: center; border: none; background: none;
+    color: var(--muted-fg); font-size: 18px; cursor: pointer; border-radius: 9999px; }
+  textarea { flex: 1; min-height: 44px; resize: none; border: none; outline: none; background: transparent;
+    font: 14px/1.45 inherit; color: var(--fg); padding: 8px 4px; }
+  textarea::placeholder { color: var(--muted-fg); }
+  .send { width: 36px; height: 36px; flex: none; align-self: center; border: none; border-radius: 9999px;
+    background: linear-gradient(135deg, var(--brand-600), var(--info)); color: #fff; font-size: 15px;
+    cursor: pointer; box-shadow: 0 1px 3px var(--primary); }
+  .mentions-bar { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 4px 6px; }
+  .mentions-bar .chip { font-size: 11px; border: 1px solid var(--border); background: var(--muted);
+    border-radius: 6px; padding: 2px 8px; color: var(--fg); }
+  .mentions-bar .chip b { color: var(--brand-700); font-weight: 600; }
+
+  /* ── 联想浮层（对齐 team-trigger-popover：absolute bottom-full，自定义浮层非 antd）── */
+  .mention-pop { position: absolute; bottom: calc(100% + 6px); left: 0; right: 0; z-index: 30;
+    background: var(--card); border: 1px solid var(--pop-bd); border-radius: 12px;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, .14); max-height: 260px; overflow-y: auto; padding: 4px 0; }
+  .mention-pop[hidden] { display: none; }
+  .group-label { font-size: 11px; color: var(--muted-fg); padding: 6px 14px 2px; letter-spacing: .05em; }
+  .item { display: flex; flex-direction: column; gap: 1px; padding: 6px 14px; cursor: pointer; }
+  .item .name { font-size: 13px; font-weight: 500; }
+  .item .name .tag { font-size: 10px; color: var(--brand-700); border: 1px solid var(--pop-bd);
+    border-radius: 4px; padding: 0 4px; margin-left: 6px; font-weight: 400; }
+  .item .desc { font-size: 11px; color: var(--muted-fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 640px; }
+  .item.active { background: var(--muted); }
+  .item.active .name { color: var(--brand-700); }
+  .empty { padding: 12px 14px; font-size: 12px; color: var(--muted-fg); }
+  .kbd-hint { position: sticky; bottom: 0; background: var(--card); border-top: 1px solid var(--border);
+    font-size: 10px; color: var(--muted-fg); padding: 4px 14px; }
+  kbd { border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px;
+    font-size: 10px; background: var(--muted); }
+  .ime-note { position: fixed; top: 48px; left: 50%; transform: translateX(-50%); z-index: 40;
+    background: var(--amber-bg); border: 1px solid var(--amber-bd); color: var(--amber-fg);
+    font-size: 12px; padding: 6px 14px; border-radius: 8px; }
+  .ime-note[hidden] { display: none; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <span>原型 · 会话输入框智能联想 · 2026-08-26-session-input-mention（方案 B）</span>
+  <button onclick="toggleTheme()">切换主题：blue ⇄ ai-native</button>
+</div>
+<div class="stage">
+  <div class="hint">
+    试试：输入 <b>/</b>（词首）唤起技能/指令联想；输入 <b>@</b> 唤起变更/快速修复关联；
+    <b>↑↓</b> 选择、<b>Enter/Tab</b> 确认、<b>Esc</b> 关闭。中文输入法拼音组合期不弹层（顶部会亮黄条提示）。
+    选中 <b>@变更</b> 后底部回显「本次发送将携带」的绑定字段；发送（Enter）可看请求体。
+  </div>
+  <div class="sendlog" id="sendlog">（发送后这里回显 create/inject 请求体摘要）</div>
+</div>
+
+<footer>
+  <!-- 联想浮层：挂输入胶囊上方，与 team popover 同锚区（互斥，见 design §3.4） -->
+  <div class="mention-pop" id="pop" role="listbox" aria-label="联想列表" hidden>
+    <div id="pop-body"></div>
+    <div class="kbd-hint"><kbd>↑</kbd><kbd>↓</kbd> 移动 · <kbd>Enter</kbd>/<kbd>Tab</kbd> 选中 · <kbd>Esc</kbd> 关闭</div>
+  </div>
+  <div class="mentions-bar" id="mentions-bar"></div>
+  <div class="capsule">
+    <button class="attach" title="添加图片/文件附件">📎</button>
+    <textarea id="input" rows="2"
+      placeholder="输入 / 唤起技能 · @ 关联变更/快速修复（Enter 发送，Shift+Enter 换行）"></textarea>
+    <button class="send" id="send-btn" title="发送">➤</button>
+  </div>
+</footer>
+
+<div class="ime-note" id="ime-note" hidden>IME 组合输入中——联想层暂停（compositionstart → compositionend）</div>
+
+<script>
+/* ── mock 数据（形态对齐真实数据源：manifest skills / listChanges / listQuicklogEntries）── */
+const COMMANDS = [
+  { kind: "command", invoke: "team", label: "/team", desc: "派团队执行任务（平台指令：发送时拦截弹层，与现状语义一致）" },
+];
+const SKILLS = [
+  { kind: "skill", name: "sillyspec-verify", invoke: "sillyspec:verify", desc: "用于验证代码实现是否符合 design 和模块文档" },
+  { kind: "skill", name: "deploy-to-server", invoke: "deploy-to-server", desc: "本地打包镜像→远程服务器（阿里云）部署" },
+  { kind: "skill", name: "sillyspec-commit", invoke: "sillyspec:commit", desc: "智能提交——自动收集变更信息，生成 commit message" },
+  { kind: "skill", name: "banner-design", invoke: "banner-design", desc: "Design banners for social media, ads, website heroes…" },
+];
+const CHANGES = [
+  { kind: "change", key: "2026-08-26-session-input-mention", title: "会话输入框智能联想" },
+  { kind: "change", key: "2026-08-25-session-spec-binding", title: "会话绑定变更/快速修复" },
+  { kind: "change", key: "2026-08-25-unified-floating-session", title: "统一悬浮会话" },
+];
+const QUICKLOGS = [
+  { kind: "quick", key: "ql-20260826-013", title: "/team 指令发送前剥离防 Unknown command" },
+  { kind: "quick", key: "ql-20260826-010", title: "会话页 4 项 UX 修复" },
+];
+
+const ta = document.getElementById("input");
+const pop = document.getElementById("pop");
+const body = document.getElementById("pop-body");
+const bar = document.getElementById("mentions-bar");
+const log = document.getElementById("sendlog");
+const imeNote = document.getElementById("ime-note");
+
+let composing = false;      // IME 守卫（design §3.1）
+let open = false, items = [], active = 0;
+let pending = { change: null, quick: null };   // pendingMentions（FR-05/FR-06）
+
+/* detectMention：词首 / 或 @，光标在触发字符后的连续查询串内（纯函数，正式实现放 lib/session-mention.ts） */
+function detectMention(text, caret) {
+  let i = caret - 1;
+  while (i >= 0 && !/\s/.test(text[i])) i--;          // 回溯到词首前一位
+  const start = i + 1;
+  if (start >= caret) return null;
+  const trigger = text[start];
+  if (trigger !== "/" && trigger !== "@") return null;
+  const query = text.slice(start + 1, caret);
+  if (/[\s]/.test(query)) return null;                // 查询串含空白 → 关闭
+  return { trigger, query, start };
+}
+
+function candidates(trigger) {
+  return trigger === "/"
+    ? [...COMMANDS, ...SKILLS]
+    : [...CHANGES, ...QUICKLOGS];
+}
+function filterAll(list, q) {
+  const lower = q.toLowerCase();
+  const hit = (s) => !lower || s.toLowerCase().includes(lower);
+  const pre = (s) => lower && s.toLowerCase().startsWith(lower);
+  const scored = list.filter((it) => pre(it.invoke ?? it.name ?? it.key) || pre(it.key) || hit(it.desc ?? it.title ?? ""));
+  return scored.sort((a, b) => (b.invoke ?? b.name ?? b.key).length - (a.invoke ?? a.name ?? a.key).length).slice(0, 12);
+}
+function groupLabel(kind) {
+  return { command: "平台指令", skill: "技能（平台 + 我的）", change: "变更（当前工作区）", quick: "快速修复（当前工作区）" }[kind];
+}
+
+function render() {
+  if (!open) { pop.hidden = true; return; }
+  const groups = [];
+  for (const it of items) {
+    const g = groups[groups.length - 1];
+    if (g && g.kind === it.kind) g.list.push(it); else groups.push({ kind: it.kind, list: [it] });
+  }
+  let idx = 0, html = "";
+  for (const g of groups) {
+    html += `<div class="group-label">${groupLabel(g.kind)}</div>`;
+    for (const it of g.list) {
+      const name = it.kind === "command" ? it.label : (it.trigger === "@" ? it.key : (it.name + (it.invoke && it.invoke !== it.name ? `<span class="tag">调用名 ${it.invoke}</span>` : "")));
+      const desc = it.desc ?? it.title ?? "";
+      html += `<div class="item ${idx === active ? "active" : ""}" role="option" aria-selected="${idx === active}"
+        data-idx="${idx}"><span class="name">${name}</span><span class="desc">${desc}</span></div>`;
+      idx++;
+    }
+  }
+  if (!items.length) html = `<div class="empty">无匹配——/ 可到「设置 · 我的技能」创建；@ 需在挂工作区的会话中使用</div>`;
+  body.innerHTML = html;
+  body.querySelectorAll(".item").forEach((el) => {
+    el.onmousedown = (e) => { e.preventDefault(); pick(+el.dataset.idx); };
+    el.onmousemove = () => { active = +el.dataset.idx; body.querySelectorAll(".item").forEach((x) => x.classList.remove("active")); el.classList.add("active"); };
+  });
+  pop.hidden = false;
+  const actEl = body.querySelector(".item.active"); actEl && actEl.scrollIntoView({ block: "nearest" });
+}
+
+function reopen() {
+  const m = composing ? null : detectMention(ta.value, ta.selectionStart);
+  if (!m) { open = false; render(); return; }
+  const list = filterAll(candidates(m.trigger).map((it) => ({ ...it, trigger: m.trigger })), m.query);
+  items = list; active = Math.min(active, Math.max(0, list.length - 1)); open = true; render();
+}
+
+/* 选中回填：替换 触发字符+查询串 → /invoke 或 @key，光标移到尾空格后（正式实现：受控 + useEffect 延迟 setSelectionRange） */
+function pick(idx) {
+  const m = detectMention(ta.value, ta.selectionStart);
+  const it = items[idx];
+  if (!m || !it) { open = false; render(); return; }
+  let insert;
+  if (it.kind === "command") insert = "/" + it.invoke + " ";
+  else if (it.kind === "skill") insert = "/" + (it.invoke ?? it.name) + " ";
+  else if (it.kind === "change") { pending.change = it; insert = "@" + it.key + " "; renderBar(); }
+  else { pending.quick = it; insert = "@" + it.key + " "; renderBar(); }
+  const caret = ta.selectionStart;
+  ta.value = ta.value.slice(0, m.start) + insert + ta.value.slice(caret);
+  const pos = m.start + insert.length;
+  ta.setSelectionRange(pos, pos);
+  open = false; render(); ta.focus();
+}
+
+function renderBar() {
+  const chips = [];
+  if (pending.change) chips.push(`<span class="chip">将关联变更 <b>${pending.change.key}</b>（create.change_id / inject.bind_change_key）</span>`);
+  if (pending.quick) chips.push(`<span class="chip">将关联快速修复 <b>${pending.quick.key}</b>（create.quicklog_id / inject.bind_quick_id）</span>`);
+  bar.innerHTML = chips.join("");
+}
+
+ta.addEventListener("input", reopen);
+ta.addEventListener("click", reopen);
+ta.addEventListener("compositionstart", () => { composing = true; imeNote.hidden = false; open = false; render(); });
+ta.addEventListener("compositionend", () => { composing = false; imeNote.hidden = true; reopen(); });
+ta.addEventListener("keydown", (e) => {
+  if (composing) return;                                   // IME 组合期不拦截
+  if (open) {
+    if (e.key === "ArrowDown") { e.preventDefault(); active = (active + 1) % Math.max(items.length, 1); render(); return; }
+    if (e.key === "ArrowUp") { e.preventDefault(); active = (active - 1 + items.length) % Math.max(items.length, 1); render(); return; }
+    if ((e.key === "Enter" || e.key === "Tab") && items.length) { e.preventDefault(); pick(active); return; }
+    if (e.key === "Escape") { open = false; render(); return; }
+  }
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); doSend(); }
+});
+ta.addEventListener("blur", () => setTimeout(() => { open = false; render(); }, 120));  // 浮层内 mousedown 先于 blur
+
+document.getElementById("send-btn").onclick = doSend;
+function doSend() {
+  const prompt = ta.value.trim();
+  if (!prompt) return;
+  const parts = [`prompt: <code>${escapeHtml(prompt === "/team …" ? prompt : prompt).slice(0, 80)}</code>`];
+  if (/^\/team(\s|$)/.test(prompt)) parts.push(`<span style="color:var(--amber-fg)">/team → 平台拦截：弹团队配置层，剥离前缀</span>`);
+  if (pending.change) parts.push(`bind_change_key: <code>${pending.change.key}</code>（幂等写 ChangeSessionLink）`);
+  if (pending.quick) parts.push(`bind_quick_id: <code>${pending.quick.key}</code>（幂等写 QuicklogSessionLink）`);
+  if (!pending.change && !pending.quick && prompt.includes("@")) parts.push(`<span style="color:var(--muted-fg)">（@ 文本原样保留；未经浮层选择的 @ 不产生绑定）</span>`);
+  log.innerHTML = "本次发送 → " + parts.join(" · ");
+  ta.value = ""; pending = { change: null, quick: null }; renderBar(); open = false; render();
+}
+function escapeHtml(s) { return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+function toggleTheme() {
+  const r = document.documentElement;
+  r.dataset.theme = r.dataset.theme === "blue" ? "ai-native" : "blue";
+}
+</script>
+</body>
+</html>
