@@ -212,10 +212,16 @@ async def build_office_config(
     editor_block: dict[str, Any] = {
         "mode": "view",
         "lang": "zh",
+        # ql-20260826-002：desktop 完整渲染链（embedded 为简化查看器，排版更差——
+        # 用户实测 Word 样式差异后的调整）。
+        "type": "desktop",
         "customization": {
             "forcesave": False,
             "compactHeader": True,
             "hideRightMenus": True,
+            # ql-20260826-002：关闭 view 模式下的"适合页面/适合宽度"切换钮导致
+            # 的初始紧凑排版，交给完整查看器管线。
+            "uiTheme": "theme-classic-light",
         },
     }
     # DS 9 JWT（helpcenter docs-configure-jwt）：顶层 token=整 config 签名；

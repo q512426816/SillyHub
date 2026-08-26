@@ -79,19 +79,25 @@ export function OnlyofficePreviewer({ officeConfig, onFallback }: OnlyofficePrev
           ...officeConfig.config,
           events: {
             onError: () => fallbackRef.current(),
+            // DS 9 约定：holder div 被就地替换为 iframe（asc-word{N}），挂载成功
+            // 即取消兜底超时（ql-20260826-002：旧检查在 holder 内找 iframe 而 DS
+            // 是替换式挂载——恒 false，20s 后误判降级，出现「先 DS 后回落」）。
+            onDocumentReady: () => {
+              if (destroyTimer) clearTimeout(destroyTimer);
+            },
           },
         });
         editorRef.current = editor;
-        // 兜底超时：onError 不总是触发（如 DS 起一半），20s 无 iframe 视为失败。
+        // 兜底超时（60s，首开含 DS 冷启动换页）：onDocumentReady 已取消；超时以
+        // 「父容器内出现了 DS 替换节点（iframe/asc 容器）」为成功信号。
         destroyTimer = setTimeout(() => {
-          if (
-            !cancelled &&
-            holderRef.current &&
-            !holderRef.current.querySelector("iframe")
-          ) {
-            fallbackRef.current();
-          }
-        }, 20_000);
+          if (cancelled || !holderRef.current) return;
+          const parent = holderRef.current.parentElement;
+          const mounted =
+            (parent && parent.querySelector("iframe")) ||
+            document.getElementById(holderRef.current.id) === null; // holder 已被替换
+          if (!mounted) fallbackRef.current();
+        }, 60_000);
       } catch {
         if (!cancelled) fallbackRef.current();
       }
