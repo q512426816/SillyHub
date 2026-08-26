@@ -100,13 +100,19 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
   调高，clamp 44px~min(480,视口60%)，`sillyhub.sessions.inputBarHeight` 全局
   持久化，双击恢复默认清键；挂载懒读回显）。
 - `ActivityCatalog`（`activity-catalog.tsx`，ql-20260826-010）：头部「后台 ▾」
-  下拉（与 SubagentCatalog 同款开合交互：外部点击/Escape 收起），收编原三段
+  下拉（与 SubagentCatalog 同款开合交互），收编原三段
   常驻区——Bash 命令进度卡（BashProgressCard）/ 后台 Agent 任务卡
   （AgentTaskCard）/ 会话团队任务块（TeamTaskBlock，取消与分身子会话经 props
-  透传父层）；三源全空返回 null 零占位；运行中触发按钮带脉冲点。session-panel
+  透传父层）；三源全空返回 null 零占位；运行中触发按钮带脉冲点。
+  ql-20260826-014：收起判定改 **containment**（mousedown 落点在根容器 ref 外
+  才收，Escape 收起）——原「document click 一律收 + 内部 stopPropagation 拦截」
+  在真实浏览器事件时序下有误关风险（点团队块「展开」整个下拉被关，用户实测
+  反馈）；目录内任意深度点击（含块展开/滚动条）一律不收。session-panel
   两模式头部挂载（page 在 SubagentCatalog 旁、dialog 在视图切换 tab 前），
   原消息流与输入区之间的三段常驻 JSX 已删（仅保留一行「后台任务仍在运行」
-  提示，无活跃 turn 且有 running 任务时显示）。
+  提示，无活跃 turn 且有 running 任务时显示）。配套：TeamTaskBlock 移除
+  「active→终态过渡自动收敛折叠」（5s 轮询送达终态时正被用户查看会被强制
+  收起——「点开就被关」的另一来源；终态默认折叠仍由挂载初始态保证）。
 - `SessionListLayout`（`session-list-layout.tsx`）：公共会话列表（2026-08-22-workspace-sessions-portal 起消费面随 ChangeSessionSection 退役收敛，现仅 runtimes 弹窗使用）；调用方 fetch 后 map 成 `SessionListEntry`
   （id/title/statusBadge/secondaryText/lastActiveAt）传入；`onDelete` 可选
   （runtimes 传删除按钮）；title 空回退 shortId。

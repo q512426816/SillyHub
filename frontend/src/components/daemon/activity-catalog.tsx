@@ -6,7 +6,7 @@
  * 背景：Bash 命令进度卡 / 后台 Agent 任务卡（子代理派发）/ 团队任务块此前常驻
  * 渲染在消息流与输入区之间，挤占聊天窗口（用户反馈「进度 tab 中 bash 和子
  * agent 太占位置」）。本组件把它们收编进头部下拉（与 SubagentCatalog 同款
- * 交互形态——触发按钮 + 点击展开 + 外部点击/Escape 收起），默认零占位，
+ * 交互形态——触发按钮 + 点击展开 + 外部 mousedown/Escape 收起），默认零占位，
  * 点击后才展示详情。
  *
  * 职责边界：
@@ -15,11 +15,13 @@
  *   - 内容为空（无 bash、无后台任务、无 mission）→ 整体不渲染（返回 null）；
  *   - 运行中（bash running / 后台任务 running / 活跃 mission）触发按钮带
  *     脉冲点提示；
+ *   - 收起判定走 containment（mousedown 落点在根容器外才收，ql-20260826-014
+ *     替代 document-click+stopPropagation——目录内任意点击不误关）；
  *   - TeamTaskBlock 交互（取消/重拉/分身子会话）经 props 透传回父层，本组件
  *     不持有状态。
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
 import { AgentTaskCard } from "@/components/daemon/agent-task-card";
@@ -73,6 +75,11 @@ export function ActivityCatalog({
   onOpenWorkerSession,
 }: ActivityCatalogProps) {
   const [open, setOpen] = useState(false);
+  // ql-20260826-014：根容器 ref——收起判定用 containment（mousedown 落点是否
+  // 在目录外），替代「document click 一律收起 + 内部 stopPropagation 拦截」。
+  // 原方案在真实浏览器的事件时序下有误关风险（点击块内「展开」整个下拉被关，
+  // 用户实测反馈）；containment 对内部任意深度/嵌套弹层的点击一律不收起。
+  const rootRef = useRef<HTMLDivElement | null>(null);
 
   const sortedMissions = useMemo(
     () =>
@@ -90,17 +97,24 @@ export function ActivityCatalog({
     agentTasks.some((t) => t.status === "running") ||
     sortedMissions.some((m) => isActiveTeamMission(m.status));
 
-  // 开合：点击组件外区域收起 + Escape 收起（同 SubagentCatalog 交互契约）。
+  // 开合：ql-20260826-014 改 containment 收起——mousedown 落点在根容器外才收
+  //（目录内任意点击——含团队块展开/收起、滚动条拖拽起点——都不收起）+
+  // Escape 收起（键盘可达）。
   useEffect(() => {
     if (!open) return;
-    const onDocClick = () => setOpen(false);
+    const onDocMouseDown = (e: MouseEvent) => {
+      const target = e.target;
+      if (rootRef.current && target instanceof Node && !rootRef.current.contains(target)) {
+        setOpen(false);
+      }
+    };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
-    document.addEventListener("click", onDocClick);
+    document.addEventListener("mousedown", onDocMouseDown);
     document.addEventListener("keydown", onKeyDown);
     return () => {
-      document.removeEventListener("click", onDocClick);
+      document.removeEventListener("mousedown", onDocMouseDown);
       document.removeEventListener("keydown", onKeyDown);
     };
   }, [open]);
@@ -108,7 +122,7 @@ export function ActivityCatalog({
   if (totalCount === 0) return null;
 
   return (
-    <div className="relative inline-flex">
+    <div ref={rootRef} className="relative inline-flex">
       <button
         type="button"
         aria-haspopup="listbox"

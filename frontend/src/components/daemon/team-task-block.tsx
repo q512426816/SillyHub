@@ -31,7 +31,7 @@
  * 字段不渲染点击态，未传回调时全部行为零变化（纯 props 契约不变）。
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { memo, useCallback, useEffect, useMemo, useState, type KeyboardEvent } from "react";
 
 import {
   getAgentRunLogs,
@@ -189,13 +189,10 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
   const active = isActiveTeamMission(summary.status);
   // ql-20260825-011：默认一律收起（原活跃任务自动展开，多任务并发时每个块都
   // 铺满展开明细，会话被挤没）——进度看概要行，点开才看分身明细。
+  // ql-20260826-014：删除「active→终态过渡自动收敛折叠」——父层 5s 轮询把
+  // 收敛态送达时正值用户查看明细，块被强制收起（「点开就被关」体感）；终态
+  // 默认折叠仍由挂载初始态保证，手动展开后不因状态翻折被夺走。
   const [open, setOpen] = useState(false);
-  // active → 终态过渡：自动收敛为折叠（终态默认折叠，对齐原型 §03 终态任务块）。
-  const prevActiveRef = useRef(active);
-  useEffect(() => {
-    if (prevActiveRef.current && !active) setOpen(false);
-    prevActiveRef.current = active;
-  }, [active]);
 
   const [confirming, setConfirming] = useState(false);
   const [cancelling, setCancelling] = useState(false);

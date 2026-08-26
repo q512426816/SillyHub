@@ -131,8 +131,11 @@ const OBJECTIVE = "修掉登录页三处移动端问题并补回归用例";
 /**
  * ql-20260826-010：团队任务块收编进头部 ActivityCatalog 下拉——先点「后台」
  * 触发按钮展开，再对块内容断言/交互。等待列表挂载后才返回。
+ * ql-20260826-014：ensure 语义——下拉已开（containment 收起下 jsdom 纯 click
+ * 不会误关）则不再点触发钮（避免把开着的目录点关）。
  */
 async function openActivityCatalog() {
+  if (screen.queryByLabelText("会话团队任务列表")) return;
   fireEvent.click(
     await screen.findByRole("button", { name: /^后台任务目录/ }),
   );
@@ -381,8 +384,11 @@ describe("SessionPanel TeamTaskBlock 挂载与活跃 chip（dialog 模式）", (
     expect(chip.textContent).toContain("团队进行中 · 2 分身");
 
     // chip 可关闭收回（只藏提示条，不取消任务——任务块仍在下拉内）。
-    // 注：chip 在下拉外，点击经 document 冒泡会顺带收起下拉 → 重开再断言。
-    fireEvent.click(screen.getByLabelText("收起团队状态提示"));
+    // 注：chip 在下拉外，真实事件序列（mousedown 落点目录外）会收起下拉 →
+    // ensure 语义重开核对（ql-20260826-014 containment 收起）。
+    const chipClose = screen.getByLabelText("收起团队状态提示");
+    fireEvent.mouseDown(chipClose);
+    fireEvent.click(chipClose);
     await waitFor(() =>
       expect(screen.queryByTestId("team-active-chip")).not.toBeInTheDocument(),
     );

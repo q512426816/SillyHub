@@ -490,3 +490,18 @@
 根因：ql-20260826-010 放行修复后，带活跃 mission 的 /team 消息原文直达后端，被 Claude Code 当 slash command 报 Unknown command，主控轮空转不派发（会话 2eac7c91 三个 orchestrator run 空转、mission 带前缀 objective 收敛）
 方案：两模式 handleSend 把 /team 定性为平台 UI 指令：拦截弹层外所有放行路径统一剥离前缀发送 effectivePrompt，裸 /team 剥后无内容不发送；onSendSettled 草稿清空加 parseTeamCommand 剥离比对
 结果：vitest 全量 212 文件 2358 用例全绿（新增裸 /team 用例 + 3 文件断言同步剥离语义），tsc 零错，lint exit 0，前端容器已重建部署待验证
+
+## ql-20260826-014-bf51 | 2026-08-26 21:04:33 | 修复后台下拉里团队任务块点击展开即被关闭
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/activity-catalog.tsx（containment 收起）
+- frontend/src/components/daemon/team-task-block.tsx（移除自动收敛折叠）
+- frontend/src/components/daemon/__tests__/activity-catalog.test.tsx（containment 用例）
+- frontend/src/components/daemon/__tests__/team-task-block.test.tsx（过渡保持展开）
+- frontend/src/components/daemon/__tests__/session-panel-team.test.tsx（ensure-open 适配）
+- .sillyspec/docs/frontend/modules/components-daemon.md（收起契约更新）
+需求：修复后台下拉里团队任务块点击展开即被关闭
+根因：下拉收起机制（document click 一律收+stopPropagation 拦截）在真实浏览器时序下误关 + TeamTaskBlock 终态过渡自动折叠在 5s 轮询送达时强制收起正在查看的明细
+方案：ActivityCatalog 改 containment 收起（根容器 ref+mousedown 落点在外才收）；TeamTaskBlock 移除自动收敛折叠
+结果：vitest 全量 2359 用例全绿，tsc 零错，lint exit 0，模块文档已更新，前端容器重建部署完成

@@ -177,13 +177,15 @@ describe("TeamTaskBlock 折叠交互", () => {
     expect(screen.queryByText("🧠 主控")).not.toBeInTheDocument();
   });
 
-  it("active → 终态过渡自动收敛为折叠（父层 5s 轮询重渲染场景）", () => {
+  it("active → 终态过渡不折叠（父层 5s 轮询重渲染场景，ql-20260826-014）", () => {
     const { rerender } = render(<TeamTaskBlock summary={makeSummary()} />);
     expandBlock();
     expect(screen.getByText("🧠 主控")).toBeInTheDocument(); // 手动展开
 
+    // 轮询送达终态：手动展开保持——查看明细不被状态翻折夺走（原自动收敛
+    // 折叠正是「点开就被关」的体感来源）。
     rerender(<TeamTaskBlock summary={makeSummary({ status: "done" })} />);
-    expect(screen.queryByText("🧠 主控")).not.toBeInTheDocument(); // 过渡即折叠
+    expect(screen.getByText("🧠 主控")).toBeInTheDocument();
   });
 });
 

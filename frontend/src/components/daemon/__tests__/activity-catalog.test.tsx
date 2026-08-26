@@ -109,6 +109,31 @@ describe("ActivityCatalog（后台活动目录，ql-20260826-010）", () => {
     expect(screen.queryByTestId("bash-progress-card")).toBeNull();
   });
 
+  it("containment 收起（ql-20260826-014）：目录内点击不收起，外部 mousedown 才收起", () => {
+    render(
+      <ActivityCatalog
+        bashProgress={null}
+        agentTasks={[]}
+        missions={[makeMission()]}
+        onRefreshMissions={noop}
+        onOpenWorkerSession={noop}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^后台任务目录/ }));
+    const block = screen.getByLabelText("团队任务");
+    expect(block).toBeInTheDocument();
+
+    // 目录内点击团队块（含其展开行——真实事件序列 mousedown+click 落点都在
+    // 目录内）→ 不收起。
+    fireEvent.mouseDown(block);
+    fireEvent.click(block);
+    expect(screen.getByLabelText("团队任务")).toBeInTheDocument();
+
+    // 外部 mousedown（落点在目录根容器外）→ 收起。
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByLabelText("团队任务")).toBeNull();
+  });
+
   it("bash completed（无运行项）→ aria-label 不带「有运行中」", () => {
     render(
       <ActivityCatalog
