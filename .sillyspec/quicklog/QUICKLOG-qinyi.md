@@ -8,7 +8,11 @@
 方案：计数口径收窄为真活跃（running turn 或 30 分钟窗口内活动）
 结果：3 新回归用例与 interactive 全量 640 passed 与 typecheck 零错；已提交推送；本机 daemon 已换新并在线
 
-## ql-20260827-001-223c | 2026-08-27 00:06:43 | 派团队 UX 优化：worker summary 展示（completed 行显示结论摘要）+ latest_action 修复（running 行显示最新动作）+ orchestrator 简报优化（更果断、自动收敛指令）
-状态：进行中
+## ql-20260827-001-223c | 2026-08-27 00:06:43 | 派团队体验优化让分身结论直接可见且主控更果断
+状态：已完成
 关联变更：（无）
 文件：backend/app/modules/daemon/router.py, backend/app/modules/daemon/schema.py, backend/app/modules/agent/mission_context.py, frontend/src/components/daemon/team-task-block.tsx, frontend/src/lib/daemon.ts, backend/openapi.json, frontend/src/lib/api-types.ts
+需求：派团队体验优化让分身结论直接可见且主控更果断。
+根因：completed 分身结论需点浮层才能看到；主控分身全完成后仍问用户是否收敛。
+方案：result_summary 字段展示 worker_done 上报摘要前120字符加简报行为准则让主控立即收敛。
+结果：backend 全量 4785 passed 与前端 27 passed 与 E2E 真实验证 mission done 且 result_summary 可见且主控果断收敛已提交推送。
