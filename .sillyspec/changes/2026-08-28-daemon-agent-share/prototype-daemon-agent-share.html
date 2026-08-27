@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 · 守护进程共享 + 平台共享智能体（2026-08-28-daemon-agent-share）</title>
+<style>
+  :root{
+    --brand-50:#f5f3ff;--brand-100:#ede9fe;--brand-200:#ddd6fe;--brand-300:#c4b5fd;
+    --brand-500:#8b5cf6;--brand-600:#7c3aed;--brand-700:#6d28d9;
+    --accent:#0891b2;--accent-light:#22d3ee;
+    --bg:#fafafa;--card:#ffffff;--muted:#f4f4f5;--muted-fore:#71717a;
+    --border:#e4e4e7;--fore:#18181b;--fore-2:#3f3f46;
+    --success:#16a34a;--warning:#d97706;--danger:#dc2626;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;background:var(--bg);color:var(--fore);font-size:14px;line-height:1.6;padding:24px}
+  h1{font-size:20px;margin-bottom:4px}
+  .sub{color:var(--muted-fore);margin-bottom:20px;font-size:13px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px}
+  .card h2{font-size:15px;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+  .grid{display:grid;gap:12px}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .g2{grid-template-columns:repeat(2,1fr)}
+  .stat{background:var(--muted);border-radius:10px;padding:12px}
+  .stat .n{font-size:22px;font-weight:700}
+  .stat .l{font-size:12px;color:var(--muted-fore)}
+  .stat.hl .n{color:var(--brand-600)}
+  .btn{display:inline-flex;align-items:center;gap:4px;border-radius:8px;padding:5px 12px;font-size:13px;border:1px solid var(--border);background:var(--card);cursor:pointer;color:var(--fore-2)}
+  .btn.primary{background:var(--brand-600);border-color:var(--brand-600);color:#fff}
+  .btn.ghost{border-color:transparent;background:transparent;color:var(--brand-600)}
+  .btn.sm{padding:2px 8px;font-size:12px}
+  .btn[disabled]{opacity:.45;cursor:not-allowed}
+  .badge{display:inline-flex;align-items:center;gap:4px;font-size:12px;border-radius:6px;padding:1px 8px;border:1px solid}
+  .badge.share{color:var(--accent);border-color:var(--accent);background:rgba(8,145,178,.08)}
+  .badge.ro{color:var(--warning);border-color:var(--warning);background:rgba(217,119,6,.08)}
+  .badge.online{color:var(--success);border-color:var(--success);background:rgba(22,163,74,.08)}
+  .badge.offline{color:var(--muted-fore);border-color:var(--border);background:var(--muted)}
+  .machine{border:1px solid var(--border);border-radius:10px;padding:12px}
+  .machine.shared{border-style:dashed;border-color:var(--accent)}
+  .machine .head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+  .machine .name{font-weight:600}
+  .machine .meta{font-size:12px;color:var(--muted-fore);margin-bottom:10px}
+  .rt{display:flex;justify-content:space-between;align-items:center;background:var(--muted);border-radius:8px;padding:8px 10px;margin-top:6px}
+  .rt .p{font-weight:600;font-size:13px}
+  .acts{display:flex;gap:6px;flex-wrap:wrap}
+  .field{margin-bottom:10px}
+  .field label{display:block;font-size:12px;color:var(--muted-fore);margin-bottom:4px}
+  .field .ctl{border:1px solid var(--border);border-radius:8px;padding:6px 10px;background:var(--card);color:var(--fore-2)}
+  .note{font-size:12px;color:var(--muted-fore);background:var(--brand-50);border:1px solid var(--brand-200);border-radius:8px;padding:8px 12px;margin-top:10px}
+  .section-tag{font-size:11px;background:var(--brand-100);color:var(--brand-700);border-radius:6px;padding:1px 8px}
+  .float-demo{position:fixed;right:24px;bottom:24px;width:360px;background:var(--card);border:1px solid var(--brand-300);border-radius:14px;box-shadow:0 12px 32px rgba(124,58,237,.18);overflow:hidden}
+  .float-demo .bar{background:linear-gradient(135deg,var(--brand-600),var(--accent));color:#fff;padding:10px 14px;font-size:13px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
+  .float-demo .body{padding:12px 14px}
+  .msg{border-radius:10px;padding:8px 12px;font-size:13px;margin-bottom:8px}
+  .msg.ai{background:var(--muted)}
+  .msg.me{background:var(--brand-50);border:1px solid var(--brand-200);text-align:right}
+  .input{border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--muted-fore);font-size:13px;margin-top:4px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{background:var(--brand-50);text-align:left;padding:8px 10px;font-weight:600}
+  td{border-top:1px solid var(--border);padding:8px 10px}
+  code{background:var(--muted);border-radius:4px;padding:1px 6px;font-size:12px}
+</style>
+</head>
+<body>
+
+<h1>守护进程共享 + 平台共享智能体</h1>
+<div class="sub">原型 · 变更 2026-08-28-daemon-agent-share · ai-native 主题（AI 紫 × 交互青）· 覆盖三块界面：守护进程页面共享区块 / 平台管理员共享智能体配置 / 悬浮助手只读回退</div>
+
+<!-- ① 统计行：新增「共享给我」卡片 -->
+<div class="grid g4" style="margin-bottom:16px">
+  <div class="stat"><div class="n">3</div><div class="l">机器总数</div></div>
+  <div class="stat"><div class="n">2</div><div class="l">在线</div></div>
+  <div class="stat"><div class="n">1</div><div class="l">维护中</div></div>
+  <div class="stat hl"><div class="n">2</div><div class="l">共享给我（新增）</div></div>
+</div>
+
+<!-- ② 平台共享智能体管理（仅 platform admin 可见，新增卡片） -->
+<div class="card">
+  <h2>🤖 平台共享智能体 <span class="section-tag">仅平台管理员</span>
+    <span style="flex:1"></span>
+    <button class="btn primary">+ 新建共享</button>
+  </h2>
+  <div class="grid g2">
+    <div class="field"><label>智能体档案（platform 可见）</label>
+      <div class="ctl">平台功能讲解助手（agent_profile · visibility=platform）</div></div>
+    <div class="field"><label>守护进程（仅管理员自己名下在线）</label>
+      <div class="ctl">DEV-PC · claude runtime（在线）</div></div>
+    <div class="field"><label>平台源码工作区（只读锚定）</label>
+      <div class="ctl">multi-agent-platform（root_path=C:\...\multi-agent-platform）</div></div>
+    <div class="field"><label>共享输出目录 writable_dir（会话唯一可写位置）</label>
+      <div class="ctl">C:\share\outputs <span class="badge ro">⊆ 守护进程可写目录</span></div></div>
+  </div>
+  <table style="margin-top:8px">
+    <tr><th>共享智能体</th><th>绑定守护进程</th><th>源码工作区</th><th>状态</th><th>操作</th></tr>
+    <tr>
+      <td>平台功能讲解助手</td><td>DEV-PC · claude</td><td>multi-agent-platform</td><td style="display:none"></td>
+      <td><span class="badge online">生效中 · 全体可用</span></td>
+      <td><button class="btn sm">停用</button></td>
+    </tr>
+  </table>
+  <div class="note">共享后<b>全体用户</b>（含无守护进程的新用户）在会话的机器/智能体选择器中可直接选中它开会话：读平台源码不受限（答功能问题有真实依据），<b>写操作限制在共享输出目录内</b>（可生成文档、原型图等），源码工作区不可写。</div>
+</div>
+
+<!-- ③ 我的机器（现状保留，节选） -->
+<div class="card">
+  <h2>💻 我的机器</h2>
+  <div class="grid g2">
+    <div class="machine">
+      <div class="head"><span class="name">DEV-PC</span><span class="badge online">在线</span></div>
+      <div class="meta">Windows · v1.8.2 · 3 个会话 · 今日用量 12.4k token</div>
+      <div class="rt"><span class="p">claude</span><span class="acts">
+        <button class="btn sm">会话</button><button class="btn sm">别名</button>
+        <button class="btn sm">可写目录</button><button class="btn sm">升级</button>
+        <button class="btn sm">禁用</button><button class="btn sm danger">移除</button></span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ④ 共享给我的（新增区块）：只读视图，只有会话按钮 -->
+<div class="card">
+  <h2>🤝 共享给我的 <span class="section-tag">新增</span>
+    <span style="flex:1"></span><span style="font-size:12px;color:var(--muted-fore)">来源：工作区成员共享（可用其守护进程开会话，配置仅所有者可改）</span></h2>
+  <div class="grid g2">
+    <div class="machine shared">
+      <div class="head"><span class="name">林工的笔记本</span>
+        <span><span class="badge share">共享</span> <span class="badge online">在线</span></span></div>
+      <div class="meta">共享人：林工 · 来自工作区：multi-agent-platform · Linux · v1.8.1</div>
+      <div class="rt"><span class="p">claude</span>
+        <span class="acts"><button class="btn primary sm">会话</button></span></div>
+      <div class="note" style="margin-top:8px">共享守护进程：可发起会话；别名 / 可写目录 / 升级 / 禁用 / 移除等配置操作仅所有者可见（此处不渲染）。</div>
+    </div>
+    <div class="machine shared">
+      <div class="head"><span class="name">测试机-02</span>
+        <span><span class="badge share">共享</span> <span class="badge offline">离线</span></span></div>
+      <div class="meta">共享人：陈晨 · 来自工作区：multi-agent-platform · macOS · v1.7.9</div>
+      <div class="rt"><span class="p">claude</span>
+        <span class="acts"><button class="btn primary sm" disabled>会话</button></span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ⑤ 悬浮助手（右下角注入；共享机器/智能体由用户在选择器中显式选择） -->
+<div class="float-demo">
+  <div class="bar"><span>💬 小助手 · 平台功能讲解</span><span class="badge share" style="border-color:rgba(255,255,255,.6);color:#fff;background:rgba(255,255,255,.15)">平台共享</span></div>
+  <div class="body">
+    <div class="msg ai">你好～我已接入<strong>平台源码工作区</strong>，可以基于真实源码与页面说明书回答平台功能问题（如「工作区怎么共享守护进程？」），也能把生成的文档/原型图写到共享输出目录。</div>
+    <div class="msg me">工作区共享的守护进程能在守护进程页面直接开会话吗？</div>
+    <div class="msg ai">可以。共享开关打开后，同工作区业务成员会在「守护进程 → 共享给我的」看到这台机器，点「会话」即可使用；配置类操作仅所有者可改（依据 daemon_runtime_grants 授权表，会话级授权）。</div>
+    <div class="input">输入问题…（读源码不受限；写文件仅限共享输出目录）</div>
+    <div class="note" style="margin-top:8px">用户在会话的机器/智能体选择器中<b>自己选择</b>共享机器与共享智能体（带「共享」标识）；悬浮助手默认解析行为不变（不做自动回退）。</div>
+  </div>
+</div>
+
+</body>
+</html>
