@@ -297,11 +297,14 @@ async def build_preview(
 
     返回 ``{"mode": "pdf", "pdf_path": "/api/preview/file/{token}"}`` 或
     ``{"mode": "ds", "ds_url", "config"}``（前端按 mode 分发渲染器）。
+
+    ql-20260827-002：LO 分支不再依赖 OnlyOffice 开关——DS 已退役（Excel 走下载
+    引导），Word 排版保真由 Gotenberg 独立承担；归属校验（404）由 resolve_object
+    保留，LO 失败仍回落 DS 路径（未启用时 503 → 前端本地渲染器兜底）。
     """
     settings = get_settings()
 
-    if settings.gotenberg_url and settings.onlyoffice_enabled and settings.onlyoffice_jwt_secret:
-        # 复用 build_office_config 的启用校验/归属校验/扩展名校验（含 503/404 语义）。
+    if settings.gotenberg_url:
         ref = await resolve_object(session, source=source, object_id=object_id, user_id=user_id)
         if _ext_of(ref.name) in _LO_PDF_EXTS:
             pdf_path = await _lo_word_pdf_path(ref, settings=settings)

@@ -344,3 +344,32 @@ class TestBuildPreview:
             db_session, source="session_attachment", object_id=aid, user_id=uid
         )
         assert resp["mode"] == "ds"
+
+    @pytest.mark.asyncio
+    async def test_word_lo_pdf_even_if_ds_disabled(self, db_session, mocked_redis) -> None:
+        """ql-20260827-002：OnlyOffice 退役（enabled=false）不阻断 Word→LO→PDF。"""
+        _settings(enabled=False, gotenberg_url="http://gotenberg:3000")
+        uid = await _create_user(db_session)
+        aid = await _seed_attachment(db_session, uid, name="指南.docx")
+        storage = _FakeStorage()
+        client_cls, client = _mock_convert()
+        with (
+            patch("app.modules.storage.factory.get_storage_backend", return_value=storage),
+            patch("app.modules.preview_office.service.httpx.AsyncClient", client_cls),
+        ):
+            resp = await svc.build_preview(
+                db_session, source="session_attachment", object_id=aid, user_id=uid
+            )
+        assert resp["mode"] == "pdf"
+        client.post.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_non_word_ds_disabled_returns_503(self, db_session, mocked_redis) -> None:
+        """ql-20260827-002：DS 退役 + 非 Word → 503（前端降级本地/下载引导）。"""
+        _settings(enabled=False, gotenberg_url="http://gotenberg:3000")
+        uid = await _create_user(db_session)
+        aid = await _seed_attachment(db_session, uid, name="汇报.pptx")
+        with pytest.raises(PreviewOfficeDisabled):
+            await svc.build_preview(
+                db_session, source="session_attachment", object_id=aid, user_id=uid
+            )

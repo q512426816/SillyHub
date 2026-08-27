@@ -12,3 +12,18 @@
 根因：逐层排查——文件本体双引擎验证健康（pypdf 全解析 + pdf.js 全渲染链通过、xref 偏移精确、无加密）、后端与 Next 代理字节一致（cmp 全等）、前端 blob URL 正常生成；直接导航 PDF URL 在内嵌浏览器报 ERR_FAILED 证明其无 PDF 组件，原生查看器对 blob PDF 的加载在部分环境不可用（Chrome 查看器报「未能加载 PDF 文档」即其错误文案）。结论：iframe+原生查看器方案不可依赖
 方案：pdf.js（pdfjs-dist 4.10.38）画布渲染，纯 JS 解析绘制零插件依赖；修复过程中顺带消灭两个真 bug——①容器零宽时 clientWidth-16 为负真值导致画布负宽（Math.max 下限 320）；②解析 then 内 containerRef 为 null（setStatus 异步提交期容器未挂载）页渲染被静默跳过（双 effect 解耦）
 结果：previewers-basic 6/6、files 全套 50/50 绿、tsc 0 错；已部署；无 PDF 插件的内嵌浏览器实测 5 页全部画布渲染成功（canvas 数=5 硬证据）
+
+## ql-20260827-002-3784e | 2026-08-27 09:40:00 | Word 预览恢复 LibreOffice→PDF 管线——本地 docxjs 无分页模型目录必漂移，且与 OnlyOffice 开关解耦
+状态：已完成
+关联变更：2026-08-26-onlyoffice-preview
+文件：
+- deploy/docker-compose.yml（gotenberg 服务块恢复 + ./onlyoffice-fonts 字体挂载）
+- deploy/.env（GOTENBERG_URL=http://gotenberg:3000 恢复；ONLYOFFICE_ENABLED 维持 false）
+- backend/app/modules/preview_office/service.py（build_preview LO 分支解除 onlyoffice_enabled 依赖——DS 退役后 Word 排版保真由 Gotenberg 独立承担）
+- backend/app/modules/preview_office/tests/test_service.py（新增：DS 禁用+Gotenberg 配置 → Word 仍走 pdf；DS 禁用+非 Word → 503）
+- frontend/src/components/files/file-preview-modal.tsx（mode=pdf 渲染从 iframe 换 PdfPreviewer（pdf.js 画布）——原生查看器对内嵌 blob PDF 不可依赖（ql-20260827-001），补 pdfBlob state）
+- frontend/src/components/files/__tests__/file-preview-modal.test.tsx（mode=pdf 断言 iframe → pdf-previewer）
+需求：用户反馈 docx 本地预览目录又到第一页（会话 3fe801bd，0-6教师温暖行为指南.docx）——期望与本地 Word 一致：封面独立一页、目录第二页
+根因：ql-20260826-013 退役 OnlyOffice 时 Word 一并回落本地 docxjs 渲染器，其无 Word 行网格分页模型（封面空段落撑不满一页，目录被拉上第一页）——昨日已论证该边界不可修（docxjs 渲染连续 HTML 无分页概念）
+方案：恢复 Word→Gotenberg(LibreOffice)→PDF 管线（昨日已验证该文档 LO 输出与 Word 一致：封面 p1/目录 p2/使用说明 p3）且与 OnlyOffice 开关解耦（DS 保持退役，Excel 保持下载引导不变）；前端 mode=pdf 从 iframe 换 pdf.js 画布（Chrome 原生查看器对内嵌 blob PDF 报"未能加载"的教训）
+结果：backend 16/16 + mypy/ruff 0 错；frontend files 70/70 + tsc 0 错；已部署；端到端实测（无 PDF 插件浏览器）46 页画布全渲染、docxjs 容器零出现；缓存命中场景秒开

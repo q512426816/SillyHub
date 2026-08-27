@@ -139,11 +139,15 @@ export function FilePreviewModal({
   const [officeCfg, setOfficeCfg] = useState<OfficeConfigResp | null>(null);
   const [officeFailed, setOfficeFailed] = useState(false);
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
+  const [pdfBlob, setPdfBlob] = useState<Blob | null>(null);
   const officeEligible = officeEligibleStatic(target) && !officeFailed;
 
-  // ── ql-20260826-011：mode=pdf（LibreOffice 转换）→ 拉 blob 交 iframe ──
+  // ── ql-20260826-011：mode=pdf（LibreOffice 转换）→ 拉 blob 成 objectURL ──
+  // ql-20260827-002：渲染交 PdfPreviewer（pdf.js 画布）——iframe+原生查看器在
+  // 部分环境不可用（Chrome 对内嵌 blob PDF 报"未能加载"，见 ql-20260827-001）。
   useEffect(() => {
     setPdfBlobUrl(null);
+    setPdfBlob(null);
     if (!officeCfg || officeCfg.mode !== "pdf" || !officeCfg.pdf_path) return;
     let cancelled = false;
     let objectUrl = "";
@@ -158,6 +162,7 @@ export function FilePreviewModal({
         // （ql-20260826-012，代理层可能丢 Content-Type）。
         const blob = raw.type === "application/pdf" ? raw : new Blob([raw], { type: "application/pdf" });
         objectUrl = URL.createObjectURL(blob);
+        setPdfBlob(blob);
         setPdfBlobUrl(objectUrl);
       })
       .catch(() => {
@@ -215,15 +220,18 @@ export function FilePreviewModal({
 
     // OnlyOffice 高保真优先：配置就绪 → DS 渲染；预取中 → 轻加载态；失败 → 落回下方本地链。
     if (officeEligible && !officeFailed) {
-      // ql-20260826-011：Word → LibreOffice→PDF（OnlyOffice 不支持中文行网格，
-      // 公文目录/封面分页与 Word 漂移；PDF 视图保真，浏览器原生查看器展示）。
+      // ql-20260826-011：Word → LibreOffice→PDF（本地 docxjs 无分页模型，公文
+      // 目录/封面必漂移；PDF 保真）。ql-20260827-002：交 PdfPreviewer（pdf.js
+      // 画布）渲染——原生查看器对内嵌 blob PDF 不可依赖（ql-20260827-001）。
       if (officeCfg?.mode === "pdf") {
         if (pdfBlobUrl) {
           return (
-            <iframe
-              src={pdfBlobUrl}
-              title={`${target.meta.name} PDF 预览`}
-              className="h-[74vh] w-full bg-white"
+            <PdfPreviewer
+              blob={pdfBlob ?? new Blob()}
+              url={pdfBlobUrl}
+              meta={target.meta}
+              onDownload={handleDownload}
+              fill={fullscreen}
             />
           );
         }
