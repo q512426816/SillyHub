@@ -796,7 +796,7 @@ class TestPlatformProfileBranch:
                 prompt="hi",
                 agent_profile_id=str(seed.profile.id),
             )
-        assert exc_info.value.details["reason"] == "missing_provider"
+        assert (exc_info.value.details or {}).get("reason") == "missing_provider"
         assert await _count(db_session, AgentSession) == 0
 
         # 带自有 runtime_id → 普通档案会话（检测不命中，零覆写）。

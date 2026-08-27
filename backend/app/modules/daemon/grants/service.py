@@ -351,7 +351,7 @@ async def list_active_shared_agents(session: AsyncSession) -> list[SharedAgentAc
         views.append(
             SharedAgentActiveView(
                 id=grant.id,
-                agent_profile_id=grant.agent_profile_id,  # type: ignore[arg-type]
+                agent_profile_id=grant.agent_profile_id,
                 display_name=getattr(profile, "name", None),
                 provider=getattr(profile, "provider", None),
                 runtime_online=(runtime is not None and (runtime.status or "") == "online"),

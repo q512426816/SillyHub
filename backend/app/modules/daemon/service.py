@@ -30,6 +30,7 @@ log = get_logger(__name__)
 # 顺序：runtime → lease → patch → session（按子域，无循环）。
 # E402: re-export 在 log 之后（保持模块顶层 import 区与 re-export 区视觉分隔）。
 # F401: 所有符号均为 re-export（facade 自身委托方法或外部 import 引用）。
+from app.modules.daemon.grants.queries import SharedMachineRow  # noqa: E402
 from app.modules.daemon.lease.service import (  # noqa: E402, F401
     DaemonAgentRunNotFound,
     DaemonInvalidClaimToken,
@@ -239,8 +240,12 @@ class DaemonService:
         user_id: uuid.UUID | None,
         limit: int,
         offset: int,
-    ) -> tuple[list[tuple[DaemonRuntime, User | None, DaemonInstance | None]], int]:
-        """Paginated filtered runtime list (task-04 / FR-04). 委托 RuntimeService."""
+    ) -> tuple[
+        list[tuple[DaemonRuntime, User | None, DaemonInstance | None]],
+        int,
+        list[SharedMachineRow],
+    ]:
+        """Paginated filtered runtime list (task-04 / FR-04 / task-07+13 shared_to_me). 委托 RuntimeService."""
         return await self._rt.list_runtimes_page(
             actor_user_id=actor_user_id,
             is_platform_admin=is_platform_admin,
@@ -292,12 +297,14 @@ class DaemonService:
         list[tuple[DaemonInstance, User | None]],
         dict[uuid.UUID, list[DaemonRuntime]],
         int,
+        list[SharedMachineRow],
     ]:
         """机器级分页/筛选聚合查询 facade（design §5.1 / FR-1）。
 
-        返回 ``(rows, runtimes_by_instance, total)``：rows 为本页 ``(instance, owner)``
+        返回 ``(rows, runtimes_by_instance, total, shared)``：rows 为本页 ``(instance, owner)``
         ORM 行；runtimes_by_instance 为一次性 IN 查询分组的 ``{instance_id: [runtime]}``；
-        total 为过滤后机器总数。router/task-03 负责 _runtime_read 组装 DaemonMachineRead。
+        total 为过滤后机器总数；shared 为 shared_to_me 区块行（task-07/task-13）。
+        router/task-03 负责 _runtime_read 组装 DaemonMachineRead。
         """
         return await self._rt.list_machines(
             actor_user_id=actor_user_id,

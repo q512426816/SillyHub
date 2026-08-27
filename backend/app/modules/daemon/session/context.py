@@ -31,6 +31,11 @@ from sqlmodel import col
 from app.core.logging import get_logger
 from app.modules.change.model import Change, ChangeDocument
 from app.modules.change.service import ChangeService
+
+# ql-20260828-003：build_ppm_item_context_preamble 的 item 传参类型标注用
+# （模型层依赖，运行时仅注解引用，无循环导入）。
+from app.modules.ppm.problem.model import PpmProblemList
+from app.modules.ppm.task.model import PlanTask
 from app.modules.workspace.model import Workspace
 
 log = get_logger(__name__)
@@ -372,11 +377,14 @@ async def build_ppm_item_context_preamble(
     item_id: uuid.UUID | None,
     *,
     attachment_lines: list[str],
+    item: PlanTask | PpmProblemList | None = None,
 ) -> str | None:
     """拼装【PPM 任务上下文】/【问题上下文】前导字符串（design §5 Phase 2 / §7）。
 
-    - 经 task-01 :func:`load_ppm_item` 回查条目；``item_id`` 为 None 或查无
-      条目时返回 None（调用方据此跳过注入、不报错，design §9）。
+    - 条目获取：``item`` 可选传参（ql-20260828-003——create_session 前置解析
+      已加载的行直接复用，全链单次查询）；缺省经 task-01
+      :func:`load_ppm_item` 回查。``item_id`` 为 None 或查无条目时返回 None
+      （调用方据此跳过注入、不报错，design §9）。
     - ``kind="plan_task"``：标题=content、描述=task_description、状态、项目=
       project_name、模块=module_name、责任人=user_name、周期=start_time~end_time。
     - ``kind="problem"``：标题=pro_desc（问题单无独立标题列）、状态、项目=
@@ -388,9 +396,10 @@ async def build_ppm_item_context_preamble(
     if item_id is None:
         return None
 
-    from app.modules.ppm.common.session_binding import load_ppm_item
+    if item is None:
+        from app.modules.ppm.common.session_binding import load_ppm_item
 
-    item = await load_ppm_item(db, kind, item_id)  # type: ignore[arg-type]
+        item = await load_ppm_item(db, kind, item_id)
     if item is None:
         return None
 

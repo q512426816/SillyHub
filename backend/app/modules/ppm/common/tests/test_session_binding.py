@@ -572,6 +572,112 @@ class TestListItemSessions:
         )
         assert resp.status_code == 422, resp.text
 
+    async def test_plain_user_cannot_read_others_task_sessions(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """ql-20260828-003 越权收紧：普通用户查他人任务的关联会话 → []
+
+        口径=task_scope_clause（非超管：经理项目集 OR user_id=自己）。他人任务
+        且无项目共享 → 不可见，与「无关联」同语义（不泄露存在性/他人会话）。
+        同请求里自己的任务正常返回（同一断言内对照，防误伤）。
+        """
+        from app.core.config import get_settings
+        from app.core.security import create_access_token
+
+        admin = await _make_admin(db_session)
+        owner = await _make_user(db_session, email=f"own-{uuid.uuid4()}@example.com")
+        rt = await _make_runtime(db_session, owner.id)
+        ws = await _make_workspace(db_session, root_path=f"/tmp/ws-{uuid.uuid4()}")
+
+        t_own = await _make_plan_task(db_session, user_id=owner.id)
+        t_other = await _make_plan_task(db_session, user_id=admin.id)
+        s_own = await _make_session(db_session, user_id=owner.id, runtime_id=rt.id)
+        s_other = await _make_session(db_session, user_id=admin.id, runtime_id=rt.id)
+        for t, s in ((t_own, s_own), (t_other, s_other)):
+            await bind_session_to_ppm_item(
+                db_session, workspace_id=ws.id, kind="plan_task", item_id=t.id, session_id=s.id
+            )
+        await db_session.commit()
+
+        settings = get_settings()
+        token, _ = create_access_token(
+            user_id=owner.id, email=owner.email, is_admin=False, settings=settings
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # 他人任务 → 不可见空列表（无关联同语义，不 403 不泄露存在性）。
+        resp = await client.get(
+            "/api/ppm/item-sessions",
+            params={"kind": "plan_task", "item_id": str(t_other.id)},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == []
+
+        # 自己的任务 → 正常返回（可见性收紧不误伤本人）。
+        resp2 = await client.get(
+            "/api/ppm/item-sessions",
+            params={"kind": "plan_task", "item_id": str(t_own.id)},
+            headers=headers,
+        )
+        assert resp2.status_code == 200, resp2.text
+        assert {i["id"] for i in resp2.json()} == {str(s_own.id)}
+
+    async def test_plain_user_problem_visibility_by_duty(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """ql-20260828-003 越权收紧（problem 维度）：责任人对自己的问题可见，
+        无关用户对他人的问题不可见。"""
+        from app.core.config import get_settings
+        from app.core.security import create_access_token
+
+        admin = await _make_admin(db_session)
+        duty = await _make_user(db_session, email=f"duty-{uuid.uuid4()}@example.com")
+        outsider = await _make_user(db_session, email=f"out-{uuid.uuid4()}@example.com")
+        rt = await _make_runtime(db_session, admin.id)
+        project = await _make_project(db_session)
+
+        problem = await _make_problem(db_session, project_id=project.id)
+        problem.duty_user_id = duty.id
+        db_session.add(problem)
+        s = await _make_session(db_session, user_id=admin.id, runtime_id=rt.id)
+        await bind_session_to_ppm_item(
+            db_session, workspace_id=None, kind="problem", item_id=problem.id, session_id=s.id
+        )
+        await db_session.commit()
+
+        settings = get_settings()
+
+        # 责任人（duty_user_id=me）→ 可见。
+        token_duty, _ = create_access_token(
+            user_id=duty.id, email=duty.email, is_admin=False, settings=settings
+        )
+        resp = await client.get(
+            "/api/ppm/item-sessions",
+            params={"kind": "problem", "item_id": str(problem.id)},
+            headers={"Authorization": f"Bearer {token_duty}"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert {i["id"] for i in resp.json()} == {str(s.id)}
+
+        # 无关用户（非创建/责任/验证/处置、非经理、非超管）→ 不可见空列表。
+        token_out, _ = create_access_token(
+            user_id=outsider.id, email=outsider.email, is_admin=False, settings=settings
+        )
+        resp2 = await client.get(
+            "/api/ppm/item-sessions",
+            params={"kind": "problem", "item_id": str(problem.id)},
+            headers={"Authorization": f"Bearer {token_out}"},
+        )
+        assert resp2.status_code == 200, resp2.text
+        assert resp2.json() == []
+
     async def test_empty_when_no_links(
         self,
         client: AsyncClient,

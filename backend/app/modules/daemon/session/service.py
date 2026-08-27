@@ -85,6 +85,11 @@ from app.modules.ppm.common.session_binding import (
     resolve_item_workspace_id,
 )
 
+# ql-20260828-003：ppm_item_row / 物化 item 传参的类型标注用（模型层依赖，
+# 运行时仅注解引用；session_binding 先例同款无循环导入）。
+from app.modules.ppm.problem.model import PpmProblemList
+from app.modules.ppm.task.model import PlanTask
+
 log = get_logger(__name__)
 
 # task-05（2026-08-14-sessions-portal / D-012@v1 / FR-05）：会话内配置热切换 WS
@@ -1357,8 +1362,11 @@ class SessionService:
         # 未显式指定时回填 + 写事务内 bind_session_to_ppm_item 落 link 快照。
         # 项目无关联工作区 → ppm_ws=None，两者留空不阻塞（D-004）。缺省双 None
         # 零分支进入（零回归）。
+        # ql-20260828-003：加载的条目行向下透传（物化 + 前导复用同一行，
+        # 全链只查一次 DB——此前前置解析/物化/前导三处各查一次）。
         ppm_item_ok = False
         ppm_ws: uuid.UUID | None = None
+        ppm_item_row: PlanTask | PpmProblemList | None = None
         if ppm_item_kind is not None and ppm_item_id is not None:
             _ppm_item = await load_ppm_item(self._session, ppm_item_kind, ppm_item_id)
             if _ppm_item is None:
@@ -1369,6 +1377,7 @@ class SessionService:
                 )
             else:
                 ppm_item_ok = True
+                ppm_item_row = _ppm_item
                 ppm_ws = await resolve_item_workspace_id(self._session, ppm_item_kind, ppm_item_id)
 
         now = datetime.now(UTC)
@@ -1431,12 +1440,14 @@ class SessionService:
                     item_id=ppm_item_id,
                     provider=provider,
                     manual_attachments=validated_attachments,
+                    item=ppm_item_row,
                 )
                 ppm_preamble = await build_ppm_item_context_preamble(
                     self._session,
                     ppm_item_kind,
                     ppm_item_id,
                     attachment_lines=_ppm_lines,
+                    item=ppm_item_row,
                 )
             await self._session.commit()
 
@@ -1945,6 +1956,7 @@ class SessionService:
         item_id: uuid.UUID,
         provider: str,
         manual_attachments: list,
+        item: PlanTask | PpmProblemList | None = None,
     ) -> tuple[list[str], list[_PreparedPpmAttachment]]:
         """PPM 条目附件物化/降级（task-03 / FR-03 / D-003/D-006/D-007，写事务外）。
 
@@ -1956,15 +1968,27 @@ class SessionService:
         storage bytes → ``SessionAttachmentStorage.store_bytes``（内容寻址
         sha256 去重）产出预备行；其余条目降级为前导文字清单。
 
+        ql-20260828-003 两项修复：
+
+        - ``item`` 可选传参——create_session 前置解析已加载的条目行直接复用，
+          全链只查一次 DB（缺省 None 自加载，独立调用/测试路径不变）。
+        - IO 并行化——三阶段：①顺序资格判定（纯 DB/内存判断，保图≤5/文≤5
+          的顺序水位语义，资格即预占、IO 失败让掉不回补，水位语义可预期）；
+          ②资格条目 ``asyncio.gather`` 并行「读源 bytes + store_bytes」（串行
+          实现最多 10 附件 × 2 次 IO = 20 次串行网络往返，慢存储下显著拖慢
+          会话创建；每条独立兜错）；③按条目原序组装 prepared / 降级行。
+
         - 降级四类（均不阻塞会话创建，TaskCard GWT-3）：无权 → 仅文件名 +
-          「无权访问」；超限 / provider≠claude / 读取失败（含 store 失败）/
-          File 已删或缺号的有权条目 → 文件名 + ``GET /api/file/{file_id}``
-          链接（软删/缺号行回查取文件名，查无以 file_id 兜底）。
+          「无权访问」；超限 / provider≠claude / 读取失败（``read_failed``）/
+          存储失败（``store_failed``）/ File 已删或缺号的有权条目 → 文件名 +
+          ``GET /api/file/{file_id}`` 链接（软删/缺号行回查取文件名，查无以
+          file_id 兜底）。
         - 纯只读 + storage IO、无 DB 写：``SessionAttachment`` 行 insert 归
           create_session 写事务内（消费返回的 ``_PreparedPpmAttachment``）；
           不复用 ``SessionAttachmentService.upload()``（自带 commit 与 PIL/
           大小校验，源文件已在 file 中心过上传校验不重复）。
-        - item 查无（与前置解析窗口间的竞态）或 ``file_urls`` 为空 → 空产出。
+        - item 查无（``item`` 传参时由调用方保证存在）或 ``file_urls`` 为空 →
+          空产出。
         """
         from app.core.config import get_settings
         from app.modules.auth.model import User as _User
@@ -1977,7 +2001,8 @@ class SessionService:
         from app.modules.session_attachment.storage import SessionAttachmentStorage
         from app.modules.storage.factory import get_storage_backend
 
-        item = await load_ppm_item(self._session, kind, item_id)
+        if item is None:
+            item = await load_ppm_item(self._session, kind, item_id)
         if item is None:
             return [], []
         entries = list(item.file_urls or [])
@@ -1998,8 +2023,10 @@ class SessionService:
         image_n = sum(1 for r in manual_attachments if getattr(r, "kind", None) == "image")
         file_n = sum(1 for r in manual_attachments if getattr(r, "kind", None) == "file")
 
+        # ── 阶段 1：顺序资格判定（无 storage IO）──按 file_urls 原序，资格即
+        # 预占水位（IO 失败让掉不回补），保「图≤5/文≤5 按原序截断」可预期。
         degrade_lines: list[str] = []
-        prepared: list[_PreparedPpmAttachment] = []
+        candidates: list[tuple[File, str]] = []
         for entry in entries:
             # R-03：file_urls 历史数据混有旧 URL 字符串——非 uuid 条目直接进降级清单。
             try:
@@ -2026,6 +2053,15 @@ class SessionService:
             ):
                 degrade_lines.append(f"{row.original_name}：GET /api/file/{row.id}")
                 continue
+            if entry_kind == "image":
+                image_n += 1
+            else:
+                file_n += 1
+            candidates.append((row, entry_kind))
+
+        # ── 阶段 2：资格条目并行「读源 + 存储」──每条独立兜错（失败返回 None，
+        # 阶段 3 按原序降级）；storage 后端无共享会话态，gather 并发安全。
+        async def _materialize_one(row: File, entry_kind: str) -> _PreparedPpmAttachment | None:
             # 读 file storage bytes（整体读入；单附件大小已在 file 中心上传侧受限）。
             try:
                 data = b"".join(
@@ -2037,8 +2073,7 @@ class SessionService:
                     file_id=str(row.id),
                     error=str(exc),
                 )
-                degrade_lines.append(f"{row.original_name}：GET /api/file/{row.id}")
-                continue
+                return None
             try:
                 object_key, sha256 = await session_store.store_bytes(
                     user_id=user_id,
@@ -2052,22 +2087,27 @@ class SessionService:
                     file_id=str(row.id),
                     error=str(exc),
                 )
+                return None
+            return _PreparedPpmAttachment(
+                kind=entry_kind,
+                media_type=row.mime_type,
+                bytes=len(data),
+                name=row.original_name[:255],
+                object_key=object_key,
+                sha256=sha256,
+            )
+
+        io_results = await asyncio.gather(
+            *(_materialize_one(row, entry_kind) for row, entry_kind in candidates)
+        )
+
+        # ── 阶段 3：按条目原序组装（IO 失败条目降级为 GET 链接）──
+        prepared: list[_PreparedPpmAttachment] = []
+        for (row, _entry_kind), result in zip(candidates, io_results, strict=True):
+            if result is None:
                 degrade_lines.append(f"{row.original_name}：GET /api/file/{row.id}")
                 continue
-            if entry_kind == "image":
-                image_n += 1
-            else:
-                file_n += 1
-            prepared.append(
-                _PreparedPpmAttachment(
-                    kind=entry_kind,
-                    media_type=row.mime_type,
-                    bytes=len(data),
-                    name=row.original_name[:255],
-                    object_key=object_key,
-                    sha256=sha256,
-                )
-            )
+            prepared.append(result)
         return degrade_lines, prepared
 
     async def _converge_failed_dispatch(

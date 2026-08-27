@@ -1,7 +1,8 @@
 """ppm common 子域 API 端点 —— 平台级,统一前缀 ``/api/ppm``（main.py 挂载）。
 
-权限:统一 ``Depends(get_current_principal)`` 仅认证不授权（登录用户或合法
-API key 的 daemon 即可调用,平台级）,对齐 ppm/task/router.py 口径。
+权限:认证用 ``Depends(get_current_principal)``（登录用户或合法 API key 的
+daemon）;条目级数据可见性按 PPM 数据范围收口（见各端点 docstring,
+ql-20260828-003 收尾审查修复）。
 
 2026-08-28-session-ppm-task-binding task-01（design §5 Phase 1 / §7）：
 ``GET /api/ppm/item-sessions?kind=&item_id=`` —— 列出某 PPM 任务/问题关联的
@@ -26,7 +27,10 @@ from app.core.db import get_session
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.auth.model import User
 from app.modules.daemon.schema import AgentSessionListItem, ChangeSessionAuthor
+from app.modules.ppm.common.data_scope import problem_scope_clause, task_scope_clause
 from app.modules.ppm.common.session_binding import PpmItemSessionLink
+from app.modules.ppm.problem.model import PpmProblemList
+from app.modules.ppm.task.model import PlanTask
 
 # 前缀由 ``app.main`` 统一以 ``prefix="/api/ppm"`` 挂载,本 router 不自带 prefix
 # (对齐 ppm/task/router.py 挂载形态)。
@@ -101,7 +105,27 @@ async def list_ppm_item_sessions(
     同构 ``list_change_sessions``：id/provider/status/turn_count/mode/author/
     last_active_at/title。无关联返回空列表（不 404——任务刚建、尚无会话是常态,
     design §9）。``kind`` 非法值由 Literal 校验 422。
+
+    条目可见性（ql-20260828-003 收尾审查修复）：按 PPM 数据范围口径
+    （``task_scope_clause`` / ``problem_scope_clause``：超管全部、经理=所辖
+    项目集、其余=自己负责的任务 / 创建·责任·验证·处置的问题）校验条目对
+    当前用户可见；不可见返回 []——与「无关联」同语义,不泄露条目存在性,
+    也不暴露他人会话的标题/作者/状态。
     """
+    # 0. 条目可见性守卫（先于任何 links 查询,不可见直接空列表）。
+    if kind == "plan_task":
+        _scope = await task_scope_clause(session, _user)
+        _visible_q = select(PlanTask.id).where(PlanTask.id == item_id)
+        if _scope is not None:
+            _visible_q = _visible_q.where(_scope)
+    else:
+        _scope = await problem_scope_clause(session, _user)
+        _visible_q = select(PpmProblemList.id).where(PpmProblemList.id == item_id)
+        if _scope is not None:
+            _visible_q = _visible_q.where(_scope)
+    if (await session.execute(_visible_q.limit(1))).first() is None:
+        return []
+
     # 1. links JOIN agent_sessions（跨成员,平台级无 workspace 过滤）。unique
     #    (kind, item_id, session_id) 使同一 (条目, 会话) 至多一行 link,JOIN 不会
     #    产生重复会话行,无需 distinct。
