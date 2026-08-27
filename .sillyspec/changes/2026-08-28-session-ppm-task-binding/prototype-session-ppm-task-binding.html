@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="blue">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>原型：会话关联 PPM 任务/问题 + 发起团队预选修复 — 2026-08-28-session-ppm-task-binding</title>
+<style>
+  /* ── 语义 token（对齐 frontend/src/styles/themes.ts：blue / ai-native 双主题）── */
+  :root[data-theme="blue"] {
+    --bg: #f8fafc; --card: #ffffff; --muted: #f1f5f9; --muted-fg: #64748b;
+    --border: #e2e8f0; --fg: #0f172a; --primary: #2563EB; --primary-hover: #1d4ed8;
+    --brand-100: #dbeafe; --brand-600: #2563EB; --brand-700: #1d4ed8;
+    --info: #0ea5e9; --amber-bg: #fef3c7; --amber-bd: #fcd34d; --amber-fg: #b45309;
+    --pop-bd: #bfdbfe; --ok-fg: #15803d; --ok-bg: #dcfce7;
+  }
+  :root[data-theme="ai-native"] {
+    --bg: #f5f3ff; --card: #ffffff; --muted: #ede9fe; --muted-fg: #6d28d9;
+    --border: #ddd6fe; --fg: #1e1b4b; --primary: #7C3AED; --primary-hover: #6D28D9;
+    --brand-100: #ede9fe; --brand-600: #7C3AED; --brand-700: #6D28D9;
+    --info: #8b5cf6; --amber-bg: #fef3c7; --amber-bd: #fcd34d; --amber-fg: #b45309;
+    --pop-bd: #ddd6fe; --ok-fg: #15803d; --ok-bg: #dcfce7;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--fg); min-height: 100vh;
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .topbar { width: 100%; display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 20px; font-size: 12px; color: var(--muted-fg); border-bottom: 1px solid var(--border); background: var(--card); }
+  .topbar button { font-size: 12px; padding: 4px 10px; border-radius: 9999px; border: 1px solid var(--border);
+    background: var(--card); color: var(--fg); cursor: pointer; }
+  .stage { width: 100%; max-width: 860px; flex: 1; display: flex; flex-direction: column; gap: 18px; padding: 14px 20px 40px; }
+  .hint { font-size: 12px; color: var(--muted-fg); line-height: 1.8; }
+  .hint b { color: var(--brand-700); }
+  .scene { border: 1px solid var(--border); border-radius: 14px; background: var(--card); padding: 14px 16px; }
+  .scene h3 { font-size: 13px; margin-bottom: 10px; color: var(--brand-700); }
+  .scene h3 .tag { font-size: 10px; font-weight: 500; color: var(--muted-fg); border: 1px solid var(--border);
+    border-radius: 9999px; padding: 1px 8px; margin-left: 8px; vertical-align: 1px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+  /* ── 场景1：PPM 任务详情抽屉（右侧抽屉简化为卡片）+ 关联会话卡片 ── */
+  .task-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .task-title { font-size: 14px; font-weight: 600; }
+  .task-meta { font-size: 11px; color: var(--muted-fg); margin-top: 4px; line-height: 1.7; }
+  .status-pill { font-size: 11px; border-radius: 9999px; padding: 2px 10px; background: var(--amber-bg);
+    color: var(--amber-fg); border: 1px solid var(--amber-bd); white-space: nowrap; }
+  .status-pill.done { background: var(--ok-bg); color: var(--ok-fg); border-color: var(--ok-bg); }
+  .btn { font-size: 12px; padding: 5px 12px; border-radius: 8px; border: 1px solid var(--primary);
+    background: var(--brand-600); color: #fff; cursor: pointer; white-space: nowrap; }
+  .btn.ghost { background: var(--card); color: var(--primary); }
+  .btn.sm { font-size: 11px; padding: 2px 8px; border-radius: 6px; }
+  .attach-list { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+  .attach-item { font-size: 12px; display: flex; gap: 6px; align-items: center; color: var(--muted-fg); }
+  .attach-item .ic { width: 16px; text-align: center; }
+  .sessions-card { margin-top: 12px; border-top: 1px dashed var(--border); padding-top: 10px; }
+  .sessions-card .card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .sessions-card .card-head b { font-size: 12px; }
+  .session-row { display: flex; gap: 8px; align-items: center; padding: 6px 8px; border: 1px solid var(--border);
+    border-radius: 8px; margin-bottom: 6px; cursor: pointer; background: var(--muted); font-size: 12px; }
+  .session-row:hover { border-color: var(--primary); }
+  .session-row .st { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: var(--brand-100); color: var(--brand-700); }
+  .session-row .t { color: var(--muted-fg); font-size: 10px; margin-left: auto; }
+  .session-row .me { font-size: 10px; color: var(--brand-700); }
+
+  /* ── 场景2：会话输入框 @ 联想浮层（新增 PPM 分组）── */
+  .input-wrap { position: relative; margin-top: 4px; }
+  .capsule { display: flex; align-items: flex-end; gap: 8px; border-radius: 16px;
+    border: 1px solid var(--border); background: color-mix(in srgb, var(--muted) 40%, var(--card));
+    padding: 8px 10px; }
+  .capsule:focus-within { border-color: var(--primary); box-shadow: 0 0 0 4px var(--brand-100); }
+  .capsule .plus { width: 36px; height: 36px; flex: none; align-self: center; border: none; background: none;
+    color: var(--muted-fg); font-size: 16px; cursor: pointer; border-radius: 9999px; }
+  .capsule textarea { flex: 1; min-height: 40px; resize: none; border: none; outline: none; background: transparent;
+    font: 13px/1.45 inherit; color: var(--fg); padding: 8px 4px; }
+  .mention-pop { position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; background: var(--card);
+    border: 1px solid var(--pop-bd); border-radius: 12px; box-shadow: 0 8px 24px rgba(2,6,23,.12);
+    max-height: 300px; overflow: auto; padding: 4px 0; }
+  .grp { font-size: 10px; color: var(--muted-fg); padding: 6px 12px 2px; letter-spacing: .4px; }
+  .mi { display: flex; gap: 8px; align-items: center; padding: 6px 12px; font-size: 12px; cursor: pointer; }
+  .mi:hover, .mi.on { background: var(--brand-100); }
+  .mi .badge { font-size: 10px; padding: 0 6px; border-radius: 4px; border: 1px solid var(--border); color: var(--muted-fg); }
+  .mi .badge.ppmtask { color: var(--brand-700); border-color: var(--pop-bd); }
+  .mi .sub { color: var(--muted-fg); font-size: 10px; margin-left: auto; }
+  .mentions-bar { display: flex; gap: 6px; flex-wrap: wrap; padding: 6px 4px 0; }
+  .mentions-bar .chip { font-size: 11px; border: 1px solid var(--border); background: var(--muted);
+    border-radius: 6px; padding: 2px 8px; }
+  .mentions-bar .chip b { color: var(--brand-700); }
+  .sendlog { margin-top: 10px; font-size: 11px; line-height: 1.7; color: var(--muted-fg);
+    background: var(--muted); border: 1px dashed var(--border); border-radius: 10px; padding: 8px 12px; }
+  .sendlog code { background: var(--card); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; font-size: 10px; }
+
+  /* ── 场景3：PPM 项目页「发起团队」→ 自动打开派团队弹层（预选项目+工作区）── */
+  .proj-row { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: 10px; font-size: 13px; }
+  .team-pop { margin-top: 10px; border: 1px solid var(--pop-bd); border-radius: 12px; background: var(--card);
+    box-shadow: 0 8px 24px rgba(2,6,23,.12); padding: 12px 14px; }
+  .team-pop .tp-title { font-size: 12px; font-weight: 600; margin-bottom: 8px; display: flex; justify-content: space-between; }
+  .team-pop .tp-title .auto { font-size: 10px; color: var(--ok-fg); background: var(--ok-bg); border-radius: 9999px; padding: 1px 8px; font-weight: 500; }
+  .fld { margin-bottom: 8px; }
+  .fld label { display: block; font-size: 11px; color: var(--muted-fg); margin-bottom: 3px; }
+  .fld .ctl { font-size: 12px; border: 1px solid var(--border); border-radius: 8px; padding: 5px 10px; background: var(--muted); }
+  .fld .ctl.pre { border-color: var(--primary); background: var(--brand-100); color: var(--brand-700); font-weight: 600; }
+  .fld textarea { width: 100%; font: 12px/1.5 inherit; border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 10px; resize: none; min-height: 36px; background: var(--card); color: var(--fg); }
+  .scope-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .scope-seg span { font-size: 11px; padding: 4px 12px; background: var(--muted); color: var(--muted-fg); }
+  .scope-seg span.on { background: var(--brand-600); color: #fff; }
+  .fixed-note { font-size: 10px; color: var(--ok-fg); margin-top: 6px; line-height: 1.6; }
+  .anim { animation: pop .35s ease; }
+  @keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <span>原型：会话关联 PPM 任务/问题 + 发起团队预选修复 · 2026-08-28-session-ppm-task-binding</span>
+  <button onclick="toggleTheme()">切换主题（blue / ai-native）</button>
+</div>
+
+<div class="stage">
+
+  <!-- ═══ 场景 1：PPM 计划任务详情 + 关联会话卡片 ═══ -->
+  <div class="scene">
+    <h3>场景 1 <span class="tag">任务/问题详情 · 会话卡片 + 发起会话入口（新增）</span></h3>
+    <div class="task-head">
+      <div>
+        <div class="task-title">会员积分模块 · 排行榜接口性能优化</div>
+        <div class="task-meta">项目：SillyHub 平台 · 模块：backend/agent · 登记人：qinyi · 周期：2026-08-24 ~ 08-30</div>
+      </div>
+      <div class="row">
+        <span class="status-pill">进行中</span>
+        <button class="btn" onclick="alert('打开预会话面板：自动解析项目第一个关联工作区，创建会话时携带 ppm_item_kind=plan_task + item_id，注入任务全文与附件')">💬 发起会话</button>
+      </div>
+    </div>
+    <div class="task-meta" style="margin-top:8px">任务描述：排行榜查询接口 P95 超 800ms，需要引入缓存与索引优化，涉及 3 张表……</div>
+    <div class="attach-list">
+      <div class="attach-item"><span class="ic">🖼️</span> 压测截图-0826.png <span style="color:var(--brand-700);font-size:10px">→ 会话真附件注入</span></div>
+      <div class="attach-item"><span class="ic">📄</span> 慢查询分析.xlsx <span style="color:var(--brand-700);font-size:10px">→ 会话真附件注入</span></div>
+    </div>
+
+    <div class="sessions-card">
+      <div class="card-head">
+        <b>关联会话（2）</b>
+        <button class="btn ghost sm" onclick="alert('新建会话并绑定本任务')">+ 新会话</button>
+      </div>
+      <div class="session-row" onclick="alert('深链打开会话面板，展示该会话完整信息')">
+        <span class="st">进行中</span> 排行榜缓存方案讨论 <span class="me">qinyi</span> <span class="t">2 分钟前</span>
+      </div>
+      <div class="session-row" onclick="alert('深链打开会话面板，展示该会话完整信息')">
+        <span class="st" style="background:var(--muted);color:var(--muted-fg)">已结束</span> 慢 SQL 索引分析 <span class="t">昨天</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 场景 2：会话输入框 @ 联想 · 新增 PPM 分组 ═══ -->
+  <div class="scene">
+    <h3>场景 2 <span class="tag">@ 联想新增「PPM 任务 / 问题」分组（默认进行中，可切全部）</span></h3>
+    <div class="hint">输入 <b>@</b> 唤起联想：变更 / 快速修复之后新增两个 PPM 分组；选中后以 chip 形式挂在输入框上方，随首句一并提交绑定。</div>
+    <div class="input-wrap">
+      <div class="mention-pop anim">
+        <div class="grp">变更（当前工作区）</div>
+        <div class="mi"><span class="badge">变更</span> 2026-08-25-session-spec-binding <span class="sub">验证确认</span></div>
+        <div class="grp">快速修复（当前工作区）</div>
+        <div class="mi"><span class="badge">快速</span> ql-20260828-002 修复日历周显示 <span class="sub">今天</span></div>
+        <div class="grp" style="color:var(--brand-700)">PPM 任务（进行中）· 新增</div>
+        <div class="mi on"><span class="badge ppmtask">任务</span> 会员积分模块 · 排行榜接口性能优化 <span class="sub">SilkyHub 平台</span></div>
+        <div class="mi"><span class="badge ppmtask">任务</span> 工时填报导出列错位修复 <span class="sub">SillyHub 平台</span></div>
+        <div class="grp" style="color:var(--brand-700)">PPM 问题（进行中）· 新增</div>
+        <div class="mi"><span class="badge ppmtask">问题</span> 看板拖拽后排序偶发丢失 <span class="sub">SillyHub 平台 · bug</span></div>
+      </div>
+      <div class="mentions-bar">
+        <span class="chip"><b>@任务</b> 排行榜接口性能优化</span>
+      </div>
+      <div class="capsule">
+        <button class="plus" onclick="alert('＋ 菜单（附件/技能/派团队等）')">＋</button>
+        <textarea placeholder="给这个 PPM 任务安排后续分析…（首句将自动携带任务上下文与附件）"></textarea>
+      </div>
+    </div>
+    <div class="sendlog">
+      提交载荷：<code>createSession({ ppm_item_kind: "plan_task", ppm_item_id: "&lt;uuid&gt;", first_message })</code><br/>
+      服务端：写 <code>ppm_item_session_links</code> → 构建【PPM 任务上下文】前导（标题/描述/状态/项目/周期/附件）→ <code>file_urls</code> 转 File → 对象存储读取 → 真附件注入（失败降级文字清单）
+    </div>
+  </div>
+
+  <!-- ═══ 场景 3：发起团队 → 自动打开派团队弹层 + 预选 ═══ -->
+  <div class="scene">
+    <h3>场景 3 <span class="tag">bug 修复：项目页「发起团队」→ 预会话自动打开派团队弹层并预选</span></h3>
+    <div class="proj-row">
+      <b>SillyHub 平台</b><span style="color:var(--muted-fg);font-size:11px">PPM-2026-018 · 进行中</span>
+      <button class="btn" style="margin-left:auto" onclick="document.getElementById('teamPop').classList.add('anim');document.getElementById('teamPop').style.display='block'">🚀 发起团队</button>
+    </div>
+    <div class="team-pop" id="teamPop" style="display:none">
+      <div class="tp-title">派团队分析 <span class="auto">✓ 自动打开 · 已预选</span></div>
+      <div class="fld">
+        <label>目标（objective）</label>
+        <textarea>分析项目「SillyHub 平台」当前迭代风险并给出建议</textarea>
+      </div>
+      <div class="fld">
+        <label>分析范围</label>
+        <div class="scope-seg"><span>按工作区</span><span class="on">按项目（自动选中）</span></div>
+      </div>
+      <div class="fld">
+        <label>PPM 项目</label>
+        <div class="ctl pre">SillyHub 平台（PPM-2026-018）✓</div>
+      </div>
+      <div class="fld">
+        <label>项目关联工作区（自动选第一个，可切换）</label>
+        <div class="ctl pre">multi-agent-platform 主仓 ✓</div>
+      </div>
+      <div class="fixed-note">
+        修复点：① 预会话检测到 page_context.ppm_project 时自动打开本弹层（原先仅注入页面上下文）<br/>
+        ② 弹层新增 defaultProjectId 预选：项目自动选中 + scopeMode=按项目 + 自动拉取项目关联工作区选第一个（原先全空）<br/>
+        ③ objective 预填分析句（原先为空）
+      </div>
+    </div>
+  </div>
+
+</div>
+<script>
+  function toggleTheme() {
+    const el = document.documentElement;
+    el.dataset.theme = el.dataset.theme === "blue" ? "ai-native" : "blue";
+  }
+</script>
+</body>
+</html>
