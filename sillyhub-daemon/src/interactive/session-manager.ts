@@ -41,6 +41,7 @@ import type {
 } from './driver.js';
 import { basename, join } from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { InputQueue, SessionQueueClosedError } from './input-queue.js';
 import { PermissionResolver } from './permission-resolver.js';
 import type { PermissionSendFn } from './permission-resolver.js';
@@ -2304,34 +2305,35 @@ export class SessionManager {
    * session 不存在 / token 空 → 静默 no-op。
    */
   /**
-   * task-09：附件落盘——{cwd}/attachments/{safeName}（basename 防穿越，
-   * 同名冲突自 1 加序号保留扩展名），子目录递归创建。返回相对路径
-   * attachments/xxx（prompt 路径清单用相对形态）。
+   * task-09 / ql-20260827-010-e472：附件落盘——内容寻址命名
+   * ``{cwd}/attachments/{sha256}.{白名单ext}``（与 backend MinIO 端
+   * ``attachments/{user_id}/{sha256}.{ext}`` 同哲学：同内容必同路径）。
+   *
+   * - 扩展名取展示名后缀白名单化（字母数字 1-8 位；非法/无后缀回退 ``bin``，
+   *   对齐 backend storage 的 ``_EXT_RE``）；展示名不进键路径（防穿越 +
+   *   消灭同名歧义——旧的同名 (n) 序号机制已废弃）。
+   * - 同哈希已存在（``wx`` 独占探测 EEXIST）即跳过写入直接复用：内容寻址
+   *   不可变，agent 从路径即可唯一锁定本次发送的文件，无需读目录比对。
+   * - 返回相对路径 ``attachments/xxx``（prompt 路径清单用相对形态）。
    */
+  private static readonly ATTACHMENT_EXT_RE = /^[A-Za-z0-9]{1,8}$/;
+
   private async _writeAttachmentFile(cwd: string, rawName: string, buf: Buffer): Promise<string> {
     const dir = join(cwd, 'attachments');
     await mkdir(dir, { recursive: true });
     const safe = basename(rawName) || 'attachment';
     const dot = safe.lastIndexOf('.');
-    const stem = dot > 0 ? safe.slice(0, dot) : safe;
-    const ext = dot > 0 ? safe.slice(dot) : '';
-    let rel = 'attachments/' + safe;
-    let n = 0;
-    // 冲突探测：写入前试目标存在性——用 writeFile 的 exclusive 模式轮试。
-    for (;;) {
-      try {
-        await writeFile(join(cwd, rel), buf, { flag: 'wx' });
-        return rel;
-      } catch (err) {
-        const code = (err as NodeJS.ErrnoException).code;
-        if (code === 'EEXIST') {
-          n += 1;
-          rel = 'attachments/' + stem + '(' + n + ')' + ext;
-          continue;
-        }
-        throw err;
-      }
+    const rawExt = dot > 0 ? safe.slice(dot + 1).trim().toLowerCase() : '';
+    const ext = SessionManager.ATTACHMENT_EXT_RE.test(rawExt) ? rawExt : 'bin';
+    const sha256 = createHash('sha256').update(buf).digest('hex');
+    const rel = `attachments/${sha256}.${ext}`;
+    try {
+      await writeFile(join(cwd, rel), buf, { flag: 'wx' });
+    } catch (err) {
+      // EEXIST = 同内容对象已落盘（不可变）→ 跳过写入直接复用；其余照抛。
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
     }
+    return rel;
   }
 
   async refreshClaimToken(sessionId: string, claimToken: string): Promise<void> {
@@ -2562,8 +2564,9 @@ export class SessionManager {
     // Claude driver 内部做形态转换，task-03）。
     // 2026-08-20-session-multimodal-attachments task-09：附件消费（deliver 由
     // backend 全权决策）。block=多模态块（内联 data 或经下载闭包回拉）；disk=落盘
-    // {cwd}/attachments/（同名加序号）+ text 追加路径清单；单文件失败降级标注不
-    // 中断 turn。无附件路径与原 push 逐字一致（零回归）。
+    // {cwd}/attachments/{sha256}.{ext}（ql-20260827-010-e472 内容寻址，同内容复用）
+    // + text 追加路径清单（注原文件名，明确无需浏览比对其他文件）；单文件失败
+    // 降级标注不中断 turn。无附件路径与原 push 逐字一致（零回归）。
     // ql-20260825-f6#3：下载闭包 60s 超时（挂起不卡死 inject）；下载 await 窗口内
     // 会话被 end/fail 收口（queue 已 close）→ push 抛 SessionQueueClosedError，
     // 此处转译为 SessionNotActiveError（不把队列内部错误类泄漏给 WS 调用方）。
@@ -2572,7 +2575,9 @@ export class SessionManager {
     let filesToFetch: UserTurnInput['filesToFetch'];
     if (attachments && attachments.length > 0) {
       const blockList: NonNullable<UserTurnInput['blocks']> = [];
-      const savedPaths: string[] = [];
+      // ql-20260827-010-e472：rel → 展示名列表（内容寻址后同内容附件并入同一行，
+      // 原文件名并列注记）。
+      const savedRelNames = new Map<string, string[]>();
       const fetched: NonNullable<UserTurnInput['filesToFetch']> = [];
       const failedNames: string[] = [];
       for (const att of attachments) {
@@ -2610,7 +2615,12 @@ export class SessionManager {
               att.id,
             );
             const rel = await this._writeAttachmentFile(state.cwd, att.name, buf);
-            savedPaths.push(rel);
+            const names = savedRelNames.get(rel);
+            if (names) {
+              if (!names.includes(att.name)) names.push(att.name);
+            } else {
+              savedRelNames.set(rel, [att.name]);
+            }
             fetched.push({ id: att.id, name: att.name });
           }
         } catch {
@@ -2620,9 +2630,15 @@ export class SessionManager {
       if (blockList.length > 0) blocks = blockList;
       if (fetched.length > 0) filesToFetch = fetched;
       const lines: string[] = [];
-      if (savedPaths.length > 0) {
-        lines.push('[附件已落盘，可用 Read/Grep 等工具读取]');
-        for (const rel of savedPaths) lines.push('- ' + rel);
+      if (savedRelNames.size > 0) {
+        // ql-20260827-010-e472：清单行 = 内容寻址路径 + 原文件名注记；头部明确
+        // 「只读列出的路径」，消除旧 (1)(2) 序号下 agent 全目录读比对的歧义。
+        lines.push(
+          '[附件已落盘，直接读取以下列出的路径即可；attachments/ 下其他文件与本次发送无关，无需浏览比对]',
+        );
+        for (const [rel, names] of savedRelNames) {
+          lines.push('- ' + rel + '（原文件名: ' + names.join('、') + '）');
+        }
       }
       for (const n of failedNames) lines.push('(下载失败: ' + n + ')');
       if (lines.length > 0) {

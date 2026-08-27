@@ -272,7 +272,7 @@ export interface SessionInjectAttachment {
   kind: 'image' | 'file';
   /** MIME（降级图片/PDF 保留原 media_type，供前端回显缩略图）。 */
   media_type: string;
-  /** 展示名（落盘文件名；同名冲突由 daemon 加序号）。 */
+  /** 展示名（prompt 清单原文件名注记用；落盘为内容寻址 {sha256}.{ext}，展示名不进路径）。 */
   name: string;
   /** 字节数（展示/日志用）。 */
   bytes: number;

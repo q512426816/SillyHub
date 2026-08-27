@@ -82,6 +82,7 @@ submitWithRetry(退避) → 用尽 → FileOutbox 暂存 → 心跳健康 → dr
 - Node 侧 PolicyCache realpath 归一 + allowed_roots JSON 短路是心跳不卡死的关键；盘符根/Unix 根前缀比较勿再补尾部 sep（历史误 deny 事故）。
 - spec-sync 推拉有顺序约束；daemon 侧 manifest 缓存过旧会推不出新 change（已知运维坑），从仓库导入 RPC 不受 30s 代理超时限制。
 - BUILD_ID 注入格式（build-id.ts 无 `: string` 注解）被 backend `_compute_daemon_version` 正则依赖，改格式断 self-update。
+- 会话附件 disk 交付落盘为内容寻址 `attachments/{sha256}.{白名单ext}`（同内容复用、EEXIST 跳过写入；展示名只在 prompt 清单注记「原文件名」）——与 backend MinIO 内容寻址同哲学，勿改回展示名+(n) 序号（路径歧义会诱发 agent 全目录读比对）。
 
 ## 人工备注
 

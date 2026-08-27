@@ -17,6 +17,10 @@ import type {
   SDKResultMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
+import { createHash } from 'node:crypto';
+import { readFile, readdir } from 'node:fs/promises';
+import { join } from 'node:path';
+import { makeTmpDir, cleanupDir } from '../helpers.js';
 import { SessionManager } from '../../src/interactive/session-manager.js';
 import type {
   ClaudeSdkDriver,
@@ -233,5 +237,145 @@ describe('inject 附件正常下载回归（ql-20260825-f6#3）', () => {
     expect(blocks).toHaveLength(1);
     expect(blocks[0]!.type).toBe('image');
     expect(blocks[0]!.base64).toBe(Buffer.from('pngbytes').toString('base64'));
+  });
+});
+
+// ── ql-20260827-010-e472：disk 交付内容寻址落盘 ──────────────────────────────
+//
+// 修复前：落盘用展示名 + 同名 (1)(2) 序号，attachments/ 跨会话堆积同名文件，
+// agent 无法从路径判断哪份是本次发送的 → 只能全读比对。
+// 修复后：落盘名 = attachments/{sha256}.{白名单ext}（与 backend MinIO 内容寻址
+// 同哲学），同内容必同路径、已存在跳过写入；prompt 清单行注明原文件名并明确
+// 无需浏览比对其他文件。
+
+describe('inject 附件 disk 落盘内容寻址（ql-20260827-010-e472）', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await makeTmpDir('sm-attach-disk-');
+  });
+
+  afterEach(async () => {
+    await cleanupDir(tmpDir);
+  });
+
+  function diskAtt(over: Partial<SessionInjectAttachment> = {}): SessionInjectAttachment {
+    return att({
+      kind: 'file',
+      media_type: 'application/octet-stream',
+      name: 'server.log',
+      deliver: 'disk',
+      ...over,
+    });
+  }
+
+  const shaOf = (buf: Buffer) => createHash('sha256').update(buf).digest('hex');
+
+  it('落盘名为 attachments/{sha256}.{ext}，prompt 行含路径与原文件名，文案明确无需比对', async () => {
+    const { driver } = makeMockDriver();
+    const sm = new SessionManager({ driver, ...makeDeps() });
+    await sm.create({ ...BASE_INPUT, cwd: tmpDir });
+    const content = Buffer.from('log-line-1\n');
+    await sm.inject('sess-att', '查日志', 'run-2', [diskAtt()], async () => content);
+
+    const rel = `attachments/${shaOf(content)}.log`;
+    await expect(readFile(join(tmpDir, rel))).resolves.toEqual(content);
+
+    const turn = firstQueuedTurn(sm);
+    expect(turn.text).toContain('查日志');
+    expect(turn.text).toContain('[附件已落盘');
+    expect(turn.text).toContain('- ' + rel + '（原文件名: server.log）');
+    // 文案明确告知：只读列出的路径，不要浏览比对目录里其他文件。
+    expect(turn.text).toContain('无需浏览');
+    expect(turn.filesToFetch).toEqual([{ id: 'att-1', name: 'server.log' }]);
+  });
+
+  it('同轮同内容不同展示名 → 磁盘单文件、清单单行（行内并列原文件名）', async () => {
+    const { driver } = makeMockDriver();
+    const sm = new SessionManager({ driver, ...makeDeps() });
+    await sm.create({ ...BASE_INPUT, cwd: tmpDir });
+    const content = Buffer.from('same-bytes\n');
+    await sm.inject(
+      'sess-att',
+      '对比',
+      'run-2',
+      [diskAtt({ id: 'att-1', name: 'a.log' }), diskAtt({ id: 'att-2', name: 'b.log' })],
+      async () => content,
+    );
+
+    const rel = `attachments/${shaOf(content)}.log`;
+    const files = await readdir(join(tmpDir, 'attachments'));
+    expect(files).toHaveLength(1);
+    expect(files[0]).toBe(`${shaOf(content)}.log`);
+
+    const turn = firstQueuedTurn(sm);
+    expect(turn.text).toContain('- ' + rel + '（原文件名: a.log、b.log）');
+  });
+
+  it('同轮同内容同展示名重复发送 → 原文件名不重复', async () => {
+    const { driver } = makeMockDriver();
+    const sm = new SessionManager({ driver, ...makeDeps() });
+    await sm.create({ ...BASE_INPUT, cwd: tmpDir });
+    const content = Buffer.from('dup\n');
+    await sm.inject(
+      'sess-att',
+      '重发',
+      'run-2',
+      [diskAtt(), diskAtt()],
+      async () => content,
+    );
+    const turn = firstQueuedTurn(sm);
+    expect(turn.text).toContain(
+      '- attachments/' + shaOf(content) + '.log（原文件名: server.log）',
+    );
+    expect(turn.text).not.toContain('server.log、server.log');
+  });
+
+  it('跨轮重复发送同内容 → 复用既有对象，不产生 (n) 序号副本', async () => {
+    const { driver } = makeMockDriver();
+    const sm = new SessionManager({ driver, ...makeDeps() });
+    await sm.create({ ...BASE_INPUT, cwd: tmpDir });
+    const content = Buffer.from('repeat-me\n');
+    await sm.inject('sess-att', '第一轮', 'run-2', [diskAtt()], async () => content);
+    await sm.inject('sess-att', '第二轮', 'run-3', [diskAtt()], async () => content);
+
+    const files = await readdir(join(tmpDir, 'attachments'));
+    expect(files).toHaveLength(1);
+    expect(files[0]).toBe(`${shaOf(content)}.log`);
+  });
+
+  it('同名不同内容 → 各自独立 sha 路径，无序号后缀', async () => {
+    const { driver } = makeMockDriver();
+    const sm = new SessionManager({ driver, ...makeDeps() });
+    await sm.create({ ...BASE_INPUT, cwd: tmpDir });
+    const v1 = Buffer.from('version-1\n');
+    const v2 = Buffer.from('version-2\n');
+    const dl = vi.fn(async (id: string) => (id === 'att-1' ? v1 : v2));
+    await sm.inject('sess-att', '旧版', 'run-2', [diskAtt({ id: 'att-1' })], dl);
+    await sm.inject('sess-att', '新版', 'run-3', [diskAtt({ id: 'att-2' })], dl);
+
+    const files = await readdir(join(tmpDir, 'attachments'));
+    expect(files.sort()).toEqual([`${shaOf(v1)}.log`, `${shaOf(v2)}.log`].sort());
+    // 任何文件名都不含旧的 (n) 序号形态。
+    for (const f of files) expect(f).not.toMatch(/\(\d+\)/);
+
+    const turn = firstQueuedTurn(sm);
+    expect(turn.text).toContain('- attachments/' + shaOf(v2) + '.log（原文件名: server.log）');
+  });
+
+  it('展示名无有效扩展名 → 回退 bin（对齐 backend 扩展名白名单）', async () => {
+    const { driver } = makeMockDriver();
+    const sm = new SessionManager({ driver, ...makeDeps() });
+    await sm.create({ ...BASE_INPUT, cwd: tmpDir });
+    const content = Buffer.from('no-ext\n');
+    await sm.inject(
+      'sess-att',
+      '看',
+      'run-2',
+      [diskAtt({ name: 'Makefile' })],
+      async () => content,
+    );
+    const files = await readdir(join(tmpDir, 'attachments'));
+    expect(files).toEqual([`${shaOf(content)}.bin`]);
   });
 });

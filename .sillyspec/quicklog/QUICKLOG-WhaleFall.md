@@ -361,3 +361,28 @@
 根因：workspaces/[id]/layout.tsx 的 main 统一 max-w-[1440px]，2K 屏下会话门户页不撑满；参照 /agent-profiles（AppShell 无帽 + PageContainer size=full）应占满
 方案：layout 按 pathname startsWith 判 sessions 子路由时 main 用 max-w-none，其余子页维持 1440；注释标 FRONTEND_PAGE_STYLE.md 列表页占满规范，模块文档变更索引同步登记
 结果：dashboard 路由组 vitest 36 文件 335 测试全过，eslint 单文件 0 告警；模块文档 frontend_app.md 已同步
+
+## ql-20260827-010-e472 | 2026-08-27 14:24:18 | 会话附件 daemon 落盘改内容寻址命名——attachments/{sha256}.{ext}
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/session-manager.ts（_writeAttachmentFile 内容寻址重写 + 注入拼装去重与文案）
+- sillyhub-daemon/src/protocol.ts（展示名字段注释同步）
+- sillyhub-daemon/tests/interactive/session-manager-inject-attachment.test.ts（新增 6 个 disk 落盘用例）
+- .sillyspec/docs/SillyHub/modules/daemon.md（注意事项补内容寻址约定）
+- .sillyspec/docs/SillyHub/modules/daemon.changelog.md（新建变更索引 sidecar）
+需求：会话附件 daemon 落盘改内容寻址命名——attachments/{sha256}.{ext}，消灭同名 (n) 序号
+根因：旧落盘用展示名+同名加序号，attachments/ 跨会话堆积 server.log/server(1).log 等歧义路径，agent 无法从名字判断哪份是本次发送的，只能把目录里所有同名文件读一遍比对内容
+方案：_writeAttachmentFile 改为 sha256 内容寻址（node:crypto，扩展名白名单对齐 backend _EXT_RE 回退 bin，wx 探测 EEXIST 即跳过复用）；注入拼装改 Map<rel,展示名[]> 同轮同内容去重一行、原文件名并列注记，prompt 头部明确无需浏览比对其他文件；protocol.ts 注释同步
+结果：目标测试 12/12 绿（含 6 个新 disk 用例），相邻回归 31/31 绿，tests/interactive 全量 662/662 绿，tsc --noEmit 0 错误
+审计：⚖️ 归属切分：3 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx, sillyhub-daemon/src/protocol.ts, sillyhub-daemon/tests/interactive/session-manager-inject-attachment.test.ts
+
+## ql-20260827-011-6dd8 | 2026-08-27 14:29:47 | 工作区全部子页宽度撑满——彻底移除 layout main 的 1440 帽子
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx（删 isFullWidth 分支，main 类名去掉 max-w-[1440px] 帽与 mx-auto，全子页撑满）
+需求：工作区全部子页宽度撑满——彻底移除 layout main 的 1440 帽子
+根因：ql-20260827-008 仅放开 sessions 路由后用户定案所有子页统一撑满；已核实子页 13 处 PageContainer 全为 size=full、其余页面无页面级宽度帽，1440 帽是唯一全局限制
+方案：layout.tsx 删除 isFullWidth 条件分支与三元宽度类，main 去掉 max-w-[1440px] 及配套 mx-auto；旧注释引用 1440 帽的表述同步修正
+结果：eslint 0 告警、tsc --noEmit 通过、dashboard 路由组 vitest 335 测试全过；模块文档已同步
