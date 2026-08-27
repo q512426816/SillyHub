@@ -500,6 +500,42 @@ class RunSyncService:
             )
             return None
         return dispatch_run_id
+    @staticmethod
+    def _override_marker_content(segment_id: str, thinking: bool) -> str:
+        """quick-0e56260f：完整行落库时合成的 override 标记行/信封正文。
+
+        格式与 daemon 信号（task-07）逐字节一致（``[ASSISTANT_OVERRIDE] <segmentId>``
+        / ``[THINKING_OVERRIDE] <segmentId>``），前端 OVERRIDE_RE / 撤回链路零改动。
+        """
+        prefix = "THINKING" if thinking else "ASSISTANT"
+        return f"[{prefix}_OVERRIDE] {segment_id}"
+
+    async def _override_marker_exists(
+        self, agent_run_id: uuid.UUID, segment_id: str
+    ) -> bool:
+        """quick-0e56260f：该 segment 的完整行是否已处理（override 标记行已落库）。
+
+        partial 行落库前的守护：完整行先到（HTTP 并发乱序 / daemon 重试迟到）时，
+        该 segment 已被覆盖，partial 整行跳过（不 INSERT 不 publish）——堵住
+        「完整行调用跑完 DELETE 后 partial 事务才提交」的竞态（会话 0ef651b6 实证：
+        partial 03:30:45.437 开始处理、full 03:30:45.580，full 的跨调用 DELETE
+        查不到未提交的 partial，擦肩留库）。标记行 segment_id=NULL（不会被
+        _revoke_committed_partials 误删），以 content 精确匹配识别。
+        """
+        row = (
+            await self._session.execute(
+                select(AgentRunLog.id).where(
+                    AgentRunLog.run_id == agent_run_id,
+                    AgentRunLog.content_redacted.in_(
+                        [
+                            self._override_marker_content(segment_id, False),
+                            self._override_marker_content(segment_id, True),
+                        ]
+                    ),
+                )
+            )
+        ).scalar_one_or_none()
+        return row is not None
 
     # ── public ────────────────────────────────────────────────────────────
 
@@ -799,6 +835,17 @@ class RunSyncService:
             if segment_id and is_partial and segment_id in completed_segments:
                 continue
 
+            # quick-0e56260f 去重判定 3（跨调用）：partial 到达时，若该 segment 的
+            # 完整行已在先前调用处理过（override 标记行已 commit），跳过 INSERT +
+            # publish——堵「完整行调用跑完 DELETE 后 partial 事务才提交」的并发
+            # 竞态（会话 0ef651b6 实证：partial 03:30:45.437 开始处理、full
+            # 03:30:45.580，full 的跨调用 DELETE 查不到未提交的 partial，擦肩留库），
+            # 也拦 daemon 重试迟到的同 segmentId 窗口。
+            if segment_id and is_partial and await self._override_marker_exists(
+                agent_run_id, segment_id
+            ):
+                continue
+
             # task-21 / FR-08：dedup_key 幂等——已存在的 (run_id, dedup_key) 跳过 INSERT
             # （daemon 重试/outbox 补发的重复消息）。无 dedup_key 的消息照常 append（NULL 不约束）。
             dedup_key = msg.get("dedup_key") if isinstance(msg, dict) else None
@@ -999,6 +1046,63 @@ class RunSyncService:
                 # 半截行复活成直播重复段（daemon override 信号生产环境未观测到
                 # 到达，本清理不依赖它）。对齐 override 分支同款 DELETE。
                 await self._revoke_committed_partials(agent_run_id, segment_id)
+                # quick-0e56260f（会话 0ef651b6）：backend 合成 override 撤回信号。
+                # 动机：直播期 partial 窗口经 Redis 发布是 best-effort，部分窗口
+                # 丢失后前端按到达顺序拼出「乱序胶水段」（非完整行前缀），全部
+                # 前缀收编失效 → 重复段；且 daemon 信号生产从未到达（见已知问题）。
+                # backend 在完整行落库点确知 segmentId，就地补发令箭：
+                #   ① 落一行标记（content=override 令箭、segment_id=NULL 防 revoke
+                #      误删）——跨调用竞态守护（见 _override_marker_exists）+ 完整行
+                #      实时发布丢失时轮后对账重放补投，前端据令箭按段 id 任意位置
+                #      撤回乱序胶水段（不依赖前缀判定）；
+                #   ② published_logs 追加同形信封（stale=True），实时直播立即治愈。
+                # 格式与 daemon 信号（task-07）逐字节一致，前端 OVERRIDE_RE /
+                # 撤回链路零改动；标记行在历史回放被分类为 override 不渲染，
+                # 「历史干净」语义保持（仅多一行不可见行）。不计入 count（count
+                # 语义=内容消息数）。message.id 缺失的退化段（mid=unknown）跳过
+                # ——daemon 退化 partial 用 runId:thinking 格式永不对齐，标记无用。
+                if ":unknown:" not in segment_id:
+                    marker_thinking = isinstance(content, str) and content.startswith("[THINKING]")
+                    marker_content = self._override_marker_content(segment_id, marker_thinking)
+                    marker_id = uuid.uuid4()
+                    self._session.add(
+                        AgentRunLog(
+                            id=marker_id,
+                            run_id=agent_run_id,
+                            timestamp=now,
+                            channel="stdout",
+                            content_redacted=marker_content,
+                            dedup_key=None,
+                            parent_tool_use_id=msg.get("parent_tool_use_id")
+                            if isinstance(msg, dict)
+                            else None,
+                            subagent_type=msg.get("subagent_type")
+                            if isinstance(msg, dict)
+                            else None,
+                            depth=msg.get("depth") if isinstance(msg, dict) else None,
+                            tool_kind=None,
+                            segment_id=None,
+                            edit_patch=None,
+                        )
+                    )
+                    published_logs.append(
+                        {
+                            "log_id": str(marker_id),
+                            "channel": "stdout",
+                            "content": marker_content,
+                            "timestamp": now.isoformat().replace("+00:00", "Z"),
+                            "segment_id": segment_id,
+                            "stale": True,
+                            "parent_tool_use_id": msg.get("parent_tool_use_id")
+                            if isinstance(msg, dict)
+                            else None,
+                            "subagent_type": msg.get("subagent_type")
+                            if isinstance(msg, dict)
+                            else None,
+                            "depth": msg.get("depth") if isinstance(msg, dict) else None,
+                            "tool_kind": None,
+                        }
+                    )
 
         # Sync AgentRun status: pending -> running on first messages
         # task-06：agent_run 已在落库循环前 get（归位需要 agent_session_id），此处

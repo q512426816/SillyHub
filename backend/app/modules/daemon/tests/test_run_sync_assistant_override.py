@@ -295,8 +295,13 @@ class TestAssistantOverrideDeletesPartial:
         assert count == 1
 
         rows = await _fetch_logs(db_session, run_id)
-        assert len(rows) == 1
-        assert rows[0].content_redacted == "[ASSISTANT] 完整回复"
+        # quick-0e56260f：完整行伴随 backend 合成的 override 标记行（内容与 daemon
+        # 信号一致；分类为 override 不渲染，「无重复落库」语义保持）。
+        assert len(rows) == 2
+        assert {r.content_redacted for r in rows} == {
+            "[ASSISTANT] 完整回复",
+            f"[ASSISTANT_OVERRIDE] {SEG}",
+        }
 
     @pytest.mark.asyncio
     async def test_late_partial_after_override_discarded(self, db_session, mocked_redis) -> None:
@@ -352,10 +357,12 @@ class TestAssistantOverrideDeletesPartial:
     async def test_committed_partial_revoked_by_later_full_line(
         self, db_session, mocked_redis
     ) -> None:
-        """quick-9f86d2c3（会话 e87622aa）：interactive 真实流式顺序——partial 在
-        前次 submit_messages 已 commit，完整 assistant message 本次经
-        _extract_sdk_messages 展开（segmentId=main:<mid>:text 与 partial 同格式）
-        → 完整行触发跨调用按 segment_id DELETE 已落库 partial，DB 只剩完整行。
+        """quick-9f86d2c3（会话 e87622aa）+ quick-0e56260f 修订：interactive 真实
+        流式顺序——partial 在前次 submit_messages 已 commit，完整 assistant message
+        本次经 _extract_sdk_messages 展开（segmentId=main:<mid>:text 与 partial 同
+        格式）→ 完整行触发跨调用按 segment_id DELETE 已落库 partial，DB 只剩完整行
+        + backend 合成的 override 标记行（quick-0e56260f：content=令箭、segment_id
+        =NULL，供竞态守护与重放自愈；历史回放分类为 override 不渲染）。
 
         生产实证（run 6f5720ab）：partial 行因该清理缺失永久滞留 DB，轮后对账
         重放把半截复活成直播重复段（daemon override 信号生产未观测到到达，
@@ -388,13 +395,94 @@ class TestAssistantOverrideDeletesPartial:
             },
         }
         count2 = await svc.submit_messages(lease_id, token, run_id, [full_msg])
+        # count 只计内容消息（标记行不计入，quick-0e56260f）。
         assert count2 == 1
+        await db_session.commit()
 
         rows = await _fetch_logs(db_session, run_id)
-        # 已 commit 的 partial 被跨调用 DELETE，只剩完整行（segment_id 恒 NULL）。
-        assert len(rows) == 1
-        assert rows[0].content_redacted == "[ASSISTANT] 只有 pdftotext 可用，而且几乎提取不出中文。"
-        assert rows[0].segment_id is None
+        # 已 commit 的 partial 被跨调用 DELETE；剩完整行 + override 标记行
+        # （同调用同 timestamp，顺序不保证，按内容集合断言）。
+        assert len(rows) == 2
+        assert {r.content_redacted for r in rows} == {
+            "[ASSISTANT] 只有 pdftotext 可用，而且几乎提取不出中文。",
+            "[ASSISTANT_OVERRIDE] main:msg-late:text",
+        }
+        assert all(r.segment_id is None for r in rows)
+
+        # quick-0e56260f 竞态守护：完整行处理过后，迟到的同 segmentId partial
+        # 整行跳过（不 INSERT）——堵「DELETE 跑完后 partial 事务才提交」的窗口。
+        count3 = await svc.submit_messages(lease_id, token, run_id, [partial])
+        assert count3 == 0
+        await db_session.commit()
+        rows = await _fetch_logs(db_session, run_id)
+        assert len(rows) == 2
+
+    @pytest.mark.asyncio
+    async def test_full_line_synthesizes_override_publish(
+        self, db_session, mocked_redis
+    ) -> None:
+        """quick-0e56260f（会话 0ef651b6）：完整行落库时 backend 合成 override
+        信封（stale=True + segment_id）publish 到 session channel——直播期窗口
+        发布丢失致前端拼出乱序胶水段（非前缀，前缀收编失效），前端据令箭按段
+        id 任意位置撤回。信封 key 形状与 daemon 信号分支（task-02 P2）一致，
+        publish 链路零改动直通；发布顺序完整行在前、令箭在后。"""
+        lease_id, run_id, token = await _seed_interactive_run_for_submit(db_session)
+        svc = DaemonService(db_session)
+        full_msg = {
+            "type": "assistant",
+            "message": {
+                "id": "msg-sync",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "完整回复全文"}],
+            },
+        }
+        ret = await svc.submit_messages(lease_id, token, run_id, [full_msg])
+        assert int(ret) == 1  # count 只计内容消息（标记行不计入）
+        await db_session.commit()
+        from app.modules.daemon.run_sync.service import publish_submitted_messages
+
+        assert ret.publish_intent is not None
+        await publish_submitted_messages(ret.publish_intent)
+
+        payloads = _session_log_payloads(mocked_redis)
+        contents = [p["content"] for p in payloads]
+        assert "[ASSISTANT] 完整回复全文" in contents
+        assert "[ASSISTANT_OVERRIDE] main:msg-sync:text" in contents
+        # 顺序：完整行在前，令箭紧随其后（前端先落全文再撤乱序段）。
+        assert contents.index("[ASSISTANT] 完整回复全文") < contents.index(
+            "[ASSISTANT_OVERRIDE] main:msg-sync:text"
+        )
+        marker_payload = next(
+            p for p in payloads if p["content"] == "[ASSISTANT_OVERRIDE] main:msg-sync:text"
+        )
+        assert marker_payload["segment_id"] == "main:msg-sync:text"
+        assert marker_payload["stale"] is True
+        assert marker_payload["event"] == "log"
+
+    @pytest.mark.asyncio
+    async def test_thinking_full_line_synthesizes_thinking_override(
+        self, db_session, mocked_redis
+    ) -> None:
+        """quick-0e56260f：thinking 完整行同样合成 [THINKING_OVERRIDE] 标记（按
+        content 前缀分流，与 daemon 信号 variant 语义一致），前端 thinking 撤回
+        链路零改动复用。"""
+        lease_id, run_id, token = await _seed_batch_run_for_submit(db_session)
+        svc = DaemonService(db_session)
+        full_msg = {
+            "type": "assistant",
+            "message": {
+                "id": "msg-think-sync",
+                "role": "assistant",
+                "content": [{"type": "thinking", "thinking": "完整思考"}],
+            },
+        }
+        count = await svc.submit_messages(lease_id, token, run_id, [full_msg])
+        assert int(count) == 1
+        await db_session.commit()
+
+        rows = await _fetch_logs(db_session, run_id)
+        contents = [r.content_redacted for r in rows]
+        assert "[THINKING_OVERRIDE] main:msg-think-sync:thinking" in contents
         # 确认没有任何行的 content 以 [ASSISTANT_OVERRIDE] 开头（防御性）。
         assert not any(
             r.content_redacted and r.content_redacted.startswith("[ASSISTANT_OVERRIDE]")
@@ -636,9 +724,14 @@ class TestCrossCallOverrideDeletesCommittedPartial:
         assert count_b == 1, "调用 B：仅完整行落库（override 信号 continue）"
 
         rows = await _fetch_logs(db_session, run_id)
-        assert len(rows) == 1, "最终只剩完整行，#35 累积重复消除"
-        assert rows[0].content_redacted == "[ASSISTANT] 完整回复"
-        assert rows[0].segment_id is None, "完整行 segment_id 应为 NULL"
+        # quick-0e56260f：完整行伴随 backend 合成的一枚 override 标记行（daemon
+        # 信号分支不落库；标记行分类为 override 不渲染）。
+        assert len(rows) == 2, "最终只剩完整行 + override 标记行，#35 累积重复消除"
+        assert {r.content_redacted for r in rows} == {
+            "[ASSISTANT] 完整回复",
+            f"[ASSISTANT_OVERRIDE] {SEG}",
+        }
+        assert all(r.segment_id is None for r in rows), "完整行/标记行 segment_id 均为 NULL"
 
     @pytest.mark.asyncio
     async def test_complete_row_not_deleted_by_override(self, db_session, mocked_redis) -> None:
@@ -677,8 +770,13 @@ class TestCrossCallOverrideDeletesCommittedPartial:
         )
 
         rows = await _fetch_logs(db_session, run_id)
-        assert len(rows) == 1, "完整行 segment_id=NULL 不被 override DELETE 误删"
-        assert rows[0].content_redacted == "[ASSISTANT] 完整回复"
+        # quick-0e56260f：完整行落库伴随一枚 override 标记行（segment_id=NULL，
+        # 不被 override DELETE 命中；此为设计——标记行本身也不是 partial）。
+        assert len(rows) == 2, "完整行 + 标记行均不被 override DELETE 误删"
+        assert {r.content_redacted for r in rows} == {
+            "[ASSISTANT] 完整回复",
+            f"[ASSISTANT_OVERRIDE] {SEG}",
+        }
 
     @pytest.mark.asyncio
     async def test_thinking_override_cross_call_deletes_committed_thinking_partial(
@@ -757,10 +855,12 @@ class TestCrossCallOverrideDeletesCommittedPartial:
         )
 
         rows = await _fetch_logs(db_session, run_id)
-        assert len(rows) == 2
+        # quick-0e56260f：完整行伴随标记行（segment_id 也为 NULL，口径与完整行一致）。
+        assert len(rows) == 3
         by_content = {r.content_redacted: r for r in rows}
         assert by_content["[ASSISTANT] 半截"].segment_id == partial_seg
         assert by_content["[ASSISTANT] 完整"].segment_id is None
+        assert by_content[f"[ASSISTANT_OVERRIDE] {complete_seg}"].segment_id is None
 
 
 # ── task-03：override publish 到 SSE 不落库 + segment_id 透传 ──────────────────

@@ -774,7 +774,7 @@ class TestSubmitMessagesSync:
                 },
             ],
         )
-        # partial(0) + 完整 thinking(1) = 1（partial 被去重跳过）
+        # partial(0) + 完整 thinking(1) = 1（partial 被去重跳过；count 不含标记行）
         assert count == 1
         stmt = (
             select(AgentRunLog)
@@ -782,10 +782,13 @@ class TestSubmitMessagesSync:
             .order_by(col(AgentRunLog.timestamp))
         )
         logs = (await db_session.execute(stmt)).scalars().all()
-        assert len(logs) == 1
-        assert logs[0].channel == "stdout"
-        # 只剩完整行（内容是完整版的 [THINKING]）
-        assert logs[0].content_redacted == "[THINKING] 正在想完整版"
+        # quick-0e56260f：完整行伴随 backend 合成的 [THINKING_OVERRIDE] 标记行
+        # （分类为 override 不渲染，「只剩完整 thinking」语义保持）。
+        assert len(logs) == 2
+        assert {lg.content_redacted for lg in logs} == {
+            "[THINKING] 正在想完整版",
+            "[THINKING_OVERRIDE] main:msg_a:thinking",
+        }
 
     @pytest.mark.asyncio
     async def test_submit_messages_thinking_override_signal_not_persisted(
@@ -904,7 +907,7 @@ class TestSubmitMessagesSync:
                 },
             ],
         )
-        # 完整(1) + override 不落库 + late partial 跳过 = 1
+        # 完整(1) + override 不落库 + late partial 跳过 = 1（count 不含标记行）
         assert count == 1
         stmt = (
             select(AgentRunLog)
@@ -912,8 +915,13 @@ class TestSubmitMessagesSync:
             .order_by(col(AgentRunLog.timestamp))
         )
         logs = (await db_session.execute(stmt)).scalars().all()
-        assert len(logs) == 1
-        assert logs[0].content_redacted == "[THINKING] 完整版C"
+        # quick-0e56260f：完整行伴随 backend 合成的 [THINKING_OVERRIDE] 标记行
+        # （分类为 override 不渲染）——恰与 2) 的 daemon 信号同形（后者不落库）。
+        assert len(logs) == 2
+        assert {lg.content_redacted for lg in logs} == {
+            "[THINKING] 完整版C",
+            "[THINKING_OVERRIDE] main:msg_c:thinking",
+        }
 
     @pytest.mark.asyncio
     async def test_submit_messages_thinking_different_segments_kept(

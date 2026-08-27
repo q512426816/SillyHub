@@ -333,3 +333,12 @@
 根因：sessions-portal 门户容器 h-[calc(100vh-56px)] 假设顶栏 56px，实际 TopBar 为 h-16=64px，容器多出 8px 撑爆 min-h-screen 出整页滚动条（浏览器实测 728>720）
 方案：改为 h-[calc(100vh-64px)] 并加注释锚定依据，与 explorer/page.tsx 既有惯例一致；重建 Docker 前端镜像部署
 结果：54 单测全绿（sessions-portal + sessions/page）、tsc 0 错误；部署后浏览器实测门户高 656=100vh-64、页高 720=视口 720、hasVerticalOverflow=false，滚动条消失
+
+## ql-20260827-006-f892 | 2026-08-27 12:06:22 | 直播乱序重复渲染修复续（会话 0ef651b6 窗口丢失胶水段与并发竞态）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/run_sync/service.py, backend/app/modules/daemon/tests/test_run_sync_assistant_override.py, backend/app/modules/daemon/tests/test_wave5_integration.py, frontend/src/components/daemon/__tests__/session-log-assembler.test.ts, frontend/src/components/daemon/session-log-assembler.ts
+需求：直播乱序重复渲染修复续（会话 0ef651b6 窗口丢失胶水段与并发竞态）
+根因：窗口发布丢失拼出非前缀胶水段致前缀收编失效，且 partial 与完整行并发提交竞态致 partial 滞留数据库
+方案：backend 完整行落库点合成 override 令箭（标记行堵竞态加重放补投，信封实时治愈胶水段），前端 override 去重键含 segmentId 保刷新路径多标记生效
+结果：backend override 19 与 wave5 39 绿 ruff 0，daemon 域 150 绿（1 存量无关红），前端装配器 67 perf 7 dialog 54 绿 tsc 0，文档同步 daemon.md 与 frontend_components.md，未部署待重建

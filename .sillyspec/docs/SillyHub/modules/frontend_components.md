@@ -98,6 +98,7 @@ SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
 - interactive-session-panel 与 sessions 页共享 TurnTimeline / SessionInputBar / 事件处理语义：日志处理已收敛到 session-log-assembler 单一装配器（2026-08-19-session-stream-ux），改会话流逻辑只改装配器一处；但改 TurnTimeline 渲染仍需两处回归（/runtimes 弹窗零回归是 sessions-portal 的硬约束）。
 - session-log-assembler 是纯函数模块（零 React 依赖），分类函数（classifySessionLog 等）实现已迁入其中，session-log-sanitize.ts 保留 re-export 垫片——新代码 import 分类一律从 assembler 取。
 - partial/complete 双向收编（quick-9f86d2c3，2026-08-27，会话 e87622aa 直播重复段+光标常闪）：正向=dropPrefixPartialReply（完整行吸收尾部 partial 前缀段）；反向=bucketCoveredByFullText（迟到 partial 是在场完整行前缀 → 跳过落段）；两向吸收/override 撤回都封存 segmentId（SUPERSEDED_SEG_IDS 内部 Set 随 turn 链流转），同 segmentId 后续重放窗口一律免疫；面板 onLog（dialog 与进度两路径）对终态轮的迟到 log 补跑 finishTurn（非当前活跃 run 才跑——healToRunning 自愈场景流式光标照常）。根因：partial 行 Redis 发布丢失 → turn_completed 后轮后对账重放到终态轮，原装配器无反序收编且 finishTurn 已跑过永不再清。
+- 乱序胶水段治愈（quick-0e56260f，2026-08-27，会话 0ef651b6）：直播窗口 Redis 发布**部分**丢失 → 前端按到达序拼出非前缀「胶水段」（内容交错挪位），双向前缀收编全部失效；backend 在完整行落库点合成 override 令箭（daemon 信号生产失效的替代，见 daemon.md run_sync 条），前端既有 override 撤回按段 id **任意位置**移除胶水段（不依赖前缀）+ 封存。logsToSegments 的 override 去重键含 segmentId（`override:<segId>`）——同轮多枚标记（每条完整行一枚）各自生效，刷新路径 raced partial 也撤干净。
 - ui/ 基础件遵循 shadcn 约定（CLI 添加为主，不手改生成物）；业务组件一律 "use client"。
 - agent-log 归一化（去重 TOOL_USE / 合并 TOOL_RESULT / 识别 thinking）是纯函数，与渲染器分离便于单测；stdout [TOOL_USE]/[TOOL_RESULT] 文本事件也走同一解析。
 - remote-folder-picker 是远程目录选择唯一入口（替代旧 browseFolder 系统弹窗——Web 用户看不到 daemon 宿主机原生弹窗）。
