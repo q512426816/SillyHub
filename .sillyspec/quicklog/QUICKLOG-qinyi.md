@@ -176,7 +176,11 @@
 方案：根layout导出viewport禁捏合缩放；globals.css加触摸基线与.m-app输入16px作用域并挂上外壳/钻取/登录容器；MobileTabBar改离底12px圆角毛玻璃胶囊并调外壳pb-28；MobileChangeCard与QuicklogCard加40px状态图标容器与间距节奏
 结果：tsc全绿；vitest相关111用例全过含新增4断言；curl实证SSR meta注入与编译CSS规则；胶囊视觉与聚焦不缩放留真机复核
 
-## ql-20260827-017-c7d3 | 2026-08-27 21:02:09 | 修复多标签页登录态互踢：session store 监听 storage 事件跨标签页同步 token
-状态：进行中
+## ql-20260827-017-c7d3 | 2026-08-27 21:02:09 | 修复多标签页登录态互踢——session store 跨标签页同步 token
+状态：已完成
 关联变更：（无）
-文件：frontend/src/stores/session.ts, frontend/src/stores/session.test.ts
+文件：frontend/src/stores/session.test.ts, frontend/src/stores/session.ts
+需求：修复多标签页登录态互踢——session store 跨标签页同步 token
+根因：token 经 zustand persist 落 localStorage 多页共享，但 persist 不监听其它标签页写入，各页内存各持旧 refresh token；A 页续票轮换后 B 页持旧 token 续票，超后端 60s 复用宽限窗被判重放攻击，吊销该用户全部会话，全页被踢回登录页
+方案：stores/session.ts 落盘 key 提为 SESSION_STORAGE_KEY 常量 + 模块级 storage 事件监听，其它标签页写入的 token/user 回放进本页内存（缺字段不误清、坏 JSON 忽略、hydrated 不回放、SSR/HMR 安全）；同秒并发续票竞态由后端既有 grace 兜底，顺带实现登出/换账号跨页同步
+结果：新增 session.test.ts 6 用例全绿；相邻回归 token-refresh 9 + dashboard layout/page 守卫 21 全绿；tsc --noEmit 0 错；eslint 改动文件 0 告警
