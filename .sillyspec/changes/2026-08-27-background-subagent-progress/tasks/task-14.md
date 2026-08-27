@@ -9,6 +9,10 @@ depends_on: [task-12]
 blocks: []
 allowed_paths:
   - frontend/src/components/daemon/session-panel.tsx
+  - frontend/src/components/daemon/session-input-bar.tsx
+  - frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx
+  - frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx
+  - frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
 provides: []
 expects_from: []
 goal: |
