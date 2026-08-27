@@ -75,7 +75,17 @@
 结果：mypy 2 文件 0 错、ruff check/format 绿、pytest 2 文件 12 passed
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/src/interactive/types.ts
 
-## ql-20260827-008-3952 | 2026-08-27 13:33:50 | 后台子代理完成后自动唤醒主代理汇报：daemon 收到 task_notification（completed/failed）时，经 debounce 合并同窗口多条通知，向同会话 inject 一条『[后台任务通知]』user 消息（含 …
-状态：进行中
+## ql-20260827-008-3952 | 2026-08-27 13:33:50 | 后台子代理完成后自动唤醒主代理汇报
+状态：已完成
 关联变更：（无）
-文件：（见实际改动）
+文件：
+- sillyhub-daemon/src/interactive/types.ts（deps 端口）
+- sillyhub-daemon/src/interactive/session-manager.ts（wakeup 调度+terminate 清理）
+- sillyhub-daemon/src/hub-client.ts（injectSessionPrompt）
+- sillyhub-daemon/src/cli.ts（deps 桥接）
+- sillyhub-daemon/tests/interactive/task-lifecycle.test.ts（3 新用例+harness 扩展）
+需求：后台子代理完成后自动唤醒主代理汇报
+根因：task_notification 只落库+发 UI 事件，不唤醒已结束的主代理 turn——用户必须手动发消息才能拿到汇报（实证会话 2fe664d9：05:30:50 主代理回复已派出后 turn 结束，05:31:22 两条 NOTIFICATION 无人消费）
+方案：daemon 终态（completed/failed，stopped 不扰）2s debounce 合并同会话通知，经新 deps 回调 onTaskWakeupInject→hubClient.injectSessionPrompt 注入『[后台任务通知]』user 消息唤醒主代理（含摘要与防环指引）；backend 零改动（inject 端点既有，queue_when_busy 处理忙态）
+结果：daemon vitest 16/16 绿（新增 3 例：合并注入/stopped 不触发/未注入回调不炸）；tsc 0 错；本地部署待用户测试（不发阿里云）
+审计：📝 文档欠账（D-8）：4 个源码文件改动未同步任何模块文档（涉及模块：sillyhub-daemon）

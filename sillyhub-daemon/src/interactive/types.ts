@@ -504,6 +504,15 @@ export interface SessionManagerDeps {
     event: SessionEventForBackend,
   ) => void | Promise<void>;
   /**
+   * ql-20260827-007：后台任务终态自动唤醒主代理端口。
+   *
+   * task_notification（completed/failed）到达且 debounce 合并后，把唤醒
+   * prompt（含任务名/用时/摘要/汇报指引）注入同会话（backend inject 创建
+   * 新 turn，queue_when_busy 处理忙态排队）。可选：未注入时仅不做唤醒，
+   * 任务事件/持久行行为不变（测试 mock 零影响）。
+   */
+  onTaskWakeupInject?: (sessionId: string, prompt: string) => void | Promise<void>;
+  /**
    * task-10（§4.3）：元数据持久化端口。
    *
    * 可选（未注入时 SessionManager 不落盘，保持 task-04 内存态行为向后兼容；

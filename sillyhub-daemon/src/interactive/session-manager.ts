@@ -765,6 +765,16 @@ export class SessionManager {
   >();
 
   /**
+   * ql-20260827-007：后台任务终态唤醒的 debounce 合并队列。同 session 短窗口
+   * （2s）内多条 task_notification 合并为一次 inject——并行后台任务（如 A/B
+   * 同时完成）只唤醒一个 turn，避免连环 turn。fire 后整 entry 移除。
+   */
+  private readonly _taskWakeupPending = new Map<
+    string,
+    { timer: NodeJS.Timeout; lines: string[] }
+  >();
+
+  /**
    * task-03（design §5 P1.2）：主 agent Task/Agent tool_use 元数据登记。
    *
    * key = tool_use_id，value = { sessionId, taskName, subagentType? }。assistant
@@ -3000,6 +3010,13 @@ export class SessionManager {
     //     消亡，task_* 不会再到达；防 Map 泄漏）。
     this._clearBackgroundTasks(state.sessionId);
 
+    // ql-20260827-007：取消未 fire 的唤醒 debounce（会话已终态，注入无处可去）。
+    const pendingWakeup = this._taskWakeupPending.get(state.sessionId);
+    if (pendingWakeup) {
+      clearTimeout(pendingWakeup.timer);
+      this._taskWakeupPending.delete(state.sessionId);
+    }
+
     // 5. ql-20260621-partial：销毁 partial buffer（含 timer），防止 end 后定时器仍
     //    fire 推送到已结束 session。
     this._destroyPartialBuffer(state.sessionId);
@@ -4794,6 +4811,76 @@ export class SessionManager {
       ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
       ...(summary ? { summary } : {}),
     }, effectiveToolUseId);
+
+    // ql-20260827-007：completed/failed 触发主代理唤醒（stopped 多为用户/系统主动
+    // 停止，结果无需汇报，不唤醒防噪）。
+    if (rawStatus === 'completed' || rawStatus === 'failed') {
+      this._scheduleTaskWakeup(state.sessionId, {
+        taskId,
+        taskName,
+        status: rawStatus,
+        elapsedMs,
+        summary,
+      });
+    }
+  }
+
+  /**
+   * ql-20260827-007：后台任务终态唤醒调度——2s debounce 合并同会话多条通知后，
+   * 经 deps.onTaskWakeupInject 注入一条「后台任务通知」user 消息（backend inject
+   * 创建新 turn 唤醒主代理汇报；忙态由 queue_when_busy 排队）。未注入回调
+   * （测试/旧构造点）时静默跳过。防环：prompt 明示「汇报后结束本轮、勿重执行」；
+   * 每次唤醒都由真实终态触发，无自持循环。
+   */
+  private _scheduleTaskWakeup(
+    sessionId: string,
+    info: {
+      taskId: string;
+      taskName: string;
+      status: string;
+      elapsedMs?: number;
+      summary?: string;
+    },
+  ): void {
+    const cb = this.deps.onTaskWakeupInject;
+    if (!cb) return;
+    const mm = Math.floor((info.elapsedMs ?? 0) / 60000);
+    const ss = Math.floor(((info.elapsedMs ?? 0) % 60000) / 1000);
+    const dur = `${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+    const summaryClip = (info.summary ?? '').slice(0, 300);
+    const line =
+      `- 任务「${info.taskName}」已${info.status === 'completed' ? '完成' : '失败'}`
+      + `（用时 ${dur}）`
+      + (summaryClip ? `。结果摘要：${summaryClip}` : '')
+      + `（task_id: ${info.taskId}，如需完整输出可调用 TaskOutput 查询，block=false）`;
+    let entry = this._taskWakeupPending.get(sessionId);
+    if (!entry) {
+      const timer = setTimeout(() => {
+        const e = this._taskWakeupPending.get(sessionId);
+        this._taskWakeupPending.delete(sessionId);
+        if (!e || e.lines.length === 0) return;
+        const prompt =
+          '[后台任务通知] 以下后台子代理任务已结束：\n' +
+          e.lines.join('\n') +
+          '\n请把上述任务结果直接汇报给用户（综合归纳，不要逐字照抄），汇报完即结束本轮；'
+          + '不要重复执行这些任务；此消息为系统通知，无需向用户复述本通知本身。';
+        void (async () => {
+          try {
+            await cb(sessionId, prompt);
+          } catch (err) {
+            console.error('[session-manager] task wakeup inject failed', {
+              sessionId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        })();
+      }, 2000);
+      timer.unref?.();
+      entry = { timer, lines: [line] };
+      this._taskWakeupPending.set(sessionId, entry);
+    } else {
+      entry.lines.push(line);
+    }
   }
 
   /**

@@ -52,6 +52,7 @@ interface Harness {
 async function createHarness(
   sessionId = 'sess-1',
   runId = 'run-1',
+  depsExtra?: Partial<SessionManagerDeps>,
 ): Promise<Harness> {
   let capturedMessage:
     | ((msg: Record<string, unknown>) => Promise<void>)
@@ -90,7 +91,7 @@ async function createHarness(
     onSessionEnd: vi.fn(),
     onSessionEvent: vi.fn(),
   };
-  const sm = new SessionManager(deps as unknown as SessionManagerDeps);
+  const sm = new SessionManager({ ...deps, ...depsExtra } as unknown as SessionManagerDeps);
   await sm.create({
     sessionId,
     leaseId: `lease-${sessionId}`,
@@ -116,6 +117,15 @@ async function createHarness(
       return capturedResult(r);
     },
   };
+}
+
+/** ql-20260827-007：注入唤醒回调的便捷包装。 */
+async function createHarnessWakeup(
+  sessionId: string,
+  runId: string,
+  onTaskWakeupInject: (sessionId: string, prompt: string) => void | Promise<void>,
+): Promise<Harness> {
+  return createHarness(sessionId, runId, { onTaskWakeupInject });
 }
 
 // ── 伪 SDK 消息构造（SDK 0.3.181 system/task_* 契约 + spike 实测字段） ────────
@@ -641,5 +651,65 @@ describe('task-lifecycle FR-01/FR-03 — result 收尾后到达的 task_notifica
       status: 'completed',
       summary: '后台完成',
     });
+  });
+});
+
+// ── ql-20260827-007：后台任务终态自动唤醒（debounce 合并 + inject） ──────────
+
+describe('task wakeup inject（终态自动唤醒主代理）', () => {
+  it('FR：同会话两条通知 2s 窗口内合并为一次唤醒注入，prompt 含任务名/用时/摘要/防环指引', async () => {
+    vi.useFakeTimers();
+    try {
+      const wakeup = vi.fn().mockResolvedValue(undefined);
+      const h = await createHarnessWakeup('sess-w', 'run-w', wakeup);
+      await h.emitMessage(msgTaskStarted({ taskId: 'task-a', toolUseId: 'call-a', description: '子代理A: 数数' }));
+      await h.emitMessage(msgTaskStarted({ taskId: 'task-b', toolUseId: 'call-b', description: '子代理B: 数数' }));
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-a', status: 'completed', summary: 'A 数完了', durationMs: 20000 }));
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-b', status: 'completed', summary: 'B 数完了', durationMs: 21000 }));
+      // 窗口内不注入
+      expect(wakeup).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(2100);
+      // 合并为一次，两条任务行都在 prompt 里
+      expect(wakeup).toHaveBeenCalledTimes(1);
+      const [sid, prompt] = wakeup.mock.calls[0] as unknown as [string, string];
+      expect(sid).toBe('sess-w');
+      expect(prompt).toContain('[后台任务通知]');
+      expect(prompt).toContain('子代理A: 数数');
+      expect(prompt).toContain('子代理B: 数数');
+      expect(prompt).toContain('00:20');
+      expect(prompt).toContain('A 数完了');
+      expect(prompt).toContain('TaskOutput');
+      expect(prompt).toContain('不要重复执行这些任务');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('FR：stopped 不唤醒（主动停止无需汇报）', async () => {
+    vi.useFakeTimers();
+    try {
+      const wakeup = vi.fn().mockResolvedValue(undefined);
+      const h = await createHarnessWakeup('sess-s', 'run-s', wakeup);
+      await h.emitMessage(msgTaskStarted({ taskId: 'task-s', toolUseId: 'call-s', description: '停我' }));
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-s', status: 'stopped' }));
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(wakeup).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('R：未注入 onTaskWakeupInject（旧构造点/测试 mock）不抛错，其余行为不变', async () => {
+    vi.useFakeTimers();
+    try {
+      const h = await createHarness('sess-n', 'run-n');
+      await h.emitMessage(msgTaskStarted({ taskId: 'task-n', toolUseId: 'call-n', description: 'n' }));
+      await h.emitMessage(msgTaskNotification({ taskId: 'task-n', status: 'completed', summary: 'x' }));
+      await vi.advanceTimersByTimeAsync(3000);
+      // 事件/落行照常，无唤醒回调也无异常
+      expect(h.deps.onSessionEvent).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

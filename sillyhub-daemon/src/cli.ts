@@ -688,6 +688,11 @@ export async function startAction(opts: StartOptions): Promise<number> {
       onSessionEnd: (sessionId, status) => daemon.onSessionEnd(sessionId, status),
       // task-04（FR-01~03）：session 反馈事件桥接 → HubClient 对应 notify 方法。
       // 失败仅日志不阻塞；字段从 camelCase event 映射为 snake_case body。
+      // ql-20260827-007：后台任务终态自动唤醒——session-manager debounce 合并后
+      // 经 hubClient 注入唤醒消息（失败仅日志，session-manager 侧已 catch）。
+      onTaskWakeupInject: async (sessionId, prompt) => {
+        await client.injectSessionPrompt(sessionId, prompt);
+      },
       onSessionEvent: (sessionId, runId, event: SessionEventForBackend) => {
         void (async () => {
           try {

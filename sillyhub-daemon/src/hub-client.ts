@@ -1048,6 +1048,20 @@ export class HubClient {
    * 保留 None，向后兼容旧 daemon 上报行为）。
    * 失败语义（对齐 _request）：非 2xx → HubHttpError；网络/超时透传。
    */
+  /**
+   * ql-20260827-007：向 interactive session 注入一条唤醒消息（后台任务终态自动
+   * 汇报）。端点：POST /api/daemon/sessions/{sessionId}/inject，body `{prompt}`；
+   * X-API-Key 服务身份鉴权（与 notifyAgentTaskStatus 同款 _headers()）。backend
+   * 侧 queue_when_busy=true——主 turn 在跑时排队，空闲即建新 turn 唤醒主代理。
+   */
+  async injectSessionPrompt(sessionId: string, prompt: string): Promise<Record<string, unknown>> {
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `/api/daemon/sessions/${sessionId}/inject`,
+      { prompt },
+    );
+  }
+
   async notifyAgentTaskStatus(
     sessionId: string,
     runId: string,
