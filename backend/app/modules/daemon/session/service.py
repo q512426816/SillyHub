@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import secrets
 import uuid
 from dataclasses import dataclass
@@ -97,6 +98,41 @@ TERMINAL_TURN_STATUSES = frozenset({"completed", "failed", "killed", "cancelled"
 # 唯一落点：task-04（reopen 前置校验窗口外放行）与 task-05（sweeper 巡检收敛）
 # 均 import 本常量，勿在别处重复定义；本 task 只定义不消费。
 RECONNECTING_RETRY_WINDOW_SEC = 180
+
+# ql-20260827-015：后台任务通知排队合并。daemon 任务终态唤醒（session-manager
+# _scheduleTaskWakeup，2026-08-27-background-subagent-progress ql-20260827-007）
+# 在忙轮期间经 inject 端点（恒 queue_when_busy=True）反复注入「[后台任务通知]」，
+# 每条一行排队——长轮会话的队列会被通知刷成 treadmill（run 终态后逐条派发、每条
+# 都是一轮完整模型汇报）。生产实证（会话 17f10040）：当前轮 4 分钟未结、期间每个
+# 后台任务终态一条排队，计数只增不减。daemon 侧 2s debounce 只覆盖 2 秒窗口，
+# 跨长轮的合并在本层做：同会话已有 pending 通知条目时并入（任务行追加 + 头/尾
+# 计数改写），不新增行——通知类排队恒 ≤1 条。
+TASK_WAKEUP_PROMPT_PREFIX = "[后台任务通知]"
+_TASK_WAKEUP_HEADER_COUNT_RE = re.compile(r"以下 \d+ 个后台子代理任务已全部结束")
+_TASK_WAKEUP_TRAILER_COUNT_RE = re.compile(r"（共 \d+ 个）")
+
+
+def _merge_task_wakeup_prompt(old: str, new: str) -> str:
+    """把新「[后台任务通知]」的任务行并入旧通知 prompt。
+
+    单生产者模板（daemon session-manager._scheduleTaskWakeup）：首行头部（含
+    任务总数）→ 若干 ``- 任务「…」…`` 任务行 → 尾行汇报指令（含总数）。合并 =
+    旧任务行 + 新任务行，头/尾计数改写为新总数。解析按行前缀 ``- `` 判任务行，
+    模板漂移时自然退化为「旧全文 + 新任务行整段拼接」（信息不丢，仅格式退化）。
+    """
+    old_lines = old.split("\n")
+    new_bullets = [line for line in new.split("\n") if line.startswith("- ")]
+    old_bullets = [line for line in old_lines[1:] if line.startswith("- ")]
+    trailer_lines = [
+        _TASK_WAKEUP_TRAILER_COUNT_RE.sub(f"（共 {len(old_bullets) + len(new_bullets)} 个）", line)
+        for line in old_lines[1:]
+        if not line.startswith("- ")
+    ]
+    header = _TASK_WAKEUP_HEADER_COUNT_RE.sub(
+        f"以下 {len(old_bullets) + len(new_bullets)} 个后台子代理任务已全部结束",
+        old_lines[0],
+    )
+    return "\n".join([header, *old_bullets, *new_bullets, *trailer_lines])
 
 
 def _apply_session_terminal_status(run: AgentRun, session: AgentSession) -> str | None:
@@ -2500,6 +2536,45 @@ class SessionService:
                             "session_id": str(session_id),
                             "pending": pending_count,
                         },
+                    )
+                # ql-20260827-015：通知合并——同会话已有 pending 的「[后台任务通知]」
+                # 条目时并入不新增行（行锁内查询 + 更新，与满员检查同事务原子）。
+                # 返回形态与普通入队一致（queued=True + 同 entry id），daemon 调用
+                # 方无感。
+                existing_notification: AgentSessionQueuedMessage | None = None
+                if prompt.startswith(TASK_WAKEUP_PROMPT_PREFIX):
+                    existing_notification = (
+                        await self._session.execute(
+                            select(AgentSessionQueuedMessage).where(
+                                AgentSessionQueuedMessage.agent_session_id == session.id,
+                                AgentSessionQueuedMessage.status == "pending",
+                                AgentSessionQueuedMessage.prompt.like(
+                                    f"{TASK_WAKEUP_PROMPT_PREFIX}%"
+                                ),
+                            )
+                        )
+                    ).scalar_one_or_none()
+                if existing_notification is not None:
+                    existing_notification.prompt = _merge_task_wakeup_prompt(
+                        existing_notification.prompt or "", prompt
+                    )
+                    self._session.add(existing_notification)
+                    await self._session.commit()
+                    await self._publish_session_event(
+                        session.id,
+                        {
+                            "event": "queue_changed",
+                            "session_id": str(session.id),
+                            "queue_entry_id": str(existing_notification.id),
+                            "action": "merged",
+                        },
+                    )
+                    return SessionDispatchResult(
+                        agent_session=session,
+                        agent_run=None,
+                        lease_id=None,
+                        queued=True,
+                        queue_entry_id=existing_notification.id,
                     )
                 entry = AgentSessionQueuedMessage(
                     agent_session_id=session.id,

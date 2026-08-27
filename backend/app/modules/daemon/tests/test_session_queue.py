@@ -386,3 +386,83 @@ class TestQueueManagement:
 
         with pytest.raises(DaemonSessionNotFound):
             await svc.delete_queued_message(other, entry.queue_entry_id, uid)
+
+
+def _wakeup_prompt(task_name: str, task_id: str) -> str:
+    """构造 daemon _scheduleTaskWakeup 同款通知 prompt（单生产者模板对齐）。"""
+    return (
+        "[后台任务通知] 以下 1 个后台子代理任务已全部结束"
+        "（列表中的每一个都已终止，没有仍在运行的任务）：\n"
+        f"- 任务「{task_name}」已完成（用时 00:01）（task_id: {task_id}，"
+        "如需完整输出可调用 TaskOutput 查询，block=false）\n"
+        "请逐条核对上述每个任务（共 1 个）的名称与结果，一次性向用户完整汇报"
+        "（综合归纳，不要逐字照抄，不要遗漏任何一个任务）；"
+        "禁止声称仍在等待任何任务；汇报完即结束本轮；不要重复执行这些任务；"
+        "此消息为系统通知，无需向用户复述本通知本身。"
+    )
+
+
+class TestTaskWakeupMerge:
+    """ql-20260827-015：忙轮期间多条「[后台任务通知]」合并为一条排队。
+
+    生产实证（会话 17f10040）：长轮未结期间每个后台任务终态注入一条通知排队，
+    计数只增不减、派发后逐条烧一轮模型汇报。合并后通知类排队恒 ≤1 条。
+    """
+
+    @pytest.mark.asyncio
+    async def test_notifications_merge_into_single_entry(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        svc, uid, session_id, _run = await _setup_busy_session(db_session)
+
+        first = await svc.inject_session(
+            session_id, uid, prompt=_wakeup_prompt("查依赖", "t-1"), queue_when_busy=True
+        )
+        second = await svc.inject_session(
+            session_id, uid, prompt=_wakeup_prompt("生成类文件", "t-2"), queue_when_busy=True
+        )
+
+        # 仍只有 1 行；两次返回同一 entry id（daemon 调用方无感）。
+        rows = await _queue_rows(db_session, session_id)
+        assert len(rows) == 1
+        assert second.queued is True
+        assert second.queue_entry_id == first.queue_entry_id
+
+        merged = rows[0].prompt or ""
+        # 两个任务行都在，头/尾计数改写为 2。
+        assert "任务「查依赖」" in merged
+        assert "任务「生成类文件」" in merged
+        assert "以下 2 个后台子代理任务已全部结束" in merged
+        assert "（共 2 个）" in merged
+        assert "以下 1 个" not in merged
+        # 汇报指令尾行保留（只出现一次）。
+        assert merged.count("请逐条核对上述每个任务") == 1
+
+    @pytest.mark.asyncio
+    async def test_normal_messages_not_merged(self, db_session, mocked_hub, mocked_redis) -> None:
+        svc, uid, session_id, _run = await _setup_busy_session(db_session)
+
+        await svc.inject_session(session_id, uid, prompt="普通消息A", queue_when_busy=True)
+        await svc.inject_session(session_id, uid, prompt="普通消息B", queue_when_busy=True)
+
+        rows = await _queue_rows(db_session, session_id)
+        assert len(rows) == 2
+        assert {r.prompt for r in rows} == {"普通消息A", "普通消息B"}
+
+    @pytest.mark.asyncio
+    async def test_notification_and_normal_coexist(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """通知与普通消息互不合并（合并只作用于通知前缀内部）。"""
+        svc, uid, session_id, _run = await _setup_busy_session(db_session)
+
+        await svc.inject_session(
+            session_id, uid, prompt=_wakeup_prompt("查依赖", "t-1"), queue_when_busy=True
+        )
+        await svc.inject_session(session_id, uid, prompt="普通消息", queue_when_busy=True)
+
+        rows = await _queue_rows(db_session, session_id)
+        assert len(rows) == 2
+        prompts = {r.prompt or "" for r in rows}
+        assert any(p.startswith("[后台任务通知]") for p in prompts)
+        assert "普通消息" in prompts

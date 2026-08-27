@@ -145,3 +145,15 @@
 方案：backend reopen_session 新 lease metadata 补写 session_llm_provider_id（create 同款键）+ SESSION_RESUME 携带 resolve_bound_provider_config 解密 provider_config（降级缺键不阻断）；daemon _routeSessionResume 双读 provider_config/providerConfig 写 record.providerConfig 走既有 restore env 重建链
 结果：backend reopen 两测试文件 36 passed（新增 3 用例）daemon resume 路由 13 passed（新增 3 用例）ruff mypy tsc 全过，模块文档 daemon.md+changelog 已更新
 审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_session_reopen.py, sillyhub-daemon/tests/daemon-session-resume-route.test.ts
+
+## ql-20260827-015-3875 | 2026-08-27 17:07:21 | 修复后台任务通知排队刷屏——同会话合并为一条
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/session/service.py（入队分支通知合并 + _merge_task_wakeup_prompt）
+- backend/app/modules/daemon/tests/test_session_queue.py（TestTaskWakeupMerge 新增 3 用例）
+需求：修复后台任务通知排队刷屏——同会话合并为一条
+根因：inject 端点恒 queue_when_busy=True，daemon 后台任务终态唤醒（2s debounce 只盖 2 秒窗）在长轮期间每任务终态入队一条通知，计数只增不减且每条派发后都是一轮完整模型汇报（会话 17f10040 实证）
+方案：入队分支对「[后台任务通知]」前缀做同会话 pending 合并：新通知任务行并入既有条目（头/尾计数改写，_merge_task_wakeup_prompt 行级解析），不新增行；返回同 entry id daemon 无感；普通消息互不合并
+结果：test_session_queue.py 13 passed（新增 3 用例）ruff mypy 全过，模块文档已更新，待部署
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_session_queue.py
