@@ -21,9 +21,10 @@
  *   - STATUS_LABELS / labelOf @/lib/status-labels（UI 无关文案表）
  *   - normalizeClientPath @/lib/client-path（路径规范化，与桌面创建同源）
  *
- * D-006 / 2026-07-26-ungate-workspace-entry：工作区详情及之后功能手机端不渲染——
- * 点卡片不 router.push('/workspaces/[id]')，任意工作区（含未绑定，门禁后移）一律：
- *   - message.info('请在电脑端打开')，不导航（daemon 绑定降级为概览可选配置）
+ * D-006 门禁已解除（2026-08-26-mobile-workspace-page task-03 / FR-01 / D-004@V1）：
+ * 点卡片 router.push 进移动工作区主页 /m/workspaces/[id]（经段主页 redirect 落变更
+ * 列表），不再提示「请在电脑端打开」。2026-07-26-ungate-workspace-entry 时期的
+ * 「不导航 + message.info」门禁行为已废弃；daemon 绑定降级语义随门禁一并作废。
  *
  * task-08 / 2026-08-18-workspace-role-type / design §5.6：类型筛选与创建调用点
  * 最小收口——筛选换 lib/workspace-types 8 值词表 + 「未分类」（unclassified 谓词），
@@ -36,7 +37,8 @@
  * 容器由 task-05 MobileLayoutShell（app/m/layout.tsx）自动包裹。
  */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { App, Input } from "antd";
+import { useRouter } from "next/navigation";
+import { Input } from "antd";
 
 import { MobileCardList, type MobileAction } from "@/components/mobile/mobile-card-list";
 import { MobileDetailSheet } from "@/components/mobile/mobile-detail-sheet";
@@ -93,8 +95,8 @@ const FILTER_CONTROL_CLASS =
   "h-11 w-full rounded-[var(--radius-md)] border border-border bg-card px-3 text-[14px] text-foreground";
 
 export default function WorkspacesMobilePage() {
+  const router = useRouter();
   const notify = useNotify();
-  const { message } = App.useApp();
   const isPlatformAdmin = useSession((s) => s.user?.is_platform_admin === true);
 
   // 列表 + 分页（page 0-based，与桌面同 offset=page*PAGE_SIZE）。
@@ -192,13 +194,14 @@ export default function WorkspacesMobilePage() {
     [statusMap],
   );
 
-  // D-006 / 2026-07-26-ungate-workspace-entry：移动端不导航进详情（FR-07 手机端不渲染详情），
-  // 点任意工作区（含未绑定，门禁后移）一律提示电脑端打开。daemon 绑定降级为概览可选配置。
+  // 2026-08-26-mobile-workspace-page task-03（FR-01 / D-004@V1）：D-006 门禁解除——
+  // 点卡片导航进移动工作区主页 /m/workspaces/[id]（经段主页 redirect 落变更列表），
+  // /changes 落地由段主页承接；不再提示「请在电脑端打开」。
   const handleActivate = useCallback(
-    (_w: Workspace) => {
-      message.info("请在电脑端打开");
+    (w: Workspace) => {
+      router.push(`/m/workspaces/${w.id}`);
     },
-    [message],
+    [router],
   );
 
   // ── 别名编辑（对齐桌面 handleOpenAlias / handleSaveAlias）──

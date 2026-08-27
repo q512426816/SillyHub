@@ -62,6 +62,12 @@ vi.mock("@/lib/errors", () => ({
     err instanceof Error && err.message ? err.message : (fallback ?? "操作失败"),
 }));
 
+// ── next/navigation mock：useRouter 提供 push/replace spy（task-03 导航断言）──
+const nav = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: nav.push, replace: nav.replace }),
+}));
+
 // ── fixtures ────────────────────────────────────────────────────────────────
 
 /** apiFetch 按 url+method 路由的默认桩：列表 → 空页；daemon → 空数组。 */
@@ -219,5 +225,48 @@ describe("m/workspaces task-08 破坏面收口", () => {
       // task-08 最小收口：移动端不加类型 UI，默认 other（D-006@v1）
       type: "other",
     });
+  });
+});
+
+describe("m/workspaces 卡片点击导航（D-006 门禁解除，2026-08-26-mobile-workspace-page task-03）", () => {
+  it("点卡片 → router.push('/m/workspaces/<id>')，不再提示「请在电脑端打开」", async () => {
+    // 列表桩改吐一张卡片（复用既有 apiFetch 桩机制，经真实 listWorkspaces 解析）
+    apiCalls.apiFetch.mockImplementation(
+      async (url: string, init?: { method?: string }) => {
+        if (url === "/api/workspaces" && (!init?.method || init.method === "GET")) {
+          return {
+            items: [
+              {
+                id: "ws-nav-1",
+                name: "移动工作区甲",
+                slug: "mobile-ws-a",
+                root_path: "C:/proj/a",
+                status: "active",
+                type: null,
+                display_alias: null,
+                owner: null,
+              },
+            ],
+            total: 1,
+          };
+        }
+        if (url === "/api/daemon/runtimes" || url === "/api/daemon/instances") {
+          return [];
+        }
+        return { items: [], total: 0 };
+      },
+    );
+    renderPage();
+
+    // 卡片主体（MobileCardList 的 onItemPress 绑在 role=button 的卡片体 div 上）
+    const cardTitle = await screen.findByText("移动工作区甲");
+    fireEvent.click(cardTitle.closest('[role="button"]') as HTMLElement);
+
+    // 门禁解除：导航进移动工作区主页（/changes 落地由 task-02 段主页 redirect 承接）
+    expect(nav.push).toHaveBeenCalledTimes(1);
+    expect(nav.push).toHaveBeenCalledWith("/m/workspaces/ws-nav-1");
+    expect(nav.replace).not.toHaveBeenCalled();
+    // 旧门禁提示文案不再出现（message.info 分支已随 D-006 解除移除）
+    expect(screen.queryByText("请在电脑端打开")).toBeNull();
   });
 });

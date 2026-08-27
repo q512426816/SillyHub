@@ -8,10 +8,17 @@
  *     strip /m + 白名单 + /m/login 公开 + 未登录→/m/login + 非白名单无 wsId→/m/workspaces。
  *  2. useSession 取 hydrated/accessToken 决定渲染（防 FOUC，镜像桌面 (dashboard)/layout.tsx:54-55）。
  *  3. 守卫通过 → <MobileAppShell activeTab=推断>{children}</MobileAppShell>。
+ *  4. 钻取页（DRILL_ROUTES，2026-08-26-mobile-workspace-page）→ 裸容器直出 children。
  *
  * ── R-10 防漂移锚点（改桌面守卫须同步 route-guard.ts + 本文件）──────────────────
  *  - !hydrated → return null        ← app/(dashboard)/layout.tsx:54
  *  - 受保护页 !accessToken → null   ← app/(dashboard)/layout.tsx:55（守卫 effect 已 replace）
+ *  - DRILL_ROUTES 分支（design §5.2 / §5.5）：钻取页 = strip 后命中
+ *    ^/workspaces/[^/]+/(changes|sessions)/[^/]+（变更详情 :cid / 会话对话 :sid）→
+ *    裸容器（mx-auto max-w-[480px] flex-col min-h-[100dvh]）直出 children，不裹
+ *    MobileAppShell（无 MobileTopBar、无底部 TabBar，页面自渲染返回顶栏，沉浸钻取）；
+ *    列表页 /workspaces/:id/changes、/workspaces/:id/sessions（无第四段）不命中，
+ *    仍走 MobileAppShell（保留底部 Tab 回平台功能）。
  *
  * 与桌面 layout 的唯一语义差异（design §5.2 明确）：
  *  - 桌面 /login 在 (auth) 路由组、根本不进 (dashboard) layout，故桌面可无条件 !accessToken→null；
@@ -62,6 +69,22 @@ function inferActiveTab(pathname: string): TabKey | undefined {
   return MOBILE_TABS.find((tab) => isTabActive(tab, stripped))?.key;
 }
 
+/**
+ * 钻取页路由正则（DRILL_ROUTES / design §5.2 / §5.5）：变更详情
+ * /workspaces/:id/changes/:cid 与会话对话 /workspaces/:id/sessions/:sid。
+ * 只消费 strip 后的桌面形态路径（与 stripMobilePrefix 保持单一约定，R-10 锚点已登记）；
+ * 列表页 /workspaces/:id/changes、/workspaces/:id/sessions（无第四段）不命中。
+ */
+const DRILL_ROUTES_RE = /^\/workspaces\/[^/]+\/(changes|sessions)\/[^/]+/;
+
+/**
+ * 判断是否钻取页（全屏沉浸：无外壳顶栏/底部 Tab，页面自渲染返回顶栏）。
+ * 入参接受 /m 前缀或桌面形态路径——内部先 stripMobilePrefix 再匹配，两形态等价。
+ */
+export function isDrillRoute(pathname: string): boolean {
+  return DRILL_ROUTES_RE.test(stripMobilePrefix(pathname));
+}
+
 export default function MobileLayoutShell({ children }: { children: ReactNode }) {
   // task-03 守卫：只负责重定向副作用，渲染由本组件按 hydrated/token 决定。
   useMobileRouteGuard();
@@ -80,6 +103,17 @@ export default function MobileLayoutShell({ children }: { children: ReactNode })
 
   // 受保护页：未登录返回 null（守卫 effect 已 replace /m/login，镜像桌面 layout:55）。
   if (!accessToken) return null;
+
+  // 钻取页（DRILL_ROUTES，design §5.2 / §5.5）：裸容器直出 children，不裹
+  // MobileAppShell——无外壳顶栏、无底部 TabBar（沉浸钻取 + 给输入条/时间线腾空间），
+  // 页面自渲染返回顶栏；容器约束与普通页一致（max-w-480px / 100dvh / flex-col）。
+  if (isDrillRoute(pathname)) {
+    return (
+      <div className="mx-auto flex min-h-[100dvh] w-full max-w-[480px] flex-col">
+        {children}
+      </div>
+    );
+  }
 
   // 守卫通过：渲染移动外壳（顶栏 + 内容 + 底部 5 Tab），按当前路由高亮对应 Tab。
   const activeTab = inferActiveTab(pathname);

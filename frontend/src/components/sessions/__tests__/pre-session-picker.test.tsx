@@ -8,7 +8,11 @@
 //   2. 默认 Claude Code 高亮（aria-pressed + 「默认」Tag）；
 //   3. 取消 / 遮罩点击关闭不清父层状态（仅 onCancel 回调，onPick 不触发）；
 //      受控 open=false 卸载；重开重置回第一步；
-//   4. 空态：无在线机器 / 该机器无可用智能体引导文案。
+//   4. 空态：无在线机器 / 该机器无可用智能体引导文案；
+//   5. variant 容器形态（task-13，2026-08-26-mobile-workspace-page / FR-08 / FR-11）：
+//      不传 variant 容器类与改前逐字一致（桌面零回归锚）；bottomSheet 贴底抽屉
+//      （items-end/满宽/顶圆角/80dvh 滚动/安全区留白）+ 两步流程同构 + 选项行
+//      ≥44px 触摸热区抽检（jsdom 不量布局，按 min-h-[44px] 类锚抽检）。
 //
 // 纯展示受控组件零数据请求——无网络 mock，仅断言回调与渲染。
 
@@ -261,5 +265,97 @@ describe("PreSessionPicker 空态引导", () => {
     expect(
       screen.queryByRole("button", { name: /选择智能体/ }),
     ).not.toBeInTheDocument();
+  });
+});
+
+/* ───────── 5. variant 容器形态（task-13 / FR-08 / FR-11） ───────── */
+
+// 独立渲染助手（不动既有 setupPicker——既有用例零修改）：variant 走 props 透传。
+function renderVariantPicker(
+  props: {
+    variant?: "center" | "bottomSheet";
+  } = {},
+) {
+  const onPick = vi.fn();
+  const onCancel = vi.fn();
+  const result = render(
+    <PreSessionPicker
+      open
+      machines={[makeMachine()]}
+      onCancel={onCancel}
+      onPick={onPick}
+      {...props}
+    />,
+  );
+  return { ...result, onPick, onCancel };
+}
+
+describe("PreSessionPicker variant 容器形态（默认 center 零回归）", () => {
+  it("不传 variant：遮罩与卡体 className 与改前逐字一致（桌面回归锚）", () => {
+    renderVariantPicker();
+    expect(screen.getByTestId("pre-session-picker-mask").className).toBe(
+      "fixed inset-0 z-50 flex items-center justify-center bg-brand-950/30 p-4 backdrop-blur-[2px]",
+    );
+    expect(screen.getByRole("dialog").className).toBe(
+      "w-full max-w-[360px] rounded-2xl border border-border bg-card p-4 shadow-lg",
+    );
+  });
+
+  it('variant="bottomSheet"：容器为贴底抽屉（items-end/满宽/顶圆角/80dvh 滚动/安全区留白）', () => {
+    renderVariantPicker({ variant: "bottomSheet" });
+
+    const mask = screen.getByTestId("pre-session-picker-mask");
+    expect(mask).toHaveClass("fixed", "inset-0", "z-50", "flex", "items-end");
+    // 居中卡形态专属类不再出现（贴底 + 满宽不吃四周留白）。
+    expect(mask).not.toHaveClass("items-center");
+    expect(mask).not.toHaveClass("p-4");
+
+    const card = screen.getByRole("dialog");
+    expect(card).toHaveClass(
+      "w-full",
+      "rounded-t-2xl",
+      "max-h-[80dvh]",
+      "overflow-y-auto",
+      "pb-[env(safe-area-inset-bottom)]",
+    );
+    expect(card).not.toHaveClass("max-w-[360px]");
+    expect(card).not.toHaveClass("rounded-2xl");
+  });
+
+  it('variant="bottomSheet" 两步流程同构：机器→智能体→onPick(runtimeId)；遮罩/✕ 仍只 onCancel；选项行 ≥44px 触摸热区抽检', () => {
+    const { onPick, onCancel } = renderVariantPicker({
+      variant: "bottomSheet",
+    });
+
+    // 两步即达（与 center 同一逻辑路径）：① 机器 → ② 智能体 → onPick。
+    const machine = screen.getByRole("button", { name: /选择机器 机器一/ });
+    expect(machine).toHaveClass("min-h-[44px]");
+    fireEvent.click(machine);
+    expect(screen.getByText(/② 智能体 · 机器一/)).toBeInTheDocument();
+
+    const claude = screen.getByRole("button", {
+      name: /选择智能体 Claude Code/,
+    });
+    expect(claude).toHaveClass("min-h-[44px]");
+    fireEvent.click(claude);
+    expect(onPick).toHaveBeenCalledTimes(1);
+    expect(onPick).toHaveBeenCalledWith("rt-claude");
+
+    // 取消语义不变：遮罩 / ✕ 仅 onCancel（受控语义零分叉，onPick 不再触发）。
+    fireEvent.click(screen.getByTestId("pre-session-picker-mask"));
+    fireEvent.click(screen.getByLabelText("关闭"));
+    expect(onCancel).toHaveBeenCalledTimes(2);
+    expect(onPick).toHaveBeenCalledTimes(1);
+  });
+
+  it("显式 variant=\"center\" 与默认一致：选项行不带 44px 热区类（外观差异仅 bottomSheet 生效）", () => {
+    renderVariantPicker({ variant: "center" });
+    expect(
+      screen.getByRole("button", { name: /选择机器 机器一/ }),
+    ).not.toHaveClass("min-h-[44px]");
+    expect(screen.getByTestId("pre-session-picker-mask")).toHaveClass(
+      "items-center",
+      "p-4",
+    );
   });
 });

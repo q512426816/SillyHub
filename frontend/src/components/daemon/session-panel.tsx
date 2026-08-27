@@ -53,6 +53,7 @@ import {
   Lock,
   MessageSquareText,
   Monitor,
+  MoreHorizontal,
   Plus,
   Puzzle,
   RefreshCw,
@@ -190,6 +191,16 @@ export interface SessionPanelProps {
    *  隐式形态。 */
   mode: "page" | "dialog";
 
+  /** task-14（2026-08-26-mobile-workspace-page / design §5.4 §7 / FR-07 / FR-11）：
+   *  视口样式变体，缺省 "desktop"（既有调用点不传 → 行为零变化）。仅 page 分支
+   *  渲染层消费——mobile 只调整布局类（面板满宽贴屏/padding 收敛）与次要 chrome
+   *  收纳（#id 复制、机器/工作区徽标、后台/子代理目录进 ⋯ 菜单），核心操作
+   *  （发消息/SSE 流式/打断/结束/视图切换）原位保留；dialog 分支不消费 variant
+   *  （渲染零分叉）；mode（宿主形态）与 variant（视口样式）双维度正交（design
+   *  §5.5 防漂移锚点）。SSE 建流/断线 resync/消息队列/中断/结束/装配器一律共用，
+   *  variant 不进入任何数据/effect/回调逻辑分支。 */
+  variant?: "desktop" | "mobile";
+
   // ── 会话标识（两模式共用）──────────────────────────────────────────
   /** page 模式：选中的既有会话 id（父级同时用作 key）；null = 预会话空态
    *  （task-03 / D-101：与真会话同构，首句发送才 createSession 原地接管）。
@@ -291,6 +302,7 @@ export function SessionPanel(props: SessionPanelProps) {
         preContext={props.preContext}
         onPreSessionCreated={props.onPreSessionCreated}
         pageContextOverride={props.pageContextOverride}
+        variant={props.variant ?? "desktop"}
       />
     );
   }
@@ -321,7 +333,41 @@ interface SessionPanelPageProps {
     | { page_key: "generic_page"; route_key: string }
     | { page_key: "workspace"; workspace_id: string }
     | null;
+  /** task-14（2026-08-26-mobile-workspace-page）：视口样式变体——分发函数已归一
+   *  （外层 ?? "desktop"），仅渲染层消费（见 SessionPanelProps.variant 注释）。 */
+  variant: "desktop" | "mobile";
 }
+
+/* ── task-14（2026-08-26-mobile-workspace-page / design §5.4）：variant 布局类 ──
+ * desktop 字面量与改动前逐字一致（回归锚：__tests__/session-panel-variant.test.tsx
+ * 断言不传 variant 时 className 不变）；mobile 仅满宽贴屏（去圆角/边框）+ padding
+ * 收敛——逻辑零分叉，variant 只出现在 JSX className/显隐条件。 */
+
+/** 面板根容器（page 模式真会话/预会话两个渲染点共用）。 */
+const PANEL_ROOT_CLS_DESKTOP =
+  "flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card";
+const PANEL_ROOT_CLS_MOBILE =
+  "flex h-full min-h-0 w-full flex-col overflow-hidden bg-card";
+
+/** 面板头（两渲染点共用）。 */
+const PANEL_HEADER_CLS_DESKTOP =
+  "flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2";
+const PANEL_HEADER_CLS_MOBILE =
+  "flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2";
+
+/**
+ * mobile 会话主体外包层：TurnTimeline / AgentLogSessionBody 自带纵向滚动容器
+ * （min-h-0 flex-1 overflow-y-auto），外包 flex 列容器不破坏高度链；任意变体
+ * 选择器给 markdown 表格补横向滚动容器（design §5.4：横向内容不撑破竖屏视口；
+ * markdown pre 已有 overflow-x-auto、ARGS_PRE_CLS pre 已 wrap，表格是缺口），
+ * 并锁外层横向溢出（防整条时间线被宽表格横向拖走）。desktop 无外包层（DOM
+ * 结构零变化）。
+ */
+const PANEL_BODY_WRAP_CLS_MOBILE =
+  "flex min-h-0 flex-1 flex-col " +
+  "[&_.wmde-markdown_table]:!block [&_.wmde-markdown_table]:!max-w-full " +
+  "[&_.wmde-markdown_table]:!overflow-x-auto " +
+  "[&_[data-testid='turn-timeline-scroll']]:overflow-x-hidden";
 
 const MAX_PROMPT_LEN = 8000;
 
@@ -615,9 +661,14 @@ function SessionPanelPage({
   preContext,
   onPreSessionCreated,
   pageContextOverride,
+  variant,
 }: SessionPanelPageProps) {
   const qc = useQueryClient();
   const notify = useNotify();
+
+  // task-14（design §5.4）：视口样式派生——仅渲染层消费（className 三元/次要
+  // chrome 显隐），不进入任何数据/effect/回调逻辑分支（可 grep 验证）。
+  const mobile = variant === "mobile";
 
   // ── 会话详情（配置三列 + 状态 + current_run_id）────────────────────────
   // task-03（R-01）：预会话态（sessionId=null）不发起 getAgentSession(null)——
@@ -797,6 +848,9 @@ function SessionPanelPage({
   // 后置为该分身 sub_session_id，浮层（WorkerSessionOverlay）复用 SessionPanel
   // 打开；null = 关闭（主控面板 state 不动，关闭即原样返回）。
   const [workerSessionId, setWorkerSessionId] = useState<string | null>(null);
+  // task-14（design §5.4）：mobile 头部 ⋯ 菜单开关（次要 chrome 收纳容器）。
+  // hook 无条件声明（desktop 渲染层不读它），variant 保持在渲染层。
+  const [mobileMoreOpen, setMobileMoreOpen] = useState(false);
 
   const streamRef = useRef<SessionStreamConnection | null>(null);
   // 面板根 ref（task-09 / FR-04）：子代理目录跳转的 DOM 定位查询范围（限面板内）。
@@ -2073,12 +2127,15 @@ function SessionPanelPage({
     return (
       <section
         ref={panelRef}
-        className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card"
+        className={mobile ? PANEL_ROOT_CLS_MOBILE : PANEL_ROOT_CLS_DESKTOP}
         aria-label="会话面板"
+        data-variant={variant}
         data-testid="session-pre-session-panel"
       >
         {/* 面板头（同构）：新会话标题 + 机器/工作区 chips + 打断按钮（禁用）。 */}
-        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2">
+        <header
+          className={mobile ? PANEL_HEADER_CLS_MOBILE : PANEL_HEADER_CLS_DESKTOP}
+        >
           <div className="flex min-w-0 items-center gap-2">
             <span className="truncate text-sm font-semibold text-foreground">
               新会话
@@ -2325,43 +2382,88 @@ function SessionPanelPage({
           ? { status: "error" as const, text: "已失败" }
           : { status: "warning" as const, text: "恢复中" };
 
+  // task-14（design §5.4）：会话主体条件提升为变量——mobile 外包横向滚动容器
+  // （PANEL_BODY_WRAP_CLS_MOBILE），desktop 原样直挂（DOM 结构/props 零变化）。
+  const sessionBody = isToolReportBody ? (
+    <AgentLogSessionBody sessionId={session.id} />
+  ) : (
+    <TurnTimeline
+      turns={displayTurns}
+      viewMode={viewMode}
+      errorMsg={errorMsg}
+      sessionStatus={
+        ended
+          ? session.status === "failed"
+            ? "failed"
+            : "ended"
+          : restoring
+            ? "reconnecting"
+            : "active"
+      }
+      pendingRequests={pendingRequests}
+      dialogHistory={dialogHistory}
+      onDialogResolved={handleDialogResolved}
+      onResend={(prompt) => {
+        void handleResend(prompt);
+      }}
+      onSwitchProvider={() => {
+        if (typeof window !== "undefined") {
+          window.location.assign("/settings");
+        }
+      }}
+      hasOnlineProvider={machineOnline}
+      emptyProviderLabel={
+        PROVIDER_META[session.provider]?.label ?? session.provider
+      }
+      streamFooter={<AgentLogCard sessionId={session.id} />}
+    />
+  );
+
   return (
     <section
       ref={panelRef}
-      className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-card"
+      className={mobile ? PANEL_ROOT_CLS_MOBILE : PANEL_ROOT_CLS_DESKTOP}
       aria-label="会话面板"
+      data-variant={variant}
     >
-      {/* 面板头：标题 + 会话 id 短码（点击复制，ql-20260815-010）+ 状态 + 视图切换 + 打断/结束 */}
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-border px-4 py-2">
+      {/* 面板头：标题 + 会话 id 短码（点击复制，ql-20260815-010）+ 状态 + 视图切换 + 打断/结束。
+          task-14（design §5.4）：mobile 保留核心（标题/运行状态/视图切换/打断），
+          次要 chrome（#id 复制、机器/工作区徽标、后台/子代理目录）收纳进 ⋯ 菜单。 */}
+      <header
+        className={mobile ? PANEL_HEADER_CLS_MOBILE : PANEL_HEADER_CLS_DESKTOP}
+      >
         <div className="flex min-w-0 items-center gap-2">
           {title && (
             <span className="truncate text-sm font-semibold text-foreground">
               {title}
             </span>
           )}
-          {/* 会话 id 短码：点击复制完整 id（排障/引用入口），notify 反馈。 */}
-          <button
-            type="button"
-            aria-label="复制会话 ID"
-            title={`点击复制会话 ID：${session.id}`}
-            onClick={() => {
-              void navigator.clipboard
-                ?.writeText(session.id)
-                .then(() => notify.success("已复制会话 ID"))
-                .catch(() => notify.error(new Error("复制失败")));
-            }}
-            className="shrink-0 cursor-pointer rounded px-1 py-0.5 font-mono text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          >
-            #{session.id.slice(0, 8)}
-          </button>
+          {/* 会话 id 短码：点击复制完整 id（排障/引用入口），notify 反馈。
+              mobile 收纳进 ⋯ 菜单（见头部右侧）。 */}
+          {!mobile && (
+            <button
+              type="button"
+              aria-label="复制会话 ID"
+              title={`点击复制会话 ID：${session.id}`}
+              onClick={() => {
+                void navigator.clipboard
+                  ?.writeText(session.id)
+                  .then(() => notify.success("已复制会话 ID"))
+                  .catch(() => notify.error(new Error("复制失败")));
+              }}
+              className="shrink-0 cursor-pointer rounded px-1 py-0.5 font-mono text-[10.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              #{session.id.slice(0, 8)}
+            </button>
+          )}
           <Badge status={statusBadge.status} text={statusBadge.text} />
-          {machineName && (
+          {!mobile && machineName && (
             <span className="hidden shrink-0 items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground sm:inline-flex">
               <Monitor aria-hidden className="h-3 w-3" />
               {machineName}
             </span>
           )}
-          {workspaceName && (
+          {!mobile && workspaceName && (
             <span className="hidden shrink-0 items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground sm:inline-flex">
               <FolderOpen aria-hidden className="h-3 w-3" />
               {workspaceName}
@@ -2370,24 +2472,31 @@ function SessionPanelPage({
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {/* ql-20260826-010：后台活动目录——bash/后台任务/团队任务收编头部下拉
-              （原三段常驻消息流与输入区之间挤占聊天窗口）。 */}
-          <ActivityCatalog
-            bashProgress={bashProgress}
-            agentTasks={agentTasks}
-            missions={teamMissions}
-            workspaceId={
-              session.workspace_id ?? preContext?.workspaceId ?? null
-            }
-            onRefreshMissions={() => {
-              void refreshTeamMissions();
-            }}
-            onOpenWorkerSession={(subSessionId) => {
-              setWorkerSessionId(subSessionId);
-            }}
-          />
-          {/* task-09（FR-04 / Grill X-09）：子代理目录——仅 page 模式头部挂载
-              （dialog 模式不挂）；无子代理段时组件返回 null 不占位。 */}
-          <SubagentCatalog turns={displayTurns} onJumpTo={handleJumpToSubagent} />
+              （原三段常驻消息流与输入区之间挤占聊天窗口）。mobile 再收纳进 ⋯ 菜单。 */}
+          {!mobile && (
+            <>
+              <ActivityCatalog
+                bashProgress={bashProgress}
+                agentTasks={agentTasks}
+                missions={teamMissions}
+                workspaceId={
+                  session.workspace_id ?? preContext?.workspaceId ?? null
+                }
+                onRefreshMissions={() => {
+                  void refreshTeamMissions();
+                }}
+                onOpenWorkerSession={(subSessionId) => {
+                  setWorkerSessionId(subSessionId);
+                }}
+              />
+              {/* task-09（FR-04 / Grill X-09）：子代理目录——仅 page 模式头部挂载
+                  （dialog 模式不挂）；无子代理段时组件返回 null 不占位。 */}
+              <SubagentCatalog
+                turns={displayTurns}
+                onJumpTo={handleJumpToSubagent}
+              />
+            </>
+          )}
           {turnState.turns.length > 0 && (
             <div
               role="tablist"
@@ -2422,12 +2531,88 @@ function SessionPanelPage({
           >
             打断本轮
           </Button>
+          {/* task-14（design §5.4）：mobile ⋯ 菜单——次要 chrome 收纳（#id 复制/
+              机器/工作区徽标/后台目录/子代理目录），组件与回调逻辑与 desktop
+              原位版本逐字共用（纯渲染层搬迁，无逻辑分叉）。 */}
+          {mobile && (
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                aria-label="更多操作"
+                aria-expanded={mobileMoreOpen}
+                title="更多操作：复制会话 ID / 机器与工作区 / 后台任务 / 子代理目录"
+                onClick={() => setMobileMoreOpen((v) => !v)}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <MoreHorizontal aria-hidden className="h-4 w-4" />
+              </button>
+              {mobileMoreOpen && (
+                <div
+                  data-testid="session-mobile-more-menu"
+                  className="absolute right-0 top-full z-30 mt-1 w-60 space-y-2 rounded-md border border-border bg-card p-2 shadow-lg"
+                >
+                  <button
+                    type="button"
+                    aria-label="复制会话 ID"
+                    title={`点击复制会话 ID：${session.id}`}
+                    onClick={() => {
+                      void navigator.clipboard
+                        ?.writeText(session.id)
+                        .then(() => notify.success("已复制会话 ID"))
+                        .catch(() => notify.error(new Error("复制失败")));
+                    }}
+                    className="flex w-full shrink-0 cursor-pointer items-center gap-2 rounded px-1 py-1 font-mono text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    #{session.id.slice(0, 8)} · 复制会话 ID
+                  </button>
+                  {machineName && (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground">
+                      <Monitor aria-hidden className="h-3 w-3" />
+                      {machineName}
+                    </span>
+                  )}
+                  {workspaceName && (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground">
+                      <FolderOpen aria-hidden className="h-3 w-3" />
+                      {workspaceName}
+                    </span>
+                  )}
+                  <div className="flex flex-col items-start gap-1 border-t border-border pt-2">
+                    <ActivityCatalog
+                      bashProgress={bashProgress}
+                      agentTasks={agentTasks}
+                      missions={teamMissions}
+                      workspaceId={
+                        session.workspace_id ?? preContext?.workspaceId ?? null
+                      }
+                      onRefreshMissions={() => {
+                        void refreshTeamMissions();
+                      }}
+                      onOpenWorkerSession={(subSessionId) => {
+                        setWorkerSessionId(subSessionId);
+                      }}
+                    />
+                    <SubagentCatalog
+                      turns={displayTurns}
+                      onJumpTo={handleJumpToSubagent}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </header>
 
-      {/* 离线只读横幅（2026-07-31-offline-session-readonly 语义） */}
+      {/* 离线只读横幅（2026-07-31-offline-session-readonly 语义；task-14：mobile
+          padding 收敛 px-3） */}
       {!machineOnline && (
-        <div className="flex items-center gap-2 border-b border-amber-300 bg-amber-50 px-5 py-2 text-xs text-amber-800">
+        <div
+          className={cn(
+            "flex items-center gap-2 border-b border-amber-300 bg-amber-50 px-5 py-2 text-xs text-amber-800",
+            mobile && "px-3",
+          )}
+        >
           <TriangleAlert aria-hidden className="h-3.5 w-3.5 shrink-0" />
           <span>
             会话所属机器{machineName ? `（${machineName}）` : ""}当前离线 —— 可浏览历史消息，暂不能继续对话；机器恢复在线后可继续。
@@ -2438,7 +2623,12 @@ function SessionPanelPage({
           本地计时 >240s（DS-5）复用同位置同款入口，超时场景文案区分，onClick 与
           ended 同一 handleReopen（不复制回调）。 */}
       {(ended || reconnectTimedOutBanner) && (
-        <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-5 py-2 text-xs text-muted-foreground">
+        <div
+          className={cn(
+            "flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-5 py-2 text-xs text-muted-foreground",
+            mobile && "px-3",
+          )}
+        >
           <span>
             {ended
               ? `会话已${session.status === "failed" ? "失败" : "结束"} —— 可浏览历史消息`
@@ -2458,40 +2648,12 @@ function SessionPanelPage({
             （task-13 共享子组件；弹窗与新页面同构复用。gap-fix：turns 用
             displayTurns），尾部挂仅关联本会话的折叠日志条目（AgentLogCard
             sessionId 关联；D-004：workspace 级旧挂载已移除，streamFooter
-            注入口保留复用）。 */}
-      {isToolReportBody ? (
-        <AgentLogSessionBody sessionId={session.id} />
+            注入口保留复用）。
+          - task-14：mobile 外包横向滚动容器（表格等横向内容不撑破竖屏视口）。 */}
+      {mobile ? (
+        <div className={PANEL_BODY_WRAP_CLS_MOBILE}>{sessionBody}</div>
       ) : (
-      <TurnTimeline
-        turns={displayTurns}
-        viewMode={viewMode}
-        errorMsg={errorMsg}
-        sessionStatus={
-          ended
-            ? session.status === "failed"
-              ? "failed"
-              : "ended"
-            : restoring
-              ? "reconnecting"
-              : "active"
-        }
-        pendingRequests={pendingRequests}
-        dialogHistory={dialogHistory}
-        onDialogResolved={handleDialogResolved}
-        onResend={(prompt) => {
-          void handleResend(prompt);
-        }}
-        onSwitchProvider={() => {
-          if (typeof window !== "undefined") {
-            window.location.assign("/settings");
-          }
-        }}
-        hasOnlineProvider={machineOnline}
-        emptyProviderLabel={
-          PROVIDER_META[session.provider]?.label ?? session.provider
-        }
-        streamFooter={<AgentLogCard sessionId={session.id} />}
-      />
+        sessionBody
       )}
 
       {/* task-11：会话团队任务块（TeamTaskBlock）——ql-20260826-010 起收编进头部
