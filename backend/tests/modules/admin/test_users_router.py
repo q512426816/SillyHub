@@ -1110,3 +1110,110 @@ async def test_create_user_without_password_returns_random_initial(
     )
     assert resp2.status_code == 201
     assert resp2.json()["initial_password"] != body1["initial_password"]
+
+
+# ── reset_password 支配权（2026-08-27 缺陷排查批次） ─────────────────────
+
+
+@pytest.fixture
+async def ws_userwrite_headers(db_session):
+    """非平台管理员，但持有某 workspace 的 user:write（require_permission_any 放行）。"""
+    from app.modules.auth.model import Role, RolePermission, UserWorkspaceRole
+    from app.modules.auth.permissions import Permission
+    from app.modules.workspace.model import Workspace
+
+    settings = get_settings()
+    password_hasher.configure(settings.auth_bcrypt_rounds)
+    user = User(
+        email=f"wsadmin-{uuid.uuid4().hex[:8]}@example.com",
+        username=f"wsadmin-{uuid.uuid4().hex[:8]}",
+        password_hash=password_hasher.hash("Xx1!abcd"),
+        is_platform_admin=False,
+        status="active",
+    )
+    db_session.add(user)
+    await db_session.flush()
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="reset-guard-ws",
+        slug=f"reset-guard-{uuid.uuid4().hex[:6]}",
+        root_path="/tmp/reset-guard",
+        created_by=user.id,
+    )
+    role = Role(
+        key=f"reset-guard-{uuid.uuid4().hex[:6]}",
+        name="Reset Guard",
+        is_system=False,
+        is_active=True,
+    )
+    db_session.add_all([ws, role])
+    await db_session.flush()
+    db_session.add(RolePermission(role_id=role.id, permission=Permission.USER_WRITE.value))
+    db_session.add(UserWorkspaceRole(user_id=user.id, workspace_id=ws.id, role_id=role.id))
+    await db_session.commit()
+
+    token, _ = create_access_token(
+        user_id=user.id,
+        email=user.email,
+        is_admin=False,
+        settings=settings,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+async def second_platform_admin(db_session):
+    user = User(
+        email=f"admin2-{uuid.uuid4().hex[:8]}@example.com",
+        username=f"admin2-{uuid.uuid4().hex[:8]}",
+        password_hash=password_hasher.hash("Xx1!abcd"),
+        is_platform_admin=True,
+        status="active",
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+    return user
+
+
+@pytest.mark.asyncio
+async def test_reset_platform_admin_password_requires_platform_admin(
+    client: AsyncClient, ws_userwrite_headers, second_platform_admin
+):
+    """持 ws user:write 的非平台管理员重置平台管理员密码 → 403（防账号接管）。"""
+    resp = await client.post(
+        f"/api/admin/users/{second_platform_admin.id}/reset-password",
+        json={},
+        headers=ws_userwrite_headers,
+    )
+    assert resp.status_code == 403, resp.text
+    assert "仅平台管理员可重置" in resp.json()["message"]
+    assert resp.json()["details"]["code"] == "PLATFORM_ADMIN_RESET_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_reset_regular_user_password_still_allowed_for_ws_userwrite(
+    client: AsyncClient, ws_userwrite_headers, target_user
+):
+    """同权限重置普通用户密码 → 200（委托管理语义不变，不误伤）。"""
+    resp = await client.post(
+        f"/api/admin/users/{target_user.id}/reset-password",
+        json={},
+        headers=ws_userwrite_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["plaintext_password"]
+
+
+@pytest.mark.asyncio
+async def test_platform_admin_can_reset_platform_admin_password(
+    client: AsyncClient, auth_headers, second_platform_admin
+):
+    """平台管理员重置另一平台管理员密码 → 200（不误伤）。"""
+    resp = await client.post(
+        f"/api/admin/users/{second_platform_admin.id}/reset-password",
+        json={},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["plaintext_password"]

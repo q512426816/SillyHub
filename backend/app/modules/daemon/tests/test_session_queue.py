@@ -466,3 +466,44 @@ class TestTaskWakeupMerge:
         prompts = {r.prompt or "" for r in rows}
         assert any(p.startswith("[后台任务通知]") for p in prompts)
         assert "普通消息" in prompts
+
+
+class TestRetrySuccessPath:
+    @pytest.mark.asyncio
+    async def test_retry_success_returns_snapshot_not_crash(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """重试成功派发：行被删后不得 assert 崩（旧代码此路径必 500）。"""
+        svc, uid, session_id, busy_run = await _setup_busy_session(db_session)
+        await svc.inject_session(session_id, uid, prompt="重试我", queue_when_busy=True)
+        await _finish_run(db_session, busy_run)
+
+        # 先造 failed（daemon 掉线派发失败），与既有失败分支测试同法。
+        mocked_hub.send_session_control = AsyncMock(return_value=False)
+        mocked_hub.is_connected = MagicMock(return_value=False)
+        with (
+            patch(
+                "app.modules.daemon.session.service.SessionService._converge_failed_dispatch",
+                new=AsyncMock(),
+            ),
+            patch(
+                "app.modules.agent.placement.RunPlacementService.notify_interactive_dispatch",
+                new=AsyncMock(return_value=False),
+            ),
+        ):
+            await svc.dispatch_queued_messages(session_id)
+        rows = await _queue_rows(db_session, session_id)
+        assert rows[0].status == "failed"
+
+        # 恢复 hub 在线 → retry 派发成功（走行删除路径，即旧代码 assert 崩溃点）。
+        mocked_hub.send_session_control = AsyncMock(return_value=True)
+        mocked_hub.is_connected = MagicMock(return_value=True)
+
+        _svc2 = DaemonService(db_session)
+        result = await _svc2.retry_queued_message(session_id, rows[0].id, uid)
+
+        # 派发成功：排队行已删（新 run 已建），返回删除前快照而非抛错。
+        assert await _queue_rows(db_session, session_id) == []
+        assert result.id == rows[0].id
+        assert result.status == "dispatched"
+        assert result.prompt == "重试我"

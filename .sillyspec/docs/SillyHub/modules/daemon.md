@@ -24,6 +24,7 @@ backend 与 daemon 经 WebSocket + REST 双向通信，支持三种执行形态�
 - **session**：
   - create/inject/interrupt/end/reopen/recover/confirm-reconnected/mark-recovery-failed/ready 上报 + SSE stream + logs（`GET /sessions/{id}/logs?after=` 增量游标，P4 2026-08-24：前端断线 resync/轮后对账增量拉取，游标-2s 重叠 + log_id 去重兜同批同 timestamp 边界）。
   - reopen 会话级供应商凭证链（ql-20260827-014，生产实证修复）：reopen_session 建 lease 时补写 `session_llm_provider_id`（与 create 同款键——漏写会让 claim/恢复链路解析不到会话供应商），SESSION_RESUME WS payload 携带 `resolve_bound_provider_config` 解密的 `provider_config`（与 claim payload 同一真相源）；解析失败/None 降级缺键 + warning 不阻断 reopen（对齐 claim 链 `_inject_provider_config` 降级语义），daemon 走本机凭证链。
+  - 排队消息 retry 成功派发返回删除前快照（ql-20260827-019）：retry 翻 pending 后立即派发，成功即删行——re-get 必为 None，旧代码裸 assert 在此路径必 500（消息其实已发出）；现返回 detached 快照（status=dispatched），前端以 SSE/重拉队列为准。
   - 排队消息通知合并（ql-20260827-015，生产实证修复）：inject 端点恒 `queue_when_busy=True`，daemon 后台任务终态唤醒（ql-20260827-007 `_scheduleTaskWakeup`，2s debounce 只覆盖 2 秒窗口）在长轮期间每任务终态注入一条「[后台任务通知]」排队——计数只增不减、派发后逐条烧一轮模型汇报（会话 17f10040 实证）。修法：入队分支对通知前缀做同会话 pending 合并（任务行追加 + 头/尾计数改写、`_merge_task_wakeup_prompt` 行级解析），通知类排队恒 ≤1 条；普通消息互不合并。
   - create_session workspace 归属校验（2026-08-19-sessions-workspace-selector）：workspace_id 非空时先经 `allowed_workspace_ids(user, WORKSPACE_READ)` 校验可见性，不可见抛 404 `HTTP_404_DAEMON_SESSION_WORKSPACE_NOT_FOUND`（校验在读 Workspace 行之前，不在事务内，失败不落库）。
   - `SessionReadiness` 模块级单例（mark_ready/wait/clear）：daemon create/recover 完成后 POST /ready 上报，backend 发 SESSION_INJECT 前 await wait(30s)，超时 fallback 仍发兼容旧 daemon——防 inject 早到 daemon 丢消息。

@@ -44,7 +44,7 @@ McpAuthMiddleware:
   → 命中: request.state.mcp_auth = McpAuthContext(workspace_id, scope, token_id)
   → 失败: 401 直返 JSONResponse（子 app 摸不到父 app 异常处理器）
 tool handler: _auth_from_ctx(ctx) → require_mcp_scope(...) 越界 403（read/dispatch/converge）
-WebhookDispatcher: worker 终态 → events 匹配的 webhook → POST url + secret HMAC-SHA256 签名
+WebhookDispatcher: worker 终态 → events 匹配的 webhook → POST url + secret HMAC-SHA256 签名（投递 task 模块级强引用防 GC 中途回收，ql-20260827-019）
 ```
 
 ## 注意事项

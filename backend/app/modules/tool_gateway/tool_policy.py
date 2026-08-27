@@ -172,7 +172,8 @@ class ToolPolicyService:
 
     All methods are static — the policy object is passed in each call.
     No DB access is performed; the ToolPolicy instance is expected to be
-    loaded by the caller (e.g., ToolGatewayService._load_policy).
+    constructed by the caller (``default_policy`` below, or the CRUD
+    endpoints in ``policy_router.py``).
     """
 
     # ── Private IP ranges (SSRF protection) ──

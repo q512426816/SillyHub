@@ -789,6 +789,19 @@ class UserService:
         if target is None or target.deleted_at is not None:
             raise HTTPException(status_code=404, detail="用户不存在或已被删除。")
 
+        # 支配权：非平台管理员不得重置平台管理员的密码。重置接口会把新明文
+        # 口令经响应下发给调用者——若不校验，任意 workspace 的 user:write
+        # 持有者（router 层 require_permission_any 只查"任一 ws 有权限"）
+        # 即可重置超管口令完成账号接管（与 _assert_actor_may_grant_platform_admin
+        # 同一根因：USER_WRITE ≠ is_platform_admin）。
+        if target.is_platform_admin:
+            actor = await self.session.get(User, self.actor_id)
+            if actor is None or not actor.is_platform_admin:
+                raise PermissionDenied(
+                    "仅平台管理员可重置平台管理员的密码。",
+                    details={"code": "PLATFORM_ADMIN_RESET_FORBIDDEN"},
+                )
+
         # 不显式传密码 → 随机生成一次性口令（BS-1），经响应 plaintext_password
         # 字段下发给管理员转发；用户登录后可自行修改（change-password）。
         plaintext = new_password or generate_initial_password()

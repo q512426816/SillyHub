@@ -293,3 +293,101 @@ def test_check_deploy_window_outside_days():
         policy = {"deploy_window": {"days": days_without_today, "start_hour": 0, "end_hour": 24}}
         with pytest.raises(ReleaseNotAllowed, match="不在允许发布的日期"):
             check_deploy_window(policy)
+
+
+# ── 审批门加固（2026-08-27 缺陷排查批次） ────────────────────────────────
+
+
+async def test_create_clamps_min_approvers_to_one(db_session):
+    """create 注入 min_approvers=0/负数/非法值 → 存储值钳制 ≥1（防零审批生产部署）。"""
+    ws_id = await _make_workspace(db_session)
+    creator_id = await _make_user(db_session)
+
+    from app.modules.release.schema import ReleaseCreate
+
+    svc = ReleaseService(db_session)
+    r0 = await svc.create(
+        ws_id,
+        creator_id,
+        ReleaseCreate(
+            version="v0.1.0",
+            target_environment="production",
+            deploy_policy={"min_approvers": 0},
+        ),
+    )
+    assert r0.deploy_policy["min_approvers"] == 1
+
+    r_neg = await svc.create(
+        ws_id,
+        creator_id,
+        ReleaseCreate(
+            version="v0.2.0",
+            target_environment="production",
+            deploy_policy={"min_approvers": -5},
+        ),
+    )
+    assert r_neg.deploy_policy["min_approvers"] == 1
+
+    r_bad = await svc.create(
+        ws_id,
+        creator_id,
+        ReleaseCreate(
+            version="v0.3.0",
+            target_environment="production",
+            deploy_policy={"min_approvers": "many"},
+        ),
+    )
+    assert r_bad.deploy_policy["min_approvers"] == 2  # 非法值回退默认
+
+
+async def test_reject_votes_block_production_deploy(db_session):
+    """已达 approved 后补投 reject 票 → deploy 仍被拒（此前 reject 完全不阻断）。"""
+    ws_id = await _make_workspace(db_session)
+    creator_id = await _make_user(db_session)
+    approver = await _make_user(db_session)
+    rejector = await _make_user(db_session)
+
+    from app.modules.release.schema import ReleaseCreate
+
+    svc = ReleaseService(db_session)
+    release = await svc.create(
+        ws_id,
+        creator_id,
+        ReleaseCreate(
+            version="v1.0.0",
+            target_environment="production",
+            deploy_policy={"min_approvers": 1},
+        ),
+    )
+    await svc.approve(release.id, approver, "approve")
+    await db_session.refresh(release)
+    assert release.status == "approved"  # 前置：无 reject 时正常过审
+
+    await svc.approve(release.id, rejector, "reject", "配置有坑")
+
+    with pytest.raises(ReleaseNotAllowed, match="已被 1 人拒绝"):
+        await svc.deploy(release.id)
+
+
+async def test_reject_votes_block_threshold_transition(db_session):
+    """approve 票数达标但存在 reject → 不转 approved。"""
+    ws_id = await _make_workspace(db_session)
+    creator_id = await _make_user(db_session)
+    a1 = await _make_user(db_session)
+    a2 = await _make_user(db_session)
+    rejector = await _make_user(db_session)
+
+    from app.modules.release.schema import ReleaseCreate
+
+    svc = ReleaseService(db_session)
+    release = await svc.create(
+        ws_id,
+        creator_id,
+        ReleaseCreate(version="v2.0.0", deploy_policy={"min_approvers": 2}),
+    )
+    await svc.approve(release.id, a1, "approve")
+    await svc.approve(release.id, rejector, "reject")
+    await svc.approve(release.id, a2, "approve")  # 达标最后一张 approve
+
+    await db_session.refresh(release)
+    assert release.status != "approved"

@@ -42,6 +42,29 @@ DEFAULT_DEPLOY_WINDOW = {
 DEFAULT_MIN_APPROVERS = 2
 
 
+def _min_approvers_of(policy: dict) -> int:
+    """读取审批下界并钳制 ≥1——生产审批门不容许 0/负数/非法值绕过。"""
+    try:
+        return max(1, int(policy.get("min_approvers", DEFAULT_MIN_APPROVERS)))
+    except (TypeError, ValueError):
+        return DEFAULT_MIN_APPROVERS
+
+
+def _sanitize_deploy_policy(policy: dict | None) -> dict | None:
+    """create 侧钳制 deploy_policy（浅拷贝，不动调用方 dict）。
+
+    ``deploy_policy`` 是自由 dict，create 此前零校验——持 DEPLOY_STAGING 的
+    用户可建 ``{"min_approvers": 0}`` 的生产发布单，deploy 时 ``count(0) >= 0``
+    直接零审批通过。读取侧 _min_approvers_of 已防御，此处把存储值一并钉住。
+    """
+    if policy is None:
+        return None
+    sanitized = dict(policy)
+    if "min_approvers" in sanitized:
+        sanitized["min_approvers"] = _min_approvers_of(sanitized)
+    return sanitized
+
+
 class ReleaseError(AppError):
     code = "RELEASE_ERROR"
     http_status = 400
@@ -101,7 +124,7 @@ class ReleaseService:
             status="draft",
             target_environment=data.target_environment,
             change_ids=data.change_ids,
-            deploy_policy=data.deploy_policy,
+            deploy_policy=_sanitize_deploy_policy(data.deploy_policy),
             creator_id=creator_id,
         )
         self._session.add(release)
@@ -249,10 +272,22 @@ class ReleaseService:
         log.info("release_rollback", release_id=str(release_id))
         return release
 
+    async def _reject_count(self, release: Release) -> int:
+        """统计该发布单的 reject 票数（一票即封堵，见 _require_approvals）。"""
+        stmt = (
+            select(func.count())
+            .select_from(ReleaseApproval)
+            .where(
+                ReleaseApproval.release_id == release.id,
+                ReleaseApproval.verdict == "reject",
+            )
+        )
+        return (await self._session.execute(stmt)).scalar() or 0
+
     async def _check_approval_threshold(self, release: Release) -> None:
         """Transition to 'approved' if enough approvals reached."""
         policy = release.deploy_policy or {}
-        min_approvals = policy.get("min_approvers", DEFAULT_MIN_APPROVERS)
+        min_approvals = _min_approvers_of(policy)
 
         count_stmt = (
             select(func.count())
@@ -264,14 +299,26 @@ class ReleaseService:
         )
         count = (await self._session.execute(count_stmt)).scalar() or 0
 
-        if count >= min_approvals and release.status in ("draft", "staging"):
+        # 存在 reject 票时不进 approved：approve/reject 并存时发布单必须停在
+        # 人工处置状态，由 reject 方撤票或另走流程，不得带病转 approved。
+        rejects = await self._reject_count(release)
+        if rejects == 0 and count >= min_approvals and release.status in ("draft", "staging"):
             release.status = "approved"
             release.updated_at = datetime.now(UTC)
 
     async def _require_approvals(self, release: Release) -> None:
         """Raise if production release lacks sufficient approvals."""
         policy = release.deploy_policy or {}
-        min_approvals = policy.get("min_approvers", DEFAULT_MIN_APPROVERS)
+        min_approvals = _min_approvers_of(policy)
+
+        # reject 票一票阻断：此前只数 approve 票，任意数量 reject + 凑够
+        # approve 即可部署，审批门形同虚设。
+        rejects = await self._reject_count(release)
+        if rejects > 0:
+            raise ReleaseNotAllowed(
+                f"该发布单已被 {rejects} 人拒绝，需先处理拒绝意见后再发布。",
+                details={"reject_count": rejects},
+            )
 
         count_stmt = (
             select(func.count())

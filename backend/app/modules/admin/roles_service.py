@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.core.errors import (
+    PermissionDenied,
     RoleInUse,
     RoleKeyDuplicate,
     RoleNotFound,
@@ -45,6 +46,7 @@ from app.modules.auth.model import (
     User,
     UserWorkspaceRole,
 )
+from app.modules.auth.permissions import Permission
 from app.modules.workflow.model import AuditLog
 
 
@@ -203,6 +205,25 @@ class RoleService:
         self._session = session
         self._actor_id = actor_id
 
+    async def _assert_may_write_platform_admin(self, permission_keys: list[Permission]) -> None:
+        """支配权：仅平台管理员可把 ``platform:admin`` 写进角色权限集。
+
+        ``platform:admin`` 是 RBAC 全权绕过权限。users_service 绑定角色时
+        会校验目标角色是否携带它（_assert_actor_may_grant_platform_admin），
+        但该校验只在**绑定时点**快照角色权限——若角色权限随后可被任意
+        ROLE_WRITE 持有者改写加回 ``platform:admin``，就构成"先绑普通
+        角色、再改角色权限"的自我提权链。本检查封住改写端。
+        """
+        if Permission.PLATFORM_ADMIN not in permission_keys:
+            return
+        actor = await self._session.get(User, self._actor_id)
+        if actor is not None and actor.is_platform_admin:
+            return
+        raise PermissionDenied(
+            "仅平台管理员可创建或修改携带 platform:admin 权限的角色。",
+            details={"code": "ROLE_PLATFORM_ADMIN_FORBIDDEN"},
+        )
+
     def _audit(
         self,
         *,
@@ -288,6 +309,7 @@ class RoleService:
                 f"角色标识 {payload.key} 已被占用，请更换后重试。",
                 details={"key": payload.key},
             )
+        await self._assert_may_write_platform_admin(payload.permission_keys)
 
         role = Role(
             key=payload.key,
@@ -329,6 +351,7 @@ class RoleService:
             role.is_active = payload.is_active
 
         if payload.permission_keys is not None:
+            await self._assert_may_write_platform_admin(payload.permission_keys)
             await self._session.execute(
                 RolePermission.__table__.delete().where(
                     RolePermission.__table__.c.role_id == role.id

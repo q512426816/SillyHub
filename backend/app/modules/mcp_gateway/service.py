@@ -46,6 +46,11 @@ from app.modules.mcp_gateway.model import McpTokenORM, McpWebhookORM
 
 log = get_logger(__name__)
 
+# webhook 投递 task 强引用（事件循环只持 task 弱引用，裸 create_task 的任务
+# 可能被 GC 中途回收——投递内含最长 ~85s 的指数退避，被回收即静默丢回调。
+# 同 core/monitoring._sample_tasks 范式）。
+_deliver_tasks: set[asyncio.Task] = set()
+
 
 class McpTokenNotFound(AppError):
     """DELETE/操作不存在的 token 或跨 workspace 越权访问 → 404。
@@ -571,7 +576,9 @@ class WebhookDispatcher:
         for wh in webhooks:
             secret_plain = _decode_secret(wh.secret)
             signature = hmac.new(secret_plain.encode("utf-8"), body, hashlib.sha256).hexdigest()
-            asyncio.create_task(self._deliver_one(wh, body, signature))
+            task = asyncio.create_task(self._deliver_one(wh, body, signature))
+            _deliver_tasks.add(task)
+            task.add_done_callback(_deliver_tasks.discard)
         return len(webhooks)
 
     async def _deliver_one(self, webhook: McpWebhookORM, body: bytes, signature: str) -> None:

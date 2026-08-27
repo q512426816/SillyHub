@@ -337,3 +337,119 @@ def func_count():
     from sqlalchemy import func
 
     return func.count()
+
+
+# ── platform:admin 写入支配权（2026-08-27 缺陷排查批次） ──────────────────
+
+
+@pytest.fixture
+async def ws_rolewrite_headers(db_session):
+    """非平台管理员，但持有某 workspace 的 role:write（require_permission_any 放行）。"""
+    from app.modules.workspace.model import Workspace
+
+    settings = get_settings()
+    password_hasher.configure(settings.auth_bcrypt_rounds)
+    user = User(
+        email=f"rolemgr-{uuid.uuid4().hex[:8]}@example.com",
+        username=f"rolemgr-{uuid.uuid4().hex[:8]}",
+        password_hash=password_hasher.hash("Xx1!abcd"),
+        is_platform_admin=False,
+        status="active",
+    )
+    db_session.add(user)
+    await db_session.flush()
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="role-guard-ws",
+        slug=f"role-guard-{uuid.uuid4().hex[:6]}",
+        root_path="/tmp/role-guard",
+        created_by=user.id,
+    )
+    role = Role(
+        key=f"role-guard-{uuid.uuid4().hex[:6]}",
+        name="Role Guard",
+        is_system=False,
+        is_active=True,
+    )
+    db_session.add_all([ws, role])
+    await db_session.flush()
+    db_session.add(RolePermission(role_id=role.id, permission=Permission.ROLE_WRITE.value))
+    db_session.add(UserWorkspaceRole(user_id=user.id, workspace_id=ws.id, role_id=role.id))
+    await db_session.commit()
+
+    token, _ = create_access_token(
+        user_id=user.id,
+        email=user.email,
+        is_admin=False,
+        settings=settings,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.mark.asyncio
+async def test_create_role_with_platform_admin_rejected_for_non_admin(
+    client: AsyncClient, ws_rolewrite_headers
+):
+    """持 ws role:write 的非平台管理员建带 platform:admin 的角色 → 403。"""
+    payload = {
+        "key": f"escalate_{uuid.uuid4().hex[:6]}",
+        "name": "Escalation Attempt",
+        "permission_keys": [Permission.PLATFORM_ADMIN.value],
+    }
+    resp = await client.post("/api/admin/roles", json=payload, headers=ws_rolewrite_headers)
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["details"]["code"] == "ROLE_PLATFORM_ADMIN_FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_update_role_adding_platform_admin_rejected_for_non_admin(
+    client: AsyncClient, ws_rolewrite_headers, db_session
+):
+    """先建普通角色（平台管理员建）、非平台管理员再 update 加 platform:admin → 403。
+
+    守护"绑定时校验通过 → 事后改角色权限"的自我提权链。
+    """
+    victim_role = Role(
+        key=f"victim-{uuid.uuid4().hex[:6]}",
+        name="Victim",
+        is_system=False,
+        is_active=True,
+    )
+    db_session.add(victim_role)
+    await db_session.commit()
+    await db_session.refresh(victim_role)
+
+    resp = await client.patch(
+        f"/api/admin/roles/{victim_role.id}",
+        json={"permission_keys": [Permission.TASK_READ.value, Permission.PLATFORM_ADMIN.value]},
+        headers=ws_rolewrite_headers,
+    )
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["details"]["code"] == "ROLE_PLATFORM_ADMIN_FORBIDDEN"
+
+    # 权限未被写入。
+    perms = (
+        (
+            await db_session.execute(
+                select(RolePermission.permission).where(RolePermission.role_id == victim_role.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert Permission.PLATFORM_ADMIN.value not in perms
+
+
+@pytest.mark.asyncio
+async def test_platform_admin_can_create_role_with_platform_admin(
+    client: AsyncClient, auth_headers
+):
+    """平台管理员建带 platform:admin 的角色 → 201（不误伤既有用法）。"""
+    payload = {
+        "key": f"super_{uuid.uuid4().hex[:6]}",
+        "name": "Super Delegated",
+        "permission_keys": [Permission.PLATFORM_ADMIN.value],
+    }
+    resp = await client.post("/api/admin/roles", json=payload, headers=auth_headers)
+    assert resp.status_code == 201, resp.text
+    assert Permission.PLATFORM_ADMIN.value in resp.json()["permissions"]

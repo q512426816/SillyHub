@@ -3510,8 +3510,15 @@ class SessionService:
             await self._session.refresh(entry)
         # 派发尝试复用会话行锁路径（忙则内部自然 no-op）。
         await self.dispatch_queued_messages(session.id)
-        entry = await self._session.get(AgentSessionQueuedMessage, entry_id)
-        assert entry is not None
+        fresh = await self._session.get(AgentSessionQueuedMessage, entry_id)
+        if fresh is not None:
+            return fresh
+        # 派发成功：dispatch 内部已删行并 commit（turn 已落 AgentRun、
+        # queue_changed=dispatched 事件已发）。此处 re-get 必为 None——此前
+        # 裸 assert 在该路径必抛 AssertionError → 接口 500，但消息其实已
+        # 发出。返回删除前的 detached 快照（expire_on_commit=False 属性仍在），
+        # status 标 dispatched 供调用方识别；前端消费 SSE/重新拉队列为准。
+        entry.status = "dispatched"
         return entry
 
     async def dispatch_queued_messages(self, session_id: uuid.UUID) -> None:

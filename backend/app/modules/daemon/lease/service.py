@@ -49,6 +49,10 @@ if TYPE_CHECKING:
 
 log = get_logger(__name__)
 
+# fire-and-forget 后台 task 强引用（事件循环只持 task 弱引用，裸 create_task
+# 的任务可能被 GC 中途回收——同 core/monitoring._sample_tasks 范式）。
+_background_tasks: set[asyncio.Task] = set()
+
 
 # ── Domain errors (task-07 迁入；原 facade service.py:48/53/58/63/68/73 字符级搬入) ─
 
@@ -776,7 +780,7 @@ class LeaseService:
                             self._session, _nt_mission
                         )
                         if _all_done:
-                            asyncio.create_task(
+                            _nt_task = asyncio.create_task(
                                 notify_orchestrator_workers_done(
                                     _nt_mission_id,
                                     _nt_mission.session_id,
@@ -784,6 +788,8 @@ class LeaseService:
                                     failed=_bad,
                                 )
                             )
+                            _background_tasks.add(_nt_task)
+                            _nt_task.add_done_callback(_background_tasks.discard)
             except Exception as exc:
                 log.warning(
                     "complete_lease_workers_done_notify_failed",

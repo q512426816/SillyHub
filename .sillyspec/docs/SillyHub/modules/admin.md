@@ -18,7 +18,8 @@ created_at: 2026-08-18 01:45:00
 ## 契约摘要
 - **角色管理**：
   - 列表（搜索/分页）/详情/创建/更新（含 permissions 列表）。
-  - disable/enable 软停停用——disable 不断 user_role 关联（保留历史）但不生效，enable 恢复。
+  - **platform:admin 写入支配权（ql-20260827-019）**：create/update 的 permission_keys 含 `platform:admin` 时仅平台管理员可写（403 `ROLE_PLATFORM_ADMIN_FORBIDDEN`）——否则持 ws `role:write` 者可"先绑普通角色、再改角色权限加回 platform:admin"自我提权（users_service 的绑定时校验只快照绑定时点的角色权限）。
+  - disable/enable 软停用——disable 不断 user_role 关联（保留历史）但不生效，enable 恢复。
   - delete 硬删——删前 `_count_users` 校验无用户关联。
   - 角色下用户列表；RoleRead 带 permissions + user_count。
 - **组织管理**：
@@ -28,7 +29,7 @@ created_at: 2026-08-18 01:45:00
   - 列表（搜索/分页 + `?ids=` 批量精确查——供前端回填已选用户真实姓名）/详情/创建/更新/删除。
   - username 为登录主账号：必填、可编辑、唯一（`_resolve_username`/`_assert_username_available` 排除自身，冲突 409）；email 可空、非空全局唯一。
   - 新建用户密码可选：缺省落模块常量 `DEFAULT_INITIAL_PASSWORD`（`SillyHub@123`），显式传仍按 min_length=8 校验；admin/settings 两入口共用 schema 行为一致；前端抽屉不渲染密码框、展示默认密码提示。
-  - 重置密码：不传新密码时同样落默认密码（非随机）；保留「自定义密码」；审计 details 记 `used_default_password`（值=是否用默认）。
+  - 重置密码：不传新密码时随机生成一次性口令经响应下发（BS-1）；保留「自定义密码」；审计 details 记 `used_default_password`。**支配权（ql-20260827-019）：非平台管理员重置平台管理员密码 → 403 `PLATFORM_ADMIN_RESET_FORBIDDEN`**（重置响应含明文新口令，不校验则任意 ws `user:write` 持有者可接管超管账号）。
   - disable/enable 登录（is_active 翻转，伴随 `_revoke_sessions` 吊销会话防已禁用账号持 token 继续操作）。
   - 会话列表 / 吊销单个 / 吊销全部；用户审计日志列表；用户工作区视图（含组织成员关系）。
 - **审计**：RoleService/OrganizationService/UserService 统一写审计行；AuditLog 模型来自 workflow 模块（admin 对 workflow 的唯一依赖）。

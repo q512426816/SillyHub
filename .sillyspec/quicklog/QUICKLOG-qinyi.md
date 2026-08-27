@@ -184,3 +184,28 @@
 根因：token 经 zustand persist 落 localStorage 多页共享，但 persist 不监听其它标签页写入，各页内存各持旧 refresh token；A 页续票轮换后 B 页持旧 token 续票，超后端 60s 复用宽限窗被判重放攻击，吊销该用户全部会话，全页被踢回登录页
 方案：stores/session.ts 落盘 key 提为 SESSION_STORAGE_KEY 常量 + 模块级 storage 事件监听，其它标签页写入的 token/user 回放进本页内存（缺字段不误清、坏 JSON 忽略、hydrated 不回放、SSR/HMR 安全）；同秒并发续票竞态由后端既有 grace 兜底，顺带实现登出/换账号跨页同步
 结果：新增 session.test.ts 6 用例全绿；相邻回归 token-refresh 9 + dashboard layout/page 守卫 21 全绿；tsc --noEmit 0 错；eslint 改动文件 0 告警
+
+## ql-20260827-018-dbd5 | 2026-08-27 22:36:48 | 会话聊天回显慢+有时加载不出来+实时与重载不一致修复
+状态：进行中
+关联变更：（无）
+文件：frontend/src/lib/daemon.ts, frontend/src/components/daemon/session-panel.tsx, backend/app/modules/daemon/router.py, frontend/src/lib/__tests__/daemon-session-stream-sync.test.ts, backend/app/modules/daemon/tests/test_session_logs_gzip.py
+
+## ql-20260827-019-156b | 2026-08-27 22:38:35 | 后端安全与稳定性缺陷修复批次（重置密码支配权/角色提权链/release 审批门/排队重试 500/弱引用 task/docstring）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/admin/users_service.py（reset_password 支配权：目标超管须 actor 自身超管，否则 403 PLATFORM_ADMIN_RESET_FORBIDDEN）
+- backend/app/modules/admin/roles_service.py（新增 _assert_may_write_platform_admin：permission_keys 含 platform:admin 时仅超管可写，create/update 两处调用）
+- backend/app/modules/release/service.py（reject 一票阻断 _require_approvals 与 approved 迁移；_min_approvers_of/_sanitize_deploy_policy 双侧钳 min_approvers>=1）
+- backend/app/modules/daemon/session/service.py（retry 派发成功行已删时返回 detached 快照 status=dispatched，替代裸 assert 500）
+- backend/app/modules/daemon/lease/service.py（notify_orchestrator_workers_done 后台 task 模块级强引用防 GC）
+- backend/app/modules/mcp_gateway/service.py（webhook 投递 task 模块级强引用防 GC）
+- backend/app/modules/tool_gateway/tool_policy.py（docstring 失实引用 ToolGatewayService._load_policy 改为真实构造方）
+- backend/tests/modules/admin/test_users_router.py（+3 用例：ws user:write 重置超管 403、重置普通用户 200 不误伤、超管重置超管 200）
+- backend/tests/modules/admin/test_roles_router.py（+3 用例：非超管建/改 platform:admin 角色 403 且权限未落库、超管建 201）
+- backend/app/modules/release/tests/test_service.py（+3 用例：min_approvers 0/负/非法钳制、approved 后补 reject 阻断 deploy、reject 阻断 approved 迁移）
+- backend/app/modules/daemon/tests/test_session_queue.py（+1 用例：retry 成功派发返回快照不崩）
+需求：后端安全与稳定性缺陷修复批次（重置密码支配权/角色提权链/release 审批门/排队重试 500/弱引用 task/docstring）
+根因：多角度缺陷排查实证：重置密码接口把新明文口令回传调用者却不校验支配权，配合 require_permission_any 的任一 workspace 权限放行语义构成超管账号接管链；角色权限改写端无 platform:admin 守卫形成先绑后改的自我提权链；release 审批只数 approve 票且 min_approvers 可注入 0；排队消息重试成功路径行被删后裸 assert 必 500；两处 fire-and-forget asyncio.create_task 弱引用可被 GC 静默丢通知/回调
+方案：users_service.reset_password 加目标为平台管理员时的 actor 支配权校验；roles_service 新增 _assert_may_write_platform_admin 守卫 create/update；release 增加 reject 一票阻断 deploy 与 approved 迁移、min_approvers 读取侧 max(1,·) 钳制、create 侧 _sanitize_deploy_policy 落库钳制；session retry 成功派发返回 detached 快照 status=dispatched 替代裸 assert；lease/mcp_gateway 两处 task 模块级强引用 + discard 回调；tool_policy docstring 改引真实构造方
+结果：新增 10 个回归用例全部通过；admin+release+mcp_gateway+session_queue 套件 255 passed 1 xfailed、lease 相关 188 passed；ruff check/format 全过、mypy 6 模块 0 issue；模块文档 4 份已同步
