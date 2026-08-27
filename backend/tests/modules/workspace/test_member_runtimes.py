@@ -4,6 +4,11 @@ Change 2026-07-01-collaborative-workspace. Covers AC-1..AC-6 + resolver
 hit/miss through the FastAPI app, mirroring ``test_members_router.py``'s
 hermetic per-test SQLite seeding (roles / users / workspace / membership +
 ``DaemonRuntime`` rows for the ownership-guard cases).
+
+Change 2026-08-28-daemon-agent-share task-06（design §5 Phase 2.3 / §9 / R-07）：
+共享开关端点改**同事务双写**（shared 列 UI 缓存 + grants 授权行），shared-daemons
+列表数据源切 grants 并新增 grant_id 响应字段——t04 组断言补 grant 侧，另加 t06
+组双写一致性单测（开/关各写两处 + 失败回滚两处都不落）。
 """
 
 from __future__ import annotations
@@ -14,6 +19,10 @@ from datetime import UTC, datetime
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
+
+# grants 模型注册（task-06）：db_engine create_all 前挂到 BaseModel.metadata，
+# 单独跑本文件/单用例时 daemon_runtime_grants 表也存在（对齐根 conftest 注册范式）。
+from app.modules.daemon.grants import model as _grants_model  # noqa: F401
 
 pytestmark = pytest.mark.asyncio
 
@@ -184,9 +193,29 @@ async def _binding_rows(db_session, *, workspace_id):
     return list(
         (
             await db_session.execute(
-                select(WorkspaceMemberRuntime).where(
-                    WorkspaceMemberRuntime.workspace_id == workspace_id
+                select(WorkspaceMemberRuntime)
+                .where(WorkspaceMemberRuntime.workspace_id == workspace_id)
+                .execution_options(populate_existing=True)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def _grant_rows(db_session, *, workspace_id):
+    """Fresh SELECT of the workspace-type grant rows for a workspace (task-06)."""
+    from app.modules.daemon.grants.model import DaemonRuntimeGrant
+
+    return list(
+        (
+            await db_session.execute(
+                select(DaemonRuntimeGrant)
+                .where(
+                    DaemonRuntimeGrant.grantee_type == "workspace",
+                    DaemonRuntimeGrant.grantee_id == workspace_id,
                 )
+                .execution_options(populate_existing=True)
             )
         )
         .scalars()
@@ -562,6 +591,10 @@ async def _seed_shared_binding(
 ):
     """Helper：建一条 binding（可指定 shared），返回刷新后的行。
 
+    ``shared=True`` 走 service 开关函数（task-06 同事务双写——binding shared 列 +
+    grants 授权行一并落），与生产路径同构；直接 ``row.shared = True`` 裸写会漏
+    grant 侧导致 grants 数据源读不到。
+
     注意 ``upsert_my_binding`` 返回 ``(row, created)`` tuple（service.py:30），
     必须解包——直接拿返回值赋给 row 会得到 tuple，后续 ``row.shared = True`` 报 AttributeError。
     """
@@ -576,8 +609,9 @@ async def _seed_shared_binding(
         path_source="daemon-client",
     )
     if shared:
-        row.shared = True
-        await db_session.commit()
+        row = await binding_service.set_my_binding_shared(
+            db_session, workspace_id, user_id, shared=True
+        )
     return row
 
 
@@ -618,6 +652,16 @@ async def test_t04_lender_mark_shared_returns_200_and_flag(
     assert body["shared"] is True
     assert body["user_id"] == str(dev.id)
 
+    # task-06 双写：同事务落 enabled workspace grant（grantee=本工作区/granted_by=lender）。
+    grants = await _grant_rows(db_session, workspace_id=ws.id)
+    assert len(grants) == 1
+    g = grants[0]
+    assert g.enabled is True
+    assert g.grantee_type == "workspace"
+    assert g.grantee_id == ws.id
+    assert g.granted_by_user_id == dev.id
+    assert g.daemon_instance_id == dev_daemon.id
+
 
 async def test_t04_lender_unmark_shared(
     client: AsyncClient,
@@ -628,7 +672,7 @@ async def test_t04_lender_unmark_shared(
     member_factory,
     daemon_factory,
 ):
-    """FR-01: lender PUT {shared:false} → shared=False（撤销自己共享）。"""
+    """FR-01: lender PUT {shared:false} → shared=False + 对应 grant enabled=False（行保留）。"""
     dev, dev_tok = await user_factory(email="dev@x.com", display_name="Dev")
     ws = await ws_factory(owner_id=dev.id)
     await member_factory(ws.id, dev.id, "developer", granted_by=dev.id)
@@ -640,6 +684,7 @@ async def test_t04_lender_unmark_shared(
         daemon_id=dev_daemon.id,
         shared=True,
     )
+    grant_before = (await _grant_rows(db_session, workspace_id=ws.id))[0]
 
     resp = await client.put(
         f"/api/workspaces/{ws.id}/my-binding/shared",
@@ -649,9 +694,16 @@ async def test_t04_lender_unmark_shared(
     assert resp.status_code == 200, resp.text
     assert resp.json()["shared"] is False
 
+    # task-06 双写关侧：软开关（enabled=False，行保留，grant_id 稳定可追溯）。
+    grants = await _grant_rows(db_session, workspace_id=ws.id)
+    assert len(grants) == 1
+    assert grants[0].enabled is False
+    assert grants[0].id == grant_before.id
+
 
 async def test_t04_lender_mark_shared_without_binding_returns_409(
     client: AsyncClient,
+    db_session,
     role_seeder,
     user_factory,
     ws_factory,
@@ -669,6 +721,8 @@ async def test_t04_lender_mark_shared_without_binding_returns_409(
     )
     assert resp.status_code == 409, resp.text
     assert resp.json()["code"] == "member_binding_not_found"
+    # 409 早退不开 grant（双写未触发，零残留）。
+    assert await _grant_rows(db_session, workspace_id=ws.id) == []
 
 
 async def test_t04_lender_can_only_touch_own_binding(
@@ -708,6 +762,9 @@ async def test_t04_lender_can_only_touch_own_binding(
     dev_row = await binding_service.get_my_binding(db_session, ws.id, dev.id)
     assert owner_row.shared is False  # owner 的 shared 未被波及
     assert dev_row.shared is True
+    # task-06 双写隔离：只有 dev（本次开关人）落 grant，owner 无 grant 行。
+    grants = await _grant_rows(db_session, workspace_id=ws.id)
+    assert [g.granted_by_user_id for g in grants] == [dev.id]
 
 
 async def test_t04_owner_list_shared_daemons(
@@ -719,7 +776,7 @@ async def test_t04_owner_list_shared_daemons(
     member_factory,
     daemon_factory,
 ):
-    """FR-02: owner GET /shared-daemons 列出所有 shared=True 的 binding（含 lender/在线状态）。"""
+    """FR-02: owner GET /shared-daemons 列出所有 enabled grant（含 lender/在线状态/grant_id）。"""
     owner, owner_tok = await user_factory(email="owner@x.com", display_name="Owner")
     dev1, _ = await user_factory(email="dev1@x.com", display_name="Dev1")
     dev2, _ = await user_factory(email="dev2@x.com", display_name="Dev2")
@@ -729,13 +786,15 @@ async def test_t04_owner_list_shared_daemons(
     await member_factory(ws.id, dev2.id, "developer", granted_by=owner.id)
     d1 = await daemon_factory(dev1.id, hostname="h1")
     d2 = await daemon_factory(dev2.id, hostname="h2")
-    # dev1 标 shared，dev2 不标
+    # dev1 开共享（双写落 grant），dev2 不开
     await _seed_shared_binding(
         db_session, workspace_id=ws.id, user_id=dev1.id, daemon_id=d1.id, shared=True
     )
     await _seed_shared_binding(
         db_session, workspace_id=ws.id, user_id=dev2.id, daemon_id=d2.id, shared=False
     )
+    grants = await _grant_rows(db_session, workspace_id=ws.id)
+    assert len(grants) == 1  # dev2 未开 → 无 grant
 
     resp = await client.get(
         f"/api/workspaces/{ws.id}/shared-daemons",
@@ -750,6 +809,8 @@ async def test_t04_owner_list_shared_daemons(
     assert it["daemon_status"] == "online"
     assert it["daemon_hostname"] == "h1"
     assert it["revocable"] is True
+    # task-06 provides SharedDaemonsGrantField：grant_id 纯增量字段（撤销追溯锚点）。
+    assert it["grant_id"] == str(grants[0].id)
 
 
 async def test_t04_owner_revoke_shared(
@@ -761,7 +822,7 @@ async def test_t04_owner_revoke_shared(
     member_factory,
     daemon_factory,
 ):
-    """FR-02: owner DELETE /members/{user_id}/shared → shared=False, binding 行保留。"""
+    """FR-02: owner DELETE /members/{user_id}/shared → shared=False + grant 禁用，binding 行保留。"""
     owner, owner_tok = await user_factory(email="owner@x.com", display_name="Owner")
     dev, _ = await user_factory(email="dev@x.com", display_name="Dev")
     ws = await ws_factory(owner_id=owner.id)
@@ -771,6 +832,7 @@ async def test_t04_owner_revoke_shared(
     await _seed_shared_binding(
         db_session, workspace_id=ws.id, user_id=dev.id, daemon_id=daemon.id, shared=True
     )
+    grant_before = (await _grant_rows(db_session, workspace_id=ws.id))[0]
 
     resp = await client.delete(
         f"/api/workspaces/{ws.id}/members/{dev.id}/shared",
@@ -786,6 +848,12 @@ async def test_t04_owner_revoke_shared(
     assert row is not None
     assert row.shared is False
     assert row.daemon_id == daemon.id
+
+    # task-06：撤销同事务置 grant enabled=False（借用立即失效，行保留可追溯）。
+    grants = await _grant_rows(db_session, workspace_id=ws.id)
+    assert len(grants) == 1
+    assert grants[0].enabled is False
+    assert grants[0].id == grant_before.id
 
 
 async def test_t04_owner_revoke_missing_binding_returns_409(
@@ -893,3 +961,144 @@ async def test_t04_shared_defaults_false_zero_regression(
     )
     assert resp2.status_code == 200, resp2.text
     assert resp2.json()["shared"] is False
+    # 零回归：建 binding 不落 grant（仅开关端点显式开启才授权）。
+    assert await _grant_rows(db_session, workspace_id=ws.id) == []
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# task-06: 开关双写一致性（R-07——同事务写 shared 列 + grants 行，单侧失败两处回滚）
+# change 2026-08-28-daemon-agent-share / design §5 Phase 2.3 / §9 / §8
+# ────────────────────────────────────────────────────────────────────────────
+
+
+async def test_t06_toggle_on_double_writes_shared_and_grant(
+    db_session,
+    role_seeder,
+    user_factory,
+    ws_factory,
+    member_factory,
+    daemon_factory,
+):
+    """开共享：同一次调用落两处——binding.shared=True + enabled workspace grant。"""
+    dev, _ = await user_factory(email="dev@x.com", display_name="Dev")
+    ws = await ws_factory(owner_id=dev.id)
+    await member_factory(ws.id, dev.id, "developer", granted_by=dev.id)
+    daemon = await daemon_factory(dev.id)
+    await _seed_shared_binding(db_session, workspace_id=ws.id, user_id=dev.id, daemon_id=daemon.id)
+
+    from app.modules.workspace.member_runtimes import service as binding_service
+
+    row = await binding_service.set_my_binding_shared(db_session, ws.id, dev.id, shared=True)
+    assert row.shared is True
+
+    grants = await _grant_rows(db_session, workspace_id=ws.id)
+    assert len(grants) == 1
+    g = grants[0]
+    assert g.enabled is True
+    assert g.grantee_type == "workspace"
+    assert g.grantee_id == ws.id
+    assert g.granted_by_user_id == dev.id
+    assert g.daemon_instance_id == daemon.id
+
+
+async def test_t06_toggle_off_disables_grant_and_retoggle_reuses_row(
+    db_session,
+    role_seeder,
+    user_factory,
+    ws_factory,
+    member_factory,
+    daemon_factory,
+):
+    """关共享：grant 置 enabled=False 行保留；再开共享复用同一 grant 行（id 稳定）。"""
+    dev, _ = await user_factory(email="dev@x.com", display_name="Dev")
+    ws = await ws_factory(owner_id=dev.id)
+    await member_factory(ws.id, dev.id, "developer", granted_by=dev.id)
+    daemon = await daemon_factory(dev.id)
+    await _seed_shared_binding(
+        db_session, workspace_id=ws.id, user_id=dev.id, daemon_id=daemon.id, shared=True
+    )
+    grant_on = (await _grant_rows(db_session, workspace_id=ws.id))[0]
+
+    from app.modules.workspace.member_runtimes import service as binding_service
+
+    row = await binding_service.set_my_binding_shared(db_session, ws.id, dev.id, shared=False)
+    assert row.shared is False
+    grants_off = await _grant_rows(db_session, workspace_id=ws.id)
+    assert len(grants_off) == 1
+    assert grants_off[0].enabled is False
+    assert grants_off[0].id == grant_on.id  # 软开关：行保留
+
+    # 再开：复用既有行复活（不插新行），审计链 grant_id 稳定。
+    await binding_service.set_my_binding_shared(db_session, ws.id, dev.id, shared=True)
+    grants_re = await _grant_rows(db_session, workspace_id=ws.id)
+    assert len(grants_re) == 1
+    assert grants_re[0].enabled is True
+    assert grants_re[0].id == grant_on.id
+
+
+async def test_t06_toggle_same_transaction_rollback_both_sides(
+    db_session,
+    role_seeder,
+    user_factory,
+    ws_factory,
+    member_factory,
+    daemon_factory,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """R-07 同事务：grants 侧写失败 → 回滚后 shared 列与 grant 行**都不落**。"""
+    dev, _ = await user_factory(email="dev@x.com", display_name="Dev")
+    ws = await ws_factory(owner_id=dev.id)
+    await member_factory(ws.id, dev.id, "developer", granted_by=dev.id)
+    daemon = await daemon_factory(dev.id)
+    await _seed_shared_binding(db_session, workspace_id=ws.id, user_id=dev.id, daemon_id=daemon.id)
+
+    import app.modules.workspace.member_runtimes.service as binding_service_module
+
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("grant write failed")
+
+    monkeypatch.setattr(binding_service_module, "_apply_workspace_grant_toggle", _boom)
+
+    # rollback 会 expire 会话内全部 ORM 实例，事后同步读 ws.id 会触发懒刷新
+    # （async 下 MissingGreenlet）——先捕获纯值再用。
+    ws_id = ws.id
+    with pytest.raises(RuntimeError, match="grant write failed"):
+        await binding_service_module.set_my_binding_shared(db_session, ws_id, dev.id, shared=True)
+    await db_session.rollback()
+
+    # 双写同事务证明：先写的 shared=True 也一并回滚（两处都不落）。
+    rows = await _binding_rows(db_session, workspace_id=ws_id)
+    assert len(rows) == 1
+    assert rows[0].shared is False
+    assert await _grant_rows(db_session, workspace_id=ws_id) == []
+
+
+async def test_t06_toggle_daemon_id_null_keeps_original_behavior(
+    db_session,
+    role_seeder,
+    user_factory,
+    ws_factory,
+    member_factory,
+):
+    """binding.daemon_id NULL → 开共享只写 shared 列、不开 grant（保持原行为）。
+
+    grants 授权对象是 daemon 机器：无 daemon 无授权（对齐迁移跳过 daemon_id NULL
+    行策略，design §5 Phase 1 / Grill B-03）。
+    """
+    dev, _ = await user_factory(email="dev@x.com", display_name="Dev")
+    ws = await ws_factory(owner_id=dev.id)
+    await member_factory(ws.id, dev.id, "developer", granted_by=dev.id)
+
+    from app.modules.workspace.member_runtimes import service as binding_service
+
+    await binding_service.upsert_my_binding(
+        db_session,
+        workspace_id=ws.id,
+        user_id=dev.id,
+        daemon_id=None,
+        root_path="/r",
+        path_source="daemon-client",
+    )
+    row = await binding_service.set_my_binding_shared(db_session, ws.id, dev.id, shared=True)
+    assert row.shared is True  # shared 列照写（原行为）
+    assert await _grant_rows(db_session, workspace_id=ws.id) == []  # 不开 grant

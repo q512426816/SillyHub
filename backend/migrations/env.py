@@ -31,6 +31,11 @@ from app.modules.auth import model as _auth_model  # noqa: F401
 from app.modules.change import model as _change_model  # noqa: F401
 from app.modules.daemon import model as _daemon_model  # noqa: F401
 from app.modules.daemon.audit import model as _daemon_audit_model  # noqa: F401
+
+# 2026-08-28-daemon-agent-share task-02（task-01 审查跟进）：daemon_runtime_grants
+# 表模型登记——grants 子包不被 daemon/__init__ 顺带 import，缺此行 autogenerate
+# 会漏判该表（后续表结构变更不生成迁移）。
+from app.modules.daemon.grants import model as _daemon_grants_model  # noqa: F401
 from app.modules.file import model as _file_model  # noqa: F401
 from app.modules.git_gateway import model as _gg_model  # noqa: F401
 from app.modules.git_identity import model as _gi_model  # noqa: F401

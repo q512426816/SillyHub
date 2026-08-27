@@ -8,7 +8,7 @@
  * 2026-08-25 悬浮球增强补测：拖拽定位、边缘吸附收起、拖拽尾音 click 抑制、
  * 点击抽屉外自动收起（portal 白名单放行）。
  */
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -24,23 +24,42 @@ vi.mock("next/navigation", () => ({
 vi.mock("@/components/daemon/session-panel", () => ({
   // task-12：透出收到的 preContext.pageContext——创建轮上下文是否真正送达
   // 面板（用户实测反馈③：UI 新建会话恒不注入的根因即此 props 断链）。
+  // task-10（2026-08-28-daemon-agent-share）：追加透出收到的 machines 候选
+  // ids——共享机器是否并入 SessionPanel 机器候选的断言锚点。
   SessionPanel: (props: {
     sessionId: string | null;
     preContext?: { pageContext?: unknown } | null;
+    machines?: { id: string }[];
   }) => (
     <div
       data-testid="mock-session-panel"
       data-session={props.sessionId ?? "null"}
       data-pagectx={JSON.stringify(props.preContext?.pageContext ?? null)}
+      data-machines={JSON.stringify((props.machines ?? []).map((m) => m.id))}
     >
       panel
     </div>
   ),
 }));
 
+// task-10：透出收到的 machines 候选 ids——共享机器是否并入 picker 候选的
+// 断言锚点（本文件不测 picker 内部渲染，那是 pre-session-picker 自身职责）。
 vi.mock("@/components/sessions/pre-session-picker", () => ({
-  PreSessionPicker: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="mock-picker">picker</div> : null,
+  PreSessionPicker: ({
+    open,
+    machines,
+  }: {
+    open: boolean;
+    machines?: { id: string }[];
+  }) =>
+    open ? (
+      <div
+        data-testid="mock-picker"
+        data-machines={JSON.stringify((machines ?? []).map((m) => m.id))}
+      >
+        picker
+      </div>
+    ) : null,
 }));
 
 // FR-02/FR-03：抽屉左栏换成 SessionListPanel，需 mock 避免真实数据查询。
@@ -87,10 +106,15 @@ const machinesRef = {
 };
 const sessionsRef = { current: [] as never[] };
 const machinesLoadingRef = { current: false };
+// task-10（2026-08-28-daemon-agent-share）：机器候选融合透传（默认=自有机器，
+// 单测内按需注入共享条目）。
+const machineCandidatesRef = { current: null as never[] | null };
 
 vi.mock("@/lib/use-daemon-machines", () => ({
   useDaemonMachines: () => ({
     items: machinesRef.current,
+    machineCandidates:
+      machineCandidatesRef.current ?? machinesRef.current,
     sessions: sessionsRef.current,
     isLoading: machinesLoadingRef.current,
   }),
@@ -130,6 +154,16 @@ describe("FloatingSessionHost", () => {
     resetStore();
     pathnameRef.current = "/ppm/projects";
     machinesLoadingRef.current = false;
+    machineCandidatesRef.current = null;
+    // task-10 用例会改写 machinesRef（清空 runtime 模拟兜底浮层路径）——
+    // 此处恢复默认形态，防跨用例泄漏。
+    machinesRef.current = [
+      {
+        id: "m-1",
+        status: "online",
+        runtimes: [{ id: "rt-1", status: "online", provider: "claude" }],
+      },
+    ] as never[];
     pushMock.mockClear();
     window.localStorage.clear();
   });
@@ -162,6 +196,70 @@ describe("FloatingSessionHost", () => {
     expect(panel.dataset.pagectx).toBe(
       JSON.stringify({ page_key: "ppm_project", project_id: "p-1" }),
     );
+  });
+
+  // ── task-10（2026-08-28-daemon-agent-share / FR-05 / D-004@v2）────────────
+  // 共享机器并入机器候选（显示层）；回退链默认解析仍只认自有机器（零改动红线）。
+
+  it("task-10：共享机器并入 SessionPanel 机器候选；默认解析回退链仍只认自有机器（D-004@v2）", async () => {
+    // 融合候选：自有 m-1（在线 claude）+ 共享 m-s（在线，无 runtime 明细，带
+    // sharedMeta 标识元数据——显示名含「共享 + 共享人」标注）。
+    machineCandidatesRef.current = [
+      {
+        id: "m-1",
+        status: "online",
+        runtimes: [{ id: "rt-1", status: "online", provider: "claude" }],
+      },
+      {
+        id: "m-s",
+        status: "online",
+        hostname: "lender-mac",
+        display_alias: "lender-mac · 张三 共享",
+        runtimes: [],
+        sharedMeta: { lenderDisplayName: "张三", sourceWorkspaceId: null },
+      },
+    ] as never[];
+    render(wrap(<FloatingSessionHost />));
+    act(() => {
+      useFloatingSessionStore.getState().requestNewSession(null);
+    });
+    // 回退链零改动：默认解析命中自有 m-1 的 rt-1（claude），不落共享机器
+    //（共享机器由用户在 picker 里显式选择，D-004@v2 不做自动回退）。
+    await waitFor(() => {
+      expect(useFloatingSessionStore.getState().preContext?.runtimeId).toBe("rt-1");
+    });
+    // SessionPanel 机器候选 = 自有 + 共享（共享条目随候选透出）。
+    const panel = await screen.findByTestId("mock-session-panel");
+    expect(JSON.parse(panel.dataset.machines ?? "[]")).toEqual(["m-1", "m-s"]);
+  });
+
+  it("task-10：兜底两步浮层机器候选同样含共享机器（共享条目可见可选）", async () => {
+    // 自有机器无可会话 runtime → 回退链落 picker 兜底；候选仍含共享机器。
+    machinesRef.current = [
+      { id: "m-1", status: "online", runtimes: [] },
+    ] as never[];
+    machineCandidatesRef.current = [
+      { id: "m-1", status: "online", runtimes: [] },
+      {
+        id: "m-s",
+        status: "online",
+        hostname: "lender-mac",
+        display_alias: "lender-mac · 张三 共享",
+        runtimes: [],
+        sharedMeta: { lenderDisplayName: "张三", sourceWorkspaceId: null },
+      },
+    ] as never[];
+    render(wrap(<FloatingSessionHost />));
+    act(() => {
+      useFloatingSessionStore.getState().openDrawer();
+    });
+    // 空态点「新会话」→ 默认解析未命中（无在线 claude/codex runtime）→ picker。
+    const btn = await screen.findByRole("button", { name: /新会话/ });
+    btn.click();
+    const picker = await screen.findByTestId("mock-picker");
+    expect(JSON.parse(picker.dataset.machines ?? "[]")).toEqual(["m-1", "m-s"]);
+    // 未自动进预会话（无自有 runtime 可解析，也不拿共享机器顶替）。
+    expect(useFloatingSessionStore.getState().preContext).toBeNull();
   });
 
   it("左栏操作回调全接线：组头新建/删除/归档/取消归档（用户反馈⑤回归锚）", async () => {

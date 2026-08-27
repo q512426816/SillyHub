@@ -11,6 +11,7 @@ requirement_ids: [FR-01, FR-02]
 decision_ids: [D-006@v1]
 allowed_paths:
   - backend/app/modules/daemon/grants/queries.py
+  - backend/migrations/env.py
   - backend/app/modules/daemon/grants/tests/test_grants_authorization.py
 provides:
   - contract: GrantAuthorization
@@ -32,6 +33,8 @@ acceptance:
   - resolve_granted_daemon_for_borrow 对同一组 fixture 与原 shared 版查询结果一致且额外携带 grant_id；授权矩阵单测全部通过
 verify:
   - cd backend && uv run pytest app/modules/daemon/grants -q --no-cov -n auto
+implementation_extra_note: >
+  （task-01 审查跟进）env.py 补 from app.modules.daemon.grants import model 一行，注册模型供 alembic autogenerate 扫描（否则未来 autogenerate 漏判 daemon_runtime_grants）。
 constraints:
   - 只新增 queries.py 与测试零接线——不改 session 与 placement 与 borrow_resolver 与 member_runtimes 任何调用方（切换归 task-03/06）；provides 三契约字段名钦定，下游按此对接不得增删
   - 借用解析语义等价红线——grants 空表或未授权时返回 None 或空列表，存量 agent-run 借用行为零变化

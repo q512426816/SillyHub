@@ -83,8 +83,18 @@ function FloatingDrawerBody({
 
   // 页面级数据（与门户同源）：machines 15s 轮询（SessionPanel 离线判定 +
   // 默认机器解析）；providers 30s（CtxUsageBar 分母）。
-  const { items: machines, sessions, isLoading: machinesLoading } =
-    useDaemonMachines({ limit: 100 });
+  // task-10（2026-08-28-daemon-agent-share / FR-05 / D-004@v2）：机器候选 =
+  // 自有 + 共享给我的（hook 融合，共享条目带 sharedMeta + 显示名「共享」标注）。
+  const {
+    items: machines,
+    machineCandidates,
+    sessions,
+    isLoading: machinesLoading,
+  } = useDaemonMachines({ limit: 100 });
+  // 仅机器选择器/Picker 与 SessionPanel 展示消费融合候选；下方 D-005 三级回退
+  // 解析（handleNewSession）仍用自有 machines——D-004@v2 用户显式选择，共享
+  // 机器不做任何自动回退/默认选中。
+  const machineOptions = machineCandidates ?? machines;
   const providersQ = useQuery({
     queryKey: ["llmProviders", "floating-session"],
     queryFn: listProviders,
@@ -308,7 +318,7 @@ function FloatingDrawerBody({
               key={sessionId}
               mode="page"
               sessionId={sessionId}
-              machines={machines}
+              machines={machineOptions}
               llmProviders={providers}
               onSessionListRefresh={refreshLists}
               pageContextOverride={derivedPageCtx}
@@ -318,7 +328,7 @@ function FloatingDrawerBody({
               key={`pre:${preContext.workspaceId ?? "-"}:${preContext.runtimeId}`}
               mode="page"
               sessionId={null}
-              machines={machines}
+              machines={machineOptions}
               llmProviders={providers}
               // task-12（用户实测反馈③：/workspaces 新建会话仍无注入）：store 的
               // preContext 与 pageContext 是两个独立字段——创建轮（预会话首句
@@ -355,10 +365,12 @@ function FloatingDrawerBody({
         </div>
       </div>
 
-      {/* 机器兜底两步浮层（复用门户组件；fixed 全屏遮罩，v1 接受） */}
+      {/* 机器兜底两步浮层（复用门户组件；fixed 全屏遮罩，v1 接受）。
+          task-10：候选含共享机器（共享条目显示名带「共享 + 共享人」标注，
+          PreSessionPicker 复用组件不改其渲染；在线过滤沿用其自身白名单）。 */}
       <PreSessionPicker
         open={pickerOpen}
-        machines={machines}
+        machines={machineOptions}
         onCancel={() => setPickerOpen(false)}
         onPick={(runtimeId) => {
           startPreSession(

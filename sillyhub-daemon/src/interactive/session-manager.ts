@@ -1757,6 +1757,8 @@ export class SessionManager {
    *   - Shell 工具（Bash/PowerShell/CMD）：经 policy/shell-paths 的
    *     `extractShellWritePaths(command, shell)` 提取写目标路径，逐条 canWrite，
    *     任一 deny 即拒绝（reason 取首个 deny）；
+   *   - task-12（D-011）：state.effectiveAllowedRoots 非空时先做 session 级
+   *     overlay 交集收紧（`_judgeWriteViaPolicyEngine` 内判定）；
    *   - deny → 返回 decision.reason（PolicyEngine 统一中文文案，含 provider/路径/原因）；
    *   - allow / 非写工具 / 提取不到写路径 → 交内层 callback（approvalReady=true 走
    *     远程人审；false 走直接 allow）。
@@ -1800,19 +1802,11 @@ export class SessionManager {
       // provider 值，∩ 物理 provider 兜底（防 backend 算的 effective 含已失效/越界路径；
       // backend 服务端已校验 overlay⊆daemon_roots，这里仅防御 stale 缓存）。provider
       // 为空（未注入）时直接信任 effective（backend 已是 daemon∩overlay 的权威交集）。
-      // effective undefined/空 → 用原 provider 值（FR-15 行为同今天）。
+      // effective undefined/空 → 用原 provider 值（FR-15 行为同今天）。roots 计算已抽
+      // _sessionOverlayRoots 共享 helper（task-12，policyEngine 分支同判定）。
       const providerRoots = this._allowedRootsProvider?.() ?? [];
-      const stateForRoots = this._store.get(sessionId);
-      const effectiveRoots = stateForRoots?.effectiveAllowedRoots;
-      let roots: string[];
-      if (effectiveRoots && effectiveRoots.length > 0) {
-        roots =
-          providerRoots.length > 0
-            ? effectiveRoots.filter((p) => isPathUnderAnyRoot(p, providerRoots))
-            : effectiveRoots;
-      } else {
-        roots = providerRoots;
-      }
+      const overlayRoots = this._sessionOverlayRoots(sessionId);
+      const roots = overlayRoots ?? providerRoots;
       if (roots.length > 0) {
         const writePaths = this._extractWritePathsForTool(toolName, toolInput);
         const outside = writePaths.find((p) => !isPathUnderAnyRoot(p, roots));
@@ -1828,11 +1822,40 @@ export class SessionManager {
   }
 
   /**
+   * task-12（2026-08-28-daemon-agent-share / D-011）：解析 session 级 overlay 写
+   * roots——写守卫两个分支（policyEngine 主路径 / allowedRootsProvider fallback）
+   * 的共享判定，从 task-10（C-12 / D-013）fallback 块原样抽出。
+   *
+   * 语义：``state.effectiveAllowedRoots`` 非空时返回 overlay roots = effective ∩
+   * 物理 provider 兜底（``allowedRootsProvider`` 未注入/为空 → 直接信任 effective，
+   * backend 已是权威交集；注入则滤掉越出物理边界的 stale 路径）。
+   *
+   * @returns null = 会话无 effectiveAllowedRoots（undefined/空数组，FR-15 用物理
+   *   provider 值，行为同今天）；非 null = overlay 生效的 roots（可能为空数组 =
+   *   effective 全被 provider 兜底滤掉——fallback 沿用「空 = 未启用」跳过检查，
+   *   policyEngine 路径按交集语义任何路径都不命中 → deny，只收紧）。
+   */
+  private _sessionOverlayRoots(sessionId: string): string[] | null {
+    const stateForRoots = this._store.get(sessionId);
+    const effectiveRoots = stateForRoots?.effectiveAllowedRoots;
+    if (!effectiveRoots || effectiveRoots.length === 0) return null;
+    const providerRoots = this._allowedRootsProvider?.() ?? [];
+    return providerRoots.length > 0
+      ? effectiveRoots.filter((p) => isPathUnderAnyRoot(p, providerRoots))
+      : effectiveRoots;
+  }
+
+  /**
    * task-14（design §5.1.3 / §5.2）：经 PolicyEngine 校验一次工具调用的写路径。
    *
    * 提取写目标路径（Write/Edit/MultiEdit 取 file_path/path；Bash/PowerShell/CMD
    * 经 extractShellWritePaths），逐条 `canWrite(runtimeId, path, provider, tool)`。
    * 任一 deny 即返回首个 deny 的 reason（统一中文文案）；全 allow / 无写路径返回 null。
+   *
+   * task-12（D-011 / spike-02 结论 B 修复）：借用沙箱分支之后、PolicyCache 循环
+   * 之前插入 session 级 overlay 交集收紧——effectiveAllowedRoots 非空的会话写路径
+   * 必须同时落 session roots 与 PolicyCache roots（见 `_sessionOverlayRoots`）。
+   * 无该字段的会话零行为变化。
    *
    * runtimeId 由 runtimeIdProvider 闭包解析（daemon._registeredRuntimes.get(provider)）；
    * 解析为空串时 PolicyCache 未命中 → fail-closed deny（design D-007）。
@@ -1878,6 +1901,24 @@ export class SessionManager {
         }
       }
       return null; // 全部落沙箱内 → 放行（交内层 allow / 审批）
+    }
+
+    // task-12（2026-08-28-daemon-agent-share / D-011 / spike-02 结论 B 修复）：
+    // session 级 overlay 交集收紧——state.effectiveAllowedRoots 非空时（platform
+    // 共享会话 backend 注入 [writable_dir]，沿 _borrowSandboxRoots per-session 先例），
+    // 写路径必须**同时**满足：① 落在 session roots（_sessionOverlayRoots 共享
+    // helper，与 fallback 块同判定）② 下方 PolicyCache canWrite 不 deny。只收紧
+    // 不放宽：session roots 不命中 → deny（本块新增强制）；命中但 PolicyCache
+    // deny → 仍 deny（下方循环，session roots 不得绕过机器级边界）。无该字段的
+    // 会话 overlay=null → 跳过本块，行为逐字节不变（D-011 Non-Goal 边界）。
+    const overlayRoots = this._sessionOverlayRoots(sessionId);
+    if (overlayRoots !== null) {
+      const outsideOverlay = writePaths.find(
+        (p) => !isPathUnderAnyRoot(p, overlayRoots),
+      );
+      if (outsideOverlay !== undefined) {
+        return `path outside allowed_roots: ${outsideOverlay}`;
+      }
     }
 
     if (!engine) return null;

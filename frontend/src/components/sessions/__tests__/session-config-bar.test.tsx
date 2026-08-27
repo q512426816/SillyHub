@@ -17,7 +17,7 @@
  * 得 null → mock 成纯文本渲染（与 turn-timeline-session-input-bar.test.tsx 一致）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type * as React from "react";
 
@@ -38,11 +38,23 @@ const mocks = vi.hoisted(() => ({
   messageSuccess: vi.fn(),
   messageError: vi.fn(),
   messageInfo: vi.fn(),
+  // task-10：useActiveSharedAgents 直取 /api/daemon/shared-agents/active（apiFetch）。
+  apiFetch: vi.fn(),
 }));
 
 vi.mock("@/lib/use-daemon-machines", () => ({
   useDaemonMachines: () => mocks.machinesHook(),
 }));
+
+// task-10：apiFetch 局部 mock（useActiveSharedAgents 数据源）——ApiError 等其余
+// 导出保留真实（ApiError instanceof 语义不变）。
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return {
+    ...actual,
+    apiFetch: (...args: unknown[]) => mocks.apiFetch(...args),
+  };
+});
 
 vi.mock("@/lib/agent-profiles", () => ({
   NO_PROFILE_VALUE: "",
@@ -221,6 +233,8 @@ beforeEach(() => {
     { id: "prov-glm", name: "GLM 平台", model: "glm-4.7" },
   ]);
   mocks.injectSession.mockReset().mockResolvedValue(INJECT_RESPONSE);
+  // task-10：active 共享智能体默认空列表（用例内按需覆盖）。
+  mocks.apiFetch.mockReset().mockResolvedValue([]);
   mocks.messageSuccess.mockReset();
   mocks.messageError.mockReset();
   mocks.messageInfo.mockReset();
@@ -448,6 +462,94 @@ describe("SessionConfigBar 切换档案", () => {
     renderBar({ engine: "codex" });
     openCtrl("配置-档案");
     expect(screen.getByText("知识经理（人格暂不支持）")).toBeInTheDocument();
+  });
+});
+
+// ── 5.5 task-10：共享机器徽标 + 共享智能体档案标识（2026-08-28-daemon-agent-share / FR-05 / D-004@v2） ──
+
+describe("SessionConfigBar 共享标识（task-10 / D-004@v2 仅展示）", () => {
+  /** 共享机器候选条目（hook machineCandidates 融合形态：sharedMeta + 净名 hostname）。 */
+  function sharedMachineCandidate() {
+    return {
+      ...makeMachine({ id: "m-shared", hostname: "lender-mac", status: "online" }),
+      display_alias: null,
+      runtimes: [],
+      runtime_count: 0,
+      online_runtime_count: 0,
+      sharedMeta: { lenderDisplayName: "张三", sourceWorkspaceId: null },
+    };
+  }
+
+  it("机器下拉：共享机器项带「共享 · 共享人」Tag + 净名展示 + 「共享机器」标注；自有机器不受影响", () => {
+    mocks.machinesHook.mockReturnValue({
+      items: defaultMachines(),
+      machineCandidates: [...defaultMachines(), sharedMachineCandidate()],
+      total: 3,
+      sessions: [],
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    renderBar();
+    openCtrl("配置-机器");
+    const dd = screen.getByTestId("config-dd-machine");
+    expect(dd).toBeInTheDocument();
+    // 共享条目：净名（hostname，无「共享」后缀）+ Tag 含共享人与「共享」字样。
+    expect(screen.getByText("lender-mac")).toBeInTheDocument();
+    const tag = screen.getByText("共享 · 张三");
+    expect(tag).toBeInTheDocument();
+    expect(screen.getByText("共享机器")).toBeInTheDocument();
+    // 自有机器条目不受影响：仍有「跨机器 · 二期」标注（无共享 Tag 干扰判别）。
+    expect(screen.getByText("跨机器 · 二期")).toBeInTheDocument();
+    // 共享 Tag 全场仅一枚（仅共享条目携带）。
+    expect(screen.getAllByText("共享 · 张三")).toHaveLength(1);
+  });
+
+  it("hook 未透传 machineCandidates（旧调用点形态）→ 回退 items 零破坏", () => {
+    // beforeEach 的默认 mock 即无 machineCandidates 字段——既有断言全绿即回退正常。
+    renderBar();
+    openCtrl("配置-机器");
+    const dd = screen.getByTestId("config-dd-machine");
+    expect(dd).toBeInTheDocument();
+    // 下拉内自有机器照常列出，无任何共享标识。
+    expect(within(dd).getByText("machine-1")).toBeInTheDocument();
+    expect(within(dd).queryByText(/共享/)).toBeNull();
+  });
+
+  it("档案下拉：active 共享智能体档案带「共享」标识，普通档案无标识", async () => {
+    mocks.profilesHook.mockReturnValue({
+      profiles: [
+        { id: "prof-1", name: "知识经理" },
+        { id: "prof-shared", name: "平台源码助手" },
+      ],
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mocks.apiFetch.mockResolvedValue([
+      {
+        id: "grant-1",
+        agent_profile_id: "prof-shared",
+        display_name: "平台源码助手",
+        provider: "claude",
+        runtime_online: true,
+      },
+    ]);
+    renderBar();
+    openCtrl("配置-档案");
+    // active 列表经 react-query 异步到达 → findBy 等待「共享」Tag 出现，
+    // 且 Tag 落在共享档案行（按钮）内。
+    const tag = await screen.findByText("共享");
+    const sharedRow = tag.closest("button");
+    expect(sharedRow).not.toBeNull();
+    expect(sharedRow?.textContent).toContain("平台源码助手");
+    // 普通档案行无共享标识。
+    const normalRow = screen.getByRole("button", { name: "选择 知识经理" });
+    expect(normalRow.textContent).not.toContain("共享");
   });
 });
 

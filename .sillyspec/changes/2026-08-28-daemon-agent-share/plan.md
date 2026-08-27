@@ -46,6 +46,11 @@ plan_level: full
 
 ## Wave 7（依赖 Wave 6）
 
+- task-13
+- task-12
+
+## Wave 8（依赖 Wave 7）
+
 - task-11
 
 ## 任务总表
@@ -66,7 +71,7 @@ plan_level: full
 
 ## 关键路径
 
-task-01 → task-02 → task-03 → task-05 → task-08 → task-09 → task-11
+task-01 → task-02 → task-03 → task-05 → task-12 → task-08 → task-09 → task-11（task-12 在 W7 落地但 08 仅消费 OpenAPI 不依赖 daemon 侧；08 于 W5 先行，12 不阻塞前端——关键交付路径不变）
 （数据层 → 授权查询 → 会话钉定 → platform 分支 → 类型生成 → 守护进程页 → 回归）
 
 ## 全局验收标准
@@ -91,3 +96,4 @@ task-01 → task-02 → task-03 → task-05 → task-08 → task-09 → task-11
 | D-008@v1 | task-01 | 迁移单测（NULLS NOT DISTINCT/跳过 daemon_id NULL 行） |
 | D-009@v1 | task-05 | allowed_tools 断言（不含 Bash/NotebookEdit） |
 | D-010@v1 | task-05 | 作用域单测（管理员同 runtime 普通会话写不受限） |
+| D-011@v1 | task-12 | daemon 交集收紧单测 + backend 注入断言 |

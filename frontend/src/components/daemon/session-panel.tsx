@@ -103,7 +103,12 @@ import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
 import { useMessageQueue } from "@/hooks/use-message-queue";
 import { logsToTurns } from "@/components/daemon/runtime-session-helpers";
 import { CtxUsageBar } from "@/components/sessions/ctx-usage-bar";
-import { SessionConfigBar } from "@/components/sessions/session-config-bar";
+// task-10（2026-08-28-daemon-agent-share / FR-05）：useActiveSharedAgents 也从
+// 本模块取（hook 定义随 SessionConfigBar 落地，会话头「平台共享」徽标数据源）。
+import {
+  SessionConfigBar,
+  useActiveSharedAgents,
+} from "@/components/sessions/session-config-bar";
 import { SubagentCatalog } from "@/components/sessions/subagent-catalog";
 import { ApiError } from "@/lib/api";
 import { useNotify } from "@/lib/errors";
@@ -767,6 +772,20 @@ function SessionPanelPage({
     enabled: Boolean(preContext?.workspaceId && preContext?.quickId),
     staleTime: 60_000,
   });
+
+  // ── task-10（2026-08-28-daemon-agent-share / FR-05 / D-004@v2）：平台共享
+  // 会话徽标数据源 ─────────────────────────────────────────────────────────
+  // 判定路径：AgentSessionRead / config_snapshot 均无 platform 共享标识字段
+  //（后端 task-05 未落展示位），前端对照 active 共享智能体生效列表——会话
+  // agent_profile_id ∈ 列表即「平台共享」。仅显示不改行为；预会话态不判定
+  //（sessionId=null 无档案绑定事实，首句创建后徽标自然出现）。失败降级 []
+  //（useActiveSharedAgents 内建），徽标数据缺失不阻塞面板。
+  const { activeSharedAgents } = useActiveSharedAgents();
+  const isPlatformSharedSession = useMemo(() => {
+    const profileId = session?.agent_profile_id;
+    if (!profileId) return false;
+    return activeSharedAgents.some((a) => a.agent_profile_id === profileId);
+  }, [activeSharedAgents, session?.agent_profile_id]);
 
   // ── 实时 turn 状态机（对齐 interactive-session-panel 的 SSE 处理）───────
   const [turnState, setTurnState] = useState<TurnState>(INITIAL_TURN_STATE);
@@ -2567,6 +2586,17 @@ function SessionPanelPage({
             </button>
           )}
           <Badge status={statusBadge.status} text={statusBadge.text} />
+          {/* task-10（FR-05 / D-002@v2）：平台共享会话徽标——会话档案 ∈ active
+              共享智能体生效列表时显示（仅显示不改行为；文案「平台共享」非「只读」）。 */}
+          {isPlatformSharedSession && (
+            <span
+              data-testid="session-platform-shared-badge"
+              title="本会话使用平台共享智能体——读平台源码不受限，写操作限制在共享输出目录"
+              className="inline-flex shrink-0 items-center rounded-full border border-brand-300 bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700"
+            >
+              平台共享
+            </span>
+          )}
           {!mobile && machineName && (
             <span className="hidden shrink-0 items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground sm:inline-flex">
               <Monitor aria-hidden className="h-3 w-3" />

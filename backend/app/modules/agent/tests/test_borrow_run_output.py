@@ -30,6 +30,9 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# grants 模型注册（task-06）：db_engine create_all 前挂到 BaseModel.metadata，
+# 单独跑本文件/单用例时 daemon_runtime_grants 表也存在（对齐根 conftest 注册范式）。
+from app.modules.daemon.grants import model as _grants_model  # noqa: F401
 from app.modules.storage.base import ObjectStat, StorageBackend
 
 pytestmark = pytest.mark.asyncio
@@ -207,10 +210,11 @@ async def _seed_borrow_audit(
 
 
 async def _setup_borrow_topology(db_session: AsyncSession, tmp_path: Any) -> dict[str, uuid.UUID]:
-    """种借用拓扑：workspace + lender(自有 daemon) + borrower + shared binding。
+    """种借用拓扑：workspace + lender(自有 daemon) + borrower + enabled grant。
 
-    返回 ws/lender/borrower/daemon/runtime ids。borrower 无自有 daemon，
-    lender 把 daemon shared 给 workspace。
+    返回 ws/lender/borrower/daemon/runtime/grant ids。borrower 无自有 daemon，
+    lender 把 daemon 通过 workspace grant 共享给工作区（task-06 借用数据源切
+    grants——binding shared 列只是开关双写的 UI 缓存侧，命中以 grant 行为准）。
     """
     ws = await _seed_workspace(db_session, tmp_path)
     lender = await _seed_user(db_session)
@@ -229,6 +233,16 @@ async def _setup_borrow_topology(db_session: AsyncSession, tmp_path: Any) -> dic
             path_source="daemon_client",
         )
     )
+    from app.modules.daemon.grants.model import DaemonRuntimeGrant
+
+    grant = DaemonRuntimeGrant(
+        daemon_instance_id=did,
+        grantee_type="workspace",
+        grantee_id=ws,
+        granted_by_user_id=lender,
+        enabled=True,
+    )
+    db_session.add(grant)
     # business_member 角色 + DAEMON_BORROW 权限给 borrower
     from app.modules.auth.model import Role, RolePermission, UserWorkspaceRole
     from app.modules.auth.permissions import Permission
@@ -264,6 +278,7 @@ async def _setup_borrow_topology(db_session: AsyncSession, tmp_path: Any) -> dic
         "borrower": borrower,
         "daemon": did,
         "runtime": rt,
+        "grant": grant.id,
     }
 
 

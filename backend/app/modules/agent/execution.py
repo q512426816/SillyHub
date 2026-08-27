@@ -138,6 +138,49 @@ def worker_tool_config(read_only: bool) -> dict[str, object]:
     }
 
 
+def platform_shared_tool_config() -> dict[str, object]:
+    """平台共享智能体会话工具集（task-05 / 2026-08-28-daemon-agent-share / D-009@v1）。
+
+    与 :func:`worker_tool_config`（mission Worker 两分支）并列的第三种构造——
+    全体用户经生效 platform grant 的绑定档案创建的交互式会话专用：
+
+    - ``mode="acceptEdits"``：允许 Edit/Write 产出文档/原型图（D-002@v2「读源码
+      不受限 + writable_dir 可写」，产出落盘走显式写工具）；
+    - **不含 Bash/NotebookEdit**（D-009@v1）：daemon 写守卫对 Bash 的写目标靠
+      shell-paths 正则提取，python -c/node -e/sed -i/变量展开等提取为空 → 放行
+      逃逸（sillyhub-daemon shell-paths.ts:7-123 自认），平台共享会话直接整体
+      不给 Bash——daemon 侧经 claim payload tool_config.allowed_tools →
+      CreateSessionInput.allowedTools → canUseTool 最外层白名单 gate
+      （session-manager.ts `_roGate`，per-session 生效）物理拒绝；
+    - 保留两个整服务器名 MCP（对齐 worker_tool_config 的 R-02/P0 先例：显式
+      allowed_tools 白名单会物理禁掉未列名工具）。
+
+    **无 ``max_turns``**：那是 mission Worker 的执行上界概念；交互式会话按轮次
+    驱动（turn_count / AgentSession 既有口径），不设上限。``mode`` 对 interactive
+    路径当前不被 daemon 消费（daemon.ts 仅读 allowed_tools），按 D-009 语义
+    冗余携带，防后续 daemon 侧消费时语义缺位。
+
+    写路径强制边界（spike-02 结论 B → D-011 修复，task-12 已落地）：daemon
+    ``_judgeWriteViaPolicyEngine`` 现支持 session 级 overlay 交集收紧——platform
+    会话经 lease metadata ``effective_allowed_roots=[writable_dir]`` 下推
+    （context.py 原样透传），写路径须同时落于 session roots 与 PolicyCache
+    （机器级）。实际边界 = writable_dir（session 级）∩ 机器级 allowed_roots
+    + 本白名单（Bash 逃逸面已封）。
+    """
+    return {
+        "mode": "acceptEdits",
+        "allowed_tools": [
+            "Read",
+            "Glob",
+            "Grep",
+            "Edit",
+            "Write",
+            "mcp__sillyhub-file",
+            "mcp__sillyhub-worker",
+        ],
+    }
+
+
 def render_worker_prompt(run: AgentRun, *, mode: str = "git") -> str:
     """Render a Worker's execution prompt from its delegation objective.
 

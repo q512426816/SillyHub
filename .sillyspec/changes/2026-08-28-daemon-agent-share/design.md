@@ -48,9 +48,9 @@ scale: large
 ## 3. 非目标（Non-Goals）
 
 - 不做按个人/按团队的共享（`grantee_type` 仅 `workspace`/`platform`，`user` 预留枚举位）。
-- 不改 sillyhub-daemon 子项目代码（`allowed_roots` 沙箱强制与
-  `tool_config.allowedTools` 工具集链路均已存在并被现有路径实证；若 Bash 写
-  逃逸实证不达标，通过后端收窄工具集应对，不动 daemon——见 R-08）。
+- sillyhub-daemon 子项目**仅一处增量**（D-011 收窄）：session-manager.ts 写守卫
+  增加 session 级 overlay 交集收紧（spike-02 实证 B 后的必要修复）；其余零改动
+  （`allowed_roots` 沙箱与 `tool_config.allowedTools` 白名单链路复用既有）。
 - 不做共享配额/限流/用量统计报表（审计表延续记录，报表另议）。
 - 不做 `WorkspaceMemberRuntime.shared` 列的物理删除（保留为开关状态缓存，物理
   清理留给后续变更）。
@@ -92,10 +92,10 @@ binding，原借用 SQL 本就过滤它们——Grill B-03）并写迁移日志�
 
 1. **会话钉定校验**（`daemon/session/service.py:932-937`）：owner 短路 →
    `grants.queries.authorize_pinned_runtime(actor, runtime_id, workspace_id)`：
-   platform grant（该 runtime 为某生效共享智能体的 pinned_runtime）→ 放行并返回
-   绑定（强制覆写 cwd/写约束，见 Phase 3）；否则 workspace grant（actor 是
-   grantee 工作区成员 + 持 `daemon:borrow` 权限 + grant.enabled + daemon 在线）
-   → 放行并按借用会话处理（审计 + 沙箱 marker，语义对齐批任务借用）。
+   platform grant 的 runtime 不经档案直接钉定 → 404（D-012）；共享路径唯一
+   入口=档案检测（Phase 3）。workspace grant（actor 是 grantee 工作区成员 +
+   持 `daemon:borrow` 权限 + grant.enabled + daemon 在线）→ 放行并按借用
+   会话处理（审计 + 沙箱 marker，语义对齐批任务借用）。
    placement 侧二次复查 `agent/placement.py` `_query_pinned_online_runtime`
    同步增加授权分支（复用 `pinned_skip_owner_check` 旗标先例）。
 2. **页面可见**：`daemon/runtime/service.py` 的 machines/runtimes-page 列表装配
@@ -162,8 +162,10 @@ binding，原借用 SQL 本就过滤它们——Grill B-03）并写迁移日志�
 | 新增 | backend/app/modules/daemon/grants/router.py | shared-agents 管理端点（require_platform_admin）+ active 公共端点 |
 | 新增 | backend/app/modules/daemon/grants/tests/ | grants 单测（鉴权矩阵/CRUD/迁移等价性） |
 | 新增 | backend/migrations/versions/<rev>_create_daemon_runtime_grants.py | 建表 + `daemon_borrow_audit` 加 `grant_id` 列 + 存量 shared=true 迁移为 grants |
+| 修改 | backend/migrations/env.py | 登记 grants 模型 import（alembic autogenerate 扫描，task-01 审查跟进补列） |
 | 修改 | backend/app/modules/daemon/session/service.py | :932-937 owner 校验替换为 `authorize_pinned_runtime`；platform 档案检测→强制 pinned/cwd/allowed_roots_overlay=[writable_dir]；借用会话写审计 |
 | 修改 | backend/app/modules/agent/placement.py | `_query_pinned_online_runtime` 授权分支；借用审计 INSERT（:148-182）补 grant_id |
+| 修改 | backend/app/modules/agent/execution.py | `platform_shared_tool_config`：platform 共享会话 tool_config 白名单组装（验收审查文档漂移补登） |
 | 修改 | backend/app/modules/agent/borrow_resolver.py | 数据源切 grants.queries（语义等价改写） |
 | 修改 | backend/app/modules/agent/model.py | `DaemonBorrowAudit` 加 `grant_id`（nullable，无 FK 硬约束——审计行允许 grant 先删） |
 | 修改 | backend/app/modules/workspace/member_runtimes/router.py | PUT `/my-binding/shared` 开关端点内部写穿 grants（同事务双写 shared 列）；`GET /shared-daemons` 数据源切 grants |
@@ -198,7 +200,10 @@ binding，原借用 SQL 本就过滤它们——Grill B-03）并写迁移日志�
 
 ### sillyhub-daemon
 
-零文件变更（allowed_roots 沙箱强制/借用沙箱 marker 链路已支持；R-08 逃逸不达标时以后端收窄工具集应对）。
+| 操作 | 文件路径 | 说明 |
+|---|---|---|
+| 修改 | sillyhub-daemon/src/interactive/session-manager.ts | _judgeWriteViaPolicyEngine 增加 session 级 overlay 交集收紧（D-011，spike-02 B 修复；无字段会话零变化） |
+| 新增 | sillyhub-daemon/tests/interactive/session-manager-write-guard.test.ts | overlay 生效/交集/无字段零变化单测 |
 
 ## 7. 接口定义
 
@@ -208,7 +213,9 @@ async def authorize_pinned_runtime(
     session: AsyncSession, *, actor_user_id: uuid.UUID,
     runtime_id: uuid.UUID, workspace_id: uuid.UUID | None,
 ) -> GrantAuthorization | None
-# GrantAuthorization: kind="owner"|"platform_grant"|"workspace_grant",
+# GrantAuthorization: kind="platform_grant"|"workspace_grant",
+#   （owner 短路归调用方；D-012@v1 后 authorize 的 platform 分支命中即 None，
+#   实际仅产生 workspace_grant，"platform_grant" 枚举保留为契约位）
 #   grant_id, lender_user_id, platform_binding(PlatformBinding|None)
 #   PlatformBinding: agent_profile_id, source_workspace_id, writable_dir
 # 返回 None = 未授权（调用方维持现有 404 语义）
@@ -306,7 +313,7 @@ grant 物理删除后审计行仍可读）。
 | R-05 | 档案 visibility 自动升级的副作用（私有→platform 全员可见） | P1 | 创建端点仅接受 platform 可见档案或显式带 `promote_visibility=true` 参数；响应提示升级结果 |
 | R-06 | gen:types 前端类型滞后（CLAUDE.md 规则 21） | P1 | backend schema 改动同变更内跑 `pnpm gen:types` 并提交两文件 |
 | R-07 | shared 列双写一致性 | P2 | 同事务写；鉴权单源 grants，单侧漂移不影响判定 |
-| R-09 | overlay 收紧的 policy_update 为 per-runtime PolicyCache——共享会话收紧 writable_dir 可能波及管理员同 runtime 的其他会话（D-010） | P1 | task-05 实证作用域；必要时改 session 级 roots provider（_allowedRootsProvider 通道）或随 claim 下推；单测覆盖「管理员普通会话不受限」 |
+| R-09 | ~~overlay 作用域未实证~~ **已实证并修复（D-011）**：spike-02 结论 B——claim payload 的 effectiveAllowedRoots 在 policyEngine 装配下不进写守卫（fallback 块不可达）；修复=task-12 daemon 交集收紧增量 + backend 注入；选项 I（降级验收口径）被否（违背 D-002@v2 用户实答语义） | 已关闭 | task-12 单测三态覆盖 + 管理员普通会话零变化断言 |
 
 ## 11. 决策追踪
 
@@ -320,10 +327,14 @@ grant 物理删除后审计行仍可读）。
 | D-006@v1 方案 B 统一授权表 | accepted（用户实选） | §5 全部、§8 |
 | D-007@v1 platform 档案检测前置 + platform 会话不写借用审计 | accepted（Grill B-01/B-04 修正） | §5 Phase 3、R-03 |
 | D-008@v1 grants 唯一约束 NULLS NOT DISTINCT + 迁移跳过 daemon_id NULL 行 | accepted（Grill B-02/B-03 修正） | §5 Phase 1、§8 |
+| D-012@v1 platform grant 的 runtime 不经档案直接钉定 → 404 | accepted（验收审查 gap-2 封堵） | FR-04，§5 Phase 2.1/Phase 3、task-03/task-05 |
+| D-013@v1 共享机器可见性=成员资格+daemon:borrow 双条件 | accepted（验收审查 gap-1 补过滤） | FR-01，§5 Phase 2.2、task-02/task-13 |
 
 未解决残留：R-09（overlay 收紧的 policy_update 作用域，D-010）在 task-05 实证。
 四个原默认决策已全部经用户重问轮实答（D-001/D-003 追认，D-002/D-004 推翻升级 v2）；
-D-009/D-010 为 plan 期新增（R-08 实证定案 + 新风险锚点）。
+D-009/D-010 为 plan 期新增（R-08 实证定案 + 新风险锚点）；D-011 为 spike-02
+裁决新增（daemon 写守卫增量）；D-012/D-013 为验收审查收口新增（gap-2 直传
+钉定封堵 / gap-1 可见性权限过滤）。
 
 ## 12. 自审（Self-Review）
 

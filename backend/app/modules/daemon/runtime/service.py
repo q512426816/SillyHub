@@ -15,6 +15,7 @@ from sqlmodel import col
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.auth.model import User
+from app.modules.daemon.grants.queries import SharedMachineRow, list_machines_shared_to_me
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime
 
 if TYPE_CHECKING:
@@ -571,7 +572,11 @@ class RuntimeService:
         user_id: uuid.UUID | None,
         limit: int,
         offset: int,
-    ) -> tuple[list[tuple[DaemonRuntime, User | None, DaemonInstance | None]], int]:
+    ) -> tuple[
+        list[tuple[DaemonRuntime, User | None, DaemonInstance | None]],
+        int,
+        list[SharedMachineRow],
+    ]:
         """Paginated filtered runtime list with owner JOIN (task-04 / FR-01/02/04).
 
         - 普通账号固定追加 ``user_id == actor_user_id``；请求的 ``user_id`` 被忽略。
@@ -581,6 +586,9 @@ class RuntimeService:
           name/provider/version 过滤即可，前端机器级视图另走 daemon_instance 列表）。
         - ``type`` 精确匹配 provider；``status`` 精确匹配 status。
         - total 为过滤后总数；items 按 created_at DESC + limit/offset。
+        - 2026-08-28-daemon-agent-share task-07：末位附加 ``shared_to_me`` 行
+          （grants.queries.list_machines_shared_to_me，design §5 Phase 2.2）——
+          共享机器独立成块不混入 items；无授权数据时空列表，items 过滤零变化。
         """
         filters: list = []
         if is_platform_admin:
@@ -620,9 +628,12 @@ class RuntimeService:
         if filters:
             rows_stmt = rows_stmt.where(*filters)
         rows = list((await self._session.execute(rows_stmt)).all())
+        # task-07：附加「共享给我的」机器块（不参与上面的过滤/分页语义）。
+        shared = await list_machines_shared_to_me(self._session, actor_user_id=actor_user_id)
         return (
             [(runtime, owner, instance) for runtime, owner, instance in rows],
             total,
+            shared,
         )
 
     async def update_runtime(
@@ -949,6 +960,7 @@ class RuntimeService:
         list[tuple[DaemonInstance, User | None]],
         dict[uuid.UUID, list[DaemonRuntime]],
         int,
+        list[SharedMachineRow],
     ]:
         """机器级分页/筛选聚合查询（design §5.1 / FR-1 / D-002 / D-003 / D-004）。
 
@@ -966,10 +978,14 @@ class RuntimeService:
           Python 按 instance_id 分组成 dict；0-runtime 机器该键缺失，router 用
           ``.get(id, [])`` 兜底（D-003）。
         - 不内联用量（D-004：用量走 ``/runtimes/usage``，前端按 instance 分组聚合）。
+        - 2026-08-28-daemon-agent-share task-07：末位附加 ``shared_to_me`` 行
+          （design §5 Phase 2.2）——共享机器独立成块不混入 items，items 的
+          owner 收窄逻辑保持（FR-03 修改类端点零变化）；无授权数据时空列表。
 
-        返回 ``(rows, runtimes_by_instance, total)``：``rows`` 为本页
+        返回 ``(rows, runtimes_by_instance, total, shared_to_me)``：``rows`` 为本页
         ``(instance, owner)`` 列表；``runtimes_by_instance`` 为
-        ``{instance_id: [DaemonRuntime,...]}``；``total`` 为过滤后机器总数。
+        ``{instance_id: [DaemonRuntime,...]}``；``total`` 为过滤后机器总数；
+        ``shared_to_me`` 为共享给 actor 的机器行（grants.queries 契约五字段）。
         """
         # 与 /runtimes/page 一致：进入先收敛 stale（design §5.1 step 4 / D-002）。
         await self.cleanup_stale_runtimes()
@@ -1053,7 +1069,9 @@ class RuntimeService:
                 if rt.daemon_instance_id is not None:
                     runtimes_by_instance.setdefault(rt.daemon_instance_id, []).append(rt)
 
-        return rows, runtimes_by_instance, total
+        # task-07：附加「共享给我的」机器块（独立查询，不影响上面的过滤/分页）。
+        shared = await list_machines_shared_to_me(self._session, actor_user_id=actor_user_id)
+        return rows, runtimes_by_instance, total, shared
 
     async def _get_owned_instance(
         self,

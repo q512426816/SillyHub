@@ -1304,3 +1304,10 @@ class DaemonBorrowAudit(BaseModel, table=True):
         default=None,
         sa_column=Column(JSON, nullable=True),
     )
+    # Change 2026-08-28-daemon-agent-share task-01 / D-006@v1：关联 daemon_runtime_grants
+    # 行（task-03/task-06 起借用路径写入）。nullable：旧行无此值；无 FK 硬约束——
+    # grant 物理删除后审计行仍可读（区别于上方 CASCADE/RESTRICT 实体外键）。
+    grant_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(Uuid(as_uuid=True), nullable=True),
+    )

@@ -26,10 +26,18 @@
  *
  * 数据源与 task-12 同：useDaemonMachines（机器/智能体展示）/ listProviders /
  * useMineAgentProfiles。页面组装归 task-10，本组件不感知 SSE/路由。
+ *
+ * task-10（2026-08-28-daemon-agent-share / FR-05 / D-004@v2）：机器下拉候选 =
+ * 自有 + 共享给我的（hook machineCandidates 融合，共享条目「共享」Tag + 共享人
+ * 名，仅展示不改行为）；档案下拉共享智能体带「共享」标识（对照
+ * useActiveSharedAgents 生效列表）。
+ * task-13（契约修复）：共享条目经 machineCandidates 携带真实 runtimes——智能体
+ * 下拉共享机器的引擎可选可显；useActiveSharedAgents 取数收敛到 lib/daemon.ts
+ * 的 fetchSharedAgentsActive（废 apiFetch 直调，行为等价）。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { App } from "antd";
+import { App, Tag } from "antd";
 import {
   Bot,
   BookUser,
@@ -42,11 +50,13 @@ import {
   Zap,
 } from "lucide-react";
 
+import { ApiError } from "@/lib/api";
+import type { components } from "@/lib/api-types";
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
 import { listProviders } from "@/lib/api/llm-providers";
 import { useNotify } from "@/lib/errors";
-import { useDaemonMachines } from "@/lib/use-daemon-machines";
-import { injectSession, PROVIDER_META } from "@/lib/daemon";
+import { useDaemonMachines, type MachineCandidate } from "@/lib/use-daemon-machines";
+import { fetchSharedAgentsActive, injectSession, PROVIDER_META } from "@/lib/daemon";
 import type {
   AgentSessionConfigSnapshot,
   DaemonMachineRead,
@@ -57,6 +67,36 @@ import { cn } from "@/lib/utils";
 
 /** 供应商下拉「不指定（本机默认）」项的值（→ injectSession llm_provider_id: ""）。 */
 export const SWITCH_NO_PROVIDER_VALUE = "";
+
+/* ────────────────────── task-10：平台共享智能体 active 数据 ────────────────────── */
+
+/** 平台共享智能体 active 生效摘要 DTO（task-08 生成 api-types 单一来源）。 */
+export type SharedAgentActiveView = components["schemas"]["SharedAgentActiveView"];
+
+/**
+ * 平台共享智能体生效列表（task-10 / FR-05）：取
+ * GET /api/daemon/shared-agents/active（task-13 起经 lib/daemon.ts 的
+ * fetchSharedAgentsActive 封装收敛取数——task-09 封装落地前的 apiFetch 直调
+ * 已废，端点与响应结构同一，行为等价）。
+ *
+ * 失败降级 []（徽标数据缺失不阻塞会话面板）；30s staleTime（低频管理数据，
+ * 对齐 listProviders 节奏）。消费端：本组件档案下拉共享标识 + session-panel
+ * 会话头「平台共享」徽标。
+ */
+export function useActiveSharedAgents() {
+  const q = useQuery<SharedAgentActiveView[], ApiError>({
+    queryKey: ["daemonSharedAgents", "active"],
+    queryFn: () =>
+      fetchSharedAgentsActive().catch(() => [] as SharedAgentActiveView[]),
+    staleTime: 30_000,
+  });
+  return {
+    activeSharedAgents: q.data ?? [],
+    isLoading: q.isLoading,
+    isError: q.isError,
+    error: q.error,
+  };
+}
 
 /** 四控件种类（task-14 provides 契约：machineCtrl/agentCtrl/providerCtrl/profileCtrl）。 */
 export type SessionConfigCtrlKind =
@@ -166,7 +206,16 @@ export function SessionConfigBar({
   // 2026-08-25：params 统一 { limit: 100 }——与 sessions-portal / session-list-panel
   // 同 queryKey（["daemonMachines","list",{limit:100}]）共享缓存与 15s 轮询，不再
   // 分叉成 {} 与 {limit:100} 两个键各自轮询双请求。
-  const { items: machines } = useDaemonMachines({ limit: 100 });
+  // task-10：机器下拉候选 = 自有 + 共享给我的（machineCandidates 融合；hook
+  // 未透传该字段的旧调用点/mock 回退 items，零破坏）。
+  const { items: machines, machineCandidates } = useDaemonMachines({ limit: 100 });
+  const machineOptions: DaemonMachineRead[] = machineCandidates ?? machines;
+  // task-10：档案下拉共享智能体标识（对照 active 生效列表）。
+  const { activeSharedAgents } = useActiveSharedAgents();
+  const sharedProfileIds = useMemo(
+    () => new Set(activeSharedAgents.map((a) => a.agent_profile_id)),
+    [activeSharedAgents],
+  );
   const { profiles } = useMineAgentProfiles();
   const notify = useNotify();
   // useNotify 无 info 级方法,引擎切换引导提示经 App 上下文取 message.info
@@ -212,7 +261,7 @@ export function SessionConfigBar({
   // ql-20260823-008：快照缺失（预会话）时从 runtimeId→机器列表解析（currentMachine
   // 在下方 useMemo，先声明机器名函数不依赖它——直接 machines 查找）。
   const machineHit = runtimeId
-    ? (machines.find((m) => m.runtimes?.some((r) => r.id === runtimeId)) ?? null)
+    ? (machineOptions.find((m) => m.runtimes?.some((r) => r.id === runtimeId)) ?? null)
     : null;
   const machineNameText =
     configSnapshot?.machine_name ?? (machineHit ? machineLabel(machineHit) : "—");
@@ -233,13 +282,13 @@ export function SessionConfigBar({
       llmProviderId
     : "本机默认";
 
-  // 当前会话所属机器（runtime_id 钉定，快照 machine_name 兜底）。
+  // 当前会话所属机器（runtime_id 钉定，快照 machine_name 兜底；候选含共享机器）。
   const currentMachine = useMemo(
     () =>
-      machines.find((m) => m.runtimes?.some((r) => r.id === runtimeId)) ??
-      machines.find((m) => machineLabel(m) === configSnapshot?.machine_name) ??
+      machineOptions.find((m) => m.runtimes?.some((r) => r.id === runtimeId)) ??
+      machineOptions.find((m) => machineLabel(m) === configSnapshot?.machine_name) ??
       null,
-    [machines, runtimeId, configSnapshot?.machine_name],
+    [machineOptions, runtimeId, configSnapshot?.machine_name],
   );
 
   /** ql-20260817-010：点选即**静默**切换——prompt 发空串（后端静默切换契约：
@@ -340,25 +389,33 @@ export function SessionConfigBar({
             testId="config-dd-machine"
             title="守护进程 · 换机器需开新会话（跨机器二期）"
           >
-            {machines.length === 0 ? (
+            {machineOptions.length === 0 ? (
               <p className="px-2 py-1.5 text-xs text-muted-foreground">
                 暂无守护进程
               </p>
             ) : (
-              machines.map((m) => {
+              machineOptions.map((m) => {
                 const isCurrent = m.id === currentMachine?.id;
                 const online = m.status === "online";
+                // task-10：共享条目净名（hostname）+「共享」Tag（共享人名随 Tag）；
+                // 自有机器沿用别名优先展示名。
+                const shared = (m as MachineCandidate).sharedMeta;
                 return (
                   <DisplayItem
                     key={m.id}
                     icon={<StatusDot online={online} />}
-                    label={machineLabel(m)}
+                    label={shared ? m.hostname : machineLabel(m)}
+                    tag={
+                      shared ? <SharedTag lender={shared.lenderDisplayName} /> : undefined
+                    }
                     current={isCurrent}
                     sub={
                       isCurrent
                         ? undefined
                         : online
-                          ? "跨机器 · 二期"
+                          ? shared
+                            ? "共享机器"
+                            : "跨机器 · 二期"
                           : "离线"
                     }
                   />
@@ -494,6 +551,12 @@ export function SessionConfigBar({
                     ? `${p.name}（人格暂不支持）`
                     : p.name
                 }
+                // task-10：共享智能体档案带「共享」标识（对照 active 生效列表）。
+                tag={
+                  sharedProfileIds.has(p.id) ? (
+                    <SharedTag lender={null} title="平台共享智能体——读平台源码不受限，写操作限制在共享输出目录" />
+                  ) : undefined
+                }
                 current={p.id === agentProfileId}
                 onClick={() =>
                   executeSwitch({
@@ -557,10 +620,33 @@ function ConfigDropdown({
   );
 }
 
+/**
+ * 共享徽标（task-10 / FR-05 / D-004@v2）：机器/档案候选中共享条目的「共享」Tag。
+ * 品牌色阶（FRONTEND_PAGE_STYLE §0.5），样式对齐 pre-session-picker「默认」Tag
+ * 先例；机器场景 lender 为共享人名，平台共享智能体场景传 null。
+ */
+function SharedTag({
+  lender,
+  title,
+}: {
+  lender: string | null;
+  title?: string;
+}) {
+  return (
+    <Tag
+      className="mr-0 shrink-0 rounded-full border-brand-300 bg-brand-100 text-brand-700"
+      title={title ?? (lender ? `来自 ${lender} 的共享` : "共享给我的")}
+    >
+      共享{lender ? ` · ${lender}` : ""}
+    </Tag>
+  );
+}
+
 /** 纯展示项（机器/智能体下拉，D-004@v2：无可选目标，整体置灰仅展示）。 */
 function DisplayItem({
   icon,
   label,
+  tag,
   current,
   sub,
   disabled = true,
@@ -568,6 +654,8 @@ function DisplayItem({
 }: {
   icon: React.ReactNode;
   label: string;
+  /** task-10：共享条目徽标（紧跟 label 渲染）。 */
+  tag?: React.ReactNode;
   current?: boolean;
   sub?: string;
   /** ql-20260817-006：默认展示态置灰；传 false + onClick 变可点（在线引擎引导开新会话）。 */
@@ -595,6 +683,7 @@ function DisplayItem({
         {icon}
       </span>
       <span className="min-w-0 break-words">{label}</span>
+      {tag}
       {current ? (
         <span className="ml-auto shrink-0 text-primary">✓ 当前</span>
       ) : (
@@ -610,12 +699,15 @@ function DisplayItem({
 function SwitchItem({
   icon,
   label,
+  tag,
   sub,
   current,
   onClick,
 }: {
   icon: React.ReactNode;
   label: string;
+  /** task-10：共享智能体档案徽标（紧跟 label 渲染）。 */
+  tag?: React.ReactNode;
   sub?: string;
   current?: boolean;
   onClick: () => void;
@@ -634,6 +726,7 @@ function SwitchItem({
         {icon}
       </span>
       <span className="min-w-0 break-words">{label}</span>
+      {tag}
       {current && <span className="ml-auto shrink-0 text-primary">✓</span>}
       {!current && sub && (
         <span className="ml-auto shrink-0 text-muted-foreground">{sub}</span>

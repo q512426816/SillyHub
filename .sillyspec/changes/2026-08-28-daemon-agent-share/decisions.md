@@ -235,3 +235,65 @@ created_at: 2026-08-28 00:17:23
 - impacts: [FR-04, task-05, R-09]
 - evidence: 探索代理 report（interactive/types.ts:294-296 / daemon.ts:4098 /
   session-manager.ts:1632 writeGuardEnabled 双通道）
+
+## D-011@v1: 打破 daemon 零改动 Non-Goal——session 级 overlay roots 写守卫增量（spike-02 B 裁决）
+- type: architecture
+- priority: P0
+- status: accepted
+- source: design-grill
+- question: spike-02 实证 daemon 生产装配（policyEngine 存在）下 claim payload 的
+  effectiveAllowedRoots 不进写守卫（session-manager.ts:1783-1793 policyEngine 分支
+  提前 return，fallback 块不可达；PolicyCache 机器级；borrow-sandbox marker 通道
+  强制 cwd=daemon 自建沙箱无法承载 writable_dir）——writable_dir 路径级强制何解？
+- answer: 选项 II（最小 daemon 增量）：_judgeWriteViaPolicyEngine 增加 per-session
+  overlay 判定——state.effectiveAllowedRoots 非空时路径必须同时落在 session roots
+  与 PolicyCache roots（交集收紧语义，沿 _borrowSandboxRoots :1859-1881 per-session
+  map 先例）；无该字段的会话零行为变化。backend 侧 platform 会话向 lease/claim 链
+  注入 effective_allowed_roots=[writable_dir]（镜像 tool_config 注入先例）。
+  选项 I 被否：降级为「allowed_roots 级 + 禁 Bash」会使共享会话可写源码工作区
+  本身，违背用户 D-002@v2 实答语义（读源码不受限+写仅限指定目录）。
+  Non-Goal「不改 sillyhub-daemon」由本决策显式收窄为「仅此一处增量写守卫 + 测试」。
+- normalized_requirement: daemon session-manager.ts 写守卫支持 session 级 overlay
+  （交集收紧）；携带 effectiveAllowedRoots 的既有会话自此被真实收紧（语义即
+  overlay 文档语义「只能收紧」，属修正休眠缺陷）；backend platform 会话注入
+  effective_allowed_roots=[writable_dir]；两侧各有单测；FR-04 验收口径维持
+  「writable_dir 外的写被拒绝」不降级。
+- impacts: [FR-04, task-05③, 新 task-12, design §3/§6/§10]
+- evidence: task-05 子代理 spike-02 report（session-manager.ts:1783-1815/1842-1895、
+  cli.ts:646/786、daemon.ts:4098/4510）；用户 D-002@v2 实答原文
+
+## D-012@v1: platform grant 的 pinned runtime 不经共享档案直接钉定 → 404
+- type: boundary
+- priority: P1
+- status: accepted
+- source: design-grill/acceptance-review
+- question: platform grant 的 pinned_runtime_id 可否不经共享档案直接钉定？
+- answer: 否——共享的是智能体而非裸 runtime：authorize_pinned_runtime 的
+  platform 分支命中即放行的旧语义，使「直传 pinned_runtime_id、不带共享档案」
+  形态绕过 task-05 强制（cwd=源码工作区 / writable_dir 写约束 / 工具集白名单）。
+  收口（验收审查 gap-2）：platform 分支命中一律返回 None → 调用方 404；共享
+  runtime 唯一入口=task-05 档案检测（检测命中下发走 pinned_skip_owner_check=True，
+  不经 authorize，不受影响）。
+- normalized_requirement: 直接以 platform grant 的 pinned_runtime_id 创建会话
+  （不带共享档案）→ 404；session 首查与 placement 二次复查同源 authorize 判定，
+  单测断言翻转覆盖。
+- impacts: [FR-04, task-03, task-05]
+- evidence: 验收审查（gap-2）；session/service.py authorize 接线注释块；
+  placement.py _query_pinned_online_runtime 授权分支
+
+## D-013@v1: 共享机器可见性 = 成员资格 + daemon:borrow 双条件
+- type: consistency
+- priority: P1
+- status: accepted
+- source: acceptance-review
+- question: 「共享给我的」机器列表的权限口径——仅成员资格，还是成员资格+权限？
+- answer: 成员资格 + daemon:borrow 双条件（FR-01 GWT-3 本义：任一不满足即
+  不可见）。list_machines_shared_to_me 原实现仅 EXISTS 成员资格，锁定了宽松
+  口径——收口（验收审查 gap-1）：补逐 grantee 工作区 has_permission 过滤
+  （与 authorize_pinned_runtime workspace 分支同源判定，含 platform_admin
+  短路），「可见」与「可借用」权限口径对齐。
+- normalized_requirement: 无 daemon:borrow 的成员在 machines/runtimes-page 的
+  shared_to_me 块看不到共享机器；持权限的成员照常可见（正反例单测锁定）。
+- impacts: [FR-01, task-02, task-13]
+- evidence: 验收审查（gap-1）；requirements FR-01 GWT-3；
+  grants/queries.list_machines_shared_to_me

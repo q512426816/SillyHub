@@ -19,7 +19,7 @@ created_at: 2026-08-28 00:38:14
 ## 功能需求
 
 ### FR-01: 共享守护进程页面可见
-覆盖决策：D-001@v1, D-006@v1
+覆盖决策：D-001@v1, D-006@v1, D-013@v1
 
 Given lender 在工作区 W 打开共享开关（grants 表存在 workspace 级行、enabled=true、daemon 在线）
 And 用户 U 是 W 的成员且持 `daemon:borrow` 权限
@@ -57,7 +57,7 @@ When U 调用别名/可写目录/升级/禁用/移除/清理任一修改类端�
 Then 后端维持现状 owner-or-platform-admin 校验（403/404），前端共享卡片不渲染这些入口
 
 ### FR-04: 平台共享智能体（管理员配置 + 全体可用 + 源码只读·指定目录可写）
-覆盖决策：D-002@v2, D-003@v1, D-006@v1, D-007@v1, D-008@v1
+覆盖决策：D-002@v2, D-003@v1, D-006@v1, D-007@v1, D-008@v1, D-012@v1
 
 Given 用户是平台管理员
 When 其创建共享智能体（agent_profile_id + pinned_runtime_id + source_workspace_id + writable_dir）
@@ -79,6 +79,10 @@ Then 在工具白名单 gate 直接拒绝（D-009：allowed_tools 不含 Bash，
 Given 管理员停用（enabled=false）或删除共享
 When 用户再以该档案创建会话
 Then 回到普通档案语义（不再强制钉定/写约束）
+
+Given 用户直接以 platform grant 的 pinned_runtime_id 创建会话（不带共享档案）
+When create_session（runtime_id 直传，非 owner 短路路径）
+Then 404（D-012：共享智能体唯一入口=共享档案检测路径，绕过强制项的直接钉定封堵）
 
 ### FR-05: 共享机器/智能体进入会话选择器（用户显式选择）
 覆盖决策：D-004@v2, D-007@v1
@@ -120,5 +124,7 @@ Then 默认解析行为与现状完全一致（不做任何自动回退到共享
 | D-008@v1 | FR-01, FR-04 | 唯一约束 NULLS NOT DISTINCT + 迁移跳过空 daemon_id |
 | D-009@v1 | FR-04 | 共享会话 allowed_tools 不含 Bash（R-08 实证定案） |
 | D-010@v1 | FR-04 | overlay 收紧作用域 task-05 实证（R-09） |
+| D-012@v1 | FR-04 | platform grant 的 pinned runtime 直传钉定 404（验收审查 gap-2 封堵） |
+| D-013@v1 | FR-01 | 共享机器可见性=成员资格+daemon:borrow 双条件（验收审查 gap-1 补过滤） |
 
-当前生效版本决策（D-001@v1、D-002@v2、D-003@v1、D-004@v2、D-005~D-010@v1）均已覆盖；D-002@v1/D-004@v1 已 superseded 不再生效。
+当前生效版本决策（D-001@v1、D-002@v2、D-003@v1、D-004@v2、D-005~D-010@v1、D-012@v1、D-013@v1）均已覆盖；D-002@v1/D-004@v1 已 superseded 不再生效；D-011@v1（daemon 写守卫增量，spike-02 裁决）属实现层决策未单列 FR 映射。

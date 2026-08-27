@@ -1041,6 +1041,7 @@ export interface paths {
          *
          *     端点无 user_id 路径参数，server 钉死当前用户 → 仅能改自己 binding。
          *     binding 未配置时 service 抛 ``MemberBindingNotFound``（409）直通全局处理器。
+         *     task-06：service 层同事务双写 shared 列 + grants 授权行（端点签名/响应不变）。
          */
         put: operations["set_my_binding_shared_endpoint_api_workspaces__workspace_id__my_binding_shared_put"];
         post?: never;
@@ -1061,7 +1062,8 @@ export interface paths {
          * List Shared Daemons Endpoint
          * @description owner 查工作空间所有共享 daemon（FR-02 / D-003@v1）。
          *
-         *     返回含 lender_user_id / daemon 在线状态 / 可撤销标记。
+         *     返回含 lender_user_id / daemon 在线状态 / 可撤销标记；task-06 数据源切
+         *     grants（enabled workspace grant），每行新增 grant_id（纯增量字段）。
          */
         get: operations["list_shared_daemons_endpoint_api_workspaces__workspace_id__shared_daemons_get"];
         put?: never;
@@ -1087,7 +1089,8 @@ export interface paths {
          * @description owner 撤销某成员 daemon 共享（FR-02 / D-003@v1）。
          *
          *     设 shared=False，**不删 binding 行**（lender 配置保留）。target 无 binding
-         *     时 service 抛 ``MemberBindingNotFound``（409）。
+         *     时 service 抛 ``MemberBindingNotFound``（409）。task-06：同事务置对应
+         *     workspace grant enabled=False（撤销后借用立即失效，鉴权只读 grants）。
          */
         delete: operations["revoke_shared_endpoint_api_workspaces__workspace_id__members__user_id__shared_delete"];
         options?: never;
@@ -3775,6 +3778,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/shared-agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Shared Agents
+         * @description 管理端全量列表（含停用行）。
+         */
+        get: operations["list_shared_agents_api_daemon_shared_agents_get"];
+        put?: never;
+        /**
+         * Create Shared Agent
+         * @description 创建平台共享智能体（五重校验：D-003 runtime 归属+在线 / D-002@v2 writable_dir ⊆
+         *     allowed_roots / 源码工作区存在 / R-05 档案显式升级 / D-008 唯一防重复）。
+         *
+         *     ``visibility_promoted=true`` 时表示档案可见性已随本次创建显式升级为 platform
+         *     （R-05「在响应中提示升级结果」）。
+         */
+        post: operations["create_shared_agent_api_daemon_shared_agents_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/shared-agents/active": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Active Shared Agents
+         * @description 生效摘要（任意登录用户）：仅 enabled 行 + 档案显示字段 + runtime 在线状态。
+         */
+        get: operations["list_active_shared_agents_api_daemon_shared_agents_active_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/shared-agents/{grant_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Shared Agent
+         * @description 删除共享智能体（物理删行；档案 visibility 不回滚——升级是独立的管理动作）。
+         */
+        delete: operations["delete_shared_agent_api_daemon_shared_agents__grant_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Patch Shared Agent
+         * @description 停用/启用共享智能体（仅改 enabled；停用后 active 不再返回该行）。
+         */
+        patch: operations["patch_shared_agent_api_daemon_shared_agents__grant_id__patch"];
+        trace?: never;
+    };
     "/api/daemon/version": {
         parameters: {
             query?: never;
@@ -3886,6 +3961,9 @@ export interface paths {
         /**
          * List Runtimes Page
          * @description 平台管理员分页查看全部 owner 的 runtime；普通账号只见自己 (FR-01/02/04).
+         *
+         *     2026-08-28-daemon-agent-share task-07：附加 shared_to_me 共享区块（design §5
+         *     Phase 2.2）——独立成块不混入 items，无授权数据时空列表（零行为变化）。
          */
         get: operations["list_runtimes_page_api_daemon_runtimes_page_get"];
         put?: never;
@@ -3993,6 +4071,8 @@ export interface paths {
          *
          *     普通账号仅见自己的机器（service 层强制 ``actor == user_id``，请求 ``user_id`` 被忽略）。
          *     ``list_machines`` 内部已先 ``cleanup_stale_runtimes`` 收敛 stale 状态，router 不重复调。
+         *     2026-08-28-daemon-agent-share task-07：附加 shared_to_me 共享区块（design §5
+         *     Phase 2.2）——独立成块不混入 items，无授权数据时空列表（零行为变化）。
          */
         get: operations["list_machines_api_daemon_machines_get"];
         put?: never;
@@ -11495,6 +11575,8 @@ export interface components {
          * @description Response body for GET /api/daemon/machines（design §5.1 / FR-1）。
          *
          *     机器级分页（默认 20/页，D-007），机器卡永不跨页断裂。
+         *     2026-08-28-daemon-agent-share task-07：附加 ``shared_to_me`` 共享区块
+         *     （design §5 Phase 2.2，独立成块不混入 items；默认空列表，无共享时零变化）。
          */
         DaemonMachineListResponse: {
             /** Items */
@@ -11505,6 +11587,8 @@ export interface components {
             limit: number;
             /** Offset */
             offset: number;
+            /** Shared To Me */
+            shared_to_me?: components["schemas"]["SharedMachineView"][];
         };
         /**
          * DaemonMachineRead
@@ -11662,6 +11746,9 @@ export interface components {
         /**
          * DaemonRuntimeListResponse
          * @description Response body for GET /api/daemon/runtimes/page (task-04 / FR-04).
+         *
+         *     2026-08-28-daemon-agent-share task-07：附加 ``shared_to_me`` 共享区块
+         *     （design §5 Phase 2.2，默认空列表保证既有子集式 shape 断言零失败）。
          */
         DaemonRuntimeListResponse: {
             /** Items */
@@ -11672,6 +11759,8 @@ export interface components {
             limit: number;
             /** Offset */
             offset: number;
+            /** Shared To Me */
+            shared_to_me?: components["schemas"]["SharedMachineView"][];
         };
         /**
          * DaemonRuntimeRead
@@ -17922,13 +18011,152 @@ export interface components {
             updated: string[];
         };
         /**
+         * SharedAgentActiveView
+         * @description active 生效摘要（任意登录用户可见；display_name/provider 取档案，runtime_online 取钉定 runtime）。
+         */
+        SharedAgentActiveView: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Agent Profile Id
+             * Format: uuid
+             */
+            agent_profile_id: string;
+            /** Display Name */
+            display_name?: string | null;
+            /** Provider */
+            provider?: string | null;
+            /**
+             * Runtime Online
+             * @default false
+             */
+            runtime_online: boolean;
+        };
+        /**
+         * SharedAgentCreateRequest
+         * @description POST /daemon/shared-agents 请求体（design §7）。
+         *
+         *     - ``writable_dir``：共享输出目录（D-002@v2——读源码不受限、写限制在此目录），
+         *       service 层校验 ⊆ 管理员该 runtime 的 allowed_roots，防指定任意路径。
+         *     - ``promote_visibility``：档案 visibility 非 platform 时必须显式置 true 才
+         *       升级（R-05 禁止静默把私有档案改为全员可见），缺省 false。
+         */
+        SharedAgentCreateRequest: {
+            /**
+             * Agent Profile Id
+             * Format: uuid
+             */
+            agent_profile_id: string;
+            /**
+             * Pinned Runtime Id
+             * Format: uuid
+             */
+            pinned_runtime_id: string;
+            /**
+             * Source Workspace Id
+             * Format: uuid
+             */
+            source_workspace_id: string;
+            /** Writable Dir */
+            writable_dir: string;
+            /**
+             * Promote Visibility
+             * @default false
+             */
+            promote_visibility: boolean;
+        };
+        /**
+         * SharedAgentCreateResponse
+         * @description 创建响应：View + 档案升级提示（R-05）。
+         */
+        SharedAgentCreateResponse: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Agent Profile Id
+             * Format: uuid
+             */
+            agent_profile_id: string;
+            /**
+             * Pinned Runtime Id
+             * Format: uuid
+             */
+            pinned_runtime_id: string;
+            /**
+             * Source Workspace Id
+             * Format: uuid
+             */
+            source_workspace_id: string;
+            /** Writable Dir */
+            writable_dir: string;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Visibility Promoted
+             * @default false
+             */
+            visibility_promoted: boolean;
+        };
+        /**
+         * SharedAgentPatchRequest
+         * @description PATCH /daemon/shared-agents/{id} 请求体——仅改 enabled（task 卡：PATCH 仅改 enabled）。
+         */
+        SharedAgentPatchRequest: {
+            /** Enabled */
+            enabled: boolean;
+        };
+        /**
+         * SharedAgentView
+         * @description 管理端完整视图（platform 行四绑定列由 service 强制非空，此处按契约声明非空）。
+         */
+        SharedAgentView: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Agent Profile Id
+             * Format: uuid
+             */
+            agent_profile_id: string;
+            /**
+             * Pinned Runtime Id
+             * Format: uuid
+             */
+            pinned_runtime_id: string;
+            /**
+             * Source Workspace Id
+             * Format: uuid
+             */
+            source_workspace_id: string;
+            /** Writable Dir */
+            writable_dir: string;
+            /** Enabled */
+            enabled: boolean;
+        };
+        /**
          * SharedDaemonView
          * @description owner 视角下一条共享 daemon（FR-02 / D-003@v1）。
          *
          *     ``daemon_status`` / ``daemon_hostname`` 来自 JOIN daemon_instances；
-         *     ``revocable`` 恒 True（owner 调用，总可撤销）。
+         *     ``revocable`` 恒 True（owner 调用，总可撤销）。task-06（2026-08-28-
+         *     daemon-agent-share，design §5 Phase 2.3 / provides SharedDaemonsGrantField）：
+         *     数据源切 grants 后每行对应一条 enabled workspace grant，新增 ``grant_id``
+         *     纯增量字段（撤销追溯锚点，前端类型生成归 task-08）；其余字段结构不变。
          */
         SharedDaemonView: {
+            /**
+             * Grant Id
+             * Format: uuid
+             */
+            grant_id: string;
             /**
              * Lender User Id
              * Format: uuid
@@ -17953,6 +18181,57 @@ export interface components {
         SharedFlagRequest: {
             /** Shared */
             shared: boolean;
+        };
+        /**
+         * SharedMachineRuntimeView
+         * @description 共享机器的 runtime 明细行 DTO（task-13 / FR-01/FR-02 / design §6）。
+         *
+         *     字段对齐 grants.queries.SharedMachineRuntimeRow 三字段（provides 契约）：
+         *     会话创建按 runtime 粒度（机器+引擎），机器级 grant 的视图需携带 runtime
+         *     清单供前端锁 runtime_id / picker 第二步选引擎；``online`` 与机器级同口径
+         *     （status == "online"，权威源 runtime.status）。
+         */
+        SharedMachineRuntimeView: {
+            /**
+             * Runtime Id
+             * Format: uuid
+             */
+            runtime_id: string;
+            /** Provider */
+            provider?: string | null;
+            /** Online */
+            online: boolean;
+        };
+        /**
+         * SharedMachineView
+         * @description 「共享给我的」机器行 DTO（2026-08-28-daemon-agent-share task-07 / design §6）。
+         *
+         *     字段对齐 grants.queries.SharedMachineRow 五字段（task-02 provides 契约）：
+         *     display_name = 机器别名（display_alias）回退 hostname；online 取机器权威
+         *     在线源 daemon_instances.status。service 层装配（runtime/service.py），router
+         *     透传序列化；platform 共享智能体不进本视图（走 shared-agents 选择器）。
+         *
+         *     task-13（契约修复）：附加 ``runtimes`` runtime 明细（Wave 6 审查——共享授权
+         *     是机器级而会话创建需要 runtime_id，五字段无明细导致前端锁 machine_id 404 /
+         *     picker 第二步无 runtime 可选）。纯增量可选（默认空列表），OpenAPI 非必填，
+         *     既有五字段与旧消费端零变化。
+         */
+        SharedMachineView: {
+            /**
+             * Machine Id
+             * Format: uuid
+             */
+            machine_id: string;
+            /** Display Name */
+            display_name: string;
+            /** Lender Display Name */
+            lender_display_name?: string | null;
+            /** Source Workspace Id */
+            source_workspace_id?: string | null;
+            /** Online */
+            online: boolean;
+            /** Runtimes */
+            runtimes?: components["schemas"]["SharedMachineRuntimeView"][];
         };
         /**
          * SkillCreateRequest
@@ -27342,6 +27621,143 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AuditPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_shared_agents_api_daemon_shared_agents_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedAgentView"][];
+                };
+            };
+        };
+    };
+    create_shared_agent_api_daemon_shared_agents_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedAgentCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedAgentCreateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_active_shared_agents_api_daemon_shared_agents_active_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedAgentActiveView"][];
+                };
+            };
+        };
+    };
+    delete_shared_agent_api_daemon_shared_agents__grant_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    patch_shared_agent_api_daemon_shared_agents__grant_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                grant_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SharedAgentPatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedAgentView"];
                 };
             };
             /** @description Validation Error */

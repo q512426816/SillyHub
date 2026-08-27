@@ -11,7 +11,10 @@ worker_tool_config 是纯函数，无需 DB session，直接断言返回 dict。
 
 from __future__ import annotations
 
-from app.modules.agent.execution import worker_tool_config
+from app.modules.agent.execution import (
+    platform_shared_tool_config,
+    worker_tool_config,
+)
 
 # 整服务器名（非通配）——R-02 明确不用 mcp__sillyhub-file__* 写法
 _FILE_MCP_SERVER = "mcp__sillyhub-file"
@@ -101,3 +104,51 @@ class TestWorkerMcpServerAllowed:
     def test_file_server_still_allowed(self):
         for ro in (True, False):
             assert _FILE_MCP_SERVER in worker_tool_config(read_only=ro)["allowed_tools"]
+
+
+# ── task-05（2026-08-28-daemon-agent-share / FR-04 / D-009@v1）：平台共享
+#    会话工具集构造 platform_shared_tool_config 枚举断言 ──
+
+
+class TestPlatformSharedToolConfig:
+    """平台共享智能体会话：mode=acceptEdits + 显式白名单（无 Bash/NotebookEdit）。
+
+    D-009@v1：daemon 写守卫对 Bash 写目标靠正则提取（python -c/node -e 等
+    提取为空 → 放行逃逸），平台共享会话整体不给 Bash，产出走 Write/Edit；
+    NotebookEdit 同为可落盘逃逸面，一并排除。两个整服务器名 MCP 对齐
+    worker_tool_config 先例（显式白名单物理禁掉未列名工具）。
+    """
+
+    def test_mode_is_accept_edits(self) -> None:
+        """产出走 Edit/Write：mode=acceptEdits（D-002@v2 指定目录可写语义）。"""
+        cfg = platform_shared_tool_config()
+        assert cfg["mode"] == "acceptEdits"
+
+    def test_allowed_tools_exact_set(self) -> None:
+        """白名单不多不少：读写基础三件 + Edit/Write + 两个整服务器名 MCP。"""
+        cfg = platform_shared_tool_config()
+        assert set(cfg["allowed_tools"]) == {
+            "Read",
+            "Glob",
+            "Grep",
+            "Edit",
+            "Write",
+            _FILE_MCP_SERVER,
+            _WORKER_MCP_SERVER,
+        }
+
+    def test_excludes_bash_and_notebook_edit(self) -> None:
+        """D-009 红线：不含 Bash（shell 写逃逸面）/ NotebookEdit（落盘逃逸面）。"""
+        cfg = platform_shared_tool_config()
+        for tool in ("Bash", "NotebookEdit"):
+            assert tool not in cfg["allowed_tools"], f"平台共享会话不应放行 {tool}"
+
+    def test_no_wildcard_entries(self) -> None:
+        """对齐 R-02：不用 mcp__server__* 通配写法（CLI 通配行为未验证）。"""
+        cfg = platform_shared_tool_config()
+        assert not any(str(t).endswith("*") for t in cfg["allowed_tools"])
+
+    def test_no_max_turns_bound(self) -> None:
+        """交互式会话按轮次驱动，不设 worker 式 max_turns 执行上界。"""
+        cfg = platform_shared_tool_config()
+        assert "max_turns" not in cfg

@@ -15,6 +15,7 @@ import {
   Server,
   Terminal,
   Trash2,
+  Users,
   WifiOff,
   Wrench,
   type LucideIcon,
@@ -28,6 +29,9 @@ import {
 // task-09：MachineCard 两级手风琴（machine + 内嵌 RuntimeCard 网格）。
 // RuntimeCard 不再在 page 内联渲染，仅由 MachineCard 展开体透传 props 调用。
 import { MachineCard } from "@/components/daemon/machine-card";
+// task-09（2026-08-28-daemon-agent-share）：「共享给我的」区块 + 平台共享智能体管理卡。
+import { SharedMachinesSection } from "@/components/daemon/shared-machines-section";
+import { PlatformSharedAgentsCard } from "@/components/daemon/platform-shared-agents-card";
 import {
   formatRelativeTime,
 } from "@/components/daemon/runtime-card-helpers";
@@ -40,6 +44,7 @@ import {
   getAgentSession,
   getDaemonVersion,
   getRuntimesUsage,
+  listDaemonMachines,
   PROVIDER_META,
   triggerMachineCleanup,
   triggerMachineSelfUpdate,
@@ -52,7 +57,10 @@ import {
   type DaemonVersionInfo,
   type RuntimeUsageItem,
   type RuntimeUsageWindow,
+  type SharedMachineView,
 } from "@/lib/daemon";
+// task-09：共享机器「来源工作区名」解析（listWorkspaces 建 id→name map）。
+import { listWorkspaces } from "@/lib/workspaces";
 // task-09：数据源 useDaemonMachines（机器级，D-005）。
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
@@ -284,12 +292,15 @@ function SummaryCard({
   icon: Icon,
   meta,
   tone = "neutral",
+  testId,
 }: {
   label: string;
   value: string;
   icon: LucideIcon;
   meta?: string;
-  tone?: "neutral" | "online" | "warning" | "offline" | "disabled";
+  tone?: "neutral" | "online" | "warning" | "offline" | "disabled" | "brand";
+  /** 测试锚点（task-09「共享给我」计数断言用）。 */
+  testId?: string;
 }) {
   const toneClass = {
     neutral: "border-slate-200 bg-card text-slate-700",
@@ -297,13 +308,26 @@ function SummaryCard({
     warning: "border-amber-200 bg-amber-50 text-amber-700",
     offline: "border-slate-200 bg-slate-50 text-slate-600",
     disabled: "border-rose-200 bg-rose-50 text-rose-700",
+    // task-09：品牌高亮阶（原型 .stat.hl——计数数字 brand-600，FRONTEND_PAGE_STYLE §0.5
+    // brand-* 语义阶，随 html data-theme 换肤）。
+    brand: "border-brand-200 bg-brand-50 text-brand-700",
   }[tone];
 
   return (
-    <div className={cn("flex min-h-[92px] items-center justify-between rounded-md border px-4 py-3", toneClass)}>
+    <div
+      data-testid={testId}
+      className={cn("flex min-h-[92px] items-center justify-between rounded-md border px-4 py-3", toneClass)}
+    >
       <div className="min-w-0">
         <p className="text-[11px] font-medium uppercase text-muted-foreground">{label}</p>
-        <p className="mt-1 text-2xl font-semibold leading-none text-foreground">{value}</p>
+        <p
+          className={cn(
+            "mt-1 text-2xl font-semibold leading-none",
+            tone === "brand" ? "text-brand-600" : "text-foreground",
+          )}
+        >
+          {value}
+        </p>
         {meta && <p className="mt-1 truncate text-[11px] text-muted-foreground">{meta}</p>}
       </div>
       <Icon className="h-5 w-5 shrink-0 opacity-80" />
@@ -467,6 +491,38 @@ export default function RuntimesPage() {
     [debouncedQuery, statusFilter, providerFilter, ownerUserId, page, isPlatformAdmin],
   );
   const { items: machines, total, sessions, isLoading, error: listError, refetch } = useDaemonMachines(listParams);
+
+  // task-09 / FR-01：shared_to_me 取数路径——/machines 响应末位附带共享机器行
+  //（task-07 后端装配），但 useDaemonMachines 的缓存是裁剪形 {items,total,sessions}
+  //（sharedToMe 透传归 task-10 领地，本卡不改 use-daemon-machines.ts），且与 hook
+  // 共用同一 queryKey 会因 queryFn 形状不同互相覆写缓存（hook 拿到原始响应丢
+  // sessions）。故 page 侧以独立子 key 直取同一端点的原始响应（select 只留
+  // shared_to_me），15s 轮询对齐 hook；task-10 落地 hook 透传后可切换为
+  // useDaemonMachines 返回值并删本查询（收敛说明见变更报告）。
+  const { data: sharedToMeData } = useQuery({
+    queryKey: ["daemonMachines", "sharedToMe", listParams],
+    queryFn: () => listDaemonMachines(listParams),
+    refetchInterval: 15000,
+    select: (resp) => resp.shared_to_me ?? [],
+  });
+  const sharedToMe = sharedToMeData ?? [];
+
+  // task-09：共享机器「来源工作区名」解析——SharedMachineView 契约仅携带
+  // source_workspace_id，借 listWorkspaces（本用户为其成员，grant 校验同源）建
+  // id→name map；无共享数据不查询，未知 id 显示「—」。
+  const { data: sharedWorkspacesResp } = useQuery({
+    queryKey: ["workspaces", "sharedToMeNames"],
+    queryFn: () => listWorkspaces({ limit: 100 }),
+    enabled: sharedToMe.length > 0,
+    staleTime: 5 * 60 * 1000,
+  });
+  const sharedWorkspaceNames = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const w of sharedWorkspacesResp?.items ?? []) {
+      map.set(w.id, w.display_alias ?? w.name);
+    }
+    return map;
+  }, [sharedWorkspacesResp]);
 
   // 2026-07-04-daemon-version-management task-09：页面级拉 daemon 分发元数据
   //（最新版本号 + build_id），传给每个 MachineCard → RuntimeCard 做版本徽标比对。
@@ -662,6 +718,22 @@ export default function RuntimesPage() {
       providerLabel: PROVIDER_META[runtimeProvider]?.label ?? runtimeProvider,
     });
   }, [machines]);
+
+  // task-09 / FR-01：共享机器「会话」——复用 openRuntimeSession 流唤起悬浮助手。
+  // task-13（契约修复）：锁该机器第一个在线 runtime 的 runtime_id（非
+  // machine_id——会话创建按 runtime 粒度，task-07 期以 machine_id 充当锁定 id
+  // 的 Wave 6 审查 404 缺口收口）；provider 标签取引擎名。无在线 runtime 时
+  // Section 侧已禁用按钮，此处防御兜底直接返回。
+  const handleOpenSharedMachineSession = useCallback((machine: SharedMachineView) => {
+    const runtime = machine.runtimes?.find((r) => r.online);
+    if (!runtime) return;
+    const provider = runtime.provider ?? "";
+    useFloatingSessionStore.getState().openRuntimeSession({
+      id: runtime.runtime_id,
+      machineLabel: machine.display_name,
+      providerLabel: PROVIDER_META[provider]?.label ?? provider ?? "共享守护进程",
+    });
+  }, []);
 
   // task-07 / FR-04：改筛选条件时重置到第一页，避免筛选后停在空页。
   const updateFilter = useCallback(
@@ -919,14 +991,26 @@ export default function RuntimesPage() {
       ) : (
         <>
           {machines.length > 0 && (
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
               <SummaryCard label="机器总数" value={String(stats.total)} icon={Server} meta={`${stats.providers} 个提供方`} />
               <SummaryCard label="在线" value={String(stats.online)} icon={CheckCircle2} tone="online" meta={stats.latestHeartbeat} />
               <SummaryCard label="维护中" value={String(stats.maintenance)} icon={Wrench} tone="warning" />
               <SummaryCard label="禁用" value={String(stats.disabled)} icon={Ban} tone="disabled" />
               <SummaryCard label="离线" value={String(stats.offline)} icon={WifiOff} tone="offline" />
+              {/* task-09 / FR-01：「共享给我」计数（品牌高亮，原型 .stat.hl）。 */}
+              <SummaryCard
+                label="共享给我"
+                value={String(sharedToMe.length)}
+                icon={Users}
+                tone="brand"
+                testId="stat-shared-to-me"
+              />
             </div>
           )}
+
+          {/* task-09 / FR-04：平台共享智能体管理卡——仅 platform admin 渲染
+              （先例 agent-profiles/page.tsx:52 的 is_platform_admin 判断）。 */}
+          {isPlatformAdmin ? <PlatformSharedAgentsCard /> : null}
 
           <div className="space-y-5">
             {machines.length === 0 ? (
@@ -1103,6 +1187,14 @@ export default function RuntimesPage() {
               </section>
             )}
           </div>
+
+          {/* task-09 / FR-01：「共享给我的」区块——空数据不渲染整块；与机器列表
+              平级独立挂载（无自有机器但被共享了机器的用户也能看到）。 */}
+          <SharedMachinesSection
+            machines={sharedToMe}
+            workspaceNames={sharedWorkspaceNames}
+            onOpenSession={handleOpenSharedMachineSession}
+          />
         </>
       )}
 

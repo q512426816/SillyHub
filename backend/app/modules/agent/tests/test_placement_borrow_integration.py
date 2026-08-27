@@ -21,7 +21,11 @@ Change 2026-07-25-daemon-borrow-for-business。验证 4 路派发解析**同语�
   - AC6 borrowed lease metadata 字段（borrowed + lender_user_id）。
 
 测试范式照抄 ``test_borrow_resolver.py``：hermetic per-test SQLite，手工 seed
-role/user/workspace/daemon/binding。RBAC 走真实 ``has_permission``。
+role/user/workspace/daemon/grant。RBAC 走真实 ``has_permission``。
+
+Change 2026-08-28-daemon-agent-share task-06：借用数据源切 grants——借用场景的
+seed 从「lender binding shared=True」改为「workspace grant enabled 行」
+（actor 成员资格由 _grant_role 角色行天然满足）。
 """
 
 from __future__ import annotations
@@ -33,6 +37,10 @@ from typing import Any
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# grants 模型注册（task-06）：db_engine create_all 前挂到 BaseModel.metadata，
+# 单独跑本文件/单用例时 daemon_runtime_grants 表也存在（对齐根 conftest 注册范式）。
+from app.modules.daemon.grants import model as _grants_model  # noqa: F401
 
 pytestmark = pytest.mark.asyncio
 
@@ -182,6 +190,29 @@ async def _seed_binding(
     await db_session.commit()
 
 
+async def _seed_grant(
+    db_session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    lender_user_id: uuid.UUID,
+    daemon_id: uuid.UUID,
+    enabled: bool = True,
+) -> uuid.UUID:
+    """种一条 workspace 类型 grants 授权行（task-06 借用数据源）。返回 grant_id。"""
+    from app.modules.daemon.grants.model import DaemonRuntimeGrant
+
+    grant = DaemonRuntimeGrant(
+        daemon_instance_id=daemon_id,
+        grantee_type="workspace",
+        grantee_id=workspace_id,
+        granted_by_user_id=lender_user_id,
+        enabled=enabled,
+    )
+    db_session.add(grant)
+    await db_session.commit()
+    return grant.id
+
+
 async def _seed_borrow_role(db_session: AsyncSession) -> uuid.UUID:
     """business_member：TASK_RUN_AGENT + DAEMON_BORROW + WORKSPACE_READ。"""
     from app.modules.auth.permissions import Permission
@@ -264,7 +295,11 @@ async def _setup_borrow(
     lender_provider: str = "claude",
     default_agent: str = "claude",
 ) -> dict[str, uuid.UUID | None]:
-    """actor 无自有 daemon；lender shared+online 可借用。返回 ws/actor/lender/daemon/runtime。"""
+    """actor 无自有 daemon；lender 有 enabled grant + online 可借用。
+
+    ``lender_shared`` 直接映射 grant ``enabled`` 软开关（task-06 数据源切 grants，
+    ↔原 binding shared 列）。返回 ws/actor/lender/daemon/runtime。
+    """
     ws = await _seed_workspace(db_session, tmp_path, default_agent=default_agent)
     lender = await _seed_user(db_session)
     actor = await _seed_user(db_session)
@@ -290,6 +325,10 @@ async def _setup_borrow(
         user_id=lender,
         daemon_id=did,
         shared=lender_shared,
+    )
+    # task-06：借用命中读 grants（shared 列只是开关双写的 UI 缓存侧）。
+    await _seed_grant(
+        db_session, workspace_id=ws, lender_user_id=lender, daemon_id=did, enabled=lender_shared
     )
     return {
         "ws": ws,
@@ -562,6 +601,9 @@ async def test_ac5_dispatch_own_daemon_wrong_provider_no_borrow(db_session, tmp_
         user_id=lender,
         daemon_id=lender_did,
         shared=True,
+    )
+    await _seed_grant(
+        db_session, workspace_id=refs["ws"], lender_user_id=lender, daemon_id=lender_did
     )
     run = await _seed_agent_run(db_session)
 

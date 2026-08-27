@@ -19,7 +19,7 @@ import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -303,6 +303,75 @@ async def _merge_lease_metadata(
     await db_session.execute(
         _sa_text("UPDATE daemon_task_leases SET metadata = :meta WHERE id = :id"),
         {"meta": _json.dumps(meta), "id": lease_id.hex},
+    )
+
+
+class _PlatformSessionBinding(NamedTuple):
+    """task-05（2026-08-28-daemon-agent-share / FR-04 / D-007@v1）：platform
+    共享档案检测命中后的服务端强制绑定。"""
+
+    grant_id: uuid.UUID
+    pinned_runtime_id: uuid.UUID
+    provider: str
+    source_root_path: str
+    writable_dir: str | None
+
+
+async def _detect_platform_profile_binding(
+    db_session: AsyncSession,
+    *,
+    profile_id: uuid.UUID,
+) -> _PlatformSessionBinding | None:
+    """task-05（design §5 Phase 3 / D-007@v1）：检测档案是否为生效 platform
+    共享智能体的绑定档案。
+
+    判定口径（查询形态同 grants/queries.authorize_pinned_runtime 原 platform
+    分支——D-012@v1 后该分支命中即 None、本检测是共享 runtime 的唯一入口 +
+    task-05 检测要求「enabled + 该 profile + runtime 在线」）：
+
+    - ``grantee_type='platform'`` + ``enabled=True``（停用/撤销即检测不命中，
+      档案自然回普通语义，无残留覆写——constraints）；
+    - ``agent_profile_id`` 命中 + join agent_profiles（悬空 grant 不放行）；
+    - ``source_workspace_id`` 非空且 Workspace 行存在（cwd 落点的完整性防御）；
+    - pinned runtime 存在且 ``status='online'``（离线 = 共享智能体不可用，
+      检测不命中走原路径：只传档案形态回落二选一 422，前端 active 端点本就
+      置灰离线条目）。
+
+    grants 空表 → None → 调用方零分支走原链路（design §9 兼容策略）。
+    检测为纯读查询，函数级 import 对齐本模块跨域 lazy 范式（design §7.2）。
+    """
+    from app.modules.agent.profile.model import AgentProfile
+    from app.modules.daemon.grants.model import DaemonRuntimeGrant
+    from app.modules.workspace.model import Workspace
+
+    row = (
+        await db_session.execute(
+            select(DaemonRuntimeGrant, DaemonRuntime, Workspace)
+            .join(DaemonRuntime, DaemonRuntime.id == DaemonRuntimeGrant.pinned_runtime_id)
+            .join(Workspace, Workspace.id == DaemonRuntimeGrant.source_workspace_id)
+            .join(AgentProfile, AgentProfile.id == DaemonRuntimeGrant.agent_profile_id)
+            .where(
+                col(DaemonRuntimeGrant.grantee_type) == "platform",
+                col(DaemonRuntimeGrant.enabled).is_(True),
+                col(DaemonRuntimeGrant.agent_profile_id) == profile_id,
+                col(DaemonRuntimeGrant.source_workspace_id).is_not(None),
+                col(DaemonRuntime.status) == "online",
+            )
+            .limit(1)
+        )
+    ).first()
+    if row is None:
+        return None
+    grant, runtime, source_ws = row
+    # provider 空 = runtime 未完成注册（同 task-03 钉定块内口径），视为不可用。
+    if not runtime.provider:
+        return None
+    return _PlatformSessionBinding(
+        grant_id=grant.id,
+        pinned_runtime_id=runtime.id,
+        provider=runtime.provider,
+        source_root_path=source_ws.root_path,
+        writable_dir=grant.writable_dir,
     )
 
 
@@ -917,11 +986,41 @@ class SessionService:
             RunPlacementService,
         )
 
+        # ── task-05（2026-08-28-daemon-agent-share / FR-04 / D-007@v1）：platform
+        # 共享档案检测前置——先于 runtime_id/provider 二选一校验（Grill B-01：悬浮
+        # 助手/门户只传 agent_profile_id（无 runtime_id/provider）形态在原校验
+        # :950-954 之后必被拒）。检测命中 → 进服务端强制分支（钉定 pinned runtime
+        # + 派生 provider；cwd 覆写在 team_mission 块后统一施加，见下方）；未命中
+        # （普通档案 / grant 停用 / 档案悬空 / runtime 离线）→ 零分支走原链路，
+        # 停用后档案天然回普通语义（constraints）。grants 空表 → 恒 None 零回归。
+        _platform_binding: _PlatformSessionBinding | None = None
+        if agent_profile_id:
+            try:
+                _platform_profile_uuid = uuid.UUID(agent_profile_id)
+            except (ValueError, AttributeError, TypeError) as exc:
+                raise DaemonSessionConfigInvalid(
+                    f"Invalid agent_profile_id '{agent_profile_id}'.",
+                    details={"agent_profile_id": agent_profile_id},
+                ) from exc
+            _platform_binding = await _detect_platform_profile_binding(
+                self._session, profile_id=_platform_profile_uuid
+            )
+
         # ── task-03：runtime_id 入口解析（钉定 + 派生 provider，Grill C-01/P0）──
         # 校验在事务开始前完成：不可满足直接 4xx，无半成品落库；placement 侧
         # pinned 路径二次复查（竞态防线），失联同样转 4xx，绝不静默换机。
         pinned_runtime_id: uuid.UUID | None = None
-        if runtime_id:
+        if _platform_binding is not None:
+            # task-05 强制分支：无视请求 runtime_id 语义（防伪造——约束由服务端
+            # 施加，请求参数不可放宽），钉定 grant 的 pinned_runtime_id 并派生
+            # provider。下发侧 prepare_interactive_dispatch 传
+            # pinned_skip_owner_check=True（代表钉定模式，:612-620 先例）：placement
+            # 只按 id+online 复查，不进借用授权分支 → 不写 daemon_borrow_audit、
+            # 不带借用沙箱 marker（D-007@v1：platform 是平台授权非工作区借用，
+            # 用量计量走 AgentSession 既有口径）。离线竞态仍转 4xx 不静默换机。
+            pinned_runtime_id = _platform_binding.pinned_runtime_id
+            provider = _platform_binding.provider
+        elif runtime_id:
             try:
                 pinned_runtime_id = uuid.UUID(runtime_id)
             except (ValueError, AttributeError, TypeError) as exc:
@@ -930,11 +1029,44 @@ class SessionService:
                     details={"runtime_id": runtime_id},
                 ) from exc
             _rt = await self._session.get(DaemonRuntime, pinned_runtime_id)
-            if _rt is None or _rt.user_id != user_id:
+            if _rt is None:
                 raise DaemonSessionRuntimeNotFound(
                     f"Runtime '{runtime_id}' not found.",
                     details={"runtime_id": runtime_id},
                 )
+            # ── task-03（2026-08-28-daemon-agent-share / FR-02 / D-001@v1 +
+            # D-006@v1）：钉定授权判定——owner 短路，非本人走 grants──
+            # ``_rt.user_id == user_id`` 自有 runtime 走原路径（零回归）；否则调
+            # task-02 的 ``authorize_pinned_runtime``（grants 授权唯一判定源）：
+            # - workspace_grant 命中（成员 + daemon:borrow 权限 + enabled + 机器
+            #   在线）→ 放行，按**借用会话**处理——lender/grant_id 的审计关联由
+            #   placement 二次复查（_query_pinned_online_runtime 授权分支，同源
+            #   判定）命中后写入 daemon_borrow_audit（含 grant_id）+ 借用沙箱
+            #   marker，本层只做授权闸不重复记审计；
+            # - platform_grant 命中 → authorize 返回 None → 404（D-012@v1，
+            #   验收审查 gap-2）：直接钉定 platform grant 的 pinned runtime
+            #   （不带共享档案）会绕过 task-05 强制（cwd/写约束/工具集），
+            #   该形态首查即封堵；共享 runtime 唯一入口=task-05 档案检测
+            #   （上方强制分支，下发走 pinned_skip_owner_check=True 不经
+            #   authorize，不受影响）；
+            # - None（未授权/停用 grant/机器离线）→ 维持 DaemonSessionRuntimeNotFound
+            #   404 语义，不泄露存在性（design §9）；下方 404/离线/provider 校验
+            #   顺序与语义不变。
+            if _rt.user_id != user_id:
+                # 函数级 import 对齐本模块跨域 lazy 范式（design §7.2 / §10 R1）。
+                from app.modules.daemon.grants.queries import authorize_pinned_runtime
+
+                _pin_authz = await authorize_pinned_runtime(
+                    self._session,
+                    actor_user_id=user_id,
+                    runtime_id=pinned_runtime_id,
+                    workspace_id=workspace_id,
+                )
+                if _pin_authz is None:
+                    raise DaemonSessionRuntimeNotFound(
+                        f"Runtime '{runtime_id}' not found.",
+                        details={"runtime_id": runtime_id},
+                    )
             if _rt.status != "online":
                 raise DaemonSessionRuntimeUnavailable(
                     f"Runtime '{runtime_id}' is offline.",
@@ -1148,7 +1280,9 @@ class SessionService:
                 # binding.runtime_id 作 pinned_runtime_id 复用既有钉定链
                 # （placement 属主+在线复查，失联转 4xx 不静默换机）；用户显式
                 # 传 runtime_id 时显式优先（R-09：W 仅决定 workspace_id/cwd）。
-                if not runtime_id:
+                # task-05：platform 会话钉定不可被 E2 覆盖——共享智能体的
+                # pinned runtime 是服务端强制项，team_mission 请求参数不得放宽。
+                if not runtime_id and _platform_binding is None:
                     pinned_runtime_id = _binding.runtime_id
                 # 用户未显式传 agent_profile_id/llm_provider_id/runtime_id 时
                 # provider/model 落 W.default_agent/W.default_model（显式选择
@@ -1158,6 +1292,15 @@ class SessionService:
                         provider = _w_row.default_agent
                     if _w_row is not None and _w_row.default_model:
                         model = _w_row.default_model
+
+        # ── task-05（FR-04 / D-002@v2 / Grill B-01 前置生效）：platform 会话
+        # cwd 强制覆写──统一施加在 request workspace cwd（:1086-1120 既有落点）
+        # 与 team_mission E2 cwd 之后：cwd = 源码工作区 root_path（读源码基准），
+        # 请求 workspace 语义不参与 cwd（防伪造，服务端强制）。AgentSession
+        # .workspace_id 仍记请求工作区（用户可访问的自身上下文，归属校验已过），
+        # 只作 bookkeeping，不改变 lease 定位与 cwd 语义。
+        if _platform_binding is not None:
+            cwd = _platform_binding.source_root_path
 
         now = datetime.now(UTC)
         # Copy config so the request dict is never mutated (boundary #16).
@@ -1391,6 +1534,10 @@ class SessionService:
                     workspace_id=workspace_id,
                     cwd=cwd,
                     pinned_runtime_id=pinned_runtime_id,
+                    # task-05：platform 会话代表钉定——placement 复查只按 id+online，
+                    # 跳过属主谓词与借用授权分支（task-03 已放行 platform 授权，本
+                    # 分支直接钉定并跳过借用语义 → 无沙箱 marker / 无借用审计）。
+                    pinned_skip_owner_check=_platform_binding is not None,
                     **_dispatch_extra,
                 )
             except NoOnlineDaemonError as exc:
@@ -1412,6 +1559,36 @@ class SessionService:
 
                 await AgentService(self._session).apply_session_profile_to_lease(
                     dispatch.lease_id, profile
+                )
+            # ── task-05（FR-04 / D-009@v1）：platform 会话工具集下推──写 lease
+            # metadata.tool_config（照 mcp_tools.py:1316 dispatch_worker 既有写法，
+            # 经 build_claim_payload tool_config 透传 context.py:442-443 → daemon
+            # CreateSessionInput.allowedTools → canUseTool 最外层白名单 gate，
+            # per-session 物理拒绝白名单外工具）。
+            # ── task-12（D-011 / spike-02 结论 B 修复）：writable_dir 写约束下推──
+            # 同点位写 lease metadata.effective_allowed_roots=[writable_dir]，经
+            # ``_apply_profile_passthrough``（context.py `_PROFILE_PAYLOAD_FIELDS`
+            # 逐键 ``in`` 守护）原样透传进 claim payload（snake+camel 双写）→
+            # daemon execPayload.effectiveAllowedRoots（daemon.ts:4510-4513）→
+            # SessionManager state.effectiveAllowedRoots → 写守卫 policyEngine
+            # 分支 session 级 overlay 交集收紧（session-manager.ts task-12 增量）。
+            # claim 透传决策（读码结论）：lease metadata 的显式值即单一来源——会话
+            # 档案变体 ``apply_session_profile_to_lease``（Grill C-06/NG-03）不写
+            # effective_allowed_roots，本注入在其后执行无覆写冲突，context.py 零改动。
+            # writable_dir 为空（模型可空，创建时校验非空 ⊆ runtime allowed_roots）
+            # → 不注入，退回机器级边界口径（不宽于 task-05 现状）。
+            if _platform_binding is not None:
+                from app.modules.agent.execution import platform_shared_tool_config
+
+                _platform_meta: dict[str, object] = {
+                    "tool_config": platform_shared_tool_config(),
+                }
+                if _platform_binding.writable_dir:
+                    _platform_meta["effective_allowed_roots"] = [_platform_binding.writable_dir]
+                await _merge_lease_metadata(
+                    self._session,
+                    dispatch.lease_id,
+                    _platform_meta,
                 )
             # task-03 / FR-04 / R-02：会话级供应商写独立 metadata key（claim 端
             # _inject_provider_config 最高优先级分支消费）；压制档案绑定，未选

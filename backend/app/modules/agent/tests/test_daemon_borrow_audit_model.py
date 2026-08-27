@@ -62,7 +62,10 @@ def test_daemon_borrow_audit_inherits_basemodel() -> None:
     assert issubclass(DaemonBorrowAudit, BaseModel)
 
 
-def test_daemon_borrow_audit_has_all_8_fields() -> None:
+def test_daemon_borrow_audit_has_all_9_fields() -> None:
+    """9 字段 = 原 8 字段 + ``grant_id``（2026-08-28-daemon-agent-share task-01
+    加列 / task-06 修断言：借用审计挂 grants 授权行，nullable 无 FK 硬约束）。
+    """
     expected = {
         "id",
         "borrower_user_id",
@@ -72,11 +75,19 @@ def test_daemon_borrow_audit_has_all_8_fields() -> None:
         "agent_run_id",
         "borrowed_at",
         "usage_summary",
+        "grant_id",
     }
     actual = set(DaemonBorrowAudit.model_fields.keys())
     assert actual == expected, (
         f"DaemonBorrowAudit field mismatch. missing={expected - actual}, extra={actual - expected}"
     )
+
+
+def test_daemon_borrow_audit_grant_id_nullable_no_fk() -> None:
+    """grant_id nullable、无 FK 硬约束（design §8——grant 物理删除后审计行仍可读）。"""
+    col = DaemonBorrowAudit.__table__.columns["grant_id"]
+    assert col.nullable is True
+    assert list(col.foreign_keys) == []
 
 
 def test_daemon_borrow_audit_id_is_pk_uuid() -> None:

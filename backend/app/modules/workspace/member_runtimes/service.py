@@ -12,6 +12,7 @@ from sqlmodel import col
 
 from app.core.errors import AppError
 from app.core.logging import get_logger
+from app.modules.daemon.grants.model import DaemonRuntimeGrant
 from app.modules.daemon.model import DaemonInstance
 from app.modules.workspace.member_runtimes.exceptions import MemberBindingNotFound
 from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
@@ -124,7 +125,72 @@ async def list_member_bindings(
 # 业务/管理人员（business_member）即可借用跑 agent 读源码。撤销 = shared=False，
 # 不删 binding 行（lender 配置的 daemon + 路径保留，可随时再标 shared）。
 # 默认 false：现有「自带 daemon」binding 行为零回归，仅显式调用端点才置位。
+#
+# change 2026-08-28-daemon-agent-share task-06（design §5 Phase 2.3 / §9 / R-07）：
+# 开关端点改**同事务双写**——``shared`` 列保留为 UI 缓存（不再参与任何鉴权），
+# 授权唯一判定源切 ``daemon_runtime_grants``：开 = upsert enabled workspace grant，
+# 关/撤销 = 置对应 grant ``enabled=False``（软开关，行保留）。单次 commit 落两处，
+# 任一写失败整体回滚（R-07 双写一致性）。
 # ────────────────────────────────────────────────────────────────────────────
+
+
+async def _apply_workspace_grant_toggle(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    lender_user_id: uuid.UUID,
+    daemon_id: uuid.UUID | None,
+    enabled: bool,
+) -> None:
+    """开关共享时同步 grants 授权行（task-06 双写的 grants 侧，不 commit）。
+
+    定位唯一键 ``(daemon_instance_id, grantee_type='workspace', grantee_id=workspace_id,
+    granted_by_user_id=lender)``（design §8 唯一约束，同工作区多 lender 各自一行）：
+
+    - ``enabled=True``：无行则建（workspace 类型、无 platform 绑定列），有行则复活
+      （撤销后重新开共享复用同一行，audit 链 grant_id 稳定）。
+    - ``enabled=False``：有行才置 False（软开关，行保留对齐撤销语义）；无行不动。
+
+    ``daemon_id`` 为 NULL（binding 未绑 daemon）时**不开 grant 且不查表**——grants
+    授权对象是 daemon 机器，无 daemon 无授权可言（对齐迁移跳过 daemon_id NULL 行，
+    design §5 Phase 1 / Grill B-03），``shared`` 列照写保持原行为。
+
+    只写不 commit：与 ``shared`` 列写同处一个事务，由调用方单次 commit 落两处（R-07）。
+    """
+    if daemon_id is None:
+        return
+
+    grant = (
+        (
+            await session.execute(
+                select(DaemonRuntimeGrant).where(
+                    col(DaemonRuntimeGrant.daemon_instance_id) == daemon_id,
+                    col(DaemonRuntimeGrant.grantee_type) == "workspace",
+                    col(DaemonRuntimeGrant.grantee_id) == workspace_id,
+                    col(DaemonRuntimeGrant.granted_by_user_id) == lender_user_id,
+                )
+            )
+        )
+        .scalars()
+        .first()
+    )
+    if enabled:
+        if grant is None:
+            session.add(
+                DaemonRuntimeGrant(
+                    daemon_instance_id=daemon_id,
+                    grantee_type="workspace",
+                    grantee_id=workspace_id,
+                    granted_by_user_id=lender_user_id,
+                    enabled=True,
+                )
+            )
+        else:
+            grant.enabled = True
+            grant.updated_at = datetime.now(UTC)
+    elif grant is not None:
+        grant.enabled = False
+        grant.updated_at = datetime.now(UTC)
 
 
 async def set_my_binding_shared(
@@ -140,12 +206,25 @@ async def set_my_binding_shared(
     借用。binding 行必须已存在（先 PUT /my-binding 配 daemon + 路径），否则
     复用既有 ``MemberBindingNotFound``（409）——前端按 code 引导先配置。
     端点无 user_id 路径参数，server 钉死 ``user_id`` → 仅能改自己 binding。
+
+    task-06 同事务双写（R-07）：``shared`` 列（UI 缓存）+ grants 授权行（鉴权源）
+    在同一事务内写、单次 commit——开共享 = upsert enabled grant，撤销 = grant
+    ``enabled=False``；任一失败两处都不落。``binding.daemon_id`` 为 NULL 时只写
+    ``shared`` 列不开 grant（无 daemon 可授权，对齐迁移跳过策略）。
     """
     row = await session.get(WorkspaceMemberRuntime, (workspace_id, user_id))
     if row is None:
         raise MemberBindingNotFound(workspace_id=workspace_id, user_id=user_id)
     row.shared = shared
     row.updated_at = datetime.now(UTC)
+    # grants 侧同事务写（helper 只写不 commit，随下方 commit 一并落库/回滚）。
+    await _apply_workspace_grant_toggle(
+        session,
+        workspace_id=workspace_id,
+        lender_user_id=user_id,
+        daemon_id=row.daemon_id,
+        enabled=shared,
+    )
     await session.commit()
     await session.refresh(row)
     return row
@@ -157,29 +236,34 @@ async def list_shared_daemons(
 ) -> list[dict[str, Any]]:
     """owner 查工作空间所有共享 daemon（FR-02 / D-003@v1）。
 
-    JOIN ``daemon_instances`` 拿在线状态 + hostname，供 owner 决定是否撤销。
-    仅命中 ``shared=True`` 的行；``daemon_id`` 为 NULL 的行也返回（前端提示
-    lender 未绑 daemon），借用查询（task-05）会自行过滤 daemon_id IS NOT NULL。
+    task-06 数据源切 ``daemon_runtime_grants``（design §5 Phase 2.3——鉴权唯一
+    判定源）：workspace 类型 + enabled 的 grant，JOIN ``daemon_instances`` 拿在线
+    状态 + hostname，供 owner 决定是否撤销。``daemon_id`` NULL 的旧行不再出现
+    （grants 不为无 daemon 的 binding 建行，对齐迁移跳过策略）；``shared`` 列
+    不再参与查询（UI 缓存，单侧漂移不影响列表正确性——design §9）。
+
+    每行额外携带 ``grant_id``（task-06 provides SharedDaemonsGrantField，撤销
+    追溯锚点；design §6「grant_id … consumer=shared-daemons 管理列表」）。
     返回 dict 列表（service 层不引入 pydantic），router 转 SharedDaemonView。
     """
     stmt: Select[Any] = (
         select(
-            col(WorkspaceMemberRuntime.user_id).label("lender_user_id"),
-            col(WorkspaceMemberRuntime.daemon_id).label("daemon_id"),
+            col(DaemonRuntimeGrant.id).label("grant_id"),
+            col(DaemonRuntimeGrant.granted_by_user_id).label("lender_user_id"),
+            col(DaemonRuntimeGrant.daemon_instance_id).label("daemon_id"),
             col(DaemonInstance.status).label("daemon_status"),
             col(DaemonInstance.hostname).label("daemon_hostname"),
         )
-        .outerjoin(
-            DaemonInstance,
-            DaemonInstance.id == WorkspaceMemberRuntime.daemon_id,
-        )
-        .where(col(WorkspaceMemberRuntime.workspace_id) == workspace_id)
-        .where(col(WorkspaceMemberRuntime.shared).is_(True))
-        .order_by(col(WorkspaceMemberRuntime.user_id))
+        .join(DaemonInstance, DaemonInstance.id == DaemonRuntimeGrant.daemon_instance_id)
+        .where(col(DaemonRuntimeGrant.grantee_type) == "workspace")
+        .where(col(DaemonRuntimeGrant.grantee_id) == workspace_id)
+        .where(col(DaemonRuntimeGrant.enabled).is_(True))
+        .order_by(col(DaemonRuntimeGrant.granted_by_user_id))
     )
     rows = (await session.execute(stmt)).all()
     return [
         {
+            "grant_id": r.grant_id,
             "lender_user_id": r.lender_user_id,
             "daemon_id": r.daemon_id,
             "daemon_status": r.daemon_status,
@@ -198,12 +282,22 @@ async def revoke_shared(
 
     设 ``shared=False``，**不删 binding 行**（lender 配置的 daemon + 路径保留，
     可随时再标 shared）。target 无 binding → ``MemberBindingNotFound``（409）。
+
+    task-06 同事务双写（R-07）：对应 workspace grant 置 ``enabled=False``
+    （软开关行保留），撤销后借用立即失效（鉴权只读 grants）。
     """
     row = await session.get(WorkspaceMemberRuntime, (workspace_id, target_user_id))
     if row is None:
         raise MemberBindingNotFound(workspace_id=workspace_id, user_id=target_user_id)
     row.shared = False
     row.updated_at = datetime.now(UTC)
+    await _apply_workspace_grant_toggle(
+        session,
+        workspace_id=workspace_id,
+        lender_user_id=target_user_id,
+        daemon_id=row.daemon_id,
+        enabled=False,
+    )
     await session.commit()
     await session.refresh(row)
     return row

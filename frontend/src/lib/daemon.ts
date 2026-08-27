@@ -121,12 +121,20 @@ export interface DaemonMachineListParams {
   offset?: number;
 }
 
-/** GET /api/daemon/machines 响应体（机器级分页）。 */
+/**
+ * GET /api/daemon/machines 响应体（机器级分页）。
+ *
+ * 2026-08-28-daemon-agent-share task-07/task-09：后端 machines 响应末位附加
+ * ``shared_to_me``（「共享给我的」机器行，grants.queries 五字段契约）；旧后端
+ * / 无授权数据时字段缺省，前端按可选消费（?? []）。
+ */
 export interface DaemonMachineListResponse {
   items: DaemonMachineRead[];
   total: number;
   limit: number;
   offset: number;
+  /** 「共享给我的」机器行（workspace grant 装配；空/缺省 = 无共享）。 */
+  shared_to_me?: SharedMachineView[];
 }
 
 /** PATCH /api/daemon/machines/{id} 请求体（省略=不变，显式 null/空白=清空）。 */
@@ -183,6 +191,70 @@ export async function triggerMachineCleanup(
   return apiFetch(
     `/api/daemon/machines/${encodeURIComponent(instanceId)}/cleanup`,
     { method: "POST" },
+  );
+}
+
+/* ---------- 平台共享智能体 + 共享给我的机器（2026-08-28-daemon-agent-share task-09） ----------
+ *
+ * 端点对齐 /api/daemon/shared-agents 系列（grants/router.py）：
+ *   - GET    /shared-agents          管理（require_platform_admin）全量列表，含停用行；
+ *   - POST   /shared-agents          创建（五重校验：runtime 归属 admin 且在线 /
+ *                                    writable_dir ⊆ allowed_roots / 源码工作区存在 /
+ *                                    R-05 档案显式升级 / D-008 唯一防重复）；
+ *   - GET    /shared-agents/active   生效摘要（任意登录用户，仅 enabled 行）；
+ *   - PATCH  /shared-agents/{id}     仅改 enabled（停用 = enabled:false）；
+ *   - DELETE /shared-agents/{id}     物理删除（本卡未用，后端已备）。
+ *
+ * 类型一律取 api-types 生成版（task-08 gen:types），禁止手写 DTO——后端 schema
+ * 变更会在下次 gen:types + tsc 时暴露漂移。
+ */
+
+/** 管理端完整视图（platform 行四绑定列由 service 强制非空）。 */
+export type SharedAgentView = components["schemas"]["SharedAgentView"];
+/** active 生效摘要（任意登录用户可见）。 */
+export type SharedAgentActiveView = components["schemas"]["SharedAgentActiveView"];
+/** POST /daemon/shared-agents 请求体（design §7）。 */
+export type SharedAgentCreateRequest = components["schemas"]["SharedAgentCreateRequest"];
+/** 创建响应：View + 档案升级提示（R-05）。 */
+export type SharedAgentCreateResponse =
+  components["schemas"]["SharedAgentCreateResponse"];
+/** 「共享给我的」机器行（grants.queries 五字段契约：machine_id/display_name/
+ *  lender_display_name/source_workspace_id/online）。 */
+export type SharedMachineView = components["schemas"]["SharedMachineView"];
+
+/** GET /api/daemon/shared-agents — 管理端全量列表（含停用行，platform admin）。 */
+export async function fetchSharedAgents(): Promise<SharedAgentView[]> {
+  return apiFetch<SharedAgentView[]>("/api/daemon/shared-agents");
+}
+
+/** GET /api/daemon/shared-agents/active — 生效摘要（任意登录用户，仅 enabled 行）。 */
+export async function fetchSharedAgentsActive(): Promise<SharedAgentActiveView[]> {
+  return apiFetch<SharedAgentActiveView[]>("/api/daemon/shared-agents/active");
+}
+
+/**
+ * POST /api/daemon/shared-agents — 创建平台共享智能体（platform admin）。
+ * 返回 SharedAgentCreateResponse（含 visibility_promoted 升级提示，R-05）。
+ */
+export async function createSharedAgent(
+  input: SharedAgentCreateRequest,
+): Promise<SharedAgentCreateResponse> {
+  return apiFetch<SharedAgentCreateResponse>("/api/daemon/shared-agents", {
+    method: "POST",
+    json: input,
+  });
+}
+
+/**
+ * PATCH /api/daemon/shared-agents/{grant_id} — 停用共享智能体
+ * （enabled:false，软开关；会话选择器即不再呈现）。返回更新后的 SharedAgentView。
+ */
+export async function disableSharedAgent(
+  grantId: string,
+): Promise<SharedAgentView> {
+  return apiFetch<SharedAgentView>(
+    `/api/daemon/shared-agents/${encodeURIComponent(grantId)}`,
+    { method: "PATCH", json: { enabled: false } },
   );
 }
 

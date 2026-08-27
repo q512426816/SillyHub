@@ -33,6 +33,12 @@ log = get_logger(__name__)
 # task-10 落 file 判别。前缀下划线 = transport-only，不进 lease metadata 原始键名。
 _BORROWED_FLAG_KEY = "_borrowed"
 _LENDER_USER_ID_KEY = "_lender_user_id"
+# task-03（2026-08-28-daemon-agent-share）：共享钉定（workspace grant 授权）的
+# 借用审计关联键。``_query_pinned_online_runtime`` 授权分支命中 workspace_grant
+# 时与 ``_borrowed``/``_lender_user_id`` 一同塞进 runtime dict，
+# ``prepare_interactive_dispatch`` 取出后写进 daemon_borrow_audit.grant_id
+# （task-06 borrow_resolver 切 grants 数据源后批处理借用路同样可塞本键）。
+_GRANT_ID_KEY = "_grant_id"
 
 
 def _stamp_borrowed_flag(rt: dict, borrowed: bool, lender: uuid.UUID | None) -> dict:
@@ -63,6 +69,16 @@ def _pop_borrowed_flag(rt: dict) -> tuple[bool, str | None]:
     borrowed = bool(rt.pop(_BORROWED_FLAG_KEY, False))
     lender_str: str | None = rt.pop(_LENDER_USER_ID_KEY, None)
     return borrowed, lender_str
+
+
+def _pop_grant_id(rt: dict) -> str | None:
+    """取出（并清除）runtime dict 上共享钉定授权塞入的 grant_id 标记（task-03）。
+
+    ``_query_pinned_online_runtime`` 授权分支命中 workspace_grant 时塞入；消费方
+    （``prepare_interactive_dispatch`` 钉定分支）取出后写进 daemon_borrow_audit
+    .grant_id。自有/批处理借用路径无键 → None。
+    """
+    return rt.pop(_GRANT_ID_KEY, None)
 
 
 # task-09 / D-007@v2（候选 B 主路径）：借用 lease 沙箱隔离 marker + slug 构造。
@@ -144,6 +160,11 @@ async def _insert_borrow_audit_row(
     daemon_instance_id: uuid.UUID,
     workspace_id: uuid.UUID,
     agent_run_id: uuid.UUID,
+    # task-03（2026-08-28-daemon-agent-share / D-006@v1）：授权该次借用的
+    # daemon_runtime_grants 行（共享钉定会话由 _query_pinned_online_runtime
+    # 授权分支携带；批处理借用路 task-06 切 grants 数据源后传入，缺省 None =
+    # 旧数据源形态，列 nullable 零迁移负担）。
+    grant_id: uuid.UUID | None = None,
 ) -> None:
     """显式 INSERT 一条 daemon_borrow_audit 审计行（task-11 / FR-07 / D-004@v1）。
 
@@ -165,9 +186,9 @@ async def _insert_borrow_audit_row(
                 """
                 INSERT INTO daemon_borrow_audit
                     (id, borrower_user_id, lender_user_id, daemon_instance_id,
-                     workspace_id, agent_run_id, borrowed_at, usage_summary)
+                     workspace_id, agent_run_id, borrowed_at, usage_summary, grant_id)
                 VALUES
-                    (:id, :borrower, :lender, :daemon, :ws, :run, :now, NULL)
+                    (:id, :borrower, :lender, :daemon, :ws, :run, :now, NULL, :grant)
                 """
             ),
             {
@@ -178,6 +199,7 @@ async def _insert_borrow_audit_row(
                 "ws": workspace_id.hex,
                 "run": agent_run_id.hex,
                 "now": now,
+                "grant": grant_id.hex if grant_id is not None else None,
             },
         )
     except Exception as exc:
@@ -680,16 +702,24 @@ class RunPlacementService:
         # NoOnlineDaemonError（上层 create_session 捕获后转 4xx），不静默换机。
         borrowed = False
         lender_user_id: uuid.UUID | None = None
+        # task-03（2026-08-28-daemon-agent-share / FR-02 / D-001@v1 + D-006@v1）：
+        # 共享钉定（workspace grant 授权）命中的 grant 行 id——授权分支塞在 runtime
+        # dict 上带出（_GRANT_ID_KEY），供下方借用审计行 daemon_borrow_audit.grant_id。
+        pinned_grant_id: uuid.UUID | None = None
         if pinned_runtime_id is not None:
             # task-03（2026-08-25-team-subsession-governance / D-004@v1）：代表钉定
             # 模式（pinned_skip_owner_check=True）跳过属主复查——resolve_representative_binding
             # 解析出的代表 runtime 属主常非 mission.created_by。属主跳过仅限本显式
             # 旗标；普通钉定（False）传给 _query_pinned_online_runtime 的行为与原
             # 实现逐字一致（零回归）。
+            # task-03（2026-08-28-daemon-agent-share）：workspace_id 供钉定复查的
+            # grants 授权分支（owner 未命中时 authorize_pinned_runtime 的权限作用域）；
+            # 自有/代表钉定路径不进授权分支，缺省 None 零回归。
             runtime = await self._query_pinned_online_runtime(
                 user_id,
                 pinned_runtime_id,
                 skip_owner_check=pinned_skip_owner_check,
+                workspace_id=workspace_id,
             )
             if runtime is None:
                 log.warning(
@@ -705,6 +735,19 @@ class RunPlacementService:
                         f"指定的运行时（{pinned_runtime_id}）已离线或不存在，请重新选择机器/智能体"
                     ),
                 )
+            # task-03（2026-08-28-daemon-agent-share / design §5 Phase 2.1）：授权
+            # 分支放行的共享钉定在 runtime dict 上带 _borrowed/_lender_user_id/
+            # _grant_id 私有键——取出后走下方既有 borrowed marker（沙箱 slug + cwd
+            # 覆写）+ daemon_borrow_audit 审计链路，与批处理借用/交互式借用兜底
+            # 同语义。自有/代表钉定无键 → (False, None) 零回归。
+            _pin_borrowed, _pin_lender_str = _pop_borrowed_flag(runtime)
+            if _pin_borrowed:
+                borrowed = True
+                if _pin_lender_str:
+                    lender_user_id = uuid.UUID(_pin_lender_str)
+                _pin_grant_str = _pop_grant_id(runtime)
+                if _pin_grant_str:
+                    pinned_grant_id = uuid.UUID(_pin_grant_str)
         else:
             # task-03：旗标误用守卫——pinned_skip_owner_check 只在钉定分支生效，
             # 单独传旗标不传 pinned_runtime_id 属调用方 bug（task-05 两者成对传），
@@ -800,6 +843,8 @@ class RunPlacementService:
             _stamp_borrow_sandbox_metadata(metadata, user_id, agent_run_id)
             # task-11 / FR-07 / D-004@v1：显式写 daemon_borrow_audit 审计行（不限额）。
             # workspace_id / lender_user_id 借用必然非空（AC7 + borrow_resolver 契约）。
+            # task-03（2026-08-28-daemon-agent-share）：共享钉定路径（上方钉定分支
+            # 取出的 pinned_grant_id）额外携带 grant_id；借用兜底路径缺省 None。
             if lender_user_id is not None and workspace_id is not None:
                 await _insert_borrow_audit_row(
                     self._session,
@@ -808,6 +853,7 @@ class RunPlacementService:
                     daemon_instance_id=daemon_id,
                     workspace_id=workspace_id,
                     agent_run_id=agent_run_id,
+                    grant_id=pinned_grant_id,
                 )
 
         # Raw SQL mirrors dispatch_to_daemon so we can set kind/agent_run_id=NULL
@@ -1489,6 +1535,11 @@ class RunPlacementService:
         runtime_id: uuid.UUID,
         *,
         skip_owner_check: bool = False,
+        # task-03（2026-08-28-daemon-agent-share / design §5 Phase 2.1）：授权
+        # 分支的 has_permission 权限作用域（会话 workspace 上下文，可为 None）。
+        # 缺省 None 仅作用于授权分支语义（grants 查询自身的成员资格仍以 grant 的
+        # grantee 工作区为准）；owner / skip_owner_check 路径不消费本参数。
+        workspace_id: uuid.UUID | None = None,
     ) -> dict | None:
         """task-03（2026-08-14-sessions-portal / Grill C-01 P0）：按 id 精确复查钉定 runtime。
 
@@ -1504,6 +1555,24 @@ class RunPlacementService:
         ``resolve_representative_binding`` 解析出的 runtime（调用方 task-05 传入）。
         属主跳过仅限本显式旗标；默认 False 时 SQL 与原实现逐字一致（零回归）。
         不满足钉定（离线/不存在）仍返回 None（上层抛 NoOnlineDaemonError）。
+
+        task-03（2026-08-28-daemon-agent-share / FR-02 / D-001@v1 + D-006@v1）：
+        **授权分支**——owner 复查未命中（钉定他人 runtime）时复用 task-02 的
+        ``authorize_pinned_runtime``（grants 是授权唯一判定源，判定口径与
+        session/service.py 首查一致，本复查是竞态防线）：
+
+        - ``workspace_grant`` 命中 → 放行，并在返回 dict 上塞
+          ``_borrowed`` / ``_lender_user_id`` / ``_grant_id`` 私有键（先例
+          ``_stamp_borrowed_flag``），调用方取出后按借用会话处理（沙箱
+          marker + daemon_borrow_audit 含 grant_id）；
+        - None（未授权/停用/离线，**含 platform grant 直传钉定**——D-012@v1
+          验收审查 gap-2：authorize 的 platform 分支命中即 None，绕过 task-05
+          强制（cwd/写约束/工具集）的直传形态首查/复查同源 404 封堵；共享
+          runtime 唯一入口=task-05 档案检测，其下发 pinned_skip_owner_check=True
+          不经本复查）→ 维持 None（上层 NoOnlineDaemonError → 4xx，绝不
+          静默换机，不 fallback 借用兜底）。
+
+        ``skip_owner_check=True``（代表钉定）恒不走授权分支（旗标语义零变化）。
         """
         # 属主谓词按旗标裁剪（f-string 拼 WHERE 与 _query_online :1465 同款范式，
         # ruff select 无 S 规则；绑定参数仍走 :rid/:uid 占位符，无注入面）。
@@ -1524,7 +1593,51 @@ class RunPlacementService:
             params,
         )
         row = result.mappings().first()
-        return dict(row) if row else None
+        if row is not None:
+            return dict(row)
+        # 代表钉定（skip_owner_check）语义零变化：owner 谓词已跳过，仍未命中 =
+        # 离线/不存在，直接 None，不进授权分支。
+        if skip_owner_check:
+            return None
+
+        # ── 授权分支（task-03 / 2026-08-28-daemon-agent-share）──────────────────
+        # owner 未命中（钉定他人 runtime）→ grants 授权复查。函数级 import 对齐
+        # 本模块跨域 lazy import 范式（ws_hub / member_runtimes 同款），避免
+        # placement ↔ grants 链的模块环。
+        from app.modules.daemon.grants.queries import authorize_pinned_runtime
+
+        grant = await authorize_pinned_runtime(
+            self._session,
+            actor_user_id=user_id,
+            runtime_id=runtime_id,
+            workspace_id=workspace_id,
+        )
+        if grant is None:
+            return None
+        # 授权放行后重查 runtime 行（id + online，无属主谓词；authorize 的
+        # workspace 分支已验机器在线，此处再验 runtime 级在线，竞态兜底）。
+        grant_result = await self._session.execute(
+            text(
+                """
+                SELECT id, user_id, provider, status, daemon_instance_id
+                FROM daemon_runtimes
+                WHERE id = :rid
+                  AND status = 'online'
+                """
+            ),
+            {"rid": runtime_id.hex},
+        )
+        grant_row = grant_result.mappings().first()
+        if grant_row is None:
+            return None
+        rt = dict(grant_row)
+        if grant.kind == "workspace_grant":
+            rt[_BORROWED_FLAG_KEY] = True
+            rt[_LENDER_USER_ID_KEY] = str(grant.lender_user_id)
+            rt[_GRANT_ID_KEY] = str(grant.grant_id)
+        # D-012@v1 后 authorize 的 platform 分支命中即 None，能走到这里的授权
+        # 结果必为 workspace_grant（platform 直传钉定已在 authorize 封堵）。
+        return rt
 
     async def _query_online(
         self,

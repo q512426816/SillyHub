@@ -102,6 +102,8 @@ from app.modules.daemon.schema import (
     SessionCreateRequest,
     SessionInjectRequest,
     SessionReopenResponse,
+    SharedMachineRuntimeView,
+    SharedMachineView,
     TeamMissionCreateBlock,
     TeamMissionSummary,
     TeamMissionTriggerRequest,
@@ -304,6 +306,16 @@ router.include_router(change_write_router)
 from app.modules.daemon.audit.router import router as audit_router  # noqa: E402
 
 router.include_router(audit_router)
+
+# 2026-08-28-daemon-agent-share task-07：挂载平台共享智能体端点（task-04 定义，
+# design §5 Phase 3 / §7）。仿 audit_router 先例在本 router 静态区 include（先于
+# 后文所有路由声明，含动态 /runtimes/{runtime_id}——固定路径 /shared-agents 与
+# /shared-agents/active 不会被动态段吞掉），复用本 router 的 /daemon prefix，
+# 经 main.py 挂 /api 后落地 /api/daemon/shared-agents 系列端点，不动 main.py。
+from app.modules.daemon.grants.queries import SharedMachineRow  # noqa: E402
+from app.modules.daemon.grants.router import router as grants_router  # noqa: E402
+
+router.include_router(grants_router)
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
 # 管理 UI 端点用 runtime:admin；daemon 自身的注册/心跳/lease 生命周期仍走 get_current_principal
@@ -552,6 +564,21 @@ def _build_machine_read(
     )
 
 
+def _shared_machine_view(row: SharedMachineRow) -> SharedMachineView:
+    """把 grants.queries.SharedMachineRow 组装成 SharedMachineView（task-13）。
+
+    ``runtimes`` 明细行是 NamedTuple——pydantic v2 不接受 tuple 形态直接
+    validate 进嵌套 model（非 dict/实例），须逐行 ``_asdict()`` 显式构造。
+    五个机器级字段沿用 ``_asdict()`` 整体展开（既有 task-07 装配方式）。
+    """
+    return SharedMachineView(
+        **{
+            **row._asdict(),
+            "runtimes": [SharedMachineRuntimeView(**rt._asdict()) for rt in row.runtimes],
+        }
+    )
+
+
 # ── Runtime admin global list (task-04 / FR-01/04 / D-005@v1) ────────────────
 # 固定路径 /runtimes/page 必须声明在动态 /runtimes/{runtime_id} 之前，否则
 # "page" 会被 {runtime_id} 捕获再 UUID parse 失败 → 422（与 /runtimes/usage 同款约束）。
@@ -571,10 +598,14 @@ async def list_runtimes_page(
     limit: int = Query(default=12, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ) -> DaemonRuntimeListResponse:
-    """平台管理员分页查看全部 owner 的 runtime；普通账号只见自己 (FR-01/02/04)."""
+    """平台管理员分页查看全部 owner 的 runtime；普通账号只见自己 (FR-01/02/04).
+
+    2026-08-28-daemon-agent-share task-07：附加 shared_to_me 共享区块（design §5
+    Phase 2.2）——独立成块不混入 items，无授权数据时空列表（零行为变化）。
+    """
     svc = DaemonService(session)
     await svc.cleanup_stale_runtimes()
-    rows, total = await svc.list_runtimes_page(
+    rows, total, shared = await svc.list_runtimes_page(
         actor_user_id=user.id,
         is_platform_admin=user.is_platform_admin,
         q=q,
@@ -589,6 +620,7 @@ async def list_runtimes_page(
         total=total,
         limit=limit,
         offset=offset,
+        shared_to_me=[_shared_machine_view(row) for row in shared],
     )
 
 
@@ -754,9 +786,11 @@ async def list_machines(
 
     普通账号仅见自己的机器（service 层强制 ``actor == user_id``，请求 ``user_id`` 被忽略）。
     ``list_machines`` 内部已先 ``cleanup_stale_runtimes`` 收敛 stale 状态，router 不重复调。
+    2026-08-28-daemon-agent-share task-07：附加 shared_to_me 共享区块（design §5
+    Phase 2.2）——独立成块不混入 items，无授权数据时空列表（零行为变化）。
     """
     svc = DaemonService(session)
-    rows, runtimes_by_instance, total = await svc.list_machines(
+    rows, runtimes_by_instance, total, shared = await svc.list_machines(
         actor_user_id=user.id,
         is_platform_admin=user.is_platform_admin,
         q=q,
@@ -770,7 +804,13 @@ async def list_machines(
         _build_machine_read(inst, owner, runtimes_by_instance.get(inst.id, []))
         for inst, owner in rows
     ]
-    return DaemonMachineListResponse(items=items, total=total, limit=limit, offset=offset)
+    return DaemonMachineListResponse(
+        items=items,
+        total=total,
+        limit=limit,
+        offset=offset,
+        shared_to_me=[_shared_machine_view(row) for row in shared],
+    )
 
 
 @router.patch(

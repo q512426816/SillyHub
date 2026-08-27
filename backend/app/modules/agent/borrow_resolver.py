@@ -1,6 +1,8 @@
 """Borrow resolver — unified own-or-borrowed runtime resolution helper.
 
 Change 2026-07-25-daemon-borrow-for-business task-05 / D-002@v1 / D-008@v1 / FR-04。
+Change 2026-08-28-daemon-agent-share task-06：借用数据源切 grants 统一授权表
+（design §5 Phase 2.3 / §9 兼容策略 / D-006@v1），语义逐条等价（enabled↔shared）。
 
 ``_resolve_borrowed_or_own_runtime`` 是 4 路派发 resolver 的统一入口（D-008）：
 
@@ -14,10 +16,11 @@ Change 2026-07-25-daemon-borrow-for-business task-05 / D-002@v1 / D-008@v1 / FR-
 
   1. 先查 actor 自己的 member binding → 有在线自有 daemon 就返回（零回归原路径，
      design §9 兼容策略；自有 daemon 路径完全不变）。
-  2. 无在线自有 daemon → DAEMON_BORROW 权限闸 → resolve_shared_daemon_for_borrow
-     → 返回借用 runtime + lender_user_id。
+  2. 无在线自有 daemon → DAEMON_BORROW 权限闸 →
+     grants.queries.resolve_granted_daemon_for_borrow → 返回借用 runtime + lender_user_id。
 
-三重校验顺序：权限 → shared → online（权限不通过不查 shared daemon，fail fast）。
+三重校验顺序：权限 → enabled(grant) → online（权限不通过不查共享 daemon，fail fast，
+闸位置不变）。
 """
 
 from __future__ import annotations
@@ -30,10 +33,10 @@ from app.core.logging import get_logger
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import has_permission
+from app.modules.daemon.grants.queries import resolve_granted_daemon_for_borrow
 from app.modules.workspace.member_runtimes.queries import (
     query_daemon_online_by_id,
     query_runtime_by_daemon_and_provider,
-    resolve_shared_daemon_for_borrow,
 )
 from app.modules.workspace.member_runtimes.resolver import MemberBindingResolver
 
@@ -49,8 +52,9 @@ async def _resolve_borrowed_or_own_runtime(
     """Resolve an online runtime for dispatch, borrowing when the actor has no own.
 
     Change 2026-07-25-daemon-borrow-for-business task-05 / D-002@v1 / D-008@v1。
-    actor 有在线自有 daemon 走原路径（零回归），无则回退借用工作空间共享 daemon
-    （业务/管理人员场景，design §5 Phase 3）。
+    Change 2026-08-28-daemon-agent-share task-06：借用数据源切 grants（design §5
+    Phase 2.3，语义等价红线 §9）。actor 有在线自有 daemon 走原路径（零回归），
+    无则回退借用工作区共享 daemon（grants 授权行，业务/管理人员场景）。
 
     解析步骤：
       1. **自有路径（零回归）**：查 actor 的 member binding
@@ -61,14 +65,15 @@ async def _resolve_borrowed_or_own_runtime(
          一致，调用方零改造消费。
       2. **借用路径**：无在线自有 daemon → 校验 actor 有 ``DAEMON_BORROW`` 权限
          （:func:`has_permission`，含 ``platform_admin`` 短路）→ 调
-         :func:`resolve_shared_daemon_for_borrow` 解析 shared+online lender daemon →
-         返回 ``(runtime_dict, True, lender_user_id)``。
+         :func:`resolve_granted_daemon_for_borrow` 解析 enabled grant 的
+         在线 lender daemon → 返回 ``(runtime_dict, True, lender_user_id)``。
 
-    三重校验顺序（design §5 Phase 3 / D-008）：**权限 → shared → online**。权限闸在
-    本函数内、shared/online 查询之前完成；shared + online 在
-    :func:`resolve_shared_daemon_for_borrow` 的单条 SQL 内一并校验。
+    三重校验顺序（design §5 Phase 3 / D-008）：**权限 → enabled(grant) → online**。
+    权限闸在本函数内、grant/online 查询之前完成（task-06 切 grants 后闸位置不变）；
+    enabled + online 在 :func:`resolve_granted_daemon_for_borrow` 的单条 SQL 内
+    一并校验（另含 actor 是 grantee 工作区成员的 EXISTS 防御，task-02 加固）。
 
-    无在线自有 daemon 且（无 ``DAEMON_BORROW`` 或 无共享/离线 lender）→ 返回
+    无在线自有 daemon 且（无 ``DAEMON_BORROW`` 或 无生效 grant/离线 lender）→ 返回
     ``(None, False, None)``，让调用方抛原 ``NoOnlineDaemonError``（不改错误文案，
     design §9 兼容策略）。
 
@@ -81,7 +86,10 @@ async def _resolve_borrowed_or_own_runtime(
     Returns:
         ``(runtime_dict, borrowed, lender_user_id)``：
           - 自有命中：``(runtime, False, None)``；
-          - 借用命中：``(runtime, True, lender_user_id)``（``runtime["user_id"]`` == lender）；
+          - 借用命中：``(runtime, True, lender_user_id)``（``runtime["user_id"]`` == lender，
+            额外携带 ``_grant_id`` 传输键（str，task-03 建立的 ``_stamp_borrowed_flag``
+            transport-only 约定）供借用审计 ``daemon_borrow_audit.grant_id`` 消费方
+            ``_pop_grant_id`` 取出——不读不受影响，自有路径无此键）；
           - 未命中：``(None, False, None)``（调用方抛原 NoOnlineDaemonError）。
     """
     # ── Step 1: 自有路径（零回归原路径，design §9）─────────────────────────
@@ -109,25 +117,33 @@ async def _resolve_borrowed_or_own_runtime(
     if not allowed:
         return (None, False, None)
 
-    # 2b. shared + online 闸：resolve_shared_daemon_for_borrow 单条 SQL 内一并校验
-    # （shared=TRUE AND daemon_id IS NOT NULL AND user_id<>actor AND
-    # daemon_instances.status='online'）+ provider 解析。命中即借用。
-    borrowed_runtime = await resolve_shared_daemon_for_borrow(
-        session, workspace_id, user_id, provider
+    # 2b. enabled(grant) + online 闸：resolve_granted_daemon_for_borrow 单条 SQL 内
+    # 一并校验（grantee_type=workspace AND grantee_id=workspace_id AND enabled=TRUE
+    # AND granted_by<>actor AND daemon_instances.status='online'，外加 actor 是
+    # grantee 工作区成员的 EXISTS 防御）+ provider 解析。命中即借用。
+    resolution = await resolve_granted_daemon_for_borrow(
+        session, actor_user_id=user_id, workspace_id=workspace_id, provider=provider
     )
-    if borrowed_runtime is None:
+    if resolution is None:
         return (None, False, None)
 
-    # runtime dict 的 user_id 即 lender（daemon 归属人 = 共享者）。规范化为 uuid.UUID
-    # 供调用方写审计 / lease metadata。SQLite 返回 CHAR(32) hex，PG 返回 uuid.UUID。
-    lender_uid_raw = borrowed_runtime.get("user_id")
-    if lender_uid_raw is None:
-        # daemon_runtime.user_id 列 NOT NULL，此处仅防御性兜底。
-        return (None, False, None)
-    lender_user_id = (
-        lender_uid_raw if isinstance(lender_uid_raw, uuid.UUID) else uuid.UUID(str(lender_uid_raw))
-    )
-    return (borrowed_runtime, True, lender_user_id)
+    # task-06 适配：grants 版返回 ``(runtime ORM, lender_user_id, grant_id)`` 三元组，
+    # 此处转回 4 路调用方（placement / member_runtimes.resolver）既有消费的 runtime
+    # dict shape ``{id, user_id, provider, status, daemon_instance_id}``，纯增量加
+    # ``_grant_id`` 传输键（str——对齐 placement ``_GRANT_ID_KEY`` transport-only 约定，
+    # 借用审计消费方 ``_pop_grant_id`` 取出写 daemon_borrow_audit.grant_id；自有路径
+    # 无此键，不读不受影响）。ORM Uuid(as_uuid=True) 在 SQLite/PG 两方言下均为
+    # uuid.UUID，无需 hex 归一化。
+    rt = resolution.runtime
+    borrowed_runtime = {
+        "id": rt.id,
+        "user_id": rt.user_id,
+        "provider": rt.provider,
+        "status": rt.status,
+        "daemon_instance_id": rt.daemon_instance_id,
+        "_grant_id": str(resolution.grant_id),
+    }
+    return (borrowed_runtime, True, resolution.lender_user_id)
 
 
 async def _resolve_own_online_runtime(

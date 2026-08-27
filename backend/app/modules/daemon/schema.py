@@ -442,13 +442,54 @@ class DaemonRuntimeAllowedRootsUpdate(BaseModel):
     allowed_roots: list[str] = Field(min_length=1, max_length=50)
 
 
+class SharedMachineRuntimeView(BaseModel):
+    """共享机器的 runtime 明细行 DTO（task-13 / FR-01/FR-02 / design §6）。
+
+    字段对齐 grants.queries.SharedMachineRuntimeRow 三字段（provides 契约）：
+    会话创建按 runtime 粒度（机器+引擎），机器级 grant 的视图需携带 runtime
+    清单供前端锁 runtime_id / picker 第二步选引擎；``online`` 与机器级同口径
+    （status == "online"，权威源 runtime.status）。
+    """
+
+    runtime_id: uuid.UUID
+    provider: str | None = None
+    online: bool
+
+
+class SharedMachineView(BaseModel):
+    """「共享给我的」机器行 DTO（2026-08-28-daemon-agent-share task-07 / design §6）。
+
+    字段对齐 grants.queries.SharedMachineRow 五字段（task-02 provides 契约）：
+    display_name = 机器别名（display_alias）回退 hostname；online 取机器权威
+    在线源 daemon_instances.status。service 层装配（runtime/service.py），router
+    透传序列化；platform 共享智能体不进本视图（走 shared-agents 选择器）。
+
+    task-13（契约修复）：附加 ``runtimes`` runtime 明细（Wave 6 审查——共享授权
+    是机器级而会话创建需要 runtime_id，五字段无明细导致前端锁 machine_id 404 /
+    picker 第二步无 runtime 可选）。纯增量可选（默认空列表），OpenAPI 非必填，
+    既有五字段与旧消费端零变化。
+    """
+
+    machine_id: uuid.UUID
+    display_name: str
+    lender_display_name: str | None = None
+    source_workspace_id: uuid.UUID | None = None
+    online: bool
+    runtimes: list[SharedMachineRuntimeView] = Field(default_factory=list)
+
+
 class DaemonRuntimeListResponse(BaseModel):
-    """Response body for GET /api/daemon/runtimes/page (task-04 / FR-04)."""
+    """Response body for GET /api/daemon/runtimes/page (task-04 / FR-04).
+
+    2026-08-28-daemon-agent-share task-07：附加 ``shared_to_me`` 共享区块
+    （design §5 Phase 2.2，默认空列表保证既有子集式 shape 断言零失败）。
+    """
 
     items: list[DaemonRuntimeRead]
     total: int
     limit: int
     offset: int
+    shared_to_me: list[SharedMachineView] = Field(default_factory=list)
 
 
 # ── Daemon instances list ─────────────────────────────────────────────────────
@@ -539,12 +580,15 @@ class DaemonMachineListResponse(BaseModel):
     """Response body for GET /api/daemon/machines（design §5.1 / FR-1）。
 
     机器级分页（默认 20/页，D-007），机器卡永不跨页断裂。
+    2026-08-28-daemon-agent-share task-07：附加 ``shared_to_me`` 共享区块
+    （design §5 Phase 2.2，独立成块不混入 items；默认空列表，无共享时零变化）。
     """
 
     items: list[DaemonMachineRead]
     total: int
     limit: int
     offset: int
+    shared_to_me: list[SharedMachineView] = Field(default_factory=list)
 
 
 # ── Lease claim ─────────────────────────────────────────────────────────────

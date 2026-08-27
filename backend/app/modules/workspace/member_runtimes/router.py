@@ -73,9 +73,13 @@ class SharedDaemonView(BaseModel):
     """owner 视角下一条共享 daemon（FR-02 / D-003@v1）。
 
     ``daemon_status`` / ``daemon_hostname`` 来自 JOIN daemon_instances；
-    ``revocable`` 恒 True（owner 调用，总可撤销）。
+    ``revocable`` 恒 True（owner 调用，总可撤销）。task-06（2026-08-28-
+    daemon-agent-share，design §5 Phase 2.3 / provides SharedDaemonsGrantField）：
+    数据源切 grants 后每行对应一条 enabled workspace grant，新增 ``grant_id``
+    纯增量字段（撤销追溯锚点，前端类型生成归 task-08）；其余字段结构不变。
     """
 
+    grant_id: uuid.UUID
     lender_user_id: uuid.UUID
     daemon_id: uuid.UUID | None = None
     daemon_status: str | None = None
@@ -169,6 +173,7 @@ async def set_my_binding_shared_endpoint(
 
     端点无 user_id 路径参数，server 钉死当前用户 → 仅能改自己 binding。
     binding 未配置时 service 抛 ``MemberBindingNotFound``（409）直通全局处理器。
+    task-06：service 层同事务双写 shared 列 + grants 授权行（端点签名/响应不变）。
     """
     row = await set_my_binding_shared(session, workspace_id, user.id, shared=payload.shared)
     return _to_view(row)
@@ -182,7 +187,8 @@ async def list_shared_daemons_endpoint(
 ):
     """owner 查工作空间所有共享 daemon（FR-02 / D-003@v1）。
 
-    返回含 lender_user_id / daemon 在线状态 / 可撤销标记。
+    返回含 lender_user_id / daemon 在线状态 / 可撤销标记；task-06 数据源切
+    grants（enabled workspace grant），每行新增 grant_id（纯增量字段）。
     """
     rows = await list_shared_daemons(session, workspace_id)
     return [SharedDaemonView(**r) for r in rows]
@@ -198,7 +204,8 @@ async def revoke_shared_endpoint(
     """owner 撤销某成员 daemon 共享（FR-02 / D-003@v1）。
 
     设 shared=False，**不删 binding 行**（lender 配置保留）。target 无 binding
-    时 service 抛 ``MemberBindingNotFound``（409）。
+    时 service 抛 ``MemberBindingNotFound``（409）。task-06：同事务置对应
+    workspace grant enabled=False（撤销后借用立即失效，鉴权只读 grants）。
     """
     row = await revoke_shared(session, workspace_id, user_id)
     return _to_view(row)

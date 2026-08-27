@@ -9,6 +9,12 @@
 - PATCH /machines/{id}：display_alias set/clear/省略、越权→404、不存在→404、0-runtime
   机器可改（D-001）。
 - POST /machines/{id}/self-update：路由正确（mock ws_hub）、离线/失败→504、越权/不存在→404。
+- shared_to_me 共享区块（2026-08-28-daemon-agent-share task-07 / design §5 Phase 2.2）：
+  ``/machines`` 与 ``/runtimes/page`` 附加「共享给我的」机器块（成员+daemon:borrow
+  双条件授权（D-013@v1）、在线/离线透传、五字段装配、不混入 items）；无授权/
+  停用 grant/成员无 borrow 权限空数组；admin 视图 items 全局且块空；
+  grants router 挂载冒烟（active 200/401、管理端 200/403）。task-13：行附加
+  ``runtimes`` 明细（runtime_id/provider/online，多 provider/离线/0-runtime 空）。
 - 既有端点回归冒烟（FR-8）：``/runtimes/page``、``/runtimes``、``/instances``、
   ``PATCH /runtimes/{id}``、``PUT /runtimes/{id}/allowed-roots``、
   ``POST /runtimes/{id}/self-update`` 行为不破。
@@ -30,11 +36,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.security import create_access_token, password_hasher
-from app.modules.auth.model import Role, RolePermission, User
+from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
 from app.modules.daemon import ws_hub as ws_hub_module
+from app.modules.daemon.grants.model import DaemonRuntimeGrant
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime
 from app.modules.daemon.ws_hub import DaemonWsHub
+from app.modules.workspace.model import Workspace
 
 # ── helpers（私有复刻 test_runtime_admin_management.py 同款风格）─────────────
 
@@ -170,6 +178,74 @@ async def _create_runtime(
     await session.commit()
     await session.refresh(rt)
     return rt
+
+
+# ── shared_to_me 装配 helpers（2026-08-28-daemon-agent-share task-07）─────────
+# 范式照 grants/tests/test_grants_authorization.py 的 _seed_* 系列（本文件不共享
+# conftest，就近私有复刻最小三件：workspace / 成员资格 / grant 行）。
+
+
+async def _create_workspace(session: AsyncSession, *, name: str = "共享工作区") -> Workspace:
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name=name,
+        slug=f"ws-{uuid.uuid4().hex[:8]}",
+        root_path=f"/tmp/ws-{uuid.uuid4().hex[:8]}",
+        status="active",
+    )
+    session.add(ws)
+    await session.commit()
+    await session.refresh(ws)
+    return ws
+
+
+async def _add_workspace_member(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    permissions: list[str] | None = None,
+) -> None:
+    """把用户加进工作区（默认角色带 daemon:borrow——shared_to_me 是「成员资格 +
+    daemon:borrow」双条件判定源，D-013@v1 验收审查 gap-1 后权限位参与过滤；
+    传 ``permissions`` 显式控制，如仅 WORKSPACE_READ 构造「成员无权限」负例）。"""
+    role = Role(id=uuid.uuid4(), key=f"test-ws-member-{uuid.uuid4().hex[:6]}", name="member")
+    session.add(role)
+    await session.flush()
+    for p in permissions if permissions is not None else [Permission.DAEMON_BORROW.value]:
+        session.add(RolePermission(role_id=role.id, permission=p))
+    session.add(
+        UserWorkspaceRole(
+            user_id=user_id,
+            workspace_id=workspace_id,
+            role_id=role.id,
+            granted_by=None,
+            granted_at=datetime.now(UTC),
+        )
+    )
+    await session.commit()
+
+
+async def _create_grant(
+    session: AsyncSession,
+    *,
+    daemon_id: uuid.UUID,
+    granted_by: uuid.UUID,
+    grantee_id: uuid.UUID,
+    enabled: bool = True,
+) -> DaemonRuntimeGrant:
+    """workspace 级共享授权行（grantee_id=工作区，lender=granted_by）。"""
+    grant = DaemonRuntimeGrant(
+        id=uuid.uuid4(),
+        daemon_instance_id=daemon_id,
+        grantee_type="workspace",
+        grantee_id=grantee_id,
+        granted_by_user_id=granted_by,
+        enabled=enabled,
+    )
+    session.add(grant)
+    await session.commit()
+    return grant
 
 
 @pytest.fixture()
@@ -817,6 +893,259 @@ async def test_machine_cleanup_nonexistent_returns_404(
         headers=_headers(_token_for(admin)),
     )
     assert resp.status_code == 404, resp.text
+
+
+# ── shared_to_me 共享区块（2026-08-28-daemon-agent-share task-07 / design §5 Phase 2.2）──
+
+
+async def _seed_shared_machine(
+    db_session: AsyncSession,
+    *,
+    lender: User,
+    workspace_id: uuid.UUID,
+    hostname: str,
+    status: str = "online",
+    display_alias: str | None = None,
+    enabled: bool = True,
+) -> DaemonInstance:
+    """造一台 lender 机器 + workspace 级 grant（lender 不需自证，grant 行即共享事实）。"""
+    inst = await _create_instance(
+        db_session, lender.id, hostname=hostname, status=status, display_alias=display_alias
+    )
+    await _create_grant(
+        db_session,
+        daemon_id=inst.id,
+        granted_by=lender.id,
+        grantee_id=workspace_id,
+        enabled=enabled,
+    )
+    return inst
+
+
+@pytest.mark.asyncio
+async def test_machines_shared_to_me_block_fields_passthrough(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """task-07 / FR-01：成员 + 生效 grant → /machines 出现 shared_to_me 块，五字段
+    透传（别名优先、lender 显示名、来源工作区、在线/离线如实现状），且不混入 items。"""
+    _admin, user_a, user_b = await _bootstrap(db_session)
+    ws = await _create_workspace(db_session)
+    await _add_workspace_member(db_session, workspace_id=ws.id, user_id=user_a.id)
+    # user_a 自己也有一台机器（items 维度），验证共享块与 items 互不混排。
+    own = await _create_instance(db_session, user_a.id, hostname="own-host")
+    await _create_runtime(db_session, user_a.id, daemon_instance_id=own.id)
+    # lender 在线机（带别名）+ 离线机（别名回退 hostname），在线状态如实透传。
+    inst_on = await _seed_shared_machine(
+        db_session,
+        lender=user_b,
+        workspace_id=ws.id,
+        hostname="lender-online-host",
+        display_alias="生产共享机",
+    )
+    inst_off = await _seed_shared_machine(
+        db_session,
+        lender=user_b,
+        workspace_id=ws.id,
+        hostname="lender-offline-host",
+        status="offline",
+    )
+    rt_claude = await _create_runtime(
+        db_session, user_b.id, daemon_instance_id=inst_on.id, name="rt-claude"
+    )
+    rt_codex = await _create_runtime(
+        db_session,
+        user_b.id,
+        daemon_instance_id=inst_on.id,
+        name="rt-codex",
+        provider="codex",
+        status="offline",
+    )
+
+    resp = await client.get("/api/daemon/machines", headers=_headers(_token_for(user_a)))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # items 仍只含自己的机器（owner 收窄不变，FR-03 边界）
+    assert {it["hostname"] for it in body["items"]} == {"own-host"}
+    # shared_to_me 独立成块，两台共享机都在（排序 hostname 升序：offline 在前）
+    shared = {row["machine_id"]: row for row in body["shared_to_me"]}
+    assert set(shared) == {str(inst_on.id), str(inst_off.id)}
+    row_on, row_off = shared[str(inst_on.id)], shared[str(inst_off.id)]
+    # 字段透传：display_name 别名优先 / 回退 hostname；lender 显示名；来源工作区；在线态
+    assert row_on["display_name"] == "生产共享机"
+    assert row_off["display_name"] == "lender-offline-host"
+    for row in (row_on, row_off):
+        assert row["lender_display_name"] == "Mach B"
+        assert row["source_workspace_id"] == str(ws.id)
+    assert row_on["online"] is True
+    assert row_off["online"] is False
+    # task-13：runtime 明细透传——多 provider（provider 升序）+ 离线行如实；
+    # 0-runtime 离线机为空列表（会话创建按 runtime 粒度的数据源）。
+    assert row_on["runtimes"] == [
+        {"runtime_id": str(rt_claude.id), "provider": "claude", "online": True},
+        {"runtime_id": str(rt_codex.id), "provider": "codex", "online": False},
+    ]
+    assert row_off["runtimes"] == []
+
+
+@pytest.mark.asyncio
+async def test_machines_shared_to_me_empty_without_membership_or_enabled(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """task-07：无授权 → shared_to_me 空数组；非成员 / 停用 grant / 成员但无
+    daemon:borrow（D-013@v1 双条件）同样不可见。"""
+    _admin, user_a, user_b = await _bootstrap(db_session)
+    ws = await _create_workspace(db_session)
+    # 停用 grant（enabled=False）——行存在但不生效
+    inst = await _seed_shared_machine(
+        db_session,
+        lender=user_b,
+        workspace_id=ws.id,
+        hostname="disabled-grant-host",
+        enabled=False,
+    )
+    # 另一工作区的生效 grant，但 user_a 非成员
+    ws_other = await _create_workspace(db_session, name="别的工作区")
+    await _add_workspace_member(db_session, workspace_id=ws_other.id, user_id=user_b.id)
+    await _seed_shared_machine(
+        db_session, lender=user_b, workspace_id=ws_other.id, hostname="other-ws-host"
+    )
+    # 第三工作区：user_a 是成员但角色仅 WORKSPACE_READ（无 daemon:borrow，
+    # D-013 权限过滤）——生效 grant 仍不可见。
+    ws_plain = await _create_workspace(db_session, name="无权限区")
+    await _add_workspace_member(
+        db_session,
+        workspace_id=ws_plain.id,
+        user_id=user_a.id,
+        permissions=[Permission.WORKSPACE_READ.value],
+    )
+    await _seed_shared_machine(
+        db_session, lender=user_b, workspace_id=ws_plain.id, hostname="no-borrow-perm-host"
+    )
+    await _create_runtime(db_session, user_b.id, daemon_instance_id=inst.id)
+    own = await _create_instance(db_session, user_a.id, hostname="own-quiet-host")
+    await _create_runtime(db_session, user_a.id, daemon_instance_id=own.id)
+
+    resp = await client.get("/api/daemon/machines", headers=_headers(_token_for(user_a)))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["shared_to_me"] == []
+    # 无共享不放大 items：只有自己的机器
+    assert {it["hostname"] for it in body["items"]} == {"own-quiet-host"}
+
+
+@pytest.mark.asyncio
+async def test_machines_admin_view_items_global_shared_block_empty(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """task-07：admin 视图 items 仍全局（含他人机器），非 grantee 成员 → 块为空。"""
+    admin, user_a, user_b = await _bootstrap(db_session)
+    ws = await _create_workspace(db_session)
+    await _add_workspace_member(db_session, workspace_id=ws.id, user_id=user_a.id)
+    await _seed_shared_machine(
+        db_session, lender=user_b, workspace_id=ws.id, hostname="lender-host"
+    )
+    own = await _create_instance(db_session, user_a.id, hostname="a-own-host")
+    await _create_runtime(db_session, user_a.id, daemon_instance_id=own.id)
+
+    resp = await client.get("/api/daemon/machines", headers=_headers(_token_for(admin)))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # admin 非 grantee 工作区成员 → 共享块为空
+    assert body["shared_to_me"] == []
+    # items 全局视角不受共享块影响（他人机器仍在 items）
+    assert {"lender-host", "a-own-host"} <= {it["hostname"] for it in body["items"]}
+
+
+@pytest.mark.asyncio
+async def test_runtimes_page_shared_to_me_block(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """task-07 / FR-01：/runtimes/page 同样附加 shared_to_me 块（字段透传，items 仍
+    只含自己的 runtime——owner 收窄零变化）。"""
+    _admin, user_a, user_b = await _bootstrap(db_session)
+    ws = await _create_workspace(db_session)
+    await _add_workspace_member(db_session, workspace_id=ws.id, user_id=user_a.id)
+    inst = await _seed_shared_machine(
+        db_session,
+        lender=user_b,
+        workspace_id=ws.id,
+        hostname="page-lender-host",
+        display_alias="共享页机",
+    )
+    lender_rt = await _create_runtime(
+        db_session, user_b.id, name="lender-rt", daemon_instance_id=inst.id
+    )
+    mine = await _create_runtime(db_session, user_a.id, name="page-mine-rt")
+
+    resp = await client.get(
+        "/api/daemon/runtimes/page?limit=10&offset=0", headers=_headers(_token_for(user_a))
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # items 仍只含自己的 runtime（共享机器的 runtime 不进 items）
+    assert {it["id"] for it in body["items"]} == {str(mine.id)}
+    assert len(body["shared_to_me"]) == 1
+    row = body["shared_to_me"][0]
+    # task-13：行新增 runtimes 明细（其余五字段零变化；快照断言同步带上明细）。
+    assert row == {
+        "machine_id": str(inst.id),
+        "display_name": "共享页机",
+        "lender_display_name": "Mach B",
+        "source_workspace_id": str(ws.id),
+        "online": True,
+        "runtimes": [
+            {"runtime_id": str(lender_rt.id), "provider": "claude", "online": True},
+        ],
+    }
+
+
+@pytest.mark.asyncio
+async def test_runtimes_page_shared_to_me_empty_by_default(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """task-07：无共享 → /runtimes/page shared_to_me 空数组（既有 shape 断言零失败）。"""
+    _admin, user_a, _u_b = await _bootstrap(db_session)
+    await _create_runtime(db_session, user_a.id, name="plain-rt")
+
+    resp = await client.get(
+        "/api/daemon/runtimes/page?limit=10&offset=0", headers=_headers(_token_for(user_a))
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["shared_to_me"] == []
+
+
+# ── grants router 挂载冒烟（task-07：include 后 /api/daemon/shared-agents 可路由）──
+
+
+@pytest.mark.asyncio
+async def test_shared_agents_router_mounted_smoke(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """task-07：grants router 挂载后端点可达——active 登录用户 200 / 未认证 401；
+    管理端点非 admin 403、admin 200（端点语义归 task-04，此处只验路由与鉴权闸）。"""
+    admin, user_a, _u_b = await _bootstrap(db_session)
+
+    # active 公共端点：任意登录用户 200（空列表也合法）
+    resp = await client.get(
+        "/api/daemon/shared-agents/active", headers=_headers(_token_for(user_a))
+    )
+    assert resp.status_code == 200, resp.text
+    assert isinstance(resp.json(), list)
+
+    # 未认证 → 401（get_current_user）
+    resp_anon = await client.get("/api/daemon/shared-agents/active")
+    assert resp_anon.status_code == 401, resp_anon.text
+
+    # 管理端点：非 admin 403（require_platform_admin）
+    resp_non_admin = await client.get(
+        "/api/daemon/shared-agents", headers=_headers(_token_for(user_a))
+    )
+    assert resp_non_admin.status_code == 403, resp_non_admin.text
+
+    # admin 200
+    resp_admin = await client.get("/api/daemon/shared-agents", headers=_headers(_token_for(admin)))
+    assert resp_admin.status_code == 200, resp_admin.text
+    assert isinstance(resp_admin.json(), list)
 
 
 # ── 既有端点回归冒烟（FR-8，只确认 200 + shape，不断言全量）────────────────
