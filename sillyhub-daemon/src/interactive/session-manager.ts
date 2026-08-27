@@ -4859,11 +4859,14 @@ export class SessionManager {
         const e = this._taskWakeupPending.get(sessionId);
         this._taskWakeupPending.delete(sessionId);
         if (!e || e.lines.length === 0) return;
+        // ql-20260827-008：头部明示总数+全部结束、尾部强制逐条核对——实证主代理
+        // 曾只读第一行漏报后续任务、并凭历史执念声称"仍在等待"（会话 2fe664d9）。
         const prompt =
-          '[后台任务通知] 以下后台子代理任务已结束：\n' +
+          `[后台任务通知] 以下 ${e.lines.length} 个后台子代理任务已全部结束` +
+          '（列表中的每一个都已终止，没有仍在运行的任务）：\n' +
           e.lines.join('\n') +
-          '\n请把上述任务结果直接汇报给用户（综合归纳，不要逐字照抄），汇报完即结束本轮；'
-          + '不要重复执行这些任务；此消息为系统通知，无需向用户复述本通知本身。';
+          `\n请逐条核对上述每个任务（共 ${e.lines.length} 个）的名称与结果，一次性向用户完整汇报（综合归纳，不要逐字照抄，不要遗漏任何一个任务）；` +
+          '禁止声称仍在等待任何任务；汇报完即结束本轮；不要重复执行这些任务；此消息为系统通知，无需向用户复述本通知本身。';
         void (async () => {
           try {
             await cb(sessionId, prompt);

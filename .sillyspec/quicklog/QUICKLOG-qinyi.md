@@ -89,3 +89,8 @@
 方案：daemon 终态（completed/failed，stopped 不扰）2s debounce 合并同会话通知，经新 deps 回调 onTaskWakeupInject→hubClient.injectSessionPrompt 注入『[后台任务通知]』user 消息唤醒主代理（含摘要与防环指引）；backend 零改动（inject 端点既有，queue_when_busy 处理忙态）
 结果：daemon vitest 16/16 绿（新增 3 例：合并注入/stopped 不触发/未注入回调不炸）；tsc 0 错；本地部署待用户测试（不发阿里云）
 审计：📝 文档欠账（D-8）：4 个源码文件改动未同步任何模块文档（涉及模块：sillyhub-daemon）
+
+## ql-20260827-009-f905 | 2026-08-27 13:50:27 | 唤醒 prompt 防漏读强化：通知开头明示任务总数与全部结束语义（共 N 个、没有仍在运行的），结尾要求逐条核对后一次性完整汇报、禁止声称仍在等待——修主代理只读第一行漏报 B 的问题（实证会话 2fe664d9 run 999dce9a…
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）

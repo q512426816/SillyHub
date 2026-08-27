@@ -674,6 +674,11 @@ describe('task wakeup inject（终态自动唤醒主代理）', () => {
       const [sid, prompt] = wakeup.mock.calls[0] as unknown as [string, string];
       expect(sid).toBe('sess-w');
       expect(prompt).toContain('[后台任务通知]');
+      // ql-20260827-008：总数与全结束明示 + 禁止声称等待（防主代理漏读/执念）。
+      expect(prompt).toContain('以下 2 个后台子代理任务已全部结束');
+      expect(prompt).toContain('没有仍在运行的任务');
+      expect(prompt).toContain('共 2 个');
+      expect(prompt).toContain('禁止声称仍在等待任何任务');
       expect(prompt).toContain('子代理A: 数数');
       expect(prompt).toContain('子代理B: 数数');
       expect(prompt).toContain('00:20');
