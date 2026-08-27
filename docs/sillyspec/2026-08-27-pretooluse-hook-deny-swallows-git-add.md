@@ -56,3 +56,23 @@ PreToolUse 的 deny 是**工具调用级拦截**——整条命令根本没有�
 - hook 的 deny 理由追加一句提示：「整条命令未执行（含其中的 git add），重试请从
   git add 重新发起」——一行文案即可消除歧义；
 - 或 sillyspec quick 技能的收尾指引明确「git add 与 git commit 分离发送」。
+
+## 同族坑第二例（2026-08-27 14:38 实证，ql-20260827-011 会话）
+
+**多 agent 共享暂存区竞态：commit 夹带并发会话的暂存内容。**
+
+时序：我 `git add` 自己的 3 个文件 → commit 被 hook deny → 手动跑全量
+`pnpm test`（~4 分钟）→ 期间并发 quick 会话（ql-20260827-010-e472，daemon 附件
+内容寻址）完成 `--done` 收尾，把它自己的 6 个文件 add 进**同一个共享暂存区** →
+我重试 commit，8 个文件一起被提交，commit message 却只描述我的前端改动。
+
+- 根因：多 agent 共用同一工作区/暂存区，`git commit` 提交的是「commit 执行时刻的
+  整个暂存区」，不含任何归属信息；hook 拦截拉长的窗口放大了竞态；
+- 影响：commit 语义与内容不符（message 说前端、内容含 daemon）；并发会话随后
+  commit 会发现「nothing to commit」；
+- 规避：① commit 后必查 `git show --stat HEAD` 对照预期文件数（本次靠它发现）；
+  ② 发现夹带且未 push 时，`git commit --amend` 改 message 如实记录夹带内容
+  （只改 message 不动内容，竞态窗口最小；内容分离 reset --soft 竞态风险更高，
+  多 agent 环境不推荐）；③ 收尾 commit 尽量避开长测试窗口，被 deny 后优先
+  重试 commit（抖动），把手动复现测试放在确认需要修的时候。
+
