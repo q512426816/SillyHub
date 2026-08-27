@@ -434,6 +434,72 @@ describe('WsClient — 5s 重连退避（FR-03）', () => {
   });
 });
 
+// ── 2026-08-27 网络切换永久假连事故回归 ──────────────────────────────────────
+//
+// 事故链：旧 socket 迟到的 close 事件（无身份守卫）把 this._ws（已是重连后的
+// 新 socket）抹成 null → 新连接 open 后 _startKeepalive 因 _ws=null 静默跳过
+// → keepalive 丢失后网络切换的黑洞连接无 ping/pong 检测 → 状态卡 Connected、
+// connect() 幂等保护令重连永不发生（HTTP 心跳照常，RPC 全 502）。
+describe('WsClient — 网络切换假连回归（2026-08-27）', () => {
+  it('旧 socket 迟到的 close 不抹掉新 socket：重连后 Connected/_ws 保持不变', async () => {
+    const mock = await startMockServer();
+    try {
+      const onDisconnected = vi.fn();
+      const c = new WsClient({
+        serverUrl: mock.url.replace('ws://', 'http://'),
+        runtimeId: 'r1',
+        callbacks: { onDisconnected },
+      });
+      c.connect();
+      await vi.waitFor(() => expect(c.isConnected).toBe(true));
+      const stale = (c as unknown as { _ws: WebSocket })._ws;
+      // 服务端异常断开（网络切换形态，1006 无关闭帧）→ 5s 退避后重连出新 socket
+      mock.conns[0]?.terminate();
+      await vi.waitFor(() => expect(c.state).toBe(WsState.Reconnecting), {
+        timeout: 3_000,
+      });
+      await vi.waitFor(() => expect(c.isConnected).toBe(true), {
+        timeout: RECONNECT_INTERVAL_MS + 3_000,
+        interval: 100,
+      });
+      const fresh = (c as unknown as { _ws: WebSocket })._ws;
+      expect(fresh).not.toBe(stale); // 已换新 socket
+      // 旧 socket 迟到的 close 事件（修复前：_handleClose 把 _ws 抹成 null +
+      // 停 keepalive → 状态卡 Connected 永不重连；修复后：身份守卫忽略）
+      stale.emit('close', 1000, Buffer.from('late'));
+      expect((c as unknown as { _ws: WebSocket | null })._ws).toBe(fresh);
+      expect(c.isConnected).toBe(true);
+      expect(c.state).toBe(WsState.Connected);
+      c.close();
+    } finally {
+      await new Promise<void>((r) => mock.server.close(() => r()));
+    }
+  }, 15_000);
+
+  it('pong 刷新 lastMessageAt（传输级新鲜度，看门狗判据）+ connectedAt getter', async () => {
+    const mock = await startMockServer();
+    try {
+      const c = new WsClient({
+        serverUrl: mock.url.replace('ws://', 'http://'),
+        runtimeId: 'r1',
+      });
+      expect(c.connectedAt).toBeNull(); // 未连接
+      c.connect();
+      await vi.waitFor(() => expect(c.isConnected).toBe(true));
+      expect(c.connectedAt).not.toBeNull(); // open 即锚定
+      expect(c.lastMessageAt).toBeNull(); // open 本身不算消息（既有语义保持）
+      // 手动发一次 ping（不等 30s keepalive 周期）→ ws server 自动回 pong
+      // → _handlePong 计入新鲜度（健康链路应用层空闲也不误判陈旧）。
+      (c as unknown as { _ws: WebSocket })._ws.ping();
+      await vi.waitFor(() => expect(c.lastMessageAt).not.toBeNull());
+      c.close();
+      expect(c.connectedAt).toBeNull(); // 主动关闭清锚点
+    } finally {
+      await new Promise<void>((r) => mock.server.close(() => r()));
+    }
+  });
+});
+
 describe('WsClient — 出站消息', () => {
   it('send() 在 Connected 时序列化 JSON 并发出', async () => {
     const mock = await startMockServer();

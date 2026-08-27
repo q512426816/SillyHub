@@ -184,11 +184,20 @@ export class WsClient {
   /** 单次 ping 的 pong 超时定时器（收到 pong 清；超时则 terminate）。 */
   private _pongTimer: NodeJS.Timeout | null = null;
   /**
-   * 最后一条 WS 消息到达时间戳（epoch ms）。perf-remediation task-09 / D-003@v1：
-   * daemon _pollLoop lease 分支据此判断推送通道新鲜度（假活检测 R-05）。
-   * 从未收到过消息为 null。
+   * 最后一条 WS 消息**或 pong** 到达时间戳（epoch ms）。perf-remediation
+   * task-09 / D-003@v1：daemon _pollLoop lease 分支据此判断推送通道新鲜度
+   * （假活检测 R-05）；pong 计入是 2026-08-27 假活看门狗配套——链路健康时
+   * ping/pong（30s 周期）恒刷新，应用层空闲不误判。从未收到任何消息/pong
+   * 为 null。
    */
   private _lastMessageAt: number | null = null;
+
+  /**
+   * 最近一次进入 Connected 的时刻（epoch ms）；从未连上或已断开为 null。
+   * 假活看门狗（daemon._wsLoop，2026-08-27）在 lastMessageAt 为 null 时的
+   * 兜底锚点：连接建立却始终无消息无 pong 超过阈值同样判假活。
+   */
+  private _connectedAt: number | null = null;
 
   /**
    * task-05：已注册的 RPC method → handler 映射。
@@ -224,6 +233,11 @@ export class WsClient {
     return this._lastMessageAt;
   }
 
+  /** 最近一次进入 Connected 的时刻（epoch ms，只读）；从未连上/已断开为 null。 */
+  get connectedAt(): number | null {
+    return this._connectedAt;
+  }
+
   // ── 连接生命周期 ───────────────────────────────────────────────────────────
 
   /**
@@ -248,11 +262,14 @@ export class WsClient {
       this._scheduleReconnect();
       return;
     }
+    // 清理上一轮可能遗留的孤儿握手定时器（守卫兜底，防旧定时器 terminate 新连接）。
+    this._clearConnectTimer();
     this._ws = ws;
 
-    // 握手超时（Python open_timeout=10）。
+    // 握手超时（Python open_timeout=10）。按 socket 身份守卫——只 terminate
+    // 自己那次连接尝试。
     this._connectTimer = setTimeout(() => {
-      if (this._state === WsState.Connecting) {
+      if (this._ws === ws && this._state === WsState.Connecting) {
         this._handleError(
           new Error(`ws connect timeout after ${CONNECT_TIMEOUT_MS}ms`),
         );
@@ -264,13 +281,27 @@ export class WsClient {
       }
     }, CONNECT_TIMEOUT_MS);
 
-    ws.on('open', () => this._handleOpen());
-    ws.on('message', (data: WebSocket.RawData) => this._handleMessage(data));
-    ws.on('close', (code: number, reason: Buffer) =>
-      this._handleClose(code, reason.toString()),
-    );
-    ws.on('error', (err: Error) => this._handleError(err));
-    ws.on('pong', () => this._handlePong());
+    // 事件按 socket 身份守卫（2026-08-27 网络切换永久假连事故）：重连已换新
+    // socket 后，旧 socket 迟到的 close/error 若不加守卫，_handleClose 会把
+    // this._ws（此时已是新 socket）抹成 null，新连接 open 后 _startKeepalive
+    // 因 _ws=null 静默跳过——keepalive 丢失后连接进入黑洞即无任何检测，状态
+    // 卡 Connected、connect() 幂等保护令重连永不发生（HTTP 心跳照常，唯独
+    // backend→daemon RPC 全 502）。
+    ws.on('open', () => {
+      if (this._ws === ws) this._handleOpen();
+    });
+    ws.on('message', (data: WebSocket.RawData) => {
+      if (this._ws === ws) this._handleMessage(data);
+    });
+    ws.on('close', (code: number, reason: Buffer) => {
+      if (this._ws === ws) this._handleClose(code, reason.toString());
+    });
+    ws.on('error', (err: Error) => {
+      if (this._ws === ws) this._handleError(err);
+    });
+    ws.on('pong', () => {
+      if (this._ws === ws) this._handlePong();
+    });
   }
 
   /**
@@ -305,6 +336,7 @@ export class WsClient {
       forceTimer.unref?.();
       this._ws = null;
     }
+    this._connectedAt = null;
     this._state = WsState.Idle;
   }
 
@@ -389,6 +421,7 @@ export class WsClient {
   private _handleOpen(): void {
     this._clearConnectTimer();
     this._state = WsState.Connected;
+    this._connectedAt = Date.now();
     this._startKeepalive();
     this._callbacks.onConnected?.();
   }
@@ -565,6 +598,7 @@ export class WsClient {
     this._clearConnectTimer();
     this._stopKeepalive();
     this._ws = null;
+    this._connectedAt = null;
     this._callbacks.onDisconnected?.(code, reason);
     if (this._running) {
       this._scheduleReconnect();
@@ -648,14 +682,16 @@ export class WsClient {
     }
     this._pongTimer = setTimeout(() => {
       this._pongTimer = null;
+      // 身份守卫（同 connect 事件守卫理由）：旧 socket 的陈旧 pong 超时不得
+      // terminate 已重连的新连接。
+      if (this._ws !== ws) return;
       // 终止期间连接可能已被 close 清掉，二次守卫。
-      const cur = this._ws;
-      if (!cur || cur.readyState !== WebSocket.OPEN) return;
+      if (ws.readyState !== WebSocket.OPEN) return;
       this._handleError(
         new Error(`ws pong timeout after ${WS_PONG_TIMEOUT_MS}ms, terminating`),
       );
       try {
-        cur.terminate();
+        ws.terminate();
       } catch {
         /* noop */
       }
@@ -666,6 +702,10 @@ export class WsClient {
   /** 收到 pong → 清当前 pong 超时（下一拍 ping 由 _pingTimer 周期驱动）。 */
   private _handlePong(): void {
     this._clearPongTimer();
+    // pong 是链路双向存活的最直接证据——计入 lastMessageAt（2026-08-27 假活
+    // 看门狗配套判据）：健康链路 ping/pong（30s 周期）恒刷新新鲜度，应用层
+    // 空闲不误判陈旧；链路黑洞时 ping 得不到 pong，新鲜度照常衰减。
+    this._lastMessageAt = Date.now();
   }
 
   /** 停止 keepalive：清 ping 周期 + pong 超时定时器。 */

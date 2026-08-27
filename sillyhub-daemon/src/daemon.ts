@@ -455,10 +455,18 @@ interface WsClientLike {
    */
   readonly isConnected: boolean;
   /**
-   * 最后一条 WS 消息到达时间（epoch ms，只读）。perf-remediation task-09 / D-003@v1：
-   * 从未收到消息为 null（门控视为陈旧 → 照常轮询）。测试 mock 可用 getter 实现。
+   * 最后一条 WS 消息**或 pong** 到达时间（epoch ms，只读）。perf-remediation
+   * task-09 / D-003@v1：lease 轮询门控 + _wsLoop 假活看门狗（2026-08-27）
+   * 消费；pong 计入使健康链路 ping/pong（30s）恒保鲜。从未收到消息/pong 为
+   * null（两处消费均视为陈旧）。测试 mock 可用 getter 实现。
    */
   readonly lastMessageAt: number | null;
+  /**
+   * 最近一次进入 Connected 的时刻（epoch ms，只读）；从未连上/已断开为
+   * null。假活看门狗在 lastMessageAt=null 时的兜底锚点。可选——测试 mock
+   * 可不实现（null 时看门狗 fail-open，交给 keepalive 主判据）。
+   */
+  readonly connectedAt?: number | null;
   /**
    * task-05：注册 RPC handler（D-005@v1）。鸭子类型可选——测试 mock 的 WsClient
    * 可不实现（生产路径真实 WsClient 必须实现，否则 list_dir 等方法不可用，R-5）。
@@ -572,6 +580,12 @@ const BORROW_SANDBOX_MARKER = 'borrow-sandbox:';
 // 消息陈旧 ≥ 90s（假活，R-05）或断连时恢复 30s 轮询兜底。
 // 常量导出便于测试注入时间（task-09 constraints）。
 export const LEASE_POLL_SKIP_MS = 90_000;
+
+// 假活看门狗阈值（2026-08-27 网络切换 WS 永久假连事故）：WsClient 自称
+// Connected 但 lastMessageAt（消息+pong）陈旧超过该值 → 判假活，_wsLoop
+// 强制关闭重建。健康链路 ping/pong（30s 周期）恒刷新新鲜度，不会误杀；
+// 阈值取 90s 轮询判据 + 30s ping 周期 + 缓冲。常量导出便于测试注入时间。
+export const WS_STALE_REAP_MS = 120_000;
 
 export interface DaemonOptions {
   /** 注入自定义 AgentDetector（测试用 mock）。默认 new AgentDetector()。 */
@@ -2319,10 +2333,13 @@ export class Daemon {
 
   private async _wsLoop(signal: AbortSignal): Promise<void> {
     // task-07 / D-006：单条 WS（daemon_local_id）。WsClient 内部自动管理重连；
-    // daemon 每秒 reconcile——register 后无 WS 则建，全部 unregister 则关。
+    // daemon 每秒 reconcile——register 后无 WS 则建，全部 unregister 则关；
+    // _reapStaleWsClient 假活看门狗（2026-08-27）——状态机任何未知漏洞令
+    // isConnected 永真且 keepalive 失效时，按消息新鲜度强制自愈重建。
     while (this._running) {
       try {
         this._ensureWsClient();
+        this._reapStaleWsClient();
         await abortableSleep(1000, signal);
       } catch (e) {
         if (e instanceof AbortError) break;
@@ -2330,6 +2347,38 @@ export class Daemon {
         break;
       }
     }
+  }
+
+  /**
+   * 假活看门狗（2026-08-27 网络切换 WS 永久假连事故）。
+   *
+   * 事故形态：旧 socket 迟到 close 事件串扰致 keepalive 丢失（已由
+   * ws-client 事件身份守卫修复），此后网络切换的黑洞连接无 ping/pong 检测，
+   * WsClient 状态卡 Connected、connect() 幂等保护令重连永不触发——HTTP
+   * 心跳与会话 HTTP 兜底照常（「在线」假象），唯独 backend→daemon RPC
+   * （git-log / explorer）持续 502。
+   *
+   * 本看门狗按与 _wsPushFresh 相同的新鲜度判据升级为自愈动作：isConnected
+   * 且 lastMessageAt（消息+pong）陈旧 ≥ WS_STALE_REAP_MS → _closeWsClient
+   * 关闭，下一拍 _ensureWsClient 重建新连接。lastMessageAt 为 null 时以
+   * connectedAt 兜底（连接建立却始终无消息无pong 超阈值同样判假活）；
+   * 两者皆 null（mock 未实现/形态未知）fail-open 跳过，交给 keepalive
+   * 主判据。健康链路 ping/pong（30s 周期）恒刷新新鲜度，不会误杀；重建
+   * 瞬断由 RPC 超时重试与 lease HTTP 轮询兜底吸收。
+   */
+  private _reapStaleWsClient(): void {
+    const ws = this._wsClient;
+    if (!ws || !ws.isConnected) return;
+    const last = ws.lastMessageAt ?? ws.connectedAt ?? null;
+    if (last === null) return;
+    if (Date.now() - last < WS_STALE_REAP_MS) return;
+    this._logger.warn('ws_stale_connected_reaping', {
+      daemon_local_id: this._config.runtime_id,
+      last_message_at: ws.lastMessageAt,
+      connected_at: ws.connectedAt ?? null,
+      stale_ms: Date.now() - last,
+    });
+    this._closeWsClient();
   }
 
   /** Hub HTTP origin（WsClient 内部 http→ws / https→wss 转换）。 */

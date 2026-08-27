@@ -21,3 +21,17 @@
 状态：进行中
 关联变更：（无）
 文件：sillyhub-daemon/src/interactive/session-manager.ts, sillyhub-daemon/tests/interactive/session-manager-worker-depth.test.ts
+
+## ql-20260827-004-c49b | 2026-08-27 09:51:21 | 修 daemon 网络切换后 WS 永久假连（git-log 502 守护进程离线）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/ws-client.ts（身份守卫+pong新鲜度+connectedAt）
+- sillyhub-daemon/src/daemon.ts（WS_STALE_REAP_MS+_reapStaleWsClient看门狗）
+- sillyhub-daemon/tests/ws-client.test.ts（迟到close回归+pong新鲜度2用例）
+- sillyhub-daemon/tests/daemon-ws-stale-reap.test.ts（看门狗4用例新文件）
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（坑条目+变更索引）
+需求：修 daemon 网络切换后 WS 永久假连（git-log 502 守护进程离线）
+根因：wp 机器切换网络后旧 socket 迟到 close 事件把新 socket 抹出 this._ws，keepalive 静默丢失，黑洞连接无检测、状态卡 Connected 永不重连；HTTP 心跳/会话兜底照常造成在线假象，唯独 WS RPC（git-log/explorer）持续 502
+方案：ws-client 事件与超时定时器加 socket 身份守卫；pong 计入 lastMessageAt 新鲜度+新增 connectedAt 锚点；daemon._wsLoop 每秒假活看门狗 _reapStaleWsClient（陈旧≥120s 强制重建，双 null fail-open）
+结果：tsc 0；vitest 相关 87 用例全绿（ws-client 42 含新 2、daemon-ws-stale-reap 新文件 4、multi-runtime+daemon.test 41）；bundle 已重打，待部署
