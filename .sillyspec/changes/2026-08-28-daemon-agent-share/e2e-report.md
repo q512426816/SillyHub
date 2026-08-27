@@ -30,7 +30,28 @@ created_at: 2026-08-28 07:40:00
 | B6 | 实测③ Bash 写 | ✅ **被拒**：`read_only: tool 'Bash' not in allowed_tools whitelist [...]`（D-009 白名单 gate live 生效，文件未创建） |
 | B7 | 实测② 写 writable_dir 外 | ❌ **未被拒（R-10）**：e2e-outside-test.txt / e2e-outside-2.txt 均写入成功（测试后已清理） |
 
-## R-10：daemon 侧共享会话写守卫未生效（未定位根因，登记待修）
+## R-10：✅ 已定位并修复（2026-08-28 07:43，commit e3d6abf8 + 实测复验通过）
+
+**根因**：Claude Agent SDK 的 `allowedTools` 语义是**预批准集**——"auto-allowed without
+prompting for permission... execute automatically without asking for approval"
+（sdk.d.ts:1420-1424），**成员工具不经过 canUseTool**。平台共享会话的白名单含
+Write/Edit → 写调用被 SDK 直接自动执行，写守卫（overlay 交集/PolicyCache）从未被调用
+→ 目录外写放行且零审计（与此前全部观测吻合：Bash 非成员走 gate 被拒；对照会话无
+allowedTools 全部经守卫）。
+
+**修复（daemon session-manager.ts 一处）**：写守卫链存在时，把写类工具
+（Write/Edit/MultiEdit，`_SDK_WRITE_TOOLS`）从 SDK 层预批准集摘除，改经 canUseTool 链
+（gate 白名单不变 → 写守卫路径校验）；读/mcp 保留预批准免每读过回调；read_only worker
+（列表无写工具）filter 后不变零回归。+3 单测（10/10）+ daemon 全量 2904 绿。
+
+**修复版实测（daemon e3d6abf8-20260828074314）**：
+- 目录外 Write → **守卫拒**（"path outside allowed_roots"），文件未创建 ✓
+- agent 尝试改用 Bash 绕过 → **gate 拒**（白名单外）✓
+- agent 尝试把路径改写到项目目录下（`...multi-agent-platform\e2e-shared-output\...`）→
+  **守卫拒**（仍在 writable_dir 外）✓ ——三次攻防全拦
+- 明确的目录内路径 Write → **成功**（e2e-inside-2.txt 11 字节）✓
+
+### 原始记录（修复前排查过程，留档）
 
 **现象**：平台共享会话的 Write 目录外写放行、零 policy_audit_log 行；同 daemon 上普通会话
 （admin 自有 runtime、无 allowedTools spec）机器级边界写**正确 deny + 审计落库**（对照实验：
