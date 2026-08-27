@@ -582,6 +582,76 @@ class TestInjectSessionBinding:
         assert link is not None
 
     @pytest.mark.asyncio
+    async def test_bind_ppm_item_alongside_change_and_quicklog(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """task-02（2026-08-28-session-ppm-task-binding / FR-02）对照断言：
+        bind_ppm_item_* 与既有 bind_change_key / bind_quick_id 同轮携带——三类
+        link 各落一行互不干扰（ppm 分支在 change/quicklog 分支之后独立执行）。"""
+        from app.modules.change.model import ChangeSessionLink, QuicklogSessionLink
+        from app.modules.ppm.common.session_binding import PpmItemSessionLink
+        from app.modules.ppm.task.model import PlanTask
+
+        svc, uid, session, ws = await _create_bindable_session(db_session)
+        task = PlanTask(
+            id=uuid.uuid4(), user_id=uid, content="ppm 对照任务", status="进行中", file_urls=[]
+        )
+        db_session.add(task)
+        await db_session.commit()
+
+        result = await svc.inject_session(
+            session.id,
+            uid,
+            prompt="三类绑定同轮",
+            bind_change_key="2026-08-28-ppm-compare",
+            bind_quick_id="ql-20260828-001-ppm",
+            bind_ppm_item_kind="plan_task",
+            bind_ppm_item_id=task.id,
+        )
+        assert result.agent_run is not None  # 消息照常派发
+
+        ppm_links = (
+            (
+                await db_session.execute(
+                    select(PpmItemSessionLink).where(PpmItemSessionLink.session_id == session.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(ppm_links) == 1
+        assert ppm_links[0].kind == "plan_task"
+        assert ppm_links[0].item_id == task.id
+        assert ppm_links[0].workspace_id == ws.id  # 快照取会话自身 workspace_id
+        # 既有两通道不受 ppm 分支影响（对照：各仍一行）
+        assert (
+            len(
+                (
+                    await db_session.execute(
+                        select(ChangeSessionLink).where(ChangeSessionLink.session_id == session.id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            == 1
+        )
+        assert (
+            len(
+                (
+                    await db_session.execute(
+                        select(QuicklogSessionLink).where(
+                            QuicklogSessionLink.session_id == session.id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            == 1
+        )
+
+    @pytest.mark.asyncio
     async def test_bind_skipped_when_session_has_no_workspace(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:
@@ -1338,3 +1408,581 @@ class TestRecoveryLeaseGuard:
             await db_session.execute(select(AgentSession.status).where(AgentSession.id == sess_id))
         ).scalar_one()
         assert status_row == "active"
+
+
+# ── PPM 前导 + 附件物化/降级（task-03 / 2026-08-28-session-ppm-task-binding）──
+#
+# FR-03 / D-003/D-006/D-007，GWT-1（前导全字段）/ GWT-2（物化并入组装链）/
+# GWT-3（四类降级各一断言）+ 事务口径守卫（storage 读 IO 与降级决策在写事务外，
+# SessionAttachment insert 写事务内 flush-only）。
+
+
+def _ppm_storage_backend(
+    events: list[str] | None = None, *, fail_keys: frozenset[str] | set[str] = frozenset()
+) -> MagicMock:
+    """file 中心 + session attachment 共用的 storage backend mock。
+
+    - ``get_object_stream``：正常键吐固定 bytes；``fail_keys`` 命中键首块抛
+      RuntimeError（模拟 MinIO 读失败 → 降级）；
+    - ``head_object``：恒抛（store_bytes 未命中 → 走 put）；``put_object``：
+      AsyncMock 吸收；
+    - ``events`` 提供时记录 storage IO 事件（事务口径守卫用）。
+    """
+    backend = MagicMock()
+
+    def _recorded_stream(key: str):
+        if events is not None:
+            events.append(f"storage_read:{key}")
+
+        async def _gen():
+            if key in fail_keys:
+                raise RuntimeError(f"storage read failed: {key}")
+            yield b"ppm-file-bytes-0123456789abcdef"
+
+        return _gen()
+
+    async def _head(key: str) -> None:
+        if events is not None:
+            events.append(f"storage_head:{key}")
+        raise RuntimeError("not found")  # store_bytes 视为未命中 → 走 put
+
+    async def _put(key: str, data: bytes, content_type: str) -> None:
+        if events is not None:
+            events.append(f"storage_put:{key}")
+
+    backend.get_object_stream = MagicMock(side_effect=_recorded_stream)
+    backend.head_object = AsyncMock(side_effect=_head)
+    backend.put_object = AsyncMock(side_effect=_put)
+    return backend
+
+
+@pytest.fixture()
+def ppm_storage():
+    """物化/降级用例的 storage 打桩（patch 工厂，service 内函数级 import 命中）。"""
+    backend = _ppm_storage_backend()
+    with patch(
+        "app.modules.storage.factory.get_storage_backend", return_value=backend
+    ) as mock_factory:
+        yield mock_factory, backend
+
+
+async def _make_ppm_file_row(
+    db_session: AsyncSession,
+    *,
+    uploaded_by: uuid.UUID,
+    name: str = "设计说明.pdf",
+    mime_type: str = "application/pdf",
+    deleted: bool = False,
+) -> uuid.UUID:
+    from app.modules.file.model import File
+
+    fid = uuid.uuid4()
+    ext = name.rsplit(".", 1)[-1].lower()
+    db_session.add(
+        File(
+            id=fid,
+            owner_type="ppm_plan_task",
+            owner_id=None,
+            original_name=name,
+            stored_key=f"2026/08/{fid}.{ext}",
+            mime_type=mime_type,
+            size=128,
+            uploaded_by=uploaded_by,
+            deleted_at=datetime.now(UTC) if deleted else None,
+        )
+    )
+    await db_session.commit()
+    return fid
+
+
+async def _make_plan_task_row(
+    db_session: AsyncSession, *, user_id: uuid.UUID, file_urls: list
+) -> uuid.UUID:
+    from app.modules.ppm.task.model import PlanTask
+
+    tid = uuid.uuid4()
+    db_session.add(
+        PlanTask(
+            id=tid,
+            user_id=user_id,
+            content="PPM 物化测试任务",
+            task_description="完成会话上下文注入改造",
+            status="进行中",
+            project_name="智慧园区二期",
+            module_name="会话模块",
+            user_name="张三",
+            start_time=datetime(2026, 8, 1, tzinfo=UTC),
+            end_time=datetime(2026, 8, 15, tzinfo=UTC),
+            file_urls=file_urls,
+        )
+    )
+    await db_session.commit()
+    return tid
+
+
+async def _lease_prompt_of(db_session: AsyncSession, lease_id: uuid.UUID) -> str:
+    lease = await db_session.get(DaemonTaskLease, lease_id)
+    assert lease is not None
+    return (lease.metadata_ or {}).get("prompt", "")
+
+
+class TestPpmCreatePreamble:
+    """GWT-1：绑定条目创建会话 → dispatch prompt 前导全字段，展示层干净。"""
+
+    @pytest.mark.asyncio
+    async def test_plan_task_preamble_full_fields(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """Given 全字段 PlanTask；When 成对 ppm 字段创建；Then lease prompt 含
+        【PPM 任务上下文】标题/描述/状态/项目/模块/责任人/周期全字段且在用户
+        消息之前；AgentRunLog(user_input) 干净（仅用户原文）。"""
+        uid = await _create_user(db_session)
+        await _create_runtime(db_session, uid)
+        tid = await _make_plan_task_row(db_session, user_id=uid, file_urls=[])
+
+        svc = DaemonService(db_session)
+        result = await svc.create_session(
+            uid,
+            provider="claude",
+            prompt="帮我跟进这个任务",
+            ppm_item_kind="plan_task",
+            ppm_item_id=tid,
+        )
+
+        meta_prompt = await _lease_prompt_of(db_session, result.lease_id)
+        assert "【PPM 任务上下文】" in meta_prompt
+        for field in (
+            "标题：PPM 物化测试任务",
+            "描述：完成会话上下文注入改造",
+            "状态：进行中",
+            "项目：智慧园区二期",
+            "模块：会话模块",
+            "责任人：张三",
+            "周期：2026-08-01 ~ 2026-08-15",
+        ):
+            assert field in meta_prompt, field
+        assert meta_prompt.index("【PPM 任务上下文】") < meta_prompt.index("帮我跟进这个任务")
+        assert "\n\n---\n\n" in meta_prompt
+        # 无降级条目 → 不渲染附件清单段。
+        assert "附件清单" not in meta_prompt
+
+        from app.modules.agent.model import AgentRunLog
+
+        log = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == result.agent_run.id,
+                        AgentRunLog.channel == "user_input",
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert log is not None
+        assert "【PPM 任务上下文】" not in (log.content_redacted or "")
+        assert "帮我跟进这个任务" in (log.content_redacted or "")
+
+    @pytest.mark.asyncio
+    async def test_problem_preamble_full_fields(self, db_session, mocked_hub, mocked_redis) -> None:
+        """Given 全字段 PpmProblemList；When problem 绑定创建；Then 前导为
+        【问题上下文】且各字段齐全（标题取 pro_desc）。"""
+        from app.modules.ppm.problem.model import PpmProblemList
+
+        uid = await _create_user(db_session)
+        await _create_runtime(db_session, uid)
+        pid = uuid.uuid4()
+        db_session.add(
+            PpmProblemList(
+                id=pid,
+                project_id=uuid.uuid4(),
+                project_name="智慧园区三期",
+                model_name="登录模块",
+                pro_desc="登录偶发 502",
+                status="新建",
+                duty_user_name="李四",
+                plan_start_time=datetime(2026, 8, 2, tzinfo=UTC),
+                plan_end_time=datetime(2026, 8, 9, tzinfo=UTC),
+                file_urls=[],
+            )
+        )
+        await db_session.commit()
+
+        svc = DaemonService(db_session)
+        result = await svc.create_session(
+            uid,
+            provider="claude",
+            prompt="看下这个问题",
+            ppm_item_kind="problem",
+            ppm_item_id=pid,
+        )
+
+        meta_prompt = await _lease_prompt_of(db_session, result.lease_id)
+        assert "【问题上下文】" in meta_prompt
+        for field in (
+            "标题：登录偶发 502",
+            "状态：新建",
+            "项目：智慧园区三期",
+            "模块：登录模块",
+            "责任人：李四",
+            "周期：2026-08-02 ~ 2026-08-09",
+        ):
+            assert field in meta_prompt, field
+
+    @pytest.mark.asyncio
+    async def test_item_missing_no_preamble_session_created(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """Given 条目不存在；When 成对字段创建；Then 会话创建成功且 prompt 无
+        任何 PPM 前导（查无返回 None 跳过注入，不报错）。"""
+        uid = await _create_user(db_session)
+        await _create_runtime(db_session, uid)
+
+        svc = DaemonService(db_session)
+        result = await svc.create_session(
+            uid,
+            provider="claude",
+            prompt="普通提问",
+            ppm_item_kind="plan_task",
+            ppm_item_id=uuid.uuid4(),
+        )
+
+        assert result.agent_session.status == "active"
+        meta_prompt = await _lease_prompt_of(db_session, result.lease_id)
+        assert meta_prompt == "普通提问"
+
+
+class TestPpmAttachmentMaterialize:
+    """GWT-2：有权 + claude + 限额内 → SessionAttachment 物化并入既有组装链。"""
+
+    @pytest.mark.asyncio
+    async def test_materialized_rows_join_assembly_chain(
+        self, db_session, mocked_hub, mocked_redis, ppm_storage
+    ) -> None:
+        """Given 本人上传的 1 图 1 文挂 PlanTask.file_urls；When 成对字段创建；
+        Then SessionAttachment 落两行（session_id 回填/user_id=创建者/kind 按
+        mime 映射），user_input 带标记行，SESSION_INJECT 携带 attachments。"""
+        from app.modules.session_attachment.model import SessionAttachment
+
+        uid = await _create_user(db_session)
+        await _create_runtime(db_session, uid)
+        img_fid = await _make_ppm_file_row(
+            db_session, uploaded_by=uid, name="截图.png", mime_type="image/png"
+        )
+        doc_fid = await _make_ppm_file_row(
+            db_session, uploaded_by=uid, name="报告.pdf", mime_type="application/pdf"
+        )
+        tid = await _make_plan_task_row(
+            db_session, user_id=uid, file_urls=[str(img_fid), str(doc_fid)]
+        )
+
+        svc = DaemonService(db_session)
+        result = await svc.create_session(
+            uid,
+            provider="claude",
+            prompt="分析这两个附件",
+            ppm_item_kind="plan_task",
+            ppm_item_id=tid,
+        )
+
+        rows = (
+            (
+                await db_session.execute(
+                    select(SessionAttachment).where(
+                        SessionAttachment.session_id == result.agent_session.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 2
+        by_name = {r.name: r for r in rows}
+        assert set(by_name) == {"截图.png", "报告.pdf"}
+        assert by_name["截图.png"].kind == "image"  # mime image/* → kind=image
+        assert by_name["报告.pdf"].kind == "file"
+        for row in rows:
+            assert row.user_id == uid  # user_id=创建者
+            assert row.session_id == result.agent_session.id  # 直接回填（跳过 draft）
+            assert row.bytes == len(b"ppm-file-bytes-0123456789abcdef")
+            assert row.object_key.startswith(f"attachments/{uid}/")
+
+        # 标记行回显（物化行并入 validated_attachments）。
+        from app.modules.agent.model import AgentRunLog
+
+        log = (
+            (
+                await db_session.execute(
+                    select(AgentRunLog).where(
+                        AgentRunLog.run_id == result.agent_run.id,
+                        AgentRunLog.channel == "user_input",
+                    )
+                )
+            )
+            .scalars()
+            .first()
+        )
+        assert log is not None
+        assert f"[附件:{by_name['截图.png'].id}|image|截图.png]" in (log.content_redacted or "")
+        assert f"[附件:{by_name['报告.pdf'].id}|file|报告.pdf]" in (log.content_redacted or "")
+
+        # SESSION_INJECT payload 携带 attachments（复用既有组装链，daemon 协议零改动）。
+        inject_payloads = [
+            c.args[2]
+            for c in mocked_hub.send_session_control.call_args_list
+            if len(c.args) >= 3 and c.args[2].get("attachments")
+        ]
+        assert inject_payloads, "首 turn SESSION_INJECT 必须携带物化附件"
+        payload_atts = inject_payloads[0]["attachments"]
+        assert {a["name"] for a in payload_atts} == {"截图.png", "报告.pdf"}
+
+        # 物化成功 → 前导无附件清单降级段。
+        meta_prompt = await _lease_prompt_of(db_session, result.lease_id)
+        assert "附件清单" not in meta_prompt
+
+
+class TestPpmAttachmentDegrade:
+    """GWT-3：四类降级各一断言——前导文字清单，会话创建不受阻。"""
+
+    @pytest.mark.asyncio
+    async def test_degrade_no_access_name_only(
+        self, db_session, mocked_hub, mocked_redis, ppm_storage
+    ) -> None:
+        """无权（他人上传，创建者非管理员）：仅文件名 + 「无权访问」，不物化。"""
+        from app.modules.session_attachment.model import SessionAttachment
+
+        uid = await _create_user(db_session)
+        await _create_runtime(db_session, uid)
+        other = await _create_user(db_session)
+        fid = await _make_ppm_file_row(db_session, uploaded_by=other, name="机密方案.pdf")
+        tid = await _make_plan_task_row(db_session, user_id=uid, file_urls=[str(fid)])
+
+        svc = DaemonService(db_session)
+        result = await svc.create_session(
+            uid, provider="claude", prompt="看附件", ppm_item_kind="plan_task", ppm_item_id=tid
+        )
+
+        meta_prompt = await _lease_prompt_of(db_session, result.lease_id)
+        assert "附件清单" in meta_prompt
+        assert "机密方案.pdf（无权访问）" in meta_prompt
+        assert "GET /api/file/" not in meta_prompt  # 无权条目不给链接
+        rows = (
+            (
+                await db_session.execute(
+                    select(SessionAttachment).where(
+                        SessionAttachment.session_id == result.agent_session.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert rows == []
+
+    @pytest.mark.asyncio
+    async def test_degrade_over_limit_get_link(
+        self, db_session, mocked_hub, mocked_redis, ppm_storage
+    ) -> None:
+        """超限：6 张图 → 前 5 张物化，第 6 张降级为文件名 + GET 链接。"""
+        from app.modules.session_attachment.model import SessionAttachment
+
+        uid = await _create_user(db_session)
+        await _create_runtime(db_session, uid)
+        fids = [
+            await _make_ppm_file_row(
+                db_session, uploaded_by=uid, name=f"截图{n}.png", mime_type="image/png"
+            )
+            for n in range(6)
+        ]
+        tid = await _make_plan_task_row(db_session, user_id=uid, file_urls=[str(f) for f in fids])
+
+        svc = DaemonService(db_session)
+        result = await svc.create_session(
+            uid, provider="claude", prompt="看图", ppm_item_kind="plan_task", ppm_item_id=tid
+        )
+
+        meta_prompt = await _lease_prompt_of(db_session, result.lease_id)
+        assert f"截图5.png：GET /api/file/{fids[5]}" in meta_prompt
+        assert "截图0.png：" not in meta_prompt  # 前 5 张正常物化不进清单
+        rows = (
+            (
+                await db_session.execute(
+                    select(SessionAttachment).where(
+                        SessionAttachment.session_id == result.agent_session.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 5
+
+    @pytest.mark.asyncio
+    async def test_degrade_non_claude_get_link(
+        self, db_session, mocked_hub, mocked_redis, ppm_storage
+    ) -> None:
+        """provider≠claude：有权条目不物化，降级为文件名 + GET 链接。"""
+        from app.modules.session_attachment.model import SessionAttachment
+
+        uid = await _create_user(db_session)
+        rt = DaemonRuntime(
+            id=uuid.uuid4(),
+            user_id=uid,
+            name="codex-rt",
+            provider="codex",
+            status="online",
+            last_heartbeat_at=datetime.now(UTC),
+        )
+        db_session.add(rt)
+        await db_session.commit()
+        fid = await _make_ppm_file_row(db_session, uploaded_by=uid, name="说明.pdf")
+        tid = await _make_plan_task_row(db_session, user_id=uid, file_urls=[str(fid)])
+
+        svc = DaemonService(db_session)
+        result = await svc.create_session(
+            uid,
+            provider=None,
+            runtime_id=str(rt.id),
+            prompt="codex 会话",
+            ppm_item_kind="plan_task",
+            ppm_item_id=tid,
+        )
+
+        meta_prompt = await _lease_prompt_of(db_session, result.lease_id)
+        assert f"说明.pdf：GET /api/file/{fid}" in meta_prompt
+        assert "无权访问" not in meta_prompt
+        rows = (
+            (
+                await db_session.execute(
+                    select(SessionAttachment).where(
+                        SessionAttachment.session_id == result.agent_session.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert rows == []
+
+    @pytest.mark.asyncio
+    async def test_degrade_deleted_and_read_failure_get_link(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """读取失败/已删：软删行走文件名 + GET 链接；storage 读抛错同降级；
+        R-03 非 uuid 历史 URL 原样进清单。"""
+        from app.modules.session_attachment.model import SessionAttachment
+
+        uid = await _create_user(db_session)
+        await _create_runtime(db_session, uid)
+        deleted_fid = await _make_ppm_file_row(
+            db_session, uploaded_by=uid, name="已删文档.pdf", deleted=True
+        )
+        broken_fid = await _make_ppm_file_row(db_session, uploaded_by=uid, name="坏盘文档.pdf")
+        tid = await _make_plan_task_row(
+            db_session,
+            user_id=uid,
+            file_urls=[str(deleted_fid), str(broken_fid), "https://old-cdn/x.png"],
+        )
+        # 坏盘文档：stored_key 指向读取必抛错的键（fail_keys 命中）。
+        from app.modules.file.model import File as _FileModel
+
+        broken_row = await db_session.get(_FileModel, broken_fid)
+        assert broken_row is not None
+        backend = _ppm_storage_backend(fail_keys={broken_row.stored_key})
+        with patch("app.modules.storage.factory.get_storage_backend", return_value=backend):
+            svc = DaemonService(db_session)
+            result = await svc.create_session(
+                uid,
+                provider="claude",
+                prompt="都坏了也要能开会话",
+                ppm_item_kind="plan_task",
+                ppm_item_id=tid,
+            )
+
+        meta_prompt = await _lease_prompt_of(db_session, result.lease_id)
+        # 已删：文件名（软删行回查取得）+ GET 链接。
+        assert f"已删文档.pdf：GET /api/file/{deleted_fid}" in meta_prompt
+        # 读取失败：同样文件名 + GET 链接。
+        assert f"坏盘文档.pdf：GET /api/file/{broken_fid}" in meta_prompt
+        # R-03：非 uuid 历史 URL 字符串原样进清单。
+        assert "https://old-cdn/x.png" in meta_prompt
+        assert "无权访问" not in meta_prompt
+        rows = (
+            (
+                await db_session.execute(
+                    select(SessionAttachment).where(
+                        SessionAttachment.session_id == result.agent_session.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert rows == []
+        assert result.agent_session.status == "active"  # 降级不阻塞创建
+
+
+class TestPpmMaterializeTxnSplit:
+    """事务口径：storage 读 IO/降级决策在写事务外；行 insert 写事务内 flush-only。"""
+
+    @pytest.mark.asyncio
+    async def test_storage_io_and_degrade_decisions_outside_write_txn(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """Given 本人上传的 file 类附件（assemble 落盘链不触 storage 读，事件
+        全部来自物化段）；When ppm 创建；Then 所有 storage 事件（file bytes 读 +
+        store_bytes 的 head/put）均早于只读事务收口 commit，首个写 flush 晚于
+        该 commit——storage IO/降级决策不落写事务窗口（守卫对齐
+        test_session_optimize_round2.py::TestCreateSessionPreambleBeforeWrite）。"""
+        uid = await _create_user(db_session)
+        await _create_runtime(db_session, uid)
+        fid = await _make_ppm_file_row(db_session, uploaded_by=uid, name="事务口径.pdf")
+        tid = await _make_plan_task_row(db_session, user_id=uid, file_urls=[str(fid)])
+
+        events: list[str] = []
+        backend = _ppm_storage_backend(events)
+        real_commit = db_session.commit
+        real_flush = db_session.flush
+
+        async def _spy_commit():
+            events.append("commit")
+            return await real_commit()
+
+        async def _spy_flush(*args, **kwargs):
+            events.append("flush")
+            return await real_flush(*args, **kwargs)
+
+        db_session.commit = _spy_commit
+        db_session.flush = _spy_flush
+
+        with patch("app.modules.storage.factory.get_storage_backend", return_value=backend):
+            svc = DaemonService(db_session)
+            result = await svc.create_session(
+                uid,
+                provider="claude",
+                prompt="事务口径",
+                ppm_item_kind="plan_task",
+                ppm_item_id=tid,
+            )
+
+        storage_idx = [i for i, e in enumerate(events) if e.startswith("storage_")]
+        assert storage_idx, "物化必须发生 storage IO"
+        first_commit = events.index("commit")
+        first_flush = events.index("flush")
+        assert max(storage_idx) < first_commit < first_flush, events
+        # SessionAttachment 行已落（写事务内 flush-only，共用唯一 commit）。
+        from app.modules.session_attachment.model import SessionAttachment
+
+        rows = (
+            (
+                await db_session.execute(
+                    select(SessionAttachment).where(
+                        SessionAttachment.session_id == result.agent_session.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 1

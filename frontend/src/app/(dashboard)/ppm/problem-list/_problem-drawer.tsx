@@ -9,12 +9,19 @@
  *  - 变更       → 变更流 deprecated (D-005), 前端入口移除
  *
  * 设计依据:.sillyspec/changes/2026-07-20-problem-list-align-task-plan/design.md
+ *
+ * task-05（2026-08-28-session-ppm-task-binding / FR-04）：编辑态（problem 实体
+ * 已存在）底部挂「💬 发起会话」入口 + 关联会话卡（ppm-item-sessions-card）——
+ * 入口写 pendingPpmItem 挂起位 + requestNewSession 唤起悬浮抽屉预会话（绑定经
+ * 挂起位构造，宿主解析项目第一个关联工作区预填）；新建态无实体 id 不挂载。
  */
 import { useRef } from "react";
 import { Button, Modal } from "antd";
 
+import { PpmItemSessionsCard } from "@/components/ppm/ppm-item-sessions-card";
 import { PROBLEM_STATUS_TEXT } from "@/components/ppm-status-actions";
 import type { ProblemList } from "@/lib/ppm";
+import { useFloatingSessionStore } from "@/stores/floating-session";
 import { ProblemCreateForm, type ProblemCreateFormHandle } from "./_forms";
 
 export type ProblemDrawerMode = "create" | "edit";
@@ -40,6 +47,20 @@ export function ProblemDrawer({
   onSaved,
 }: ProblemDrawerProps) {
   const formRef = useRef<ProblemCreateFormHandle>(null);
+  // task-05（FR-04 / D-001@v1）：问题侧「发起会话」触发通道（仅编辑态——
+  // problem 实体存在才有可绑定的 item id；pro_desc 作 chip 标题）。
+  const setPendingPpmItem = useFloatingSessionStore((s) => s.setPendingPpmItem);
+  const requestNewSession = useFloatingSessionStore((s) => s.requestNewSession);
+  const handleStartItemSession = () => {
+    if (!problem) return;
+    setPendingPpmItem({
+      kind: "problem",
+      id: problem.id,
+      projectId: problem.project_id,
+      title: problem.pro_desc,
+    });
+    requestNewSession(null);
+  };
   return (
     <Modal
       open={open}
@@ -80,6 +101,25 @@ export function ProblemDrawer({
         onSuccess={onSaved}
         onCancel={onClose}
       />
+
+      {/* task-05（FR-04）：编辑态底部「发起会话」入口 + 关联会话卡（本人前 3
+          条预览 + ?session= 深链 + 「+ 新会话」同通道）；新建态无实体不挂载。 */}
+      {mode === "edit" && problem && (
+        <div className="mt-4 space-y-2 border-t border-border pt-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-medium text-foreground">会话协作</span>
+            <Button size="small" onClick={handleStartItemSession}>
+              💬 发起会话
+            </Button>
+          </div>
+          <PpmItemSessionsCard
+            kind="problem"
+            itemId={problem.id}
+            projectId={problem.project_id}
+            title={problem.pro_desc}
+          />
+        </div>
+      )}
     </Modal>
   );
 }

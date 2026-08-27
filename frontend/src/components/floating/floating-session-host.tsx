@@ -42,6 +42,9 @@ import {
 import { listProviders } from "@/lib/api/llm-providers";
 import type { LlmProviderRead } from "@/lib/api/llm-providers";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
+// task-05（2026-08-28-session-ppm-task-binding / FR-04 / D-004@v2）：PPM 条目
+// 入口的工作区解析（listProjectWorkspaces，按 workspace_id 升序取第一个）。
+import { listProjectWorkspaces } from "@/lib/workspace";
 import { usePageSessionContext } from "@/hooks/use-page-session-context";
 import {
   FloatingMascot,
@@ -49,7 +52,7 @@ import {
   setFloatingPet,
   type FloatingPet,
 } from "@/components/floating/floating-mascot";
-import { useFloatingSessionStore } from "@/stores/floating-session";
+import { useFloatingSessionStore, type PendingPpmItem } from "@/stores/floating-session";
 import { cn } from "@/lib/utils";
 
 /** 门户三路由（互斥；离开即恢复悬浮层）。 */
@@ -101,13 +104,66 @@ function FloatingDrawerBody({
 
   // 新会话：D-005 三级回退解析默认机器（默认 Claude），未命中弹两步浮层兜底。
   const [pickerOpen, setPickerOpen] = useState(false);
+  const clearPendingPpmItem = useFloatingSessionStore((s) => s.clearPendingPpmItem);
+  // ── task-05（2026-08-28-session-ppm-task-binding / FR-04 / D-001@v1 /
+  //    D-004@v2）：PPM 条目挂起位消费 + 工作区解析 ────────────────────────
+  // 打开预会话的统一收口：pendingPpmItem 存在时构造 preContext.ppmItem（kind+id
+  // +title，经 store preContext 展开透传 SessionPanel），并按挂起位的 projectId
+  // 调 listProjectWorkspaces 按 workspace_id 升序取第一个填 workspaceId（与后端
+  // link.workspace_id 同键 D-004@v2）；解析不到/无关联/请求失败不带 workspaceId
+  // 不阻塞（预会话照开，走非工作区语义）。
+  // P2-3（QA 边界修复）：挂起位「读取不清、镜像 ref 保活、实际消费才清」——
+  // 此前 handleNewSession 读取即清 store，默认 runtime 解析失败走两步浮层兜底
+  // （setPickerOpen）时绑定意图与工作区预选被静默丢弃。现 handleNewSession 只
+  // 镜像进 ppmPendingRef，openPreSession（直连分支或浮层 onPick 兜底）为实际
+  // 消费点统一清 store+ref；取消路径（picker onCancel / closeDrawer 全清）兜
+  // 底清——与 autoTeamIntent「兜底期间意图保活、谁消费谁清、取消兜底清」同语义。
+  const ppmPendingRef = useRef<PendingPpmItem | null>(null);
+  const openPreSession = useCallback(
+    (runtimeId: string, ppm: PendingPpmItem | null) => {
+      // P2-3：预会话打开即挂起位实际消费点——store 与 ref 一并清（ppm 为 null
+      // 的普通新建也清，防历史残留泄漏进后续新建）。
+      clearPendingPpmItem();
+      ppmPendingRef.current = null;
+      if (!ppm) {
+        startPreSession({ runtimeId, workspaceId: null }, effectivePageCtx);
+        return;
+      }
+      void (async () => {
+        let workspaceId: string | null = null;
+        if (ppm.projectId) {
+          try {
+            const spaces = await listProjectWorkspaces(ppm.projectId);
+            // 升序取首（UUID 字典序，后端 link 写入同键——两端预选一致）。
+            workspaceId =
+              [...spaces]
+                .sort((a, b) => a.workspace_id.localeCompare(b.workspace_id))
+                .at(0)?.workspace_id ?? null;
+          } catch {
+            // 解析失败不阻塞（不带 workspaceId）。
+          }
+        }
+        startPreSession(
+          {
+            runtimeId,
+            workspaceId,
+            ppmItem: { kind: ppm.kind, id: ppm.id, title: ppm.title },
+          },
+          effectivePageCtx,
+        );
+      })();
+    },
+    [startPreSession, effectivePageCtx, clearPendingPpmItem],
+  );
   const handleNewSession = useCallback(() => {
+    // P2-3：读取暂不清 store（此前读取即清——默认 runtime 解析失败走两步浮层
+    // 兜底时绑定意图被静默丢弃）；镜像进 ref 保活至实际消费（直连
+    // openPreSession 或浮层 onPick，消费点统一清）。
+    const ppm = useFloatingSessionStore.getState().pendingPpmItem;
+    ppmPendingRef.current = ppm;
     // FR-02：lockedRuntime 时钉死该 runtime，不弹 PreSessionPicker 两步浮层。
     if (lockedRuntime) {
-      startPreSession(
-        { runtimeId: lockedRuntime.id, workspaceId: null },
-        effectivePageCtx,
-      );
+      openPreSession(lockedRuntime.id, ppm);
       return;
     }
     const machineId = resolveDefaultMachineId(machines, sessions);
@@ -120,14 +176,13 @@ function FloatingDrawerBody({
     );
     const runtime = runtimes.find((r) => r.provider === "claude") ?? runtimes[0];
     if (runtime) {
-      startPreSession(
-        { runtimeId: runtime.id, workspaceId: null },
-        effectivePageCtx,
-      );
+      openPreSession(runtime.id, ppm);
     } else {
+      // P2-3：两步浮层兜底——ppmPendingRef 保活绑定意图，onPick 消费 /
+      // onCancel 取消清（浮层全屏遮罩期间其它新建入口不可达）。
       setPickerOpen(true);
     }
-  }, [lockedRuntime, machines, sessions, startPreSession, effectivePageCtx]);
+  }, [lockedRuntime, machines, sessions, openPreSession]);
 
   const handlePreSessionCreated = useCallback(
     (resp: SessionCreateResponse) => {
@@ -146,6 +201,10 @@ function FloatingDrawerBody({
   const handleNewInGroup = useCallback(
     (workspaceId: string | null, filter?: { machineId: string; agent: string }) => {
       if (lockedRuntime) return; // runtime 锁定 scope 组头新建禁用（同 ca3a83ad 语义）
+      // P2-3：组头新建是独立入口（普通新建），不携带 PPM 绑定意图——防御性
+      // 清 store+ref，防历史挂起意图经本入口（直连或兜底浮层）泄漏。
+      clearPendingPpmItem();
+      ppmPendingRef.current = null;
       if (filter?.machineId && filter.agent) {
         const machine = machines.find((m) => m.id === filter.machineId);
         const runtime = machine?.runtimes?.find(
@@ -159,7 +218,7 @@ function FloatingDrawerBody({
       setPickerWorkspaceId(workspaceId);
       setPickerOpen(true);
     },
-    [lockedRuntime, machines, startPreSession, effectivePageCtx],
+    [lockedRuntime, machines, startPreSession, effectivePageCtx, clearPendingPpmItem],
   );
 
   /** 批量删除/归档/取消归档（门户同款：逐条调用 + invalidate + 选中被删则清）。 */
@@ -193,13 +252,27 @@ function FloatingDrawerBody({
 
   // 页面入口一键唤起（task-07）：requestNewSession 挂起 → 机器数据就绪后
   // 自动解析默认机器进预会话（未命中弹两步浮层兜底，pageContext 已在壳态）。
+  // task-07 Phase 5（FR-06 / D-004@v2）：PPM 项目页「发起团队」入口的
+  // autoTeamIntent 直接订阅透传为 SessionPanel `autoTeamOpen` prop（预会话
+  // 挂载即自动开派团队弹层）；预会话就绪后清 store 意图（一次性，防后续手动
+  // 新建误弹——两步浮层兜底期间意图保活，浮层遮罩挡住手动新建入口）。
   const autoNewPending = useFloatingSessionStore((s) => s.autoNewPending);
+  const autoTeamIntent = useFloatingSessionStore((s) => s.autoTeamIntent);
   const clearAutoNew = useFloatingSessionStore((s) => s.clearAutoNew);
+  const clearAutoTeamIntent = useFloatingSessionStore((s) => s.clearAutoTeamIntent);
   useEffect(() => {
     if (!autoNewPending || machinesLoading) return;
     clearAutoNew();
     handleNewSession();
   }, [autoNewPending, machinesLoading, clearAutoNew, handleNewSession]);
+  // 意图送达（task-07 Phase 5）：预会话就绪（preContext 非空）→ 清 store 意图。
+  // 时序：本 effect 在面板挂载 commit 的 effect 段执行（子组件已按挂载渲染读到
+  // true），清除后下一拍 prop 翻 false——面板按挂载初值快照消费，不重复触发。
+  useEffect(() => {
+    if (preContext && useFloatingSessionStore.getState().autoTeamIntent) {
+      clearAutoTeamIntent();
+    }
+  }, [preContext, clearAutoTeamIntent]);
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -325,10 +398,15 @@ function FloatingDrawerBody({
               // createSession）读 preContext.pageContext，此前直传 store.preContext
               // 恒缺 pageContext，导致 UI 新建会话一律不注入（API 级 E2E 绕过
               // UI 故未暴露）。此处显式合并（显式入口上下文 ?? URL 派生兜底）。
+              // task-05（FR-04）：ppmItem 经同一展开透传（宿主 openPreSession
+              // 构造进 store preContext，面板随首句上送 ppm_item_kind/ppm_item_id）。
               preContext={{
                 ...preContext,
                 pageContext: effectivePageCtx ?? undefined,
               }}
+              // task-07 Phase 5：autoTeamIntent 一次性透传（store 意图在预会话
+              // 就绪的下一拍被清——面板按挂载初值快照消费，不重复触发）。
+              autoTeamOpen={autoTeamIntent}
               onPreSessionCreated={handlePreSessionCreated}
               pageContextOverride={derivedPageCtx}
             />
@@ -359,12 +437,26 @@ function FloatingDrawerBody({
       <PreSessionPicker
         open={pickerOpen}
         machines={machines}
-        onCancel={() => setPickerOpen(false)}
+        onCancel={() => {
+          // P2-3：取消兜底清——保活的 PPM 绑定意图（store+ref）不得残留到
+          // 后续手动新建（✕ 与遮罩点击均走此处，取消契约单一）。
+          clearPendingPpmItem();
+          ppmPendingRef.current = null;
+          setPickerOpen(false);
+        }}
         onPick={(runtimeId) => {
-          startPreSession(
-            { runtimeId, workspaceId: pickerWorkspaceId },
-            effectivePageCtx,
-          );
+          // P2-3：两步浮层兜底消费保活的 PPM 绑定意图（openPreSession 内消费
+          // 即清，含工作区升序取首预选）；无 PPM 保持原语义（组头兜底带
+          // pickerWorkspaceId 预选）。
+          const ppm = ppmPendingRef.current;
+          if (ppm) {
+            openPreSession(runtimeId, ppm);
+          } else {
+            startPreSession(
+              { runtimeId, workspaceId: pickerWorkspaceId },
+              effectivePageCtx,
+            );
+          }
           setPickerOpen(false);
         }}
       />

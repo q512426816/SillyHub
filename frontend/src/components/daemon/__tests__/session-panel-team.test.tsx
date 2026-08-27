@@ -14,7 +14,11 @@
 //   5. task-14（2026-08-25-team-subsession-governance / FR-08 / design §5.E）：
 //      分身行（sub_session_id）点击 → WorkerSessionOverlay 浮层复用 SessionPanel
 //      （dialog/attach 形态）打开该子会话（attach 轮询打到 sub_session_id）；
-//      关闭浮层还原主控面板（团队列表 + 输入框不丢）；page/dialog 两渲染点等价。
+//      关闭浮层还原主控面板（团队列表 + 输入框不丢）；page/dialog 两渲染点等价；
+//   6. task-07 Phase 5（2026-08-28-session-ppm-task-binding / FR-06 / D-004@v2）：
+//      page 模式预会话 autoTeamOpen 一次性通道——挂载即自动开派团队弹层 +
+//      objective 预填「分析项目 X 当前迭代风险并给出建议」（getProject 项目名，
+//      失败空目标降级）+ defaultProjectId 项目/工作区预选；不传 prop 零回归。
 //
 // 测试纪律：FIRST / AAA / 仅 mock 网络层（@/lib/daemon 会话 API + 团队 client、
 // @/lib/workspaces、@/lib/ppm/project、@/lib/workspace、page chrome 数据 hook）；
@@ -80,10 +84,12 @@ vi.mock("@/lib/daemon", async () => {
 });
 
 // page 模式 workspacesQuery（工作区名解析）+ popover 项目下拉/项目工作区数据源。
+// task-07 Phase 5 追加 getProject：autoTeamOpen 预填 objective 的项目名解析源。
 const workspaceApi = vi.hoisted(() => ({
   listWorkspaces: vi.fn(),
   listProjects: vi.fn(),
   listProjectWorkspaces: vi.fn(),
+  getProject: vi.fn(),
 }));
 
 vi.mock("@/lib/workspaces", async () => {
@@ -97,7 +103,11 @@ vi.mock("@/lib/ppm/project", async () => {
   const actual = await vi.importActual<typeof import("@/lib/ppm/project")>(
     "@/lib/ppm/project",
   );
-  return { ...actual, listProjects: workspaceApi.listProjects };
+  return {
+    ...actual,
+    listProjects: workspaceApi.listProjects,
+    getProject: workspaceApi.getProject,
+  };
 });
 
 vi.mock("@/lib/workspace", async () => {
@@ -237,6 +247,8 @@ beforeEach(() => {
   );
   workspaceApi.listProjects.mockResolvedValue([]);
   workspaceApi.listProjectWorkspaces.mockResolvedValue([]);
+  // task-07 Phase 5：项目名解析默认失败（各用例按需覆盖）→ 空目标降级。
+  workspaceApi.getProject.mockRejectedValue(new Error("no project"));
 });
 
 /* ───────── 1. 派团队按钮引擎门控（dialog） ───────── */
@@ -555,5 +567,97 @@ describe("SessionPanel task-14 分身会话浮层（FR-08 / design §5.E）", ()
     // 主控面板未卸载：团队列表（重展开下拉核对）+ 主输入仍在（流与输入状态不丢）。
     await openActivityCatalog();
     expect(screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/)).toBeInTheDocument();
+  });
+});
+
+/* ───────── 6. task-07 Phase 5：page 模式预会话 autoTeamOpen 自动弹层（FR-06 / D-004@v2） ───────── */
+
+describe("SessionPanel page 模式 autoTeamOpen 自动开弹层（预会话）", () => {
+  /** 预会话形态：ppm_project 页面上下文 + 在线 claude runtime（悬浮宿主同款接线）。 */
+  function setupPre(
+    autoTeamOpen?: boolean,
+    pageContext: Record<string, string> = {
+      page_key: "ppm_project",
+      project_id: "p-1",
+    },
+  ) {
+    const machines = [
+      {
+        id: "m-1",
+        status: "online",
+        hostname: "m1-host",
+        display_alias: null,
+        runtimes: [{ id: "rt-1", status: "online", provider: "claude" }],
+      },
+    ] as never[];
+    sessionApi.listSessionRuns.mockResolvedValue([]);
+    workspaceApi.listWorkspaces.mockResolvedValue({ items: [] });
+    workspaceApi.listProjects.mockResolvedValue([
+      { id: "p-1", project_name: "网站重构项目", project_code: "P-1" },
+    ]);
+    workspaceApi.listProjectWorkspaces.mockResolvedValue([
+      { workspace_id: "ws-a", name: "sillyspec", status: "active", type: "backend-code" },
+    ]);
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    return render(
+      <QueryClientProvider client={qc}>
+        <SessionPanel
+          mode="page"
+          sessionId={null}
+          machines={machines}
+          llmProviders={[]}
+          preContext={{
+            workspaceId: null,
+            runtimeId: "rt-1",
+            pageContext: pageContext as never,
+          }}
+          autoTeamOpen={autoTeamOpen}
+        />
+      </QueryClientProvider>,
+    );
+  }
+
+  it("autoTeamOpen：预会话挂载即自动开弹层（无需点击）+ objective 预填项目名句式 + 项目预选", async () => {
+    workspaceApi.getProject.mockResolvedValue({
+      project_name: "网站重构项目",
+      project_code: "P-1",
+    });
+    setupPre(true);
+
+    // 弹层自动打开（全程零点击）。
+    expect(await screen.findByText("派团队做这件事")).toBeInTheDocument();
+    // objective 预填「分析项目 X 当前迭代风险并给出建议」句式（弹层内可修改）。
+    const objInput = screen.getByLabelText(/^目标/) as HTMLInputElement;
+    expect(objInput.value).toBe("分析项目 网站重构项目 当前迭代风险并给出建议");
+    // defaultProjectId 从 ppm_project 页面上下文派生：项目预选 + 工作区自动预选
+    //（预选后 anchor 胶囊同名展示，直接对 checkbox 断言避免文本多命中）。
+    const select = (await screen.findByLabelText(
+      /选择项目/,
+    )) as HTMLSelectElement;
+    expect(select.value).toBe("p-1");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("checkbox", { name: /勾选工作区 sillyspec/ }),
+      ).toBeChecked(),
+    );
+  });
+
+  it("不传 autoTeamOpen：预会话不自动开弹层（零回归）", async () => {
+    setupPre(undefined);
+    expect(
+      await screen.findByTestId("session-pre-session-panel"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("派团队做这件事")).not.toBeInTheDocument();
+  });
+
+  it("项目名解析失败 → 空目标降级，弹层照开", async () => {
+    workspaceApi.getProject.mockRejectedValue(new Error("project down"));
+    setupPre(true);
+
+    expect(await screen.findByText("派团队做这件事")).toBeInTheDocument();
+    const objInput = screen.getByLabelText(/^目标/) as HTMLInputElement;
+    expect(objInput.value).toBe("");
   });
 });

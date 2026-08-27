@@ -9,6 +9,13 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+# task-02（2026-08-28-session-ppm-task-binding / D-005@v1 / design §7）：PPM 条目
+# 类型 Literal——``plan_task``=个人计划任务（ppm_plan_task）、``problem``=问题清单
+# （ppm_problem_list）。与 ``ppm/common/session_binding.py:PpmItemKind`` 同域，此处
+# 独立定义：schema 是叶子 DTO 层，不 import ppm 业务模块（非法值由 Literal 校验
+# 直接 422，router 的 GET /sessions query 参数同用本定义）。
+PpmItemKindLiteral = Literal["plan_task", "problem"]
+
 # ── Interactive session list / read (task-12, FR-10 / D-005@v1) ──────────────
 # DTO for GET /api/daemon/sessions. Field nullability aligns with the actual
 # AgentSession ORM (runtime_id / lease_id are nullable in model.py), so we do
@@ -192,6 +199,15 @@ class SessionCreateRequest(BaseModel):
     # 消费（预建 mission / orchestrator_workspace_id ∈ scope 校验）归 create
     # 路径（task-09）。
     team_mission: TeamMissionCreateBlock | None = None
+    # task-02（2026-08-28-session-ppm-task-binding / FR-01 / D-005@v1）：PPM 条目
+    # 成对绑定字段——``ppm_item_kind``（见 PpmItemKindLiteral）+ ``ppm_item_id``
+    # （条目 UUID，软关联无 FK，对齐 quicklog 模式）。成对携带时创建落库点写
+    # ppm_item_session_links（bind_session_to_ppm_item 幂等 best-effort），并按
+    # D-004@v2 解析条目所属项目第一个关联工作区、AgentSession.workspace_id 未
+    # 显式指定时回填。item 不存在/已删不 4xx——降级普通会话仅 warning（§9）。
+    # 成对校验见 ``_require_ppm_item_pair``；缺省 None 零分支进入（零回归）。
+    ppm_item_kind: PpmItemKindLiteral | None = None
+    ppm_item_id: uuid.UUID | None = None
     # 悬浮会话页面上下文（FR-5 / D-005）：缺省 None 零回归；数据服务端回查。
     page_context: PageContextCreateBlock | None = None
     # ql-20260825-001：首句附件引用（session-attachments 上传端点产出的 id）。
@@ -211,6 +227,16 @@ class SessionCreateRequest(BaseModel):
         # 空 prompt（看图说话）。旧请求体（无附件字段）行为不变。
         if not self.prompt.strip() and not self.attachment_ids:
             raise ValueError("prompt is required when no attachments are provided")
+        return self
+
+    @model_validator(mode="after")
+    def _require_ppm_item_pair(self) -> SessionCreateRequest:
+        # task-02（2026-08-28-session-ppm-task-binding / FR-01）：ppm_item_kind 与
+        # ppm_item_id 必须成对携带——只传其一 ValueError → 422（kind 无 item 无法
+        # 定位条目，item 无 kind 无法选表）。绑定字段不纳入空 prompt 豁免（绑定
+        # 不是配置切换，对齐 SessionInjectRequest bind_* 口径）。缺省双 None 零分支。
+        if (self.ppm_item_kind is None) != (self.ppm_item_id is None):
+            raise ValueError("ppm_item_kind and ppm_item_id must be provided together")
         return self
 
 
@@ -253,6 +279,23 @@ class SessionInjectRequest(BaseModel):
     # 二者均不纳入 _require_prompt_or_switch 空 prompt 豁免（绑定不是配置切换）。
     bind_change_key: str | None = Field(default=None, max_length=200)
     bind_quick_id: str | None = Field(default=None, max_length=128, pattern=r"^ql-[\w-]+$")
+    # task-02（2026-08-28-session-ppm-task-binding / FR-02 / D-005@v1）：@ 联想
+    # 选中 PPM 任务/问题时的追问绑定成对字段（可选，缺省 None 零回归）——经
+    # 三层透传到 SessionService 后走 bind_session_to_ppm_item 幂等落
+    # ppm_item_session_links，**不注入 prompt 前导**（前导/附件物化归 task-03，
+    # 对齐 bind_quick_id 行为）。item 不存在仅 warning 跳过（§9 降级不报错）。
+    # 成对校验见 ``_require_ppm_item_pair``；不纳入空 prompt 豁免（绑定不是
+    # 配置切换）。
+    bind_ppm_item_kind: PpmItemKindLiteral | None = None
+    bind_ppm_item_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _require_ppm_item_pair(self) -> SessionInjectRequest:
+        # task-02：bind_ppm_item_kind 与 bind_ppm_item_id 必须成对——只传其一
+        # ValueError → 422（与 create 通道 ppm_item_* 同口径）。
+        if (self.bind_ppm_item_kind is None) != (self.bind_ppm_item_id is None):
+            raise ValueError("bind_ppm_item_kind and bind_ppm_item_id must be provided together")
+        return self
 
 
 # ── Change-scoped session list (2026-07-09-change-detail-session task-09 / D-005@v1) ─

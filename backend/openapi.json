@@ -12779,7 +12779,7 @@
           "daemon"
         ],
         "summary": "List Sessions",
-        "description": "List the current user's AgentSessions (owner-scoped, stable paging).\n\ntask-06 / FR-02 / D-003@v1：可选过滤参数 runtime_id / machine_id（经\ndaemon_runtimes 关联）/ provider / q（标题模糊，实现为 user_input 的内容\nilike，见 service 层 docstring）；全部可选，不传时查询与现状一致（零回归）。\n过滤在 SQL 层完成，total 为过滤后总数（R-04 真分页），分页 limit/offset\n作用于过滤结果。machine_id 不匹配 runtime 缺失的旧会话（无 runtime 即无机器）。\n2026-08-22-workspace-sessions-portal / D-003@v2：新增可选 workspace_id /\nchange_id（AgentSession 冗余绑定列精确匹配），供 workspace/change 级会话\n门户复用全局端点做 scope 过滤；不传 = 现状（零回归）。\n2026-08-25-session-spec-binding task-04 / FR-05（design §5.W3.3 / §9）：\nchange_id 语义从单 FK 精确匹配扩大为 change_session_links M:N 子查询\n命中（存量单 FK 已播种为 link 行，原命中集是新命中集子集，参数名/类型\n不变向后兼容）；新增可选 ql_id（快速修复短码，走 quicklog_session_links\n按 (workspace_id, ql_id) 双条件子查询，防跨工作区同 ql_id 串扰），不传\n= 现状（零回归）。",
+        "description": "List the current user's AgentSessions (owner-scoped, stable paging).\n\ntask-06 / FR-02 / D-003@v1：可选过滤参数 runtime_id / machine_id（经\ndaemon_runtimes 关联）/ provider / q（标题模糊，实现为 user_input 的内容\nilike，见 service 层 docstring）；全部可选，不传时查询与现状一致（零回归）。\n过滤在 SQL 层完成，total 为过滤后总数（R-04 真分页），分页 limit/offset\n作用于过滤结果。machine_id 不匹配 runtime 缺失的旧会话（无 runtime 即无机器）。\n2026-08-22-workspace-sessions-portal / D-003@v2：新增可选 workspace_id /\nchange_id（AgentSession 冗余绑定列精确匹配），供 workspace/change 级会话\n门户复用全局端点做 scope 过滤；不传 = 现状（零回归）。\n2026-08-25-session-spec-binding task-04 / FR-05（design §5.W3.3 / §9）：\nchange_id 语义从单 FK 精确匹配扩大为 change_session_links M:N 子查询\n命中（存量单 FK 已播种为 link 行，原命中集是新命中集子集，参数名/类型\n不变向后兼容）；新增可选 ql_id（快速修复短码，走 quicklog_session_links\n按 (workspace_id, ql_id) 双条件子查询，防跨工作区同 ql_id 串扰），不传\n= 现状（零回归）。\ntask-02（2026-08-28-session-ppm-task-binding / FR-05 / §9）：新增可选\nppm_item_kind + ppm_item_id 成对筛选（ppm_item_session_links 子查询命中；\nkind Literal 校验非法值 422，只传其一 422——与 create/inject 通道同口径；\n不传 = 现状，零回归）。",
         "operationId": "list_sessions_api_daemon_sessions_get",
         "parameters": [
           {
@@ -12948,6 +12948,43 @@
                 }
               ],
               "title": "Ql Id"
+            }
+          },
+          {
+            "name": "ppm_item_kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "plan_task",
+                    "problem"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ppm Item Kind"
+            }
+          },
+          {
+            "name": "ppm_item_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ppm Item Id"
             }
           },
           {
@@ -24505,6 +24542,71 @@
                   },
                   "type": "array",
                   "title": "Response Get Workbench Switchable Users Api Ppm Workbench Switchable Users Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ppm/item-sessions": {
+      "get": {
+        "tags": [
+          "ppm-common"
+        ],
+        "summary": "List Ppm Item Sessions",
+        "description": "列出某 PPM 任务/问题关联的全部会话（design §5 Phase 1 / §7 / FR-01）。\n\n数据源 ``ppm_item_session_links`` JOIN ``agent_sessions``（软删过滤）,响应\n同构 ``list_change_sessions``：id/provider/status/turn_count/mode/author/\nlast_active_at/title。无关联返回空列表（不 404——任务刚建、尚无会话是常态,\ndesign §9）。``kind`` 非法值由 Literal 校验 422。",
+        "operationId": "list_ppm_item_sessions_api_ppm_item_sessions_get",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "plan_task",
+                "problem"
+              ],
+              "type": "string",
+              "description": "PPM 条目类型：plan_task/problem",
+              "title": "Kind"
+            },
+            "description": "PPM 条目类型：plan_task/problem"
+          },
+          {
+            "name": "item_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "PPM 条目 id（ppm_plan_task/ppm_problem_list 主键）",
+              "title": "Item Id"
+            },
+            "description": "PPM 条目 id（ppm_plan_task/ppm_problem_list 主键）"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AgentSessionListItem"
+                  },
+                  "title": "Response List Ppm Item Sessions Api Ppm Item Sessions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -51962,6 +52064,33 @@
               }
             ]
           },
+          "ppm_item_kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "plan_task",
+                  "problem"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ppm Item Kind"
+          },
+          "ppm_item_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ppm Item Id"
+          },
           "page_context": {
             "anyOf": [
               {
@@ -52231,6 +52360,33 @@
               }
             ],
             "title": "Bind Quick Id"
+          },
+          "bind_ppm_item_kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "plan_task",
+                  "problem"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bind Ppm Item Kind"
+          },
+          "bind_ppm_item_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bind Ppm Item Id"
           }
         },
         "type": "object",

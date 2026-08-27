@@ -348,3 +348,96 @@ async def build_page_context_preamble(
     if len(proj_lines) <= 2:
         return None
     return "\n".join(proj_lines)
+
+
+# ── PPM 条目上下文前导（2026-08-28-session-ppm-task-binding / FR-03 / D-006/D-007）──
+#
+# 会话绑定 PPM 任务/问题后的首轮【PPM 任务上下文】/【问题上下文】前导：数据
+# 全部服务端回查（task-01 load_ppm_item），字段拼装模式与
+# build_change_context_preamble 同构（X-02 纯后端，零 daemon 改动）——dispatch
+# prompt 通道注入，AgentRunLog(user_input) 与 SESSION_INJECT 展示层保持干净
+# 用户消息。attachment_lines 由调用方（task-03 _materialize_ppm_attachments）
+# 产出：物化失败的降级条目（无权/超限/非 claude/读取失败/已删）逐行拼成尾部
+# 附件清单段，AI 据此引导用户经 GET /api/file/{file_id} 自取。
+
+# 描述字段（PlanTask.task_description / PpmProblemList.pro_desc 均为 Text 长文本）
+# 截断上限——单值截断沿用 _PAGE_VALUE_MAX（120）口径，描述作为条目核心载荷
+# 放宽到 1000 控制前导总长度。
+_PPM_DESC_MAX: int = 1000
+
+
+async def build_ppm_item_context_preamble(
+    db: AsyncSession,
+    kind: str,
+    item_id: uuid.UUID | None,
+    *,
+    attachment_lines: list[str],
+) -> str | None:
+    """拼装【PPM 任务上下文】/【问题上下文】前导字符串（design §5 Phase 2 / §7）。
+
+    - 经 task-01 :func:`load_ppm_item` 回查条目；``item_id`` 为 None 或查无
+      条目时返回 None（调用方据此跳过注入、不报错，design §9）。
+    - ``kind="plan_task"``：标题=content、描述=task_description、状态、项目=
+      project_name、模块=module_name、责任人=user_name、周期=start_time~end_time。
+    - ``kind="problem"``：标题=pro_desc（问题单无独立标题列）、状态、项目=
+      project_name、模块=model_name、责任人=duty_user_name、周期=
+      plan_start_time~plan_end_time。
+    - ``attachment_lines`` 非空时追加尾部「附件清单」段（每行一条，内容为
+      物化降级条目）；空列表不渲染该段。
+    """
+    if item_id is None:
+        return None
+
+    from app.modules.ppm.common.session_binding import load_ppm_item
+
+    item = await load_ppm_item(db, kind, item_id)  # type: ignore[arg-type]
+    if item is None:
+        return None
+
+    def _period(start: object, end: object) -> str | None:
+        start_s = start.date().isoformat() if start is not None else None
+        end_s = end.date().isoformat() if end is not None else None
+        if start_s and end_s:
+            return f"{start_s} ~ {end_s}"
+        return start_s or end_s
+
+    lines: list[str]
+    if kind == "plan_task":
+        lines = ["【PPM 任务上下文】"]
+        if item.content:
+            lines.append(f"- 标题：{item.content[:_PAGE_VALUE_MAX]}")
+        if item.task_description:
+            lines.append(f"- 描述：{item.task_description[:_PPM_DESC_MAX]}")
+        if item.status:
+            lines.append(f"- 状态：{item.status[:_PAGE_VALUE_MAX]}")
+        if item.project_name:
+            lines.append(f"- 项目：{item.project_name[:_PAGE_VALUE_MAX]}")
+        if item.module_name:
+            lines.append(f"- 模块：{item.module_name[:_PAGE_VALUE_MAX]}")
+        if item.user_name:
+            lines.append(f"- 责任人：{item.user_name[:_PAGE_VALUE_MAX]}")
+        period = _period(item.start_time, item.end_time)
+        if period:
+            lines.append(f"- 周期：{period}")
+    else:
+        lines = ["【问题上下文】"]
+        if item.pro_desc:
+            lines.append(f"- 标题：{item.pro_desc[:_PPM_DESC_MAX]}")
+        if item.status:
+            lines.append(f"- 状态：{item.status[:_PAGE_VALUE_MAX]}")
+        if item.project_name:
+            lines.append(f"- 项目：{item.project_name[:_PAGE_VALUE_MAX]}")
+        if item.model_name:
+            lines.append(f"- 模块：{item.model_name[:_PAGE_VALUE_MAX]}")
+        if item.duty_user_name:
+            lines.append(f"- 责任人：{item.duty_user_name[:_PAGE_VALUE_MAX]}")
+        period = _period(item.plan_start_time, item.plan_end_time)
+        if period:
+            lines.append(f"- 周期：{period}")
+
+    if attachment_lines:
+        lines.append("- 附件清单：")
+        for line in attachment_lines:
+            lines.append(f"  - {line}")
+
+    return "\n".join(lines)

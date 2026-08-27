@@ -779,6 +779,10 @@ export type InteractiveProvider = "claude" | "codex";
  * 2026-08-25-session-spec-binding task-09 / FR-06：可选 quicklog_id 短码
  * （创建即落 quicklog 绑定），同为生成版自带字段（本卡 gen:types 引入），
  * 直接继承不覆写。
+ *
+ * 2026-08-28-session-ppm-task-binding task-04 / FR-01：可选 ppm_item_kind +
+ * ppm_item_id 成对绑定（创建即落 ppm_item_session_links），同为生成版自带
+ * 字段（本卡 gen:types 引入），直接继承不覆写。
  */
 export type SessionCreateRequest = Omit<
   components["schemas"]["SessionCreateRequest"],
@@ -789,6 +793,17 @@ export type SessionCreateRequest = Omit<
   /** 省略 = 后端默认 true。 */
   ask_user_only?: boolean;
 };
+
+/**
+ * 2026-08-28-session-ppm-task-binding task-04 / FR-01：PPM 条目类型——
+ * ``plan_task``=个人计划任务（ppm_plan_task）、``problem``=问题清单
+ * （ppm_problem_list）。从生成版 SessionCreateRequest.ppm_item_kind 派生
+ * （NonNullable 去掉 null/undefined），单一来源，后端 Literal 变更时
+ * gen:types + tsc 即暴露。
+ */
+export type PpmItemKind = NonNullable<
+  components["schemas"]["SessionCreateRequest"]["ppm_item_kind"]
+>;
 
 /**
  * task-13（FR-05 / D-010@v1）→ task-14 收敛：createSession 的 team_mission 块。
@@ -894,6 +909,11 @@ export async function createSession(
   // 2026-08-25-session-spec-binding task-09 / FR-06：快速修复短码绑定
   // （对齐 change_id 先例：有值才带；后端创建落库点写 quicklog_session_links）。
   if (input.quicklog_id !== undefined) body.quicklog_id = input.quicklog_id;
+  // 2026-08-28-session-ppm-task-binding task-04 / FR-01：PPM 条目成对绑定
+  // （对齐 quicklog_id 先例：有值才带；kind+id 成对上送——半对由后端
+  // _require_ppm_item_pair 422 兜底，item 不存在降级普通会话仅 warning）。
+  if (input.ppm_item_kind !== undefined) body.ppm_item_kind = input.ppm_item_kind;
+  if (input.ppm_item_id !== undefined) body.ppm_item_id = input.ppm_item_id;
   if (input.workspace_id !== undefined) body.workspace_id = input.workspace_id;
   // task-13（FR-05）：预会话团队任务块透传（有值才带；后端 create 路径预建
   // 归 task-09——flush-only 同事务，失败整体回滚）。
@@ -957,6 +977,16 @@ export async function injectSession(
   }
   if (options?.bind_quick_id !== undefined) {
     body.bind_quick_id = options.bind_quick_id;
+  }
+  // 2026-08-28-session-ppm-task-binding task-04 / FR-02：@ 联想选中 PPM 任务/
+  // 问题时的成对追问绑定（对齐 bind_change_key/bind_quick_id 先例：有值才带，
+  // 缺省零变化；后端 binder 幂等写 ppm_item_session_links，不注入 prompt 前导，
+  // 半对由后端 _require_ppm_item_pair 422 兜底）。组件接线归 task-05/06。
+  if (options?.bind_ppm_item_kind !== undefined) {
+    body.bind_ppm_item_kind = options.bind_ppm_item_kind;
+  }
+  if (options?.bind_ppm_item_id !== undefined) {
+    body.bind_ppm_item_id = options.bind_ppm_item_id;
   }
   return apiFetch<SessionInjectResponse>(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/inject`,
@@ -1860,6 +1890,13 @@ export interface AgentSessionListParams {
    * M:N 子查询命中；纯透传不做本地过滤（命中集全在服务端，D-001@v1）。
    */
   ql_id?: string;
+  /**
+   * 按 PPM 条目过滤（2026-08-28-session-ppm-task-binding task-04 / FR-01）：
+   * kind + item_id 成对（后端 ppm_item_session_links M:N 子查询命中，半对 422；
+   * 对齐 ql_id 先例：真值才下发，命中集全在服务端）。
+   */
+  ppm_item_kind?: PpmItemKind;
+  ppm_item_id?: string;
   /** 2026-08-24：按归档状态过滤（true=已归档，false=未归档）。 */
   archived?: boolean;
 }
@@ -1887,6 +1924,10 @@ export async function listAgentSessions(
   // 2026-08-25-session-spec-binding task-09 / FR-05：快速修复短码过滤参
   // （对齐 change_id 先例：真值才下发，缺省零回归）。
   if (options?.ql_id) query.ql_id = options.ql_id;
+  // 2026-08-28-session-ppm-task-binding task-04 / FR-01：PPM 条目成对过滤参
+  // （对齐 ql_id 先例：真值才下发，缺省零回归；命中集全在服务端 M:N 子查询）。
+  if (options?.ppm_item_kind) query.ppm_item_kind = options.ppm_item_kind;
+  if (options?.ppm_item_id) query.ppm_item_id = options.ppm_item_id;
   // 2026-08-24：archived 过滤参（布尔→字符串 "true"/"false"）。
   if (options?.archived !== undefined) query.archived = options.archived ? "true" : "false";
   return apiFetch<AgentSessionListResponse>("/api/daemon/sessions", { query });
@@ -1943,6 +1984,23 @@ export async function listQuicklogSessions(
   return apiFetch<AgentSessionListItem[]>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/quicklog-entries/${encodeURIComponent(qlId)}/sessions`,
   );
+}
+
+/**
+ * GET /api/ppm/item-sessions?kind=&item_id= — PPM 条目（任务/问题）级会话列表
+ * （2026-08-28-session-ppm-task-binding task-01 端点 / task-04 客户端封装 /
+ * FR-01）。与 listChangeSessions/listQuicklogSessions 同源 schema
+ * （AgentSessionListItem 数组，design §5 Phase 1 响应同构）；平台级端点无
+ * workspace scope（跨成员可见）；无关联返回空列表不 404（任务刚建尚无会话
+ * 是常态）；kind 非法值由后端 Literal 校验 422。
+ */
+export async function listItemSessions(
+  kind: PpmItemKind,
+  itemId: string,
+): Promise<AgentSessionListItem[]> {
+  return apiFetch<AgentSessionListItem[]>("/api/ppm/item-sessions", {
+    query: { kind, item_id: itemId },
+  });
 }
 
 /**

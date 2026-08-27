@@ -449,3 +449,137 @@ class TestWorkspaceTabManuals:
         assert "平台全局地图" in PLATFORM_MAP
         assert "主使用动线" in PLATFORM_MAP
         assert "PPM 业务链" in PLATFORM_MAP
+
+
+# ── task-03（2026-08-28-session-ppm-task-binding / FR-03）：PPM 条目前导单测 ───
+
+
+class TestPpmItemContextPreamble:
+    """build_ppm_item_context_preamble 纯逻辑单测（镜像 §A 范式）：查无 → None；
+    命中 → 全字段前导；attachment_lines 尾部附件清单段（空列表不渲染）。"""
+
+    @pytest.mark.asyncio
+    async def test_item_missing_returns_none(self, db_session) -> None:
+        from app.modules.daemon.session.context import build_ppm_item_context_preamble
+
+        assert (
+            await build_ppm_item_context_preamble(
+                db_session, "plan_task", uuid.uuid4(), attachment_lines=[]
+            )
+            is None
+        )
+        assert (
+            await build_ppm_item_context_preamble(
+                db_session, "problem", uuid.uuid4(), attachment_lines=["x"]
+            )
+            is None
+        )
+        assert (
+            await build_ppm_item_context_preamble(
+                db_session, "plan_task", None, attachment_lines=[]
+            )
+            is None
+        )
+
+    @pytest.mark.asyncio
+    async def test_plan_task_preamble_full_fields(self, db_session) -> None:
+        from datetime import UTC
+        from datetime import datetime as _dt
+
+        from app.modules.daemon.session.context import build_ppm_item_context_preamble
+        from app.modules.ppm.task.model import PlanTask
+
+        tid = uuid.uuid4()
+        db_session.add(
+            PlanTask(
+                id=tid,
+                user_id=uuid.uuid4(),
+                content="升级网关依赖",
+                task_description="梳理兼容性风险并灰度",
+                status="进行中",
+                project_name="智慧园区二期",
+                module_name="网关模块",
+                user_name="王五",
+                start_time=_dt(2026, 9, 1, tzinfo=UTC),
+                end_time=_dt(2026, 9, 10, tzinfo=UTC),
+                file_urls=[],
+            )
+        )
+        await db_session.commit()
+
+        out = await build_ppm_item_context_preamble(
+            db_session, "plan_task", tid, attachment_lines=[]
+        )
+        assert out is not None
+        assert out.startswith("【PPM 任务上下文】")
+        for field in (
+            "- 标题：升级网关依赖",
+            "- 描述：梳理兼容性风险并灰度",
+            "- 状态：进行中",
+            "- 项目：智慧园区二期",
+            "- 模块：网关模块",
+            "- 责任人：王五",
+            "- 周期：2026-09-01 ~ 2026-09-10",
+        ):
+            assert field in out, field
+        # attachment_lines 为空 → 不渲染附件清单段。
+        assert "附件清单" not in out
+
+    @pytest.mark.asyncio
+    async def test_problem_preamble_full_fields(self, db_session) -> None:
+        from datetime import UTC
+        from datetime import datetime as _dt
+
+        from app.modules.daemon.session.context import build_ppm_item_context_preamble
+        from app.modules.ppm.problem.model import PpmProblemList
+
+        pid = uuid.uuid4()
+        db_session.add(
+            PpmProblemList(
+                id=pid,
+                project_id=uuid.uuid4(),
+                project_name="智慧园区三期",
+                model_name="支付模块",
+                pro_desc="退款偶发双倍",
+                status="新建",
+                duty_user_name="赵六",
+                plan_start_time=_dt(2026, 9, 2, tzinfo=UTC),
+                plan_end_time=_dt(2026, 9, 8, tzinfo=UTC),
+                file_urls=[],
+            )
+        )
+        await db_session.commit()
+
+        out = await build_ppm_item_context_preamble(db_session, "problem", pid, attachment_lines=[])
+        assert out is not None
+        assert out.startswith("【问题上下文】")
+        for field in (
+            "- 标题：退款偶发双倍",
+            "- 状态：新建",
+            "- 项目：智慧园区三期",
+            "- 模块：支付模块",
+            "- 责任人：赵六",
+            "- 周期：2026-09-02 ~ 2026-09-08",
+        ):
+            assert field in out, field
+
+    @pytest.mark.asyncio
+    async def test_attachment_lines_rendered_as_tail_section(self, db_session) -> None:
+        """attachment_lines 非空 → 尾部「附件清单」段逐行渲染（物化降级条目）。"""
+        from app.modules.daemon.session.context import build_ppm_item_context_preamble
+        from app.modules.ppm.task.model import PlanTask
+
+        tid = uuid.uuid4()
+        db_session.add(PlanTask(id=tid, user_id=uuid.uuid4(), content="带附件的任务", file_urls=[]))
+        await db_session.commit()
+
+        lines = ["机密方案.pdf（无权访问）", f"说明.pdf：GET /api/file/{uuid.uuid4()}"]
+        out = await build_ppm_item_context_preamble(
+            db_session, "plan_task", tid, attachment_lines=lines
+        )
+        assert out is not None
+        assert "- 附件清单：" in out
+        assert f"  - {lines[0]}" in out
+        assert f"  - {lines[1]}" in out
+        # 附件清单段在尾部（最后一个字段行之后）。
+        assert out.index("附件清单") > out.index("- 标题：带附件的任务")

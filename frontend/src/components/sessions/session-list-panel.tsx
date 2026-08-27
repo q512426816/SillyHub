@@ -101,7 +101,13 @@ import {
   type AgentSessionRead,
   type AgentSessionStatus,
   type DaemonMachineRead,
+  type PpmItemKind,
 } from "@/lib/daemon";
+import { listPersonalPlanTasks } from "@/lib/ppm/task";
+import { listProblems } from "@/lib/ppm/problem";
+import type { PageResp, PlanTask, ProblemList } from "@/lib/ppm/types";
+import { useSession } from "@/stores/session";
+import { queryKeys } from "@/lib/query-keys";
 import { cn } from "@/lib/utils";
 
 /* ────────────── scope 判别联合（task-04 provides 契约，供 task-01 门户复用） ────────────── */
@@ -501,9 +507,10 @@ function WorkspaceTreeList({
   // 组内超 50 截断（R-03）的「显示全部」展开集合。
   const [showAllGroupIds, setShowAllGroupIds] = useState<Set<string>>(new Set());
   // X-009「关联」筛选下拉（task-10 / FR-05）：选中值编码 kind:id
-  //（change:<uuid> / quicklog:<ql_id>），undefined = 未筛。仅 workspace scope
-  // 渲染下拉与发起选项查询（门控谓词显式化：change/quicklog scope 自身已按
-  // 关联过滤再叠加会互相冲突；全局门户跨工作区选项过杂均不提供）。
+  //（change:<uuid> / quicklog:<ql_id>；task-06 PPM 为三段 ppm:<kind>:<uuid>），
+  // undefined = 未筛。仅 workspace scope 渲染下拉与发起选项查询（门控谓词显式
+  // 化：change/quicklog scope 自身已按关联过滤再叠加会互相冲突；全局门户跨
+  // 工作区选项过杂均不提供）。
   const [assocFilter, setAssocFilter] = useState<string | undefined>(undefined);
 
   // 2026-08-24：归档视图判定（哨兵值 __archived__ 触发服务端 archived=true 过滤）。
@@ -512,6 +519,10 @@ function WorkspaceTreeList({
   // X-009 门控谓词：「关联」筛选仅 workspace scope 提供（含选项查询 enabled）。
   const isWorkspaceScope = scope?.kind === "workspace";
   const assocWorkspaceId = isWorkspaceScope ? scope.workspaceId : null;
+
+  // task-06（2026-08-28-session-ppm-task-binding / FR-05）：当前登录用户——
+  // PPM 选项数据源口径（问题 duty_user_id=me，对齐 @ 联想与 PPM「我的任务」）。
+  const meId = useSession((s) => s.user?.id ?? null);
 
   const { machines, workspaces, workspaceIdToName, runtimeToMachine } =
     useSessionListSharedData();
@@ -534,7 +545,36 @@ function WorkspaceTreeList({
     staleTime: 60_000,
   });
 
-  /** 「关联」下拉分组选项（antd Select 分组形态；value 编码 kind:id）。 */
+  // task-06（FR-05）：PPM 任务/问题选项数据源——口径同 @ 联想（进行中、按当前
+  // 用户），缓存键复用 queryKeys.mentionSources.ppm*（ongoing 桶与联想浮层共享
+  // 缓存，少一拉；PPM 实体与工作区软关联，不按 assocWorkspaceId 分桶，X-06 的
+  // 禁用门控走 enabled 而非键维度）。问题源 duty_user_id=me——me 未就绪禁用
+  //（防退化为全量清单）。
+  const assocPpmTasksQuery = useQuery<PageResp<PlanTask>, ApiError>({
+    queryKey: queryKeys.mentionSources.ppmTasks("ongoing"),
+    queryFn: () =>
+      listPersonalPlanTasks({
+        status: ["进行中"],
+        page: 1,
+        page_size: 100,
+      }),
+    enabled: isWorkspaceScope,
+    staleTime: 60_000,
+  });
+  const assocPpmProblemsQuery = useQuery<PageResp<ProblemList>, ApiError>({
+    queryKey: queryKeys.mentionSources.ppmProblems("ongoing"),
+    queryFn: () =>
+      listProblems({
+        duty_user_id: meId ?? undefined,
+        status: ["进行中"],
+        page: 1,
+        page_size: 100,
+      }),
+    enabled: isWorkspaceScope && meId !== null,
+    staleTime: 60_000,
+  });
+
+  /** 「关联」下拉分组选项（antd Select 分组形态；value 编码 kind:id，PPM 三段）。 */
   const assocOptions = useMemo(() => {
     if (!isWorkspaceScope) return [];
     const groups: {
@@ -559,11 +599,45 @@ function WorkspaceTreeList({
     if (quicklogOpts.length > 0) {
       groups.push({ label: "快速修复", options: quicklogOpts });
     }
+    // task-06（FR-05）：PPM 任务/问题分组——value 编码 ppm:plan_task:<uuid> /
+    // ppm:problem:<uuid>；label = 条目标题（任务 content / 问题 pro_desc，空
+    // 回退 id 短码），项目名随标题并列标注。
+    const ppmTaskOpts = (assocPpmTasksQuery.data?.items ?? []).map((t) => ({
+      value: `ppm:plan_task:${t.id}`,
+      label: t.content?.trim()
+        ? t.project_name?.trim()
+          ? `${t.content.trim()}（${t.project_name.trim()}）`
+          : t.content.trim()
+        : `任务 ${t.id.slice(0, 8)}`,
+    }));
+    if (ppmTaskOpts.length > 0) {
+      groups.push({ label: "PPM 任务（进行中）", options: ppmTaskOpts });
+    }
+    const ppmProblemOpts = (assocPpmProblemsQuery.data?.items ?? []).map((p) => ({
+      value: `ppm:problem:${p.id}`,
+      label: p.pro_desc?.trim()
+        ? p.project_name?.trim()
+          ? `${p.pro_desc.trim()}（${p.project_name.trim()}）`
+          : p.pro_desc.trim()
+        : `问题 ${p.id.slice(0, 8)}`,
+    }));
+    if (ppmProblemOpts.length > 0) {
+      groups.push({ label: "PPM 问题（进行中）", options: ppmProblemOpts });
+    }
     return groups;
-  }, [isWorkspaceScope, assocChangesQuery.data, assocQuicklogQuery.data]);
+  }, [
+    isWorkspaceScope,
+    assocChangesQuery.data,
+    assocQuicklogQuery.data,
+    assocPpmTasksQuery.data,
+    assocPpmProblemsQuery.data,
+  ]);
 
-  /** 「关联」选中值 → listAgentSessions 服务端过滤参（清除/未筛 = 空对象）。 */
-  const assocParams = useMemo<{ change_id?: string; ql_id?: string }>(() => {
+  /** 「关联」选中值 → listAgentSessions 服务端过滤参（清除/未筛 = 空对象）。
+   * PPM 为三段编码 ppm:<kind>:<uuid>（task-06），第二段拆 kind 后成对透传。 */
+  const assocParams = useMemo<
+    { change_id?: string; ql_id?: string; ppm_item_kind?: PpmItemKind; ppm_item_id?: string }
+  >(() => {
     if (!assocFilter) return {};
     const sep = assocFilter.indexOf(":");
     if (sep <= 0) return {};
@@ -571,6 +645,18 @@ function WorkspaceTreeList({
     const id = assocFilter.slice(sep + 1);
     if (kind === "change") return { change_id: id };
     if (kind === "quicklog") return { ql_id: id };
+    if (kind === "ppm") {
+      const sep2 = id.indexOf(":");
+      if (sep2 <= 0) return {};
+      const subKind = id.slice(0, sep2);
+      const itemId = id.slice(sep2 + 1);
+      if (subKind === "plan_task") {
+        return { ppm_item_kind: "plan_task", ppm_item_id: itemId };
+      }
+      if (subKind === "problem") {
+        return { ppm_item_kind: "problem", ppm_item_id: itemId };
+      }
+    }
     return {};
   }, [assocFilter]);
 
@@ -1084,7 +1170,8 @@ function WorkspaceTreeList({
         </div>
         {/* X-009：「关联」筛选下拉（task-10 / FR-05）——服务端过滤（与上方
             状态/机器层的纯视图过滤不同，选中即换查询键重拉）；选项分组
-            「变更」（活跃未归档）/「快速修复」（非占位），allowClear 清除恢复。 */}
+            「变更」（活跃未归档）/「快速修复」（非占位）/「PPM 任务」「PPM
+            问题」（进行中，task-06），allowClear 清除恢复。 */}
         {isWorkspaceScope && (
           <Select
             id="slp-assoc"
@@ -1092,7 +1179,7 @@ function WorkspaceTreeList({
             showSearch
             allowClear
             className="w-full"
-            placeholder="关联：变更/快速修复"
+            placeholder="关联：变更/快速修复/PPM"
             aria-label="关联筛选"
             value={assocFilter}
             onChange={(v) => setAssocFilter(v)}

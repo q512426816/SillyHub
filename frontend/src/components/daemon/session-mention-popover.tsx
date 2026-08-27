@@ -30,7 +30,8 @@ import { useEffect, useMemo, useRef } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 // 注：RefObject<HTMLDivElement> 取 React 18 类型口径（useRef<HTMLDivElement>(null)）。
 
-import type { MentionTrigger } from "@/lib/session-mention";
+import type { MentionPpmItem, MentionTrigger } from "@/lib/session-mention";
+import type { PpmMentionScope } from "@/lib/session-mention-sources";
 import type { PlatformSkillSummary } from "@/lib/custom-skills";
 import type { ChangeSummary } from "@/lib/changes";
 import type { QuicklogEntryListItem } from "@/lib/quicklog";
@@ -60,12 +61,17 @@ export const TEAM_MENTION_COMMAND: SessionMentionCommand = {
 /**
  * 联想条目判别联合：kind 驱动分组与字段取值；entity 为原始实体对象
  *（onSelect 原样抛出，task-03 由此计算回填名与绑定字段）。
+ * task-06（2026-08-28-session-ppm-task-binding / FR-02）：扩展 PPM 任务/问题
+ * 两类，entity 为 task-04 归一的 MentionPpmItem（kind/id/title/projectName/
+ * subtitle），分组排在变更/快速修复之后。
  */
 export type SessionMentionItem =
   | { kind: "command"; entity: SessionMentionCommand }
   | { kind: "skill"; entity: PlatformSkillSummary }
   | { kind: "change"; entity: ChangeSummary }
-  | { kind: "quick"; entity: QuicklogEntryListItem };
+  | { kind: "quick"; entity: QuicklogEntryListItem }
+  | { kind: "ppmTask"; entity: MentionPpmItem }
+  | { kind: "ppmProblem"; entity: MentionPpmItem };
 
 /** onSelect 参数：原始实体对象（联合 = 各条目 entity 的原样透传）。 */
 export type SessionMentionEntity = SessionMentionItem["entity"];
@@ -86,17 +92,26 @@ export function buildSlashMentionItems(
 }
 
 /**
- * 组装 @ 联想候选：变更在前、快速修复在后（design §3.2 分组序）。
- * task-04 已滤 default 伪 change_key 与 placeholder 快速修复，此处不再过滤。
+ * 组装 @ 联想候选：变更在前、快速修复在后、PPM 任务/问题再后（design §3.2
+ * 分组序 + task-06 PPM 扩展）。task-04 已滤 default 伪 change_key 与
+ * placeholder 快速修复，此处不再过滤；PPM 两参缺省空数组（旧调用点零改动）。
  */
 export function buildAtMentionItems(
   changes: ChangeSummary[],
   quicklogs: QuicklogEntryListItem[],
+  ppmTasks: MentionPpmItem[] = [],
+  ppmProblems: MentionPpmItem[] = [],
 ): SessionMentionItem[] {
   return [
     ...changes.map((c) => ({ kind: "change", entity: c }) as SessionMentionItem),
     ...quicklogs.map(
       (q) => ({ kind: "quick", entity: q }) as SessionMentionItem,
+    ),
+    ...ppmTasks.map(
+      (t) => ({ kind: "ppmTask", entity: t }) as SessionMentionItem,
+    ),
+    ...ppmProblems.map(
+      (p) => ({ kind: "ppmProblem", entity: p }) as SessionMentionItem,
     ),
   ];
 }
@@ -129,6 +144,13 @@ function mentionMatchTexts(item: SessionMentionItem): {
       return {
         primary: [item.entity.ql_id],
         secondary: [item.entity.title],
+      };
+    case "ppmTask":
+    case "ppmProblem":
+      // 标题前缀/包含命中；项目名与说明作次级包含命中面（task-06）。
+      return {
+        primary: [item.entity.title],
+        secondary: [item.entity.projectName ?? "", item.entity.subtitle ?? ""],
       };
   }
 }
@@ -276,17 +298,43 @@ export interface SessionMentionPopoverProps {
    * 契约闭环。
    */
   onClose: () => void;
+  /**
+   * task-06（FR-02 / D-002@v1）：PPM 分组状态口径（缺省 "ongoing" 仅进行中）。
+   * 仅影响 PPM 两分组的标签后缀与开关文案；与 onPpmScopeChange 配对传入才
+   * 渲染分组头「切全部/仅进行中」开关（纯受控——开关状态归 task-03 接线层）。
+   */
+  ppmScope?: PpmMentionScope;
+  /** task-06：PPM 分组头开关回调（ongoing↔all，换键重拉归数据源 hook）。 */
+  onPpmScopeChange?: (next: PpmMentionScope) => void;
 }
 
 /* ───────────────── 渲染辅助 ───────────────── */
 
-/** 分组标签（design §3.2 / 原型 .group-label）。 */
+/** 分组标签（design §3.2 / 原型 .group-label；PPM 两组 task-06 追加，标签后缀
+ * （进行中/全部）随 ppmScope 在渲染期拼接）。 */
 const GROUP_LABELS: Record<SessionMentionItem["kind"], string> = {
   command: "平台指令",
   skill: "技能（平台 + 我的）",
   change: "变更（当前工作区）",
   quick: "快速修复（当前工作区）",
+  ppmTask: "PPM 任务",
+  ppmProblem: "PPM 问题",
 };
+
+/** PPM 分组标签后缀（状态口径 D-002@v1：默认进行中，可切全部）。 */
+function ppmGroupLabel(
+  kind: "ppmTask" | "ppmProblem",
+  scope: PpmMentionScope,
+): string {
+  return `${GROUP_LABELS[kind]}（${scope === "all" ? "全部" : "进行中"}）`;
+}
+
+/** PPM 分组判别（task-06：ppmTask / ppmProblem 两 kind 共用渲染分支）。 */
+function isPpmMentionKind(
+  kind: SessionMentionItem["kind"],
+): kind is "ppmTask" | "ppmProblem" {
+  return kind === "ppmTask" || kind === "ppmProblem";
+}
 
 /** 条目展示字段：主行 / 次行（单行截断）/ 行内标注。 */
 function mentionOptionTexts(item: SessionMentionItem): {
@@ -322,6 +370,17 @@ function mentionOptionTexts(item: SessionMentionItem): {
         secondary: item.entity.title,
         tag: null,
       };
+    case "ppmTask":
+    case "ppmProblem": {
+      // 主行 = 条目标题；次行标注项目名（响应自带，task-06「条目标注项目名」）；
+      // 行内标注区分任务/问题（对齐原型 .badge）。
+      const projectName = item.entity.projectName?.trim() || null;
+      return {
+        primary: item.entity.title,
+        secondary: projectName,
+        tag: item.kind === "ppmTask" ? "任务" : "问题",
+      };
+    }
   }
 }
 
@@ -413,6 +472,8 @@ export function SessionMentionPopover({
   items,
   activeIndex,
   onSelect,
+  ppmScope = "ongoing",
+  onPpmScopeChange,
 }: SessionMentionPopoverProps) {
   // 过滤口径与 task-03 共享（filterMentionItems 单一源）。
   const filtered = useMemo(() => filterMentionItems(items, query), [items, query]);
@@ -441,15 +502,51 @@ export function SessionMentionPopover({
     >
       <div
         role="listbox"
-        aria-label={trigger === "/" ? "技能与指令联想" : "变更与快速修复联想"}
+        aria-label={trigger === "/" ? "技能与指令联想" : "变更、快速修复与 PPM 联想"}
         aria-activedescendant={activeId}
         className="max-h-[260px] overflow-y-auto"
       >
         {groups.map((group) => (
           <div key={`${group.kind}-${group.items[0]!.flatIndex}`}>
-            <p className="px-3.5 pb-1 pt-1.5 text-[11px] tracking-wide text-muted-foreground">
-              {GROUP_LABELS[group.kind]}
-            </p>
+            {isPpmMentionKind(group.kind) ? (
+              // task-06（FR-02 / D-002@v1）：PPM 分组头——状态口径后缀 +
+              // 「切全部/仅进行中」小开关（纯受控，状态归 task-03 接线层；
+              // 未传 onPpmScopeChange 时只渲染标签不带开关）。开关 mousedown
+              // preventDefault 不夺输入框焦点（与选项行同规则），点击只换键
+              // 重拉不选中不关层。
+              <div className="flex items-center justify-between gap-2 px-3.5 pb-1 pt-1.5">
+                <p className="text-[11px] tracking-wide text-muted-foreground">
+                  {ppmGroupLabel(group.kind, ppmScope)}
+                </p>
+                {onPpmScopeChange && (
+                  <button
+                    type="button"
+                    data-testid={`mention-ppm-scope-${group.kind}`}
+                    aria-label={`PPM 分组状态范围（当前${
+                      ppmScope === "all" ? "全部" : "仅进行中"
+                    }，点击切换）`}
+                    title={
+                      ppmScope === "ongoing"
+                        ? "显示全部状态的 PPM 条目（D-002 全状态可关联）"
+                        : "只显示进行中的 PPM 条目"
+                    }
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                    }}
+                    onClick={() => {
+                      onPpmScopeChange(ppmScope === "ongoing" ? "all" : "ongoing");
+                    }}
+                    className="shrink-0 rounded border border-brand-200 px-1.5 py-0.5 text-[10px] text-brand-700 transition-colors hover:bg-brand-50"
+                  >
+                    {ppmScope === "ongoing" ? "切全部" : "仅进行中"}
+                  </button>
+                )}
+              </div>
+            ) : (
+              <p className="px-3.5 pb-1 pt-1.5 text-[11px] tracking-wide text-muted-foreground">
+                {GROUP_LABELS[group.kind]}
+              </p>
+            )}
             {group.items.map(({ item, flatIndex }) => (
               <MentionOption
                 key={flatIndex}
@@ -471,7 +568,7 @@ export function SessionMentionPopover({
             >
               {trigger === "/"
                 ? "技能清单未就绪（加载失败或暂无技能）——可到「设置 · 我的技能」查看或创建。"
-                : "暂无可关联的变更或快速修复——@ 联想需在挂接工作区的会话中使用。"}
+                : "暂无可关联的变更、快速修复或 PPM 条目——@ 联想需在挂接工作区的会话中使用。"}
             </p>
           ) : (
             // 有数据但无匹配（前缀与包含均未命中）。

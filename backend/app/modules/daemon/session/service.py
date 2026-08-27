@@ -72,6 +72,19 @@ from app.modules.daemon.schema import (
 # 只需 await 调用；user_id 一律取会话属主 AgentSession.user_id。
 from app.modules.daemon.session_events import publish_sessions_changed
 
+# task-02（2026-08-28-session-ppm-task-binding / FR-01/02/05 / D-005@v1）：PPM
+# 条目↔会话绑定基座消费——create/inject 落 link + item 校验/工作区解析、list
+# ppm 维度筛选的数据源。session_binding 只依赖 model 层（file/ppm/workspace），
+# 不 import daemon——无循环导入（change.model 顶部 import 先例同款）。
+from app.modules.ppm.common.session_binding import (
+    PpmItemKind,
+    PpmItemSessionLink,
+    bind_session_to_ppm_item,
+    load_item_files,
+    load_ppm_item,
+    resolve_item_workspace_id,
+)
+
 log = get_logger(__name__)
 
 # task-05（2026-08-14-sessions-portal / D-012@v1 / FR-05）：会话内配置热切换 WS
@@ -577,6 +590,25 @@ class _PrelockedInjectAttachments:
     agent_kind: str
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedPpmAttachment:
+    """task-03（2026-08-28-session-ppm-task-binding / FR-03 / D-006）：PPM 附件
+    物化的写事务外预备产物。
+
+    ``_materialize_ppm_attachments`` 在写事务外完成 storage 读 IO、``_can_access``
+    与降级决策，并把对象写入 session attachment storage（``store_bytes`` 内容
+    寻址）；本结构承载落 ``SessionAttachment`` 行所需的列值——行 insert 归
+    create_session 写事务内（session.id 已知后）flush-only 完成。
+    """
+
+    kind: str
+    media_type: str
+    bytes: int
+    name: str
+    object_key: str
+    sha256: str
+
+
 class SessionReadiness:
     """跨请求共享的内存 session ready 状态管理器（task-05 / D-002@v1）。
 
@@ -866,6 +898,14 @@ class SessionService:
         # （savepoint best-effort，失败仅 warning 不阻断创建主事务与 201）。
         # 缺省 None 零分支进入（零回归）。
         quicklog_id: str | None = None,
+        # task-02（2026-08-28-session-ppm-task-binding / FR-01 / D-005@v1 /
+        # D-004@v2）：PPM 条目成对绑定字段——item 存在性校验与工作区解析在写
+        # 事务前（查无记 ``session_ppm_bind_item_missing`` warning 降级普通会话，
+        # §9 不 4xx）；落 ppm_item_session_links 在写事务内（quicklog 分支旁）；
+        # AgentSession.workspace_id 未显式指定时回填解析值。缺省 None 零分支
+        # 进入（零回归）。前导注入/附件物化归 task-03，本方法不实现。
+        ppm_item_kind: PpmItemKind | None = None,
+        ppm_item_id: uuid.UUID | None = None,
         # task-04（2026-08-25-team-subsession-governance / FR-02 / design §5.B）：
         # 分身子会话形态参数组（task-05 dispatch_worker 换三元组派发时传入）：
         # parent_session_id 写 AgentSession.parent_session_id（会话树挂载，
@@ -1159,6 +1199,29 @@ class SessionService:
                     if _w_row is not None and _w_row.default_model:
                         model = _w_row.default_model
 
+        # ── task-02（2026-08-28-session-ppm-task-binding / FR-01 / D-004@v2）：
+        # PPM 条目绑定前置解析（写事务前，纯只读）──成对携带 ppm_item_* 时先
+        # load_ppm_item 校验条目存在性：查无记 ``session_ppm_bind_item_missing``
+        # warning 后**降级普通会话**（§9：不 4xx/5xx 阻塞创建，不落 link）；
+        # 命中则 resolve_item_workspace_id 解析条目所属项目第一个关联工作区
+        # （workspace_id 升序第一个，D-004@v2），供下方 AgentSession.workspace_id
+        # 未显式指定时回填 + 写事务内 bind_session_to_ppm_item 落 link 快照。
+        # 项目无关联工作区 → ppm_ws=None，两者留空不阻塞（D-004）。缺省双 None
+        # 零分支进入（零回归）。
+        ppm_item_ok = False
+        ppm_ws: uuid.UUID | None = None
+        if ppm_item_kind is not None and ppm_item_id is not None:
+            _ppm_item = await load_ppm_item(self._session, ppm_item_kind, ppm_item_id)
+            if _ppm_item is None:
+                log.warning(
+                    "session_ppm_bind_item_missing",
+                    kind=ppm_item_kind,
+                    item_id=str(ppm_item_id),
+                )
+            else:
+                ppm_item_ok = True
+                ppm_ws = await resolve_item_workspace_id(self._session, ppm_item_kind, ppm_item_id)
+
         now = datetime.now(UTC)
         # Copy config so the request dict is never mutated (boundary #16).
         config: dict = {
@@ -1179,6 +1242,7 @@ class SessionService:
             from app.modules.daemon.session.context import (
                 build_change_context_preamble,
                 build_page_context_preamble,
+                build_ppm_item_context_preamble,
             )
 
             # 2026-07-09-change-detail-session / D-004@v1（X-02/X-04）：变更会话首轮
@@ -1202,6 +1266,29 @@ class SessionService:
                 if page_context is not None
                 else None
             )
+            # ── task-03（2026-08-28-session-ppm-task-binding / FR-03 / D-003/D-006/
+            # D-007）：PPM 附件物化 + PPM 条目前导，执行序＝物化在前、前导消费
+            # attachment_lines（design §5 Phase 2 不变量）──同样只落「写事务外」段：
+            # storage 读 IO（file bytes 读取 + session attachment store_bytes）/
+            # ``_can_access`` / 降级决策全部在本只读事务窗口内完成（首个写 flush
+            # 晚于下方 commit，对齐上方前导段的结构守卫）；``SessionAttachment``
+            # 行 insert 归写事务内（session.id 已知后，见下方组装段）。
+            ppm_preamble: str | None = None
+            ppm_prepared_attachments: list[_PreparedPpmAttachment] = []
+            if ppm_item_ok:
+                _ppm_lines, ppm_prepared_attachments = await self._materialize_ppm_attachments(
+                    user_id=user_id,
+                    kind=ppm_item_kind,
+                    item_id=ppm_item_id,
+                    provider=provider,
+                    manual_attachments=validated_attachments,
+                )
+                ppm_preamble = await build_ppm_item_context_preamble(
+                    self._session,
+                    ppm_item_kind,
+                    ppm_item_id,
+                    attachment_lines=_ppm_lines,
+                )
             await self._session.commit()
 
             session = AgentSession(
@@ -1213,7 +1300,11 @@ class SessionService:
                 turn_count=0,
                 created_at=now,
                 change_id=change_id,
-                workspace_id=workspace_id,
+                # task-02（FR-01 / D-004@v2）：显式 workspace_id 优先（含 team_
+                # mission E2 覆写）；未显式指定且命中 PPM 条目时回填解析的
+                # ppm_ws（条目所属项目第一个关联工作区快照）——只回填本列，
+                # cwd/dispatch 沿用既有 workspace_id 决策不新增覆盖（R-05）。
+                workspace_id=workspace_id if workspace_id is not None else ppm_ws,
                 cwd=cwd,
                 # task-03（FR-04/D-008）：会话配置三列（未选 = None = 现状，零回归）。
                 agent_profile_id=profile.id if profile is not None else None,
@@ -1283,6 +1374,21 @@ class SessionService:
                     await bind_session_to_quicklog(
                         self._session, workspace_id, quicklog_id, session.id
                     )
+            # ③ ppm_item_* 成对携带且条目存在（task-02 / 2026-08-28-session-ppm-
+            #    task-binding / FR-01 / D-005@v1）：bind_session_to_ppm_item 幂等写
+            #    ppm_item_session_links（自带 savepoint + log.warning 不抛，失败
+            #    不回滚创建主事务与 201）。workspace_id 快照取前置解析的 ppm_ws
+            #    （可空：项目无关联工作区留 None，D-004@v2——本表列可空，与
+            #    quicklog 的 NOT NULL 跳过守卫不同）。条目查无已被前置降级
+            #    （ppm_item_ok=False），此处不重复校验。
+            if ppm_item_ok:
+                await bind_session_to_ppm_item(
+                    self._session,
+                    workspace_id=ppm_ws,
+                    kind=ppm_item_kind,
+                    item_id=ppm_item_id,
+                    session_id=session.id,
+                )
 
             # ── task-09 / D-009@v2（flush-only 预建，R-04）：team_mission 预建 ──
             # session 行 add+flush 后、首 run 构造前调 task-04 helper（session
@@ -1364,7 +1470,14 @@ class SessionService:
                 from app.modules.agent.mission_context import build_orchestrator_briefing
 
                 briefing = await build_orchestrator_briefing(self._session, mission)
-            _prefix_parts = [part for part in (preamble, page_preamble, briefing) if part]
+            # task-03（2026-08-28-session-ppm-task-binding Phase 2 / FR-01/FR-03）：
+            # PPM 条目前导插在页面前导与团队简报之间并入 _prefix_parts（task-02
+            # 占位注释的落地点）——dispatch_prompt 经 lease metadata 携带前缀
+            # （既有机制），AgentRunLog(user_input)（下方）与首 turn SESSION_INJECT
+            # 展示层仍写干净用户原文（对齐变更/页面前导先例，零 daemon 改动）。
+            _prefix_parts = [
+                part for part in (preamble, page_preamble, ppm_preamble, briefing) if part
+            ]
             dispatch_prompt = (
                 "\n\n---\n\n".join([*_prefix_parts, prompt]) if _prefix_parts else prompt
             )
@@ -1422,6 +1535,34 @@ class SessionService:
                     dispatch.lease_id,
                     {"session_llm_provider_id": str(llm_provider_row.id)},
                 )
+
+            # ── task-03（2026-08-28-session-ppm-task-binding / FR-03 / D-006）：
+            # PPM 附件物化行落库（写事务内 flush-only，共用本方法唯一 commit）──
+            # 对象本体与降级决策已在写事务外完成（见方法顶部物化段）；此处
+            # session.id 已知，session_id 直接回填（跳过 draft 语义）、
+            # user_id=创建者，按列写入后并入 validated_attachments 复用下方既有
+            # 组装链（标记行/多模态块/落盘/8MB 闸门，daemon 协议零改动）。
+            # 不复用 SessionAttachmentService.upload()——其自带 commit 与 PIL/
+            # 大小校验，源文件已在 file 中心过上传校验不重复（TaskCard 事务口径）。
+            if ppm_prepared_attachments:
+                from app.modules.session_attachment.model import (
+                    SessionAttachment as _PpmSessionAttachment,
+                )
+
+                for _ppm_spec in ppm_prepared_attachments:
+                    _ppm_row = _PpmSessionAttachment(
+                        id=uuid.uuid4(),
+                        user_id=user_id,
+                        session_id=session.id,
+                        kind=_ppm_spec.kind,
+                        media_type=_ppm_spec.media_type,
+                        bytes=_ppm_spec.bytes,
+                        name=_ppm_spec.name,
+                        object_key=_ppm_spec.object_key,
+                        sha256=_ppm_spec.sha256,
+                    )
+                    self._session.add(_ppm_row)
+                    validated_attachments.append(_ppm_row)
 
             # ── ql-20260825-001：附件回填与组装（对齐 inject 路径 task-06 段）──
             # 同事务完成：①session_id 回填（draft→bound 唯一前进迁移）；②多模态
@@ -1612,6 +1753,139 @@ class SessionService:
             agent_run=run,
             lease_id=dispatch.lease_id,
         )
+
+    async def _materialize_ppm_attachments(
+        self,
+        *,
+        user_id: uuid.UUID,
+        kind: PpmItemKind,
+        item_id: uuid.UUID,
+        provider: str,
+        manual_attachments: list,
+    ) -> tuple[list[str], list[_PreparedPpmAttachment]]:
+        """PPM 条目附件物化/降级（task-03 / FR-03 / D-003/D-006/D-007，写事务外）。
+
+        消费链（design §5 Phase 2）：``item.file_urls`` → uuid 解析过滤（R-03：
+        非 uuid 条目直接进降级清单）→ task-01 :func:`load_item_files` 取存活
+        File 行 → 逐条 ``FileService._can_access`` 同口径校验（D-007：上传者
+        本人/平台管理员；ppm 附件 owner_type 不命中 workspace/agent 锚分支）→
+        有权且 provider=claude 且与手动附件合并后 图≤5/文≤5 的条目读 file
+        storage bytes → ``SessionAttachmentStorage.store_bytes``（内容寻址
+        sha256 去重）产出预备行；其余条目降级为前导文字清单。
+
+        - 降级四类（均不阻塞会话创建，TaskCard GWT-3）：无权 → 仅文件名 +
+          「无权访问」；超限 / provider≠claude / 读取失败（含 store 失败）/
+          File 已删或缺号的有权条目 → 文件名 + ``GET /api/file/{file_id}``
+          链接（软删/缺号行回查取文件名，查无以 file_id 兜底）。
+        - 纯只读 + storage IO、无 DB 写：``SessionAttachment`` 行 insert 归
+          create_session 写事务内（消费返回的 ``_PreparedPpmAttachment``）；
+          不复用 ``SessionAttachmentService.upload()``（自带 commit 与 PIL/
+          大小校验，源文件已在 file 中心过上传校验不重复）。
+        - item 查无（与前置解析窗口间的竞态）或 ``file_urls`` 为空 → 空产出。
+        """
+        from app.core.config import get_settings
+        from app.modules.auth.model import User as _User
+        from app.modules.file.model import File
+        from app.modules.file.service import FileService
+        from app.modules.session_attachment.service import (
+            MAX_FILES_PER_MESSAGE,
+            MAX_IMAGES_PER_MESSAGE,
+        )
+        from app.modules.session_attachment.storage import SessionAttachmentStorage
+        from app.modules.storage.factory import get_storage_backend
+
+        item = await load_ppm_item(self._session, kind, item_id)
+        if item is None:
+            return [], []
+        entries = list(item.file_urls or [])
+        if not entries:
+            return [], []
+
+        backend = get_storage_backend()
+        # D-007：直接复用 FileService 的归属判定（构造范式对齐 agent/service.py
+        # borrow 落 file 段：工厂单例 storage/settings，测试经 patch 注入 mock）。
+        file_svc = FileService(self._session, backend, get_settings())
+        session_store = SessionAttachmentStorage(backend)
+        actor = await self._session.get(_User, user_id)
+
+        live_rows = {row.id: row for row in await load_item_files(self._session, kind, item_id)}
+
+        # 与手动 attachment_ids 合并后的数量水位（图≤5/文≤5）——手动侧超限已在上
+        # 方整体 422；ppm 侧超限条目走降级清单不 4xx（不阻塞会话创建）。
+        image_n = sum(1 for r in manual_attachments if getattr(r, "kind", None) == "image")
+        file_n = sum(1 for r in manual_attachments if getattr(r, "kind", None) == "file")
+
+        degrade_lines: list[str] = []
+        prepared: list[_PreparedPpmAttachment] = []
+        for entry in entries:
+            # R-03：file_urls 历史数据混有旧 URL 字符串——非 uuid 条目直接进降级清单。
+            try:
+                file_id = uuid.UUID(str(entry))
+            except (ValueError, AttributeError, TypeError):
+                degrade_lines.append(str(entry))
+                continue
+            row = live_rows.get(file_id)
+            if row is None:
+                # File 已删/缺号：回查行（含软删）取文件名，降级为文件名 + GET 链接。
+                soft_row = await self._session.get(File, file_id)
+                name = (soft_row.original_name if soft_row is not None else None) or str(file_id)
+                degrade_lines.append(f"{name}：GET /api/file/{file_id}")
+                continue
+            if actor is None or not await file_svc._can_access(user=actor, row=row):
+                degrade_lines.append(f"{row.original_name}（无权访问）")
+                continue
+            if provider != "claude":
+                degrade_lines.append(f"{row.original_name}：GET /api/file/{row.id}")
+                continue
+            entry_kind = "image" if (row.mime_type or "").startswith("image/") else "file"
+            if (entry_kind == "image" and image_n >= MAX_IMAGES_PER_MESSAGE) or (
+                entry_kind == "file" and file_n >= MAX_FILES_PER_MESSAGE
+            ):
+                degrade_lines.append(f"{row.original_name}：GET /api/file/{row.id}")
+                continue
+            # 读 file storage bytes（整体读入；单附件大小已在 file 中心上传侧受限）。
+            try:
+                data = b"".join(
+                    [chunk async for chunk in backend.get_object_stream(row.stored_key)]
+                )
+            except Exception as exc:
+                log.warning(
+                    "session_ppm_attachment_read_failed",
+                    file_id=str(row.id),
+                    error=str(exc),
+                )
+                degrade_lines.append(f"{row.original_name}：GET /api/file/{row.id}")
+                continue
+            try:
+                object_key, sha256 = await session_store.store_bytes(
+                    user_id=user_id,
+                    data=data,
+                    media_type=row.mime_type,
+                    name=row.original_name,
+                )
+            except Exception as exc:
+                log.warning(
+                    "session_ppm_attachment_store_failed",
+                    file_id=str(row.id),
+                    error=str(exc),
+                )
+                degrade_lines.append(f"{row.original_name}：GET /api/file/{row.id}")
+                continue
+            if entry_kind == "image":
+                image_n += 1
+            else:
+                file_n += 1
+            prepared.append(
+                _PreparedPpmAttachment(
+                    kind=entry_kind,
+                    media_type=row.mime_type,
+                    bytes=len(data),
+                    name=row.original_name[:255],
+                    object_key=object_key,
+                    sha256=sha256,
+                )
+            )
+        return degrade_lines, prepared
 
     async def _converge_failed_dispatch(
         self,
@@ -2247,6 +2521,12 @@ class SessionService:
         # 不注入 prompt 前导；缺省 None = 不绑定（零回归）。
         bind_change_key: str | None = None,
         bind_quick_id: str | None = None,
+        # task-02（2026-08-28-session-ppm-task-binding / FR-02 / D-005@v1）：@ 联想
+        # 选中 PPM 任务/问题的追问绑定成对字段——见下方「PPM 条目追问绑定」段
+        # （load_ppm_item 校验 + bind_session_to_ppm_item 幂等追加，不注入前导）；
+        # 缺省 None = 不绑定（零回归）。
+        bind_ppm_item_kind: PpmItemKind | None = None,
+        bind_ppm_item_id: uuid.UUID | None = None,
         # ql-20260825-011：忙轮（已有活跃 run）时入队而不是 409 拒绝（后端真实
         # 排队，刷新页面不丢）。默认 False 保持既有拒绝语义（service 身份路径 /
         # 平台审批代写等调用方零回归）；前端会话 UI 置 True。
@@ -2357,6 +2637,41 @@ class SessionService:
                     workspace_id=str(bind_workspace_id),
                     bind_change_key=bind_change_key,
                     bind_quick_id=bind_quick_id,
+                )
+        # ── task-02（2026-08-28-session-ppm-task-binding / FR-02 / D-005@v1）：
+        # PPM 条目追问绑定──bind_ppm_item_* 成对携带时 load_ppm_item 校验
+        # 条目存在性（不存在仅 warning 跳过，§9 降级不报错、消息照常派发）→
+        # bind_session_to_ppm_item 幂等追加 link（savepoint best-effort，失败不
+        # 阻断消息发送，本层不重复 try/except）；**不注入 prompt 前导**（task-03
+        # 已在 create_session 落前导/附件物化；追问路径按 design §5 Phase 4 只写
+        # link 不注入前导，对齐 bind_quick_id 行为）。workspace 取会话自身
+        # workspace_id 传参（对齐 bind_session_to_quicklog 模式；本表列可空，
+        # 会话无工作区时 link 快照留 None，不设跳过守卫）。
+        if bind_ppm_item_kind is not None and bind_ppm_item_id is not None:
+            _ppm_item = await load_ppm_item(self._session, bind_ppm_item_kind, bind_ppm_item_id)
+            if _ppm_item is None:
+                log.warning(
+                    "session_ppm_bind_item_missing",
+                    kind=bind_ppm_item_kind,
+                    item_id=str(bind_ppm_item_id),
+                    session_id=str(session.id),
+                )
+            else:
+                await bind_session_to_ppm_item(
+                    self._session,
+                    workspace_id=session.workspace_id,
+                    kind=bind_ppm_item_kind,
+                    item_id=bind_ppm_item_id,
+                    session_id=session.id,
+                )
+                # 事件名语义对齐上方 A-2 口径：表达「已请求绑定」，真实落库以
+                # ppm_item_session_links 表为准（binder 失败时自身记 warning）。
+                log.info(
+                    "session_bind_requested",
+                    session_id=str(session.id),
+                    workspace_id=str(session.workspace_id),
+                    bind_ppm_item_kind=bind_ppm_item_kind,
+                    bind_ppm_item_id=str(bind_ppm_item_id),
                 )
         # ── task-05（design §3.3.4 / D-010）：tool_report 会话懒激活分支 ──────────
         # CLI 工具上报聚合出的「本地 Agent 会话」（origin='tool_report'，创建时
@@ -4220,6 +4535,10 @@ class SessionService:
         # 2026-08-25-session-spec-binding task-04 / FR-05：快速修复级关联筛选
         # （ql_id 为自然键短码 ``ql-YYYYMMDD-NNN-后缀``，非 UUID）。
         ql_id: str | None = None,
+        # task-02（2026-08-28-session-ppm-task-binding / FR-05 / D-005@v1）：PPM
+        # 条目级关联筛选（kind + item_id 成对，router 层已校验配对与 Literal）。
+        ppm_item_kind: PpmItemKind | None = None,
+        ppm_item_id: uuid.UUID | None = None,
         # 2026-08-24：会话归档过滤（archived=True 只看已归档，False 只看未归档）。
         archived: bool = False,
     ) -> tuple[list[AgentSession], int]:
@@ -4263,6 +4582,14 @@ class SessionService:
           参数非空时子查询同步收紧到该工作区；为空时按 ql_id 全工作区命中
           （列表本身 owner-scoped，串扰面已受限，design §5.W3.3 允许）。
           与其余筛选 AND 交集组合（``change_id`` + ``ql_id`` 同传即双关联交集）。
+
+        2026-08-28-session-ppm-task-binding task-02 / FR-05 新增（可选，零回归）：
+
+        - ``ppm_item_kind`` + ``ppm_item_id``：PPM 条目级关联筛选，走
+          ``ppm_item_session_links`` (kind, item_id) 子查询命中（照 change_id
+          分支模式）。``item_id`` 为 UUID 全局唯一，无跨工作区串扰，不叠
+          workspace 条件；与其余筛选 AND 交集组合。成对约束由 router 层
+          校验（只传其一 422），service 层双 None 时零分支进入。
         """
         from sqlalchemy import exists, func
 
@@ -4304,6 +4631,19 @@ class SessionService:
                 ql_filters.append(QuicklogSessionLink.workspace_id == workspace_id)
             base_filters.append(
                 AgentSession.id.in_(select(QuicklogSessionLink.session_id).where(*ql_filters))
+            )
+        if ppm_item_kind is not None and ppm_item_id is not None:
+            # task-02（2026-08-28-session-ppm-task-binding / FR-05 / D-005@v1）：
+            # PPM 条目级关联筛选——照 change_id 分支模式走 ppm_item_session_links
+            # 子查询命中。item_id 为 UUID 全局唯一（kind+item_id 定位唯一条目），
+            # 无跨工作区串扰，不叠 workspace 条件（区别于 ql_id 双条件）。
+            base_filters.append(
+                AgentSession.id.in_(
+                    select(PpmItemSessionLink.session_id).where(
+                        PpmItemSessionLink.kind == ppm_item_kind,
+                        PpmItemSessionLink.item_id == ppm_item_id,
+                    )
+                )
             )
         if machine_id is not None:
             base_filters.append(

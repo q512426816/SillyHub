@@ -671,6 +671,11 @@ class DaemonService:
         quicklog_id: str | None = None,
         # ql-20260825-001：预会话首句附件透传（校验/标记行/组装归 SessionService）。
         attachment_ids: list[uuid.UUID] | None = None,
+        # task-02（2026-08-28-session-ppm-task-binding / FR-01）：PPM 条目成对
+        # 绑定字段透传（item 校验/工作区解析/落 link 归 SessionService，facade
+        # 显式签名同步——漏透传会 500，同款教训）。
+        ppm_item_kind: str | None = None,
+        ppm_item_id: uuid.UUID | None = None,
     ) -> SessionDispatchResult:
         return await self._sess.create_session(
             user_id,
@@ -689,6 +694,8 @@ class DaemonService:
             page_context=page_context,
             quicklog_id=quicklog_id,
             attachment_ids=attachment_ids,
+            ppm_item_kind=ppm_item_kind,
+            ppm_item_id=ppm_item_id,
         )
 
     async def inject_session(
@@ -711,6 +718,10 @@ class DaemonService:
         # 同步——漏透传会 500，见 create quicklog_id 同款教训）。
         bind_change_key: str | None = None,
         bind_quick_id: str | None = None,
+        # task-02（2026-08-28-session-ppm-task-binding / FR-02）：PPM 条目追问
+        # 绑定成对字段透传（幂等 binder 归 SessionService，facade 签名同步）。
+        bind_ppm_item_kind: str | None = None,
+        bind_ppm_item_id: uuid.UUID | None = None,
         # ql-20260825-011：忙轮入队透传（后端真实排队）。
         queue_when_busy: bool = False,
     ) -> SessionDispatchResult:
@@ -724,6 +735,8 @@ class DaemonService:
             page_context=page_context,
             bind_change_key=bind_change_key,
             bind_quick_id=bind_quick_id,
+            bind_ppm_item_kind=bind_ppm_item_kind,
+            bind_ppm_item_id=bind_ppm_item_id,
             queue_when_busy=queue_when_busy,
         )
 
@@ -846,6 +859,10 @@ class DaemonService:
         # 2026-08-25-session-spec-binding task-04 / FR-05：快速修复级关联筛选透传
         # （facade 签名需与 SessionService.list_agent_sessions 同步，缺省会 500）。
         ql_id: str | None = None,
+        # task-02（2026-08-28-session-ppm-task-binding / FR-05）：PPM 条目级关联
+        # 筛选透传（facade 签名同步，缺省会 500）。
+        ppm_item_kind: str | None = None,
+        ppm_item_id: uuid.UUID | None = None,
         # 2026-08-24：会话归档过滤。
         archived: bool = False,
     ) -> tuple[list[AgentSession], int]:
@@ -862,6 +879,8 @@ class DaemonService:
             workspace_id=workspace_id,
             change_id=change_id,
             ql_id=ql_id,
+            ppm_item_kind=ppm_item_kind,
+            ppm_item_id=ppm_item_id,
             archived=archived,
         )
 

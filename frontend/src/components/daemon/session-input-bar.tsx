@@ -57,9 +57,11 @@ import {
 import {
   applyMentionPick,
   detectMention,
+  sanitizePpmInsertKey,
   type MentionDetection,
 } from "@/lib/session-mention";
-import { useMentionSources } from "@/lib/session-mention-sources";
+import { useMentionSources, type PpmMentionScope } from "@/lib/session-mention-sources";
+import type { PpmItemKind } from "@/lib/daemon";
 
 /* ── ql-20260826-010：输入框高度拖拽调节（全局持久化）────────────────────── */
 
@@ -88,12 +90,17 @@ function readPersistedInputHeight(): number | null {
  * change/quick 两槽位独立、同类型后选覆盖先选；父级（task-05）随发送组装
  * （预会话 change_id/quicklog_id、真会话 bind_change_key/bind_quick_id）并在
  * 发送成功后清空——本组件只回传不持有业务语义。
+ * task-06（2026-08-28-session-ppm-task-binding / FR-02）：新增 ppmItem 槽位
+ * （PPM 任务/问题同槽互斥、后选覆盖先选——createSession/inject 的 ppm 绑定
+ * 参数是成对单值；title 供父级预会话 chip 展示「PPM 任务/问题 · 标题」）。
  */
 export interface SessionInputMentions {
   /** 变更槽位（@ 变更联想选中）。 */
   change?: { id: string; change_key: string };
   /** 快速修复槽位（@ 快速修复联想选中）。 */
   quick?: { ql_id: string };
+  /** PPM 条目槽位（@ PPM 任务/问题联想选中，task-06）。 */
+  ppmItem?: { kind: PpmItemKind; id: string; title?: string | null };
 }
 
 export interface SessionInputBarProps {
@@ -151,7 +158,8 @@ type MentionSourcesSnapshot = ReturnType<typeof useMentionSources>;
  * 数据快照内容级比较（回流去重）：useMentionSources 每次渲染都返回新对象/新
  * 数组字面量（`?? []` / filter 产物），按引用比较会让「桥 effect → 父 setState
  * → 桥重渲」成环；按元素身份逐位比较数组内容，加载态的重复空数组与稳定缓存
- * 数据均判等收敛，setState bail-out 截断回流。
+ * 数据均判等收敛，setState bail-out 截断回流。PPM 两分组（task-06）同口径
+ * 扩展；可选链防御旧 harness 的部分快照 mock（运行时缺字段不炸）。
  */
 function isSameMentionSources(
   a: MentionSourcesSnapshot,
@@ -164,7 +172,11 @@ function isSameMentionSources(
     a.quicklogs.length === b.quicklogs.length &&
     a.skills.every((s, i) => s === b.skills[i]) &&
     a.changes.every((c, i) => c === b.changes[i]) &&
-    a.quicklogs.every((q, i) => q === b.quicklogs[i])
+    a.quicklogs.every((q, i) => q === b.quicklogs[i]) &&
+    (a.ppmTasks ?? []).length === (b.ppmTasks ?? []).length &&
+    (a.ppmProblems ?? []).length === (b.ppmProblems ?? []).length &&
+    (a.ppmTasks ?? []).every((t, i) => t === (b.ppmTasks ?? [])[i]) &&
+    (a.ppmProblems ?? []).every((p, i) => p === (b.ppmProblems ?? [])[i])
   );
 }
 
@@ -174,15 +186,19 @@ function isSameMentionSources(
  * harness（session-panel 系既有测试、高度/抽取回归）不挂载本桥即零依赖零
  * 副作用；真实浏览器打字必先聚焦，聚焦即预取对齐 design §5「挂载 prefetch +
  * staleTime，输入过程零网络请求」语义（staleTime 5 分钟由 task-04 内部设置）。
+ * task-06：ppmScope 透传（PPM 分组状态口径，进缓存键换键重拉——开关状态由
+ * 本组件持有，浮层经 onPpmScopeChange 回调翻转）。
  */
 function MentionSourcesBridge({
   workspaceId,
+  ppmScope,
   onData,
 }: {
   workspaceId: string | null | undefined;
+  ppmScope: PpmMentionScope;
   onData: (sources: MentionSourcesSnapshot) => void;
 }) {
-  const sources = useMentionSources(workspaceId);
+  const sources = useMentionSources(workspaceId, ppmScope);
   useEffect(() => {
     onData(sources);
   }, [onData, sources]);
@@ -228,15 +244,21 @@ export function SessionInputBar({
   /** @ 选中累计（同类型后选覆盖先选；/ 选中不动槽位；受控 value 归空时随
    *  归空 effect 复位为 {} 并以 {} 回调 onMentionsChange（双向复位——父级
    *  pendingMentions 同步归零，防陈旧槽位跨消息/跨上下文泄漏，见下方归空
-   *  effect 注释）。 */
+   *  effect 注释）。task-06：ppmItem 槽位（任务/问题同槽互斥）同语义。 */
   const mentionsRef = useRef<SessionInputMentions>({});
   /** 联想数据桥挂载门（textarea 首次聚焦，见 MentionSourcesBridge 注释）。 */
   const [mentionSourcesMounted, setMentionSourcesMounted] = useState(false);
+  /** task-06（FR-02 / D-002@v1）：PPM 分组状态口径开关——ongoing（默认仅
+   *  进行中）↔ all（全状态可关联）；经桥透传数据源进键重拉，经浮层分组头
+   *  「切全部/仅进行中」回调翻转。 */
+  const [ppmScope, setPpmScope] = useState<PpmMentionScope>("ongoing");
   /** 联想数据快照（桥回流；未聚焦前保持空快照——浮层此时至多显示空态引导）。 */
   const [mentionSources, setMentionSources] = useState<MentionSourcesSnapshot>(() => ({
     skills: [],
     changes: [],
     quicklogs: [],
+    ppmTasks: [],
+    ppmProblems: [],
     atEnabled: false,
   }));
   const handleMentionSources = useCallback((next: MentionSourcesSnapshot) => {
@@ -348,6 +370,21 @@ export function SessionInputBar({
         insertKey = item.entity.ql_id;
         mentionsNext = { ...mentionsRef.current, quick: { ql_id: item.entity.ql_id } };
         break;
+      case "ppmTask":
+      case "ppmProblem":
+        // task-06（FR-02）：回填键 = 清洗后的条目标题（压空白 + 截断，绑定走
+        // 结构化槽位不依赖回填文本）；ppmItem 槽位任务/问题同槽互斥、后选覆盖
+        // 先选（create/inject 的 ppm 绑定参数成对单值）。
+        insertKey = sanitizePpmInsertKey(item.entity.title);
+        mentionsNext = {
+          ...mentionsRef.current,
+          ppmItem: {
+            kind: item.entity.kind,
+            id: item.entity.id,
+            title: item.entity.title,
+          },
+        };
+        break;
     }
     const picked = applyMentionPick(value, detection, insertKey);
     onChange(picked.value);
@@ -360,12 +397,18 @@ export function SessionInputBar({
     closeMention();
   };
 
-  // 候选组装（task-02 纯函数）：/ = 内置 /team 置顶 + 技能；@ = 变更 + 快速修复。
+  // 候选组装（task-02 纯函数）：/ = 内置 /team 置顶 + 技能；@ = 变更 + 快速
+  // 修复 + PPM 任务/问题（task-06；?? [] 防御旧 harness 部分快照 mock）。
   const mentionItems = useMemo(
     () =>
       mention?.trigger === "/"
         ? buildSlashMentionItems(mentionSources.skills)
-        : buildAtMentionItems(mentionSources.changes, mentionSources.quicklogs),
+        : buildAtMentionItems(
+            mentionSources.changes,
+            mentionSources.quicklogs,
+            mentionSources.ppmTasks ?? [],
+            mentionSources.ppmProblems ?? [],
+          ),
     [mention?.trigger, mentionSources],
   );
   // 过滤口径与浮层渲染共享同一纯函数（filterMentionItems 单一源），保证键盘
@@ -406,7 +449,11 @@ export function SessionInputBar({
   // 组件侧/父级选中均原地保留随重试再携带。
   useEffect(() => {
     if (value !== "") return;
-    if (mentionsRef.current.change !== undefined || mentionsRef.current.quick !== undefined) {
+    if (
+      mentionsRef.current.change !== undefined ||
+      mentionsRef.current.quick !== undefined ||
+      mentionsRef.current.ppmItem !== undefined
+    ) {
       mentionsRef.current = {};
       onMentionsChangeRef.current?.({});
     }
@@ -584,18 +631,26 @@ export function SessionInputBar({
           契约原样（task-13 / D-7）。task-03 加 relative 作联想浮层锚区
           （absolute bottom-full，与 TeamTriggerPopover 同锚区同层族，R-5）。 */}
       <div className="relative flex items-end gap-2 rounded-2xl border border-border bg-muted/40 px-2.5 py-2 transition-all focus-within:border-primary focus-within:bg-card focus-within:ring-4 focus-within:ring-brand-100">
-        {/* task-03：联想数据桥（首次聚焦挂载，见 MentionSourcesBridge 注释）。 */}
+        {/* task-03：联想数据桥（首次聚焦挂载，见 MentionSourcesBridge 注释；
+            task-06：ppmScope 状态口径透传——切开关换键重拉 PPM 两分组）。 */}
         {mentionSourcesMounted && (
-          <MentionSourcesBridge workspaceId={workspaceId} onData={handleMentionSources} />
+          <MentionSourcesBridge
+            workspaceId={workspaceId}
+            ppmScope={ppmScope}
+            onData={handleMentionSources}
+          />
         )}
         {/* task-03：联想浮层（task-02）——检测命中渲染，随 query 过滤；键盘
-            ↑↓/Enter/Tab/Esc 经下方 textarea onKeyDown 首位接管。 */}
+            ↑↓/Enter/Tab/Esc 经下方 textarea onKeyDown 首位接管。task-06：
+            ppmScope/onPpmScopeChange 透传（PPM 分组头「切全部/仅进行中」开关）。 */}
         {mention && (
           <SessionMentionPopover
             trigger={mention.trigger}
             query={mention.query}
             items={mentionItems}
             activeIndex={mentionActiveIndex}
+            ppmScope={ppmScope}
+            onPpmScopeChange={setPpmScope}
             onSelect={(entity) => {
               // 浮层抛原始实体（引用透传）——在候选里按身份找回条目取 kind
               //（回填名与槽位判定收敛在本层）。
@@ -711,12 +766,12 @@ export function SessionInputBar({
                   insertMentionTrigger("@");
                 }}
                 disabled={!workspaceId}
-                title={workspaceId ? "插入 @ 关联变更 / 快速修复" : "需在绑定工作区的会话中关联变更"}
+                title={workspaceId ? "插入 @ 关联变更 / 快速修复 / PPM 任务/问题" : "需在绑定工作区的会话中关联条目"}
                 className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <AtSign aria-hidden className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <span className="min-w-0">
-                  <span className="block text-[13px] leading-5">关联变更 / 快速修复</span>
+                  <span className="block text-[13px] leading-5">关联变更 / 快速修复 / PPM</span>
                   <span className="block text-[11px] leading-4 text-muted-foreground">
                     @ 绑定任务上下文
                   </span>

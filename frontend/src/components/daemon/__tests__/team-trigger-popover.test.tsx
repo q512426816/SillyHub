@@ -658,3 +658,109 @@ describe("TeamTriggerPopover probe 失败 fail-safe", () => {
     expect(lastPayload()).toEqual({ objective: null, budget_usd: null });
   });
 });
+
+/* ───────────────── 12. task-07 Phase 5：defaultProjectId 预选（FR-06 / D-004@v2） ───────────────── */
+
+describe("TeamTriggerPopover defaultProjectId 预选（悬浮预会话「发起团队」入口）", () => {
+  it("项目预选 + scopeMode=项目维度 + 关联工作区按 workspace_id 升序自动预选第一个（进 payload）", async () => {
+    listProjectsMock.mockResolvedValue([
+      makeProject("p-1", "网站重构项目"),
+      makeProject("p-2", "移动端项目"),
+    ]);
+    // 乱序返回：按 workspace_id 字典序（D-004@v2 同键）应预选 ws-a。
+    listProjectWorkspacesMock.mockResolvedValue([
+      makeWs("ws-b", "平台前端", "frontend-code"),
+      makeWs("ws-a", "sillyspec", "backend-code"),
+    ]);
+    // 悬浮预会话入口形态：会话未绑定工作区 + defaultProjectId。
+    setup({ workspaceId: null, workspaceName: null, defaultProjectId: "p-1" });
+
+    // scopeMode 预选项目维度（会话工作区选项禁用，项目 radio 选中）。
+    const projectRadio = await waitFor(() =>
+      screen.getByRole("radio", { name: /项目维度/ }),
+    );
+    expect(projectRadio).toBeChecked();
+
+    // 项目下拉初值预选（无需用户手选）。
+    const select = (await screen.findByLabelText(
+      /选择项目/,
+    )) as HTMLSelectElement;
+    expect(select.value).toBe("p-1");
+
+    // 关联工作区自动拉取 + 升序预选第一个（ws-a 勾选、ws-b 未勾）。
+    //（预选后 anchor 胶囊同名展示，文本查询会多命中——直接对 checkbox 断言。）
+    await waitFor(() =>
+      expect(
+        screen.getByRole("checkbox", { name: /勾选工作区 sillyspec/ }),
+      ).toBeChecked(),
+    );
+    expect(
+      screen.getByRole("checkbox", { name: /勾选工作区 平台前端/ }),
+    ).not.toBeChecked();
+
+    // 预选随确认进 payload。
+    fireEvent.click(screen.getByRole("button", { name: /就绪，随下条消息发出/ }));
+    await waitFor(() => expect(HANDLERS.onTrigger).toHaveBeenCalledTimes(1));
+    expect(lastPayload()).toEqual(
+      expect.objectContaining({
+        project_id: "p-1",
+        scope_workspace_ids: ["ws-a"],
+      }),
+    );
+  });
+
+  it("有会话工作区时 defaultProjectId 仍预选项目维度（入口上下文优先）", async () => {
+    listProjectsMock.mockResolvedValue([makeProject("p-1", "网站重构项目")]);
+    listProjectWorkspacesMock.mockResolvedValue([makeWs("ws-a", "sillyspec", "backend-code")]);
+    setup({ defaultProjectId: "p-1" });
+
+    // 等项目列表加载完成后断言：入口上下文优先 → 项目维度选中（当前工作区不选）。
+    await waitFor(() =>
+      expect(screen.getByRole("radio", { name: /项目维度/ })).toBeChecked(),
+    );
+    expect(screen.getByRole("radio", { name: /当前工作区/ })).not.toBeChecked();
+  });
+
+  it("项目无关联工作区：不报错、无勾选，确认走既有「至少一个工作区」校验文案", async () => {
+    listProjectsMock.mockResolvedValue([makeProject("p-1", "网站重构项目")]);
+    listProjectWorkspacesMock.mockResolvedValue([]);
+    setup({ workspaceId: null, workspaceName: null, defaultProjectId: "p-1" });
+
+    expect(await screen.findByText(/该项目未关联工作区/)).toBeInTheDocument();
+    // 确认按钮可用（不被预选逻辑禁用/崩溃），点击走既有校验。
+    fireEvent.click(screen.getByRole("button", { name: /就绪，随下条消息发出/ }));
+    expect(
+      await screen.findByText(/勾选至少一个工作区/),
+    ).toBeInTheDocument();
+    expect(HANDLERS.onTrigger).not.toHaveBeenCalled();
+  });
+
+  it("预选一次后改选其它项目 → 不再自动预选（scope 空选走原逻辑）", async () => {
+    listProjectsMock.mockResolvedValue([
+      makeProject("p-1", "网站重构项目"),
+      makeProject("p-2", "移动端项目"),
+    ]);
+    listProjectWorkspacesMock.mockImplementation(async (projectId: string) =>
+      projectId === "p-1"
+        ? [makeWs("ws-a", "sillyspec", "backend-code")]
+        : [makeWs("ws-c", "共享文档盘", "docs")],
+    );
+    setup({ workspaceId: null, workspaceName: null, defaultProjectId: "p-1" });
+
+    // p-1 预选完成（waitFor 勾选态——预选 effect 在列表渲染后一拍生效）。
+    await waitFor(() =>
+      expect(
+        screen.getByRole("checkbox", { name: /勾选工作区 sillyspec/ }),
+      ).toBeChecked(),
+    );
+
+    // 改选 p-2：工作区列表换新，不自动勾选（预选仅消费一次）。
+    fireEvent.change(screen.getByLabelText(/选择项目/), {
+      target: { value: "p-2" },
+    });
+    expect(await screen.findByText("共享文档盘")).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: /勾选工作区 共享文档盘/ }),
+    ).not.toBeChecked();
+  });
+});

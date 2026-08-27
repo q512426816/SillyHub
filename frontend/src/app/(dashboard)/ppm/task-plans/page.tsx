@@ -46,6 +46,10 @@ import type {
   ProjectSimpleItem,
 } from "@/lib/ppm/types";
 import { useSession } from "@/stores/session";
+// task-05（2026-08-28-session-ppm-task-binding / FR-04）：个人任务行「发起会话」
+// 入口（pendingPpmItem 挂起位通道）+ 关联会话卡挂载（行展开）。
+import { useFloatingSessionStore } from "@/stores/floating-session";
+import { PpmItemSessionsCard } from "@/components/ppm/ppm-item-sessions-card";
 import {
   DEFAULT_PAGE_SIZE,
   PAGE_SIZE_OPTIONS,
@@ -94,6 +98,21 @@ function Field({
 export default function TaskPlansPage() {
   const currentUser = useSession((s) => s.user);
   const notify = useNotify();
+
+  // task-05（FR-04 / D-001@v1）：「发起会话」触发通道——写 pendingPpmItem 挂起位
+  // （kind=plan_task + id + projectId 供宿主解析工作区 + content 作 chip 标题）+
+  // requestNewSession 唤起悬浮抽屉（requestNewSession 清 preContext，绑定走挂起位）。
+  const setPendingPpmItem = useFloatingSessionStore((s) => s.setPendingPpmItem);
+  const requestNewSession = useFloatingSessionStore((s) => s.requestNewSession);
+  const handleStartItemSession = (t: PlanTask) => {
+    setPendingPpmItem({
+      kind: "plan_task",
+      id: t.id,
+      projectId: t.project_id,
+      title: t.content,
+    });
+    requestNewSession(null);
+  };
 
   const [view, setView] = useState<ViewMode>("all");
   const [rows, setRows] = useState<PlanTask[]>([]);
@@ -375,7 +394,7 @@ export default function TaskPlansPage() {
       title: "操作",
       key: "actions",
       align: "center",
-      width: 180,
+      width: 240,
       fixed: "right",
       render: (_v, t: PlanTask) => {
         const isOwner = currentUser?.id === t.user_id;
@@ -421,6 +440,17 @@ export default function TaskPlansPage() {
                 }
               >
                 编辑
+              </Button>
+            )}
+            {/* task-05（FR-04）：个人任务视图行「发起会话」——悬浮抽屉预会话
+                携带本条任务绑定（首句创建落 ppm_item_session_links）。 */}
+            {view === "personal" && (
+              <Button
+                size="small"
+                type="link"
+                onClick={() => handleStartItemSession(t)}
+              >
+                发起会话
               </Button>
             )}
           </div>
@@ -571,6 +601,23 @@ export default function TaskPlansPage() {
           tableLayout="fixed"
           rowClassName={(_row, idx) => (idx % 2 === 1 ? "bg-muted/40" : "")}
           scroll={{ x: "max-content", y: "calc(100vh - 430px)" }}
+          /* task-05（FR-04）：个人任务视图行展开挂载关联会话卡（本人前 3 条预览
+             + ?session= 深链 + 「+ 新会话」同入口发起）；全部任务视图不展开
+             （入口形态按 GWT-1 限定个人视图）。 */
+          expandable={
+            view === "personal"
+              ? {
+                  expandedRowRender: (t: PlanTask) => (
+                    <PpmItemSessionsCard
+                      kind="plan_task"
+                      itemId={t.id}
+                      projectId={t.project_id}
+                      title={t.content}
+                    />
+                  ),
+                }
+              : undefined
+          }
           pagination={{
             current: page,
             pageSize,

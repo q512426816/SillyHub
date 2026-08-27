@@ -26,6 +26,10 @@ import { ApiError } from "@/lib/api";
 import { listPersonalPlanTasks, startPlanTask } from "@/lib/ppm/task";
 import { listSimpleProjects } from "@/lib/ppm/project";
 import type { PlanTask, PlanTaskPageReq, ProjectSimpleItem } from "@/lib/ppm/types";
+// task-05（2026-08-28-session-ppm-task-binding / FR-04）：我的任务行「发起会话」
+// 入口（pendingPpmItem 挂起位通道）+ 关联会话卡挂载（行展开）。
+import { useFloatingSessionStore } from "@/stores/floating-session";
+import { PpmItemSessionsCard } from "@/components/ppm/ppm-item-sessions-card";
 import {
   TaskDetailModal,
   type TaskDetailMode,
@@ -129,6 +133,21 @@ export function WorkbenchTaskTable({ onChanged, targetUserId, readOnly }: Workbe
   const [detailMode, setDetailMode] = useState<TaskDetailMode>("detail");
   const { toast, showToast } = useToast();
 
+  // task-05（FR-04 / D-001@v1）：「发起会话」触发通道——写 pendingPpmItem 挂起位
+  // + requestNewSession 唤起悬浮抽屉（绑定经挂起位构造，宿主解析项目第一个
+  // 关联工作区预填）。readOnly（查看他人工作台）不放行（操作列整体只读口径）。
+  const setPendingPpmItem = useFloatingSessionStore((s) => s.setPendingPpmItem);
+  const requestNewSession = useFloatingSessionStore((s) => s.requestNewSession);
+  const handleStartItemSession = (t: PlanTask) => {
+    setPendingPpmItem({
+      kind: "plan_task",
+      id: t.id,
+      projectId: t.project_id,
+      title: t.content,
+    });
+    requestNewSession(null);
+  };
+
   // 启动只切状态(D-002, 对齐任务计划页): startPlanTask→刷本表+回调 page 刷 summary+toast, 不弹执行窗
   const handleStart = async (task: PlanTask) => {
     try {
@@ -185,7 +204,7 @@ export function WorkbenchTaskTable({ onChanged, targetUserId, readOnly }: Workbe
       title: "操作",
       key: "action",
       align: "center",
-      width: 180,
+      width: 260,
       render: (_v: unknown, t: PlanTask) =>
         readOnly ? (
           <span className="text-xs text-muted-foreground">仅查看</span>
@@ -218,6 +237,15 @@ export function WorkbenchTaskTable({ onChanged, targetUserId, readOnly }: Workbe
                 执行
               </Button>
             )}
+            {/* task-05（FR-04）：我的任务行「发起会话」——悬浮抽屉预会话携带
+                本条任务绑定（首句创建落 ppm_item_session_links）。 */}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => handleStartItemSession(t)}
+            >
+              发起会话
+            </Button>
           </div>
         ),
     },
@@ -309,6 +337,22 @@ export function WorkbenchTaskTable({ onChanged, targetUserId, readOnly }: Workbe
         dataSource={tasks}
         loading={loading}
         emptyText="暂无任务"
+        /* task-05（FR-04）：我的任务行展开挂载关联会话卡（本人前 3 条预览 +
+           ?session= 深链 + 「+ 新会话」同入口发起）；readOnly 不展开（只读口径）。 */
+        expandable={
+          !readOnly
+            ? {
+                expandedRowRender: (t: PlanTask) => (
+                  <PpmItemSessionsCard
+                    kind="plan_task"
+                    itemId={t.id}
+                    projectId={t.project_id}
+                    title={t.content}
+                  />
+                ),
+              }
+            : undefined
+        }
       />
 
       {/* 任务详情/执行弹窗(抽自任务计划页的 TaskDetailModal, 2026-07-20-workbench-task-modal-align) */}

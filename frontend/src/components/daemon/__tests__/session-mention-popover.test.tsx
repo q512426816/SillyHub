@@ -44,6 +44,7 @@ import {
   handleMentionKeyDown,
   type SessionMentionItem,
 } from "../session-mention-popover";
+import type { MentionPpmItem } from "@/lib/session-mention";
 import type { PlatformSkillSummary } from "@/lib/custom-skills";
 import type { ChangeSummary } from "@/lib/changes";
 import type { QuicklogEntryListItem } from "@/lib/quicklog";
@@ -82,6 +83,35 @@ function quick(ql_id: string, title: string): QuicklogEntryListItem {
   };
 }
 
+/** task-06：PPM 任务/问题归一条目（MentionPpmItem 形态）。 */
+function ppmTask(
+  id: string,
+  title: string,
+  projectName: string | null,
+): MentionPpmItem {
+  return {
+    kind: "plan_task",
+    id,
+    title,
+    projectName,
+    subtitle: null,
+  };
+}
+
+function ppmProblem(
+  id: string,
+  title: string,
+  projectName: string | null,
+): MentionPpmItem {
+  return {
+    kind: "problem",
+    id,
+    title,
+    projectName,
+    subtitle: "登录模块 · bug",
+  };
+}
+
 const SKILLS = [
   skill("sillyspec-verify", "验证代码实现是否符合 design 和模块文档"),
   skill("deploy-to-server", "本地打包镜像→远程服务器（阿里云）部署"),
@@ -99,11 +129,21 @@ const QUICKS = [
   quick("ql-20260826-010", "会话页 4 项 UX 修复"),
 ];
 
+/** task-06：PPM 任务/问题 fixture（分组渲染与开关用例）。 */
+const PPM_TASKS = [
+  ppmTask("pt-1", "排行榜接口性能优化", "SillyHub 平台"),
+  ppmTask("pt-2", "工时填报导出列错位修复", null),
+];
+const PPM_PROBLEMS = [ppmProblem("pb-1", "看板拖拽后排序偶发丢失", "SillyHub 平台")];
+
 /** / 联想候选（task-03 组装口径：内置 /team 置顶 + 技能）。 */
 const SLASH_ITEMS = buildSlashMentionItems(SKILLS);
 
 /** @ 联想候选（task-03 组装口径：变更 + 快速修复）。 */
 const AT_ITEMS = buildAtMentionItems(CHANGES, QUICKS);
+
+/** @ 联想候选（task-06 组装口径：变更 + 快速修复 + PPM 任务/问题）。 */
+const AT_PPM_ITEMS = buildAtMentionItems(CHANGES, QUICKS, PPM_TASKS, PPM_PROBLEMS);
 
 /* ───────── 渲染 harness ───────── */
 
@@ -554,5 +594,114 @@ describe("SessionMentionPopover 叠层互斥（R-5）", () => {
       name: "team",
       description: expect.stringContaining("派团队"),
     });
+  });
+});
+
+/* ───────── 9. task-06（2026-08-28-session-ppm-task-binding / FR-02 / D-002@v1）：
+   PPM 任务/问题分组渲染 + 分组头「切全部/仅进行中」开关 ───────── */
+
+describe("SessionMentionPopover PPM 分组（task-06 / FR-02）", () => {
+  it("分组标签与排序：变更/快速修复之后追加「PPM 任务（进行中）」「PPM 问题（进行中）」", () => {
+    setup({ trigger: "@", items: AT_PPM_ITEMS, onPpmScopeChange: vi.fn() });
+
+    expect(screen.getByText("变更（当前工作区）")).toBeInTheDocument();
+    expect(screen.getByText("快速修复（当前工作区）")).toBeInTheDocument();
+    expect(screen.getByText("PPM 任务（进行中）")).toBeInTheDocument();
+    expect(screen.getByText("PPM 问题（进行中）")).toBeInTheDocument();
+    // 2 变更 + 2 快速修复 + 2 任务 + 1 问题。
+    expect(screen.getAllByRole("option")).toHaveLength(7);
+  });
+
+  it("条目形态：主行标题 + 次行项目名标注 + 行内「任务/问题」标注", () => {
+    setup({ trigger: "@", items: AT_PPM_ITEMS, onPpmScopeChange: vi.fn() });
+
+    const options = screen.getAllByRole("option");
+    const task = options[4]!; // 变更 2 + 快速修复 2 之后
+    expect(within(task).getByText("排行榜接口性能优化")).toBeInTheDocument();
+    expect(within(task).getByText("SillyHub 平台")).toBeInTheDocument(); // 项目名标注
+    expect(within(task).getByText("任务")).toBeInTheDocument(); // 行内标注
+    const problem = options[6]!;
+    expect(within(problem).getByText("看板拖拽后排序偶发丢失")).toBeInTheDocument();
+    expect(within(problem).getByText("问题")).toBeInTheDocument();
+    // 项目名空的条目：次行不渲染（无空标注）。
+    const taskNoProject = options[5]!;
+    expect(within(taskNoProject).getByText("工时填报导出列错位修复")).toBeInTheDocument();
+    expect(within(taskNoProject).queryByText("（空）")).toBeNull();
+  });
+
+  it("buildAtMentionItems 选中抛原始实体（Object.is 身份）；缺省 PPM 参不进候选", () => {
+    setup({ trigger: "@", items: AT_PPM_ITEMS, activeIndex: 6, onPpmScopeChange: vi.fn() });
+    fireEvent.mouseDown(screen.getByTestId("mention-option-6"));
+    expect(HANDLERS.onSelect).toHaveBeenCalledTimes(1);
+    expect(HANDLERS.onSelect.mock.calls[0]![0]).toBe(PPM_PROBLEMS[0]);
+
+    // 旧三参调用（PPM 缺省空数组）零回归——候选只含变更 + 快速修复。
+    expect(buildAtMentionItems(CHANGES, QUICKS)).toHaveLength(4);
+  });
+
+  it("过滤：标题前缀命中 + 项目名/说明作次级包含命中面", () => {
+    // 标题前缀命中任务。
+    expect(filterMentionItems(AT_PPM_ITEMS, "排行榜").map((i) => i.kind)).toEqual([
+      "ppmTask",
+    ]);
+    // 项目名包含命中（次级命中面）。
+    expect(filterMentionItems(AT_PPM_ITEMS, "SillyHub").map((i) => i.kind)).toEqual([
+      "ppmTask",
+      "ppmProblem",
+    ]);
+    // 说明（subtitle）包含命中问题。
+    expect(filterMentionItems(AT_PPM_ITEMS, "登录模块").map((i) => i.kind)).toEqual([
+      "ppmProblem",
+    ]);
+  });
+
+  it("未传 onPpmScopeChange：PPM 分组只渲染标签（带状态后缀）不带开关", () => {
+    setup({ trigger: "@", items: AT_PPM_ITEMS });
+
+    expect(screen.getByText("PPM 任务（进行中）")).toBeInTheDocument();
+    expect(screen.queryByTestId("mention-ppm-scope-ppmTask")).toBeNull();
+    expect(screen.queryByTestId("mention-ppm-scope-ppmProblem")).toBeNull();
+  });
+
+  it("分组头开关：ongoing 显「切全部」，点击回调 all 且不选中不关层（纯受控）", () => {
+    const onPpmScopeChange = vi.fn();
+    setup({
+      trigger: "@",
+      items: AT_PPM_ITEMS,
+      onPpmScopeChange,
+    });
+
+    const taskToggle = screen.getByTestId("mention-ppm-scope-ppmTask");
+    expect(taskToggle).toBeInTheDocument();
+    expect(taskToggle.textContent).toBe("切全部");
+    // mousedown preventDefault——不偷输入框焦点（与选项行同规则）。
+    const evt = createEvent.mouseDown(taskToggle);
+    fireEvent(taskToggle, evt);
+    expect(evt.defaultPrevented).toBe(true);
+    // 点击只回调换 scope，不触发选中、浮层不关（浮层开合归检测层）。
+    fireEvent.click(taskToggle);
+    expect(onPpmScopeChange).toHaveBeenCalledWith("all");
+    expect(HANDLERS.onSelect).not.toHaveBeenCalled();
+    expect(HANDLERS.onClose).not.toHaveBeenCalled();
+    // 两组共用同一开关状态（两个分组头各一个入口，点击任一等价）。
+    fireEvent.click(screen.getByTestId("mention-ppm-scope-ppmProblem"));
+    expect(onPpmScopeChange).toHaveBeenCalledTimes(2);
+  });
+
+  it("ppmScope=all：标签后缀「（全部）」+ 开关文案「仅进行中」，点击回 ongoing", () => {
+    const onPpmScopeChange = vi.fn();
+    setup({
+      trigger: "@",
+      items: AT_PPM_ITEMS,
+      ppmScope: "all",
+      onPpmScopeChange,
+    });
+
+    expect(screen.getByText("PPM 任务（全部）")).toBeInTheDocument();
+    expect(screen.getByText("PPM 问题（全部）")).toBeInTheDocument();
+    const toggle = screen.getByTestId("mention-ppm-scope-ppmTask");
+    expect(toggle.textContent).toBe("仅进行中");
+    fireEvent.click(toggle);
+    expect(onPpmScopeChange).toHaveBeenCalledWith("ongoing");
   });
 });

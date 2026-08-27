@@ -36,6 +36,7 @@ import { useState } from "react";
 
 import { SessionInputBar, type SessionInputMentions } from "../session-input-bar";
 import { useMentionSources } from "@/lib/session-mention-sources";
+import type { MentionPpmItem } from "@/lib/session-mention";
 import type { PlatformSkillSummary } from "@/lib/custom-skills";
 import type { ChangeSummary } from "@/lib/changes";
 import type { QuicklogEntryListItem } from "@/lib/quicklog";
@@ -84,6 +85,23 @@ function quick(ql_id: string, title: string): QuicklogEntryListItem {
   };
 }
 
+/** task-06：PPM 任务/问题归一条目（MentionPpmItem 形态）。 */
+const PPM_TASK_1: MentionPpmItem = {
+  kind: "plan_task",
+  id: "pt-1",
+  title: "排行榜接口性能优化",
+  projectName: "SillyHub 平台",
+  subtitle: null,
+};
+
+const PPM_PROBLEM_1: MentionPpmItem = {
+  kind: "problem",
+  id: "pb-1",
+  title: "看板拖拽后排序偶发丢失",
+  projectName: "SillyHub 平台",
+  subtitle: null,
+};
+
 const SKILLS = [
   // invoke_name 缺省（null）→ 回填写目录名；非空 → 回填写冒号名。
   skill("deploy-to-server", "本地打包镜像部署", null),
@@ -104,10 +122,13 @@ const CHANGE_1 = {
 };
 
 beforeEach(() => {
-  sourcesMock.mockReturnValue({
+  sourcesMock.mockReset().mockReturnValue({
     skills: SKILLS,
     changes: CHANGES,
     quicklogs: QUICKS,
+    // task-06：PPM 两分组（任务/问题各一条，分组渲染与选中回填用例消费）。
+    ppmTasks: [PPM_TASK_1],
+    ppmProblems: [PPM_PROBLEM_1],
     atEnabled: true,
   });
 });
@@ -175,8 +196,9 @@ describe("SessionInputBar 联想：检测驱动浮层开关", () => {
     const pop = getPopover();
     expect(within(pop).getAllByRole("option")).toHaveLength(3);
     expect(within(pop).getByText("/team")).toBeInTheDocument();
-    // 首次聚焦挂载的数据桥把 workspaceId 透传给 useMentionSources（task-04 契约）。
-    expect(sourcesMock).toHaveBeenCalledWith("ws-1");
+    // 首次聚焦挂载的数据桥把 workspaceId + ppmScope（task-06 状态口径，默认
+    // ongoing）透传给 useMentionSources。
+    expect(sourcesMock).toHaveBeenCalledWith("ws-1", "ongoing");
 
     type("/silly");
     const opts = within(getPopover()).getAllByRole("option");
@@ -184,14 +206,16 @@ describe("SessionInputBar 联想：检测驱动浮层开关", () => {
     expect(within(opts[0]!).getByText("sillyspec-verify")).toBeInTheDocument();
   });
 
-  it("@ 打开变更/快速修复分组", () => {
+  it("@ 打开变更/快速修复/PPM 分组（task-06：PPM 任务/问题追加在快速修复之后）", () => {
     const { type } = setupBar();
     type("@");
 
     const pop = getPopover();
-    expect(within(pop).getAllByRole("option")).toHaveLength(4);
+    expect(within(pop).getAllByRole("option")).toHaveLength(6);
     expect(within(pop).getByText("变更（当前工作区）")).toBeInTheDocument();
     expect(within(pop).getByText("快速修复（当前工作区）")).toBeInTheDocument();
+    expect(within(pop).getByText("PPM 任务（进行中）")).toBeInTheDocument();
+    expect(within(pop).getByText("PPM 问题（进行中）")).toBeInTheDocument();
   });
 
   it("查询串含空白 / 非词首触发字符（foo/bar、你好@世界）→ 不弹层", () => {
@@ -518,5 +542,91 @@ describe("SessionInputBar 联想：mentionsRef 归空复位（双向）", () => 
       change: CHANGE_1,
       quick: { ql_id: "ql-20260826-013" },
     });
+  });
+});
+
+/* ───────── 7. task-06（2026-08-28-session-ppm-task-binding / FR-02）：PPM 条目
+   选中回填 + ppmItem 槽位 + 分组头「切全部」开关 + 归空复位 ───────── */
+
+describe("SessionInputBar 联想：PPM 条目（task-06 / FR-02 / D-002@v1）", () => {
+  it("@ PPM 任务选中：回填清洗标题+空格、onMentionsChange 回传 ppmItem 槽位（kind+id+title）", () => {
+    const onMentionsChange = vi.fn();
+    const { onSend, ta, type } = setupBar({ onMentionsChange });
+    type("跟进 @排行榜");
+    fireEvent.keyDown(ta(), { key: "Enter" });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(ta().value).toBe("跟进 @排行榜接口性能优化 ");
+    expect(queryPopover()).not.toBeInTheDocument();
+    expect(onMentionsChange).toHaveBeenCalledTimes(1);
+    expect(onMentionsChange).toHaveBeenCalledWith({
+      ppmItem: { kind: "plan_task", id: "pt-1", title: "排行榜接口性能优化" },
+    });
+  });
+
+  it("@ PPM 问题选中：与 change 槽位并存、ppmItem 同槽覆盖（任务→问题后选覆盖先选）", () => {
+    const onMentionsChange = vi.fn();
+    const { ta, type } = setupBar({ onMentionsChange });
+
+    // 第 1 选：变更。
+    type("看下 @2026");
+    fireEvent.keyDown(ta(), { key: "Enter" });
+    expect(onMentionsChange).toHaveBeenNthCalledWith(1, { change: CHANGE_1 });
+    const afterChange = ta().value;
+
+    // 第 2 选：PPM 任务 → change 保留、ppmItem 新增。
+    type(`${afterChange}@排行榜`);
+    fireEvent.keyDown(ta(), { key: "Enter" });
+    expect(onMentionsChange).toHaveBeenNthCalledWith(2, {
+      change: CHANGE_1,
+      ppmItem: { kind: "plan_task", id: "pt-1", title: "排行榜接口性能优化" },
+    });
+    const afterTask = ta().value;
+
+    // 第 3 选：PPM 问题 → ppmItem 覆盖（任务/问题同槽互斥）、change 仍保留。
+    type(`${afterTask}@看板`);
+    fireEvent.keyDown(ta(), { key: "Enter" });
+    expect(onMentionsChange).toHaveBeenNthCalledWith(3, {
+      change: CHANGE_1,
+      ppmItem: { kind: "problem", id: "pb-1", title: "看板拖拽后排序偶发丢失" },
+    });
+  });
+
+  it("分组头「切全部」开关：点击 → 数据源以 ppmScope=\"all\" 重拉（换键），浮层不关", () => {
+    const { ta, type } = setupBar();
+    type("@");
+
+    const toggle = within(getPopover()).getByTestId("mention-ppm-scope-ppmTask");
+    expect(toggle.textContent).toBe("切全部");
+    fireEvent.click(toggle);
+
+    // 纯受控开关：点击只翻转传入数据源的状态口径（换键重拉归 react-query），
+    // 不选中条目、不关层（关层仍走 Esc/失焦/回填）。
+    expect(sourcesMock).toHaveBeenLastCalledWith("ws-1", "all");
+    expect(getPopover()).toBeInTheDocument();
+
+    // 受控回显：mock 快照不变时标签由组件状态驱动——开关文案翻转。
+    expect(
+      within(getPopover()).getByTestId("mention-ppm-scope-ppmTask").textContent,
+    ).toBe("仅进行中");
+    // 回切。
+    fireEvent.click(within(getPopover()).getByTestId("mention-ppm-scope-ppmTask"));
+    expect(sourcesMock).toHaveBeenLastCalledWith("ws-1", "ongoing");
+  });
+
+  it("归空复位含 ppmItem：受控置空 → onMentionsChange 以 {} 回调（A-1 双向复位延伸）", () => {
+    const onMentionsChange = vi.fn();
+    const { ta, type, setValueExternal } = setupBar({ onMentionsChange });
+
+    type("@排行榜");
+    fireEvent.keyDown(ta(), { key: "Enter" });
+    expect(onMentionsChange).toHaveBeenLastCalledWith({
+      ppmItem: { kind: "plan_task", id: "pt-1", title: "排行榜接口性能优化" },
+    });
+
+    act(() => setValueExternal()(""));
+    expect(ta().value).toBe("");
+    expect(onMentionsChange).toHaveBeenLastCalledWith({});
+    expect(onMentionsChange).toHaveBeenCalledTimes(2);
   });
 });

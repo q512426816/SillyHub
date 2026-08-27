@@ -8,7 +8,7 @@
  * 2026-08-25 悬浮球增强补测：拖拽定位、边缘吸附收起、拖拽尾音 click 抑制、
  * 点击抽屉外自动收起（portal 白名单放行）。
  */
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
@@ -21,26 +21,75 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: pushMock, replace: vi.fn() }),
 }));
 
-vi.mock("@/components/daemon/session-panel", () => ({
+vi.mock("@/components/daemon/session-panel", async () => {
   // task-12：透出收到的 preContext.pageContext——创建轮上下文是否真正送达
   // 面板（用户实测反馈③：UI 新建会话恒不注入的根因即此 props 断链）。
-  SessionPanel: (props: {
-    sessionId: string | null;
-    preContext?: { pageContext?: unknown } | null;
-  }) => (
-    <div
-      data-testid="mock-session-panel"
-      data-session={props.sessionId ?? "null"}
-      data-pagectx={JSON.stringify(props.preContext?.pageContext ?? null)}
-    >
-      panel
-    </div>
-  ),
-}));
+  // task-07 Phase 5：autoTeamOpen 按挂载初值快照透出（真实面板同口径——宿主
+  // 送达下一拍即复位 prop，动态读取会竞态闪烁）。
+  // task-05（2026-08-28-session-ppm-task-binding / FR-04）：ppmItem / workspaceId
+  // 同样透出（挂起位 → preContext.ppmItem + 工作区解析断言数据源）。
+  const React = await vi.importActual<typeof import("react")>("react");
+  return {
+    SessionPanel: (props: {
+      sessionId: string | null;
+      preContext?:
+        | {
+            pageContext?: unknown;
+            ppmItem?: { kind: string; id: string } | null;
+            workspaceId?: string | null;
+          }
+        | null
+        | undefined;
+      autoTeamOpen?: boolean;
+    }) => {
+      const autoTeamAtMount = React.useRef(props.autoTeamOpen === true);
+      return (
+        <div
+          data-testid="mock-session-panel"
+          data-session={props.sessionId ?? "null"}
+          data-pagectx={JSON.stringify(props.preContext?.pageContext ?? null)}
+          data-ppm={JSON.stringify(props.preContext?.ppmItem ?? null)}
+          data-workspace={props.preContext?.workspaceId ?? ""}
+          data-autoteam={autoTeamAtMount.current ? "true" : "false"}
+        >
+          panel
+        </div>
+      );
+    },
+  };
+});
 
+// P2-3（QA 边界修复）：透出 onPick/onCancel 触发器——两步浮层兜底分支的
+// PPM 绑定意图消费/取消路径需从测试侧驱动。
 vi.mock("@/components/sessions/pre-session-picker", () => ({
-  PreSessionPicker: ({ open }: { open: boolean }) =>
-    open ? <div data-testid="mock-picker">picker</div> : null,
+  PreSessionPicker: ({
+    open,
+    onPick,
+    onCancel,
+  }: {
+    open: boolean;
+    onPick?: (_runtimeId: string) => void;
+    onCancel?: () => void;
+  }) =>
+    open ? (
+      <div data-testid="mock-picker">
+        picker
+        <button
+          type="button"
+          data-testid="mock-picker-pick"
+          onClick={() => onPick?.("rt-pick")}
+        >
+          pick
+        </button>
+        <button
+          type="button"
+          data-testid="mock-picker-cancel"
+          onClick={() => onCancel?.()}
+        >
+          cancel
+        </button>
+      </div>
+    ) : null,
 }));
 
 // FR-02/FR-03：抽屉左栏换成 SessionListPanel，需 mock 避免真实数据查询。
@@ -104,6 +153,19 @@ vi.mock("@/lib/api/llm-providers", () => ({
   listProviders: vi.fn().mockResolvedValue([]),
 }));
 
+// task-05（2026-08-28-session-ppm-task-binding / FR-04 / D-004@v2）：PPM 条目
+// 入口的工作区解析数据源（listProjectWorkspaces 按 workspace_id 升序取第一）。
+const workspaceApi = vi.hoisted(() => ({
+  listProjectWorkspaces: vi.fn(),
+}));
+
+vi.mock("@/lib/workspace", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/workspace")>(
+    "@/lib/workspace",
+  );
+  return { ...actual, listProjectWorkspaces: workspaceApi.listProjectWorkspaces };
+});
+
 import { FloatingSessionHost } from "@/components/floating/floating-session-host";
 import { useFloatingSessionStore } from "@/stores/floating-session";
 
@@ -115,6 +177,8 @@ function resetStore() {
     preContext: null,
     pageContext: null,
     autoNewPending: false,
+    autoTeamIntent: false,
+    pendingPpmItem: null,
   });
 }
 
@@ -129,9 +193,20 @@ describe("FloatingSessionHost", () => {
   beforeEach(() => {
     resetStore();
     pathnameRef.current = "/ppm/projects";
+    // P2-3：机器数据改为每例重置（新用例会替换成「无可用 runtime」形态，
+    // 防跨用例泄漏）。
+    machinesRef.current = [
+      {
+        id: "m-1",
+        status: "online",
+        runtimes: [{ id: "rt-1", status: "online", provider: "claude" }],
+      },
+    ] as never[];
     machinesLoadingRef.current = false;
     pushMock.mockClear();
     window.localStorage.clear();
+    workspaceApi.listProjectWorkspaces.mockReset();
+    workspaceApi.listProjectWorkspaces.mockResolvedValue([]);
   });
 
   it("非门户路由渲染悬浮球；全关无会话时抽屉主体不挂载（门控）", () => {
@@ -186,6 +261,229 @@ describe("FloatingSessionHost", () => {
     expect(panel.dataset.pagectx).toBe(
       JSON.stringify({ page_key: "generic_page", route_key: "workspaces" }),
     );
+  });
+
+  // ── task-07 Phase 5（FR-06 / D-004@v2）：autoTeamIntent → autoTeamOpen 通道 ──
+
+  it("requestNewSession(ppm_project)：意图经 autoTeamOpen 送达预会话，送达后清 store 意图", async () => {
+    render(wrap(<FloatingSessionHost />));
+    act(() => {
+      useFloatingSessionStore
+        .getState()
+        .requestNewSession({ page_key: "ppm_project", project_id: "p-1" });
+    });
+    const panel = await screen.findByTestId("mock-session-panel");
+    // 预会话面板挂载拍收到 autoTeamOpen=true（挂载初值快照——宿主下一拍清
+    // store 意图，prop 翻 false 不撤回面板已消费的意图）。
+    expect(panel.dataset.autoteam).toBe("true");
+    // 送达后 store 意图清除（防下一次 autoNew 误读残留）。
+    await waitFor(() =>
+      expect(useFloatingSessionStore.getState().autoTeamIntent).toBe(false),
+    );
+  });
+
+  it("requestNewSession(非 ppm_project)：预会话不携带 autoTeamOpen（零回归）", async () => {
+    pathnameRef.current = "/workspaces";
+    render(wrap(<FloatingSessionHost />));
+    act(() => {
+      useFloatingSessionStore
+        .getState()
+        .requestNewSession({ page_key: "generic_page", route_key: "workspaces" });
+    });
+    const panel = await screen.findByTestId("mock-session-panel");
+    expect(panel.dataset.autoteam).toBe("false");
+    expect(useFloatingSessionStore.getState().autoTeamIntent).toBe(false);
+  });
+
+  it("意图送达后手动再建预会话不重弹（latch 复位）", async () => {
+    render(wrap(<FloatingSessionHost />));
+    act(() => {
+      useFloatingSessionStore
+        .getState()
+        .requestNewSession({ page_key: "ppm_project", project_id: "p-1" });
+    });
+    await screen.findByTestId("mock-session-panel");
+    await waitFor(() =>
+      expect(useFloatingSessionStore.getState().autoTeamIntent).toBe(false),
+    );
+    // 选中真会话（预会话退出）→ 左栏「＋」再建新预会话：autoTeamOpen 不得
+    // 再为 true（防 PPM 意图泄漏进手动新建）。
+    act(() => {
+      useFloatingSessionStore.getState().selectSession("s-real");
+    });
+    act(() => {
+      useFloatingSessionStore
+        .getState()
+        .startPreSession({ runtimeId: "rt-1", workspaceId: null }, null);
+    });
+    // 确已切回预会话面板（data-session=null）再断言意图不复弹。
+    await waitFor(() =>
+      expect(
+        screen.getByTestId("mock-session-panel").dataset.session,
+      ).toBe("null"),
+    );
+    const panel = screen.getByTestId("mock-session-panel");
+    expect(panel.dataset.autoteam).toBe("false");
+  });
+
+  // ── task-05（2026-08-28-session-ppm-task-binding / FR-04 / D-004@v2）：
+  //    pendingPpmItem → preContext.ppmItem + 工作区升序取首 ────────────────
+
+  it("pendingPpmItem + requestNewSession：preContext.ppmItem 送达 + workspace_id 升序取第一预填 + 挂起位消费清除", async () => {
+    // 乱序返回（b 在前）——断言按 workspace_id 字典序升序取 a（D-004@v2 与
+    // 后端 link.workspace_id 同键）。
+    workspaceApi.listProjectWorkspaces.mockResolvedValue([
+      { workspace_id: "ws-b", workspace_name: "工作区B" },
+      { workspace_id: "ws-a", workspace_name: "工作区A" },
+    ]);
+    render(wrap(<FloatingSessionHost />));
+    act(() => {
+      useFloatingSessionStore.getState().setPendingPpmItem({
+        kind: "plan_task",
+        id: "task-1",
+        projectId: "p-1",
+        title: "排行榜接口性能优化",
+      });
+      useFloatingSessionStore.getState().requestNewSession(null);
+    });
+    const panel = await screen.findByTestId("mock-session-panel");
+    // 绑定经挂起位进入面板 preContext（创建轮 createSession 上送数据源）。
+    await waitFor(() =>
+      expect(useFloatingSessionStore.getState().preContext?.ppmItem).toEqual({
+        kind: "plan_task",
+        id: "task-1",
+        title: "排行榜接口性能优化",
+      }),
+    );
+    expect(panel.dataset.ppm).toBe(
+      JSON.stringify({ kind: "plan_task", id: "task-1", title: "排行榜接口性能优化" }),
+    );
+    // 工作区解析：按 projectId 拉取 + 升序取首（ws-a）。
+    expect(workspaceApi.listProjectWorkspaces).toHaveBeenCalledWith("p-1");
+    await waitFor(() =>
+      expect(useFloatingSessionStore.getState().preContext?.workspaceId).toBe("ws-a"),
+    );
+    // 读取即消费：挂起位清除（一次性，防残留泄漏进后续手动新建）。
+    expect(useFloatingSessionStore.getState().pendingPpmItem).toBeNull();
+  });
+
+  it("工作区解析失败/无关联：不带 workspaceId 不阻塞，ppmItem 照常送达（D-004 降级）", async () => {
+    workspaceApi.listProjectWorkspaces.mockRejectedValue(new Error("network down"));
+    render(wrap(<FloatingSessionHost />));
+    act(() => {
+      useFloatingSessionStore.getState().setPendingPpmItem({
+        kind: "problem",
+        id: "prob-1",
+        projectId: "p-9",
+      });
+      useFloatingSessionStore.getState().requestNewSession(null);
+    });
+    await screen.findByTestId("mock-session-panel");
+    await waitFor(() =>
+      expect(useFloatingSessionStore.getState().preContext?.ppmItem).toEqual({
+        kind: "problem",
+        id: "prob-1",
+      }),
+    );
+    // 解析失败 → 非工作区语义（workspaceId null），预会话照开。
+    await waitFor(() =>
+      expect(useFloatingSessionStore.getState().preContext?.workspaceId).toBeNull(),
+    );
+    expect(useFloatingSessionStore.getState().open).toBe(true);
+  });
+
+  it("无挂起位：预会话不带 ppmItem、工作区解析零调用（缺省零回归）", async () => {
+    render(wrap(<FloatingSessionHost />));
+    act(() => {
+      useFloatingSessionStore
+        .getState()
+        .requestNewSession({ page_key: "ppm_project", project_id: "p-1" });
+    });
+    await screen.findByTestId("mock-session-panel");
+    await waitFor(() =>
+      expect(useFloatingSessionStore.getState().preContext?.runtimeId).toBe("rt-1"),
+    );
+    expect(useFloatingSessionStore.getState().preContext?.ppmItem).toBeUndefined();
+    expect(workspaceApi.listProjectWorkspaces).not.toHaveBeenCalled();
+  });
+
+  // ── P2-3（QA 边界修复）：两步浮层兜底分支的 PPM 绑定意图保活/消费/取消 ──
+
+  it("P2-3：默认 runtime 解析失败走两步浮层——onPick 后 preContext 仍带 ppmItem + 工作区预选", async () => {
+    // m-1 无在线 claude/codex runtime → 默认机器三级回退落空 → PreSessionPicker
+    // 兜底（此前该分支绑定意图在入口被清、onPick 丢失——本次修复的回归锚）。
+    machinesRef.current = [
+      { id: "m-1", status: "online", runtimes: [] },
+    ] as never[];
+    workspaceApi.listProjectWorkspaces.mockResolvedValue([
+      { workspace_id: "ws-b", workspace_name: "工作区B" },
+      { workspace_id: "ws-a", workspace_name: "工作区A" },
+    ]);
+    render(wrap(<FloatingSessionHost />));
+    act(() => {
+      useFloatingSessionStore.getState().setPendingPpmItem({
+        kind: "plan_task",
+        id: "task-9",
+        projectId: "p-2",
+        title: "浮层兜底绑定意图",
+      });
+      useFloatingSessionStore.getState().requestNewSession(null);
+    });
+    // 兜底浮层弹出；绑定意图保活（读取不再即清），预会话尚未打开。
+    await screen.findByTestId("mock-picker");
+    expect(useFloatingSessionStore.getState().pendingPpmItem).not.toBeNull();
+    expect(useFloatingSessionStore.getState().preContext).toBeNull();
+    // 浮层选定 runtime → 消费 ref：绑定 + 工作区升序取首照样送达面板。
+    fireEvent.click(screen.getByTestId("mock-picker-pick"));
+    await waitFor(() =>
+      expect(useFloatingSessionStore.getState().preContext?.ppmItem).toEqual({
+        kind: "plan_task",
+        id: "task-9",
+        title: "浮层兜底绑定意图",
+      }),
+    );
+    expect(useFloatingSessionStore.getState().preContext?.runtimeId).toBe("rt-pick");
+    expect(workspaceApi.listProjectWorkspaces).toHaveBeenCalledWith("p-2");
+    await waitFor(() =>
+      expect(useFloatingSessionStore.getState().preContext?.workspaceId).toBe("ws-a"),
+    );
+    const panel = await waitFor(() => screen.getByTestId("mock-session-panel"));
+    expect(panel.dataset.ppm).toBe(
+      JSON.stringify({ kind: "plan_task", id: "task-9", title: "浮层兜底绑定意图" }),
+    );
+    expect(panel.dataset.workspace).toBe("ws-a");
+    // 消费后挂起位清干净（不留陈旧意图）。
+    expect(useFloatingSessionStore.getState().pendingPpmItem).toBeNull();
+  });
+
+  it("P2-3：两步浮层取消兜底清——后续普通新建不误带 PPM 绑定", async () => {
+    machinesRef.current = [
+      { id: "m-1", status: "online", runtimes: [] },
+    ] as never[];
+    render(wrap(<FloatingSessionHost />));
+    act(() => {
+      useFloatingSessionStore.getState().setPendingPpmItem({
+        kind: "problem",
+        id: "prob-9",
+        projectId: "p-9",
+      });
+      useFloatingSessionStore.getState().requestNewSession(null);
+    });
+    await screen.findByTestId("mock-picker");
+    // 取消（✕ 与遮罩点击同走 onCancel 契约）→ 保活的挂起位一并清。
+    fireEvent.click(screen.getByTestId("mock-picker-cancel"));
+    expect(useFloatingSessionStore.getState().pendingPpmItem).toBeNull();
+    expect(screen.queryByTestId("mock-picker")).not.toBeInTheDocument();
+    // 后续普通新建（仍无默认 runtime → 再次走浮层）→ onPick 不带 ppm 绑定。
+    fireEvent.click(screen.getByRole("button", { name: /新会话/ }));
+    await screen.findByTestId("mock-picker");
+    workspaceApi.listProjectWorkspaces.mockClear();
+    fireEvent.click(screen.getByTestId("mock-picker-pick"));
+    await waitFor(() =>
+      expect(useFloatingSessionStore.getState().preContext?.runtimeId).toBe("rt-pick"),
+    );
+    expect(useFloatingSessionStore.getState().preContext?.ppmItem).toBeUndefined();
+    expect(workspaceApi.listProjectWorkspaces).not.toHaveBeenCalled();
   });
 
   it("最小化保活：抽屉隐藏但不卸载，胶囊出现，恢复后展开", () => {
