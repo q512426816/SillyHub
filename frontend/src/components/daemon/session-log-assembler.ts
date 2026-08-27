@@ -603,10 +603,17 @@ interface LegacyCell {
 
 const LEGACY_CELL: unique symbol = Symbol("assemblerLegacyCell");
 const SEGMENT_ID_INDEX: unique symbol = Symbol("assemblerSegmentIds");
+/**
+ * quick-9f86d2c3（会话 e87622aa）：已被完整行覆盖（收编 / 封存）的 partial segmentId
+ * 集合——同 segmentId 的后续 partial 窗口（重放增量）一律跳过。turn 链共享同一可变
+ * Set（语义同 seenLogIds：对象展开随行、原地记入）。
+ */
+const SUPERSEDED_SEG_IDS: unique symbol = Symbol("assemblerSupersededSegIds");
 
 interface AssemblerInternalsCarrier {
   [LEGACY_CELL]?: LegacyCell;
   [SEGMENT_ID_INDEX]?: Set<string>;
+  [SUPERSEDED_SEG_IDS]?: Set<string>;
 }
 
 /**
@@ -656,11 +663,12 @@ function buildLegacyCell(segments: TurnSegment[]): LegacyCell {
   };
 }
 
-/** 把 cell / id 索引以 enumerable symbol 键挂到 target（对象展开自动随行）。 */
+/** 把 cell / id 索引 / 封存集合以 enumerable symbol 键挂到 target（对象展开自动随行）。 */
 function attachInternals(
   target: AssembledTurn,
   cell: LegacyCell,
   idIndex: Set<string> | null,
+  superseded: Set<string> | null = null,
 ): void {
   Object.defineProperty(target, LEGACY_CELL, {
     value: cell,
@@ -676,6 +684,30 @@ function attachInternals(
       configurable: true,
     });
   }
+  if (superseded) {
+    Object.defineProperty(target, SUPERSEDED_SEG_IDS, {
+      value: superseded,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+}
+
+/** 惰性取 / 建 turn 链共享的封存 segmentId 集合（quick-9f86d2c3）。 */
+function supersededSegIdsOf(turn: AssembledTurn): Set<string> {
+  const carrier = turn as AssembledTurn & AssemblerInternalsCarrier;
+  let set = carrier[SUPERSEDED_SEG_IDS];
+  if (!set) {
+    set = new Set<string>();
+    Object.defineProperty(turn, SUPERSEDED_SEG_IDS, {
+      value: set,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return set;
 }
 
 /**
@@ -688,7 +720,7 @@ export function transferAssemblerInternals(target: AssembledTurn, source: Assemb
   const carrier = source as AssembledTurn & AssemblerInternalsCarrier;
   const cell = carrier[LEGACY_CELL];
   const index = carrier[SEGMENT_ID_INDEX];
-  if (cell) attachInternals(target, cell, index ?? null);
+  if (cell) attachInternals(target, cell, index ?? null, carrier[SUPERSEDED_SEG_IDS] ?? null);
 }
 
 /**
@@ -1074,6 +1106,10 @@ export function applyLogToSegments(
     const revoked = revokePartialSegments(turn.segments, seg.segmentId, seg.variant, removedIds);
     if (!revoked) return turn;
     removedIds.forEach((id) => ids().delete(id));
+    // quick-9f86d2c3：override 撤回 = 该 segment 已被完整行覆盖 → 封存 segmentId，
+    // 后续同源重放 partial 一并免疫（共享 Set 原地记入，随链流转）。
+    const superseded = supersededSegIdsOf(turn);
+    superseded.add(seg.segmentId);
     const cell = buildLegacyCell(revoked);
     const next: AssembledTurn = {
       segments: revoked,
@@ -1082,7 +1118,7 @@ export function applyLogToSegments(
       turnStartedAt: turn.turnStartedAt,
       seenLogIds: recordSeenLogId(turn.seenLogIds, input.logId),
     };
-    attachInternals(next, cell, idIndex);
+    attachInternals(next, cell, idIndex, superseded);
     if (input.logId) applyResultMemo.set(turn.seenLogIds, { logId: input.logId, next });
     return next;
   }
@@ -1174,15 +1210,33 @@ export function applyLogToSegments(
       // output 不变）；log_id 照记（去重语义不受影响，走尾部统一路径）。
       if (seg.text === "") break;
       {
-        // 用户反馈⑥防御：完整回复行 + 遗留 partial（override 丢失）前缀命中 →
-        // 先移除 partial（ql-20260820-011 的 override 协同不受影响：override 正常
-        // 到达时 partial 已被撤走，此处为空操作）。
-        if (seg.kind === "reply" && !nonEmptyString(input.segmentId)) {
+        // quick-9f86d2c3（会话 e87622aa 重复段+光标常闪）：终态轮迟到 partial 兜底。
+        // 事件序：full 先落段（实时 SSE），partial（同内容前缀）因 Redis 发布丢失/
+        // 延迟在 turn_completed 后经轮后对账/断线重放到达——原 dropPrefixPartialReply
+        // 只收编「partial 先到、full 后到」正向序，反序时 partial 以 streaming=true
+        // 新段落地且 finishTurn 已跑过永不再清。此处反向收编：归属桶内已有完整行
+        // （segId 空 text 段）的文本是该 partial 的前缀超集 → 该 segment 已被覆盖，
+        // 封存 segmentId 并跳过落段（同 segmentId 后续重放窗口一并免疫）。
+        const partialSegId = seg.kind === "reply" ? nonEmptyString(input.segmentId) : null;
+        if (partialSegId) {
+          const superseded = supersededSegIdsOf(turn);
+          if (superseded.has(partialSegId)) break;
+          if (bucketCoveredByFullText(segments, bucketId, seg.text)) {
+            superseded.add(partialSegId);
+            break;
+          }
+        } else if (seg.kind === "reply") {
+          // 用户反馈⑥防御：完整回复行 + 遗留 partial（override 丢失）前缀命中 →
+          // 先移除 partial（ql-20260820-011 的 override 协同不受影响：override 正常
+          // 到达时 partial 已被撤走，此处为空操作）。quick-9f86d2c3：吸收成功时封存
+          // 该 segmentId，后续同源重放窗口不再复活。
+          const superseded = supersededSegIdsOf(turn);
           segments = dropPrefixPartialReply(
             segments,
             bucketId,
             routeSubagentType,
             seg.text,
+            (sealedSegId) => superseded.add(sealedSegId),
           );
         }
         const appended = appendStreamText(
@@ -1384,7 +1438,12 @@ export function applyLogToSegments(
     turnStartedAt: turn.turnStartedAt ?? ts,
     seenLogIds: recordSeenLogId(turn.seenLogIds, input.logId),
   };
-  attachInternals(next, cell, idIndex);
+  attachInternals(
+    next,
+    cell,
+    idIndex,
+    (turn as AssembledTurn & AssemblerInternalsCarrier)[SUPERSEDED_SEG_IDS] ?? null,
+  );
   if (input.logId) applyResultMemo.set(turn.seenLogIds, { logId: input.logId, next });
   return next;
 }
@@ -1499,16 +1558,19 @@ function attachSkillInjection(
  */
 /**
  * 用户反馈⑥防御（2026-08-25）：完整回复行（无 segmentId）到达时，直播 partial
- * 派生段仍在（override 撤回丢失/未发）且其文本是全文前缀 → 先移除该 partial 段
- * 再落全文，避免「partial（可能截断）+ 全文」双气泡重复显示。partial 非前缀
+ * 派生段仍在（override 撤回丢失/未发）且其文本是全文前缀 → 先移除该 partial
+ * 段再落全文，避免「partial（可能截断）+ 全文」双气泡重复显示。partial 非前缀
  * （内容已分叉）时保守保留双方。仅处理同桶尾部单个 text partial——partial 链
  * 按源合并恒为一段（appendStreamText 语义）。
+ * quick-9f86d2c3：吸收成功时经 onSeal 回调封存该 segmentId——同 segmentId 的
+ * 后续重放窗口（轮后对账 / 断线 resync 增量）不再以 streaming 新段复活。
  */
 function dropPrefixPartialReply(
   segments: TurnSegment[],
   bucketId: string | null,
   subagentType: string | null,
   fullText: string,
+  onSeal?: (segId: string) => void,
 ): TurnSegment[] {
   return applyToBucket(segments, bucketId, subagentType, (children) => {
     const last = children[children.length - 1];
@@ -1518,10 +1580,33 @@ function dropPrefixPartialReply(
       last.segId != null &&
       fullText.startsWith(last.text)
     ) {
+      if (onSeal && last.segId) onSeal(last.segId);
       return children.slice(0, -1);
     }
     return children;
   });
+}
+
+/**
+ * quick-9f86d2c3（会话 e87622aa）：反向前缀覆盖判定——归属桶内是否存在完整行
+ * （segId 空的 text 段）的文本以 partialText 为前缀（partial 内容 ⊆ 完整行）。
+ * 覆盖只看完整行段（segId 空）：partial 与 partial 之间的前缀关系不构成覆盖
+ * （同源流式窗口本就增量递进）。桶定位对齐 applyToBucket 的容器路由（DFS 嵌套）。
+ */
+function bucketCoveredByFullText(
+  segments: TurnSegment[],
+  bucketId: string | null,
+  partialText: string,
+): boolean {
+  let list: readonly TurnSegment[] | null = segments;
+  if (bucketId !== null) {
+    const container = findToolById(segments, bucketId) ?? findStubById(segments, bucketId);
+    list = container ? container.children : null;
+  }
+  if (!list) return false;
+  return list.some(
+    (s) => s.kind === "text" && s.segId == null && s.text.startsWith(partialText),
+  );
 }
 
 function appendStreamText(

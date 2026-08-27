@@ -314,3 +314,12 @@
 根因：0bd08e88（OnlyOffice）与其后打包推送的 11e712fc（预会话附件修复）各带 lint 债——02:30 的 backend-ci 死在 ruff check（I001）这步，format check / mypy 从未执行，I001 身后还压着 5 个未格式化文件 + 1 个 mypy 错误，逐层修完才能真绿。
 方案：I001 手工补空行（ruff --diff 建议项）+ ruff format 5 文件 + delete_key 改显式 if 分支（语义不变：key 在 set 中返回 1 否则 0）。
 结果：ruff check / ruff format --check 全绿、mypy 737 文件 0 错、受影响测试 29/29 绿（preview_office + create_attachments + session_optimize_round2）；CI 失败史梳理：8/22-8/25 的 10 次 backend-ci 失败均为「提交引入→后续提交修复」的确定性破坏（合并冲突 page_context / alembic 双头 / mypy / ruff format），非不稳定测试；--reruns 2 兜底的已知 flaky 见 backend-ci.yml 注释。已提交（见 git log）。注：sillyspec CLI quick 仍崩（docs/sillyspec 已记），本条目人工补写。
+
+## ql-20260827-004-0f84 | 2026-08-27 10:26:05 | 直播会话重复渲染段+流式光标常闪修复（会话 e87622aa）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/run_sync/service.py, backend/app/modules/daemon/tests/test_run_sync_assistant_override.py, backend/app/modules/daemon/tests/test_wave5_integration.py, frontend/src/components/daemon/__tests__/session-log-assembler-perf.test.ts, frontend/src/components/daemon/__tests__/session-log-assembler.test.ts, frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx, frontend/src/components/daemon/session-log-assembler.ts
+需求：直播会话重复渲染段+流式光标常闪修复（会话 e87622aa）
+根因：三道防御同时失效：daemon partial 行 Redis 发布丢失未实时送达；backend 完整行 segmentId 旧格式 <mid>:<idx> 与 partial 格式 main:<mid>:text 永不匹配致去重清理空转、partial 行滞留 DB（daemon override 信号生产从未到达）；turn_completed 后轮后对账重放 partial 到终态轮，装配器只有正向收编（full 后到吸收 partial）无反向，partial 落成 streaming=true 新段且 finishTurn 已跑过永不再清
+方案：装配器加反向收编 bucketCoveredByFullText（迟到 partial 是在场完整行前缀则跳过落段）与 SUPERSEDED_SEG_IDS 封存（正向吸收/override/反向收编统一封存，同 segId 重放窗口免疫）；session-panel 两处 onLog 对终态轮非活跃 run 迟到 log 补跑 finishTurn；backend _extract_sdk_messages segmentId 对齐 daemon 格式 parent:mid:type 且完整行落库时 _revoke_committed_partials 跨调用 DELETE 已 commit 同 segmentId partial（不再依赖 override 信号）
+结果：前端装配器 65 + perf 7 + dialog 55 + helpers 29 + 面板族/页面 57 全绿，tsc 0 / eslint 0 err；backend override 14 + wave5 45 + extract/run_sync 34 全绿，ruff 0；存量无关红 1 例（test_run_sync_gate_enqueue close 立即返回，干净 HEAD 同样红非本次引入）；未部署（本地 Docker 环境需重建镜像生效）

@@ -347,6 +347,54 @@ class TestAssistantOverrideDeletesPartial:
 
         rows = await _fetch_logs(db_session, run_id)
         assert len(rows) == 0
+
+    @pytest.mark.asyncio
+    async def test_committed_partial_revoked_by_later_full_line(
+        self, db_session, mocked_redis
+    ) -> None:
+        """quick-9f86d2c3（会话 e87622aa）：interactive 真实流式顺序——partial 在
+        前次 submit_messages 已 commit，完整 assistant message 本次经
+        _extract_sdk_messages 展开（segmentId=main:<mid>:text 与 partial 同格式）
+        → 完整行触发跨调用按 segment_id DELETE 已落库 partial，DB 只剩完整行。
+
+        生产实证（run 6f5720ab）：partial 行因该清理缺失永久滞留 DB，轮后对账
+        重放把半截复活成直播重复段（daemon override 信号生产未观测到到达，
+        本路径不依赖它）。
+        """
+        lease_id, run_id, token = await _seed_batch_run_for_submit(db_session)
+        svc = DaemonService(db_session)
+
+        # 第一次调用：daemon 500ms flush 的半截（daemon partial 格式 segmentId）。
+        partial = {
+            "event_type": "text",
+            "content": "[ASSISTANT] 只有 pdftotext 可用",
+            "channel": "stdout",
+            "metadata": {"segmentId": "main:msg-late:text", "isPartial": True},
+        }
+        count1 = await svc.submit_messages(lease_id, token, run_id, [partial])
+        assert count1 == 1
+        # 模拟 router 提交（interactive 一次 HTTP 一个事务，partial 已跨调用落库）。
+        await db_session.commit()
+
+        # 第二次调用：完整 assistant message → 展开完整行（同格式 segmentId）。
+        full_msg = {
+            "type": "assistant",
+            "message": {
+                "id": "msg-late",
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "只有 pdftotext 可用，而且几乎提取不出中文。"}
+                ],
+            },
+        }
+        count2 = await svc.submit_messages(lease_id, token, run_id, [full_msg])
+        assert count2 == 1
+
+        rows = await _fetch_logs(db_session, run_id)
+        # 已 commit 的 partial 被跨调用 DELETE，只剩完整行（segment_id 恒 NULL）。
+        assert len(rows) == 1
+        assert rows[0].content_redacted == "[ASSISTANT] 只有 pdftotext 可用，而且几乎提取不出中文。"
+        assert rows[0].segment_id is None
         # 确认没有任何行的 content 以 [ASSISTANT_OVERRIDE] 开头（防御性）。
         assert not any(
             r.content_redacted and r.content_redacted.startswith("[ASSISTANT_OVERRIDE]")

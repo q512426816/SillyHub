@@ -991,6 +991,14 @@ class RunSyncService:
                 flushed_partials[segment_id] = log_entry
             elif segment_id and not is_partial:
                 completed_segments.add(segment_id)
+                # quick-9f86d2c3（会话 e87622aa）：完整行跨调用清理——interactive
+                # 流式真实顺序是「partial 已在前次 submit_messages commit、完整行
+                # 本次到达」，判定 1（同调用 expunge）够不到已 commit 行。按
+                # segment_id DELETE 已落库 partial（complete 行 segment_id 恒 NULL
+                # 不受影响），DB 收敛「只剩完整行」——轮后对账 / 断线重放不再把
+                # 半截行复活成直播重复段（daemon override 信号生产环境未观测到
+                # 到达，本清理不依赖它）。对齐 override 分支同款 DELETE。
+                await self._revoke_committed_partials(agent_run_id, segment_id)
 
         # Sync AgentRun status: pending -> running on first messages
         # task-06：agent_run 已在落库循环前 get（归位需要 agent_session_id），此处
@@ -2519,16 +2527,20 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
         return rec
 
     # task-12 / D-002@v1 / FR-07 FR-08：thinking segmentId 去重 —— 完整 message
-    # 展开时给每个 thinking block 标记 segmentId = ${msg.id}:${block_index}，让上层
-    # submit_messages 能识别"同 segment 的 partial 已 flush"并跳过重复行。msg.id
-    # 来自 SDK message_start 事件（Anthropic 标准 assistant message id），同 turn
-    # 内稳定；block_index 是 content 数组下标，同一 message 内多个 thinking block
-    # 各自独立 segment。msg.id 缺失时退化为 "unknown:<idx>"（仍可去重，只是跨 turn
-    # 可能撞 id，前端 normalize 兜底覆盖）。design §5.3 D1/D2 / task-11 契约。
+    # 展开时给每个 thinking block 标记 segmentId，让上层 submit_messages 能识别
+    # "同 segment 的 partial 已 flush"并跳过重复行。
+    # quick-9f86d2c3（会话 e87622aa）：格式从 ``${msg.id}:${block_index}`` 对齐为
+    # daemon partial 的 task-13 格式 ``${parent}:${mid}:${type}``（type=text/thinking）——
+    # 旧格式与 daemon partial（main:<mid>:text）永不匹配，submit_messages 判定 1/2
+    # 与 _revoke_committed_partials 全部空转（partial 行永久滞留 DB 的根因之一）。
+    # parent 前缀与 block type 与 daemon _resolveSegmentId / _extractCompletedSegments
+    # 逐段对齐（同 message 多个同 type block 共享 segmentId——对齐 daemon 语义）。
     inner_msg_id = inner.get("id")
     msg_id = inner_msg_id if isinstance(inner_msg_id, str) and inner_msg_id else "unknown"
+    _raw_parent = msg.get("parent_tool_use_id")
+    parent_key = _raw_parent if isinstance(_raw_parent, str) and _raw_parent else "main"
 
-    for idx, b in enumerate(blocks):
+    for b in blocks:
         if not isinstance(b, dict):
             continue
         btype = b.get("type")
@@ -2548,7 +2560,7 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
                             # assistant 文本不带 thinking:True（仅 thinking block 才打该
                             # 标记），让 daemon 端 / submit_messages 能区分两类 segment。
                             "metadata": {
-                                "segmentId": f"{msg_id}:{idx}",
+                                "segmentId": f"{parent_key}:{msg_id}:text",
                                 "isComplete": True,
                             },
                         }
@@ -2569,7 +2581,7 @@ def _extract_sdk_messages(msg: dict) -> list[dict]:
                             # 让 submit_messages 单次调用内丢弃同 segment 的 partial。
                             "metadata": {
                                 "thinking": True,
-                                "segmentId": f"{msg_id}:{idx}",
+                                "segmentId": f"{parent_key}:{msg_id}:thinking",
                                 "isComplete": True,
                             },
                         }

@@ -1171,3 +1171,81 @@ describe("finishTurn 终态前缀去重（用户反馈⑥续）", () => {
     expect(finished.output).toBe("唯一回答。");
   });
 });
+
+// ── quick-9f86d2c3（会话 e87622aa）：终态轮迟到 partial——重复段+光标常闪 ──────
+// 事件序实证（run 6f5720ab）：partial（segment_id=main:<mid>:text）实时发布丢失，
+// turn_completed 处理完后经轮后对账 / 断线 resync 重放到达 → 装配器对「full 已在场、
+// partial 迟到」原先无反向收编，partial 以 streaming=true 新段落地且 finishTurn 已
+// 跑过永不再清（重复段 + 光标常闪）。修复：反向前缀收编 + segId 封存。
+describe("迟到 partial 反向收编与 segId 封存（quick-9f86d2c3）", () => {
+  it("full 先在场、终态后迟到 partial（前缀命中）→ 不落段不置 streaming（光标不常亮）", () => {
+    const turn = applyAll([
+      makeLog("t1", "stdout", "[THINKING] Docker is running…"),
+      makeLog("tf", "stdout", "[ASSISTANT] 只有 pdftotext 可用，我用 Node + pdfjs-dist(自带 CMap)再试一次。"),
+      makeLog("tt", "stdout", "[TOOL_USE] Bash: node --version"),
+    ]);
+    const finished = finishTurn(turn);
+    // 终态后对账重放的 partial（是 full 的严格前缀）
+    const after = applyLogToSegments(
+      finished,
+      makeLog("tp", "stdout", "[ASSISTANT] 只有 pdftotext 可用，我用 Node + pdfjs-dist(", {
+        segmentId: "main:msg-late:text",
+      }),
+    );
+    const texts = after.segments.filter((s) => s.kind === "text") as TextTurnSegment[];
+    expect(texts).toHaveLength(1);
+    expect(texts[0]!.text).toContain("再试一次。");
+    expect(texts.every((t) => !t.streaming)).toBe(true);
+    expect(after.output).toBe(finished.output);
+  });
+
+  it("封存后同 segmentId 的后续窗口（非前缀增量）不再复活重复段", () => {
+    const turn = applyAll([
+      makeLog("wf", "stdout", "[ASSISTANT] 窗口一窗口二的完整全文。"),
+      // 窗口 1：full 前缀 → 反向收编 + 封存 main:msg-w:text
+      makeLog("wp1", "stdout", "[ASSISTANT] 窗口一", { segmentId: "main:msg-w:text" }),
+      // 窗口 2：增量与 full 非前缀关系——封存后整体跳过（partial ⊆ full 恒成立）
+      makeLog("wp2", "stdout", "[ASSISTANT] 窗口二的完整全文", { segmentId: "main:msg-w:text" }),
+    ]);
+    const texts = turn.segments.filter((s) => s.kind === "text") as TextTurnSegment[];
+    expect(texts).toHaveLength(1);
+    expect(texts[0]!.text).toContain("完整全文。");
+    expect(turn.output).toBe("窗口一窗口二的完整全文。");
+  });
+
+  it("正向吸收（full 后到收编尾部 partial）同样封存，重放窗口不复活", () => {
+    const turn = applyAll([
+      makeLog("fp", "stdout", "[ASSISTANT] 前缀部分", { segmentId: "main:msg-f:text" }),
+      makeLog("ff", "stdout", "[ASSISTANT] 前缀部分的完整全文在此。"),
+    ]);
+    expect(turn.segments.filter((s) => s.kind === "text")).toHaveLength(1);
+    // 同 segId 迟到重放（对账窗口增量）——封存生效，不新建段
+    const after = applyLogToSegments(
+      turn,
+      makeLog("fp2", "stdout", "[ASSISTANT] 前缀部分", { segmentId: "main:msg-f:text" }),
+    );
+    expect(after.segments.filter((s) => s.kind === "text")).toHaveLength(1);
+    expect(after.output).toBe("前缀部分的完整全文在此。");
+  });
+
+  it("partial 与在场 full 内容分叉（非前缀）→ 照常落段（保守并存不误伤）", () => {
+    const turn = applyAll([
+      makeLog("df", "stdout", "[ASSISTANT] 完整回答已经在此。"),
+      makeLog("dp", "stdout", "[ASSISTANT] 完全不同的新内容", { segmentId: "main:msg-d:text" }),
+    ]);
+    const texts = turn.segments.filter((s) => s.kind === "text") as TextTurnSegment[];
+    expect(texts).toHaveLength(2);
+    expect(texts[1]!.segId).toBe("main:msg-d:text");
+  });
+
+  it("override 撤回后同 segmentId 重放窗口不再落地", () => {
+    const turn = applyAll([
+      makeLog("op", "stdout", "[ASSISTANT] 将被撤回的半截", { segmentId: "main:msg-o:text" }),
+      makeLog("oo", "stdout", "[ASSISTANT_OVERRIDE] main:msg-o:text"),
+      // 撤回后同 segId 重放窗口——封存生效
+      makeLog("op2", "stdout", "[ASSISTANT] 将被撤回的半截", { segmentId: "main:msg-o:text" }),
+    ]);
+    expect(turn.segments.filter((s) => s.kind === "text")).toHaveLength(0);
+    expect(turn.output).toBe("");
+  });
+});

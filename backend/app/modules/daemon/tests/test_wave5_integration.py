@@ -724,9 +724,10 @@ class TestSubmitMessagesSync:
     async def test_submit_messages_thinking_same_segment_partial_then_complete_dedup(
         self, db_session: AsyncSession
     ) -> None:
-        """task-12：同一次 submit_messages 调用里，partial（segmentId=msg_a:0）
-        先到、完整 message（thinking block index=0 → segmentId=msg_a:0）后到 ——
-        AgentRunLog 只剩完整 thinking 行，partial 被丢弃。"""
+        """task-12（quick-9f86d2c3 格式对齐修订）：同一次 submit_messages 调用里，
+        partial（daemon 格式 segmentId=main:msg_a:thinking）先到、完整 message
+        （thinking block → 同格式 segmentId）后到 —— AgentRunLog 只剩完整 thinking
+        行，partial 被丢弃。"""
         user_id = await _create_user(db_session)
         rt = await _create_runtime(db_session, user_id)
         agent_run = await _create_agent_run(db_session, status="running")
@@ -748,15 +749,19 @@ class TestSubmitMessagesSync:
             "dedup-tok",
             agent_run.id,
             [
-                # 1) partial 增量片段（daemon 节流 flush）
+                # 1) partial 增量片段（daemon 节流 flush，segmentId 为 daemon 格式）
                 {
                     "event_type": "text",
                     "content": "[THINKING] 正在想",
                     "channel": "stdout",
-                    "metadata": {"thinking": True, "segmentId": "msg_a:0", "isPartial": True},
+                    "metadata": {
+                        "thinking": True,
+                        "segmentId": "main:msg_a:thinking",
+                        "isPartial": True,
+                    },
                 },
                 # 2) 完整 assistant message —— _extract_sdk_messages 展开为
-                #    [THINKING] 完整内容，segmentId = msg_a:0
+                #    [THINKING] 完整内容，segmentId = main:msg_a:thinking（同格式命中）
                 {
                     "type": "assistant",
                     "message": {
@@ -1033,8 +1038,10 @@ class TestSubmitMessagesSync:
     @pytest.mark.asyncio
     async def test_extract_sdk_messages_thinking_carries_segment_id(self) -> None:
         """task-12：_extract_sdk_messages 完整 assistant message 的 thinking block
-        展开行必须带 metadata.segmentId（${msg.id}:${block_idx}）+ isComplete=True，
-        让 submit_messages 去重逻辑生效。"""
+        展开行必须带 metadata.segmentId + isComplete=True，让 submit_messages 去重
+        逻辑生效。quick-9f86d2c3：格式对齐 daemon partial 的 task-13 格式
+        ``${parent}:${mid}:${type}``（主 agent parent=main），旧 ``${mid}:${idx}``
+        与 daemon partial 永不匹配致去重空转。"""
         from app.modules.daemon.run_sync.service import _extract_sdk_messages
 
         msg = {
@@ -1052,16 +1059,43 @@ class TestSubmitMessagesSync:
         rec = out[0]
         assert rec["content"] == "[THINKING] 完整思考D"
         assert rec["channel"] == "stdout"
-        # 关键：segmentId + isComplete 标记
+        # 关键：segmentId（daemon 对齐格式）+ isComplete 标记
         md = rec.get("metadata")
         assert isinstance(md, dict)
-        assert md.get("segmentId") == "msg_d:0"
+        assert md.get("segmentId") == "main:msg_d:thinking"
         assert md.get("isComplete") is True
 
     @pytest.mark.asyncio
+    async def test_extract_sdk_messages_segment_id_aligns_daemon_partial(self) -> None:
+        """quick-9f86d2c3（会话 e87622aa）：完整行 segmentId 必须与 daemon partial
+        flush（session-manager _resolveSegmentId）同格式 ``${parent}:${mid}:${type}``——
+        子代理归属（parent_tool_use_id）随 parent 段入键，type=text/thinking 按
+        block 类型分流（同 message 多个同 type block 共享，对齐 daemon 语义）。"""
+        from app.modules.daemon.run_sync.service import _extract_sdk_messages
+
+        msg = {
+            "type": "assistant",
+            "parent_tool_use_id": "toolu_sub1",
+            "message": {
+                "id": "msg_sub",
+                "role": "assistant",
+                "content": [
+                    {"type": "thinking", "thinking": "子代理思考"},
+                    {"type": "text", "text": "子代理正文"},
+                ],
+            },
+        }
+        out = _extract_sdk_messages(msg)
+        seg_by_content = {r["content"]: r["metadata"]["segmentId"] for r in out}
+        assert seg_by_content["[THINKING] 子代理思考"] == "toolu_sub1:msg_sub:thinking"
+        assert seg_by_content["[ASSISTANT] 子代理正文"] == "toolu_sub1:msg_sub:text"
+
+    @pytest.mark.asyncio
     async def test_extract_sdk_messages_thinking_segment_id_uses_block_index(self) -> None:
-        """task-12：同一 message 内多个 thinking block 必须用 block index 区分
-        segmentId（msg:0 / msg:1），不能共享同一 id（design §5.3 边界2）。"""
+        """task-12 → quick-9f86d2c3 修订：同一 message 内多个 thinking block 共享
+        type 键控 segmentId（``main:<mid>:thinking``，对齐 daemon task-13 语义——
+        daemon 端 _extractCompletedSegments 同样按 type 不按下标），去重/清理按
+        segment 幂等不受影响。"""
         from app.modules.daemon.run_sync.service import _extract_sdk_messages
 
         msg = {
@@ -1082,7 +1116,7 @@ class TestSubmitMessagesSync:
         thinking_recs = [r for r in out if r["content"].startswith("[THINKING]")]
         assert len(thinking_recs) == 2
         seg_ids = {r["metadata"]["segmentId"] for r in thinking_recs}
-        assert seg_ids == {"msg_e:0", "msg_e:2"}
+        assert seg_ids == {"main:msg_e:thinking"}
 
     @pytest.mark.asyncio
     async def test_submit_messages_sdk_extracts_inner_usage(self, db_session: AsyncSession) -> None:
