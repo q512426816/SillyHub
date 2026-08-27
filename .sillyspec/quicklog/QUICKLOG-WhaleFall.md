@@ -351,3 +351,13 @@
 根因：推送经 spec-sync 网络中止丢失致 PG 只留开始时快照而文件已终态，合并层无条件 PG 优先钉死陈旧行
 方案：merge_entries 同 ql_id 按状态成熟度选优加同级 PG 优先
 结果：quicklog 21 测试绿 ruff 0，已提交 4d6eae34，backend 待重建部署
+
+## ql-20260827-008-70cf | 2026-08-27 14:05:21 | 工作区会话页 2K 屏宽度撑满——sessions 路由放开 1440 帽子
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/[id]/layout.tsx（sessions 路由 isFullWidth → main max-w-none，其余子页维持 max-w-[1440px]）
+需求：工作区会话页 2K 屏宽度撑满——sessions 路由放开 1440 帽子
+根因：workspaces/[id]/layout.tsx 的 main 统一 max-w-[1440px]，2K 屏下会话门户页不撑满；参照 /agent-profiles（AppShell 无帽 + PageContainer size=full）应占满
+方案：layout 按 pathname startsWith 判 sessions 子路由时 main 用 max-w-none，其余子页维持 1440；注释标 FRONTEND_PAGE_STYLE.md 列表页占满规范，模块文档变更索引同步登记
+结果：dashboard 路由组 vitest 36 文件 335 测试全过，eslint 单文件 0 告警；模块文档 frontend_app.md 已同步
