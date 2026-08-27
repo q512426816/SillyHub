@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Bot, Workflow, BookOpenText, Sparkles } from "lucide-react";
+import QRCode from "react-qr-code";
 
 import { ApiError } from "@/lib/api";
 import { login } from "@/lib/auth";
@@ -28,6 +29,15 @@ const PLATFORM_REDIRECT: Record<LoginPlatform, string> = {
   sillyhub: "/workspaces",
   ppm: "/ppm/workbench",
 };
+
+/**
+ * 移动端入口二维码编码的 URL：当前站点 /login。
+ * 手机扫码后由 middleware 按 UA rewrite 到 /m/login（设备分流 design §5.1），
+ * 登录后落地 /m/workspaces 移动工作台。导出供单测。
+ */
+export function buildMobileEntryUrl(origin: string): string {
+  return `${origin}/login`;
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -244,12 +254,55 @@ export default function LoginPage() {
             </div>
           </div>
 
+          {/* 移动端入口：扫码直达移动版登录页(middleware UA 分流) */}
+          <MobileQrEntry />
+
           <p className="mt-6 text-center text-xs text-slate-400">
             多智能体协作平台 · 知识沉淀 · 规格驱动开发
           </p>
         </div>
       </section>
     </main>
+  );
+}
+
+/** 移动端入口二维码卡:编码当前站点 /login,手机扫码经 middleware UA 分流进
+ *  /m/login,登录后进入移动工作台(/m/workspaces)。仅桌面/平板会看到本页,
+ *  手机 UA 已被 rewrite 到移动版登录页,故无需在此做设备显隐。 */
+function MobileQrEntry() {
+  // SSR 阶段无 window,挂载后取 origin 再渲染二维码,避免 hydration 不匹配
+  const [origin, setOrigin] = useState<string | null>(null);
+  useEffect(() => {
+    setOrigin(window.location.origin);
+  }, []);
+
+  return (
+    <div
+      aria-label="移动端入口二维码"
+      className="mt-4 flex items-center gap-4 rounded-2xl border border-white/60 bg-card p-4 shadow-[0_8px_40px_-12px_color-mix(in_srgb,var(--color-brand-600)_18%,transparent)] backdrop-blur-xl"
+    >
+      {/* 白底衬板保证暗色主题下二维码对比度,扫码可靠 */}
+      <div className="shrink-0 rounded-lg bg-white p-2">
+        {origin ? (
+          <QRCode value={buildMobileEntryUrl(origin)} size={80} />
+        ) : (
+          <div className="h-[80px] w-[80px]" />
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-semibold text-slate-900">手机访问移动端</div>
+        <p className="mt-1 text-xs leading-relaxed text-slate-500">
+          用手机扫描二维码，直达移动版登录页；登录后可在手机上查看变更与会话。
+        </p>
+        {/* 展示编码目标,局域网/localhost 一眼可辨(localhost 二维码在手机上不可达) */}
+        <span
+          data-testid="mobile-qr-url"
+          className="mt-1 block truncate text-[11px] text-slate-400"
+        >
+          {origin ? buildMobileEntryUrl(origin) : ""}
+        </span>
+      </div>
+    </div>
   );
 }
 

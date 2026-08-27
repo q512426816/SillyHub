@@ -98,3 +98,26 @@
 根因：主代理漏读合并通知第二行并凭执念声称仍在等待
 方案：prompt 头部明示总数全结束/尾部强制逐条核对禁称等待
 结果：16/16 绿+tsc 0 错
+
+## ql-20260827-010-5fa3 | 2026-08-27 14:16:13 | 工作区移动端页面（变更中心 + 会话移植）
+状态：进行中
+关联变更：2026-08-26-mobile-workspace-page
+文件：frontend/src/app/m/layout.tsx, frontend/src/app/m/workspaces/[id]/sessions/[sid]/page.tsx, frontend/src/components/mobile/mobile-top-bar.tsx, frontend/src/components/mobile/mobile-top-bar.test.tsx, frontend/src/app/m/layout.test.tsx
+
+## ql-20260827-011-e756 | 2026-08-27 14:17:36 | 桌面登录页加移动端入口二维码
+状态：已完成
+关联变更：2026-08-26-mobile-workspace-page
+文件：
+- frontend/src/app/(auth)/login/page.tsx（MobileQrEntry 二维码卡 + buildMobileEntryUrl 纯函数导出）
+- frontend/src/app/(auth)/login/page.qr.test.tsx（新增测试（URL 构造 + 渲染断言））
+- frontend/package.json（+react-qr-code@^2.2.0）
+- frontend/pnpm-lock.yaml（锁文件同步（+qrcode-generator 传递依赖））
+需求：桌面登录页加移动端入口二维码
+根因：移动工作台已上线（2026-08-26-mobile-workspace-page）但桌面登录页没有移动端入口，手机用户缺便捷途径进入手持端
+方案：(auth)/login/page.tsx 新增 MobileQrEntry 卡片（react-qr-code@2.2.0 纯 SVG 零依赖），编码当前站点 /login，扫码后经 middleware UA 分流 rewrite 到 /m/login，登录后落地 /m/workspaces；SSR 占位挂载后取 origin 防 hydration 不匹配，白底衬板保扫码对比度，卡内小字展示编码 URL；导出 buildMobileEntryUrl 纯函数供测试
+结果：page.qr.test.tsx 2 用例通过；tsc --noEmit 0 错误；next lint 0 告警；并发会话移动端脏文件未触碰
+
+## ql-20260827-012-6c87 | 2026-08-27 14:18:27 | 工作区移动端页面（变更中心 + 会话移植）
+状态：进行中
+关联变更：2026-08-26-mobile-workspace-page
+文件：frontend/src/app/m/layout.tsx, frontend/src/app/m/layout.test.tsx, frontend/src/components/mobile/mobile-app-shell.tsx, frontend/src/components/mobile/mobile-top-bar.tsx, frontend/src/components/mobile/mobile-top-bar.test.tsx, frontend/src/app/m/workspaces/[id]/changes/[cid]/page.tsx, frontend/src/app/m/workspaces/[id]/sessions/[sid]/page.tsx

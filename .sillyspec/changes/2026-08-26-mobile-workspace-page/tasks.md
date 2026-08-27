@@ -23,3 +23,6 @@ created_at: 2026-08-27 00:19:07
 - [x] task-14: SessionPanel variant 适配（通读渲染层耦合清单 → mobile 布局类/次要 chrome 收纳，逻辑零分叉）+「不传 variant 与 desktop 一致」回归测试（FR-07/FR-11；R-01）(depends_on: —)
 - [x] task-15: 会话对话移动页 sessions/[sid]/page.tsx（SessionPanel 第四宿主，machines/llmProviders 页面级数据同源）（FR-07/FR-09）(depends_on: task-01,02,14)
 - [x] task-16: 全量自测清单（双主题切换/键盘避让/深链矩阵/桌面既有测试全绿）+ 文档核对（X-03 组件复用落位清单、X-04 key 锁形态用例）(depends_on: task-01,02,03,04,05,06,07,08,09,10,11,12,13,14,15)
+- [ ] ql-20260827-010-5fa3 工作区移动端页面（变更中心 + 会话移植）
+- [x] ql-20260827-011-e756 工作区移动端页面（变更中心 + 会话移植）
+- [ ] ql-20260827-012-6c87 工作区移动端页面（变更中心 + 会话移植）
