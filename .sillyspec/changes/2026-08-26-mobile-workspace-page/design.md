@@ -102,7 +102,7 @@ app/m/layout.tsx（已有，最小扩展）
   └ 钻取页（DRILL_ROUTES 正则命中 /workspaces/:id/changes/:cid、/workspaces/:id/sessions/:sid）：
     裸容器（max-w-480px flex-col，无底部 Tab）——页面自渲染返回顶栏
 app/m/workspaces/[id]/layout.tsx（新增）
-  └ 工作区上下文 Provider：getWorkspace 预取（react-query ["workspaces", id]），
+  └ 工作区上下文 Provider：getWorkspace 预取（react-query ["workspaces", "detail", id]——桌面既有三段键（对齐 git-log/page.tsx:64 共享缓存；execute 勘误：原稿写两段键，QA P2-2）），
     供子页共享（顶栏工作区名/在线状态），避免每页重复拉取
 ```
 
@@ -202,32 +202,30 @@ app/m/workspaces/[id]/layout.tsx（新增）
 | `components/sessions/pre-session-picker.tsx` | 加 variant prop（默认 center） | 桌面调用点零改动 + 既有测试 |
 | `components/daemon/session-panel.tsx` | 加 variant prop（默认 desktop） | 桌面零改动 + 既有测试 + 新增 mobile 快照/交互测试 |
 
-## §6 文件变更清单（File Changes）
+## 文件变更清单（File Changes）
 
 > 纯前端渲染层变更，无对外字段/DTO/接口 payload 变更，无需数据流标注；
 > `api-types.ts` / `openapi.json` 零改动（无 gen:types 需求）。
 
 | 操作 | 路径（frontend/ 内，相对仓根） | 说明 |
 |---|---|---|
-| 新增 | src/app/m/workspaces/[id]/layout.tsx | 工作区上下文 Provider（getWorkspace 预取） |
-| 新增 | src/app/m/workspaces/[id]/page.tsx | 主页 redirect → /changes |
-| 新增 | src/app/m/workspaces/[id]/changes/page.tsx | 变更列表移动版（三Tab/搜索/筛选/卡片/quicklog Tab） |
-| 新增 | src/app/m/workspaces/[id]/changes/[cid]/page.tsx | 变更详情移动版（钻取） |
-| 新增 | src/app/m/workspaces/[id]/sessions/page.tsx | 会话列表移动版（分组卡片+新建入口+预会话态） |
-| 新增 | src/app/m/workspaces/[id]/sessions/[sid]/page.tsx | 会话对话（SessionPanel 第四宿主，钻取） |
-| 新增 | src/app/m/workspaces/[id]/changes/[cid]/sessions/page.tsx | X-02 深链兜底：redirect → /m/workspaces/[id]/sessions |
-| 新增 | src/app/m/workspaces/[id]/quicklog/[qlId]/sessions/page.tsx | X-02 深链兜底：redirect → /m/workspaces/[id]/sessions |
-| 新增 | src/components/mobile/mobile-workspace-header.tsx | 返回+工作区名+段控双Tab（两列表页复用） |
-| 新增 | src/components/mobile/mobile-change-card.tsx | 变更/quicklog 卡片（阶段/待办徽标映射复用） |
-| 新增 | src/components/mobile/mobile-change-detail.tsx | 详情区块组（阶段条/审批/折叠卡；自绘壳） |
-| 新增 | src/components/mobile/mobile-session-list.tsx | 会话分组卡片列表（同 key query + 分组） |
-| 修改 | src/app/m/layout.tsx | DRILL_ROUTES 正则 → 裸容器分支 |
-| 修改 | src/app/m/workspaces/page.tsx | :199 门禁改 router.push |
-| 修改 | src/app/(dashboard)/workspaces/[id]/changes/page.tsx | PENDING_REVIEW_LABEL（:63）加 export（Grill C-10） |
-| 修改 | src/components/sessions/pre-session-picker.tsx | variant?: "center"\|"bottomSheet"（默认 center） |
-| 修改 | src/components/daemon/session-panel.tsx | variant?: "desktop"\|"mobile"（默认 desktop），mobile 仅渲染层 |
-| 新增 | 对应 __tests__/*.test.tsx（就近 colocate） | 见 §8 测试策略 |
-| 修改 | src/lib/auth/route-guard.test.ts 等 | 仅当正则/守卫行为变化补用例（守卫本身零改动，预期不加） |
+| 新增 | frontend/src/app/m/workspaces/[id]/layout.tsx | 工作区上下文 Provider（getWorkspace 预取） |
+| 新增 | frontend/src/app/m/workspaces/[id]/page.tsx | 主页 redirect → /changes |
+| 新增 | frontend/src/app/m/workspaces/[id]/changes/page.tsx | 变更列表移动版（三Tab/搜索/筛选/卡片/quicklog Tab） |
+| 新增 | frontend/src/app/m/workspaces/[id]/changes/[cid]/page.tsx | 变更详情移动版（钻取） |
+| 新增 | frontend/src/app/m/workspaces/[id]/sessions/page.tsx | 会话列表移动版（分组卡片+新建入口+预会话态） |
+| 新增 | frontend/src/app/m/workspaces/[id]/sessions/[sid]/page.tsx | 会话对话（SessionPanel 第四宿主，钻取） |
+| 新增 | frontend/src/app/m/workspaces/[id]/changes/[cid]/sessions/page.tsx | X-02 深链兜底：redirect → /m/workspaces/[id]/sessions |
+| 新增 | frontend/src/app/m/workspaces/[id]/quicklog/[qlId]/sessions/page.tsx | X-02 深链兜底：redirect → /m/workspaces/[id]/sessions |
+| 新增 | frontend/src/components/mobile/mobile-workspace-header.tsx | 返回+工作区名+段控双Tab（两列表页复用） |
+| 新增 | frontend/src/components/mobile/mobile-change-card.tsx | 变更/quicklog 卡片（阶段/待办徽标映射复用） |
+| 新增 | frontend/src/components/mobile/mobile-change-detail.tsx | 详情区块组（阶段条/审批/折叠卡；自绘壳） |
+| 新增 | frontend/src/components/mobile/mobile-session-list.tsx | 会话分组卡片列表（同 key query + 分组） |
+| 修改 | frontend/src/app/m/layout.tsx | DRILL_ROUTES 正则 → 裸容器分支 |
+| 修改 | frontend/src/app/m/workspaces/page.tsx | :199 门禁改 router.push |
+| 修改 | frontend/src/app/(dashboard)/workspaces/[id]/changes/page.tsx | PENDING_REVIEW_LABEL（:63）加 export（Grill C-10） |
+| 修改 | frontend/src/components/sessions/pre-session-picker.tsx | variant?: "center"\|"bottomSheet"（默认 center） |
+| 修改 | frontend/src/components/daemon/session-panel.tsx | variant?: "desktop"\|"mobile"（默认 desktop），mobile 仅渲染层 |
 
 ## §7 接口定义
 

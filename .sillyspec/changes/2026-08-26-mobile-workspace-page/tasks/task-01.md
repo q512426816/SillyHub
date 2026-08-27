@@ -1,29 +1,36 @@
 ---
 id: task-01
-title: 'm/layout.tsx 加 DRILL_ROUTES 正则分支（钻取页裸容器：无底部 Tab）+ 正则纯函数与测试（FR-09/FR-11）'
-title_zh: 'm/layout.tsx 加 DRILL_ROUTES 正则分支（钻取页裸容器：无底部 Tab）+ 正则纯函数与测试（FR-09/FR-11）'
+title: 'add-drill-routes-bare-branch-to-mobile-layout'
+title_zh: 'm/layout 加 DRILL_ROUTES 钻取裸容器分支（无底部 Tab）+ 正则纯函数与测试'
 author: 'qinyi'
-created_at: 2026-08-27 00:35:07
+created_at: 2026-08-27 00:34:52
 priority: P0
-depends_on: ['task-0—']
-blocks: []
-requirement_ids: [FR-XX]
-decision_ids: [D-XXX@vN]
+depends_on: []
+blocks: [task-09, task-11, task-15]
+requirement_ids: [FR-09, FR-11]
+decision_ids: [D-004@V1, D-001@V1]
 allowed_paths:
-  - src/example/file.ts
+  - frontend/src/app/m/layout.tsx
+  - frontend/src/app/m/layout.test.tsx
 goal: >
-  一句话说明这个 task 要做什么、为什么。
+  给 app/m/layout.tsx 加钻取页（changes/[cid]、sessions/[sid]）裸容器分支，隐藏底部
+  Tab 并导出正则纯函数供测试，既有 /m 路径零命中零回归。
 implementation:
-  - 具体步骤 1
-  - 具体步骤 2
+  - layout.tsx 导出纯函数 isDrillRoute(pathname)，内部复用 stripMobilePrefix 后匹配 ^/workspaces/[^/]+/(changes|sessions)/[^/]+；列表页 /workspaces/:id/changes、/workspaces/:id/sessions（无第四段）不得命中
+  - MobileLayoutShell 在 !accessToken 判空之后加分支，isDrillRoute 命中时返回裸容器（mx-auto flex min-h-[100dvh] w-full max-w-[480px] flex-col 直出 children，不裹 MobileAppShell）
+  - 同步 layout.tsx 头部 R-10 防漂移注释锚，登记 DRILL_ROUTES 分支语义（design §5.5）
+  - layout.test.tsx 新增 describe——纯函数命中/不命中用例 + 渲染用例（钻取路径 children 直出且无 mobile-app-shell，列表页仍裹 Shell）
 acceptance:
-  - 可验证的验收条件 1
-  - 可验证的验收条件 2
+  - isDrillRoute 对 /workspaces/w1/changes/c1、/workspaces/w1/sessions/s1 返回 true；对 /workspaces/w1/changes、/workspaces/w1/sessions、/login、/workspaces、/ppm/workbench 返回 false
+  - pathname 为 /m/workspaces/w1/changes/c1 时 children 渲染且 queryByTestId("mobile-app-shell") 为 null
+  - layout.test.tsx 既有 13 条用例零修改全绿（FR-11 零回归）
 verify:
+  - cd frontend && pnpm test -- src/app/m/layout.test.tsx
   - cd frontend && pnpm exec tsc --noEmit
 constraints:
-  - 边界约束 1（如：不加测试）
-  - 边界约束 2（如：不修改传入参数）
+  - 不改 route-guard.ts 守卫逻辑本身（/workspaces/:id/** 已在 route-guard.ts:96 放行，零改动）
+  - 不改 MobileAppShell 与 mobile-tab-bar，普通页渲染路径零变化
+  - 正则只消费 strip 后的桌面形态路径，与 stripMobilePrefix 保持单一约定
 ---
 
 <!-- 骨架由 sillyspec taskcard 生成（LF 行尾 + frontmatter 已闭合 + 硬校验 9 字段齐全）。
