@@ -508,7 +508,11 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
           )}
         </div>
 
-        <div className="flex min-h-[40vh] flex-col">
+        {/* ql-20260827-005：min-w-0 是 ql-20260818-008 横向版的缺环——预览列作为
+            grid item 默认 min-width:auto，MD 宽表格把 1fr 轨道撑大后被上层
+            overflow-hidden 裁掉且无滚动条；补 min-w-0 让宽度锁在列宽，
+            FilePreview 各分支的 overflow-auto 才能出横向滚动条 */}
+        <div className="flex min-h-[40vh] min-w-0 flex-col">
           {!selected ? (
             <p className="py-8 text-center text-xs text-muted-foreground">点击左侧文件查看内容</p>
           ) : !selected.is_text ? (
@@ -523,7 +527,7 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
           ) : loadingDoc ? (
             <p className="py-8 text-center text-xs text-muted-foreground">加载中…</p>
           ) : (
-            <div className="flex h-full flex-col gap-2">
+            <div className="flex h-full min-w-0 flex-col gap-2">
               <div className="flex items-center justify-between gap-2">
                 <span className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">{selected.path}</span>
                 <div className="flex items-center gap-2">

@@ -181,9 +181,6 @@ export default function LoginPage() {
                   label="登录名"
                   name="account"
                   rules={[{ required: true, message: "请输入登录名" }]}
-                  /* ② 指路提示（UX 走查 2026-08-26）：登录名是邮箱 @ 前缀而非完整邮箱，
-                     新用户在 admin@sillyhub.local 场景极易输错且错误文案不指路 */
-                  extra="登录名即邮箱 @ 前缀（例如 admin），非完整邮箱地址"
                 >
                   <Input
                     placeholder="登录名"

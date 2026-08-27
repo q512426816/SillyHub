@@ -76,6 +76,9 @@ stage-team-config / team-progress）。派生脉络：2026-08-11-change-detail-l
 - `ChangeFileTree`（change-file-tree.tsx）：变更文件树 + 内容区。
   - 预览三模：.md → MarkdownPreview（复用统一 sanitize 插件 markdownRehypePlugins）/
     .html·htm → iframe / 其他纯文本 → 只读源码。
+  - ql-20260827-005：预览列宽度约束链补全——外层 flex 包装（grid item）加 `min-w-0`，
+    否则 MD 宽表格把 grid `1fr` 轨道撑大、被上层 `overflow-hidden` 裁掉且无横向滚动条；
+    补齐后 FilePreview 各分支的 `overflow-auto` 才能出左右滚动条（纵向版见 ql-20260818-008）。
   - 保存链路 SaveStatus 五态（idle/saving/done/pending/failed）；数据走 lib/change-files
     （buildChangeFileTree / listChangeFiles / listPendingChangeFiles / get·save content）。
 - `StageTeamConfig`（stage-team-config.tsx）：execute/verify 的 worker 预设编辑。

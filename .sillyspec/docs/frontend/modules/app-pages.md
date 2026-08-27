@@ -46,5 +46,6 @@ WorkspacesPage: listWorkspaces ∥ fetchMyBindings ∥ useDaemonStatusMap
 
 ## 变更索引
 - ql-20260624-004-c8a2 | 优化 /settings/api-keys 页面：统一 PageHeader、SectionCard、StatusBadge、EmptyState，增加统计概览并整理表格操作区。
+- ql-20260827-005-8bca | 登录页删除登录名输入框下的常显前缀提示（Form.Item extra）；登录失败错误卡内的同语义指路提示保留（仅失败场景出现）。
 
 <!-- MANUAL_NOTES_END -->
