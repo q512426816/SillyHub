@@ -323,3 +323,31 @@
 根因：三道防御同时失效：daemon partial 行 Redis 发布丢失未实时送达；backend 完整行 segmentId 旧格式 <mid>:<idx> 与 partial 格式 main:<mid>:text 永不匹配致去重清理空转、partial 行滞留 DB（daemon override 信号生产从未到达）；turn_completed 后轮后对账重放 partial 到终态轮，装配器只有正向收编（full 后到吸收 partial）无反向，partial 落成 streaming=true 新段且 finishTurn 已跑过永不再清
 方案：装配器加反向收编 bucketCoveredByFullText（迟到 partial 是在场完整行前缀则跳过落段）与 SUPERSEDED_SEG_IDS 封存（正向吸收/override/反向收编统一封存，同 segId 重放窗口免疫）；session-panel 两处 onLog 对终态轮非活跃 run 迟到 log 补跑 finishTurn；backend _extract_sdk_messages segmentId 对齐 daemon 格式 parent:mid:type 且完整行落库时 _revoke_committed_partials 跨调用 DELETE 已 commit 同 segmentId partial（不再依赖 override 信号）
 结果：前端装配器 65 + perf 7 + dialog 55 + helpers 29 + 面板族/页面 57 全绿，tsc 0 / eslint 0 err；backend override 14 + wave5 45 + extract/run_sync 34 全绿，ruff 0；存量无关红 1 例（test_run_sync_gate_enqueue close 立即返回，干净 HEAD 同样红非本次引入）；未部署（本地 Docker 环境需重建镜像生效）
+
+## ql-20260827-005-a660 | 2026-08-27 11:14:56 | /sessions 页整页滚动条修复（门户容器高度与 TopBar 不符）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/sessions/sessions-portal.tsx（门户容器 calc(100vh-56px)→calc(100vh-64px) 对齐 TopBar h-16）
+需求：/sessions 页整页滚动条修复（门户容器高度与 TopBar 不符）
+根因：sessions-portal 门户容器 h-[calc(100vh-56px)] 假设顶栏 56px，实际 TopBar 为 h-16=64px，容器多出 8px 撑爆 min-h-screen 出整页滚动条（浏览器实测 728>720）
+方案：改为 h-[calc(100vh-64px)] 并加注释锚定依据，与 explorer/page.tsx 既有惯例一致；重建 Docker 前端镜像部署
+结果：54 单测全绿（sessions-portal + sessions/page）、tsc 0 错误；部署后浏览器实测门户高 656=100vh-64、页高 720=视口 720、hasVerticalOverflow=false，滚动条消失
+
+## ql-20260827-006-f892 | 2026-08-27 12:06:22 | 直播乱序重复渲染修复续（会话 0ef651b6 窗口丢失胶水段与并发竞态）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/run_sync/service.py, backend/app/modules/daemon/tests/test_run_sync_assistant_override.py, backend/app/modules/daemon/tests/test_wave5_integration.py, frontend/src/components/daemon/__tests__/session-log-assembler.test.ts, frontend/src/components/daemon/session-log-assembler.ts
+需求：直播乱序重复渲染修复续（会话 0ef651b6 窗口丢失胶水段与并发竞态）
+根因：窗口发布丢失拼出非前缀胶水段致前缀收编失效，且 partial 与完整行并发提交竞态致 partial 滞留数据库
+方案：backend 完整行落库点合成 override 令箭（标记行堵竞态加重放补投，信封实时治愈胶水段），前端 override 去重键含 segmentId 保刷新路径多标记生效
+结果：backend override 19 与 wave5 39 绿 ruff 0，daemon 域 150 绿（1 存量无关红），前端装配器 67 perf 7 dialog 54 绿 tsc 0，文档同步 daemon.md 与 frontend_components.md，未部署待重建
+
+## ql-20260827-007-67b4 | 2026-08-27 13:21:26 | 已完成 quick 任务在变更页仍显示进行中的合并修复
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+需求：已完成 quick 任务在变更页仍显示进行中的合并修复
+根因：推送经 spec-sync 网络中止丢失致 PG 只留开始时快照而文件已终态，合并层无条件 PG 优先钉死陈旧行
+方案：merge_entries 同 ql_id 按状态成熟度选优加同级 PG 优先
+结果：quicklog 21 测试绿 ruff 0，已提交 4d6eae34，backend 待重建部署

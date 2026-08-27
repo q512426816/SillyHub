@@ -150,6 +150,32 @@ def _from_file_entry(e: QuicklogFileEntry) -> QuicklogMergedEntry:
     )
 
 
+# quick-88472229：状态成熟度（终态 > 暂存 > 进行中）。stale 是查询时派生态，
+# 不参与原始比较（源数据里不会出现）。
+_STATUS_RANK = {"in_progress": 0, "partial_done": 1, "completed": 2}
+
+
+def _prefer_pushed(
+    file_entry: QuicklogMergedEntry, pushed_entry: QuicklogMergedEntry
+) -> bool:
+    """quick-88472229（用户实证 ql-20260827-005-a660）：同 ql_id 的 PG/文件选优。
+
+    旧策略无条件 PG 优先，假设「推送时点新于文件」——但 quick 的最终 --done 推送
+    会因网络中止（spec-sync abort）丢失，PG 只留**任务开始时**的快照（进行中 +
+    占位长标题），而 QUICKLOG 文件在推送前已写终态（已完成 + 语义标题）。陈旧 PG
+    行永久压过文件终态 → 已完成任务在变更页恒显「进行中」。
+
+    修复：先按状态成熟度选优（CLI 流程文件先写、推送后发，文件状态恒 ≥ PG；
+    反向仅出现在 spec bundle 拉回同步场景，终态 PG 同样胜）；成熟度相同才保持
+    PG 优先（D-003 既有语义——body 富度/推送版本胜文件解析）。
+    """
+    file_rank = _STATUS_RANK.get(file_entry.status, 0)
+    pushed_rank = _STATUS_RANK.get(pushed_entry.status, 0)
+    if file_rank != pushed_rank:
+        return pushed_rank > file_rank
+    return True
+
+
 def derive_stale(
     entries: list[QuicklogMergedEntry], now: datetime, threshold: timedelta = STALE_THRESHOLD
 ) -> list[QuicklogMergedEntry]:
@@ -286,10 +312,12 @@ class QuicklogQueryService:
                     **{**entry.__dict__, "body_sections": None, "raw_block": None}
                 )
             merged[entry.ql_id] = entry
-        for e in pushed:  # PG 后写覆盖同 ql_id（推送时点新）
+        for e in pushed:  # 同 ql_id 见 _prefer_pushed（状态成熟度 + PG 优先）
             if not include_body:
                 e = QuicklogMergedEntry(**{**e.__dict__, "body_sections": None, "raw_block": None})
-            merged[e.ql_id] = e
+            existing = merged.get(e.ql_id)
+            if existing is None or _prefer_pushed(existing, e):
+                merged[e.ql_id] = e
 
         def _sort_key(e: QuicklogMergedEntry) -> tuple:
             return (e.timestamp is not None, e.timestamp or datetime.min.replace(tzinfo=UTC))

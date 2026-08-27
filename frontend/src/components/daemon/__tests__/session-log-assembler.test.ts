@@ -1249,3 +1249,51 @@ describe("迟到 partial 反向收编与 segId 封存（quick-9f86d2c3）", () =
     expect(turn.output).toBe("");
   });
 });
+
+// ── quick-0e56260f（会话 0ef651b6）：窗口发布丢失 → 乱序胶水段（非前缀）——
+// backend 在完整行落库点合成 override 令箭（daemon 信号生产失效的替代），
+// 前端按段 id 任意位置撤回，不依赖前缀判定。
+describe("backend 合成 override 治愈乱序胶水段（quick-0e56260f）", () => {
+  const FULL = "PDF 已完整解码。以下是分析：一、概况……二、结构……三、修辞……七、总评。";
+
+  it("直播：窗口丢失拼出乱序胶水段（非前缀）→ 全文 + 合成令箭 → 撤回治愈", () => {
+    // w1 + w3 到达（w2 丢失）→ 胶水段 = w1+w3（非 FULL 前缀）
+    const w1 = FULL.slice(0, 10);
+    const w3 = FULL.slice(24, 40);
+    const turn = applyAll([
+      makeLog("p1", "stdout", `[ASSISTANT] ${w1}`, { segmentId: "main:msg-g:text" }),
+      makeLog("p3", "stdout", `[ASSISTANT] ${w3}`, { segmentId: "main:msg-g:text" }),
+      // 全文到达：非前缀 → 前缀收编失效，保守并存（旧行为的重复段）
+      makeLog("f", "stdout", `[ASSISTANT] ${FULL}`),
+    ]);
+    expect(turn.segments.filter((s) => s.kind === "text")).toHaveLength(2);
+    // backend 合成令箭（完整行落库点）→ 按段 id 任意位置撤回胶水段
+    const healed = applyLogToSegments(
+      turn,
+      makeLog("ovr", "stdout", "[ASSISTANT_OVERRIDE] main:msg-g:text"),
+    );
+    const texts = healed.segments.filter((s) => s.kind === "text") as TextTurnSegment[];
+    expect(texts).toHaveLength(1);
+    expect(texts[0]!.text).toBe(FULL);
+    expect(healed.output).toBe(FULL);
+  });
+
+  it("刷新路径（logsToSegments）：raced partial + 全文 + 多枚标记行 → 收敛单段", () => {
+    // DB 终态（竞态残留 partial + 完整行 + backend 标记行），两条消息各一枚标记
+    const segs = logsToSegments([
+      makeLog("rp", "stdout", "[ASSISTANT] 中段窗口内容", { segmentId: "main:msg-r1:text" }),
+      makeLog("rf", "stdout", "[ASSISTANT] 完整回答一全文在此。"),
+      makeLog("rm1", "stdout", "[ASSISTANT_OVERRIDE] main:msg-r1:text"),
+      makeLog("rp2", "stdout", "[ASSISTANT] 另一窗口", { segmentId: "main:msg-r2:text" }),
+      makeLog("rf2", "stdout", "[ASSISTANT] 完整回答二全文在此。"),
+      makeLog("rm2", "stdout", "[ASSISTANT_OVERRIDE] main:msg-r2:text"),
+    ]);
+    const texts = segs.filter((s) => s.kind === "text") as TextTurnSegment[];
+    // quick-0e56260f：override 去重键含 segmentId——两枚标记各自生效，两条 raced
+    // partial 都被撤回，只剩两条完整行（旧键 "override:" 会让第二枚被跳过）。
+    expect(texts.map((t) => t.text)).toEqual([
+      "完整回答一全文在此。",
+      "完整回答二全文在此。",
+    ]);
+  });
+});

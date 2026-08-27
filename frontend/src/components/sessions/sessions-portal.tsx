@@ -405,9 +405,11 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
   );
 
   return (
+    /* 高度锚定视口：TopBar 实际 h-16=64px（explorer/page.tsx 同款），原 56px
+       会溢出 8px 出整页滚动条。 */
     <PageContainer
       size="full"
-      className="h-[calc(100vh-56px)] gap-3 py-4"
+      className="h-[calc(100vh-64px)] gap-3 py-4"
       aria-label={portalTitle}
     >
       {/* X-12：页头「新建会话」按钮移除——新建入口收敛到组头「＋」，actions 空；

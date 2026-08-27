@@ -1705,7 +1705,15 @@ export function logsToSegments(
       // 同 file_id 重复行为内容级去重兜底（后端另有 (run_id, dedup_key) 唯一索引）。
       // task-11：task 段 text 为剥前缀的 JSON 原文——不同行/不同阶段天然异键，
       // 重复行（重放）内容级去重且元数据写入幂等，无双丢风险。
-      const key = seg.kind === "file" ? `file:${seg.fileId ?? ""}` : `${seg.kind}:${seg.text}`;
+      // quick-0e56260f：override 令箭 text 也恒空——键含 segmentId，同轮多条令箭
+      // （backend 每条完整行合成一枚，quick-0e56260f）各自生效；否则第二条起被
+      // 同键跳过，刷新路径 raced partial 撤不干净。
+      const key =
+        seg.kind === "file"
+          ? `file:${seg.fileId ?? ""}`
+          : seg.kind === "override"
+            ? `override:${seg.segmentId ?? ""}`
+            : `${seg.kind}:${seg.text}`;
       if (seenText.has(key)) continue;
       seenText.add(key);
     }
