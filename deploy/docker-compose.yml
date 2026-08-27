@@ -59,23 +59,6 @@ services:
       retries: 20
     mem_limit: 256m
 
-  # ql-20260827-002：Word 预览 LibreOffice→PDF 转换（docGrid 行网格排版保真——
-  # 本地 docxjs 渲染器无分页模型，公文封面空段撑页/目录位置必漂移；LibreOffice
-  # 完整支持）。OnlyOffice 已退役（ql-20260826-013）不受本服务影响；Excel 按
-  # 用户决策走下载引导。中文字体经 ./onlyoffice-fonts 只读挂载（商用许可不入
-  # Git——目录缺失时 LO 用替代字体，公文还原度下降）。
-  gotenberg:
-    image: gotenberg/gotenberg:8
-    restart: unless-stopped
-    volumes:
-      - ./onlyoffice-fonts:/usr/share/fonts/truetype/office-custom:ro
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:3000/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-    mem_limit: 1g
-
   backend:
     # 固定 tag：本地 build / 服务器 docker load / compose up 三者复用同一镜像名。
     # 部署改用 save/load（见 deploy/scripts/build-and-save.sh + load-and-up.sh），服务器不再现场构建。
