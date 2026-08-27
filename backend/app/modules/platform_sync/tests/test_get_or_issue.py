@@ -1,13 +1,18 @@
 """Tests for ``PlatformSyncTokenService.get_or_issue`` — init-provision 签发语义。
 
-Change 2026-08-12-init-provision-local-yaml task-08 / FR-02 / D-001。
+Change 2026-08-12-init-provision-local-yaml task-08 / FR-02 / D-001；
+2026-08-27 契约修订（docs/sillyspec/init-revokes-persistent-local-yaml-tokens.md）：
+吊销范围收窄到 name=init-provisioned——connect 换发的持久 token（name=sync-*）与
+用户手签 token 不再被一锅端（它们的明文在 local.yaml，被吊销即静默 401）。
 
-覆盖四个场景（design §5.2 §7.1，task-01 contract）：
+覆盖场景（design §5.2 §7.1，task-01 contract + 2026-08-27 修订）：
 - 空表 ``get_or_issue`` 直接签新：返回 row+明文，DB 恰一条 ``revoked_at`` 为空记录。
-- 同维度已有活 token：``get_or_issue`` 内联吊销旧行（``revoked_at`` 非空）再签新，
-  新行 ``revoked_at`` 为空，DB 至多一条活 token。
-- 多次调用同 workspace+created_by 维度：始终仅一条活 token，活 token 不堆积。
-- 吊销后的旧明文 ``authenticate`` 返 None；新明文返非空 Principal。
+- 同维度已有持久 token（name != init-provisioned）：**不被吊销**，与新 init token 并存。
+- 持久 token 与 init token 并存时再次 ``get_or_issue``：只轮换旧 init token（防 init
+  堆积），持久 token 存活，且多活并存不崩（旧实现 ``scalar_one_or_none`` 的
+  ``MultipleResultsFound`` 潜伏崩溃回归锚）。
+- 多次调用同 workspace+created_by 维度：init 活 token 始终仅一条，不堆积。
+- 吊销后的旧 init 明文 ``authenticate`` 返 None；新明文返非空 Principal。
 
 复用 ``platform_sync/tests/conftest.py`` 的 autouse 建表 fixture + 根 conftest 的
 ``db_session``；明文断言一律用 ``get_or_issue`` 返回值（sha256 不可逆，不查 DB 比对 hash），
@@ -110,40 +115,79 @@ async def test_empty_table_issues_new(db_session: AsyncSession) -> None:
     assert all_rows[0].revoked_at is None
 
 
-# ── 场景 2：有旧同维度则吊销 + 签新 ─────────────────────────────────────────
+# ── 场景 2：持久 token（name != init-provisioned）不被吊销 ──────────────────
 
 
 @pytest.mark.asyncio
-async def test_existing_active_token_revoked_and_reissued(
+async def test_persistent_token_survives_get_or_issue(
     db_session: AsyncSession,
 ) -> None:
-    """同维度已有一条 create 出的活 token → get_or_issue 吊销旧行 + 签新；
-    旧行 revoked_at 非空、新行 revoked_at 为空、DB 至多一条活 token。"""
+    """同维度已有 connect 换发/手签持久 token（name=sync-*）→ get_or_issue **不吊销它**，
+    只签新 init token；持久明文仍可鉴权（2026-08-27 修复的正面契约）。"""
     ws = await _make_workspace(db_session)
     user = await _make_user(db_session)
     svc = _svc(db_session)
 
-    # 先 create 一条同维度活 token（模拟 init-provision 之前已手工签发）
-    old_row, _old_plaintext = await svc.create(
-        workspace_id=ws.id, name="manual", created_by=user.id, scope=None
+    # 先 create 一条持久 token（镜像 connect 换发通道的 name 形态）
+    old_row, old_plaintext = await svc.create(
+        workspace_id=ws.id, name=f"sync-{ws.root_path[:60]}", created_by=user.id, scope=None
     )
     assert old_row.revoked_at is None  # 前置：旧 token 确实活着
 
     new_row, new_plaintext = await svc.get_or_issue(workspace_id=ws.id, created_by=user.id)
 
-    # 新行未吊销 + 明文带前缀 + 新旧行 id 不同（确是新签发，不是复用旧 row）
+    # 新 init 行未吊销 + 明文带前缀 + 新旧行 id 不同（确是新签发，不是复用旧 row）
     assert new_row.revoked_at is None
     assert new_plaintext.startswith(PLATFORM_SYNC_TOKEN_PREFIX)
     assert new_row.id != old_row.id
 
-    # refresh 重新从 DB 拉，确认旧行吊销状态确已落盘（不只 in-memory 假象）
+    # 持久 token 未被吊销（refresh 从 DB 拉实证），明文仍可鉴权
     await db_session.refresh(old_row)
-    assert old_row.revoked_at is not None
+    assert old_row.revoked_at is None
+    assert await svc.authenticate(old_plaintext) is not None
 
-    # 同维度至多一条活 token，且就是新行
+    # 持久 + init 两条活 token 并存（"同维度至多一条活 token"仅对 init 名下成立）
     active = await _active_tokens(db_session, workspace_id=ws.id)
-    assert len(active) == 1
-    assert active[0].id == new_row.id
+    assert {t.id for t in active} == {old_row.id, new_row.id}
+
+
+# ── 场景 2b：init token 轮换 + 多活并存不崩 ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_init_token_rotated_and_coexistence_no_crash(
+    db_session: AsyncSession,
+) -> None:
+    """持久 token 与 init token 并存时再次 get_or_issue：只轮换旧 init token（防 init
+    堆积），持久 token 存活；多活并存不崩（旧实现 scalar_one_or_none 多行
+    MultipleResultsFound 潜伏崩溃的回归锚）。"""
+    ws = await _make_workspace(db_session)
+    user = await _make_user(db_session)
+    svc = _svc(db_session)
+
+    # 持久 token + 首轮 init token → 两条活 token 并存
+    persistent_row, persistent_plaintext = await svc.create(
+        workspace_id=ws.id, name=f"sync-{ws.root_path[:60]}", created_by=user.id, scope=None
+    )
+    _init1_row, init1_plaintext = await svc.get_or_issue(workspace_id=ws.id, created_by=user.id)
+    assert len(await _active_tokens(db_session, workspace_id=ws.id)) == 2
+
+    # 并存状态下再次 get_or_issue（旧实现此处 MultipleResultsFound 崩溃）
+    init2_row, init2_plaintext = await svc.get_or_issue(workspace_id=ws.id, created_by=user.id)
+
+    assert init2_plaintext != init1_plaintext  # 真·签新
+    assert init2_row.revoked_at is None
+    assert await svc.authenticate(init1_plaintext) is None  # 旧 init 被轮换
+    assert await svc.authenticate(persistent_plaintext) is not None  # 持久仍活
+    await db_session.refresh(persistent_row)
+    assert persistent_row.revoked_at is None
+
+    # 活 token 仍两条（持久 + 新 init），init 名下恒一条
+    active = await _active_tokens(db_session, workspace_id=ws.id)
+    assert len(active) == 2
+    init_active = [t for t in active if t.name == "init-provisioned"]
+    assert len(init_active) == 1
+    assert init_active[0].id == init2_row.id
 
 
 # ── 场景 3：多次调用同维度仅一条活 token ────────────────────────────────────
@@ -151,7 +195,7 @@ async def test_existing_active_token_revoked_and_reissued(
 
 @pytest.mark.asyncio
 async def test_repeated_calls_keep_single_active(db_session: AsyncSession) -> None:
-    """同 workspace+created_by 多次 get_or_issue → 始终仅一条活 token，活 token 不堆积。"""
+    """同 workspace+created_by 多次 get_or_issue → init 活 token 始终仅一条，不堆积。"""
     ws = await _make_workspace(db_session)
     user = await _make_user(db_session)
     svc = _svc(db_session)

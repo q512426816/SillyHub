@@ -236,3 +236,18 @@
 方案：session-input-bar 📎 改 ＋ 按钮弹自定义功能菜单（daemon 族 absolute bottom-full 浮层惯例）：附件项走原 file input 管线（门控下沉菜单项 title）、派团队项经新 props onTeamTrigger/teamTriggerDisabled/Title 回调父层开 TeamTriggerPopover（门控口径同原按钮）、选择技能/关联变更项向光标插入 / 或 @ 驱动既有联想浮层（词中插入自动补空格保词首检测）；菜单外点/Esc/选中即关；TeamTriggerRow 移除派团队按钮并按需渲染（chip/错误/弹层开才出现）；page 真会话/预会话/dialog 三宿主接线
 结果：新增 session-input-bar-plus-menu.test.tsx 8 用例全过；适配 pre-session/team 测试 13 用例（含 ql-20260827-018 streamSession 三参断言漏改补遗）；相关 9 suites 174 用例全过，tsc 0、eslint 无新增告警；未部署
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/__tests__/session-panel-team.test.tsx
+
+## ql-20260828-001-6c6e | 2026-08-28 00:08:50 | get_or_issue 吊销按 name 过滤——init 不再一锅端持久 token
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/platform_sync/token_service.py（INIT_PROVISIONED_TOKEN_NAME 常量 + 吊销 SELECT name 过滤）
+- backend/app/modules/mcp_gateway/service.py（同名常量 + 查旧过滤加 name 条件）
+- backend/app/modules/platform_sync/tests/test_get_or_issue.py（场景2 反转（持久存活）+ 场景2b 并存不崩回归锚）
+- backend/app/modules/mcp_gateway/tests/test_get_or_issue.py（场景2/5 契约反转）
+- .sillyspec/docs/backend/modules/platform_sync.md（MANUAL_NOTES 补 2026-08-27 修订条目）
+- .sillyspec/docs/backend/modules/mcp_gateway.md（MANUAL_NOTES 补 2026-08-27 修订条目）
+需求：get_or_issue 吊销按 name 过滤——init 不再一锅端持久 token
+根因：init lease 触发的 get_or_issue 把同 workspace+created_by 名下所有活 token（connect 换发 shpsync_ 与手签 shmcp_）全部吊销，而新 init token 明文仅当次消费不写回 local.yaml，持久凭据从此静默 401（docs/sillyspec/init-revokes-persistent-local-yaml-tokens.md）
+方案：两处 get_or_issue 吊销查询加 name=init-provisioned 过滤（只轮换旧 init token 防堆积，持久 token 不动）；platform_sync 侧同时消除多活并存时 scalar_one_or_none 的 MultipleResultsFound 潜伏崩溃；两测试文件契约反转 + 并存回归锚；两模块文档 MANUAL_NOTES 补修订条目
+结果：pytest platform_sync+mcp_gateway+daemon/lease 279 passed（get_or_issue 10 passed）；ruff 两模块通过；mypy 4 改动文件 0 issues

@@ -39,6 +39,12 @@ log = get_logger(__name__)
 # 明文无此前缀直接 return None（不查库）。
 PLATFORM_SYNC_TOKEN_PREFIX = "shpsync_"
 
+# init lease 专用 token 名。get_or_issue 只轮换此名下的旧 token（防 init 自身堆积），
+# 不碰 connect 换发的持久 token（name=sync-<root_path>）与用户手签 token——后两者是
+# local.yaml 持久凭据，被吊销即静默 401（2026-08-27 修复，docs/sillyspec/
+# init-revokes-persistent-local-yaml-tokens.md）。
+INIT_PROVISIONED_TOKEN_NAME = "init-provisioned"
+
 
 @dataclass(frozen=True, slots=True)
 class PlatformSyncTokenPrincipal:
@@ -81,23 +87,34 @@ class PlatformSyncTokenService:
         workspace_id: uuid.UUID,
         created_by: uuid.UUID,
     ) -> tuple[PlatformSyncTokenORM, str]:
-        """获取或签发 token（按 design §5.2 §7.1）。
+        """获取或签发 init 专用 token（按 design §5.2 §7.1）。
 
-        语义：查同维度（workspace_id + created_by）旧未吊销 token → 命中则内联吊销
-        → 签新返回 (新 row, 明文)。明文仅本次返回，调用方立即注入 payload 后丢弃，
-        不写日志不落 lease.metadata（对齐 D-001 与 §9）。
+        语义：查同维度（workspace_id + created_by）旧未吊销的 **init 专用 token**
+        （name=init-provisioned）→ 命中则内联吊销 → 签新返回 (新 row, 明文)。
+        明文仅本次返回，调用方立即注入 payload 后丢弃，不写日志不落
+        lease.metadata（对齐 D-001 与 §9）。
 
-        幂等性：单次调用非幂等（每次签新）；但同维度至多一条活 token，旧 token
-        被吊销后 authenticate 返 None。重复 init 重复签新可接受：前端初始化按钮
-        仅忙时禁用、已初始化后仍可重复触发（workspace-config-card busyReason），
-        但旧 token 内联吊销 + init 第 5 步重写 local.yaml，用户侧恒单活 token；
-        lease claim 单飞窗口防并发签发。
+        吊销范围只限 init-provisioned（2026-08-27 修复，docs/sillyspec/
+        init-revokes-persistent-local-yaml-tokens.md）：connect 换发的持久
+        shpsync_（name=sync-<root_path>）与用户手签 token 同属一个
+        workspace+created_by 维度但语义是持久凭据，且新 init token 明文不写回
+        local.yaml——一锅端吊销会让 local.yaml 凭据静默 401。init 自身防堆积
+        不受影响：重复 init 只轮换旧 init-provisioned。
+
+        幂等性：单次调用非幂等（每次签新）；同维度至多一条活 init token，旧
+        init token 被吊销后 authenticate 返 None。重复 init 重复签新可接受：
+        前端初始化按钮仅忙时禁用、已初始化后仍可重复触发
+        （workspace-config-card busyReason），但旧 token 内联吊销 + init 第 5 步
+        重写 local.yaml，用户侧恒单活 token；lease claim 单飞窗口防并发签发。
         """
-        # 1) select 旧未吊销（workspace_id + created_by + revoked_at IS NULL）
+        # 1) select 旧未吊销 init 专用 token（维度 + name + revoked_at IS NULL；
+        #    name 过滤后同维度至多一行，也消除持久 token 并存时
+        #    scalar_one_or_none 的 MultipleResultsFound 潜伏崩溃）
         stmt = (
             select(PlatformSyncTokenORM)
             .where(col(PlatformSyncTokenORM.workspace_id) == workspace_id)
             .where(col(PlatformSyncTokenORM.created_by) == created_by)
+            .where(col(PlatformSyncTokenORM.name) == INIT_PROVISIONED_TOKEN_NAME)
             .where(col(PlatformSyncTokenORM.revoked_at).is_(None))
         )
         old_row = (await self._db.execute(stmt)).scalar_one_or_none()
@@ -112,7 +129,7 @@ class PlatformSyncTokenService:
         # 3) 签新（调既有 create，复用 _generate_plaintext 与 _token_hash）
         return await self.create(
             workspace_id=workspace_id,
-            name="init-provisioned",
+            name=INIT_PROVISIONED_TOKEN_NAME,
             created_by=created_by,
             scope=None,
         )

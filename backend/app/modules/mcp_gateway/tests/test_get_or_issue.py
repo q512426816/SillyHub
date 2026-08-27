@@ -1,14 +1,19 @@
 """Tests for :meth:`McpTokenService.get_or_issue`（task-09 / design §5.2 §7.1 / D-001）。
 
+2026-08-27 契约修订（docs/sillyspec/init-revokes-persistent-local-yaml-tokens.md）：
+吊销范围收窄到 name=init-provisioned——用户手签的持久 token 不再被一锅端
+（其明文在 local.yaml，被吊销即静默 401）。
+
 覆盖 5 场景：
 
 1. 空表 ``get_or_issue`` 直接签新——返 row+明文，DB 仅一条且 ``revoked_at`` 为空。
-2. 先 ``create`` 一条同维度 token（同 workspace_id + 同 created_by），再
-   ``get_or_issue``——旧 revoke 新签，至多一条活 token。
-3. 多次 ``get_or_issue`` 同 workspace——不堆积（活 token 恒为 1，历史行保留供审计）。
+2. 先 ``create`` 一条同维度持久 token，再 ``get_or_issue``——**持久 token 存活**，
+   与新 init token 两条活 token 并存。
+3. 多次 ``get_or_issue`` 同 workspace——init token 不堆积（活 token 恒为 1，历史行保留供审计）。
 4. 签出的 token ``scope`` 落库为 ``['dispatch']``（非 ``'workspace'`` 非 ``'read'``），
    属 :data:`MCP_SCOPES` 合法值；``authenticate`` 返非空 :class:`McpTokenPrincipal`。
-5. ``get_or_issue`` 内部吊销旧 token 后，旧明文 ``authenticate`` 返 ``None``。
+5. ``get_or_issue`` 轮换旧 init token 后，旧 init 明文 ``authenticate`` 返 ``None``；
+   并存的持久 token 明文不受影响。
 
 Fixture 复用（蓝图 constraints）：
 
@@ -109,23 +114,26 @@ async def test_get_or_issue_on_empty_table_issues_new(db_session: AsyncSession) 
     assert await _count_active(db_session, ws.id) == 1
 
 
-# ── 场景 2：有旧（同维度）→ 吊销 + 签新 ─────────────────────────────────
+# ── 场景 2：持久 token（name != init-provisioned）不被吊销 ──────────────────
 
 
 @pytest.mark.asyncio
-async def test_get_or_issue_revokes_existing_same_dimension_token(
+async def test_get_or_issue_keeps_persistent_token(
     db_session: AsyncSession,
 ) -> None:
+    """同维度已有用户手签持久 token（name=manual-old）→ get_or_issue **不吊销它**，
+    只签新 init token；持久明文仍可鉴权（2026-08-27 修复，docs/sillyspec/
+    init-revokes-persistent-local-yaml-tokens.md——持久 token 是 local.yaml 凭据，
+    被吊销即静默 401）。"""
     ws = await _make_workspace(db_session)
     svc = _svc(db_session)
 
-    # 先 create 同维度 token（同 workspace_id + 同 created_by=None）
+    # 先 create 同维度持久 token（同 workspace_id + 同 created_by=None）
     old_row, old_plaintext = await svc.create(
         workspace_id=ws.id, name="manual-old", scope=["read"], created_by=None
     )
     assert await _count_active(db_session, ws.id) == 1
 
-    # get_or_issue 应吊销旧 token 再签新
     new_row, new_plaintext = await svc.get_or_issue(workspace_id=ws.id, created_by=None)
 
     # 新明文 != 旧明文（确保是真签发新 token，非返旧）
@@ -133,14 +141,15 @@ async def test_get_or_issue_revokes_existing_same_dimension_token(
     assert new_plaintext.startswith(MCP_TOKEN_PREFIX)
     # 新 row 为活 token
     assert new_row.revoked_at is None
-    # 旧 row 已被 revoke（refresh from DB——old_row 是 revoke 前的快照）
+    # 旧持久 row 未被 revoke（refresh from DB——old_row 是快照）
     refreshed_old = (
         await db_session.execute(select(McpTokenORM).where(McpTokenORM.id == old_row.id))
     ).scalar_one()
-    assert refreshed_old.revoked_at is not None
-    # 至多一条活 token（D-001 不堆积语义）
-    assert await _count_active(db_session, ws.id) == 1
-    # 总行数 2（旧吊销行保留供审计 + 新活行）
+    assert refreshed_old.revoked_at is None
+    assert await svc.authenticate(old_plaintext) is not None  # 持久明文仍可鉴权
+    # 持久 + init 两条活 token 并存（"不堆积"仅对 init 名下成立）
+    assert await _count_active(db_session, ws.id) == 2
+    # 总行数 2（两条都活着）
     assert await _count_all(db_session, ws.id) == 2
 
 
@@ -196,25 +205,30 @@ async def test_get_or_issue_scope_is_dispatch_and_authenticates(
     assert principal.scope == [MCP_SCOPE_DISPATCH]
 
 
-# ── 场景 5：旧 token 被 get_or_issue 吊销后 authenticate 返 None ─────────
+# ── 场景 5：旧 init token 被 get_or_issue 轮换后 authenticate 返 None ─────
 
 
 @pytest.mark.asyncio
-async def test_get_or_issue_revoked_old_token_does_not_authenticate(
+async def test_get_or_issue_rotated_init_token_does_not_authenticate(
     db_session: AsyncSession,
 ) -> None:
+    """get_or_issue 轮换旧 init token：旧 init 明文 authenticate 返 None（缓存已清 +
+    DB revoked_at 非空）；并存的持久 token 明文不受影响。"""
     ws = await _make_workspace(db_session)
     svc = _svc(db_session)
 
-    # 先 create 同维度 token（同 workspace_id + 同 created_by=None）
-    _, old_plaintext = await svc.create(
+    # 持久 token（用户手签）+ 首轮 init token
+    _, persistent_plaintext = await svc.create(
         workspace_id=ws.id, name="pre-existing", scope=["read"], created_by=None
     )
-    # 旧明文此刻可认证（写正缓存或走 DB 均成功）
-    assert await svc.authenticate(old_plaintext) is not None
+    _, init_plaintext = await svc.get_or_issue(workspace_id=ws.id, created_by=None)
+    # 两个明文此刻都可认证（前置：均未吊销）
+    assert await svc.authenticate(persistent_plaintext) is not None
+    assert await svc.authenticate(init_plaintext) is not None
 
-    # get_or_issue 吊销旧 token（内部 revoke 会 commit + 精确清正缓存）再签新
+    # 再次 get_or_issue：轮换旧 init token（内部 revoke 会 commit + 精确清正缓存）
     await svc.get_or_issue(workspace_id=ws.id, created_by=None)
 
-    # 旧明文已吊销 → authenticate 返 None（缓存已清 + DB revoked_at 非空）
-    assert await svc.authenticate(old_plaintext) is None
+    # 旧 init 明文已吊销 → authenticate 返 None；持久明文不受影响
+    assert await svc.authenticate(init_plaintext) is None
+    assert await svc.authenticate(persistent_plaintext) is not None

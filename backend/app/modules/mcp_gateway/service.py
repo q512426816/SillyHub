@@ -70,6 +70,12 @@ class McpTokenNotFound(AppError):
 # 单独列——authenticate 先判前缀，明文无此前缀直接 return None（不查库）。
 MCP_TOKEN_PREFIX = "shmcp_"
 
+# init lease 专用 token 名。get_or_issue 只轮换此名下的旧 token（防 init 自身堆积），
+# 不碰用户手签的持久 token——后者是 local.yaml 持久凭据，被吊销即静默 401
+# （2026-08-27 修复，docs/sillyspec/init-revokes-persistent-local-yaml-tokens.md；
+# 与 platform_sync.INIT_PROVISIONED_TOKEN_NAME 同名不同表，各自模块内定义）。
+INIT_PROVISIONED_TOKEN_NAME = "init-provisioned"
+
 # 缓存 key 前缀（与 ApiKeyService 的 ``auth:apikey:*`` 独立 namespace，互不影响）。
 _POS_CACHE_PREFIX = "auth:mcptoken:"  # 正缓存：auth:mcptoken:{token_hash}
 _NEG_CACHE_PREFIX = "auth:mcptoken:neg:"  # 负缓存：auth:mcptoken:neg:{token_hash}
@@ -253,8 +259,11 @@ class McpTokenService:
         """获取或签发 init 专用的 dispatch scope token（design §5.2 / §7.1 / D-001）。
 
         复用既有三件套（list_for_workspace / revoke / create）：
-        1. 查该 workspace 所有 token，过滤 ``created_by`` 匹配且 ``revoked_at IS NULL``。
-        2. 命中则吊销旧 token（避免堆积）。
+        1. 查该 workspace 所有 token，过滤 ``created_by`` 匹配、未吊销**且
+           name=init-provisioned**（2026-08-27 修复：只轮换 init 专用 token，
+           不碰用户手签持久 token——后者是 local.yaml 持久凭据，被吊销即静默 401，
+           见 docs/sillyspec/init-revokes-persistent-local-yaml-tokens.md）。
+        2. 命中则吊销旧 init token（避免 init 自身堆积）。
         3. 签发新 token：``name='init-provisioned'``，``scope=['dispatch']``（execute 派
            Wave 子代理语义，必须取 MCP_SCOPES 合法值）。
 
@@ -269,20 +278,23 @@ class McpTokenService:
         """
         from app.modules.mcp_gateway.auth import MCP_SCOPE_DISPATCH
 
-        # 1) 查旧：过滤 created_by 匹配且未吊销
+        # 1) 查旧 init 专用 token：created_by 匹配 + 未吊销 + name 过滤
         existing = [
             row
             for row in await self.list_for_workspace(workspace_id=workspace_id)
-            if row.created_by == created_by and row.revoked_at is None
+            if row.created_by == created_by
+            and row.revoked_at is None
+            and row.name == INIT_PROVISIONED_TOKEN_NAME
         ]
-        # 2) 吊销旧（命中则逐一 revoke；通常至多一条，因 get_or_issue 每次调用都吊旧签新）
+        # 2) 吊销旧 init token（命中则逐一 revoke；通常至多一条，因 get_or_issue
+        #    每次调用都吊旧签新；持久 token 不在此列）
         for old in existing:
             await self.revoke(token_id=old.id, workspace_id=workspace_id)
         # 3) 签新：scope 必须是 MCP_SCOPES 合法值（dispatch 对齐 execute 派子代理语义）
         return await self.create(
             workspace_id=workspace_id,
             created_by=created_by,
-            name="init-provisioned",
+            name=INIT_PROVISIONED_TOKEN_NAME,
             scope=[MCP_SCOPE_DISPATCH],
         )
 
