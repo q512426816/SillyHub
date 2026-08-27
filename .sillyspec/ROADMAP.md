@@ -4,12 +4,15 @@
 > 维护规则：每次 `sillyspec-archive` 归档变更时同步更新「已完成里程碑」与「当前活跃」两节。
 > 详细变更规格见 `.sillyspec/changes/`（活跃）与 `.sillyspec/changes/archive/`（历史）。
 
-最近更新：2026-08-21
+最近更新：2026-08-27
 
 ---
 
 ## 一、已完成里程碑（按时间，提炼自已归档变更）
 
+### 2026-08-25 · 会话附件与文件统一在线预览
+
+- **session-attachment-preview**（2026-08-25）：智能体会话发送的文件可点击在线预览——统一预览弹窗（antd Modal）+ 注册表分发架构（matchRenderer：blob.type > meta.mime > 扩展名），覆盖三入口（附件 chips / 文件消息卡片 / 文件中心），后端零渲染职责仅存取。渲染器演进终态：图片=antd Image、PDF=pdf.js 画布逐页渲染（iframe+原生查看器不可依赖，ql-20260827-001）、docx=docx-preview 动态 import、markdown=必经 MarkdownText 防 XSS、fallback=下载引导；Excel 按用户决策取消在线渲染（ql-20260826-013）。useObjectUrl 统一鉴权拉取/objectURL 生命周期托管（R-04）。期间 OnlyOffice/LibreOffice 高保真管线先后上线又退役（字体解混淆修复字形 / docGrid 行网格引擎不支持 / LO 页数偏差 46v42 用户不接受），决策链完整沉淀 quicklog ql-20260825-004~006、ql-20260826-002/010~013、ql-20260827-001~003。
 ### 2026-08-21 · 会话随时可继续（reopen 链路打通）
 
 - **session-reopen-resume**（2026-08-21）：修「会话重新开启生产必 409 + 恢复后永久卡 reconnecting」三处断链，实现客户端式随时继续会话。①恢复钥匙落库：daemon 消息上报时把 SDK 会话 id 回填 `agent_sessions.agent_session_id`（最新值覆盖，fork 场景正确）+ 存量 Alembic 数据迁移（取最后一轮 run 值，provider/软删三重守卫）；②双端协议确认（方案 B）：daemon 恢复成功调 confirm-reconnected（可选 lease_id 陈旧确认防误翻第二次 reopen，runtimeId 从 SESSION_RESUME payload 参数透传修复 hub-client 静默吞 F1）/ 失败含 SessionAlreadyExistsError 立即 mark-recovery-failed；③双保险兜底：reconnecting 超 180s（last_active_at 基准，F2 修复 recover 路径误杀）手动可重开（旧 lease cancelled 旋转重发）+ 后端 60s 巡检协程自动收敛 failed——同时覆盖旧 daemon 不发确认的过渡期；④边界：cwd 空扫描会话中文 409 拒绝、前端恢复超 240s 出现重开入口 + 409 中文化、gen:types 同步。全链路证据：ASGI 端点级集成测试四步链（reopen→SESSION_RESUME payload 捕获→confirm(lease_id)→active）+ daemon 侧 7 用例拼合 + 真实启动验证（health 200、sweeper 协程拉起）。9 任务 4 Wave，backend 4752/frontend 1818/daemon 2474 全绿，设计/计划/执行三道独立审查（各揪出 F1/F2/同文件同 Wave 真阻断）。部署顺序：先 backend 后 daemon（deploy-notes.md）。已知边界：极老会话（从未上报 id）维持 409 属预期；真实 SDK transcript 加载待部署后人工冒烟一次。
