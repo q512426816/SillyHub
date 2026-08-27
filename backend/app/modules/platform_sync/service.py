@@ -67,6 +67,25 @@ def _tool_report_provider(harness: str) -> str:
     return _TOOL_REPORT_PROVIDER_BY_HARNESS.get(harness, "claude")
 
 
+# ── ql-20260827-016-2b4c：hub 会话归属时间重叠过滤 ──
+def _entry_last_seen_gte(last_seen_at: str | None, floor: datetime) -> bool:
+    """entry.last_seen_at（CLI ISO 8601 UTC 字符串）是否不早于 floor（hub 会话 created_at）。
+
+    解析失败 / 缺失按 False（不挂接）——与 D-005 同口径 best-effort，绝不抛错；
+    naive 时间统一按 UTC 解释（CLI 协议时间恒为 UTC Z 后缀，SQLite 测试库可能
+    丢 tzinfo，跨方言比较前先对齐）。
+    """
+    if not last_seen_at:
+        return False
+    try:
+        seen = datetime.fromisoformat(last_seen_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if seen.tzinfo is None:
+        seen = seen.replace(tzinfo=UTC)
+    return seen >= floor
+
+
 # ── 2026-08-25-session-spec-binding task-06（design §5.W2.2/W2.3 / D-003）──
 async def _bind_entry_ctx(
     session: AsyncSession,
@@ -665,8 +684,12 @@ class PlatformSyncService:
 
         1. ``hub_session_id`` 分支（daemon env 注入的平台会话）：select
            ``agent_sessions`` where id=hub 且 workspace=token 派生 ws 且未软删——
-           命中 → 本批全部 entries 挂该会话；未命中/跨 ws → **静默跳过**（D-005
-           best-effort：entries 仍入库，绝不 4xx/抛错）。
+           命中 → 仅挂 ``last_seen_at`` 不早于会话 ``created_at`` 的条目
+           （ql-20260827-016-2b4c 时间重叠过滤：CLI 全量重推会把早于会话创建
+           就停止活跃的历史旧日志一并送来，整批挂接会让会话尾部卡片挂满无关
+           旧账并覆盖原归属；不满足的条目保持原归属、不参与 ctx 绑定）；
+           未命中/跨 ws → **静默跳过**（D-005 best-effort：entries 仍入库，
+           绝不 4xx/抛错）。
         2. 无 hub 分支（entry 级 ctx，D-009）：entries 按 ``(harness,
            coalesce(change_key, quick_id, ''))`` 分组，每组 find-or-create
            ``origin='tool_report'`` 会话——find 按 ``aggregation_key="{harness}|{ctx}"``
@@ -773,7 +796,17 @@ class PlatformSyncService:
                 )
             ).scalar_one_or_none()
             if hub_session is not None:
+                # ql-20260827-016-2b4c：时间重叠过滤——CLI 上报是全量重推，批里
+                # 混有早于会话创建就停止活跃的历史旧日志；整批挂接会把它们连同
+                # 原归属一起改写到当前会话（卡片挂满无关旧账 + 抢走别家归属）。
+                # 只挂 last_seen_at ≥ 会话 created_at 的条目；不满足的保持原归属
+                # 且不参与 ctx 绑定（其 ctx 属于更早的 run，与 hub 会话无关）。
+                hub_created = hub_session.created_at
+                if hub_created.tzinfo is None:
+                    hub_created = hub_created.replace(tzinfo=UTC)
                 for entry, log_row in persisted:
+                    if not _entry_last_seen_gte(entry.last_seen_at, hub_created):
+                        continue
                     log_row.agent_session_id = hub_session.id
                     # task-06（design §5.W2.2 / D-003）：hub 命中补消费 entry 级 ctx
                     # （quick 绑定唯一可靠通道）——绑定主体为 hub 会话，与归属同事务

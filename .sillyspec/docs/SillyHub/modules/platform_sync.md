@@ -19,7 +19,7 @@ SillySpec CLI ↔ 平台的跨仓同步层。CLI（agent 进程内运行，或 d
   - 审批：`GET /changes/{name}/approval`、`POST /changes/{name}/approval`
   - quicklog：`POST /quicklog-entries`
   - agent 日志（2026-08-23-platform-agent-log-ingest / 2026-08-23-agent-log-conversation-view）：
-    - `POST /agent-logs`：CLI 批量幂等 upsert + 归属（hub_session_id 挂接 / (harness, ctx) find-or-create tool_report 会话）
+    - `POST /agent-logs`：CLI 批量幂等 upsert + 归属（hub_session_id 挂接——仅挂 `last_seen_at` ≥ 会话 `created_at` 的条目，ql-20260827-016-2b4c 时间重叠过滤：全量重推混入的历史旧日志不再被整批挂到当前会话/覆盖原归属，被跳过条目也不落 ctx 绑定；无 hub 时按 (harness, ctx) find-or-create tool_report 会话）
     - `GET /agent-logs`：按读 scope 聚合列表
     - `GET /agent-logs/{id}/content`：原文尾部 256KB（读即弃；回落与二进制格式唯一通道）
     - `GET /agent-logs/{id}/messages?before_seq=`：对话化归一化消息——经 ws rpc host_fs.read_agent_log_messages 透传（MVP 解析 zcode model-io），status 四值一律 200 分层（parsed/unsupported/parse_error/too_large，前端判断回落）；唯一 422=老 daemon method-not-found；与 content 端点共享 scope 校验/二进制黑名单/daemon 定位/错误映射 helper（`_resolve_agent_log_read_target` / `_send_agent_log_rpc`）

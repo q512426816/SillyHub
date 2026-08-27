@@ -434,3 +434,15 @@
 根因：agent-sdk 版本尾数与捆绑 Claude Code 内核对齐，0.3.181 落后 66 个 patch 约 2 个月，错过上游修复与增强；用户确认升级到 npm latest
 方案：package.json 主依赖与 8 个平台 overrides 同步改 0.3.247，pnpm install 更新 lock，tsc build 重建 dist，daemon 进程原参数重启加载新 SDK
 结果：typecheck 0 错；vitest 全量 2917 passed/9 skipped 零回归；build 成功；daemon 新进程 WS 重连成功并在处理真实 lease 派发消息流（运行时实证）
+
+## ql-20260827-016-2b4c | 2026-08-27 16:51:11 | agent 日志 hub 会话归属加时间重叠过滤——旧日志不再被整批挂接
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/platform_sync/service.py（hub 分支时间过滤 + _entry_last_seen_gte 辅助 + docstring）
+- backend/app/modules/platform_sync/tests/test_agent_log_push.py（4 用例固定 HUB_CREATED_AT + 新增 stale 过滤专测）
+- .sillyspec/docs/SillyHub/modules/platform_sync.md（POST /agent-logs 契约行同步）
+需求：agent 日志 hub 会话归属加时间重叠过滤——旧日志不再被整批挂接
+根因：CLI 上报是全量重推，hub_session_id 命中后整批 entries 全部改写归属到当前平台会话，早于会话创建就停止活跃的历史旧日志也被挂上（33fd100d 会话挂 4 条上午旧 zcode 日志）且覆盖原归属，会话尾部「本地 Agent 日志」卡片失真并抢走别家归属
+方案：service.py hub 分支仅挂 last_seen_at ≥ 会话 created_at 的条目（_entry_last_seen_gte，naive 按 UTC 对齐，解析失败/缺失按不挂 best-effort），被跳过条目保持原归属且不落 ctx 绑定；既有 4 个 hub 命中测试改用固定 HUB_CREATED_AT，新增 stale 过滤专测；模块文档契约行同步
+结果：test_agent_log_push.py 27 passed、daemon hub 分支零发布用例 1 passed、ruff 两文件 All checks passed；现网 Postgres 存量错误挂接待部署后一次性 detach（另附 SQL）

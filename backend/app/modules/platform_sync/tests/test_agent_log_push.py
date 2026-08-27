@@ -15,10 +15,16 @@ D-007/D-009）：hub_session_id 关联命中与跨 ws 降级、无 hub 按 (harn
 quicklog_session_links、change_key 落 change_session_links、并存 quick 优先、
 default 伪键无 placeholder 无绑定）、聚合分支 tool_report 会话同款绑定、空 ctx
 单桶不落、降级路径不产生绑定。
+
+ql-20260827-016-2b4c：hub 分支时间重叠过滤——last_seen_at 早于会话 created_at
+的历史旧条目（CLI 全量重推混入）不挂接、不落绑定、不改写原归属；last_seen_at
+缺失同样跳过；既有 hub 命中/绑定用例改用固定 HUB_CREATED_AT 保证条目落在
+会话生命周期内。
 """
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -79,6 +85,11 @@ SAMPLE_BODY: dict[str, Any] = {
     "scan_run_id": "run-20260823-0053",
     "entries": [CODEX_ENTRY, CLAUDE_ENTRY],
 }
+
+# ql-20260827-016-2b4c：hub 会话固定 created_at——条目时间（08-23 00:44/00:53）
+# 均晚于它，走「会话期间活跃」挂接路径；不固定则用真实当前时间，条目全被
+# 时间重叠过滤拦下。过滤行为专测见 test_push_hub_session_skips_stale_entries。
+HUB_CREATED_AT = datetime(2026, 8, 23, 0, 0, tzinfo=UTC)
 
 
 @pytest.mark.asyncio
@@ -448,7 +459,7 @@ async def test_push_hub_session_hit_links_entries(
     shpsync_headers: tuple[Any, dict[str, str]],
     db_session: AsyncSession,
 ) -> None:
-    """hub_session_id 命中（同 ws 未软删）→ 本批 entries 全挂该会话，status 不变。"""
+    """hub_session_id 命中（同 ws 未软删）→ 会话期间活跃的 entries 挂该会话，status 不变。"""
     import uuid as _uuid
 
     ws_id, headers = shpsync_headers
@@ -458,6 +469,7 @@ async def test_push_hub_session_hit_links_entries(
         workspace_id=ws_id,
         provider="claude",
         status="active",  # 故意非默认 pending：断言归属不改 status（生命周期契约）
+        created_at=HUB_CREATED_AT,  # 条目时间之前：条目全部命中时间重叠过滤
     )
     db_session.add(hub)
     await db_session.commit()
@@ -505,6 +517,95 @@ async def test_push_hub_session_hit_links_entries(
     assert [(ln.change_id, ln.session_id) for ln in change_links] == [
         (by_key["change-hub-claude"].id, hub.id)
     ]
+
+
+@pytest.mark.asyncio
+async def test_push_hub_session_skips_stale_entries(
+    client: AsyncClient,
+    shpsync_headers: tuple[Any, dict[str, str]],
+    db_session: AsyncSession,
+) -> None:
+    """ql-20260827-016-2b4c：早于会话创建就停止活跃的旧条目不挂接、不绑定、不抢原归属。
+
+    CLI 上报是全量重推，批里混有历史旧日志：last_seen_at < 会话 created_at →
+    agent_session_id 保持原值不动（含已挂聚合会话的行，hub 重推不得抢走）、
+    entry ctx 不落绑定；last_seen_at 缺失同样按不活跃跳过。会话期间活跃的
+    条目照常挂 hub。
+    """
+    import uuid as _uuid
+
+    ws_id, headers = shpsync_headers
+    hub = AgentSession(
+        id=_uuid.uuid4(),
+        user_id=_uuid.uuid4(),
+        workspace_id=ws_id,
+        provider="claude",
+        status="active",
+        created_at=HUB_CREATED_AT,
+    )
+    prior_group = AgentSession(
+        id=_uuid.uuid4(),
+        user_id=_uuid.uuid4(),
+        workspace_id=ws_id,
+        provider="claude",
+        origin="tool_report",
+        aggregation_key="zcode|change-old-owner",
+    )
+    db_session.add_all([hub, prior_group])
+    await db_session.commit()
+
+    stale_path = "C:/Users/qinyi/.zcode/rollout/stale-before-hub.jsonl"
+    db_session.add(
+        AgentSessionLogORM(
+            workspace_id=ws_id,
+            log_path=stale_path,
+            harness="zcode",
+            agent_session_id=prior_group.id,  # 已归属聚合会话——重推不得改写
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/agent-logs",
+        json={
+            **SAMPLE_BODY,
+            "hub_session_id": str(hub.id),
+            "entries": [
+                # 旧日志：last_seen 早于 hub.created_at（带 quick_id，验证不落绑定）。
+                {
+                    **CODEX_ENTRY,
+                    "log_path": stale_path,
+                    "harness": "zcode",
+                    "last_seen_at": "2026-08-22T23:00:00.000Z",
+                    "quick_id": "ql-stale-skip",
+                },
+                # last_seen_at 缺失：按不活跃跳过，不入归属也不落绑定。
+                {**CODEX_ENTRY, "log_path": "C:/x/null-seen.jsonl", "last_seen_at": None},
+                # 会话期间活跃：照常挂 hub。
+                {
+                    **CLAUDE_ENTRY,
+                    "log_path": "C:/x/fresh-during-hub.jsonl",
+                    "last_seen_at": "2026-08-23T00:44:00.000Z",
+                },
+            ],
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "upserted": 3}
+
+    rows = {r.log_path: r for r in await _all_log_rows(db_session)}
+    assert len(rows) == 3
+    assert rows[stale_path].agent_session_id == prior_group.id  # 原归属不动
+    assert rows["C:/x/null-seen.jsonl"].agent_session_id is None
+    assert rows["C:/x/fresh-during-hub.jsonl"].agent_session_id == hub.id
+
+    # 被跳过条目的 ctx 属于更早的 run，不落任何绑定。
+    assert await _quicklog_links(db_session) == []
+    assert await _change_links(db_session) == []
+    # hub 分支不新建聚合会话（唯一 tool_report 会话是预置的 prior_group）。
+    sessions = await _tool_report_sessions(db_session)
+    assert [s.id for s in sessions] == [prior_group.id]
 
 
 @pytest.mark.asyncio
@@ -863,6 +964,7 @@ async def test_push_hub_hit_quick_id_binds_quicklog_link(
         workspace_id=ws_id,
         provider="claude",
         status="active",
+        created_at=HUB_CREATED_AT,
     )
     db_session.add(hub)
     await db_session.commit()
@@ -900,6 +1002,7 @@ async def test_push_hub_hit_change_key_binds_change_link_with_placeholder(
         workspace_id=ws_id,
         provider="claude",
         status="active",
+        created_at=HUB_CREATED_AT,
     )
     db_session.add(hub)
     await db_session.commit()
@@ -943,6 +1046,7 @@ async def test_push_hub_hit_default_change_key_no_placeholder_no_link(
         workspace_id=ws_id,
         provider="claude",
         status="active",
+        created_at=HUB_CREATED_AT,
     )
     db_session.add(hub)
     await db_session.commit()
