@@ -411,3 +411,92 @@ describe('daemon SESSION_RESUME 双向确认（task-06 / session-reopen-resume /
     expect(client.markRecoveryFailed).not.toHaveBeenCalled();
   });
 });
+
+// ql-20260827-014（reopen 丢供应商凭证修复）：SESSION_RESUME 随带的会话级
+// provider_config 必须透传进 record.providerConfig——restoreAndReconnect 由此
+// 重建供应商 env（buildSpawnEnv 第 0 层）。缺该透传时恢复出的 SDK 子进程无
+// 凭证（隔离 CLAUDE_CONFIG_DIR 无本机 OAuth 兜底）→ "Not logged in" 秒退 →
+// daemon 上报 end → 会话秒回 ended（生产实证：每次重开约 2s 死亡循环）。
+describe('daemon SESSION_RESUME 供应商凭证透传（ql-20260827-014）', () => {
+  let daemons: Daemon[] = [];
+
+  afterEach(async () => {
+    for (const d of daemons) {
+      if (d.isRunning) {
+        await d.stop().catch(() => undefined);
+      }
+    }
+    daemons = [];
+  });
+
+  const providerConfig = {
+    agent_kind: 'claude',
+    base_url: 'https://open.bigmodel.cn/api/anthropic',
+    api_key: 'sk-reopen-key',
+    api_format: 'anthropic',
+  };
+
+  it('snake provider_config → record.providerConfig 原样透传', async () => {
+    const { daemon, sm } = buildDaemon();
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: MSG.SESSION_RESUME,
+      payload: {
+        session_id: 'sess-prov-1',
+        lease_id: 'lease-prov-1',
+        agent_session_id: 'agent-sid-prov',
+        cwd: '/tmp/prov',
+        provider: 'claude',
+        runtime_id: 'runtime-prov',
+        provider_config: providerConfig,
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    expect(sm.restoreAndReconnect).toHaveBeenCalledTimes(1);
+    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
+    expect(record.providerConfig).toEqual(providerConfig);
+  });
+
+  it('camel providerConfig 兼容（双读归一）', async () => {
+    const { daemon, sm } = buildDaemon();
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: MSG.SESSION_RESUME,
+      payload: {
+        session_id: 'sess-prov-2',
+        lease_id: 'lease-prov-2',
+        agent_session_id: 'agent-sid-prov2',
+        cwd: '/tmp/prov2',
+        provider: 'claude',
+        providerConfig: providerConfig,
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
+    expect(record.providerConfig).toEqual(providerConfig);
+  });
+
+  it('payload 不带凭证键 → record.providerConfig 保持 undefined（本机凭证链零回归）', async () => {
+    const { daemon, sm } = buildDaemon();
+    daemons.push(daemon);
+
+    await emit(daemon, {
+      type: MSG.SESSION_RESUME,
+      payload: {
+        session_id: 'sess-prov-3',
+        lease_id: 'lease-prov-3',
+        agent_session_id: 'agent-sid-prov3',
+        cwd: '/tmp/prov3',
+        provider: 'claude',
+      },
+    });
+    await new Promise((r) => setTimeout(r, 5));
+
+    const record = sm.restoreAndReconnect.mock.calls[0]![0] as PersistedSessionRecord;
+    expect(record.providerConfig).toBeUndefined();
+  });
+});

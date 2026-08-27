@@ -3335,6 +3335,14 @@ export class Daemon {
     // 字段同时填 pathToAgentExecutable（Codex driver 读）+ pathToClaudeCodeExecutable
     //（兼容名，SessionManager.restoreAndReconnect fallback）。
     const exePath = this._agentPaths.get(provider) ?? '';
+    // ql-20260827-014：backend reopen 随 SESSION_RESUME 下发的会话级供应商凭证
+    //（resolve_bound_provider_config 解密，结构同 claim payload 的 provider_config；
+    // snake/camel 双读同款 ql-20260616-006）。缺省（backend 未带——会话无供应商或
+    // 解析降级）不写键 → restoreAndReconnect 走本机凭证链（零回归）。含 api_key
+    // 明文，仅进 record（内存态/落盘 sessions.json 与既有快照同信任域），不入日志。
+    const rawProviderConfig =
+      (raw.provider_config as ProviderConfig | null | undefined) ??
+      (raw.providerConfig as ProviderConfig | null | undefined);
     const record: PersistedSessionRecord = {
       sessionId,
       leaseId,
@@ -3347,6 +3355,8 @@ export class Daemon {
       // 给合理默认：turnCount=0（新进程无内存计数），lastActiveAt=now。
       turnCount: 0,
       lastActiveAt: Date.now(),
+      // null 归一缺省（record 类型不收 null；backend 不发 null，防御性归一）。
+      ...(rawProviderConfig != null ? { providerConfig: rawProviderConfig } : {}),
     };
     // restoreAndReconnect 内部 new InputQueue + driver.start({resume}) + fire
     // consume 协程；成功返回后调 markReconnected 切 active。task-06（DS-3）：

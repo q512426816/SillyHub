@@ -71,6 +71,8 @@ async def _make_session(
     agent_session_id: str | None = "sdk-sess-123",
     lease_id: uuid.UUID | None = None,
     cwd: str | None = "/workspace/proj",
+    # ql-20260827-014：会话级供应商（reopen 凭证链用例需自造绑定）。
+    llm_provider_id: uuid.UUID | None = None,
     # DS-5（2026-08-21-session-reopen-resume）：窗口用例需自造 last_active_at
     # （默认 now，既有用例行为不变）。
     last_active_at: datetime | None = None,
@@ -87,6 +89,7 @@ async def _make_session(
         config={"model": "sonnet"},
         turn_count=1,
         cwd=cwd,
+        llm_provider_id=llm_provider_id,
         created_at=now,
         last_active_at=last_active_at if last_active_at is not None else now,
         ended_at=now if status in ("ended", "failed") else None,
@@ -667,6 +670,211 @@ class TestReopenSessionTransition:
         assert lease_row.runtime_id == rt_old.id
         assert lease_row.id != old_lease.id
         assert captured["payload"]["runtime_id"] == str(rt_old.id)
+
+
+# ── ql-20260827-014：reopen 会话级供应商凭证链 ────────────────────────────────
+
+
+async def _seed_provider(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    api_key: str,
+    base_url: str = "https://open.bigmodel.cn/api/anthropic",
+) -> uuid.UUID:
+    """直插 LlmProvider 行（真实 cipher 加密落盘），返回 id。
+
+    镜像 ``test_lease_context_provider_priority.py::_seed_provider``（该文件
+    头注释的范式约定：provider 落盘用真实 cipher，不 mock）。
+    """
+    from app.core.crypto import get_cipher
+    from app.modules.llm_provider.model import LlmProvider
+
+    cipher = get_cipher()
+    ct, key_id = cipher.encrypt(api_key)
+    row = LlmProvider(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        name=f"t014-reopen-{uuid.uuid4().hex[:6]}",
+        agent_kind="claude",
+        encrypted_api_key=ct,
+        key_id=key_id,
+        base_url=base_url,
+        model=None,
+        is_default=False,
+        api_format="anthropic",
+    )
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return row.id
+
+
+class TestReopenSessionProviderCredential:
+    """ql-20260827-014：reopen 必须把会话级供应商带到 daemon（lease 键 + WS 凭证）。
+
+    生产实证（阿里云 b70bf7b2）：reopen 建 lease 漏写 ``session_llm_provider_id``
+    且 SESSION_RESUME payload 不带 provider_config → daemon 恢复的 SDK 子进程无
+    凭证（隔离 CLAUDE_CONFIG_DIR 无本机 OAuth 兜底）→ "Not logged in" 秒退 →
+    会话回 ended，每次重开约 2s 死亡循环。
+    """
+
+    async def test_reopen_with_provider_writes_lease_key_and_ws_credential(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        monkeypatch,
+    ) -> None:
+        """会话绑了供应商 → 新 lease metadata 带 session_llm_provider_id +
+        SESSION_RESUME payload 带解密后的 provider_config（含 api_key 明文）。"""
+        from app.modules.daemon import ws_hub
+
+        admin = await _admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        old_lease = await _make_completed_lease(db_session, rt.id, "sdk-prov-1")
+        provider_id = await _seed_provider(db_session, admin.id, api_key="sk-reopen-key")
+        sess = await _make_session(
+            db_session,
+            admin.id,
+            rt.id,
+            status="ended",
+            agent_session_id="sdk-prov-1",
+            lease_id=old_lease.id,
+            llm_provider_id=provider_id,
+        )
+
+        sent: list[tuple] = []
+
+        async def _capture(runtime_id, msg_type, payload):
+            sent.append((runtime_id, msg_type, payload))
+            return True
+
+        hub = ws_hub.get_daemon_ws_hub()
+        monkeypatch.setattr(hub, "is_connected", lambda _rid: True)
+        monkeypatch.setattr(hub, "send_session_control", _capture)
+
+        resp = await client.post(f"/api/daemon/sessions/{sess.id}/reopen", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+
+        # lease metadata：新 lease 带 session_llm_provider_id（create 路径同款键）。
+        new_lease_id = (
+            await db_session.execute(
+                select(AgentSession.lease_id).where(AgentSession.id == sess.id)
+            )
+        ).scalar_one()
+        meta = (
+            await db_session.execute(
+                select(DaemonTaskLease.metadata_).where(DaemonTaskLease.id == new_lease_id)
+            )
+        ).scalar_one()
+        assert meta.get("session_llm_provider_id") == str(provider_id)
+
+        # WS payload：provider_config 已解密（结构同 claim payload，api_key 明文）。
+        assert len(sent) == 1
+        _, msg_type, payload = sent[0]
+        assert msg_type == protocol.DAEMON_MSG_SESSION_RESUME
+        provider_config = payload.get("provider_config")
+        assert isinstance(provider_config, dict)
+        assert provider_config.get("api_key") == "sk-reopen-key"
+        assert provider_config.get("base_url") == "https://open.bigmodel.cn/api/anthropic"
+
+    async def test_reopen_without_provider_omits_credential(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        monkeypatch,
+    ) -> None:
+        """会话无供应商（llm_provider_id=None，本机凭证链）→ payload 不带
+        provider_config 键、lease metadata 不带 session_llm_provider_id（零回归）。"""
+        from app.modules.daemon import ws_hub
+
+        admin = await _admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        old_lease = await _make_completed_lease(db_session, rt.id, "sdk-noprov-1")
+        sess = await _make_session(
+            db_session,
+            admin.id,
+            rt.id,
+            status="ended",
+            agent_session_id="sdk-noprov-1",
+            lease_id=old_lease.id,
+        )
+
+        sent: list[tuple] = []
+
+        async def _capture(runtime_id, msg_type, payload):
+            sent.append((runtime_id, msg_type, payload))
+            return True
+
+        hub = ws_hub.get_daemon_ws_hub()
+        monkeypatch.setattr(hub, "is_connected", lambda _rid: True)
+        monkeypatch.setattr(hub, "send_session_control", _capture)
+
+        resp = await client.post(f"/api/daemon/sessions/{sess.id}/reopen", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+
+        assert len(sent) == 1
+        _, _, payload = sent[0]
+        assert "provider_config" not in payload
+        new_lease_id = (
+            await db_session.execute(
+                select(AgentSession.lease_id).where(AgentSession.id == sess.id)
+            )
+        ).scalar_one()
+        meta = (
+            await db_session.execute(
+                select(DaemonTaskLease.metadata_).where(DaemonTaskLease.id == new_lease_id)
+            )
+        ).scalar_one()
+        assert "session_llm_provider_id" not in (meta or {})
+
+    async def test_reopen_stale_provider_id_degrades_to_no_credential(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        monkeypatch,
+    ) -> None:
+        """llm_provider_id 指向已不存在的供应商 → 解析降级（payload 缺键、
+        reopen 仍 200 reconnecting），不阻断重开（对齐 claim 链路降级语义）。"""
+        from app.modules.daemon import ws_hub
+
+        admin = await _admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        old_lease = await _make_completed_lease(db_session, rt.id, "sdk-stale-1")
+        # 不落 LlmProvider 行——llm_provider_id 直接指向幽灵 id。
+        sess = await _make_session(
+            db_session,
+            admin.id,
+            rt.id,
+            status="ended",
+            agent_session_id="sdk-stale-1",
+            lease_id=old_lease.id,
+            llm_provider_id=uuid.uuid4(),
+        )
+
+        sent: list[tuple] = []
+
+        async def _capture(runtime_id, msg_type, payload):
+            sent.append((runtime_id, msg_type, payload))
+            return True
+
+        hub = ws_hub.get_daemon_ws_hub()
+        monkeypatch.setattr(hub, "is_connected", lambda _rid: True)
+        monkeypatch.setattr(hub, "send_session_control", _capture)
+
+        resp = await client.post(f"/api/daemon/sessions/{sess.id}/reopen", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        status_row = (
+            await db_session.execute(select(AgentSession.status).where(AgentSession.id == sess.id))
+        ).scalar_one()
+        assert status_row == "reconnecting"
+
+        assert len(sent) == 1
+        _, _, payload = sent[0]
+        assert "provider_config" not in payload
 
 
 # ── DS-5/DS-7（2026-08-21-session-reopen-resume）：reopen 前置校验扩展 ─────────

@@ -131,3 +131,17 @@
 根因：钻取裸容器与详情页原用 min-h-[100dvh] 可被内容撑高致 body 整页滚动（顶栏底栏滚走/手感松垮）；ThemeToggle 只挂桌面顶栏，/m 段无主题切换入口
 方案：m/layout 钻取裸容器与 mobile-app-shell 统一改 fixed inset-0+overflow-hidden；变更详情页 h-full+固定顶栏+main overflow-y-auto；对话页 h-full+overflow-hidden；MobileTopBar 加 actions 槽、外壳默认注入桌面同款 ThemeToggle
 结果：70 用例全绿+tsc/lint 零错；浏览器 390×844 实证：滚动后 body 零滚动（scrollH=clientH=844）、顶栏钉 0-44px、底部导航钉 797-844px（列表+详情双场景）；主题三选一换肤生效且 persist 跨页保持
+
+## ql-20260827-014-d438 | 2026-08-27 15:56:10 | 修复 reopen 会话丢供应商凭证致秒回 ended
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/session/service.py（reopen lease 补键 + WS payload 带解密凭证与降级语义）
+- sillyhub-daemon/src/daemon.ts（resume 路由接收 provider_config 写 record）
+- backend/app/modules/daemon/tests/test_session_reopen.py（新增 3 用例）
+- sillyhub-daemon/tests/daemon-session-resume-route.test.ts（新增 3 用例）
+需求：修复 reopen 会话丢供应商凭证致秒回 ended
+根因：reopen_session 建 lease 漏写 session_llm_provider_id 且 SESSION_RESUME payload 不带解密 provider_config，daemon 恢复的 SDK 子进程无任何凭证（隔离 CLAUDE_CONFIG_DIR 无本机 OAuth 兜底）Not logged in 秒退，daemon 上报 end 会话约 2s 回 ended 死亡循环（阿里云会话 b70bf7b2 实证）
+方案：backend reopen_session 新 lease metadata 补写 session_llm_provider_id（create 同款键）+ SESSION_RESUME 携带 resolve_bound_provider_config 解密 provider_config（降级缺键不阻断）；daemon _routeSessionResume 双读 provider_config/providerConfig 写 record.providerConfig 走既有 restore env 重建链
+结果：backend reopen 两测试文件 36 passed（新增 3 用例）daemon resume 路由 13 passed（新增 3 用例）ruff mypy tsc 全过，模块文档 daemon.md+changelog 已更新
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_session_reopen.py, sillyhub-daemon/tests/daemon-session-resume-route.test.ts

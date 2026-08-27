@@ -4491,6 +4491,15 @@ class SessionService:
                 "provider": session.provider,
                 "claim_token": new_token,
                 "reopened_from_status": session.status,
+                # ql-20260827-014：会话级供应商标记随新 lease 重建（与 create 路径
+                # :1383 同款）。reopen 漏写会让 claim/恢复链路解析不到会话供应商
+                # ——生产实证：reopen 后 lease 全缺此键，SDK 无凭证秒退、会话回
+                # ended（每次重开约 2s 死亡循环）。
+                **(
+                    {"session_llm_provider_id": str(session.llm_provider_id)}
+                    if session.llm_provider_id is not None
+                    else {}
+                ),
             },
         )
         self._session.add(new_lease)
@@ -4514,6 +4523,35 @@ class SessionService:
         # 不受 WS 结果影响）。
         await publish_sessions_changed("status_changed", session.id, session.user_id)
 
+        # ql-20260827-014：reopen 的 SESSION_RESUME 必须携带会话级供应商凭证。
+        # daemon 侧 reopen 恢复（区别于 daemon 重启 recover——那条路走本机
+        # sessions.json 快照里的 providerConfig）此前既拿不到 lease metadata 键、
+        # WS payload 也不带凭证，恢复出的 SDK 子进程无任何凭证（隔离
+        # CLAUDE_CONFIG_DIR 下无本机 OAuth 兜底）→ 首轮 "Not logged in · Please
+        # run /login" 退出 → daemon 上报 end → 会话秒回 ended。解析复用
+        # resolve_bound_provider_config（与 claim payload 同一真相源，D-006）；
+        # 抛异常 / 返回 None（供应商已删 / 属主不符等）降级缺键 + warning 不阻断
+        # reopen（对齐 claim 链路 _inject_provider_config 的降级语义，
+        # context.py:297-303），daemon 走本机凭证链（零回归）。
+        resume_provider_config: dict | None = None
+        if session.llm_provider_id is not None:
+            from app.modules.daemon.lease.context import resolve_bound_provider_config
+
+            try:
+                resume_provider_config = await resolve_bound_provider_config(
+                    self._session,
+                    {"llm_provider_id": str(session.llm_provider_id)},
+                    session.user_id,
+                    session.provider,
+                )
+            except Exception:
+                log.warning(
+                    "session_resume_provider_resolve_failed",
+                    session_id=str(session.id),
+                    llm_provider_id=str(session.llm_provider_id),
+                )
+                resume_provider_config = None
+
         # ── best-effort daemon:session_resume WS (design §6.4) ────────────────
         # WS failure does NOT roll back the local reconnecting state — the daemon
         # will converge on its own (pull/next-poll or recover-on-restart). The
@@ -4527,6 +4565,10 @@ class SessionService:
             "provider": session.provider,
             "runtime_id": str(target_runtime_id),
         }
+        if resume_provider_config is not None:
+            # R-02：明文 api_key 仅进 WS payload（服务端→daemon 下发通道），不入
+            # 日志/ORM；daemon 侧同样不落日志（record.providerConfig 快照语义）。
+            resume_payload["provider_config"] = resume_provider_config
         try:
             from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
