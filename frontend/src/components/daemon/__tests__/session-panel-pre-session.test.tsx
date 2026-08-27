@@ -365,6 +365,14 @@ beforeEach(() => {
 
 /* ───────── 1. D-101 同构渲染 + D-104 上下文行只读 ───────── */
 
+
+/** ql-20260827-020：派团队入口迁入 ＋ 功能菜单——先开菜单再取 menuitem。
+ *  （fireEvent.click 不触发 document mousedown，菜单保持打开可直接取项。） */
+function getTeamMenuItem(): HTMLButtonElement {
+  fireEvent.click(screen.getByRole("button", { name: "更多功能" }));
+  return screen.getByRole("menuitem", { name: /派团队/ }) as HTMLButtonElement;
+}
+
 describe("SessionPanel 预会话态渲染（D-101 同构空态）", () => {
   it("面板头 / 时间线容器 / 输入区均在：新会话标题 + 空时间线提示 + 可输入，仅多上下文行", () => {
     setupPre();
@@ -607,6 +615,8 @@ describe("SessionPanel 预会话首句创建（D-102）", () => {
       expect(sessionApi.streamSession).toHaveBeenCalledWith(
         "sess-pre-1",
         expect.any(Object),
+        // ql-20260827-018：第三参 cursor/initialSync 建流选项。
+        expect.any(Object),
       ),
     );
     // 真会话面板头接管（标题来自 detailQuery）。
@@ -707,7 +717,7 @@ describe("SessionPanel 预会话配置条与团队行（ql-20260823-008 完全�
     expect(profileCtrl.disabled).toBe(false);
     // task-13（FR-05）：派团队按钮解禁——默认 preContext（claude + 在线）可点，
     // 与真会话门控同构；tooltip 提示首句创建会话即预建团队任务。
-    const teamBtn = screen.getByRole("button", { name: /派团队/ }) as HTMLButtonElement;
+    const teamBtn = getTeamMenuItem();
     expect(teamBtn.disabled).toBe(false);
     expect(teamBtn.title).toBe("派团队：首句创建会话时预建团队任务");
   });
@@ -782,9 +792,7 @@ describe("SessionPanel 预会话派团队门控（task-13 解禁）", () => {
   it("claude 引擎 + 所选机器在线：按钮可点，点击打开 preSession 弹层（主 agent 选择器 + 确认文案）", async () => {
     setupPre();
 
-    const teamBtn = screen.getByRole("button", {
-      name: /派团队/,
-    }) as HTMLButtonElement;
+    const teamBtn = getTeamMenuItem();
     expect(teamBtn.disabled).toBe(false);
     expect(teamBtn.title).toBe("派团队：首句创建会话时预建团队任务");
 
@@ -802,9 +810,7 @@ describe("SessionPanel 预会话派团队门控（task-13 解禁）", () => {
   it("非 claude 引擎（codex）：按钮禁用 + tooltip「团队需要 Claude 引擎」", () => {
     setupPre({ preContext: { workspaceId: null, runtimeId: "rt-codex" } });
 
-    const teamBtn = screen.getByRole("button", {
-      name: /派团队/,
-    }) as HTMLButtonElement;
+    const teamBtn = getTeamMenuItem();
     expect(teamBtn.disabled).toBe(true);
     expect(teamBtn.title).toBe("团队需要 Claude 引擎");
   });
@@ -814,9 +820,7 @@ describe("SessionPanel 预会话派团队门控（task-13 解禁）", () => {
       machines: [makeMachine({ status: "offline", online_runtime_count: 0 })],
     });
 
-    const teamBtn = screen.getByRole("button", {
-      name: /派团队/,
-    }) as HTMLButtonElement;
+    const teamBtn = getTeamMenuItem();
     expect(teamBtn.disabled).toBe(true);
     expect(teamBtn.title).toBe("所选机器离线，无法派团队");
   });
@@ -824,9 +828,7 @@ describe("SessionPanel 预会话派团队门控（task-13 解禁）", () => {
   it("无 preContext（空门户态）：按钮禁用 + tooltip「请先选择机器与智能体」", () => {
     setupPre({ preContext: null });
 
-    const teamBtn = screen.getByRole("button", {
-      name: /派团队/,
-    }) as HTMLButtonElement;
+    const teamBtn = getTeamMenuItem();
     expect(teamBtn.disabled).toBe(true);
     expect(teamBtn.title).toBe("请先选择机器与智能体");
   });
@@ -838,9 +840,7 @@ describe("SessionPanel 预会话弹层确认 → 暂存 + 首句携带 team_miss
   /** 打开弹层并确认（目标回填输入框后返回输入框元素）。
    *  ql-20260826-010：回填前置 /team 指令（首句带团队指令语义直送 create）。 */
   async function confirmPopoverWith(objective: string) {
-    fireEvent.click(
-      screen.getByRole("button", { name: /^派团队$/ }) as HTMLButtonElement,
-    );
+    fireEvent.click(getTeamMenuItem());
     const objectiveInput = await screen.findByLabelText(
       "目标（可选，随下条消息发出）",
     );
@@ -929,9 +929,7 @@ describe("SessionPanel 预会话弹层确认 → 暂存 + 首句携带 team_miss
     ]);
 
     // 打开弹层，等主 agent 选择器出现可选工作区项（probe 在线）后选中。
-    fireEvent.click(
-      screen.getByRole("button", { name: /^派团队$/ }) as HTMLButtonElement,
-    );
+    fireEvent.click(getTeamMenuItem());
     const selector = await screen.findByLabelText("主 agent（项目经理）");
     await screen.findByText("前端重构 · 机器一（该工作区设备与智能体）");
     fireEvent.change(selector, { target: { value: "ws-1" } });

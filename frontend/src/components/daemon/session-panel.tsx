@@ -512,16 +512,15 @@ function useSessionTeamMissions(sessionId: string | null) {
 
 /**
  * task-11：输入区上方团队触发行（原型 §01 .team-trigger-row + §02 弹层锚点），
- * page/dialog 两模式共用：派团队按钮（引擎门控 + tooltip）+ 活跃状态 chip（可
- * 关闭收回）+ TeamTriggerPopover 挂载（relative 锚点 + absolute bottom-full，
- * 同 SessionConfigBar 浮层风格）+ 触发错误提示（409/403/422 中文文案）。
- * 纯受控：API 调用/弹层开关归父层（本组件不含团队业务状态）。
+ * page/dialog 两模式共用：活跃状态 chip（可关闭收回）+ TeamTriggerPopover 挂载
+ * （relative 锚点 + absolute bottom-full，同 SessionConfigBar 浮层风格）+ 触发
+ * 错误提示（409/403/422 中文文案）。纯受控：API 调用/弹层开关归父层（本组件
+ * 不含团队业务状态）。
+ *
+ * ql-20260827-020：「派团队」按钮迁入 SessionInputBar ＋ 功能菜单——本行只保留
+ * chip / 错误文案 / 弹层挂载，三者皆空时整行不渲染（原按钮位不再占一行）。
  */
 interface TeamTriggerRowProps {
-  /** 派团队按钮禁用（引擎非 claude / 无会话 / 终态 / 离线等，由父层合成）。 */
-  disabled: boolean;
-  /** 按钮 tooltip（引擎门控时固定「团队需要 Claude 引擎」）。 */
-  tooltip: string;
   /** 活跃 mission 分身数（chip 文案「团队进行中 · N 分身」）；null = 隐藏。 */
   activeWorkers: number | null;
   /** chip 关闭（只收回提示条，不取消任务——TeamTaskBlock 仍展示进展）。 */
@@ -543,14 +542,11 @@ interface TeamTriggerRowProps {
   submitting: boolean;
   /** 触发错误文案（弹层保持打开时行内展示）。 */
   errorText: string | null;
-  onOpen: () => void;
   onTrigger: (payload: TeamMissionTriggerRequest) => void;
   onClose: () => void;
 }
 
 function TeamTriggerRow({
-  disabled,
-  tooltip,
   activeWorkers,
   onDismissChip,
   popoverOpen,
@@ -560,22 +556,14 @@ function TeamTriggerRow({
   defaultObjective,
   submitting,
   errorText,
-  onOpen,
   onTrigger,
   onClose,
 }: TeamTriggerRowProps) {
+  // ql-20260827-020：按钮迁走后按需渲染——无 chip / 无错误 / 弹层未开时不占位
+  //（弹层仍以本行为锚点，开层时行随之出现）。
+  if (activeWorkers === null && !errorText && !popoverOpen) return null;
   return (
     <div className="relative flex shrink-0 flex-wrap items-center gap-2 border-t border-border bg-card px-5 pb-1.5 pt-2">
-      <button
-        type="button"
-        onClick={onOpen}
-        disabled={disabled}
-        title={tooltip}
-        className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-violet-300 bg-violet-50/60 px-3 text-[12px] font-semibold text-violet-700 transition-shadow hover:bg-violet-100 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-60 disabled:shadow-none"
-      >
-        <Users className="h-3.5 w-3.5" aria-hidden />
-        派团队
-      </button>
       {activeWorkers !== null && (
         <span
           data-testid="team-active-chip"
@@ -2329,10 +2317,10 @@ function SessionPanelPage({
           {/* task-13（FR-05/D-009@v2）：预会话团队触发行解禁——门控与真会话
               同构（claude 引擎 + 所选机器在线）；弹层确认后 payload 暂存
               （handlePreTeamTrigger，含主 agent 选择器的 orchestrator_workspace_id），
-              首句 create 随 team_mission 上送（后端预建归 task-09）。 */}
+              首句 create 随 team_mission 上送（后端预建归 task-09）。
+              ql-20260827-020：派团队入口移入 SessionInputBar ＋ 菜单，本行仅留
+              弹层挂载（预会话无 chip/错误常态不渲染）。 */}
           <TeamTriggerRow
-            disabled={preTeamButtonDisabled}
-            tooltip={preTeamButtonTitle}
             activeWorkers={null}
             onDismissChip={() => {}}
             popoverOpen={teamPopover.open}
@@ -2342,7 +2330,6 @@ function SessionPanelPage({
             defaultObjective={teamPopover.objective}
             submitting={false}
             errorText={null}
-            onOpen={() => openTeamPopover(null)}
             onTrigger={handlePreTeamTrigger}
             onClose={closeTeamPopover}
           />
@@ -2363,6 +2350,10 @@ function SessionPanelPage({
             // 上下文的工作区，无则 @ 联想禁用）。
             onMentionsChange={setPendingMentions}
             workspaceId={preContext?.workspaceId ?? null}
+            // ql-20260827-020：＋ 菜单派团队入口（门控口径同原触发行按钮）。
+            onTeamTrigger={() => openTeamPopover(null)}
+            teamTriggerDisabled={preTeamButtonDisabled}
+            teamTriggerTitle={preTeamButtonTitle}
           />
           {/* ql-20260823-008：配置控件条同构挂载（provisional 暂存模式）——机器/
               智能体只读（D-104 锁定与真会话一致），供应商/档案可选暂存随首句生效。 */}
@@ -2807,11 +2798,10 @@ function SessionPanelPage({
             void retryEntry(id);
           }}
         />
-        {/* task-11：输入区上方团队触发行（派团队按钮 + 活跃 chip + 配置弹层），
-            原型 §01 .team-trigger-row；弹层相对本行向上弹出（§02 .team-pop）。 */}
+        {/* task-11：输入区上方团队触发行（活跃 chip + 配置弹层挂载），原型 §01
+            .team-trigger-row；弹层相对本行向上弹出（§02 .team-pop）。ql-20260827-020：
+            派团队按钮移入 SessionInputBar ＋ 菜单，本行按需渲染（chip/错误/弹层）。 */}
         <TeamTriggerRow
-          disabled={teamButtonDisabled}
-          tooltip={teamButtonTitle}
           activeWorkers={teamChipWorkers}
           onDismissChip={() => {
             if (activeTeamMission) setTeamChipDismissedId(activeTeamMission.mission_id);
@@ -2822,7 +2812,6 @@ function SessionPanelPage({
           defaultObjective={teamPopover.objective}
           submitting={teamTriggering}
           errorText={teamError}
-          onOpen={() => openTeamPopover(null)}
           onTrigger={(payload) => {
             void handleTeamTrigger(payload);
           }}
@@ -2847,6 +2836,10 @@ function SessionPanelPage({
           // 仍在，会话 workspace_id 缺省时回落，避免 @ 联想无数据）。
           onMentionsChange={setPendingMentions}
           workspaceId={session.workspace_id ?? preContext?.workspaceId ?? null}
+          // ql-20260827-020：＋ 菜单派团队入口（门控口径同原触发行按钮）。
+          onTeamTrigger={() => openTeamPopover(null)}
+          teamTriggerDisabled={teamButtonDisabled}
+          teamTriggerTitle={teamButtonTitle}
         />
         <div className="px-5 pb-3">
           <SessionConfigBar
@@ -4448,11 +4441,10 @@ function SessionPanelDialog(props: SessionPanelProps) {
         }}
       />
 
-      {/* task-11：输入区上方团队触发行（派团队按钮 + 活跃 chip + 配置弹层），
-          原型 §01 .team-trigger-row；弹层相对本行向上弹出（§02 .team-pop）。 */}
+      {/* task-11：输入区上方团队触发行（活跃 chip + 配置弹层挂载），原型 §01
+          .team-trigger-row；弹层相对本行向上弹出（§02 .team-pop）。ql-20260827-020：
+          派团队按钮移入 SessionInputBar ＋ 菜单，本行按需渲染（chip/错误/弹层）。 */}
       <TeamTriggerRow
-        disabled={teamButtonDisabled}
-        tooltip={teamButtonTitle}
         activeWorkers={teamChipWorkers}
         onDismissChip={() => {
           if (activeTeamMission) setTeamChipDismissedId(activeTeamMission.mission_id);
@@ -4463,7 +4455,6 @@ function SessionPanelDialog(props: SessionPanelProps) {
         defaultObjective={teamPopover.objective}
         submitting={teamTriggering}
         errorText={teamError}
-        onOpen={() => openTeamPopover(null)}
         onTrigger={(payload) => {
           void handleTeamTrigger(payload);
         }}
@@ -4493,6 +4484,10 @@ function SessionPanelDialog(props: SessionPanelProps) {
         // workspaceId prop——attach 续聊工作区由宿主注入，缺省 @ 联想禁用）。
         onMentionsChange={setPendingMentions}
         workspaceId={workspaceId ?? null}
+        // ql-20260827-020：＋ 菜单派团队入口（门控口径同原触发行按钮）。
+        onTeamTrigger={() => openTeamPopover(null)}
+        teamTriggerDisabled={teamButtonDisabled}
+        teamTriggerTitle={teamButtonTitle}
       />
 
       {/* task-14：分身会话浮层——复用 SessionPanel（dialog/attach 形态）打开分身

@@ -241,12 +241,20 @@ beforeEach(() => {
 
 /* ───────── 1. 派团队按钮引擎门控（dialog） ───────── */
 
+
+/**
+ * ql-20260827-020：派团队入口迁入 ＋ 功能菜单——先开菜单再取 menuitem
+ *（fireEvent.click 不触发 document mousedown，菜单保持打开）。
+ */
+async function findTeamMenuItem(): Promise<HTMLButtonElement> {
+  fireEvent.click(await screen.findByRole("button", { name: "更多功能" }));
+  return (await screen.findByRole("menuitem", { name: /派团队/ })) as HTMLButtonElement;
+}
+
 describe("SessionPanel 派团队按钮（dialog 模式引擎门控，D-003）", () => {
   it("claude 会话：按钮可用，tooltip 为派团队说明", async () => {
     setupDialog();
-    const btn = (await screen.findByRole("button", {
-      name: "派团队",
-    })) as HTMLButtonElement;
+    const btn = await findTeamMenuItem();
     expect(btn.disabled).toBe(false);
     expect(btn.title).not.toContain("团队需要 Claude 引擎");
   });
@@ -257,9 +265,7 @@ describe("SessionPanel 派团队按钮（dialog 模式引擎门控，D-003）", 
       defaultProvider: "codex",
       sessionId: null, // idle 新建态：引擎门控优先于会话存在性展示
     });
-    const btn = (await screen.findByRole("button", {
-      name: "派团队",
-    })) as HTMLButtonElement;
+    const btn = await findTeamMenuItem();
     expect(btn.disabled).toBe(true);
     expect(btn.title).toBe("团队需要 Claude 引擎");
   });
@@ -430,17 +436,13 @@ describe("SessionPanel page 模式团队入口", () => {
 
   it("claude 会话（session.provider）：按钮可用", async () => {
     setupPage("claude");
-    const btn = (await screen.findByRole("button", {
-      name: "派团队",
-    })) as HTMLButtonElement;
+    const btn = await findTeamMenuItem();
     expect(btn.disabled).toBe(false);
   });
 
   it("codex 会话（session.provider）：按钮置灰 + tooltip「团队需要 Claude 引擎」", async () => {
     setupPage("codex");
-    const btn = (await screen.findByRole("button", {
-      name: "派团队",
-    })) as HTMLButtonElement;
+    const btn = await findTeamMenuItem();
     expect(btn.disabled).toBe(true);
     expect(btn.title).toBe("团队需要 Claude 引擎");
   });

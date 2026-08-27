@@ -221,3 +221,18 @@
 根因：多角度缺陷排查实证：重置密码接口把新明文口令回传调用者却不校验支配权，配合 require_permission_any 的任一 workspace 权限放行语义构成超管账号接管链；角色权限改写端无 platform:admin 守卫形成先绑后改的自我提权链；release 审批只数 approve 票且 min_approvers 可注入 0；排队消息重试成功路径行被删后裸 assert 必 500；两处 fire-and-forget asyncio.create_task 弱引用可被 GC 静默丢通知/回调
 方案：users_service.reset_password 加目标为平台管理员时的 actor 支配权校验；roles_service 新增 _assert_may_write_platform_admin 守卫 create/update；release 增加 reject 一票阻断 deploy 与 approved 迁移、min_approvers 读取侧 max(1,·) 钳制、create 侧 _sanitize_deploy_policy 落库钳制；session retry 成功派发返回 detached 快照 status=dispatched 替代裸 assert；lease/mcp_gateway 两处 task 模块级强引用 + discard 回调；tool_policy docstring 改引真实构造方
 结果：新增 10 个回归用例全部通过；admin+release+mcp_gateway+session_queue 套件 255 passed 1 xfailed、lease 相关 188 passed；ruff check/format 全过、mypy 6 模块 0 issue；模块文档 4 份已同步
+
+## ql-20260827-020-c8d0 | 2026-08-27 23:52:51 | 会话输入框功能按钮合并——派团队并入＋功能菜单（附件/派团队/选择技能/关联变更·快速修复）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-input-bar.tsx（＋功能按钮+四入口菜单+insertMentionTrigger）
+- frontend/src/components/daemon/session-panel.tsx（TeamTriggerRow 去按钮按需渲染+三宿主接线）
+- frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx（新增 8 用例）
+- frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx（门控用例走菜单+三参断言补遗）
+- frontend/src/components/daemon/__tests__/session-panel-team.test.tsx（按钮查询改 menuitem）
+需求：会话输入框功能按钮合并——派团队并入＋功能菜单（附件/派团队/选择技能/关联变更·快速修复）
+根因：用户需求：输入区按钮收敛——原 📎 附件按钮与输入区上方独立「派团队」按钮两个入口合并为一个＋功能按钮，点击弹菜单承载附件、派团队、选择技能、关联变更/快速修复四类入口
+方案：session-input-bar 📎 改 ＋ 按钮弹自定义功能菜单（daemon 族 absolute bottom-full 浮层惯例）：附件项走原 file input 管线（门控下沉菜单项 title）、派团队项经新 props onTeamTrigger/teamTriggerDisabled/Title 回调父层开 TeamTriggerPopover（门控口径同原按钮）、选择技能/关联变更项向光标插入 / 或 @ 驱动既有联想浮层（词中插入自动补空格保词首检测）；菜单外点/Esc/选中即关；TeamTriggerRow 移除派团队按钮并按需渲染（chip/错误/弹层开才出现）；page 真会话/预会话/dialog 三宿主接线
+结果：新增 session-input-bar-plus-menu.test.tsx 8 用例全过；适配 pre-session/team 测试 13 用例（含 ql-20260827-018 streamSession 三参断言漏改补遗）；相关 9 suites 174 用例全过，tsc 0、eslint 无新增告警；未部署
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/__tests__/session-panel-team.test.tsx

@@ -27,7 +27,18 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FileText, Image as ImageIcon, Paperclip, RefreshCw, Send, X } from "lucide-react";
+import {
+  AtSign,
+  FileText,
+  Image as ImageIcon,
+  Paperclip,
+  Plus,
+  RefreshCw,
+  Send,
+  Sparkles,
+  Users,
+  X,
+} from "lucide-react";
 import { Button } from "antd";
 
 import {
@@ -116,6 +127,14 @@ export interface SessionInputBarProps {
   /** task-03：会话所属工作区（@ 变更/快速修复联想数据源，task-04
    *  useMentionSources）；空（""/null/undefined）= @ 数据源禁用，/ 技能源不受影响。 */
   workspaceId?: string | null;
+  /** ql-20260827-020：＋ 功能菜单——派团队入口（父层开 TeamTriggerPopover）；
+   *  缺省不渲染该项（宿主未接团队能力）。 */
+  onTeamTrigger?: () => void;
+  /** 派团队入口禁用（引擎/终态/离线等，父层合成；含原因文案由 title 承载）。 */
+  teamTriggerDisabled?: boolean;
+  /** 派团队入口 tooltip（启用态动作说明 / 禁用态原因，对齐原 TeamTriggerRow
+   *  按钮的 tooltip 口径由父层合成）。 */
+  teamTriggerTitle?: string;
 }
 
 function formatBytes(n: number): string {
@@ -184,6 +203,9 @@ export function SessionInputBar({
   registerClearAttachments,
   onMentionsChange,
   workspaceId,
+  onTeamTrigger,
+  teamTriggerDisabled = false,
+  teamTriggerTitle,
 }: SessionInputBarProps) {
   const fileRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -225,6 +247,54 @@ export function SessionInputBar({
   const closeMention = () => {
     setMention(null);
     setMentionActiveIndex(0);
+  };
+
+  /* ── ql-20260827-020：＋ 功能菜单 ───────────────────────────────────── */
+
+  /** 菜单开合（外点 / Esc / 选中任一项后关闭）。 */
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+  const plusMenuRef = useRef<HTMLDivElement | null>(null);
+
+  // 外点 + Esc 关闭（外点判定含 ＋ 按钮自身——点击由按钮 onClick 翻转，不走此处）。
+  useEffect(() => {
+    if (!plusMenuOpen) return;
+    const onPointerDown = (e: MouseEvent | TouchEvent) => {
+      if (plusMenuRef.current && !plusMenuRef.current.contains(e.target as Node)) {
+        setPlusMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPlusMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [plusMenuOpen]);
+
+  /**
+   * 向光标处插入联想触发字符并开层（＋ 菜单「选择技能 / 关联变更·快速修复」）。
+   * detectMention 词首规则（task-01）：光标前是正文字符时先补一个空格，保证
+   * 触发字符落在词首（补空格只发生在光标前的正文字符与触发字符之间，不改写
+   * 原文其余内容）。聚焦 textarea 同时挂载联想数据桥（首次预取），回填光标经
+   * pendingCaretRef 延迟复位（受控 value DOM 更新不被覆盖）。
+   */
+  const insertMentionTrigger = (trigger: "/" | "@") => {
+    const ta = textareaRef.current;
+    ta?.focus();
+    setMentionSourcesMounted(true);
+    const caret = Math.min(ta?.selectionStart ?? value.length, value.length);
+    const prevChar = caret > 0 ? value.charAt(caret - 1) : "";
+    const prefix = prevChar && !/\s/.test(prevChar) ? " " : "";
+    const triggerAt = caret + prefix.length;
+    const next = value.slice(0, caret) + prefix + trigger + value.slice(caret);
+    onChange(next);
+    pendingCaretRef.current = triggerAt + 1;
+    runMentionDetect(next, triggerAt + 1);
   };
 
   /**
@@ -544,19 +614,117 @@ export function SessionInputBar({
           hidden
           onChange={(e) => void handleFiles(e.target.files)}
         />
-        <Button
-          type="text"
-          onClick={() => fileRef.current?.click()}
-          disabled={disabled || attachmentsDisabled}
-          className="h-10 w-10 shrink-0 self-center rounded-full p-0 text-muted-foreground"
-          title={
-            attachmentsDisabled
-              ? (attachmentsDisabledTitle ?? "当前引擎不支持附件")
-              : "添加图片/文件附件，支持 Ctrl+V 直接粘贴（图片直读需多模态模型）"
-          }
-        >
-          <Paperclip className="h-5 w-5" />
-        </Button>
+        {/* ql-20260827-020：＋ 功能按钮（原 📎 附件按钮位）——点击弹功能菜单
+            （附件 / 派团队 / 选择技能 / 关联变更·快速修复）。菜单为 daemon
+            组件族自定义浮层（absolute bottom-full + z-30，同联想浮层/团队弹层
+            惯例，避用 antd 浮层）；＋ 按钮包含在外点判定 ref 内防开合双翻。
+            ＋ 不随输入框 disabled（终态/离线仍可开菜单看各入口禁用原因 tooltip，
+            各项自行门控——原 📎 的 attachmentsDisabled 下沉到菜单项）。 */}
+        <div ref={plusMenuRef} className="relative shrink-0 self-center">
+          <Button
+            type="text"
+            onClick={() => setPlusMenuOpen((v) => !v)}
+            aria-haspopup="menu"
+            aria-expanded={plusMenuOpen}
+            aria-label="更多功能"
+            className="h-10 w-10 rounded-full p-0 text-muted-foreground"
+            title="附件 / 派团队 / 选择技能 / 关联变更·快速修复"
+          >
+            <Plus
+              aria-hidden
+              className={`h-5 w-5 transition-transform duration-150 ${plusMenuOpen ? "rotate-45" : ""}`}
+            />
+          </Button>
+          {plusMenuOpen && (
+            <div
+              role="menu"
+              aria-label="输入功能"
+              className="absolute bottom-full left-0 z-30 mb-1.5 w-64 overflow-hidden rounded-xl border border-border bg-card py-1 shadow-lg"
+            >
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setPlusMenuOpen(false);
+                  fileRef.current?.click();
+                }}
+                disabled={attachmentsDisabled}
+                title={
+                  attachmentsDisabled
+                    ? (attachmentsDisabledTitle ?? "当前引擎不支持附件")
+                    : "添加图片/文件附件，支持 Ctrl+V 直接粘贴（图片直读需多模态模型）"
+                }
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Paperclip aria-hidden className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0">
+                  <span className="block text-[13px] leading-5">附件</span>
+                  <span className="block text-[11px] leading-4 text-muted-foreground">
+                    图片 / 文件，支持 Ctrl+V 粘贴
+                  </span>
+                </span>
+              </button>
+              {onTeamTrigger && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setPlusMenuOpen(false);
+                    onTeamTrigger();
+                  }}
+                  disabled={teamTriggerDisabled}
+                  title={teamTriggerTitle ?? "派团队执行任务"}
+                  className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <Users aria-hidden className="h-4 w-4 shrink-0 text-violet-600" />
+                  <span className="min-w-0">
+                    <span className="block text-[13px] leading-5">派团队</span>
+                    <span className="block text-[11px] leading-4 text-muted-foreground">
+                      当前智能体升级主控，派发分身
+                    </span>
+                  </span>
+                </button>
+              )}
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setPlusMenuOpen(false);
+                  insertMentionTrigger("/");
+                }}
+                title="插入 / 触发技能指令联想"
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted"
+              >
+                <Sparkles aria-hidden className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0">
+                  <span className="block text-[13px] leading-5">选择技能</span>
+                  <span className="block text-[11px] leading-4 text-muted-foreground">
+                    / 技能指令
+                  </span>
+                </span>
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setPlusMenuOpen(false);
+                  insertMentionTrigger("@");
+                }}
+                disabled={!workspaceId}
+                title={workspaceId ? "插入 @ 关联变更 / 快速修复" : "需在绑定工作区的会话中关联变更"}
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <AtSign aria-hidden className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0">
+                  <span className="block text-[13px] leading-5">关联变更 / 快速修复</span>
+                  <span className="block text-[11px] leading-4 text-muted-foreground">
+                    @ 绑定任务上下文
+                  </span>
+                </span>
+              </button>
+            </div>
+          )}
+        </div>
         <textarea
           ref={textareaRef}
           value={value}
