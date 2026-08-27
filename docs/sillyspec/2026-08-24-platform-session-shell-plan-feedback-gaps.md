@@ -108,3 +108,39 @@
 - [ ] 平台数据库里 `agent_sessions.id = 239c7817-...` / `f39e443d-...` 的事件流是否有 `EnterPlanMode`、`Bash` 相关记录？
 - [ ] 这两个会话对应的是哪个 harness（claude-code / zcode / 其他）？
 - [ ] 平台版本号 / 部署时间？
+
+## 调查进展（2026-08-27 平台本地库只读取证）
+
+平台后端 127.0.0.1:8001 可达（本地 Postgres 库直查，只读 SELECT）：
+
+- 两会话均在库：`239c7817`（turn_count=7，2026-08-24 01:29 建，last_active 08:04）与
+  `f39e443d`（turn_count=4，01:21 建，last_active 02:11）——**不是空会话，活动真实发生过**；
+- 两会话 `status=failed` 且 `ended_at` 完全相同（2026-08-25 03:03:20.563462）——
+  是同一时刻被批量清扫置 failed，非运行中自然失败；
+- harness 均为 claude-code（provider=claude，origin=chat，cwd=multi-agent-platform 仓，
+  config `manual_approval: true`）；`agent_session_id` 分别为 `1550e2bd-...`（与本地
+  agent-log 表一致）与 `cc83bb56-...`（后者不在当初本地枚举里，为新增对账信息）；
+- `session_dialog_requests`：两会话仅 1 条 AskUserQuestion 对话（f39e443d，30 秒内被
+  用户回答，status=answered）——**没有任何 plan 审批类 dialog 记录**；
+- 后端代码全仓 grep 无 `EnterPlanMode`/`ExitPlanMode` 映射：daemon 的 dialog 扩展
+  （`dialog_kind` 判别，长驻可答）只覆盖 AskUserQuestion 类；plan 审批（ExitPlanMode
+  的 canUseTool）走「普通审批」路径——**内存态 ephemeral + 5 分钟自动 deny**
+  （`daemon/protocol.py` 注释明示），平台 UI 不弹卡即静默超时。
+
+### 初步定性（待平台侧立项）
+
+1. **plan 确认缺失的机制性根因**：plan 审批没有接入 dialog 通道（无 dialog_kind），
+   普通审批 5min 自动 deny + 无会话内可见消息 → 用户侧表现正是「发起后没响应」。
+   修复方向：把 ExitPlanMode 审批升级为 dialog 类（复用 AskUserQuestion 基建），
+   或至少在自动 deny 前向会话推一条可见消息（通用反馈兜底）。
+2. **Bash 长命令输出桥接**：仍需前端 network trace 确认 ws_rpc 内容端点是否已推送
+   stdout chunk（后端已有 agent log 会话内容端点，未确认 Bash 事件是否入流）。
+3. **会话被清扫置 failed 无用户通知**：ended_at 批量同时刻，会话列表侧应有通知/标注。
+
+### 待补充信息更新（2026-08-27）
+
+- [x] 平台数据库里两会话的事件流是否有 `EnterPlanMode`、`Bash` 相关记录 → 无 plan 审批
+  dialog（仅 1 条 AskUserQuestion 已答）；Bash 事件是否入流待前端 trace 确认；
+- [x] 两会话 harness → claude-code（第二个本地会话 ID 补齐：cc83bb56-...）；
+- [ ] 浏览器控制台日志 / network trace（仍需用户导出）；
+- [ ] 平台版本号 / 部署时间。

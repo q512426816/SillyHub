@@ -2,7 +2,7 @@
 
 - 日期：2026-08-27
 - 变更：quick-cb5b006c（ql-20260827-005-a660）
-- 状态：活跃（工具未修，传参侧规避有效）
+- 状态：已解决（2026-08-27，sillyspec 仓 commit 51be0fc）
 
 ## 现象
 
@@ -38,3 +38,9 @@ sillyspec CLI 收到的已是污染串。CLI 侧无感知、无校验，直接�
 
 `--done` 落盘前对 req/output 做一次可疑路径嗅探（如 `^[A-Za-z]:/.*` 且含中文/
 空格紧随其后），或文档明确 Windows Git Bash 下需 `MSYS_NO_PATHCONV=1`。
+
+## 修复记录（2026-08-27）
+
+- sillyspec CLI 已上嗅探告警：src/run/command.js 新增 looksLikeMsysMangledPath（盘符绝对路径开头+紧随空白中文正文启发式）+ 三处解析点接线（--output / quick 四字段 / --input），命中 stderr 告警点名 flag 与 MSYS_NO_PATHCONV=1 指引，不阻断；test/quick-msys-path-sniff.test.mjs 12 断言（纯函数 7 + CLI 冒烟 5）。
+- 传参侧 MSYS_NO_PATHCONV=1 前缀仍是最优实践（CLI 只能事后嗅探，转换发生在 shell 层）。
+- 坑记录：sillyspec 仓 docs/sillyspec/troubleshooting.md 第 44 条。

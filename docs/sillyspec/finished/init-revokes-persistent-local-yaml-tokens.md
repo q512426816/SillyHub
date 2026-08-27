@@ -23,6 +23,13 @@ created_at: 2026-08-20T09:25:00
 3. `POST /api/workspaces/{ws}/mcp-tokens`（body `{name, scope:["read","dispatch","converge"]}`）→ 返回新 `shmcp_`（明文仅此一次）。
 4. 逐行改写 local.yaml 两段 token（保留注释与其他段），复测两组端点 200。
 
+## 修复记录（2026-08-27，本仓 commit b66188d9）
+
+- 已按修复方向①落地：两处 get_or_issue（platform_sync/token_service.py 与 mcp_gateway/service.py）吊销查询加 name=init-provisioned 过滤——只轮换同维度旧 init token（防 init 堆积），connect 换发的持久 shpsync_ 与用户手签 shmcp_ 不再被吊销。
+- 副作用修复：platform_sync 侧 name 过滤后同维度至多一行命中，消除持久 + init 并存时 scalar_one_or_none 的 MultipleResultsFound 潜伏崩溃。
+- 测试：两份 test_get_or_issue.py 契约反转（持久 token 存活）+ 并存回归锚，10 用例；pytest 三模块 279 passed；ruff/mypy 通过。
+- 存量受害凭据不自动恢复：已被吊销的 local.yaml token 仍需按上文「修复方式」手动换发。
+
 ## 建议工具修复方向
 
 - `get_or_issue` 只吊销 `name='init-provisioned'` 的旧 token（按 name 过滤），不动 connect 换发的持久 token 与用户手签 token；

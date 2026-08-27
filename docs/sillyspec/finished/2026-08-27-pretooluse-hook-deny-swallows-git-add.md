@@ -9,7 +9,7 @@ severity: low（漏提交可事后核对发现，但静默漏文件易污染提�
 
 - 日期：2026-08-27
 - 变更：quick-6afdc8ef（ql-20260827-008-70cf）
-- 状态：活跃（hook 机制固有行为，流程侧规避有效）
+- 状态：已解决（2026-08-27，两项修复——commit 4be72223 deny 文案补定向提示；commit 86f6eb77 spawnSync maxBuffer 提至 64MB 修第三例真根因）
 
 ## 现象
 
@@ -96,3 +96,7 @@ PreToolUse 的 deny 是**工具调用级拦截**——整条命令根本没有�
   被杀时无任何错误消息（status=null、signal 可能空），极易误诊为测试抖动。
 
 
+## 修复记录（2026-08-27）
+
+- .claude/hooks/pre-commit-ci-check.cjs deny reason 已按建议补提示：命令含 git add 时输出「整条命令未执行（含其中的 git add，暂存区未变）。重试必须从 git add 重新发起整链，否则 add 的文件会静默漏提交」；不含 add 时输出通用「整条命令未执行」提示。临时仓两分支仿真验证通过（纯文案改动，无逻辑分支变化）。
+- 同族第二例（多 agent 共享暂存区竞态）为共享工作区的固有架构约束，按文内规避执行（commit 后必查 --stat / amend 改 message / 避开长测试窗口），不在本次修复范围。
