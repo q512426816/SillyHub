@@ -198,3 +198,26 @@ async def test_redis_down_degrades_open(client: AsyncClient, bob, monkeypatch) -
 
     resp = await client.post("/api/auth/login", json={"account": "bob", "password": "Xx1!abcd"})
     assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.asyncio
+async def test_captcha_disabled_switch_bypasses_threshold(
+    client: AsyncClient, bob, fake_redis, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ql-20260827-006：AUTH_CAPTCHA_ENABLED=false → 失败计数超阈值也不 423,免验证码登录。"""
+    # 失败至阈值(3)→ 423,确认验证码已触发态
+    for _ in range(2):
+        resp = await client.post("/api/auth/login", json={"account": "bob", "password": "wrong"})
+        assert resp.status_code == 401
+    resp = await client.post("/api/auth/login", json={"account": "bob", "password": "wrong"})
+    assert resp.status_code == 423
+    # 开关关闭:needs_captcha 短路 → 同场景不再 423,正确密码免验证码直接登录
+    monkeypatch.setattr(get_settings(), "auth_captcha_enabled", False)
+    resp = await client.post("/api/auth/login", json={"account": "bob", "password": "Xx1!abcd"})
+    assert resp.status_code == 200
+    assert resp.json()["access_token"]
+    # 开关恢复后生产默认路径不变:成功登录已清计数,再失败至阈值重新触发 423
+    monkeypatch.undo()
+    for _ in range(3):
+        resp = await client.post("/api/auth/login", json={"account": "bob", "password": "wrong"})
+    assert resp.status_code == 423

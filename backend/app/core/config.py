@@ -164,6 +164,14 @@ class Settings(BaseSettings):
         ge=1,
         description="登录连续失败达到此次数后,该 IP 后续登录强制滑块验证码。",
     )
+    auth_captcha_enabled: bool = Field(
+        True,
+        description=(
+            "登录滑块验证码总开关。默认开;本地开发/自动化集成验证可设 "
+            "AUTH_CAPTCHA_ENABLED=false 关闭(needs_captcha 恒 False,不触发 423)。"
+            "生产环境勿设——不设即保持验证码防护。"
+        ),
+    )
     auth_login_fail_window_seconds: int = Field(
         900,
         ge=60,

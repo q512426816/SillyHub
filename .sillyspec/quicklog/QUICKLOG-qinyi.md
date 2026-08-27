@@ -49,3 +49,16 @@
 根因：提示常显冗余按用户要求移除；滚动条缺陷是 ql-20260818-008 修纵向链时漏了横向——FilePreview 分支的 min-w-0 挡不住更上层 grid item（默认 min-width:auto）被宽表格撑大 1fr 轨道，被 overflow-hidden 裁掉且无滚动条
 方案：登录页 Form.Item 删 extra 属性及其注释（错误卡内失败场景提示保留）；change-file-tree.tsx 右列 grid item 与内层 flex 包装两处补 min-w-0 锁列宽，让 overflow-auto 出左右滚动条
 结果：change-files-card.test.tsx 2 用例通过；两改动文件 eslint 0 error（1 既有 warning 在未触及的 onSelect 类型签名处）；模块文档 3 处已登记
+
+## ql-20260827-006-d79d | 2026-08-27 12:43:38 | 登录滑块验证码加免验证开关
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/core/config.py（新增 auth_captcha_enabled Field）
+- backend/app/modules/auth/captcha_service.py（needs_captcha 短路）
+- backend/tests/modules/auth/test_login_captcha.py（test_captcha_disabled_switch_bypasses_threshold）
+- backend/.env（本地开关（不入库））
+需求：登录滑块验证码加免验证开关
+根因：自动化集成验证被 captcha 卡（本轮 verify 本地管理员密码试错触发 423，走 confirm/verify 流程繁琐），需要本地可关、生产默认开的开关
+方案：config.py 加 auth_captcha_enabled（默认 True）；CaptchaService.needs_captcha 开头短路 False；本地 backend/.env 设 AUTH_CAPTCHA_ENABLED=false；生产 .env 不含该变量核实行为不变
+结果：captcha 测试套件 8/8 绿（新增 1 例：关开关超阈值免 423 直接 200 登录、恢复开关后默认 423 路径不变）；ruff 三文件过；未部署（本地 dev 开关，生产无需）

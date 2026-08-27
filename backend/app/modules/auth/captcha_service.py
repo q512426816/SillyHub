@@ -107,6 +107,9 @@ class CaptchaService:
             pass
 
     async def needs_captcha(self, ip: str | None) -> bool:
+        # ql-20260827-006：总开关关闭(本地 dev/自动化集成验证)→ 恒不需要,阈值逻辑短路。
+        if not self._settings.auth_captcha_enabled:
+            return False
         return await self._failures(ip) >= self._settings.auth_login_fail_threshold
 
     async def assert_captcha_if_needed(self, ip: str | None, captcha_token: str | None) -> bool:
