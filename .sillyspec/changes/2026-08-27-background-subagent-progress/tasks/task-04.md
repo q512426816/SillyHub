@@ -8,8 +8,8 @@ title_zh: daemon 单测（task_* 映射 / 回执解析 / 行格式 / 节流）
 depends_on: [task-03]
 blocks: []
 allowed_paths:
-  - sillyhub-daemon/src/interactive/__tests__/task-lifecycle.test.ts
-  - sillyhub-daemon/src/interactive/__tests__/task-ack-fallback.test.ts
+  - sillyhub-daemon/tests/interactive/task-lifecycle.test.ts
+  - sillyhub-daemon/tests/interactive/task-ack-fallback.test.ts
 provides: []
 expects_from:
   - task: task-03

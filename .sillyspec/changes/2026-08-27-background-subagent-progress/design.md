@@ -123,7 +123,7 @@ user tool_result(异步启动回执) ──> daemon 解析 agentId（兜底路�
 | `sillyhub-daemon/src/interactive/types.ts` | agent_task_status 载荷扩展 |
 | `sillyhub-daemon/src/hub-client.ts` | NotifyAgentTaskStatusBody 扩展（:141/:1018） |
 | `sillyhub-daemon/src/cli.ts` | 事件透传（:718 case） |
-| `sillyhub-daemon/src/interactive/__tests__/`（新增） | task_* 映射/回执解析/行格式 vitest |
+| `sillyhub-daemon/tests/interactive/`（新增） | task_* 映射/回执解析/行格式 vitest（落 tests/interactive：vitest include 仅覆盖 tests/**） |
 | `backend/app/modules/daemon/schema.py` | AgentTaskStatusEvent 扩展（:968） |
 | `backend/app/modules/daemon/router.py` | notify_agent_task_status 透传（:1555） |
 | `backend/app/modules/daemon/run_sync/service.py` | publish 透传 + submit_messages 跨轮归位 |
@@ -180,10 +180,15 @@ class AgentTaskStatusEvent(BaseModel):
 - **R-06（低）`async` 字段名**：Python 侧 `async_` + alias，OpenAPI/TS 侧 `async`，三端命名对齐由 gen:types 卡（CI gen:types:check）。
 - **R-07（低）旧日志兼容**：无 [TASK_*] 前缀的历史行走原路径，assembler 解析为普通 stdout 文本，无回归。
 
-## 10. 验证记录（spike 后回填）
+## 10. 验证记录（spike 已回填，2026-08-27 task-01 实测）
 
-- [ ] CLI 0.3.181 是否发 task_started / task_progress / task_notification：**待 P4.1 验证**
-- [ ] task_progress 实际频率：**待测**（决定 R-03 节流参数）
+- [x] CLI 0.3.181（npm）捆绑契约 + 本机 claude 2.1.216 运行时**确实发射** task_* 消息（直连 SDK 起后台 Task 会话实测）：
+  - `task_started`：含 task_id + **tool_use_id**（关联键齐）+ description + subagent_type + task_type + prompt；
+  - `task_updated`：patch{status:"completed", end_time}，与终态同时到达（轻量辅助信号，仅记不消费为主）；
+  - `task_notification`：status:"completed" + task_id + tool_use_id + output_file（summary/usage.duration_ms 按类型契约），实测启动后 ~64s 到达；
+  - 另发现 `system:background_tasks_changed`（×2，本期不消费，仅记录）。
+  - **结论：事件消费为 primary（R-01 消解），回执解析兜底降级为防旧版 CLI 的 secondary。**
+- [x] task_progress 实际频率：**短任务（~64s）全程零发射**。设计调整：前端"正在做什么"行数据源优先 task_progress、缺失时回退子代理 children 最新日志（latestActivity 既有机制，task-12 卡已按此落口径）；[TASK_PROGRESS] 节流保留默认 ≥2000ms（发射稀疏时节流自然无感，R-03 参数定案）。
 
 ## 11. 决策引用
 

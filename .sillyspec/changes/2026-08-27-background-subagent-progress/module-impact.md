@@ -10,8 +10,8 @@ change: 2026-08-27-background-subagent-progress
 
 | 模块文档 | 操作 | 状态 |
 |---|---|---|
-| `modules/daemon.md` | 更新 daemon 模块卡：session-manager 新增 task_* 拦截/回执兜底/[TASK_*] 行、hub-client/cli 载荷扩展 | pending |
-| `modules/frontend_components.md` | 更新前端组件卡：agent-task-card 全生命周期、turn-status-bar/subagent-catalog/turn-segment-views 异步感知、session-log-assembler [TASK_*] 解析 | pending |
-| `modules/frontend_lib.md` | 更新 lib 卡：daemon.ts AgentTaskStatusEvent 扩展与分发 | pending |
-| `modules/agent.md` | 更新 agent 卡：agent_run_logs 归位语义（带 parent 行落派发 run）、空 prompt 422（daemon.md 与 agent.md 若有职责重叠以 daemon.md 为主，此处只记归位/422 语义） | pending |
+| `modules/daemon.md` | 更新 daemon 模块卡：session-manager 新增 task_* 拦截/回执兜底/[TASK_*] 行、hub-client/cli 载荷扩展；测试落 tests/interactive | done |
+| `modules/frontend_components.md` | 更新前端组件卡：agent-task-card 全生命周期、turn-status-bar/subagent-catalog/turn-segment-views 异步感知、session-log-assembler [TASK_*] 解析、activity-catalog/session-input-bar 传导 | done |
+| `modules/frontend_lib.md` | 更新 lib 卡：daemon.ts AgentTaskStatusEvent 扩展与分发、api-types 重生成 | done |
+| `modules/agent.md` | 更新 agent 卡：agent_run_logs 归位语义（带 parent 行落派发 run）、空 prompt 422、AgentTaskStatusEvent 扩展（归位/422 语义细节以 daemon.md 为主） | done |
 | `_module-map.yaml` | 无变化（未增删模块） | skipped |

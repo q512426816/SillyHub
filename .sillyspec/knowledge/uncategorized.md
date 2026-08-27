@@ -255,3 +255,9 @@ worktree doctor 静默失败后手动补链时（上一条 junction 坑的修复
 - Image：v6 已删 `wrapperClassName`，撑高外层 wrapper 用语义槽 `classNames={{ root: "..." }}`（grep @rc-component/image 确认 root 落 wrapper div）；img 的百分比 max-h 需 wrapper 有高度基准，否则解析不了。
 - Modal：v6 语义键是 `styles.container`（v5 的 `styles.content` 不再命中内容容器）；`style+width` 挂 `.ant-modal` 根，默认 `top:100/max-width:calc(100vw-32px)`，做全屏需同时覆盖 `width=100vw + style={{top:0, maxWidth:"100vw"}}`。
 - 测试：枚举式 `vi.mock("桶文件", () => ({...}))` 工厂在桶文件新增导出时会让模块作用域引用（如 RENDERER_MAP）直接炸套件（"No X export is defined on the mock"）——桶加导出必须同步补 mock 工厂，且这类断裂是套件级（0 test 收集），vitest 汇总里表现为 1 test file failed 而非用例 failed。
+
+## daemon 单测只能落 tests/**（vitest include 不含 src）
+sillyhub-daemon 的 vitest.config.ts include 仅 `tests/**/*.test.ts`——src 内任何 `__tests__/` 目录不被发现（`pnpm vitest run src/...` 报 No test files found，spikes 目录就是因此单独建了 config）。新增 daemon 测试一律落 `tests/interactive/` 等既有子目录。（来源：2026-08-27-background-subagent-progress task-04）
+
+## Claude Agent SDK 0.3.181 的 task_* 生命周期系统消息可消费
+SDK 0.3.181（捆 CLI 2.1.181+）运行时确实发射 `system/task_started`（task_id+tool_use_id+description+subagent_type）、`task_notification`（status:completed|failed|stopped + output_file，~64s 量级延迟）、`task_updated`（patch.status/end_time）与 `background_tasks_changed`；**task_progress 短任务零发射**（"正在做什么"展示需回退 transcript 推导）。消费点：session-manager `_onMessage` system 分支（2026-08-27-background-subagent-progress task-03），持久化方言 `[TASK_*]` stdout 单行 JSON 行带 parent_tool_use_id。（来源：同变更 task-01 spike 静态+动态双实证）
