@@ -19,11 +19,21 @@ export default function WorkspaceDetailLayout({
   const isStandalone = pathname.includes(
     `/workspaces/${params.id}/components/topology`,
   );
+  // ql-20260827-008：sessions 门户页放开宽度帽（max-w-none）撑满内容区，对齐
+  // /agent-profiles 等平台级列表页 PageContainer size="full" 的占满语义
+  // （FRONTEND_PAGE_STYLE.md §「列表页 size=full 占满」）；其余子页维持 1440 收窄。
+  const isFullWidth = pathname.startsWith(
+    `/workspaces/${params.id}/sessions`,
+  );
   if (isStandalone) {
     return <>{children}</>;
   }
   return (
-    <main className="mx-auto flex w-full max-w-[1440px] flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
+    <main
+      className={`mx-auto flex w-full ${
+        isFullWidth ? "max-w-none" : "max-w-[1440px]"
+      } flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8`}
+    >
       <WorkspaceTabs workspaceId={params.id}>{children}</WorkspaceTabs>
     </main>
   );

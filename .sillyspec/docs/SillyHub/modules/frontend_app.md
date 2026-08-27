@@ -88,6 +88,7 @@ whoLine: attach 时并发拉 listSessionRuns，按 realRunId??runId 匹配注入
 
 ## 变更索引
 
+- ql-20260827-008-70cf | workspaces/[id] sessions 子页宽度帽放开——layout main 对 sessions 路由 max-w-none 撑满（对齐平台级列表页 size=full），其余子页维持 1440
 - ql-20260820-011-f230 | 会话流装配器修复——完整行不再 merge 进 partial 派生段（override 连坐撤回致长文本直播消失的根因）
 - ql-20260820-010-2223 | /sessions 轮边界对账——turn_completed 后重拉日志补 Redis 发布丢失的尾部事件（连接活着也丢的收口）
 - ql-20260820-009-ee9d | /sessions SSE 断线自动重连——退避重连 + 全量日志回放 + 终态合成（修复直播断连永久卡死）
