@@ -217,7 +217,7 @@ export default function ReleasesPage({ params }: Props) {
   ];
 
   return (
-    <PageContainer>
+    <PageContainer size="full">
       <PageHeader
         title="发布管理"
         subtitle={

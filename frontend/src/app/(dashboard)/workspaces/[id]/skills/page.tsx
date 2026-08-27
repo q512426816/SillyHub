@@ -218,7 +218,7 @@ export default function WorkspaceSkillsPage({ params }: Props) {
     "text-destructive hover:bg-destructive/10 hover:text-destructive";
 
   return (
-    <PageContainer>
+    <PageContainer size="full">
       <PageHeader
         title="自定义 Skills"
         subtitle="编辑工作区 specDir/skills/ 下的自定义 skill（保存后写入，下次同步对新会话生效）"

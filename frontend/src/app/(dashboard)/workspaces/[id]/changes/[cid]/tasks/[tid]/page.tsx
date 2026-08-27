@@ -281,7 +281,7 @@ export default function TaskDetailPage({ params }: Props) {
   /* ---- Loading state ---- */
   if (loading) {
     return (
-      <PageContainer className="gap-5">
+      <PageContainer size="full" className="gap-5">
         <p className="text-xs text-muted-foreground">加载中...</p>
       </PageContainer>
     );
@@ -290,7 +290,7 @@ export default function TaskDetailPage({ params }: Props) {
   /* ---- Error / not-found state ---- */
   if (pageError || !task) {
     return (
-      <PageContainer className="gap-5">
+      <PageContainer size="full" className="gap-5">
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {pageError ?? "任务未找到"}
         </div>
@@ -334,7 +334,7 @@ export default function TaskDetailPage({ params }: Props) {
   };
 
   return (
-    <PageContainer className="gap-5">
+    <PageContainer size="full" className="gap-5">
       {/* ---- Breadcrumb ---- */}
       <nav className="flex items-center gap-1 text-[11px] text-muted-foreground">
         <Link

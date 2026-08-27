@@ -88,6 +88,7 @@ whoLine: attach 时并发拉 listSessionRuns，按 realRunId??runId 匹配注入
 
 ## 变更索引
 
+- ql-20260827-013-4418 | 工作区剩余 12 子页宽度撑满——PageContainer 未传 size 走默认 1400 帽的 20 处统一补 size=full（components/files/mcp/mcp-tokens/releases/runtime/skills/incidents×2/changes 详情/tasks×2）
 - ql-20260827-011-6dd8 | 工作区全部子页宽度撑满——layout main 彻底移除 max-w-[1440px] 帽（ql-008 仅 sessions 放开的用户定案超集，isFullWidth 分支删除）
 - ql-20260827-008-70cf | workspaces/[id] sessions 子页宽度帽放开——layout main 对 sessions 路由 max-w-none 撑满（对齐平台级列表页 size=full），其余子页维持 1440
 - ql-20260820-011-f230 | 会话流装配器修复——完整行不再 merge 进 partial 派生段（override 连坐撤回致长文本直播消失的根因）

@@ -204,7 +204,7 @@ export default function ChangeDetailPage({ params }: Props) {
 
   if (loading) {
     return (
-      <PageContainer>
+      <PageContainer size="full">
         <p className="text-xs text-muted-foreground">加载中…</p>
       </PageContainer>
     );
@@ -212,7 +212,7 @@ export default function ChangeDetailPage({ params }: Props) {
 
   if (loadError || !change) {
     return (
-      <PageContainer>
+      <PageContainer size="full">
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {loadError ?? "变更未找到"}
         </div>
@@ -243,7 +243,7 @@ export default function ChangeDetailPage({ params }: Props) {
       : [];
 
   return (
-    <PageContainer className="gap-5">
+    <PageContainer size="full" className="gap-5">
       <p className="text-[11px] text-muted-foreground">
         <Link
           href={`/workspaces/${workspaceId}/changes`}

@@ -70,7 +70,7 @@ export default function ComponentsPage({ params }: Props) {
     : components;
 
   return (
-    <PageContainer>
+    <PageContainer size="full">
       <PageHeader
         title="项目组件"
         subtitle="查看项目组的内部组件（只读，来自 projects/*.yaml）"

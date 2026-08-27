@@ -152,7 +152,7 @@ export default function WorkspaceMcpPage({ params }: Props) {
   };
 
   return (
-    <PageContainer>
+    <PageContainer size="full">
       <PageHeader
         title="MCP 配置"
         subtitle={

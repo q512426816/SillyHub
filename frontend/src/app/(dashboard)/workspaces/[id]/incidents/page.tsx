@@ -210,7 +210,7 @@ export default function IncidentsPage({ params }: Props) {
   ];
 
   return (
-    <PageContainer>
+    <PageContainer size="full">
       <PageHeader
         title="事件管理"
         subtitle={

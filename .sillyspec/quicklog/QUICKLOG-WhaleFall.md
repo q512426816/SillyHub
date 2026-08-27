@@ -386,3 +386,24 @@
 根因：ql-20260827-008 仅放开 sessions 路由后用户定案所有子页统一撑满；已核实子页 13 处 PageContainer 全为 size=full、其余页面无页面级宽度帽，1440 帽是唯一全局限制
 方案：layout.tsx 删除 isFullWidth 条件分支与三元宽度类，main 去掉 max-w-[1440px] 及配套 mx-auto；旧注释引用 1440 帽的表述同步修正
 结果：eslint 0 告警、tsc --noEmit 通过、dashboard 路由组 vitest 335 测试全过；模块文档已同步
+
+## ql-20260827-013-4418 | 2026-08-27 14:53:34 | 工作区剩余 12 子页宽度撑满——PageContainer 补 size=full 撤 1400 内帽
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/[id]/components/page.tsx（PageContainer 补 size=full）
+- frontend/src/app/(dashboard)/workspaces/[id]/files/page.tsx（同）
+- frontend/src/app/(dashboard)/workspaces/[id]/mcp/page.tsx（同）
+- frontend/src/app/(dashboard)/workspaces/[id]/mcp-tokens/page.tsx（同）
+- frontend/src/app/(dashboard)/workspaces/[id]/releases/page.tsx（同）
+- frontend/src/app/(dashboard)/workspaces/[id]/runtime/page.tsx（同）
+- frontend/src/app/(dashboard)/workspaces/[id]/skills/page.tsx（同）
+- frontend/src/app/(dashboard)/workspaces/[id]/incidents/page.tsx（同）
+- frontend/src/app/(dashboard)/workspaces/[id]/incidents/[iid]/page.tsx（3 处（加载/错误/主体））
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/page.tsx（3 处）
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/tasks/page.tsx（3 处）
+- frontend/src/app/(dashboard)/workspaces/[id]/changes/[cid]/tasks/[tid]/page.tsx（3 处）
+需求：工作区剩余 12 子页宽度撑满——PageContainer 补 size=full 撤 1400 内帽
+根因：ql-011 放开 layout main 后用户实测 components/runtime/skills/mcp/mcp-tokens/files 六页仍 1400 居中——上轮核实用单行 grep 统计 size 用法，这批未传 size 的写法被漏掉，PageContainer 默认 default 即 1400 帽
+方案：PCRE2 多行正则复查全 workspaces/[id] 路由共 12 文件 20 处未传 size 的 PageContainer，sed 批量统一补 size=full 复查 0 残留；顺带补装远端新依赖 react-qr-code 修 tsc 红
+结果：eslint 0 error（5 个预存 warning 无关）、tsc --noEmit 通过、dashboard 路由组 335 测试全过；模块文档已同步

@@ -121,7 +121,7 @@ export default function IncidentDetailPage({ params }: Props) {
 
   if (incident === null && error === null) {
     return (
-      <PageContainer>
+      <PageContainer size="full">
         <p className="text-xs text-muted-foreground">加载中…</p>
       </PageContainer>
     );
@@ -129,7 +129,7 @@ export default function IncidentDetailPage({ params }: Props) {
 
   if (incident === null) {
     return (
-      <PageContainer>
+      <PageContainer size="full">
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {error}
         </div>
@@ -144,7 +144,7 @@ export default function IncidentDetailPage({ params }: Props) {
   }
 
   return (
-    <PageContainer className="gap-5">
+    <PageContainer size="full" className="gap-5">
       <p className="text-[11px] text-muted-foreground">
         <Link href={`/workspaces/${workspaceId}/incidents`} className="hover:underline">
           ← 事件列表

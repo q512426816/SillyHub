@@ -83,7 +83,7 @@ export default function WorkspaceMcpTokensPage({ params }: Props) {
   };
 
   return (
-    <PageContainer className="gap-5">
+    <PageContainer size="full" className="gap-5">
       <PageHeader
         title="MCP 令牌"
         subtitle="为外部客户端签发访问本工作区 MCP 服务的凭据，明文仅在签发后显示一次"

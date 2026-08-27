@@ -26,7 +26,7 @@ export default function WorkspaceFilesPage({ params }: Props) {
   const workspaceId = params.id;
 
   return (
-    <PageContainer>
+    <PageContainer size="full">
       <PageHeader
         title={
           <span className="flex items-center gap-2.5">

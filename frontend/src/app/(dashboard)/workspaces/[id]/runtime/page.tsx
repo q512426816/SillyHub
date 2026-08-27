@@ -232,7 +232,7 @@ export default function RuntimePage({ params }: Props) {
   );
 
   return (
-    <PageContainer>
+    <PageContainer size="full">
       <PageHeader
         title={
           <span className="flex items-center gap-3">

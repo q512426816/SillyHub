@@ -122,7 +122,7 @@ export default function TaskBoardPage({ params }: Props) {
 
   if (loading) {
     return (
-      <PageContainer>
+      <PageContainer size="full">
         <p className="text-xs text-muted-foreground">加载中…</p>
       </PageContainer>
     );
@@ -130,7 +130,7 @@ export default function TaskBoardPage({ params }: Props) {
 
   if (pageError && !board) {
     return (
-      <PageContainer>
+      <PageContainer size="full">
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {pageError}
         </div>
@@ -139,7 +139,7 @@ export default function TaskBoardPage({ params }: Props) {
   }
 
   return (
-    <PageContainer className="gap-5">
+    <PageContainer size="full" className="gap-5">
       <p className="text-[11px] text-muted-foreground">
         <Link href={`/workspaces/${workspaceId}/changes/${changeId}`} className="hover:underline">
           ← 变更详情
