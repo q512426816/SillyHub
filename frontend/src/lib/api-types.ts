@@ -4836,6 +4836,10 @@ export interface paths {
          *     不变向后兼容）；新增可选 ql_id（快速修复短码，走 quicklog_session_links
          *     按 (workspace_id, ql_id) 双条件子查询，防跨工作区同 ql_id 串扰），不传
          *     = 现状（零回归）。
+         *     task-02（2026-08-28-session-ppm-task-binding / FR-05 / §9）：新增可选
+         *     ppm_item_kind + ppm_item_id 成对筛选（ppm_item_session_links 子查询命中；
+         *     kind Literal 校验非法值 422，只传其一 422——与 create/inject 通道同口径；
+         *     不传 = 现状，零回归）。
          */
         get: operations["list_sessions_api_daemon_sessions_get"];
         put?: never;
@@ -7909,6 +7913,31 @@ export interface paths {
          * @description 当前登录人可切换查看的用户列表(经理 ‖ super_admin);其余返回空。
          */
         get: operations["get_workbench_switchable_users_api_ppm_workbench_switchable_users_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/ppm/item-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Ppm Item Sessions
+         * @description 列出某 PPM 任务/问题关联的全部会话（design §5 Phase 1 / §7 / FR-01）。
+         *
+         *     数据源 ``ppm_item_session_links`` JOIN ``agent_sessions``（软删过滤）,响应
+         *     同构 ``list_change_sessions``：id/provider/status/turn_count/mode/author/
+         *     last_active_at/title。无关联返回空列表（不 404——任务刚建、尚无会话是常态,
+         *     design §9）。``kind`` 非法值由 Literal 校验 422。
+         */
+        get: operations["list_ppm_item_sessions_api_ppm_item_sessions_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -17632,6 +17661,10 @@ export interface components {
             /** Quicklog Id */
             quicklog_id?: string | null;
             team_mission?: components["schemas"]["TeamMissionCreateBlock"] | null;
+            /** Ppm Item Kind */
+            ppm_item_kind?: ("plan_task" | "problem") | null;
+            /** Ppm Item Id */
+            ppm_item_id?: string | null;
             page_context?: components["schemas"]["PageContextCreateBlock"] | null;
             /** Attachment Ids */
             attachment_ids?: string[];
@@ -17757,6 +17790,10 @@ export interface components {
             bind_change_key?: string | null;
             /** Bind Quick Id */
             bind_quick_id?: string | null;
+            /** Bind Ppm Item Kind */
+            bind_ppm_item_kind?: ("plan_task" | "problem") | null;
+            /** Bind Ppm Item Id */
+            bind_ppm_item_id?: string | null;
         };
         /**
          * SessionInjectResponse
@@ -29168,6 +29205,8 @@ export interface operations {
                 workspace_id?: string | null;
                 change_id?: string | null;
                 ql_id?: string | null;
+                ppm_item_kind?: ("plan_task" | "problem") | null;
+                ppm_item_id?: string | null;
                 archived?: boolean;
             };
             header?: never;
@@ -35542,6 +35581,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkbenchSwitchableUser"][];
+                };
+            };
+        };
+    };
+    list_ppm_item_sessions_api_ppm_item_sessions_get: {
+        parameters: {
+            query: {
+                /** @description PPM 条目类型：plan_task/problem */
+                kind: "plan_task" | "problem";
+                /** @description PPM 条目 id（ppm_plan_task/ppm_problem_list 主键） */
+                item_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentSessionListItem"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

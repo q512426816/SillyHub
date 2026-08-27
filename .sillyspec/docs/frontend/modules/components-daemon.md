@@ -19,6 +19,11 @@ runtime-session-helpers 纯函数）。2026-07-11-unify-runtime-session-dialog �
 弹窗与变更会话（ChangeSessionSection）共用同一套组件，杜绝两套样式分叉。
 
 ## 契约摘要
+- 共享与平台共享（2026-08-28-daemon-agent-share）：`shared-machines-section`（「共享给我的」
+  虚线卡：共享人/来源工作区/在线态，操作仅「会话」且锁**在线 runtime_id**，无修改类入口 FR-03）；
+  `platform-shared-agents-card`（admin-only 管理卡：档案/runtime/源码工作区/writable_dir 四字段
+  创建 + 生效列表/停用）；session-panel 会话头「平台共享」徽标（agent_profile_id ∈ active 共享
+  档案前端判定，D-004@v2 用户自选——悬浮回退链零改动）。
 - `RuntimeSessionDialog`（`runtime-session-dialog.tsx`）：统一会话弹窗。
   - props：`{ runtime, open, onClose, initialSessionId?, ... }`；由 page 单一
     dialogRuntime state 驱动，key 重 mount 重置内部状态；URL `?session=` 恢复点经

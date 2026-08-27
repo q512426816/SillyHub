@@ -14,6 +14,8 @@ daemon 机器列表的机器级数据 hook（会话门户/runtimes 页共用）�
 机器分页列表 + 最近会话列表，组合成单一 `useQuery` 结果；15s 无条件轮询。
 
 ## 契约摘要
+- sharedToMe/machineCandidates（2026-08-28-daemon-agent-share）：hook 透传响应 shared_to_me
+  并融合共享机器候选（自有在前、runtimes 真实明细可选引擎）；既有字段/轮询/queryKey 零变化。
 
 - `useDaemonMachines(params: DaemonMachineListParams)`（类型来自 `lib/daemon`）→
   `{ items: DaemonMachineRead[]; total: number; sessions: AgentSessionRead[];

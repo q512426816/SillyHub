@@ -71,7 +71,15 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
     latest.json `fd0314c`、install.ps1 无 BOM 且 `{{SERVER_URL}}` 占位未替换 → 用户下载
     install.ps1 即 GBK 乱码解析失败、装到的是 0.1.0 旧 bundle。修复后该静态目录已弃用
     （文件仍残留在 `/var/www/sillyhub/daemon/`，无害，可后续清理）。
-- 审计子域（audit/）：`POST /api/daemon/audit/batch`（daemon 批量审计上行）+ 查询端点。
+- 审计子域（audit/）：- grants 子域（grants/，2026-08-28-daemon-agent-share）：`daemon_runtime_grants` 统一授权表
+  （workspace|platform 两类 grantee，唯一约束 NULLS NOT DISTINCT）；管理端点
+  `GET|POST|PATCH|DELETE /api/daemon/shared-agents`（require_platform_admin，创建五重校验：
+  runtime 限管理员自己名下在线/档案 visibility 显式升级/writable_dir ⊆ allowed_roots）+
+  `GET /api/daemon/shared-agents/active`（任意登录用户）；`GET /machines`、`/runtimes/page`
+  响应附加 `shared_to_me`（成员资格+daemon:borrow 双条件，SharedMachineView 含 runtimes 明细）；
+  会话钉定校验 owner 短路 → `authorize_pinned_runtime`（workspace grant 放行写借用审计含
+  grant_id；platform grant 的 runtime 直传钉定 404——共享唯一入口=档案检测分支，D-012）。
+`POST /api/daemon/audit/batch`（daemon 批量审计上行）+ 查询端点。
 - 其它：`GET|POST /llm-proxy/{path:path}`（daemon 侧 LLM 网关转发）、
   `GET /skills/latest/manifest`（skills bundle 分发，agent 模块消费）。
 - host_fs：delegate.py + ws_rpc.py——经 WS RPC 读客户端文件系统

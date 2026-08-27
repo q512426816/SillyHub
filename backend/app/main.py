@@ -57,6 +57,10 @@ from app.modules.platform_sync.router import router as platform_sync_router
 # 2026-08-11-change-progress-projection task-07：workspace-scoped token 签发 2 端点
 # （POST /workspaces/{wid}/platform-sync-tokens / POST /workspaces/resolve-by-root-path）。
 from app.modules.platform_sync.workspace_router import router as platform_sync_workspace_router
+
+# 2026-08-28-session-ppm-task-binding task-01：PPM common 端点（GET /api/ppm/item-sessions，
+# 任务/问题关联会话列表，links 表读取面）。
+from app.modules.ppm.common.router import router as ppm_common_router
 from app.modules.ppm.kanban.router import router as ppm_kanban_router
 from app.modules.ppm.plan.router import router as ppm_plan_router
 from app.modules.ppm.problem.router import router as ppm_problem_router
@@ -789,6 +793,10 @@ def create_app() -> FastAPI:
     app.include_router(ppm_problem_router, prefix="/api/ppm")
     app.include_router(ppm_kanban_router, prefix="/api/ppm")
     app.include_router(ppm_workbench_router, prefix="/api/ppm")
+    # 2026-08-28-session-ppm-task-binding task-01：ppm common 子域（平台级）——
+    # GET /api/ppm/item-sessions?kind=&item_id= 任务/问题关联会话列表，照上方
+    # ppm 子域挂载形态（router 不自带 prefix，此处统一落 /api/ppm）。
+    app.include_router(ppm_common_router, prefix="/api/ppm")
     app.include_router(runtime_router, prefix="/api")
     app.include_router(tool_gateway_router, prefix="/api")
     app.include_router(policy_crud_router, prefix="/api")

@@ -82,9 +82,19 @@ export const queryKeys = {
   // 变更（location=active）与快速修复两路独立查询按 workspaceId 分桶；
   // wid 归一 null（workspaceId 为空时查询禁用但 key 稳定，不产生分叉键）。
   // / 技能源复用 customSkills.manifest 既有键，不在此重复登记。
+  //
+  // 2026-08-28-session-ppm-task-binding task-06：PPM 任务/问题两路分组键。
+  // 状态维度进键（"ongoing"=进行中 / "all"=全部，切开关换键重新拉取，D-002@v1）；
+  // 不按 workspace 分桶——PPM 实体与工作区为软关联多对多，条目集不随会话工作区
+  // 变化（X-06：无 workspace 会话的禁用走查询 enabled，不靠 key）。会话列表
+  // 「关联」筛选的 PPM 选项数据源复用同键（数据口径同 @ 联想，共享缓存少一拉）。
   mentionSources: {
     all: ["mentionSources"] as const,
     changes: (wid: string | null) => ["mentionSources", "changes", wid] as const,
     quicklogs: (wid: string | null) => ["mentionSources", "quicklogs", wid] as const,
+    ppmTasks: (scope: "ongoing" | "all") =>
+      ["mentionSources", "ppmTasks", scope] as const,
+    ppmProblems: (scope: "ongoing" | "all") =>
+      ["mentionSources", "ppmProblems", scope] as const,
   },
 } as const;

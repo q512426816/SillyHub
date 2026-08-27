@@ -21,6 +21,9 @@ updated_at: 2026-08-23 12:58:00
 组件自治约定：只收 props / 只调本域接口，不做 SSE 订阅与页面路由——组装归 `app-sessions-pages` 的 SessionPanel 页面（task-10）。
 
 ## 契约摘要
+- session-config-bar（2026-08-28-daemon-agent-share）：机器候选切融合列表（共享条目
+  「共享·共享人」Tag）、档案下拉共享智能体「共享」标识；useActiveSharedAgents 复用
+  lib/daemon.ts fetchSharedAgentsActive。
 - `SessionsPortal`（task-06/07 双态接线）：props `{ scope? }`；右侧三分支优先级 = 真会话（selectedSessionId → `SessionPanel mode="page" key={id}`）> 预会话（preContext → `SessionPanel sessionId=null` + preContext + onPreSessionCreated，key=`pre:{workspaceId ?? "-"}:{runtimeId}`）> 空门户态（`data-testid="sessions-empty-portal"` 轻引导，深链无效/无参亦落此）。
   - 组头「＋」onNewInGroup(workspaceId, filter) → 筛选态直带链（ql-20260823-001 补齐 D-107 第一段）：两层筛选 tab（机器+智能体）均已选具体值且该引擎有在线 runtime 时**跳过浮层直接合成 preContext**；缺任一层或无在线 runtime 回退 PreSessionPicker 两步浮层（默认高亮 Claude）；onPick 合成 preContext `{ workspaceId(组), runtimeId }` 并清选中。
   - change scope（ql-20260823-003 修订）：左侧同树形态（单组+组头「＋」，预展开该组）；页头「新建会话（本变更）」按钮已移除（入口收敛组头「＋」，经 handleNewInGroup 直带/浮层均双传 `{ workspaceId, changeId, runtimeId }`，X-13）。

@@ -1001,3 +1001,110 @@ class TestQlIdFilter:
             "/api/daemon/sessions", params={"ql_id": "x" * 129}, headers=auth_headers
         )
         assert resp.status_code == 422
+
+
+# ── ppm_item_kind / ppm_item_id 关联过滤（2026-08-28-session-ppm-task-binding
+#    task-02 / FR-05 / D-005@v1）——对照 ql_id 组：照 change_id 分支模式走
+#    ppm_item_session_links 子查询，但 item_id 为 UUID 全局唯一，不叠
+#    workspace 条件。完整 GWT 覆盖见 test_ppm_session.py，此处补本文件口径
+#    的对照断言。
+
+
+class TestPpmItemFilter:
+    """``GET /sessions?ppm_item_kind=&ppm_item_id=`` 子查询命中 + 成对 422。"""
+
+    async def test_hit_and_miss(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        from app.modules.ppm.common.session_binding import PpmItemSessionLink
+
+        admin = await _get_admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        item_id = uuid.uuid4()
+        s_bound = await _make_session(db_session, admin.id, rt.id)
+        db_session.add(
+            PpmItemSessionLink(
+                id=uuid.uuid4(),
+                kind="plan_task",
+                item_id=item_id,
+                session_id=s_bound.id,
+                workspace_id=None,
+            )
+        )
+        # 未绑定 / 绑定异 item 的会话不命中
+        await _make_session(db_session, admin.id, rt.id)
+        s_other = await _make_session(db_session, admin.id, rt.id)
+        db_session.add(
+            PpmItemSessionLink(
+                id=uuid.uuid4(),
+                kind="plan_task",
+                item_id=uuid.uuid4(),
+                session_id=s_other.id,
+                workspace_id=None,
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get(
+            "/api/daemon/sessions",
+            params={"ppm_item_kind": "plan_task", "ppm_item_id": str(item_id)},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["total"] == 1
+        assert [i["id"] for i in body["items"]] == [str(s_bound.id)]
+        assert str(s_other.id) not in [i["id"] for i in body["items"]]
+
+    async def test_ql_id_and_ppm_intersection(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """ql_id + ppm 双关联同传取交集（照 change_id+ql_id 组合口径）。"""
+        from app.modules.ppm.common.session_binding import PpmItemSessionLink
+
+        admin = await _get_admin(db_session)
+        rt = await _make_runtime(db_session, admin.id)
+        ws = await _make_workspace(db_session, root_path="D:/repo-ppm")
+        ql_id = f"ql-{uuid.uuid4().hex[:6]}"
+        item_id = uuid.uuid4()
+        s_both = await _make_session(db_session, admin.id, rt.id, workspace_id=ws.id)
+        await _make_quicklog_link(
+            db_session, workspace_id=ws.id, ql_id=ql_id, agent_session_id=s_both.id
+        )
+        db_session.add(
+            PpmItemSessionLink(
+                id=uuid.uuid4(),
+                kind="plan_task",
+                item_id=item_id,
+                session_id=s_both.id,
+                workspace_id=ws.id,
+            )
+        )
+        # 仅 ppm 关联：被 ql_id 剔除
+        s_ppm_only = await _make_session(db_session, admin.id, rt.id, workspace_id=ws.id)
+        db_session.add(
+            PpmItemSessionLink(
+                id=uuid.uuid4(),
+                kind="plan_task",
+                item_id=item_id,
+                session_id=s_ppm_only.id,
+                workspace_id=ws.id,
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get(
+            "/api/daemon/sessions",
+            params={"ql_id": ql_id, "ppm_item_kind": "plan_task", "ppm_item_id": str(item_id)},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["total"] == 1
+        assert [i["id"] for i in body["items"]] == [str(s_both.id)]

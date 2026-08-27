@@ -2,6 +2,8 @@
  * 会话输入联想触发检测与选中回填纯函数。
  *
  * 变更 2026-08-26-session-input-mention task-01（FR-01/FR-04，D-002）。
+ * 变更 2026-08-28-session-ppm-task-binding task-06（FR-02/FR-05，D-001@v1）：
+ *   条目类型扩展 ppmItem（PPM 任务/问题归一形态）+ 回填键清洗纯函数。
  *
  * 只做纯计算，零副作用、不依赖 React 与 DOM API——浮层归 task-02
  * （session-mention-popover.tsx），输入框接入与 IME 保护归 task-03
@@ -12,8 +14,9 @@
  *   - applyMentionPick(value, mention, insertKey) 返回 { value, caret }，
  *     回填段后随一个尾随空格（浮层检测归零自动关闭）。
  */
+import type { PpmItemKind } from "@/lib/daemon";
 
-/** 触发字符：/ = 技能指令联想，@ = 变更/快速修复关联联想。 */
+/** 触发字符：/ = 技能指令联想，@ = 变更/快速修复/PPM 条目关联联想。 */
 export type MentionTrigger = "/" | "@";
 
 /** detectMention 命中结果。start = 触发字符在原文本中的下标。 */
@@ -91,4 +94,43 @@ export function applyMentionPick(
       value.slice(0, mention.start) + inserted + value.slice(segmentEnd),
     caret: mention.start + inserted.length,
   };
+}
+
+/* ───────── PPM 条目（2026-08-28-session-ppm-task-binding task-06 / FR-02） ───────── */
+
+/**
+ * @ 联想 PPM 条目归一形态（PPM 任务/问题两类共用；task-04 useMentionSources
+ * 从 PlanTask/ProblemList 响应映射，绑定走结构化槽位不依赖回填文本）。
+ */
+export interface MentionPpmItem {
+  /** 绑定类别：plan_task=PPM 任务 / problem=PPM 问题（对齐 daemon.ts PpmItemKind）。 */
+  kind: PpmItemKind;
+  /** 条目 id（uuid，随 createSession/injectSession 成对上送）。 */
+  id: string;
+  /** 条目标题（任务 content / 问题 pro_desc；空由数据源兜底短码）。 */
+  title: string;
+  /** 项目名标注（响应自带 project_name，零额外请求；空 = 不标注）。 */
+  projectName: string | null;
+  /** 次行说明（任务 task_description / 问题功能名·类型，仅展示与次级过滤）。 */
+  subtitle: string | null;
+}
+
+/** PPM 条目回填键上限：标题过长截断（回填文本是展示性残留，绑定走结构化槽位）。 */
+const PPM_INSERT_KEY_MAX = 40;
+
+/**
+ * PPM 条目回填键清洗（task-06）：标题压连续空白为单空格 + 截断 40 字符。
+ * change_key/ql_id 是无空格自然键，PPM 标题是自由文本——换行会拆行、连续
+ * 空格是噪音；压成单空格后经 applyMentionPick 回填，尾随空格的关层语义
+ * （下一次检测因查询串含空白归 null）不受影响。空标题返回空串（回填仅剩
+ * 触发字符 + 尾随空格，绑定仍由 mentions 槽位承载）。
+ */
+export function sanitizePpmInsertKey(
+  title: string | null | undefined,
+): string {
+  const collapsed = (title ?? "").replace(/\s+/g, " ").trim();
+  if (!collapsed) return "";
+  return collapsed.length > PPM_INSERT_KEY_MAX
+    ? `${collapsed.slice(0, PPM_INSERT_KEY_MAX)}…`
+    : collapsed;
 }

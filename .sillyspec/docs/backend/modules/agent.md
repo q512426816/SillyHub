@@ -16,6 +16,11 @@ RunPlacementService 选 daemon 运行时 + lease，与 daemon 模块双向协作
 完成回调 run_sync）。
 
 ## 契约摘要
+- 借用与共享写约束（2026-08-28-daemon-agent-share）：borrow_resolver 数据源切
+  `daemon/grants/queries.resolve_granted_daemon_for_borrow`（语义等价+grant_id，`_grant_id`
+  传输键贯通 placement 审计）；`DaemonBorrowAudit` 加 grant_id 可空列；execution 新增
+  `platform_shared_tool_config()`（七工具白名单无 Bash/NotebookEdit、mode=acceptEdits——
+  平台共享会话专用，D-009）。
 - 文件制品面（2026-08-23-agent-file-upload-mcp）：`POST /api/agent/file-artifacts`
   （multipart file/description/run_id + X-Session-Id 会话场景；WORKSPACE_WRITE 双路径
   鉴权，落 File 行 owner_type=agent_session/agent_run + AgentRunLog 日志行

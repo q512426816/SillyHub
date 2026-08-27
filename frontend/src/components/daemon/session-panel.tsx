@@ -55,6 +55,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Ban,
   Bot,
+  ClipboardList,
   FolderOpen,
   Lock,
   MessageSquareText,
@@ -133,6 +134,8 @@ import {
   type LlmProviderRoleMapping,
 } from "@/lib/api/llm-providers";
 import { listWorkspaces } from "@/lib/workspaces";
+// task-07 Phase 5（FR-06 / D-004@v2）：autoTeamOpen 预填 objective 的项目名解析。
+import { getProject } from "@/lib/ppm/project";
 import { getChange } from "@/lib/changes";
 // task-11（2026-08-25-session-spec-binding / FR-06）：quickId 标题解析数据源。
 import { getQuicklogDetail } from "@/lib/quicklog";
@@ -161,6 +164,7 @@ import {
   type SessionRunRead,
   type SessionStreamConnection,
   type SessionStreamEnvelope,
+  type PpmItemKind,
   type TeamMissionSummary,
   type TeamMissionTriggerRequest,
 } from "@/lib/daemon";
@@ -184,6 +188,16 @@ export interface SessionPreContext {
    * 隐含 workspace，调用方须显式双传（对齐 changeId X-13 契约）。
    */
   quickId?: string | null;
+  /**
+   * PPM 任务/问题入口传入（task-05 / 2026-08-28-session-ppm-task-binding /
+   * FR-04 / D-001@v1）：悬浮宿主经 store pendingPpmItem 挂起位构造（入口
+   * requestNewSession 会清 preContext，不能直传）。kind+id 随首句 createSession
+   * 上送 ppm_item_kind/ppm_item_id 落 ppm_item_session_links 绑定（后端注入
+   * 【PPM 任务/问题上下文】前导归 task-03）；title 为入口行内已有条目名（任务
+   * content / 问题 pro_desc），仅预会话上下文行展示，缺省回退 id 短码。缺省
+   * 零回归（对齐 changeId/quickId 语义）。
+   */
+  ppmItem?: { kind: PpmItemKind; id: string; title?: string | null } | null;
   /** 目标 runtime id（首句 createSession 的 runtime_id）。 */
   runtimeId: string;
   /**
@@ -246,6 +260,16 @@ export interface SessionPanelProps {
    *  与首句 createSession（runtime_id 必需；workspace_id/change_id 条件下发）。
    *  change 入口须显式双传 workspaceId + changeId（X-13）。〔prop〕 */
   preContext?: SessionPreContext;
+
+  /**
+   * task-07 Phase 5（2026-08-28-session-ppm-task-binding / FR-06 / D-004@v2）：
+   * 预会话自动开派团队弹层意图——悬浮宿主把 store.autoTeamIntent 经本 prop 一次
+   * 性送达（仅预会话挂载消费一次：按挂载初值快照，prop 后续翻转不重复触发）。
+   * ppm_project 页面上下文时预填「分析项目 <项目名> 当前迭代风险并给出建议」
+   *（getProject 解析项目名，失败/无上下文降级空目标，弹层内可修改）。缺省
+   * false 零回归（门户三入口/真会话不自动开弹层）。〔prop〕
+   */
+  autoTeamOpen?: boolean;
 
   /** page 可选：预会话首句创建成功上报（task-03）。父层据此切换 sessionId →
    *  面板状态机自然接管（门户接线归 task-06）。〔prop〕 */
@@ -316,6 +340,7 @@ export function SessionPanel(props: SessionPanelProps) {
         llmProviders={props.llmProviders ?? []}
         onSessionListRefresh={props.onSessionListRefresh}
         preContext={props.preContext}
+        autoTeamOpen={props.autoTeamOpen}
         onPreSessionCreated={props.onPreSessionCreated}
         pageContextOverride={props.pageContextOverride}
         variant={props.variant ?? "desktop"}
@@ -341,6 +366,8 @@ interface SessionPanelPageProps {
   onSessionListRefresh?: () => void;
   /** 预会话上下文（sessionId=null 时渲染锁定上下文行 + 首句 createSession）。 */
   preContext?: SessionPreContext;
+  /** task-07 Phase 5：预会话自动开派团队弹层意图（一次性，见 SessionPanelProps 注释）。 */
+  autoTeamOpen?: boolean;
   /** 预会话首句创建成功上报（父层切 sessionId → 状态机自然接管）。 */
   onPreSessionCreated?: (_resp: SessionCreateResponse) => void;
   /** ql-20260825-004：每轮注入携带当前页面上下文。 */
@@ -401,14 +428,26 @@ const MENTION_PLACEHOLDER_HINT = "/ 唤起技能 · @ 关联变更";
  * 缺省展开为空对象不进请求体，保后端零行为差异；bind_change_key = 变更自然键、
  * bind_quick_id = 快速修复短码，后端 binder 幂等写 M:N link，不注入 prompt）。
  * page 与 dialog 的全部四个 inject 发送点位共用本组装。
+ * task-06（2026-08-28-session-ppm-task-binding / FR-02）：扩展
+ * bind_ppm_item_kind/bind_ppm_item_id 成对追问绑定（对齐 bind_change_key 模式；
+ * 后端 binder 幂等写 ppm_item_session_links，只追加 link 不注入前导——对齐
+ * quicklog 行为，重复选择追问绑定幂等）。
  */
 function mentionBindOptions(m: SessionInputMentions): {
   bind_change_key?: string;
   bind_quick_id?: string;
+  bind_ppm_item_kind?: PpmItemKind;
+  bind_ppm_item_id?: string;
 } {
   return {
     ...(m.change ? { bind_change_key: m.change.change_key } : {}),
     ...(m.quick ? { bind_quick_id: m.quick.ql_id } : {}),
+    ...(m.ppmItem
+      ? {
+          bind_ppm_item_kind: m.ppmItem.kind,
+          bind_ppm_item_id: m.ppmItem.id,
+        }
+      : {}),
   };
 }
 
@@ -543,6 +582,12 @@ interface TeamTriggerRowProps {
   workspaceName: string | null;
   /** 目标预填（/team 指令文本 /「用团队分析」提示句）。 */
   defaultObjective: string | null;
+  /**
+   * task-07 Phase 5（FR-06 / D-004@v2）：项目预选 id（ppm_project 页面上下文
+   * 派生，仅预会话实例传）——弹层 projectId 初值 + scopeMode=project + 关联
+   * 工作区自动预选；缺省弹层行为零变化。
+   */
+  defaultProjectId?: string;
   /** triggerSessionTeamMission 在途（确认按钮禁用）。 */
   submitting: boolean;
   /** 触发错误文案（弹层保持打开时行内展示）。 */
@@ -559,6 +604,7 @@ function TeamTriggerRow({
   workspaceId,
   workspaceName,
   defaultObjective,
+  defaultProjectId,
   submitting,
   errorText,
   onTrigger,
@@ -596,6 +642,7 @@ function TeamTriggerRow({
           workspaceId={workspaceId}
           workspaceName={workspaceName}
           defaultObjective={defaultObjective}
+          defaultProjectId={defaultProjectId}
           preSession={preSession}
           submitting={submitting}
           onTrigger={onTrigger}
@@ -688,6 +735,7 @@ function SessionPanelPage({
   llmProviders,
   onSessionListRefresh,
   preContext,
+  autoTeamOpen,
   onPreSessionCreated,
   pageContextOverride,
   variant,
@@ -1797,6 +1845,41 @@ function SessionPanelPage({
     setTeamPopover({ open: false, objective: null });
   }, []);
 
+  // ── task-07 Phase 5（FR-06 / D-004@v2）：autoTeamOpen 一次性通道 ──────────
+  // PPM 项目页「发起团队」→ 宿主把 store.autoTeamIntent 经 autoTeamOpen prop 在
+  // 预会话挂载拍送达（下一拍即复位）——按挂载初值快照消费，ref 保证只消费一次
+  //（用户关弹层/prop 翻转均不重复触发）。ppm_project 上下文：getProject 解析
+  // 项目名预填「分析项目 X 当前迭代风险并给出建议」（弹层内可修改）；解析失败/
+  // 非 ppm_project 降级空目标，弹层照开（仅预会话——真会话不自动开弹层）。
+  const autoTeamAtMountRef = useRef(autoTeamOpen === true);
+  const autoTeamConsumedRef = useRef(false);
+  useEffect(() => {
+    if (sessionId || !autoTeamAtMountRef.current || autoTeamConsumedRef.current) {
+      return;
+    }
+    autoTeamConsumedRef.current = true;
+    const ctx = preContext?.pageContext;
+    if (ctx?.page_key !== "ppm_project") {
+      openTeamPopover(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      let objective: string | null = null;
+      try {
+        const project = await getProject(ctx.project_id);
+        const name = project.project_name?.trim() || project.project_code || "";
+        if (name) objective = `分析项目 ${name} 当前迭代风险并给出建议`;
+      } catch {
+        // 项目名解析失败 → 空目标降级（弹层照开，目标可手填）。
+      }
+      if (!cancelled) openTeamPopover(objective);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, preContext, openTeamPopover]);
+
   /**
    * task-11：弹层确认 → POST /sessions/{id}/team-mission 预建（triggerSessionTeamMission）。
    * 成功：关弹层 + 刷新 mission 列表（TeamTaskBlock/chip 即时呈现）+ objective
@@ -1873,6 +1956,9 @@ function SessionPanelPage({
       // preContext（change/quicklog 入口 X-13 契约）兜底；缺省回落既有语义。
       const createChangeId = pendingMentions.change?.id ?? preContext.changeId ?? null;
       const createQuickId = pendingMentions.quick?.ql_id ?? preContext.quickId ?? null;
+      // task-06（FR-02）：PPM 同语义合并——@ 选中 ppmItem 优先、preContext.ppmItem
+      // （task-05 入口锁定通道）兜底，成对单值上送。
+      const createPpmItem = pendingMentions.ppmItem ?? preContext.ppmItem ?? null;
       try {
         const resp = await createSession({
           runtime_id: preContext.runtimeId,
@@ -1887,6 +1973,16 @@ function SessionPanelPage({
           // quickId 随首句上送 quicklog_id（对齐 change_id 展开形态；后端创建
           // 即落 quicklog_session_links 绑定，缺省不进请求体零回归）。
           ...(createQuickId ? { quicklog_id: createQuickId } : {}),
+          // task-05（2026-08-28-session-ppm-task-binding / FR-04）+ task-06（@ 联想
+          // 合并）：PPM 任务/问题 kind+id 成对上送（与 change_id/quicklog_id 并列；
+          // 后端创建即落 ppm_item_session_links 绑定 + 注入【PPM 任务/问题上下文】
+          // 前导，缺省不进请求体零回归）。
+          ...(createPpmItem
+            ? {
+                ppm_item_kind: createPpmItem.kind,
+                ppm_item_id: createPpmItem.id,
+              }
+            : {}),
           // ql-20260823-008：预会话配置条暂存值随首句落为会话初始配置。
           ...(preProviderId ? { llm_provider_id: preProviderId } : {}),
           ...(preProfileId ? { agent_profile_id: preProfileId } : {}),
@@ -2242,6 +2338,12 @@ function SessionPanelPage({
         : !preMachineOnline
           ? "所选机器离线，无法派团队"
           : "派团队：首句创建会话时预建团队任务";
+    // task-07 Phase 5（FR-06 / D-004@v2）：ppm_project 页面上下文 → 弹层项目
+    // 预选 id（「发起团队」入口自动开弹层时项目/工作区随上下文预选）。
+    const pageProjectId =
+      preContext?.pageContext?.page_key === "ppm_project"
+        ? preContext.pageContext.project_id
+        : undefined;
     return (
       <section
         ref={panelRef}
@@ -2306,6 +2408,38 @@ function SessionPanelPage({
               {preQuicklogName ?? "—"}
             </span>
           )}
+          {/* task-05（FR-04）：PPM 任务/问题锁定行——中文名 + 条目标题（入口
+              行内已带，零额外请求；缺省回退 id 短码），形态对齐变更/快速修复行
+              （📋→ClipboardList，纯文本 D-104）。 */}
+          {preContext?.ppmItem && (
+            <span
+              className="inline-flex items-center gap-1"
+              data-testid="pre-session-ppm-chip"
+            >
+              <ClipboardList aria-hidden className="h-3 w-3" />
+              {preContext.ppmItem.kind === "plan_task" ? "PPM 任务" : "PPM 问题"}
+              {" · "}
+              {preContext.ppmItem.title?.trim() ||
+                `#${preContext.ppmItem.id.slice(0, 8)}`}
+            </span>
+          )}
+          {/* task-06（FR-02）：@ 联想选中的 PPM 条目 chip——「PPM 任务/问题 · 标题」
+              （原型场景 2 mentions-bar），随首句 create 上送（handlePreSessionSend
+              合并优先级高于上方入口锁定行）；与入口锁定同一条目时去重不重复挂。 */}
+          {pendingMentions.ppmItem &&
+            (pendingMentions.ppmItem.kind !== preContext?.ppmItem?.kind ||
+              pendingMentions.ppmItem.id !== preContext?.ppmItem?.id) && (
+              <span
+                className="inline-flex items-center gap-1"
+                data-testid="pre-session-mention-ppm-chip"
+              >
+                <ClipboardList aria-hidden className="h-3 w-3" />
+                {pendingMentions.ppmItem.kind === "plan_task" ? "PPM 任务" : "PPM 问题"}
+                {" · "}
+                {pendingMentions.ppmItem.title?.trim() ||
+                  `#${pendingMentions.ppmItem.id.slice(0, 8)}`}
+              </span>
+            )}
           <span className="inline-flex items-center gap-1">
             <FolderOpen aria-hidden className="h-3 w-3" />
             {preContext?.workspaceId
@@ -2368,6 +2502,7 @@ function SessionPanelPage({
             workspaceId={preContext?.workspaceId ?? null}
             workspaceName={preWorkspaceName}
             defaultObjective={teamPopover.objective}
+            defaultProjectId={pageProjectId}
             submitting={false}
             errorText={null}
             onTrigger={handlePreTeamTrigger}
@@ -3989,6 +4124,14 @@ function SessionPanelDialog(props: SessionPanelProps) {
           // task-05（FR-05）：@ 快速修复选中随首句上送 quicklog_id（对齐 page
           // 预会话 create 展开形态，缺省不进请求体零回归）。
           ...(mentions.quick ? { quicklog_id: mentions.quick.ql_id } : {}),
+          // task-06（FR-02）：@ PPM 任务/问题选中随首句成对上送（对齐 page 预会话
+          // create 展开形态，缺省不进请求体零回归；后端创建即绑定 + 注入前导）。
+          ...(mentions.ppmItem
+            ? {
+                ppm_item_kind: mentions.ppmItem.kind,
+                ppm_item_id: mentions.ppmItem.id,
+              }
+            : {}),
         });
         // 用返回 run id 替换 pending 占位 + 启动唯一 SSE
         setView((prev) => ({

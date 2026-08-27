@@ -355,10 +355,14 @@ beforeEach(() => {
   vi.clearAllMocks();
   // task-05：联想数据源默认快照（变更 + 快速修复各一条，形态对齐
   // ChangeSummary / QuicklogEntryListItem；用例按需覆盖）。
+  // task-06（2026-08-28-session-ppm-task-binding）：PPM 两分组补空数组占位
+  //（useMentionSources 返回面扩展的旧 mock 顺手补字段，CLAUDE.md 惯例）。
   mentionSourcesMock.mockReturnValue({
     skills: [],
     changes: [makeMentionChange()],
     quicklogs: [makeMentionQuick()],
+    ppmTasks: [],
+    ppmProblems: [],
     atEnabled: true,
   });
 });
@@ -1094,6 +1098,112 @@ describe("SessionPanel 预会话快速修复上下文行（task-11 / FR-06）", 
     const ctx = screen.getByTestId("pre-session-context");
     expect(ctx.textContent).not.toContain("修复登录跳转");
     expect(quicklogApi.getQuicklogDetail).not.toHaveBeenCalled();
+  });
+});
+
+/* ───────── 10. task-05（2026-08-28-session-ppm-task-binding / FR-04）：
+   ppmItem 首句上送 + 锁定行 PPM 徽标 ───────── */
+
+describe("SessionPanel 预会话 PPM 条目绑定（task-05 / FR-04）", () => {
+  it("ppmItem 存在：首句 createSession 成对上送 ppm_item_kind/ppm_item_id（与 change_id/quicklog_id 并列）", async () => {
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-ppm-1",
+      run_id: "run-ppm-1",
+      lease_id: "l",
+      status: "active",
+      stream_url: "",
+    });
+    setupPre({
+      preContext: {
+        workspaceId: "ws-1",
+        runtimeId: "rt-claude",
+        ppmItem: { kind: "plan_task", id: "task-1", title: "排行榜接口性能优化" },
+      },
+    });
+
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "任务入口首句" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
+    expect(sessionApi.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runtime_id: "rt-claude",
+        prompt: "任务入口首句",
+        workspace_id: "ws-1",
+        ppm_item_kind: "plan_task",
+        ppm_item_id: "task-1",
+        manual_approval: true,
+        ask_user_only: true,
+      }),
+    );
+    // change/quick 缺省不进请求体（入口独立，零回归）。
+    const arg = sessionApi.createSession.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg.change_id).toBeUndefined();
+    expect(arg.quicklog_id).toBeUndefined();
+  });
+
+  it("ppmItem 缺省：请求体不含 ppm_item_kind/ppm_item_id（零回归）", async () => {
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-ppm-2",
+      run_id: "run-ppm-2",
+      lease_id: "l",
+      status: "active",
+      stream_url: "",
+    });
+    setupPre();
+
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "普通首句" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
+    const arg = sessionApi.createSession.mock.calls[0]![0] as Record<string, unknown>;
+    expect(arg.ppm_item_kind).toBeUndefined();
+    expect(arg.ppm_item_id).toBeUndefined();
+  });
+
+  it("锁定行渲染 PPM 徽标：中文名 + 条目标题（problem kind 同构，纯文本 D-104）", () => {
+    setupPre({
+      preContext: {
+        workspaceId: "ws-1",
+        runtimeId: "rt-claude",
+        ppmItem: { kind: "plan_task", id: "task-1", title: "排行榜接口性能优化" },
+      },
+    });
+
+    const chip = screen.getByTestId("pre-session-ppm-chip");
+    expect(chip.textContent).toContain("PPM 任务");
+    expect(chip.textContent).toContain("排行榜接口性能优化");
+    // D-104：锁定行无任何可交互元素（chip 纯文本）。
+    const ctx = screen.getByTestId("pre-session-context");
+    expect(within(ctx).queryAllByRole("button")).toHaveLength(0);
+    expect(within(ctx).queryAllByRole("link")).toHaveLength(0);
+  });
+
+  it("标题缺失回退 id 短码；problem kind 显示「PPM 问题」", () => {
+    setupPre({
+      preContext: {
+        workspaceId: null,
+        runtimeId: "rt-claude",
+        ppmItem: { kind: "problem", id: "0123456789abcdef", title: null },
+      },
+    });
+
+    const chip = screen.getByTestId("pre-session-ppm-chip");
+    expect(chip.textContent).toContain("PPM 问题");
+    expect(chip.textContent).toContain("#01234567");
+  });
+
+  it("ppmItem 缺省：锁定行不渲染 PPM 徽标（缺省零回归）", () => {
+    setupPre();
+    expect(
+      screen.queryByTestId("pre-session-ppm-chip"),
+    ).not.toBeInTheDocument();
   });
 });
 

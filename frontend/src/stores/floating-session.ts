@@ -19,6 +19,10 @@
  *   - startPreSession：进入预会话（清选中，可携带 pageContext）。
  */
 import { create } from "zustand";
+// task-05（2026-08-28-session-ppm-task-binding / FR-04）：PPM 条目 kind 取值
+// 与 createSession 的 ppm_item_kind 同源（lib/daemon 从生成版派生）。type-only
+// import 编译期擦除，R6「store 不 import daemon lib」的运行时纯状态边界不变。
+import type { PpmItemKind } from "@/lib/daemon";
 
 /** 预会话机器/工作区上下文（对齐 SessionPreContext，宿主解析 runtime 后填）。 */
 export interface FloatingPreContext {
@@ -31,6 +35,19 @@ export interface FloatingPreContext {
    * 上送 quicklog_id 落绑定。缺省零回归（对齐 changeId 语义）。
    */
   quickId?: string | null;
+  /**
+   * PPM 任务/问题入口传入（task-05 / 2026-08-28-session-ppm-task-binding /
+   * FR-04 / D-001@v1）：经 store pendingPpmItem 挂起位由宿主构造（requestNewSession
+   * 会清 preContext，不能直传）。kind+id 随首句 createSession 上送
+   * ppm_item_kind/ppm_item_id 落 ppm_item_session_links 绑定；title 为入口行内
+   * 已有条目名（任务 content / 问题 pro_desc），仅预会话上下文行展示。缺省零
+   * 回归（对齐 changeId/quickId 语义）。
+   */
+  ppmItem?: {
+    kind: PpmItemKind;
+    id: string;
+    title?: string | null;
+  } | null;
 }
 
 /**
@@ -60,6 +77,24 @@ export type FloatingPageContext =
   | { page_key: "generic_page"; route_key: string }
   | { page_key: "workspace"; workspace_id: string; tab_key?: string };
 
+/**
+ * PPM 条目挂起位形态（task-05 / FR-04 / D-001@v1）：任务/问题侧「发起会话」
+ * 入口写入（requestNewSession 会清 preContext，故走独立挂起位），宿主
+ * handleNewSession 读取后镜像进组件内 ref 保活，实际消费（打开预会话，含
+ * 两步浮层兜底）或取消（浮层取消/组头新建/抽屉全清）时才清（P2-3 修复：
+ * 读取即清会把兜底浮层分支的绑定意图静默丢弃）。
+ */
+export interface PendingPpmItem {
+  /** plan_task=个人计划任务 / problem=问题清单（与 createSession ppm_item_kind 同源）。 */
+  kind: PpmItemKind;
+  /** 条目 id（PlanTask.id / ProblemList.id）。 */
+  id: string;
+  /** 项目 id——宿主解析项目第一个关联工作区用；任务无项目时 null 不解析。 */
+  projectId: string | null;
+  /** 展示用条目标题（任务 content / 问题 pro_desc），预会话上下文行 chip 用。 */
+  title?: string | null;
+}
+
 /** 悬浮会话壳层状态与动作（design §3）。 */
 export interface FloatingSessionState {
   /** 抽屉是否展开（false 且 minimized=true 为胶囊态）。 */
@@ -78,6 +113,24 @@ export interface FloatingSessionState {
    */
   autoNewPending: boolean;
   /**
+   * task-07 Phase 5（2026-08-28-session-ppm-task-binding / FR-06 / D-004@v2）：
+   * PPM 项目页「发起团队」自动弹层意图。requestNewSession 的 pageContext 为
+   * ppm_project 时置 true（非 ppm_project 入口显式置 false，零回归）；宿主在
+   * autoNewPending 打开预会话时读取并经 SessionPanel `autoTeamOpen` prop 一次性
+   * 送达（预会话挂载即自动开派团队弹层），送达后调 clearAutoTeamIntent 清除。
+   */
+  autoTeamIntent: boolean;
+  /**
+   * PPM 条目挂起位（task-05 / 2026-08-28-session-ppm-task-binding / FR-04 /
+   * D-001@v1）：任务/问题侧入口「发起会话」写入 + requestNewSession 唤起；
+   * 宿主 handleNewSession 读取（构造 preContext.ppmItem + 解析工作区），
+   * 实际消费点为打开预会话（含两步浮层 onPick 兜底，P2-3）——彼时才清；
+   * 取消路径（浮层取消/组头新建防漏/closeDrawer 无会话全清）兜底清。
+   * requestNewSession 不清（挂起位生命周期与 preContext 独立——正是走挂起位
+   * 的原因）。
+   */
+  pendingPpmItem: PendingPpmItem | null;
+  /**
    * FR-01/FR-02：runtime 锁定态（/runtimes 入口唤起时携带）。非空=锁定，
    * 抽屉头部渲染锁定徽标、树按 runtime scope 过滤、新建钉死该 runtime。
    * 不随 closeDrawer 自动清（运行中会话保活时保留；下次 openRuntimeSession
@@ -95,6 +148,12 @@ export interface FloatingSessionState {
   requestNewSession: (_pageContext?: FloatingPageContext | null) => void;
   /** 宿主消费 autoNewPending 后清除（防循环触发）。 */
   clearAutoNew: () => void;
+  /** task-07 Phase 5：宿主把 autoTeamIntent 送达预会话（SessionPanel autoTeamOpen）后清除（防重复弹层）。 */
+  clearAutoTeamIntent: () => void;
+  /** task-05（FR-04）：入口写入 PPM 条目挂起位（与 requestNewSession 搭配唤起）。 */
+  setPendingPpmItem: (_item: PendingPpmItem) => void;
+  /** task-05（FR-04）/ P2-3：宿主实际消费（打开预会话）或取消（浮层取消/组头新建防漏/closeDrawer 全清）时清。 */
+  clearPendingPpmItem: () => void;
   /** 预会话首句创建成功（SessionPanel onPreSessionCreated → 宿主回调）。 */
   preSessionCreated: (_sessionId: string) => void;
   /**
@@ -113,6 +172,8 @@ export const useFloatingSessionStore = create<FloatingSessionState>((set) => ({
   preContext: null,
   pageContext: null,
   autoNewPending: false,
+  autoTeamIntent: false,
+  pendingPpmItem: null,
   lockedRuntime: null,
 
   openDrawer: () => set({ open: true, minimized: false }),
@@ -131,6 +192,10 @@ export const useFloatingSessionStore = create<FloatingSessionState>((set) => ({
           preContext: null,
           pageContext: null,
           autoNewPending: false,
+          // task-07 Phase 5：无会话全清时一并清团队意图（壳态清零口径）。
+          autoTeamIntent: false,
+          // task-05（FR-04）：挂起位同壳态清零口径一并清（入口意图随壳关闭作废）。
+          pendingPpmItem: null,
           // lockedRuntime 不清（运行中会话保活时保留锁定）。
         };
       }
@@ -165,9 +230,18 @@ export const useFloatingSessionStore = create<FloatingSessionState>((set) => ({
       open: true,
       minimized: false,
       autoNewPending: true,
+      // task-07 Phase 5：仅 PPM 项目页入口携带团队弹层意图（显式写布尔——
+      // 上一次 ppm 入口残留的 true 不得泄漏进本次非 ppm 自动新建）。
+      autoTeamIntent: pageContext?.page_key === "ppm_project",
     }),
 
   clearAutoNew: () => set({ autoNewPending: false }),
+
+  clearAutoTeamIntent: () => set({ autoTeamIntent: false }),
+
+  setPendingPpmItem: (item) => set({ pendingPpmItem: item }),
+
+  clearPendingPpmItem: () => set({ pendingPpmItem: null }),
 
   preSessionCreated: (sessionId) =>
     set({ sessionId, preContext: null, open: true, minimized: false, autoNewPending: false }),

@@ -12,6 +12,8 @@ created_at: 2026-08-18 01:45:00
 daemon 域的浏览器侧 API 客户端 + 会话 SSE 接入层（`frontend/src/lib/daemon.ts`，约 1300 行，前端最大的单个 lib 文件）。覆盖 `/api/daemon/**`（运行时/机器/实例/版本/用量/文件浏览 RPC/会话生命周期/权限对话）与两处 workspace 侧会话查询端点，并把 session SSE 流解析成结构化事件交给回调。所有 REST 走 `apiFetch`（401 自动刷新、错误归一 `ApiError`）；SSE 走 `lib/fetch-sse`（token 进 Authorization header）。依赖面广：pages、components-daemon / components-sessions / components-permissions / components-agent-log、lib 内部（query-keys、use-daemon-machines、workspace-daemon-status、workspace-path）均 import 本模块。
 
 ## 契约摘要
+- sharedAgents API（2026-08-28-daemon-agent-share）：fetchSharedAgents/createSharedAgent/
+  disableSharedAgent/fetchSharedAgentsActive——类型全取 api-types 生成版（SharedAgentView 等）。
 按子域分组（全部顶层 export；DTO 大量采用「api-types 生成版 + Omit/交叉窄化」，见注意事项）：
 
 **runtime 管理**

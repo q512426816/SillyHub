@@ -97,6 +97,7 @@ from app.modules.daemon.schema import (
     OwnerRead,
     PlanModeEnteredEvent,
     PlanResponseRequest,
+    PpmItemKindLiteral,
     RuntimeUsageListResponse,
     RuntimeUsageWindow,
     SessionCreateRequest,
@@ -2091,6 +2092,12 @@ async def list_sessions(
     # links (workspace_id, ql_id) 子查询；max_length 对齐 links 表 ql_id 列
     # String(128)。不传 = 现状（零回归）。
     ql_id: str | None = Query(default=None, max_length=128),
+    # task-02（2026-08-28-session-ppm-task-binding / FR-05 / D-005@v1）：PPM 条目
+    # 级关联筛选——kind 走 Literal 校验（非法值 422，与 status/provider 同口径），
+    # item_id 为 UUID；二者成对携带（只传其一 422，见下方手工成对校验），不传
+    # = 现状（零回归）。service 层走 ppm_item_session_links 子查询。
+    ppm_item_kind: PpmItemKindLiteral | None = Query(default=None),
+    ppm_item_id: uuid.UUID | None = Query(default=None),
     # 2026-08-24：会话归档过滤（True=只看已归档，False=只看未归档）。
     archived: bool = Query(default=False),
 ) -> AgentSessionListResponse:
@@ -2110,7 +2117,20 @@ async def list_sessions(
     不变向后兼容）；新增可选 ql_id（快速修复短码，走 quicklog_session_links
     按 (workspace_id, ql_id) 双条件子查询，防跨工作区同 ql_id 串扰），不传
     = 现状（零回归）。
+    task-02（2026-08-28-session-ppm-task-binding / FR-05 / §9）：新增可选
+    ppm_item_kind + ppm_item_id 成对筛选（ppm_item_session_links 子查询命中；
+    kind Literal 校验非法值 422，只传其一 422——与 create/inject 通道同口径；
+    不传 = 现状，零回归）。
     """
+    # task-02：Query 参数无 DTO model_validator 可用，成对约束在此手工校验
+    # （只传其一 422，对齐 SessionCreateRequest._require_ppm_item_pair 口径）。
+    # 注意 status_code 用字面量——本函数的 ``status`` 查询参数遮蔽了 fastapi 的
+    # ``status`` 模块（同款先例：下方 status Literal 校验）。
+    if (ppm_item_kind is None) != (ppm_item_id is None):
+        raise HTTPException(
+            status_code=422,
+            detail="ppm_item_kind and ppm_item_id must be provided together",
+        )
     from app.modules.agent.model import AgentRun, AgentRunLog
 
     svc = DaemonService(session)
@@ -2126,6 +2146,8 @@ async def list_sessions(
         workspace_id=workspace_id,
         change_id=change_id,
         ql_id=ql_id,
+        ppm_item_kind=ppm_item_kind,
+        ppm_item_id=ppm_item_id,
         archived=archived,
     )
     reads = [AgentSessionRead.model_validate(item) for item in items]
@@ -2325,6 +2347,9 @@ async def create_session(
     # task-08（2026-08-25-session-spec-binding / FR-04 / FR-06）：quicklog_id
     # 透传（对齐 change_id 既有透传形态；落绑定归 service 创建落库点）。
     # ql-20260825-001：首句附件透传（校验/标记行/组装归 service）。
+    # task-02（2026-08-28-session-ppm-task-binding / FR-01）：PPM 条目成对绑定
+    # 字段透传（DTO 成对校验 422 已在 schema 层；item 校验/工作区解析/落 link
+    # 归 service；漏透传会 500，三层同步加参）。
     result = await svc.create_session(
         user.id,
         provider=data.provider,
@@ -2337,6 +2362,8 @@ async def create_session(
         change_id=data.change_id,
         workspace_id=data.workspace_id,
         quicklog_id=data.quicklog_id,
+        ppm_item_kind=data.ppm_item_kind,
+        ppm_item_id=data.ppm_item_id,
         team_mission=data.team_mission,
         # P0 修复（2026-08-26，E2E 实证）：team_mission 预建主控会话必须写
         # stage='orchestrator' → daemon isMainAgentSession 谓词命中 → 注入
@@ -2388,6 +2415,10 @@ async def inject_session(
         # （幂等 binder 调用归 SessionService，三层同步加参——漏透传会 500）。
         bind_change_key=data.bind_change_key,
         bind_quick_id=data.bind_quick_id,
+        # task-02（2026-08-28-session-ppm-task-binding / FR-02）：PPM 条目追问
+        # 绑定成对字段透传（幂等 binder 归 SessionService，三层同步加参）。
+        bind_ppm_item_kind=data.bind_ppm_item_kind,
+        bind_ppm_item_id=data.bind_ppm_item_id,
         # ql-20260825-011：忙轮入队（后端真实排队，前端 UI 语义）；服务身份
         # 调用方不经本端点，保持 409 拒绝语义。
         queue_when_busy=True,

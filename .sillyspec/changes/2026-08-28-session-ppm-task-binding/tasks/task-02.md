@@ -13,6 +13,7 @@ allowed_paths:
   - backend/app/modules/daemon/schema.py
   - backend/app/modules/daemon/session/service.py
   - backend/app/modules/daemon/router.py
+  - backend/app/modules/daemon/service.py
   - backend/app/modules/daemon/tests/test_ppm_session.py
   - backend/app/modules/daemon/tests/test_change_session.py
   - backend/app/modules/daemon/tests/test_session_service.py

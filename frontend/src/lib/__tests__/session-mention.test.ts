@@ -15,7 +15,9 @@ import { describe, expect, it } from "vitest";
 import {
   applyMentionPick,
   detectMention,
+  sanitizePpmInsertKey,
   type MentionDetection,
+  type MentionPpmItem,
 } from "../session-mention";
 
 /** session-panel.tsx parseTeamCommand 同款正则（未导出，内联断言拦截兼容）。 */
@@ -212,5 +214,55 @@ describe("/team 拦截兼容链（design §3.4 / 验收第 3 条）", () => {
     const withArgs = picked.value + "分析下登录";
     expect(TEAM_COMMAND_RE.test(withArgs)).toBe(true);
     expect((TEAM_COMMAND_RE.exec(withArgs)?.[1] ?? "").trim()).toBe("分析下登录");
+  });
+});
+
+/* ───────── task-06（2026-08-28-session-ppm-task-binding / FR-02）：PPM 条目 ───────── */
+
+describe("MentionPpmItem 类型与 sanitizePpmInsertKey 回填键清洗", () => {
+  it("MentionPpmItem 结构：kind/id/title/projectName/subtitle（任务/问题归一形态）", () => {
+    const item: MentionPpmItem = {
+      kind: "plan_task",
+      id: "0b6dc46e-5b60-4a06-9c6f-8b42eec5b58a",
+      title: "排行榜接口性能优化",
+      projectName: "SillyHub 平台",
+      subtitle: null,
+    };
+    // 判别消费面：kind 兼容 daemon.ts PpmItemKind 字面量、problem 同构。
+    const problem: MentionPpmItem = { ...item, kind: "problem" };
+    expect(item.kind).toBe("plan_task");
+    expect(problem.kind).toBe("problem");
+  });
+
+  it("压连续空白（含换行/制表）为单空格 + 去首尾空白", () => {
+    expect(sanitizePpmInsertKey("  排行榜\t接口\n性能  优化  ")).toBe(
+      "排行榜 接口 性能 优化",
+    );
+  });
+
+  it("超 40 字符截断加省略号（回填文本仅展示性残留，绑定走结构化槽位）", () => {
+    const long = "一二三四五六七八九十".repeat(5); // 50 字符
+    expect(sanitizePpmInsertKey(long)).toBe(`${"一二三四五六七八九十".repeat(4)}…`);
+    expect(sanitizePpmInsertKey(long).length).toBe(41);
+  });
+
+  it("空标题（null/undefined/纯空白）返回空串", () => {
+    expect(sanitizePpmInsertKey(null)).toBe("");
+    expect(sanitizePpmInsertKey(undefined)).toBe("");
+    expect(sanitizePpmInsertKey("   \n\t ")).toBe("");
+  });
+
+  it("清洗后的 PPM 键经 applyMentionPick 回填：尾随空格仍使检测归 null 关层", () => {
+    // 标题含内部空格（清洗保留单空格）——回填段 "@排行榜 接口 性能 优化 "
+    const key = sanitizePpmInsertKey("排行榜 接口\n性能优化");
+    const picked = applyMentionPick("看下 @排行", {
+      trigger: "@",
+      query: "排行",
+      start: 3,
+    }, key);
+    expect(picked.value).toBe("看下 @排行榜 接口 性能优化 ");
+    expect(picked.caret).toBe(picked.value.length);
+    // 尾随空格语义不受内部空格影响：光标回看遇空白 → null（浮层自动关闭）。
+    expect(detectMention(picked.value, picked.caret)).toBeNull();
   });
 });

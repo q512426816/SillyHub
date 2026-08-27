@@ -98,6 +98,8 @@ prototype: prototype-session-ppm-task-binding.html
 
 sillyhub-daemon 仓**零改动**（附件走既有 SessionInjectAttachment 协议与 session-attachments 下载端点，D-006 物化策略保证 id 兼容）。
 
+清单外必要改动（QA 验收 P2-1 补录，均为透传/装配必经或产物文件）：backend/app/modules/daemon/service.py（facade 显式签名三层透传，漏传即 500）、frontend/src/components/daemon/session-input-bar.tsx（ppmItem 槽位 + ppmScope 状态接线）、backend/app/modules/ppm/common/__init__.py（__all__ 增补）、backend/openapi.json（gen:types 产物，归 task-04 说明列）、相关测试文件若干（TaskCard allowed_paths 内）。
+
 ## 7. 接口定义
 
 ```python
@@ -123,6 +125,9 @@ def build_ppm_item_context_preamble(db, kind: str, item_id: UUID, *,
 async def _materialize_ppm_attachments(self, file_ids: list[str], *, user_id, session_id,
                                        provider: str, manual_counts: dict) -> list[str]
 # 返回降级文字清单行（未物化条目）；物化行并入 validated_attachments
+# 注（QA 验收 P2-2）：本签名为设计草图；实现为 (self, *, user_id, kind, item_id, provider,
+# manual_attachments) -> tuple[list[str], list[_PreparedPpmAttachment]]，自加载 item 并以
+# _PreparedPpmAttachment 承载写事务内外的拆分——语义完整且优于草图，以实现为准。
 ```
 
 REST 变更：

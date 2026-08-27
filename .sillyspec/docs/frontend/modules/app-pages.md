@@ -12,6 +12,9 @@ created_at: 2026-08-18 01:45:00
 顶层路由页面集合（`src/app/` 根 + `(auth)` + `(dashboard)` 平台级页面），共 12 个 page.tsx：落地页 `/`、登录 `/login`、工作区选择器 `/workspaces`、机器列表 `/runtimes`、机器审计 `/runtimes/[id]/audit`、设置域 `/settings` 及其 5 个子页（git-identities / api-keys / mcp / providers / skills）、个人中心 `/account`。页面负责数据拉取与交互编排，UI 骨架下沉 components-layout / components-shared / components-llm-providers / components-daemon。
 
 ## 契约摘要
+- /runtimes（2026-08-28-daemon-agent-share）：统计行加「共享给我」计数卡；挂载
+  SharedMachinesSection（共享区块）与 PlatformSharedAgentsCard（admin）；共享机器「会话」
+  锁第一个在线 runtime（handleOpenSharedMachineSession）。
 - `HomePage`（`/`）：client 组件，hydrate 后按 accessToken `router.replace` 到 `/workspaces` 或 `/login`；token 在 localStorage、server 端读不到，故 client effect 跳转；persist 恢复前 `return null` 防首帧误判闪烁。
 - `LoginPage`（`/login`，`(auth)` 路由组，不进 dashboard layout）：表单 → `login(account, password)` → 成功跳平台默认页；localStorage 记忆账号/平台偏好（`sillyhub.login.remember` / `sillyhub.login.platform`，移动端 `/m/login` 复用同组 key 保持两端回填一致）。
 - `WorkspacesPage`（`/workspaces`，387 行）：`listWorkspaces` + `fetchMyBindings` + `useDaemonStatusMap` 组装 `WorkspaceCard` 卡片列表；扫描入口 `WorkspaceScanDialog`；平台管理员可见人员搜索（`listUsers`，`is_platform_admin` 控制显隐，失败降级隐藏控件）。

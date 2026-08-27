@@ -53,6 +53,12 @@
  *     orchestrator_workspace_id（选工作区=其 id、默认=null；组件内类型交集，
  *     lib/daemon.ts 类型扩展归 task-13）。非 preSession 实例渲染与 payload
  *     零变化（既有会话主 agent 恒=当前会话，跨机器迁移属 C 层非目标）。
+ *
+ * task-07（2026-08-28-session-ppm-task-binding Phase 5 / FR-06 / D-004@v2）追加：
+ *   - `defaultProjectId` 可选 prop（ppm_project 页面上下文派生，悬浮预会话
+ *     「发起团队」入口传入）：projectId 初值预选 + scopeMode 初值 "project" +
+ *     关联工作区加载后按 workspace_id 升序自动预选第一个作 scope（与后端
+ *     Phase 1 工作区解析同排序键）；缺省行为零变化。
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -180,6 +186,15 @@ export interface TeamTriggerPopoverProps {
   /** 目标预填（/team 指令文本 /「用团队分析」提示句）；确认后由父层回填输入框。 */
   defaultObjective?: string | null;
   /**
+   * task-07 Phase 5（2026-08-28-session-ppm-task-binding / FR-06 / D-004@v2）：
+   * 项目预选 id（ppm_project 页面上下文派生，悬浮预会话「发起团队」入口传）。
+   * 有值时：projectId 初值预选 + scopeMode 初值 "project" + 自动拉关联工作区并
+   * 按 workspace_id 升序预选第一个作 scope（与后端 link 写入/Phase 1 工作区解析
+   * 同排序键 D-004@v2）；列表空/加载失败不报错（弹层照常可用，确认走既有
+   * 「至少一个工作区」校验）。缺省 → 现行为零变化。
+   */
+  defaultProjectId?: string;
+  /**
    * task-12：预会话实例（新会话派团队，session-panel task-13 传参）。仅 true
    * 渲染「主 agent（项目经理）」选择器 + 确认按钮文案「派团队（随首句创建生效）」
    * + payload 追加 orchestrator_workspace_id；缺省 false 渲染与 payload 零变化。
@@ -211,6 +226,7 @@ export function TeamTriggerPopover({
   workspaceId,
   workspaceName,
   defaultObjective,
+  defaultProjectId,
   preSession = false,
   submitting = false,
   onTrigger,
@@ -218,15 +234,17 @@ export function TeamTriggerPopover({
 }: TeamTriggerPopoverProps) {
   // 目标（可选）：留空 → 后端落占位、首条 inject 回填（CC-09）。
   const [objective, setObjective] = useState(defaultObjective ?? "");
-  // 范围模式：workspace（默认，需会话绑定工作区）/ project。
+  // 范围模式：workspace（默认，需会话绑定工作区）/ project。task-07 Phase 5：
+  // defaultProjectId 有值 → 预选项目维度（项目上下文入口直接落到项目 scope）。
   const [scopeMode, setScopeMode] = useState<"workspace" | "project">(
-    workspaceId ? "workspace" : "project",
+    defaultProjectId ? "project" : workspaceId ? "workspace" : "project",
   );
   // 项目下拉数据：null = 加载中；[] = 无可见项目（非项目经理/加载失败）。
   const [projects, setProjects] = useState<
     Awaited<ReturnType<typeof listProjects>> | null
   >(null);
-  const [projectId, setProjectId] = useState("");
+  // task-07 Phase 5：项目初值预选（defaultProjectId；缺省空选走原逻辑）。
+  const [projectId, setProjectId] = useState(defaultProjectId ?? "");
   // 项目关联工作区（scope 候选）：null = 未加载。
   const [projectWorkspaces, setProjectWorkspaces] = useState<
     WorkspaceBrief[] | null
@@ -288,6 +306,22 @@ export function TeamTriggerPopover({
       cancelled = true;
     };
   }, [projectId]);
+
+  // task-07 Phase 5（FR-06 / D-004@v2）：defaultProjectId 预选——关联工作区
+  // 加载成功后按 workspace_id 升序（UUID 字典序，与 Phase 1 后端工作区解析/
+  // link 写入同排序键）取第一个设为 scope 预选；ref 保证只预选一次（用户改选
+  // 其它项目后走原「scope 空选」逻辑，不重复自动勾选）。列表空/加载失败 →
+  // 不报错不勾选（确认走既有「至少一个工作区」校验文案）。
+  const workspacePreselectedRef = useRef(false);
+  useEffect(() => {
+    if (!defaultProjectId || workspacePreselectedRef.current) return;
+    if (!projectWorkspaces || projectWorkspaces.length === 0) return;
+    workspacePreselectedRef.current = true;
+    const first = [...projectWorkspaces].sort((a, b) =>
+      a.workspace_id < b.workspace_id ? -1 : a.workspace_id > b.workspace_id ? 1 : 0,
+    )[0]!;
+    setScopeIds((prev) => (prev.length > 0 ? prev : [first.workspace_id]));
+  }, [defaultProjectId, projectWorkspaces]);
 
   const projectSelectable = (projects?.length ?? 0) > 0;
   const projectsLoading = projects === null;

@@ -30,7 +30,9 @@ WorkspaceRelation 模型全删，拓扑退化为纯项目组节点视图。
 `GET /members/search`、`PATCH|DELETE /{id}/members/{uid}`、
 `POST /{id}/members/{uid}/transfer-ownership`
 
-member_runtimes 子域：`GET|PUT /{id}/my-binding`（per-member 绑定行）、
+member_runtimes 子域：member_runtimes 子域（2026-08-28-daemon-agent-share 更新：开关/撤销端点**同事务双写**
+grants（shared 列保留为 UI 缓存，授权唯一判定源=grants）；`GET /shared-daemons` 数据源切
+grants 且响应加 grant_id；queries.resolve_shared_daemon_for_borrow 为薄壳委托）：`GET|PUT /{id}/my-binding`（per-member 绑定行）、
 `GET /{id}/members/bindings`、`PUT /{id}/my-binding/shared` +
 `GET /{id}/shared-daemons` + `DELETE /{id}/members/{uid}/shared`（共享 daemon 借用）
 

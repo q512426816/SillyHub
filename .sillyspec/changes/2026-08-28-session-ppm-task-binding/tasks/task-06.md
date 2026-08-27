@@ -32,6 +32,8 @@ allowed_paths:
   - frontend/src/components/daemon/__tests__/session-mention-popover.test.tsx
   - frontend/src/components/daemon/__tests__/session-input-bar-mention.test.tsx
   - frontend/src/components/sessions/__tests__/session-list-panel.test.tsx
+  - frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx
+  - frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
 related_tests:
   - frontend/src/lib/__tests__/session-mention-sources.test.tsx
   - frontend/src/lib/__tests__/session-mention.test.ts

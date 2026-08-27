@@ -230,6 +230,10 @@ describe("SessionPanel（dialog）", () => {
           source: "file",
         },
       ],
+      // task-06（2026-08-28-session-ppm-task-binding）：PPM 两分组补空数组占位
+      //（useMentionSources 返回面扩展的旧 mock 顺手补字段，CLAUDE.md 惯例）。
+      ppmTasks: [],
+      ppmProblems: [],
       atEnabled: true,
     });
     // ql-20260825-011：默认空队列（服务端排队三件套）。

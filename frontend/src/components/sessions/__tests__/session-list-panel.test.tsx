@@ -72,6 +72,7 @@ import type {
   DaemonRuntimeRead,
 } from "@/lib/daemon";
 import type { Workspace } from "@/lib/workspaces";
+import { useSession } from "@/stores/session";
 
 // ── hoisted mock 状态 ─────────────────────────────────────────────────────
 
@@ -86,6 +87,10 @@ const mocks = vi.hoisted(() => ({
   // task-10（X-009）：「关联」下拉选项数据源（变更列表 + 快速修复列表）。
   listChanges: vi.fn(),
   listQuicklogEntries: vi.fn(),
+  // task-06（2026-08-28-session-ppm-task-binding / FR-05）：「关联」下拉 PPM
+  // 任务/问题选项数据源（口径同 @ 联想：进行中、按当前用户）。
+  listPersonalPlanTasks: vi.fn(),
+  listProblems: vi.fn(),
 }));
 
 // 组件只消费 listAgentSessions + 树拉取上限常量（类型导入编译期擦除），
@@ -114,6 +119,16 @@ vi.mock("@/lib/changes", () => ({
 vi.mock("@/lib/quicklog", () => ({
   listQuicklogEntries: (...args: unknown[]) =>
     mocks.listQuicklogEntries(...args),
+}));
+
+// task-06（FR-05）：PPM 任务/问题选项数据源 mock（组件仅消费两个列表函数）。
+vi.mock("@/lib/ppm/task", () => ({
+  listPersonalPlanTasks: (...args: unknown[]) =>
+    mocks.listPersonalPlanTasks(...args),
+}));
+
+vi.mock("@/lib/ppm/problem", () => ({
+  listProblems: (...args: unknown[]) => mocks.listProblems(...args),
 }));
 
 // ── jsdom 虚拟滚动桩：change 分支 scroll 容器给出非零视口 ────────────────
@@ -370,6 +385,15 @@ beforeEach(() => {
   // task-10（X-009）：选项数据源默认成功空集（workspace scope 既有用例零干扰）。
   mocks.listChanges.mockReset().mockResolvedValue({ items: [], total: 0 });
   mocks.listQuicklogEntries.mockReset().mockResolvedValue({ items: [], total: 0 });
+  // task-06（FR-05）：PPM 选项数据源默认成功空集 + 当前用户复位（真实 store，
+  // setState 直写；persist 落 localStorage 不影响断言）。
+  mocks.listPersonalPlanTasks
+    .mockReset()
+    .mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100 });
+  mocks.listProblems
+    .mockReset()
+    .mockResolvedValue({ items: [], total: 0, page: 1, page_size: 100 });
+  useSession.setState({ user: null });
   setWorkspaces();
   setMachines();
   mocks.machinesRefetch.mockReset();
@@ -1681,6 +1705,9 @@ describe("SessionListPanel「关联」筛选下拉（task-10 / X-009）", () => 
     }
     expect(mocks.listChanges).not.toHaveBeenCalled();
     expect(mocks.listQuicklogEntries).not.toHaveBeenCalled();
+    // task-06（FR-05）：PPM 选项数据源同门控——非 workspace scope 零请求。
+    expect(mocks.listPersonalPlanTasks).not.toHaveBeenCalled();
+    expect(mocks.listProblems).not.toHaveBeenCalled();
   });
 
   it("workspace scope 渲染分组选项（变更 title 优先/change_key 回退、快速修复剔占位行）；选中变更 → change_id 透传；清除恢复", async () => {
@@ -1752,6 +1779,120 @@ describe("SessionListPanel「关联」筛选下拉（task-10 / X-009）", () => 
         ql_id: "ql-20260824-014",
       });
     });
+  });
+
+  it("task-06（FR-05）：PPM 任务/问题分组选项 + 选中 ppm:<kind>:<uuid> → ppm_item_kind/ppm_item_id 透传", async () => {
+    assocFixtures();
+    // 当前登录用户（问题源 duty_user_id=me；任务走 personal 端点）。
+    act(() => {
+      useSession.setState({ user: { id: "u-1", email: "u@x.io", displayName: "U" } });
+    });
+    mocks.listPersonalPlanTasks.mockResolvedValue({
+      items: [
+        {
+          id: "pt-1",
+          content: "排行榜接口性能优化",
+          task_description: null,
+          project_name: "SillyHub 平台",
+          status: "进行中",
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 100,
+    });
+    mocks.listProblems.mockResolvedValue({
+      items: [
+        {
+          id: "pb-1",
+          pro_desc: "看板拖拽后排序偶发丢失",
+          project_name: null,
+          func_name: null,
+          pro_type: "bug",
+          status: "进行中",
+        },
+      ],
+      total: 1,
+      page: 1,
+      page_size: 100,
+    });
+    renderPanel(<SessionListPanel scope={WORKSPACE_SCOPE} />);
+
+    // 选项查询参：口径同 @ 联想（任务 personal 端点 status=进行中；问题
+    // duty_user_id=me + status=进行中）。
+    await waitFor(() => {
+      expect(mocks.listPersonalPlanTasks).toHaveBeenCalledWith({
+        status: ["进行中"],
+        page: 1,
+        page_size: 100,
+      });
+      expect(mocks.listProblems).toHaveBeenCalledWith({
+        duty_user_id: "u-1",
+        status: ["进行中"],
+        page: 1,
+        page_size: 100,
+      });
+    });
+
+    // 分组追加在变更/快速修复之后；label = 标题（+项目名括注）。
+    openAntdSelect("slp-assoc");
+    await waitFor(() => {
+      const groupTexts = [...document.querySelectorAll(".ant-select-item-group")].map(
+        (el) => el.textContent,
+      );
+      expect(groupTexts).toEqual([
+        "变更",
+        "快速修复",
+        "PPM 任务（进行中）",
+        "PPM 问题（进行中）",
+      ]);
+    });
+    const optionTexts = [
+      ...document.querySelectorAll(".ant-select-item-option-content"),
+    ].map((el) => el.textContent);
+    expect(optionTexts).toContain("排行榜接口性能优化（SillyHub 平台）");
+    expect(optionTexts).toContain("看板拖拽后排序偶发丢失");
+
+    // 选中 PPM 任务 → value 三段编码 ppm:plan_task:<uuid> 解析为成对过滤参透传。
+    await chooseAntdOptionByText("slp-assoc", "排行榜接口性能优化（SillyHub 平台）");
+    await waitFor(() => {
+      expect(lastCallArgs()).toEqual({
+        limit: 500,
+        workspace_id: "ws-1",
+        ppm_item_kind: "plan_task",
+        ppm_item_id: "pt-1",
+      });
+    });
+
+    // 换选 PPM 问题 → kind=problem 成对透传（单值切换不叠加）。
+    await chooseAntdOptionByText("slp-assoc", "看板拖拽后排序偶发丢失");
+    await waitFor(() => {
+      expect(lastCallArgs()).toEqual({
+        limit: 500,
+        workspace_id: "ws-1",
+        ppm_item_kind: "problem",
+        ppm_item_id: "pb-1",
+      });
+    });
+
+    // 清除恢复无关联过滤参。
+    const assocRoot = (document.getElementById("slp-assoc") as HTMLElement)
+      .closest(".ant-select");
+    if (!assocRoot) throw new Error(".ant-select for #slp-assoc not found");
+    const clearBtn = assocRoot.querySelector(".ant-select-clear");
+    if (!clearBtn) throw new Error("assoc clear button not found");
+    fireEvent.mouseDown(clearBtn);
+    fireEvent.click(clearBtn);
+    await waitFor(() => {
+      expect(lastCallArgs()).toEqual({ limit: 500, workspace_id: "ws-1" });
+    });
+  });
+
+  it("task-06：当前用户未就绪（user=null）→ 问题选项查询零发起（防全量清单），任务照常", async () => {
+    assocFixtures();
+    renderPanel(<SessionListPanel scope={WORKSPACE_SCOPE} />);
+    await waitFor(() => expect(mocks.listPersonalPlanTasks).toHaveBeenCalled());
+    expect(mocks.listProblems).not.toHaveBeenCalled();
   });
 });
 
