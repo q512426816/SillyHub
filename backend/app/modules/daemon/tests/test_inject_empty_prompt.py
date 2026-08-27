@@ -60,7 +60,7 @@ def fresh_ws_hub(monkeypatch: pytest.MonkeyPatch) -> DaemonWsHub:
 async def _connect_mock(hub: DaemonWsHub, runtime_id: uuid.UUID) -> AsyncMock:
     """挂一个记录 sent_messages 的 mock WS 到 hub（create 需在线 runtime）。"""
     ws = AsyncMock()
-    ws.sent_messages: list[dict[str, Any]] = []
+    ws.sent_messages = []
 
     async def _send_json(message: dict[str, Any]) -> None:
         ws.sent_messages.append(message)

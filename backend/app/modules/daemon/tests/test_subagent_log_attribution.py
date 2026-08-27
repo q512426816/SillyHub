@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import secrets
 import uuid
+from collections.abc import Generator
 from datetime import UTC, datetime
 
 import pytest
@@ -44,7 +45,7 @@ _DISPATCH_TUID = "toolu_dispatch_01"
 
 
 @pytest.fixture(autouse=True)
-def _clean_tool_use_run_lru() -> None:
+def _clean_tool_use_run_lru() -> Generator[None, None, None]:
     """每测试前后清进程级 LRU（service.clear() 即为此提供的测试隔离钩子）。
 
     LRU 是模块级单例（跨 submit_messages 调用共享），不清态会让上一个测试
