@@ -342,3 +342,8 @@
 根因：窗口发布丢失拼出非前缀胶水段致前缀收编失效，且 partial 与完整行并发提交竞态致 partial 滞留数据库
 方案：backend 完整行落库点合成 override 令箭（标记行堵竞态加重放补投，信封实时治愈胶水段），前端 override 去重键含 segmentId 保刷新路径多标记生效
 结果：backend override 19 与 wave5 39 绿 ruff 0，daemon 域 150 绿（1 存量无关红），前端装配器 67 perf 7 dialog 54 绿 tsc 0，文档同步 daemon.md 与 frontend_components.md，未部署待重建
+
+## ql-20260827-007-67b4 | 2026-08-27 13:21:26 | 已完成的 quick 任务在变更页仍显示进行中（推送失败时 PG 陈旧快照压过文件终态）
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）

@@ -64,7 +64,8 @@ async def _add_pushed(
 
 @pytest.mark.asyncio
 async def test_merge_pg_wins_on_same_ql_id(db_session: AsyncSession, tmp_path: Path) -> None:
-    """双源同 ql_id 取 PG（D-003：推送时点新于文件同步）。"""
+    """双源同 ql_id 取 PG（D-003：推送时点新于文件同步）。quick-88472229 修订：
+    仅在状态成熟度不落后时（本例 PG completed > 文件 in_progress）。"""
     ws_id, ws = await _setup(db_session, tmp_path)
     _write_file(
         tmp_path,
@@ -82,6 +83,58 @@ async def test_merge_pg_wins_on_same_ql_id(db_session: AsyncSession, tmp_path: P
     assert result.items[0].title == "推送版标题"
     assert result.items[0].status == "completed"
     assert result.items[0].source == "pushed"
+
+
+@pytest.mark.asyncio
+async def test_merge_file_terminal_wins_over_stale_pushed(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """quick-88472229（用户实证 ql-20260827-005-a660）：quick 最终 --done 推送因
+    spec-sync abort 丢失，PG 只留任务开始时快照（进行中 + 占位长标题），QUICKLOG
+    文件已写终态（已完成 + 语义标题）——状态成熟度选优，文件终态胜陈旧 PG。"""
+    ws_id, ws = await _setup(db_session, tmp_path)
+    _write_file(
+        tmp_path,
+        "QUICKLOG-WhaleFall.md",
+        f"## ql-20260817-004-dddd | {_ts(2)} | 语义短标题（--done 回填）\n状态：已完成\n",
+    )
+    await _add_pushed(
+        db_session,
+        ws_id,
+        "ql-20260817-004-dddd",
+        {
+            "title": "修复 /sessions 页面高度溢出：门户容器 calc(100vh-56px) 与 TopBar h-16(64px) 不符多出 8px 致整页滚动条",
+            "status": "in_progress",
+            "timestamp": _ts(2),
+        },
+    )
+    result = await QuicklogQueryService(db_session).list_entries(ws, now=_now())
+    assert result.total == 1
+    assert result.items[0].source == "file"
+    assert result.items[0].status == "completed"
+    assert result.items[0].title == "语义短标题（--done 回填）"
+
+
+@pytest.mark.asyncio
+async def test_merge_same_status_pg_wins(db_session: AsyncSession, tmp_path: Path) -> None:
+    """quick-88472229：状态成熟度相同（同为进行中）保持 PG 优先（D-003 原语义，
+    推送 body 富度/即时性胜文件解析）。"""
+    ws_id, ws = await _setup(db_session, tmp_path)
+    _write_file(
+        tmp_path,
+        "QUICKLOG-qinyi.md",
+        f"## ql-20260817-005-eeee | {_ts(2)} | 文件版标题\n状态：进行中\n",
+    )
+    await _add_pushed(
+        db_session,
+        ws_id,
+        "ql-20260817-005-eeee",
+        {"title": "推送版标题", "status": "in_progress", "timestamp": _ts(2)},
+    )
+    result = await QuicklogQueryService(db_session).list_entries(ws, now=_now())
+    assert result.total == 1
+    assert result.items[0].source == "pushed"
+    assert result.items[0].title == "推送版标题"
 
 
 @pytest.mark.asyncio
