@@ -17653,6 +17653,10 @@ export interface components {
             /** Attachment Ids */
             attachment_ids?: string[];
             page_context?: components["schemas"]["PageContextCreateBlock"] | null;
+            /** Bind Change Key */
+            bind_change_key?: string | null;
+            /** Bind Quick Id */
+            bind_quick_id?: string | null;
         };
         /**
          * SessionInjectResponse

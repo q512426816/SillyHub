@@ -78,4 +78,13 @@ export const queryKeys = {
     all: ["agentLogs"] as const,
     list: (sessionId?: string) => ["agentLogs", "list", sessionId ?? null] as const,
   },
+  // 2026-08-26-session-input-mention task-04：会话输入联想 @ 数据源缓存键。
+  // 变更（location=active）与快速修复两路独立查询按 workspaceId 分桶；
+  // wid 归一 null（workspaceId 为空时查询禁用但 key 稳定，不产生分叉键）。
+  // / 技能源复用 customSkills.manifest 既有键，不在此重复登记。
+  mentionSources: {
+    all: ["mentionSources"] as const,
+    changes: (wid: string | null) => ["mentionSources", "changes", wid] as const,
+    quicklogs: (wid: string | null) => ["mentionSources", "quicklogs", wid] as const,
+  },
 } as const;

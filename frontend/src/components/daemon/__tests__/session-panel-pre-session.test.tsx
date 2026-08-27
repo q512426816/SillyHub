@@ -38,10 +38,24 @@ import { render, screen, fireEvent, waitFor, act, within } from "@testing-librar
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { SessionPanel, type SessionPreContext } from "../session-panel";
+import { useMentionSources } from "@/lib/session-mention-sources";
 import type {
   DaemonMachineRead,
   DaemonRuntimeRead,
 } from "@/lib/daemon";
+import type { ChangeSummary } from "@/lib/changes";
+import type { QuicklogEntryListItem } from "@/lib/quicklog";
+
+// task-05（2026-08-26-session-input-mention / FR-05 / FR-06）：@ 联想数据源
+// hook mock——SessionInputBar 的数据桥在 textarea 首次聚焦才挂载（组件内注释），
+// 既有用例 fireEvent.change 不聚焦故零影响；发送组装用例聚焦后消费本 mock
+// 快照（真实 hook 走 react-query，mock 掉避免打真网络，先例
+// session-input-bar-mention.test.tsx）。
+vi.mock("@/lib/session-mention-sources", () => ({
+  useMentionSources: vi.fn(),
+}));
+
+const mentionSourcesMock = vi.mocked(useMentionSources);
 
 // MarkdownText 用 next/dynamic + ssr:false，jsdom 同步 render 处于 loading(null)——
 // mock 成纯文本渲染（同 session-panel-dialog.test.tsx）。
@@ -249,6 +263,37 @@ function makeQuicklogDetail(
   };
 }
 
+/* ----- task-05（FR-05/FR-06）：@ 联想数据源 fixture（形态对齐 task-03
+   session-input-bar-mention.test.tsx 的 ChangeSummary / QuicklogEntryListItem） ----- */
+
+function makeMentionChange(): ChangeSummary {
+  return {
+    id: "chg-mention-1",
+    change_key: "2026-08-26-mention-demo",
+    title: "联想演示变更",
+    status: "active",
+    location: "worktree",
+    change_type: null,
+    affected_components: [],
+    owner_id: null,
+    updated_at: "2026-08-26T00:00:00Z",
+  };
+}
+
+function makeMentionQuick(): QuicklogEntryListItem {
+  return {
+    ql_id: "ql-20260826-099",
+    title: "联想演示修复",
+    status: "completed",
+    placeholder: false,
+    author_raw: "qinyi",
+    linked_changes: [],
+    files: [],
+    affected_modules: [],
+    source: "file",
+  };
+}
+
 function setupPre(
   overrides: {
     sessionId?: string | null;
@@ -308,6 +353,14 @@ function setupPre(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // task-05：联想数据源默认快照（变更 + 快速修复各一条，形态对齐
+  // ChangeSummary / QuicklogEntryListItem；用例按需覆盖）。
+  mentionSourcesMock.mockReturnValue({
+    skills: [],
+    changes: [makeMentionChange()],
+    quicklogs: [makeMentionQuick()],
+    atEnabled: true,
+  });
 });
 
 /* ───────── 1. D-101 同构渲染 + D-104 上下文行只读 ───────── */
@@ -326,11 +379,12 @@ describe("SessionPanel 预会话态渲染（D-101 同构空态）", () => {
 
     // 时间线容器（与 TurnTimeline 同容器语义）+ 空态文案。
     expect(screen.getByTestId("turn-timeline-scroll")).toBeInTheDocument();
+    // 空时间线提示文案（面板主体，非 placeholder——不带联想提示）。
     expect(screen.getByText(/发送第一句话开始对话/)).toBeInTheDocument();
 
     // 输入区：完整输入可用（机器在线 + preContext 就位）。
     const input = screen.getByPlaceholderText(
-      /发送第一句话开始对话/,
+      /发送第一句话开始对话.*\/ 唤起技能 · @ 关联变更/,
     ) as HTMLTextAreaElement;
     expect(input.disabled).toBe(false);
   });
@@ -417,7 +471,7 @@ describe("SessionPanel 预会话首句创建（D-102）", () => {
     setupPre({ onPreSessionCreated });
 
     const input = screen.getByPlaceholderText(
-      /发送第一句话开始对话/,
+      /发送第一句话开始对话.*\/ 唤起技能 · @ 关联变更/,
     ) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "帮我核对文档" } });
     fireEvent.click(screen.getByTitle("发送"));
@@ -457,7 +511,7 @@ describe("SessionPanel 预会话首句创建（D-102）", () => {
     });
 
     const input = screen.getByPlaceholderText(
-      /发送第一句话开始对话/,
+      /发送第一句话开始对话.*\/ 唤起技能 · @ 关联变更/,
     ) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "变更入口首句" } });
     fireEvent.click(screen.getByTitle("发送"));
@@ -501,7 +555,7 @@ describe("SessionPanel 预会话首句创建（D-102）", () => {
     });
 
     const input = screen.getByPlaceholderText(
-      /发送第一句话开始对话/,
+      /发送第一句话开始对话.*\/ 唤起技能 · @ 关联变更/,
     ) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "快速修复入口首句" } });
     fireEvent.click(screen.getByTitle("发送"));
@@ -538,7 +592,7 @@ describe("SessionPanel 预会话首句创建（D-102）", () => {
     const { rerenderWith } = setupPre();
 
     const input = screen.getByPlaceholderText(
-      /发送第一句话开始对话/,
+      /发送第一句话开始对话.*\/ 唤起技能 · @ 关联变更/,
     ) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "首句" } });
     fireEvent.click(screen.getByTitle("发送"));
@@ -584,7 +638,7 @@ describe("SessionPanel 预会话首句创建失败（R-02）", () => {
     setupPre();
 
     const input = screen.getByPlaceholderText(
-      /发送第一句话开始对话/,
+      /发送第一句话开始对话.*\/ 唤起技能 · @ 关联变更/,
     ) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "会失败的首句" } });
     fireEvent.click(screen.getByTitle("发送"));
@@ -611,7 +665,7 @@ describe("SessionPanel 预会话首句创建失败（R-02）", () => {
   it("空文本不发首句（后端 prompt 首句约束）", async () => {
     setupPre();
     const input = screen.getByPlaceholderText(
-      /发送第一句话开始对话/,
+      /发送第一句话开始对话.*\/ 唤起技能 · @ 关联变更/,
     ) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "   " } });
     // task-14（FR-08）：纯空文本发送按钮禁点，title/aria 提示与后端 422 文案一致
@@ -686,7 +740,7 @@ describe("SessionPanel 预会话配置条与团队行（ql-20260823-008 完全�
 
     // 首句发送 → createSession 带暂存供应商
     const input = screen.getByPlaceholderText(
-      /发送第一句话开始对话/,
+      /发送第一句话开始对话.*\/ 唤起技能 · @ 关联变更/,
     ) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "带供应商开聊" } });
     fireEvent.click(screen.getByTitle("发送"));
@@ -711,7 +765,7 @@ describe("SessionPanel 预会话配置条与团队行（ql-20260823-008 完全�
     setupPre();
 
     const input = screen.getByPlaceholderText(
-      /发送第一句话开始对话/,
+      /发送第一句话开始对话.*\/ 唤起技能 · @ 关联变更/,
     ) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "直接开聊" } });
     fireEvent.click(screen.getByTitle("发送"));
@@ -801,7 +855,7 @@ describe("SessionPanel 预会话弹层确认 → 暂存 + 首句携带 team_miss
       ).not.toBeInTheDocument(),
     );
     const input = screen.getByPlaceholderText(
-      /发送第一句话开始对话/,
+      /发送第一句话开始对话.*\/ 唤起技能 · @ 关联变更/,
     ) as HTMLTextAreaElement;
     await waitFor(() => expect(input.value).toBe(`/team ${objective}`));
     return input;
@@ -888,7 +942,7 @@ describe("SessionPanel 预会话弹层确认 → 暂存 + 首句携带 team_miss
       screen.getByRole("button", { name: /派团队（随首句创建生效）/ }),
     );
     const input = screen.getByPlaceholderText(
-      /发送第一句话开始对话/,
+      /发送第一句话开始对话.*\/ 唤起技能 · @ 关联变更/,
     ) as HTMLTextAreaElement;
     await waitFor(() => expect(input.value).toBe("/team 重构登录页"));
 
@@ -982,7 +1036,7 @@ describe("SessionPanel 预会话弹层确认 → 暂存 + 首句携带 team_miss
     setupPre();
 
     const input = screen.getByPlaceholderText(
-      /发送第一句话开始对话/,
+      /发送第一句话开始对话.*\/ 唤起技能 · @ 关联变更/,
     ) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "普通首句" } });
     fireEvent.click(screen.getByTitle("发送"));
@@ -1042,5 +1096,150 @@ describe("SessionPanel 预会话快速修复上下文行（task-11 / FR-06）", 
     const ctx = screen.getByTestId("pre-session-context");
     expect(ctx.textContent).not.toContain("修复登录跳转");
     expect(quicklogApi.getQuicklogDetail).not.toHaveBeenCalled();
+  });
+});
+
+/* ───────── task-05：@ 联想发送组装（FR-05 create / FR-06 inject 绑定） ───────── */
+
+describe("SessionPanel @ 联想发送组装（task-05）", () => {
+  /** 聚焦并键入触发串（光标随文本末尾），返回输入框元素。 */
+  const focusAndType = (input: HTMLTextAreaElement, text: string) => {
+    fireEvent.focus(input);
+    fireEvent.change(input, {
+      target: { value: text, selectionStart: text.length, selectionEnd: text.length },
+    });
+  };
+
+  it("预会话 @ 变更选中 → 首句 createSession 带 change_id（@ 选中优先于入口 changeId），不带 quicklog_id", async () => {
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-m1",
+      run_id: "run-m1",
+      lease_id: "l",
+      status: "active",
+      stream_url: "",
+    });
+    setupPre({
+      preContext: { workspaceId: "ws-1", changeId: "chg-entry", runtimeId: "rt-claude" },
+    });
+
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    focusAndType(input, "@2026-08-26-mention-demo");
+    // 浮层命中唯一变更条目；Enter 选中回填（task-03 契约，回填名 = change_key）。
+    expect(screen.getByTestId("session-mention-popover")).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input.value).toBe("@2026-08-26-mention-demo ");
+    fireEvent.change(input, { target: { value: `${input.value}推进这个变更` } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
+    expect(sessionApi.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspace_id: "ws-1",
+        // @ 选中的结构化 id（change.id）覆盖入口锁定值（用户显式最新选择优先）。
+        change_id: "chg-mention-1",
+      }),
+    );
+    // 无快速修复选中 → quicklog_id 缺省不进请求体。
+    const payload = sessionApi.createSession.mock.calls[0]![0] as Record<
+      string,
+      unknown
+    >;
+    expect(payload.quicklog_id).toBeUndefined();
+  });
+
+  it("预会话 @ 快速修复选中 → 首句 createSession 带 quicklog_id；成功后输入与选中一并清空", async () => {
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-m2",
+      run_id: "run-m2",
+      lease_id: "l",
+      status: "active",
+      stream_url: "",
+    });
+    setupPre();
+
+    const input = screen.getByPlaceholderText(
+      /发送第一句话开始对话/,
+    ) as HTMLTextAreaElement;
+    focusAndType(input, "@ql-20260826-099");
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input.value).toBe("@ql-20260826-099 ");
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
+    expect(sessionApi.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ quicklog_id: "ql-20260826-099" }),
+    );
+    // 发送成功 → 输入清空（既有断言）且 @ 选中随 clearAttachments 同时机收敛。
+    await waitFor(() => expect(input.value).toBe(""));
+  });
+
+  it("真会话空闲追问 @ 变更选中 → injectSession 带 bind_change_key；无选中再发 options 收敛为空对象（缺省零回归）", async () => {
+    sessionApi.injectSession.mockResolvedValue({
+      session_id: "sess-pre-1",
+      run_id: "run-inj-1",
+      status: "active",
+    });
+    setupPre({ sessionId: "sess-pre-1" });
+
+    const input = (await screen.findByPlaceholderText(
+      /继续追问/,
+    )) as HTMLTextAreaElement;
+    focusAndType(input, "@2026-08-26-mention-demo");
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: `${input.value}推进这个变更` } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
+    // 空闲路径（sendFromQueue）：options 恰为唯一绑定字段（无附件/无页面上下文）。
+    expect(sessionApi.injectSession).toHaveBeenCalledWith(
+      "sess-pre-1",
+      "@2026-08-26-mention-demo 推进这个变更",
+      { bind_change_key: "2026-08-26-mention-demo" },
+    );
+
+    // 发送成功清空选中后普通追问：第三参展开为空对象（与缺省形态逐字段一致）。
+    fireEvent.change(input, { target: { value: "普通追问" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(2));
+    expect(sessionApi.injectSession).toHaveBeenNthCalledWith(
+      2,
+      "sess-pre-1",
+      "普通追问",
+      {},
+    );
+  });
+
+  it("真会话忙轮 @ 快速修复选中 → injectSession 带 bind_quick_id（排队路径绑定不丢，R-10）", async () => {
+    sessionApi.injectSession.mockResolvedValue({
+      session_id: "sess-pre-1",
+      run_id: null,
+      status: "queued",
+      queued: true,
+    });
+    // 先空态挂载再覆盖 detail 并切真会话（setupPre 渲染期会消费默认
+    // getAgentSession 响应——忙轮覆盖须在 rerender 前就位）。
+    const { rerenderWith } = setupPre();
+    sessionApi.getAgentSession.mockResolvedValue({
+      ...makeDetail(),
+      current_run_id: "run-busy",
+    });
+    rerenderWith("sess-pre-1");
+
+    // detail.current_run_id 回填 currentRunId → running（忙轮）placeholder。
+    const input = (await screen.findByPlaceholderText(
+      /消息将排队/,
+    )) as HTMLTextAreaElement;
+    focusAndType(input, "@ql-20260826-099");
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.change(input, { target: { value: `${input.value}跟进` } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
+    // 忙轮路径（sendToServerQueue）：绑定字段直达后端排队请求。
+    expect(sessionApi.injectSession).toHaveBeenCalledWith("sess-pre-1", "@ql-20260826-099 跟进", {
+      bind_quick_id: "ql-20260826-099",
+    });
   });
 });

@@ -281,7 +281,7 @@ describe("SessionPanel /team 指令拦截（dialog 模式）", () => {
       stream_url: "",
     });
     setupDialog({ sessionId: null });
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
@@ -328,7 +328,7 @@ describe("SessionPanel /team 指令拦截（dialog 模式）", () => {
       providers: ["codex"],
       defaultProvider: "codex",
     });
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
@@ -552,6 +552,6 @@ describe("SessionPanel task-14 分身会话浮层（FR-08 / design §5.E）", ()
     );
     // 主控面板未卸载：团队列表（重展开下拉核对）+ 主输入仍在（流与输入状态不丢）。
     await openActivityCatalog();
-    expect(screen.getByPlaceholderText(/继续追问/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/)).toBeInTheDocument();
   });
 });

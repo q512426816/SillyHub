@@ -394,6 +394,177 @@ class TestSessionEndpointsErrors:
         assert r2.json()["current_run_id"] is None
 
 
+# ── inject 绑定字段（task-07 / 2026-08-26-session-input-mention）──────────────
+
+
+class TestInjectBindFields:
+    """task-07（FR-06 / D-003~D-005）：inject 绑定字段端点契约。
+
+    - 携带 bind 字段 → 三层（router → Facade → SessionService）透传真实落库
+      （漏一层即 500 / 不落 link，此组用例守护）；
+    - 字段校验 422：bind_quick_id 超 128 / 非 ql- 前缀、bind_change_key 超 200；
+    - bind 字段不豁免空 prompt（绑定不是配置切换）。
+    """
+
+    async def _seed_ws_session_first_turn_done(
+        self,
+        db_session: AsyncSession,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        fresh_ws_hub: DaemonWsHub,
+    ) -> tuple[dict[str, str], uuid.UUID]:
+        """建挂工作区的会话并完结首 turn，返回 (create body, workspace_id)。"""
+        from app.modules.agent.model import AgentRun
+        from app.modules.auth.model import User
+        from app.modules.workspace.model import Workspace
+
+        admin = (
+            (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+            .scalars()
+            .first()
+        )
+        assert admin is not None
+        await _create_runtime(db_session, admin.id)
+        await _connect_mock(fresh_ws_hub, (await _first_runtime(db_session, admin.id)).id)
+
+        ws = Workspace(
+            id=uuid.uuid4(),
+            name="inject-bind-ws",
+            slug=f"inject-bind-{uuid.uuid4().hex[:8]}",
+            root_path="/tmp/inject-bind",
+            status="active",
+        )
+        db_session.add(ws)
+        await db_session.commit()
+        await db_session.refresh(ws)
+
+        resp = await client.post(
+            "/api/daemon/sessions",
+            json={"provider": "claude", "prompt": "first", "workspace_id": str(ws.id)},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        created = resp.json()
+        # 完结首 turn，让后续 inject 走直发路径（非排队）
+        run = await db_session.get(AgentRun, uuid.UUID(created["run_id"]))
+        assert run is not None
+        run.status = "completed"
+        run.finished_at = datetime.now(UTC)
+        await db_session.commit()
+        return created, ws.id
+
+    async def test_inject_bind_fields_bind_links(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+        fresh_ws_hub: DaemonWsHub,
+    ) -> None:
+        """带 bind_change_key + bind_quick_id 的 inject → 201 且两类 link 行落库。"""
+        from app.modules.change.model import ChangeSessionLink, QuicklogSessionLink
+
+        created, ws_id = await self._seed_ws_session_first_turn_done(
+            db_session, client, auth_headers, fresh_ws_hub
+        )
+        sid = uuid.UUID(created["session_id"])
+        ql_id = "ql-20260827-010-http"
+
+        resp = await client.post(
+            f"/api/daemon/sessions/{sid}/inject",
+            json={
+                "prompt": "关联变更与快速修复",
+                "bind_change_key": "2026-08-27-http-bind",
+                "bind_quick_id": ql_id,
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        body = resp.json()
+        assert body["queued"] is False
+        assert body["run_id"] is not None
+
+        c_link = (
+            (
+                await db_session.execute(
+                    select(ChangeSessionLink).where(ChangeSessionLink.session_id == sid)
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert c_link is not None
+        q_link = (
+            (
+                await db_session.execute(
+                    select(QuicklogSessionLink).where(
+                        QuicklogSessionLink.workspace_id == ws_id,
+                        QuicklogSessionLink.ql_id == ql_id,
+                        QuicklogSessionLink.session_id == sid,
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert q_link is not None
+
+    async def test_inject_bind_quick_id_too_long_422(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        """bind_quick_id 超 128（对齐 create 通道 quicklog_id 契约）→ 422。"""
+        resp = await client.post(
+            f"/api/daemon/sessions/{uuid.uuid4()}/inject",
+            json={"prompt": "hi", "bind_quick_id": f"ql-{'a' * 126}"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 422
+
+    async def test_inject_bind_quick_id_bad_prefix_422(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        """bind_quick_id 非 ql- 前缀（pattern ^ql-[\\w-]+$）→ 422。"""
+        resp = await client.post(
+            f"/api/daemon/sessions/{uuid.uuid4()}/inject",
+            json={"prompt": "hi", "bind_quick_id": "quick-20260827-001"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 422
+
+    async def test_inject_bind_change_key_too_long_422(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        """bind_change_key 超 200 → 422。"""
+        resp = await client.post(
+            f"/api/daemon/sessions/{uuid.uuid4()}/inject",
+            json={"prompt": "hi", "bind_change_key": "x" * 201},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 422
+
+    async def test_inject_bind_fields_do_not_exempt_empty_prompt(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+    ) -> None:
+        """bind 字段不纳入 _require_prompt_or_switch：空 prompt 仍 422。"""
+        resp = await client.post(
+            f"/api/daemon/sessions/{uuid.uuid4()}/inject",
+            json={
+                "prompt": " ",
+                "bind_change_key": "2026-08-27-emptyprompt",
+                "bind_quick_id": "ql-20260827-011-emptyprompt",
+            },
+            headers=auth_headers,
+        )
+        assert resp.status_code == 422
+
+
 # ── helper ───────────────────────────────────────────────────────────────────
 
 

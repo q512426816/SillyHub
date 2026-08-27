@@ -447,7 +447,11 @@ def test_parse_skill_frontmatter_no_fence_returns_empty() -> None:
 
 
 def test_summarize_skills_aggregates_by_top_dir() -> None:
-    """按顶层目录聚合：name=目录名、description 来自 SKILL.md、file_count 计数。"""
+    """按顶层目录聚合：name=目录名、description 来自 SKILL.md、file_count 计数。
+
+    task-06（2026-08-26-session-input-mention）：每项新增 ``invoke_name`` 键——
+    透传 SKILL.md frontmatter ``name`` 原值（冒号名原样保留），缺失为 None。
+    """
     from app.modules.agent.skills_bundle_service import _summarize_skills
 
     files = [
@@ -456,9 +460,44 @@ def test_summarize_skills_aggregates_by_top_dir() -> None:
         (Path("sillyspec-b/SKILL.md"), b"---\ndescription: B\n---\n"),
     ]
     assert _summarize_skills(files) == [
-        {"name": "sillyspec-a", "description": "A skill", "file_count": 2},
-        {"name": "sillyspec-b", "description": "B", "file_count": 1},
+        {
+            "name": "sillyspec-a",
+            "description": "A skill",
+            "invoke_name": "a",
+            "file_count": 2,
+        },
+        {
+            "name": "sillyspec-b",
+            "description": "B",
+            "invoke_name": None,
+            "file_count": 1,
+        },
     ]
+
+
+def test_summarize_skills_invoke_name_passthrough() -> None:
+    """task-06（FR-07/D-002）：invoke_name 透传 frontmatter name 原值。
+
+    * 有 frontmatter name 的技能（含冒号名）→ 原样保留（目录名兜底由前端完成）；
+    * frontmatter 缺 name、无 SKILL.md → None（不是目录名，也不是空串）。
+    """
+    from app.modules.agent.skills_bundle_service import _summarize_skills
+
+    files = [
+        # 冒号名原样透传（与目录名 sillyspec-archive 不同）
+        (
+            Path("sillyspec-archive/SKILL.md"),
+            b"---\nname: sillyspec:archive\ndescription: archive\n---\n\nbody",
+        ),
+        # 有 frontmatter 但缺 name → None
+        (Path("sillyspec-noname/SKILL.md"), b"---\ndescription: no name\n---\n"),
+        # 完全没有 SKILL.md → None
+        (Path("sillyspec-nomd/helper.ts"), b"helper"),
+    ]
+    summaries = {s["name"]: s for s in _summarize_skills(files)}
+    assert summaries["sillyspec-archive"]["invoke_name"] == "sillyspec:archive"
+    assert summaries["sillyspec-noname"]["invoke_name"] is None
+    assert summaries["sillyspec-nomd"]["invoke_name"] is None
 
 
 async def test_manifest_includes_skill_descriptions(
@@ -466,7 +505,11 @@ async def test_manifest_includes_skill_descriptions(
     auth_headers: dict[str, str],
     skills_dir_with_descriptions: Path,
 ) -> None:
-    """manifest.skills 含每个 skill 的 description（有 frontmatter 提取，无则空兜底）。"""
+    """manifest.skills 含每个 skill 的 description 与 invoke_name（端点透传可见）。
+
+    有 frontmatter 提取（description 原值 / invoke_name 冒号名原样），无则兜底
+    （description 空串 / invoke_name None）。
+    """
     resp = await client.get("/api/daemon/skills/latest/manifest", headers=auth_headers)
     assert resp.status_code == 200
 
@@ -478,11 +521,19 @@ async def test_manifest_includes_skill_descriptions(
     archive = skills["sillyspec-archive"]
     assert archive["description"] == "用于归档已验证完成的变更"
     assert archive["file_count"] == 2
+    # task-06（FR-07）：invoke_name 透传 frontmatter name 冒号名原值
+    assert archive["invoke_name"] == "sillyspec:archive"
 
-    # 无 frontmatter 的技能：description 空串兜底，不报错
+    # 无 frontmatter 的技能：description 空串兜底，invoke_name None，不报错
     plain = skills["sillyspec-plain"]
     assert plain["description"] == ""
+    assert plain["invoke_name"] is None
     assert plain["file_count"] == 1
+
+    # 契约：skills 数组每项 invoke_name 取值为 str 或 None
+    assert all(
+        isinstance(s["invoke_name"], str) or s["invoke_name"] is None for s in payload["skills"]
+    )
 
 
 # ---------------------------------------------------------------------------

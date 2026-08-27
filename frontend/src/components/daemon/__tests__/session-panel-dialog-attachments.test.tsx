@@ -258,7 +258,7 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
   /** 首发建会话并推进到指定态："active-idle"（首轮完成）或 "running"。 */
   async function reachState(target: "active-idle" | "running") {
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "first" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -292,7 +292,7 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
     await reachState("active-idle");
     const att = makeAtt("att-1", "shot.png", "image");
 
-    const input = screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     expect(pasteFile(input, att)).toBe(false);
     expect(uploadSessionAttachment).toHaveBeenCalledWith(
       expect.any(File),
@@ -375,7 +375,7 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
     await reachState("active-idle");
     const att = makeAtt("att-3", "shot.png", "image");
 
-    const input = screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     pasteFile(input, att);
     await screen.findByTitle("shot.png · 2KB");
 

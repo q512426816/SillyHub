@@ -42,6 +42,12 @@
  *     applyEnvelopeToTurn / deriveTurnTerminalStatus 等）两模式共用
  *     （diff-analysis §4.3 归属：〔内部〕模块级函数；upsertTurn 以 PAGE 版为
  *     基底保留 healToRunning，R1——对 dialog attach 竞态同样成立）。
+ *   - task-05（2026-08-26-session-input-mention / FR-05 / FR-06 / FR-08）：三个
+ *     SessionInputBar 渲染点接 onMentionsChange + workspaceId（@ 联想数据源），
+ *     可输入态 placeholder 追加 MENTION_PLACEHOLDER_HINT；page 与 dialog 各自
+ *     持有 pendingMentions，七个发送组装点位随请求上送（预会话/首句 create 带
+ *     change_id/quicklog_id，四个 inject 点位带 bind_change_key/bind_quick_id，
+ *     page 重发不带 R-7）；发送成功清空、草稿不持久化（design §3.3/§3.4）。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -89,7 +95,10 @@ import {
   parseAttachmentMarkers,
   runTerminalTurnStatus,
 } from "@/components/daemon/runtime-session-helpers";
-import { SessionInputBar } from "@/components/daemon/session-input-bar";
+import {
+  SessionInputBar,
+  type SessionInputMentions,
+} from "@/components/daemon/session-input-bar";
 import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
 import { useMessageQueue } from "@/hooks/use-message-queue";
 import { logsToTurns } from "@/components/daemon/runtime-session-helpers";
@@ -371,6 +380,31 @@ const PANEL_BODY_WRAP_CLS_MOBILE =
   "[&_[data-testid='turn-timeline-scroll']]:overflow-x-hidden";
 
 const MAX_PROMPT_LEN = 8000;
+
+/* ── task-05（2026-08-26-session-input-mention）：@ 联想接线共享常量与组装 ──── */
+
+/**
+ * FR-08：输入框联想能力提示——追加在三个渲染点「可正常输入」态 placeholder
+ * 尾部（与 Enter/Shift+Enter 按键提示同括号同「 · 」分隔）；禁用/排队/恢复等
+ * 状态文案不追加（彼时提示语义已让位于状态说明）。
+ */
+const MENTION_PLACEHOLDER_HINT = "/ 唤起技能 · @ 关联变更";
+
+/**
+ * task-05（FR-06 / D-003）：@ 联想选中 → inject 绑定字段条件展开（有值才带，
+ * 缺省展开为空对象不进请求体，保后端零行为差异；bind_change_key = 变更自然键、
+ * bind_quick_id = 快速修复短码，后端 binder 幂等写 M:N link，不注入 prompt）。
+ * page 与 dialog 的全部四个 inject 发送点位共用本组装。
+ */
+function mentionBindOptions(m: SessionInputMentions): {
+  bind_change_key?: string;
+  bind_quick_id?: string;
+} {
+  return {
+    ...(m.change ? { bind_change_key: m.change.change_key } : {}),
+    ...(m.quick ? { bind_quick_id: m.quick.ql_id } : {}),
+  };
+}
 
 /**
  * task-08（2026-08-21-session-reopen-resume / FR-09）：重新开启 409 错误码 → 中文
@@ -793,15 +827,27 @@ function SessionPanelPage({
   const [pendingAttachments, setPendingAttachments] = useState<AttachmentRead[]>([]);
   const clearAttachmentsRef = useRef<(() => void) | null>(null);
   const [reopening, setReopening] = useState(false);
+  // task-05（2026-08-26-session-input-mention / FR-05 / FR-06）：@ 联想结构化
+  // 选中暂存（SessionInputBar onMentionsChange 回传，change/quick 两槽位）——
+  // 预会话随首句 createSession 上送 change_id/quicklog_id，真会话随
+  // injectSession 上送 bind_change_key/bind_quick_id；发送成功后清空（与
+  // clearAttachments 同时机），切会话（下方草稿恢复 effect）与组件 value 归空
+  //（A-1 双向复位回调）同步清零，草稿持久化不存（R-7：草稿恢复后 @ 文本仍在，
+  // 绑定需重新选择）。
+  const [pendingMentions, setPendingMentions] = useState<SessionInputMentions>({});
 
   // ── ql-20260825-011：输入框草稿持久化（刷新/切换会话不丢）──────────────────
   // 回读：挂载 + sessionId 变化（预会话态无 id 用固定键 __pre__）。
   // hydrated 门闩防「回读前先写空串」冲掉已存草稿：restore 先 setInput，rAF 后
   // 才放行持久化 effect（该 commit 内 input 仍是旧会话的值，不写新会话键）。
+  // 缺陷修复收口（A-1）：切会话时清 @ 联想选中残留——草稿换装（setInput 非
+  // 空新草稿）不触发组件归空复位，会话 A 的绑定会随会话 B 的消息错绑；
+  // R-7 语义（草稿只存文本、绑定需重选）在切会话边界同样成立。
   const draftHydratedRef = useRef(false);
   useEffect(() => {
     draftHydratedRef.current = false;
     setInput(readSessionDraft(sessionId));
+    setPendingMentions({});
     const raf = requestAnimationFrame(() => {
       draftHydratedRef.current = true;
     });
@@ -1544,6 +1590,9 @@ function SessionPanelPage({
     );
     if (attachmentIds.length > 0) clearAttachmentsRef.current?.();
     for (const id of attachmentIds) attachmentMetaRef.current.delete(id);
+    // task-05（FR-06）：发送成功清空 @ 联想选中（与 clearAttachments 同时机；
+    // 绑定已随本次请求上送，残留会错绑到下一条消息）。
+    setPendingMentions({});
   }, []);
 
   /**
@@ -1603,6 +1652,8 @@ function SessionPanelPage({
           ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
           // ql-20260825-004：每轮注入携带当前页面上下文（有值才带，零回归）。
           ...(pageContextOverride ? { page_context: pageContextOverride } : {}),
+          // task-05（FR-06 / D-003）：@ 联想绑定字段（有值才带，缺省零变化）。
+          ...mentionBindOptions(pendingMentions),
         });
         if (inflightSendRef.current?.placeholderId !== placeholderId) {
           // 发送窗口期被「打断本轮」回退：占位轮已移除、消息已回输入框。
@@ -1652,7 +1703,7 @@ function SessionPanelPage({
         }
       }
     },
-    [sessionId, pageContextOverride, qc, onSendSettled],
+    [sessionId, pageContextOverride, pendingMentions, qc, onSendSettled],
   );
 
   /**
@@ -1667,6 +1718,9 @@ function SessionPanelPage({
         const resp = await injectSession(sessionId, prompt, {
           ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
           ...(pageContextOverride ? { page_context: pageContextOverride } : {}),
+          // task-05（FR-06 / D-003）：忙轮排队路径同样带绑定字段（后端 binder
+          // 插入点在排队早退分支之前，design §4.2——漏带则该场景静默失效）。
+          ...mentionBindOptions(pendingMentions),
         });
         setErrorMsg(null);
         void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
@@ -1679,7 +1733,7 @@ function SessionPanelPage({
         setErrorMsg(apiErr instanceof ApiError ? apiErr.message : "发送失败");
       }
     },
-    [sessionId, pageContextOverride, qc, onSendSettled],
+    [sessionId, pageContextOverride, pendingMentions, qc, onSendSettled],
   );
 
   const { queue, removeEntry, retryEntry, isQueueFull } = useMessageQueue({
@@ -1770,6 +1824,11 @@ function SessionPanelPage({
       if (!preContext || preCreating) return;
       setPreCreating(true);
       setPreError(null);
+      // task-05（FR-05）：@ 联想选中与入口锁定上下文合并——同字段单值，@ 选中
+      // （用户显式最新选择，组件内「同类型后选覆盖先选」语义的延伸）优先，
+      // preContext（change/quicklog 入口 X-13 契约）兜底；缺省回落既有语义。
+      const createChangeId = pendingMentions.change?.id ?? preContext.changeId ?? null;
+      const createQuickId = pendingMentions.quick?.ql_id ?? preContext.quickId ?? null;
       try {
         const resp = await createSession({
           runtime_id: preContext.runtimeId,
@@ -1779,11 +1838,11 @@ function SessionPanelPage({
           ...(preContext.workspaceId
             ? { workspace_id: preContext.workspaceId }
             : {}),
-          ...(preContext.changeId ? { change_id: preContext.changeId } : {}),
+          ...(createChangeId ? { change_id: createChangeId } : {}),
           // task-11（2026-08-25-session-spec-binding / FR-06）：quicklog 入口
           // quickId 随首句上送 quicklog_id（对齐 change_id 展开形态；后端创建
           // 即落 quicklog_session_links 绑定，缺省不进请求体零回归）。
-          ...(preContext.quickId ? { quicklog_id: preContext.quickId } : {}),
+          ...(createQuickId ? { quicklog_id: createQuickId } : {}),
           // ql-20260823-008：预会话配置条暂存值随首句落为会话初始配置。
           ...(preProviderId ? { llm_provider_id: preProviderId } : {}),
           ...(preProfileId ? { agent_profile_id: preProfileId } : {}),
@@ -1805,6 +1864,9 @@ function SessionPanelPage({
         clearAttachmentsRef.current?.();
         // task-13：成功清空暂存（mission 已随 create 预建，再发不重复上送）。
         setPreTeamMission(null);
+        // task-05（FR-05）：成功清空 @ 联想选中（绑定已随首句上送；失败保留
+        // 可随原地重试再携带，与输入/附件 R-02 语义一致）。
+        setPendingMentions({});
         onPreSessionCreated?.(resp);
       } catch (err) {
         setPreError(err instanceof ApiError ? err.message : "创建会话失败，请重试");
@@ -1815,6 +1877,7 @@ function SessionPanelPage({
     [
       preContext,
       preCreating,
+      pendingMentions,
       onPreSessionCreated,
       preProviderId,
       preProfileId,
@@ -1862,6 +1925,9 @@ function SessionPanelPage({
     ) {
       openTeamPopover(teamCmd || null);
       setInput("");
+      // task-05：拦截清空输入的同点位清空 @ 联想选中（拦截不发送，残留选中
+      // 会错绑到下一条消息；/team 拦截语义本身零改动）。
+      setPendingMentions({});
       return;
     }
     // ql-20260826-013：/team 是平台 UI 指令，永不作为 agent 消息原文——拦截弹层
@@ -2004,6 +2070,8 @@ function SessionPanelPage({
         ],
       }));
       try {
+        // task-05（R-7 取舍）：重发不携带 mentions——@ 文本保留在重发原文中
+        // 仅作提示，绑定需用户重新选择（草稿恢复同语义，design §3.4）。
         const resp = await injectSession(sessionId, trimmed);
         const runId = resp.run_id;
         if (resp.queued || !runId) {
@@ -2115,7 +2183,7 @@ function SessionPanelPage({
       ? "请先选择机器与智能体…"
       : !preMachineOnline
         ? "机器离线，输入不可用…"
-        : "发送第一句话开始对话…（Enter 发送 · Shift+Enter 换行）";
+        : `发送第一句话开始对话…（Enter 发送 · Shift+Enter 换行 · ${MENTION_PLACEHOLDER_HINT}）`;
     // task-13（FR-05）：预会话团队门控——与真会话同构（:1771 附近
     // teamButtonDisabled/teamButtonTitle 先例）：引擎 claude（D-003 一期专属）
     // + 所选机器在线；机器列表找不到不武断判离线（preMachineOnline 语义
@@ -2274,6 +2342,10 @@ function SessionPanelPage({
             registerClearAttachments={(fn) => {
               clearAttachmentsRef.current = fn;
             }}
+            // task-05（FR-05/FR-08）：@ 联想回传与数据源工作区（预会话用锁定
+            // 上下文的工作区，无则 @ 联想禁用）。
+            onMentionsChange={setPendingMentions}
+            workspaceId={preContext?.workspaceId ?? null}
           />
           {/* ql-20260823-008：配置控件条同构挂载（provisional 暂存模式）——机器/
               智能体只读（D-104 锁定与真会话一致），供应商/档案可选暂存随首句生效。 */}
@@ -2353,11 +2425,11 @@ function SessionPanelPage({
         ? "发消息继续这个会话（将派发到绑定机器的 agent）…"
         : isQueueFull
           ? "队列已满，请等待投递或删除排队消息…"
-          : restoring
-            ? "恢复会话中，消息将排队等待恢复完成后自动发送…"
-            : running
-              ? "消息将排队，等待本轮完成后自动发送…"
-              : "继续追问…（Enter 发送 · Shift+Enter 换行）";
+            : restoring
+              ? "恢复会话中，消息将排队等待恢复完成后自动发送…"
+              : running
+                ? "消息将排队，等待本轮完成后自动发送…"
+                : `继续追问…（Enter 发送 · Shift+Enter 换行 · ${MENTION_PLACEHOLDER_HINT}）`;
 
   const interruptDisabled =
     session.status !== "active" || !turnState.currentRunId || !machineOnline;
@@ -2753,6 +2825,11 @@ function SessionPanelPage({
           registerClearAttachments={(fn) => {
             clearAttachmentsRef.current = fn;
           }}
+          // task-05（FR-06/FR-08）：@ 联想回传与数据源工作区（真会话用会话自身
+          // 工作区，预会话锁定上下文兜底——父层切 sessionId 后 preContext 可能
+          // 仍在，会话 workspace_id 缺省时回落，避免 @ 联想无数据）。
+          onMentionsChange={setPendingMentions}
+          workspaceId={session.workspace_id ?? preContext?.workspaceId ?? null}
         />
         <div className="px-5 pb-3">
           <SessionConfigBar
@@ -3049,6 +3126,11 @@ function SessionPanelDialog(props: SessionPanelProps) {
   const [pendingAttachments, setPendingAttachments] = useState<AttachmentRead[]>([]);
   const clearAttachmentsRef = useRef<(() => void) | null>(null);
   const attachmentMetaRef = useRef(new Map<string, { kind: string; name: string }>());
+  // task-05（2026-08-26-session-input-mention / FR-05 / FR-06）：@ 联想结构化选中
+  // 暂存（同 page 模式——首句 createSession 合并语义见 handleSend idle 分支，
+  // 追问/排队随 injectSession 上送 bind_change_key/bind_quick_id；发送成功后
+  // 清空，草稿持久化不存，R-7）。
+  const [pendingMentions, setPendingMentions] = useState<SessionInputMentions>({});
   // ql-20260825-011：发送中（inject 在途）占位信息——「打断本轮」发送窗口期
   // 触发时回退消息到输入框（同 page 模式 inflightSendRef 语义）。
   const inflightSendRef = useRef<{ placeholderId: string; prompt: string } | null>(null);
@@ -3089,6 +3171,8 @@ function SessionPanelDialog(props: SessionPanelProps) {
     );
     if (attachmentIds.length > 0) clearAttachmentsRef.current?.();
     for (const id of attachmentIds) attachmentMetaRef.current.delete(id);
+    // task-05（FR-06）：发送成功清空 @ 联想选中（与 clearAttachments 同时机）。
+    setPendingMentions({});
   }, []);
 
   // 消息队列（ql-20260825-011 服务端真实排队）：队列条目来自 GET /queue（刷新
@@ -3582,11 +3666,16 @@ function SessionPanelDialog(props: SessionPanelProps) {
         ],
       }));
       try {
-        // 无附件保持两参调用（与既有形态逐字节一致）；有附件才带第三参
-        // options（attachment_ids）。
+        // 无附件且无绑定字段保持两参调用（与既有形态逐字节一致，缺省零回归）；
+        // 任一有值才带第三参 options（task-05：@ 联想绑定字段，FR-06/D-003；
+        // dialog 重发复用本函数，随该点位一并生效——当前选中通常已清空）。
+        const bindOpts = mentionBindOptions(pendingMentions);
         const resp =
-          attachmentIds.length > 0
-            ? await injectSession(sid, prompt, { attachment_ids: attachmentIds })
+          attachmentIds.length > 0 || Object.keys(bindOpts).length > 0
+            ? await injectSession(sid, prompt, {
+                ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
+                ...bindOpts,
+              })
             : await injectSession(sid, prompt);
         if (inflightSendRef.current?.placeholderId !== placeholderId) {
           // ql-20260825-011：发送窗口期被「打断本轮」回退（占位轮已移除、消息
@@ -3641,7 +3730,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
         }
       }
     },
-    [view.sessionId, onSendSettled],
+    [view.sessionId, pendingMentions, onSendSettled],
   );
 
   /**
@@ -3654,10 +3743,19 @@ function SessionPanelDialog(props: SessionPanelProps) {
       const sid = view.sessionId;
       if (!sid) return;
       try {
+        // task-05（FR-06 / D-003）：忙轮排队路径带 @ 联想绑定字段（有值才带）；
+        // 无附件且无绑定时保持第三参 undefined（与既有形态逐字节一致，缺省零
+        // 回归——后端 binder 插入点在排队早退分支之前，design §4.2）。
+        const bindOpts = mentionBindOptions(pendingMentions);
         await injectSession(
           sid,
           prompt,
-          attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : undefined,
+          attachmentIds.length > 0 || Object.keys(bindOpts).length > 0
+            ? {
+                ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
+                ...bindOpts,
+              }
+            : undefined,
         );
         setView((prev) => ({ ...prev, errorMsg: null }));
         queueRefreshRef.current?.();
@@ -3670,7 +3768,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
         }));
       }
     },
-    [view.sessionId, onSendSettled],
+    [view.sessionId, pendingMentions, onSendSettled],
   );
 
   // ── task-11：会话内团队触发（弹层开关 + 预建回调，语义同 page 模式）──────
@@ -3758,6 +3856,9 @@ function SessionPanelDialog(props: SessionPanelProps) {
     ) {
       openTeamPopover(teamCmd || null);
       setInput("");
+      // task-05：拦截清空输入的同点位清空 @ 联想选中（拦截不发送，残留选中
+      // 会错绑到下一条消息；/team 拦截语义本身零改动）。
+      setPendingMentions({});
       return;
     }
 
@@ -3770,7 +3871,15 @@ function SessionPanelDialog(props: SessionPanelProps) {
 
     // 首 turn：createSession（绕过队列直发，R2）
     if (view.status === "idle") {
+      // task-05（FR-05）：@ 联想选中捕获后再清（dialog idle 先清输入的既有
+      // 语义下，创建失败也不留僵尸绑定）；change_id 合并语义 = @ 选中优先
+      //（用户显式最新选择），changeId prop（change-session-section 入口上下文）
+      // 兜底——单值字段不并送，缺省回落既有语义零回归（不互相覆盖：无 @ 选中
+      // 时 prop 照常生效，有 @ 选中时以用户选择为准）。
+      const mentions = pendingMentions;
+      const createChangeId = mentions.change?.id ?? changeId;
       setInput("");
+      setPendingMentions({});
       setView({
         ...INITIAL_DIALOG_VIEW,
         status: "creating",
@@ -3798,8 +3907,11 @@ function SessionPanelDialog(props: SessionPanelProps) {
           prompt: effectivePrompt,
           manual_approval: true,
           ask_user_only: true,
-          ...(changeId ? { change_id: changeId } : {}),
+          ...(createChangeId ? { change_id: createChangeId } : {}),
           ...(workspaceId ? { workspace_id: workspaceId } : {}),
+          // task-05（FR-05）：@ 快速修复选中随首句上送 quicklog_id（对齐 page
+          // 预会话 create 展开形态，缺省不进请求体零回归）。
+          ...(mentions.quick ? { quicklog_id: mentions.quick.ql_id } : {}),
         });
         // 用返回 run id 替换 pending 占位 + 启动唯一 SSE
         setView((prev) => ({
@@ -3850,7 +3962,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
     } catch {
       /* errorMsg 已写入 view（占位轮回滚），此路径不向上抛 */
     }
-  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.sessionId, view.currentRunId, isQueueFull, provider, changeId, workspaceId, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, teamMissions]);
+  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.sessionId, view.currentRunId, isQueueFull, provider, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, teamMissions]);
 
   // 失败轮次「重新发送」——复用 submitFollowup 重新提交该 turn 的 prompt。受
   // turn 级串行 / active 守卫；retryable=false 的错误由 RunErrorItem 隐藏按钮
@@ -3987,6 +4099,11 @@ function SessionPanelDialog(props: SessionPanelProps) {
     // ql-20260825-007：随新建重置丢弃待发送附件与元数据镜像（hook 同按
     // sessionId 切换清队，对齐 page 模式会话切换清理语义）。
     setPendingAttachments([]);
+    // 缺陷修复收口（A-1）：@ 联想选中残留同点位清空——只重置 view/input/
+    // 附件时，未消费的 pendingMentions 会随下一个新建会话首句 create 错绑
+    //（组件侧归空 effect 的双向复位是兜底通道，此处显式清保证不依赖 effect
+    // 触发时序）。
+    setPendingMentions({});
     clearAttachmentsRef.current?.();
     attachmentMetaRef.current.clear();
     // 重置回 idle 时通知父级清除 URL ?session= / 清选中（触发 key 重挂载）
@@ -4063,6 +4180,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
   // 提示；reconnecting / creating / ending / running → 排队或过渡提示（running 的
   // 「等待本轮完成…」旧禁用文案改为排队文案——有意行为变更，diff-analysis
   // §5.2-2）；idle / active 空闲 → 常规输入提示（active 用 page 同款文案）。
+  // task-05（FR-08）：可正常输入的两态追加联想能力提示（MENTION_PLACEHOLDER_HINT）。
   const placeholder =
     view.status === "ended" || view.status === "failed"
       ? "会话已结束，请新建会话"
@@ -4079,8 +4197,8 @@ function SessionPanelDialog(props: SessionPanelProps) {
                 : view.status === "active" && view.currentRunId
                   ? "消息将排队，等待本轮完成后自动发送…"
                   : view.status === "active"
-                    ? "继续追问…（Enter 发送 · Shift+Enter 换行）"
-                    : "输入首条消息创建会话";
+                    ? `继续追问…（Enter 发送 · Shift+Enter 换行 · ${MENTION_PLACEHOLDER_HINT}）`
+                    : `输入首条消息创建会话…（${MENTION_PLACEHOLDER_HINT}）`;
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
@@ -4346,6 +4464,10 @@ function SessionPanelDialog(props: SessionPanelProps) {
         registerClearAttachments={(fn) => {
           clearAttachmentsRef.current = fn;
         }}
+        // task-05（FR-05/FR-06/FR-08）：@ 联想回传与数据源工作区（dialog 的
+        // workspaceId prop——attach 续聊工作区由宿主注入，缺省 @ 联想禁用）。
+        onMentionsChange={setPendingMentions}
+        workspaceId={workspaceId ?? null}
       />
 
       {/* task-14：分身会话浮层——复用 SessionPanel（dialog/attach 形态）打开分身

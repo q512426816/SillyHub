@@ -93,7 +93,7 @@ describe("SessionPanel（dialog）changeId/workspaceId 透传（task-15）", () 
     });
 
     setupPanel({ changeId: "change-99", workspaceId: "ws-9" });
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
 
@@ -115,7 +115,7 @@ describe("SessionPanel（dialog）changeId/workspaceId 透传（task-15）", () 
     });
 
     setupPanel(); // 无 changeId / workspaceId
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
 

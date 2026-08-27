@@ -65,6 +65,14 @@ export interface PlatformSkillSummary {
   name: string;
   /** SKILL.md frontmatter description；无 frontmatter 时为空字符串。 */
   description: string;
+  /**
+   * SKILL.md frontmatter name 原值（冒号名原样保留，如 sillyspec:archive）。
+   * 来源：skills_bundle_service._summarize_skills 聚合新键（task-06 /
+   * 2026-08-26-session-input-mention）；frontmatter 缺 name 或解析失败为
+   * null，目录名兜底由调用方 `invoke_name ?? name` 完成。manifest 端点无
+   * OpenAPI schema，此类型为既有手写惯例（R-9 人肉跟改），不违反规则 21。
+   */
+  invoke_name?: string | null;
   /** 该 skill 目录下文件数。 */
   file_count: number;
 }
@@ -73,8 +81,9 @@ export interface PlatformSkillsManifest {
   version: string;
   files: PlatformSkillsManifestFile[];
   /**
-   * 每个 skill 的摘要（name + description + file_count），供清单页展示「每个技能
-   * 干什么」。正常返回必有；后端空/错误状态可能缺省，前端用 `?? []` 兜底。
+   * 每个 skill 的摘要（name + description + invoke_name + file_count），供
+   * 清单页展示「每个技能干什么」。正常返回必有；后端空/错误状态可能缺省，
+   * 前端用 `?? []` 兜底。
    */
   skills?: PlatformSkillSummary[];
   /** 当代码库无 sillyspec skills 时返回的提示信息（version 为空字符串）。 */

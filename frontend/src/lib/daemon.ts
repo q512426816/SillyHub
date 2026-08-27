@@ -949,6 +949,15 @@ export async function injectSession(
   if (options?.page_context !== undefined) {
     body.page_context = options.page_context;
   }
+  // 2026-08-26-session-input-mention task-08（FR-06 / D-003）：@ 关联的会话绑定
+  // 字段透传（仿 page_context 有值才带，缺省零变化；后端 binder 幂等写 M:N
+  // link，不注入 prompt）。bind 业务接线归 task-05（7 发送点位）。
+  if (options?.bind_change_key !== undefined) {
+    body.bind_change_key = options.bind_change_key;
+  }
+  if (options?.bind_quick_id !== undefined) {
+    body.bind_quick_id = options.bind_quick_id;
+  }
   return apiFetch<SessionInjectResponse>(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/inject`,
     { method: "POST", json: body },

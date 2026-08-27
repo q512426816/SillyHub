@@ -52206,6 +52206,31 @@
                 "type": "null"
               }
             ]
+          },
+          "bind_change_key": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bind Change Key"
+          },
+          "bind_quick_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "pattern": "^ql-[\\w-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bind Quick Id"
           }
         },
         "type": "object",

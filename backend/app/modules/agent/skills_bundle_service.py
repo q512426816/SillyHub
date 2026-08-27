@@ -206,13 +206,16 @@ def _parse_skill_frontmatter(content: bytes) -> dict[str, str]:
 
 
 def _summarize_skills(files: list[tuple[Path, bytes]]) -> list[dict[str, Any]]:
-    """按 skill 顶层目录聚合，返回 ``[{name, description, file_count}]``。
+    """按 skill 顶层目录聚合，返回 ``[{name, description, invoke_name, file_count}]``。
 
     * ``name`` —— 顶层目录名（技能标识，与 daemon 同步路径、前端 ``deriveSkillGroups``
       口径一致；注意它可能与 frontmatter ``name`` 不同，如目录 ``sillyspec-archive``
       vs frontmatter ``sillyspec:archive``，展示统一用目录名）。
     * ``description`` —— 该目录下 ``SKILL.md`` 的 frontmatter description
       （:func:`_parse_skill_frontmatter`）；无 SKILL.md 或无 frontmatter 时为空串。
+    * ``invoke_name`` —— 同一 frontmatter 的 ``name`` 原值（冒号名原样保留，供前端
+      回填 slash 调用名）；无 SKILL.md 或 frontmatter 缺 name 时为 None（目录名兜底
+      由前端 ``invoke_name ?? name`` 完成，task-06 / 2026-08-26-session-input-mention）。
     * ``file_count`` —— 该顶层目录下文件数。
 
     按 ``name`` 排序保证确定性（与 ``deriveSkillGroups`` 一致）。
@@ -223,14 +226,23 @@ def _summarize_skills(files: list[tuple[Path, bytes]]) -> list[dict[str, Any]]:
         top = parts[0]
         if not top:
             continue
-        grp = groups.setdefault(top, {"description": "", "file_count": 0, "skill_md_parsed": False})
+        grp = groups.setdefault(
+            top, {"description": "", "invoke_name": None, "file_count": 0, "skill_md_parsed": False}
+        )
         grp["file_count"] += 1
         # SKILL.md 在顶层目录根下：parts == [top, "SKILL.md"]
         if len(parts) == 2 and parts[1] == "SKILL.md" and not grp["skill_md_parsed"]:
-            grp["description"] = _parse_skill_frontmatter(content).get("description", "")
+            frontmatter = _parse_skill_frontmatter(content)
+            grp["description"] = frontmatter.get("description", "")
+            grp["invoke_name"] = frontmatter.get("name") or None
             grp["skill_md_parsed"] = True
     return [
-        {"name": name, "description": grp["description"], "file_count": grp["file_count"]}
+        {
+            "name": name,
+            "description": grp["description"],
+            "invoke_name": grp["invoke_name"],
+            "file_count": grp["file_count"],
+        }
         for name, grp in sorted(groups.items())
     ]
 
@@ -265,9 +277,9 @@ async def build_skills_manifest(
       when no skills are found.
     * ``files`` — list of ``{path, sha256}`` entries, one per file.
     * ``message`` — informational string (only present on error/empty states).
-    * ``skills`` — list of ``{name, description, file_count}`` summaries for the
-      platform skills list UI（展示用：解析每个顶层 skill 目录下 ``SKILL.md`` 的
-      frontmatter ``description``）。``files`` 为空时为空列表。
+    * ``skills`` — list of ``{name, description, invoke_name, file_count}`` summaries
+      for the platform skills list UI（展示用：解析每个顶层 skill 目录下 ``SKILL.md``
+      的 frontmatter ``description`` 与 ``name`` 原值）。``files`` 为空时为空列表。
 
     When ``skills_dir`` is ``None`` (default) the value from
     ``Settings.skills_bundle_dir`` is used. When the directory does not exist

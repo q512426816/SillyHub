@@ -17,7 +17,18 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 
 import { SessionPanel } from "../session-panel";
+import { useMentionSources } from "@/lib/session-mention-sources";
 import type { SessionStreamConnection } from "@/lib/daemon";
+
+// task-05（2026-08-26-session-input-mention / FR-05 / FR-06）：@ 联想数据源
+// hook mock——SessionInputBar 的数据桥在 textarea 首次聚焦才挂载，既有用例
+// 不聚焦零影响（先例 session-input-bar-mention.test.tsx；dialog 测试无
+// QueryClientProvider，真实 hook 会因缺 QueryClient 抛错，必须 mock）。
+vi.mock("@/lib/session-mention-sources", () => ({
+  useMentionSources: vi.fn(),
+}));
+
+const mentionSourcesMock = vi.mocked(useMentionSources);
 
 // MarkdownText 用 next/dynamic + ssr:false，jsdom 测试同步 render 处于 loading(null)，
 // turn.output 文本不出现。mock 成纯文本渲染（测 panel 交互逻辑，不测 markdown 库）。
@@ -190,6 +201,37 @@ function setupPanel(overrides: Record<string, any> = {}) {
 describe("SessionPanel（dialog）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // task-05：@ 联想数据源默认快照（变更 + 快速修复各一条，聚焦挂桥后消费）。
+    mentionSourcesMock.mockReturnValue({
+      skills: [],
+      changes: [
+        {
+          id: "chg-mention-1",
+          change_key: "2026-08-26-mention-demo",
+          title: "联想演示变更",
+          status: "active",
+          location: "worktree",
+          change_type: null,
+          affected_components: [],
+          owner_id: null,
+          updated_at: "2026-08-26T00:00:00Z",
+        },
+      ],
+      quicklogs: [
+        {
+          ql_id: "ql-20260826-099",
+          title: "联想演示修复",
+          status: "completed",
+          placeholder: false,
+          author_raw: "qinyi",
+          linked_changes: [],
+          files: [],
+          affected_modules: [],
+          source: "file",
+        },
+      ],
+      atEnabled: true,
+    });
     // ql-20260825-011：默认空队列（服务端排队三件套）。
     sessionApi.fetchSessionQueue.mockResolvedValue([]);
     sessionApi.deleteSessionQueueEntry.mockResolvedValue(undefined);
@@ -253,7 +295,7 @@ describe("SessionPanel（dialog）", () => {
     });
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hello" } });
     fireEvent.click(screen.getByTitle("发送"));
 
@@ -276,7 +318,7 @@ describe("SessionPanel（dialog）", () => {
     });
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "first" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -363,7 +405,7 @@ describe("SessionPanel（dialog）", () => {
 
     setupPanel();
     // 首发
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "first" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -378,9 +420,9 @@ describe("SessionPanel（dialog）", () => {
 
     // 第二条：输入框变为追问
     await waitFor(() => {
-      expect((screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement)).toBeTruthy();
+      expect((screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement)).toBeTruthy();
     }, { timeout: 2000 });
-    const input2 = screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement;
+    const input2 = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input2, { target: { value: "second" } });
     fireEvent.click(screen.getByTitle("发送"));
 
@@ -388,6 +430,200 @@ describe("SessionPanel（dialog）", () => {
     expect(sessionApi.injectSession).toHaveBeenCalledWith("sess-1", "second");
     // SSE 仍只 1 次
     expect(sessionApi.streamSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("task-05：@ 变更选中随首句 createSession 上送 change_id（quicklog_id 缺省不进请求体）", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+
+    setupPanel();
+    // 首句：聚焦挂联想桥 → @ 选中变更 → createSession 带 change_id（@ 选中
+    // 即结构化 id；无 quick 选中时 quicklog_id 缺省不进请求体）。
+    const input = screen.getByPlaceholderText(
+      /输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/,
+    ) as HTMLTextAreaElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, {
+      target: {
+        value: "@2026-08-26-mention-demo",
+        selectionStart: "@2026-08-26-mention-demo".length,
+        selectionEnd: "@2026-08-26-mention-demo".length,
+      },
+    });
+    expect(screen.getByTestId("session-mention-popover")).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input.value).toBe("@2026-08-26-mention-demo ");
+    fireEvent.change(input, { target: { value: `${input.value}开工` } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
+    const createPayload = sessionApi.createSession.mock.calls[0]![0] as Record<
+      string,
+      unknown
+    >;
+    expect(createPayload.change_id).toBe("chg-mention-1");
+    expect(createPayload.quicklog_id).toBeUndefined();
+  });
+
+  it("缺陷修复收口（A-1）：@ 选中残留随「新建会话」清空——新首句 create 请求体不含 change_id/quicklog_id", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-2", run_id: "run-2", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+
+    setupPanel();
+    // idle 首句框：聚焦挂联想桥 → @ 选中变更（pendingMentions = { change }），
+    // 不发送——构造「选中未消费」的残留前置。
+    const input = screen.getByPlaceholderText(
+      /输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/,
+    ) as HTMLTextAreaElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, {
+      target: {
+        value: "@2026-08-26-mention-demo",
+        selectionStart: "@2026-08-26-mention-demo".length,
+        selectionEnd: "@2026-08-26-mention-demo".length,
+      },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(input.value).toBe("@2026-08-26-mention-demo ");
+
+    // 点「新建会话」：handleNewSession 重置 view/input/附件——缺陷版本漏清
+    // pendingMentions，残留 change 选中随下一个新建会话首句 create 错绑。
+    fireEvent.click(screen.getByTitle("新建会话"));
+    await waitFor(() =>
+      expect(
+        (screen.getByPlaceholderText(/输入首条消息创建会话/) as HTMLTextAreaElement).value,
+      ).toBe(""),
+    );
+
+    // 新建后的首句（无任何 @ 选中）→ create 请求体不得携带残留绑定字段。
+    const fresh = screen.getByPlaceholderText(
+      /输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(fresh, { target: { value: "全新首句" } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
+    const payload = sessionApi.createSession.mock.calls[0]![0] as Record<
+      string,
+      unknown
+    >;
+    expect(payload.prompt).toBe("全新首句");
+    expect(payload.change_id).toBeUndefined();
+    expect(payload.quicklog_id).toBeUndefined();
+  });
+
+  it("task-05：忙轮 @ 快速修复选中 → 排队路径 inject 带 bind_quick_id（漏改该点位则绑定静默丢失，R-10）", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+    sessionApi.injectSession.mockResolvedValue({
+      session_id: "sess-1", run_id: null, status: "queued", queued: true,
+    });
+
+    setupPanel();
+    // 首发（无 @ 选中）：走 create（本用例聚焦忙轮 inject 点位）。
+    const input = screen.getByPlaceholderText(
+      /输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "first" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalledTimes(1));
+
+    // create 成功 → currentRunId=run-1（忙轮）：@ 快速修复选中 → 排队路径
+    // inject 直达后端，恰带唯一绑定字段 bind_quick_id。
+    const input2 = screen.getByPlaceholderText(/消息将排队/) as HTMLTextAreaElement;
+    fireEvent.focus(input2);
+    fireEvent.change(input2, {
+      target: {
+        value: "@ql-20260826-099",
+        selectionStart: "@ql-20260826-099".length,
+        selectionEnd: "@ql-20260826-099".length,
+      },
+    });
+    fireEvent.keyDown(input2, { key: "Enter" });
+    fireEvent.change(input2, { target: { value: `${input2.value}跟进` } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
+    expect(sessionApi.injectSession).toHaveBeenCalledWith("sess-1", "@ql-20260826-099 跟进", {
+      bind_quick_id: "ql-20260826-099",
+    });
+  });
+
+  it("task-05：空闲追问 @ 变更选中 → injectSession 第三参恰为 bind_change_key（无附件无选中时仍两参调用）", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+    sessionApi.injectSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-2", status: "active",
+    });
+
+    setupPanel();
+    const input = screen.getByPlaceholderText(
+      /输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "first" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+
+    const conn = stream.conn;
+    act(() => {
+      conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-1", turn: 1 }));
+      conn.handlers.route(
+        makeEnvelope("turn_completed", { run_id: "run-1", status: "completed" }),
+      );
+    });
+
+    // 空闲追问：@ 选中变更 → submitFollowup 的第三参恰为唯一绑定字段。
+    const input2 = (await screen.findByPlaceholderText(
+      /继续追问.*\/ 唤起技能 · @ 关联变更/,
+    )) as HTMLTextAreaElement;
+    fireEvent.focus(input2);
+    fireEvent.change(input2, {
+      target: {
+        value: "@2026-08-26-mention-demo",
+        selectionStart: "@2026-08-26-mention-demo".length,
+        selectionEnd: "@2026-08-26-mention-demo".length,
+      },
+    });
+    fireEvent.keyDown(input2, { key: "Enter" });
+    fireEvent.change(input2, { target: { value: `${input2.value}推进` } });
+    fireEvent.click(screen.getByTitle("发送"));
+
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
+    expect(sessionApi.injectSession).toHaveBeenCalledWith("sess-1", "@2026-08-26-mention-demo 推进", {
+      bind_change_key: "2026-08-26-mention-demo",
+    });
+
+    // 选中已随发送成功清空：完结 run-2 回到空闲后，无附件无选中再发 →
+    // 保持两参调用（缺省零回归，ux-fixes 系断言的契约形态）。
+    act(() => {
+      conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-2", turn: 2 }));
+      conn.handlers.route(
+        makeEnvelope("turn_completed", { run_id: "run-2", status: "completed" }),
+      );
+    });
+    const input3 = (await screen.findByPlaceholderText(
+      /继续追问.*\/ 唤起技能 · @ 关联变更/,
+    )) as HTMLTextAreaElement;
+    fireEvent.change(input3, { target: { value: "普通追问" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(2));
+    expect(sessionApi.injectSession).toHaveBeenNthCalledWith(2, "sess-1", "普通追问");
   });
 
   it("AC-11-04 第二 run 输出只写第二 turn，第一 turn 不变", async () => {
@@ -402,7 +638,7 @@ describe("SessionPanel（dialog）", () => {
     });
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "first" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -421,7 +657,7 @@ describe("SessionPanel（dialog）", () => {
     await waitFor(() => expect(screen.getByText(/turn1-out/)).toBeInTheDocument());
 
     // 第二 turn
-    const input2 = screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement;
+    const input2 = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input2, { target: { value: "second" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalled());
@@ -450,7 +686,7 @@ describe("SessionPanel（dialog）", () => {
     });
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "first" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -490,7 +726,7 @@ describe("SessionPanel（dialog）", () => {
     });
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "first" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -509,9 +745,9 @@ describe("SessionPanel（dialog）", () => {
 
     // currentRun 清空后可继续追问
     await waitFor(() => {
-      expect((screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement)).toBeTruthy();
+      expect((screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement)).toBeTruthy();
     });
-    const input2 = screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement;
+    const input2 = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input2, { target: { value: "again" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalledTimes(1));
@@ -546,7 +782,7 @@ describe("SessionPanel（dialog）", () => {
     ]);
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "first" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -592,7 +828,7 @@ describe("SessionPanel（dialog）", () => {
     });
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "first" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -608,7 +844,7 @@ describe("SessionPanel（dialog）", () => {
   it("输入校验：空/纯空白 prompt 不发送", async () => {
     sessionApi.streamSession.mockImplementation(makeStreamMock().factory);
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "   " } });
     // task-14（FR-08）：纯空文本发送按钮禁点，title/aria 提示与后端 422 文案一致
     const sendBtn = screen.getByTitle("消息内容不能为空") as HTMLButtonElement;
@@ -631,7 +867,7 @@ describe("SessionPanel（dialog）", () => {
     );
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(screen.getByText(/no daemon/)).toBeInTheDocument());
@@ -647,7 +883,7 @@ describe("SessionPanel（dialog）", () => {
     });
 
     const { unmount } = setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -763,7 +999,7 @@ describe("SessionPanel（dialog）", () => {
     ]);
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "first" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -789,7 +1025,7 @@ describe("SessionPanel（dialog）", () => {
     await waitFor(() =>
       expect(screen.getByText(/会话排队消息已达上限/)).toBeInTheDocument(),
     );
-    expect((screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement).value).toBe("draft-keep");
+    expect((screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement).value).toBe("draft-keep");
   });
 
   it("session_ended SSE 先到：收口 ended + close", async () => {
@@ -801,7 +1037,7 @@ describe("SessionPanel（dialog）", () => {
     });
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -828,7 +1064,7 @@ describe("SessionPanel（dialog）", () => {
     });
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "first" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -1003,7 +1239,7 @@ describe("SessionPanel（dialog）", () => {
       expect(sessionApi.getAgentSession).toHaveBeenCalledTimes(2);
 
       // status active → 输入启用 + placeholder 继续追问（fake timers 下 advanceTimersByTimeAsync 已 flush）
-      const activeInput = screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement;
+      const activeInput = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
       expect(activeInput.disabled).toBe(false);
 
       // 不再轮询（active 已清 interval）
@@ -1108,7 +1344,7 @@ describe("SessionPanel（dialog）", () => {
 
       // 等待首次轮询转 active
       await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
-      const input = screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement;
+      const input = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
       expect(input.disabled).toBe(false);
       fireEvent.change(input, { target: { value: "续聊内容" } });
       await act(async () => {
@@ -1136,7 +1372,7 @@ describe("SessionPanel（dialog）", () => {
     // 不应立刻建 SSE / 轮询
     expect(sessionApi.streamSession).not.toHaveBeenCalled();
     expect(sessionApi.getAgentSession).not.toHaveBeenCalled();
-    expect(screen.getByPlaceholderText(/创建会话/)).toBeTruthy();
+    expect(screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/)).toBeTruthy();
   });
 
   /* ---------- ql-20260623：URL 恢复配套（改动一/二/三） ---------- */
@@ -1151,7 +1387,7 @@ describe("SessionPanel（dialog）", () => {
     const onSessionCreated = vi.fn();
 
     setupPanel({ onSessionCreated });
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hello" } });
     fireEvent.click(screen.getByTitle("发送"));
 
@@ -1173,7 +1409,7 @@ describe("SessionPanel（dialog）", () => {
     const onSessionReset = vi.fn();
 
     setupPanel({ onSessionReset });
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -1195,7 +1431,7 @@ describe("SessionPanel（dialog）", () => {
     });
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
 
@@ -1246,7 +1482,7 @@ describe("SessionPanel（dialog）", () => {
     ]);
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
 
@@ -1286,7 +1522,7 @@ describe("SessionPanel（dialog）", () => {
     ]);
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     // 等待 dialog 出现
@@ -1312,7 +1548,7 @@ describe("SessionPanel（dialog）", () => {
     });
 
     setupPanel({ providers: ["claude", "codex"], defaultProvider: "codex" });
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hello codex" } });
     fireEvent.click(screen.getByTitle("发送"));
 
@@ -1337,7 +1573,7 @@ describe("SessionPanel（dialog）", () => {
     });
 
     setupPanel({ providers: ["claude", "codex"], defaultProvider: "codex" });
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "first codex" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -1402,7 +1638,7 @@ describe("SessionPanel（dialog）", () => {
     });
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -1433,7 +1669,7 @@ describe("SessionPanel（dialog）", () => {
       );
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -1475,7 +1711,7 @@ describe("SessionPanel（dialog）", () => {
     });
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -1508,7 +1744,7 @@ describe("SessionPanel（dialog）", () => {
     });
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -1533,7 +1769,7 @@ describe("SessionPanel（dialog）", () => {
     });
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -1590,7 +1826,7 @@ describe("SessionPanel（dialog）", () => {
     });
 
     setupPanel({ workspaceId: "ws-1" });
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -1635,7 +1871,7 @@ describe("SessionPanel（dialog）", () => {
     const onTeamMissionCreated = vi.fn();
 
     setupPanel({ workspaceId: "ws-1", onTeamMissionCreated });
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -1698,7 +1934,7 @@ describe("SessionPanel（dialog）", () => {
     const onTeamMissionCreated = vi.fn();
 
     setupPanel({ workspaceId: "ws-1", onTeamMissionCreated });
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -1763,7 +1999,7 @@ describe("SessionPanel（dialog）对话/进度视图切换（ql-20260729-005）
     });
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "帮我读文件" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -1817,7 +2053,7 @@ describe("SessionPanel（dialog）对话/进度视图切换（ql-20260729-005）
     });
 
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -1920,7 +2156,7 @@ describe("SessionPanel（dialog）partial override 撤回（task-06/08）", () =
       status: "active", stream_url: "",
     });
     setupPanel();
-    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    const input = screen.getByPlaceholderText(/输入首条消息创建会话.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "hi" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
@@ -2104,9 +2340,9 @@ describe("SessionPanel（dialog）partial override 撤回（task-06/08）", () =
 
     // 第二 turn
     await waitFor(() => {
-      expect((screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement)).toBeTruthy();
+      expect((screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement)).toBeTruthy();
     }, { timeout: 2000 });
-    const input2 = screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement;
+    const input2 = screen.getByPlaceholderText(/继续追问.*\/ 唤起技能 · @ 关联变更/) as HTMLTextAreaElement;
     fireEvent.change(input2, { target: { value: "second" } });
     fireEvent.click(screen.getByTitle("发送"));
     await waitFor(() => expect(sessionApi.injectSession).toHaveBeenCalled());

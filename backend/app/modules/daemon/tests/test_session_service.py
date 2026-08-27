@@ -411,6 +411,279 @@ class TestInjectSession:
         assert failed[0].output_redacted is not None  # auditable
 
 
+# ── inject 绑定字段（task-07 / 2026-08-26-session-input-mention）──────────────
+
+
+async def _make_bind_workspace(db_session: AsyncSession, uid: uuid.UUID, name: str):
+    """建一个普通工作区行（供会话挂 workspace_id / 造跨工作区 change 行）。"""
+    from app.modules.workspace.model import Workspace
+
+    suffix = uuid.uuid4().hex[:6]
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name=name,
+        slug=f"{name}-{suffix}",
+        # root_path 有 UNIQUE 约束——每次调用取唯一值
+        root_path=f"/tmp/{name}-{suffix}",
+        created_by=uid,
+    )
+    db_session.add(ws)
+    await db_session.flush()
+    return ws
+
+
+async def _create_bindable_session(
+    db_session: AsyncSession, *, with_workspace: bool = True
+) -> tuple[DaemonService, uuid.UUID, AgentSession, object | None]:
+    """建一个（可选挂工作区的）活跃会话并完结首 turn，供 inject 绑定用例复用。"""
+    uid = await _create_user(db_session)
+    await _create_runtime(db_session, uid)
+    ws = await _make_bind_workspace(db_session, uid, "bind-ws") if with_workspace else None
+    create_kwargs: dict = {}
+    if ws is not None:
+        create_kwargs["workspace_id"] = ws.id
+    with patch(
+        "app.modules.daemon.session.service.allowed_workspace_ids",
+        new_callable=AsyncMock,
+        return_value={ws.id} if ws is not None else set(),
+    ):
+        svc = DaemonService(db_session)
+        created = await svc.create_session(uid, provider="claude", prompt="first", **create_kwargs)
+    created.agent_run.status = "completed"
+    created.agent_run.finished_at = datetime.now(UTC)
+    await db_session.commit()
+    return svc, uid, created.agent_session, ws
+
+
+class TestInjectSessionBinding:
+    """task-07（FR-06 / D-003~D-005）：inject 携带 bind 字段经幂等 binder 落
+    M:N link——真实 DB 副作用断言（link 行 / placeholder 行存在性）。"""
+
+    @pytest.mark.asyncio
+    async def test_bind_change_key_creates_placeholder_and_link(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """bind_change_key → 会话工作区建 placeholder Change + ChangeSessionLink。"""
+        from app.modules.change.model import Change, ChangeSessionLink
+
+        svc, uid, session, ws = await _create_bindable_session(db_session)
+
+        result = await svc.inject_session(
+            session.id, uid, prompt="绑定变更", bind_change_key="2026-08-27-demo-change"
+        )
+        assert result.agent_run is not None  # 消息照常派发
+
+        change = (
+            (
+                await db_session.execute(
+                    select(Change).where(
+                        Change.workspace_id == ws.id,
+                        Change.change_key == "2026-08-27-demo-change",
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert change.status == "draft"  # placeholder 行
+        link = (
+            (
+                await db_session.execute(
+                    select(ChangeSessionLink).where(
+                        ChangeSessionLink.change_id == change.id,
+                        ChangeSessionLink.session_id == session.id,
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert link is not None
+
+    @pytest.mark.asyncio
+    async def test_bind_idempotent_on_repeat(self, db_session, mocked_hub, mocked_redis) -> None:
+        """同 key 重复 inject（含 quicklog）→ 不重复建 link / placeholder 行。"""
+        from app.modules.change.model import Change, ChangeSessionLink, QuicklogSessionLink
+
+        svc, uid, session, _ws = await _create_bindable_session(db_session)
+        ql_id = "ql-20260827-001-bind"
+
+        for _ in range(2):
+            result = await svc.inject_session(
+                session.id,
+                uid,
+                prompt="重复绑定",
+                bind_change_key="2026-08-27-repeat",
+                bind_quick_id=ql_id,
+            )
+            assert result.agent_run is not None
+            # 完结本轮，允许下一轮 inject
+            result.agent_run.status = "completed"
+            result.agent_run.finished_at = datetime.now(UTC)
+            await db_session.commit()
+
+        changes = (
+            (
+                await db_session.execute(
+                    select(Change).where(Change.change_key == "2026-08-27-repeat")
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(changes) == 1  # placeholder 不重复建
+        change_links = (
+            (
+                await db_session.execute(
+                    select(ChangeSessionLink).where(ChangeSessionLink.session_id == session.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(change_links) == 1
+        ql_links = (
+            (
+                await db_session.execute(
+                    select(QuicklogSessionLink).where(QuicklogSessionLink.session_id == session.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(ql_links) == 1
+
+    @pytest.mark.asyncio
+    async def test_bind_quick_id_writes_quicklog_link(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """bind_quick_id → QuicklogSessionLink（不要求条目行存在，D-001@v1）。"""
+        from app.modules.change.model import QuicklogSessionLink
+
+        svc, uid, session, ws = await _create_bindable_session(db_session)
+
+        await svc.inject_session(
+            session.id, uid, prompt="绑定快速修复", bind_quick_id="ql-20260827-002-bind"
+        )
+
+        link = (
+            (
+                await db_session.execute(
+                    select(QuicklogSessionLink).where(
+                        QuicklogSessionLink.workspace_id == ws.id,
+                        QuicklogSessionLink.ql_id == "ql-20260827-002-bind",
+                        QuicklogSessionLink.session_id == session.id,
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert link is not None
+
+    @pytest.mark.asyncio
+    async def test_bind_skipped_when_session_has_no_workspace(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """session.workspace_id None → 记 warning 跳过绑定，消息仍正常下发。
+
+        structlog 直写 stderr，caplog 抓不到（见 test_terminating_at_lifecycle
+        同款说明）——照抄该先例替换模块级 ``log`` 为 MagicMock 断言 warning。
+        """
+        from app.modules.change.model import Change, ChangeSessionLink, QuicklogSessionLink
+
+        svc, uid, session, _ws = await _create_bindable_session(db_session, with_workspace=False)
+
+        with patch("app.modules.daemon.session.service.log") as mock_log:
+            result = await svc.inject_session(
+                session.id,
+                uid,
+                prompt="无工作区的绑定",
+                bind_change_key="2026-08-27-nows",
+                bind_quick_id="ql-20260827-003-nows",
+            )
+
+        assert result.agent_run is not None  # 消息仍正常派发
+        mock_log.warning.assert_called_once()
+        # 零副作用：无 placeholder、无任何 link 行
+        assert (
+            await db_session.execute(select(Change).where(Change.change_key == "2026-08-27-nows"))
+        ).scalars().all() == []
+        assert (await db_session.execute(select(ChangeSessionLink))).scalars().all() == []
+        assert (await db_session.execute(select(QuicklogSessionLink))).scalars().all() == []
+
+    @pytest.mark.asyncio
+    async def test_bind_cross_workspace_only_placeholder_in_session_workspace(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """跨 workspace change_key → 只在会话自有工作区建 placeholder（D-004）。"""
+        from app.modules.change.model import Change, ChangeSessionLink
+
+        svc, uid, session, ws_a = await _create_bindable_session(db_session)
+        # 另一个工作区已有同名 change_key 真实行
+        ws_b = await _make_bind_workspace(db_session, uid, "bind-ws-other")
+        other_change = Change(
+            id=uuid.uuid4(),
+            workspace_id=ws_b.id,
+            change_key="shared-key",
+            title="别的工作区的变更",
+            status="active",
+            location="active",
+            path="changes/shared-key",
+        )
+        db_session.add(other_change)
+        await db_session.commit()
+
+        await svc.inject_session(
+            session.id, uid, prompt="跨工作区绑定", bind_change_key="shared-key"
+        )
+
+        rows = (
+            (await db_session.execute(select(Change).where(Change.change_key == "shared-key")))
+            .scalars()
+            .all()
+        )
+        assert len(rows) == 2  # ws_b 原行 + ws_a placeholder
+        by_ws = {row.workspace_id: row for row in rows}
+        assert set(by_ws) == {ws_a.id, ws_b.id}
+        # link 只连到会话自有工作区的 placeholder 行（不跨区串扰）
+        link = (
+            (
+                await db_session.execute(
+                    select(ChangeSessionLink).where(ChangeSessionLink.session_id == session.id)
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert link.change_id == by_ws[ws_a.id].id
+        assert link.change_id != other_change.id
+
+    @pytest.mark.asyncio
+    async def test_bind_failure_does_not_block_message(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """binder 内部失败（savepoint 语义吞掉）→ 绑定落空但消息仍正常下发。"""
+        from app.modules.change.model import Change, ChangeSessionLink
+
+        svc, uid, session, _ws = await _create_bindable_session(db_session)
+
+        # 让 binder 的首个查询就抛错 → binding.py 自身 except 捕获记 warning，
+        # 设计要求 SessionService 不再包 try/except，注入流程不应被打断。
+        with patch("app.modules.change.binding.select", side_effect=RuntimeError("db down")):
+            result = await svc.inject_session(
+                session.id, uid, prompt="绑定失败也要发", bind_change_key="2026-08-27-boom"
+            )
+
+        assert result.agent_run is not None
+        assert result.agent_run.status == "pending"
+        assert mocked_hub.send_session_control.await_count >= 1
+        assert (
+            await db_session.execute(select(Change).where(Change.change_key == "2026-08-27-boom"))
+        ).scalars().all() == []
+        assert (await db_session.execute(select(ChangeSessionLink))).scalars().all() == []
+
+
 # ── interrupt_session ────────────────────────────────────────────────────────
 
 

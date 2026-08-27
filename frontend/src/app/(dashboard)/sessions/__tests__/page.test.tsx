@@ -474,7 +474,7 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄�
     expect(screen.getByLabelText("会话配置控件条")).toBeTruthy();
     expect(screen.getByTestId("ctx-ring")).toBeTruthy();
     expect(
-      screen.getByPlaceholderText("继续追问…（Enter 发送 · Shift+Enter 换行）"),
+      screen.getByPlaceholderText("继续追问…（Enter 发送 · Shift+Enter 换行 · / 唤起技能 · @ 关联变更）"),
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: /打断本轮/ })).toBeTruthy();
     // ql-20260819-002：/sessions 页「结束会话」按钮已移除（会话结束走自然超时；
@@ -520,7 +520,7 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄�
     expect(screen.getByTestId("pre-session-context")).toBeTruthy();
     expect(screen.queryByLabelText("门户空态")).toBeNull();
     expect(
-      screen.queryByPlaceholderText("继续追问…（Enter 发送 · Shift+Enter 换行）"),
+      screen.queryByPlaceholderText("继续追问…（Enter 发送 · Shift+Enter 换行 · / 唤起技能 · @ 关联变更）"),
     ).toBeNull();
     expect(mocks.streamClose).toHaveBeenCalled();
     // 未发首句不创建（FR-03 零残留）

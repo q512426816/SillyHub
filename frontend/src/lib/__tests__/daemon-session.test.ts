@@ -147,6 +147,10 @@ describe("injectSession", () => {
     expect(init.method).toBe("POST");
     const body = JSON.parse(init.body as string);
     expect(body).toEqual({ prompt: "next question" });
+    // 2026-08-26-session-input-mention task-08（FR-06 / D-003）：不使用联想绑定时
+    // bind 字段缺省不下发——请求体零变化（对齐 page_context 有值才带形态）。
+    expect(body).not.toHaveProperty("bind_change_key");
+    expect(body).not.toHaveProperty("bind_quick_id");
   });
 
   it("options 携带切换参数时序列化进 body（task-16 / FR-02）", async () => {
@@ -180,6 +184,49 @@ describe("injectSession", () => {
     // 空串必须作为字段下发（backend 置 NULL），不能被真值判断吞掉。
     expect(body).toHaveProperty("llm_provider_id", "");
     expect(body).not.toHaveProperty("agent_profile_id");
+  });
+
+  // 2026-08-26-session-input-mention task-08（FR-06 / D-003）：@ 关联的会话绑定
+  // 字段随 inject 下发（后端 binder 幂等写 M:N link）；与其它可选字段一样
+  // 有值才带，business 接线（7 发送点位）归 task-05。
+  it("options 携带 bind_change_key/bind_quick_id 时序列化进 body（task-08 / FR-06）", async () => {
+    const fetchMock = mockFetch({
+      session_id: "s1",
+      run_id: "run-b",
+      status: "active",
+    });
+    await injectSession("s1", "看看这个变更", {
+      bind_change_key: "2026-08-26-session-input-mention",
+      bind_quick_id: "ql-20260826-001",
+    });
+    const { init } = fetchCall(fetchMock);
+    const body = JSON.parse(init.body as string);
+    expect(body).toEqual({
+      prompt: "看看这个变更",
+      bind_change_key: "2026-08-26-session-input-mention",
+      bind_quick_id: "ql-20260826-001",
+    });
+  });
+
+  it("bind 字段与既有可选字段混发时互不干扰（bind 分支独立）", async () => {
+    const fetchMock = mockFetch({
+      session_id: "s1",
+      run_id: "run-c",
+      status: "active",
+    });
+    await injectSession("s1", "切换并关联", {
+      agent_profile_id: "ap-3",
+      bind_quick_id: "ql-20260826-002",
+    });
+    const { init } = fetchCall(fetchMock);
+    const body = JSON.parse(init.body as string);
+    expect(body).toEqual({
+      prompt: "切换并关联",
+      agent_profile_id: "ap-3",
+      bind_quick_id: "ql-20260826-002",
+    });
+    // 只带 quick 绑定时 change 绑定不下发。
+    expect(body).not.toHaveProperty("bind_change_key");
   });
 
   it("409 turn conflict 抛 ApiError", async () => {

@@ -142,6 +142,102 @@ class TestEnqueueWhenBusy:
         assert rows[0].sender_user_id == uid
 
     @pytest.mark.asyncio
+    async def test_busy_queue_inject_still_binds(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """task-07（2026-08-26-session-input-mention / FR-06）：忙轮排队路径仍完成绑定。
+
+        binder 插入点在排队早退之前（design §4.2）——queue_when_busy 入队返回前
+        link 行已落库（前端 running 态 sendToServerQueue 恰走本路径，绑定静默
+        丢失即 R-10，此用例守护防回归）。
+        """
+        from app.modules.change.model import Change, ChangeSessionLink, QuicklogSessionLink
+        from app.modules.workspace.model import Workspace
+
+        uid = await _create_user(db_session)
+        await _create_runtime(db_session, uid)
+        ws = Workspace(
+            id=uuid.uuid4(),
+            name="queue-bind-ws",
+            slug=f"queue-bind-{uuid.uuid4().hex[:6]}",
+            root_path="/tmp/queue-bind",
+            created_by=uid,
+        )
+        db_session.add(ws)
+        await db_session.commit()
+        await db_session.refresh(ws)
+
+        with patch(
+            "app.modules.daemon.session.service.allowed_workspace_ids",
+            new_callable=AsyncMock,
+            return_value={ws.id},
+        ):
+            svc = DaemonService(db_session)
+            created = await svc.create_session(
+                uid, provider="claude", prompt="first", workspace_id=ws.id
+            )
+        await _finish_run(db_session, created.agent_run)
+        await svc.inject_session(created.agent_session.id, uid, prompt="占用本轮")
+        session_id = created.agent_session.id
+
+        result = await svc.inject_session(
+            session_id,
+            uid,
+            prompt="排队的绑定消息",
+            queue_when_busy=True,
+            bind_change_key="2026-08-27-queue-bind",
+            bind_quick_id="ql-20260827-020-queue",
+        )
+
+        # 入队语义不变
+        assert result.queued is True
+        assert result.queue_entry_id is not None
+        rows = await _queue_rows(db_session, session_id)
+        assert [r.prompt for r in rows] == ["排队的绑定消息"]
+
+        # 绑定在入队早退前已完成：placeholder + 两类 link 行真实落库
+        change = (
+            (
+                await db_session.execute(
+                    select(Change).where(
+                        Change.workspace_id == ws.id,
+                        Change.change_key == "2026-08-27-queue-bind",
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert change is not None
+        c_link = (
+            (
+                await db_session.execute(
+                    select(ChangeSessionLink).where(
+                        ChangeSessionLink.change_id == change.id,
+                        ChangeSessionLink.session_id == session_id,
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert c_link is not None
+        q_link = (
+            (
+                await db_session.execute(
+                    select(QuicklogSessionLink).where(
+                        QuicklogSessionLink.workspace_id == ws.id,
+                        QuicklogSessionLink.ql_id == "ql-20260827-020-queue",
+                        QuicklogSessionLink.session_id == session_id,
+                    )
+                )
+            )
+            .scalars()
+            .one()
+        )
+        assert q_link is not None
+
+    @pytest.mark.asyncio
     async def test_default_flag_keeps_conflict_semantics(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:

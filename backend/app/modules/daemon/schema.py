@@ -244,6 +244,15 @@ class SessionInjectRequest(BaseModel):
     # ql-20260825-004：每轮注入携带当前页面上下文——客户端传页面类型枚举+键，
     # 服务端回查注入【页面上下文】前导（复用 create 路径 build_page_context_preamble）。
     page_context: PageContextCreateBlock | None = None
+    # task-07（2026-08-26-session-input-mention / FR-06 / D-003 / D-005）：@ 联想
+    # 选中项的会话绑定字段（可选，缺省 None 零回归）——经三层透传到
+    # SessionService 后走既有幂等 binder 落 M:N link，不注入 prompt 前导。
+    # bind_change_key 按自然键（变更名）解析（max_length=200 对齐 Change.change_key
+    # 列宽）；bind_quick_id 为 ql- 短码（128 + ^ql-[\w-]+$ 对齐 create 通道
+    # quicklog_id 契约与 QuicklogSessionLink.ql_id 列宽，同语义同约束）。
+    # 二者均不纳入 _require_prompt_or_switch 空 prompt 豁免（绑定不是配置切换）。
+    bind_change_key: str | None = Field(default=None, max_length=200)
+    bind_quick_id: str | None = Field(default=None, max_length=128, pattern=r"^ql-[\w-]+$")
 
 
 # ── Change-scoped session list (2026-07-09-change-detail-session task-09 / D-005@v1) ─

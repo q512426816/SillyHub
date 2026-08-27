@@ -706,6 +706,11 @@ class DaemonService:
         # ql-20260825-004：每轮注入携带当前页面上下文（服务端回查注入
         # 【页面上下文】前导，组装归 session 子域 _inject_into_session）。
         page_context: PageContextCreateBlock | None = None,
+        # task-07（2026-08-26-session-input-mention / FR-06）：@ 联想绑定字段透传
+        # （幂等 binder 调用归 session 子域 inject_session，facade 显式签名
+        # 同步——漏透传会 500，见 create quicklog_id 同款教训）。
+        bind_change_key: str | None = None,
+        bind_quick_id: str | None = None,
         # ql-20260825-011：忙轮入队透传（后端真实排队）。
         queue_when_busy: bool = False,
     ) -> SessionDispatchResult:
@@ -717,6 +722,8 @@ class DaemonService:
             llm_provider_id=llm_provider_id,
             attachment_ids=attachment_ids,
             page_context=page_context,
+            bind_change_key=bind_change_key,
+            bind_quick_id=bind_quick_id,
             queue_when_busy=queue_when_busy,
         )
 

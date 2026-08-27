@@ -2206,6 +2206,11 @@ class SessionService:
         attachment_ids: list[uuid.UUID] | None = None,
         # ql-20260825-004：每轮注入携带当前页面上下文。
         page_context: PageContextCreateBlock | None = None,
+        # task-07（2026-08-26-session-input-mention / FR-06 / D-003）：@ 联想绑定
+        # 字段——经幂等 binder 落 M:N link（见下方「会话绑定」段插入点说明），
+        # 不注入 prompt 前导；缺省 None = 不绑定（零回归）。
+        bind_change_key: str | None = None,
+        bind_quick_id: str | None = None,
         # ql-20260825-011：忙轮（已有活跃 run）时入队而不是 409 拒绝（后端真实
         # 排队，刷新页面不丢）。默认 False 保持既有拒绝语义（service 身份路径 /
         # 平台审批代写等调用方零回归）；前端会话 UI 置 True。
@@ -2273,6 +2278,50 @@ class SessionService:
         except Exception:
             await self._session.rollback()
             raise
+        # ── task-07（2026-08-26-session-input-mention / FR-06 / D-003）：会话绑定 ──
+        # @ 联想选中项落 M:N link（bind_session_to_change / bind_session_to_quicklog
+        # 幂等 best-effort：savepoint + log.warning 自吞异常，失败不阻断消息发送，
+        # 本层不重复 try/except）。插入点（design §4.2）：归属校验+行锁之后、
+        # tool_report 懒激活早退与忙轮排队早退**之前**——两条早退分支都会先经过
+        # 这里，绑定不丢失；workspace 取会话自有值，None 时照抄 create 路径守卫
+        # （link 行 workspace_id NOT NULL）记 warning 跳过。跨 workspace change_key
+        # 维持 binder 既有 placeholder 行为（仅在会话自有工作区建行，D-004）。
+        if bind_change_key or bind_quick_id:
+            bind_workspace_id = session.workspace_id
+            if bind_workspace_id is None:
+                log.warning(
+                    "session_bind_skipped_no_workspace",
+                    session_id=str(session.id),
+                    bind_change_key=bind_change_key,
+                    bind_quick_id=bind_quick_id,
+                )
+            else:
+                from app.modules.change.binding import (
+                    bind_session_to_change,
+                    bind_session_to_quicklog,
+                )
+
+                if bind_change_key:
+                    await bind_session_to_change(
+                        self._session, bind_workspace_id, bind_change_key, session.id
+                    )
+                if bind_quick_id:
+                    await bind_session_to_quicklog(
+                        self._session, bind_workspace_id, bind_quick_id, session.id
+                    )
+                # 日志语义修正（缺陷收口 A-2）：binder 内部 savepoint 自吞异常
+                # 且无返回值，调用后无条件打日志无法区分「已落库」与「被吞失败」
+                # ——事件名用 session_bind_requested 表达「已请求绑定」而非
+                # 「已落库」；绑定是否真实落库以 change_session_links /
+                # quicklog_session_links link 表为准（binder 失败时自身会记
+                # log.warning）。不改 binder 签名（不在本变更文件清单内）。
+                log.info(
+                    "session_bind_requested",
+                    session_id=str(session.id),
+                    workspace_id=str(bind_workspace_id),
+                    bind_change_key=bind_change_key,
+                    bind_quick_id=bind_quick_id,
+                )
         # ── task-05（design §3.3.4 / D-010）：tool_report 会话懒激活分支 ──────────
         # CLI 工具上报聚合出的「本地 Agent 会话」（origin='tool_report'，创建时
         # status='pending' 且无 lease/runtime）首次被用户继续（首条消息）时，才

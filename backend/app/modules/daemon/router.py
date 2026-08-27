@@ -2336,6 +2336,10 @@ async def inject_session(
         attachment_ids=data.attachment_ids or None,
         # ql-20260825-004：每轮注入携带当前页面上下文。
         page_context=data.page_context,
+        # task-07（2026-08-26-session-input-mention / FR-06）：@ 联想绑定字段透传
+        # （幂等 binder 调用归 SessionService，三层同步加参——漏透传会 500）。
+        bind_change_key=data.bind_change_key,
+        bind_quick_id=data.bind_quick_id,
         # ql-20260825-011：忙轮入队（后端真实排队，前端 UI 语义）；服务身份
         # 调用方不经本端点，保持 409 拒绝语义。
         queue_when_busy=True,
