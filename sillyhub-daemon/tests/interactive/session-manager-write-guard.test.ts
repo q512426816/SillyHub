@@ -104,6 +104,7 @@ async function makeChatSession(opts: {
   runtimeRoots: string[];
   effectiveRoots?: string[];
   allowedRootsProvider?: () => string[];
+  allowedTools?: string[];
 }) {
   const RUNTIME_ID = 'rt-overlay-1';
   const { engine } = makePolicyEngine(RUNTIME_ID, opts.runtimeRoots);
@@ -125,10 +126,11 @@ async function makeChatSession(opts: {
     ...(opts.effectiveRoots !== undefined
       ? { effectiveAllowedRoots: opts.effectiveRoots }
       : {}),
+    ...(opts.allowedTools !== undefined ? { allowedTools: opts.allowedTools } : {}),
   });
   const canUseTool = getOpts()?.canUseTool;
   expect(canUseTool).toBeTypeOf('function');
-  return { canUseTool: canUseTool!, sm };
+  return { canUseTool: canUseTool!, sm, getOpts };
 }
 
 // ── 1. overlay 三态（policyEngine 装配，D-011 交集收紧）────────────────────────
@@ -307,5 +309,75 @@ describe('task-12: Bash 提取器与 overlay 组合', () => {
       'path outside allowed_roots',
     );
     expect((res as { message?: string }).message).toContain(P('C:\\work\\out.txt'));
+  });
+});
+
+describe('R-10：allowedTools 白名单会话的写工具不经 SDK 预批准（2026-08-28-daemon-agent-share E2E）', () => {
+  const PLATFORM_WHITELIST = [
+    'Read',
+    'Glob',
+    'Grep',
+    'Edit',
+    'Write',
+    'mcp__sillyhub-file',
+    'mcp__sillyhub-worker',
+  ];
+
+  it('写守卫在链时：Write/Edit 从 driverOpts.allowedTools 摘除（SDK 预批准绕过 canUseTool 是 R-10 根因），读/mcp 保留', async () => {
+    const { getOpts } = await makeChatSession({
+      runtimeRoots: [P('C:\work')],
+      effectiveRoots: [P('C:\work\writable')],
+      allowedTools: PLATFORM_WHITELIST,
+    });
+    const opts = getOpts()!;
+    expect(opts.allowedTools).toBeDefined();
+    const sdkList = opts.allowedTools as string[];
+    expect(sdkList).not.toContain('Write');
+    expect(sdkList).not.toContain('Edit');
+    expect(sdkList).toContain('Read');
+    expect(sdkList).toContain('mcp__sillyhub-file');
+  });
+
+  it('平台共享语义全链：Write 在 overlay 外 deny（即使它是白名单成员）/ overlay 内 allow / Bash 非成员 deny', async () => {
+    const { canUseTool } = await makeChatSession({
+      runtimeRoots: [P('C:\\work')],
+      effectiveRoots: [P('C:\\work\\writable')],
+      allowedTools: PLATFORM_WHITELIST,
+    });
+    const outside = await canUseTool(
+      'Write',
+      { file_path: P('C:\\work\\secret.txt'), content: 'x' },
+      { signal: undefined },
+    );
+    expect(outside).toMatchObject({ behavior: 'deny' });
+    expect((outside as { message?: string }).message).toContain(
+      'path outside allowed_roots',
+    );
+    await expect(
+      canUseTool(
+        'Write',
+        { file_path: P('C:\\work\\writable\\ok.txt'), content: 'x' },
+        { signal: undefined },
+      ),
+    ).resolves.toMatchObject({ behavior: 'allow' });
+    const bash = await canUseTool('Bash', { command: 'echo x' }, { signal: undefined });
+    expect(bash).toMatchObject({ behavior: 'deny' });
+    expect((bash as { message?: string }).message).toContain(
+      "tool 'Bash' not in allowed_tools whitelist",
+    );
+  });
+
+  it('无写守卫链（legacy 装配）：allowedTools 原样透传 SDK（G3 行为零回归）', async () => {
+    const { driver, getOpts } = makeDriverCapturingOpts();
+    const sm = new SessionManager({ driver, ...noopDeps }, {});
+    await sm.create({
+      ...BASE_INPUT,
+      sessionId: 'sess-r10-legacy',
+      manualApproval: false,
+      allowedTools: PLATFORM_WHITELIST,
+    });
+    const opts = getOpts()!;
+    expect(opts.allowedTools).toEqual(PLATFORM_WHITELIST);
+    expect(opts.canUseTool).toBeTypeOf('function');
   });
 });

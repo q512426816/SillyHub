@@ -108,6 +108,15 @@ import { classifyModelError } from '../model-error/classifier.js';
 import type { ModelError } from '../model-error/types.js';
 
 /**
+ * R-10（2026-08-28-daemon-agent-share E2E）：显式写文件工具集——这些工具在
+ * spec.allowedTools 白名单内时必须从 SDK 层预批准集（driverOpts.allowedTools，
+ * 语义=auto-allowed 不经 canUseTool）摘除，改经 canUseTool 链接受写守卫路径
+ * 校验（overlay 交集收紧 / PolicyCache 机器级）。shell 类（Bash 等）从不进
+ * 白名单（D-009），无需在此列。
+ */
+const _SDK_WRITE_TOOLS: ReadonlySet<string> = new Set(['Write', 'Edit', 'MultiEdit']);
+
+/**
  * task-08（D-007@v1 / FR-07）：wsClient.send 注入接口（鸭子类型，便于测试 mock）。
  * daemon 注入真实 WsClient；测试注入 mock。
  */
@@ -1733,6 +1742,23 @@ export class SessionManager {
     if (spec.allowedTools !== undefined) {
       const _roWhitelist = new Set(spec.allowedTools);
       const _innerCanUse = driverOpts.canUseTool as CanUseTool | undefined;
+      // R-10 修复（2026-08-28-daemon-agent-share E2E）：SDK allowedTools 语义是
+      // 「auto-allowed without prompting——execute automatically without asking for
+      // approval」（sdk.d.ts:1420-1424），成员**不经过 canUseTool**。平台共享会话
+      // 白名单含 Write/Edit → 写调用被 SDK 直接自动执行，写守卫（overlay 交集收紧/
+      // PolicyCache 机器级）从未被调用 → 目录外写放行且零审计（E2E 实证）。修法：
+      // 写守卫链存在时把**写类工具从 SDK 层预批准集摘除**（读/mcp 保留预批准，免每
+      // 读一次过回调），写工具改经 canUseTool 链——gate 白名单仍用完整 spec 列表
+      // （Write 在其中过 gate）→ 写守卫路径校验。read_only worker 列表无写工具，
+      // filter 后不变，行为逐字节不变（G3 零回归）。
+      if (_innerCanUse) {
+        const sdkPreapproved = spec.allowedTools.filter((t) => !_SDK_WRITE_TOOLS.has(t));
+        if (sdkPreapproved.length > 0) {
+          driverOpts.allowedTools = sdkPreapproved;
+        } else {
+          delete driverOpts.allowedTools;
+        }
+      }
       const _roGate: CanUseTool = async (toolName, input, options) => {
         if (!_roWhitelist.has(toolName)) {
           return {
