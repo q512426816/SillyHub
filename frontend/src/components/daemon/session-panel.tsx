@@ -143,6 +143,7 @@ import {
   listSessionRuns,
   listSessionTeamMissions,
   triggerSessionTeamMission,
+  maxLogTimestamp,
   PROVIDER_META,
   reopenSession,
   streamSession,
@@ -949,13 +950,22 @@ function SessionPanelPage({
     // task-03：随队列清空（hook 同按 sessionId 切换清队）一并丢弃附件元数据镜像。
     attachmentMetaRef.current.clear();
 
-    // 预取历史 logs 回灌（防 SSE 订阅前 daemon publish 丢事件）；已有实时
-    // turn 时不覆盖（SSE 先到时保留）。
-    void getAgentSessionLogs(sessionId)
-      .then((logs) => {
+    // ql-20260827-018：历史预取改 await **先回灌再建流**——原并行时活跃会话
+    // SSE 先到建 turn，回灌条件（prev.turns 空）不满足 → 历史被整体丢弃，
+    // 旧轮内容永久缺失（「有时加载不出来」根因；dialog 模式 establishStream
+    // 同款竞态先例）。建流缺口（历史快照 → SSE 订阅间发布的事件）由
+    // streamSession cursor 首连缺口同步增量补齐，不再依赖「SSE 抢先订阅」。
+    const establish = async (): Promise<void> => {
+      let streamCursor: string | undefined;
+      let initialSync = false;
+      try {
+        const logs = await getAgentSessionLogs(sessionId);
         if (cancelled) return;
+        streamCursor = maxLogTimestamp(logs);
         const restored = logsToTurns(logs);
         setTurnState((prev) => {
+          // 预取窗口内用户抢先发送的占位轮（__pending_inject_*）不覆盖——
+          // 该轮由 inject 响应回填真实 run_id 后走 SSE 增量，正常路径。
           if (prev.turns.length > 0) return prev;
           // attach 竞态修复（ql-20260820-007）：detail 先到时修正 effect 已扫过空
           // turns——装回后按 currentRunIdRef 重放同一修正，运行中 run 不再被
@@ -972,10 +982,237 @@ function SessionPanelPage({
               : restored,
           };
         });
-      })
-      .catch(() => {
-        /* 历史拉取失败不阻断 SSE */
-      });
+      } catch {
+        /* 历史拉取失败：不阻断建流，streamSession initialSync 全量对账兜底 */
+        initialSync = true;
+      }
+      if (cancelled) return;
+      streamRef.current = streamSession(
+        sessionId,
+        {
+          onTurnStarted: (env) => {
+            // ql-20260825-011：新轮开跑（含排队消息自动派发）→ 刷队列条（队头条目
+            // 已转正式轮，应从队列中消失）。
+            void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
+            setTurnState((prev) =>
+              upsertTurn(
+                prev,
+                env,
+                (turn) => ({
+                  ...turn,
+                  turn: env.turn ?? turn.turn,
+                  status: turn.status === "pending" ? "running" : turn.status,
+                }),
+                { setCurrentRun: env.run_id! },
+              ),
+            );
+          },
+          onLog: (env) => {
+            // user_input 是用户消息（attach 历史/占位 turn 已作 prompt），不进 output
+            // （装配器内同语义双保险）。task-09（FR-05）：其余日志归一喂共享装配器，
+            // 分类 / override 撤回 / tool 配对 / 子代理归属一律依赖装配器导出。
+            if (env.channel === "user_input") {
+              // 2026-08-25-unified-floating-session task-11（FR-7）：daemon 回传的
+              // 首条 user_input 含完整 dispatch_prompt——提取前导为 preamble 段
+              // （对话视图不渲染，「全部」视图显示注入来源）。
+              const preambleText = extractPreambleText(env.content ?? "");
+              if (preambleText && env.run_id) {
+                setTurnState((prev) =>
+                  upsertTurn(
+                    prev,
+                    env,
+                    (turn) =>
+                      turn.segments?.some((s) => s.kind === "preamble")
+                        ? turn
+                        : {
+                            ...turn,
+                            segments: [
+                              {
+                                kind: "preamble",
+                                id: `preamble:${env.run_id}`,
+                                text: preambleText,
+                                ts: env.timestamp
+                                  ? Date.parse(env.timestamp)
+                                  : Date.now(),
+                              },
+                              ...(turn.segments ?? []),
+                            ],
+                          },
+                    { setCurrentRun: env.run_id! },
+                  ),
+                );
+              }
+              return;
+            }
+            setTurnState((prev) =>
+              upsertTurn(
+                prev,
+                env,
+                (turn) => {
+                  const applied = applyEnvelopeToTurn(turn, env);
+                  // quick-9f86d2c3（会话 e87622aa）：终态轮迟到 log（轮后对账 / 断线
+                  // resync 重放）补跑 finishTurn——迟到 partial 不常亮光标、前缀重复
+                  // 段就地收敛。当前活跃 run（healToRunning 自愈场景）不跑，流式光标
+                  // 照常。同款兜底见 dialog onLog（lateOnIdleRun）。
+                  const lateOnIdleRun = prev.currentRunId !== env.run_id;
+                  if (
+                    lateOnIdleRun &&
+                    TERMINAL_TURN_STATUSES.has(turn.status) &&
+                    applied !== turn
+                  ) {
+                    return { ...applied, ...finishTurn(asAssembled(applied)) };
+                  }
+                  return applied;
+                },
+                {},
+              ),
+            );
+          },
+          onTurnCompleted: (env) => {
+            const terminal = deriveTurnTerminalStatus(env);
+            setTurnState((prev) =>
+              upsertTurn(
+                prev,
+                env,
+                (turn) => {
+                  // task-09：finishTurn 清全部 text/thinking 段 streaming 标记
+                  // （流式光标收起，段级状态随终态收敛）；终态与 token 照旧页面胶水写入。
+                  const finished = finishTurn(asAssembled(turn));
+                  return {
+                    ...turn,
+                    segments: finished.segments,
+                    output: finished.output,
+                    processItems: finished.processItems,
+                    turnStartedAt: finished.turnStartedAt,
+                    seenLogIds: finished.seenLogIds,
+                    status: terminal,
+                    inputTokens: env.input_tokens ?? turn.inputTokens,
+                    outputTokens: env.output_tokens ?? turn.outputTokens,
+                  };
+                },
+                { clearCurrentRun: env.run_id! },
+              ),
+            );
+
+            // gap-fix（D-008@v1）：每轮终态后刷新 run 快照——本轮 whoLine/usage 由
+            // run 行（dispatch 冻结）注入，切换配置后的下一轮跟随新快照。
+            refreshRunsMeta(sessionId);
+
+            // ql-20260825-011：轮终态 → 后台会自动派发下一条排队消息，刷队列条
+            // （新派发轮的 turn_started 事件也会再刷一次，双保险）。
+            void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
+
+            // ql-20260824-004：每轮完成即时刷新左栏列表（轮数/相对时间/状态点，
+            // 不等 10s 轮询兜底；dialog 模式不传 onSessionListRefresh 天然不受影响）。
+            onSessionListRefresh?.();
+
+            // 失败轮拉取结构化错误详情（同 run 只拉一次，供 RunErrorItem 渲染）。
+            if (
+              terminal === "failed" &&
+              env.run_id &&
+              !fetchedErrorRunIdsRef.current.has(env.run_id)
+            ) {
+              const failedRunId = env.run_id;
+              fetchedErrorRunIdsRef.current.add(failedRunId);
+              void (async () => {
+                try {
+                  const runs = await listSessionRuns(sessionId);
+                  const matched = runs.find((r) => r.id === failedRunId);
+                  const item = buildErrorLogItem(matched?.error_detail ?? null);
+                  if (!item) return;
+                  setTurnState((prev) => ({
+                    ...prev,
+                    turns: prev.turns.map((t) =>
+                      t.runId === failedRunId && !t.errorDetail
+                        ? { ...t, errorDetail: item }
+                        : t,
+                    ),
+                  }));
+                } catch {
+                  /* 拉取失败不阻塞：失败 turn 仍有状态徽标 */
+                }
+              })();
+            }
+          },
+          onTokens: (env) => {
+            setTurnState((prev) =>
+              upsertTurn(
+                prev,
+                env,
+                (turn) => ({
+                  ...turn,
+                  inputTokens: env.input_tokens ?? turn.inputTokens,
+                  outputTokens: env.output_tokens ?? turn.outputTokens,
+                }),
+                {},
+              ),
+            );
+          },
+          onSessionEnded: () => {
+            // streamSession 内部已 close；收口本地态 + 刷新详情/列表。
+            setTurnState((prev) => ({ ...prev, currentRunId: null }));
+            setPendingRequests([]);
+            setPlanPending(null);
+            setBashProgress(null);
+            setAgentTasks([]);
+            streamRef.current = null;
+            void qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
+            onSessionListRefresh?.();
+          },
+          onError: () => {
+            // 不伪造终态；fetch-sse 迁移后无浏览器自动重连，断线由 streamSession
+            // 内建指数退避 + resync 增量回放重建连接（onError 仅记录，见 lib/daemon.ts）。
+          },
+          onPermissionRequest: (req) => {
+            if (!req.dialog_kind) return;
+            setPendingRequests((prev) =>
+              prev.some((r) => r.request_id === req.request_id)
+                ? prev
+                : [...prev, req],
+            );
+          },
+          onPermissionResolved: (resolved) => {
+            setPendingRequests((prev) =>
+              prev.filter((r) => r.request_id === resolved.request_id),
+            );
+          },
+          // task-09：plan 模式进入 → 展示 PlanApprovalCard（按 runId 去重）。
+          onPlanModeEntered: (event) => {
+            setPlanPending((prev) => {
+              if (prev && prev.runId === event.run_id) return prev;
+              return {
+                runId: event.run_id,
+                summary: event.summary,
+                requestedAt: event.requested_at,
+              };
+            });
+          },
+          // task-09：bash 命令状态/输出 → BashProgressCard（归约统一走底部 helper：
+          // 新命令重置 chunks，防同 run 上一条命令的输出/is_final 污染）。
+          onBashStatus: (event) => {
+            setBashProgress((prev) => applyBashStatusEvent(prev, event));
+          },
+          onBashChunk: (event) => {
+            setBashProgress((prev) =>
+              !prev || prev.runId !== event.run_id
+                ? prev
+                : appendBashChunk(prev, {
+                    channel: event.channel,
+                    content: event.content,
+                    is_final: event.is_final,
+                  }),
+            );
+          },
+          // verify P1 返工（FR-03）：后台 Agent 任务状态 → AgentTaskCard（按 task_id upsert）。
+          // task-12（FR-06）：归约统一走底部 applyAgentTaskStatusEvent（扩展字段合并
+          // + 终态定格 + 最近 6 条截断，page / dialog 两模式共用）。
+          onAgentTaskStatus: (event) => {
+            setAgentTasks((prev) => applyAgentTaskStatusEvent(prev, event));
+          },
+        },
+        { cursor: streamCursor, initialSync },
+      );
+    };
 
     // gap-fix：attach 并发拉 run 级轮次快照（whoLine + 历史 usage 数据源）。
     void listSessionRuns(sessionId)
@@ -1000,227 +1237,7 @@ function SessionPanelPage({
         });
     };
 
-    streamRef.current = streamSession(sessionId, {
-      onTurnStarted: (env) => {
-        // ql-20260825-011：新轮开跑（含排队消息自动派发）→ 刷队列条（队头条目
-        // 已转正式轮，应从队列中消失）。
-        void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
-        setTurnState((prev) =>
-          upsertTurn(
-            prev,
-            env,
-            (turn) => ({
-              ...turn,
-              turn: env.turn ?? turn.turn,
-              status: turn.status === "pending" ? "running" : turn.status,
-            }),
-            { setCurrentRun: env.run_id! },
-          ),
-        );
-      },
-      onLog: (env) => {
-        // user_input 是用户消息（attach 历史/占位 turn 已作 prompt），不进 output
-        // （装配器内同语义双保险）。task-09（FR-05）：其余日志归一喂共享装配器，
-        // 分类 / override 撤回 / tool 配对 / 子代理归属一律依赖装配器导出。
-        if (env.channel === "user_input") {
-          // 2026-08-25-unified-floating-session task-11（FR-7）：daemon 回传的
-          // 首条 user_input 含完整 dispatch_prompt——提取前导为 preamble 段
-          // （对话视图不渲染，「全部」视图显示注入来源）。
-          const preambleText = extractPreambleText(env.content ?? "");
-          if (preambleText && env.run_id) {
-            setTurnState((prev) =>
-              upsertTurn(
-                prev,
-                env,
-                (turn) =>
-                  turn.segments?.some((s) => s.kind === "preamble")
-                    ? turn
-                    : {
-                        ...turn,
-                        segments: [
-                          {
-                            kind: "preamble",
-                            id: `preamble:${env.run_id}`,
-                            text: preambleText,
-                            ts: env.timestamp
-                              ? Date.parse(env.timestamp)
-                              : Date.now(),
-                          },
-                          ...(turn.segments ?? []),
-                        ],
-                      },
-                { setCurrentRun: env.run_id! },
-              ),
-            );
-          }
-          return;
-        }
-        setTurnState((prev) =>
-          upsertTurn(
-            prev,
-            env,
-            (turn) => {
-              const applied = applyEnvelopeToTurn(turn, env);
-              // quick-9f86d2c3（会话 e87622aa）：终态轮迟到 log（轮后对账 / 断线
-              // resync 重放）补跑 finishTurn——迟到 partial 不常亮光标、前缀重复
-              // 段就地收敛。当前活跃 run（healToRunning 自愈场景）不跑，流式光标
-              // 照常。同款兜底见 dialog onLog（lateOnIdleRun）。
-              const lateOnIdleRun = prev.currentRunId !== env.run_id;
-              if (
-                lateOnIdleRun &&
-                TERMINAL_TURN_STATUSES.has(turn.status) &&
-                applied !== turn
-              ) {
-                return { ...applied, ...finishTurn(asAssembled(applied)) };
-              }
-              return applied;
-            },
-            {},
-          ),
-        );
-      },
-      onTurnCompleted: (env) => {
-        const terminal = deriveTurnTerminalStatus(env);
-        setTurnState((prev) =>
-          upsertTurn(
-            prev,
-            env,
-            (turn) => {
-              // task-09：finishTurn 清全部 text/thinking 段 streaming 标记
-              // （流式光标收起，段级状态随终态收敛）；终态与 token 照旧页面胶水写入。
-              const finished = finishTurn(asAssembled(turn));
-              return {
-                ...turn,
-                segments: finished.segments,
-                output: finished.output,
-                processItems: finished.processItems,
-                turnStartedAt: finished.turnStartedAt,
-                seenLogIds: finished.seenLogIds,
-                status: terminal,
-                inputTokens: env.input_tokens ?? turn.inputTokens,
-                outputTokens: env.output_tokens ?? turn.outputTokens,
-              };
-            },
-            { clearCurrentRun: env.run_id! },
-          ),
-        );
-
-        // gap-fix（D-008@v1）：每轮终态后刷新 run 快照——本轮 whoLine/usage 由
-        // run 行（dispatch 冻结）注入，切换配置后的下一轮跟随新快照。
-        refreshRunsMeta(sessionId);
-
-        // ql-20260825-011：轮终态 → 后台会自动派发下一条排队消息，刷队列条
-        // （新派发轮的 turn_started 事件也会再刷一次，双保险）。
-        void qc.invalidateQueries({ queryKey: ["agentSessionQueue", sessionId] });
-
-        // ql-20260824-004：每轮完成即时刷新左栏列表（轮数/相对时间/状态点，
-        // 不等 10s 轮询兜底；dialog 模式不传 onSessionListRefresh 天然不受影响）。
-        onSessionListRefresh?.();
-
-        // 失败轮拉取结构化错误详情（同 run 只拉一次，供 RunErrorItem 渲染）。
-        if (
-          terminal === "failed" &&
-          env.run_id &&
-          !fetchedErrorRunIdsRef.current.has(env.run_id)
-        ) {
-          const failedRunId = env.run_id;
-          fetchedErrorRunIdsRef.current.add(failedRunId);
-          void (async () => {
-            try {
-              const runs = await listSessionRuns(sessionId);
-              const matched = runs.find((r) => r.id === failedRunId);
-              const item = buildErrorLogItem(matched?.error_detail ?? null);
-              if (!item) return;
-              setTurnState((prev) => ({
-                ...prev,
-                turns: prev.turns.map((t) =>
-                  t.runId === failedRunId && !t.errorDetail
-                    ? { ...t, errorDetail: item }
-                    : t,
-                ),
-              }));
-            } catch {
-              /* 拉取失败不阻塞：失败 turn 仍有状态徽标 */
-            }
-          })();
-        }
-      },
-      onTokens: (env) => {
-        setTurnState((prev) =>
-          upsertTurn(
-            prev,
-            env,
-            (turn) => ({
-              ...turn,
-              inputTokens: env.input_tokens ?? turn.inputTokens,
-              outputTokens: env.output_tokens ?? turn.outputTokens,
-            }),
-            {},
-          ),
-        );
-      },
-      onSessionEnded: () => {
-        // streamSession 内部已 close；收口本地态 + 刷新详情/列表。
-        setTurnState((prev) => ({ ...prev, currentRunId: null }));
-        setPendingRequests([]);
-        setPlanPending(null);
-        setBashProgress(null);
-        setAgentTasks([]);
-        streamRef.current = null;
-        void qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
-        onSessionListRefresh?.();
-      },
-      onError: () => {
-        // 不伪造终态；fetch-sse 迁移后无浏览器自动重连，断线由 streamSession
-        // 内建指数退避 + resync 增量回放重建连接（onError 仅记录，见 lib/daemon.ts）。
-      },
-      onPermissionRequest: (req) => {
-        if (!req.dialog_kind) return;
-        setPendingRequests((prev) =>
-          prev.some((r) => r.request_id === req.request_id)
-            ? prev
-            : [...prev, req],
-        );
-      },
-      onPermissionResolved: (resolved) => {
-        setPendingRequests((prev) =>
-          prev.filter((r) => r.request_id !== resolved.request_id),
-        );
-      },
-      // task-09：plan 模式进入 → 展示 PlanApprovalCard（按 runId 去重）。
-      onPlanModeEntered: (event) => {
-        setPlanPending((prev) => {
-          if (prev && prev.runId === event.run_id) return prev;
-          return {
-            runId: event.run_id,
-            summary: event.summary,
-            requestedAt: event.requested_at,
-          };
-        });
-      },
-      // task-09：bash 命令状态/输出 → BashProgressCard（归约统一走底部 helper：
-      // 新命令重置 chunks，防同 run 上一条命令的输出/is_final 污染）。
-      onBashStatus: (event) => {
-        setBashProgress((prev) => applyBashStatusEvent(prev, event));
-      },
-      onBashChunk: (event) => {
-        setBashProgress((prev) =>
-          !prev || prev.runId !== event.run_id
-            ? prev
-            : appendBashChunk(prev, {
-                channel: event.channel,
-                content: event.content,
-                is_final: event.is_final,
-              }),
-        );
-      },
-      // verify P1 返工（FR-03）：后台 Agent 任务状态 → AgentTaskCard（按 task_id upsert）。
-      // task-12（FR-06）：归约统一走底部 applyAgentTaskStatusEvent（扩展字段合并
-      // + 终态定格 + 最近 6 条截断，page / dialog 两模式共用）。
-      onAgentTaskStatus: (event) => {
-        setAgentTasks((prev) => applyAgentTaskStatusEvent(prev, event));
-      },
-    });
+    void establish();
 
     return () => {
       cancelled = true;
@@ -3212,8 +3229,14 @@ function SessionPanelDialog(props: SessionPanelProps) {
       // prefetch 先回灌历史（防 SSE 订阅前 daemon publish 丢事件）。必须 await 先
       // 于 SSE 建连：否则 SSE 收到 turn_started 建空 turn 后 prev.turns 非空，
       // prefetch 条件（prev.turns 空）不满足 → 不回灌 → output 空白。
+      // ql-20260827-018：回灌成功的最大 log ts 作 cursor 传给 streamSession——
+      // 建连前缺口同步只增量拉取该点之后的日志，补「快照 → 订阅」窗口；预取
+      // 失败时退 initialSync 全量对账兜底。
+      let streamCursor: string | undefined;
+      let initialSync = false;
       try {
         const logs = await getAgentSessionLogs(sessionId);
+        streamCursor = maxLogTimestamp(logs);
         if (logs.length > 0) {
           const turns = logsToTurns(logs);
           if (turns.length > 0) {
@@ -3223,7 +3246,8 @@ function SessionPanelDialog(props: SessionPanelProps) {
           }
         }
       } catch {
-        /* prefetch 失败不阻断 SSE */
+        /* prefetch 失败不阻断 SSE；initialSync 全量对账兜底 */
+        initialSync = true;
       }
         // await 窗口竞态自查：已卸载（cleanup 先跑过，streamConnRef 当时还是
         // null 未 close 到）/ 已有连接（并发先建）/ 代际已推进（attach 切换或
@@ -3402,6 +3426,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
               setAgentTasks((prev) => applyAgentTaskStatusEvent(prev, event));
             },
           },
+          { cursor: streamCursor, initialSync },
         );
     })();
     // in-flight 登记清理：promise settle 后仅当仍是本次 promise（未被后续建流

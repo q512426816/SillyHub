@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gzip
 import io
 import json
 import re
@@ -24,7 +25,7 @@ from fastapi import (
     WebSocketDisconnect,
     status,
 )
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func as sa_func
 from sqlalchemy import select
@@ -2766,6 +2767,7 @@ async def list_session_runs(
 )
 async def get_session_logs(
     session_id: uuid.UUID,
+    request: Request,
     session: SessionDep,
     user: TaskRunAgentUser,
     after: datetime | None = Query(
@@ -2776,17 +2778,33 @@ async def get_session_logs(
             "回退 1-2s 重叠窗口并按 log_id 去重"
         ),
     ),
-) -> list[AgentRunLogEntry]:
+) -> Response:
     """Return all logs of a session, aggregated across AgentRuns (D-005@v1).
 
     Read-only. Ownership / existence follow the same resource-hiding 404 as
     the other session endpoints (no existence leak for missing / cross-user).
     Response items reuse the existing ``AgentRunLogEntry`` DTO; ``run_id`` is
     preserved so the frontend can delineate turn boundaries.
+
+    ql-20260827-018：客户端 Accept-Encoding 含 gzip 且正文超过阈值时返回 gzip
+    编码响应（长会话 5000 行 × 50KB 文本列明文传输是回显慢主因，JSON 文本
+    压缩比 ~10x）。浏览器 fetch / Next rewrite 代理均透传 accept-encoding 与
+    Content-Encoding，无需调用方改动。
     """
     svc = DaemonService(session)
     logs = await svc.get_agent_session_logs(session_id, user.id, after=after)
-    return [AgentRunLogEntry.model_validate(log) for log in logs]
+    payload = [AgentRunLogEntry.model_validate(log) for log in logs]
+    raw = json.dumps([item.model_dump(mode="json") for item in payload], ensure_ascii=False).encode(
+        "utf-8"
+    )
+    # 小响应不值得压缩编码开销（阈值对齐常见 CDN 默认 1KB）。
+    if len(raw) > 1024 and "gzip" in request.headers.get("accept-encoding", "").lower():
+        return Response(
+            content=gzip.compress(raw, compresslevel=6),
+            media_type="application/json",
+            headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"},
+        )
+    return Response(content=raw, media_type="application/json")
 
 
 # ── Session team mission trigger/list（2026-08-22-team-session-unify task-03）──

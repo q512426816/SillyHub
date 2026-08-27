@@ -185,10 +185,22 @@
 方案：stores/session.ts 落盘 key 提为 SESSION_STORAGE_KEY 常量 + 模块级 storage 事件监听，其它标签页写入的 token/user 回放进本页内存（缺字段不误清、坏 JSON 忽略、hydrated 不回放、SSR/HMR 安全）；同秒并发续票竞态由后端既有 grace 兜底，顺带实现登出/换账号跨页同步
 结果：新增 session.test.ts 6 用例全绿；相邻回归 token-refresh 9 + dashboard layout/page 守卫 21 全绿；tsc --noEmit 0 错；eslint 改动文件 0 告警
 
-## ql-20260827-018-dbd5 | 2026-08-27 22:36:48 | 会话聊天回显慢+有时加载不出来+实时与重载不一致修复
-状态：进行中
+## ql-20260827-018-dbd5 | 2026-08-27 22:36:48 | 会话聊天回显慢+有时加载不出来+实时与重载内容不一致修复
+状态：已完成
 关联变更：（无）
-文件：frontend/src/lib/daemon.ts, frontend/src/components/daemon/session-panel.tsx, backend/app/modules/daemon/router.py, frontend/src/lib/__tests__/daemon-session-stream-sync.test.ts, backend/app/modules/daemon/tests/test_session_logs_gzip.py
+文件：
+- backend/app/modules/daemon/router.py（logs 端点 gzip 协商）
+- frontend/src/lib/daemon.ts（streamSession cursor/initialSync 首连缺口同步+回放 envelope 补归属字段+maxLogTimestamp）
+- frontend/src/components/daemon/session-panel.tsx（page 模式先回灌再建流+dialog 模式 cursor 接线）
+- frontend/src/lib/__tests__/daemon-session-stream-sync.test.ts（新增 7 用例）
+- backend/app/modules/daemon/tests/test_session_logs_gzip.py（新增 5 用例）
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（模块 mock 补 maxLogTimestamp+第三参断言适配）
+- frontend/src/lib/__tests__/daemon-session.test.ts（SSE mock REST 路由 JSON 适配）
+需求：会话聊天回显慢+有时加载不出来+实时与重载内容不一致修复
+根因：①回显慢：/logs 历史接口全量 JSON（上限 5000 行×50KB 文本列）明文传输，WAN 部署秒级等待；②加载不出来：session-panel page 模式建流 effect 并行发起历史预取与 SSE，活跃会话重开时 SSE 先到建 turn，回灌条件 prev.turns 为空不满足→历史被整体丢弃，旧轮内容永久缺失（dialog 模式 establishStream 先例已修同款竞态）；③实时/重载不一致：replayLogsFromDb 合成 envelope 只带 5 个基础字段，丢 parent_tool_use_id/subagent_type/depth/tool_kind/edit_patch，断线 resync/轮后对账补放的子代理日志平铺渲染与硬重载不一致
+方案：①后端 get_session_logs 按 Accept-Encoding 协商 gzip（>1KB 压缩，Content-Encoding+Vary，小载荷/旧客户端明文回退）；②page 模式改 await 历史先回灌再建流；streamSession 新增 cursor/initialSync 首连缺口同步（syncGapFromDb 提取自 resyncAndReconnect：建连前 runs 快照合成+logs 增量回放，建连后 5s 终态复核），补历史快照→SSE 订阅窗口的丢事件，预取失败时 initialSync 全量对账兜底；dialog 模式同接线；③回放 envelope 补透传 5 个归属字段，配套新增 maxLogTimestamp 导出
+结果：backend：新增 test_session_logs_gzip.py 5 用例 + 既有 test_session_history 17 用例零回归，ruff/mypy 0；frontend：新增 daemon-session-stream-sync.test.ts 7 用例，相关 suites（daemon-session/page/sessions/runtimes/floating/mobile/assembler 等）共 212+ 用例 passed，tsc 0、eslint 无新增告警；未部署，待用户验证线上效果
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx, frontend/src/lib/__tests__/daemon-session.test.ts
 
 ## ql-20260827-019-156b | 2026-08-27 22:38:35 | 后端安全与稳定性缺陷修复批次（重置密码支配权/角色提权链/release 审批门/排队重试 500/弱引用 task/docstring）
 状态：已完成

@@ -1255,6 +1255,9 @@ function timeoutSignal(ms: number): AbortSignal {
  *   listSessionRuns + getAgentSessionLogs 全量回放/终态合成补齐缺口（调用方
  *   按 log_id 去重，合成 turn 事件在页面侧终态幂等）。close()/session_ended
  *   后不再重连。F7：resync 快照拉取带 10s 超时（options.resyncTimeoutMs 可覆盖）。
+ * - ql-20260827-018：cursor / initialSync 首连缺口同步——调用方先回灌历史再
+ *   建流（修 page 模式并行竞态：SSE 先到建 turn 致历史被整体丢弃），本函数在
+ *   首次建连前跑一次 DB 缺口同步，补「历史快照 → SSE 订阅」窗口内发布的事件。
  *
  * P0-1（2026-06-18）：从 addEventListener(kind) 改为 onmessage 单通道 dispatch，
  * 与 backend stream_session_logs 的 default data: 帧对齐。done/error 仍走命名事件
@@ -1264,7 +1267,17 @@ function timeoutSignal(ms: number): AbortSignal {
 export function streamSession(
   sessionId: string,
   handlers: SessionStreamHandlers,
-  options?: { cursor?: string; resyncTimeoutMs?: number },
+  options?: {
+    /** 已回灌历史的最大 log timestamp（ISO）——首连缺口同步的增量游标起点。 */
+    cursor?: string;
+    resyncTimeoutMs?: number;
+    /**
+     * ql-20260827-018：建连前先跑一次 DB 缺口同步（runs 快照合成 + 全量 logs
+     * 回放）。历史预取失败（无 cursor 可用）时的兜底路径；成功路径用 cursor
+     * 增量同步即可，两者都置位时 cursor 优先（lastLogTs 已初始化）。
+     */
+    initialSync?: boolean;
+  },
 ): SessionStreamConnection {
   const base = getApiBaseUrl();
   const url = new URL(
@@ -1280,7 +1293,9 @@ export function streamSession(
   // `after = lastLogTs - 2s` 之后的增量，替代全量重放（5000 行 × 50KB）。
   // -2s 重叠窗口兜「submit_messages 同批日志共用同一 timestamp，纯 timestamp
   // 游标跳过同批后到行」的边界；重复行由页面装配器 seenLogIds（log_id）去重。
-  let lastLogTs: string | null = null;
+  // ql-20260827-018：调用方已回灌历史时传 cursor 初始化——首连缺口同步从该点
+  // 增量拉取，避免无游标时的二次全量。
+  let lastLogTs: string | null = options?.cursor ?? null;
   const REPLAY_OVERLAP_MS = 2000;
   // ── ql-20260820-009：断线重连（指数退避 + 全量回放 + 终态合成） ──────────
   // fetch-sse 无自动重连、backend Redis Pub/Sub 无补发：断连期间的 turn/log
@@ -1515,6 +1530,16 @@ export function streamSession(
           status: null,
           exit_code: null,
           reason: null,
+          // ql-20260827-018：归属字段透传——回放日志与硬重载渲染一致（子代理
+          // 嵌套 / 工具类型 / Edit patch）。此前只带 5 个基础字段，断线 resync /
+          // 轮后对账补放的子代理日志平铺渲染、与刷新后不一致。segment_id/stale
+          // 不在 /logs DTO（partial 行 content 自带标记、override 撤回由分类器
+          // 解析 content 前缀），维持 undefined 语义。
+          parent_tool_use_id: log.parent_tool_use_id ?? null,
+          subagent_type: log.subagent_type ?? null,
+          depth: log.depth ?? null,
+          tool_kind: log.tool_kind ?? null,
+          edit_patch: log.edit_patch ?? null,
         }),
       });
     }
@@ -1536,6 +1561,31 @@ export function streamSession(
   };
 
   /**
+   * ql-20260827-018：DB 缺口同步（断线 resync 与首连缺口共用）——runs 快照 →
+   * 运行中 run 合成 turn_started（建轮 + 设 currentRunId）→ /logs 增量回放
+   * （P4 游标-2s 重叠，首次全量；调用方 seenLogIds 去重补缺口）→ 终态 run 合成
+   * turn_completed（补错过的完成事件；页面终态幂等，重复合成 no-op）。
+   * 不含建连——调用方决定时序（resync：同步后 wireConnection；首连：wireConnection
+   * 前同步，回放期间无实时事件竞争、段内时序干净，与 resync 同序）。
+   */
+  const syncGapFromDb = async (signal?: AbortSignal) => {
+    const runs = await listSessionRuns(sessionId, { signal });
+    if (closed) return;
+    for (const run of runs) {
+      if (!TERMINAL_RUN_STATUSES.has(run.status)) {
+        dispatchRunSynth(run, "turn_started");
+      }
+    }
+    await replayLogsFromDb(signal);
+    if (closed) return;
+    for (const run of runs) {
+      if (TERMINAL_RUN_STATUSES.has(run.status)) {
+        dispatchRunSynth(run, "turn_completed");
+      }
+    }
+  };
+
+  /**
    * 断线恢复（ql-20260820-009）：runs 快照 → 运行中 run 合成 turn_started
    * （建轮 + 设 currentRunId）→ /logs 增量回放（P4 游标-2s 重叠，首次全量；调用方 seenLogIds 去重补缺口）
    * → 终态 run 合成 turn_completed（补错过的完成事件；页面终态幂等，重复合成
@@ -1548,20 +1598,8 @@ export function streamSession(
     // catch 退避分支继续重连循环（不停摆数分钟）。仅作用于本轮两个 REST 调用。
     const signal = timeoutSignal(options?.resyncTimeoutMs ?? RESYNC_REST_TIMEOUT_MS);
     try {
-      const runs = await listSessionRuns(sessionId, { signal });
+      await syncGapFromDb(signal);
       if (closed) return;
-      for (const run of runs) {
-        if (!TERMINAL_RUN_STATUSES.has(run.status)) {
-          dispatchRunSynth(run, "turn_started");
-        }
-      }
-      await replayLogsFromDb(signal);
-      if (closed) return;
-      for (const run of runs) {
-        if (TERMINAL_RUN_STATUSES.has(run.status)) {
-          dispatchRunSynth(run, "turn_completed");
-        }
-      }
       retryCount = 0;
       wireConnection();
       reconcileTimer = setTimeout(() => void reconcileTerminalRuns(), 5000);
@@ -1586,7 +1624,27 @@ export function streamSession(
     }
   };
 
-  wireConnection();
+  // ql-20260827-018：首连缺口同步——调用方已回灌历史（cursor）或预取失败
+  // （initialSync）时，建连**前**跑一次 DB 缺口同步（同 resync 时序：回放期间
+  // 无实时事件竞争，段内时序干净），补「历史快照 → SSE 订阅」窗口内发布的
+  // 事件；同步失败不阻断建连（轮后对账 / 断线 resync 兜底）。建连后 5s 延迟
+  // 复核兜「同步窗口内完成」的 run（同 resync）。
+  if (options?.cursor || options?.initialSync) {
+    void syncGapFromDb(
+      timeoutSignal(options?.resyncTimeoutMs ?? RESYNC_REST_TIMEOUT_MS),
+    )
+      .catch(() => {
+        /* 静默：轮后对账 / 断线 resync 再兜 */
+      })
+      .finally(() => {
+        if (!closed && !es) wireConnection();
+        if (!closed) {
+          reconcileTimer = setTimeout(() => void reconcileTerminalRuns(), 5000);
+        }
+      });
+  } else {
+    wireConnection();
+  }
 
   return {
     close: () => {
@@ -1978,6 +2036,19 @@ export async function getAgentSessionLogs(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/logs${qs}`,
     { signal: opts?.signal },
   );
+}
+
+/**
+ * ql-20260827-018：logs 的最大 timestamp（ISO 字典序比较，后端返回 asc 序但
+ * 不依赖排序兜底）。作为 streamSession 首连缺口同步的 cursor——历史回灌后
+ * SSE 只需增量拉取该点之后的日志。空数组 → undefined（不启用增量同步）。
+ */
+export function maxLogTimestamp(logs: AgentRunLogEntry[]): string | undefined {
+  let max: string | undefined;
+  for (const log of logs) {
+    if (log.timestamp && (!max || log.timestamp > max)) max = log.timestamp;
+  }
+  return max;
 }
 
 /**

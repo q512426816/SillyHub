@@ -330,6 +330,17 @@ let lastStream: FakeSseStream | null = null;
 function installSseFetchMock(): void {
   vi.spyOn(globalThis, "fetch").mockImplementation(
     (input: URL | RequestInfo, init?: RequestInit) => {
+      const u = typeof input === "string" ? input : input.toString();
+      // ql-20260827-018：cursor 首连缺口同步会先发 /runs、/logs REST——回 JSON
+      // 空数组（否则 apiFetch 的 resp.text() 挂在永不关闭的 SSE 流上）。
+      if (!u.includes("/stream")) {
+        return Promise.resolve(
+          new Response("[]", {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
       let controller!: ReadableStreamDefaultController<Uint8Array>;
       const body = new ReadableStream<Uint8Array>({
         start(c) {

@@ -92,30 +92,36 @@ const mocks = vi.hoisted(() => ({
   })),
 }));
 
-vi.mock("@/lib/daemon", () => ({
-  PROVIDER_META: {
-    claude: { label: "Claude Code", icon: "🟣", color: "" },
-    codex: { label: "Codex", icon: "🟢", color: "" },
-  },
-  // task-07：task-05 树形态一次拉取常量（原 18 红基线根因即缺它）。
-  AGENT_SESSIONS_TREE_FETCH_LIMIT: 500,
-  listAgentSessions: (...args: unknown[]) => mocks.listAgentSessions(...args),
-  getAgentSession: (...args: unknown[]) => mocks.getAgentSession(...args),
-  getAgentSessionLogs: (...args: unknown[]) => mocks.getAgentSessionLogs(...args),
-  createSession: (...args: unknown[]) => mocks.createSession(...args),
-  injectSession: (...args: unknown[]) => mocks.injectSession(...args),
-  interruptSession: (...args: unknown[]) => mocks.interruptSession(...args),
-  endSession: (...args: unknown[]) => mocks.endSession(...args),
-  reopenSession: (...args: unknown[]) => mocks.reopenSession(...args),
-  streamSession: (...args: unknown[]) => mocks.streamSession(...args),
-  fetchPendingDialogs: (...args: unknown[]) => mocks.fetchPendingDialogs(...args),
-  fetchSessionDialogHistory: (...args: unknown[]) =>
-    mocks.fetchSessionDialogHistory(...args),
-  listSessionRuns: (...args: unknown[]) => mocks.listSessionRuns(...args),
-  deleteAgentSession: vi.fn(),
-  subscribeAgentSessionsEvents: (...args: unknown[]) =>
-    mocks.subscribeAgentSessionsEvents(...args),
-}));
+vi.mock("@/lib/daemon", async (importOriginal) => {
+  // ql-20260827-018：maxLogTimestamp（纯函数）用真实实现——SessionPanel page
+  // 模式建流前置计算 cursor，mock 缺它会命中 catch 兜底、历史回灌被跳过。
+  const actual = await importOriginal<typeof import("@/lib/daemon")>();
+  return {
+    maxLogTimestamp: actual.maxLogTimestamp,
+    PROVIDER_META: {
+      claude: { label: "Claude Code", icon: "🟣", color: "" },
+      codex: { label: "Codex", icon: "🟢", color: "" },
+    },
+    // task-07：task-05 树形态一次拉取常量（原 18 红基线根因即缺它）。
+    AGENT_SESSIONS_TREE_FETCH_LIMIT: 500,
+    listAgentSessions: (...args: unknown[]) => mocks.listAgentSessions(...args),
+    getAgentSession: (...args: unknown[]) => mocks.getAgentSession(...args),
+    getAgentSessionLogs: (...args: unknown[]) => mocks.getAgentSessionLogs(...args),
+    createSession: (...args: unknown[]) => mocks.createSession(...args),
+    injectSession: (...args: unknown[]) => mocks.injectSession(...args),
+    interruptSession: (...args: unknown[]) => mocks.interruptSession(...args),
+    endSession: (...args: unknown[]) => mocks.endSession(...args),
+    reopenSession: (...args: unknown[]) => mocks.reopenSession(...args),
+    streamSession: (...args: unknown[]) => mocks.streamSession(...args),
+    fetchPendingDialogs: (...args: unknown[]) => mocks.fetchPendingDialogs(...args),
+    fetchSessionDialogHistory: (...args: unknown[]) =>
+      mocks.fetchSessionDialogHistory(...args),
+    listSessionRuns: (...args: unknown[]) => mocks.listSessionRuns(...args),
+    deleteAgentSession: vi.fn(),
+    subscribeAgentSessionsEvents: (...args: unknown[]) =>
+      mocks.subscribeAgentSessionsEvents(...args),
+  };
+});
 
 vi.mock("@/lib/use-daemon-machines", () => ({
   useDaemonMachines: () => mocks.machinesHook(),
@@ -499,6 +505,8 @@ describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄�
           onLog: expect.any(Function),
           onTurnCompleted: expect.any(Function),
         }),
+        // ql-20260827-018：第三参 cursor/initialSync 建流选项（logs 预取失败兜底）。
+        expect.any(Object),
       );
     });
     expect(mocks.getAgentSessionLogs).toHaveBeenCalledWith("s-1");
@@ -763,6 +771,8 @@ describe("SessionPanel SSE 装配器接线（task-09）", () => {
       expect(mocks.streamSession).toHaveBeenCalledWith(
         "s-1",
         expect.objectContaining({ onLog: expect.any(Function) }),
+        // ql-20260827-018：第三参 cursor/initialSync 建流选项。
+        expect.any(Object),
       );
     });
     return getStreamHandlers();
@@ -852,6 +862,8 @@ describe("SessionPanel SSE 装配器接线（task-09）", () => {
       expect(mocks.streamSession).toHaveBeenCalledWith(
         "s-1",
         expect.objectContaining({ onLog: expect.any(Function) }),
+        // ql-20260827-018：第三参 cursor/initialSync 建流选项。
+        expect.any(Object),
       );
     });
     const listCalls = mocks.listAgentSessions.mock.calls.length;
