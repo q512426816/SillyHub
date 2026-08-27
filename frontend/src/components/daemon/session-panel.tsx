@@ -1016,7 +1016,22 @@ function SessionPanelPage({
           upsertTurn(
             prev,
             env,
-            (turn) => applyEnvelopeToTurn(turn, env),
+            (turn) => {
+              const applied = applyEnvelopeToTurn(turn, env);
+              // quick-9f86d2c3（会话 e87622aa）：终态轮迟到 log（轮后对账 / 断线
+              // resync 重放）补跑 finishTurn——迟到 partial 不常亮光标、前缀重复
+              // 段就地收敛。当前活跃 run（healToRunning 自愈场景）不跑，流式光标
+              // 照常。同款兜底见 dialog onLog（lateOnIdleRun）。
+              const lateOnIdleRun = prev.currentRunId !== env.run_id;
+              if (
+                lateOnIdleRun &&
+                TERMINAL_TURN_STATUSES.has(turn.status) &&
+                applied !== turn
+              ) {
+                return { ...applied, ...finishTurn(asAssembled(applied)) };
+              }
+              return applied;
+            },
             {},
           ),
         );
@@ -3162,15 +3177,22 @@ function SessionPanelDialog(props: SessionPanelProps) {
               // 不追加到 agent output，避免 prompt 气泡与 output 气泡重复。
               if (env.channel === "user_input") return;
               setView((prev) => {
-                // 日志内容处理走共享装配器（归一 + 增量回写）。无内容变化（重复
-                // log_id / 分类丢弃 / override 无匹配段）时装配器原引用返回 → turn
-                // 原样（引用相等短路，R1——segments 缺省的旧形状 turn 不被切到 v2
-                // 渲染路径）。
+                // quick-9f86d2c3（会话 e87622aa）：非当前活跃 run 的 log = 终态轮迟到
+                // 事件（轮后对账 1.5s 重放 / 断线 resync 增量）。此类 log 落在已终态
+                // 轮时补跑 finishTurn——迟到的 partial 不再以 streaming 段常亮光标，
+                // 残留前缀重复段就地收敛（「直播终态 == 刷新视图」不变式扩展到轮后）。
+                // 当前活跃 run 不跑：healToRunning（ql-20260820-007 attach 竞态自愈）
+                // 场景下流式光标仍需正常工作，下一 partial 会重新置位 streaming。
+                const lateOnIdleRun = prev.currentRunId !== env.run_id;
                 return upsertDialogTurn(prev, env, (turn) => {
                   const assembled = assembledViewOf(turn);
                   const next = applyLogToSegments(assembled, toAssemblerLogInput(env));
                   if (next === assembled) return turn;
-                  return { ...turn, ...next };
+                  const merged = { ...turn, ...next };
+                  if (lateOnIdleRun && TERMINAL_TURN_STATUSES.has(turn.status)) {
+                    return { ...merged, ...finishTurn(assembledViewOf(merged)) };
+                  }
+                  return merged;
                 }, {});
               });
             },

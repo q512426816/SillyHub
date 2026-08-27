@@ -94,9 +94,10 @@ SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
 ```
 
 ## 注意事项
-- AppShell / TopBar / antd-providers 是全局组件，改动影响所有 dashboard 页面；菜单条目缺失是 menu-permissions 数据问题，app-shell 只管图标映射。
+- AppShell / TopBar / antd-providers 是全局组件，改动影响所有页面；菜单条目缺失是 menu-permissions 数据问题，app-shell 只管图标映射。
 - interactive-session-panel 与 sessions 页共享 TurnTimeline / SessionInputBar / 事件处理语义：日志处理已收敛到 session-log-assembler 单一装配器（2026-08-19-session-stream-ux），改会话流逻辑只改装配器一处；但改 TurnTimeline 渲染仍需两处回归（/runtimes 弹窗零回归是 sessions-portal 的硬约束）。
 - session-log-assembler 是纯函数模块（零 React 依赖），分类函数（classifySessionLog 等）实现已迁入其中，session-log-sanitize.ts 保留 re-export 垫片——新代码 import 分类一律从 assembler 取。
+- partial/complete 双向收编（quick-9f86d2c3，2026-08-27，会话 e87622aa 直播重复段+光标常闪）：正向=dropPrefixPartialReply（完整行吸收尾部 partial 前缀段）；反向=bucketCoveredByFullText（迟到 partial 是在场完整行前缀 → 跳过落段）；两向吸收/override 撤回都封存 segmentId（SUPERSEDED_SEG_IDS 内部 Set 随 turn 链流转），同 segmentId 后续重放窗口一律免疫；面板 onLog（dialog 与进度两路径）对终态轮的迟到 log 补跑 finishTurn（非当前活跃 run 才跑——healToRunning 自愈场景流式光标照常）。根因：partial 行 Redis 发布丢失 → turn_completed 后轮后对账重放到终态轮，原装配器无反序收编且 finishTurn 已跑过永不再清。
 - ui/ 基础件遵循 shadcn 约定（CLI 添加为主，不手改生成物）；业务组件一律 "use client"。
 - agent-log 归一化（去重 TOOL_USE / 合并 TOOL_RESULT / 识别 thinking）是纯函数，与渲染器分离便于单测；stdout [TOOL_USE]/[TOOL_RESULT] 文本事件也走同一解析。
 - remote-folder-picker 是远程目录选择唯一入口（替代旧 browseFolder 系统弹窗——Web 用户看不到 daemon 宿主机原生弹窗）。
@@ -111,6 +112,7 @@ SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
 
 ## 变更索引
 
+- quick-9f86d2c3 | 直播重复段+光标常闪（会话 e87622aa）：终态轮迟到 partial 反向收编 + segId 封存 + 面板终态轮 finishTurn 兜底（详见注意事项「partial/complete 双向收编」条）
 - ql-20260824-004-9783 | /sessions 用户消息气泡上方空行修复：page 模式占位轮 displayPrompt 无附件时拼出前导换行（61a1b709 引入），改走 joinAttachmentMarkers（runtime-session-helpers，parse 逆操作、语义对齐 backend inject 落库）；dialog 模式 submitFollowup 不受影响
 - 2026-08-19-sessions-workspace-selector | 新建会话工作区选择器：workspace-session-picker 组件 + new-session-form 接入（工作区→绑定机器联动、提交体 workspace_id）
 - ql-20260819-001-b742 | 会话列表和面板头部增加工作区信息显示（session-list-panel chips + session header badge）

@@ -300,6 +300,56 @@ describe("SessionPanel（dialog）", () => {
     expect(conn.closeSpy).not.toHaveBeenCalled();
   });
 
+  it("quick-9f86d2c3：终态轮迟到 partial（轮后对账重放）不落重复段、光标不常亮", async () => {
+    const stream = makeStreamMock();
+    sessionApi.streamSession.mockImplementation(stream.factory);
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-1", run_id: "run-1", lease_id: "l",
+      status: "active", stream_url: "",
+    });
+
+    setupPanel();
+    const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "分析一下" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() => expect(sessionApi.createSession).toHaveBeenCalled());
+
+    const conn = stream.conn;
+    act(() => {
+      conn.handlers.route(makeEnvelope("turn_started", { run_id: "run-1", turn: 1 }));
+      conn.handlers.route(
+        makeEnvelope("log", {
+          run_id: "run-1",
+          channel: "stdout",
+          content: "[ASSISTANT] 只有 pdftotext 可用，我用 Node + pdfjs-dist(自带 CMap)再试一次。",
+          log_id: "log-full",
+        }),
+      );
+    });
+    await waitFor(() => expect(screen.getByText(/再试一次/)).toBeInTheDocument());
+
+    act(() => {
+      conn.handlers.route(
+        makeEnvelope("turn_completed", { run_id: "run-1", status: "completed" }),
+      );
+      // 会话 e87622aa 实证时序：partial 实时发布丢失，turn_completed 之后经
+      // 轮后对账重放到达（full 的严格前缀 + segment_id）。
+      conn.handlers.route(
+        makeEnvelope("log", {
+          run_id: "run-1",
+          channel: "stdout",
+          content: "[ASSISTANT] 只有 pdftotext 可用，我用 Node + pdfjs-dist(",
+          segment_id: "main:msg-late:text",
+          log_id: "log-partial",
+        }),
+      );
+    });
+
+    // 单气泡（迟到 partial 被反向前缀收编），流式光标不出现
+    expect(document.querySelectorAll(".seg-text-bubble")).toHaveLength(1);
+    expect(document.querySelector(".seg-caret")).toBeNull();
+  });
+
   it("AC-11-03 第二条走 injectSession，SSE 累计仍只 1 次", async () => {
     const stream = makeStreamMock();
     sessionApi.streamSession.mockImplementation(stream.factory);

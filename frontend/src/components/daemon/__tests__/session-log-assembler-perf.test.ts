@@ -137,16 +137,17 @@ describe("F7 增量投影（流式热路径 O(1)，值与全量重算一致）",
     expect(applyLogToSegments(third, makeLog("2", "stdout", "x", { segmentId: "main:s:1" }))).toBe(third);
   });
 
-  it("撤回同步 id 索引：撤回后同 segmentId 新段 id 为派生 base（无多余 -2 后缀）", () => {
+  it("撤回同步 id 索引：撤回后新建段 id 为派生 base（无多余 -2 后缀）", () => {
     let turn = applyLogToSegments(
       createEmptyAssembledTurn(),
       makeLog("1", "stdout", "p1", { segmentId: "main:a:1" }),
     );
     turn = applyLogToSegments(turn, makeLog("2", null, "[ASSISTANT_OVERRIDE] main:a:1"));
     expect(turn.segments).toHaveLength(0);
-    turn = applyLogToSegments(turn, makeLog("3", "stdout", "p2", { segmentId: "main:a:1" }));
-    // 索引已同步删除被撤 id：同 base 再建不带 -2（与全树收集语义一致）
-    expect(turn.segments.map((s) => s.id)).toEqual(["text:main:a:1"]);
+    // quick-9f86d2c3：override 后同 segmentId 的 partial 已被封存（重放窗口不复活），
+    // 换新 segmentId 验证原属性——索引已同步删除被撤 id，新 base 不带 -2 后缀。
+    turn = applyLogToSegments(turn, makeLog("3", "stdout", "p2", { segmentId: "main:b:1" }));
+    expect(turn.segments.map((s) => s.id)).toEqual(["text:main:b:1"]);
   });
 
   it("内部状态随对象展开流转：session-panel merge 形态（{...turn, ...next} + 视图直传）不断链", () => {

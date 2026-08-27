@@ -28,7 +28,7 @@ backend 与 daemon 经 WebSocket + REST 双向通信，支持三种执行形态�
   - permission_service：权限请求落 dialog 行、pending/history/workspace 级聚合、响应下发、超时收敛。
   - 僵尸收敛双档 sweep（`sweep.py`，2026-08-24 会话审查 P2b）：① reconnecting 超窗（180s）→ failed（DS-6 原档）；② `session_offline_sweep_once`——active/pending 会话其 runtime 非「online 且心跳≥600s 宽限」→ failed + 挂起 run failed + 挂起 lease cancelled（daemon 永久死亡场景；正常重启走 recover→reconnecting 不进本档）；两档收敛后都广播 `session_ended`（SSE 只认它收尾）。终态写入点 `cancel_lease`（kill 把会话置 ended）也广播 session_ended；SSE 生成器对 `session_recovery_failed` 同样收尾（agent/service.py stream_session_logs）。
 - **run_sync**：
-  - `submit_messages`：daemon 上行消息落库；partial/complete 用 segmentId 跨调用去重（`_revoke_committed_partials` 撤已提交半截）；pending→running 用原子条件 UPDATE 防迟到的 submit 覆盖终态（lost update）。
+  - `submit_messages`：daemon 上行消息落库；partial/complete 用 segmentId 跨调用去重（`_revoke_committed_partials` 撤已提交半截）；pending→running 用原子条件 UPDATE 防迟到的 submit 覆盖终态（lost update）。quick-9f86d2c3（2026-08-27，会话 e87622aa）：完整行展开 segmentId 格式对齐 daemon partial 的 task-13 格式 `${parent}:${mid}:${type}`（text/thinking；原 `${mid}:${idx}` 与 partial 永不匹配致同调用判定与跨调用清理全部空转、partial 行永久滞留 DB）；完整行落库时不再只依赖 override 信号——直接 `_revoke_committed_partials` DELETE 已 commit 的同 segmentId partial（interactive 每消息独立 HTTP 提交，partial 先 commit、完整行后到是常态）。
   - `sync_agent_run_status`、`close_interactive_run`（gate 任务仅 verify 阶段适用 `_gate_applicable`，勿扩大）。
   - `_trigger_stage_completion_callback`：lease 完结回调驱动 change stage 收口；`_advance_team_stage`：execute 团队 mission 全 worker 收敛后推阶段；`_handle_team_run_completion`。
   - gate/stage 状态变化事件发布（`_publish_gate_status_changed` / `_publish_stage_status_changed`）。
@@ -77,6 +77,7 @@ submitWithRetry(退避) → 用尽 → FileOutbox 暂存 → 心跳健康 → dr
 - llm-proxy 白名单/转发行为与 daemon 侧 credential-injector 的注入约定是双侧契约；master key 永不出 hub 进程。
 - WS 升级期鉴权 4001/4003 语义由各调用方（WS 端点、llm-proxy）落地，共用凭据解析 helper 只做凭据→User。
 - segmentId 去重约定（partial 行带 metadata.segmentId、complete 行 NULL）是双侧消息结构契约；pending→running 原子条件 UPDATE 防终态覆盖，勿改回 ORM 内存读改写。
+- 已知问题（quick-9f86d2c3 实证，2026-08-27）：daemon session-manager 的 `_emitOverrideSignals`（[ASSISTANT_OVERRIDE]/[THINKING_OVERRIDE]）单测绿但生产环境从未观测到达 backend（全库 0 条 override 消费痕迹、partial 行从未被其删除，run 6f5720ab / 会话 e87622aa）——静态推演 daemon 代码与 transcript（47/47 assistant 记录带 message.id、与 partial mid 一致）均应命中，失效点疑似在 daemon→backend HTTP 提交链路（daemon 日志走 Windows 服务 stdout 不可追溯）。backend 已改为完整行落库时自行 `_revoke_committed_partials`（不依赖 override），前端装配器双向收编兜底；override 链路本体待运行时插桩排查，修复前勿依赖它做任何清理。
 - gate 仅 verify 阶段适用（`_gate_applicable`），勿恢复对任意 change run 跑 gate 的旧行为（曾致 quick 变更误报核验失败）。
 - Node 侧 PolicyCache realpath 归一 + allowed_roots JSON 短路是心跳不卡死的关键；盘符根/Unix 根前缀比较勿再补尾部 sep（历史误 deny 事故）。
 - spec-sync 推拉有顺序约束；daemon 侧 manifest 缓存过旧会推不出新 change（已知运维坑），从仓库导入 RPC 不受 30s 代理超时限制。
