@@ -55,3 +55,9 @@
 锚点：`frontend/src/components/files/use-object-url.ts`
 最近确认：3b1624fb
 理由：鉴权拉 blob → createObjectURL → 卸载/切换自动 revoke 三件套统一 hook，消灭三入口手写拉取泄漏风险（R-04）。
+
+## D-010@v1 : OnlyOffice 渲染器免 npm 包（动态 script + DocsAPI）
+状态：implemented（休眠）
+锚点：`frontend/src/components/files/previewers/onlyoffice-previewer.tsx`
+最近确认：3b1624fb
+理由：不引 @onlyoffice/documenteditor-react——DocsAPI 全局 + 自写最小类型；api.js 单飞加载；DS 9 替换式挂载（holder 被 iframe 替换）→ 兜底超时以父容器出现 iframe/holder 消失为成功信号（ql-20260826-002 误降级教训）。

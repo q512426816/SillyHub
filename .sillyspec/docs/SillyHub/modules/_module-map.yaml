@@ -544,6 +544,26 @@ modules:
     concerns: []
     review_reasons: []
 
+  preview_office:
+    status: active
+    doc: modules/preview_office.md
+    paths:
+      - backend/app/modules/preview_office/**
+    tags: [backend, preview, office]
+    aliases: [office-preview, onlyoffice-preview]
+    entrypoints:
+      - APIRouter tags=[preview]  # office-config + 一次性 file 令牌回拉
+    main_symbols:
+      - preview_office.service.build_preview（Word→LibreOffice→PDF / DS 配置双模式入口）
+      - preview_office.service.issue_file_token / consume_file_token（一次性令牌）
+      - preview_office.router（/preview/office-config + /preview/file/{token}）
+    depends_on: [core, storage]
+    used_by: [frontend_components]
+    needs_review: false
+    concerns:
+      - 休眠：ONLYOFFICE_ENABLED=false + GOTENBERG_URL 空 → office-config 503（2026-08-27 用户决策退役，代码保留可 env 重启）
+    review_reasons: []
+
   llm_provider:
     status: active
     doc: modules/llm_provider.md
