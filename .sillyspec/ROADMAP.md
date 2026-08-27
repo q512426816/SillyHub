@@ -4,11 +4,26 @@
 > 维护规则：每次 `sillyspec-archive` 归档变更时同步更新「已完成里程碑」与「当前活跃」两节。
 > 详细变更规格见 `.sillyspec/changes/`（活跃）与 `.sillyspec/changes/archive/`（历史）。
 
-最近更新：2026-08-27
+最近更新：2026-08-28
 
 ---
 
 ## 一、已完成里程碑（按时间，提炼自已归档变更）
+
+### 2026-08-28 · 守护进程共享与平台共享智能体（grants 统一授权表）
+
+- **daemon-agent-share**（2026-08-28，brainstorm→plan→execute→verify→E2E 全流程 + R-10 修复收口）：
+  新建 `daemon_runtime_grants` 统一授权表（workspace|platform 两类 grantee，NULLS NOT DISTINCT
+  唯一约束；存量 shared 数据自动迁移）。三块能力：①工作区共享补齐两缺口——共享机器在守护进程
+  页面可见（shared_to_me 含引擎明细）+ 交互式会话钉定授权放行（owner-only 扩为授权判定，借用
+  审计含 grant_id；修改类端点 owner-only 不变）；②平台共享智能体——管理员配置（档案+自己名下
+  在线 runtime+源码工作区+writable_dir）共享给全体用户，会话服务端强制钉定/cwd 锚源码/禁 Bash
+  七工具白名单/writable_dir 写边界（daemon 写守卫 overlay 交集收紧，D-011 唯一一处 daemon
+  增量）；③前端守护进程页共享区块+管理卡+选择器三入口共享徽标+「平台共享」会话徽标（用户自选
+  D-004@v2，回退链零改动）。E2E 双账号实测（admin/180024）三攻防全拦（外写拒/Bash 绕过拒/路径
+  改写拒）；两处集成缺陷修复（DTO validator 拒纯档案形态；R-10=SDK allowedTools 预批准集绕过
+  canUseTool——写工具从 SDK 层摘除改经守卫链）。13 task/13 决策全闭环，决策 D-001~D-013 沉淀
+  knowledge/decisions。
 
 ### 2026-08-26 · OnlyOffice/LibreOffice 高保真预览管线上线与退役（休眠保留）
 

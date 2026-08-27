@@ -1219,3 +1219,4 @@ modules:
     needs_review: false
     concerns: []
     review_reasons: []
+      - authorize_pinned_runtime (backend/app/modules/daemon/grants/queries.py, 会话钉定授权判定 owner/工作区 grant/platform 直传 404[D-012]，2026-08-28-daemon-agent-share)
