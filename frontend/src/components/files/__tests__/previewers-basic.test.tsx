@@ -49,11 +49,42 @@ describe("ImagePreviewer", () => {
 });
 
 describe("PdfPreviewer", () => {
-  it("渲染 iframe 且 src 为 objectURL", () => {
+  // ql-20260827-001：pdf.js 画布渲染——mock pdfjs-dist（jsdom 无 canvas/worker）。
+  vi.mock("pdfjs-dist", () => {
+    const makePage = () => ({
+      getViewport: ({ scale }: { scale: number }) => ({
+        width: 595 * scale,
+        height: 842 * scale,
+      }),
+      render: () => ({ promise: Promise.resolve() }),
+    });
+    return {
+      GlobalWorkerOptions: { workerSrc: "" },
+      getDocument: ({ url }: { url: string }) => ({
+        promise: url.includes("bad")
+          ? Promise.reject(new Error("invalid pdf"))
+          : Promise.resolve({
+              numPages: 2,
+              getPage: () => Promise.resolve(makePage()),
+              destroy: () => Promise.resolve(),
+            }),
+      }),
+    };
+  });
+
+  it("顺序渲染页画布（pdf.js，容器出现页节点）", async () => {
     render(<PdfPreviewer blob={mockBlob} url={mockUrl} meta={mockMeta} />);
-    const iframe = document.querySelector("iframe");
-    expect(iframe).toBeInTheDocument();
-    expect(iframe?.src).toBe(mockUrl);
+    const pages = await screen.findByTestId("pdf-pages");
+    // 两页画布顺序追加（render promise 已 resolve）
+    await vi.waitFor(() => {
+      expect(pages.querySelectorAll("canvas").length).toBe(2);
+    });
+    expect(document.querySelector("iframe")).not.toBeInTheDocument();
+  });
+
+  it("解析失败显示错误引导", async () => {
+    render(<PdfPreviewer blob={mockBlob} url="blob:bad" meta={mockMeta} />);
+    expect(await screen.findByText("PDF 渲染失败")).toBeInTheDocument();
   });
 });
 
