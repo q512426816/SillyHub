@@ -13652,7 +13652,7 @@
           "daemon"
         ],
         "summary": "Get Session Logs",
-        "description": "Return all logs of a session, aggregated across AgentRuns (D-005@v1).\n\nRead-only. Ownership / existence follow the same resource-hiding 404 as\nthe other session endpoints (no existence leak for missing / cross-user).\nResponse items reuse the existing ``AgentRunLogEntry`` DTO; ``run_id`` is\npreserved so the frontend can delineate turn boundaries.",
+        "description": "Return all logs of a session, aggregated across AgentRuns (D-005@v1).\n\nRead-only. Ownership / existence follow the same resource-hiding 404 as\nthe other session endpoints (no existence leak for missing / cross-user).\nResponse items reuse the existing ``AgentRunLogEntry`` DTO; ``run_id`` is\npreserved so the frontend can delineate turn boundaries.\n\nql-20260827-018：客户端 Accept-Encoding 含 gzip 且正文超过阈值时返回 gzip\n编码响应（长会话 5000 行 × 50KB 文本列明文传输是回显慢主因，JSON 文本\n压缩比 ~10x）。浏览器 fetch / Next rewrite 代理均透传 accept-encoding 与\nContent-Encoding，无需调用方改动。",
         "operationId": "get_session_logs_api_daemon_sessions__session_id__logs_get",
         "parameters": [
           {
@@ -52235,7 +52235,7 @@
         },
         "type": "object",
         "title": "SessionInjectRequest",
-        "description": "POST /api/daemon/sessions/{id}/inject 请求体（FR-02 / design §5 Wave1）。\n\n``agent_profile_id`` 非空且 ≠ 会话当前档案 → 切档案；``llm_provider_id``\n非空且 ≠ 当前 → 切供应商（空串/\"none\" 语义=切回本机默认）。切换校验与\nSESSION_SWITCH_CONFIG 下发归 task-05，本 DTO 只透传。\n\nql-20260817-010：**静默切换**——携带切换字段时 prompt 可为空串（切换轮\n不产生用户消息与模型回应，daemon 只 reload 配置）；纯追问（无切换字段）\n仍要求非空 prompt。\n\n2026-08-20-session-multimodal-attachments task-05：``attachment_ids`` 附件\n引用（上传端点产出的 SessionAttachment id）；**D-7 豁免**——附件非空时\nprompt 可为空（看图说话）；上限 10 = 图片 5 + 文件 5（逐 kind 校验归\nservice，DTO 层总量兜底）。"
+        "description": "POST /api/daemon/sessions/{id}/inject 请求体（FR-02 / design §5 Wave1）。\n\n``agent_profile_id`` 非空且 ≠ 会话当前档案 → 切档案；``llm_provider_id``\n非空且 ≠ 当前 → 切供应商（空串/\"none\" 语义=切回本机默认）。切换校验与\nSESSION_SWITCH_CONFIG 下发归 task-05，本 DTO 只透传。\n\nql-20260817-010：**静默切换**——携带切换字段时 prompt 可为空串（切换轮\n不产生用户消息与模型回应，daemon 只 reload 配置）；纯追问（无切换字段）\n仍要求非空 prompt。\n\n2026-08-27-background-subagent-progress task-07（FR-08 / D-004@v1）：空\nprompt 判定（含全空白 → 422「消息内容不能为空」）与上述切换/附件豁免\n**统一在 service 层** ``inject_session`` 入口（SessionEmptyPrompt，取锁 /\n忙轮入队之前）；本 DTO 不再重复判空，也**不加字段级 min_length**——豁免\n轮（静默切换 / D-7 看图说话）的请求体显式携带 ``prompt: \"\"``（前端\ninjectSession 恒发 prompt 键），字段级 min_length 会连豁免轮一并 422。\n2026-08-20-session-multimodal-attachments task-05：``attachment_ids`` 附件\n引用（上传端点产出的 SessionAttachment id）；**D-7 豁免**——附件非空时\nprompt 可为空（看图说话）；上限 10 = 图片 5 + 文件 5（逐 kind 校验归\nservice，DTO 层总量兜底）。"
       },
       "SessionInjectResponse": {
         "properties": {
@@ -52623,6 +52623,17 @@
               }
             ],
             "title": "Output Tokens"
+          },
+          "ctx_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ctx Tokens"
           }
         },
         "type": "object",
@@ -52631,7 +52642,7 @@
           "status"
         ],
         "title": "SessionRunRead",
-        "description": "GET /sessions/{id}/runs 单个 run 项（task-07 / FR-02 / design §7.4）。\n\n透传 ``AgentRun.error_detail``（模型层 ModelError 序列化值；成功 / 无错误 run\n为 None），供前端拉历史与当前 run 错误。``error_code``（调度层 / 系统错误）\n与 ``error_detail`` 正交共存（D-009），前端可分别用作系统错误兜底与模型错误\n渲染。DTO 内联在此避免触碰 schema.py（非本任务 allowed_path）。\n\ngap-fix（FR-07 whoLine / FR-08 历史 usage）：追加轮次配置快照与 usage 三组\n字段，均直映 AgentRun 既有列（查询本就 select 整实体，零查询改动）——\n  - ``agent_profile_snapshot`` / ``llm_provider_id``：D-008@v1 轮次快照，供前端\n    渲染每轮 whoLine（历史不跟随会话当前配置）；\n  - ``input_tokens`` / ``output_tokens``：daemon 关单经 close_interactive_run\n    写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）。\n全部 nullable——老 run 行 / 未配置轮为 None，前端如实显示未指定/不累计。"
+        "description": "GET /sessions/{id}/runs 单个 run 项（task-07 / FR-02 / design §7.4）。\n\n透传 ``AgentRun.error_detail``（模型层 ModelError 序列化值；成功 / 无错误 run\n为 None），供前端拉历史与当前 run 错误。``error_code``（调度层 / 系统错误）\n与 ``error_detail`` 正交共存（D-009），前端可分别用作系统错误兜底与模型错误\n渲染。DTO 内联在此避免触碰 schema.py（非本任务 allowed_path）。\n\ngap-fix（FR-07 whoLine / FR-08 历史 usage）：追加轮次配置快照与 usage 三组\n字段，均直映 AgentRun 既有列（查询本就 select 整实体，零查询改动）——\n  - ``agent_profile_snapshot`` / ``llm_provider_id``：D-008@v1 轮次快照，供前端\n    渲染每轮 whoLine（历史不跟随会话当前配置）；\n  - ``input_tokens`` / ``output_tokens``：daemon 关单经 close_interactive_run\n    写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）；\n  - ``ctx_tokens``（2026-08-27-session-token-usage-fix task-05 / FR-01）：该\n    run 期间最近一次 API 调用的提示词大小（daemon 经 usage 管线实时写入，\n    close 终态不覆盖），供前端上下文环历史回填取最新非 null 值；历史行 /\n    老 daemon 无上报为 None（环未知态，design §9）。\n全部 nullable——老 run 行 / 未配置轮为 None，前端如实显示未指定/不累计。"
       },
       "SessionRuntimeRequest": {
         "properties": {

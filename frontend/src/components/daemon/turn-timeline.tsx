@@ -125,6 +125,15 @@ export interface SessionTurnView {
   inputTokens: number | null;
   outputTokens: number | null;
   /**
+   * 2026-08-27-session-token-usage-fix task-08 / FR-01：该轮期间最近一次 API
+   * 调用的提示词大小（daemon ctx_tokens = input+cache_read+cache_creation，
+   * 含缓存命中部分）。由 SSE tokens/turn_completed 事件与 runsMeta 回填写入；
+   * null / 缺省 = 未知（历史会话 / 旧 daemon 不上报）。仅上下文环分子消费
+   * （session-panel usedTokens 逆序取最新非 null 值），每轮徽标仍是本轮计费量
+   * 渲染、不读此字段（D-004）。
+   */
+  ctxTokens?: number | null;
+  /**
    * 2026-07-29-model-error-visibility / FR-04：turn 终态=failed 时拉取的结构化错误
    * 详情（GET /sessions/{id}/runs 的 error_detail 经 buildErrorLogItem 映射）。
    * null/undefined（成功 turn / brownfield / attach 历史 turn）→ 不渲染 RunErrorItem。

@@ -10,9 +10,10 @@
 //   - prototype-sessions-portal.html（.ctx-bar/.ctx-ring/.quota-pill 视觉基准）
 //   - FRONTEND_PAGE_STYLE.md §10/§11（颜色走 tailwind 语义 token，不硬编码 hex）
 //
-// 组件自治约定（constraints）：本组件只收 props / 只调额度接口，不做 usage 累计
-// （SSE turn usage + attach 历史 logs 累计由父层 task-10 组装时传入 usedTokens）；
-// 页面组装归 task-10。
+// 组件自治约定（constraints）：本组件只收 props / 只调额度接口，不做 usage 组装
+// （SSE ctx_tokens 实时值 + runsMeta 历史回填由父层组装 usedTokens 后传入——
+// 2026-08-27-session-token-usage-fix task-08 起为逆序最新非 null ctxTokens，
+// 不再求和 inputTokens）；页面组装归 task-10。
 
 import { Popover } from "antd";
 import { useEffect, useState } from "react";
@@ -77,8 +78,13 @@ function ctxToneClass(pct: number): string {
 // ── CtxUsageRing：上下文用量环形进度 ─────────────────────────────────────
 
 export interface CtxUsageRingProps {
-  /** 当前会话累计输入 token（SSE turn usage + attach 历史 logs，父层累计后传入）。 */
-  usedTokens: number;
+  /**
+   * 环分子：最近一次模型调用的提示词大小（ctx_tokens = input+cache_read+
+   * cache_creation，父层按 displayTurns 逆序取最新非 null 值传入）。
+   * null = 未知（历史会话 / 旧 daemon 不上报 ctx），渲染未知态「—」不算百分比
+   * （2026-08-27-session-token-usage-fix task-08 / FR-01 / D-003）。
+   */
+  usedTokens: number | null;
   /** 会话供应商当前 role 的映射（含 model / one_m；本机默认供应商传 null）。 */
   roleMapping?: LlmProviderRoleMapping | null;
   /** 供应商 default_fallback_model（role mapping 无 model 时的二级模型来源）。 */
@@ -92,8 +98,10 @@ export function CtxUsageRing({
   fallbackModel,
 }: CtxUsageRingProps) {
   const windowTokens = resolveCtxWindowTokens(roleMapping, fallbackModel);
+  // task-08（FR-01 / D-003）：分子未知（null，历史会话 / 旧 daemon）→ pct=null，
+  // 不算百分比（不再显示 0.0%）；已知且有分母才计算占比。
   const pct =
-    windowTokens && windowTokens > 0
+    usedTokens != null && windowTokens && windowTokens > 0
       ? Math.min(100, (usedTokens / windowTokens) * 100)
       : null;
   const tone = pct == null ? "text-muted-foreground" : ctxToneClass(pct);
@@ -115,12 +123,13 @@ export function CtxUsageRing({
         <div className="flex items-center justify-between">
           <span>已用 / 总量</span>
           <b className="font-semibold text-foreground">
+            {/* 分子 null（未知态）formatTokenCount 输出「—」，与分母缺省口径一致。 */}
             {formatTokenCount(usedTokens)} /{" "}
             {windowTokens ? formatTokenCount(windowTokens) : "—"}
           </b>
         </div>
         <div className="mt-1 text-[11px] leading-4 text-muted-foreground">
-          当前会话累计 token（含系统提示与历史轮次）。窗口分母口径：供应商配置
+          最近一次模型调用的提示词大小（含缓存命中部分）。窗口分母口径：供应商配置
           1M 勾选 → 1000k；否则模型默认常量 200k；均无法派生时仅显示累计。
         </div>
       </div>
@@ -132,15 +141,19 @@ export function CtxUsageRing({
       <span
         data-testid="ctx-ring"
         title={
-          pct == null
-            ? `上下文累计 ${formatTokenCount(usedTokens)}（无窗口分母）`
-            : `上下文用量 ${Math.round(pct)}%`
+          usedTokens == null
+            ? "上下文用量未知（暂无本次调用量数据）"
+            : pct == null
+              ? `上下文累计 ${formatTokenCount(usedTokens)}（无窗口分母）`
+              : `上下文用量 ${Math.round(pct)}%`
         }
         className={`relative inline-flex h-7 w-7 shrink-0 cursor-pointer select-none items-center justify-center ${tone}`}
         aria-label={
-          pct == null
-            ? "上下文累计 token（无分母）"
-            : `上下文用量 ${Math.round(pct)}%`
+          usedTokens == null
+            ? "上下文用量未知（暂无本次调用量数据）"
+            : pct == null
+              ? "上下文累计 token（无分母）"
+              : `上下文用量 ${Math.round(pct)}%`
         }
       >
         <svg width="28" height="28" style={{ transform: "rotate(-90deg)" }}>
@@ -168,6 +181,8 @@ export function CtxUsageRing({
             pct == null ? "text-[7px]" : "text-[8.5px]"
           } ${tone}`}
         >
+          {/* 未知态（usedTokens=null）中心显示「—」（formatTokenCount 口径）；
+              已知但无分母保留只显示累计数值（三级降级链第三级，零回归）。 */}
           {pct == null ? formatTokenCount(usedTokens) : `${Math.round(pct)}%`}
         </span>
       </span>

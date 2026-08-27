@@ -296,6 +296,15 @@ class AgentRun(BaseModel, table=True):
         default=None,
         sa_column=Column(Integer, nullable=True),
     )
+    # ── Context ring numerator (2026-08-27-session-token-usage-fix task-04) ──
+    # 该 run 期间最近一次 API 调用的提示词大小（= input_tokens + cache_read_tokens
+    # + cache_creation_tokens 之和，daemon 计算后经既有 usage 附带管线透传，
+    # D-002@v1）。NULL = 老数据 / 未上报 → 前端上下文环显示未知态（D-003）。
+    # nullable 写法对齐 input_tokens 等既有 token 列；无索引（无该列查询诉求）。
+    ctx_tokens: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
     # ── Post-scan validation fields ──
     post_scan_status: str | None = Field(
         default=None,

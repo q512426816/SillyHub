@@ -1893,7 +1893,11 @@ class SessionRunRead(BaseModel):
       - ``agent_profile_snapshot`` / ``llm_provider_id``：D-008@v1 轮次快照，供前端
         渲染每轮 whoLine（历史不跟随会话当前配置）；
       - ``input_tokens`` / ``output_tokens``：daemon 关单经 close_interactive_run
-        写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）。
+        写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）；
+      - ``ctx_tokens``（2026-08-27-session-token-usage-fix task-05 / FR-01）：该
+        run 期间最近一次 API 调用的提示词大小（daemon 经 usage 管线实时写入，
+        close 终态不覆盖），供前端上下文环历史回填取最新非 null 值；历史行 /
+        老 daemon 无上报为 None（环未知态，design §9）。
     全部 nullable——老 run 行 / 未配置轮为 None，前端如实显示未指定/不累计。
     """
 
@@ -1913,6 +1917,9 @@ class SessionRunRead(BaseModel):
     llm_provider_id: uuid.UUID | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    # task-05 / FR-01：最近一次调用提示词大小，from_attributes 直映
+    # AgentRun.ctx_tokens 列（runs 查询零改动）；历史行 None 如实输出。
+    ctx_tokens: int | None = None
     model_config = {"from_attributes": True}
 
 

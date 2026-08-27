@@ -1076,6 +1076,9 @@ function SessionPanelPage({
                     status: terminal,
                     inputTokens: env.input_tokens ?? turn.inputTokens,
                     outputTokens: env.output_tokens ?? turn.outputTokens,
+                    // task-08（FR-01）：ctx_tokens null 不覆盖已收值（终态保留实时
+                    // 最后写入——close_interactive_run 请求 DTO 不含 ctx_tokens）。
+                    ctxTokens: env.ctx_tokens ?? turn.ctxTokens,
                   };
                 },
                 { clearCurrentRun: env.run_id! },
@@ -1131,6 +1134,9 @@ function SessionPanelPage({
                   ...turn,
                   inputTokens: env.input_tokens ?? turn.inputTokens,
                   outputTokens: env.output_tokens ?? turn.outputTokens,
+                  // task-08（FR-01）：ctx 是 last-write-wins 瞬时量，null/缺省
+                  // （旧 daemon）不覆盖已收值，保持环未知态语义。
+                  ctxTokens: env.ctx_tokens ?? turn.ctxTokens,
                 }),
                 {},
               ),
@@ -1492,6 +1498,9 @@ function SessionPanelPage({
         },
         inputTokens: t.inputTokens ?? meta.input_tokens ?? null,
         outputTokens: t.outputTokens ?? meta.output_tokens ?? null,
+        // task-08（FR-01 / D-003）：ctx 历史回填（SessionRunRead.ctx_tokens，
+        // 历史 run 无 ctx 列值 → null → 环未知态）。
+        ctxTokens: t.ctxTokens ?? meta.ctx_tokens ?? null,
         // ql-20260817-004：答复完成时间（finished_at 优先；运行中/旧数据 null 不显示）。
         replyAt: t.replyAt ?? meta.finished_at ?? meta.started_at ?? null,
         // task-09（FR-02）计时锚点 ?? 链：turn 已有值（live 发送占位 / 首条 log
@@ -1517,6 +1526,8 @@ function SessionPanelPage({
         seenLogIds: new Set(),
         inputTokens: meta.input_tokens ?? null,
         outputTokens: meta.output_tokens ?? null,
+        // task-08（FR-01）：孤儿轮（无 SSE 事件的静默后台 run）同样回填 ctx。
+        ctxTokens: meta.ctx_tokens ?? null,
         errorDetail: null,
         processItems: [],
         realRunId: runId,
@@ -1551,8 +1562,12 @@ function SessionPanelPage({
     return [...enriched, ...orphanTurns].sort((a, b) => ts(a) - ts(b));
   }, [turnState.turns, runsMeta, llmProviders, agentDisplayName, session?.user_id]);
 
-  // CtxUsageBar：累计 usage（实时 turn input_tokens 求和 + 历史轮回填，R-06 前端累计）
-  // + 分母派生（会话供应商 role mapping one_m → fallback model，D-014）。
+  // CtxUsageBar：环分子（task-08 / FR-01 改口径）= displayTurns 逆序第一个非 null
+  // 的 ctxTokens（最近一次模型调用提示词大小，瞬时量；SSE 实时 + runsMeta 历史回填
+  // 两路写入）+ 分母派生（会话供应商 role mapping one_m → fallback model，D-014）。
+  // 旧口径「Σ 各轮 inputTokens」把跨调用可加的计费量当瞬时量，环永远虚高封顶
+  // （design §1.1 失真根因），已废弃；全 null（历史会话 / 旧 daemon）→ null，
+  // 环渲染未知态（D-003，CtxUsageRing usedTokens 可空）。
   const ctxProvider = useMemo(
     () => llmProviders.find((p) => p.id === session?.llm_provider_id) ?? null,
     [llmProviders, session?.llm_provider_id],
@@ -1565,7 +1580,11 @@ function SessionPanelPage({
   const ctxFallbackModel =
     ctxProvider?.default_fallback_model ?? ctxProvider?.model ?? null;
   const usedTokens = useMemo(
-    () => displayTurns.reduce((n, t) => n + (t.inputTokens ?? 0), 0),
+    () =>
+      displayTurns.reduceRight(
+        (found: number | null, t) => found ?? t.ctxTokens ?? null,
+        null,
+      ),
     [displayTurns],
   );
 
@@ -1642,6 +1661,7 @@ function SessionPanelPage({
             seenLogIds: new Set(),
             inputTokens: null,
             outputTokens: null,
+            ctxTokens: null,
             errorDetail: null,
             processItems: [],
             // task-09（FR-02）：live 计时锚点 = 本地发送占位时刻（空段数组 =
@@ -2066,6 +2086,7 @@ function SessionPanelPage({
             seenLogIds: new Set(),
             inputTokens: null,
             outputTokens: null,
+            ctxTokens: null,
             errorDetail: null,
             processItems: [],
             // task-09（FR-02）：同 handleSend——live 锚点 = 本地重发占位时刻。
@@ -2308,7 +2329,7 @@ function SessionPanelPage({
         <div className="flex shrink-0 flex-col bg-card">
           <div className="px-5 pt-3">
             <CtxUsageBar
-              usedTokens={0}
+              usedTokens={null}
               roleMapping={null}
               fallbackModel={null}
               providerId={preProviderId || null}
@@ -3304,6 +3325,9 @@ function SessionPanelDialog(props: SessionPanelProps) {
                   // 终态 token 同步写入（null 不覆盖执行中已收到的累积值）。
                   inputTokens: env.input_tokens ?? turn.inputTokens,
                   outputTokens: env.output_tokens ?? turn.outputTokens,
+                  // task-08（FR-01）：ctx_tokens 同步写入；null 不覆盖已收值
+                  // （close 终态不携带 ctx，保留实时最后写入值）。
+                  ctxTokens: env.ctx_tokens ?? turn.ctxTokens,
                 };
               }, { clearCurrentRun: env.run_id! }));
 
@@ -3346,6 +3370,9 @@ function SessionPanelDialog(props: SessionPanelProps) {
                 ...turn,
                 inputTokens: env.input_tokens ?? turn.inputTokens,
                 outputTokens: env.output_tokens ?? turn.outputTokens,
+                // task-08（FR-01）：ctx 实时写入（last-write-wins 瞬时量；
+                // null/缺省不覆盖已收值）。
+                ctxTokens: env.ctx_tokens ?? turn.ctxTokens,
               }), {}));
             },
             onSessionEnded: () => {
@@ -3674,6 +3701,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
             seenLogIds: new Set(),
             inputTokens: null,
             outputTokens: null,
+            ctxTokens: null,
             errorDetail: null,
             processItems: [],
             // 装配化初始形状 + live 计时锚点（本地发送占位时刻），带 segments
@@ -3911,6 +3939,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
             seenLogIds: new Set(),
             inputTokens: null,
             outputTokens: null,
+            ctxTokens: null,
             errorDetail: null,
             processItems: [],
             // 装配化初始形状 + live 计时锚点（同 submitFollowup）。
@@ -4556,6 +4585,9 @@ function upsertTurn(
       seenLogIds: empty.seenLogIds,
       inputTokens: env.input_tokens ?? null,
       outputTokens: env.output_tokens ?? null,
+      // task-08（FR-01）：unknown run 首建 turn 同步携带 ctx（tokens 事件到达
+      // 早于 turn_started 时 upsert 走此分支）；null = 未知。
+      ctxTokens: env.ctx_tokens ?? null,
       errorDetail: null,
       processItems: empty.processItems,
       segments: empty.segments,

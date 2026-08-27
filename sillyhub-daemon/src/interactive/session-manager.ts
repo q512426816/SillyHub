@@ -390,16 +390,27 @@ interface SessionManagerDepsWithQueued extends SessionManagerDeps {
  * 完整内容的子集，避免重复）。session end/fail 时销毁 timer。
  */
 /**
- * ql-20260627-usage：partial flush 注入的 usage 快照。来自 stream_event
- * message_delta.usage（Claude 流式 cumulative 计费，整条 message 的累计值）。
- * 字段名映射为短名 cache_*_tokens（Claude SDK 原始为 cache_*_input_tokens），
- * 与 backend _METADATA_FIELDS 对齐，避免 daemon lift 重复映射。
+ * ql-20260627-usage：partial flush 注入的 usage 快照。cache_* 来自 stream_event
+ * message_delta.usage（Claude 流式计费），字段名映射为短名 cache_*_tokens（Claude
+ * SDK 原始为 cache_*_input_tokens），与 backend _METADATA_FIELDS 对齐，避免 daemon
+ * lift 重复映射。
+ * task-02（2026-08-27-session-token-usage-fix / design §7）：input/output 改**轮级**
+ * （本轮至今累计，消实时/终态跨语义跳变 FR-02）；cache_* 保持快照语义不变；新增
+ * ctx_tokens = 最近一次调用 input+cache_read+cache_creation（上下文环分子 FR-01），
+ * **仅 main 桶携带**——子桶 pendingUsage 不含该键（D-006），backend 侧缺键即跳过，
+ * 天然兼容老链路。
  */
 interface PartialUsageSnapshot {
+  /** 轮级：本轮至今累计输入（task-02 前为会话级累计）。 */
   input_tokens: number;
+  /** 轮级：本轮至今累计输出（task-02 前为会话级累计）。 */
   output_tokens: number;
+  /** 快照（不变）：本调用缓存前缀量的最新值（replace 语义）。 */
   cache_read_tokens: number;
+  /** 快照（不变）：本调用缓存前缀量的最新值（replace 语义）。 */
   cache_creation_tokens: number;
+  /** 最近一次调用提示词大小（input+cache_read+cache_creation 三分量和）。仅 main 桶。 */
+  ctx_tokens?: number;
 }
 
 interface PartialFlushBuffer {
@@ -469,16 +480,42 @@ interface PartialFlushBuffer {
   /** ql-20260627-usage：上次已 flush 的 usage（去重，仅在变化时注入）。null = 从未注入。 */
   flushedUsage: PartialUsageSnapshot | null;
   /**
-   * ql-session-usage：session 级跨 API call 累积 token（实时显示用）。
+   * ql-session-usage：session 级跨 API call 累积 token（**跨轮不清零**）。
    * 每次 message_start 累加 input_tokens，message_delta 累加 output delta。
-   * pendingUsage 取 sessionUsage 值，使 submitMessages 发送递增的 session 总量。
+   * task-02（2026-08-27-session-token-usage-fix）：pendingUsage 数据源改取下方
+   * turn 级计数器（轮级计费量口径 FR-02）；会话级计数器语义不变，仍是 budget
+   * 聚合（_aggregateSessionUsage / _checkBudgetCutoff，R-01）与
+   * _shrinkSubagentBuffers 折算的数据源。
    */
   sessionInputTokens: number;
   sessionOutputTokens: number;
   sessionCacheReadTokens: number;
   sessionCacheCreationTokens: number;
+  /**
+   * task-02（design §5 Phase 1.1 / FR-02）：turn 级计数器（本轮至今累计）——
+   * pendingUsage input/output 的数据源。与上方会话级计数器**物理分离**：
+   * _checkBudgetCutoff 只读会话级（R-01：误改即预算漏计）；所有桶（主+子代理）
+   * 都累计——子代理计费量经各自 pendingUsage flush 上报，backend max 聚合接收。
+   * _onResult 轮边界仅清零 main 桶三字段（子桶随 _shrinkSubagentBuffers 删桶
+   * 销毁，turn 级**不折算**——折算发生在轮结束后、后续 flush 因无 runId 早退，
+   * 折算即死代码，B3/R-05）。
+   */
+  turnInputTokens: number;
+  turnOutputTokens: number;
+  /**
+   * task-02（FR-01 / D-006）：最近一次调用提示词大小 = input_tokens +
+   * cache_read_input_tokens + cache_creation_input_tokens（三分量和，上下文环
+   * 分子口径）。**仅 main 桶计算与注入**——子代理桶恒 0：其上下文非会话主上下文，
+   * 注入会在子代理轮把环切到子代理 ctx 再跳回（X-02/B2）。
+   */
+  lastCallCtxTokens: number;
   /** 当前 API call 上次的 output_tokens（算 delta 用）。 */
   lastCallOutputTokens: number;
+  /**
+   * task-02：本调用 cache 两维最新快照（main 桶 lastCallCtxTokens 差分重算用——
+   * message_delta 不带 input_tokens，ctx 只能以「上次值 ± cache 差量」更新）。
+   * message_start 设为 startUsage 值（缺失 0），message_delta 携带时 replace。
+   */
   lastCallCacheReadTokens: number;
   lastCallCacheCreationTokens: number;
 }
@@ -4133,6 +4170,19 @@ export class SessionManager {
       for (const buf of turnSessionMap.values()) {
         buf.completedSegments = new Set<string>();
       }
+      // task-02（2026-08-27-session-token-usage-fix / design §5 Phase 1.2）：轮边界
+      // 清零 main 桶 turn 级计数器 + lastCallCtxTokens，并置 pendingUsage=null——防
+      // 上轮残留轮级 usage 注入新 run（下轮 flush 复用同桶）。会话级计数器跨轮
+      // **不清零**（budget 数据源不变，R-01）。子桶 turn 级字段**不折算**：随后
+      // _shrinkSubagentBuffers 删桶即随桶销毁（折算发生在轮结束后、后续 flush 因
+      // 无 runId 早退，折算即死代码，B3/R-05）。
+      const mainBuf = turnSessionMap.get('main');
+      if (mainBuf) {
+        mainBuf.turnInputTokens = 0;
+        mainBuf.turnOutputTokens = 0;
+        mainBuf.lastCallCtxTokens = 0;
+        mainBuf.pendingUsage = null;
+      }
     }
     // task-08（D-006 / D-009）：turn 收尾 budget 软切断检查点。在 completedSegments
     // 重置**之后**调用（聚合 usage 不依赖 completedSegments，但放在末尾确保
@@ -5113,6 +5163,9 @@ export class SessionManager {
         sessionOutputTokens: 0,
         sessionCacheReadTokens: 0,
         sessionCacheCreationTokens: 0,
+        turnInputTokens: 0,
+        turnOutputTokens: 0,
+        lastCallCtxTokens: 0,
         lastCallOutputTokens: 0,
         lastCallCacheReadTokens: 0,
         lastCallCacheCreationTokens: 0,
@@ -5309,11 +5362,18 @@ export class SessionManager {
           const startUsage = (ev.message as { usage?: Record<string, unknown> }).usage;
           if (startUsage && typeof startUsage['input_tokens'] === 'number') {
             buf.sessionInputTokens += startUsage['input_tokens'] as number;
+            // task-02：轮级输入同步累加（所有桶——子代理计费量经各自 pendingUsage
+            // flush 上报，backend max 聚合接收，R-05）。
+            buf.turnInputTokens += startUsage['input_tokens'] as number;
           }
-          // ql-20260710-001：cache_*_input_tokens 是**会话级累计快照**（非 per-call
-          // 增量），改 replace 语义（对齐 batch stream-json.ts:552/1143-1148）。原 +=
-          // 会被下方 message_delta 的 delta 再叠加一次 → 翻倍（见
-          // session-manager-usage-cache.test.ts）。
+          // ql-20260710-001（注释勘误 task-02 / 2026-08-27-session-token-usage-fix
+          // design §5 Phase 1.4）：cache_*_input_tokens 是**本调用缓存前缀量的最新
+          // 快照**（per-call 语义，replace 取最新值）——旧注释「会话级累计快照」描述
+          // 失准但 replace 行为正确（原 += 会与下方 message_delta 的叠加翻倍，见
+          // session-manager-usage-cache.test.ts）。连带勘误旧注释对 batch
+          // stream-json.ts:552/1143-1148 的错引：batch 实为 :498-511 对每次调用
+          // message_start 的 input/cache 三维逐调用 `+=` 累加（恰好佐证 per-call
+          // 语义）；:552 是 thinking 节流、:1143-1148 是 content 展平，均与 usage 无关。
           if (startUsage && typeof startUsage['cache_read_input_tokens'] === 'number') {
             buf.sessionCacheReadTokens = startUsage['cache_read_input_tokens'] as number;
           }
@@ -5324,6 +5384,28 @@ export class SessionManager {
           buf.lastCallOutputTokens = 0;
           buf.lastCallCacheReadTokens = 0;
           buf.lastCallCacheCreationTokens = 0;
+          // task-02（FR-01 / D-006）：main 桶计算本调用 ctx = input + cache_read +
+          // cache_creation（三分量和，上下文环分子）。子代理桶不计算（恒 0）——其
+          // 上下文非会话主上下文，注入会把环切到子代理 ctx 再跳回（X-02/B2）。
+          // cache 两维快照存 tracker，供 message_delta 携带 cache 时差分重算
+          //（delta 不带 input_tokens，ctx 只能以「上次值 ± cache 差量」更新）。
+          if (buf.parentKey === 'main') {
+            const startInput =
+              startUsage && typeof startUsage['input_tokens'] === 'number'
+                ? (startUsage['input_tokens'] as number)
+                : 0;
+            const startCr =
+              startUsage && typeof startUsage['cache_read_input_tokens'] === 'number'
+                ? (startUsage['cache_read_input_tokens'] as number)
+                : 0;
+            const startCc =
+              startUsage && typeof startUsage['cache_creation_input_tokens'] === 'number'
+                ? (startUsage['cache_creation_input_tokens'] as number)
+                : 0;
+            buf.lastCallCtxTokens = startInput + startCr + startCc;
+            buf.lastCallCacheReadTokens = startCr;
+            buf.lastCallCacheCreationTokens = startCc;
+          }
         }
         // content_block_start 带 content_block.type==='thinking' 仅是开始标记，
         // thinking_delta 会跟随，无需特殊处理（避免 emit 空消息）。
@@ -5375,25 +5457,49 @@ export class SessionManager {
           const outDelta = Math.max(0, callOut - buf.lastCallOutputTokens);
           buf.sessionOutputTokens += outDelta;
           buf.lastCallOutputTokens = callOut;
+          // task-02：轮级 output 同步累加同一差分（所有桶，复用 lastCallOutputTokens 差分）。
+          buf.turnOutputTokens += outDelta;
 
-          // ql-20260710-001：cache 两维 replace（会话级累计快照，取最新 cumulative 值覆盖），
-          // 不再 delta 累加——message_start 已 replace 设值，此处再 delta 会翻倍。仅当
-          // message_delta 携带该字段时覆盖；缺失则保留 message_start 的值不变。对齐
-          // batch stream-json.ts:552（message_delta replace 而非 += delta）。
-          if (typeof u['cache_read_input_tokens'] === 'number') {
+          // ql-20260710-001（注释勘误 task-02）：cache 两维 replace——cache_*_input_tokens
+          // 是本调用缓存前缀量的最新快照（per-call），取最新值覆盖而非 delta 累加
+          //（message_start 已 replace 设值，此处再 delta 会翻倍；仅当 message_delta
+          // 携带该字段时覆盖，缺失则保留 message_start 的值不变）。旧注释引 batch
+          // stream-json.ts:552「message_delta replace」佐证系错引——batch 实为
+          // :498-511 逐调用 `+=` 累加（per-call 语义同向，replace/累加是交互/批处理
+          // 两种聚合实现，行为零改动）。
+          const deltaHasCr = typeof u['cache_read_input_tokens'] === 'number';
+          const deltaHasCc = typeof u['cache_creation_input_tokens'] === 'number';
+          if (deltaHasCr) {
             buf.sessionCacheReadTokens = u['cache_read_input_tokens'] as number;
           }
-          if (typeof u['cache_creation_input_tokens'] === 'number') {
+          if (deltaHasCc) {
             buf.sessionCacheCreationTokens = u['cache_creation_input_tokens'] as number;
           }
+          // task-02（FR-01 / D-006）：main 桶在 delta 携带 cache 时用最新 cache 差分
+          // 重算本调用 ctx（瞬时量，delta 不带 input_tokens，只能以「上次快照 ±
+          // cache 差量」更新）。子代理桶不重算（不注入 ctx）。
+          if (buf.parentKey === 'main' && (deltaHasCr || deltaHasCc)) {
+            const prevCr = buf.lastCallCacheReadTokens;
+            const prevCc = buf.lastCallCacheCreationTokens;
+            const newCr = deltaHasCr ? (u['cache_read_input_tokens'] as number) : prevCr;
+            const newCc = deltaHasCc ? (u['cache_creation_input_tokens'] as number) : prevCc;
+            buf.lastCallCacheReadTokens = newCr;
+            buf.lastCallCacheCreationTokens = newCc;
+            buf.lastCallCtxTokens = buf.lastCallCtxTokens - prevCr - prevCc + newCr + newCc;
+          }
 
-          // pendingUsage 用 session 级累积值
+          // task-02：pendingUsage 改**轮级**值（本轮至今累计，消实时/终态跨语义跳变
+          // FR-02）；cache_* 保持快照语义；main 桶附加 ctx_tokens（子桶 pendingUsage
+          // 不含该键，backend 缺键即跳过）。
           buf.pendingUsage = {
-            input_tokens: buf.sessionInputTokens,
-            output_tokens: buf.sessionOutputTokens,
+            input_tokens: buf.turnInputTokens,
+            output_tokens: buf.turnOutputTokens,
             cache_read_tokens: buf.sessionCacheReadTokens,
             cache_creation_tokens: buf.sessionCacheCreationTokens,
           };
+          if (buf.parentKey === 'main') {
+            buf.pendingUsage.ctx_tokens = buf.lastCallCtxTokens;
+          }
         }
       }
     } else if (msgType === 'system') {

@@ -4,7 +4,10 @@
 // 覆盖：
 //   - 分母三级降级链（one_m→1000k / 常量 200k / 无分母只显示累计）；
 //   - 阈值变色（50 / 80 边界，≥50 黄 ≥80 红）；
-//   - 点击详情浮层（占比 / 已用总量 / 口径说明）；
+//   - 点击详情浮层（占比 / 已用总量 / 口径说明——2026-08-27-session-token-
+//     usage-fix task-08 起为「最近一次模型调用」新口径文案）；
+//   - usedTokens={null} 未知态（task-09 / FR-01 / D-003：中心「—」不算百分比，
+//     历史会话 / 旧 daemon 不上报 ctx 的渲染分支）；
 //   - quota=null 不渲染胶囊（灰字提示）、正常窗口渲染、低剩余变色、
 //     reset 时间格式化、供应商切换重新拉取、失败静默降级。
 //
@@ -134,10 +137,35 @@ describe("CtxUsageRing", () => {
     expect(await screen.findByText("上下文窗口用量")).toBeInTheDocument();
     expect(await screen.findByText("50.0%")).toBeInTheDocument();
     expect(screen.getByText("100.0k / 200.0k")).toBeInTheDocument();
-    // 口径说明（R-06：展示标注口径）
+    // 口径说明——task-08（2026-08-27-session-token-usage-fix FR-01）改新口径：
+    // 分子=最近一次模型调用的提示词大小（含缓存命中部分），不再是会话累计求和。
     expect(
-      screen.getByText(/当前会话累计 token（含系统提示与历史轮次）/),
+      screen.getByText(/最近一次模型调用的提示词大小（含缓存命中部分）/),
     ).toBeInTheDocument();
+  });
+
+  // task-09（2026-08-27-session-token-usage-fix / FR-01 / D-003）：
+  // 分子未知（历史会话 / 旧 daemon 不上报 ctx）→ 环未知态——中心「—」、
+  // 不算百分比（旧类型 Σ=0 口径会显示 0.0%，X-09 即为此坑）。
+  it("usedTokens={null}（有分母）→ 环中心「—」、无百分比、浮层「用量占比 未知」与已用分子「—」", async () => {
+    render(
+      <CtxUsageRing usedTokens={null} roleMapping={{ model: "glm-4.6" }} />,
+    );
+    const ring = screen.getByTestId("ctx-ring");
+    expect(ring).toHaveTextContent("—");
+    expect(ring.textContent).not.toContain("%");
+    // title 含未知文案（悬浮提示不显示 0.0%）
+    expect(ring).toHaveAttribute(
+      "title",
+      "上下文用量未知（暂无本次调用量数据）",
+    );
+
+    fireEvent.click(ring);
+    expect(await screen.findByText("上下文窗口用量")).toBeInTheDocument();
+    // 浮层：用量占比 = 未知（非 0.0%）；已用分子 = 「—」，分母照常派生 200k。
+    expect(screen.getByText("未知")).toBeInTheDocument();
+    expect(screen.getByText("— / 200.0k")).toBeInTheDocument();
+    expect(screen.queryByText("0.0%")).not.toBeInTheDocument();
   });
 });
 

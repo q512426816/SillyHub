@@ -194,6 +194,43 @@ class TestListSessionRuns:
         assert plain_item["output_tokens"] is None
 
     @pytest.mark.asyncio
+    async def test_returns_ctx_tokens_column(self, client, auth_headers, db_session) -> None:
+        """task-06（2026-08-27-session-token-usage-fix / FR-01）：run 项透传
+        ``ctx_tokens``（SessionRunRead from_attributes 直映 AgentRun.ctx_tokens 列）。
+
+        seed 值 12345 如实输出；历史 run 行（迁移前数据 / 老 daemon 未上报，
+        列 NULL）→ null（前端上下文环历史回填取最新非 null，全 null 显示未知态，
+        design §9）。"""
+        admin = await _admin_id(db_session)
+        sid = uuid.uuid4()
+        db_session.add(AgentSession(id=sid, user_id=admin, provider="claude", status="active"))
+        with_ctx = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            status="completed",
+            agent_session_id=sid,
+            started_at=datetime.now(UTC),
+            ctx_tokens=12345,
+        )
+        legacy = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            status="completed",
+            agent_session_id=sid,
+            started_at=datetime.now(UTC) + timedelta(seconds=1),
+            # ctx_tokens 缺省 None（历史行，未迁移不回填 NG-04）
+        )
+        db_session.add_all([with_ctx, legacy])
+        await db_session.commit()
+
+        resp = await client.get(f"/api/daemon/sessions/{sid}/runs", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        items = {it["id"]: it for it in resp.json()}
+        assert len(items) == 2
+        assert items[str(with_ctx.id)]["ctx_tokens"] == 12345
+        assert items[str(legacy.id)]["ctx_tokens"] is None
+
+    @pytest.mark.asyncio
     async def test_empty_session_returns_empty_list(self, client, auth_headers, db_session) -> None:
         """有 session 但无 run → 200 空列表（不报错）。"""
         admin = await _admin_id(db_session)

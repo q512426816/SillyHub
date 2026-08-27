@@ -5104,6 +5104,11 @@ export interface paths {
          *     the other session endpoints (no existence leak for missing / cross-user).
          *     Response items reuse the existing ``AgentRunLogEntry`` DTO; ``run_id`` is
          *     preserved so the frontend can delineate turn boundaries.
+         *
+         *     ql-20260827-018：客户端 Accept-Encoding 含 gzip 且正文超过阈值时返回 gzip
+         *     编码响应（长会话 5000 行 × 50KB 文本列明文传输是回显慢主因，JSON 文本
+         *     压缩比 ~10x）。浏览器 fetch / Next rewrite 代理均透传 accept-encoding 与
+         *     Content-Encoding，无需调用方改动。
          */
         get: operations["get_session_logs_api_daemon_sessions__session_id__logs_get"];
         put?: never;
@@ -17635,6 +17640,12 @@ export interface components {
          *     不产生用户消息与模型回应，daemon 只 reload 配置）；纯追问（无切换字段）
          *     仍要求非空 prompt。
          *
+         *     2026-08-27-background-subagent-progress task-07（FR-08 / D-004@v1）：空
+         *     prompt 判定（含全空白 → 422「消息内容不能为空」）与上述切换/附件豁免
+         *     **统一在 service 层** ``inject_session`` 入口（SessionEmptyPrompt，取锁 /
+         *     忙轮入队之前）；本 DTO 不再重复判空，也**不加字段级 min_length**——豁免
+         *     轮（静默切换 / D-7 看图说话）的请求体显式携带 ``prompt: ""``（前端
+         *     injectSession 恒发 prompt 键），字段级 min_length 会连豁免轮一并 422。
          *     2026-08-20-session-multimodal-attachments task-05：``attachment_ids`` 附件
          *     引用（上传端点产出的 SessionAttachment id）；**D-7 豁免**——附件非空时
          *     prompt 可为空（看图说话）；上限 10 = 图片 5 + 文件 5（逐 kind 校验归
@@ -17792,7 +17803,11 @@ export interface components {
          *       - ``agent_profile_snapshot`` / ``llm_provider_id``：D-008@v1 轮次快照，供前端
          *         渲染每轮 whoLine（历史不跟随会话当前配置）；
          *       - ``input_tokens`` / ``output_tokens``：daemon 关单经 close_interactive_run
-         *         写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）。
+         *         写入（gap-3 result 透传），供前端历史回看累计 ctx usage（R-06）；
+         *       - ``ctx_tokens``（2026-08-27-session-token-usage-fix task-05 / FR-01）：该
+         *         run 期间最近一次 API 调用的提示词大小（daemon 经 usage 管线实时写入，
+         *         close 终态不覆盖），供前端上下文环历史回填取最新非 null 值；历史行 /
+         *         老 daemon 无上报为 None（环未知态，design §9）。
          *     全部 nullable——老 run 行 / 未配置轮为 None，前端如实显示未指定/不累计。
          */
         SessionRunRead: {
@@ -17829,6 +17844,8 @@ export interface components {
             input_tokens?: number | null;
             /** Output Tokens */
             output_tokens?: number | null;
+            /** Ctx Tokens */
+            ctx_tokens?: number | null;
         };
         /**
          * SessionRuntimeRequest

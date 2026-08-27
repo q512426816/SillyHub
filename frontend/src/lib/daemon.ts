@@ -1119,6 +1119,13 @@ export interface SessionStreamEnvelope {
   cache_read_tokens?: number | null;
   cache_creation_tokens?: number | null;
   /**
+   * 2026-08-27-session-token-usage-fix task-07 / FR-01：该 run 期间最近一次
+   * API 调用的提示词大小（上下文环）。tokens / turn_completed 事件携带；
+   * 仅 main 桶上报（子代理桶不下发）；旧 backend 不下发此字段时为 undefined，
+   * 消费方（task-08 onTokens / 终态回填）按 undefined 保持环未知态。
+   */
+  ctx_tokens?: number | null;
+  /**
    * 2026-08-03-session-stream-partial-revoke / FR-03 / design §5 Phase2 / §7.2：
    * 流式分片 segment_id。backend（task-01 透传 log_entry.segment_id）对 partial 半截
    * 行下发非空（形如 "main:<msg_id>" 或 "<tool_use_id>:<seq>"），对 complete/其他行
@@ -2061,7 +2068,8 @@ export function maxLogTimestamp(logs: AgentRunLogEntry[]): string | undefined {
  *   - agent_profile_snapshot：dispatch 冻结的档案快照（name/provider/model/
  *     system_prompt/...），供 whoLine 取档案名；
  *   - llm_provider_id：本轮生效供应商 id（null = 本机默认）；
- *   - input_tokens / output_tokens：daemon 关单写入，供历史回看累计 usage。
+ *   - input_tokens / output_tokens：daemon 关单写入，供历史回看累计 usage；
+ *   - ctx_tokens：REST 历史回填路径的上下文环分子（task-07 补录，见字段注释）。
  */
 export interface SessionRunRead {
   id: string;
@@ -2078,6 +2086,15 @@ export interface SessionRunRead {
   llm_provider_id: string | null;
   input_tokens: number | null;
   output_tokens: number | null;
+  /**
+   * 2026-08-27-session-token-usage-fix task-07 补录 / FR-01：该 run 期间最近
+   * 一次 API 调用的提示词大小（input+cache_read+cache_creation，REST 历史
+   * 回填路径：AgentRun.ctx_tokens 列 → GET /sessions/{id}/runs → 前端
+   * runsMeta 回填 turn.ctxTokens，环逆序取最新非 null 值）。daemon 经 usage
+   * 管线实时写入（last-write-wins），close 终态不覆盖；仅 main 桶上报。
+   * 历史 run 行 / 老 daemon 无上报为 null（环未知态，design §9）。
+   */
+  ctx_tokens?: number | null;
   /** ql-20260817-003：轮次发送者（旧 run 行为 null → 前端不显示发送行）。 */
   user_id: string | null;
   sender_name: string | null;

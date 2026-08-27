@@ -137,6 +137,9 @@ class PublishIntent:
     output_tokens: int | None
     cache_read_tokens: int | None
     cache_creation_tokens: int | None
+    # task-05 / FR-01：最近一次调用提示词大小（last-write-wins 写回后的实时值），
+    # None（老 daemon / 未上报）时 publish 两路 payload 均不带该键（design §9）。
+    ctx_tokens: int | None
     agent_session_id: uuid.UUID | None
     timestamp_iso: str
 
@@ -205,6 +208,10 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
             summary_payload["cache_read_tokens"] = intent.cache_read_tokens
         if intent.cache_creation_tokens is not None:
             summary_payload["cache_creation_tokens"] = intent.cache_creation_tokens
+        # task-05 / FR-01：ctx_tokens 实时透传到 run channel summary（最近一次
+        # 调用提示词大小）。None 不带键——老 daemon / 子桶未上报兼容（design §9）。
+        if intent.ctx_tokens is not None:
+            summary_payload["ctx_tokens"] = intent.ctx_tokens
         pipe.publish(channel_name, json.dumps(summary_payload))
         await pipe.execute()
     except Exception:
@@ -272,6 +279,11 @@ async def publish_submitted_messages(intent: PublishIntent) -> None:
                 token_payload["cache_read_tokens"] = intent.cache_read_tokens
             if intent.cache_creation_tokens is not None:
                 token_payload["cache_creation_tokens"] = intent.cache_creation_tokens
+            # task-05 / FR-01：ctx_tokens 实时透传到 session channel tokens 事件
+            # （前端 onTokens → 上下文环分子）。None 不带键（design §9，老前端/
+            # 老 daemon 双向兼容）。
+            if intent.ctx_tokens is not None:
+                token_payload["ctx_tokens"] = intent.ctx_tokens
             pipe.publish(session_channel, json.dumps(token_payload, default=str))
         await pipe.execute()
     except Exception:
@@ -500,6 +512,7 @@ class RunSyncService:
             )
             return None
         return dispatch_run_id
+
     @staticmethod
     def _override_marker_content(segment_id: str, thinking: bool) -> str:
         """quick-0e56260f：完整行落库时合成的 override 标记行/信封正文。
@@ -510,9 +523,7 @@ class RunSyncService:
         prefix = "THINKING" if thinking else "ASSISTANT"
         return f"[{prefix}_OVERRIDE] {segment_id}"
 
-    async def _override_marker_exists(
-        self, agent_run_id: uuid.UUID, segment_id: str
-    ) -> bool:
+    async def _override_marker_exists(self, agent_run_id: uuid.UUID, segment_id: str) -> bool:
         """quick-0e56260f：该 segment 的完整行是否已处理（override 标记行已落库）。
 
         partial 行落库前的守护：完整行先到（HTTP 并发乱序 / daemon 重试迟到）时，
@@ -577,6 +588,11 @@ class RunSyncService:
         latest_cache_read_tokens: int | None = None
         latest_cache_creation_tokens: int | None = None
         latest_session_id: str | None = None
+        # task-05 / FR-01 / D-002@v1：ctx_tokens（最近一次 API 调用的提示词大小 =
+        # input + cache_read + cache_creation，daemon 仅 main 桶 pendingUsage 携带）。
+        # 瞬时量可上可下——批内最后出现值胜出直接赋值（last-write-wins），刻意
+        # 不用 input/output 的 max 累积（design §7 守卫差异）。
+        latest_ctx_tokens: int | None = None
         # ql-006：interactive session（SDK driver）的 onTurnMessage 发原始 SDK msg
         # （{type:"assistant"|"user", message:{content:[ContentBlock]}}），顶层无
         # content/event_type。旧代码只拼 text blocks、丢弃 thinking/tool_use/tool_result，
@@ -792,6 +808,11 @@ class RunSyncService:
                 # max 累积（service.py:69-72 乱序防御注释）。
                 cache_read_tok = usage.get("cache_read_tokens")
                 cache_creation_tok = usage.get("cache_creation_tokens")
+                # task-05 / FR-01：ctx_tokens——最近一次调用提示词大小（daemon
+                # message_start 三分量求和，仅 main 桶注入）。last-write-wins：
+                # 批内最后出现值胜出直接赋值（非 max）；缺键（老 daemon / 子桶
+                # pendingUsage）→ isinstance 守卫不命中 → None 不写，天然兼容。
+                ctx_tok = usage.get("ctx_tokens")
                 # ql-20260705-001：接受 0（Claude prompt cache 全命中时 input_tokens
                 # 合法为 0，真实输入在 cache_read_tokens）。旧 >0 守卫把合法 0 当噪声
                 # 丢，致 AgentRun.input_tokens 永久 NULL。改由 max 累积 + 仅增不减写回
@@ -808,6 +829,8 @@ class RunSyncService:
                     latest_cache_creation_tokens = max(
                         latest_cache_creation_tokens or 0, int(cache_creation_tok)
                     )
+                if isinstance(ctx_tok, (int, float)):
+                    latest_ctx_tokens = int(ctx_tok)
             msg_session_id = msg.get("session_id")
             if isinstance(msg_session_id, str) and msg_session_id:
                 latest_session_id = msg_session_id
@@ -841,8 +864,10 @@ class RunSyncService:
             # 竞态（会话 0ef651b6 实证：partial 03:30:45.437 开始处理、full
             # 03:30:45.580，full 的跨调用 DELETE 查不到未提交的 partial，擦肩留库），
             # 也拦 daemon 重试迟到的同 segmentId 窗口。
-            if segment_id and is_partial and await self._override_marker_exists(
-                agent_run_id, segment_id
+            if (
+                segment_id
+                and is_partial
+                and await self._override_marker_exists(agent_run_id, segment_id)
             ):
                 continue
 
@@ -1158,6 +1183,13 @@ class RunSyncService:
             ):
                 agent_run.cache_creation_tokens = latest_cache_creation_tokens
                 self._session.add(agent_run)
+            # task-05 / FR-01 / design §7 守卫差异：ctx_tokens 实时写回——
+            # last-write-wins 直接赋值（瞬时量可上可下），刻意不做上面
+            # input/output/cache_* 的仅增不减守卫。close_interactive_run 终态
+            # 不触碰该列（SDK result 无 per-call 拆分，保留实时最后写入值）。
+            if latest_ctx_tokens is not None:
+                agent_run.ctx_tokens = latest_ctx_tokens
+                self._session.add(agent_run)
             # ql-20260617-001：session_id 实时写回（首次拿到就填，complete_lease 仍可覆盖）。
             if latest_session_id and not agent_run.session_id:
                 agent_run.session_id = latest_session_id
@@ -1231,6 +1263,9 @@ class RunSyncService:
         publish_cache_creation_tokens = (
             agent_run.cache_creation_tokens if agent_run is not None else None
         )
+        # task-05 / FR-01：ctx_tokens 同步提取（对齐 input/output），供 publish
+        # 实时透传（run channel summary + session channel tokens 事件）。
+        publish_ctx_tokens = agent_run.ctx_tokens if agent_run is not None else None
         publish_session_id = agent_run.agent_session_id if agent_run is not None else None
 
         if count > 0 or (agent_run is not None and agent_run_status == "running"):
@@ -1273,6 +1308,7 @@ class RunSyncService:
                 output_tokens=publish_output_tokens,
                 cache_read_tokens=publish_cache_read_tokens,
                 cache_creation_tokens=publish_cache_creation_tokens,
+                ctx_tokens=publish_ctx_tokens,
                 agent_session_id=publish_session_id,
                 timestamp_iso=now.isoformat().replace("+00:00", "Z"),
             ),

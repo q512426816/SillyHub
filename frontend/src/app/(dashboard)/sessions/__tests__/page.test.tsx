@@ -632,6 +632,7 @@ describe("SessionPanel attach 历史 whoLine + usage 注入（gap-fix）", () =>
         agent_profile_snapshot: { name: "知识经理", version: 1 },
         llm_provider_id: "lp-1",
         input_tokens: 1500,
+        ctx_tokens: 1500,
         output_tokens: 300,
       }),
     ]);
