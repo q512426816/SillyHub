@@ -104,9 +104,28 @@ export type SessionEventForBackend =
       kind: 'agent_task_status';
       task_id: string;
       task_name: string;
-      status: 'running' | 'completed' | 'failed';
+      // task-02（2026-08-27-background-subagent-progress / design §8）：status 扩
+      // 'stopped'（task_notification 终态之一）；旧三值调用点不受影响（向后兼容）。
+      status: 'running' | 'completed' | 'failed' | 'stopped';
       progress?: number;
       message?: string;
+      // task-02（design §8 契约冻结）：后台子代理生命周期扩展字段，全部 optional
+      //（缺省 = 旧 daemon 行为，backend 侧兜底）。字段名 snake_case 直通 body
+      //（cli.ts 桥接零映射）。task-03 的 task_* 拦截 / 回执兜底路径负责填充。
+      /** 关联前端 tool 段 id（tool_use block id；回执兜底路径必发）。 */
+      tool_use_id?: string;
+      /** 终态摘要 / 进行中摘要（backend 截断 200 字符）。 */
+      summary?: string;
+      /** task_progress.last_tool_name（「正在做什么」）。 */
+      last_tool_name?: string;
+      /** 服务端权威时长 ms（usage.duration_ms）。 */
+      elapsed_ms?: number;
+      /** 累计 tokens（task_progress.usage）。 */
+      total_tokens?: number;
+      /** 工具调用次数（task_progress.usage）。 */
+      tool_uses?: number;
+      /** 异步派发标记（回执兜底路径必发；缺省语义=前台）。 */
+      async?: boolean;
     };
 
 /** session 生命周期状态。 */

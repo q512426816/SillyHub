@@ -18,7 +18,9 @@
  *                       Agent Prompt / 通用参数 JSON 兜底），下方接工具 result）
  *   - SubagentBlockView 子代理嵌套块（头部状态点/名称/类型/时长 + children 递归
  *                       渲染；运行中默认展开+头部扫动，完成默认折叠；subagent_stub
- *                       兜底段复用同组件）
+ *                       兜底段复用同组件；task-13：段带 [TASK_*] 元数据（async 后台
+ *                       派发）时块头改状态徽标「后台运行中+走秒 / 已完成(真实时长) /
+ *                       失败 / 已停止」+ 正文尾行进度摘要——元数据驱动，终态即终）
  *   - StderrRowView     stderr 警示行（⚠ 前缀，平移现有 amber 样式）
  *   - TeamWorkerBlockView 分身段块（task-12 / 2026-08-22-team-session-unify FR-07：
  *                       violet 折叠卡——角色/目标工作区徽标/状态/耗时 + children
@@ -254,6 +256,35 @@ const TOOL_STATUS_META: Record<
  */
 function subagentStatus(segment: SubagentContainerSegment): "running" | "ok" | "deny" {
   return segment.kind === "subagent_stub" ? "running" : segment.status;
+}
+
+/* ───────── task-13（2026-08-27-background-subagent-progress / FR-07 / D-005@v1）───────── */
+
+/** [TASK_*] 任务状态（tool 段 taskStatus 元数据，task-11 装配）。 */
+type SubagentTaskStatus = "running" | "completed" | "failed" | "stopped";
+
+/**
+ * 块头状态徽标（原型 .st 药丸：bg-running=brand 阶 / done=绿 / 失败=红 / 停止=灰；
+ * 三主题语义阶——brand-* 随主题换肤，emerald/destructive 同既有完成/拒绝点色系）。
+ */
+const TASK_STATUS_BADGE: Record<SubagentTaskStatus, { label: string; cls: string }> = {
+  running: { label: "后台运行中", cls: "bg-brand-100 text-brand-700" },
+  completed: { label: "已完成", cls: "bg-emerald-600/15 text-emerald-600" },
+  failed: { label: "失败", cls: "bg-destructive/15 text-destructive" },
+  stopped: { label: "已停止", cls: "bg-muted text-muted-foreground" },
+};
+
+/**
+ * task-13：子代理容器段的 [TASK_*] 元数据收窄——段带元数据（taskStatus 或
+ * taskAsync 存在 = async 后台派发，task-11 装配）时返回任务状态：taskStatus
+ * 有值即权威（终态即终，不再因 result 配对判完成——async 启动回执 0.1s 配对
+ * 不是完成信号，design §1）；仅 taskAsync 时按 running。stub 段无这些字段恒
+ * null；无元数据的前台阻塞式子代理也恒 null → 消费方走原推导，零回归。
+ */
+function taskMetaStatusOf(segment: SubagentContainerSegment): SubagentTaskStatus | null {
+  if (segment.kind !== "tool") return null;
+  if (segment.taskStatus === undefined && segment.taskAsync === undefined) return null;
+  return segment.taskStatus ?? "running";
 }
 
 /* ─────────────── 团队 MCP 工具识别与摘要（task-12 / FR-07） ─────────────── */
@@ -534,12 +565,24 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
  * 展开、完成折叠，均可点击切换；running→终态过渡时自动收敛为折叠（跟随
  * 「完成折叠」默认，task-05 implementation）。body 内 children 段序列经
  * SegmentView 递归渲染（支持 depth>1 嵌套），折叠时不挂载（R-03）。
+ *
+ * task-13（2026-08-27-background-subagent-progress / FR-07 / D-005@v1）：段带
+ * [TASK_*] 元数据（async 后台派发，task-11 装配）时块头改元数据驱动——状态徽标
+ * 「后台运行中 / 已完成 / 失败 / 已停止」+ 时长（运行中本地走秒；终态 = 服务端
+ * 权威 taskElapsedMs 真实用时，不再显示回执差值 00:00），正文尾行补最近一条
+ * [TASK_*] 消费后的进度摘要（taskToolName + taskSummary）。走秒为组件局部 tick
+ *（仅 async 运行中启动）——task-05「纯组件不读本地时钟」约束在此让位：运行中
+ * 不显示秒数会重新制造「00:00 假完成」盲区。无元数据段走原推导（前台阻塞式
+ * 子代理零回归）。
  */
 export const SubagentBlockView = memo(function SubagentBlockView({
   segment,
 }: SubagentBlockViewProps) {
   useSegmentAnimations();
-  const status = subagentStatus(segment);
+  // task-13：[TASK_*] 元数据优先（stub 段无元数据恒走原三态推导）。
+  const taskSeg = segment.kind === "tool" ? segment : null;
+  const metaStatus = taskMetaStatusOf(segment);
+  const status = metaStatus ?? subagentStatus(segment);
   const running = status === "running";
   const [open, setOpen] = useState(running);
   // running→终态过渡：收敛为折叠（初值已按运行态取展开，此处只管生命周期中段翻转）。
@@ -549,18 +592,45 @@ export const SubagentBlockView = memo(function SubagentBlockView({
     prevRunningRef.current = running;
   }, [running]);
 
+  // task-13：后台异步运行中本地走秒（FR-06 渲染经济性对齐 subagent-catalog 模式：
+  // tick 是组件局部 state，仅 async 运行中启动，终态/卸载清理）；锚点 = 段
+  // startedAt（派发时刻）。
+  const [now, setNow] = useState<number>(() => Date.now());
+  const asyncRunning = metaStatus === "running";
+  useEffect(() => {
+    if (!asyncRunning) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [asyncRunning]);
+
   const dotCls =
     status === "running"
       ? "bg-brand-600 animate-pulse"
-      : status === "deny"
+      : status === "deny" || status === "failed"
         ? "bg-destructive"
-        : "bg-emerald-600";
+        : status === "stopped"
+          ? "bg-muted-foreground"
+          : "bg-emerald-600";
   const name =
     segment.kind === "tool"
       ? (segment.primary?.trim() || segment.subagentType || "子代理")
       : (segment.subagentType || "子代理");
   let durationText: string | null = null;
-  if (running) {
+  if (metaStatus != null && taskSeg != null) {
+    // task-13：元数据驱动时长——终态 = 服务端权威 taskElapsedMs（真实用时）；
+    // 运行中 = 本地走秒（缺锚点回退最近一次 taskElapsedMs 校准值，再缺不显示）。
+    if (metaStatus === "running") {
+      durationText =
+        taskSeg.startedAt != null
+          ? formatClockDuration(now - taskSeg.startedAt)
+          : taskSeg.taskElapsedMs != null
+            ? formatClockDuration(taskSeg.taskElapsedMs)
+            : null;
+    } else {
+      durationText =
+        taskSeg.taskElapsedMs != null ? formatClockDuration(taskSeg.taskElapsedMs) : null;
+    }
+  } else if (running) {
     durationText = "运行中";
   } else if (
     segment.kind === "tool" &&
@@ -569,6 +639,22 @@ export const SubagentBlockView = memo(function SubagentBlockView({
   ) {
     durationText = formatClockDuration(segment.endedAt - segment.startedAt);
   }
+  // task-13：正文尾行 = 最近一条 [TASK_*] 消费后的进度摘要（段元数据，原型
+  // blk-body 的 └ 行）——运行中 = 最近工具名（brand 阶）+ 进行中摘要（PROGRESS
+  // 行）；终态 = 终态文案 + 摘要（NOTIFICATION 行，taskToolName 已陈旧不展示）。
+  // 无摘要不渲染。
+  const progressLine: { label: string | null; tool: string | null; summary: string } | null =
+    (() => {
+      if (taskSeg == null || metaStatus == null) return null;
+      const summary = taskSeg.taskSummary?.trim() ?? "";
+      if (metaStatus === "running") {
+        const tool = taskSeg.taskToolName?.trim() ?? "";
+        return tool || summary ? { label: null, tool: tool || null, summary } : null;
+      }
+      return summary
+        ? { label: TASK_STATUS_BADGE[metaStatus].label, tool: null, summary }
+        : null;
+    })();
   return (
     <div className="w-full self-stretch overflow-hidden rounded-[10px] border border-indigo-200 bg-indigo-50">
       <div
@@ -600,6 +686,18 @@ export const SubagentBlockView = memo(function SubagentBlockView({
             {segment.subagentType}
           </span>
         )}
+        {/* task-13：元数据驱动的块头状态徽标（后台运行中/已完成/失败/已停止，
+            原型 .st 药丸）；前台路径不渲染（保持原形态零回归）。 */}
+        {metaStatus != null && (
+          <span
+            className={cn(
+              "shrink-0 rounded-[5px] px-2 py-px text-[10.5px] font-semibold",
+              TASK_STATUS_BADGE[metaStatus].cls,
+            )}
+          >
+            {TASK_STATUS_BADGE[metaStatus].label}
+          </span>
+        )}
         {durationText && (
           <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
             {durationText}
@@ -611,6 +709,38 @@ export const SubagentBlockView = memo(function SubagentBlockView({
           {segment.children.map((child) => (
             <SegmentView key={child.id} segment={child} />
           ))}
+          {progressLine && (
+            <p
+              className="flex min-w-0 items-baseline gap-1.5 font-mono text-[10.5px] text-muted-foreground"
+              title={`${progressLine.tool ?? progressLine.label ?? ""} ${progressLine.summary}`.trim()}
+            >
+              <span aria-hidden className="shrink-0 text-muted-foreground/70">
+                └
+              </span>
+              {progressLine.label && (
+                <span
+                  className={cn(
+                    "shrink-0 font-semibold",
+                    metaStatus === "completed"
+                      ? "text-emerald-600"
+                      : metaStatus === "failed"
+                        ? "text-destructive"
+                        : "text-muted-foreground",
+                  )}
+                >
+                  {progressLine.label}
+                </span>
+              )}
+              {progressLine.tool && (
+                <span className="shrink-0 font-semibold text-brand-600">
+                  {progressLine.tool}
+                </span>
+              )}
+              {progressLine.summary && (
+                <span className="min-w-0 truncate">{progressLine.summary}</span>
+              )}
+            </p>
+          )}
         </div>
       )}
     </div>
@@ -678,15 +808,19 @@ export const PreambleSegmentView = memo(function PreambleSegmentView({
 /* ─────────────── 分身段块（task-12 / 2026-08-22-team-session-unify / FR-07） ─────────────── */
 
 /** 分身 run 状态 → 渲染态/文案/颜色（与 team-task-block WORKER_STATUS_META 对齐；
- * 段族文件保持零跨模块依赖，故独立维护同款映射）。 */
+ * 段族文件保持零跨模块依赖，故独立维护同款映射）。
+ * task-13：bg_running / stopped 为 [TASK_*] 元数据映射态——async 后台派发运行中
+ * 显示「后台运行中」（brand 阶），任务被停止显示灰；无元数据路径不产生这两态。 */
 const WORKER_STATUS_META: Record<string, { label: string; cls: string }> = {
   pending: { label: "排队中", cls: "text-muted-foreground" },
   running: { label: "运行中", cls: "text-brand-700" },
+  bg_running: { label: "后台运行中", cls: "text-brand-700" },
   completed: { label: "已完成", cls: "text-emerald-700" },
   failed: { label: "失败", cls: "text-red-600" },
   killed: { label: "已终止", cls: "text-muted-foreground" },
   cancelled: { label: "已取消", cls: "text-muted-foreground" },
   interrupted: { label: "已打断", cls: "text-muted-foreground" },
+  stopped: { label: "已停止", cls: "text-muted-foreground" },
 };
 
 const WORKER_STATUS_FALLBACK = { label: "未知", cls: "text-muted-foreground" };
@@ -732,7 +866,8 @@ export const TeamWorkerBlockView = memo(function TeamWorkerBlockView({
 }: TeamWorkerBlockProps) {
   useSegmentAnimations();
   const wsMeta = WORKER_STATUS_META[status] ?? WORKER_STATUS_FALLBACK;
-  const running = status === "pending" || status === "running";
+  // task-13：bg_running（[TASK_*] 元数据映射态）与 running 同属运行中口径。
+  const running = status === "pending" || status === "running" || status === "bg_running";
   const [open, setOpen] = useState(running);
   // running → 终态过渡：收敛为折叠（同 SubagentBlockView 生命周期语义）。
   const prevRunningRef = useRef(running);
@@ -804,20 +939,44 @@ export const TeamWorkerBlockView = memo(function TeamWorkerBlockView({
   );
 });
 
-/** dispatch_worker tool 段 → TeamWorkerBlockProps（args 解析 + 段三态映射）。 */
+/**
+ * dispatch_worker tool 段 → TeamWorkerBlockProps（args 解析 + 段三态映射）。
+ * task-13（FR-07）：段带 [TASK_*] 元数据（async 后台派发）时状态/时长优先走
+ * 元数据——taskStatus 终态即终（不再被段三态误判 completed），运行中映射
+ * bg_running（头部「后台运行中」）；时长终态取服务端 taskElapsedMs，运行中
+ * 不显示冻结值（本组件纯展示不读本地时钟，走秒归子代理块/目录）。无元数据
+ * 走原段三态映射（团队路径零回归）。
+ */
 function teamWorkerBlockFromSegment(segment: ToolTurnSegment): TeamWorkerBlockProps {
   const args = parseTeamToolArgs(segment.raw);
   const str = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+  const metaStatus = taskMetaStatusOf(segment);
   return {
     role: str(args.role),
-    // 段三态 → run 状态口径（running/ok/deny → running/completed/failed）
     status:
-      segment.status === "ok" ? "completed" : segment.status === "deny" ? "failed" : "running",
+      metaStatus === "completed"
+        ? "completed"
+        : metaStatus === "failed"
+          ? "failed"
+          : metaStatus === "stopped"
+            ? "stopped"
+            : metaStatus === "running"
+              ? (segment.taskAsync ? "bg_running" : "running")
+              : // 段三态 → run 状态口径（running/ok/deny → running/completed/failed）
+                segment.status === "ok"
+                ? "completed"
+                : segment.status === "deny"
+                  ? "failed"
+                  : "running",
     objective: str(args.objective),
     durationMs:
-      segment.startedAt != null && segment.endedAt != null
-        ? segment.endedAt - segment.startedAt
-        : null,
+      metaStatus === "running"
+        ? null
+        : metaStatus != null
+          ? (segment.taskElapsedMs ?? null)
+          : segment.startedAt != null && segment.endedAt != null
+            ? segment.endedAt - segment.startedAt
+            : null,
     workspaceId: str(args.target_workspace_id),
     children: segment.children.map((child) => (
       <SegmentView key={child.id} segment={child} />

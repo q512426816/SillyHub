@@ -151,6 +151,15 @@ export function SessionInputBar({
     }
   };
 
+  /* task-14（2026-08-27-background-subagent-progress / FR-08）：空内容禁点提示——
+   * 纯空文本（strip 后为空且无附件）时发送按钮 title/aria-label 提示「消息内容
+   * 不能为空」，与后端 inject 空 prompt 422 文案一致（backend session/service.py
+   * SessionEmptyPrompt）。仅在非父级禁用时提示：终态/离线等父级禁用原因由
+   * placeholder 承载，此时不误报空内容。D-7 例外口径不变——有附件无文本仍可发
+   * （看图说话），提示保持「发送」。 */
+  const sendEmptyHinted =
+    !disabled && !value.trim() && attachments.length === 0;
+
   const syncToParent = (next: AttachmentRead[]) => {
     onAttachmentsChange?.(next);
   };
@@ -311,7 +320,8 @@ export function SessionInputBar({
           // D-7：带附件时空文本可发（看图说话）；纯文本仍要求非空。
           disabled={disabled || (!value.trim() && attachments.length === 0)}
           className="h-9 w-9 shrink-0 self-center border-none bg-gradient-to-br from-brand-600 to-info shadow-primary hover:from-brand-700 hover:to-info hover:shadow-primary"
-          title="发送"
+          title={sendEmptyHinted ? "消息内容不能为空" : "发送"}
+          aria-label={sendEmptyHinted ? "消息内容不能为空" : "发送"}
         >
           {creating ? (
             <RefreshCw className="h-4 w-4 animate-spin" />

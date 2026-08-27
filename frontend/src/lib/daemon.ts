@@ -635,14 +635,21 @@ function parseBashChunkEvent(
   };
 }
 
-/** 把 SSE payload 归一化为 AgentTaskStatusEvent（verify P1 返工 / FR-03）。 */
+/**
+ * 把 SSE payload 归一化为 AgentTaskStatusEvent（verify P1 返工 / FR-03）。
+ * 2026-08-27-background-subagent-progress task-10（FR-04）：status 增补 stopped，
+ * 透传异步子代理生命周期扩展字段（全可选——旧 daemon 不下发时归一为 null，
+ * 消费方按可选语义兜底）。
+ */
 function parseAgentTaskStatusEvent(
   data: unknown,
   sessionId: string,
 ): AgentTaskStatusEvent {
   const evt = data as Record<string, unknown>;
   const status =
-    evt.status === "completed" || evt.status === "failed"
+    evt.status === "completed" ||
+    evt.status === "failed" ||
+    evt.status === "stopped"
       ? evt.status
       : "running";
   return {
@@ -654,6 +661,16 @@ function parseAgentTaskStatusEvent(
     status,
     progress: typeof evt.progress === "number" ? evt.progress : null,
     message: typeof evt.message === "string" ? evt.message : null,
+    // FR-04 扩展字段（旧 daemon 缺字段 → null）：
+    tool_use_id: typeof evt.tool_use_id === "string" ? evt.tool_use_id : null,
+    summary: typeof evt.summary === "string" ? evt.summary : null,
+    last_tool_name:
+      typeof evt.last_tool_name === "string" ? evt.last_tool_name : null,
+    elapsed_ms: typeof evt.elapsed_ms === "number" ? evt.elapsed_ms : null,
+    total_tokens:
+      typeof evt.total_tokens === "number" ? evt.total_tokens : null,
+    tool_uses: typeof evt.tool_uses === "number" ? evt.tool_uses : null,
+    async: typeof evt.async === "boolean" ? evt.async : null,
   };
 }
 
@@ -1018,6 +1035,11 @@ export interface BashChunkEvent {
 /**
  * agent_task_status 事件：后台 Agent 任务（Task/Agent 工具派发的子代理）状态。
  * verify P1 返工（FR-03）：daemon 在 Task/Agent tool_use 时上报，前端渲染任务卡片。
+ * 2026-08-27-background-subagent-progress task-10（FR-04，对齐 api-types 生成类型）：
+ * status 增补 stopped 终态，透传异步子代理生命周期扩展字段
+ * （tool_use_id/summary/last_tool_name/elapsed_ms/total_tokens/tool_uses/async）。
+ * 新字段均可选——旧 daemon 只发 running + task_id/task_name 载荷不受影响
+ * （解析侧缺字段归一为 null）。
  */
 export interface AgentTaskStatusEvent {
   event: "agent_task_status";
@@ -1025,9 +1047,18 @@ export interface AgentTaskStatusEvent {
   run_id: string;
   task_id: string;
   task_name: string;
-  status: "running" | "completed" | "failed";
+  status: "running" | "completed" | "failed" | "stopped";
   progress: number | null;
   message: string | null;
+  /** FR-04：以下扩展字段全可选（旧 daemon 事件解析为 null）。 */
+  tool_use_id?: string | null;
+  summary?: string | null;
+  last_tool_name?: string | null;
+  elapsed_ms?: number | null;
+  total_tokens?: number | null;
+  tool_uses?: number | null;
+  /** 后端 DTO 字段名 async_ + alias async，daemon 下发键名为 async。 */
+  async?: boolean | null;
 }
 
 export interface SessionStreamEnvelope {
@@ -1056,7 +1087,11 @@ export interface SessionStreamEnvelope {
   elapsed_ms?: number | null;
   is_final?: boolean;
   /**
-   * task-05 预留：agent task 状态事件字段（后续 task 消费）。
+   * agent task 状态事件字段（task-05 引入；2026-08-27-background-subagent-progress
+   * FR-04 task-10 已接线）：dispatch 经 parseAgentTaskStatusEvent 归一后交给
+   * onAgentTaskStatus 回调消费。扩展字段（stopped 终态 / tool_use_id / summary /
+   * last_tool_name / elapsed_ms / total_tokens / tool_uses / async）以
+   * AgentTaskStatusEvent 接口为准，不在 envelope 重复声明。
    */
   task_id?: string | null;
   task_name?: string | null;
@@ -1155,8 +1190,12 @@ export interface SessionStreamHandlers {
    */
   onBashChunk?(event: BashChunkEvent): void;
   /**
-   * verify P1 返工（FR-03）：后台 Agent 任务状态（running / completed / failed）。
-   * 父组件按 task_id 维护任务卡片列表；存在 running 任务时会话不显示「已完成」。
+   * verify P1 返工（FR-03）：后台 Agent 任务状态（running / completed / failed /
+   * stopped）。父组件按 task_id 维护任务卡片列表；存在 running 任务时会话不显示
+   * 「已完成」。
+   * 2026-08-27-background-subagent-progress / FR-04（task-10）：携带异步子代理
+   * 生命周期扩展字段 tool_use_id / summary / last_tool_name / elapsed_ms /
+   * total_tokens / tool_uses / async（全可选，旧 daemon 事件为 null）。
    */
   onAgentTaskStatus?(event: AgentTaskStatusEvent): void;
 }

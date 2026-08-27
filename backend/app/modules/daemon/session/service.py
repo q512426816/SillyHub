@@ -364,6 +364,23 @@ class DaemonOffline(AppError):
     http_status = 409
 
 
+# ── 2026-08-27-background-subagent-progress task-07：空 prompt 注入防御（FR-08
+# / D-004@v1；生产实证 run c78044c8：空 prompt inject 产出 50ms 零输出空轮）──
+
+
+class SessionEmptyPrompt(AppError):
+    """inject 空 prompt（含全空白）拒绝：422 + 中文文案「消息内容不能为空」。
+
+    领域错误按事件命名（IncidentNotFound 惯例，不带 Error 后缀）。豁免口径与
+    :meth:`DaemonService.inject_session` 入口一致（口径单一来源在 service）：
+    静默切换轮（ql-20260817-010）/ 附件看图说话轮（D-7）允许空 prompt，
+    不受本错误影响。
+    """
+
+    code = "SESSION_EMPTY_PROMPT"
+    http_status = 422
+
+
 # ── 2026-08-14-sessions-portal task-03：create_session 配置入口校验错误 ─────────
 
 
@@ -2218,13 +2235,17 @@ class SessionService:
         只含可注入状态判定 + 写入；锁内复核 gate 基准漂移（见组装段）。
         """
         # ql-20260817-010：静默切换——携带切换字段时允许空 prompt（切换轮无用户
-        # 消息/模型回应，daemon 只 reload 配置）；纯追问仍要求非空（DTO 已 422，
-        # 服务层兜底防绕过）。
+        # 消息/模型回应，daemon 只 reload 配置）；纯追问仍要求非空。
         # 2026-08-20 task-05（D-7）：附件非空也豁免空 prompt（看图说话）。
-        if not prompt or not prompt.strip():
+        # 2026-08-27-background-subagent-progress task-07（FR-08 / D-004@v1）：
+        # 空 prompt（含全空白）→ SessionEmptyPrompt 422 中文文案；校验在取锁 /
+        # 附件预读 / 忙轮入队（queue_when_busy）之前——空消息不进队列、不建
+        # run、不写 user_input 行。空判权威唯一在此（DTO 层不再重复判空，切换 /
+        # 附件豁免口径单一来源，见 SessionInjectRequest docstring）。
+        if not (prompt or "").strip():
             if agent_profile_id is None and llm_provider_id is None and not attachment_ids:
-                raise DaemonSessionNotActive(
-                    "prompt must not be empty.",
+                raise SessionEmptyPrompt(
+                    "消息内容不能为空",
                     details={"reason": "empty_prompt"},
                 )
             prompt = ""
@@ -2310,9 +2331,12 @@ class SessionService:
         for the change-side best-effort degradation mapping (turn_conflict /
         session_inactive / inject_failed, R-03).
         """
-        if not prompt or not prompt.strip():
-            raise DaemonSessionNotActive(
-                "prompt must not be empty.",
+        # 2026-08-27-background-subagent-progress task-07（FR-08 / D-004@v1）：
+        # 与 inject_session 入口同口径——空 prompt（含全空白）→ SessionEmptyPrompt
+        # 422；service 身份路径无切换字段/附件，无豁免分支。
+        if not (prompt or "").strip():
+            raise SessionEmptyPrompt(
+                "消息内容不能为空",
                 details={"reason": "empty_prompt"},
             )
 

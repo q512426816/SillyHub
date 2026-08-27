@@ -41,6 +41,7 @@ from app.modules.daemon.session.service import (
     DaemonSessionLlmProviderKindMismatch,
     DaemonSessionLlmProviderNotFound,
     DaemonSessionNotActive,
+    SessionEmptyPrompt,
 )
 from app.modules.llm_provider.model import LlmProvider
 
@@ -524,7 +525,14 @@ class TestClearProvider:
     async def test_empty_prompt_without_switch_fields_rejected(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:
-        """ql-20260817-010：纯追问空 prompt 仍拒绝（服务层兜底，DTO 层已 422）。"""
+        """纯追问空 prompt 仍拒绝。
+
+        2026-08-27-background-subagent-progress task-07 判空收口 service 入口：
+        无切换字段/附件的空 prompt 在 ``inject_session`` 入口即抛
+        ``SessionEmptyPrompt``（422「消息内容不能为空」），不再走到锁内的
+        ``DaemonSessionNotActive``（409，ql-20260818-002 旧路径，现仅等值
+        切换空轮场景触达，见 test_empty_string_when_already_none_no_switch）。
+        """
         uid = await _create_user(db_session)
         rt = await _create_runtime(db_session, uid)
         svc = DaemonService(db_session)
@@ -533,8 +541,10 @@ class TestClearProvider:
         )
         await _finish_first_turn(db_session, created)
 
-        with pytest.raises(DaemonSessionNotActive):
+        with pytest.raises(SessionEmptyPrompt) as exc_info:
             await svc.inject_session(created.agent_session.id, uid, prompt="")
+        assert exc_info.value.http_status == 422
+        assert exc_info.value.message == "消息内容不能为空"
 
     @pytest.mark.asyncio
     async def test_empty_string_when_already_none_is_plain_inject(

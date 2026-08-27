@@ -99,7 +99,7 @@ import { SubagentCatalog } from "@/components/sessions/subagent-catalog";
 import { ApiError } from "@/lib/api";
 import { useNotify } from "@/lib/errors";
 import { isActiveTeamMission } from "@/components/daemon/team-task-block";
-import { ActivityCatalog } from "@/components/daemon/activity-catalog";
+import { ActivityCatalog, type AgentTaskEntry } from "@/components/daemon/activity-catalog";
 import { TeamTriggerPopover } from "@/components/daemon/team-trigger-popover";
 import {
   AgentLogCard,
@@ -112,6 +112,7 @@ import type {
   PlanSummary,
   BashStatusEvent,
   BashChunkEvent,
+  AgentTaskStatusEvent,
 } from "@/lib/daemon";
 import {
   type LlmProviderRead,
@@ -763,15 +764,11 @@ function SessionPanelPage({
   const [bashProgress, setBashProgress] = useState<BashProgressState | null>(null);
   // verify P1 返工（FR-03）：后台 Agent 任务状态（按 task_id upsert，保留终态供
   // 回看；最多展示最近 6 条防长会话刷屏，会话结束清空）。
-  const [agentTasks, setAgentTasks] = useState<
-    {
-      taskId: string;
-      taskName: string;
-      status: "running" | "completed" | "failed";
-      progress: number | null;
-      message: string | null;
-    }[]
-  >([]);
+  // task-12（2026-08-27-background-subagent-progress / FR-06）：state 扩到全生命
+  // 周期——status 增补 stopped 终态，存「正在做什么」/ 走秒锚点 / tokens /
+  // 最后活跃 / 终态定格字段（形状同 ActivityCatalog 的 AgentTaskEntry）；归约
+  // 统一走底部 applyAgentTaskStatusEvent（page / dialog 两模式共用）。
+  const [agentTasks, setAgentTasks] = useState<AgentTaskEntry[]>([]);
   // gap-fix（FR-07 / FR-08）：run 级轮次快照（id → SessionRunRead），attach 时
   // 预取 + 每轮 turn_completed 后刷新，供 whoLine 注入与历史 usage 回填。
   const [runsMeta, setRunsMeta] = useState<Map<string, SessionRunRead>>(new Map());
@@ -1157,21 +1154,10 @@ function SessionPanelPage({
         );
       },
       // verify P1 返工（FR-03）：后台 Agent 任务状态 → AgentTaskCard（按 task_id upsert）。
+      // task-12（FR-06）：归约统一走底部 applyAgentTaskStatusEvent（扩展字段合并
+      // + 终态定格 + 最近 6 条截断，page / dialog 两模式共用）。
       onAgentTaskStatus: (event) => {
-        setAgentTasks((prev) => {
-          const next = {
-            taskId: event.task_id,
-            taskName: event.task_name,
-            status: event.status,
-            progress: event.progress,
-            message: event.message,
-          };
-          const idx = prev.findIndex((t) => t.taskId === event.task_id);
-          if (idx === -1) return [...prev, next].slice(-6);
-          const copy = [...prev];
-          copy[idx] = next;
-          return copy;
-        });
+        setAgentTasks((prev) => applyAgentTaskStatusEvent(prev, event));
       },
     });
 
@@ -2105,6 +2091,10 @@ function SessionPanelPage({
   // team missions）；配置条与团队触发行同构挂载（团队行 task-13 解禁，随首句
   // 创建生效）。
   if (!sessionId) {
+    // task-14（FR-08 辅半）：纯空文本禁点不在本条件追加——空内容判断收口在共享
+    // SessionInputBar 发送按钮（!value.trim() 且无附件，D-7 附件例外维持）+
+    // handleSend 双守卫；本 disabled 同时禁 textarea，并入 trim 判断会在空输入
+    // 时锁死输入框无法打字。
     const preSendingDisabled = !preContext || !preMachineOnline;
     const prePlaceholder = !preContext
       ? "请先选择机器与智能体…"
@@ -2335,6 +2325,10 @@ function SessionPanelPage({
   // placeholder 引导继续（首条消息懒激活派发，D-002）。
   const isToolReportBody =
     session.origin === "tool_report" && session.turn_count === 0;
+  // task-14（FR-08 辅半）：纯空文本禁点不在本条件追加——空内容判断收口在共享
+  // SessionInputBar 发送按钮（!value.trim() 且无附件，D-7 附件例外维持）+
+  // handleSend 入口守卫（下方 !prompt && 附件空 return）；本 disabled 同时禁
+  // textarea，并入 trim 判断会在空输入时锁死输入框无法打字。
   const sendingDisabled = ended || !machineOnline;
   const placeholder = ended
     ? "会话已结束，请新建会话"
@@ -3001,15 +2995,9 @@ function SessionPanelDialog(props: SessionPanelProps) {
   // 重置 + 环形截断，page / dialog 两模式共用）。
   const [bashProgress, setBashProgress] = useState<BashProgressState | null>(null);
   // verify P1 返工（FR-03）：后台 Agent 任务状态（按 task_id upsert，最近 6 条）。
-  const [agentTasks, setAgentTasks] = useState<
-    {
-      taskId: string;
-      taskName: string;
-      status: "running" | "completed" | "failed";
-      progress: number | null;
-      message: string | null;
-    }[]
-  >([]);
+  // task-12（FR-06）：state 扩到全生命周期（形状同 AgentTaskEntry），归约统一
+  // 走底部 applyAgentTaskStatusEvent（page / dialog 两模式共用）。
+  const [agentTasks, setAgentTasks] = useState<AgentTaskEntry[]>([]);
   // AskUserQuestion 问答历史（pending+answered），独立于实时卡片——卡片回答后
   // 即移除、failed/ended 会话不渲染卡片，历史靠 GET /dialogs/history 恢复展示。
   const [dialogHistory, setDialogHistory] = useState<SessionDialogRead[]>([]);
@@ -3302,21 +3290,10 @@ function SessionPanelDialog(props: SessionPanelProps) {
           );
         },
             // verify P1 返工（FR-03）：后台 Agent 任务状态 → AgentTaskCard（按 task_id upsert）。
+            // task-12（FR-06）：归约统一走底部 applyAgentTaskStatusEvent（扩展
+            // 字段合并 + 终态定格 + 最近 6 条截断，page / dialog 两模式共用）。
             onAgentTaskStatus: (event) => {
-              setAgentTasks((prev) => {
-                const next = {
-                  taskId: event.task_id,
-                  taskName: event.task_name,
-                  status: event.status,
-                  progress: event.progress,
-                  message: event.message,
-                };
-                const idx = prev.findIndex((t) => t.taskId === event.task_id);
-                if (idx === -1) return [...prev, next].slice(-6);
-                const copy = [...prev];
-                copy[idx] = next;
-                return copy;
-              });
+              setAgentTasks((prev) => applyAgentTaskStatusEvent(prev, event));
             },
           },
         );
@@ -4010,6 +3987,10 @@ function SessionPanelDialog(props: SessionPanelProps) {
   // running / reconnecting 排队可输入（有意行为变更：ISP 旧语义为全态禁用，
   // diff-analysis §5.2-2；弹窗测试旧禁用断言由 task-08/09 更新，非回归）。
   // 队满（D-002）不禁输入但 handleSend 阻止提交，提示由 placeholder 承载。
+  // task-14（FR-08 辅半）：纯空文本禁点不在本条件追加——空内容判断收口在共享
+  // SessionInputBar 发送按钮（!value.trim() 且无附件，D-7 附件例外维持）+
+  // handleSend 入口守卫；本 disabled 同时禁 textarea，并入 trim 判断会在空
+  // 输入时锁死输入框无法打字。
   const sendingDisabled =
     view.status === "ended" ||
     view.status === "failed" ||
@@ -4680,5 +4661,56 @@ export function appendBashChunk(
     start += 1;
   }
   return start > 0 ? { ...prev, chunks: chunks.slice(start) } : { ...prev, chunks };
+}
+
+/* ── 后台 Agent 任务状态归约（task-12 / 2026-08-27-background-subagent-progress）── */
+
+/**
+ * agent_task_status 归约（page / dialog 两模式共用，对齐 bash 先例收口到底部）：
+ * 按 task_id upsert，扩展字段（工具名 / summary / tokens / 走秒锚点）事件未带
+ * （null）时保留旧值——服务端累计量只增不减，心跳缺字段不回退；running 心跳
+ * 推进「最后活跃」锚点；终态事件到达即定格（记 terminalAt + 服务端 elapsed），
+ * 此后迟到的 running 心跳不复活转圈（终态为吸收态，后到终态允许覆盖定格数据）；
+ * 最近 6 条截断语义与原实现一致（终态保留供回看，会话结束由调用方清空）。
+ */
+export function applyAgentTaskStatusEvent(
+  prev: AgentTaskEntry[],
+  event: AgentTaskStatusEvent,
+): AgentTaskEntry[] {
+  const now = Date.now();
+  const idx = prev.findIndex((t) => t.taskId === event.task_id);
+  const existing = idx >= 0 ? (prev[idx] ?? null) : null;
+  // 终态定格：已定格（completed / failed / stopped）的卡片忽略迟到 running 心跳。
+  if (existing && existing.status !== "running" && event.status === "running") {
+    return prev;
+  }
+  const next: AgentTaskEntry = {
+    taskId: event.task_id,
+    taskName: event.task_name,
+    status: event.status,
+    progress: event.progress,
+    message: event.message,
+    // FR-04 扩展字段：事件缺省（null / undefined）时沿用旧值（首见任务为 null）。
+    isAsync: event.async ?? existing?.isAsync ?? null,
+    lastToolName: event.last_tool_name ?? existing?.lastToolName ?? null,
+    summary: event.summary ?? existing?.summary ?? null,
+    elapsedMs: event.elapsed_ms ?? existing?.elapsedMs ?? null,
+    totalTokens: event.total_tokens ?? existing?.totalTokens ?? null,
+    toolUses: event.tool_uses ?? existing?.toolUses ?? null,
+    // 走秒校准锚点：elapsed_ms 到达即重置；首见任务记 startedAt 兜底（无服务端
+    // 时长时卡片走 startedAt 起本地走秒）。
+    elapsedSyncedAt:
+      event.elapsed_ms != null ? now : existing?.elapsedSyncedAt ?? null,
+    startedAt: existing?.startedAt ?? now,
+    // 「最后活跃」锚点：running 心跳推进，终态定格后不再更新（卡片据此判 >5min
+    // 沉默；终态本身不触发警示）。
+    lastActivityAt:
+      event.status === "running" ? now : existing?.lastActivityAt ?? null,
+    terminalAt: event.status === "running" ? existing?.terminalAt ?? null : now,
+  };
+  if (idx === -1) return [...prev, next].slice(-6);
+  const copy = [...prev];
+  copy[idx] = next;
+  return copy;
 }
 

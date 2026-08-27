@@ -25,6 +25,13 @@
  *
  * 挂载范围（Grill X-09）：仅 /sessions 页头部（task-09 接线）；runtimes
  * 弹窗不挂。antd 不用——轻量自绘，与 sessions 组件现有 tailwind 风格一致。
+ *
+ * task-13（2026-08-27-background-subagent-progress / FR-07 / D-005@v1）：行时长/状态
+ * 对带 [TASK_*] 元数据的 async 后台子代理改由元数据驱动（上游 collectSubagents 透传
+ * taskStatus / taskElapsedMs 等）——运行中显示走秒 + running 状态点（消灭假「已完成 +
+ * 00:00」），终态显示服务端真实时长 taskElapsedMs（不用 endedAt-startedAt 回执差值），
+ * stopped 灰点；无元数据段走原推导（前台阻塞式子代理零回归）。目录头部计数徽标
+ * 口径同步（运行中数）。
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -64,15 +71,32 @@ function pickCatalogTurn(turns: SessionTurnView[]): SessionTurnView | null {
   return turns.length > 0 ? (turns[turns.length - 1] ?? null) : null;
 }
 
-/** 行状态点样式（原型 .catalog-row .st：running=brand 阶 pulse / done 绿 / deny 红）。 */
-const STATUS_DOT_CLS: Record<"running" | "done" | "deny", string> = {
+/** 行状态点样式（原型 .catalog-row .st：running=brand 阶 pulse / done 绿 / deny 红；
+ * task-13：stopped 灰——后台任务被停止，原型「失败/停止变红/变灰」）。 */
+const STATUS_DOT_CLS: Record<SubagentActivity["status"], string> = {
   running: "animate-pulse bg-brand-600",
   done: "bg-emerald-600",
   deny: "bg-destructive",
+  stopped: "bg-muted-foreground",
 };
 
-/** 单行时长：运行中 = now 补秒；已完成 = endedAt - startedAt；锚点缺失「—」。 */
+/**
+ * 单行时长（task-13 / FR-07）：段带 [TASK_*] 元数据（taskStatus 或 taskAsync 存在 =
+ * async 后台派发）时由元数据驱动——终态显示服务端权威时长 taskElapsedMs（真实
+ * 用时，不用 endedAt-startedAt 回执差值）；运行中本地走秒（now 补秒，锚点
+ * startedAt = 派发时刻；缺锚点回退最近一次 taskElapsedMs 校准值，再缺「—」）。
+ * 无元数据段走原推导（前台阻塞式零回归）：运行中 = now 补秒；已完成 =
+ * endedAt - startedAt；锚点缺失「—」。
+ */
 function subagentDuration(sa: SubagentActivity, now: number): string {
+  const metaDriven = sa.taskStatus !== undefined || sa.taskAsync !== undefined;
+  if (metaDriven) {
+    if (sa.status !== "running") {
+      return sa.taskElapsedMs != null ? formatElapsedMmss(sa.taskElapsedMs) : "—";
+    }
+    if (sa.startedAt != null) return formatElapsedMmss(now - sa.startedAt);
+    return sa.taskElapsedMs != null ? formatElapsedMmss(sa.taskElapsedMs) : "—";
+  }
   if (sa.status === "running") {
     return sa.startedAt != null ? formatElapsedMmss(now - sa.startedAt) : "—";
   }
@@ -168,6 +192,13 @@ export function SubagentCatalog({ turns, onJumpTo }: SubagentCatalogProps) {
             <span className="rounded-full bg-brand-100 px-1.5 text-[10px] font-semibold leading-4 text-brand-700">
               {subagents.length}
             </span>
+            {/* task-13：头部计数徽标口径同步（原型 catalog-head 双 cnt）——存在
+                运行中（含 async 后台运行中）时追加「N 运行中」徽标。 */}
+            {hasRunning && (
+              <span className="rounded-full bg-brand-100 px-1.5 text-[10px] font-semibold leading-4 text-brand-700">
+                {runningCount} 运行中
+              </span>
+            )}
           </div>
           <ul role="list" className="max-h-80 overflow-y-auto">
             {subagents.map((sa) => (
@@ -178,8 +209,12 @@ export function SubagentCatalog({ turns, onJumpTo }: SubagentCatalogProps) {
                     setOpen(false);
                     onJumpTo?.(sa.segmentId);
                   }}
+                  /* task-13：悬停摘要优先 [TASK_*] 元数据 taskSummary（async 后台
+                      任务的最新进度/终态摘要），无元数据回退内部活动摘要。 */
                   title={`${sa.name}${sa.subagentType ? ` · ${sa.subagentType}` : ""}${
-                    sa.latestActivity ? `\n${sa.latestActivity}` : ""
+                    (sa.taskSummary ?? sa.latestActivity)
+                      ? `\n${sa.taskSummary ?? sa.latestActivity}`
+                      : ""
                   }`}
                   className="flex w-full items-center gap-2 px-3 py-[7px] text-left text-xs hover:bg-brand-50 focus-visible:bg-brand-50 focus-visible:outline-none"
                 >

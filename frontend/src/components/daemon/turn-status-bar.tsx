@@ -21,6 +21,13 @@
  * 触发整轮 / 兄弟段重渲染；组件 React.memo + segments 引用未变时派生统计走 useMemo
  * 缓存。子代理运行中时长（task-08 目录消费）同锚点策略：deriveTurnActivity 暴露
  * startedAt，展示侧用 (now - startedAt) 每秒 tick 补足（deepseek subagentTiming 模式）。
+ *
+ * task-13（2026-08-27-background-subagent-progress / FR-07 / D-005@v1）：collectSubagents
+ * 对带 [TASK_*] 元数据（task-11 装配到 tool 段）的 async 后台子代理，状态改由元数据
+ * 驱动——taskStatus 有值即权威（终态即终；不再因 result 配对判 done，async 启动回执
+ * 0.1s 配对不是完成信号），并把 taskElapsedMs / taskAsync / taskSummary / taskToolName
+ * 透传给 task-08 目录与会话块消费（终态时长 = 服务端权威 taskElapsedMs，运行中走秒
+ * 由消费方本地 tick）；无元数据段走原推导（前台阻塞式子代理零回归）。
  */
 
 import { memo, useEffect, useMemo, useState } from "react";
@@ -36,12 +43,31 @@ export interface SubagentActivity {
   /** 展示名：tool.primary ?? toolName ?? subagentType ?? 「子代理」（stub 无前两者）。 */
   name: string;
   subagentType: string | null;
-  /** 容器 result 未配对 = running（stub 恒 running）；配对后按 deny 判定 done/deny。 */
-  status: "running" | "done" | "deny";
+  /**
+   * 容器 result 未配对 = running（stub 恒 running）；配对后按 deny 判定 done/deny。
+   * task-13（2026-08-27-background-subagent-progress / FR-07）：段带 [TASK_*] 元数据
+   * （async 后台派发）时由 taskStatus 映射——completed→done / failed→deny（红）/
+   * stopped→stopped（灰）/ running→running，终态即终，不再看 result 配对。
+   */
+  status: "running" | "done" | "deny" | "stopped";
   startedAt: number | null;
   endedAt: number | null;
   /** 内部（children）最新 running 段摘要；内部无 running / streaming 段为 null。 */
   latestActivity: string | null;
+  /**
+   * task-13：[TASK_*] 任务元数据透传（task-11 装配到 tool 段；无元数据段恒缺省
+   * ——前台阻塞式子代理零影响，消费方见字段存在即切元数据驱动）：
+   *   - taskStatus：STARTED→running；NOTIFICATION→completed/failed/stopped（终态覆盖）；
+   *   - taskElapsedMs：服务端权威时长（终态展示用它；PROGRESS 覆盖式刷新）；
+   *   - taskAsync：异步派发标记（STARTED 行 JSON async）；
+   *   - taskSummary / taskToolName：最近一条 [TASK_*] 行的摘要 / 最近工具名
+   *     （截断展示归渲染层）。
+   */
+  taskStatus?: "running" | "completed" | "failed" | "stopped";
+  taskElapsedMs?: number;
+  taskAsync?: boolean;
+  taskSummary?: string;
+  taskToolName?: string;
 }
 
 /** 轮级派生统计（TurnStatusBar 与 task-08 subagent-catalog 消费）。 */
@@ -161,6 +187,26 @@ function latestActivityWithin(segments: TurnSegment[]): string | null {
   return latestStreamingSummary(segments);
 }
 
+/**
+ * task-13（FR-07 / D-005@v1）：[TASK_*] 任务状态 → 目录/状态条活动状态映射。
+ * failed 并入红（deny 同色系）；stopped 独立灰态（后台任务被停止，原型「变灰」）；
+ * running 即运行中。终态即终——不看 result 配对（async 启动回执不是完成信号）。
+ */
+function taskStatusToActivity(
+  taskStatus: "running" | "completed" | "failed" | "stopped",
+): SubagentActivity["status"] {
+  switch (taskStatus) {
+    case "running":
+      return "running";
+    case "completed":
+      return "done";
+    case "failed":
+      return "deny";
+    case "stopped":
+      return "stopped";
+  }
+}
+
 /** DFS 收集子代理清单：有 children 归属的 tool 段 + subagent_stub 兜底段（嵌套递归收集）。 */
 function collectSubagents(segments: TurnSegment[], out: SubagentActivity[]): void {
   for (const s of segments) {
@@ -177,14 +223,31 @@ function collectSubagents(segments: TurnSegment[], out: SubagentActivity[]): voi
       collectSubagents(s.children, out);
     } else if (s.kind === "tool") {
       if (s.children.length > 0) {
+        // task-13：段带 [TASK_*] 元数据（taskStatus 或 taskAsync 存在 = async 后台
+        // 派发）时状态由元数据驱动——taskStatus 有值即权威（终态即终），仅 taskAsync
+        // 时按 running 防御；同时透传五字段供目录/会话块消费（终态时长用服务端
+        // taskElapsedMs，运行中走秒由消费方 tick）。无元数据段走原 result 配对推导
+        //（前台阻塞式子代理零回归）。
+        const metaDriven = s.taskStatus !== undefined || s.taskAsync !== undefined;
         out.push({
           segmentId: s.id,
           name: subagentDisplayName(s),
           subagentType: s.subagentType,
-          status: s.result === undefined ? "running" : s.status === "deny" ? "deny" : "done",
+          status: metaDriven
+            ? taskStatusToActivity(s.taskStatus ?? "running")
+            : s.result === undefined
+              ? "running"
+              : s.status === "deny"
+                ? "deny"
+                : "done",
           startedAt: s.startedAt,
           endedAt: s.endedAt,
           latestActivity: latestActivityWithin(s.children),
+          ...(s.taskStatus !== undefined ? { taskStatus: s.taskStatus } : {}),
+          ...(s.taskElapsedMs !== undefined ? { taskElapsedMs: s.taskElapsedMs } : {}),
+          ...(s.taskAsync !== undefined ? { taskAsync: s.taskAsync } : {}),
+          ...(s.taskSummary !== undefined ? { taskSummary: s.taskSummary } : {}),
+          ...(s.taskToolName !== undefined ? { taskToolName: s.taskToolName } : {}),
         });
       }
       collectSubagents(s.children, out);

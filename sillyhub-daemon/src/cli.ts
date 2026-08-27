@@ -724,6 +724,18 @@ export async function startAction(opts: StartOptions): Promise<number> {
                   event.status,
                   event.progress,
                   event.message,
+                  // task-02（2026-08-27-background-subagent-progress / design §8）：
+                  // 扩展可选字段并入上报 body（字段名 snake_case 直通零映射；
+                  // undefined 由 hub-client 守卫剔除，不进 body —— 向后兼容）。
+                  {
+                    tool_use_id: event.tool_use_id,
+                    summary: event.summary,
+                    last_tool_name: event.last_tool_name,
+                    elapsed_ms: event.elapsed_ms,
+                    total_tokens: event.total_tokens,
+                    tool_uses: event.tool_uses,
+                    async: event.async,
+                  },
                 );
                 break;
               default:

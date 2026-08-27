@@ -1560,6 +1560,11 @@ async def notify_agent_task_status(
 ) -> dict[str, bool]:
     """Receive daemon agent-task-status report and forward to frontend SSE (task-02).
 
+    2026-08-27-background-subagent-progress task-05（FR-04）：请求模型即
+    AgentTaskStatusEvent（schema.py），生命周期扩展字段（tool_use_id/summary/
+    last_tool_name/elapsed_ms/total_tokens/tool_uses/async）经模型校验后随
+    ``publish_session_event`` 整包转发（by_alias 发布），端点不逐字段挑选。
+
     越权防护（2026-08-25 P1）：同 notify_plan_mode_entered，发布前做 runtime
     归属校验（404 不泄露存在性）。
     """

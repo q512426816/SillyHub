@@ -181,6 +181,15 @@ describe("streamSession — 会话反馈四事件分发（task-12 verify P2 返�
       status: "running",
       progress: 50,
       message: "审查中",
+      // task-10（2026-08-27-background-subagent-progress / FR-04）：payload 未带
+      // 的扩展字段归一为 null（parseAgentTaskStatusEvent 显式回填）。
+      tool_use_id: null,
+      summary: null,
+      last_tool_name: null,
+      elapsed_ms: null,
+      total_tokens: null,
+      tool_uses: null,
+      async: null,
     });
   });
 
@@ -204,6 +213,14 @@ describe("streamSession — 会话反馈四事件分发（task-12 verify P2 返�
       status: "running",
       progress: null,
       message: null,
+      // task-10（FR-04）：缺字段的扩展字段同样归一为 null。
+      tool_use_id: null,
+      summary: null,
+      last_tool_name: null,
+      elapsed_ms: null,
+      total_tokens: null,
+      tool_uses: null,
+      async: null,
     });
   });
 

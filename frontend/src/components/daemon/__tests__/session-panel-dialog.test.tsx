@@ -560,7 +560,10 @@ describe("SessionPanel（dialog）", () => {
     setupPanel();
     const input = screen.getByPlaceholderText(/创建会话/) as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "   " } });
-    fireEvent.click(screen.getByTitle("发送"));
+    // task-14（FR-08）：纯空文本发送按钮禁点，title/aria 提示与后端 422 文案一致
+    const sendBtn = screen.getByTitle("消息内容不能为空") as HTMLButtonElement;
+    expect(sendBtn.disabled).toBe(true);
+    fireEvent.click(sendBtn);
     expect(sessionApi.createSession).not.toHaveBeenCalled();
   });
 

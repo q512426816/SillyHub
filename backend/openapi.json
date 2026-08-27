@@ -12372,7 +12372,7 @@
           "daemon"
         ],
         "summary": "Notify Agent Task Status",
-        "description": "Receive daemon agent-task-status report and forward to frontend SSE (task-02).\n\n越权防护（2026-08-25 P1）：同 notify_plan_mode_entered，发布前做 runtime\n归属校验（404 不泄露存在性）。",
+        "description": "Receive daemon agent-task-status report and forward to frontend SSE (task-02).\n\n2026-08-27-background-subagent-progress task-05（FR-04）：请求模型即\nAgentTaskStatusEvent（schema.py），生命周期扩展字段（tool_use_id/summary/\nlast_tool_name/elapsed_ms/total_tokens/tool_uses/async）经模型校验后随\n``publish_session_event`` 整包转发（by_alias 发布），端点不逐字段挑选。\n\n越权防护（2026-08-25 P1）：同 notify_plan_mode_entered，发布前做 runtime\n归属校验（404 不泄露存在性）。",
         "operationId": "notify_agent_task_status_api_daemon_sessions__session_id__agent_task_status_post",
         "parameters": [
           {
@@ -31149,7 +31149,8 @@
             "enum": [
               "running",
               "completed",
-              "failed"
+              "failed",
+              "stopped"
             ],
             "title": "Status"
           },
@@ -31174,6 +31175,83 @@
               }
             ],
             "title": "Message"
+          },
+          "tool_use_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Use Id"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "last_tool_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Tool Name"
+          },
+          "elapsed_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elapsed Ms"
+          },
+          "total_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Tokens"
+          },
+          "tool_uses": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Uses"
+          },
+          "async": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Async"
           }
         },
         "type": "object",
@@ -31185,7 +31263,7 @@
           "status"
         ],
         "title": "AgentTaskStatusEvent",
-        "description": "``agent_task_status`` 事件——Agent 任务粒度状态（FR-03）。"
+        "description": "``agent_task_status`` 事件——Agent 任务粒度状态（FR-03）。\n\n2026-08-27-background-subagent-progress task-05 扩展（FR-04，design §8）：\nstatus 增补 ``stopped`` 终态，并透传后台异步子代理生命周期字段\n（tool_use_id / summary / last_tool_name / elapsed_ms / total_tokens /\ntool_uses / async）。新字段均可选——旧 daemon 只发 running +\ntask_id/task_name 的载荷解析不受影响（向后兼容）。\n``async`` 是 Python 关键字：DTO 字段名用 ``async_`` + alias ``async``，\n``populate_by_name`` 使入参两种名字都可用（daemon 发 ``async``、后端\n代码读 ``async_``）。"
       },
       "ApiKeyCreateRequest": {
         "properties": {

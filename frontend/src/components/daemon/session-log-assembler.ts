@@ -52,6 +52,16 @@
  *     重查误判重复而丢内容（真正迟到重放走集合命中原引用返回，语义不变）；
  *   - 新段 id 唯一化走链内共享 id 索引 Set（O(1) has/add），撤回时同步移除，替代
  *     每新段全树收集；索引缺失（外部构造 turn / 视图）回退全树收集，行为不变。
+ *
+ * task-11（2026-08-27-background-subagent-progress / FR-03·07 前端半）：[TASK_*]
+ * 后台任务生命周期行解析——classifySessionLog 识别 [TASK_STARTED]/[TASK_PROGRESS]/
+ * [TASK_NOTIFICATION] 前缀（与 [TOOL_USE]/[SYSTEM:] 同级的前缀方言），JSON.parse
+ * 容错（坏行降级普通文本，R-07 不抛错）；applyLogToSegments 按行级
+ * parent_tool_use_id 路由（复用既有归属路由的容器定位）把解析结果写入派发
+ * tool 段元数据：taskStatus（STARTED→running；NOTIFICATION→其 status）/
+ * taskElapsedMs / taskAsync / taskSummary / taskToolName（tool 段可选字段，
+ * task_segment_metadata 契约）。行本身消费后不产生正文文本段（不显示为普通
+ * 文本行）；无路由目标的历史孤儿行丢弃不崩（不建 stub 空壳，取更安全者）。
  */
 
 /* ───────────────── 分类（自 session-log-sanitize.ts 平移，语义不变） ───────────────── */
@@ -77,6 +87,9 @@
  *     解析失败 / 缺 file_id → 回退通用 tool_use 映射不丢行；未知 / 缺省 tool_kind
  *     一律走原 tool_use 映射（零回归）
  *   - kind=tool_result：[TOOL_RESULT] 前缀的 stdout 文本行（剥前缀，供配对最近 tool_use）
+ *   - kind=task：[TASK_STARTED]/[TASK_PROGRESS]/[TASK_NOTIFICATION] 前缀行（task-11 /
+ *     2026-08-27-background-subagent-progress，daemon task-03 落库的后台任务生命周期
+ *     协议行——解析为 tool 段元数据载荷，不进正文；坏 JSON 降级普通文本，R-07）
  *   - kind=skill：[ASSISTANT] Base directory for this skill: 前缀行（ql-20260824-017，
  *     Claude Code 技能装载注入——SKILL.md 全文以 assistant 文本块注入，属技能协议
  *     载荷非用户答复，剥前缀后由装配器挂到最近 Skill 工具段 result，不进对话正文）
@@ -94,7 +107,8 @@ export type SessionLogSegmentKind =
   | "skill"
   | "stderr"
   | "override"
-  | "file";
+  | "file"
+  | "task";
 
 export interface SessionLogSegment {
   kind: SessionLogSegmentKind;
@@ -119,6 +133,24 @@ export interface SessionLogSegment {
   size?: number;
   mime?: string;
   description?: string;
+  /**
+   * task kind 专有（task-11 / 2026-08-27-background-subagent-progress / FR-03·07）：
+   * [TASK_STARTED]/[TASK_PROGRESS]/[TASK_NOTIFICATION] stdout 行（daemon task-03
+   * 落库形状：前缀 + 单行 JSON）的分类解析产物——applyLogToSegments 按行级
+   * parent_tool_use_id 路由写入派发 tool 段的同名元数据字段（正文不渲染）。字段
+   * 按行类型可选（其余 kind 恒缺省）：
+   *   - STARTED → taskStatus="running" + taskAsync（JSON async 布尔守卫）；
+   *   - PROGRESS → taskElapsedMs / taskSummary / taskToolName（不动状态）；
+   *   - NOTIFICATION → taskStatus=终态（completed/failed/stopped）+ taskElapsedMs /
+   *     taskSummary（终态覆盖 STARTED 的 running）。
+   * text 保留剥前缀后的 JSON 原文——仅供 logsToSegments 内容级去重做键，不进
+   * 对话正文与任何投影。
+   */
+  taskStatus?: "running" | "completed" | "failed" | "stopped";
+  taskElapsedMs?: number;
+  taskAsync?: boolean;
+  taskSummary?: string;
+  taskToolName?: string;
 }
 
 /**
@@ -174,6 +206,82 @@ function parseFileUploadContent(raw: string): FileUploadContent | null {
   }
 }
 
+/**
+ * task-11（2026-08-27-background-subagent-progress）：[TASK_*] 后台任务生命周期行
+ * 前缀正则（与 [TOOL_USE]/[SYSTEM:] 同级的前缀方言，daemon task-03 落库）。
+ * 命中三前缀之一；捕获组区分行类型（STARTED/PROGRESS/NOTIFICATION 的元数据
+ * 映射不同）。
+ */
+const TASK_LINE_RE = /^\[(TASK_STARTED|TASK_PROGRESS|TASK_NOTIFICATION)\]\s?/;
+
+/** parseTaskLine 产物：tool 段任务元数据五字段的可选子集（task_segment_metadata 契约）。 */
+type TaskLineMeta = Pick<
+  SessionLogSegment,
+  "taskStatus" | "taskElapsedMs" | "taskAsync" | "taskSummary" | "taskToolName"
+>;
+
+/**
+ * task-11：解析 [TASK_STARTED]/[TASK_PROGRESS]/[TASK_NOTIFICATION] 行的 JSON 载荷，
+ * 归一为 tool 段任务元数据（task_log_line_format 契约，daemon session-manager
+ * _writeTaskLine 落库形状：前缀 + 单行 JSON；行级 parent_tool_use_id 由归一化
+ * 输入携带，不在本函数处理）。字段映射：
+ *   - STARTED → taskStatus="running"（async 布尔守卫 → taskAsync；daemon 恒写
+ *     async:true，守卫防旧数据/异常形态）；
+ *   - PROGRESS → taskElapsedMs（elapsed_ms）/ taskSummary / taskToolName
+ *     （last_tool_name）；不动 taskStatus——进行中行不携带状态语义，不误覆盖
+ *     STARTED 的 running 或已到达的终态；
+ *   - NOTIFICATION → taskStatus=终态（status 三值，daemon 类型契约）+
+ *     taskElapsedMs / taskSummary（终态覆盖，到达顺序即权威）。
+ *
+ * 坏行容错（R-07）：非 JSON / 非对象 / NOTIFICATION 缺合法 status → null，调用方
+ * 降级为普通文本行（不抛错不丢行）；未知字段（task_id/total_tokens/tool_uses 等）
+ * 忽略——路由走行级 parent_tool_use_id，token 计数走 SSE 卡片通道，均不在此消费。
+ */
+function parseTaskLine(trimmed: string): TaskLineMeta | null {
+  const match = TASK_LINE_RE.exec(trimmed);
+  if (!match) return null;
+  try {
+    const obj = JSON.parse(trimmed.slice(match[0].length)) as {
+      status?: unknown;
+      elapsed_ms?: unknown;
+      summary?: unknown;
+      last_tool_name?: unknown;
+      async?: unknown;
+    } | null;
+    if (!obj || typeof obj !== "object") return null;
+    const elapsedMs =
+      typeof obj.elapsed_ms === "number" && Number.isFinite(obj.elapsed_ms)
+        ? obj.elapsed_ms
+        : undefined;
+    const summary = typeof obj.summary === "string" ? obj.summary : undefined;
+    if (match[1] === "TASK_STARTED") {
+      return {
+        taskStatus: "running",
+        ...(typeof obj.async === "boolean" ? { taskAsync: obj.async } : {}),
+      };
+    }
+    if (match[1] === "TASK_PROGRESS") {
+      return {
+        ...(elapsedMs !== undefined ? { taskElapsedMs: elapsedMs } : {}),
+        ...(summary !== undefined ? { taskSummary: summary } : {}),
+        ...(typeof obj.last_tool_name === "string" ? { taskToolName: obj.last_tool_name } : {}),
+      };
+    }
+    // TASK_NOTIFICATION：status 必须是三值终态，缺失/非法视为坏行降级文本（防御
+    // 运行时异常形态，daemon 侧已有同款守卫）。
+    if (obj.status !== "completed" && obj.status !== "failed" && obj.status !== "stopped") {
+      return null;
+    }
+    return {
+      taskStatus: obj.status,
+      ...(elapsedMs !== undefined ? { taskElapsedMs: elapsedMs } : {}),
+      ...(summary !== undefined ? { taskSummary: summary } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function classifySessionLog(
   content: string,
   channel?: string | null,
@@ -215,6 +323,15 @@ export function classifySessionLog(
   }
   if (/^\[TOOL_RESULT\]\s?/.test(trimmed)) {
     return { kind: "tool_result", text: trimmed.replace(/^\[TOOL_RESULT\]\s?/, "") };
+  }
+  // task-11：[TASK_*] 后台任务生命周期行 → kind=task（tool 段元数据载荷，非正文）。
+  // 剥前缀的 JSON 原文留在 text（仅供 logsToSegments 内容级去重做键，不进对话正文
+  // 与任何投影——applyLogToSegments 按 parent_tool_use_id 路由写入 tool 段后消费）。
+  // 坏 JSON / 非法形态 → parseTaskLine 返回 null，落到下方 reply 降级为普通文本
+  // 行（R-07 容错不抛错）。
+  const taskMeta = parseTaskLine(trimmed);
+  if (taskMeta) {
+    return { kind: "task", text: trimmed.replace(TASK_LINE_RE, ""), ...taskMeta };
   }
   if (/^\[THINKING\]\s?/.test(trimmed)) {
     return { kind: "thinking", text: trimmed.replace(/^\[THINKING\]\s?/, "") };
@@ -329,6 +446,26 @@ export type TurnSegment =
       children: TurnSegment[];
       /** 有子代理归属时记录（子代理目录展示）。 */
       subagentType: string | null;
+      /**
+       * task-11（2026-08-27-background-subagent-progress / FR-03·07）：后台异步
+       * 子代理任务生命周期元数据——[TASK_*] stdout 行按 parent_tool_use_id 路由
+       * 写入（刷新/历史回放重建状态；实时卡片另有 agent_task_status SSE 通道）。
+       * 全部可选：无 [TASK_*] 行的段恒缺省（前台阻塞式子代理零影响）。
+       *   - taskStatus：STARTED→"running"；NOTIFICATION→completed/failed/stopped
+       *     （终态覆盖，到达顺序即权威）；
+       *   - taskElapsedMs：服务端权威时长（usage.duration_ms，PROGRESS/NOTIFICATION
+       *     覆盖式刷新）；
+       *   - taskAsync：异步派发标记（STARTED 行 JSON async）；
+       *   - taskSummary：进行中/终态摘要（截断展示归渲染层）；
+       *   - taskToolName：最近在用的工具名（PROGRESS 行 last_tool_name）。
+       * 消费方（turn-status-bar collectSubagents / subagent-catalog 等）对 async
+       * 段不再因 result 存在判 done（启动回执 0.1s 配对不是完成信号，design §1）。
+       */
+      taskStatus?: "running" | "completed" | "failed" | "stopped";
+      taskElapsedMs?: number;
+      taskAsync?: boolean;
+      taskSummary?: string;
+      taskToolName?: string;
     }
   | {
       /**
@@ -739,6 +876,23 @@ function applyToBucket(
 }
 
 /**
+ * task-11（2026-08-27-background-subagent-progress）：把 [TASK_*] 行解析出的任务
+ * 元数据合并进派发 tool 段（path-copy，仅覆盖本行携带的字段——PROGRESS 不动
+ * 状态、NOTIFICATION 终态覆盖 STARTED 的 running，到达顺序即权威）。元数据不
+ * 参与兼容投影（segmentsToLegacy 不读这些字段），投影值不变。
+ */
+function applyTaskMeta(tool: ToolTurnSegment, meta: TaskLineMeta): ToolTurnSegment {
+  return {
+    ...tool,
+    ...(meta.taskStatus !== undefined ? { taskStatus: meta.taskStatus } : {}),
+    ...(meta.taskElapsedMs !== undefined ? { taskElapsedMs: meta.taskElapsedMs } : {}),
+    ...(meta.taskAsync !== undefined ? { taskAsync: meta.taskAsync } : {}),
+    ...(meta.taskSummary !== undefined ? { taskSummary: meta.taskSummary } : {}),
+    ...(meta.taskToolName !== undefined ? { taskToolName: meta.taskToolName } : {}),
+  };
+}
+
+/**
  * override 撤回（task-02 / R-06 / Grill X-06）：按 segmentId 前缀路由目标桶——
  * `main:` → 顶层段；`<tool_use_id>:` → 该 id 匹配容器（tool / stub，DFS 含嵌套）的
  * children；无 `:` 视同 main（顶层）。桶内移除该 segmentId 派生的全部同类段：
@@ -931,6 +1085,44 @@ export function applyLogToSegments(
     attachInternals(next, cell, idIndex);
     if (input.logId) applyResultMemo.set(turn.seenLogIds, { logId: input.logId, next });
     return next;
+  }
+
+  // task-11（2026-08-27-background-subagent-progress / FR-03·07 前端半）：[TASK_*]
+  // 后台任务生命周期行 → 按行级 parent_tool_use_id 路由写入派发 tool 段元数据
+  // （刷新/历史回放重建状态；实时卡片状态另有 agent_task_status SSE 通道）。
+  // 与 override 同属「信号非内容」提前路径：
+  //   - 行本身不产生任何正文/过程段（消费后折叠进段元数据，不显示为普通文本行）；
+  //   - 路由目标 = parent_tool_use_id 匹配的 tool 段（复用既有归属路由的容器定位
+  //     DFS，含嵌套 children）。找不到（历史孤儿 / 行级归属缺失 / 目标仅为
+  //     subagent_stub 的极端时序——stub 无元数据槽，tool_call JSON 到达合并后由
+  //     后续 [TASK_*] 行补写）→ 丢弃该行原引用返回，不建 stub 空壳、不落顶层
+  //     （硬约束：找不到段时不崩，取更安全者）；
+  //   - 元数据不参与兼容投影（output/processItems 值不变）→ 投影 cell 原样复用，
+  //     不触发全量重投影（F7 增量链不断；外部构造 turn 无 cell 时全量建一次，
+  //     维持「携带 cell 则恒等全量投影」不变式）。
+  if (seg.kind === "task") {
+    const parent = nonEmptyString(input.parentToolUseId);
+    if (parent && findToolById(turn.segments, parent)) {
+      const next = updateContainerById(turn.segments, parent, (c) =>
+        c.kind === "tool" ? applyTaskMeta(c, seg) : c,
+      );
+      const prevCell = (turn as AssembledTurn & AssemblerInternalsCarrier)[LEGACY_CELL];
+      const cell = prevCell ?? buildLegacyCell(next);
+      const nextTurn: AssembledTurn = {
+        segments: next,
+        output: cell.output,
+        processItems: cell.processItems,
+        // 计时锚点兜底同主路径（§7.5）：live/attach 均缺时取本行 timestamp。
+        turnStartedAt: turn.turnStartedAt ?? parseLogTs(input.timestamp),
+        seenLogIds: recordSeenLogId(turn.seenLogIds, input.logId),
+      };
+      attachInternals(nextTurn, cell, idIndex);
+      if (input.logId) {
+        applyResultMemo.set(turn.seenLogIds, { logId: input.logId, next: nextTurn });
+      }
+      return nextTurn;
+    }
+    return turn;
   }
 
   const ts = parseLogTs(input.timestamp);
@@ -1135,7 +1327,8 @@ export function applyLogToSegments(
       break;
     }
     default:
-      // classifySessionLog 仅产上述七类 + override（已提前 return），防御分支。
+      // classifySessionLog 仅产上述七类 + override / task（两者已在 switch 前的
+      // 提前路径消费返回），防御分支。
       break;
   }
 
@@ -1425,6 +1618,8 @@ export function logsToSegments(
       if (!seg) continue;
       // task-08：file 段 text 恒空——键改用 fileId，两份不同文件不得误去重；
       // 同 file_id 重复行为内容级去重兜底（后端另有 (run_id, dedup_key) 唯一索引）。
+      // task-11：task 段 text 为剥前缀的 JSON 原文——不同行/不同阶段天然异键，
+      // 重复行（重放）内容级去重且元数据写入幂等，无双丢风险。
       const key = seg.kind === "file" ? `file:${seg.fileId ?? ""}` : `${seg.kind}:${seg.text}`;
       if (seenText.has(key)) continue;
       seenText.add(key);

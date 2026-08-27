@@ -483,6 +483,44 @@ interface PartialFlushBuffer {
 }
 
 /**
+ * task-03（2026-08-27-background-subagent-progress / design §5 P1.1 + §6 契约表）：
+ * 后台异步任务注册表条目（仅内存态，**不持久化**）。
+ *
+ * 数据源二选一：
+ *   1. CLI system/task_started（primary——spike 实测 0.3.181 确实发射，design §10）；
+ *   2. 异步启动回执兜底（user tool_result 文本含 "Async agent launched successfully"
+ *      时正则提取 agentId，防旧版 CLI 不发 task_*，secondary）。
+ *
+ * 终态（task_notification）到达后注销；会话 end/fail 终态统一清理。后台任务随 SDK
+ * 子进程消亡，daemon 重启后无从恢复 → **不进 snapshotPersistable**（对齐
+ * subagentDepth「日志元数据非恢复必需」口径）；且 types.ts 不在本任务 allowed_paths
+ * （SessionState 定义于 types.ts），故落位类级 Map 而非 SessionState 字段——先例
+ * 见 `_borrowSandboxRoots`（task-09 同款 allowed_paths 受限处理）。
+ */
+interface BackgroundTaskInfo {
+  /** 关联的主 agent Task/Agent tool_use id（[TASK_*] 行 parent_tool_use_id + SSE tool_use_id 关联键）。 */
+  toolUseId?: string;
+  /** 任务名（task_started.description；回执路径用同 tool_use 的 description，兜底 '后台任务'）。 */
+  taskName: string;
+  /** 子代理类型（subagent_type 透传，[TASK_STARTED] 行可选字段）。 */
+  subagentType?: string;
+  /** 异步派发标记（回执路径恒 true；task_started 路径按 true 记——SDK 任务生命周期系统即后台机制，见 _handleTaskStarted 注释）。 */
+  async: boolean;
+  /** 注册时刻 epoch ms（task_updated 轻量事件的观察口径，非权威时长）。 */
+  startedAt: number;
+  /** 最近一次 task_progress 到达时刻（「最后活跃」观察口径，本层仅记录）。 */
+  lastProgressAt?: number;
+  /** 上次 [TASK_PROGRESS] 行落库时刻（R-03 ≥2000ms 节流锚点）。 */
+  lastLineAt?: number;
+  /**
+   * 注册时捕获的派发 runId。后台任务的 progress/notification 常在派发 turn 收尾
+   * （_onResult 清空 state.currentRunId）之后到达——落行/emit 必须用捕获的派发
+   * runId 兜住跨 turn 场景（与 backend P2.2 跨轮归位「行归派发 run」同向）。
+   */
+  runId?: string;
+}
+
+/**
  * 默认空闲阈值（秒）。D-001@v1（2026-06-25-interactive-idle-timeout-fix）：默认 0 = 禁用
  * idle 自动回收。scan/stage 完成由 backend 主动 end_session 收口（D-002@v1），session 不再
  * 因假性空闲被误杀。env SESSION_IDLE_TIMEOUT_SEC 显式设 >0 可恢复旧行为（逃生口）。
@@ -711,6 +749,40 @@ export class SessionManager {
     string,
     { command: string; startTime: number; sessionId: string }
   >();
+
+  /**
+   * task-03（design §5 P1.1）：会话级后台任务注册表（BackgroundTaskRegistry）。
+   *
+   * key = sessionId，value = 该会话的 Map<task_id, BackgroundTaskInfo>。仅内存态
+   * 不持久化（后台任务随 SDK 进程消亡，不进 snapshotPersistable——见
+   * BackgroundTaskInfo 注释）。会话 end/fail 终态时经 `_clearBackgroundTasks`
+   * 清理；interrupt **不**清——后台任务与当轮 turn 解耦，interrupt 终止的是当轮
+   * 对话，已派发任务的 task_notification 仍会到达，注册表须存活。
+   */
+  private readonly _backgroundTasks = new Map<
+    string,
+    Map<string, BackgroundTaskInfo>
+  >();
+
+  /**
+   * task-03（design §5 P1.2）：主 agent Task/Agent tool_use 元数据登记。
+   *
+   * key = tool_use_id，value = { sessionId, taskName, subagentType? }。assistant
+   * tool_use 到达时写入，供异步回执兜底把提取的 agentId 关联回该 tool_use 的
+   * description / subagent_type（回执文本自身不带任务名）。仅内存态；会话终态
+   * 时与任务表同点位清理。
+   */
+  private readonly _agentToolUseMeta = new Map<
+    string,
+    { sessionId: string; taskName: string; subagentType?: string }
+  >();
+
+  /**
+   * task-03（design R-03 定案）：[TASK_PROGRESS] 行同任务落库最小间隔 ms
+   * （spike 实测短任务零发射，节流保留默认值——发射稀疏时自然无感）。
+   * 仅作用于落行；SSE emit 不节流（实时精度优先）。
+   */
+  private static readonly TASK_PROGRESS_LINE_THROTTLE_MS = 2000;
 
   /**
    * task-07（FR-06 / D-004@v1）：空闲扫描定时器。start() 启动、stop() 清理。
@@ -2923,6 +2995,11 @@ export class SessionManager {
     // 4. task-04（FR-02）：清运行中 Bash 命令表（session 终态，后续 tool_result 不再到达）。
     this._clearRunningBashCommands(state.sessionId);
 
+    // 4b. task-03（2026-08-27-background-subagent-progress）：清后台任务注册表 +
+    //     Task/Agent tool_use 元数据（session 终态 SDK 进程已 kill，后台任务随之
+    //     消亡，task_* 不会再到达；防 Map 泄漏）。
+    this._clearBackgroundTasks(state.sessionId);
+
     // 5. ql-20260621-partial：销毁 partial buffer（含 timer），防止 end 后定时器仍
     //    fire 推送到已结束 session。
     this._destroyPartialBuffer(state.sessionId);
@@ -4091,6 +4168,11 @@ export class SessionManager {
    * 避免每 token 一次 HTTP）。完整 assistant message（type='assistant'）到达
    * 时清空 buffer（delta 是完整内容子集，backend _extract_sdk_messages 会展开
    * 完整 message 为全文 [THINKING]/[ASSISTANT]，partial delta 必须丢弃避免重复）。
+   *
+   * task-03（2026-08-27-background-subagent-progress）：system/task_*（后台任务
+   * 生命周期）拦截消费（_onBackgroundTaskSystemMessage）后 return 不透传——
+   * backend 对 system 类静默丢弃，持久化改由 [TASK_*] 行承载；user tool_result
+   * 分支另识别异步 Agent 启动回执（_registerAsyncReceiptTask 兜底注册）。
    */
   private async _onMessage(state: SessionState, msg: SDKMessage): Promise<void> {
     // 2026-06-28-daemon-subagent-transcript task-02 / D-007@v1：子代理 depth 计算 +
@@ -4178,6 +4260,23 @@ export class SessionManager {
                     task_name: taskName,
                     status: 'running',
                   });
+                  // task-03（design §5 P1.2 回执兜底元数据）：登记本 tool_use 的
+                  // 任务名 / 子代理类型，异步启动回执（tool_result 文本含 agentId）
+                  // 到达时据此回填任务表 taskName/subagentType（回执文本自身不带
+                  // 任务名）。仅内存登记，会话终态清理。
+                  const rawSubagentType =
+                    toolInput && typeof toolInput === 'object'
+                      ? toolInput['subagent_type']
+                      : undefined;
+                  const subagentType =
+                    typeof rawSubagentType === 'string' && rawSubagentType
+                      ? rawSubagentType
+                      : undefined;
+                  this._agentToolUseMeta.set(tId, {
+                    sessionId: state.sessionId,
+                    taskName,
+                    ...(subagentType ? { subagentType } : {}),
+                  });
                 }
               }
             }
@@ -4256,6 +4355,24 @@ export class SessionManager {
       return; // 不直接转发；由 500ms 定时器批量 flush
     }
 
+    // task-03（2026-08-27-background-subagent-progress / design §5 P1.1，FR-01/02/03）：
+    // system/task_* 后台任务生命周期拦截。spike 实测（design §10）CLI 0.3.181 确实
+    // 发射 task_started / task_updated / task_notification（task_progress 短任务零
+    // 发射，仍实现消费——字段 task_id/usage/last_tool_name/summary）。四类消息拦截后
+    // **return 不走尾部默认 onTurnMessage 透传**：backend _extract_sdk_messages 只认
+    // assistant/user 两型，system 类静默丢弃，透传即无痕迹；持久化由 [TASK_*] 行
+    // 承载（D-002@v1 双写：SSE 事件 + 日志行）。
+    if (
+      msgType === 'system' &&
+      (msgSubtype === 'task_started' ||
+        msgSubtype === 'task_progress' ||
+        msgSubtype === 'task_notification' ||
+        msgSubtype === 'task_updated')
+    ) {
+      await this._onBackgroundTaskSystemMessage(state, msgSubtype, msgRecord);
+      return; // 拦截收敛，不再透传（[TASK_*] 行已承载持久化）
+    }
+
     // 完整 assistant message 到达 → 清空 partial buffer 的未 flush 尾部，
     // 避免与完整 message（backend 展开为全文）重复。
     if (msgType === 'assistant') {
@@ -4332,6 +4449,31 @@ export class SessionManager {
               });
               this._runningBashCommands.delete(resultToolUseId);
             }
+            // task-03（design §5 P1.2，FR-01）：异步 Agent 启动回执兜底。后台派发的
+            // tool_result（"Async agent launched successfully… agentId: xxx"）与
+            // tool_use 在 0.1s 内配对，若不接管前端会把回执当完成信号（假完成根因）。
+            // CLI 发 task_* 时（spike 结论 primary）task_started 已注册过同
+            // tool_use_id，_registerAsyncReceiptTask 内查重跳过——本路径仅覆盖 CLI
+            // 不发 task_* 的旧版 / 异常场景（secondary）。
+            const receiptContent = (item as { content?: unknown }).content;
+            const receiptText =
+              receiptContent === undefined
+                ? ''
+                : typeof receiptContent === 'string'
+                  ? receiptContent
+                  : JSON.stringify(receiptContent);
+            if (receiptText.includes('Async agent launched successfully')) {
+              const agentIdMatch = /agentId:\s*([0-9a-f]+)/i.exec(receiptText);
+              const agentId = agentIdMatch?.[1];
+              if (agentId) {
+                await this._registerAsyncReceiptTask(
+                  state,
+                  runId,
+                  agentId,
+                  resultToolUseId,
+                );
+              }
+            }
           }
         }
       }
@@ -4375,6 +4517,446 @@ export class SessionManager {
     for (const [toolUseId, meta] of this._runningBashCommands) {
       if (meta.sessionId === sessionId) {
         this._runningBashCommands.delete(toolUseId);
+      }
+    }
+  }
+
+  // ── task-03（2026-08-27-background-subagent-progress）：后台任务生命周期消费 ──
+
+  /**
+   * task-03（design §5 P1.1）：system/task_* 消息统一入口（_onMessage 拦截分支调用）。
+   *
+   * 四类子消息分派（SDK 0.3.181 sdk.d.ts:4012-4092 契约 + spike 实测字段）：
+   *   - task_started：注册任务表 + emit running + 落 [TASK_STARTED] 行；
+   *   - task_progress：更新 lastProgressAt + emit 进度 + 节流落 [TASK_PROGRESS] 行；
+   *   - task_notification：emit 终态 + 落 [TASK_NOTIFICATION] 行（不节流）+ 注销；
+   *   - task_updated：仅 patch.status/is_backgrounded 变化时 emit 轻量事件，不落行。
+   */
+  private async _onBackgroundTaskSystemMessage(
+    state: SessionState,
+    subtype:
+      | 'task_started'
+      | 'task_progress'
+      | 'task_notification'
+      | 'task_updated',
+    msg: Record<string, unknown>,
+  ): Promise<void> {
+    const taskId = typeof msg['task_id'] === 'string' ? msg['task_id'] : '';
+    if (!taskId) {
+      // 无 task_id 无法注册/关联（类型契约必有，防御运行时异常形态）。
+      return;
+    }
+    const rawToolUseId = msg['tool_use_id'];
+    const toolUseId =
+      typeof rawToolUseId === 'string' && rawToolUseId ? rawToolUseId : undefined;
+    if (subtype === 'task_started') {
+      await this._handleTaskStarted(state, msg, taskId, toolUseId);
+    } else if (subtype === 'task_progress') {
+      await this._handleTaskProgress(state, msg, taskId, toolUseId);
+    } else if (subtype === 'task_notification') {
+      await this._handleTaskNotification(state, msg, taskId, toolUseId);
+    } else {
+      this._handleTaskUpdated(state, msg, taskId);
+    }
+  }
+
+  /**
+   * task-03：task_started 消费——注册任务表 + emit running + 落 [TASK_STARTED] 行。
+   *
+   * async 标记按 true 记：SDK 任务生命周期系统（task_* 消息族 + task_notification
+   * 跨 turn 到达 + is_backgrounded patch）即后台任务机制，spike 实测消息来自后台
+   * Task 派发；前台子代理可见性走 forwardSubagentText + parent_tool_use_id 转发链
+   * （2026-06-28-daemon-subagent-transcript），不经本表。emit 的 extra **不带**
+   * async（task-03 口径：async 仅回执兜底路径必发）；[TASK_STARTED] 行携带
+   * async:true（task_log_line_format 契约字段）。
+   */
+  private async _handleTaskStarted(
+    state: SessionState,
+    msg: Record<string, unknown>,
+    taskId: string,
+    toolUseId: string | undefined,
+  ): Promise<void> {
+    // SDK 契约：skip_transcript=true 为 ambient/housekeeping 任务（如压缩），
+    // 「Consumers should hide this from the inline transcript」——[TASK_*] 行即
+    // transcript 行，跳过注册/emit/落行避免幽灵任务卡片。
+    if (msg['skip_transcript'] === true) {
+      return;
+    }
+    const tasks = this._getOrCreateTaskMap(state.sessionId);
+    const existing = tasks.get(taskId);
+    if (existing) {
+      // 重复 task_started（SDK 重放）：仅补全缺失关联键，不重复 emit/落行。
+      if (toolUseId && !existing.toolUseId) {
+        existing.toolUseId = toolUseId;
+      }
+      return;
+    }
+    const description =
+      typeof msg['description'] === 'string' ? msg['description'] : '';
+    const subagentType =
+      typeof msg['subagent_type'] === 'string' && msg['subagent_type']
+        ? msg['subagent_type']
+        : undefined;
+    const taskName =
+      description ||
+      (toolUseId ? this._agentToolUseMeta.get(toolUseId)?.taskName : undefined) ||
+      '后台任务';
+    // 捕获派发 runId（task_notification 常在本 turn 收尾后到达，届时 currentRunId
+    // 已被 _onResult 清空——注册表是唯一带 runId 的地方）。
+    const runId = state.currentRunId;
+    tasks.set(taskId, {
+      ...(toolUseId ? { toolUseId } : {}),
+      taskName,
+      ...(subagentType ? { subagentType } : {}),
+      async: true,
+      startedAt: Date.now(),
+      ...(runId ? { runId } : {}),
+    });
+    // 无 runId（极端时序：task_started 在 turn 收尾后到达且注册时未捕获）→
+    // emit/落行双双跳过；注册表仍在，后续 progress/notification 用
+    // info.runId ?? currentRunId 兜住。
+    if (!runId) {
+      return;
+    }
+    this._emitSessionEvent(state.sessionId, runId, {
+      kind: 'agent_task_status',
+      task_id: taskId,
+      task_name: taskName,
+      status: 'running',
+      ...(toolUseId ? { tool_use_id: toolUseId } : {}),
+    });
+    await this._writeTaskLine(state.sessionId, runId, '[TASK_STARTED]', {
+      task_id: taskId,
+      ...(toolUseId ? { tool_use_id: toolUseId } : {}),
+      task_name: taskName,
+      ...(subagentType ? { subagent_type: subagentType } : {}),
+      async: true,
+    }, toolUseId);
+  }
+
+  /**
+   * task-03：task_progress 消费——emit 进度（不节流）+ 节流落 [TASK_PROGRESS] 行。
+   *
+   * elapsed_ms 取 usage.duration_ms（服务端权威值）；usage 三字段按 number 守卫
+   * 读取。注册表缺失（task_started 丢失 / daemon 重启窗口）→ 懒注册：本消息自带
+   * description/subagent_type 可现场补建条目（startedAt 仅兜底，不影响进度精度）。
+   */
+  private async _handleTaskProgress(
+    state: SessionState,
+    msg: Record<string, unknown>,
+    taskId: string,
+    toolUseId: string | undefined,
+  ): Promise<void> {
+    const usage = msg['usage'] as
+      | { total_tokens?: unknown; tool_uses?: unknown; duration_ms?: unknown }
+      | undefined;
+    const elapsedMs =
+      usage && typeof usage.duration_ms === 'number'
+        ? usage.duration_ms
+        : undefined;
+    const totalTokens =
+      usage && typeof usage.total_tokens === 'number'
+        ? usage.total_tokens
+        : undefined;
+    const toolUses =
+      usage && typeof usage.tool_uses === 'number'
+        ? usage.tool_uses
+        : undefined;
+    const lastToolName =
+      typeof msg['last_tool_name'] === 'string' && msg['last_tool_name']
+        ? msg['last_tool_name']
+        : undefined;
+    const summary =
+      typeof msg['summary'] === 'string' && msg['summary']
+        ? msg['summary']
+        : undefined;
+
+    const tasks = this._getOrCreateTaskMap(state.sessionId);
+    let info = tasks.get(taskId);
+    if (!info) {
+      const description =
+        typeof msg['description'] === 'string' ? msg['description'] : '';
+      const subagentType =
+        typeof msg['subagent_type'] === 'string' && msg['subagent_type']
+          ? msg['subagent_type']
+          : undefined;
+      const meta = toolUseId
+        ? this._agentToolUseMeta.get(toolUseId)
+        : undefined;
+      info = {
+        ...(toolUseId ? { toolUseId } : {}),
+        taskName: description || meta?.taskName || '后台任务',
+        ...(subagentType ? { subagentType } : {}),
+        async: true,
+        startedAt: Date.now(),
+        ...(state.currentRunId ? { runId: state.currentRunId } : {}),
+      };
+      tasks.set(taskId, info);
+    } else if (toolUseId && !info.toolUseId) {
+      info.toolUseId = toolUseId;
+    }
+    info.lastProgressAt = Date.now();
+
+    const runId = info.runId ?? state.currentRunId;
+    if (!runId) {
+      return;
+    }
+    // emit 不节流（SSE 实时精度优先；R-03 节流只作用于落行）。
+    this._emitSessionEvent(state.sessionId, runId, {
+      kind: 'agent_task_status',
+      task_id: taskId,
+      task_name: info.taskName,
+      status: 'running',
+      ...(info.toolUseId ? { tool_use_id: info.toolUseId } : {}),
+      ...(lastToolName ? { last_tool_name: lastToolName } : {}),
+      ...(summary ? { summary } : {}),
+      ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
+      ...(totalTokens !== undefined ? { total_tokens: totalTokens } : {}),
+      ...(toolUses !== undefined ? { tool_uses: toolUses } : {}),
+    });
+    // R-03：[TASK_PROGRESS] 行同任务 ≥2000ms 节流合并；首行（lastLineAt 未设）必落。
+    const now = Date.now();
+    if (
+      now - (info.lastLineAt ?? 0) <
+      SessionManager.TASK_PROGRESS_LINE_THROTTLE_MS
+    ) {
+      return;
+    }
+    info.lastLineAt = now;
+    await this._writeTaskLine(state.sessionId, runId, '[TASK_PROGRESS]', {
+      task_id: taskId,
+      ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
+      ...(totalTokens !== undefined ? { total_tokens: totalTokens } : {}),
+      ...(toolUses !== undefined ? { tool_uses: toolUses } : {}),
+      ...(lastToolName ? { last_tool_name: lastToolName } : {}),
+      ...(summary ? { summary } : {}),
+    }, info.toolUseId);
+  }
+
+  /**
+   * task-03：task_notification 消费——emit 终态 + 落 [TASK_NOTIFICATION] 行
+   * （不节流）+ 任务表注销。usage 可选（类型契约标 ?；spike 实测到达但需
+   * None 容错）——缺失时 elapsed_ms 不发（undefined 守卫剔除，前端走本地
+   * 走秒兜底，design §6 契约表）。
+   */
+  private async _handleTaskNotification(
+    state: SessionState,
+    msg: Record<string, unknown>,
+    taskId: string,
+    toolUseId: string | undefined,
+  ): Promise<void> {
+    const rawStatus = msg['status'];
+    const tasks = this._getOrCreateTaskMap(state.sessionId);
+    const info = tasks.get(taskId);
+    const usage = msg['usage'] as { duration_ms?: unknown } | undefined;
+    const elapsedMs =
+      usage && typeof usage.duration_ms === 'number'
+        ? usage.duration_ms
+        : undefined;
+    const summary = typeof msg['summary'] === 'string' ? msg['summary'] : '';
+    // 任务表注销（终态即注销——先删后 emit，防重复消费；后续同 task_id 的迟到
+    // progress 会走懒注册兜底而非挂死条目）。
+    tasks.delete(taskId);
+    if (
+      rawStatus !== 'completed' &&
+      rawStatus !== 'failed' &&
+      rawStatus !== 'stopped'
+    ) {
+      // 非法终态（类型契约三值，防御运行时异常形态）：已注销，不再 emit/落行。
+      return;
+    }
+    const taskName =
+      info?.taskName ??
+      (toolUseId
+        ? this._agentToolUseMeta.get(toolUseId)?.taskName
+        : undefined) ??
+      '后台任务';
+    const runId = info?.runId ?? state.currentRunId;
+    if (!runId) {
+      // 注册表缺失且无在跑 turn（如 daemon 重启后孤儿终态）：无处可归，跳过
+      //（会话 end 收敛兜底，design R-01 降级口径）。
+      return;
+    }
+    const effectiveToolUseId = info?.toolUseId ?? toolUseId;
+    this._emitSessionEvent(state.sessionId, runId, {
+      kind: 'agent_task_status',
+      task_id: taskId,
+      task_name: taskName,
+      status: rawStatus,
+      ...(effectiveToolUseId ? { tool_use_id: effectiveToolUseId } : {}),
+      ...(summary ? { summary } : {}),
+      ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
+    });
+    // 终态行不节流（task_log_line_format 契约）。
+    await this._writeTaskLine(state.sessionId, runId, '[TASK_NOTIFICATION]', {
+      task_id: taskId,
+      status: rawStatus,
+      ...(elapsedMs !== undefined ? { elapsed_ms: elapsedMs } : {}),
+      ...(summary ? { summary } : {}),
+    }, effectiveToolUseId);
+  }
+
+  /**
+   * task-03：task_updated 消费——轻量辅助信号（spike：patch{status,end_time} 与
+   * 终态 task_notification 同时到达，task_notification 才是权威终态，本消息
+   * 「仅记不消费为主」）。
+   *
+   * patch 只含**变化**字段（SDK 契约「Wire-safe subset of TaskState fields that
+   * changed」），出现即变化：仅 patch.status / patch.is_backgrounded 出现时 emit
+   * 轻量事件（复用 running 态字段 task_name/tool_use_id，failed 时附 patch.error
+   * 作 summary）；不落行、不注销（噪声控制，design §6 契约表第 4 行）。patch.status
+   * 六值 → SSE 四值映射：completed/failed 直通，killed→stopped，pending/running/
+   * paused 归 running。
+   */
+  private _handleTaskUpdated(
+    state: SessionState,
+    msg: Record<string, unknown>,
+    taskId: string,
+  ): void {
+    const patch = msg['patch'] as Record<string, unknown> | undefined;
+    if (!patch || typeof patch !== 'object') {
+      return;
+    }
+    const patchStatus =
+      typeof patch['status'] === 'string' ? patch['status'] : undefined;
+    const patchBackgrounded = patch['is_backgrounded'];
+    if (patchStatus === undefined && patchBackgrounded === undefined) {
+      // 仅 description/end_time 等非关键字段变化 → 不转发（噪声控制）。
+      return;
+    }
+    const info = this._getOrCreateTaskMap(state.sessionId).get(taskId);
+    if (!info) {
+      // 任务表无记录（未注册 / task_notification 已注销）→ 轻量信号无从挂靠。
+      return;
+    }
+    const mapped =
+      patchStatus === 'completed' || patchStatus === 'failed'
+        ? patchStatus
+        : patchStatus === 'killed'
+          ? 'stopped'
+          : 'running';
+    const runId = info.runId ?? state.currentRunId;
+    if (!runId) {
+      return;
+    }
+    const errorText =
+      typeof patch['error'] === 'string' && patch['error']
+        ? patch['error']
+        : undefined;
+    this._emitSessionEvent(state.sessionId, runId, {
+      kind: 'agent_task_status',
+      task_id: taskId,
+      task_name: info.taskName,
+      status: mapped,
+      ...(info.toolUseId ? { tool_use_id: info.toolUseId } : {}),
+      ...(errorText ? { summary: errorText } : {}),
+    });
+  }
+
+  /**
+   * task-03（design §5 P1.2）：异步启动回执兜底注册——user tool_result 文本含
+   * "Async agent launched successfully" 且正则提取到 agentId 时调用。
+   *
+   * 以 tool_use_id 为关联键注册（task_id=agentId，async:true）；查重：CLI 已发
+   * task_started 注册过同 tool_use_id（spike 结论 primary 路径）或同 agentId
+   * 已注册 → 跳过（避免双 [TASK_STARTED] 行 + 双 running emit）。emit 的 extra
+   * 必带 tool_use_id + async:true（design §8：「async 回执兜底路径必发」）——
+   * 前端据此不再把 0.1s 配对的 tool_result 当完成信号（FR-01 假完成根因）。
+   */
+  private async _registerAsyncReceiptTask(
+    state: SessionState,
+    runId: string | undefined,
+    agentId: string,
+    toolUseId: string,
+  ): Promise<void> {
+    const tasks = this._getOrCreateTaskMap(state.sessionId);
+    for (const info of tasks.values()) {
+      if (info.toolUseId === toolUseId) {
+        return; // task_started 已注册（primary 路径），回执仅是佐证。
+      }
+    }
+    if (tasks.has(agentId)) {
+      return; // 同 agentId 重复回执（理论不至），幂等跳过。
+    }
+    const meta = this._agentToolUseMeta.get(toolUseId);
+    const taskName = meta?.taskName ?? '后台任务';
+    tasks.set(agentId, {
+      toolUseId,
+      taskName,
+      ...(meta?.subagentType ? { subagentType: meta.subagentType } : {}),
+      async: true,
+      startedAt: Date.now(),
+      ...(runId ? { runId } : {}),
+    });
+    if (!runId) {
+      return;
+    }
+    this._emitSessionEvent(state.sessionId, runId, {
+      kind: 'agent_task_status',
+      task_id: agentId,
+      task_name: taskName,
+      status: 'running',
+      tool_use_id: toolUseId,
+      async: true,
+    });
+    await this._writeTaskLine(state.sessionId, runId, '[TASK_STARTED]', {
+      task_id: agentId,
+      tool_use_id: toolUseId,
+      task_name: taskName,
+      ...(meta?.subagentType ? { subagent_type: meta.subagentType } : {}),
+      async: true,
+    }, toolUseId);
+  }
+
+  /**
+   * task-03（design §5 P1.3 / §8 契约）：[TASK_*] 持久行落库。
+   *
+   * 形状照抄 `_flushPartial` 先例——flat 消息 `{event_type:'text', content,
+   * channel:'stdout'}`（backend submit_messages 顶层有 event_type/content 即
+   * 原样透传，不走 _extract_sdk_messages 展开）；行级带**顶层**
+   * parent_tool_use_id=tool_use_id（backend 落库读 msg.parent_tool_use_id 写
+   * AgentRunLog 归属列 + P2.2 跨轮归位用，与 SDK 消息顶层字段同位）。
+   * JSON.stringify 输出恒为单行（字符串内换行转义为 `\n` 字面量），满足
+   * 「单行 JSON」契约；键名统一 task_name（不用 name，task-03 约束）。
+   */
+  private async _writeTaskLine(
+    sessionId: string,
+    runId: string,
+    prefix: '[TASK_STARTED]' | '[TASK_PROGRESS]' | '[TASK_NOTIFICATION]',
+    payload: Record<string, unknown>,
+    parentToolUseId?: string,
+  ): Promise<void> {
+    const line = {
+      event_type: 'text',
+      content: `${prefix} ${JSON.stringify(payload)}`,
+      channel: 'stdout',
+      ...(parentToolUseId ? { parent_tool_use_id: parentToolUseId } : {}),
+    } as unknown as SDKMessage;
+    await this.deps.onTurnMessage(sessionId, runId, line);
+  }
+
+  /** task-03：取或建会话级后台任务表（二级 Map 内层懒建）。 */
+  private _getOrCreateTaskMap(
+    sessionId: string,
+  ): Map<string, BackgroundTaskInfo> {
+    let tasks = this._backgroundTasks.get(sessionId);
+    if (!tasks) {
+      tasks = new Map();
+      this._backgroundTasks.set(sessionId, tasks);
+    }
+    return tasks;
+  }
+
+  /**
+   * task-03：清理指定 session 的后台任务表 + Task/Agent tool_use 元数据。
+   * 会话终态（end/fail）调用——SDK 进程已 kill，后台任务随进程消亡，后续
+   * task_* 不会再到达；防 Map 泄漏（对齐 _clearRunningBashCommands 语义）。
+   */
+  private _clearBackgroundTasks(sessionId: string): void {
+    this._backgroundTasks.delete(sessionId);
+    for (const [toolUseId, meta] of this._agentToolUseMeta) {
+      if (meta.sessionId === sessionId) {
+        this._agentToolUseMeta.delete(toolUseId);
       }
     }
   }

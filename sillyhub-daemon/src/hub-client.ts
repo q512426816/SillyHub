@@ -137,13 +137,40 @@ export interface NotifyBashChunkBody {
   is_final: boolean;
 }
 
-/** Agent 任务状态事件上报体（对齐 backend AgentTaskStatusEvent / task-01 DTO）。 */
-export interface NotifyAgentTaskStatusBody {
+/**
+ * task-02（2026-08-27-background-subagent-progress / design §8）：Agent 任务状态
+ * 事件扩展可选字段（契约冻结，snake_case 对齐 backend AgentTaskStatusEvent 新字段）。
+ *
+ * 全部 optional——旧 daemon 只发 running + task_id/task_name 不受影响（backend 侧
+ * 兜底）。`async` 在 TS 是合法属性名，无需 alias（alias 仅 backend Python 侧问题）。
+ */
+export interface AgentTaskStatusExtraFields {
+  /** 关联前端 tool 段 id（tool_use block id；回执兜底路径必发）。 */
+  tool_use_id?: string;
+  /** 终态摘要 / 进行中摘要（backend 截断 200 字符）。 */
+  summary?: string;
+  /** task_progress.last_tool_name（「正在做什么」）。 */
+  last_tool_name?: string;
+  /** 服务端权威时长 ms（usage.duration_ms）。 */
+  elapsed_ms?: number;
+  /** 累计 tokens（task_progress.usage）。 */
+  total_tokens?: number;
+  /** 工具调用次数（task_progress.usage）。 */
+  tool_uses?: number;
+  /** 异步派发标记（回执兜底路径必发；缺省语义=前台）。 */
+  async?: boolean;
+}
+
+/**
+ * Agent 任务状态事件上报体（对齐 backend AgentTaskStatusEvent / task-01 DTO；
+ * task-02 扩展字段见 AgentTaskStatusExtraFields，status 增 'stopped'）。
+ */
+export interface NotifyAgentTaskStatusBody extends AgentTaskStatusExtraFields {
   session_id: string;
   run_id: string;
   task_id: string;
   task_name: string;
-  status: 'running' | 'completed' | 'failed';
+  status: 'running' | 'completed' | 'failed' | 'stopped';
   progress?: number;
   message?: string;
 }
@@ -1007,12 +1034,18 @@ export class HubClient {
 
   /**
    * task-03（FR-03）：上报 Agent 任务状态事件。
+   * task-02（2026-08-27-background-subagent-progress / design §8）扩展：status 增
+   * 'stopped'，新增 extra 可选对象透传扩展字段（tool_use_id/summary/last_tool_name/
+   * elapsed_ms/total_tokens/tool_uses/async）。旧调用点（只传前 5 参）零改动成立。
    *
    * 端点：POST {REST_PREFIX}/sessions/{sessionId}/agent-task-status
-   * body（snake_case，对齐 backend AgentTaskStatusEvent / task-01 DTO）：
-   *   { session_id, run_id, task_id, task_name, status, progress?, message? }
+   * body（snake_case，对齐 backend AgentTaskStatusEvent / task-01 DTO + task-02 扩展）：
+   *   { session_id, run_id, task_id, task_name, status, progress?, message?,
+   *     tool_use_id?, summary?, last_tool_name?, elapsed_ms?, total_tokens?,
+   *     tool_uses?, async? }
    *
-   * undefined 字段守卫写入（progress / message 缺省时不传 → backend 保留 None）。
+   * undefined 字段守卫写入（progress / message / extra.* 缺省时不传 → backend
+   * 保留 None，向后兼容旧 daemon 上报行为）。
    * 失败语义（对齐 _request）：非 2xx → HubHttpError；网络/超时透传。
    */
   async notifyAgentTaskStatus(
@@ -1020,9 +1053,10 @@ export class HubClient {
     runId: string,
     taskId: string,
     taskName: string,
-    status: 'running' | 'completed' | 'failed',
+    status: 'running' | 'completed' | 'failed' | 'stopped',
     progress?: number,
     message?: string,
+    extra?: AgentTaskStatusExtraFields,
   ): Promise<Record<string, unknown>> {
     const body: NotifyAgentTaskStatusBody = {
       session_id: sessionId,
@@ -1033,6 +1067,20 @@ export class HubClient {
     };
     if (progress !== undefined) body.progress = progress;
     if (message !== undefined) body.message = message;
+    // task-02 扩展字段守卫写入（undefined 不进 body，向后兼容）
+    if (extra?.tool_use_id !== undefined) {
+      body.tool_use_id = extra.tool_use_id;
+    }
+    if (extra?.summary !== undefined) body.summary = extra.summary;
+    if (extra?.last_tool_name !== undefined) {
+      body.last_tool_name = extra.last_tool_name;
+    }
+    if (extra?.elapsed_ms !== undefined) body.elapsed_ms = extra.elapsed_ms;
+    if (extra?.total_tokens !== undefined) {
+      body.total_tokens = extra.total_tokens;
+    }
+    if (extra?.tool_uses !== undefined) body.tool_uses = extra.tool_uses;
+    if (extra?.async !== undefined) body.async = extra.async;
     return this._request<Record<string, unknown>>(
       'POST',
       `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/agent-task-status`,

@@ -426,9 +426,12 @@ describe("SessionInputBar（task-13 抽取共享子组件）", () => {
     expect((screen.getByTitle("发送") as HTMLButtonElement).disabled).toBe(true);
     first.unmount();
 
-    // enabled 但空输入：发送按钮仍禁用（!value.trim()）
+    // enabled 但空输入：发送按钮仍禁用（!value.trim()），且 title/aria 提示
+    // 「消息内容不能为空」（task-14 / FR-08——与后端 inject 空 prompt 422 文案一致）
     setupBar({ disabled: false, value: "   " });
-    expect((screen.getByTitle("发送") as HTMLButtonElement).disabled).toBe(true);
+    const emptySendBtn = screen.getByTitle("消息内容不能为空") as HTMLButtonElement;
+    expect(emptySendBtn.disabled).toBe(true);
+    expect(emptySendBtn.getAttribute("aria-label")).toBe("消息内容不能为空");
   });
 });
 

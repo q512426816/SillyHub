@@ -12,6 +12,7 @@ import asyncio
 import json
 import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -58,6 +59,56 @@ log = get_logger(__name__)
 # 100000（约 2000 行）覆盖绝大多数命令输出；超长追加中文标注保留原始长度
 # 信息。daemon task-runner.ts 的 batch 路径同步对齐（原同样 3000 截断）。
 TOOL_RESULT_MAX_CHARS = 100_000
+
+
+# ── task-06 / FR-05 / D-003@v1：submit_messages 跨轮归位（后台子代理） ─────────
+# 后台子代理的日志行（带 parent_tool_use_id）经同 session 的**后续 run** 上报，
+# 若按上报 run 落库，前端子代理目录按「派发 tool_use → 子代理行」聚合时找不到
+# 行（孤儿 stub）。submit_messages 落库时把这类行的 run_id 归写**派发 run**
+# （派发 tool_use 行所在的 run，design §5 Phase 2 P2.2）。tool_use_id → 派发
+# run_id 的映射两级供给：进程级 LRU（热路径零查询）+ 冷启动反查 agent_run_logs
+# （_resolve_dispatch_run_id）。只改写入归因，不改 AgentRun/AgentSession 状态机，
+# 历史行不迁移（N4）。
+
+# LRU 容量 1024（task-06 契约）：长会话多轮派发的 tool_use 映射上限，防膨胀。
+_TOOL_USE_RUN_LRU_CAPACITY = 1024
+
+
+class _ToolUseRunLRU:
+    """(agent_session_id, tool_use_id) → 派发 run_id 的进程级 LRU。
+
+    - 手写 OrderedDict 而非 functools.lru_cache：lru_cache 会把 None 返回值也
+      缓存（等价负缓存），冷启动反查失败一次后会被永久短路，违背「派发行迟到
+      时后续上报仍可归位」的语义；本类只在反查成功时写入。
+    - asyncio 单线程事件循环内读-判-写无 await 穿插，天然原子，无需锁（对齐
+      下方 _bash_chunk_last_publish 的并发口径）。
+    """
+
+    def __init__(self, capacity: int = _TOOL_USE_RUN_LRU_CAPACITY) -> None:
+        self._capacity = capacity
+        self._data: OrderedDict[tuple[uuid.UUID, str], uuid.UUID] = OrderedDict()
+
+    def get(self, key: tuple[uuid.UUID, str]) -> uuid.UUID | None:
+        """查映射：命中移到 MRU 端并返回 run_id；未命中返回 None（不写负缓存）。"""
+        run_id = self._data.get(key)
+        if run_id is not None:
+            self._data.move_to_end(key)
+        return run_id
+
+    def put(self, key: tuple[uuid.UUID, str], run_id: uuid.UUID) -> None:
+        """写映射并维持容量上限（超出淘汰最老条目）。"""
+        self._data[key] = run_id
+        self._data.move_to_end(key)
+        while len(self._data) > self._capacity:
+            self._data.popitem(last=False)
+
+    def clear(self) -> None:
+        """清空缓存（测试隔离用，task-08 单测在用例间清态）。"""
+        self._data.clear()
+
+
+# 进程级单例：跨 submit_messages 调用、跨 run 共享（同会话第二轮起命中热路径）。
+_tool_use_run_lru = _ToolUseRunLRU()
 
 
 # ── QueuePool 修复 3：submit_messages 的发布意图 + 延迟 publish ────────────────
@@ -252,14 +303,20 @@ _bash_chunk_last_publish: dict[tuple[uuid.UUID, str], float] = {}
 async def publish_session_event(session_id: uuid.UUID, payload: dict | BaseModel) -> None:
     """把单条事件发布到 ``agent_session:{session_id}`` 频道（task-01）。
 
-    BaseModel payload 走 ``model_dump(mode="json")``（UUID / Literal 自动转 JSON
-    兼容形态），dict payload 原样透传；``json.dumps(..., default=str)`` 兜底不可
+    BaseModel payload 走 ``model_dump(mode="json", by_alias=True)``（UUID /
+    Literal 自动转 JSON 兼容形态；by_alias 使带别名字段按契约名输出，如
+    agent_task_status 的 ``async_`` → ``async``），dict payload 原样透传；
+    ``json.dumps(..., default=str)`` 兜底不可
     序列化对象（对齐 ``_publish_gate_status_changed`` 的容错风格）。Redis 获取
     方式为 ``get_redis()``；发布失败仅 ``log.warning`` 不抛——Pub/Sub 无历史，
     漏发实时事件不影响 DB 真相，前端重连即续流。
     """
     if isinstance(payload, BaseModel):
-        payload = payload.model_dump(mode="json")
+        # by_alias=True：agent_task_status 的 async_ 字段按契约名 "async" 发布
+        # （2026-08-27-background-subagent-progress task-05 / design §8 R-06，
+        # 前端/daemon 侧契约名就是 async）；其余经此 helper 的事件模型均无别名，
+        # 序列化行为不变。UUID / Literal 由 mode="json" 自动转 JSON 兼容形态。
+        payload = payload.model_dump(mode="json", by_alias=True)
     try:
         redis = get_redis()
         await redis.publish(f"agent_session:{session_id}", json.dumps(payload, default=str))
@@ -384,6 +441,66 @@ class RunSyncService:
             )
         return len(rows)
 
+    async def _resolve_dispatch_run_id(
+        self,
+        agent_session_id: uuid.UUID,
+        tool_use_id: str,
+    ) -> uuid.UUID | None:
+        """task-06 / FR-05：冷启动反查 tool_use_id 的派发 run_id。
+
+        进程级 LRU 未命中时（进程重启 / 容量逐出 / 首次上报）从 agent_run_logs
+        反查：同 agent_session_id 的 run 集合中，channel='tool_call' 且 content
+        JSON 含该 tool_use_id 的**最早**一行的 run_id。取最早是因为派发 tool_use
+        在时间上先于任何子代理回显，可防子代理输出里偶现同 id 串的误配。查询走
+        既有索引两步最小化：先 ix_agent_runs_agent_session_id 取同 session 的
+        run id 列表，再 run_id IN + channel 过滤（ix_agent_run_logs_run）定位。
+        查不到（极端：派发 run 日志已被清理）返回 None，调用方保持当前 run_id
+        兜底不抛错（design §5 P2.2 / N4 历史行不迁移）。
+        """
+        try:
+            # 第一步：同 session 的 run id 列表（索引命中，避免 agent_run_logs 全表扫）。
+            run_ids = (
+                (
+                    await self._session.execute(
+                        select(AgentRun.id).where(AgentRun.agent_session_id == agent_session_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if not run_ids:
+                return None
+            # 第二步：这些 run 的 tool_call 行中定位 content 含该 tool_use_id 的行。
+            dispatch_run_id = (
+                (
+                    await self._session.execute(
+                        select(AgentRunLog.run_id)
+                        .where(
+                            AgentRunLog.run_id.in_(run_ids),
+                            AgentRunLog.channel == "tool_call",
+                            # LIKE 模式给 id 带双引号，匹配 JSON 字符串值
+                            # （"tool_use_id":"toolu_xxx"，interactive 与 batch 两路
+                            # 径的 tc_content 均含该键）；toolu id 字符集为字母
+                            # 数字下划线，不含 LIKE 通配符，无需转义。
+                            AgentRunLog.content_redacted.like(f'%"{tool_use_id}"%'),
+                        )
+                        .order_by(AgentRunLog.timestamp.asc())
+                        .limit(1)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+        except Exception:
+            # 未命中路径不抛错（task-06 验收）：查询异常视作未找到，调用方兜底。
+            log.debug(
+                "daemon_messages_parent_dispatch_lookup_error",
+                agent_session_id=str(agent_session_id),
+                tool_use_id=tool_use_id,
+            )
+            return None
+        return dispatch_run_id
+
     # ── public ────────────────────────────────────────────────────────────
 
     async def submit_messages(
@@ -488,6 +605,17 @@ class RunSyncService:
         # （design §5 W2.1 / §7.5 生命周期契约表第 1 行）。仅 sillyspec 行触发
         # 收集（R-03 低频热路径），空列表时循环后零额外查询。
         sillyspec_commands: list[str] = []
+        # task-06 / FR-05 / D-003@v1：跨轮归位预处理。提前 get AgentRun（原在
+        # 循环后状态同步处；identity map 复用，无额外查询），取 agent_session_id
+        # 作归位映射的会话维度 key——后台子代理行经同 session 的后续 run 上报，
+        # 归位映射必须按会话隔离。batch run（agent_session_id=None）无会话维度，
+        # 跳过登记与归位（batch 无跨轮后台子代理场景，行为不变）。
+        agent_run = await self._session.get(AgentRun, agent_run_id)
+        attribution_session_id = agent_run.agent_session_id if agent_run is not None else None
+        # 冷启动反查未命中集合（本次调用局部）：同一 parent_tool_use_id 的多行
+        # 只查一次 DB；不做跨调用负缓存——派发行迟到时后续调用反查仍可成功
+        # （design §5 P2.2），失败行保持当前 run_id 兜底。
+        cold_lookup_misses: set[tuple[uuid.UUID, str]] = set()
 
         for msg in flat_messages:
             # ql-20260616-003：daemon _eventToMessage 不发 channel/timestamp/log_id，
@@ -744,9 +872,63 @@ class RunSyncService:
                     _inherited = tool_kind_by_tool_use_id.get(_msg_tuid)
                     if isinstance(_inherited, str) and _inherited:
                         tool_kind = _inherited
+
+            # task-06 / FR-05 / D-003@v1：跨轮归位——带 parent_tool_use_id 的行
+            # （后台子代理输出 / [TASK_*] 行，经同 session 后续 run 上报）run_id
+            # 归写**派发 run**，消除前端孤儿 stub。两级映射：进程级 LRU → 冷启动
+            # 反查 agent_run_logs；仍失败保持当前 run_id 兜底不抛错（design §5
+            # P2.2）。batch run（attribution_session_id=None）/ 主 agent 行（无
+            # parent）不经本分支，行为不变。
+            parent_tuid = msg.get("parent_tool_use_id") if isinstance(msg, dict) else None
+            effective_run_id = agent_run_id
+            if isinstance(parent_tuid, str) and parent_tuid and attribution_session_id is not None:
+                lru_key = (attribution_session_id, parent_tuid)
+                dispatch_run_id = _tool_use_run_lru.get(lru_key)
+                if dispatch_run_id is None and lru_key not in cold_lookup_misses:
+                    # LRU 未命中且本调用内未查过 → 冷启动反查；失败记入局部集合，
+                    # 同一 parent id 的后续行不再重复打 DB（一次 submit 常含多行）。
+                    dispatch_run_id = await self._resolve_dispatch_run_id(
+                        attribution_session_id, parent_tuid
+                    )
+                    if dispatch_run_id is not None:
+                        _tool_use_run_lru.put(lru_key, dispatch_run_id)
+                    else:
+                        cold_lookup_misses.add(lru_key)
+                        log.debug(
+                            "daemon_messages_parent_dispatch_lookup_miss",
+                            agent_run_id=str(agent_run_id),
+                            agent_session_id=str(attribution_session_id),
+                            parent_tool_use_id=parent_tuid,
+                        )
+                if dispatch_run_id is not None:
+                    effective_run_id = dispatch_run_id
+
+            # task-06 / FR-05：assistant tool_use 行（channel=tool_call 的 JSON 卡）
+            # 落库时登记 (session_id, tool_use_id) → 本行 run_id，供后续 parent 行
+            # 归位命中热路径。登记值用 effective_run_id（归位后的落库 run）而非
+            # 上报 run——嵌套子代理（孙代）的 parent 是子代 tool_use，其行已归位
+            # 到派发 run，孙代据此同样归位，两层语义一致。interactive 路径
+            # tool_use_id 在 flat record 顶层；batch 路径（旧 daemon）仅在 content
+            # JSON 内，兜底解析（解析失败静默跳过，不阻塞落库）。
+            if channel == "tool_call" and attribution_session_id is not None:
+                dispatch_reg_tuid = _msg_tuid if isinstance(_msg_tuid, str) and _msg_tuid else ""
+                if not dispatch_reg_tuid and isinstance(content, str) and content:
+                    try:
+                        parsed_reg = json.loads(content)
+                        reg_val = (
+                            parsed_reg.get("tool_use_id") if isinstance(parsed_reg, dict) else None
+                        )
+                        dispatch_reg_tuid = reg_val if isinstance(reg_val, str) and reg_val else ""
+                    except Exception:
+                        dispatch_reg_tuid = ""
+                if dispatch_reg_tuid:
+                    _tool_use_run_lru.put(
+                        (attribution_session_id, dispatch_reg_tuid), effective_run_id
+                    )
+
             log_entry = AgentRunLog(
                 id=log_id,
-                run_id=agent_run_id,
+                run_id=effective_run_id,
                 timestamp=now,
                 channel=channel,
                 # ql-20260626-001 放宽（原 5000 截断 agent 长答复/总结）
@@ -811,8 +993,9 @@ class RunSyncService:
                 completed_segments.add(segment_id)
 
         # Sync AgentRun status: pending -> running on first messages
+        # task-06：agent_run 已在落库循环前 get（归位需要 agent_session_id），此处
+        # 复用同一对象（identity map），无额外查询。
         agent_run_status: str | None = None
-        agent_run = await self._session.get(AgentRun, agent_run_id)
         if agent_run is not None:
             agent_run_status = agent_run.status
             if agent_run.status == "pending":

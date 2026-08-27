@@ -24,18 +24,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 
-import { AgentTaskCard } from "@/components/daemon/agent-task-card";
+import { AgentTaskCard, type AgentTaskCardProps } from "@/components/daemon/agent-task-card";
 import { BashProgressCard } from "@/components/daemon/bash-progress-card";
 import { TeamTaskBlock, isActiveTeamMission } from "@/components/daemon/team-task-block";
 import type { TeamMissionSummary } from "@/lib/daemon";
 
-/** 后台 Agent 任务条目（session-panel 两模式的 agentTasks state 同构形状）。 */
-export interface AgentTaskEntry {
-  taskId: string;
-  taskName: string;
-  status: "running" | "completed" | "failed";
-  progress: number | null;
-  message: string | null;
+/**
+ * 后台 Agent 任务条目（session-panel 两模式的 agentTasks state 同构形状）。
+ * 2026-08-27-background-subagent-progress / task-12（FR-06）：形状扩到全生命
+ * 周期——status 增补 stopped 终态，透传「正在做什么」/ 走秒锚点 / tokens /
+ * 最后活跃 / 终态定格扩展字段（全可选，旧事件缺失 → null 不渲染）。
+ */
+export interface AgentTaskEntry extends AgentTaskCardProps {
+  /** 后台异步派发标记（FR-04 状态机存储；卡片展示暂不消费）。 */
+  isAsync?: boolean | null;
 }
 
 /** bash 进度（BashProgressState 子集——runId 仅归约用，展示不需要）。 */
@@ -171,6 +173,15 @@ export function ActivityCatalog({
                   status={task.status}
                   progress={task.progress}
                   message={task.message}
+                  lastToolName={task.lastToolName}
+                  summary={task.summary}
+                  elapsedMs={task.elapsedMs}
+                  elapsedSyncedAt={task.elapsedSyncedAt}
+                  startedAt={task.startedAt}
+                  lastActivityAt={task.lastActivityAt}
+                  terminalAt={task.terminalAt}
+                  totalTokens={task.totalTokens}
+                  toolUses={task.toolUses}
                 />
               ))}
             </section>

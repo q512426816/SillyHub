@@ -4551,6 +4551,11 @@ export interface paths {
          * Notify Agent Task Status
          * @description Receive daemon agent-task-status report and forward to frontend SSE (task-02).
          *
+         *     2026-08-27-background-subagent-progress task-05（FR-04）：请求模型即
+         *     AgentTaskStatusEvent（schema.py），生命周期扩展字段（tool_use_id/summary/
+         *     last_tool_name/elapsed_ms/total_tokens/tool_uses/async）经模型校验后随
+         *     ``publish_session_event`` 整包转发（by_alias 发布），端点不逐字段挑选。
+         *
          *     越权防护（2026-08-25 P1）：同 notify_plan_mode_entered，发布前做 runtime
          *     归属校验（404 不泄露存在性）。
          */
@@ -10004,6 +10009,15 @@ export interface components {
         /**
          * AgentTaskStatusEvent
          * @description ``agent_task_status`` 事件——Agent 任务粒度状态（FR-03）。
+         *
+         *     2026-08-27-background-subagent-progress task-05 扩展（FR-04，design §8）：
+         *     status 增补 ``stopped`` 终态，并透传后台异步子代理生命周期字段
+         *     （tool_use_id / summary / last_tool_name / elapsed_ms / total_tokens /
+         *     tool_uses / async）。新字段均可选——旧 daemon 只发 running +
+         *     task_id/task_name 的载荷解析不受影响（向后兼容）。
+         *     ``async`` 是 Python 关键字：DTO 字段名用 ``async_`` + alias ``async``，
+         *     ``populate_by_name`` 使入参两种名字都可用（daemon 发 ``async``、后端
+         *     代码读 ``async_``）。
          */
         AgentTaskStatusEvent: {
             /**
@@ -10030,11 +10044,25 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "running" | "completed" | "failed";
+            status: "running" | "completed" | "failed" | "stopped";
             /** Progress */
             progress?: number | null;
             /** Message */
             message?: string | null;
+            /** Tool Use Id */
+            tool_use_id?: string | null;
+            /** Summary */
+            summary?: string | null;
+            /** Last Tool Name */
+            last_tool_name?: string | null;
+            /** Elapsed Ms */
+            elapsed_ms?: number | null;
+            /** Total Tokens */
+            total_tokens?: number | null;
+            /** Tool Uses */
+            tool_uses?: number | null;
+            /** Async */
+            async?: boolean | null;
         };
         /** ApiKeyCreateRequest */
         ApiKeyCreateRequest: {

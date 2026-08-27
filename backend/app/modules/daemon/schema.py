@@ -225,6 +225,12 @@ class SessionInjectRequest(BaseModel):
     不产生用户消息与模型回应，daemon 只 reload 配置）；纯追问（无切换字段）
     仍要求非空 prompt。
 
+    2026-08-27-background-subagent-progress task-07（FR-08 / D-004@v1）：空
+    prompt 判定（含全空白 → 422「消息内容不能为空」）与上述切换/附件豁免
+    **统一在 service 层** ``inject_session`` 入口（SessionEmptyPrompt，取锁 /
+    忙轮入队之前）；本 DTO 不再重复判空，也**不加字段级 min_length**——豁免
+    轮（静默切换 / D-7 看图说话）的请求体显式携带 ``prompt: ""``（前端
+    injectSession 恒发 prompt 键），字段级 min_length 会连豁免轮一并 422。
     2026-08-20-session-multimodal-attachments task-05：``attachment_ids`` 附件
     引用（上传端点产出的 SessionAttachment id）；**D-7 豁免**——附件非空时
     prompt 可为空（看图说话）；上限 10 = 图片 5 + 文件 5（逐 kind 校验归
@@ -238,17 +244,6 @@ class SessionInjectRequest(BaseModel):
     # ql-20260825-004：每轮注入携带当前页面上下文——客户端传页面类型枚举+键，
     # 服务端回查注入【页面上下文】前导（复用 create 路径 build_page_context_preamble）。
     page_context: PageContextCreateBlock | None = None
-
-    @model_validator(mode="after")
-    def _require_prompt_or_switch(self) -> "SessionInjectRequest":
-        if (
-            not self.prompt.strip()
-            and self.agent_profile_id is None
-            and self.llm_provider_id is None
-            and not self.attachment_ids
-        ):
-            raise ValueError("prompt is required when no config switch is requested")
-        return self
 
 
 # ── Change-scoped session list (2026-07-09-change-detail-session task-09 / D-005@v1) ─
@@ -966,16 +961,40 @@ class BashChunkEvent(BaseModel):
 
 
 class AgentTaskStatusEvent(BaseModel):
-    """``agent_task_status`` 事件——Agent 任务粒度状态（FR-03）。"""
+    """``agent_task_status`` 事件——Agent 任务粒度状态（FR-03）。
+
+    2026-08-27-background-subagent-progress task-05 扩展（FR-04，design §8）：
+    status 增补 ``stopped`` 终态，并透传后台异步子代理生命周期字段
+    （tool_use_id / summary / last_tool_name / elapsed_ms / total_tokens /
+    tool_uses / async）。新字段均可选——旧 daemon 只发 running +
+    task_id/task_name 的载荷解析不受影响（向后兼容）。
+    ``async`` 是 Python 关键字：DTO 字段名用 ``async_`` + alias ``async``，
+    ``populate_by_name`` 使入参两种名字都可用（daemon 发 ``async``、后端
+    代码读 ``async_``）。
+    """
+
+    model_config = {"populate_by_name": True}
 
     event: Literal["agent_task_status"] = "agent_task_status"
     session_id: uuid.UUID
     run_id: uuid.UUID
     task_id: str
     task_name: str
-    status: Literal["running", "completed", "failed"]
+    status: Literal["running", "completed", "failed", "stopped"]
     progress: int | None = None
     message: str | None = None
+    # 与前端 tool 段 id 关联（tool_use_id），卡片定位 / 跨轮归位（P2.2）的关联键
+    tool_use_id: str | None = None
+    # 终态摘要 / 进行中摘要（task_notification.summary / task_progress.summary）
+    summary: str | None = None
+    # task_progress.last_tool_name——「正在做什么」提示
+    last_tool_name: str | None = None
+    # 服务端权威时长（usage.duration_ms），终态定格 / 前端走秒校准锚点
+    elapsed_ms: int | None = None
+    total_tokens: int | None = None
+    tool_uses: int | None = None
+    # 异步派发标记（回执兜底路径必发）；dump 时按 alias 输出为 "async"（契约名）
+    async_: bool | None = Field(None, alias="async")
 
 
 class PlanResponseDecision(enum.StrEnum):
