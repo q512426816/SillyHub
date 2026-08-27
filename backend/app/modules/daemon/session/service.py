@@ -1060,6 +1060,12 @@ class SessionService:
             # 用量计量走 AgentSession 既有口径）。离线竞态仍转 4xx 不静默换机。
             pinned_runtime_id = _platform_binding.pinned_runtime_id
             provider = _platform_binding.provider
+            # E2E 修正（2026-08-28，R-10）：平台共享会话强制 manual_approval=False
+            # ——约束即策略（writable_dir 写边界 + 禁 Bash 白名单），远程人审无增益
+            # 且实测 enableApproval=true 路径下写守卫未生效（目录外写放行、零审计）；
+            # enableApproval=false 路径（write-only 守卫）经对照实验实证可用
+            # （机器级边界 deny + 审计落库）。服务端强制，请求参数不可放宽。
+            manual_approval = False
         elif runtime_id:
             try:
                 pinned_runtime_id = uuid.UUID(runtime_id)
