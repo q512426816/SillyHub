@@ -62,7 +62,7 @@ D-001@v2→FR-02→task-01/02/05→spike-r09+轮级计数器+权威覆盖 ✅；
 - backend：`uv run pytest -q --no-cov` 5 文件（ctx_tokens/endpoint/cache-parse/sse/close-model-error）→ 49 passed
 - frontend：`pnpm test -- --run` 3 文件（ctx-usage-bar/session-panel-ctx-tokens/page）→ 43/43 passed
 - 静态：daemon `pnpm typecheck` 0 错；frontend `tsc --noEmit` 0 错；backend ruff All passed + mypy 0 issues
-- known_failures 豁免（4 例，均有基线取证）：frontend 全量套件 4 个失败在 HEAD=ddf42787 基线（临时基线 worktree，无本变更任何改动）逐字节复现——session-panel-variant（建流 3 参断言过时：HEAD 代码已传 {cursor,initialSync} 第三参）、session-panel-dialog-attachments ×2（附件入口 title 断言过时）、session-panel-ux-fixes（/team 回填断言过时）。均属其它已提交/在途变更的测试债，与本变更 diff 零交集（本变更未触碰建流调用/附件 title/team 回填路径）。已按 local.yaml known_failures 机制登记豁免（3 个文件名模式），归属变更收尾时应修复并移除。
+- known_failures 豁免（4 例，均有基线取证）：frontend 全量套件 4 个失败在 HEAD=ddf42787 基线（临时基线 worktree，无本变更任何改动）逐字节复现——session-panel-variant（建流 3 参断言过时：HEAD 代码已传 {cursor,initialSync} 第三参）、session-panel-dialog-attachments ×2（附件入口 title 断言过时）、session-panel-ux-fixes（/team 回填断言过时）。均属其它已提交/在途变更的测试债，与本变更 diff 零交集（本变更未触碰建流调用/附件 title/team 回填路径）。已按 local.yaml known_failures 机制登记豁免并实证（frontend 全量输出 383 个"失败行"全部命中豁免、judge=passed）：真实失败 4 行按文件名模式豁免；其余 379 行为工具缺陷假阳性（vitest 输出中 ✓ 通过行/stderr 噪声块/汇总行/退出横幅/jsdom 告警/断言详情行被 PER_TEST_FAIL_RE 误判，ANSI 色码还会拆散多词模式）。清单偏宽（judge 提示人工复核），local.yaml 注释已按 A 工具缺陷 workaround / B 预存债两类标注临时性与收缩条件；缺陷按规则 15 记录于 docs/sillyspec/verify-known-failures-pass-line-false-positive.md（修复建议：✓ 前缀剔除/结构化解析/SUMMARY_LINE_RE 增补）。归属变更收尾修复 4 个过时测试后应整体收缩。
 - 集成冒烟（plan 全局验收 4）未执行：本地 Docker 为旧镜像（见风险等级节）。
 
 ## 决策追踪矩阵（如存在 decisions.md；无则删本节）
