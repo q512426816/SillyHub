@@ -11,3 +11,4 @@ created_at: 2026-08-28 03:12:50
 - [x] task-05: 前端任务/问题侧入口与卡片——pendingPpmItem 挂起位通道 + 发起会话入口 + ppm-item-sessions-card（W4, depends_on: task-03, task-04）
 - [x] task-06: 前端 @联想与筛选——mention-sources PPM 分组 + query-keys + popover 渲染 + 会话列表筛选 ppm 选项（W5, depends_on: task-04, task-05 串行）
 - [x] task-07: 「发起团队」预选修复——autoTeamIntent/autoTeamOpen 通道 + defaultProjectId 预选 + objective 预填（W1）
+- [x] ql-20260828-003-f2b4 会话关联 PPM 任务/问题 + 发起团队预选修复

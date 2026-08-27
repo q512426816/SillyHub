@@ -260,3 +260,18 @@
 根因：PreToolUse deny 是工具调用级拦截，复合命令整条未执行，但 deny 理由只说「commit was blocked」——重试只重跑 commit 导致链上 git add 的文件静默漏提交（2026-08-27 QUICKLOG 漏提交实证）
 方案：deny reason 按命令是否含 git add 追加定向/通用提示行，一行文案消除歧义
 结果：node --check 通过；临时仓两分支仿真 deny 文案均按预期输出；纯文案改动无逻辑分支变化，未触及 backend/frontend 路径（pre-commit CI 不适用）
+
+## ql-20260828-003-f2b4 | 2026-08-28 07:39:06 | session-ppm-item-sessions 越权收紧 + PPM 附件物化并行化与查询收敛
+状态：已完成
+关联变更：2026-08-28-session-ppm-task-binding
+文件：
+- backend/app/modules/ppm/common/router.py（data_scope 可见性守卫）
+- backend/app/modules/daemon/session/service.py（三阶段并行物化+item 传参）
+- backend/app/modules/daemon/session/context.py（item 可选传参）
+- backend/app/modules/ppm/common/tests/test_session_binding.py（2 越权用例）
+- .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md（条目）
+需求：session-ppm-item-sessions 越权收紧 + PPM 附件物化并行化与查询收敛
+根因：收尾审查发现三处：item-sessions 端点仅认证不授权，任意登录用户可枚举他人任务的会话（PPM 已上线模块的越权读取面）；物化最多 10 附件串行 2 次 IO 共 20 次串行网络往返拖慢会话创建；同一请求 load_ppm_item 查询 3 次
+方案：router.py 前置 task_scope_clause/problem_scope_clause 条目可见性守卫（不可见返回 []防存在性泄露）；_materialize_ppm_attachments 三阶段重构（顺序资格判定保图≤5/文≤5 水位→asyncio.gather 并行读写→原序组装降级）；item 可选传参全链复用前置解析加载行
+结果：test_session_binding 17 passed（含 2 新越权用例）+ daemon 相关 87/26 passed（含事务守卫）+ ruff 全过；容器重建实测超管可见普通用户空列表（越权修复生效）、绑定链路正常；测试数据已清理
+审计：⚖️ 归属切分：4 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/grants/service.py, backend/app/modules/daemon/service.py, backend/app/modules/daemon/session/context.py, backend/app/modules/daemon/tests/test_session_create_config.py
