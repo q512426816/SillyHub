@@ -155,9 +155,7 @@ def _from_file_entry(e: QuicklogFileEntry) -> QuicklogMergedEntry:
 _STATUS_RANK = {"in_progress": 0, "partial_done": 1, "completed": 2}
 
 
-def _prefer_pushed(
-    file_entry: QuicklogMergedEntry, pushed_entry: QuicklogMergedEntry
-) -> bool:
+def _prefer_pushed(file_entry: QuicklogMergedEntry, pushed_entry: QuicklogMergedEntry) -> bool:
     """quick-88472229（用户实证 ql-20260827-005-a660）：同 ql_id 的 PG/文件选优。
 
     旧策略无条件 PG 优先，假设「推送时点新于文件」——但 quick 的最终 --done 推送

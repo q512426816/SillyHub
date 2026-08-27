@@ -23,6 +23,6 @@ created_at: 2026-08-28 03:28:10
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `modules/backend.md` | 更新 daemon 模块卡（ppm 绑定字段/前导/物化/筛选条目）与 ppm 子树条目（common/ 新增 session_binding + item-sessions 端点） | pending（execute/verify 后同步） |
-| `modules/frontend.md` | 更新 frontend 模块卡（ppm-item-sessions-card、mention PPM 分组、floating store 挂起位、team 预选条目） | pending（execute/verify 后同步） |
+| `modules/backend.md` | 更新 daemon 模块卡（ppm 绑定字段/前导/物化/筛选条目）与 ppm 子树条目（common/ 新增 session_binding + item-sessions 端点） | done（2026-08-28）：条目追加至 `modules/backend.changelog.md` sidecar（change 2026-08-28-session-ppm-task-binding）；backend.md 正文核对无与本次变更直接冲突的描述（PPM 子树行系子域粗枚举、common/ 本不在列），未改动 |
+| `modules/frontend.md` | 更新 frontend 模块卡（ppm-item-sessions-card、mention PPM 分组、floating store 挂起位、team 预选条目） | done（2026-08-28）：条目追加至 `modules/frontend.changelog.md` sidecar（change 2026-08-28-session-ppm-task-binding）；frontend.md 正文核对无与本次变更直接冲突的描述（无 @联想分组穷举式描述），未改动 |
 | `_module-map.yaml` | 无变化（未增删模块，仅模块内新增文件） | skipped |

@@ -418,9 +418,7 @@ class TestAssistantOverrideDeletesPartial:
         assert len(rows) == 2
 
     @pytest.mark.asyncio
-    async def test_full_line_synthesizes_override_publish(
-        self, db_session, mocked_redis
-    ) -> None:
+    async def test_full_line_synthesizes_override_publish(self, db_session, mocked_redis) -> None:
         """quick-0e56260f（会话 0ef651b6）：完整行落库时 backend 合成 override
         信封（stale=True + segment_id）publish 到 session channel——直播期窗口
         发布丢失致前端拼出乱序胶水段（非前缀，前缀收编失效），前端据令箭按段
