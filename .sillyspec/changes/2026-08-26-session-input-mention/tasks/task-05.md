@@ -17,6 +17,7 @@ allowed_paths:
   - frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx
   - frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx
   - frontend/src/components/daemon/__tests__/session-panel-dialog-changeid.test.tsx
+  - frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
 expects_from:
   task-03:
     - contract: onMentionsChange
@@ -43,6 +44,8 @@ constraints:
   - /team 整条拦截与 team popover 互斥零改动；消息模型、渲染协议、附件流、高度拖拽不触碰
   - 草稿不持久化 pendingMentions；page 重发明确不带 mentions（R-7 已声明取舍）
 related_tests:
+  - path: frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx
+    reason: 门户页级渲染 SessionPanel，2 处追问态 placeholder 精确断言随文案更新（task-09 全量回归时发现，Plan Review 相关测试清单遗漏此文件）
   - path: frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx
     reason: 预会话 placeholder 14 处 getByPlaceholderText 断言随文案更新
   - path: frontend/src/components/daemon/__tests__/session-panel-dialog.test.tsx

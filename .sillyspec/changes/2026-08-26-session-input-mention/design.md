@@ -204,6 +204,7 @@ tier: independent
 - `frontend/src/components/daemon/__tests__/session-input-bar-mention.test.tsx`（接入单测）
 
 修改（前端）：
+- `frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx`（追问态 placeholder 断言随文案更新）
 - `frontend/src/components/daemon/session-input-bar.tsx`（检测驱动浮层与 IME 与光标回填与 onMentionsChange）
 - `frontend/src/components/daemon/session-panel.tsx`（3 渲染点接线与 7 发送组装点位与 placeholder 文案）
 - `frontend/src/lib/daemon.ts`（injectSession 请求体透传 bind 字段）
