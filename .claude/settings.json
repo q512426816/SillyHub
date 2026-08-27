@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "node .claude/hooks/pre-commit-ci-check.cjs",
-            "timeout": 300,
+            "timeout": 600,
             "statusMessage": "Running local CI checks before commit..."
           }
         ]

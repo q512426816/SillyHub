@@ -407,3 +407,19 @@
 根因：ql-011 放开 layout main 后用户实测 components/runtime/skills/mcp/mcp-tokens/files 六页仍 1400 居中——上轮核实用单行 grep 统计 size 用法，这批未传 size 的写法被漏掉，PageContainer 默认 default 即 1400 帽
 方案：PCRE2 多行正则复查全 workspaces/[id] 路由共 12 文件 20 处未传 size 的 PageContainer，sed 批量统一补 size=full 复查 0 残留；顺带补装远端新依赖 react-qr-code 修 tsc 红
 结果：eslint 0 error（5 个预存 warning 无关）、tsc --noEmit 通过、dashboard 路由组 335 测试全过；模块文档已同步
+
+## ql-20260827-014-b9f5 | 2026-08-27 15:18:28 | 平台级页面宽度撑满——选择器与 settings 四管理页、PPM 里程碑明细补 size=full
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/page.tsx（选择器页 PageContainer 补 size=full）
+- frontend/src/app/(dashboard)/settings/providers/page.tsx（同）
+- frontend/src/app/(dashboard)/settings/skills/page.tsx（同）
+- frontend/src/app/(dashboard)/settings/mcp/page.tsx（同）
+- frontend/src/app/(dashboard)/settings/api-keys/page.tsx（同）
+- frontend/src/app/(dashboard)/ppm/milestone-details/page.tsx（同（PPM 已上线，纯样式））
+- .sillyspec/docs/SillyHub/modules/ppm.changelog.md（新建 ppm 变更索引 sidecar）
+需求：平台级页面宽度撑满——选择器与 settings 四管理页、PPM 里程碑明细补 size=full
+根因：用户逐页验收后点名 /workspaces 选择器页仍 1400 居中；dashboard 全路由复查共 6 处 PageContainer 未传 size 走默认帽，均为列表/管理形态，符合「列表页 full」规范
+方案：6 文件 PageContainer 统一补 size=full（/workspaces + settings providers/skills/mcp/api-keys + ppm/milestone-details），PCRE2 复查 0 残留；frontend_app 与 ppm（新建 sidecar）两模块文档登记
+结果：eslint 0 error（26 个预存 warning 无关）、tsc 通过、dashboard 路由组 335 测试全过

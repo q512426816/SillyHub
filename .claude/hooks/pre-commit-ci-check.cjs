@@ -53,6 +53,10 @@ function run(command, options = {}) {
     env: env,
     encoding: "utf8",
     shell: true,
+    // maxBuffer 默认 1MB：vitest 全量输出（含 jsdom stderr 噪音）远超 1MB，
+    // 攒满即子进程被杀（status=null、无 Test Files 汇总、死点随机）——
+    // 2026-08-27 实证 hook 连续误拦 "frontend: test failed" 而手动跑全绿。
+    maxBuffer: 64 * 1024 * 1024,
   });
 }
 
