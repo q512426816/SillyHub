@@ -10,6 +10,8 @@ blocks: [task-14, task-15]
 allowed_paths:
   - frontend/src/components/daemon/agent-task-card.tsx
   - frontend/src/components/daemon/session-panel.tsx
+  - frontend/src/lib/__tests__/daemon-session-events.test.ts
+  - frontend/src/components/daemon/activity-catalog.tsx
 provides:
   - contract: card_lifecycle_ui
     fields: [running(正在做什么行/走秒/tokens/最后活跃), terminal(定格+服务端时长+summary), 状态机 running→completed/failed/stopped]
