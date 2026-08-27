@@ -423,3 +423,14 @@
 根因：用户逐页验收后点名 /workspaces 选择器页仍 1400 居中；dashboard 全路由复查共 6 处 PageContainer 未传 size 走默认帽，均为列表/管理形态，符合「列表页 full」规范
 方案：6 文件 PageContainer 统一补 size=full（/workspaces + settings providers/skills/mcp/api-keys + ppm/milestone-details），PCRE2 复查 0 残留；frontend_app 与 ppm（新建 sidecar）两模块文档登记
 结果：eslint 0 error（26 个预存 warning 无关）、tsc 通过、dashboard 路由组 335 测试全过
+
+## ql-20260827-015-4cdb | 2026-08-27 16:42:16 | 升级 daemon claude-agent-sdk 0.3.181→0.3.247
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/package.json（主依赖+8 平台 overrides 0.3.181→0.3.247）
+- sillyhub-daemon/pnpm-lock.yaml（依赖解析与平台二进制重锁）
+需求：升级 daemon claude-agent-sdk 0.3.181→0.3.247
+根因：agent-sdk 版本尾数与捆绑 Claude Code 内核对齐，0.3.181 落后 66 个 patch 约 2 个月，错过上游修复与增强；用户确认升级到 npm latest
+方案：package.json 主依赖与 8 个平台 overrides 同步改 0.3.247，pnpm install 更新 lock，tsc build 重建 dist，daemon 进程原参数重启加载新 SDK
+结果：typecheck 0 错；vitest 全量 2917 passed/9 skipped 零回归；build 成功；daemon 新进程 WS 重连成功并在处理真实 lease 派发消息流（运行时实证）
