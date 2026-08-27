@@ -84,7 +84,7 @@ export default function ApiKeysSettingsPage() {
   };
 
   return (
-    <PageContainer className="gap-5">
+    <PageContainer size="full" className="gap-5">
       <PageHeader
         title="API 密钥"
         subtitle={

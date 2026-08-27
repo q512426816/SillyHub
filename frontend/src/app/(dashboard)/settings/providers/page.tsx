@@ -14,7 +14,7 @@ import { LlmProviderSection } from "@/components/llm-providers/llm-provider-list
  */
 export default function LlmProvidersPage() {
   return (
-    <PageContainer className="gap-5">
+    <PageContainer size="full" className="gap-5">
       <PageHeader
         title="我的供应商"
         subtitle={

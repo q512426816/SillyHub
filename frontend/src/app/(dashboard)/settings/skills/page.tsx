@@ -121,7 +121,7 @@ export default function SkillsSettingsPage() {
   };
 
   return (
-    <PageContainer className="gap-5">
+    <PageContainer size="full" className="gap-5">
       <PageHeader
         title="技能管理"
         subtitle={

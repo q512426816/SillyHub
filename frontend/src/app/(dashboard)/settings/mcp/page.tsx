@@ -380,7 +380,7 @@ export default function McpSettingsPage() {
   const canWrite = !!user?.is_platform_admin;
 
   return (
-    <PageContainer className="gap-5">
+    <PageContainer size="full" className="gap-5">
       <PageHeader
         title="MCP 配置"
         subtitle={

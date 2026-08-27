@@ -585,7 +585,7 @@ export default function MilestoneDetailsPage() {
 
   if (!planId) {
     return (
-      <PageContainer>
+      <PageContainer size="full">
         <p className="py-10 text-center text-sm text-muted-foreground">
           请从「项目计划」页选择一条计划进入里程碑明细。
         </p>

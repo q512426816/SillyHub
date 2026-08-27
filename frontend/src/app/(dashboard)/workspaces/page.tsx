@@ -218,7 +218,7 @@ export default function WorkspacesPage() {
   );
 
   return (
-    <PageContainer>
+    <PageContainer size="full">
       <PageHeader
         title="选择工作区"
         subtitle="选择一个工作区开始，或在右上角进入平台后台"
