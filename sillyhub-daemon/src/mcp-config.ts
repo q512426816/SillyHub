@@ -186,6 +186,7 @@ export async function fetchMcpBundle(
   token: string | null,
   workspaceId?: string,
   logger?: McpConfigLogger,
+  apiKey?: string,
 ): Promise<McpBundle> {
   const base = serverUrl.replace(/\/$/, '');
   const url = workspaceId
@@ -193,7 +194,13 @@ export async function fetchMcpBundle(
     : `${base}/api/daemon/mcp/config`;
   try {
     const headers: Record<string, string> = {};
-    if (token) headers['Authorization'] = `Bearer ${token}`;
+    // task-09 / D-004@v2：daemon 鉴权优先级对齐 hub-client._headers()——
+    // apiKey（X-API-Key，长期凭证）优先于 token（Authorization: Bearer，JWT）。
+    if (apiKey) {
+      headers['X-API-Key'] = apiKey;
+    } else if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
     const resp = await fetch(url, { headers });
     if (!resp.ok) {
       logger?.('warn', 'mcp_bundle_fetch_failed', { url, status: resp.status });

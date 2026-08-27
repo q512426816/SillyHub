@@ -4020,6 +4020,7 @@ export class Daemon {
           (level, msg, data) => {
             this._logger[level](msg, data);
           },
+          this._config.api_key ?? undefined,
         );
         this._mcpBundleBySession.set(sessionId, bundle);
         this._logger.debug('mcp_bundle_prefetched', {
