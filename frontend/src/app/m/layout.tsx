@@ -106,10 +106,12 @@ export default function MobileLayoutShell({ children }: { children: ReactNode })
 
   // 钻取页（DRILL_ROUTES，design §5.2 / §5.5）：裸容器直出 children，不裹
   // MobileAppShell——无外壳顶栏、无底部 TabBar（沉浸钻取 + 给输入条/时间线腾空间），
-  // 页面自渲染返回顶栏；容器约束与普通页一致（max-w-480px / 100dvh / flex-col）。
+  // 页面自渲染返回顶栏；容器约束与普通页一致（max-w-480px / 视口高 / flex-col）。
+  // ql-20260827-012：min-h-[100dvh] 改 fixed inset-0 + overflow-hidden——min-h 可
+  // 长高致 body 整页可滚（顶栏滚走/手感松垮），脱流锁死后页面内部自管滚动。
   if (isDrillRoute(pathname)) {
     return (
-      <div className="mx-auto flex min-h-[100dvh] w-full max-w-[480px] flex-col">
+      <div className="fixed inset-0 mx-auto flex w-full max-w-[480px] flex-col overflow-hidden">
         {children}
       </div>
     );

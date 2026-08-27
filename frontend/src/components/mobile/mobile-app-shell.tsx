@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 
+import { ThemeToggle } from "@/components/theme-toggle";
 import { MobileTabBar, type TabKey } from "./mobile-tab-bar";
 import { MobileTopBar } from "./mobile-top-bar";
 
@@ -12,8 +13,11 @@ import { MobileTopBar } from "./mobile-top-bar";
  *   localStorage；桌面零回归。
  * - 内容区 flex-1 overflow-auto，自带滚动；底部留 pb 避让固定 TabBar。
  * - 正文 ≥ 14px（R-04）：main 显式 text-[14px]（与 globals.css body 14px 对齐）。
- * - 移动容器：h-[100dvh]（动态视口，兼容移动浏览器地址栏伸缩）+ max-w-[480px] 居中
- *   （/m/ 仅手机访问，宽屏上限避免拉伸）。
+ * - 移动容器：fixed inset-0 + max-w-[480px] 居中（ql-20260827-012：外壳脱离文档
+ *   流锁死视口高，body 永不可滚——此前 h-[100dvh] 留在流内，内容异常撑高时整页
+ *   可滚、顶栏滚走手感松垮；overflow-hidden 兜底）。/m/ 仅手机访问，宽屏上限避免拉伸。
+ * - 顶栏默认挂 ThemeToggle（ql-20260827-012：移动端主题切换入口；antd Dropdown
+ *   组件原样复用，偏好经 useThemeStore persist 与桌面同源）。
  * - 守卫不在本组件（守卫在 app/m/layout，属另一任务）。
  */
 export interface MobileAppShellProps {
@@ -24,6 +28,9 @@ export interface MobileAppShellProps {
   title?: string;
   /** 可选：传入则顶栏渲染返回箭头并以此回调（透传给 MobileTopBar）。 */
   onBack?: () => void;
+  /** 可选：顶栏右侧动作槽（透传给 MobileTopBar）。不传默认渲染 ThemeToggle；
+   *  传 null 显式关闭（预留给不需要主题按钮的宿主）。 */
+  actions?: ReactNode | null;
 }
 
 export function MobileAppShell({
@@ -31,10 +38,15 @@ export function MobileAppShell({
   activeTab,
   title,
   onBack,
+  actions,
 }: MobileAppShellProps) {
   return (
-    <div className="mx-auto flex h-[100dvh] w-full max-w-[480px] flex-col bg-background">
-      <MobileTopBar title={title} onBack={onBack} />
+    <div className="fixed inset-0 mx-auto flex w-full max-w-[480px] flex-col overflow-hidden bg-background">
+      <MobileTopBar
+        title={title}
+        onBack={onBack}
+        actions={actions === undefined ? <ThemeToggle /> : actions}
+      />
       <main className="min-w-0 flex-1 overflow-y-auto px-4 py-3 pb-20 text-[14px] text-foreground">
         {children}
       </main>

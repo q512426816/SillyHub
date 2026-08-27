@@ -56,7 +56,7 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
   - `mission-console.tsx` / `mission-summary-card.tsx` — 任务执行控制台与摘要
   - `AgentModelInput` / `AgentProviderSelect` — 模型与供应商选择
 - 交互问答：`ask-user-dialog-card` — codex request_user_input / 可归一化 MCP elicitation 的 question/options 问答（每问下方常驻手动输入框；复杂 schema daemon 侧 fail-closed）。
-- 移动端（mobile/）：`mobile-app-shell` / `mobile-top-bar` / `mobile-tab-bar`（底部导航）、`mobile-card-list`（卡片列表替代表格）、`mobile-filter-drawer` / `mobile-detail-sheet` / `milestone-sheet`（筛选/详情抽屉）、`mobile-batch-bar` / `mobile-action-menu` / `mobile-export-button`（批量/操作/导出）。
+- 移动端（mobile/）：`mobile-app-shell` / `mobile-top-bar` / `mobile-tab-bar`（底部导航）、`mobile-card-list`（卡片列表替代表格）、`mobile-filter-drawer` / `mobile-detail-sheet` / `milestone-sheet`（筛选/详情抽屉）、`mobile-batch-bar` / `mobile-action-menu` / `mobile-export-button`（批量/操作/导出）。ql-20260827-012：外壳容器改 `fixed inset-0 + overflow-hidden`（body 锁死不可滚，内容区自管滚动）；`mobile-top-bar` 加 actions 动作槽，外壳默认注入桌面同款 `ThemeToggle`（移动端主题切换入口，useThemeStore persist 同源）。
 - 基础件（ui/，shadcn 模式）：button / input / badge / card / dialog / dropdown-menu / avatar / empty-state / json-editor / markdown-text / status-badge / confirm-captcha。
 - 其余独立件：
   - 审批与权限：`permission-approval-card`

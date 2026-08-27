@@ -127,10 +127,13 @@ export default function MobileChangeDetailPage() {
       : "变更详情";
 
   return (
-    <div className="flex min-h-[100dvh] w-full min-w-0 flex-1 flex-col">
+    // ql-20260827-012：父级（m/layout 钻取裸容器）已 fixed inset-0 + overflow-hidden，
+    // 本页 h-full 撑满视口：顶栏 shrink-0 固定，main 自管滚动（原 min-h-[100dvh] 靠
+    // body 整页滚，顶栏 sticky 跟滚、底部无锚，手感松垮）。
+    <div className="flex h-full w-full min-w-0 flex-1 flex-col">
       {/* 顶栏：MobileTopBar（title/onBack）+ 右侧 ⋯ 触发（pr 预留 44px 热区，
           按钮自带 border-b 与顶栏底分隔线连成一线；触摸热区 ≥44px，design §5.5） */}
-      <div className="sticky top-0 z-30">
+      <div className="relative shrink-0">
         <div className="relative pr-11">
           <MobileTopBar title={barTitle} onBack={handleBackToList} />
         </div>
@@ -145,7 +148,7 @@ export default function MobileChangeDetailPage() {
         </button>
       </div>
 
-      <main className="flex min-w-0 flex-1 flex-col gap-3 px-3 pb-6 pt-3">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto px-3 pb-6 pt-3">
         {/* ⋯ 菜单动作反馈（重解析 / 复制结果） */}
         {actionMsg ? (
           <p

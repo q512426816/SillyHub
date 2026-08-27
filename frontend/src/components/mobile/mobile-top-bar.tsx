@@ -2,14 +2,18 @@
 
 import { ChevronLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
+import type { ReactNode } from "react";
 
 /**
  * 移动端简洁顶栏（design §5.2）。
  *
- * - 简洁：仅【可选返回箭头】+【可选标题】，不带桌面 TopBar 的面包屑 / 搜索 / 通知 /
- *   工作区切换器 / 用户菜单（移动端这些下沉到底部 Tab 与「我的」页）。
+ * - 简洁：仅【可选返回箭头】+【可选标题】+【可选右侧动作槽】，不带桌面 TopBar 的
+ *   面包屑 / 搜索 / 通知 / 工作区切换器 / 用户菜单（移动端这些下沉到底部 Tab 与
+ *   「我的」页）。
  * - 返回：传 `onBack` 时渲染返回箭头并调用之；未传则不渲染返回按钮（Tab 根页无需返回）。
  * - 标题：text-base（16px ≥ 14px，满足 R-04 正文下限），左对齐，truncate 防溢出。
+ * - 动作槽（ql-20260827-012）：传 `actions` 渲染在标题右侧（如 ThemeToggle / 页面
+ *   ⋯ 菜单按钮）；MobileAppShell 默认注入 ThemeToggle，钻取页可自带。
  * - 触摸热区：返回按钮 min-h/min-w-[44px]（R-04）。顶栏整体 min-h-[44px]。
  * - 不复用 / 不改桌面 top-bar.tsx（D-001 独立移动 UI，桌面零回归）。
  */
@@ -18,9 +22,11 @@ export interface MobileTopBarProps {
   title?: string;
   /** 传入则渲染返回箭头并以此作为返回回调；不传则不渲染返回按钮。 */
   onBack?: () => void;
+  /** 顶栏右侧动作槽（可选）。渲染在标题之后、末尾对齐（ml-auto）。 */
+  actions?: ReactNode;
 }
 
-export function MobileTopBar({ title, onBack }: MobileTopBarProps) {
+export function MobileTopBar({ title, onBack, actions }: MobileTopBarProps) {
   const router = useRouter();
 
   const handleBack = () => {
@@ -50,6 +56,14 @@ export function MobileTopBar({ title, onBack }: MobileTopBarProps) {
         <h1 className="min-w-0 flex-1 truncate px-1 text-base font-medium text-foreground">
           {title}
         </h1>
+      )}
+      {actions !== undefined && (
+        <div
+          data-testid="mobile-top-bar-actions"
+          className="ml-auto flex shrink-0 items-center gap-1 pr-1"
+        >
+          {actions}
+        </div>
       )}
     </header>
   );

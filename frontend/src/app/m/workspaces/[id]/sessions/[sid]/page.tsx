@@ -47,9 +47,12 @@ export default function MobileSessionChatPage() {
   if (!sid) return null;
 
   return (
+    // ql-20260827-012：父级（m/layout 钻取裸容器）已 fixed inset-0 + overflow-hidden，
+    // h-full 撑满视口并加 overflow-hidden 兜底——原 h-[100dvh] 留在流内，内容异常
+    // 撑高时 body 整页可滚、头部/输入条跟滚。
     <div
       data-testid="m-session-chat-page"
-      className="flex h-[100dvh] w-full min-h-0 flex-col"
+      className="flex h-full w-full min-h-0 flex-col overflow-hidden"
     >
       <SessionPanel
         key={sid}

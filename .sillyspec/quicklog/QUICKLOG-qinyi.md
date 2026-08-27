@@ -117,7 +117,17 @@
 方案：(auth)/login/page.tsx 新增 MobileQrEntry 卡片（react-qr-code@2.2.0 纯 SVG 零依赖），编码当前站点 /login，扫码后经 middleware UA 分流 rewrite 到 /m/login，登录后落地 /m/workspaces；SSR 占位挂载后取 origin 防 hydration 不匹配，白底衬板保扫码对比度，卡内小字展示编码 URL；导出 buildMobileEntryUrl 纯函数供测试
 结果：page.qr.test.tsx 2 用例通过；tsc --noEmit 0 错误；next lint 0 告警；并发会话移动端脏文件未触碰
 
-## ql-20260827-012-6c87 | 2026-08-27 14:18:27 | 工作区移动端页面（变更中心 + 会话移植）
-状态：进行中
+## ql-20260827-012-6c87 | 2026-08-27 14:18:27 | 移动端外壳锁死整页滚动（fixed inset-0）+顶栏补主题切换入口（actions 槽注入 ThemeToggle）
+状态：已完成
 关联变更：2026-08-26-mobile-workspace-page
-文件：frontend/src/app/m/layout.tsx, frontend/src/app/m/layout.test.tsx, frontend/src/components/mobile/mobile-app-shell.tsx, frontend/src/components/mobile/mobile-top-bar.tsx, frontend/src/components/mobile/mobile-top-bar.test.tsx, frontend/src/app/m/workspaces/[id]/changes/[cid]/page.tsx, frontend/src/app/m/workspaces/[id]/sessions/[sid]/page.tsx
+文件：
+- frontend/src/components/mobile/mobile-app-shell.tsx（fixed inset-0+overflow-hidden+actions 槽默认 ThemeToggle）
+- frontend/src/components/mobile/mobile-top-bar.tsx（加 actions 动作槽）
+- frontend/src/app/m/layout.tsx（钻取裸容器改 fixed inset-0）
+- frontend/src/app/m/workspaces/[id]/changes/[cid]/page.tsx（h-full+固定顶栏+内容区滚动）
+- frontend/src/app/m/workspaces/[id]/sessions/[sid]/page.tsx（h-full+overflow-hidden）
+- frontend/src/components/mobile/mobile-top-bar.test.tsx（新增 3 用例）
+需求：移动端外壳锁死整页滚动（fixed inset-0）+顶栏补主题切换入口（actions 槽注入 ThemeToggle）
+根因：钻取裸容器与详情页原用 min-h-[100dvh] 可被内容撑高致 body 整页滚动（顶栏底栏滚走/手感松垮）；ThemeToggle 只挂桌面顶栏，/m 段无主题切换入口
+方案：m/layout 钻取裸容器与 mobile-app-shell 统一改 fixed inset-0+overflow-hidden；变更详情页 h-full+固定顶栏+main overflow-y-auto；对话页 h-full+overflow-hidden；MobileTopBar 加 actions 槽、外壳默认注入桌面同款 ThemeToggle
+结果：70 用例全绿+tsc/lint 零错；浏览器 390×844 实证：滚动后 body 零滚动（scrollH=clientH=844）、顶栏钉 0-44px、底部导航钉 797-844px（列表+详情双场景）；主题三选一换肤生效且 persist 跨页保持
