@@ -251,3 +251,12 @@
 根因：init lease 触发的 get_or_issue 把同 workspace+created_by 名下所有活 token（connect 换发 shpsync_ 与手签 shmcp_）全部吊销，而新 init token 明文仅当次消费不写回 local.yaml，持久凭据从此静默 401（docs/sillyspec/init-revokes-persistent-local-yaml-tokens.md）
 方案：两处 get_or_issue 吊销查询加 name=init-provisioned 过滤（只轮换旧 init token 防堆积，持久 token 不动）；platform_sync 侧同时消除多活并存时 scalar_one_or_none 的 MultipleResultsFound 潜伏崩溃；两测试文件契约反转 + 并存回归锚；两模块文档 MANUAL_NOTES 补修订条目
 结果：pytest platform_sync+mcp_gateway+daemon/lease 279 passed（get_or_issue 10 passed）；ruff 两模块通过；mypy 4 改动文件 0 issues
+
+## ql-20260828-002-f314 | 2026-08-28 00:13:39 | pre-commit hook deny 文案补「整条命令未执行（含 git add）」提示
+状态：已完成
+关联变更：（无）
+文件：.claude/hooks/pre-commit-ci-check.cjs
+需求：pre-commit hook deny 文案补「整条命令未执行（含 git add）」提示
+根因：PreToolUse deny 是工具调用级拦截，复合命令整条未执行，但 deny 理由只说「commit was blocked」——重试只重跑 commit 导致链上 git add 的文件静默漏提交（2026-08-27 QUICKLOG 漏提交实证）
+方案：deny reason 按命令是否含 git add 追加定向/通用提示行，一行文案消除歧义
+结果：node --check 通过；临时仓两分支仿真 deny 文案均按预期输出；纯文案改动无逻辑分支变化，未触及 backend/frontend 路径（pre-commit CI 不适用）

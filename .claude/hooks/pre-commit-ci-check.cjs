@@ -184,7 +184,16 @@ if (hasFrontend) {
 }
 
 if (failures.length > 0) {
-  deny(`Local CI checks failed; git commit was blocked:\n${failures.map((item) => `- ${item}`).join("\n")}`);
+  // PreToolUse deny 是工具调用级拦截：整条 Bash 命令未执行——复合命令里的
+  // git add 也没跑（暂存区未变）。不点破这一点，重试容易只重跑 commit，
+  // 漏掉链上的 add → 静默漏提交（2026-08-27 实证：QUICKLOG 漏提交）。
+  const addHint = /\bgit\s+add\b/.test(command)
+    ? "\n注意：整条命令未执行（含其中的 git add，暂存区未变）。重试必须从 git add 重新发起整链，否则 add 的文件会静默漏提交。"
+    : "\n注意：整条命令未执行（PreToolUse 拦截发生在执行前），修复后重试即可。";
+  deny(
+    `Local CI checks failed; git commit was blocked:\n${failures.map((item) => `- ${item}`).join("\n")}` +
+      addHint
+  );
   process.exit(0);
 }
 
