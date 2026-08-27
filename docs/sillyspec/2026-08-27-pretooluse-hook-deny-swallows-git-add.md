@@ -76,3 +76,23 @@ PreToolUse 的 deny 是**工具调用级拦截**——整条命令根本没有�
   多 agent 环境不推荐）；③ 收尾 commit 尽量避开长测试窗口，被 deny 后优先
   重试 commit（抖动），把手动复现测试放在确认需要修的时候。
 
+## 同族坑第三例（2026-08-27 15:3x 实证，ql-20260827-014 会话，已修复）
+
+**hook spawnSync maxBuffer 默认 1MB：vitest 全量输出攒满即杀子进程 →
+"frontend: test failed" 连续误拦。**
+
+症状：commit 连续 4+ 次被拦 `frontend: test`，但 bash/cmd/node 手动跑全量
+2576 测试始终全绿；hook 直跑日志显示 vitest 输出中途戛然而止（无 Test Files
+汇总、status=null、死点随机）、无 OOM/SIGTERM 痕迹。
+
+- 根因：`pre-commit-ci-check.cjs` 的 `run()` 用 `spawnSync(cmd, [], {shell:true})`
+  未设 maxBuffer（node 默认 1MB）——vitest 全量 stdout+stderr（jsdom
+  Not implemented 噪音刷屏）轻松超 1MB，攒满瞬间子进程被杀，status=null≠0
+  → runCheck 判 failed → deny。14:11 之前能过是当时输出量未过线；测试套件
+  增长后稳定踩线。**此前记录的「并发资源竞争」结论有误，此为真根因。**
+- 修复（d8e867db 已落）：spawnSync 加 `maxBuffer: 64*1024*1024`；
+  顺带 settings.json hook timeout 300→600s（三连最坏情况余量）。
+- 教训：node `spawnSync`/`execSync` 收集大输出必须显式设 maxBuffer——
+  被杀时无任何错误消息（status=null、signal 可能空），极易误诊为测试抖动。
+
+
