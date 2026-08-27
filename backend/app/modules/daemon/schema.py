@@ -217,7 +217,11 @@ class SessionCreateRequest(BaseModel):
     def _require_runtime_or_provider(self) -> SessionCreateRequest:
         # design §5「与 provider 二选一，优先 runtime_id」：两者都缺 → 422，
         # 防止 provider=None 落到 NOT NULL 的 agent_sessions.provider 列。
-        if not self.runtime_id and not self.provider:
+        # 2026-08-28-daemon-agent-share E2E 修正（D-007 补口）：带 agent_profile_id
+        # 的形态放行——平台共享档案会话只传档案（runtime 由服务端钉定）；非共享
+        # 档案落 service 层二选一兜底（session/service.py create_session 的
+        # DaemonSessionNotActive），错误语义不变。
+        if not self.runtime_id and not self.provider and not self.agent_profile_id:
             raise ValueError("either runtime_id or provider must be provided")
         return self
 

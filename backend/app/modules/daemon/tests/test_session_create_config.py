@@ -47,6 +47,7 @@ from app.modules.daemon.model import (
     DaemonTaskLease,
 )
 from app.modules.daemon.runtime.service import DaemonRuntimeNotFound, RuntimeService
+from app.modules.daemon.schema import SessionCreateRequest
 from app.modules.daemon.service import DaemonService
 from app.modules.daemon.session.service import (
     DaemonSessionLlmProviderKindMismatch,
@@ -649,6 +650,28 @@ async def _seed_platform_shared_agent(
         runtime=rt,
         grant=grant,
     )
+
+
+class TestSessionCreateRequestDtoPlatformForm:
+    """DTO 层二选一校验放行共享档案形态（E2E 缺陷回归，2026-08-28-daemon-agent-share）。
+
+    线上缺陷：schema._require_runtime_or_provider 在 service 前置检测之前把
+    只传 agent_profile_id 的请求 422——既有 TestPlatformProfileBranch 直调
+    service 层绕过 DTO，未覆盖 HTTP 形态。修复后：带档案放行（服务端钉定/兜底），
+    纯空形态仍 422。
+    """
+
+    def test_profile_only_form_passes_dto(self) -> None:
+        req = SessionCreateRequest(
+            prompt="帮我读下源码", agent_profile_id="857f7582-27f8-4764-b157-8fa2269177c3"
+        )
+        assert req.agent_profile_id == "857f7582-27f8-4764-b157-8fa2269177c3"
+
+    def test_empty_form_still_rejected(self) -> None:
+        import pytest as _pytest
+
+        with _pytest.raises(ValueError, match="either runtime_id or provider"):
+            SessionCreateRequest(prompt="x")
 
 
 class TestPlatformProfileBranch:
