@@ -31,6 +31,13 @@ created_at: 2026-06-24T01:16:42
 - **构建发布**：`tsc` 出 `dist/`，`scripts/build-bundle.sh`（bundle 脚本）用 ncc 打成单文件便于分发；engines 锁 Node ≥20。
 
 ## 注意事项
+- 写守卫 session 级 overlay（2026-08-28-daemon-agent-share / D-011）：`_judgeWriteViaPolicyEngine`
+  在 `_borrowSandboxRoots` 之后增加 `_sessionOverlayRoots` 交集收紧——claim payload 的
+  `effectiveAllowedRoots` 非空时写路径须同时落于 session roots 与 PolicyCache（机器级），
+  语义只收紧、无字段会话零变化；fallback 块复用同一 helper（overlayRoots ?? providerRoots）。
+  服务方：backend 平台共享智能体会话（writable_dir 注入 effective_allowed_roots）。
+  单测 tests/interactive/session-manager-write-guard.test.ts（三态/fail-closed/Bash 提取器组合）。
+
 
 - claude-agent-sdk 跨平台二进制用 pnpm overrides 统一钉版 0.3.181，升级需全平台验证。
 - daemon 与 backend 的 session/permission 消息契约双向耦合，改动必须 backend daemon 模块 + frontend runtime-session 组件同步。

@@ -28,8 +28,9 @@ created_at: 2026-08-28 01:23:10
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `docs/backend/modules/daemon.md` | 更新 daemon 模块卡（新增 grants 子包 + 会话授权/共享智能体端点） | pending |
-| `docs/backend/modules/agent.md` | 更新 agent 模块卡（borrow_resolver 数据源、审计 grant_id） | pending |
-| `docs/backend/modules/workspace.md` | 更新 workspace 模块卡（member_runtimes 双写 grants） | pending |
-| `docs/frontend/modules/frontend.md` | 更新 frontend 模块卡（守护进程页共享区块/管理卡、选择器共享标识） | pending |
+| `docs/backend/modules/daemon.md` | 已更新（grants 子域端点/表/钉定授权 D-012 语义） | done |
+| `docs/backend/modules/agent.md` | 已更新（borrow_resolver 切 grants/审计 grant_id/platform_shared_tool_config） | done |
+| `docs/backend/modules/workspace.md` | 已更新（member_runtimes 双写 grants/薄壳/grant_id 响应） | done |
+| `docs/frontend/modules/*` 细粒度卡 ×5（components-daemon / app-pages / lib-daemon / lib-use-daemon-machines / components-sessions） | 已更新（两新组件/页面区块与统计/API 封装/hook sharedToMe/选择器徽标；首版「frontend.md」单行系笔误——前端为细粒度卡体系，无 frontend.md 大卡） | done |
+| `sillyhub-daemon` 模块卡 | 更新（session-manager.ts 写守卫 overlay 增量，D-011） | done |
 | `_module-map.yaml`（backend/frontend） | 无变化（未增删模块；grants 为 daemon 子包，不新增模块条目） | skipped |
