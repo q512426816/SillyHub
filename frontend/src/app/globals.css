@@ -293,6 +293,28 @@
     @apply bg-background text-foreground antialiased font-sans;
     font-size: 14px;
     line-height: 1.5;
+    /* 触摸基线（quick-a4939946，用户反馈「莫名容易缩放」）：
+       - text-size-adjust: 禁系统浏览器横竖屏/字号自动重排缩放；
+       - tap-highlight: 去 Android Chrome 点击灰块（视觉降噪）；
+       - overscroll-behavior: /m/ 外壳 fixed 锁死后 body 本不可滚，此处再切断
+         链式滚动与 iOS 橡皮筋下拉（防止滚到头拖动整页产生「页面在缩放/移动」错觉）；
+       - touch-action: manipulation 去 300ms 双击缩放延迟（viewport 已禁缩放，
+         双击手势只剩干扰）。桌面鼠标交互不受这三条影响。 */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior-y: none;
+    touch-action: manipulation;
+  }
+
+  /* 移动外壳内可聚焦控件统一 ≥16px（quick-a4939946）：iOS/Android Safari 聚焦
+     字号 <16px 的输入框会自动放大视口且不回落——这正是「点输入框后整个页面莫名
+     变大」的根因。.m-app 挂在 /m/ 外壳与钻取裸容器上（mobile-app-shell.tsx /
+     app/m/layout.tsx），桌面布局零影响；antd Input 渲染的原生 input 同样命中。 */
+  .m-app input,
+  .m-app textarea,
+  .m-app select {
+    font-size: 16px;
   }
 
   h1 {

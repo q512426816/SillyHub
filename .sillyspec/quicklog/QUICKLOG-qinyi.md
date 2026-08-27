@@ -157,3 +157,26 @@
 方案：入队分支对「[后台任务通知]」前缀做同会话 pending 合并：新通知任务行并入既有条目（头/尾计数改写，_merge_task_wakeup_prompt 行级解析），不新增行；返回同 entry id daemon 无感；普通消息互不合并
 结果：test_session_queue.py 13 passed（新增 3 用例）ruff mypy 全过，模块文档已更新，待部署
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_session_queue.py
+
+## ql-20260827-016-c3ea | 2026-08-27 20:42:39 | 移动端第三轮UX打磨：禁意外缩放+触摸基线+输入16px+悬浮胶囊底栏+卡片图标容器
+状态：已完成
+关联变更：2026-08-26-mobile-workspace-page
+文件：
+- frontend/src/app/layout.tsx（viewport导出）
+- frontend/src/app/globals.css（触摸基线+m-app 16px）
+- frontend/src/app/m/layout.tsx（钻取容器挂m-app）
+- frontend/src/app/m/login/page.tsx（PUBLIC分支自带m-app）
+- frontend/src/components/mobile/mobile-app-shell.tsx（m-app+pb-28）
+- frontend/src/components/mobile/mobile-tab-bar.tsx（悬浮胶囊）
+- frontend/src/components/mobile/mobile-change-card.tsx（状态图标容器）
+- frontend/src/app/m/workspaces/[id]/changes/page.tsx（QuicklogCard同步）
+- 两测试文件（新增断言）
+需求：移动端第三轮UX打磨：禁意外缩放+触摸基线+输入16px+悬浮胶囊底栏+卡片图标容器
+根因：用户反馈移动端莫名容易缩放且手感差并给参考效果图；根因是根layout无viewport导出、无触摸基线CSS、输入框字号<16px触发iOS聚焦自动放大，底栏/卡片观感与参考图差距大
+方案：根layout导出viewport禁捏合缩放；globals.css加触摸基线与.m-app输入16px作用域并挂上外壳/钻取/登录容器；MobileTabBar改离底12px圆角毛玻璃胶囊并调外壳pb-28；MobileChangeCard与QuicklogCard加40px状态图标容器与间距节奏
+结果：tsc全绿；vitest相关111用例全过含新增4断言；curl实证SSR meta注入与编译CSS规则；胶囊视觉与聚焦不缩放留真机复核
+
+## ql-20260827-017-c7d3 | 2026-08-27 21:02:09 | 修复多标签页登录态互踢：session store 监听 storage 事件跨标签页同步 token
+状态：进行中
+关联变更：（无）
+文件：frontend/src/stores/session.ts, frontend/src/stores/session.test.ts

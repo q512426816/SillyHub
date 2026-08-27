@@ -111,9 +111,12 @@ export function MobileTabBar({ activeTab }: MobileTabBarProps) {
     <nav
       aria-label="移动端主导航"
       data-testid="mobile-tab-bar"
-      className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card pb-[env(safe-area-inset-bottom)] shadow-[var(--shadow-lg)]"
+      // 悬浮胶囊（quick-a4939946，对齐用户参考效果图）：贴底通栏边框式改为
+      // 离底 12px 的圆角胶囊 + 毛玻璃，内容从胶囊下方穿行（外壳 main pb-28
+      // 预留占位）；bottom 安全区只作间距不再撑背景，视觉轻、不压内容。
+      className="fixed inset-x-0 bottom-0 z-40 px-3 pb-[calc(env(safe-area-inset-bottom)+12px)]"
     >
-      <ul className="mx-auto flex w-full max-w-[480px] items-stretch">
+      <ul className="mx-auto flex w-full max-w-[432px] items-stretch rounded-[var(--radius-lg)] border border-border bg-card/95 shadow-[var(--shadow-lg)] backdrop-blur">
         {MOBILE_TABS.map((tab) => {
           const active = activeTab ? activeTab === tab.key : isTabActive(tab, pathname);
           const Icon = tab.icon;

@@ -104,6 +104,49 @@ describe("MobileChangeCard 阶段徽标（ChangeStepBadge 复用）", () => {
   });
 });
 
+describe("MobileChangeCard 状态图标容器（quick-a4939946 视觉升级）", () => {
+  it("默认（进行中）→ GitBranch + primary 语义色容器", () => {
+    const { container } = render(
+      <MobileChangeCard change={makeChange()} onClick={vi.fn()} />,
+    );
+    const card = screen.getByTestId("mobile-change-card");
+    expect(card.className).toContain("gap-3");
+    expect(card.className).toContain("p-3.5");
+    // 左侧图标容器：语义色描边 + 淡底（primary 分支）
+    const iconBox = container.querySelector(
+      "span.border-primary\\/25",
+    ) as HTMLElement | null;
+    expect(iconBox).not.toBeNull();
+    expect(iconBox?.className).toContain("h-10 w-10");
+    // svg（lucide GitBranch）渲染在容器内
+    expect(iconBox?.querySelector("svg")).not.toBeNull();
+  });
+
+  it("status=blocked → destructive 语义色容器", () => {
+    const { container } = render(
+      <MobileChangeCard
+        change={makeChange({ status: "blocked" })}
+        onClick={vi.fn()}
+      />,
+    );
+    expect(
+      container.querySelector("span.border-destructive\\/25"),
+    ).not.toBeNull();
+  });
+
+  it("status=archived → success 语义色容器", () => {
+    const { container } = render(
+      <MobileChangeCard
+        change={makeChange({ status: "archived" })}
+        onClick={vi.fn()}
+      />,
+    );
+    expect(
+      container.querySelector("span.border-success\\/25"),
+    ).not.toBeNull();
+  });
+});
+
 describe("MobileChangeCard 相对时间与变更名", () => {
   it("updated_at 5 分钟前 → 「5 分钟前」", () => {
     render(<MobileChangeCard change={makeChange()} onClick={vi.fn()} />);

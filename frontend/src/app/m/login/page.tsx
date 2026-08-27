@@ -184,7 +184,9 @@ function MobileLoginPageInner() {
   };
 
   return (
-    <main className="mx-auto flex min-h-[100dvh] w-full max-w-[480px] flex-col bg-background px-6 py-10 text-foreground">
+    // m-app：globals.css 触摸基线作用域（antd Input ≥16px 防聚焦缩放，quick-a4939946；
+    // /m/login 走 PUBLIC 分支不裹 MobileAppShell，需自带作用域容器）。
+    <main className="m-app mx-auto flex min-h-[100dvh] w-full max-w-[480px] flex-col bg-background px-6 py-10 text-foreground">
       {/* Logo：复用 public/logo.png（与桌面同源资源） */}
       <div className="mb-8 flex justify-center">
         <LogoMark />

@@ -63,11 +63,25 @@ describe("MobileTabBar 渲染", () => {
   it("恰好渲染 5 个 Tab", () => {
     render(<MobileTabBar />);
     // 5 个 Tab 各对应一个 data-tab-key 锚点（getByTestId 返回唯一 nav，规避 noUncheckedIndexedAccess）
-    const links = screen
-      .getByTestId("mobile-tab-bar")
-      .querySelectorAll("a[data-tab-key]");
+    const nav = screen.getByTestId("mobile-tab-bar");
+    const links = nav.querySelectorAll("a[data-tab-key]");
     expect(links).toHaveLength(5);
     expect(MOBILE_TABS).toHaveLength(5);
+  });
+
+  it("悬浮胶囊形态（quick-a4939946）：胶囊容器圆角+毛玻璃+离底占位", () => {
+    render(<MobileTabBar />);
+    const nav = screen.getByTestId("mobile-tab-bar");
+    // 外层 nav：离底 12px + 安全区占位（不再贴底通栏）
+    expect(nav.className).toContain("bottom-0");
+    expect(nav.className).toContain("px-3");
+    expect(nav.className).toContain("pb-[calc(env(safe-area-inset-bottom)+12px)]");
+    // 内层 ul：圆角胶囊 + 毛玻璃 + 上限 432px
+    const ul = nav.querySelector("ul");
+    expect(ul).not.toBeNull();
+    expect(ul?.className).toContain("rounded-[var(--radius-lg)]");
+    expect(ul?.className).toContain("backdrop-blur");
+    expect(ul?.className).toContain("max-w-[432px]");
   });
 
   it("5 Tab 文案与目标路径（href）正确", () => {

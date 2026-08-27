@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { AntdRegistry } from "@ant-design/nextjs-registry";
 
 import { AntdProviders } from "@/components/antd-providers";
@@ -9,6 +9,22 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "SillyHub",
   description: "SillySpec 原生查看器 + 多智能体执行平台。",
+};
+
+/**
+ * 视口基线（quick-a4939946，用户反馈「莫名容易缩放」）：
+ * - maximumScale=1 + userScalable=false：禁捏合/双击放大。/m/ 移动段是 app 化 UI
+ *   （fixed 外壳 + 自管滚动），意外缩放后 480px 容器与视口错位、手势全乱；桌面
+ *   浏览器窗口无 pinch 概念，width=device-width 对其无影响。
+ * - interactiveWidget=resizes-content：Android 软键盘弹出压缩视口高而非平移，
+ *   fixed 底部输入条/TabBar 才不会被键盘顶飞。
+ */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  interactiveWidget: "resizes-content",
 };
 
 /**

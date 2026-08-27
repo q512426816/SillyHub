@@ -111,7 +111,9 @@ export default function MobileLayoutShell({ children }: { children: ReactNode })
   // 长高致 body 整页可滚（顶栏滚走/手感松垮），脱流锁死后页面内部自管滚动。
   if (isDrillRoute(pathname)) {
     return (
-      <div className="fixed inset-0 mx-auto flex w-full max-w-[480px] flex-col overflow-hidden">
+      // m-app：globals.css 触摸基线作用域（会话输入条 textarea ≥16px 防聚焦缩放，
+      // quick-a4939946）。
+      <div className="m-app fixed inset-0 mx-auto flex w-full max-w-[480px] flex-col overflow-hidden">
         {children}
       </div>
     );

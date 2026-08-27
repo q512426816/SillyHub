@@ -33,6 +33,14 @@ import {
   useQueries,
   useQuery,
 } from "@tanstack/react-query";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  FileText,
+  Loader,
+  type LucideIcon,
+} from "lucide-react";
 
 import { useMobileWorkspace } from "@/app/m/workspaces/[id]/layout";
 // 数据层与轮询纯函数复用桌面既有导出（任务卡约束：禁止复制第二份实现）
@@ -113,7 +121,28 @@ const QL_BODY_ORDER = ["需求", "根因", "方案", "结果"] as const;
  * quicklog 卡片（纯展示，数据由页面 quicklog query 提供）：标题（空壳占位降级）/
  * 状态徽标（4 态映射）/ 作者（owner_name → author_name → author_raw 兜底链，
  * ql-20260818-006 同口径）/ 相对时间。整卡 button 触摸热区 ≥44px（design §5.5）。
+ * quick-a4939946：与 MobileChangeCard 同款视觉节奏——左侧 40px 状态图标容器
+ * （语义色随 QL_STATUS_META.kind）+ p-3.5 + 两栏呼吸感。
  */
+const QL_ICON_META: Record<string, { icon: LucideIcon; tone: string }> = {
+  completed: {
+    icon: CheckCircle2,
+    tone: "border-success/25 bg-success/10 text-success",
+  },
+  in_progress: {
+    icon: Loader,
+    tone: "border-primary/25 bg-primary/10 text-primary",
+  },
+  partial_done: {
+    icon: Clock,
+    tone: "border-warning/30 bg-warning/10 text-warning",
+  },
+  stale: {
+    icon: AlertTriangle,
+    tone: "border-destructive/25 bg-destructive/10 text-destructive",
+  },
+};
+
 function QuicklogCard({
   entry,
   onClick,
@@ -126,6 +155,11 @@ function QuicklogCard({
       label: entry.status,
       kind: "neutral" as const,
     };
+  const iconMeta = QL_ICON_META[entry.status] ?? {
+    icon: FileText,
+    tone: "border-border bg-muted/50 text-muted-foreground",
+  };
+  const QLIcon = iconMeta.icon;
   const author =
     entry.owner_name || entry.author_name || entry.author_raw || "—";
   return (
@@ -134,39 +168,47 @@ function QuicklogCard({
       onClick={onClick}
       aria-label={`打开快速修复 ${entry.placeholder ? entry.ql_id : entry.title}`}
       data-testid="m-quicklog-card"
-      className="flex min-h-[44px] w-full flex-col gap-2 rounded-[var(--radius-lg)] border border-border bg-card p-3 text-left shadow-[var(--shadow-sm)] transition-colors active:border-primary/40 active:bg-muted/50"
+      className="flex min-h-[44px] w-full items-start gap-3 rounded-[var(--radius-lg)] border border-border bg-card p-3.5 text-left shadow-[var(--shadow-sm)] transition-colors active:border-primary/40 active:bg-muted/50"
     >
-      {/* 标题（truncate）+ 相对时间 */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <span
-            className="block truncate text-[14px] font-medium text-foreground"
-            title={entry.placeholder ? "空壳占位条目" : entry.title}
-          >
-            {entry.placeholder ? (
-              <span className="italic text-muted-foreground">（空壳占位）</span>
-            ) : (
-              entry.title
-            )}
+      <span
+        aria-hidden
+        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[12px] border ${iconMeta.tone}`}
+      >
+        <QLIcon className="h-5 w-5" />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col gap-1.5">
+        {/* 标题（truncate）+ 相对时间 */}
+        <span className="flex items-start justify-between gap-2">
+          <span className="min-w-0 flex-1">
+            <span
+              className="block truncate text-[14px] font-medium text-foreground"
+              title={entry.placeholder ? "空壳占位条目" : entry.title}
+            >
+              {entry.placeholder ? (
+                <span className="italic text-muted-foreground">（空壳占位）</span>
+              ) : (
+                entry.title
+              )}
+            </span>
+            <span
+              className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground"
+              title={entry.ql_id}
+            >
+              {entry.ql_id}
+            </span>
           </span>
-          <span
-            className="mt-0.5 block truncate font-mono text-[11px] text-muted-foreground"
-            title={entry.ql_id}
-          >
-            {entry.ql_id}
+          <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+            {entry.timestamp ? formatRelativeTime(entry.timestamp) : "—"}
           </span>
-        </div>
-        <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
-          {entry.timestamp ? formatRelativeTime(entry.timestamp) : "—"}
         </span>
-      </div>
-      {/* 状态徽标 + 作者 */}
-      <div className="flex flex-wrap items-center gap-2">
-        <StatusBadge kind={meta.kind}>{meta.label}</StatusBadge>
-        <span className="min-w-0 truncate text-xs text-muted-foreground">
-          {author}
+        {/* 状态徽标 + 作者 */}
+        <span className="flex flex-wrap items-center gap-2">
+          <StatusBadge kind={meta.kind}>{meta.label}</StatusBadge>
+          <span className="min-w-0 truncate text-xs text-muted-foreground">
+            {author}
+          </span>
         </span>
-      </div>
+      </span>
     </button>
   );
 }

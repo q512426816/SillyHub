@@ -18,6 +18,8 @@ import { MobileTopBar } from "./mobile-top-bar";
  *   可滚、顶栏滚走手感松垮；overflow-hidden 兜底）。/m/ 仅手机访问，宽屏上限避免拉伸。
  * - 顶栏默认挂 ThemeToggle（ql-20260827-012：移动端主题切换入口；antd Dropdown
  *   组件原样复用，偏好经 useThemeStore persist 与桌面同源）。
+ * - 容器挂 m-app（quick-a4939946）：globals.css 据此把壳内 input/textarea/select
+ *   提到 16px，杜绝 iOS 聚焦小字号输入框自动放大视口。
  * - 守卫不在本组件（守卫在 app/m/layout，属另一任务）。
  */
 export interface MobileAppShellProps {
@@ -41,13 +43,15 @@ export function MobileAppShell({
   actions,
 }: MobileAppShellProps) {
   return (
-    <div className="fixed inset-0 mx-auto flex w-full max-w-[480px] flex-col overflow-hidden bg-background">
+    <div className="m-app fixed inset-0 mx-auto flex w-full max-w-[480px] flex-col overflow-hidden bg-background">
       <MobileTopBar
         title={title}
         onBack={onBack}
         actions={actions === undefined ? <ThemeToggle /> : actions}
       />
-      <main className="min-w-0 flex-1 overflow-y-auto px-4 py-3 pb-20 text-[14px] text-foreground">
+      {/* pb-28：避让悬浮胶囊 TabBar（quick-a4939946：TabBar 贴底改悬浮后
+          占位 = 胶囊高 56px + 底距 12px + 安全区，原 pb-20 不够露馅） */}
+      <main className="min-w-0 flex-1 overflow-y-auto px-4 py-3 pb-28 text-[14px] text-foreground">
         {children}
       </main>
       <MobileTabBar activeTab={activeTab} />
