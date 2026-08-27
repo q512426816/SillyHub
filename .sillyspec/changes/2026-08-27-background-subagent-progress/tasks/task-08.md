@@ -11,6 +11,7 @@ allowed_paths:
   - backend/app/modules/daemon/tests/test_agent_task_status_payload.py
   - backend/app/modules/daemon/tests/test_subagent_log_attribution.py
   - backend/app/modules/daemon/tests/test_inject_empty_prompt.py
+  - backend/app/modules/daemon/tests/test_session_switch_config.py
   - backend/app/modules/daemon/tests/test_session_plan_bash_events.py
 provides: []
 expects_from:
