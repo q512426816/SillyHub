@@ -55,6 +55,8 @@ const sessionApi = vi.hoisted(() => ({
   listSessionRuns: vi.fn(),
   listSessionTeamMissions: vi.fn(),
   triggerSessionTeamMission: vi.fn(),
+  // ql-20260828-009-4a13：chip × 真取消 + 更新指派前置取消。
+  cancelTeamMission: vi.fn(),
   // ql-20260825-011：服务端排队三件套（GET/DELETE/retry）。
   fetchSessionQueue: vi.fn(),
   deleteSessionQueueEntry: vi.fn(),
@@ -77,6 +79,7 @@ vi.mock("@/lib/daemon", async () => {
     listSessionRuns: sessionApi.listSessionRuns,
     listSessionTeamMissions: sessionApi.listSessionTeamMissions,
     triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
+    cancelTeamMission: sessionApi.cancelTeamMission,
     fetchSessionQueue: sessionApi.fetchSessionQueue,
     deleteSessionQueueEntry: sessionApi.deleteSessionQueueEntry,
     retrySessionQueueEntry: sessionApi.retrySessionQueueEntry,
@@ -373,14 +376,20 @@ describe("SessionPanel /team 指令拦截（dialog 模式）", () => {
 /* ───────── 3. TeamTaskBlock 挂载冒烟 + 活跃 chip（dialog） ───────── */
 
 describe("SessionPanel TeamTaskBlock 挂载与活跃 chip（dialog 模式）", () => {
-  it("mission 列表全部渲染（活跃在前）+ chip「团队进行中 · N 分身」可关闭收回", async () => {
-    sessionApi.listSessionTeamMissions.mockResolvedValue([
+  it("mission 列表全部渲染（活跃在前）+ chip × 真取消（ql-20260828-009-4a13）", async () => {
+    sessionApi.listSessionTeamMissions.mockResolvedValueOnce([
       makeMission("m-done", "done", [makeWorker("w-3", "completed")]),
       makeMission("m-run", "running", [
         makeWorker("w-1", "running"),
         makeWorker("w-2", "completed"),
       ]),
     ]);
+    // 取消成功后刷新：m-run 收敛 cancelled（终态 → chip 消失，任务块保留）。
+    sessionApi.listSessionTeamMissions.mockResolvedValueOnce([
+      makeMission("m-done", "done", [makeWorker("w-3", "completed")]),
+      makeMission("m-run", "cancelled", []),
+    ]);
+    sessionApi.cancelTeamMission.mockResolvedValue(undefined);
     setupDialog();
 
     // ql-20260826-010：默认收起（点开前不渲染任务块——不挤占会话窗口）。
@@ -401,17 +410,53 @@ describe("SessionPanel TeamTaskBlock 挂载与活跃 chip（dialog 模式）", (
     const chip = await screen.findByTestId("team-active-chip");
     expect(chip.textContent).toContain("团队进行中 · 2 分身");
 
-    // chip 可关闭收回（只藏提示条，不取消任务——任务块仍在下拉内）。
-    // 注：chip 在下拉外，真实事件序列（mousedown 落点目录外）会收起下拉 →
-    // ensure 语义重开核对（ql-20260826-014 containment 收起）。
-    const chipClose = screen.getByLabelText("收起团队状态提示");
+    // ql-20260828-009-4a13：× 真取消——调 cancelTeamMission(活跃 mission id) +
+    // 刷新后 mission 终态 → chip 消失（原「仅收起提示条」语义下线，任务块仍在）。
+    const chipClose = screen.getByLabelText("取消团队任务");
     fireEvent.mouseDown(chipClose);
     fireEvent.click(chipClose);
     await waitFor(() =>
+      expect(sessionApi.cancelTeamMission).toHaveBeenCalledWith("m-run"),
+    );
+    await waitFor(() =>
       expect(screen.queryByTestId("team-active-chip")).not.toBeInTheDocument(),
     );
-    await openActivityCatalog();
-    expect(screen.getAllByLabelText("团队任务")).toHaveLength(2);
+  });
+
+  it("chip 主体点击 → 打开弹层更新指派（hasActiveMission 提示 + 确认先取消再派）", async () => {
+    sessionApi.listSessionTeamMissions.mockResolvedValue([
+      makeMission("m-run", "running", [makeWorker("w-1", "running")]),
+    ]);
+    sessionApi.cancelTeamMission.mockResolvedValue(undefined);
+    sessionApi.triggerSessionTeamMission.mockResolvedValue({
+      mission_id: "m-new",
+    });
+    // workspaceId 必传——缺省时弹层 scopeMode 落项目维度，空项目确认被校验拦。
+    setupDialog({ workspaceId: "11111111-2222-3333-4444-555555555555" });
+
+    const chip = await screen.findByTestId("team-active-chip");
+    // 点击 chip 文本主体 → 弹层打开（含更新指派提示行）。
+    fireEvent.click(screen.getByRole("button", { name: "团队进行中 · 1 分身" }));
+    expect(await screen.findByText("派团队做这件事")).toBeInTheDocument();
+    expect(
+      screen.getByText(/已有进行中的团队任务：确认后将取消当前任务并按本次配置重新指派/),
+    ).toBeInTheDocument();
+
+    // 填目标确认 → 先 cancel(旧 mission) 再 trigger（更新指派语义），顺序断言。
+    fireEvent.change(screen.getByLabelText(/^目标/), {
+      target: { value: OBJECTIVE },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /就绪，随下条消息发出/ }));
+    await waitFor(() =>
+      expect(sessionApi.cancelTeamMission).toHaveBeenCalledWith("m-run"),
+    );
+    await waitFor(() =>
+      expect(sessionApi.triggerSessionTeamMission).toHaveBeenCalledTimes(1),
+    );
+    const cancelOrder = sessionApi.cancelTeamMission.mock.invocationCallOrder[0]!;
+    const triggerOrder =
+      sessionApi.triggerSessionTeamMission.mock.invocationCallOrder[0]!;
+    expect(cancelOrder).toBeLessThan(triggerOrder);
   });
 
   it("无活跃 mission（全部终态）→ 不显示 chip", async () => {

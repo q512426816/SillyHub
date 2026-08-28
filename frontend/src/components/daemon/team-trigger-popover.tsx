@@ -201,6 +201,11 @@ export interface TeamTriggerPopoverProps {
    * + payload 追加 orchestrator_workspace_id；缺省 false 渲染与 payload 零变化。
    */
   preSession?: boolean;
+  /**
+   * ql-20260828-009-4a13：存在活跃 mission——确认前提示「将取消当前团队并
+   * 重新指派」（父层 handleTeamTrigger 前置 cancel；chip 点击更新指派入口）。
+   */
+  hasActiveMission?: boolean;
   /** 提交中（父层 triggerSessionTeamMission 在途 → 确认按钮禁用）。 */
   submitting?: boolean;
   /** 确认回调：payload 即 TeamMissionTriggerRequest，API 调用归父层。 */
@@ -229,6 +234,7 @@ export function TeamTriggerPopover({
   defaultObjective,
   defaultProjectId,
   preSession = false,
+  hasActiveMission = false,
   submitting = false,
   onTrigger,
   onClose,
@@ -469,6 +475,12 @@ export function TeamTriggerPopover({
       <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
         当前会话的智能体升级为主控，通过 MCP 派发分身；任务进展直接回到本会话。
       </p>
+      {/* ql-20260828-009-4a13：更新指派提示——已有活跃 mission 时确认 = 取消重派 */}
+      {hasActiveMission && (
+        <p className="mt-1.5 rounded-lg border border-amber-300/60 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-700">
+          已有进行中的团队任务：确认后将取消当前任务并按本次配置重新指派。
+        </p>
+      )}
 
       {/* 目标（可选）：/team 指令文本或「用团队分析」提示句预填；确认后随下条消息发出 */}
       <label className="mt-3 block">

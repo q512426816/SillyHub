@@ -88,6 +88,7 @@ whoLine: attach 时并发拉 listSessionRuns，按 realRunId??runId 匹配注入
 
 ## 变更索引
 
+- ql-20260828-009-4a13 | 派团队状态标签四问题修复——mission 迟到轮询盲区（hasRunningTurn 纳入轮询）/chip ×改真取消（cancelTeamMission，收起记忆下线）/chip 可点击更新指派（前置取消重派+弹层提示）/＋菜单图标对齐灰黑；顺手修 ux-fixes 按钮迁＋菜单后既有测试债
 - ql-20260828-008-7bd5 | team-progress 团队进度卡补迁 brand-* 语义阶——ql-007 派团队视觉统一的漏网组件（变更详情页/会话共用 mission 进度卡，4 处类名 + 注释同步）
 - ql-20260828-007-7dcf | 派团队视觉迁 brand-* 语义阶随主题换肤——弹层/＋菜单入口/团队 chip/任务卡/分身段卡 5 组件弃 violet 固定身份色（blue/dark 主题下固定紫与主题割裂；Claude 厂商外部标识色 PROVIDER_TONES 不在范围）
 - ql-20260828-006-e5af | workspaces/[id] 默认智能体提供方卡片文案修正——阶段流转自动派发已退役（2026-08-14），现文案对齐真实消费点（scan-generate / 未指定提供方派发兜底 / 多提供方在线固定选择，留空自动选最近在线）

@@ -38,6 +38,8 @@ const sessionApi = vi.hoisted(() => ({
   listSessionRuns: vi.fn(),
   listSessionTeamMissions: vi.fn(),
   triggerSessionTeamMission: vi.fn(),
+  // ql-20260828-009-4a13：handleTeamTrigger 前置取消（更新指派）依赖。
+  cancelTeamMission: vi.fn(),
   fetchSessionQueue: vi.fn(),
   deleteSessionQueueEntry: vi.fn(),
   retrySessionQueueEntry: vi.fn(),
@@ -59,6 +61,7 @@ vi.mock("@/lib/daemon", async () => {
     listSessionRuns: sessionApi.listSessionRuns,
     listSessionTeamMissions: sessionApi.listSessionTeamMissions,
     triggerSessionTeamMission: sessionApi.triggerSessionTeamMission,
+    cancelTeamMission: sessionApi.cancelTeamMission,
     fetchSessionQueue: sessionApi.fetchSessionQueue,
     deleteSessionQueueEntry: sessionApi.deleteSessionQueueEntry,
     retrySessionQueueEntry: sessionApi.retrySessionQueueEntry,
@@ -252,8 +255,6 @@ describe("派团队确认回填 /team 前缀（ql-20260826-010）", () => {
       .mockResolvedValue([makeMission("m-new", "planning")]); // 确认后刷新
     const input = await setupActiveSession();
 
-    // ql-20260827-020：独立「派团队」按钮已移除（TeamTriggerRow 删除）——
-    // 入口收敛进 ＋ 功能菜单，先开菜单再点「派团队」菜单项（onTeamTrigger 开弹层）。
     fireEvent.click(screen.getByRole("button", { name: "更多功能" }));
     fireEvent.click(screen.getByRole("menuitem", { name: /派团队/ }));
     const objInput = (await screen.findByLabelText(

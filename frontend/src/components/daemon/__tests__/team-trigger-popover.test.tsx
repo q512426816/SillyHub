@@ -358,6 +358,24 @@ describe("TeamTriggerPopover 取消", () => {
   });
 });
 
+/* ───────── 7.5 ql-20260828-009-4a13：hasActiveMission 更新指派提示 ───────── */
+
+describe("TeamTriggerPopover 更新指派提示（hasActiveMission）", () => {
+  it("hasActiveMission=true → 渲染「确认后将取消当前任务并重新指派」提示；缺省不渲染", () => {
+    setup({ hasActiveMission: true });
+    expect(
+      screen.getByText(/已有进行中的团队任务：确认后将取消当前任务并按本次配置重新指派/),
+    ).toBeInTheDocument();
+  });
+
+  it("缺省（无活跃 mission）→ 不渲染更新指派提示", () => {
+    setup();
+    expect(
+      screen.queryByText(/已有进行中的团队任务/),
+    ).not.toBeInTheDocument();
+  });
+});
+
 /* ───────────────── 8. task-12：弹层 probe 一次拉取（无轮询） ───────────────── */
 
 const CURRENT_WS_ID = "11111111-2222-3333-4444-555555555555";

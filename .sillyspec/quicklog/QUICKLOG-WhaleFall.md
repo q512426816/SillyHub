@@ -482,10 +482,21 @@
 方案：4 处类名 violet-N→brand-N 同档替换（mission 容器卡/决策日志块/worker 列表标题两处/状态色）+ 头注释身份色说明同步
 结果：vitest team-progress.test.tsx + page-team-toggle.test.tsx 25/25 通过
 
-## ql-20260828-009-4a13 | 2026-08-28 10:35:15 | 派团队状态标签四问题修复——首次 mission 迟到不显示（轮询盲区）/×改真取消/点击标签更新指派/入口图标改灰黑
-状态：进行中
+## ql-20260828-009-4a13 | 2026-08-28 10:35:15 | 派团队状态标签四问题修复（不显示/删除不生效/不可更新/图标色）
+状态：已完成
 关联变更：（无）
-文件：frontend/src/components/daemon/session-panel.tsx, frontend/src/components/daemon/team-trigger-popover.tsx, frontend/src/components/daemon/session-input-bar.tsx, frontend/src/components/daemon/__tests__/session-panel-team.test.tsx, frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx, frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx
+文件：
+- frontend/src/components/daemon/session-panel.tsx（hook 轮询条件+TeamTriggerRow+双模式 handler/消费点）
+- frontend/src/components/daemon/team-trigger-popover.tsx（hasActiveMission 提示行）
+- frontend/src/components/daemon/session-input-bar.tsx（图标灰黑）
+- frontend/src/components/daemon/__tests__/session-panel-team.test.tsx（重写收起为真取消+新增重派用例）
+- frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx（提示行用例）
+- frontend/src/components/daemon/__tests__/session-panel-ux-fixes.test.tsx（补 cancel mock+修＋菜单路径测试债）
+需求：派团队状态标签四问题修复（不显示/删除不生效/不可更新/图标色）
+根因：DB 实证用户会话首 run 与 mission 创建差 36s——useSessionTeamMissions 仅 hasActive 时轮询，mission 迟到后无刷新机制 chip 永不出现；×仅收起提示不取消（mission 仍在→再派 409）；chip 无更新入口；入口图标品牌色与附件/技能灰黑不一致
+方案：轮询条件扩展 hasRunningTurn 消盲区；× 改调 cancelTeamMission+刷新（收起记忆下线）；chip 主体点击开弹层、确认前置取消活跃 mission 重派（弹层 hasActiveMission 提示行）；图标改 text-muted-foreground；page/dialog 双模式同步；顺手修 ux-fixes 既有测试债（stash 实证先在）
+结果：7 个测试文件 181/181 通过（新增真取消/重派顺序/提示行用例）+ tsc 无错
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/__tests__/session-panel-ux-fixes.test.tsx
 
 ## ql-20260828-010-ca22 | 2026-08-28 10:38:59 | 切换守护进程时同步确认新机器的项目本地路径
 状态：已完成

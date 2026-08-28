@@ -731,7 +731,8 @@ export function SessionInputBar({
                   title={teamTriggerTitle ?? "派团队执行任务"}
                   className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <Users aria-hidden className="h-4 w-4 shrink-0 text-brand-600" />
+                  {/* ql-20260828-009-4a13：图标对齐附件/选择技能的灰黑（弃品牌色强调）。 */}
+                  <Users aria-hidden className="h-4 w-4 shrink-0 text-muted-foreground" />
                   <span className="min-w-0">
                     <span className="block text-[13px] leading-5">派团队</span>
                     <span className="block text-[11px] leading-4 text-muted-foreground">

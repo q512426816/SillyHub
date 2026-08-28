@@ -157,6 +157,7 @@ import { getChange } from "@/lib/changes";
 // task-11（2026-08-25-session-spec-binding / FR-06）：quickId 标题解析数据源。
 import { getQuicklogDetail } from "@/lib/quicklog";
 import {
+  cancelTeamMission,
   createSession,
   endSession,
   fetchPendingDialogs,
@@ -544,8 +545,16 @@ function teamTriggerErrorText(err: unknown): string {
  * 纯 fetch + setInterval（不用 react-query——R4：团队入口在 dialog 渲染路径同样
  * 挂载，dialog 分支零 react-query 铁律覆盖至此）；拉取失败静默（任务块非关键
  * 路径，不阻断会话主流程，下轮轮询/取消刷新自愈）。
+ *
+ * ql-20260828-009-4a13：轮询条件扩展 hasRunningTurn——原仅 hasActive 时轮询，
+ * mission 迟到场景（主控轮运行中 dispatch 建 mission / 弹层确认晚于面板挂载
+ * 首拉）下 hasActive=false 轮询不启动，chip 永不出现（用户实测首次派团队无
+ * 标签的根因）；会话有进行中轮时主控随时可能建 mission，纳入轮询消除盲区。
  */
-function useSessionTeamMissions(sessionId: string | null) {
+function useSessionTeamMissions(
+  sessionId: string | null,
+  hasRunningTurn = false,
+) {
   const [missions, setMissions] = useState<TeamMissionSummary[]>([]);
   // F7（2026-08-25）：异步回写守卫——refresh 同时被 effect（挂载/切会话/轮询）与
   // 外部回调（dialog 派团队后手动刷新）调用，effect 作用域 cancelled 覆盖不全，
@@ -573,12 +582,12 @@ function useSessionTeamMissions(sessionId: string | null) {
   }, [sessionId, refresh]);
   const hasActive = missions.some((m) => isActiveTeamMission(m.status));
   useEffect(() => {
-    if (!sessionId || !hasActive) return;
+    if (!sessionId || (!hasActive && !hasRunningTurn)) return;
     const timer = window.setInterval(() => {
       void refresh();
     }, TEAM_MISSION_POLL_MS);
     return () => window.clearInterval(timer);
-  }, [sessionId, hasActive, refresh]);
+  }, [sessionId, hasActive, hasRunningTurn, refresh]);
   return { missions, refresh };
 }
 
@@ -595,8 +604,24 @@ function useSessionTeamMissions(sessionId: string | null) {
 interface TeamTriggerRowProps {
   /** 活跃 mission 分身数（chip 文案「团队进行中 · N 分身」）；null = 隐藏。 */
   activeWorkers: number | null;
-  /** chip 关闭（只收回提示条，不取消任务——TeamTaskBlock 仍展示进展）。 */
-  onDismissChip: () => void;
+  /**
+   * ql-20260828-009-4a13：chip × 改真取消——调父层 cancelTeamMission(活跃
+   * mission) + 刷新（原 onDismissChip 仅收起提示条、mission 仍在，用户以为
+   * 删了再派却 409；收起记忆 teamChipDismissedId 一并下线）。
+   */
+  onCancelMission: () => void;
+  /** 取消在途（× 禁用防重复提交）。 */
+  cancelling?: boolean;
+  /**
+   * ql-20260828-009-4a13：chip 主体点击——打开派团队弹层更新指派（父层
+   * openTeamPopover；确认时 handleTeamTrigger 前置取消活跃 mission）。
+   */
+  onChipClick: () => void;
+  /**
+   * ql-20260828-009-4a13：存在活跃 mission（弹层提示「确认后取消并重新指派」，
+   * 透传 TeamTriggerPopover.hasActiveMission）。
+   */
+  hasActiveMission?: boolean;
   /** 弹层开关（父层 state）。 */
   popoverOpen: boolean;
   /**
@@ -626,7 +651,10 @@ interface TeamTriggerRowProps {
 
 function TeamTriggerRow({
   activeWorkers,
-  onDismissChip,
+  onCancelMission,
+  cancelling = false,
+  onChipClick,
+  hasActiveMission = false,
   popoverOpen,
   preSession = false,
   workspaceId,
@@ -646,17 +674,26 @@ function TeamTriggerRow({
       {activeWorkers !== null && (
         <span
           data-testid="team-active-chip"
+          title="点击可更新团队指派（确认后取消当前任务重新派发）"
           className="inline-flex shrink-0 items-center gap-1 rounded-full border border-brand-300 bg-brand-50 px-2.5 py-0.5 text-[11.5px] font-medium text-brand-700"
         >
           <Users aria-hidden className="h-3.5 w-3.5" />
-          团队进行中 · {activeWorkers} 分身
           <button
             type="button"
-            aria-label="收起团队状态提示"
-            onClick={onDismissChip}
-            className="ml-0.5 rounded-full px-1 leading-none text-brand-500 hover:bg-brand-100 hover:text-brand-700"
+            onClick={onChipClick}
+            className="rounded-full px-0.5 py-0 transition-colors hover:text-brand-800"
           >
-            ×
+            团队进行中 · {activeWorkers} 分身
+          </button>
+          <button
+            type="button"
+            aria-label="取消团队任务"
+            title="取消当前团队任务（分身停止，进度保留在会话记录）"
+            onClick={onCancelMission}
+            disabled={cancelling}
+            className="ml-0.5 rounded-full px-1 leading-none text-brand-500 transition-colors hover:bg-brand-100 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {cancelling ? "…" : "×"}
           </button>
         </span>
       )}
@@ -673,6 +710,7 @@ function TeamTriggerRow({
           defaultProjectId={defaultProjectId}
           preSession={preSession}
           submitting={submitting}
+          hasActiveMission={hasActiveMission}
           onTrigger={onTrigger}
           onClose={onClose}
         />
@@ -1267,16 +1305,18 @@ function SessionPanelPage({
   );
 
   // ── task-11（2026-08-22-team-session-unify）：会话内团队触发 + TeamTaskBlock ──
-  // 任务列表/轮询共用 hook；弹层开关与预填、触发在途、错误文案、chip 收回为面板态。
+  // 任务列表/轮询共用 hook；弹层开关与预填、触发在途、错误文案、chip 取消为面板态。
+  // ql-20260828-009-4a13：running（进行中轮）时也轮询——mission 迟到不再盲区。
   const { missions: teamMissions, refresh: refreshTeamMissions } =
-    useSessionTeamMissions(sessionId);
+    useSessionTeamMissions(sessionId, turnState.currentRunId != null);
   const [teamPopover, setTeamPopover] = useState<{ open: boolean; objective: string | null }>({
     open: false,
     objective: null,
   });
   const [teamTriggering, setTeamTriggering] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
-  const [teamChipDismissedId, setTeamChipDismissedId] = useState<string | null>(null);
+  // ql-20260828-009-4a13：chip × 真取消在途态（防重复提交）。
+  const [teamCancelling, setTeamCancelling] = useState(false);
   // task-14（FR-08 / design §5.E）：查看分身子会话——TeamTaskBlock 分身行点击
   // 后置为该分身 sub_session_id，浮层（WorkerSessionOverlay）复用 SessionPanel
   // 打开；null = 关闭（主控面板 state 不动，关闭即原样返回）。
@@ -2250,6 +2290,12 @@ function SessionPanelPage({
       setTeamTriggering(true);
       setTeamError(null);
       try {
+        // ql-20260828-009-4a13：更新指派语义——已有活跃 mission 时先取消再派
+        //（chip 点击进来的「重新指派」；直发场景旧 mission 终态自然跳过）。
+        const activeId = teamMissions.find((m) =>
+          isActiveTeamMission(m.status),
+        )?.mission_id;
+        if (activeId) await cancelTeamMission(activeId);
         await triggerSessionTeamMission(sessionId, payload);
         closeTeamPopover();
         await refreshTeamMissions();
@@ -2258,12 +2304,34 @@ function SessionPanelPage({
         );
       } catch (err) {
         setTeamError(teamTriggerErrorText(err));
+        void refreshTeamMissions();
       } finally {
         setTeamTriggering(false);
       }
     },
-    [sessionId, refreshTeamMissions, closeTeamPopover],
+    [sessionId, teamMissions, refreshTeamMissions, closeTeamPopover],
   );
+
+  /**
+   * ql-20260828-009-4a13：chip × 真取消——cancelTeamMission(活跃 mission) 后
+   * 刷新列表（chip 消失、TeamTaskBlock 状态收敛 cancelled）；失败行内回显。
+   */
+  const handleCancelTeamMission = useCallback(async () => {
+    const activeId = teamMissions.find((m) =>
+      isActiveTeamMission(m.status),
+    )?.mission_id;
+    if (!activeId || teamCancelling) return;
+    setTeamCancelling(true);
+    setTeamError(null);
+    try {
+      await cancelTeamMission(activeId);
+      await refreshTeamMissions();
+    } catch {
+      setTeamError("取消团队任务失败，请稍后重试");
+    } finally {
+      setTeamCancelling(false);
+    }
+  }, [teamMissions, teamCancelling, refreshTeamMissions]);
 
   /**
    * task-13（FR-05/D-010@v1）：预会话弹层确认——**不走** handleTeamTrigger
@@ -2854,7 +2922,8 @@ function SessionPanelPage({
               弹层挂载（预会话无 chip/错误常态不渲染）。 */}
           <TeamTriggerRow
             activeWorkers={null}
-            onDismissChip={() => {}}
+            onCancelMission={() => {}}
+            onChipClick={() => {}}
             popoverOpen={teamPopover.open}
             preSession
             workspaceId={preContext?.workspaceId ?? null}
@@ -2993,10 +3062,10 @@ function SessionPanelPage({
         : "派团队：当前会话智能体升级为主控，派发分身";
   const activeTeamMission =
     teamMissions.find((m) => isActiveTeamMission(m.status)) ?? null;
-  const teamChipWorkers =
-    activeTeamMission && activeTeamMission.mission_id !== teamChipDismissedId
-      ? activeTeamMission.workers.length
-      : null;
+  // ql-20260828-009-4a13：dismissed 收起记忆下线——chip 常驻至 mission 终态。
+  const teamChipWorkers = activeTeamMission
+    ? activeTeamMission.workers.length
+    : null;
 
   // ql-20260815-011：无真实标题不渲染占位「未命名会话」，只留 id 短码。
   const title = session.title?.trim() || "";
@@ -3391,9 +3460,12 @@ function SessionPanelPage({
             派团队按钮移入 SessionInputBar ＋ 菜单，本行按需渲染（chip/错误/弹层）。 */}
         <TeamTriggerRow
           activeWorkers={teamChipWorkers}
-          onDismissChip={() => {
-            if (activeTeamMission) setTeamChipDismissedId(activeTeamMission.mission_id);
+          onCancelMission={() => {
+            void handleCancelTeamMission();
           }}
+          cancelling={teamCancelling}
+          onChipClick={() => openTeamPopover(null)}
+          hasActiveMission={teamChipWorkers !== null}
           popoverOpen={teamPopover.open}
           workspaceId={session.workspace_id ?? null}
           workspaceName={workspaceName}
@@ -3662,17 +3734,19 @@ function SessionPanelDialog(props: SessionPanelProps) {
   const [input, setInput] = useState("");
   const [view, setView] = useState<SessionDialogView>(INITIAL_DIALOG_VIEW);
   // task-11（2026-08-22-team-session-unify）：会话内团队触发——弹层开关/预填、
-  // 触发在途、错误文案、chip 收回；mission 列表 + 活跃 5s 轮询走共用 hook
+  // 触发在途、错误文案、chip 取消；mission 列表 + 活跃 5s 轮询走共用 hook
   //（旧 teamAnalyzing/teamMissionId（createMission 直发）随「用团队分析」改造下线）。
+  // ql-20260828-009-4a13：进行中轮时也轮询（mission 迟到盲区，同 page 模式）。
   const { missions: teamMissions, refresh: refreshTeamMissions } =
-    useSessionTeamMissions(view.sessionId);
+    useSessionTeamMissions(view.sessionId, view.currentRunId != null);
   const [teamPopover, setTeamPopover] = useState<{ open: boolean; objective: string | null }>({
     open: false,
     objective: null,
   });
   const [teamTriggering, setTeamTriggering] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
-  const [teamChipDismissedId, setTeamChipDismissedId] = useState<string | null>(null);
+  // ql-20260828-009-4a13：chip × 真取消在途态（防重复提交）。
+  const [teamCancelling, setTeamCancelling] = useState(false);
   // task-14（FR-08 / design §5.E）：查看分身子会话——TeamTaskBlock 分身行点击
   // 后置为该分身 sub_session_id，浮层（WorkerSessionOverlay）复用 SessionPanel
   // 打开；null = 关闭（主控面板 state 不动，关闭即原样返回）。
@@ -4463,6 +4537,12 @@ function SessionPanelDialog(props: SessionPanelProps) {
       setTeamTriggering(true);
       setTeamError(null);
       try {
+        // ql-20260828-009-4a13：更新指派语义——已有活跃 mission 先取消再派
+        //（同 page 模式；直发场景旧 mission 终态自然跳过）。
+        const activeId = teamMissions.find((m) =>
+          isActiveTeamMission(m.status),
+        )?.mission_id;
+        if (activeId) await cancelTeamMission(activeId);
         const summary = await triggerSessionTeamMission(sid, payload);
         closeTeamPopover();
         onTeamMissionCreated?.(summary.mission_id);
@@ -4472,12 +4552,33 @@ function SessionPanelDialog(props: SessionPanelProps) {
         );
       } catch (err) {
         setTeamError(teamTriggerErrorText(err));
+        void refreshTeamMissions();
       } finally {
         setTeamTriggering(false);
       }
     },
-    [view.sessionId, refreshTeamMissions, closeTeamPopover, onTeamMissionCreated],
+    [view.sessionId, teamMissions, refreshTeamMissions, closeTeamPopover, onTeamMissionCreated],
   );
+
+  /**
+   * ql-20260828-009-4a13：chip × 真取消（dialog 模式，同 page 模式语义）。
+   */
+  const handleCancelTeamMission = useCallback(async () => {
+    const activeId = teamMissions.find((m) =>
+      isActiveTeamMission(m.status),
+    )?.mission_id;
+    if (!activeId || teamCancelling) return;
+    setTeamCancelling(true);
+    setTeamError(null);
+    try {
+      await cancelTeamMission(activeId);
+      await refreshTeamMissions();
+    } catch {
+      setTeamError("取消团队任务失败，请稍后重试");
+    } finally {
+      setTeamCancelling(false);
+    }
+  }, [teamMissions, teamCancelling, refreshTeamMissions]);
 
   /**
    * 发送主入口（队列化，design §3.3）：
@@ -4851,10 +4952,10 @@ function SessionPanelDialog(props: SessionPanelProps) {
         : "派团队：当前会话智能体升级为主控，派发分身";
   const activeTeamMission =
     teamMissions.find((m) => isActiveTeamMission(m.status)) ?? null;
-  const teamChipWorkers =
-    activeTeamMission && activeTeamMission.mission_id !== teamChipDismissedId
-      ? activeTeamMission.workers.length
-      : null;
+  // ql-20260828-009-4a13：dismissed 收起记忆下线——chip 常驻至 mission 终态。
+  const teamChipWorkers = activeTeamMission
+    ? activeTeamMission.workers.length
+    : null;
 
   // 占位文案（队列化语义，与 page 模式同构的优先级链）：终态 / 离线 / 队满 →
   // 提示；reconnecting / creating / ending / running → 排队或过渡提示（running 的
@@ -5137,9 +5238,12 @@ function SessionPanelDialog(props: SessionPanelProps) {
           派团队按钮移入 SessionInputBar ＋ 菜单，本行按需渲染（chip/错误/弹层）。 */}
       <TeamTriggerRow
         activeWorkers={teamChipWorkers}
-        onDismissChip={() => {
-          if (activeTeamMission) setTeamChipDismissedId(activeTeamMission.mission_id);
+        onCancelMission={() => {
+          void handleCancelTeamMission();
         }}
+        cancelling={teamCancelling}
+        onChipClick={() => openTeamPopover(null)}
+        hasActiveMission={teamChipWorkers !== null}
         popoverOpen={teamPopover.open}
         workspaceId={workspaceId ?? null}
         workspaceName={null}
