@@ -3031,24 +3031,36 @@ export class Daemon {
         break;
       }
       // Server → Daemon：服务端判定 daemon 版本落后后推送的自更新指令。
-      // 复用 preflight 的 runDaemonSelfUpdate 下载 + 原子替换 bundle，成功后
-      // 优雅退出等外部 supervisor（install.sh wrapper）重启拉起新版本。
+      // 复用 preflight 的 runDaemonSelfUpdate 下载 + 原子替换 bundle；替换成功后
+      // 先优雅 stop（释放 runtime lock / 标 offline / flush 会话快照），再以
+      // detached 子进程拉起新 bundle（同启动参数）并退出——仓库不存在外部
+      // supervisor（install wrapper 是一次性 exec，无 systemd/服务/计划任务），
+      // 不自带拉起就会"更新完就死"（新进程 acquire lock 时旧进程已释放，无竞态）。
       case MSG.SELF_UPDATE: {
         const payload = (msg as { payload?: { version?: string } }).payload;
         this._logger.info('self_update_received', {
           version: payload?.version,
         });
         try {
-          // 复用 preflight 的自更新逻辑（下载 + 替换 bundle 文件）
-          const { runDaemonSelfUpdate } = await import('./preflight.js');
-          await runDaemonSelfUpdate(BUILD_ID, this._config, (level, m, data) => {
+          // 复用 preflight 的自更新逻辑（下载 + 替换 bundle 文件）。
+          // 返回 true=已替换需重启；false=跳过（dev/已最新/防降级/失败已 warn）。
+          const { runDaemonSelfUpdate, respawnDaemonAndExit } = await import('./preflight.js');
+          const updated = await runDaemonSelfUpdate(BUILD_ID, this._config, (level, m, data) => {
             // 适配 PreflightLogger 的 (level,msg,data) 签名为内部 Logger 方法
             this._logger[level](m, data);
           });
+          if (!updated) {
+            // 未发生替换（已最新/防降级/拉取失败）→ 保持运行不断连不重启。
+            this._logger.info('self_update_noop', { version: payload?.version });
+            break;
+          }
           this._logger.info('self_update_done', { version: payload?.version });
-          // 替换成功 → 优雅退出，等外部 supervisor 重启
-          this._logger.info('self_update_restart', {});
-          setTimeout(() => process.exit(0), 500); // 给日志 flush 500ms
+          // 顺序：stop（释放资源）→ 拉起新进程 → 退出。stop 必须先于拉起，
+          // 否则新进程 acquire runtime lock 时旧进程仍持有 → 抢锁失败退出。
+          await this.stop();
+          respawnDaemonAndExit((level, m, data) => {
+            this._logger[level](m, data);
+          });
         } catch (e) {
           this._logger.warn('self_update_failed', {
             error: (e as Error)?.message ?? String(e),

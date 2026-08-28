@@ -36,6 +36,7 @@ import {
   runPreflight,
   runSillySpecCheck,
   runDaemonSelfUpdate,
+  respawnDaemonAndExit,
 } from '../src/preflight.js';
 import type { DaemonConfig } from '../src/config.js';
 
@@ -293,13 +294,14 @@ describe('runDaemonSelfUpdate', () => {
       }),
     );
     vi.stubGlobal('fetch', spy);
-    await runDaemonSelfUpdate('abc1234', makeConfig(), fn);
+    const res = await runDaemonSelfUpdate('abc1234', makeConfig(), fn);
+    expect(res).toBe(false);
     expect(spy).toHaveBeenCalledTimes(1);
     expect(String(spy.mock.calls[0]![0])).toContain('/daemon/latest.json');
     expect(entries.find((e) => e.msg === 'daemon_up_to_date')).toBeTruthy();
   });
 
-  it('版本不一致 → 下载 bundle 原子替换到 binDir，warn 提示重启', async () => {
+  it('版本不一致 → 下载 bundle 原子替换到 binDir，返回 true；url 非标准名跳过 mcp 伴生更新', async () => {
     const binDir = makeTmpDir();
     const { fn, entries } = makeLogger();
     const spy = vi.fn(
@@ -309,8 +311,9 @@ describe('runDaemonSelfUpdate', () => {
       }),
     );
     vi.stubGlobal('fetch', spy);
-    await runDaemonSelfUpdate('abc1234', makeConfig(), fn, binDir);
-    expect(spy).toHaveBeenCalledTimes(2);
+    const res = await runDaemonSelfUpdate('abc1234', makeConfig(), fn, binDir);
+    expect(res).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(2); // latest.json + bundle.js，无 mcp 请求
     const target = join(binDir, 'sillyhub-daemon.js');
     expect(existsSync(target)).toBe(true);
     expect(readFileSync(target, 'utf-8')).toBe('NEW BUNDLE BODY');
@@ -320,6 +323,54 @@ describe('runDaemonSelfUpdate', () => {
     expect(e!.data).toMatchObject({ from: 'abc1234', to: 'def5678' });
     // tmp 文件已 rename，不残留
     expect(existsSync(`${target}.tmp`)).toBe(false);
+    // url 不以 sillyhub-daemon.js 结尾 → mcp 伴生更新跳过（debug）
+    expect(entries.find((x) => x.msg === 'mcp_server_update_skip_url_shape')).toBeTruthy();
+  });
+
+  it('版本不一致且 url 以 sillyhub-daemon.js 结尾 → mcp-server.js 伴生一并替换', async () => {
+    const binDir = makeTmpDir();
+    const { fn, entries } = makeLogger();
+    const spy = vi.fn(
+      makeFetch({
+        '/daemon/latest.json': {
+          version: 'def5678',
+          url: 'http://x/daemon/latest/sillyhub-daemon.js',
+        },
+        '/sillyhub-daemon.js': bundleResponse('NEW BUNDLE BODY'),
+        '/mcp-server.js': bundleResponse('NEW MCP BODY'),
+      }),
+    );
+    vi.stubGlobal('fetch', spy);
+    const res = await runDaemonSelfUpdate('abc1234', makeConfig(), fn, binDir);
+    expect(res).toBe(true);
+    expect(spy).toHaveBeenCalledTimes(3); // latest.json + 主 bundle + mcp-server.js
+    expect(readFileSync(join(binDir, 'sillyhub-daemon.js'), 'utf-8')).toBe('NEW BUNDLE BODY');
+    expect(readFileSync(join(binDir, 'mcp-server.js'), 'utf-8')).toBe('NEW MCP BODY');
+    expect(
+      entries.find((x) => x.msg === 'mcp_server_self_updated')?.data,
+    ).toMatchObject({ to: 'def5678' });
+    expect(entries.find((x) => x.msg === 'daemon_self_update_restart')).toBeTruthy();
+  });
+
+  it('mcp-server.js 下载失败（404）→ 主 bundle 仍替换返回 true，仅 warn 不影响重启', async () => {
+    const binDir = makeTmpDir();
+    const { fn, entries } = makeLogger();
+    vi.stubGlobal(
+      'fetch',
+      makeFetch({
+        '/daemon/latest.json': {
+          version: 'def5678',
+          url: 'http://x/daemon/latest/sillyhub-daemon.js',
+        },
+        '/sillyhub-daemon.js': bundleResponse('NEW BUNDLE BODY'),
+        '/mcp-server.js': new Response('gone', { status: 404 }),
+      }),
+    );
+    const res = await runDaemonSelfUpdate('abc1234', makeConfig(), fn, binDir);
+    expect(res).toBe(true);
+    expect(existsSync(join(binDir, 'sillyhub-daemon.js'))).toBe(true);
+    expect(existsSync(join(binDir, 'mcp-server.js'))).toBe(false);
+    expect(entries.find((x) => x.msg === 'mcp_server_update_failed_keep_old')?.level).toBe('warn');
   });
 
   it('服务器不可达（fetch 抛错）→ warn 不崩，不下载', async () => {
@@ -332,7 +383,7 @@ describe('runDaemonSelfUpdate', () => {
     );
     await expect(
       runDaemonSelfUpdate('abc1234', makeConfig(), fn),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe(false);
     const e = entries.find((x) => x.msg === 'daemon_latest_fetch_failed');
     expect(e).toBeTruthy();
     expect(e!.level).toBe('warn');
@@ -394,6 +445,87 @@ describe('runDaemonSelfUpdate', () => {
   });
 });
 
+// ── respawnDaemonAndExit（自更新后自拉起）──────────────────────────────────────
+
+describe('respawnDaemonAndExit', () => {
+  /** respawn 子进程替身：pid + unref + on（runWithTreeKill 的 makeSpawnChild 无 unref）。 */
+  function makeRespawnChild(pid = 4242) {
+    return { pid, unref: vi.fn(), on: vi.fn() };
+  }
+
+  it('拉起成功 → detached spawn（node + 新 bundle + 原启动参数）+ unref，500ms 后 exit(0)', () => {
+    vi.useFakeTimers();
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() => undefined) as never);
+    const child = makeRespawnChild();
+    spawnMock.mockReturnValue(child as never);
+    const binDir = makeTmpDir();
+    const { fn, entries } = makeLogger();
+
+    respawnDaemonAndExit(fn, binDir);
+
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    const [cmd, args, opts] = spawnMock.mock.calls[0] as [
+      string,
+      string[],
+      Record<string, unknown>,
+    ];
+    expect(cmd).toBe(process.execPath);
+    expect(args[0]).toBe(join(binDir, 'sillyhub-daemon.js'));
+    expect(args.slice(1)).toEqual(process.argv.slice(2)); // 复用原启动参数
+    expect(opts.detached).toBe(true); // 脱离父进程组，父退出后存活
+    expect(opts.stdio).toBe('ignore');
+    expect(opts.windowsHide).toBe(true);
+    expect(child.unref).toHaveBeenCalledTimes(1); // 不阻塞父进程退出
+    expect(entries.find((x) => x.msg === 'daemon_self_update_respawn')?.data).toMatchObject({
+      pid: 4242,
+    });
+    vi.advanceTimersByTime(500);
+    expect(exitSpy).toHaveBeenCalledWith(0); // 日志 flush 后退出旧进程
+    exitSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('spawn 抛错 → 记 error 不退出（旧进程保活，不裸死）', () => {
+    vi.useFakeTimers();
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() => undefined) as never);
+    spawnMock.mockImplementation(() => {
+      throw new Error('spawn boom');
+    });
+    const { fn, entries } = makeLogger();
+
+    respawnDaemonAndExit(fn, makeTmpDir());
+
+    const e = entries.find((x) => x.msg === 'daemon_self_update_respawn_failed');
+    expect(e).toBeTruthy();
+    expect(e!.level).toBe('error');
+    vi.advanceTimersByTime(5_000);
+    expect(exitSpy).not.toHaveBeenCalled(); // 拉起失败绝不退出
+    exitSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('spawn 返回无 pid（异步失败形态）→ 同样记 error 不退出', () => {
+    vi.useFakeTimers();
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() => undefined) as never);
+    spawnMock.mockReturnValue({ unref: vi.fn(), on: vi.fn() } as never);
+    const { fn, entries } = makeLogger();
+
+    respawnDaemonAndExit(fn, makeTmpDir());
+
+    expect(entries.find((x) => x.msg === 'daemon_self_update_respawn_failed')).toBeTruthy();
+    vi.advanceTimersByTime(5_000);
+    expect(exitSpy).not.toHaveBeenCalled();
+    exitSpy.mockRestore();
+    vi.useRealTimers();
+  });
+});
+
 // ── runPreflight 集成（两步隔离）──────────────────────────────────────────────
 
 describe('runPreflight 集成', () => {
@@ -430,5 +562,49 @@ describe('runPreflight 集成', () => {
     const msgs = entries.map((e) => e.msg);
     expect(msgs).toContain('sillyspec_latest_unavailable');
     expect(msgs).toContain('daemon_latest_fetch_failed');
+  });
+
+  it('启动期自更新成功 → 拉起新进程（detached spawn）并退出旧进程', async () => {
+    vi.useFakeTimers();
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() => undefined) as never);
+    // spawn 路由：sillyspec 命令走 makeSpawnChild；respawn（cmd=node 路径）返回带 unref 的替身。
+    spawnMock.mockImplementation((cmd: unknown) => {
+      if (typeof cmd === 'string' && cmd.includes('sillyspec')) {
+        return makeSpawnChild({
+          stdout: cmd.includes('sillyspec --version') ? '3.19.2\n' : '',
+          code: cmd.includes('npm view') ? 1 : 0, // npm 不可达 → 快速跳过安装
+        });
+      }
+      return { pid: 7777, unref: vi.fn(), on: vi.fn() };
+    });
+    vi.stubGlobal(
+      'fetch',
+      makeFetch({
+        '/daemon/latest.json': {
+          version: 'def5678',
+          url: 'http://x/daemon/latest/sillyhub-daemon.js',
+        },
+        '/sillyhub-daemon.js': bundleResponse('NEW BUNDLE BODY'),
+        '/mcp-server.js': bundleResponse('NEW MCP BODY'),
+      }),
+    );
+    const { fn, entries } = makeLogger();
+    await expect(runPreflight(makeConfig(), fn)).resolves.toBeUndefined();
+
+    // respawn：node + ~/.sillyhub/daemon/bin/sillyhub-daemon.js + 原启动参数，detached
+    const respawnCall = spawnMock.mock.calls.find(
+      (c) => c[0] === process.execPath,
+    ) as [string, string[], Record<string, unknown>];
+    expect(respawnCall).toBeTruthy();
+    expect(respawnCall[1]![0]).toContain(join('sillyhub-daemon.js'));
+    expect(respawnCall[2]).toMatchObject({ detached: true, stdio: 'ignore' });
+    expect(entries.find((x) => x.msg === 'daemon_self_update_respawn')).toBeTruthy();
+
+    vi.advanceTimersByTime(500);
+    expect(exitSpy).toHaveBeenCalledWith(0);
+    exitSpy.mockRestore();
+    vi.useRealTimers();
   });
 });

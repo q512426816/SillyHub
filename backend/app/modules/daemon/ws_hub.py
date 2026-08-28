@@ -362,7 +362,8 @@ class DaemonWsHub:
     ) -> bool:
         """推送 daemon 自更新指令（Server → Daemon）。
 
-        daemon 收到后下载最新 bundle 替换本地文件，然后退出等外部 supervisor 重启。
+        daemon 收到后下载最新 bundle 替换本地文件，优雅停止后以 detached 子进程
+        自行拉起新版本（仓库无外部 supervisor，自拉起是唯一重启机制）。
         """
         payload = {}
         if version:

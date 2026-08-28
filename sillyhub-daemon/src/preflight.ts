@@ -12,8 +12,10 @@
  *   - 本地构建标识 {@link BUILD_ID}（release 时为 git SHA）
  *   - 服务器最新版本 `fetch ${server_url}/daemon/latest.json` → { version, url, publishedAt }
  *   - version 与本地 SHA 不一致 → 从 url 下载新 bundle，原子替换
- *     ~/.sillyhub/daemon/bin/sillyhub-daemon.js，warn 提示需重启
- *   - 服务器不可达 / 下载失败 → 仅 warn
+ *     ~/.sillyhub/daemon/bin/sillyhub-daemon.js（mcp-server.js 同目录 best-effort
+ *     伴生替换），返回 true；调用方（启动期 runPreflight / WS SELF_UPDATE）据
+ *     true 调 respawnDaemonAndExit 以 detached 子进程拉起新版本后退出旧进程
+ *   - 服务器不可达 / 下载失败 → 仅 warn，返回 false 保持运行
  *
  * 异步性：sillyspec 检查/安装用 spawn+超时杀树（runWithTreeKill，启动阶段执行，
  * 耗时数十秒，刻意阻塞以确保启动前 CLI 就绪）；daemon 自更新用 Node 20 原生
@@ -61,6 +63,13 @@ const DAEMON_BIN_DIR: string = join(homedir(), '.sillyhub', 'daemon', 'bin');
 /** daemon bundle 文件名，对齐 install.sh 的 `BUNDLE_NAME="sillyhub-daemon.js"`。 */
 const DAEMON_BUNDLE_NAME = 'sillyhub-daemon.js';
 
+/**
+ * MCP server bundle 文件名（与主 bundle 同目录，install.sh 一并安装）。
+ * 自更新时 best-effort 伴生替换（URL 从主 bundle URL 同目录推导），失败仅
+ * warn 不影响主 bundle 更新；运行中的 MCP 子进程已加载进内存不受影响。
+ */
+const MCP_SERVER_BUNDLE_NAME = 'mcp-server.js';
+
 /** latest.json 描述的服务器版本信息结构。 */
 interface LatestInfo {
   /** 最新构建标识（git short SHA）。 */
@@ -92,7 +101,12 @@ export async function runPreflight(
     logger('warn', 'preflight_sillyspec_unexpected', { error: fmtErr(e) });
   }
   try {
-    await runDaemonSelfUpdate(BUILD_ID, config, logger);
+    const updated = await runDaemonSelfUpdate(BUILD_ID, config, logger);
+    if (updated) {
+      // 启动期路径：daemon.start() 尚未 acquire runtime lock / 未起三循环，
+      // 直接拉起新进程退出（新进程启动后版本一致不再触发更新，无循环风险）。
+      respawnDaemonAndExit(logger);
+    }
   } catch (e) {
     logger('warn', 'preflight_daemon_update_unexpected', { error: fmtErr(e) });
   }
@@ -164,33 +178,35 @@ async function installSillySpec(logger: PreflightLogger): Promise<void> {
  * @param config   daemon 配置（取 server_url）
  * @param logger   日志回调
  * @param binDir   bundle 落盘目录，默认 {@link DAEMON_BIN_DIR}（测试注入临时目录）
+ * @returns true=主 bundle 已替换需重启（调用方应 respawnDaemonAndExit）；
+ *          false=未替换（dev/运维开关/已最新/防降级/拉取或下载失败已 warn）
  */
 export async function runDaemonSelfUpdate(
   buildId: string,
   config: DaemonConfig,
   logger: PreflightLogger,
   binDir: string = DAEMON_BIN_DIR,
-): Promise<void> {
+): Promise<boolean> {
   // dev 构建（占位 "dev"）跳过自更新：本地开发无 SHA 注入，latest.version
   // 恒不为 "dev"，跑了也只是每次启动徒劳下载最新 bundle 覆盖本地开发版本。
   if (!buildId || buildId === 'dev') {
     logger('debug', 'daemon_self_update_skip_dev_build');
-    return;
+    return false;
   }
 
   // 紧急运维开关：SKIP_DAEMON_SELF_UPDATE=1 完全跳过 daemon 自更新
   //（sillyspec 检查仍跑）。用于锁版本 / 服务器分发 manifest 过期导致循环降级时。
   if (process.env.SKIP_DAEMON_SELF_UPDATE === '1') {
     logger('info', 'daemon_self_update_skip_env');
-    return;
+    return false;
   }
 
   const latest = await fetchLatest(config, logger);
-  if (latest === null) return; // 拉取失败已记 warn
+  if (latest === null) return false; // 拉取失败已记 warn
 
   if (latest.version === buildId) {
     logger('debug', 'daemon_up_to_date', { version: buildId });
-    return;
+    return false;
   }
 
   // 防降级保护：version 格式 `<gitsha8>-<YYYYMMDDHHMMSS>`，解析时间戳部分比较。
@@ -204,7 +220,7 @@ export async function runDaemonSelfUpdate(
       current: buildId,
       latest: latest.version,
     });
-    return;
+    return false;
   }
 
   logger('info', 'daemon_newer_available', {
@@ -221,14 +237,107 @@ export async function runDaemonSelfUpdate(
 
   const updated = await downloadAndReplace(fullUrl, latest.version, buildId, binDir, logger);
 
-  if (updated) {
-    // 替换成功 → 优雅退出，等外部 supervisor（install.sh wrapper）重启拉起新版本。
-    logger('info', 'daemon_self_update_restart', {
-      from: buildId,
-      to: latest.version,
-    });
-    setTimeout(() => process.exit(0), 500); // 给日志 flush 500ms
+  if (!updated) return false; // 下载/写盘失败已记 warn，保持运行
+
+  // mcp-server.js best-effort 伴生替换（失败仅 warn，不影响主 bundle 更新结果）。
+  await updateMcpServerBundle(fullUrl, latest.version, binDir, logger);
+
+  logger('info', 'daemon_self_update_restart', {
+    from: buildId,
+    to: latest.version,
+  });
+  return true;
+}
+
+/**
+ * 伴生更新 `mcp-server.js`（与主 bundle 同目录同版本分发）。
+ *
+ * URL 推导：latest.json 只描述主 bundle URL，mcp-server.js 按「同目录同名段」
+ * 替换文件名推导（backend dist_router 两个文件同在 /daemon/latest/ 下）。
+ * 主 bundle URL 不以 sillyhub-daemon.js 结尾（自定义分发形态）→ debug 跳过。
+ */
+async function updateMcpServerBundle(
+  daemonBundleUrl: string,
+  newVersion: string,
+  binDir: string,
+  logger: PreflightLogger,
+): Promise<void> {
+  if (!daemonBundleUrl.endsWith(DAEMON_BUNDLE_NAME)) {
+    logger('debug', 'mcp_server_update_skip_url_shape', { url: daemonBundleUrl });
+    return;
   }
+  const mcpUrl = daemonBundleUrl.slice(0, -DAEMON_BUNDLE_NAME.length)
+    + MCP_SERVER_BUNDLE_NAME;
+  const ok = await downloadAndReplace(
+    mcpUrl,
+    newVersion,
+    '(unknown)',
+    binDir,
+    logger,
+    MCP_SERVER_BUNDLE_NAME,
+    'mcp_server_self_updated',
+  );
+  if (!ok) {
+    // best-effort：主 bundle 已替换成功，mcp 旧版不阻塞重启（新 MCP 子进程
+    // 下次会话 spawn 时若文件已换则用新版；保持旧文件也不影响主流程）。
+    logger('warn', 'mcp_server_update_failed_keep_old', { url: mcpUrl });
+  }
+}
+
+/**
+ * 以 detached 子进程拉起新 bundle（复用当前进程的启动参数）并安排退出旧进程。
+ *
+ * 背景：仓库不存在外部 supervisor——install.sh/ps1 的 wrapper 是一次性
+ * `exec node bundle.js`（无重启循环），也没注册 systemd/Windows 服务/计划
+ * 任务，自更新后仅 process.exit 会"更新完就死"。故退出前自行拉起新版本。
+ *
+ * 行为：
+ *   - spawn `process.execPath <binDir>/sillyhub-daemon.js ...process.argv.slice(2)`
+ *     （detached + stdio ignore + windowsHide，跨 Windows/Linux/macOS 存活于
+ *     父进程退出后；新进程日志走 daemon 文件日志，不依赖终端 stdio）
+ *   - 拉起成功 → 500ms 后 process.exit(0)（给日志 flush）；调用方应先完成
+ *     资源释放（WS 路径 daemon.stop() 释放 runtime lock / 标 offline），
+ *     保证新进程 acquire lock 时旧进程已释放
+ *   - 拉起失败 → 记 error **不退出**：旧进程继续跑旧版本保持在线，等下次
+ *     触发或人工介入（比"裸退出死掉"安全）
+ *
+ * @param logger      日志回调
+ * @param binDir      新 bundle 所在目录，默认 {@link DAEMON_BIN_DIR}
+ * @param exitDelayMs 退出前延迟（日志 flush），默认 500ms（测试注入）
+ */
+export function respawnDaemonAndExit(
+  logger: PreflightLogger,
+  binDir: string = DAEMON_BIN_DIR,
+  exitDelayMs: number = 500,
+): void {
+  const bundlePath = join(binDir, DAEMON_BUNDLE_NAME);
+  const startArgs = process.argv.slice(2);
+  let child: ChildProcess;
+  try {
+    child = spawn(process.execPath, [bundlePath, ...startArgs], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    // 兜底吞异步 spawn error（error 事件异步 emit，无 listener 会崩进程）。
+    child.on('error', () => {});
+    if (typeof child.pid !== 'number') {
+      throw new Error('spawn returned no pid');
+    }
+    child.unref();
+  } catch (e) {
+    logger('error', 'daemon_self_update_respawn_failed', {
+      bundle: bundlePath,
+      error: fmtErr(e),
+    });
+    return; // 不退出：旧进程保活（见函数注释）
+  }
+  logger('info', 'daemon_self_update_respawn', {
+    pid: child.pid,
+    bundle: bundlePath,
+    args: startArgs,
+  });
+  setTimeout(() => process.exit(0), exitDelayMs); // 给日志 flush
 }
 
 /**
@@ -289,10 +398,12 @@ async function fetchLatest(
  * 下载新 bundle 并原子替换落盘文件（tmp + rename）。
  *
  * 替换正在运行的 bundle 是安全的：node 已把当前进程代码加载进内存，本次进程
- * 不受影响；下次 daemon 启动（install.sh 的 wrapper exec node bundle.js）才
- * 加载新文件 → 故 warn 提示需重启。
+ * 不受影响；新文件由 respawnDaemonAndExit 拉起的新进程加载生效。
  *
- * 下载失败 / 写盘失败 → 仅 warn。
+ * 下载失败 / 写盘失败 → 仅 warn 返回 false。
+ *
+ * @param fileName  落盘文件名（主 bundle 默认，mcp-server.js 伴生替换复用）
+ * @param eventName 成功事件名（主 bundle 保留原事件，mcp 用独立事件区分）
  */
 async function downloadAndReplace(
   fullUrl: string,
@@ -300,6 +411,8 @@ async function downloadAndReplace(
   currentId: string,
   binDir: string,
   logger: PreflightLogger,
+  fileName: string = DAEMON_BUNDLE_NAME,
+  eventName: string = 'daemon_self_updated_need_restart',
 ): Promise<boolean> {
   let resp: Response;
   try {
@@ -320,7 +433,7 @@ async function downloadAndReplace(
   }
 
   const buf = Buffer.from(await resp.arrayBuffer());
-  const target = join(binDir, DAEMON_BUNDLE_NAME);
+  const target = join(binDir, fileName);
   const tmp = `${target}.tmp`;
   try {
     await mkdir(binDir, { recursive: true });
@@ -335,7 +448,7 @@ async function downloadAndReplace(
     return false;
   }
 
-  logger('warn', 'daemon_self_updated_need_restart', {
+  logger('warn', eventName, {
     from: currentId,
     to: newVersion,
     target,

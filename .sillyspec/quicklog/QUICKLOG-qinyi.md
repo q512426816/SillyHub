@@ -275,3 +275,21 @@
 方案：router.py 前置 task_scope_clause/problem_scope_clause 条目可见性守卫（不可见返回 []防存在性泄露）；_materialize_ppm_attachments 三阶段重构（顺序资格判定保图≤5/文≤5 水位→asyncio.gather 并行读写→原序组装降级）；item 可选传参全链复用前置解析加载行
 结果：test_session_binding 17 passed（含 2 新越权用例）+ daemon 相关 87/26 passed（含事务守卫）+ ruff 全过；容器重建实测超管可见普通用户空列表（越权修复生效）、绑定链路正常；测试数据已清理
 审计：⚖️ 归属切分：4 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/grants/service.py, backend/app/modules/daemon/service.py, backend/app/modules/daemon/session/context.py, backend/app/modules/daemon/tests/test_session_create_config.py
+
+## ql-20260828-004-5798 | 2026-08-28 08:19:07 | daemon 自更新后自动重启——更新完不再裸退出死掉
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/preflight.ts（runDaemonSelfUpdate 返回布尔+respawnDaemonAndExit+mcp-server 伴生替换）
+- sillyhub-daemon/src/daemon.ts（SELF_UPDATE 处理器 stop→拉起→退出）
+- sillyhub-daemon/tests/preflight.test.ts（+6 用例（返回值/mcp 三态/respawn 三态/启动期集成））
+- backend/app/modules/daemon/ws_hub.py（docstring 同步自拉起）
+- .sillyspec/docs/sillyhub-daemon/modules/preflight.md（契约/关键逻辑/注意事项更新）
+- .sillyspec/docs/sillyhub-daemon/modules/preflight.changelog.md（新建变更索引）
+- .sillyspec/docs/sillyhub-daemon/modules/daemon.changelog.md（新建变更索引）
+- .sillyspec/docs/sillyhub-daemon/scan/ARCHITECTURE.md（自更新行为描述更新）
+- .sillyspec/docs/SillyHub/scan/CONCERNS.md（条目坐实根因+修复）
+需求：daemon 自更新后自动重启——更新完不再裸退出死掉
+根因：自更新替换 bundle 后 process.exit(0)，但代码注释假设的外部 supervisor 从未落地：install wrapper 是一次性 exec，无 systemd/服务/计划任务，平台触发升级后 daemon 离线需手动拉起
+方案：preflight.ts 的 runDaemonSelfUpdate 改返回 boolean 并移出退出逻辑；新增 respawnDaemonAndExit（detached spawn node 新 bundle+原启动参数，成功后 500ms exit，拉起失败记 error 保活旧进程）；启动期 runPreflight 与 WS SELF_UPDATE 两路径据 true 自拉起，WS 路径先 stop() 释放 runtime lock/标 offline 再拉起避免抢锁竞态；未发生替换改记 self_update_noop 保持运行；mcp-server.js best-effort 伴生替换
+结果：vitest tests/preflight.test.ts 23/23（原17+新增6）；pnpm typecheck 绿；ruff check+format ws_hub.py 绿；文档同步 preflight.md/ARCHITECTURE.md/CONCERNS.md/ws_hub.py docstring + 两模块 changelog sidecar
