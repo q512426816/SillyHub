@@ -293,3 +293,8 @@
 根因：自更新替换 bundle 后 process.exit(0)，但代码注释假设的外部 supervisor 从未落地：install wrapper 是一次性 exec，无 systemd/服务/计划任务，平台触发升级后 daemon 离线需手动拉起
 方案：preflight.ts 的 runDaemonSelfUpdate 改返回 boolean 并移出退出逻辑；新增 respawnDaemonAndExit（detached spawn node 新 bundle+原启动参数，成功后 500ms exit，拉起失败记 error 保活旧进程）；启动期 runPreflight 与 WS SELF_UPDATE 两路径据 true 自拉起，WS 路径先 stop() 释放 runtime lock/标 offline 再拉起避免抢锁竞态；未发生替换改记 self_update_noop 保持运行；mcp-server.js best-effort 伴生替换
 结果：vitest tests/preflight.test.ts 23/23（原17+新增6）；pnpm typecheck 绿；ruff check+format ws_hub.py 绿；文档同步 preflight.md/ARCHITECTURE.md/CONCERNS.md/ws_hub.py docstring + 两模块 changelog sidecar
+
+## ql-20260828-005-fe24 | 2026-08-28 08:41:06 | C:/Program Files/Git/sessions 门户 PreSessionPicker 接入共享机器：sessions-portal.tsx 解构 machineCandidates 传给 PreSessionPicker（ta…
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
