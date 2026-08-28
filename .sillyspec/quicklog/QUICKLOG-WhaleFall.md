@@ -37,3 +37,14 @@
 方案：mission.py + daemon/router.py 两处 _virtual_status 加首 run 终态 failed/killed→虚拟 failed 兜底（mission 下带 role 的最早 run 查表；追问轮无 mission_id 不进首 run 集）；router 行化 row_status 同款；排序键 isoformat 规避 naive/aware datetime 混比；守护用例×2 锁定两形态收敛 + completed 不越权
 结果：agent 全量 1181/1181（含 derive 矩阵 169 + team mission 端点）全绿；模块文档 agent.md 注意事项补双源同改警示
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/agent/tests/test_derive_status_matrix.py
+
+## ql-20260828-014-bfef | 2026-08-28 13:35:22 | list_workers MCP 工具分身状态不收敛（主控拒派）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/mcp_tools.py（_list_workers_core 首run终态兜底）
+- backend/app/modules/agent/tests/test_mcp_tools.py（守护用例）
+需求：list_workers MCP 工具分身状态不收敛（主控拒派）
+根因：ql-013 修了两处状态源，第三处镜像 _list_workers_core（MCP list_workers，主控唯一状态查询源）漏改首 run 终态兜底——run d72943d7 日志实证：主控查到 killed 分身显示 running，结论「没有全失败」拒绝用户重新分析请求
+方案：row_status 加 first_run.status in (failed,killed)→failed 分支（三处镜像同构收齐）；守护用例锁定 killed+ended / failed+active 两形态；agent.md 警示双源改三源
+结果：test_mcp_tools 52/52（含新增守护用例）

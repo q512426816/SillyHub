@@ -1554,11 +1554,16 @@ async def _list_workers_core(session: AsyncSession, mission: AgentMission) -> Wo
         # status 三值映射对齐 mission_derive_status 虚拟 run 优先级（§5.C.4，
         # 与 _team_mission_summary 逐分支同构）：完成判定经
         # is_worker_complete_from_active（§5.C.3 单一真相源的批量形态）。
+        # ql-20260828-014-bfef：首 run 终态兜底（同构第三处，主控拒派实证：
+        # run killed 后会话侧未收敛形态原映射 running，主控据 list_workers
+        # 误判「没全失败」拒绝重派）。
         if worker_session.worker_done_at is not None and is_worker_complete_from_active(
             worker_session, active_sub_ids
         ):
             row_status = "completed"
         elif worker_session.status == "failed":
+            row_status = "failed"
+        elif first_run is not None and first_run.status in ("failed", "killed"):
             row_status = "failed"
         else:
             row_status = "running"
