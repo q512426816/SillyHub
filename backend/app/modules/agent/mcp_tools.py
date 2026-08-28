@@ -907,9 +907,13 @@ async def _dispatch_worker_core(
     三元组——前置治理段逐项保留（scope 校验 / BE-P0-2 越权 / 档案校验 / 治理门 /
     resolve_representative_binding 在线预检），执行段：
 
-    1. runtime 解析（D-004@v1）：anchor 本机自有 runtime 在线优先，无自有 →
-       预检解析的代表 binding 以钉定模式传入（``pinned_skip_owner_check=True``，
-       task-03 原语——代表机器属主常非 mission.created_by）；
+    1. runtime 解析（2026-08-28-fix-cross-machine-worker-dispatch task-03 /
+       FR-01 / D-001@v1）：目标工作区代表绑定机器**唯一钉定**——预检解析的
+       代表 binding 恒作 ``pinned_runtime_id``（``pinned_skip_owner_check=True``，
+       代表机器属主常非 mission.created_by）；不再 anchor 自有 runtime 在线
+       优先（owner 自有机器仅在恰为绑定机器时使用）；预检为两段式 provider
+       解析（FR-02 / D-002@v1），钉定后另接 allowed_roots 可判定越界 400
+       预检（FR-04 / D-003@v2）；
     2. 子会话 + 首 run 落行（flush）：AgentSession(parent=mission.session_id,
        owner=mission.created_by) + 首 run(mission_id+role 双标记) + AgentRunWorkspace
        anchor∪target 双关联 + 首 prompt 的 user_input 日志行；
@@ -1051,11 +1055,24 @@ async def _dispatch_worker_core(
     # 与派发链路同一启发式）都查无在线 → 422 中文引导，不建 run。
     # 语义安全性：该函数返回 None 意味着全工作区（含创建者本人）无在线绑定，
     # 本人 binding 路径（placement）也必失败，前置拦截不误伤。
+    # 两段式（2026-08-28-fix-cross-machine-worker-dispatch task-03 / FR-02 /
+    # D-002@v1）：第一段 provider=target_provider 严格解析（ws.default_agent
+    # or "claude"，ws 取行相应前移到预检段）；严格无果再 provider=None 回退
+    # 任意在线 binding，回退命中打 placement_provider_fallback 同款 warning
+    # （对齐被删 own_rt 路径 placement.py:1508-1520 的 fallback 语义，不引入
+    # 新拒绝路径）；两段均无果维持既有 422 文案不变。
     from app.modules.workspace.member_runtimes.queries import (
         resolve_representative_binding,
     )
+    from app.modules.workspace.model import Workspace
 
     dispatch_target = explicit_target or anchor
+    effective_target = dispatch_target
+    # ws 取行前移（task-03）：target_provider 供两段式预检与 lease_provider
+    # 兜底；行缺失保持 None 防御（原执行段取行同款语义）。
+    ws = await session.get(Workspace, effective_target)
+    target_provider = (ws.default_agent if ws is not None else None) or "claude"
+
     # user_id 供 resolve 的 owner 分支过滤；懒建竞态 rollback 会 expire 会话内
     # 全部对象（含请求 user），过期属性访问触发隐式刷新在 greenlet 外炸
     # MissingGreenlet——捕获后回落 None（owner 分支 miss，走「任意在线」分支2
@@ -1068,8 +1085,27 @@ async def _dispatch_worker_core(
         session,
         workspace_id=uuid.UUID(str(dispatch_target)),
         user_id=dispatch_user_id,
-        provider=None,
+        provider=target_provider,
     )
+    if binding is None:
+        # 第二段回退（D-002@v1）：任意在线 binding（与旧单段行为同查询），
+        # provider 偏好降级打点可观测（事件名/字段对齐 placement.py:1515）。
+        binding = await resolve_representative_binding(
+            session,
+            workspace_id=uuid.UUID(str(dispatch_target)),
+            user_id=dispatch_user_id,
+            provider=None,
+        )
+        if binding is not None:
+            log.warning(
+                "placement_provider_fallback",
+                wanted=target_provider,
+                actual=binding.get("provider"),
+                user_id=(
+                    str(dispatch_user_id) if dispatch_user_id is not None else None
+                ),
+                workspace_id=str(dispatch_target),
+            )
     if binding is None:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -1083,39 +1119,71 @@ async def _dispatch_worker_core(
     # MissionExecutionService.dispatch_worker / placement.dispatch_to_daemon；
     # 存量 batch 路径保留不删，bootstrap 等仍用）。
     from app.modules.agent.mission_context import build_worker_briefing
-    from app.modules.agent.placement import NoOnlineDaemonError, RunPlacementService
-    from app.modules.workspace.model import AgentRunWorkspace, Workspace
+    from app.modules.agent.placement import (
+        NoOnlineDaemonError,
+        RunPlacementService,
+        fetch_daemon_allowed_roots,
+        path_definitively_outside_roots,
+    )
+    from app.modules.workspace.model import AgentRunWorkspace
     from app.modules.workspace.service import resolve_root_path_for_daemon
 
-    effective_target = dispatch_target
     # D-004@v1：分身归属 = mission 创建者（追问/权限卡片/门户/审计 owner-only 机制
     # 全部因归属正确而自然通）；存量 mission（bootstrap/external）created_by 可空，
     # 回落派发主体保底（行 NOT NULL）。
     owner_id = mission.created_by or user.id
 
-    ws = await session.get(Workspace, effective_target)
-
-    # 1) runtime 解析（D-004@v1）：anchor 本机自有在线优先（用户级 first-online，
-    # provider 按 target workspace default_agent 匹配 + fallback）→ 无自有用上方
-    # 预检解析的代表 binding 钉定。两条路都经 prepare_interactive_dispatch 的
-    # 钉定复查（在线不可满足抛 NoOnlineDaemonError 绝不静默换机，Grill C-01）。
+    # 1) runtime 解析（2026-08-28-fix-cross-machine-worker-dispatch task-03 /
+    # FR-01 / D-001@v1）：目标工作区代表绑定机器**唯一钉定**——恒用上方预检
+    # 解析的 binding；旧「anchor 本机自有在线优先」抢占分支已删：旧路径
+    # ``_get_online_runtime(owner_id)`` 纯查 daemon_runtimes（用户级）从不看
+    # workspace_member_runtimes，owner 机器在线即抢占——跨机工作区时会话钉
+    # owner 机器而 worktree 副本经 host_fs 建在绑定机器，两机分裂后错机
+    # daemon 无差别 mkdir 空目录、分身在空目录里静默"成功"（QM小程序→
+    # crrcdt-hubin 跨机派发实证）。owner 自有机器仅在恰为工作区代表绑定机器
+    # 时被使用（常态单绑定下钉定结果与旧行为一致）。属主跳过由
+    # pinned_skip_owner_check 表达（代表机器属主常非 mission.created_by）；钉定
+    # 复查（prepare_interactive_dispatch）竞态掉线仍抛 NoOnlineDaemonError
+    # 绝不静默换机（Grill C-01 语义零回归）。
     placement_svc = RunPlacementService(session)
-    target_provider = (ws.default_agent if ws is not None else None) or "claude"
 
     def _runtime_uuid(raw: object) -> uuid.UUID:
         return raw if isinstance(raw, uuid.UUID) else uuid.UUID(str(raw))
 
-    own_rt = await placement_svc._get_online_runtime(owner_id, provider=target_provider)
-    if own_rt is not None:
-        pinned_runtime_id = _runtime_uuid(own_rt["id"])
-        pinned_skip_owner_check = False  # 自有机器：属主校验天然通过
-        lease_provider = own_rt.get("provider") or target_provider
-    else:
-        # 代表钉定：resolve_representative_binding 已保证在线；属主跳过由
-        # pinned_skip_owner_check 表达（跨 ws 代表机器属主常非 mission.created_by）。
-        pinned_runtime_id = _runtime_uuid(binding["id"])
-        pinned_skip_owner_check = True
-        lease_provider = binding.get("provider") or target_provider
+    pinned_runtime_id = _runtime_uuid(binding["id"])
+    pinned_skip_owner_check = True
+    lease_provider = binding.get("provider") or target_provider
+
+    # A3 预检（FR-04 / D-003@v2）：钉定后、建 sub_session/run 行之前——daemon
+    # 视角路径 ⊆ 钉定机器 allowed_roots（instance ∪ 名下全部 runtimes 并集，
+    # 对齐 daemon ``_effectiveAllowedRoots`` 同机全量语义）；仅**可判定越界**
+    # （并集存在绝对路径根且路径不在任何绝对根内）才 400 fail-loud 中文引导、
+    # 零垃圾行（对齐上方治理门前置拦截既有模式）；全 ``~`` 根/空并集不可判定
+    # → 放行交 daemon 认领终检权威裁决。precheck_path 无可判定对象（ws 无
+    # root_path 且非路径A worktree 透传）→ 跳过。
+    roots = await fetch_daemon_allowed_roots(
+        session, _runtime_uuid(binding["daemon_instance_id"])
+    )
+    precheck_path = effective_worktree_path or (
+        resolve_root_path_for_daemon(ws.root_path)
+        if ws is not None and ws.root_path
+        else None
+    )
+    if precheck_path and path_definitively_outside_roots(precheck_path, roots):
+        log.info(
+            "mcp_dispatch_worker_roots_precheck_rejected",
+            mission_id=str(mission.id),
+            workspace_id=str(effective_target),
+            pinned_runtime_id=str(pinned_runtime_id),
+            precheck_path=precheck_path,
+            allowed_roots=roots,
+        )
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"目标工作区路径 {precheck_path} 不在绑定机器的 allowed_roots 白名单内，"
+            "分身无法在该机器上访问执行。"
+            "请检查该机器的白名单配置或工作区 root_path 绑定。",
+        )
 
     # delegate 构造前置（构造失败 fail-loud 503，零半成品行）。
     host_fs_delegate = new_host_fs_delegate(session)
@@ -1561,9 +1629,9 @@ async def _list_workers_core(session: AsyncSession, mission: AgentMission) -> Wo
             worker_session, active_sub_ids
         ):
             row_status = "completed"
-        elif worker_session.status == "failed":
-            row_status = "failed"
-        elif first_run is not None and first_run.status in ("failed", "killed"):
+        elif worker_session.status == "failed" or (
+            first_run is not None and first_run.status in ("failed", "killed")
+        ):
             row_status = "failed"
         else:
             row_status = "running"

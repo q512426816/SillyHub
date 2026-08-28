@@ -37,7 +37,9 @@
  */
 
 import { arch, homedir, hostname, platform, tmpdir } from 'node:os';
-import { mkdir } from 'node:fs/promises';
+// stat：2026-08-28-fix-cross-machine-worker-dispatch task-06——认领段 cwd 存在性
+// 预检（FR-05/D-004@v1，正确机器上 worktree 必已存在，存在性即「对机」试金石）。
+import { mkdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { type DaemonConfig, DEFAULT_CONFIG_DIR, normalizeAllowedRoots } from './config.js';
@@ -86,6 +88,9 @@ import {
   assertWithinAllowedRoots,
 } from './file-rpc.js';
 import { listRoots } from './roots-rpc.js';
+// 2026-08-28-fix-cross-machine-worker-dispatch task-05/06（FR-05 / D-004@v1）：
+// interactive 会话 cwd 守卫纯函数——白名单终检 + 存在性判定，daemon.ts 认领段只接线。
+import { checkWorkspaceBoundCwd } from './interactive-cwd-guard.js';
 // task-03（2026-07-06-daemon-host-fs-delegate）：host_fs.* WS handler 业务层。
 // backend 经 HostFsDelegate + ws_rpc 调本 handler 在宿主执行 stat/git_apply/...（FR-02）。
 import { HostFsHandler } from './host-fs-handler.js';
@@ -4777,7 +4782,11 @@ export class Daemon {
       }
     } else {
       // 非借用：rootPath 优先作 cwd（与 batch 一致，ql-20260617-009）；无则 workspace_dir 兜底。
-      cwd = rawRootPath ?? this._config.workspace_dir;
+      // 2026-08-28-fix-cross-machine-worker-dispatch task-06（Grill D-1.2 修订）：
+      // 兜底判定用 truthy 而非 `??` —— `??` 只兜 null/undefined 不兜空串 ''，
+      // 空串 rootPath 会漏成 cwd=''（spawn/stat 走错分支）；空串与
+      // undefined/null 一律回落 config.workspace_dir 兜底。
+      cwd = rawRootPath ? rawRootPath : this._config.workspace_dir;
     }
     // ql-20260703-001：归一化 adapter id → detector provider key（claude_code→claude），
     // 对齐 reopen 路径（:2144）。原 (execPayload.provider ?? 'claude') as 'claude'|'codex'
@@ -4801,6 +4810,65 @@ export class Daemon {
         has_prompt: !!prompt,
       });
       return;
+    }
+
+    // 跨机派发守卫（2026-08-28-fix-cross-machine-worker-dispatch task-06 / FR-05 / D-004@v1）：
+    // workspace 绑定会话（rootPath 非空且非借用沙箱 marker）——白名单终检先行 +
+    // 存在性检查（正确机器上 worktree 必已存在，存在性即「对机」试金石）；
+    // 任一不过：notifyRunResult 拒绝后 return，绝不 mkdir（gap-8 的无差别 mkdir
+    // 会把错机派发静默变成「错机上建空目录继续跑」）。
+    // 判定抽纯函数 checkWorkspaceBoundCwd（task-05，含 assertWithinAllowedRoots 同一
+    // containment 口径 + 双违反 forbidden 优先）；插入点在 firstRunId 非空守卫之后
+    // （保证 notifyRunResult 可用，防 run 永久 pending，对齐 executable-not-found 模式）。
+    const workspaceBoundCwd =
+      typeof rawRootPath === 'string' &&
+      rawRootPath &&
+      !rawRootPath.startsWith(BORROW_SANDBOX_MARKER)
+        ? cwd
+        : null;
+    if (workspaceBoundCwd) {
+      let cwdExists = false;
+      try {
+        await stat(workspaceBoundCwd);
+        cwdExists = true;
+      } catch {
+        cwdExists = false;
+      }
+      const verdict = checkWorkspaceBoundCwd(
+        workspaceBoundCwd,
+        cwdExists,
+        this._effectiveAllowedRoots(),
+      );
+      if (!verdict.ok) {
+        this._logger.error('interactive_cwd_guard_rejected', {
+          lease_id: leaseId,
+          cwd: workspaceBoundCwd,
+          code: verdict.code,
+        });
+        // 主动回传拒绝（status=error_during_execution）防 run 永久 pending；回传失败
+        // 仅 warn 不阻塞主循环（backend 侧 lease GC / WS 失活兜底仍在，同下方
+        // executable-not-found 块模式）。
+        if (execPayload.claimToken && firstRunId) {
+          try {
+            await this._client.notifyRunResult(
+              leaseId,
+              execPayload.claimToken,
+              firstRunId,
+              {
+                status: 'error_during_execution',
+                is_error: true,
+                result_summary: verdict.message,
+              },
+            );
+          } catch (e) {
+            this._logger.warn('interactive_cwd_guard_report_failed', {
+              lease_id: leaseId,
+              error: String(e),
+            });
+          }
+        }
+        return;
+      }
     }
 
     if (!pathToClaudeCodeExecutable) {
@@ -4846,14 +4914,24 @@ export class Daemon {
     // onError→fail→onSessionEnd，agent_session_id 永远为 null（实测复现）。
     // 修复：create 前确保 cwd 存在（与 batch 对齐）。失败仅 warn 不阻断——让 SDK
     // 的真实错误经 onError 收口，不在此吞掉诊断信息。
-    try {
-      await mkdir(cwd, { recursive: true });
-    } catch (e) {
-      this._logger.warn('interactive_cwd_mkdir_failed', {
-        lease_id: leaseId,
-        cwd,
-        error: (e as Error)?.message ?? String(e),
-      });
+    // 2026-08-28-fix-cross-machine-worker-dispatch task-06（D-004@v1 收敛）：
+    // mkdir 仅对「非 workspace 绑定形态」执行——无 rootPath 兜底路径（daemon-client
+    // 会话回落 workspace_dir）保留 mkdir（该目录是 daemon 自有领地，无错机语义，
+    // gap-8 原意）；workspace 绑定路径（rootPath 非空非借用 marker）不 mkdir——
+    // 上方守卫 stat 已确认目录存在（正确机器上 worktree 必已建），错机派发已在
+    // 守卫处 notifyRunResult 拒绝。借用沙箱形态 workspaceBoundCwd 亦为 null →
+    // 本段照旧执行（prepareWorkspace 已自建目录，recursive mkdir 幂等无副作用；
+    // 失败回落 workspace_dir 属兜底形态保 fail-open），行为零变化。
+    if (!workspaceBoundCwd) {
+      try {
+        await mkdir(cwd, { recursive: true });
+      } catch (e) {
+        this._logger.warn('interactive_cwd_mkdir_failed', {
+          lease_id: leaseId,
+          cwd,
+          error: (e as Error)?.message ?? String(e),
+        });
+      }
     }
 
     // 2026-07-08 修复：spawn 前把同步的平台 skills 拷到 cwd/.claude/skills/，让 claude

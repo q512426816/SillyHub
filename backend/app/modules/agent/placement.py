@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import enum
 import json
+import os
 import secrets
 import uuid
 from dataclasses import dataclass
@@ -1785,3 +1786,137 @@ class RunPlacementService:
                 lease_id=str(lease_id),
                 agent_run_id=str(agent_run_id),
             )
+
+
+# ---------------------------------------------------------------------------
+# allowed_roots 预检 helper（task-02 / 2026-08-28-fix-cross-machine-worker-dispatch
+# / FR-04 / D-003@v2）——供 task-03 mcp_tools 派发前预检接线消费，本卡不改派发链路
+# ---------------------------------------------------------------------------
+
+
+def _absorb_roots(target: list[str], raw: object) -> None:
+    """JSON allowed_roots 列容忍归并（task-02 / FR-04）。
+
+    raw text() 读 JSON 列时 SQLite 返 str、PG 返已解析对象（对齐 execution.py
+    读 lease metadata 的双形态范式）；None / 非 list / JSON 解析失败一律视为空
+    贡献跳过（daemon_runtimes.allowed_roots nullable=True，NULL 行不崩）。
+    去重保序：已在 target 中的根不重复追加（instance 根在前的顺序由调用方保证）。
+    """
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return
+    if not isinstance(raw, list):
+        return
+    for item in raw:
+        if isinstance(item, str) and item and item not in target:
+            target.append(item)
+
+
+async def fetch_daemon_allowed_roots(
+    session: AsyncSession, daemon_instance_id: uuid.UUID
+) -> list[str]:
+    """取 daemon 的 allowed_roots 同机全量并集（FR-04 / D-003@v2 / task-02）。
+
+    数据源 = ``daemon_instances.allowed_roots``（model.py:76）∪ 该 instance 名下
+    **全部** ``daemon_runtimes.allowed_roots``（model.py:171），对齐 daemon
+    ``_effectiveAllowedRoots`` 的同机全量语义（本地 config≈instance 注册值 ∪
+    PolicyCache 全部 runtime 根）——只取钉定 runtime 两行会偏严（兄弟 runtime 根
+    也是同机合法根），误拒窗口由此收敛（D-003@v2 修订点①）。
+
+    - instance 行缺失**不视为空整体**：跳过 instance 贡献，返回 runtime 并集；
+    - JSON 列容忍（None / 非 list 行跳过）；去重保序（instance 根在前）；
+    - 查询异常吞掉记 warning 返回 []（对齐 ``_get_online_runtime`` 吞异常范式
+      ——数据源不可用属"不可判定"，放行交 daemon 终检权威裁决，D-003@v2）。
+    """
+    roots: list[str] = []
+    try:
+        inst_row = (
+            (
+                await session.execute(
+                    text("SELECT allowed_roots FROM daemon_instances WHERE id = :di"),
+                    {"di": daemon_instance_id.hex},
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if inst_row is not None:
+            _absorb_roots(roots, inst_row["allowed_roots"])
+        rt_rows = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT allowed_roots FROM daemon_runtimes"
+                        " WHERE daemon_instance_id = :di"
+                    ),
+                    {"di": daemon_instance_id.hex},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        for row in rt_rows:
+            _absorb_roots(roots, row["allowed_roots"])
+        return roots
+    except Exception as exc:
+        log.warning(
+            "fetch_daemon_allowed_roots_failed",
+            daemon_instance_id=str(daemon_instance_id),
+            error=str(exc),
+        )
+        return []
+
+
+def _is_windows_path_form(s: str) -> bool:
+    """判定字符串是否 Windows 路径形态（含反斜杠或盘符前缀 ``C:``）。
+
+    必须在 raw 字符串上判：normpath 之后 Windows 宿主会把 POSIX 形态 ``/ws``
+    也翻成 ``\\ws``，先判形态再归一才能区分两种形态的 casefold / 分隔符语义。
+    """
+    if "\\" in s:
+        return True
+    return len(s) >= 2 and s[0].isalpha() and s[1] == ":"
+
+
+def _normalize_for_root_compare(s: str, windows_form: bool, casefold_cmp: bool) -> str:
+    """按根形态归一路径供比较（task-02 / FR-04 / NFR-01 跨平台）。
+
+    ``os.path.normpath`` 在 Windows 宿主上会把 ``/`` 翻成 ``\\``、POSIX 宿主不动，
+    故归一后按形态手动统一分隔符（Windows→``\\``、POSIX→``/``），保证同一输入在
+    任意宿主 OS 上比较结果一致；``casefold_cmp`` 仅 Windows 形态比较时启用
+    （POSIX 形态大小写敏感，NFR-01）。
+    """
+    normalized = os.path.normpath(s)
+    normalized = normalized.replace("/", "\\") if windows_form else normalized.replace("\\", "/")
+    return normalized.casefold() if casefold_cmp else normalized
+
+
+def path_definitively_outside_roots(path: str, roots: list[str]) -> bool:
+    """仅**可判定越界**才 True（FR-04 / D-003@v2，task-02 纯函数）。
+
+    语义（D-003@v2）：roots 中存在至少一条绝对路径根（非 ``~`` 前缀且非空），
+    且 path 归一后不在任何绝对根的边界敏感前缀包含内（相等 或 以 ``root+sep``
+    开头，sep 按各自根形态取 ``/`` 或 ``\\``）→ True。全部根为 ``~`` 前缀
+    （backend 无法展开）或 roots 为空 → False（不可判定，放行交 daemon 终检
+    权威裁决）。
+
+    Windows 形态（path 或 root 含反斜杠/盘符）大小写不敏感（casefold），POSIX
+    形态大小写敏感；``/ws-other`` 不因朴素前缀字符串包含被误判在 ``/ws`` 内。
+    无 IO、无 session 依赖，独立可测。
+    """
+    absolute_roots = [r for r in roots if r and not r.startswith("~")]
+    if not absolute_roots:
+        return False
+    path_is_win = _is_windows_path_form(path)
+    for root in absolute_roots:
+        root_is_win = _is_windows_path_form(root)
+        # path 或 root 任一为 Windows 形态 → 该根的比较整体大小写不敏感（NFR-01）。
+        casefold_cmp = path_is_win or root_is_win
+        norm_root = _normalize_for_root_compare(root, root_is_win, casefold_cmp)
+        norm_path = _normalize_for_root_compare(path, root_is_win, casefold_cmp)
+        sep = "\\" if root_is_win else "/"
+        if norm_path == norm_root or norm_path.startswith(norm_root + sep):
+            return False
+    return True

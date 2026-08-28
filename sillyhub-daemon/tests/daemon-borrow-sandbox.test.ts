@@ -14,7 +14,7 @@
 // wsClient._injectMessage 驱动 lease 状态机）。
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Daemon } from '../src/daemon.js';
@@ -160,7 +160,15 @@ function buildDaemon(opts: {
     wsClientMock._setCallbacks(o.callbacks);
     return wsClientMock;
   });
-  const config = { ...mockConfig, workspace_dir: opts.workspaceDir };
+  // task-07 夹具债修复（2026-08-28-fix-cross-machine-worker-dispatch）：非借用 lease
+  // 的 rootPath 现在要过 daemon 认领段 cwd 守卫（白名单 + 存在性）——allowed_roots
+  // 指向该用例的 workspace_dir（cwd=wsDir 时 containment resolved===root 命中）。
+  // 借用 marker 路径不走守卫，不受影响。
+  const config = {
+    ...mockConfig,
+    workspace_dir: opts.workspaceDir,
+    allowed_roots: [opts.workspaceDir],
+  };
 
   const ctorOpts: Record<string, unknown> = {
     detector,
@@ -202,6 +210,9 @@ describe('task-09 daemon 借用沙箱检测（_startInteractiveSession）', () =
       tmpdir(),
       `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     );
+    // task-07 夹具债修复：真实创建目录——cwd 守卫对 workspace 绑定会话做存在性
+    // 终检（正确机器上 cwd 必已存在，不存在即 cwd_not_found 拒绝）。
+    mkdirSync(dir, { recursive: true });
     tmpDirs.push(dir);
     return dir;
   }

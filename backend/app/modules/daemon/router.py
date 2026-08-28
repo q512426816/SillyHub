@@ -3316,9 +3316,9 @@ async def _team_mission_summary(
             worker_session, active_ids
         ):
             row_status = "completed"
-        elif worker_session.status == "failed":
-            row_status = "failed"
-        elif first_run is not None and first_run.status in ("failed", "killed"):
+        elif worker_session.status == "failed" or (
+            first_run is not None and first_run.status in ("failed", "killed")
+        ):
             row_status = "failed"
         else:
             row_status = "running"

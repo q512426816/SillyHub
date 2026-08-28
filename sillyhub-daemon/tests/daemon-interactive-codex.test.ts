@@ -50,6 +50,10 @@ const mockConfig: DaemonConfig = {
   heartbeat_interval: 0.02,
   max_concurrent_tasks: 5,
   log_level: 'debug',
+  // task-07 夹具债修复（2026-08-28-fix-cross-machine-worker-dispatch）：daemon 认领段
+  // cwd 守卫对 workspace 绑定会话做 allowed_roots 白名单终检 + 存在性终检——夹具
+  // rootPath 改用真实存在的 tmpdir() 并补白名单，走正常守卫通过路径。
+  allowed_roots: [tmpdir()],
 };
 
 function mockAgent(provider: string, path: string, available = true): DetectedAgent {
@@ -194,13 +198,15 @@ function driveInteractiveStart(
   const sessionId = p.sessionId ?? 'sess-1';
   const runId = p.runId ?? 'run-1';
   const provider = p.provider ?? 'claude';
+  // task-07 夹具债修复：默认 rootPath 用真实存在的 tmpdir()（cwd 守卫存在性终检）。
+  const rootPath = p.rootPath ?? tmpdir();
   const payload: Record<string, unknown> = {
     kind: 'interactive',
     prompt: p.prompt ?? 'hi',
     provider,
     agent_session_id: sessionId,
     agent_run_id: runId,
-    root_path: p.rootPath ?? '/tmp/work',
+    root_path: rootPath,
     claim_token: 'tok-i',
   };
   client.claimLease.mockResolvedValueOnce({ claim_token: 'tok-i', payload });
@@ -212,7 +218,7 @@ function driveInteractiveStart(
       prompt: p.prompt ?? 'hi',
       agentSessionId: sessionId,
       agentRunId: runId,
-      rootPath: p.rootPath ?? '/tmp/work',
+      rootPath,
       provider,
     },
   });

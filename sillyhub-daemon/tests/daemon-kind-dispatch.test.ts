@@ -37,6 +37,11 @@ const mockConfig: DaemonConfig = {
   heartbeat_interval: 0.02,
   max_concurrent_tasks: 5,
   log_level: 'debug',
+  // task-07 夹具债修复（2026-08-28-fix-cross-machine-worker-dispatch）：daemon 认领段
+  // cwd 守卫对 workspace 绑定会话（rootPath 非空非借用 marker）做 allowed_roots
+  // 白名单终检 + 存在性终检——夹具 rootPath 由假路径 'C:\work' 改用真实存在的
+  // tmpdir() 并补白名单，interactive 用例走正常守卫通过路径（断言意图不变）。
+  allowed_roots: [tmpdir()],
 };
 
 function mockAgent(provider: string, path = '', available = true): DetectedAgent {
@@ -338,7 +343,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         provider: 'claude',
         agent_session_id: 'sess-1',
         agent_run_id: 'run-1',
-        root_path: 'C:\\work',
+        root_path: tmpdir(),
       },
     });
 
@@ -350,7 +355,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         prompt: 'hi',
         agentSessionId: 'sess-1',
         agentRunId: 'run-1',
-        rootPath: 'C:\\work',
+        rootPath: tmpdir(),
       },
     });
     await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
@@ -363,7 +368,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
       leaseId: 'lease-int',
       firstPrompt: 'hi',
       firstRunId: 'run-1',
-      cwd: 'C:\\work',
+      cwd: tmpdir(),
       provider: 'claude',
     });
     expect(createArg.pathToClaudeCodeExecutable).toBe('C:\\bin\\claude.exe');
@@ -402,7 +407,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         prompt: 'hi',
         agent_session_id: 'sess-1',
         agent_run_id: 'run-1',
-        root_path: 'C:\\work',
+        root_path: tmpdir(),
       },
     });
 
@@ -414,7 +419,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         prompt: 'hi',
         agentSessionId: 'sess-1',
         agentRunId: 'run-1',
-        rootPath: 'C:\\work',
+        rootPath: tmpdir(),
       },
     });
     await sleep(50);
@@ -444,7 +449,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         prompt: 'hi',
         agent_session_id: 'sess-1',
         agent_run_id: 'run-1',
-        root_path: 'C:\\work',
+        root_path: tmpdir(),
       },
     });
 
@@ -457,7 +462,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         prompt: 'hi',
         agentSessionId: 'sess-1',
         agentRunId: 'run-1',
-        rootPath: 'C:\\work',
+        rootPath: tmpdir(),
       },
     });
     await sleep(30);
@@ -470,7 +475,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         prompt: 'hi',
         agentSessionId: 'sess-1',
         agentRunId: 'run-1',
-        rootPath: 'C:\\work',
+        rootPath: tmpdir(),
       },
     });
     await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
@@ -495,7 +500,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         prompt: 'hi',
         agent_session_id: 'sess-1',
         agent_run_id: 'run-1',
-        root_path: 'C:\\work',
+        root_path: tmpdir(),
       },
     });
 
@@ -507,7 +512,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         prompt: 'hi',
         agentSessionId: 'sess-1',
         agentRunId: 'run-1',
-        rootPath: 'C:\\work',
+        rootPath: tmpdir(),
       },
     });
     await sleep(50);
@@ -776,7 +781,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         provider: 'claude',
         agent_session_id: 'sess-pf',
         agent_run_id: 'run-pf',
-        root_path: 'C:\\work',
+        root_path: tmpdir(),
         // task-07 双写 camelCase（优先源）
         mcpRefs: ['mcp-a', 'mcp-b'],
         skillRefs: ['skill-x'],
@@ -792,7 +797,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         prompt: 'hi',
         agentSessionId: 'sess-pf',
         agentRunId: 'run-pf',
-        rootPath: 'C:\\work',
+        rootPath: tmpdir(),
       },
     });
     await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
@@ -821,7 +826,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         provider: 'claude',
         agent_session_id: 'sess-pf2',
         agent_run_id: 'run-pf2',
-        root_path: 'C:\\work',
+        root_path: tmpdir(),
         // 仅 snake_case（兼容 backend 旧/变体写法）
         mcp_refs: ['mcp-s'],
         skill_refs: ['skill-s'],
@@ -837,7 +842,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         prompt: 'hi',
         agentSessionId: 'sess-pf2',
         agentRunId: 'run-pf2',
-        rootPath: 'C:\\work',
+        rootPath: tmpdir(),
       },
     });
     await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
@@ -865,7 +870,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         provider: 'claude',
         agent_session_id: 'sess-pf3',
         agent_run_id: 'run-pf3',
-        root_path: 'C:\\work',
+        root_path: tmpdir(),
       },
     });
 
@@ -877,7 +882,7 @@ describe('daemon lease.kind 分流（D-002@v3）', () => {
         prompt: 'hi',
         agentSessionId: 'sess-pf3',
         agentRunId: 'run-pf3',
-        rootPath: 'C:\\work',
+        rootPath: tmpdir(),
       },
     });
     await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });

@@ -14,6 +14,7 @@
 // daemon 透传 → task-runner/session-manager 检查点真正生效（feature 不再 dormant）。
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { tmpdir } from 'node:os';
 import { Daemon } from '../src/daemon.js';
 import type { DaemonConfig } from '../src/config.js';
 import { MSG } from '../src/protocol.js';
@@ -34,6 +35,10 @@ const mockConfig: DaemonConfig = {
   heartbeat_interval: 0.02,
   max_concurrent_tasks: 5,
   log_level: 'debug',
+  // task-07 夹具债修复（2026-08-28-fix-cross-machine-worker-dispatch）：daemon 认领段
+  // cwd 守卫对 workspace 绑定会话做 allowed_roots 白名单终检 + 存在性终检——夹具
+  // rootPath 改用真实存在的 tmpdir() 并补白名单，走正常守卫通过路径。
+  allowed_roots: [tmpdir()],
 };
 
 function sleep(ms: number): Promise<void> {
@@ -233,7 +238,7 @@ describe('task-08 / RS-4：budget_tokens claim payload → daemon 透传', () =>
         provider: 'claude',
         agent_session_id: 'sess-bgt',
         agent_run_id: 'run-bgt',
-        root_path: 'C:\\work',
+        root_path: tmpdir(),
         // context.py task-07 双写 snake_case（优先源，与 types.ts LeaseCtx.budget_tokens 一致）
         budget_tokens: 5000,
       },
@@ -247,7 +252,7 @@ describe('task-08 / RS-4：budget_tokens claim payload → daemon 透传', () =>
         prompt: 'hi',
         agentSessionId: 'sess-bgt',
         agentRunId: 'run-bgt',
-        rootPath: 'C:\\work',
+        rootPath: tmpdir(),
       },
     });
     await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
@@ -272,7 +277,7 @@ describe('task-08 / RS-4：budget_tokens claim payload → daemon 透传', () =>
         provider: 'claude',
         agent_session_id: 'sess-bgt2',
         agent_run_id: 'run-bgt2',
-        root_path: 'C:\\work',
+        root_path: tmpdir(),
         // 仅 camelCase（兼容双写的 camel 兜底分支）
         budgetTokens: 1234,
       },
@@ -286,7 +291,7 @@ describe('task-08 / RS-4：budget_tokens claim payload → daemon 透传', () =>
         prompt: 'hi',
         agentSessionId: 'sess-bgt2',
         agentRunId: 'run-bgt2',
-        rootPath: 'C:\\work',
+        rootPath: tmpdir(),
       },
     });
     await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
@@ -310,7 +315,7 @@ describe('task-08 / RS-4：budget_tokens claim payload → daemon 透传', () =>
         provider: 'claude',
         agent_session_id: 'sess-bgt3',
         agent_run_id: 'run-bgt3',
-        root_path: 'C:\\work',
+        root_path: tmpdir(),
         // 无 budget_tokens / budgetTokens
       },
     });
@@ -323,7 +328,7 @@ describe('task-08 / RS-4：budget_tokens claim payload → daemon 透传', () =>
         prompt: 'hi',
         agentSessionId: 'sess-bgt3',
         agentRunId: 'run-bgt3',
-        rootPath: 'C:\\work',
+        rootPath: tmpdir(),
       },
     });
     await waitForSpy(sessionManager.create as unknown as { mock: { calls: unknown[][] } });
