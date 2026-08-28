@@ -38,7 +38,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.core.logging import get_logger
-from app.modules.agent.profile.model import AgentProfile
 from app.modules.auth.model import User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
 from app.modules.auth.rbac import has_permission
@@ -51,7 +50,7 @@ log = get_logger(__name__)
 class PlatformBinding(NamedTuple):
     """platform grant 的钉定绑定（design §7 / D-002@v2，契约保留位）。
 
-    D-012@v1 起 authorize_pinned_runtime 的 platform 分支命中即返回 ``None``
+    D-012@v2 起 authorize_pinned_runtime 不再有 platform 分支（授权统一 workspace 判定）
     （直传钉定封堵），本类型不再由 authorize 产出——task-05 档案检测命中后的
     强制覆写（cwd=source_workspace.root_path + 写约束 [writable_dir]）由
     session/service 的 ``_PlatformSessionBinding`` 承载；保留为 design §7
@@ -145,21 +144,17 @@ async def authorize_pinned_runtime(
 ) -> GrantAuthorization | None:
     """判定 actor 能否钉定 ``runtime_id`` 建会话（design §5 Phase 2 / §7）。
 
-    判定顺序（owner 短路归调用方，本函数从 platform 分支开始）：
+    判定顺序（owner 短路归调用方；D-012@v2 起单一路径）：
 
-    1. **platform_grant**：``runtime_id`` 是某生效平台共享智能体 grant 的
-       ``pinned_runtime_id``（join 档案存在——档案被物理删除的悬空 grant 不
-       视为命中）→ **返回 ``None``**（D-012@v1，验收审查 gap-2）：共享的是
-       智能体而非裸 runtime，直接钉定（不带共享档案）会绕过 task-05 强制
-       （cwd/写约束/工具集），在此封堵——调用方 404。共享 runtime 唯一入口
-       =task-05 档案检测（session/service ``_detect_platform_profile_binding``，
-       命中走 ``pinned_skip_owner_check=True``，不经本函数）。
-    2. **workspace_grant**：runtime 所属机器有 enabled workspace grant，且
+    1. **workspace_grant**：runtime 所属机器有 enabled workspace grant，且
        actor 是 grantee 工作区成员（user_workspace_roles），且持
        ``Permission.DAEMON_BORROW``（has_permission，含 platform_admin 短路，
        先例 borrow_resolver:103-110），且 daemon 在线，且 granted_by≠actor
        （永不「借用」自己共享的机器）。
-    3. 均未命中 → ``None``（调用方维持现有 404，不泄露存在性）。
+    2. 未命中 → ``None``（调用方维持现有 404，不泄露存在性）。裸 platform
+       grant 的 pinned_runtime 直用（无 workspace 授权、不带共享档案）同样
+       落此默认拒绝（D-012 封堵目标不变）；带共享档案的 platform 会话唯一
+       入口=task-05 档案检测（``pinned_skip_owner_check=True``，不经本函数）。
 
     Args:
         session: 数据库会话。
@@ -182,35 +177,18 @@ async def authorize_pinned_runtime(
     if runtime is None or runtime.daemon_instance_id is None:
         return None
 
-    # ── 分支 1：platform grant（钉定 runtime = 共享智能体的 pinned_runtime）──
-    # D-012@v1（验收审查 gap-2）：命中即返回 None——直接钉定 platform grant 的
-    # pinned_runtime（不带共享档案）会绕过 task-05 强制（cwd/写约束/工具集），
-    # 该形态在此封堵；共享 runtime 唯一入口=task-05 档案检测（下发走
-    # pinned_skip_owner_check=True，不经本函数）。join 档案存在的口径保留
-    # （悬空 grant 不视为 platform 命中，落 workspace 分支判定）；
-    # source_workspace_id IS NOT NULL 为绑定完整性的防御性过滤（service 层
-    # 建行时已强制，防绕过 service 的脏行）。
-    platform_grant = (
-        (
-            await session.execute(
-                select(DaemonRuntimeGrant)
-                .join(AgentProfile, AgentProfile.id == DaemonRuntimeGrant.agent_profile_id)
-                .where(
-                    col(DaemonRuntimeGrant.grantee_type) == "platform",
-                    col(DaemonRuntimeGrant.enabled).is_(True),
-                    col(DaemonRuntimeGrant.pinned_runtime_id) == runtime_id,
-                    col(DaemonRuntimeGrant.source_workspace_id).is_not(None),
-                )
-                .limit(1)
-            )
-        )
-        .scalars()
-        .first()
-    )
-    if platform_grant is not None:
-        return None
+    # ── D-012@v2（quick-5aaefe0e，用户实测 404）：授权统一走 workspace grant 判定 ──
+    # v1 的 platform 分支「命中即 None」误伤门户正常形态——会话门户「选机器+选引擎」
+    # 产出的请求就是无档案直传 runtime_id（preContext.runtimeId），若该 runtime 恰被
+    # 平台共享智能体钉定（同机常见），早退把有效的 workspace 授权一并封死（180024
+    # 实测 Runtime not found）。v2 语义：platform grant 不在本函数单独封堵——
+    # 授权与否完全由 workspace 分支判定：有 workspace grant + 成员 + daemon:borrow
+    # → 按借用会话放行（FR-02 正常语义，审计/借用标记照旧）；无任何授权 → None
+    # （裸 platform runtime 直用仍 404，v1 的封堵目标由「默认拒绝」达成）。
+    # task-05 档案路径不受影响（_detect_platform_profile_binding 命中走
+    # pinned_skip_owner_check=True，不经本函数，强制项完整）。
 
-    # ── 分支 2：workspace grant（权限 → 成员 → enabled → 在线 → 非本人）──────
+    # ── workspace grant（权限 → 成员 → enabled → 在线 → 非本人）────────────
     # 权限闸先行（fail fast，三重校验顺序「权限 → shared → online」先例
     # borrow_resolver）；actor 行不存在视同无权限。
     user = await session.get(User, actor_user_id)

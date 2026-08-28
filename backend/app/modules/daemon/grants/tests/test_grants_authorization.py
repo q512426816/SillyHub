@@ -328,6 +328,50 @@ async def test_authorize_runtime_not_found_returns_none(db_session) -> None:
     )
 
 
+async def test_authorize_platform_pinned_runtime_via_workspace_grant_allowed(
+    db_session,
+) -> None:
+    """D-012@v2（quick-5aaefe0e，180024 实测 404）：platform 钉定的 runtime 同机
+    另有 workspace grant 时，无档案直传（门户「选机器+选引擎」形态）按借用授权
+    放行——v1 的 platform 早退把这种双授权场景一并封死（Runtime not found）。"""
+    admin = await _seed_user(db_session, display_name="Admin")
+    actor = await _seed_user(db_session, display_name="Actor")
+    profile = await _seed_agent_profile(db_session)
+    src_ws = await _seed_workspace(db_session, name="源码区")
+    ws = await _seed_workspace(db_session, name="业务区")
+    did = await _seed_daemon(db_session, owner_id=admin.id)
+    rt = await _seed_runtime(db_session, daemon_id=did.id, owner_id=admin.id)
+    # 双授权：platform grant 钉定本 runtime + workspace grant 授权业务区成员。
+    await _seed_grant(
+        db_session,
+        daemon_id=did.id,
+        granted_by=admin.id,
+        grantee_type="platform",
+        grantee_id=None,
+        agent_profile_id=profile.id,
+        source_workspace_id=src_ws.id,
+        pinned_runtime_id=rt.id,
+        writable_dir="/srv/share/out",
+    )
+    await _seed_grant(
+        db_session,
+        daemon_id=did.id,
+        granted_by=admin.id,
+        grantee_type="workspace",
+        grantee_id=ws.id,
+    )
+    role = await _seed_borrow_role(db_session)
+    await _grant_role(db_session, workspace_id=ws.id, user_id=actor.id, role_id=role.id)
+
+    authz = await authorize_pinned_runtime(
+        db_session, actor_user_id=actor.id, runtime_id=rt.id, workspace_id=None
+    )
+    assert authz is not None
+    assert authz.kind == "workspace_grant"
+    assert authz.grant_id is not None
+    assert authz.lender_user_id == admin.id
+
+
 async def test_authorize_platform_grant_direct_pin_returns_none(db_session) -> None:
     """D-012@v1（验收审查 gap-2）：platform grant 的 pinned runtime 直传钉定
     → None（调用方 404 封堵）。
