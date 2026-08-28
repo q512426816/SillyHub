@@ -15,6 +15,7 @@ import {
   type MemberBindingUpsertRequest,
 } from "@/lib/workspace-binding";
 import WorkspacePathPicker from "@/components/workspace-path-picker";
+import { useDaemonMachines } from "@/lib/use-daemon-machines";
 
 /**
  * 已绑定成员回填的当前值（编辑模式 initial）。
@@ -33,6 +34,8 @@ interface Props {
    * 不传（undefined）即首次绑定模式（unbound，空值）。
    */
   initial?: AccessGuideInitial | null;
+  /** quick-18951370：工作区 canonical root_path（共享快选时回填默认本地路径）。 */
+  defaultRootPath?: string;
 }
 
 function providerLabel(provider: string | null): string {
@@ -72,6 +75,7 @@ export function WorkspaceAccessGuide({
   workspaceId,
   onConfigured,
   initial,
+  defaultRootPath,
 }: Props) {
   const [daemonId, setDaemonId] = useState(initial?.daemon_id ?? "");
   const [rootPath, setRootPath] = useState(initial?.root_path ?? "");
@@ -80,6 +84,15 @@ export function WorkspaceAccessGuide({
   const [error, setError] = useState<string | null>(null);
 
   const [instances, setInstances] = useState<DaemonInstanceRead[]>([]);
+  // quick-18951370：本工作区的共享守护进程（融合候选按 sharedMeta.sourceWorkspaceId
+  // 过滤）——业务成员无自有 daemon 时一键选用（绑定是引用，后端已放宽 grant 可绑）。
+  const { machineCandidates } = useDaemonMachines({ limit: 100 });
+  const sharedDaemons = (machineCandidates ?? [])
+    .filter((m) => m.sharedMeta?.sourceWorkspaceId === workspaceId)
+    .map((m) => ({
+      id: m.id,
+      label: `${m.display_alias ?? m.hostname}（共享自 ${m.sharedMeta?.lenderDisplayName ?? "成员"}）`,
+    }));
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -140,6 +153,32 @@ export function WorkspaceAccessGuide({
       {error && (
         <div className="mb-3 rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
           {error}
+        </div>
+      )}
+
+      {sharedDaemons.length > 0 && (
+        <div
+          className="mb-3 rounded border border-info/30 bg-info/5 px-3 py-2"
+          data-testid="shared-daemon-quick-pick"
+        >
+          <p className="mb-1.5 text-xs font-medium text-brand-700">
+            使用成员共享的守护进程（无需自己安装）
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {sharedDaemons.map((sd) => (
+              <Button
+                key={sd.id}
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setDaemonId(sd.id);
+                  if (!rootPath && defaultRootPath) setRootPath(defaultRootPath);
+                }}
+              >
+                {sd.label}
+              </Button>
+            ))}
+          </div>
         </div>
       )}
 

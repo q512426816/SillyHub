@@ -548,6 +548,7 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
           <WorkspaceAccessGuide
             workspaceId={workspaceId}
             onConfigured={onRefresh}
+            defaultRootPath={workspace.root_path}
           />
         </div>
       );

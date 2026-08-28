@@ -47,16 +47,44 @@ async def upsert_my_binding(
     function — it retains legacy snapshot data only.
 
     Raises ``AppError(403)`` if ``daemon_id`` is set but belongs to a
-    different user (defensive — prevents cross-user daemon hijack).
+    different user AND is not an enabled workspace-granted online daemon
+    (quick-18951370 共享绑定放宽；防跨工作区/跨用户劫持语义不变).
     """
     if daemon_id is not None:
         daemon = await session.get(DaemonInstance, daemon_id)
-        if daemon is None or daemon.user_id != user_id:
+        # quick-18951370（共享绑定）：owner 直绑（原路径零变化）；非 owner 放宽为
+        # 「本工作区有 enabled workspace grant 且 daemon 在线」即可绑——业务成员
+        # 无自有 daemon 时可直接选用成员共享的守护进程（bind 是引用不是属权）。
+        # 无 grant / 离线维持 403（防跨工作区/跨用户劫持语义不变）。
+        if daemon is None:
             raise AppError(
-                "该守护进程不属于当前用户，无法使用。",
+                "该守护进程不存在，无法使用。",
                 code="daemon_not_owned",
                 http_status=403,
             )
+        if daemon.user_id != user_id:
+            from app.modules.daemon.grants.model import DaemonRuntimeGrant
+
+            shared_ok = (
+                (
+                    await session.execute(
+                        select(DaemonRuntimeGrant).where(
+                            col(DaemonRuntimeGrant.daemon_instance_id) == daemon_id,
+                            col(DaemonRuntimeGrant.grantee_type) == "workspace",
+                            col(DaemonRuntimeGrant.grantee_id) == workspace_id,
+                            col(DaemonRuntimeGrant.enabled).is_(True),
+                        )
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if shared_ok is None or daemon.status != "online":
+                raise AppError(
+                    "该守护进程不属于当前用户，且不是本工作区的在线共享守护进程，无法使用。",
+                    code="daemon_not_owned",
+                    http_status=403,
+                )
 
     existing = await session.get(WorkspaceMemberRuntime, (workspace_id, user_id))
     now = datetime.now(UTC)
