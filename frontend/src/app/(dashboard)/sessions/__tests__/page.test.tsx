@@ -1276,3 +1276,31 @@ describe("SessionPanel reconnecting 恢复超时入口 + reopen 409 中文化（
     expect((shown as Error).message).not.toContain("reopen");
   });
 });
+
+describe("机器筛选 tab 接入共享机器（quick 机器行修复）", () => {
+  it("hook 返回融合候选时，机器 tab 出现共享机器选项（180024 无自有机器场景）", async () => {
+    const sharedCandidate = {
+      id: "sm-share-2",
+      hostname: "shared-host-2",
+      display_alias: "共享的机器",
+      status: "online",
+      runtimes: [],
+      created_at: "2026-08-28T00:00:00Z",
+      updated_at: "2026-08-28T00:00:00Z",
+      isShared: true,
+      lenderDisplayName: "系统管理员",
+    };
+    mocks.machinesHook.mockReturnValue({
+      items: [],
+      machineCandidates: [sharedCandidate],
+      sessions: [],
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+    });
+    renderPage();
+    expect(
+      await screen.findByRole("button", { name: /机器tab 共享的机器/ }),
+    ).toBeTruthy();
+  });
+});

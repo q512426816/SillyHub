@@ -32,7 +32,9 @@ export default function MobileSessionChatPage() {
   const qc = useQueryClient();
 
   // ── 页面级数据（与悬浮宿主同源同 key，见文件头）──────────────────────
-  const { items: machines } = useDaemonMachines({ limit: 100 });
+  // quick：融合候选（含共享机器）——离线判定覆盖共享会话。
+  const { machineCandidates } = useDaemonMachines({ limit: 100 });
+  const machines = machineCandidates ?? [];
   const providersQ = useQuery({
     queryKey: ["llmProviders", "floating-session"],
     queryFn: listProviders,

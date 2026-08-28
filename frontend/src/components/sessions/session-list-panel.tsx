@@ -439,7 +439,10 @@ export function SessionListPanel(props: SessionListPanelProps) {
 /** 机器列表 + 工作区列表 + runtime→机器映射（树/平铺两分支共用数据源）。 */
 function useSessionListSharedData() {
   // 机器列表（两层筛选机器 tab / 机器小节在线点 / chips 回退共用一份数据源）。
-  const { items: machines } = useDaemonMachines({ limit: 100 });
+  // quick（机器筛选接共享机器）：改喂融合候选（自有 + 共享给我的，180024 无自有
+  // 机器时筛选 tab 此前只剩「全部」）；runtimeToMachine 同步覆盖共享会话归属。
+  const { machineCandidates } = useDaemonMachines({ limit: 100 });
+  const machines = machineCandidates ?? [];
 
   // 工作区列表（树分组 / chips 工作区名解析）。
   const workspacesQuery = useQuery({

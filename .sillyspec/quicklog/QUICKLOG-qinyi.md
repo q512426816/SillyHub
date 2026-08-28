@@ -304,3 +304,12 @@
 根因：sessions-portal 只喂 PreSessionPicker 自有 items，漏接 task-10 的 machineCandidates 融合候选（门户新建表单是悬浮/运行中条/门户三入口中唯一漏网的）
 方案：sessions-portal 三处消费（组头「＋」picker + 两处 SessionPanel）统一切 pickerMachines=machineCandidates??machines，对齐 floating-host 接法，离线判定同步覆盖共享会话
 结果：新增融合候选回归用例+既有 19 用例 20/20 全过、tsc 零错、前端容器重建后 chunks 含 sharedToMe、提交 dd6d8a8e+8a6403f1 已推送 origin/main
+
+## ql-20260828-006-739b | 2026-08-28 09:06:24 | 共享机器会话创建 404 修复——D-012 早退误伤双授权场景
+状态：已完成
+关联变更：（无）
+文件：（见实际改动）
+需求：共享机器会话创建 404 修复——D-012 早退误伤双授权场景
+根因：v1 platform 早退在 workspace 授权前 return None，门户无档案直传被一刀切封堵
+方案：删早退统一 workspace 判定（无授权仍默认 404，封堵目标不变）
+结果：29+1386 用例全过、ruff/mypy 净、实测 201+审计 grant_id

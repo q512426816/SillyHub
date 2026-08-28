@@ -209,7 +209,9 @@ export function MobileSessionList({
   );
 
   // 机器分组数据源：与桌面树同源同参（session-list-panel.tsx:436）。
-  const { items: machines } = useDaemonMachines({ limit: 100 });
+  // quick：融合候选（含共享机器）——机器分组/在线态覆盖共享会话归属。
+  const { machineCandidates } = useDaemonMachines({ limit: 100 });
+  const machines = machineCandidates ?? [];
 
   /** runtime_id → 所属机器（在线判定：machine.status === "online"）。 */
   const runtimeToMachine = useMemo<RuntimeMachineIndex>(() => {

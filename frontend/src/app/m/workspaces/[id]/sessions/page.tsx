@@ -52,7 +52,9 @@ export default function MobileWorkspaceSessionsPage() {
   const { workspace } = useMobileWorkspace();
 
   // ── 页面级数据（与悬浮宿主同源同 key，见文件头）──────────────────────
-  const { items: machines } = useDaemonMachines({ limit: 100 });
+  // quick：融合候选（含共享机器）——离线判定/默认机器解析覆盖共享资源。
+  const { machineCandidates } = useDaemonMachines({ limit: 100 });
+  const machines = machineCandidates ?? [];
   const providersQ = useQuery({
     queryKey: ["llmProviders", "floating-session"],
     queryFn: listProviders,
