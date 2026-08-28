@@ -281,6 +281,8 @@ describe('task-16 / 集成: ndjson batch runLease → TaskResult.stats 含 cache
     const stats = result.stats as Record<string, unknown>;
     expect(stats.cache_read_tokens).toBe(700);
     expect(stats.cache_creation_tokens).toBe(200);
-    expect(stats.input_tokens).toBe(200); // 100 assistant + 100 result
+    // ql-20260829-001：assistant.usage(100) 与 result.usage(100) 同源（result 是
+    // CLI 官方全 run 累计），旧求和断言 200 钉住翻倍 bug → result 优先取 100。
+    expect(stats.input_tokens).toBe(100);
   });
 });

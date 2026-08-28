@@ -977,7 +977,7 @@ describe('task-01 cache 词元采集', () => {
     expect(usage.cache_read_tokens).toBe(300);
   });
 
-  it('result 事件 extractResultStats: cache 用 result 优先（覆盖 accumulated），input/output 求和', () => {
+  it('result 事件 extractResultStats: 四维均 result 优先（覆盖 accumulated，同源不翻倍）', () => {
     const a = new StreamJsonAdapter('claude');
     a.resetAccumulator();
     // 先 assistant commit 累加 cache（accumulated = 200/300）
@@ -1004,8 +1004,9 @@ describe('task-01 cache 词元采集', () => {
         },
       }),
     );
-    // result 带 cache → cache 取 result.cache_*_input_tokens(200/300) 覆盖 accumulated
-    // （task-16 修复：cache 是会话级快照非增量，求和会翻倍；input/output 仍求和）
+    // result 带 usage → 四维取 result 权威值覆盖 accumulated
+    // （task-16：cache 是会话级快照非增量，求和翻倍已修；ql-20260829-001：input/output
+    //  与 accumulated 同源，求和同样翻倍（实测 1447→2894），对齐 result 优先语义）
     const events = a.parse(
       JSON.stringify({
         type: 'result',
@@ -1026,8 +1027,8 @@ describe('task-01 cache 词元采集', () => {
     const stats = events[0]!.metadata?.stats as Record<string, number>;
     expect(stats.cache_creation_tokens).toBe(200); // result 覆盖（非 200+200）
     expect(stats.cache_read_tokens).toBe(300); // result 覆盖（非 300+300）
-    expect(stats.input_tokens).toBe(200); // 100 + 100
-    expect(stats.output_tokens).toBe(100); // 50 + 50
+    expect(stats.input_tokens).toBe(100); // result 覆盖（非 100+100）
+    expect(stats.output_tokens).toBe(50); // result 覆盖（非 50+50）
   });
 
   it('result 无 cache 字段 → extractResultStats 回落 accumulated（result.usage 缺 cache 按 0 累加）', () => {

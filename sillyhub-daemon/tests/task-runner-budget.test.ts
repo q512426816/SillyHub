@@ -127,7 +127,7 @@ describe('task-08 / extractBudgetUsageTokens（D-009 口径）', () => {
 
 describe('task-08 / budget 软切断（batch runLease 集成）', () => {
   beforeEach(() => {
-    // 真实 adapter：让 parse 完整跑过，stats 走 extractResultStats 累加。
+    // 真实 adapter：让 parse 完整跑过，stats 走 extractResultStats（result 优先）。
     mockAdapter = new StreamJsonAdapter('claude');
   });
 
@@ -145,7 +145,9 @@ describe('task-08 / budget 软切断（batch runLease 集成）', () => {
     const killSpy = vi.spyOn(child, 'kill');
     vi.mocked(spawn).mockReturnValue(child as never);
 
-    // budget=100。assistant usage 60/30 + result usage 50/40 = input 110 / output 70 = 180 ≥ 100。
+    // budget=100。assistant 中间快照 60/30；result.usage 是 CLI 官方全 run 累计
+    // 110/70（ql-20260829-001：result 优先、不与 accumulated 求和——同源求和翻倍）。
+    // input 110 + output 70 = 180 ≥ 100 → 触发软切断。
     const lease = makeLease({ budget_tokens: 100 });
     const runPromise = runner.runLease(lease);
 
@@ -166,7 +168,7 @@ describe('task-08 / budget 软切断（batch runLease 集成）', () => {
         is_error: false,
         result: 'done',
         session_id: 'sess-bg',
-        usage: { input_tokens: 50, output_tokens: 40 },
+        usage: { input_tokens: 110, output_tokens: 70 },
       }),
     ]);
     child._endStdout();
@@ -187,8 +189,8 @@ describe('task-08 / budget 软切断（batch runLease 集成）', () => {
       (m) => m.reason === 'budget_exceeded',
     )!;
     expect(budgetMsg.usage).toEqual({
-      input_tokens: 110, // 60 + 50
-      output_tokens: 70, // 30 + 40
+      input_tokens: 110, // result 官方累计（非 60+50 求和）
+      output_tokens: 70,
     });
     expect(budgetMsg.budget_tokens).toBe(100);
 

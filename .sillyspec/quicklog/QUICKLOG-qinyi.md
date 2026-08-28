@@ -402,3 +402,19 @@
 根因：mypy 拦门期间三债从未在 CI 执行：3d8432d9 写了英文 422 文案违 l10n 守护、ctx_tokens 字段加入后旧测试构造未跟、captcha 用例 monkeypatch.undo 连 fixture 补丁一并撤销在无 Redis 的 CI 上失败计数丢失
 方案：router/schema 两处同口径中文化；测试构造补 ctx_tokens=None；去 undo 改显式翻回开关并调高限流阈值隔离关注点
 结果：l10n/tool_kind/captcha 127 用例绿 + daemon ppm/list_filters 57 绿 + mypy 762 文件 0 错 + ruff 净
+
+## ql-20260829-001-ace1 | 2026-08-29 02:01:23 | 修复 batch token 统计 input/output 翻倍 bug（extractResultStats 同源求和）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/adapters/stream-json.ts（extractResultStats input/output 改 result 优先回落 + docstring/注释同步）
+- sillyhub-daemon/tests/stream-json.test.ts（旧求和断言改四维 result 优先）
+- sillyhub-daemon/tests/stats-passthrough.test.ts（case1/case3 断言修正 + case1b 翻倍回归新增）
+- sillyhub-daemon/tests/cache-passthrough.test.ts（input 200→100 断言修正）
+- sillyhub-daemon/tests/task-runner-budget.test.ts（result.usage 数据改官方累计语义）
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（变更索引补 ql-20260829-001-ace1）
+需求：修复 batch token 统计 input/output 翻倍 bug（extractResultStats 同源求和）
+根因：Claude CLI 的 result.usage 本身是整个 run 的官方累计，accumulated 是 message_start/message_delta 自算的同一份账（batch 必开 --include-partial-messages 恒有值），旧代码两者相加致 AgentRun 输入/输出终值精确 2 倍（实测 1447→2894）；task-16 当时只修了 cache 两维的同类翻倍，input/output 漏改
+方案：extractResultStats 的 input/output 对齐 cache 的 task-16 语义改为 result.usage 优先、缺失回落 accumulated；同步更新 _accumulatedUsage docstring 与过时注释；修正 4 处钉住旧求和断言的用例（stream-json 四维 result 优先 / stats-passthrough case1&case3 / cache-passthrough input 100 / task-runner-budget result.usage 改官方累计 110/70 保持 budget 触发意图）+ 新增 case1b 真实事件流翻倍回归；模块文档 sillyhub-daemon.md 变更索引补 ql-20260829-001-ace1
+结果：stream-json+stats-passthrough+cache-passthrough+task-runner-budget 88 用例与 task-runner 72 用例全绿，pnpm typecheck 0 错误；未部署（daemon 修复需随下次 daemon 发版分发）
+审计：⚖️ 归属切分：3 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/tests/cache-passthrough.test.ts, sillyhub-daemon/tests/stats-passthrough.test.ts, sillyhub-daemon/tests/task-runner-budget.test.ts

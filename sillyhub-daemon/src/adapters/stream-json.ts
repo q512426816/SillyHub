@@ -86,8 +86,8 @@ export class StreamJsonAdapter implements ProtocolAdapter {
   /**
    * 跨 assistant 事件累加的 usage（task-06：对齐 SERVER _extract_result_metadata 聚合策略）。
    * parseAssistant 每次累加 message.usage.input_tokens/output_tokens；
-   * parseResult 时通过 extractResultStats 与 result.usage 求和（result.usage 优先 +
-   * accumulated 防御性双保险）。
+   * parseResult 时 extractResultStats 按「result.usage 优先，缺失才回落本值」取数
+   * （ql-20260829-001：两者同源，求和必翻倍，input/output 对齐 task-16 的 cache 语义）。
    *
    * 跨 lease 重置：TaskRunner 在 runLease 步骤4 拿到 adapter 后调 resetAccumulator，
    * 避免 adapter 单例场景下跨 lease 累加污染（task-06 §边界处理 6）。
@@ -1198,21 +1198,28 @@ function extractResultStats(
   // usage 拆平（优先取 result.usage；缺失时回落 accumulated）
   const usage = resultMsg.usage;
   if (isRecord(usage)) {
-    stats.input_tokens =
-      (typeof usage.input_tokens === 'number' ? usage.input_tokens : 0) + accumulated.input_tokens;
-    stats.output_tokens =
-      (typeof usage.output_tokens === 'number' ? usage.output_tokens : 0) +
-      accumulated.output_tokens;
+    // ql-20260829-001：input/output 与 cache 同构采用「result.usage 优先，缺失才回落
+    // accumulated」语义（对齐下方 task-16 的 cache 修法）。原因：result.usage 的
+    // input/output_tokens 同样是 CLI 官方的**整个 run 累计**，而 accumulated 是从
+    // message_start/message_delta/assistant 自算的**同一份账**——旧求和语义
+    // （result + accumulated）在开 --include-partial-messages 后必精确翻倍
+    // （实测 1447 → 2894）。task-16 当时只修了 cache 两维，input/output 漏改。
+    const resultInput =
+      typeof usage.input_tokens === 'number' ? usage.input_tokens : undefined;
+    const resultOutput =
+      typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined;
+    stats.input_tokens = resultInput !== undefined ? resultInput : accumulated.input_tokens;
+    stats.output_tokens = resultOutput !== undefined ? resultOutput : accumulated.output_tokens;
     // task-16 修复（2026-06-24-runtime-usage-stats task-16 / execute step13）：
-    // cache 两维采用「result.usage 优先，缺失才回落 accumulated」语义（replace/max），
-    // 而非 input/output 的求和语义。原因：Claude CLI 在 stream-json 模式下，
-    // cache_*_input_tokens 是**会话级累计快照**（不是 turn 增量）——
+    // cache 两维采用「result.usage 优先，缺失才回落 accumulated」语义（replace/max）。
+    // 原因：Claude CLI 在 stream-json 模式下，cache_*_input_tokens 是**会话级累计
+    // 快照**（不是 turn 增量）——
     //   - result.usage.cache_*_input_tokens = 整个会话累计
     //   - assistant.message.usage.cache_*_input_tokens（无 --include-partial-messages 时）
     //     = 截至该 turn 的累计（与 result 同一份全局值的子集）
     //   - message_delta.event.usage.cache_*_input_tokens（--include-partial-messages 时）
     //     = 当前 turn 累计快照（同样非增量）
-    // 若按 input/output 求和（result.cache + accumulated.cache），accumulated 已含
+    // 若对同源两值求和（result + accumulated），accumulated 已含
     // assistant/message_delta 的同一份 cache，必然翻倍（task-16 测试发现的 bug）。
     // 故 cache 只取权威源：result.usage 有则用（覆盖 accumulated），无则回落 accumulated。
     // 字段名映射：result.usage 用 cache_*_input_tokens（Claude 原始名），

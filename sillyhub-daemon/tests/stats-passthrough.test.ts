@@ -2,7 +2,8 @@
 // task-06: A2 stats 透传链路单测。
 //
 // 覆盖 5 case（task-06.md §TDD 步骤 1）：
-//   1. adapter 拆 usage（extractResultStats：result.usage + accumulated 累加）
+//   1. adapter 拆 usage（extractResultStats：result.usage 优先，缺失回落 accumulated，
+//      ql-20260829-001 修正——同源求和会翻倍）+ 1b 真实事件流翻倍回归
 //   2. result 无 usage 时回落 accumulated
 //   3. _finish 透传 stats（_spawnAndStream → _finish → TaskRunnerResult.stats）
 //   4. completeLease payload 完整（runLease 成功路径 → daemon 提交含 stats/exit_code/status）
@@ -85,8 +86,8 @@ beforeEach(() => {
 // case 1 & 2：extractResultStats（adapter 拆 usage + 累加）
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('task-06 / case1&2: StreamJsonAdapter extractResultStats 拆 usage + 累加', () => {
-  it('case1: result 有 usage → 拆平 input/output_tokens + 与 accumulated 求和', () => {
+describe('task-06 / case1&2: StreamJsonAdapter extractResultStats 拆 usage（result 优先）', () => {
+  it('case1: result 有 usage → 拆平 input/output_tokens；result.usage 优先不与 accumulated 求和（同源防翻倍）', () => {
     // 驱动：构造一个 complete 事件，让 adapter.parse 产出 metadata.stats；
     // 直接通过 parse 完整路径验证（更接近真实调用链）。
     const adapter = new StreamJsonAdapter('claude');
@@ -119,12 +120,111 @@ describe('task-06 / case1&2: StreamJsonAdapter extractResultStats 拆 usage + �
     const completeEv = events![0];
     expect(completeEv.type).toBe('complete');
     const stats = completeEv.metadata?.stats as Record<string, unknown>;
-    // input/output = result.usage(100/50) + accumulated(30/20) = 130/70
-    expect(stats.input_tokens).toBe(130);
-    expect(stats.output_tokens).toBe(70);
+    // ql-20260829-001：result.usage 与 accumulated 同源（result 是 CLI 官方全 run
+    // 累计，accumulated 是 message_start/message_delta/assistant 自算的同一份账），
+    // 求和必翻倍 → result.usage 优先取 100/50（旧断言 130/70 钉住的是翻倍 bug）。
+    expect(stats.input_tokens).toBe(100);
+    expect(stats.output_tokens).toBe(50);
     expect(stats.total_cost_usd).toBe(0.01);
     expect(stats.num_turns).toBe(3);
     expect(stats.duration_ms).toBe(5000);
+  });
+
+  it('case1b: --include-partial-messages 真实事件流（message_start/message_delta 累计 + result 同源）不翻倍', () => {
+    // ql-20260829-001 回归：CLI 开 --include-partial-messages 后 accumulated 经
+    // message_start（input/cache）+ message_delta（output）累计出真实全 run 账，
+    // result.usage 是 CLI 官方的同一份累计——旧求和语义产出精确 2 倍
+    // （实测 1447 → 2894 / 130 → 260）。修复后四维均取 result.usage 权威值。
+    const adapter = new StreamJsonAdapter('claude');
+    const lines = [
+      // turn 1：本次调用 input=1437, cache_creation=12000, cache_read=0
+      JSON.stringify({
+        type: 'stream_event',
+        event: {
+          type: 'message_start',
+          message: {
+            id: 'msg_1',
+            usage: {
+              input_tokens: 1437,
+              cache_creation_input_tokens: 12000,
+              cache_read_input_tokens: 0,
+              output_tokens: 1,
+            },
+          },
+        },
+      }),
+      JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'message_delta', usage: { output_tokens: 50 } },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'msg_1',
+          usage: { input_tokens: 0, output_tokens: 0 },
+          content: [{ type: 'text', text: 'turn 1' }],
+        },
+      }),
+      // turn 2：input=10（新增），cache_read=13400（turn1 全量命中）
+      JSON.stringify({
+        type: 'stream_event',
+        event: {
+          type: 'message_start',
+          message: {
+            id: 'msg_2',
+            usage: {
+              input_tokens: 10,
+              cache_creation_input_tokens: 0,
+              cache_read_input_tokens: 13400,
+              output_tokens: 1,
+            },
+          },
+        },
+      }),
+      JSON.stringify({
+        type: 'stream_event',
+        event: { type: 'message_delta', usage: { output_tokens: 80 } },
+      }),
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'msg_2',
+          usage: { input_tokens: 0, output_tokens: 0 },
+          content: [{ type: 'text', text: 'turn 2' }],
+        },
+      }),
+      // result.usage = 整个 run 累计（CLI 官方）
+      JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        result: 'done',
+        session_id: 'sess-1b',
+        usage: {
+          input_tokens: 1447,
+          output_tokens: 130,
+          cache_creation_input_tokens: 12000,
+          cache_read_input_tokens: 13400,
+        },
+        num_turns: 2,
+      }),
+    ];
+    let stats: Record<string, unknown> | undefined;
+    for (const line of lines) {
+      const events = adapter.parse(line);
+      if (!events) continue;
+      for (const ev of events) {
+        if (ev.type === 'complete') {
+          stats = (ev.metadata as Record<string, unknown>)?.stats as Record<string, unknown>;
+        }
+      }
+    }
+    expect(stats).toBeDefined();
+    // 旧求和语义此处产出 2894/260（翻倍）；修复后取 result.usage 权威值。
+    expect(stats!.input_tokens).toBe(1447);
+    expect(stats!.output_tokens).toBe(130);
+    expect(stats!.cache_creation_tokens).toBe(12000);
+    expect(stats!.cache_read_tokens).toBe(13400);
   });
 
   it('case2: result 无 usage → 回落 accumulated（仅 assistant 事件聚合值）', () => {
@@ -215,15 +315,15 @@ describe('task-06 / case3: _spawnAndStream 收集 complete.stats → _finish 透
 
     const result = await runPromise;
 
-    // TaskRunnerResult.stats 必须透传（含累加后的 tokens + cost）
+    // TaskRunnerResult.stats 必须透传（result.usage 权威值 + cost）
     expect(result.stats).toBeDefined();
     const stats = result.stats as Record<string, unknown>;
     expect(stats.total_cost_usd).toBe(0.05);
     expect(stats.num_turns).toBe(2);
-    // 50 + 10 = 60
-    expect(stats.input_tokens).toBe(60);
-    // 25 + 5 = 30
-    expect(stats.output_tokens).toBe(30);
+    // ql-20260829-001：result.usage(50/25) 优先（官方全 run 累计），不与
+    // assistant 累计值(10/5) 求和（同源求和翻倍；旧断言 60/30 钉住翻倍 bug）。
+    expect(stats.input_tokens).toBe(50);
+    expect(stats.output_tokens).toBe(25);
   });
 });
 
