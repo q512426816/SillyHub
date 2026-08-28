@@ -443,6 +443,54 @@ async function selectDefaultSession() {
   );
 }
 
+describe("quick-a0458ac9：门户机器选择器接入共享机器（machineCandidates 三入口补漏）", () => {
+  it("hook 返回融合候选时，组头「＋」两步浮层第一步可见共享机器并可进入第二步选智能体", async () => {
+    // 共享机器候选（task-10/task-13 形态：含真实 runtimes 与共享元数据）。
+    const sharedCandidate = {
+      id: "sm-share-1",
+      hostname: "shared-host",
+      display_alias: "牛逼的电脑",
+      status: "online",
+      runtimes: [
+        {
+          id: "srt-1",
+          provider: "claude",
+          status: "online",
+          display_alias: null,
+          version: "1.0.0",
+          created_at: "2026-08-28T00:00:00Z",
+          updated_at: "2026-08-28T00:00:00Z",
+        },
+      ],
+      created_at: "2026-08-28T00:00:00Z",
+      updated_at: "2026-08-28T00:00:00Z",
+      isShared: true,
+      lenderDisplayName: "系统管理员",
+    };
+    mocks.machinesHook.mockReturnValue({
+      items: [makeMachine()],
+      machineCandidates: [makeMachine(), sharedCandidate],
+      sessions: [],
+      isLoading: false,
+      isFetching: false,
+      isError: false,
+    });
+    renderPage();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "在 非工作区 新建会话" }),
+    );
+    // 第一步：共享机器出现（选择按钮含机器标识）。
+    const sharedBtn = await screen.findByRole("button", {
+      name: /选择机器 牛逼的电脑/,
+    });
+    fireEvent.click(sharedBtn);
+    // 第二步：该机器的 Claude 智能体可选。
+    expect(
+      await screen.findByRole("button", { name: /选择智能体 Claude Code/ }),
+    ).toBeTruthy();
+  });
+});
+
 describe("SessionsPortalPage 两栏两态组装（task-10 冒烟；task-08 薄壳化——渲染经 SessionsPortal 间接覆盖；task-07 表单态断言迁移预会话/空门户态）", () => {
   it("无选中：左会话列表 + 右空门户态 + 页头标题（task-07：原「新建会话表单」断言迁移）", async () => {
     renderPage();

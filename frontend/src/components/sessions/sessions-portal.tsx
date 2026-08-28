@@ -166,8 +166,18 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
 
   // 机器列表：SessionPanel 离线判定 + PreSessionPicker 第一步数据源共用；
   // sessions/isLoading 供 ?new=1 直达的 D-005 默认机器解析（ql-20260823-005）。
-  const { items: machines, sessions, isLoading: machinesLoading } =
-    useDaemonMachines({ limit: 100 });
+  // quick-a0458ac9（task-10 三入口补漏）：PreSessionPicker 改喂 machineCandidates
+  // （自有 + 共享给我的融合候选，2026-08-28-daemon-agent-share D-004@v2 用户自选）；
+  // machines 保留自有视图供 SessionPanel 离线判定（会话属主语义不变）。
+  const {
+    items: machines,
+    machineCandidates,
+    sessions,
+    isLoading: machinesLoading,
+  } = useDaemonMachines({ limit: 100 });
+  // quick-a0458ac9：三处消费统一走融合候选（对齐 floating-session-host task-10 接法：
+  // picker + 两处 SessionPanel；候选含共享机器的 runtimes，离线判定覆盖共享会话）。
+  const pickerMachines = machineCandidates ?? machines;
 
   // 最近会话（空门户快捷动作「继续最近会话」）：last_active_at 优先，其次
   // created_at；无会话返回 null 不渲染入口。
@@ -485,7 +495,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             key={selectedSessionId}
             mode="page"
             sessionId={selectedSessionId}
-            machines={machines}
+            machines={pickerMachines}
             llmProviders={providers}
             onSessionListRefresh={refreshSessionLists}
           />
@@ -494,7 +504,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             key={`pre:${preContext.workspaceId ?? "-"}:${preContext.runtimeId}`}
             mode="page"
             sessionId={null}
-            machines={machines}
+            machines={pickerMachines}
             llmProviders={providers}
             preContext={preContext}
             onPreSessionCreated={handlePreSessionCreated}
@@ -565,7 +575,7 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
           Claude 高亮）；onPick 合成 preContext，取消仅关闭零影响。 */}
       <PreSessionPicker
         open={pickerOpen}
-        machines={machines}
+        machines={pickerMachines}
         onCancel={() => setPickerOpen(false)}
         onPick={handlePickerPick}
       />
