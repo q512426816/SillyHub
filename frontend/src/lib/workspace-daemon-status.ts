@@ -29,6 +29,7 @@ import {
   fetchMyBindings,
 } from "@/lib/workspace-binding";
 import { type DaemonInstanceRead, listDaemonInstances } from "@/lib/daemon";
+import { useDaemonMachines } from "@/lib/use-daemon-machines";
 
 /**
  * 单个 workspace 的 daemon 状态条目（statusMap 值）。
@@ -112,14 +113,27 @@ export function useDaemonStatusMap(): {
   isLoading: boolean;
   isError: boolean;
 } {
+  // quick-90a9bf32：实例源并入共享候选——绑定共享 daemon 时 listDaemonInstances
+  // （仅自有）查不到该实例会被判「离线」误报；融合候选含共享机器（15s 轮询、
+  // 与守护进程页同缓存），聚合前合并去重（自有优先）。
+  const { machineCandidates } = useDaemonMachines({ limit: 100 });
+
   const q = useQuery<Record<string, DaemonStatusEntry>, ApiError>({
-    queryKey: WORKSPACE_DAEMON_STATUS_QUERY_KEY,
+    queryKey: [...WORKSPACE_DAEMON_STATUS_QUERY_KEY, machineCandidates],
     queryFn: async () => {
       const [bindings, instances] = await Promise.all([
         fetchMyBindings(),
         listDaemonInstances().catch(() => [] as DaemonInstanceRead[]),
       ]);
-      return aggregateDaemonStatus(bindings, instances);
+      const shared = (machineCandidates ?? []).map((m) => ({
+        id: m.id,
+        status: m.status,
+      })) as DaemonInstanceRead[];
+      const merged = [...instances];
+      for (const sh of shared) {
+        if (!merged.some((i) => i.id === sh.id)) merged.push(sh);
+      }
+      return aggregateDaemonStatus(bindings, merged);
     },
     refetchInterval: 30_000,
   });
