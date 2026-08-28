@@ -617,53 +617,54 @@ describe("SessionPanel task-14 分身会话浮层（FR-08 / design §5.E）", ()
 
 /* ───────── 6. task-07 Phase 5：page 模式预会话 autoTeamOpen 自动弹层（FR-06 / D-004@v2） ───────── */
 
-describe("SessionPanel page 模式 autoTeamOpen 自动开弹层（预会话）", () => {
-  /** 预会话形态：ppm_project 页面上下文 + 在线 claude runtime（悬浮宿主同款接线）。 */
-  function setupPre(
-    autoTeamOpen?: boolean,
-    pageContext: Record<string, string> = {
-      page_key: "ppm_project",
-      project_id: "p-1",
+/** 预会话形态：ppm_project 页面上下文 + 在线 claude runtime（悬浮宿主同款接线）。
+ * ql-20260828-011-1ec7 提升为文件级——待生效 chip describe 复用。 */
+function setupPre(
+  autoTeamOpen?: boolean,
+  pageContext: Record<string, string> = {
+    page_key: "ppm_project",
+    project_id: "p-1",
+  },
+) {
+  const machines = [
+    {
+      id: "m-1",
+      status: "online",
+      hostname: "m1-host",
+      display_alias: null,
+      runtimes: [{ id: "rt-1", status: "online", provider: "claude" }],
     },
-  ) {
-    const machines = [
-      {
-        id: "m-1",
-        status: "online",
-        hostname: "m1-host",
-        display_alias: null,
-        runtimes: [{ id: "rt-1", status: "online", provider: "claude" }],
-      },
-    ] as never[];
-    sessionApi.listSessionRuns.mockResolvedValue([]);
-    workspaceApi.listWorkspaces.mockResolvedValue({ items: [] });
-    workspaceApi.listProjects.mockResolvedValue([
-      { id: "p-1", project_name: "网站重构项目", project_code: "P-1" },
-    ]);
-    workspaceApi.listProjectWorkspaces.mockResolvedValue([
-      { workspace_id: "ws-a", name: "sillyspec", status: "active", type: "backend-code" },
-    ]);
-    const qc = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    return render(
-      <QueryClientProvider client={qc}>
-        <SessionPanel
-          mode="page"
-          sessionId={null}
-          machines={machines}
-          llmProviders={[]}
-          preContext={{
-            workspaceId: null,
-            runtimeId: "rt-1",
-            pageContext: pageContext as never,
-          }}
-          autoTeamOpen={autoTeamOpen}
-        />
-      </QueryClientProvider>,
-    );
-  }
+  ] as never[];
+  sessionApi.listSessionRuns.mockResolvedValue([]);
+  workspaceApi.listWorkspaces.mockResolvedValue({ items: [] });
+  workspaceApi.listProjects.mockResolvedValue([
+    { id: "p-1", project_name: "网站重构项目", project_code: "P-1" },
+  ]);
+  workspaceApi.listProjectWorkspaces.mockResolvedValue([
+    { workspace_id: "ws-a", name: "sillyspec", status: "active", type: "backend-code" },
+  ]);
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={qc}>
+      <SessionPanel
+        mode="page"
+        sessionId={null}
+        machines={machines}
+        llmProviders={[]}
+        preContext={{
+          workspaceId: null,
+          runtimeId: "rt-1",
+          pageContext: pageContext as never,
+        }}
+        autoTeamOpen={autoTeamOpen}
+      />
+    </QueryClientProvider>,
+  );
+}
 
+describe("SessionPanel page 模式 autoTeamOpen 自动开弹层（预会话）", () => {
   it("autoTeamOpen：预会话挂载即自动开弹层（无需点击）+ objective 预填项目名句式 + 项目预选", async () => {
     workspaceApi.getProject.mockResolvedValue({
       project_name: "网站重构项目",
@@ -704,5 +705,87 @@ describe("SessionPanel page 模式 autoTeamOpen 自动开弹层（预会话）",
     expect(await screen.findByText("派团队做这件事")).toBeInTheDocument();
     const objInput = screen.getByLabelText(/^目标/) as HTMLInputElement;
     expect(objInput.value).toBe("");
+  });
+});
+
+/* ───────── 7. ql-20260828-011-1ec7：预会话待生效 chip（配置反馈 + 放弃） ───────── */
+
+describe("SessionPanel page 模式预会话待生效 chip（ql-20260828-011-1ec7）", () => {
+  it("弹层确认 → 待生效 chip 出现（虚线样式语义：已配置待随首句生效）+ 输入框回填 /team", async () => {
+    workspaceApi.getProject.mockResolvedValue({
+      project_name: "网站重构项目",
+      project_code: "P-1",
+    });
+    setupPre(true);
+
+    expect(await screen.findByText("派团队做这件事")).toBeInTheDocument();
+    // 等 scope 自动预选完成（defaultProjectId → 关联工作区预勾选）再确认，
+    // 否则项目维度「至少一个工作区」校验拦截 onTrigger。
+    await waitFor(() =>
+      expect(
+        screen.getByRole("checkbox", { name: /勾选工作区 sillyspec/ }),
+      ).toBeChecked(),
+    );
+    // 确认前无 chip。
+    expect(screen.queryByTestId("team-pending-chip")).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: /派团队（随首句创建生效）/ }),
+    );
+
+    // 确认后：待生效 chip + 输入框回填 /team 前缀（预会话主输入框，唯一 textbox）。
+    const chip = await screen.findByTestId("team-pending-chip");
+    expect(chip.textContent).toContain("团队已配置 · 随首句创建生效");
+    const input = (await screen.findByRole(
+      "textbox",
+    )) as HTMLTextAreaElement;
+    await waitFor(() => expect(input.value).toContain("/team"));
+  });
+
+  it("待生效 chip × → 放弃配置（chip 消失 + /team 回填清空）+ 首句不带 team_mission", async () => {
+    workspaceApi.getProject.mockResolvedValue({
+      project_name: "网站重构项目",
+      project_code: "P-1",
+    });
+    sessionApi.createSession.mockResolvedValue({
+      session_id: "sess-pre",
+      run_id: "run-1",
+      lease_id: "l",
+      status: "active",
+      stream_url: "",
+    });
+    setupPre(true);
+
+    expect(await screen.findByText("派团队做这件事")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("checkbox", { name: /勾选工作区 sillyspec/ }),
+      ).toBeChecked(),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /派团队（随首句创建生效）/ }),
+    );
+    expect(await screen.findByTestId("team-pending-chip")).toBeInTheDocument();
+
+    // × 放弃：chip 消失，回填的 /team 输入一并清空。
+    fireEvent.click(screen.getByLabelText("放弃团队配置"));
+    await waitFor(() =>
+      expect(screen.queryByTestId("team-pending-chip")).not.toBeInTheDocument(),
+    );
+
+    // 首句照发：createSession 不携带 team_mission（配置已放弃）。
+    const input = (await screen.findByRole(
+      "textbox",
+    )) as HTMLTextAreaElement;
+    await waitFor(() => expect(input.value).toBe(""));
+    fireEvent.change(input, { target: { value: "普通首句" } });
+    fireEvent.click(screen.getByTitle("发送"));
+    await waitFor(() =>
+      expect(sessionApi.createSession).toHaveBeenCalledTimes(1),
+    );
+    const createArg = sessionApi.createSession.mock.calls[0]![0] as Record<
+      string,
+      unknown
+    >;
+    expect(createArg.team_mission).toBeUndefined();
   });
 });

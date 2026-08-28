@@ -622,6 +622,13 @@ interface TeamTriggerRowProps {
    * 透传 TeamTriggerPopover.hasActiveMission）。
    */
   hasActiveMission?: boolean;
+  /**
+   * ql-20260828-011-1ec7：预会话待生效 chip——弹层确认后 preTeamMission 已
+   * 暂存（随首句创建落库 D-009），无会话无 mission 期间以此反馈「已配置」。
+   */
+  pendingTeam?: boolean;
+  /** 待生效 chip × ——放弃暂存的团队配置（同时清回填的 /team 输入框）。 */
+  onRemovePendingTeam?: () => void;
   /** 弹层开关（父层 state）。 */
   popoverOpen: boolean;
   /**
@@ -655,6 +662,8 @@ function TeamTriggerRow({
   cancelling = false,
   onChipClick,
   hasActiveMission = false,
+  pendingTeam = false,
+  onRemovePendingTeam,
   popoverOpen,
   preSession = false,
   workspaceId,
@@ -668,7 +677,9 @@ function TeamTriggerRow({
 }: TeamTriggerRowProps) {
   // ql-20260827-020：按钮迁走后按需渲染——无 chip / 无错误 / 弹层未开时不占位
   //（弹层仍以本行为锚点，开层时行随之出现）。
-  if (activeWorkers === null && !errorText && !popoverOpen) return null;
+  if (activeWorkers === null && !pendingTeam && !errorText && !popoverOpen) {
+    return null;
+  }
   return (
     <div className="relative flex shrink-0 flex-wrap items-center gap-2 border-t border-border bg-card px-5 pb-1.5 pt-2">
       {activeWorkers !== null && (
@@ -694,6 +705,33 @@ function TeamTriggerRow({
             className="ml-0.5 rounded-full px-1 leading-none text-brand-500 transition-colors hover:bg-brand-100 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {cancelling ? "…" : "×"}
+          </button>
+        </span>
+      )}
+      {/* ql-20260828-011-1ec7：预会话待生效 chip——虚线边框区分「进行中」实线；
+          mission 随首句创建落库（D-009），此处反馈配置已暂存。 */}
+      {pendingTeam && (
+        <span
+          data-testid="team-pending-chip"
+          title="点击可修改团队配置（随首条消息创建会话时生效）"
+          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-dashed border-brand-400 bg-brand-50/60 px-2.5 py-0.5 text-[11.5px] font-medium text-brand-700"
+        >
+          <Users aria-hidden className="h-3.5 w-3.5" />
+          <button
+            type="button"
+            onClick={onChipClick}
+            className="rounded-full px-0.5 py-0 transition-colors hover:text-brand-800"
+          >
+            团队已配置 · 随首句创建生效
+          </button>
+          <button
+            type="button"
+            aria-label="放弃团队配置"
+            title="放弃本次团队配置（不随首条消息创建团队）"
+            onClick={onRemovePendingTeam}
+            className="ml-0.5 rounded-full px-1 leading-none text-brand-500 transition-colors hover:bg-brand-100 hover:text-brand-700"
+          >
+            ×
           </button>
         </span>
       )}
@@ -2923,7 +2961,14 @@ function SessionPanelPage({
           <TeamTriggerRow
             activeWorkers={null}
             onCancelMission={() => {}}
-            onChipClick={() => {}}
+            onChipClick={() => openTeamPopover(null)}
+            pendingTeam={preTeamMission !== null}
+            onRemovePendingTeam={() => {
+              // 放弃暂存配置；输入框仍是弹层回填的 /team 指令时一并清空
+              //（用户编辑过则保留——发送会走 /team 拦截重开弹层，语义自洽）。
+              setPreTeamMission(null);
+              setInput((prev) => (/^\/team(\s|$)/.test(prev.trim()) ? "" : prev));
+            }}
             popoverOpen={teamPopover.open}
             preSession
             workspaceId={preContext?.workspaceId ?? null}
