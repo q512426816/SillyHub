@@ -481,3 +481,19 @@
 根因：ql-007 派团队视觉迁 brand 时漏了 team-progress.tsx（变更详情页 agent 运行日志与会话共用的 mission 进度卡），violet 固定阶在 blue/dark 主题下同样与主题割裂
 方案：4 处类名 violet-N→brand-N 同档替换（mission 容器卡/决策日志块/worker 列表标题两处/状态色）+ 头注释身份色说明同步
 结果：vitest team-progress.test.tsx + page-team-toggle.test.tsx 25/25 通过
+
+## ql-20260828-009-4a13 | 2026-08-28 10:35:15 | 派团队状态标签四问题修复——首次 mission 迟到不显示（轮询盲区）/×改真取消/点击标签更新指派/入口图标改灰黑
+状态：进行中
+关联变更：（无）
+文件：frontend/src/components/daemon/session-panel.tsx, frontend/src/components/daemon/team-trigger-popover.tsx, frontend/src/components/daemon/session-input-bar.tsx, frontend/src/components/daemon/__tests__/session-panel-team.test.tsx, frontend/src/components/daemon/__tests__/team-trigger-popover.test.tsx, frontend/src/components/daemon/__tests__/session-input-bar-plus-menu.test.tsx
+
+## ql-20260828-010-ca22 | 2026-08-28 10:38:59 | 切换守护进程时同步确认新机器的项目本地路径
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/workspace-daemon-switcher.tsx（两步切换：路径确认态面板 + 确认提交）
+- frontend/src/components/__tests__/workspace-daemon-switcher.test.tsx（重写：新增路径确认 3 用例共 9 用例）
+需求：切换守护进程时同步确认新机器的项目本地路径
+根因：本地项目路径是机器相关的，跨机切换沿用旧 root_path 多半不匹配新机器，派发/扫描会找错目录
+方案：workspace-daemon-switcher 改两步切换：点选非当前 daemon 进入路径确认态（WorkspacePathPicker 绑定新 daemon、预填当前 root_path、可改可浏览远程目录），确认才 upsertMyBinding 一并提交 daemon_id+root_path；取消返回列表；点当前项仍仅收起
+结果：vitest 切换器组件 9/9 通过（新增路径确认态预填/改后提交/取消 3 用例）、工作区详情页 10/10 通过、tsc --noEmit 0 错误
