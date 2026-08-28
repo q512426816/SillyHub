@@ -20,9 +20,8 @@
  *
  * 约束（task-12 constraints）：不用 antd（对齐段族惯例，也规避按钮中文
  * autoLetterSpacing 拆分）；纯 props 渲染（不读 store / SSE / 本地时钟）；
- * 团队视觉用 violet 固定阶（主题不变量，「团队/主控专用」，对齐现有
- * team-progress.tsx mission 视觉与原型），运行态文字走 brand-* 语义阶
- *（随 html data-theme 换肤，双主题铁律）。
+ * 团队视觉统一走 brand-* 语义阶（随 html data-theme 换肤，双主题铁律；
+ * ql-20260828-007-7dcf 弃 violet 固定身份色——blue/dark 主题下固定紫与主题割裂）。
  *
  * task-14（2026-08-25-team-subsession-governance / FR-08 / design §5.E）：
  * 子会话形态分身行（workers[].sub_session_id 非空）行主体可点击 →
@@ -330,7 +329,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
       // 是 flex-col + max-h + overflow-y-auto，flex 子项默认 shrink:1 会被压到
       // 容器高内（配合本节点 overflow-hidden 裁掉底部分身行，且父层永不溢出、
       // 滚动条不出现）；保持自然高度才能让父层限高滚动真正生效。
-      className="w-full shrink-0 self-stretch overflow-hidden rounded-[10px] border border-violet-200 bg-violet-50/55"
+      className="w-full shrink-0 self-stretch overflow-hidden rounded-[10px] border border-brand-200 bg-brand-50/55"
       aria-label="团队任务"
     >
       {/* 概要行（常驻，点击折叠/展开；ql-20260825-011：拖选文字不触发折叠） */}
@@ -358,7 +357,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
         }}
         className="flex w-full cursor-pointer select-text flex-wrap items-center gap-2 px-3 py-[7px] text-xs"
       >
-        <span className="inline-flex shrink-0 items-center gap-1 text-[12px] font-bold text-violet-700">
+        <span className="inline-flex shrink-0 items-center gap-1 text-[12px] font-bold text-brand-700">
           <span aria-hidden>👥</span>团队任务
         </span>
         <span
@@ -375,18 +374,18 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
         <span className="ml-auto shrink-0 font-mono text-[11.5px] text-muted-foreground">
           {budgetText}
         </span>
-        <span className="shrink-0 text-[11px] text-violet-700">
+        <span className="shrink-0 text-[11px] text-brand-700">
           {open ? "收起 ▴" : "展开 ▾"}
         </span>
       </div>
 
       {/* 展开明细（折叠时不挂载） */}
       {open && (
-        <div className="flex flex-col gap-[5px] border-t border-dashed border-violet-200 bg-card px-3 py-2">
+        <div className="flex flex-col gap-[5px] border-t border-dashed border-brand-200 bg-card px-3 py-2">
           {/* 主控行：mission objective 即主控目标（workers 已排除主控轮，D-009；
               主控状态 = mission 状态，概要行徽标已示，此处不重复） */}
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-[12.5px]">
-            <span className="inline-flex h-[19px] shrink-0 items-center rounded border border-violet-300 bg-violet-50 px-2 text-[11px] font-semibold text-violet-700">
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1.5 text-[12.5px]">
+            <span className="inline-flex h-[19px] shrink-0 items-center rounded border border-brand-300 bg-brand-50 px-2 text-[11px] font-semibold text-brand-700">
               🧠 主控
             </span>
             <span
@@ -401,7 +400,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
           <div className="flex flex-wrap items-center gap-1.5 px-0.5 text-[11px] text-muted-foreground">
             <span className="shrink-0">范围</span>
             {summary.scope_workspace_ids.length === 0 ? (
-              <span className="inline-flex h-5 items-center rounded border border-violet-200 bg-violet-50 px-1.5 text-[10px] font-semibold text-violet-700">
+              <span className="inline-flex h-5 items-center rounded border border-brand-200 bg-brand-50 px-1.5 text-[10px] font-semibold text-brand-700">
                 会话工作区
               </span>
             ) : (
@@ -413,7 +412,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
                   <span
                     key={id}
                     title={id}
-                    className="inline-flex h-5 items-center rounded border border-violet-200 bg-violet-50 px-1.5 font-mono text-[10px] font-semibold text-violet-700"
+                    className="inline-flex h-5 items-center rounded border border-brand-200 bg-brand-50 px-1.5 font-mono text-[10px] font-semibold text-brand-700"
                   >
                     #{id.slice(0, 8)}
                   </span>
@@ -446,7 +445,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
                     className={cn(
                       "flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[12.5px]",
                       // hover 高亮走 brand-* 语义阶（AI-Native 双主题 token，
-                      // FRONTEND_PAGE_STYLE §0.5 铁律；violet 仅团队固定身份色沿用）。
+                      // FRONTEND_PAGE_STYLE §0.5 铁律；团队卡视觉同规随主题换肤）。
                       workerSessionOpenable &&
                         "cursor-pointer transition-colors hover:border-brand-300 hover:bg-brand-50/60 focus-visible:border-brand-400 focus-visible:bg-brand-50/60 focus-visible:outline-none",
                     )}
@@ -482,7 +481,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
                           return wEntry ? (
                             <WsBadge entry={wEntry} />
                           ) : (
-                            <span className="inline-flex h-5 items-center rounded border border-violet-200 bg-violet-50 px-1.5 font-mono text-[10px] font-semibold text-violet-700">
+                            <span className="inline-flex h-5 items-center rounded border border-brand-200 bg-brand-50 px-1.5 font-mono text-[10px] font-semibold text-brand-700">
                               #{w.workspace_id.slice(0, 8)}
                             </span>
                           );
@@ -525,7 +524,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
                       className={cn(
                         "shrink-0 rounded border px-2 py-0.5 text-[11.5px] hover:bg-muted",
                         logsOpen
-                          ? "border-violet-300 bg-violet-50 text-violet-700"
+                          ? "border-brand-300 bg-brand-50 text-brand-700"
                           : "border-border text-muted-foreground",
                       )}
                     >
@@ -541,7 +540,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
                       className={cn(
                         "shrink-0 rounded border px-2 py-0.5 text-[11.5px] hover:bg-muted",
                         artifactsOpen
-                          ? "border-violet-300 bg-violet-50 text-violet-700"
+                          ? "border-brand-300 bg-brand-50 text-brand-700"
                           : "border-border text-muted-foreground",
                       )}
                     >
@@ -558,7 +557,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
 
                   {/* 日志展开区——ql-20260825-004 富渲染（与主会话「进度」视图同形态） */}
                   {logsOpen && (
-                    <div className="ml-4 mt-1 overflow-hidden rounded-lg border border-violet-100 bg-violet-50/30">
+                    <div className="ml-4 mt-1 overflow-hidden rounded-lg border border-brand-100 bg-brand-50/30">
                       <div className="max-h-[420px] overflow-y-auto p-2">
                         {logsLoading ? (
                           <p className="text-[11px] text-muted-foreground">加载中…</p>
@@ -581,7 +580,7 @@ export const TeamTaskBlock = memo(function TeamTaskBlock({
 
                   {/* 产物展开区——ql-20260825-004 agent_artifacts（summary=Markdown） */}
                   {artifactsOpen && (
-                    <div className="ml-4 mt-1 overflow-hidden rounded-lg border border-violet-100 bg-violet-50/30">
+                    <div className="ml-4 mt-1 overflow-hidden rounded-lg border border-brand-100 bg-brand-50/30">
                       <div className="max-h-[420px] overflow-y-auto p-2">
                         {artifactsLoading ? (
                           <p className="text-[11px] text-muted-foreground">加载中…</p>

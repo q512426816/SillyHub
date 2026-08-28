@@ -731,7 +731,7 @@ export function SessionInputBar({
                   title={teamTriggerTitle ?? "派团队执行任务"}
                   className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <Users aria-hidden className="h-4 w-4 shrink-0 text-violet-600" />
+                  <Users aria-hidden className="h-4 w-4 shrink-0 text-brand-600" />
                   <span className="min-w-0">
                     <span className="block text-[13px] leading-5">派团队</span>
                     <span className="block text-[11px] leading-4 text-muted-foreground">

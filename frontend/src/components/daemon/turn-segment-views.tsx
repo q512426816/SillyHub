@@ -23,7 +23,7 @@
  *                       失败 / 已停止」+ 正文尾行进度摘要——元数据驱动，终态即终）
  *   - StderrRowView     stderr 警示行（⚠ 前缀，平移现有 amber 样式）
  *   - TeamWorkerBlockView 分身段块（task-12 / 2026-08-22-team-session-unify FR-07：
- *                       violet 折叠卡——角色/目标工作区徽标/状态/耗时 + children
+ *                       brand 折叠卡——角色/目标工作区徽标/状态/耗时 + children
  *                       日志产物；dispatch_worker tool 段在 SegmentView 升级路由到此）
  *   - file 段 → FileMessageCard（task-08 / 2026-08-23-agent-file-upload-mcp FR-01 /
  *                       D-001@v1：agent 上传文件卡片——图片缩略图 / 通用文件卡两
@@ -501,7 +501,7 @@ export const ToolRowView = memo(function ToolRowView({ segment }: ToolRowViewPro
         </span>
         {teamTool && (
           <span
-            className="shrink-0 rounded border border-violet-200 bg-violet-50 px-1 py-px text-[9.5px] font-semibold leading-none text-violet-700"
+            className="shrink-0 rounded border border-brand-200 bg-brand-50 px-1 py-px text-[9.5px] font-semibold leading-none text-brand-700"
             title="团队 MCP 工具"
           >
             mcp
@@ -844,7 +844,8 @@ export interface TeamWorkerBlockProps {
 }
 
 /**
- * 分身段块（原型 §03 violet `<details>` .worker 语义）：violet 折叠卡——头部 =
+ * 分身段块（原型 §03 violet `<details>` .worker 语义，实现已迁 brand 语义阶
+ * ql-20260828-007-7dcf）：brand 折叠卡——头部 =
  * 👥 分身「角色」+ 状态 + mm:ss 耗时 + 目标工作区徽标；body = 目标一行 + children
  * （分身日志/产物）。运行中默认展开 + 无扫动（头部轻量），终态默认折叠，点击切换；
  * running→终态过渡自动收敛折叠（对齐 SubagentBlockView）。无 children 时显示
@@ -878,7 +879,7 @@ export const TeamWorkerBlockView = memo(function TeamWorkerBlockView({
 
   const hasWs = Boolean(workspaceName || workspaceId);
   return (
-    <div className="w-full self-stretch overflow-hidden rounded-[10px] border border-violet-200 bg-violet-50">
+    <div className="w-full self-stretch overflow-hidden rounded-[10px] border border-brand-200 bg-brand-50">
       <div
         role="button"
         tabIndex={0}
@@ -898,7 +899,7 @@ export const TeamWorkerBlockView = memo(function TeamWorkerBlockView({
         <span aria-hidden className="shrink-0">
           👥
         </span>
-        <span className="min-w-0 shrink-0 truncate font-semibold text-violet-700">
+        <span className="min-w-0 shrink-0 truncate font-semibold text-brand-700">
           {`分身「${role || "分身"}」`}
         </span>
         <span className={cn("shrink-0 text-[12px]", wsMeta.cls)}>{wsMeta.label}</span>
@@ -913,7 +914,7 @@ export const TeamWorkerBlockView = memo(function TeamWorkerBlockView({
               "inline-flex h-5 shrink-0 items-center rounded border px-1.5 text-[10px] font-semibold",
               workspaceName
                 ? workspaceTypeBadge(workspaceType).className
-                : "border-violet-200 bg-card font-mono text-violet-700",
+                : "border-brand-200 bg-card font-mono text-brand-700",
             )}
             title={workspaceId ?? workspaceName ?? undefined}
           >
@@ -922,7 +923,7 @@ export const TeamWorkerBlockView = memo(function TeamWorkerBlockView({
         )}
       </div>
       {open && (
-        <div className="flex flex-col gap-[5px] border-t border-dashed border-violet-200 bg-card px-3 pb-2.5 pt-2">
+        <div className="flex flex-col gap-[5px] border-t border-dashed border-brand-200 bg-card px-3 pb-2.5 pt-2">
           {objective && (
             <p className="text-[11.5px] text-muted-foreground">{`目标：${objective}`}</p>
           )}

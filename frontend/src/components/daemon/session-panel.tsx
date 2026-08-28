@@ -646,7 +646,7 @@ function TeamTriggerRow({
       {activeWorkers !== null && (
         <span
           data-testid="team-active-chip"
-          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-violet-300 bg-violet-50 px-2.5 py-0.5 text-[11.5px] font-medium text-violet-700"
+          className="inline-flex shrink-0 items-center gap-1 rounded-full border border-brand-300 bg-brand-50 px-2.5 py-0.5 text-[11.5px] font-medium text-brand-700"
         >
           <Users aria-hidden className="h-3.5 w-3.5" />
           团队进行中 · {activeWorkers} 分身
@@ -654,7 +654,7 @@ function TeamTriggerRow({
             type="button"
             aria-label="收起团队状态提示"
             onClick={onDismissChip}
-            className="ml-0.5 rounded-full px-1 leading-none text-violet-500 hover:bg-violet-100 hover:text-violet-700"
+            className="ml-0.5 rounded-full px-1 leading-none text-brand-500 hover:bg-brand-100 hover:text-brand-700"
           >
             ×
           </button>

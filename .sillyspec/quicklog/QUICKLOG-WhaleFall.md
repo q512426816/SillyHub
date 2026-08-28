@@ -456,3 +456,18 @@
 根因：原文案『自动派发（阶段流转、scan-generate）且未显式指定 provider 时使用』中阶段流转自动派发已于 2026-08-14 change-center-conversation-driven（D-004）退役，审批通过/打回不再派发 agent，文案与现状脱节
 方案：page.tsx 两处纯文案改动——卡片说明段改为『扫描生成（scan-generate）以及未显式指定提供方的智能体派发时使用；守护进程上多个提供方同时在线时，此处用于固定选用哪一个。留空则自动选用最近在线的提供方』，下拉未设置项『由守护进程默认决定』改『自动选最近在线的提供方』（对齐 queries.py 按 last_heartbeat_at DESC 取任意在线 runtime 的实际行为）
 结果：全库 grep 确认无其它引用处（含移动端/测试）；pnpm vitest run page.test.tsx 10 个测试全部通过（210s）；纯 JSX 字符串改动无逻辑变更
+
+## ql-20260828-007-7dcf | 2026-08-28 10:05:30 | 派团队弹层及会话团队卡片配色迁主题统一
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/team-trigger-popover.tsx（派团队弹层 violet→brand 同档 + 注释）
+- frontend/src/components/daemon/session-input-bar.tsx（＋菜单派团队项图标）
+- frontend/src/components/daemon/session-panel.tsx（团队进行中 chip）
+- frontend/src/components/daemon/team-task-block.tsx（会话团队任务卡）
+- frontend/src/components/daemon/turn-segment-views.tsx（分身段块折叠卡）
+需求：派团队弹层及会话团队卡片配色迁主题统一
+根因：派团队链路视觉用 violet Tailwind 固定阶作团队身份色，违反主题铁律 brand-* 语义阶随 data-theme 换肤——ai-native 下碰巧一致，blue 主题变蓝后紫色突兀、dark 主题 violet-50/100 亮紫在 zinc 黑底刺眼
+方案：5 组件 violet-N→brand-N 同档替换（team-trigger-popover 弹层/session-input-bar ＋菜单派团队项/session-panel 团队 chip/team-task-block 任务卡/turn-segment-views 分身段卡）+ 6 处身份色注释同步；PROVIDER_TONES.claude 厂商外部标识色不动
+结果：vitest 5 个相关测试文件 139/139 通过，grep 确认类名零 violet 残留
+审计：📝 文档欠账（D-8）：5 个源码文件改动未同步任何模块文档（涉及模块：frontend_components）

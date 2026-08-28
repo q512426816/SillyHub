@@ -31,8 +31,9 @@
  *
  * 约束（task-11 constraints）：不依赖 react-query（dialog 渲染路径零 react-query
  * 铁律 R4——弹层在 page/dialog 两模式都挂载）；不用 antd（对齐段族惯例，规避
- * 中文按钮 autoLetterSpacing 拆分坑）；团队视觉 violet 固定阶 + brand-* 语义阶
- *（双主题铁律）；纯 props 受控，API 调用归父层。
+ * 中文按钮 autoLetterSpacing 拆分坑）；团队视觉统一走 brand-* 语义阶（随
+ * html data-theme 换肤，双主题铁律；ql-20260828-007-7dcf 弃 violet 固定身份色
+ * ——blue/dark 主题下固定紫不随肤换色，与主题割裂）；纯 props 受控，API 调用归父层。
  *
  * task-12（2026-08-24-session-team-mission-context / FR-03 / FR-06 / D-008@v2 /
  * D-010@v1）追加：
@@ -453,13 +454,13 @@ export function TeamTriggerPopover({
     <div
       role="dialog"
       aria-label="派团队配置"
-      className="absolute bottom-full left-0 z-30 mb-1.5 max-h-[70vh] w-[400px] overflow-y-auto rounded-xl border border-violet-200 bg-card p-4 text-xs shadow-md"
+      className="absolute bottom-full left-0 z-30 mb-1.5 max-h-[70vh] w-[400px] overflow-y-auto rounded-xl border border-brand-200 bg-card p-4 text-xs shadow-md"
     >
-      {/* 标题 + 说明（原型 .team-pop .tp-title / .tp-sub；violet =「团队」固定身份色） */}
-      <p className="flex items-center gap-2 text-[13px] font-bold text-violet-700">
+      {/* 标题 + 说明（原型 .team-pop .tp-title / .tp-sub；brand 语义阶随主题换肤） */}
+      <p className="flex items-center gap-2 text-[13px] font-bold text-brand-700">
         <span
           aria-hidden
-          className="flex h-6 w-6 items-center justify-center rounded-md bg-violet-100"
+          className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-100"
         >
           <Users className="h-3.5 w-3.5" />
         </span>
@@ -679,9 +680,9 @@ export function TeamTriggerPopover({
           既有会话实例不渲染（主 agent 恒=当前会话，进程 cwd/机器创建时钉定，
           跨机器迁移属 C 层非目标——仅以选择器下方说明文案表达，不加交互）。 */}
       {preSession && (
-        <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50/40 p-2.5">
+        <div className="mt-3 rounded-lg border border-brand-200 bg-brand-50/40 p-2.5">
           <label className="block">
-            <span className="text-[10.5px] font-semibold text-violet-700">
+            <span className="text-[10.5px] font-semibold text-brand-700">
               主 agent（项目经理）
             </span>
             <select
@@ -745,7 +746,7 @@ export function TeamTriggerPopover({
       <button
         type="button"
         onClick={() => setPresetOpen((v) => !v)}
-        className="mt-3 flex w-full items-center justify-between rounded-lg border border-violet-200 bg-violet-50/50 px-2.5 py-1.5 text-[11.5px] font-semibold text-violet-700 transition-colors hover:bg-violet-100/70"
+        className="mt-3 flex w-full items-center justify-between rounded-lg border border-brand-200 bg-brand-50/50 px-2.5 py-1.5 text-[11.5px] font-semibold text-brand-700 transition-colors hover:bg-brand-100/70"
         aria-expanded={presetOpen}
       >
         <span className="inline-flex items-center gap-1">
@@ -756,7 +757,7 @@ export function TeamTriggerPopover({
         <span aria-hidden>{presetOpen ? "收起 ▴" : "展开 ▾"}</span>
       </button>
       {presetOpen && (
-        <div className="mt-1.5 space-y-2 rounded-lg border border-violet-200 bg-violet-50/40 p-2.5">
+        <div className="mt-1.5 space-y-2 rounded-lg border border-brand-200 bg-brand-50/40 p-2.5">
           {/* 主控配置（不填走默认 Claude · claude-sonnet-4-6） */}
           <div className="grid grid-cols-3 gap-1.5">
             <label className="flex flex-col gap-1">
@@ -816,14 +817,14 @@ export function TeamTriggerPopover({
 
           {/* 分身列表（留空 = 主控自动拆） */}
           <div className="flex items-center justify-between">
-            <span className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-violet-700">
+            <span className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-brand-700">
               <Users aria-hidden className="h-3 w-3" />
               分身列表（{workers.length}）· 留空 = 主控自动拆
             </span>
             <button
               type="button"
               onClick={() => setWorkers((prev) => [...prev, makeEmptyWorker()])}
-              className="rounded border border-violet-300 bg-card px-2 py-0.5 text-[11px] font-semibold text-violet-700 hover:bg-violet-100"
+              className="rounded border border-brand-300 bg-card px-2 py-0.5 text-[11px] font-semibold text-brand-700 hover:bg-brand-100"
             >
               + 添加分身
             </button>
