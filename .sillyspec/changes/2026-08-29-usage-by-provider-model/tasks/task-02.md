@@ -11,6 +11,7 @@ requirement_ids: [FR-01-3, FR-04-1]
 decision_ids: [D-001@v1, D-003@v1]
 allowed_paths:
   - backend/app/modules/daemon/schema.py
+  - backend/app/modules/daemon/router.py
   - frontend/src/lib/api-types.ts
   - backend/openapi.json
 goal: >

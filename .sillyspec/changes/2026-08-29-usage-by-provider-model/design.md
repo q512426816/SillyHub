@@ -162,6 +162,7 @@ GROUP BY p.id, p.name, u.model
 - backend/app/modules/agent/model.py
 - backend/migrations/versions/20260829010000_add_agent_run_model_usage.py
 - backend/app/modules/daemon/schema.py
+- backend/app/modules/daemon/router.py
 - backend/app/modules/daemon/run_sync/service.py
 - backend/app/modules/daemon/lease/service.py
 - backend/app/modules/daemon/service.py
