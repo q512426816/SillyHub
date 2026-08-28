@@ -159,6 +159,7 @@ function makeMission(
   id: string,
   status: TeamMissionSummary["status"],
   workers: TeamMissionSummary["workers"],
+  overrides: Partial<TeamMissionSummary> = {},
 ): TeamMissionSummary {
   return {
     mission_id: id,
@@ -167,6 +168,7 @@ function makeMission(
     scope_workspace_ids: [],
     budget_usd: null,
     workers,
+    ...overrides,
   };
 }
 
@@ -423,9 +425,21 @@ describe("SessionPanel TeamTaskBlock 挂载与活跃 chip（dialog 模式）", (
     );
   });
 
-  it("chip 主体点击 → 打开弹层更新指派（hasActiveMission 提示 + 确认先取消再派）", async () => {
+  it("chip 主体点击 → 打开弹层更新指派（回显当前配置 + 确认先取消再派）", async () => {
     sessionApi.listSessionTeamMissions.mockResolvedValue([
-      makeMission("m-run", "running", [makeWorker("w-1", "running")]),
+      // ql-20260828-012-4425：带编辑回显三件套（项目/预算/preset）。
+      makeMission("m-run", "running", [makeWorker("w-1", "running")], {
+        budget_usd: 5,
+        project_id: null,
+        main_agent_config: {
+          agent_type: "codex",
+          provider: "gpt",
+          model: "gpt-5",
+        },
+        worker_preset: [
+          { agent_type: "claude_code", model: "", objective: "查风险", role: "risk" },
+        ],
+      }),
     ]);
     sessionApi.cancelTeamMission.mockResolvedValue(undefined);
     sessionApi.triggerSessionTeamMission.mockResolvedValue({
@@ -435,14 +449,22 @@ describe("SessionPanel TeamTaskBlock 挂载与活跃 chip（dialog 模式）", (
     setupDialog({ workspaceId: "11111111-2222-3333-4444-555555555555" });
 
     const chip = await screen.findByTestId("team-active-chip");
-    // 点击 chip 文本主体 → 弹层打开（含更新指派提示行）。
+    // 点击 chip 文本主体 → 弹层打开（含更新指派提示行 + 配置回显）。
     fireEvent.click(screen.getByRole("button", { name: "团队进行中 · 1 分身" }));
     expect(await screen.findByText("派团队做这件事")).toBeInTheDocument();
     expect(
       screen.getByText(/已有进行中的团队任务：确认后将取消当前任务并按本次配置重新指派/),
     ).toBeInTheDocument();
+    // ql-20260828-012-4425：目标/预算回显当前 mission 配置。
+    expect((screen.getByLabelText(/^目标/) as HTMLInputElement).value).toBe(
+      "目标-m-run",
+    );
+    expect(
+      (screen.getByLabelText(/^费用上限/) as HTMLInputElement).value,
+    ).toBe("5");
 
-    // 填目标确认 → 先 cancel(旧 mission) 再 trigger（更新指派语义），顺序断言。
+    // 填目标确认 → 先 cancel(旧 mission) 再 trigger（更新指派语义），顺序断言；
+    // 未展开预设确认也原样回传 preset（编辑语义）。
     fireEvent.change(screen.getByLabelText(/^目标/), {
       target: { value: OBJECTIVE },
     });
@@ -457,6 +479,13 @@ describe("SessionPanel TeamTaskBlock 挂载与活跃 chip（dialog 模式）", (
     const triggerOrder =
       sessionApi.triggerSessionTeamMission.mock.invocationCallOrder[0]!;
     expect(cancelOrder).toBeLessThan(triggerOrder);
+    expect(
+      sessionApi.triggerSessionTeamMission.mock.calls[0]![1]
+        .main_agent_config,
+    ).toEqual({ agent_type: "codex", provider: "gpt", model: "gpt-5" });
+    expect(
+      sessionApi.triggerSessionTeamMission.mock.calls[0]![1].worker_preset,
+    ).toHaveLength(1);
   });
 
   it("无活跃 mission（全部终态）→ 不显示 chip", async () => {

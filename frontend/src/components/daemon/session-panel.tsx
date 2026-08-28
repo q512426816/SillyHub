@@ -129,10 +129,14 @@ import {
 } from "@/components/sessions/session-config-bar";
 import { SubagentCatalog } from "@/components/sessions/subagent-catalog";
 import { ApiError } from "@/lib/api";
+import type { MainAgentConfig, WorkerPresetItem } from "@/lib/agent";
 import { useNotify } from "@/lib/errors";
 import { isActiveTeamMission } from "@/components/daemon/team-task-block";
 import { ActivityCatalog, type AgentTaskEntry } from "@/components/daemon/activity-catalog";
-import { TeamTriggerPopover } from "@/components/daemon/team-trigger-popover";
+import {
+  TeamTriggerPopover,
+  type TeamTriggerInitialConfig,
+} from "@/components/daemon/team-trigger-popover";
 import {
   AgentLogCard,
   AgentLogSessionBody,
@@ -652,6 +656,8 @@ interface TeamTriggerRowProps {
   submitting: boolean;
   /** 触发错误文案（弹层保持打开时行内展示）。 */
   errorText: string | null;
+  /** ql-20260828-012-4425：编辑回显初始配置（chip 点击派生，透传弹层）。 */
+  popoverInitial?: TeamTriggerInitialConfig | null;
   onTrigger: (payload: TeamMissionTriggerRequest) => void;
   onClose: () => void;
 }
@@ -672,6 +678,7 @@ function TeamTriggerRow({
   defaultProjectId,
   submitting,
   errorText,
+  popoverInitial,
   onTrigger,
   onClose,
 }: TeamTriggerRowProps) {
@@ -745,6 +752,7 @@ function TeamTriggerRow({
           workspaceId={workspaceId}
           workspaceName={workspaceName}
           defaultObjective={defaultObjective}
+          initialConfig={popoverInitial ?? undefined}
           defaultProjectId={defaultProjectId}
           preSession={preSession}
           submitting={submitting}
@@ -1347,9 +1355,14 @@ function SessionPanelPage({
   // ql-20260828-009-4a13：running（进行中轮）时也轮询——mission 迟到不再盲区。
   const { missions: teamMissions, refresh: refreshTeamMissions } =
     useSessionTeamMissions(sessionId, turnState.currentRunId != null);
-  const [teamPopover, setTeamPopover] = useState<{ open: boolean; objective: string | null }>({
+  const [teamPopover, setTeamPopover] = useState<{
+    open: boolean;
+    objective: string | null;
+    initial: TeamTriggerInitialConfig | null;
+  }>({
     open: false,
     objective: null,
+    initial: null,
   });
   const [teamTriggering, setTeamTriggering] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
@@ -2267,13 +2280,21 @@ function SessionPanelPage({
 
   // ── 操作 ───────────────────────────────────────────────────────────────
   // task-11：团队弹层开关（打开时清旧错误；objective 预填 /team 指令文本）。
-  const openTeamPopover = useCallback((objective: string | null) => {
-    setTeamError(null);
-    setTeamPopover({ open: true, objective });
-  }, []);
+  // ql-20260828-012-4425：initial 携带编辑回显配置（chip 点击派生自活跃
+  // mission / 预会话暂存 payload）；缺省 null 走弹层默认值。
+  const openTeamPopover = useCallback(
+    (
+      objective: string | null,
+      initial?: TeamTriggerInitialConfig | null,
+    ) => {
+      setTeamError(null);
+      setTeamPopover({ open: true, objective, initial: initial ?? null });
+    },
+    [],
+  );
   const closeTeamPopover = useCallback(() => {
     setTeamError(null);
-    setTeamPopover({ open: false, objective: null });
+    setTeamPopover({ open: false, objective: null, initial: null });
   }, []);
 
   // ── task-07 Phase 5（FR-06 / D-004@v2）：autoTeamOpen 一次性通道 ──────────
@@ -2961,7 +2982,27 @@ function SessionPanelPage({
           <TeamTriggerRow
             activeWorkers={null}
             onCancelMission={() => {}}
-            onChipClick={() => openTeamPopover(null)}
+            onChipClick={() => {
+              // ql-20260828-012-4425：待生效 chip 点击回显暂存 payload。
+              const p = preTeamMission;
+              if (!p) {
+                openTeamPopover(null);
+                return;
+              }
+              const objective = p.objective?.trim() || null;
+              openTeamPopover(objective, {
+                objective,
+                projectId: p.project_id ?? null,
+                scopeWorkspaceIds: p.scope_workspace_ids ?? null,
+                budgetUsd: p.budget_usd ?? null,
+                // 弹层确认写入的 payload 反向回读（handlePreTeamTrigger 断言
+                // 暂存），结构同源 as 收窄（SessionCreateTeamMission 宽松 dict）。
+                mainAgentConfig:
+                  (p.main_agent_config as MainAgentConfig | null) ?? null,
+                workerPreset:
+                  (p.worker_preset as WorkerPresetItem[] | null) ?? null,
+              });
+            }}
             pendingTeam={preTeamMission !== null}
             onRemovePendingTeam={() => {
               // 放弃暂存配置；输入框仍是弹层回填的 /team 指令时一并清空
@@ -2970,6 +3011,7 @@ function SessionPanelPage({
               setInput((prev) => (/^\/team(\s|$)/.test(prev.trim()) ? "" : prev));
             }}
             popoverOpen={teamPopover.open}
+            popoverInitial={teamPopover.initial}
             preSession
             workspaceId={preContext?.workspaceId ?? null}
             workspaceName={preWorkspaceName}
@@ -3509,12 +3551,36 @@ function SessionPanelPage({
             void handleCancelTeamMission();
           }}
           cancelling={teamCancelling}
-          onChipClick={() => openTeamPopover(null)}
+          onChipClick={() => {
+            // ql-20260828-012-4425：chip 点击回显活跃 mission 配置（占位符/
+            // 指令前缀目标过滤为空——编辑语义让用户重填或保留）。
+            const m = activeTeamMission;
+            if (!m) {
+              openTeamPopover(null);
+              return;
+            }
+            const raw = m.objective?.trim() ?? "";
+            const objective =
+              !raw ||
+              raw === "（由会话首条团队指令定义）" ||
+              raw.startsWith("/team")
+                ? null
+                : raw;
+            openTeamPopover(objective, {
+              objective,
+              projectId: m.project_id ?? null,
+              scopeWorkspaceIds: m.scope_workspace_ids ?? null,
+              budgetUsd: m.budget_usd ?? null,
+              mainAgentConfig: m.main_agent_config ?? null,
+              workerPreset: m.worker_preset ?? null,
+            });
+          }}
           hasActiveMission={teamChipWorkers !== null}
           popoverOpen={teamPopover.open}
           workspaceId={session.workspace_id ?? null}
           workspaceName={workspaceName}
           defaultObjective={teamPopover.objective}
+          popoverInitial={teamPopover.initial}
           submitting={teamTriggering}
           errorText={teamError}
           onTrigger={(payload) => {
@@ -3784,9 +3850,14 @@ function SessionPanelDialog(props: SessionPanelProps) {
   // ql-20260828-009-4a13：进行中轮时也轮询（mission 迟到盲区，同 page 模式）。
   const { missions: teamMissions, refresh: refreshTeamMissions } =
     useSessionTeamMissions(view.sessionId, view.currentRunId != null);
-  const [teamPopover, setTeamPopover] = useState<{ open: boolean; objective: string | null }>({
+  const [teamPopover, setTeamPopover] = useState<{
+    open: boolean;
+    objective: string | null;
+    initial: TeamTriggerInitialConfig | null;
+  }>({
     open: false,
     objective: null,
+    initial: null,
   });
   const [teamTriggering, setTeamTriggering] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
@@ -4558,13 +4629,21 @@ function SessionPanelDialog(props: SessionPanelProps) {
   );
 
   // ── task-11：会话内团队触发（弹层开关 + 预建回调，语义同 page 模式）──────
-  const openTeamPopover = useCallback((objective: string | null) => {
-    setTeamError(null);
-    setTeamPopover({ open: true, objective });
-  }, []);
+  // ql-20260828-012-4425：initial 携带编辑回显配置（chip 点击派生自活跃
+  // mission / 预会话暂存 payload）；缺省 null 走弹层默认值。
+  const openTeamPopover = useCallback(
+    (
+      objective: string | null,
+      initial?: TeamTriggerInitialConfig | null,
+    ) => {
+      setTeamError(null);
+      setTeamPopover({ open: true, objective, initial: initial ?? null });
+    },
+    [],
+  );
   const closeTeamPopover = useCallback(() => {
     setTeamError(null);
-    setTeamPopover({ open: false, objective: null });
+    setTeamPopover({ open: false, objective: null, initial: null });
   }, []);
 
   /**
@@ -5287,12 +5366,35 @@ function SessionPanelDialog(props: SessionPanelProps) {
           void handleCancelTeamMission();
         }}
         cancelling={teamCancelling}
-        onChipClick={() => openTeamPopover(null)}
+        onChipClick={() => {
+          // ql-20260828-012-4425：chip 点击回显活跃 mission 配置（同 page 模式）。
+          const m = activeTeamMission;
+          if (!m) {
+            openTeamPopover(null);
+            return;
+          }
+          const raw = m.objective?.trim() ?? "";
+          const objective =
+            !raw ||
+            raw === "（由会话首条团队指令定义）" ||
+            raw.startsWith("/team")
+              ? null
+              : raw;
+          openTeamPopover(objective, {
+            objective,
+            projectId: m.project_id ?? null,
+            scopeWorkspaceIds: m.scope_workspace_ids ?? null,
+            budgetUsd: m.budget_usd ?? null,
+            mainAgentConfig: m.main_agent_config ?? null,
+            workerPreset: m.worker_preset ?? null,
+          });
+        }}
         hasActiveMission={teamChipWorkers !== null}
         popoverOpen={teamPopover.open}
         workspaceId={workspaceId ?? null}
         workspaceName={null}
         defaultObjective={teamPopover.objective}
+        popoverInitial={teamPopover.initial}
         submitting={teamTriggering}
         errorText={teamError}
         onTrigger={(payload) => {

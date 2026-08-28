@@ -3426,6 +3426,10 @@ async def _team_mission_summary(
             TeamWorkspaceRef(id=ws_id, name=_ws_names.get(ws_id)) for ws_id in scope_ids
         ],
         budget_usd=mission.budget_usd,
+        # ql-20260828-012-4425：编辑回显三件套（行直取透传）。
+        project_id=mission.project_id,
+        worker_preset=mission.worker_preset,
+        main_agent_config=mission.main_agent_config,
         workers=worker_rows,
     )
 

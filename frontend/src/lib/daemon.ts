@@ -2509,6 +2509,14 @@ export interface TeamMissionSummary {
   /** scope 工作区 id+名称 enriched 视图（ql-20260825-003，前端范围徽标名称化）。 */
   scope_workspaces?: TeamWorkspaceRef[];
   budget_usd: number | null;
+  /**
+   * ql-20260828-012-4425：编辑回显三件套（后端 mission 行直取；后端为宽松
+   * dict 形态，前端按 WorkerPresetItem/MainAgentConfig 精确消费——结构同源，
+   * trigger 侧 lib 类型即该形态的生成契约）。
+   */
+  project_id?: string | null;
+  worker_preset?: WorkerPresetItem[] | null;
+  main_agent_config?: MainAgentConfig | null;
   workers: TeamMissionWorkerSummary[];
 }
 
