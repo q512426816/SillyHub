@@ -3213,12 +3213,21 @@ async def _team_mission_summary(
         mission.constraints is not None and WORKER_FORCE_ENDED_AT_KEY in mission.constraints
     )
 
+    # ql-20260828-013-a55b：每树会话首 run 终态兜底查表（all_runs 含树内 run，
+    # 仅从 derive 输入剔除；按 created_at 排序 setdefault 取最早——run killed/
+    # failed 后会话侧未收敛的形态虚拟 run 不再 running）。
+    first_run_status_by_session: dict[uuid.UUID, str] = {}
+    for r in sorted(all_runs, key=lambda x: x.created_at.isoformat() if x.created_at else ""):
+        if r.agent_session_id is not None and r.role is not None:
+            first_run_status_by_session.setdefault(r.agent_session_id, r.status)
+
     def _virtual_status(s: AgentSession) -> str:
         # 优先级复刻 mission.mission_derive_status._virtual_status（§5.C.4）：
         # done 且无活跃 turn → completed > 强收标记（budget 或 worker 任一，
         # 审计 F01 两键同象）下会话 ended 且未 done → failed（终态，可收敛
-        # degraded）> 会话终态 failed → failed > 其余（idle 未 done / 追问
-        # 重开工中 / 无标记 ended 未 done）→ running。
+        # degraded）> 会话终态 failed → failed > 首 run 终态 failed/killed →
+        # failed（ql-20260828-013-a55b 收敛兜底，同 mission.py 单源）> 其余
+        # （idle 未 done / 追问重开工中 / 无标记 ended 未 done）→ running。
         if s.worker_done_at is not None and s.id not in active_ids:
             return "completed"
         if (
@@ -3228,6 +3237,8 @@ async def _team_mission_summary(
         ):
             return "failed"
         if s.status == "failed":
+            return "failed"
+        if first_run_status_by_session.get(s.id) in ("failed", "killed"):
             return "failed"
         return "running"
 
@@ -3296,14 +3307,18 @@ async def _team_mission_summary(
         # status 三值映射对齐 mission_derive_status 虚拟 run 优先级（§5.C.4）：
         # worker_done 且无活跃 turn（is_worker_complete=True）→ completed
         # （优先于终态映射——converge end_session 后 done 分身仍映射 done）>
-        # 会话终态 failed → failed > 其余（idle 未 done / 追问重开工中）→
-        # running；完成判定经 is_worker_complete_from_active（§5.C.3 单一
-        # 真相源的批量形态，active_ids 一次查明，F09）。
+        # 会话终态 failed → failed > 首 run 终态 failed/killed → failed
+        #（ql-20260828-013-a55b 收敛兜底：run 已死任务卡不再显示运行中）>
+        # 其余（idle 未 done / 追问重开工中）→ running；完成判定经
+        # is_worker_complete_from_active（§5.C.3 单一真相源的批量形态，
+        # active_ids 一次查明，F09）。
         if worker_session.worker_done_at is not None and is_worker_complete_from_active(
             worker_session, active_ids
         ):
             row_status = "completed"
         elif worker_session.status == "failed":
+            row_status = "failed"
+        elif first_run is not None and first_run.status in ("failed", "killed"):
             row_status = "failed"
         else:
             row_status = "running"

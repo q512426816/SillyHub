@@ -56,6 +56,7 @@ _dispatch_execute_team → 多 worker 并行 → 全员收敛 → daemon run_syn
 
 ## 注意事项
 - run 与 lease 强耦合：需写盘的派发先申请 worktree lease，daemon 完成后经 lease complete 回调驱动 stage 收口——改 lease 生命周期须同步 daemon run_sync 回调链。
+- mission 状态派生的虚拟 run 映射（mission.py `_virtual_status` 与 daemon/router.py `_team_mission_summary` 本地展开**双源同改**）：分身 run 终态 failed/killed 但会话侧未收敛（active）或 ended 无强收标记时，靠「首 run 终态兜底」映射 failed——去掉该兜底会复发 mission 永卡 running（ql-20260828-013-a55b 实证）；守护用例在 test_derive_status_matrix.py。
 - fingerprint（AgentSpecBundle 内容）变更使旧 resume token 失效；幂等 key 防同阶段重复派发；`reconcile_stale_runs`/`cleanup_stale_runs` 定时收敛卡死 run。
 - 档案字段经 lease.metadata 透传给 daemon（lease/context 消费），两侧字段名是隐式契约；llm_provider_id 的归属校验在 daemon 侧解析时执行。
 - 角色模板回收清单写死在 profile/seed.py：新增/回收模板须同步 `_DEPRECATED_ROLE_TEMPLATE_IDS`，否则产生孤儿模板行。

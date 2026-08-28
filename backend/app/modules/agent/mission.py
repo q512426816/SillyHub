@@ -237,11 +237,23 @@ async def mission_derive_status(
         and WORKER_FORCE_ENDED_AT_KEY in mission.constraints
     )
 
+    # ql-20260828-013-a55b：每子会话首 run（mission 下带 role 的最早 run）终态
+    # 兜底查表——raw_runs 含树内 run（仅从 derive 输入剔除防双计），按
+    # created_at 排序后 setdefault 取最早；追问轮 run 无 mission_id 天然不进。
+    first_run_status_by_session: dict[uuid.UUID, str] = {}
+    for r in sorted(raw_runs, key=lambda x: x.created_at.isoformat() if x.created_at else ""):
+        if r.agent_session_id is not None and r.role is not None:
+            first_run_status_by_session.setdefault(r.agent_session_id, r.status)
+
     def _virtual_status(s: AgentSession) -> str:
         # 优先级：done 且无活跃 turn → completed > 强收标记（budget 或 worker
         # 任一，F01）下会话 ended 且未 done → failed（终态，可收敛 degraded）>
-        # 会话终态 failed → failed > 其余（idle 未 done / 追问重开工中 / 无标记
-        # ended 未 done）→ running。
+        # 会话终态 failed → failed > 首 run 终态 failed/killed → failed
+        #（ql-20260828-013-a55b：树内 run 从 derive 输入剔除，run 已死的终态
+        # 信息原本完全丢失——run killed 后会话 ended 无强收标记、run failed
+        # 后会话未收敛 active，两种形态虚拟 run 都卡 running 致 mission 永不
+        # 收敛）> 其余（idle 未 done / 追问重开工中 / 无标记 ended 未 done）→
+        # running。
         if s.worker_done_at is not None and s.id not in active_worker_ids:
             return "completed"
         if (
@@ -251,6 +263,8 @@ async def mission_derive_status(
         ):
             return "failed"
         if s.status == "failed":
+            return "failed"
+        if first_run_status_by_session.get(s.id) in ("failed", "killed"):
             return "failed"
         return "running"
 

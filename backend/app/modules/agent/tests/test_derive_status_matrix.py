@@ -632,3 +632,54 @@ class TestMissionDeriveStatusVirtualMapping:
         """mission 不存在 → 输入空集宽限（对齐 mission_worker_sessions 缺行
         返 [] 口径），返回 planning 不抛。"""
         assert await mission_derive_status(db_session, uuid.uuid4()) == "planning"
+
+    @pytest.mark.asyncio
+    async def test_first_run_terminal_maps_failed_convergence(
+        self, db_session: AsyncSession
+    ) -> None:
+        """ql-20260828-013-a55b 守护：分身 run 终态（failed/killed）但会话侧
+        未收敛（active）或 ended 无强收标记 → 虚拟 failed，mission 不再卡
+        running（真实案例 mission 1eae4f70：run killed+会话 ended、run
+        failed+会话 active 两种形态都卡「进行中」）。"""
+        root = await _add_session(db_session)
+        mission = await _add_session_mission(db_session, root_session_id=root.id)
+
+        # 形态①：run killed + 会话 ended（无强收标记，原映射落 running）。
+        w1 = await _add_session(db_session, status="ended", parent_session_id=root.id)
+        await _add_run_row(
+            db_session, status="killed", role="worker", mission_id=mission.id,
+            agent_session_id=w1.id,
+        )
+        # 形态②：run failed + 会话仍 active（失败后未收敛）。
+        w2 = await _add_session(db_session, status="active", parent_session_id=root.id)
+        await _add_run_row(
+            db_session, status="failed", role="worker", mission_id=mission.id,
+            agent_session_id=w2.id,
+        )
+
+        # 两个虚拟 run 都映射 failed（修复前卡 running）→ 全终态有失败无完成
+        # + 会话 mission 未收敛 → awaiting_input（等主控输入中间档，语义同
+        # test_all_done_active_mission_maps_awaiting_input；关键在不再 running）。
+        # converge 置位后收敛 failed。
+        assert await mission_derive_status(db_session, mission.id) == "awaiting_input"
+        mission.converged_at = _ts()
+        db_session.add(mission)
+        await db_session.commit()
+        assert await mission_derive_status(db_session, mission.id) == "failed"
+
+    @pytest.mark.asyncio
+    async def test_first_run_terminal_priority_below_session_failed(
+        self, db_session: AsyncSession
+    ) -> None:
+        """ql-20260828-013-a55b：首 run 终态兜底不改变既有优先级——done 未
+        收敛语义（追问重开中）与 run completed 仍在 running 档（兜底只认
+        failed/killed，completed 不越权标 done）。"""
+        root = await _add_session(db_session)
+        mission = await _add_session_mission(db_session, root_session_id=root.id)
+        w = await _add_session(db_session, status="active", parent_session_id=root.id)
+        await _add_run_row(
+            db_session, status="completed", role="worker", mission_id=mission.id,
+            agent_session_id=w.id,
+        )
+        # completed run + 会话 active（无 worker_done_at）→ 仍 running。
+        assert await mission_derive_status(db_session, mission.id) == "running"
