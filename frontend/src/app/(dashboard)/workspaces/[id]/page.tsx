@@ -466,7 +466,8 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const defaultAgentBody = (
         <div className="space-y-2.5">
           <p className="text-xs text-muted-foreground">
-            自动派发（阶段流转、scan-generate）且未显式指定 provider 时使用。留空则由守护进程默认决定。
+            扫描生成（scan-generate）以及未显式指定提供方的智能体派发时使用；守护进程上
+            多个提供方同时在线时，此处用于固定选用哪一个。留空则自动选用最近在线的提供方。
           </p>
           {myBinding?.daemon_id ? (
             boundDaemonProviders.length > 0 ? (
@@ -478,7 +479,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
                     onChange={(e) => setDefaultAgent(e.target.value === "" ? null : e.target.value)}
                     className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
                   >
-                    <option value="">未设置（由守护进程默认决定）</option>
+                    <option value="">未设置（自动选最近在线的提供方）</option>
                     {boundDaemonProviders.map((p) => (
                       <option key={p} value={p}>
                         {PROVIDER_META[p]?.label ?? p}

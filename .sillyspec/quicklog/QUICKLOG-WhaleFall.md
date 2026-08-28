@@ -446,3 +446,13 @@
 根因：CLI 上报是全量重推，hub_session_id 命中后整批 entries 全部改写归属到当前平台会话，早于会话创建就停止活跃的历史旧日志也被挂上（33fd100d 会话挂 4 条上午旧 zcode 日志）且覆盖原归属，会话尾部「本地 Agent 日志」卡片失真并抢走别家归属
 方案：service.py hub 分支仅挂 last_seen_at ≥ 会话 created_at 的条目（_entry_last_seen_gte，naive 按 UTC 对齐，解析失败/缺失按不挂 best-effort），被跳过条目保持原归属且不落 ctx 绑定；既有 4 个 hub 命中测试改用固定 HUB_CREATED_AT，新增 stale 过滤专测；模块文档契约行同步
 结果：test_agent_log_push.py 27 passed、daemon hub 分支零发布用例 1 passed、ruff 两文件 All checks passed；现网 Postgres 存量错误挂接待部署后一次性 detach（另附 SQL）
+
+## ql-20260828-006-e5af | 2026-08-28 09:33:20 | 工作区详情页默认智能体提供方卡片文案修正——对齐阶段流转自动派发退役后的真实消费点
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/app/(dashboard)/workspaces/[id]/page.tsx（默认智能体提供方卡片说明段 + 下拉未设置项两处文案）
+需求：工作区详情页默认智能体提供方卡片文案修正——对齐阶段流转自动派发退役后的真实消费点
+根因：原文案『自动派发（阶段流转、scan-generate）且未显式指定 provider 时使用』中阶段流转自动派发已于 2026-08-14 change-center-conversation-driven（D-004）退役，审批通过/打回不再派发 agent，文案与现状脱节
+方案：page.tsx 两处纯文案改动——卡片说明段改为『扫描生成（scan-generate）以及未显式指定提供方的智能体派发时使用；守护进程上多个提供方同时在线时，此处用于固定选用哪一个。留空则自动选用最近在线的提供方』，下拉未设置项『由守护进程默认决定』改『自动选最近在线的提供方』（对齐 queries.py 按 last_heartbeat_at DESC 取任意在线 runtime 的实际行为）
+结果：全库 grep 确认无其它引用处（含移动端/测试）；pnpm vitest run page.test.tsx 10 个测试全部通过（210s）；纯 JSX 字符串改动无逻辑变更
