@@ -341,3 +341,13 @@
 根因：后端 grants/router.py 已有 PATCH enabled 双向与 DELETE 204 端点但前端只接了停用按钮，且管理卡常驻展开占据页面大量空间
 方案：platform-shared-agents-card.tsx 加 expanded 状态默认折叠（头部常驻 N 个生效/共 M 个计数摘要+展开按钮，条件渲染表单/列表）；lib/daemon.ts disableSharedAgent 泛化为 setSharedAgentEnabled(grantId,enabled)+新增 deleteSharedAgent；操作列按行状态给停用/启用切换+删除（App.useApp modal.confirm 二次确认，对齐 runtimes 页移除运行时先例）
 结果：组件 8 用例+页面测试 20/20 绿、page-usage 10/10 绿、tsc 0 错、lint 仅预存 warning
+
+## ql-20260828-010-d154 | 2026-08-28 10:13:48 | 工作区守护状态徽标误报离线——aggregateDaemonStatus 实例源仅自有，共享绑定 daemon 查不到判离线（列表卡/切换器/移动端三消费方同错）
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
+
+## ql-20260828-011-5523 | 2026-08-28 10:24:43 | 悬浮助手在工作区页发新会话未带 workspace_id——cwd 落空借用沙箱+说明书未注入，agent 全盘搜索；从页面上下文派生 workspaceId 传入 preContext
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）

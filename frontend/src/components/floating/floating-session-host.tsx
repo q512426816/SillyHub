@@ -135,8 +135,20 @@ function FloatingDrawerBody({
       // 的普通新建也清，防历史残留泄漏进后续新建）。
       clearPendingPpmItem();
       ppmPendingRef.current = null;
+      // quick-50381fee：工作区页发起的新会话携带 workspace_id——后端据此落
+      // workspace cwd（共享机器借用走隔离沙箱 + page_context 注入工作区说明书
+      // + 会话归属工作区），否则 cwd 悬空导致 agent 全盘搜索、说明书也不注入。
+      // 仅 page_key=workspace 的上下文派生（用户就在该工作区页面上，语义安全）；
+      // 其余页面维持 null（既有零回归）。
+      const ctxWorkspaceId =
+        effectivePageCtx?.page_key === "workspace"
+          ? effectivePageCtx.workspace_id
+          : null;
       if (!ppm) {
-        startPreSession({ runtimeId, workspaceId: null }, effectivePageCtx);
+        startPreSession(
+          { runtimeId, workspaceId: ctxWorkspaceId },
+          effectivePageCtx,
+        );
         return;
       }
       void (async () => {
