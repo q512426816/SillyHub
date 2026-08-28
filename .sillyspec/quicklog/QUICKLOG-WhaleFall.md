@@ -471,3 +471,13 @@
 方案：5 组件 violet-N→brand-N 同档替换（team-trigger-popover 弹层/session-input-bar ＋菜单派团队项/session-panel 团队 chip/team-task-block 任务卡/turn-segment-views 分身段卡）+ 6 处身份色注释同步；PROVIDER_TONES.claude 厂商外部标识色不动
 结果：vitest 5 个相关测试文件 139/139 通过，grep 确认类名零 violet 残留
 审计：📝 文档欠账（D-8）：5 个源码文件改动未同步任何模块文档（涉及模块：frontend_components）
+
+## ql-20260828-008-7bd5 | 2026-08-28 10:19:22 | 团队进度卡 team-progress 配色补迁主题统一
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/team-progress.tsx（团队 mission 进度卡 violet→brand 同档 + 注释）
+需求：团队进度卡 team-progress 配色补迁主题统一
+根因：ql-007 派团队视觉迁 brand 时漏了 team-progress.tsx（变更详情页 agent 运行日志与会话共用的 mission 进度卡），violet 固定阶在 blue/dark 主题下同样与主题割裂
+方案：4 处类名 violet-N→brand-N 同档替换（mission 容器卡/决策日志块/worker 列表标题两处/状态色）+ 头注释身份色说明同步
+结果：vitest team-progress.test.tsx + page-team-toggle.test.tsx 25/25 通过

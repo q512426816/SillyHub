@@ -9,7 +9,8 @@
  *      取主 agent 调度决策（dispatch/get_result/converge 等步骤的 note）。
  *      设计 §5 MCP report_progress(note) 写入；brownfield 无字段→空态。
  *   2. Worker 进度列表：mission.workers（含 status / role / objective / artifacts），
- *      复用 mission-console WorkerRow 的样式（紫系 violet，对齐 team 主题）。
+ *      复用 mission-console WorkerRow 的样式（brand 语义阶随主题换肤，对齐
+ *      ql-20260828-007-7dcf 团队视觉统一）。
  *   3. CostBar：mission.cost_so_far / budget_usd 进度条。
  *
  * 与 mission-console 区别：
@@ -122,7 +123,7 @@ export function TeamProgress({ missionId, workspaceId, compact, pollMs }: TeamPr
 
   const sectionClass = compact
     ? "space-y-3"
-    : "space-y-3 rounded-lg border border-violet-200 bg-violet-50/20 p-4";
+    : "space-y-3 rounded-lg border border-brand-200 bg-brand-50/20 p-4";
 
   if (loading) {
     return (
@@ -188,8 +189,8 @@ export function TeamProgress({ missionId, workspaceId, compact, pollMs }: TeamPr
       </div>
 
       {/* 主 agent 决策日志（orchestrator_log，brownfield 空→提示） */}
-      <div className="rounded-md border border-violet-200 bg-card p-3">
-        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-700">
+      <div className="rounded-md border border-brand-200 bg-card p-3">
+        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-700">
           🧠 主 Agent 决策
         </div>
         {mainAgent && (
@@ -225,7 +226,7 @@ export function TeamProgress({ missionId, workspaceId, compact, pollMs }: TeamPr
 
       {/* Worker 进度列表（复用 mission-console WorkerRow 风格） */}
       <div>
-        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-700">
+        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-700">
           👥 Worker 进度（{workerRuns.length}）
         </div>
         {workerRuns.length === 0 ? (
