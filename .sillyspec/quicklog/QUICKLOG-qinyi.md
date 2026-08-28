@@ -418,3 +418,15 @@
 方案：extractResultStats 的 input/output 对齐 cache 的 task-16 语义改为 result.usage 优先、缺失回落 accumulated；同步更新 _accumulatedUsage docstring 与过时注释；修正 4 处钉住旧求和断言的用例（stream-json 四维 result 优先 / stats-passthrough case1&case3 / cache-passthrough input 100 / task-runner-budget result.usage 改官方累计 110/70 保持 budget 触发意图）+ 新增 case1b 真实事件流翻倍回归；模块文档 sillyhub-daemon.md 变更索引补 ql-20260829-001-ace1
 结果：stream-json+stats-passthrough+cache-passthrough+task-runner-budget 88 用例与 task-runner 72 用例全绿，pnpm typecheck 0 错误；未部署（daemon 修复需随下次 daemon 发版分发）
 审计：⚖️ 归属切分：3 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/tests/cache-passthrough.test.ts, sillyhub-daemon/tests/stats-passthrough.test.ts, sillyhub-daemon/tests/task-runner-budget.test.ts
+
+## ql-20260829-002-255f | 2026-08-29 02:10:38 | interactive 终态 token 四维改 modelUsage 聚合（含子代理）+ 历史污染数据清理
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/daemon.ts（_aggregateModelUsage 新增 + onTurnResult 四维 modelUsage 优先回落）
+- sillyhub-daemon/tests/daemon-interactive-bridge.test.ts（ql-002 三用例（聚合/回落/防御））
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（变更索引补 ql-20260829-002-255f）
+需求：interactive 终态 token 四维改 modelUsage 聚合（含子代理）+ 历史污染数据清理
+根因：SDK 文档钉死 result.usage 是 MAIN AGENT LOOP ONLY（不含 Task 子代理/sidechain/compaction）且 per-turn，平台会话大量派子代理时终态 token 系统性低估；且 2026-08-27 23:07:58 新 daemon 生效前的历史 run 记的是会话级累计（跨轮不清零+backend max 写回），input 累计 1860 万占总量的 90%+ 全为重复计数污染
+方案：daemon.ts 新增 _aggregateModelUsage（Record<string,ModelUsage> camelCase 四维跨模型求和、非有限数防御），onTurnResult 终态 payload 四维优先 modelUsage 聚合、缺失/空回落 result.usage（老 CLI/Codex 兼容行为不变）；本地 DB 先备份 agent_runs_token_backup_20260829（514 行）再把切割点前 run 的六 token 字段置 NULL
+结果：daemon-interactive-bridge 新增 3 用例（聚合优先/空回落/非法防御），26+89（关联 7 文件）用例全绿 tsc 0；DB 清理后干净数据 input 14.6 万 vs cache_read 55.8 万，缓存远大于输入的比例恢复正常；daemon 修复待随下次发版生效

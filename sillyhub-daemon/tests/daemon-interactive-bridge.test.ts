@@ -338,6 +338,107 @@ describe('Wave2 task-04 gap-1 daemon 桥接 onTurnResult/onTurnMessage/onSession
     expect(payload.cache_read_tokens).toBe(0);
   });
 
+  // ql-20260829-002：token 四维优先 modelUsage 跨模型聚合（含 Task 子代理），
+  // 缺失/空回落 result.usage（主循环 only，D-001 兼容）。
+  it('ql-002 onTurnResult: modelUsage 聚合优先（含子代理模型条目，跨 key 求和）', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    const result = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      // 主循环 only（不含子代理）——修复前会被当作全量透传
+      usage: {
+        input_tokens: 1000,
+        output_tokens: 200,
+        cache_creation_input_tokens: 50,
+        cache_read_input_tokens: 30000,
+      },
+      // 全 pipeline per-model 账（主模型 + 子代理模型）
+      modelUsage: {
+        'claude-sonnet-4-6': {
+          inputTokens: 1000,
+          outputTokens: 200,
+          cacheReadInputTokens: 30000,
+          cacheCreationInputTokens: 50,
+        },
+        'claude-haiku-4-6': {
+          inputTokens: 500,
+          outputTokens: 80,
+          cacheReadInputTokens: 8000,
+          cacheCreationInputTokens: 0,
+        },
+      },
+    } as unknown as SDKResultMessage;
+
+    await daemon.onTurnResult('sess-1', 'run-1', result);
+
+    const callArgs = client.notifyRunResult.mock.calls[0]!;
+    const payload = callArgs[3] as Record<string, unknown>;
+    // 四维 = 跨模型求和（含子代理），不再用主循环 only 的 usage 值
+    expect(payload.input_tokens).toBe(1500);
+    expect(payload.output_tokens).toBe(280);
+    expect(payload.cache_read_tokens).toBe(38000);
+    expect(payload.cache_creation_tokens).toBe(50);
+  });
+
+  it('ql-002 onTurnResult: modelUsage 空对象 → 回落 result.usage（老 CLI 兼容）', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    const result = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      usage: {
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_creation_input_tokens: 200,
+        cache_read_input_tokens: 800,
+      },
+      modelUsage: {}, // 空对象（无有效条目）→ seen=false → 回落
+    } as unknown as SDKResultMessage;
+
+    await daemon.onTurnResult('sess-1', 'run-1', result);
+
+    const callArgs = client.notifyRunResult.mock.calls[0]!;
+    const payload = callArgs[3] as Record<string, unknown>;
+    expect(payload.input_tokens).toBe(100);
+    expect(payload.output_tokens).toBe(50);
+    expect(payload.cache_read_tokens).toBe(800);
+    expect(payload.cache_creation_tokens).toBe(200);
+  });
+
+  it('ql-002 onTurnResult: modelUsage 非法条目（非 number 值）跳过、有效条目仍聚合', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    const result = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      modelUsage: {
+        'claude-sonnet-4-6': {
+          inputTokens: 'oops' as unknown as number, // 非法 → 跳过
+          outputTokens: 10,
+          cacheReadInputTokens: Number.NaN, // 非有限数 → 跳过
+          cacheCreationInputTokens: 5,
+        },
+      },
+    } as unknown as SDKResultMessage;
+
+    await daemon.onTurnResult('sess-1', 'run-1', result);
+
+    const callArgs = client.notifyRunResult.mock.calls[0]!;
+    const payload = callArgs[3] as Record<string, unknown>;
+    // 有效字段聚合，非法字段按 0 基线（seen 由其它维触发，input 全非法 → 0 仍写）
+    expect(payload.input_tokens).toBe(0);
+    expect(payload.output_tokens).toBe(10);
+    expect(payload.cache_read_tokens).toBe(0);
+    expect(payload.cache_creation_tokens).toBe(5);
+  });
+
   // ── onTurnMessage → hubClient.submitMessages ──────────────────────────────
 
   it('onTurnMessage(state.active) → submitMessages(leaseId, claimToken, runId, [msg])', async () => {

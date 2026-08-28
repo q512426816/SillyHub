@@ -223,6 +223,57 @@ function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
+// ── modelUsage 聚合（ql-20260829-002）────────────────────────────────────────
+// SDK 文档（sdk.d.ts SDKResultSuccess）：result.usage 是 MAIN AGENT LOOP ONLY
+// （不含 Task 子代理 / sidechain / compaction），modelUsage 才是 "The correct
+// field for token/cost accounting"（per-model 累计，含全部 query-pipeline 调用）。
+// 平台会话大量派 Task 子代理，终态 token 只取 result.usage 会系统性低估。
+// 本函数把 Record<string, ModelUsage>（camelCase 四维）跨模型求和；任一条目
+// 出现 number 字段即视为有效（seen）；非对象 / 空对象 / 全非有限数 → null
+// （调用方回落 result.usage 现行为，兼容老 CLI 与 Codex driver）。
+interface ModelUsageTotals {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+}
+
+function _aggregateModelUsage(modelUsage: unknown): ModelUsageTotals | null {
+  if (typeof modelUsage !== 'object' || modelUsage === null || Array.isArray(modelUsage)) {
+    return null;
+  }
+  const totals: ModelUsageTotals = { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 };
+  let seen = false;
+  for (const raw of Object.values(modelUsage as Record<string, unknown>)) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const entry = raw as Record<string, unknown>;
+    // 非有限数（NaN/Infinity/字符串）不计入，防脏 stats 污染求和。
+    if (typeof entry.inputTokens === 'number' && Number.isFinite(entry.inputTokens)) {
+      totals.input += entry.inputTokens;
+      seen = true;
+    }
+    if (typeof entry.outputTokens === 'number' && Number.isFinite(entry.outputTokens)) {
+      totals.output += entry.outputTokens;
+      seen = true;
+    }
+    if (
+      typeof entry.cacheReadInputTokens === 'number' &&
+      Number.isFinite(entry.cacheReadInputTokens)
+    ) {
+      totals.cacheRead += entry.cacheReadInputTokens;
+      seen = true;
+    }
+    if (
+      typeof entry.cacheCreationInputTokens === 'number' &&
+      Number.isFinite(entry.cacheCreationInputTokens)
+    ) {
+      totals.cacheCreation += entry.cacheCreationInputTokens;
+      seen = true;
+    }
+  }
+  return seen ? totals : null;
+}
+
 // ── translateSpecRoot（prompt 路径翻译纯函数）─────────────────────────────────
 // 2026-06-22-agent-run-pipeline-fix task-02：SPEC_ROOT_MAP 翻译器。
 // design §4.1 A1 第 2 层：daemon 在 prompt 透传给 SessionManager.create 前，
@@ -1557,7 +1608,8 @@ export class Daemon {
     // SDKResultSuccess 含 total_cost_usd / num_turns / duration_ms / duration_api_ms /
     // usage.{input_tokens,output_tokens}（见 sdk.d.ts SDKResultSuccess 类型）；
     // interactive 路径原先丢弃这些字段导致 AgentRun 全 NULL（对齐 batch
-    // task-runner extractResultStats）。
+    // task-runner extractResultStats）。ql-20260829-002：token 四维优先取
+    // modelUsage 聚合（usage 只含主循环、不含子代理，见 _aggregateModelUsage）。
     const resultMeta = result as SDKResultMessage & {
       subtype?: string;
       is_error?: boolean;
@@ -1625,27 +1677,42 @@ export class Daemon {
     if (typeof resultMeta.duration_api_ms === 'number') {
       payload.duration_api_ms = resultMeta.duration_api_ms;
     }
-    if (resultMeta.usage && typeof resultMeta.usage.input_tokens === 'number') {
-      payload.input_tokens = resultMeta.usage.input_tokens;
-    }
-    if (resultMeta.usage && typeof resultMeta.usage.output_tokens === 'number') {
-      payload.output_tokens = resultMeta.usage.output_tokens;
-    }
-    // task-16：cache 两维提取（Anthropic SDK 全名 → payload 短名映射）。
-    // 全名 cache_*_input_tokens 来自 Claude SDK result.usage；映射为短名 cache_*_tokens
-    //（对齐 backend agent_runs 列 / _METADATA_FIELDS）。typeof 'number' 守卫，
-    // 字段缺失（codex/老 CLI）不 set → backend NULL（D-001@v1）。0 值合法不丢。
-    if (
-      resultMeta.usage &&
-      typeof resultMeta.usage.cache_creation_input_tokens === 'number'
-    ) {
-      payload.cache_creation_tokens = resultMeta.usage.cache_creation_input_tokens;
-    }
-    if (
-      resultMeta.usage &&
-      typeof resultMeta.usage.cache_read_input_tokens === 'number'
-    ) {
-      payload.cache_read_tokens = resultMeta.usage.cache_read_input_tokens;
+    // ql-20260829-002：token 四维优先取 modelUsage 跨模型聚合（含 Task 子代理 /
+    // sidechain / compaction 的全部 query-pipeline 消耗，SDK 官方指明这才是
+    // token 口径权威字段）；modelUsage 缺失 / 空（老 CLI、Codex driver）回落
+    // resultMeta.usage（主循环 only，即修复前 D-001 行为，向后兼容）。
+    // total_cost_usd 本身已覆盖全部 pipeline（SDK 语义），不走本分支。
+    const modelTotals = _aggregateModelUsage(
+      (resultMeta as { modelUsage?: unknown }).modelUsage,
+    );
+    if (modelTotals) {
+      payload.input_tokens = modelTotals.input;
+      payload.output_tokens = modelTotals.output;
+      payload.cache_read_tokens = modelTotals.cacheRead;
+      payload.cache_creation_tokens = modelTotals.cacheCreation;
+    } else if (resultMeta.usage) {
+      if (typeof resultMeta.usage.input_tokens === 'number') {
+        payload.input_tokens = resultMeta.usage.input_tokens;
+      }
+      if (typeof resultMeta.usage.output_tokens === 'number') {
+        payload.output_tokens = resultMeta.usage.output_tokens;
+      }
+      // task-16：cache 两维提取（Anthropic SDK 全名 → payload 短名映射）。
+      // 全名 cache_*_input_tokens 来自 Claude SDK result.usage；映射为短名 cache_*_tokens
+      //（对齐 backend agent_runs 列 / _METADATA_FIELDS）。typeof 'number' 守卫，
+      // 字段缺失（codex/老 CLI）不 set → backend NULL（D-001@v1）。0 值合法不丢。
+      if (
+        resultMeta.usage &&
+        typeof resultMeta.usage.cache_creation_input_tokens === 'number'
+      ) {
+        payload.cache_creation_tokens = resultMeta.usage.cache_creation_input_tokens;
+      }
+      if (
+        resultMeta.usage &&
+        typeof resultMeta.usage.cache_read_input_tokens === 'number'
+      ) {
+        payload.cache_read_tokens = resultMeta.usage.cache_read_input_tokens;
+      }
     }
     // task-04（FR-01 / D-005@v1）：模型层结构化错误注入。session-manager._onResult
     // 收尾时已按 provider + is_error + resultText 调 classifyModelError 归类，把非空
