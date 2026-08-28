@@ -587,7 +587,10 @@ describe("2026-08-28-daemon-agent-share task-09: 共享给我的区块 + 平台�
     expect(screen.getByTestId("platform-shared-agents-card")).toBeInTheDocument();
     expect(screen.getByText("平台共享智能体")).toBeInTheDocument();
     expect(screen.getByText(/仅平台管理员/)).toBeTruthy();
-    // 创建表单四字段 label 挂载（交互细节归组件测试）。
-    expect(screen.getByText(/共享输出目录 writable_dir/)).toBeInTheDocument();
+    // quick-6625a929：卡默认折叠——表单不渲染，头部展开按钮常驻；展开后表单挂载
+    // （交互细节归组件测试）。
+    expect(screen.queryByText(/共享输出目录 writable_dir/)).toBeNull();
+    fireEvent.click(screen.getByTestId("platform-shared-agents-toggle"));
+    expect(await screen.findByText(/共享输出目录 writable_dir/)).toBeInTheDocument();
   });
 });

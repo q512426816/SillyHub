@@ -1,18 +1,22 @@
 /**
  * 2026-08-28-daemon-agent-share task-09：PlatformSharedAgentsCard 平台共享智能体
- * 管理卡单测。
+ * 管理卡单测（quick-6625a929 扩充：默认折叠 + 启用/删除）。
  *
- * 覆盖（task-09 acceptance / FR-04）：
- *   1. 渲染：创建表单四字段（档案/守护进程/源码工作区/writable_dir）+「新建共享」
+ * 覆盖（task-09 acceptance / FR-04 + quick-6625a929）：
+ *   1. 默认折叠：表单/列表不渲染，头部计数摘要（N 个生效 / 共 M 个）常驻；展开后
+ *      创建表单四字段（档案/守护进程/源码工作区/writable_dir）+「新建共享」
  *      按钮 + 生效列表行（档案名/绑定 runtime + writable_dir/源码工作区/状态
- *      Badge 生效中·已停用/停用按钮）；
+ *      Badge 生效中·已停用/启用·停用/删除按钮）；
  *   2. 表单校验：空表单提交 → 四条中文必填提示，createSharedAgent 不被调；
  *   3. 创建交互：四字段填写提交 → createSharedAgent 收到正确 payload
  *      （promote_visibility=false——表单只列 platform 档案，R-05 无需升级）；
- *   4. 停用交互：生效行点「停用」→ disableSharedAgent(grantId)；已停用行按钮禁用。
+ *   4. 停用交互：生效行点「停用」→ setSharedAgentEnabled(grantId, false)；
+ *   5. 启用交互：已停用行点「启用」→ setSharedAgentEnabled(grantId, true)；
+ *   6. 删除交互：行点「删除」→ modal.confirm 二次确认 → 点确认 →
+ *      deleteSharedAgent(grantId)；取消则不调。
  *
  * admin-only 渲染门控在 page 层（page.test.tsx 断言非 admin 不出现本卡）。
- * mock 网络层：@/lib/daemon（sharedAgents 四函数 + useDaemonMachines 数据源）、
+ * mock 网络层：@/lib/daemon（sharedAgents 封装 + useDaemonMachines 数据源）、
  * @/lib/agent-profiles、@/lib/workspaces；antd Select 选项经 portal 渲染，
  * 用 mouseDown 展开 + findByText 点选（antd RTL 惯例）。
  */
@@ -51,7 +55,8 @@ const daemon = vi.hoisted(() => ({
   fetchSharedAgents: vi.fn(),
   fetchSharedAgentsActive: vi.fn(),
   createSharedAgent: vi.fn(),
-  disableSharedAgent: vi.fn(),
+  setSharedAgentEnabled: vi.fn(),
+  deleteSharedAgent: vi.fn(),
   listDaemonMachines: vi.fn(),
   listAgentSessions: vi.fn(),
 }));
@@ -63,7 +68,8 @@ vi.mock("@/lib/daemon", async () => {
     fetchSharedAgents: daemon.fetchSharedAgents,
     fetchSharedAgentsActive: daemon.fetchSharedAgentsActive,
     createSharedAgent: daemon.createSharedAgent,
-    disableSharedAgent: daemon.disableSharedAgent,
+    setSharedAgentEnabled: daemon.setSharedAgentEnabled,
+    deleteSharedAgent: daemon.deleteSharedAgent,
     listDaemonMachines: daemon.listDaemonMachines,
     listAgentSessions: daemon.listAgentSessions,
   };
@@ -201,14 +207,17 @@ beforeEach(() => {
     enabled: true,
     visibility_promoted: false,
   });
-  daemon.disableSharedAgent.mockResolvedValue({
-    id: "g-1",
-    agent_profile_id: "p-1",
-    pinned_runtime_id: "rt-1",
-    source_workspace_id: "ws-1",
-    writable_dir: "C:\\share\\outputs",
-    enabled: false,
-  });
+  daemon.setSharedAgentEnabled.mockImplementation((_grantId: string, enabled: boolean) =>
+    Promise.resolve({
+      id: "g-1",
+      agent_profile_id: "p-1",
+      pinned_runtime_id: "rt-1",
+      source_workspace_id: "ws-1",
+      writable_dir: "C:\\share\\outputs",
+      enabled,
+    }),
+  );
+  daemon.deleteSharedAgent.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -226,6 +235,12 @@ function renderCard() {
       </AntApp>
     </QueryClientProvider>,
   );
+}
+
+/** 卡默认折叠：点头部「展开」并等表单挂载后再断言内容。 */
+async function expandCard() {
+  fireEvent.click(screen.getByTestId("platform-shared-agents-toggle"));
+  await screen.findByText("智能体档案（platform 可见）");
 }
 
 /**
@@ -255,9 +270,30 @@ async function selectOption(placeholder: string, optionText: string) {
   });
 }
 
-describe("PlatformSharedAgentsCard（task-09 / FR-04）", () => {
-  it("渲染创建表单四字段 + 新建共享按钮 + 生效列表行（状态 Badge + 停用）", async () => {
+describe("PlatformSharedAgentsCard（task-09 / FR-04 + quick-6625a929）", () => {
+  it("默认折叠：表单/列表不渲染，头部计数摘要常驻；展开后内容挂载", async () => {
     renderCard();
+
+    // 头部常驻：标题 + 计数摘要（g-1 生效 / g-2 停用 → 1 个生效 / 共 2 个）。
+    expect(screen.getByText("平台共享智能体")).toBeInTheDocument();
+    const summary = await screen.findByTestId("platform-shared-agents-summary");
+    expect(summary).toHaveTextContent("1 个生效 / 共 2 个");
+
+    // 折叠态：表单与列表均不渲染。
+    expect(screen.queryByText("智能体档案（platform 可见）")).toBeNull();
+    expect(screen.queryByRole("button", { name: /新建共享/ })).toBeNull();
+    expect(screen.queryByText("生效中 · 全体可用")).toBeNull();
+
+    // 展开 → 表单挂载；再收起 → 内容卸载（按钮文本随状态切换）。
+    await expandCard();
+    expect(screen.getByRole("button", { name: /新建共享/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("platform-shared-agents-toggle"));
+    expect(screen.queryByRole("button", { name: /新建共享/ })).toBeNull();
+  });
+
+  it("展开后渲染创建表单四字段 + 生效列表行（状态 Badge + 启用/停用/删除）", async () => {
+    renderCard();
+    await expandCard();
 
     // 表单四字段 label（antd Form label 与控件 htmlFor 关联）
     expect(screen.getByText("智能体档案（platform 可见）")).toBeInTheDocument();
@@ -282,12 +318,15 @@ describe("PlatformSharedAgentsCard（task-09 / FR-04）", () => {
     expect(screen.getByText("生效中 · 全体可用")).toBeInTheDocument();
     expect(screen.getByText("runtime 在线")).toBeInTheDocument();
     expect(screen.getByText("已停用")).toBeInTheDocument();
-    // 停用按钮两行各一
-    expect(screen.getAllByRole("button", { name: /停\s*用/ })).toHaveLength(2);
+    // 操作列：g-1（生效）给「停用」，g-2（停用）给「启用」；两行各一「删除」。
+    expect(within(g1Row as HTMLElement).getByRole("button", { name: /停\s*用/ })).toBeInTheDocument();
+    expect(within(g2Row as HTMLElement).getByRole("button", { name: /启\s*用/ })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: /删\s*除/ })).toHaveLength(2);
   });
 
   it("空表单提交 → 四条必填中文提示，createSharedAgent 不被调", async () => {
     renderCard();
+    await expandCard();
     fireEvent.click(screen.getByRole("button", { name: /新建共享/ }));
 
     // 四条提示经 findByText 逐条等（嵌套 noStyle 字段的校验回显有一拍延迟）。
@@ -303,6 +342,7 @@ describe("PlatformSharedAgentsCard（task-09 / FR-04）", () => {
 
   it("四字段填写提交 → createSharedAgent 收到正确 payload（promote_visibility=false）", async () => {
     renderCard();
+    await expandCard();
 
     // 档案下拉：展开时仅 platform 可见档案（R-05：非 platform 不进下拉）。
     const profileWrapper = screen
@@ -342,21 +382,13 @@ describe("PlatformSharedAgentsCard（task-09 / FR-04）", () => {
     });
   });
 
-  it("生效行点「停用」→ disableSharedAgent(grantId)；已停用行按钮禁用", async () => {
+  it("生效行点「停用」→ setSharedAgentEnabled(g-1, false)", async () => {
     renderCard();
+    await expandCard();
     await waitFor(() => {
       expect(screen.getByText("生效中 · 全体可用")).toBeInTheDocument();
     });
 
-    // g-2（已停用）行按钮禁用——行内「已停用」Badge 所在行定位。
-    const disabledRow = screen.getByText("已停用").closest("tr");
-    expect(disabledRow).not.toBeNull();
-    const disabledBtn = within(disabledRow as HTMLElement).getByRole("button", {
-      name: /停\s*用/,
-    });
-    expect(disabledBtn).toBeDisabled();
-
-    // g-1（生效中）行停用按钮可点 → disableSharedAgent("g-1")
     const enabledRow = screen.getByText("生效中 · 全体可用").closest("tr");
     expect(enabledRow).not.toBeNull();
     const enabledBtn = within(enabledRow as HTMLElement).getByRole("button", {
@@ -366,7 +398,83 @@ describe("PlatformSharedAgentsCard（task-09 / FR-04）", () => {
     fireEvent.click(enabledBtn);
 
     await waitFor(() => {
-      expect(daemon.disableSharedAgent).toHaveBeenCalledWith("g-1");
+      expect(daemon.setSharedAgentEnabled).toHaveBeenCalledWith("g-1", false);
     });
+  });
+
+  it("已停用行点「启用」→ setSharedAgentEnabled(g-2, true)", async () => {
+    renderCard();
+    await expandCard();
+    await waitFor(() => {
+      expect(screen.getByText("已停用")).toBeInTheDocument();
+    });
+
+    const disabledRow = screen.getByText("已停用").closest("tr");
+    expect(disabledRow).not.toBeNull();
+    const enableBtn = within(disabledRow as HTMLElement).getByRole("button", {
+      name: /启\s*用/,
+    });
+    expect(enableBtn).not.toBeDisabled();
+    fireEvent.click(enableBtn);
+
+    await waitFor(() => {
+      expect(daemon.setSharedAgentEnabled).toHaveBeenCalledWith("g-2", true);
+    });
+  });
+
+  it("行点「删除」→ modal.confirm 二次确认，确认后 deleteSharedAgent(g-1)", async () => {
+    renderCard();
+    await expandCard();
+    await waitFor(() => {
+      expect(screen.getByText("生效中 · 全体可用")).toBeInTheDocument();
+    });
+
+    const enabledRow = screen.getByText("生效中 · 全体可用").closest("tr");
+    fireEvent.click(
+      within(enabledRow as HTMLElement).getByRole("button", { name: /删\s*除/ }),
+    );
+
+    // 二次确认弹窗（portal 到 body）：标题 + 共享名 + 确认按钮。antd v6 标题渲染
+    // 两份（.ant-modal-title 供 aria-labelledby + .ant-modal-confirm-title 正文），
+    // getByText 会多命中——按结构选择器断言。
+    const confirmRoot = await waitFor(() => {
+      const el = document.querySelector(".ant-modal-confirm");
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    const confirmTitle = confirmRoot.querySelector(".ant-modal-confirm-title");
+    expect(confirmTitle).toHaveTextContent("删除共享智能体");
+    expect(within(confirmRoot).getByText(/平台功能讲解助手/)).toBeInTheDocument();
+
+    fireEvent.click(within(confirmRoot).getByRole("button", { name: /删\s*除/ }));
+
+    await waitFor(() => {
+      expect(daemon.deleteSharedAgent).toHaveBeenCalledWith("g-1");
+    });
+  });
+
+  it("删除二次确认点「取消」→ deleteSharedAgent 不被调", async () => {
+    renderCard();
+    await expandCard();
+    await waitFor(() => {
+      expect(screen.getByText("生效中 · 全体可用")).toBeInTheDocument();
+    });
+
+    const enabledRow = screen.getByText("生效中 · 全体可用").closest("tr");
+    fireEvent.click(
+      within(enabledRow as HTMLElement).getByRole("button", { name: /删\s*除/ }),
+    );
+
+    const confirmRoot = await waitFor(() => {
+      const el = document.querySelector(".ant-modal-confirm");
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    fireEvent.click(within(confirmRoot).getByRole("button", { name: /取\s*消/ }));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(daemon.deleteSharedAgent).not.toHaveBeenCalled();
   });
 });

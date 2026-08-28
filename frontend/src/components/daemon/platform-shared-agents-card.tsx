@@ -9,7 +9,9 @@
  *   - 创建表单四字段：档案（platform 可见）/ 守护进程（仅管理员自己名下在线，D-003）/
  *     源码工作区（只读锚定）/ writable_dir（会话唯一可写位置，⊆ runtime 可写目录）；
  *   - 生效列表（SharedAgentView 行 + enabled 状态 Badge + active runtime 在线状态）；
- *   - 停用按钮（PATCH enabled=false 软开关，会话选择器即不再呈现）。
+ *   - 启用/停用按钮（PATCH enabled 真假双向软开关，停用后会话选择器即不再呈现）；
+ *   - 删除按钮（DELETE 物理删除，modal.confirm 二次确认，对齐 runtimes 页移除运行时先例）；
+ *   - 整卡默认折叠（头部常驻计数摘要，展开才渲染表单与列表）。
  *
  * 数据源（全部复用既有 API，零新端点）：
  *   - 档案：usePlatformAgentProfiles（/api/agent-profiles platform 级）；
@@ -17,15 +19,16 @@
  *     精确过滤自己名下机器，对齐后端 list_machines 权限分支）；
  *   - 源码工作区：listWorkspaces；
  *   - 共享列表/摘要：lib/daemon sharedAgents 封装（fetchSharedAgents /
- *     fetchSharedAgentsActive / createSharedAgent / disableSharedAgent）。
+ *     fetchSharedAgentsActive / createSharedAgent / setSharedAgentEnabled /
+ *     deleteSharedAgent）。
  *
  * 样式：antd Form/Select/Input/Button/Table/Badge/Tag（FRONTEND_PAGE_STYLE §0/§5/§7）
  * + tailwind brand-* 语义阶（§0.5），无硬编码 hex；文案中文。
  */
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Badge, Button, Form, Input, Select, Table, Tag } from "antd";
-import { Bot, FolderOpen, Plus } from "lucide-react";
+import { App, Badge, Button, Form, Input, Select, Table, Tag } from "antd";
+import { Bot, ChevronDown, ChevronRight, FolderOpen, Plus } from "lucide-react";
 
 import { RemoteFolderPicker } from "@/components/daemon/remote-folder-picker";
 import { useNotify } from "@/lib/errors";
@@ -33,10 +36,11 @@ import { agentProfileQueryKeys, usePlatformAgentProfiles } from "@/lib/agent-pro
 import { listWorkspaces } from "@/lib/workspaces";
 import {
   createSharedAgent,
-  disableSharedAgent,
+  deleteSharedAgent,
   fetchSharedAgents,
   fetchSharedAgentsActive,
   PROVIDER_META,
+  setSharedAgentEnabled,
   type DaemonMachineRead,
   type DaemonRuntimeRead,
   type SharedAgentView,
@@ -66,10 +70,14 @@ const SHARED_AGENTS_QUERY_KEY = ["daemonSharedAgents"] as const;
 export function PlatformSharedAgentsCard() {
   const notify = useNotify();
   const queryClient = useQueryClient();
+  const { modal } = App.useApp();
   const [form] = Form.useForm<SharedAgentFormValues>();
   const [creating, setCreating] = useState(false);
-  const [disablingId, setDisablingId] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // 默认折叠：该卡是管理员低频管理入口，头部常驻计数摘要，展开才渲染表单与列表。
+  const [expanded, setExpanded] = useState(false);
 
   // D-003：钉定 runtime 必须是管理员自己名下——admin 传 user_id 即精确过滤。
   const currentUserId = useSession((s) => s.user?.id);
@@ -174,17 +182,45 @@ export function PlatformSharedAgentsCard() {
     }
   };
 
-  const handleDisable = async (row: SharedAgentView) => {
-    setDisablingId(row.id);
+  // 头部折叠摘要：生效/总数计数（折叠时也要能看到大盘）。
+  const enabledCount = sharedAgents?.filter((a) => a.enabled).length ?? 0;
+
+  /** 启用/停用软开关（PATCH enabled 真假双向）。 */
+  const handleToggle = async (row: SharedAgentView) => {
+    setTogglingId(row.id);
     try {
-      await disableSharedAgent(row.id);
-      notify.success("共享智能体已停用");
+      await setSharedAgentEnabled(row.id, !row.enabled);
+      notify.success(row.enabled ? "共享智能体已停用" : "共享智能体已启用");
       void queryClient.invalidateQueries({ queryKey: SHARED_AGENTS_QUERY_KEY });
     } catch (err) {
-      notify.error(err, "停用共享智能体失败");
+      notify.error(err, row.enabled ? "停用共享智能体失败" : "启用共享智能体失败");
     } finally {
-      setDisablingId(null);
+      setTogglingId(null);
     }
+  };
+
+  /** 物理删除（modal.confirm 二次确认，先例 runtimes 页移除运行时）。 */
+  const handleDelete = (row: SharedAgentView) => {
+    const name = activeById.get(row.id)?.display_name ?? row.agent_profile_id;
+    modal.confirm({
+      title: "删除共享智能体",
+      content: `确定删除共享智能体「${name}」？删除后全体用户的会话选择器立即不再呈现，且不可恢复（智能体档案本身不受影响）。`,
+      okText: "删除",
+      okType: "danger",
+      cancelText: "取消",
+      onOk: async () => {
+        setDeletingId(row.id);
+        try {
+          await deleteSharedAgent(row.id);
+          notify.success("共享智能体已删除");
+          void queryClient.invalidateQueries({ queryKey: SHARED_AGENTS_QUERY_KEY });
+        } catch (err) {
+          notify.error(err, "删除共享智能体失败");
+        } finally {
+          setDeletingId(null);
+        }
+      },
+    });
   };
 
   return (
@@ -200,8 +236,35 @@ export function PlatformSharedAgentsCard() {
         <span className="text-[11px] text-muted-foreground">
           把管理员名下的守护进程 + 智能体档案共享给全体用户（含无守护进程的新用户）
         </span>
+        {sharedAgents && (
+          <span
+            className="text-[11px] text-muted-foreground"
+            data-testid="platform-shared-agents-summary"
+          >
+            {enabledCount} 个生效 / 共 {sharedAgents.length} 个
+          </span>
+        )}
+        <Button
+          type="text"
+          size="small"
+          className="ml-auto flex items-center gap-1 px-1.5 text-xs"
+          aria-expanded={expanded}
+          data-testid="platform-shared-agents-toggle"
+          icon={
+            expanded ? (
+              <ChevronDown className="h-3.5 w-3.5" aria-hidden />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+            )
+          }
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "收起" : "展开"}
+        </Button>
       </div>
 
+      {expanded && (
+        <>
       <Form
         form={form}
         layout="vertical"
@@ -371,17 +434,25 @@ export function PlatformSharedAgentsCard() {
             title: "操作",
             key: "action",
             align: "center",
-            width: 100,
+            width: 160,
             render: (_, row) => (
-              <Button
-                size="small"
-                danger
-                disabled={!row.enabled}
-                loading={disablingId === row.id}
-                onClick={() => void handleDisable(row)}
-              >
-                停用
-              </Button>
+              <span className="flex items-center justify-center gap-1">
+                <Button
+                  size="small"
+                  loading={togglingId === row.id}
+                  onClick={() => void handleToggle(row)}
+                >
+                  {row.enabled ? "停用" : "启用"}
+                </Button>
+                <Button
+                  size="small"
+                  danger
+                  loading={deletingId === row.id}
+                  onClick={() => handleDelete(row)}
+                >
+                  删除
+                </Button>
+              </span>
             ),
           },
         ]}
@@ -408,6 +479,8 @@ export function PlatformSharedAgentsCard() {
           }}
         />
       ) : null}
+        </>
+      )}
     </section>
   );
 }

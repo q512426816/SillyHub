@@ -202,8 +202,8 @@ export async function triggerMachineCleanup(
  *                                    writable_dir ⊆ allowed_roots / 源码工作区存在 /
  *                                    R-05 档案显式升级 / D-008 唯一防重复）；
  *   - GET    /shared-agents/active   生效摘要（任意登录用户，仅 enabled 行）；
- *   - PATCH  /shared-agents/{id}     仅改 enabled（停用 = enabled:false）；
- *   - DELETE /shared-agents/{id}     物理删除（本卡未用，后端已备）。
+ *   - PATCH  /shared-agents/{id}     仅改 enabled（停用 = false / 启用 = true 软开关）；
+ *   - DELETE /shared-agents/{id}     物理删除（204，管理卡删除按钮）。
  *
  * 类型一律取 api-types 生成版（task-08 gen:types），禁止手写 DTO——后端 schema
  * 变更会在下次 gen:types + tsc 时暴露漂移。
@@ -246,16 +246,28 @@ export async function createSharedAgent(
 }
 
 /**
- * PATCH /api/daemon/shared-agents/{grant_id} — 停用共享智能体
- * （enabled:false，软开关；会话选择器即不再呈现）。返回更新后的 SharedAgentView。
+ * PATCH /api/daemon/shared-agents/{grant_id} — 停用/启用共享智能体软开关
+ * （enabled 真假双向；停用后 active 不再返回该行，会话选择器即不再呈现）。
+ * 返回更新后的 SharedAgentView。
  */
-export async function disableSharedAgent(
+export async function setSharedAgentEnabled(
   grantId: string,
+  enabled: boolean,
 ): Promise<SharedAgentView> {
   return apiFetch<SharedAgentView>(
     `/api/daemon/shared-agents/${encodeURIComponent(grantId)}`,
-    { method: "PATCH", json: { enabled: false } },
+    { method: "PATCH", json: { enabled } },
   );
+}
+
+/**
+ * DELETE /api/daemon/shared-agents/{grant_id} — 物理删除共享智能体
+ * （204 无响应体；档案 visibility 不回滚——升级是独立管理动作）。
+ */
+export async function deleteSharedAgent(grantId: string): Promise<void> {
+  await apiFetch(`/api/daemon/shared-agents/${encodeURIComponent(grantId)}`, {
+    method: "DELETE",
+  });
 }
 
 // task-06 / FR-04 / D-006@v1：平台管理员全局分页视图。旧 listDaemonRuntimes()

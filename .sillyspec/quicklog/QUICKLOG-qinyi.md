@@ -313,3 +313,27 @@
 根因：v1 platform 早退在 workspace 授权前 return None，门户无档案直传被一刀切封堵
 方案：删早退统一 workspace 判定（无授权仍默认 404，封堵目标不变）
 结果：29+1386 用例全过、ruff/mypy 净、实测 201+审计 grant_id
+
+## ql-20260828-007-2270 | 2026-08-28 09:32:26 | 会话列表机器筛选 tab 接入共享机器——session-list-panel 与移动端三处改喂 machineCandidates（同类第三批漏接）
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
+
+## ql-20260828-008-f487 | 2026-08-28 09:37:14 | 工作区绑定守护进程支持选用共享 daemon——upsert_my_binding 放宽（工作区 grant 授权即可绑）+ 引导卡共享快选按钮
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
+
+## ql-20260828-009-08d0 | 2026-08-28 09:46:50 | 运行时页平台共享智能体卡默认折叠+补启用/删除操作
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/platform-shared-agents-card.tsx（默认折叠+启用/停用切换+删除二次确认）
+- frontend/src/lib/daemon.ts（setSharedAgentEnabled 泛化+deleteSharedAgent 新增）
+- frontend/src/components/daemon/__tests__/platform-shared-agents-card.test.tsx（8 用例重写（折叠/启用/删除/antd v6 confirm 标题双渲染坑））
+- frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx（admin 用例适配折叠断言）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md（变更索引 ql-20260828-009-08d0）
+需求：运行时页平台共享智能体卡默认折叠+补启用/删除操作
+根因：后端 grants/router.py 已有 PATCH enabled 双向与 DELETE 204 端点但前端只接了停用按钮，且管理卡常驻展开占据页面大量空间
+方案：platform-shared-agents-card.tsx 加 expanded 状态默认折叠（头部常驻 N 个生效/共 M 个计数摘要+展开按钮，条件渲染表单/列表）；lib/daemon.ts disableSharedAgent 泛化为 setSharedAgentEnabled(grantId,enabled)+新增 deleteSharedAgent；操作列按行状态给停用/启用切换+删除（App.useApp modal.confirm 二次确认，对齐 runtimes 页移除运行时先例）
+结果：组件 8 用例+页面测试 20/20 绿、page-usage 10/10 绿、tsc 0 错、lint 仅预存 warning
