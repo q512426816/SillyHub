@@ -137,16 +137,17 @@ export default function LoginPage() {
       <BrandPanel />
 
       {/* 右侧:表单区(亮色 + 玻璃拟态登录卡) */}
-      <section className="relative flex flex-1 items-center justify-center overflow-y-auto px-6 py-10 sm:px-10">
-        {/* 右侧极淡背景光晕,呼应品牌区 */}
+      <section className="relative flex flex-1 items-center justify-center overflow-y-auto px-6 py-8 sm:px-10">
+        {/* 右侧极淡背景光晕,呼应品牌区。裁切罩 inset-0+overflow-hidden:
+            光斑绝对定位在滚动容器内,-right-32/-bottom-32 超出右/下边缘的
+            部分会无条件撑出横/纵滚动条(任意屏幕尺寸都出现),先裁切再滚动 ql-20260828-014 */}
         <div
           aria-hidden
-          className="pointer-events-none absolute -right-32 -top-32 h-96 w-96 rounded-full bg-[color:color-mix(in_srgb,var(--color-brand-100)_60%,transparent)] blur-3xl"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -bottom-32 -left-24 h-80 w-80 rounded-full bg-cyan-100/50 blur-3xl"
-        />
+          className="pointer-events-none absolute inset-0 overflow-hidden"
+        >
+          <div className="absolute -right-32 -top-32 h-96 w-96 rounded-full bg-[color:color-mix(in_srgb,var(--color-brand-100)_60%,transparent)] blur-3xl" />
+          <div className="absolute -bottom-32 -left-24 h-80 w-80 rounded-full bg-cyan-100/50 blur-3xl" />
+        </div>
 
         <div className="relative w-full max-w-[420px]">
           {/* 移动端(无左侧)时显示 LOGO */}
@@ -158,8 +159,8 @@ export default function LoginPage() {
 
           {/* 玻璃拟态登录卡(阴影取 brand-600 18% 透明度,blue 主题下与重构前取值一致) */}
           <div className="rounded-2xl border border-white/60 bg-card shadow-[0_8px_40px_-12px_color-mix(in_srgb,var(--color-brand-600)_18%,transparent)] backdrop-blur-xl">
-            <div className="p-6 sm:p-9">
-              <div className="mb-7">
+            <div className="p-6 sm:p-8">
+              <div className="mb-6">
                 <h1 className="text-2xl font-bold tracking-tight text-slate-900">
                   账号登录
                 </h1>
@@ -190,6 +191,7 @@ export default function LoginPage() {
                 <Form.Item
                   label="登录名"
                   name="account"
+                  className="mb-4"
                   rules={[{ required: true, message: "请输入登录名" }]}
                 >
                   <Input
@@ -203,6 +205,7 @@ export default function LoginPage() {
                 <Form.Item
                   label="密码"
                   name="password"
+                  className="mb-4"
                   rules={[{ required: true, message: "请输入密码" }]}
                 >
                   <Input.Password
@@ -254,10 +257,14 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* 移动端入口：扫码直达移动版登录页(middleware UA 分流) */}
+          {/* 移动端入口：扫码直达移动版登录页(middleware UA 分流)。
+              紧凑化(64px 码+单行说明)+短视口隐藏(≤660px 高时让位给登录卡,
+              避免撑出滚动条 ql-20260828-014) */}
           <MobileQrEntry />
 
-          <p className="mt-6 text-center text-xs text-slate-400">
+          {/* 移动端(<lg 无左侧品牌区)的兜底标语;桌面端与左侧 BrandPanel
+              同句标语重复,隐藏去重并给登录卡留高度 */}
+          <p className="mt-6 text-center text-xs text-slate-400 lg:hidden">
             多智能体协作平台 · 知识沉淀 · 规格驱动开发
           </p>
         </div>
@@ -279,20 +286,20 @@ function MobileQrEntry() {
   return (
     <div
       aria-label="移动端入口二维码"
-      className="mt-4 flex items-center gap-4 rounded-2xl border border-white/60 bg-card p-4 shadow-[0_8px_40px_-12px_color-mix(in_srgb,var(--color-brand-600)_18%,transparent)] backdrop-blur-xl"
+      className="mt-3 flex items-center gap-3.5 rounded-2xl border border-white/60 bg-card p-3 shadow-[0_8px_40px_-12px_color-mix(in_srgb,var(--color-brand-600)_18%,transparent)] backdrop-blur-xl [@media(max-height:660px)]:hidden"
     >
       {/* 白底衬板保证暗色主题下二维码对比度,扫码可靠 */}
-      <div className="shrink-0 rounded-lg bg-white p-2">
+      <div className="shrink-0 rounded-lg bg-white p-1.5">
         {origin ? (
-          <QRCode value={buildMobileEntryUrl(origin)} size={80} />
+          <QRCode value={buildMobileEntryUrl(origin)} size={64} />
         ) : (
-          <div className="h-[80px] w-[80px]" />
+          <div className="h-16 w-16" />
         )}
       </div>
       <div className="min-w-0 flex-1">
         <div className="text-sm font-semibold text-slate-900">手机访问移动端</div>
         <p className="mt-1 text-xs leading-relaxed text-slate-500">
-          用手机扫描二维码，直达移动版登录页；登录后可在手机上查看变更与会话。
+          扫码直达移动版登录页，在手机上查看变更与会话。
         </p>
         {/* 展示编码目标,局域网/localhost 一眼可辨(localhost 二维码在手机上不可达) */}
         <span
@@ -351,9 +358,10 @@ function BrandPanel() {
         </span>
       </div>
 
-      {/* 中部主视觉 */}
+      {/* 中部主视觉(正文/小字一律白色透明度阶:面板渐变三主题恒为深色,
+          而 brand-100 在 dark 主题翻转为深青 #164e63,压深底不可读 ql-20260828-014) */}
       <div className="relative z-10 flex flex-1 flex-col items-start justify-center gap-8 px-12 xl:px-16">
-        <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-xs font-medium text-brand-100 backdrop-blur-sm">
+        <div className="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 text-xs font-medium text-white/90 backdrop-blur-sm">
           <Sparkles className="h-3.5 w-3.5" />
           多智能体协作平台
         </div>
@@ -362,7 +370,7 @@ function BrandPanel() {
           <br />
           SillyHub
         </h2>
-        <p className="max-w-md text-sm leading-relaxed text-[color:color-mix(in_srgb,var(--color-brand-100)_80%,transparent)]">
+        <p className="max-w-md text-sm leading-relaxed text-white/75">
           多智能体协作平台 · 知识沉淀 · 规格驱动开发,让团队协作与知识资产在一处生长。
         </p>
 
@@ -405,7 +413,7 @@ function FeatureItem({
       </span>
       <div>
         <div className="text-sm font-semibold text-white">{title}</div>
-        <div className="text-xs text-[color:color-mix(in_srgb,var(--color-brand-100)_70%,transparent)]">{desc}</div>
+        <div className="text-xs text-white/70">{desc}</div>
       </div>
     </div>
   );

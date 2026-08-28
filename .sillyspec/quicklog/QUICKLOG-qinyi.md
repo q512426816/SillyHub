@@ -380,10 +380,15 @@
 方案：session_binding 按 kind 分支具体类型查询；test_ppm_session 改局部列表；captcha fixture 钉开关 True；6 文件 mock 补 machineCandidates 同源注入或整体 mock hook；SessionPanel 三件改走 ＋ 菜单交互与 streamSession 三参断言
 结果：backend mypy 762 文件 0 错 + 相关 pytest 109+21 用例绿 + ruff 净；前端 9 文件 130 用例绿 + tsc 0 + lint 仅预存 warning；alembic 单 head 确认；local.yaml 豁免清单同步收缩
 
-## ql-20260828-014-45f9 | 2026-08-28 13:35:04 | 登录页优化：左侧小文字对比度不足看不清 + 右侧表单区出现意外滚动条
-状态：进行中
+## ql-20260828-014-45f9 | 2026-08-28 13:35:04 | 登录页可读性与滚动条修复——左侧小字白透明阶+右侧光斑裁切
+状态：已完成
 关联变更：（无）
-文件：（见实际改动）
+文件：
+- frontend/src/app/(auth)/login/page.tsx（BrandPanel 小字白透明阶 + 光斑裁切罩 + QR 紧凑化/短视口隐藏 + 页脚 lg:hidden 去重 + 留白收敛）
+需求：登录页可读性与滚动条修复——左侧小字白透明阶+右侧光斑裁切
+根因：左侧小字用 brand-100 系色，dark 主题 brand 阶=cyan 翻转后 brand-100=#164e63 深青压深色渐变不可读；右侧两个装饰光斑绝对定位在 overflow-y-auto 滚动容器内且负偏移超出右/下边缘，任意屏幕尺寸都会无条件撑出横/纵滚动条；QR 入口卡叠加页脚又使内容在短视口超高触发滚动
+方案：BrandPanel 徽标/正文/特性描述改 text-white/90·75·70（面板渐变三主题恒深色，与 hero-header 同惯例）；光斑套 inset-0+overflow-hidden 裁切罩；QR 卡紧凑化（码 80→64、p-3、mt-3、单行说明）+[@media(max-height:660px)]:hidden；桌面页脚标语与左侧 BrandPanel 重复改 lg:hidden；section py-10→8、卡 p-9→8、标题 mb-7→6、登录名/密码表单项补 mb-4
+结果：page.qr.test.tsx 2 用例绿（aria-label/标题/mobile-qr-url 断言未动），tsc --noEmit 0 错，未跑无关全量
 
 ## ql-20260828-015-796d | 2026-08-28 13:39:18 | backend-ci 首跑全量暴露三预存债修复：ppm 成对 422 英文文案中文化、PublishIntent 漏 ctx_tokens、captcha 禁用…
 状态：已完成
