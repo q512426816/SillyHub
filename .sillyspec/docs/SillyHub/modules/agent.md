@@ -60,6 +60,7 @@ _dispatch_execute_team → 多 worker 并行 → 全员收敛 → daemon run_syn
 - fingerprint（AgentSpecBundle 内容）变更使旧 resume token 失效；幂等 key 防同阶段重复派发；`reconcile_stale_runs`/`cleanup_stale_runs` 定时收敛卡死 run。
 - 档案字段经 lease.metadata 透传给 daemon（lease/context 消费），两侧字段名是隐式契约；llm_provider_id 的归属校验在 daemon 侧解析时执行。
 - 角色模板回收清单写死在 profile/seed.py：新增/回收模板须同步 `_DEPRECATED_ROLE_TEMPLATE_IDS`，否则产生孤儿模板行。
+- 分身子会话派发选机（mcp_tools._dispatch_worker_core，2026-08-28-fix-cross-machine-worker-dispatch）：恒钉定目标工作区代表绑定机器（workspace_member_runtimes，预检 resolve_representative_binding 两段式 provider 严格→回退）；owner 自有在线机器不再抢占（除非恰为绑定机器）；钉定后建行前 allowed_roots 预检（placement.fetch_daemon_allowed_roots 并集 + path_definitively_outside_roots 仅可判定越界才 400）——错机派发 fail-loud，测试 TestRuntimePinning/TestAllowedRootsPrecheck。
 - 涉 LLM/delegation 的测试必须 monkeypatch GLMConfig.from_env 返 None，防本机环境变量泄漏打真实 LLM（烧 token 且测试漂移）。
 - 借用（borrow）产物回存带审计用量更新，删除/重构 borrow 相关表须连带审计口径。
 - AgentRunLog 的 segment_id 列是 daemon 消息去重的 DB 侧锚点，不入对外 API 响应（DB-only 去重字段）。
