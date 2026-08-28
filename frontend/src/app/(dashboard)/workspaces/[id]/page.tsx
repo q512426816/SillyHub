@@ -21,6 +21,7 @@ import {
   type WorkspaceType,
 } from "@/lib/workspace-types";
 import { listDaemonInstances, listDaemonRuntimes, PROVIDER_META, type DaemonInstanceRead, type DaemonRuntimeRead } from "@/lib/daemon";
+import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import { listComponents } from "@/lib/components";
 import { listChanges } from "@/lib/changes";
 import { listQuicklogEntries } from "@/lib/quicklog";
@@ -80,6 +81,9 @@ export default function WorkspaceDetailPage({ params }: Props) {
   // task-11 / daemon-entity-binding：当前绑定守护进程的在线 provider 列表
   const [boundDaemonProviders, setBoundDaemonProviders] = useState<string[]>([]);
   const [boundDaemon, setBoundDaemon] = useState<DaemonInstanceRead | null>(null);
+  // quick-18951370：共享绑定的 daemon 展示回退——listDaemonInstances 仅自有，
+  // 绑定共享 daemon 时从融合候选（自有+共享）解析显示名与在线态。
+  const { machineCandidates } = useDaemonMachines({ limit: 100 });
   // task-08 / D-003@V2：owner 门禁
   const isOwner = (() => {
     const ownerId = workspace?.owner?.user_id;
@@ -230,9 +234,24 @@ export default function WorkspaceDetailPage({ params }: Props) {
           new Set(filtered.map((r) => r.provider as string)),
         );
         setBoundDaemonProviders(providers);
-        setBoundDaemon(
-          instances.find((i) => i.id === myBinding.daemon_id) ?? null,
-        );
+        const own = instances.find((i) => i.id === myBinding.daemon_id);
+        if (own) {
+          setBoundDaemon(own);
+        } else {
+          const shared = (machineCandidates ?? []).find(
+            (m) => m.id === myBinding.daemon_id,
+          );
+          setBoundDaemon(
+            shared
+              ? {
+                  ...shared,
+                  display_alias: shared.display_alias ?? shared.hostname,
+                  providers:
+                    providers.map((p) => ({ provider: p })) as DaemonInstanceRead["providers"],
+                }
+              : null,
+          );
+        }
       })
       .catch(() => {
         if (active) {
