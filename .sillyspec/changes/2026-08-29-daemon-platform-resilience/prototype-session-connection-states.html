@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会话连接状态回显 · 原型 — daemon 平台韧性改造</title>
+<style>
+  :root{
+    --primary:#7C3AED;--primary-hover:#6D28D9;--primary-soft:#EDE9FE;
+    --accent:#0891B2;--accent-soft:#CFFAFE;--accent-text:#0E7490;
+    --bg:#FAF5FF;--fg:#1E1B4B;--card:#FFFFFF;--muted:#ECEEF9;--muted-fg:#475569;--faint:#94A3B8;
+    --border:#DDD6FE;--border-weak:#EEE9F8;
+    --success:#059669;--success-soft:#D1FAE5;--success-text:#065F46;
+    --warning:#D97706;--warning-soft:#FEF3C7;--warning-text:#92400E;
+    --error:#DC2626;--error-soft:#FEE2E2;--error-text:#991B1B;
+    --info:#2563EB;--info-soft:#DBEAFE;--info-text:#1E40AF;
+    --radius-sm:6px;--radius-md:8px;--radius-lg:12px;
+    --shadow-sm:0 1px 2px rgba(30,27,75,.06);--shadow-md:0 4px 14px rgba(30,27,75,.08);
+    --font-sans:Inter,-apple-system,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  }
+  [data-theme="dark"]{
+    --primary:#A78BFA;--primary-hover:#C4B5FD;--primary-soft:rgba(167,139,250,.16);
+    --accent:#22D3EE;--accent-soft:rgba(34,211,238,.14);--accent-text:#67E8F9;
+    --bg:#0B0A1A;--fg:#E7E5F4;--card:#151228;--muted:#1E1B33;--muted-fg:#A5A3C2;--faint:#6D6A8E;
+    --border:#2B2747;--border-weak:#211E38;
+    --success:#34D399;--success-soft:rgba(52,211,153,.14);--success-text:#6EE7B7;
+    --warning:#FBBF24;--warning-soft:rgba(251,191,36,.14);--warning-text:#FCD34D;
+    --error:#F87171;--error-soft:rgba(248,113,113,.14);--error-text:#FCA5A5;
+    --info:#60A5FA;--info-soft:rgba(96,165,250,.14);--info-text:#93C5FD;
+    --shadow-sm:0 1px 2px rgba(0,0,0,.3);--shadow-md:0 4px 14px rgba(0,0,0,.35);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font-sans);background:var(--bg);color:var(--fg);padding:24px;display:flex;flex-direction:column;gap:20px;align-items:center;min-height:100vh}
+  h1{font-size:18px;font-weight:600}
+  .sub{font-size:13px;color:var(--muted-fg);max-width:860px;line-height:1.7}
+  .toolbar{display:flex;gap:10px;align-items:center}
+  .toolbar button{border:1px solid var(--border);background:var(--card);color:var(--fg);padding:6px 14px;border-radius:var(--radius-md);cursor:pointer;font-size:13px}
+  .toolbar button.active{border-color:var(--primary);color:var(--primary);background:var(--primary-soft)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:20px;width:100%;max-width:1240px}
+  .case{background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-sm);overflow:hidden;display:flex;flex-direction:column}
+  .case h2{font-size:13px;font-weight:600;padding:10px 16px;border-bottom:1px solid var(--border-weak);background:var(--muted);display:flex;justify-content:space-between;align-items:center;gap:8px}
+  .tag{font-size:11px;padding:2px 8px;border-radius:999px;font-weight:500;white-space:nowrap}
+  .tag.new{background:var(--primary-soft);color:var(--primary)}
+  .tag.exist{background:var(--muted);color:var(--muted-fg)}
+  .panel{display:flex;flex-direction:column;height:340px}
+  .banner{display:flex;align-items:flex-start;gap:10px;padding:9px 14px;font-size:12.5px;line-height:1.55;border-bottom:1px solid var(--border-weak)}
+  .banner .icon{font-size:14px;line-height:1.3}
+  .banner b{font-weight:600}
+  .banner .sub-line{color:var(--muted-fg);font-size:12px}
+  .b-warn{background:var(--warning-soft);color:var(--warning-text)}
+  .b-ok{background:var(--success-soft);color:var(--success-text)}
+  .b-err{background:var(--error-soft);color:var(--error-text)}
+  .b-info{background:var(--info-soft);color:var(--info-text)}
+  .b-mut{background:var(--muted);color:var(--muted-fg)}
+  .b-gap{background:var(--accent-soft);color:var(--accent-text)}
+  .msgs{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+  .turn{display:flex;flex-direction:column;gap:6px;max-width:86%}
+  .turn.user{align-self:flex-end;align-items:flex-end}
+  .bubble{padding:8px 12px;border-radius:var(--radius-md);font-size:13px;line-height:1.6;white-space:pre-wrap}
+  .turn.user .bubble{background:var(--primary);color:#fff}
+  .turn.agent .bubble{background:var(--muted);color:var(--fg)}
+  .turn-meta{font-size:11px;color:var(--faint);display:flex;gap:8px;align-items:center}
+  .pill{padding:1px 8px;border-radius:999px;font-size:11px;border:1px solid var(--border)}
+  .pill.running{color:var(--accent-text);background:var(--accent-soft);border-color:transparent;animation:pulse 1.6s infinite}
+  .pill.failed{color:var(--error-text);background:var(--error-soft);border-color:transparent}
+  .pill.done{color:var(--success-text);background:var(--success-soft);border-color:transparent}
+  .pill.suspended{color:var(--muted-fg);background:var(--muted);border-color:transparent}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+  .caret{display:inline-block;width:7px;height:14px;background:var(--accent);vertical-align:-2px;animation:blink 1s step-end infinite;margin-left:2px}
+  @keyframes blink{50%{opacity:0}}
+  .inputbar{border-top:1px solid var(--border-weak);padding:10px 14px;display:flex;gap:10px;align-items:center}
+  .inputbar .box{flex:1;border:1px solid var(--border);border-radius:var(--radius-md);padding:8px 12px;font-size:13px;color:var(--faint);background:var(--card)}
+  .inputbar .box[disabled]{background:var(--muted)}
+  .inputbar .send{background:var(--primary);color:#fff;border:none;border-radius:var(--radius-md);padding:8px 16px;font-size:13px;cursor:pointer}
+  .inputbar .send[disabled]{opacity:.45;cursor:not-allowed}
+  .legend{font-size:12.5px;color:var(--muted-fg);max-width:1240px;line-height:1.8}
+  .legend code{background:var(--muted);padding:1px 6px;border-radius:4px;font-size:12px}
+</style>
+</head>
+<body>
+  <h1>会话面板 · 连接与恢复状态回显（daemon 平台韧性改造原型）</h1>
+  <div class="sub">左侧六张卡片为会话面板在不同连接/恢复阶段的状态快照。标注「新增」的横幅/徽标为本变更引入，「已有」为现状保留。右上角可切换明暗主题。</div>
+  <div class="toolbar">
+    <button id="btnLight" class="active" onclick="setTheme('light')">明亮主题</button>
+    <button id="btnDark" onclick="setTheme('dark')">暗黑主题</button>
+  </div>
+
+  <div class="grid">
+
+    <!-- 1 正常 -->
+    <div class="case">
+      <h2>① 正常运行 <span class="tag exist">已有</span></h2>
+      <div class="panel">
+        <div class="msgs">
+          <div class="turn user"><div class="bubble">帮我梳理这个模块的依赖关系</div><div class="turn-meta">14:02:11</div></div>
+          <div class="turn agent"><div class="bubble">这个模块包含三个核心组件……<span class="caret"></span></div><div class="turn-meta"><span class="pill running">运行中</span> 第 3 轮</div></div>
+        </div>
+        <div class="inputbar"><div class="box">输入消息…</div><button class="send">发送</button></div>
+      </div>
+    </div>
+
+    <!-- 2 SSE 断开重连中 -->
+    <div class="case">
+      <h2>② 实时连接断开 · 重连中 <span class="tag new">新增</span></h2>
+      <div class="panel">
+        <div class="banner b-warn"><span class="icon">⚠</span><div><b>实时连接已断开，正在重连…</b>（第 3 次尝试，8 秒后重试）<div class="sub-line">已发送的消息不会丢失，恢复后将自动同步错过的内容</div></div></div>
+        <div class="msgs">
+          <div class="turn user"><div class="bubble">继续上面的分析</div><div class="turn-meta">14:05:02</div></div>
+          <div class="turn agent"><div class="bubble">这个模块包含三个核心组件……</div><div class="turn-meta"><span class="pill running">运行中</span> 第 3 轮 · 等待连接恢复</div></div>
+        </div>
+        <div class="inputbar"><div class="box">输入消息…</div><button class="send">发送</button></div>
+      </div>
+    </div>
+
+    <!-- 3 重连成功 -->
+    <div class="case">
+      <h2>③ 连接恢复 · 同步中 <span class="tag new">新增</span></h2>
+      <div class="panel">
+        <div class="banner b-ok"><span class="icon">✓</span><div><b>连接已恢复</b>，正在同步断线期间的消息…<div class="sub-line">同步完成后此提示自动消失（约 2 秒）</div></div></div>
+        <div class="msgs">
+          <div class="turn user"><div class="bubble">继续上面的分析</div><div class="turn-meta">14:05:02</div></div>
+          <div class="turn agent"><div class="bubble">这个模块包含三个核心组件：调度器、适配层和存储层。其中调度器负责……<span class="caret"></span></div><div class="turn-meta"><span class="pill running">运行中</span> 第 3 轮</div></div>
+        </div>
+        <div class="inputbar"><div class="box">输入消息…</div><button class="send">发送</button></div>
+      </div>
+    </div>
+
+    <!-- 4 运行轮看门狗 -->
+    <div class="case">
+      <h2>④ 运行轮无响应 · 对账兜底 <span class="tag new">新增</span></h2>
+      <div class="panel">
+        <div class="banner b-gap"><span class="icon">⏱</span><div><b>本轮已超过 90 秒没有新输出</b>，正在与平台核对最新状态…<div class="sub-line">核对期间无需操作；若确认已中断，轮次会被标记为失败，会话仍可继续</div></div></div>
+        <div class="msgs">
+          <div class="turn user"><div class="bubble">继续上面的分析</div><div class="turn-meta">14:05:02</div></div>
+          <div class="turn agent"><div class="bubble">这个模块包含三个核心组件……</div><div class="turn-meta"><span class="pill running">运行中</span> 第 3 轮 · 90s 无输出</div></div>
+        </div>
+        <div class="inputbar"><div class="box">输入消息…</div><button class="send">发送</button></div>
+      </div>
+    </div>
+
+    <!-- 5 会话挂起 -->
+    <div class="case">
+      <h2>⑤ 会话挂起 · 等守护进程恢复 <span class="tag new">新增</span></h2>
+      <div class="panel">
+        <div class="banner b-info"><span class="icon">⏸</span><div><b>会话已挂起</b>——守护进程当前不在线<div class="sub-line">守护进程重新启动后会话将自动恢复，历史消息完整保留；挂起超过 24 小时才会被标记为失败</div></div></div>
+        <div class="msgs">
+          <div class="turn user"><div class="bubble">继续上面的分析</div><div class="turn-meta">昨天 14:05</div></div>
+          <div class="turn agent"><div class="bubble">这个模块包含三个核心组件：调度器、适配层和存储层。</div><div class="turn-meta"><span class="pill failed">中断失败</span> <span class="pill suspended">会话挂起</span> 第 3 轮</div></div>
+        </div>
+        <div class="inputbar"><div class="box" disabled>等待守护进程恢复后可继续对话…</div><button class="send" disabled>发送</button></div>
+      </div>
+    </div>
+
+    <!-- 6 恢复中 -->
+    <div class="case">
+      <h2>⑥ 守护进程回归 · 会话自动恢复 <span class="tag new">新增</span></h2>
+      <div class="panel">
+        <div class="banner b-ok"><span class="icon">↻</span><div><b>守护进程已重新上线</b>，会话恢复中…<div class="sub-line">恢复完成后可直接在下方继续对话</div></div></div>
+        <div class="msgs">
+          <div class="turn user"><div class="bubble">继续上面的分析</div><div class="turn-meta">昨天 14:05</div></div>
+          <div class="turn agent"><div class="bubble">这个模块包含三个核心组件：调度器、适配层和存储层。</div><div class="turn-meta"><span class="pill failed">中断失败</span> 今天 09:12 · daemon 已重启</div></div>
+          <div class="turn agent"><div class="bubble">（会话已恢复——你回来了！可以直接继续刚才的话题。）</div><div class="turn-meta"><span class="pill done">已恢复</span></div></div>
+        </div>
+        <div class="inputbar"><div class="box">输入消息…</div><button class="send">发送</button></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="legend">
+    状态流转说明：<code>正常</code> →（SSE 断开）→ <code>② 重连中</code> →（成功）→ <code>③ 同步中</code>（自动消失）；轮次运行中长时间无输出 → <code>④ 对账兜底</code>；守护进程离线超时 → <code>⑤ 会话挂起</code>（suspended，输入禁用，24h 上限）；守护进程重启 → <code>⑥ 自动恢复</code> → 回到 <code>① 正常</code>。现状已有的「离线只读」与「会话恢复超时（240s）」横幅保留不变，本原型只展示新增部分。
+  </div>
+
+<script>
+  function setTheme(t){
+    document.documentElement.setAttribute('data-theme',t);
+    document.getElementById('btnLight').classList.toggle('active',t==='light');
+    document.getElementById('btnDark').classList.toggle('active',t==='dark');
+  }
+</script>
+</body>
+</html>

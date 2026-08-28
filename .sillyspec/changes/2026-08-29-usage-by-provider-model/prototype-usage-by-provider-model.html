@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>原型 — 供应商/模型级联 + 用量分组明细</title>
+<style>
+  :root { --bg:#0f1117; --card:#171a23; --line:#2a2f3d; --txt:#e5e7eb; --dim:#9ca3af; --brand:#22d3ee; }
+  * { box-sizing:border-box; margin:0; padding:0; font-family:system-ui,"Microsoft YaHei",sans-serif; }
+  body { background:var(--bg); color:var(--txt); padding:24px; max-width:860px; margin:0 auto; }
+  h2 { font-size:15px; color:var(--brand); margin:18px 0 8px; }
+  .note { color:var(--dim); font-size:12px; margin-bottom:10px; line-height:1.6; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:16px; }
+  .bar { display:flex; gap:8px; }
+  .ctrl { flex:1; border:1px solid var(--line); border-radius:8px; padding:8px 10px; background:#1d2129; min-width:0; }
+  .ctrl .k { font-size:11px; color:var(--dim); margin-bottom:4px; }
+  .ctrl .v { font-size:13px; display:flex; align-items:center; justify-content:space-between; gap:6px; }
+  .ctrl .v .arrow { color:var(--dim); font-size:10px; }
+  .removed { flex:1; border:1px dashed #7f1d1d; border-radius:8px; padding:8px 10px; opacity:.45; position:relative; }
+  .removed .k { font-size:11px; color:#f87171; margin-bottom:4px; text-decoration:line-through; }
+  .removed .v { font-size:13px; color:var(--dim); text-decoration:line-through; }
+  .removed::after { content:"移除"; position:absolute; top:-8px; right:8px; background:#7f1d1d; color:#fecaca; font-size:10px; padding:1px 6px; border-radius:4px; }
+  .cascade { display:flex; gap:6px; margin-top:6px; }
+  .cascade select { flex:1; background:#1d2129; color:var(--txt); border:1px solid var(--line); border-radius:6px; padding:5px 6px; font-size:12px; min-width:0; }
+  .usage-row { display:flex; gap:14px; flex-wrap:wrap; margin:10px 0; }
+  .stat .n { font-size:18px; font-weight:600; }
+  .stat .l { font-size:11px; color:var(--dim); }
+  table { width:100%; border-collapse:collapse; font-size:12px; margin-top:8px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--dim); font-weight:normal; font-size:11px; }
+  td.num { font-variant-numeric:tabular-nums; }
+  .tag { background:#164e63; color:var(--brand); border-radius:4px; padding:1px 6px; font-size:11px; }
+  .tag.ghost { background:#374151; color:#d1d5db; }
+  .footnote { font-size:11px; color:var(--dim); margin-top:8px; }
+  .chart { height:60px; border-radius:6px; background:linear-gradient(90deg,#164e6355,#164e6311); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--dim); font-size:11px; margin-top:8px; }
+</style>
+</head>
+<body>
+
+<h2>① 会话页底部配置条（四块 → 两块 + 级联）</h2>
+<div class="note">「机器」「智能体」两块移除；供应商块内嵌模型子下拉，候选来自该供应商高级设置（角色映射 / 兜底模型），首项「默认」。</div>
+<div class="card">
+  <div class="bar">
+    <div class="removed"><div class="k">机器</div><div class="v">DESKTOP-XX</div></div>
+    <div class="removed"><div class="k">智能体</div><div class="v">Claude</div></div>
+    <div class="ctrl">
+      <div class="k">供应商 + 模型</div>
+      <div class="cascade">
+        <select id="prov">
+          <option>智谱 GLM（王鹏的）</option>
+          <option>不指定（本机默认）</option>
+        </select>
+        <select id="model">
+          <option>默认（跟随供应商配置）</option>
+          <option>glm-4.7</option>
+          <option>glm-4.6</option>
+        </select>
+      </div>
+      <div class="footnote">idle 点选即切换（切模型 = 重启一轮 CLI，与切供应商一致）</div>
+    </div>
+    <div class="ctrl">
+      <div class="k">档案</div>
+      <div class="v">默认档案 <span class="arrow">▾</span></div>
+    </div>
+  </div>
+</div>
+
+<h2>② 运行时用量卡（新增 按供应商 / 模型 分组明细）</h2>
+<div class="note">现有输入/输出/缓存数字与双线图不动，下方新增分组列表与调用次数。</div>
+<div class="card">
+  <div class="usage-row">
+    <div class="stat"><div class="n">145.9K</div><div class="l">输入</div></div>
+    <div class="stat"><div class="n">11.0K</div><div class="l">输出</div></div>
+    <div class="stat"><div class="n">557.9K</div><div class="l">缓存</div></div>
+    <div class="stat"><div class="n">38</div><div class="l">调用次数</div></div>
+  </div>
+  <div class="chart">输入 / 输出双线趋势图（保持现状）</div>
+  <table>
+    <tr><th>供应商</th><th>模型</th><th>输入</th><th>输出</th><th>缓存读</th><th>缓存写</th><th>调用</th></tr>
+    <tr>
+      <td><span class="tag">智谱 GLM（王鹏的）</span></td>
+      <td>glm-4.7</td>
+      <td class="num">140,210</td><td class="num">10,502</td><td class="num">540,000</td><td class="num">0</td><td class="num">35</td>
+    </tr>
+    <tr>
+      <td><span class="tag">智谱 GLM（王鹏的）</span></td>
+      <td>glm-4.5-air</td>
+      <td class="num">5,726</td><td class="num">482</td><td class="num">17,888</td><td class="num">0</td><td class="num">3</td>
+    </tr>
+    <tr>
+      <td><span class="tag ghost">未记录</span></td>
+      <td>—</td>
+      <td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td>
+    </tr>
+  </table>
+  <div class="footnote">* 调用次数为 API 请求全口径（含子代理），与套餐计费口径可能略有出入；「未记录」= 旧数据或旧版 daemon 未上报。</div>
+</div>
+
+</body>
+</html>
