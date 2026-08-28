@@ -370,3 +370,12 @@
 根因：quick-18951370 放宽借用绑定后，前端只要 myBinding 存在就渲染共享开关（标签取共享机器候选，故显示「xx 共享」），后端 set_my_binding_shared 无 daemon 归属校验——借用者能以自己名义再开 workspace grant，原共享人撤销后借用者的授权仍在，撤销语义被击穿
 方案：后端 set_my_binding_shared 在写 shared/grant 前校验 binding 的 daemon 归属（属他人 403 daemon_not_owned 零残留）；前端 page 记 boundDaemonOwned，借用绑定不渲染开关改提示「当前绑定的是他人共享的守护进程（借用），仅自有守护进程可开启共享」；新增后端借用者 403 用例+前端自有/借用两用例，顺手修 quick-18951370 漏处理的 page.test QueryClientProvider 预存债（HEAD 基线 10/10 全挂，mock use-daemon-machines 修复）
 结果：后端 25 用例全绿+ruff/mypy 净；前端 page.test 12/12+toggle 组件 4/4+tsc 0
+
+## ql-20260828-013-1a7d | 2026-08-28 12:24:35 | CI 红灯清偿：backend-ci mypy 拦门两处 + frontend-ci 九测试文件（machineCandidates mock 债与 Sessi…
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/tests/test_ppm_session.py, backend/app/modules/ppm/common/session_binding.py, backend/tests/modules/auth/test_login_captcha.py, frontend/src/app/m/workspaces/[id]/sessions/[sid]/__tests__/page.m-session-chat.test.tsx, frontend/src/app/m/workspaces/[id]/sessions/__tests__/page.m-sessions.test.tsx, frontend/src/components/__tests__/workspace-access-guide.test.tsx, frontend/src/components/daemon/__tests__/session-panel-dialog-attachments.test.tsx, frontend/src/components/daemon/__tests__/session-panel-ux-fixes.test.tsx, frontend/src/components/daemon/__tests__/session-panel-variant.test.tsx, frontend/src/components/mobile/mobile-session-list.test.tsx, frontend/src/components/sessions/__tests__/session-list-panel.test.tsx, frontend/src/components/sessions/__tests__/sessions-portal.test.tsx（他者 quick 会话 quick-1cc450ee 同声明，经核实为本会话 CI 修复产出，补录文件行）
+需求：CI 红灯清偿：backend-ci mypy 拦门两处 + frontend-ci 九测试文件（machineCandidates mock 债与 SessionPanel ＋菜单旧断言）+ auth captcha 环境敏感
+根因：backend-ci 被 3d8432d9 两处 mypy 错误拦在 pytest 之前；frontend-ci 失败一半是组件改读 useDaemonMachines 融合候选后测试 mock 未跟、一半是 604c32fa ＋功能菜单收敛未适配旧断言；本地 captcha 两用例红是 .env 开关环境敏感（CI 不受影响）
+方案：session_binding 按 kind 分支具体类型查询；test_ppm_session 改局部列表；captcha fixture 钉开关 True；6 文件 mock 补 machineCandidates 同源注入或整体 mock hook；SessionPanel 三件改走 ＋ 菜单交互与 streamSession 三参断言
+结果：backend mypy 762 文件 0 错 + 相关 pytest 109+21 用例绿 + ruff 净；前端 9 文件 130 用例绿 + tsc 0 + lint 仅预存 warning；alembic 单 head 确认；local.yaml 豁免清单同步收缩

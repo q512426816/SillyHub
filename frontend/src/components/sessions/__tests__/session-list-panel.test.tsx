@@ -261,16 +261,20 @@ function listResponse(items: AgentSessionRead[], extra: Partial<{ total: number 
 
 /** 设置 useDaemonMachines 返回（默认成功空集）。 */
 function setMachines(r: Partial<{ items: DaemonMachineRead[] }> = {}) {
+  // machineCandidates 与 items 同源派生：面板机器小节/两层筛选已改读融合候选
+  // （task-10，2026-08-28-daemon-agent-share），漏配机器层 tab 全空。
+  const items = r.items ?? [];
   mocks.machinesHook.mockReturnValue({
-    items: [],
-    total: 0,
+    items,
+    sharedToMe: [],
+    machineCandidates: items,
+    total: items.length,
     sessions: [],
     isLoading: false,
     isFetching: false,
     isError: false,
     error: null,
     refetch: mocks.machinesRefetch,
-    ...r,
   });
 }
 

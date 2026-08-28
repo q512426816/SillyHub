@@ -165,8 +165,12 @@ beforeEach(() => {
     defaultOptions: { queries: { retry: false } },
   });
   invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+  // machineCandidates 与 items 同源注入：组件分组已改读融合候选（task-10，
+  // 2026-08-28-daemon-agent-share），漏配会走 config_snapshot 回退恒离线。
   machinesHook.useDaemonMachines.mockReturnValue({
     items: defaultMachines(),
+    sharedToMe: [],
+    machineCandidates: defaultMachines(),
     total: 2,
     sessions: [],
     isLoading: false,

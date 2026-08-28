@@ -349,11 +349,13 @@ describe("SessionPanel variant='mobile' 布局类与收纳", () => {
   it("逻辑零分叉：SSE 建流入参与 variant 无关，发消息（injectSession）mobile 下照常可用", async () => {
     setupPage("mobile");
 
-    // SSE 建流：streamSession(sessionId, handlers)——与 desktop 同参（共用同一条代码路径）。
+    // SSE 建流：streamSession(sessionId, handlers, options)——与 desktop 同参
+    // （共用同一条代码路径）。第三参为 ql-20260827-018 cursor/initialSync 建流选项。
     await waitFor(() =>
       expect(sessionApi.streamSession).toHaveBeenCalledWith(
         "sess-variant",
-        expect.anything(),
+        expect.any(Object),
+        expect.any(Object),
       ),
     );
 

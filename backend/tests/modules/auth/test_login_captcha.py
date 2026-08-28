@@ -64,6 +64,11 @@ async def bob(db_session):
 def fake_redis(monkeypatch: pytest.MonkeyPatch) -> _FakeRedis:
     fake = _FakeRedis()
     monkeypatch.setattr("app.modules.auth.captcha_service.get_redis", lambda: fake)
+    # 592e0435 开关允许本地 .env 设 AUTH_CAPTCHA_ENABLED=false（CI 无 .env 走默认
+    # True）。本文件契约是「开关开」的生产路径——显式钉 True，消除本地/CI 环境差
+    # 异（否则开关关时 needs_captcha 恒 False、token 不被消费，token 一次性与
+    # 401 明示两用例在本地必红）；下方免验证开关用例自会显式改回 False。
+    monkeypatch.setattr(get_settings(), "auth_captcha_enabled", True)
     return fake
 
 

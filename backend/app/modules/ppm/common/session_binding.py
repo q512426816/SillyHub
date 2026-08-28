@@ -189,8 +189,13 @@ async def load_ppm_item(
     ``kind="problem"`` 按 id 查 ``ppm/problem/model.py:PpmProblemList``。
     item 不存在/已删 → None，调用方降级（design §9：创建会话不报错）。
     """
-    model_cls = PlanTask if kind == "plan_task" else PpmProblemList
-    return (await db.execute(select(model_cls).where(model_cls.id == item_id))).scalar_one_or_none()
+    # 按 kind 分支各自具体类型查询：联合 `type[PlanTask] | type[PpmProblemList]`
+    # 变量进 select() 会被 SQLAlchemy 类型重载归并到公共基类，返回类型不符（mypy return-value）。
+    if kind == "plan_task":
+        stmt = select(PlanTask).where(PlanTask.id == item_id)
+    else:
+        stmt = select(PpmProblemList).where(PpmProblemList.id == item_id)
+    return (await db.execute(stmt)).scalar_one_or_none()
 
 
 async def load_item_files(

@@ -252,7 +252,10 @@ describe("派团队确认回填 /team 前缀（ql-20260826-010）", () => {
       .mockResolvedValue([makeMission("m-new", "planning")]); // 确认后刷新
     const input = await setupActiveSession();
 
-    fireEvent.click(screen.getByRole("button", { name: "派团队" }));
+    // ql-20260827-020：独立「派团队」按钮已移除（TeamTriggerRow 删除）——
+    // 入口收敛进 ＋ 功能菜单，先开菜单再点「派团队」菜单项（onTeamTrigger 开弹层）。
+    fireEvent.click(screen.getByRole("button", { name: "更多功能" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /派团队/ }));
     const objInput = (await screen.findByLabelText(
       /目标（可选，随下条消息发出）/,
     )) as HTMLInputElement;

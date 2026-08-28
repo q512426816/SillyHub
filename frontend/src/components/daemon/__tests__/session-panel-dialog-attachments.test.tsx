@@ -278,12 +278,17 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
 
   it("idle 首句：附件入口禁用（createSession 契约无附件），title 提示创建后可用", () => {
     setupPanel();
+    // ql-20260827-020：📎 收敛进 ＋ 功能菜单——先开菜单再断言菜单项
+    // （＋ 不随输入框 disabled，禁用原因在菜单项 title 上）。
+    fireEvent.click(screen.getByRole("button", { name: "更多功能" }));
     const clip = screen.getByTitle("发送首条消息创建会话后可添加附件") as HTMLButtonElement;
     expect(clip.disabled).toBe(true);
   });
 
   it("codex 引擎：附件入口禁用（D-6 同构），title 提示引擎不支持", () => {
     setupPanel({ providers: ["codex"], defaultProvider: "codex" });
+    // 同上：附件入口在 ＋ 功能菜单内。
+    fireEvent.click(screen.getByRole("button", { name: "更多功能" }));
     const clip = screen.getByTitle("当前引擎不支持附件") as HTMLButtonElement;
     expect(clip.disabled).toBe(true);
   });

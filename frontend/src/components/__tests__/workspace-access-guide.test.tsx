@@ -27,6 +27,23 @@ vi.mock("@/lib/workspace-binding", () => ({
   upsertMyBinding: vi.fn(),
 }));
 
+// quick-18951370：组件挂 useDaemonMachines（共享守护进程回退数据源），其内部
+// useQuery 需 QueryClientProvider——本测试聚焦 listDaemonInstances 实体下拉，
+// mock 空集走组件 `?? []` 兜底（sharedDaemons 为空），不引入真实 Provider/网络。
+vi.mock("@/lib/use-daemon-machines", () => ({
+  useDaemonMachines: () => ({
+    items: [],
+    total: 0,
+    sessions: [],
+    sharedToMe: [],
+    machineCandidates: [],
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+    error: null,
+  }),
+}));
+
 import { WorkspaceAccessGuide } from "@/components/workspace-access-guide";
 import { listDaemonInstances, type DaemonInstanceRead } from "@/lib/daemon";
 import { upsertMyBinding } from "@/lib/workspace-binding";

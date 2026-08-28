@@ -108,6 +108,10 @@ describe("m/workspaces/[id]/sessions/[sid] 会话对话移动页（SessionPanel 
     });
     machinesHook.useDaemonMachines.mockReturnValue({
       items: MACHINES,
+      // 页面透传给面板的 machines 取自 machineCandidates（task-10 融合候选），
+      // mock 需与 items 同源注入，否则透传空数组。
+      sharedToMe: [],
+      machineCandidates: MACHINES,
       total: MACHINES.length,
       sessions: [],
       isLoading: false,

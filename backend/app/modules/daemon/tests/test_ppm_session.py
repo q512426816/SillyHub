@@ -113,10 +113,12 @@ async def _create_runtime(session: AsyncSession, user_id: uuid.UUID) -> DaemonRu
 async def _connect_mock_ws(hub: DaemonWsHub, runtime_id: uuid.UUID) -> AsyncMock:
     """往 fresh hub 挂一个记录 sent_messages 的 mock websocket（HTTP 层派发用）。"""
     ws = AsyncMock()
-    ws.sent_messages: list[dict[str, Any]] = []
+    # 类型只能声明在局部变量上；直接注解 mock 属性会触发 mypy misc（non-self attribute）。
+    sent_messages: list[dict[str, Any]] = []
+    ws.sent_messages = sent_messages
 
     async def _send_json(message: dict[str, Any]) -> None:
-        ws.sent_messages.append(message)
+        sent_messages.append(message)
 
     ws.send_json = AsyncMock(side_effect=_send_json)
     ws.close = AsyncMock()

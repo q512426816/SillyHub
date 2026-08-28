@@ -200,6 +200,10 @@ describe("m/workspaces/[id]/sessions 会话列表移动页", () => {
     });
     machinesHook.useDaemonMachines.mockReturnValue({
       items: MACHINES,
+      // 页面透传给 picker/面板的 machines 取自 machineCandidates（task-10 融合候选），
+      // mock 需与 items 同源注入，否则透传空数组。
+      sharedToMe: [],
+      machineCandidates: MACHINES,
       total: MACHINES.length,
       sessions: [],
       isLoading: false,

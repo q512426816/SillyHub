@@ -469,15 +469,21 @@ beforeEach(() => {
   mocks.searchParams = new URLSearchParams();
   mocks.lastListPanelProps = null;
   mocks.lastSessionPanelProps = null;
+  // machineCandidates 与 items 同源注入：门户 picker/两层筛选已改读融合候选
+  // （task-10，2026-08-28-daemon-agent-share），漏配机器层 tab 全空。
+  const defaultMachines = [
+    makeMachine(),
+    makeMachine({
+      id: "m-2",
+      hostname: "machine-2",
+      runtimes: [makeRuntime({ id: "rt-2", provider: "codex" })],
+    }),
+  ];
   mocks.machinesHook.mockReturnValue({
-    items: [
-      makeMachine(),
-      makeMachine({
-        id: "m-2",
-        hostname: "machine-2",
-        runtimes: [makeRuntime({ id: "rt-2", provider: "codex" })],
-      }),
-    ],
+    items: defaultMachines,
+    sharedToMe: [],
+    machineCandidates: defaultMachines,
+    total: defaultMachines.length,
     sessions: [],
     isLoading: false,
     isFetching: false,
@@ -903,10 +909,14 @@ describe("SessionsPortal ?new=1 直达新建（ql-20260823-005）", () => {
   });
 
   it("解析不命中（无在线机器）→ 自动弹两步浮层兜底（浮层空态引导），不落空门户态让用户再手动点", async () => {
+    const machines = [
+      makeMachine({ id: "m-off", hostname: "machine-off", status: "offline" }),
+    ];
     mocks.machinesHook.mockReturnValue({
-      items: [
-        makeMachine({ id: "m-off", hostname: "machine-off", status: "offline" }),
-      ],
+      items: machines,
+      sharedToMe: [],
+      machineCandidates: machines,
+      total: machines.length,
       sessions: [],
       isLoading: false,
       isFetching: false,
@@ -1115,10 +1125,14 @@ describe("SessionsPortal 筛选态直带上下文（ql-20260823-001）", () => {
   });
 
   it("筛选的引擎无在线 runtime（如 Codex 离线）→ 回退浮层（不直带失效上下文）", async () => {
+    const machines = [
+      makeMachine({ id: "m-2", hostname: "machine-2", runtimes: [makeRuntime({ id: "rt-2", provider: "codex", status: "offline" })] }),
+    ];
     mocks.machinesHook.mockReturnValue({
-      items: [
-        makeMachine({ id: "m-2", hostname: "machine-2", runtimes: [makeRuntime({ id: "rt-2", provider: "codex", status: "offline" })] }),
-      ],
+      items: machines,
+      sharedToMe: [],
+      machineCandidates: machines,
+      total: machines.length,
       sessions: [],
       isLoading: false,
       isFetching: false,
