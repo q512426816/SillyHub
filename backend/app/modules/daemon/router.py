@@ -2129,7 +2129,8 @@ async def list_sessions(
     if (ppm_item_kind is None) != (ppm_item_id is None):
         raise HTTPException(
             status_code=422,
-            detail="ppm_item_kind and ppm_item_id must be provided together",
+            # 与 SessionCreateRequest._require_ppm_item_pair 同口径（用户可见 422 文案中文化）。
+            detail="ppm_item_kind 与 ppm_item_id 必须成对提供。",
         )
     from app.modules.agent.model import AgentRun, AgentRunLog
 

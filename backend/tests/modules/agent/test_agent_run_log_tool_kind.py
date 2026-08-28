@@ -426,6 +426,8 @@ async def test_session_channel_payload_contains_tool_kind(monkeypatch: pytest.Mo
         output_tokens=None,
         cache_read_tokens=None,
         cache_creation_tokens=None,
+        # task-05 / FR-01 新增字段（老 daemon/未上报 None → payload 不带该键）。
+        ctx_tokens=None,
         agent_session_id=uuid.uuid4(),  # 非 None → 进入 session publish 分支
         timestamp_iso="2026-07-05T00:00:00Z",
     )

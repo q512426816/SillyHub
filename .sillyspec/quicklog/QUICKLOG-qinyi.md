@@ -379,3 +379,21 @@
 根因：backend-ci 被 3d8432d9 两处 mypy 错误拦在 pytest 之前；frontend-ci 失败一半是组件改读 useDaemonMachines 融合候选后测试 mock 未跟、一半是 604c32fa ＋功能菜单收敛未适配旧断言；本地 captcha 两用例红是 .env 开关环境敏感（CI 不受影响）
 方案：session_binding 按 kind 分支具体类型查询；test_ppm_session 改局部列表；captcha fixture 钉开关 True；6 文件 mock 补 machineCandidates 同源注入或整体 mock hook；SessionPanel 三件改走 ＋ 菜单交互与 streamSession 三参断言
 结果：backend mypy 762 文件 0 错 + 相关 pytest 109+21 用例绿 + ruff 净；前端 9 文件 130 用例绿 + tsc 0 + lint 仅预存 warning；alembic 单 head 确认；local.yaml 豁免清单同步收缩
+
+## ql-20260828-014-45f9 | 2026-08-28 13:35:04 | 登录页优化：左侧小文字对比度不足看不清 + 右侧表单区出现意外滚动条
+状态：进行中
+关联变更：（无）
+文件：（见实际改动）
+
+## ql-20260828-015-796d | 2026-08-28 13:39:18 | backend-ci 首跑全量暴露三预存债修复：ppm 成对 422 英文文案中文化、PublishIntent 漏 ctx_tokens、captcha 禁用…
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/router.py（422 detail 中文化）
+- backend/app/modules/daemon/schema.py（同口径 ValueError 中文化）
+- backend/tests/modules/agent/test_agent_run_log_tool_kind.py（补 ctx_tokens=None）
+- backend/tests/modules/auth/test_login_captcha.py（去 undo 改显式翻开关 + 限流阈值隔离）
+需求：backend-ci 首跑全量暴露三预存债修复：ppm 成对 422 英文文案中文化、PublishIntent 漏 ctx_tokens、captcha 禁用开关用例 undo 误撤 fake_redis
+根因：mypy 拦门期间三债从未在 CI 执行：3d8432d9 写了英文 422 文案违 l10n 守护、ctx_tokens 字段加入后旧测试构造未跟、captcha 用例 monkeypatch.undo 连 fixture 补丁一并撤销在无 Redis 的 CI 上失败计数丢失
+方案：router/schema 两处同口径中文化；测试构造补 ctx_tokens=None；去 undo 改显式翻回开关并调高限流阈值隔离关注点
+结果：l10n/tool_kind/captcha 127 用例绿 + daemon ppm/list_filters 57 绿 + mypy 762 文件 0 错 + ruff 净

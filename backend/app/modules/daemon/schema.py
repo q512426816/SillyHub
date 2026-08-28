@@ -240,7 +240,7 @@ class SessionCreateRequest(BaseModel):
         # 定位条目，item 无 kind 无法选表）。绑定字段不纳入空 prompt 豁免（绑定
         # 不是配置切换，对齐 SessionInjectRequest bind_* 口径）。缺省双 None 零分支。
         if (self.ppm_item_kind is None) != (self.ppm_item_id is None):
-            raise ValueError("ppm_item_kind and ppm_item_id must be provided together")
+            raise ValueError("ppm_item_kind 与 ppm_item_id 必须成对提供。")
         return self
 
 
