@@ -294,7 +294,13 @@
 方案：preflight.ts 的 runDaemonSelfUpdate 改返回 boolean 并移出退出逻辑；新增 respawnDaemonAndExit（detached spawn node 新 bundle+原启动参数，成功后 500ms exit，拉起失败记 error 保活旧进程）；启动期 runPreflight 与 WS SELF_UPDATE 两路径据 true 自拉起，WS 路径先 stop() 释放 runtime lock/标 offline 再拉起避免抢锁竞态；未发生替换改记 self_update_noop 保持运行；mcp-server.js best-effort 伴生替换
 结果：vitest tests/preflight.test.ts 23/23（原17+新增6）；pnpm typecheck 绿；ruff check+format ws_hub.py 绿；文档同步 preflight.md/ARCHITECTURE.md/CONCERNS.md/ws_hub.py docstring + 两模块 changelog sidecar
 
-## ql-20260828-005-fe24 | 2026-08-28 08:41:06 | C:/Program Files/Git/sessions 门户 PreSessionPicker 接入共享机器：sessions-portal.tsx 解构 machineCandidates 传给 PreSessionPicker（ta…
-状态：进行中
+## ql-20260828-005-fe24 | 2026-08-28 08:41:06 | 门户机器选择器接入共享机器——三入口漏网修复
+状态：已完成
 关联变更：（无）
-文件：（见实际改动）
+文件：
+- frontend/src/components/sessions/sessions-portal.tsx（三处消费切融合候选）
+- frontend/src/app/(dashboard)/sessions/__tests__/page.test.tsx（共享机器两步浮层回归用例）
+需求：门户机器选择器接入共享机器——三入口漏网修复
+根因：sessions-portal 只喂 PreSessionPicker 自有 items，漏接 task-10 的 machineCandidates 融合候选（门户新建表单是悬浮/运行中条/门户三入口中唯一漏网的）
+方案：sessions-portal 三处消费（组头「＋」picker + 两处 SessionPanel）统一切 pickerMachines=machineCandidates??machines，对齐 floating-host 接法，离线判定同步覆盖共享会话
+结果：新增融合候选回归用例+既有 19 用例 20/20 全过、tsc 零错、前端容器重建后 chunks 含 sharedToMe、提交 dd6d8a8e+8a6403f1 已推送 origin/main
