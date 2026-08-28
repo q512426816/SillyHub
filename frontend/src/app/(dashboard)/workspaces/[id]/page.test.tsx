@@ -90,6 +90,25 @@ vi.mock("@/lib/daemon", async () => {
   return { ...actual, getDaemonRuntime: vi.fn(async () => null), listDaemonRuntimes: daemonApi.listDaemonRuntimes, listDaemonInstances: daemonApi.listDaemonInstances };
 });
 
+// quick-4a55e2dc：page 挂 useDaemonMachines（quick-18951370 共享绑定的显示回退
+// 数据源），其内部 useQuery 需 QueryClientProvider——本测试文件原裸 render（无
+// Provider），quick-18951370 接线时漏补，HEAD 基线 10/10 全挂（预存债顺手修）。
+// mock 掉 hook 避免真实网络请求；machineCandidates=[] 走 page 的 `?? []` 兜底，
+// 借用归属判定不依赖它（只看 listDaemonInstances 是否命中）。
+vi.mock("@/lib/use-daemon-machines", () => ({
+  useDaemonMachines: () => ({
+    items: [],
+    total: 0,
+    sessions: [],
+    sharedToMe: [],
+    machineCandidates: [],
+    isLoading: false,
+    isFetching: false,
+    isError: false,
+    error: null,
+  }),
+}));
+
 const componentsApi = vi.hoisted(() => ({ listComponents: vi.fn() }));
 vi.mock("@/lib/components", () => ({ listComponents: componentsApi.listComponents }));
 
@@ -452,5 +471,81 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
       expect(screen.queryByText("未关联")).not.toBeInTheDocument(),
     );
     expect(screen.getAllByText("项目甲").length).toBeGreaterThanOrEqual(2);
+  });
+
+  // ── quick-4a55e2dc：守护进程共享卡——借用绑定不能「共享的共享」 ──
+  // 注：不走 renderWithStrategy（其内部 mockDefaultBinding 会把 daemon_id 覆盖
+  // 成 null），照 default_agent 用例手动 mock + 裸 render。
+
+  it("绑定自有 daemon → 「守护进程共享」开关正常渲染", async () => {
+    daemonApi.listDaemonRuntimes.mockResolvedValue([]);
+    daemonApi.listDaemonInstances.mockResolvedValue([
+      { id: "did-1", hostname: "HOST-1", display_alias: null, status: "online", providers: [] },
+    ]);
+    const { ws, specWs } = makeWorkspace("repo-native");
+    workspacesApi.getWorkspace.mockResolvedValue(ws);
+    specApi.getSpecWorkspace.mockResolvedValue(specWs);
+    workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
+    componentsApi.listComponents.mockResolvedValue({ items: [], total: 0 });
+    bindingApi.fetchMyBinding.mockResolvedValue({
+      workspace_id: "ws-1",
+      user_id: "user-1",
+      daemon_id: "did-1",
+      runtime_id: "rid-1",
+      root_path: "C:/proj",
+      path_source: "daemon-client",
+      synced_at: null,
+      last_scan_at: null,
+      init_synced_at: null,
+    });
+
+    render(<WorkspaceDetailPage params={{ id: "ws-1" }} />);
+    await waitFor(() =>
+      expect(screen.getAllByText("multi-agent-platform").length).toBeGreaterThan(0),
+    );
+
+    // effect 解析后 owned=true → 开关渲染、无借用提示。
+    expect(
+      await screen.findByTestId("shared-daemon-toggle"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/仅自有守护进程可开启共享/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("绑定他人共享 daemon（借用）→ 不渲染共享开关，改提示文案", async () => {
+    // listDaemonInstances 只返回自有实例；绑定 did-shared 不在其中 =
+    // quick-18951370 放宽的借用绑定形态。
+    daemonApi.listDaemonRuntimes.mockResolvedValue([]);
+    daemonApi.listDaemonInstances.mockResolvedValue([
+      { id: "did-1", hostname: "HOST-1", display_alias: null, status: "online", providers: [] },
+    ]);
+    const { ws, specWs } = makeWorkspace("repo-native");
+    workspacesApi.getWorkspace.mockResolvedValue(ws);
+    specApi.getSpecWorkspace.mockResolvedValue(specWs);
+    workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
+    componentsApi.listComponents.mockResolvedValue({ items: [], total: 0 });
+    bindingApi.fetchMyBinding.mockResolvedValue({
+      workspace_id: "ws-1",
+      user_id: "user-1",
+      daemon_id: "did-shared",
+      runtime_id: null,
+      root_path: "C:/proj",
+      path_source: "daemon-client",
+      synced_at: null,
+      last_scan_at: null,
+      init_synced_at: null,
+    });
+
+    render(<WorkspaceDetailPage params={{ id: "ws-1" }} />);
+    await waitFor(() =>
+      expect(screen.getAllByText("multi-agent-platform").length).toBeGreaterThan(0),
+    );
+
+    // effect 解析（findByText 等待）后：提示出现、开关不渲染。
+    expect(
+      await screen.findByText(/当前绑定的是他人共享的守护进程（借用），仅自有守护进程可开启共享。/),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("shared-daemon-toggle")).not.toBeInTheDocument();
   });
 });

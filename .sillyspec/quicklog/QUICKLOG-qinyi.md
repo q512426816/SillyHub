@@ -355,3 +355,18 @@
 根因：收尾
 方案：同前
 结果：同前
+
+## ql-20260828-012-2a3e | 2026-08-28 10:31:24 | 工作区守护进程共享卡禁止借用绑定再共享——前端隐藏开关+后端归属校验
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/workspace/member_runtimes/service.py（归属校验 403 daemon_not_owned）
+- backend/tests/modules/workspace/test_member_runtimes.py（借用者 403 无残留用例）
+- frontend/src/app/(dashboard)/workspaces/[id]/page.tsx（boundDaemonOwned+借用绑定提示）
+- frontend/src/app/(dashboard)/workspaces/[id]/page.test.tsx（两新用例+QueryClient 预存债修复）
+- .sillyspec/docs/multi-agent-platform/modules/backend.changelog.md（变更索引）
+- .sillyspec/docs/multi-agent-platform/modules/frontend.changelog.md（变更索引）
+需求：工作区守护进程共享卡禁止借用绑定再共享——前端隐藏开关+后端归属校验
+根因：quick-18951370 放宽借用绑定后，前端只要 myBinding 存在就渲染共享开关（标签取共享机器候选，故显示「xx 共享」），后端 set_my_binding_shared 无 daemon 归属校验——借用者能以自己名义再开 workspace grant，原共享人撤销后借用者的授权仍在，撤销语义被击穿
+方案：后端 set_my_binding_shared 在写 shared/grant 前校验 binding 的 daemon 归属（属他人 403 daemon_not_owned 零残留）；前端 page 记 boundDaemonOwned，借用绑定不渲染开关改提示「当前绑定的是他人共享的守护进程（借用），仅自有守护进程可开启共享」；新增后端借用者 403 用例+前端自有/借用两用例，顺手修 quick-18951370 漏处理的 page.test QueryClientProvider 预存债（HEAD 基线 10/10 全挂，mock use-daemon-machines 修复）
+结果：后端 25 用例全绿+ruff/mypy 净；前端 page.test 12/12+toggle 组件 4/4+tsc 0

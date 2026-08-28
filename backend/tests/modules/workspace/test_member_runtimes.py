@@ -767,6 +767,65 @@ async def test_t04_lender_can_only_touch_own_binding(
     assert [g.granted_by_user_id for g in grants] == [dev.id]
 
 
+async def test_quick4a55e2dc_borrower_cannot_reshare_shared_daemon(
+    client: AsyncClient,
+    db_session,
+    role_seeder,
+    user_factory,
+    ws_factory,
+    member_factory,
+    daemon_factory,
+):
+    """quick-4a55e2dc（防共享的共享）：绑定他人共享 daemon 的成员（借用绑定，
+    quick-18951370 放宽合法）再开共享 → 403 daemon_not_owned，不落借用者 grant。
+
+    否则借用者能以自己名义 upsert enabled workspace grant——原 lender 撤销后
+    借用者的 grant 仍在，撤销语义被击穿。
+    """
+    from app.modules.workspace.member_runtimes import service as binding_service
+
+    dev, _ = await user_factory(email="dev@x.com", display_name="Dev")
+    biz, biz_tok = await user_factory(email="biz@x.com", display_name="Biz")
+    ws = await ws_factory(owner_id=dev.id)
+    await member_factory(ws.id, dev.id, "workspace_owner", granted_by=dev.id)
+    await member_factory(ws.id, biz.id, "developer", granted_by=dev.id)
+    dev_daemon = await daemon_factory(dev.id)  # 默认 status=online
+
+    # lender 开共享（合法：daemon 归 dev）→ enabled workspace grant。
+    await _seed_shared_binding(
+        db_session,
+        workspace_id=ws.id,
+        user_id=dev.id,
+        daemon_id=dev_daemon.id,
+        shared=True,
+    )
+    # biz 借用绑定（合法：本工作区 enabled grant + daemon 在线）。
+    await binding_service.upsert_my_binding(
+        db_session,
+        workspace_id=ws.id,
+        user_id=biz.id,
+        daemon_id=dev_daemon.id,
+        root_path="/home/biz/repo",
+        path_source="daemon-client",
+    )
+
+    resp = await client.put(
+        f"/api/workspaces/{ws.id}/my-binding/shared",
+        headers=_bearer(biz_tok),
+        json={"shared": True},
+    )
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["code"] == "daemon_not_owned"
+
+    # 无残留：grants 仍只有 lender（dev）那一行 enabled grant，biz 的 binding.shared
+    # 未被置 true（403 早退于 shared 列写入之前）。
+    grants = await _grant_rows(db_session, workspace_id=ws.id)
+    assert [g.granted_by_user_id for g in grants] == [dev.id]
+    assert grants[0].enabled is True
+    biz_row = await binding_service.get_my_binding(db_session, ws.id, biz.id)
+    assert biz_row.shared is False
+
+
 async def test_t04_owner_list_shared_daemons(
     client: AsyncClient,
     db_session,

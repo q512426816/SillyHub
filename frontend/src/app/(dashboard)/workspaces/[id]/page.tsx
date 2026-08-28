@@ -81,6 +81,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
   // task-11 / daemon-entity-binding：当前绑定守护进程的在线 provider 列表
   const [boundDaemonProviders, setBoundDaemonProviders] = useState<string[]>([]);
   const [boundDaemon, setBoundDaemon] = useState<DaemonInstanceRead | null>(null);
+  // quick-4a55e2dc：绑定 daemon 是否本人自有（listDaemonInstances 命中）——借用
+  // 绑定（quick-18951370 放宽后可绑他人共享 daemon）不渲染「共享」开关（防共享
+  // 的共享；后端 set_my_binding_shared 同步加了归属校验双保险）。null=未解析。
+  const [boundDaemonOwned, setBoundDaemonOwned] = useState<boolean | null>(null);
   // quick-18951370：共享绑定的 daemon 展示回退——listDaemonInstances 仅自有，
   // 绑定共享 daemon 时从融合候选（自有+共享）解析显示名与在线态。
   const { machineCandidates } = useDaemonMachines({ limit: 100 });
@@ -218,6 +222,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
     if (!myBinding?.daemon_id) {
       setBoundDaemonProviders([]);
       setBoundDaemon(null);
+      setBoundDaemonOwned(null);
       return;
     }
     let active = true;
@@ -235,6 +240,8 @@ export default function WorkspaceDetailPage({ params }: Props) {
         );
         setBoundDaemonProviders(providers);
         const own = instances.find((i) => i.id === myBinding.daemon_id);
+        // quick-4a55e2dc：own 命中=自有 daemon；仅共享候选命中=借用绑定。
+        setBoundDaemonOwned(!!own);
         if (own) {
           setBoundDaemon(own);
         } else {
@@ -257,6 +264,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
         if (active) {
           setBoundDaemonProviders([]);
           setBoundDaemon(null);
+          setBoundDaemonOwned(null);
         }
       });
     return () => {
@@ -589,14 +597,23 @@ export default function WorkspaceDetailPage({ params }: Props) {
           </SectionCard>
           {myBinding && (
             <SectionCard title="守护进程共享" bodyPadding="p-4">
-              <SharedDaemonToggle
-                workspaceId={workspaceId}
-                shared={myBinding?.shared}
-                daemonLabel={
-                  boundDaemon?.display_alias ?? boundDaemon?.hostname ?? null
-                }
-                onChanged={() => void load()}
-              />
+              {/* quick-4a55e2dc：借用绑定（绑的是他人共享 daemon）不能开「共享的
+                  共享」——渲染提示替代开关；未绑 daemon（daemon_id null）维持原
+                  开关行为（服务端本就不为无 daemon binding 开 grant）。 */}
+              {myBinding.daemon_id && boundDaemonOwned === false ? (
+                <p className="text-[11px] text-muted-foreground">
+                  当前绑定的是他人共享的守护进程（借用），仅自有守护进程可开启共享。
+                </p>
+              ) : (
+                <SharedDaemonToggle
+                  workspaceId={workspaceId}
+                  shared={myBinding?.shared}
+                  daemonLabel={
+                    boundDaemon?.display_alias ?? boundDaemon?.hostname ?? null
+                  }
+                  onChanged={() => void load()}
+                />
+              )}
             </SectionCard>
           )}
         </div>

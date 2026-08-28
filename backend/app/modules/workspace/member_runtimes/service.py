@@ -243,6 +243,18 @@ async def set_my_binding_shared(
     row = await session.get(WorkspaceMemberRuntime, (workspace_id, user_id))
     if row is None:
         raise MemberBindingNotFound(workspace_id=workspace_id, user_id=user_id)
+    # quick-4a55e2dc（防共享的共享）：quick-18951370 放宽绑定后 binding 可指向
+    # 他人共享的 daemon（借用绑定）——借用者不得以自己名义再开 workspace grant，
+    # 否则原 lender 撤销（自己那行 grant disabled）后借用者的 grant 仍在，
+    # 撤销语义被击穿。仅 daemon 归属本人时才允许开/关共享授权。
+    if row.daemon_id is not None:
+        daemon = await session.get(DaemonInstance, row.daemon_id)
+        if daemon is None or daemon.user_id != user_id:
+            raise AppError(
+                "只能共享自己名下的守护进程；当前绑定的是他人共享的守护进程（借用），不能再次共享。",
+                code="daemon_not_owned",
+                http_status=403,
+            )
     row.shared = shared
     row.updated_at = datetime.now(UTC)
     # grants 侧同事务写（helper 只写不 commit，随下方 commit 一并落库/回滚）。
