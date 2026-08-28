@@ -15,6 +15,7 @@ from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.model_error import ModelErrorDTO
 from app.modules.daemon.schema import (
+    ModelUsageItemRead,
     PageContextCreateBlock,
     SessionReopenResponse,
     TeamMissionCreateBlock,
@@ -565,6 +566,12 @@ class DaemonService:
         # 保证老调用方（router/WS）不传该参数时向后兼容。
         cache_read_tokens: int | None = None,
         cache_creation_tokens: int | None = None,
+        # task-03（2026-08-29-usage-by-provider-model / FR-01-3）：daemon 终态上报的
+        # 逐模型用量明细行（per-model api_requests 已由 daemon 按 design §2 分摊）
+        # + run 级 API 调用次数精确值。facade 委托签名必须与 RunSyncService 同步
+        # （service.py:528-531 警告），None=老 daemon 未传，明细零行（N-01 兼容）。
+        model_usage: list[ModelUsageItemRead] | None = None,
+        api_requests: int | None = None,
         # task-06 / FR-02：模型层错误详情（ModelErrorDTO）。facade 委托签名必须与
         # RunSyncService 同步（service.py:528-531 警告），None=daemon 未传保持兼容。
         error: ModelErrorDTO | None = None,
@@ -608,6 +615,8 @@ class DaemonService:
             output_tokens=output_tokens,
             cache_read_tokens=cache_read_tokens,
             cache_creation_tokens=cache_creation_tokens,
+            model_usage=model_usage,
+            api_requests=api_requests,
             error=error,
         )
 
@@ -714,6 +723,11 @@ class DaemonService:
         # 2026-08-14-sessions-portal task-02：切档案/切供应商透传（实现归 task-05）。
         agent_profile_id: str | None = None,
         llm_provider_id: str | None = None,
+        # task-11（2026-08-29-usage-by-provider-model / FR-03-3）：会话级模型选择
+        # 透传（三态：None=不动；空串=显式重置跟随供应商配置；非空需同请求携带
+        # llm_provider_id，422 守卫与 R-07 兜底模型快照同步归 session 子域
+        # inject_session）。
+        model: str | None = None,
         # 2026-08-20-session-multimodal-attachments task-05：附件引用透传
         # （校验/组装在 session 子域 _inject_into_session）。
         attachment_ids: list[uuid.UUID] | None = None,
@@ -738,6 +752,7 @@ class DaemonService:
             prompt=prompt,
             agent_profile_id=agent_profile_id,
             llm_provider_id=llm_provider_id,
+            model=model,
             attachment_ids=attachment_ids,
             page_context=page_context,
             bind_change_key=bind_change_key,

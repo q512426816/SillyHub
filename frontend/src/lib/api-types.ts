@@ -7936,6 +7936,12 @@ export interface paths {
          *     同构 ``list_change_sessions``：id/provider/status/turn_count/mode/author/
          *     last_active_at/title。无关联返回空列表（不 404——任务刚建、尚无会话是常态,
          *     design §9）。``kind`` 非法值由 Literal 校验 422。
+         *
+         *     条目可见性（ql-20260828-003 收尾审查修复）：按 PPM 数据范围口径
+         *     （``task_scope_clause`` / ``problem_scope_clause``：超管全部、经理=所辖
+         *     项目集、其余=自己负责的任务 / 创建·责任·验证·处置的问题）校验条目对
+         *     当前用户可见；不可见返回 []——与「无关联」同语义,不泄露条目存在性,
+         *     也不暴露他人会话的标题/作者/状态。
          */
         get: operations["list_ppm_item_sessions_api_ppm_item_sessions_get"];
         put?: never;
@@ -13124,6 +13130,14 @@ export interface components {
             input_tokens?: number | null;
             /** Output Tokens */
             output_tokens?: number | null;
+            /** Cache Read Tokens */
+            cache_read_tokens?: number | null;
+            /** Cache Creation Tokens */
+            cache_creation_tokens?: number | null;
+            /** Model Usage */
+            model_usage?: components["schemas"]["ModelUsageItemRead"][] | null;
+            /** Api Requests */
+            api_requests?: number | null;
             error?: components["schemas"]["ModelErrorDTO"] | null;
         };
         /** InteractiveRunResultResponse */
@@ -13942,6 +13956,43 @@ export interface components {
          * @enum {string}
          */
         ModelErrorType: "auth_failed" | "quota_exceeded" | "rate_limited" | "timeout" | "model_not_found" | "network" | "provider_error" | "unknown";
+        /**
+         * ModelUsageItemRead
+         * @description 终态上报的 run×模型用量明细行（FR-01-3，2026-08-29-usage-by-provider-model）。
+         *
+         *     daemon interactive 从 SDK ``result.modelUsage`` 逐模型拆行（camelCase→snake）；
+         *     ``api_requests`` 为按消耗占比的分摊估算（run 级精确值在顶层 api_requests，
+         *     design §2 D-01）。batch 侧为 run 级单行。
+         */
+        ModelUsageItemRead: {
+            /** Model */
+            model: string;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Cache Creation Tokens
+             * @default 0
+             */
+            cache_creation_tokens: number;
+            /**
+             * Api Requests
+             * @default 0
+             */
+            api_requests: number;
+        };
         /** OkResponse */
         OkResponse: {
             /**
@@ -16156,6 +16207,34 @@ export interface components {
              */
             notify_session: boolean;
         };
+        /**
+         * ProviderModelUsageRead
+         * @description 用量统计的 供应商×模型 分组行（FR-04-1）。
+         *
+         *     ``provider_id``/``provider_name`` 为 NULL 时（老 run 未记录供应商）由
+         *     service 层填 ``未记录`` 标识，前端不再判空。
+         */
+        ProviderModelUsageRead: {
+            /** Provider Id */
+            provider_id?: string | null;
+            /**
+             * Provider Name
+             * @default 未记录
+             */
+            provider_name: string;
+            /** Model */
+            model: string;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /** Cache Creation Tokens */
+            cache_creation_tokens: number;
+            /** Api Requests */
+            api_requests?: number | null;
+        };
         /** PsPlanNodeCreate */
         PsPlanNodeCreate: {
             /** Overall Stage */
@@ -17322,7 +17401,11 @@ export interface components {
         };
         /**
          * RuntimeUsageRead
-         * @description 单 runtime 的用量记录(summary 总量 + daily 时间序列)。
+         * @description 单 runtime 的用量记录(summary 总量 + daily 时间序列 + 供应商×模型分组)。
+         *
+         *     ``by_provider``（FR-04-1，2026-08-29-usage-by-provider-model）：窗口内
+         *     agent_run_model_usage 明细按 供应商×模型 聚合；空列表=无明细数据
+         *     （老 daemon / 老数据），前端隐藏分组区。
          */
         RuntimeUsageRead: {
             /** Runtime Id */
@@ -17330,6 +17413,11 @@ export interface components {
             summary: components["schemas"]["RuntimeUsageSummaryRead"];
             /** Daily */
             daily: components["schemas"]["RuntimeUsagePointRead"][];
+            /**
+             * By Provider
+             * @default []
+             */
+            by_provider: components["schemas"]["ProviderModelUsageRead"][];
         };
         /**
          * RuntimeUsageSummaryRead
@@ -17624,8 +17712,11 @@ export interface components {
          *
          *     双入口：``runtime_id``（新会话门户页，指定机器+智能体，优先）与 ``provider``
          *     （/runtimes 弹窗旧路径，零回归保留）二选一，都未传 → 422。
-         *     ``model`` 字段已移除（design §5：由档案/默认派生，继承 D-005/D-004@v2）——
-         *     pydantic 默认忽略多余字段，旧前端继续上送 model 不会 422，仅不再生效。
+         *     ``model`` 字段曾按旧设计移除（由档案/默认派生，D-005/D-004@v2）；D-002@v1
+         *     （2026-08-29-usage-by-provider-model）恢复——预会话供应商+模型级联的首句
+         *     携带（None/空串=跟随供应商配置）。创建下发的 ProviderConfig 只带 model 键
+         *     不含 default_fallback_model（injector ``default_fallback_model ?? model``
+         *     对 undefined 前者天然不遮蔽，R-07 创建路径无虞）。
          *     ``agent_profile_id``/``llm_provider_id`` 由 service 层解析（task-03），
          *     本 DTO 只透传 str（llm_provider_id 空串/"none" 语义=切回本机默认，task-05）。
          *
@@ -17644,6 +17735,8 @@ export interface components {
             agent_profile_id?: string | null;
             /** Llm Provider Id */
             llm_provider_id?: string | null;
+            /** Model */
+            model?: string | null;
             /**
              * Manual Approval
              * @default true
@@ -17783,6 +17876,8 @@ export interface components {
             agent_profile_id?: string | null;
             /** Llm Provider Id */
             llm_provider_id?: string | null;
+            /** Model */
+            model?: string | null;
             /** Attachment Ids */
             attachment_ids?: string[];
             page_context?: components["schemas"]["PageContextCreateBlock"] | null;

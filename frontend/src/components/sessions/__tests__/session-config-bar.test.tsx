@@ -6,44 +6,42 @@
  *   - components/sessions/session-config-bar.tsx（本 task 实现）
  *   - components/daemon/turn-timeline.tsx（whoLine 可选字段，task-14 追加）
  *   - tasks/task-14.md acceptance：idle 切档案/供应商走 inject 新配置、running 全置灰、
- *     机器/智能体仅展示、切换参数正确（含「不指定」空串 ""）、who 行按快照渲染、
+ *     切换参数正确（含「不指定」空串 ""）、who 行按快照渲染、
  *     TurnTimeline 不传 whoLine 零回归。
+ *   - 2026-08-29-usage-by-provider-model task-09：配置条四块→两块，机器/智能体
+ *     纯展示用例随之移除（useDaemonMachines mock 一并退役）。
+ *   - 同变更 task-10：供应商+模型级联——供应商 Ctrl 内嵌模型子下拉（候选三来源
+ *     去重保序 + 首项「默认」）；切模型 injectSession 同请求带 llm_provider_id +
+ *     model；切供应商级联重置 model=""；providerLocked/「不指定」两态隐藏。
  *
  * mock 策略（对齐 new-session-form.test.tsx）：直接 mock 组件消费的 hook/函数模块
- * （useDaemonMachines / useMineAgentProfiles / listProviders / injectSession），
+ * （useMineAgentProfiles / listProviders / injectSession），
  * @/lib/api 保留真实（ApiError instanceof 用）；antd message 局部 mock 便于断言 toast。
  *
  * jsdom 坑：TurnTimeline 的 MarkdownText 用 next/dynamic ssr:false，jsdom 同步 render
  * 得 null → mock 成纯文本渲染（与 turn-timeline-session-input-bar.test.tsx 一致）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type * as React from "react";
 
 import {
   SessionConfigBar,
+  SWITCH_MODEL_DEFAULT_VALUE,
   SWITCH_NO_PROVIDER_VALUE,
 } from "@/components/sessions/session-config-bar";
 import { TurnTimeline, type SessionTurnView } from "@/components/daemon/turn-timeline";
-import type { DaemonMachineRead, DaemonRuntimeRead } from "@/lib/daemon";
 
 // ── hoisted mock 状态 ─────────────────────────────────────────────────────
 
 const mocks = vi.hoisted(() => ({
-  machinesHook: vi.fn(),
   profilesHook: vi.fn(),
   listProviders: vi.fn(),
   injectSession: vi.fn(),
   messageSuccess: vi.fn(),
   messageError: vi.fn(),
-  messageInfo: vi.fn(),
   // task-10：useActiveSharedAgents 直取 /api/daemon/shared-agents/active（apiFetch）。
   apiFetch: vi.fn(),
-}));
-
-vi.mock("@/lib/use-daemon-machines", () => ({
-  useDaemonMachines: () => mocks.machinesHook(),
 }));
 
 // task-10：apiFetch 局部 mock（useActiveSharedAgents 数据源）——ApiError 等其余
@@ -66,8 +64,6 @@ vi.mock("@/lib/api/llm-providers", () => ({
 }));
 
 // 组件运行时只消费 injectSession（类型导入编译期擦除），局部 mock 不加载真实 daemon.ts。
-// ql-20260815-011：组件新增消费 PROVIDER_META（引擎显示名），importOriginal
-// 保留真常量只 mock injectSession 网络函数。
 vi.mock("@/lib/daemon", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/daemon")>();
   return {
@@ -76,7 +72,7 @@ vi.mock("@/lib/daemon", async (importOriginal) => {
   };
 });
 
-// antd 局部 mock（Button/Input 走真实实现）。组件 toast 走 useNotify → App.useApp()
+// antd 局部 mock（Tag/Button 走真实实现）。组件 toast 走 useNotify → App.useApp()
 // 上下文 message（message→useNotify 迁移，FR-04），故在 App.useApp 上挂 mock 断言；
 // 静态 message mock 保留兜底（若有第三方直调静态方法不至于崩）。
 vi.mock("antd", async (importOriginal) => {
@@ -86,7 +82,6 @@ vi.mock("antd", async (importOriginal) => {
       message: {
         success: mocks.messageSuccess,
         error: mocks.messageError,
-        info: mocks.messageInfo,
       },
     }),
   });
@@ -106,67 +101,6 @@ vi.mock("@/components/ui/markdown-text", () => ({
 
 // ── 固件构造 ─────────────────────────────────────────────────────────────
 
-function makeRuntime(
-  overrides: Partial<DaemonRuntimeRead> = {},
-): DaemonRuntimeRead {
-  return {
-    id: "rt-1",
-    display_alias: null,
-    name: null,
-    provider: "claude",
-    version: null,
-    os: null,
-    arch: null,
-    status: "online",
-    last_heartbeat_at: null,
-    capabilities: null,
-    allowed_roots: [],
-    created_at: "2026-08-01T00:00:00Z",
-    updated_at: "2026-08-01T00:00:00Z",
-    ...overrides,
-  };
-}
-
-function makeMachine(
-  overrides: Partial<DaemonMachineRead> = {},
-): DaemonMachineRead {
-  return {
-    id: "m-1",
-    hostname: "machine-1",
-    display_alias: null,
-    os: "windows",
-    arch: "x64",
-    status: "online",
-    last_heartbeat_at: "2026-08-15T08:00:00Z",
-    version: "1.0.0",
-    build_id: null,
-    started_at: null,
-    created_at: "2026-08-01T00:00:00Z",
-    runtime_count: 1,
-    online_runtime_count: 1,
-    runtimes: [makeRuntime({ id: "rt-m1-claude" })],
-    ...overrides,
-  } as DaemonMachineRead;
-}
-
-/** 当前会话机器：machine-1 上 Claude（rt-cur）+ Codex（rt-m1-codex）；另 machine-2 Claude。 */
-function defaultMachines() {
-  return [
-    makeMachine({
-      runtimes: [
-        makeRuntime({ id: "rt-cur", provider: "claude", name: "Claude Code" }),
-        makeRuntime({ id: "rt-m1-codex", provider: "codex", name: "Codex" }),
-      ],
-      runtime_count: 2,
-    }),
-    makeMachine({
-      id: "m-2",
-      hostname: "machine-2",
-      runtimes: [makeRuntime({ id: "rt-m2-claude", name: "Claude Code" })],
-    }),
-  ];
-}
-
 const BASE_PROPS = {
   sessionId: "sess-1",
   running: false,
@@ -178,7 +112,6 @@ const BASE_PROPS = {
     agent_name: "Claude Code",
     engine: "claude",
   },
-  runtimeId: "rt-cur",
   engine: "claude" as const,
 };
 
@@ -207,16 +140,6 @@ function openCtrl(labelPart: string) {
 }
 
 beforeEach(() => {
-  mocks.machinesHook.mockReset().mockReturnValue({
-    items: defaultMachines(),
-    total: 2,
-    sessions: [],
-    isLoading: false,
-    isFetching: false,
-    isError: false,
-    error: null,
-    refetch: vi.fn(),
-  });
   mocks.profilesHook.mockReset().mockReturnValue({
     profiles: [
       { id: "prof-1", name: "知识经理" },
@@ -237,24 +160,17 @@ beforeEach(() => {
   mocks.apiFetch.mockReset().mockResolvedValue([]);
   mocks.messageSuccess.mockReset();
   mocks.messageError.mockReset();
-  mocks.messageInfo.mockReset();
 });
 
 afterEach(() => {
   cleanup();
 });
 
-// ── 1. 四控件渲染（样式 B） ───────────────────────────────────────────────
+// ── 1. 两控件渲染（样式 B，task-09 四块→两块） ────────────────────────────
 
-describe("SessionConfigBar 四控件渲染", () => {
-  it("机器/智能体/供应商/档案四控件展示当前值（快照直显 + 本机默认/未指定如实显示）", () => {
+describe("SessionConfigBar 两控件渲染", () => {
+  it("供应商/档案两控件展示当前值（未选 → 本机默认/未指定如实显示），机器/智能体块不再渲染", () => {
     renderBar();
-    expect(
-      screen.getByRole("button", { name: "配置-机器 machine-1" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "配置-智能体 Claude Code" }),
-    ).toBeInTheDocument();
     // 未选供应商/档案 → 本机默认 / 未指定
     expect(
       screen.getByRole("button", { name: "配置-供应商 本机默认" }),
@@ -262,6 +178,9 @@ describe("SessionConfigBar 四控件渲染", () => {
     expect(
       screen.getByRole("button", { name: "配置-档案 未指定" }),
     ).toBeInTheDocument();
+    // task-09：机器/智能体块已移除，控件条只剩两块
+    expect(screen.queryByRole("button", { name: /^配置-机器/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^配置-智能体/ })).not.toBeInTheDocument();
   });
 
   it("已选供应商/档案时展示列表名（id 解析优先，快照名兜底）", async () => {
@@ -282,11 +201,9 @@ describe("SessionConfigBar 四控件渲染", () => {
 // ── 2. running / ended 置灰（FR-05） ─────────────────────────────────────
 
 describe("SessionConfigBar 状态置灰", () => {
-  it("running：四控件全禁用 + 「本轮完成后解锁切换」(Lock 图标)提示，下拉不可开", () => {
+  it("running：两控件全禁用 + 「本轮完成后解锁切换」(Lock 图标)提示，下拉不可开", () => {
     renderBar({ running: true });
     for (const name of [
-      "配置-机器 machine-1",
-      "配置-智能体 Claude Code",
       "配置-供应商 本机默认",
       "配置-档案 未指定",
     ]) {
@@ -312,50 +229,6 @@ describe("SessionConfigBar 状态置灰", () => {
   });
 });
 
-// ── 3. 机器/智能体纯展示（D-004@v2） ─────────────────────────────────────
-
-describe("SessionConfigBar 机器/智能体纯展示（D-004@v2）", () => {
-  it("机器下拉：其它机器标「跨机器 · 二期」、离线标「离线」，全部项不可点、无确认行", () => {
-    mocks.machinesHook.mockReturnValue({
-      items: [
-        ...defaultMachines(),
-        makeMachine({ id: "m-3", hostname: "machine-off", status: "offline" }),
-      ],
-      total: 3,
-      sessions: [],
-      isLoading: false,
-      isFetching: false,
-      isError: false,
-      error: null,
-      refetch: vi.fn(),
-    });
-    renderBar();
-    openCtrl("配置-机器");
-    const dd = screen.getByTestId("config-dd-machine");
-    expect(dd).toBeInTheDocument();
-    expect(screen.getByText("跨机器 · 二期")).toBeInTheDocument();
-    expect(screen.getByText("离线")).toBeInTheDocument();
-    expect(screen.getByText("✓ 当前")).toBeInTheDocument();
-    // 展示项为 aria-disabled div（非按钮，不可点）→ 不出现切换确认行
-    expect(dd.querySelector("button")).toBeNull();
-    expect(screen.queryByLabelText("切换确认行")).not.toBeInTheDocument();
-  });
-
-  it("智能体下拉：只列当前机器引擎——其它在线引擎可点引导开新会话、离线置灰、不列其它机器", () => {
-    renderBar();
-    openCtrl("配置-智能体");
-    expect(screen.getByTestId("config-dd-agent")).toBeInTheDocument();
-    // 同机其它引擎（Codex，在线）→ 可点，标注「换引擎需开新会话」
-    const codex = screen.getByRole("button", { name: /Codex/ });
-    expect(codex).toBeInTheDocument();
-    expect(screen.getByText("换引擎需开新会话")).toBeInTheDocument();
-    // 其它机器（machine-2）的引擎不出现在下拉里
-    expect(screen.queryByText("跨机器 · 二期")).not.toBeInTheDocument();
-    expect(screen.queryByText(/machine-2/)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("切换确认行")).not.toBeInTheDocument();
-  });
-});
-
 // ── 4. 供应商切换（含「不指定」空串语义，task-16 契约） ───────────────────
 
 describe("SessionConfigBar 切换供应商", () => {
@@ -366,9 +239,11 @@ describe("SessionConfigBar 切换供应商", () => {
     fireEvent.click(await screen.findByRole("button", { name: "选择 GLM 平台" }));
 
     await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
-    // ql-20260817-010：静默切换——prompt 空串（daemon 只 reload 不喂消息）
+    // ql-20260817-010：静默切换——prompt 空串（daemon 只 reload 不喂消息）；
+    // task-10：切供应商同请求级联重置 model=""（候选随供应商变）。
     expect(mocks.injectSession).toHaveBeenCalledWith("sess-1", "", {
       llm_provider_id: "prov-glm",
+      model: "",
     });
     await waitFor(() =>
       expect(mocks.messageSuccess).toHaveBeenCalledWith(
@@ -387,11 +262,13 @@ describe("SessionConfigBar 切换供应商", () => {
     expect(mocks.injectSession).toHaveBeenCalledWith(
       "sess-1",
       expect.any(String),
-      { llm_provider_id: SWITCH_NO_PROVIDER_VALUE },
+      { llm_provider_id: SWITCH_NO_PROVIDER_VALUE, model: "" },
     );
-    // 空串语义钉死："" 必须作为字段下发（task-16：""=切回本机默认，undefined=不切换）
+    // 空串语义钉死：两键的 "" 都必须下发（task-16：llm_provider_id ""=切回本机
+    // 默认；task-10：model ""=跟随供应商配置；undefined=不切换）
     const firstCall = mocks.injectSession.mock.calls.at(0);
     expect(firstCall?.[2]?.llm_provider_id).toBe("");
+    expect(firstCall?.[2]?.model).toBe("");
   });
 
   it("Codex 引擎（engine≠claude）→ 供应商控件禁用（D-010）", () => {
@@ -419,6 +296,127 @@ describe("SessionConfigBar 切换供应商", () => {
     openCtrl("配置-供应商");
     fireEvent.click(await screen.findByRole("button", { name: "选择 Kimi 中转" }));
     await waitFor(() => expect(mocks.messageError).toHaveBeenCalled());
+  });
+});
+
+// ── 4.5 task-10：供应商+模型级联（2026-08-29-usage-by-provider-model /
+//        FR-03-2/3/5 / D-002@v1） ────────────────────────────────────────────
+
+describe("SessionConfigBar 供应商+模型级联（task-10）", () => {
+  /** 三来源齐备的供应商：model / default_fallback_model / role_mappings（含
+   *  重复项与空串/缺键——用例据此断言去重保序 + 过滤）。 */
+  const GLM_PROVIDER = {
+    id: "prov-glm",
+    name: "GLM 平台",
+    model: "glm-4.7",
+    default_fallback_model: "glm-4.6",
+    model_role_mappings: {
+      sonnet: { model: "glm-4.7" }, // 与 model 重复 → 去重
+      opus: { model: "glm-4.5-air" },
+      haiku: { model: "" }, // 空串 → 过滤
+      fable: { display: "无模型角色" }, // 缺 model 键 → 过滤
+    },
+  };
+
+  it("选中供应商 → 模型子下拉出现，候选 = 三来源去重保序 + 首项「默认」", async () => {
+    mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
+    renderBar({ llmProviderId: "prov-glm" });
+    const select = (await screen.findByRole("combobox", {
+      name: "配置-模型",
+    })) as HTMLSelectElement;
+    const values = Array.from(select.options).map((o) => o.value);
+    // 首项固定「默认（跟随供应商配置）」value=""；随后 model → default_fallback
+    // → role_mappings 按序去重（glm-4.7 重复只留一次；空串/缺键已过滤）。
+    expect(values).toEqual(["", "glm-4.7", "glm-4.6", "glm-4.5-air"]);
+    expect(select.options[0]?.textContent).toBe("默认（跟随供应商配置）");
+    // 快照无 model → 当前值即「默认」首项
+    expect(select.value).toBe("");
+  });
+
+  it("选模型 → injectSession 同请求带 llm_provider_id + model", async () => {
+    mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
+    renderBar({ llmProviderId: "prov-glm" });
+    const select = (await screen.findByRole("combobox", {
+      name: "配置-模型",
+    })) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "glm-4.5-air" } });
+    await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
+    expect(mocks.injectSession).toHaveBeenCalledWith("sess-1", "", {
+      llm_provider_id: "prov-glm",
+      model: "glm-4.5-air",
+    });
+  });
+
+  it("切回「默认」→ model 空串下发（当前值来自 config_snapshot.model）", async () => {
+    mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
+    renderBar({
+      llmProviderId: "prov-glm",
+      configSnapshot: {
+        ...BASE_PROPS.configSnapshot,
+        provider_name: "GLM 平台",
+        model: "glm-4.6",
+      },
+    });
+    const select = (await screen.findByRole("combobox", {
+      name: "配置-模型",
+    })) as HTMLSelectElement;
+    // 快照模型直显为当前选中项
+    expect(select.value).toBe("glm-4.6");
+    fireEvent.change(select, { target: { value: SWITCH_MODEL_DEFAULT_VALUE } });
+    await waitFor(() => expect(mocks.injectSession).toHaveBeenCalledTimes(1));
+    const call = mocks.injectSession.mock.calls.at(0);
+    expect(call?.[2]?.llm_provider_id).toBe("prov-glm");
+    expect(call?.[2]?.model).toBe("");
+  });
+
+  it("providerLocked（Codex）/「不指定」两态 → 模型子下拉不渲染", async () => {
+    // 「不指定（本机默认）」：无具体供应商 → 隐藏
+    renderBar({ llmProviderId: null });
+    expect(
+      screen.queryByRole("combobox", { name: "配置-模型" }),
+    ).not.toBeInTheDocument();
+    cleanup();
+    // Codex 锁定：供应商+模型整块锁定（D-010），子下拉同锁不渲染
+    mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
+    renderBar({
+      llmProviderId: "prov-glm",
+      engine: "codex",
+      configSnapshot: {
+        machine_name: "machine-1",
+        agent_name: "Codex",
+        engine: "codex",
+      },
+    });
+    expect(
+      screen.queryByRole("combobox", { name: "配置-模型" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("provisional：选模型不 inject 只暂存（专用回调收值）；切供应商级联重置暂存", async () => {
+    mocks.listProviders.mockResolvedValue([GLM_PROVIDER] as never);
+    const onProvisionalSwitch = vi.fn();
+    const onProvisionalModelSwitch = vi.fn();
+    renderBar({
+      provisional: true,
+      llmProviderId: "prov-glm",
+      configSnapshot: null,
+      onProvisionalSwitch,
+      onProvisionalModelSwitch,
+    });
+    const select = (await screen.findByRole("combobox", {
+      name: "配置-模型",
+    })) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: "glm-4.6" } });
+    // 暂存不走 inject（无会话）；模型值走专用回调，绝不混进 onProvisionalSwitch
+    expect(mocks.injectSession).not.toHaveBeenCalled();
+    expect(onProvisionalModelSwitch).toHaveBeenCalledWith("glm-4.6");
+    expect(onProvisionalSwitch).not.toHaveBeenCalled();
+    expect(select.value).toBe("glm-4.6");
+
+    // 切回「默认」→ 暂存重置回空串
+    fireEvent.change(select, { target: { value: "" } });
+    expect(onProvisionalModelSwitch).toHaveBeenLastCalledWith("");
+    expect(select.value).toBe("");
   });
 });
 
@@ -465,59 +463,10 @@ describe("SessionConfigBar 切换档案", () => {
   });
 });
 
-// ── 5.5 task-10：共享机器徽标 + 共享智能体档案标识（2026-08-28-daemon-agent-share / FR-05 / D-004@v2） ──
+// ── 5.5 task-10：共享智能体档案标识（2026-08-28-daemon-agent-share / FR-05 / D-004@v2；
+//        机器共享徽标用例随 task-09 机器块移除而退役） ──
 
 describe("SessionConfigBar 共享标识（task-10 / D-004@v2 仅展示）", () => {
-  /** 共享机器候选条目（hook machineCandidates 融合形态：sharedMeta + 净名 hostname）。 */
-  function sharedMachineCandidate() {
-    return {
-      ...makeMachine({ id: "m-shared", hostname: "lender-mac", status: "online" }),
-      display_alias: null,
-      runtimes: [],
-      runtime_count: 0,
-      online_runtime_count: 0,
-      sharedMeta: { lenderDisplayName: "张三", sourceWorkspaceId: null },
-    };
-  }
-
-  it("机器下拉：共享机器项带「共享 · 共享人」Tag + 净名展示 + 「共享机器」标注；自有机器不受影响", () => {
-    mocks.machinesHook.mockReturnValue({
-      items: defaultMachines(),
-      machineCandidates: [...defaultMachines(), sharedMachineCandidate()],
-      total: 3,
-      sessions: [],
-      isLoading: false,
-      isFetching: false,
-      isError: false,
-      error: null,
-      refetch: vi.fn(),
-    });
-    renderBar();
-    openCtrl("配置-机器");
-    const dd = screen.getByTestId("config-dd-machine");
-    expect(dd).toBeInTheDocument();
-    // 共享条目：净名（hostname，无「共享」后缀）+ Tag 含共享人与「共享」字样。
-    expect(screen.getByText("lender-mac")).toBeInTheDocument();
-    const tag = screen.getByText("共享 · 张三");
-    expect(tag).toBeInTheDocument();
-    expect(screen.getByText("共享机器")).toBeInTheDocument();
-    // 自有机器条目不受影响：仍有「跨机器 · 二期」标注（无共享 Tag 干扰判别）。
-    expect(screen.getByText("跨机器 · 二期")).toBeInTheDocument();
-    // 共享 Tag 全场仅一枚（仅共享条目携带）。
-    expect(screen.getAllByText("共享 · 张三")).toHaveLength(1);
-  });
-
-  it("hook 未透传 machineCandidates（旧调用点形态）→ 回退 items 零破坏", () => {
-    // beforeEach 的默认 mock 即无 machineCandidates 字段——既有断言全绿即回退正常。
-    renderBar();
-    openCtrl("配置-机器");
-    const dd = screen.getByTestId("config-dd-machine");
-    expect(dd).toBeInTheDocument();
-    // 下拉内自有机器照常列出，无任何共享标识。
-    expect(within(dd).getByText("machine-1")).toBeInTheDocument();
-    expect(within(dd).queryByText(/共享/)).toBeNull();
-  });
-
   it("档案下拉：active 共享智能体档案带「共享」标识，普通档案无标识", async () => {
     mocks.profilesHook.mockReturnValue({
       profiles: [

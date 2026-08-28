@@ -8,65 +8,66 @@
  *   - design.md §2 FR-05/FR-07、§5 Wave3 SessionConfigBar 段、D-004@v2 / D-007@v1 /
  *     D-008@v1、§7.4（switch config：inject 带新配置+prompt，session 维持 active）
  *   - prototype-sessions-portal.html renderSessionPanel / openSwitchDD（样式 B 视觉
- *     与交互语义：四控件行 + 上弹下拉 + 🔒 解锁提示）
+ *     与交互语义：配置控件行 + 上弹下拉 + 🔒 解锁提示）
  *   - FRONTEND_PAGE_STYLE.md（antd Button/Input + tailwind 语义 token，不硬编码 hex）
  *
  * 行为（FR-05 / D-004@v2）：
- *   - 四控件（机器/智能体/供应商/档案）展示会话当前配置（props 传入
+ *   - 两控件（供应商/档案）展示会话当前配置（props 传入
  *     agent_profile_id / llm_provider_id / config_snapshot）。
  *   - 可切：档案、供应商——idle 点开下拉点选即切换（ql-20260817-009：去掉确认
  *     行/输入提示消息步骤；prompt 用默认文案或 props switchPrompt 覆盖）→
  *     injectSession(sessionId, prompt, 带新配置)；供应商含「不指定（本机默认）」
  *     选项 → llm_provider_id: "" 切回本机默认（task-16 契约）。
- *   - 纯展示：机器/智能体——下拉仅展示可选项并整体置灰，跨机器标「二期」、跨引擎标
- *     「需开新会话」（每机每引擎唯一 runtime，无同机同引擎切换目标，D-004@v2）。
  *   - running 全置灰 + 「🔒 本轮完成后解锁切换」；ended/failed 同样不可切（无锁提示）。
  *   - 切换 toast：下一轮生效，历史消息保留当时配置（who 行按轮快照渲染，D-008，
  *     渲染归 turn-timeline.tsx whoLine，本组件不管消息流）。
  *
- * 数据源与 task-12 同：useDaemonMachines（机器/智能体展示）/ listProviders /
- * useMineAgentProfiles。页面组装归 task-10，本组件不感知 SSE/路由。
+ * 数据源：listProviders / useMineAgentProfiles。页面组装归 task-10，本组件不感知
+ * SSE/路由。
  *
- * task-10（2026-08-28-daemon-agent-share / FR-05 / D-004@v2）：机器下拉候选 =
- * 自有 + 共享给我的（hook machineCandidates 融合，共享条目「共享」Tag + 共享人
- * 名，仅展示不改行为）；档案下拉共享智能体带「共享」标识（对照
- * useActiveSharedAgents 生效列表）。
- * task-13（契约修复）：共享条目经 machineCandidates 携带真实 runtimes——智能体
- * 下拉共享机器的引擎可选可显；useActiveSharedAgents 取数收敛到 lib/daemon.ts
- * 的 fetchSharedAgentsActive（废 apiFetch 直调，行为等价）。
+ * task-10（2026-08-28-daemon-agent-share / FR-05 / D-004@v2）：档案下拉共享智能体
+ * 带「共享」标识（对照 useActiveSharedAgents 生效列表）。
+ * task-13（契约修复）：useActiveSharedAgents 取数收敛到 lib/daemon.ts 的
+ * fetchSharedAgentsActive（废 apiFetch 直调，行为等价）。
+ * task-09（2026-08-29-usage-by-provider-model / FR-03-1 / D-004@v1）：配置条
+ * 四块→两块——移除机器/智能体纯展示块（换机器/换引擎本就需开新会话，块内无任何
+ * 可执行目标，信息量低），useDaemonMachines 依赖随之移除；供应商/档案切换、
+ * provisional 暂存、Codex 锁定（D-010）逻辑不变。
+ * task-10（同变更 / FR-03-2/3/5 / D-002@v1）：供应商 Ctrl 内嵌模型子下拉
+ * （级联，原型 .cascade 两 select 并排紧凑小号）——候选 = provider.model /
+ * default_fallback_model / model_role_mappings 各角色 model 去重保序 + 首项
+ * 「默认（跟随供应商配置）」；切换 injectSession 同请求带 llm_provider_id +
+ * model（切供应商级联重置模型）；provisional 模型暂存走专用回调
+ * onProvisionalModelSwitch（session-panel 已接 preModelId 暂存随首句携带）；Codex 锁定/「不指定」
+ * 两态隐藏子下拉。候选不做上游 /v1/models 实时拉取（D-002）。
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { App, Tag } from "antd";
-import {
-  Bot,
-  BookUser,
-  ChevronDown,
-  Cloud,
-  Command,
-  Lock,
-  Monitor,
-  User,
-  Zap,
-} from "lucide-react";
+import { Tag } from "antd";
+import { ChevronDown, Cloud, Lock, User } from "lucide-react";
 
 import { ApiError } from "@/lib/api";
 import type { components } from "@/lib/api-types";
 import { useMineAgentProfiles } from "@/lib/agent-profiles";
 import { listProviders } from "@/lib/api/llm-providers";
 import { useNotify } from "@/lib/errors";
-import { useDaemonMachines, type MachineCandidate } from "@/lib/use-daemon-machines";
-import { fetchSharedAgentsActive, injectSession, PROVIDER_META } from "@/lib/daemon";
+import { fetchSharedAgentsActive, injectSession } from "@/lib/daemon";
 import type {
   AgentSessionConfigSnapshot,
-  DaemonMachineRead,
-  DaemonRuntimeRead,
+  SessionInjectOptions,
   SessionInjectResponse,
 } from "@/lib/daemon";
 import { cn } from "@/lib/utils";
 
 /** 供应商下拉「不指定（本机默认）」项的值（→ injectSession llm_provider_id: ""）。 */
 export const SWITCH_NO_PROVIDER_VALUE = "";
+
+/**
+ * 模型子下拉「默认（跟随供应商配置）」项的值（task-10 / FR-03-2，→
+ * injectSession model: ""——与 llm_provider_id 空串语义同构：空串=切回默认，
+ * undefined=不切换）。
+ */
+export const SWITCH_MODEL_DEFAULT_VALUE = "";
 
 /* ────────────────────── task-10：平台共享智能体 active 数据 ────────────────────── */
 
@@ -98,22 +99,19 @@ export function useActiveSharedAgents() {
   };
 }
 
-/** 四控件种类（task-14 provides 契约：machineCtrl/agentCtrl/providerCtrl/profileCtrl）。 */
-export type SessionConfigCtrlKind =
-  | "machine"
-  | "agent"
-  | "provider"
-  | "profile";
+/** 配置控件种类（task-09 起两控件：providerCtrl/profileCtrl）。 */
+export type SessionConfigCtrlKind = "provider" | "profile";
 
-/** 可切换字段（inject options 的键）。 */
+/** 可切换字段（inject options 的键；task-10 增 model——会话级模型覆盖）。 */
 export type SessionConfigSwitchField =
   | "agent_profile_id"
-  | "llm_provider_id";
+  | "llm_provider_id"
+  | "model";
 
 /** 切换目标（选中下拉项直接执行，ql-20260817-009 去掉确认行）。 */
 interface PendingSwitch {
   field: SessionConfigSwitchField;
-  /** 目标值（供应商「不指定」为空串 ""）。 */
+  /** 目标值（供应商/模型「默认」为空串 ""）。 */
   value: string;
   /** 目标展示名（toast / 默认提示语用）。 */
   label: string;
@@ -130,10 +128,8 @@ export interface SessionConfigBarProps {
   agentProfileId: string | null;
   /** 会话当前供应商 id（null=本机默认）。 */
   llmProviderId: string | null;
-  /** 会话当前生效配置摘要（agent_sessions.config_snapshot，机器/智能体展示名来源）。 */
+  /** 会话当前生效配置摘要（agent_sessions.config_snapshot，engine 与档案/供应商名兜底来源）。 */
   configSnapshot: AgentSessionConfigSnapshot | null;
-  /** 会话 runtime id（定位当前机器，机器/智能体展示下拉用）。 */
-  runtimeId?: string | null;
   /** 引擎（claude/codex；缺省回退 config_snapshot.engine）。engine≠claude 锁供应商（D-010）。 */
   engine?: string | null;
   /** 切换轮提示消息默认值（不传用组件内置按目标名生成的文案）。 */
@@ -147,42 +143,42 @@ export interface SessionConfigBarProps {
   /**
    * ql-20260823-008：预会话（provisional）模式——供应商/档案点选**暂存**而非
    * injectSession（会话尚未创建），父层经 onProvisionalSwitch 收值并入首句
-   * createSession（llm_provider_id/agent_profile_id）；机器/智能体仍只读展示
-   * （D-104 锁定语义与真会话一致）。running/ended 传 false 即可。
+   * createSession（llm_provider_id/agent_profile_id）。running/ended 传 false 即可。
    */
   provisional?: boolean;
   onProvisionalSwitch?: (
-    field: SessionConfigSwitchField,
+    field: Exclude<SessionConfigSwitchField, "model">,
     value: string,
   ) => void;
+  /**
+   * task-10（FR-03-2）：provisional 模式模型暂存专用回调——模型值不经
+   * onProvisionalSwitch 发（其消费端 session-panel 按 llm_provider_id/else
+   * 二分收值，混发 "model" 会误写档案暂存）；切供应商级联重置时同样发空串。
+   * 父层接线（并入首句 createSession）归后续任务，未传时组件内仍暂存显示。
+   */
+  onProvisionalModelSwitch?: (model: string) => void;
 }
 
 /* ────────────────────── 纯辅助（组件外便于单测推理） ────────────────────── */
 
-/** 引擎图标（线性统一，2026-08-24 emoji 退役）：claude=Zap / codex=Command / 其它=Bot。 */
-function engineIcon(provider: string | null | undefined): React.ReactNode {
-  const cls = "h-3.5 w-3.5";
-  if (provider === "claude") return <Zap aria-hidden className={cls} />;
-  if (provider === "codex") return <Command aria-hidden className={cls} />;
-  return <Bot aria-hidden className={cls} />;
-}
-
-/** 机器展示名（别名优先，FRONTEND_PAGE_STYLE 空值统一 —）。 */
-function machineLabel(m: DaemonMachineRead): string {
-  return m.display_alias?.trim() || m.hostname;
-}
-
-/** 智能体展示名——引擎名优先（ql-20260815-011：name 默认=主机名不得作主标签）。 */
-function runtimeLabel(r: DaemonRuntimeRead): string {
-  const engine = PROVIDER_META[r.provider ?? ""]?.label ?? r.provider ?? r.id;
-  const alias = r.display_alias?.trim();
-  return alias ? `${alias} · ${engine}` : engine;
+/** 切换目标中文名（toast / 默认提示语用；task-10 增「模型」）。 */
+function switchFieldWhat(field: SessionConfigSwitchField): string {
+  return field === "llm_provider_id"
+    ? "供应商"
+    : field === "model"
+      ? "模型"
+      : "档案";
 }
 
 /** 切换轮提示消息默认文案（按字段与目标名生成）。 */
 export function buildDefaultSwitchPrompt(p: PendingSwitch): string {
-  const what = p.field === "llm_provider_id" ? "供应商" : "智能体档案";
-  const name = p.value === SWITCH_NO_PROVIDER_VALUE ? "本机默认" : p.label;
+  const what = p.field === "llm_provider_id" ? "供应商" : switchFieldWhat(p.field);
+  const name =
+    p.field === "llm_provider_id" && p.value === SWITCH_NO_PROVIDER_VALUE
+      ? "本机默认"
+      : p.field === "model" && p.value === SWITCH_MODEL_DEFAULT_VALUE
+        ? "默认"
+        : p.label;
   return `已切换${what}为「${name}」，请继续。`;
 }
 
@@ -195,21 +191,13 @@ export function SessionConfigBar({
   agentProfileId,
   llmProviderId,
   configSnapshot,
-  runtimeId,
   engine,
   switchPrompt,
   onSwitched,
   provisional,
   onProvisionalSwitch,
+  onProvisionalModelSwitch,
 }: SessionConfigBarProps) {
-  // 数据源与 task-12 同（机器/智能体展示下拉 + 供应商/档案切换选项）。
-  // 2026-08-25：params 统一 { limit: 100 }——与 sessions-portal / session-list-panel
-  // 同 queryKey（["daemonMachines","list",{limit:100}]）共享缓存与 15s 轮询，不再
-  // 分叉成 {} 与 {limit:100} 两个键各自轮询双请求。
-  // task-10：机器下拉候选 = 自有 + 共享给我的（machineCandidates 融合；hook
-  // 未透传该字段的旧调用点/mock 回退 items，零破坏）。
-  const { items: machines, machineCandidates } = useDaemonMachines({ limit: 100 });
-  const machineOptions: DaemonMachineRead[] = machineCandidates ?? machines;
   // task-10：档案下拉共享智能体标识（对照 active 生效列表）。
   const { activeSharedAgents } = useActiveSharedAgents();
   const sharedProfileIds = useMemo(
@@ -218,9 +206,6 @@ export function SessionConfigBar({
   );
   const { profiles } = useMineAgentProfiles();
   const notify = useNotify();
-  // useNotify 无 info 级方法,引擎切换引导提示经 App 上下文取 message.info
-  // (对齐 m/ppm/problem-list 先例,非 antd 裸 import,FR-04 不破)。
-  const { message } = App.useApp();
   const providersQ = useQuery({
     queryKey: ["llmProviders", "sessions-config-bar"],
     queryFn: listProviders,
@@ -254,23 +239,65 @@ export function SessionConfigBar({
 
   const effectiveEngine = engine ?? configSnapshot?.engine ?? null;
   const canSwitch = !running && !ended;
-  // D-010：Codex 引擎无会话级供应商 → 控件锁定（下拉不可开）。
+  // D-010：Codex 引擎无会话级供应商 → 控件锁定（下拉不可开；task-10 起模型
+  // 子下拉同锁——直接不渲染）。
   const providerLocked = effectiveEngine != null && effectiveEngine !== "claude";
 
+  // ── task-10（FR-03-2/5 / D-002@v1）：供应商+模型级联 ──────────────────────
+
+  /** 当前选中供应商行（「不指定」/列表未含该 id → null，模型子下拉随之隐藏）。 */
+  const selectedProvider = useMemo(
+    () => providers.find((p) => p.id === llmProviderId) ?? null,
+    [providers, llmProviderId],
+  );
+
+  /**
+   * 模型候选 = provider.model → default_fallback_model → model_role_mappings
+   * 各角色 model **去重保序**（空串/缺键过滤；不做上游 /v1/models 实时拉取，
+   * D-002）。首项「默认（跟随供应商配置）」在渲染处固定，不进候选集。
+   */
+  const modelCandidates = useMemo(() => {
+    if (!selectedProvider) return [] as string[];
+    const raw: (string | null | undefined)[] = [
+      selectedProvider.model,
+      selectedProvider.default_fallback_model,
+      ...Object.values(selectedProvider.model_role_mappings ?? {}).map(
+        (m) => m?.model,
+      ),
+    ];
+    const seen = new Set<string>();
+    const models: string[] = [];
+    for (const m of raw) {
+      if (!m || seen.has(m)) continue;
+      seen.add(m);
+      models.push(m);
+    }
+    return models;
+  }, [selectedProvider]);
+
+  /**
+   * provisional 模式模型暂存（组件内显示用；父层经 onProvisionalModelSwitch
+   * 收值，session-panel 已接 preModelId）。非 provisional 当前值 = 会话快照 config_snapshot.model
+   * （快照直显免二次解析，Grill C-12；空=「默认」）。
+   */
+  const [provisionalModel, setProvisionalModel] = useState("");
+  const currentModel = provisional
+    ? provisionalModel
+    : (configSnapshot?.model ?? "");
+
+  /**
+   * 快照模型可能已不在候选集（供应商高级设置后续改过）→ 追加到尾部兜底，
+   * 保证 select 有对应 option 可显示、不丢当前值。
+   */
+  const modelOptions = useMemo(
+    () =>
+      currentModel && !modelCandidates.includes(currentModel)
+        ? [...modelCandidates, currentModel]
+        : modelCandidates,
+    [modelCandidates, currentModel],
+  );
+
   // 当前值展示（快照直显免二次解析，Grill C-12；id 兜底防列表缺行）。
-  // ql-20260823-008：快照缺失（预会话）时从 runtimeId→机器列表解析（currentMachine
-  // 在下方 useMemo，先声明机器名函数不依赖它——直接 machines 查找）。
-  const machineHit = runtimeId
-    ? (machineOptions.find((m) => m.runtimes?.some((r) => r.id === runtimeId)) ?? null)
-    : null;
-  const machineNameText =
-    configSnapshot?.machine_name ?? (machineHit ? machineLabel(machineHit) : "—");
-  // ql-20260815-011：智能体=引擎维度（FR-01）——引擎名优先（后端快照
-  // agent_name 存的 runtime.name 默认=主机名，仅作引擎缺失时的兜底）。
-  const agentName =
-    PROVIDER_META[effectiveEngine ?? ""]?.label ??
-    configSnapshot?.agent_name ??
-    "—";
   const profileLabel = agentProfileId
     ? profiles.find((p) => p.id === agentProfileId)?.name ??
       configSnapshot?.profile_name ??
@@ -282,29 +309,33 @@ export function SessionConfigBar({
       llmProviderId
     : "本机默认";
 
-  // 当前会话所属机器（runtime_id 钉定，快照 machine_name 兜底；候选含共享机器）。
-  const currentMachine = useMemo(
-    () =>
-      machineOptions.find((m) => m.runtimes?.some((r) => r.id === runtimeId)) ??
-      machineOptions.find((m) => machineLabel(m) === configSnapshot?.machine_name) ??
-      null,
-    [machineOptions, runtimeId, configSnapshot?.machine_name],
-  );
-
   /** ql-20260817-010：点选即**静默**切换——prompt 发空串（后端静默切换契约：
    * 有切换字段允许空 prompt；daemon 收到空 prompt 只 reload 配置不喂消息，
    * 切换轮无用户消息/模型回应）。switchPrompt 传入时仍作为切换轮消息发出。 */
   const executeSwitch = async (p: PendingSwitch) => {
     if (submitting) return;
+    const what = switchFieldWhat(p.field);
+    const name =
+      p.field === "llm_provider_id" && p.value === SWITCH_NO_PROVIDER_VALUE
+        ? "本机默认"
+        : p.label;
     // ql-20260823-008：预会话暂存——不 inject（无会话），值随首句 createSession 生效。
     if (provisional) {
       setOpenKind(null);
-      const what = p.field === "llm_provider_id" ? "供应商" : "档案";
-      const name =
-        p.field === "llm_provider_id" && p.value === SWITCH_NO_PROVIDER_VALUE
-          ? "本机默认"
-          : p.label;
       notify.success(`已选择${what} → ${name}（第一句话发送创建会话时生效）`);
+      // task-10：模型暂存走专用回调（onProvisionalSwitch 消费端按
+      // llm_provider_id/else 二分收值，混发 "model" 会误写档案暂存）。
+      if (p.field === "model") {
+        setProvisionalModel(p.value);
+        onProvisionalModelSwitch?.(p.value);
+        return;
+      }
+      // task-10：切供应商级联重置模型暂存（候选随供应商变，旧模型对新供应商
+      // 无意义；「不指定」下 model 非空更会被后端 422——task-11 守卫）。
+      if (p.field === "llm_provider_id") {
+        setProvisionalModel(SWITCH_MODEL_DEFAULT_VALUE);
+        onProvisionalModelSwitch?.(SWITCH_MODEL_DEFAULT_VALUE);
+      }
       onProvisionalSwitch?.(p.field, p.value);
       return;
     }
@@ -312,12 +343,19 @@ export function SessionConfigBar({
     setSubmitting(true);
     setOpenKind(null);
     try {
-      const resp = await injectSession(sessionId, prompt, { [p.field]: p.value });
-      const what = p.field === "llm_provider_id" ? "供应商" : "档案";
-      const name =
-        p.field === "llm_provider_id" && p.value === SWITCH_NO_PROVIDER_VALUE
-          ? "本机默认"
-          : p.label;
+      // task-10（FR-03-3）：供应商与模型同请求——切供应商级联重置 model=""
+      // （语义见上）；切模型补带当前 llm_provider_id（model 非空必须挂供应商，
+      // 后端 422 守卫）。档案切换不带伴生键，payload 零变化。
+      const companion: Partial<SessionInjectOptions> =
+        p.field === "llm_provider_id"
+          ? { model: SWITCH_MODEL_DEFAULT_VALUE }
+          : p.field === "model"
+            ? { llm_provider_id: llmProviderId ?? SWITCH_NO_PROVIDER_VALUE }
+            : {};
+      const resp = await injectSession(sessionId, prompt, {
+        ...companion,
+        [p.field]: p.value,
+      });
       notify.success(`已切换${what} → ${name}（下一轮生效，历史消息保留当时配置）`);
       onSwitched?.(resp, p.field, p.value);
     } catch (err) {
@@ -328,8 +366,6 @@ export function SessionConfigBar({
   };
 
   const ctrlDisabled: Record<SessionConfigCtrlKind, boolean> = {
-    machine: !canSwitch,
-    agent: !canSwitch,
     provider: !canSwitch || providerLocked,
     profile: !canSwitch,
   };
@@ -378,147 +414,87 @@ export function SessionConfigBar({
   );
 
   return (
-    <div ref={barRef} className="relative mt-1.5" aria-label="会话配置控件条">
+      <div ref={barRef} className="relative mt-1.5" aria-label="会话配置控件条">
       <div className="flex flex-wrap items-center gap-0.5">
-        {ctrlButton(
-          "machine",
-          <Monitor aria-hidden className="h-3.5 w-3.5" />,
-          machineNameText,
-          "守护进程（换机器需开新会话）",
-          <ConfigDropdown
-            testId="config-dd-machine"
-            title="守护进程 · 换机器需开新会话（跨机器二期）"
-          >
-            {machineOptions.length === 0 ? (
-              <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                暂无守护进程
-              </p>
-            ) : (
-              machineOptions.map((m) => {
-                const isCurrent = m.id === currentMachine?.id;
-                const online = m.status === "online";
-                // task-10：共享条目净名（hostname）+「共享」Tag（共享人名随 Tag）；
-                // 自有机器沿用别名优先展示名。
-                const shared = (m as MachineCandidate).sharedMeta;
-                return (
-                  <DisplayItem
-                    key={m.id}
-                    icon={<StatusDot online={online} />}
-                    label={shared ? m.hostname : machineLabel(m)}
-                    tag={
-                      shared ? <SharedTag lender={shared.lenderDisplayName} /> : undefined
-                    }
-                    current={isCurrent}
-                    sub={
-                      isCurrent
-                        ? undefined
-                        : online
-                          ? shared
-                            ? "共享机器"
-                            : "跨机器 · 二期"
-                          : "离线"
-                    }
-                  />
-                );
-              })
-            )}
-          </ConfigDropdown>,
-        )}
-        {ctrlButton(
-          "agent",
-          <Bot aria-hidden className="h-3.5 w-3.5" />,
-          agentName,
-          "智能体（换引擎需开新会话）",
-          <ConfigDropdown
-            testId="config-dd-agent"
-            title="智能体 · 当前机器引擎（换引擎需开新会话）"
-          >
-            {/* ql-20260817-006：只列当前机器的引擎（不列其它机器）——当前=✓；
-                其它在线引擎可点（引擎不支持会话内热切 → 点击引导开新会话）；
-                离线引擎置灰标注。 */}
-            {(currentMachine?.runtimes ?? []).map((r) => {
-              const isCurrent = r.id === runtimeId;
-              const online = r.status === "online";
-              return (
-                <DisplayItem
-                  key={r.id}
-                  icon={<span aria-hidden>{engineIcon(r.provider)}</span>}
-                  label={runtimeLabel(r)}
-                  current={isCurrent}
-                  sub={
-                    isCurrent
-                      ? undefined
-                      : online
-                        ? "换引擎需开新会话"
-                        : "离线"
-                  }
-                  disabled={!online}
-                  onClick={
-                    isCurrent || !online
-                      ? undefined
-                      : () => {
-                          setOpenKind(null);
-                          message.info(
-                            `当前会话不支持切换引擎，请在「新建会话」中选择 ${runtimeLabel(r)}`,
-                          );
-                        }
-                  }
-                />
-              );
-            })}
-            {(currentMachine?.runtimes ?? []).length === 0 && (
-              <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                未找到当前智能体所属机器
-              </p>
-            )}
-          </ConfigDropdown>,
-        )}
-        {ctrlButton(
-          "provider",
-          <Cloud aria-hidden className="h-3.5 w-3.5" />,
-          providerLabel,
-          providerLocked
-            ? "Codex 引擎暂不支持会话级供应商"
-            : "供应商（不选=本机默认配置）",
-          <ConfigDropdown
-            testId="config-dd-provider"
-            title="切换供应商 · 只影响本会话"
-          >
-            <SwitchItem
-              icon={<Cloud aria-hidden className="h-3 w-3" />}
-              label="不指定（本机默认）"
-              current={llmProviderId == null}
-              onClick={() =>
-                executeSwitch({
-                  field: "llm_provider_id",
-                  value: SWITCH_NO_PROVIDER_VALUE,
-                  label: "不指定（本机默认）",
-                })
-              }
-            />
-            {providers.map((p) => (
+        {/* task-10（FR-03-2 / 原型 .cascade）：供应商+模型级联——两「select」并排
+            在供应商 Ctrl 内（供应商=既有按钮+上弹下拉，模型=紧凑原生 select）。
+            模型子下拉仅选中具体供应商且非 Codex 锁定时渲染：「不指定（本机默认）」
+            / providerLocked 两态隐藏；running/ended 同供应商控件置灰。 */}
+        <span className="inline-flex items-center gap-0.5">
+          {ctrlButton(
+            "provider",
+            <Cloud aria-hidden className="h-3.5 w-3.5" />,
+            providerLabel,
+            providerLocked
+              ? "Codex 引擎暂不支持会话级供应商"
+              : "供应商（不选=本机默认配置）",
+            <ConfigDropdown
+              testId="config-dd-provider"
+              title="切换供应商 · 只影响本会话"
+            >
               <SwitchItem
-                key={p.id}
                 icon={<Cloud aria-hidden className="h-3 w-3" />}
-                label={p.name}
-                sub={p.model ?? undefined}
-                current={p.id === llmProviderId}
+                label="不指定（本机默认）"
+                current={llmProviderId == null}
                 onClick={() =>
                   executeSwitch({
                     field: "llm_provider_id",
-                    value: p.id,
-                    label: p.name,
+                    value: SWITCH_NO_PROVIDER_VALUE,
+                    label: "不指定（本机默认）",
                   })
                 }
               />
-            ))}
-            {providers.length === 0 && (
-              <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                暂无自定义供应商
-              </p>
-            )}
-          </ConfigDropdown>,
-        )}
+              {providers.map((p) => (
+                <SwitchItem
+                  key={p.id}
+                  icon={<Cloud aria-hidden className="h-3 w-3" />}
+                  label={p.name}
+                  sub={p.model ?? undefined}
+                  current={p.id === llmProviderId}
+                  onClick={() =>
+                    executeSwitch({
+                      field: "llm_provider_id",
+                      value: p.id,
+                      label: p.name,
+                    })
+                  }
+                />
+              ))}
+              {providers.length === 0 && (
+                <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                  暂无自定义供应商
+                </p>
+              )}
+            </ConfigDropdown>,
+          )}
+          {selectedProvider && !providerLocked && (
+            <select
+              aria-label="配置-模型"
+              data-testid="config-model-select"
+              value={currentModel}
+              disabled={!canSwitch}
+              title="模型（默认=跟随供应商配置）"
+              onChange={(e) => {
+                const v = e.target.value;
+                executeSwitch({ field: "model", value: v, label: v || "默认" });
+              }}
+              className={cn(
+                "h-6 max-w-[150px] cursor-pointer truncate rounded-md border border-border bg-card px-1 text-xs transition-colors hover:bg-muted",
+                !canSwitch &&
+                  "cursor-not-allowed text-muted-foreground/60 hover:bg-card",
+              )}
+            >
+              <option value={SWITCH_MODEL_DEFAULT_VALUE}>
+                默认（跟随供应商配置）
+              </option>
+              {modelOptions.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          )}
+        </span>
         {ctrlButton(
           "profile",
           <User aria-hidden className="h-3.5 w-3.5" />,
@@ -554,7 +530,7 @@ export function SessionConfigBar({
                 // task-10：共享智能体档案带「共享」标识（对照 active 生效列表）。
                 tag={
                   sharedProfileIds.has(p.id) ? (
-                    <SharedTag lender={null} title="平台共享智能体——读平台源码不受限，写操作限制在共享输出目录" />
+                    <SharedTag title="平台共享智能体——读平台源码不受限，写操作限制在共享输出目录" />
                   ) : undefined
                 }
                 current={p.id === agentProfileId}
@@ -589,13 +565,7 @@ export function SessionConfigBar({
 /* ────────────────────── 下拉浮层与选项（原型 .dd / .dd-item） ────────────────────── */
 
 function labelOfCtrl(kind: SessionConfigCtrlKind): string {
-  return kind === "machine"
-    ? "机器"
-    : kind === "agent"
-      ? "智能体"
-      : kind === "provider"
-        ? "供应商"
-        : "档案";
+  return kind === "provider" ? "供应商" : "档案";
 }
 
 function ConfigDropdown({
@@ -621,77 +591,18 @@ function ConfigDropdown({
 }
 
 /**
- * 共享徽标（task-10 / FR-05 / D-004@v2）：机器/档案候选中共享条目的「共享」Tag。
- * 品牌色阶（FRONTEND_PAGE_STYLE §0.5），样式对齐 pre-session-picker「默认」Tag
- * 先例；机器场景 lender 为共享人名，平台共享智能体场景传 null。
+ * 共享徽标（task-10 / FR-05 / D-004@v2）：档案候选中平台共享智能体条目的
+ * 「共享」Tag。品牌色阶（FRONTEND_PAGE_STYLE §0.5），样式对齐
+ * pre-session-picker「默认」Tag 先例（机器共享场景 lender 形态随机器块移除）。
  */
-function SharedTag({
-  lender,
-  title,
-}: {
-  lender: string | null;
-  title?: string;
-}) {
+function SharedTag({ title }: { title?: string }) {
   return (
     <Tag
       className="mr-0 shrink-0 rounded-full border-brand-300 bg-brand-100 text-brand-700"
-      title={title ?? (lender ? `来自 ${lender} 的共享` : "共享给我的")}
+      title={title ?? "共享给我的"}
     >
-      共享{lender ? ` · ${lender}` : ""}
+      共享
     </Tag>
-  );
-}
-
-/** 纯展示项（机器/智能体下拉，D-004@v2：无可选目标，整体置灰仅展示）。 */
-function DisplayItem({
-  icon,
-  label,
-  tag,
-  current,
-  sub,
-  disabled = true,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  /** task-10：共享条目徽标（紧跟 label 渲染）。 */
-  tag?: React.ReactNode;
-  current?: boolean;
-  sub?: string;
-  /** ql-20260817-006：默认展示态置灰；传 false + onClick 变可点（在线引擎引导开新会话）。 */
-  disabled?: boolean;
-  onClick?: () => void;
-}) {
-  const clickable = !disabled && onClick != null && !current;
-  return (
-    <div
-      role={clickable ? "button" : undefined}
-      tabIndex={clickable ? 0 : undefined}
-      aria-disabled={clickable ? undefined : "true"}
-      onClick={clickable ? onClick : undefined}
-      className={cn(
-        "flex items-center gap-2 rounded px-2 py-1.5 text-xs",
-        clickable && "cursor-pointer hover:bg-muted",
-        !clickable && "cursor-not-allowed",
-        current
-          ? "bg-primary/10 font-medium text-primary"
-          : "text-foreground/80",
-        disabled && !current && "opacity-60",
-      )}
-    >
-      <span aria-hidden className="shrink-0">
-        {icon}
-      </span>
-      <span className="min-w-0 break-words">{label}</span>
-      {tag}
-      {current ? (
-        <span className="ml-auto shrink-0 text-primary">✓ 当前</span>
-      ) : (
-        sub && (
-          <span className="ml-auto shrink-0 text-muted-foreground">{sub}</span>
-        )
-      )}
-    </div>
   );
 }
 
@@ -732,17 +643,5 @@ function SwitchItem({
         <span className="ml-auto shrink-0 text-muted-foreground">{sub}</span>
       )}
     </button>
-  );
-}
-
-function StatusDot({ online }: { online: boolean }) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "h-2 w-2 shrink-0 rounded-full",
-        online ? "bg-success" : "bg-muted-foreground/50",
-      )}
-    />
   );
 }

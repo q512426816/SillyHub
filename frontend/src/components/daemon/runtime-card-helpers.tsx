@@ -236,6 +236,60 @@ export function formatCache(item: RuntimeUsageItem | undefined): string {
   return sum > 0 ? formatTokens(sum) : "—";
 }
 
+// ===== 2026-08-29-usage-by-provider-model task-12 / FR-04-2：by_provider 分组明细辅助 =====
+
+/** 供应商×模型 分组明细行（类型源 RuntimeUsageItem.by_provider → api-types 生成版）。 */
+export type ProviderModelUsageRow = NonNullable<RuntimeUsageItem["by_provider"]>[number];
+
+/** 「未记录」兜底标识（后端 service 层对 provider NULL 的统一填充值，前端不再判空）。 */
+export const UNRECORDED_PROVIDER = "未记录";
+
+/**
+ * sortProviderUsage —— by_provider 明细行定序（FR-04-2）。
+ * 后端 _build_by_provider_sql 纯 GROUP BY 无 ORDER BY，行序不保证；前端定序让
+ * 同数据渲染稳定：供应商名分组聚拢（「未记录」兜底行恒排最后）→ 组内按模型名。
+ */
+export function sortProviderUsage(rows: ProviderModelUsageRow[]): ProviderModelUsageRow[] {
+  return [...rows].sort((a, b) => {
+    const aGhost = a.provider_name === UNRECORDED_PROVIDER ? 1 : 0;
+    const bGhost = b.provider_name === UNRECORDED_PROVIDER ? 1 : 0;
+    if (aGhost !== bGhost) return aGhost - bGhost;
+    return (
+      a.provider_name.localeCompare(b.provider_name, "zh-CN") ||
+      a.model.localeCompare(b.model, "zh-CN")
+    );
+  });
+}
+
+/**
+ * 调用次数汇总（FR-02-3）：summary 级无 requests 字段，由 by_provider 各行
+ * api_requests 求和（null 按 0）；无明细返回 null，调用方显示「—」。
+ */
+export function sumApiRequests(rows: ProviderModelUsageRow[] | undefined): number | null {
+  if (!rows || rows.length === 0) return null;
+  return rows.reduce((sum, row) => sum + (row.api_requests ?? 0), 0);
+}
+
+/**
+ * ProviderUsageTag —— by_provider 明细行的供应商标签（对齐原型 .tag / .tag.ghost）：
+ * 已知供应商 brand 阶强调；「未记录」灰阶 ghost（旧数据 / 旧版 daemon 未上报）。
+ */
+export function ProviderUsageTag({ name }: { name: string }) {
+  const ghost = name === UNRECORDED_PROVIDER;
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-semibold",
+        ghost
+          ? "border-slate-200 bg-slate-100 text-slate-400"
+          : "border-brand-200 bg-brand-50 text-brand-700",
+      )}
+    >
+      {name}
+    </span>
+  );
+}
+
 export function ProviderBadge({ provider }: { provider: string | null }) {
   const tone = getProviderTone(provider);
   // 对齐 prototype .pbadge：无 dot，仅 provider 名 + 精确色阶边框/底/字。

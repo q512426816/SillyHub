@@ -26,7 +26,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import col
@@ -34,7 +34,7 @@ from sqlmodel import col
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.core.redis import get_redis
-from app.modules.agent.model import AgentRun
+from app.modules.agent.model import AgentRun, AgentRunModelUsage
 from app.modules.daemon.lease.context import build_claim_payload
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 
@@ -439,6 +439,31 @@ class LeaseService:
                         agent_run.session_id = stats["session_id"]
                     if "exit_code" in stats:
                         agent_run.exit_code = stats["exit_code"]
+
+                    # task-04（2026-08-29-usage-by-provider-model / FR-01-2 / FR-01-4 /
+                    # D-001@v1，design §4.1）：batch stats.model / api_requests（daemon
+                    # task-runner 终态上报，§3.2）→ run.model 终态填充 +
+                    # agent_run_model_usage 单行明细 + run.llm_provider_id 仅空时回填
+                    # （R-08）。老 daemon stats 无新字段 → 不进明细分支，零变化（N-01）。
+                    _stats_model = stats.get("model")
+                    if _stats_model:
+                        # run.model 此前从不在终态写入（design §1.2），batch 取 daemon
+                        # 上报的 lease ProviderConfig.model（"unknown" 兜底在 daemon 侧）。
+                        agent_run.model = _stats_model
+                    # 明细落库 / provider 回填均 best-effort：失败只 warn 不阻塞 lease
+                    # 完成（design §4.1，与上下 failure_log / stage_callback 容错一致）。
+                    try:
+                        if _stats_model:
+                            await self._upsert_batch_model_usage(agent_run, _stats_model, stats)
+                        await self._fill_run_llm_provider_id(agent_run, lease)
+                    except Exception as exc:
+                        log.warning(
+                            "complete_lease_model_usage_failed",
+                            lease_id=str(lease_id),
+                            agent_run_id=str(agent_run.id),
+                            model=str(_stats_model),
+                            error=str(exc),
+                        )
 
                 # ql-20260706-009：兜底——run failed 时把 output_redacted 写一条
                 # stderr AgentRunLog + SSE 推送，让前端日志流可见失败原因（防 daemon
@@ -1128,3 +1153,69 @@ class LeaseService:
                 details={"lease_id": str(lease_id)},
             )
         return lease
+
+    async def _upsert_batch_model_usage(
+        self,
+        agent_run: AgentRun,
+        model: str,
+        stats: dict,
+    ) -> None:
+        """task-04（2026-08-29-usage-by-provider-model / design §4.1）：batch 单行明细幂等落库。
+
+        先 DELETE 该 run_id 全部明细再 INSERT 单行——batch 单模型，run 早期写入的
+        旧明细（如 interactive 路径 task-03 行）一并由终态权威值覆盖；事务内
+        delete+insert 等价 upsert，终态重放（retryTerminal / outbox 补发）安全
+        （design §9）。四维 COALESCE 0（半字段 / None 兼容，不依赖 stats 键存在）；
+        api_requests 缺省按 1（行存在即至少一次调用，task-01 列口径）。不单独
+        commit，复用 ``complete_lease`` 末尾的 commit；异常由调用方 best-effort 捕获。
+        """
+        await self._session.execute(
+            delete(AgentRunModelUsage).where(AgentRunModelUsage.run_id == agent_run.id)
+        )
+        self._session.add(
+            AgentRunModelUsage(
+                run_id=agent_run.id,
+                model=model,
+                input_tokens=int(stats.get("input_tokens") or 0),
+                output_tokens=int(stats.get("output_tokens") or 0),
+                cache_read_tokens=int(stats.get("cache_read_tokens") or 0),
+                cache_creation_tokens=int(stats.get("cache_creation_tokens") or 0),
+                api_requests=int(stats.get("api_requests") or 1),
+            )
+        )
+
+    async def _fill_run_llm_provider_id(
+        self,
+        agent_run: AgentRun,
+        lease: DaemonTaskLease,
+    ) -> None:
+        """task-04 / R-08（design §1.2 / Design Grill 项2）：run.llm_provider_id 仅空时回填。
+
+        归因值保护：dispatch 时点已写入的准确值（session/service.py 轮次供应商，
+        batch 路径之外该列唯一既有写入点）不被终态覆盖——切供应商竞态下终态会话
+        当前值会错归因。batch 路径 lease 的持久化 provider 信号 = metadata 显式键
+        （优先级对齐 claim 时 ``_inject_provider_config``：session_llm_provider_id >
+        llm_provider_id，后者由 ``AgentService._apply_profile_to_lease`` 写入）；
+        用户默认链 claim 时现算、无持久化 id，**不强行造关联** → 解析不到保持 NULL。
+        provider 行已删（FK 目标不存在）时跳过，防 PG 侧 UPDATE 违反外键。
+        """
+        if agent_run.llm_provider_id is not None:
+            return
+        meta = lease.metadata_ if isinstance(lease.metadata_, dict) else {}
+        provider_id: uuid.UUID | None = None
+        for key in ("session_llm_provider_id", "llm_provider_id"):
+            raw = meta.get(key)
+            if not raw:
+                continue
+            try:
+                provider_id = uuid.UUID(str(raw))
+            except (ValueError, TypeError):
+                continue  # 脏值降级试下一键（对齐 claim 路径解析异常降级语义）
+            break
+        if provider_id is None:
+            return
+
+        from app.modules.llm_provider.model import LlmProvider
+
+        if await self._session.get(LlmProvider, provider_id) is not None:
+            agent_run.llm_provider_id = provider_id

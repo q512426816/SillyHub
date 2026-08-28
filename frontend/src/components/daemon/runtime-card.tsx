@@ -38,6 +38,9 @@ import {
   getProtocol,
   getStatusMeta,
   ProviderBadge,
+  ProviderUsageTag,
+  sortProviderUsage,
+  sumApiRequests,
   UsageStat,
   VersionCell,
 } from "./runtime-card-helpers";
@@ -100,6 +103,13 @@ export function RuntimeCard({
   const costLabel = summary ? formatCost(summary.total_cost_usd) : "$0.00";
   const hasUsage = !!summary;
 
+  // task-12 / FR-04-2：调用次数无 summary 级字段，由 by_provider 各行 api_requests
+  // 求和（null 按 0）；无明细（老 daemon / 老数据）显示「—」。
+  const requestsTotal = sumApiRequests(usage?.by_provider);
+  const requestsLabel = requestsTotal === null ? "—" : String(requestsTotal);
+  // 分组明细行：后端无 ORDER BY，前端定序（供应商聚拢、「未记录」最后、组内按模型）。
+  const providerRows = usage?.by_provider?.length ? sortProviderUsage(usage.by_provider) : [];
+
   // prototype .btn 系列 className（btn-ghost btn-tiny / btn-primary btn-tiny / btn-danger btn-tiny）。
   const btnGhost =
     "inline-flex items-center gap-1 rounded border border-slate-300 bg-card px-2 py-1 text-[11.5px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-card";
@@ -158,7 +168,7 @@ export function RuntimeCard({
         </div>
       </div>
 
-      {/* ===== rt-usage：用量统计区（4 数字 + sparkline） ===== */}
+      {/* ===== rt-usage：用量统计区（4 数字 + 调用次数 + sparkline + by_provider 分组明细） ===== */}
       <div className="border-t border-slate-100 bg-slate-50 px-3 py-2.5">
         <div className="mb-1.5 flex items-center justify-between">
           <p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">
@@ -168,11 +178,16 @@ export function RuntimeCard({
             {usageLoading ? "加载中" : hasUsage ? (runtime.provider ?? "") : "暂无数据"}
           </span>
         </div>
-        <div className="grid grid-cols-4 gap-1.5">
+        <div className="grid grid-cols-5 gap-1.5">
           <UsageStat label="输入" value={inputLabel} tone={hasUsage ? "default" : "muted"} />
           <UsageStat label="输出" value={outputLabel} tone={hasUsage ? "default" : "muted"} />
           <UsageStat label="缓存" value={cacheLabel} tone={cacheLabel === "—" ? "muted" : "default"} />
           <UsageStat label="费用" value={costLabel} tone="cost" />
+          <UsageStat
+            label="调用次数"
+            value={requestsLabel}
+            tone={requestsLabel === "—" ? "muted" : "default"}
+          />
         </div>
         <div className="mt-1.5">
           <RuntimeUsageLineChart
@@ -180,6 +195,60 @@ export function RuntimeCard({
             loading={usageLoading}
           />
         </div>
+
+        {/* ===== task-12 / FR-04-2：按供应商 / 模型 分组明细（空列表隐藏，对齐原型 ②区） ===== */}
+        {providerRows.length > 0 ? (
+          <div className="mt-2">
+            <table className="w-full border-collapse text-[10.5px]">
+              <thead>
+                <tr className="text-left text-[9px] font-semibold uppercase tracking-wide text-slate-400">
+                  <th className="border-b border-slate-200 px-1 py-1 font-semibold">供应商</th>
+                  <th className="border-b border-slate-200 px-1 py-1 font-semibold">模型</th>
+                  <th className="border-b border-slate-200 px-1 py-1 font-semibold">输入</th>
+                  <th className="border-b border-slate-200 px-1 py-1 font-semibold">输出</th>
+                  <th className="border-b border-slate-200 px-1 py-1 font-semibold">缓存读</th>
+                  <th className="border-b border-slate-200 px-1 py-1 font-semibold">缓存写</th>
+                  <th className="border-b border-slate-200 px-1 py-1 font-semibold">调用</th>
+                </tr>
+              </thead>
+              <tbody>
+                {providerRows.map((row, idx) => (
+                  <tr
+                    key={`${row.provider_id ?? "unrecorded"}-${row.model}-${idx}`}
+                    className="border-b border-slate-100 last:border-b-0"
+                  >
+                    <td className="px-1 py-1">
+                      <ProviderUsageTag name={row.provider_name} />
+                    </td>
+                    <td className="max-w-[110px] truncate px-1 py-1 font-mono text-slate-600" title={row.model}>
+                      {row.model}
+                    </td>
+                    <td className="px-1 py-1 tabular-nums text-slate-700">
+                      {formatTokens(row.input_tokens)}
+                    </td>
+                    <td className="px-1 py-1 tabular-nums text-slate-700">
+                      {formatTokens(row.output_tokens)}
+                    </td>
+                    <td className="px-1 py-1 tabular-nums text-slate-700">
+                      {formatTokens(row.cache_read_tokens)}
+                    </td>
+                    <td className="px-1 py-1 tabular-nums text-slate-700">
+                      {formatTokens(row.cache_creation_tokens)}
+                    </td>
+                    {/* api_requests 可 null（明细行缺计数）→「—」 */}
+                    <td className="px-1 py-1 tabular-nums text-slate-700">
+                      {row.api_requests ?? "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {/* NFR-04 / FR-02-3：计费口径 footnote（API 全口径 vs 套餐计费口径） */}
+            <p className="mt-1.5 text-[9px] leading-relaxed text-slate-400">
+              * 调用次数为 API 请求全口径（含子代理），与套餐计费口径可能略有出入；「未记录」= 旧数据或旧版 daemon 未上报。
+            </p>
+          </div>
+        ) : null}
       </div>
 
       {/* ===== 运行能力区（决策 B 保留，prototype 无此项） ===== */}

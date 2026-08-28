@@ -737,3 +737,243 @@ describe('ql-20260825-f3#8：_interactiveFlatSeq 终态按 session 回收', () =
     expect(seq.size).toBe(0);
   });
 });
+
+// ── task-06（2026-08-29-usage-by-provider-model）：终态 model_usage 明细行 ────
+// + run 级 assistant 计数（FR-01-3 / FR-02-1，design §2/§3.1）────────────────
+
+describe('task-06：onTurnResult model_usage 拆行 + api_requests 计数', () => {
+  let daemons: Daemon[] = [];
+
+  afterEach(async () => {
+    for (const d of daemons) {
+      if (d.isRunning) {
+        await d.stop().catch(() => undefined);
+      }
+    }
+    daemons = [];
+  });
+
+  /** 白盒读取 run 级 assistant 计数 Map。 */
+  function readCountMap(daemon: Daemon): Map<string, number> {
+    const d = daemon as unknown as { _assistantMsgCountByRun: Map<string, number> };
+    return d._assistantMsgCountByRun;
+  }
+
+  const assistantMsg = {
+    type: 'assistant',
+    message: { role: 'assistant' },
+  } as unknown as SDKMessage;
+
+  // 子代理消息也是 assistant 类型（带 parent_tool_use_id），design §2 口径计入。
+  const subagentMsg = {
+    type: 'assistant',
+    parent_tool_use_id: 'toolu_01ABC',
+    message: { role: 'assistant' },
+  } as unknown as SDKMessage;
+
+  it('modelUsage 多模型 → payload.model_usage 拆行（camel→snake）+ 分摊和 == api_requests', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    // 3 条 assistant（含 1 条子代理）→ run 级 api_requests = 3。
+    await daemon.onTurnMessage('sess-1', 'run-1', assistantMsg);
+    await daemon.onTurnMessage('sess-1', 'run-1', subagentMsg);
+    await daemon.onTurnMessage('sess-1', 'run-1', assistantMsg);
+
+    const result = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      modelUsage: {
+        'claude-sonnet-4-6': {
+          inputTokens: 1000,
+          outputTokens: 200,
+          cacheReadInputTokens: 30000,
+          cacheCreationInputTokens: 50,
+        },
+        'claude-haiku-4-6': {
+          inputTokens: 500,
+          outputTokens: 80,
+          cacheReadInputTokens: 8000,
+          cacheCreationInputTokens: 0,
+        },
+      },
+    } as unknown as SDKResultMessage;
+
+    await daemon.onTurnResult('sess-1', 'run-1', result);
+
+    const callArgs = client.notifyRunResult.mock.calls[0]!;
+    const payload = callArgs[3] as Record<string, unknown>;
+    expect(payload.api_requests).toBe(3);
+    const rows = payload.model_usage as Array<Record<string, number | string>>;
+    expect(rows).toHaveLength(2);
+    const sonnet = rows.find((r) => r.model === 'claude-sonnet-4-6')!;
+    const haiku = rows.find((r) => r.model === 'claude-haiku-4-6')!;
+    // camelCase 四维 → snake_case 拆行
+    expect(sonnet).toMatchObject({
+      input_tokens: 1000,
+      output_tokens: 200,
+      cache_read_tokens: 30000,
+      cache_creation_tokens: 50,
+    });
+    expect(haiku).toMatchObject({
+      input_tokens: 500,
+      output_tokens: 80,
+      cache_read_tokens: 8000,
+      cache_creation_tokens: 0,
+    });
+    // 分摊按 input+output 占比：sonnet 1200/1780*3≈2.02→2；haiku 580/1780*3≈0.98→1。
+    expect(sonnet.api_requests).toBe(2);
+    expect(haiku.api_requests).toBe(1);
+    // 核心不变量：Σ行 api_requests == run 级 total（四舍五入残差守恒）。
+    expect(sonnet.api_requests + haiku.api_requests).toBe(payload.api_requests as number);
+  });
+
+  it('分摊残差补给最大消耗行（四舍五入不均时 Σ行仍 == api_requests）', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    // 3 条 assistant → total=3，两模型 weight 相等（各 100）：份额 round(1.5)=2
+    // 各占 → Σ=4 超发 1 → 残差 -1 补给最大消耗行（并列取首行）→ 1 + 2。
+    await daemon.onTurnMessage('sess-1', 'run-1', assistantMsg);
+    await daemon.onTurnMessage('sess-1', 'run-1', assistantMsg);
+    await daemon.onTurnMessage('sess-1', 'run-1', assistantMsg);
+
+    const result = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      modelUsage: {
+        'model-a': { inputTokens: 100, outputTokens: 0 },
+        'model-b': { inputTokens: 100, outputTokens: 0 },
+      },
+    } as unknown as SDKResultMessage;
+
+    await daemon.onTurnResult('sess-1', 'run-1', result);
+
+    const callArgs = client.notifyRunResult.mock.calls[0]!;
+    const payload = callArgs[3] as Record<string, unknown>;
+    expect(payload.api_requests).toBe(3);
+    const rows = payload.model_usage as Array<Record<string, number | string>>;
+    const a = rows.find((r) => r.model === 'model-a')!;
+    const b = rows.find((r) => r.model === 'model-b')!;
+    expect(a.api_requests + b.api_requests).toBe(3);
+    // 残差给首行（并列最大）：2 - 1 = 1；次行 2。
+    expect(a.api_requests).toBe(1);
+    expect(b.api_requests).toBe(2);
+  });
+
+  it('无 modelUsage → model_usage/api_requests 两字段都不写（老 CLI 兼容，计数≥1 也不发）', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    // 有 assistant 计数（≥1）但 result 无 modelUsage → 两字段均不写
+    //（design §3.1：modelUsage 缺失 → 两字段都不写，老行为）。
+    await daemon.onTurnMessage('sess-1', 'run-1', assistantMsg);
+    await daemon.onTurnMessage('sess-1', 'run-1', assistantMsg);
+
+    const result = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      usage: { input_tokens: 100, output_tokens: 50 },
+    } as unknown as SDKResultMessage;
+
+    await daemon.onTurnResult('sess-1', 'run-1', result);
+
+    const callArgs = client.notifyRunResult.mock.calls[0]!;
+    const payload = callArgs[3] as Record<string, unknown>;
+    expect(payload.model_usage).toBeUndefined();
+    expect(payload.api_requests).toBeUndefined();
+    // usage 回落路径不受影响
+    expect(payload.input_tokens).toBe(100);
+  });
+
+  it('两条 assistant 计数（user 消息不计）→ api_requests=2，单模型行全额分摊', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    await daemon.onTurnMessage('sess-1', 'run-1', assistantMsg);
+    await daemon.onTurnMessage('sess-1', 'run-1', assistantMsg);
+    // user 消息不是模型调用产出，不计数。
+    const userMsg = { type: 'user', message: { role: 'user' } } as unknown as SDKMessage;
+    await daemon.onTurnMessage('sess-1', 'run-1', userMsg);
+
+    const result = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      modelUsage: {
+        'claude-sonnet-4-6': {
+          inputTokens: 300,
+          outputTokens: 60,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+        },
+      },
+    } as unknown as SDKResultMessage;
+
+    await daemon.onTurnResult('sess-1', 'run-1', result);
+
+    const callArgs = client.notifyRunResult.mock.calls[0]!;
+    const payload = callArgs[3] as Record<string, unknown>;
+    expect(payload.api_requests).toBe(2);
+    const rows = payload.model_usage as Array<Record<string, number | string>>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.api_requests).toBe(2);
+  });
+
+  it('modelUsage 有而计数 0（run 内无 assistant 消息）→ api_requests=0 也发 + 行内全 0', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    const result = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      modelUsage: {
+        'claude-sonnet-4-6': {
+          inputTokens: 300,
+          outputTokens: 60,
+          cacheReadInputTokens: 10,
+          cacheCreationInputTokens: 5,
+        },
+      },
+    } as unknown as SDKResultMessage;
+
+    await daemon.onTurnResult('sess-1', 'run-1', result);
+
+    const callArgs = client.notifyRunResult.mock.calls[0]!;
+    const payload = callArgs[3] as Record<string, unknown>;
+    // 有 modelUsage → 两字段都写；0 = 无计数来源的诚实值（非缺失）。
+    expect(payload.api_requests).toBe(0);
+    const rows = payload.model_usage as Array<Record<string, number | string>>;
+    expect(rows[0]!.api_requests).toBe(0);
+  });
+
+  it('计数条目生命周期：onTurnResult 读后清理；onSessionEnd 兜底回收未终态 run', async () => {
+    const { daemon } = buildDaemon();
+    daemons.push(daemon);
+
+    // run-1：有计数 + 达终态 → 读出后条目清理。
+    await daemon.onTurnMessage('sess-1', 'run-1', assistantMsg);
+    expect(readCountMap(daemon).get('run-1')).toBe(1);
+    const result = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+      modelUsage: {
+        'claude-sonnet-4-6': { inputTokens: 10, outputTokens: 5 },
+      },
+    } as unknown as SDKResultMessage;
+    await daemon.onTurnResult('sess-1', 'run-1', result);
+    expect(readCountMap(daemon).has('run-1')).toBe(false);
+
+    // run-2：有计数但未达终态（session 中途结束）→ onSessionEnd 反查兜底回收。
+    await daemon.onTurnMessage('sess-1', 'run-2', assistantMsg);
+    await daemon.onTurnMessage('sess-1', 'run-2', assistantMsg);
+    expect(readCountMap(daemon).get('run-2')).toBe(2);
+    await daemon.onSessionEnd('sess-1', 'ended');
+    expect(readCountMap(daemon).has('run-2')).toBe(false);
+  });
+});

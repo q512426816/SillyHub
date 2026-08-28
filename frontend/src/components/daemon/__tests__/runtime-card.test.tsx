@@ -41,6 +41,9 @@ function makeRuntime(overrides: Record<string, unknown> = {}): DaemonRuntimeRead
 function usageItem(
   runtimeId: string,
   summary: Partial<RuntimeUsageItem["summary"]>,
+  // task-12（2026-08-29-usage-by-provider-model）：补 by_provider mock——缺省 []（老 daemon）
+  // 时调用次数 stat 也显示「—」，会让断言唯一「—」的用例（codex 缓存）多匹配。
+  byProvider: RuntimeUsageItem["by_provider"] = [],
 ): RuntimeUsageItem {
   return {
     runtime_id: runtimeId,
@@ -53,6 +56,7 @@ function usageItem(
       ...summary,
     },
     daily: [],
+    by_provider: byProvider,
   };
 }
 
@@ -155,13 +159,31 @@ describe("RuntimeCard（task-07 / FR-01 / FR-04）", () => {
 
     it("codex 无 cache（read+creation 均 0）→ 缓存项显示「—」", () => {
       const rt = makeRuntime({ id: "rt-codex", provider: "codex" });
-      const usage = usageItem("rt-codex", {
-        input_tokens: 5000, // 5.0k
-        output_tokens: 1000, // 1.0k
-        cache_read_tokens: 0,
-        cache_creation_tokens: 0,
-        total_cost_usd: 2.5, // $2.50
-      });
+      const usage = usageItem(
+        "rt-codex",
+        {
+          input_tokens: 5000, // 5.0k
+          output_tokens: 1000, // 1.0k
+          cache_read_tokens: 0,
+          cache_creation_tokens: 0,
+          total_cost_usd: 2.5, // $2.50
+        },
+        // task-12：补 by_provider（api_requests 非 null）→ 调用次数 stat 显示数字，
+        // 保持「—」仅缓存项一处（getByText 唯一匹配）。
+        [
+          {
+            provider_id: "p-openai",
+            provider_name: "OpenAI",
+            model: "gpt-5",
+            // 明细数字刻意与 summary 不同（4000/900），避免与 stat 的 5.0k/1.0k 撞文本。
+            input_tokens: 4000,
+            output_tokens: 900,
+            cache_read_tokens: 0,
+            cache_creation_tokens: 0,
+            api_requests: 5,
+          },
+        ],
+      );
       renderCard(<RuntimeCard {...defaultProps(rt, { usage })} />);
       // input/output 正常显示，cache 显示「—」
       expect(screen.getByText("5.0k")).toBeInTheDocument();

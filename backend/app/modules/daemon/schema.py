@@ -165,8 +165,11 @@ class SessionCreateRequest(BaseModel):
 
     双入口：``runtime_id``（新会话门户页，指定机器+智能体，优先）与 ``provider``
     （/runtimes 弹窗旧路径，零回归保留）二选一，都未传 → 422。
-    ``model`` 字段已移除（design §5：由档案/默认派生，继承 D-005/D-004@v2）——
-    pydantic 默认忽略多余字段，旧前端继续上送 model 不会 422，仅不再生效。
+    ``model`` 字段曾按旧设计移除（由档案/默认派生，D-005/D-004@v2）；D-002@v1
+    （2026-08-29-usage-by-provider-model）恢复——预会话供应商+模型级联的首句
+    携带（None/空串=跟随供应商配置）。创建下发的 ProviderConfig 只带 model 键
+    不含 default_fallback_model（injector ``default_fallback_model ?? model``
+    对 undefined 前者天然不遮蔽，R-07 创建路径无虞）。
     ``agent_profile_id``/``llm_provider_id`` 由 service 层解析（task-03），
     本 DTO 只透传 str（llm_provider_id 空串/"none" 语义=切回本机默认，task-05）。
 
@@ -182,6 +185,8 @@ class SessionCreateRequest(BaseModel):
     provider: InteractiveProviderLiteral | None = None
     agent_profile_id: str | None = None
     llm_provider_id: str | None = None
+    # D-002@v1：预会话级联首句模型（None/空串=跟随供应商配置）。
+    model: str | None = Field(default=None, max_length=128)
     # 新页面默认更安全的对话模式（design §5）；现有前端弹窗均显式传 true，不受影响。
     manual_approval: bool = True
     ask_user_only: bool = True
@@ -270,6 +275,15 @@ class SessionInjectRequest(BaseModel):
     prompt: str = Field(default="", max_length=8000)
     agent_profile_id: str | None = None
     llm_provider_id: str | None = None
+    # task-11（2026-08-29-usage-by-provider-model / FR-03-3 / D-002@v1）：会话级
+    # 模型选择（三态，与 llm_provider_id None/空串语义同构）。None（不带键）=
+    # 不动（普通轮/纯档案切换零回归）；空串 = 显式「跟随供应商配置」重置（前端
+    # 切模型选「默认」、切供应商级联重置均发空串）；非空 = 显式选模型，**必须
+    # 同请求显式携带非空 llm_provider_id**（模型依赖供应商，service 入口守卫
+    # 422）。空串重置/非空选择均构成切换轮（SESSION_SWITCH_CONFIG → daemon
+    # reload，ANTHROPIC_MODEL 生效，R-07 兜底模型快照级同步）。max_length 对齐
+    # LlmProvider.model 列宽（128）。
+    model: str | None = Field(default=None, max_length=128)
     attachment_ids: list[uuid.UUID] = Field(default_factory=list, max_length=10)
     # ql-20260825-004：每轮注入携带当前页面上下文——客户端传页面类型枚举+键，
     # 服务端回查注入【页面上下文】前导（复用 create 路径 build_page_context_preamble）。
@@ -811,6 +825,39 @@ class RuntimeUsageWindow(enum.StrEnum):
 RuntimeUsageWindowLiteral = Literal["1d", "7d", "30d"]
 
 
+class ModelUsageItemRead(BaseModel):
+    """终态上报的 run×模型用量明细行（FR-01-3，2026-08-29-usage-by-provider-model）。
+
+    daemon interactive 从 SDK ``result.modelUsage`` 逐模型拆行（camelCase→snake）；
+    ``api_requests`` 为按消耗占比的分摊估算（run 级精确值在顶层 api_requests，
+    design §2 D-01）。batch 侧为 run 级单行。
+    """
+
+    model: str = Field(min_length=1, max_length=128)
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    api_requests: int = 0
+
+
+class ProviderModelUsageRead(BaseModel):
+    """用量统计的 供应商×模型 分组行（FR-04-1）。
+
+    ``provider_id``/``provider_name`` 为 NULL 时（老 run 未记录供应商）由
+    service 层填 ``未记录`` 标识，前端不再判空。
+    """
+
+    provider_id: uuid.UUID | None = None
+    provider_name: str = "未记录"
+    model: str
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int
+    cache_creation_tokens: int
+    api_requests: int | None = None
+
+
 class RuntimeUsageSummaryRead(BaseModel):
     """单 runtime 在时间窗内的 token/cache/cost 聚合总量。
 
@@ -839,11 +886,17 @@ class RuntimeUsagePointRead(BaseModel):
 
 
 class RuntimeUsageRead(BaseModel):
-    """单 runtime 的用量记录(summary 总量 + daily 时间序列)。"""
+    """单 runtime 的用量记录(summary 总量 + daily 时间序列 + 供应商×模型分组)。
+
+    ``by_provider``（FR-04-1，2026-08-29-usage-by-provider-model）：窗口内
+    agent_run_model_usage 明细按 供应商×模型 聚合；空列表=无明细数据
+    （老 daemon / 老数据），前端隐藏分组区。
+    """
 
     runtime_id: str
     summary: RuntimeUsageSummaryRead
     daily: list[RuntimeUsagePointRead]
+    by_provider: list[ProviderModelUsageRead] = []
 
 
 class RuntimeUsageListResponse(BaseModel):

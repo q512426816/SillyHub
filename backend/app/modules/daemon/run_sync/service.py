@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import BaseModel
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
@@ -28,14 +28,14 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.core.db import get_session_factory
 from app.core.logging import get_logger
 from app.core.redis import get_redis
-from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
+from app.modules.agent.model import AgentRun, AgentRunLog, AgentRunModelUsage, AgentSession
 from app.modules.agent.tool_kind import classify_tool_kind
 from app.modules.change.binding import bind_session_to_change, extract_spec_bindings
 from app.modules.change.dispatch import _run_gate_via_delegate
 from app.modules.daemon.lease.service import DaemonAgentRunNotFound
 from app.modules.daemon.model import DaemonTaskLease
 from app.modules.daemon.model_error import ModelErrorDTO
-from app.modules.daemon.schema import BashChunkEvent
+from app.modules.daemon.schema import BashChunkEvent, ModelUsageItemRead
 from app.modules.daemon.session.service import (
     TERMINAL_TURN_STATUSES,
     _apply_session_terminal_status,
@@ -1476,6 +1476,14 @@ class RunSyncService:
         # 终态一次写入直接覆盖（无 max 守卫，对齐 input/output 终态覆盖模式）。
         cache_read_tokens: int | None = None,
         cache_creation_tokens: int | None = None,
+        # task-03（2026-08-29-usage-by-provider-model / FR-01-3 / design §2 §4.1）：
+        # daemon 终态上报的逐模型用量明细行（SDK result.modelUsage 拆行；行内
+        # api_requests 已由 daemon 按各模型 input+output 占比分摊，各行求和 ==
+        # run 级总数——backend 不重复分摊，直接落行）+ run 级 API 调用次数精确值
+        # （AgentRun 无该列，精确值只入日志观测，落库承载在明细行）。
+        # None/空列表=老 daemon 未传 → 明细零行、run 列不填（N-01 兼容）。
+        model_usage: list[ModelUsageItemRead] | None = None,
+        api_requests: int | None = None,
         # task-06 / FR-02：daemon classifyModelError 回传的模型层错误。None=daemon
         # 未传（旧 daemon / 成功 run），AgentRun.error_detail 保持 None（design §9）。
         error: ModelErrorDTO | None = None,
@@ -1503,6 +1511,14 @@ class RunSyncService:
         cache 词元，daemon 从 SDKResultSuccess.usage 透传；None 表示 daemon 未传
         （老 daemon / codex 无 cache），保留 AgentRun 原值不覆盖。终态一次写入
         直接覆盖（无 max 守卫），对齐既有 input/output 终态覆盖语义。
+
+        ``model_usage`` (task-03 / 2026-08-29-usage-by-provider-model / FR-01-3):
+        daemon 终态上报的逐模型用量明细——事务内同 run 先 DELETE 后 INSERT 全部
+        行（等价幂等 upsert by (run_id, model)，design §4.1）；run.model 终态填
+        input+output 最大行的 model；run.llm_provider_id **仅空时**填会话当前值
+        （dispatch 已按轮写入生效供应商，终态覆盖会造成切供应商竞态错归因，
+        R-08）。明细落库 best-effort：savepoint 包裹，失败仅 warn 不阻塞 close。
+        None/空列表（老 daemon）→ 零行为变化（N-01）。
 
         Raises ``DaemonAgentRunNotFound`` when the run does not exist or is not
         bound to the lease's session (resource-hiding 404 — no existence leak).
@@ -1665,6 +1681,55 @@ class RunSyncService:
             agent_run.cache_read_tokens = cache_read_tokens
         if cache_creation_tokens is not None:
             agent_run.cache_creation_tokens = cache_creation_tokens
+
+        # ── task-03（2026-08-29-usage-by-provider-model / FR-01-3 / design §1.2 §4.1）：
+        # model_usage 明细落库 + run.model / llm_provider_id 填充。api_requests 无
+        # run 级列——run 总数已由 daemon 按 design §2 分摊进各行（各行求和 == run
+        # 总数），backend 不重复分摊直接落行；run 级精确值仅入下方 close 日志观测。
+        if model_usage:
+            try:
+                # run 列填充（design §1.2）：model 终态填 input+output 最大行的
+                # model（该列确从未写入，终态无条件覆盖对齐 input/output 模式）；
+                # llm_provider_id 仅空时填会话当前值——dispatch（session/service.py
+                # :3359）已按轮写入生效供应商，终态无条件覆盖会把 dispatch 时点的
+                # 准确值改成终态会话当前值（切供应商竞态错归因，R-08），非空不触碰。
+                agent_run.model = max(
+                    model_usage,
+                    key=lambda item: item.input_tokens + item.output_tokens,
+                ).model
+                if agent_run.llm_provider_id is None:
+                    bound_session = await self._session.get(
+                        AgentSession, agent_run.agent_session_id
+                    )
+                    if bound_session is not None:
+                        agent_run.llm_provider_id = bound_session.llm_provider_id
+                # 明细幂等 upsert：同 run 先 DELETE 后 INSERT 全部行（等价 upsert
+                # by (run_id, model)，重放同 payload 不叠行）。savepoint 包裹——
+                # 明细落库失败只回滚本块，不阻塞 close 主事务（design §4.1
+                # best-effort，对齐 session/service.py:1491 落绑定范式）。
+                async with self._session.begin_nested():
+                    await self._session.execute(
+                        delete(AgentRunModelUsage).where(AgentRunModelUsage.run_id == agent_run.id)
+                    )
+                    for item in model_usage:
+                        self._session.add(
+                            AgentRunModelUsage(
+                                run_id=agent_run.id,
+                                model=item.model,
+                                input_tokens=item.input_tokens,
+                                output_tokens=item.output_tokens,
+                                cache_read_tokens=item.cache_read_tokens,
+                                cache_creation_tokens=item.cache_creation_tokens,
+                                api_requests=item.api_requests,
+                            )
+                        )
+                    await self._session.flush()
+            except Exception as exc:
+                log.warning(
+                    "model_usage_persist_failed",
+                    run_id=str(agent_run.id),
+                    error=str(exc),
+                )
         if result_summary:
             # Redact via git_gateway redact_output to avoid leaking secrets in
             # the stored summary (mirrors batch completeLease path).
@@ -1689,8 +1754,9 @@ class RunSyncService:
         # user_id 同样须在 expire_on_commit 前取标量。
         _sessions_changed_intent: tuple[uuid.UUID, uuid.UUID | None] | None = None
         if agent_run.agent_session_id is not None:
-            from app.modules.agent.model import AgentSession
-
+            # AgentSession 走模块顶 import（与上方 task-03 model_usage 块共用）：
+            # 此处若保留函数内局部 import，Python 会把 AgentSession 判为整个
+            # 函数体的局部名，上方先于本行执行的引用直接 UnboundLocalError。
             session = await self._session.get(AgentSession, agent_run.agent_session_id)
             if session is not None:
                 new_status = _apply_session_terminal_status(agent_run, session)
@@ -1837,6 +1903,9 @@ class RunSyncService:
             sdk_status=status,
             is_error=is_error,
             subtype=subtype,
+            # task-03：run 级 API 调用次数精确值（AgentRun 无该列，日志观测；
+            # 落库承载在 agent_run_model_usage 明细行，各行求和 == 该值，design §2）。
+            api_requests=api_requests,
         )
 
         # ql-20260825-011（后端真实排队）：turn 终态 → 后台派发下一条排队消息。

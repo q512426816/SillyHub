@@ -1020,16 +1020,25 @@ export async function createSession(
  * injectSession 切换参数（2026-08-14-sessions-portal task-16 / FR-02 / D-012@v1）。
  * task-17（规则 20）：迁 api-types 生成版 SessionInjectRequest；prompt 是
  * injectSession 的独立入参（不进 options），故 Omit 掉。
+ *
+ * 2026-08-29-usage-by-provider-model task-10（FR-03-2）：扩 model——会话级模型
+ * 覆盖，空串=跟随供应商配置（与 llm_provider_id 空串=本机默认同语义）。生成版
+ * SessionInjectRequest 扩 model 归并行 task-11（gen:types 同提交），落地前先在
+ * 此补前端契约；落地后此 Omit+交叉窄化 string，与生成版并存不冲突。
  */
 export type SessionInjectOptions = Omit<
   components["schemas"]["SessionInjectRequest"],
-  "prompt"
->;
+  "prompt" | "model"
+> & {
+  model?: string;
+};
 
 /**
  * POST /api/daemon/sessions/{id}/inject — 同一 session 下创建下一 turn（新 AgentRun）。
  * 业务含义是"新一轮追问"，不是写入长驻进程 stdin。
- * options 携带 agent_profile_id/llm_provider_id 时触发轮次配置热切换（FR-02）。
+ * options 携带 agent_profile_id/llm_provider_id 时触发轮次配置热切换（FR-02）；
+ * model（task-10 / FR-03-2）为会话级模型覆盖，随供应商同请求下发（空串=跟随
+ * 供应商配置）。
  */
 export async function injectSession(
   sessionId: string,
@@ -1043,6 +1052,11 @@ export async function injectSession(
   }
   if (options?.llm_provider_id !== undefined) {
     body.llm_provider_id = options.llm_provider_id;
+  }
+  // 2026-08-29-usage-by-provider-model task-10（FR-03-2）：会话级模型覆盖——
+  // model === ""（切回跟随供应商配置）必须下发，判 undefined 同 llm_provider_id。
+  if (options?.model !== undefined) {
+    body.model = options.model;
   }
   // 2026-08-20-session-multimodal-attachments task-12：附件引用（D-7 豁免空
   // prompt 由 backend DTO 校验；空数组不下发保持既有 payload 形态）。
@@ -2306,6 +2320,12 @@ export interface RuntimeUsageItem {
   runtime_id: string;
   summary: RuntimeUsageSummary;
   daily: RuntimeUsagePoint[];
+  /**
+   * 供应商×模型 分组明细（2026-08-29-usage-by-provider-model task-12 / FR-04-2）。
+   * 对齐后端 RuntimeUsageRead.by_provider：空列表=无明细数据（老 daemon / 老数据），
+   * 卡片隐藏分组明细区。类型取 api-types 生成版（task-02 gen:types），禁止手写。
+   */
+  by_provider?: components["schemas"]["ProviderModelUsageRead"][];
 }
 
 /** GET /api/daemon/runtimes/usage 响应体。runtimes 为全部 runtime 的数组（可能含 0 用量项）。 */

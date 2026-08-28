@@ -1307,3 +1307,59 @@ class TestQuicklogIdBinding:
 
         assert await _count(db_session, QuicklogSessionLink) == 0
         assert await _count(db_session, ChangeSessionLink) == 0
+
+
+class TestCreateSessionModelSelect:
+    """D-002@v1（2026-08-29-usage-by-provider-model / FR-03）：预会话级联首句 model。
+
+    显式 model 优先于供应商派生（config_snapshot 展示口径与下发 config 一致）；
+    缺省回落供应商 model（现状零回归）。
+    """
+
+    @pytest.mark.asyncio
+    async def test_create_with_explicit_model_overrides_provider_derivation(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """llm_provider_id + model 同传：快照 model=显式值（非供应商 glm-4.7 派生）。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid, provider="claude")
+        lp = await _seed_provider(db_session, uid, model="glm-4.7")
+
+        svc = DaemonService(db_session)
+        result = await svc.create_session(
+            uid,
+            provider=None,
+            prompt="hi",
+            runtime_id=str(rt.id),
+            llm_provider_id=str(lp.id),
+            model="glm-4.6",
+        )
+
+        s = result.agent_session
+        assert s.llm_provider_id == lp.id
+        assert s.config_snapshot is not None
+        # 显式 model 优先（供应商原配 glm-4.7 不遮蔽选择）。
+        assert s.config_snapshot["model"] == "glm-4.6"
+        assert s.config_snapshot["provider_name"] == "GLM"
+
+    @pytest.mark.asyncio
+    async def test_create_without_model_keeps_provider_derivation(
+        self, db_session, mocked_hub, mocked_redis
+    ) -> None:
+        """不带 model：快照回落供应商 model 派生（现状零回归）。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid, provider="claude")
+        lp = await _seed_provider(db_session, uid, model="glm-4.7")
+
+        svc = DaemonService(db_session)
+        result = await svc.create_session(
+            uid,
+            provider=None,
+            prompt="hi",
+            runtime_id=str(rt.id),
+            llm_provider_id=str(lp.id),
+        )
+
+        s = result.agent_session
+        assert s.config_snapshot is not None
+        assert s.config_snapshot["model"] == "glm-4.7"

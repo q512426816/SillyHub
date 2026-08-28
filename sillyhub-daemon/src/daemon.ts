@@ -274,6 +274,98 @@ function _aggregateModelUsage(modelUsage: unknown): ModelUsageTotals | null {
   return seen ? totals : null;
 }
 
+// ── modelUsage 明细行（task-06 / 2026-08-29-usage-by-provider-model）──────────
+
+/**
+ * 终态上报 payload 的 run×模型用量明细行（FR-01-3）。
+ *
+ * 字段 snake_case 对齐 backend ModelUsageItemRead（InteractiveRunResultRequest.
+ * model_usage 元素）；由 `_modelUsageRows` 从 SDK modelUsage（camelCase 四维）
+ * 拆行映射产出。daemon.ts 拥有该 wire 形状（计算方），hub-client.ts 仅
+ * type-only 引用（对齐既有 SessionRecoverStatus 的 daemon→hub-client 方向）。
+ */
+export interface ModelUsageRow {
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  /** 该模型调用次数（估算分摊，见 _modelUsageRows；run 级精确值在 payload.api_requests）。 */
+  api_requests: number;
+}
+
+/**
+ * task-06（FR-01-3 / design §3.1 / D-001@v1）：modelUsage（Record<string,
+ * ModelUsage>，camelCase 四维）逐 key 拆明细行，camel→snake 映射。
+ *
+ * 防御口径同 `_aggregateModelUsage`：modelUsage 非对象 / null / 数组 → 空数组；
+ * 条目非对象跳过；任一维为非有限数（NaN/Infinity/字符串）按 0 计；四维全非法
+ * 的条目跳过（与聚合函数 seen 语义一致——不产生全 0 噪声行）。
+ *
+ * api_requests 分摊（design §2 D-01 / R-01）：SDK 不提供 per-model 请求数，
+ * totalRequests 非 null 时按各行 input+output 占比四舍五入分配，残差补给最大
+ * 消耗行（input+output 最大，并列取首行），保证 Σ行 == totalRequests；
+ * totalRequests 为 null（无计数来源）时各行 0。行内值为**估算分摊**，run 级
+ * payload.api_requests 才是精确计数。
+ */
+function _modelUsageRows(modelUsage: unknown, totalRequests: number | null): ModelUsageRow[] {
+  if (typeof modelUsage !== 'object' || modelUsage === null || Array.isArray(modelUsage)) {
+    return [];
+  }
+  const rows: ModelUsageRow[] = [];
+  for (const [model, raw] of Object.entries(modelUsage as Record<string, unknown>)) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const entry = raw as Record<string, unknown>;
+    // 非有限数按 null 标记（区别于合法 0），便于 seen 判定（同聚合函数语义）。
+    const dim = (v: unknown): number | null =>
+      typeof v === 'number' && Number.isFinite(v) ? v : null;
+    const input = dim(entry.inputTokens);
+    const output = dim(entry.outputTokens);
+    const cacheRead = dim(entry.cacheReadInputTokens);
+    const cacheCreation = dim(entry.cacheCreationInputTokens);
+    if (input === null && output === null && cacheRead === null && cacheCreation === null) {
+      continue;
+    }
+    rows.push({
+      model,
+      input_tokens: input ?? 0,
+      output_tokens: output ?? 0,
+      cache_read_tokens: cacheRead ?? 0,
+      cache_creation_tokens: cacheCreation ?? 0,
+      api_requests: 0,
+    });
+  }
+  // 分摊：totalRequests 非有限数防御性视同 null（调用方传 daemon 内部计数，
+  // 正常恒为非负整数；防脏数据把负数/Infinity 摊进行内）。
+  const total =
+    totalRequests !== null && Number.isFinite(totalRequests)
+      ? Math.max(0, Math.round(totalRequests))
+      : null;
+  if (rows.length > 0 && total !== null) {
+    const weights = rows.map((r) => r.input_tokens + r.output_tokens);
+    const weightSum = weights.reduce((a, b) => a + b, 0);
+    if (weightSum > 0) {
+      let assigned = 0;
+      rows.forEach((row, i) => {
+        const share = Math.round((weights[i]! / weightSum) * total);
+        row.api_requests = share;
+        assigned += share;
+      });
+      // 残差（四舍五入舍入误差，可正可负）补给最大消耗行，保 Σ行 == total。
+      let maxIdx = 0;
+      for (let i = 1; i < rows.length; i++) {
+        if (weights[i]! > weights[maxIdx]!) maxIdx = i;
+      }
+      rows[maxIdx]!.api_requests += total - assigned;
+    } else {
+      // 全部行 input+output=0（纯 cache 消耗 / 全 0）：无法按占比分摊，
+      // 全部归首行（并列取首行的同一确定性规则），仍保 Σ行 == total。
+      rows[0]!.api_requests = total;
+    }
+  }
+  return rows;
+}
+
 // ── translateSpecRoot（prompt 路径翻译纯函数）─────────────────────────────────
 // 2026-06-22-agent-run-pipeline-fix task-02：SPEC_ROOT_MAP 翻译器。
 // design §4.1 A1 第 2 层：daemon 在 prompt 透传给 SessionManager.create 前，
@@ -376,6 +468,11 @@ interface ClientLike {
       // task-16：cache 两维（短名，对齐 backend _METADATA_FIELDS）。
       cache_read_tokens?: number;
       cache_creation_tokens?: number;
+      // task-06（2026-08-29-usage-by-provider-model / FR-01-3/FR-02-1）：
+      // modelUsage 逐模型明细行 + run 级 assistant 计数。modelUsage 缺失/空时
+      // daemon 两字段都不写（老 CLI / Codex 兼容，backend N-01 None）。
+      model_usage?: ModelUsageRow[];
+      api_requests?: number;
       // task-04：模型层结构化错误（is_error=true 时归类器产出，成功路径不 set）。
       error?: ModelError;
     },
@@ -857,6 +954,24 @@ export class Daemon {
   private readonly _interactiveFlatSeq = new Map<string, number>();
   /** ql-20260825-f3#8：runId → sessionId 归属（onSessionEnd 反查清理 flatSeq 条目用）。 */
   private readonly _interactiveFlatSeqOwner = new Map<string, string>();
+  /**
+   * task-06（2026-08-29-usage-by-provider-model / FR-02-1 / D-01）：run 级
+   * assistant 消息计数（runId → count），终态随 payload.api_requests 上报。
+   *
+   * 为什么需要：SDK 无 per-run 请求数字段，assistant 消息数是调用次数的最优
+   * 近似（SDK 每次模型调用产出一条 assistant；Task 子代理消息同为 assistant
+   * 类型带 parent_tool_use_id，天然计入——design §2 口径，与 modelUsage 同源
+   * 对齐）。turn 边界不清零：runId 即 turn 维度，新 run 无条目从 0 起。
+   *
+   * 生命周期：onTurnMessage（type==='assistant'）递增；onTurnResult 读出后
+   * delete（api_requests=0 也发——有 modelUsage 而无计数的诚实值；modelUsage
+   * 缺失时 payload 两字段都不写，条目仍清理）；onSessionEnd 兜底回收（run
+   * 未达终态时防泄漏，复用 _interactiveFlatSeqOwner 归属反查）。
+   *
+   * 不进 SessionState（interactive/types.ts）：桥接层私有计数无需会话状态可见，
+   * Map 跟随 daemon 实例生命周期（重启即清零，只影响本次终态上报，不落盘）。
+   */
+  private readonly _assistantMsgCountByRun = new Map<string, number>();
   /**
    * task-06（D-003@v1 tar 模式）：interactive lease.id → spec 同步上下文。
    * _startInteractiveSession tar 模式 pull 时 set(leaseId, {workspaceId})；
@@ -1647,6 +1762,10 @@ export class Daemon {
       // task-16：cache 两维（短名），SDK 全名在此处映射注入。
       cache_read_tokens?: number;
       cache_creation_tokens?: number;
+      // task-06（2026-08-29-usage-by-provider-model）：模型明细行 + run 级计数
+      //（modelUsage 缺失/空时两字段都不写，见下方组装段）。
+      model_usage?: ModelUsageRow[];
+      api_requests?: number;
       // task-04：模型层结构化错误（is_error=true 时 session-manager 已挂到 result.modelError）。
       error?: ModelError;
     } = {
@@ -1682,9 +1801,13 @@ export class Daemon {
     // token 口径权威字段）；modelUsage 缺失 / 空（老 CLI、Codex driver）回落
     // resultMeta.usage（主循环 only，即修复前 D-001 行为，向后兼容）。
     // total_cost_usd 本身已覆盖全部 pipeline（SDK 语义），不走本分支。
-    const modelTotals = _aggregateModelUsage(
-      (resultMeta as { modelUsage?: unknown }).modelUsage,
-    );
+    const modelUsage = (resultMeta as { modelUsage?: unknown }).modelUsage;
+    // task-06（FR-02-1 / D-01）：run 级 assistant 计数读出 + 清理。读出即删
+    //（retryTerminal 重试闭包已捕获 payload 值，计数不因重发重复累计；run 未
+    // 达终态的残留条目由 onSessionEnd 兜底回收）。
+    const apiRequests = this._assistantMsgCountByRun.get(runId) ?? 0;
+    this._assistantMsgCountByRun.delete(runId);
+    const modelTotals = _aggregateModelUsage(modelUsage);
     if (modelTotals) {
       payload.input_tokens = modelTotals.input;
       payload.output_tokens = modelTotals.output;
@@ -1713,6 +1836,17 @@ export class Daemon {
       ) {
         payload.cache_read_tokens = resultMeta.usage.cache_read_input_tokens;
       }
+    }
+    // task-06（FR-01-3/FR-02-1，design §3.1）：modelUsage 逐模型明细行 + run 级
+    // api_requests。modelUsage 缺失/空（拆行结果为空数组）→ 两字段都不写（老
+    // CLI / Codex driver 兼容，backend None → 明细无行，N-01）；有 → 两字段都写
+    //（api_requests=0 也写：本 run 至少一次调用时计数≥1，0 = 有 modelUsage 而无
+    // 计数来源的诚实值）。行内 api_requests 为按 input+output 占比的分摊估算
+    //（design §2 D-01 / R-01），顶层 api_requests 为精确计数。
+    const usageRows = _modelUsageRows(modelUsage, apiRequests);
+    if (usageRows.length > 0) {
+      payload.model_usage = usageRows;
+      payload.api_requests = apiRequests;
     }
     // task-04（FR-01 / D-005@v1）：模型层结构化错误注入。session-manager._onResult
     // 收尾时已按 provider + is_error + resultText 调 classifyModelError 归类，把非空
@@ -1803,6 +1937,17 @@ export class Daemon {
         lease_id: state.leaseId,
       });
       return;
+    }
+    // task-06（FR-02-1 / D-01）：run 级 assistant 计数（API 调用次数近似，design
+    // §2）。放在 try 之前：模型调用已实际发生，计数不依赖 submitMessages 转发
+    // 成败。子代理消息同为 type==='assistant'（带 parent_tool_use_id）天然计入；
+    // Codex flat message（event_type，无 type）不计——其 driver 本就无 modelUsage，
+    // payload 两字段都不写，口径自洽。
+    if ((msg as unknown as Record<string, unknown>)['type'] === 'assistant') {
+      this._assistantMsgCountByRun.set(
+        runId,
+        (this._assistantMsgCountByRun.get(runId) ?? 0) + 1,
+      );
     }
     try {
       const fwdMsg = msg as unknown as Record<string, unknown>;
@@ -1990,10 +2135,13 @@ export class Daemon {
     // ql-20260825-f3#8：清理本 session 的 per-run flatSeq 计数条目（原只增不减）。
     // flatSeq 以 runId 为 key，onTurnMessage 时已记 runId→sessionId 归属，此处反查
     // 一次性回收该 session 全部 run 的条目（Map 迭代中 delete 当前项安全，ES 规范）。
+    // task-06：assistant 计数条目同批回收（run 未达终态时防泄漏——assistant 消息
+    // 走 onTurnMessage 必然同时登记 flatSeq 归属，此处反查必命中）。
     for (const [rid, ownerSessionId] of this._interactiveFlatSeqOwner) {
       if (ownerSessionId === sessionId) {
         this._interactiveFlatSeqOwner.delete(rid);
         this._interactiveFlatSeq.delete(rid);
+        this._assistantMsgCountByRun.delete(rid);
       }
     }
   }

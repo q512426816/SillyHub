@@ -13,6 +13,8 @@
  *   3. 时间窗切窗触发 getRuntimesUsage 重拉 + 数字/图同步(AC-02)
  *   4. codex 无 cache → 缓存项显示「—」(D-001@v1/AC-05)
  *   5. loading=true 显示「加载中」(AC-07 子项)
+ *   6. task-12 / FR-04-2: by_provider 分组明细行(供应商/模型/数字/null「—」)+
+ *      调用次数 stat(各行 api_requests 求和)+ 空态隐藏 + 计费口径 footnote(NFR-04)
  *
  * 测试模式:照搬 runtimes/page.test.tsx 的 mock 脚手架(vi.hoisted +
  * vi.importActual + next/navigation mock + EventSource stub + useSession.setState),
@@ -149,6 +151,8 @@ function makeUsageItem(
   runtime_id: string,
   summary: Record<string, number>,
   daily: Array<Record<string, unknown>> = [],
+  // task-12：by_provider 分组明细（FR-04-2）；缺省 []（老 daemon / 老数据）→ 卡片隐藏明细区。
+  byProvider: RuntimeUsageItem["by_provider"] = [],
 ): RuntimeUsageItem {
   return {
     runtime_id,
@@ -169,6 +173,7 @@ function makeUsageItem(
       total_cost_usd: 0,
       ...d,
     })),
+    by_provider: byProvider,
   };
 }
 
@@ -395,13 +400,32 @@ describe("task-14 / D-001@v1: codex 无 cache 显示「—」(AC-05)", () => {
     );
     daemon.getRuntimesUsage.mockResolvedValue(
       usageResponse("7d", [
-        makeUsageItem("rt-codex", {
-          input_tokens: 5000,
-          output_tokens: 1000,
-          cache_read_tokens: 0, // codex 无 prompt cache
-          cache_creation_tokens: 0,
-          total_cost_usd: 2.5,
-        }),
+        // task-12：补 by_provider（api_requests 非 null）——否则调用次数 stat 也显示
+        // 「—」，getByText("—") 多匹配报错（taskcard：mock 补 by_provider 修既有测试）。
+        makeUsageItem(
+          "rt-codex",
+          {
+            input_tokens: 5000,
+            output_tokens: 1000,
+            cache_read_tokens: 0, // codex 无 prompt cache
+            cache_creation_tokens: 0,
+            total_cost_usd: 2.5,
+          },
+          [],
+          [
+            {
+              provider_id: "p-openai",
+              provider_name: "OpenAI",
+              model: "gpt-5",
+              // 明细数字刻意与 summary 不同（4000/900），避免与 stat 的 5.0k/1.0k 撞文本。
+              input_tokens: 4000,
+              output_tokens: 900,
+              cache_read_tokens: 0,
+              cache_creation_tokens: 0,
+              api_requests: 5,
+            },
+          ],
+        ),
       ]),
     );
 
@@ -430,10 +454,29 @@ describe("task-14 / D-001@v1: codex 无 cache 显示「—」(AC-05)", () => {
     );
     daemon.getRuntimesUsage.mockResolvedValue(
       usageResponse("7d", [
-        makeUsageItem("rt-claude", {
-          cache_read_tokens: 30000,
-          cache_creation_tokens: 5000,
-        }),
+        // task-12：补 by_provider（api_requests 非 null）——否则调用次数 stat 显示
+        // 「—」，与本用例「无『—』」断言冲突。
+        makeUsageItem(
+          "rt-claude",
+          {
+            cache_read_tokens: 30000,
+            cache_creation_tokens: 5000,
+          },
+          [],
+          [
+            {
+              provider_id: "p-anthropic",
+              provider_name: "Anthropic",
+              model: "claude-opus-4-6",
+              // 明细缓存 30000 刻意不等于 summary 合并值 35000，避免「35.0k」撞文本。
+              input_tokens: 1200,
+              output_tokens: 340,
+              cache_read_tokens: 30000,
+              cache_creation_tokens: 0,
+              api_requests: 8,
+            },
+          ],
+        ),
       ]),
     );
 
@@ -468,5 +511,109 @@ describe("task-14 / FR-04: loading 态(AC-07 子项)", () => {
     await waitFor(() => {
       expect(screen.getAllByText("加载中").length).toBeGreaterThan(0);
     });
+  });
+});
+
+// ── task-12 / FR-04-2: by_provider 分组明细 + 调用次数 + 计费口径 footnote ──────
+
+/** 单行明细 fixture（已知供应商行；独立常量便于单行用例引用，绕开索引访问 undefined）。 */
+const ZHIPU_GLM_ROW: NonNullable<RuntimeUsageItem["by_provider"]>[number] = {
+  provider_id: "p-1",
+  provider_name: "智谱 GLM（王鹏的）",
+  model: "glm-4.7",
+  input_tokens: 140210,
+  output_tokens: 10502,
+  cache_read_tokens: 540000,
+  cache_creation_tokens: 0,
+  api_requests: 35,
+};
+
+/** by_provider 明细 fixture（已知供应商两行 + 「未记录」null 行，对齐原型 ②区数据）。 */
+const PROVIDER_ROWS: NonNullable<RuntimeUsageItem["by_provider"]> = [
+  ZHIPU_GLM_ROW,
+  {
+    provider_id: "p-1",
+    provider_name: "智谱 GLM（王鹏的）",
+    model: "glm-4.5-air",
+    input_tokens: 5726,
+    output_tokens: 482,
+    cache_read_tokens: 17888,
+    cache_creation_tokens: 0,
+    api_requests: 3,
+  },
+  {
+    provider_id: null,
+    provider_name: "未记录", // 后端 service 层对 provider NULL 的兜底填充
+    model: "claude-opus-4-6",
+    input_tokens: 100,
+    output_tokens: 10,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+    api_requests: null, // 老数据缺计数 → 调用列「—」、求和按 0
+  },
+];
+
+describe("task-12 / FR-04-2: by_provider 分组明细 + 调用次数 + footnote", () => {
+  it("明细行渲染供应商名/模型/数字；api_requests null 行调用列「—」；调用次数 stat 为各行求和", async () => {
+    daemon.listDaemonMachines.mockResolvedValue(wrapMachines([makeRuntime({ id: "rt-p", name: "ProvClaude" })]));
+    daemon.getRuntimesUsage.mockResolvedValue(
+      usageResponse("7d", [makeUsageItem("rt-p", { input_tokens: 146_036 }, [], PROVIDER_ROWS)]),
+    );
+
+    await renderAndWaitForUsage();
+    const card = await findUsageSectionByName("ProvClaude");
+    // 表头断言限定在 table 内——「输入」「输出」同时是 UsageStat label，不限定会多匹配。
+    const table = within(card).getByRole("table");
+    for (const header of ["供应商", "模型", "输入", "输出", "缓存读", "缓存写", "调用"]) {
+      expect(within(table).getByText(header)).toBeInTheDocument();
+    }
+    // 供应商名（已知 + 「未记录」兜底）与模型名
+    expect(within(table).getAllByText("智谱 GLM（王鹏的）").length).toBe(2);
+    expect(within(table).getByText("未记录")).toBeInTheDocument();
+    expect(within(table).getByText("glm-4.7")).toBeInTheDocument();
+    expect(within(table).getByText("glm-4.5-air")).toBeInTheDocument();
+    // 数字复用 formatTokens：140210→140.2k / 10502→10.5k / 540000→540.0k / 5726→5.7k
+    expect(within(table).getByText("140.2k")).toBeInTheDocument();
+    expect(within(table).getByText("10.5k")).toBeInTheDocument();
+    expect(within(table).getByText("540.0k")).toBeInTheDocument();
+    expect(within(table).getByText("5.7k")).toBeInTheDocument();
+    // 调用列：数值行 35；「未记录」行 api_requests=null → 调用列「—」
+    expect(within(table).getByText("35")).toBeInTheDocument();
+    expect(within(table).getAllByText("—").length).toBeGreaterThanOrEqual(1);
+    // 调用次数 stat = 35 + 3 + 0(null 按 0) = 38
+    expect(within(card).getByText("38")).toBeInTheDocument();
+  });
+
+  it("by_provider=[]（老 daemon / 老数据）→ 隐藏分组明细区（无表头/footnote），调用次数显示「—」", async () => {
+    daemon.listDaemonMachines.mockResolvedValue(wrapMachines([makeRuntime({ id: "rt-empty", name: "LegacyClaude" })]));
+    daemon.getRuntimesUsage.mockResolvedValue(
+      usageResponse("7d", [makeUsageItem("rt-empty", { input_tokens: 1000 })]),
+    );
+
+    await renderAndWaitForUsage();
+    const card = await findUsageSectionByName("LegacyClaude");
+
+    // 明细表与 footnote 均不渲染
+    expect(within(card).queryByRole("table")).not.toBeInTheDocument();
+    expect(within(card).queryByText("供应商")).not.toBeInTheDocument();
+    expect(within(card).queryByText(/调用次数为 API 请求全口径/)).not.toBeInTheDocument();
+    // 调用次数 stat 显示「—」（按 label 定位到 UsageStat 格子再验值，避免误伤缓存格的「—」）
+    const label = within(card).getByText("调用次数");
+    expect(label.parentElement).toHaveTextContent("—");
+  });
+
+  it("footnote 文案存在：API 全口径 vs 套餐计费口径 + 「未记录」说明（NFR-04）", async () => {
+    daemon.listDaemonMachines.mockResolvedValue(wrapMachines([makeRuntime({ id: "rt-fn", name: "FootnoteClaude" })]));
+    daemon.getRuntimesUsage.mockResolvedValue(
+      usageResponse("7d", [makeUsageItem("rt-fn", { input_tokens: 100 }, [], [ZHIPU_GLM_ROW])]),
+    );
+
+    await renderAndWaitForUsage();
+    const card = await findUsageSectionByName("FootnoteClaude");
+
+    expect(
+      within(card).getByText(/调用次数为 API 请求全口径（含子代理），与套餐计费口径可能略有出入/),
+    ).toBeInTheDocument();
+    expect(within(card).getByText(/「未记录」= 旧数据或旧版 daemon 未上报/)).toBeInTheDocument();
   });
 });

@@ -94,6 +94,7 @@ from app.modules.daemon.schema import (
     ListDirRequest,
     ListDirResponse,
     ListRootsResponse,
+    ModelUsageItemRead,
     OwnerRead,
     PlanModeEnteredEvent,
     PlanResponseRequest,
@@ -1263,6 +1264,17 @@ class InteractiveRunResultRequest(BaseModel):
     duration_api_ms: int | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    # ── cache 两维（2026-08-29-usage-by-provider-model task-02 补漏）：daemon
+    # task-16 起就在 payload 里发送 cache_*_tokens，但本 DTO 一直缺这两个字段
+    # 被 pydantic 静默丢弃——DB 里的 interactive cache 值实为实时上报的快照 max，
+    # 终态覆盖从未生效。现补齐对齐 batch 路径。
+    cache_read_tokens: int | None = None
+    cache_creation_tokens: int | None = None
+    # ── 模型明细与调用次数（FR-01-3/FR-02-1，2026-08-29-usage-by-provider-model）：
+    # modelUsage 逐模型拆行（含子代理）；api_requests 为 run 级精确计数（assistant
+    # 消息数含子代理）。旧 daemon 不传 → None → 明细无行（N-01 兼容）。
+    model_usage: list[ModelUsageItemRead] | None = None
+    api_requests: int | None = None
     # task-06 / FR-02：daemon classifyModelError 回传的模型层错误（可选）。
     # 旧 daemon 不传 → None → AgentRun.error_detail 保持 None（design §9 兼容）。
     error: ModelErrorDTO | None = None
@@ -1314,6 +1326,10 @@ async def close_interactive_run(
         duration_api_ms=data.duration_api_ms,
         input_tokens=data.input_tokens,
         output_tokens=data.output_tokens,
+        cache_read_tokens=data.cache_read_tokens,
+        cache_creation_tokens=data.cache_creation_tokens,
+        model_usage=data.model_usage,
+        api_requests=data.api_requests,
         error=data.error,
     )
     return InteractiveRunResultResponse(
@@ -2340,7 +2356,8 @@ async def create_session(
     svc = DaemonService(session)
     # 2026-08-14-sessions-portal task-02：DTO 具名化迁 schema.py。runtime_id/
     # agent_profile_id/llm_provider_id 仅透传 service（解析归 task-03）；model
-    # 字段已随 design §5 移除（由档案/默认派生）。
+    # 曾随 design §5 移除，D-002@v1（2026-08-29-usage-by-provider-model）恢复
+    # 透传（预会话级联首句模型，None/空串=跟随供应商配置）。
     # task-09（2026-08-24-session-team-mission-context / FR-05/06）：预会话团队
     # 任务块透传（共享校验/预建/简报归 service，本端点仅此一处路由改动）。
     # 2026-08-25-unified-floating-session（FR-5）：页面上下文块透传（前导构建
@@ -2358,6 +2375,7 @@ async def create_session(
         runtime_id=data.runtime_id,
         agent_profile_id=data.agent_profile_id,
         llm_provider_id=data.llm_provider_id,
+        model=data.model,
         manual_approval=data.manual_approval,
         ask_user_only=data.ask_user_only,
         change_id=data.change_id,
@@ -2407,6 +2425,10 @@ async def inject_session(
         prompt=data.prompt,
         agent_profile_id=data.agent_profile_id,
         llm_provider_id=data.llm_provider_id,
+        # task-11（2026-08-29-usage-by-provider-model / FR-03-3）：会话级模型选择
+        # 透传（空串=跟随供应商配置；非空需同请求携带 llm_provider_id，422 守卫
+        # 归 SessionService 入口）。
+        model=data.model,
         # 2026-08-20-session-multimodal-attachments task-05：附件引用透传
         # （协调者扩权本文件：DTO 新字段须经路由转达 service，卡内已同步）。
         attachment_ids=data.attachment_ids or None,

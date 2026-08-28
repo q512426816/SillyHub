@@ -1811,10 +1811,15 @@ class SessionService:
                     "provider_name": (
                         llm_provider_row.name if llm_provider_row is not None else None
                     ),
+                    # D-002@v1：显式选择的 model 优先（预会话级联首句）；缺省
+                    # 回落供应商配置派生（展示口径与下发 config["model"] 一致）。
                     "model": (
-                        (llm_provider_row.model or llm_provider_row.default_fallback_model)
-                        if llm_provider_row is not None
-                        else None
+                        model
+                        or (
+                            (llm_provider_row.model or llm_provider_row.default_fallback_model)
+                            if llm_provider_row is not None
+                            else None
+                        )
                     ),
                     "engine": provider,
                     "machine_name": machine_name,
@@ -2734,6 +2739,12 @@ class SessionService:
         # SESSION_SWITCH_CONFIG 下发归 task-05；默认 None 不改既有行为）。
         agent_profile_id: str | None = None,
         llm_provider_id: str | None = None,
+        # task-11（2026-08-29-usage-by-provider-model / FR-03-3 / FR-03-4 /
+        # D-002@v1）：会话级模型选择（三态，与 llm_provider_id None/空串语义
+        # 同构）：None=不动（零回归）；空串=显式「跟随供应商配置」重置；
+        # 非空=显式选模型（构成切换轮，R-07 兜底模型快照级同步见
+        # _inject_into_session 切换段）。
+        model: str | None = None,
         # 2026-08-20-session-multimodal-attachments task-05：附件引用（D-7 豁免
         # 空 prompt；引擎/归属/数量校验见 _inject_into_session；组装下发归 task-06）。
         attachment_ids: list[uuid.UUID] | None = None,
@@ -2774,10 +2785,26 @@ class SessionService:
         "none" → 清空回本机默认）。都 None → 原有 inject 行为零回归；send 失败
         按既有收敛（Grill C-11）。
 
+        task-11（2026-08-29-usage-by-provider-model / FR-03-3 / design §4.2）：
+        ``model`` 三态——None=不动（零回归）；空串=显式「跟随供应商配置」重置；
+        非空=显式选模型（模型依赖供应商——本入口守卫：未显式携带非空
+        ``llm_provider_id`` → 422）。②③ 都构成切换轮，下发 daemon 的
+        ProviderConfig 快照同步 ``default_fallback_model=model``（R-07 消兜底
+        遮蔽），见 :meth:`_inject_into_session`。
+
         P1（2026-08-25 会话路径二审 #1）：附件校验 + gate 解析 + MinIO 组装在
         取锁前完成（:meth:`_preassemble_inject_attachments`，普通读）——行锁窗口
         只含可注入状态判定 + 写入；锁内复核 gate 基准漂移（见组装段）。
         """
+        # task-11（FR-03-3）：模型依赖供应商——model 非空而本次请求未显式携带
+        # 非空 llm_provider_id（None/空串）→ 422。口径单一来源在本入口（HTTP
+        # inject 路由 / 激活分支统一覆盖；空 prompt 豁免条件无需扩——model 非空
+        # ⟹ llm_provider_id 非空，已被既有豁免覆盖）。
+        if model and not (llm_provider_id or "").strip():
+            raise DaemonSessionConfigInvalid(
+                "模型依赖供应商：选择模型时必须同时指定供应商。",
+                details={"reason": "model_requires_provider", "model": model},
+            )
         # ql-20260817-010：静默切换——携带切换字段时允许空 prompt（切换轮无用户
         # 消息/模型回应，daemon 只 reload 配置）；纯追问仍要求非空。
         # 2026-08-20 task-05（D-7）：附件非空也豁免空 prompt（看图说话）。
@@ -2904,8 +2931,19 @@ class SessionService:
         # 存在）的 tool_report 会话与 origin 缺省的 chat 会话不进本分支，走既有
         # inject 路径零回归（design §3.3.4 第 5 点）。
         # 二审 #2：切换字段（agent_profile_id/llm_provider_id）与附件透传进激活
-        # 事务（照 create_session 语义落 config，附件随首轮下发），不再静默丢弃。
+        # 事务（照 create_session 语义落配置，附件随首轮下发），不再静默丢弃。
+        # task-11（2026-08-29-usage-by-provider-model）：激活轮暂不支持会话级选
+        # 模型——激活路径的供应商配置经 claim 链组装（lease/context），快照级
+        # model 同步不在本 task 范围；显式 422 拒绝而非静默丢弃（铁律：不吞参数）。
         if getattr(session, "origin", "chat") == "tool_report" and session.lease_id is None:
+            if model:
+                raise DaemonSessionConfigInvalid(
+                    "该会话尚未激活，暂不支持在激活消息中切换模型；请激活后再选模型。",
+                    details={
+                        "reason": "activation_model_unsupported",
+                        "session_id": str(session.id),
+                    },
+                )
             return await self._activate_tool_report_session(
                 session,
                 user_id,
@@ -2923,6 +2961,8 @@ class SessionService:
             # sessions-portal task-05：切换参数透传共享核心（service 路径不传=零回归）。
             agent_profile_id=agent_profile_id,
             llm_provider_id=llm_provider_id,
+            # task-11：会话级模型选择透传（None/空串=不选，零回归）。
+            model=model,
             # 2026-08-20 task-05：附件透传（None → 空列表零回归）。
             attachment_ids=list(attachment_ids) if attachment_ids else None,
             # P1（二审 #1）：取锁前预组装产物（rows + payload + gate 快照）。
@@ -2997,6 +3037,11 @@ class SessionService:
         # 不传 → 走原有 inject 行为（零回归）。
         agent_profile_id: str | None = None,
         llm_provider_id: str | None = None,
+        # task-11（2026-08-29-usage-by-provider-model / FR-03-3）：会话级模型选择
+        # （三态：None=不动；空串=显式重置跟随供应商配置；非空=显式选模型——
+        # 守卫在 inject_session 入口，本方法的直调方不携带）。②③ 均构成切换轮
+        # （进 SESSION_SWITCH_CONFIG 分支）。
+        model: str | None = None,
         # 2026-08-20-session-multimodal-attachments task-05：附件引用（None → 零
         # 回归）。校验（引擎门控/归属/数量）在本方法事务内；组装下发归 task-06。
         attachment_ids: list[uuid.UUID] | None = None,
@@ -3025,6 +3070,17 @@ class SessionService:
         会话三列刷新 + lease metadata 同步 + SESSION_SWITCH_CONFIG 原子下发）；
         空串 = "none" → 清空会话供应商回本机默认（写 NULL）；都 None / 等值 →
         原有行为逐字段不变（零回归）。
+
+        task-11（2026-08-29-usage-by-provider-model / FR-03-3、FR-03-4 / R-07）：
+        ``model`` 三态（与 ``llm_provider_id`` None/空串语义同构）——None=不动
+        （普通轮/纯档案切换零回归）；空串=显式「跟随供应商配置」重置；非空=
+        显式选模型（→ 切换分支，daemon reload 重建 driver，ANTHROPIC_MODEL
+        生效），且下发 daemon 的 ProviderConfig 快照同步 ``model=model`` 且
+        ``default_fallback_model=model``（credential-injector 规则3 优先级
+        ``default_fallback_model ?? model``，不同步会被供应商兜底模型静默遮蔽；
+        快照级覆盖，不动 llm_providers 原配置）。空串/切供应商时随供应商原配置
+        重置（无旧模型残留），纯档案切换（不带 model 键）不动模型（沿用会话
+        已选，含下发快照同步）；config_snapshot.model 回填本轮生效模型（展示用）。
         """
         session_id = session.id
         now = datetime.now(UTC)
@@ -3244,7 +3300,26 @@ class SessionService:
                         provider_changed = True
                         new_llm_provider_id = provider_row.id
 
-            config_switch = profile_changed or provider_changed
+            # ── task-11（2026-08-29-usage-by-provider-model / FR-03-3 / design §4.2）：
+            # 会话级模型选择解析（三态，与 llm_provider_id None/空串语义同构）：
+            # ① None（不带键）= 不动——普通轮/纯档案切换零回归（前端聊天路径
+            # 恒不带 model 键）；② 空串 = 显式「跟随供应商配置」重置（前端切模
+            # 型选「默认」、切供应商级联重置均发空串）；③ 非空 = 显式选模型
+            # （依赖供应商——守卫在 inject_session 入口）。②③ 都构成切换轮（进
+            # SESSION_SWITCH_CONFIG 分支，daemon reload 重建 driver 使
+            # ANTHROPIC_MODEL 生效）。
+            selected_model: str | None = None
+            model_reset = False
+            if model is None:
+                pass
+            elif model.strip():
+                selected_model = model
+            else:
+                model_reset = True
+
+            config_switch = (
+                profile_changed or provider_changed or selected_model is not None or model_reset
+            )
 
             # ql-20260818-002：切换字段与当前值**等值**（不构成切换）+ 空 prompt →
             # 拒绝——否则落普通 inject 路径发空 prompt SESSION_INJECT（daemon 拒收
@@ -3278,6 +3353,41 @@ class SessionService:
                 from app.modules.llm_provider.model import LlmProvider
 
                 effective_provider = await self._session.get(LlmProvider, session.llm_provider_id)
+
+            # ── task-11（FR-03-3 / design §4.2）：本轮生效模型（config_snapshot
+            # 展示与下发 providerConfig 同步的单一口径）─────────────────────────
+            # ① 显式选模型 → 所选；② 显式切供应商（含空串清空）→ 重置回新供应
+            # 商原配置（避免旧供应商所选模型残留）；③ model 空串「跟随配置」→
+            # 重置回当前供应商原配置；④ 纯档案切换/供应商等值（不带 model 键）→
+            # 会话级模型**不动**（沿用此前所选；无历史快照的旧会话回落供应商原
+            # 配置，与 task-05 重算口径一致）。model_override 标记「生效模型是
+            # 会话级选择」（非供应商原配）——下发 providerConfig 时才做 R-07
+            # 快照同步；重置场景（②③）保持原样透传零回归。
+            prior_model = (session.config_snapshot or {}).get("model")
+            provider_original = (
+                (effective_provider.model or effective_provider.default_fallback_model)
+                if effective_provider is not None
+                else None
+            )
+            if selected_model is not None:
+                effective_model: str | None = selected_model
+                model_override = True
+            elif provider_changed:
+                effective_model = (
+                    (provider_row.model or provider_row.default_fallback_model)
+                    if provider_row is not None
+                    else None
+                )
+                model_override = False
+            elif model_reset:
+                effective_model = provider_original
+                model_override = False
+            elif prior_model is not None:
+                effective_model = prior_model
+                model_override = True
+            else:
+                effective_model = provider_original
+                model_override = False
 
             config = dict(session.config or {})
             # ── 2026-08-22-team-session-unify task-04 / D-009@v1：主控轮双标记 ──
@@ -3376,11 +3486,9 @@ class SessionService:
                     "provider_name": (
                         effective_provider.name if effective_provider is not None else None
                     ),
-                    "model": (
-                        (effective_provider.model or effective_provider.default_fallback_model)
-                        if effective_provider is not None
-                        else None
-                    ),
+                    # task-11（FR-03-4）：回填本轮生效模型（显式所选 / 供应商原配
+                    # / 纯档案切换沿用已选），前端配置条展示用。
+                    "model": effective_model,
                     "engine": session.provider,
                     "machine_name": machine_name,
                     "agent_name": agent_name,
@@ -3514,6 +3622,20 @@ class SessionService:
                             "Session provider config could not be resolved.",
                             details={"llm_provider_id": str(effective_provider.id)},
                         )
+                    # ── task-11 / R-07（design §4.2 兜底模型遮蔽规则）：会话级
+                    # 选模型时，快照同步 model 且 default_fallback_model=所选——
+                    # credential-injector 规则3 优先级 ``default_fallback_model ??
+                    # model``，仅改 model 会被供应商兜底模型静默遮蔽。纯档案切换
+                    # 轮也同步（沿用会话已选模型，防 reload 丢所选回退兜底）；
+                    # 纯切供应商（重置回原配置）不覆盖，快照原样透传零回归。
+                    # 均为**快照级覆盖**（copy 后改写），不动 llm_providers 原配置。
+                    # openai_chat 快照无 default_fallback_model 键（单模型经
+                    # litellm_model_name 路由），仅同步 model。
+                    if model_override and effective_model is not None:
+                        provider_config_payload = dict(provider_config_payload)
+                        provider_config_payload["model"] = effective_model
+                        if "default_fallback_model" in provider_config_payload:
+                            provider_config_payload["default_fallback_model"] = effective_model
                 else:
                     provider_config_payload = None
                 profile_payload = None

@@ -25,7 +25,7 @@ import { REST_PREFIX } from './protocol.js';
 import { DAEMON_VERSION } from './daemon-version.js';
 import { BUILD_ID } from './build-id.js';
 import type { ExecutionContextPayload } from './types.js';
-import type { SessionRecoverStatus } from './daemon.js';
+import type { ModelUsageRow, SessionRecoverStatus } from './daemon.js';
 // task-04（FR-01 / D-005@v1）：notifyRunResult payload 的 error 字段类型。
 // 与 backend ModelErrorDTO、daemon/src/model-error/types.ts ModelError 三端同构。
 import type { ModelError } from './model-error/types.js';
@@ -691,16 +691,47 @@ export class HubClient {
    * 完成 lease，提交 result（含 patch / stats / status）。
    * 端点：POST {REST_PREFIX}/leases/{leaseId}/complete，
    * body `{ claim_token, result }`。
+   *
+   * task-07（2026-08-29-usage-by-provider-model / FR-01-4 / FR-02-2）：可选
+   * statsExtras 条件注入 result.stats 的 model / api_requests——backend
+   * complete_lease 从 stats.model / stats.api_requests 落明细（design §4.1）。
+   * undefined 不写：extras 缺省 / 字段 undefined 时 body 与老链路逐字节一致
+   *（老 daemon 兼容 N-01）；result.stats 已含同名字段时不覆盖（stats 优先，幂等）。
+   * 主数据路径是 task-runner 在 complete stats 组装时直接写入两字段（随
+   * result.stats 整体透传），本参数是调用方显式补充通道。不修改调用方传入的
+   * result / stats 对象（浅拷贝后写入）。
    */
   async completeLease(
     leaseId: string,
     claimToken: string,
     result: Record<string, unknown>,
+    statsExtras?: { model?: string; api_requests?: number },
   ): Promise<Record<string, unknown>> {
+    let bodyResult = result;
+    if (
+      statsExtras !== undefined &&
+      (statsExtras.model !== undefined || statsExtras.api_requests !== undefined)
+    ) {
+      const rawStats = result.stats;
+      const stats =
+        rawStats && typeof rawStats === 'object' && !Array.isArray(rawStats)
+          ? { ...(rawStats as Record<string, unknown>) }
+          : {};
+      if (statsExtras.model !== undefined && stats.model === undefined) {
+        stats.model = statsExtras.model;
+      }
+      if (
+        statsExtras.api_requests !== undefined &&
+        stats.api_requests === undefined
+      ) {
+        stats.api_requests = statsExtras.api_requests;
+      }
+      bodyResult = { ...result, stats };
+    }
     return this._request<Record<string, unknown>>(
       'POST',
       `${REST_PREFIX}/leases/${encodeURIComponent(leaseId)}/complete`,
-      { claim_token: claimToken, result } satisfies CompleteLeaseBody,
+      { claim_token: claimToken, result: bodyResult } satisfies CompleteLeaseBody,
     );
   }
 
@@ -795,6 +826,12 @@ export class HubClient {
       // backend 收不到该字段 → NULL（D-001@v1）。
       cache_read_tokens?: number;
       cache_creation_tokens?: number;
+      // task-06（2026-08-29-usage-by-provider-model / FR-01-3/FR-02-1）：
+      // modelUsage 逐模型明细行（daemon._modelUsageRows 拆行）+ run 级 assistant
+      // 计数。modelUsage 缺失/空时 daemon 不 set 两字段（老 CLI 兼容，backend
+      // None → 明细无行，N-01）。ModelUsageRow wire 形状归 daemon.ts 拥有。
+      model_usage?: ModelUsageRow[];
+      api_requests?: number;
       // task-04（FR-01 / D-005@v1）：模型层结构化错误。仅 is_error=true 且归类器产出
       // 非空 ModelError 时 set（session-manager turn 收尾归类 + 挂到 result.modelError，
       // daemon 桥接读取注入）；成功路径 / 非模型错误不 set → backend error_detail=NULL（D-008）。
@@ -846,6 +883,16 @@ export class HubClient {
     }
     if (payload.cache_creation_tokens !== undefined) {
       body.cache_creation_tokens = payload.cache_creation_tokens;
+    }
+    // task-06（2026-08-29-usage-by-provider-model / FR-01-3/FR-02-1）：模型明细行
+    // 与 run 级调用次数透传。undefined（老 daemon / modelUsage 缺失）→ 不写 →
+    // backend InteractiveRunResultRequest None → 明细无行（N-01 兼容）。0 值合法
+    //（api_requests=0 诚实上报），用 `!== undefined` 守卫。
+    if (payload.model_usage !== undefined) {
+      body.model_usage = payload.model_usage;
+    }
+    if (payload.api_requests !== undefined) {
+      body.api_requests = payload.api_requests;
     }
     // task-04：模型层结构化错误守卫。undefined（成功 / 非模型错误，未 set）→ 不写 →
     // backend error_detail 保留 NULL（D-008 成功路径不回归）。非空对象直接透传（与

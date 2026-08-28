@@ -16,6 +16,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     literal,
     select,
@@ -401,6 +402,62 @@ class AgentRun(BaseModel, table=True):
     attempt: int = Field(
         default=0,
         sa_column=Column(Integer, nullable=False, default=0),
+    )
+
+
+class AgentRunModelUsage(BaseModel, table=True):
+    """Run × 模型维度的 token 用量明细行（2026-08-29-usage-by-provider-model task-01，design §1.1）。
+
+    一次 run 内按模型拆分的四维 token 消耗 + 调用次数——run 终态时由 daemon
+    上报的 modelUsage 明细落库（task-03/04 upsert，UNIQUE(run_id, model) 同 run
+    同模型覆盖）；统计侧按 model GROUP BY 聚合出「按供应商/模型」用量（task-05）。
+    run 删除级联清理明细行（FK CASCADE），不残留孤儿行。
+    """
+
+    __tablename__ = "agent_run_model_usage"
+    __table_args__ = (
+        # 同 run 同模型至多一行（终态 upsert 覆盖语义，design §1.1）；该约束
+        # 同时充当前导列 run_id 的查询索引（uq_daemon_runtime_grants 先例）。
+        # 模型与迁移建表两侧同语义（20260829010000）。
+        UniqueConstraint("run_id", "model", name="uq_agent_run_model_usage_run_model"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    run_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("agent_runs.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    # 模型名（daemon modelUsage key / ProviderConfig.model / "unknown"，design §1.1）。
+    model: str = Field(sa_column=Column(String(128), nullable=False))
+    # 该模型四维 token 消耗（列名/口径与 agent_runs 既有 token 列同义；新表
+    # 无历史包袱，直接 NOT NULL default 0，不像 run 级列留 nullable 旧债）。
+    input_tokens: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, default=0),
+    )
+    output_tokens: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, default=0),
+    )
+    cache_read_tokens: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, default=0),
+    )
+    cache_creation_tokens: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, default=0),
+    )
+    # 该模型调用次数（口径 design §2：interactive 各模型按消耗占比分摊估算、
+    # batch 单模型精确；default 1——行存在即至少一次调用）。
+    api_requests: int = Field(
+        default=1,
+        sa_column=Column(Integer, nullable=False, default=1),
     )
 
 

@@ -696,20 +696,15 @@ describe("SessionPanel 预会话首句创建失败（R-02）", () => {
 /* ───────── 6. ql-20260823-008：配置条/团队行同构挂载（provisional 暂存） ───────── */
 
 describe("SessionPanel 预会话配置条与团队行（ql-20260823-008 完全一致）", () => {
-  it("配置控件条渲染：机器/智能体只读（D-104 锁定同真会话），供应商/档案可选；派团队按钮解禁可点（task-13，门控三态见下方专项）", () => {
+  it("配置控件条渲染：供应商/档案可选（task-09 起配置条仅两块，机器/智能体块不再渲染）；派团队按钮解禁可点（task-13，门控三态见下方专项）", () => {
     setupPre();
 
     // 配置条在（aria-label 同真会话）
     expect(screen.getByLabelText("会话配置控件条")).toBeInTheDocument();
-    // 机器/智能体：与真会话 idle 同形态（展示型下拉可点开、选项标注需开新
-    // 会话，D-104 锁定语义由预会话上下文行承担；不断言 disabled——真会话
-    // idle 同样可点开，完全一致）。
-    expect(
-      screen.getByRole("button", { name: "配置-机器 —" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "配置-智能体 Claude Code" }),
-    ).toBeInTheDocument();
+    // task-09：机器/智能体展示块已移除（换机器/引擎需开新会话，块内无可执行
+    // 目标）；D-104 锁定语义由预会话上下文行承担。
+    expect(screen.queryByRole("button", { name: /^配置-机器/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^配置-智能体/ })).not.toBeInTheDocument();
     // 供应商/档案可选（未锁）
     const providerCtrl = screen.getByRole("button", {
       name: "配置-供应商 本机默认",

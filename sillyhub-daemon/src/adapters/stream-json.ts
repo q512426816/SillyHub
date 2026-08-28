@@ -84,6 +84,14 @@ export class StreamJsonAdapter implements ProtocolAdapter {
   private _lastAssistantText = '';
 
   /**
+   * task-07（2026-08-29-usage-by-provider-model / FR-02-2）：message_start 事件计数。
+   * 每个 message_start = 一次模型 API 调用（claude CLI 2.1.216 实测计数 == num_turns，
+   * design §2 batch 口径），task-runner 在 complete stats 组装时作 api_requests 上报。
+   * 与 resetAccumulator 同生命周期（跨 lease 清零，防 adapter 单例复用污染）。
+   */
+  private _messageStartCount = 0;
+
+  /**
    * 跨 assistant 事件累加的 usage（task-06：对齐 SERVER _extract_result_metadata 聚合策略）。
    * parseAssistant 每次累加 message.usage.input_tokens/output_tokens；
    * parseResult 时 extractResultStats 按「result.usage 优先，缺失才回落本值」取数
@@ -248,11 +256,23 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     // task-03：归类输入累加器一并清零，防跨 lease 污染（上一 lease 的 api_retry / assistant 残留不带入）。
     this._apiRetryError = '';
     this._lastAssistantText = '';
+    // task-07（2026-08-29-usage-by-provider-model）：message_start 计数一并清零
+    //（与 resetAccumulator 同生命周期，TaskCard constraints）。
+    this._messageStartCount = 0;
   }
 
   /** 读取累积的 session_id（供 TaskRunner 在 lease 结束时上报）。 */
   getSessionId(): string {
     return this.sessionId;
+  }
+
+  /**
+   * task-07（FR-02-2）：读取 message_start 计数（= 本 lease 的模型 API 调用次数）。
+   * TaskRunner 在 complete stats 组装时鸭子类型读取（ndjson/opencode 等其它
+   * adapter 无此 getter → 跳过 model/api_requests 两字段，零回归）。
+   */
+  get messageStartCount(): number {
+    return this._messageStartCount;
   }
 
   /** 读取 result 事件的最终状态（对照 Python getattr(self, '_last_result_info')）。 */
@@ -483,6 +503,9 @@ export class StreamJsonAdapter implements ProtocolAdapter {
     const eventType = typeof event.type === 'string' ? event.type : '';
 
     if (eventType === 'message_start') {
+      // task-07（2026-08-29-usage-by-provider-model / FR-02-2）：API 调用计数 +1
+      //（message_start 每次模型调用一发，实测 == num_turns，design §2 batch 口径）。
+      this._messageStartCount += 1;
       this._currentTurnHasRealUsage = false;
       // ql-20260617-007：新 turn 开始时清掉 emit 节流状态
       this._lastEmittedOutputTokens = 0;

@@ -9,6 +9,10 @@
 //   4. completeLease payload 完整（runLease 成功路径 → daemon 提交含 stats/exit_code/status）
 //   5. adapter reset（跨两次 runLease，_accumulatedUsage reset 生效）
 //
+// task-07（2026-08-29-usage-by-provider-model）追加：batch stats 增补
+// model / api_requests（stream-json message_start 计数 → complete stats →
+// hub-client completeLease 透传）。对齐 task-07.md FR-01-4 / FR-02-2。
+//
 // 对齐 task-06.md §实现要求 8 + AC-05。
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -33,8 +37,10 @@ import { spawn } from 'node:child_process';
 import { getBackend } from '../src/adapters/index.js';
 import { TaskRunner } from '../src/task-runner.js';
 import { StreamJsonAdapter } from '../src/adapters/stream-json.js';
+import { NdjsonAdapter } from '../src/adapters/ndjson.js';
+import { HubClient } from '../src/hub-client.js';
 import { createFakeChild, type FakeChild } from './helpers/fake-child.js';
-import type { AgentEvent, LeaseCtx } from '../src/types.js';
+import type { AgentEvent, LeaseCtx, ProviderConfig } from '../src/types.js';
 
 // ── 测试工具 ────────────────────────────────────────────────────────────────
 
@@ -521,5 +527,249 @@ describe('task-06 / case5: StreamJsonAdapter resetAccumulator', () => {
     // 不含污染的 999/888；只含本次 7/4
     expect(stats.input_tokens).toBe(7);
     expect(stats.output_tokens).toBe(4);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// task-07（2026-08-29-usage-by-provider-model）：batch stats 增补 model / api_requests
+//   a) stream-json 事件流（message_start×2 + assistant + result）跑完后
+//      TaskResult.stats 含 ProviderConfig.model 与 api_requests == message_start 数
+//   b) ProviderConfig 无 model → "unknown"
+//   c) ndjson（opencode）adapter 无 messageStartCount getter → 两字段不出现
+//   d) 计数器纯函数行为：随 message_start 递增、resetAccumulator 清零（同生命周期）
+//   e) hub-client completeLease statsExtras 条件透传（undefined 不写，老 body 形态不变）
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('task-07 / batch stats 增补 model / api_requests', () => {
+  /** 构造一条 stream_event message_start 行（task-07 计数口径：每发一次 = 1 次 API 调用）。 */
+  function messageStartLine(id: string, inputTokens: number): string {
+    return JSON.stringify({
+      type: 'stream_event',
+      event: {
+        type: 'message_start',
+        message: { id, usage: { input_tokens: inputTokens, output_tokens: 1 } },
+      },
+    });
+  }
+
+  it('a) stream-json 事件流跑完：TaskResult.stats 含 model（ProviderConfig.model）与 api_requests == message_start 数', async () => {
+    const realAdapter = new StreamJsonAdapter('claude');
+    mockAdapter = realAdapter;
+
+    const client = makeMockClient();
+    const workspace = makeMockWorkspace();
+    const credential = { get: vi.fn(() => undefined), buildEnv: vi.fn(() => ({})) };
+    const runner = new TaskRunner(
+      client as never,
+      workspace as never,
+      credential as never,
+    );
+
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    const providerConfig: ProviderConfig = { agent_kind: 'claude', model: 'glm-4.7' };
+    const lease = makeLease({ provider_config: providerConfig });
+    const runPromise = runner.runLease(lease);
+
+    await new Promise((r) => setImmediate(r));
+
+    // 2 个 turn：各 1 条 message_start（task-07 口径：计数 == num_turns）
+    child._emitLines([
+      messageStartLine('msg_1', 100),
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'msg_1',
+          content: [{ type: 'text', text: 'turn 1' }],
+          usage: { input_tokens: 0, output_tokens: 10 },
+        },
+      }),
+      messageStartLine('msg_2', 20),
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          id: 'msg_2',
+          content: [{ type: 'text', text: 'turn 2' }],
+          usage: { input_tokens: 0, output_tokens: 30 },
+        },
+      }),
+      JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        result: 'done',
+        session_id: 'sess-t07a',
+        usage: { input_tokens: 120, output_tokens: 40 },
+        num_turns: 2,
+      }),
+    ]);
+    child._endStdout();
+    child._emitExit(0);
+
+    const result = await runPromise;
+    const stats = result.stats as Record<string, unknown>;
+    // 既有 stats 语义零回归（ql-20260829-001 result.usage 优先）
+    expect(stats.input_tokens).toBe(120);
+    expect(stats.output_tokens).toBe(40);
+    expect(stats.num_turns).toBe(2);
+    // task-07 新增两字段
+    expect(stats.model).toBe('glm-4.7');
+    expect(stats.api_requests).toBe(2);
+    // TaskCard acceptance：计数 == num_turns（08-29 实测 fixture 口径）
+    expect(stats.api_requests).toBe(stats.num_turns);
+  });
+
+  it('b) ProviderConfig 无 model → "unknown"', async () => {
+    const realAdapter = new StreamJsonAdapter('claude');
+    mockAdapter = realAdapter;
+
+    const client = makeMockClient();
+    const workspace = makeMockWorkspace();
+    const credential = { get: vi.fn(() => undefined), buildEnv: vi.fn(() => ({})) };
+    const runner = new TaskRunner(
+      client as never,
+      workspace as never,
+      credential as never,
+    );
+
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    // ProviderConfig 存在但 model 缺省
+    const lease = makeLease({ provider_config: { agent_kind: 'claude' } });
+    const runPromise = runner.runLease(lease);
+
+    await new Promise((r) => setImmediate(r));
+
+    child._emitLines([
+      messageStartLine('msg_1', 50),
+      JSON.stringify({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        result: 'done',
+        session_id: 'sess-t07b',
+        usage: { input_tokens: 50, output_tokens: 5 },
+        num_turns: 1,
+      }),
+    ]);
+    child._endStdout();
+    child._emitExit(0);
+
+    const result = await runPromise;
+    const stats = result.stats as Record<string, unknown>;
+    expect(stats.model).toBe('unknown');
+    expect(stats.api_requests).toBe(1);
+  });
+
+  it('c) ndjson（opencode）adapter 无 getter → model / api_requests 两字段不出现', async () => {
+    // 对齐 cache-passthrough case5：ndjson 不产 complete.stats，stats 由
+    // mergeAdapterUsage 的 getUsage() 兜底；adapter 无 messageStartCount →
+    // attachBatchModelStats 跳过两字段（stats 形态不变，老链路零回归）。
+    const realAdapter = new NdjsonAdapter('opencode');
+    realAdapter.parse(
+      JSON.stringify({
+        type: 'step_finish',
+        part: { tokens: { input: 120, output: 80, cache: { read: 500, write: 60 } } },
+      }),
+    );
+    mockAdapter = realAdapter;
+
+    const client = makeMockClient();
+    const workspace = makeMockWorkspace();
+    const credential = { get: vi.fn(() => undefined), buildEnv: vi.fn(() => ({})) };
+    const runner = new TaskRunner(
+      client as never,
+      workspace as never,
+      credential as never,
+    );
+
+    const child = createFakeChild();
+    vi.mocked(spawn).mockReturnValue(child as never);
+
+    // 即便 lease 带 ProviderConfig.model，ndjson 无 getter 也不加两字段
+    const lease = makeLease({
+      provider: 'opencode',
+      provider_config: { agent_kind: 'opencode', model: 'gpt-5' },
+    });
+    const runPromise = runner.runLease(lease);
+
+    await new Promise((r) => setImmediate(r));
+
+    child._endStdout();
+    child._emitExit(0);
+
+    const result = await runPromise;
+    const stats = result.stats as Record<string, unknown>;
+    expect(stats.input_tokens).toBe(120);
+    expect('model' in stats).toBe(false);
+    expect('api_requests' in stats).toBe(false);
+  });
+
+  it('d) messageStartCount：随事件递增、resetAccumulator 清零（与累加器同生命周期）', () => {
+    const adapter = new StreamJsonAdapter('claude');
+    expect(adapter.messageStartCount).toBe(0);
+    adapter.parse(messageStartLine('msg_1', 10));
+    adapter.parse(messageStartLine('msg_2', 20));
+    expect(adapter.messageStartCount).toBe(2);
+    // resetAccumulator 一并清零（TaskCard constraints）
+    adapter.resetAccumulator();
+    expect(adapter.messageStartCount).toBe(0);
+    adapter.parse(messageStartLine('msg_3', 30));
+    expect(adapter.messageStartCount).toBe(1);
+  });
+
+  it('e) hub-client completeLease statsExtras 条件透传：写入 stats、undefined 不写、stats 已有字段不覆盖', async () => {
+    const calls: { init: RequestInit }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      (async (_url: unknown, init?: unknown) => {
+        calls.push({ init: (init ?? {}) as RequestInit });
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }) as typeof fetch,
+    );
+    const c = new HubClient('http://x:8000', 't');
+
+    // e-1：extras 提供两字段 → 注入 result.stats
+    await c.completeLease(
+      'lease-1',
+      'ct',
+      { status: 'completed', stats: { input_tokens: 120 } },
+      { model: 'glm-4.7', api_requests: 2 },
+    );
+    let body = JSON.parse(calls[0]!.init.body as string) as {
+      result: { stats: Record<string, unknown> };
+    };
+    expect(body.result.stats.input_tokens).toBe(120);
+    expect(body.result.stats.model).toBe('glm-4.7');
+    expect(body.result.stats.api_requests).toBe(2);
+
+    // e-2：不传 extras → body 与老链路逐字节一致（result 原样透传）
+    const result2 = { status: 'completed', stats: { input_tokens: 1 } };
+    await c.completeLease('lease-1', 'ct', result2);
+    body = JSON.parse(calls[1]!.init.body as string) as {
+      claim_token: string;
+      result: Record<string, unknown>;
+    };
+    expect(body).toEqual({ claim_token: 'ct', result: result2 });
+
+    // e-3：result.stats 已含同名字段 → extras 不覆盖（stats 优先，幂等）
+    await c.completeLease(
+      'lease-1',
+      'ct',
+      { status: 'completed', stats: { model: 'from-stats' } },
+      { model: 'from-extras', api_requests: 7 },
+    );
+    body = JSON.parse(calls[2]!.init.body as string) as {
+      result: { stats: Record<string, unknown> };
+    };
+    expect(body.result.stats.model).toBe('from-stats');
+    expect(body.result.stats.api_requests).toBe(7);
+
+    vi.unstubAllGlobals();
   });
 });

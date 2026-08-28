@@ -1409,6 +1409,12 @@ export class TaskRunner {
     // task-06：收集 complete 事件 metadata.stats（claude result 消息的 usage/cost）。
     // complete 事件通常仅一个，覆盖式赋值；失败路径保持 undefined。
     let lastStats: Record<string, unknown> | undefined;
+    // task-07（2026-08-29-usage-by-provider-model / FR-01-4 / FR-02-2）：终态 stats
+    // 组装单点 = task-16 mergeAdapterUsage（ndjson getUsage 兜底）+ attachBatchModelStats
+    // 增补 model / api_requests（仅 stream-json adapter 暴露 messageStartCount）。
+    // cancelled / timeout / failed / completed 五个 finishAttempt 出口共用。
+    const finalStats = (): Record<string, unknown> | undefined =>
+      attachBatchModelStats(mergeAdapterUsage(adapter, lastStats), ctx, adapter);
 
     // stderr 累积（用于失败诊断）+ observer raw 写入 + ql-20260706-009 实时 forward
     child.stderr?.on('data', (chunk: Buffer | string) => {
@@ -1654,15 +1660,15 @@ export class TaskRunner {
 
     // 计算最终状态
     if (cancelled) {
-      return finishAttempt({ status: 'cancelled', exitCode: exitCode || 1, error: 'task cancelled', stats: mergeAdapterUsage(adapter, lastStats) });
+      return finishAttempt({ status: 'cancelled', exitCode: exitCode || 1, error: 'task cancelled', stats: finalStats() });
     }
     if (timedOut) {
-      return finishAttempt({ status: 'timeout', exitCode: exitCode || 1, error: `task timed out after ${timeoutSec}s`, stats: mergeAdapterUsage(adapter, lastStats) });
+      return finishAttempt({ status: 'timeout', exitCode: exitCode || 1, error: `task timed out after ${timeoutSec}s`, stats: finalStats() });
     }
     // spawnErrorRef.current：spawn 错误（'error' 事件异步赋值）。用对象容器
     // 避免 TS 对闭包内赋值的 let 变量做错误 narrowing（详见声明处注释）。
     if (spawnErrorRef.current) {
-      return finishAttempt({ status: 'failed', exitCode: exitCode || 127, error: spawnErrorRef.current.message, stats: mergeAdapterUsage(adapter, lastStats) });
+      return finishAttempt({ status: 'failed', exitCode: exitCode || 127, error: spawnErrorRef.current.message, stats: finalStats() });
     }
     if (exitCode !== 0) {
       const errDetail = stderrBuf.trim();
@@ -1680,11 +1686,11 @@ export class TaskRunner {
         status: 'failed',
         exitCode: 1, // 统一映射非零退出为 1（对齐 Python 把非零 exit 视为 failed）
         error: errMsg,
-        stats: mergeAdapterUsage(adapter, lastStats),
+        stats: finalStats(),
         businessError,
       });
     }
-    return finishAttempt({ status: 'completed', exitCode: 0, stats: mergeAdapterUsage(adapter, lastStats) });
+    return finishAttempt({ status: 'completed', exitCode: 0, stats: finalStats() });
   }
 
   /**
@@ -3143,6 +3149,46 @@ export function mergeAdapterUsage(
     return lastStats;
   }
   return merged;
+}
+
+// ── task-07（2026-08-29-usage-by-provider-model）：batch stats 增补 model/api_requests ──
+
+/**
+ * task-07（FR-01-4 / FR-02-2 / design §3.2）：batch 终态 stats 增补两字段——
+ *   - model：lease ProviderConfig.model，空则 "unknown"（backend complete_lease
+ *     据此落 agent_run_model_usage 单行明细 + run.model 填充，design §4.1）；
+ *   - api_requests：adapter 的 message_start 计数（batch API 调用次数口径，
+ *     claude CLI 2.1.216 实测 == num_turns，design §2）。
+ *
+ * 鸭子类型门禁（对齐 resetAccumulator / getUsage 先例，不改 ProtocolAdapter 契约）：
+ * 仅 StreamJsonAdapter 暴露 messageStartCount getter；ndjson / opencode 等其它
+ * provider 无 getter → **两字段都不加**（stats 形态不变，老链路零回归）。
+ *
+ * stats 为 undefined（cancelled / spawn 失败等无 complete stats 的路径）→ 原样
+ * 返回 undefined，不为两字段凭空造 stats 对象（_finish 对 undefined 语义敏感）。
+ *
+ * 不修改入参 stats（浅拷贝后加键）——lastStats 同一引用还被 budget onStats 回调
+ * 持有，原地写键会污染外部观察快照。
+ *
+ * @param stats   mergeAdapterUsage 合并后的终态 stats（可能 undefined）
+ * @param ctx     lease 上下文（provider_config.model 取模型名）
+ * @param adapter ProtocolAdapter（鸭子类型读 messageStartCount）
+ * @returns 增补后的 stats 新对象（或原 undefined）
+ */
+export function attachBatchModelStats(
+  stats: Record<string, unknown> | undefined,
+  ctx: LeaseCtx,
+  adapter: ProtocolAdapter,
+): Record<string, unknown> | undefined {
+  const count = (adapter as { messageStartCount?: unknown }).messageStartCount;
+  if (typeof count !== 'number' || stats === undefined) {
+    return stats;
+  }
+  return {
+    ...stats,
+    model: ctx.provider_config?.model || 'unknown',
+    api_requests: count,
+  };
 }
 
 // ── task-08（D-006 / D-009）：budget 累计 + 软切断检查点 ──────────────────────

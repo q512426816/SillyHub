@@ -1146,6 +1146,10 @@ class RuntimeService:
         分组粒度(D-002@v1):1d→hour 桶(≤24 点),7d/30d→day 桶。
         since(D-004@v1):1d=本地自然日 today 00:00 转 UTC;7d/30d=now(UTC)-N 天。
 
+        by_provider(FR-04-1,2026-08-29-usage-by-provider-model):``agent_run_model_usage``
+        明细按 供应商×模型 聚合,同窗同 COALESCE 去重(见 ``_build_by_provider_sql``);
+        无明细(老 daemon/老数据)→ 空列表。
+
         ⚠️ 方言分支(R-05):生产 PostgreSQL 用 ``date_trunc``;后端单测用 SQLite
         in-memory(conftest.py),SQLite 无 ``date_trunc``,改用 ``strftime``。
         通过 ``self._session.bind.dialect.name`` 分支。
@@ -1178,8 +1182,15 @@ class RuntimeService:
         daily_params: dict[str, object] = {"since": since_param}
         daily_rows = (await self._session.execute(daily_sql, daily_params)).mappings().all()
 
+        # ── by_provider(供应商×模型分组,明细表 agent_run_model_usage;FR-04-1)──
+        by_provider_sql = sa_text(self._build_by_provider_sql(dialect))
+        by_provider_rows = (
+            (await self._session.execute(by_provider_sql, {"since": since_param})).mappings().all()
+        )
+
         # ── 聚合成 RuntimeUsageRead(延迟 import 避免循环依赖)──
         from app.modules.daemon.schema import (
+            ProviderModelUsageRead,
             RuntimeUsagePointRead,
             RuntimeUsageRead,
             RuntimeUsageSummaryRead,
@@ -1209,8 +1220,33 @@ class RuntimeService:
                 )
             )
 
+        # by_provider 按 rid 分组(注意 pid 是 provider uuid 不是 runtime;runtime
+        # 归属由 SELECT COALESCE(s.runtime_id, l.runtime_id) AS rid 单独给出)。
+        by_provider_map: dict[str, list[ProviderModelUsageRead]] = {}
+        for row in by_provider_rows:
+            rid = str(row["rid"])
+            # SUM(u.api_requests) 理论可 NULL(明细行缺 api_requests 时)→ None 透传
+            api_requests_raw = row["api_requests"]
+            by_provider_map.setdefault(rid, []).append(
+                ProviderModelUsageRead(
+                    provider_id=row["pid"],
+                    provider_name=row["pname"] if row["pname"] is not None else "未记录",
+                    model=str(row["model"]),
+                    input_tokens=int(row["input_tokens"] or 0),
+                    output_tokens=int(row["output_tokens"] or 0),
+                    cache_read_tokens=int(row["cache_read_tokens"] or 0),
+                    cache_creation_tokens=int(row["cache_creation_tokens"] or 0),
+                    api_requests=(int(api_requests_raw) if api_requests_raw is not None else None),
+                )
+            )
+
         result = [
-            RuntimeUsageRead(runtime_id=rid, summary=summary_map[rid], daily=daily_map.get(rid, []))
+            RuntimeUsageRead(
+                runtime_id=rid,
+                summary=summary_map[rid],
+                daily=daily_map.get(rid, []),
+                by_provider=by_provider_map.get(rid, []),
+            )
             for rid in summary_map
         ]
         log.info("runtime_usage_aggregated", window=window, runtime_count=len(result))
@@ -1333,6 +1369,41 @@ class RuntimeService:
             GROUP BY COALESCE(s.runtime_id, l.runtime_id),
                      {bucket}
             ORDER BY bucket ASC
+        """
+
+    @staticmethod
+    def _build_by_provider_sql(dialect: str) -> str:
+        """by_provider SQL(供应商×模型分组,FR-04-1 / design §4.3)。
+
+        明细表 ``agent_run_model_usage`` JOIN ``agent_runs`` → LEFT JOIN
+        ``llm_providers``(老 run 未记录供应商时 pid/pname 为 NULL,装配层归
+        「未记录」);runtime 归属沿用 summary 的 COALESCE 双 JOIN 去重——SELECT
+        额外投影 ``rid`` 并一并 GROUP BY,让分组按 (runtime, provider, model)
+        落桶。纯 GROUP BY 无时间桶,不需要 date_trunc/strftime;仅 ``created_at``
+        比较照 ``_build_summary_sql`` 的方言分支(见 ``cmp`` 变量)。
+        """
+        cmp = "r.created_at" if dialect == "postgresql" else "datetime(r.created_at)"
+        return f"""
+            SELECT COALESCE(s.runtime_id, l.runtime_id) AS rid,
+                   p.id                                     AS pid,
+                   p.name                                   AS pname,
+                   u.model                                  AS model,
+                   SUM(COALESCE(u.input_tokens, 0))          AS input_tokens,
+                   SUM(COALESCE(u.output_tokens, 0))         AS output_tokens,
+                   SUM(COALESCE(u.cache_read_tokens, 0))     AS cache_read_tokens,
+                   SUM(COALESCE(u.cache_creation_tokens, 0)) AS cache_creation_tokens,
+                   SUM(u.api_requests)                       AS api_requests
+            FROM agent_run_model_usage u
+            JOIN agent_runs r ON u.run_id = r.id
+            LEFT JOIN llm_providers p ON p.id = r.llm_provider_id
+            LEFT JOIN agent_sessions s ON r.agent_session_id = s.id
+            LEFT JOIN daemon_task_leases l ON r.lease_id = l.id
+            WHERE COALESCE(s.runtime_id, l.runtime_id) IS NOT NULL
+              AND {cmp} >= :since
+            GROUP BY COALESCE(s.runtime_id, l.runtime_id),
+                     p.id,
+                     p.name,
+                     u.model
         """
 
     @staticmethod

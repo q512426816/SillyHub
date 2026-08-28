@@ -924,6 +924,10 @@ function SessionPanelPage({
   // 点选暂存（无会话不 inject），首句 createSession 携带（""=不指定/本机默认不传）。
   const [preProviderId, setPreProviderId] = useState("");
   const [preProfileId, setPreProfileId] = useState("");
+  // D-002@v1（2026-08-29-usage-by-provider-model）：预会话模型暂存——级联专用
+  // 回调（不能复用 onProvisionalSwitch 二分收值），首句 createSession 携带
+  // （""=跟随供应商配置不传）。
+  const [preModelId, setPreModelId] = useState("");
   const [preError, setPreError] = useState<string | null>(null);
   // task-13（FR-05/D-009@v2）：预会话团队 payload 暂存——弹层确认后暂存（含
   // task-12 主 agent 选择器落定的 orchestrator_workspace_id），首句 createSession
@@ -1986,6 +1990,8 @@ function SessionPanelPage({
           // ql-20260823-008：预会话配置条暂存值随首句落为会话初始配置。
           ...(preProviderId ? { llm_provider_id: preProviderId } : {}),
           ...(preProfileId ? { agent_profile_id: preProfileId } : {}),
+          // D-002@v1：预会话级联模型随首句携带（""=跟随供应商配置不传）。
+          ...(preModelId ? { model: preModelId } : {}),
           // task-13（FR-05/D-009@v2）：弹层确认暂存的团队 payload 随首句上送
           //（有值才带；后端 create 路径预建 mission，objective 空时以首句回填）。
           ...(preTeamMission ? { team_mission: preTeamMission } : {}),
@@ -2021,6 +2027,7 @@ function SessionPanelPage({
       onPreSessionCreated,
       preProviderId,
       preProfileId,
+      preModelId,
       preTeamMission,
     ],
   );
@@ -2530,8 +2537,8 @@ function SessionPanelPage({
             teamTriggerDisabled={preTeamButtonDisabled}
             teamTriggerTitle={preTeamButtonTitle}
           />
-          {/* ql-20260823-008：配置控件条同构挂载（provisional 暂存模式）——机器/
-              智能体只读（D-104 锁定与真会话一致），供应商/档案可选暂存随首句生效。 */}
+          {/* ql-20260823-008：配置控件条同构挂载（provisional 暂存模式）——
+              供应商/档案可选暂存随首句生效（task-09 起配置条仅此两块）。 */}
           <div className="px-5 pb-3">
             <SessionConfigBar
               sessionId=""
@@ -2541,12 +2548,13 @@ function SessionPanelPage({
               agentProfileId={preProfileId || null}
               llmProviderId={preProviderId || null}
               configSnapshot={null}
-              runtimeId={preContext?.runtimeId ?? null}
               engine={preEngine}
               onProvisionalSwitch={(field, value) => {
                 if (field === "llm_provider_id") setPreProviderId(value);
                 else setPreProfileId(value);
               }}
+              // D-002@v1：模型暂存专用回调（onProvisionalSwitch 二分收值会误写档案）。
+              onProvisionalModelSwitch={setPreModelId}
             />
           </div>
           {/* R-02：创建失败内联错误（输入保留在上框，点发送即重试）。 */}
@@ -3035,7 +3043,6 @@ function SessionPanelPage({
             agentProfileId={session.agent_profile_id ?? null}
             llmProviderId={session.llm_provider_id ?? null}
             configSnapshot={session.config_snapshot ?? null}
-            runtimeId={session.runtime_id ?? null}
             engine={session.provider ?? null}
             onSwitched={() => {
               // 切换成功 → 刷新会话详情（三列快照）+ 左侧列表 chips + runsMeta
