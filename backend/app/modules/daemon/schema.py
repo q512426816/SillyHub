@@ -1050,6 +1050,11 @@ class TeamMissionSummary(BaseModel):
     scope_workspace_ids: list[str]
     scope_workspaces: list[TeamWorkspaceRef] = Field(default_factory=list)
     budget_usd: float | None
+    # ql-20260828-012-4425：编辑回显三件套（mission 行直取，前端弹层
+    # initialConfig 派生——点击「团队进行中」标签重新指派时回显当前配置）。
+    project_id: uuid.UUID | None = None
+    worker_preset: list[dict] | None = None
+    main_agent_config: dict | None = None
     workers: list[TeamMissionWorkerSummary] = Field(default_factory=list)
 
 

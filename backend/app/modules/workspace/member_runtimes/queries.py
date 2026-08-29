@@ -133,7 +133,12 @@ async def resolve_daemon_instance_for_workspace(
        ``daemon_id`` 即 instance id（daemon-entity-binding 后稳定绑定键，
        daemon-client workspace 的源码物理位于某台 daemon 宿主，workspace 编码了
        "哪个 daemon 的宿主有源"，多成员绑定时取带 ``daemon_id`` 的行即源宿主
-       daemon，LIMIT 1）。
+       daemon，``LIMIT 1``）。多成员多机绑定时按统一全序
+       ``ORDER BY 实例心跳（daemon_instances.last_heartbeat_at）DESC,
+       daemon_id ASC`` 选行（D-005@v1）——与
+       :func:`resolve_representative_binding` 同键全序，相同候选集上两解析
+       必收敛同机（钉定链路与 host_fs worktree 路由不分叉），心跳并列时
+       daemon_id 升序 tie-break。
     2. 无 binding 行 → 返回 None（genuinely unbound，caller 兜底报错）。
        legacy ``workspaces.daemon_runtime_id`` join fallback 已删（D-005）。
 
@@ -142,13 +147,21 @@ async def resolve_daemon_instance_for_workspace(
     """
     try:
         # member binding（唯一来源）— daemon_id 即 instance id。
+        # 双源同序（D-005@v1）：与 resolve_representative_binding 统一全序
+        # ORDER BY di.last_heartbeat_at DESC NULLS LAST, daemon_id ASC——相同候选集
+        # 上钉定解析与 host_fs 路由必收敛同机。inner join daemon_instances 会静默
+        # 丢弃 daemon_instances 行缺失的 stale 绑定行（良性——该 daemon 实体已
+        # 不存在，本就不可路由）；不加 online 过滤（design 风险登记口径）：离线
+        # 机器靠心跳排序自然靠后，RPC 失败由 worktree 创建链路 fail-loud 兜底。
         result = await session.execute(
             text(
                 """
-                SELECT daemon_id
-                FROM workspace_member_runtimes
-                WHERE workspace_id = :wid
-                  AND daemon_id IS NOT NULL
+                SELECT wmr.daemon_id
+                FROM workspace_member_runtimes wmr
+                JOIN daemon_instances di ON di.id = wmr.daemon_id
+                WHERE wmr.workspace_id = :wid
+                  AND wmr.daemon_id IS NOT NULL
+                ORDER BY di.last_heartbeat_at DESC NULLS LAST, wmr.daemon_id ASC
                 LIMIT 1
                 """
             ),
@@ -271,8 +284,15 @@ async def resolve_representative_binding(
 
     1. **owner 在线优先**：查询 workspace.created_by（owner）的在线 binding。
     2. **任意在线兜底**：owner 无在线 binding，查该 workspace 任意 member 的在线
-       binding（按 daemon 最近心跳排序，与派发链路同一启发式）。
+       binding（按 daemon 实例心跳排序；daemon 内 runtime 选择仍与派发链路同一
+       启发式——runtime 最近心跳优先）。
     3. **均无在线**：返回 None（调用方抛 NoOnlineDaemonError）。
+
+    daemon 选择统一全序 ``ORDER BY daemon_instances.last_heartbeat_at DESC
+    NULLS LAST, daemon_id ASC``（D-005@v1）——与
+    :func:`resolve_daemon_instance_for_workspace` 同键全序，多成员多机绑定时
+    两解析（钉定链路 vs host_fs worktree 路由）必收敛同机；心跳并列时
+    daemon_id 升序 tie-break，结果确定。
 
     在线判定复用派发链路同一标准（daemon_instances.status = 'online'），返回的
     runtime dict shape 与 query_runtime_by_daemon_and_provider 一致
@@ -293,7 +313,9 @@ async def resolve_representative_binding(
         # 关键修复：provider 非空时必须在SQL层过滤 runtime，否则owner的daemon在线
         # 但无匹配provider的runtime时会错误地走到分支2
         if provider:
-            # provider 非空：直接查 owner 的匹配 provider 的在线 runtime
+            # provider 非空：直接查 owner 的匹配 provider 的在线 runtime。
+            # daemon 选择按统一全序（D-005@v1，与路由查询同键）——owner 多绑定
+            # 多候选时确定选行，owner 优先语义不变。
             result = await session.execute(
                 text(
                     """
@@ -308,6 +330,7 @@ async def resolve_representative_binding(
                       AND di.status = 'online'
                       AND dr.status = 'online'
                       AND dr.provider = :prov
+                    ORDER BY di.last_heartbeat_at DESC NULLS LAST, wmr.daemon_id ASC
                     LIMIT 1
                     """
                 ),
@@ -325,7 +348,8 @@ async def resolve_representative_binding(
                 )
                 return runtime
         else:
-            # provider 为空：查 owner 的任意在线 daemon，再取任意 runtime
+            # provider 为空：查 owner 的任意在线 daemon，再取任意 runtime。
+            # daemon 选择按统一全序（D-005@v1，与路由查询同键）。
             result = await session.execute(
                 text(
                     """
@@ -337,6 +361,7 @@ async def resolve_representative_binding(
                       AND w.created_by = :uid
                       AND wmr.daemon_id IS NOT NULL
                       AND di.status = 'online'
+                    ORDER BY di.last_heartbeat_at DESC NULLS LAST, wmr.daemon_id ASC
                     LIMIT 1
                     """
                 ),
@@ -362,10 +387,12 @@ async def resolve_representative_binding(
                     )
                     return runtime
 
-        # 分支2：owner 无在线 binding，查任意 member 在线 binding（按最近心跳排序）
+        # 分支2：owner 无在线 binding，查任意 member 在线 binding
+        # （按实例心跳全序排序，D-005@v1——daemon 选择与路由查询同键）
         # 关键修复：provider 非空时必须在SQL层过滤，否则选出的daemon未必有该provider
         if provider:
-            # provider 非空：直接查匹配 provider 的在线 runtime，按心跳排序
+            # provider 非空：直接查匹配 provider 的在线 runtime，按实例心跳全序
+            # 排序（D-005@v1，从 runtime 心跳改为实例心跳——与路由查询同键）
             result = await session.execute(
                 text(
                     """
@@ -378,7 +405,7 @@ async def resolve_representative_binding(
                       AND di.status = 'online'
                       AND dr.status = 'online'
                       AND dr.provider = :prov
-                    ORDER BY dr.last_heartbeat_at DESC NULLS LAST
+                    ORDER BY di.last_heartbeat_at DESC NULLS LAST, wmr.daemon_id ASC
                     LIMIT 1
                     """
                 ),
@@ -395,11 +422,13 @@ async def resolve_representative_binding(
                 )
                 return runtime
         else:
-            # provider 为空：先选 daemon（按最近心跳），再取任意 runtime
+            # provider 为空：先选 daemon（按实例心跳全序，与路由查询同键），再取
+            # 任意 runtime。MAX(di.last_heartbeat_at)——di 与 wmr.daemon_id 经
+            # di.id 1:1 join，分组结果等价且满足 ONLY_FULL_GROUP_BY（D-005@v1）。
             result = await session.execute(
                 text(
                     """
-                    SELECT wmr.daemon_id, MAX(dr.last_heartbeat_at) AS max_heartbeat
+                    SELECT wmr.daemon_id, MAX(di.last_heartbeat_at) AS max_heartbeat
                     FROM workspace_member_runtimes wmr
                     JOIN daemon_instances di ON di.id = wmr.daemon_id
                     JOIN daemon_runtimes dr ON dr.daemon_instance_id = wmr.daemon_id
@@ -408,7 +437,7 @@ async def resolve_representative_binding(
                       AND di.status = 'online'
                       AND dr.status = 'online'
                     GROUP BY wmr.daemon_id
-                    ORDER BY max_heartbeat DESC NULLS LAST
+                    ORDER BY max_heartbeat DESC NULLS LAST, wmr.daemon_id ASC
                     LIMIT 1
                     """
                 ),

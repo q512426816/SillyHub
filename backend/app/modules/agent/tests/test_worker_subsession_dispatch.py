@@ -17,8 +17,10 @@ interactive lease(kind=interactive, metadata.stage=mission_worker, metadata.role
   均不建子会话不建 run。
 - worktree 失败——分身首 run failed(worktree_create_failed) + finished_at +
   error_code，子会话收口终态，mission 不崩可继续派发。
-- runtime 解析——anchor 自有 runtime 在线优先；无自有时跨 ws 代表 binding
-  钉定（pinned_skip_owner_check，落代表机器）。
+- runtime 解析（2026-08-28-fix-cross-machine-worker-dispatch task-04 重写）——
+  目标工作区代表绑定机器唯一钉定（FR-01/D-001@v1：anchor 自有 runtime 在线
+  抢占分支已删，owner 机器仅在恰为绑定机器时使用）；两段式 provider 预检
+  （FR-02）与 allowed_roots 可判定越界 400 预检（FR-04）另设用例。
 - 路由族同构——显式路由（ws+mid）与 header 会话族（/sessions/{sid}/...）
   三元组同构。
 """
@@ -27,7 +29,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -103,24 +105,51 @@ async def _make_user(db: AsyncSession, *, admin: bool = False) -> uuid.UUID:
 
 
 async def _stub_online_runtime(
-    db: AsyncSession, *, user_id: uuid.UUID, provider: str = "claude"
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    provider: str = "claude",
+    heartbeat: str | None = None,
+    allowed_roots: list[str] | None = None,
+    runtime_allowed_roots: list[str] | None = None,
 ) -> dict:
-    """造一台在线机器（instance online + runtime online，归 user）。"""
+    """造一台在线机器（instance online + runtime online，归 user）。
+
+    task-04（2026-08-28-fix-cross-machine-worker-dispatch）：新增三处可控项——
+
+    - ``heartbeat``：daemon_instances.last_heartbeat_at（缺省 None=保持旧行为
+      NULL；双源全序 D-005@v1 以实例心跳为主序，多机形态必须显式设心跳消除
+      daemon_id 随机 tie-break 的 flaky）；
+    - ``allowed_roots`` / ``runtime_allowed_roots``：instance 行与 runtime 行的
+      allowed_roots JSON 列（A3 预检形态用；缺省 None=旧行为 instance
+      ``["~/.sillyhub"]`` 单根 + runtime 行 NULL，raw INSERT 漏列即 NULL）。
+    """
     di_id = uuid.uuid4()
     rt_id = uuid.uuid4()
-    await db.execute(
-        text(
-            "INSERT INTO daemon_instances (id, user_id, hostname, server_url, allowed_roots, status, created_at, updated_at)"
-            " VALUES (:id, :uid, 'h1', 'http://t', '[\"~/.sillyhub\"]', 'online', :ts, :ts)"
-        ),
-        {"id": di_id.hex, "uid": user_id.hex, "ts": _TS},
+    roots_json = json.dumps(allowed_roots) if allowed_roots is not None else '["~/.sillyhub"]'
+    rt_roots_json = (
+        json.dumps(runtime_allowed_roots) if runtime_allowed_roots is not None else None
     )
     await db.execute(
         text(
-            "INSERT INTO daemon_runtimes (id, user_id, daemon_instance_id, provider, status, last_heartbeat_at, created_at, updated_at)"
-            " VALUES (:id, :uid, :di, :prov, 'online', :ts, :ts, :ts)"
+            "INSERT INTO daemon_instances (id, user_id, hostname, server_url, allowed_roots, status, last_heartbeat_at, created_at, updated_at)"
+            " VALUES (:id, :uid, 'h1', 'http://t', :roots, 'online', :hb, :ts, :ts)"
         ),
-        {"id": rt_id.hex, "uid": user_id.hex, "di": di_id.hex, "prov": provider, "ts": _TS},
+        {"id": di_id.hex, "uid": user_id.hex, "roots": roots_json, "hb": heartbeat, "ts": _TS},
+    )
+    await db.execute(
+        text(
+            "INSERT INTO daemon_runtimes (id, user_id, daemon_instance_id, provider, allowed_roots, status, last_heartbeat_at, created_at, updated_at)"
+            " VALUES (:id, :uid, :di, :prov, :rt_roots, 'online', :ts, :ts, :ts)"
+        ),
+        {
+            "id": rt_id.hex,
+            "uid": user_id.hex,
+            "di": di_id.hex,
+            "prov": provider,
+            "rt_roots": rt_roots_json,
+            "ts": _TS,
+        },
     )
     await db.commit()
     return {"runtime_id": rt_id, "daemon_id": di_id}
@@ -170,9 +199,22 @@ async def _grant_ws_permission(
 
 
 async def _seed_context(
-    db: AsyncSession, *, with_own_runtime: bool = True
+    db: AsyncSession,
+    *,
+    with_own_runtime: bool = True,
+    bind_own_runtime: bool = True,
+    ws_created_by: uuid.UUID | None = None,
 ) -> tuple[Workspace, AgentSession, AgentMission, uuid.UUID, dict | None]:
-    """主控会话 + mission（session 锚 + created_by）+（可选）创建者自有在线 runtime。"""
+    """主控会话 + mission（session 锚 + created_by）+（可选）创建者自有在线 runtime。
+
+    task-04（2026-08-28-fix-cross-machine-worker-dispatch）夹具微调（仅解耦所需）：
+
+    - ``bind_own_runtime=False``：owner 在线机器**不建** workspace_member_runtimes
+      绑定行——解耦「自有 online runtime」与「owner 绑定」（FR-01 QM 场景：
+      owner 机器在线但未绑目标工作区，旧 own_rt 抢占分支的翻案复刻）；
+    - ``ws_created_by``：设 workspaces.created_by（分支1 预检走 created_by 匹配、
+      分支2 走心跳序，design 风险登记明示两分支需可独立构造）。
+    """
     owner_id = await _make_user(db)
     ws = Workspace(
         id=uuid.uuid4(),
@@ -182,6 +224,7 @@ async def _seed_context(
         default_branch="main",
         default_agent="claude",
         status="active",
+        created_by=ws_created_by,
     )
     db.add(ws)
     main_session = AgentSession(
@@ -207,7 +250,8 @@ async def _seed_context(
     own_rt: dict | None = None
     if with_own_runtime:
         own_rt = await _stub_online_runtime(db, user_id=owner_id)
-        await _stub_member_binding(db, ws.id, owner_id, own_rt["daemon_id"])
+        if bind_own_runtime:
+            await _stub_member_binding(db, ws.id, owner_id, own_rt["daemon_id"])
     return ws, main_session, mission, owner_id, own_rt
 
 
@@ -231,6 +275,30 @@ def _mock_wake_delivered(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
     mock = AsyncMock(return_value=True)
     monkeypatch.setattr(RunPlacementService, "notify_interactive_dispatch", mock)
     return mock
+
+
+def _mcp_tools_log_spy(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """替换 ``mcp_tools.log`` 为 spy 捕获 ``placement_provider_fallback`` 等事件。
+
+    structlog 经 ``PrintLoggerFactory`` 直写 stderr，pytest ``caplog`` 抓不到
+    （同 ``test_terminating_at_lifecycle._patch_logger_spy`` 既有注释）；替换模块级
+    ``log`` 符号是最稳健的捕获方式（方法调用时按模块 globals 解析，monkeypatch
+    生效）。A1 用例以此断言「严格命中无回退日志 / 回退命中打点可观测」。
+    """
+    import app.modules.agent.mcp_tools as mcp_tools_mod
+
+    spy = MagicMock()
+    monkeypatch.setattr(mcp_tools_mod, "log", spy)
+    return spy
+
+
+def _fallback_warning_calls(spy: MagicMock) -> list:
+    """从 log spy 中筛出 ``placement_provider_fallback`` warning 调用。"""
+    return [
+        call
+        for call in spy.warning.call_args_list
+        if call.args and call.args[0] == "placement_provider_fallback"
+    ]
 
 
 def _auth_bearer(token: str) -> dict[str, str]:
@@ -714,7 +782,7 @@ class TestDispatchFinalizeFailure:
 
 
 # ---------------------------------------------------------------------------
-# runtime 解析：anchor 自有优先 / 跨 ws 代表钉定
+# runtime 解析：绑定机器唯一钉定 + 两段式 provider 预检（FR-01 / FR-02）
 # ---------------------------------------------------------------------------
 
 
@@ -772,20 +840,88 @@ class TestRuntimePinning:
         assert {ln.workspace_id for ln in links} == {ws.id, target.id}
 
     @pytest.mark.asyncio
-    async def test_own_runtime_preferred_over_representative(
+    async def test_binding_machine_pinned_over_own_runtime(
         self, client, db_session, auth_headers, monkeypatch
     ) -> None:
-        """anchor 本机自有 runtime 在线时优先于代表 binding。"""
-        ws, _main, mission, _owner, own_rt = await _seed_context(db_session)
-        # 同工作区再造一台第三方代表机器（heartbeat 更新），自有仍应优先
-        rep_owner = await _make_user(db_session)
-        rep_rt = await _stub_online_runtime(db_session, user_id=rep_owner)
-        await _stub_member_binding(db_session, ws.id, rep_owner, rep_rt["daemon_id"])
-        await db_session.execute(
-            text("UPDATE daemon_runtimes SET last_heartbeat_at = :ts WHERE id = :rid"),
-            {"ts": datetime.now(UTC).isoformat(), "rid": rep_rt["runtime_id"].hex},
+        """QM小程序→crrcdt-hubin 跨机派发场景复刻（FR-01 / D-001@v1）。
+
+        **语义翻转（需求变更，非测试放水——CLAUDE.md 规则9）**：本用例原为
+        ``test_own_runtime_preferred_over_representative``（旧行为：anchor 本机
+        自有 runtime 在线时优先于代表 binding）。2026-08-28-fix-cross-machine-
+        worker-dispatch FR-01 删除该抢占分支：owner 自有机器在线但未绑定目标
+        工作区时，会话必须钉定目标工作区的代表绑定机器（第三方用户绑定该区且
+        在线，其绑定机器实例心跳设为更新），绝不落 owner 机器——否则两机分裂
+        后错机 daemon 无差别 mkdir 空目录、分身在空目录里静默"成功"（QM 场景
+        实证，详见 mcp_tools._dispatch_worker_core 注释）。
+
+        owner 绑定自己机器的常态等价回归由 :283/:317 覆盖（owner 机器恰为
+        唯一绑定机器时钉定结果与旧行为一致），此处不重复。
+        """
+        # owner 在线 runtime 但不绑目标区（bind_own_runtime=False 解耦自有
+        # runtime 与 owner 绑定——旧行为下该在线机器会被抢占选中）。
+        ws, _main, mission, _owner, own_rt = await _seed_context(
+            db_session, with_own_runtime=True, bind_own_runtime=False
         )
+        assert own_rt is not None
+        target = Workspace(
+            id=uuid.uuid4(),
+            name="target",
+            slug=f"t-{uuid.uuid4().hex[:8]}",
+            root_path="/tmp/target",
+            status="active",
+        )
+        db_session.add(target)
+        await db_session.flush()
+        mission.scope_workspace_ids = [str(ws.id), str(target.id)]
+        db_session.add(mission)
         await db_session.commit()
+
+        # 第三方用户绑定目标工作区且在线（实例心跳设为更新——显式设值消除
+        # daemon_id 随机 tie-break 的不确定性）。
+        third_party = await _make_user(db_session)
+        third_rt = await _stub_online_runtime(
+            db_session,
+            user_id=third_party,
+            heartbeat="2026-08-28T12:00:00+00:00",
+        )
+        await _stub_member_binding(db_session, target.id, third_party, third_rt["daemon_id"])
+
+        _mock_worktree_delegate(monkeypatch)
+        _mock_wake_delivered(monkeypatch)
+
+        resp = await client.post(
+            f"/api/workspaces/{ws.id}/missions/{mission.id}/dispatch_worker",
+            json={"objective": "o", "target_workspace_id": str(target.id)},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        lease = await _lease(db_session, await _sub_session_lease_id(db_session, _main.id))
+        assert lease.runtime_id == third_rt["runtime_id"], (
+            "跨机工作区钉定应落目标工作区代表绑定机器"
+        )
+        assert lease.runtime_id != own_rt["runtime_id"], "绝不回落 owner 自有在线机器"
+
+    @pytest.mark.asyncio
+    async def test_same_workspace_newer_heartbeat_binding_wins(
+        self, client, db_session, auth_headers, monkeypatch
+    ) -> None:
+        """同区多绑定变体（FR-01 涟漪 / D-005@v1 全序）：owner 绑定自己机器、
+        第三方绑定同工作区且其实例心跳更新 → 绑定候选集内按心跳全序第三方胜出。
+
+        旧 :736 同形用例断言「owner 自有优先」；新语义下同工作区多绑定时统一
+        全序（实例心跳 DESC, daemon_id ASC）在候选内选行——owner 行并非硬优先。
+        owner 绑定机器实例心跳 NULL（NULLS LAST 恒排后），第三方显式设心跳，
+        结果确定不 flaky。「owner 机器即唯一绑定机器」的常态回归归 :283/:317。
+        """
+        ws, _main, mission, _owner, own_rt = await _seed_context(db_session)
+        assert own_rt is not None
+        rep_owner = await _make_user(db_session)
+        rep_rt = await _stub_online_runtime(
+            db_session,
+            user_id=rep_owner,
+            heartbeat="2026-08-28T12:00:00+00:00",
+        )
+        await _stub_member_binding(db_session, ws.id, rep_owner, rep_rt["daemon_id"])
 
         _mock_worktree_delegate(monkeypatch)
         _mock_wake_delivered(monkeypatch)
@@ -796,6 +932,167 @@ class TestRuntimePinning:
             headers=auth_headers,
         )
         assert resp.status_code == 201, resp.text
+        lease = await _lease(db_session, await _sub_session_lease_id(db_session, _main.id))
+        assert lease.runtime_id == rep_rt["runtime_id"], (
+            "同区多绑定时实例心跳更新的绑定机器应胜出（D-005@v1 全序）"
+        )
+        assert lease.runtime_id != own_rt["runtime_id"]
+
+    @pytest.mark.asyncio
+    async def test_provider_strict_hit_no_fallback_warning(
+        self, client, db_session, auth_headers, monkeypatch
+    ) -> None:
+        """A1 严格命中（FR-02 / D-002@v1）：绑定机器有 provider=ws.default_agent
+        的在线 runtime → 第一段严格解析命中，无 placement_provider_fallback 回退日志。"""
+        # _seed_context：ws.default_agent="claude"、绑定机器 runtime provider=claude。
+        ws, _main, mission, _owner, own_rt = await _seed_context(db_session)
         assert own_rt is not None
+        spy = _mcp_tools_log_spy(monkeypatch)
+        _mock_worktree_delegate(monkeypatch)
+        _mock_wake_delivered(monkeypatch)
+
+        resp = await client.post(
+            f"/api/workspaces/{ws.id}/missions/{mission.id}/dispatch_worker",
+            json={"objective": "o"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        # 严格命中：预检不走第二段回退，无 fallback warning（可观测性验收）。
+        assert _fallback_warning_calls(spy) == []
         lease = await _lease(db_session, await _sub_session_lease_id(db_session, _main.id))
         assert lease.runtime_id == own_rt["runtime_id"]
+
+    @pytest.mark.asyncio
+    async def test_provider_fallback_resolves_heterogeneous_runtime(
+        self, client, db_session, auth_headers, monkeypatch
+    ) -> None:
+        """A1 回退命中（FR-02 / D-002@v1 验收）：绑定机器仅有 codex runtime 而
+        ws.default_agent=claude → 严格段无果、provider=None 回退段解析成功，
+        打 placement_provider_fallback warning，钉定 codex runtime（lease 侧
+        provider 实际值 = codex——子会话/首 run provider 同源）。"""
+        # owner 不建自有机器；绑定机器（binder 名下）只有 codex runtime。
+        ws, _main, mission, _owner, _no_rt = await _seed_context(
+            db_session, with_own_runtime=False
+        )
+        binder = await _make_user(db_session)
+        codex_rt = await _stub_online_runtime(
+            db_session,
+            user_id=binder,
+            provider="codex",
+            heartbeat="2026-08-28T12:00:00+00:00",
+        )
+        await _stub_member_binding(db_session, ws.id, binder, codex_rt["daemon_id"])
+        spy = _mcp_tools_log_spy(monkeypatch)
+        _mock_worktree_delegate(monkeypatch)
+        _mock_wake_delivered(monkeypatch)
+
+        resp = await client.post(
+            f"/api/workspaces/{ws.id}/missions/{mission.id}/dispatch_worker",
+            json={"objective": "o"},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 201, resp.text
+
+        # 回退解析成功：钉定绑定机器上的 codex runtime（绝不 422）。
+        lease = await _lease(db_session, await _sub_session_lease_id(db_session, _main.id))
+        assert lease.runtime_id == codex_rt["runtime_id"]
+        sub_sessions = (
+            (
+                await db_session.execute(
+                    select(AgentSession).where(AgentSession.parent_session_id == _main.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(sub_sessions) == 1
+        # lease_provider = binding.provider（回退命中后的实际 provider）。
+        assert sub_sessions[0].provider == "codex"
+        runs = await _worker_runs(db_session, mission.id)
+        assert runs[0].provider == "codex"
+
+        # 回退命中打点可观测：事件名 + wanted/actual 字段（对齐 placement 同款语义）。
+        fallback_calls = _fallback_warning_calls(spy)
+        assert len(fallback_calls) == 1
+        assert fallback_calls[0].kwargs["wanted"] == "claude"
+        assert fallback_calls[0].kwargs["actual"] == "codex"
+
+
+# ---------------------------------------------------------------------------
+# allowed_roots 预检三形态（FR-04 / D-003@v2）：可判定越界 400 / 全 ~ 放行 /
+# 空并集放行（边界包含子句由 test_placement_member_binding.py
+# TestPathDefinitivelyOutsideRoots 纯函数用例覆盖，此处不重复）
+# ---------------------------------------------------------------------------
+
+
+class TestAllowedRootsPrecheck:
+    async def _dispatch(self, client, auth_headers, ws_id, mission_id):
+        return await client.post(
+            f"/api/workspaces/{ws_id}/missions/{mission_id}/dispatch_worker",
+            json={"objective": "o"},
+            headers=auth_headers,
+        )
+
+    @pytest.mark.asyncio
+    async def test_definitively_outside_absolute_roots_400_creates_nothing(
+        self, client, db_session, auth_headers, monkeypatch
+    ) -> None:
+        """可判定越界 400（FR-04 验收）：绑定机器 allowed_roots 为绝对路径根
+        /secured-area，ws.root_path=/tmp/xxx 不命中 → 400 中文引导（含
+        「allowed_roots 白名单」），且该 mission 无新 run 行落库、无子会话无 lease。"""
+        ws, main_session, mission, _owner, own_rt = await _seed_context(db_session)
+        assert own_rt is not None
+        await db_session.execute(
+            text("UPDATE daemon_instances SET allowed_roots = :roots WHERE id = :di"),
+            {"roots": json.dumps(["/secured-area"]), "di": own_rt["daemon_id"].hex},
+        )
+        await db_session.commit()
+        _mock_worktree_delegate(monkeypatch)  # 即便误入执行段也不碰真 delegate
+
+        resp = await self._dispatch(client, auth_headers, ws.id, mission.id)
+        assert resp.status_code == 400, resp.text
+        assert "allowed_roots 白名单" in resp.json()["message"]
+        assert "目标工作区路径" in resp.json()["message"]
+        # 零垃圾行：预检先于建 sub_session/run/lease（fail-loud 前置拦截）。
+        assert await _count_subsessions(db_session, main_session.id) == 0
+        assert await _worker_runs(db_session, mission.id) == []
+        assert (await db_session.execute(select(DaemonTaskLease))).scalars().first() is None
+
+    @pytest.mark.asyncio
+    async def test_all_tilde_roots_passthrough_201(
+        self, client, db_session, auth_headers, monkeypatch
+    ) -> None:
+        """全 ~ 根放行（FR-04 验收）：backend 无法展开 ``~`` 前缀根 → 不可判定，
+        放行交 daemon 认领终检权威裁决（现状默认形态，显式设根排除歧义）。"""
+        ws, _main, mission, _owner, own_rt = await _seed_context(db_session)
+        assert own_rt is not None
+        await db_session.execute(
+            text("UPDATE daemon_instances SET allowed_roots = :roots WHERE id = :di"),
+            {"roots": json.dumps(["~/.sillyhub", "~/work"]), "di": own_rt["daemon_id"].hex},
+        )
+        await db_session.commit()
+        _mock_worktree_delegate(monkeypatch)
+        _mock_wake_delivered(monkeypatch)
+
+        resp = await self._dispatch(client, auth_headers, ws.id, mission.id)
+        assert resp.status_code == 201, resp.text
+
+    @pytest.mark.asyncio
+    async def test_empty_roots_union_passthrough_201(
+        self, client, db_session, auth_headers, monkeypatch
+    ) -> None:
+        """空并集放行（FR-04 验收）：instance 行 allowed_roots 置空 JSON（[]）、
+        名下 runtime 行 allowed_roots 为 NULL（无根贡献）→ 并集为空不可判定 →
+        放行（daemon 终检权威）。"""
+        ws, _main, mission, _owner, own_rt = await _seed_context(db_session)
+        assert own_rt is not None
+        await db_session.execute(
+            text("UPDATE daemon_instances SET allowed_roots = :roots WHERE id = :di"),
+            {"roots": json.dumps([]), "di": own_rt["daemon_id"].hex},
+        )
+        await db_session.commit()
+        _mock_worktree_delegate(monkeypatch)
+        _mock_wake_delivered(monkeypatch)
+
+        resp = await self._dispatch(client, auth_headers, ws.id, mission.id)
+        assert resp.status_code == 201, resp.text

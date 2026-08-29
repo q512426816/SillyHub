@@ -2,6 +2,12 @@
 
 Change 2026-08-19-cross-workspace-team-mission task-02 (design 4.2):
 Three-branch coverage: owner online priority -> any online (heartbeat sorted) -> None (all offline).
+
+2026-08-28-fix-cross-machine-worker-dispatch task-01 涟漪（D-005@v1）：两分支
+daemon 选择统一全序 ``ORDER BY 实例心跳 DESC, daemon_id ASC``——分支1 候选集 =
+owner 所建工作区全部成员绑定（含他人行），全序在候选内选行，owner 行并非硬
+优先；分支1/分支2 与 resolve_daemon_instance_for_workspace 相同候选集收敛同机
+（双源同序用例见 test_placement_member_binding.py）。
 """
 
 from __future__ import annotations
@@ -67,13 +73,21 @@ async def _make_daemon_with_runtime(
     daemon_online: bool = True,
     runtime_online: bool = True,
     existing_daemon_id: uuid.UUID | None = None,
+    heartbeat: datetime | None = None,
 ) -> tuple[uuid.UUID, uuid.UUID]:
     """Create a daemon instance and runtime, return (daemon_id, runtime_id).
 
     If existing_daemon_id provided, reuse that daemon and only create a new runtime.
+
+    task-04（2026-08-28-fix-cross-machine-worker-dispatch）：新增 ``heartbeat``
+    显式设 daemon_instances.last_heartbeat_at（缺省 None=旧行为 now()）。D-005@v1
+    双源全序以实例心跳为主序，多机形态必须显式设值消除插入顺序依赖的 flaky。
     """
     daemon_id = existing_daemon_id or uuid.uuid4()
     if not existing_daemon_id:
+        effective_heartbeat = (
+            heartbeat if heartbeat is not None else (datetime.now(UTC) if daemon_online else None)
+        )
         db_session.add(
             DaemonInstance(
                 id=daemon_id,
@@ -81,7 +95,7 @@ async def _make_daemon_with_runtime(
                 hostname=f"host-{daemon_id.hex[:8]}",
                 server_url="http://test-server",
                 status="online" if daemon_online else "offline",
-                last_heartbeat_at=datetime.now(UTC) if daemon_online else None,
+                last_heartbeat_at=effective_heartbeat,
             )
         )
 
@@ -121,34 +135,85 @@ async def _make_binding(
 
 
 @pytest.mark.asyncio
-async def test_representative_binding_owner_online_priority(db_session: AsyncSession) -> None:
-    """Branch 1: owner online binding hit first (task-02 acceptance)."""
+async def test_representative_binding_owner_ws_owner_newest_heartbeat_hit(
+    db_session: AsyncSession,
+) -> None:
+    """分支1（task-01 全序涟漪更新 / D-005@v1 真实语义）。
+
+    分支1 候选集 = owner 所建工作区（w.created_by=dispatch user）的**全部成员
+    绑定**（含他人绑定行），统一全序 ``ORDER BY 实例心跳 DESC, daemon_id ASC``
+    在候选内选行——owner 行并非硬优先，仅在其绑定机器实例心跳最新时胜出。
+
+    旧用例 ``test_representative_binding_owner_online_priority`` 断言「owner
+    在线绑定先返」（无 ORDER BY，靠插入顺序碰巧先返 owner）；task-01 补全序后
+    候选含全部成员绑定、user2 后插入心跳更新反而胜出（翻红）。本用例按实现
+    真实语义重写：显式设 owner 心跳最新 → 断言 owner 行胜出（需求变更非放水，
+    CLAUDE.md 规则9）。
+    """
+    older = datetime(2026, 8, 28, 10, 0, 0, tzinfo=UTC)
+    newer = datetime(2026, 8, 28, 11, 0, 0, tzinfo=UTC)
+
     owner = await _make_user(db_session)
     ws_id = await _make_workspace(db_session, owner_id=owner)
 
-    # Owner's online daemon + runtime
+    # Owner's online daemon + runtime（实例心跳最新 → 全序内胜出）
     daemon1, runtime1 = await _make_daemon_with_runtime(
-        db_session, owner, provider="claude", daemon_online=True, runtime_online=True
+        db_session, owner, provider="claude", daemon_online=True, runtime_online=True,
+        heartbeat=newer,
     )
     await _make_binding(db_session, ws_id, owner, daemon1)
 
-    # Another user's online binding (should be filtered by owner priority)
+    # Another user's online binding（同在分支1候选集内，实例心跳更旧）
     user2 = await _make_user(db_session)
     daemon2, _ = await _make_daemon_with_runtime(
-        db_session, user2, provider="claude", daemon_online=True, runtime_online=True
+        db_session, user2, provider="claude", daemon_online=True, runtime_online=True,
+        heartbeat=older,
     )
     await _make_binding(db_session, ws_id, user2, daemon2)
 
     # Call resolve_representative_binding (user_id = owner)
     result = await resolve_representative_binding(db_session, ws_id, owner, "claude")
 
-    # Assert: hit owner's binding
+    # Assert: owner's binding wins on the newest instance heartbeat
     assert result is not None
     assert uuid.UUID(str(result["id"])) == runtime1
     # SQLite stores UUID as CHAR(32) hex string, convert back for comparison
     assert uuid.UUID(str(result["user_id"])) == owner
     assert result["provider"] == "claude"
     assert uuid.UUID(str(result["daemon_instance_id"])) == daemon1
+
+
+@pytest.mark.asyncio
+async def test_representative_binding_owner_ws_other_member_newer_heartbeat_wins(
+    db_session: AsyncSession,
+) -> None:
+    """分支1 对照（D-005@v1）：他人绑定机器实例心跳更新时他人行胜出——owner 行
+    并非硬优先，全序在候选内选（分支1 owner 优先语义 = 「owner 建区时进入分支1
+    候选集」，非「owner 行越过心跳全序」）。"""
+    older = datetime(2026, 8, 28, 10, 0, 0, tzinfo=UTC)
+    newer = datetime(2026, 8, 28, 11, 0, 0, tzinfo=UTC)
+
+    owner = await _make_user(db_session)
+    ws_id = await _make_workspace(db_session, owner_id=owner)
+
+    daemon1, _ = await _make_daemon_with_runtime(
+        db_session, owner, provider="claude", heartbeat=older
+    )
+    await _make_binding(db_session, ws_id, owner, daemon1)
+
+    user2 = await _make_user(db_session)
+    daemon2, runtime2 = await _make_daemon_with_runtime(
+        db_session, user2, provider="claude", heartbeat=newer
+    )
+    await _make_binding(db_session, ws_id, user2, daemon2)
+
+    result = await resolve_representative_binding(db_session, ws_id, owner, "claude")
+
+    # 心跳全序在分支1候选集内选行：user2 绑定机器心跳更新 → user2 runtime 胜出。
+    assert result is not None
+    assert uuid.UUID(str(result["id"])) == runtime2
+    assert uuid.UUID(str(result["user_id"])) == user2
+    assert uuid.UUID(str(result["daemon_instance_id"])) == daemon2
 
 
 @pytest.mark.asyncio

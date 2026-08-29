@@ -31,8 +31,9 @@
  *
  * 约束（task-11 constraints）：不依赖 react-query（dialog 渲染路径零 react-query
  * 铁律 R4——弹层在 page/dialog 两模式都挂载）；不用 antd（对齐段族惯例，规避
- * 中文按钮 autoLetterSpacing 拆分坑）；团队视觉 violet 固定阶 + brand-* 语义阶
- *（双主题铁律）；纯 props 受控，API 调用归父层。
+ * 中文按钮 autoLetterSpacing 拆分坑）；团队视觉统一走 brand-* 语义阶（随
+ * html data-theme 换肤，双主题铁律；ql-20260828-007-7dcf 弃 violet 固定身份色
+ * ——blue/dark 主题下固定紫不随肤换色，与主题割裂）；纯 props 受控，API 调用归父层。
  *
  * task-12（2026-08-24-session-team-mission-context / FR-03 / FR-06 / D-008@v2 /
  * D-010@v1）追加：
@@ -178,6 +179,20 @@ function WorkspaceProbeMeta({ probe }: { probe?: WorkspaceProbeItem }) {
 
 /* ───────────────── props 契约（session-panel 两模式消费） ───────────────── */
 
+/**
+ * ql-20260828-012-4425：编辑回显初始配置——「团队进行中」标签点击重新指派时
+ * 从活跃 mission 派生（真会话）/ 从 preTeamMission 暂存 payload 派生（预会话
+ * 待生效）。弹层条件渲染每次打开重新 mount，initialConfig 仅在 mount 时取值。
+ */
+export interface TeamTriggerInitialConfig {
+  objective: string | null;
+  projectId: string | null;
+  scopeWorkspaceIds: string[] | null;
+  budgetUsd: number | null;
+  mainAgentConfig: MainAgentConfig | null;
+  workerPreset: WorkerPresetItem[] | null;
+}
+
 export interface TeamTriggerPopoverProps {
   /** 会话绑定工作区 id（scope 默认「当前工作区」的数据源）；null = 未绑定。 */
   workspaceId: string | null;
@@ -185,6 +200,8 @@ export interface TeamTriggerPopoverProps {
   workspaceName?: string | null;
   /** 目标预填（/team 指令文本 /「用团队分析」提示句）；确认后由父层回填输入框。 */
   defaultObjective?: string | null;
+  /** 编辑回显初始配置（优先于 defaultObjective/默认值；缺省零变化）。 */
+  initialConfig?: TeamTriggerInitialConfig;
   /**
    * task-07 Phase 5（2026-08-28-session-ppm-task-binding / FR-06 / D-004@v2）：
    * 项目预选 id（ppm_project 页面上下文派生，悬浮预会话「发起团队」入口传）。
@@ -200,6 +217,11 @@ export interface TeamTriggerPopoverProps {
    * + payload 追加 orchestrator_workspace_id；缺省 false 渲染与 payload 零变化。
    */
   preSession?: boolean;
+  /**
+   * ql-20260828-009-4a13：存在活跃 mission——确认前提示「将取消当前团队并
+   * 重新指派」（父层 handleTeamTrigger 前置 cancel；chip 点击更新指派入口）。
+   */
+  hasActiveMission?: boolean;
   /** 提交中（父层 triggerSessionTeamMission 在途 → 确认按钮禁用）。 */
   submitting?: boolean;
   /** 确认回调：payload 即 TeamMissionTriggerRequest，API 调用归父层。 */
@@ -226,38 +248,62 @@ export function TeamTriggerPopover({
   workspaceId,
   workspaceName,
   defaultObjective,
+  initialConfig,
   defaultProjectId,
   preSession = false,
+  hasActiveMission = false,
   submitting = false,
   onTrigger,
   onClose,
 }: TeamTriggerPopoverProps) {
   // 目标（可选）：留空 → 后端落占位、首条 inject 回填（CC-09）。
-  const [objective, setObjective] = useState(defaultObjective ?? "");
+  // ql-20260828-012-4425：编辑回显优先（initialConfig.objective 干净值——
+  // 占位符/指令前缀由父层派生时过滤）。
+  const [objective, setObjective] = useState(
+    initialConfig?.objective ?? defaultObjective ?? "",
+  );
   // 范围模式：workspace（默认，需会话绑定工作区）/ project。task-07 Phase 5：
-  // defaultProjectId 有值 → 预选项目维度（项目上下文入口直接落到项目 scope）。
+  // defaultProjectId 有值 → 预选项目维度；ql-20260828-012-4425 编辑回显优先
+  //（projectId 非空 → project，否则 workspace）。
   const [scopeMode, setScopeMode] = useState<"workspace" | "project">(
-    defaultProjectId ? "project" : workspaceId ? "workspace" : "project",
+    initialConfig
+      ? initialConfig.projectId
+        ? "project"
+        : "workspace"
+      : defaultProjectId
+        ? "project"
+        : workspaceId
+          ? "workspace"
+          : "project",
   );
   // 项目下拉数据：null = 加载中；[] = 无可见项目（非项目经理/加载失败）。
   const [projects, setProjects] = useState<
     Awaited<ReturnType<typeof listProjects>> | null
   >(null);
-  // task-07 Phase 5：项目初值预选（defaultProjectId；缺省空选走原逻辑）。
-  const [projectId, setProjectId] = useState(defaultProjectId ?? "");
-  // 项目关联工作区（scope 候选）：null = 未加载。
+  // task-07 Phase 5：项目初值预选；ql-20260828-012-4425 编辑回显优先。
+  const [projectId, setProjectId] = useState(
+    initialConfig?.projectId ?? defaultProjectId ?? "",
+  );
+  // 项目关联工作区（scope 候选）：null = 未加载；编辑回显时初值即已选 scope。
   const [projectWorkspaces, setProjectWorkspaces] = useState<
     WorkspaceBrief[] | null
   >(null);
-  const [scopeIds, setScopeIds] = useState<string[]>([]);
-  // 预算（留空 = 不限，校验同 mission-console FE-P2-4）。
-  const [budget, setBudget] = useState("");
-  // 分身预设折叠（默认折叠 = 主控自动拆解 + 服务端默认主控配置）。
+  const [scopeIds, setScopeIds] = useState<string[]>(
+    initialConfig?.scopeWorkspaceIds ?? [],
+  );
+  // 预算（留空 = 不限，校验同 mission-console FE-P2-4；回显数值转字符串）。
+  const [budget, setBudget] = useState(
+    initialConfig?.budgetUsd != null ? String(initialConfig.budgetUsd) : "",
+  );
+  // 分身预设折叠（默认折叠 = 主控自动拆解 + 服务端默认主控配置；回显值预塞
+  // state——用户展开即可见，未展开确认时按「已配置」整体上送）。
   const [presetOpen, setPresetOpen] = useState(false);
   const [mainAgent, setMainAgent] = useState<MainAgentConfig>(
-    DEFAULT_MAIN_AGENT_CONFIG,
+    initialConfig?.mainAgentConfig ?? DEFAULT_MAIN_AGENT_CONFIG,
   );
-  const [workers, setWorkers] = useState<WorkerPresetItem[]>([]);
+  const [workers, setWorkers] = useState<WorkerPresetItem[]>(
+    initialConfig?.workerPreset ?? [],
+  );
   const [error, setError] = useState<string | null>(null);
   // task-12：probe 静态快照（workspace_id → 项；null=未拉到/失败 fail-safe）。
   const [probeMap, setProbeMap] = useState<Record<string, WorkspaceProbeItem>>({});
@@ -285,15 +331,23 @@ export function TeamTriggerPopover({
   }, []);
 
   // 项目切换 → 拉关联工作区（scope 候选），scope 重置为空选。
+  // ql-20260828-012-4425：mount 首跑不清 scopeIds——编辑回显时 scope 初值
+  // 来自 initialConfig（projectId 回显同轮触发本 effect，清空会冲掉回显）；
+  // 用户此后切换项目仍走原「scope 重置空选」语义。
+  const scopeMountInitRef = useRef(false);
   useEffect(() => {
     if (!projectId) {
       setProjectWorkspaces(null);
       setScopeIds([]);
       return;
     }
+    if (scopeMountInitRef.current) {
+      setScopeIds([]);
+    } else {
+      scopeMountInitRef.current = true;
+    }
     let cancelled = false;
     setProjectWorkspaces(null);
-    setScopeIds([]);
     void (async () => {
       try {
         const list = await listProjectWorkspaces(projectId);
@@ -436,8 +490,10 @@ export function TeamTriggerPopover({
       payload.project_id = projectId;
       payload.scope_workspace_ids = scopeIds;
     }
-    // 分身预设：仅展开过才带（未展开 = 主控自动拆解 + 服务端默认主控配置）。
-    if (presetOpen) {
+    // 分身预设：未展开且非回显 = 主控自动拆解 + 服务端默认主控配置（原语义）；
+    // ql-20260828-012-4425 回显实例恒带——用户未展开预设面板确认时保留原
+    // mission 的 preset/主控配置（编辑语义），显式清空需展开删除。
+    if (presetOpen || initialConfig) {
       payload.main_agent_config = mainAgent;
       if (workers.length > 0) payload.worker_preset = workers;
     }
@@ -453,13 +509,13 @@ export function TeamTriggerPopover({
     <div
       role="dialog"
       aria-label="派团队配置"
-      className="absolute bottom-full left-0 z-30 mb-1.5 max-h-[70vh] w-[400px] overflow-y-auto rounded-xl border border-violet-200 bg-card p-4 text-xs shadow-md"
+      className="absolute bottom-full left-0 z-30 mb-1.5 max-h-[70vh] w-[400px] overflow-y-auto rounded-xl border border-brand-200 bg-card p-4 text-xs shadow-md"
     >
-      {/* 标题 + 说明（原型 .team-pop .tp-title / .tp-sub；violet =「团队」固定身份色） */}
-      <p className="flex items-center gap-2 text-[13px] font-bold text-violet-700">
+      {/* 标题 + 说明（原型 .team-pop .tp-title / .tp-sub；brand 语义阶随主题换肤） */}
+      <p className="flex items-center gap-2 text-[13px] font-bold text-brand-700">
         <span
           aria-hidden
-          className="flex h-6 w-6 items-center justify-center rounded-md bg-violet-100"
+          className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-100"
         >
           <Users className="h-3.5 w-3.5" />
         </span>
@@ -468,6 +524,12 @@ export function TeamTriggerPopover({
       <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
         当前会话的智能体升级为主控，通过 MCP 派发分身；任务进展直接回到本会话。
       </p>
+      {/* ql-20260828-009-4a13：更新指派提示——已有活跃 mission 时确认 = 取消重派 */}
+      {hasActiveMission && (
+        <p className="mt-1.5 rounded-lg border border-amber-300/60 bg-amber-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-700">
+          已有进行中的团队任务：确认后将取消当前任务并按本次配置重新指派。
+        </p>
+      )}
 
       {/* 目标（可选）：/team 指令文本或「用团队分析」提示句预填；确认后随下条消息发出 */}
       <label className="mt-3 block">
@@ -679,9 +741,9 @@ export function TeamTriggerPopover({
           既有会话实例不渲染（主 agent 恒=当前会话，进程 cwd/机器创建时钉定，
           跨机器迁移属 C 层非目标——仅以选择器下方说明文案表达，不加交互）。 */}
       {preSession && (
-        <div className="mt-3 rounded-lg border border-violet-200 bg-violet-50/40 p-2.5">
+        <div className="mt-3 rounded-lg border border-brand-200 bg-brand-50/40 p-2.5">
           <label className="block">
-            <span className="text-[10.5px] font-semibold text-violet-700">
+            <span className="text-[10.5px] font-semibold text-brand-700">
               主 agent（项目经理）
             </span>
             <select
@@ -745,7 +807,7 @@ export function TeamTriggerPopover({
       <button
         type="button"
         onClick={() => setPresetOpen((v) => !v)}
-        className="mt-3 flex w-full items-center justify-between rounded-lg border border-violet-200 bg-violet-50/50 px-2.5 py-1.5 text-[11.5px] font-semibold text-violet-700 transition-colors hover:bg-violet-100/70"
+        className="mt-3 flex w-full items-center justify-between rounded-lg border border-brand-200 bg-brand-50/50 px-2.5 py-1.5 text-[11.5px] font-semibold text-brand-700 transition-colors hover:bg-brand-100/70"
         aria-expanded={presetOpen}
       >
         <span className="inline-flex items-center gap-1">
@@ -756,7 +818,7 @@ export function TeamTriggerPopover({
         <span aria-hidden>{presetOpen ? "收起 ▴" : "展开 ▾"}</span>
       </button>
       {presetOpen && (
-        <div className="mt-1.5 space-y-2 rounded-lg border border-violet-200 bg-violet-50/40 p-2.5">
+        <div className="mt-1.5 space-y-2 rounded-lg border border-brand-200 bg-brand-50/40 p-2.5">
           {/* 主控配置（不填走默认 Claude · claude-sonnet-4-6） */}
           <div className="grid grid-cols-3 gap-1.5">
             <label className="flex flex-col gap-1">
@@ -816,14 +878,14 @@ export function TeamTriggerPopover({
 
           {/* 分身列表（留空 = 主控自动拆） */}
           <div className="flex items-center justify-between">
-            <span className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-violet-700">
+            <span className="inline-flex items-center gap-1 text-[10.5px] font-semibold text-brand-700">
               <Users aria-hidden className="h-3 w-3" />
               分身列表（{workers.length}）· 留空 = 主控自动拆
             </span>
             <button
               type="button"
               onClick={() => setWorkers((prev) => [...prev, makeEmptyWorker()])}
-              className="rounded border border-violet-300 bg-card px-2 py-0.5 text-[11px] font-semibold text-violet-700 hover:bg-violet-100"
+              className="rounded border border-brand-300 bg-card px-2 py-0.5 text-[11px] font-semibold text-brand-700 hover:bg-brand-100"
             >
               + 添加分身
             </button>

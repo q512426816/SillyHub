@@ -19998,6 +19998,16 @@ export interface components {
             scope_workspaces?: components["schemas"]["TeamWorkspaceRef"][];
             /** Budget Usd */
             budget_usd: number | null;
+            /** Project Id */
+            project_id?: string | null;
+            /** Worker Preset */
+            worker_preset?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Main Agent Config */
+            main_agent_config?: {
+                [key: string]: unknown;
+            } | null;
             /** Workers */
             workers?: components["schemas"]["TeamMissionWorkerSummary"][];
         };

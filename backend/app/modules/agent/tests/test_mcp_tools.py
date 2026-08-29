@@ -1474,6 +1474,53 @@ class TestSessionRouteResolution:
         assert [w["role"] for w in data["workers"]] == ["arch"]
 
     @pytest.mark.asyncio
+    async def test_list_workers_first_run_terminal_maps_failed(
+        self, client, db_session, auth_headers
+    ) -> None:
+        """ql-20260828-014-bfef 守护：分身首 run 终态（killed/failed）但子会话
+        侧未收敛（active / ended 无强收标记）→ list_workers 行 failed 而非
+        running（主控据本端点状态决定是否重派——误报 running 会拒派，真实
+        案例 run d72943d7 主控结论「没有全失败」）。"""
+        agent_session, _ws_id = await _seed_agent_session(db_session)
+        mission = await _seed_session_mission(db_session, agent_session)
+        # 形态①：run killed + 子会话 ended（无强收标记）。
+        w1 = AgentSession(
+            user_id=agent_session.user_id,
+            provider="claude",
+            status="ended",
+            parent_session_id=agent_session.id,
+        )
+        # 形态②：run failed + 子会话仍 active。
+        w2 = AgentSession(
+            user_id=agent_session.user_id,
+            provider="claude",
+            status="active",
+            parent_session_id=agent_session.id,
+        )
+        db_session.add_all([w1, w2])
+        await db_session.flush()
+        for sub, run_status in ((w1, "killed"), (w2, "failed")):
+            db_session.add(
+                AgentRun(
+                    mission_id=mission.id,
+                    agent_type="claude_code",
+                    status=run_status,
+                    role="worker",
+                    objective="分析",
+                    agent_session_id=sub.id,
+                )
+            )
+        await db_session.commit()
+
+        resp = await client.get(
+            f"/api/sessions/{agent_session.id}/missions/workers",
+            headers=auth_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        statuses = [w["status"] for w in resp.json()["workers"]]
+        assert statuses == ["failed", "failed"]
+
+    @pytest.mark.asyncio
     async def test_list_workers_no_active_mission_404(
         self, client, db_session, auth_headers
     ) -> None:

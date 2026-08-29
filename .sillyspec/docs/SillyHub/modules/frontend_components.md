@@ -41,7 +41,7 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
     textarea，均消费 lib/workspace-types，2026-08-18-workspace-role-type）
   - git-log/（工作区 Git 日志视图，2026-08-25-workspace-git-log）：`commit-graph`（SVG 泳道渲染 + lanePalette 三主题色板）/ `commit-list`（react-virtual 虚拟滚动行）/ `commit-detail-drawer`（提交详情 + diff 按需展开）/ `file-tree`（变更文件按 `/` 聚合目录树、目录节点 +x/-y）/ `git-status-bar`（共享 Git 状态条 full/compact 双形态：git-log 页完整态 + sessions 门户紧凑态 Tooltip 展开；自治取数 useGitLogStatus，状态色经 statusBarPalette → 组件级 `--sb-*` 变量注入零硬编码 hex；五边界形态——fetch 降级黄条/无 upstream/detached HEAD/空仓库/no_git 返 null，2026-08-26-workspace-git-status）；workspace-tabs TABS 追加「Git 日志」项（纯三字段）
   - 绑定与成员：`workspace-binding-dialog` / `workspace-binding-guard` / `workspace-member-row` / `workspace-member-add-dialog`
-  - 配置与路径：`workspace-config-card` / `workspace-path-picker` / `workspace-path-fields` / `workspace-daemon-switcher` / `workspace-access-guide` / `workspace-session-section`
+  - 配置与路径：`workspace-config-card` / `workspace-path-picker` / `workspace-path-fields` / `workspace-daemon-switcher`（两步切换：点选非当前 daemon 先进路径确认态——WorkspacePathPicker 绑定新 daemon 预填旧 root_path 可改可浏览，确认才一并提交 daemon_id+root_path，不再沿用旧路径，ql-20260828-010-ca22）/ `workspace-access-guide` / `workspace-session-section`
   - workspace/ 目录：`LinkWorkspaceDialog` / `LinkedProjectsSection`（PPM 项目链接）、`shared-daemon-manager` / `shared-daemon-toggle`（共享 daemon 管理与成员视图）；LinkWorkspaceDialog 已关联/可选两侧均按词表徽标渲染
     工作区类型（title 带 role/description 摘要）
 - 供应商域（llm-providers/）：
@@ -114,6 +114,7 @@ SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
 ## 变更索引
 
 - ql-20260829-006 | MachineCard 机器头新增「删除」按钮（仅离线可点，危险红字）+ runtimes 页 handleDeleteMachine（modal.confirm 二次确认 → deleteDaemonMachine → machines cache 就地移除 + 本机会话过滤 + 悬浮锁清理）；lib/daemon.ts 增 deleteDaemonMachine
+- ql-20260828-010-ca22 | 切换守护进程两步确认：workspace-daemon-switcher 点选非当前 daemon 后先进路径确认态（WorkspacePathPicker 绑定新 daemon、预填旧 root_path 可改可浏览），确认才一并提交 daemon_id+root_path——本地路径机器相关，跨机切换不再沿用旧路径
 - ql-20260827-005-a660 | /sessions 整页滚动条修复：sessions-portal 门户容器 calc(100vh-56px) 与 TopBar h-16(64px) 不符溢出 8px，对齐 calc(100vh-64px)（explorer/page.tsx 同款惯例）
 - quick-9f86d2c3 | 直播重复段+光标常闪（会话 e87622aa）：终态轮迟到 partial 反向收编 + segId 封存 + 面板终态轮 finishTurn 兜底（详见注意事项「partial/complete 双向收编」条）
 - ql-20260824-004-9783 | /sessions 用户消息气泡上方空行修复：page 模式占位轮 displayPrompt 无附件时拼出前导换行（61a1b709 引入），改走 joinAttachmentMarkers（runtime-session-helpers，parse 逆操作、语义对齐 backend inject 落库）；dialog 模式 submitFollowup 不受影响

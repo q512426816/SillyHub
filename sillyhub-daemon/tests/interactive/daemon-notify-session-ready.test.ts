@@ -43,6 +43,10 @@ const mockConfig: DaemonConfig = {
   heartbeat_interval: 0.02,
   max_concurrent_tasks: 5,
   log_level: 'debug',
+  // task-07 夹具债修复（2026-08-28-fix-cross-machine-worker-dispatch）：daemon 认领段
+  // cwd 守卫对 workspace 绑定会话做 allowed_roots 白名单终检——夹具 cwd 已是真实
+  // tmpdir()（interactiveClaimPayload），补白名单即走正常守卫通过路径。
+  allowed_roots: [tmpdir()],
 };
 
 function mockAgent(provider: string, path: string): DetectedAgent {

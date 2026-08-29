@@ -89,6 +89,7 @@ create: 软删可复活（_resurrect_soft_deleted）→ slug 去重
   `resolve_runtime_for_writeback`（runtime 现算 D-001@v1，
   失败抛 DaemonClientNoActiveSession 400），
   spec_workspace.sync-manual 等写回链路复用
+- member_runtimes.queries 双解析**统一全序**（2026-08-28-fix-cross-machine-worker-dispatch D-005@v1）：`resolve_representative_binding`（四 SQL 变体）与 `resolve_daemon_instance_for_workspace`（host_fs 路由）均 `ORDER BY 实例心跳 DESC NULLS LAST, daemon_id ASC`——多成员多机绑定时钉定链路与 worktree 路由必收敛同机；路由查询 inner join daemon_instances（stale 绑定行被静默丢弃，良性）。
 - scan_generate 走 daemon client RPC 源，`_guard_daemon_owned_by_user` 校验
   daemon 归属；`_find_active_scan_run` 防并发重复扫描
 - members_service：`_count_workspace_owners` 最后 owner 保护

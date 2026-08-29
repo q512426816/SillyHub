@@ -25,12 +25,18 @@ from app.modules.agent.model import AgentRun
 from app.modules.agent.placement import (
     NoOnlineDaemonError,
     RunPlacementService,
+    fetch_daemon_allowed_roots,
+    path_definitively_outside_roots,
 )
 from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime
 
 # Import to register workspace_member_runtimes table in BaseModel.metadata.
 from app.modules.workspace.member_runtimes import model as _wmr_model  # noqa: F401
+from app.modules.workspace.member_runtimes.queries import (
+    resolve_daemon_instance_for_workspace,
+    resolve_representative_binding,
+)
 from app.modules.workspace.model import Workspace
 
 # ---- Test helpers ------------------------------------------------------------
@@ -56,6 +62,7 @@ async def _create_daemon_instance(
     user_id: uuid.UUID,
     *,
     status: str = "online",
+    heartbeat: datetime | None = None,
 ) -> DaemonInstance:
     di = DaemonInstance(
         id=uuid.uuid4(),
@@ -63,7 +70,9 @@ async def _create_daemon_instance(
         hostname=f"host-{uuid.uuid4().hex[:6]}",
         server_url="http://localhost:8000",
         status=status,
-        last_heartbeat_at=datetime.now(UTC),
+        # task-04：heartbeat 可显式设（D-005@v1 双源全序主序 = 实例心跳，
+        # 多机形态须显式设值消除插入顺序依赖；缺省 None=旧行为 now()）。
+        last_heartbeat_at=heartbeat if heartbeat is not None else datetime.now(UTC),
     )
     session.add(di)
     await session.commit()
@@ -348,3 +357,164 @@ async def test_t8_scan_interactive_dispatch_uses_member_binding(db_session):
     assert dispatch.runtime_id == target_rt.id, (
         f"Expected runtime matching provider=codex on bound daemon, got {dispatch.runtime_id}"
     )
+
+
+# ---- allowed_roots 预检 helper（task-02 / FR-04 / D-003@v2）--------------------
+
+
+class TestPathDefinitivelyOutsideRoots:
+    """path_definitively_outside_roots 纯函数直测（无 DB / 无 IO）。
+
+    FR-04 边界敏感前缀包含 + D-003@v2「仅可判定越界才 True」+ NFR-01 双 OS
+    路径形态。用例名含 allowed_roots 关键字，命中 verify 的
+    ``-k "allowed_roots or precheck"`` 过滤。
+    """
+
+    def test_allowed_roots_path_inside_root_boundary(self):
+        # /ws/root 命中根 /ws：相等或 startswith(root + sep) 才算在内（放行）
+        assert path_definitively_outside_roots("/ws/root", ["/ws"]) is False
+
+    def test_allowed_roots_exact_root_equality_allowed(self):
+        # 路径与根完全相等 → 命中放行（== 分支）
+        assert path_definitively_outside_roots("/ws", ["/ws"]) is False
+
+    def test_allowed_roots_sibling_path_definitively_outside(self):
+        # /ws-other/x 不在 /ws 内 → 可判定越界（True）
+        assert path_definitively_outside_roots("/ws-other/x", ["/ws"]) is True
+
+    def test_allowed_roots_sibling_prefix_string_trap(self):
+        # 边界敏感："/ws-other" 不因朴素字符串前缀包含 "/ws" 被误判命中
+        assert path_definitively_outside_roots("/ws-other", ["/ws"]) is True
+
+    def test_allowed_roots_all_tilde_undecidable_passthrough(self):
+        # 全 ~ 根：backend 无法展开 → 不可判定放行（daemon 终检权威，D-003@v2）
+        assert path_definitively_outside_roots("/any/path", ["~/.sillyhub"]) is False
+
+    def test_allowed_roots_empty_union_undecidable_passthrough(self):
+        # 空并集 → 不可判定放行（D-003@v2）
+        assert path_definitively_outside_roots("/any/path", []) is False
+
+    def test_allowed_roots_windows_drive_case_insensitive(self):
+        # Windows 形态（盘符/反斜杠）大小写不敏感命中（NFR-01）
+        assert path_definitively_outside_roots("c:\\worknew\\SillyHub", ["C:\\WorkNew"]) is False
+
+    def test_allowed_roots_windows_other_drive_rejected(self):
+        # Windows 形态：不同盘 → 可判定越界（True）
+        assert path_definitively_outside_roots("D:\\elsewhere", ["C:\\WorkNew"]) is True
+
+    def test_allowed_roots_posix_case_sensitive(self):
+        # POSIX 形态大小写敏感：/WS/ROOT 不算在 /ws 内（与 Windows 形态相反）
+        assert path_definitively_outside_roots("/WS/ROOT", ["/ws"]) is True
+
+    def test_allowed_roots_mixed_tilde_skipped_absolute_judged(self):
+        # ~ 根跳过判定，绝对根 /ws 仍生效：越 /ws 可判定越界、命中放行
+        assert path_definitively_outside_roots("/outside/x", ["~/.sillyhub", "/ws"]) is True
+        assert path_definitively_outside_roots("/ws/x", ["~/.sillyhub", "/ws"]) is False
+
+
+@pytest.mark.asyncio
+async def test_fetch_daemon_allowed_roots_union_instance_and_runtimes(db_session):
+    """instance.allowed_roots ∪ 名下全部 runtimes.allowed_roots 并集（FR-04 / D-003@v2）。"""
+    user_id = await _create_user(db_session, suffix="roots")
+    di = await _create_daemon_instance(db_session, user_id)
+    # instance 根行内赋值（覆盖默认 ["~/.sillyhub"]）。
+    di.allowed_roots = ["/ws/instance"]
+    db_session.add(di)
+    # 同 instance 多 runtime 全收 + 跨 runtime 去重保序（instance 根在前）。
+    rt1 = await _create_runtime(db_session, user_id, daemon_instance_id=di.id)
+    rt1.allowed_roots = ["/ws/rt1", "/ws/shared"]
+    db_session.add(rt1)
+    rt2 = await _create_runtime(db_session, user_id, provider="codex", daemon_instance_id=di.id)
+    rt2.allowed_roots = ["/ws/shared"]
+    db_session.add(rt2)
+    # nullable 列 NULL 行 → 容忍跳过不崩。
+    rt_null = await _create_runtime(
+        db_session, user_id, provider="hermes", daemon_instance_id=di.id
+    )
+    rt_null.allowed_roots = None
+    db_session.add(rt_null)
+    # 其它 instance 名下的 runtime → 不并入（WHERE daemon_instance_id 过滤）。
+    stray_di = await _create_daemon_instance(db_session, user_id)
+    stray_rt = await _create_runtime(db_session, user_id, daemon_instance_id=stray_di.id)
+    stray_rt.allowed_roots = ["/ws/other-instance"]
+    db_session.add(stray_rt)
+    await db_session.commit()
+
+    roots = await fetch_daemon_allowed_roots(db_session, di.id)
+
+    assert roots == ["/ws/instance", "/ws/rt1", "/ws/shared"]
+
+
+@pytest.mark.asyncio
+async def test_fetch_daemon_allowed_roots_instance_row_missing_returns_runtime_union(db_session):
+    """instance 行缺失不视为空整体：返回 runtime 并集（task-02 / FR-04）。"""
+    user_id = await _create_user(db_session, suffix="miss")
+    # 无 instance 行的孤儿 runtime（SQLite 测试库不强制 FK，可直接挂随机 id）。
+    missing_id = uuid.uuid4()
+    rt = await _create_runtime(db_session, user_id, daemon_instance_id=missing_id)
+    rt.allowed_roots = ["/ws/rt-only"]
+    db_session.add(rt)
+    await db_session.commit()
+
+    roots = await fetch_daemon_allowed_roots(db_session, missing_id)
+
+    assert roots == ["/ws/rt-only"]
+
+
+# ---- 双源同序（task-04 / FR-03 / D-005@v1）--------------------------------------
+
+
+async def _seed_two_member_two_machine_ws(db_session, *, heartbeat_a, heartbeat_b):
+    """同工作区两成员各绑一台在线机器（心跳可控），返回解析所需句柄。"""
+    user_a = await _create_user(db_session, suffix="duo-a")
+    user_b = await _create_user(db_session, suffix="duo-b")
+    di_a = await _create_daemon_instance(db_session, user_a, heartbeat=heartbeat_a)
+    di_b = await _create_daemon_instance(db_session, user_b, heartbeat=heartbeat_b)
+    await _create_runtime(db_session, user_a, daemon_instance_id=di_a.id)
+    await _create_runtime(db_session, user_b, daemon_instance_id=di_b.id)
+    ws = await _create_workspace(db_session, user_id=user_a, default_agent="claude_code")
+    await _create_member_binding(db_session, ws.id, user_a, daemon_id=di_a.id)
+    await _create_member_binding(db_session, ws.id, user_b, daemon_id=di_b.id)
+    return user_a, di_a, di_b, ws
+
+
+@pytest.mark.asyncio
+async def test_dual_source_resolution_converges_same_daemon(db_session):
+    """双源同序（FR-03 / D-005@v1）：多成员多机绑定均在线时，
+    resolve_representative_binding（钉定链路）与 resolve_daemon_instance_for_workspace
+    （host_fs worktree 路由）返回同一 daemon_instance_id——统一全序
+    ``ORDER BY 实例心跳 DESC, daemon_id ASC`` 下实例心跳较新的机器（di_b）双源同选。"""
+    older = datetime(2026, 8, 28, 10, 0, 0, tzinfo=UTC)
+    newer = datetime(2026, 8, 28, 11, 0, 0, tzinfo=UTC)
+    user_a, di_a, di_b, ws = await _seed_two_member_two_machine_ws(
+        db_session, heartbeat_a=older, heartbeat_b=newer
+    )
+
+    rep = await resolve_representative_binding(db_session, ws.id, user_a, "claude_code")
+    routed = await resolve_daemon_instance_for_workspace(db_session, ws.id)
+
+    # 心跳全序：di_b（较新）在两源中均胜出，且两源收敛同机。
+    assert rep is not None
+    assert uuid.UUID(str(rep["daemon_instance_id"])) == di_b.id
+    assert routed == di_b.id
+    assert routed == uuid.UUID(str(rep["daemon_instance_id"]))
+    assert routed != di_a.id
+
+
+@pytest.mark.asyncio
+async def test_dual_source_tie_heartbeat_daemon_id_asc_tiebreak(db_session):
+    """心跳并列 tie-break（FR-03 验收）：两台绑定机器实例心跳完全相同时，
+    ``daemon_id ASC`` 升序取 id 较小者——两解析源同取同一行，结果确定。"""
+    tied = datetime(2026, 8, 28, 12, 0, 0, tzinfo=UTC)
+    user_a, di_a, di_b, ws = await _seed_two_member_two_machine_ws(
+        db_session, heartbeat_a=tied, heartbeat_b=tied
+    )
+    # CHAR(32) hex 字典升序 == 等宽小写 hex 的数值序，与 SQL ASC 一致。
+    expected = min(di_a.id, di_b.id)
+
+    rep = await resolve_representative_binding(db_session, ws.id, user_a, "claude_code")
+    routed = await resolve_daemon_instance_for_workspace(db_session, ws.id)
+
+    assert rep is not None
+    assert uuid.UUID(str(rep["daemon_instance_id"])) == expected
+    assert routed == expected

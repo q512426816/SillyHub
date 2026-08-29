@@ -6,13 +6,16 @@
  * 职责：
  *   - listDaemonInstances() 拉当前用户在线守护进程实体（含已启用 provider 列表）。
  *   - 每项展示 hostname/display_alias 为主文 + 副位 provider 徽标。
- *   - 选中非当前项调 upsertMyBinding({ daemon_id }) => onChanged 刷新父级。
+ *   - 选中非当前项进入路径确认态：项目本地路径是机器相关的（跨机多半不同），
+ *     用 WorkspacePathPicker 绑定新 daemon 预填旧路径、可改可浏览（ql-20260828-010-ca22）；
+ *     确认后调 upsertMyBinding({ daemon_id, root_path }) => onChanged 刷新父级。
  *   - 空列表展示「暂无在线守护进程」空态引导。
  */
 import { useCallback, useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import WorkspacePathPicker from "@/components/workspace-path-picker";
 import { ApiError } from "@/lib/api";
 import {
   listDaemonInstances,
@@ -57,6 +60,9 @@ export function WorkspaceDaemonSwitcher({
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [switchingId, setSwitchingId] = useState<string | null>(null);
+  // 路径确认态：点选的目标 daemon + 待确认路径（预填当前绑定路径）。
+  const [pending, setPending] = useState<DaemonInstanceRead | null>(null);
+  const [pendingPath, setPendingPath] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -77,37 +83,47 @@ export function WorkspaceDaemonSwitcher({
 
   const handleToggle = useCallback(() => {
     setOpen((v) => !v);
+    setPending(null);
     void load();
   }, [load]);
 
   const currentDaemonId = (currentBinding as any)?.daemon_id ?? null;
 
-  const handleSwitch = useCallback(
-    async (di: DaemonInstanceRead) => {
-      // 点击当前绑定项：仅收起，不重复提交。
+  // 点选列表项：当前项仅收起；非当前项进入路径确认态（不立即提交）。
+  const handlePick = useCallback(
+    (di: DaemonInstanceRead) => {
       if (di.id === currentDaemonId) {
         setOpen(false);
         return;
       }
-      setSwitchingId(di.id);
-      setError(null);
-      try {
-        // path_source 固定 daemon-client（member 级 spec 策略，server-local 模式已移除）。
-        await upsertMyBinding(workspaceId, {
-          daemon_id: di.id,
-          root_path: currentBinding?.root_path ?? "",
-          path_source: "daemon-client",
-        });
-        setOpen(false);
-        onChanged?.();
-      } catch (e) {
-        setError(e instanceof ApiError ? e.message : "切换失败");
-      } finally {
-        setSwitchingId(null);
-      }
+      setPending(di);
+      setPendingPath(currentBinding?.root_path ?? "");
     },
-    [workspaceId, currentBinding, currentDaemonId, onChanged],
+    [currentDaemonId, currentBinding],
   );
+
+  const handleCancel = useCallback(() => setPending(null), []);
+
+  const handleConfirmSwitch = useCallback(async () => {
+    if (!pending || !pendingPath) return;
+    setSwitchingId(pending.id);
+    setError(null);
+    try {
+      // path_source 固定 daemon-client（member 级 spec 策略，server-local 模式已移除）。
+      await upsertMyBinding(workspaceId, {
+        daemon_id: pending.id,
+        root_path: pendingPath,
+        path_source: "daemon-client",
+      });
+      setOpen(false);
+      setPending(null);
+      onChanged?.();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "切换失败");
+    } finally {
+      setSwitchingId(null);
+    }
+  }, [workspaceId, pending, pendingPath, onChanged]);
 
   return (
     <div className="space-y-1.5" data-testid="daemon-switcher">
@@ -133,7 +149,43 @@ export function WorkspaceDaemonSwitcher({
         </p>
       )}
 
-      {open && (
+      {open && pending ? (
+        <div
+          className="rounded border bg-card p-2 shadow-sm"
+          data-testid="daemon-switcher-confirm"
+        >
+          <p className="px-1 pb-1.5 text-[11px] text-muted-foreground">
+            切换到「{pending.display_alias ?? pending.hostname}」：请确认项目在该机器上的本地路径
+            （不同机器的检出路径通常不同）
+          </p>
+          <WorkspacePathPicker
+            daemonId={pending.id}
+            value={pendingPath}
+            onChange={setPendingPath}
+            disabled={switchingId !== null}
+            inputClassName="text-xs"
+          />
+          <div className="mt-1.5 flex justify-end gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 text-[11px]"
+              onClick={handleCancel}
+              disabled={switchingId !== null}
+            >
+              取消
+            </Button>
+            <Button
+              size="sm"
+              className="h-6 text-[11px]"
+              onClick={() => void handleConfirmSwitch()}
+              disabled={switchingId !== null || !pendingPath}
+            >
+              {switchingId ? "切换中…" : "确认切换"}
+            </Button>
+          </div>
+        </div>
+      ) : open ? (
         <div className="rounded border bg-card p-1 shadow-sm">
           {loading ? (
             <p className="px-2 py-1.5 text-[11px] text-muted-foreground">
@@ -151,9 +203,8 @@ export function WorkspaceDaemonSwitcher({
                   <li key={di.id}>
                     <button
                       type="button"
-                      disabled={switchingId !== null}
-                      onClick={() => void handleSwitch(di)}
-                      className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted/50 disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => handlePick(di)}
+                      className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted/50"
                       aria-current={isCurrent || undefined}
                     >
                       <span className="flex min-w-0 flex-col gap-0.5">
@@ -189,7 +240,7 @@ export function WorkspaceDaemonSwitcher({
             </ul>
           )}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -18,6 +18,7 @@
 // 对照蓝图 task-09.md §4.2 B1-B10 + §9 AC-6~AC-12, AC-24。
 
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest';
+import { tmpdir } from 'node:os';
 import { Daemon } from '../../src/daemon.js';
 import type { DaemonConfig } from '../../src/config.js';
 import { MSG } from '../../src/protocol.js';
@@ -68,6 +69,10 @@ const mockConfig: DaemonConfig = {
   heartbeat_interval: 0.02,
   max_concurrent_tasks: 5,
   log_level: 'debug',
+  // task-07 夹具债修复（2026-08-28-fix-cross-machine-worker-dispatch）：daemon 认领段
+  // cwd 守卫对 workspace 绑定会话做 allowed_roots 白名单终检 + 存在性终检——夹具
+  // rootPath 由假路径 'C:\work' 改用真实存在的 tmpdir() 并补白名单。
+  allowed_roots: [tmpdir()],
 };
 
 function mockAgent(provider: string, path = '', available = true): DetectedAgent {
@@ -258,6 +263,8 @@ function driveInteractiveStart(
   const sessionId = p.sessionId ?? 'sess-1';
   const runId = p.runId ?? 'run-1';
   const leaseId = p.leaseId;
+  // task-07 夹具债修复：默认 rootPath 用真实存在的 tmpdir()（cwd 守卫存在性终检）。
+  const rootPath = p.rootPath ?? tmpdir();
   // claimLease 返回 payload：daemon 从这里读 transport/workspaceId（_executeTask 归一化）。
   const payload: Record<string, unknown> = {
     kind: 'interactive',
@@ -265,7 +272,7 @@ function driveInteractiveStart(
     provider: p.provider ?? 'claude',
     agent_session_id: sessionId,
     agent_run_id: runId,
-    root_path: p.rootPath ?? 'C:\\work',
+    root_path: rootPath,
     claim_token: 'tok-i',
   };
   if (p.transport !== undefined) {
@@ -287,7 +294,7 @@ function driveInteractiveStart(
     prompt: p.prompt ?? 'hi',
     agentSessionId: sessionId,
     agentRunId: runId,
-    rootPath: p.rootPath ?? 'C:\\work',
+    rootPath,
   };
   if (p.transport !== undefined) {
     wsPayload.transport = p.transport;

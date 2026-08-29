@@ -358,6 +358,90 @@ describe("TeamTriggerPopover 取消", () => {
   });
 });
 
+/* ───────── 7.5 ql-20260828-009-4a13：hasActiveMission 更新指派提示 ───────── */
+
+describe("TeamTriggerPopover 更新指派提示（hasActiveMission）", () => {
+  it("hasActiveMission=true → 渲染「确认后将取消当前任务并重新指派」提示；缺省不渲染", () => {
+    setup({ hasActiveMission: true });
+    expect(
+      screen.getByText(/已有进行中的团队任务：确认后将取消当前任务并按本次配置重新指派/),
+    ).toBeInTheDocument();
+  });
+
+  it("缺省（无活跃 mission）→ 不渲染更新指派提示", () => {
+    setup();
+    expect(
+      screen.queryByText(/已有进行中的团队任务/),
+    ).not.toBeInTheDocument();
+  });
+});
+
+/* ───────── 7.6 ql-20260828-012-4425：initialConfig 编辑回显 ───────── */
+
+describe("TeamTriggerPopover 编辑回显（initialConfig）", () => {
+  it("initialConfig → 目标/预算/项目维度回显；未展开预设确认也保留原 preset", async () => {
+    listProjectsMock.mockResolvedValue([
+      { id: "p-1", project_name: "网站重构项目", project_code: "P-1" },
+    ] as never);
+    listProjectWorkspacesMock.mockResolvedValue([
+      makeWs("ws-a", "sillyspec", "backend-code"),
+    ]);
+    setup({
+      initialConfig: {
+        objective: "分析迭代风险",
+        projectId: "p-1",
+        scopeWorkspaceIds: ["ws-a"],
+        budgetUsd: 5,
+        mainAgentConfig: {
+          agent_type: "codex",
+          provider: "gpt",
+          model: "gpt-5",
+        },
+        workerPreset: [
+          { agent_type: "claude_code", model: "", objective: "查风险", role: "risk" },
+        ],
+      },
+    });
+
+    // 目标与预算回显；项目维度选中（scopeMode=project + 下拉预选 + 勾选——
+    // 项目下拉异步加载，waitFor 等就位）。
+    expect((screen.getByLabelText(/^目标/) as HTMLInputElement).value).toBe(
+      "分析迭代风险",
+    );
+    expect(
+      (screen.getByLabelText(/^费用上限/) as HTMLInputElement).value,
+    ).toBe("5");
+    await waitFor(() => {
+      const select = screen.getByLabelText(/选择项目/) as HTMLSelectElement;
+      expect(select.value).toBe("p-1");
+    });
+    // 项目模式卡选中态（radio checked 透传到卡片样式断言走勾选工作区）。
+    await waitFor(() =>
+      expect(
+        screen.getByRole("checkbox", { name: /勾选工作区 sillyspec/ }),
+      ).toBeChecked(),
+    );
+
+    // 未展开预设面板直接确认：preset 原样回传（编辑语义，非「自动拆解」清空）。
+    fireEvent.click(screen.getByRole("button", { name: /就绪，随下条消息发出/ }));
+    expect(HANDLERS.onTrigger).toHaveBeenCalledTimes(1);
+    expect(lastPayload().main_agent_config).toEqual({
+      agent_type: "codex",
+      provider: "gpt",
+      model: "gpt-5",
+    });
+    expect(lastPayload().worker_preset).toHaveLength(1);
+  });
+
+  it("无 initialConfig → 既有关闭折叠语义零回归（未展开确认不带 preset）", () => {
+    setup();
+    fireEvent.click(screen.getByRole("button", { name: /就绪，随下条消息发出/ }));
+    expect(HANDLERS.onTrigger).toHaveBeenCalledTimes(1);
+    expect(lastPayload().main_agent_config).toBeUndefined();
+    expect(lastPayload().worker_preset).toBeUndefined();
+  });
+});
+
 /* ───────────────── 8. task-12：弹层 probe 一次拉取（无轮询） ───────────────── */
 
 const CURRENT_WS_ID = "11111111-2222-3333-4444-555555555555";
