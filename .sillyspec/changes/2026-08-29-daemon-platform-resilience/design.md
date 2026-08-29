@@ -172,37 +172,38 @@ daemon 与平台（backend）通过 WebSocket（控制面）+ HTTP（数据面�
 
 ## 文件变更清单（File Changes）
 
-**backend（新增 2 / 修改 12）**
-- 新增 `backend/app/modules/daemon/control_commands.py`（ControlCommandService：enqueue/mark_delivered/fetch_pending/ack/gc）
-- 新增 `backend/alembic/versions/<rev>_add_daemon_control_commands.py`（建表迁移）
-- 修改 `backend/app/modules/daemon/model.py`（DaemonControlCommand 表）
-- 修改 `backend/app/modules/daemon/router.py`（GET pending-controls、POST controls/ack、POST sessions/suspend-batch、POST sessions/{id}/permission-requests；心跳响应加 pending_controls_count）
-- 修改 `backend/app/modules/daemon/ws_hub.py`（disconnect 延迟降级回调挂载）
-- 修改 `backend/app/modules/daemon/runtime/service.py`（延迟 offline 标记 + 心跳恢复 online）
-- 修改 `backend/app/modules/daemon/sweep.py`（lease_expiry_sweeper、offline sweep 改 suspended、suspended 超龄 GC、控制指令 GC）
-- 修改 `backend/app/modules/daemon/session/service.py`（inject/interrupt/end/resume 走 enqueue+WS；suspend 批量端点逻辑；recover 接受 suspended；result/session-end 幂等化）
-- 修改 `backend/app/modules/daemon/permission_service.py`（审批结果/超时 deny 走控制指令；HTTP 上行端点逻辑）
-- 修改 `backend/app/modules/daemon/lease/provider_switch.py`（provider_config_changed 走控制指令）
-- 修改 `backend/app/modules/agent/model.py`（AgentSession.status 词表加 suspended）
-- 修改 `backend/app/modules/agent/placement.py`（派发前查 ws_hub.is_connected）
-- 修改 `backend/app/main.py`（lifespan：lease sweeper 挂载、pending lease 重唤醒）
-- 重新生成 `backend/openapi.json`
-
-**daemon（新增 1 / 修改 6）**
-- 新增 `sillyhub-daemon/src/control-dispatcher.ts`（控制指令消费分发：统一 (kind,payload) 入口，WS 与补拉共用；LRU 去重窗）——避免 daemon.ts god 文件继续膨胀
-- 修改 `sillyhub-daemon/src/ws-client.ts`（退避重连序列+jitter+消息重置）
-- 修改 `sillyhub-daemon/src/daemon.ts`（register 周期重试、_reconcileAfterReconnect、stop 挂起批量、恢复网络失败保留重试、no_claim_token 入 outbox）
-- 修改 `sillyhub-daemon/src/hub-client.ts`（getPendingControls/ackControls/suspendSessions/submitPermissionRequest）
-- 修改 `sillyhub-daemon/src/resilience/service.ts` + `outbox.ts`（run_result/session_end 终态 kind、pending_token 暂存语义）
-- 修改 `sillyhub-daemon/src/protocol.ts`（控制指令 kind 常量与心跳响应类型）
-- 重新生成 `sillyhub-daemon/src/api-types.ts`（gen:types）
-
-**frontend（修改 4）**
-- 修改 `frontend/src/lib/daemon.ts`（streamSession onStatusChange、suspended 类型与展示辅助）
-- 修改 `frontend/src/components/daemon/session-panel.tsx`（连接横幅、看门狗对账、suspended 展示与输入禁用）
-- 修改 `frontend/src/lib/agent-stream.ts`（成功事件重置 retryCount）
-- 修改 `frontend/src/components/permissions/session-permission-panel.tsx`（无限退避重连+dialogs 补拉）
-- 重新生成 `frontend/src/lib/api-types.ts`（pnpm gen:types）
+| 操作 | 文件路径 | 说明 |
+|---|---|---|
+| 新增 | backend/app/modules/daemon/control_commands.py | ControlCommandService：enqueue/mark_delivered/fetch_pending/ack/gc |
+| 新增 | backend/migrations/versions/20260829_1200_add_daemon_control_commands.py | 建表迁移（alembic.ini script_location=migrations） |
+| 修改 | backend/app/modules/daemon/model.py | DaemonControlCommand 表 |
+| 修改 | backend/app/modules/daemon/router.py | GET pending-controls、POST controls/ack、POST sessions/suspend-batch、POST sessions/{id}/permission-requests；心跳响应加 pending_controls |
+| 修改 | backend/app/modules/daemon/ws_hub.py | disconnect 延迟降级回调挂载 |
+| 修改 | backend/app/modules/daemon/runtime/service.py | 延迟 offline 标记 + 心跳恢复 online |
+| 修改 | backend/app/modules/daemon/sweep.py | lease_expiry_sweeper、offline sweep 改 suspended、suspended 超龄 GC、控制指令 GC |
+| 修改 | backend/app/modules/daemon/session/service.py | inject/interrupt/end/resume 走 enqueue+WS；suspend 批量端点逻辑；recover 接受 suspended；result/session-end 幂等化 |
+| 修改 | backend/app/modules/daemon/permission_service.py | 审批结果/超时 deny 走控制指令；HTTP 上行端点逻辑 |
+| 修改 | backend/app/modules/daemon/lease/service.py | expire/handle_expired/alert_stuck 接线（只调用不改语义） |
+| 修改 | backend/app/modules/daemon/lease/provider_switch.py | provider_config_changed 走控制指令 |
+| 修改 | backend/app/modules/agent/model.py | AgentSession.status 词表加 suspended |
+| 修改 | backend/app/modules/agent/placement.py | 派发前查 ws_hub.is_connected |
+| 修改 | backend/app/main.py | lifespan：lease sweeper 挂载、pending lease 重唤醒 |
+| 重新生成 | backend/openapi.json | openapi 再导出 |
+| 新增 | sillyhub-daemon/src/control-dispatcher.ts | 控制指令消费分发：统一 (kind,payload) 入口，WS 与补拉共用；LRU 去重窗（避免 daemon.ts god 文件继续膨胀） |
+| 修改 | sillyhub-daemon/src/ws-client.ts | 退避重连序列+jitter+消息重置 |
+| 修改 | sillyhub-daemon/src/daemon.ts | register 周期重试、_reconcileAfterReconnect、stop 挂起批量、恢复网络失败保留重试、no_claim_token 入 outbox |
+| 修改 | sillyhub-daemon/src/hub-client.ts | getPendingControls/ackControls/suspendSessions/submitPermissionRequest |
+| 修改 | sillyhub-daemon/src/resilience/service.ts | run_result/session_end 终态 kind、drain 按 kind 路由、pending_token 暂存 |
+| 修改 | sillyhub-daemon/src/resilience/outbox.ts | entry kind 字段、dedupId 命名维度、旧 runId 文件兼容 |
+| 修改 | sillyhub-daemon/src/protocol.ts | 控制指令 kind 常量与心跳响应类型 |
+| 重新生成 | sillyhub-daemon/src/api-types.ts | gen:types |
+| 修改 | frontend/src/lib/daemon.ts | streamSession onStatusChange、suspended 类型与展示辅助 |
+| 修改 | frontend/src/components/daemon/session-panel.tsx | 连接横幅、看门狗对账、suspended 展示与输入禁用 |
+| 修改 | frontend/src/components/daemon/session-list-layout.tsx | SESSION_STATUS_LABELS 增加 suspended 徽标 |
+| 修改 | frontend/src/components/daemon/runtime-session-helpers.tsx | ACTIVE_SESSION_VIEW_STATUSES 词表 + 恢复按钮对 suspended 的处理 |
+| 修改 | frontend/src/lib/agent-stream.ts | 成功事件重置 retryCount |
+| 修改 | frontend/src/components/permissions/session-permission-panel.tsx | 无限退避重连+dialogs 补拉 |
+| 重新生成 | frontend/src/lib/api-types.ts | pnpm gen:types |
 
 ## 接口定义
 
@@ -232,7 +233,7 @@ POST /api/daemon/sessions/{session_id}/permission-requests
 |---|---|---|---|
 | R1 | 控制指令表每次 inject/审批多一次 INSERT，增加延迟 | 低 | 单行写入微秒级；低频操作（用户级） |
 | R2 | WS 断开即时降级引起状态抖动（前端频繁切换离线横幅） | 中 | 10s 延迟标记可取消；daemon 重连即拍心跳恢复 |
-| R3 | suspended 新状态三端展示遗漏（列表/详情/浮窗/枚举 default） | 中 | 前端统一 status 徽标映射函数 + default 兜底「未知状态」；三处入口同改 |
+| R3 | suspended 新状态三端展示遗漏（列表/详情/浮窗/枚举 default） | 中 | 前端统一 status 徽标映射函数 + default 兜底「未知状态」；四处入口同改：session-panel.tsx、session-list-layout.tsx、runtime-session-helpers.tsx、浮窗 |
 | R4 | daemon.ts 已 4773 行（god 文件），继续膨胀 | 中 | 控制指令消费独立 control-dispatcher.ts；对账流程独立方法组 |
 | R5 | 终态 outbox 重放与 backend 端点幂等不严格导致重复副作用 | 中 | result/session-end 端点显式幂等（同 dedup/payload → no-op）+ 用例覆盖 |
 | R6 | 恢复重试保留本地记录无限堆积 | 低 | 记录数上限 + 超龄清理（7 天）+ 日志 |
