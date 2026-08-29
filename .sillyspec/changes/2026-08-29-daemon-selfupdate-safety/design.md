@@ -129,7 +129,7 @@ backend openapi 再导出 → daemon/frontend `pnpm gen:types`（心跳 body/机
 | 修改 | sillyhub-daemon/src/cli.ts | status 命令读 pending-update.json 展示 |
 | 修改 | sillyhub-daemon/src/hub-client.ts | heartbeat 请求体可选 pending_update 字段 |
 | 修改 | backend/app/modules/daemon/model.py | DaemonInstance.pending_update JSON nullable 列 |
-| 新增 | backend/migrations/versions/<rev>_add_daemon_pending_update.py | 建列迁移（backend/migrations/versions/ 实际目录） |
+| 新增 | backend/migrations/versions/202608291500_add_daemon_pending_update.py | 建列迁移（backend/migrations/versions/ 实际目录） |
 | 修改 | backend/app/modules/daemon/router.py | 心跳接收落库+machines/runtimes/page 透出 |
 | 修改 | backend/app/modules/daemon/runtime/service.py | heartbeat_daemon 落 pending_update upsert/清除 |
 | 修改 | frontend/src/components/daemon/machine-card.tsx | 三状态横幅+「升级 daemon」按钮禁用扩展（Grill M12 核实：文件属实 332 行，按钮在 234-246 行已有 disabled 可扩展） |
@@ -172,7 +172,7 @@ GET /api/daemon/runtimes/page → 同款机器级字段
 
 - 章节完整性：背景/目标/非目标/决策/总体方案/生命周期契约表/文件清单/接口/风险/自审——齐全 ✓
 - 决策引用：D-001（忙定义→S1）、D-002（推迟→S1）、D-003（探测→S2）、D-004（A3→S3-S5）、D-005（保活+释放→S1）、D-006（整体确认）——全部当前版本引用 ✓
-- 生命周期契约表：涉及 daemon/lease/session/lifecycle 关键词，8 行矩阵覆盖全部新增状态转移 ✓
+- 生命周期契约表：涉及 daemon/lease/session/lifecycle 关键词，10 行矩阵覆盖全部新增状态转移 ✓
 - 原型：机器卡三状态组件级变化，prototype-machine-update-status.html 已产出 ✓
 - Grill 交叉审查（独立子代理 19 项矩阵）：3 阻断已修——B1 探测改读文件提取 BUILD_ID（--version 输出 semver 不同源，实跑证伪）；B2 disk_change 独立直启路径（不下载不查 manifest，multica trySelfReload 同款）；B3 stop 前终检忙判定；其余 M04-M19 语义补全（所有权/定时器生命周期、respawn 失败停摆语义、启动清残留、since 保留、文件清单补 lib/daemon.ts、可选方法接口先例、原型文案）全部修订入上文 ✓
 - 自审存疑 1（机器卡组件名）：Grill 核实 machine-card.tsx 属实（332 行）解除 ✓；存疑 2 随 B1 修正作废（无 spawn）✓

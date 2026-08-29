@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>审批通知铃铛 · 原型 · 2026-08-29-approval-notify-push</title>
+<!--
+  原型：全局顶栏通知铃铛 + 下拉通知面板（站内通知 · SSE 实时）
+  变更：2026-08-29-approval-notify-push
+  说明：三主题切换（ai-native 默认 / blue / dark），token 对照 frontend/src/styles/themes.ts
+  交互演示：点铃铛开合面板 / 点条目已读+跳转提示 / 全部已读 / 模拟 SSE 推送（演示未读徽标实时增长）
+-->
+<style>
+  :root[data-theme="ai-native"] {
+    --bg: #FAF5FF; --card: #FFFFFF; --border: #DDD6FE; --border-weak: #EDE9FE;
+    --primary: #7C3AED; --primary-hover: #6D28D9; --accent: #0891B2;
+    --text: #1E1B2E; --text-2: #6B6480; --text-3: #9C94B8;
+    --success: #059669; --warning: #D97706; --error: #DC2626; --info: #0891B2; --neutral: #64748b;
+    --brand-50: #f5f3ff; --brand-100: #ede9fe; --brand-600: #7c3aed;
+    --shadow: 0 12px 32px rgba(76, 29, 149, .14), 0 2px 8px rgba(76, 29, 149, .08);
+  }
+  :root[data-theme="blue"] {
+    --bg: #F8FAFC; --card: #FFFFFF; --border: #E2E8F0; --border-weak: #F1F5F9;
+    --primary: #2563EB; --primary-hover: #1D4ED8; --accent: #2563EB;
+    --text: #0F172A; --text-2: #475569; --text-3: #94A3B8;
+    --success: #10B981; --warning: #F59E0B; --error: #EF4444; --info: #06B6D4; --neutral: #64748b;
+    --brand-50: #EFF6FF; --brand-100: #DBEAFE; --brand-600: #2563eb;
+    --shadow: 0 12px 32px rgba(30, 64, 175, .12), 0 2px 8px rgba(30, 64, 175, .08);
+  }
+  :root[data-theme="dark"] {
+    --bg: #18181B; --card: #27272A; --border: #3F3F46; --border-weak: #2D2D31;
+    --primary: #0891B2; --primary-hover: #06B6D4; --accent: #22D3EE;
+    --text: #E4E4E7; --text-2: #A1A1AA; --text-3: #71717A;
+    --success: #34D399; --warning: #FBBF24; --error: #F87171; --info: #22D3EE; --neutral: #A1A1AA;
+    --brand-50: #164E63; --brand-100: #155E75; --brand-600: #22D3EE;
+    --shadow: 0 12px 32px rgba(0, 0, 0, .5), 0 2px 8px rgba(0, 0, 0, .35);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+         background: var(--bg); color: var(--text); min-height: 100vh; }
+  button { font-family: inherit; cursor: pointer; }
+
+  /* ===== 顶栏（示意壳，非本次改动目标） ===== */
+  .topbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 16px;
+    height: 56px; padding: 0 24px; background: var(--card); border-bottom: 1px solid var(--border); }
+  .logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
+  .logo-dot { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--primary), var(--accent)); }
+  .topbar .crumb { color: var(--text-2); font-size: 13px; }
+  .topbar .spacer { flex: 1; }
+  .theme-switch { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .theme-switch button { padding: 4px 10px; font-size: 12px; border: none; background: transparent; color: var(--text-2); }
+  .theme-switch button.on { background: var(--primary); color: #fff; }
+
+  /* ===== 铃铛 ===== */
+  .bell-wrap { position: relative; }
+  .bell-btn { width: 38px; height: 38px; border-radius: 10px; border: 1px solid transparent;
+    background: transparent; color: var(--text-2); display: grid; place-items: center; position: relative; }
+  .bell-btn:hover { background: var(--brand-50); color: var(--primary); }
+  .bell-btn.open { background: var(--brand-50); color: var(--primary); border-color: var(--border); }
+  .bell-btn svg { width: 20px; height: 20px; }
+  .badge { position: absolute; top: 2px; right: 2px; min-width: 17px; height: 17px; padding: 0 4px;
+    border-radius: 9px; background: var(--error); color: #fff; font-size: 11px; font-weight: 600;
+    display: grid; place-items: center; border: 2px solid var(--card); transition: transform .15s; }
+  .badge.pop { animation: pop .3s; }
+  @keyframes pop { 0% { transform: scale(.4); } 60% { transform: scale(1.25); } 100% { transform: scale(1); } }
+  .avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--brand-100);
+    color: var(--primary); display: grid; place-items: center; font-size: 13px; font-weight: 600; }
+
+  /* ===== 下拉面板 ===== */
+  .panel { position: absolute; right: 0; top: 46px; width: 384px; background: var(--card);
+    border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow);
+    opacity: 0; transform: translateY(-6px); pointer-events: none; transition: opacity .16s, transform .16s; }
+  .panel.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 16px 10px; border-bottom: 1px solid var(--border-weak); }
+  .panel-head .t { font-size: 14px; font-weight: 600; }
+  .panel-head .t .cnt { color: var(--primary); margin-left: 4px; }
+  .read-all { border: none; background: transparent; color: var(--primary); font-size: 12px; }
+  .read-all:hover { color: var(--primary-hover); text-decoration: underline; }
+  .read-all:disabled { color: var(--text-3); text-decoration: none; cursor: default; }
+
+  .list { max-height: 420px; overflow-y: auto; }
+  .item { display: flex; gap: 12px; padding: 12px 16px; cursor: pointer; border-bottom: 1px solid var(--border-weak);
+    transition: background .12s; position: relative; }
+  .item:hover { background: var(--brand-50); }
+  .item:last-child { border-bottom: none; }
+  .item.unread { background: var(--brand-50); }
+  .item.unread::before { content: ""; position: absolute; left: 6px; top: 20px; width: 6px; height: 6px;
+    border-radius: 50%; background: var(--primary); }
+  .item .icon { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; flex: none; }
+  .item .icon svg { width: 17px; height: 17px; }
+  .icon.pending { background: color-mix(in srgb, var(--warning) 14%, transparent); color: var(--warning); }
+  .icon.approved { background: color-mix(in srgb, var(--success) 14%, transparent); color: var(--success); }
+  .icon.rejected { background: color-mix(in srgb, var(--error) 13%, transparent); color: var(--error); }
+  .icon.permission { background: color-mix(in srgb, var(--info) 14%, transparent); color: var(--info); }
+  .icon.timeout { background: color-mix(in srgb, var(--neutral) 16%, transparent); color: var(--neutral); }
+  .item .main { flex: 1; min-width: 0; }
+  .item .title { font-size: 13px; font-weight: 600; line-height: 1.45; display: flex; align-items: center; gap: 6px; }
+  .item .tag { font-size: 10px; font-weight: 500; padding: 1px 6px; border-radius: 5px; flex: none;
+    background: var(--brand-100); color: var(--primary); }
+  .item .body { font-size: 12px; color: var(--text-2); margin-top: 2px; line-height: 1.5;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .foot { display: flex; justify-content: space-between; margin-top: 4px; font-size: 11px; color: var(--text-3); }
+  .item .jump { color: var(--accent); }
+  .item.fresh { animation: freshIn .35s; }
+  @keyframes freshIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
+
+  .empty { padding: 36px 0 40px; text-align: center; color: var(--text-3); font-size: 13px; }
+  .empty svg { width: 40px; height: 40px; margin-bottom: 8px; opacity: .5; }
+  .panel-foot { padding: 9px 0; text-align: center; border-top: 1px solid var(--border-weak); }
+  .panel-foot button { border: none; background: transparent; color: var(--text-2); font-size: 12px; }
+  .panel-foot button:hover { color: var(--primary); }
+
+  /* ===== 演示区 ===== */
+  .demo { max-width: 760px; margin: 40px auto; padding: 0 24px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px; }
+  .demo h2 { font-size: 16px; margin-bottom: 6px; }
+  .demo p.desc { color: var(--text-2); font-size: 13px; line-height: 1.8; margin-bottom: 16px; }
+  .demo .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .btn { padding: 8px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--card);
+    color: var(--text); font-size: 13px; }
+  .btn:hover { border-color: var(--primary); color: var(--primary); }
+  .btn.primary { background: var(--primary); border-color: var(--primary); color: #fff; }
+  .btn.primary:hover { background: var(--primary-hover); }
+  .demo ul { margin: 14px 0 0 18px; color: var(--text-2); font-size: 13px; line-height: 2; }
+
+  /* toast */
+  .toast { position: fixed; left: 50%; bottom: 32px; transform: translateX(-50%) translateY(10px);
+    background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 10px;
+    box-shadow: var(--shadow); padding: 10px 18px; font-size: 13px; opacity: 0; pointer-events: none;
+    transition: opacity .2s, transform .2s; z-index: 99; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--success);
+    margin-right: 8px; vertical-align: 1px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo"><div class="logo-dot"></div>SillyHub</div>
+  <span class="crumb">/ 工作区 / 变更中心</span>
+  <div class="spacer"></div>
+  <div class="theme-switch">
+    <button data-set-theme="ai-native" class="on">AI 紫</button>
+    <button data-set-theme="blue">蓝</button>
+    <button data-set-theme="dark">暗夜</button>
+  </div>
+  <!-- ===== 本次改动主体：铃铛 ===== -->
+  <div class="bell-wrap">
+    <button class="bell-btn" id="bellBtn" title="通知" aria-label="通知">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>
+      </svg>
+      <span class="badge" id="badge" style="display:none">0</span>
+    </button>
+    <div class="panel" id="panel">
+      <div class="panel-head">
+        <span class="t">通知<span class="cnt" id="headCnt"></span></span>
+        <button class="read-all" id="readAllBtn">全部已读</button>
+      </div>
+      <div class="list" id="list"></div>
+      <div class="panel-foot"><button id="viewAllBtn">查看全部通知（预留：通知中心页）</button></div>
+    </div>
+  </div>
+  <div class="avatar">秦</div>
+</div>
+
+<div class="demo">
+  <div class="card">
+    <h2>审批通知 · 铃铛 + 下拉面板 原型</h2>
+    <p class="desc">
+      顶栏全局铃铛，未读数实时红点；下拉面板承载最近通知。数据来自 <b>notifications 落库 + SSE 实时推送</b>（无轮询）：
+      审批待办产生 / 审批结果 / daemon 权限审批请求 / 权限审批超时 四类事件，SSE 事件到达即刷新未读数与列表。
+    </p>
+    <div class="row">
+      <button class="btn primary" id="simBtn">模拟 SSE 推送一条新通知</button>
+      <button class="btn" id="simBtn2">模拟一条审批结果通知</button>
+    </div>
+    <ul>
+      <li>点铃铛开合面板；未读条目带紫点与浅底，点击即「标记已读 + 跳转对应审批页」</li>
+      <li>「全部已读」一键清未读；徽标数字实时联动</li>
+      <li>模拟推送按钮用于演示 SSE 到达后徽标 pop 动画与新条目滑入（真实环境由服务端事件驱动）</li>
+    </ul>
+  </div>
+</div>
+
+<div class="toast" id="toast"><span class="dot"></span><span id="toastMsg"></span></div>
+
+<script>
+/* ---------- 主题切换 ---------- */
+document.querySelectorAll("[data-set-theme]").forEach(btn => {
+  btn.onclick = () => {
+    document.documentElement.dataset.theme = btn.dataset.setTheme;
+    document.querySelectorAll("[data-set-theme]").forEach(b => b.classList.toggle("on", b === btn));
+  };
+});
+
+/* ---------- 数据 ---------- */
+const ICONS = {
+  pending:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  approved:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 4.5-5"/></svg>',
+  rejected:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></svg>',
+  permission:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 5-3.5 8-7 9-3.5-1-7-4-7-9V6z"/></svg>',
+  timeout:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4"/><path d="M9 2.5h6" opacity="0"/><path d="M12 7V5"/></svg>'
+};
+const TYPE_META = {
+  pending:    { cls: "pending",    tag: "审批待办" },
+  approved:   { cls: "approved",   tag: "审批通过" },
+  rejected:   { cls: "rejected",   tag: "审批驳回" },
+  permission: { cls: "permission", tag: "权限审批" },
+  timeout:    { cls: "timeout",    tag: "已超时" }
+};
+let seq = 100;
+const now = Date.now();
+let items = [
+  { id: ++seq, type: "pending",    read: false, at: now - 2 * 60e3,
+    title: "变更「用户设置页改版」等待方案审核", body: "brainstorm 阶段完成，待 proposal_review 审核",
+    jump: "变更详情 · 审核面板" },
+  { id: ++seq, type: "permission", read: false, at: now - 11 * 60e3,
+    title: "会话「重构调研-01」请求文件写入权限", body: "agent 申请写入 src/lib/daemon.ts（会话 owner 定向通知）",
+    jump: "会话审批面板" },
+  { id: ++seq, type: "approved",   read: true,  at: now - 3 * 36e5,
+    title: "变更「用户设置页改版」计划审核已通过", body: "由 秦 审批通过，可进入执行阶段",
+    jump: "变更详情" },
+  { id: ++seq, type: "rejected",   read: true,  at: now - 26 * 36e5,
+    title: "变更「导出功能」方案审核被驳回", body: "驳回原因：缺少错误处理方案，请修改后重新提交",
+    jump: "变更详情" },
+  { id: ++seq, type: "timeout",    read: true,  at: now - 49 * 36e5,
+    title: "会话「数据迁移-02」权限请求已超时", body: "5 分钟内未处理，本次请求已自动失效",
+    jump: "会话详情" }
+];
+
+/* ---------- 渲染 ---------- */
+const $ = id => document.getElementById(id);
+function relTime(ts) {
+  const d = Date.now() - ts;
+  if (d < 60e3) return "刚刚";
+  if (d < 36e5) return Math.floor(d / 60e3) + " 分钟前";
+  if (d < 864e5) return Math.floor(d / 36e5) + " 小时前";
+  return Math.floor(d / 864e5) + " 天前";
+}
+function render(freshId) {
+  const unread = items.filter(i => !i.read).length;
+  const badge = $("badge");
+  badge.style.display = unread ? "grid" : "none";
+  badge.textContent = unread > 99 ? "99+" : unread;
+  $("headCnt").textContent = unread ? `（${unread} 条未读）` : "";
+  $("readAllBtn").disabled = unread === 0;
+
+  const list = $("list");
+  if (!items.length) {
+    list.innerHTML = `<div class="empty">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+      <div>暂无通知</div></div>`;
+    return;
+  }
+  list.innerHTML = items.map(i => {
+    const m = TYPE_META[i.type];
+    return `<div class="item ${i.read ? "" : "unread"} ${i.id === freshId ? "fresh" : ""}" data-id="${i.id}">
+      <div class="icon ${m.cls}">${ICONS[i.type]}</div>
+      <div class="main">
+        <div class="title"><span class="tag">${m.tag}</span>${i.title}</div>
+        <div class="body">${i.body}</div>
+        <div class="foot"><span>${relTime(i.at)}</span><span class="jump">→ ${i.jump}</span></div>
+      </div>
+    </div>`;
+  }).join("");
+  list.querySelectorAll(".item").forEach(el => {
+    el.onclick = () => {
+      const it = items.find(x => x.id == el.dataset.id);
+      if (it) it.read = true;
+      render();
+      toast(`已标记已读，跳转：${it ? it.jump : ""}`);
+    };
+  });
+}
+function toast(msg) {
+  $("toastMsg").textContent = msg;
+  $("toast").classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => $("toast").classList.remove("show"), 2200);
+}
+
+/* ---------- 交互 ---------- */
+$("bellBtn").onclick = e => {
+  e.stopPropagation();
+  const open = $("panel").classList.toggle("show");
+  $("bellBtn").classList.toggle("open", open);
+};
+document.addEventListener("click", e => {
+  if (!e.target.closest(".bell-wrap")) {
+    $("panel").classList.remove("show");
+    $("bellBtn").classList.remove("open");
+  }
+});
+$("readAllBtn").onclick = () => { items.forEach(i => i.read = true); render(); toast("已全部标记为已读"); };
+$("viewAllBtn").onclick = () => toast("通知中心页为后续扩展预留，本次仅铃铛+下拉面板");
+
+/* 模拟 SSE 推送 */
+function simulate(type, title, body, jump) {
+  const it = { id: ++seq, type, read: false, at: Date.now(), title, body, jump };
+  items.unshift(it);
+  render(it.id);
+  $("badge").classList.remove("pop"); void $("badge").offsetWidth; $("badge").classList.add("pop");
+}
+$("simBtn").onclick = () => simulate("pending",
+  "变更「审批通知推送」等待人工验收审核", "execute 阶段完成，待 human_test 审核", "变更详情 · 审核面板");
+$("simBtn2").onclick = () => simulate("approved",
+  "变更「审批通知推送」人工验收已通过", "由 秦 审批通过，可进入验证阶段", "变更详情");
+
+render();
+</script>
+</body>
+</html>

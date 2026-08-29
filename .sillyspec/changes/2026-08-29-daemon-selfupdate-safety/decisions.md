@@ -42,7 +42,7 @@ created_at: 2026-08-29 14:19:26
 ## D-003@v1: 磁盘旁路探测默认开启
 - type: boundary
 - priority: P1
-- status: accepted
+- status: superseded
 - source: user
 - question: bundle 被外部替换/降级的磁盘探测默认开还是关？
 - answer: 默认开启（10min 周期 spawn `node bundle --version` 与内存 BUILD_ID 比对；版本差异含降级即触发升级；探测失败或任一侧版本为空≠版本变化，绝不据此重启——防替换窗口自杀）；配置项可关
