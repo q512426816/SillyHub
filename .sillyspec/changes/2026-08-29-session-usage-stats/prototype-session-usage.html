@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>会话 Token 用量统计 · 原型（2026-08-29-session-usage-stats）</title>
+<style>
+  :root {
+    --bg: #f7f8fa; --card: #ffffff; --border: #e5e7eb; --text: #1f2328;
+    --muted: #6b7280; --brand: #0ea5a4; --brand-soft: rgba(14,165,164,.08);
+    --shadow: 0 1px 2px rgba(0,0,0,.04);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+         background: var(--bg); color: var(--text); padding: 24px; font-size: 13px; }
+  h2 { font-size: 14px; margin: 18px 0 8px; color: var(--muted); font-weight: 600; }
+  .scene { max-width: 680px; margin: 0 auto; }
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+           box-shadow: var(--shadow); overflow: hidden; }
+
+  /* ── 用量条（本变更核心组件）── */
+  .usage-bar { border-top: 1px solid var(--border); padding: 10px 14px; background: var(--card); }
+  .usage-summary { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; }
+  .usage-item { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+  .usage-item .k { color: var(--muted); }
+  .usage-item .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .usage-item.hit .v { color: var(--brand); }
+  .usage-toggle { margin-left: auto; border: none; background: none; color: var(--brand);
+                  cursor: pointer; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
+  .usage-toggle:hover { background: var(--brand-soft); }
+  .usage-detail { display: none; margin-top: 10px; }
+  .usage-bar.expanded .usage-detail { display: block; }
+  .usage-bar.expanded .usage-toggle .arr { transform: rotate(180deg); }
+  .arr { display: inline-block; transition: transform .15s; }
+
+  table.models { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.models th { text-align: right; color: var(--muted); font-weight: 500;
+                    padding: 5px 8px; border-bottom: 1px solid var(--border); }
+  table.models th:first-child, table.models td:first-child { text-align: left; }
+  table.models td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--border);
+                    font-variant-numeric: tabular-nums; }
+  table.models tr:last-child td { border-bottom: none; }
+  .model-tag { display: inline-block; padding: 1px 8px; border-radius: 10px;
+               background: var(--brand-soft); color: var(--brand); font-weight: 500; }
+  .model-tag.legacy { background: #f3f4f6; color: var(--muted); }
+  .usage-note { margin-top: 8px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+
+  /* 场景装饰 */
+  .fake-head { padding: 12px 14px; border-bottom: 1px solid var(--border); display: flex;
+               gap: 8px; align-items: center; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; }
+  .fake-title { font-weight: 600; }
+  .fake-msgs { padding: 18px 14px; color: var(--muted); line-height: 2.2; }
+  .dialog-scene { max-width: 420px; }
+  .hit-zero { color: var(--muted) !important; }
+</style>
+</head>
+<body>
+<div class="scene">
+
+  <h2>场景一 · 会话详情页（page 模式）——用量条位于会话头部下方</h2>
+  <div class="panel">
+    <div class="fake-head"><span class="dot"></span><span class="fake-title">重构登录模块</span>
+      <span style="color:var(--muted)">· 活跃</span></div>
+
+    <div class="usage-bar" id="bar1">
+      <div class="usage-summary">
+        <span class="usage-item"><span class="k">输入</span><span class="v">1.5 万</span></span>
+        <span class="usage-item"><span class="k">输出</span><span class="v">11,522</span></span>
+        <span class="usage-item"><span class="k">缓存读取</span><span class="v">64.3 万</span></span>
+        <span class="usage-item"><span class="k">缓存写入</span><span class="v">4.3 万</span></span>
+        <span class="usage-item"><span class="k">请求次数</span><span class="v">128</span></span>
+        <span class="usage-item hit"><span class="k">缓存命中率</span><span class="v">97.7%</span></span>
+        <button class="usage-toggle" data-bar="bar1">按模型明细 <span class="arr">▾</span></button>
+      </div>
+      <div class="usage-detail">
+        <table class="models">
+          <thead><tr><th>模型</th><th>输入</th><th>输出</th><th>缓存读取</th><th>缓存写入</th><th>请求</th><th>命中率</th></tr></thead>
+          <tbody>
+            <tr><td><span class="model-tag">glm-4.7</span></td><td>9,800</td><td>7,120</td><td>421,533</td><td>26,400</td><td>102</td><td>97.7%</td></tr>
+            <tr><td><span class="model-tag">glm-4.7-air</span></td><td>2,400</td><td>1,522</td><td>71,767</td><td>4,600</td><td>26</td><td>96.8%</td></tr>
+            <tr><td><span class="model-tag legacy">未记录（旧轮次）</span></td><td>3,000</td><td>2,880</td><td>150,000</td><td>12,000</td><td>0</td><td>98.0%</td></tr>
+          </tbody>
+        </table>
+        <div class="usage-note">口径：命中率 = 缓存读取 ÷（缓存读取 + 输入）；「未记录」为升级前无按模型明细的旧轮次，其四维 token 并入上方汇总，请求次数无来源按 0 计。数据随每轮结束刷新。</div>
+      </div>
+    </div>
+
+    <div class="fake-msgs">用户：帮我看看登录模块…<br>助手：好的，我先读一下现有代码…<br>（会话消息区，原型从略）</div>
+  </div>
+
+  <h2>场景二 · 浮窗对话（dialog 模式）——同一组件，置于输入框上方</h2>
+  <div class="panel dialog-scene">
+    <div class="fake-head"><span class="dot"></span><span class="fake-title">悬浮助手</span></div>
+    <div class="fake-msgs">用户：继续刚才的分析…<br>助手：基于上轮结论…</div>
+
+    <div class="usage-bar" id="bar2">
+      <div class="usage-summary">
+        <span class="usage-item"><span class="k">输入</span><span class="v">980</span></span>
+        <span class="usage-item"><span class="k">输出</span><span class="v">1,204</span></span>
+        <span class="usage-item"><span class="k">缓存读取</span><span class="v">2.6 万</span></span>
+        <span class="usage-item"><span class="k">缓存写入</span><span class="v">4,120</span></span>
+        <span class="usage-item"><span class="k">请求次数</span><span class="v">6</span></span>
+        <span class="usage-item hit"><span class="k">命中率</span><span class="v">96.4%</span></span>
+        <button class="usage-toggle" data-bar="bar2">明细 <span class="arr">▾</span></button>
+      </div>
+      <div class="usage-detail">
+        <table class="models">
+          <thead><tr><th>模型</th><th>输入</th><th>输出</th><th>缓存读取</th><th>缓存写入</th><th>请求</th><th>命中率</th></tr></thead>
+          <tbody>
+            <tr><td><span class="model-tag">claude-sonnet-4</span></td><td>980</td><td>1,204</td><td>26,000</td><td>4,120</td><td>6</td><td>96.4%</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div style="padding:10px 14px;border-top:1px solid var(--border);color:var(--muted)">输入框…（继续对话）</div>
+  </div>
+
+  <h2>边界态 · 无数据 / 命中率分母为 0</h2>
+  <div class="panel">
+    <div class="usage-bar">
+      <div class="usage-summary">
+        <span class="usage-item"><span class="k">输入</span><span class="v">0</span></span>
+        <span class="usage-item"><span class="k">输出</span><span class="v">0</span></span>
+        <span class="usage-item"><span class="k">缓存读取</span><span class="v">0</span></span>
+        <span class="usage-item"><span class="k">缓存写入</span><span class="v">0</span></span>
+        <span class="usage-item"><span class="k">请求次数</span><span class="v">0</span></span>
+        <span class="usage-item hit"><span class="k">命中率</span><span class="v hit-zero">—</span></span>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script>
+  document.querySelectorAll(".usage-toggle").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const bar = document.getElementById(btn.dataset.bar);
+      bar.classList.toggle("expanded");
+    });
+  });
+</script>
+</body>
+</html>
