@@ -110,3 +110,31 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：HEAD
 理由：确认。变更名 2026-08-29-daemon-selfupdate-safety，原型 prototype-machine-update-status.html
+
+## D-001@v1 : 会话继承触发范围
+状态：implemented
+变更：2026-08-29-batch-session-inherit
+锚点：未记录
+最近确认：HEAD
+理由：仅 infra 中断继承——lease 过期自动重派（daemon 掉线/断连）attempt+1 继承原会话继续；lease 内 spawn 重试维持现状清空 resume（R-10 防副作用）；手动重跑走 dispatch_to_daemon 全新 lease 天然新会话
+
+## D-003@v1 : 方案选型 A 最小闭环
+状态：implemented
+变更：2026-08-29-batch-session-inherit
+锚点：未记录
+最近确认：HEAD
+理由：A——backend handle_lease_expiry 继承原 lease metadata+注入 resume_session_id/work_dir；daemon work_dir 同一性守卫+resume 失败降级。零迁移零新端点零前端，全消费既有链路
+
+## D-004@v1 : 设计整体确认
+状态：implemented
+变更：2026-08-29-batch-session-inherit
+锚点：未记录
+最近确认：HEAD
+理由：确认。变更名 2026-08-29-batch-session-inherit；无 UI 变化不产出 HTML 原型
+
+## D-005@v1 : P0 方向重定位——worker 重派继承（Grill C-01 裁定）
+状态：implemented
+变更：2026-08-29-batch-session-inherit
+锚点：未记录
+最近确认：HEAD
+理由：转向 worker 重派继承——interactive worker 会话（AgentSession.role 含 worker 或 parent_session_id 非空）daemon 掉线后不 suspended 而是 failed+自动重派继承原会话（worker 是临时会话无人手恢复，挂起无意义）；主会话（orchestrator/用户 chat）保持挂起语义不变
