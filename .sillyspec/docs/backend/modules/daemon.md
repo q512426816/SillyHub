@@ -43,6 +43,10 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
 - 会话：`POST|GET /sessions`、`DELETE /{id}`（终态才可删）、
   `/{id}/inject|reopen|interrupt|end`、`/{id}/recover|confirm-reconnected|
   mark-recovery-failed|ready`、`GET /{id}/stream`（SSE）、`/{id}/runs`、`/{id}/logs`、
+  `GET /{id}/usage`（会话累计用量聚合，2026-08-29-session-usage-stats：owner-only 404，
+  SessionUsageRead totals+by_model——agent_run_model_usage 按 model SUM 为主 + 无明细行
+  run 的 AgentRun 四维列 NOT EXISTS 兜底（ctx_tokens 快照列排除，「未记录」桶末位
+  api_requests=0），全 SQL 侧聚合）、
   `GET|POST /{id}/dialogs`（+history）、`POST /{id}/permissions/{rid}/response`；
   列表 `GET /sessions`：`limit` 收口 `le=500`（2026-08-23-sessions-workspace-hub
   D-103@v1，le=100→le=500 供门户树单页全量取回，>500 仍 422）；响应含非 ORM 列

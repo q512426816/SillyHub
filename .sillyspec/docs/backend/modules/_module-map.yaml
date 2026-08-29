@@ -147,6 +147,27 @@ modules:
     concerns: []
     review_reasons: []
 
+  notification:
+    status: active
+    doc: modules/notification.md
+    paths:
+      - app/modules/notification/**
+    tags: [notification, approval, sse, redis, bell, 通知, 审批]
+    aliases: [notice, inbox]
+    entrypoints:
+      - /api/notifications
+      - /api/notifications/unread-count
+      - /api/notifications/events (SSE)
+    main_symbols:
+      - NotificationService (backend/app/modules/notification/service.py, 广播/定向/幂等/消解)
+      - InAppChannel (backend/app/modules/notification/service.py, Redis notifications:new 合并 publish)
+      - _stream_notifications_events (backend/app/modules/notification/router.py, SSE 服务端过滤)
+    depends_on: [auth]
+    used_by: [platform_sync, change, daemon, frontend]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+
   auth:
     status: active
     doc: modules/auth.md

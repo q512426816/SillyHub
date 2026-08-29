@@ -31,9 +31,9 @@ created_at: 2026-08-29 20:52:40
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `docs/backend/modules/modules.md`（notification 新模块卡） | execute/verify 完成后新增 notification 模块文档卡 | pending |
-| `docs/backend/modules/_module-map.yaml` | 补 notification 条目（paths/entrypoints/symbols） | pending |
-| `docs/backend/modules/auth.md` | 补 list_user_ids_with_permission 说明（若模块文档维护函数级清单） | pending |
-| `modules/frontend.md` | 补通知铃铛组件与 SSE 订阅说明 | pending |
-| `modules/platform_sync.md` / `modules/change.md` / `modules/daemon.md`（backend 细粒度模块卡） | 补触发点钩子说明 | pending |
+| `docs/backend/modules/notification.md` | 已新增 notification 模块卡（定位/契约摘要/触发点/注意事项） | done |
+| `docs/backend/modules/_module-map.yaml` | 已补 notification 条目（paths/entrypoints/main_symbols/depends_on/used_by） | done |
+| `docs/backend/modules/auth.changelog.md` | list_user_ids_with_permission 变更索引（sidecar，不堆卡正文） | done |
+| `modules/frontend.changelog.md`（顶层） | 通知铃铛与数据层变更索引（sidecar） | done |
+| `docs/backend/modules/{platform_sync,change,daemon}.changelog.md` | 三触发点钩子变更索引（sidecar） | done |
 | `_module-map.yaml`（顶层 multi-agent-platform） | 无变化（backend/frontend 子项目粒度未变） | skipped |
