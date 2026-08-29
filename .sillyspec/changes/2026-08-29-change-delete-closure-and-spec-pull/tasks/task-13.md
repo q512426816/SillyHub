@@ -8,6 +8,8 @@ priority: P1
 depends_on: ['task-04']
 blocks: []
 repo: sillyspec
+base_commit: f5ce73523fda2cc351e4d307c48d3e171cecb04a
+head_commit: b86a5937907eb50cdaae31d2028c81a650733b23
 requirement_ids: [FR-10]
 decision_ids: [D-004@v1, D-007@v1]
 expects_from:
