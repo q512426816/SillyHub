@@ -194,6 +194,18 @@ export async function triggerMachineCleanup(
   );
 }
 
+/**
+ * DELETE /api/daemon/machines/{instance_id} — 物理删除机器条目
+ * （ql-20260829-006-6a9e）。级联清除该机全部 runtimes 及其会话/任务记录；
+ * 后端守卫：daemon 心跳新鲜（在线）/ 工作区绑定 / 共享授权 / 借用审计红线 /
+ * in-flight 任务 → 409；daemon 之后重新启动会以同一 daemon_local_id 重建。
+ */
+export async function deleteDaemonMachine(instanceId: string): Promise<void> {
+  await apiFetch(`/api/daemon/machines/${encodeURIComponent(instanceId)}`, {
+    method: "DELETE",
+  });
+}
+
 /* ---------- 平台共享智能体 + 共享给我的机器（2026-08-28-daemon-agent-share task-09） ----------
  *
  * 端点对齐 /api/daemon/shared-agents 系列（grants/router.py）：
@@ -1659,6 +1671,16 @@ export function streamSession(
       setStatus("live"); // task-09：重建后首条实时事件 → live（横幅收起）
       dispatch({ data: e.data, lastEventId: e.lastEventId || undefined });
     };
+    // 终态收口（ql-20260829-007）：backend stream_session_logs 对终态（ended/failed）
+    // 会话连上即发命名事件 `event: done` 并关闭连接（连接时终态 race guard 与流中
+    // session_ended 两场景同款）。done 是命名事件不进 onmessage/dispatch，此前无人
+    // 监听 → 连接关闭触发 onerror → 无限重连循环（终态会话打开面板时反复打
+    // runs/logs/stream）。与 session_ended 分支同语义置 closed 终止本流；
+    // `event: error`（Redis 故障，AC-07）保持 onerror → 退避重连路径不变。
+    es.addEventListener("done", () => {
+      closed = true;
+      es?.close();
+    });
     es.onerror = () => {
       scheduleReconnect();
     };

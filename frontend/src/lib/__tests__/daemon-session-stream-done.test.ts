@@ -1,0 +1,178 @@
+/**
+ * ql-20260829-007：终态会话 SSE 无限重连循环回归。
+ *
+ * backend stream_session_logs 对终态（ended/failed）会话连上即发命名事件
+ * `event: done` 并关闭连接（连接时终态 race guard 与流中 session_ended 两场景）。
+ * 修复前：done 是命名事件不进 onmessage/dispatch 且无人监听 → 连接关闭触发
+ * onerror → 退避重连 → 秒收 done 又断 → 无限循环（终态会话打开面板时反复打
+ * runs/logs/stream）。修复：streamSession 注册 addEventListener("done") 置
+ * closed 终止本流。
+ *
+ * mock 体系与 daemon-session-stream-sync.test.ts 同款（fetch + ReadableStream
+ * 假 SSE 流）。
+ */
+
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+import {
+  streamSession,
+  type SessionStreamHandlers,
+  type SessionStreamConnection,
+} from "@/lib/daemon";
+
+interface StreamHarness {
+  streamCalls: number;
+  runsCalls: number;
+  logsCalls: number;
+  stream: {
+    push: (_text: string) => void;
+    close: () => void;
+  } | null;
+}
+
+let harness: StreamHarness;
+
+function installRoutedFetchMock(): void {
+  harness = { streamCalls: 0, runsCalls: 0, logsCalls: 0, stream: null };
+  vi.spyOn(globalThis, "fetch").mockImplementation(
+    (input: URL | RequestInfo, _init?: RequestInit) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/stream")) {
+        harness.streamCalls += 1;
+        let controller!: ReadableStreamDefaultController<Uint8Array>;
+        const body = new ReadableStream<Uint8Array>({
+          start(c) {
+            controller = c;
+          },
+        });
+        const encoder = new TextEncoder();
+        harness.stream = {
+          push: (text) => controller.enqueue(encoder.encode(text)),
+          close: () => controller.close(),
+        };
+        return Promise.resolve(
+          new Response(body, {
+            status: 200,
+            headers: { "Content-Type": "text/event-stream" },
+          }),
+        );
+      }
+      if (url.includes("/runs")) {
+        harness.runsCalls += 1;
+        return Promise.resolve(
+          new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      if (url.includes("/logs")) {
+        harness.logsCalls += 1;
+        return Promise.resolve(
+          new Response(JSON.stringify([]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    },
+  );
+}
+
+async function flush(times = 5): Promise<void> {
+  for (let i = 0; i < times; i++) {
+    await new Promise((r) => setTimeout(r, 0));
+  }
+}
+
+function baseHandlers(): SessionStreamHandlers {
+  return {
+    onTurnStarted: vi.fn(),
+    onLog: vi.fn(),
+    onTurnCompleted: vi.fn(),
+    onSessionEnded: vi.fn(),
+    onError: vi.fn(),
+  };
+}
+
+describe("streamSession — 终态 done 命名事件收口（ql-20260829-007）", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    installRoutedFetchMock();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("连上即 done（终态 race guard 场景）：连接关闭后不再重连", async () => {
+    const conn: SessionStreamConnection = streamSession(
+      "sess-ended",
+      baseHandlers(),
+    );
+    await vi.runOnlyPendingTimersAsync();
+    expect(harness.streamCalls).toBe(1);
+
+    // backend 对终态会话的行为：connected 注释 → done 命名事件 → 关闭流。
+    harness.stream!.push(": connected\n\n");
+    harness
+      .stream!.push(
+        'event: done\ndata: {"status":"ended","reason":"session_terminated"}\n\n',
+      );
+    harness.stream!.close();
+    await vi.runOnlyPendingTimersAsync();
+
+    // 推进远超完整退避序列（1/2/4/8/16/30s）的时长——修复前此处会反复重建
+    // SSE 并触发 resync（runs/logs 持续增长）。
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(harness.streamCalls).toBe(1);
+    expect(harness.runsCalls).toBe(0);
+    expect(harness.logsCalls).toBe(0);
+    conn.close();
+  });
+
+  it("流中先收实时事件再 done（session_ended 场景）：同样终止不重连", async () => {
+    const conn: SessionStreamConnection = streamSession(
+      "sess-live-then-end",
+      baseHandlers(),
+    );
+    await vi.runOnlyPendingTimersAsync();
+    expect(harness.streamCalls).toBe(1);
+
+    harness.stream!.push(": connected\n\n");
+    harness.stream!.push(
+      'data: {"kind":"turn_completed","run_id":"run-1","session_id":"sess-live-then-end"}\n\n',
+    );
+    harness
+      .stream!.push(
+        'event: done\ndata: {"status":"ended","reason":"session_terminated"}\n\n',
+      );
+    harness.stream!.close();
+    await vi.runOnlyPendingTimersAsync();
+    await vi.advanceTimersByTimeAsync(120_000);
+
+    expect(harness.streamCalls).toBe(1);
+    conn.close();
+  });
+
+  it("无 done 的普通断流：仍走退避重连（修复不误伤）", async () => {
+    const conn: SessionStreamConnection = streamSession(
+      "sess-flap",
+      baseHandlers(),
+    );
+    await vi.runOnlyPendingTimersAsync();
+    expect(harness.streamCalls).toBe(1);
+
+    // 无 done 直接待对端关闭（如网络中断 / Redis error 后断开）→ 应重连。
+    harness.stream!.push(": connected\n\n");
+    harness.stream!.close();
+    await vi.runOnlyPendingTimersAsync();
+    // 第一档退避 1s + resync 后重建。
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(harness.streamCalls).toBeGreaterThanOrEqual(2);
+    conn.close();
+  });
+});
