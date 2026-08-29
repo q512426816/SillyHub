@@ -81,7 +81,7 @@ modules:
   client:
     status: active
     doc: modules/client.md
-    paths: ["sillyhub-daemon/src/hub-client.ts"]
+    paths: ["sillyhub-daemon/src/hub-client.ts", "sillyhub-daemon/src/control-dispatcher.ts"]
     tags: [http, api-client, 平台接口, 同步]
     aliases: [hub-client]
     entrypoints: []
