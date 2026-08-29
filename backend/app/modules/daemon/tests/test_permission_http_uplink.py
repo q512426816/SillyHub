@@ -7,6 +7,9 @@
   （与 WS 上行同源汇聚），同 request_id 重放不 fork 第二张 pending 卡；
 * 该会话有 claim 语义（lease metadata 存非空 claim_token）时 X-Claim-Token
   缺失/不匹配 → 403（对齐 runs/result 端点鉴权惯例）；
+* ql-20260829-004：跨主体（他人凭证 + 他人会话，runtime 归属不符）→ 404
+  resource-hiding——principal 必须 own 会话所挂 runtime（对齐 pending-controls
+  owner-only 惯例；归属校验先于 claim_token）；
 * 会话不存在 → 404（resource-hiding）；缺鉴权头 → 401；
 * 校验不过（manual_approval=false / run 不匹配）→ 200 accepted=false（fail-soft，
   等待交由 backend 5min 超时 + daemon fallback timer 双兜底）。
@@ -112,6 +115,23 @@ async def _seed_full_session(
     return sess, run, lease
 
 
+async def _admin_uid(db_session: AsyncSession) -> uuid.UUID:
+    """auth_headers 背后的平台管理员 id（owner 校验用 runtime.user_id == user.id）。
+
+    ql-20260829-004：HTTP 上行补「principal own 会话所挂 runtime」归属校验后，
+    正向用例的 runtime/session 需归属 auth_headers 主体（admin）——与
+    test_control_command_dispatch.py 的 _admin_user 先例同款。
+    """
+    from app.modules.auth.model import User
+
+    user = (
+        (await db_session.execute(select(User).where(User.email == "admin@example.com")))
+        .scalars()
+        .one()
+    )
+    return user.id
+
+
 def _uplink_body(run: AgentRun, request_id: str = "req-http-1") -> dict:
     return {
         "run_id": str(run.id),
@@ -146,7 +166,7 @@ class TestPermissionHttpUplink:
         mocked_redis: AsyncMock,
     ) -> None:
         """happy path：200 accepted=true + SSE permission_request + timer 挂起。"""
-        uid = await _seed_user(db_session)
+        uid = await _admin_uid(db_session)
         sess, run, _lease = await _seed_full_session(db_session, user_id=uid)
 
         resp = await client.post(
@@ -182,7 +202,7 @@ class TestPermissionHttpUplink:
         mocked_redis: AsyncMock,
     ) -> None:
         """dialog：落 session_dialog_requests 行；同 request_id 重放不 fork 第二张卡。"""
-        uid = await _seed_user(db_session)
+        uid = await _admin_uid(db_session)
         sess, run, _lease = await _seed_full_session(db_session, user_id=uid)
         body = {
             **_uplink_body(run, request_id="dlg-http-1"),
@@ -245,7 +265,7 @@ class TestPermissionHttpUplink:
         db_session: AsyncSession,
     ) -> None:
         """有 claim 语义的会话：token 不匹配 / 缺头 → 403（不泄露差异）。"""
-        uid = await _seed_user(db_session)
+        uid = await _admin_uid(db_session)
         sess, run, _lease = await _seed_full_session(db_session, user_id=uid)
 
         wrong = await client.post(
@@ -262,6 +282,31 @@ class TestPermissionHttpUplink:
             headers=auth_headers,
         )
         assert missing.status_code == 403, missing.text
+
+    @pytest.mark.asyncio
+    async def test_cross_principal_runtime_owner_404(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """ql-20260829-004：他人凭证 + 他人会话（runtime 归属不符）→ 404 resource-hiding。
+
+        HTTP 上行此前仅 claim_token 条件校验（无 claim 语义时跳过），且
+        daemon_id 从 session.runtime_id 反推（归属比对恒真）——补「principal
+        必须 own 会话所挂 runtime」校验（对齐 pending-controls owner-only 惯例；
+        借用 runtime 场景 runtime 属 lender=daemon 凭证主体，正常链路不受影响）。
+        带正确 claim token 仍 404：归属校验先于 token 比对。
+        """
+        other = await _seed_user(db_session)
+        sess, run, _lease = await _seed_full_session(db_session, user_id=other)
+
+        resp = await client.post(
+            f"/api/daemon/sessions/{sess.id}/permission-requests",
+            json=_uplink_body(run),
+            headers={**auth_headers, "X-Claim-Token": "lease-token-1"},
+        )
+        assert resp.status_code == 404, resp.text
 
     @pytest.mark.asyncio
     async def test_unknown_session_404(
@@ -308,7 +353,7 @@ class TestPermissionHttpUplink:
         mocked_redis: AsyncMock,
     ) -> None:
         """manual_approval=false → 200 accepted=false（fail-soft，不 5xx）。"""
-        uid = await _seed_user(db_session)
+        uid = await _admin_uid(db_session)
         sess, run, _lease = await _seed_full_session(db_session, user_id=uid, manual_approval=False)
 
         resp = await client.post(
@@ -330,7 +375,7 @@ class TestPermissionHttpUplink:
         db_session: AsyncSession,
     ) -> None:
         """payload.run_id 与 current run 不一致 → 200 accepted=false。"""
-        uid = await _seed_user(db_session)
+        uid = await _admin_uid(db_session)
         sess, _run, _lease = await _seed_full_session(db_session, user_id=uid)
 
         resp = await client.post(

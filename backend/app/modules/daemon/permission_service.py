@@ -456,28 +456,37 @@ class DaemonPermissionService:
         session_id: uuid.UUID,
         x_claim_token: str | None,
         payload: PermissionRequestPayload,
+        *,
+        principal_user_id: uuid.UUID,
     ) -> bool:
         """HTTP PERMISSION_REQUEST uplink (task-07 / design A3).
 
         daemon WS 不通时的兜底上行通道（``POST /api/daemon/sessions/{id}/
-        permission-requests``）。与 WS 上行**同源汇聚**：lease 级 claim_token
-        校验 + daemon_id 解析后委托 :meth:`handle_permission_request`，复用
-        其全部校验/SSE 广播/dialog 持久化/5min timer 语义。
+        permission-requests``）。与 WS 上行**同源汇聚**：归属校验 + lease 级
+        claim_token 校验 + daemon_id 解析后委托 :meth:`handle_permission_request`，
+        复用其全部校验/SSE 广播/dialog 持久化/5min timer 语义。
 
         鉴权链（对齐既有 permissions response / runs/result 端点惯例）：
           - 路由层 ``get_current_principal`` 已解 X-API-Key（daemon 长期凭证）；
+          - **runtime 归属校验**（ql-20260829-004，补 task-07 缺口）：HTTP 路径的
+            daemon_id 是从 session.runtime_id 反推的（WS 路径则来自经注册鉴权的
+            连接键），若不绑主体会形成「任意有效凭证可对他理会话上行」的弱
+            校验面——本方法要求 ``principal_user_id`` own 会话所挂 runtime
+            （``daemon_runtimes.user_id``，对齐 pending-controls owner-only 惯例），
+            不符/不存在同语义 404 resource-hiding。借用 runtime 场景 runtime 属
+            lender=daemon 凭证主体，正常链路不受影响；
           - 本方法对会话绑定的 interactive lease 做 **X-Claim-Token 条件校验**：
             lease metadata 存有非空 claim_token（该会话有 claim 语义）时，
             header 必须携带且 ``secrets.compare_digest`` 匹配，否则 403
             ``DaemonInvalidClaimToken``；无 claim 语义（无 lease / token 空）
             时跳过，交给下方 handle_permission_request 的会话状态校验。
 
-        会话不存在 → 404（与既有 REST 面 resource-hiding 一致）；校验不过
-        返回 False（不抛——daemon 侧 fire-and-forget，等待响应交由 backend
-        5min 超时 + daemon fallback timer 双兜底）。
+        会话不存在 / runtime 归属不符 → 404（与既有 REST 面 resource-hiding
+        一致）；校验不过返回 False（不抛——daemon 侧 fire-and-forget，等待
+        响应交由 backend 5min 超时 + daemon fallback timer 双兜底）。
         """
         from app.modules.agent.model import AgentSession
-        from app.modules.daemon.model import DaemonTaskLease
+        from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 
         session_obj = (
             await self._svc._session.execute(
@@ -485,6 +494,24 @@ class DaemonPermissionService:
             )
         ).scalar_one_or_none()
         if session_obj is None:
+            raise DaemonSessionNotFound(
+                f"AgentSession '{session_id}' not found.",
+                details={"session_id": str(session_id)},
+            )
+        # ql-20260829-004：runtime 归属校验先于 claim_token（凭证主体不符时
+        # 直接 resource-hiding 404，不进入后续校验）。
+        runtime = (
+            await self._svc._session.get(DaemonRuntime, session_obj.runtime_id)
+            if session_obj.runtime_id is not None
+            else None
+        )
+        if runtime is None or runtime.user_id != principal_user_id:
+            log.warning(
+                "permission_http_uplink_runtime_not_owned",
+                session_id=str(session_id),
+                request_id=payload.request_id,
+                runtime_id=str(session_obj.runtime_id),
+            )
             raise DaemonSessionNotFound(
                 f"AgentSession '{session_id}' not found.",
                 details={"session_id": str(session_id)},

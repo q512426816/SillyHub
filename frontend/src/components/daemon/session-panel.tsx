@@ -4096,10 +4096,17 @@ function SessionPanelDialog(props: SessionPanelProps) {
   // attach 轮询（D3）：每 ATTACH_POLL_MS 调 getAgentSession，active → 转 active +
   // 清轮询 + 恢复 currentRunId / terminatingAt；failed / ended / 累计超时 → 只读
   // 终态。pending / reconnecting 期间 terminating_at 已带则先更新（尽早显示横幅）。
+  // ql-20260829-004：suspended 期间实际拉取节流到 SUSPENDED_SESSION_REFETCH_MS
+  // （15s，对齐 page 模式 refetchInterval 低频档）——挂起窗口以小时计，1.5s
+  // 高频轮询是请求风暴；离开挂起（daemon 回归转其它状态）即恢复 1.5s 档。
   useEffect(() => {
     if (!attachSessionId) return;
     let attempts = 0;
     let cancelled = false;
+    // 挂起节流镜像（组件 state 的 suspended 只驱动 UI，tick 闭包内自持布尔 +
+    // 上次实际拉取时间戳做节流；挂起的识别与回归检测最多各延迟一个 15s 窗）。
+    let suspendedNow = false;
+    let lastPollAt = 0;
     const stop = () => {
       if (attachPollRef.current) {
         clearInterval(attachPollRef.current);
@@ -4108,6 +4115,9 @@ function SessionPanelDialog(props: SessionPanelProps) {
     };
     const tick = async () => {
       if (cancelled) return;
+      const now = Date.now();
+      if (suspendedNow && now - lastPollAt < SUSPENDED_SESSION_REFETCH_MS) return;
+      lastPollAt = now;
       attempts += 1;
       try {
         const detail = await getAgentSession(attachSessionId);
@@ -4151,9 +4161,11 @@ function SessionPanelDialog(props: SessionPanelProps) {
         } else if ((detail.status as string) === "suspended") {
           // task-10（design A5/A6）：挂起不算恢复失败——daemon 不在线是挂起的
           // 因，15s attach 轮询上限对以小时计的挂起窗口无意义；置挂起标志
-          //（info 横幅 + 输入禁用）并重置计数继续轮询，daemon 重启转
-          // reconnecting/active 后由上方分支收敛（D-001 自动恢复）。
+          //（info 横幅 + 输入禁用）并重置计数继续轮询（ql-20260829-004：轮询
+          // 节流到 15s 档，见 effect 头注释），daemon 重启转 reconnecting/active
+          // 后由上方分支收敛（D-001 自动恢复）。
           attempts = 0;
+          suspendedNow = true;
           setView((prev) =>
             prev.suspended && prev.errorMsg === null
               ? prev
@@ -4161,7 +4173,9 @@ function SessionPanelDialog(props: SessionPanelProps) {
           );
         } else {
           // pending/reconnecting：terminating_at 可能已带，先更新以便尽早显示
-          //「终止中…」横幅；task-10：离开挂起（daemon 已回归）清挂起标志。
+          //「终止中…」横幅；task-10：离开挂起（daemon 已回归）清挂起标志 +
+          // 恢复 1.5s 轮询档（ql-20260829-004）。
+          suspendedNow = false;
           setView((prev) =>
             !prev.suspended && prev.terminatingAt === detailTermAt
               ? prev

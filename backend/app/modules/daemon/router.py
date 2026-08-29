@@ -2099,7 +2099,9 @@ async def respond_session_permission(
 # ── Daemon HTTP permission uplink (task-07 / design A3) ─────────────────────
 # daemon PERMISSION_REQUEST 的 WS 不通兜底通道。与 WS 上行同源汇聚：service 侧
 # handle_permission_request_http 复用 handle_permission_request 的全部校验 /
-# SSE 广播 / dialog 持久化 / plain 5min timer 语义。等待人审不设时限——backend
+# SSE 广播 / dialog 持久化 / plain 5min timer 语义；ql-20260829-004 起 service
+# 侧先做 runtime 归属校验（principal 必须 own 会话所挂 runtime，不符 404
+# resource-hiding，对齐 pending-controls owner-only 惯例）。等待人审不设时限——backend
 # 5min 超时 + daemon fallback timer 双兜底（断线期间挂起等待而非 fail-closed deny）。
 
 
@@ -2149,8 +2151,10 @@ async def submit_session_permission_request(
 
     daemon ``sendToHub`` 遇 WS 不通时经 ``hubClient.submitPermissionRequest``
     改走本端点创建待审记录——人审挂起等待而非直接 deny。Auth:
-    ``get_current_principal`` 接受 daemon ``X-API-Key``（长期凭证）；
-    ``X-Claim-Token`` 由 service 按会话 lease 的 claim 语义条件校验。
+    ``get_current_principal`` 接受 daemon ``X-API-Key``（长期凭证），service
+    侧先校验 principal own 会话所挂 runtime（不符/不存在同语义 404，
+    ql-20260829-004）；``X-Claim-Token`` 由 service 按会话 lease 的 claim
+    语义条件校验。
 
     幂等性（dialog）：request_id 唯一约束 upsert，daemon 重放不 fork 第二张
     pending 卡（与 WS 上行同一持久化路径）；plain approval 的重复 request_id
@@ -2166,7 +2170,9 @@ async def submit_session_permission_request(
         dialog_kind=body.dialog_kind,
         dialog_payload=body.dialog_payload,
     )
-    accepted = await service.handle_permission_request_http(session_id, x_claim_token, payload)
+    accepted = await service.handle_permission_request_http(
+        session_id, x_claim_token, payload, principal_user_id=user.id
+    )
     return DaemonPermissionUplinkResponse(
         session_id=session_id,
         request_id=body.request_id,

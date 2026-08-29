@@ -231,6 +231,8 @@ class TestSelectModel:
 
         # config_snapshot.model 回填（展示用）。
         await db_session.refresh(created.agent_session)
+        # ql-20260829-004 顺手清偿（mypy 预存债）：config_snapshot Optional 收窄
+        assert created.agent_session.config_snapshot is not None
         assert created.agent_session.config_snapshot["model"] == "glm-4.7-air"
         assert created.agent_session.llm_provider_id == provider_a.id  # 供应商不变
 
@@ -278,6 +280,8 @@ class TestSelectModel:
         assert payload["providerConfig"]["default_fallback_model"] == "kimi-k2-thinking"
         await db_session.refresh(created.agent_session)
         assert created.agent_session.llm_provider_id == provider_b.id
+        # ql-20260829-004 顺手清偿（mypy 预存债）：config_snapshot Optional 收窄
+        assert created.agent_session.config_snapshot is not None
         assert created.agent_session.config_snapshot["model"] == "kimi-k2-thinking"
 
 
@@ -305,6 +309,8 @@ class TestModelRequiresProvider:
         with pytest.raises(DaemonSessionConfigInvalid) as exc_info:
             await svc.inject_session(sid, uid, prompt="pick model", model="glm-x")
         assert exc_info.value.http_status == 422
+        # ql-20260829-004 顺手清偿（mypy 预存债）：details Optional 收窄
+        assert exc_info.value.details is not None
         assert exc_info.value.details["reason"] == "model_requires_provider"
 
         with pytest.raises(DaemonSessionConfigInvalid):
@@ -371,6 +377,8 @@ class TestProviderSwitchResetsModel:
         assert payload["providerConfig"]["model"] == "kimi-k2"
         assert payload["providerConfig"]["default_fallback_model"] == "kimi-mini"
         await db_session.refresh(created.agent_session)
+        # ql-20260829-004 顺手清偿（mypy 预存债）：config_snapshot Optional 收窄
+        assert created.agent_session.config_snapshot is not None
         assert created.agent_session.config_snapshot["model"] == "kimi-k2"
         assert created.agent_session.llm_provider_id == provider_b.id
 
@@ -432,6 +440,8 @@ class TestProfileSwitchKeepsModel:
         assert payload["providerConfig"]["default_fallback_model"] == "glm-custom"
         await db_session.refresh(created.agent_session)
         assert created.agent_session.agent_profile_id == profile_b.id
+        # ql-20260829-004 顺手清偿（mypy 预存债）：config_snapshot Optional 收窄
+        assert created.agent_session.config_snapshot is not None
         assert created.agent_session.config_snapshot["model"] == "glm-custom"
 
 
@@ -484,6 +494,8 @@ class TestModelEmptyStringResets:
         assert payload["providerConfig"]["model"] == "glm-4.7"
         assert payload["providerConfig"]["default_fallback_model"] == "glm-flash"
         await db_session.refresh(created.agent_session)
+        # ql-20260829-004 顺手清偿（mypy 预存债）：config_snapshot Optional 收窄
+        assert created.agent_session.config_snapshot is not None
         assert created.agent_session.config_snapshot["model"] == "glm-4.7"
 
 

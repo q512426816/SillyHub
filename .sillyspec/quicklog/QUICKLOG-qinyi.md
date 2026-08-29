@@ -444,3 +444,18 @@
 根因：task-06/08 实现期 api-types 未再生成被迫手写过渡类型（task-11 已收口生成物但当时零编译错未替换）；CONCERNS 的 daemon 无 CI 条目为扫描基线过时失实（daemon-ci.yml 2026-08-20 HY-1 审计已新增）。
 方案：三处 interface 改 type 别名指向 components schemas 生成物（payload 可选化由 dispatcher 既有 ?? 兜底吸收，消费方零改动）；CONCERNS 划线清偿+ci.md/daemon 卡同步。
 结果：tsc 0 错、相关回归 92 用例绿（control-dispatcher/resilience/integration/stop-suspend），commit 含文档四文件。
+
+## ql-20260829-004-a7ef | 2026-08-29 10:35:41 | 审查风险双修：attach 挂起轮询 15s 节流 + permission 上行 runtime 归属校验
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-panel.tsx（attach 轮询挂起节流（suspendedNow/lastPollAt））
+- frontend/src/components/daemon/__tests__/session-suspended-display.test.tsx（新增节流用例+存量恢复断言适配 15s 窗）
+- backend/app/modules/daemon/permission_service.py（handle_permission_request_http 归属校验）
+- backend/app/modules/daemon/router.py（传 principal_user_id=user.id）
+- backend/app/modules/daemon/tests/test_permission_http_uplink.py（跨主体 404 用例+正向种子对齐 admin）
+- backend/app/modules/daemon/tests/test_inject_session_model.py（6 处 mypy Optional 预存债清偿）
+需求：审查风险双修：attach 挂起轮询 15s 节流 + permission 上行 runtime 归属校验
+根因：昨日 618aaf39 审查发现两个问题：① dialog 模式 attach 挂起会话的 suspended 分支每 tick 归零 attempts，1.5s interval 无限高频轮询（挂起窗口以小时计，每客户端每分钟约 40 次 getAgentSession，page 模式已有 15s 低频档而 dialog 漏降频）；② permission-requests HTTP 上行端点声明 user 未用、daemon_id 从 session.runtime_id 反推致归属比对恒真，仅 claim_token 条件校验（无 claim 语义时跳过），形成任意有效凭证可对他理会话上行的弱校验面
+方案：① session-panel attach effect 增加 suspendedNow/lastPollAt 闭包节流，挂起期间实际拉取降频到 SUSPENDED_SESSION_REFETCH_MS、离开挂起恢复 1.5s 档；② handle_permission_request_http 新增 principal_user_id，runtime.user_id 不符 → 404 resource-hiding（对齐 pending-controls owner-only 惯例，归属先于 claim_token；借用 runtime 属 lender=凭证主体不受影响），router 传 user.id；顺手清偿 test_inject_session_model.py 6 处 mypy Optional 预存债（挡 commit hook）
+结果：后端 uplink 9（新增跨主体 404）+ inject_model 7 用例绿，mypy 776 文件 0 错，ruff 净；前端 suspended-display 12（新增节流用例+存量恢复断言适配）+ connection 11 用例绿，tsc 0 错

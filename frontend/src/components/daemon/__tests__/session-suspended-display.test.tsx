@@ -451,15 +451,48 @@ describe("SessionPanel（dialog）attach 挂起会话（task-10 / 原型⑤⑥�
       expect(screen.getByText(/会话已挂起/)).toBeInTheDocument();
       expect(screen.queryByText(/会话恢复失败/)).toBeNull();
 
-      // daemon 回归 → active：横幅消失、输入恢复
+      // daemon 回归 → active：横幅消失、输入恢复。ql-20260829-004：挂起期间
+      // 轮询节流到 15s 档，回归检测最多延迟一个节流窗（对齐 page 模式语义）。
       daemonMock.getAgentSession.mockResolvedValue({
         ...suspendedDetail(),
         status: "active",
       });
-      await advance(1500);
+      await advance(15_000);
       expect(screen.queryByText(/会话已挂起/)).toBeNull();
       const ta2 = screen.getByPlaceholderText(/继续追问/) as HTMLTextAreaElement;
       expect(ta2.disabled).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ql-20260829-004：挂起期间 attach 轮询节流到 15s——1.5s 档 tick 不重复拉详情（对齐 page 模式低频档）", async () => {
+    vi.useFakeTimers();
+    try {
+      daemonMock.getAgentSession.mockResolvedValue(suspendedDetail());
+      render(
+        <SessionPanel
+          mode="dialog"
+          sessionId="s-1"
+          {...baseDialogProps}
+          initialTurns={[]}
+        />,
+      );
+      await flushEstablish();
+
+      // 首个 attach 轮询 tick（1.5s）识别挂起 → 横幅出现
+      await advance(1500);
+      expect(screen.getByText(/会话已挂起/)).toBeInTheDocument();
+      const callsAtSuspended = daemonMock.getAgentSession.mock.calls.length;
+
+      // 未满 15s 节流窗：期间所有 1.5s 档 tick 被跳过，不产生新请求
+      await advance(13_500);
+      expect(daemonMock.getAgentSession.mock.calls.length).toBe(callsAtSuspended);
+
+      // 满 15s：节流窗到期，下一 tick 拉取详情；仍挂起则继续保持挂起展示
+      await advance(1500);
+      expect(daemonMock.getAgentSession.mock.calls.length).toBe(callsAtSuspended + 1);
+      expect(screen.getByText(/会话已挂起/)).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
