@@ -94,7 +94,7 @@ resume 链路在 interactive 路径当前**未接线**（与 batch 共用白名�
 |---|---|---|
 | 修改 | backend/app/modules/daemon/session/service.py | suspend_sessions_for_daemon 分流：worker 子会话 failed+重派种子 |
 | 修改 | backend/app/modules/daemon/sweep.py | session_offline_sweep_once 同款分流 |
-| 修改 | backend/app/modules/agent/mcp_tools.py 或新文件 | worker 重派函数（prepare_interactive_dispatch 复用原会话行+双表上下文重建+resume 注入+互斥守卫） |
+| 修改 | backend/app/modules/agent/worker_redispatch.py | worker 重派函数（prepare_interactive_dispatch 复用原会话行+双表上下文重建+resume 注入+互斥守卫；独立新文件防 mcp_tools.py 2600 行膨胀） |
 | 修改 | backend/app/modules/agent/placement.py | prepare_interactive_dispatch 加 resume_session_id 形参 |
 | 修改 | backend/app/modules/agent/patrol.py | 职责④候选排除 daemon_interrupted（互斥守卫②） |
 | 修改 | backend/app/modules/daemon/lease/context.py | interactive 分支补 resume_session_id 白名单透传 |
