@@ -211,6 +211,10 @@ class PlatformSyncService:
             await self._ensure_change_row(workspace_id, name, body)
             await self._sync_change_owner(workspace_id, name, user_id)
             await self._apply_cli_tombstone(workspace_id, name, body)
+            # task-04（2026-08-29-approval-notify-push design §7.3①）：待办产生旁路
+            # 钩子——进度落库 commit 后广播 approval_pending（best-effort，见
+            # ``_broadcast_pending_approval`` docstring）。
+            await self._broadcast_pending_approval(workspace_id, name, body)
             return PlatformSyncResult(conflict=False, platform_progress=None, last_pushed_at=None)
 
         # 分支 2：stored 存在 AND stored > base_ts（字符串字典序 §7）→ 冲突
@@ -227,7 +231,139 @@ class PlatformSyncService:
         await self._ensure_change_row(workspace_id, name, body)
         await self._sync_change_owner(workspace_id, name, user_id)
         await self._apply_cli_tombstone(workspace_id, name, body)
+        # task-04（design §7.3①）：接受分支同款待办产生钩子（分支 1 / 3 尾部各一处）。
+        await self._broadcast_pending_approval(workspace_id, name, body)
         return PlatformSyncResult(conflict=False, platform_progress=None, last_pushed_at=None)
+
+    # ── Change 2026-08-29-approval-notify-push task-04（design §7.3① 触发点①）──
+
+    _GATE_TITLE_ZH: dict[str, str] = {
+        # PendingReview 四门值 → 门中文名（title 拼接用）。
+        "proposal_review": "提案审核",
+        "plan_review": "计划审核",
+        "human_test": "人工测试",
+        "archive_confirm": "归档确认",
+    }
+
+    @staticmethod
+    def _extract_current_stage(latest_progress: dict[str, Any] | None) -> str | None:
+        """``latest_progress.changes[0].current_stage`` 解析（D-011@v1 in-hand 数据源）。
+
+        等价内联自 ``ChangeService._extract_current_stage``（change/service.py
+        staticmethod，本变更 allowed_paths 不含 change/service.py、且无需为两个
+        纯函数引整个 ChangeService 依赖面）：结构缺失/类型异常一律返 None 不抛。
+        """
+        if not isinstance(latest_progress, dict):
+            return None
+        changes = latest_progress.get("changes")
+        if not isinstance(changes, list) or not changes:
+            return None
+        first = changes[0]
+        if not isinstance(first, dict):
+            return None
+        stage = first.get("current_stage")
+        return stage if isinstance(stage, str) else None
+
+    @staticmethod
+    def _extract_completed_stages(latest_progress: dict[str, Any] | None) -> set[str]:
+        """``latest_progress.stages`` 顶层数组解析 completed 集合（等价内联先例）。
+
+        等价内联自 ``ChangeService._extract_completed_stages``（同上原因）：对齐
+        projection ``SELECT stage FROM stages WHERE status='completed'`` 语义，
+        结构异常返空 set 不抛。
+        """
+        if not isinstance(latest_progress, dict):
+            return set()
+        stages = latest_progress.get("stages")
+        if not isinstance(stages, list):
+            return set()
+        completed: set[str] = set()
+        for item in stages:
+            if not isinstance(item, dict) or item.get("status") != "completed":
+                continue
+            stage_name = item.get("stage")
+            if isinstance(stage_name, str):
+                completed.add(stage_name)
+        return completed
+
+    async def _broadcast_pending_approval(
+        self,
+        workspace_id: uuid.UUID | None,
+        name: str,
+        body: dict[str, Any],
+    ) -> None:
+        """待办产生旁路钩子（design §7.3① / D-011@v1 / D-006@v1 best-effort）。
+
+        数据源 = 本次 upsert 的 in-hand ``latest_progress``（PG 权威，刚 commit），
+        **不读 ``compute_pending_review``**（其源 sillyspec.db 镜像与进度推送是两条
+        通道、时点滞后会漏发/迟发，D-011@v1 / Grill X-06）。提取 current_stage +
+        completed_stages（等价内联 ``ChangeService`` 先例）后复用
+        ``StageProjectionService._map``（projection.py staticmethod 纯函数，不读
+        sillyspec.db）投影——单值返回，同一时刻至多一门 pending（Grill X-07），
+        无需多门循环。
+
+        pending 命中 → ``NotificationService.notify_broadcast`` 广播
+        ``approval_pending`` 给持有 CHANGE_CREATE 的全员（接收人展开在 service 内，
+        D-002@v1）；幂等检查由 service 内统一执行（未消解存在性检查，D-009@v2），
+        本触发点**不做**存在性检查、重复推送每次都调 service。驳回/回退重跑场景：
+        审批动作侧先 ``resolve_pending`` 置已读 → 同门再产生时检查不命中可再通知。
+
+        整体 try/except（D-006@v1）：判定或通知任何异常仅 log.warning——
+        ``upsert_progress`` 的落库结果与返回值永不受影响（调用点在 commit 后）。
+        ``workspace_id=None``（service 直调防御）静默跳过。
+        """
+        if workspace_id is None:
+            return
+        from app.modules.auth.permissions import Permission
+        from app.modules.change.model import Change
+        from app.modules.change.projection import StageProjectionService
+        from app.modules.notification.service import NotificationService
+
+        try:
+            pending = StageProjectionService._map(
+                self._extract_current_stage(body),
+                self._extract_completed_stages(body),
+            )
+            if pending is None:
+                return
+            review_kind = str(pending.value) if hasattr(pending, "value") else str(pending)
+            # change id + 显示名：``_ensure_change_row`` 已在前保证占位行存在；
+            # 这里独立重查（不依赖上游传行，``_sync_change_owner`` 同款防御），
+            # 行缺失（理论不发生）静默跳过。
+            change_row = (
+                await self._session.execute(
+                    select(Change).where(
+                        col(Change.workspace_id) == workspace_id,
+                        col(Change.change_key) == name,
+                    )
+                )
+            ).scalar_one_or_none()
+            if change_row is None:
+                return
+            change_id = change_row.id
+            change_name = change_row.title or name
+            gate_zh = self._GATE_TITLE_ZH.get(review_kind, review_kind)
+            stage = self._extract_current_stage(body) or ""
+            await NotificationService(self._session).notify_broadcast(
+                workspace_id=workspace_id,
+                permission=Permission.CHANGE_CREATE,
+                type="approval_pending",
+                title=f"变更「{change_name}」等待{gate_zh}审核",
+                body=f"当前阶段：{stage}，等待{gate_zh}通过。" if stage else f"等待{gate_zh}通过。",
+                # 详情深链（task-05 对齐）：Next.js 路由 /workspaces/[id]/changes/[cid]，
+                # 与审批结果通知（approval_result）的 link 同格式，S-02 已由前端路由核实关闭。
+                link=f"/workspaces/{workspace_id}/changes/{change_id}",
+                ref_type="change",
+                ref_id=str(change_id),
+                dedupe_key=f"{change_id}:{review_kind}",
+            )
+        except Exception as exc:
+            log.warning(
+                "platform_sync.pending_approval_broadcast_failed",
+                workspace_id=str(workspace_id),
+                change_key=name,
+                error=str(exc),
+            )
 
     async def _apply(
         self,

@@ -24,6 +24,15 @@ vi.mock("@/components/workspace-switcher", () => ({
   ),
 }));
 
+// task-11（2026-08-29-approval-notify-push）：mock 通知铃铛，避免拖入 react-query /
+// SSE hooks 依赖（铃铛自身行为在 notifications/__tests__/notification-bell.test.tsx 覆盖，
+// taskcard 约定「mock 补齐允许」）。
+vi.mock("@/components/notifications/notification-bell", () => ({
+  NotificationBell: () => (
+    <div data-testid="notification-bell-mock">bell</div>
+  ),
+}));
+
 // next/navigation 在 jsdom 下需 mock，避免引入真实路由依赖。
 // ql-20260711-002：pathname 改可变 hoisted ref，便于测 /ppm 下不渲染 WorkspaceSwitcher。
 const { pathnameRef } = vi.hoisted(() => ({

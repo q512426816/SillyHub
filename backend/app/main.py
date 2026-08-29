@@ -51,6 +51,10 @@ from app.modules.mcp_gateway.router import router as mcp_gateway_router
 from app.modules.mcp_gateway.server import mcp, mount_mcp
 from app.modules.mcp_gateway.sse import router as mcp_sse_router
 
+# 2026-08-29-approval-notify-push task-07：站内通知 REST 四端点
+# （列表/未读数/单条已读/全部已读；SSE events 端点归 task-08）。
+from app.modules.notification.router import router as notification_router
+
 # 2026-08-10-sillyhub-platform-sync task-06：SillySpec 进度同步层 3 端点。
 from app.modules.platform_sync.router import router as platform_sync_router
 
@@ -836,6 +840,7 @@ def create_app() -> FastAPI:
     app.include_router(incident_router, prefix="/api")
     app.include_router(knowledge_router, prefix="/api")
     app.include_router(release_router, prefix="/api")
+    app.include_router(notification_router, prefix="/api")
     # ppm 子域:平台级,统一前缀 /api/ppm (design §7)
     # 五个 router 自身均不带 prefix,由 main 统一挂载到 /api/ppm
     app.include_router(ppm_project_router, prefix="/api/ppm")

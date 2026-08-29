@@ -28,6 +28,6 @@ created_at: 2026-08-29 21:26:40
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `modules/backend.md`（daemon/agent 模块） | 更新 worker 分流挂起+重派继承说明 | pending |
-| `modules/sillyhub-daemon.md`（daemon/interactive） | 更新 resume 接线+损伤降级说明 | pending |
+| `modules/backend.md`（daemon/agent 模块） | 更新 worker 分流挂起+重派继承说明 | done |
+| `modules/sillyhub-daemon.md`（daemon/interactive） | 更新 resume 接线+损伤降级说明 | done |
 | `_module-map.yaml` | 待 worker_redispatch.py 落地后由 scan 刷新 | skipped |

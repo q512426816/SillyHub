@@ -11,6 +11,7 @@ import type {
   DaemonMachineListParams,
   DaemonRuntimeListParams,
 } from "@/lib/daemon";
+import type { NotificationListParams } from "@/lib/notifications";
 
 export const queryKeys = {
   agentRuns: {
@@ -96,5 +97,15 @@ export const queryKeys = {
       ["mentionSources", "ppmTasks", scope] as const,
     ppmProblems: (scope: "ongoing" | "all") =>
       ["mentionSources", "ppmProblems", scope] as const,
+  },
+  // 2026-08-29-approval-notify-push task-10：站内通知缓存键（铃铛数据源）。
+  // list 与 unreadCount 共用 "notifications" 前缀——SSE notification 事件 / 重连
+  // 补拉时一次 invalidateQueries(all) 即列表 + 未读数双失效（D-005@v1 事件驱动，
+  // 全链路无 refetchInterval）。分页/过滤 params 进 list key；unreadCount 无参。
+  notifications: {
+    all: ["notifications"] as const,
+    list: (params: NotificationListParams) =>
+      ["notifications", "list", params] as const,
+    unreadCount: ["notifications", "unreadCount"] as const,
   },
 } as const;

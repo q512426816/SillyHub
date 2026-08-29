@@ -419,6 +419,29 @@ class DaemonPermissionService:
             sse_payload["dialog_payload"] = payload.dialog_payload
         await self._svc._publish_session_event(session_id, sse_payload)
 
+        # task-06（2026-08-29-approval-notify-push / FR-06 / §7.3③）：请求受理
+        # 成功（SSE 已广播）后，向会话 owner（AgentSession.user_id，D-010@v1）
+        # 定向发 permission_request 通知。HTTP 上行（handle_permission_request_http）
+        # 委托本方法，单点挂钩即覆盖 WS/HTTP 双通道。best-effort：任何异常仅
+        # log.warning，不影响既有登记行为（D-001@v1 旁路原则）。
+        session_label = session_obj.title or str(session_id)[:8]
+        if is_dialog:
+            notify_title = f"会话「{session_label}」有新的提问待回答"
+            notify_ref_type = "session_dialog"
+        else:
+            notify_title = f"会话「{session_label}」请求权限审批"
+            notify_ref_type = "session_permission"
+        await self._notify_session_owner(
+            owner_id=session_obj.user_id,
+            workspace_id=session_obj.workspace_id,
+            type="permission_request",
+            title=notify_title,
+            body=notify_title,
+            ref_type=notify_ref_type,
+            ref_id=str(session_id),
+            request_id=request_id,
+        )
+
         if is_dialog:
             # Persist the dialog so it survives a frontend refresh. Idempotent
             # on request_id (unique) — a daemon replay upserts the same row
@@ -1140,6 +1163,59 @@ class DaemonPermissionService:
             accepted=True,
         )
 
+    # ── owner 定向通知（task-06 / FR-06 / §7.3③，best-effort 旁路）──────────
+
+    async def _notify_session_owner(
+        self,
+        *,
+        owner_id: uuid.UUID,
+        workspace_id: uuid.UUID | None,
+        type: str,
+        title: str,
+        body: str,
+        ref_type: str,
+        ref_id: str,
+        request_id: str,
+    ) -> None:
+        """向会话 owner（AgentSession.user_id，D-010@v1）定向发通知。
+
+        best-effort（D-001@v1 旁路原则）：任何异常仅 log.warning，不影响
+        权限请求登记 / 超时回调既有行为。``workspace_id`` 为 None（会话未绑
+        workspace，通知模型 workspace 必填）时跳过并 log.info。
+        """
+        if owner_id is None or workspace_id is None:
+            log.info(
+                "permission_owner_notify_skipped_no_context",
+                type=type,
+                ref_type=ref_type,
+                ref_id=ref_id,
+                request_id=request_id,
+                has_owner=owner_id is not None,
+            )
+            return
+        try:
+            from app.modules.notification.service import NotificationService
+
+            await NotificationService(self._svc._session).notify_user(
+                workspace_id=workspace_id,
+                recipient_user_id=owner_id,
+                type=type,
+                title=title,
+                body=body,
+                link=None,
+                ref_type=ref_type,
+                ref_id=ref_id,
+            )
+        except Exception:
+            log.warning(
+                "permission_owner_notify_failed",
+                type=type,
+                ref_type=ref_type,
+                ref_id=ref_id,
+                request_id=request_id,
+                owner_user_id=str(owner_id),
+            )
+
     # ── Timeout enforcer ─────────────────────────────────────────────────────
 
     async def _on_timeout(
@@ -1167,6 +1243,41 @@ class DaemonPermissionService:
         current = self._timers.get(request_id)
         if current is not None and current.done() is False and current is asyncio.current_task():
             self._timers.pop(request_id, None)
+
+        # task-06（2026-08-29-approval-notify-push / FR-06 / §7.3③）：超时失效
+        # 时向 owner 发 permission_timeout 通知。回调只收请求 id → 重查会话行
+        # 取 owner（D-010@v1：AgentSession.user_id）。本回调后续 ControlCommand
+        # 落库本就使用 self._svc._session，owner 重查同源复用（既有惯例优先于
+        # 新开短 session）。best-effort：失败仅 log.warning（D-001@v1）。
+        # v1 取舍 R-09：不消解历史 permission_request 通知。
+        try:
+            from app.modules.agent.model import AgentSession as _AgentSession
+
+            sess_row = (
+                await self._svc._session.execute(
+                    select(_AgentSession).where(_AgentSession.id == session_id)
+                )
+            ).scalar_one_or_none()
+        except Exception:
+            log.warning(
+                "permission_timeout_owner_lookup_failed",
+                session_id=str(session_id),
+                request_id=request_id,
+            )
+            sess_row = None
+        if sess_row is not None:
+            session_label = sess_row.title or str(session_id)[:8]
+            timeout_title = f"会话「{session_label}」权限请求已超时失效"
+            await self._notify_session_owner(
+                owner_id=sess_row.user_id,
+                workspace_id=sess_row.workspace_id,
+                type="permission_timeout",
+                title=timeout_title,
+                body=timeout_title,
+                ref_type="session_permission",
+                ref_id=str(session_id),
+                request_id=request_id,
+            )
 
         ws_payload = {
             "session_id": str(session_id),

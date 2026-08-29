@@ -75,6 +75,17 @@ MAX_RAW_BYTES = 50 * 1024 * 1024  # 50 MB
 # _ensure_change_row 的 upsert 语义会重建占位行，不丢数据。
 PLACEHOLDER_PROTECT_WINDOW_DAYS = 7
 
+# 2026-08-29-approval-notify-push task-05（D-007@v1 / design §7.3②）：审批结果
+# 通知 owner 的门中文名映射（title 文案常量集中于此，勿散落触发点）。
+# 四个审核门 + 旧版 approve/reject（approval）。
+_APPROVAL_GATE_LABELS = {
+    "proposal_review": "提案审核",
+    "plan_review": "计划审核",
+    "human_test": "人工测试",
+    "archive_confirm": "归档确认",
+    "approval": "审批",
+}
+
 
 @dataclass
 class CompleteStageResult:
@@ -806,6 +817,9 @@ class ChangeService:
         change.updated_at = datetime.now(UTC)
         self._session.add(change)
         await self._session.commit()
+        await self._notify_approval_result(
+            workspace_id, change, "approval", outcome="passed", operator=approved_by
+        )
 
     async def reject(
         self,
@@ -820,6 +834,9 @@ class ChangeService:
         change.updated_at = datetime.now(UTC)
         self._session.add(change)
         await self._session.commit()
+        await self._notify_approval_result(
+            workspace_id, change, "approval", outcome="rejected", comment=reason
+        )
 
     async def sync_documents(
         self,
@@ -2689,6 +2706,85 @@ class ChangeService:
         notified, notify_error = await self._notify_bound_session(workspace_id, change, message)
         return {"notified_session": notified, "notify_error": notify_error}
 
+    async def _notify_approval_result(
+        self,
+        workspace_id: uuid.UUID,
+        change: Change,
+        gate: str,
+        *,
+        outcome: str,
+        operator: str | None = None,
+        decision: str | None = None,
+        comment: str | None = None,
+    ) -> None:
+        """审批动作成功提交后的旁路通知（task-05 / D-007@v1 / design §7.3②）。
+
+        两步（顺序固定）：先 ``resolve_pending`` 消解该变更未读的
+        ``approval_pending`` 待办，再向 change owner 发 ``approval_result``
+        结果通知。整体 best-effort（D-006@v1）：任何异常仅 log.warning，
+        不影响审批动作返回值；owner_id 为 None 时跳过 notify_user 不报错
+        （镜像 session_events.py 的 None-skip）。NotificationService 方法内
+        自 commit（独立于审批事务，调用点须在动作成功提交后）。
+
+        Args:
+            workspace_id: 工作区 id。
+            change: 已落库的 Change（取 owner_id / title / change_key / id）。
+            gate: 门标识（``_APPROVAL_GATE_LABELS`` 键：proposal_review /
+                plan_review / human_test / archive_confirm / approval）。
+            outcome: 结果措辞键——``passed``（已通过）/ ``rejected``（被驳回）/
+                ``returned``（被打回，title 带 decision）。
+            operator: 审批人标识（旧版 approve 的 approved_by；四门为
+                str(user_id)；缺省省略）。
+            decision: 打回类决策名（仅 ``returned`` 用于 title）。
+            comment: 审批意见 / 驳回原因（进 body）。
+        """
+        try:
+            from app.modules.notification.service import NotificationService
+
+            notifier = NotificationService(self._session)
+            ref_id = str(change.id)
+            await notifier.resolve_pending(ref_type="change", ref_id=ref_id)
+
+            if change.owner_id is None:
+                return
+
+            label = _APPROVAL_GATE_LABELS.get(gate, gate)
+            name = change.title or change.change_key
+            if outcome == "passed":
+                verb = "已通过"
+            elif outcome == "rejected":
+                verb = "被驳回"
+            else:
+                verb = f"被打回（{decision}）"
+            title = f"变更「{name}」{label}{verb}"
+
+            body_parts = []
+            if operator:
+                body_parts.append(f"审批人：{operator}")
+            if comment:
+                body_parts.append(f"处理意见：{comment}")
+            body = "；".join(body_parts) if body_parts else title
+
+            await notifier.notify_user(
+                workspace_id=workspace_id,
+                recipient_user_id=change.owner_id,
+                type="approval_result",
+                title=title,
+                body=body,
+                link=f"/workspaces/{workspace_id}/changes/{change.id}",
+                ref_type="change",
+                ref_id=ref_id,
+            )
+        except Exception as exc:
+            log.warning(
+                "change.approval_result_notify_failed",
+                workspace_id=str(workspace_id),
+                change_id=str(change.id),
+                gate=gate,
+                outcome=outcome,
+                error=str(exc),
+            )
+
     async def _notify_bound_session(
         self,
         workspace_id: uuid.UUID,
@@ -2818,6 +2914,14 @@ class ChangeService:
                 comment=comment,
                 notify_session=notify_session,
             )
+            await self._notify_approval_result(
+                workspace_id,
+                change,
+                "proposal_review",
+                outcome="passed",
+                operator=str(user_id),
+                comment=comment,
+            )
             return {"change": change, "agent_dispatch": None, **notify}
         # revise / unclear → 回退到 brainstorm 重跑（保持 brainstorm stage，只记录不派发）
         r = await self._record_stage_rework(
@@ -2835,6 +2939,15 @@ class ChangeService:
             decision=decision,
             comment=comment,
             notify_session=notify_session,
+        )
+        await self._notify_approval_result(
+            workspace_id,
+            r,
+            "proposal_review",
+            outcome="returned",
+            operator=str(user_id),
+            decision=decision,
+            comment=comment,
         )
         return {
             "change": r,
@@ -2899,6 +3012,14 @@ class ChangeService:
                 comment=comment,
                 notify_session=notify_session,
             )
+            await self._notify_approval_result(
+                workspace_id,
+                change,
+                "plan_review",
+                outcome="passed",
+                operator=str(user_id),
+                comment=comment,
+            )
             return {"change": change, "agent_dispatch": None, **notify}
         if decision == "replan":
             # 保持 plan stage，重新跑 plan agent（只记录，不派发）
@@ -2917,6 +3038,15 @@ class ChangeService:
                 decision=decision,
                 comment=comment,
                 notify_session=notify_session,
+            )
+            await self._notify_approval_result(
+                workspace_id,
+                r,
+                "plan_review",
+                outcome="returned",
+                operator=str(user_id),
+                decision=decision,
+                comment=comment,
             )
             return {
                 "change": r,
@@ -2939,6 +3069,15 @@ class ChangeService:
             decision=decision,
             comment=comment,
             notify_session=notify_session,
+        )
+        await self._notify_approval_result(
+            workspace_id,
+            r,
+            "plan_review",
+            outcome="returned",
+            operator=str(user_id),
+            decision=decision,
+            comment=comment,
         )
         return {
             "change": r,
@@ -3002,6 +3141,14 @@ class ChangeService:
                 comment=comment,
                 notify_session=notify_session,
             )
+            await self._notify_approval_result(
+                workspace_id,
+                change,
+                "human_test",
+                outcome="passed",
+                operator=str(user_id),
+                comment=comment,
+            )
             return {"change": change, "agent_dispatch": None, **notify}
         if result == "bug":
             # 回到 execute 重跑（只记录，不派发）
@@ -3020,6 +3167,15 @@ class ChangeService:
                 decision=result,
                 comment=comment,
                 notify_session=notify_session,
+            )
+            await self._notify_approval_result(
+                workspace_id,
+                r,
+                "human_test",
+                outcome="returned",
+                operator=str(user_id),
+                decision=result,
+                comment=comment,
             )
             return {
                 "change": r,
@@ -3042,6 +3198,15 @@ class ChangeService:
             decision=result,
             comment=comment,
             notify_session=notify_session,
+        )
+        await self._notify_approval_result(
+            workspace_id,
+            r,
+            "human_test",
+            outcome="returned",
+            operator=str(user_id),
+            decision=result,
+            comment=comment,
         )
         return {
             "change": r,
@@ -3350,6 +3515,14 @@ class ChangeService:
             decision="archive_confirm",
             comment=comment,
             notify_session=notify_session,
+        )
+        await self._notify_approval_result(
+            workspace_id,
+            change,
+            "archive_confirm",
+            outcome="passed",
+            operator=str(user_id),
+            comment=comment,
         )
         return {
             "change": change,

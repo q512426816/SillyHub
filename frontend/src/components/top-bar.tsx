@@ -1,8 +1,9 @@
 "use client";
 
 import { usePathname, useRouter } from "next/navigation";
-import { ArrowLeftRight, Bell, ChevronRight, LogOut, Search, UserRound } from "lucide-react";
+import { ArrowLeftRight, ChevronRight, LogOut, Search, UserRound } from "lucide-react";
 
+import { NotificationBell } from "@/components/notifications/notification-bell";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
   Avatar,
@@ -133,14 +134,9 @@ export function TopBar({ displayName, onLogout }: TopBarProps) {
           />
         </div>
 
-        <button
-          type="button"
-          className="relative inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
-          aria-label="通知"
-        >
-          <Bell className="h-5 w-5" />
-          <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-red-500" />
-        </button>
+        {/* task-11 / FR-09：通知铃铛（Badge 未读数 + Popover 下拉面板 + SSE 实时），
+            替换原静态 Bell 占位按钮。 */}
+        <NotificationBell />
 
         {/* task-07 / FR-02：主题切换（AI 紫 ↔ 明亮蓝 两态直切，经 store persist 记忆） */}
         <ThemeToggle />

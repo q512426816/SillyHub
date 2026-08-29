@@ -1,0 +1,97 @@
+{
+  "generatedAt": "2026-08-29T14:40:15.507Z",
+  "schemaVersion": 1,
+  "items": [
+    {
+      "task": "task-01",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft (no-attributed-diff): task-01 的 allowed_paths 未命中本次 diff 任何文件（task 未实现 / 改动与他人同文件 / 路径不匹配 / 纯验证任务）——需人工确认实际改动后升级 verdict，确属未实现则回 fail；若是纯验证任务（跑测试/部署验证/观测，无代码 diff 是本质属性），task 卡 frontmatter 声明 task_type: verification + review 披露验证区间即走合法零 diff 通道"
+      ]
+    },
+    {
+      "task": "task-02",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft (no-attributed-diff): task-02 的 allowed_paths 未命中本次 diff 任何文件（task 未实现 / 改动与他人同文件 / 路径不匹配 / 纯验证任务）——需人工确认实际改动后升级 verdict，确属未实现则回 fail；若是纯验证任务（跑测试/部署验证/观测，无代码 diff 是本质属性），task 卡 frontmatter 声明 task_type: verification + review 披露验证区间即走合法零 diff 通道"
+      ]
+    },
+    {
+      "task": "task-03",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft (no-attributed-diff): task-03 的 allowed_paths 未命中本次 diff 任何文件（task 未实现 / 改动与他人同文件 / 路径不匹配 / 纯验证任务）——需人工确认实际改动后升级 verdict，确属未实现则回 fail；若是纯验证任务（跑测试/部署验证/观测，无代码 diff 是本质属性），task 卡 frontmatter 声明 task_type: verification + review 披露验证区间即走合法零 diff 通道"
+      ]
+    },
+    {
+      "task": "task-04",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft (no-attributed-diff): task-04 的 allowed_paths 未命中本次 diff 任何文件（task 未实现 / 改动与他人同文件 / 路径不匹配 / 纯验证任务）——需人工确认实际改动后升级 verdict，确属未实现则回 fail；若是纯验证任务（跑测试/部署验证/观测，无代码 diff 是本质属性），task 卡 frontmatter 声明 task_type: verification + review 披露验证区间即走合法零 diff 通道"
+      ]
+    },
+    {
+      "task": "task-05",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft (no-attributed-diff): task-05 的 allowed_paths 未命中本次 diff 任何文件（task 未实现 / 改动与他人同文件 / 路径不匹配 / 纯验证任务）——需人工确认实际改动后升级 verdict，确属未实现则回 fail；若是纯验证任务（跑测试/部署验证/观测，无代码 diff 是本质属性），task 卡 frontmatter 声明 task_type: verification + review 披露验证区间即走合法零 diff 通道"
+      ]
+    },
+    {
+      "task": "task-06",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft (no-attributed-diff): task-06 的 allowed_paths 未命中本次 diff 任何文件（task 未实现 / 改动与他人同文件 / 路径不匹配 / 纯验证任务）——需人工确认实际改动后升级 verdict，确属未实现则回 fail；若是纯验证任务（跑测试/部署验证/观测，无代码 diff 是本质属性），task 卡 frontmatter 声明 task_type: verification + review 披露验证区间即走合法零 diff 通道"
+      ]
+    },
+    {
+      "task": "task-07",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft (no-attributed-diff): task-07 的 allowed_paths 未命中本次 diff 任何文件（task 未实现 / 改动与他人同文件 / 路径不匹配 / 纯验证任务）——需人工确认实际改动后升级 verdict，确属未实现则回 fail；若是纯验证任务（跑测试/部署验证/观测，无代码 diff 是本质属性），task 卡 frontmatter 声明 task_type: verification + review 披露验证区间即走合法零 diff 通道"
+      ]
+    },
+    {
+      "task": "task-08",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft (no-attributed-diff): task-08 的 allowed_paths 未命中本次 diff 任何文件（task 未实现 / 改动与他人同文件 / 路径不匹配 / 纯验证任务）——需人工确认实际改动后升级 verdict，确属未实现则回 fail；若是纯验证任务（跑测试/部署验证/观测，无代码 diff 是本质属性），task 卡 frontmatter 声明 task_type: verification + review 披露验证区间即走合法零 diff 通道"
+      ]
+    },
+    {
+      "task": "task-09",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft (no-attributed-diff): task-09 的 allowed_paths 未命中本次 diff 任何文件（task 未实现 / 改动与他人同文件 / 路径不匹配 / 纯验证任务）——需人工确认实际改动后升级 verdict，确属未实现则回 fail；若是纯验证任务（跑测试/部署验证/观测，无代码 diff 是本质属性），task 卡 frontmatter 声明 task_type: verification + review 披露验证区间即走合法零 diff 通道"
+      ]
+    },
+    {
+      "task": "task-10",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft (no-attributed-diff): task-10 的 allowed_paths 未命中本次 diff 任何文件（task 未实现 / 改动与他人同文件 / 路径不匹配 / 纯验证任务）——需人工确认实际改动后升级 verdict，确属未实现则回 fail；若是纯验证任务（跑测试/部署验证/观测，无代码 diff 是本质属性），task 卡 frontmatter 声明 task_type: verification + review 披露验证区间即走合法零 diff 通道"
+      ]
+    },
+    {
+      "task": "task-11",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft (no-attributed-diff): task-11 的 allowed_paths 未命中本次 diff 任何文件（task 未实现 / 改动与他人同文件 / 路径不匹配 / 纯验证任务）——需人工确认实际改动后升级 verdict，确属未实现则回 fail；若是纯验证任务（跑测试/部署验证/观测，无代码 diff 是本质属性），task 卡 frontmatter 声明 task_type: verification + review 披露验证区间即走合法零 diff 通道"
+      ]
+    },
+    {
+      "task": "task-12",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft (no-attributed-diff): task-12 的 allowed_paths 未命中本次 diff 任何文件（task 未实现 / 改动与他人同文件 / 路径不匹配 / 纯验证任务）——需人工确认实际改动后升级 verdict，确属未实现则回 fail；若是纯验证任务（跑测试/部署验证/观测，无代码 diff 是本质属性），task 卡 frontmatter 声明 task_type: verification + review 披露验证区间即走合法零 diff 通道"
+      ]
+    },
+    {
+      "task": "task-13",
+      "verdict": "spec+quality",
+      "evidence": [
+        "auto-generated draft (no-attributed-diff): task-13 的 allowed_paths 未命中本次 diff 任何文件（task 未实现 / 改动与他人同文件 / 路径不匹配 / 纯验证任务）——需人工确认实际改动后升级 verdict，确属未实现则回 fail；若是纯验证任务（跑测试/部署验证/观测，无代码 diff 是本质属性），task 卡 frontmatter 声明 task_type: verification + review 披露验证区间即走合法零 diff 通道"
+      ]
+    }
+  ]
+}

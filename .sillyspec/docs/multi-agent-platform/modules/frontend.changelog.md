@@ -15,3 +15,7 @@
 - ql-20260829-005-86e9 | 审批面板 SSE 永久性错误停重连：session-permission-panel onerror 此前忽略 fetch-sse 透传的 status 码，会话已删（404）/凭证失效（401）/无权限（403）也按 [1..30]s 退避无限重试必败请求；新增 PERMANENT_SSE_ERROR_STATUSES={401,403,404}，命中即置 closed 停本会话重连循环+摘除 sourcesRef 死连接。无 status（网络中断/流结束）与 5xx 照旧退避（task-09 行为不变）；token 刷新/sessionIds 变化经 effect deps 重建订阅自然重开。新增 401/404 停连 + 503/无 status 照旧重连两用例，connection 13 用例绿 tsc 0。daemon.ts subscribeAgentSessionsEvents 同款形态未动（用户指定范围仅审批面板）。
 ## 2026-08-29-frontend-e2e-playwright
 - 新增浏览器级 E2E 体系：frontend/e2e/ 六件套 + playwright.config + test:e2e script + e2e-ci.yml；移除 puppeteer 残留（lockfile -596 行）。8 用例（auth A1-A4/navigation N1-N4），本机 Docker 全栈 8/8 绿 + CI 绿（run 33257206610）+ vitest 2908 零回归。
+
+## 2026-08-29 — 通知铃铛与数据层（变更 2026-08-29-approval-notify-push task-09~13）
+- lib/notifications.ts：四 REST 函数 + useNotifications/useUnreadCount（无 refetchInterval，D-005@v1）+ useNotificationsStream（SSE 事件与重连成功双 invalidate，PERMANENT_SSE_ERROR_STATUSES={401,403,404} 停连+指数退避）；query-keys 增 notifications 族。
+- components/notifications/notification-bell.tsx：铃铛+Badge 徽标（99+）+Popover 面板（类型语义色标签/相对时间/点击已读+跳转/全部已读/空态），挂载 top-bar（替换原静态 Bell 占位）；三主题 brand-* 语义阶。api-types.ts 经 gen:types 同步（5 端点+4 DTO）。

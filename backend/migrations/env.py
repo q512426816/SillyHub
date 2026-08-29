@@ -43,6 +43,10 @@ from app.modules.incident import model as _incident_model  # noqa: F401
 from app.modules.llm_provider import model as _llm_model  # noqa: F401
 from app.modules.mcp_gateway import model as _mcp_gateway_model  # noqa: F401
 
+# 2026-08-29-approval-notify-push task-01：站内通知表登记（漏登记 =
+# autogenerate 不生成该表，Grill X-16）。
+from app.modules.notification import model as _notification_model  # noqa: F401
+
 # 2026-08-10-sillyhub-platform-sync task-02：进度同步层聚合存储表登记，
 # 否则 autogenerate 会因 metadata 缺该表而误判 platform_change_progress 多余。
 from app.modules.platform_sync import model as _platform_sync_model  # noqa: F401

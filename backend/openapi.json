@@ -16346,6 +16346,181 @@
         }
       }
     },
+    "/api/notifications": {
+      "get": {
+        "tags": [
+          "notification"
+        ],
+        "summary": "List Notifications",
+        "description": "本人通知列表（created_at DESC）+ 总数，供分页。",
+        "operationId": "list_notifications_api_notifications_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          },
+          {
+            "name": "unread_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Unread Only"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notifications/unread-count": {
+      "get": {
+        "tags": [
+          "notification"
+        ],
+        "summary": "Get Unread Count",
+        "description": "本人未读数（徽标首载/兜底轮询）。",
+        "operationId": "get_unread_count_api_notifications_unread_count_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnreadCountResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notifications/{notification_id}/read": {
+      "post": {
+        "tags": [
+          "notification"
+        ],
+        "summary": "Mark Notification Read",
+        "description": "单条标记已读；非本人或不存在 → NotificationNotFound（404）。",
+        "operationId": "mark_notification_read_api_notifications__notification_id__read_post",
+        "parameters": [
+          {
+            "name": "notification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Notification Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notifications/read-all": {
+      "post": {
+        "tags": [
+          "notification"
+        ],
+        "summary": "Mark All Notifications Read",
+        "description": "全部已读，返回更新行数。",
+        "operationId": "mark_all_notifications_read_api_notifications_read_all_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadAllResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notifications/events": {
+      "get": {
+        "tags": [
+          "notification"
+        ],
+        "summary": "Stream Notifications Events",
+        "description": "SSE 实时通知流（task-08 / FR-07 / design §7.2）。\n\n前端 fetch-sse 订阅 ``GET /api/notifications/events``（token 经\nAuthorization header 传，EventSource 不支持自定义 header 故不适用），\n收到 ``event: notification`` 帧后刷新列表/徽标。无 Last-Event-ID 回放\n（漏发由前端重连后列表查询兜底，D-003@v2 Non-Goal）。\n\n单频道 + 服务端过滤（R-06 跨用户隔离）：所有用户共享\n``NOTIFICATIONS_CHANNEL`` 全局频道，本生成器仅当 payload 的\n``recipient_user_ids`` 含当前用户 id 时下发通知摘要，他人信号静默丢弃。\n\n连接池安全（对齐 daemon stream_sessions_events）：不注入请求级 DB\nsession；鉴权链（get_current_user）查库完成后即归还 DB 连接，生成器内\n零 DB 访问——流存续期间不占用任何连接池 slot。",
+        "operationId": "stream_notifications_events_api_notifications_events_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/ppm/project-maintenance": {
       "post": {
         "tags": [
@@ -41393,6 +41568,120 @@
         "title": "ModelUsageItemRead",
         "description": "终态上报的 run×模型用量明细行（FR-01-3，2026-08-29-usage-by-provider-model）。\n\ndaemon interactive 从 SDK ``result.modelUsage`` 逐模型拆行（camelCase→snake）；\n``api_requests`` 为按消耗占比的分摊估算（run 级精确值在顶层 api_requests，\ndesign §2 D-01）。batch 侧为 run 级单行。"
       },
+      "NotificationListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationRead"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total"
+        ],
+        "title": "NotificationListResponse",
+        "description": "列表分页响应（total 为本人（可选未读过滤后）总数）。"
+      },
+      "NotificationRead": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "workspace_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Workspace Id"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "link": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link"
+          },
+          "ref_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Type"
+          },
+          "ref_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref Id"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "workspace_id",
+          "type",
+          "title",
+          "created_at"
+        ],
+        "title": "NotificationRead",
+        "description": "单条通知视图（仅本人可见字段，不含 recipient_user_id / dedupe_key）。"
+      },
       "OkResponse": {
         "properties": {
           "ok": {
@@ -51656,6 +51945,20 @@
         "title": "QuicklogPushOk",
         "description": "POST /quicklog-entries 200 响应（CLI best-effort，任意 2xx 即可）。"
       },
+      "ReadAllResponse": {
+        "properties": {
+          "updated": {
+            "type": "integer",
+            "title": "Updated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "updated"
+        ],
+        "title": "ReadAllResponse",
+        "description": "全部已读响应（更新行数）。"
+      },
       "RefreshRequest": {
         "properties": {
           "refresh_token": {
@@ -58520,6 +58823,20 @@
         ],
         "title": "TransitionResponse",
         "description": "POST /changes/{id}/transition 的返回类型。\n\n包含变更状态和 agent dispatch 信息。"
+      },
+      "UnreadCountResponse": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count"
+        ],
+        "title": "UnreadCountResponse",
+        "description": "未读数（铃铛徽标轮询/首载）。"
       },
       "UsageData": {
         "properties": {

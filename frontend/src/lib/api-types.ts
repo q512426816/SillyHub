@@ -6063,6 +6063,119 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Notifications
+         * @description 本人通知列表（created_at DESC）+ 总数，供分页。
+         */
+        get: operations["list_notifications_api_notifications_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/unread-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Unread Count
+         * @description 本人未读数（徽标首载/兜底轮询）。
+         */
+        get: operations["get_unread_count_api_notifications_unread_count_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/{notification_id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Notification Read
+         * @description 单条标记已读；非本人或不存在 → NotificationNotFound（404）。
+         */
+        post: operations["mark_notification_read_api_notifications__notification_id__read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark All Notifications Read
+         * @description 全部已读，返回更新行数。
+         */
+        post: operations["mark_all_notifications_read_api_notifications_read_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Notifications Events
+         * @description SSE 实时通知流（task-08 / FR-07 / design §7.2）。
+         *
+         *     前端 fetch-sse 订阅 ``GET /api/notifications/events``（token 经
+         *     Authorization header 传，EventSource 不支持自定义 header 故不适用），
+         *     收到 ``event: notification`` 帧后刷新列表/徽标。无 Last-Event-ID 回放
+         *     （漏发由前端重连后列表查询兜底，D-003@v2 Non-Goal）。
+         *
+         *     单频道 + 服务端过滤（R-06 跨用户隔离）：所有用户共享
+         *     ``NOTIFICATIONS_CHANNEL`` 全局频道，本生成器仅当 payload 的
+         *     ``recipient_user_ids`` 含当前用户 id 时下发通知摘要，他人信号静默丢弃。
+         *
+         *     连接池安全（对齐 daemon stream_sessions_events）：不注入请求级 DB
+         *     session；鉴权链（get_current_user）查库完成后即归还 DB 连接，生成器内
+         *     零 DB 访问——流存续期间不占用任何连接池 slot。
+         */
+        get: operations["stream_notifications_events_api_notifications_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/ppm/project-maintenance": {
         parameters: {
             query?: never;
@@ -14413,6 +14526,51 @@ export interface components {
              */
             api_requests: number;
         };
+        /**
+         * NotificationListResponse
+         * @description 列表分页响应（total 为本人（可选未读过滤后）总数）。
+         */
+        NotificationListResponse: {
+            /** Items */
+            items?: components["schemas"]["NotificationRead"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * NotificationRead
+         * @description 单条通知视图（仅本人可见字段，不含 recipient_user_id / dedupe_key）。
+         */
+        NotificationRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Type */
+            type: string;
+            /** Title */
+            title: string;
+            /** Body */
+            body?: string | null;
+            /** Link */
+            link?: string | null;
+            /** Ref Type */
+            ref_type?: string | null;
+            /** Ref Id */
+            ref_id?: string | null;
+            /** Read At */
+            read_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** OkResponse */
         OkResponse: {
             /**
@@ -17463,6 +17621,14 @@ export interface components {
             /** Ql Id */
             ql_id: string;
         };
+        /**
+         * ReadAllResponse
+         * @description 全部已读响应（更新行数）。
+         */
+        ReadAllResponse: {
+            /** Updated */
+            updated: number;
+        };
         /** RefreshRequest */
         RefreshRequest: {
             /** Refresh Token */
@@ -20383,6 +20549,14 @@ export interface components {
             };
             /** @description Agent dispatch 结果（无 dispatch 时为 null） */
             agent_dispatch?: components["schemas"]["TransitionDispatchResponse"] | null;
+        };
+        /**
+         * UnreadCountResponse
+         * @description 未读数（铃铛徽标轮询/首载）。
+         */
+        UnreadCountResponse: {
+            /** Count */
+            count: number;
         };
         /**
          * UsageData
@@ -31891,6 +32065,130 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_notifications_api_notifications_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                unread_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_unread_count_api_notifications_unread_count_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnreadCountResponse"];
+                };
+            };
+        };
+    };
+    mark_notification_read_api_notifications__notification_id__read_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notification_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_all_notifications_read_api_notifications_read_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadAllResponse"];
+                };
+            };
+        };
+    };
+    stream_notifications_events_api_notifications_events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

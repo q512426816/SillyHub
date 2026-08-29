@@ -132,6 +132,77 @@ async def has_permission(
     return permission.value in perms or Permission.PLATFORM_ADMIN.value in perms
 
 
+async def list_user_ids_with_permission(
+    session: AsyncSession,
+    *,
+    workspace_id: uuid.UUID,
+    permission: Permission,
+) -> list[uuid.UUID]:
+    """Broadcast recipient lookup (change 2026-08-29-approval-notify-push FR-03).
+
+    Return the ids of every **active** user holding ``permission`` in this
+    workspace. Mirrors :func:`has_permission`'s three resolution segments
+    (D-002@v1):
+
+    1. Workspace grant via ``user_workspace_roles`` → roles →
+       role_permissions (users holding a role whose permission set contains
+       ``permission`` **or** ``PLATFORM_ADMIN`` are admitted).
+    2. Platform-level grant via admin ``user_roles`` (same permission /
+       PLATFORM_ADMIN admission, workspace-agnostic). Falls back to an
+       empty segment when the admin module is not bootstrapped — same
+       ImportError degradation as :func:`collect_permissions_platform`.
+    3. Users flagged ``is_platform_admin``.
+
+    Only users with ``status == "active"`` are returned (Grill X-04);
+    disabled/deleted accounts never receive broadcast notifications.
+
+    This is a reverse lookup over the same tables the per-user collectors
+    query, so it deliberately bypasses the per-user permission cache.
+    """
+    target = permission.value
+    admin_perm = Permission.PLATFORM_ADMIN.value
+
+    # Segment 1: workspace-scoped grants (PLATFORM_ADMIN role passes for any
+    # permission, mirroring has_permission's :125/:130 semantics).
+    stmt = (
+        select(col(UserWorkspaceRole.user_id))
+        .join(Role, col(Role.id) == col(UserWorkspaceRole.role_id))
+        .join(RolePermission, col(RolePermission.role_id) == col(Role.id))
+        .join(User, col(User.id) == col(UserWorkspaceRole.user_id))
+        .where(col(UserWorkspaceRole.workspace_id) == workspace_id)
+        .where(col(User.status) == "active")
+        .where(col(RolePermission.permission).in_([target, admin_perm]))
+        .distinct()
+    )
+    user_ids = set((await session.execute(stmt)).scalars().all())
+
+    # Segment 2: platform-level grants via the admin module's UserRole.
+    try:
+        from app.modules.admin.model import UserRole
+    except ImportError:
+        pass  # admin not bootstrapped — empty segment (rbac.py:79 precedent)
+    else:
+        stmt = (
+            select(col(UserRole.user_id))
+            .join(Role, col(Role.id) == col(UserRole.role_id))
+            .join(RolePermission, col(RolePermission.role_id) == col(Role.id))
+            .join(User, col(User.id) == col(UserRole.user_id))
+            .where(col(User.status) == "active")
+            .where(col(RolePermission.permission).in_([target, admin_perm]))
+            .distinct()
+        )
+        user_ids.update((await session.execute(stmt)).scalars().all())
+
+    # Segment 3: platform admin flag.
+    stmt = select(col(User.id)).where(
+        col(User.is_platform_admin) == True,  # noqa: E712 — SQL boolean
+        col(User.status) == "active",
+    )
+    user_ids.update((await session.execute(stmt)).scalars().all())
+
+    return list(user_ids)
+
+
 async def list_user_workspace_roles(
     session: AsyncSession, *, user_id: uuid.UUID
 ) -> list[tuple[uuid.UUID, str, str]]:
