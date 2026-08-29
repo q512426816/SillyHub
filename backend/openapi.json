@@ -3858,6 +3858,58 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "change"
+        ],
+        "summary": "Delete Change",
+        "description": "平台删除入口（task-06 / 2026-08-29-change-delete-closure-and-spec-pull，\ndesign §6.1 / FR-05a / D-001@v1）。\n\n组合权限 = ``change.owner_id == 当前用户`` **或** ``CHANGE_ARCHIVE``（owner 为空\n仅后者可删；workspace_owner 角色已内置、platform_admin 经 has_permission 短路）。\n``require_permission`` 依赖工厂（auth_deps.py）不支持行级 OR，故实现为端点内\n组合校验（agent/file_artifacts.py 同款先例；permission 枚举用法照\nmembers_router 先例）；未通过判 403。不存在 404、已删幂等 409（code=\nchange_deleted）由 ``ChangeService.delete_change`` 给出。",
+        "operationId": "delete_change_api_workspaces__workspace_id__changes__change_id__delete",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "change_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Change Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangeDeleteResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/workspaces/{workspace_id}/changes/{change_id}/documents": {
@@ -28038,7 +28090,7 @@
           "spec-workspace"
         ],
         "summary": "Download Spec Bundle",
-        "description": "Stream the server ``spec_root`` as a tar bundle (FR-05 / D-003@v1).\n\nUsed by daemon-client workspaces to borrow the spec tree before an agent\nrun. Excludes ``.runtime/`` (daemon runtime cache, not spec data).",
+        "description": "Stream the server ``spec_root`` as a tar bundle (FR-05 / D-003@v1).\n\nUsed by daemon-client workspaces to borrow the spec tree before an agent\nrun. Excludes ``.runtime/`` (daemon runtime cache, not spec data).\n\ntask-08（2026-08-29-change-delete-closure-and-spec-pull / FR-08 / design\n§7.3）：响应头追加 ``X-Spec-Version``（= ``spec_ws.spec_version``），tar 顶层\n含内存生成的 ``PLATFORM-BUNDLE.json`` 快照元数据（service.build_bundle）——\n持包方离线即可辨快照新旧，无需解包对账。",
         "operationId": "download_spec_bundle_api_workspaces__workspace_id__spec_workspace_bundle_get",
         "parameters": [
           {
@@ -28729,6 +28781,27 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/changes/-/spec-bundle": {
+      "get": {
+        "tags": [
+          "platform-sync",
+          "platform-sync"
+        ],
+        "summary": "Get Spec Bundle",
+        "description": "GET 服务器 spec 整树 tar（CLI 直跑拉取口子，task-08 / design §7.1 / FR-07）。\n\n持 ``shpsync_`` token 的 CLI 可拉本 workspace 整树（浏览器用户走既有 RBAC\nbundle 端点 ``GET /workspaces/{ws}/spec-workspace/bundle``）。鉴权同\nspec-manifest 先例：``require_platform_sync_write``（仅 shpsync_，JWT/\nshk_live_ 凭据有效也 403）——只读拉 bundle 是 shpsync_ 既有 spec-sync 写\n能力的严格子集，无越权扩大（design §7.1 权限评估）；不用读鉴权是为避免\n非同步方探测文件布局。workspace 唯一来源是 token 派生（URL 不带 workspace\n选择器，G6）；``scope.workspace_id`` 为空 → 403 fail-closed（对齐 task-01\n范式）。\n\n路由顺序硬约束（R-06，ppm export-excel 同款坑）：本字面量 ``-`` 段路由必须\n注册在 ``/changes/{name}/...`` 参数路由之前（FastAPI 按注册顺序匹配，防\n``{name}`` 贪婪吞掉 ``-`` 段）——故放在下方 ``GET /changes/{name}/progress``\n之前的字面量端点块内，勿挪到文件尾。\n\n响应 ``application/x-tar`` 流：``Content-Disposition`` 文件名 + ``X-Spec-\nVersion``（= ``spec_ws.spec_version``）；tar 顶层含内存生成的\n``PLATFORM-BUNDLE.json`` 快照元数据（design §7.3，service.build_bundle）。\n二进制流不进 OpenAPI DTO（openapi.json/api-types 再生成归 gen:types 时点）。",
+        "operationId": "get_spec_bundle_api_changes___spec_bundle_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           }
@@ -33027,6 +33100,30 @@
         "title": "ChangeApprovalResponse",
         "description": "GET /changes/{name}/approval 响应——给 sillyspec CLI execute 审批门控用。\n\nCLI ``sync.js checkApproval``（execute 启动时调）读 ``status``：\n``rejected``/``pending`` 阻断 execute，其他（``approved``）放行\n（command.js:1071-1080）。当前后端无审批策略/数据 → 所有 change 默认 ``approved``\n放行（ql-20260812-001-6eb8 修 CLI 因 404 误判 pending 卡死）。"
       },
+      "ChangeDeleteResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "backup_dir": {
+            "type": "string",
+            "title": "Backup Dir"
+          },
+          "file_count": {
+            "type": "integer",
+            "title": "File Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "backup_dir",
+          "file_count"
+        ],
+        "title": "ChangeDeleteResponse",
+        "description": "DELETE /changes/{cid} 响应（task-06 / design §11，FR-05a）。\n\n- ``ok``：恒 True（失败路径走 403/404/409 错误体，不进本 DTO）；\n- ``backup_dir``：镜像软删落地的备份目录绝对路径（30 天保留，人工恢复兜底）；\n- ``file_count``：实际移入备份区的文件数（零文件幂等删除为 0）。"
+      },
       "ChangeDocMatrix": {
         "properties": {
           "change_id": {
@@ -33806,6 +33903,17 @@
               }
             ],
             "title": "Owner Name"
+          },
+          "last_pushed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Pushed At"
           },
           "updated_at": {
             "type": "string",

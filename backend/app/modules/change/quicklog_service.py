@@ -290,7 +290,11 @@ class QuicklogQueryService:
             (
                 await self._session.execute(
                     select(QuicklogEntryORM).where(
-                        col(QuicklogEntryORM.workspace_id) == workspace.id
+                        col(QuicklogEntryORM.workspace_id) == workspace.id,
+                        # task-05（design §5.3 / FR-03b）：apply 期对账软隐藏的
+                        # pushed 行（本地已删条目）不进合并；文件侧条目不受影响
+                        # （hidden 只过滤 PG 源，文件重现条目照常显示）。
+                        col(QuicklogEntryORM.hidden).is_(False),
                     )
                 )
             )

@@ -162,6 +162,14 @@ class QuicklogEntryORM(BaseModel, table=True):
         default=None,
         sa_column=Column(JSON, nullable=True),
     )
+    # Change 2026-08-29-change-delete-closure-and-spec-pull task-01（design §5.3）：
+    # quicklog 文件对账软隐藏——apply_ops 落 quicklog 文件后重解析 quicklog/ 目录，
+    # ql_id 不在文件集合中的 pushed 行置 TRUE（读侧 merge 过滤在 task-05）。
+    # 隐藏不硬删，保留推送留底可回滚。
+    hidden: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False),
+    )
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(

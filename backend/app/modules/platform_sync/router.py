@@ -4,6 +4,7 @@
 - GET /changes：轻量列表（裸数组，按 token 派生 workspace 过滤）
 - GET /changes/-/spec-manifest：服务器 spec 文件权威清单（2026-08-17-spec-file-incremental-sync task-01，design §5.2/§7）
 - POST /changes/-/spec-sync：CLI 直跑增量 spec 文件 ops（2026-08-17-spec-file-incremental-sync task-02，design §5.2/§7）
+- GET /changes/-/spec-bundle：CLI 直跑拉服务器 spec 整树 tar（2026-08-29-change-delete-closure-and-spec-pull task-08，design §7.1/§7.3）
 - GET /changes/{name}/progress：完整 JSON（裸六表 + 顶层 last_pushed_at，404）
 - POST /changes/{name}/documents：四件套全文同步（2026-08-14-platform-sync-docs-approval，D-004@v1）
 - POST /changes/{name}/approval：审批决定提交（同上，D-001@v1 完整闭环）
@@ -38,7 +39,7 @@ import uuid
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_session
@@ -138,6 +139,20 @@ async def push_progress(
         # owner 对齐用真实 User（auth 已派生，改前丢弃）；header user 只喂 last_pusher。
         user_id=_user.id,
     )
+    if result.change_deleted:
+        # task-04（FR-04 复活通道 4 / design §11）：已删 key 拒收——409 + 错误体
+        # ``code='change_deleted'``，与下方 base_ts 冲突 409（契约 §4.4 body）按
+        # code 字段区分。旧 CLI 把任意 409 当冲突处理：重试无害、最终报推送失败
+        # 可接受（design §11 兼容口径）。错误体在本层 JSONResponse 直接构造，
+        # 不动 schema.py 的 ConflictResponse（本卡文件集不含 schema.py）。
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "code": "change_deleted",
+                "message": "该变更已在平台删除，进度上行被拒收；请在本地 unregister 该变更。",
+                "change_name": name,
+            },
+        )
     if result.conflict:
         # 409 必须返回正确状态码 + 契约 §4.4 body（客户端 fetchJsonWithStatus 读
         # res.status==409 + res.body.platform_progress，sync.js:314-318）。
@@ -170,6 +185,8 @@ async def list_changes(
 # Change 2026-08-17-spec-file-incremental-sync task-01/task-02（design §5.2/§7）：
 # 固定片段端点用 ``-`` 占位段，且必须注册在 ``/changes/{name}/...`` 路由之前
 # （FastAPI 按注册顺序匹配），避免 ``{name}`` 贪婪匹配冲突。
+# task-08（2026-08-29-change-delete-closure-and-spec-pull）的 spec-bundle 同入
+# 本块（R-06：字面量路由前置注册不可妥协）。
 
 
 @router.get("/changes/-/spec-manifest", response_model=SpecManifestResponse)
@@ -228,6 +245,53 @@ async def push_spec_sync(
         new_versions=result["new_versions"],
         conflict=result["conflict"],
         server_versions=result["server_versions"],
+    )
+
+
+@router.get("/changes/-/spec-bundle")
+async def get_spec_bundle(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    auth: _write_auth,
+) -> StreamingResponse:
+    """GET 服务器 spec 整树 tar（CLI 直跑拉取口子，task-08 / design §7.1 / FR-07）。
+
+    持 ``shpsync_`` token 的 CLI 可拉本 workspace 整树（浏览器用户走既有 RBAC
+    bundle 端点 ``GET /workspaces/{ws}/spec-workspace/bundle``）。鉴权同
+    spec-manifest 先例：``require_platform_sync_write``（仅 shpsync_，JWT/
+    shk_live_ 凭据有效也 403）——只读拉 bundle 是 shpsync_ 既有 spec-sync 写
+    能力的严格子集，无越权扩大（design §7.1 权限评估）；不用读鉴权是为避免
+    非同步方探测文件布局。workspace 唯一来源是 token 派生（URL 不带 workspace
+    选择器，G6）；``scope.workspace_id`` 为空 → 403 fail-closed（对齐 task-01
+    范式）。
+
+    路由顺序硬约束（R-06，ppm export-excel 同款坑）：本字面量 ``-`` 段路由必须
+    注册在 ``/changes/{name}/...`` 参数路由之前（FastAPI 按注册顺序匹配，防
+    ``{name}`` 贪婪吞掉 ``-`` 段）——故放在下方 ``GET /changes/{name}/progress``
+    之前的字面量端点块内，勿挪到文件尾。
+
+    响应 ``application/x-tar`` 流：``Content-Disposition`` 文件名 + ``X-Spec-
+    Version``（= ``spec_ws.spec_version``）；tar 顶层含内存生成的
+    ``PLATFORM-BUNDLE.json`` 快照元数据（design §7.3，service.build_bundle）。
+    二进制流不进 OpenAPI DTO（openapi.json/api-types 再生成归 gen:types 时点）。
+    """
+    _user, scope = auth
+    if scope.workspace_id is None:
+        # 防御：require_platform_sync_write 的 shpsync_ 通道恒派生 workspace；到达此
+        # 分支即凭据形态异常，403 关闭通道（fail-closed，对齐 task-01 范式）。
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="缺少工作区归属")
+    # 函数级 import 防模块加载环（对齐 service.py 透调 SpecWorkspaceService 惯例）。
+    from app.modules.spec_workspace.service import SpecWorkspaceService
+
+    _spec_root, spec_version, tar_stream = await SpecWorkspaceService(session).build_bundle(
+        scope.workspace_id
+    )
+    return StreamingResponse(
+        tar_stream,
+        media_type="application/x-tar",
+        headers={
+            "Content-Disposition": f'attachment; filename="spec-bundle-{scope.workspace_id}.tar"',
+            "X-Spec-Version": str(spec_version),
+        },
     )
 
 

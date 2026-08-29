@@ -135,12 +135,35 @@ class ChangeSummary(BaseModel):
     # fallback，R-06 与事件 A/B 名字共用一次 IN 查询）。填充逻辑是 task-04
     # 领地，本处仅落契约。optional default None（brownfield 安全，§9）。
     owner_name: str | None = None
+    # 2026-08-29-change-delete-closure-and-spec-pull task-11（design §8.1 Layer 1）：
+    # 「最后信号」投影（纯 CLI 模式进行中可见性，前端活动徽标数据源）。计算字段
+    # （DTO 层），非 changes 表列（零 migration）；数据源 =
+    # platform_change_progress.last_pushed_at 既有列（platform_sync/model.py:90-95，
+    # String ISO 原文），由 service.enrich_summaries 在既有复合 IN join 的 SELECT
+    # 列表顺带取值（零新增查询，R-03）。join 不命中（无 progress 行）保持 None
+    # （D-003 fallback，与 current_stage 同款）。服务端零解析：ISO 原文透传，
+    # 畸形串防御解析归前端（task-12）。optional default None（brownfield 安全，
+    # 旧客户端不读不受影响）。
+    last_pushed_at: str | None = None
     updated_at: datetime
 
 
 class ChangeList(BaseModel):
     items: list[ChangeSummary]
     total: int
+
+
+class ChangeDeleteResponse(BaseModel):
+    """DELETE /changes/{cid} 响应（task-06 / design §11，FR-05a）。
+
+    - ``ok``：恒 True（失败路径走 403/404/409 错误体，不进本 DTO）；
+    - ``backup_dir``：镜像软删落地的备份目录绝对路径（30 天保留，人工恢复兜底）；
+    - ``file_count``：实际移入备份区的文件数（零文件幂等删除为 0）。
+    """
+
+    ok: bool
+    backup_dir: str
+    file_count: int
 
 
 class ChangeDocMatrixEntry(BaseModel):

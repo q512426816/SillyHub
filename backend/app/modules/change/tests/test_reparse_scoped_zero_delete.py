@@ -1,17 +1,24 @@
-"""Scoped reparse 零删除红线测试（task-02 / design §5 P1 R-08）。
+"""scoped reparse 定向删除测试（task-03 / design §5.2 R-08 收窄修订）。
 
-Change 2026-08-14-change-center-conversation-driven task-02：``ChangeService.reparse``
-新增 ``scope: list[str] | None`` 参数——scope=None 全量（含 delete，现状语义）；
-scope=[...] 只 create/update，**零 delete**：
+Change 2026-08-29-change-delete-closure-and-spec-pull task-03：``ChangeService.reparse``
+的 scoped 模式从「零删除红线（R-08 原版）」修订为**定向删除**——scope 非空也进
+删除环，但仅删「key ∈ scope 集 且磁盘确认消失（key ∉ seen_keys）」的行，使本地
+裸删后经 apply_ops → scoped reparse 自动收敛（FR-01）：
 
-- 范围外变更不进 parsed 集合也不判删除；
-- 范围内 key 磁盘确认消失也不删（留全量/手动重扫描收敛）；
-- rename 检测同样只在全量模式下进行（scoped 是部分视图，误判 orphaned）。
+- **scope 外行零动作**：范围外变更不进 parsed 集合也不判删除（R-08 原始动机保留
+  ——防部分视图误删范围外变更）；
+- **scope 内磁盘消失即删**：行删除 + ``platform_change_progress`` 收件箱行连带删
+  （FR-03a）；
+- rename 检测两模式都跑：scoped 下 orphaned 候选仅取 scope 集内行，scope 集内
+  old→new 目录改名被识别并保留 workflow 状态，scope 外变更不被误判 orphaned
+  （R-11）；
+- 全量 reparse（scope=None）删除语义不变（现状回归）。
 
-删除仅发生在全量 reparse / 手动「重新扫描」（Grill P0 R-08）。
+历史（2026-08-14-change-center-conversation-driven task-02 的 scoped 零删除红线）
+已被本变更 R-08 收窄修订取代，原「scope 内消失也不删」用例反转为定向删除。
 
 author: qinyi
-created_at: 2026-08-14
+created_at: 2026-08-14（2026-08-29 task-03 改写）
 """
 
 from __future__ import annotations
@@ -25,6 +32,7 @@ from sqlalchemy import select
 
 from app.modules.change.model import Change
 from app.modules.change.service import ChangeService
+from app.modules.platform_sync.model import PlatformChangeProgressORM
 from app.modules.spec_workspace.model import SpecWorkspace
 from app.modules.workspace.model import Workspace
 
@@ -79,59 +87,105 @@ async def _fetch(db_session, ws_id: uuid.UUID, key: str) -> Change | None:
     )
 
 
+async def _seed_progress_row(db_session, ws_id: uuid.UUID, change_name: str) -> None:
+    """插 platform_change_progress 收件箱行（表由 conftest autouse fixture 建）。"""
+    db_session.add(
+        PlatformChangeProgressORM(
+            workspace_id=ws_id,
+            change_name=change_name,
+            latest_progress={
+                "project": {"name": "demo"},
+                "changes": [{"name": change_name, "status": "active"}],
+            },
+            last_pushed_at="2026-08-29T00:00:00.000Z",
+            last_pusher="tester",
+        )
+    )
+    await db_session.commit()
+
+
+async def _fetch_progress(db_session, ws_id: uuid.UUID, change_name: str):
+    return (
+        (
+            await db_session.execute(
+                select(PlatformChangeProgressORM).where(
+                    PlatformChangeProgressORM.workspace_id == ws_id,
+                    PlatformChangeProgressORM.change_name == change_name,
+                )
+            )
+        )
+        .scalars()
+        .one_or_none()
+    )
+
+
 # ===========================================================================
-# 红线核心：scoped 零删除
+# 定向删除核心：scope 内消失删 / scope 外不删（双断言）
 # ===========================================================================
 
 
-async def test_scoped_reparse_does_not_delete_out_of_scope_changes(db_session, tmp_path):
-    """范围外变更不删：B 目录磁盘消失，scoped 只扫 A → B 行保留、A 行更新。"""
+async def test_scoped_reparse_deletes_scope_in_keeps_out_of_scope(db_session, tmp_path):
+    """双断言（design §13）：scope 内磁盘消失 → 删；scope 外磁盘消失 → 零动作。"""
     ws = await _make_ws(db_session)
     spec_root = tmp_path / "spec-root"
     await _make_spec_ws(db_session, ws, spec_root)
     _seed_change(spec_root, "2026-08-14-keep", "Keep")
-    _seed_change(spec_root, "2026-08-14-remove", "Remove")
+    _seed_change(spec_root, "2026-08-14-gone-in", "GoneIn")
+    _seed_change(spec_root, "2026-08-14-gone-out", "GoneOut")
 
     service = ChangeService(db_session)
-    stats, _ = await service.reparse(ws.id)  # 全量建 A/B 两行
-    assert stats["created"] == 2
-    assert stats["deleted"] == 0
-    assert await _fetch(db_session, ws.id, "2026-08-14-remove") is not None
+    stats, _ = await service.reparse(ws.id)  # 全量建三行
+    assert stats["created"] == 3
 
-    # B 磁盘消失 → scoped 只扫 A
-    shutil.rmtree(spec_root / "changes" / "2026-08-14-remove")
+    # scope 内 gone-in 与 scope 外 gone-out 磁盘同批消失；keep 更新
+    shutil.rmtree(spec_root / "changes" / "2026-08-14-gone-in")
+    shutil.rmtree(spec_root / "changes" / "2026-08-14-gone-out")
     (spec_root / "changes" / "2026-08-14-keep" / "proposal.md").write_text(
         "# Keep v2\n", encoding="utf-8"
     )
 
-    stats, _ = await service.reparse(ws.id, scope=["2026-08-14-keep"])
-    assert stats["deleted"] == 0  # 零删除红线
+    stats, _ = await service.reparse(ws.id, scope=["2026-08-14-keep", "2026-08-14-gone-in"])
+    # scope 内确认消失 → 删；scope 外零动作（双断言核心）
+    assert stats["deleted"] == 1
     assert stats["updated"] == 1
-    # 范围外 B 行保留；范围内 A 行更新
-    assert await _fetch(db_session, ws.id, "2026-08-14-remove") is not None
+    assert await _fetch(db_session, ws.id, "2026-08-14-gone-in") is None
+    assert await _fetch(db_session, ws.id, "2026-08-14-gone-out") is not None
     keep = await _fetch(db_session, ws.id, "2026-08-14-keep")
     assert keep is not None and keep.title == "Keep v2"
 
 
-async def test_scoped_reparse_does_not_delete_scope_in_disappeared_change(db_session, tmp_path):
-    """范围内 key 磁盘消失也不删：A 目录被删，scoped scope=["A"] → A 行保留。"""
+async def test_scoped_reparse_deletes_disappeared_change_with_progress_row(db_session, tmp_path):
+    """scope 内消失即删 + platform_change_progress 行连带删（FR-01 + FR-03a）。
+
+    原「scope 内消失也不删」红测（2026-08-14 task-02）反转：本地裸删 →
+    apply_ops 触发 scoped reparse → 变更中心自动收敛，收件箱行不残留。
+    scope 外变更（gone-out）的收件箱行不受牵连（联动删只作用于被删行）。
+    """
     ws = await _make_ws(db_session)
     spec_root = tmp_path / "spec-root"
     await _make_spec_ws(db_session, ws, spec_root)
     _seed_change(spec_root, "2026-08-14-gone", "Gone")
+    _seed_change(spec_root, "2026-08-14-out", "Out")
 
     service = ChangeService(db_session)
     stats, _ = await service.reparse(ws.id)
-    assert stats["created"] == 1
-    assert await _fetch(db_session, ws.id, "2026-08-14-gone") is not None
+    assert stats["created"] == 2
+    await _seed_progress_row(db_session, ws.id, "2026-08-14-gone")
+    await _seed_progress_row(db_session, ws.id, "2026-08-14-out")
 
-    # 范围内 key 磁盘消失 → scoped 不删（留全量/手动收敛）
+    # scope 内 key 磁盘消失（含空目录已被 task-02 空目录清理移除的形态）
     shutil.rmtree(spec_root / "changes" / "2026-08-14-gone")
+    shutil.rmtree(spec_root / "changes" / "2026-08-14-out")
+
     stats, _ = await service.reparse(ws.id, scope=["2026-08-14-gone"])
-    assert stats["deleted"] == 0
-    assert stats["created"] == 0
+    assert stats["deleted"] == 1
     assert stats["parsed"] == 0
-    assert await _fetch(db_session, ws.id, "2026-08-14-gone") is not None
+    # Change 行 + progress 收件箱行连带删（FR-03a）
+    assert await _fetch(db_session, ws.id, "2026-08-14-gone") is None
+    assert await _fetch_progress(db_session, ws.id, "2026-08-14-gone") is None
+    # scope 外：Change 行与 progress 行都零动作
+    assert await _fetch(db_session, ws.id, "2026-08-14-out") is not None
+    assert await _fetch_progress(db_session, ws.id, "2026-08-14-out") is not None
 
 
 async def test_scoped_reparse_does_not_touch_other_workspace_changes(db_session, tmp_path):
@@ -220,28 +274,62 @@ async def test_full_reparse_still_deletes_disappeared_changes(db_session, tmp_pa
     assert await _fetch(db_session, ws.id, "2026-08-14-gone") is None
 
 
-async def test_scoped_reparse_skips_rename_detection(db_session, tmp_path):
-    """scoped 不跑 rename 检测：范围外变更目录"消失"不会被误判为 orphaned 而错配 rename。"""
+# ===========================================================================
+# scoped rename（R-11）：scope 集内改名识别 + scope 外不误判
+# ===========================================================================
+
+
+async def test_scoped_reparse_detects_rename_within_scope(db_session, tmp_path):
+    """scope 集内 old→new 目录改名被识别：renamed 计数 + workflow 状态保留（R-11）。
+
+    生产触发形态：rename op 的 op.path 与 op.new_path 都进 scope（
+    spec_workspace._compute_reparse_scope 扫描两路径取 name）。gone-out 与新目录
+    同日期前缀——若它被误判为 orphaned 候选，同前缀候选变 2 个、匹配不唯一 →
+    renamed 必为 0；断言 renamed==1 即证明 scope 外行未进候选集。
+    """
     ws = await _make_ws(db_session)
     spec_root = tmp_path / "spec-root"
     await _make_spec_ws(db_session, ws, spec_root)
-    _seed_change(spec_root, "2026-08-14-old", "Old")
-    _seed_change(spec_root, "2026-08-14-new", "New")
+    # old 带 proposal+tasks（推断 plan）；out 与 new 同日期前缀（误判探针）
+    old_dir = spec_root / "changes" / "2026-08-14-old"
+    old_dir.mkdir(parents=True)
+    (old_dir / "proposal.md").write_text("# Old\n", encoding="utf-8")
+    (old_dir / "tasks.md").write_text("# Tasks\n", encoding="utf-8")
+    _seed_change(spec_root, "2026-08-14-out", "Out")
 
     service = ChangeService(db_session)
     stats, _ = await service.reparse(ws.id)
     assert stats["created"] == 2
 
-    # 模拟 rename：旧目录消失、新目录出现，但只 scoped 扫新目录。
-    # 全量模式会识别为 rename（保持状态）；scoped 必须当作独立 create，不吞旧行。
-    shutil.rmtree(spec_root / "changes" / "2026-08-14-old")
+    old_row = await _fetch(db_session, ws.id, "2026-08-14-old")
+    assert old_row is not None
+    old_row_id = old_row.id
+    # 手工注入 workflow 状态（_apply_parsed 不触碰 status/stages，rename 后应保留）
+    old_row.status = "in_progress"
+    old_row.stages = {"plan": {"status": "done"}}
+    await db_session.commit()
 
-    stats, _ = await service.reparse(ws.id, scope=["2026-08-14-new"])
-    assert stats["renamed"] == 0
-    # 旧行保留（未因 rename 匹配而迁移状态）
-    assert await _fetch(db_session, ws.id, "2026-08-14-old") is not None
-    # 新行作为独立变更创建
-    assert await _fetch(db_session, ws.id, "2026-08-14-new") is not None
+    # 目录改名：old 消失、new 出现（同日期前缀 + 同文档集 → 推断 stage 一致）；
+    # out 目录同时消失（scope 外消失，不得被误判 orphaned）
+    new_dir = spec_root / "changes" / "2026-08-14-new"
+    shutil.move(str(old_dir), str(new_dir))
+    shutil.rmtree(spec_root / "changes" / "2026-08-14-out")
+
+    stats, _ = await service.reparse(ws.id, scope=["2026-08-14-old", "2026-08-14-new"])
+    assert stats["renamed"] == 1
+    assert stats["created"] == 0
+    assert stats["deleted"] == 0  # scope 外 out 行零动作
+
+    # 旧 key 行迁移为 new key 且是同一行（workflow 状态保留，非删旧建新）
+    assert await _fetch(db_session, ws.id, "2026-08-14-old") is None
+    new_row = await _fetch(db_session, ws.id, "2026-08-14-new")
+    assert new_row is not None
+    assert new_row.id == old_row_id
+    assert new_row.status == "in_progress"
+    assert new_row.stages == {"plan": {"status": "done"}}
+    assert new_row.current_stage == "plan"
+    # scope 外 out 行保留（未被误判 orphaned、未被删除）
+    assert await _fetch(db_session, ws.id, "2026-08-14-out") is not None
 
 
 # Suppress unused-import warning for pytest fixture discovery.

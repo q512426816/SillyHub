@@ -1,7 +1,8 @@
 /**
  * Spec Workspace API client. Mirrors backend spec_workspace endpoints.
  */
-import { apiFetch, ApiError } from "@/lib/api";
+import { apiFetch, ApiError, safeUUID } from "@/lib/api";
+import { ensureFreshAccessToken } from "@/lib/token-refresh";
 import { useSession } from "@/stores/session";
 
 export type SpecStrategy = "platform-managed" | "repo-mirrored" | "repo-native";
@@ -217,5 +218,91 @@ export async function listPendingSync(
   return apiFetch<PendingSyncItem[]>(
     `/api/workspaces/${workspaceId}/spec-workspace/sync-manual/pending`,
   );
+}
+
+// ── Bundle download (task-09, 2026-08-29-change-delete-closure-and-spec-pull) ──
+
+/** downloadSpecBundle 返回：Blob + Content-Disposition 文件名 + X-Spec-Version 快照版本。 */
+export interface SpecBundleDownload {
+  blob: Blob;
+  /** 下载落盘文件名（Content-Disposition 解析值，缺失时回退 spec-bundle-{wsId}.tar）。 */
+  filename: string;
+  /** 快照版本号（X-Spec-Version 头，供 toast 一次性展示；缺失/非法 → null，R-07 不常驻展示）。 */
+  specVersion: number | null;
+}
+
+/** 从 `attachment; filename="..."` 解析文件名（支持引号/裸 token 两种形态）。 */
+function parseDispositionFilename(header: string | null): string | null {
+  if (!header) return null;
+  const match = /filename\*?=(?:"([^"]+)"|([^;]+))/i.exec(header);
+  const name = (match?.[1] ?? match?.[2] ?? "").trim();
+  return name || null;
+}
+
+/**
+ * GET /api/workspaces/{workspaceId}/spec-workspace/bundle — 下载服务器 spec 整树
+ * 快照 tar（FR-06/FR-08，design §7.2/§7.3）。
+ *
+ * 鉴权 blob 范式（照 lib/explorer.ts fetchDownload / lib/file/api.ts
+ * fetchFileBlob 先例）：裸 fetch + Authorization Bearer（浏览器 ``<a href>``
+ * 直连不带 JWT 会 401），401 时单飞刷新 token 重试一次（并发 401 由
+ * token-refresh 模块级 inflight 保证只发一次）；非 2xx 抛 ApiError。
+ *
+ * 拿到 Blob 后转 objectURL → ``<a download>`` click → finally revoke
+ * （downloadExplorerFile / downloadFile 范式，对齐知识库 D-009 blob 生命周期
+ * 托管，防 objectURL 泄漏）。文件名取响应 Content-Disposition，缺失回退
+ * ``spec-bundle-{workspaceId}.tar``；specVersion 读 X-Spec-Version 头返回
+ * 给调用方（成功 toast 一次性展示快照版本）。
+ *
+ * 语义：人拉=主动快照（design §7.4），即时 HTTP 拉流——不建 DaemonChangeWrite
+ * 任务、不轮询，与 syncManual 的任务化推送是两条独立链路。
+ */
+export async function downloadSpecBundle(
+  workspaceId: string,
+): Promise<SpecBundleDownload> {
+  const url = `/api/workspaces/${workspaceId}/spec-workspace/bundle`;
+  const doFetch = (token: string | null) =>
+    fetch(url, token ? { headers: { Authorization: `Bearer ${token}` } } : undefined);
+
+  let token = useSession.getState().accessToken ?? null;
+  let resp = await doFetch(token);
+  if (resp.status === 401) {
+    // 单飞刷新（并发 401 由 token-refresh 模块级 inflight 保证只发一次）。
+    const fresh = await ensureFreshAccessToken();
+    if (fresh) {
+      token = fresh;
+      resp = await doFetch(token);
+    }
+  }
+  if (!resp.ok) {
+    throw new ApiError(resp.status, {
+      code: "download_failed",
+      message: `下载失败（HTTP ${resp.status}）`,
+      request_id: safeUUID(),
+      details: null,
+    });
+  }
+
+  const filename =
+    parseDispositionFilename(resp.headers.get("Content-Disposition")) ??
+    `spec-bundle-${workspaceId}.tar`;
+  // X-Spec-Version 是数字字符串（backend str(spec_version)）；空串/缺失/非数字 → null。
+  const versionRaw = resp.headers.get("X-Spec-Version");
+  const specVersion =
+    versionRaw && Number.isFinite(Number(versionRaw)) ? Number(versionRaw) : null;
+  const blob = await resp.blob();
+
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement("a");
+    a.href = objectUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+  return { blob, filename, specVersion };
 }
 

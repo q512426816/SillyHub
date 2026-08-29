@@ -101,14 +101,19 @@ async def _make_progress_row(
     workspace_id: uuid.UUID,
     change_name: str,
     latest_progress: dict,
+    last_pushed_at: str | None = "2026-08-13T00:00:00Z",
 ) -> None:
-    """插入一条 platform_change_progress 行（latest_progress 镜像）。"""
+    """插入一条 platform_change_progress 行（latest_progress 镜像）。
+
+    ``last_pushed_at`` 缺省给固定 ISO 原文（task-11 起被 ChangeSummary 投影消费）；
+    显式传 None 可构造「progress 行存在但列值为 NULL」的降级态。
+    """
     session.add(
         PlatformChangeProgressORM(
             workspace_id=workspace_id,
             change_name=change_name,
             latest_progress=latest_progress,
-            last_pushed_at="2026-08-13T00:00:00Z",
+            last_pushed_at=last_pushed_at,
             last_pusher="agent",
         )
     )
@@ -574,3 +579,62 @@ def test_map_archive_already_completed_returns_none() -> None:
     assert (
         StageProjectionService._map("archive", {"brainstorm", "plan", "verify", "archive"}) is None
     )
+
+
+# ── task-11（2026-08-29-change-delete-closure-and-spec-pull design §8.1）：
+#    ChangeSummary.last_pushed_at 活动投影（纯 CLI 模式进行中可见性 Layer 1，
+#    前端活动徽标「最后信号」数据源；零 migration、零新增查询）──
+
+
+@pytest.mark.asyncio
+async def test_enrich_summaries_last_pushed_at_projected_from_progress_row(
+    db_session: AsyncSession,
+) -> None:
+    """progress 行带 last_pushed_at → summary.last_pushed_at 投影该值（ISO 原文透传）。
+
+    服务端零解析：客户端时区偏移原文（+08:00）原样透传，畸形串防御解析归 task-12
+    前端；与 current_stage 同一次复合 IN join 的 SELECT 顺带取值（R-03 零新增查询）。
+    """
+    ws = await _make_workspace(db_session)
+    change = await _make_change(db_session, ws.id, "lp-hit", stage="execute")
+    await _make_progress_row(
+        db_session,
+        ws.id,
+        "lp-hit",
+        _progress_with_stages("execute", {"brainstorm", "plan", "execute"}),
+        last_pushed_at="2026-08-29T12:34:56+08:00",
+    )
+
+    summaries = await ChangeService(db_session).enrich_summaries([change])
+    assert summaries[0].current_stage == "execute"
+    assert summaries[0].last_pushed_at == "2026-08-29T12:34:56+08:00"
+
+
+@pytest.mark.asyncio
+async def test_enrich_summaries_last_pushed_at_none_when_no_row_or_null(
+    db_session: AsyncSession,
+) -> None:
+    """两态降级：①无 progress 行（join 不命中）②行存在但列值 NULL → 均保持 None。
+
+    D-003 fallback 范式（与 current_stage / pending_review 同款）：miss 不赋值，
+    ChangeSummary 字段缺省 None。
+    """
+    ws = await _make_workspace(db_session)
+    c_norow = await _make_change(db_session, ws.id, "lp-norow", stage="plan")
+    c_nullcol = await _make_change(db_session, ws.id, "lp-nullcol", stage="plan")
+    await _make_progress_row(
+        db_session,
+        ws.id,
+        "lp-nullcol",
+        _progress_with_stages("plan", {"plan"}),
+        last_pushed_at=None,
+    )
+
+    summaries = await ChangeService(db_session).enrich_summaries([c_norow, c_nullcol])
+    by_key = {s.change_key: s for s in summaries}
+    # join 不命中：current_stage fallback 现值 + last_pushed_at None
+    assert by_key["lp-norow"].current_stage == "plan"
+    assert by_key["lp-norow"].last_pushed_at is None
+    # join 命中但列值 NULL：投影路径走通，last_pushed_at 仍 None（不造值）
+    assert by_key["lp-nullcol"].current_stage == "plan"
+    assert by_key["lp-nullcol"].last_pushed_at is None

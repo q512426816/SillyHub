@@ -113,11 +113,17 @@ async def _bind_entry_ctx(
 
 @dataclass
 class PlatformSyncResult:
-    """``upsert_progress`` 返回：冲突标志 + 平台当前完整 progress（冲突时供 409 body）。"""
+    """``upsert_progress`` 返回：冲突标志 + 平台当前完整 progress（冲突时供 409 body）。
+
+    ``change_deleted``（2026-08-29-change-delete-closure-and-spec-pull task-04 /
+    FR-04 复活通道 4）：已删 key 拒收标记——上行 key 命中双层已删判据时置 True，
+    router 据此返回 409 + ``code='change_deleted'``（与 base_ts 冲突 409 区分）。
+    """
 
     conflict: bool
     platform_progress: dict[str, Any] | None
     last_pushed_at: str | None
+    change_deleted: bool = False
 
 
 class PlatformSyncService:
@@ -180,7 +186,23 @@ class PlatformSyncService:
         签发人真实 User id（router 从鉴权 tuple 派生透传）。接受分支在进度 + 占位行
         落定后用其对齐 ``ux_changes.owner_id``（best-effort，失败不阻断）；冲突分支
         不触碰 owner——被拒绝的上行不得改责任人。None 防御（service 直调场景）。
+
+        已删 key 拒收（task-04 / FR-04 复活通道 4，design §5.4-4）：上行 key 命中
+        双层已删判据（``_change_key_deleted``）→ 整次上行拒收——不写收件箱行、
+        不建占位行、不对齐 owner，返回 ``change_deleted=True``（router 映射 409
+        ``code='change_deleted'``）。CLI sillyspec.db 仍注册该 change 的复活通道
+        就此堵死（平台已删，本地应 unregister）。
         """
+        # task-04：已删探测先于一切写路径（含 base_ts 冲突分支——已删 key 无论
+        # 乐观锁状态一律以 change_deleted 拒收，信息对 CLI 更可行动）。
+        if await self._change_key_deleted(workspace_id, name):
+            return PlatformSyncResult(
+                conflict=False,
+                platform_progress=None,
+                last_pushed_at=None,
+                change_deleted=True,
+            )
+
         row = await self._find_row(workspace_id, name)
 
         # 分支 1：base_ts 空/缺失（None 或空串）→ 首次同步/无基准，无条件接受
@@ -188,6 +210,7 @@ class PlatformSyncService:
             await self._apply(workspace_id, row, name, body, pushed_at, user)
             await self._ensure_change_row(workspace_id, name, body)
             await self._sync_change_owner(workspace_id, name, user_id)
+            await self._apply_cli_tombstone(workspace_id, name, body)
             return PlatformSyncResult(conflict=False, platform_progress=None, last_pushed_at=None)
 
         # 分支 2：stored 存在 AND stored > base_ts（字符串字典序 §7）→ 冲突
@@ -203,6 +226,7 @@ class PlatformSyncService:
         await self._apply(workspace_id, row, name, body, pushed_at, user)
         await self._ensure_change_row(workspace_id, name, body)
         await self._sync_change_owner(workspace_id, name, user_id)
+        await self._apply_cli_tombstone(workspace_id, name, body)
         return PlatformSyncResult(conflict=False, platform_progress=None, last_pushed_at=None)
 
     async def _apply(
@@ -255,6 +279,55 @@ class PlatformSyncService:
             self._assign(existing, body, pushed_at, user)
             await self._session.commit()
 
+    async def _change_key_deleted(self, workspace_id: uuid.UUID | None, name: str) -> bool:
+        """已删 key 双层判据（task-04 / design §5.4 B-1 加固，upsert_progress 拒收
+        前置与 ``_ensure_change_row`` 建占位守卫共用同一 helper）。
+
+        - ① 主判据：现存 Change 行 ``location='deleted'``（``(workspace_id,
+          change_key)`` 精确查询）。行存在且未删 → 以行为准返回 False（兜底判据
+          只在行缺失时启用，防陈旧 manifest 锚点误伤活跃变更）。
+        - ② 兜底判据：行缺失时探测 ``spec_file_manifest`` 中 ``changes/{name}/``
+          前缀下是否存在 ``platform_deleted=True`` 行（持久锚点——Change 行被
+          旧删除环物理删后的第二道防线，task-03 豁免落地前行可能短暂缺失）。
+          前缀匹配取回 workspace 全部 ``platform_deleted=True`` 行后 Python
+          ``startswith`` 逐字符过滤（卡内二法择一）：变更名含 ``_`` 常见，SQL
+          LIKE 未转义时 ``_`` 是单字符通配符，会把 ``my_change`` 误配到
+          ``myXchange`` 等相似名；startswith 天然无通配语义，跨方言零转义负担。
+
+        ``workspace_id=None`` → False（无 workspace 定位不猜，与 ``_ensure_change_row``
+        防御分支口径一致；写端点恒非 None，仅 service 直调场景可达）。
+        """
+        if workspace_id is None:
+            return False
+        from app.modules.change.model import Change
+        from app.modules.spec_workspace.model import SpecFileManifest
+
+        existing = (
+            await self._session.execute(
+                select(Change).where(
+                    col(Change.workspace_id) == workspace_id,
+                    col(Change.change_key) == name,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return existing.location == "deleted"
+
+        prefix = f"changes/{name}/"
+        tombstone_paths = (
+            (
+                await self._session.execute(
+                    select(SpecFileManifest.path).where(
+                        col(SpecFileManifest.workspace_id) == workspace_id,
+                        col(SpecFileManifest.platform_deleted).is_(True),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return any(p.startswith(prefix) for p in tombstone_paths)
+
     async def _ensure_change_row(
         self,
         workspace_id: uuid.UUID | None,
@@ -272,6 +345,10 @@ class PlatformSyncService:
         - ``workspace_id=None``：无法定位 workspace，跳过（与进度收件箱隔离一致，
           service 内不猜 workspace）。task-06（D-004@v1）后写端点仅 shpsync_ 可达
           （workspace_id 恒非 None），此分支仅防御 service 直调场景。
+        - 已删守卫（task-04 / FR-04 复活通道 4）：建占位前用 ``_change_key_deleted``
+          同一 helper 加守卫——主判据（现存行 deleted）虽已由 ``upsert_progress``
+          拒收前置覆盖，本守卫补 manifest 兜底锚点，防 service 直调路径绕过
+          （拒收锚点行不因占位重建而复活）。
         - 幂等：已存在同 ``(workspace_id, change_key)`` 行则直接返回。
         - 并发兜底：savepoint 内 flush 撞 ``ux_changes_workspace_key`` 唯一约束
           → 回滚 savepoint 静默放弃（对端已建行，语义等价）。
@@ -290,6 +367,14 @@ class PlatformSyncService:
             )
         ).scalar_one_or_none()
         if existing is not None:
+            return
+        # task-04：行缺失 + manifest platform_deleted 前缀锚点 → 不建占位（防复活）。
+        if await self._change_key_deleted(workspace_id, name):
+            log.info(
+                "platform_sync.placeholder_change_deleted_key_skipped",
+                workspace_id=str(workspace_id),
+                change_key=name,
+            )
             return
 
         info = next(
@@ -331,6 +416,81 @@ class PlatformSyncService:
             workspace_id=str(workspace_id),
             change_key=name,
         )
+
+    async def _apply_cli_tombstone(
+        self,
+        workspace_id: uuid.UUID | None,
+        name: str,
+        body: dict[str, Any],
+    ) -> None:
+        """CLI 墓碑写路径（task-04 / design §5.5，X1 增强项；task-06 接线镜像软删）。
+
+        接受分支检测 body ``changes[]`` 同名条目 ``status='deleted'``（对齐现有
+        ``'archived'`` 状态语义，X1 上行载荷）→ 置 Change 行 ``location='deleted'``，
+        随后**同一写路径**触发该 key 镜像软删收敛（task-06 / design §6.1：调
+        ``SpecWorkspaceService.soft_delete_change_dir``，最小侵入一处调用；读时投影
+        层零副作用原则不破坏——接线在写路径，区别于 ``'archived'`` 的读时投影纯
+        DTO 覆盖范式）。墓碑要成为后续拒收的持久锚点
+        （``_change_key_deleted`` 主判据），必须写库；镜像收敛让文件侧同步消失，
+        不依赖下一次 reparse（方案 A 兜底仍在）。
+
+        边界：
+
+        - 镜像收敛 best-effort：失败仅告警不阻断进度上行——墓碑锚点已 commit，
+          镜像残留由方案 A（reparse 收敛）兜底；无 SpecWorkspace 行的 workspace
+          （无镜像可删）同走此分支静默跳过；
+        - 已删拒收优先：``upsert_progress`` 的 ``_change_key_deleted`` 探测在前，
+          行已 deleted 时整次上行走拒收分支，本方法只对未删行生效——重复墓碑
+          上行天然幂等（首块墓碑后后续一律 409）。
+        """
+        if workspace_id is None:
+            return
+        from app.modules.change.model import Change
+
+        status = next(
+            (
+                c.get("status")
+                for c in (body.get("changes") or [])
+                if isinstance(c, dict) and c.get("name") == name
+            ),
+            None,
+        )
+        if status != "deleted":
+            return
+        row = (
+            await self._session.execute(
+                select(Change).where(
+                    col(Change.workspace_id) == workspace_id,
+                    col(Change.change_key) == name,
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None or row.location == "deleted":
+            # 理论不发生：拒收探测已在前，且 _ensure_change_row 兜底建行；防御早退。
+            return
+        # 镜像前缀按墓碑前的 location 选（active→changes/{name}/、archive→
+        # changes/archive/{name}/）——先捕获再置位。
+        prev_location = row.location
+        row.location = "deleted"
+        await self._session.commit()
+        log.info(
+            "platform_sync.change_tombstone_applied",
+            workspace_id=str(workspace_id),
+            change_key=name,
+        )
+        try:
+            from app.modules.spec_workspace.service import SpecWorkspaceService
+
+            await SpecWorkspaceService(self._session).soft_delete_change_dir(
+                workspace_id, name, location=prev_location
+            )
+        except Exception as exc:
+            log.warning(
+                "platform_sync.change_tombstone_mirror_soft_delete_failed",
+                workspace_id=str(workspace_id),
+                change_key=name,
+                error=str(exc),
+            )
 
     async def _sync_change_owner(
         self,

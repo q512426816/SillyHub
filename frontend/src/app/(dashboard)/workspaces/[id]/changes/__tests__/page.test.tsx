@@ -30,6 +30,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ChangesPage, {
+  ACTIVITY_STALE_MS,
   CHANGES_POLL_INTERVAL_MS,
   changesRefetchInterval,
   hasActiveChanges,
@@ -575,6 +576,127 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     // 无摘要副行（降级：视觉与现状一致）
     expect(screen.queryByTestId("step-sub-row")).not.toBeInTheDocument();
     expect(screen.queryByText(/step \d+\/\d+/)).not.toBeInTheDocument();
+  });
+
+  // ── 7b. 活动徽标三态（task-12 / FR-09 / design §8.1 真值表前端半）─────────
+  // last_pushed_at 用真实时钟构造 ISO（5min/2h/3h 距 30min 阈值边界足够远，零 flake）；
+  // 边界（30min±）在 change-activity-badge.test.tsx 组件级用注入时钟钉死。
+
+  it("active + 最后信号 5min → 活动徽标「进行中 · 5 分钟前」", async () => {
+    setupListChanges({
+      items: [
+        makeChange({
+          id: "ch-act",
+          owner_id: "owner1234",
+          pending_review: "proposal_review",
+          step_progress: {
+            step_total: 8,
+            steps_completed: 2,
+            current_step_name: "对话式探索与需求澄清",
+            current_step_status: "active",
+            current_step_desc: null,
+          },
+          last_pushed_at: new Date(Date.now() - 5 * 60_000).toISOString(),
+        }),
+      ],
+    });
+    await renderAndWait();
+    expect(screen.getByTestId("activity-active")).toHaveTextContent(
+      "进行中 · 5 分钟前",
+    );
+  });
+
+  it("active + 最后信号 2h → 灰「停滞 · 最后信号 2 小时前」（只陈述事实）", async () => {
+    setupListChanges({
+      items: [
+        makeChange({
+          id: "ch-stale",
+          owner_id: "owner1234",
+          pending_review: "proposal_review",
+          step_progress: {
+            step_total: 8,
+            steps_completed: 4,
+            current_step_name: "实现核心逻辑",
+            current_step_status: "active",
+            current_step_desc: null,
+          },
+          last_pushed_at: new Date(Date.now() - 2 * 3_600_000).toISOString(),
+        }),
+      ],
+    });
+    await renderAndWait();
+    const badge = screen.getByTestId("activity-stale");
+    expect(badge).toHaveTextContent("停滞 · 最后信号 2 小时前");
+    expect(badge.textContent).not.toMatch(/挂死|没在跑|卡死/);
+  });
+
+  it("waiting → 空闲态显示最后活动时间", async () => {
+    setupListChanges({
+      items: [
+        makeChange({
+          id: "ch-idle",
+          owner_id: "owner1234",
+          pending_review: "plan_review",
+          step_progress: {
+            step_total: 5,
+            steps_completed: 3,
+            current_step_name: "设计确认",
+            current_step_status: "waiting",
+            current_step_desc: null,
+          },
+          last_pushed_at: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+        }),
+      ],
+    });
+    await renderAndWait();
+    expect(screen.getByTestId("activity-idle")).toHaveTextContent(
+      "空闲 · 最后活动 3 小时前",
+    );
+  });
+
+  it("step_progress / last_pushed_at 双缺失 → 空闲态占位（不炸）", async () => {
+    setupListChanges({
+      items: [
+        makeChange({
+          id: "ch-nosig",
+          owner_id: "owner1234",
+          pending_review: "human_test",
+          step_progress: null,
+          last_pushed_at: null,
+        }),
+      ],
+    });
+    await renderAndWait();
+    expect(screen.getByTestId("activity-idle")).toHaveTextContent("空闲");
+  });
+
+  it("last_pushed_at 畸形串 → 空闲态回退显示原文（ISO_LIKE_RE 白名单回退）", async () => {
+    setupListChanges({
+      items: [
+        makeChange({
+          id: "ch-bad",
+          owner_id: "owner1234",
+          pending_review: "proposal_review",
+          step_progress: {
+            step_total: 5,
+            steps_completed: 3,
+            current_step_name: "设计确认",
+            current_step_status: "waiting",
+            current_step_desc: null,
+          },
+          last_pushed_at: "不是时间戳",
+        }),
+      ],
+    });
+    await renderAndWait();
+    expect(screen.getByTestId("activity-idle")).toHaveTextContent(
+      "空闲 · 最后活动 不是时间戳",
+    );
+  });
+
+  it("ACTIVITY_STALE_MS 与 CHANGES_POLL_INTERVAL_MS 同点导出（30min / 30s）", () => {
+    expect(ACTIVITY_STALE_MS).toBe(30 * 60_000);
+    expect(CHANGES_POLL_INTERVAL_MS).toBe(30_000);
   });
 
   // ── 8. 智能轮询纯函数（D-001@v1：非终态 30000 / 全终态 false）─────────

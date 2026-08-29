@@ -158,6 +158,15 @@ class SpecFileManifest(BaseModel, table=True):
         default=True,
         sa_column=Column(Boolean, nullable=False),
     )
+    # Change 2026-08-29-change-delete-closure-and-spec-pull task-01（design §5.4）：
+    # 平台删除墓碑。变更中心删除入口（task-06）把 changes/{name}/ 下行置 TRUE 后，
+    # apply_ops add/rename 复活拦截与 _write_spec_root 落盘排除（task-02）、
+    # _ensure_change_row manifest 兜底锚点（task-04）以此为准。与 ``exists``
+    # （增量协议软删，daemon/CLI 对账可置回）语义分离：本列只由平台删除动作置位。
+    platform_deleted: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False),
+    )
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(UTC),
         sa_column=Column(DateTime(timezone=True), nullable=False),

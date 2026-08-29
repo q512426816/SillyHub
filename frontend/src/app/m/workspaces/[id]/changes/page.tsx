@@ -30,8 +30,10 @@ import { useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import {
   keepPreviousData,
+  useMutation,
   useQueries,
   useQuery,
+  useQueryClient,
 } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -50,10 +52,21 @@ import { MobileChangeCard } from "@/components/mobile/mobile-change-card";
 import { MobileDetailSheet } from "@/components/mobile/mobile-detail-sheet";
 import { MobileFilterDrawer } from "@/components/mobile/mobile-filter-drawer";
 import { MobileWorkspaceHeader } from "@/components/mobile/mobile-workspace-header";
+import {
+  DeleteChangeConfirm,
+  canDeleteChange,
+  useChangeDeleteAccess,
+} from "@/components/delete-change-confirm";
 import { formatRelativeTime } from "@/components/daemon/runtime-card-helpers";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
-import { listChanges, type ChangeList, type ChangeSummary } from "@/lib/changes";
+import {
+  deleteChange,
+  listChanges,
+  type ChangeList,
+  type ChangeSummary,
+} from "@/lib/changes";
+import { useNotify } from "@/lib/errors";
 import {
   getQuicklogDetail,
   listQuicklogEntries,
@@ -372,6 +385,27 @@ function QuicklogDetailContent({
 export default function MobileChangesPage() {
   const { workspaceId, workspace } = useMobileWorkspace();
   const router = useRouter();
+  const queryClient = useQueryClient();
+
+  // ── 删除入口（task-07 / design §6.3 / FR-05d，与桌面同构）──────────────
+  // 复用同一 DeleteChangeConfirm 弹层与 mutation 失效逻辑（与桌面共享
+  // ["changes", workspaceId] 前缀缓存）；可见性启发式仅控「⋯」动作菜单显隐。
+  const notify = useNotify();
+  const deleteAccess = useChangeDeleteAccess(workspaceId);
+  const [deleteTarget, setDeleteTarget] = useState<ChangeSummary | null>(null);
+  const deleteMutation = useMutation({
+    mutationFn: (c: ChangeSummary) => deleteChange(workspaceId, c.id),
+    onSuccess: async (_resp, c) => {
+      notify.success(`变更 ${c.change_key} 已删除`);
+      // 与桌面同 key 前缀失效（移动端分页 query 与桌面共享 ["changes"] 前缀）
+      await queryClient.invalidateQueries({
+        queryKey: ["changes", workspaceId],
+      });
+    },
+    onError: (err) => {
+      notify.error(err, "删除变更失败");
+    },
+  });
 
   // ── 查询条件 state（语义对齐桌面：搜索词输入/提交分离、聚焦仅进行中视图）────
   const [tab, setTab] = useState<ChangesTab>("active");
@@ -910,6 +944,21 @@ export default function MobileChangesPage() {
                     }
                   />
                 )}
+                // task-07（design §6.3 / FR-05d）：行内「⋯」动作菜单删除入口，
+                // 仅权限可见者渲染（启发式三判，后端权威）——「⋯」按钮由
+                // MobileCardList 在 actions 非空时渲染，点开底部 ActionSheet。
+                actions={(c) =>
+                  canDeleteChange(c, deleteAccess)
+                    ? [
+                        {
+                          key: "delete",
+                          label: "删除",
+                          danger: true,
+                          onPress: () => setDeleteTarget(c),
+                        },
+                      ]
+                    : []
+                }
               />
               {hasMore && (
                 <button
@@ -962,6 +1011,20 @@ export default function MobileChangesPage() {
           />
         ) : null}
       </MobileDetailSheet>
+
+      {/* task-07：删除确认弹层（与桌面复用同一组件；确认先关弹层再
+          deleteMutation，失败中文 toast） */}
+      {deleteTarget && (
+        <DeleteChangeConfirm
+          target={deleteTarget}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            const target = deleteTarget;
+            setDeleteTarget(null);
+            deleteMutation.mutate(target);
+          }}
+        />
+      )}
     </div>
   );
 }

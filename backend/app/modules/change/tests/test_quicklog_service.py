@@ -169,6 +169,66 @@ async def test_merge_pushed_only(db_session: AsyncSession, tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
+async def test_merge_filters_hidden_pushed_rows(db_session: AsyncSession, tmp_path: Path) -> None:
+    """task-05（design §5.3 / FR-03b）：hidden=True 的 pushed 行不进合并；
+    hidden=False 行照常合并；文件侧条目不受影响——hidden 只过滤 PG 源，被隐藏
+    推送与文件同 ql_id 共存时文件版仍显示（对账回翻前的读侧兜底语义）。"""
+    ws_id, ws = await _setup(db_session, tmp_path)
+    _write_file(
+        tmp_path,
+        "QUICKLOG-qinyi.md",
+        f"## ql-20260817-050-pppp | {_ts(3)} | 文件版条目\n状态：已完成\n"
+        f"## ql-20260817-051-qqqq | {_ts(2)} | 与隐藏推送同 ID 的文件条目\n状态：已完成\n",
+    )
+    # 正常 pushed 行（hidden 默认 False）→ 照常合并
+    await _add_pushed(
+        db_session,
+        ws_id,
+        "ql-20260817-050-pppp",
+        {"title": "正常推送", "status": "completed", "timestamp": _ts(2)},
+    )
+    # hidden=True 且文件无此 ql_id（apply 期对账软隐藏的本地已删条目）→ 不出现
+    db_session.add(
+        QuicklogEntryORM(
+            workspace_id=ws_id,
+            ql_id="ql-20260817-052-rrrr",
+            payload={
+                "ql_id": "ql-20260817-052-rrrr",
+                "title": "已隐藏推送",
+                "status": "completed",
+                "timestamp": _ts(1),
+            },
+            hidden=True,
+        )
+    )
+    # hidden=True 且文件有同 ql_id 条目 → 文件版显示（文件侧不受 hidden 影响）
+    db_session.add(
+        QuicklogEntryORM(
+            workspace_id=ws_id,
+            ql_id="ql-20260817-051-qqqq",
+            payload={
+                "ql_id": "ql-20260817-051-qqqq",
+                "title": "被文件盖过的隐藏推送",
+                "status": "completed",
+                "timestamp": _ts(1),
+            },
+            hidden=True,
+        )
+    )
+    await db_session.commit()
+
+    svc = QuicklogQueryService(db_session)
+    result = await svc.list_entries(ws, now=_now())
+    by_id = {e.ql_id: e for e in result.items}
+    assert set(by_id) == {"ql-20260817-050-pppp", "ql-20260817-051-qqqq"}
+    assert "ql-20260817-052-rrrr" not in by_id  # hidden 行不进合并
+    assert by_id["ql-20260817-050-pppp"].source == "pushed"  # 正常推送照常
+    assert by_id["ql-20260817-051-qqqq"].source == "file"  # 文件侧不受影响
+    # 详情读侧同样过滤（get_entry 走 merge_entries）
+    assert await svc.get_entry(ws, "ql-20260817-052-rrrr", now=_now()) is None
+
+
+@pytest.mark.asyncio
 async def test_merge_both_empty(db_session: AsyncSession, tmp_path: Path) -> None:
     """双空：无目录内容 + 无推送 → 空列表（design §7）。"""
     _ws_id, ws = await _setup(db_session, tmp_path)

@@ -1,11 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { PageContainer, PageHeader } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  DeleteChangeConfirm,
+  canDeleteChange,
+  useChangeDeleteAccess,
+} from "@/components/delete-change-confirm";
 import { ChangeAgentRunLog } from "@/components/changes/detail/change-agent-run-log";
 import { ChangeFilesCard } from "@/components/changes/detail/change-files-card";
 import {
@@ -19,16 +26,22 @@ import {
   WORKFLOW_STAGE_LABELS,
 } from "@/components/changes/detail/change-stage-header";
 import { ChangeStepTimeline } from "@/components/changes/detail/change-step-timeline";
+import {
+  ChangeLastSignal,
+  lastSignalFromSteps,
+} from "@/components/changes/change-activity-badge";
 import { ChangeTaskBoardCard } from "@/components/changes/detail/change-task-board-card";
 import { QuicklogLinkedCard } from "@/components/changes/detail/quicklog-linked-card";
 import { ApiError } from "@/lib/api";
 import {
+  deleteChange,
   getAgentStatus,
   getChange,
   submitStageReview,
   type ChangeRead,
   type DispatchResponse,
 } from "@/lib/changes";
+import { useNotify } from "@/lib/errors";
 import {
   listWorkspaceAgentSessions,
   type AgentSessionListItem,
@@ -101,6 +114,14 @@ export default function ChangeDetailPage({ params }: Props) {
   const [pageError, setPageError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [taskBoard, setTaskBoard] = useState<TaskBoard | null>(null);
+
+  // ── 删除入口（task-07 / design §6.3 / FR-05d）──────────────────────────
+  // PageHeader 右侧独立危险按钮（不混入审批卡）。可见性启发式（owner/平台
+  // 管理员/工作区所有者）仅控显隐，后端 DELETE 组合权限为权威；动作本体
+  // （useRouter + mutation + 弹层）在 DetailDeleteAction 子组件内，仅权限
+  // 可见者挂载——未挂载即不触碰 router（无 app-router 上下文的环境不触发
+  // next/navigation invariant）。
+  const deleteAccess = useChangeDeleteAccess(workspaceId);
 
   // ── 执行日志流（只读展示：agent 运行状态 / SSE 日志，task-10 退化后保留）──
   const [agentStatus, setAgentStatus] = useState<DispatchResponse | null>(null);
@@ -287,6 +308,18 @@ export default function ChangeDetailPage({ params }: Props) {
             </span>
           </span>
         }
+        // task-07：PageHeader actions 危险按钮（仅权限可见者挂载 DetailDeleteAction，
+        // 危险悬停色走 destructive 主题 token；确认弹层独立于下方审批卡）
+        actions={
+          canDeleteChange(change, deleteAccess) ? (
+            <DetailDeleteAction
+              workspaceId={workspaceId}
+              changeId={changeId}
+              changeKey={change.change_key}
+              ownerName={change.owner_name}
+            />
+          ) : undefined
+        }
       />
 
       {/* 阶段步骤条（主线宏观进度；节点可点击筛选下方步骤时间线，ql-20260821-017） */}
@@ -300,6 +333,13 @@ export default function ChangeDetailPage({ params }: Props) {
           setFocusStage((prev) => (prev === stage ? null : stage))
         }
       />
+
+      {/* task-12（design §8.1）：头部「最后信号」——数据源 = steps 明细最大
+          completed_at（每步 --done 推送时点）纯前端派生：ChangeRead 无
+          last_pushed_at（task-11 只落列表 ChangeSummary），且本页禁新增网络
+          请求（复用既有 10s 详情轮询）；无信号（steps 缺失/无 completed_at）
+          整行不渲染，畸形串回退原文（组件内防御）。 */}
+      <ChangeLastSignal lastPushedAt={lastSignalFromSteps(change.steps)} />
 
       {pageError ? (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">
@@ -395,5 +435,69 @@ export default function ChangeDetailPage({ params }: Props) {
         </aside>
       </div>
     </PageContainer>
+  );
+}
+
+/**
+ * 详情页删除动作（task-07 / design §6.3 / FR-05d）——危险按钮 + 受控弹层。
+ *
+ * 独立子组件（PageHeader actions slot 挂载）：承载 useRouter + useMutation，
+ * 仅权限可见者由父组件挂载（canDeleteChange 三判启发式，后端权威）。删除
+ * 成功 → toast + ["changes", wsId] 前缀失效 + 跳回变更列表；403/404/409
+ * 失败 → 中文 toast 留在本页（errMessage 取 ApiError.message，不白屏）。
+ */
+function DetailDeleteAction({
+  workspaceId,
+  changeId,
+  changeKey,
+  ownerName,
+}: {
+  workspaceId: string;
+  changeId: string;
+  changeKey: string;
+  ownerName?: string | null;
+}) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const notify = useNotify();
+  const [open, setOpen] = useState(false);
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteChange(workspaceId, changeId),
+    onSuccess: async () => {
+      notify.success(`变更 ${changeKey} 已删除`);
+      // 列表前缀失效（行从 tab 消失）+ 详情页跳回列表
+      await queryClient.invalidateQueries({
+        queryKey: ["changes", workspaceId],
+      });
+      router.push(`/workspaces/${workspaceId}/changes`);
+    },
+    onError: (err) => {
+      notify.error(err, "删除变更失败");
+    },
+  });
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        data-testid="change-delete-entry"
+        className="text-muted-foreground hover:border-destructive/50 hover:text-destructive"
+        onClick={() => setOpen(true)}
+      >
+        删除
+      </Button>
+      {/* 受控弹层（照 admin/users DeleteConfirm 范式）：确认先关弹层再删，
+          失败路径走 onError toast 不重开弹层 */}
+      {open && (
+        <DeleteChangeConfirm
+          target={{ change_key: changeKey, owner_name: ownerName }}
+          onCancel={() => setOpen(false)}
+          onConfirm={() => {
+            setOpen(false);
+            deleteMutation.mutate();
+          }}
+        />
+      )}
+    </>
   );
 }

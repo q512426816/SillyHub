@@ -15,13 +15,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from app.core.auth_deps import require_permission
+from app.core.auth_deps import get_current_principal, require_permission
 from app.core.db import get_session
-from app.core.errors import AppError
+from app.core.errors import AppError, PermissionDenied
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentRun, AgentRunLog, AgentSession
 from app.modules.auth.model import User
 from app.modules.auth.permissions import Permission
+from app.modules.auth.rbac import has_permission
 from app.modules.change.model import ChangeSessionLink, QuicklogSessionLink
 from app.modules.change.quicklog_service import QuicklogQueryService
 from app.modules.change.schema import (
@@ -29,6 +30,7 @@ from app.modules.change.schema import (
     ApproveRequest,
     ArchiveConfirmRequest,
     ArchiveGateResponse,
+    ChangeDeleteResponse,
     ChangeDocMatrix,
     ChangeDocMatrixEntry,
     ChangeFileContent,
@@ -184,6 +186,49 @@ async def get_change(
     service = ChangeService(session)
     change = await service.get(workspace_id, change_id)
     return await service.enrich_with_workspace_ids(change)
+
+
+@router.delete(
+    "/changes/{change_id}",
+    response_model=ChangeDeleteResponse,
+)
+async def delete_change(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> ChangeDeleteResponse:
+    """平台删除入口（task-06 / 2026-08-29-change-delete-closure-and-spec-pull，
+    design §6.1 / FR-05a / D-001@v1）。
+
+    组合权限 = ``change.owner_id == 当前用户`` **或** ``CHANGE_ARCHIVE``（owner 为空
+    仅后者可删；workspace_owner 角色已内置、platform_admin 经 has_permission 短路）。
+    ``require_permission`` 依赖工厂（auth_deps.py）不支持行级 OR，故实现为端点内
+    组合校验（agent/file_artifacts.py 同款先例；permission 枚举用法照
+    members_router 先例）；未通过判 403。不存在 404、已删幂等 409（code=
+    change_deleted）由 ``ChangeService.delete_change`` 给出。
+    """
+    service = ChangeService(session)
+    # 先取行判 owner（同时覆盖 404：行不存在 / workspace 不存在）。
+    change = await service.get(workspace_id, change_id)
+    allowed = change.owner_id == user.id
+    if not allowed:
+        allowed = await has_permission(
+            session,
+            user=user,
+            permission=Permission.CHANGE_ARCHIVE,
+            workspace_id=workspace_id,
+        )
+    if not allowed:
+        raise PermissionDenied(
+            "无权删除该变更：仅变更责任人本人或持有 change:archive 权限的成员可删除。",
+            details={
+                "permission": Permission.CHANGE_ARCHIVE.value,
+                "workspace_id": str(workspace_id),
+                "change_id": str(change_id),
+            },
+        )
+    return await service.delete_change(workspace_id, change_id, actor_id=user.id)
 
 
 @router.get(

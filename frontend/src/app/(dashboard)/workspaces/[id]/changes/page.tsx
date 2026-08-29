@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   keepPreviousData,
+  useMutation,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
@@ -20,11 +21,18 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { ErrorBanner } from "@/components/ui/error-banner";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ChangeStepBadge } from "@/components/changes/change-step-badge";
+import { ChangeActivityBadge } from "@/components/changes/change-activity-badge";
 import { QuicklogDrawer } from "@/components/changes/quicklog-drawer";
 import { QuicklogTable } from "@/components/changes/quicklog-table";
+import {
+  DeleteChangeConfirm,
+  canDeleteChange,
+  useChangeDeleteAccess,
+} from "@/components/delete-change-confirm";
 import { ApiError } from "@/lib/api";
 import { listQuicklogEntries, type QuicklogEntryListItem } from "@/lib/quicklog";
 import {
+  deleteChange,
   listChanges,
   reparseChanges,
   type ChangeList,
@@ -32,6 +40,7 @@ import {
   type ChangeSummary,
   type ChangeWarning,
 } from "@/lib/changes";
+import { useNotify } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 import { getWorkspace, type Workspace } from "@/lib/workspaces";
 
@@ -102,6 +111,11 @@ export function hasActiveChanges(
 /** 列表轮询间隔（D-001@v1）：非终态存在 → 30s；全终态 / 无数据 → false 停轮。 */
 export const CHANGES_POLL_INTERVAL_MS = 30_000;
 
+// task-12（design §8.1）：活动停滞阈值（30min）——与上方 CHANGES_POLL_INTERVAL_MS
+// 同属展示层常量，此处同点重导出供测试/消费方与轮询间隔一处取用；真值表与
+// 防御解析实现在 change-activity-badge.tsx（徽标组件领地，避免页面↔组件循环依赖）。
+export { ACTIVITY_STALE_MS } from "@/components/changes/change-activity-badge";
+
 /** refetchInterval 决策函数（导出供单测两分支：非终态 30000 / 全终态 false）。 */
 export function changesRefetchInterval(
   data: ChangesPageData | undefined,
@@ -132,6 +146,9 @@ export default function ChangesPage({ params }: Props) {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [reparsing, setReparsing] = useState(false);
+  // task-07（design §6.3 / FR-05d）：受控删除弹层 target（null = 关闭，
+  // 照 admin/users DeleteConfirm 受控范式），确认后关弹层 + deleteMutation。
+  const [deleteTarget, setDeleteTarget] = useState<ChangeSummary | null>(null);
   // task-09（D-006）：quicklog 行点击打开详情抽屉
   const [quicklogSelected, setQuicklogSelected] =
     useState<QuicklogEntryListItem | null>(null);
@@ -189,6 +206,30 @@ export default function ChangesPage({ params }: Props) {
   const items = changesQuery.data?.items ?? [];
   const total = changesQuery.data?.total ?? 0;
   const workspace = changesQuery.data?.workspace ?? null;
+
+  // ── 删除入口（task-07 / design §6.3 / FR-05d）──────────────────────────
+  // 可见性启发式（owner 本人 / 平台管理员 / 工作区所有者）——仅控制按钮显隐，
+  // 后端 DELETE 组合权限为权威（判漏 403 兜底走 onError toast）。
+  const notify = useNotify();
+  const deleteAccess = useChangeDeleteAccess(workspaceId);
+  const deleteMutation = useMutation({
+    mutationFn: (c: ChangeSummary) => deleteChange(workspaceId, c.id),
+    onSuccess: async (_resp, c) => {
+      notify.success(`变更 ${c.change_key} 已删除`);
+      // ["changes", workspaceId] 前缀失效（列表/各 tab 分页同前缀全刷，页面
+      // 既有范式 :276-278；location='deleted' 行不进 active/archive 两 tab，
+      // 行从当前 tab 消失）。tab 计数 changesTabTotals 不在此前缀（对齐
+      // reparse 既有语义，不额外失效）。
+      await queryClient.invalidateQueries({
+        queryKey: ["changes", workspaceId],
+      });
+    },
+    onError: (err) => {
+      // 403（无权限）/404（不存在）/409（已删幂等）统一中文 toast（errMessage
+      // 取 ApiError.message，不白屏）
+      notify.error(err, "删除变更失败");
+    },
+  });
   // loading = 挂起态（首载/切 key 无数据可显时转圈）；后台轮询与同参 refetch
   // 不闪 loading（antd spinner 会造成整表重渲染抖动，与 R-04 不乱跳目标相悖）
   const loading = changesQuery.isPending;
@@ -321,8 +362,20 @@ export default function ChangesPage({ params }: Props) {
     {
       title: "待办状态",
       key: "todo",
-      width: 120,
-      render: (_v: unknown, c: ChangeSummary) => renderTodoBadge(c),
+      // task-12（design §8.1）：列内追加活动徽标（真值表三态：进行中/停滞/空闲），
+      // 消费 step_progress.current_step_status + last_pushed_at（task-11 投影）；
+      // 数据随既有 30s 智能轮询刷新，零新增请求。宽度 120→150 容纳
+      // 「停滞 · 最后信号 x 小时前」最长文案单行不折行。
+      width: 150,
+      render: (_v: unknown, c: ChangeSummary) => (
+        <div className="flex flex-col items-start gap-1">
+          {renderTodoBadge(c)}
+          <ChangeActivityBadge
+            currentStepStatus={c.step_progress?.current_step_status ?? null}
+            lastPushedAt={c.last_pushed_at ?? null}
+          />
+        </div>
+      ),
     },
     {
       title: "标题",
@@ -403,6 +456,27 @@ export default function ChangesPage({ params }: Props) {
           })}
         </span>
       ),
+    },
+    // task-07（design §6.3 / FR-05d）：操作列删除入口——仅权限可见者渲染
+    // （canDeleteChange 三判启发式，后端权威）；无权行渲染空占位（不加「—」，
+    // 避免与待办/负责人列的「—」占位叠加干扰可读性）。active/archive 两 tab
+    // 均可删（§6.1 归档区变更同样可删）。
+    {
+      title: "操作",
+      key: "actions",
+      width: 70,
+      render: (_v: unknown, c: ChangeSummary) =>
+        canDeleteChange(c, deleteAccess) ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            data-testid="change-delete-entry"
+            className="text-muted-foreground hover:text-destructive"
+            onClick={() => setDeleteTarget(c)}
+          >
+            删除
+          </Button>
+        ) : null,
     },
   ];
 
@@ -668,6 +742,20 @@ export default function ChangesPage({ params }: Props) {
         // 空态走自定义 ReactNode（分场景 + CTA），透传给 antd Table locale.emptyText
         locale={{ emptyText: renderEmpty() }}
       />
+      )}
+
+      {/* task-07：删除确认弹层（受控 target，null = 关闭；确认先关弹层再
+          deleteMutation——403/404/409 失败路径走 onError toast，不重开弹层） */}
+      {deleteTarget && (
+        <DeleteChangeConfirm
+          target={deleteTarget}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            const target = deleteTarget;
+            setDeleteTarget(null);
+            deleteMutation.mutate(target);
+          }}
+        />
       )}
     </PageContainer>
   );

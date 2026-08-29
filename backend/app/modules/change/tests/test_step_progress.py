@@ -567,12 +567,13 @@ async def _get_change_by_key(session: AsyncSession, workspace_id: uuid.UUID, key
     return (await session.execute(stmt)).scalars().one()
 
 
-# ── _project_current_stage 三元组形状守护 ──
+# ── _project_current_stage 四元组形状守护（2026-08-15 三元 → 2026-08-29 task-11
+#    SELECT 顺带加 last_pushed_at 列扩四元，design §8.1 零新增查询）──
 
 
 @pytest.mark.asyncio
-async def test_project_current_stage_returns_triple(db_session: AsyncSession) -> None:
-    """_project_current_stage 映射值为 (stage, completed, latest_progress) 三元组（D-002@v1）。"""
+async def test_project_current_stage_returns_quadruple(db_session: AsyncSession) -> None:
+    """_project_current_stage 映射值为 (stage, completed, latest_progress, last_pushed_at)。"""
     ws = await _make_workspace(db_session)
     payload = _payload(
         "plan",
@@ -584,12 +585,15 @@ async def test_project_current_stage_returns_triple(db_session: AsyncSession) ->
     svc = ChangeService(db_session)
     projected = await svc._project_current_stage([(ws.id, "triple")])
     info = projected[(ws.id, "triple")]
-    assert isinstance(info, tuple) and len(info) == 3
+    assert isinstance(info, tuple) and len(info) == 4
     assert info[0] == "plan"
     assert info[1] == {"brainstorm"}
     # 第三元=SELECT 返回的 latest_progress 原文（SQLite JSON 列经 DB 往返是拷贝，
     # 断言内容等值而非对象同一，语义=数据本来就在 SELECT 结果里、零新增查询）
     assert info[2] == payload
+    # 第四元=progress 行既有列 last_pushed_at 的 ISO 原文（task-11 顺带投影，
+    # 服务端零解析；helper 缺省值即行值）
+    assert info[3] == "2026-08-15T00:00:00Z"
 
 
 def test_stage_group_order_matches_design() -> None:

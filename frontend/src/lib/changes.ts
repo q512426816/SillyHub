@@ -115,6 +115,29 @@ export function getChange(workspaceId: string, changeId: string) {
   );
 }
 
+// ── 变更删除（task-07 / 2026-08-29-change-delete-closure-and-spec-pull，design §6.1/§6.3）──
+
+/** DELETE /changes/{cid} 响应。对齐后端 schema（components.schemas.ChangeDeleteResponse，gen:types 生成）。 */
+export type ChangeDeleteResponse = components["schemas"]["ChangeDeleteResponse"];
+
+/**
+ * 删除变更 — DELETE /api/workspaces/{wid}/changes/{cid}
+ *
+ * 后端语义（design §6.1 / FR-05a，task-06 已交付）：镜像软删（30 天备份区）→
+ * 清进度行 → location='deleted' → 写审计事件；active/archive 两区行均可删。
+ * 错误分支经 apiFetch 抛 ApiError：无权限 403 / 不存在 404 / 已删幂等 409
+ * （code=change_deleted），调用方按 code/message 出中文 toast。
+ *
+ * 入口可见性启发式（canDeleteChange / useChangeDeleteAccess）在
+ * components/delete-change-confirm.tsx（删除入口域组件模块，三页共用）。
+ */
+export function deleteChange(workspaceId: string, changeId: string) {
+  return apiFetch<ChangeDeleteResponse>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}`,
+    { method: "DELETE" },
+  );
+}
+
 export function reparseChanges(workspaceId: string) {
   return apiFetch<ChangeReparseResponse>(
     `/api/workspaces/${workspaceId}/changes/reparse`,

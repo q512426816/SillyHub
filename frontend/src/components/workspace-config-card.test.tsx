@@ -18,6 +18,7 @@ import type { DaemonInstanceRead } from "@/lib/daemon";
 import type { SpecWorkspace } from "@/lib/spec-workspaces";
 import type { Workspace } from "@/lib/workspaces";
 import type { MemberBindingView } from "@/lib/workspace-binding";
+import { useSession } from "@/stores/session";
 
 // ── next/navigation mock（handleScan 用 router.push 跳转会话页）────────────
 const routerPush = vi.fn();
@@ -128,6 +129,66 @@ const daemonApi = vi.hoisted(() => ({
 vi.mock("@/lib/daemon", async () => {
   const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
   return { ...actual, listDaemonInstances: daemonApi.listDaemonInstances };
+});
+
+// ── task-09：token-refresh 局部 mock（401 单飞刷新重试用；其余导出保留真实）──────
+const tokenRefreshApi = vi.hoisted(() => ({
+  ensureFreshAccessToken: vi.fn(),
+}));
+vi.mock("@/lib/token-refresh", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/token-refresh")>(
+    "@/lib/token-refresh",
+  );
+  return {
+    ...actual,
+    ensureFreshAccessToken: tokenRefreshApi.ensureFreshAccessToken,
+  };
+});
+
+// ── task-09：antd 局部 mock（Button/Tooltip/Modal 走真实实现）。组件下载结果 toast ──
+// 走 useNotify → App.useApp() 上下文 message，故在 App.useApp 上挂 mock 断言
+// （对齐 session-config-bar.test.tsx FR-04 先例）；静态 message 同步替换兜底。
+const antdToast = vi.hoisted(() => ({
+  messageSuccess: vi.fn(),
+  messageError: vi.fn(),
+  messageWarning: vi.fn(),
+}));
+vi.mock("antd", async () => {
+  const actual = await vi.importActual<typeof import("antd")>("antd");
+  const AppWithMockUseApp = Object.assign(actual.App, {
+    useApp: () => ({
+      message: {
+        success: antdToast.messageSuccess,
+        error: antdToast.messageError,
+        warning: antdToast.messageWarning,
+      },
+    }),
+  });
+  return {
+    ...actual,
+    App: AppWithMockUseApp,
+    message: {
+      success: antdToast.messageSuccess,
+      error: antdToast.messageError,
+      warning: antdToast.messageWarning,
+    },
+  };
+});
+
+// ── task-09：jsdom 未实现 URL.createObjectURL/revokeObjectURL——可控替身追踪生命周期 ──
+// （对齐 explorer/__tests__/file-preview.test.tsx 先例）
+let objectUrlSeq = 0;
+const createObjectURL = vi.fn((_blob: Blob) => `blob:spec-bundle-${++objectUrlSeq}`);
+const revokeObjectURL = vi.fn();
+Object.defineProperty(URL, "createObjectURL", {
+  configurable: true,
+  writable: true,
+  value: createObjectURL,
+});
+Object.defineProperty(URL, "revokeObjectURL", {
+  configurable: true,
+  writable: true,
+  value: revokeObjectURL,
 });
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
@@ -786,5 +847,209 @@ describe("WorkspaceConfigCard 操作按钮（design §10 R-01 / AC-07）", () =>
     await vi.advanceTimersByTimeAsync(6000);
     await flushMicrotasks();
     expect(bindingApi.fetchMyBinding.mock.calls.length).toBe(callsBeforeUnmount);
+  });
+});
+
+describe("WorkspaceConfigCard 下载文档包（task-09 / FR-06 / FR-08，design §7.2-§7.4）", () => {
+  // downloadSpecBundle 走真实实现（specApi mock 展开保留 actual）+ 全局 fetch stub，
+  // 断言完整鉴权 blob 下载链路（裸 fetch + Bearer → blob → objectURL → <a download>）。
+  let appendedAnchor: HTMLAnchorElement | null;
+
+  beforeEach(() => {
+    appendedAnchor = null;
+    // anchor click 置空（防 jsdom 导航 "Not implemented" 报错）；anchor 实例经
+    // document.body.appendChild 捕获（download 属性 = 落盘文件名，append 后紧跟 click）。
+    // appendChild 须穿透原实现——RTL render 挂载容器也走 document.body.appendChild。
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    const realAppendChild = document.body.appendChild.bind(document.body);
+    vi.spyOn(document.body, "appendChild").mockImplementation((node: Node) => {
+      if (node instanceof HTMLAnchorElement) appendedAnchor = node;
+      return realAppendChild(node);
+    });
+    // 默认已登录带 token（断言 Authorization Bearer 用）；刷新默认不可用（防意外网络）。
+    useSession.setState({ accessToken: "tok-1", refreshToken: null, hydrated: true });
+    tokenRefreshApi.ensureFreshAccessToken.mockResolvedValue(null);
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    // session store 是模块级单例：还原默认态防泄漏到其它 describe。
+    useSession.setState({ accessToken: null, refreshToken: null, hydrated: false });
+  });
+
+  /** 构造 bundle 端点 Response（真实 Headers，走 downloadSpecBundle 的 headers.get）。 */
+  function bundleResponse(opts: {
+    status?: number;
+    disposition?: string;
+    version?: string;
+  } = {}): Response {
+    return new Response(new Blob(["fake-tar-bytes"]), {
+      status: opts.status ?? 200,
+      headers: {
+        ...(opts.disposition !== undefined
+          ? { "Content-Disposition": opts.disposition }
+          : {}),
+        ...(opts.version !== undefined ? { "X-Spec-Version": opts.version } : {}),
+      },
+    });
+  }
+
+  /** 已初始化已扫描的 fixture（「同步到服务器」可见，与下载按钮成对）。 */
+  const syncedBinding = () =>
+    makeBinding({
+      init_synced_at: "2026-06-30T02:00:00Z",
+      init_synced_spec_version: 1,
+    });
+
+  it("specWs 就绪 + 已初始化已扫描：「下载文档包」与「同步到服务器」成对渲染；Tooltip 明示快照语义", async () => {
+    renderCard({ myBinding: syncedBinding(), componentCount: 5 });
+
+    // 推送/拉取语义成对（design §7.2）
+    expect(screen.getByRole("button", { name: "同步到服务器" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下载文档包" })).toBeInTheDocument();
+
+    // 快照语义文案（design §7.4）：非实时同步 + daemon 任务/会话开始自动取新
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "下载文档包" }));
+    await waitFor(() => {
+      expect(screen.getByText(/非实时同步/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/任务开始\/会话开始/)).toBeInTheDocument();
+  });
+
+  it("未初始化（同步按钮隐藏）：下载按钮仍在——拉取不依赖本地缓存初始化（FR-06 入口全员可用）", () => {
+    renderCard({}); // 默认 binding init_synced_at=null + componentCount=0
+    expect(screen.queryByRole("button", { name: "同步到服务器" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "下载文档包" })).toBeInTheDocument();
+  });
+
+  it("下载链路：fetch 带 Bearer → blob objectURL → <a download> click（文件名取 Content-Disposition）→ revoke → 成功 toast 含版本号", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      bundleResponse({
+        disposition: 'attachment; filename="spec-bundle-ws-1.tar"',
+        version: "128",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderCard({ myBinding: syncedBinding(), componentCount: 5 });
+
+    fireEvent.click(screen.getByRole("button", { name: "下载文档包" }));
+
+    // 成功 toast：版本号读 X-Spec-Version（R-07 仅此一次性展示）
+    await waitFor(() => expect(antdToast.messageSuccess).toHaveBeenCalled());
+    expect(antdToast.messageSuccess).toHaveBeenCalledWith(
+      "文档包已下载（快照版本 v128）",
+    );
+    expect(antdToast.messageError).not.toHaveBeenCalled();
+
+    // 请求：既有 bundle 端点 + Authorization Bearer（鉴权 blob 范式）
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [reqUrl, reqInit] = fetchMock.mock.calls[0] as [
+      string,
+      RequestInit | undefined,
+    ];
+    expect(reqUrl).toBe("/api/workspaces/ws-1/spec-workspace/bundle");
+    expect((reqInit?.headers as Record<string, string>).Authorization).toBe(
+      "Bearer tok-1",
+    );
+
+    // objectURL 生命周期：create → anchor click → revoke（D-009 无泄漏）
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+    expect(appendedAnchor).not.toBeNull();
+    expect(appendedAnchor?.getAttribute("download")).toBe("spec-bundle-ws-1.tar");
+    expect(appendedAnchor?.href).toContain("blob:spec-bundle-");
+    expect(revokeObjectURL).toHaveBeenCalledWith(
+      createObjectURL.mock.results[0]?.value,
+    );
+    // 刷新未触发（非 401 不刷新）
+    expect(tokenRefreshApi.ensureFreshAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("Content-Disposition 缺失：文件名回退 spec-bundle-{wsId}.tar；无版本头 toast 不带版本号", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      bundleResponse(),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderCard({ myBinding: syncedBinding(), componentCount: 5 });
+
+    fireEvent.click(screen.getByRole("button", { name: "下载文档包" }));
+
+    await waitFor(() => expect(antdToast.messageSuccess).toHaveBeenCalled());
+    expect(antdToast.messageSuccess).toHaveBeenCalledWith("文档包已下载");
+    expect(appendedAnchor?.getAttribute("download")).toBe("spec-bundle-ws-1.tar");
+    expect(revokeObjectURL).toHaveBeenCalled();
+  });
+
+  it("失败：非 2xx 抛 ApiError → 失败 toast 非静默，不触发 anchor click", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      bundleResponse({ status: 500 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderCard({ myBinding: syncedBinding(), componentCount: 5 });
+
+    fireEvent.click(screen.getByRole("button", { name: "下载文档包" }));
+
+    await waitFor(() => expect(antdToast.messageError).toHaveBeenCalled());
+    // errMessage 取 ApiError 中文文案
+    expect(antdToast.messageError).toHaveBeenCalledWith("下载失败（HTTP 500）");
+    expect(antdToast.messageSuccess).not.toHaveBeenCalled();
+    expect(createObjectURL).not.toHaveBeenCalled();
+    expect(appendedAnchor).toBeNull();
+  });
+
+  it("401：单飞刷新拿新 token → 带新 Bearer 重试一次成功", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const auth = (init?.headers as Record<string, string> | undefined)
+        ?.Authorization;
+      return auth === "Bearer fresh-token"
+        ? bundleResponse({
+            disposition: 'attachment; filename="spec-bundle-ws-1.tar"',
+            version: "9",
+          })
+        : new Response("unauthorized", { status: 401 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    tokenRefreshApi.ensureFreshAccessToken.mockResolvedValue("fresh-token");
+
+    renderCard({ myBinding: syncedBinding(), componentCount: 5 });
+
+    fireEvent.click(screen.getByRole("button", { name: "下载文档包" }));
+
+    await waitFor(() => expect(antdToast.messageSuccess).toHaveBeenCalled());
+    expect(antdToast.messageSuccess).toHaveBeenCalledWith(
+      "文档包已下载（快照版本 v9）",
+    );
+    // 旧 token 401 一次 + 新 token 成功一次，共 2 次；刷新单飞只发 1 次
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(tokenRefreshApi.ensureFreshAccessToken).toHaveBeenCalledTimes(1);
+    const [, retryInit] = fetchMock.mock.calls[1] as [
+      string,
+      RequestInit | undefined,
+    ];
+    expect((retryInit?.headers as Record<string, string>).Authorization).toBe(
+      "Bearer fresh-token",
+    );
+    expect(appendedAnchor?.getAttribute("download")).toBe("spec-bundle-ws-1.tar");
+  });
+
+  it("401：刷新失败（null）→ 不重试 → 失败 toast 不静默", async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      new Response("unauthorized", { status: 401 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    tokenRefreshApi.ensureFreshAccessToken.mockResolvedValue(null);
+
+    renderCard({ myBinding: syncedBinding(), componentCount: 5 });
+
+    fireEvent.click(screen.getByRole("button", { name: "下载文档包" }));
+
+    await waitFor(() => expect(antdToast.messageError).toHaveBeenCalled());
+    expect(antdToast.messageError).toHaveBeenCalledWith("下载失败（HTTP 401）");
+    expect(fetchMock).toHaveBeenCalledTimes(1); // 刷新拿不到 token 不重试
+    expect(createObjectURL).not.toHaveBeenCalled();
   });
 });

@@ -9,7 +9,9 @@ import { Button, Modal, Progress, Tooltip } from "antd";
 import { SectionCard } from "@/components/layout";
 import { ApiError } from "@/lib/api";
 import { PROVIDER_META, type DaemonInstanceRead } from "@/lib/daemon";
+import { useNotify } from "@/lib/errors";
 import {
+  downloadSpecBundle,
   generateProjects,
   getSpecWorkspace,
   importSpecWorkspace,
@@ -90,6 +92,13 @@ function formatTs(raw: string | null): string {
 const CACHE_ROOT_TOOLTIP =
   "守护进程在你电脑上缓存这个工作区文档的位置。`~` = 你的用户主目录（Windows: C:\\Users\\<你>；macOS/Linux: /home/<你>）";
 
+/**
+ * 「下载文档包」快照语义文案（task-09，design §7.4 时机口径）：人拉=主动快照，
+ * 非实时同步；daemon 机器拉维持现状（任务开始/会话开始按版本变化自动取新）。
+ */
+const DOWNLOAD_BUNDLE_TOOLTIP =
+  "下载文档包：把服务器当前的规范文档整树打包为 tar 下载（当前时刻快照，非实时同步）。守护进程会在任务开始/会话开始时按版本变化自动取最新，无需手动同步。";
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -135,6 +144,9 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
   const [importing, setImporting] = useState(false);
   const [importPhase, setImportPhase] = useState<ImportPhase | null>(null);
   const [generatingProjects, setGeneratingProjects] = useState(false);
+  // task-09（FR-06/FR-08）：下载文档包独立 loading 态——即时 HTTP 拉流，
+  // 不建 DaemonChangeWrite 任务、不轮询，与 syncManual/syncStatus 状态机完全独立。
+  const [downloading, setDownloading] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
   const initPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -145,6 +157,8 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
   const syncDeadlineRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const router = useRouter();
+  // task-09：下载结果 toast（操作类走 useNotify，展示策略规范 design §5）。
+  const notify = useNotify();
 
   /* ---- 绑定初始化状态徽标随 prop 同步 ---- */
   useEffect(() => {
@@ -295,6 +309,27 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
     } catch (err) {
       setSyncStatus("failed");
       setSyncError(err instanceof ApiError ? err.message : "同步派发失败");
+    }
+  }
+
+  /* ---- Download bundle handler（task-09 / FR-06 / FR-08，design §7.2/§7.4）---- */
+  async function handleDownloadBundle(): Promise<void> {
+    // specWs 为空时按钮本就不渲染；守卫兜底防误触。
+    if (!specWs) return;
+    setDownloading(true);
+    try {
+      const { specVersion } = await downloadSpecBundle(workspaceId);
+      // R-07：快照版本号仅此 toast 一次性展示，不在配置卡常驻。
+      notify.success(
+        specVersion !== null
+          ? `文档包已下载（快照版本 v${specVersion}）`
+          : "文档包已下载",
+      );
+    } catch (err) {
+      // 失败不静默：toast 错误信息（errMessage 取中文文案，网络失败有统一兜底）。
+      notify.error(err, "下载文档包失败");
+    } finally {
+      setDownloading(false);
     }
   }
 
@@ -467,6 +502,18 @@ export function WorkspaceConfigCard(props: WorkspaceConfigCardProps): JSX.Elemen
           </span>
         </Tooltip>
       )}
+      {/* task-09（FR-06）：下载=拉取方向，与「同步到服务器」（推送）语义成对； */}
+      {/* 即时 HTTP 拉流独立 loading，不占 busyReason 互斥（不动同步既有行为）。 */}
+      <Tooltip title={DOWNLOAD_BUNDLE_TOOLTIP}>
+        <span>
+          <Button
+            onClick={() => void handleDownloadBundle()}
+            loading={downloading}
+          >
+            下载文档包
+          </Button>
+        </span>
+      </Tooltip>
       {!specWs.repo_sillyspec_path && (
         <Tooltip
           title={

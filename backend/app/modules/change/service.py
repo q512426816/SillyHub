@@ -24,7 +24,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from app.core.config import get_settings, resolve_cli_tzinfo
-from app.core.errors import ChangeDocNotFound, ChangeNotFound, InvalidTransition, PermissionDenied
+from app.core.errors import (
+    AppError,
+    ChangeDocNotFound,
+    ChangeNotFound,
+    InvalidTransition,
+    PermissionDenied,
+)
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentSession
 from app.modules.auth.model import User
@@ -42,6 +48,7 @@ from app.modules.change.projection import StageProjectionService
 from app.modules.change.schema import (
     ArchiveCheckItem,
     ArchiveGateResponse,
+    ChangeDeleteResponse,
     ChangeRead,
     ChangeSummary,
     PendingReview,
@@ -257,6 +264,107 @@ class ChangeService:
         prototypes = [Path(d.path).name for d in docs if d.doc_type == "prototype" and d.exists]
         references = [Path(d.path).name for d in docs if d.doc_type == "reference" and d.exists]
         return docs, prototypes, references
+
+    # ── 平台删除入口（task-06 / 2026-08-29-change-delete-closure-and-spec-pull）──
+
+    async def delete_change(
+        self,
+        workspace_id: uuid.UUID,
+        change_id: uuid.UUID,
+        *,
+        actor_id: uuid.UUID,
+    ) -> ChangeDeleteResponse:
+        """平台删除入口服务层（task-06 / design §6.1，FR-05a/b/c，D-002@v1）。
+
+        权限判定（CHANGE_ARCHIVE OR owner==当前用户，D-001@v1）在 router 层组合
+        完成（require_permission 依赖工厂不支持行级 OR）；本方法只做服务顺序：
+
+        1. 取行：不存在 404（``get``）；行已 ``location='deleted'`` 幂等拒绝
+           （409 ``code='change_deleted'``，与 task-04 拒收口径一致——不产生第二个
+           delete 事件）；
+        2. ① ``SpecWorkspaceService.soft_delete_change_dir`` 镜像软删（active →
+           ``changes/{key}/``、archive → ``changes/archive/{key}/``；文件入 30 天
+           备份区 + manifest 三标记 + 空目录清理，内部自带事务）；
+        3. ② 删 ``platform_change_progress`` 对应 ``(workspace_id, change_name)``
+           行（FR-03a 收件箱联动；此处失败整体失败——用户级终局操作不容静默
+           残留，与 reparse 删除环的 best-effort 联动语义不同）；
+        4. ③ Change 行置 ``location='deleted'`` 软删**不物理删**（ChangeEventORM
+           FK CASCADE 会丢审计，model.py:346-402；R-09）；
+        5. ④ 写 ``change_events`` ``event_type='delete'``、detail 含
+           ``{deleted_by, change_key, file_count, backup_dir}`` 四字段（照
+           platform_sync ``_sync_change_owner`` 的 begin_nested savepoint 范式）；
+           commit 后组装 ``ChangeDeleteResponse``。
+        """
+        change = await self.get(workspace_id, change_id)
+        if change.location == "deleted":
+            raise AppError(
+                "该变更已在平台删除，无需重复删除。",
+                code="change_deleted",
+                http_status=409,
+                details={
+                    "workspace_id": str(workspace_id),
+                    "change_id": str(change_id),
+                    "change_key": change.change_key,
+                },
+            )
+
+        # ① 镜像软删（内部自带 commit：manifest 标记与文件搬移先行落定）。
+        from app.modules.spec_workspace.service import SpecWorkspaceService
+
+        mirror = await SpecWorkspaceService(self._session).soft_delete_change_dir(
+            workspace_id, change.change_key, location=change.location
+        )
+        backup_dir = str(mirror["backup_dir"])
+        file_count = int(mirror["file_count"])
+
+        # ② progress 收件箱行删（行不存在静默跳过——幂等）。
+        progress_row = (
+            (
+                await self._session.execute(
+                    select(PlatformChangeProgressORM).where(
+                        col(PlatformChangeProgressORM.workspace_id) == workspace_id,
+                        col(PlatformChangeProgressORM.change_name) == change.change_key,
+                    )
+                )
+            )
+            .scalars()
+            .one_or_none()
+        )
+        if progress_row is not None:
+            await self._session.delete(progress_row)
+
+        # ③ 软删（不物理删——审计 CASCADE 防丢，design §6.1/D-002@v1）。
+        change.location = "deleted"
+        change.updated_at = datetime.now(UTC)
+
+        # ④ 审计事件（savepoint 范式：INSERT 失败只回滚 savepoint 不污染外层已累积
+        # 的 ②③ 改动；审计属删除操作必经路径，失败即整体失败抛出，不吞）。
+        async with self._session.begin_nested():
+            self._session.add(
+                ChangeEventORM(
+                    id=uuid.uuid4(),
+                    workspace_id=workspace_id,
+                    change_id=change.id,
+                    event_type="delete",
+                    detail={
+                        "deleted_by": str(actor_id),
+                        "change_key": change.change_key,
+                        "file_count": file_count,
+                        "backup_dir": backup_dir,
+                    },
+                    created_by=actor_id,
+                )
+            )
+            await self._session.flush()
+        await self._session.commit()
+        log.info(
+            "change.deleted",
+            workspace_id=str(workspace_id),
+            change_id=str(change_id),
+            change_key=change.change_key,
+            file_count=file_count,
+        )
+        return ChangeDeleteResponse(ok=True, backup_dir=backup_dir, file_count=file_count)
 
     # ── File tree (task-03/04/05/07, 2026-07-02-change-detail-file-tree-editor) ──
 
@@ -1156,13 +1264,19 @@ class ChangeService:
     ) -> tuple[dict[str, int], ChangeParserResult]:
         """Reconcile ``ux_changes`` rows against the filesystem change tree.
 
-        ``scope``（change 2026-08-14-change-center-conversation-driven / D-005@v1，
-        design §5 P1）：
-        - ``None``：全量 reparse（含 delete，现状语义不变，删除磁盘消失的变更行）。
-        - ``[...]``：scoped reparse，**零 delete 红线（R-08）**——只对 scope 内 key
-          create/update；scope 外变更不进 parsed 集合也不判删除；scope 内 key 磁盘
-          确认消失也不删（留全量/手动重扫描收敛）。rename 检测同样只在全量模式下
-          进行（scoped 是部分视图，跑 rename 匹配会把范围外变更误判为 orphaned）。
+        ``scope``（change 2026-08-14-change-center-conversation-driven / D-005@v1；
+        2026-08-29-change-delete-closure-and-spec-pull task-03 R-08 收窄修订，
+        design §5.2）：
+        - ``None``：全量 reparse——删除全部磁盘消失的变更行（现状语义不变），
+          并连带删对应 ``platform_change_progress`` 收件箱行。
+        - ``[...]``：scoped reparse——**定向删除**：仅删 ``change_key ∈ scope 集``
+          且磁盘确认消失（``key ∉ seen_keys``）的行；scope 外行零动作（R-08 原始
+          动机保留——防部分视图误删范围外变更）。删除同样连带清 progress 行。
+          rename 检测两模式都跑，scoped 下 orphaned 候选仅取 scope 集内行（R-11，
+          防范围外行被误判 orphaned 而错配 rename 丢 workflow 状态）。
+        - ``location='deleted'`` 墓碑行（平台删除锚点，B-1/R-09）在两模式删除环
+          均不物理删；``_apply_parsed`` 也不回翻其 location。
+        - ``_progress_reported_active_keys`` 占位保护（7 天窗）两模式同样生效。
         - reparse 发现新变更（created）时按 design §8 绑定查询自动绑定该 workspace
           最近活跃会话（change_session_links 行，best-effort 失败不阻断 reparse）。
         """
@@ -1199,18 +1313,21 @@ class ChangeService:
         existing_changes = await self._fetch_existing_changes(workspace_id)
         existing_by_key = {c.change_key: c for c in existing_changes}
 
-        # Detect directory renames before processing（仅全量模式；scoped 是部分视图，
-        # 范围外变更的目录"消失"会被误判为 orphaned 而错配 rename）。
+        # Detect directory renames before processing。task-03（2026-08-29-change-
+        # delete-closure-and-spec-pull / R-11）：scoped 也跑 rename 检测，传 scope 集
+        # 让 orphaned 候选仅取 scope 内行——范围外行不进 parsed ≠ 磁盘消失，若按全量
+        # 候选会被误判 orphaned 而错配 rename 丢 workflow 状态；scope=None 即全量
+        # 现语义（全部 not-in-parsed 行均为候选）。
         parsed_key_set = {p.change_key for p in result.changes}
-        rename_map: dict[str, Change] = {}
-        if scope is None:
-            rename_map = self._detect_renames(existing_by_key, parsed_key_set, sillyspec_root)
+        rename_map: dict[str, Change] = self._detect_renames(
+            existing_by_key, parsed_key_set, sillyspec_root, scope=scope
+        )
 
-            # Update existing_by_key for renamed entries: old_key → new_key
-            for new_key, old_row in rename_map.items():
-                old_key = old_row.change_key
-                existing_by_key.pop(old_key, None)
-                existing_by_key[new_key] = old_row
+        # Update existing_by_key for renamed entries: old_key → new_key
+        for new_key, old_row in rename_map.items():
+            old_key = old_row.change_key
+            existing_by_key.pop(old_key, None)
+            existing_by_key[new_key] = old_row
 
         # Wave B（2026-07-25）：批量预取所有 existing change 的 docs（原 _sync_docs
         # 每 change 一次 _fetch_existing_docs = N+1）。新建 change 无 existing docs（[]）。
@@ -1287,28 +1404,41 @@ class ChangeService:
             # D-005@V1：M:N change_workspaces 投影已废，变更只属单一 workspace，无需 sync。
 
         # Delete changes whose keys disappeared and were not renamed。
-        # **scoped 零删除红线（R-08）**：scope 模式跳过整个删除循环——scope 外变更
-        # 不进 parsed 集合也不判删除；scope 内 key 磁盘消失也不删（留全量/手动重扫描
-        # 收敛）。删除仅发生在全量 reparse（scope=None，现状语义不变）。
-        if scope is None:
+        # task-03（2026-08-29-change-delete-closure-and-spec-pull / design §5.2，R-08
+        # 收窄修订）：scope 非空也进删除环，但仅删「key ∈ scope 集 且 key ∉
+        # seen_keys」的行——scope 外行零动作（R-08 原始动机保留：scoped 是部分视图，
+        # 范围外变更不进 parsed 集合不等于磁盘消失）；全量（scope=None）保持现语义
+        # （key 不在 seen_keys 即删）。location='deleted' 墓碑行两模式均跳过（B-1
+        # 三点豁免①②——审计锚点行保活，R-09，唯一物理清除通道是未来显式回收策略）。
+        # 删除处连带删 platform_change_progress 收件箱行（FR-03a，见
+        # _delete_progress_row；豁免/受保护跳过的行不触发联动删）。
+        progress_active_keys = await self._progress_reported_active_keys(workspace_id)
+        scope_set = set(scope) if scope is not None else None
+        for key, row in existing_by_key.items():
+            if key in seen_keys:
+                continue
+            if scope_set is not None and key not in scope_set:
+                continue  # R-01/R-08：scope 外行零动作
+            if row.location == "deleted":
+                continue  # B-1：墓碑行不物理删（R-09）
             # ql-20260815-002 镜像滞后保护：CLI 最近一次上行仍报 status=active 且
             # 行内无任何文档（= platform_sync 首推占位行，spec tar 未跟上）的 key 不删，
             # 否则占位行「刚被进度上行建出、又被下一次全量 reparse 删掉」，变更中心
             # 先出现后消失。保护只覆盖从未同步过文档的占位行：有文档的行仍以镜像
-            # 磁盘为权威（避免 stale progress 行让本地已删变更永生）。
-            progress_active_keys = await self._progress_reported_active_keys(workspace_id)
-            for key, row in existing_by_key.items():
-                if key in seen_keys:
-                    continue
-                if key in progress_active_keys and not docs_by_change.get(row.id):
-                    log.info(
-                        "change.reparse_placeholder_kept",
-                        workspace_id=str(workspace_id),
-                        change_key=key,
-                    )
-                    continue
-                await self._session.delete(row)
-                stats["deleted"] += 1
+            # 磁盘为权威（避免 stale progress 行让本地已删变更永生）。task-03 起
+            # scoped 与全量两模式共用同一保护。
+            if key in progress_active_keys and not docs_by_change.get(row.id):
+                log.info(
+                    "change.reparse_placeholder_kept",
+                    workspace_id=str(workspace_id),
+                    change_key=key,
+                )
+                continue
+            await self._session.delete(row)
+            stats["deleted"] += 1
+            # FR-03a：Change 行删除 → 连带删 progress 收件箱行，防变更中心收敛后
+            # progress 永久残留（行不存在静默跳过）。
+            await self._delete_progress_row(workspace_id, key)
 
         await self._session.commit()
         log.info("changes.reparsed", workspace_id=str(workspace_id), **stats)
@@ -1362,6 +1492,42 @@ class ChangeService:
                 if isinstance(c, dict) and c.get("name") and c.get("status") == "active":
                     keys.add(str(c["name"]))
         return keys
+
+    async def _delete_progress_row(self, workspace_id: uuid.UUID, change_name: str) -> None:
+        """删除环联动删 ``platform_change_progress`` 收件箱行（task-03 / FR-03a）。
+
+        Change 行因磁盘确认消失被删除时，连带删同 ``(workspace_id, change_name)``
+        的 progress 行，防变更中心收敛后收件箱永久残留（design §5.2 progress 联动；
+        ``platform_sync/service.py`` 无删除路径的补口）。行不存在静默跳过；查询/删除
+        失败 best-effort 告警不阻断删除环（对齐 ``_progress_reported_active_keys``
+        的降级哲学——读方核实：投影 join 全部 miss-fallback，审批 upsert 会按需重建
+        最小行，联动删失败不产生读侧错误）。``PlatformChangeProgressORM`` 函数级
+        import 照 ``_progress_reported_active_keys`` 范式。
+        """
+        try:
+            from app.modules.platform_sync.model import PlatformChangeProgressORM
+
+            row = (
+                (
+                    await self._session.execute(
+                        select(PlatformChangeProgressORM).where(
+                            col(PlatformChangeProgressORM.workspace_id) == workspace_id,
+                            col(PlatformChangeProgressORM.change_name) == change_name,
+                        )
+                    )
+                )
+                .scalars()
+                .one_or_none()
+            )
+            if row is not None:
+                await self._session.delete(row)
+        except Exception as exc:  # best-effort 守卫，任何 DB 异常只告警不回滚 Change 删除
+            log.warning(
+                "change.reparse_progress_cleanup_failed",
+                workspace_id=str(workspace_id),
+                change_name=change_name,
+                error=str(exc),
+            )
 
     async def _bind_change_to_session(
         self,
@@ -1418,6 +1584,7 @@ class ChangeService:
         existing_by_key: dict[str, Change],
         parsed_keys: set[str],
         sillyspec_root: Path,
+        scope: list[str] | None = None,
     ) -> dict[str, Change]:
         """Detect directory renames by matching date prefix + directory absence.
 
@@ -1426,16 +1593,33 @@ class ChangeService:
         keeps its workflow state (current_stage, human_gate, stages JSON).
 
         Returns a map of new_key → existing Change row for detected renames.
+
+        task-03（2026-08-29-change-delete-closure-and-spec-pull / R-11）：
+        - ``scope`` 非空时 orphaned 候选仅取 ``key ∈ scope 集`` 的 existing 行——
+          scoped 是部分视图，范围外行不进 parsed ≠ 磁盘消失，按全量候选会把它们
+          误判 orphaned 而错配 rename（丢 workflow 状态）；``scope=None`` 即全量
+          现语义（全部 not-in-parsed 行均为候选）。
+        - ``changes_dir`` 空判：changes 根目录不存在（布局缺失/路径漂移）直接返回
+          空 dict，不把全部行误判 orphaned。磁盘检查对齐 parser 扫描的同一棵树
+          ——reparse 固定 ``platform_managed=True``（扁平布局 ``<root>/changes/``，
+          parser.py ``SpecPathResolver`` 同源），旧实现硬编码 ``.sillyspec/changes``
+          包裹路径在扁平布局下永不存在，``is_dir`` 确认恒为假（真空判）。
         """
         if not existing_by_key or not parsed_keys:
             return {}
 
-        changes_dir = sillyspec_root / ".sillyspec" / "changes"
+        changes_dir = sillyspec_root / "changes"
+        if not changes_dir.is_dir():
+            return {}
 
-        # Find orphaned DB rows whose directories no longer exist on disk
+        # Find orphaned DB rows whose directories no longer exist on disk.
+        # scoped：候选仅取 scope 集内行（R-11），不做全量候选拉取。
+        scope_set = set(scope) if scope is not None else None
         orphaned: dict[str, Change] = {}
         for key, row in existing_by_key.items():
             if key not in parsed_keys:
+                if scope_set is not None and key not in scope_set:
+                    continue
                 dir_path = changes_dir / key
                 if not dir_path.is_dir():
                     orphaned[key] = row
@@ -1543,8 +1727,18 @@ class ChangeService:
         ``_fetch_owner_events`` 一次 IN + ``_merge_event_entries``，events 查询只挂
         本详情路径，列表零成本）；③Phase 2.4 明细 output 全量透传（截断挪列表摘要
         current_step_desc，D-004@v1）。
+
+        task-06（design §6.2）：``location='deleted'`` 行**前置过滤**——投影块整体
+        跳过（current_stage 覆盖 / archived 终态回翻 / steps / 时间线均不作用，
+        与 enrich_summaries 同口径），仅保留 owner_name 填充。
         """
         change_read = ChangeRead.model_validate(change)
+        if change.location == "deleted":
+            # task-06：deleted 行不被残留 progress 投影回显（FR-05c 读侧防复活）。
+            if change.owner_id is not None:
+                names = await self._resolve_user_names({change.owner_id})
+                change_read.owner_name = names.get(change.owner_id)
+            return change_read
         projected = await self._project_current_stage([(change.workspace_id, change.change_key)])
         stage_info = projected.get((change.workspace_id, change.change_key))
         timeline: list[StepTimelineEntry] | None = None
@@ -1590,10 +1784,19 @@ class ChangeService:
         批量填充——owner_id 集合一次 IN 查 users（``_resolve_user_names``，与
         ``_project_current_stage`` 同款批量模式）。列表路径**零** events 查询
         （时间线合成只挂 enrich_with_workspace_ids 详情路径，R-03 锚定测试防回归）。
+
+        2026-08-29-change-delete-closure-and-spec-pull task-11（design §8.1）：
+        ``last_pushed_at`` 投影——stage_info 命中处顺带透传 progress 行既有列
+        （SELECT 已加列，零新增查询）；miss / 列值 NULL 保持缺省 None（D-003）。
+
+        task-06（design §6.2）：**deleted 行前置过滤**——``location='deleted'`` 行
+        不进投影 join、不被 latest_progress 覆盖（archived 终态回翻 / stage_info /
+        last_pushed_at / step 摘要均不作用）：CLI 墓碑或平台删除置 location 后，
+        残留 progress 行不得把已删行投影回显（FR-05c 读侧防复活口径）。
         """
         if not changes:
             return []
-        pairs = [(c.workspace_id, c.change_key) for c in changes]
+        pairs = [(c.workspace_id, c.change_key) for c in changes if c.location != "deleted"]
         projected = await self._project_current_stage(pairs)
         owner_ids = {c.owner_id for c in changes if c.owner_id is not None}
         names = await self._resolve_user_names(owner_ids)
@@ -1602,10 +1805,19 @@ class ChangeService:
             summary = ChangeSummary.model_validate(c)
             if c.owner_id is not None:
                 summary.owner_name = names.get(c.owner_id)
+            if c.location == "deleted":
+                # task-06：deleted 行跳过投影覆盖（row 现值原样返回）。
+                summaries.append(summary)
+                continue
             stage_info = projected.get((c.workspace_id, c.change_key))
             if stage_info is not None:
-                stage, completed, latest_progress = stage_info
+                stage, completed, latest_progress, last_pushed_at = stage_info
                 summary.current_stage = stage
+                # task-11（design §8.1）：「最后信号」ISO 原文透传（join 命中处顺带
+                # 取值，零新增查询）；不命中（无 progress 行）/列值 NULL 保持缺省
+                # None（D-003 fallback，与 current_stage 同款）；服务端零解析（畸形串
+                # 防御解析归 task-12 前端）。
+                summary.last_pushed_at = last_pushed_at
                 # 终态投影（2026-08-21 quick，与 enrich_with_workspace_ids 同范式）：
                 # CLI 归档推送 status='archived' → status/current_stage 读时覆盖
                 # 'archived'，pending_review 归 None（已归档不可能待审，防
@@ -1902,24 +2114,29 @@ class ChangeService:
             # 2026-08-15-change-step-visibility task-01（Grill P0-1）：_project_current_stage
             # 扩三元组（stage, completed, latest_progress），本函数不消费 steps（行为不变，
             # 守护测试 test_resolve_pending_change_keys_* 防回归），第三元丢弃。
-            stage, completed, _ = info
+            # 2026-08-29-change-delete-closure-and-spec-pull task-11：再扩第四元
+            # last_pushed_at，本函数同样不消费（行为不变），尾两元丢弃。
+            stage, completed, _, _ = info
             if StageProjectionService._map(stage, completed) is not None:
                 pending.add(k)
         return pending
 
     async def _project_current_stage(
         self, pairs: list[tuple[uuid.UUID, str]]
-    ) -> dict[tuple[uuid.UUID, str], tuple[str, set[str], dict | None]]:
+    ) -> dict[tuple[uuid.UUID, str], tuple[str, set[str], dict | None, str | None]]:
         """批量 read-only join ``platform_change_progress`` 取权威 current_stage。
 
         一次 ``select where (workspace_id, change_name) in (pairs)``（复合 IN，R-03 禁 N+1）。
         返回 ``(workspace_id, change_name) → (current_stage, completed_stages,
-        latest_progress)`` 三元组映射（2026-08-15-change-step-visibility task-01 /
-        D-002@v1：latest_progress 数据本来就在 SELECT 结果里，透传给调用方做 step 提取，
-        零新增查询）；未命中/解析失败/异常一律不进映射（调用方 fallback 现有值，D-003）。
-        latest_progress 结构异常不抛（防御性 isinstance）。shk_live_ 过渡期
-        workspace_id=NULL 行不匹配任何 change.workspace_id（change.workspace_id 非
-        None）→ 自然 fallback。
+        latest_progress, last_pushed_at)`` 四元组映射（2026-08-15-change-step-visibility
+        task-01 / D-002@v1：latest_progress 数据本来就在 SELECT 结果里，透传给调用方做
+        step 提取，零新增查询；2026-08-29-change-delete-closure-and-spec-pull task-11 /
+        design §8.1：SELECT 列表再顺带加 progress 行既有列 ``last_pushed_at``，供列表
+        「最后信号」投影，仍是零新增查询）；未命中/解析失败/异常一律不进映射（调用方
+        fallback 现有值，D-003）。latest_progress 结构异常不抛（防御性 isinstance）。
+        shk_live_ 过渡期 workspace_id=NULL 行不匹配任何 change.workspace_id
+        （change.workspace_id 非 None）→ 自然 fallback。``last_pushed_at`` 为 ISO
+        原文 String 透传（服务端零解析，畸形串防御归前端 task-12）。
         """
         if not pairs:
             return {}
@@ -1927,6 +2144,7 @@ class ChangeService:
             PlatformChangeProgressORM.workspace_id,
             PlatformChangeProgressORM.change_name,
             PlatformChangeProgressORM.latest_progress,
+            PlatformChangeProgressORM.last_pushed_at,
         ).where(
             tuple_(
                 PlatformChangeProgressORM.workspace_id,
@@ -1934,12 +2152,12 @@ class ChangeService:
             ).in_(pairs)
         )
         rows = (await self._session.execute(stmt)).all()
-        mapping: dict[tuple[uuid.UUID, str], tuple[str, set[str], dict | None]] = {}
-        for ws_id, change_name, latest_progress in rows:
+        mapping: dict[tuple[uuid.UUID, str], tuple[str, set[str], dict | None, str | None]] = {}
+        for ws_id, change_name, latest_progress, last_pushed_at in rows:
             stage = self._extract_current_stage(latest_progress)
             if stage is not None and ws_id is not None:
                 completed = self._extract_completed_stages(latest_progress)
-                mapping[(ws_id, change_name)] = (stage, completed, latest_progress)
+                mapping[(ws_id, change_name)] = (stage, completed, latest_progress, last_pushed_at)
         return mapping
 
     @staticmethod
@@ -2178,7 +2396,12 @@ class ChangeService:
         if parsed.affected_components:
             row.affected_components = parsed.affected_components
         row.change_key = parsed.change_key
-        row.location = parsed.location
+        # B-1 三点豁免③（task-03 / R-09）：墓碑行（location='deleted'）不回翻
+        # location——parser 即便产出同名 parsed（如镜像文件短暂复活后被 reparse 扫到）
+        # 也不把平台删除标记覆盖回 active/archive，审计锚点行由平台删除动作保证存活。
+        # 仅保护 location 字段，其余字段（title/path/current_stage 等）更新语义不变。
+        if row.location != "deleted":
+            row.location = parsed.location
         row.path = parsed.path
         # ql-20260702-001：同步推断的 current_stage（fallback；dispatch 读 sillyspec.db 时覆盖）
         # D-002@v1（2026-08-01-proxy-create-race-fix）：仅扫描历史行（owner_id=None）才用

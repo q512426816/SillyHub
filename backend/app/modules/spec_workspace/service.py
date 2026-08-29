@@ -33,7 +33,9 @@ from app.core.config import Settings, get_settings
 from app.core.db import get_session_factory
 from app.core.errors import AppError, SpecWorkspaceNotFound
 from app.core.logging import get_logger
+from app.modules.change.quicklog_parser import parse_quicklog_directory
 from app.modules.daemon.model import DaemonChangeWrite
+from app.modules.platform_sync.model import QuicklogEntryORM
 from app.modules.spec_workspace.model import SpecFileManifest, SpecWorkspace
 from app.modules.spec_workspace.schema import (
     FileOp,
@@ -68,6 +70,17 @@ BATCH_FLUSH_INTERVAL_S = 0.5
 # 用于清存量 landing 树的历史 local.yaml 行（软删入备份区，不入浏览树/导出包）。
 # 生产端（CLI spec-sync.js / daemon）同步排除属优化非必需，daemon 侧留遗留。
 SERVER_EXCLUDED_FILENAMES = frozenset({"local.yaml"})
+
+# task-08（2026-08-29-change-delete-closure-and-spec-pull / FR-08 / design §7.3）：
+# bundle tar 顶层的快照元数据成员名。内容 ``{spec_version, strategy, generated_at,
+# server}`` 由 build_bundle 内存生成（不落 spec_root 磁盘，镜像树/manifest 零污染），
+# 用户/CLI 离线可辨快照新旧。
+BUNDLE_METADATA_MEMBER = "PLATFORM-BUNDLE.json"
+
+# task-05（2026-08-29-change-delete-closure-and-spec-pull / FR-03b / design §5.3）：
+# quicklog 镜像目录在 spec 树内的固定前缀——apply_ops 的 ops 含此前缀路径才触发
+# pushed 行对账（R-03：不含时零触发零额外查询，不新增整树扫描）。
+QUICKLOG_DIR_PREFIX = "quicklog/"
 
 
 def _is_server_excluded_write(op: "FileOp") -> bool:
@@ -630,15 +643,23 @@ class SpecWorkspaceService:
     async def build_bundle(
         self,
         workspace_id: uuid.UUID,
-    ) -> tuple[str, Iterator[bytes]]:
+    ) -> tuple[str, int, Iterator[bytes]]:
         """Stream the server ``spec_root`` as a tar stream.
 
         Excludes any ``.runtime/`` directory (top-level or nested) — that is
-        daemon runtime cache, not spec data (R-02 / design §7.2).
+        daemon runtime cache, not spec data (R-02 / design §7.2) — plus
+        ``SERVER_EXCLUDED_FILENAMES`` (local.yaml, ql-20260818-002).
 
-        Returns ``(spec_root_abs, tar_byte_chunks)``. The generator yields the
-        tar in chunks so the caller can feed it directly to ``StreamingResponse``
-        without buffering the whole tree in memory.
+        Change 2026-08-29-change-delete-closure-and-spec-pull task-08（FR-08 /
+        design §7.3）：tar 顶层新增内存生成的 ``PLATFORM-BUNDLE.json`` 快照元数据
+        ``{spec_version, strategy, generated_at, server}``——用户/CLI 离线可辨快照
+        新旧。成员由内存构造（不经 rglob、不落 spec_root 磁盘），镜像树与
+        manifest 对账零污染。返回值扩展为 ``(spec_root_abs, spec_version,
+        tar_byte_chunks)``——路由侧据此回 ``X-Spec-Version`` 响应头。
+
+        The generator yields the tar in chunks so the caller can feed it
+        directly to ``StreamingResponse`` without buffering the whole tree in
+        memory.
         """
         spec_ws = await self.get(workspace_id)
         spec_root = Path(spec_ws.spec_root)
@@ -648,6 +669,8 @@ class SpecWorkspaceService:
         spec_root.mkdir(parents=True, exist_ok=True)
 
         spec_root_abs = str(spec_root)
+        spec_version = int(spec_ws.spec_version or 0)
+        strategy = spec_ws.strategy
 
         def _stream() -> Iterator[bytes]:
             buf = io.BytesIO()
@@ -655,6 +678,18 @@ class SpecWorkspaceService:
             # in memory here for simplicity. Spec trees are small (R-02); a
             # future task can swap to a real chunked pipe if needed.
             with tarfile.open(fileobj=buf, mode="w") as tar:
+                # 快照元数据成员（task-08）：generated_at 取打包时刻 UTC ISO；
+                # server 取 hub 对外 origin（多平台实例部署下可辨快照来源）。
+                meta = {
+                    "spec_version": spec_version,
+                    "strategy": strategy,
+                    "generated_at": datetime.now(UTC).isoformat(),
+                    "server": get_settings().hub_proxy_base_url,
+                }
+                meta_bytes = json.dumps(meta, ensure_ascii=False, indent=2).encode("utf-8")
+                meta_info = tarfile.TarInfo(name=BUNDLE_METADATA_MEMBER)
+                meta_info.size = len(meta_bytes)
+                tar.addfile(meta_info, io.BytesIO(meta_bytes))
                 for path in sorted(spec_root.rglob("*")):
                     rel = path.relative_to(spec_root)
                     # Exclude .runtime/ at any depth.
@@ -664,6 +699,11 @@ class SpecWorkspaceService:
                     # 不跨机分发）；landing 树存量文件即使残留也不出服务器。
                     if path.name in SERVER_EXCLUDED_FILENAMES:
                         continue
+                    # 磁盘上顶层同名残留（daemon 回灌带旧元数据的整树等）不随包
+                    # 下发——与内存成员重名时整包解压「后写覆盖前写」，旧快照
+                    # 元数据会冒充本次快照；嵌套同名文件不冲突，照常分发。
+                    if str(rel) == BUNDLE_METADATA_MEMBER:
+                        continue
                     tar.add(path, arcname=str(rel), recursive=False)
             buf.seek(0)
             while True:
@@ -672,7 +712,7 @@ class SpecWorkspaceService:
                     break
                 yield chunk
 
-        return spec_root_abs, _stream()
+        return spec_root_abs, spec_version, _stream()
 
     @staticmethod
     def _extract_spec_tar_to_staging(
@@ -727,6 +767,40 @@ class SpecWorkspaceService:
         # filter="data"：拒绝链接/设备/绝对路径等危险成员（与上方预检双保险）。
         tf.extractall(staging, members=members, filter="data")
         return tf, staging
+
+    async def _load_platform_deleted_prefixes(self, workspace_id: uuid.UUID) -> tuple[str, ...]:
+        """task-02（design §5.4 B-2 加固）：workspace manifest 中 platform_deleted=True
+        行 → 已平台删除目录前缀集。
+
+        活跃区 ``changes/{name}/``（两段）、归档区 ``changes/archive/{name}/``（三段），
+        尾缀带 ``/`` 保证前缀边界（``changes/foo/`` 不误吞 ``changes/foobar/...``）。
+        非 ``changes/`` 前缀的墓碑行不参与（平台删除入口只作用于变更目录，task-06）。
+        返回 tuple 供 ``str.startswith`` 前缀探测（一次命中即跳过，整目录排除）。
+        """
+        rows = (
+            (
+                await self._session.execute(
+                    select(SpecFileManifest.path).where(
+                        SpecFileManifest.workspace_id == workspace_id,
+                        SpecFileManifest.platform_deleted.is_(True),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        prefixes: set[str] = set()
+        for p in rows:
+            p = p.replace("\\", "/")
+            if p.startswith("changes/archive/"):
+                segs = p.split("/")[:3]  # changes/archive/{name}
+                if len(segs) == 3 and segs[2]:
+                    prefixes.add("/".join(segs) + "/")
+            elif p.startswith("changes/"):
+                segs = p.split("/")[:2]  # changes/{name}
+                if len(segs) == 2 and segs[1]:
+                    prefixes.add("/".join(segs) + "/")
+        return tuple(prefixes)
 
     async def _write_spec_root(
         self,
@@ -805,6 +879,10 @@ class SpecWorkspaceService:
                     )
                 ).scalars()
                 existing_by_path = {d.path: d for d in existing_rows}
+            # task-02（design §5.4 B-2 / 通道 3）：平台已删除目录前缀集——落盘集
+            # 计算阶段整目录排除（见循环内 continue）。查询与 ScanDocument 预取同批，
+            # 不在 FS 循环期间重开读事务（见下方②注释）。
+            platform_deleted_prefixes = await self._load_platform_deleted_prefixes(workspace_id)
             # ql-20260817-005：事务释放点②——下方逐文件循环（read/sha256/move 全
             # FS；冲突行/新 doc 收集进 pending 不 add；既有行改写是纯属性赋值；
             # 进度回写走独立 session）主连接零 SQL、零事务。若循环内 add/delete
@@ -822,6 +900,16 @@ class SpecWorkspaceService:
                 # 500。此处与 build_bundle（pull 方向，service.py:520）任意深度排除对称。纵深防御：
                 # daemon packSpecDir 已默认排除 `.runtime`，此分支兜底防历史 tar / 其它打包源。
                 if any(part == ".runtime" for part in rel_path.split("/")):
+                    continue
+                # task-02（design §5.4 B-2 / 通道 3）：daemon 增量失败回退整树 tar /
+                # 手动全量同步时，已平台删除目录的成员不落盘——前缀级排除优先于逐
+                # 路径精确匹配（顺带闭合成员本地「新增从未见路径」绕过精确匹配的
+                # P2 边角）。跳过点在 _load_member 之前（其 mkdir 会凭空建出幽灵父
+                # 目录）；不 move、不入 landed_paths/landed_hashes（对账环与 manifest
+                # 对齐环因此不触达这些行，墓碑维持；文件留 staging 随 finally rmtree
+                # 消失）——仅挡 manifest 对齐环不够，文件一旦回磁盘 reparse 即翻回
+                # active（R-10）。
+                if platform_deleted_prefixes and rel_path.startswith(platform_deleted_prefixes):
                     continue
                 src_file = staging / m.name
                 target = spec_root / rel_path
@@ -1263,6 +1351,39 @@ class SpecWorkspaceService:
         return converged, converged_dirs
 
     @staticmethod
+    def _cleanup_empty_dirs(spec_root: Path, rel_dirs: set[str]) -> int:
+        """task-02（design §5.1 / FR-02 幽灵目录）：清理 ops 涉及目录链上的空目录。
+
+        ``rel_dirs`` 为本次 ops 涉及的父目录（delete 的 op.path / rename 的源与目标
+        路径的父目录，spec_root 相对 POSIX 路径）。对每个涉及目录沿父链收集到
+        spec_root（不含根本身），按路径深度降序**自底向上** rmdir：目录空
+        （``os.listdir`` 实时探空，复用 ``_converge_stale_files`` 范式）则删、非空即
+        跳过（父目录因含非空子目录自然探非空，等效「非空即停」）、OSError 一律忽略
+        （目录不存在 / 并发写入 / Windows 句柄滞留等）。**仅触碰 ops 涉及目录链，
+        禁止 rglob 整树**（R-03：Windows bind mount stat 性能断崖）。全同步 FS 段，
+        调用方需整体入 ``asyncio.to_thread``。返回清理的目录数。
+        """
+        chain: set[Path] = set()
+        for rel in rel_dirs:
+            rel = rel.replace("\\", "/").strip("/")
+            if not rel:
+                continue
+            cur = spec_root / rel
+            # cur.parent == cur 即文件系统根，防 spec_root 异常形态下的死循环
+            while cur != spec_root and cur.parent != cur:
+                chain.add(cur)
+                cur = cur.parent
+        removed = 0
+        for dir_path in sorted(chain, key=lambda p: len(p.parts), reverse=True):
+            try:
+                if not os.listdir(dir_path):
+                    os.rmdir(dir_path)
+                    removed += 1
+            except OSError:
+                continue
+        return removed
+
+    @staticmethod
     def _prune_spec_backups(backup_root: Path) -> None:
         """R-06：机会式修剪备份区早于 30 天的旧 timestamp 目录。
 
@@ -1287,6 +1408,100 @@ class SpecWorkspaceService:
                         "spec_workspace.backup_prune_failed",
                         backup_dir=str(backup_root / name),
                     )
+
+    async def soft_delete_change_dir(
+        self,
+        workspace_id: uuid.UUID,
+        change_key: str,
+        *,
+        location: str = "active",
+    ) -> dict[str, object]:
+        """平台删除入口的镜像目录软删（task-06 / design §6.1 步骤①，FR-05b）。
+
+        按 ``location`` 选镜像前缀（``archive`` → ``changes/archive/{name}/``，其余 →
+        ``changes/{name}/``——归档区行同样可删），manifest 前缀枚举现存文件
+        （``exists=True``）逐文件 ``_move_op_file`` 移入 30 天备份区
+        ``backup_root/{BACKUP_TS_FORMAT 时间戳}/<rel>``（与增量 delete op 同构的 move
+        软删，D-010），manifest 行置 ``exists=False`` / ``version+1`` /
+        ``platform_deleted=True``（base_version 直读 manifest 现值、不经上行乐观锁，
+        零 409 冲突）；目录空后自底向上 rmdir（task-02 ``_cleanup_empty_dirs`` 范式：
+        仅触碰该变更目录链，禁整树扫描，R-03），末尾机会式修剪备份区
+        （``_prune_spec_backups``，R-06）。
+
+        - 前缀匹配：取回 workspace manifest 行后 Python ``startswith`` 逐字符过滤
+          （卡内二法择一）：变更名含 ``_`` 常见，SQL LIKE 未转义时 ``_`` 是单字符
+          通配符（与 platform_sync ``_change_key_deleted`` 同口径）。
+        - 前缀内既有 ``exists=False`` 行（增量协议软删过）只补
+          ``platform_deleted=True``（前缀级墓碑完整性——保证 task-02
+          ``_load_platform_deleted_prefixes`` 落盘排除与 task-04 拒收兜底锚点对整
+          目录生效），不 move 不 version+1（无 op 应用，乐观锁谱系不动）。
+        - 磁盘文件已缺失（并发删 / 从未落盘）→ ``FileNotFoundError`` 容错，标记
+          照落（对齐 apply_ops delete 分支）。
+        - 零文件幂等：返回 ``file_count=0`` 不抛。
+
+        返回 ``{"backup_dir": str, "file_count": int}``（task-06 审计 detail 消费）。
+        """
+        spec_ws = await self.get(workspace_id)
+        spec_root = Path(spec_ws.spec_root)
+        prefix = (
+            f"changes/archive/{change_key}/" if location == "archive" else f"changes/{change_key}/"
+        )
+        rows = (
+            (
+                await self._session.execute(
+                    select(SpecFileManifest).where(
+                        SpecFileManifest.workspace_id == workspace_id,
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        touched = [r for r in rows if r.path.replace("\\", "/").startswith(prefix)]
+        # ql-20260817-005：事务释放点——下方 FS 循环（move）前 commit 释放枚举读事务
+        # （见 apply_ops 同注释）；行改写是纯属性赋值，集中在最终 commit 单事务落库。
+        await self._session.commit()
+
+        settings = get_settings()
+        backup_root = self._backup_root(settings, workspace_id)
+        ts = datetime.now(UTC).strftime(BACKUP_TS_FORMAT)
+        now = datetime.now(UTC)
+        file_count = 0
+        # task-02 范式：涉及目录 = 变更目录本身 + 各被移文件的父目录链（自底向上
+        # 非空即停；changes/ 根因其它变更存在天然保留）。
+        cleanup_dirs: set[str] = {prefix.rstrip("/")}
+        for row in touched:
+            if row.exists:
+                src = spec_root / row.path
+                dest = backup_root / ts / row.path
+                try:
+                    # ql-20260818-009：mkdir+move 整体入线程（见 _move_op_file）。
+                    await asyncio.to_thread(self._move_op_file, src, dest)
+                except FileNotFoundError:
+                    # 磁盘文件已不存在（并发删/从未落盘）→ 仅推进状态，软删语义仍成立
+                    pass
+                row.exists = False
+                row.version = row.version + 1
+                row.updated_at = now
+                file_count += 1
+                parent = str(PurePosixPath(row.path).parent)
+                if parent != ".":
+                    cleanup_dirs.add(parent)
+            if not row.platform_deleted:
+                row.platform_deleted = True
+                row.updated_at = now
+
+        await asyncio.to_thread(self._cleanup_empty_dirs, spec_root, cleanup_dirs)
+        await asyncio.to_thread(self._prune_spec_backups, backup_root)
+        await self._session.commit()
+        log.info(
+            "spec_workspace.change_dir_soft_deleted",
+            workspace_id=str(workspace_id),
+            change_key=change_key,
+            location=location,
+            file_count=file_count,
+        )
+        return {"backup_dir": str(backup_root / ts), "file_count": file_count}
 
     async def apply_ops(
         self,
@@ -1352,6 +1567,13 @@ class SpecWorkspaceService:
         new_versions: dict[str, int] = {}
         server_versions: dict[str, int] | None = None
         conflict = False
+        # task-02（design §5.4/§11）：被 platform_deleted 墓碑拒绝的 add/rename 路径
+        # （返回 dict 新增键，conflict 语义的显式回告——CLI 可感知被拒路径）。
+        platform_deleted_paths: list[str] = []
+        # task-02（design §5.1 / FR-02）：本次 ops 涉及目录（delete 的 op.path /
+        # rename 的源与目标路径的父目录）——循环后统一自底向上清理空目录（仅涉及
+        # 目录链，R-03 禁整树扫描）。
+        cleanup_dirs: set[str] = set()
 
         # task-03 / D-002@v1：循环前一次 IN 预取全部 op 涉及路径（path ∪ new_path）
         # 的清单行，消除原 per-op SELECT 的 N+1（照抄上文 _write_spec_root 的
@@ -1391,6 +1613,19 @@ class SpecWorkspaceService:
         progress = _BatchProgressWriter(change_write_id)
         try:
             for op in ops:
+                # task-02（design §5.1）：收集 ops 涉及目录（delete / rename 才会改变
+                # 目录占用形态；update/add 只增不空）。conflict 被跳过的 op 同样收集——
+                # 其文件未搬走，目录探空自然不通过，零副作用（见 _cleanup_empty_dirs）。
+                if op.op == "delete":
+                    parent = str(PurePosixPath(op.path).parent)
+                    if parent != ".":
+                        cleanup_dirs.add(parent)
+                elif op.op == "rename" and op.new_path is not None:
+                    for involved in (op.path, op.new_path):
+                        parent = str(PurePosixPath(involved).parent)
+                        if parent != ".":
+                            cleanup_dirs.add(parent)
+
                 # 查清单行（workspace_id+path）——task-03 起查预取 dict（miss 即 None）
                 row = manifest_by_path.get(op.path)
 
@@ -1402,6 +1637,18 @@ class SpecWorkspaceService:
                 # 对客户端不可见，add 即「客户端树里该文件存在」的权威声明：写盘 +
                 # 原地复活（version+1、exists=True），不进冲突路径。
                 if op.op == "add" and row is not None and row.exists is False:
+                    # task-02（design §5.4 通道 1）：平台删除墓碑（platform_deleted=
+                    # True，仅平台删除动作置位）不可被 add 复活——多用户下另一成员
+                    # CLI 以 manifest 为锚 diff 本地残留文件会发 add。拒绝落盘：
+                    # conflict + server_versions + platform_deleted 列表显式回告
+                    # （design §11），行维持墓碑不翻 exists。
+                    if row.platform_deleted:
+                        conflict = True
+                        if server_versions is None:
+                            server_versions = {}
+                        server_versions[op.path] = row.version
+                        platform_deleted_paths.append(op.path)
+                        continue
                     if op.content is None:
                         raise _spec_bundle_invalid(
                             "同步包无效：新增/更新操作缺少文件内容。",
@@ -1503,6 +1750,17 @@ class SpecWorkspaceService:
                     # 愈合同步永久卡死（2026-08-19-quick-done-autoarchive-misfire
                     # 缺陷②）。墓碑的磁盘文件已在备份区，rename 结果原地复活墓碑。
                     target_row = manifest_by_path.get(op.new_path)
+                    # task-02（design §5.4 通道 2）：rename 目标命中 platform_deleted
+                    # 墓碑 → 拒绝复活（daemon 增量把本地残留搬进平台已删目录）。与下方
+                    # exists 占用判断同构回告：conflict + server_versions +
+                    # platform_deleted 项，不落盘不复活（区别于普通软删墓碑的放行复活）。
+                    if target_row is not None and target_row.platform_deleted:
+                        conflict = True
+                        if server_versions is None:
+                            server_versions = {}
+                        server_versions[op.new_path] = target_row.version
+                        platform_deleted_paths.append(op.new_path)
+                        continue
                     if target_row is not None and target_row.exists:
                         conflict = True
                         if server_versions is None:
@@ -1603,6 +1861,38 @@ class SpecWorkspaceService:
             # task-03 / R-02：终态回写兜底（含 422 中断路径——已处理计数最终准确）。
             await progress.flush()
 
+        # task-02（design §5.1 / FR-02 幽灵目录堵点）：ops 涉及目录链的空目录清理。
+        # delete/rename 逐文件软删不动目录，parser 对空目录照常产出 key → 即使全量
+        # reparse 该 key 仍在 seen_keys，DB 行连全量都删不掉（§1.1 堵点）；目录真
+        # 消失后删除判据才生效。发生在 reparse 触发之前（parser 枚举不到已消失目录）；
+        # 仅涉及目录链、自底向上非空即停、OSError 忽略（见 _cleanup_empty_dirs）；
+        # FS 段入线程（R-03 / ql-20260818-009 范式）。
+        if cleanup_dirs:
+            removed_dirs = await asyncio.to_thread(
+                self._cleanup_empty_dirs, spec_root, cleanup_dirs
+            )
+            if removed_dirs:
+                log.info(
+                    "spec_workspace.apply_ops_dirs_cleaned",
+                    workspace_id=str(workspace_id),
+                    removed_dirs=removed_dirs,
+                )
+
+        # task-05（design §5.3 / FR-03b）：quicklog pushed 行 apply 期对账。ops 含
+        # quicklog/ 前缀路径时重解析镜像 quicklog/ 目录，文件集合中缺失 ql_id 的
+        # pushed 行置 hidden=True（本地删除的 QUICKLOG 条目软隐藏，推送留底可回滚），
+        # 文件重现的 hidden 行回翻 False。放在空目录清理之后（目录被清 → 重解析得
+        # 空集合 → 全量隐藏，与磁盘终态一致）；异常仅告警不阻断同步主流程（对齐
+        # 下方 reparse 触发容错范式，best-effort）。
+        try:
+            await self._reconcile_quicklog_hidden(workspace_id, ops, spec_root)
+        except Exception as exc:
+            log.warning(
+                "spec_workspace.quicklog_reconcile_failed",
+                workspace_id=str(workspace_id),
+                error=str(exc),
+            )
+
         # R-04 / D-005（change 2026-08-14-change-center-conversation-driven task-02）：
         # 落盘提交成功后，事务外 best-effort 触发 change reparse（独立 session），
         # 使 agent 会话新建的变更自动出现在 ux_changes 列表（命门链路）。
@@ -1620,7 +1910,78 @@ class SpecWorkspaceService:
             "new_versions": new_versions,
             "conflict": conflict,
             "server_versions": server_versions,
+            # task-02（design §5.4/§11）：被 platform_deleted 墓碑拒绝的 add/rename
+            # 路径（空列表=无拦截）。HTTP 响应模型暂不透出（task 约束：不改端点
+            # 签名），service 层契约先行，供后续 CLI 感知接线。
+            "platform_deleted": platform_deleted_paths,
         }
+
+    async def _reconcile_quicklog_hidden(
+        self,
+        workspace_id: uuid.UUID,
+        ops: list[FileOp],
+        spec_root: Path,
+    ) -> None:
+        """quicklog pushed 行 apply 期对账（task-05 / design §5.3 / FR-03b）。
+
+        仅当本次 ops 含 ``quicklog/`` 前缀路径时触发（R-03：不含时零触发零额外
+        查询）；复用 ``parse_quicklog_directory`` 重解析**镜像 quicklog/ 目录**
+        （自带 name+mtime 指纹缓存，不做整树扫描）取文件侧 ql_id 集合，与该
+        workspace 的 ``QuicklogEntryORM`` pushed 行对账：
+
+        - ql_id 不在文件集合 → ``hidden=True``（软隐藏不硬删——推送留底可回滚，
+          design §15 Non-Goal；读侧 ``merge_entries`` 过滤，读改在本类之外）；
+        - ql_id 回到文件集合且当前 ``hidden=True`` → 回翻 ``hidden=False``（文件
+          重现即恢复）。
+
+        apply 时点文件刚落镜像（CLI 推送条目与文件 ops 同拍到达），不存在合并期
+        过滤方案的「文件同步滞后误杀刚推送条目」问题（design §5.3 方案 B 取舍）。
+        调用方（apply_ops commit 后 best-effort 段）包 try/except，异常仅告警。
+        """
+        touched = any(
+            p.replace("\\", "/").startswith(QUICKLOG_DIR_PREFIX)
+            for op in ops
+            for p in (op.path, op.new_path)
+            if p
+        )
+        if not touched:
+            return
+
+        # ql-20260818-009 范式：FS stat/读段入线程（bind mount 上同步扫描卡循环）。
+        entries = await asyncio.to_thread(parse_quicklog_directory, spec_root / "quicklog")
+        file_ql_ids = {e.ql_id for e in entries}
+
+        rows = (
+            (
+                await self._session.execute(
+                    select(QuicklogEntryORM).where(QuicklogEntryORM.workspace_id == workspace_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        now = datetime.now(UTC)
+        hidden_count = 0
+        restored_count = 0
+        for row in rows:
+            if row.ql_id in file_ql_ids:
+                if row.hidden:
+                    row.hidden = False
+                    row.updated_at = now
+                    restored_count += 1
+            elif not row.hidden:
+                row.hidden = True
+                row.updated_at = now
+                hidden_count += 1
+        if hidden_count or restored_count:
+            await self._session.commit()
+            log.info(
+                "spec_workspace.quicklog_reconciled",
+                workspace_id=str(workspace_id),
+                hidden=hidden_count,
+                restored=restored_count,
+                file_entries=len(file_ql_ids),
+            )
 
     @staticmethod
     def _compute_reparse_scope(

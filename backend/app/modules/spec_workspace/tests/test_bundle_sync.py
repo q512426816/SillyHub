@@ -43,13 +43,21 @@ async def _make_workspace(db_session, *, component_key: str | None = "comp") -> 
     return ws
 
 
-async def _make_spec_workspace(db_session, workspace: Workspace, spec_root: Path) -> SpecWorkspace:
+async def _make_spec_workspace(
+    db_session,
+    workspace: Workspace,
+    spec_root: Path,
+    *,
+    strategy: str = "platform-managed",
+    spec_version: int = 0,
+) -> SpecWorkspace:
     spec_ws = SpecWorkspace(
         id=uuid.uuid4(),
         workspace_id=workspace.id,
         spec_root=str(spec_root),
-        strategy="platform-managed",
+        strategy=strategy,
         sync_status="clean",
+        spec_version=spec_version,
     )
     db_session.add(spec_ws)
     await db_session.commit()
@@ -131,6 +139,75 @@ class TestBundle:
         )
         assert resp.status_code == 404
         assert resp.json()["code"] == "HTTP_404_SPEC_WORKSPACE_NOT_FOUND"
+
+
+# ===========================================================================
+# Bundle snapshot metadata（task-08 / FR-08 / design §7.3）
+# ===========================================================================
+
+
+class TestBundleMetadata:
+    """task-08（2026-08-29-change-delete-closure-and-spec-pull）：快照元数据。
+
+    - 响应头 ``X-Spec-Version`` = ``spec_ws.spec_version``（持包方不解包即可辨新旧）
+    - tar 顶层 ``PLATFORM-BUNDLE.json`` 含 {spec_version, strategy, generated_at,
+      server} 四键（离线可辨快照来源/时点）
+    - ``.runtime/`` 与 local.yaml 任意深度排除零回归 + 元数据不落 spec_root 磁盘
+    """
+
+    async def test_bundle_x_spec_version_header_and_metadata(
+        self, db_session, client: AsyncClient, auth_headers, tmp_path
+    ) -> None:
+        import json
+        from datetime import datetime
+
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        (spec_root / "docs").mkdir(parents=True)
+        (spec_root / "docs" / "A.md").write_text("# A", encoding="utf-8")
+        # 排除项素材：顶层 .runtime + 嵌套 .runtime + 顶层/嵌套 local.yaml
+        (spec_root / ".runtime").mkdir()
+        (spec_root / ".runtime" / "cache.log").write_text("cache", encoding="utf-8")
+        (spec_root / "changes").mkdir()
+        (spec_root / "changes" / "c1" / ".runtime").mkdir(parents=True)
+        (spec_root / "changes" / "c1" / ".runtime" / "x.db").write_text("db", encoding="utf-8")
+        (spec_root / "local.yaml").write_text("token: top", encoding="utf-8")
+        (spec_root / "changes" / "c1" / "local.yaml").write_text("token: nested", encoding="utf-8")
+        await _make_spec_workspace(
+            db_session, ws, spec_root, strategy="repo-mirrored", spec_version=12
+        )
+
+        resp = await client.get(
+            f"/api/workspaces/{ws.id}/spec-workspace/bundle",
+            headers=auth_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.headers["x-spec-version"] == "12"
+        with tarfile.open(fileobj=io.BytesIO(resp.content), mode="r:*") as tf:
+            names = tf.getnames()
+            # 顶层字面成员（非嵌套同名）
+            assert "PLATFORM-BUNDLE.json" in names
+            assert not any(
+                n != "PLATFORM-BUNDLE.json" and n.endswith("PLATFORM-BUNDLE.json") for n in names
+            )
+            raw = tf.extractfile("PLATFORM-BUNDLE.json")
+            assert raw is not None
+            meta = json.loads(raw.read())
+        assert set(meta) == {"spec_version", "strategy", "generated_at", "server"}
+        assert meta["spec_version"] == 12
+        assert meta["strategy"] == "repo-mirrored"
+        datetime.fromisoformat(str(meta["generated_at"]))  # 打包时刻 UTC ISO 可解析
+        assert isinstance(meta["server"], str) and meta["server"]
+
+        # 排除零回归：.runtime 任意深度 / local.yaml 任意深度不出服务器
+        for n in names:
+            assert ".runtime" not in n.split("/"), f"runtime leaked into bundle: {n}"
+            assert n.rsplit("/", 1)[-1] != "local.yaml", f"local.yaml leaked: {n}"
+        assert "docs/A.md" in names
+
+        # 元数据仅存在于 tar 流内，spec_root 磁盘零残留（镜像树不被污染）
+        assert not (spec_root / "PLATFORM-BUNDLE.json").exists()
 
 
 # ===========================================================================

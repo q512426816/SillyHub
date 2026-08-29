@@ -84,15 +84,21 @@ async def download_spec_bundle(
 
     Used by daemon-client workspaces to borrow the spec tree before an agent
     run. Excludes ``.runtime/`` (daemon runtime cache, not spec data).
+
+    task-08（2026-08-29-change-delete-closure-and-spec-pull / FR-08 / design
+    §7.3）：响应头追加 ``X-Spec-Version``（= ``spec_ws.spec_version``），tar 顶层
+    含内存生成的 ``PLATFORM-BUNDLE.json`` 快照元数据（service.build_bundle）——
+    持包方离线即可辨快照新旧，无需解包对账。
     """
     service = SpecWorkspaceService(session)
-    spec_root, tar_stream = await service.build_bundle(workspace_id)
+    spec_root, spec_version, tar_stream = await service.build_bundle(workspace_id)
     return StreamingResponse(
         tar_stream,
         media_type="application/x-tar",
         headers={
             "Content-Disposition": f'attachment; filename="spec-bundle-{workspace_id}.tar"',
             "X-Spec-Root": spec_root,
+            "X-Spec-Version": str(spec_version),
         },
     )
 
