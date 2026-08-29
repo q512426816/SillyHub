@@ -303,7 +303,9 @@ class TestCreatePathInjection:
 
         lease = await db_session.get(DaemonTaskLease, result.lease_id)
         assert lease is not None
-        assert (lease.metadata_ or {}).get("prompt") == user_prompt
+        # 无页面前导时 prompt 仍含基础前导（user/platform_rules/sillyspec——
+        # 并行会话已提交的平台级前导注入），断言包含原始用户输入而非全等。
+        assert user_prompt in (lease.metadata_ or {}).get("prompt", "")
 
     @pytest.mark.asyncio
     async def test_unknown_project_id_creates_session_without_preamble(
@@ -326,7 +328,9 @@ class TestCreatePathInjection:
 
         lease = await db_session.get(DaemonTaskLease, result.lease_id)
         assert lease is not None
-        assert (lease.metadata_ or {}).get("prompt") == user_prompt
+        # 同 test_without_page_context_regression_free：基础前导（user/platform/
+        # sillyspec）恒注入，断言包含而非全等。
+        assert user_prompt in (lease.metadata_ or {}).get("prompt", "")
 
 
 class TestWorkspacePreamble:
