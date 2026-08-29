@@ -72,6 +72,15 @@ export interface SessionPermissionPanelProps {
 const MAX_SESSION_SSE = 50;
 
 /**
+ * ql-20260829-005：永久性 SSE HTTP 错误码（401 凭证失效 / 403 无权限 / 404 会话
+ * 已删）。fetch-sse 对非 2xx 响应在 onerror 透传 ``status``——这些状态对同一
+ * token / 同一会话重试永远不会再成功，按退避每 30s 重打一次必败请求没有意义；
+ * 命中即停本会话的重连循环（网络中断 / 流结束 / 5xx 不在名单，照旧退避重连；
+ * token 刷新或 sessionIds 变化会经 effect deps 重建订阅自然重开）。
+ */
+const PERMANENT_SSE_ERROR_STATUSES = new Set([401, 403, 404]);
+
+/**
  * 合并 SSE 实时增量与查询兜底（design §4.4 C4）——纯函数，便于测试。
  *
  * 规则：按 request_id 幂等合并。
@@ -287,10 +296,22 @@ export function SessionPermissionPanel({
           fireConnectedOnce();
           handleFrame(e);
         };
-        es.onerror = () => {
+        es.onerror = (ev) => {
           // 404/401/网络中断：fetch-sse 不自动重连（task-12 取舍）——task-09 起
           // 按退避自动重建（上方 scheduleReconnect），refetchInterval 兜底保留。
           es.close();
+          // ql-20260829-005：永久性 HTTP 错误（见 PERMANENT_SSE_ERROR_STATUSES）
+          // 停本会话重连循环——closed 置位后 scheduleReconnect/wire 均 no-op，
+          // 已死连接从 sourcesRef 摘除（effect 重建/卸载时的统一清理不受影响）。
+          if (
+            ev &&
+            typeof ev.status === "number" &&
+            PERMANENT_SSE_ERROR_STATUSES.has(ev.status)
+          ) {
+            closed = true;
+            sourcesRef.current.delete(sid);
+            return;
+          }
           hadDisconnection = true;
           scheduleReconnect();
         };

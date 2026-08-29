@@ -459,3 +459,14 @@
 根因：昨日 618aaf39 审查发现两个问题：① dialog 模式 attach 挂起会话的 suspended 分支每 tick 归零 attempts，1.5s interval 无限高频轮询（挂起窗口以小时计，每客户端每分钟约 40 次 getAgentSession，page 模式已有 15s 低频档而 dialog 漏降频）；② permission-requests HTTP 上行端点声明 user 未用、daemon_id 从 session.runtime_id 反推致归属比对恒真，仅 claim_token 条件校验（无 claim 语义时跳过），形成任意有效凭证可对他理会话上行的弱校验面
 方案：① session-panel attach effect 增加 suspendedNow/lastPollAt 闭包节流，挂起期间实际拉取降频到 SUSPENDED_SESSION_REFETCH_MS、离开挂起恢复 1.5s 档；② handle_permission_request_http 新增 principal_user_id，runtime.user_id 不符 → 404 resource-hiding（对齐 pending-controls owner-only 惯例，归属先于 claim_token；借用 runtime 属 lender=凭证主体不受影响），router 传 user.id；顺手清偿 test_inject_session_model.py 6 处 mypy Optional 预存债（挡 commit hook）
 结果：后端 uplink 9（新增跨主体 404）+ inject_model 7 用例绿，mypy 776 文件 0 错，ruff 净；前端 suspended-display 12（新增节流用例+存量恢复断言适配）+ connection 11 用例绿，tsc 0 错
+
+## ql-20260829-005-86e9 | 2026-08-29 12:06:45 | 审批面板 SSE 永久性错误（401/403/404）停止退避重连
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/permissions/session-permission-panel.tsx（PERMANENT_SSE_ERROR_STATUSES + onerror 停连分支）
+- frontend/src/components/daemon/__tests__/session-panel-connection.test.tsx（新增停连/照旧重连两用例）
+需求：审批面板 SSE 永久性错误（401/403/404）停止退避重连
+根因：session-permission-panel 的 onerror 忽略 fetch-sse 透传的 status 码，会话已删/凭证失效/无权限也按 [1..30]s 退避无限重试必败请求（审查遗留观察项，用户指定收口）
+方案：新增 PERMANENT_SSE_ERROR_STATUSES={401,403,404}，onerror 改收 ev 参数——命中即置本会话订阅 closed 停重连循环并从 sourcesRef 摘除死连接；无 status（网络中断/流结束）与 5xx 照旧退避（task-09 行为不变）；token 刷新/sessionIds 变化经 effect deps 重建订阅自然重开
+结果：session-panel-connection 13 用例绿（新增 401/404 停连 + 503/无 status 照旧重连两用例），tsc 0 错；daemon.ts subscribeAgentSessionsEvents 同款形态未动（范围仅审批面板）

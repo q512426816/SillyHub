@@ -549,4 +549,47 @@ describe("SessionPermissionPanel SSE 无限退避重连（task-09 / design A6）
       vi.useRealTimers();
     }
   });
+
+  it("ql-20260829-005：永久性 HTTP 错误（401/404）停止退避重连——远超退避全档无第二次建连", async () => {
+    vi.useFakeTimers();
+    try {
+      // 404：会话已删（重试永远 404）
+      const v1 = render(<SessionPermissionPanel sessionIds={["s-1"]} />);
+      const conn1 = sseMock.fetchSse.mock.results.at(-1)!.value as FakeSseConn;
+      conn1.onerror!({ status: 404 });
+      await advance(120_000);
+      expect(sseMock.fetchSse).toHaveBeenCalledTimes(1);
+      v1.unmount();
+
+      // 401：凭证失效（同 token 重试永远 401；新 token 经 effect deps 重建订阅）
+      render(<SessionPermissionPanel sessionIds={["s-1"]} />);
+      const conn2 = sseMock.fetchSse.mock.results.at(-1)!.value as FakeSseConn;
+      conn2.onerror!({ status: 401 });
+      await advance(120_000);
+      expect(sseMock.fetchSse).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ql-20260829-005：5xx 与无 status（网络中断/流结束）不在停连名单——照旧退避重连", async () => {
+    vi.useFakeTimers();
+    try {
+      render(<SessionPermissionPanel sessionIds={["s-1"]} />);
+      const conn1 = sseMock.fetchSse.mock.results.at(-1)!.value as FakeSseConn;
+
+      // 503（服务端临时错误）：仍按退避重连（1s 首档）
+      conn1.onerror!({ status: 503 });
+      await advance(1000);
+      expect(sseMock.fetchSse).toHaveBeenCalledTimes(2);
+      const conn2 = sseMock.fetchSse.mock.results.at(-1)!.value as FakeSseConn;
+
+      // 无 status（网络中断 / 流结束，fetch-sse fail 不带 status）：仍重连（2s 次档）
+      conn2.onerror!({});
+      await advance(2000);
+      expect(sseMock.fetchSse).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
