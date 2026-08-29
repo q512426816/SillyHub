@@ -1412,8 +1412,26 @@ class ChangeService:
         # 三点豁免①②——审计锚点行保活，R-09，唯一物理清除通道是未来显式回收策略）。
         # 删除处连带删 platform_change_progress 收件箱行（FR-03a，见
         # _delete_progress_row；豁免/受保护跳过的行不触发联动删）。
-        progress_active_keys = await self._progress_reported_active_keys(workspace_id)
+        # 审计 A2（2026-08-29 合入后修复轮）：progress 占位保护查询改候选驱动——
+        # 先在内存算删除候选（key ∉ seen_keys；scoped 另要求 key ∈ scope 集；
+        # location='deleted' 墓碑行豁免，与下方删除环三道跳过条件一致），候选为空
+        # → 零查询（此前 scoped 每次也无条件拉全 workspace progress 整实体，含
+        # latest_progress 六表 JSON 肥列）；候选非空 → 仅按候选键 IN 过滤拉行
+        # （7 天窗逻辑不变）。rename 检测已在上方改写 existing_by_key（旧 key 弹出、
+        # 新 key 入位），候选集与删除环遍历集同源，行为不变。
         scope_set = set(scope) if scope is not None else None
+        delete_candidates = [
+            key
+            for key, row in existing_by_key.items()
+            if key not in seen_keys
+            and (scope_set is None or key in scope_set)
+            and row.location != "deleted"
+        ]
+        progress_active_keys = (
+            await self._progress_reported_active_keys(workspace_id, keys=delete_candidates)
+            if delete_candidates
+            else set()
+        )
         for key, row in existing_by_key.items():
             if key in seen_keys:
                 continue
@@ -1444,7 +1462,9 @@ class ChangeService:
         log.info("changes.reparsed", workspace_id=str(workspace_id), **stats)
         return stats, result
 
-    async def _progress_reported_active_keys(self, workspace_id: uuid.UUID) -> set[str]:
+    async def _progress_reported_active_keys(
+        self, workspace_id: uuid.UUID, keys: list[str] | None = None
+    ) -> set[str]:
         """ql-20260815-002：platform_change_progress 最近一次上行仍报 active 的 key 集合。
 
         读 ``(workspace_id, change_name)`` 收件箱行的 ``latest_progress.changes[]``，
@@ -1456,21 +1476,21 @@ class ChangeService:
         保护集（时效字段用服务端 tz-aware 审计列 updated_at，非 String(64) 的
         last_pushed_at——后者是客户端原值 / 乐观锁基准，非时效源）。测试残留的
         一次性上行占位行不再永久滞留「进行中」。
+
+        审计 A2（2026-08-29 合入后修复轮）：``keys`` 可选参数做 change_name IN
+        过滤——调用方（reparse 删除环）先算删除候选，只拉候选键的收件箱行
+        （消除 scoped 下全 workspace 无界拉取整实体，含 latest_progress 肥列）；
+        ``None`` 保持原全量语义（缺省兼容旧调用）。
         """
         try:
             from app.modules.platform_sync.model import PlatformChangeProgressORM
 
-            rows = (
-                (
-                    await self._session.execute(
-                        select(PlatformChangeProgressORM).where(
-                            col(PlatformChangeProgressORM.workspace_id) == workspace_id
-                        )
-                    )
-                )
-                .scalars()
-                .all()
+            stmt = select(PlatformChangeProgressORM).where(
+                col(PlatformChangeProgressORM.workspace_id) == workspace_id
             )
+            if keys is not None:
+                stmt = stmt.where(col(PlatformChangeProgressORM.change_name).in_(keys))
+            rows = (await self._session.execute(stmt)).scalars().all()
         except Exception as exc:  # best-effort 守卫，任何 DB 异常降级空集
             log.warning(
                 "change.reparse_progress_lookup_failed",

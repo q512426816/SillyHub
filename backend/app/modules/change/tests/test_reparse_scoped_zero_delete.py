@@ -332,5 +332,47 @@ async def test_scoped_reparse_detects_rename_within_scope(db_session, tmp_path):
     assert await _fetch(db_session, ws.id, "2026-08-14-out") is not None
 
 
+# ===========================================================================
+# 审计 A2（2026-08-29 合入后修复轮）：删除候选守卫——零候选不查 progress 表
+# ===========================================================================
+
+
+async def test_scoped_reparse_zero_delete_candidates_skips_progress_query(
+    db_session, tmp_path, monkeypatch
+):
+    """审计 A2：scope 内全部 seen（零删除候选）→ ``_progress_reported_active_keys``
+    零调用——scoped reparse 不再无条件拉全 workspace progress 整实体（含
+    latest_progress 六表 JSON 肥列，占位保护只服务于删除候选）。"""
+    ws = await _make_ws(db_session)
+    spec_root = tmp_path / "spec-root"
+    await _make_spec_ws(db_session, ws, spec_root)
+    _seed_change(spec_root, "2026-08-14-zero-cand", "Zero")
+
+    service = ChangeService(db_session)
+    stats, _ = await service.reparse(ws.id)
+    assert stats["created"] == 1
+
+    calls: list[object] = []
+    original = ChangeService._progress_reported_active_keys
+
+    async def _spy(self, ws_id, keys=None):
+        calls.append(keys)
+        return await original(self, ws_id, keys=keys)
+
+    monkeypatch.setattr(ChangeService, "_progress_reported_active_keys", _spy)
+
+    # scope 内变更仍在磁盘 → 全部 seen → 零删除候选 → progress 表零查询
+    stats, _ = await service.reparse(ws.id, scope=["2026-08-14-zero-cand"])
+    assert stats["updated"] == 1
+    assert stats["deleted"] == 0
+    assert calls == [], "零删除候选时不得查询 platform_change_progress"
+
+    # 对照锚：scope 内磁盘消失（候选非空）→ 查询按需发生且带 IN 过滤键
+    shutil.rmtree(spec_root / "changes" / "2026-08-14-zero-cand")
+    stats, _ = await service.reparse(ws.id, scope=["2026-08-14-zero-cand"])
+    assert stats["deleted"] == 1
+    assert calls == [["2026-08-14-zero-cand"]], "候选非空时按候选键 IN 过滤查询"
+
+
 # Suppress unused-import warning for pytest fixture discovery.
 pytestmark = pytest.mark.asyncio
