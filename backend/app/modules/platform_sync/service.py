@@ -286,13 +286,19 @@ class PlatformSyncService:
         - ① 主判据：现存 Change 行 ``location='deleted'``（``(workspace_id,
           change_key)`` 精确查询）。行存在且未删 → 以行为准返回 False（兜底判据
           只在行缺失时启用，防陈旧 manifest 锚点误伤活跃变更）。
-        - ② 兜底判据：行缺失时探测 ``spec_file_manifest`` 中 ``changes/{name}/``
-          前缀下是否存在 ``platform_deleted=True`` 行（持久锚点——Change 行被
-          旧删除环物理删后的第二道防线，task-03 豁免落地前行可能短暂缺失）。
-          前缀匹配取回 workspace 全部 ``platform_deleted=True`` 行后 Python
-          ``startswith`` 逐字符过滤（卡内二法择一）：变更名含 ``_`` 常见，SQL
-          LIKE 未转义时 ``_`` 是单字符通配符，会把 ``my_change`` 误配到
-          ``myXchange`` 等相似名；startswith 天然无通配语义，跨方言零转义负担。
+        - ② 兜底判据：行缺失时探测 ``spec_file_manifest`` 中活跃区
+          ``changes/{name}/`` 与归档区 ``changes/archive/{name}/`` 前缀下是否
+          存在 ``platform_deleted=True`` 行（持久锚点——Change 行被旧删除环
+          物理删后的第二道防线，task-03 豁免落地前行可能短暂缺失；归档区为
+          审计 A3 补口：平台删除已归档变更的墓碑落在三段前缀，原实现漏探）。
+          查询形态：两条索引范围查询（走 ``(workspace_id, path)`` 唯一索引，
+          ``path >= '{name}/' AND path < '{name}0'``，LIMIT 1 + first() 取
+          EXISTS 语义）——消除原「取回全 workspace platform_deleted 行后 Python
+          startswith」的无界扫描。上界 ``{name}0``：'0'(0x30) 恰为 '/'(0x2F)
+          的后继字符，字典序吞尽前缀内任意路径、不越到 ``{name}0xx`` /
+          ``{name}bar`` 等兄弟名；范围比较逐字符精确，无 LIKE ``_`` 通配歧义
+          （含下划线变更名不误配相似名，test_manifest_prefix_no_false_match
+          回归锚）。
 
         ``workspace_id=None`` → False（无 workspace 定位不猜，与 ``_ensure_change_row``
         防御分支口径一致；写端点恒非 None，仅 service 直调场景可达）。
@@ -313,20 +319,36 @@ class PlatformSyncService:
         if existing is not None:
             return existing.location == "deleted"
 
-        prefix = f"changes/{name}/"
-        tombstone_paths = (
-            (
-                await self._session.execute(
-                    select(SpecFileManifest.path).where(
-                        col(SpecFileManifest.workspace_id) == workspace_id,
-                        col(SpecFileManifest.platform_deleted).is_(True),
+        # 审计 A3（2026-08-29 合入后修复轮）：两条范围查询分别覆盖活跃区两段
+        # 前缀与归档区三段前缀（见 docstring——原实现全量拉取 + startswith 且漏
+        # 归档区）。任一命中即已删。注意上界是 ``{name}0``（**剥尾斜杠**再补 '0'）：
+        # '/'(0x2F) 恰小于 '0'(0x30)，``changes/foo/anything`` 字典序都落在
+        # ``[changes/foo/, changes/foo0)`` 内，而 ``changes/foo0xx`` /
+        # ``changes/foobar`` 等兄弟名全部排除；若误写成 ``changes/foo/0`` 则
+        # 普通字母开头文件名（'a'-'z' > '0'）全部逃出范围、查询恒空。
+        for lower, upper in (
+            (f"changes/{name}/", f"changes/{name}0"),
+            (f"changes/archive/{name}/", f"changes/archive/{name}0"),
+        ):
+            hit = (
+                (
+                    await self._session.execute(
+                        select(SpecFileManifest.path)
+                        .where(
+                            col(SpecFileManifest.workspace_id) == workspace_id,
+                            col(SpecFileManifest.path) >= lower,
+                            col(SpecFileManifest.path) < upper,
+                            col(SpecFileManifest.platform_deleted).is_(True),
+                        )
+                        .limit(1)
                     )
                 )
+                .scalars()
+                .first()
             )
-            .scalars()
-            .all()
-        )
-        return any(p.startswith(prefix) for p in tombstone_paths)
+            if hit is not None:
+                return True
+        return False
 
     async def _ensure_change_row(
         self,

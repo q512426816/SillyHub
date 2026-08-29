@@ -139,16 +139,20 @@ async def _add_deleted_change_row(db_session, ws_id, name, *, owner_id=None):
     return row
 
 
-async def _add_manifest_anchor(db_session, ws_id, name, *, filename: str = "proposal.md"):
-    """造 manifest ``changes/{name}/{filename}`` 行并置 ``platform_deleted=True``
-    （兜底判据锚点；task-06 平台删除动作的落点形态）。"""
+async def _add_manifest_anchor(
+    db_session, ws_id, name, *, filename: str = "proposal.md", archive: bool = False
+):
+    """造 manifest ``changes/{name}/{filename}``（或归档区 ``changes/archive/{name}/
+    {filename}``）行并置 ``platform_deleted=True``（兜底判据锚点；task-06 平台删除
+    动作的落点形态）。"""
     from app.modules.spec_workspace.model import SpecFileManifest
 
+    prefix = "changes/archive/" if archive else "changes/"
     db_session.add(
         SpecFileManifest(
             id=_uuid.uuid4(),
             workspace_id=ws_id,
-            path=f"changes/{name}/{filename}",
+            path=f"{prefix}{name}/{filename}",
             content_hash="0" * 64,
             version=2,
             exists=False,
@@ -226,6 +230,27 @@ async def test_ensure_change_row_direct_guard_manifest_anchor(db_session):
         ws_id, "direct-c", _progress("direct-c")
     )
     assert await _get_change(db_session, ws_id, "direct-c") is None
+
+
+# ── ②b 审计 A3：归档区墓碑兜底命中（原实现只探活跃区两段前缀） ────────────────
+
+
+async def test_missing_row_archive_manifest_anchor_rejected_409(client, db_session):
+    """审计 A3：行缺失 + manifest ``changes/archive/{name}/`` 前缀
+    platform_deleted=True 锚点 → 409（软删归档变更后 Change 行被物理删，上行
+    仍拒收）；兄弟名不受范围上界外溢牵连。"""
+    ws_id, _users, headers = await _make_ws_and_users_with_tokens(db_session)
+    await _add_manifest_anchor(db_session, ws_id, "arch-c", archive=True)
+
+    rejected = await _push(client, headers[0], "arch-c")
+    assert rejected.status_code == 409
+    assert rejected.json()["code"] == "change_deleted"
+    assert await _get_change(db_session, ws_id, "arch-c") is None
+    assert await _get_progress_row(db_session, ws_id, "arch-c") is None
+
+    # 范围上界 {name}0 不外溢：兄弟名（arch-cx / arch-c0x）不受归档锚点牵连
+    ok = await _push(client, headers[0], "arch-cx")
+    assert ok.status_code == 200
 
 
 # ── ③ 前缀精确性（LIKE 转义等价）：含 _ 变更名不误配相似名 ─────────────────────
