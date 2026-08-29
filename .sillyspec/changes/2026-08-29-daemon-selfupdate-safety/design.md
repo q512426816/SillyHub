@@ -154,7 +154,7 @@ GET /api/daemon/machines → items[].pending_update?: { reason, current_version,
 GET /api/daemon/runtimes/page → 同款机器级字段
 ```
 
-**配置常量**：`self_reload_check_interval_sec` 默认 600（0=关闭）；探测超时 10s；复查间隔 30s；pending-update.json 路径 `~/.sillyhub/daemon/pending-update.json`。
+**配置常量**：`self_reload_check_interval_sec` 默认 600（0=关闭）；复查间隔 30s；pending-update.json 路径 `~/.sillyhub/daemon/pending-update.json`。
 
 ## 风险登记（Risk Register）
 

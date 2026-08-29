@@ -14,6 +14,7 @@ allowed_paths:
   - sillyhub-daemon/src/config.ts
   - sillyhub-daemon/src/cli.ts
   - sillyhub-daemon/tests/disk-probe-pending.test.ts
+  - sillyhub-daemon/tests/config.test.ts
 provides:
   - contract: DiskProbeAndPending
     fields: [onDiskChange, pendingUpdatePath, writePendingUpdate, clearPendingUpdate, startDiskProbe]

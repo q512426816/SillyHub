@@ -29,7 +29,7 @@ created_at: 2026-08-29 15:22:10
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `modules/sillyhub-daemon.md`（daemon/client/cli/config/preflight） | 更新自更新安全层语义（编排器/探测/pending）说明 | pending |
-| `modules/backend.md`（daemon 模块） | 更新心跳 upsert 与机器视图透出说明 | pending |
-| `modules/frontend.md`（components-daemon/lib-daemon） | 更新机器卡三状态说明 | pending |
+| `modules/sillyhub-daemon.md`（daemon/client/cli/config/preflight） | 更新自更新安全层语义（编排器/探测/pending）说明 | done |
+| `modules/backend.md`（daemon 模块） | 更新心跳 upsert 与机器视图透出说明 | done |
+| `modules/frontend.md`（components-daemon/lib-daemon） | 更新机器卡三状态说明 | done |
 | `_module-map.yaml` | 无变化（未增删模块；新迁移文件落既有 versions 目录） | skipped |
