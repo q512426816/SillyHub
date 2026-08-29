@@ -98,7 +98,9 @@ const mocks = vi.hoisted(() => ({
   // task-06（D-001/D-006）：会话列表变更信号订阅——捕获 opts（onEvent /
   // onReconnected 触发 invalidate）+ close 调用断言（unmount 关订阅）。
   // 2026-08-30 补 mock 债（f7f99a2f session-usage-stats，同 page.test）。
-  getSessionUsage: vi.fn(async () => ({
+  // vi.fn(async () => …) 推断为零参签名，转发层 (...args) 展开会 TS2556——
+  // 实现带 rest 形参对齐转发层。
+  getSessionUsage: vi.fn(async (..._args: unknown[]) => ({
     totals: {
       model: "totals",
       input_tokens: 0,

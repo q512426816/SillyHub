@@ -1582,7 +1582,9 @@ class ChangeService:
             )
             return set()
         cutoff = datetime.now(UTC) - timedelta(days=PLACEHOLDER_PROTECT_WINDOW_DAYS)
-        keys: set[str] = set()
+        # 累加器与入参 ``keys`` 分名（mypy no-redef：原实现复用参数名遮蔽
+        # ``list[str] | None`` 签名，返回处类型二义）。
+        active_keys: set[str] = set()
         for r in rows:
             updated = r.updated_at
             if updated is not None:
@@ -1593,8 +1595,8 @@ class ChangeService:
             payload = r.latest_progress if isinstance(r.latest_progress, dict) else {}
             for c in payload.get("changes") or []:
                 if isinstance(c, dict) and c.get("name") and c.get("status") == "active":
-                    keys.add(str(c["name"]))
-        return keys
+                    active_keys.add(str(c["name"]))
+        return active_keys
 
     async def _delete_progress_rows(self, workspace_id: uuid.UUID, change_names: list[str]) -> None:
         """删除环联动删 ``platform_change_progress`` 收件箱行（task-03 / FR-03a）。

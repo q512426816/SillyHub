@@ -249,7 +249,7 @@ async def mission_derive_status(
         # 优先级：done 且无活跃 turn → completed > 强收标记（budget 或 worker
         # 任一，F01）下会话 ended 且未 done → failed（终态，可收敛 degraded）>
         # 会话终态 failed → failed > 首 run 终态 failed/killed → failed
-        #（ql-20260828-013-a55b：树内 run 从 derive 输入剔除，run 已死的终态
+        # （ql-20260828-013-a55b：树内 run 从 derive 输入剔除，run 已死的终态
         # 信息原本完全丢失——run killed 后会话 ended 无强收标记、run failed
         # 后会话未收敛 active，两种形态虚拟 run 都卡 running 致 mission 永不
         # 收敛）> 其余（idle 未 done / 追问重开工中 / 无标记 ended 未 done）→

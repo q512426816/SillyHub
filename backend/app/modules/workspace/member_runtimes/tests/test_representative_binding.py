@@ -158,7 +158,11 @@ async def test_representative_binding_owner_ws_owner_newest_heartbeat_hit(
 
     # Owner's online daemon + runtime（实例心跳最新 → 全序内胜出）
     daemon1, runtime1 = await _make_daemon_with_runtime(
-        db_session, owner, provider="claude", daemon_online=True, runtime_online=True,
+        db_session,
+        owner,
+        provider="claude",
+        daemon_online=True,
+        runtime_online=True,
         heartbeat=newer,
     )
     await _make_binding(db_session, ws_id, owner, daemon1)
@@ -166,7 +170,11 @@ async def test_representative_binding_owner_ws_owner_newest_heartbeat_hit(
     # Another user's online binding（同在分支1候选集内，实例心跳更旧）
     user2 = await _make_user(db_session)
     daemon2, _ = await _make_daemon_with_runtime(
-        db_session, user2, provider="claude", daemon_online=True, runtime_online=True,
+        db_session,
+        user2,
+        provider="claude",
+        daemon_online=True,
+        runtime_online=True,
         heartbeat=older,
     )
     await _make_binding(db_session, ws_id, user2, daemon2)

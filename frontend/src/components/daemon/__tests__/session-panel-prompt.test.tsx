@@ -33,6 +33,9 @@ vi.mock("@/components/ui/markdown-text", () => ({
 /* ----- mock 网络层（骨架平移 session-panel-pre-session.test.tsx，page 模式） ----- */
 
 const sessionApi = vi.hoisted(() => ({
+  // 会话用量条（session-usage-bar）自取数：必须 resolve（裸 vi.fn() 返回
+  // undefined 会被组件 .then 同步崩）；null = 按无数据不渲染。
+  getSessionUsage: vi.fn().mockResolvedValue(null),
   createSession: vi.fn(),
   injectSession: vi.fn(),
   interruptSession: vi.fn(),
@@ -51,6 +54,7 @@ vi.mock("@/lib/daemon", async () => {
   const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
   return {
     ...actual,
+    getSessionUsage: sessionApi.getSessionUsage,
     createSession: sessionApi.createSession,
     injectSession: sessionApi.injectSession,
     interruptSession: sessionApi.interruptSession,

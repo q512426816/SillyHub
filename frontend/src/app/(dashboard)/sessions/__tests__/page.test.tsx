@@ -89,7 +89,9 @@ const mocks = vi.hoisted(() => ({
   // 本页用例不断言信号行为，mock 返回 no-op close 防卸载清理炸 jsdom。
   // 2026-08-30 补 mock 债（f7f99a2f session-usage-stats）：session-usage-bar
   // 自取数消费，缺导出会 Uncaught Error 炸渲染（规则 21 顺手修）。
-  getSessionUsage: vi.fn(async () => ({
+  // vi.fn(async () => …) 推断为零参签名，转发层 (...args) 展开会 TS2556——
+  // 实现带 rest 形参对齐转发层。
+  getSessionUsage: vi.fn(async (..._args: unknown[]) => ({
     totals: {
       model: "totals",
       input_tokens: 0,

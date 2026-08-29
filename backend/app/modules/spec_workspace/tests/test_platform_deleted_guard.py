@@ -55,7 +55,7 @@ def _b64(text: str) -> str:
 
 
 def _op(op: str, path: str, base_version: int = 0, **extra: object) -> FileOp:
-    return FileOp(op=op, path=path, base_version=base_version, **extra)  # type: ignore[arg-type]
+    return FileOp(op=op, path=path, base_version=base_version, **extra)
 
 
 async def _make_workspace(db_session) -> Workspace:

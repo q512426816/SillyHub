@@ -127,9 +127,7 @@ async def _stub_online_runtime(
     di_id = uuid.uuid4()
     rt_id = uuid.uuid4()
     roots_json = json.dumps(allowed_roots) if allowed_roots is not None else '["~/.sillyhub"]'
-    rt_roots_json = (
-        json.dumps(runtime_allowed_roots) if runtime_allowed_roots is not None else None
-    )
+    rt_roots_json = json.dumps(runtime_allowed_roots) if runtime_allowed_roots is not None else None
     await db.execute(
         text(
             "INSERT INTO daemon_instances (id, user_id, hostname, server_url, allowed_roots, status, last_heartbeat_at, created_at, updated_at)"
@@ -971,9 +969,7 @@ class TestRuntimePinning:
         打 placement_provider_fallback warning，钉定 codex runtime（lease 侧
         provider 实际值 = codex——子会话/首 run provider 同源）。"""
         # owner 不建自有机器；绑定机器（binder 名下）只有 codex runtime。
-        ws, _main, mission, _owner, _no_rt = await _seed_context(
-            db_session, with_own_runtime=False
-        )
+        ws, _main, mission, _owner, _no_rt = await _seed_context(db_session, with_own_runtime=False)
         binder = await _make_user(db_session)
         codex_rt = await _stub_online_runtime(
             db_session,

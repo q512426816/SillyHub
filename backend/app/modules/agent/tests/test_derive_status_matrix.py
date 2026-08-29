@@ -647,13 +647,19 @@ class TestMissionDeriveStatusVirtualMapping:
         # 形态①：run killed + 会话 ended（无强收标记，原映射落 running）。
         w1 = await _add_session(db_session, status="ended", parent_session_id=root.id)
         await _add_run_row(
-            db_session, status="killed", role="worker", mission_id=mission.id,
+            db_session,
+            status="killed",
+            role="worker",
+            mission_id=mission.id,
             agent_session_id=w1.id,
         )
         # 形态②：run failed + 会话仍 active（失败后未收敛）。
         w2 = await _add_session(db_session, status="active", parent_session_id=root.id)
         await _add_run_row(
-            db_session, status="failed", role="worker", mission_id=mission.id,
+            db_session,
+            status="failed",
+            role="worker",
+            mission_id=mission.id,
             agent_session_id=w2.id,
         )
 
@@ -678,7 +684,10 @@ class TestMissionDeriveStatusVirtualMapping:
         mission = await _add_session_mission(db_session, root_session_id=root.id)
         w = await _add_session(db_session, status="active", parent_session_id=root.id)
         await _add_run_row(
-            db_session, status="completed", role="worker", mission_id=mission.id,
+            db_session,
+            status="completed",
+            role="worker",
+            mission_id=mission.id,
             agent_session_id=w.id,
         )
         # completed run + 会话 active（无 worker_done_at）→ 仍 running。

@@ -52,6 +52,9 @@ vi.mock("@/lib/agent", async () => {
 // @/lib/daemon：实际模块 + 关键函数覆写（streamSession 捕获 handlers；对账 /
 // 轮询 / 队列依赖全部 mock 成空结果，防真实 fetch 噪声）。
 const daemonMock = vi.hoisted(() => ({
+  // 会话用量条（session-usage-bar）自取数：必须 resolve（裸 vi.fn() 返回
+  // undefined 会被组件 .then 同步崩）；null = 按无数据不渲染。
+  getSessionUsage: vi.fn().mockResolvedValue(null),
   streamSession: vi.fn(),
   getAgentSession: vi.fn(),
   listSessionRuns: vi.fn(),
