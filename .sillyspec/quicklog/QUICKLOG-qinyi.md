@@ -65,3 +65,15 @@
 根因：上一轮禁写只拦「新建」，归档区既有会话仍可继续对话（inject）与中断（interrupt），归档语义不完整
 方案：后端 SessionService._ensure_session_workspace_writable 守卫接线 _inject_into_session 共享核心（覆盖用户 inject/平台审批代写/激活分支三路径）与 interrupt_session，409 与创建/派发同口径，无工作区会话不拦；前端 SessionPanel sessionWorkspaceArchived 派生并入 sendingDisabled+占位文案（归档只读提示），三处输入栏挂载点自动覆盖
 结果：后端 test_archived_write_guard 7 用例全绿（新增 inject/interrupt 409 集成）+ inject/interrupt 相关 97 回归绿 ruff/mypy 0；前端预会话 36（新增归档只读用例）+ prompt/dialog 62 回归绿 tsc 0 eslint 0 错误；模块文档 workspace.md 已补存量会话只读段
+
+## ql-20260829-012-2eb3 | 2026-08-29 23:01:56 | 会话开启自动注入用户信息与平台规则前导
+状态：已完成
+关联变更：2026-08-29-session-user-preamble
+文件：
+- backend/app/modules/daemon/session/context.py（新增 build_user_preamble/build_platform_rules_preamble/build_sillyspec_preamble 三前导函数+admin/auth 模型导入）
+- backend/app/modules/daemon/session/service.py（create_session 前导段组装三前导（workspace 口径与 AgentSession 同式）并扩 _prefix_parts 至七段）
+- backend/app/modules/daemon/tests/test_session_user_preamble.py（新建三组 14 用例（字段/空跳过/护栏/环防护/探测三分支/首轮顺序/缺块/后续轮干净））
+需求：会话开启自动注入用户信息与平台规则前导
+根因：此前 agent 不认识对话用户、无语言规范约束、不知道项目是否用 SillySpec 管理，业务用户常被专业术语轰炸
+方案：context.py 新增三前导构建函数（用户信息含组织全路径与沟通适配指引+护栏、语言规则、SillySpec 条件注入）并在 create_session 首轮拼进 dispatch_prompt 紧贴用户原话，后续轮次不带
+结果：相关测试 46+76 全绿（含新增 14 用例），ruff check/format 0 问题，mypy 0 问题
