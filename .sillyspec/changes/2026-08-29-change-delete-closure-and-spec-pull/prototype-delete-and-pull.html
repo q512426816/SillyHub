@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="ai-native">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型 — 变更中心删除入口 + 文档包下载</title>
+<style>
+  /* ===== AI-Native 主题 token（示意，与 frontend/src/styles/themes.ts 对齐）===== */
+  :root[data-theme="ai-native"]{
+    --bg:#0d1117; --bg-panel:#161b22; --bg-elevated:#1c2128; --border:#30363d;
+    --text:#e6edf3; --text-dim:#8b949e;
+    --brand-500:#7c5cff; --brand-600:#6b4ff0; --brand-100:rgba(124,92,255,.12);
+    --danger-500:#f85149; --danger-600:#da3633; --danger-bg:rgba(248,81,73,.1);
+    --success:#3fb950;
+  }
+  :root[data-theme="blue"]{
+    --bg:#f5f7fa; --bg-panel:#ffffff; --bg-elevated:#f0f3f7; --border:#d9dee5;
+    --text:#1f2328; --text-dim:#6b7280;
+    --brand-500:#2f6fed; --brand-600:#2558c7; --brand-100:rgba(47,111,237,.08);
+    --danger-500:#d93838; --danger-600:#b82929; --danger-bg:rgba(217,56,56,.08);
+    --success:#2a9d4e;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;padding:24px}
+  h2{font-size:18px;margin:28px 0 12px}
+  h2 .tag{font-size:12px;font-weight:400;color:var(--text-dim);margin-left:8px}
+  .panel{background:var(--bg-panel);border:1px solid var(--border);border-radius:12px;padding:20px;max-width:960px}
+  /* 顶栏 */
+  .topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;max-width:960px}
+  .topbar .title{font-size:20px;font-weight:600}
+  .theme-toggle{background:var(--bg-elevated);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:6px 12px;cursor:pointer}
+  /* Tabs */
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:16px}
+  .tab{padding:8px 16px;cursor:pointer;color:var(--text-dim);border-bottom:2px solid transparent}
+  .tab.active{color:var(--text);border-bottom-color:var(--brand-500)}
+  .tab .count{font-size:12px;margin-left:4px;color:var(--text-dim)}
+  /* 筛选栏 */
+  .filterbar{display:flex;gap:10px;margin-bottom:14px;align-items:center}
+  .input,.select{background:var(--bg-elevated);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:7px 12px}
+  .checkbox{display:flex;align-items:center;gap:6px;color:var(--text-dim)}
+  /* 表格 */
+  table{width:100%;border-collapse:collapse}
+  th{font-size:12px;color:var(--text-dim);text-align:left;padding:10px 12px;border-bottom:1px solid var(--border);font-weight:500}
+  td{padding:12px;border-bottom:1px solid var(--border)}
+  tr:hover td{background:var(--bg-elevated)}
+  .stage-pill{display:inline-block;background:var(--brand-100);color:var(--brand-500);border-radius:999px;padding:2px 10px;font-size:12px}
+  .owner{color:var(--text-dim)}
+  /* 操作列 */
+  .btn{border:none;border-radius:8px;padding:6px 14px;cursor:pointer;font-size:13px}
+  .btn-ghost{background:transparent;border:1px solid var(--border);color:var(--text-dim)}
+  .btn-ghost:hover{color:var(--danger-500);border-color:var(--danger-500)}
+  .btn-danger{background:var(--danger-500);color:#fff}
+  .btn-danger:hover{background:var(--danger-600)}
+  .btn-danger:disabled{opacity:.5;cursor:not-allowed}
+  .btn-brand{background:var(--brand-500);color:#fff}
+  .btn-brand:hover{background:var(--brand-600)}
+  /* 危险确认弹层（照 admin users DeleteConfirm 范式）*/
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;justify-content:center;z-index:50}
+  .overlay.show{display:flex}
+  .modal{background:var(--bg-panel);border:1px solid var(--border);border-radius:14px;padding:24px;width:420px}
+  .modal h3{font-size:16px;margin-bottom:10px}
+  .modal p{color:var(--text-dim);margin-bottom:6px;font-size:13px}
+  .modal .warn{background:var(--danger-bg);border:1px solid var(--danger-500);border-radius:8px;padding:10px;color:var(--danger-500);font-size:13px;margin:12px 0}
+  .modal .actions{display:flex;justify-content:flex-end;gap:10px;margin-top:18px}
+  /* 配置卡（workspace-config-card 片段）*/
+  .config-group{margin-bottom:18px}
+  .config-group .label{font-size:13px;color:var(--text-dim);margin-bottom:8px}
+  .config-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .kv{font-size:12px;color:var(--text-dim);background:var(--bg-elevated);border-radius:6px;padding:4px 10px}
+  /* toast */
+  .toast{position:fixed;bottom:28px;right:28px;background:var(--bg-panel);border:1px solid var(--success);color:var(--text);border-radius:10px;padding:12px 18px;display:none;z-index:60;font-size:13px}
+  .toast.show{display:block}
+  .note{max-width:960px;font-size:12px;color:var(--text-dim);margin-top:10px;line-height:1.8}
+  .note b{color:var(--text)}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="title">SillyHub · 变更中心（原型）</div>
+  <button class="theme-toggle" onclick="toggleTheme()">切换主题（blue / ai-native）</button>
+</div>
+
+<!-- ============ ① 变更中心：列表 + 操作列删除 ============ -->
+<div class="panel">
+  <div class="tabs">
+    <div class="tab active">进行中 <span class="count">12</span></div>
+    <div class="tab">已归档 <span class="count">37</span></div>
+    <div class="tab">快速修复 <span class="count">8</span></div>
+  </div>
+  <div class="filterbar">
+    <input class="input" placeholder="搜索变更名 / 关键词" style="width:220px">
+    <select class="select"><option>全部阶段</option><option>实现中</option><option>待验证</option></select>
+    <label class="checkbox"><input type="checkbox"> 只看待我处理</label>
+    <span style="flex:1"></span>
+    <button class="btn btn-ghost">重新扫描</button>
+  </div>
+  <table>
+    <thead><tr>
+      <th>变更</th><th>负责人</th><th>阶段</th><th>更新时间</th><th style="width:90px">操作</th>
+    </tr></thead>
+    <tbody>
+      <tr>
+        <td>2026-08-29-change-delete-closure-and-spec-pull</td>
+        <td class="owner">qinyi</td>
+        <td><span class="stage-pill">实现中</span></td>
+        <td class="owner">刚刚</td>
+        <td><button class="btn btn-ghost" onclick="openModal('2026-08-29-change-delete-closure-and-spec-pull','qinyi')">删除</button></td>
+      </tr>
+      <tr>
+        <td>2026-08-28-session-ppm-task-binding</td>
+        <td class="owner">qinyi</td>
+        <td><span class="stage-pill">待验证</span></td>
+        <td class="owner">2 小时前</td>
+        <td><button class="btn btn-ghost" onclick="openModal('2026-08-28-session-ppm-task-binding','qinyi')">删除</button></td>
+      </tr>
+      <tr>
+        <td>2026-08-16-auto-sync-from-repo <span class="owner" style="font-size:12px">（非本人负责 → 普通成员无删除按钮）</span></td>
+        <td class="owner">别人</td>
+        <td><span class="stage-pill">实现中</span></td>
+        <td class="owner">3 天前</td>
+        <td><span class="owner" style="font-size:12px">—</span></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+<p class="note"><b>权限演示：</b>当前登录人为 qinyi（工作区所有者）→ 所有行可见删除按钮；若登录的是普通成员（developer），仅 <b>owner_id = 本人</b> 的行显示删除。删除后行标记 location='deleted'，三个 tab 均不再显示；镜像文件移入服务器 30 天备份区，不提供恢复界面。</p>
+
+<!-- ============ ② 危险确认弹层 ============ -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3>删除变更</h3>
+    <p id="m-name" style="color:var(--text);font-weight:600">—</p>
+    <p>负责人：<span id="m-owner">—</span></p>
+    <div class="warn">该操作不可恢复：变更将从变更中心移除，服务器镜像文件移入 30 天备份区后自动过期。工作区全体成员将不再看到此变更。</div>
+    <p>输入变更名末段以确认：</p>
+    <input class="input" id="m-confirm" style="width:100%" placeholder="change-delete-closure-and-spec-pull">
+    <div class="actions">
+      <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+      <button class="btn btn-danger" id="m-del" disabled onclick="doDelete()">确认删除</button>
+    </div>
+  </div>
+</div>
+
+<h2>② 工作区文档 · 下载口子 <span class="tag">workspace-config-card 片段（组件级改动）</span></h2>
+<div class="panel">
+  <div class="config-group">
+    <div class="label">工作区文档存储</div>
+    <div class="config-row">
+      <span class="kv">策略 platform-managed</span>
+      <span class="kv">上次同步 2026-08-29 10:12</span>
+      <span style="flex:1"></span>
+      <button class="btn btn-ghost">同步到服务器</button>
+      <button class="btn btn-brand" id="dl-btn" onclick="doDownload()">下载文档包</button>
+    </div>
+  </div>
+  <p class="note" style="margin-top:0">
+    <b>下载内容：</b>服务器 spec 整树快照（变更文档 + 扫描文档 + 知识库 + quicklog + skills），tar 格式，文件名 <b>spec-bundle-&lt;工作区&gt;.tar</b>，包内含 PLATFORM-BUNDLE.json（版本号 / 策略 / 生成时间）。<br>
+    <b>快照语义：</b>下载的是打包时刻的快照，非实时；新会话 / 任务开始时 daemon 会自动取最新版本。<br>
+    <b>本地使用：</b>解压后即 .sillyspec 内容根，放入项目根目录命名为 .sillyspec（或 --spec-dir 指定）即可被 sillyspec CLI 使用。
+  </p>
+</div>
+
+<div class="toast" id="toast">文档包已开始下载 · spec_version v128</div>
+
+<script>
+function toggleTheme(){
+  const h=document.documentElement;
+  h.dataset.theme = h.dataset.theme==='ai-native' ? 'blue' : 'ai-native';
+}
+let target='';
+function openModal(name,owner){
+  target=name; document.getElementById('m-name').textContent=name;
+  document.getElementById('m-owner').textContent=owner;
+  document.getElementById('m-confirm').value='';
+  document.getElementById('m-del').disabled=true;
+  document.getElementById('overlay').classList.add('show');
+}
+function closeModal(){document.getElementById('overlay').classList.remove('show')}
+document.getElementById('m-confirm').addEventListener('input',e=>{
+  const tail=target.split('-').slice(3).join('-');
+  document.getElementById('m-del').disabled = e.target.value!==tail;
+});
+function doDelete(){
+  closeModal();
+  alert('演示：DELETE /api/workspaces/{id}/changes/{cid}\n→ 镜像软删(30天备份区) → 清进度行 → location=deleted → 写审计事件\n→ 列表立即移除（不提供恢复 UI）');
+}
+function doDownload(){
+  const b=document.getElementById('dl-btn'); b.disabled=true; b.textContent='打包中…';
+  setTimeout(()=>{
+    b.disabled=false; b.textContent='下载文档包';
+    const t=document.getElementById('toast'); t.classList.add('show');
+    setTimeout(()=>t.classList.remove('show'),3200);
+  },900);
+}
+</script>
+</body>
+</html>
