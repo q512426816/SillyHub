@@ -15,6 +15,6 @@
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `modules/frontend.md` | 更新 frontend 模块卡（新增 e2e 测试体系入口与命令） | pending |
-| `modules/ci.md` | 更新 ci 模块卡（新增第 4 个 workflow e2e-ci） | pending |
+| `modules/frontend.md` | 更新 frontend 模块卡（契约摘要新增浏览器级 E2E 条目 + changelog sidecar 条目） | done |
+| `modules/ci.md` | 更新 ci 模块卡（4 workflow 清单 + frontend-ci 与 e2e 分工说明） | done |
 | `_module-map.yaml` | 无变化（未增删模块） | skipped |

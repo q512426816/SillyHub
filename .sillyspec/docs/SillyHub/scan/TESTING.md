@@ -16,6 +16,7 @@ SillyHub 三端（backend / frontend / sillyhub-daemon）各自独立测试栈�
 |---|---|---|---|
 | backend | pytest | `backend/pyproject.toml [tool.pytest.ini_options]` | `asyncio_mode=auto`；`testpaths=["tests","app"]` 同时发现集成套件与模块内单测；`addopts="-ra -o dist=loadscope"`（xdist 按模块分组绑 worker，消除跨模块状态交叉 flaky） |
 | frontend | vitest 2.0 + jsdom | `frontend/vitest.config.ts` + `package.json` scripts | `clearMocks` 自动清调用计数；`testTimeout=15000` 治全量并行超时；纯逻辑测试经 `environmentMatchGlobs` 白名单切 node 环境省 jsdom 启动 |
+| frontend e2e | Playwright 1.60（chromium） | `frontend/playwright.config.ts` + `frontend/e2e/`（2026-08-29-frontend-e2e-playwright） | workers:1 串行 / retries CI?1:0 / trace retain-on-failure / locale zh-CN；双栈隔离：vitest exclude `e2e/**`、tsconfig include e2e；身份=bootstrap admin 造数 + run-id 唯一用户挂 workspace:read 角色（ctxSeq 防唯一约束冲突），API 登录注入 localStorage persist v1；后端登录 account=username（D-001） |
 | daemon | vitest（node 环境） | `sillyhub-daemon/vitest.config.ts` | forks 池 `maxForks: 8`（I/O 密集用例限并行防磁盘争用）；`testTimeout=30000`；`test` script 带 `--passWithNoTests` |
 
 测试依赖（`backend/pyproject.toml [project.optional-dependencies].dev`）：pytest-asyncio / pytest-xdist（`-n auto` 并行，全量从约 50 分钟压到分钟级）/ pytest-cov / pytest-rerunfailures（CI flaky 重试兜底）/ aiosqlite（单测 DB）。frontend dev 依赖 @testing-library/react + @testing-library/jest-dom + jsdom（`frontend/package.json`）。
@@ -32,17 +33,18 @@ SillyHub 三端（backend / frontend / sillyhub-daemon）各自独立测试栈�
 - **审计挂载守护**：`backend/tests/core/test_audit_hooks_effective.py`（audit_hooks 全表挂载 + 手工审计点有效，依据 `2026-08-14-audit-system-completion` 归档 change）。
 - **类型漂移守护**：frontend 与 daemon 各有 `gen:types` / `gen:types:check` script（两端 `package.json`）——openapi-typescript 生成后 `git diff --exit-code`，前端 `src/lib/api-types.ts` / daemon `src/api-types.ts` 与后端 OpenAPI 漂移即红；daemon 侧同样纳入 CI。
 
-## CI（.github/workflows/，共 3 个）
+## CI（.github/workflows/，共 4 个）
 
 - **backend-ci.yml**：push / PR（paths `backend/**`）+ workflow_dispatch；步骤 = ruff check → ruff format --check → mypy app → `pytest -n auto -q --cov=app --cov-fail-under=60 --reruns 2 --reruns-delay 1`（PostgreSQL + Redis 服务容器，ENVIRONMENT=test）；job 超时 30 分钟（注释：全量 4000+ 用例 + 2 核 xdist + reruns 裕量，此前 15 分钟撞顶致 99% 被取消）。
 - **frontend-ci.yml**：push / PR（paths `frontend/**`）+ workflow_dispatch；lint + build + test 一体 job，超时 15 分钟，pnpm 9.6.0 + Node 20。
+- **e2e-ci.yml**（2026-08-29-frontend-e2e-playwright）：push/PR paths `frontend/**` + dispatch；services postgres:16+redis:7 → `uv sync` + `alembic upgrade head` + uvicorn（env `AUTH_LOGIN_RATE_LIMIT_PER_MINUTE=60` + bootstrap admin，就绪轮询校验 `/api/health` body status=="ok"）→ `pnpm build && next start -p 3000`（生产形态）→ playwright chromium → `pnpm test:e2e`（CI=true retries=1）→ 失败上传 playwright-report/test-results artifact（7 天）。本机运行见 `frontend/e2e/README.md`（dev 前置或 Docker 全栈 3001/8001 两种方式）。
 - **scan-drift.yml**：PR + push main + workflow_dispatch；scan 文档 `source_commit` 漂移检测门，warn-only（`::warning` 文件注解 + 去重 PR 评论，不阻塞 merge）。
 
 ## 覆盖与门禁
 
 - backend 覆盖率门 `--cov-fail-under=60` 同时落在根 `Makefile backend-test` 与 `backend-ci.yml`；ruff + mypy 全绿是静态基线（`[tool.mypy]` strict=false 但 `warn_unused_ignores=true`）。
 - frontend 与 daemon 的 `typecheck`（tsc --noEmit）纳入 `make lint` 聚合。
-- E2E：backend 有 `backend/tests/e2e/test_three_member_collaboration.py`（三成员协作端到端）；前端 devDeps 声明 `@playwright/test ^1.60` 与 `puppeteer ^24.43` 两套浏览器自动化依赖，但仓库内无 playwright 配置文件（Glob 无命中）——浏览器 E2E 套件实际未配置。
+- E2E：backend 有 `backend/tests/e2e/test_three_member_collaboration.py`（三成员协作端到端）；**前端浏览器级 E2E 已落地**（2026-08-29-frontend-e2e-playwright）：`frontend/e2e/` 8 用例（auth A1-A4 真实表单登录链路 + navigation N1-N4 侧边栏冒烟含负向断言），本机实跑 8/8 绿 + e2e-ci 首套绿（run 33257206610）；puppeteer 残留依赖已移除。
 
 ## 常用命令与已知坑
 

@@ -16,17 +16,18 @@ multi-agent-platform 的持续集成组件，以 GitHub Actions workflow 实现�
 
 ## 契约摘要
 
-两个独立 workflow，分别覆盖前后端：
+四个独立 workflow：
 
 - `.github/workflows/backend-ci.yml`（name: backend-ci）
 - `.github/workflows/frontend-ci.yml`（name: frontend-ci）
+- `.github/workflows/e2e-ci.yml`（name: e2e-ci，2026-08-29-frontend-e2e-playwright 新增）：浏览器级 E2E 全链路——services pg16+redis7 → alembic → uvicorn（限流 60+bootstrap admin）→ next build/start → playwright chromium → pnpm test:e2e → 失败 artifact；paths 仅 frontend/**（D-007）
 
 触发：push / PR。运行环境：ubuntu-latest。
 
 ## 关键逻辑
 
 - **backend-ci 步骤**：setup-uv@v8.1.0 → `uv python install 3.12` → `uv sync --all-extras` → `uv run ruff check .` → `uv run ruff format --check .` → `uv run mypy app` → `uv run pytest -q --cov=app --cov-fail-under=60`。
-- **frontend-ci 步骤**：`pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `pnpm build`。
+- **frontend-ci 步骤**：`pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `pnpm build`。（`pnpm test` 不含 e2e——vitest 已 exclude `e2e/**`，e2e 归 e2e-ci 专项跑）
 - **门禁一致性**：CI 跑的命令与根 Makefile 的 `backend-test`/`backend-lint`/`frontend-*` 同源，本地 `make lint && make test` 通过基本等于 CI 通过。
 - **覆盖率硬门**：backend 要求 `--cov-fail-under=60`，低于则 CI 红。
 
