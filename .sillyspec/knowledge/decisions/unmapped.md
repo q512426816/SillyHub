@@ -81,3 +81,32 @@ supersedes：D-004@v1
 锚点：未记录
 最近确认：0ec935c9
 理由：删除收敛+防复活基建（波 1）/删除入口（波 2）/拉取口子（波 3）一个变更三波，波与波共享防复活基建（波 1 建）；进行中可见性经 revision 1 重开 brainstorm 并入为波 4——与波 1-3 同文件（platform_sync/change/changes 页面），并入避免并行变更冲突（规则 19）。跨仓配套（X1-X4）以 repo: sillyspec 任务卡入列，不另开变更。
+
+## D-003@v2 : 磁盘旁路探测方式与 disk_change 直启路径（Grill B1/B2 修正）
+状态：implemented
+变更：2026-08-29-daemon-selfupdate-safety
+锚点：未记录
+最近确认：HEAD
+理由：探测=读 bundle 文件正则提取 BUILD_ID（gen-build-id.mjs 格式 regex 兼容，无 spawn）；disk_change 触发后走独立直启路径——不下载不查 manifest，空闲即 stop+respawn 到盘上版本（操作者换文件即意图，multica trySelfReload 同款）；server_command 仍走现有下载链
+supersedes：D-003@v1
+
+## D-004@v1 : 方案选型 A3 完整形态
+状态：implemented
+变更：2026-08-29-daemon-selfupdate-safety
+锚点：未记录
+最近确认：HEAD
+理由：A3——A1 全部（空闲屏障/所有权 CAS+失败释放/磁盘探测/pending 本地 status 可见）+ 心跳上报 pending_update 字段 + backend 机器视图透出 + 前端机器卡展示「等待空闲升级」原因
+
+## D-005@v1 : 保留既有优势语义
+状态：implemented
+变更：2026-08-29-daemon-selfupdate-safety
+锚点：未记录
+最近确认：HEAD
+理由：保留「拉起失败旧进程保活」（multica 没有的优点）并补全其半边语义——交接失败必须释放更新所有权与屏障，让下一条 SELF_UPDATE 指令可再触发；下载原子替换/防降级/noop 保活等既有行为不变
+
+## D-006@v1 : 设计整体确认
+状态：implemented
+变更：2026-08-29-daemon-selfupdate-safety
+锚点：未记录
+最近确认：HEAD
+理由：确认。变更名 2026-08-29-daemon-selfupdate-safety，原型 prototype-machine-update-status.html
