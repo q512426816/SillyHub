@@ -37,8 +37,9 @@
  */
 
 import { arch, homedir, hostname, platform, tmpdir } from 'node:os';
-import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readFile, writeFile, rename, unlink, chmod } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { type DaemonConfig, DEFAULT_CONFIG_DIR, normalizeAllowedRoots } from './config.js';
 // task-07（2026-08-26-workspace-mcp-edit / D-007@v2）：会话级 MCP 三件套预取
@@ -92,7 +93,15 @@ import { HostFsHandler } from './host-fs-handler.js';
 import { buildSpawnEnv, type SpawnCredentialManager } from './spawn-env.js';
 import { applyClaudeSettings } from './claude-settings.js';
 // 2026-06-24 preflight：启动前预检 sillyspec 版本 + daemon 自更新（失败不阻断启动）。
-import { runPreflight } from './preflight.js';
+// task-04（S1）：编排器静态引入自更新三件套——runDaemonSelfUpdate（下载原子替换）、
+// respawnDaemonAndExit（交接拉起）、fetchLatestBuildId（推迟路径目标版本回传，
+// 指令 payload 缺 version 时拉 latest.json 兜底）。
+import {
+  runPreflight,
+  runDaemonSelfUpdate,
+  respawnDaemonAndExit,
+  fetchLatestBuildId,
+} from './preflight.js';
 // 2026-07-07-daemon-skill-execution task-03：skill-manager，启动同步平台 sillyspec skills。
 import { syncSkills, linkSkillsToWorkdir } from './skill-manager.js';
 // daemon 自身构建标识（release=git SHA），register 时上报供服务端判定是否需推送自更新。
@@ -162,6 +171,102 @@ const CONTROL_MSG_TYPE_TO_KIND: Record<string, string> = {
 // 成功清计数恢复正常心跳。常量导出便于测试注入时间。
 export const REGISTER_RETRY_BASE_MS = 15_000;
 export const REGISTER_RETRY_MAX_MS = 60_000;
+
+// task-04（S1 / D-002@v1）：忙推迟升级的空闲复查间隔——忙时记 pending 后每 30s
+// 重探（完整重跑 _tryUpdate，无状态机），无限等空闲。导出供测试断言间隔语义。
+export const SELF_UPDATE_RETRY_INTERVAL_MS = 30_000;
+
+/**
+ * task-04（S1）：_deferUpdate 目标版本缺省占位（可见性字段，不参与升级判定）。
+ *
+ * disk_change 回调恒带盘上 BUILD_ID、server_command 通常带指令 version——只有
+ * 「server_command 且 payload 缺 version 且 fetchLatestBuildId 也失败」时落到
+ * 此占位（status/心跳仍能展示「有升级在等」，具体版本未知）。
+ */
+const SELF_UPDATE_TARGET_UNKNOWN = '<disk>';
+
+// ── task-03（2026-08-29-daemon-selfupdate-safety / S2+S3）：磁盘旁路探测 + pending ──
+
+// daemon bundle 落盘目录。与 preflight.ts:61 的模块私有常量 DAEMON_BIN_DIR 同值
+// 重声明（preflight.ts 不在本卡 allowed_paths 且常量未导出，禁止为复用而改动它）；
+// respawn 加载的同一文件，探测读它比对 BUILD_ID。
+const DAEMON_BIN_DIR: string = join(homedir(), '.sillyhub', 'daemon', 'bin');
+
+// daemon bundle 文件名。与 preflight.ts:64 的模块私有常量 DAEMON_BUNDLE_NAME
+// 同值重声明（理由同上）。
+const DAEMON_BUNDLE_NAME = 'sillyhub-daemon.js';
+
+/**
+ * bundle 文本内 BUILD_ID 提取正则（design S2 / D-003@v2）。
+ *
+ * gen-build-id.mjs 生成 `export const BUILD_ID = "<sha>-<ts>";` 单行，格式为 regex
+ * 兼容而设计；引号单双皆容。首处匹配即取（bundle 内无前序同形出现）。
+ */
+const DISK_BUILD_ID_RE = /BUILD_ID\s*=\s*["']([^"']+)/;
+
+/**
+ * pending-update.json 记录结构（S3 可见性 / FR-01）。
+ *
+ * 推迟升级期间落盘 `~/.sillyhub/daemon/pending-update.json`，cli status / task-05
+ * 心跳读取展示；升级执行或取消时删除。since=写入时刻 epoch ms——task-04 忙复查
+ * 每轮重写，故本地值为「最近一次推迟时刻」（本地 status 展示用，非权威）；
+ * 「pending 起点」的权威 since 在 backend（upsert 同内容保留原值，不随心跳漂移）。
+ */
+export interface PendingUpdateRecord {
+  /** 推迟原因：'server_command'（服务端指令）| 'disk_change'（磁盘旁路探测）。 */
+  reason: string;
+  /** 推迟时进程内存中的 BUILD_ID。 */
+  current_version: string;
+  /** 等待切换到的目标 BUILD_ID。 */
+  target_version: string;
+  /** 最近一次推迟时刻（epoch ms；起点权威值在 backend upsert 侧）。 */
+  since: number;
+}
+
+/**
+ * 读取 pending-update.json（严格校验四字段，损坏/缺字段/不存在 → null）。
+ *
+ * 导出为独立函数：cli.ts statusAction（无 Daemon 实例）与 task-05 心跳复用同一
+ * 校验口径；Daemon.readPendingUpdate 委托本函数。
+ *
+ * @param filePath pending-update.json 绝对路径。
+ */
+export async function readPendingUpdateFile(
+  filePath: string,
+): Promise<PendingUpdateRecord | null> {
+  let raw: string;
+  try {
+    raw = await readFile(filePath, 'utf-8');
+  } catch {
+    // 不存在 / 不可读 → 无 pending（调用方语义：null=无）。
+    return null;
+  }
+  try {
+    const obj = JSON.parse(raw) as Partial<PendingUpdateRecord>;
+    if (
+      typeof obj.reason === 'string' &&
+      obj.reason.length > 0 &&
+      typeof obj.current_version === 'string' &&
+      obj.current_version.length > 0 &&
+      typeof obj.target_version === 'string' &&
+      obj.target_version.length > 0 &&
+      typeof obj.since === 'number' &&
+      Number.isFinite(obj.since)
+    ) {
+      return {
+        reason: obj.reason,
+        current_version: obj.current_version,
+        target_version: obj.target_version,
+        since: obj.since,
+      };
+    }
+    return null;
+  } catch {
+    // JSON 损坏 → 无有效 pending。
+    return null;
+  }
+}
+
 
 // ── 最小日志（design G-05 零依赖，不装 winston/pino）──────────────────────────
 
@@ -458,6 +563,16 @@ interface ClientLike {
     providers?: { provider: string; status?: string }[],
     /** task-01：进程启动时间（对齐 hub-client task-02 的 heartbeat 第 3 参数）。 */
     startedAt?: number | Date | null,
+    /**
+     * task-05（2026-08-29-daemon-selfupdate-safety / FR-04）：推迟升级期间的
+     * pending 状态（对齐 hub-client task-05 heartbeat 第 4 参数，结构同
+     * HeartbeatPendingUpdate）。undefined 时请求体不含 pending_update 键。
+     */
+    pendingUpdate?: {
+      reason: string;
+      current_version: string;
+      target_version: string;
+    },
   ): Promise<unknown>;
   markOffline?(runtimeId: string): Promise<unknown>;
   /**
@@ -652,6 +767,14 @@ interface TaskRunnerLike {
    * 测试 mock（duck-typed，daemon 调用前用 `typeof === 'function'` 探测）。
    */
   cancel?(leaseId: string): Promise<boolean>;
+  /**
+   * task-04（2026-08-29-daemon-selfupdate-safety / FR-01 / D-001@v1）：是否存在
+   * 进行中的 batch lease（真实 TaskRunner._controllers 非空，task-runner.ts
+   * hasActiveLease）。可选——照 cancel? / runChangeWrite? 先例（Grill M14）：
+   * 仅含 runLease 的旧测试 mock 不实现时缺省视为不忙，daemon 调用前用
+   * `typeof === 'function'` 探测（_isBusyForUpdate），不砸碎既有 mock。
+   */
+  hasActiveLease?(): boolean;
 }
 
 /** daemon 需要的 WsClient 接口子集。 */
@@ -927,6 +1050,21 @@ export interface DaemonOptions {
    * 默认 undefined：daemon 不上报 startedAt（hub-client 转 null，后端兜底 register 时刻）。
    */
   startedAt?: number;
+  /**
+   * task-03（S2 / FR-03 / D-003@v2）：磁盘旁路探测读的 daemon bundle 文件路径。
+   *
+   * 默认 ``<DAEMON_BIN_DIR>/<DAEMON_BUNDLE_NAME>``（~/.sillyhub/daemon/bin/
+   * sillyhub-daemon.js，respawn 加载的同一文件）。仅测试注入临时目录用（不污染
+   * 真实 ~/.sillyhub）；生产路径不传。
+   */
+  selfUpdateBundlePath?: string;
+  /**
+   * task-03（S3 / FR-01）：pending-update.json 落盘路径。
+   *
+   * 默认 ``~/.sillyhub/daemon/pending-update.json``（DEFAULT_CONFIG_DIR 下）。测试
+   * 注入临时目录用；cli.ts statusAction 读同一默认路径。
+   */
+  pendingUpdatePath?: string;
 }
 
 /**
@@ -1217,6 +1355,27 @@ export class Daemon {
   private _sigtermHandler: (() => void) | null = null;
   private _sigintHandler: (() => void) | null = null;
 
+  /**
+   * task-03（S2）：磁盘旁路探测循环定时器（null=未启动/已停止）。
+   * startDiskProbe 创建（unref 不阻止进程退出），stop() 清理。
+   */
+  private _diskProbeTimer: ReturnType<typeof setInterval> | null = null;
+  /** task-03（S2）：探测读的 bundle 文件路径（构造注入或默认 DAEMON_BIN_DIR 下）。 */
+  private readonly _selfUpdateBundlePath: string;
+  /** task-03（S3）：pending-update.json 路径（构造注入或默认 DEFAULT_CONFIG_DIR 下）。 */
+  private readonly _pendingUpdatePath: string;
+  /**
+   * task-04（S1）：自更新编排所有权（true=一次 _tryUpdate 在途）。入口同步
+   * check+set 占位（JS 单线程原子，无竞态窗口）；仅「交接排定后」（stop 完成、
+   * respawn 已排）保持 true 到进程退出，noop/异常/回推迟路径都释放（可再触发）。
+   */
+  private _updateBusy = false;
+  /**
+   * task-04（S1 / D-002）：推迟升级的 30s 空闲复查定时器（null=未排定）。unref
+   * 不阻止进程退出；pending 期间新触发仅经 _deferUpdate 的 clear+set 刷新不叠。
+   */
+  private _updateRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor(
     config: DaemonConfig,
     client: ClientLike,
@@ -1263,6 +1422,12 @@ export class Daemon {
     this._logger = createLogger(
       this._normalizeLogLevel(config.log_level),
     );
+    // task-03（S2/S3）：磁盘探测 bundle 路径 + pending 文件路径（默认真实路径，
+    // 测试经 DaemonOptions 注入临时目录）。
+    this._selfUpdateBundlePath =
+      options?.selfUpdateBundlePath ?? join(DAEMON_BIN_DIR, DAEMON_BUNDLE_NAME);
+    this._pendingUpdatePath =
+      options?.pendingUpdatePath ?? join(DEFAULT_CONFIG_DIR, 'pending-update.json');
     // task-06（design A2 消费端）：控制指令统一消费入口。handler 全部是下方既有
     // _route* 方法的薄包装（同一实例调用，不复制业务逻辑）；HTTP 源仅在 client
     // 实现两方法（真实 HubClient）时挂接——旧测试 mock 缺方法 → 只走 WS 路由。
@@ -1356,6 +1521,16 @@ export class Daemon {
       this._logger.warn('preflight_failed', { error: e });
     }
 
+    // task-03（S3 / Grill M15）：启动清矛盾 pending 残留——上次升级已执行完成
+    //（盘上 target==内存 BUILD_ID）或文件结构无效的 pending-update.json 会永久
+    // 误导本地 status / task-05 心跳，发现即删；仍在途（target≠内存）则保留。
+    // 失败不阻断启动（残留最多多展示一行，下次启动再清）。
+    try {
+      await this.cleanupStalePendingUpdate();
+    } catch (e) {
+      this._logger.warn('pending_update_cleanup_failed', { error: e });
+    }
+
     // 1. 探测 agent（task-16，真实方法名 detectAgents，不是 detectAll）
     const agents = await this._detector.detectAgents();
     const availableAgents = agents.filter((a) => a.status === 'available');
@@ -1432,6 +1607,13 @@ export class Daemon {
     // 4. 注册信号 handler（R8）
     this._installSignalHandlers();
 
+    // task-04（S1 / S2 接线）：磁盘旁路探测——盘上 BUILD_ID 差异（含降级，操作者
+    // 换文件即意图）汇入单入口编排器（盘上版本即目标，不查 manifest）。间隔 0
+    //（显式关闭）/ dev 构建由 startDiskProbe 内部判定不启动。
+    this.startDiskProbe((diskBuildId) =>
+      void this._tryUpdate('disk_change', diskBuildId),
+    );
+
     this._logger.info('started', { runtime_id: this._config.runtime_id });
   }
 
@@ -1458,6 +1640,15 @@ export class Daemon {
     // task-08：清恢复重试定时器（收尾不再触发新一轮；遗留记录在下方 flush 后
     // 合并落盘，下次启动 _recoverSessionsOnBoot 续接）。
     this._clearRecoveryRetryTimer();
+
+    // task-03（S2）：清磁盘旁路探测定时器（stop 后不再探测；respawn 前的新进程
+    // 会自行 startDiskProbe 重建，接线归 task-04）。
+    this._stopDiskProbe();
+
+    // task-04（S1）：清推迟升级复查定时器——daemon 已停，30s 重探不应再触发
+    //（正常交接路径 _tryUpdate 在 stop 前已清；此处兜底 SIGTERM 等旁路 stop）。
+    // 定时器本身 unref 不阻止退出，纯语义收口。
+    this._clearUpdateRetryTimer();
 
     // task-08（design A5 / FR-04）：优雅停止挂起——在 markOffline 前批量挂起本
     // daemon 全部 active 会话（中断 run→failed(daemon_stopped)、session→
@@ -1511,6 +1702,464 @@ export class Daemon {
     }
 
     this._logger.info('stopped');
+  }
+
+  // ── task-03（S2/S3）：磁盘旁路探测 + pending-update 方法组 ──────────────────
+  // 契约（provides DiskProbeAndPending，task-04 接线 / task-05 心跳消费）：
+  //   - startDiskProbe(onDiskChange)：探测循环，差异出口**仅**注入式回调——本卡
+  //     不实现也不引用 tryUpdate 编排（差异处置归 task-04 汇合接线）。
+  //   - writePendingUpdate / clearPendingUpdate / readPendingUpdate / pendingUpdatePath：
+  //     pending-update.json 落盘（推迟升级可见性，FR-01）。
+
+  /** task-03（S3）：pending-update.json 路径（cli status / task-05 心跳同源读取）。 */
+  get pendingUpdatePath(): string {
+    return this._pendingUpdatePath;
+  }
+
+  /** task-03（S2）：磁盘探测循环是否在跑（「interval=0 不创建定时器」断言用）。 */
+  get diskProbeActive(): boolean {
+    return this._diskProbeTimer !== null;
+  }
+
+  /**
+   * task-03（S2 / FR-03 / D-003@v2）：启动磁盘旁路探测循环。
+   *
+   * 每间隔（config.self_reload_check_interval_sec，默认 600s）读 bundle 文件按
+   * `BUILD_ID` 正则提取与内存 BUILD_ID 比对；**任何差异（含降级）** 调
+   * onDiskChange(盘上值)——每轮至多一次，多轮仍差异则每轮再触发（去抖/刷新语义
+   * 由 task-04 的 pending 路径收口）。操作者换文件即意图，不做 manifest 校验。
+   *
+   * 不动作（仅 debug 日志，防替换窗口半写文件自杀，D-003@v2）：
+   *   - 读文件失败 / 正则不中 / 盘上提取值为空（任一侧空）
+   *   - dev 构建（BUILD_ID='dev'，本地开发无 SHA，与 preflight 同判定）
+   *   - interval <= 0 / 非数值：**不创建定时器**（0=显式关闭）
+   *
+   * 定时器 unref（不阻止进程退出）；重复调用先清旧定时器（幂等单实例）；
+   * stop() 统一清理。接线（start() 内调用）归 task-04。
+   *
+   * @param onDiskChange 差异回调，参数为盘上 bundle 提取的 BUILD_ID（目标版本）。
+   */
+  startDiskProbe(onDiskChange: (diskBuildId: string) => void): void {
+    // interval 读取口：config 默认 600；0=关闭。Number() 容忍字符串脏值，
+    // 非法/<=0 一律视为关闭不创建定时器（对齐 _recoveryConcurrency 的兜底惯例）。
+    const intervalSec = Number(this._config.self_reload_check_interval_sec);
+    if (!Number.isFinite(intervalSec) || intervalSec <= 0) {
+      this._logger.debug('disk_probe_disabled', {
+        interval_sec: this._config.self_reload_check_interval_sec,
+      });
+      return;
+    }
+    // dev 构建跳过探测：无 SHA 注入，盘上 release bundle 与内存 'dev' 恒不等，
+    // 跑了只会每轮徒劳触发差异（preflight runDaemonSelfUpdate 同判定）。
+    // 显式放宽为 string 再比对：BUILD_ID 是 gen-build-id.mjs 生成的字面量常量，
+    // 当前值非 'dev' 时字面量类型会让 `=== 'dev'` 被 tsc 判无重叠（dev 构建下
+    // 该常量即 'dev'，运行时判定有意义）。
+    const memoryBuildId: string = BUILD_ID;
+    if (!memoryBuildId || memoryBuildId === 'dev') {
+      this._logger.debug('disk_probe_skipped_dev_build', { build_id: memoryBuildId });
+      return;
+    }
+    // 幂等：已探测中先清旧定时器再重建（不叠多个循环）。
+    this._stopDiskProbe();
+    this._diskProbeTimer = setInterval(() => {
+      // 探测读文件/回调异常不冒泡到定时器（unhandled rejection 会杀进程），
+      // 对齐 daemon.ts void 分发 + .catch 收敛惯例；下轮照常。
+      void this._probeDiskOnce(onDiskChange).catch((e) => {
+        this._logger.error('disk_probe_round_failed', { error: e });
+      });
+    }, intervalSec * 1000);
+    // node 标准：定时器不阻塞 daemon 退出（fake timers 下 unref 可能缺省，守卫调用）。
+    if (typeof this._diskProbeTimer.unref === 'function') {
+      this._diskProbeTimer.unref();
+    }
+    this._logger.debug('disk_probe_started', {
+      bundle_path: this._selfUpdateBundlePath,
+      interval_sec: intervalSec,
+    });
+  }
+
+  /** task-03（S2）：清磁盘探测定时器（stop() / startDiskProbe 重建前调用）。 */
+  private _stopDiskProbe(): void {
+    if (this._diskProbeTimer) {
+      clearInterval(this._diskProbeTimer);
+      this._diskProbeTimer = null;
+    }
+  }
+
+  /**
+   * task-03（S2）：单轮探测——读 bundle 提取 BUILD_ID 与内存比对。
+   *
+   * 失败即返回不动作（D-003@v2：探测失败 ≠ 版本变化）；差异恰好调用一次回调
+   * （回调异常由 startDiskProbe 的 interval 包装 catch 收敛，不中断后续轮次）。
+   */
+  private async _probeDiskOnce(
+    onDiskChange: (diskBuildId: string) => void,
+  ): Promise<void> {
+    let raw: string;
+    try {
+      raw = await readFile(this._selfUpdateBundlePath, 'utf-8');
+    } catch (e) {
+      // 文件不存在（未 install）/ 替换窗口半写 → 本轮放弃，下轮再试。
+      this._logger.debug('disk_probe_read_failed', {
+        path: this._selfUpdateBundlePath,
+        error: (e as Error)?.message ?? String(e),
+      });
+      return;
+    }
+    const diskBuildId = DISK_BUILD_ID_RE.exec(raw)?.[1] ?? '';
+    if (!diskBuildId) {
+      // 正则不中 / 提取值为空（任一侧空，内存侧已由 startDiskProbe 非 dev 保证）。
+      this._logger.debug('disk_probe_build_id_missing', {
+        path: this._selfUpdateBundlePath,
+      });
+      return;
+    }
+    if (diskBuildId === BUILD_ID) {
+      // 同值：静默（默认 10min 一轮，避免日志噪音）。
+      return;
+    }
+    this._logger.info('disk_change_detected', {
+      disk_build_id: diskBuildId,
+      memory_build_id: BUILD_ID,
+    });
+    // 差异出口：恰一次，含目标（盘上）BUILD_ID。
+    onDiskChange(diskBuildId);
+  }
+
+  /**
+   * task-03（S3 / FR-01）：写 pending-update.json（推迟升级可见性）。
+   *
+   * 四字段：reason / current_version / target_version / since（=Date.now()）。
+   * 原子写照 interactive/session-store-persistence 惯例：同目录 tmp 文件 →
+   * rename 落位（POSIX rename 原子；Windows rename 目标存在会失败 → 先 unlink
+   * 再 rename），0o600（Windows NTFS 无 0600 语义，失败降级忽略）。同内容续写
+   * 不重置 since 的去重语义归 task-04 调用方。
+   */
+  async writePendingUpdate(record: {
+    reason: string;
+    current_version: string;
+    target_version: string;
+  }): Promise<void> {
+    const payload: PendingUpdateRecord = {
+      reason: record.reason,
+      current_version: record.current_version,
+      target_version: record.target_version,
+      since: Date.now(),
+    };
+    const body = JSON.stringify(payload, null, 2);
+    await mkdir(dirname(this._pendingUpdatePath), { recursive: true });
+    // 同目录临时文件：rename 不跨设备（同分区）。
+    const tmpPath = `${this._pendingUpdatePath}.tmp-${process.pid}-${Date.now()}`;
+    await writeFile(tmpPath, body, 'utf-8');
+    try {
+      await chmod(tmpPath, 0o600);
+    } catch {
+      // POSIX chmod 失败 / Windows 无 0600 语义 → 降级不中断（惯例 R-05）。
+    }
+    // Windows rename 目标存在会失败 → 先 unlink 再 rename。
+    if (existsSync(this._pendingUpdatePath)) {
+      try {
+        await unlink(this._pendingUpdatePath);
+      } catch {
+        // 并发场景下另一进程刚清：忽略，rename 仍尝试。
+      }
+    }
+    try {
+      await rename(tmpPath, this._pendingUpdatePath);
+    } catch {
+      // rename 失败兜底：直接写目标（牺牲原子性但保证最终落盘）。
+      await writeFile(this._pendingUpdatePath, body, 'utf-8');
+      await chmod(this._pendingUpdatePath, 0o600).catch(() => undefined);
+      await unlink(tmpPath).catch(() => undefined);
+    }
+    this._logger.info('pending_update_written', {
+      reason: payload.reason,
+      current_version: payload.current_version,
+      target_version: payload.target_version,
+    });
+  }
+
+  /**
+   * task-03（S3）：删除 pending-update.json（升级执行 / 取消 / noop 路径调用）。
+   *
+   * 不存在 = 幂等成功（忽略 ENOENT）；其他失败仅 warn 不抛（清除路径在收尾链上，
+   * 抛错会阻断 stop/respawn 编排；残留由下次启动 cleanupStalePendingUpdate 兜底）。
+   */
+  async clearPendingUpdate(): Promise<void> {
+    try {
+      await unlink(this._pendingUpdatePath);
+      this._logger.info('pending_update_cleared', {});
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (code === 'ENOENT') {
+        // 已不存在：幂等成功，静默。
+        return;
+      }
+      this._logger.warn('pending_update_clear_failed', {
+        error: (e as Error)?.message ?? String(e),
+      });
+    }
+  }
+
+  /**
+   * task-03（S3）：读取当前 pending 记录（task-05 心跳「仅 pending 期间携带
+   * pending_update 字段」的读取口）。无 / 无效 → null（心跳不带字段）。
+   */
+  async readPendingUpdate(): Promise<PendingUpdateRecord | null> {
+    return readPendingUpdateFile(this._pendingUpdatePath);
+  }
+
+  /**
+   * task-03（S3 / Grill M15）：启动清矛盾 pending 残留。
+   *
+   * 判定（design S3）：文件存在且 target_version == 内存 BUILD_ID（升级已完成，
+   * 矛盾）或结构无效（reason 等字段缺失）→ 删除；target ≠ 内存（仍在途推迟）→
+   * 保留。防「升级后删除失败」导致本地 status / 心跳永久展示过期等待。start()
+   * 已接线（preflight 后、三循环前）；亦导出为公开方法供测试直接调用。
+   */
+  async cleanupStalePendingUpdate(): Promise<void> {
+    const record = await this.readPendingUpdate();
+    if (record !== null && record.target_version !== BUILD_ID) {
+      // 仍在途：盘上 ≠ 内存，保留给 status / 心跳展示。
+      this._logger.debug('pending_update_kept', {
+        target_version: record.target_version,
+        current_build_id: BUILD_ID,
+      });
+      return;
+    }
+    // record===null 但文件可能存在（损坏/缺字段）→ clear 兜底删；不存在 → no-op。
+    await this.clearPendingUpdate();
+    this._logger.debug('pending_update_stale_removed', {
+      target_version: record?.target_version ?? null,
+    });
+  }
+
+  // ── task-04（S1）：自更新单入口编排器 tryUpdate ──────────────────────────────
+  // 契约（consumes task-01 BusyCheckApi + task-03 DiskProbeAndPending）：
+  //   SELF_UPDATE 指令（WS）与磁盘探测差异（startDiskProbe 回调）都汇入
+  //   _tryUpdate(reason, targetVersion)——所有权占位/忙推迟（pending+30s 复查）/
+  //   空闲按 reason 分流（server_command 走 runDaemonSelfUpdate 升级链 + stop 前
+  //   终检；disk_change 不下载直启）/交接排定后所有权持有到进程退出。
+
+  /**
+   * task-04：preflight 的 PreflightLogger((level,msg,data)) → 内部 Logger 方法
+   * 适配（runDaemonSelfUpdate / fetchLatestBuildId / respawnDaemonAndExit 三处
+   * 共用，同 start() 内 runPreflight 的适配写法）。
+   */
+  private _preflightLog(
+    level: 'debug' | 'info' | 'warn' | 'error',
+    msg: string,
+    data?: Record<string, unknown>,
+  ): void {
+    this._logger[level](msg, data);
+  }
+
+  /**
+   * task-04（S1 / FR-01 / D-001@v1）：升级忙判定——纯同步查询。
+   *
+   * 口径：sessionManager 存在「在跑轮次」（SessionState.status==='running'，
+   * hasRunningTurn；'reconnecting' 恢复中间态不算忙）或 taskRunner 存在「在跑
+   * batch lease」（hasActiveLease：_controllers 非空）。**同步性是终检（Grill B3）
+   * 的前提**：终检与 stop() 首动作之间不得有 await——本方法内任何 await 都会把
+   * 竞态窗口从毫秒级放大到一次 IO。taskRunner 缺 hasActiveLease（旧测试 mock）
+   * 视为不忙（TaskRunnerLike 可选方法先例，Grill M14）。
+   */
+  private _isBusyForUpdate(): boolean {
+    if (this._sessionManager?.hasRunningTurn() === true) return true;
+    if (
+      typeof this._taskRunner?.hasActiveLease === 'function' &&
+      this._taskRunner.hasActiveLease() === true
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * task-04（S1 / D-002@v1）：忙推迟——释放所有权 + 写 pending + 排/刷新 30s 复查。
+   *
+   * 生命周期约定（design Grill M05/M19）：进入推迟态即释放所有权（推迟期不占，
+   * 新触发可再入——仅刷新 pending 目标、定时器 clear+set 不叠）；离开推迟态
+   * （升级执行/noop/异常）必清定时器（_clearUpdateRetryTimer，防 noop 后 30s
+   * 死循环）；reason 取最新触发（server_command 与 disk_change 等价，谁后到
+   * pending 显示谁——writePendingUpdate 整体覆盖天然满足）。
+   *
+   * 目标版本解析：disk_change 恒携带盘上 BUILD_ID；server_command 优先 WS 指令
+   * version，缺失时拉 latest.json（fetchLatestBuildId 等价接口）兜底，仍失败用
+   * '<disk>' 占位（可见性字段，不参与升级判定——升级与否由 runDaemonSelfUpdate
+   * /盘上文件决定）。
+   */
+  private async _deferUpdate(
+    reason: 'server_command' | 'disk_change',
+    targetVersion?: string,
+  ): Promise<void> {
+    // 先释放再落盘/排时：此后即便有新触发穿插（写 pending 竞态）也只是刷新目标。
+    this._updateBusy = false;
+    let target = targetVersion;
+    if (!target) {
+      // 仅 server_command 可能缺目标（disk_change 回调恒带盘上 BUILD_ID）。
+      // fetchLatestBuildId 内部全收敛不抛，try/catch 为防御性兜底。
+      try {
+        target =
+          (await fetchLatestBuildId(this._config, this._preflightLog.bind(this)))
+          ?? undefined;
+      } catch {
+        target = undefined;
+      }
+    }
+    const resolved = target ?? SELF_UPDATE_TARGET_UNKNOWN;
+    await this.writePendingUpdate({
+      reason,
+      current_version: BUILD_ID,
+      target_version: resolved,
+    });
+    this._scheduleUpdateRetry(reason, resolved);
+  }
+
+  /**
+   * task-04（S1 / D-002）：排/刷新 30s 空闲复查定时器（unref）。
+   *
+   * 已有 pending 仅刷新不叠：clearTimeout 再 setTimeout（单实例定时器）。到点
+   * 完整重跑 _tryUpdate（携带已解析目标，避免每 30s 重拉 latest.json）——每轮
+   * 从零重探，无 drain-hook 状态机（D-002 明示不做）。
+   */
+  private _scheduleUpdateRetry(
+    reason: 'server_command' | 'disk_change',
+    targetVersion: string,
+  ): void {
+    if (this._updateRetryTimer) clearTimeout(this._updateRetryTimer);
+    this._updateRetryTimer = setTimeout(() => {
+      this._updateRetryTimer = null;
+      // _tryUpdate 全路径内部 catch 收敛不 reject；.catch 为防御性兜底（惯例）。
+      void this._tryUpdate(reason, targetVersion).catch((e) => {
+        this._logger.error('self_update_retry_failed', { error: e });
+      });
+    }, SELF_UPDATE_RETRY_INTERVAL_MS);
+    if (typeof this._updateRetryTimer.unref === 'function') {
+      this._updateRetryTimer.unref();
+    }
+    this._logger.debug('self_update_retry_scheduled', {
+      reason,
+      target_version: targetVersion,
+      interval_ms: SELF_UPDATE_RETRY_INTERVAL_MS,
+    });
+  }
+
+  /** task-04（S1）：清 30s 复查定时器——离开推迟态（升级执行/noop/异常）必调。 */
+  private _clearUpdateRetryTimer(): void {
+    if (this._updateRetryTimer) {
+      clearTimeout(this._updateRetryTimer);
+      this._updateRetryTimer = null;
+    }
+  }
+
+  /**
+   * task-04（S1 / Grill B2+B3 修正）：自更新单入口编排器。
+   *
+   * 流程（design S1）：
+   *   1. 所有权占位：已占（另一次 _tryUpdate 在途）→ 本次忽略仅记 debug。
+   *   2. 忙判定（_isBusyForUpdate）忙 → 推迟（_deferUpdate：释放+pending+30s）。
+   *   3. 空闲按 reason 分流：
+   *      - server_command → runDaemonSelfUpdate 下载原子替换（false=noop →
+   *        释放+清 pending+清定时器）→ true → ★终检（重跑 _isBusyForUpdate，
+   *        忙回推迟；**终检与 stop() 首动作之间不得有 await**，竞态窗口毫秒级）
+   *        → stop()（挂起空闲会话，D-001）→ respawnDaemonAndExit（交接）。
+   *      - disk_change → 不下载不查 manifest 直接 stop() → respawn 到盘上版本
+   *        （操作者换文件即意图，multica trySelfReload 同款——防磁盘降级/盘≠
+   *        manifest 被 runDaemonSelfUpdate 的防降级/noop 挡成永不收敛）。
+   *   4. 一切非「交接排定」路径释放所有权+清 pending 可再触发；交接排定后所有
+   *      权保持到进程退出。
+   *
+   * 注：disk_change 入口忙判定即终检——分流后到 stop() 之间无任何 await，无
+   * 重查窗口（终检语义自然满足）；server_command 因下载 await 挂起存在窗口，
+   * 故显式重查。
+   */
+  private async _tryUpdate(
+    reason: 'server_command' | 'disk_change',
+    targetVersion?: string,
+  ): Promise<void> {
+    // 所有权占位（JS 单线程下 check+set 原子）。推迟态所有权已释放，不在此列；
+    // 在途的下载 await 挂起期间到达的新触发在这里被忽略（推迟信息由在途那次
+    // 自身的 defer/终检路径收口）。
+    if (this._updateBusy) {
+      this._logger.debug('self_update_skipped_inflight', { reason });
+      return;
+    }
+    this._updateBusy = true;
+    try {
+      if (this._isBusyForUpdate()) {
+        this._logger.info('self_update_deferred_busy', {
+          reason,
+          target_version: targetVersion,
+        });
+        await this._deferUpdate(reason, targetVersion);
+        return;
+      }
+      if (reason === 'disk_change') {
+        // 直启路径：同款终检语义见方法注释（入口判定后无 await，天然满足 B3）。
+        this._logger.info('self_update_disk_change_restart', {
+          target_version: targetVersion,
+        });
+        // 离开推迟态（升级执行）必清定时器，再走 stop → 交接。
+        this._clearUpdateRetryTimer();
+        await this.stop();
+        // 交接排定：所有权保持到进程退出，不释放。
+        respawnDaemonAndExit(this._preflightLog.bind(this));
+        return;
+      }
+      // server_command：现有升级链（下载+tmp+rename 原子替换；false=已最新/
+      // 防降级/拉取下载失败，内部已 warn）。
+      const updated = await runDaemonSelfUpdate(
+        BUILD_ID,
+        this._config,
+        this._preflightLog.bind(this),
+      );
+      if (!updated) {
+        // noop：释放所有权+清 pending+清复查定时器（防 noop 后 30s 死循环），
+        // 新指令可再触发。
+        this._updateBusy = false;
+        this._clearUpdateRetryTimer();
+        await this.clearPendingUpdate();
+        this._logger.info('self_update_noop', { target_version: targetVersion });
+        return;
+      }
+      // ★终检（Grill B3）：下载 await 挂起期间可能新起了 turn/lease——stop 前
+      // 重跑忙判定，忙则不打断回推迟。终检与 stop() 首动作之间不得有 await。
+      if (this._isBusyForUpdate()) {
+        this._logger.info('self_update_final_check_busy', {
+          target_version: targetVersion,
+        });
+        await this._deferUpdate(reason, targetVersion);
+        return;
+      }
+      this._logger.info('self_update_done', { target_version: targetVersion });
+      // 离开推迟态（升级执行）必清定时器；stop 必须先于 respawn——新进程
+      // acquire runtime lock 时旧进程已释放（无竞态）。
+      this._clearUpdateRetryTimer();
+      await this.stop();
+      // 交接排定：所有权保持到进程退出（respawn 内部 500ms 后 exit(0)）。
+      respawnDaemonAndExit(this._preflightLog.bind(this));
+    } catch (e) {
+      // 兜底 catch：runDaemonSelfUpdate / respawnDaemonAndExit 均内部收敛不抛，
+      // 能到这里的只有 stop()/pending 落盘意外——释放所有权+清 pending（升级未
+      // 排定，新触发可再入）+ warn。
+      //
+      // respawn 失败停摆语义（design S1 / Grill M07）：spawn 在 stop() 之后，
+      // 失败时进程已停摆（WS/心跳已关）——「保活」指进程不退出待人工/看护介入，
+      // backend 45s 判 offline 可见；该路径 preflight 内部吞掉不上抛，**到不了
+      // 本 catch**，此处释放所有权仅为语义自洽（无消费者）。
+      this._updateBusy = false;
+      this._clearUpdateRetryTimer();
+      try {
+        await this.clearPendingUpdate();
+      } catch {
+        // clearPendingUpdate 自身 warn 收敛不抛，防御性兜底。
+      }
+      this._logger.warn('self_update_failed', {
+        reason,
+        error: (e as Error)?.message ?? String(e),
+      });
+    }
   }
 
   // ── 内部：register 单个 agent（task-17 HubClient.register）─────────────────
@@ -2817,11 +3466,23 @@ export class Daemon {
       status: 'online' as const,
     }));
     try {
+      // task-05（FR-04 / design S3）：pending 期心跳透传 pending_update——读
+      // task-03 提供的 readPendingUpdate（pending-update.json 读取口），剥掉
+      // since 只传三字段（backend 首次落库盖 since，daemon 不上报）。null/读失败
+      // → 不传第 4 参，body 无该键（=backend 清除，task-06 语义）。
+      const pending = await this.readPendingUpdate();
       const hbResp = await this._client.heartbeat(
         daemonLocalId,
         providers,
         // task-01：进程启动时间随心跳上报（位置参数第 3，对齐 hub-client task-02 签名）。
         this._startedAt,
+        pending == null
+          ? undefined
+          : {
+              reason: pending.reason,
+              current_version: pending.current_version,
+              target_version: pending.target_version,
+            },
       );
       // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。
       this._heartbeatFailSince = null;
@@ -3989,41 +4650,20 @@ export class Daemon {
         break;
       }
       // Server → Daemon：服务端判定 daemon 版本落后后推送的自更新指令。
-      // 复用 preflight 的 runDaemonSelfUpdate 下载 + 原子替换 bundle；替换成功后
-      // 先优雅 stop（释放 runtime lock / 标 offline / flush 会话快照），再以
+      // task-04（S1）：改经单入口编排器 _tryUpdate——忙判定推迟（pending+30s 复查）/
+      // 空闲走 runDaemonSelfUpdate 下载原子替换 → stop 前终检（Grill B3）→ 优雅
+      // stop（释放 runtime lock / 标 offline / 挂起会话）→ respawnDaemonAndExit 以
       // detached 子进程拉起新 bundle（同启动参数）并退出——仓库不存在外部
       // supervisor（install wrapper 是一次性 exec，无 systemd/服务/计划任务），
       // 不自带拉起就会"更新完就死"（新进程 acquire lock 时旧进程已释放，无竞态）。
+      // fire-and-forget（指令无回执，同 CLEANUP 惯例）；_tryUpdate 全路径内部
+      // catch 收敛不 reject。
       case MSG.SELF_UPDATE: {
         const payload = (msg as { payload?: { version?: string } }).payload;
         this._logger.info('self_update_received', {
           version: payload?.version,
         });
-        try {
-          // 复用 preflight 的自更新逻辑（下载 + 替换 bundle 文件）。
-          // 返回 true=已替换需重启；false=跳过（dev/已最新/防降级/失败已 warn）。
-          const { runDaemonSelfUpdate, respawnDaemonAndExit } = await import('./preflight.js');
-          const updated = await runDaemonSelfUpdate(BUILD_ID, this._config, (level, m, data) => {
-            // 适配 PreflightLogger 的 (level,msg,data) 签名为内部 Logger 方法
-            this._logger[level](m, data);
-          });
-          if (!updated) {
-            // 未发生替换（已最新/防降级/拉取失败）→ 保持运行不断连不重启。
-            this._logger.info('self_update_noop', { version: payload?.version });
-            break;
-          }
-          this._logger.info('self_update_done', { version: payload?.version });
-          // 顺序：stop（释放资源）→ 拉起新进程 → 退出。stop 必须先于拉起，
-          // 否则新进程 acquire runtime lock 时旧进程仍持有 → 抢锁失败退出。
-          await this.stop();
-          respawnDaemonAndExit((level, m, data) => {
-            this._logger[level](m, data);
-          });
-        } catch (e) {
-          this._logger.warn('self_update_failed', {
-            error: (e as Error)?.message ?? String(e),
-          });
-        }
+        void this._tryUpdate('server_command', payload?.version);
         break;
       }
       // Server → Daemon：清理本地缓存（specs 缓存 / Claude 会话日志 / 备份 / 日志）。

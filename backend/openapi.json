@@ -10800,7 +10800,7 @@
           "daemon"
         ],
         "summary": "Daemon Heartbeat",
-        "description": "Per-daemon HTTP 心跳（design §5.4 / §9.1 / D-006）。\n\ndaemon 单条心跳合并上报 ``daemon_local_id`` + 各 provider 状态。backend 刷新\n``daemon_instances.last_heartbeat_at`` + 各 ``daemon_runtimes.status``。\n``heartbeat_ack`` 经 WS 下发到该 daemon 连接（task-06 通路），本 HTTP 响应只\n回 ``{daemon_instance_id, status, allowed_roots}``（allowed_roots 从 daemon\n实体读，已上提到 daemon_instances，design §4.2）。\n\nWS breaking（D-007）：旧 daemon 按 per-provider body 上报（无 daemon_local_id）\n→ pydantic 校验 daemon_local_id 必填失败 → 422 拒绝，要求同步升级。",
+        "description": "Per-daemon HTTP 心跳（design §5.4 / §9.1 / D-006）。\n\ndaemon 单条心跳合并上报 ``daemon_local_id`` + 各 provider 状态。backend 刷新\n``daemon_instances.last_heartbeat_at`` + 各 ``daemon_runtimes.status``。\n``heartbeat_ack`` 经 WS 下发到该 daemon 连接（task-06 通路），本 HTTP 响应只\n回 ``{daemon_instance_id, status, allowed_roots}``（allowed_roots 从 daemon\n实体读，已上提到 daemon_instances，design §4.2）。\n\nWS breaking（D-007）：旧 daemon 按 per-provider body 上报（无 daemon_local_id）\n→ pydantic 校验 daemon_local_id 必填失败 → 422 拒绝，要求同步升级。\n2026-08-29-daemon-selfupdate-safety task-06：心跳携带可选 pending_update 时\nupsert daemon_instances.pending_update（同内容保留原 since）；无该字段置 NULL\n清除（D-004@v1，语义与兄弟字段反向，详见 DTO/服务层注释）。",
         "operationId": "daemon_heartbeat_api_daemon_heartbeat_post",
         "requestBody": {
           "content": {
@@ -10887,7 +10887,7 @@
           "daemon"
         ],
         "summary": "List Runtimes Page",
-        "description": "平台管理员分页查看全部 owner 的 runtime；普通账号只见自己 (FR-01/02/04).\n\n2026-08-28-daemon-agent-share task-07：附加 shared_to_me 共享区块（design §5\nPhase 2.2）——独立成块不混入 items，无授权数据时空列表（零行为变化）。",
+        "description": "平台管理员分页查看全部 owner 的 runtime；普通账号只见自己 (FR-01/02/04).\n\n2026-08-28-daemon-agent-share task-07：附加 shared_to_me 共享区块（design §5\nPhase 2.2）——独立成块不混入 items，无授权数据时空列表（零行为变化）。\n2026-08-29-daemon-selfupdate-safety task-06：items 透出机器级 pending_update\n（FR-04 / D-004@v1，_runtime_read 注入，无 pending 时 null）。",
         "operationId": "list_runtimes_page_api_daemon_runtimes_page_get",
         "parameters": [
           {
@@ -10988,7 +10988,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DaemonRuntimeListResponse"
+                  "$ref": "#/components/schemas/DaemonRuntimeListResponseWithPending"
                 }
               }
             }
@@ -11252,7 +11252,7 @@
           "daemon"
         ],
         "summary": "List Machines",
-        "description": "平台管理员分页查看全部 owner 的 daemon 机器（design §5.1 / FR-1）。\n\n普通账号仅见自己的机器（service 层强制 ``actor == user_id``，请求 ``user_id`` 被忽略）。\n``list_machines`` 内部已先 ``cleanup_stale_runtimes`` 收敛 stale 状态，router 不重复调。\n2026-08-28-daemon-agent-share task-07：附加 shared_to_me 共享区块（design §5\nPhase 2.2）——独立成块不混入 items，无授权数据时空列表（零行为变化）。",
+        "description": "平台管理员分页查看全部 owner 的 daemon 机器（design §5.1 / FR-1）。\n\n普通账号仅见自己的机器（service 层强制 ``actor == user_id``，请求 ``user_id`` 被忽略）。\n``list_machines`` 内部已先 ``cleanup_stale_runtimes`` 收敛 stale 状态，router 不重复调。\n2026-08-28-daemon-agent-share task-07：附加 shared_to_me 共享区块（design §5\nPhase 2.2）——独立成块不混入 items，无授权数据时空列表（零行为变化）。\n2026-08-29-daemon-selfupdate-safety task-06：items 透出机器级 pending_update\n（FR-04 / D-004@v1，_build_machine_read 组装，无 pending 时 null）。",
         "operationId": "list_machines_api_daemon_machines_get",
         "parameters": [
           {
@@ -11353,7 +11353,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DaemonMachineListResponse"
+                  "$ref": "#/components/schemas/DaemonMachineListResponseWithPending"
                 }
               }
             }
@@ -34864,6 +34864,36 @@
         "type": "object",
         "title": "CustomerMaintenanceUpdate"
       },
+      "DaemonHeartbeatPendingUpdate": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "current_version": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Current Version"
+          },
+          "target_version": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Target Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason",
+          "current_version",
+          "target_version"
+        ],
+        "title": "DaemonHeartbeatPendingUpdate",
+        "description": "心跳 pending_update 载荷（task-06 / FR-04 / D-004@v1 / design S4）。\n\ndaemon 推迟自升级期间（忙推迟 / disk_change 复查等待）每轮心跳携带；语义同\ndaemon 侧 pending-update.json 的三字段投影（task-05，``since`` 不上报——backend\n首落库时盖 ``since=now``，daemon 侧值无意义）。reason 当前取值\n``server_command`` / ``disk_change``（design §5）；此处不收紧成 Literal——收紧\n会让未来新增 reason 的整条心跳 422（心跳是保活通道，宁宽勿断）。"
+      },
       "DaemonHeartbeatProviderItem": {
         "properties": {
           "provider": {
@@ -34929,6 +34959,16 @@
               }
             ],
             "title": "Started At"
+          },
+          "pending_update": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DaemonHeartbeatPendingUpdate"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "providers": {
             "items": {
@@ -35095,11 +35135,11 @@
         "title": "DaemonInstanceRead",
         "description": "Frontend-oriented daemon instance DTO with nested provider info.\n\nUsed by GET /api/daemon/instances for the workspace-daemon-switcher\n(task-10, design §7). Includes the list of provider runtimes so the\nfrontend can render provider badges without an extra HTTP round-trip."
       },
-      "DaemonMachineListResponse": {
+      "DaemonMachineListResponseWithPending": {
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/DaemonMachineRead"
+              "$ref": "#/components/schemas/DaemonMachineReadWithPending"
             },
             "type": "array",
             "title": "Items"
@@ -35131,8 +35171,8 @@
           "limit",
           "offset"
         ],
-        "title": "DaemonMachineListResponse",
-        "description": "Response body for GET /api/daemon/machines（design §5.1 / FR-1）。\n\n机器级分页（默认 20/页，D-007），机器卡永不跨页断裂。\n2026-08-28-daemon-agent-share task-07：附加 ``shared_to_me`` 共享区块\n（design §5 Phase 2.2，独立成块不混入 items；默认空列表，无共享时零变化）。"
+        "title": "DaemonMachineListResponseWithPending",
+        "description": "GET /machines 响应（items 换 pending_update 扩展视图）。"
       },
       "DaemonMachineRead": {
         "properties": {
@@ -35271,6 +35311,154 @@
         ],
         "title": "DaemonMachineRead",
         "description": "机器级聚合读视图 DTO（design §5.1 / task-01）。\n\n一行 = 一台 daemon 机器（daemon_instances），机器级字段直接读 instance 行；\n其下 runtimes 嵌套该机器全部 daemon_runtimes（含各自 capabilities/allowed_roots）。\n派生 runtime_count / online_runtime_count 由 service 层组装时填入。"
+      },
+      "DaemonMachineReadWithPending": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "hostname": {
+            "type": "string",
+            "title": "Hostname"
+          },
+          "display_alias": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Alias"
+          },
+          "os": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Os"
+          },
+          "arch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arch"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "last_heartbeat_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Heartbeat At"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "build_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Build Id"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/app__modules__daemon__schema__OwnerRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runtime_count": {
+            "type": "integer",
+            "title": "Runtime Count"
+          },
+          "online_runtime_count": {
+            "type": "integer",
+            "title": "Online Runtime Count"
+          },
+          "runtimes": {
+            "items": {
+              "$ref": "#/components/schemas/DaemonRuntimeRead"
+            },
+            "type": "array",
+            "title": "Runtimes"
+          },
+          "pending_update": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MachinePendingUpdateRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "hostname",
+          "status",
+          "last_heartbeat_at",
+          "created_at",
+          "runtime_count",
+          "online_runtime_count"
+        ],
+        "title": "DaemonMachineReadWithPending",
+        "description": "DaemonMachineRead + 机器级 pending_update（GET /machines 透出用）。"
       },
       "DaemonMachineUpdate": {
         "properties": {
@@ -35593,11 +35781,11 @@
         "title": "DaemonRuntimeAllowedRootsUpdate",
         "description": "Request body for PUT /api/daemon/runtimes/{runtime_id}/allowed-roots.\n\n2026-06-29-runtime-allowed-roots-config task-02：admin 配置可访问目录沙箱。\n每条路径绝对路径或 ``~`` 开头（daemon 侧展开 homedir）；后端只校验格式。"
       },
-      "DaemonRuntimeListResponse": {
+      "DaemonRuntimeListResponseWithPending": {
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/DaemonRuntimeRead"
+              "$ref": "#/components/schemas/DaemonRuntimeReadWithPending"
             },
             "type": "array",
             "title": "Items"
@@ -35629,8 +35817,8 @@
           "limit",
           "offset"
         ],
-        "title": "DaemonRuntimeListResponse",
-        "description": "Response body for GET /api/daemon/runtimes/page (task-04 / FR-04).\n\n2026-08-28-daemon-agent-share task-07：附加 ``shared_to_me`` 共享区块\n（design §5 Phase 2.2，默认空列表保证既有子集式 shape 断言零失败）。"
+        "title": "DaemonRuntimeListResponseWithPending",
+        "description": "GET /runtimes/page 响应（items 换 pending_update 扩展视图）。"
       },
       "DaemonRuntimeRead": {
         "properties": {
@@ -35815,6 +36003,200 @@
         ],
         "title": "DaemonRuntimeRead",
         "description": "Response body for daemon runtime info.\n\n2026-07-03-daemon-entity-binding task-05：机器级字段（os / arch / capabilities /\nallowed_roots / display_alias）已上提到 daemon_instances（design §4.2），本 DTO\n这些字段保留为 optional 占位（default=None / default_factory），让现有返回该\nDTO 的端点（disable / enable / get / list / update）在 runtime 行不含这些列时\n不崩。语义正确的机器级视图由后续 daemon_instance Read 承载（task-06/前端）。"
+      },
+      "DaemonRuntimeReadWithPending": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "daemon_instance_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Instance Id"
+          },
+          "display_alias": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Alias"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "daemon_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Version"
+          },
+          "daemon_build_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daemon Build Id"
+          },
+          "os": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Os"
+          },
+          "arch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arch"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "last_heartbeat_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Heartbeat At"
+          },
+          "capabilities": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capabilities"
+          },
+          "allowed_roots": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Roots"
+          },
+          "owner": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/app__modules__daemon__schema__OwnerRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "pending_update": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MachinePendingUpdateRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "provider",
+          "version",
+          "status",
+          "last_heartbeat_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "DaemonRuntimeReadWithPending",
+        "description": "DaemonRuntimeRead + 机器级 pending_update（/runtimes/page 透出用）。"
       },
       "DaemonRuntimeUpdate": {
         "properties": {
@@ -39839,6 +40221,36 @@
           "password"
         ],
         "title": "LoginRequest"
+      },
+      "MachinePendingUpdateRead": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "current_version": {
+            "type": "string",
+            "title": "Current Version"
+          },
+          "target_version": {
+            "type": "string",
+            "title": "Target Version"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Since"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reason",
+          "current_version",
+          "target_version",
+          "since"
+        ],
+        "title": "MachinePendingUpdateRead",
+        "description": "机器视图 pending_update 嵌套（design S4 / M11）。\n\n即 daemon_instances.pending_update JSON 列原样透出：三上报字段 + backend 首落\n库时盖的 ``since``（同内容重放心跳保留原 since，不退化成最后心跳时间）。\nNULL（无待升级）→ 机器视图字段为 null。"
       },
       "McpConfigUpdateRequest": {
         "properties": {

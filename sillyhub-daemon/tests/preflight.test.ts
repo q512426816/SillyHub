@@ -37,6 +37,7 @@ import {
   runSillySpecCheck,
   runDaemonSelfUpdate,
   respawnDaemonAndExit,
+  fetchLatestBuildId,
 } from '../src/preflight.js';
 import type { DaemonConfig } from '../src/config.js';
 
@@ -442,6 +443,61 @@ describe('runDaemonSelfUpdate', () => {
     expect(String(spy.mock.calls[0]![0])).toBe(
       'http://127.0.0.1:8000/daemon/latest.json',
     );
+  });
+});
+
+// ── fetchLatestBuildId（task-04 目标版本回传等价接口）─────────────────────────
+
+describe('fetchLatestBuildId', () => {
+  it('latest.json 可得 → 返回 version 字符串，只拉一次不下载 bundle', async () => {
+    const { fn } = makeLogger();
+    const spy = vi.fn(
+      makeFetch({
+        '/daemon/latest.json': { version: 'def5678-20260829120000', url: 'http://x/bundle.js' },
+      }),
+    );
+    vi.stubGlobal('fetch', spy);
+    await expect(fetchLatestBuildId(makeConfig(), fn)).resolves.toBe(
+      'def5678-20260829120000',
+    );
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(String(spy.mock.calls[0]![0])).toContain('/daemon/latest.json');
+  });
+
+  it('拉取失败（fetch 抛错）→ 返回 null 不抛（warn 已记）', async () => {
+    const { fn, entries } = makeLogger();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => {
+        throw new Error('network down');
+      }),
+    );
+    await expect(fetchLatestBuildId(makeConfig(), fn)).resolves.toBe(null);
+    expect(entries.find((x) => x.msg === 'daemon_latest_fetch_failed')?.level).toBe('warn');
+  });
+
+  it('结构无效（缺 url）→ 复用 fetchLatest 严格校验返回 null', async () => {
+    const { fn, entries } = makeLogger();
+    vi.stubGlobal(
+      'fetch',
+      makeFetch({ '/daemon/latest.json': { version: 'def5678' } }),
+    );
+    await expect(fetchLatestBuildId(makeConfig(), fn)).resolves.toBe(null);
+    expect(entries.find((x) => x.msg === 'daemon_latest_invalid_shape')).toBeTruthy();
+  });
+
+  it('server_url 尾斜杠 → 同款去斜杠拼接', async () => {
+    const { fn } = makeLogger();
+    const spy = vi.fn(
+      makeFetch({
+        '/daemon/latest.json': { version: 'abc1234', url: 'http://x/bundle.js' },
+      }),
+    );
+    vi.stubGlobal('fetch', spy);
+    await expect(
+      fetchLatestBuildId(makeConfig('http://127.0.0.1:8000///'), fn),
+    ).resolves.toBe('abc1234');
+    expect(String(spy.mock.calls[0]![0])).toBe('http://127.0.0.1:8000/daemon/latest.json');
   });
 });
 

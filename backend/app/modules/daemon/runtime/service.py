@@ -340,6 +340,7 @@ class RuntimeService:
         daemon_version: str | None = None,
         daemon_build_id: str | None = None,
         started_at: datetime | None = None,
+        pending_update: dict | None = None,
         *,
         actor_user_id: uuid.UUID | None = None,
     ) -> DaemonInstance:
@@ -348,6 +349,17 @@ class RuntimeService:
         2026-08-05-daemon-start-time D-002@v1：started_at 仿 daemon_version
         非空判断幂等覆盖（daemon 进程不重启 started_at 恒定，覆盖同值无副作用；
         daemon 重启后会先 register 重置，再 heartbeat 维持）。
+
+        2026-08-29-daemon-selfupdate-safety task-06（FR-04 / D-004@v1）：
+        ``pending_update``（``{reason, current_version, target_version}`` 三键 dict，
+        router 层 DTO 已校验）upsert ``daemon_instances.pending_update``——首次落库
+        或三元组内容变化 → 整对象重写并盖 ``since=now`` ISO；同内容重放心跳保留
+        原 dict（含 since，防退化成最后心跳时间，design S4 / Grill M11）。
+        ⚠ ``pending_update is None`` 即**清除置 NULL**（升级执行/取消路径收敛）——
+        刻意与本方法兄弟字段 daemon_version/daemon_build_id/started_at 的「非 None
+        才覆盖」语义相反：pydantic 请求模型中「缺省不携带」与「显式 null」不可
+        区分，且单机单 daemon 无新旧进程交错，靠「无字段」显式清除才收敛
+        （D-004@v1 锚定，勿被「对齐兄弟字段」误改回非空才覆盖）。
 
         daemon 单条心跳合并上报 ``daemon_local_id`` + 各 provider 状态。backend：
 
@@ -403,6 +415,30 @@ class RuntimeService:
             instance.build_id = daemon_build_id
         if started_at is not None:
             instance.started_at = started_at
+        # ── pending_update upsert（FR-04 / D-004@v1 / design S4）───────────────
+        # ⚠ None 即清除置 NULL——与上方兄弟字段「非 None 才覆盖」刻意反向：pydantic
+        # 请求模型缺省与显式 null 不可区分，单机单 daemon 无新旧进程交错，升级
+        # 执行/取消路径靠「无字段」显式清除才收敛（D-004@v1，勿对齐兄弟字段）。
+        if pending_update is None:
+            instance.pending_update = None
+        else:
+            current = instance.pending_update
+            same_pending = (
+                current is not None
+                and current.get("reason") == pending_update.get("reason")
+                and current.get("current_version") == pending_update.get("current_version")
+                and current.get("target_version") == pending_update.get("target_version")
+            )
+            # 同内容（reason+两版本三元组相等）保留原 dict（含 since）——since 是
+            # pending 首次出现时刻，防退化成最后心跳时间（design S4 / Grill M11）；
+            # 首落库或内容变化才整对象重写并盖 since=now。
+            if not same_pending:
+                instance.pending_update = {
+                    "reason": pending_update.get("reason", ""),
+                    "current_version": pending_update.get("current_version", ""),
+                    "target_version": pending_update.get("target_version", ""),
+                    "since": now.isoformat(),
+                }
         if instance.status != "disabled":
             instance.status = "online"
         self._session.add(instance)

@@ -110,6 +110,27 @@ export interface HeartbeatBody {
   started_at: string | null;
   /** 各 provider 当前状态，每项 {provider, status}。 */
   providers: { provider: string; status?: string }[];
+  /**
+   * task-05（2026-08-29-daemon-selfupdate-safety / FR-04 / D-004@v1）：推迟升级
+   * 期间心跳透传的 pending 状态。**仅 pending 期携带**——undefined 时本键完全不
+   * 出现（禁空对象/null 兜底）：无字段即 backend 清除（daemon_instances.pending_update
+   * 置 NULL），与 task-06「无字段=清除」语义对齐，旧 backend 兼容。
+   * since 不上报（backend 首次落库盖 since=now，daemon 侧值无意义）。
+   */
+  pending_update?: HeartbeatPendingUpdate;
+}
+
+/**
+ * 心跳 pending_update 载荷（task-05 / design S3）：task-03 pending-update.json
+ * 记录剥掉 since 后的三字段投影。daemon.ts 组装时转换，hub-client 原样透传。
+ */
+export interface HeartbeatPendingUpdate {
+  /** 推迟原因：'server_command' | 'disk_change'。 */
+  reason: string;
+  /** 推迟时进程内存中的 BUILD_ID。 */
+  current_version: string;
+  /** 等待切换到的目标 BUILD_ID。 */
+  target_version: string;
 }
 
 /**
@@ -623,17 +644,27 @@ export class HubClient {
     providers?: { provider: string; status?: string }[],
     /** task-02：daemon 进程启动时间（epoch ms / Date / 数值）；空填 null（兼容旧 daemon）。 */
     startedAt?: number | Date | null,
+    /**
+     * task-05（2026-08-29-daemon-selfupdate-safety / FR-04）：推迟升级期间的
+     * pending 状态（三字段）。可选且追加末位——undefined 时请求体不含
+     * pending_update 键（无字段=backend 清除，禁空对象兜底），既有 3 参调用
+     * 请求体逐字段不变（零破坏）。
+     */
+    pendingUpdate?: HeartbeatPendingUpdate,
   ): Promise<HeartbeatResponse> {
+    const body: HeartbeatBody = {
+      daemon_local_id: daemonLocalId,
+      daemon_version: DAEMON_VERSION,
+      daemon_build_id: BUILD_ID,
+      started_at: startedAt == null ? null : new Date(startedAt).toISOString(),
+      providers: providers ?? [],
+    };
+    // 仅 pending 期携带：undefined → 键完全不出现（design S3 兼容约束）。
+    if (pendingUpdate) body.pending_update = pendingUpdate;
     return this._request<HeartbeatResponse>(
       'POST',
       `${REST_PREFIX}/heartbeat`,
-      {
-        daemon_local_id: daemonLocalId,
-        daemon_version: DAEMON_VERSION,
-        daemon_build_id: BUILD_ID,
-        started_at: startedAt == null ? null : new Date(startedAt).toISOString(),
-        providers: providers ?? [],
-      } satisfies HeartbeatBody,
+      body,
     );
   }
 

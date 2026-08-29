@@ -427,6 +427,18 @@ export class TaskRunner {
   }
 
   /**
+   * task-01（2026-08-29-daemon-selfupdate-safety / FR-01 / D-001@v1）：是否存在
+   * 进行中的 batch lease——``_controllers`` 追踪集非空即 true。
+   *
+   * 空闲屏障的忙判定查询口，供 daemon 升级编排器（tryUpdate，task-04）判定是否
+   * 推迟升级。口径与 ``activeTaskCount`` getter 严格一致（同读 ``_controllers.size``；
+   * track/untrack 维护生命周期，untrack 后即不算）。零副作用纯查询。
+   */
+  hasActiveLease(): boolean {
+    return this._controllers.size > 0;
+  }
+
+  /**
    * 把 leaseId 加入追踪集，返回关联的 AbortController（供 cancel 触发）。
    * 对齐 Python `running_tasks[task_id] = asyncio.create_task(...)`。
    */

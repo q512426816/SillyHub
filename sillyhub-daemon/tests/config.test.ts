@@ -66,6 +66,7 @@ describe('config', () => {
         'retry_jitter',
         'retry_max_attempts',
         'runtime_id',
+        'self_reload_check_interval_sec',
         'server_url',
         'spec_root_map',
         'terminal_observer_close_on_exit',

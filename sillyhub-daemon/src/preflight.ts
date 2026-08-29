@@ -22,7 +22,9 @@
  * fetch（异步）。两者皆在 runPreflight 内 try/catch 隔离。
  *
  * 可测性：除公开入口 {@link runPreflight} 外，导出 {@link runSillySpecCheck} /
- * {@link runDaemonSelfUpdate} 供单测直接调用（buildId / binDir 可注入）。
+ * {@link runDaemonSelfUpdate} / {@link fetchLatestBuildId}（task-04：仅取
+ * latest.json version，daemon 推迟路径目标版本回传）供单测直接调用
+ * （buildId / binDir 可注入）。
  *
  * @module preflight
  */
@@ -247,6 +249,30 @@ export async function runDaemonSelfUpdate(
     to: latest.version,
   });
   return true;
+}
+
+/**
+ * task-04（2026-08-29-daemon-selfupdate-safety / S1）：拉取 latest.json 仅取
+ * version（目标版本回传等价接口）。
+ *
+ * 背景：WS SELF_UPDATE 指令的忙推迟路径要往 pending-update.json 写
+ * target_version，指令 payload 的 version 缺失时需要单独拉一次 latest.json 取
+ * 目标——不动 runDaemonSelfUpdate 的 boolean 返回（既有调用方/测试零改动），
+ * 以伴生函数复用同一 fetchLatest（同 URL 拼接 + 严格结构校验 + 失败 warn）。
+ *
+ * 永不 reject（fetchLatest 内部 fetch/解析全 try/catch 收敛）；失败返回 null，
+ * 调用方（daemon._deferUpdate）以 '<disk>' 占位兜底。
+ *
+ * @param config daemon 配置（取 server_url）
+ * @param logger 日志回调
+ * @returns latest.json 的 version 字符串；拉取失败/结构无效 → null
+ */
+export async function fetchLatestBuildId(
+  config: DaemonConfig,
+  logger: PreflightLogger,
+): Promise<string | null> {
+  const latest = await fetchLatest(config, logger);
+  return latest?.version ?? null;
 }
 
 /**

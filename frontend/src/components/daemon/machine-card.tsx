@@ -7,10 +7,15 @@
  *
  * 受控组件：expanded 由 page 持有。不在此拉用量——usageByRuntime 由 page 注入（D-004）。
  * 不内联 RuntimeCard 实现，import { RuntimeCard } from "./runtime-card"。
+ *
+ * 2026-08-29-daemon-selfupdate-safety task-07 / FR-05：machine.pending_update
+ * 非空时折叠头下渲染推迟升级横幅（server_command=warning / disk_change=info
+ * 主题语义色阶，文案对照 prototype-machine-update-status.html）并禁用升级按钮。
  */
 import {
   ChevronRight,
   HardDrive,
+  Hourglass,
   Pencil,
   RefreshCw,
   Server,
@@ -104,6 +109,13 @@ export function MachineCard({
   const status = getStatusMeta(machine.status);
   const StatusIcon = machine.status === "offline" ? ServerOff : Server;
   const isOffline = machine.status === "offline";
+
+  // task-07 / FR-05：pending_update 非空 = 推迟升级期（机器忙，daemon 自更新
+  // 安全层等待空闲）。server_command 与 disk_change 共用同一横幅位，仅文案/
+  // 色阶不同（原型②③）；缺省（旧后端）按 null 消费。未知 reason 兜底走
+  // warning 升级等待文案（reason 保持 string 不收紧，见 lib/daemon.ts）。
+  const pendingUpdate = machine.pending_update ?? null;
+  const isDiskChange = pendingUpdate?.reason === "disk_change";
 
   // 聚合费用：该机器所有 runtime 在 usageByRuntime 中的 total_cost_usd 之和。
   const totalCost = machine.runtimes.reduce((sum, r) => {
@@ -230,16 +242,26 @@ export function MachineCard({
             别名
           </button>
 
-          {/* 升级 daemon 按钮（对齐 .btn-outline btn-tiny，offline disabled） */}
+          {/* 升级 daemon 按钮（对齐 .btn-outline btn-tiny，offline disabled）。
+              task-07 / FR-05：pending_update 期也 disabled——升级已由安全层接管
+              （等待空闲自动执行），手动指令此时无意义，title 提示等待原因。 */}
           <button
             type="button"
             className={btnOutlineTiny}
-            disabled={isOffline || upgrading}
+            disabled={isOffline || upgrading || pendingUpdate !== null}
             onClick={(e) => {
               e.stopPropagation();
               onUpgrade(machine);
             }}
-            title={isOffline ? "离线，无法升级" : upgrading ? "升级中…" : "下发 daemon 自更新指令"}
+            title={
+              isOffline
+                ? "离线，无法升级"
+                : upgrading
+                  ? "升级中…"
+                  : pendingUpdate
+                    ? "升级进行中"
+                    : "下发 daemon 自更新指令"
+            }
           >
             <RefreshCw className="h-3.5 w-3.5" />
             升级 daemon
@@ -288,6 +310,50 @@ export function MachineCard({
           />
         </div>
       </header>
+
+      {/* ===== pending_update 三状态横幅（task-07 / FR-05 / D-003@v2 + D-004@v1）=====
+       * daemon 自更新安全层推迟升级期对运维可见。置于折叠头之外（expanded 两侧都
+       * 渲染）——pending 期升级按钮被禁用，原因需要始终可见。同一横幅位两种文案
+       * （原型②③）：server_command → warning 色阶「等待空闲后自动升级」；
+       * disk_change → info 色阶「程序文件已变更，等待空闲加载」。色阶用主题语义
+       * token（warning/info，session-panel 横幅同款写法），双主题随 data-theme
+       * 换肤。刷新走 useDaemonMachines 既有 15s 轮询——升级完成后 pending_update
+       * 置 null，横幅自然消失（接受 30-60s 残留窗口）。null/缺省不渲染。 */}
+      {pendingUpdate ? (
+        <div
+          role="status"
+          data-machine-pending-banner={pendingUpdate.reason}
+          className={cn(
+            "border-b px-[18px] py-2 text-xs",
+            isDiskChange
+              ? "border-info/30 bg-info/10 text-info"
+              : "border-warning/30 bg-warning/10 text-warning",
+          )}
+        >
+          <div className="flex items-center gap-2">
+            {isDiskChange ? (
+              <RefreshCw aria-hidden className="h-3.5 w-3.5 shrink-0" />
+            ) : (
+              <Hourglass aria-hidden className="h-3.5 w-3.5 shrink-0" />
+            )}
+            <span>
+              {isDiskChange
+                ? "检测到程序文件已变更，等待空闲自动加载新版本"
+                : "等待空闲后自动升级（每 30s 复查）"}
+            </span>
+          </div>
+          <p
+            className={cn(
+              "ml-[22px] mt-0.5 text-[11px] leading-4",
+              isDiskChange ? "text-info/80" : "text-warning/80",
+            )}
+          >
+            {isDiskChange
+              ? `来源：磁盘旁路探测——${pendingUpdate.target_version}`
+              : `新版本 ${pendingUpdate.target_version} 已就绪（当前 ${pendingUpdate.current_version}），空闲即自动升级生效`}
+          </p>
+        </div>
+      ) : null}
 
       {/* ===== 展开体（对齐 .machine-body） ===== */}
       {expanded ? (

@@ -57,6 +57,8 @@ import { WorkspaceManager } from './workspace.js';
 import { CredentialManager } from './credential.js';
 import { TaskRunner, mapDetectedToSillyspecTools } from './task-runner.js';
 import { Daemon } from './daemon.js';
+// task-03（2026-08-29-daemon-selfupdate-safety S3）：status 追加 pending 升级等待行。
+import { readPendingUpdateFile } from './daemon.js';
 // task-06（FR-04/D-007@v1）：构造 TaskRunner 前独立探测 agent CLI（映射 sillyspec --tool）。
 import { AgentDetector } from './agent-detector.js';
 // 2026-06-24-daemon-network-resilience task-13/15：网络层重试编排注入。
@@ -1252,6 +1254,18 @@ export async function statusAction(): Promise<number> {
   process.stdout.write(`Runtime ID:  ${config.runtime_id}\n`);
   process.stdout.write(`Server URL:  ${config.server_url}\n`);
   process.stdout.write(`Config dir:  ${DEFAULT_CONFIG_DIR}\n`);
+  // task-03（2026-08-29-daemon-selfupdate-safety S3 / FR-01）：pending-update.json
+  // 存在时追加等待空闲升级行（本地可见性；后端横幅走 task-05 心跳透传）。读失败
+  // / 无效结构视为无 pending（readPendingUpdateFile 统一口径），不中断 status。
+  const pending = await readPendingUpdateFile(
+    join(DEFAULT_CONFIG_DIR, 'pending-update.json'),
+  );
+  if (pending) {
+    process.stdout.write(
+      `等待空闲升级：盘上 ${pending.target_version} 运行 ${pending.current_version}` +
+        `（原因 ${pending.reason}，since ${new Date(pending.since).toISOString()}）\n`,
+    );
+  }
   return 0;
 }
 

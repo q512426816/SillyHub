@@ -3919,6 +3919,9 @@ export interface paths {
          *
          *     WS breaking（D-007）：旧 daemon 按 per-provider body 上报（无 daemon_local_id）
          *     → pydantic 校验 daemon_local_id 必填失败 → 422 拒绝，要求同步升级。
+         *     2026-08-29-daemon-selfupdate-safety task-06：心跳携带可选 pending_update 时
+         *     upsert daemon_instances.pending_update（同内容保留原 since）；无该字段置 NULL
+         *     清除（D-004@v1，语义与兄弟字段反向，详见 DTO/服务层注释）。
          */
         post: operations["daemon_heartbeat_api_daemon_heartbeat_post"];
         delete?: never;
@@ -3964,6 +3967,8 @@ export interface paths {
          *
          *     2026-08-28-daemon-agent-share task-07：附加 shared_to_me 共享区块（design §5
          *     Phase 2.2）——独立成块不混入 items，无授权数据时空列表（零行为变化）。
+         *     2026-08-29-daemon-selfupdate-safety task-06：items 透出机器级 pending_update
+         *     （FR-04 / D-004@v1，_runtime_read 注入，无 pending 时 null）。
          */
         get: operations["list_runtimes_page_api_daemon_runtimes_page_get"];
         put?: never;
@@ -4073,6 +4078,8 @@ export interface paths {
          *     ``list_machines`` 内部已先 ``cleanup_stale_runtimes`` 收敛 stale 状态，router 不重复调。
          *     2026-08-28-daemon-agent-share task-07：附加 shared_to_me 共享区块（design §5
          *     Phase 2.2）——独立成块不混入 items，无授权数据时空列表（零行为变化）。
+         *     2026-08-29-daemon-selfupdate-safety task-06：items 透出机器级 pending_update
+         *     （FR-04 / D-004@v1，_build_machine_read 组装，无 pending 时 null）。
          */
         get: operations["list_machines_api_daemon_machines_get"];
         put?: never;
@@ -4093,7 +4100,17 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Machine
+         * @description 删除机器条目（daemon_instance 级物理删除，ql-20260829-006-6a9e）。
+         *
+         *     守卫链在 service ``delete_machine``：归属 404 / 心跳新鲜 409（daemon 在跑时
+         *     删除会产生僵尸心跳，须先停止）/ 工作区绑定与共享授权 409（RESTRICT 前置）/
+         *     借用审计红线 409 / in-flight lease+change_write 409。通过后物理删，CASCADE
+         *     清该机全部 runtimes 及其会话/任务记录；daemon 之后重新启动会以同一
+         *     daemon_local_id 重建（与 runtime 级删除同款复活语义）。
+         */
+        delete: operations["delete_machine_api_daemon_machines__instance_id__delete"];
         options?: never;
         head?: never;
         /**
@@ -4804,8 +4821,10 @@ export interface paths {
          *
          *     daemon ``sendToHub`` 遇 WS 不通时经 ``hubClient.submitPermissionRequest``
          *     改走本端点创建待审记录——人审挂起等待而非直接 deny。Auth:
-         *     ``get_current_principal`` 接受 daemon ``X-API-Key``（长期凭证）；
-         *     ``X-Claim-Token`` 由 service 按会话 lease 的 claim 语义条件校验。
+         *     ``get_current_principal`` 接受 daemon ``X-API-Key``（长期凭证），service
+         *     侧先校验 principal own 会话所挂 runtime（不符/不存在同语义 404，
+         *     ql-20260829-004）；``X-Claim-Token`` 由 service 按会话 lease 的 claim
+         *     语义条件校验。
          *
          *     幂等性（dialog）：request_id 唯一约束 upsert，daemon 重放不 fork 第二张
          *     pending 卡（与 WS 上行同一持久化路径）；plain approval 的重复 request_id
@@ -11646,6 +11665,24 @@ export interface components {
             level?: string | null;
         };
         /**
+         * DaemonHeartbeatPendingUpdate
+         * @description 心跳 pending_update 载荷（task-06 / FR-04 / D-004@v1 / design S4）。
+         *
+         *     daemon 推迟自升级期间（忙推迟 / disk_change 复查等待）每轮心跳携带；语义同
+         *     daemon 侧 pending-update.json 的三字段投影（task-05，``since`` 不上报——backend
+         *     首落库时盖 ``since=now``，daemon 侧值无意义）。reason 当前取值
+         *     ``server_command`` / ``disk_change``（design §5）；此处不收紧成 Literal——收紧
+         *     会让未来新增 reason 的整条心跳 422（心跳是保活通道，宁宽勿断）。
+         */
+        DaemonHeartbeatPendingUpdate: {
+            /** Reason */
+            reason: string;
+            /** Current Version */
+            current_version: string;
+            /** Target Version */
+            target_version: string;
+        };
+        /**
          * DaemonHeartbeatProviderItem
          * @description 单个 provider 心跳上报项（per-daemon heartbeat body 内 ``providers[]``）。
          */
@@ -11680,6 +11717,7 @@ export interface components {
             daemon_build_id?: string | null;
             /** Started At */
             started_at?: string | null;
+            pending_update?: components["schemas"]["DaemonHeartbeatPendingUpdate"] | null;
             /** Providers */
             providers?: components["schemas"]["DaemonHeartbeatProviderItem"][];
         };
@@ -11765,16 +11803,12 @@ export interface components {
             providers?: components["schemas"]["DaemonInstanceProviderItem"][];
         };
         /**
-         * DaemonMachineListResponse
-         * @description Response body for GET /api/daemon/machines（design §5.1 / FR-1）。
-         *
-         *     机器级分页（默认 20/页，D-007），机器卡永不跨页断裂。
-         *     2026-08-28-daemon-agent-share task-07：附加 ``shared_to_me`` 共享区块
-         *     （design §5 Phase 2.2，独立成块不混入 items；默认空列表，无共享时零变化）。
+         * DaemonMachineListResponseWithPending
+         * @description GET /machines 响应（items 换 pending_update 扩展视图）。
          */
-        DaemonMachineListResponse: {
+        DaemonMachineListResponseWithPending: {
             /** Items */
-            items: components["schemas"]["DaemonMachineRead"][];
+            items: components["schemas"]["DaemonMachineReadWithPending"][];
             /** Total */
             total: number;
             /** Limit */
@@ -11828,6 +11862,48 @@ export interface components {
             online_runtime_count: number;
             /** Runtimes */
             runtimes?: components["schemas"]["DaemonRuntimeRead"][];
+        };
+        /**
+         * DaemonMachineReadWithPending
+         * @description DaemonMachineRead + 机器级 pending_update（GET /machines 透出用）。
+         */
+        DaemonMachineReadWithPending: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Hostname */
+            hostname: string;
+            /** Display Alias */
+            display_alias?: string | null;
+            /** Os */
+            os?: string | null;
+            /** Arch */
+            arch?: string | null;
+            /** Status */
+            status: string;
+            /** Last Heartbeat At */
+            last_heartbeat_at: string | null;
+            /** Version */
+            version?: string | null;
+            /** Build Id */
+            build_id?: string | null;
+            /** Started At */
+            started_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            owner?: components["schemas"]["app__modules__daemon__schema__OwnerRead"] | null;
+            /** Runtime Count */
+            runtime_count: number;
+            /** Online Runtime Count */
+            online_runtime_count: number;
+            /** Runtimes */
+            runtimes?: components["schemas"]["DaemonRuntimeRead"][];
+            pending_update?: components["schemas"]["MachinePendingUpdateRead"] | null;
         };
         /**
          * DaemonMachineUpdate
@@ -11980,15 +12056,12 @@ export interface components {
             allowed_roots: string[];
         };
         /**
-         * DaemonRuntimeListResponse
-         * @description Response body for GET /api/daemon/runtimes/page (task-04 / FR-04).
-         *
-         *     2026-08-28-daemon-agent-share task-07：附加 ``shared_to_me`` 共享区块
-         *     （design §5 Phase 2.2，默认空列表保证既有子集式 shape 断言零失败）。
+         * DaemonRuntimeListResponseWithPending
+         * @description GET /runtimes/page 响应（items 换 pending_update 扩展视图）。
          */
-        DaemonRuntimeListResponse: {
+        DaemonRuntimeListResponseWithPending: {
             /** Items */
-            items: components["schemas"]["DaemonRuntimeRead"][];
+            items: components["schemas"]["DaemonRuntimeReadWithPending"][];
             /** Total */
             total: number;
             /** Limit */
@@ -12053,6 +12126,57 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * DaemonRuntimeReadWithPending
+         * @description DaemonRuntimeRead + 机器级 pending_update（/runtimes/page 透出用）。
+         */
+        DaemonRuntimeReadWithPending: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Daemon Instance Id */
+            daemon_instance_id?: string | null;
+            /** Display Alias */
+            display_alias?: string | null;
+            /** Name */
+            name: string | null;
+            /** Provider */
+            provider: string | null;
+            /** Version */
+            version: string | null;
+            /** Daemon Version */
+            daemon_version?: string | null;
+            /** Daemon Build Id */
+            daemon_build_id?: string | null;
+            /** Os */
+            os?: string | null;
+            /** Arch */
+            arch?: string | null;
+            /** Status */
+            status: string | null;
+            /** Last Heartbeat At */
+            last_heartbeat_at: string | null;
+            /** Capabilities */
+            capabilities?: {
+                [key: string]: unknown;
+            } | null;
+            /** Allowed Roots */
+            allowed_roots?: string[];
+            owner?: components["schemas"]["app__modules__daemon__schema__OwnerRead"] | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            pending_update?: components["schemas"]["MachinePendingUpdateRead"] | null;
         };
         /**
          * DaemonRuntimeUpdate
@@ -13331,6 +13455,14 @@ export interface components {
             input_tokens?: number | null;
             /** Output Tokens */
             output_tokens?: number | null;
+            /** Cache Read Tokens */
+            cache_read_tokens?: number | null;
+            /** Cache Creation Tokens */
+            cache_creation_tokens?: number | null;
+            /** Model Usage */
+            model_usage?: components["schemas"]["ModelUsageItemRead"][] | null;
+            /** Api Requests */
+            api_requests?: number | null;
             error?: components["schemas"]["ModelErrorDTO"] | null;
         };
         /** InteractiveRunResultResponse */
@@ -13761,6 +13893,27 @@ export interface components {
             captcha_token?: string | null;
         };
         /**
+         * MachinePendingUpdateRead
+         * @description 机器视图 pending_update 嵌套（design S4 / M11）。
+         *
+         *     即 daemon_instances.pending_update JSON 列原样透出：三上报字段 + backend 首落
+         *     库时盖的 ``since``（同内容重放心跳保留原 since，不退化成最后心跳时间）。
+         *     NULL（无待升级）→ 机器视图字段为 null。
+         */
+        MachinePendingUpdateRead: {
+            /** Reason */
+            reason: string;
+            /** Current Version */
+            current_version: string;
+            /** Target Version */
+            target_version: string;
+            /**
+             * Since
+             * Format: date-time
+             */
+            since: string;
+        };
+        /**
          * McpConfigUpdateRequest
          * @description ``PUT /api/workspaces/{id}/mcp-config`` 请求体（wire 格式同 claude .mcp.json）。
          */
@@ -14149,6 +14302,43 @@ export interface components {
          * @enum {string}
          */
         ModelErrorType: "auth_failed" | "quota_exceeded" | "rate_limited" | "timeout" | "model_not_found" | "network" | "provider_error" | "unknown";
+        /**
+         * ModelUsageItemRead
+         * @description 终态上报的 run×模型用量明细行（FR-01-3，2026-08-29-usage-by-provider-model）。
+         *
+         *     daemon interactive 从 SDK ``result.modelUsage`` 逐模型拆行（camelCase→snake）；
+         *     ``api_requests`` 为按消耗占比的分摊估算（run 级精确值在顶层 api_requests，
+         *     design §2 D-01）。batch 侧为 run 级单行。
+         */
+        ModelUsageItemRead: {
+            /** Model */
+            model: string;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Cache Creation Tokens
+             * @default 0
+             */
+            cache_creation_tokens: number;
+            /**
+             * Api Requests
+             * @default 0
+             */
+            api_requests: number;
+        };
         /** OkResponse */
         OkResponse: {
             /**
@@ -16371,6 +16561,34 @@ export interface components {
              */
             notify_session: boolean;
         };
+        /**
+         * ProviderModelUsageRead
+         * @description 用量统计的 供应商×模型 分组行（FR-04-1）。
+         *
+         *     ``provider_id``/``provider_name`` 为 NULL 时（老 run 未记录供应商）由
+         *     service 层填 ``未记录`` 标识，前端不再判空。
+         */
+        ProviderModelUsageRead: {
+            /** Provider Id */
+            provider_id?: string | null;
+            /**
+             * Provider Name
+             * @default 未记录
+             */
+            provider_name: string;
+            /** Model */
+            model: string;
+            /** Input Tokens */
+            input_tokens: number;
+            /** Output Tokens */
+            output_tokens: number;
+            /** Cache Read Tokens */
+            cache_read_tokens: number;
+            /** Cache Creation Tokens */
+            cache_creation_tokens: number;
+            /** Api Requests */
+            api_requests?: number | null;
+        };
         /** PsPlanNodeCreate */
         PsPlanNodeCreate: {
             /** Overall Stage */
@@ -17537,7 +17755,11 @@ export interface components {
         };
         /**
          * RuntimeUsageRead
-         * @description 单 runtime 的用量记录(summary 总量 + daily 时间序列)。
+         * @description 单 runtime 的用量记录(summary 总量 + daily 时间序列 + 供应商×模型分组)。
+         *
+         *     ``by_provider``（FR-04-1，2026-08-29-usage-by-provider-model）：窗口内
+         *     agent_run_model_usage 明细按 供应商×模型 聚合；空列表=无明细数据
+         *     （老 daemon / 老数据），前端隐藏分组区。
          */
         RuntimeUsageRead: {
             /** Runtime Id */
@@ -17545,6 +17767,11 @@ export interface components {
             summary: components["schemas"]["RuntimeUsageSummaryRead"];
             /** Daily */
             daily: components["schemas"]["RuntimeUsagePointRead"][];
+            /**
+             * By Provider
+             * @default []
+             */
+            by_provider: components["schemas"]["ProviderModelUsageRead"][];
         };
         /**
          * RuntimeUsageSummaryRead
@@ -17839,8 +18066,11 @@ export interface components {
          *
          *     双入口：``runtime_id``（新会话门户页，指定机器+智能体，优先）与 ``provider``
          *     （/runtimes 弹窗旧路径，零回归保留）二选一，都未传 → 422。
-         *     ``model`` 字段已移除（design §5：由档案/默认派生，继承 D-005/D-004@v2）——
-         *     pydantic 默认忽略多余字段，旧前端继续上送 model 不会 422，仅不再生效。
+         *     ``model`` 字段曾按旧设计移除（由档案/默认派生，D-005/D-004@v2）；D-002@v1
+         *     （2026-08-29-usage-by-provider-model）恢复——预会话供应商+模型级联的首句
+         *     携带（None/空串=跟随供应商配置）。创建下发的 ProviderConfig 只带 model 键
+         *     不含 default_fallback_model（injector ``default_fallback_model ?? model``
+         *     对 undefined 前者天然不遮蔽，R-07 创建路径无虞）。
          *     ``agent_profile_id``/``llm_provider_id`` 由 service 层解析（task-03），
          *     本 DTO 只透传 str（llm_provider_id 空串/"none" 语义=切回本机默认，task-05）。
          *
@@ -17859,6 +18089,8 @@ export interface components {
             agent_profile_id?: string | null;
             /** Llm Provider Id */
             llm_provider_id?: string | null;
+            /** Model */
+            model?: string | null;
             /**
              * Manual Approval
              * @default true
@@ -17998,6 +18230,8 @@ export interface components {
             agent_profile_id?: string | null;
             /** Llm Provider Id */
             llm_provider_id?: string | null;
+            /** Model */
+            model?: string | null;
             /** Attachment Ids */
             attachment_ids?: string[];
             page_context?: components["schemas"]["PageContextCreateBlock"] | null;
@@ -21129,6 +21363,8 @@ export interface components {
             component_key?: string | null;
             /** Type */
             type?: ("frontend-code" | "backend-code" | "fullstack" | "business-doc" | "submodule" | "deploy-ops" | "design-asset" | "other") | null;
+            /** Status */
+            status?: ("active" | "archived") | null;
             /** Role */
             role?: string | null;
             /** Description */
@@ -21149,8 +21385,6 @@ export interface components {
             test_command?: string | null;
             /** Source Yaml Path */
             source_yaml_path?: string | null;
-            /** Status */
-            status?: string | null;
         };
         /** WorktreeAcquireRequest */
         WorktreeAcquireRequest: {
@@ -28193,7 +28427,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DaemonRuntimeListResponse"];
+                    "application/json": components["schemas"]["DaemonRuntimeListResponseWithPending"];
                 };
             };
             /** @description Validation Error */
@@ -28392,8 +28626,37 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DaemonMachineListResponse"];
+                    "application/json": components["schemas"]["DaemonMachineListResponseWithPending"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_machine_api_daemon_machines__instance_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

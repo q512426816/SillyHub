@@ -3242,6 +3242,25 @@ export class SessionManager {
     return this._store.get(sessionId);
   }
 
+  /**
+   * task-01（2026-08-29-daemon-selfupdate-safety / FR-01 / D-001@v1）：是否存在
+   * 进行中的 interactive turn——任一 session ``status === 'running'`` 即 true。
+   *
+   * 空闲屏障的忙判定查询口，供 daemon 升级编排器（tryUpdate，task-04）判定是否
+   * 推迟升级。口径仅 'running' 算忙：'active'（空闲可接 inject）/ 'reconnecting'
+   * 可经挂起/恢复链路无损穿越升级窗口；'ended'/'failed' 终态延迟清理残留条目
+   * （_terminalCleanupTimers 窗口内，见 ql-20260825-f3#1）同样不算。遍历口径照
+   * create 内活会话计数先例（本文件 for..of _store.values()）。
+   *
+   * 零副作用纯查询：不修改 _store 生命周期、不触发挂起/取消。
+   */
+  hasRunningTurn(): boolean {
+    for (const state of this._store.values()) {
+      if (state.status === 'running') return true;
+    }
+    return false;
+  }
+
   // ── task-10：持久化 + 崩溃恢复 ──────────────────────────────────────────────
 
   /**

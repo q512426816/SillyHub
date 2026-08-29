@@ -236,6 +236,21 @@ class DaemonHeartbeatProviderItem(BaseModel):
     status: str = Field(default="online", max_length=20)
 
 
+class DaemonHeartbeatPendingUpdate(BaseModel):
+    """心跳 pending_update 载荷（task-06 / FR-04 / D-004@v1 / design S4）。
+
+    daemon 推迟自升级期间（忙推迟 / disk_change 复查等待）每轮心跳携带；语义同
+    daemon 侧 pending-update.json 的三字段投影（task-05，``since`` 不上报——backend
+    首落库时盖 ``since=now``，daemon 侧值无意义）。reason 当前取值
+    ``server_command`` / ``disk_change``（design §5）；此处不收紧成 Literal——收紧
+    会让未来新增 reason 的整条心跳 422（心跳是保活通道，宁宽勿断）。
+    """
+
+    reason: str = Field(min_length=1, max_length=50)
+    current_version: str = Field(min_length=1, max_length=100)
+    target_version: str = Field(min_length=1, max_length=100)
+
+
 class DaemonHeartbeatRequest(BaseModel):
     """Per-daemon 心跳请求体（design §5.4 / §9.1 / D-006）。
 
@@ -252,6 +267,13 @@ class DaemonHeartbeatRequest(BaseModel):
     # 心跳携带用于 daemon 重启后 started_at 刷新（process 重启时间变）。
     # Optional 兼容旧 daemon（不上报则保留原值 / NULL）。
     started_at: datetime | None = Field(default=None)
+    # 推迟自升级期间心跳透传的 pending 状态（task-06 / FR-04 / D-004@v1）。
+    # ⚠ 语义刻意与上方兄弟字段（daemon_version/build_id/started_at「非 None 才
+    # 覆盖」）相反：None 即清除（daemon_instances.pending_update 置 NULL）。pydantic
+    # 请求模型中「缺省不携带」与「显式 null」不可区分，本字段就采用 None=清除——
+    # 单机单 daemon 无新旧进程交错，升级执行/取消路径靠「无字段」显式清除才收敛
+    # （design S4 / D-004@v1，勿被「对齐兄弟字段」误改）。
+    pending_update: DaemonHeartbeatPendingUpdate | None = Field(default=None)
     providers: list[DaemonHeartbeatProviderItem] = Field(default_factory=list)
 
 
@@ -414,14 +436,26 @@ async def daemon_heartbeat(
 
     WS breaking（D-007）：旧 daemon 按 per-provider body 上报（无 daemon_local_id）
     → pydantic 校验 daemon_local_id 必填失败 → 422 拒绝，要求同步升级。
+    2026-08-29-daemon-selfupdate-safety task-06：心跳携带可选 pending_update 时
+    upsert daemon_instances.pending_update（同内容保留原 since）；无该字段置 NULL
+    清除（D-004@v1，语义与兄弟字段反向，详见 DTO/服务层注释）。
     """
-    svc = DaemonService(session)
-    instance = await svc.heartbeat_daemon(
+    # task-06 / FR-04：DaemonService.heartbeat_daemon facade（app/modules/daemon/
+    # service.py）无 pending_update 透传参数，而该文件不在本卡 allowed_path——
+    # 心跳端点直调 RuntimeService（本函数下方 pending_controls 统计同款直调先例）。
+    from app.modules.daemon.runtime.service import RuntimeService
+
+    instance = await RuntimeService(session).heartbeat_daemon(
         data.daemon_local_id,
         providers=[item.model_dump() for item in data.providers],
         daemon_version=data.daemon_version,
         daemon_build_id=data.daemon_build_id,
         started_at=data.started_at,
+        # task-06 / D-004@v1：pending_update None=清除（与兄弟字段反向，DTO 字段
+        # 注释已锚定）。model_dump 后交服务层 upsert（dict 契约同 providers 先例）。
+        pending_update=(
+            data.pending_update.model_dump() if data.pending_update is not None else None
+        ),
         # task-03（security-audit-remediation / FR-12）：心跳归属校验——
         # instance.user_id 必须等于当前认证 user，不匹配 404（owner-only）。
         actor_user_id=user.id,
@@ -444,8 +478,7 @@ async def daemon_heartbeat(
     )
     # task-04（design A1/A2）：pending 控制指令计数（该 daemon 全部 runtime 的
     # pending 行，一次聚合查询）——daemon 据此触发控制指令补拉对账。
-    from app.modules.daemon.runtime.service import RuntimeService
-
+    # （RuntimeService 已在函数上方 import，task-06 起心跳本体也走它。）
     pending_controls = await RuntimeService(session).count_pending_control_commands(instance.id)
     return DaemonHeartbeatResponse(
         daemon_instance_id=instance.id,
@@ -510,6 +543,53 @@ def _derive_policy_version(updated_at: datetime | None) -> int:
     return int(ts.timestamp() * 1000)
 
 
+# ── 机器视图 pending_update 透出 DTO（inline，task-06 / FR-04 / D-004@v1）──────
+# schema.py 的 DaemonMachineRead / DaemonRuntimeRead 无 pending_update 字段；本
+# 变更不动 schema.py（task 边界），照 task-07 heartbeat DTO 内联先例在 router 内
+# 扩展（子类化仅加一个 nullable 字段，其余字段/校验全继承）。openapi.json 再导出
+# 与三端 gen:types 归 task-08。经基础 response_model 序列化时子类实例的多余字段
+# 会被 FastAPI 丢弃（TypeAdapter 按声明类型 dump），故其他仍返回基础 Read 的端点
+# 响应 shape 零变化。
+
+
+class MachinePendingUpdateRead(BaseModel):
+    """机器视图 pending_update 嵌套（design S4 / M11）。
+
+    即 daemon_instances.pending_update JSON 列原样透出：三上报字段 + backend 首落
+    库时盖的 ``since``（同内容重放心跳保留原 since，不退化成最后心跳时间）。
+    NULL（无待升级）→ 机器视图字段为 null。
+    """
+
+    reason: str
+    current_version: str
+    target_version: str
+    since: datetime
+
+
+class DaemonMachineReadWithPending(DaemonMachineRead):
+    """DaemonMachineRead + 机器级 pending_update（GET /machines 透出用）。"""
+
+    pending_update: MachinePendingUpdateRead | None = None
+
+
+class DaemonMachineListResponseWithPending(DaemonMachineListResponse):
+    """GET /machines 响应（items 换 pending_update 扩展视图）。"""
+
+    items: list[DaemonMachineReadWithPending]
+
+
+class DaemonRuntimeReadWithPending(DaemonRuntimeRead):
+    """DaemonRuntimeRead + 机器级 pending_update（/runtimes/page 透出用）。"""
+
+    pending_update: MachinePendingUpdateRead | None = None
+
+
+class DaemonRuntimeListResponseWithPending(DaemonRuntimeListResponse):
+    """GET /runtimes/page 响应（items 换 pending_update 扩展视图）。"""
+
+    items: list[DaemonRuntimeReadWithPending]
+
+
 def _runtime_read(
     runtime: object,
     owner: object | None = None,
@@ -517,8 +597,13 @@ def _runtime_read(
 ) -> DaemonRuntimeRead:
     """Build DaemonRuntimeRead, attaching nested OwnerRead when an owner user
     row is available (task-04 / D-006@v1)。2026-07-04-daemon-version-management：
-    instance 非空时填 daemon_version/daemon_build_id（JOIN daemon_instances 带出）。"""
-    read = DaemonRuntimeRead.model_validate(runtime)
+    instance 非空时填 daemon_version/daemon_build_id（JOIN daemon_instances 带出）。
+
+    task-06（FR-04 / D-004@v1）：instance 非空时同款注入机器级 pending_update。
+    返回类型升级为 WithPending 子类——仍返回基础 DaemonRuntimeRead 的端点经
+    response_model 序列化时该字段被丢弃（shape 零变化），仅 /runtimes/page
+    （WithPending 响应模型）透出。"""
+    read = DaemonRuntimeReadWithPending.model_validate(runtime)
     update: dict[str, object] = {}
     if owner is not None:
         update["owner"] = OwnerRead(
@@ -529,6 +614,13 @@ def _runtime_read(
     if instance is not None:
         update["daemon_version"] = getattr(instance, "version", None)
         update["daemon_build_id"] = getattr(instance, "build_id", None)
+        # pending_update JSON 原样转嵌套 Read（dict→model 校验，since ISO→datetime）。
+        raw_pending = getattr(instance, "pending_update", None)
+        update["pending_update"] = (
+            MachinePendingUpdateRead.model_validate(raw_pending)
+            if raw_pending is not None
+            else None
+        )
     if not update:
         return read
     return read.model_copy(update=update)
@@ -538,18 +630,23 @@ def _build_machine_read(
     instance: DaemonInstance,
     owner: User | None,
     runtimes: list[DaemonRuntime],
-) -> DaemonMachineRead:
-    """把 (instance, owner, runtimes) ORM 组装成 DaemonMachineRead（design §5.1）。
+) -> DaemonMachineReadWithPending:
+    """把 (instance, owner, runtimes) ORM 组装成机器视图（design §5.1）。
 
     纯组装函数（不做 SQL）：GET /machines 与 PATCH /machines/{id} 共用。runtime 卡
     复用 _runtime_read 填充 owner/instance；machine 卡再聚合 runtime_count /
     online_runtime_count（design §4.1 机器级聚合字段）。0-runtime 机器传 ``[]`` 正常。
+
+    task-06（FR-04 / D-004@v1）：返回 WithPending 子类——instance.pending_update
+    （JSON，含 since）透出到机器视图；PATCH /machines/{id} 仍声明基础
+    response_model（DaemonMachineRead），该字段经基础适配器序列化被丢弃，
+    仅 GET /machines（WithPending 响应模型）透出。
     """
     runtime_reads = [_runtime_read(r, owner, instance) for r in runtimes]
     # 直接构造（不走 model_validate(instance)）：runtime_count/online_runtime_count
     # 是派生字段（design §5.1），daemon_instance ORM 无此二属性，model_validate 会在
     # model_copy 填值前抛 ValidationError（task-04 测试捕获）。显式传全部字段。
-    return DaemonMachineRead(
+    return DaemonMachineReadWithPending(
         id=instance.id,
         hostname=instance.hostname,
         display_alias=instance.display_alias,
@@ -562,6 +659,13 @@ def _build_machine_read(
         # 2026-08-05-daemon-start-time D-002@v1：进程启动时间，直接读 instance.started_at
         # （task-03 已加该字段，timezone=True nullable）。旧 daemon / 未上报 → None。
         started_at=instance.started_at,
+        # task-06 / FR-04：心跳 upsert 落库的 pending JSON 原样透出（含 since）；
+        # dict→嵌套 Read 校验；NULL（无待升级）→ None。
+        pending_update=(
+            MachinePendingUpdateRead.model_validate(instance.pending_update)
+            if instance.pending_update is not None
+            else None
+        ),
         created_at=instance.created_at,
         owner=OwnerRead(
             user_id=owner.id,
@@ -598,7 +702,7 @@ def _shared_machine_view(row: SharedMachineRow) -> SharedMachineView:
 
 @router.get(
     "/runtimes/page",
-    response_model=DaemonRuntimeListResponse,
+    response_model=DaemonRuntimeListResponseWithPending,
 )
 async def list_runtimes_page(
     session: SessionDep,
@@ -609,11 +713,13 @@ async def list_runtimes_page(
     user_id: uuid.UUID | None = Query(default=None),
     limit: int = Query(default=12, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-) -> DaemonRuntimeListResponse:
+) -> DaemonRuntimeListResponseWithPending:
     """平台管理员分页查看全部 owner 的 runtime；普通账号只见自己 (FR-01/02/04).
 
     2026-08-28-daemon-agent-share task-07：附加 shared_to_me 共享区块（design §5
     Phase 2.2）——独立成块不混入 items，无授权数据时空列表（零行为变化）。
+    2026-08-29-daemon-selfupdate-safety task-06：items 透出机器级 pending_update
+    （FR-04 / D-004@v1，_runtime_read 注入，无 pending 时 null）。
     """
     svc = DaemonService(session)
     await svc.cleanup_stale_runtimes()
@@ -627,7 +733,7 @@ async def list_runtimes_page(
         limit=limit,
         offset=offset,
     )
-    return DaemonRuntimeListResponse(
+    return DaemonRuntimeListResponseWithPending(
         items=[_runtime_read(runtime, owner, instance) for runtime, owner, instance in rows],
         total=total,
         limit=limit,
@@ -782,7 +888,7 @@ async def trigger_daemon_self_update(
 
 @router.get(
     "/machines",
-    response_model=DaemonMachineListResponse,
+    response_model=DaemonMachineListResponseWithPending,
 )
 async def list_machines(
     session: SessionDep,
@@ -793,13 +899,15 @@ async def list_machines(
     user_id: uuid.UUID | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
-) -> DaemonMachineListResponse:
+) -> DaemonMachineListResponseWithPending:
     """平台管理员分页查看全部 owner 的 daemon 机器（design §5.1 / FR-1）。
 
     普通账号仅见自己的机器（service 层强制 ``actor == user_id``，请求 ``user_id`` 被忽略）。
     ``list_machines`` 内部已先 ``cleanup_stale_runtimes`` 收敛 stale 状态，router 不重复调。
     2026-08-28-daemon-agent-share task-07：附加 shared_to_me 共享区块（design §5
     Phase 2.2）——独立成块不混入 items，无授权数据时空列表（零行为变化）。
+    2026-08-29-daemon-selfupdate-safety task-06：items 透出机器级 pending_update
+    （FR-04 / D-004@v1，_build_machine_read 组装，无 pending 时 null）。
     """
     svc = DaemonService(session)
     rows, runtimes_by_instance, total, shared = await svc.list_machines(
@@ -816,7 +924,7 @@ async def list_machines(
         _build_machine_read(inst, owner, runtimes_by_instance.get(inst.id, []))
         for inst, owner in rows
     ]
-    return DaemonMachineListResponse(
+    return DaemonMachineListResponseWithPending(
         items=items,
         total=total,
         limit=limit,

@@ -294,6 +294,19 @@ export interface DaemonConfig {
    * 详见 design 2026-06-22-agent-run-pipeline-fix §4.1 A1。
    */
   spec_root_map: string;
+  /**
+   * 磁盘旁路自更新探测间隔（秒），默认 600，0=关闭。
+   *
+   * 2026-08-29-daemon-selfupdate-safety task-03（S2 / FR-03 / D-003@v2）：daemon
+   * 常驻轻量循环每该间隔读 bundle 文件（~/.sillyhub/daemon/bin/sillyhub-daemon.js）
+   * 按 `BUILD_ID\s*=\s*["']([^"']+)` 正则提取与内存 BUILD_ID 比对，差异（含降级）
+   * 出口为注入式 onDiskChange 回调（差异处置接线归 task-04）。纯读文件零子进程
+   * 开销。0 或负数=不启动探测循环（本地开发/显式关闭）。命名照
+   * disconnect_log_threshold_sec 的 snake_case + `_sec` 先例；loadConfig 经
+   * DEFAULT_CONFIG 浅合并自动补默认值（缺字段=600），与其它数值字段同策略
+   * 不做类型强校验（非法值由消费端 startDiskProbe 兜底为关闭）。
+   */
+  self_reload_check_interval_sec: number;
 }
 
 // ── 默认值常量 ───────────────────────────────────────────────────────────────
@@ -352,6 +365,9 @@ export const DEFAULT_CONFIG: Readonly<DaemonConfig> = Object.freeze({
   allowed_roots: [homedir()],
   // 2026-06-22-agent-run-pipeline-fix task-02：prompt 路径翻译映射，默认空串（向后兼容）。
   spec_root_map: '',
+  // 2026-08-29-daemon-selfupdate-safety task-03（S2）：磁盘旁路自更新探测间隔，
+  // 默认 600s（10min），0=关闭（见 DaemonConfig.self_reload_check_interval_sec 注释）。
+  self_reload_check_interval_sec: 600,
 });
 
 // ── loadConfig（异步加载 + 合并默认 + 自动生成 runtime_id）──────────────────

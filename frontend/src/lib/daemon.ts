@@ -80,6 +80,28 @@ export async function listDaemonInstances(): Promise<DaemonInstanceRead[]> {
 // 字段对齐 design §5.1 / 后端 task-01 DTO（蛇形），与 runtime 级类型并列。
 
 /**
+ * machine 级 pending 升级视图（2026-08-29-daemon-selfupdate-safety task-07 /
+ * FR-05 / D-003@v2），对齐后端 task-06 机器视图透出的 MachinePendingUpdateRead
+ * （蛇形）。daemon 自更新安全层在「服务端升级指令 / 磁盘旁路探测」发现新版本
+ * 但机器忙（会话轮次 / 任务执行中）时推迟升级，心跳上报 pending_update；
+ * null = 无挂起（升级已执行/取消，backend 清列）。api-types 生成版归 task-08。
+ */
+export interface MachinePendingUpdate {
+  /**
+   * 挂起原因：server_command（服务端升级指令）/ disk_change（磁盘版本变更
+   * 探测）。与后端口径一致保持 string 不收紧成 Literal——心跳通道宁宽勿断，
+   * 前端对未知 reason 兜底按升级等待（warning）横幅渲染。
+   */
+  reason: string;
+  /** 挂起时 daemon 当前版本。 */
+  current_version: string;
+  /** 待升级目标版本。 */
+  target_version: string;
+  /** 挂起起始时间（ISO；backend 首落库盖值，同内容重放心跳保留原值）。 */
+  since: string;
+}
+
+/**
  * machine（守护进程实例）视图 DTO，对齐 design §5.1 DaemonMachineRead。
  * owner 复用既有 OwnerRead，runtimes 复用既有 DaemonRuntimeRead（含各自
  * capabilities/allowed_roots）。runtime_count / online_runtime_count 由后端派生。
@@ -109,6 +131,12 @@ export interface DaemonMachineRead {
   online_runtime_count: number;
   /** 该机器全部 runtime。0-runtime 机器为 []。 */
   runtimes: DaemonRuntimeRead[];
+  /**
+   * 推迟升级状态（task-07 / FR-05）：非 null 时机器卡渲染三状态横幅
+   * （server_command=warning / disk_change=info）并禁用升级按钮。
+   * 旧后端无该字段 → undefined，按无挂起消费（不渲染横幅不改轮询）。
+   */
+  pending_update?: MachinePendingUpdate | null;
 }
 
 /** GET /api/daemon/machines 查询参数（design §5.1）。 */

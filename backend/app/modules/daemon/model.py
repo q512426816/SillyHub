@@ -81,6 +81,14 @@ class DaemonInstance(BaseModel, table=True):
         default=None,
         sa_column=Column(JSON, nullable=True),
     )
+    # 心跳上报的待升级状态（2026-08-29-daemon-selfupdate-safety FR-04 / D-004@v1）：
+    # daemon 忙、推迟自升级期间心跳携带 {reason, current_version, target_version}
+    # （backend 落库时补 since，语义同 daemon 侧 pending-update.json）；
+    # NULL=无待升级。写入/清除（心跳无该字段即置 NULL）在 task-06 心跳端点。
+    pending_update: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
     status: str = Field(
         default="online",
         sa_column=Column(
