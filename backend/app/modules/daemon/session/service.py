@@ -17,7 +17,7 @@ import json
 import re
 import secrets
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal, NamedTuple
 
@@ -123,6 +123,15 @@ RECONNECTING_RETRY_WINDOW_SEC = 180
 # 停止时中断轮 run 的收敛错误码。与 recover 路径的 ``daemon_restarted``（区分
 # 优雅停止 vs 崩溃重启两条挂起来源）；唯一写入点 suspend_sessions_for_daemon。
 DAEMON_STOPPED_ERROR_CODE = "daemon_stopped"
+
+# 2026-08-29-batch-session-inherit task-01（design S1 / FR-01 / D-005@v1）：daemon
+# 掉线中断 **worker 子会话**（``parent_session_id`` 非空）的收敛错误码——与主会话
+# 的 ``daemon_stopped`` 区分来源：worker 是临时会话无用户手恢复，挂起只会卡
+# mission 等 24h GC，改判 failed 落本码作 task-02 自动重派（--resume 继承原会话）
+# 的种子标识。写入点：suspend_sessions_for_daemon 与 session_offline_sweep_once
+# （sweep.py import 本常量，单一落点）的 worker 分流分支；主会话与 sweep pending
+# 档不写（语义逐字不变）。
+DAEMON_INTERRUPTED_ERROR_CODE = "daemon_interrupted"
 
 # ql-20260827-015：后台任务通知排队合并。daemon 任务终态唤醒（session-manager
 # _scheduleTaskWakeup，2026-08-27-background-subagent-progress ql-20260827-007）
@@ -659,13 +668,21 @@ class SessionRecoveryResult:
 class SuspendBatchResult:
     """Result of suspend_sessions_for_daemon（task-05 provides 契约）.
 
-    ``suspended`` = 实际翻 suspended 的会话行数（条件 UPDATE 命中数——重复调用
-    对已挂起/终态会话 no-op 计 0）；``runs_failed`` = 同批收敛 failed 的活跃轮
-    run 行数（error_code=daemon_stopped）。
+    ``suspended`` = 实际翻 suspended 的**主会话**（``parent_session_id`` IS NULL）
+    行数（条件 UPDATE 命中数——重复调用对已挂起/终态会话 no-op 计 0）；
+    ``runs_failed`` = 同批收敛 failed 的活跃轮 run 行数（主会话 error_code=
+    daemon_stopped + worker error_code=daemon_interrupted 合计）。
+
+    2026-08-29-batch-session-inherit task-01 追加：``workers`` = 同批按
+    ``parent_session_id`` 分流改判 ``failed``（error_code=daemon_interrupted）的
+    worker 子会话 ``(session_id, runtime_id)`` 列表——重派种子，供 task-02 异步
+    重派消费（runtime_id 为派发路由键）；**仅内部消费**，router 响应 DTO
+    （SuspendBatchResponse）只读 suspended / runs_failed 两键，响应契约零变化。
     """
 
     suspended: int
     runs_failed: int
+    workers: list[tuple[uuid.UUID, uuid.UUID]] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1426,7 +1443,10 @@ class SessionService:
             from app.modules.daemon.session.context import (
                 build_change_context_preamble,
                 build_page_context_preamble,
+                build_platform_rules_preamble,
                 build_ppm_item_context_preamble,
+                build_sillyspec_preamble,
+                build_user_preamble,
             )
 
             # 2026-07-09-change-detail-session / D-004@v1（X-02/X-04）：变更会话首轮
@@ -1475,6 +1495,20 @@ class SessionService:
                     attachment_lines=_ppm_lines,
                     item=ppm_item_row,
                 )
+            # ── 2026-08-29-session-user-preamble（ql-20260829-012-2eb3 /
+            # D-001/D-002/FR-01~FR-04）：用户信息 + 平台规则 + SillySpec 工具
+            # 规则三前导，同样只落「写事务外」段——.sillyspec/ 探测是磁盘 IO
+            # （单次 stat），对齐 TestCreateSessionPreambleBeforeWrite 结构守卫
+            # （磁盘 IO 不进写事务窗口）。workspace 口径与下方 AgentSession.
+            # workspace_id 同式：显式 workspace_id（含 team_mission E2 覆写）
+            # 优先，PPM 回填 ppm_ws 兜底。仅本轮 create 拼接；后续轮次
+            # _inject_into_session / 服务身份注入不携带（D-002）。展示层
+            # （AgentRunLog user_input / SESSION_INJECT payload）仍写干净
+            # 用户原文，对齐变更/页面前导先例。
+            _user_preamble_ws = workspace_id if workspace_id is not None else ppm_ws
+            user_preamble = await build_user_preamble(self._session, user_id, _user_preamble_ws)
+            platform_preamble = build_platform_rules_preamble()
+            sillyspec_preamble = await build_sillyspec_preamble(self._session, _user_preamble_ws)
             await self._session.commit()
 
             session = AgentSession(
@@ -1662,7 +1696,19 @@ class SessionService:
             # （既有机制），AgentRunLog(user_input)（下方）与首 turn SESSION_INJECT
             # 展示层仍写干净用户原文（对齐变更/页面前导先例，零 daemon 改动）。
             _prefix_parts = [
-                part for part in (preamble, page_preamble, ppm_preamble, briefing) if part
+                part
+                for part in (
+                    preamble,
+                    page_preamble,
+                    ppm_preamble,
+                    briefing,
+                    # 2026-08-29-session-user-preamble：三前导紧贴用户消息
+                    # （业务前导在前，规则块离用户输入最近遵从度最高）。
+                    user_preamble,
+                    platform_preamble,
+                    sillyspec_preamble,
+                )
+                if part
             ]
             dispatch_prompt = (
                 "\n\n---\n\n".join([*_prefix_parts, prompt]) if _prefix_parts else prompt
@@ -4713,17 +4759,30 @@ class SessionService:
 
         daemon ``stop()`` 在 markOffline 前经 ``POST /sessions/suspend-batch``
         调入（body ``daemon_local_id`` = ``daemon_instances.id``，归属校验在
-        router 层）。该 daemon 全部 runtime 名下的 **active** 会话单事务三步收敛
-        （对齐 offline sweep 手法，条件 UPDATE 重挂状态条件保证幂等可重入）：
+        router 层）。该 daemon 全部 runtime 名下的 **active** 会话单事务收敛
+        （对齐 offline sweep 手法，条件 UPDATE 重挂状态条件保证幂等可重入），
+        2026-08-29-batch-session-inherit task-01 起按 ``parent_session_id``
+        分流两组（design S1）：
 
-        1. 会话 → ``suspended`` + ``last_active_at=now``（挂起时刻写入，作
-           sweep 超龄 GC（SUSPENDED_MAX_AGE_SEC，24h）的时间基准——对齐 recover
-           翻 reconnecting 时写 last_active_at 的先例；双路径（本方法与 offline
-           sweep）都写，suspended 行该列恒有值）；
-        2. 中断轮 run（ACTIVE_TURN_STATUSES）→ ``failed`` + ``finished_at`` +
-           ``error_code=daemon_stopped``（D-001：被中断的一轮标失败，不影响
-           会话存活）；
-        3. 挂起 lease（pending/claimed）→ ``cancelled``（终态 lease 不回写）。
+        - **主会话组**（parent IS NULL，语义逐字不变）：会话 → ``suspended`` +
+          ``last_active_at=now``（挂起时刻写入，作 sweep 超龄 GC
+          （SUSPENDED_MAX_AGE_SEC，24h）的时间基准——对齐 recover 翻
+          reconnecting 时写 last_active_at 的先例）；中断轮 run
+          （ACTIVE_TURN_STATUSES）→ ``failed`` + ``finished_at`` +
+          ``error_code=daemon_stopped``（D-001：被中断的一轮标失败，不影响
+          会话存活）；
+        - **worker 子会话组**（parent 非空）：会话 → ``failed`` + ``ended_at``
+          （worker 是临时会话无用户手恢复，挂起只会卡 mission 等 24h GC）；
+          中断轮 run → ``failed`` + ``error_code=daemon_interrupted``
+          （与 daemon_stopped 区分来源，作 task-02 自动重派的种子标识）；终态
+          行对齐 sweep 档发 ``session_ended`` + 列表 ``status_changed``；
+        - 挂起 lease（pending/claimed）→ ``cancelled`` 两组共享（终态 lease
+          不回写）。
+
+        worker 识别唯一口径是 ``parent_session_id`` 非空（兼容 role=NULL 老
+        worker 行，禁用 role 词表兜底）；本方法产出 ``workers`` 重派种子
+        ``(session_id, runtime_id)`` 列表并在事务提交后异步 fire task-02 自动
+        重派（失败仅记日志，不阻塞本路径）。
 
         **pending 会话不挂起**：daemon 本地 sessions.json 只快照 active 且有
         agentSessionId 的会话，pending 行标 suspended 后无人 recover 只能等
@@ -4732,7 +4791,7 @@ class SessionService:
 
         commit 后逐行 best-effort 发列表变更信号 ``status_changed``；suspended
         **非终态不发 session_ended**（design A5：SSE 会话流继续 keepalive，
-        列表视图经信号秒级刷新）。
+        列表视图经信号秒级刷新）；worker 组 failed 终态发 session_ended。
         """
         try:
             daemon_runtime_ids = select(DaemonRuntime.id).where(
@@ -4740,7 +4799,12 @@ class SessionService:
             )
             hit_rows = (
                 await self._session.execute(
-                    select(AgentSession.id, AgentSession.lease_id).where(
+                    select(
+                        AgentSession.id,
+                        AgentSession.lease_id,
+                        AgentSession.runtime_id,
+                        AgentSession.parent_session_id,
+                    ).where(
                         AgentSession.status == "active",
                         col(AgentSession.runtime_id).in_(daemon_runtime_ids),
                     )
@@ -4749,32 +4813,67 @@ class SessionService:
             if not hit_rows:
                 return SuspendBatchResult(suspended=0, runs_failed=0)
 
+            # task-01 分流（design S1）：parent_session_id 非空 = worker 子会话。
+            main_ids = [row.id for row in hit_rows if row.parent_session_id is None]
+            worker_rows = [row for row in hit_rows if row.parent_session_id is not None]
+            worker_ids = [row.id for row in worker_rows]
             hit_ids = [row.id for row in hit_rows]
             now = datetime.now(UTC)
 
+            # 主会话组：suspended 语义逐字不变（回归锁定）。
             suspended_result = await self._session.execute(
                 update(AgentSession)
                 .where(
-                    AgentSession.id.in_(hit_ids),
+                    AgentSession.id.in_(main_ids),
                     AgentSession.status == "active",
                 )
                 .values(status="suspended", last_active_at=now)
             )
             suspended = int(suspended_result.rowcount or 0)
 
-            runs_result = await self._session.execute(
-                update(AgentRun)
-                .where(
-                    AgentRun.agent_session_id.in_(hit_ids),
-                    col(AgentRun.status).in_(list(ACTIVE_TURN_STATUSES)),
+            # worker 组：改判 failed + ended_at（挂起无意义——无人手 recover，
+            # 重派由 task-02 以 workers 种子翻回 active 续跑）。
+            if worker_ids:
+                await self._session.execute(
+                    update(AgentSession)
+                    .where(
+                        AgentSession.id.in_(worker_ids),
+                        AgentSession.status == "active",
+                    )
+                    .values(status="failed", ended_at=now)
                 )
-                .values(
-                    status="failed",
-                    finished_at=now,
-                    error_code=DAEMON_STOPPED_ERROR_CODE,
+
+            # 中断轮 run 收敛：主会话 daemon_stopped（既有语义）、worker 组
+            # daemon_interrupted（新错误码区分来源）。
+            runs_failed = 0
+            if main_ids:
+                runs_result = await self._session.execute(
+                    update(AgentRun)
+                    .where(
+                        AgentRun.agent_session_id.in_(main_ids),
+                        col(AgentRun.status).in_(list(ACTIVE_TURN_STATUSES)),
+                    )
+                    .values(
+                        status="failed",
+                        finished_at=now,
+                        error_code=DAEMON_STOPPED_ERROR_CODE,
+                    )
                 )
-            )
-            runs_failed = int(runs_result.rowcount or 0)
+                runs_failed += int(runs_result.rowcount or 0)
+            if worker_ids:
+                runs_result = await self._session.execute(
+                    update(AgentRun)
+                    .where(
+                        AgentRun.agent_session_id.in_(worker_ids),
+                        col(AgentRun.status).in_(list(ACTIVE_TURN_STATUSES)),
+                    )
+                    .values(
+                        status="failed",
+                        finished_at=now,
+                        error_code=DAEMON_INTERRUPTED_ERROR_CODE,
+                    )
+                )
+                runs_failed += int(runs_result.rowcount or 0)
 
             lease_ids = [row.lease_id for row in hit_rows if row.lease_id is not None]
             if lease_ids:
@@ -4790,7 +4889,7 @@ class SessionService:
             await self._session.commit()
 
             # 以 UPDATE 后状态复查决定广播对象（并发翻转的行 status 已非
-            # suspended 不发——对齐 sweep 两档的防误伤口径）。
+            # suspended / failed 不发——对齐 sweep 两档的防误伤口径）。
             final_rows = (
                 await self._session.execute(
                     select(AgentSession.id, AgentSession.status, AgentSession.user_id).where(
@@ -4798,10 +4897,36 @@ class SessionService:
                     )
                 )
             ).all()
+            worker_id_set = set(worker_ids)
             for row in final_rows:
                 if row.status == "suspended":
                     await publish_sessions_changed("status_changed", row.id, row.user_id)
-            return SuspendBatchResult(suspended=suspended, runs_failed=runs_failed)
+                elif row.id in worker_id_set and row.status == "failed":
+                    # worker 组终态：对齐 sweep 档发 session_ended（SSE 收尾）+
+                    # 列表 status_changed；reason 即中断错误码。
+                    await self._publish_session_event(
+                        row.id,
+                        {
+                            "event": "session_ended",
+                            "session_id": str(row.id),
+                            "reason": DAEMON_INTERRUPTED_ERROR_CODE,
+                            "current_run_id": None,
+                        },
+                    )
+                    await publish_sessions_changed("status_changed", row.id, row.user_id)
+            result = SuspendBatchResult(
+                suspended=suspended,
+                runs_failed=runs_failed,
+                workers=[(row.id, row.runtime_id) for row in worker_rows],
+            )
+            # task-02（design S2）：worker failed 落库（上方事务已 commit）后异步
+            # fire 自动重派——复用原会话 + resume_session_id 续 SDK 上下文；不
+            # 阻塞挂起主路径，重派失败仅记日志（下轮 offline sweep 60s 周期自愈）。
+            if result.workers:
+                from app.modules.agent.worker_redispatch import fire_worker_redispatch
+
+                fire_worker_redispatch(result.workers)
+            return result
         except Exception:
             await self._session.rollback()
             raise

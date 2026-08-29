@@ -492,6 +492,17 @@ async def build_claim_payload(session: AsyncSession, lease: DaemonTaskLease) -> 
         # ``is not None`` 守护（int 0 合法）；单键 snake_case，对齐 stage 先例。
         if lease_meta.get("worker_depth") is not None:
             payload["worker_depth"] = lease_meta["worker_depth"]
+        # task-03（2026-08-29-batch-session-inherit / FR-05 / D-005@v1）：interactive
+        # 分支补 resume_session_id 白名单透传——此前仅 batch 分支透传（本函数下方
+        # resume_session_id 处），重派 worker 的 lease metadata 已带该键（S2 重派
+        # 经 prepare_interactive_dispatch 写入）但 interactive 分支不透传 → daemon
+        # claim 拿不到续会话 id。写法照 batch 分支先例（snake_case 单键，真值守护），
+        # daemon execPayload.resumeSessionId 归一化 → CreateSessionInput.resume 续原
+        # 会话（消费归 task-04）。置于 transport 分支之前，tar / shared 两路 return
+        # 都携带。缺键 / 空串不加 payload 键——存量 quick-chat / 主控 / 普通
+        # interactive lease 全链 undefined 穿透（零回归，不伪造默认值）。
+        if lease_meta.get("resume_session_id"):
+            payload["resume_session_id"] = lease_meta["resume_session_id"]
         # task-07 / C-13：透传 profile 字段（mcp_refs/skill_refs/effective_allowed_roots/
         # profile_version，双写 camelCase+snake_case）。置于 transport 分支之前，让 tar /
         # shared 两路 return 都携带（system_prompt 不在此，走 task-06 claudeMd prepend）。

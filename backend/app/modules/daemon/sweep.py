@@ -29,6 +29,13 @@ daemon 回调 confirm-reconnected / mark-recovery-failed 翻转；旧版 daemon 
   （:data:`SUSPENDED_MAX_AGE_SEC`，默认 24h）——超龄 suspended → failed
   （此时才发终态 ``session_ended``），防 daemon 永不回归的永久泄漏。
 
+2026-08-29-batch-session-inherit task-01（design S1 / FR-01）追加：
+
+- :func:`session_offline_sweep_once` active 档按 ``parent_session_id`` 分流——
+  **worker 子会话**（parent 非空）改判 ``failed`` + ``ended_at``、活跃 run 落
+  ``error_code=daemon_interrupted``（重派种子标识，task-02 消费）；**主会话**
+  suspended 语义逐字不变；pending 档（含 worker pending）不加分流维持现状。
+
 2026-08-29-daemon-platform-resilience task-03 / design A4（FR-02）追加：
 
 - :func:`lease_expiry_sweep_once`：lease 过期 GC 单拍——把既有但无调用方的
@@ -60,7 +67,10 @@ from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.modules.agent.model import AgentRun, AgentSession
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
-from app.modules.daemon.session.service import RECONNECTING_RETRY_WINDOW_SEC
+from app.modules.daemon.session.service import (
+    DAEMON_INTERRUPTED_ERROR_CODE,
+    RECONNECTING_RETRY_WINDOW_SEC,
+)
 from app.modules.daemon.session_events import publish_sessions_changed
 
 log = get_logger(__name__)
@@ -90,7 +100,9 @@ _SWEEPABLE_LEASE_STATUSES = ("pending", "claimed")
 # 离线档收敛的会话状态（active=已建立；pending=派发后从未就绪）。task-05
 # （design A5 / D-007）起两态归宿分流：active → suspended（非终态可 recover），
 # pending → failed（daemon 本地 sessions.json 无快照记录，suspended 无人
-# recover，维持 failed 语义更准确）。
+# recover，维持 failed 语义更准确）。task-01（design S1）起 active 档再按
+# parent_session_id 分流：worker 子会话 → failed+daemon_interrupted（重派
+# 种子）；pending 档不加分流。
 _OFFLINE_SWEEPABLE_SESSION_STATUSES = ("active", "pending")
 
 
@@ -211,11 +223,20 @@ async def session_offline_sweep_once(session: AsyncSession) -> int:
       记录（仅持久化 active 且有 agentSessionId 的会话），suspended 无人
       recover 只能等 24h GC，维持 failed 更准确。
 
+    2026-08-29-batch-session-inherit task-01（design S1）active 档再按
+    ``parent_session_id`` 分流：**worker 子会话**（parent 非空）改判
+    ``failed`` + ``ended_at``、活跃 run 落 ``error_code=daemon_interrupted``
+    （作 task-02 自动重派种子；worker 临时会话无人手 recover，挂起只会卡
+    mission 等 24h GC）；**主会话**（parent IS NULL）suspended 语义逐字不变；
+    **pending 档不加分流**（含 worker pending 维持既有 pending→failed 与无
+    error_code 现状——design 显式边界）。
+
     daemon 正常重启的会话走 recover → reconnecting → 既有 sweep，不会进本档
     （重启即翻状态）；进本档的都是长时间无心跳且未恢复的 runtime。
 
     同事务保持既有两步（对齐 reconnecting sweep 手法）：
-    1. 命中会话（两态）的挂起 run（pending/running）→ ``failed`` + ``finished_at``；
+    1. 命中会话（两态）的挂起 run（pending/running）→ ``failed`` + ``finished_at``
+       （worker active 组额外落 ``error_code=daemon_interrupted``）；
     2. 挂起 lease（pending/claimed）→ ``cancelled``。
 
     **suspended 超龄 GC（task-05 / design A5，每轮顺带）**：``status='suspended'``
@@ -224,10 +245,10 @@ async def session_offline_sweep_once(session: AsyncSession) -> int:
     永不回来时防永久泄漏；coalesce 兜底脏数据 NULL（正常两路径翻 suspended
     均写 last_active_at）。条件 UPDATE 重挂全部条件，幂等可重入。
 
-    commit 后逐会话按终态分流广播：failed（pending 档 + GC 档）发
-    ``session_ended``（reason=runtime_offline / suspended_expired）+ 列表
-    status_changed；suspended 非终态**只发 status_changed 不发 session_ended**
-    （design A5：SSE 会话流继续 keepalive）。
+    commit 后逐会话按终态分流广播：failed（pending 档 + worker active 档 +
+    GC 档）发 ``session_ended``（reason=runtime_offline / suspended_expired）
+    + 列表 status_changed；suspended 非终态**只发 status_changed 不发
+    session_ended**（design A5：SSE 会话流继续 keepalive）。
     """
     now = datetime.now(UTC)
     grace = now - timedelta(seconds=RUNTIME_OFFLINE_GRACE_SEC)
@@ -244,7 +265,13 @@ async def session_offline_sweep_once(session: AsyncSession) -> int:
     )
     hit_rows = (
         await session.execute(
-            select(AgentSession.id, AgentSession.lease_id, AgentSession.status).where(
+            select(
+                AgentSession.id,
+                AgentSession.lease_id,
+                AgentSession.runtime_id,
+                AgentSession.status,
+                AgentSession.parent_session_id,
+            ).where(
                 AgentSession.status.in_(_OFFLINE_SWEEPABLE_SESSION_STATUSES),
                 col(AgentSession.runtime_id).is_not(None),
                 ~online_runtime,
@@ -252,21 +279,41 @@ async def session_offline_sweep_once(session: AsyncSession) -> int:
         )
     ).all()
 
-    # SELECT 带出 status 分流两态；UPDATE 重挂各自状态条件——SELECT 与 UPDATE
-    # 之间被并发（ready 翻 active / recover 翻 reconnecting）改态的行不会误伤。
-    active_ids = [row.id for row in hit_rows if row.status == "active"]
+    # SELECT 带出 status / parent_session_id 分流；UPDATE 重挂各自状态条件——
+    # SELECT 与 UPDATE 之间被并发（ready 翻 active / recover 翻 reconnecting）
+    # 改态的行不会误伤。task-01（design S1）：active 档按 parent 分流 worker /
+    # 主会话，pending 档不分流。
+    active_main_ids = [
+        row.id for row in hit_rows if row.status == "active" and row.parent_session_id is None
+    ]
+    active_worker_ids = [
+        row.id for row in hit_rows if row.status == "active" and row.parent_session_id is not None
+    ]
     pending_ids = [row.id for row in hit_rows if row.status == "pending"]
     hit_ids = [row.id for row in hit_rows]
     converged = 0
 
-    if active_ids:
+    if active_main_ids:
         result = await session.execute(
             update(AgentSession)
             .where(
-                AgentSession.id.in_(active_ids),
+                AgentSession.id.in_(active_main_ids),
                 AgentSession.status == "active",
             )
             .values(status="suspended", last_active_at=now)
+        )
+        converged += int(result.rowcount or 0)
+
+    # worker active 组（task-01）：改判 failed + ended_at——挂起无人 recover，
+    # failed 落 daemon_interrupted 作 task-02 重派种子。
+    if active_worker_ids:
+        result = await session.execute(
+            update(AgentSession)
+            .where(
+                AgentSession.id.in_(active_worker_ids),
+                AgentSession.status == "active",
+            )
+            .values(status="failed", ended_at=now)
         )
         converged += int(result.rowcount or 0)
 
@@ -281,12 +328,29 @@ async def session_offline_sweep_once(session: AsyncSession) -> int:
         )
         converged += int(result.rowcount or 0)
 
-    # 命中会话的挂起 run 一并收敛（否则 run 永远 running）。
-    if hit_ids:
+    # 命中会话的挂起 run 一并收敛（否则 run 永远 running）。worker active 组落
+    # daemon_interrupted（重派种子口径）；其余（主会话 active + 全部 pending 档，
+    # 含 worker pending——design 显式边界不加分流）维持无 error_code 现状。
+    if active_worker_ids:
         await session.execute(
             update(AgentRun)
             .where(
-                AgentRun.agent_session_id.in_(hit_ids),
+                AgentRun.agent_session_id.in_(active_worker_ids),
+                AgentRun.status.in_(("pending", "running")),
+            )
+            .values(
+                status="failed",
+                finished_at=now,
+                error_code=DAEMON_INTERRUPTED_ERROR_CODE,
+            )
+        )
+    worker_id_set = set(active_worker_ids)
+    non_worker_ids = [row_id for row_id in hit_ids if row_id not in worker_id_set]
+    if non_worker_ids:
+        await session.execute(
+            update(AgentRun)
+            .where(
+                AgentRun.agent_session_id.in_(non_worker_ids),
                 AgentRun.status.in_(("pending", "running")),
             )
             .values(status="failed", finished_at=now)
@@ -355,6 +419,20 @@ async def session_offline_sweep_once(session: AsyncSession) -> int:
         elif row.status == "suspended":
             # 非终态：只发列表变更信号，不发 session_ended（design A5）。
             await publish_sessions_changed("status_changed", row.id, row.user_id)
+
+    # task-02（2026-08-29-batch-session-inherit / design S2）：worker active 档
+    # failed 组（重派种子）事务提交后异步 fire 自动重派——复用原会话 +
+    # resume_session_id 续 SDK 上下文；不阻塞 sweep 主路径，失败仅记日志
+    # （60s 周期下轮自愈）。种子与 suspend 路径同构：(session_id, runtime_id)。
+    worker_seeds = [
+        (row.id, row.runtime_id)
+        for row in hit_rows
+        if row.status == "active" and row.parent_session_id is not None
+    ]
+    if worker_seeds:
+        from app.modules.agent.worker_redispatch import fire_worker_redispatch
+
+        fire_worker_redispatch(worker_seeds)
     return converged
 
 

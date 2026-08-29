@@ -19,6 +19,13 @@ execPayload.workspaceId 原本缺失 → daemon 端 D-008 三件套预取对主�
 夹具范式镜像 ``test_lease_budget_dispatch.py``：import ``test_lease_service.py`` 的
 ``_create_user`` / ``_create_runtime`` helper；dispatch 形态 interactive lease（带
 agent_run_id 列）本地构造（``_create_interactive_lease`` 恒 NULL 不适用）。
+
+task-03（2026-08-29-batch-session-inherit / FR-05 / D-005@v1）追加：interactive 分支
+resume_session_id 白名单透传守护——重派 worker 的 lease metadata 已带该键但
+interactive 分支原本不透传，daemon claim 拿不到续会话 id。断言矩阵：
+  - R1/R2: metadata 含 resume_session_id → tar 与 shared 两路 payload 透传值一致；
+  - R3: metadata 无该键（存量 quick-chat / 主控）→ payload 无该键（缺省不下发）；
+  - B1: batch 分支既有 resume_session_id 透传（context.py batch 段先例）回归不变。
 """
 
 from __future__ import annotations
@@ -115,13 +122,16 @@ async def _create_dispatch_style_lease(
     run_id: uuid.UUID,
     *,
     metadata: dict,
+    kind: str = "interactive",
 ) -> DaemonTaskLease:
-    """构造 dispatch_to_daemon 形态 interactive lease（agent_run_id 列非空）。
+    """构造 dispatch_to_daemon 形态 lease（agent_run_id 列非空）。
 
     与 placement.dispatch_to_daemon 的 INSERT（placement.py:485-503）同构：
     kind='interactive' + agent_run_id 绑定 + metadata 带 session_id/run_id/
     prompt/provider/stage 等。区别于 _create_interactive_lease（prepare_
     interactive_dispatch 形态，agent_run_id 列恒 NULL，D-005@v1）。
+    task-03（2026-08-29-batch-session-inherit）：kind 参数化（默认 interactive
+    保持既有用例不变），batch 回归用例复用同一构造器。
     """
     now = datetime.now(UTC)
     lease = DaemonTaskLease(
@@ -129,7 +139,7 @@ async def _create_dispatch_style_lease(
         runtime_id=runtime_id,
         agent_run_id=run_id,
         status="claimed",
-        kind="interactive",
+        kind=kind,
         claimed_at=now,
         lease_expires_at=None,
         metadata_=metadata,
@@ -292,3 +302,147 @@ class TestBuildClaimPayloadOrchestratorWorkspaceFallback:
         assert payload["transport"] == "tar"
         assert "workspaceId" not in payload
         assert payload.get("workspace_id") is None
+
+
+class TestInteractiveResumeSessionIdPassthrough:
+    """task-03（2026-08-29-batch-session-inherit / FR-05 / D-005@v1）：
+    interactive claim payload resume_session_id 白名单透传守护单测。
+
+    重派 worker 的 lease metadata 携带 resume_session_id（原会话 SDK resume id），
+    build_claim_payload interactive 分支须透传进 claim payload → daemon
+    execPayload.resumeSessionId 归一化 → CreateSessionInput.resume 续原会话
+    （daemon 端消费归 task-04）。缺键短路不加 payload 键（不伪造默认值）。
+    """
+
+    @pytest.mark.asyncio
+    async def test_r1_tar_resume_session_id_passthrough(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """R1: tar 模式 metadata 含 resume_session_id → payload 携带且值一致。
+
+        注入点在 transport tar 分支 return 之前（对齐 stage/worker_depth 先例），
+        tar 路 claim payload 同样携带续会话 id。
+        """
+        _patch_transport(monkeypatch, "tar")
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        run = await _create_run(db_session, mission_id=None)
+        resume_key = f"sess-{uuid.uuid4().hex[:24]}"
+        lease = await _create_dispatch_style_lease(
+            db_session,
+            rt.id,
+            run.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(run.id),
+                "prompt": "continue work",
+                "provider": "claude_code",
+                "claim_token": "tok",
+                "stage": "mission_worker",
+                "resume_session_id": resume_key,
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        assert payload["transport"] == "tar"
+        assert payload["resume_session_id"] == resume_key
+        # 既有白名单键不受影响（stage 透传先例同在）
+        assert payload["stage"] == "mission_worker"
+
+    @pytest.mark.asyncio
+    async def test_r2_shared_resume_session_id_passthrough(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """R2: shared 模式（默认 transport）metadata 含 resume_session_id → 同样携带。
+
+        注入点在 shared 分支 return 之前，两路 claim payload 都带续会话 id。
+        """
+        _patch_transport(monkeypatch, "shared")
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        run = await _create_run(db_session, mission_id=None)
+        resume_key = f"sess-{uuid.uuid4().hex[:24]}"
+        lease = await _create_dispatch_style_lease(
+            db_session,
+            rt.id,
+            run.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(run.id),
+                "prompt": "continue work",
+                "provider": "claude_code",
+                "claim_token": "tok",
+                "resume_session_id": resume_key,
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        assert payload["transport"] == "shared"
+        assert payload["resume_session_id"] == resume_key
+
+    @pytest.mark.asyncio
+    async def test_r3_missing_resume_session_id_no_key(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """R3: metadata 无 resume_session_id（存量 quick-chat / 主控 / 旧 lease）
+        → payload 不含该键（缺省不下发，undefined 穿透零回归）。"""
+        _patch_transport(monkeypatch, "tar")
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        run = await _create_run(db_session, mission_id=None)
+        lease = await _create_dispatch_style_lease(
+            db_session,
+            rt.id,
+            run.id,
+            metadata={
+                "session_id": str(uuid.uuid4()),
+                "run_id": str(run.id),
+                "prompt": "quick chat",
+                "provider": "claude_code",
+                "claim_token": "tok",
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        assert "resume_session_id" not in payload
+
+    @pytest.mark.asyncio
+    async def test_b1_batch_resume_session_id_regression(
+        self,
+        db_session: AsyncSession,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """B1: batch 分支既有 resume_session_id 透传（context.py batch 段先例）
+        行为回归不变——本 task 只补 interactive 分支，batch 键值照旧透传。"""
+        _patch_transport(monkeypatch, "tar")
+        user_id = await _create_user(db_session)
+        rt = await _create_runtime(db_session, user_id)
+        run = await _create_run(db_session, mission_id=None)
+        resume_key = f"sess-{uuid.uuid4().hex[:24]}"
+        lease = await _create_dispatch_style_lease(
+            db_session,
+            rt.id,
+            run.id,
+            kind="batch",
+            metadata={
+                "run_id": str(run.id),
+                "prompt": "batch job",
+                "claim_token": "tok",
+                "resume_session_id": resume_key,
+            },
+        )
+
+        payload = await build_claim_payload(db_session, lease)
+
+        assert payload["kind"] == "batch"
+        assert payload["agent_run_id"] == str(run.id)
+        assert payload["resume_session_id"] == resume_key

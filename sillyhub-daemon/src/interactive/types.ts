@@ -439,6 +439,13 @@ export interface CreateSessionInput {
   effectiveAllowedRoots?: string[];
   /** task-05：profile.system_prompt（create 透传，见 SessionState 注释）。 */
   systemPrompt?: string;
+  /**
+   * task-04（2026-08-29-batch-session-inherit / D-001@v1）：resume 目标会话 id。
+   * daemon _startInteractiveSession 从 execPayload.resumeSessionId 透传（claim
+   * payload 归一化区，不新建第二套）。SessionManager.create 内转发进
+   * driverOpts.resume（spec.resume 既有链）。undefined 零回归。
+   */
+  resume?: string;
 }
 
 /** inject 返回值（runId 由 backend 在 inject 时已创建）。 */
@@ -759,6 +766,16 @@ export interface PersistedSessionRecord {
   effectiveAllowedRoots?: string[];
   /** task-05：profile.system_prompt 落盘（resume 时重新注入 systemPrompt）。 */
   systemPrompt?: string;
+  /**
+   * task-04（2026-08-29-batch-session-inherit / D-001@v1）：resume 目标会话 id。
+   *
+   * daemon ``_startInteractiveSession`` 从 ``execPayload.resumeSessionId`` 透传
+   *（claim payload 归一化：resumeSessionId ?? resume_session_id，daemon.ts 既有
+   * 归一化区，不新建第二套）。SessionManager.create 内转发进 driverOpts.resume
+   *（spec.resume → driverOpts 既有链）归 task-05——本任务只扩字段接线到 create 入参。
+   * undefined（旧 backend 无该键）→ 全链无键，行为与现状一致（零回归）。
+   */
+  resume?: string;
   /**
    * task-08（2026-08-14-sessions-portal / design §5 Wave2）：会话级供应商配置快照。
    *

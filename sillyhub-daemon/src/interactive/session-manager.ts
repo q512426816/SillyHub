@@ -117,6 +117,18 @@ import type { ModelError } from '../model-error/types.js';
 const _SDK_WRITE_TOOLS: ReadonlySet<string> = new Set(['Write', 'Edit', 'MultiEdit']);
 
 /**
+ * task-05（2026-08-29-batch-session-inherit / S4 / FR-04 / D-002@v1）：resume 损伤
+ * 判定正则——单点维护，实现与测试（session-manager-resume-fallback.test.ts）共用。
+ *
+ * create 带 resume 启动时 SDK 报这些模式 = 目标会话 transcript 缺失/损坏（旧 daemon
+ * 掉线期间 jsonl 被清理等），语义为「这个 resume 目标续不上了」。命中才触发降级
+ * （清 resume 以同参 fresh 重建一次，见 create）；网络/权限/executable 缺失等普通
+ * 启动错误不命中 → 不降级走原失败路径（防误伤）。
+ */
+export const RESUME_DAMAGE_PATTERNS =
+  /session not found|no conversation found|unable to resume/i;
+
+/**
  * task-08（D-007@v1 / FR-07）：wsClient.send 注入接口（鸭子类型，便于测试 mock）。
  * daemon 注入真实 WsClient；测试注入 mock。
  */
@@ -1292,6 +1304,53 @@ export class SessionManager {
      */
     budget_tokens?: number;
   }): Promise<void> {
+    // task-05（2026-08-29-batch-session-inherit / S4 / FR-04 / D-002@v1）：resume 损伤
+    // 自动降级包装。首次走 _createInternal（含 input.resume → spec.resume →
+    // driverOpts.resume 透传，续旧 SDK 会话）；启动错误命中 RESUME_DAMAGE_PATTERNS
+    // 且本次带 resume → 清 resume 同参 fresh 重建一次（worker 重派链路不因旧会话
+    // transcript 损伤死锁）。降级一次为限不循环。
+    try {
+      await this._createInternal(input);
+      return;
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      if (input.resume === undefined || !RESUME_DAMAGE_PATTERNS.test(message)) {
+        // 非损伤模式（网络/权限/executable 缺失等）或本次未带 resume：不降级，
+        // 原失败路径抛出（损伤判定只认集中正则命中，防误伤）。
+        throw e;
+      }
+      // 披露（D-003 最小闭环：daemon 侧仅日志，不加新上报协议字段）——warn 日志
+      // 含原 resume id，供排查 worker 重派链路的降级情况。
+      console.warn('[session-manager] resume_downgraded', {
+        sessionId: input.sessionId,
+        resume: input.resume,
+        error: message,
+      });
+      // 清首轮挂起 timer：首次 _createInternal 已设 pendingFirstPrompt 10s fallback，
+      // 不清则旧 timer 到点会 push 首句 + 删掉重建新挂的条目 → 首句双提交
+      //（ql-20260825-002 同款回归）；重建会重新挂一个全新 timer。
+      const stalePending = this._pendingFirstPrompt.get(input.sessionId);
+      if (stalePending) {
+        clearTimeout(stalePending.timer);
+        this._pendingFirstPrompt.delete(input.sessionId);
+      }
+      // 清 resume 后同参 fresh 重建（降级一次为限：再失败在本处直接抛出，走普通
+      // create 失败路径 → daemon _startInteractiveSession catch → worker failed，
+      // 不二次降级）。不 push prompt——首轮由 pendingFirstPrompt 10s fallback 驱动
+      //（与首轮派发同构，S3 设计定论，不动该机制）。
+      const { resume: _downgradedResume, ...freshInput } = input;
+      await this._createInternal(freshInput);
+    }
+  }
+
+  /**
+   * create 的内部实现（原 create 主体；task-05 拆出供降级分支以清 resume 后的
+   * 同参重放）。语义与拆出前逐行等价：driver 解析/会话闸/挂起首句/写 store/
+   * driver.start/fire consume，失败时清理半建 state 后抛出。
+   */
+  private async _createInternal(input: CreateSessionInput & {
+    budget_tokens?: number;
+  }): Promise<void> {
     // D-001：先解析 driver（未注册即抛，在写 store 前，不留孤儿 state）。
     const driver = this._getDriver(input.provider);
     if (this._store.has(input.sessionId)) {
@@ -1433,6 +1492,11 @@ export class SessionManager {
         env: input.env,
         enableApproval,
         effectiveAskUserOnly,
+        // task-05（2026-08-29-batch-session-inherit / D-001@v1）：resume 透传——
+        // CreateSessionInput.resume（daemon.ts task-04 已从 execPayload.resumeSessionId
+        // 归一化传入）→ spec.resume → driverOpts.resume 既有链（worker 重派续旧 SDK
+        // 会话）。undefined（旧 backend 无该键）→ 键不写入，全新会话原路径（零回归）。
+        resume: input.resume,
         mcpServers: mainAgentMcp,
         systemPrompt: input.systemPrompt,
       });
@@ -2164,6 +2228,103 @@ export class SessionManager {
         // 其他工具正常 allow-through：透传归一化后的 updatedInput（不篡改语义，
         // 仅满足 Zod record 要求），让 scan 自动推进。
         return { behavior: 'allow', updatedInput };
+      }
+      // Plan 审批升级为 dialog（docs/sillyspec/2026-08-24-platform-session-shell-
+      // plan-feedback-gaps 收口）：ExitPlanMode 的 canUseTool 原走下方普通审批——
+      // 前端把无 dialog_kind 的审批卡分流到 /runtimes 面板（会话页无卡）+ backend
+      // 5min 自动 deny（ephemeral 无 DB 行），用户侧表现正是「plan 发起后没响应」。
+      // 复用 AskUserQuestion dialog 基建：dialog_kind='plan_approval' → backend 持久化
+      // session_dialog_requests（刷新存活）+ 前端会话页按 dialog_kind 存在性渲染问答卡
+      //（长驻可答，无 5min 超时）。答案映射：选「批准计划」→ allow 放行 SDK 退出计划
+      // 模式；其他答案/自定义文本 → deny.message 回喂用户反馈，Claude 据此修订计划后
+      // 重新提交。scan（askUserOnly）不受影响——上方分支已 allow-through。
+      if (toolName === 'ExitPlanMode') {
+        const planApproveLabel = '批准计划';
+        const planRaw = updatedInput['plan'];
+        const planText =
+          typeof planRaw === 'string' && planRaw.length > 0 ? planRaw : '';
+        // preview 有界：计划全文可能很长，卡片只带前 1500 字预览防巨型 payload
+        const planPreview = planText.slice(0, 1500);
+        const planResolver = this._resolversBySession.get(sessionId);
+        const planWsClient = this._permissionWsClient;
+        if (!planResolver || !planWsClient) {
+          return {
+            behavior: 'deny',
+            message: `Plan approval channel unavailable (session=${sessionId}, run=${runId}); revise and resubmit.`,
+          };
+        }
+        try {
+          const { promise } = planResolver.register({
+            sessionId,
+            runId,
+            toolName,
+            toolInput: updatedInput,
+            signal: options?.signal,
+            send: (msg) => planWsClient.send(msg),
+            dialogKind: 'plan_approval',
+            dialogPayload: {
+              questions: [
+                {
+                  question: planPreview
+                    ? 'Agent 提交了执行计划等待审批（长驻等待，不会自动超时）：'
+                    : 'Agent 提交了执行计划等待审批（长驻等待，不会自动超时）。',
+                  header: 'Plan 审批',
+                  options: [
+                    {
+                      label: planApproveLabel,
+                      description: '批准该计划，Agent 按计划开始执行',
+                      ...(planPreview ? { preview: planPreview } : {}),
+                    },
+                    {
+                      label: '需要修改',
+                      description:
+                        '拒绝执行；可在输入框填写修改意见，Agent 会据此修订计划后重新提交',
+                      ...(planPreview ? { preview: planPreview } : {}),
+                    },
+                  ],
+                },
+              ],
+            },
+          });
+          const decision = await promise;
+          if (decision.behavior === 'allow') {
+            // 问答卡提交语义 = allow + dialog_result.answers；单选答案为选中 label，
+            // 填了自定义文本时为文本本身（卡片逻辑：custom 非空时替换选中项）。
+            const dialogResult = (decision as { dialogResult?: unknown })
+              .dialogResult;
+            const answers = (
+              dialogResult as { answers?: unknown } | undefined
+            )?.answers;
+            const first = Array.isArray(answers) ? answers[0] : undefined;
+            const raw = first && typeof first === 'object'
+              ? (first as { answer?: unknown }).answer
+              : undefined;
+            const answer = Array.isArray(raw)
+              ? raw.join('；')
+              : typeof raw === 'string'
+                ? raw
+                : '';
+            if (answer === planApproveLabel) {
+              return { behavior: 'allow', updatedInput };
+            }
+            return {
+              behavior: 'deny',
+              message: `计划未批准。用户反馈：${answer || '（无）'}。请根据反馈修订计划后重新提交（ExitPlanMode）。`,
+            };
+          }
+          // deny / abort（dialog 无超时）→ 带默认可读原因 deny，让 Claude 收敛。
+          return {
+            behavior: 'deny',
+            message: `Plan approval not completed (${decision.message ?? 'no response'}). Revise the plan or ask the user in chat.`,
+          };
+        } catch (err) {
+          const reason =
+            err instanceof Error ? err.message : String(err ?? 'unknown error');
+          return {
+            behavior: 'deny',
+            message: `Plan approval channel error (${reason}). Revise the plan or ask the user in chat.`,
+          };
+        }
       }
       // task-09：默认 deny message 模板（含 toolName / sessionId / runId），
       // 远程 deny 未带 message 时回填，让 claude 拿到可读原因自决定收敛行为。

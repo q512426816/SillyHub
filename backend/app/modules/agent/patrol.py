@@ -89,6 +89,7 @@ from app.modules.agent.orchestrator import (
 )
 from app.modules.agent.placement import NoOnlineDaemonError, RunPlacementService
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
+from app.modules.daemon.session.service import DAEMON_INTERRUPTED_ERROR_CODE
 
 log = get_logger(__name__)
 
@@ -712,6 +713,12 @@ class MissionPatrolService:
         链路管，不重复处理）且 ``role != 'orchestrator'``（主控轮专属
         redispatch_pending_main_runs 链路负责，不重复）。
 
+        2026-08-29-batch-session-inherit task-02（design S2 互斥守卫②）：
+        ``error_code = daemon_interrupted`` 的 run **排除**——该形态走 worker
+        自动重派链路（worker_redispatch 复用原会话 + resume 续 SDK 上下文建
+        新 lease + 新首 run），此处 resume 翻回 pending 会与新 run 双跑 +
+        刷日志噪音。
+
         恢复只按本职责计数进 ``worker_recovered``；简历定的 run 由 daemon
         侧重连后 outbox drain 补发终态（FileOutbox 持久化，R-07/R-10 既有
         语义）。
@@ -730,6 +737,15 @@ class MissionPatrolService:
                 col(AgentRun.mission_id).is_not(None),
                 col(AgentRun.role) != "orchestrator",
                 col(AgentRun.agent_session_id).is_not(None),  # 会话 mission 锚
+                # task-02（2026-08-29-batch-session-inherit / design S2 互斥守卫②）：
+                # daemon_interrupted 的 run 走 worker 自动重派链路（新 lease + 新首
+                # run 挂原会话）——此处翻回 pending 会与新 run 双跑 + 刷
+                # resume_failed 日志噪音，排除（NULL error_code 的既有候选不受
+                # ``!=`` 三值逻辑误伤，or_ is_(None) 显式放行，对齐 :584 先例）。
+                or_(
+                    col(AgentRun.error_code).is_(None),
+                    col(AgentRun.error_code) != DAEMON_INTERRUPTED_ERROR_CODE,
+                ),
             )
             .order_by(AgentRun.created_at.desc())
             .limit(50)

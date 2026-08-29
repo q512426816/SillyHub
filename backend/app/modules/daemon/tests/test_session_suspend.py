@@ -17,6 +17,12 @@ design A5 / FR-04 / D-001（恢复口径）/ D-007（pending 归宿、recover �
 - **recover 非白名单三态锁定**（D-007）：suspended / pending / reconnecting
   均 recover → reconnecting 且 claim_token 轮换（既有 recover 状态守卫零
   改动，本组仅用例化锁定语义）。
+
+2026-08-29-batch-session-inherit task-01（design S1 / FR-01）追加 worker 分流
+用例（既有主会话断言零改动，只补 ``parent_session_id`` 非空场景）：suspend 与
+offline sweep 两路径的 worker 子会话改判 failed（error_code=daemon_interrupted
+作重派种子），主会话 suspended 语义回归锁定；pending 档（含 worker pending）
+维持既有行为。
 """
 
 from __future__ import annotations
@@ -35,6 +41,7 @@ from app.modules.auth.model import User
 from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.service import DaemonService
 from app.modules.daemon.session.service import (
+    DAEMON_INTERRUPTED_ERROR_CODE,
     DAEMON_STOPPED_ERROR_CODE,
     SessionService,
 )
@@ -125,6 +132,7 @@ async def _make_session(
     status: str,
     lease_id: uuid.UUID | None,
     last_active_at: datetime | None = None,
+    parent_session_id: uuid.UUID | None = None,
 ) -> AgentSession:
     now = datetime.now(UTC)
     sess = AgentSession(
@@ -138,6 +146,9 @@ async def _make_session(
         config={"model": "sonnet"},
         turn_count=1,
         cwd="/workspace/proj",
+        # task-01：parent_session_id 非空 = worker 子会话（分流识别唯一口径）；
+        # 缺省 None = 主会话（既有造数全部走缺省，主会话断言零改动）。
+        parent_session_id=parent_session_id,
         created_at=now,
         last_active_at=last_active_at if last_active_at is not None else now,
         ended_at=now if status in ("ended", "failed") else None,
@@ -188,6 +199,25 @@ def _capture_sweep_redis(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str
             return 1
 
     monkeypatch.setattr(sweep_mod, "get_redis", lambda: _FakeRedis())
+    return captured
+
+
+def _capture_service_redis(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
+    """捕获 service 模块 per-session 频道（``agent_session:{id}``）的 publish。
+
+    task-01：suspend 路径 worker 组终态行经 ``_publish_session_event`` 发
+    ``session_ended``——捕获桩镜像 ``_capture_sweep_redis``，仅换模块落点。
+    """
+    from app.modules.daemon.session import service as svc_mod
+
+    captured: list[tuple[str, str]] = []
+
+    class _FakeRedis:
+        async def publish(self, channel: str, payload: str) -> int:
+            captured.append((channel, payload))
+            return 1
+
+    monkeypatch.setattr(svc_mod, "get_redis", lambda: _FakeRedis())
     return captured
 
 
@@ -671,3 +701,241 @@ class TestRecoverThreeStates:
         assert result.status == "reconnecting"
         await db_session.refresh(lease)
         assert (lease.metadata_ or {}).get("claim_token") != "tok-old"
+
+
+# ── 5. worker 子会话分流（2026-08-29-batch-session-inherit task-01 / design S1）──
+# parent_session_id 非空 = worker 子会话：两挂起路径改判 failed（error_code=
+# daemon_interrupted 作 task-02 重派种子）；主会话（parent IS NULL）语义逐字
+# 不变（回归锁定）；sweep pending 档（含 worker pending）维持既有行为。
+
+
+class TestSuspendBatchWorkerSplit:
+    async def test_worker_failed_main_suspended_same_batch(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """同批分流：主会话 suspended（daemon_stopped 逐字不变），worker 子会话
+        failed+ended_at（run error_code=daemon_interrupted）+lease cancelled+
+        workers 种子 [(session_id, runtime_id)]；worker 终态发 session_ended、
+        主会话不发。"""
+        captured = _capture_service_redis(monkeypatch)
+        calls = _capture_publish(monkeypatch, "app.modules.daemon.session.service")
+        user = await _make_user(db_session, prefix="susp-wk")
+        inst = await _make_instance(db_session, user.id)
+        rt = await _make_runtime(db_session, user.id, daemon_instance_id=inst.id)
+        main_lease = await _make_lease(db_session, rt.id, status="claimed")
+        main = await _make_session(
+            db_session, user.id, rt.id, status="active", lease_id=main_lease.id
+        )
+        main_run = await _make_run(db_session, main.id, status="running")
+        wk_lease = await _make_lease(db_session, rt.id, status="claimed")
+        worker = await _make_session(
+            db_session,
+            user.id,
+            rt.id,
+            status="active",
+            lease_id=wk_lease.id,
+            parent_session_id=main.id,
+        )
+        wk_run = await _make_run(db_session, worker.id, status="running")
+
+        result = await SessionService(db_session).suspend_sessions_for_daemon(inst.id)
+
+        assert result.suspended == 1  # 仅主会话
+        assert result.runs_failed == 2
+        assert result.workers == [(worker.id, rt.id)]  # 重派种子
+        main_row = await _session_row(db_session, main.id)
+        assert (main_row.status, main_row.ended_at) == ("suspended", None)
+        wk_row = await _session_row(db_session, worker.id)
+        assert wk_row.status == "failed"
+        assert wk_row.ended_at is not None
+        assert (
+            await db_session.execute(
+                select(AgentRun.status, AgentRun.error_code).where(AgentRun.id == main_run.id)
+            )
+        ).one() == ("failed", DAEMON_STOPPED_ERROR_CODE)
+        assert (
+            await db_session.execute(
+                select(AgentRun.status, AgentRun.error_code).where(AgentRun.id == wk_run.id)
+            )
+        ).one() == ("failed", DAEMON_INTERRUPTED_ERROR_CODE)
+        assert await _lease_status(db_session, main_lease.id) == "cancelled"
+        assert await _lease_status(db_session, wk_lease.id) == "cancelled"
+        # worker 终态：per-session 频道收 session_ended（reason=daemon_interrupted）；
+        # 主会话 suspended 非终态不发。
+        wk_events = [json.loads(p) for ch, p in captured if ch == f"agent_session:{worker.id}"]
+        assert any(
+            e.get("event") == "session_ended" and e.get("reason") == DAEMON_INTERRUPTED_ERROR_CODE
+            for e in wk_events
+        )
+        main_events = [json.loads(p) for ch, p in captured if ch == f"agent_session:{main.id}"]
+        assert not any(e.get("event") == "session_ended" for e in main_events)
+        assert sorted(calls, key=lambda c: str(c[1])) == sorted(
+            [
+                ("status_changed", main.id, user.id),
+                ("status_changed", worker.id, user.id),
+            ],
+            key=lambda c: str(c[1]),
+        )
+
+    async def test_worker_second_call_idempotent(self, db_session: AsyncSession) -> None:
+        """worker 档幂等重入：二跑 0/0/[]，failed/daemon_interrupted 原样不覆盖。"""
+        user = await _make_user(db_session, prefix="susp-wk-id")
+        inst = await _make_instance(db_session, user.id)
+        rt = await _make_runtime(db_session, user.id, daemon_instance_id=inst.id)
+        parent = await _make_session(db_session, user.id, rt.id, status="active", lease_id=None)
+        worker = await _make_session(
+            db_session,
+            user.id,
+            rt.id,
+            status="active",
+            lease_id=None,
+            parent_session_id=parent.id,
+        )
+        run = await _make_run(db_session, worker.id, status="running")
+        svc = SessionService(db_session)
+
+        first = await svc.suspend_sessions_for_daemon(inst.id)
+        second = await svc.suspend_sessions_for_daemon(inst.id)
+
+        # 首跑：主会话（parent）suspended + worker run failed；worker 不计入
+        # suspended（改判 failed）。
+        assert (first.suspended, first.runs_failed) == (1, 1)
+        assert first.workers == [(worker.id, rt.id)]
+        assert (second.suspended, second.runs_failed, second.workers) == (0, 0, [])
+        assert (await _session_row(db_session, worker.id)).status == "failed"
+        assert (
+            await db_session.execute(
+                select(AgentRun.status, AgentRun.error_code).where(AgentRun.id == run.id)
+            )
+        ).one() == ("failed", DAEMON_INTERRUPTED_ERROR_CODE)
+
+
+class TestSuspendBatchEndpointWorkerContract:
+    async def test_endpoint_worker_only_two_key_response(
+        self, client, db_session: AsyncSession
+    ) -> None:
+        """worker-only daemon 挂起：响应体仍只含 suspended 与 runs_failed 两键
+        （workers 种子仅内部消费，响应 DTO 契约零变化）。"""
+        user = await _make_user(db_session, prefix="susp-wk-ep")
+        inst = await _make_instance(db_session, user.id)
+        rt = await _make_runtime(db_session, user.id, daemon_instance_id=inst.id)
+        # 父会话置终态（ended）保证批内唯一 active 是 worker——纯 worker 档。
+        parent = await _make_session(db_session, user.id, rt.id, status="ended", lease_id=None)
+        worker = await _make_session(
+            db_session,
+            user.id,
+            rt.id,
+            status="active",
+            lease_id=None,
+            parent_session_id=parent.id,
+        )
+        await _make_run(db_session, worker.id, status="running")
+
+        resp = await client.post(
+            "/api/daemon/sessions/suspend-batch",
+            json={"daemon_local_id": str(inst.id)},
+            headers={"Authorization": f"Bearer {_token_for(user)}"},
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"suspended": 0, "runs_failed": 1}
+        assert (await _session_row(db_session, worker.id)).status == "failed"
+
+
+class TestOfflineSweepWorkerSplit:
+    async def test_offline_worker_active_failed_with_daemon_interrupted(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """offline sweep active 档 worker 分流：worker 子会话 failed+ended_at、
+        run error_code=daemon_interrupted、lease cancelled、发 session_ended
+        （reason=runtime_offline）+status_changed。"""
+        from app.modules.daemon import sweep as sweep_mod
+
+        captured = _capture_sweep_redis(monkeypatch)
+        calls = _capture_publish(monkeypatch, "app.modules.daemon.sweep")
+        user = await _make_user(db_session, prefix="susp-wk-off")
+        rt = await _make_runtime(
+            db_session,
+            user.id,
+            status="offline",
+            heartbeat=datetime.now(UTC)
+            - timedelta(seconds=sweep_mod.RUNTIME_OFFLINE_GRACE_SEC + 60),
+        )
+        lease = await _make_lease(db_session, rt.id, status="claimed")
+        parent = await _make_session(db_session, user.id, rt.id, status="active", lease_id=None)
+        worker = await _make_session(
+            db_session,
+            user.id,
+            rt.id,
+            status="active",
+            lease_id=lease.id,
+            parent_session_id=parent.id,
+        )
+        run = await _make_run(db_session, worker.id, status="running")
+
+        converged = await sweep_mod.session_offline_sweep_once(db_session)
+
+        assert converged == 2  # worker failed（active 档）+ parent suspended（active 档）
+        wk_row = await _session_row(db_session, worker.id)
+        assert wk_row.status == "failed"
+        assert wk_row.ended_at is not None
+        assert (await _session_row(db_session, parent.id)).status == "suspended"
+        assert (
+            await db_session.execute(
+                select(AgentRun.status, AgentRun.error_code).where(AgentRun.id == run.id)
+            )
+        ).one() == ("failed", DAEMON_INTERRUPTED_ERROR_CODE)
+        assert await _lease_status(db_session, lease.id) == "cancelled"
+        events = [json.loads(p) for ch, p in captured if ch == f"agent_session:{worker.id}"]
+        assert any(
+            e.get("event") == "session_ended" and e.get("reason") == "runtime_offline"
+            for e in events
+        )
+        assert sorted(calls, key=lambda c: str(c[1])) == sorted(
+            [
+                ("status_changed", worker.id, user.id),
+                ("status_changed", parent.id, user.id),
+            ],
+            key=lambda c: str(c[1]),
+        )
+
+    async def test_offline_worker_pending_stays_failed_without_error_code(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """pending 档不加分流（design 显式边界）：worker pending 会话仍 pending→
+        failed+ended_at，run 收敛 failed 但**不落** daemon_interrupted error_code。"""
+        from app.modules.daemon import sweep as sweep_mod
+
+        _capture_sweep_redis(monkeypatch)
+        _capture_publish(monkeypatch, "app.modules.daemon.sweep")
+        user = await _make_user(db_session, prefix="susp-wk-p")
+        rt = await _make_runtime(
+            db_session,
+            user.id,
+            status="offline",
+            heartbeat=datetime.now(UTC)
+            - timedelta(seconds=sweep_mod.RUNTIME_OFFLINE_GRACE_SEC + 300),
+        )
+        parent = await _make_session(db_session, user.id, rt.id, status="pending", lease_id=None)
+        worker = await _make_session(
+            db_session,
+            user.id,
+            rt.id,
+            status="pending",
+            lease_id=None,
+            parent_session_id=parent.id,
+        )
+        run = await _make_run(db_session, worker.id, status="pending")
+
+        converged = await sweep_mod.session_offline_sweep_once(db_session)
+
+        assert converged == 2  # 两行均走 pending 档 → failed
+        for sid in (parent.id, worker.id):
+            row = await _session_row(db_session, sid)
+            assert row.status == "failed"
+            assert row.ended_at is not None
+        assert (
+            await db_session.execute(
+                select(AgentRun.status, AgentRun.error_code).where(AgentRun.id == run.id)
+            )
+        ).one() == ("failed", None)

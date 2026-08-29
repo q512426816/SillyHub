@@ -685,6 +685,14 @@ class RunPlacementService:
         # int 字段 0 是合法值不被吞）；缺省 None 不写键——存量 quick-chat / 主控 /
         # 普通会话 / 旧 lease 全链无键（undefined 穿透不伪造默认值，零回归）。
         worker_depth: int | None = None,
+        # task-02（2026-08-29-batch-session-inherit / design S2 / FR-02 / D-001@v1）：
+        # worker 自动重派注入的 SDK resume 会话 id（取原 AgentSession.agent_session_id
+        # 或最新 AgentRun.session_id，由 worker_redispatch.py 解析后传入）。非 None 时
+        # 写 lease metadata.resume_session_id 键——写法对齐 dispatch_to_daemon :456-457
+        # 先例（真值才写键）；经 claim payload（task-03 interactive 分支白名单透传）→
+        # daemon SessionManager.create({resume}) 续 SDK 上下文。缺省 None 不写键——
+        # 存量 quick-chat / 主控 / 普通会话创建零回归。
+        resume_session_id: str | None = None,
     ) -> "RunPlacementService.InteractiveDispatch":
         """Create the long-lived interactive lease for a new session.
 
@@ -857,6 +865,11 @@ class RunPlacementService:
         # lease 全链无键（undefined 穿透不伪造默认值，零回归）。
         if worker_depth is not None:
             metadata["worker_depth"] = worker_depth
+        # task-02（2026-08-29-batch-session-inherit / design S2）：worker 自动重派注入
+        # 的 SDK resume 会话 id。真值才写键（对齐 dispatch_to_daemon :456-457 先例），
+        # 缺省 None 不写 → 存量 quick-chat / 主控 / 普通会话 lease 全链无键零回归。
+        if resume_session_id:
+            metadata["resume_session_id"] = resume_session_id
         # D-008@v1（task-06 provides BorrowedLeaseFlag）：借用 lease 标记 borrowed=True
         # + lender_user_id，供 task-09 沙箱（按 lease 隔离只读 root_path）+ task-10 落 file
         # 判别。自有 daemon 路径 borrowed=False 不写（零回归）。
@@ -1848,8 +1861,7 @@ async def fetch_daemon_allowed_roots(
             (
                 await session.execute(
                     text(
-                        "SELECT allowed_roots FROM daemon_runtimes"
-                        " WHERE daemon_instance_id = :di"
+                        "SELECT allowed_roots FROM daemon_runtimes WHERE daemon_instance_id = :di"
                     ),
                     {"di": daemon_instance_id.hex},
                 )

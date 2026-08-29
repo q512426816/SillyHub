@@ -5824,6 +5824,13 @@ export class Daemon {
         // SessionManager 据此设 SDK systemPrompt preset+append（保留 claude 默认能力 +
         // 追加档案提示词）。undefined → 不注入（行为同今天，零回归）。
         systemPrompt: execPayload.systemPrompt,
+        // task-04（2026-08-29-batch-session-inherit / D-001@v1）：resume 目标会话 id
+        // 透传 SessionManager.create（CreateSessionInput.resume）。取 execPayload
+        // .resumeSessionId（上方归一化区既有：resumeSessionId ?? resume_session_id，
+        // 不新建第二套）。SessionManager.create 内 spec.resume → driverOpts.resume
+        // 转发归 task-05。undefined（旧 backend 无该键）→ 键不生效，走全新会话
+        // 原路径（零回归）。
+        resume: execPayload.resumeSessionId,
         // 2026-08-06-public-mcp-server verify 修复（read_only 物制 / G3 / D-005@v2）：
         // worker 全走 kind=interactive（placement.py D-002@v3），原 interactive 路径在
         // _runLeaseStateMachine 对 kind=interactive 提前 return（daemon.ts:3582）跳过 ctx
