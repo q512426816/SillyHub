@@ -16,12 +16,14 @@ import hashlib
 import io
 import json
 import os
+import queue
 import shutil
 import tarfile
 import tempfile
+import threading
 import time
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
 
@@ -76,6 +78,114 @@ SERVER_EXCLUDED_FILENAMES = frozenset({"local.yaml"})
 # server}`` 由 build_bundle 内存生成（不落 spec_root 磁盘，镜像树/manifest 零污染），
 # 用户/CLI 离线可辨快照新旧。
 BUNDLE_METADATA_MEMBER = "PLATFORM-BUNDLE.json"
+
+# 审计修复 P1-性能④（2026-08-29）：bundle 流式产出的分块/背压/回收参数。
+# 有界队列上限 × 分块大小 = 驻留内存上限（≈2MB），与 spec 树大小无关；
+# 取消检查在写线程每次分片入队前，消费端排空队列后必然到达。
+_BUNDLE_CHUNK_BYTES = 64 * 1024
+_BUNDLE_QUEUE_MAX_CHUNKS = 32
+_BUNDLE_CANCEL_JOIN_S = 5.0
+
+
+class _TarStreamCancelled(Exception):
+    """内部：消费端提前关闭 bundle 流——写线程据此退出（非错误）。"""
+
+
+class _QueueBackedTarWriter:
+    """tarfile 流式写适配器：write 分片入有界队列（分片即消费端 chunk）。
+
+    有界队列即背压：消费端落后时写线程阻塞在 ``put``——整包不再驻留内存
+    （审计 P1-性能④：旧实现整树攒 BytesIO，万级文件≈100MB 峰值×并发数）。
+    """
+
+    __slots__ = ("_cancelled", "_queue")
+
+    def __init__(self, q: "queue.Queue[bytes]", cancelled: threading.Event) -> None:
+        self._queue = q
+        self._cancelled = cancelled
+
+    def write(self, data: bytes) -> int:
+        view = memoryview(data)
+        for i in range(0, len(view), _BUNDLE_CHUNK_BYTES):
+            if self._cancelled.is_set():
+                raise _TarStreamCancelled
+            self._queue.put(bytes(view[i : i + _BUNDLE_CHUNK_BYTES]))
+        return len(data)
+
+    def flush(self) -> None:  # tarfile 流式模式可能调用；无操作
+        pass
+
+
+class _BundleTarStream:
+    """同步分块迭代器：后台线程打包（tarfile ``w|``），队列传 chunk。
+
+    消费协议（队列元素）：``bytes``=数据块；``None``=正常结束；
+    ``BaseException``=打包线程异常透传（HTTP 层转 500 由框架处理）。
+    ``close()``（客户端断连/消费端放弃）置取消标志并排空队列，解除写线程
+    的 ``put`` 阻塞后限时 join 回收；幂等，``__del__`` 兜底。
+    """
+
+    def __init__(self, produce: "Callable[[_QueueBackedTarWriter], None]") -> None:
+        self._queue: "queue.Queue[bytes | BaseException | None]" = queue.Queue(
+            maxsize=_BUNDLE_QUEUE_MAX_CHUNKS
+        )
+        self._cancelled = threading.Event()
+        self._done = threading.Event()
+        self._closed = False
+        self._started = False
+        self._thread = threading.Thread(
+            target=self._run, args=(produce,), daemon=True, name="spec-bundle-tar"
+        )
+
+    def _run(self, produce: "Callable[[_QueueBackedTarWriter], None]") -> None:
+        outcome: BaseException | None = None
+        try:
+            produce(_QueueBackedTarWriter(self._queue, self._cancelled))
+        except _TarStreamCancelled:
+            outcome = None  # 消费端取消不是错误
+        except BaseException as exc:  # 打包异常透传给消费端
+            outcome = exc
+        finally:
+            self._done.set()
+            if not self._cancelled.is_set():
+                self._queue.put(outcome)
+
+    def __iter__(self) -> "Iterator[bytes]":
+        if not self._started:
+            self._started = True
+            self._thread.start()
+        return self
+
+    def __next__(self) -> bytes:
+        item = self._queue.get()
+        if item is None:
+            self.close()
+            raise StopIteration
+        if isinstance(item, BaseException):
+            self.close()
+            raise item
+        return item
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._cancelled.set()
+        # 排空队列解除写线程的 put 阻塞（取消检查在每次分片入队前，必然到达）
+        while not self._done.is_set() and self._thread.is_alive():
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                time.sleep(0.01)
+        if self._thread.is_alive():
+            self._thread.join(timeout=_BUNDLE_CANCEL_JOIN_S)
+
+    def __del__(self) -> None:  # 消费端未显式 close 的兜底（daemon 线程最终回收）
+        try:
+            self.close()
+        except Exception:
+            pass
+
 
 # task-05（2026-08-29-change-delete-closure-and-spec-pull / FR-03b / design §5.3）：
 # quicklog 镜像目录在 spec 树内的固定前缀——apply_ops 的 ops 含此前缀路径才触发
@@ -657,9 +767,10 @@ class SpecWorkspaceService:
         manifest 对账零污染。返回值扩展为 ``(spec_root_abs, spec_version,
         tar_byte_chunks)``——路由侧据此回 ``X-Spec-Version`` 响应头。
 
-        The generator yields the tar in chunks so the caller can feed it
-        directly to ``StreamingResponse`` without buffering the whole tree in
-        memory.
+        审计修复 P1-性能④（2026-08-29）：tar 经 ``_BundleTarStream`` 流式产出
+        （后台线程 ``w|`` 模式打包 + 有界队列背压 + ``close()`` 取消回收）——
+        驻留内存上限 ≈ 队列容量×分块（2MB），与 spec 树大小无关；旧实现整包
+        攒 BytesIO（万级文件≈100MB 峰值×并发拉取数）。
         """
         spec_ws = await self.get(workspace_id)
         spec_root = Path(spec_ws.spec_root)
@@ -672,12 +783,10 @@ class SpecWorkspaceService:
         spec_version = int(spec_ws.spec_version or 0)
         strategy = spec_ws.strategy
 
-        def _stream() -> Iterator[bytes]:
-            buf = io.BytesIO()
-            # ``w|`` is a streaming (non-seekable) tar; we buffer the whole tar
-            # in memory here for simplicity. Spec trees are small (R-02); a
-            # future task can swap to a real chunked pipe if needed.
-            with tarfile.open(fileobj=buf, mode="w") as tar:
+        def _produce(writer: _QueueBackedTarWriter) -> None:
+            # ``w|`` 流式（不可 seek）模式：成员按序写入 writer（有界队列），
+            # 消费端逐块取走——格式仍为默认 PAX（daemon/CLI 侧解析均已支持）。
+            with tarfile.open(fileobj=writer, mode="w|", bufsize=_BUNDLE_CHUNK_BYTES) as tar:
                 # 快照元数据成员（task-08）：generated_at 取打包时刻 UTC ISO；
                 # server 取 hub 对外 origin（多平台实例部署下可辨快照来源）。
                 meta = {
@@ -705,14 +814,8 @@ class SpecWorkspaceService:
                     if str(rel) == BUNDLE_METADATA_MEMBER:
                         continue
                     tar.add(path, arcname=str(rel), recursive=False)
-            buf.seek(0)
-            while True:
-                chunk = buf.read(64 * 1024)
-                if not chunk:
-                    break
-                yield chunk
 
-        return spec_root_abs, spec_version, _stream()
+        return spec_root_abs, spec_version, _BundleTarStream(_produce)
 
     @staticmethod
     def _extract_spec_tar_to_staging(

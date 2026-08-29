@@ -377,3 +377,60 @@ class TestSync:
 
 # Suppress unused-import warning for pytest (used for fixture discovery in some setups).
 pytestmark = pytest.mark.asyncio
+
+
+class TestBundleStreaming:
+    """审计修复 P1-性能④：build_bundle 流式产出（有界内存 + 可取消）。
+
+    旧实现整包攒 BytesIO 后再分块 yield——万级文件 workspace 内存峰值=整树
+    字节，并发拉取成倍。新实现：后台线程打包（tarfile ``w|`` 流式模式）→
+    有界队列背压 → 消费端逐块取；消费端提前关闭（客户端断连）时取消标志
+    解除写线程阻塞并限时回收。
+    """
+
+    async def test_bundle_stream_chunked_and_content_valid(self, db_session, tmp_path) -> None:
+        from app.modules.spec_workspace.service import SpecWorkspaceService
+
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        (spec_root / "docs").mkdir(parents=True)
+        # 256KB 内容 → ≥4×64KB 分块，证流式分块真实发生（小树会整包一块）
+        (spec_root / "docs" / "big.bin").write_bytes(bytes(range(256)) * 1024)
+        (spec_root / "docs" / "A.md").write_text("# A", encoding="utf-8")
+        await _make_spec_workspace(
+            db_session, ws, spec_root, strategy="repo-mirrored", spec_version=7
+        )
+
+        service = SpecWorkspaceService(db_session)
+        _, version, stream = await service.build_bundle(ws.id)
+        assert version == 7
+
+        chunks = list(stream)
+        assert len(chunks) >= 4, "大树必须跨多个 64KB 块（整包缓冲则恒 1 块）"
+        with tarfile.open(fileobj=io.BytesIO(b"".join(chunks)), mode="r:*") as tf:
+            names = tf.getnames()
+        assert "docs/big.bin" in names and "docs/A.md" in names
+        assert "PLATFORM-BUNDLE.json" in names
+        assert stream._cancelled.is_set(), "正常消费完毕后应走 close 清理路径"
+
+    async def test_bundle_stream_cancel_unblocks_writer(self, db_session, tmp_path) -> None:
+        from app.modules.spec_workspace.service import SpecWorkspaceService
+
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        (spec_root / "docs").mkdir(parents=True)
+        (spec_root / "docs" / "big.bin").write_bytes(bytes(range(256)) * 1024)
+        await _make_spec_workspace(db_session, ws, spec_root)
+
+        service = SpecWorkspaceService(db_session)
+        _, _, stream = await service.build_bundle(ws.id)
+        first = next(iter(stream))
+        assert first, "首个分块应立即可用（无需整包打包完成）"
+
+        stream.close()  # 模拟客户端断连：消费端放弃
+        assert stream._cancelled.is_set()
+        thread = stream._thread
+        assert thread is not None
+        thread.join(timeout=5.0)
+        assert not thread.is_alive(), "取消后写线程必须限时退出（取消检查在每次分片入队前）"
+        stream.close()  # 幂等
