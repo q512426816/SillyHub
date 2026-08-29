@@ -33,15 +33,18 @@ from typing import Any
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col, select
 
 from app.core.config import get_settings
 from app.core.security import create_access_token, password_hasher
+from app.modules.agent.model import AgentRun, DaemonBorrowAudit
 from app.modules.auth.model import Role, RolePermission, User, UserWorkspaceRole
 from app.modules.auth.permissions import Permission
 from app.modules.daemon import ws_hub as ws_hub_module
 from app.modules.daemon.grants.model import DaemonRuntimeGrant
-from app.modules.daemon.model import DaemonInstance, DaemonRuntime
+from app.modules.daemon.model import DaemonInstance, DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.ws_hub import DaemonWsHub
+from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
 from app.modules.workspace.model import Workspace
 
 # ── helpers（私有复刻 test_runtime_admin_management.py 同款风格）─────────────
@@ -893,6 +896,233 @@ async def test_machine_cleanup_nonexistent_returns_404(
         headers=_headers(_token_for(admin)),
     )
     assert resp.status_code == 404, resp.text
+
+
+# ── DELETE /machines/{instance_id}（ql-20260829-006-6a9e 机器级删除）────────────
+
+
+async def _create_stale_machine(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    hostname: str,
+    status: str = "offline",
+) -> DaemonInstance:
+    """离线且心跳过期（>45s stale 窗口）的机器——delete_machine 可删除态。"""
+    return await _create_instance(
+        session,
+        user_id,
+        hostname=hostname,
+        status=status,
+        last_heartbeat_at=datetime.now(UTC) - timedelta(minutes=10),
+    )
+
+
+@pytest.mark.asyncio
+async def test_delete_machine_success_removes_instance(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """删除主路径：离线 + 无引用 → 204 + instance 行消失（级联清 runtimes 为 PG
+    生产 FK 保证，SQLite 测试库不启用 FK PRAGMA 不断言）。"""
+    admin, user_a, _ = await _bootstrap(db_session)
+    inst = await _create_stale_machine(db_session, user_a.id, hostname="del-host")
+    inst_id = inst.id
+    # 带 1 个 runtime 的真实机器形态（删除不因有 runtime 而受影响）。
+    await _create_runtime(db_session, user_a.id, daemon_instance_id=inst.id, status="offline")
+
+    resp = await client.delete(
+        f"/api/daemon/machines/{inst_id}", headers=_headers(_token_for(admin))
+    )
+    assert resp.status_code == 204, resp.text
+    # db_session 与 router session 不同对象：expire_all 驱逐 identity-map 缓存，
+    # 让 get 走 DB 真查（否则返回创建时缓存的 Python 对象，删了也读得到）；
+    # id 须在 expire 前捕获（行已删，事后访问 inst.id 会触发刷新抛 ObjectDeletedError）。
+    db_session.expire_all()
+    refreshed = await db_session.get(DaemonInstance, inst_id)
+    assert refreshed is None
+    # 级联清 runtimes 为 PG 生产 FK 保证（ondelete=CASCADE），SQLite 测试库
+    # 不启用 FK PRAGMA，不断言 runtime 行删除。
+
+
+@pytest.mark.asyncio
+async def test_delete_machine_fresh_heartbeat_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """心跳守卫：``last_heartbeat_at`` 在 45s 窗口内 → 409（即使 status 已被标
+    offline，心跳新鲜即 daemon 还在跑；删了会产生僵尸心跳）。"""
+    admin, user_a, _ = await _bootstrap(db_session)
+    # status=online + 心跳 now：典型在线机器
+    inst_on = await _create_instance(db_session, user_a.id, hostname="hb-on-host")
+    # status=offline 但心跳刚到（sweeper 尚未收敛的边缘态）：仍按心跳真值拦
+    inst_off = await _create_instance(
+        db_session, user_a.id, hostname="hb-off-host", status="offline"
+    )
+
+    for inst in (inst_on, inst_off):
+        resp = await client.delete(
+            f"/api/daemon/machines/{inst.id}", headers=_headers(_token_for(admin))
+        )
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["code"] == "HTTP_409_DAEMON_MACHINE_IN_USE"
+        assert body["details"]["guard"] == "heartbeat_fresh"
+
+
+@pytest.mark.asyncio
+async def test_delete_machine_cross_owner_returns_404(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """越权 → 404（_get_owned_instance，与 PATCH/self-update/cleanup 同语义）。"""
+    _admin, user_a, user_b = await _bootstrap(db_session)
+    inst = await _create_stale_machine(db_session, user_b.id, hostname="victim-del-host")
+
+    resp = await client.delete(
+        f"/api/daemon/machines/{inst.id}", headers=_headers(_token_for(user_a))
+    )
+    assert resp.status_code == 404, resp.text
+    assert resp.json()["code"] == "HTTP_404_DAEMON_RUNTIME_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_delete_machine_nonexistent_returns_404(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """不存在 instance_id → 404。"""
+    admin, _u_a, _u_b = await _bootstrap(db_session)
+
+    resp = await client.delete(
+        f"/api/daemon/machines/{uuid.uuid4()}", headers=_headers(_token_for(admin))
+    )
+    assert resp.status_code == 404, resp.text
+
+
+@pytest.mark.asyncio
+async def test_delete_machine_workspace_binding_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """RESTRICT 守卫 ①：workspace_member_runtimes 绑定（daemon_id 直绑或旧
+    runtime_id 列）→ 409，提示先解绑。"""
+    admin, user_a, _ = await _bootstrap(db_session)
+    inst = await _create_stale_machine(db_session, user_a.id, hostname="wmr-host")
+    rt = await _create_runtime(db_session, user_a.id, daemon_instance_id=inst.id, status="offline")
+    ws = await _create_workspace(db_session)
+
+    # daemon_id 直绑（现行链路）
+    db_session.add(
+        WorkspaceMemberRuntime(
+            workspace_id=ws.id,
+            user_id=user_a.id,
+            daemon_id=inst.id,
+            shared=False,
+            root_path="/tmp/wmr-daemon",
+            path_source="daemon_client",
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.delete(
+        f"/api/daemon/machines/{inst.id}", headers=_headers(_token_for(admin))
+    )
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["code"] == "HTTP_409_DAEMON_MACHINE_IN_USE"
+    assert body["details"]["workspace_bindings"] == 1
+
+    # 解绑 daemon_id 后改用旧 runtime_id 列遗留绑定 → 同样拦截
+    wmr = (
+        await db_session.execute(
+            select(WorkspaceMemberRuntime).where(
+                col(WorkspaceMemberRuntime.workspace_id) == ws.id,
+                col(WorkspaceMemberRuntime.user_id) == user_a.id,
+            )
+        )
+    ).scalar_one()
+    wmr.daemon_id = None
+    wmr.runtime_id = rt.id
+    await db_session.commit()
+
+    resp2 = await client.delete(
+        f"/api/daemon/machines/{inst.id}", headers=_headers(_token_for(admin))
+    )
+    assert resp2.status_code == 409, resp2.text
+    assert resp2.json()["details"]["workspace_bindings"] == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_machine_grant_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """RESTRICT 守卫 ②：daemon_runtime_grants 行存在（含停用行）→ 409。"""
+    admin, user_a, _ = await _bootstrap(db_session)
+    inst = await _create_stale_machine(db_session, user_a.id, hostname="grant-host")
+    ws = await _create_workspace(db_session)
+    await _create_grant(
+        db_session,
+        daemon_id=inst.id,
+        granted_by=user_a.id,
+        grantee_id=ws.id,
+        enabled=False,  # 停用行同样拦截：行即共享事实，RESTRICT 不区分 enabled
+    )
+
+    resp = await client.delete(
+        f"/api/daemon/machines/{inst.id}", headers=_headers(_token_for(admin))
+    )
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["code"] == "HTTP_409_DAEMON_MACHINE_IN_USE"
+    assert body["details"]["grant_rows"] == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_machine_borrow_audit_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """RESTRICT 守卫 ③：daemon_borrow_audit 审计红线 → 409（无解绑路径，不可删）。"""
+    admin, user_a, user_b = await _bootstrap(db_session)
+    inst = await _create_stale_machine(db_session, user_a.id, hostname="audit-host")
+    ws = await _create_workspace(db_session)
+    run = AgentRun(agent_type="claude_code", status="completed")
+    db_session.add(run)
+    await db_session.flush()
+    db_session.add(
+        DaemonBorrowAudit(
+            borrower_user_id=user_b.id,
+            lender_user_id=user_a.id,
+            daemon_instance_id=inst.id,
+            workspace_id=ws.id,
+            agent_run_id=run.id,
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.delete(
+        f"/api/daemon/machines/{inst.id}", headers=_headers(_token_for(admin))
+    )
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["code"] == "HTTP_409_DAEMON_MACHINE_IN_USE"
+    assert body["details"]["borrow_audit_rows"] == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_machine_inflight_lease_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """in-flight 守卫：本机 runtime 名下 pending/claimed lease → 409（对齐
+    delete_runtime 的 D-003@v1 语义，机器级聚合本机全部 runtimes）。"""
+    admin, user_a, _ = await _bootstrap(db_session)
+    inst = await _create_stale_machine(db_session, user_a.id, hostname="lease-host")
+    rt = await _create_runtime(db_session, user_a.id, daemon_instance_id=inst.id, status="offline")
+    db_session.add(DaemonTaskLease(id=uuid.uuid4(), runtime_id=rt.id, status="claimed"))
+    await db_session.commit()
+
+    resp = await client.delete(
+        f"/api/daemon/machines/{inst.id}", headers=_headers(_token_for(admin))
+    )
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["code"] == "HTTP_409_DAEMON_MACHINE_IN_USE"
+    assert body["details"]["inflight_leases"] == 1
 
 
 # ── shared_to_me 共享区块（2026-08-28-daemon-agent-share task-07 / design §5 Phase 2.2）──

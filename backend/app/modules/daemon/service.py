@@ -400,6 +400,22 @@ class DaemonService:
             runtime_id, user_id, is_platform_admin=is_platform_admin
         )
 
+    async def delete_machine(
+        self,
+        instance_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        is_platform_admin: bool = False,
+    ) -> None:
+        """DELETE /machines/{id} facade（ql-20260829-006-6a9e）。
+
+        委托 RuntimeService.delete_machine（归属 404 / 心跳新鲜 409 / RESTRICT
+        引用 409 / in-flight 409 / 物理删级联），守卫链细节见被委托方 docstring。
+        """
+        return await self._rt.delete_machine(
+            instance_id, user_id, is_platform_admin=is_platform_admin
+        )
+
     async def enable_runtime(
         self,
         runtime_id: uuid.UUID,

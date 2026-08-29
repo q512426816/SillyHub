@@ -38,6 +38,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import {
+  deleteDaemonMachine,
   deleteDaemonRuntime,
   disableDaemonRuntime,
   enableDaemonRuntime,
@@ -655,6 +656,54 @@ export default function RuntimesPage() {
     [modal, notify],
   );
 
+  // ql-20260829-006-6a9e：删除机器条目（机器级物理删除，级联清该机全部
+  // runtimes 及其会话/任务记录）。按钮仅离线机器可点（MachineCard disabled），
+  // 但后端守卫为准（心跳 45s 内 409 / 工作区绑定 409 / 共享授权 409 /
+  // 借用审计红线 409 / in-flight 409），失败 toast 透传后端中文文案。
+  // 对齐 handleDeleteRuntime 模式：modal.confirm 二次确认 + cache 就地移除 +
+  // sessions 过滤 + 悬浮抽屉锁定态清理。
+  const handleDeleteMachine = useCallback(
+    (machine: DaemonMachineRead) => {
+      modal.confirm({
+        title: "删除机器",
+        content: `确定删除机器「${machine.display_alias ?? machine.hostname}」？将同时清除该机器下 ${machine.runtime_count} 个运行时及其全部会话与任务记录，且不可恢复。若之后该机器上的守护进程重新启动，会自动重新注册。`,
+        okText: "删除",
+        okType: "danger",
+        cancelText: "取消",
+        onOk: async () => {
+          try {
+            await deleteDaemonMachine(machine.id);
+            // machines cache 就地移除该机器（嵌套 runtimes 随之消失）。
+            queryClient.setQueryData<MachinesCache>(
+              queryKeys.daemonMachines.list(listParams),
+              (old) => {
+                if (!old) return old;
+                return {
+                  ...old,
+                  items: old.items.filter((m) => m.id !== machine.id),
+                };
+              },
+            );
+            // 本机会话侧栏同步过滤：清掉该机全部 runtimes 名下的会话。
+            const runtimeIds = new Set(machine.runtimes.map((r) => r.id));
+            patchSessions((prev) =>
+              prev.filter((s) => s.runtime_id === null || !runtimeIds.has(s.runtime_id)),
+            );
+            // 悬浮抽屉若锁定在该机某 runtime 上，清锁定态（对齐 runtime 删除）。
+            const locked = useFloatingSessionStore.getState().lockedRuntime;
+            if (locked && runtimeIds.has(locked.id)) {
+              useFloatingSessionStore.getState().closeRuntimeLock();
+            }
+            notify.success("机器已删除");
+          } catch (err) {
+            notify.error(err, "删除机器失败");
+          }
+        },
+      });
+    },
+    [listParams, modal, notify, patchSessions, queryClient],
+  );
+
   // ql-012 / task-06 / FR-03 / D-003@v1 / D-007@v1：移除运行时（物理删除，级联清会话/lease）。
   // 二次确认改 antd Modal.confirm（走主题 + destructive 红按钮），替代浏览器原生 window.confirm。
   // 失败走 notify.error toast（409 后端中文 / network 中文兜底），成功补 notify.success。
@@ -1144,6 +1193,7 @@ export default function RuntimesPage() {
                       onEditAlias={handleOpenAlias}
                       onUpgrade={handleUpgrade}
                       onCleanup={handleCleanup}
+                      onDeleteMachine={handleDeleteMachine}
                       onRuntimeToggle={handleToggleRuntime}
                       onRuntimeOpenSession={handleOpenSession}
                       onRuntimeDelete={handleDeleteRuntime}

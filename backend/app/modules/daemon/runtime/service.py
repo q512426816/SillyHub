@@ -67,6 +67,19 @@ class DaemonRuntimeInUse(AppError):
     http_status = 409
 
 
+class DaemonMachineInUse(AppError):
+    """机器级删除守卫命中：daemon 在跑 / 被工作区绑定 / 有共享授权 / 借用审计红线 / in-flight。
+
+    ql-20260829-006-6a9e：DELETE /machines/{id} 的应用层前置检查族（心跳新鲜度 +
+    三张 RESTRICT FK 表 + in-flight lease/change_write）。命中任一 → 409 中文可操作
+    文案，避免 FK IntegrityError 500 与「删在线机器产生僵尸心跳」（daemon 仅对
+    401/403 心跳失败重注册，404 只会无限重试）。
+    """
+
+    code = "HTTP_409_DAEMON_MACHINE_IN_USE"
+    http_status = 409
+
+
 class DaemonRuntimeOffline(AppError):
     """Target daemon runtime has no active WS connection (R-01)."""
 
@@ -859,6 +872,163 @@ class RuntimeService:
         # ``session.delete(runtime)`` + ``commit()``（CASCADE 自动清理 bound 行）。
         await self._session.delete(runtime)
         await self._session.commit()
+
+    async def delete_machine(
+        self,
+        instance_id: uuid.UUID,
+        user_id: uuid.UUID,
+        *,
+        is_platform_admin: bool = False,
+        max_age_seconds: int = DEFAULT_RUNTIME_STALE_SECONDS,
+    ) -> None:
+        """物理删除归属机器（daemon_instance 级，ql-20260829-006-6a9e）。
+
+        守卫链（对齐 delete_runtime 并上提机器级，逐条 409 DaemonMachineInUse）：
+
+        1. 归属校验：``_get_owned_instance``（越权/不存在合并 404）。
+        2. 心跳守卫：``last_heartbeat_at`` 在 stale 窗口（默认 45s）内 → 拒绝。
+           daemon 心跳 404 不触发重注册（仅 401/403 会，daemon.ts
+           _sendHeartbeatOnce），删在跑机器 = 僵尸心跳循环；须先停止 daemon。
+        3. RESTRICT 引用守卫（应用层前置，否则 FK IntegrityError 500）：
+           - workspace_member_runtimes（daemon_id 直绑或旧 runtime_id 列遗留）
+             → 提示先在工作区解绑；
+           - daemon_runtime_grants（含 enabled=False 行——行即共享事实，RESTRICT
+             不区分）→ 提示先撤销/删除共享授权；
+           - daemon_borrow_audit（审计红线，无解绑路径）→ 如实告知不可删。
+        4. in-flight 守卫：本机 runtimes 名下 pending/claimed 的
+           daemon_task_leases / daemon_change_writes → 拒绝（避免 in-flight
+           工作 CASCADE 静默丢失，同 delete_runtime D-003@v1）。
+        5. 物理 DELETE：CASCADE 收敛 runtimes → sessions / leases /
+           change_writes / control_commands / audit_log，scan_docs.runtime_id
+           SET NULL；commit 包 IntegrityError 兜底转 409（未来新增 RESTRICT
+           FK 不退化成 500）。
+        """
+        from sqlalchemy.exc import IntegrityError
+
+        from app.modules.agent.model import DaemonBorrowAudit
+        from app.modules.daemon.grants.model import DaemonRuntimeGrant
+        from app.modules.daemon.model import DaemonChangeWrite, DaemonTaskLease
+        from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
+
+        instance = await self._get_owned_instance(
+            instance_id, user_id, is_platform_admin=is_platform_admin
+        )
+        if self._is_recent_heartbeat(instance.last_heartbeat_at, max_age_seconds):
+            raise DaemonMachineInUse(
+                "该机器守护进程仍在心跳上报，请先停止该机器上的 daemon，待其离线后再删除。",
+                details={
+                    "daemon_instance_id": str(instance_id),
+                    "guard": "heartbeat_fresh",
+                },
+            )
+
+        # 本机 runtime id 集：工作区旧列 runtime_id 与 in-flight 检查共用。
+        runtime_ids = list(
+            (
+                await self._session.execute(
+                    select(DaemonRuntime.id).where(
+                        col(DaemonRuntime.daemon_instance_id) == instance_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        bound_workspaces = (
+            await self._session.execute(
+                select(func.count())
+                .select_from(WorkspaceMemberRuntime)
+                .where(
+                    or_(
+                        col(WorkspaceMemberRuntime.daemon_id) == instance_id,
+                        col(WorkspaceMemberRuntime.runtime_id).in_(runtime_ids),
+                    )
+                )
+            )
+        ).scalar_one()
+        if bound_workspaces:
+            raise DaemonMachineInUse(
+                f"该机器仍绑定在 {bound_workspaces} 个工作区，请先在工作区成员守护进程设置中解绑后再删除。",
+                details={
+                    "daemon_instance_id": str(instance_id),
+                    "workspace_bindings": bound_workspaces,
+                },
+            )
+
+        grant_rows = (
+            await self._session.execute(
+                select(func.count())
+                .select_from(DaemonRuntimeGrant)
+                .where(col(DaemonRuntimeGrant.daemon_instance_id) == instance_id)
+            )
+        ).scalar_one()
+        if grant_rows:
+            raise DaemonMachineInUse(
+                f"该机器存在 {grant_rows} 条共享授权记录，请先在共享管理中撤销后再删除。",
+                details={
+                    "daemon_instance_id": str(instance_id),
+                    "grant_rows": grant_rows,
+                },
+            )
+
+        borrow_audit_rows = (
+            await self._session.execute(
+                select(func.count())
+                .select_from(DaemonBorrowAudit)
+                .where(col(DaemonBorrowAudit.daemon_instance_id) == instance_id)
+            )
+        ).scalar_one()
+        if borrow_audit_rows:
+            raise DaemonMachineInUse(
+                f"该机器存在 {borrow_audit_rows} 条借用审计记录（审计红线，须保留完整审计链），不可删除。",
+                details={
+                    "daemon_instance_id": str(instance_id),
+                    "borrow_audit_rows": borrow_audit_rows,
+                },
+            )
+
+        inflight_leases = (
+            await self._session.execute(
+                select(func.count())
+                .select_from(DaemonTaskLease)
+                .where(
+                    col(DaemonTaskLease.runtime_id).in_(runtime_ids),
+                    col(DaemonTaskLease.status).in_(["pending", "claimed"]),
+                )
+            )
+        ).scalar_one()
+        inflight_writes = (
+            await self._session.execute(
+                select(func.count())
+                .select_from(DaemonChangeWrite)
+                .where(
+                    col(DaemonChangeWrite.runtime_id).in_(runtime_ids),
+                    col(DaemonChangeWrite.status).in_(["pending", "claimed"]),
+                )
+            )
+        ).scalar_one()
+        if inflight_leases or inflight_writes:
+            raise DaemonMachineInUse(
+                f"该机器仍有 {inflight_leases + inflight_writes} 个进行中的任务/写回"
+                f"（lease {inflight_leases} + change_write {inflight_writes}），"
+                "请等待完成或取消后再删除",
+                details={
+                    "daemon_instance_id": str(instance_id),
+                    "inflight_leases": inflight_leases,
+                    "inflight_change_writes": inflight_writes,
+                },
+            )
+
+        try:
+            await self._session.delete(instance)
+            await self._session.commit()
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise DaemonMachineInUse(
+                "该机器仍被其他数据引用，无法删除，请检查是否有未解除的绑定关系。",
+                details={"daemon_instance_id": str(instance_id)},
+            ) from exc
 
     async def enable_runtime(
         self,

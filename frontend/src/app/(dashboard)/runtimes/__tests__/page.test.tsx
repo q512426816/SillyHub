@@ -16,7 +16,7 @@
  *   3. 离线 machine 升级按钮 disabled（AC-04）
  */
 
-import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
+import { act, render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App as AntApp } from "antd";
@@ -62,6 +62,7 @@ const daemon = vi.hoisted(() => {
     listAgentSessions: vi.fn(),
     deleteAgentSession: vi.fn(),
     deleteDaemonRuntime: vi.fn(),
+    deleteDaemonMachine: vi.fn(),
     getAgentSessionLogs: vi.fn(),
     getAgentSession: vi.fn(),
     reopenSession: vi.fn(),
@@ -88,6 +89,7 @@ vi.mock("@/lib/daemon", async () => {
     listAgentSessions: daemon.listAgentSessions,
     deleteAgentSession: daemon.deleteAgentSession,
     deleteDaemonRuntime: daemon.deleteDaemonRuntime,
+    deleteDaemonMachine: daemon.deleteDaemonMachine,
     getAgentSessionLogs: daemon.getAgentSessionLogs,
     getAgentSession: daemon.getAgentSession,
     reopenSession: daemon.reopenSession,
@@ -204,6 +206,7 @@ beforeEach(() => {
   daemon.listAgentSessions.mockResolvedValue({ items: [], total: 0, limit: 20, offset: 0 });
   daemon.deleteAgentSession.mockResolvedValue(undefined);
   daemon.deleteDaemonRuntime.mockResolvedValue(undefined);
+  daemon.deleteDaemonMachine.mockResolvedValue(undefined);
   daemon.getAgentSessionLogs.mockResolvedValue([]);
   daemon.reopenSession.mockResolvedValue({ session_id: "stub", status: "reconnecting" });
   daemon.getAgentSession.mockResolvedValue({
@@ -473,6 +476,91 @@ describe("2026-07-04-daemon-version-management task-09: 升级按钮（task-09 �
     await waitFor(() => {
       expect(daemon.triggerMachineSelfUpdate).toHaveBeenCalledWith("m-1");
     });
+  });
+});
+
+describe("ql-20260829-006-6a9e: 机器级删除（离线机器可删，在线 disabled）", () => {
+  /** 定位机器头「删除」按钮（ tagName=BUTTON 过滤折叠头，同 findUpgradeButton 模式）。 */
+  function findMachineDeleteButton(): HTMLElement {
+    const matches = screen.getAllByRole("button", { name: /删\s*除/ });
+    const real = matches.filter((el) => el.tagName === "BUTTON");
+    expect(real.length, "机器头「删除」按钮应恰有 1 个").toBe(1);
+    return real[0] as HTMLElement;
+  }
+
+  it("离线机器点删除 → modal.confirm 二次确认 → 确认后 deleteDaemonMachine(m-1) + 列表移除", async () => {
+    daemon.listDaemonMachines.mockResolvedValue(
+      wrapMachines(
+        [makeRuntime({ id: "rt-del", name: "DelClaude", status: "offline" })],
+        { status: "offline", hostname: "del-host-1" },
+      ),
+    );
+
+    await renderAndWaitForRuntime();
+    fireEvent.click(findMachineDeleteButton());
+
+    // 二次确认弹层（portal 到 body）：标题 + 机器名 + 运行时数提示。
+    const confirmRoot = await waitFor(() => {
+      const el = document.querySelector(".ant-modal-confirm");
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    const confirmTitle = confirmRoot.querySelector(".ant-modal-confirm-title");
+    expect(confirmTitle).toHaveTextContent("删除机器");
+    expect(within(confirmRoot).getByText(/del-host-1/)).toBeInTheDocument();
+    expect(within(confirmRoot).getByText(/1 个运行时/)).toBeInTheDocument();
+
+    fireEvent.click(within(confirmRoot).getByRole("button", { name: /删\s*除/ }));
+
+    await waitFor(() => {
+      expect(daemon.deleteDaemonMachine).toHaveBeenCalledWith("m-1");
+    });
+    // machines cache 就地移除：机器名从列表消失。
+    await waitFor(() => {
+      expect(screen.queryByText("del-host-1")).not.toBeInTheDocument();
+    });
+  });
+
+  it("删除二次确认点「取消」→ deleteDaemonMachine 不被调", async () => {
+    daemon.listDaemonMachines.mockResolvedValue(
+      wrapMachines([makeRuntime({ id: "rt-cancel", status: "offline" })], {
+        status: "offline",
+        hostname: "cancel-host",
+      }),
+    );
+
+    await renderAndWaitForRuntime();
+    fireEvent.click(findMachineDeleteButton());
+
+    const confirmRoot = await waitFor(() => {
+      const el = document.querySelector(".ant-modal-confirm");
+      expect(el).not.toBeNull();
+      return el as HTMLElement;
+    });
+    fireEvent.click(within(confirmRoot).getByRole("button", { name: /取\s*消/ }));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(daemon.deleteDaemonMachine).not.toHaveBeenCalled();
+    expect(screen.getByText("cancel-host")).toBeInTheDocument();
+  });
+
+  it("在线机器删除按钮 disabled（在跑机器不可删，不触发确认弹层）", async () => {
+    daemon.listDaemonMachines.mockResolvedValue(
+      wrapMachines([makeRuntime({ id: "rt-on", status: "online" })], {
+        status: "online",
+        hostname: "online-del-host",
+      }),
+    );
+
+    await renderAndWaitForRuntime();
+    const btn = findMachineDeleteButton();
+    expect(btn).toBeDisabled();
+
+    fireEvent.click(btn);
+    expect(daemon.deleteDaemonMachine).not.toHaveBeenCalled();
+    expect(document.querySelector(".ant-modal-confirm")).toBeNull();
   });
 });
 

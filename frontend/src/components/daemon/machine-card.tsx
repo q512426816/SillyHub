@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Server,
   ServerOff,
+  Trash2,
 } from "lucide-react";
 
 import { RuntimeCard } from "@/components/daemon/runtime-card";
@@ -56,6 +57,8 @@ export interface MachineCardProps {
   onEditAlias: (machine: DaemonMachineRead) => void;
   onUpgrade: (machine: DaemonMachineRead) => void;
   onCleanup: (machine: DaemonMachineRead) => void;
+  /** ql-20260829-006-6a9e：删除机器条目（仅离线机器可触发，page 层 modal.confirm）。 */
+  onDeleteMachine: (machine: DaemonMachineRead) => void;
   onRuntimeToggle: (runtime: DaemonRuntimeRead) => Promise<void>;
   onRuntimeOpenSession: (runtime: DaemonRuntimeRead) => void;
   onRuntimeDelete: (runtime: DaemonRuntimeRead) => void;
@@ -91,6 +94,7 @@ export function MachineCard({
   onEditAlias,
   onUpgrade,
   onCleanup,
+  onDeleteMachine,
   onRuntimeToggle,
   onRuntimeOpenSession,
   onRuntimeDelete,
@@ -113,6 +117,11 @@ export function MachineCard({
   // prototype .btn-outline btn-tiny（机器头别名/升级按钮）。
   const btnOutlineTiny =
     "inline-flex items-center gap-1 rounded border border-slate-300 bg-card px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 disabled:hover:bg-card";
+
+  // 删除按钮（ql-20260829-006-6a9e）：危险红字，同 outline 尺寸；仅离线机器可点
+  // （后端 45s 心跳守卫同语义，在线机器删了也会被下次心跳复活 + 产生僵尸心跳）。
+  const btnDangerTiny =
+    "inline-flex items-center gap-1 rounded border border-slate-300 bg-card px-2.5 py-1 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:opacity-50 disabled:hover:bg-card";
 
   return (
     <section
@@ -249,6 +258,25 @@ export function MachineCard({
           >
             <HardDrive className="h-3.5 w-3.5" />
             清理
+          </button>
+
+          {/* 删除机器按钮（ql-20260829-006-6a9e，online disabled） */}
+          <button
+            type="button"
+            className={btnDangerTiny}
+            disabled={!isOffline}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDeleteMachine(machine);
+            }}
+            title={
+              isOffline
+                ? "删除该机器条目（连带清除其下全部运行时与会话/任务记录）"
+                : "在线机器不可删除，请先停止该机器上的守护进程"
+            }
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            删除
           </button>
 
           {/* chevron（对齐 .chevron，展开 rotate-90） */}

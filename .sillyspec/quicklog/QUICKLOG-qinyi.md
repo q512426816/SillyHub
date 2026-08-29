@@ -470,3 +470,36 @@
 根因：session-permission-panel 的 onerror 忽略 fetch-sse 透传的 status 码，会话已删/凭证失效/无权限也按 [1..30]s 退避无限重试必败请求（审查遗留观察项，用户指定收口）
 方案：新增 PERMANENT_SSE_ERROR_STATUSES={401,403,404}，onerror 改收 ev 参数——命中即置本会话订阅 closed 停重连循环并从 sourcesRef 摘除死连接；无 status（网络中断/流结束）与 5xx 照旧退避（task-09 行为不变）；token 刷新/sessionIds 变化经 effect deps 重建订阅自然重开
 结果：session-panel-connection 13 用例绿（新增 401/404 停连 + 503/无 status 照旧重连两用例），tsc 0 错；daemon.ts subscribeAgentSessionsEvents 同款形态未动（范围仅审批面板）
+
+## ql-20260829-006-6a9e | 2026-08-29 13:30:10 | 运行时管理机器信息删除功能（后端 DELETE /machines 端点 + 前端机器卡删除按钮）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/runtime/service.py（DaemonMachineInUse 错误类 + delete_machine 守卫链与物理删）
+- backend/app/modules/daemon/service.py（delete_machine facade 委托）
+- backend/app/modules/daemon/router.py（DELETE /machines/{instance_id} 204 端点）
+- backend/app/modules/daemon/tests/test_machines_router.py（新增 8 个 DELETE 用例（主路径/心跳409/越权404/不存在404/wmr绑定409双列/grant409/审计红线409/in-flight409））
+- backend/openapi.json（gen:types 再生成（含新 DELETE 端点））
+- frontend/src/lib/daemon.ts（deleteDaemonMachine 封装——本行改动已被并行会话 ql-20260829-007 提交 ce7e08cb 卷入（函数已在 HEAD，本 quick 无重复 diff））
+- frontend/src/lib/api-types.ts（gen:types 再生成）
+- frontend/src/components/daemon/machine-card.tsx（机器头删除按钮（Trash2 红字、仅离线可点）+ onDeleteMachine prop）
+- frontend/src/app/(dashboard)/runtimes/page.tsx（handleDeleteMachine（确认弹层+cache 移除+会话过滤+悬浮锁清理））
+- frontend/src/components/daemon/__tests__/machine-card.test.tsx（删除按钮 disabled/触发两用例 + defaultProps 适配）
+- frontend/src/app/(dashboard)/runtimes/__tests__/page.test.tsx（删除流程三用例（确认删除/取消/在线 disabled）+ mock 适配）
+需求：运行时管理机器信息删除功能（后端 DELETE /machines 端点 + 前端机器卡删除按钮）
+根因：无现成删除路径——/machines 只有 GET/PATCH/self-update/cleanup 四端点，废弃机器条目永久残留列表；且不能简单照搬 runtime 删除语义——daemon 心跳 404 不触发重注册（仅 401/403 会），删在跑机器会产生僵尸心跳，且三张 RESTRICT 外键表（工作区绑定/共享授权/借用审计红线）不前置检查会 FK 500
+方案：后端 RuntimeService.delete_machine 守卫链（归属 404 → 心跳 45s 新鲜 409 → wmr 绑定/grants/borrow_audit 三张 RESTRICT 表前置 409 → in-flight lease+change_write 409 → 物理删 + IntegrityError 兜底 409，新错误类 DaemonMachineInUse），facade + DELETE /api/daemon/machines/{id}（204，RuntimeAdminUser）；前端 daemon.ts deleteDaemonMachine + MachineCard 机器头删除按钮（红字、仅离线可点）+ page.tsx handleDeleteMachine（modal.confirm 二次确认 → machines cache 就地移除 → 本机会话过滤 → 悬浮锁清理）
+结果：后端 test_machines_router 45 passed（新增 8 用例）+ test_runtime_admin_management 11 回归绿 + ruff/mypy 0 错；前端 machine-card+page 28 passed（新增 5 用例）+ page.test/page-usage 26 回归绿 + tsc 0 错 + eslint 0 错误；gen:types 已跑（openapi.json+api-types.ts 同步新端点）；模块文档 daemon.md/daemon.changelog/frontend_components 已更新暂存
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/__tests__/machine-card.test.tsx
+
+## ql-20260829-007-3ec0 | 2026-08-29 13:39:56 | 终态会话 SSE 无限重连循环修复（streamSession 补 done 监听）
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/daemon.ts（streamSession 补 done 命名事件监听置 closed）
+- frontend/src/lib/__tests__/daemon-session-stream-done.test.ts（3 回归用例新增）
+需求：终态会话 SSE 无限重连循环修复（streamSession 补 done 监听）
+根因：backend 对 ended/failed 会话连上即发命名事件 done 并关流，fetch-sse 命名事件只走 addEventListener 而 streamSession 从未注册监听 → 关流触发 onerror 无限重连（预存缺陷被 task-09 横幅显性化）
+方案：streamSession 注册 addEventListener(done) 置 closed+close 与 session_ended 同语义收口；event: error 保持重连路径
+结果：3 新回归用例+27 相关回归+tsc 0 错全绿；本地前端已重建部署；commit ce7e08cb
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：frontend/src/components/daemon/__tests__/machine-card.test.tsx

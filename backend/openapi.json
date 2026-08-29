@@ -11423,6 +11423,41 @@
             }
           }
         }
+      },
+      "delete": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Delete Machine",
+        "description": "删除机器条目（daemon_instance 级物理删除，ql-20260829-006-6a9e）。\n\n守卫链在 service ``delete_machine``：归属 404 / 心跳新鲜 409（daemon 在跑时\n删除会产生僵尸心跳，须先停止）/ 工作区绑定与共享授权 409（RESTRICT 前置）/\n借用审计红线 409 / in-flight lease+change_write 409。通过后物理删，CASCADE\n清该机全部 runtimes 及其会话/任务记录；daemon 之后重新启动会以同一\ndaemon_local_id 重建（与 runtime 级删除同款复活语义）。",
+        "operationId": "delete_machine_api_daemon_machines__instance_id__delete",
+        "parameters": [
+          {
+            "name": "instance_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instance Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/daemon/machines/{instance_id}/self-update": {
@@ -12911,7 +12946,7 @@
           "daemon"
         ],
         "summary": "Submit Session Permission Request",
-        "description": "Daemon HTTP uplink for a canUseTool / dialog permission request (task-07).\n\ndaemon ``sendToHub`` 遇 WS 不通时经 ``hubClient.submitPermissionRequest``\n改走本端点创建待审记录——人审挂起等待而非直接 deny。Auth:\n``get_current_principal`` 接受 daemon ``X-API-Key``（长期凭证）；\n``X-Claim-Token`` 由 service 按会话 lease 的 claim 语义条件校验。\n\n幂等性（dialog）：request_id 唯一约束 upsert，daemon 重放不 fork 第二张\npending 卡（与 WS 上行同一持久化路径）；plain approval 的重复 request_id\n替换既有 timer。",
+        "description": "Daemon HTTP uplink for a canUseTool / dialog permission request (task-07).\n\ndaemon ``sendToHub`` 遇 WS 不通时经 ``hubClient.submitPermissionRequest``\n改走本端点创建待审记录——人审挂起等待而非直接 deny。Auth:\n``get_current_principal`` 接受 daemon ``X-API-Key``（长期凭证），service\n侧先校验 principal own 会话所挂 runtime（不符/不存在同语义 404，\nql-20260829-004）；``X-Claim-Token`` 由 service 按会话 lease 的 claim\n语义条件校验。\n\n幂等性（dialog）：request_id 唯一约束 upsert，daemon 重放不 fork 第二张\npending 卡（与 WS 上行同一持久化路径）；plain approval 的重复 request_id\n替换既有 timer。",
         "operationId": "submit_session_permission_request_api_daemon_sessions__session_id__permission_requests_post",
         "parameters": [
           {

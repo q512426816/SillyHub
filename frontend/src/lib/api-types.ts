@@ -4093,7 +4093,17 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Machine
+         * @description 删除机器条目（daemon_instance 级物理删除，ql-20260829-006-6a9e）。
+         *
+         *     守卫链在 service ``delete_machine``：归属 404 / 心跳新鲜 409（daemon 在跑时
+         *     删除会产生僵尸心跳，须先停止）/ 工作区绑定与共享授权 409（RESTRICT 前置）/
+         *     借用审计红线 409 / in-flight lease+change_write 409。通过后物理删，CASCADE
+         *     清该机全部 runtimes 及其会话/任务记录；daemon 之后重新启动会以同一
+         *     daemon_local_id 重建（与 runtime 级删除同款复活语义）。
+         */
+        delete: operations["delete_machine_api_daemon_machines__instance_id__delete"];
         options?: never;
         head?: never;
         /**
@@ -4804,8 +4814,10 @@ export interface paths {
          *
          *     daemon ``sendToHub`` 遇 WS 不通时经 ``hubClient.submitPermissionRequest``
          *     改走本端点创建待审记录——人审挂起等待而非直接 deny。Auth:
-         *     ``get_current_principal`` 接受 daemon ``X-API-Key``（长期凭证）；
-         *     ``X-Claim-Token`` 由 service 按会话 lease 的 claim 语义条件校验。
+         *     ``get_current_principal`` 接受 daemon ``X-API-Key``（长期凭证），service
+         *     侧先校验 principal own 会话所挂 runtime（不符/不存在同语义 404，
+         *     ql-20260829-004）；``X-Claim-Token`` 由 service 按会话 lease 的 claim
+         *     语义条件校验。
          *
          *     幂等性（dialog）：request_id 唯一约束 upsert，daemon 重放不 fork 第二张
          *     pending 卡（与 WS 上行同一持久化路径）；plain approval 的重复 request_id
@@ -28483,6 +28495,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DaemonMachineListResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_machine_api_daemon_machines__instance_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

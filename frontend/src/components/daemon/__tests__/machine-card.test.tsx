@@ -10,6 +10,8 @@
  *   6. 0-runtime 机器（runtimes=[]）展开体显空态文案「该机器暂无运行时」。
  *   7. 离线机器（status=offline）升级按钮 disabled，点击不触发 onUpgrade。
  *   8. 清理按钮同款：离线 disabled 不触发 onCleanup；在线点击触发 onCleanup。
+ *   9. 删除按钮（ql-20260829-006-6a9e）反向可用性：在线 disabled 不触发
+ *      onDeleteMachine；离线可点触发 onDeleteMachine（与升级/清理互补）。
  *
  * 模式：照搬 page.test.tsx 的 QueryClientProvider 包裹（MachineCard 透传 RuntimeCard，
  * RuntimeCard 用 RuntimeUsageLineChart 走 dynamic import 链，包 QueryClientProvider 稳妥）。
@@ -111,6 +113,7 @@ function defaultProps(
     onEditAlias: vi.fn(),
     onUpgrade: vi.fn(),
     onCleanup: vi.fn(),
+    onDeleteMachine: vi.fn(),
     onRuntimeToggle: vi.fn(),
     onRuntimeOpenSession: vi.fn(),
     onRuntimeDelete: vi.fn(),
@@ -265,5 +268,25 @@ describe("MachineCard（task-08 / FR-4）", () => {
     expect(cleanupBtn).not.toBeDisabled();
     fireEvent.click(cleanupBtn);
     expect(onCleanup).toHaveBeenCalledWith(machine);
+  });
+
+  it("在线机器删除按钮 disabled，点击不触发 onDeleteMachine（在跑机器不可删）", () => {
+    const onDeleteMachine = vi.fn();
+    const machine = makeMachine({ status: "online" });
+    renderCard(<MachineCard {...defaultProps(machine, { onDeleteMachine })} />);
+    const deleteBtn = findNativeButtonByName(/删除/);
+    expect(deleteBtn).toBeDisabled();
+    fireEvent.click(deleteBtn);
+    expect(onDeleteMachine).not.toHaveBeenCalled();
+  });
+
+  it("离线机器点删除按钮 → onDeleteMachine 被调（stopPropagation 不冒泡折叠头）", () => {
+    const onDeleteMachine = vi.fn();
+    const machine = makeMachine({ status: "offline" });
+    renderCard(<MachineCard {...defaultProps(machine, { onDeleteMachine })} />);
+    const deleteBtn = findNativeButtonByName(/删除/);
+    expect(deleteBtn).not.toBeDisabled();
+    fireEvent.click(deleteBtn);
+    expect(onDeleteMachine).toHaveBeenCalledWith(machine);
   });
 });

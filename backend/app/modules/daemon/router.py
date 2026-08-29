@@ -933,6 +933,27 @@ async def trigger_machine_cleanup(
     return {"sent": True}
 
 
+@router.delete(
+    "/machines/{instance_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_machine(
+    instance_id: uuid.UUID,
+    session: SessionDep,
+    user: RuntimeAdminUser,
+) -> None:
+    """删除机器条目（daemon_instance 级物理删除，ql-20260829-006-6a9e）。
+
+    守卫链在 service ``delete_machine``：归属 404 / 心跳新鲜 409（daemon 在跑时
+    删除会产生僵尸心跳，须先停止）/ 工作区绑定与共享授权 409（RESTRICT 前置）/
+    借用审计红线 409 / in-flight lease+change_write 409。通过后物理删，CASCADE
+    清该机全部 runtimes 及其会话/任务记录；daemon 之后重新启动会以同一
+    daemon_local_id 重建（与 runtime 级删除同款复活语义）。
+    """
+    svc = DaemonService(session)
+    await svc.delete_machine(instance_id, user.id, is_platform_admin=user.is_platform_admin)
+
+
 @router.get(
     "/runtimes/{runtime_id}",
     response_model=DaemonRuntimeRead,

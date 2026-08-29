@@ -113,6 +113,7 @@ SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
 
 ## 变更索引
 
+- ql-20260829-006 | MachineCard 机器头新增「删除」按钮（仅离线可点，危险红字）+ runtimes 页 handleDeleteMachine（modal.confirm 二次确认 → deleteDaemonMachine → machines cache 就地移除 + 本机会话过滤 + 悬浮锁清理）；lib/daemon.ts 增 deleteDaemonMachine
 - ql-20260827-005-a660 | /sessions 整页滚动条修复：sessions-portal 门户容器 calc(100vh-56px) 与 TopBar h-16(64px) 不符溢出 8px，对齐 calc(100vh-64px)（explorer/page.tsx 同款惯例）
 - quick-9f86d2c3 | 直播重复段+光标常闪（会话 e87622aa）：终态轮迟到 partial 反向收编 + segId 封存 + 面板终态轮 finishTurn 兜底（详见注意事项「partial/complete 双向收编」条）
 - ql-20260824-004-9783 | /sessions 用户消息气泡上方空行修复：page 模式占位轮 displayPrompt 无附件时拼出前导换行（61a1b709 引入），改走 joinAttachmentMarkers（runtime-session-helpers，parse 逆操作、语义对齐 backend inject 落库）；dialog 模式 submitFollowup 不受影响
