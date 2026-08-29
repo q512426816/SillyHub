@@ -211,7 +211,8 @@ async def test_build_bundle_excludes_runtime(tmp_path, db_session):
     (spec_root / "nested" / ".runtime" / "deep.json").write_text("{}", encoding="utf-8")
 
     svc = SpecWorkspaceService(db_session)
-    _, stream = await svc.build_bundle(workspace_id)
+    # d3f094da 起 build_bundle 返回 (spec_root, spec_version, tar_stream) 三元组。
+    _, _, stream = await svc.build_bundle(workspace_id)
     tar_bytes = b"".join(stream)
     buf = io.BytesIO(tar_bytes)
     members: list[str] = []

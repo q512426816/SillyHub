@@ -114,3 +114,12 @@
 根因：3aff0ce5 R1 给 30s 自升级复查定时器加 !this._running 停机守卫（生产语义正确，stop 后 SDK 子进程句柄可使进程存活到 +30s 不该再触发升级）；但 selfupdate-scenarios 集成 harness 四路径刻意不 start()，_running 恒 false，重探全被守卫吃掉，路径①/② 的 writePendingUpdate×3 与 runDaemonSelfUpdate×2 断言过期变红
 方案：makeHarness 按既有 _registeredRuntimes 直填同款 cast 惯例补 (daemon as unknown as { _running: boolean })._running = true，模拟在跑 daemon 对齐守卫前置；不改产品代码
 结果：selfupdate-scenarios 4/4 绿 + 邻近 selfupdate/orchestrator/heartbeat/preflight 31 用例绿 + daemon tsc 0 错；未部署
+
+## ql-20260830-005-6441 | 2026-08-30 07:45:57 | backend-ci Pytest 21 红清偿
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/git_log/tests/test_router.py, backend/tests/modules/spec_workspace/test_apply_sync.py
+需求：backend-ci Pytest 21 红清偿，git_log 补种 daemon 实体与旧位三元组解包
+根因：e2b95aad 落在最后一次绿 backend-ci 之后，其 host_fs 解析 JOIN daemon_instances 使 git_log 测试的幽灵 daemon_id 绑定解析归 None，20 用例塌缩 502 OFFLINE，被 ruff 格式墙挡了约 18 小时才在 Pytest 暴露；d3f094da 把 build_bundle 改为三元组返回但漏改 tests/modules 旧位用例的二元解包
+方案：git_log 的 binding_factory 在 daemon_id 非空时按 test_worker_subsession_dispatch 同款 raw INSERT 补种真实 daemon_instances 行；旧位用例改为三元组解包；均不改产品代码
+结果：git_log test_router 44/44 绿，tests/modules/spec_workspace/test_apply_sync 12/12 绿，ruff format 与 check 均无问题；未部署

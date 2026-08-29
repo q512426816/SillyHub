@@ -224,7 +224,12 @@ async def member_factory(db_session, role_seeder):
 
 @pytest.fixture()
 async def binding_factory(db_session):
-    """Seed 一条 ``workspace_member_runtimes`` 绑定行（直插模型，无需 daemon 实体）。"""
+    """Seed 一条 ``workspace_member_runtimes`` 绑定行（直插模型）。
+
+    e2b95aad（D-005@v1）起 host_fs 解析 JOIN daemon_instances（stale 绑定行
+    被过滤），daemon_id 非空时须同种真实 daemon_instances 行——幽灵 id 解析
+    返回 None，全链路会在发 RPC 前塌缩 502 OFFLINE。
+    """
 
     async def _bind(
         ws_id: uuid.UUID,
@@ -233,8 +238,23 @@ async def binding_factory(db_session):
         daemon_id: uuid.UUID | None,
         root_path: str = r"C:\repo",
     ) -> None:
+        from datetime import UTC
+
+        from sqlalchemy import text
+
         from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
 
+        if daemon_id is not None:
+            hb = datetime.now(UTC)
+            await db_session.execute(
+                text(
+                    "INSERT INTO daemon_instances (id, user_id, hostname, server_url,"
+                    " allowed_roots, status, last_heartbeat_at, created_at, updated_at)"
+                    " VALUES (:id, :uid, 'gitlog-test-host', 'http://t',"
+                    " '[\"~/.sillyhub\"]', 'online', :hb, :hb, :hb)"
+                ),
+                {"id": daemon_id.hex, "uid": user_id.hex, "hb": hb},
+            )
         db_session.add(
             WorkspaceMemberRuntime(
                 workspace_id=ws_id,
