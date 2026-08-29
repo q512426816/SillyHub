@@ -245,6 +245,8 @@ async def push_spec_sync(
         new_versions=result["new_versions"],
         conflict=result["conflict"],
         server_versions=result["server_versions"],
+        # 审计 A6：透出被平台墓碑拒绝的路径列表（CLI 区分墓碑拒绝与版本冲突）
+        platform_deleted=result["platform_deleted"],
     )
 
 

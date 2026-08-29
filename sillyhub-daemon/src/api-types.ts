@@ -1473,7 +1473,19 @@ export interface paths {
         get: operations["get_change_api_workspaces__workspace_id__changes__change_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Change
+         * @description 平台删除入口（task-06 / 2026-08-29-change-delete-closure-and-spec-pull，
+         *     design §6.1 / FR-05a / D-001@v1）。
+         *
+         *     组合权限 = ``change.owner_id == 当前用户`` **或** ``CHANGE_ARCHIVE``（owner 为空
+         *     仅后者可删；workspace_owner 角色已内置、platform_admin 经 has_permission 短路）。
+         *     ``require_permission`` 依赖工厂（auth_deps.py）不支持行级 OR，故实现为端点内
+         *     组合校验（agent/file_artifacts.py 同款先例；permission 枚举用法照
+         *     members_router 先例）；未通过判 403。不存在 404、已删幂等 409（code=
+         *     change_deleted）由 ``ChangeService.delete_change`` 给出。
+         */
+        delete: operations["delete_change_api_workspaces__workspace_id__changes__change_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -8870,6 +8882,11 @@ export interface paths {
          *
          *     Used by daemon-client workspaces to borrow the spec tree before an agent
          *     run. Excludes ``.runtime/`` (daemon runtime cache, not spec data).
+         *
+         *     task-08（2026-08-29-change-delete-closure-and-spec-pull / FR-08 / design
+         *     §7.3）：响应头追加 ``X-Spec-Version``（= ``spec_ws.spec_version``），tar 顶层
+         *     含内存生成的 ``PLATFORM-BUNDLE.json`` 快照元数据（service.build_bundle）——
+         *     持包方离线即可辨快照新旧，无需解包对账。
          */
         get: operations["download_spec_bundle_api_workspaces__workspace_id__spec_workspace_bundle_get"];
         put?: never;
@@ -9197,6 +9214,45 @@ export interface paths {
          *     起同 token 复用）；workspace_id 从 token 派生，无归属 → 403 fail-closed。
          */
         post: operations["push_spec_sync_api_changes___spec_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/changes/-/spec-bundle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Spec Bundle
+         * @description GET 服务器 spec 整树 tar（CLI 直跑拉取口子，task-08 / design §7.1 / FR-07）。
+         *
+         *     持 ``shpsync_`` token 的 CLI 可拉本 workspace 整树（浏览器用户走既有 RBAC
+         *     bundle 端点 ``GET /workspaces/{ws}/spec-workspace/bundle``）。鉴权同
+         *     spec-manifest 先例：``require_platform_sync_write``（仅 shpsync_，JWT/
+         *     shk_live_ 凭据有效也 403）——只读拉 bundle 是 shpsync_ 既有 spec-sync 写
+         *     能力的严格子集，无越权扩大（design §7.1 权限评估）；不用读鉴权是为避免
+         *     非同步方探测文件布局。workspace 唯一来源是 token 派生（URL 不带 workspace
+         *     选择器，G6）；``scope.workspace_id`` 为空 → 403 fail-closed（对齐 task-01
+         *     范式）。
+         *
+         *     路由顺序硬约束（R-06，ppm export-excel 同款坑）：本字面量 ``-`` 段路由必须
+         *     注册在 ``/changes/{name}/...`` 参数路由之前（FastAPI 按注册顺序匹配，防
+         *     ``{name}`` 贪婪吞掉 ``-`` 段）——故放在下方 ``GET /changes/{name}/progress``
+         *     之前的字面量端点块内，勿挪到文件尾。
+         *
+         *     响应 ``application/x-tar`` 流：``Content-Disposition`` 文件名 + ``X-Spec-
+         *     Version``（= ``spec_ws.spec_version``）；tar 顶层含内存生成的
+         *     ``PLATFORM-BUNDLE.json`` 快照元数据（design §7.3，service.build_bundle）。
+         *     二进制流不进 OpenAPI DTO（openapi.json/api-types 再生成归 gen:types 时点）。
+         */
+        get: operations["get_spec_bundle_api_changes___spec_bundle_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -10903,6 +10959,22 @@ export interface components {
             /** Reason */
             reason?: string | null;
         };
+        /**
+         * ChangeDeleteResponse
+         * @description DELETE /changes/{cid} 响应（task-06 / design §11，FR-05a）。
+         *
+         *     - ``ok``：恒 True（失败路径走 403/404/409 错误体，不进本 DTO）；
+         *     - ``backup_dir``：镜像软删落地的备份目录绝对路径（30 天保留，人工恢复兜底）；
+         *     - ``file_count``：实际移入备份区的文件数（零文件幂等删除为 0）。
+         */
+        ChangeDeleteResponse: {
+            /** Ok */
+            ok: boolean;
+            /** Backup Dir */
+            backup_dir: string;
+            /** File Count */
+            file_count: number;
+        };
         /** ChangeDocMatrix */
         ChangeDocMatrix: {
             /**
@@ -11177,6 +11249,8 @@ export interface components {
             step_progress?: components["schemas"]["StepProgressSummary"] | null;
             /** Owner Name */
             owner_name?: string | null;
+            /** Last Pushed At */
+            last_pushed_at?: string | null;
             /**
              * Updated At
              * Format: date-time
@@ -19924,6 +19998,16 @@ export interface components {
             scope_workspaces?: components["schemas"]["TeamWorkspaceRef"][];
             /** Budget Usd */
             budget_usd: number | null;
+            /** Project Id */
+            project_id?: string | null;
+            /** Worker Preset */
+            worker_preset?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Main Agent Config */
+            main_agent_config?: {
+                [key: string]: unknown;
+            } | null;
             /** Workers */
             workers?: components["schemas"]["TeamMissionWorkerSummary"][];
         };
@@ -21683,6 +21767,11 @@ export interface components {
          *     conflict 恒伴随 200（不改 HTTP 状态码）：``conflict=True`` 时
          *     ``server_versions`` 携带服务器当前版本，CLI 侧 console.warn 提示人工拍板、
          *     不阻塞（design §5.4/§5.5）。
+         *
+         *     审计 A6（2026-08-29 合入后修复轮）：``platform_deleted`` 透出被平台墓碑
+         *     （``platform_deleted=True`` 目录前缀，apply_ops 前缀级拦截）拒绝的路径列表
+         *     ——service 层返回 dict 早已携带该键，此处对齐透传，CLI 可机器区分「墓碑
+         *     拒绝」与「版本冲突」，对墓碑路径停止重试（重试恒空转）。空列表=无拦截。
          */
         app__modules__platform_sync__schema__SpecSyncResponse: {
             /** Ok */
@@ -21700,6 +21789,8 @@ export interface components {
             server_versions?: {
                 [key: string]: number;
             } | null;
+            /** Platform Deleted */
+            platform_deleted?: string[];
         };
         /**
          * SpecSyncResponse
@@ -24196,6 +24287,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChangeRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_change_api_workspaces__workspace_id__changes__change_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeDeleteResponse"];
                 };
             };
             /** @description Validation Error */
@@ -38641,6 +38764,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_spec_bundle_api_changes___spec_bundle_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

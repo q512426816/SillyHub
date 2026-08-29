@@ -266,6 +266,48 @@ class TestConflict:
         assert body["conflict"] is True
         assert body["server_versions"] == {"docs/K.md": 5}
 
+    async def test_platform_deleted_paths_surfaced_in_response(
+        self, db_session: Any, spec_env: dict[str, Any]
+    ) -> None:
+        """审计 A6：墓碑拒绝（platform_deleted）在响应体透出——CLI 可区分「墓碑
+        拒绝」与「版本冲突」，不再对墓碑路径重试空转。
+
+        平台删除 changes/dead/ 后 CLI 对本地残留文件发 add（含从未推送路径，
+        审计 A1 前缀级拦截）：conflict=True + platform_deleted 列表含被拒路径；
+        对照键 server_versions 为 None（行不存在）。
+        """
+        import uuid as _uuid
+
+        client: AsyncClient = spec_env["client"]
+        headers = spec_env["headers"]
+        spec_root: Path = spec_env["spec_root"]
+
+        db_session.add(
+            SpecFileManifest(
+                id=_uuid.uuid4(),
+                workspace_id=spec_env["workspace_id"],
+                path="changes/dead/proposal.md",
+                content_hash="0" * 64,
+                version=2,
+                exists=False,
+                platform_deleted=True,
+            )
+        )
+        await db_session.commit()
+
+        never_seen = "changes/dead/member-never-pushed.md"
+        resp = await client.post(
+            "/api/changes/-/spec-sync",
+            headers=headers,
+            json={"ops": [_op("add", never_seen, base_version=0, content=_b64("x"), hash=_h("x"))]},
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["conflict"] is True
+        assert body["platform_deleted"] == [never_seen]
+        assert body["server_versions"] is None
+        assert not (spec_root / "changes" / "dead").exists()
+
 
 class TestEdgeCases:
     async def test_empty_ops_ok(self, spec_env: dict[str, Any]) -> None:

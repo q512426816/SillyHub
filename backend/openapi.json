@@ -62002,6 +62002,13 @@
               }
             ],
             "title": "Server Versions"
+          },
+          "platform_deleted": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Platform Deleted"
           }
         },
         "type": "object",
@@ -62010,7 +62017,7 @@
           "new_versions"
         ],
         "title": "SpecSyncResponse",
-        "description": "POST /changes/-/spec-sync 响应（design §7，对齐 SpecIncrementalSyncResponse 语义）。\n\nconflict 恒伴随 200（不改 HTTP 状态码）：``conflict=True`` 时\n``server_versions`` 携带服务器当前版本，CLI 侧 console.warn 提示人工拍板、\n不阻塞（design §5.4/§5.5）。"
+        "description": "POST /changes/-/spec-sync 响应（design §7，对齐 SpecIncrementalSyncResponse 语义）。\n\nconflict 恒伴随 200（不改 HTTP 状态码）：``conflict=True`` 时\n``server_versions`` 携带服务器当前版本，CLI 侧 console.warn 提示人工拍板、\n不阻塞（design §5.4/§5.5）。\n\n审计 A6（2026-08-29 合入后修复轮）：``platform_deleted`` 透出被平台墓碑\n（``platform_deleted=True`` 目录前缀，apply_ops 前缀级拦截）拒绝的路径列表\n——service 层返回 dict 早已携带该键，此处对齐透传，CLI 可机器区分「墓碑\n拒绝」与「版本冲突」，对墓碑路径停止重试（重试恒空转）。空列表=无拦截。"
       },
       "app__modules__spec_workspace__router__SpecSyncResponse": {
         "properties": {

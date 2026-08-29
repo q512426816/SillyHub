@@ -21767,6 +21767,11 @@ export interface components {
          *     conflict 恒伴随 200（不改 HTTP 状态码）：``conflict=True`` 时
          *     ``server_versions`` 携带服务器当前版本，CLI 侧 console.warn 提示人工拍板、
          *     不阻塞（design §5.4/§5.5）。
+         *
+         *     审计 A6（2026-08-29 合入后修复轮）：``platform_deleted`` 透出被平台墓碑
+         *     （``platform_deleted=True`` 目录前缀，apply_ops 前缀级拦截）拒绝的路径列表
+         *     ——service 层返回 dict 早已携带该键，此处对齐透传，CLI 可机器区分「墓碑
+         *     拒绝」与「版本冲突」，对墓碑路径停止重试（重试恒空转）。空列表=无拦截。
          */
         app__modules__platform_sync__schema__SpecSyncResponse: {
             /** Ok */
@@ -21784,6 +21789,8 @@ export interface components {
             server_versions?: {
                 [key: string]: number;
             } | null;
+            /** Platform Deleted */
+            platform_deleted?: string[];
         };
         /**
          * SpecSyncResponse
