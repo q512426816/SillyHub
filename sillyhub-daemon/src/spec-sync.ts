@@ -4,7 +4,9 @@
 // 从 task-runner.ts 等价迁移（除新增的 404 容错分支外，行为对齐）：
 //   - resolveSpecDir   ← task-runner.ts:1444-1449（_resolveSpecDir）
 //   - pullSpecBundle   ← task-runner.ts:1417-1438（_pullSpecBundle）+ 新增 404 容错
-//   - extractTar       ← task-runner.ts:1464-1505（_extractTar，含 Tar Slip 防护）
+//   - extractTar       ← task-runner.ts:1464-1505（_extractTar，含 Tar Slip 防护）；
+//                        审计 P1-5 补 PAX 'x' / GNU 'L' / ustar prefix 长路径读取
+//                        （backend build_bundle 用 Python tarfile mode "w" PAX 格式）
 //   - packSpecDir      ← task-runner.ts:1512-1533（_packSpecDir）
 //   - walkDir/buildTarHeader/readTarString ← task-runner.ts:1951/1993/1934（模块内 helper）
 //   - postSpecSync     ← task-runner.ts:482-486 等价逻辑抽提（pack + client.postSpecSync）
@@ -967,9 +969,24 @@ export async function packSpecDir(
 // ── 模块内 helper（不 export，迁自 task-runner.ts）────────────────────────────
 
 /**
- * 解包 tar Buffer 到目标目录（手工 ustar 实现，零依赖）。
+ * 解包 tar Buffer 到目标目录（手工 ustar + PAX/GNU 扩展实现，零依赖）。
  *
- * 路径穿越防护（§5 E-05/E-06，Zip Slip 类）：
+ * PAX/GNU 长路径兼容（审计 P1-5）：backend build_bundle 用 Python tarfile.open
+ * (mode="w")（3.8+ 默认 PAX 格式）打包，输出含三类纯 ustar 之外的形态——
+ *   - typeflag 'x'（PAX 扩展头）：磁盘成员 mtime 为 float（st_mtime）时每成员前
+ *     必现（data 形如 "28 mtime=1788005616.38\n"）；路径 >100 字节时完整路径只在
+ *     其 path 记录（"<len> path=<完整路径>\n"），紧随实体头 name 字段被截断到
+ *     100 字节。本函数解析记录取 path 应用到下一实体头，其余键（mtime 等）忽略，
+ *     扩展头自身不落盘（不处理会把文件落到截断的错误路径 / 每成员一条告警噪音）。
+ *   - typeflag 'L'（GNU LongLink）：data 是 NUL 结尾完整长名，应用到下一实体头
+ *     （daemon 打包侧 buildLongLinkHeader 的对偶读取）。
+ *   - ustar prefix 字段（345-500，155 字节）：magic 'ustar' + version '00' 且非空
+ *     时 name = prefix + '/' + name。
+ * typeflag 'g'（PAX 全局扩展头）/ 'K'（GNU 长链接目标）忽略跳过（spec 树无符号链接）。
+ * 实现与 CLI 侧 sillyspec src/sync.js _parseSpecTar 对齐（两仓行为一致）。
+ *
+ * 路径穿越防护（§5 E-05/E-06，Zip Slip 类）——校验对象是 PAX/prefix/L 拼接后的
+ * 最终 name：
  *   - entry.name 含 '..' 段 → 抛错。
  *   - entry.name 绝对路径（/ 开头 / win 盘符 `[A-Z]:`）→ 抛错。
  *   - join 后 path.relative(targetDir, fullPath) 必须不以 '..' 开头。
@@ -982,6 +999,9 @@ export async function packSpecDir(
 async function extractTar(tarBuf: Buffer, targetDir: string): Promise<void> {
   await mkdir(targetDir, { recursive: true });
   let offset = 0;
+  // PAX 'x' path 记录 / GNU 'L' 长名：覆盖下一实条目的 name（扩展头与实体头成对，
+  // Python/GNU tar 打包器均紧邻输出）。
+  let pendingPath: string | null = null;
   while (offset + 512 <= tarBuf.length) {
     const header = tarBuf.subarray(offset, offset + 512);
     // 结尾 zero block（全 0）→ 结束
@@ -996,19 +1016,48 @@ async function extractTar(tarBuf: Buffer, targetDir: string): Promise<void> {
     const data = tarBuf.subarray(offset, offset + size);
     offset += Math.ceil(size / 512) * 512;
 
-    if (!name) continue;
-
-    // 路径穿越防护（join 前后双重校验）
-    if (name.includes('..') || isAbsolute(name) || /^[A-Za-z]:[\\/]/.test(name)) {
-      throw new Error(`tar path traversal blocked: ${name}`);
+    // PAX 扩展头（'x'）：不落盘，path 记录暂存应用到下一实体头，其余键忽略。
+    if (typeflag === 'x') {
+      const records = parsePaxRecords(data);
+      if (records.path) pendingPath = records.path;
+      continue;
     }
-    const fullPath = join(targetDir, name);
+    // GNU LongLink（'L'）：data 是 NUL 结尾长名，应用到下一实体头。
+    if (typeflag === 'L') {
+      pendingPath = readTarString(data);
+      continue;
+    }
+    // PAX 全局扩展头（'g'）/ GNU 长链接目标（'K'）：spec 树不含符号链接，静默跳过。
+    if (typeflag === 'g' || typeflag === 'K') continue;
+
+    // ustar prefix 字段（345-500）：magic 'ustar' + version '00' 时 name = prefix/name。
+    // （GNU 旧格式 magic 'ustar ' version ' \0' 不满足 version 校验，天然不误拼。）
+    let fullName = name;
+    const magic = readTarString(header.subarray(257, 263));
+    const version = readTarString(header.subarray(263, 265));
+    if (magic === 'ustar' && version === '00') {
+      const prefix = readTarString(header.subarray(345, 500));
+      if (prefix) fullName = `${prefix}/${name}`;
+    }
+    // PAX path / GNU 长名覆盖（优先于 prefix 拼接——完整路径以扩展头记录为准）。
+    if (pendingPath) {
+      fullName = pendingPath;
+      pendingPath = null;
+    }
+
+    if (!fullName) continue;
+
+    // 路径穿越防护（join 前后双重校验，校验最终 name）
+    if (fullName.includes('..') || isAbsolute(fullName) || /^[A-Za-z]:[\\/]/.test(fullName)) {
+      throw new Error(`tar path traversal blocked: ${fullName}`);
+    }
+    const fullPath = join(targetDir, fullName);
     const rel = relative(targetDir, fullPath);
     if (rel.startsWith('..') || isAbsolute(rel)) {
-      throw new Error(`tar path escapes target dir: ${name} -> ${fullPath}`);
+      throw new Error(`tar path escapes target dir: ${fullName} -> ${fullPath}`);
     }
 
-    if (typeflag === '5' || name.endsWith('/')) {
+    if (typeflag === '5' || fullName.endsWith('/')) {
       await mkdir(fullPath, { recursive: true });
       continue;
     }
@@ -1018,7 +1067,7 @@ async function extractTar(tarBuf: Buffer, targetDir: string): Promise<void> {
       continue;
     }
     // symlink / 其他 → 跳过 + warn（daemon spec 树不应含）
-    console.warn('spec_sync: tar_skip_entry', { name, typeflag });
+    console.warn('spec_sync: tar_skip_entry', { name: fullName, typeflag });
   }
 }
 
@@ -1200,6 +1249,29 @@ function readTarString(buf: Buffer): string {
   const nul = buf.indexOf(0);
   const slice = nul < 0 ? buf : buf.subarray(0, nul);
   return slice.toString('utf-8');
+}
+
+/**
+ * PAX 扩展头（typeflag 'x'/'g'）data 解析为 {key: value}（审计 P1-5）。
+ * 记录形态 "<len> <key>=<value>\n" 重复（UTF-8），len 十进制且含自身位数、空格与
+ * 尾部 \n。畸形记录（len 非法/越界）容错截断后续解析，不抛错（解包不因扩展头坏
+ * 记录中断）。与 CLI 侧 sillyspec src/sync.js _parsePaxRecords 对齐。
+ */
+function parsePaxRecords(data: Buffer): Record<string, string> {
+  const text = data.toString('utf-8');
+  const out: Record<string, string> = {};
+  let pos = 0;
+  while (pos < text.length) {
+    const sp = text.indexOf(' ', pos);
+    if (sp === -1) break;
+    const len = parseInt(text.slice(pos, sp), 10);
+    if (!Number.isInteger(len) || len <= 0 || pos + len > text.length) break;
+    const record = text.slice(sp + 1, pos + len - 1); // 尾部 \n 不属于 value
+    const eq = record.indexOf('=');
+    if (eq > 0) out[record.slice(0, eq)] = record.slice(eq + 1);
+    pos += len;
+  }
+  return out;
 }
 
 /**

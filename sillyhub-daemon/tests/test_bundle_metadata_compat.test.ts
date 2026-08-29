@@ -20,6 +20,14 @@
 // build_bundle：元数据成员在最前，其后 sorted 目录+文件）；mock client duck-type
 // 不依赖 hub-client 导出；真实解包到 os.tmpdir() 临时目录。
 // vitest.config.ts: globals=false → 显式 import；include=tests/**/*.test.ts。
+//
+// 审计 P1-5（2026-08 追加，§4 describe）：backend build_bundle 用 Python
+// tarfile.open(mode="w")（3.8+ 默认 PAX 格式），daemon extractTar 原为纯 ustar 手写
+// 解析（不读 PAX 'x' 扩展头 / GNU 'L' 长名 / ustar prefix 字段）→ ① 每成员前置的
+// typeflag 'x' 头（磁盘成员 mtime 为 float 时必现）落入 tar_skip_entry 警告噪音；
+// ② 路径 >100 字节时 name 字段被截断、完整路径只在 PAX path 记录 → 文件静默落到
+// 截断的错误路径（进而 hasUnsyncedLocalChanges 误判本地有未回灌改动）。本文件新增
+// PAX/GNU-L/ustar-prefix 生产格式 fixture 验证 extractTar 补齐三类扩展读取。
 
 import { describe, it, expect, vi, afterAll } from 'vitest';
 import { tmpdir } from 'node:os';
@@ -67,7 +75,23 @@ afterAll(() => {
 });
 
 // ── 手工 ustar 构造（照 spec-transport-tar-sync/spec-sync.test.ts 范式）────────
-function buildTarEntry(name: string, content: string, typeflag: string, isDir = false): Buffer {
+// prefix（345-500，155 字节）为 ustar 标准拆分字段：非空且 magic ustar 时读取方应
+// name = prefix + '/' + name（P1-5 用例用；既有调用缺省 '' 不写不影响）。
+function buildTarEntry(
+  name: string,
+  content: string,
+  typeflag: string,
+  isDir = false,
+  prefix = '',
+): Buffer {
+  // 防御：name/prefix 超字段宽度会溢出写脏邻接字段（Buffer.write 不按字段截断），
+  // PAX/GNU 长名用例必须传已截断的 name + 扩展头承载完整路径。
+  if (Buffer.byteLength(name, 'utf-8') > 100) {
+    throw new Error(`test fixture name >100 bytes: ${name}`);
+  }
+  if (Buffer.byteLength(prefix, 'utf-8') > 155) {
+    throw new Error(`test fixture prefix >155 bytes: ${prefix}`);
+  }
   const header = Buffer.alloc(512, 0);
   header.write(name, 0, 'utf-8');
   header.write(isDir ? '0000755' : '0000644', 100, 'ascii');
@@ -86,6 +110,7 @@ function buildTarEntry(name: string, content: string, typeflag: string, isDir = 
   header.write('ustar', 257, 'ascii');
   header[262] = 0;
   header.write('00', 263, 'ascii');
+  if (prefix) header.write(prefix, 345, 'utf-8');
   let sum = 0;
   for (let i = 0; i < 512; i++) sum += header[i] ?? 0;
   header.write(sum.toString(8).padStart(6, '0') + '\0 ', 148, 'ascii');
@@ -98,6 +123,71 @@ function buildTarEntry(name: string, content: string, typeflag: string, isDir = 
 
 function tarBuf(entries: Buffer[]): Buffer {
   return Buffer.concat([...entries, Buffer.alloc(1024, 0)]); // 2×512 zero block 结尾
+}
+
+// ── PAX/GNU 扩展头构造（审计 P1-5）────────────────────────────────────────────
+// 形态对齐依据：本机 Python 3.12.10 tarfile.open(mode="w") 实测 dump（与 backend
+// build_bundle 同款调用：TarInfo.addfile 元数据成员 + tar.add(arcname) 磁盘成员）：
+//   - 磁盘成员 mtime 为 float（os.stat().st_mtime）→ 每成员前置 typeflag 'x' 头
+//     （name '././@PaxHeader'，magic 'ustar\0' version '00'），data 形如
+//     "28 mtime=1788005616.3831797\n"；元数据成员（TarInfo 默认 int mtime）无 'x' 头。
+//   - 路径 >100 字节 → 同一 'x' 头 data 追加 "132 path=<完整路径>\n" 记录，紧随的
+//     实体头 name 字段只剩前 100 字节（截断、无 NUL 填充语义差异）。
+// CI 无 python 依赖，fixture 手工构造上述字节流（ASCII 路径下 char slice == byte slice）。
+
+/** 构造单条 PAX 记录 "<len> <key>=<value>\n"：len 十进制、含自身位数 + 空格 + 记录体。 */
+function paxRecord(key: string, value: string): string {
+  const body = `${key}=${value}\n`;
+  const bodyLen = Buffer.byteLength(body, 'utf-8');
+  let digits = 1;
+  let total = 0;
+  for (;;) {
+    total = digits + 1 + bodyLen;
+    const width = String(total).length;
+    if (width === digits) break;
+    digits = width;
+  }
+  return `${total} ${body}`;
+}
+
+/** typeflag 'x' 扩展头 + data（records 为若干条 paxRecord 拼接；不落盘，由下一实体消费）。 */
+function buildPaxExtHeader(records: string[]): Buffer {
+  return buildTarEntry('././@PaxHeader', records.join(''), 'x');
+}
+
+/** typeflag 'L' GNU 长名头：data 是 NUL 结尾完整名（512 对齐补零），对齐 src 侧
+ *  buildLongLinkHeader 的 GNU 惯例（占位名 '././@LongLink'）。 */
+function buildGnuLongLinkEntry(name: string): Buffer {
+  const nameBytes = Buffer.from(name, 'utf-8');
+  const dataSize = nameBytes.length + 1; // name + NUL 终止符
+  const header = Buffer.alloc(512, 0);
+  header.write('././@LongLink', 0, 'ascii');
+  header.write('0000644', 100, 'ascii');
+  header[107] = 0;
+  header.write('0000000', 108, 'ascii');
+  header[115] = 0;
+  header.write('0000000', 116, 'ascii');
+  header[123] = 0;
+  header.write(dataSize.toString(8).padStart(11, '0'), 124, 'ascii');
+  header[135] = 0;
+  header.write('00000000000', 136, 'ascii');
+  header[147] = 0;
+  header.write('        ', 148, 'ascii');
+  header[156] = 0x4c; // 'L'
+  header.write('ustar', 257, 'ascii');
+  header[262] = 0;
+  header.write('00', 263, 'ascii');
+  let sum = 0;
+  for (let i = 0; i < 512; i++) sum += header[i] ?? 0;
+  header.write(sum.toString(8).padStart(6, '0') + '\0 ', 148, 'ascii');
+  const data = Buffer.alloc(Math.ceil(dataSize / 512) * 512, 0);
+  nameBytes.copy(data);
+  return Buffer.concat([header, data]);
+}
+
+/** tar 头 name 字段 100 字节截断（Python tarfile PAX 长名行为：截断、完整值在 path 记录）。 */
+function truncateName(name: string): string {
+  return Buffer.from(name, 'utf-8').subarray(0, 100).toString('utf-8');
 }
 
 // ── task-08 契约：顶层 PLATFORM-BUNDLE.json 四键（spec_version/strategy/
@@ -278,5 +368,133 @@ describe('回灌判定：hasUnsyncedLocalChanges 不因 PLATFORM-BUNDLE.json 误
     expect(r2).toBe(r);
     expect(postSpy).not.toHaveBeenCalled();
     expect(existsSync(join(r2!, 'PLATFORM-BUNDLE.json'))).toBe(true);
+  });
+});
+
+// ── 4. 审计 P1-5：backend PAX 打包形态解包兼容（typeflag 'x' / 'L' / ustar prefix）─
+
+describe('PAX/GNU/ustar-prefix 解包兼容（审计 P1-5，对齐 backend tarfile mode "w" PAX 输出）', () => {
+  it('每成员前置 typeflag "x" PAX 头（float mtime 记录，Python 磁盘成员形态）：全部落地且无 tar_skip_entry 告警', async () => {
+    const wsId = 'ws-pax-mtime-prefix';
+    // 形态照 Python 实测 dump：元数据成员（TarInfo int mtime）无 'x' 头；磁盘成员
+    // （tar.add → float st_mtime）每个前置 'x' 头含 "NN mtime=<float>\n" 记录。
+    const bundle = tarBuf([
+      buildTarEntry('PLATFORM-BUNDLE.json', BUNDLE_METADATA_JSON, '0'),
+      buildPaxExtHeader([paxRecord('mtime', '1788005616.3821805')]),
+      buildTarEntry('changes/', '', '5', true),
+      buildPaxExtHeader([paxRecord('mtime', '1788005616.3821805')]),
+      buildTarEntry('changes/2026-08-29-demo/', '', '5', true),
+      buildPaxExtHeader([paxRecord('mtime', '1788005616.3821805')]),
+      buildTarEntry('changes/2026-08-29-demo/design.md', '# demo design\n', '0'),
+      buildPaxExtHeader([paxRecord('mtime', '1788005616.3831797')]),
+      buildTarEntry('docs/CONVENTIONS.md', '# conventions\n', '0'),
+    ]);
+    const client = { getSpecBundle: vi.fn().mockResolvedValue(bundle) } as any;
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const r = await pullSpecBundle(client, wsId, {});
+      expect(r).toBe(resolveSpecDir(wsId));
+      // 'x' 扩展头被识别消费，不落盘、不告警；实体成员照常全部落地。
+      expect(readFileSync(join(r!, 'changes', '2026-08-29-demo', 'design.md'), 'utf-8')).toBe(
+        '# demo design\n',
+      );
+      expect(readFileSync(join(r!, 'docs', 'CONVENTIONS.md'), 'utf-8')).toBe('# conventions\n');
+      expect(readFileSync(join(r!, 'PLATFORM-BUNDLE.json'), 'utf-8')).toBe(BUNDLE_METADATA_JSON);
+      expect(
+        warnSpy.mock.calls.some((args) =>
+          args.some((a) => typeof a === 'string' && a.includes('tar_skip_entry')),
+        ),
+      ).toBe(false);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('>100 字节路径：name 截断 + PAX path 记录 → 解到完整正确路径，截断路径不落盘', async () => {
+    const wsId = 'ws-pax-long-path';
+    const longDir = 'changes/' + 'x'.repeat(40) + '/' + 'y'.repeat(60); // 109 字节 >100
+    const longFile = longDir + '/deep-file.md'; // 122 字节（Python 实测同形态用例）
+    // 形态照 Python 实测：'x' 头 data = path 记录 + mtime 记录；紧随实体头 name 只剩
+    // 前 100 字节（目录条目截断后无 trailing '/'，dir 判定须靠 typeflag '5' + path 记录）。
+    const bundle = tarBuf([
+      buildPaxExtHeader([paxRecord('path', longDir + '/'), paxRecord('mtime', '1788005616.3831797')]),
+      buildTarEntry(truncateName(longDir), '', '5', true),
+      buildPaxExtHeader([paxRecord('path', longFile), paxRecord('mtime', '1788005616.3831797')]),
+      buildTarEntry(truncateName(longFile), 'deep content\n', '0'),
+    ]);
+    const client = { getSpecBundle: vi.fn().mockResolvedValue(bundle) } as any;
+
+    const r = await pullSpecBundle(client, wsId, {});
+    expect(r).toBe(resolveSpecDir(wsId));
+
+    // 完整正确路径落地（P1-5 核心断言：修复前完整路径无法落地——截断 name 误用导致
+    // 文件落错位置，本 fixture 中还与截断目录条目同路径冲突直接 EISDIR 抛错）。
+    const full = join(r!, ...longFile.split('/'));
+    expect(existsSync(full)).toBe(true);
+    expect(readFileSync(full, 'utf-8')).toBe('deep content\n');
+
+    // 截断路径（前 100 字节，终止于 y 第 51 个，无 /deep-file.md）不得作为文件落盘。
+    const truncated = join(r!, ...truncateName(longFile).split('/'));
+    expect(existsSync(truncated)).toBe(false);
+  });
+
+  it('ustar prefix 字段（345-500）：name = prefix + "/" + name 拼接后落地', async () => {
+    const wsId = 'ws-ustar-prefix';
+    const bundle = tarBuf([
+      buildTarEntry('changes/', '', '5', true),
+      // prefix='changes/prefix-demo' + name='file.md' → 'changes/prefix-demo/file.md'
+      buildTarEntry('file.md', 'prefix member\n', '0', false, 'changes/prefix-demo'),
+    ]);
+    const client = { getSpecBundle: vi.fn().mockResolvedValue(bundle) } as any;
+
+    const r = await pullSpecBundle(client, wsId, {});
+    expect(r).toBe(resolveSpecDir(wsId));
+    // 修复前不读 prefix → 文件误落顶层 file.md；正确路径必须拼接 prefix 后落地。
+    expect(readFileSync(join(r!, 'changes', 'prefix-demo', 'file.md'), 'utf-8')).toBe(
+      'prefix member\n',
+    );
+    expect(existsSync(join(r!, 'file.md'))).toBe(false);
+  });
+
+  it('GNU LongLink（typeflag "L"）：长名 data 应用到下一实体头（daemon 打包侧 buildLongLinkHeader 对偶）', async () => {
+    const wsId = 'ws-gnu-longlink';
+    const longFile = 'docs/' + 'z'.repeat(80) + '/' + 'w'.repeat(40) + '/long-name.md'; // >100 字节
+    const bundle = tarBuf([
+      buildGnuLongLinkEntry(longFile),
+      buildTarEntry(truncateName(longFile), 'gnu longlink content\n', '0'),
+    ]);
+    const client = { getSpecBundle: vi.fn().mockResolvedValue(bundle) } as any;
+
+    const r = await pullSpecBundle(client, wsId, {});
+    expect(r).toBe(resolveSpecDir(wsId));
+    const full = join(r!, ...longFile.split('/'));
+    expect(existsSync(full)).toBe(true);
+    expect(readFileSync(full, 'utf-8')).toBe('gnu longlink content\n');
+  });
+
+  it('typeflag "g" 全局扩展头忽略跳过：不落盘、不告警、后续成员照常解包', async () => {
+    const wsId = 'ws-pax-global-header';
+    const bundle = tarBuf([
+      buildTarEntry('././@PaxHeader', paxRecord('comment', 'global ext header'), 'g'),
+      buildTarEntry('docs/', '', '5', true),
+      buildTarEntry('docs/CONVENTIONS.md', '# conventions\n', '0'),
+    ]);
+    const client = { getSpecBundle: vi.fn().mockResolvedValue(bundle) } as any;
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const r = await pullSpecBundle(client, wsId, {});
+      expect(r).toBe(resolveSpecDir(wsId));
+      expect(readFileSync(join(r!, 'docs', 'CONVENTIONS.md'), 'utf-8')).toBe('# conventions\n');
+      expect(existsSync(join(r!, '././@PaxHeader'))).toBe(false);
+      expect(
+        warnSpy.mock.calls.some((args) =>
+          args.some((a) => typeof a === 'string' && a.includes('tar_skip_entry')),
+        ),
+      ).toBe(false);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
