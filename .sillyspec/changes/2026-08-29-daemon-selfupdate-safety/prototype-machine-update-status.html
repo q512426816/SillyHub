@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<title>机器卡 · 自更新状态提示 · 原型 — SELF_UPDATE 安全层</title>
+<style>
+  :root{
+    --primary:#7C3AED;--primary-soft:#EDE9FE;
+    --bg:#FAF5FF;--fg:#1E1B4B;--card:#FFFFFF;--muted:#ECEEF9;--muted-fg:#475569;--faint:#94A3B8;
+    --border:#DDD6FE;--radius:12px;
+    --success:#059669;--success-soft:#D1FAE5;--success-text:#065F46;
+    --warning:#D97706;--warning-soft:#FEF3C7;--warning-text:#92400E;
+    --info:#2563EB;--info-soft:#DBEAFE;--info-text:#1E40AF;
+    --font-sans:Inter,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  [data-theme="dark"]{
+    --primary:#A78BFA;--primary-soft:rgba(167,139,250,.16);
+    --bg:#0B0A1A;--fg:#E7E5F4;--card:#151228;--muted:#1E1B33;--muted-fg:#A5A3C2;--faint:#6D6A8E;
+    --border:#2B2747;
+    --success:#34D399;--success-soft:rgba(52,211,153,.14);--success-text:#6EE7B7;
+    --warning:#FBBF24;--warning-soft:rgba(251,191,36,.14);--warning-text:#FCD34D;
+    --info:#60A5FA;--info-soft:rgba(96,165,250,.14);--info-text:#93C5FD;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font-sans);background:var(--bg);color:var(--fg);padding:24px;display:flex;flex-direction:column;gap:16px;align-items:center}
+  h1{font-size:17px;font-weight:600}
+  .sub{font-size:13px;color:var(--muted-fg);max-width:820px;line-height:1.7}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:16px;width:100%;max-width:1140px}
+  .case{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+  .case h2{font-size:12.5px;font-weight:600;padding:8px 14px;border-bottom:1px solid var(--border);background:var(--muted);display:flex;justify-content:space-between}
+  .tag{font-size:11px;padding:1px 8px;border-radius:999px;background:var(--primary-soft);color:var(--primary)}
+  .tag.exist{background:var(--muted);color:var(--muted-fg)}
+  .card{padding:14px}
+  .mrow{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--success)}
+  .dot.warn{background:var(--warning)}
+  .mname{font-size:14px;font-weight:600}
+  .mprov{font-size:12px;color:var(--muted-fg)}
+  .banner{display:flex;align-items:flex-start;gap:8px;padding:8px 12px;font-size:12.5px;line-height:1.55;border-radius:8px}
+  .banner .icon{font-size:13px}
+  .banner small{display:block;color:var(--muted-fg);font-size:11.5px;margin-top:2px}
+  .b-warn{background:var(--warning-soft);color:var(--warning-text)}
+  .b-info{background:var(--info-soft);color:var(--info-text)}
+  .actions{display:flex;gap:8px;margin-top:12px}
+  .btn{border:1px solid var(--border);background:transparent;color:var(--fg);padding:5px 12px;border-radius:8px;font-size:12px;cursor:pointer}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .legend{font-size:12.5px;color:var(--muted-fg);max-width:1140px;line-height:1.8}
+  code{background:var(--muted);padding:1px 6px;border-radius:4px;font-size:12px}
+</style>
+</head>
+<body>
+  <h1>机器卡 · 自更新状态提示（SELF_UPDATE 安全层原型）</h1>
+  <div class="sub">标注「新增」的横幅/禁用态为本变更引入（pending_update 透传链：daemon 心跳 → backend 机器视图 → 机器卡）。「已有」为现状保留。</div>
+
+  <div class="grid">
+    <div class="case">
+      <h2>① 正常在线 <span class="tag exist">已有</span></h2>
+      <div class="card">
+        <div class="mrow"><span class="dot"></span><span class="mname">qinyi-DESKTOP</span><span class="mprov">claude · codex · glm</span></div>
+        <div class="actions"><button class="btn">详情</button><button class="btn">自更新</button></div>
+      </div>
+    </div>
+
+    <div class="case">
+      <h2>② 等待空闲升级（在跑任务） <span class="tag">新增</span></h2>
+      <div class="card">
+        <div class="mrow"><span class="dot"></span><span class="mname">qinyi-DESKTOP</span><span class="mprov">claude · codex · glm</span></div>
+        <div class="banner b-warn"><span class="icon">⏳</span><div>等待空闲后自动升级（每 30s 复查）<small>原因：1 个会话轮次进行中 · 1 个任务执行中 —— 新版本 0.4.2 已就绪（当前 0.4.1），空闲即自动升级生效</small></div></div>
+        <div class="actions"><button class="btn">详情</button><button class="btn" disabled title="升级进行中">自更新</button></div>
+      </div>
+    </div>
+
+    <div class="case">
+      <h2>③ 磁盘版本变更跟进（外部替换/降级） <span class="tag">新增</span></h2>
+      <div class="card">
+        <div class="mrow"><span class="dot"></span><span class="mname">qinyi-DESKTOP</span><span class="mprov">claude · codex · glm</span></div>
+        <div class="banner b-info"><span class="icon">↻</span><div>检测到程序文件已变更（构建号 c2860… → c2871…），等待空闲自动加载新版本<small>来源：磁盘旁路探测（每 10 分钟）—— 覆盖外部部署工具替换/降级场景</small></div></div>
+        <div class="actions"><button class="btn">详情</button><button class="btn" disabled>自更新</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    状态流转：<code>正常</code> →（服务端指令/磁盘探测发现新版本且忙）→ <code>② 等待空闲</code>（pending_update 透传，30s 复查）→（空闲）→ 下载替换+优雅重启 → <code>①</code>；
+    空闲时收到指令/探测到变更则直接升级无横幅。<code>③</code> 与 <code>②</code> 仅原因文案不同（pending_update.reason：server_command / disk_change），UI 同一横幅位。探测失败（替换窗口）不上报不触发——防自杀。
+  </div>
+</body>
+</html>
