@@ -74,3 +74,10 @@ supersedes：D-004@v1
 锚点：未记录
 最近确认：bdef3a21
 理由：确认。变更名 2026-08-29-daemon-platform-resilience，原型 prototype-session-connection-states.html 六状态快照
+
+## D-003@v1 : 三条线打包 = 单变更三波交付（+revision 1 并入波 4）
+状态：implemented
+变更：2026-08-29-change-delete-closure-and-spec-pull
+锚点：未记录
+最近确认：0ec935c9
+理由：删除收敛+防复活基建（波 1）/删除入口（波 2）/拉取口子（波 3）一个变更三波，波与波共享防复活基建（波 1 建）；进行中可见性经 revision 1 重开 brainstorm 并入为波 4——与波 1-3 同文件（platform_sync/change/changes 页面），并入避免并行变更冲突（规则 19）。跨仓配套（X1-X4）以 repo: sillyspec 任务卡入列，不另开变更。

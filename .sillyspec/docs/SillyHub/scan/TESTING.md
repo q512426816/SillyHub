@@ -20,11 +20,11 @@ SillyHub 三端（backend / frontend / sillyhub-daemon）各自独立测试栈�
 
 测试依赖（`backend/pyproject.toml [project.optional-dependencies].dev`）：pytest-asyncio / pytest-xdist（`-n auto` 并行，全量从约 50 分钟压到分钟级）/ pytest-cov / pytest-rerunfailures（CI flaky 重试兜底）/ aiosqlite（单测 DB）。frontend dev 依赖 @testing-library/react + @testing-library/jest-dom + jsdom（`frontend/package.json`）。
 
-## 测试规模（Glob 实测，source_commit 744e3de4）
+## 测试规模（Glob 实测，source_commit 744e3de4；含 2026-08-29-change-delete-closure-and-spec-pull 增量）
 
-- **backend**：`backend/tests/` 下 75 个 `test_*.py`（另 11 个 `__init__.py`）+ `backend/app/**/tests/` 模块内 284 个 `test_*.py`，合计约 359 个测试文件；conftest.py 共 13 个（根 `backend/conftest.py` + ppm 各子域 / file / mcp_gateway / change / daemon / workspace.member_runtimes / platform_sync 共 12 个模块级 fixture）。CI 注释口径：全量 4000+ 用例（`.github/workflows/backend-ci.yml` 超时注释，2026-08-15）。
-- **frontend**：157 个 `frontend/src/**/*.test.ts(x)`，覆盖页面（`app/`）、组件（`components/`）、lib 钩子与纯函数（`lib/__tests__/`）、store、middleware。
-- **daemon**：141 个 `sillyhub-daemon/tests/**/*.test.ts`（interactive 会话与驱动、policy、adapters、resilience、task-runner、spec 同步等）；spikes 探索性测试另走 `vitest.spikes.config.ts`（`include=['spikes/**/*.test.ts']`，串行 forks ≤2），不进 CI 主套件。
+- **backend**：`backend/tests/` 下 76 个 `test_*.py`（另 11 个 `__init__.py`）+ `backend/app/**/tests/` 模块内 291 个 `test_*.py`，合计约 367 个测试文件；conftest.py 共 13 个（根 `backend/conftest.py` + ppm 各子域 / file / mcp_gateway / change / daemon / workspace.member_runtimes / platform_sync 共 12 个模块级 fixture）。CI 注释口径：全量 4000+ 用例（`.github/workflows/backend-ci.yml` 超时注释，2026-08-15）。2026-08-29 变更新增 8 个：`tests/test_platform_deleted_hidden_migration.py`（迁移冒烟）+ 模块内 7 个（`change/tests/test_reparse_delete_closure.py`、`test_delete_change.py`；`platform_sync/tests/test_change_deleted_guard.py`、`test_spec_bundle.py`；`spec_workspace/tests/test_platform_deleted_guard.py`、`test_soft_delete_change_dir.py`、`test_quicklog_reconcile.py`），并改写 `test_reparse_scoped_zero_delete.py` 为「scope 内消失可删 / scope 外不删」双断言。
+- **frontend**：160 个 `frontend/src/**/*.test.ts(x)`，覆盖页面（`app/`）、组件（`components/`）、lib 钩子与纯函数（`lib/__tests__/`）、store、middleware。2026-08-29 变更新增 3 个（`delete-change-confirm` / `change-activity-badge` / 详情页 `page-last-signal`），扩展列表页与 `workspace-config-card` 既有用例。
+- **daemon**：142 个 `sillyhub-daemon/tests/**/*.test.ts`（interactive 会话与驱动、policy、adapters、resilience、task-runner、spec 同步等）；spikes 探索性测试另走 `vitest.spikes.config.ts`（`include=['spikes/**/*.test.ts']`，串行 forks ≤2），不进 CI 主套件。2026-08-29 变更新增 `test_bundle_metadata_compat.test.ts`（bundle 含 PLATFORM-BUNDLE.json 后 pullSpecBundle/spec_version 判定兼容回归，daemon 源码零改动前提）。
 
 ## 守护测试
 

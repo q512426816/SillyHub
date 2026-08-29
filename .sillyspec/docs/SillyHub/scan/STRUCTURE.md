@@ -55,7 +55,7 @@ backend/
 │       ├── daemon/                               # daemon 实体 + WS 通道 + 会话 SSE
 │       ├── llm_provider/                         # 模型供应商(Claude 直连 + LiteLLM 网关)
 │       ├── mcp_gateway/                          # 对外 MCP 服务(FastMCP mount,server/tools/sse)
-│       ├── platform_sync/                        # 跨仓进度同步(shpsync_ token + spec manifest/sync)
+│       ├── platform_sync/                        # 跨仓进度同步(shpsync_ token + spec manifest/sync/bundle 拉取)
 │       ├── tool_gateway/ git_gateway/ git_identity/   # 工具网关 / Git 凭证
 │       ├── file/ storage/                        # 平台文件中心(MinIO/S3)
 │       ├── ppm/                                  # 项目/问题管理(PPM)
@@ -86,7 +86,9 @@ frontend/
 │   │   ├── agent/ agent-log/ agent-profile/ changes/ daemon/
 │   │   ├── llm-providers/ workspace/ sessions/ ppm/ permissions/
 │   │   ├── charts/ layout/ mobile/ ui/ __tests__/
-│   │   └── app-shell.tsx top-bar.tsx mission-console.tsx file-upload.tsx ...
+│   │   └── app-shell.tsx top-bar.tsx mission-console.tsx file-upload.tsx
+│   │       delete-change-confirm.tsx ...          # 变更删除受控确认弹层(2026-08-29-change-delete-closure-and-spec-pull;
+│   │                                              #   活动徽标在 changes/change-activity-badge.tsx)
 │   ├── lib/                 # 前端业务逻辑层
 │   │   ├── api/ auth/ file/ ppm/     # 子域 API 客户端
 │   │   ├── api.ts api-types.ts query-client.ts query-keys.ts

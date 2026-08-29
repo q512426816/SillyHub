@@ -28,6 +28,7 @@ generator: sillyspec-scan
 
 ### 🟢 低
 
+- **变更删除闭环四处收尾尾巴（2026-08-29-change-delete-closure-and-spec-pull 已知裁量/遗留，随 worktree 分支交付）**：① spec-sync 的 service 层结果已含 `platform_deleted` 诊断键（apply_ops 返回 dict），但 `POST /changes/-/spec-sync` HTTP 响应模型暂不透出——CLI 感知「被平台删除拒绝」待后续接线（`spec_workspace/service.py` apply_ops 返回处注释明示契约先行）；② `ChangeRead` 无 `last_pushed_at`（仅列表 ChangeSummary 投影），详情页「最后信号」由 steps 明细派生（`changes/[cid]/page.tsx` `lastSignalFromSteps`，禁新增网络请求）；③ X3 步骤开始上报的渲染侧一行接线（sillyspec 仓 `run/stage.js`/`run/prompt.js` 调 `triggerStepStartSync`）受跨仓 taskcard allowed_paths 约束留后续变更（活跃坑见 `docs/sillyspec/2026-08-29-sillyspec-x1-x4-cli-receipts.md`）；④ `_compute_reparse_scope` docstring 仍写「scoped 零删除」，与 task-03 后「scope∩磁盘确认消失可删」的收窄语义漂移（`spec_workspace/service.py:1987` 一带，规则 18 待修）。
 - **daemon interactive 兼容入口 @deprecated 未清**：`sillyhub-daemon/src/interactive/types.ts:369`、`claude-sdk-driver.ts:226`、`:246` 三处（grep 实测），确认无外部引用后应清理。
 - **daemon god 文件未拆分**：`daemon.ts` / `task-runner.ts` 高耦合、lease payload 鸭子类型几十处，无低风险切片（旧 scan 记录，未复核）。
 - **scan 漂移门 warn-only**：scan 文档过期只告警 + PR 评论，不阻塞 merge，修复仍需人工重跑（`.github/workflows/scan-drift.yml` 头部注释）。

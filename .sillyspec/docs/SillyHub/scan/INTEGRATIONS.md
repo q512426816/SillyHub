@@ -43,8 +43,9 @@ generator: sillyspec-scan
 
 | 集成 | 用途 | 实现 | 依据 |
 |---|---|---|---|
-| SillySpec CLI ↔ 平台进度同步 | CLI（daemon 本地）向平台上报 change 进度/审批/文档，读进度列表 | `/api/changes/{name}/progress`（GET/POST）、`GET /api/changes`、`/api/changes/{name}/documents`、`/api/changes/{name}/approval`、`/api/quicklog-entries`；鉴权 `shpsync_` token | backend/app/modules/platform_sync/router.py、auth.py、token_service.py |
+| SillySpec CLI ↔ 平台进度同步 | CLI（daemon 本地）向平台上报 change 进度/审批/文档，读进度列表；删除/归档上行 `status='deleted'` 墓碑（2026-08-29 起，平台写路径置 location='deleted' 触发镜像软删收敛） | `/api/changes/{name}/progress`（GET/POST）、`GET /api/changes`、`/api/changes/{name}/documents`、`/api/changes/{name}/approval`、`/api/quicklog-entries`；鉴权 `shpsync_` token | backend/app/modules/platform_sync/router.py、auth.py、token_service.py |
 | spec 文件增量同步 | CLI 直跑 spec 树 manifest 对比 + 增量推送（替代整树 tar 全量） | `GET /api/changes/-/spec-manifest`、`POST /api/changes/-/spec-sync`；daemon 侧 `spec-sync.ts` | backend/app/modules/platform_sync/router.py；sillyhub-daemon/src/spec-sync.ts |
+| spec 文档拉取（CLI/浏览器，2026-08-29-change-delete-closure-and-spec-pull） | 主动拉服务器 spec 整树**快照** tar（无自动同步/会话中刷新）；响应头 `X-Spec-Version` + tar 顶层 `PLATFORM-BUNDLE.json` 元数据（spec_version/strategy/generated_at/server） | CLI：`GET /api/changes/-/spec-bundle`（`_write_auth` 仅 shpsync_，字面量路由前置注册防被 `/changes/{name}` 吞）+ sillyspec 顶层命令 `pull --spec`（`--force` 整树覆盖、保留 local.yaml 连接凭据）；浏览器：既有 `GET /api/workspaces/{ws}/spec-workspace/bundle` + 前端「下载文档包」按钮（鉴权 blob 范式） | backend/app/modules/platform_sync/router.py、spec_workspace/router.py；frontend/src/lib/spec-workspaces.ts（downloadSpecBundle）；sillyspec 仓 src/sync.js（pullSpecBundle） |
 | workspace 同步 token 管理 | 工作区粒度签发/管理 `shpsync_` token（key_prefix 前缀对账） | `/api/workspaces/...`（platform-sync-tokens router） | backend/app/modules/platform_sync/workspace_router.py、token_model.py |
 | daemon 本机配置 | init/claim 时写 `.sillyspec/local.yaml`（platform + mcp 派发段） | daemon `local-yaml-writer.ts` | sillyhub-daemon/src/local-yaml-writer.ts |
 

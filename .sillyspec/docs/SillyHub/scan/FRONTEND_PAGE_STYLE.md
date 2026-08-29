@@ -251,6 +251,9 @@ onCell: () => ({ style: { background: "hsl(var(--card))" } })
 </Modal>
 ```
 
+**高危删除升级为「输入名称」受控确认**(2026-08-29-change-delete-closure-and-spec-pull 定式,先例=admin 用户删除):
+对多用户共享/不可恢复的数据(变更中心删除、admin 删用户),弹层**末段**加输入框,要求用户输入实体名称(或末段)完全相等才能点亮确认按钮——仅 `okText="确认删除"` 的普通二次确认不够。组件参照 `frontend/src/components/delete-change-confirm.tsx`(变更删除:输入变更名末段=change_key 去掉 `YYYY-MM-DD-` 日期前缀后的段;成功后失效 changes 列表缓存)。
+
 ---
 
 ## 9. 提示与错误

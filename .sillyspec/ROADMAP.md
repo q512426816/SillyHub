@@ -4,11 +4,15 @@
 > 维护规则：每次 `sillyspec-archive` 归档变更时同步更新「已完成里程碑」与「当前活跃」两节。
 > 详细变更规格见 `.sillyspec/changes/`（活跃）与 `.sillyspec/changes/archive/`（历史）。
 
-最近更新：2026-08-28
+最近更新：2026-08-29
 
 ---
 
 ## 一、已完成里程碑（按时间，提炼自已归档变更）
+
+### 2026-08-29 · 变更中心删除闭环、文档拉取与进行中可见性（task-15 收尾，待人工确认归档）
+
+- **change-delete-closure-and-spec-pull**（2026-08-29，brainstorm→plan→execute 三轮审过门，revision 1 并入波 4；15 task/4 Wave + 跨仓 X1-X4）：四块能力——①**删除自动收敛+防复活**（波 1）：apply_ops 空目录清理（仅 ops 涉及目录，规避 Windows bind mount stat 断崖）/`spec_file_manifest.platform_deleted` 墓碑四通道拦截（add/rename 拒、delete 幂等放行、`_write_spec_root` 落盘前缀排除、`_ensure_change_row` 双层拒收 409 code=change_deleted）/scoped 定向删除（R-08 收窄修订：scope∩磁盘确认消失可删、scope 外零动作）/删除环与 `_apply_parsed` 对 deleted 行三点豁免（Grill B-1/B-2 加固）/progress 联动删/quicklog apply 期对账 hidden；②**删除入口**（波 2）：`DELETE /workspaces/{ws}/changes/{cid}`（CHANGE_ARCHIVE 或 owner，D-001）→ soft_delete_change_dir（30 天备份区+墓碑）→ location='deleted' 软删+change_events 审计（D-002），前端三页（末段输入防呆弹层/操作列/详情危险按钮/移动端 ActionSheet）；③**拉取口子**（波 3）：`GET /changes/-/spec-bundle`（shpsync、字面量路由前置）+X-Spec-Version 头+tar 顶层 PLATFORM-BUNDLE.json，前端「下载文档包」（blob 范式，快照语义文案），daemon 兼容实证零改；④**进行中可见性**（波 4，D-007 三层）：ChangeSummary.last_pushed_at 投影（零 migration）+活动徽标三态（ACTIVITY_STALE_MS=30min/ISO_LIKE_RE 防御解析，R-12 文案只陈述事实）+CLI X3 步骤开始/X4 任务边界补推（后端零改动）+心跳 Layer 3 Non-Goal。跨仓 sillyspec 仓 X1-X4 全落地（b86a593 墓碑+X3/X4、16c21b0 pull --spec、fb35dc0 --force 保留 local.yaml）。决策 D-001~D-007 沉淀 knowledge/decisions（backend 4/frontend 1/sillyhub-daemon 1/unmapped 1）。已知裁量/遗留：spec-sync HTTP 响应未透传 platform_deleted 诊断键（service 契约先行）、ChangeRead 无 last_pushed_at（详情页 steps 派生）、X3 渲染侧一行接线待后续变更、_compute_reparse_scope docstring 漂移待修（详见 scan/CONCERNS 与 docs/sillyspec 回执）。
 
 ### 2026-08-28 · 守护进程共享与平台共享智能体（grants 统一授权表）
 

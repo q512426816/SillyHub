@@ -15,7 +15,7 @@ generator: sillyspec-scan
 
 ### backend（Python 3.12 / FastAPI，`backend/pyproject.toml`，uv + hatchling）
 - Web 框架：`fastapi>=0.115` + `uvicorn`（lifespan 启停钩子在 `backend/app/main.py`）。
-- ORM / DB：`sqlmodel>=0.0.22` + `asyncpg`（PostgreSQL 异步驱动）；迁移 `alembic>=1.13`，迁移脚本在 `backend/migrations/versions`（145 个 revision 文件）。
+- ORM / DB：`sqlmodel>=0.0.22` + `asyncpg`（PostgreSQL 异步驱动）；迁移 `alembic>=1.13`，迁移脚本在 `backend/migrations/versions`（170 个 revision 文件；2026-08-29-change-delete-closure-and-spec-pull 新增单 revision 两列 `20260829130000_add_platform_deleted_and_quicklog_hidden`：`spec_file_manifest.platform_deleted` + `quicklog_entries.hidden`）。
 - 缓存 / 实时：`redis>=5.0`（agent run 日志扇出等）。
 - 对象存储：`aiobotocore>=3.8,<4`（文件中心，S3 兼容 / MinIO，经 `modules/storage` 抽象：base / factory / minio_backend）。
 - 对外 MCP：官方 MCP Python SDK `mcp>=1.29,<2`（FastMCP + ASGI mount，`modules/mcp_gateway`）。
@@ -69,7 +69,8 @@ generator: sillyspec-scan
        │  读写宿主文件系统 / .sillyspec 文档 / skills
        │
   SillySpec CLI（agent 进程内）──platform_sync 端点(/api/platform-sync/*)──> backend
-       │  shpsync_ workspace token 鉴权，回传 progress/documents/approval/quicklog
+       │  shpsync_ workspace token 鉴权，回传 progress/documents/approval/quicklog，
+       │  spec 文件推拉（增量 ops / 整树 bundle 快照，2026-08-29 起 CLI 侧 `pull --spec`）
 ```
 - backend 是唯一持久化与鉴权中心；daemon 是执行边缘节点（无独立 HTTP 服务），主动连 backend `/ws`（`modules/daemon/router.py:2552`），WS 双向消息 + lease 轮询领取任务。
 - LLM 调用经 LiteLLM 网关统一出口：backend `llm_provider` 模块持 `litellm_client.py`；daemon 侧经 backend `/api/llm-proxy/{path}` 透传端点（`modules/daemon/router.py:2307`，master key 不出 backend 进程）。
@@ -94,10 +95,10 @@ generator: sillyspec-scan
 ### DB Schema 概况（PostgreSQL，约 94 张表，`__tablename__` 计数）
 按域分组（列代表性表名 + 用途，不列字段明细）：
 - 认证 / 组织：`users`、`sessions`、`roles`、`api_keys`、`workspaces`、`user_workspace_roles` 等。
-- 变更流 / 文档：`changes`、`change_documents`、`change_reviews`、`tasks`、`scan_documents`、`spec_workspaces`、`spec_conflicts` 等。
+- 变更流 / 文档：`changes`、`change_documents`、`change_reviews`、`tasks`、`scan_documents`、`spec_workspaces`、`spec_conflicts`、`spec_file_manifest`（spec 文件增量清单；2026-08-29-change-delete-closure-and-spec-pull 加 `platform_deleted` 平台删除墓碑列，拦截四条复活通道）等。
 - Agent 编排：`agent_runs`、`agent_run_logs`、`agent_sessions`、`agent_missions`、`agent_profiles`（AgentProfile 配置层）、`agent_artifacts` 等。
 - Daemon 运行时：`daemon_instances`、`daemon_task_leases`、`daemon_change_writes`、`daemon_borrow_audit` 等。
-- 跨仓同步（platform_sync）：`platform_change_progress`（CLI 进度回传落库）、`platform_sync_tokens`（shpsync_ workspace 级 token）、`quicklog_entries`（quick 条目推送）。
+- 跨仓同步（platform_sync）：`platform_change_progress`（CLI 进度回传落库；`last_pushed_at` 列自 2026-08-29 起投影进 ChangeSummary）、`platform_sync_tokens`（shpsync_ workspace 级 token）、`quicklog_entries`（quick 条目推送；2026-08-29 加 `hidden` 软隐藏列——apply 期对账镜像文件中缺失的 pushed 行，读端 merge_entries 过滤）。
 - MCP 网关：`mcp_tokens`（McpToken 签发/吊销）、`mcp_webhooks`。
 - 网关 / 审计：`git_identities`、`git_operation_logs`、`tool_policies`、`audit_logs` 等。
 - DevOps：`releases`、`release_approvals`、`incidents`、`postmortems`。
@@ -123,7 +124,9 @@ generator: sillyspec-scan
 - **鉴权四轨**：JWT 会话（浏览器）、`X-API-Key`（daemon 长期 key，`auth_deps` 双路径鉴权）、`shpsync_` 前缀 token（platform_sync workspace 级同步 token，写通道仅接受它，读端点兼容 JWT/API key）、McpToken（mcp_gateway 签发，dispatch scope）。
 - **实时通道**：WS（daemon ↔ backend `/ws`，`daemon/router.py:2552`）+ SSE 三路（`/api/daemon-chat/{id}/stream` 快捷聊天流、`mcp_gateway/sse.py` EventSource 帧 worker 事件流、Next.js `app/api/*` stream 中继）。WS `--ws-max-size 100MB` 以容纳 spec bundle RPC。
 - **文件中心**：`modules/file`（元数据+权限）+ `modules/storage`（base/factory/minio_backend 抽象）→ MinIO 对象存储。
-- **进度投影**：SillySpec CLI 经 `platform_sync` 9 个端点回传（`POST /changes/{name}/progress`、`GET /changes/-/spec-manifest`、`POST /changes/-/spec-sync` 增量同步、`POST /changes/{name}/documents`、`POST /changes/{name}/approval`、`POST /quicklog-entries` 等），落 `platform_change_progress` / `quicklog_entries`，变更中心读时投影覆盖 CLI 镜像。
+- **进度投影**：SillySpec CLI 经 `platform_sync` 10 个端点回传（`POST /changes/{name}/progress`、`GET /changes/-/spec-manifest`、`POST /changes/-/spec-sync` 增量同步、`GET /changes/-/spec-bundle` 整树快照 tar 拉取（2026-08-29 新增，shpsync token，响应头 `X-Spec-Version` + tar 顶层 `PLATFORM-BUNDLE.json` 快照元数据）、`POST /changes/{name}/documents`、`POST /changes/{name}/approval`、`POST /quicklog-entries` 等），落 `platform_change_progress` / `quicklog_entries`，变更中心读时投影覆盖 CLI 镜像。
+- **变更删除闭环**（2026-08-29-change-delete-closure-and-spec-pull）：① 平台删除入口 `DELETE /workspaces/{ws}/changes/{cid}`（权限 CHANGE_ARCHIVE 或 change owner）→ `soft_delete_change_dir` 镜像软删（30 天备份区 + manifest `platform_deleted` 墓碑）→ progress 删 → `location='deleted'` 软删 + `change_events` delete 审计；② 本地裸删自动收敛：apply_ops 空目录清理 + scoped 定向删除（R-08 收窄修订：scope∩磁盘确认消失可删，scope 外零动作）+ 删除环顺手清 progress 行；③ 防复活四通道拦截：`platform_deleted` 墓碑上 add/rename 拒（conflict + `platform_deleted` 列表回告，delete 幂等放行）、`_write_spec_root` 落盘集计算阶段前缀排除、`_ensure_change_row` 双层拒收（行 location='deleted' 为主 + manifest 前缀兜底锚点，409 code=change_deleted）、删除环（scoped/全量）与 `_apply_parsed` 对 deleted 行三点豁免；④ CLI 删除/归档上行 `status='deleted'` 墓碑（progress POST 写路径处理）为收敛加速器，平台闭环不依赖。
+- **进行中可见性**（2026-08-29 波 4，纯 CLI 模式）：`ChangeSummary.last_pushed_at`（progress 行既有列投影，ISO 原文透传零服务端解析）驱动前端活动徽标三态（进行中/停滞/空闲，`ACTIVITY_STALE_MS=30min` 阈值与 `ISO_LIKE_RE` 防御解析均为前端展示层关注点）；sillyspec CLI 步骤开始（X3）/execute 任务边界（X4）补推 progress 刷新最后信号（渐进增强，旧 CLI 行为不变；心跳 Layer 3 为 Non-Goal 协议预留）。
 - **LLM 出口收敛**：全部 LLM 调用经 LiteLLM 网关；daemon 侧无直连密钥，经 backend `/api/llm-proxy/{path}` 透传（master key 不出进程）。
 
 ### 三端契约同步
