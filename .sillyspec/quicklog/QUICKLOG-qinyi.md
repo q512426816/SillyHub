@@ -430,3 +430,17 @@
 根因：SDK 文档钉死 result.usage 是 MAIN AGENT LOOP ONLY（不含 Task 子代理/sidechain/compaction）且 per-turn，平台会话大量派子代理时终态 token 系统性低估；且 2026-08-27 23:07:58 新 daemon 生效前的历史 run 记的是会话级累计（跨轮不清零+backend max 写回），input 累计 1860 万占总量的 90%+ 全为重复计数污染
 方案：daemon.ts 新增 _aggregateModelUsage（Record<string,ModelUsage> camelCase 四维跨模型求和、非有限数防御），onTurnResult 终态 payload 四维优先 modelUsage 聚合、缺失/空回落 result.usage（老 CLI/Codex 兼容行为不变）；本地 DB 先备份 agent_runs_token_backup_20260829（514 行）再把切割点前 run 的六 token 字段置 NULL
 结果：daemon-interactive-bridge 新增 3 用例（聚合优先/空回落/非法防御），26+89（关联 7 文件）用例全绿 tsc 0；DB 清理后干净数据 input 14.6 万 vs cache_read 55.8 万，缓存远大于输入的比例恢复正常；daemon 修复待随下次发版生效
+
+## ql-20260829-003-feee | 2026-08-29 09:45:27 | daemon 手写过渡类型收口为 api-types 生成物同构别名 + 清偿 daemon 无 CI 债
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/protocol.ts（PendingControlCommand 改生成物 ControlCommandItem 别名）
+- sillyhub-daemon/src/hub-client.ts（SuspendBatchBody/Response 改生成物别名+补 api-types import）
+- .sillyspec/docs/multi-agent-platform/scan/CONCERNS.md（daemon 无 CI 失实条目划线清偿）
+- .sillyspec/docs/multi-agent-platform/modules/ci.md（补登 daemon-ci.yml 存在事实）
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（变更索引追加 ql-20260829-003 条目）
+需求：daemon 手写过渡类型收口为 api-types 生成物同构别名 + 清偿 daemon 无 CI 债。
+根因：task-06/08 实现期 api-types 未再生成被迫手写过渡类型（task-11 已收口生成物但当时零编译错未替换）；CONCERNS 的 daemon 无 CI 条目为扫描基线过时失实（daemon-ci.yml 2026-08-20 HY-1 审计已新增）。
+方案：三处 interface 改 type 别名指向 components schemas 生成物（payload 可选化由 dispatcher 既有 ?? 兜底吸收，消费方零改动）；CONCERNS 划线清偿+ci.md/daemon 卡同步。
+结果：tsc 0 错、相关回归 92 用例绿（control-dispatcher/resilience/integration/stop-suspend），commit 含文档四文件。
