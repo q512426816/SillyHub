@@ -300,8 +300,8 @@ function setupPre(
     preContext?: SessionPreContext | null;
     machines?: DaemonMachineRead[];
     onPreSessionCreated?: (_resp: { session_id: string; run_id: string }) => void;
-    /** workspacesQuery 返回（上下文行工作区名解析数据源）。 */
-    workspacesItems?: { id: string; name: string }[];
+    /** workspacesQuery 返回（上下文行工作区名解析数据源；status 供归档只读判定）。 */
+    workspacesItems?: { id: string; name: string; status?: string }[];
   } = {},
 ) {
   sessionApi.getAgentSession.mockResolvedValue(makeDetail());
@@ -442,6 +442,18 @@ describe("SessionPanel 预会话态渲染（D-101 同构空态）", () => {
     const input = screen.getByPlaceholderText(
       /机器离线，输入不可用/,
     ) as HTMLTextAreaElement;
+    expect(input.disabled).toBe(true);
+  });
+
+  it("ql-20260829-011：preContext 工作区已归档：输入禁用 + 只读占位文案", async () => {
+    setupPre({
+      preContext: { workspaceId: "ws-arch", runtimeId: "rt-claude" },
+      workspacesItems: [{ id: "ws-arch", name: "归档区", status: "archived" }],
+    });
+    // 归档判定依赖 workspacesQuery（异步），findBy 等占位文案出现。
+    const input = (await screen.findByPlaceholderText(
+      /工作区已归档，会话只读/,
+    )) as HTMLTextAreaElement;
     expect(input.disabled).toBe(true);
   });
 });

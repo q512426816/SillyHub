@@ -52,3 +52,16 @@
 方案：后端 WorkspaceService.ensure_writable 统一守卫（WorkspaceArchived 409 中文提示+恢复路径），接线四处写入口——创建会话（daemon/session）、批量派发 run（start_run）、变更级派发、发起变更（change_writer 门禁先于 not-scanned）；pending 不拦。前端会话树归档组「＋」与 scoped 门户页头「新建会话」置灰（提示恢复路径），权限权威在服务端
 结果：后端新增 5 用例全绿（unit/会话 409/run 409/变更 409 含顺序断言）+ change_writer 47 + 会话路由 + agent run 37 回归绿，ruff/mypy 0 错；前端 session-list-panel 52（新增归档＋禁用用例）+ 门户/会话页 107 回归绿，tsc 0 错，eslint 0 错误；模块文档 workspace.md 已补禁写口径段
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/workspace/tests/test_archived_write_guard.py
+
+## ql-20260829-011-d37c | 2026-08-29 21:14:26 | 归档区存量会话转只读（inject/interrupt 409 + 前端输入栏置灰）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/session/service.py（_ensure_session_workspace_writable 守卫 + _inject_into_session/interrupt_session 两处接线）
+- backend/app/modules/workspace/tests/test_archived_write_guard.py（新增 inject 409/interrupt 409 集成用例（守卫先于 status 判定））
+- frontend/src/components/daemon/session-panel.tsx（sessionWorkspaceArchived 派生 + sendingDisabled/placeholder 并入（三处输入栏覆盖））
+- frontend/src/components/daemon/__tests__/session-panel-pre-session.test.tsx（归档只读用例（findBy 等异步 workspacesQuery））
+需求：归档区存量会话转只读（inject/interrupt 409 + 前端输入栏置灰）
+根因：上一轮禁写只拦「新建」，归档区既有会话仍可继续对话（inject）与中断（interrupt），归档语义不完整
+方案：后端 SessionService._ensure_session_workspace_writable 守卫接线 _inject_into_session 共享核心（覆盖用户 inject/平台审批代写/激活分支三路径）与 interrupt_session，409 与创建/派发同口径，无工作区会话不拦；前端 SessionPanel sessionWorkspaceArchived 派生并入 sendingDisabled+占位文案（归档只读提示），三处输入栏挂载点自动覆盖
+结果：后端 test_archived_write_guard 7 用例全绿（新增 inject/interrupt 409 集成）+ inject/interrupt 相关 97 回归绿 ruff/mypy 0；前端预会话 36（新增归档只读用例）+ prompt/dialog 62 回归绿 tsc 0 eslint 0 错误；模块文档 workspace.md 已补存量会话只读段

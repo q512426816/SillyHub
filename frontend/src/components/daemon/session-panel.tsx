@@ -1192,6 +1192,15 @@ function SessionPanelPage({
     return ws ? (ws.display_alias ?? ws.name) : null;
   }, [session?.workspace_id, workspacesQuery.data]);
 
+  // ql-20260829-011：归档区存量会话只读——后端 inject/interrupt 已 409，输入栏
+  // 置灰 + 占位提示恢复路径（预会话态兜底 preContext.workspaceId 同判）。
+  const sessionWorkspaceArchived = useMemo(() => {
+    const wsId = session?.workspace_id ?? preContext?.workspaceId ?? null;
+    if (!wsId) return false;
+    const ws = workspacesQuery.data?.items.find((w) => w.id === wsId);
+    return ws?.status === "archived";
+  }, [session?.workspace_id, preContext?.workspaceId, workspacesQuery.data]);
+
   // ── task-07（D-106）：change 入口预会话上下文行加显变更名 ────────────────
   // X-13 双传契约保证 changeId 存在时 workspaceId 必在；真会话态 / 非 change
   // 预会话（changeId 空）enabled 守卫停请求。title 缺省回退 change_key。
@@ -2804,12 +2813,15 @@ function SessionPanelPage({
     // SessionInputBar 发送按钮（!value.trim() 且无附件，D-7 附件例外维持）+
     // handleSend 双守卫；本 disabled 同时禁 textarea，并入 trim 判断会在空输入
     // 时锁死输入框无法打字。
-    const preSendingDisabled = !preContext || !preMachineOnline;
-    const prePlaceholder = !preContext
-      ? "请先选择机器与智能体…"
-      : !preMachineOnline
-        ? "机器离线，输入不可用…"
-        : `发送第一句话开始对话…（Enter 发送 · Shift+Enter 换行 · ${MENTION_PLACEHOLDER_HINT}）`;
+    const preSendingDisabled =
+      !preContext || !preMachineOnline || sessionWorkspaceArchived;
+    const prePlaceholder = sessionWorkspaceArchived
+      ? "工作区已归档，会话只读。恢复请到工作区详情把状态改回「活跃」"
+      : !preContext
+        ? "请先选择机器与智能体…"
+        : !preMachineOnline
+          ? "机器离线，输入不可用…"
+          : `发送第一句话开始对话…（Enter 发送 · Shift+Enter 换行 · ${MENTION_PLACEHOLDER_HINT}）`;
     // task-13（FR-05）：预会话团队门控——与真会话同构（:1771 附近
     // teamButtonDisabled/teamButtonTitle 先例）：引擎 claude（D-003 一期专属）
     // + 所选机器在线；机器列表找不到不武断判离线（preMachineOnline 语义
@@ -3116,9 +3128,11 @@ function SessionPanelPage({
   // SessionInputBar 发送按钮（!value.trim() 且无附件，D-7 附件例外维持）+
   // handleSend 入口守卫（下方 !prompt && 附件空 return）；本 disabled 同时禁
   // textarea，并入 trim 判断会在空输入时锁死输入框无法打字。
-  const sendingDisabled = ended || suspended || !machineOnline;
-  const placeholder = ended
-    ? "会话已结束，请新建会话"
+  const sendingDisabled = ended || suspended || !machineOnline || sessionWorkspaceArchived;
+  const placeholder = sessionWorkspaceArchived
+    ? "工作区已归档，会话只读。恢复请到工作区详情把状态改回「活跃」"
+    : ended
+      ? "会话已结束，请新建会话"
     : suspended
       ? "等待守护进程恢复后可继续对话…"
       : !machineOnline

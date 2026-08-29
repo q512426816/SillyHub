@@ -60,6 +60,11 @@ workspace_id 是全平台跨组件协作主轴；daemon-client 唯一模式下�
     后）、发起变更（change_writer 门禁，先于 not-scanned 检查）；pending 不拦
     （激活前过渡态）。前端：会话树归档组头「＋」与 scoped 门户页头「新建会话」
     按钮置灰（提示恢复路径）；前端置灰是提示层，权限权威在服务端。
+    **存量会话只读（ql-20260829-011）**：inject/interrupt 对归档区会话同口径
+    409——守卫在 ``_inject_into_session`` 共享核心入口（覆盖用户 inject / 平台
+    审批代写 / 激活分支）与 ``interrupt_session``，会话无工作区（workspace_id
+    null）不拦；前端 SessionPanel 输入栏置灰 + 只读占位文案（预会话态兜底
+    preContext.workspaceId 同判）。
     root_path 与 slug 的唯一性是 **partial unique index（WHERE deleted_at IS NULL）**——
     软删行保留原值，同路径重建走复活而非冲突（migration 202605261000）
   - M2N 中间表：`TaskWorkspace` / `AgentRunWorkspace` / `PpmProjectWorkspace`。

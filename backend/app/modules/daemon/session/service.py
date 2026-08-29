@@ -3049,6 +3049,23 @@ class SessionService:
             run_sender_user_id=session.user_id,
         )
 
+    async def _ensure_session_workspace_writable(self, session: AgentSession) -> None:
+        """ql-20260829-011：归档区存量会话只读守卫。
+
+        会话挂工作区且该工作区已归档 → 409 WorkspaceArchived（统一守卫
+        ``WorkspaceService.ensure_writable``，与创建会话/发起变更同口径）；
+        非工作区会话（workspace_id null）不拦。inject 主路径/service 身份路径
+        与 interrupt 共用本守卫。
+        """
+        if session.workspace_id is None:
+            return
+        from app.modules.workspace.model import Workspace
+        from app.modules.workspace.service import WorkspaceService
+
+        ws = await self._session.get(Workspace, session.workspace_id)
+        if ws is not None:
+            WorkspaceService.ensure_writable(ws)
+
     async def _inject_into_session(
         self,
         session: AgentSession,
@@ -3110,6 +3127,10 @@ class SessionService:
         session_id = session.id
         now = datetime.now(UTC)
         try:
+            # ql-20260829-011：归档区存量会话只读——共享核心入口统一拦（覆盖用户
+            # inject / 平台审批代写 / 激活分支三路径），409 早于 status/lease
+            # 判定；置于 try 内借既有 AppError rollback 收敛行锁事务。
+            await self._ensure_session_workspace_writable(session)
             if session.status != "active":
                 raise DaemonSessionNotActive(
                     f"AgentSession '{session_id}' is not active (status={session.status}).",
@@ -3855,6 +3876,8 @@ class SessionService:
         """
         try:
             session = await self._get_owned_session_for_update(session_id, user_id)
+            # ql-20260829-011：归档区存量会话只读——interrupt 同口径 409。
+            await self._ensure_session_workspace_writable(session)
             if session.status != "active":
                 raise DaemonSessionNotActive(
                     f"AgentSession '{session_id}' is not active (status={session.status}).",

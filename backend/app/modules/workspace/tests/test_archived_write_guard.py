@@ -234,3 +234,66 @@ async def test_change_create_on_archived_returns_409(
             title="归档区变更",
         )
     assert exc_info.value.http_status == 409
+
+
+# ── HTTP：存量会话只读（inject / interrupt 409，ql-20260829-011）─────────────
+
+
+async def _seed_session(
+    db_session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    workspace_id: uuid.UUID | None,
+) -> uuid.UUID:
+    from app.modules.agent.model import AgentSession
+
+    sess = AgentSession(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        runtime_id=None,
+        lease_id=None,
+        workspace_id=workspace_id,
+        provider="claude",
+        status="active",
+    )
+    db_session.add(sess)
+    await db_session.commit()
+    return sess.id
+
+
+@pytest.mark.asyncio
+async def test_session_inject_on_archived_workspace_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """归档区存量会话注入（继续对话）→ 409（守卫先于 status/lease 判定）。"""
+    user = await _create_user(db_session)
+    await _grant_platform_permission(db_session, user.id, Permission.TASK_RUN_AGENT)
+    ws = await _create_workspace(db_session, status="archived")
+    session_id = await _seed_session(db_session, user_id=user.id, workspace_id=ws.id)
+
+    resp = await client.post(
+        f"/api/daemon/sessions/{session_id}/inject",
+        json={"prompt": "继续"},
+        headers=_headers(_token_for(user)),
+    )
+    assert resp.status_code == 409, resp.text
+    body = resp.json()
+    assert body["code"] == "HTTP_409_WORKSPACE_ARCHIVED"
+
+
+@pytest.mark.asyncio
+async def test_session_interrupt_on_archived_workspace_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """归档区存量会话中断 → 409（与 inject 同口径只读）。"""
+    user = await _create_user(db_session)
+    await _grant_platform_permission(db_session, user.id, Permission.TASK_RUN_AGENT)
+    ws = await _create_workspace(db_session, status="archived")
+    session_id = await _seed_session(db_session, user_id=user.id, workspace_id=ws.id)
+
+    resp = await client.post(
+        f"/api/daemon/sessions/{session_id}/interrupt",
+        headers=_headers(_token_for(user)),
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["code"] == "HTTP_409_WORKSPACE_ARCHIVED"
