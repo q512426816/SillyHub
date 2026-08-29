@@ -1992,27 +1992,40 @@ class SpecWorkspaceService:
         file_ql_ids = {e.ql_id for e in entries}
 
         rows = (
-            (
-                await self._session.execute(
-                    select(QuicklogEntryORM).where(QuicklogEntryORM.workspace_id == workspace_id)
+            await self._session.execute(
+                select(QuicklogEntryORM.ql_id, QuicklogEntryORM.hidden).where(
+                    QuicklogEntryORM.workspace_id == workspace_id
                 )
             )
-            .scalars()
-            .all()
-        )
+        ).all()
+        # 审计 A4（2026-08-29 合入后修复轮）：对账读改轻量列——原 SELECT 全
+        # workspace QuicklogEntryORM 整实体（payload 裸存 CLI 六表结构化 JSON 的
+        # 肥列），对账判定只需 ``ql_id``（集合差）与 ``hidden`` 当前值（是否要
+        # 置位/回翻）。回写改两条按 ql_id IN 的批量 UPDATE（collect-then-update，
+        # 不再依赖 ORM 实体脏标记），置位/回翻集合逻辑与原逐行判定逐字等价。
         now = datetime.now(UTC)
-        hidden_count = 0
-        restored_count = 0
-        for row in rows:
-            if row.ql_id in file_ql_ids:
-                if row.hidden:
-                    row.hidden = False
-                    row.updated_at = now
-                    restored_count += 1
-            elif not row.hidden:
-                row.hidden = True
-                row.updated_at = now
-                hidden_count += 1
+        to_hide = [ql_id for ql_id, hidden in rows if ql_id not in file_ql_ids and not hidden]
+        to_restore = [ql_id for ql_id, hidden in rows if ql_id in file_ql_ids and hidden]
+        hidden_count = len(to_hide)
+        restored_count = len(to_restore)
+        if to_hide:
+            await self._session.execute(
+                update(QuicklogEntryORM)
+                .where(
+                    QuicklogEntryORM.workspace_id == workspace_id,
+                    QuicklogEntryORM.ql_id.in_(to_hide),
+                )
+                .values(hidden=True, updated_at=now)
+            )
+        if to_restore:
+            await self._session.execute(
+                update(QuicklogEntryORM)
+                .where(
+                    QuicklogEntryORM.workspace_id == workspace_id,
+                    QuicklogEntryORM.ql_id.in_(to_restore),
+                )
+                .values(hidden=False, updated_at=now)
+            )
         if hidden_count or restored_count:
             await self._session.commit()
             log.info(
