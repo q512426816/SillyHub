@@ -10,6 +10,7 @@ created_at: 2026-06-18
 
 from __future__ import annotations
 
+import asyncio
 import io
 import tarfile
 import uuid
@@ -434,3 +435,56 @@ class TestBundleStreaming:
         thread.join(timeout=5.0)
         assert not thread.is_alive(), "取消后写线程必须限时退出（取消检查在每次分片入队前）"
         stream.close()  # 幂等
+
+
+class TestBundleStreamLeakWindow:
+    """2026-08-30 审计⑦：finally put 撞满队 + close 竞态的线程泄漏窗口。"""
+
+    async def test_finally_put_on_full_queue_with_close_race_recycled(self) -> None:
+        """生产者恰在队列满时收尾 + 消费端 close——写线程必须被回收。
+
+        构造：produce 写满队列（32×64KB）后返回，finally 的 outcome ``put`` 撞
+        满队阻塞；主线程随后 close()。修复前顺序（先 ``done.set()`` 后 put）下
+        close 的排空循环被 ``not done`` 挡住不排空 → put 无人解阻 → join 5s
+        超时后线程永久阻塞（泄漏）；修复后（先 put 后 done）close 排空解阻，
+        线程限时退出。
+        """
+        import time as _time
+
+        from app.modules.spec_workspace.service import (
+            _BUNDLE_QUEUE_MAX_CHUNKS,
+            _BundleTarStream,
+        )
+
+        def produce(writer) -> None:
+            writer.write(b"x" * (64 * 1024 * _BUNDLE_QUEUE_MAX_CHUNKS))
+
+        stream = _BundleTarStream(produce)
+        iter(stream)  # 启动写线程（迭代器本身由消费端 close 路径回收）
+        deadline = _time.monotonic() + 5.0
+        while stream._queue.qsize() < _BUNDLE_QUEUE_MAX_CHUNKS and _time.monotonic() < deadline:
+            await asyncio.sleep(0.01)
+        assert stream._queue.qsize() == _BUNDLE_QUEUE_MAX_CHUNKS, "前置：队列应已写满"
+
+        stream.close()  # 消费端放弃（与 finally put 并发竞态）
+
+        thread = stream._thread
+        assert thread is not None
+        thread.join(timeout=6.0)
+        assert not thread.is_alive(), "满队收尾 + close 竞态下写线程必须限时回收（修复前死锁泄漏）"
+
+    async def test_iter_bundle_stream_closes_on_aclose(self) -> None:
+        """async 包装：消费端提前 aclose（客户端断连同构）→ finally 显式 close，
+        线程回收（starlette 1.1.0 不调同步迭代器 close，本包装是清理入口）。"""
+        from app.modules.spec_workspace.service import _BundleTarStream, iter_bundle_stream
+
+        stream = _BundleTarStream(lambda w: w.write(b"y" * 300_000))
+        agen = iter_bundle_stream(stream)
+        first = await agen.__anext__()
+        assert first
+        await agen.aclose()  # 触发生成器 finally → to_thread(close)
+        assert stream._closed
+        thread = stream._thread
+        assert thread is not None
+        thread.join(timeout=5.0)
+        assert not thread.is_alive()

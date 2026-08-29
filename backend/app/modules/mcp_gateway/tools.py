@@ -473,6 +473,16 @@ async def dispatch_worker(
                 details={"reason": reason},
             )
 
+        # 归档区禁写（2026-08-30 审计④-3）：MCP token 通道 dispatch_worker 在目标
+        # 工作区建 run + worktree 副本并派发 daemon 执行——目标已归档 → 409，
+        # 与链路A（agent/mcp_tools._dispatch_worker_core）/ 批量派发同口径
+        # （守卫统一 WorkspaceService.ensure_writable）。
+        from app.modules.workspace.service import WorkspaceService
+
+        guard_ws = await session.get(Workspace, target_workspace_id or auth.workspace_id)
+        if guard_ws is not None:
+            WorkspaceService.ensure_writable(guard_ws)
+
         run = AgentRun(
             mission_id=mission.id,
             change_id=mission.change_id,

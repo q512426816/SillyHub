@@ -45,6 +45,7 @@ interface MockSseStream {
   url: string;
   init: RequestInit;
   push: (text: string) => void;
+  close: () => void;
 }
 
 const instances: MockSseStream[] = [];
@@ -63,6 +64,7 @@ function installSseFetchMock() {
         url: typeof input === "string" ? input : input.toString(),
         init: (init ?? {}) as RequestInit,
         push: (text) => controller.enqueue(encoder.encode(text)),
+        close: () => controller.close(),
       };
       instances.push(inst);
       return Promise.resolve(
@@ -278,6 +280,29 @@ describe("SessionPermissionPanel", () => {
     // token 在 Authorization header
     const headers = inst.init.headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer test-token");
+  });
+
+  it("终态 done 命名事件 → 停本会话重连（2026-08-30 审计⑧：不再无限退避）", async () => {
+    render(<SessionPermissionPanel sessionIds={["sess-done"]} />);
+    await flushSse();
+    const inst = instances.find((i) => i.url.includes("/sess-done/stream"))!;
+    expect(inst).toBeDefined();
+
+    // backend 对 ended/failed 会话连上即发命名事件 done 并关流（对齐
+    // daemon.ts streamSession ql-20260829-007 场景）。done 不进 onmessage，
+    // 修复前无人监听 → 关流 onerror 无 status → 退避重连无限循环。
+    inst.push('event: done\ndata: {"status":"ended"}\n\n');
+    await act(async () => {
+      for (let i = 0; i < 3; i++) {
+        await new Promise((r) => setTimeout(r, 0));
+      }
+    });
+    inst.close(); // 模拟服务端关流 → fetch-sse 触发 onerror
+    // 越过首档退避（RECONNECT_BACKOFF_MS[0]=1000ms）仍不得出现第二次 fetch。
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 1500));
+    });
+    expect(instances.filter((i) => i.url.includes("/sess-done/stream"))).toHaveLength(1);
   });
 });
 

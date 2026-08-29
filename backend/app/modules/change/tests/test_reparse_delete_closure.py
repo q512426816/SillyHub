@@ -224,6 +224,39 @@ async def test_apply_parsed_keeps_deleted_location_on_same_key_parsed(db_session
     assert row.title == "Tomb V2", "仅保护 location 字段，其余字段更新语义不变"
 
 
+async def test_tombstone_row_not_rename_matched_to_same_day_new_change(db_session, tmp_path):
+    """墓碑行不进 rename 候选（2026-08-30 审计②）。
+
+    墓碑行（location='deleted'）目录已被平台删除搬走、删除环不物理删——是永生的
+    "not-in-parsed 且磁盘不在"行。同日新建合法变更触发全量 reparse 时，若墓碑行
+    进 orphaned 候选会被日期前缀唯一匹配为 "rename"：``_apply_parsed`` 把墓碑行
+    change_key 改写为新 key 且 location 保持 deleted → 新变更出生即在变更中心
+    隐藏 + 上行 progress 永久 409（change_deleted），全仓无逆转 API。
+    """
+    ws = await _make_ws(db_session)
+    spec_root = tmp_path / "spec-root"
+    await _make_spec_ws(db_session, ws, spec_root)
+    # 墓碑：目录不在磁盘（平台删除已搬走），location='deleted'
+    await _insert_deleted_change_row(db_session, ws.id, "2026-08-29-alpha")
+    # 同日新建合法变更（磁盘目录真实存在）
+    _seed_change(spec_root, "2026-08-29-beta", "Beta")
+
+    stats, _ = await ChangeService(db_session).reparse(ws.id)  # 全量
+
+    # 墓碑行原样保留——key 不被 rename 错配改写为 beta
+    tomb = await _fetch(db_session, ws.id, "2026-08-29-alpha")
+    assert tomb is not None, "墓碑行保活（B-1）"
+    assert tomb.location == "deleted"
+    # beta 正常新建为 active 行——修复前墓碑被错配给 beta（created=0、beta 行
+    # location='deleted' 永久隐身）
+    assert stats["created"] == 1
+    assert stats["renamed"] == 0
+    beta = await _fetch(db_session, ws.id, "2026-08-29-beta")
+    assert beta is not None, "新变更正常建行，不吃墓碑"
+    assert beta.location == "active"
+    assert beta.id != tomb.id, "beta 是全新行，非墓碑行换 key 而来"
+
+
 # ===========================================================================
 # progress 联动删（FR-03a）
 # ===========================================================================
@@ -389,3 +422,90 @@ async def test_reparse_main_commit_survives_progress_cleanup_failure(
 
 # Suppress unused-import warning for pytest fixture discovery.
 pytestmark = pytest.mark.asyncio
+
+
+# ===========================================================================
+# 平台删除半删窗口兜底（2026-08-30 审计③）
+# ===========================================================================
+
+
+async def test_half_deleted_platform_tombstone_demoted_not_physical_deleted(db_session, tmp_path):
+    """平台删除半删窗口兜底：删除环遇 manifest 墓碑锚点的 'active' 行降级置软删。
+
+    delete_change 步骤①（镜像软删）内部先 commit——manifest 行 platform_deleted=True
+    + 文件搬走已落定；Change 行 location='deleted' 要到步骤⑤才随主事务落库。两
+    commit 之间中断 → 行仍 'active' 且目录已不在。修复前下次 reparse 删除环把它
+    物理删 → change_events/change_documents/change_session_links 随 ondelete=
+    CASCADE 全部抹掉（R-09 要保护的审计数据丢失）。修复后降级置软删：行保活、
+    审计子表保留、不触发 progress 联动删。
+    """
+    from app.modules.change.model import ChangeEventORM
+    from app.modules.spec_workspace.model import SpecFileManifest
+
+    ws = await _make_ws(db_session)
+    spec_root = tmp_path / "spec-root"
+    await _make_spec_ws(db_session, ws, spec_root)
+    _seed_change(spec_root, "2026-08-29-half", "Half")
+    service = ChangeService(db_session)
+    stats, _ = await service.reparse(ws.id)
+    assert stats["created"] == 1
+    row = await _fetch(db_session, ws.id, "2026-08-29-half")
+    assert row is not None and row.location == "active"
+
+    # 审计事件（子表，物理删时随 CASCADE 抹掉——本用例的保活断言对象）
+    db_session.add(
+        ChangeEventORM(
+            workspace_id=ws.id,
+            change_id=row.id,
+            event_type="stage_change",
+            detail={"from": "brainstorm"},
+        )
+    )
+    await db_session.commit()
+
+    # 模拟步骤① 完成 + 步骤⑤ 前中断：目录已搬走、manifest 墓碑已 commit、行仍 active
+    shutil.rmtree(spec_root / "changes" / "2026-08-29-half")
+    db_session.add(
+        SpecFileManifest(
+            workspace_id=ws.id,
+            path="changes/2026-08-29-half/proposal.md",
+            content_hash="0" * 64,
+            exists=False,
+            platform_deleted=True,
+        )
+    )
+    await db_session.commit()
+
+    stats, _ = await service.reparse(ws.id)  # 全量
+
+    assert stats["deleted"] == 0, "半删行不物理删（审计锚点行保活）"
+    assert stats["tombstoned"] == 1, "降级置软删"
+    row2 = await _fetch(db_session, ws.id, "2026-08-29-half")
+    assert row2 is not None and row2.id == row.id
+    assert row2.location == "deleted", "收敛为墓碑态（与 B-1 豁免行同态）"
+    events = (
+        (await db_session.execute(select(ChangeEventORM).where(ChangeEventORM.change_id == row.id)))
+        .scalars()
+        .all()
+    )
+    assert len(events) == 1, "change_events 不随删除环丢失（修复前 CASCADE 抹掉）"
+
+
+async def test_member_local_delete_without_anchor_still_physical_deleted(db_session, tmp_path):
+    """反例：成员本地删除（manifest 无 platform_deleted 锚点）仍走物理删——
+    降级只认平台墓碑锚点，不吞正常删除语义。"""
+    ws = await _make_ws(db_session)
+    spec_root = tmp_path / "spec-root"
+    await _make_spec_ws(db_session, ws, spec_root)
+    _seed_change(spec_root, "2026-08-29-local", "Local")
+    service = ChangeService(db_session)
+    stats, _ = await service.reparse(ws.id)
+    assert stats["created"] == 1
+
+    # 成员本地删除目录（无平台墓碑锚点）
+    shutil.rmtree(spec_root / "changes" / "2026-08-29-local")
+
+    stats, _ = await service.reparse(ws.id)
+    assert stats["deleted"] == 1, "无锚点 → 照常物理删"
+    assert stats["tombstoned"] == 0
+    assert await _fetch(db_session, ws.id, "2026-08-29-local") is None

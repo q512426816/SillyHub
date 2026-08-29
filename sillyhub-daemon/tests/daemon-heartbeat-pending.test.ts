@@ -231,6 +231,27 @@ describe('task-05 Daemon._sendHeartbeatOnce 注入 pending_update', () => {
     });
   });
 
+  it('R2：覆盖写（target 已存在）→ 直接 rename 原子替换成功，内容为最新', async () => {
+    const h = makeDaemonHarness(join(tmpDir, 'pending-overwrite.json'));
+    await h.daemon.writePendingUpdate({
+      reason: 'disk_change',
+      current_version: 'cur-1',
+      target_version: 'tgt-1',
+    });
+    // 第二次覆盖（target 已存在——修复前无条件先 unlink，存在 ENOENT 窗口）
+    await h.daemon.writePendingUpdate({
+      reason: 'server_command',
+      current_version: 'cur-2',
+      target_version: 'tgt-2',
+    });
+    const rec = await h.daemon.readPendingUpdate();
+    expect(rec).not.toBeNull();
+    expect(rec?.reason).toBe('server_command');
+    expect(rec?.current_version).toBe('cur-2');
+    expect(rec?.target_version).toBe('tgt-2');
+    expect(rec?.since).toBeTruthy();
+  });
+
   it('无 pending 文件（真实读取路径）→ 第 4 参 undefined', async () => {
     const h = makeDaemonHarness(join(tmpDir, 'absent.json'));
     await expect(h.sendHeartbeatOnce()).resolves.toBe(true);

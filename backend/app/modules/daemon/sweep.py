@@ -397,7 +397,48 @@ async def session_offline_sweep_once(session: AsyncSession) -> int:
         if gc_failed_count:
             gc_failed_ids = set(gc_ids)
 
-    if not hit_rows and not gc_ids:
+    # 2026-08-30 审计⑤：重派失败自愈链——NoOnlineDaemonError 返回 None 的 worker
+    # 会话停留 failed（上方离线档只选 active/pending，永不再被选中；「下轮 sweep
+    # 自愈」此前无实现）。每轮顺带捞「failed worker + 末次 run 落
+    # daemon_interrupted（重派种子口径）+ 原 runtime 已回在线 + 仍在重派宽限窗
+    # （对齐 _worker_force_end_grace_minutes 单源，超窗重派本身也拒）」重 fire；
+    # runtime 未回归 / 超窗不 fire（零无效任务）。本轮刚翻档的 hit_ids 去重，
+    # 防同轮双 fire。只读查询，不写库（fire 内部自开短事务）。
+    from app.modules.agent.patrol import _worker_force_end_grace_minutes
+
+    retry_cutoff = now - timedelta(minutes=_worker_force_end_grace_minutes())
+    latest_run_created = (
+        select(func.max(AgentRun.created_at))
+        .where(AgentRun.agent_session_id == AgentSession.id)
+        .correlate(AgentSession)
+        .scalar_subquery()
+    )
+    latest_run_interrupted = (
+        select(AgentRun.id)
+        .where(
+            AgentRun.agent_session_id == AgentSession.id,
+            AgentRun.created_at == latest_run_created,
+            AgentRun.error_code == DAEMON_INTERRUPTED_ERROR_CODE,
+        )
+        .correlate(AgentSession)
+        .exists()
+    )
+    retry_rows = (
+        await session.execute(
+            select(AgentSession.id, AgentSession.runtime_id).where(
+                AgentSession.status == "failed",
+                AgentSession.parent_session_id.is_not(None),
+                AgentSession.runtime_id.is_not(None),
+                col(AgentSession.ended_at) >= retry_cutoff,
+                online_runtime,
+                latest_run_interrupted,
+            )
+        )
+    ).all()
+    fresh_ids = {row.id for row in hit_rows}
+    retry_seeds = [(row.id, row.runtime_id) for row in retry_rows if row.id not in fresh_ids]
+
+    if not hit_rows and not gc_ids and not retry_seeds:
         return 0
 
     await session.commit()
@@ -429,10 +470,10 @@ async def session_offline_sweep_once(session: AsyncSession) -> int:
         for row in hit_rows
         if row.status == "active" and row.parent_session_id is not None
     ]
-    if worker_seeds:
+    if worker_seeds or retry_seeds:
         from app.modules.agent.worker_redispatch import fire_worker_redispatch
 
-        fire_worker_redispatch(worker_seeds)
+        fire_worker_redispatch(worker_seeds + retry_seeds)
     return converged
 
 

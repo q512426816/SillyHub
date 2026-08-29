@@ -462,10 +462,14 @@ class PlatformSyncService:
         # ``[changes/foo/, changes/foo0)`` 内，而 ``changes/foo0xx`` /
         # ``changes/foobar`` 等兄弟名全部排除；若误写成 ``changes/foo/0`` 则
         # 普通字母开头文件名（'a'-'z' > '0'）全部逃出范围、查询恒空。
-        for lower, upper in (
-            (f"changes/{name}/", f"changes/{name}0"),
-            (f"changes/archive/{name}/", f"changes/archive/{name}0"),
-        ):
+        # R6（2026-08-30 审计）：``name == "archive"`` 时跳过活跃区范围——
+        # ``changes/archive/`` 即归档区根（parser.py:135 结构性排除该名活跃
+        # 变更），该范围会吞整个归档区的任意墓碑（误 409 合法归档操作）。
+        ranges: list[tuple[str, str]] = []
+        if name != "archive":
+            ranges.append((f"changes/{name}/", f"changes/{name}0"))
+        ranges.append((f"changes/archive/{name}/", f"changes/archive/{name}0"))
+        for lower, upper in ranges:
             hit = (
                 (
                     await self._session.execute(

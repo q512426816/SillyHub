@@ -823,6 +823,15 @@ async def _dispatch_execute_team(
     ``Finalizer`` 不删），fallback 时调用。
     """
     from app.modules.agent.orchestrator import OrchestratorService
+    from app.modules.workspace.model import Workspace
+    from app.modules.workspace.service import WorkspaceService
+
+    # 归档区禁写（2026-08-30 审计④-4）：team 模式阶段推进在归档工作区建 mission
+    # + 主 run + 整队 worker 派发——single 模式已由 start_stage_dispatch 守卫
+    # （agent/service.py），team 分流此前漏拦，同口径补 409。
+    guard_ws = await session.get(Workspace, workspace_id)
+    if guard_ws is not None:
+        WorkspaceService.ensure_writable(guard_ws)
 
     change = await session.get(Change, change_id)
     if change is None:

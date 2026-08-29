@@ -1072,6 +1072,14 @@ async def _dispatch_worker_core(
     # 兜底；行缺失保持 None 防御（原执行段取行同款语义）。
     ws = await session.get(Workspace, effective_target)
     target_provider = (ws.default_agent if ws is not None else None) or "claude"
+    # 归档区禁写（2026-08-30 审计④-2）：MCP dispatch_worker 四入口共用本 core，
+    # 在归档目标工作区建子会话/worktree/lease 并派发执行——与批量派发
+    # （agent/service.py start_run）同口径 409（守卫统一 WorkspaceService.
+    # ensure_writable）。
+    if ws is not None:
+        from app.modules.workspace.service import WorkspaceService
+
+        WorkspaceService.ensure_writable(ws)
 
     # user_id 供 resolve 的 owner 分支过滤；懒建竞态 rollback 会 expire 会话内
     # 全部对象（含请求 user），过期属性访问触发隐式刷新在 greenlet 外炸
@@ -1101,9 +1109,7 @@ async def _dispatch_worker_core(
                 "placement_provider_fallback",
                 wanted=target_provider,
                 actual=binding.get("provider"),
-                user_id=(
-                    str(dispatch_user_id) if dispatch_user_id is not None else None
-                ),
+                user_id=(str(dispatch_user_id) if dispatch_user_id is not None else None),
                 workspace_id=str(dispatch_target),
             )
     if binding is None:
@@ -1161,13 +1167,9 @@ async def _dispatch_worker_core(
     # 零垃圾行（对齐上方治理门前置拦截既有模式）；全 ``~`` 根/空并集不可判定
     # → 放行交 daemon 认领终检权威裁决。precheck_path 无可判定对象（ws 无
     # root_path 且非路径A worktree 透传）→ 跳过。
-    roots = await fetch_daemon_allowed_roots(
-        session, _runtime_uuid(binding["daemon_instance_id"])
-    )
+    roots = await fetch_daemon_allowed_roots(session, _runtime_uuid(binding["daemon_instance_id"]))
     precheck_path = effective_worktree_path or (
-        resolve_root_path_for_daemon(ws.root_path)
-        if ws is not None and ws.root_path
-        else None
+        resolve_root_path_for_daemon(ws.root_path) if ws is not None and ws.root_path else None
     )
     if precheck_path and path_definitively_outside_roots(precheck_path, roots):
         log.info(

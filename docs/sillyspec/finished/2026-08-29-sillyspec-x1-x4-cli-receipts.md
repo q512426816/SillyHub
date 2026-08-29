@@ -47,3 +47,13 @@ daemon 零改动兼容（task-10）：主仓 `sillyhub-daemon/tests/test_bundle_
 
 - `POST /changes/-/spec-sync` HTTP 响应未透传 `platform_deleted` 诊断键（service 层 apply_ops 返回已含，端点 DTO 暂不透出）——CLI「被平台删除拒绝」感知接线待后续（平台端裁量，见 scan/CONCERNS 条目①）。
 - X1 墓碑依赖 CLI 升级发版后才能覆盖旧版 CLI；平台侧方案 A（镜像驱动收敛）不依赖它，旧 CLI 残留由平台删除入口/重扫描收敛兜底（D-005）。
+
+## 五、处置记录（2026-08-29 收口）
+
+**X3 渲染侧接线已补上（本文件唯一活跃坑解除）**：
+
+- 接线点：sillyspec 仓 `src/run/prompt.js` outputStep 越界守卫后、渲染前段，fire-and-forget 调 `triggerStepStartSync(cwd, changeName, platformOpts)`（不 await，prompt 渲染不被网络阻塞；未连接静默 / quick 降级 / 8s 熔断契约全在钩子内）。
+- 配套：`src/run/shared.js` docstring「接线说明」更新为已接线；补 null changeName 静默护栏（渲染层个别路径无变更名时不打 warn）。
+- 测试：`test/platform-tombstone-and-activity-report.test.mjs` 新增 X3-4「outputStep 渲染步骤即推一次 progress」（含 in-progress 投影断言），该文件 11 测试全过；受影响面（import prompt/stage/shared/complete/command 的 55 个测试文件）除一个与本接线无关的既有失败（worktree-execute-spec-drift AC-A6，在途 worktree/commit 工作引入，摘除接线复测同样失败）外全过。
+- 效果：步骤起点即刷新平台 last_pushed_at，前端活动徽标停滞误报收窄到步骤粒度（R-12 边界达成）。
+- 「三、改进点」中 allowed_paths 粒度 / 路径口径机械校验 / head_commit 统一 / verify 按仓标注等仍为上游 backlog 建议，不阻塞本文件归档。

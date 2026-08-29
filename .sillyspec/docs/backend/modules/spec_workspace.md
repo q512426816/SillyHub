@@ -88,6 +88,14 @@ apply_ops(workspace_id, ops, change_write_id, change_dirs):
 - bootstrap 后台任务持强引用防 asyncio GC（`_BACKGROUND_BOOTSTRAP_TASKS`）；
   AgentRunLog 分段写（4000 字符/段）
 - 错误文案已中文化（error-message-l10n），守护测试强制
+- apply_ops 防复活拦截覆盖 add **与 update**（ql-20260830-002 R5）：A1 前缀
+  与精确墓碑行两道守卫原只判 add——update 会把墓碑行翻 exists=True 落僵尸文件；
+  归档区前缀派生四段起步（R6：三段行不是变更目录墓碑，切段产出伪前缀）。
+- **_BundleTarStream 收尾顺序铁律**（ql-20260830-001 审计⑦）：`_run` finally 必须
+  先 `put(outcome)` 再 `_done.set()`——反序在「队列恰满 + close() 置 cancelled 晚于
+  检查」窗口 put 永久阻塞且 close 排空被 `not done` 挡住 → 写线程泄漏。路由层消费
+  必须经 `iter_bundle_stream`（async 包装：断连/结束显式 close，阻塞段 to_thread
+  不卡事件循环——starlette 1.1.0 不调同步迭代器 close）
 
 ## 人工备注
 

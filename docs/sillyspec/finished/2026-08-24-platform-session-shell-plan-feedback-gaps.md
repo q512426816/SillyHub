@@ -144,3 +144,22 @@
 - [x] 两会话 harness → claude-code（第二个本地会话 ID 补齐：cc83bb56-...）；
 - [ ] 浏览器控制台日志 / network trace（仍需用户导出）；
 - [ ] 平台版本号 / 部署时间。
+
+## 处置记录（2026-08-29 收口，机制修复落地）
+
+**症状 2「plan 确认缺失」——已修复（主坑解除）**：
+
+- 修复：daemon `sillyhub-daemon/src/interactive/session-manager.ts` `_buildCanUseToolCallback` 新增 `ExitPlanMode` 分支——canUseTool 审批升级为 dialog（`dialog_kind='plan_approval'`），复用 AskUserQuestion 基建：
+  - backend `handle_permission_request` dialog 路径（已通用）：持久化 `session_dialog_requests`（前端刷新存活）+ **不 arm 5min 自动 deny**（长驻可答）；
+  - 前端按 `dialog_kind` 存在性分流渲染会话页问答卡（session-panel 已注释「天然兼容后续新增 kind」，零前端改动）——不再被分流到无人盯的 `/runtimes` 审批面板；
+  - 答案映射：选「批准计划」→ allow（SDK 退出计划模式开始执行）；其他答案/自定义文本 → deny.message 回喂用户反馈（Claude 据此修订计划后重新提交）；卡片含计划前 1500 字预览；
+  - scan（askUserOnly）不受影响（该分支在 allow-through 之后才生效）。
+- 测试：`tests/interactive/claude-sdk-driver-permission.test.ts` 新增 3 条（载荷含 dialog_kind/双选项、批准→allow 透传、反馈→deny 回喂）；daemon 全量 vitest 180 文件 / 3103 测试 0 失败；`tsc --noEmit` 0 错；dist 已重建（下次 daemon 重启生效）。
+
+**症状 1「长命令无进度」——已由既有工作覆盖**：daemon 已上报 `bash_status`（running / completed / failed + exit_code + elapsed_ms）与 `bash_chunk`（stdout/stderr 输出，tool_result 终点携带）事件（2026-08-27-background-subagent-progress task-04，FR-01/02）——「正在跑 / 已结束 / 退出码」可见性已解决；执行中逐 chunk 增量流式推送仍是后续增强项（非本坑阻塞）。
+
+**「清扫置 failed 无通知」——已由既有工作覆盖**：sweep 已按终态分流广播 `_publish_session_ended`（suspended/failed 语义拆分后）。
+
+**待补充信息失效说明**：机制修复后浏览器 trace / 平台版本两项取证不再必要（根因已在库内 + 代码定位并修复）。
+
+**状态更新：活跃坑 → 已解决，归档至 finished/。**

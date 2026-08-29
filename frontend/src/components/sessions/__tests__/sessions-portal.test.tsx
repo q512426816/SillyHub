@@ -97,6 +97,18 @@ const mocks = vi.hoisted(() => ({
   streamClose: vi.fn(),
   // task-06（D-001/D-006）：会话列表变更信号订阅——捕获 opts（onEvent /
   // onReconnected 触发 invalidate）+ close 调用断言（unmount 关订阅）。
+  // 2026-08-30 补 mock 债（f7f99a2f session-usage-stats，同 page.test）。
+  getSessionUsage: vi.fn(async () => ({
+    totals: {
+      model: "totals",
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      api_requests: 0,
+    },
+    by_model: [],
+  })),
   subscribeAgentSessionsEvents: vi.fn(),
   eventsClose: vi.fn(),
   deleteAgentSession: vi.fn(),
@@ -154,6 +166,7 @@ vi.mock("@/lib/daemon", () => ({
   listSessionRuns: (...args: unknown[]) => mocks.listSessionRuns(...args),
   deleteAgentSession: (...args: unknown[]) => mocks.deleteAgentSession(...args),
   // task-06：门户挂载订阅的哑信号通道（opts 经包装转发捕获到 mocks）。
+  getSessionUsage: (...args: unknown[]) => mocks.getSessionUsage(...args),
   subscribeAgentSessionsEvents: (...args: unknown[]) =>
     mocks.subscribeAgentSessionsEvents(...args),
 }));

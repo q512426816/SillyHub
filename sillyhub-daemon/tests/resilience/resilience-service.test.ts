@@ -797,3 +797,95 @@ describe("drainOutbox (task-18 / FR-07)", () => {
     expect(store.has("sess-1")).toBe(false);
   });
 });
+
+// ── R4（2026-08-30 审计）：stale-token 422 有界保留重试 ────────────────────────
+
+describe("drainOutbox stale-token 422 keep-retry (R4)", () => {
+  function pendingEntry(): OutboxEntry {
+    return {
+      leaseId: "l",
+      claimToken: "stale",
+      runId: "run-r4",
+      envelopes: [{ message: { a: 1 }, dedup_key: "dk-r4" }],
+      ts: "x",
+      pending_token: true,
+    };
+  }
+
+  it("刷新取不到新 token 的 422 → 保留 entry 下轮重试（不 markDelivered）", async () => {
+    const store = new Map<string, OutboxEntry[]>([["run-r4", [pendingEntry()]]]);
+    const outbox = memOutbox(store);
+    const submit = vi.fn(async () => {
+      throw new HubHttpError(422, "token rotated", "u", "POST");
+    });
+    const svc = new ResilienceService(makeClient(submit), outbox, fastRetry, noopLogger());
+    // 刷新回调取不到（daemon 刚重启 SessionState 未建窗口）
+    svc.setClaimTokenRefresher(async () => null);
+
+    await svc.drainOutbox();
+    await flush();
+
+    expect(submit).toHaveBeenCalledTimes(1); // 用旧 token 重放了一次
+    expect(outbox.markDelivered).not.toHaveBeenCalled(); // 保留不丢弃
+    expect(store.has("run-r4")).toBe(true);
+  });
+
+  it("保留后下轮刷新成功 → 正常补发 markDelivered（窗口自愈）", async () => {
+    const store = new Map<string, OutboxEntry[]>([["run-r4", [pendingEntry()]]]);
+    const outbox = memOutbox(store);
+    let fresh = false; // 刷新回调能否取到新 token
+    let backendOk = false; // backend 是否仍拒旧 token
+    const submit = vi.fn(async () => {
+      if (!backendOk) throw new HubHttpError(422, "token rotated", "u", "POST");
+      return {};
+    });
+    const svc = new ResilienceService(makeClient(submit), outbox, fastRetry, noopLogger());
+    svc.setClaimTokenRefresher(async () => (fresh ? "tok-new" : null));
+
+    await svc.drainOutbox(); // 第一轮：旧 token 422 → 保留
+    fresh = true; // SESSION_INJECT 到达，刷新可用
+    backendOk = true; // 新 token 被 backend 接受
+    await svc.drainOutbox(); // 第二轮：新 token 补发成功
+    await flush();
+
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(outbox.markDelivered).toHaveBeenCalledWith("run-r4", ["dk-r4"]);
+    expect(store.has("run-r4")).toBe(false);
+  });
+
+  it("持续刷新失败超过 TOKEN_422_KEEP_RETRIES(5) 轮 → 落回丢弃（防毒丸）", async () => {
+    const store = new Map<string, OutboxEntry[]>([["run-r4", [pendingEntry()]]]);
+    const outbox = memOutbox(store);
+    const submit = vi.fn(async () => {
+      throw new HubHttpError(422, "token rotated", "u", "POST");
+    });
+    const svc = new ResilienceService(makeClient(submit), outbox, fastRetry, noopLogger());
+    svc.setClaimTokenRefresher(async () => null);
+
+    for (let i = 0; i < 6; i++) {
+      await svc.drainOutbox();
+    }
+    await flush();
+
+    expect(outbox.markDelivered).toHaveBeenCalledWith("run-r4", ["dk-r4"]); // 第 6 轮丢弃
+    expect(store.has("run-r4")).toBe(false);
+  });
+
+  it("非 pending entry 的 422 仍立即丢弃（既有 R-10 语义零回归）", async () => {
+    const store = new Map<string, OutboxEntry[]>([
+      ["run-r4", [{ leaseId: "l", claimToken: "t", runId: "run-r4", envelopes: [{ message: {}, dedup_key: "dk-r4" }], ts: "x" }]],
+    ]);
+    const outbox = memOutbox(store);
+    const submit = vi.fn(async () => {
+      throw new HubHttpError(422, "token rotated", "u", "POST");
+    });
+    const svc = new ResilienceService(makeClient(submit), outbox, fastRetry, noopLogger());
+    svc.setClaimTokenRefresher(async () => "tok-new"); // 有 refresher 但 entry 非 pending
+
+    await svc.drainOutbox();
+    await flush();
+
+    expect(outbox.markDelivered).toHaveBeenCalledWith("run-r4", ["dk-r4"]);
+    expect(store.has("run-r4")).toBe(false);
+  });
+});

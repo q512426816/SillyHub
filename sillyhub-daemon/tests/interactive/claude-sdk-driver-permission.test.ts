@@ -341,3 +341,83 @@ describe('deny 收敛（AC-09.1 / FR-07 / D-007@v1）', () => {
     expect(decision.message).toBe(special); // 原样，不转义不截断。
   });
 });
+
+// ── Plan 审批 dialog 升级（ExitPlanMode → plan_approval）─────────────────────
+// docs/sillyspec/2026-08-24-platform-session-shell-plan-feedback-gaps 收口：
+// ExitPlanMode 原走普通审批（前端分流 /runtimes 面板 + backend 5min 自动 deny），
+// 升级为 dialog 复用 AskUserQuestion 基建（会话页问答卡、长驻可答、DB 持久化）。
+
+describe('plan 审批 dialog 升级（ExitPlanMode → plan_approval）', () => {
+  it('PERMISSION_REQUEST 带 dialog_kind=plan_approval + 问答卡载荷（含计划预览）', async () => {
+    const d = makeMockDriver();
+    const { sm, wsClient } = makeManualSession(d);
+    await sm.create(BASE_INPUT);
+    const canUseTool = d.capturedOptions!.canUseTool!;
+    const pending = canUseTool('ExitPlanMode', { plan: '# 计划\n1. 做 A' });
+    const payload = wsClient.send.mock.calls[0]![0].payload as {
+      request_id: string;
+      dialog_kind?: string;
+      dialog_payload?: {
+        questions: { question: string; options: { label: string }[] }[];
+      };
+    };
+    expect(payload.dialog_kind).toBe('plan_approval');
+    const labels = payload.dialog_payload!.questions[0]!.options.map(
+      (o) => o.label,
+    );
+    expect(labels).toEqual(['批准计划', '需要修改']);
+    // pending 不 settle 也不 5min 超时（dialog 长驻）；清理悬挂 promise 防 vitest 报未处理拒绝
+    const reqId = payload.request_id;
+    sm.getPermissionResolver('sess-1')!.resolve(
+      { session_id: 'sess-1', request_id: reqId, decision: 'deny', message: 'cleanup' },
+      'sess-1',
+    );
+    await pending;
+  });
+
+  it('答案=「批准计划」→ allow，透传 updatedInput（SDK 退出计划模式）', async () => {
+    const d = makeMockDriver();
+    const { sm, wsClient } = makeManualSession(d);
+    await sm.create(BASE_INPUT);
+    const canUseTool = d.capturedOptions!.canUseTool!;
+    const pending = canUseTool('ExitPlanMode', { plan: '# 计划' });
+    const reqId = (
+      wsClient.send.mock.calls[0]![0].payload as { request_id: string }
+    ).request_id;
+    sm.getPermissionResolver('sess-1')!.resolve(
+      {
+        session_id: 'sess-1',
+        request_id: reqId,
+        decision: 'allow',
+        dialog_result: { answers: [{ answer: '批准计划' }] },
+      },
+      'sess-1',
+    );
+    const decision = (await pending) as Record<string, unknown>;
+    expect(decision.behavior).toBe('allow');
+    expect(decision.updatedInput).toEqual({ plan: '# 计划' });
+  });
+
+  it('答案=自定义反馈文本 → deny，message 回喂用户反馈（Claude 据此修订）', async () => {
+    const d = makeMockDriver();
+    const { sm, wsClient } = makeManualSession(d);
+    await sm.create(BASE_INPUT);
+    const canUseTool = d.capturedOptions!.canUseTool!;
+    const pending = canUseTool('ExitPlanMode', { plan: '# 计划' });
+    const reqId = (
+      wsClient.send.mock.calls[0]![0].payload as { request_id: string }
+    ).request_id;
+    sm.getPermissionResolver('sess-1')!.resolve(
+      {
+        session_id: 'sess-1',
+        request_id: reqId,
+        decision: 'allow',
+        dialog_result: { answers: [{ answer: '改用方案B，理由X' }] },
+      },
+      'sess-1',
+    );
+    const decision = (await pending) as { behavior: string; message?: string };
+    expect(decision.behavior).toBe('deny');
+    expect(decision.message).toContain('改用方案B，理由X');
+  });
+});

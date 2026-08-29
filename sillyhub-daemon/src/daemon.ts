@@ -40,7 +40,7 @@ import { arch, homedir, hostname, platform, tmpdir } from 'node:os';
 // stat：2026-08-28-fix-cross-machine-worker-dispatch task-06——认领段 cwd 存在性
 // 预检（FR-05/D-004@v1，正确机器上 worktree 必已存在，存在性即「对机」试金石）。
 import { mkdir, stat, readFile, writeFile, rename, unlink, chmod } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+
 import { join, dirname } from 'node:path';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 import { type DaemonConfig, DEFAULT_CONFIG_DIR, normalizeAllowedRoots } from './config.js';
@@ -1381,6 +1381,9 @@ export class Daemon {
    */
   private _updateRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /** R1（2026-08-30 审计）：在途 stop 的 Promise——二次 stop() 等待完成不空转。 */
+  private _stopPromise: Promise<void> | null = null;
+
   constructor(
     config: DaemonConfig,
     client: ClientLike,
@@ -1625,10 +1628,27 @@ export class Daemon {
   /**
    * 优雅停止：_running=false → abort 所有循环 → 等待 → 关闭 WS/HTTP → 注销信号。
    * 对齐 daemon.py:120-132 stop()。
+   *
+   * R1（2026-08-30 审计·selfupdate 停机竞态）：stop 在途时二次调用**等待同一
+   * Promise 完成**而非幂等空转——原 `if (!this._running) return` 会让并发调用方
+   * （SELF_UPDATE 交接链的 `await this.stop()`）在外部 SIGTERM stop 进行中、
+   * runtime lock / markOffline 尚未落地时立即返回 → respawn 新进程抢锁失败退出、
+   * 旧进程随后 exit(0) → 机器上无 daemon。
    */
   async stop(): Promise<void> {
+    if (this._stopPromise) {
+      await this._stopPromise;
+      return;
+    }
     if (!this._running) return;
     this._running = false;
+    this._stopPromise = this._stopInternal().finally(() => {
+      this._stopPromise = null;
+    });
+    await this._stopPromise;
+  }
+
+  private async _stopInternal(): Promise<void> {
     this._logger.info('stopping');
 
     // 注销信号 handler（避免 stop 中再次收到信号二次触发）
@@ -1861,21 +1881,27 @@ export class Daemon {
     } catch {
       // POSIX chmod 失败 / Windows 无 0600 语义 → 降级不中断（惯例 R-05）。
     }
-    // Windows rename 目标存在会失败 → 先 unlink 再 rename。
-    if (existsSync(this._pendingUpdatePath)) {
-      try {
-        await unlink(this._pendingUpdatePath);
-      } catch {
-        // 并发场景下另一进程刚清：忽略，rename 仍尝试。
-      }
-    }
+    // R2（2026-08-30 审计）：直接 rename 覆盖（Node 的 rename 在 Windows 经
+    // MoveFileExW(REPLACE_EXISTING)、POSIX rename(2) 均原子替换已存在目标）——
+    // 不再无条件「先 unlink 再 rename」（旧注释前提错误，unlink↔rename 窗口
+    // 心跳 readPendingUpdate 会读到 ENOENT → backend 清 pending → since 重置）。
+    // rename 失败（目标被短暂锁定的兜底路径）才退回 unlink+rename 重试。
     try {
       await rename(tmpPath, this._pendingUpdatePath);
     } catch {
-      // rename 失败兜底：直接写目标（牺牲原子性但保证最终落盘）。
-      await writeFile(this._pendingUpdatePath, body, 'utf-8');
-      await chmod(this._pendingUpdatePath, 0o600).catch(() => undefined);
-      await unlink(tmpPath).catch(() => undefined);
+      try {
+        await unlink(this._pendingUpdatePath);
+      } catch {
+        // 目标不存在（首写）/ 并发已清：忽略，重试 rename。
+      }
+      try {
+        await rename(tmpPath, this._pendingUpdatePath);
+      } catch {
+        // rename 二次失败兜底：直接写目标（牺牲原子性但保证最终落盘）。
+        await writeFile(this._pendingUpdatePath, body, 'utf-8');
+        await chmod(this._pendingUpdatePath, 0o600).catch(() => undefined);
+        await unlink(tmpPath).catch(() => undefined);
+      }
     }
     this._logger.info('pending_update_written', {
       reason: payload.reason,
@@ -2035,6 +2061,13 @@ export class Daemon {
     if (this._updateRetryTimer) clearTimeout(this._updateRetryTimer);
     this._updateRetryTimer = setTimeout(() => {
       this._updateRetryTimer = null;
+      // R1（2026-08-30 审计）：daemon 已停/停机中不触发升级复查——stop() 已清本
+      // 定时器，此守卫兜底「_deferUpdate 的 await 晚于 stop 清理点又排了新定时
+      // 器」的窗口（SDK 子进程句柄可使进程存活到 +30s，期间定时器仍会到点）。
+      if (!this._running) {
+        this._logger.debug('self_update_retry_skipped_stopped');
+        return;
+      }
       // _tryUpdate 全路径内部 catch 收敛不 reject；.catch 为防御性兜底（惯例）。
       void this._tryUpdate(reason, targetVersion).catch((e) => {
         this._logger.error('self_update_retry_failed', { error: e });

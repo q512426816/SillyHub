@@ -3660,7 +3660,7 @@ async def validate_team_mission_block(
 async def get_session_usage(
     session_id: uuid.UUID,
     session: SessionDep,
-    user: Annotated[User, Depends(get_current_principal)],
+    user: TaskRunAgentUser,
 ) -> SessionUsageRead:
     """返回本会话累计用量聚合（2026-08-29-session-usage-stats task-02 / FR-01 / FR-04 / D-004@v1）。
 
@@ -3670,9 +3670,11 @@ async def get_session_usage(
     ``agent_run_model_usage`` GROUP BY model 为主源 + 无明细行 run 的四维 token
     列兜底（``ctx_tokens`` 快照列排除），本端点只做委托，不重复聚合逻辑。
 
-    owner-only 404 resource-hiding：归属校验在 service 内 DB 侧过滤，缺失 /
-    跨用户会话同抛 ``DaemonSessionNotFound``（不泄露存在性），与 runs / logs
-    等会话读端点同一道闸门。只读端点，无状态机交互。
+    权限闸门对齐同 router 会话读端点（2026-08-30 审计⑥）：``TaskRunAgentUser``
+    （``require_permission_any(Permission.TASK_RUN_AGENT)``）——与 runs / logs /
+    detail 同一道闸门；owner-only 404 resource-hiding：归属校验在 service 内
+    DB 侧过滤（含软删 ``deleted_at`` 视为不存在），缺失 / 跨用户 / 已软删会话
+    同抛 ``DaemonSessionNotFound``（不泄露存在性）。只读端点，无状态机交互。
     """
     return await SessionService(session).get_session_usage(session_id, user.id)
 

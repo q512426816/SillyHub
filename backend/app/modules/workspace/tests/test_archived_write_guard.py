@@ -244,6 +244,8 @@ async def _seed_session(
     *,
     user_id: uuid.UUID,
     workspace_id: uuid.UUID | None,
+    origin: str = "chat",
+    status: str = "active",
 ) -> uuid.UUID:
     from app.modules.agent.model import AgentSession
 
@@ -254,7 +256,8 @@ async def _seed_session(
         lease_id=None,
         workspace_id=workspace_id,
         provider="claude",
-        status="active",
+        status=status,
+        origin=origin,
     )
     db_session.add(sess)
     await db_session.commit()
@@ -293,6 +296,183 @@ async def test_session_interrupt_on_archived_workspace_returns_409(
 
     resp = await client.post(
         f"/api/daemon/sessions/{session_id}/interrupt",
+        headers=_headers(_token_for(user)),
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["code"] == "HTTP_409_WORKSPACE_ARCHIVED"
+
+
+# ── 2026-08-30 审计④ 补口轮：激活分支 / plan-response / 文件写 API / 派发链 ────
+
+
+@pytest.mark.asyncio
+async def test_tool_report_activation_on_archived_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """归档区 tool_report 预会话首条消息（懒激活分支）→ 409（审计④-1）。
+
+    激活分支在 inject_session 内先于 _inject_into_session（守卫原所在）提前
+    return——4d64cb28 提交信息声称覆盖激活分支但实际未拦（新测试的会话 origin
+    缺省 chat，从未测到该分支），本用例坐实收口。
+    """
+    user = await _create_user(db_session)
+    await _grant_platform_permission(db_session, user.id, Permission.TASK_RUN_AGENT)
+    ws = await _create_workspace(db_session, status="archived")
+    session_id = await _seed_session(
+        db_session, user_id=user.id, workspace_id=ws.id, origin="tool_report", status="pending"
+    )
+
+    resp = await client.post(
+        f"/api/daemon/sessions/{session_id}/inject",
+        json={"prompt": "首条消息"},
+        headers=_headers(_token_for(user)),
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["code"] == "HTTP_409_WORKSPACE_ARCHIVED"
+
+
+@pytest.mark.asyncio
+async def test_plan_response_on_archived_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """归档区存量会话 plan 确认 → 409（审计④-7，不持久化 decision 不推送）。
+
+    守卫位于会话归属校验之后、run 校验之前——dummy run_id 即可命中（无需种子 run）。
+    """
+    user = await _create_user(db_session)
+    await _grant_platform_permission(db_session, user.id, Permission.TASK_RUN_AGENT)
+    ws = await _create_workspace(db_session, status="archived")
+    session_id = await _seed_session(db_session, user_id=user.id, workspace_id=ws.id)
+
+    resp = await client.post(
+        f"/api/daemon/sessions/{session_id}/plan-response",
+        json={
+            "session_id": str(session_id),
+            "run_id": str(uuid.uuid4()),
+            "decision": "confirm",
+        },
+        headers=_headers(_token_for(user)),
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["code"] == "HTTP_409_WORKSPACE_ARCHIVED"
+
+
+@pytest.mark.asyncio
+async def test_skill_create_on_archived_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """归档工作区新建 skill → 409（审计④-5，守卫在 _skills_root 内统一挂）。"""
+    user = await _create_user(db_session)
+    await _grant_platform_permission(db_session, user.id, Permission.WORKSPACE_WRITE)
+    ws = await _create_workspace(db_session, status="archived")
+
+    resp = await client.post(
+        f"/api/workspaces/{ws.id}/skills",
+        json={"name": "demo", "description": "d"},
+        headers=_headers(_token_for(user)),
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["code"] == "HTTP_409_WORKSPACE_ARCHIVED"
+
+
+@pytest.mark.asyncio
+async def test_mcp_config_update_on_archived_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """归档工作区写 .mcp.json → 409（审计④-5）。"""
+    user = await _create_user(db_session)
+    await _grant_platform_permission(db_session, user.id, Permission.WORKSPACE_WRITE)
+    ws = await _create_workspace(db_session, status="archived")
+
+    resp = await client.put(
+        f"/api/workspaces/{ws.id}/mcp-config",
+        json={"mcpServers": {}},
+        headers=_headers(_token_for(user)),
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["code"] == "HTTP_409_WORKSPACE_ARCHIVED"
+
+
+@pytest.mark.asyncio
+async def test_generate_projects_on_archived_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """归档工作区 generate-projects（写 projects/*.yaml）→ 409（审计④-5）。"""
+    user = await _create_user(db_session)
+    await _grant_platform_permission(db_session, user.id, Permission.WORKSPACE_ADMIN)
+    ws = await _create_workspace(db_session, status="archived")
+
+    resp = await client.post(
+        f"/api/workspaces/{ws.id}/generate-projects",
+        headers=_headers(_token_for(user)),
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["code"] == "HTTP_409_WORKSPACE_ARCHIVED"
+
+
+async def test_dispatch_execute_team_on_archived_raises(db_session: AsyncSession) -> None:
+    """归档工作区 team 模式阶段推进 → WorkspaceArchived（审计④-4，service 级）。
+
+    single 模式已由 start_stage_dispatch 守卫，team 分流漏拦——守卫在函数首，
+    无需 change/mission 种子即命中。
+    """
+    ws = await _create_workspace(db_session, status="archived")
+    from app.modules.change.dispatch import _dispatch_execute_team
+
+    with pytest.raises(WorkspaceArchived):
+        await _dispatch_execute_team(db_session, ws.id, uuid.uuid4(), uuid.uuid4())
+
+
+async def test_mcp_dispatch_worker_core_on_archived_raises(db_session: AsyncSession) -> None:
+    """归档目标工作区 MCP dispatch_worker 共用主体 → WorkspaceArchived（审计④-2）。
+
+    链路A 四入口（dispatch_worker / _for_session / _scoped / _by_mission）共用
+    _dispatch_worker_core；守卫位于两段式 binding 预检前——mission 仅需内存对象
+    （守卫前只读 workspace_id/session_id/scope_workspace_ids）。
+    """
+    from types import SimpleNamespace
+
+    from app.modules.agent.mcp_tools import DispatchWorkerRequest, _dispatch_worker_core
+    from app.modules.agent.model import AgentMission
+
+    ws = await _create_workspace(db_session, status="archived")
+    user = await _create_user(db_session)
+    mission = AgentMission(
+        id=uuid.uuid4(),
+        workspace_id=ws.id,
+        session_id=None,
+        objective="demo",
+        created_by=user.id,
+    )
+    request = SimpleNamespace(headers={})
+
+    with pytest.raises(WorkspaceArchived):
+        await _dispatch_worker_core(
+            db_session,
+            request,
+            user,
+            mission,
+            DispatchWorkerRequest(objective="demo"),
+            anchor_workspace_id=ws.id,
+        )
+
+
+@pytest.mark.asyncio
+async def test_session_reopen_on_archived_returns_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """归档区存量会话 reopen（复活会话句柄 + SESSION_RESUME）→ 409（审计R8）。
+
+    reopen 建 lease 并让 daemon 恢复在归档工作区执行——与 inject/interrupt/
+    plan-response 同拦；守卫先于 provider/cwd 前置校验（归档语义优先）。
+    """
+    user = await _create_user(db_session)
+    await _grant_platform_permission(db_session, user.id, Permission.TASK_RUN_AGENT)
+    ws = await _create_workspace(db_session, status="archived")
+    session_id = await _seed_session(db_session, user_id=user.id, workspace_id=ws.id)
+
+    resp = await client.post(
+        f"/api/daemon/sessions/{session_id}/reopen",
         headers=_headers(_token_for(user)),
     )
     assert resp.status_code == 409, resp.text

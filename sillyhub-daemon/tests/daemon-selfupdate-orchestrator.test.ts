@@ -155,6 +155,10 @@ function makeHarness(opts: {
       selfUpdateBundlePath: join(opts.pendingPath, '..', 'no-bundle.js'),
     },
   );
+  // R1（2026-08-30 审计）：复查定时器回调带 _running 守卫（停机不触发升级链）——
+  // 生产上定时器只在运行中的 daemon 存在（WS/磁盘探测均 start() 后接线），夹具
+  // 同步置位运行态，与真实前提一致。
+  (daemon as unknown as { _running: boolean })._running = true;
   const writeSpy = vi
     .spyOn(daemon, 'writePendingUpdate')
     .mockResolvedValue(undefined);
@@ -594,5 +598,89 @@ describe('task-04 S1 start() 磁盘探测接线', () => {
 
     await daemon.start();
     expect(daemon.diskProbeActive).toBe(false);
+  });
+});
+
+// ── R1（2026-08-30 审计）：stop 可重入等待 + 复查定时器停机守卫 ────────────────
+
+describe('R1 stop() 可重入等待 + 定时器停机守卫', () => {
+  let tmpDir: string;
+  let pendingPath: string;
+  let restoreConsole: () => void;
+
+  beforeEach(async () => {
+    tmpDir = await makeTmpDir('task04-r1-');
+    pendingPath = join(tmpDir, 'pending-update.json');
+    restoreConsole = silenceConsole();
+    vi.useFakeTimers();
+    runDaemonSelfUpdateMock.mockReset().mockResolvedValue(true);
+    respawnMock.mockReset().mockReturnValue(undefined);
+    fetchLatestBuildIdMock.mockReset().mockResolvedValue(null);
+  });
+  afterEach(async () => {
+    restoreConsole();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    await cleanupDir(tmpDir);
+  });
+
+  it('stop() 在途时二次调用等待同一停止完成（不空转）——_stopInternal 只执行一次', async () => {
+    const h = makeHarness({ pendingPath });
+    const d = h.daemon as unknown as {
+      _running: boolean;
+      _stopInternal: () => Promise<void>;
+      _stopPromise: Promise<void> | null;
+    };
+    d._running = true; // 模拟运行中（start() 才置 true）
+    // 置换 _stopInternal 为受控延迟（不触真实收尾链）
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const internalSpy = vi
+      .spyOn(d, '_stopInternal')
+      .mockImplementation(async () => {
+        await gate;
+      });
+    h.stopSpy.mockRestore(); // 用真实 stop()（被 harness spy 掉了）
+
+    const first = (h.daemon as unknown as { stop(): Promise<void> }).stop();
+    const second = (h.daemon as unknown as { stop(): Promise<void> }).stop();
+    expect(d._stopPromise).toBeInstanceOf(Promise); // 在途标记已建立
+    release();
+    await Promise.all([first, second]);
+
+    expect(internalSpy).toHaveBeenCalledTimes(1); // 停止逻辑只执行一次
+    expect(d._stopPromise).toBeNull(); // 完成后清标记
+    // 修复前语义：second 在 _running=false 后立即 return（空转不等 first 完成）
+  });
+
+  it('复查定时器回调 _running 守卫：停机后到点不触发 _tryUpdate', async () => {
+    const h = makeHarness({ pendingPath });
+    const d = h.daemon as unknown as {
+      _running: boolean;
+      _scheduleUpdateRetry: (r: 'server_command' | 'disk_change', v: string) => void;
+      _tryUpdate: (r: 'server_command' | 'disk_change', v?: string) => Promise<void>;
+    };
+    d._running = true;
+    const trySpy = vi.spyOn(d, '_tryUpdate').mockResolvedValue(undefined);
+    d._scheduleUpdateRetry('server_command', 'v-r1');
+    d._running = false; // stop 完成（或进行中）——定时器仍挂载（兜底场景）
+
+    await vi.advanceTimersByTimeAsync(SELF_UPDATE_RETRY_INTERVAL_MS + 100);
+    expect(trySpy).not.toHaveBeenCalled(); // 停机后不再触发升级链
+  });
+
+  it('运行中到点照常触发（守卫不误伤正常复查）', async () => {
+    const h = makeHarness({ pendingPath });
+    const d = h.daemon as unknown as {
+      _running: boolean;
+      _scheduleUpdateRetry: (r: 'server_command' | 'disk_change', v: string) => void;
+      _tryUpdate: (r: 'server_command' | 'disk_change', v?: string) => Promise<void>;
+    };
+    d._running = true;
+    const trySpy = vi.spyOn(d, '_tryUpdate').mockResolvedValue(undefined);
+    d._scheduleUpdateRetry('server_command', 'v-r1b');
+
+    await vi.advanceTimersByTimeAsync(SELF_UPDATE_RETRY_INTERVAL_MS + 1);
+    expect(trySpy).toHaveBeenCalledTimes(1);
   });
 });

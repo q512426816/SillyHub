@@ -405,3 +405,31 @@ async def test_change_deleted_409_distinguishable_from_base_ts_conflict(client, 
     assert deleted_body["code"] == "change_deleted"
     assert "conflict" not in deleted_body
     assert conflict_body != deleted_body
+
+
+# ── R6（2026-08-30 审计）：变更名字面量 archive 的段边界 ────────────────────────
+
+
+async def test_name_archive_not_swallowed_by_archive_area_anchor(client, db_session):
+    """name="archive"：活跃区范围被跳过——归档区任意墓碑（changes/archive/foo/）
+    不得误伤该名上行（修复前范围 [changes/archive/, changes/archive0) 吞整个
+    归档区 → 误 409）；该名活跃变更被 parser 结构性排除，仅防手工构造误伤。"""
+    ws_id, _users, headers = await _make_ws_and_users_with_tokens(db_session)
+    # 归档区存在无关墓碑（曾删除已归档变更 foo）
+    await _add_manifest_anchor(db_session, ws_id, "foo", archive=True)
+
+    resp = await _push(client, headers[0], "archive")
+    assert resp.status_code == 200, (
+        "归档区无关墓碑不牵连 name=archive（修复前活跃区范围吞整个归档区误 409）"
+    )
+
+
+async def test_name_archive_second_range_still_catches_real_archived_anchor(client, db_session):
+    """对照锚：归档区三段范围仍精确命中——真删除过名为 archive 的归档变更
+    （changes/archive/archive/）→ 409 拒收（R6 只跳过活跃区范围，不放宽归档区）。"""
+    ws_id, _users, headers = await _make_ws_and_users_with_tokens(db_session)
+    await _add_manifest_anchor(db_session, ws_id, "archive", archive=True)
+
+    resp = await _push(client, headers[0], "archive")
+    assert resp.status_code == 409
+    assert resp.json()["code"] == "change_deleted"

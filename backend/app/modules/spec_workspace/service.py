@@ -26,6 +26,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path, PurePosixPath
+from typing import Any
 
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -146,9 +147,14 @@ class _BundleTarStream:
         except BaseException as exc:  # 打包异常透传给消费端
             outcome = exc
         finally:
-            self._done.set()
+            # 2026-08-30 审计⑦：put 必须先于 done.set()——原顺序（先 done 后 put）
+            # 在「队列恰满 + close() 置 cancelled 晚于上方检查」窗口里 put 永久
+            # 阻塞，而 close() 的排空循环被 not done 挡住不排空 → 写线程泄漏。
+            # 对换后：put 阻塞时 done 未置，close() 排空循环可解阻；cancelled
+            # 已置时根本不 put（消费端已放弃，无人再 get）。
             if not self._cancelled.is_set():
                 self._queue.put(outcome)
+            self._done.set()
 
     def __iter__(self) -> "Iterator[bytes]":
         if not self._started:
@@ -185,6 +191,43 @@ class _BundleTarStream:
             self.close()
         except Exception:
             pass
+
+
+# iter_bundle_stream 的线程侧判停哨兵（StopIteration 不能穿越 to_thread）。
+_BUNDLE_STREAM_END = object()
+
+
+def _next_bundle_chunk(iterator: Iterator[bytes]) -> Any:
+    """线程侧取下一分块：StopIteration 归一为哨兵对象（见 iter_bundle_stream）。"""
+    try:
+        return iterator.__next__()
+    except StopIteration:
+        return _BUNDLE_STREAM_END
+
+
+async def iter_bundle_stream(stream: _BundleTarStream) -> AsyncIterator[bytes]:
+    """bundle 流的 async 消费包装（2026-08-30 审计⑦）。
+
+    starlette 1.1.0 的 ``StreamingResponse`` **不会**调用同步迭代器的
+    ``close()``——客户端断连时唯一清理路径是 GC 兜底 ``__del__→close()``，
+    其中 ``time.sleep`` 轮询 + ``join(≤5s)`` 会同步阻塞事件循环（大树/慢盘
+    单次断连可卡整个服务）。本包装供路由层把同步迭代器交框架前套一层 async
+    generator：正常结束 / 异常 / 取消（客户端断开）路径都在 ``finally`` 显式
+    ``close()``，且 ``next()`` 与 ``close()`` 的阻塞经 ``asyncio.to_thread``
+    挪线程池执行，不占事件循环。
+
+    StopIteration 不能作为线程结果穿越 ``to_thread``（asyncio 明确拒绝——
+    "interacts badly with generators"），线程内转哨兵对象判停。
+    """
+    it = iter(stream)
+    try:
+        while True:
+            chunk = await asyncio.to_thread(_next_bundle_chunk, it)
+            if chunk is _BUNDLE_STREAM_END:
+                break
+            yield chunk
+    finally:
+        await asyncio.to_thread(stream.close)
 
 
 # task-05（2026-08-29-change-delete-closure-and-spec-pull / FR-03b / design §5.3）：
@@ -896,9 +939,13 @@ class SpecWorkspaceService:
         for p in rows:
             p = p.replace("\\", "/")
             if p.startswith("changes/archive/"):
-                segs = p.split("/")[:3]  # changes/archive/{name}
-                if len(segs) == 3 and segs[2]:
-                    prefixes.add("/".join(segs) + "/")
+                # R6（2026-08-30 审计）：归档区墓碑须四段起（changes/archive/
+                # {name}/{file}）——三段（changes/archive/{file}，直接躺在归档区
+                # 根下的行）不是变更目录墓碑，切段会产出以文件名为目录的伪前缀
+                # `changes/archive/{file}/`（匹配不到任何路径），跳过不参与。
+                segs = p.split("/")
+                if len(segs) >= 4 and segs[2]:
+                    prefixes.add("/".join(segs[:3]) + "/")
             elif p.startswith("changes/"):
                 segs = p.split("/")[:2]  # changes/{name}
                 if len(segs) == 2 and segs[1]:
@@ -1740,13 +1787,15 @@ class SpecWorkspaceService:
                 # 查清单行（workspace_id+path）——task-03 起查预取 dict（miss 即 None）
                 row = manifest_by_path.get(op.path)
 
-                # 审计 A1：add 命中已平台删除目录前缀（含「从未推送文件」row=None
-                # 的边角）→ 与下方精确行拦截同构处理：不落盘、conflict=True、
-                # server_versions[path]（若行存在）+ platform_deleted 列表项。
-                # 前缀探测优先于软删复活分支——目录级墓碑语义下该目录内任何 add
-                # 都是复活企图（含普通软删行，平台删除是目录级动作）。
+                # 审计 A1 + R5（2026-08-30 审计）：add **与 update** 命中已平台
+                # 删除目录前缀（含「从未推送文件」row=None 的边角）→ 与下方精确
+                # 行拦截同构处理：不落盘、conflict=True、server_versions[path]
+                # （若行存在）+ platform_deleted 列表项。前缀探测优先于软删复活
+                # 分支——目录级墓碑语义下该目录内任何写入（add 新增 / update
+                # 覆写）都是复活企图（含普通软删行，平台删除是目录级动作；update
+                # 原漏拦会把墓碑行翻 exists=True 落僵尸文件）。
                 if (
-                    op.op == "add"
+                    op.op in ("add", "update")
                     and platform_deleted_prefixes
                     and op.path.replace("\\", "/").startswith(platform_deleted_prefixes)
                 ):
@@ -1793,6 +1842,17 @@ class SpecWorkspaceService:
                     row.updated_at = now
                     new_versions[op.path] = row.version
                     await progress.bump()
+                    continue
+
+                # R5（2026-08-30 审计）：update 撞精确墓碑行（platform_deleted=True）
+                # → 拒绝落盘（前缀守卫的纵深防御——manifest 行是墓碑权威，前缀集
+                # 由其派生但两处独立判定更稳）；行维持墓碑不翻 exists。
+                if op.op == "update" and row is not None and row.platform_deleted:
+                    conflict = True
+                    if server_versions is None:
+                        server_versions = {}
+                    server_versions[op.path] = row.version
+                    platform_deleted_paths.append(op.path)
                     continue
 
                 # base_version 乐观锁（D-001）：有行且版本不匹配 → conflict，跳过不落盘。

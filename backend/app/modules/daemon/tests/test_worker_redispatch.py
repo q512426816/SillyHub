@@ -1393,3 +1393,151 @@ class TestRedispatchClaimIntegration:
         assert "实现登录鉴权模块" in (payload["prompt"] or "")
         assert payload["stage"] == "mission_worker"
         assert payload["root_path"] == "/workspace/proj"  # 原 cwd 复用（workdir 锚）
+
+
+class TestSweepRedispatchRetrySeeds:
+    """2026-08-30 审计⑤：重派失败自愈链修复。
+
+    上轮 sweep fire 后 NoOnlineDaemonError 返回 None 的 worker 会话停留 failed
+    （离线档只选 active/pending，此前永不再被选中——「下轮 sweep 自愈」承诺无
+    实现）。修复后每轮顺带捞「failed worker + 末次 run 仍为 daemon_interrupted
+    + 原 runtime 已回在线 + 宽限窗内」重 fire；runtime 未回归 / 末次 run 非中断
+    / 超窗均不 fire。
+    """
+
+    async def test_failed_worker_with_online_runtime_refired(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """正例：runtime 回归在线 + 末次 run=daemon_interrupted + 窗内 → 重 fire。"""
+        from app.modules.agent import worker_redispatch as wr_mod
+        from app.modules.daemon import sweep as sweep_mod
+
+        fired: list[list[tuple[uuid.UUID, uuid.UUID]]] = []
+        monkeypatch.setattr(wr_mod, "fire_worker_redispatch", lambda workers: fired.append(workers))
+        user = await _make_user(db_session, prefix="wrk-r1")
+        rt = await _make_runtime(db_session, user.id, status="online")
+        parent = await _make_session(db_session, user.id, rt.id, status="ended", lease_id=None)
+        worker = await _make_session(
+            db_session,
+            user.id,
+            rt.id,
+            status="failed",
+            lease_id=None,
+            parent_session_id=parent.id,
+            role="worker",
+        )
+        await _make_run(
+            db_session, worker.id, status="failed", error_code=DAEMON_INTERRUPTED_ERROR_CODE
+        )
+
+        converged = await sweep_mod.session_offline_sweep_once(db_session)
+
+        assert converged == 0  # 无新离线收敛，纯重试种子
+        assert fired == [[(worker.id, rt.id)]]
+
+    async def test_runtime_still_offline_not_refired(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """反例：runtime 仍离线 → 不 fire（fire 必 NoOnlineDaemonError，零无效任务）。"""
+        from app.modules.agent import worker_redispatch as wr_mod
+        from app.modules.daemon import sweep as sweep_mod
+
+        fired: list[list[tuple[uuid.UUID, uuid.UUID]]] = []
+        monkeypatch.setattr(wr_mod, "fire_worker_redispatch", lambda workers: fired.append(workers))
+        user = await _make_user(db_session, prefix="wrk-r2")
+        rt = await _make_runtime(
+            db_session,
+            user.id,
+            status="offline",
+            heartbeat=datetime.now(UTC)
+            - timedelta(seconds=sweep_mod.RUNTIME_OFFLINE_GRACE_SEC + 90),
+        )
+        parent = await _make_session(db_session, user.id, rt.id, status="ended", lease_id=None)
+        worker = await _make_session(
+            db_session,
+            user.id,
+            rt.id,
+            status="failed",
+            lease_id=None,
+            parent_session_id=parent.id,
+            role="worker",
+        )
+        await _make_run(
+            db_session, worker.id, status="failed", error_code=DAEMON_INTERRUPTED_ERROR_CODE
+        )
+
+        await sweep_mod.session_offline_sweep_once(db_session)
+
+        assert fired == []
+
+    async def test_latest_run_not_interrupted_not_refired(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """反例：末次 run 非中断（真实失败 / 重派已建新 run）→ 不 fire。
+
+        两条 run：旧 run=daemon_interrupted（60s 前），新 run 无 error_code
+        （刚建）——「末次 run」判定不得被旧中断标记误触发。
+        """
+        from app.modules.agent import worker_redispatch as wr_mod
+        from app.modules.daemon import sweep as sweep_mod
+
+        fired: list[list[tuple[uuid.UUID, uuid.UUID]]] = []
+        monkeypatch.setattr(wr_mod, "fire_worker_redispatch", lambda workers: fired.append(workers))
+        user = await _make_user(db_session, prefix="wrk-r3")
+        rt = await _make_runtime(db_session, user.id, status="online")
+        parent = await _make_session(db_session, user.id, rt.id, status="ended", lease_id=None)
+        worker = await _make_session(
+            db_session,
+            user.id,
+            rt.id,
+            status="failed",
+            lease_id=None,
+            parent_session_id=parent.id,
+            role="worker",
+        )
+        now = datetime.now(UTC)
+        await _make_run(
+            db_session,
+            worker.id,
+            status="failed",
+            error_code=DAEMON_INTERRUPTED_ERROR_CODE,
+            created_at=now - timedelta(seconds=60),
+        )
+        await _make_run(db_session, worker.id, status="failed", error_code=None, created_at=now)
+
+        await sweep_mod.session_offline_sweep_once(db_session)
+
+        assert fired == []
+
+    async def test_ended_at_beyond_grace_window_not_refired(
+        self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """反例：ended_at 超 worker_force_end 宽限（默认 30min）→ 不 fire
+        （重派守卫③本身也会拒，预过滤避免无效任务与日志噪音）。"""
+        from app.modules.agent import worker_redispatch as wr_mod
+        from app.modules.daemon import sweep as sweep_mod
+
+        fired: list[list[tuple[uuid.UUID, uuid.UUID]]] = []
+        monkeypatch.setattr(wr_mod, "fire_worker_redispatch", lambda workers: fired.append(workers))
+        user = await _make_user(db_session, prefix="wrk-r4")
+        rt = await _make_runtime(db_session, user.id, status="online")
+        parent = await _make_session(db_session, user.id, rt.id, status="ended", lease_id=None)
+        worker = await _make_session(
+            db_session,
+            user.id,
+            rt.id,
+            status="failed",
+            lease_id=None,
+            parent_session_id=parent.id,
+            role="worker",
+        )
+        worker.ended_at = datetime.now(UTC) - timedelta(minutes=45)
+        db_session.add(worker)
+        await db_session.commit()
+        await _make_run(
+            db_session, worker.id, status="failed", error_code=DAEMON_INTERRUPTED_ERROR_CODE
+        )
+
+        await sweep_mod.session_offline_sweep_once(db_session)
+
+        assert fired == []

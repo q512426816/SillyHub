@@ -32,7 +32,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { mkdir, writeFile, rename } from 'node:fs/promises';
+import { mkdir, writeFile, rename, unlink } from 'node:fs/promises';
 import type { DaemonConfig } from './config.js';
 import { BUILD_ID } from './build-id.js';
 import { parseSemver, type SemVerTuple } from './version.js';
@@ -426,12 +426,12 @@ async function fetchLatest(
  * 替换正在运行的 bundle 是安全的：node 已把当前进程代码加载进内存，本次进程
  * 不受影响；新文件由 respawnDaemonAndExit 拉起的新进程加载生效。
  *
- * 下载失败 / 写盘失败 → 仅 warn 返回 false。
+ * 下载失败 / 写盘失败 → 仅 warn 返回 false（R3：失败路径清理 .tmp 残留）。
  *
- * @param fileName  落盘文件名（主 bundle 默认，mcp-server.js 伴生替换复用）
+ * @param fileName 落盘文件名（主 bundle 默认，mcp-server.js 伴生替换复用）
  * @param eventName 成功事件名（主 bundle 保留原事件，mcp 用独立事件区分）
  */
-async function downloadAndReplace(
+export async function downloadAndReplace(
   fullUrl: string,
   newVersion: string,
   currentId: string,
@@ -467,6 +467,10 @@ async function downloadAndReplace(
     // rename 原子替换：避免下载中途写坏 target 导致下次启动加载半截 bundle。
     await rename(tmp, target);
   } catch (e) {
+    // R3（2026-08-30 审计）：失败路径清理 .tmp 残留——固定名 tmp 不清会在下次
+    // 下载覆写前滞留磁盘（Windows 目标被 AV/他进程短暂占用时 rename 失败的
+    // 场景；忙推迟期 30s 复查每轮重跑会放大残留频率）。ENOENT 忽略。
+    await unlink(tmp).catch(() => undefined);
     logger('warn', 'daemon_bundle_write_failed', {
       target,
       error: fmtErr(e),

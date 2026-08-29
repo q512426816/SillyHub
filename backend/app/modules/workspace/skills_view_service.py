@@ -328,6 +328,8 @@ class SkillsViewService:
         视为空配置处理（与 GET 容错一致），``<set>`` 还原自然走失败路径。
         """
         ws, spec_ws = await self._get_base(workspace_id)
+        # 归档区禁写（2026-08-30 审计④-5）：写 .mcp.json 同属归档区文件写。
+        WorkspaceService.ensure_writable(ws)
         resolver = self._resolver_for(ws, spec_ws)
         if resolver is None:
             raise SpecWorkspaceNotFound(
@@ -491,8 +493,13 @@ class SkillsViewService:
     # ── skills 写路径（2026-08-26-workspace-skill-edit task-01）──────────────────
 
     async def _skills_root(self, workspace_id: uuid.UUID) -> Path:
-        """定位 specDir/skills/（无 spec 工作区则抛 SpecWorkspaceNotFound，不静默）。"""
+        """定位 specDir/skills/（无 spec 工作区则抛 SpecWorkspaceNotFound，不静默）。
+
+        调用方均为 skill 写/删路径（create/delete/write/delete_file）——统一在此
+        挂归档禁写守卫（2026-08-30 审计④-5，409 WorkspaceArchived）。
+        """
         ws, spec_ws = await self._get_base(workspace_id)
+        WorkspaceService.ensure_writable(ws)
         resolver = self._resolver_for(ws, spec_ws)
         if resolver is None:
             raise SpecWorkspaceNotFound(

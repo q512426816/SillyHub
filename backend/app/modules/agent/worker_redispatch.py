@@ -395,9 +395,19 @@ def fire_worker_redispatch(workers: list[tuple[uuid.UUID, uuid.UUID]]) -> None:
     AsyncSession 随其生命周期结束，不能跨 task 复用。任何失败仅记日志
     （task 体内部兜底，不抛出）；调用方须在**事务提交后**调用（重派自开事务，
     与挂起主路径不共享）。
+
+    2026-08-30 审计⑤附注：task 引用存模块级集合防 GC——事件循环对 task 只持
+    弱引用，无强引用的后台 task 可能在执行中被静默回收（CPython 文档明示）。
+    done 回调自摘防集合无限增长。
     """
     for session_id, runtime_id in workers:
-        asyncio.create_task(_redispatch_task(session_id, runtime_id))
+        task = asyncio.create_task(_redispatch_task(session_id, runtime_id))
+        _REDISPATCH_TASKS.add(task)
+        task.add_done_callback(_REDISPATCH_TASKS.discard)
+
+
+# 后台重派 task 强引用池（fire 后无人持有引用，防执行中被 GC 静默消失）。
+_REDISPATCH_TASKS: set[asyncio.Task[None]] = set()
 
 
 async def _redispatch_task(session_id: uuid.UUID, runtime_id: uuid.UUID) -> None:

@@ -613,6 +613,9 @@ class WorkspaceService:
         import yaml
 
         ws = await self.get(workspace_id)
+        # 归档区禁写（2026-08-30 审计④-5）：向 spec 根写 projects/*.yaml，
+        # 归档工作区 → 409（统一守卫）。
+        self.ensure_writable(ws)
 
         # Determine spec_root
         from app.modules.spec_workspace.service import SpecWorkspaceService

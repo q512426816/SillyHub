@@ -1253,20 +1253,25 @@ function readTarString(buf: Buffer): string {
 
 /**
  * PAX 扩展头（typeflag 'x'/'g'）data 解析为 {key: value}（审计 P1-5）。
- * 记录形态 "<len> <key>=<value>\n" 重复（UTF-8），len 十进制且含自身位数、空格与
- * 尾部 \n。畸形记录（len 非法/越界）容错截断后续解析，不抛错（解包不因扩展头坏
+ * 记录形态 "<len> <key>=<value>\n" 重复（UTF-8），len 十进制**字节数**且含自身位数、
+ * 空格与尾部 \n。畸形记录（len 非法/越界）容错截断后续解析，不抛错（解包不因扩展头坏
  * 记录中断）。与 CLI 侧 sillyspec src/sync.js _parsePaxRecords 对齐。
+ *
+ * 必须在 Buffer 上按字节偏移推进/切片：value 含非 ASCII（中文文件名——Python tarfile
+ * 对任何非 ASCII 名都写 path 记录，即使 ≤100 字节）时，len（字节）> JS 字符串长度
+ * （UTF-16 码元），按码元校验会首记录即 break、path 丢失 → 文件落实体头 name 的
+ * ascii/replace 混淆路径并互相覆盖。分隔符（空格/'='/'\n'）均为 ASCII，多字节序列
+ * 内不含它们，按字节定位边界安全；key 为 ASCII，仅 value 可能多字节。
  */
 function parsePaxRecords(data: Buffer): Record<string, string> {
-  const text = data.toString('utf-8');
   const out: Record<string, string> = {};
   let pos = 0;
-  while (pos < text.length) {
-    const sp = text.indexOf(' ', pos);
+  while (pos < data.length) {
+    const sp = data.indexOf(0x20, pos);
     if (sp === -1) break;
-    const len = parseInt(text.slice(pos, sp), 10);
-    if (!Number.isInteger(len) || len <= 0 || pos + len > text.length) break;
-    const record = text.slice(sp + 1, pos + len - 1); // 尾部 \n 不属于 value
+    const len = parseInt(data.toString('utf-8', pos, sp), 10);
+    if (!Number.isInteger(len) || len <= 0 || pos + len > data.length) break;
+    const record = data.toString('utf-8', sp + 1, pos + len - 1); // 尾部 \n 不属于 value
     const eq = record.indexOf('=');
     if (eq > 0) out[record.slice(0, eq)] = record.slice(eq + 1);
     pos += len;

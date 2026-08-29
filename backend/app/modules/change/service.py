@@ -1293,6 +1293,12 @@ class ChangeService:
           防范围外行被误判 orphaned 而错配 rename 丢 workflow 状态）。
         - ``location='deleted'`` 墓碑行（平台删除锚点，B-1/R-09）在两模式删除环
           均不物理删；``_apply_parsed`` 也不回翻其 location。
+        - 平台删除半删窗口兜底（2026-08-30 审计③）：``delete_change`` 步骤①镜像
+          软删内部先 commit（manifest 墓碑 + 文件搬移落定），Change 行
+          ``location='deleted'`` 要到步骤⑤才随主事务落库——两 commit 之间中断的
+          行仍 'active' 且目录已不在，删除环遇 manifest ``platform_deleted=True``
+          锚点时**降级为置软删**（不物理删、不联动删 progress），防
+          change_documents/session_links/events 被 CASCADE 抹掉（R-09 审计保护）。
         - ``_progress_reported_active_keys`` 占位保护（7 天窗）两模式同样生效。
         - reparse 发现新变更（created）时按 design §8 绑定查询自动绑定该 workspace
           最近活跃会话（change_session_links 行，best-effort 失败不阻断 reparse）。
@@ -1324,7 +1330,14 @@ class ChangeService:
         result = await asyncio.to_thread(
             self._parser.parse_workspace, sillyspec_root, platform_managed=True, scope=scope
         )
-        stats = {"parsed": 0, "created": 0, "updated": 0, "deleted": 0, "renamed": 0}
+        stats = {
+            "parsed": 0,
+            "created": 0,
+            "updated": 0,
+            "deleted": 0,
+            "renamed": 0,
+            "tombstoned": 0,
+        }
 
         # Fetch existing changes
         existing_changes = await self._fetch_existing_changes(workspace_id)
@@ -1449,6 +1462,35 @@ class ChangeService:
             if delete_candidates
             else set()
         )
+        # 2026-08-30 审计③：平台删除半删窗口兜底——删除候选中存在 manifest
+        # platform_deleted=True 锚点（活跃区 changes/{key}/ 或归档区
+        # changes/archive/{key}/ 前缀，段边界带尾斜杠防兄弟名误吞）的 key 收集为
+        # 降级集：平台删除动作已完成镜像软删（步骤① 内部 commit），仅 Change 行
+        # location 未随步骤⑤落库（中断）——删除环对其置软删而非物理删，保住
+        # change_documents/session_links/events（ondelete=CASCADE 会随行删除被抹掉，
+        # R-09 要保护的审计数据）。成员本地删除不走平台删除入口，manifest 行
+        # platform_deleted 恒 False，不会误命中。
+        tombstone_anchor_keys: set[str] = set()
+        if delete_candidates:
+            from app.modules.spec_workspace.model import SpecFileManifest
+
+            pd_paths = (
+                (
+                    await self._session.execute(
+                        select(SpecFileManifest.path).where(
+                            SpecFileManifest.workspace_id == workspace_id,
+                            SpecFileManifest.platform_deleted.is_(True),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            pd_norm = {p.replace("\\", "/") for p in pd_paths}
+            for key in delete_candidates:
+                prefixes = (f"changes/{key}/", f"changes/archive/{key}/")
+                if any(p.startswith(prefixes) for p in pd_norm):
+                    tombstone_anchor_keys.add(key)
         # FR-03a / 审计 A5：删除环收集被删 key，主 commit 后独立短事务批量联动删
         # progress 收件箱行（见循环后调用点注释）。
         deleted_keys: list[str] = []
@@ -1459,6 +1501,18 @@ class ChangeService:
                 continue  # R-01/R-08：scope 外行零动作
             if row.location == "deleted":
                 continue  # B-1：墓碑行不物理删（R-09）
+            # 2026-08-30 审计③：平台删除半删窗口——降级为置软删（锚点判定见上方
+            # tombstone_anchor_keys 构建注释），不物理删、不收集联动删 progress。
+            if key in tombstone_anchor_keys:
+                row.location = "deleted"
+                row.updated_at = datetime.now(UTC)
+                stats["tombstoned"] += 1
+                log.info(
+                    "change.reparse_platform_deleted_demoted",
+                    workspace_id=str(workspace_id),
+                    change_key=key,
+                )
+                continue
             # ql-20260815-002 镜像滞后保护：CLI 最近一次上行仍报 status=active 且
             # 行内无任何文档（= platform_sync 首推占位行，spec tar 未跟上）的 key 不删，
             # 否则占位行「刚被进度上行建出、又被下一次全量 reparse 删掉」，变更中心
@@ -1664,6 +1718,12 @@ class ChangeService:
           ——reparse 固定 ``platform_managed=True``（扁平布局 ``<root>/changes/``，
           parser.py ``SpecPathResolver`` 同源），旧实现硬编码 ``.sillyspec/changes``
           包裹路径在扁平布局下永不存在，``is_dir`` 确认恒为假（真空判）。
+        - 墓碑行（``location='deleted'``）不进 orphaned 候选（2026-08-30 审计②）：
+          墓碑行目录已被平台删除搬走、两模式删除环均不物理删——它们是永生的
+          "not-in-parsed 且磁盘不在"行，进候选会把同日新建的合法变更错配成
+          "rename"（``_apply_parsed`` 换 key 保 deleted 标记 → 新变更出生即隐藏
+          且上行永久 409，无逆转 API），也会让真实 rename 的同日候选 ≥2 静默放弃。
+          与删除环三条件（``change/service.py`` reparse 物理删豁免）同口径。
         """
         if not existing_by_key or not parsed_keys:
             return {}
@@ -1674,11 +1734,14 @@ class ChangeService:
 
         # Find orphaned DB rows whose directories no longer exist on disk.
         # scoped：候选仅取 scope 集内行（R-11），不做全量候选拉取。
+        # 墓碑行（location='deleted'）永生且目录永不在，排除出候选（见 docstring）。
         scope_set = set(scope) if scope is not None else None
         orphaned: dict[str, Change] = {}
         for key, row in existing_by_key.items():
             if key not in parsed_keys:
                 if scope_set is not None and key not in scope_set:
+                    continue
+                if row.location == "deleted":
                     continue
                 dir_path = changes_dir / key
                 if not dir_path.is_dir():

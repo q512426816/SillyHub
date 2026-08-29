@@ -1932,6 +1932,15 @@ class AgentService:
         )
 
         # -- 1. Ensure spec workspace container exists -------------------------
+        # 归档区禁写（2026-08-30 审计④-5）：init 派发的 lease 由 daemon 向成员本地
+        # 项目目录写 .sillyspec-platform.json 并拉整树 spec——工作区已归档 → 409
+        # （守卫统一 WorkspaceService.ensure_writable）。
+        from app.modules.workspace.model import Workspace
+
+        init_ws = await self._session.get(Workspace, workspace_id)
+        if init_ws is not None:
+            WorkspaceService.ensure_writable(init_ws)
+
         spec_ws_svc = SpecWorkspaceService(self._session)
         spec_ws = await spec_ws_svc.ensure_spec_workspace(workspace_id)
 

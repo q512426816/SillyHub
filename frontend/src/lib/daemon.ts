@@ -1425,6 +1425,14 @@ export interface SessionStreamConnection {
 export const RECONNECT_BACKOFF_MS = [1000, 2000, 4000, 8000, 16000, 30000];
 
 /**
+ * SSE 永久性 HTTP 错误停连名单（R7 / 2026-08-30 审计，对齐审批面板
+ * ql-20260829-005 的同名常量语义）：命中即停本订阅重连循环——必败请求
+ * 每 30s 重打无意义且刷日志。401/403/404 由 fetch-sse 的 onerror ev.status
+ * 携带；网络断/流正常结束无 status，保持退避重连路径。
+ */
+export const PERMANENT_SSE_ERROR_STATUSES = new Set([401, 403, 404]);
+
+/**
  * resync REST 快照拉取默认超时（F7 / 2026-08-25）：重连前的 runs/logs 拉取无
  * 超时时，TCP 半开 / 后端挂起会让 resync 流程停摆数分钟（退避循环卡死在
  * await）。10s 足够覆盖正常快照拉取；超时视为 resync 失败走既有 catch 退避
@@ -1969,7 +1977,20 @@ export function subscribeAgentSessionsEvents(opts: {
       fireConnectedOnce();
       opts.onEvent();
     };
-    es.onerror = () => {
+    es.onerror = (ev) => {
+      // R7（2026-08-30 审计）：永久性 HTTP 错误（401/403/404，见
+      // PERMANENT_SSE_ERROR_STATUSES）停本订阅重连循环——此前对必败请求无限
+      // 退避重打（8fab9af4 时的明确留置项）；无 status（网络断/服务端关流）
+      // 保持退避重连路径不变（不额外 close，维持既有语义）。
+      if (
+        ev &&
+        typeof ev.status === "number" &&
+        PERMANENT_SSE_ERROR_STATUSES.has(ev.status)
+      ) {
+        es?.close();
+        closed = true;
+        return;
+      }
       hadDisconnection = true;
       scheduleReconnect();
     };

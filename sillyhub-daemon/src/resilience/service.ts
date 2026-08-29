@@ -105,6 +105,13 @@ export type ClaimTokenRefresher = (runId: string) => Promise<string | null>;
 const MAX_BACKOFF_MS = 8000;
 
 /**
+ * R4（2026-08-30 审计）：stale-token 422 的 drain 保留重试上限——pending_token
+ * entry 在刷新回调取不到新 token 的窗口（daemon 刚重启 SessionState 未建）用旧
+ * token 重放撞 422 时保留 entry 重试的轮数；超出落回 R-10 立即丢弃（防毒丸）。
+ */
+const TOKEN_422_KEEP_RETRIES = 5;
+
+/**
  * 网络层重试编排服务。
  *
  * 不持有可变业务状态（除内部 healthy 信号），每次调用独立重试。
@@ -116,6 +123,8 @@ export class ResilienceService {
   private _draining = false;
   /** task-07：claim_token 刷新回调（daemon 注入；null=未接线）。 */
   private _refresher: ClaimTokenRefresher | null = null;
+  /** R4（2026-08-30 审计）：stale-token 422 有界保留重试的内存计数（runId 键）。 */
+  private _token422Retries = new Map<string, number>();
   /** task-07：422 对账防抖——每 run 只主动触发一次刷新（重复 422 不打爆）。 */
   private readonly _refreshTriggered = new Set<string>();
 
@@ -147,19 +156,30 @@ export class ResilienceService {
    * pending_token entry（空窗/422 入箱）优先经 refresher 取当前 token
    * （SESSION_INJECT 已刷新到 daemon SessionState）；取不到回落 entry 原值
    * （backend dedup/终态规则兜底）。非 pending_token entry 直接用原值。
+   *
+   * R4（2026-08-30 审计）：返回值附 `staleReplay` 标记——pending_token entry
+   * 且刷新未取得新 token 时为 true（重放的是旧 token，422 应有界保留重试而非
+   * 立即丢弃，见 _drainHandleFailure）。
    */
-  private async _replayToken(entry: OutboxEntry): Promise<string> {
-    if (!entry.pending_token || !this._refresher) return entry.claimToken;
+  private async _replayToken(
+    entry: OutboxEntry,
+  ): Promise<{ token: string; staleReplay: boolean }> {
+    if (!entry.pending_token) {
+      return { token: entry.claimToken, staleReplay: false };
+    }
+    if (!this._refresher) {
+      return { token: entry.claimToken, staleReplay: true };
+    }
     try {
       const fresh = await this._refresher(entry.runId);
-      if (fresh) return fresh;
+      if (fresh) return { token: fresh, staleReplay: false };
     } catch (e) {
       this._logger.warn('claim_token_refresh_failed', {
         run_id: entry.runId,
         error: this._causeForLog(e),
       });
     }
-    return entry.claimToken;
+    return { token: entry.claimToken, staleReplay: true };
   }
 
   /**
@@ -473,15 +493,38 @@ export class ResilienceService {
     }
   }
 
-  /** drain 单类 entry 的公共错误分类（422/终态 4xx 丢弃，可重试保留）。 */
+  /** drain 单类 entry 的公共错误分类（422/终态 4xx 丢弃，可重试保留）。
+   *
+   * R4（2026-08-30 审计）：`staleReplay`（pending_token entry 刷新未取得新
+   * token、用旧 token 重放）撞 422 → **保留 entry 下轮 drain 重试**（daemon
+   * 刚重启 SessionState 未建的窗口，SESSION_INJECT 到达后刷新即成功），有界
+   * :data:`TOKEN_422_KEEP_RETRIES` 次后仍失败才丢弃（防毒丸死循环，落回
+   * R-10 既有语义）。计数在内存（重启清零重计，可接受）。
+   */
   private async _drainHandleFailure(
     dedupId: string,
     entry: OutboxEntry,
     e: unknown,
+    staleReplay = false,
   ): Promise<void> {
     const outbox = this._outbox;
     if (!outbox) return;
     if (e instanceof HubHttpError && e.status === 422) {
+      if (staleReplay) {
+        const attempt = (this._token422Retries.get(dedupId) ?? 0) + 1;
+        if (attempt <= TOKEN_422_KEEP_RETRIES) {
+          this._token422Retries.set(dedupId, attempt);
+          this._logger.warn('drain_kept_token_invalid_retry', {
+            run_id: dedupId,
+            kind: entry.kind ?? 'messages',
+            attempt,
+            max: TOKEN_422_KEEP_RETRIES,
+            error: this._causeForLog(e),
+          });
+          return; // 保留 entry，下轮 drain 重试
+        }
+        this._token422Retries.delete(dedupId);
+      }
       // claim_token rotate 失效：丢弃该条（R-10；backend dedup/终态规则兜底）。
       await outbox.markDelivered(
         dedupId,
@@ -559,7 +602,7 @@ export class ResilienceService {
       ...e.message,
       dedup_key: e.dedup_key,
     }));
-    const claimToken = await this._replayToken(entry);
+    const { token: claimToken, staleReplay } = await this._replayToken(entry);
     try {
       await this.retryTerminal(() =>
         this._client.submitMessages(entry.leaseId, claimToken, dedupId, messages),
@@ -568,8 +611,9 @@ export class ResilienceService {
         dedupId,
         entry.envelopes.map((e) => e.dedup_key),
       );
+      this._token422Retries.delete(dedupId);
     } catch (e) {
-      await this._drainHandleFailure(dedupId, entry, e);
+      await this._drainHandleFailure(dedupId, entry, e, staleReplay);
     }
   }
 
@@ -587,7 +631,7 @@ export class ResilienceService {
     }
     if (await this._drainCheckValidity(dedupId, entry)) return;
     const payload = entry.envelopes[0]?.message ?? {};
-    const claimToken = await this._replayToken(entry);
+    const { token: claimToken, staleReplay } = await this._replayToken(entry);
     try {
       await this.retryTerminal(() =>
         notify.call(this._client, entry.leaseId, claimToken, dedupId, payload),
@@ -596,8 +640,9 @@ export class ResilienceService {
         dedupId,
         entry.envelopes.map((e) => e.dedup_key),
       );
+      this._token422Retries.delete(dedupId);
     } catch (e) {
-      await this._drainHandleFailure(dedupId, entry, e);
+      await this._drainHandleFailure(dedupId, entry, e, staleReplay);
     }
   }
 

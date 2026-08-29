@@ -439,6 +439,32 @@ describe('PAX/GNU/ustar-prefix 解包兼容（审计 P1-5，对齐 backend tarfi
     expect(existsSync(truncated)).toBe(false);
   });
 
+  it('非 ASCII（中文）文件名：PAX path 记录按字节长度解析，落到正确中文路径（2026-08-30 审计①）', async () => {
+    const wsId = 'ws-pax-nonascii-path';
+    // Python tarfile 实测：任何非 ASCII 名（即使 ≤100 字节）都写 'x' 头 path 记录，
+    // 实体头 name 字段为 ascii/replace 混淆形（b'docs/?????/??.md'）。修复前
+    // parsePaxRecords 按码元校验字节长度（len=字节 > text.length=码元）→ 首记录即
+    // break → path 丢失 → 文件落混淆路径（同长中文名互相覆盖）。
+    const realPath = 'docs/团队介绍/文件.md';
+    const mojibakeName = 'docs/?????/??.md'; // 实体头 name 字段的 ascii/replace 形态
+    const bundle = tarBuf([
+      buildPaxExtHeader([
+        paxRecord('path', realPath),
+        paxRecord('mtime', '1788005616.3831797'),
+      ]),
+      buildTarEntry(mojibakeName, '团队内容\n', '0'),
+    ]);
+    const client = { getSpecBundle: vi.fn().mockResolvedValue(bundle) } as any;
+
+    const r = await pullSpecBundle(client, wsId, {});
+    expect(r).toBe(resolveSpecDir(wsId));
+
+    // 正确中文路径落地、内容完整（paxRecord 助手按字节算 len，字节/码元错位时本用例红）。
+    expect(readFileSync(join(r!, 'docs', '团队介绍', '文件.md'), 'utf-8')).toBe('团队内容\n');
+    // 混淆路径不得存在（修复前文件落这里）。
+    expect(existsSync(join(r!, 'docs', '?????'))).toBe(false);
+  });
+
   it('ustar prefix 字段（345-500）：name = prefix + "/" + name 拼接后落地', async () => {
     const wsId = 'ws-ustar-prefix';
     const bundle = tarBuf([

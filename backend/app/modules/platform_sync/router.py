@@ -287,8 +287,12 @@ async def get_spec_bundle(
     _spec_root, spec_version, tar_stream = await SpecWorkspaceService(session).build_bundle(
         scope.workspace_id
     )
+    # 2026-08-30 审计⑦：经 async 包装消费——断连/结束显式 close（starlette 1.1.0
+    # 不调同步迭代器 close），阻塞段挪线程池不卡事件循环。
+    from app.modules.spec_workspace.service import iter_bundle_stream
+
     return StreamingResponse(
-        tar_stream,
+        iter_bundle_stream(tar_stream),
         media_type="application/x-tar",
         headers={
             "Content-Disposition": f'attachment; filename="spec-bundle-{scope.workspace_id}.tar"',

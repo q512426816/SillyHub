@@ -296,6 +296,17 @@ export function SessionPermissionPanel({
           fireConnectedOnce();
           handleFrame(e);
         };
+        // 终态收口（2026-08-30 审计⑧）：backend 对 ended/failed 会话连上即发命名
+        // 事件 `event: done` 并关流——done 是命名事件不进 onmessage，此前无人
+        // 监听 → 流关闭触发 onerror（无 status）→ 退避重连封顶 30s 无限循环
+        // （approvals 页 sessionIds 仅手动 reload 刷新，循环不会自止）。与
+        // daemon.ts streamSession（ql-20260829-007）同款置 closed 停本会话
+        // 重连；已死连接从 sourcesRef 摘除（effect 重建/卸载清理不受影响）。
+        es.addEventListener("done", () => {
+          closed = true;
+          sourcesRef.current.delete(sid);
+          es.close();
+        });
         es.onerror = (ev) => {
           // 404/401/网络中断：fetch-sse 不自动重连（task-12 取舍）——task-09 起
           // 按退避自动重建（上方 scheduleReconnect），refetchInterval 兜底保留。

@@ -80,6 +80,7 @@ runSillyspecInit: 版本门控 sillyspec --version ≥ 3.26.8（3s 超时）
 - onProgress 回调只报过程起点（total+processed=0），终态上报由 task-runner 在
   complete 前做；filesTotal 增量=ops 数、全量=快照文件数。
 
+- parsePaxRecords 必须在 Buffer 上按**字节**偏移解析（ql-20260830-001 审计①）：PAX 记录 len 是字节数，非 ASCII（中文文件名）时 len > JS 字符串码元数，按码元校验会首记录即 break、path 丢失 → 文件落实体头 name 的混淆路径并互相覆盖（CLI 侧 src/sync.js 同款已同步修复）
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->

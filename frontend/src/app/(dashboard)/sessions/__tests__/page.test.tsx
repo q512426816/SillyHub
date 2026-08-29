@@ -87,6 +87,19 @@ const mocks = vi.hoisted(() => ({
   notifyWarning: vi.fn(),
   // 2026-08-24-sessions-live-updates（task-06）：门户挂载即订阅 SSE 信号——
   // 本页用例不断言信号行为，mock 返回 no-op close 防卸载清理炸 jsdom。
+  // 2026-08-30 补 mock 债（f7f99a2f session-usage-stats）：session-usage-bar
+  // 自取数消费，缺导出会 Uncaught Error 炸渲染（规则 21 顺手修）。
+  getSessionUsage: vi.fn(async () => ({
+    totals: {
+      model: "totals",
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      api_requests: 0,
+    },
+    by_model: [],
+  })),
   subscribeAgentSessionsEvents: vi.fn((..._args: unknown[]) => ({
     close: () => {},
   })),
@@ -118,6 +131,7 @@ vi.mock("@/lib/daemon", async (importOriginal) => {
       mocks.fetchSessionDialogHistory(...args),
     listSessionRuns: (...args: unknown[]) => mocks.listSessionRuns(...args),
     deleteAgentSession: vi.fn(),
+    getSessionUsage: (...args: unknown[]) => mocks.getSessionUsage(...args),
     subscribeAgentSessionsEvents: (...args: unknown[]) =>
       mocks.subscribeAgentSessionsEvents(...args),
   };

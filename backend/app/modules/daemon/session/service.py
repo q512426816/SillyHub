@@ -2293,6 +2293,10 @@ class SessionService:
         ``_inject_into_session``——激活已消费首条消息为首轮，再走 inject 会撞
         turn 冲突守卫）。
         """
+        # 归档区禁写（2026-08-30 审计④-1）：激活分支在 inject_session 内先于
+        # _inject_into_session（守卫所在）提前 return——预会话工作区已归档时，
+        # 首条消息激活同样是在归档区建 run/lease 并派发执行，须与共享核心同拦。
+        await self._ensure_session_workspace_writable(session)
         from app.modules.agent.placement import (
             NoOnlineDaemonError,
             RunPlacementService,
@@ -4405,6 +4409,11 @@ class SessionService:
         """
         session = await self._get_owned_session_for_update(session_id, user_id)
 
+        # 归档区禁写（2026-08-30 审计④-7）：plan 确认会解除 daemon 侧 agent 的
+        # 等待让其继续在归档工作区执行写操作——与 inject/interrupt 同拦（409），
+        # 不持久化 decision、不推送控制消息。
+        await self._ensure_session_workspace_writable(session)
+
         # Validate the run exists and belongs to this session.
         run = (
             await self._session.execute(
@@ -5417,6 +5426,11 @@ class SessionService:
         """
         session = await self._get_owned_session_for_update(session_id, user_id)
 
+        # 归档区禁写（2026-08-30 审计R8）：reopen 建 lease + SESSION_RESUME 会让
+        # daemon 恢复在归档工作区执行——与 inject/interrupt/plan-response 同拦
+        # （409），不在归档区复活会话句柄。
+        await self._ensure_session_workspace_writable(session)
+
         # DS-5：窗口判断需要统一时间基准，now 前移到前置校验之前；后续新建
         # lease / 状态翻转复用同一 now，避免双取漂移。
         now = datetime.now(UTC)
@@ -5990,20 +6004,23 @@ class SessionService:
            （Grill P1）；按 ``COALESCE(run.model, '未记录')`` 归并，``api_requests``
            无来源按 0 计（诚实值，design R-01）。
 
-        归属校验对齐 :meth:`get_agent_session_logs`：``session_id + user_id``
-        DB 侧过滤，缺失/跨用户同抛 :class:`DaemonSessionNotFound`（404 不泄露
-        存在性）。两段按 model 名 dict 归并求和（兜底段按 run.model 命名可能与
-        明细段同名——同名桶相加，不丢）；``by_model`` 按 input+output 总量降序、
-        「未记录」桶恒末位（D-002@v1）；空会话返回全 0 totals + 空 ``by_model``。
+        归属校验对齐 :meth:`get_agent_session`：``session_id + user_id`` DB 侧
+        过滤 + 软删 ``deleted_at`` 视为不存在（FR-07 同口径），缺失/跨用户/已软删
+        同抛 :class:`DaemonSessionNotFound`（404 不泄露存在性）。两段按 model 名
+        dict 归并求和（兜底段按 run.model 命名可能与明细段同名——同名桶相加，
+        不丢）；``by_model`` 按 input+output 总量降序、「未记录」桶恒末位
+        （D-002@v1）；空会话返回全 0 totals + 空 ``by_model``。
         """
         from sqlalchemy import exists, func
 
-        # Ownership check (resource hiding — same not-found for missing/cross-user).
+        # Ownership check (resource hiding — same not-found for missing/cross-user;
+        # 2026-08-30 审计⑥：软删会话同 404，对齐 runs/logs/detail 端点口径).
         owned = (
             await self._session.execute(
                 select(AgentSession.id).where(
                     AgentSession.id == session_id,
                     AgentSession.user_id == user_id,
+                    AgentSession.deleted_at.is_(None),
                 )
             )
         ).scalar_one_or_none()

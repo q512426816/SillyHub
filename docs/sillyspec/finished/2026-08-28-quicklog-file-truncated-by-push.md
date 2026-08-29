@@ -24,3 +24,9 @@ quick 会话 `--done` 后主文件 `.sillyspec/quicklog/QUICKLOG-WhaleFall.md` �
 
 - d1752d11：误判后从 git 恢复主文件全量（与轮转副本重复，历史记录保留）。
 - 后续提交：主文件回到 CLI 单条形态，轮转文件 `QUICKLOG-WhaleFall-2026-08-28.md` 入库。
+
+## 处置记录（2026-08-29 收口）
+
+- **工具侧**：轮转 echo 自 sillyspec 仓 f1709ec（2026-08-13）已存在——`🔄 QUICKLOG 已轮转（>500 行）：QUICKLOG-<user>.md → QUICKLOG-<user>-<日期>.md（提交时带上归档文件，勿漏）`。08-28 事故时该提示已在，误判根因是提示发生在**条目创建时**（rotateIfNeeded 在 append 路径内），而 git diff 审视发生在 `--done` 之后，时间差导致提示未被关联。
+- **文档侧（本日补齐）**：两仓（multi-agent-platform / sillyspec）CLAUDE.md「任务记录隔离」规则与 `.claude/skills/sillyspec-quick/SKILL.md` 均已补轮转口径：主文件超 500 行自动轮转属正常、git diff 大幅删除不是数据丢失、**勿从 git 恢复**（会与轮转副本重复）、提交带上归档文件。
+- 结论：机制已查明 + 工具提示已在 + 文档口径已对齐 → 归档。

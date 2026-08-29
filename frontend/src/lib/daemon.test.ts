@@ -620,3 +620,39 @@ describe("subscribeAgentSessionsEvents (task-05)", () => {
     expect(conn.close).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("subscribeAgentSessionsEvents 停连名单 (R7)", () => {
+  beforeEach(() => {
+    installFetchSseMock();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("永久性 HTTP 错误（403）→ 停止重连（越过最大退避档不再建连）", async () => {
+    vi.useFakeTimers();
+    const sub = subscribeAgentSessionsEvents({ onEvent: vi.fn() });
+    expect(sseConns).toHaveLength(1);
+
+    // 403（PERMANENT_SSE_ERROR_STATUSES）→ close + 停连
+    sseConns[0]!.onerror?.({ status: 403 });
+    expect(sseConns[0]!.close).toHaveBeenCalled();
+
+    // 越过全部退避档（1+2+4+8+16+30s = 61s）不再有第二次建连
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(sseConns).toHaveLength(1);
+    sub.close();
+  });
+
+  it("无 status（网络断/服务端关流）→ 保持退避重连路径（停连名单不误伤）", async () => {
+    vi.useFakeTimers();
+    const sub = subscribeAgentSessionsEvents({ onEvent: vi.fn() });
+    expect(sseConns).toHaveLength(1);
+
+    sseConns[0]!.onerror?.({});
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sseConns).toHaveLength(2); // 照常重连
+    sub.close();
+  });
+});

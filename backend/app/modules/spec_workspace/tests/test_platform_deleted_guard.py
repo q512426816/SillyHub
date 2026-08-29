@@ -615,3 +615,89 @@ class TestWriteSpecRootExclusion:
 
 # Suppress unused-import warning for pytest (fixture discovery).
 pytestmark = pytest.mark.asyncio
+
+
+class TestUpdateOpInterception:
+    """R5（2026-08-30 审计）：update op 同受防复活拦截。
+
+    修复前两道守卫（A1 前缀 / 精确墓碑行）都只判 add——update 直接落盘把
+    墓碑行翻 exists=True 落僵尸文件（get_manifest 响应不含 platform_deleted，
+    按其原样 diff 的新客户端会命中）。
+    """
+
+    async def test_update_on_tombstone_row_rejected(self, db_session, tmp_path) -> None:
+        """update 撞精确墓碑行 → 拒绝：conflict + platform_deleted 回告，行不翻
+        exists、文件不落盘（修复前翻 exists=True 落僵尸文件）。"""
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+        svc = SpecWorkspaceService(db_session)
+        tomb_path = "changes/dead-u/proposal.md"
+        await _seed_tombstone(db_session, ws.id, tomb_path, version=3)
+
+        result = await svc.apply_ops(
+            ws.id,
+            [
+                _op(
+                    "update",
+                    tomb_path,
+                    base_version=3,
+                    content=_b64("zombie write"),
+                    hash=hashlib.sha256(b"zombie write").hexdigest(),
+                )
+            ],
+        )
+
+        assert result["conflict"] is True
+        assert result["server_versions"] == {tomb_path: 3}
+        assert result["platform_deleted"] == [tomb_path]
+        assert not (spec_root / "changes" / "dead-u" / "proposal.md").exists()
+        row = await _get_row(db_session, ws.id, tomb_path)
+        assert row is not None
+        assert row.exists is False
+        assert row.platform_deleted is True
+        assert row.version == 3
+
+    async def test_update_on_plain_row_still_applies(self, db_session, tmp_path) -> None:
+        """对照锚：普通行 update 照常落盘（拦截只认平台墓碑，不吞正常更新）。"""
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+        svc = SpecWorkspaceService(db_session)
+
+        await svc.apply_ops(ws.id, [_op("add", "docs/u.md", content=_b64("v1"))])
+        result = await svc.apply_ops(
+            ws.id,
+            [
+                _op(
+                    "update",
+                    "docs/u.md",
+                    base_version=1,
+                    content=_b64("v2"),
+                    hash=hashlib.sha256(b"v2").hexdigest(),
+                )
+            ],
+        )
+
+        assert result["conflict"] is False
+        assert result["new_versions"] == {"docs/u.md": 2}
+        assert (spec_root / "docs" / "u.md").read_text(encoding="utf-8") == "v2"
+
+
+class TestPrefixLoadingArchiveBoundary:
+    """R6（2026-08-30 审计）：归档区前缀切段四段起步——三段（直接躺在
+    changes/archive/ 根下的行）不是变更目录墓碑，切段会产出以文件名为目录的
+    伪前缀（匹配不到任何路径、真前缀丢失）。"""
+
+    async def test_three_segment_archive_row_not_a_prefix(self, db_session, tmp_path) -> None:
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+        # 三段墓碑行（changes/archive/stray.md）+ 正常四段墓碑
+        await _seed_tombstone(db_session, ws.id, "changes/archive/stray.md")
+        await _seed_tombstone(db_session, ws.id, "changes/archive/real/proposal.md")
+
+        prefixes = await SpecWorkspaceService(db_session)._load_platform_deleted_prefixes(ws.id)
+
+        assert "changes/archive/real/" in prefixes  # 四段正常派生
+        assert "changes/archive/stray.md/" not in prefixes  # 伪前缀不再产出

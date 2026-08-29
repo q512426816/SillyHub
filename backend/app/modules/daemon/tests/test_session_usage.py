@@ -452,6 +452,25 @@ class TestSessionUsageEndpoint:
         assert resp.json()["code"] == "HTTP_404_DAEMON_SESSION_NOT_FOUND"
 
     @pytest.mark.asyncio
+    async def test_soft_deleted_session_404(
+        self,
+        client: AsyncClient,
+        auth_headers: dict[str, str],
+        db_session: AsyncSession,
+    ) -> None:
+        """⑥（2026-08-30 审计）：软删会话 → 404（对齐 runs/logs/detail 的
+        deleted_at 口径——修复前软删会话仍返回 200 聚合数据）。"""
+        me = await _admin_uid(db_session)
+        sess = await _seed_session(db_session, user_id=me)
+        sess.deleted_at = datetime.now(UTC)
+        db_session.add(sess)
+        await db_session.commit()
+
+        resp = await client.get(f"/api/daemon/sessions/{sess.id}/usage", headers=auth_headers)
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["code"] == "HTTP_404_DAEMON_SESSION_NOT_FOUND"
+
+    @pytest.mark.asyncio
     async def test_no_auth_401(
         self,
         client: AsyncClient,

@@ -255,6 +255,12 @@ class ChangeWriterService:
                 details={"lease_id": str(lease_id)},
             )
 
+        # 归档区禁写（2026-08-30 审计④-6）：归档前取得的 lease 在归档后继续向
+        # worktree 写 markdown——与 create_change 同口径 409。
+        doc_ws = await self._session.get(Workspace, workspace_id)
+        if doc_ws is not None:
+            WorkspaceService.ensure_writable(doc_ws)
+
         # Resolve change
         change = await self._get_change(change_id, workspace_id)
 
@@ -328,6 +334,11 @@ class ChangeWriterService:
         Returns list of generated doc types.
         """
         from app.modules.change_writer.markdown_builder import DOCUMENT_BUILDERS
+
+        # 归档区禁写（2026-08-30 审计④-6）：模板批量落盘同属归档区文件写，先拦。
+        batch_ws = await self._session.get(Workspace, workspace_id)
+        if batch_ws is not None:
+            WorkspaceService.ensure_writable(batch_ws)
 
         change = await self._get_change(change_id, workspace_id)
 

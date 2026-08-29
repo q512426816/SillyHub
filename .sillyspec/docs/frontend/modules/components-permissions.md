@@ -42,6 +42,13 @@ useEffect(() => {                    // pendingFallback 变化 → 查询覆盖 
 - token 已从 URL query 移到 Authorization header（防访问日志明文泄漏），勿回退到 query 传参。
 - 本组件管的是"会话工具审批/问答"，与 RBAC 菜单权限（lib-permission/lib-menu-permissions）是不同概念，勿混淆。
 - `parseSessionPermissionEvent` / `SessionPermissionRequest` 类型定义在 lib-daemon，本模块只消费。
+- subscribeAgentSessionsEvents（lib/daemon.ts）已加 PERMANENT_SSE_ERROR_STATUSES
+  停连名单（401/403/404 停订阅重连，ql-20260830-002 R7；全局列表流无 done 事件，
+  与会话级流不同）；常量从 lib/daemon.ts 导出复用。
+- 终态会话（ended/failed）backend 连上即发命名事件 `done` 并关流——done 不进
+  onmessage，wire() 的 done 监听置 closed 停本会话重连（ql-20260830-001 审计⑧，
+  对齐 daemon.ts streamSession ql-20260829-007 同款形态）；删监听会回到每 30s
+  必败重连的无限循环（approvals 页 sessionIds 仅手动 reload 刷新）。
 
 ## 人工备注
 
