@@ -1598,6 +1598,14 @@ class SpecWorkspaceService:
                 )
             ).scalars()
             manifest_by_path = {r.path: r for r in manifest_rows}
+        # 审计 A1（2026-08-29 合入后修复轮）：apply_ops 增量通道（CLI spec-sync /
+        # daemon 增量）补前缀级防复活拦截——平台删除 changes/{name}/ 后，成员本地
+        # 新增的**从未推送文件**（manifest 无行）发 add 时 row=None，原实现只做
+        # 精确行拦截（row.platform_deleted）挡不住，走普通 add 落盘即复活已删
+        # 目录（reparse 随之翻回 active）。与 _write_spec_root 通道 3 的 B-2 前缀
+        # 排除（:885/:912）同构：加载时机与 manifest 预取同批（保持 :1601 注释的
+        # 「ops 循环主连接零事务」性质——commit 在循环前释放读事务）。
+        platform_deleted_prefixes = await self._load_platform_deleted_prefixes(workspace_id)
         # ql-20260817-005：事务释放点——ops 循环（write_bytes/move 全 FS）主连接
         # 需保持零事务：SQLAlchemy 2.0 的 add/delete 会 autobegin 立即开事务，
         # 横跨后续全部 FS 段会撞 idle-in-transaction 超时（同 _write_spec_root②，
@@ -1628,6 +1636,24 @@ class SpecWorkspaceService:
 
                 # 查清单行（workspace_id+path）——task-03 起查预取 dict（miss 即 None）
                 row = manifest_by_path.get(op.path)
+
+                # 审计 A1：add 命中已平台删除目录前缀（含「从未推送文件」row=None
+                # 的边角）→ 与下方精确行拦截同构处理：不落盘、conflict=True、
+                # server_versions[path]（若行存在）+ platform_deleted 列表项。
+                # 前缀探测优先于软删复活分支——目录级墓碑语义下该目录内任何 add
+                # 都是复活企图（含普通软删行，平台删除是目录级动作）。
+                if (
+                    op.op == "add"
+                    and platform_deleted_prefixes
+                    and op.path.replace("\\", "/").startswith(platform_deleted_prefixes)
+                ):
+                    conflict = True
+                    if row is not None:
+                        if server_versions is None:
+                            server_versions = {}
+                        server_versions[op.path] = row.version
+                    platform_deleted_paths.append(op.path)
+                    continue
 
                 # ql-20260819-004：软删行复活（add）。CLI diff 把 exists=False 行从
                 # serverPaths 过滤（spec-sync.js computeSpecOps），本地文件在即发
@@ -1750,6 +1776,20 @@ class SpecWorkspaceService:
                     # 愈合同步永久卡死（2026-08-19-quick-done-autoarchive-misfire
                     # 缺陷②）。墓碑的磁盘文件已在备份区，rename 结果原地复活墓碑。
                     target_row = manifest_by_path.get(op.new_path)
+                    # 审计 A1：rename 目标命中已平台删除目录前缀（含目标「从未推送
+                    # 路径」target_row=None 的边角）→ 与下方精确行拦截同构处理：
+                    # 不落盘、conflict=True、server_versions[new_path]（若行存在）+
+                    # platform_deleted 列表项。源文件不动、目标目录不建。
+                    if platform_deleted_prefixes and op.new_path.replace("\\", "/").startswith(
+                        platform_deleted_prefixes
+                    ):
+                        conflict = True
+                        if target_row is not None:
+                            if server_versions is None:
+                                server_versions = {}
+                            server_versions[op.new_path] = target_row.version
+                        platform_deleted_paths.append(op.new_path)
+                        continue
                     # task-02（design §5.4 通道 2）：rename 目标命中 platform_deleted
                     # 墓碑 → 拒绝复活（daemon 增量把本地残留搬进平台已删目录）。与下方
                     # exists 占用判断同构回告：conflict + server_versions +

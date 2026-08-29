@@ -393,6 +393,86 @@ class TestRenameTargetInterception:
 
 
 # ===========================================================================
+# ⑥ 前缀级防复活拦截（审计 A1 / 2026-08-29 合入后修复轮）：通道 1/2 的
+#    「从未推送文件」边角——manifest 无行 → row=None 绕过精确行拦截
+# ===========================================================================
+
+
+class TestPrefixLevelInterception:
+    async def test_add_never_seen_path_under_tombstone_dir_rejected(
+        self, db_session, tmp_path
+    ) -> None:
+        """平台删除 changes/dead/ 后，成员本地新增的从未推送文件（manifest 无行）
+        发 add → row=None 原实现走普通 add 落盘复活已删目录。
+
+        前缀级拦截（对齐 _write_spec_root 通道 3 的 B-2 加固）：conflict=True +
+        platform_deleted 列表含路径 + 磁盘未落（目录都不建）+ 不建 manifest 行；
+        行不存在 → server_versions 无该键。
+        """
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+        svc = SpecWorkspaceService(db_session)
+        # 平台删除落库终态：目录内既有行成墓碑 → changes/dead/ 进前缀集
+        await _seed_tombstone(db_session, ws.id, "changes/dead/proposal.md", version=2)
+
+        never_seen = "changes/dead/member-never-pushed.md"
+        result = await svc.apply_ops(
+            ws.id,
+            [
+                _op(
+                    "add",
+                    never_seen,
+                    content=_b64("brand new local file"),
+                    hash=hashlib.sha256(b"brand new local file").hexdigest(),
+                )
+            ],
+        )
+
+        assert result["conflict"] is True
+        assert result["platform_deleted"] == [never_seen]
+        assert result["new_versions"] == {}
+        # 行不存在 → 不收集 server_versions 项
+        assert result["server_versions"] is None
+        # 磁盘未落盘（连目录都未建——防 reparse 翻回 active）
+        assert not (spec_root / "changes" / "dead").exists()
+        # 不建 manifest 行（无行维持无行）
+        assert await _get_row(db_session, ws.id, never_seen) is None
+
+    async def test_rename_never_seen_target_into_tombstone_dir_rejected(
+        self, db_session, tmp_path
+    ) -> None:
+        """rename 目标进墓碑目录（目标路径无 manifest 行）→ 同拒绝。
+
+        target_row=None 原实现绕过精确行拦截走普通 rename 落盘；前缀级拦截后：
+        conflict + platform_deleted 列表含目标路径、源文件不动、目标未落盘、
+        目标不建行。
+        """
+        ws = await _make_workspace(db_session)
+        spec_root = tmp_path / "spec-root"
+        await _make_spec_workspace(db_session, ws, spec_root)
+        svc = SpecWorkspaceService(db_session)
+        src = "changes/ok/tasks.md"
+        await svc.apply_ops(ws.id, [_op("add", src, content=_b64("tasks"))])
+        await _seed_tombstone(db_session, ws.id, "changes/dead/proposal.md", version=2)
+
+        never_seen_target = "changes/dead/moved-here.md"
+        result = await svc.apply_ops(
+            ws.id, [_op("rename", src, base_version=1, new_path=never_seen_target)]
+        )
+
+        assert result["conflict"] is True
+        assert result["platform_deleted"] == [never_seen_target]
+        assert result["new_versions"] == {}
+        assert result["server_versions"] is None  # 目标行不存在
+        # 源文件不动（rename 整体被拒，未 move）
+        assert (spec_root / "changes" / "ok" / "tasks.md").read_text(encoding="utf-8") == "tasks"
+        # 目标未落盘、不建行
+        assert not (spec_root / "changes" / "dead").exists()
+        assert await _get_row(db_session, ws.id, never_seen_target) is None
+
+
+# ===========================================================================
 # ④ delete op 在墓碑行上幂等放行（design §5.4：愈合方向不拦截）
 # ===========================================================================
 
