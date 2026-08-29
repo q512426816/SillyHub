@@ -58,3 +58,13 @@ answer: 用户拍板「并入，继续」。以 revision 1 重开 brainstorm 并
 依据：只读调查结论——last_pushed_at 字段已存在未投影、30s 轮询已就绪、current_step_status 投影已存在，Layer 1/2 改动极小；与波 1-3 同文件（platform_sync/change/changes 页面），并入避免并行变更冲突（规则 19）。
 evidence: brainstorm revision 1（step 3-8 重做），用户对话原话「并入 继续吧」。
 
+## D-008@v1 : X1 墓碑触发面收窄——裸删不发墓碑，仅归档/unregister 触发（design §5.5 修订）
+状态：accepted
+type: risk
+priority: P1
+source: audit-fix（2026-08-29 审计修复轮，B1）
+question: CLI「实体目录双失」判定无法区分「本地裸删」与「platform pull 只写 DB 不建目录的无目录态」——后者误发墓碑会把活跃变更在平台软删（全体成员生效）。如何收口？
+answer: 收窄 tombstoneDue 为仅 `DB status='archived'`（unregister/归档链）触发；删除 entityDirGone 判据。裸删收敛不损失：镜像链（spec-sync delete ops → scoped 定向删除 FR-01）本就是权威闭环，墓碑只是加速器；该加速器在无目录态下风险大于收益。跨仓实现 cefd811。
+supersedes: 无（修订 D-005@v1 中 X1 的触发面描述，不推翻方案 A）
+evidence: 审计报告 P1-2（三审计代理之一发现+主代理复核）；修复后 X1 测试改为「目录双失不发墓碑」断言。
+
