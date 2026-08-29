@@ -323,5 +323,69 @@ async def test_placeholder_protected_within_window_full(db_session, tmp_path):
     assert await _fetch(db_session, ws.id, "2026-08-29-window-full") is not None
 
 
+# ===========================================================================
+# 审计 A5（2026-08-29 合入后修复轮）：progress 联动删独立短事务化
+# ===========================================================================
+
+
+async def test_reparse_main_commit_survives_progress_cleanup_failure(
+    db_session, db_engine, tmp_path, monkeypatch
+):
+    """审计 A5：progress 表缺失（联动删 SELECT 抛错）只告警，不放大成主 reparse
+    事务中止（PG 下 SELECT 异常使事务 aborted → 外层 commit 抛
+    InFailedSqlTransaction → 整次 reparse 回滚）。
+
+    双断言：
+    - 行为：Change 行删除照常 commit（主流程不因联动删失败回滚）；
+    - 结构：联动删在 ``get_session_factory()`` 新开的独立短事务 session 上执行
+      （对齐 spec_workspace._trigger_change_reparse 范式，彻底隔离主事务）。
+    """
+    import app.core.db as db_module
+
+    ws = await _make_ws(db_session)
+    spec_root = tmp_path / "spec-root"
+    spec_root.mkdir()
+    await _make_spec_ws(db_session, ws, spec_root)
+    _seed_change(spec_root, "2026-08-29-gone", "Gone")
+    service = ChangeService(db_session)
+    stats, _ = await service.reparse(ws.id)
+    assert stats["created"] == 1
+    await _seed_progress_row(db_session, ws.id, "2026-08-29-gone")
+    shutil.rmtree(spec_root / "changes" / "2026-08-29-gone")
+
+    # 探针：记录 reparse 期间经 get_session_factory 开出的独立 session
+    created: list[object] = []
+    original_factory = db_module.get_session_factory
+
+    class _TrackingFactory:
+        def __init__(self, inner) -> None:
+            self._inner = inner
+
+        def __call__(self):
+            session = self._inner()
+            created.append(session)
+            return session
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+    monkeypatch.setattr(
+        db_module, "get_session_factory", lambda: _TrackingFactory(original_factory())
+    )
+
+    # 模拟 progress 收件箱表不可用（迁移窗口 / 表缺失）
+    from sqlalchemy import text
+
+    async with db_engine.begin() as conn:
+        await conn.execute(text("DROP TABLE platform_change_progress"))
+
+    stats, _ = await service.reparse(ws.id)
+    assert stats["deleted"] == 1
+    # 主事务照常 commit：Change 行删除已落库，未被联动删失败牵连回滚
+    assert await _fetch(db_session, ws.id, "2026-08-29-gone") is None
+    # 联动删在独立短事务上执行（非主 reparse session）
+    assert created, "progress 联动删必须在 get_session_factory 独立 session 执行"
+
+
 # Suppress unused-import warning for pytest fixture discovery.
 pytestmark = pytest.mark.asyncio

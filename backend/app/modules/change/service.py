@@ -1432,6 +1432,9 @@ class ChangeService:
             if delete_candidates
             else set()
         )
+        # FR-03a / 审计 A5：删除环收集被删 key，主 commit 后独立短事务批量联动删
+        # progress 收件箱行（见循环后调用点注释）。
+        deleted_keys: list[str] = []
         for key, row in existing_by_key.items():
             if key in seen_keys:
                 continue
@@ -1454,12 +1457,21 @@ class ChangeService:
                 continue
             await self._session.delete(row)
             stats["deleted"] += 1
-            # FR-03a：Change 行删除 → 连带删 progress 收件箱行，防变更中心收敛后
-            # progress 永久残留（行不存在静默跳过）。
-            await self._delete_progress_row(workspace_id, key)
+            # FR-03a：收集被删 key——Change 行删除的主事务 commit 后，独立短事务
+            # 连带删 progress 收件箱行（见 _delete_progress_rows；豁免/受保护跳过
+            # 的行不收集不联动删）。
+            deleted_keys.append(key)
 
         await self._session.commit()
         log.info("changes.reparsed", workspace_id=str(workspace_id), **stats)
+        # FR-03a + 审计 A5（2026-08-29 合入后修复轮）：progress 收件箱联动删挪到
+        # 主 commit **之后**的独立短事务——原实现在删除环内用主 session SELECT+
+        # DELETE，SELECT 抛错虽被 catch 只告警，但 PG 事务已 aborted → 外层
+        # commit 抛 InFailedSqlTransaction → 整次 reparse（含全部 Change 删除）
+        # 回滚。挪后 + 独立 session（对齐 spec_workspace._trigger_change_reparse
+        # 的 get_session_factory 范式）彻底隔离：联动删失败仅告警，主事务已落库。
+        if deleted_keys:
+            await self._delete_progress_rows(workspace_id, deleted_keys)
         return stats, result
 
     async def _progress_reported_active_keys(
@@ -1513,7 +1525,7 @@ class ChangeService:
                     keys.add(str(c["name"]))
         return keys
 
-    async def _delete_progress_row(self, workspace_id: uuid.UUID, change_name: str) -> None:
+    async def _delete_progress_rows(self, workspace_id: uuid.UUID, change_names: list[str]) -> None:
         """删除环联动删 ``platform_change_progress`` 收件箱行（task-03 / FR-03a）。
 
         Change 行因磁盘确认消失被删除时，连带删同 ``(workspace_id, change_name)``
@@ -1523,29 +1535,40 @@ class ChangeService:
         的降级哲学——读方核实：投影 join 全部 miss-fallback，审批 upsert 会按需重建
         最小行，联动删失败不产生读侧错误）。``PlatformChangeProgressORM`` 函数级
         import 照 ``_progress_reported_active_keys`` 范式。
+
+        审计 A5（2026-08-29 合入后修复轮）：**独立短事务**——``get_session_factory()``
+        新开 session 做 SELECT+DELETE+commit（照 spec_workspace
+        ``_trigger_change_reparse`` 范式），不再用主 reparse session：原实现 SELECT
+        抛错虽被 catch 只告警，但 PG 事务已 aborted → 外层 commit 抛
+        InFailedSqlTransaction → 整次 reparse 回滚。调用点在主 commit 之后（见
+        reparse 删除环尾部注释），失败只 log.warning，主事务结果不受影响。批量
+        change_name IN 一次处理全部被删 key（原逐 key 一次 SELECT）。
         """
         try:
+            from app.core.db import get_session_factory
             from app.modules.platform_sync.model import PlatformChangeProgressORM
 
-            row = (
-                (
-                    await self._session.execute(
-                        select(PlatformChangeProgressORM).where(
-                            col(PlatformChangeProgressORM.workspace_id) == workspace_id,
-                            col(PlatformChangeProgressORM.change_name) == change_name,
+            async with get_session_factory()() as cleanup_session:
+                rows = (
+                    (
+                        await cleanup_session.execute(
+                            select(PlatformChangeProgressORM).where(
+                                col(PlatformChangeProgressORM.workspace_id) == workspace_id,
+                                col(PlatformChangeProgressORM.change_name).in_(change_names),
+                            )
                         )
                     )
+                    .scalars()
+                    .all()
                 )
-                .scalars()
-                .one_or_none()
-            )
-            if row is not None:
-                await self._session.delete(row)
+                for row in rows:
+                    await cleanup_session.delete(row)
+                await cleanup_session.commit()
         except Exception as exc:  # best-effort 守卫，任何 DB 异常只告警不回滚 Change 删除
             log.warning(
                 "change.reparse_progress_cleanup_failed",
                 workspace_id=str(workspace_id),
-                change_name=change_name,
+                change_names=change_names,
                 error=str(exc),
             )
 
