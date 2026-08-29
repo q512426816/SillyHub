@@ -136,6 +136,9 @@ function makeHarness(opts: { pendingPath: string; bundlePath: string; intervalSe
   (
     daemon as unknown as { _registeredRuntimes: Map<string, string> }
   )._registeredRuntimes.set('claude', 'rt-task08-selfupdate-1');
+  // R1（2026-08-30）起 30s 复查定时器带 ``!this._running`` 停机守卫——四路径
+  // 不 start() 的本 harness 需模拟在跑 daemon，否则推迟路径的重探全被守卫跳过。
+  (daemon as unknown as { _running: boolean })._running = true;
 
   // 顺序断言载体：download（mock 实现）/ stop（spy 置换）/ respawn（mock 实现）。
   const order: string[] = [];

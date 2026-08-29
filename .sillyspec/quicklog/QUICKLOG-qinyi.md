@@ -105,3 +105,12 @@
 方案：前端 13 个 SessionPanel 测试文件 hoisted 对象补 getSessionUsage: vi.fn().mockResolvedValue(null)（必须 resolve——裸 vi.fn() 返回 undefined 会被组件 .then 同步崩；null=按无数据不渲染）+ factory 映射行；portal/page 由并行会话已补 mock，我修其 vi.fn 零参推断 vs 转发层 rest 展开的 TS2556（实现加 (..._args: unknown[])）；后端 ruff format 5 文件 + 3 处过时 ignore 删除 + 累加器改名 active_keys
 结果：前端 4 个 CI 失败文件 150/150 绿 + 11 个防回归文件 78/78 绿 + typecheck/lint 0 错；后端 change+spec_workspace 34 用例、agent+workspace 193 用例全绿，mypy 0 错（原 5）、ruff check 过、格式化 4 文件 --check 干净；未部署（纯测试基建与静态检查修复）
 审计：📝 文档欠账（D-8）：17 个源码文件改动未同步任何模块文档（涉及模块：frontend）
+
+## ql-20260830-004-90a4 | 2026-08-30 07:20:09 | daemon-ci 红修复——selfupdate 集成 harness 模拟在跑 daemon
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts
+需求：daemon-ci 红修复——selfupdate 集成 harness 模拟在跑 daemon
+根因：3aff0ce5 R1 给 30s 自升级复查定时器加 !this._running 停机守卫（生产语义正确，stop 后 SDK 子进程句柄可使进程存活到 +30s 不该再触发升级）；但 selfupdate-scenarios 集成 harness 四路径刻意不 start()，_running 恒 false，重探全被守卫吃掉，路径①/② 的 writePendingUpdate×3 与 runDaemonSelfUpdate×2 断言过期变红
+方案：makeHarness 按既有 _registeredRuntimes 直填同款 cast 惯例补 (daemon as unknown as { _running: boolean })._running = true，模拟在跑 daemon 对齐守卫前置；不改产品代码
+结果：selfupdate-scenarios 4/4 绿 + 邻近 selfupdate/orchestrator/heartbeat/preflight 31 用例绿 + daemon tsc 0 错；未部署
