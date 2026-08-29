@@ -547,6 +547,13 @@ class WorkspaceService:
                 "slug 创建后不可修改。",
                 details={"slug": new_slug, "current_slug": ws.slug},
             )
+        # ql-20260829-008：状态维护。pending→active 不能裸写列——activate 的引导
+        # 语义（_ensure_empty_spec_workspace + last_scanned_at）必须保留，故先委托
+        # activate（幂等：status!=pending 时提前返回），再继续应用其余字段。
+        new_status = changes.get("status")
+        if new_status == "active" and ws.status == "pending":
+            await self.activate(workspace_id)
+            ws = await self.get(workspace_id)
         if changes:
             _upd_root = changes.get("root_path")
             for field, value in changes.items():

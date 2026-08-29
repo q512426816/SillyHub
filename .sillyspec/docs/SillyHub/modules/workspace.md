@@ -40,6 +40,13 @@ workspace_id 是全平台跨组件协作主轴；daemon-client 唯一模式下�
     `default_agent_profile_id`（档案软约束兜底：run 未显式指定时回退，
     档案删则 SET NULL 回退 default_agent，D-014）、
     tech_stack / build_command / test_command、status、deleted_at。
+    **status 维护（ql-20260829-008）**：值域 pending/active/archived/deleted，
+    PATCH 可维护子集仅 active/archived（WorkspacePatchStatusLiteral，Literal 外
+    值 422；曾存在类尾同名字段把 Literal 校验覆盖成任意字符串的隐患，已删重）；
+    pending→active 经 PATCH 传入时 service 层委托 activate 引导（spec bootstrap
+    + last_scanned_at），deleted 恒走 DELETE 软删端点（runs 收敛 + deleted_at）。
+    前端：列表页默认 status=active 筛选（选「全部状态」可看归档），详情页基本
+    信息编辑表单含状态下拉（active↔archived），hero 徽标非 active 值显中文标签。
     root_path 与 slug 的唯一性是 **partial unique index（WHERE deleted_at IS NULL）**——
     软删行保留原值，同路径重建走复活而非冲突（migration 202605261000）
   - M2N 中间表：`TaskWorkspace` / `AgentRunWorkspace` / `PpmProjectWorkspace`。

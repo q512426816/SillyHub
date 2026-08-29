@@ -273,4 +273,31 @@ describe("WorkspacesPage 选择器改造 (task-07)", () => {
     fireEvent.click(screen.getByTestId("card-activate"));
     expect(nav.push).toHaveBeenCalledWith("/workspaces/ws-offline");
   });
+
+  it("ql-20260829-008：默认只拉活跃工作区（status=active）；切「全部状态」后不带 status", async () => {
+    workspacesApi.listWorkspaces.mockResolvedValue({
+      items: [mkWorkspace("ws-live")],
+      total: 1,
+    });
+
+    renderPage(<WorkspacesPage />);
+    await waitFor(() =>
+      expect(screen.getByTestId("ws-card-ws-live")).toBeInTheDocument(),
+    );
+    // 首载即带 status: "active"——归档行默认不进列表（用户需求：页面默认只展示活跃）。
+    expect(workspacesApi.listWorkspaces).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "active" }),
+    );
+
+    // 切「全部状态」（value=""）→ status 归 undefined 重新拉取。
+    // antd Select 非 select 原生控件：fireEvent.change 不触发 onChange，按
+    // antd RTL 惯例 mouseDown 展开下拉 + 点选选项（portal 渲染）。
+    fireEvent.mouseDown(screen.getByLabelText("筛选状态"));
+    fireEvent.click(await screen.findByText("全部状态"));
+    await waitFor(() =>
+      expect(workspacesApi.listWorkspaces).toHaveBeenLastCalledWith(
+        expect.objectContaining({ status: undefined }),
+      ),
+    );
+  });
 });

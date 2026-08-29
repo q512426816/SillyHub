@@ -75,7 +75,9 @@ export default function WorkspacesPage() {
   // null=全部 / "unclassified"=type IS NULL（走 ?unclassified=true，不传 type）/
   // 8 值词表之一=?type= 等值匹配（后端 Literal 校验）。旧值 daemon-client 已废弃删除。
   const [typeFilter, setTypeFilter] = useState<WorkspaceType | "unclassified" | null>(null);
-  const [statusFilter, setStatusFilter] = useState("");
+  // ql-20260829-008：默认只展示活跃工作区（archived 归档行不再默认入列）；
+  // 筛选器可选「全部状态」查看归档/删除等非活跃行。
+  const [statusFilter, setStatusFilter] = useState("active");
   const [ownerUserId, setOwnerUserId] = useState<string | null>(null);
   const [userOptions, setUserOptions] = useState<UserRead[]>([]);
   const [page, setPage] = useState(0);

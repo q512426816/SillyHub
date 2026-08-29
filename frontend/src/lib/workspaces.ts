@@ -149,7 +149,9 @@ export interface UpdateWorkspaceInput {
   tech_stack?: string[];
   build_command?: string | null;
   test_command?: string | null;
-  status?: WorkspaceStatus;
+  // 状态维护（ql-20260829-008）：仅 active/archived（后端 Literal 校验，pending 走
+  // 激活流程 / deleted 走软删端点，不开放 PATCH）；omit 不改。
+  status?: Extract<WorkspaceStatus, "active" | "archived">;
   // ── 2026-08-18-workspace-role-type task-05（FR-02/FR-05）──
   // omit=不改 / 显式 null=清空（对齐后端 exclude_unset 实现，D-005@v1）；
   // type 清空后列表/详情显示「未分类」灰徽标。

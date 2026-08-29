@@ -426,6 +426,88 @@ async def test_patch_slug_same_value_is_noop(
     assert resp.json()["slug"] == created["slug"]
 
 
+# ── PATCH status 状态维护（ql-20260829-008）──────────────────────────────
+
+
+async def test_patch_status_archive_and_restore(
+    client: AsyncClient, workspace_root: Path, auth_headers: dict[str, str]
+) -> None:
+    """active→archived→active 日常维护主路径；归档后 ?status=archived 可检索。"""
+    created = await _create_workspace(client, workspace_root, auth_headers)
+    ws_id = created["id"]
+    assert created["status"] == "active"
+
+    resp = await client.patch(
+        f"/api/workspaces/{ws_id}",
+        json={"status": "archived"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "archived"
+
+    listed = await client.get(
+        "/api/workspaces", params={"status": "archived"}, headers=auth_headers
+    )
+    assert listed.status_code == 200, listed.text
+    assert ws_id in {item["id"] for item in listed.json()["items"]}
+
+    restore = await client.patch(
+        f"/api/workspaces/{ws_id}",
+        json={"status": "active"},
+        headers=auth_headers,
+    )
+    assert restore.status_code == 200, restore.text
+    assert restore.json()["status"] == "active"
+
+
+async def test_patch_status_rejects_non_maintainable_values(
+    client: AsyncClient, workspace_root: Path, auth_headers: dict[str, str]
+) -> None:
+    """pending/deleted/乱值 → 422：pending 走激活流程、deleted 走软删端点，不开放 PATCH。"""
+    created = await _create_workspace(client, workspace_root, auth_headers)
+    ws_id = created["id"]
+
+    for bad in ("pending", "deleted", "bogus"):
+        resp = await client.patch(
+            f"/api/workspaces/{ws_id}",
+            json={"status": bad},
+            headers=auth_headers,
+        )
+        assert resp.status_code == 422, f"status={bad} 应 422，实际 {resp.status_code}"
+
+
+async def test_patch_status_pending_to_active_runs_activate_bootstrap(
+    db_session,
+    client: AsyncClient,
+    auth_headers: dict[str, str],
+) -> None:
+    """pending→active 经 PATCH 传入时委托 activate 引导语义——last_scanned_at 被
+    置值（裸写 status 列不会碰它），防 PATCH 直改绕过 spec bootstrap。"""
+    from app.modules.workspace.model import Workspace
+
+    ws = Workspace(
+        id=uuid.uuid4(),
+        name="pending-patch-ws",
+        slug=f"pending-{uuid.uuid4().hex[:8]}",
+        root_path="/tmp/pending-patch",
+        status="pending",
+    )
+    db_session.add(ws)
+    await db_session.commit()
+
+    resp = await client.patch(
+        f"/api/workspaces/{ws.id}",
+        json={"status": "active"},
+        headers=auth_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "active"
+    assert body["last_scanned_at"] is not None, (
+        "pending→active 应走 activate 引导（置 last_scanned_at），而非裸写列"
+    )
+
+
 # ── Init endpoint (POST /{workspace_id}/init) ──────────────────────────────
 
 

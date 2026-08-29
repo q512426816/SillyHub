@@ -60653,6 +60653,21 @@
             ],
             "title": "Type"
           },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "archived"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
           "role": {
             "anyOf": [
               {
@@ -60770,17 +60785,6 @@
               }
             ],
             "title": "Source Yaml Path"
-          },
-          "status": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Status"
           }
         },
         "type": "object",

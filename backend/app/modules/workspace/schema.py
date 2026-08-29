@@ -12,6 +12,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.modules.workspace.constants import WorkspaceTypeLiteral
 
 WorkspaceStatusLiteral = Literal["pending", "active", "archived", "deleted"]
+# PATCH 可维护的状态子集（ql-20260829-008）：pending 是创建/首扫前过渡态（激活
+# 走 POST /activate 的引导语义）、deleted 走 DELETE 软删（runs 收敛 + deleted_at），
+# 二者均不开放给 PATCH 直改；PATCH 只做 active ↔ archived 日常维护
+# （pending→active 经 PATCH 传入时 service 层委托 activate 引导，见 service.update）。
+WorkspacePatchStatusLiteral = Literal["active", "archived"]
 # spec 同步策略（2026-06-28-daemon-client-spec-sync-strategy，D-001/D-004）。
 # daemon-client workspace 创建时用户可选；决定源项目已有 .sillyspec 如何进入平台。
 SpecStrategyLiteral = Literal["platform-managed", "repo-mirrored", "repo-native"]
@@ -159,6 +164,10 @@ class WorkspaceUpdate(BaseModel):
     component_key: str | None = Field(default=None, max_length=100)
     # 工作区类型 omit 不改 / null 清空（D-005@v1）；值域 8 值词表，非法值 422。
     type: WorkspaceTypeLiteral | None = None
+    # 状态维护（ql-20260829-008）：仅 active/archived（pending/deleted 走各自
+    # 专属流程，Literal 外值 422）；omit 不改。pending→active 由 service 层
+    # 委托 activate 引导（spec bootstrap + last_scanned_at），不裸写列。
+    status: WorkspacePatchStatusLiteral | None = None
     role: str | None = Field(default=None, max_length=100)
     # description: omit 不改 / null 清空（与 default_agent 同 exclude_unset 模式）。
     description: str | None = Field(default=None, max_length=2000)
@@ -172,7 +181,6 @@ class WorkspaceUpdate(BaseModel):
     build_command: str | None = Field(default=None)
     test_command: str | None = Field(default=None)
     source_yaml_path: str | None = Field(default=None)
-    status: str | None = Field(default=None)
 
     @field_validator("slug")
     @classmethod

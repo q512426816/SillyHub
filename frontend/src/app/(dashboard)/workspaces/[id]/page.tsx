@@ -51,6 +51,16 @@ interface Props {
   params: { id: string };
 }
 
+// ql-20260829-008：状态中文标签（编辑表单存量值选项显示用；hero 头图徽标
+// 用同款映射，见 hero-header.tsx）。可维护值仅 active/archived；pending/deleted
+// 为只读态（各自走激活/软删流程）。
+const WORKSPACE_STATUS_LABEL: Record<string, string> = {
+  active: "活跃",
+  archived: "已归档",
+  pending: "待激活",
+  deleted: "已删除",
+};
+
 /* ------------------------------------------------------------------ */
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -106,6 +116,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
   const [typeDraft, setTypeDraft] = useState<string | null>(null);
   const [roleDraft, setRoleDraft] = useState("");
   const [descriptionDraft, setDescriptionDraft] = useState("");
+  // ql-20260829-008：状态维护草稿（active/archived 两值可维护；pending/deleted 走
+  // 各自专属流程）。存原始 string，存量过渡态（pending）在下拉追加「存量值」选项
+  // 原样显示（形态对齐 typeDraft 的词表外值处理）。
+  const [statusDraft, setStatusDraft] = useState<string>("active");
   const [savingInfo, setSavingInfo] = useState(false);
   // 基本信息编辑态展开开关（默认收起只读展示，点「编辑」展开表单；贴
   // WorkspaceConfigCard 内联展开的交互形态，页面无独立编辑路由）。
@@ -123,6 +137,10 @@ export default function WorkspaceDetailPage({ params }: Props) {
         ...(typeDraft !== (workspace.type ?? null)
           ? { type: typeDraft as WorkspaceType | null }
           : {}),
+        // 状态同款 omit=不改：未变化不发；pending→active 由后端委托 activate 引导。
+        ...(statusDraft !== workspace.status
+          ? { status: statusDraft as "active" | "archived" }
+          : {}),
         role: roleDraft.trim() === "" ? null : roleDraft.trim(),
         description: descriptionDraft.trim() === "" ? null : descriptionDraft.trim(),
       });
@@ -137,6 +155,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
 
   const infoDirty =
     typeDraft !== (workspace?.type ?? null) ||
+    statusDraft !== (workspace?.status ?? "") ||
     roleDraft !== (workspace?.role ?? "") ||
     descriptionDraft !== (workspace?.description ?? "");
 
@@ -179,6 +198,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
       setDefaultModel(ws.default_model);
       // task-07 / FR-05：基本信息编辑草稿回填（保存后 reload 同样走这里收敛）。
       setTypeDraft(ws.type ?? null);
+      setStatusDraft(ws.status ?? "active");
       setRoleDraft(ws.role ?? "");
       setDescriptionDraft(ws.description ?? "");
       // task-11 / 2026-07-10-remove-server-local-workspace-mode：平台统一
@@ -301,6 +321,7 @@ export default function WorkspaceDetailPage({ params }: Props) {
         onClick={() => {
           // 取消 = 丢弃草稿回填当前值，退回只读态
           setTypeDraft(workspace.type ?? null);
+          setStatusDraft(workspace.status ?? "active");
           setRoleDraft(workspace.role ?? "");
           setDescriptionDraft(workspace.description ?? "");
           setEditingInfo(false);
@@ -338,7 +359,9 @@ export default function WorkspaceDetailPage({ params }: Props) {
             <dd>{formatTs(workspace.created_at)}</dd>
             <dt className="text-muted-foreground">最后扫描</dt>
             <dd>{formatTs(workspace.last_scanned_at)}</dd>
-            {/* 类型/角色/用途：只读态徽标 + 单行截断（R-06），编辑态换下方表单 */}
+            {/* 类型/角色/用途：只读态徽标 + 单行截断（R-06），编辑态换下方表单。
+                状态不在本行展示——hero 头图已有状态徽标（hero-header.tsx），
+                状态的「维护」入口在下方编辑表单（ql-20260829-008）。 */}
             <dt className="text-muted-foreground">类型</dt>
             <dd>
               {(() => {
@@ -371,6 +394,26 @@ export default function WorkspaceDetailPage({ params }: Props) {
             /* 编辑表单：布局类对齐「默认智能体提供方」卡片的 label+控件+保存按钮
                交互形态（直接可编辑小表单 + 保存，页面无独立编辑路由）。 */
             <div className="mt-3 space-y-2.5 border-t pt-2.5">
+              <div className="space-y-1">
+                <label className="text-[11px] text-muted-foreground">
+                  状态（归档后默认不再出现在工作区列表）
+                </label>
+                <select
+                  value={statusDraft}
+                  onChange={(e) => setStatusDraft(e.target.value)}
+                  className="h-8 w-full rounded border border-input bg-background px-2.5 text-sm focus:border-ring focus:outline-none"
+                >
+                  <option value="active">活跃</option>
+                  <option value="archived">已归档</option>
+                  {/* 存量过渡态（pending 等）：词表外当前值追加原值选项防止 React
+                      select 失配回跳（形态对齐 typeDraft 存量值处理）。 */}
+                  {statusDraft !== "active" && statusDraft !== "archived" && (
+                    <option value={statusDraft}>
+                      {WORKSPACE_STATUS_LABEL[statusDraft] ?? statusDraft}（存量值）
+                    </option>
+                  )}
+                </select>
+              </div>
               <div className="space-y-1">
                 <label className="text-[11px] text-muted-foreground">
                   工作区类型（不选即&ldquo;未分类&rdquo;）

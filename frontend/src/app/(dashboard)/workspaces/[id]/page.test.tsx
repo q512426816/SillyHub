@@ -548,4 +548,42 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     ).toBeInTheDocument();
     expect(screen.queryByTestId("shared-daemon-toggle")).not.toBeInTheDocument();
   });
+
+  // ── ql-20260829-008：基本信息区状态维护（徽标 + 编辑归档）──
+
+  it("基本信息区显示状态徽标「活跃」；编辑态改「已归档」保存 → updateWorkspace 带 status", async () => {
+    const { ws, specWs } = makeWorkspace("platform-managed");
+    workspacesApi.getWorkspace.mockResolvedValue(ws);
+    specApi.getSpecWorkspace.mockResolvedValue(specWs);
+    workspacesApi.scanGenerate.mockResolvedValue({ workspace_id: "ws-1", agent_run_id: "run-1", session_id: "sess-1" });
+    componentsApi.listComponents.mockResolvedValue({ items: [], total: 0 });
+    mockDefaultBinding();
+    workspacesApi.updateWorkspace.mockResolvedValue({ ...ws, status: "archived" });
+
+    render(<WorkspaceDetailPage params={{ id: "ws-1" }} />);
+    await waitFor(() =>
+      expect(screen.getAllByText("multi-agent-platform").length).toBeGreaterThan(0),
+    );
+    // 只读态：状态徽标显示「活跃」（状态行 dl 内）
+    expect(screen.getByText("活跃")).toBeInTheDocument();
+
+    // 展开「编辑」→ 状态下拉出现
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    const statusLabel = screen.getByText("状态（归档后默认不再出现在工作区列表）");
+    const statusSelect = statusLabel.parentElement?.querySelector("select");
+    expect(statusSelect).not.toBeNull();
+
+    // 改「已归档」→ 保存按钮解禁 → 点保存
+    fireEvent.change(statusSelect!, { target: { value: "archived" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() =>
+      expect(workspacesApi.updateWorkspace).toHaveBeenCalledWith(
+        "ws-1",
+        expect.objectContaining({ status: "archived" }),
+      ),
+    );
+    // 保存成功 → setWorkspace(updated) 刷新徽标为「已归档」并退回只读态
+    expect(await screen.findByText("已归档")).toBeInTheDocument();
+  });
 });

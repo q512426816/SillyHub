@@ -21230,6 +21230,8 @@ export interface components {
             component_key?: string | null;
             /** Type */
             type?: ("frontend-code" | "backend-code" | "fullstack" | "business-doc" | "submodule" | "deploy-ops" | "design-asset" | "other") | null;
+            /** Status */
+            status?: ("active" | "archived") | null;
             /** Role */
             role?: string | null;
             /** Description */
@@ -21250,8 +21252,6 @@ export interface components {
             test_command?: string | null;
             /** Source Yaml Path */
             source_yaml_path?: string | null;
-            /** Status */
-            status?: string | null;
         };
         /** WorktreeAcquireRequest */
         WorktreeAcquireRequest: {

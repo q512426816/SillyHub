@@ -14,6 +14,15 @@ interface WorkspaceHeroHeaderProps {
   extraActions?: React.ReactNode;
 }
 
+// ql-20260829-008：状态中文标签（原样英文 archived/pending 对用户不可读）；
+// 未知存量值回退原值显示。
+const WORKSPACE_STATUS_LABEL: Record<string, string> = {
+  active: "活跃",
+  archived: "已归档",
+  pending: "待激活",
+  deleted: "已删除",
+};
+
 export function WorkspaceHeroHeader({
   workspace,
   extraActions,
@@ -42,7 +51,7 @@ export function WorkspaceHeroHeader({
                   : "bg-transparent text-white/80",
               )}
             >
-              {workspace.status === "active" ? "活跃" : workspace.status}
+              {WORKSPACE_STATUS_LABEL[workspace.status] ?? workspace.status}
             </Badge>
           </div>
           <p className="font-mono text-xs text-white/60">{workspace.slug}</p>
