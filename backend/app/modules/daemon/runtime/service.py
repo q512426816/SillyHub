@@ -430,6 +430,31 @@ class RuntimeService:
         await self._session.refresh(instance)
         return instance
 
+    async def count_pending_control_commands(self, daemon_instance_id: uuid.UUID) -> int:
+        """该 daemon 全部 runtime 名下 pending 控制指令计数（task-04 / design A2）。
+
+        心跳响应 ``pending_controls`` 字段的数据源（一次聚合查询，JOIN
+        daemon_runtimes 按 ``daemon_instance_id`` 汇总；daemon 心跳循环据此
+        触发控制指令补拉对账——A1/A2 约定字段名）。迁移期
+        ``daemon_instance_id IS NULL`` 的旧 runtime 行不归属任何实体，天然
+        不计入。纯读无副作用。
+        """
+        # lazy import：control_commands 属投递层新模块，保持 runtime 子包顶层
+        # 依赖面不变（对齐本文件 host_fs RPC 等函数级 import 先例）。
+        from app.modules.daemon.control_commands import STATUS_PENDING
+        from app.modules.daemon.model import DaemonControlCommand
+
+        stmt = (
+            select(func.count())
+            .select_from(DaemonControlCommand)
+            .join(DaemonRuntime, DaemonControlCommand.runtime_id == DaemonRuntime.id)
+            .where(
+                DaemonRuntime.daemon_instance_id == daemon_instance_id,
+                DaemonControlCommand.status == STATUS_PENDING,
+            )
+        )
+        return int((await self._session.execute(stmt)).scalar() or 0)
+
     async def get_runtime(
         self,
         runtime_id: uuid.UUID,
@@ -923,6 +948,50 @@ class RuntimeService:
             self._session.add(rt)
         await self._session.commit()
         return len(stale_instances)
+
+    async def mark_instance_offline_delayed(self, daemon_instance_id: uuid.UUID) -> int:
+        """WS 断开 10s 延迟降级落库（task-02 / D-007@v1）。
+
+        由 ws_hub 断开延迟任务到期后经默认回调调用（取消判定在 ws_hub 侧：
+        任务执行时复查 ``is_connected(daemon_instance_id)``，重连即跳过，本方法
+        不再重复复查）。语义与 ``cleanup_stale_runtimes`` 的联动一致，但触发源
+        是 WS 实连接断开而非心跳过期：
+
+            daemon_instances.status: online → offline
+            + 其下所有非 disabled daemon_runtimes.status → offline
+
+        - 实体不存在 / 状态非 online（disabled 保留管理员意图、已 offline 幂等）
+          → 返回 0 不写库。
+        - 心跳恢复由既有 ``heartbeat_daemon`` 覆盖（instance + 上报 provider 的
+          runtime 均拉回 online）；HTTP 心跳周期 15s 与 10s 延迟的相位差会留下
+          最长一个心跳周期的 offline→online 抖动窗口——design A4 已声明可接受。
+        """
+        instance = await self._session.get(DaemonInstance, daemon_instance_id)
+        if instance is None or instance.status != "online":
+            return 0
+        now = datetime.now(UTC)
+        instance.status = "offline"
+        instance.updated_at = now
+        self._session.add(instance)
+        # 联动：该 daemon 下所有非 disabled runtime 标 offline（同 stale 清理语义）。
+        runtimes = (
+            (
+                await self._session.execute(
+                    select(DaemonRuntime).where(
+                        col(DaemonRuntime.daemon_instance_id) == daemon_instance_id,
+                        col(DaemonRuntime.status) != "disabled",
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for rt in runtimes:
+            rt.status = "offline"
+            rt.updated_at = now
+            self._session.add(rt)
+        await self._session.commit()
+        return 1
 
     async def _get_owned_runtime(
         self,

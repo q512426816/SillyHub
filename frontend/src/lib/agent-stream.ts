@@ -122,6 +122,11 @@ export class AgentRunStreamClient {
         // 事件会复用该连接到达。它们没 timestamp 字段，走 _emitMessage 会被丢弃，
         // 因此先专用解析 → 专用回调，其余才当普通 log 处理。
         const data: unknown = JSON.parse(e.data);
+        // task-09 / design A6（2026-08-29-daemon-platform-resilience）：收到任一
+        // 成功解析的事件即重置重试预算（retryCount=0）——修复「5 次耗尽永久停连」：
+        // 长会话偶发断线累计耗尽 maxRetries 后 status=error 不再连流，此后即使
+        // backend 恢复也收不到新事件。disconnect() 归零语义保持不变。
+        this.retryCount = 0;
         const permEvt = parseSessionPermissionEvent(data);
         if (permEvt) {
           if ((permEvt as SessionPermissionRequest).tool_name) {

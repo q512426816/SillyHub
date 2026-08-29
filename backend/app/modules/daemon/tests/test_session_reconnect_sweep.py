@@ -395,14 +395,17 @@ class TestSweepSoftDeleted:
 
 
 # ── P2b（2026-08-24 会话审查）：runtime 离线 sweep + 终态广播 ───────────────
+# task-05（2026-08-29-daemon-platform-resilience / design A5 / D-007）改挂起语义：
+# active → suspended（非终态、可 recover，D-001 恢复口径）；pending 维持 failed。
 
 
 class TestOfflineSweep:
     async def test_offline_runtime_active_session_converged(
         self, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """runtime 离线（心跳早于宽限阈值）+ active 会话 → failed + 挂起 run
-        failed + 挂起 lease cancelled + 广播 session_ended。"""
+        """runtime 离线 + active 会话 → **suspended**（非终态，ended_at 不写）+
+        挂起 run failed + 挂起 lease cancelled；suspended 非终态**不发
+        session_ended**（只发列表 status_changed，SSE 会话流继续 keepalive）。"""
         from app.modules.daemon import sweep as sweep_mod
 
         captured: list[tuple[str, str]] = []
@@ -445,16 +448,16 @@ class TestOfflineSweep:
                 select(AgentSession.status, AgentSession.ended_at).where(AgentSession.id == sess.id)
             )
         ).one()
-        assert row.status == "failed"
-        assert row.ended_at is not None
+        assert row.status == "suspended"  # task-05：active 档收敛改挂起（原 failed）
+        assert row.ended_at is None  # 非终态不写 ended_at
         assert await _lease_status(db_session, lease.id) == "cancelled"
         run_status = (
             await db_session.execute(select(AgentRun.status).where(AgentRun.id == run.id))
         ).scalar_one()
         assert run_status == "failed"
-        # 广播 session_ended（SSE 收尾依赖）
+        # suspended 非终态：不广播 session_ended（SSE 流不收尾，列表经 status_changed 刷新）
         events = [json.loads(p) for ch, p in captured if ch == f"agent_session:{sess.id}"]
-        assert any(e.get("event") == "session_ended" for e in events)
+        assert not any(e.get("event") == "session_ended" for e in events)
 
     async def test_online_runtime_session_untouched(self, db_session: AsyncSession) -> None:
         """runtime 在线且心跳新鲜 → active 会话不收敛（不误伤）。"""
@@ -482,7 +485,8 @@ class TestOfflineSweep:
         assert await _lease_status(db_session, lease.id) == "pending"
 
     async def test_pending_session_offline_converged(self, db_session: AsyncSession) -> None:
-        """pending 会话（派发后 daemon 从未就绪即死）同样收敛。"""
+        """pending 会话（派发后 daemon 从未就绪即死）**维持 failed**（task-05 /
+        D-007：daemon 本地无快照记录，suspended 无人 recover）。"""
         from app.modules.daemon import sweep as sweep_mod
 
         user = await _make_user(db_session)

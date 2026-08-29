@@ -137,13 +137,20 @@ export function InteractiveSessionChatSection({
 
 // ── 会话列表 + 历史回看（task-12 / FR-10 / D-005@v1） ───────────────────────
 
-export const ACTIVE_SESSION_VIEW_STATUSES: ReadonlySet<AgentSessionStatus> = new Set([
-  "pending",
-  "active",
-  "reconnecting",
-]);
+/**
+ * task-10（2026-08-29-daemon-platform-resilience / design A5 / D-001@v1）：
+ * 后端 AgentSession.status 已含 suspended（task-05 契约），lib/daemon.ts 的
+ * AgentSessionStatus 联合尚未收口（task-11 归口）——本文件局部放宽词表类型，
+ * 不改 lib。
+ */
+export type AgentSessionStatusWithSuspended = AgentSessionStatus | "suspended";
+
+export const ACTIVE_SESSION_VIEW_STATUSES: ReadonlySet<AgentSessionStatusWithSuspended> =
+  new Set(["pending", "active", "reconnecting", "suspended"]);
 
 export function isActiveSession(s: AgentSessionRead): boolean {
+  // task-10：suspended 挂起会话保留在活跃视图（可进详情/浮窗看历史，横幅+输入
+  // 禁用由 session-panel 承接；daemon 重启后自动恢复，D-001）。
   return ACTIVE_SESSION_VIEW_STATUSES.has(s.status);
 }
 
@@ -152,6 +159,10 @@ export function isActiveSession(s: AgentSessionRead): boolean {
  * claude 或 codex + 有 agent_session_id + 终态（ended/failed）可恢复。
  * active 本就活跃（不显示按钮，走只读回看 ql-007）；
  * 无 agent_session_id（create 失败的 failed）无法恢复（D-007：缺 threadId 不得伪造恢复）。
+ * task-10（2026-08-29-daemon-platform-resilience / D-001@v1）：suspended 不可手动
+ * 续聊——daemon 重启后自动恢复（suspended → reconnecting → active），无需用户操作；
+ * 按钮保留「显示禁用态」交互（对齐 pending/reconnecting 现状：显示但不可点，
+ * resumeDisabledTitle 给出说明），不隐藏入口。
  */
 export function canResumeSession(session: AgentSessionRead | null): boolean {
   if (!session) return false;
@@ -164,6 +175,10 @@ export function canResumeSession(session: AgentSessionRead | null): boolean {
 
 /** 续聊按钮不可用时的 title 提示文案。 */
 export function resumeDisabledTitle(session: AgentSessionRead): string {
+  // task-10：suspended 专用文案——等待守护进程自动恢复，非「不支持续聊」。
+  if ((session.status as AgentSessionStatusWithSuspended) === "suspended") {
+    return "会话已挂起，守护进程重新上线后将自动恢复";
+  }
   if (session.provider !== "claude" && session.provider !== "codex") {
     return "当前会话不支持续聊";
   }

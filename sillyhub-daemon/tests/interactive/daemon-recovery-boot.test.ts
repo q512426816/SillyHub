@@ -14,7 +14,7 @@
 //
 // 不测真实 HubClient / WS / driver；全 mock。
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Daemon } from '../../src/daemon.js';
 import type { DaemonConfig } from '../../src/config.js';
 import type { SessionManager } from '../../src/interactive/session-manager.js';
@@ -47,7 +47,9 @@ function mkRecord(over: Partial<PersistedSessionRecord> = {}): PersistedSessionR
     cwd: 'C:\\work',
     provider: 'claude',
     turnCount: 1,
-    lastActiveAt: 1_700_000_000_000,
+    // task-08 起boot 编排按 lastActiveAt 做 7 天超龄清理（R6）——fixture 默认
+    // 取当前时间（新鲜记录）；超龄用例显式覆盖为历史时间。
+    lastActiveAt: Date.now(),
     ...over,
   };
 }
@@ -380,5 +382,127 @@ describe('Daemon 启动恢复编排', () => {
     expect(client.startLease).not.toHaveBeenCalled();
     expect(client.completeLease).not.toHaveBeenCalled();
     await daemon.stop();
+  });
+});
+
+// ── task-08（2026-08-29-daemon-platform-resilience / design A5 / FR-04）────────
+//
+// 恢复健壮性补充断言：recover HTTP 网络类失败保留本地记录（退避 30s 起步重试，
+// 重试成功走完 reconnecting→active）、记录超龄 7 天（R6）boot 清理。
+// 业务终态删记录已由上方 ended/rejected 用例覆盖。
+
+describe('task-08：恢复健壮性（网络失败保留重试 + 超龄清理）', () => {
+  let holder: Daemon | null = null;
+
+  afterEach(async () => {
+    if (holder?.isRunning) {
+      await holder.stop().catch(() => undefined);
+    }
+    holder = null;
+    vi.useRealTimers();
+  });
+
+  function lastSave(persistence: SessionStorePersistence): PersistedSessionRecord[] {
+    return (
+      (persistence.save as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] ?? []
+    );
+  }
+
+  it('recover 网络类失败（原生 fetch 异常）→ 记录保留 + 30s 退避重试成功恢复全链', async () => {
+    vi.useFakeTimers();
+    const rec = mkRecord();
+    const { persistence } = mockPersistence([rec]);
+    const rc = mockRecoveryClient();
+    // boot 第 1 次网络失败（请求未达，透传原生异常）；重试成功。
+    rc.recoverSession.mockRejectedValueOnce(new TypeError('fetch failed'));
+    const { sm, restoreSpy, markReconnectedSpy } = mockSessionManager();
+    const { daemon } = makeDaemon({
+      sessionManager: sm,
+      persistence,
+      recoveryClient: rc,
+    });
+    holder = daemon;
+    await daemon.start();
+    // 保留语义：boot 失败后记录仍在落盘集合（合并回写，非删除）。
+    expect(restoreSpy).not.toHaveBeenCalled();
+    expect(lastSave(persistence).find((r) => r.sessionId === 'sess-1')).toBeDefined();
+    // 30s 退避到期重试：第 2 次成功 → restore + markReconnected + confirm。
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(rc.recoverSession).toHaveBeenCalledTimes(2);
+    expect(restoreSpy).toHaveBeenCalledWith(rec);
+    expect(markReconnectedSpy).toHaveBeenCalledWith('sess-1');
+    expect(rc.confirmReconnected).toHaveBeenCalledWith('sess-1');
+  });
+
+  it('recover HTTP 5xx（HubHttpError 503）→ 同样保留记录入重试（非业务终态不删）', async () => {
+    vi.useFakeTimers();
+    const rec = mkRecord();
+    const { persistence } = mockPersistence([rec]);
+    const rc = mockRecoveryClient();
+    rc.recoverSession.mockRejectedValueOnce(
+      Object.assign(new Error('HTTP 503 POST .../recover: upstream down'), {
+        name: 'HubHttpError',
+      }),
+    );
+    const { sm } = mockSessionManager();
+    const { daemon } = makeDaemon({
+      sessionManager: sm,
+      persistence,
+      recoveryClient: rc,
+    });
+    holder = daemon;
+    await daemon.start();
+    expect(lastSave(persistence).find((r) => r.sessionId === 'sess-1')).toBeDefined();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(rc.recoverSession).toHaveBeenCalledTimes(2);
+    // 第 2 次成功（默认 mock）→ 恢复完成，不再有第 3 次调用。
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(rc.recoverSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('重试后遇业务终态（ended）→ 删记录出队（保留只针对网络类失败）', async () => {
+    vi.useFakeTimers();
+    const rec = mkRecord();
+    const { persistence } = mockPersistence([rec]);
+    const rc = mockRecoveryClient();
+    rc.recoverSession
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockResolvedValueOnce({ status: 'ended' });
+    const { sm, restoreSpy } = mockSessionManager();
+    const { daemon } = makeDaemon({
+      sessionManager: sm,
+      persistence,
+      recoveryClient: rc,
+    });
+    holder = daemon;
+    await daemon.start();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(restoreSpy).not.toHaveBeenCalled();
+    // 终态删记录：最终落盘不含该 session，且后续退避窗口不再重试。
+    expect(lastSave(persistence).find((r) => r.sessionId === 'sess-1')).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(rc.recoverSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('记录超龄 7 天（R6）→ boot 清理：recover 不发、落盘移除', async () => {
+    const stale = mkRecord({
+      sessionId: 'sess-stale',
+      lastActiveAt: Date.now() - 8 * 24 * 60 * 60_000,
+    });
+    const { persistence } = mockPersistence([stale]);
+    const rc = mockRecoveryClient();
+    const { sm, restoreSpy } = mockSessionManager();
+    const { daemon } = makeDaemon({
+      sessionManager: sm,
+      persistence,
+      recoveryClient: rc,
+    });
+    holder = daemon;
+    await daemon.start();
+    expect(rc.recoverSession).not.toHaveBeenCalled();
+    expect(restoreSpy).not.toHaveBeenCalled();
+    expect(
+      lastSave(persistence).find((r) => r.sessionId === 'sess-stale'),
+    ).toBeUndefined();
   });
 });

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections import deque
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fastapi import WebSocket
@@ -39,6 +40,11 @@ _SEND_TIMEOUT = 10.0
 # the caller within 10s rather than hanging on the WS send path.
 RPC_DEFAULT_TIMEOUT = 10.0
 
+# WS 断开 → DB 标 offline 的延迟窗口（task-02 / D-007@v1 防抖动裁定）。
+# 运行时动态读取（对齐 RPC_DEFAULT_TIMEOUT 惯例）：测试 monkeypatch 本常量即可
+# 缩短窗口，无需真实 sleep 10s。
+WS_DISCONNECT_OFFLINE_DELAY_SECONDS = 10.0
+
 
 class DaemonWsHub:
     """WebSocket connection manager for daemon processes (task-06 / D-006).
@@ -59,6 +65,14 @@ class DaemonWsHub:
         # The future is resolved with the raw result dict (transparent passthrough
         # of the daemon payload); send_rpc extracts result/error before returning.
         self._pending_rpcs: dict[str, asyncio.Future[Any]] = {}
+        # task-02 / D-007@v1：per-daemon 的「断开 10s 后标 offline」延迟任务。
+        # 键 = daemon_instance_id；同 daemon 再次断开时取消旧任务重挂（窗口从
+        # 最近一次断开起算）。任务执行时自查 is_connected 取消（见
+        # _delayed_offline_downgrade）。
+        self._offline_tasks: dict[uuid.UUID, asyncio.Task[None]] = {}
+        # 降级回调（daemon_id → awaitable）。ws_hub 不直接依赖 DB 层；默认回调在
+        # get_daemon_ws_hub() 单例创建时装配，测试可注入 fake。
+        self._offline_callback: Callable[[uuid.UUID], Awaitable[None]] | None = None
 
     # ── Connection lifecycle ──────────────────────────────────────────────────
 
@@ -105,6 +119,8 @@ class DaemonWsHub:
                 daemon_id=str(daemon_id),
                 total_connected=len(self._connections),
             )
+            # task-02：断开后挂 10s 延迟降级任务（内存清理语义不变）。
+            self._schedule_offline_downgrade(daemon_id)
 
     async def _evict_stale(self, daemon_id: uuid.UUID, ws: WebSocket) -> bool:
         """Evict a connection only if it's still the one we tried to send on.
@@ -128,6 +144,8 @@ class DaemonWsHub:
             daemon_id=str(daemon_id),
             total_connected=len(self._connections),
         )
+        # task-02：send 失败逐出与 disconnect 同为「WS 断开」事件，同样挂延迟降级。
+        self._schedule_offline_downgrade(daemon_id)
         return True
 
     async def send_to_runtime(
@@ -559,6 +577,67 @@ class DaemonWsHub:
                 )
                 future.cancel()
 
+    # ── Delayed offline downgrade (task-02 / D-007@v1) ────────────────────────
+
+    def set_offline_callback(
+        self,
+        callback: Callable[[uuid.UUID], Awaitable[None]] | None,
+    ) -> None:
+        """设置「断开 10s 后标 offline」的降级回调（daemon_id 入参）。
+
+        ws_hub 不直接依赖 DB 层：默认回调在 ``get_daemon_ws_hub()`` 单例创建时
+        装配（见模块底部）；测试用本方法注入 fake 以断言回调时序/参数。
+        """
+        self._offline_callback = callback
+
+    def _schedule_offline_downgrade(self, daemon_id: uuid.UUID) -> None:
+        """挂 10s 延迟降级任务（per-daemon，重复断开时替换旧任务）。
+
+        未设置回调时为 no-op——直接实例化 ``DaemonWsHub()`` 的旧路径（单测/
+        未装配环境）行为与 task-02 之前完全一致。
+        """
+        if self._offline_callback is None:
+            return
+        existing = self._offline_tasks.get(daemon_id)
+        if existing is not None and not existing.done():
+            existing.cancel()
+        task = asyncio.create_task(self._delayed_offline_downgrade(daemon_id))
+        self._offline_tasks[daemon_id] = task
+
+    async def _delayed_offline_downgrade(self, daemon_id: uuid.UUID) -> None:
+        """延迟降级任务体：到期后复查实连接，仍断开才触发回调。
+
+        D-007@v1 取消判定 = **任务执行时复查**（而非 disconnect 时注册取消
+        回调）：窗口内同 daemon 重连（``is_connected`` 为真）→ 跳过标记，
+        防重连后误降级。延迟秒数在协程启动时动态读模块常量，测试可
+        monkeypatch ``WS_DISCONNECT_OFFLINE_DELAY_SECONDS`` 缩短窗口。
+        """
+        delay = WS_DISCONNECT_OFFLINE_DELAY_SECONDS
+        await asyncio.sleep(delay)
+        try:
+            if self.is_connected(daemon_id):
+                log.info(
+                    "ws_offline_downgrade_cancelled_reconnected",
+                    daemon_id=str(daemon_id),
+                )
+                return
+            callback = self._offline_callback
+            if callback is None:
+                return
+            await callback(daemon_id)
+        except Exception:
+            # 降级是 best-effort 兜底：回调失败不影响 hub 自身（后续 45s 惰性
+            # 清理 / 心跳链路仍可收敛状态）。
+            log.exception(
+                "ws_offline_downgrade_callback_failed",
+                daemon_id=str(daemon_id),
+            )
+        finally:
+            # 身份校验防止把「替换后的新任务」登记项误删（旧任务被 cancel 时
+            # finally 也会执行）。
+            if self._offline_tasks.get(daemon_id) is asyncio.current_task():
+                del self._offline_tasks[daemon_id]
+
     # ── Query helpers ─────────────────────────────────────────────────────────
 
     def is_connected(self, daemon_id: uuid.UUID) -> bool:
@@ -591,11 +670,44 @@ class DaemonWsHub:
 _ws_hub: DaemonWsHub | None = None
 
 
+async def _default_offline_downgrade(daemon_id: uuid.UUID) -> None:
+    """默认降级回调（task-02）：短命 session 把 instance+runtimes 标 offline。
+
+    依赖注入方向说明：ws_hub 不在模块级 import DB 层（避免环 + 保持 hub 无 DB
+    依赖）；回调内函数级 lazy import + ``get_session_factory()`` 短命 session
+    是后台任务开 session 的既有惯例（conventions §3）。测试环境的
+    ``_redirect_session_factory``（backend/conftest.py autouse）会把工厂指到
+    in-memory 测试引擎，回调不会触碰真实 PG。
+    """
+    # 函数级 import：runtime.service 经 facade 被 ws_hub 模块顶部引用，此处再
+    # 反向引用必须延迟到调用时，避免 import 环。
+    from app.core.db import get_session_factory
+    from app.modules.daemon.runtime.service import RuntimeService
+
+    factory = get_session_factory()
+    async with factory() as session:
+        marked = await RuntimeService(session).mark_instance_offline_delayed(daemon_id)
+    if marked:
+        log.info(
+            "ws_disconnect_offline_marked",
+            daemon_id=str(daemon_id),
+        )
+    else:
+        # 实体不存在 / 非 online（disabled 或已 offline）→ 无需标记。
+        log.info(
+            "ws_disconnect_offline_mark_skipped",
+            daemon_id=str(daemon_id),
+        )
+
+
 def get_daemon_ws_hub() -> DaemonWsHub:
     """Return (and lazily create) the process-wide DaemonWsHub singleton."""
     global _ws_hub
     if _ws_hub is None:
         _ws_hub = DaemonWsHub()
+        # task-02：单例创建时装配默认降级回调（router 无感知、无需装配点）。
+        # 生产首个调用方（router /ws 端点）与测试 patch 均经本函数，行为一致。
+        _ws_hub.set_offline_callback(_default_offline_downgrade)
     return _ws_hub
 
 

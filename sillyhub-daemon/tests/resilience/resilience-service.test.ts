@@ -1,14 +1,19 @@
 /**
- * ResilienceService 单测（task-08 / FR-04 / FR-05 / D-005@v1）。
+ * ResilienceService 单测（task-08 / FR-04 / FR-05 / D-005@v1；task-07 扩展）。
  *
  * 策略：重试用 real timer + baseDelayMs=0（_sleep(0) 几乎瞬时，总耗时几 ms，避免
  * fake timer + 连续异步重试的 unhandled rejection 竞态）；仅退避递增断言（AC-05）
  * 用 fake timer 精确捕获 setTimeout delay。
  *
  * 覆盖：
- *   - submitWithRetry：成功 1 次 / 可重试失败重试 maxAttempts 次 / 4xx fail-fast /
- *     用尽入 outbox / outbox null warn 不崩 / 退避递增
+ *   - submitWithRetry：成功 1 次 / 可重试失败重试 maxAttempts 次 / 其它 4xx fail-fast /
+ *     422 入箱+触发一次 token 刷新（task-07 A3）/ 用尽入 outbox / outbox null warn
+ *     不崩 / 退避递增
  *   - retryTerminal：成功 / 重试后成功 / 4xx 抛 / 用尽抛不暂存
+ *   - 终态入箱（task-07）：enqueueRunResult / enqueueSessionEnd /
+ *     enqueuePendingToken 的 entry 形状（kind/pending_token/payload）
+ *   - drainOutbox：按 kind 路由三类 entry（messages/run_result/session_end）、
+ *     pending_token 经 refresher 取新 token 重放、fake 缺扩展方法丢弃
  *
  * @module resilience/resilience-service.test
  */
@@ -21,6 +26,7 @@ import {
   type RetryConfig,
   type ResilienceLogger,
   type Envelope,
+  type OutboxEntry,
 } from "../../src/resilience/service.js";
 import { HubHttpError } from "../../src/hub-client.js";
 
@@ -42,8 +48,21 @@ function noopLogger(): ResilienceLogger {
   };
 }
 
-function makeClient(submitImpl: ReturnType<typeof vi.fn>): SubmitClient {
-  return { submitMessages: submitImpl };
+/**
+ * task-07：fake client 同步扩展两可选方法（drain 按 kind 路由的补发目标）。
+ * 缺省 vi.fn 成功——测试按需覆盖 mockRejectedValue / mockImplementation。
+ */
+function makeClient(
+  submitImpl: ReturnType<typeof vi.fn>,
+  extra?: {
+    notifyRunResult?: ReturnType<typeof vi.fn>;
+    notifySessionEnd?: ReturnType<typeof vi.fn>;
+  },
+): SubmitClient {
+  const client: SubmitClient = { submitMessages: submitImpl };
+  if (extra?.notifyRunResult) client.notifyRunResult = extra.notifyRunResult;
+  if (extra?.notifySessionEnd) client.notifySessionEnd = extra.notifySessionEnd;
+  return client;
 }
 
 function makeOutbox(): Outbox & {
@@ -105,9 +124,9 @@ describe("submitWithRetry (task-08 / FR-04)", () => {
     expect(outbox.enqueue).toHaveBeenCalledTimes(1);
   });
 
-  it("AC-04 4xx fail-fast 立即抛不重试", async () => {
+  it("AC-04 其它 4xx fail-fast 立即抛不重试（422 除外，见下方 A3 用例）", async () => {
     const submit = vi.fn(async () => {
-      throw new HubHttpError(422, "bad", "u", "POST");
+      throw new HubHttpError(404, "nf", "u", "POST");
     });
     const outbox = makeOutbox();
     const svc = new ResilienceService(
@@ -119,6 +138,56 @@ describe("submitWithRetry (task-08 / FR-04)", () => {
     await expect(svc.submitWithRetry("l", "t", "run-1", envs())).rejects.toThrow();
     expect(submit).toHaveBeenCalledTimes(1);
     expect(outbox.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("task-07 A3: 422（claim_token 失效）不抛——入箱带 pending_token + 触发一次刷新", async () => {
+    const submit = vi.fn(async () => {
+      throw new HubHttpError(422, "token rotated", "u", "POST");
+    });
+    const outbox = makeOutbox();
+    const svc = new ResilienceService(
+      makeClient(submit),
+      outbox,
+      fastRetry,
+      noopLogger(),
+    );
+    const refresh = vi.fn(async () => "new-token");
+    svc.setClaimTokenRefresher(refresh);
+    // 422 不再向上抛（fail-closed 改为入箱对账）。
+    await expect(svc.submitWithRetry("l", "t", "run-1", envs())).resolves.toBeUndefined();
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(outbox.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-1",
+        kind: "messages",
+        pending_token: true,
+      }),
+    );
+    // 触发一次 claim_token 刷新（每 run 防抖：重复 422 不再触发）。
+    await flush();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    await expect(svc.submitWithRetry("l", "t", "run-1", envs())).resolves.toBeUndefined();
+    await flush();
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("task-07 A3: 422 刷新取不到 token 仅 warn 不崩（backend dedup 兜底）", async () => {
+    const submit = vi.fn(async () => {
+      throw new HubHttpError(422, "token rotated", "u", "POST");
+    });
+    const outbox = makeOutbox();
+    const logger = noopLogger();
+    const warnSpy = vi.spyOn(logger, "warn");
+    const svc = new ResilienceService(makeClient(submit), outbox, fastRetry, logger);
+    const refresh = vi.fn(async () => null);
+    svc.setClaimTokenRefresher(refresh);
+    await expect(svc.submitWithRetry("l", "t", "run-1", envs())).resolves.toBeUndefined();
+    await flush();
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "claim_token_refresh_unavailable",
+      expect.objectContaining({ run_id: "run-1" }),
+    );
   });
 
   it("AC-03 用尽入 outbox（注入时 enqueue 被调）", async () => {
@@ -258,6 +327,80 @@ describe("retryTerminal (task-08 / FR-05)", () => {
     await flush();
     expect(call).toHaveBeenCalledTimes(3);
     expect(outbox.enqueue).not.toHaveBeenCalled();
+  });
+});
+
+// ── 终态入箱（task-07 / A3）─────────────────────────────────────────────────
+
+describe("enqueueRunResult / enqueueSessionEnd / enqueuePendingToken (task-07)", () => {
+  it("run_result 入箱：payload 进 envelopes[0]、dedup_key=runId、空 token 带 pending_token", async () => {
+    const outbox = makeOutbox();
+    const svc = new ResilienceService(makeClient(vi.fn()), outbox, fastRetry, noopLogger());
+    await svc.enqueueRunResult("l", "tok", "run-1", { status: "success", is_error: false });
+    expect(outbox.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "run_result",
+        runId: "run-1",
+        envelopes: [
+          { message: { status: "success", is_error: false }, dedup_key: "run-1" },
+        ],
+      }),
+    );
+    // 空窗：claimToken 空串 → pending_token 标记。
+    await svc.enqueueRunResult("l", "", "run-2", { status: "failed", is_error: true });
+    expect(outbox.enqueue).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "run_result", pending_token: true }),
+    );
+  });
+
+  it("run_result 同 run 已有未补发 entry 时跳过（不重复滞留）", async () => {
+    const store = new Map<string, OutboxEntry[]>([
+      [
+        "run-1",
+        [{
+          leaseId: "l",
+          claimToken: "t",
+          runId: "run-1",
+          envelopes: [{ message: {}, dedup_key: "run-1" }],
+          ts: "x",
+          kind: "run_result",
+        }],
+      ],
+    ]);
+    const outbox = memOutbox(store);
+    const svc = new ResilienceService(makeClient(vi.fn()), outbox, fastRetry, noopLogger());
+    await svc.enqueueRunResult("l", "t", "run-1", { status: "success", is_error: false });
+    expect(store.get("run-1")?.length).toBe(1);
+  });
+
+  it("session_end 入箱：dedupId=sessionId、无 lease/token 语义", async () => {
+    const outbox = makeOutbox();
+    const svc = new ResilienceService(makeClient(vi.fn()), outbox, fastRetry, noopLogger());
+    await svc.enqueueSessionEnd("sess-1", "failed", "driver_error");
+    expect(outbox.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "session_end",
+        runId: "sess-1",
+        leaseId: "",
+        claimToken: "",
+        envelopes: [
+          { message: { status: "failed", reason: "driver_error" }, dedup_key: "sess-1" },
+        ],
+      }),
+    );
+  });
+
+  it("pending_token 消息入箱：claimToken 空 + pending_token 标记", async () => {
+    const outbox = makeOutbox();
+    const svc = new ResilienceService(makeClient(vi.fn()), outbox, fastRetry, noopLogger());
+    await svc.enqueuePendingToken("l", "run-1", envs());
+    expect(outbox.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "messages",
+        claimToken: "",
+        pending_token: true,
+      }),
+    );
   });
 });
 
@@ -405,5 +548,252 @@ describe("drainOutbox (task-18 / FR-07)", () => {
     // 可重试错误用尽：保留 entry（不 markDelivered），待下轮 drain 网络恢复后重试
     expect(outbox.markDelivered).not.toHaveBeenCalled();
     expect(store.has("run-1")).toBe(true);
+  });
+
+  // ── task-07：drain 按 kind 路由三类 entry（D-007@v1）──────────────────────
+
+  it("task-07: kind=run_result → 路由 notifyRunResult，成功后 markDelivered", async () => {
+    const store = new Map<string, OutboxEntry[]>([
+      [
+        "run-1",
+        [{
+          leaseId: "l",
+          claimToken: "t",
+          runId: "run-1",
+          envelopes: [{ message: { status: "success", is_error: false }, dedup_key: "run-1" }],
+          ts: "x",
+          kind: "run_result",
+        }],
+      ],
+    ]);
+    const outbox = memOutbox(store);
+    const submit = vi.fn(async () => ({}));
+    const notifyRunResult = vi.fn(async () => ({}));
+    const svc = new ResilienceService(
+      makeClient(submit, { notifyRunResult }),
+      outbox,
+      fastRetry,
+      noopLogger(),
+    );
+    await svc.drainOutbox();
+    await flush();
+    expect(notifyRunResult).toHaveBeenCalledWith(
+      "l",
+      "t",
+      "run-1",
+      { status: "success", is_error: false },
+    );
+    expect(submit).not.toHaveBeenCalled(); // 不走 messages 通道
+    expect(outbox.markDelivered).toHaveBeenCalledWith("run-1", ["run-1"]);
+    expect(store.has("run-1")).toBe(false);
+  });
+
+  it("task-07: kind=session_end → 路由 notifySessionEnd（dedupId=sessionId）", async () => {
+    const store = new Map<string, OutboxEntry[]>([
+      [
+        "sess-1",
+        [{
+          leaseId: "",
+          claimToken: "",
+          runId: "sess-1",
+          envelopes: [{ message: { status: "failed", reason: "driver_error" }, dedup_key: "sess-1" }],
+          ts: "x",
+          kind: "session_end",
+        }],
+      ],
+    ]);
+    const outbox = memOutbox(store);
+    const submit = vi.fn(async () => ({}));
+    const notifySessionEnd = vi.fn(async () => ({}));
+    const svc = new ResilienceService(
+      makeClient(submit, { notifySessionEnd }),
+      outbox,
+      fastRetry,
+      noopLogger(),
+    );
+    await svc.drainOutbox();
+    await flush();
+    expect(notifySessionEnd).toHaveBeenCalledWith("sess-1", "failed", "driver_error");
+    expect(submit).not.toHaveBeenCalled();
+    expect(outbox.markDelivered).toHaveBeenCalledWith("sess-1", ["sess-1"]);
+    expect(store.has("sess-1")).toBe(false);
+  });
+
+  it("task-07: 422 后 token 刷新可重放——pending_token entry 经 refresher 取新 token 补发", async () => {
+    const store = new Map<string, OutboxEntry[]>([
+      [
+        "run-1",
+        [{
+          leaseId: "l",
+          claimToken: "stale-token",
+          runId: "run-1",
+          envelopes: [{ message: { a: 1 }, dedup_key: "dk-1" }],
+          ts: "x",
+          kind: "messages",
+          pending_token: true,
+        }],
+      ],
+    ]);
+    const outbox = memOutbox(store);
+    const submit = vi.fn(async () => ({}));
+    const svc = new ResilienceService(makeClient(submit), outbox, fastRetry, noopLogger());
+    // SESSION_INJECT 已刷新 token（daemon SessionState 持有新值）。
+    svc.setClaimTokenRefresher(async () => "fresh-token");
+    await svc.drainOutbox();
+    await flush();
+    expect(submit).toHaveBeenCalledWith(
+      "l",
+      "fresh-token",
+      "run-1",
+      [{ a: 1, dedup_key: "dk-1" }],
+    );
+    expect(outbox.markDelivered).toHaveBeenCalledWith("run-1", ["dk-1"]);
+    expect(store.has("run-1")).toBe(false);
+  });
+
+  it("task-07: pending_token run_result 经 refresher 取新 token 重放成功", async () => {
+    const store = new Map<string, OutboxEntry[]>([
+      [
+        "run-9",
+        [{
+          leaseId: "l",
+          claimToken: "",
+          runId: "run-9",
+          envelopes: [{ message: { status: "success", is_error: false }, dedup_key: "run-9" }],
+          ts: "x",
+          kind: "run_result",
+          pending_token: true,
+        }],
+      ],
+    ]);
+    const outbox = memOutbox(store);
+    const notifyRunResult = vi.fn(async () => ({}));
+    const svc = new ResilienceService(
+      makeClient(vi.fn(), { notifyRunResult }),
+      outbox,
+      fastRetry,
+      noopLogger(),
+    );
+    svc.setClaimTokenRefresher(async () => "token-after-inject");
+    await svc.drainOutbox();
+    await flush();
+    expect(notifyRunResult).toHaveBeenCalledWith(
+      "l",
+      "token-after-inject",
+      "run-9",
+      { status: "success", is_error: false },
+    );
+    expect(store.has("run-9")).toBe(false);
+  });
+
+  it("task-07: fake 未实现扩展方法 → run_result/session_end entry warn 丢弃（不无限滞留）", async () => {
+    const store = new Map<string, OutboxEntry[]>([
+      [
+        "run-1",
+        [{
+          leaseId: "l",
+          claimToken: "t",
+          runId: "run-1",
+          envelopes: [{ message: {}, dedup_key: "run-1" }],
+          ts: "x",
+          kind: "run_result",
+        }],
+      ],
+      [
+        "sess-1",
+        [{
+          leaseId: "",
+          claimToken: "",
+          runId: "sess-1",
+          envelopes: [{ message: { status: "ended", reason: "manual" }, dedup_key: "sess-1" }],
+          ts: "x",
+          kind: "session_end",
+        }],
+      ],
+    ]);
+    const outbox = memOutbox(store);
+    const submit = vi.fn(async () => ({}));
+    const svc = new ResilienceService(makeClient(submit), outbox, fastRetry, noopLogger());
+    await svc.drainOutbox();
+    await flush();
+    expect(submit).not.toHaveBeenCalled();
+    expect(store.has("run-1")).toBe(false);
+    expect(store.has("sess-1")).toBe(false);
+  });
+
+  it("task-07: 混合三类 entry 同轮 drain 全部路由（messages/run_result/session_end）", async () => {
+    const store = new Map<string, OutboxEntry[]>([
+      [
+        "run-1",
+        [{ leaseId: "l", claimToken: "t", runId: "run-1", envelopes: [{ message: { a: 1 }, dedup_key: "dk-1" }], ts: "x" }],
+      ],
+      [
+        "run-2",
+        [{
+          leaseId: "l",
+          claimToken: "t",
+          runId: "run-2",
+          envelopes: [{ message: { status: "success", is_error: false }, dedup_key: "run-2" }],
+          ts: "x",
+          kind: "run_result",
+        }],
+      ],
+      [
+        "sess-1",
+        [{
+          leaseId: "",
+          claimToken: "",
+          runId: "sess-1",
+          envelopes: [{ message: { status: "ended", reason: "manual" }, dedup_key: "sess-1" }],
+          ts: "x",
+          kind: "session_end",
+        }],
+      ],
+    ]);
+    const outbox = memOutbox(store);
+    const submit = vi.fn(async () => ({}));
+    const notifyRunResult = vi.fn(async () => ({}));
+    const notifySessionEnd = vi.fn(async () => ({}));
+    const svc = new ResilienceService(
+      makeClient(submit, { notifyRunResult, notifySessionEnd }),
+      outbox,
+      fastRetry,
+      noopLogger(),
+    );
+    await svc.drainOutbox();
+    await flush();
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(notifyRunResult).toHaveBeenCalledTimes(1);
+    expect(notifySessionEnd).toHaveBeenCalledTimes(1);
+    expect(store.size).toBe(0);
+  });
+
+  it("task-07: session_end 4xx（终态业务错误）→ 丢弃该条（backend 幂等 no-op 兜底）", async () => {
+    const store = new Map<string, OutboxEntry[]>([
+      [
+        "sess-1",
+        [{
+          leaseId: "",
+          claimToken: "",
+          runId: "sess-1",
+          envelopes: [{ message: { status: "ended", reason: "manual" }, dedup_key: "sess-1" }],
+          ts: "x",
+          kind: "session_end",
+        }],
+      ],
+    ]);
+    const outbox = memOutbox(store);
+    const notifySessionEnd = vi.fn(async () => {
+      throw new HubHttpError(404, "not found", "u", "POST");
+    });
+    const svc = new ResilienceService(
+      makeClient(vi.fn(), { notifySessionEnd }),
+      outbox,
+      fastRetry,
+      noopLogger(),
+    );
+    await svc.drainOutbox();
+    await flush();
+    expect(store.has("sess-1")).toBe(false);
   });
 });

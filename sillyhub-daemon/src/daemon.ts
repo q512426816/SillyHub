@@ -48,6 +48,13 @@ import type { McpBundle } from './mcp-config.js';
 import { MSG } from './protocol.js';
 // 2026-08-20-session-multimodal-attachments task-09：SESSION_INJECT 附件类型。
 import type { SessionInjectAttachment } from './protocol.js';
+// 2026-08-29-daemon-platform-resilience task-06：控制指令 kind 词表（与 backend
+// control_commands.py KIND_* 逐字对齐）+ 补拉条目类型（WS 控制消息与 HTTP 补拉
+// 共用 control-dispatcher 路由）。
+import { CONTROL_KIND } from './protocol.js';
+import type { PendingControlCommand } from './protocol.js';
+// task-06（design A1+A2 消费端）：控制指令统一消费入口（路由/去重/ack 收集）。
+import { ControlDispatcher } from './control-dispatcher.js';
 // task-06（design §5.4.4）：onTurnMessage/onTurnResult 参数类型从 Claude SDK 专属类型
 // 放宽为 provider-neutral 联合，支持 Codex flat message/result 透传。
 import type {
@@ -132,6 +139,29 @@ import type {
 // 后升格进 protocol.ts MSG 表（本任务 allowed_paths 只 daemon.ts + tests，
 // 暂以模块级常量收口，避免越界改 protocol.ts）。
 const SESSION_SWITCH_CONFIG_MSG = 'daemon:session_switch_config';
+
+// ── 2026-08-29-daemon-platform-resilience task-06：控制指令路由与 register 重试 ──
+//
+// WS 控制消息 type（MSG.*，形如 `daemon:session_inject`）→ 控制指令 kind
+//（CONTROL_KIND.*，形如 `session_inject`）映射。task-04 起六类控制消息统一走
+// backend daemon_control_commands 三段式投递（payload 尾部注入 command_id），
+// daemon 侧 WS 推送与 HTTP 补拉共用 control-dispatcher 按 kind 路由——本表是
+// WS 入口把 msgType 翻译成 kind 的唯一落点。PLAN_RESPONSE 不入表（backend 未
+// 收录 plan 下发点，见 protocol.ts CONTROL_KIND 注释），保持既有直连路由。
+const CONTROL_MSG_TYPE_TO_KIND: Record<string, string> = {
+  [MSG.SESSION_INJECT]: CONTROL_KIND.SESSION_INJECT,
+  [MSG.SESSION_INTERRUPT]: CONTROL_KIND.SESSION_INTERRUPT,
+  [MSG.SESSION_END]: CONTROL_KIND.SESSION_END,
+  [MSG.SESSION_RESUME]: CONTROL_KIND.SESSION_RESUME,
+  [MSG.PERMISSION_RESPONSE]: CONTROL_KIND.PERMISSION_RESPONSE,
+  [MSG.PROVIDER_CONFIG_CHANGED]: CONTROL_KIND.PROVIDER_CONFIG_CHANGED,
+};
+
+// register 周期重试退避（design A1）：启动时 register 失败 / 运行期注册全失效时，
+// 心跳循环按退避周期重试 _registerDaemon——15s 起步，连续失败翻倍，60s 封顶；
+// 成功清计数恢复正常心跳。常量导出便于测试注入时间。
+export const REGISTER_RETRY_BASE_MS = 15_000;
+export const REGISTER_RETRY_MAX_MS = 60_000;
 
 // ── 最小日志（design G-05 零依赖，不装 winston/pino）──────────────────────────
 
@@ -430,6 +460,13 @@ interface ClientLike {
     startedAt?: number | Date | null,
   ): Promise<unknown>;
   markOffline?(runtimeId: string): Promise<unknown>;
+  /**
+   * 2026-08-29-daemon-platform-resilience task-08（design A5 / FR-04）：优雅停止
+   * 批量挂起本 daemon 全部 active 会话（POST /sessions/suspend-batch）。可选——
+   * 真实 HubClient 已实现；旧测试 mock 未实现时 stop() 跳过挂起（等价强杀，
+   * 走 backend 600s offline sweep 兜底收敛 suspended）。
+   */
+  suspendSessions?(daemonLocalId: string): Promise<unknown>;
   claimLease(leaseId: string, runtimeId: string): Promise<Record<string, unknown>>;
   // 2026-08-20-session-multimodal-attachments task-09：会话附件下载（可选——
   // HubClient 已实现；测试 mock 未实现时附件回拉/落盘走失败降级标注）。
@@ -441,6 +478,20 @@ interface ClientLike {
     result: Record<string, unknown>,
   ): Promise<unknown>;
   getPendingLeases(runtimeId: string): Promise<Record<string, unknown>[]>;
+  /**
+   * 2026-08-29-daemon-platform-resilience task-06：补拉 runtime 的 pending 控制
+   * 指令（design A2）。可选——真实 HubClient 已实现；旧测试 mock 未实现时
+   * control-dispatcher 不挂 HTTP 源（只走 WS 路由+去重，不补拉不回执）。
+   */
+  getPendingControls?(runtimeId: string): Promise<PendingControlCommand[]>;
+  /**
+   * task-06：控制指令消费回执（ids 批量置 acked，design A2 ack 语义=已处理）。
+   * 可选，同 getPendingControls。
+   */
+  ackControls?(
+    runtimeId: string,
+    ids: string[],
+  ): Promise<{ acked: number } | Record<string, unknown>>;
   getExecutionContext(agentRunId: string): Promise<ExecutionContextPayload>;
   close(): void;
   /**
@@ -496,6 +547,16 @@ interface ClientLike {
     sessionId: string,
     status: 'ended' | 'failed',
     reason: string,
+  ): Promise<unknown>;
+  /**
+   * 2026-08-29-daemon-platform-resilience task-07（design A3）：PERMISSION_REQUEST
+   * 的 HTTP 上行兜底（WS 不通时 sendToHub 改走）。可选——真实 HubClient 已实现；
+   * 旧测试 mock 未实现且 WS 不通时保持既有 fail-closed deny 语义。
+   */
+  submitPermissionRequest?(
+    sessionId: string,
+    payload: Record<string, unknown>,
+    claimToken?: string,
   ): Promise<unknown>;
   /**
    * task-02（design Phase 1 / FR-01）：上报 interactive session 已就绪（create 完成）。
@@ -704,6 +765,30 @@ export interface RecoveryCoordinator {
   markRecoveryFailed(sessionId: string): Promise<void>;
 }
 
+/**
+ * task-08（design A5 / FR-04）：单条恢复编排结果三态。
+ *   - 'recovered'：恢复成功（reconnecting→active）；
+ *   - 'dropped'：未恢复且记录已从持久化移除（业务终态 ended/failed/rejected、
+ *     restore/markReconnected 失败、超龄 7 天清理）；
+ *   - 'retry'：recover HTTP 网络类失败——本地记录保留并已入重试队列。
+ */
+type SessionRecoveryOutcome = 'recovered' | 'dropped' | 'retry';
+
+/**
+ * task-08（design A5）：恢复重试队列条目（recover 网络类失败保留的本地记录）。
+ *
+ * 内存态（不写 sessions.json——退避计数是本次进程的暂态，重启后 boot 编排
+ * 立即重试无需续接计数）；记录本体留在 sessions.json（_mergedPersistableSnapshot
+ * 合并回写防 flush 冲掉）。
+ */
+interface PendingRecoveryEntry {
+  record: PersistedSessionRecord;
+  /** 连续失败次数（成功恢复/终态出队即消亡；退避 = BASE × 2^(retryCount-1) 封顶 MAX）。 */
+  retryCount: number;
+  /** 下次允许重试的时间戳（epoch ms；WS onConnected 立即重试一轮时归零）。 */
+  nextRetryAt: number;
+}
+
 // ── DaemonOptions（便于测试注入 mock detector/wsClientFactory）────────────────
 
 /**
@@ -734,6 +819,18 @@ export const LEASE_POLL_SKIP_MS = 90_000;
 // 强制关闭重建。健康链路 ping/pong（30s 周期）恒刷新新鲜度，不会误杀；
 // 阈值取 90s 轮询判据 + 30s ping 周期 + 缓冲。常量导出便于测试注入时间。
 export const WS_STALE_REAP_MS = 120_000;
+
+// ── task-08（design A5 / FR-04）：recover 网络类失败重试退避 + 超龄清理常量 ────
+//
+// _recoverOneSession 遇 recover HTTP 网络类失败（请求未达/超时/5xx——HubHttpError
+// 非 2xx 或原生网络异常；业务终态只以 2xx status 字段返回）保留 sessions.json
+// 记录入重试队列：退避 30s 起步指数翻倍封顶 5min 持续重试；WS onConnected 立即
+// 重试一轮。R6 防堆积：记录按 lastActiveAt 超龄 7 天清理，仅业务终态
+//（ended/failed/rejected）与 restore 失败删记录。常量导出便于测试注入时间。
+export const RECOVERY_RETRY_BASE_MS = 30_000;
+export const RECOVERY_RETRY_MAX_MS = 5 * 60_000;
+/** 待恢复记录超龄阈值（7 天，R6）：启动编排 / 重试入队时检查，超龄删记录。 */
+export const RECOVERY_RECORD_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
 
 export interface DaemonOptions {
   /** 注入自定义 AgentDetector（测试用 mock）。默认 new AgentDetector()。 */
@@ -1007,6 +1104,20 @@ export class Daemon {
   private readonly _recoveredSessionIds = new Set<string>();
 
   /**
+   * task-08（design A5 / FR-04）：recover 网络类失败保留的重试队列
+   * （sessionId → PendingRecoveryEntry）。退避定时器按最早到期 deadline 单实例
+   * 排程（_scheduleRecoveryRetry）；WS onConnected 把 nextRetryAt 归零立即重试
+   * 一轮（_retryPendingRecoveryNow）。stop() 清定时器 + 合并落盘遗留记录。
+   */
+  private readonly _pendingRecovery = new Map<string, PendingRecoveryEntry>();
+  /** task-08：重试定时器（null=未排程）。 */
+  private _recoveryRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** task-08：当前定时器指向的 deadline（epoch ms；防持续入队把最早 deadline 无限后推）。 */
+  private _recoveryRetryScheduledFor: number | null = null;
+  /** task-08：重试轮防重入标记（定时器与 onConnected 并发触发只跑一轮）。 */
+  private _recoveryRetryInFlight = false;
+
+  /**
    * 单条 WS 客户端（连 backend Hub 带 daemon_local_id，design §5.5 / D-006）。
    *
    * 2026-07-03-daemon-entity-binding task-07：从 per-provider ``_wsClients`` Map
@@ -1046,6 +1157,36 @@ export class Daemon {
 
   /** agent provider → server 分配的 runtime_id（register 成功后填入）。 */
   private readonly _registeredRuntimes = new Map<string, string>();
+
+  /**
+   * task-06（design A1）：启动时探测到的 available agent 列表快照。register
+   * 周期重试（_retryRegisterIfNeeded）重放 _registerDaemon 用——本地 CLI 探测
+   * 结果不随网络波动变化，重试不需要重新探测（detector 可能是测试 mock，
+   * 重放快照保持与启动路径同一数据源）。
+   */
+  private _lastAvailableAgents: DetectedAgent[] = [];
+
+  /**
+   * task-06（design A1）：register 周期重试状态。_registerRetryCount=连续失败
+   * 次数（成功清零）；_nextRegisterRetryAt=下次允许重试的时间戳（15s 起步
+   * 翻倍封顶 60s，见 REGISTER_RETRY_BASE/MAX_MS）。类成员跨 _fire 自愈重启保留
+   *（同 _heartbeatFailSince 惯例，重启即清会误判健康）。
+   */
+  private _registerRetryCount = 0;
+  private _nextRegisterRetryAt = 0;
+
+  /**
+   * task-06（design A1+A2）：控制指令统一消费入口。六类控制消息（WS 推送 +
+   * HTTP 补拉）经它按 kind 路由到下方既有 _route* 方法（不复制业务逻辑）、
+   * LRU 256 command_id 去重、收集 ack 回执。构造器创建（handler 闭包捕获 this）。
+   */
+  private readonly _controlDispatcher: ControlDispatcher;
+
+  /**
+   * task-06（design A1）：重连后统一对账防重入标记。_reconcileAfterReconnect
+   * 运行中为 true（并发触发直接返回，幂等只跑一轮）；finally 兜底复位。
+   */
+  private _reconciling = false;
 
   /**
    * task-05（FR-03）→ task-07 per-daemon：心跳断连计数。value=首次失败时间戳 ms，
@@ -1095,6 +1236,18 @@ export class Daemon {
     this._credentialManager = options?.credentialManager ?? null;
     this._lockManager = options?.lockManager ?? null;
     this._resilience = options?.resilience ?? null;
+    // task-07（A3 422 对账 / A5 空窗重放）：claim_token 刷新回调接线——按 runId
+    // 反查当前 SessionState 的 claimToken（SESSION_INJECT 已刷新到 state；
+    // _interactiveFlatSeqOwner 记录 runId→sessionId 归属）。ResilienceService 在
+    // 422 对账与 drain 重放 pending_token entry 时咨询。
+    if (this._resilience) {
+      this._resilience.setClaimTokenRefresher(async (runId) => {
+        const sid = this._interactiveFlatSeqOwner.get(runId);
+        if (!sid) return null;
+        const token = this._sessionManager?.get(sid)?.claimToken;
+        return token || null;
+      });
+    }
     // task-11：Policy 三件套构造注入（additive，未传 = null，行为不变）。
     this._policyCache = options?.policyCache ?? null;
     // task-09（D-007@v2 候选 B）：借用沙箱管理器，构造期注入优先；未注入走 lazy。
@@ -1110,6 +1263,37 @@ export class Daemon {
     this._logger = createLogger(
       this._normalizeLogLevel(config.log_level),
     );
+    // task-06（design A2 消费端）：控制指令统一消费入口。handler 全部是下方既有
+    // _route* 方法的薄包装（同一实例调用，不复制业务逻辑）；HTTP 源仅在 client
+    // 实现两方法（真实 HubClient）时挂接——旧测试 mock 缺方法 → 只走 WS 路由。
+    const controlSource =
+      typeof this._client.getPendingControls === 'function' &&
+      typeof this._client.ackControls === 'function'
+        ? {
+            getPendingControls: (rid: string) =>
+              this._client.getPendingControls!(rid),
+            ackControls: (rid: string, ids: string[]) =>
+              this._client.ackControls!(rid, ids),
+          }
+        : null;
+    this._controlDispatcher = new ControlDispatcher({
+      handlers: {
+        [CONTROL_KIND.SESSION_INJECT]: (p) =>
+          this._routeSessionControl(MSG.SESSION_INJECT, p),
+        [CONTROL_KIND.SESSION_INTERRUPT]: (p) =>
+          this._routeSessionControl(MSG.SESSION_INTERRUPT, p),
+        [CONTROL_KIND.SESSION_END]: (p) =>
+          this._routeSessionControl(MSG.SESSION_END, p),
+        [CONTROL_KIND.SESSION_RESUME]: (p) =>
+          this._routeSessionControl(MSG.SESSION_RESUME, p),
+        [CONTROL_KIND.PERMISSION_RESPONSE]: (p) =>
+          this._routePermissionResponse(p),
+        [CONTROL_KIND.PROVIDER_CONFIG_CHANGED]: (p) =>
+          this._routeProviderConfigChanged(p),
+      },
+      source: controlSource,
+      logger: this._logger,
+    });
   }
 
   private _normalizeLogLevel(level: string): LogLevel {
@@ -1178,6 +1362,9 @@ export class Daemon {
     this._logger.info('agents_detected', {
       agents: availableAgents.map((a) => a.provider),
     });
+    // task-06（design A1）：快照供 register 周期重试重放（网络恢复后重试
+    // _registerDaemon 不重新探测本地 CLI——见 _lastAvailableAgents 注释）。
+    this._lastAvailableAgents = availableAgents;
 
     // 2. per-daemon 注册（design §5.2 / D-006）：单次 POST /register 上报整体
     // daemon_local_id + 探测到的 provider 列表。单个失败不中断（错误隔离在
@@ -1268,6 +1455,16 @@ export class Daemon {
     this._controllers.clear();
     this._loopPromises.clear();
 
+    // task-08：清恢复重试定时器（收尾不再触发新一轮；遗留记录在下方 flush 后
+    // 合并落盘，下次启动 _recoverSessionsOnBoot 续接）。
+    this._clearRecoveryRetryTimer();
+
+    // task-08（design A5 / FR-04）：优雅停止挂起——在 markOffline 前批量挂起本
+    // daemon 全部 active 会话（中断 run→failed(daemon_stopped)、session→
+    // suspended、挂起 lease→cancelled）。失败仅结构化日志降级不阻断收尾（与
+    // 强杀等价走 backend 600s offline sweep 兜底收敛 suspended，已声明行为）。
+    await this._suspendSessionsOnStop();
+
     await this._markRegisteredRuntimesOffline();
 
     // task-07（FR-06 / D-004@v1）：停 SessionManager 空闲扫描定时器。
@@ -1289,6 +1486,11 @@ export class Daemon {
         this._logger.warn('session_flush_on_stop_failed', { error: e });
       }
     }
+
+    // task-08：上方 flush 只写 store snapshot（active 会话）——遗留待恢复记录
+    //（recover 网络失败重试队列）不在 store，需合并回写 sessions.json，否则
+    // 长时间 backend 故障期间停止 daemon 会把保留记录静默丢档（R6 语义回归）。
+    await this._persistPendingRecoveryRecords();
 
     // ql-20260624-006：释放 runtime lock（启动期 acquire 的单实例 lock）。
     // SIGKILL/断电未走到此 → 下次启动靠 pid 存活检测回收 stale lock。
@@ -1326,6 +1528,36 @@ export class Daemon {
         }
       }),
     );
+  }
+
+  /**
+   * task-08（design A5 / FR-04）：优雅停止挂起——POST suspend-batch（按
+   * daemon_local_id = config.runtime_id）让 backend 把本 daemon 全部 active
+   * 会话单事务三步收敛（中断 run→failed(daemon_stopped)、session→suspended、
+   * 挂起 lease→cancelled，幂等可重入）。
+   *
+   * 失败仅结构化日志降级（不阻断 stop 收尾）：网络已断时与强杀等价，backend
+   * 600s offline sweep 兜底收敛 suspended（design A5 已声明行为，代价是 fallback
+   * 路径下前端最长 600s 仍显示 active）。旧 mock client 未实现 suspendSessions
+   *（ClientLike 可选方法）同样跳过，现有测试构造点零改动。
+   */
+  private async _suspendSessionsOnStop(): Promise<void> {
+    if (typeof this._client.suspendSessions !== 'function') return;
+    try {
+      const resp = (await this._client.suspendSessions(
+        this._config.runtime_id,
+      )) as { suspended?: number; runs_failed?: number } | null;
+      this._logger.info('daemon_stop_sessions_suspended', {
+        daemon_local_id: this._config.runtime_id,
+        suspended: resp?.suspended ?? 0,
+        runs_failed: resp?.runs_failed ?? 0,
+      });
+    } catch (e) {
+      this._logger.warn('daemon_stop_suspend_failed', {
+        daemon_local_id: this._config.runtime_id,
+        error: e,
+      });
+    }
   }
 
   /**
@@ -1414,13 +1646,16 @@ export class Daemon {
   // ── task-10：daemon 启动崩溃恢复编排（§5）───────────────────────────────────
 
   /**
-   * 启动恢复编排：load → 限流并发对每条记录 recover+restore → flush → 完成。
+   * 启动恢复编排：load → 超龄清理 → 限流并发对每条记录 recover+restore →
+   * flush → 遗留待恢复记录合并落盘。
    *
    * 顺序（§5）：在三循环（heartbeat/poll/ws）启动**前**完成全部恢复。
    * - 未注入 persistence/recoveryClient/sessionManager → no-op（Wave1/2 行为）。
    * - load 抛错（不应发生，persistence 内部已隔离）→ 记 warn 不崩。
    * - 单条记录失败（backend rejected 或 driver.start 抛错）→ 结构化 warn 后
    *   继续其他记录，不崩 daemon（失败隔离）。
+   * - task-08：load 后先剔超龄 7 天记录（R6）；recover 网络类失败的记录保留
+   *   入重试队列（_recoverOneSession 返回 'retry'），boot 收尾合并回写。
    * - 全部恢复完成后 flush（清 currentRunId / 无效记录）。
    */
   private async _recoverSessionsOnBoot(): Promise<void> {
@@ -1439,7 +1674,33 @@ export class Daemon {
       this._logger.debug('session_recover_no_records');
       return;
     }
-    this._logger.info('session_recover_start', { count: records.length });
+    // task-08（R6 超龄清理）：启动先剔 lastActiveAt 距今超 7 天的陈旧记录——
+    // backend suspended 会话 24h GC 早已收敛 failed，恢复无意义；防断网堆积的
+    // 遗留记录无限滞留 sessions.json。
+    const fresh: PersistedSessionRecord[] = [];
+    let expired = 0;
+    for (const record of records) {
+      if (this._recoveryRecordExpired(record)) {
+        expired += 1;
+        this._logger.warn('session_recover_record_expired', {
+          session_id: record.sessionId,
+          last_active_at: record.lastActiveAt,
+        });
+        await this._markRecordRemoved(record);
+      } else {
+        fresh.push(record);
+      }
+    }
+    if (fresh.length === 0) {
+      this._logger.info('session_recover_done', {
+        total: records.length,
+        recovered: 0,
+        failed: 0,
+        expired,
+      });
+      return;
+    }
+    this._logger.info('session_recover_start', { count: fresh.length });
 
     // 限流并发（默认 4）：用 slot 池控制最大并发，单条失败不影响其他。
     const limit = this._recoveryConcurrency;
@@ -1448,12 +1709,12 @@ export class Daemon {
     let cursor = 0;
     const workers: Promise<void>[] = [];
     const runOne = async (): Promise<void> => {
-      while (cursor < records.length) {
+      while (cursor < fresh.length) {
         const idx = cursor++;
-        const record = records[idx]!;
+        const record = fresh[idx]!;
         try {
-          const ok = await this._recoverOneSession(record);
-          if (ok) recovered.add(record.sessionId);
+          const outcome = await this._recoverOneSession(record);
+          if (outcome === 'recovered') recovered.add(record.sessionId);
           else failed.add(record.sessionId);
         } catch (e) {
           // 不应到此（_recoverOneSession 内已 try/catch），防御性兜底。
@@ -1465,7 +1726,7 @@ export class Daemon {
         }
       }
     };
-    for (let i = 0; i < Math.min(limit, records.length); i++) {
+    for (let i = 0; i < Math.min(limit, fresh.length); i++) {
       workers.push(runOne());
     }
     await Promise.all(workers);
@@ -1476,21 +1737,29 @@ export class Daemon {
     } catch (e) {
       this._logger.warn('session_recover_flush_failed', { error: e });
     }
+    // task-08：flush 只写 store snapshot——网络类失败保留的待恢复记录不在 store，
+    // 合并回写防 boot 收尾把它们从 sessions.json 冲掉（保留语义）。
+    await this._persistPendingRecoveryRecords();
     this._logger.info('session_recover_done', {
       total: records.length,
       recovered: recovered.size,
       failed: failed.size,
+      expired,
     });
   }
 
   /**
-   * 恢复单条记录（§5 单条流程）。返回 true=恢复成功（reconnecting→active），
-   * false=该记录未恢复（终态/rejected/driver 抛错，已从持久化移除）。
+   * 恢复单条记录（§5 单条流程）。返回三态（task-08）：
+   *   - 'recovered'：恢复成功（reconnecting→active）；
+   *   - 'dropped'：该记录未恢复且已从持久化移除（终态/rejected/driver 抛错/超龄）；
+   *   - 'retry'：recover HTTP 网络类失败——本地记录保留并已入重试队列。
    *
    * 失败隔离：本方法不抛错（所有异常内部 catch + 结构化日志），让调用方
    * 的并发循环继续处理其他记录。
    */
-  private async _recoverOneSession(record: PersistedSessionRecord): Promise<boolean> {
+  private async _recoverOneSession(
+    record: PersistedSessionRecord,
+  ): Promise<SessionRecoveryOutcome> {
     // daemon 注册的 runtime id（恢复对账需要）。取 record 对应 provider 的
     // 已注册 runtime；未注册 → 不恢复为 active（backend 会 reject）。
     const runtimeId = this._registeredRuntimes.get(record.provider) ?? '';
@@ -1513,13 +1782,18 @@ export class Daemon {
       });
       recoverStatus = resp.status;
     } catch (e) {
-      // recover 调用失败（网络等）：当条 fail，删记录，不复活。
+      // task-08（design A5 / FR-04）：recover HTTP 网络类失败（请求未达/超时/5xx
+      // ——HubHttpError 非 2xx，或 fetch 透传的原生网络异常；业务终态只以 2xx
+      // 响应的 status 字段返回，见 backend recover_session_after_daemon_restart）
+      // **不再删记录**——保留 sessions.json 记录入退避重试队列（30s 起步翻倍
+      // 封顶 5min），backend 恢复（或 WS onConnected 立即重试）后继续走完
+      // reconnecting→active（D-001 任意时长重启后可继续对话）。
       this._logger.error('session_recover_call_failed', {
         session_id: record.sessionId,
         error: e,
       });
-      await this._markRecordRemoved(record);
-      return false;
+      const queued = await this._enqueueRecoveryRetry(record);
+      return queued ? 'retry' : 'dropped';
     }
 
     // backend 终态/rejected → 不调 restoreAndReconnect；删本地记录。
@@ -1529,7 +1803,7 @@ export class Daemon {
         backend_status: recoverStatus,
       });
       await this._markRecordRemoved(record);
-      return false;
+      return 'dropped';
     }
 
     // backend reconnecting → driver.start({resume}) 跨进程恢复（spike D3）。
@@ -1545,7 +1819,7 @@ export class Daemon {
       });
       await this._notifyRecoveryFailed(record);
       await this._markRecordRemoved(record);
-      return false;
+      return 'dropped';
     }
 
     // P1-1（2026-06-18）：去掉 stillAlive 短路判断。
@@ -1566,7 +1840,7 @@ export class Daemon {
       });
       await this._notifyRecoveryFailed(record);
       await this._markRecordRemoved(record);
-      return false;
+      return 'dropped';
     }
     try {
       await this._recoveryClient!.confirmReconnected(record.sessionId);
@@ -1587,7 +1861,7 @@ export class Daemon {
       /* flush 失败不影响 session 运行（恢复索引非运行依赖） */
     }
     this._logger.info('session_recovered', { session_id: record.sessionId });
-    return true;
+    return 'recovered';
   }
 
   /**
@@ -1639,21 +1913,203 @@ export class Daemon {
   /**
    * 把单条记录从持久化集合移除（终态/rejected/driver 抛错路径）。
    *
-   * 实现：直接调 persistence.save，写入 SessionManager.snapshotPersistable()
-   * 的结果（已恢复成功的 session 仍在；失败/终态的 session 因不在 _store
-   * 而被自动剔除）。不依赖 SessionManager.flush 的 microtask 去抖，保证启动
-   * 编排路径同步落盘正确的「移除后」状态。
+   * 实现：直接调 persistence.save，写入合并快照（SessionManager.
+   * snapshotPersistable() 的结果 + 重试队列遗留记录；已恢复成功的 session 仍在；
+   * 失败/终态的 session 因不在 _store 而被自动剔除）。不依赖 SessionManager.flush
+   * 的 microtask 去抖，保证启动编排路径同步落盘正确的「移除后」状态。
+   *
+   * task-08：改写合并快照——单独删一条终态记录时不能把重试队列里的保留记录
+   * 从 sessions.json 一并冲掉（保留语义，见 _mergedPersistableSnapshot）。
    */
   private async _markRecordRemoved(record: PersistedSessionRecord): Promise<void> {
     if (!this._persistence || !this._sessionManager) return;
     try {
-      const remaining = this._sessionManager.snapshotPersistable();
+      // 排除被移除的 sessionId（终态出队先于队列 delete，见 _mergedPersistableSnapshot）。
+      const remaining = this._mergedPersistableSnapshot(record.sessionId);
       await this._persistence.save(remaining);
     } catch (e) {
       this._logger.warn('session_mark_removed_flush_failed', {
         session_id: record.sessionId,
         error: e,
       });
+    }
+  }
+
+  // ── task-08（design A5 / FR-04）：recover 网络类失败重试队列 ──────────────────
+
+  /** task-08（R6）：待恢复记录超龄判定（lastActiveAt 距今 > 7 天）。 */
+  private _recoveryRecordExpired(record: PersistedSessionRecord): boolean {
+    return Date.now() - record.lastActiveAt > RECOVERY_RECORD_MAX_AGE_MS;
+  }
+
+  /**
+   * task-08：合并落盘快照 = snapshotPersistable()（store 内 active 会话）+
+   * 重试队列遗留记录（不在 store，flush 只写 snapshot 会把它们从 sessions.json
+   * 丢掉）。sessionId 去重——已成功恢复的记录以 store 快照为准。
+   *
+   * ``excludeSessionId``：正在被移除的记录（_markRecordRemoved 调用点）不参与
+   * 合并——终态出队发生在队列 delete 之前，不排除会把刚删的记录又写回文件。
+   */
+  private _mergedPersistableSnapshot(excludeSessionId?: string): PersistedSessionRecord[] {
+    const snapshot = this._sessionManager?.snapshotPersistable() ?? [];
+    if (this._pendingRecovery.size === 0) return snapshot;
+    const inSnapshot = new Set(snapshot.map((r) => r.sessionId));
+    const merged = [...snapshot];
+    for (const entry of this._pendingRecovery.values()) {
+      if (entry.record.sessionId === excludeSessionId) continue;
+      if (!inSnapshot.has(entry.record.sessionId)) merged.push(entry.record);
+    }
+    return merged;
+  }
+
+  /**
+   * task-08：把重试队列遗留记录合并回写 sessions.json。
+   *
+   * 挂点：boot 收尾 flush 后、stop 收尾 flush 后、每轮重试后——对冲
+   * SessionManager.flush 只写 store snapshot 的丢档窗口（运行期其他会话
+   * 生命周期触发的 debounced flush 同理，由下一轮重试（≤5min）收敛）。
+   * 队列为空 / 端口未注入 → no-op；save 失败仅 warn（重试仍在内存继续）。
+   */
+  private async _persistPendingRecoveryRecords(): Promise<void> {
+    if (this._pendingRecovery.size === 0) return;
+    if (!this._persistence || !this._sessionManager) return;
+    try {
+      await this._persistence.save(this._mergedPersistableSnapshot());
+      this._logger.debug('session_recover_pending_persisted', {
+        pending: this._pendingRecovery.size,
+      });
+    } catch (e) {
+      this._logger.warn('session_recover_pending_persist_failed', { error: e });
+    }
+  }
+
+  /**
+   * task-08：把 recover 网络类失败的记录入重试队列。
+   *
+   * 退避 30s 起步指数翻倍封顶 5min 持续重试；WS onConnected 时
+   * _retryPendingRecoveryNow 立即重试一轮。R6 防堆积：记录超龄 7 天
+   * （按 lastActiveAt）不再入队，直接删记录。
+   *
+   * @returns true=已入队（等待退避/立即重试）；false=超龄已删记录（按 dropped 收口）。
+   */
+  private async _enqueueRecoveryRetry(record: PersistedSessionRecord): Promise<boolean> {
+    if (this._recoveryRecordExpired(record)) {
+      this._logger.warn('session_recover_record_expired', {
+        session_id: record.sessionId,
+        last_active_at: record.lastActiveAt,
+      });
+      await this._markRecordRemoved(record);
+      return false;
+    }
+    const prev = this._pendingRecovery.get(record.sessionId);
+    const retryCount = (prev?.retryCount ?? 0) + 1;
+    const delayMs = Math.min(
+      RECOVERY_RETRY_BASE_MS * 2 ** (retryCount - 1),
+      RECOVERY_RETRY_MAX_MS,
+    );
+    this._pendingRecovery.set(record.sessionId, {
+      record,
+      retryCount,
+      nextRetryAt: Date.now() + delayMs,
+    });
+    this._scheduleRecoveryRetry();
+    this._logger.warn('session_recover_retry_scheduled', {
+      session_id: record.sessionId,
+      attempt: retryCount,
+      retry_in_ms: delayMs,
+    });
+    return true;
+  }
+
+  /**
+   * task-08：按最早到期 deadline 排一个单实例定时器。已排程的 deadline 不晚于
+   * 新算出的最早值时保持不动（防持续入队把最早 deadline 无限后推）；队列为空
+   * 时清掉定时器。
+   */
+  private _scheduleRecoveryRetry(): void {
+    if (this._pendingRecovery.size === 0) {
+      this._clearRecoveryRetryTimer();
+      return;
+    }
+    let earliest = Number.POSITIVE_INFINITY;
+    for (const entry of this._pendingRecovery.values()) {
+      if (entry.nextRetryAt < earliest) earliest = entry.nextRetryAt;
+    }
+    if (
+      this._recoveryRetryTimer !== null &&
+      this._recoveryRetryScheduledFor !== null &&
+      this._recoveryRetryScheduledFor <= earliest
+    ) {
+      return;
+    }
+    if (this._recoveryRetryTimer !== null) clearTimeout(this._recoveryRetryTimer);
+    this._recoveryRetryScheduledFor = earliest;
+    this._recoveryRetryTimer = setTimeout(() => {
+      this._recoveryRetryTimer = null;
+      this._recoveryRetryScheduledFor = null;
+      void this._runRecoveryRetryRound();
+    }, Math.max(0, earliest - Date.now()));
+  }
+
+  /** task-08：清恢复重试定时器（stop 收尾用，防退出后触发新一轮）。 */
+  private _clearRecoveryRetryTimer(): void {
+    if (this._recoveryRetryTimer !== null) {
+      clearTimeout(this._recoveryRetryTimer);
+      this._recoveryRetryTimer = null;
+    }
+    this._recoveryRetryScheduledFor = null;
+  }
+
+  /**
+   * task-08：WS onConnected 钩子——遗留待恢复记录立即重试一轮（backend 可达
+   * 信号），不等退避到期。
+   *
+   * 实现形态：把队列内全部条目 nextRetryAt 归零后重排定时器（deadline 已过
+   * → 0ms 触发 _runRecoveryRetryRound）。退避计数不清零：立即轮再失败继续按
+   * 原退避序列等待（只重置等待不重置计数，防重连风暴打爆 backend）。
+   */
+  private _retryPendingRecoveryNow(): void {
+    if (this._pendingRecovery.size === 0) return;
+    for (const entry of this._pendingRecovery.values()) {
+      entry.nextRetryAt = 0;
+    }
+    this._scheduleRecoveryRetry();
+  }
+
+  /**
+   * task-08：执行一轮到期记录的恢复重试（退避定时器 / WS onConnected 触发）。
+   *
+   * 幂等防重入（_recoveryRetryInFlight）：并发触发只跑一轮。每条仍走
+   * _recoverOneSession 全流程（recover→restore→active）；'recovered'/'dropped'
+   * 出队，'retry' 由 _recoverOneSession 内部重新入队（退避翻倍）。收尾重排
+   * 定时器 + 把遗留记录合并回写 sessions.json。
+   */
+  private async _runRecoveryRetryRound(): Promise<void> {
+    if (!this._running) return; // stop() 后不再触发新轮（定时器已清，防迟到轮重排）。
+    if (this._recoveryRetryInFlight) return;
+    if (this._pendingRecovery.size === 0) return;
+    this._recoveryRetryInFlight = true;
+    try {
+      const now = Date.now();
+      const due = [...this._pendingRecovery.values()].filter(
+        (e) => e.nextRetryAt <= now,
+      );
+      if (due.length > 0) {
+        this._logger.info('session_recover_retry_round', { count: due.length });
+      }
+      for (const entry of due) {
+        const cur = this._pendingRecovery.get(entry.record.sessionId);
+        if (!cur) continue; // 已被并发路径处理（成功恢复/终态出队）。
+        const outcome = await this._recoverOneSession(cur.record);
+        if (outcome === 'recovered' || outcome === 'dropped') {
+          this._pendingRecovery.delete(cur.record.sessionId);
+        }
+        // outcome === 'retry'：_recoverOneSession 已重新入队（nextRetryAt 退避翻倍）。
+      }
+      this._scheduleRecoveryRetry();
+      await this._persistPendingRecoveryRecords();
+    } finally {
+      this._recoveryRetryInFlight = false;
     }
   }
 
@@ -1709,13 +2165,6 @@ export class Daemon {
     if (!state) {
       this._logger.warn('on_turn_result_session_not_found', {
         session_id: sessionId,
-      });
-      return;
-    }
-    if (!state.claimToken) {
-      this._logger.warn('on_turn_result_no_claim_token', {
-        session_id: sessionId,
-        lease_id: state.leaseId,
       });
       return;
     }
@@ -1857,6 +2306,23 @@ export class Daemon {
     if (resultMeta.modelError) {
       payload.error = resultMeta.modelError;
     }
+    if (!state.claimToken) {
+      // task-07（A5 claim_token 空窗）：终态不再丢弃——kind=run_result 入箱
+      //（pending_token 标记），SESSION_INJECT 刷新 token 后 drain 重放；
+      // 未注入 resilience（旧测试形态）维持旧行为（warn 即丢）。
+      this._logger.warn('on_turn_result_no_claim_token', {
+        session_id: sessionId,
+        lease_id: state.leaseId,
+      });
+      if (this._resilience) {
+        try {
+          await this._resilience.enqueueRunResult(state.leaseId, '', runId, payload);
+        } catch {
+          // 落盘失败不向上抛（对齐下方 notify 失败的容错语义）。
+        }
+      }
+      return;
+    }
     try {
       // task-12（FR-05 / D-005@v1）：终态上报包 retryTerminal 轻量重试（不暂存）。
       // _resilience 未注入 → 回退直接调 _client。用尽抛被下方 catch 兜住 warn。
@@ -1868,6 +2334,20 @@ export class Daemon {
         await call();
       }
     } catch (e) {
+      // task-07（A3 终态入箱）：retryTerminal 用尽/失败不丢——kind=run_result 落
+      // outbox，由对账/心跳 drain 重放（backend 端点幂等，200 no-op 防重复副作用）。
+      if (this._resilience) {
+        try {
+          await this._resilience.enqueueRunResult(
+            state.leaseId,
+            state.claimToken,
+            runId,
+            payload,
+          );
+        } catch {
+          // 落盘失败仅记 warn（下方统一 warn），不向上抛。
+        }
+      }
       // backend 500 / 422 / 网络 → warn 不向上抛（SessionManager._onResult 不感知，
       // daemon 主循环继续）。run 关闭失败由 backend 兜底（lease 超时 / SSE 重连）。
       this._logger.warn('on_turn_result_notify_failed', {
@@ -1922,13 +2402,6 @@ export class Daemon {
       });
       return;
     }
-    if (!state.claimToken) {
-      this._logger.warn('on_turn_message_no_claim_token', {
-        session_id: sessionId,
-        lease_id: state.leaseId,
-      });
-      return;
-    }
     if (!runId) {
       // ql-004：空 runId（''/undefined）不发 submitMessages，避免空 agent_run_id
       // 触发 backend 422 风暴（每请求 auth 占连接 → 连接池耗尽）。
@@ -1936,6 +2409,31 @@ export class Daemon {
         session_id: sessionId,
         lease_id: state.leaseId,
       });
+      return;
+    }
+    if (!state.claimToken) {
+      // task-07（A5 claim_token 空窗）：消息不再丢弃——带 pending_token 标记入
+      // outbox，SESSION_INJECT 刷新 token 后 drain 重放（refresher 咨询
+      // SessionState.claimToken）；未注入 resilience（旧测试形态）维持旧行为。
+      this._logger.warn('on_turn_message_no_claim_token', {
+        session_id: sessionId,
+        lease_id: state.leaseId,
+      });
+      if (this._resilience) {
+        const fwdMsg = msg as unknown as Record<string, unknown>;
+        // flatSeq 语义与主路径一致（per-run 递增保 dedup_key 确定性，重放同 key
+        // 命中 backend ON CONFLICT 去重）。
+        const flatSeq = this._interactiveFlatSeq.get(runId) ?? 0;
+        this._interactiveFlatSeq.set(runId, flatSeq + 1);
+        this._interactiveFlatSeqOwner.set(runId, sessionId);
+        try {
+          await this._resilience.enqueuePendingToken(state.leaseId, runId, [
+            { message: fwdMsg, dedup_key: dedupKeyFor(fwdMsg, runId, 0, flatSeq) },
+          ]);
+        } catch {
+          // 落盘失败不向上抛（对齐 submit 失败的容错语义）。
+        }
+      }
       return;
     }
     // task-06（FR-02-1 / D-01）：run 级 assistant 计数（API 调用次数近似，design
@@ -2100,6 +2598,16 @@ export class Daemon {
         await call();
       }
     } catch (e) {
+      // task-07（A3 终态入箱）：retryTerminal 用尽/失败不丢——kind=session_end 落
+      // outbox（dedupId=sessionId），由对账/心跳 drain 重放（backend end 端点幂等，
+      // 终态 no-op 不翻转）。未注入 resilience（旧测试形态）维持旧行为。
+      if (this._resilience) {
+        try {
+          await this._resilience.enqueueSessionEnd(sessionId, mappedStatus, reason);
+        } catch {
+          // 落盘失败仅 warn（下方统一 warn），不向上抛。
+        }
+      }
       this._logger.warn('on_session_end_notify_failed', {
         session_id: sessionId,
         status: mappedStatus,
@@ -2276,60 +2784,177 @@ export class Daemon {
       try {
         await abortableSleep(this._config.heartbeat_interval * 1000, signal);
         // task-07 / D-006：单条心跳合并上报 daemon_local_id + 各 provider 状态。
-        // 至少一个 provider 已注册才发心跳（design §5.4）；无 provider 则跳过，
-        // 等同旧「无 runtime 不发心跳」语义。
-        const registeredProviders = [...this._registeredRuntimes.keys()];
-        if (registeredProviders.length === 0) continue;
-        const daemonLocalId = this._config.runtime_id;
-        const providers = registeredProviders.map((provider) => ({
-          provider,
-          status: 'online' as const,
-        }));
-        try {
-          const hbResp = await this._client.heartbeat(
-            daemonLocalId,
-            providers,
-            // task-01：进程启动时间随心跳上报（位置参数第 3，对齐 hub-client task-02 签名）。
-            this._startedAt,
-          );
-          // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。
-          this._heartbeatFailSince = null;
-          this._degradedWarned = false;
-          // task-18（FR-07 / D-004@v1）：心跳健康 → 触发 outbox drain。
-          this._resilience?.notifyHeartbeatResult(true);
-          // 2026-06-29-runtime-allowed-roots-config task-04：心跳响应同步 allowed_roots。
-          this._syncAllowedRoots(hbResp);
-        } catch (e) {
-          // task-02（FR-01）：展开 cause 暴露底层 undici code。
-          // task-05（FR-03 / D-006）→ task-07 per-daemon：累加断连时长，超阈值记一次
-          //   FATAL（运维感知），不主动调 offline——backend 45s 自然判 daemon 实体
-          //   offline（runtime 联动），网络恢复后 heartbeat 自动拉回 online。
-          if (this._heartbeatFailSince === null) {
-            this._heartbeatFailSince = Date.now();
-          }
-          const elapsed = Date.now() - (this._heartbeatFailSince ?? Date.now());
-          if (
-            !this._degradedWarned &&
-            elapsed >= this._config.disconnect_log_threshold_sec * 1000
-          ) {
-            this._logger.error('daemon_disconnect_degraded', {
-              daemon_local_id: daemonLocalId,
-              elapsed_sec: Math.round(elapsed / 1000),
-            });
-            this._degradedWarned = true;
-          }
-          this._logger.warn('heartbeat_failed', {
-            daemon_local_id: daemonLocalId,
-            message: (e as Error | undefined)?.message ?? String(e),
-            cause: extractCause(e),
-          });
-          // task-18：心跳失败 → 标记不健康（drainOutbox 不补发，等恢复）。
-          this._resilience?.notifyHeartbeatResult(false);
+        // 至少一个 provider 已注册才发心跳（design §5.4）；无 provider 则——
+        // task-06（design A1）：不再纯 continue 跳过，按退避周期重试 register
+        //（15s 起步翻倍封顶 60s，成功清计数恢复正常心跳循环）。
+        if (this._registeredRuntimes.size === 0) {
+          await this._retryRegisterIfNeeded();
+          continue;
         }
+        await this._sendHeartbeatOnce();
       } catch (e) {
         if (e instanceof AbortError) break;
         // 非预期异常：记日志后继续循环（不崩）
         this._logger.warn('heartbeat_loop_error', { error: e });
+      }
+    }
+  }
+
+  /**
+   * task-06（design A1）：单拍心跳（心跳循环每拍 + 重连对账第 1 步共用）。
+   *
+   * 成功路径：清断连计数/告警标记 → 通知 resilience 健康 → 同步 allowed_roots
+   * → 心跳响应携带 pending_controls > 0 时触发控制指令补拉（design A1 触发点
+   * 之二：仅第 3 步）。失败路径：断连计数/FATAL 告警（原心跳循环内逻辑原样
+   * 收敛于此，行为不变）。返回是否成功（对账观测用；循环内忽略返回值）。
+   */
+  private async _sendHeartbeatOnce(): Promise<boolean> {
+    const registeredProviders = [...this._registeredRuntimes.keys()];
+    if (registeredProviders.length === 0) return false;
+    const daemonLocalId = this._config.runtime_id;
+    const providers = registeredProviders.map((provider) => ({
+      provider,
+      status: 'online' as const,
+    }));
+    try {
+      const hbResp = await this._client.heartbeat(
+        daemonLocalId,
+        providers,
+        // task-01：进程启动时间随心跳上报（位置参数第 3，对齐 hub-client task-02 签名）。
+        this._startedAt,
+      );
+      // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。
+      this._heartbeatFailSince = null;
+      this._degradedWarned = false;
+      // task-18（FR-07 / D-004@v1）：心跳健康 → 触发 outbox drain。
+      this._resilience?.notifyHeartbeatResult(true);
+      // 2026-06-29-runtime-allowed-roots-config task-04：心跳响应同步 allowed_roots。
+      this._syncAllowedRoots(hbResp);
+      // task-06（design A1）：心跳响应 pending_controls > 0 → 控制指令补拉
+      //（backend task-04 起携带；旧 backend 无该字段视为 0 不触发）。
+      this._maybeTriggerControlPull(hbResp);
+      return true;
+    } catch (e) {
+      // task-06（design A1）：heartbeat 401/403 → 凭证被平台拒绝（D-002 边界外
+      // 的异常态，如 api_key 失效）。记一次 FATAL（运维感知，不静默），并清空
+      // 注册表让 _retryRegisterIfNeeded 退避重注册接管——重试成功即恢复三循环。
+      const hubStatus = (e as { status?: number } | undefined)?.status;
+      if (hubStatus === 401 || hubStatus === 403) {
+        this._logger.error('heartbeat_auth_rejected', {
+          daemon_local_id: daemonLocalId,
+          status: hubStatus,
+          message: (e as Error | undefined)?.message ?? String(e),
+        });
+        this._registeredRuntimes.clear();
+        this._resilience?.notifyHeartbeatResult(false);
+        return false;
+      }
+      // task-02（FR-01）：展开 cause 暴露底层 undici code。
+      // task-05（FR-03 / D-006）→ task-07 per-daemon：累加断连时长，超阈值记一次
+      //   FATAL（运维感知），不主动调 offline——backend 45s 自然判 daemon 实体
+      //   offline（runtime 联动），网络恢复后 heartbeat 自动拉回 online。
+      if (this._heartbeatFailSince === null) {
+        this._heartbeatFailSince = Date.now();
+      }
+      const elapsed = Date.now() - (this._heartbeatFailSince ?? Date.now());
+      if (
+        !this._degradedWarned &&
+        elapsed >= this._config.disconnect_log_threshold_sec * 1000
+      ) {
+        this._logger.error('daemon_disconnect_degraded', {
+          daemon_local_id: daemonLocalId,
+          elapsed_sec: Math.round(elapsed / 1000),
+        });
+        this._degradedWarned = true;
+      }
+      this._logger.warn('heartbeat_failed', {
+        daemon_local_id: daemonLocalId,
+        message: (e as Error | undefined)?.message ?? String(e),
+        cause: extractCause(e),
+      });
+      // task-18：心跳失败 → 标记不健康（drainOutbox 不补发，等恢复）。
+      this._resilience?.notifyHeartbeatResult(false);
+      return false;
+    }
+  }
+
+  /**
+   * task-06（design A1）：register 周期重试。心跳循环每拍（15s）检测
+   * `_registeredRuntimes` 为空时调用——按退避节流（15s 起步翻倍封顶 60s）重放
+   * `_registerDaemon(启动期探测快照)`。失败记日志不崩（_registerDaemon 内部
+   * catch）；成功清计数（下拍恢复正常心跳）。未探测到 agent（快照空）时跳过
+   *（保持「无 agent 不注册」语义，同启动路径 no_agents_detected）。
+   */
+  private async _retryRegisterIfNeeded(): Promise<void> {
+    if (this._lastAvailableAgents.length === 0) return;
+    const now = Date.now();
+    if (now < this._nextRegisterRetryAt) return;
+    this._logger.info('register_retry', {
+      daemon_local_id: this._config.runtime_id,
+      attempt: this._registerRetryCount + 1,
+      providers: this._lastAvailableAgents.map((a) => a.provider),
+    });
+    await this._registerDaemon(this._lastAvailableAgents);
+    if (this._registeredRuntimes.size > 0) {
+      // 成功：清计数，恢复心跳循环正常节拍。
+      this._registerRetryCount = 0;
+      this._nextRegisterRetryAt = 0;
+      return;
+    }
+    // 失败：翻倍退避（15→30→60→60…），从当前拍起算。
+    this._registerRetryCount += 1;
+    const delayMs = Math.min(
+      REGISTER_RETRY_BASE_MS * 2 ** (this._registerRetryCount - 1),
+      REGISTER_RETRY_MAX_MS,
+    );
+    this._nextRegisterRetryAt = now + delayMs;
+    this._logger.warn('register_retry_scheduled', {
+      daemon_local_id: this._config.runtime_id,
+      fail_count: this._registerRetryCount,
+      next_retry_in_ms: delayMs,
+    });
+  }
+
+  /**
+   * task-06（design A1）：心跳响应 pending_controls > 0 → 对账第 3 步（仅控制
+   * 指令补拉）。fire-and-forget——补拉失败（旧 backend 404/网络错）由
+   * _pullPendingControlsForAllRuntimes 内 catch 降级 warn，不影响心跳节拍。
+   */
+  private _maybeTriggerControlPull(resp: unknown): void {
+    if (!resp || typeof resp !== 'object') return;
+    const pending = (resp as Record<string, unknown>).pending_controls;
+    if (typeof pending !== 'number' || !Number.isFinite(pending) || pending <= 0) {
+      return;
+    }
+    this._logger.info('pending_controls_signal', { count: pending });
+    void this._pullPendingControlsForAllRuntimes();
+  }
+
+  /**
+   * task-06（design A1/A2）：对所有已注册 runtime 各跑一趟控制指令补拉
+   *（getPendingControls → dispatcher 消费+ack）。单 runtime 失败（旧 backend
+   * 无端点 404 / 网络错）降级 warn 不崩，其余 runtime 照常（对账后续步骤由
+   * 调用方继续）。
+   */
+  private async _pullPendingControlsForAllRuntimes(): Promise<void> {
+    for (const rid of this._registeredRuntimeIds()) {
+      try {
+        const summary = await this._controlDispatcher.pullAndConsume(rid);
+        if (summary.pulled > 0) {
+          this._logger.info('pending_controls_pulled', {
+            runtime_id: rid,
+            pulled: summary.pulled,
+            consumed: summary.consumed,
+            acked: summary.acked,
+          });
+        }
+      } catch (e) {
+        // 旧 backend 无 pending-controls 端点（404）或网络失败——降级 warn，
+        // 指令留 backend pending 等下轮（constraints：不崩、后续步骤照常）。
+        this._logger.warn('pending_controls_pull_failed', {
+          runtime_id: rid,
+          error: e,
+        });
       }
     }
   }
@@ -2493,27 +3118,7 @@ export class Daemon {
           if (skipLeasePoll) {
             this._logger.debug('poll_lease_skipped_ws_healthy', { rid });
           } else {
-            try {
-              const pending = await this._client.getPendingLeases(rid);
-              for (const task of pending) {
-                const leaseId = task.lease_id as string | undefined;
-                if (!leaseId) continue;
-                this._logger.info('poll_task', { lease_id: leaseId });
-                // poll payload 字段映射（daemon.py:199-206）：
-                // 把 server 返回的 snake_case 组装成 LeaseCtx（camelCase）
-                const payload: LeasePayload = {
-                  leaseId,
-                  runtimeId: rid,
-                  agentRunId: (task.agent_run_id as string | undefined) ?? undefined,
-                  prompt: (task.prompt as string | undefined) ?? undefined,
-                  provider: (task.provider as string | undefined) ?? undefined,
-                  cmdPath: (task.cmd_path as string | undefined) ?? undefined,
-                };
-                this._fire(() => this._executeTask(payload));
-              }
-            } catch (e) {
-              this._logger.debug('poll_runtime_failed', { rid, error: e });
-            }
+            await this._pullPendingLeasesOnce(rid);
           }
 
           // task-11 / FR-08 / D-004@v1：change-write 轮询分支（与 lease 轮询同节奏，
@@ -2522,25 +3127,103 @@ export class Daemon {
           // perf-remediation task-09 / Grill B-1：该分支**永不被 WS 门控跳过**——
           // protocol 无 change-write 消息类型、change_writer 不走 ws_hub，30s 轮询
           // 是唯一分发通道，门控会让 change 写任务失联。
-          try {
-            const writes =
-              await this._client.getPendingChangeWrites(rid);
-            for (const w of writes) {
-              const taskId = w.task_id as string | undefined;
-              if (!taskId) continue;
-              this._fire(() => this._executeChangeWrite(taskId, rid, w));
-            }
-          } catch (e) {
-            this._logger.debug('poll_change_writes_failed', {
-              rid,
-              error: e,
-            });
-          }
+          await this._pullPendingChangeWritesOnce(rid);
         }
       } catch (e) {
         if (e instanceof AbortError) break;
         this._logger.warn('poll_failed', { error: e });
       }
+    }
+  }
+
+  /**
+   * 单 runtime 一趟 pending lease 补拉（原 _pollLoop 循环体抽出，行为不变；
+   * task-06 起重连对账第 4 步复用）。poll payload 字段映射（daemon.py:199-206）：
+   * 把 server 返回的 snake_case 组装成 LeaseCtx（camelCase）后 _fire 非阻塞执行。
+   * 单趟失败降级 debug（同原 catch 语义——轮询兜底通道，失败等下一拍）。
+   */
+  private async _pullPendingLeasesOnce(rid: string): Promise<void> {
+    try {
+      const pending = await this._client.getPendingLeases(rid);
+      for (const task of pending) {
+        const leaseId = task.lease_id as string | undefined;
+        if (!leaseId) continue;
+        this._logger.info('poll_task', { lease_id: leaseId });
+        const payload: LeasePayload = {
+          leaseId,
+          runtimeId: rid,
+          agentRunId: (task.agent_run_id as string | undefined) ?? undefined,
+          prompt: (task.prompt as string | undefined) ?? undefined,
+          provider: (task.provider as string | undefined) ?? undefined,
+          cmdPath: (task.cmd_path as string | undefined) ?? undefined,
+        };
+        this._fire(() => this._executeTask(payload));
+      }
+    } catch (e) {
+      this._logger.debug('poll_runtime_failed', { rid, error: e });
+    }
+  }
+
+  /**
+   * 单 runtime 一趟 pending change-write 补拉（原 _pollLoop 循环体抽出，行为
+   * 不变；task-06 起重连对账第 4 步复用——「含 change-write 分支保持现状」）。
+   */
+  private async _pullPendingChangeWritesOnce(rid: string): Promise<void> {
+    try {
+      const writes = await this._client.getPendingChangeWrites(rid);
+      for (const w of writes) {
+        const taskId = w.task_id as string | undefined;
+        if (!taskId) continue;
+        this._fire(() => this._executeChangeWrite(taskId, rid, w));
+      }
+    } catch (e) {
+      this._logger.debug('poll_change_writes_failed', { rid, error: e });
+    }
+  }
+
+  /**
+   * task-06（design A1）：重连后统一对账。四步顺序固定：
+   *   1. 立即拍一次 HTTP 心跳（加速 backend 在线状态恢复——对冲 WS 断开 10s
+   *      延迟降级的 offline 标记，design A4/D-007；同时拉 allowed_roots/pending 计数）；
+   *   2. drain outbox（上行回放，原 onConnected 逻辑并入此处，不重复调用）；
+   *   3. 补拉控制指令（dispatcher pullAndConsume：消费+ack，design A2）；
+   *   4. 补拉 pending leases + change-writes（复用 _pollLoop 既有补拉逻辑）。
+   *
+   * 幂等 + `_reconciling` 防重入：并发触发（如重连风暴下多个 onConnected）只跑
+   * 一轮，后到者直接返回。各步失败均降级 warn 不崩（单步失败不阻断后续步——
+   * 旧 backend 无 pending-controls 端点时对账照常走完）。
+   */
+  private async _reconcileAfterReconnect(): Promise<void> {
+    if (this._reconciling) return;
+    this._reconciling = true;
+    try {
+      this._logger.info('reconcile_after_reconnect_started', {
+        daemon_local_id: this._config.runtime_id,
+      });
+      // 第 1 步：立即心跳（未注册任何 runtime 时跳过——同心跳循环守卫）。
+      await this._sendHeartbeatOnce();
+      // 第 2 步：drain outbox（断连期间暂存的上行回放；resilience 未注入跳过）。
+      try {
+        await this._resilience?.drainOutbox();
+      } catch (e) {
+        this._logger.warn('reconcile_drain_outbox_failed', { error: e });
+      }
+      // 第 3 步：补拉控制指令（逐 runtime；失败 warn 由内部 catch 降级）。
+      await this._pullPendingControlsForAllRuntimes();
+      // 第 4 步：补拉 pending leases（含 change-write 分支，保持现状语义）。
+      // 同 _pollLoop 守卫（daemon.py:188-189）：无 taskRunner 不轮询——lease 与
+      // change-write 均由 runner 执行，拉了也无法消费（AC-02b 语义）。
+      if (this._taskRunner) {
+        for (const rid of this._registeredRuntimeIds()) {
+          await this._pullPendingLeasesOnce(rid);
+          await this._pullPendingChangeWritesOnce(rid);
+        }
+      }
+      this._logger.info('reconcile_after_reconnect_done', {
+        daemon_local_id: this._config.runtime_id,
+      });
+    } finally {
+      this._reconciling = false;
     }
   }
 
@@ -2622,10 +3305,18 @@ export class Daemon {
    * 到 backend，供 SessionManager 的 permissionWsClient.send 调用。task-07：单条 WS
    * 收敛后直接用 ``_wsClient``。连接未就绪 / 发送异常 → 返回 false（fail-closed，
    * canUseTool 回调 deny，不让工具静默放行）。
+   *
+   * task-07（2026-08-29-daemon-platform-resilience / design A3）：PERMISSION_REQUEST
+   * 例外——WS 不通时改走 HTTP 上行（submitPermissionRequest）创建待审记录，
+   * 返回 true 让 resolver 继续等人审（PERMISSION_RESPONSE 经 WS/补拉到达；
+   * backend 5min 超时 + daemon fallback timer 双兜底），不再 fail-closed deny。
    */
   sendToHub(msg: { type: string; payload: unknown }): boolean {
     const ws = this._wsClient;
     if (!ws || typeof ws.send !== 'function') {
+      if (msg.type === MSG.PERMISSION_REQUEST) {
+        return this._uplinkPermissionRequestViaHttp(msg.payload);
+      }
       this._logger.warn('send_to_hub_no_ws', { msg_type: msg.type });
       return false;
     }
@@ -2633,12 +3324,60 @@ export class Daemon {
       ws.send(msg);
       return true;
     } catch (e) {
+      if (msg.type === MSG.PERMISSION_REQUEST) {
+        return this._uplinkPermissionRequestViaHttp(msg.payload);
+      }
       this._logger.warn('send_to_hub_failed', {
         msg_type: msg.type,
         error: (e as Error)?.message ?? String(e),
       });
       return false;
     }
+  }
+
+  /**
+   * task-07（design A3）：PERMISSION_REQUEST 的 HTTP 上行兜底。
+   *
+   * fire-and-forget：POST /api/daemon/sessions/{id}/permission-requests（带当前
+   * SessionState 的 claimToken），返回 true 表示已转 HTTP 在途（resolver 挂起等
+   * PERMISSION_RESPONSE）。HTTP 失败仅 warn——由 daemon fallback timer（5min+5s）
+   * deny 收口，不本地静默 allow。claimToken 空窗（恢复占位）/ client 未实现 /
+   * payload 无 session_id → 返回 false 维持既有 fail-closed deny。
+   */
+  private _uplinkPermissionRequestViaHttp(rawPayload: unknown): boolean {
+    const p = rawPayload as { session_id?: unknown } | null;
+    const sessionId = typeof p?.session_id === 'string' ? p.session_id : '';
+    if (!sessionId || typeof this._client.submitPermissionRequest !== 'function') {
+      this._logger.warn('permission_http_uplink_unavailable', {
+        session_id: sessionId || null,
+      });
+      return false;
+    }
+    const claimToken = this._sessionManager?.get(sessionId)?.claimToken ?? '';
+    if (!claimToken) {
+      // claim_token 空窗：backend X-Claim-Token 校验必拒，等价 fail-closed deny。
+      this._logger.warn('permission_http_uplink_no_claim_token', {
+        session_id: sessionId,
+      });
+      return false;
+    }
+    void this._client
+      .submitPermissionRequest(
+        sessionId,
+        rawPayload as Record<string, unknown>,
+        claimToken,
+      )
+      .then(() => {
+        this._logger.info('permission_http_uplink_sent', { session_id: sessionId });
+      })
+      .catch((e: unknown) => {
+        // 人审等待交由 backend 超时 + fallback timer 兜底（design A3）。
+        this._logger.warn('permission_http_uplink_failed', {
+          session_id: sessionId,
+          error: (e as Error)?.message ?? String(e),
+        });
+      });
+    return true;
   }
 
   /**
@@ -2671,9 +3410,14 @@ export class Daemon {
         onMessage: (msg) => {
           void this._handleWsMessage(msg);
         },
-        // task-18（FR-07 / D-004@v1）：WS 重连成功 → 触发 outbox drain（补发断连期间暂存的消息）。
+        // task-06（design A1）：WS 重连成功 → 统一对账（心跳→drain outbox→补拉
+        // 控制指令→补拉 pending leases）。原 task-18 的 drainOutbox 并入对账第 2
+        // 步，此处不再单独调用（不重复 drain）。幂等防重入见 _reconcileAfterReconnect。
         onConnected: () => {
-          void this._resilience?.drainOutbox();
+          void this._reconcileAfterReconnect();
+          // task-08（design A5）：WS 重连成功 = backend 可达信号——遗留待恢复
+          // 记录（recover 网络失败重试队列）立即重试一轮，不等退避到期。
+          this._retryPendingRecoveryNow();
         },
         // task-13（D-004）：POLICY_UPDATE 推送 → sub-second 热更新 PolicyCache。
         onPolicyUpdate: (rid, roots, version) => {
@@ -3187,29 +3931,28 @@ export class Daemon {
         break;
       }
       // change 2026-08-06-provider-switch-live-session task-06 / FR-04 / D-002@v1 /
-      // design §5 Wave2：backend set/unset_default 经 WS 即时推送供应商热切换指令
-      //（best-effort，失败由心跳轮询兜底，与 LEASE_CANCEL 同模式）。daemon 收到后
-      // 非阻塞调 sessionManager.markPendingSwitch(sessionId, providerConfig)：空闲
-      // session 立即 reload；生成中 turn 仅覆盖写 pendingSwitch 不中断，turn 边界
-      // 完成切换。provider_config=null 表停止 → 透传给 markPendingSwitch（D-004@v1
-      // 回退本机凭证）。session 不存在（迟到/重放）由 markPendingSwitch 抛
-      // SessionNotFoundError，被 _routeProviderConfigChanged 的 catch 收敛 warn 丢弃。
+      // design §5 Wave2：backend set/unset_default 经 WS 即时推送供应商热切换指令。
+      // 2026-08-29-daemon-platform-resilience task-06：改经 control-dispatcher 统一
+      // 消费（kind 路由到下方 _routeProviderConfigChanged 既有实现 + command_id
+      // 去重 + ack 收集；payload 无 command_id 的旧 backend 消息行为不变）。
       case MSG.PROVIDER_CONFIG_CHANGED: {
         // 非阻塞分发（同 SESSION_INJECT / LEASE_CANCEL 风格，不阻塞 WS 接收）。
-        void this._routeProviderConfigChanged(rawPayload).catch((e) => {
-          this._logger.error('provider_config_changed_failed', { error: e });
-        });
+        void this._dispatchControl(CONTROL_KIND.PROVIDER_CONFIG_CHANGED, rawPayload);
         break;
       }
       // task-04：交互式会话控制消息（SESSION_INJECT/INTERRUPT/END）路由到 SessionManager。
+      // 2026-08-29-daemon-platform-resilience task-06：改经 control-dispatcher 统一
+      // 消费——kind 路由到 _routeSessionControl 既有实现（四类共享），补拉消息走
+      // 同一路径（断线窗口控制指令零丢失零重复，design A1+A2）。
       case MSG.SESSION_INJECT:
       case MSG.SESSION_INTERRUPT:
       case MSG.SESSION_END:
       case MSG.SESSION_RESUME: {
         // 非阻塞分发（同 task_available 风格，不阻塞 WS 接收）。
-        void this._routeSessionControl(msgType, rawPayload).catch((e) => {
-          this._logger.error('session_control_failed', { type: msgType, error: e });
-        });
+        void this._dispatchControl(
+          CONTROL_MSG_TYPE_TO_KIND[msgType] ?? msgType,
+          rawPayload,
+        );
         break;
       }
       // task-02 verify P0 返工（2026-08-24-platform-session-feedback-fix / FR-02）：
@@ -3239,10 +3982,10 @@ export class Daemon {
       // task-08（D-007@v1 / FR-07）：backend PERMISSION_RESPONSE → resolver.resolve
       // settle canUseTool 回调。session 不存在 / resolver 不存在 / unknown_request
       // 只 warn 丢弃（迟到 response，turn 已结束）；不断 WS、不崩。
+      // 2026-08-29-daemon-platform-resilience task-06：改经 control-dispatcher 统一
+      // 消费（kind 路由到 _routePermissionResponse 既有实现 + 去重 + ack）。
       case MSG.PERMISSION_RESPONSE: {
-        void this._routePermissionResponse(rawPayload).catch((e) => {
-          this._logger.error('permission_response_failed', { error: e });
-        });
+        void this._dispatchControl(CONTROL_KIND.PERMISSION_RESPONSE, rawPayload);
         break;
       }
       // Server → Daemon：服务端判定 daemon 版本落后后推送的自更新指令。
@@ -3320,6 +4063,36 @@ export class Daemon {
       default: {
         this._logger.warn('unknown_message_type', { type: msgType });
       }
+    }
+  }
+
+  /**
+   * task-06（design A2 消费端）：WS 控制消息统一经 control-dispatcher 消费。
+   *
+   * 从 payload 尾部提取 backend task-04 注入的可选 `command_id`（幂等去重键；
+   * 旧 backend 消息无该字段 → dispatcher 跳过去重直接路由，行为与改造前一致）
+   * 与 `runtime_id`（snake/camel 双读，ack 归属桶键）。去重命中（补拉在途时 WS
+   * 同条到达）→ dispatcher 跳过执行并记日志；handler 业务失败由 dispatcher 捕获
+   * 落 error 日志（原 case 内 `.catch` 收敛语义平移，不向上冒泡阻塞 WS 接收）。
+   */
+  private async _dispatchControl(
+    kind: string,
+    rawPayload: Record<string, unknown>,
+  ): Promise<void> {
+    const commandId =
+      typeof rawPayload.command_id === 'string' ? rawPayload.command_id : undefined;
+    const runtimeId =
+      (typeof rawPayload.runtime_id === 'string' ? rawPayload.runtime_id : undefined) ??
+      (typeof rawPayload.runtimeId === 'string' ? rawPayload.runtimeId : undefined);
+    const outcome = await this._controlDispatcher.consume(kind, rawPayload, {
+      commandId,
+      runtimeId,
+    });
+    if (outcome === 'duplicate') {
+      this._logger.info('control_command_duplicate_dropped', {
+        kind,
+        command_id: commandId,
+      });
     }
   }
 

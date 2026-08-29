@@ -11,7 +11,8 @@ import {
   WsState,
   RpcError,
   type RpcHandler,
-  RECONNECT_INTERVAL_MS,
+  RECONNECT_BACKOFF_SCHEDULE_MS,
+  RECONNECT_JITTER_RATIO,
   CONNECT_TIMEOUT_MS,
   WS_PING_INTERVAL_MS,
   WS_PONG_TIMEOUT_MS,
@@ -364,8 +365,95 @@ describe('WsClient — X-API-Key 升级请求头（security-audit-remediation ta
   });
 });
 
-describe('WsClient — 5s 重连退避（FR-03）', () => {
-  it('Server 主动 close → 5s 后重连成功', async () => {
+// ── 指数退避重连（2026-08-29-daemon-platform-resilience task-06 / design A1）──
+// 原「固定 5s（RECONNECT_INTERVAL_MS）」改为退避档位序列 [1,2,4,8,16,30]s 封顶
+// + 每档 ±20% jitter；收到任何 WS 消息/pong 档位重置回第 0 档。时序断言用
+// jitterFn 注入固定抖动源（()=>0.5 = 无抖动基准值）保持确定性。
+describe('WsClient — 指数退避重连（task-06 / design A1）', () => {
+  it('档位序列：连续调度延时按 [1,2,4,8,16,30]s 推进并在最后档封顶（jitter 固定中值）', () => {
+    const c = new WsClient({
+      serverUrl: 'http://x',
+      runtimeId: 'r1',
+      jitterFn: () => 0.5, // 抖动系数 = 1 + (0.5×2−1)×0.2 = 1.0（无抖动）
+    });
+    const next = (c as unknown as { _nextReconnectDelayMs: () => number })
+      ._nextReconnectDelayMs;
+    // 依次取档：1,2,4,8,16,30s，之后驻留 30s。
+    const delays = [
+      next.call(c),
+      next.call(c),
+      next.call(c),
+      next.call(c),
+      next.call(c),
+      next.call(c),
+      next.call(c),
+      next.call(c),
+    ];
+    expect(delays).toEqual([1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000, 30_000]);
+  });
+
+  it('抖动区间：jitter=0 → 0.8 倍基准；jitter=1 → 1.2 倍基准（±20%）', () => {
+    const lo = new WsClient({ serverUrl: 'http://x', runtimeId: 'r1', jitterFn: () => 0 });
+    const hi = new WsClient({ serverUrl: 'http://x', runtimeId: 'r1', jitterFn: () => 1 });
+    const loNext = (lo as unknown as { _nextReconnectDelayMs: () => number })._nextReconnectDelayMs;
+    const hiNext = (hi as unknown as { _nextReconnectDelayMs: () => number })._nextReconnectDelayMs;
+    // 第 4 档 8000ms 为例：0.8×=6400 / 1.2×=9600。
+    loNext.call(lo); loNext.call(lo); loNext.call(lo);
+    hiNext.call(hi); hiNext.call(hi); hiNext.call(hi);
+    expect(loNext.call(lo)).toBe(6_400);
+    expect(hiNext.call(hi)).toBe(9_600);
+  });
+
+  it('收到任何 WS 消息 → 档位重置回第 0 档（含非法 JSON——链路活着即证据）', () => {
+    const c = new WsClient({
+      serverUrl: 'http://x',
+      runtimeId: 'r1',
+      jitterFn: () => 0.5,
+    });
+    const hack = c as unknown as {
+      _nextReconnectDelayMs: () => number;
+      _handleMessage: (data: WebSocket.RawData) => void;
+      _reconnectAttempt: number;
+    };
+    // 推进到第 3 档（8s）。
+    hack._nextReconnectDelayMs();
+    hack._nextReconnectDelayMs();
+    hack._nextReconnectDelayMs();
+    expect(hack._reconnectAttempt).toBe(3);
+    // 非法 JSON 消息到达 → 重置。
+    hack._handleMessage(Buffer.from('not-a-json{'));
+    expect(hack._reconnectAttempt).toBe(0);
+    expect(hack._nextReconnectDelayMs()).toBe(1_000);
+  });
+
+  it('收到 pong → 档位重置回第 0 档', () => {
+    const c = new WsClient({ serverUrl: 'http://x', runtimeId: 'r1' });
+    const hack = c as unknown as {
+      _nextReconnectDelayMs: () => number;
+      _handlePong: () => void;
+      _reconnectAttempt: number;
+    };
+    hack._nextReconnectDelayMs();
+    hack._nextReconnectDelayMs();
+    hack._nextReconnectDelayMs();
+    expect(hack._reconnectAttempt).toBe(3);
+    hack._handlePong();
+    expect(hack._reconnectAttempt).toBe(0);
+  });
+
+  it('close() 主动关闭 → 档位归零（新生命周期从第 0 档起）', () => {
+    const c = new WsClient({ serverUrl: 'http://x', runtimeId: 'r1' });
+    const hack = c as unknown as {
+      _nextReconnectDelayMs: () => number;
+      _reconnectAttempt: number;
+    };
+    hack._nextReconnectDelayMs();
+    hack._nextReconnectDelayMs();
+    c.close();
+    expect(hack._reconnectAttempt).toBe(0);
+  });
+
+  it('Server 主动 close → 第 0 档退避（1s，jitter 固定中值）后重连成功', async () => {
     const mock = await startMockServer();
     try {
       const onDisconnected = vi.fn();
@@ -373,6 +461,7 @@ describe('WsClient — 5s 重连退避（FR-03）', () => {
       const c = new WsClient({
         serverUrl: mock.url.replace('ws://', 'http://'),
         runtimeId: 'r1',
+        jitterFn: () => 0.5, // 第 0 档 = 1000ms 整
         callbacks: { onDisconnected, onConnected },
       });
       c.connect();
@@ -382,14 +471,13 @@ describe('WsClient — 5s 重连退避（FR-03）', () => {
       mock.conns[0]?.close(1000, 'test');
       await vi.waitFor(() => expect(onDisconnected).toHaveBeenCalledTimes(1));
       expect(c.state).toBe(WsState.Reconnecting);
-      // 真实等待 5s 退避 + 重连握手完成（RECONNECT_INTERVAL_MS=5000）。
-      // 不用 fake timers——connect() 内部 new WebSocket 的 TCP 握手是 libuv 异步 IO，
-      // fake timers 会冻结事件循环导致握手回调不触发。
+      // 真实等待第 0 档 1s 退避 + 重连握手完成。不用 fake timers——connect() 内部
+      // new WebSocket 的 TCP 握手是 libuv 异步 IO，fake timers 会冻结事件循环。
       await vi.waitFor(
         () => {
           expect(onConnected).toHaveBeenCalledTimes(2);
         },
-        { timeout: RECONNECT_INTERVAL_MS + 3_000, interval: 100 },
+        { timeout: 1_000 + 3_000, interval: 50 },
       );
       expect(c.isConnected).toBe(true);
       c.close();
@@ -397,6 +485,41 @@ describe('WsClient — 5s 重连退避（FR-03）', () => {
       await new Promise<void>((r) => mock.server.close(() => r()));
     }
   }, 15_000);
+
+  it('连续两次断线且无任何消息 → 第二次退避升到第 1 档（2s，jitter 固定中值）', async () => {
+    const mock = await startMockServer();
+    try {
+      const onConnected = vi.fn();
+      const c = new WsClient({
+        serverUrl: mock.url.replace('ws://', 'http://'),
+        runtimeId: 'r1',
+        jitterFn: () => 0.5, // 档位基准值：第 0 档 1s、第 1 档 2s
+        callbacks: { onConnected },
+      });
+      c.connect();
+      await vi.waitFor(() => expect(c.isConnected).toBe(true));
+      // 第一次断线（连接期间 server 不发任何消息 → 档位不被重置）。
+      mock.conns[0]?.close(1000, 'test');
+      await vi.waitFor(() => expect(onConnected).toHaveBeenCalledTimes(2), {
+        timeout: 1_000 + 3_000,
+        interval: 50,
+      });
+      // 第二次断线：无消息重置 → 退避应升到第 1 档（2s）。判据：1.3s 时（第 0
+      // 档已过、第 1 档未到）仍未重连，2s+握手窗口后重连成功。
+      const secondCloseAt = Date.now();
+      mock.conns[1]?.close(1000, 'test');
+      await new Promise((r) => setTimeout(r, 1_300));
+      expect(onConnected).toHaveBeenCalledTimes(2); // 未在第 0 档（1s）内重连
+      await vi.waitFor(() => expect(onConnected).toHaveBeenCalledTimes(3), {
+        timeout: 2_000 + 3_000 - (Date.now() - secondCloseAt),
+        interval: 50,
+      });
+      expect(c.isConnected).toBe(true);
+      c.close();
+    } finally {
+      await new Promise<void>((r) => mock.server.close(() => r()));
+    }
+  }, 20_000);
 
   it('close() 后 running=false → 不重连', async () => {
     const mock = await startMockServer();
@@ -412,7 +535,10 @@ describe('WsClient — 5s 重连退避（FR-03）', () => {
       c.close();
       expect(c.state).toBe(WsState.Idle);
       vi.useFakeTimers();
-      vi.advanceTimersByTime(RECONNECT_INTERVAL_MS * 3);
+      // 推进超过整条退避序列之和（含抖动上界）——主动关闭后任何档位都不重连。
+      vi.advanceTimersByTime(
+        RECONNECT_BACKOFF_SCHEDULE_MS.reduce((a, b) => a + b, 0) * 2,
+      );
       expect(onConnected).toHaveBeenCalledTimes(1); // 未重连
       vi.useRealTimers();
     } finally {
@@ -420,7 +546,7 @@ describe('WsClient — 5s 重连退避（FR-03）', () => {
     }
   });
 
-  it('连接失败（端口无服务）→ 5s 后重试', async () => {
+  it('连接失败（端口无服务）→ 进入 Reconnecting（退避定时器已挂）', async () => {
     const onError = vi.fn();
     const c = new WsClient({
       serverUrl: 'http://127.0.0.1:1', // 1 号端口几乎肯定无服务
@@ -453,14 +579,15 @@ describe('WsClient — 网络切换假连回归（2026-08-27）', () => {
       c.connect();
       await vi.waitFor(() => expect(c.isConnected).toBe(true));
       const stale = (c as unknown as { _ws: WebSocket })._ws;
-      // 服务端异常断开（网络切换形态，1006 无关闭帧）→ 5s 退避后重连出新 socket
+      // 服务端异常断开（网络切换形态，1006 无关闭帧）→ 第 0 档退避（1s，jitter
+      // 固定中值）后重连出新 socket（task-06 退避语义，原 5s 固定档已废）。
       mock.conns[0]?.terminate();
       await vi.waitFor(() => expect(c.state).toBe(WsState.Reconnecting), {
         timeout: 3_000,
       });
       await vi.waitFor(() => expect(c.isConnected).toBe(true), {
-        timeout: RECONNECT_INTERVAL_MS + 3_000,
-        interval: 100,
+        timeout: 5_000,
+        interval: 50,
       });
       const fresh = (c as unknown as { _ws: WebSocket })._ws;
       expect(fresh).not.toBe(stale); // 已换新 socket
@@ -550,11 +677,17 @@ describe('WsClient — 出站消息', () => {
   });
 });
 
-describe('WsClient — 常量与 Python 对齐', () => {
-  it('RECONNECT_INTERVAL_MS === 5000（FR-03 / design §9）', () => {
-    expect(RECONNECT_INTERVAL_MS).toBe(5_000);
+describe('WsClient — 常量与设计对齐', () => {
+  // task-06（design A1）：固定 5s（RECONNECT_INTERVAL_MS）已废，改退避档位序列。
+  it('RECONNECT_BACKOFF_SCHEDULE_MS === [1,2,4,8,16,30]s（design A1 档位表）', () => {
+    expect(RECONNECT_BACKOFF_SCHEDULE_MS).toEqual([
+      1_000, 2_000, 4_000, 8_000, 16_000, 30_000,
+    ]);
   });
-  it('CONNECT_TIMEOUT_MS === 10000（Python open_timeout=10）', () => {
+  it('RECONNECT_JITTER_RATIO === 0.2（每档 ±20% 抖动）', () => {
+    expect(RECONNECT_JITTER_RATIO).toBe(0.2);
+  });
+  it('CONNECT_TIMEOUT_MS === 10000（握手超时不动，task-06 constraints）', () => {
     expect(CONNECT_TIMEOUT_MS).toBe(10_000);
   });
 });

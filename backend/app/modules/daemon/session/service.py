@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal, NamedTuple
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import col
@@ -47,18 +47,20 @@ from app.modules.auth.rbac import allowed_workspace_ids
 # 只依赖 app.models.base，不 import daemon——无循环导入（daemon/session/
 # context.py 顶部 import 先例同款）。
 from app.modules.change.model import ChangeSessionLink, QuicklogSessionLink
+from app.modules.daemon.control_commands import (
+    INJECT_SEND_FAILED_ERROR_CODE,
+    KIND_SESSION_END,
+    KIND_SESSION_INJECT,
+    KIND_SESSION_INTERRUPT,
+    KIND_SESSION_RESUME,
+    ControlCommandService,
+)
 from app.modules.daemon.model import (
     DaemonInstance,
     DaemonRuntime,
     DaemonTaskLease,
 )
-from app.modules.daemon.protocol import (
-    DAEMON_MSG_PLAN_RESPONSE,
-    DAEMON_MSG_SESSION_END,
-    DAEMON_MSG_SESSION_INJECT,
-    DAEMON_MSG_SESSION_INTERRUPT,
-    DAEMON_MSG_SESSION_RESUME,
-)
+from app.modules.daemon.protocol import DAEMON_MSG_PLAN_RESPONSE
 from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 from app.modules.daemon.schema import (
     PageContextCreateBlock,
@@ -116,6 +118,11 @@ TERMINAL_TURN_STATUSES = frozenset({"completed", "failed", "killed", "cancelled"
 # 唯一落点：task-04（reopen 前置校验窗口外放行）与 task-05（sweeper 巡检收敛）
 # 均 import 本常量，勿在别处重复定义；本 task 只定义不消费。
 RECONNECTING_RETRY_WINDOW_SEC = 180
+
+# 2026-08-29-daemon-platform-resilience task-05（design A5 / FR-04）：daemon 优雅
+# 停止时中断轮 run 的收敛错误码。与 recover 路径的 ``daemon_restarted``（区分
+# 优雅停止 vs 崩溃重启两条挂起来源）；唯一写入点 suspend_sessions_for_daemon。
+DAEMON_STOPPED_ERROR_CODE = "daemon_stopped"
 
 # ql-20260827-015：后台任务通知排队合并。daemon 任务终态唤醒（session-manager
 # _scheduleTaskWakeup，2026-08-27-background-subagent-progress ql-20260827-007）
@@ -238,16 +245,17 @@ async def _send_session_end_best_effort(
     if lease_id is None or runtime_id is None:
         return False
     try:
-        from app.modules.daemon.ws_hub import get_daemon_ws_hub
-
-        hub = get_daemon_ws_hub()
+        # task-04（design A2）：SESSION_END 走控制指令三段式——落库 pending +
+        # WS 推送 + delivered 标记；daemon 断线窗口由重连补拉兜底。best-effort
+        # 语义不变（delivered=False 仅记日志返 False，不阻断已 commit 的终态）。
         daemon_id = await _resolve_daemon_id_for_runtime(db_session, runtime_id)
         if daemon_id is None:
             return False
-        ok = await hub.send_session_control(
-            daemon_id,
-            DAEMON_MSG_SESSION_END,
-            {
+        _row, ok = await ControlCommandService(db_session).enqueue_and_push(
+            daemon_id=daemon_id,
+            runtime_id=runtime_id,
+            kind=KIND_SESSION_END,
+            payload={
                 "session_id": str(session_id),
                 "lease_id": str(lease_id),
                 "runtime_id": str(runtime_id),
@@ -645,6 +653,19 @@ class SessionRecoveryResult:
     lease_id: uuid.UUID | None
     status: Literal["active", "ended", "failed", "reconnecting", "rejected"]
     interrupted_run_status: Literal["failed"] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SuspendBatchResult:
+    """Result of suspend_sessions_for_daemon（task-05 provides 契约）.
+
+    ``suspended`` = 实际翻 suspended 的会话行数（条件 UPDATE 命中数——重复调用
+    对已挂起/终态会话 no-op 计 0）；``runs_failed`` = 同批收敛 failed 的活跃轮
+    run 行数（error_code=daemon_stopped）。
+    """
+
+    suspended: int
+    runs_failed: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -1890,9 +1911,8 @@ class SessionService:
         # Best-effort SESSION_INJECT control message carrying the first turn.
         # Wake-up already signalled the lease; the control message lets the
         # daemon SessionManager know the exact first prompt (FR-02 contract).
-        from app.modules.daemon.ws_hub import get_daemon_ws_hub
-
-        hub = get_daemon_ws_hub()
+        # task-04（design A2）：走控制指令三段式（落库 pending + WS 推送 +
+        # delivered 标记）——WS 失败不再裸丢，daemon 重连补拉兜底。
         # task-06: WS Hub routes by daemon_instance_id; resolve from the
         # provider runtime_id carried on the dispatch.
         daemon_id = await _resolve_daemon_id_for_runtime(self._session, dispatch.runtime_id)
@@ -1927,10 +1947,11 @@ class SessionService:
             # 有附件时附加，旧 daemon 忽略未知键，协议向后兼容）。
             if create_inject_attachments:
                 _create_inject_payload["attachments"] = create_inject_attachments
-            control_ok = await hub.send_session_control(
-                daemon_id,
-                DAEMON_MSG_SESSION_INJECT,
-                _create_inject_payload,
+            _row, control_ok = await ControlCommandService(self._session).enqueue_and_push(
+                daemon_id=daemon_id,
+                runtime_id=dispatch.runtime_id,
+                kind=KIND_SESSION_INJECT,
+                payload=_create_inject_payload,
             )
         if not control_ok:
             # Wake-up delivered but control send failed: the daemon will still
@@ -2517,9 +2538,7 @@ class SessionService:
         # best-effort SESSION_INJECT 携带首条消息（对齐 create_session :1022-1065：
         # 唤醒已信号 lease，控制消息让 daemon SessionManager 拿到确切首 prompt；
         # 等 session ready 再发，超时 fallback 仍发兼容不上报 ready 的旧 daemon）。
-        from app.modules.daemon.ws_hub import get_daemon_ws_hub
-
-        hub = get_daemon_ws_hub()
+        # task-04（design A2）：走控制指令三段式——WS 失败落库 pending 待补拉。
         daemon_id = await _resolve_daemon_id_for_runtime(self._session, dispatch.runtime_id)
         ready = await get_session_readiness().wait(session.id, timeout=8)
         if not ready:
@@ -2539,10 +2558,11 @@ class SessionService:
             # 附加，旧 daemon 忽略未知键，协议向后兼容）。
             if inject_attachments:
                 inject_payload["attachments"] = inject_attachments
-            control_ok = await hub.send_session_control(
-                daemon_id,
-                DAEMON_MSG_SESSION_INJECT,
-                inject_payload,
+            _row, control_ok = await ControlCommandService(self._session).enqueue_and_push(
+                daemon_id=daemon_id,
+                runtime_id=dispatch.runtime_id,
+                kind=KIND_SESSION_INJECT,
+                payload=inject_payload,
             )
         if not control_ok:
             # 唤醒已送达但控制消息发送失败：daemon 仍会 claim lease（metadata 含
@@ -3764,10 +3784,15 @@ class SessionService:
                 # 逐字节一致零回归；旧 daemon 忽略未知键，协议向后兼容）。
                 if inject_attachments:
                     inject_payload["attachments"] = inject_attachments
-                control_ok = await hub.send_session_control(
-                    daemon_id,
-                    DAEMON_MSG_SESSION_INJECT,
-                    inject_payload,
+                # task-04（design A2）：SESSION_INJECT 走控制指令三段式——WS
+                # 失败/不在线落库 pending 待补拉（run failed 收敛语义保持，见
+                # 下方 not control_ok 分支；补拉到达时 daemon 侧按 command_id
+                # 幂等，GC 10min 过期联动兜底）。
+                _row, control_ok = await ControlCommandService(self._session).enqueue_and_push(
+                    daemon_id=daemon_id,
+                    runtime_id=runtime_id,
+                    kind=KIND_SESSION_INJECT,
+                    payload=inject_payload,
                 )
         if not control_ok:
             # New run failed to dispatch → converge it to failed but leave the
@@ -3778,7 +3803,9 @@ class SessionService:
             try:
                 run.status = "failed"
                 run.finished_at = datetime.now(UTC)
-                run.error_code = "interactive_inject_send_failed"
+                # task-04：错误码常量唯一落点迁 control_commands.py（GC inject
+                # 过期联动复用同一取值），本处语义不变。
+                run.error_code = INJECT_SEND_FAILED_ERROR_CODE
                 run.output_redacted = f"failed to dispatch turn (daemon offline): prompt={prompt!r}"
                 self._session.add(run)
                 await self._session.commit()
@@ -3848,9 +3875,6 @@ class SessionService:
                 details={"session_id": str(session_id)},
             )
 
-        from app.modules.daemon.ws_hub import get_daemon_ws_hub
-
-        hub = get_daemon_ws_hub()
         # task-06: resolve provider runtime_id → daemon_instance_id (WS route key).
         runtime_id = session.runtime_id
         daemon_id = (
@@ -3866,10 +3890,13 @@ class SessionService:
                     "runtime_id": str(runtime_id) if runtime_id else None,
                 },
             )
-        control_ok = await hub.send_session_control(
-            daemon_id,
-            DAEMON_MSG_SESSION_INTERRUPT,
-            {
+        # task-04（design A2）：SESSION_INTERRUPT 走控制指令三段式——推送失败
+        # 落库 pending 待补拉；504 语义保持（下方 not control_ok 分支）。
+        _row, control_ok = await ControlCommandService(self._session).enqueue_and_push(
+            daemon_id=daemon_id,
+            runtime_id=runtime_id,
+            kind=KIND_SESSION_INTERRUPT,
+            payload={
                 "session_id": str(session.id),
                 "lease_id": str(session.lease_id),
                 "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
@@ -4407,8 +4434,9 @@ class SessionService:
           3. Ownership mismatch (runtime/lease/provider/lease kind) OR session
              missing → return ``rejected``. Daemon deletes local record; no
              token rotation, no local session built.
-          4. Recoverable (active/reconnecting) → write status=reconnecting +
-             last_active_at=now.
+          4. Recoverable（非终态一律：active/suspended/pending/reconnecting，
+             task-05 起 suspended 经 offline sweep/优雅停止产生）→ write
+             status=reconnecting + last_active_at=now.
           5. interrupted_run_id non-null → converge ONLY the same-session run
              whose status is in ACTIVE_TURN_STATUSES to failed (error_code=
              daemon_restarted, finished_at=now); already-terminal → idempotent
@@ -4648,6 +4676,107 @@ class SessionService:
                     "lingering_run_ids": [str(i) for i in ids],
                 },
             )
+
+    async def suspend_sessions_for_daemon(
+        self,
+        daemon_instance_id: uuid.UUID,
+    ) -> SuspendBatchResult:
+        """daemon 优雅停止批量挂起（2026-08-29-daemon-platform-resilience task-05 / design A5 / FR-04）.
+
+        daemon ``stop()`` 在 markOffline 前经 ``POST /sessions/suspend-batch``
+        调入（body ``daemon_local_id`` = ``daemon_instances.id``，归属校验在
+        router 层）。该 daemon 全部 runtime 名下的 **active** 会话单事务三步收敛
+        （对齐 offline sweep 手法，条件 UPDATE 重挂状态条件保证幂等可重入）：
+
+        1. 会话 → ``suspended`` + ``last_active_at=now``（挂起时刻写入，作
+           sweep 超龄 GC（SUSPENDED_MAX_AGE_SEC，24h）的时间基准——对齐 recover
+           翻 reconnecting 时写 last_active_at 的先例；双路径（本方法与 offline
+           sweep）都写，suspended 行该列恒有值）；
+        2. 中断轮 run（ACTIVE_TURN_STATUSES）→ ``failed`` + ``finished_at`` +
+           ``error_code=daemon_stopped``（D-001：被中断的一轮标失败，不影响
+           会话存活）；
+        3. 挂起 lease（pending/claimed）→ ``cancelled``（终态 lease 不回写）。
+
+        **pending 会话不挂起**：daemon 本地 sessions.json 只快照 active 且有
+        agentSessionId 的会话，pending 行标 suspended 后无人 recover 只能等
+        24h GC（D-007 裁定维持 failed 归宿——那条路径归 offline sweep，本方法
+        条件锁 ``status == "active"`` 不碰 pending/终态行）。
+
+        commit 后逐行 best-effort 发列表变更信号 ``status_changed``；suspended
+        **非终态不发 session_ended**（design A5：SSE 会话流继续 keepalive，
+        列表视图经信号秒级刷新）。
+        """
+        try:
+            daemon_runtime_ids = select(DaemonRuntime.id).where(
+                col(DaemonRuntime.daemon_instance_id) == daemon_instance_id
+            )
+            hit_rows = (
+                await self._session.execute(
+                    select(AgentSession.id, AgentSession.lease_id).where(
+                        AgentSession.status == "active",
+                        col(AgentSession.runtime_id).in_(daemon_runtime_ids),
+                    )
+                )
+            ).all()
+            if not hit_rows:
+                return SuspendBatchResult(suspended=0, runs_failed=0)
+
+            hit_ids = [row.id for row in hit_rows]
+            now = datetime.now(UTC)
+
+            suspended_result = await self._session.execute(
+                update(AgentSession)
+                .where(
+                    AgentSession.id.in_(hit_ids),
+                    AgentSession.status == "active",
+                )
+                .values(status="suspended", last_active_at=now)
+            )
+            suspended = int(suspended_result.rowcount or 0)
+
+            runs_result = await self._session.execute(
+                update(AgentRun)
+                .where(
+                    AgentRun.agent_session_id.in_(hit_ids),
+                    col(AgentRun.status).in_(list(ACTIVE_TURN_STATUSES)),
+                )
+                .values(
+                    status="failed",
+                    finished_at=now,
+                    error_code=DAEMON_STOPPED_ERROR_CODE,
+                )
+            )
+            runs_failed = int(runs_result.rowcount or 0)
+
+            lease_ids = [row.lease_id for row in hit_rows if row.lease_id is not None]
+            if lease_ids:
+                await self._session.execute(
+                    update(DaemonTaskLease)
+                    .where(
+                        DaemonTaskLease.id.in_(lease_ids),
+                        DaemonTaskLease.status.in_(("pending", "claimed")),
+                    )
+                    .values(status="cancelled", updated_at=now)
+                )
+
+            await self._session.commit()
+
+            # 以 UPDATE 后状态复查决定广播对象（并发翻转的行 status 已非
+            # suspended 不发——对齐 sweep 两档的防误伤口径）。
+            final_rows = (
+                await self._session.execute(
+                    select(AgentSession.id, AgentSession.status, AgentSession.user_id).where(
+                        AgentSession.id.in_(hit_ids)
+                    )
+                )
+            ).all()
+            for row in final_rows:
+                if row.status == "suspended":
+                    await publish_sessions_changed("status_changed", row.id, row.user_id)
+            return SuspendBatchResult(suspended=suspended, runs_failed=runs_failed)
+        except Exception:
+            await self._session.rollback()
+            raise
 
     async def confirm_session_reconnected(
         self,
@@ -5324,6 +5453,9 @@ class SessionService:
         # will converge on its own (pull/next-poll or recover-on-restart). The
         # frontend surfaces reconnecting immediately. cwd is forwarded so the
         # SDK resume runs in the original working directory (R-cwd).
+        # task-04（design A2）：SESSION_RESUME 走控制指令三段式——reopen 租约的
+        # WS 单次投递丢失即永挂缺陷由「落库 pending + 重连补拉」弥补（design A2
+        # 末条）；失败不回滚 reconnecting 本地状态的既有语义保持。
         resume_payload = {
             "session_id": str(session.id),
             "lease_id": str(new_lease.id),
@@ -5337,19 +5469,17 @@ class SessionService:
             # 日志/ORM；daemon 侧同样不落日志（record.providerConfig 快照语义）。
             resume_payload["provider_config"] = resume_provider_config
         try:
-            from app.modules.daemon.ws_hub import get_daemon_ws_hub
-
-            hub = get_daemon_ws_hub()
             # task-06: resolve provider runtime_id → daemon_instance_id (WS key).
             resume_daemon_id = await _resolve_daemon_id_for_runtime(
                 self._session, target_runtime_id
             )
             resume_ok = False
             if resume_daemon_id is not None:
-                resume_ok = await hub.send_session_control(
-                    resume_daemon_id,
-                    DAEMON_MSG_SESSION_RESUME,
-                    resume_payload,
+                _row, resume_ok = await ControlCommandService(self._session).enqueue_and_push(
+                    daemon_id=resume_daemon_id,
+                    runtime_id=target_runtime_id,
+                    kind=KIND_SESSION_RESUME,
+                    payload=resume_payload,
                 )
             if not resume_ok:
                 log.warning(
@@ -5446,8 +5576,6 @@ class SessionService:
         best-effort——与 :meth:`end_session` / interrupt_session 同款「先 commit、
         再发 WS」模式，锁内不等 ws_hub 最长 10s 的发送。
         """
-        from app.modules.daemon.ws_hub import get_daemon_ws_hub
-
         now = datetime.now(UTC)
         # Kill the current non-terminal run if any (single-transaction convergence).
         # P2：WHERE 直接过滤 ACTIVE_TURN_STATUSES（pending/running/pending_approval），
@@ -5486,17 +5614,19 @@ class SessionService:
         await self._session.commit()
 
         # Best-effort SESSION_END (kill currentRun + clear SessionStore on daemon).
+        # task-04（design A2）：走控制指令三段式——WS 失败落库 pending 待补拉
+        # （软删会话后 daemon 重连补拉仍能收到 end 清理本地 SessionStore）。
         if session.runtime_id is not None:
-            hub = get_daemon_ws_hub()
             try:
                 # task-06: resolve provider runtime_id → daemon_instance_id.
                 daemon_id = await _resolve_daemon_id_for_runtime(self._session, session.runtime_id)
                 end_ok = False
                 if daemon_id is not None:
-                    end_ok = await hub.send_session_control(
-                        daemon_id,
-                        DAEMON_MSG_SESSION_END,
-                        {
+                    _row, end_ok = await ControlCommandService(self._session).enqueue_and_push(
+                        daemon_id=daemon_id,
+                        runtime_id=session.runtime_id,
+                        kind=KIND_SESSION_END,
+                        payload={
                             "session_id": str(session.id),
                             "lease_id": str(session.lease_id) if session.lease_id else "",
                             "runtime_id": str(session.runtime_id),

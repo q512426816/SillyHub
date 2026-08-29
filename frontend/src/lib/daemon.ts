@@ -1294,6 +1294,16 @@ export interface SessionStreamEnvelope {
   edit_patch?: string | null;
 }
 
+/**
+ * task-09 / design A6（2026-08-29-daemon-platform-resilience）：streamSession
+ * 外露的连接状态。断线重连循环本就内建（对调用方只表现为事件暂停），本类型让
+ * 调用方（session-panel 连接横幅）可观测：
+ * - "reconnecting"：onerror → 进入退避重连（attempt = 即将进行的第 N 次尝试）；
+ * - "reconnected"：resync 完成、SSE 连接重建（横幅「连接已恢复，正在同步…」）；
+ * - "live"：重建后收到任一实时事件（恢复正常，无横幅）。
+ */
+export type SessionStreamStatus = "reconnecting" | "reconnected" | "live";
+
 export interface SessionStreamHandlers {
   onTurnStarted(event: SessionStreamEnvelope): void;
   onLog(event: SessionStreamEnvelope, cursor: string | null): void;
@@ -1342,11 +1352,29 @@ export interface SessionStreamHandlers {
    * total_tokens / tool_uses / async（全可选，旧 daemon 事件为 null）。
    */
   onAgentTaskStatus?(event: AgentTaskStatusEvent): void;
+  /**
+   * task-09 / design A6（2026-08-29-daemon-platform-resilience）：连接状态回调
+   * （可选，不传不影响既有退避 / resync 行为）。进入退避重连上报
+   * "reconnecting"（attempt = 即将进行的第 N 次尝试，1 起）；resync 完成建连
+   * 上报 "reconnected"；重建后收到任一实时事件转 "live"。首连（未断过线）不
+   * 上报——调用方初始态即视为 live，不显示横幅。
+   */
+  onStatusChange?(status: SessionStreamStatus, attempt?: number): void;
 }
 
 export interface SessionStreamConnection {
   close(): void;
   getLastEventId(): string | null;
+  /**
+   * task-09 / design A6：立即对账一次——复用断线 resync 的 DB 缺口同步
+   * （syncGapFromDb：运行中 run 合成 turn_started、终态 run 合成
+   * turn_completed、增量回放日志），**不重建 SSE 连接**。运行轮看门狗 90s
+   * 无事件时对账发现 run 已终态，经此走既有 resync 刷新路径收敛轮次（终态
+   * 以 backend 数据为准，调用方不本地伪造）。对账失败静默（看门狗下一轮再兜）。
+   *
+   * 可选成员：既有调用方 / 测试桩不构造它也不受影响（看门狗按缺省跳过）。
+   */
+  resync?(): void;
 }
 
 /**
@@ -1393,6 +1421,9 @@ function timeoutSignal(ms: number): AbortSignal {
  * - ql-20260827-018：cursor / initialSync 首连缺口同步——调用方先回灌历史再
  *   建流（修 page 模式并行竞态：SSE 先到建 turn 致历史被整体丢弃），本函数在
  *   首次建连前跑一次 DB 缺口同步，补「历史快照 → SSE 订阅」窗口内发布的事件。
+ * - task-09 / design A6：可选 onStatusChange 外露连接状态（reconnecting 携
+ *   attempt / reconnected / live），仅观测不改退避 / resync 行为；连接对象新增
+ *   resync() 供运行轮看门狗主动对账（复用 DB 缺口同步路径）。
  *
  * P0-1（2026-06-18）：从 addEventListener(kind) 改为 onmessage 单通道 dispatch，
  * 与 backend stream_session_logs 的 default data: 帧对齐。done/error 仍走命名事件
@@ -1441,6 +1472,20 @@ export function streamSession(
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
   let postTurnTimer: ReturnType<typeof setTimeout> | null = null;
+  // task-09 / design A6：连接状态外露（onStatusChange）。初值 live——首连（未断
+  // 过线）不上报，调用方初始态即视为 live（不显示横幅）。
+  let connStatus: SessionStreamStatus = "live";
+  const setStatus = (s: SessionStreamStatus, attempt?: number): void => {
+    if (s === "reconnecting") {
+      // 每次尝试都上报（横幅要显示第 N 次，attempt 变化不算重复态）。
+      connStatus = s;
+      handlers.onStatusChange?.(s, attempt);
+      return;
+    }
+    if (connStatus === s) return;
+    connStatus = s;
+    handlers.onStatusChange?.(s);
+  };
 
   const TERMINAL_RUN_STATUSES: ReadonlySet<string | null> = new Set([
     "completed",
@@ -1611,6 +1656,7 @@ export function streamSession(
     //（task-12 迁移 fetch-sse 后 onmessage 签名 {data, lastEventId}，与原一致。）
     es.onmessage = (e) => {
       retryCount = 0; // 收到事件 = 连接健康，退避档位归零
+      setStatus("live"); // task-09：重建后首条实时事件 → live（横幅收起）
       dispatch({ data: e.data, lastEventId: e.lastEventId || undefined });
     };
     es.onerror = () => {
@@ -1625,6 +1671,8 @@ export function streamSession(
         Math.min(retryCount, RECONNECT_BACKOFF_MS.length - 1)
       ]!;
     retryCount += 1;
+    // task-09：进入退避重连——上报 reconnecting（attempt = 即将进行的第 N 次）。
+    setStatus("reconnecting", retryCount);
     reconnectTimer = setTimeout(() => {
       void resyncAndReconnect();
     }, delay);
@@ -1737,6 +1785,9 @@ export function streamSession(
       if (closed) return;
       retryCount = 0;
       wireConnection();
+      // task-09：resync 完成建连 → reconnected（「连接已恢复，正在同步…」；
+      // 收到首条实时事件后再转 live）。
+      setStatus("reconnected");
       reconcileTimer = setTimeout(() => void reconcileTerminalRuns(), 5000);
     } catch {
       scheduleReconnect(); // 后端不可达 → 继续退避重试
@@ -1790,6 +1841,15 @@ export function streamSession(
       es?.close();
     },
     getLastEventId: () => lastEventId,
+    // task-09：看门狗对账入口——复用断线 resync 的 DB 缺口同步路径（终态 run
+    // 合成 turn_completed / 运行中 run 合成 turn_started / 增量日志回放），
+    // 不重建 SSE 连接、不设超时（同轮后对账 1.5s 重放先例）。
+    resync: () => {
+      if (closed) return;
+      void syncGapFromDb().catch(() => {
+        /* 静默：看门狗下一轮再对账 */
+      });
+    },
   };
 }
 

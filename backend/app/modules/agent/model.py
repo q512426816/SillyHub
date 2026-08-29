@@ -700,7 +700,13 @@ class AgentSession(BaseModel, table=True):
     status: str = Field(
         default="pending",
         sa_column=Column(String(20), nullable=False, default="pending"),
-    )  # pending, active, reconnecting, ended, failed
+    )  # pending, active, reconnecting, suspended, ended, failed
+    # suspended（2026-08-29-daemon-platform-resilience task-05 / design A5 / D-001@v1）：
+    # daemon 优雅停止（suspend-batch）或 offline sweep 收敛的挂起态——非终态、可
+    # 经 recover → reconnecting 恢复（非白名单语义，D-007）；超 SUSPENDED_MAX_AGE_SEC
+    # （sweep.py，默认 24h）由 offline sweep 顺带 GC 置 failed。**不入**终态集合
+    # （session/service 的 ACTIVE_SESSION_STATUSES 语义为「可 inject/审批的活跃态」，
+    # suspended 不可 inject、lease 已 cancelled，故也不加入该集合）。
     # ── 会话化三列（2026-08-23-agent-activity-sessions task-03 / FR-03 / design §3.3.1）──
     # 会话来源：'chat'（平台对话会话，存量行为；server_default 'chat' 使迁移对存量
     # 行免回填即得 chat 语义）| 'tool_report'（CLI 工具上报聚合出的本地 Agent 会话，

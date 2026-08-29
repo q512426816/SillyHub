@@ -14,6 +14,13 @@ daemon WS downlink (PERMISSION_RESPONSE). It handles two flavors of request:
   so it survives a frontend page refresh; the 5min timeout is *not* armed. The
   REST ``GET /sessions/{id}/dialogs`` endpoint replays pending rows.
 
+task-07（2026-08-29-daemon-platform-resilience / design A3）：新增 HTTP 上行通道
+``POST /api/daemon/sessions/{id}/permission-requests`` →
+:meth:`DaemonPermissionService.handle_permission_request_http`——daemon WS 不通时
+的兜底（X-API-Key + 条件 X-Claim-Token 鉴权），与 WS 上行同源汇聚（复用
+``handle_permission_request`` 的校验/SSE/持久化/timer），人审挂起等待而非直接
+deny（backend 5min 超时 + daemon fallback timer 双兜底）。
+
 Reuses DaemonService helpers verbatim (task-05):
   - ``_publish_session_event(session_id, payload)`` → ``agent_session:{id}`` Redis
   - ``_get_owned_session_for_update(session_id, user_id)`` for REST response auth
@@ -23,6 +30,7 @@ Reuses DaemonService helpers verbatim (task-05):
 from __future__ import annotations
 
 import asyncio
+import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -35,6 +43,10 @@ from sqlmodel import col
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentRun
+from app.modules.daemon.control_commands import (
+    KIND_PERMISSION_RESPONSE,
+    ControlCommandService,
+)
 from app.modules.daemon.model import SessionDialogRequest
 from app.modules.daemon.protocol import (
     PermissionRequestPayload,
@@ -42,9 +54,11 @@ from app.modules.daemon.protocol import (
 from app.modules.daemon.service import (
     ACTIVE_SESSION_STATUSES,
     ACTIVE_TURN_STATUSES,
+    DaemonInvalidClaimToken,
     DaemonRuntimeOffline,
     DaemonService,
     DaemonSessionNotActive,
+    DaemonSessionNotFound,
 )
 
 if TYPE_CHECKING:
@@ -279,18 +293,23 @@ class DaemonPermissionService:
         self,
         daemon_id: uuid.UUID,
         payload: PermissionRequestPayload,
-    ) -> None:
+    ) -> bool:
         """WS PERMISSION_REQUEST handler: validate + publish SSE + (maybe) arm timer.
 
         ``daemon_id`` is the daemon entity id the request arrived on (= the WS
-        connection key since task-06). Validation:
+        connection key since task-06).
+
+        task-07（2026-08-29-daemon-platform-resilience / design A3）：返回
+        ``bool``——True=已受理（SSE 已广播，dialog 落行 / plain 挂 timer），False=
+        校验不通过被丢弃（fail-soft）。WS 调用方忽略返回值；HTTP 上行端点
+        （``handle_permission_request_http``）透传给 daemon 做日志观测。
 
         Validation (fail-soft: warn + drop, never close the WS — task-03 NFR-05):
           1. session exists (read-only; lock lives in the REST response endpoint)
           2. session.runtime_id resolves to a runtime whose owning daemon entity
              id == ``daemon_id`` (migration window: runtime.daemon_instance_id
              is NULL → the runtime_id itself is the legacy routing key, so the
-             check then expects ``daemon_id == session.runtime_id``).
+             check then expects ``daemon_id == session.runtime_id``)
           3. session.status ∈ ACTIVE_SESSION_STATUSES
           4. session.config.get("manual_approval") is True (FR-07 gate)
           5. current run exists, status ∈ ACTIVE_TURN_STATUSES,
@@ -325,7 +344,7 @@ class DaemonPermissionService:
                 session_id=str(session_id),
                 request_id=request_id,
             )
-            return
+            return False
         if session_obj.runtime_id is None:
             log.warning(
                 "permission_request_no_runtime",
@@ -333,7 +352,7 @@ class DaemonPermissionService:
                 request_id=request_id,
                 daemon_id=str(daemon_id),
             )
-            return
+            return False
         expected_daemon_id = await self._resolve_daemon_id_for_runtime(session_obj.runtime_id)
         if expected_daemon_id != daemon_id:
             log.warning(
@@ -344,7 +363,7 @@ class DaemonPermissionService:
                 expected_daemon_id=str(expected_daemon_id),
                 received_daemon_id=str(daemon_id),
             )
-            return
+            return False
         if (session_obj.status or "") not in ACTIVE_SESSION_STATUSES:
             log.warning(
                 "permission_request_session_not_active",
@@ -352,7 +371,7 @@ class DaemonPermissionService:
                 request_id=request_id,
                 status=session_obj.status,
             )
-            return
+            return False
         config = session_obj.config or {}
         if config.get("manual_approval") is not True:
             # daemon should never send PERMISSION_REQUEST for manual=false sessions
@@ -361,7 +380,7 @@ class DaemonPermissionService:
                 session_id=str(session_id),
                 request_id=request_id,
             )
-            return
+            return False
 
         current_run = await self._svc._get_current_run(session_id)
         if current_run is None or current_run.id != run_id:
@@ -372,7 +391,7 @@ class DaemonPermissionService:
                 payload_run_id=str(run_id),
                 current_run_id=str(current_run.id) if current_run else None,
             )
-            return
+            return False
         if (current_run.status or "") not in ACTIVE_TURN_STATUSES:
             log.warning(
                 "permission_request_run_not_active_turn",
@@ -380,7 +399,7 @@ class DaemonPermissionService:
                 request_id=request_id,
                 run_status=current_run.status,
             )
-            return
+            return False
 
         # Publish permission_request SSE for the frontend approval card. For
         # dialogs the event carries dialog_kind + dialog_payload so the card
@@ -412,7 +431,7 @@ class DaemonPermissionService:
                 tool_name=payload.tool_name,
                 dialog_kind=payload.dialog_kind,
             )
-            return
+            return True
 
         # Plain canUseTool approval: arm 5min timeout. Use a fresh task so a
         # daemon disconnect can't cancel it.
@@ -428,6 +447,90 @@ class DaemonPermissionService:
             request_id=request_id,
             tool_name=payload.tool_name,
         )
+        return True
+
+    # ── HTTP uplink: POST /sessions/{id}/permission-requests (task-07 / A3) ──
+
+    async def handle_permission_request_http(
+        self,
+        session_id: uuid.UUID,
+        x_claim_token: str | None,
+        payload: PermissionRequestPayload,
+    ) -> bool:
+        """HTTP PERMISSION_REQUEST uplink (task-07 / design A3).
+
+        daemon WS 不通时的兜底上行通道（``POST /api/daemon/sessions/{id}/
+        permission-requests``）。与 WS 上行**同源汇聚**：lease 级 claim_token
+        校验 + daemon_id 解析后委托 :meth:`handle_permission_request`，复用
+        其全部校验/SSE 广播/dialog 持久化/5min timer 语义。
+
+        鉴权链（对齐既有 permissions response / runs/result 端点惯例）：
+          - 路由层 ``get_current_principal`` 已解 X-API-Key（daemon 长期凭证）；
+          - 本方法对会话绑定的 interactive lease 做 **X-Claim-Token 条件校验**：
+            lease metadata 存有非空 claim_token（该会话有 claim 语义）时，
+            header 必须携带且 ``secrets.compare_digest`` 匹配，否则 403
+            ``DaemonInvalidClaimToken``；无 claim 语义（无 lease / token 空）
+            时跳过，交给下方 handle_permission_request 的会话状态校验。
+
+        会话不存在 → 404（与既有 REST 面 resource-hiding 一致）；校验不过
+        返回 False（不抛——daemon 侧 fire-and-forget，等待响应交由 backend
+        5min 超时 + daemon fallback timer 双兜底）。
+        """
+        from app.modules.agent.model import AgentSession
+        from app.modules.daemon.model import DaemonTaskLease
+
+        session_obj = (
+            await self._svc._session.execute(
+                select(AgentSession).where(AgentSession.id == session_id)
+            )
+        ).scalar_one_or_none()
+        if session_obj is None:
+            raise DaemonSessionNotFound(
+                f"AgentSession '{session_id}' not found.",
+                details={"session_id": str(session_id)},
+            )
+        if session_obj.lease_id is not None:
+            lease = await self._svc._session.get(DaemonTaskLease, session_obj.lease_id)
+            stored_token = (lease.metadata_ or {}).get("claim_token") if lease else None
+            # 该会话有 claim 语义：常量时间比对（对齐 lease service 口径，
+            # 缺头/不匹配一律 403，不泄露具体差异）。
+            if (
+                isinstance(stored_token, str)
+                and stored_token
+                and (not x_claim_token or not secrets.compare_digest(stored_token, x_claim_token))
+            ):
+                raise DaemonInvalidClaimToken(
+                    "Invalid or missing claim_token for permission uplink.",
+                    details={
+                        "session_id": str(session_id),
+                        "lease_id": str(session_obj.lease_id),
+                    },
+                )
+        if session_obj.runtime_id is None:
+            log.warning(
+                "permission_http_uplink_no_runtime",
+                session_id=str(session_id),
+                request_id=payload.request_id,
+            )
+            return False
+        daemon_id = await self._resolve_daemon_id_for_runtime(session_obj.runtime_id)
+        if daemon_id is None:
+            log.warning(
+                "permission_http_uplink_no_daemon",
+                session_id=str(session_id),
+                request_id=payload.request_id,
+                runtime_id=str(session_obj.runtime_id),
+            )
+            return False
+        accepted = await self.handle_permission_request(daemon_id, payload)
+        if accepted:
+            log.info(
+                "permission_http_uplink_accepted",
+                session_id=str(session_id),
+                request_id=payload.request_id,
+                is_dialog=payload.dialog_kind is not None,
+            )
+        return accepted
 
     # ── daemon_id resolution (task-06 ws routes by daemon_instance_id) ───────
 
@@ -847,7 +950,17 @@ class DaemonPermissionService:
                     "request_id": request_id,
                 },
             )
-        sent = await self._hub.send_permission_response(route_key, ws_payload)
+        # task-04（design A2）：审批结果走控制指令三段式——落库 pending +
+        # ``self._hub`` 推送（消息形状不变，payload 尾部注入 command_id）+
+        # delivered 标记；WS 失败/不在线保持 pending 待 daemon 重连补拉。
+        # 504 + re-arm timer 语义保持（补拉到达前 daemon 侧 fallback timer 兜底）。
+        _row, sent = await ControlCommandService(self._svc._session).enqueue_and_push(
+            daemon_id=route_key,
+            runtime_id=session_obj.runtime_id,
+            kind=KIND_PERMISSION_RESPONSE,
+            payload=ws_payload,
+            hub=self._hub,
+        )
         if not sent:
             # Re-arm: the daemon fallback timer will still deny; surface 504 so
             # the frontend can prompt retry. Re-create a fresh 5min timer so a
@@ -937,11 +1050,18 @@ class DaemonPermissionService:
         # task-06: WS hub routes by daemon_instance_id (migration-window
         # fallback routes by runtime_id). Resolve before sending.
         route_key = await self._resolve_daemon_id_for_runtime(session_obj.runtime_id)
-        sent = (
-            await self._hub.send_permission_response(route_key, ws_payload)
-            if route_key is not None
-            else False
-        )
+        # task-04（design A2）：dialog 应答同走控制指令三段式（kind 仍
+        # permission_response，payload 携 dialog_result 不变）；失败保持
+        # pending 待补拉，DB 行不翻 answered（下方 sent 检查语义保持）。
+        sent = False
+        if route_key is not None:
+            _row, sent = await ControlCommandService(self._svc._session).enqueue_and_push(
+                daemon_id=route_key,
+                runtime_id=session_obj.runtime_id,
+                kind=KIND_PERMISSION_RESPONSE,
+                payload=ws_payload,
+                hub=self._hub,
+            )
         if not sent:
             # Dialogs have no backend timeout to re-arm; surface 504 so the
             # frontend can retry. The DB row stays pending (untouched below)
@@ -1053,7 +1173,16 @@ class DaemonPermissionService:
                 },
             )
             return
-        sent = await self._hub.send_permission_response(route_key, ws_payload)
+        # task-04（design A2）：超时 deny 同走控制指令三段式——WS 失败落库
+        # pending 待补拉（daemon 断线窗口内 deny 不丢，重连补拉送达后
+        # fail-closed 语义仍成立）；send 失败仅告警的既有语义保持。
+        _row, sent = await ControlCommandService(self._svc._session).enqueue_and_push(
+            daemon_id=route_key,
+            runtime_id=runtime_id,
+            kind=KIND_PERMISSION_RESPONSE,
+            payload=ws_payload,
+            hub=self._hub,
+        )
         if not sent:
             log.warning(
                 "permission_timeout_send_failed",

@@ -20,7 +20,7 @@ export interface SessionListEntry {
   id: string;
   /** 列表项主标题；null/空 → 回退 shortId(id)。 */
   title: string | null;
-  /** 状态徽标文本（active/pending/reconnecting/ended/failed），active 类显示 success。 */
+  /** 状态徽标文本（active/pending/reconnecting/suspended/ended/failed，active 类显示 success；task-10：suspended 走 outline 非活跃阶）。 */
   statusBadge: string;
   /** 会话类型：scan = 扫描会话，chat = 普通对话；不传则零回归。 */
   kind?: "scan" | "chat";
@@ -63,17 +63,24 @@ function isActiveBadge(status: string): boolean {
   return status === "active" || status === "pending" || status === "reconnecting";
 }
 
-/** 会话状态英文 → 中文展示（CLAUDE.md 规则 11 中文 UI）。 */
+/**
+ * 会话状态英文 → 中文展示（CLAUDE.md 规则 11 中文 UI）。
+ * task-10（2026-08-29-daemon-platform-resilience / design A5/A6）：新增
+ * suspended「已挂起」——后端 status 词表已含该值（task-05），本组件按
+ * Record<string,string> 消费，不依赖 lib/daemon.ts 的 AgentSessionStatus
+ * 联合（类型收口归 task-11）。词表外值兜底「未知状态」（design A6 回显兜底）。
+ */
 const SESSION_STATUS_LABELS: Record<string, string> = {
   active: "进行中",
   pending: "启动中",
   reconnecting: "重连中",
+  suspended: "已挂起",
   ended: "已结束",
   failed: "失败",
 };
 
 function statusLabel(status: string): string {
-  return SESSION_STATUS_LABELS[status] ?? status;
+  return SESSION_STATUS_LABELS[status] ?? "未知状态";
 }
 
 export function SessionListLayout({

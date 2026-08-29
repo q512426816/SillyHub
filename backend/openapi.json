@@ -12272,6 +12272,48 @@
         }
       }
     },
+    "/api/daemon/sessions/suspend-batch": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Suspend Sessions Batch",
+        "description": "daemon 优雅停止：该 daemon 全部 active 会话批量挂起（task-05 / design A5）.\n\ndaemon ``stop()`` 在 markOffline 前调用。单事务三步收敛（中断 run →\nfailed（error_code=daemon_stopped）、会话 → suspended、挂起 lease →\ncancelled），条件 UPDATE 幂等可重入；调用失败（网络已断）与强杀等价，\n由 600s offline sweep 兜底收敛 suspended（design A5 已声明的 fallback）。\n归属校验对齐 heartbeat（actor_user_id）：instance 必须属于当前认证主体\n（api-key owner），不存在/越权同语义 404。",
+        "operationId": "suspend_sessions_batch_api_daemon_sessions_suspend_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionSuspendBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuspendBatchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/sessions/{session_id}/ready": {
       "post": {
         "tags": [
@@ -12846,6 +12888,76 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PermissionResponseRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/permission-requests": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Submit Session Permission Request",
+        "description": "Daemon HTTP uplink for a canUseTool / dialog permission request (task-07).\n\ndaemon ``sendToHub`` 遇 WS 不通时经 ``hubClient.submitPermissionRequest``\n改走本端点创建待审记录——人审挂起等待而非直接 deny。Auth:\n``get_current_principal`` 接受 daemon ``X-API-Key``（长期凭证）；\n``X-Claim-Token`` 由 service 按会话 lease 的 claim 语义条件校验。\n\n幂等性（dialog）：request_id 唯一约束 upsert，daemon 重放不 fork 第二张\npending 卡（与 WS 上行同一持久化路径）；plain approval 的重复 request_id\n替换既有 timer。",
+        "operationId": "submit_session_permission_request_api_daemon_sessions__session_id__permission_requests_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "X-Claim-Token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Claim-Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DaemonPermissionUplinkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DaemonPermissionUplinkResponse"
                 }
               }
             }
@@ -14146,6 +14258,104 @@
                     "additionalProperties": true
                   },
                   "title": "Response Get Pending Leases Api Daemon Runtimes  Runtime Id  Pending Leases Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/runtimes/{runtime_id}/pending-controls": {
+      "get": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Get Pending Controls",
+        "description": "补拉待发控制指令（daemon 重连对账 / 心跳 pending_controls>0 触发）.\n\n2026-08-29-daemon-platform-resilience task-04 / design A2 / D-006@v1：\n**仅返回 status=pending 的指令**，``created_at`` 升序（FIFO）——delivered\n一律不重发（WS 推送成功 = TCP 已达 daemon 进程，重发 inject 会向 agent\n双发 prompt），过期与 delivered-未-ack 行由 GC 清理。归属校验同\npending-leases（owner-only，跨用户与不存在同语义 404）。",
+        "operationId": "get_pending_controls_api_daemon_runtimes__runtime_id__pending_controls_get",
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Runtime Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PendingControlsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/runtimes/{runtime_id}/controls/ack": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Ack Controls",
+        "description": "daemon 消费回执：ids 批量置 acked（pending|delivered 均可，终态幂等跳过）.\n\n2026-08-29-daemon-platform-resilience task-04 / design A2：ack 语义 =\n「daemon 已处理」——消费成功与消费失败的业务性错误同样 ack（防毒丸指令\n无限重投，错误进 daemon 日志）；过期/已回执行静默跳过。翻转范围限定\n本 runtime 名下（归属校验后防越权 ack 他人指令）。返回实际翻转数。",
+        "operationId": "ack_controls_api_daemon_runtimes__runtime_id__controls_ack_post",
+        "parameters": [
+          {
+            "name": "runtime_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Runtime Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ControlsAckRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ControlsAckResponse"
                 }
               }
             }
@@ -34037,6 +34247,73 @@
         "title": "ConfirmCaptchaResponse",
         "description": "GET /auth/captcha/confirm 返回:一次性 captcha_id(点「我不是机器人」时取)。"
       },
+      "ControlCommandItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payload"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "created_at"
+        ],
+        "title": "ControlCommandItem",
+        "description": "补拉返回的单条控制指令（task-04 provides 契约：id/kind/payload/created_at）。\n\n``payload`` 与 WS 消息 payload 同构且已含 ``command_id``（daemon 侧幂等键，\n补拉与 WS 推送共用同键去重）。"
+      },
+      "ControlsAckRequest": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Ids"
+          }
+        },
+        "type": "object",
+        "title": "ControlsAckRequest",
+        "description": "POST controls/ack 请求体。\n\n``ids`` 为 daemon 已处理（含消费失败的业务性错误——ack 语义=已处理防毒丸\n重投，不承诺成功）的指令 id 列表；空列表合法（acked=0）。"
+      },
+      "ControlsAckResponse": {
+        "properties": {
+          "acked": {
+            "type": "integer",
+            "title": "Acked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "acked"
+        ],
+        "title": "ControlsAckResponse",
+        "description": "POST controls/ack 响应：实际翻转 acked 的行数。"
+      },
       "ConvergeResponse": {
         "properties": {
           "mission_id": {
@@ -34650,6 +34927,11 @@
             },
             "type": "array",
             "title": "Runtimes"
+          },
+          "pending_controls": {
+            "type": "integer",
+            "title": "Pending Controls",
+            "default": 0
           }
         },
         "type": "object",
@@ -34658,7 +34940,7 @@
           "status"
         ],
         "title": "DaemonHeartbeatResponse",
-        "description": "Per-daemon 心跳响应体。\n\n2026-07-06-allowed-roots-per-runtime：返 per-runtime allowed_roots map\n（runtimes: [{runtime_id, allowed_roots}]），daemon _syncAllowedRoots per-runtime 同步。"
+        "description": "Per-daemon 心跳响应体。\n\n2026-07-06-allowed-roots-per-runtime：返 per-runtime allowed_roots map\n（runtimes: [{runtime_id, allowed_roots}]），daemon _syncAllowedRoots per-runtime 同步。\n2026-08-29-daemon-platform-resilience task-04：新增 ``pending_controls``——\n该 daemon 全部 runtime 名下 pending 控制指令计数（design A1/A2 对账触发\n约定字段名；daemon 心跳循环见 >0 即补拉控制指令）。"
       },
       "DaemonHeartbeatRuntimePolicy": {
         "properties": {
@@ -34973,6 +35255,101 @@
         "type": "object",
         "title": "DaemonMachineUpdate",
         "description": "Request body for PATCH /api/daemon/machines/{instance_id}（design §5.2 / D-001）。\n\n``display_alias`` 省略 = 不变；显式 ``null``/空白 = 清空（与 runtime 级\n``DaemonRuntimeUpdate`` 语义一致）。"
+      },
+      "DaemonPermissionUplinkRequest": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Run Id"
+          },
+          "request_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Request Id"
+          },
+          "tool_name": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Tool Name"
+          },
+          "input": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Input"
+          },
+          "tool_use_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 256
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Use Id"
+          },
+          "dialog_kind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dialog Kind"
+          },
+          "dialog_payload": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dialog Payload"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id",
+          "request_id",
+          "tool_name",
+          "input"
+        ],
+        "title": "DaemonPermissionUplinkRequest",
+        "description": "Body for POST /sessions/{id}/permission-requests（task-07 / design A3）.\n\n字段与 protocol.PermissionRequestPayload 对齐（session_id 在 path，不重复）；\n由路由层组装成完整 payload 委托 permission service。"
+      },
+      "DaemonPermissionUplinkResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Session Id"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "request_id",
+          "accepted"
+        ],
+        "title": "DaemonPermissionUplinkResponse"
       },
       "DaemonRegisterProviderItem": {
         "properties": {
@@ -41282,6 +41659,20 @@
         },
         "type": "object",
         "title": "Page[WorkbenchTodoItem]"
+      },
+      "PendingControlsResponse": {
+        "properties": {
+          "commands": {
+            "items": {
+              "$ref": "#/components/schemas/ControlCommandItem"
+            },
+            "type": "array",
+            "title": "Commands"
+          }
+        },
+        "type": "object",
+        "title": "PendingControlsResponse",
+        "description": "GET pending-controls 响应（仅 status=pending，created_at 升序）。"
       },
       "PendingFileEntry": {
         "properties": {
@@ -53221,6 +53612,22 @@
         "title": "SessionRuntimeRequest",
         "description": "Body for confirm-reconnected / mark-recovery-failed (gap-8.1).\n\nDS-4（2026-08-21-session-reopen-resume）：可选 ``lease_id`` 携带本次\nSESSION_RESUME 的 lease_id 供陈旧确认防误翻——提供且与 session 当前\nlease 不匹配时幂等跳过；不传（旧 daemon 重启 recover 链路）走既有行为。"
       },
+      "SessionSuspendBatchRequest": {
+        "properties": {
+          "daemon_local_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Daemon Local Id",
+            "description": "daemon 本地 uuid（daemon_instances.id）"
+          }
+        },
+        "type": "object",
+        "required": [
+          "daemon_local_id"
+        ],
+        "title": "SessionSuspendBatchRequest",
+        "description": "Body for POST /sessions/suspend-batch（task-05）.\n\ndaemon ``stop()`` 在 markOffline 前上报自身标识；backend 按\n``daemon_local_id``（= ``daemon_instances.id``）定位该 daemon 全部 runtime\n名下的 active 会话做三步挂起收敛（daemon 侧调用方属 task-08）。"
+      },
       "SetDefaultResult": {
         "properties": {
           "switched": {
@@ -54582,6 +54989,25 @@
         ],
         "title": "SubtaskVO",
         "description": "子任务 VO (D-011)。"
+      },
+      "SuspendBatchResponse": {
+        "properties": {
+          "suspended": {
+            "type": "integer",
+            "title": "Suspended"
+          },
+          "runs_failed": {
+            "type": "integer",
+            "title": "Runs Failed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "suspended",
+          "runs_failed"
+        ],
+        "title": "SuspendBatchResponse",
+        "description": "POST /sessions/suspend-batch 响应（task-05 provides 契约）.\n\n``suspended`` = 实际翻挂起的会话数；``runs_failed`` = 同批收敛 failed 的\n活跃轮 run 数（error_code=daemon_stopped）。重复调用幂等——已挂起会话\nno-op 计 0。"
       },
       "SystemStatusResponse": {
         "properties": {

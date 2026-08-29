@@ -27,8 +27,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.modules.agent.model import AgentSession
+from app.modules.daemon.control_commands import (
+    KIND_PROVIDER_CONFIG_CHANGED,
+    ControlCommandService,
+)
 from app.modules.daemon.model import DaemonTaskLease
-from app.modules.daemon.protocol import DAEMON_MSG_PROVIDER_CONFIG_CHANGED
 
 log = get_logger(__name__)
 
@@ -100,9 +103,7 @@ async def notify_provider_switch(
 
     # lazy import：避免与 session.service / ws_hub 的顶层循环 import（同 _send_interactive_cancel）。
     from app.modules.daemon.session.service import _resolve_daemon_id_for_runtime
-    from app.modules.daemon.ws_hub import get_daemon_ws_hub
 
-    hub = get_daemon_ws_hub()
     delivered_count = 0
 
     for sess in rows:
@@ -128,15 +129,19 @@ async def notify_provider_switch(
             continue
 
         # ── step 3: 推送 PROVIDER_CONFIG_CHANGED（payload 对齐 ProviderConfigChangedPayload）──
+        # task-04（design A2）：走控制指令三段式——落库 pending + ws_hub 推送
+        # （消息形状不变）+ delivered 标记；WS 失败/不在线保持 pending 待补拉，
+        # 热切换即时性缺陷由 daemon 重连对账弥补。
         payload = {
             "session_id": str(sess.id),
             "provider_config": provider_config,
         }
         try:
-            delivered = await hub.send_session_control(
-                daemon_id,
-                DAEMON_MSG_PROVIDER_CONFIG_CHANGED,
-                payload,
+            _row, delivered = await ControlCommandService(session).enqueue_and_push(
+                daemon_id=daemon_id,
+                runtime_id=runtime_id,
+                kind=KIND_PROVIDER_CONFIG_CHANGED,
+                payload=payload,
             )
         except Exception as exc:
             # best-effort（design §9）：WS 异常不影响其余 session 推送。

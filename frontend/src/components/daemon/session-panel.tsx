@@ -48,6 +48,20 @@
  *     持有 pendingMentions，七个发送组装点位随请求上送（预会话/首句 create 带
  *     change_id/quicklog_id，四个 inject 点位带 bind_change_key/bind_quick_id，
  *     page 重发不带 R-7）；发送成功清空、草稿不持久化（design §3.3/§3.4）。
+ *   - task-09（2026-08-29-daemon-platform-resilience / design A6）：连接横幅 +
+ *     运行轮看门狗（page / dialog 共用 useStreamConnectionGuard）——streamSession
+ *     handlers 经 tapStreamHandlers 包装注入 onStatusChange（reconnecting 横幅
+ *     「第 N 次尝试」/ reconnected 2s 自动消失）与看门狗活动时间；turn running
+ *     90s 无事件对账（getAgentSession + listSessionRuns），run 终态走
+ *     connection.resync() 既有 DB 缺口同步路径刷新，不本地伪造终态。
+ *   - task-10（同变更 / design A5+A6 / 原型⑤⑥）：suspended 挂起会话展示——
+ *     page 模式（浮窗第三个消费方同构复用）info 横幅「会话已挂起——守护进程
+ *     不在线…」+ 输入禁用（placeholder 等待恢复文案）+ 低频轮询驱动
+ *     suspended → reconnecting → active 翻转；dialog attach 轮询对挂起不误报
+ *     「恢复失败」。reconnecting 恢复中展示复用既有逻辑（badge「恢复中」/
+ *     placeholder「恢复会话中…」/ 240s 超时横幅，原型⑥不重复加）。
+ *     类型过渡：lib/daemon.ts AgentSessionStatus 尚未含 suspended（task-11
+ *     收口），本组件字符串比较/局部断言过渡，不改 lib。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -55,12 +69,15 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Ban,
   Bot,
+  CheckCircle2,
   ClipboardList,
   FolderOpen,
+  Hourglass,
   Lock,
   MessageSquareText,
   Monitor,
   MoreHorizontal,
+  PauseCircle,
   Plus,
   Puzzle,
   RefreshCw,
@@ -164,6 +181,8 @@ import {
   type SessionRunRead,
   type SessionStreamConnection,
   type SessionStreamEnvelope,
+  type SessionStreamHandlers,
+  type SessionStreamStatus,
   type PpmItemKind,
   type TeamMissionSummary,
   type TeamMissionTriggerRequest,
@@ -478,6 +497,15 @@ const REOPEN_ERROR_ZH: Record<string, string> = {
  */
 const RECONNECT_TIMEOUT_MS = 240_000;
 
+/**
+ * task-10（2026-08-29-daemon-platform-resilience / design A5+A6）：suspended
+ * 挂起期间会话详情轮询间隔。挂起窗口以小时计（24h GC 上限），复用 pending/
+ * reconnecting 的 1.5s 高频轮询浪费；daemon 重启 recover（suspended →
+ * reconnecting → active，D-001 自动恢复）的翻转靠该轮询驱动——SSE 只推
+ * 轮次事件，会话级状态变化无推送。15s 兼顾翻转及时性与请求量。
+ */
+const SUSPENDED_SESSION_REFETCH_MS = 15_000;
+
 /** turn 状态（currentRunId 只指向 pending/running/interrupting turn）。 */
 interface TurnState {
   turns: SessionTurnView[];
@@ -729,6 +757,302 @@ function WorkerSessionOverlay({
   );
 }
 
+/* ── task-09 / design A6（2026-08-29-daemon-platform-resilience）：连接横幅 + 运行轮看门狗（page / dialog 共用） ── */
+
+/** 运行轮看门狗：turn running 且 90s 无新日志 / SSE 事件 → 首次对账。 */
+const TURN_WATCHDOG_FIRST_MS = 90_000;
+/** 看门狗复核间隔：首次触发后每 30s 一轮。 */
+const TURN_WATCHDOG_INTERVAL_MS = 30_000;
+/** 连续 N 轮对账仍 running 且 SSE 断开 → 显示「本轮长时间无响应」提示。 */
+const TURN_WATCHDOG_HINT_ROUNDS = 3;
+/** 「连接已恢复」横幅自动消失时长（design A6：约 2 秒）。 */
+const RECONNECTED_BANNER_MS = 2_000;
+
+/**
+ * 看门狗判定 run 终态的词表（lib/daemon.ts streamSession 内 TERMINAL_RUN_STATUSES
+ * 同款五值）。不复用 runTerminalTurnStatus——它对 completed 返回 null（只映射失败族）。
+ */
+const WATCHDOG_TERMINAL_RUN_STATUSES: ReadonlySet<string | null> = new Set([
+  "completed",
+  "failed",
+  "killed",
+  "cancelled",
+  "interrupted",
+]);
+
+interface StreamConnectionGuard {
+  /** SSE 连接状态（onStatusChange 驱动；live = 无横幅）。 */
+  connStatus: SessionStreamStatus;
+  /** 当前重连尝试次数（reconnecting 横幅「第 N 次尝试」）。 */
+  reconnectAttempt: number;
+  /** 看门狗提示：本轮长时间无响应，正在与平台核对（不伪造终态，原型④）。 */
+  stalledHint: boolean;
+  /**
+   * streamSession handlers 装配 tap：每个事件回调触发即推进看门狗活动时间 +
+   * 连续轮次归零，并注入 onStatusChange 驱动横幅。原 handler 逐字透传（后兼容，
+   * 不改既有事件语义）。
+   */
+  tapStreamHandlers: (handlers: SessionStreamHandlers) => SessionStreamHandlers;
+}
+
+/**
+ * task-09 / design A6：连接状态横幅 + 运行轮看门狗（page / dialog 共用 hook）。
+ *
+ * - 横幅：onStatusChange('reconnecting', N) → warning 常驻「正在重连…（第 N 次）」；
+ *   'reconnected' → success「连接已恢复，正在同步…」2s 自动消失（期间转 live 同样收起）。
+ * - 看门狗：currentRunId 非空（turn running）且 90s 无事件 → getAgentSession +
+ *   listSessionRuns 对账；此后每 30s 复核一轮，连续 3 轮仍 running 且 SSE 断开 →
+ *   stalledHint（accent 提示，不伪造终态）。对账发现 run 已终态 → 走既有 resync
+ *   路径（connection.resync()，streamSession DB 缺口同步合成 turn_completed）刷新
+ *   轮次；发现会话非 active → onSessionReconciled（page：invalidate 详情查询）。
+ * - 清理：轮终态（currentRunId 清空）/ 会话切换 / 卸载即停看门狗计时器。
+ */
+function useStreamConnectionGuard(opts: {
+  sessionId: string | null;
+  currentRunId: string | null;
+  getConnection: () => SessionStreamConnection | null;
+  /** 对账发现会话非 active（failed/ended 等）时回调（可选）。 */
+  onSessionReconciled?: (status: string) => void;
+}): StreamConnectionGuard {
+  const [connStatus, setConnStatus] = useState<SessionStreamStatus>("live");
+  const [reconnectAttempt, setReconnectAttempt] = useState(1);
+  const [stalledHint, setStalledHint] = useState(false);
+
+  const lastActivityRef = useRef(Date.now());
+  const sseDownRef = useRef(false);
+  const roundsRef = useRef(0);
+  const watchdogTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+  // 看门狗 timer / SSE 回调闭包读 ref（避免重建计时器 / 捕获过期 props）。
+  const sessionIdRef = useRef(opts.sessionId);
+  const currentRunIdRef = useRef(opts.currentRunId);
+  const getConnectionRef = useRef(opts.getConnection);
+  const onSessionReconciledRef = useRef(opts.onSessionReconciled);
+
+  useEffect(() => {
+    sessionIdRef.current = opts.sessionId;
+    currentRunIdRef.current = opts.currentRunId;
+    getConnectionRef.current = opts.getConnection;
+    onSessionReconciledRef.current = opts.onSessionReconciled;
+  });
+
+  // 卸载清理（含 StrictMode 双挂载重锚）；轮终态清理在下方看门狗 effect 的
+  // 「无运行轮」分支与 cleanup。
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (watchdogTimerRef.current) {
+        clearTimeout(watchdogTimerRef.current);
+        watchdogTimerRef.current = null;
+      }
+      if (bannerTimerRef.current) {
+        clearTimeout(bannerTimerRef.current);
+        bannerTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // 会话切换：状态复位（横幅 / 提示 / 连续轮次不跨会话残留）。
+  useEffect(() => {
+    setConnStatus("live");
+    setStalledHint(false);
+    roundsRef.current = 0;
+    sseDownRef.current = false;
+    lastActivityRef.current = Date.now();
+    if (bannerTimerRef.current) {
+      clearTimeout(bannerTimerRef.current);
+      bannerTimerRef.current = null;
+    }
+  }, [opts.sessionId]);
+
+  // 看门狗对账（每轮执行）。终态一律以 backend 数据为准：run 终态走既有 resync
+  // 路径刷新（不本地伪造 turn 状态）；会话非 active 仅回调消费方刷新详情。
+  const reconcileRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    reconcileRef.current = () => {
+      const sid = sessionIdRef.current;
+      const rid = currentRunIdRef.current;
+      if (!sid || !rid) return;
+      void (async () => {
+        try {
+          const [detail, runs] = await Promise.all([
+            getAgentSession(sid),
+            listSessionRuns(sid),
+          ]);
+          if (!mountedRef.current) return;
+          if (sid !== sessionIdRef.current || rid !== currentRunIdRef.current) {
+            return; // 对账窗口内轮次/会话已切换：丢弃过期结果
+          }
+          const run = runs.find((r) => r.id === rid);
+          if (run && WATCHDOG_TERMINAL_RUN_STATUSES.has(run.status)) {
+            getConnectionRef.current()?.resync?.();
+          }
+          if (detail.status !== "active") {
+            onSessionReconciledRef.current?.(detail.status);
+          }
+        } catch {
+          /* 对账失败静默：看门狗下一轮再兜 */
+        }
+      })();
+    };
+  });
+
+  // 运行轮看门狗主体：90s 首查、每 30s 复核；任一 SSE 事件（tapStreamHandlers）
+  // 推进活动时间并归零连续轮次；轮终态 / 预会话态停表并清提示。
+  useEffect(() => {
+    if (!opts.sessionId || !opts.currentRunId) {
+      if (watchdogTimerRef.current) {
+        clearTimeout(watchdogTimerRef.current);
+        watchdogTimerRef.current = null;
+      }
+      roundsRef.current = 0;
+      setStalledHint(false);
+      return;
+    }
+    lastActivityRef.current = Date.now();
+    const tick = () => {
+      watchdogTimerRef.current = null;
+      if (Date.now() - lastActivityRef.current >= TURN_WATCHDOG_FIRST_MS) {
+        roundsRef.current += 1;
+        reconcileRef.current();
+        if (roundsRef.current >= TURN_WATCHDOG_HINT_ROUNDS && sseDownRef.current) {
+          setStalledHint(true);
+        }
+      }
+      watchdogTimerRef.current = setTimeout(tick, TURN_WATCHDOG_INTERVAL_MS);
+    };
+    watchdogTimerRef.current = setTimeout(tick, TURN_WATCHDOG_FIRST_MS);
+    return () => {
+      if (watchdogTimerRef.current) {
+        clearTimeout(watchdogTimerRef.current);
+        watchdogTimerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [opts.sessionId, opts.currentRunId]);
+
+  const tapStreamHandlers = useCallback(
+    (handlers: SessionStreamHandlers): SessionStreamHandlers => {
+      const wrapped: Record<string, unknown> = { ...handlers };
+      for (const key of Object.keys(handlers)) {
+        const fn = (handlers as unknown as Record<string, unknown>)[key];
+        if (typeof fn !== "function") continue;
+        wrapped[key] = (...args: unknown[]) => {
+          // 任一事件回调触发 = SSE 有新事件：活动时间推进 + 连续轮次归零。
+          lastActivityRef.current = Date.now();
+          roundsRef.current = 0;
+          setStalledHint(false);
+          (fn as (...a: unknown[]) => void)(...args);
+        };
+      }
+      wrapped.onStatusChange = (status: SessionStreamStatus, attempt?: number) => {
+        if (status === "reconnecting") {
+          sseDownRef.current = true;
+          if (bannerTimerRef.current) {
+            clearTimeout(bannerTimerRef.current);
+            bannerTimerRef.current = null;
+          }
+          setReconnectAttempt(attempt ?? 1);
+          setConnStatus("reconnecting");
+          return;
+        }
+        sseDownRef.current = false;
+        if (bannerTimerRef.current) {
+          clearTimeout(bannerTimerRef.current);
+          bannerTimerRef.current = null;
+        }
+        setConnStatus(status === "reconnected" ? "reconnected" : "live");
+        if (status === "reconnected") {
+          // 原型③：恢复横幅 2s 自动消失（期间收到实时事件转 live 亦收起）。
+          bannerTimerRef.current = setTimeout(() => {
+            bannerTimerRef.current = null;
+            setConnStatus((prev) => (prev === "reconnected" ? "live" : prev));
+          }, RECONNECTED_BANNER_MS);
+        }
+      };
+      return wrapped as unknown as SessionStreamHandlers;
+    },
+    [],
+  );
+
+  return { connStatus, reconnectAttempt, stalledHint, tapStreamHandlers };
+}
+
+/**
+ * task-09 / design A6（原型②③）：连接状态横幅。reconnecting = warning 常驻
+ * 「正在重连…（第 N 次尝试）」；reconnected = success「连接已恢复，正在同步…」
+ * 2s 自动消失（useStreamConnectionGuard 内计时）。复用「离线只读」横幅样式位
+ * （border-b + 12px 文案 + 图标，warning 同 amber 阶；success 走 emerald 阶）。
+ */
+function StreamConnectionBanner(props: {
+  connStatus: SessionStreamStatus;
+  attempt: number;
+  mobile?: boolean;
+}) {
+  if (props.connStatus === "reconnecting") {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        data-conn-banner="reconnecting"
+        className={cn(
+          "flex items-center gap-2 border-b border-amber-300 bg-amber-50 px-5 py-2 text-xs text-amber-800",
+          props.mobile && "px-3",
+        )}
+      >
+        <TriangleAlert aria-hidden className="h-3.5 w-3.5 shrink-0" />
+        <span>
+          实时连接已断开，正在重连…（第 {props.attempt} 次尝试）—— 已发送的消息不会丢失，恢复后将自动同步错过的内容
+        </span>
+      </div>
+    );
+  }
+  if (props.connStatus === "reconnected") {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        data-conn-banner="reconnected"
+        className={cn(
+          "flex items-center gap-2 border-b border-emerald-300 bg-emerald-50 px-5 py-2 text-xs text-emerald-800",
+          props.mobile && "px-3",
+        )}
+      >
+        <CheckCircle2 aria-hidden className="h-3.5 w-3.5 shrink-0" />
+        <span>连接已恢复，正在同步断线期间的消息…（同步完成后此提示自动消失）</span>
+      </div>
+    );
+  }
+  return null;
+}
+
+/**
+ * task-09 / design A6（原型④）：运行轮看门狗提示——本轮长时间无响应仅提示
+ * 「正在与平台核对」，不伪造终态（终态以 backend 数据经 resync 刷新为准）。
+ * accent 色走 brand 主题阶（border-brand-200 bg-brand-50 text-brand-700，
+ * runtimes 页 info 徽标同款组合）。
+ */
+function TurnStalledWatchdogBanner(props: { mobile?: boolean }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-watchdog-hint="true"
+      className={cn(
+        "flex items-center gap-2 border-b border-brand-200 bg-brand-50 px-5 py-2 text-xs text-brand-700",
+        props.mobile && "px-3",
+      )}
+    >
+      <Hourglass aria-hidden className="h-3.5 w-3.5 shrink-0" />
+      <span>
+        本轮长时间无响应，正在与平台核对…（核对期间无需操作；若确认已中断，轮次会按平台数据更新，会话仍可继续）
+      </span>
+    </div>
+  );
+}
+
 function SessionPanelPage({
   sessionId,
   machines,
@@ -758,9 +1082,15 @@ function SessionPanelPage({
     },
     enabled: sessionId !== null,
     // pending/reconnecting 期间轮询直到 active/终态（attach 恢复语义）。
+    // task-10：suspended 挂起期间低频轮询（design A5/A6）——daemon 重启后
+    // recover 的状态翻转（suspended → reconnecting → active）靠轮询发现，
+    // 横幅/输入禁用随之收敛。
     refetchInterval: (query) => {
-      const st = query.state.data?.status;
-      return st === "pending" || st === "reconnecting" ? 1500 : false;
+      // task-10 类型过渡：status 联合暂不含 suspended（task-11 收口），字符串化比较。
+      const st = query.state.data?.status as string | undefined;
+      if (st === "pending" || st === "reconnecting") return 1500;
+      if (st === "suspended") return SUSPENDED_SESSION_REFETCH_MS;
+      return false;
     },
   });
   const session = detailQuery.data ?? null;
@@ -974,6 +1304,18 @@ function SessionPanelPage({
   // 是否已被打断（不匹配 = 已回退，需对真实 run 补发 interrupt）。
   const inflightSendRef = useRef<{ placeholderId: string; prompt: string } | null>(null);
 
+  // ── task-09 / design A6：连接横幅 + 运行轮看门狗（共用 hook）──────────────
+  // 建流 effect 的 handlers 经 tapStreamHandlers 包装注入 onStatusChange 与活动
+  // 时间推进；对账发现会话非 active 时 invalidate 详情查询（刷新状态章 / current_run_id）。
+  const connGuard = useStreamConnectionGuard({
+    sessionId,
+    currentRunId: turnState.currentRunId,
+    getConnection: () => streamRef.current,
+    onSessionReconciled: () => {
+      void qc.invalidateQueries({ queryKey: ["agentSessionDetail", sessionId] });
+    },
+  });
+
   // ── SSE 建流 + 历史预取（sessionId 驱动，切换会话即重建）────────────────
   // gap-fix（FR-07/FR-08）：runs 快照拉取失败不阻断——whoLine 不注入、历史
   // usage 走实时 SSE 路径，与 logs 预取同一容错语义。
@@ -1046,9 +1388,11 @@ function SessionPanelPage({
         initialSync = true;
       }
       if (cancelled) return;
+      // task-09：handlers 经 connGuard.tapStreamHandlers 包装——注入 onStatusChange
+      //（连接横幅）+ 看门狗活动时间推进，原事件语义逐字保留。
       streamRef.current = streamSession(
         sessionId,
-        {
+        connGuard.tapStreamHandlers({
           onTurnStarted: (env) => {
             // ql-20260825-011：新轮开跑（含排队消息自动派发）→ 刷队列条（队头条目
             // 已转正式轮，应从队列中消失）。
@@ -1269,12 +1613,12 @@ function SessionPanelPage({
             );
           },
           // verify P1 返工（FR-03）：后台 Agent 任务状态 → AgentTaskCard（按 task_id upsert）。
-          // task-12（FR-06）：归约统一走底部 applyAgentTaskStatusEvent（扩展字段合并
-          // + 终态定格 + 最近 6 条截断，page / dialog 两模式共用）。
+          // task-12（FR-06）：归约统一走底部 applyAgentTaskStatusEvent（扩展
+          // 字段合并 + 终态定格 + 最近 6 条截断，page / dialog 两模式共用）。
           onAgentTaskStatus: (event) => {
             setAgentTasks((prev) => applyAgentTaskStatusEvent(prev, event));
           },
-        },
+        }),
         { cursor: streamCursor, initialSync },
       );
     };
@@ -1440,6 +1784,11 @@ function SessionPanelPage({
   const status = session?.status ?? null;
   const ended = status === "ended" || status === "failed";
   const restoring = status === "pending" || status === "reconnecting";
+  // task-10（design A5/A6 / 原型⑤）：suspended 挂起态——后端 status 词表已含
+  // 该值（task-05），lib/daemon.ts AgentSessionStatus 联合尚未收口（task-11），
+  // 此处字符串比较过渡（不改 lib）。挂起会话只读浏览 + info 横幅，daemon 重启
+  // 后自动恢复（D-001）。
+  const suspended = (status as string | null) === "suspended";
   const running = turnState.currentRunId != null;
   // task-03（design §3.3）：队列投递条件之一——后端 inject 守卫 status=active
   // （D-001），reconnecting/pending 期间只排队不投递。
@@ -2086,7 +2435,9 @@ function SessionPanelPage({
     if (!effectivePrompt && pendingAttachments.length === 0) return; // 裸 /team 无可发内容
     // design §3.3：仅终态（ended/failed）与离线禁发；running / reconnecting /
     // pending 不再拦截（忙轮入服务端排队，ql-20260825-011）。
-    if (!session || ended || !machineOnline) return;
+    // task-10：suspended 挂起禁发（daemon 不在线，发也必失败；输入框本已禁用，
+    // 此处为发送路径防御性兜底）。
+    if (!session || ended || suspended || !machineOnline) return;
     if (isQueueFull) return; // D-002 满员拒收：提示见 placeholder，草稿与附件保留
     const attachmentIds = pendingAttachments.map((a) => a.id);
     // D-004：登记附件元数据（投递只携带 ids）——先登记再发送，保证占位轮可查。
@@ -2100,7 +2451,7 @@ function SessionPanelPage({
       return;
     }
     void sendFromQueue(effectivePrompt, attachmentIds);
-  }, [input, sessionId, session, ended, machineOnline, running, isQueueFull, pendingAttachments, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions]);
+  }, [input, sessionId, session, ended, suspended, machineOnline, running, isQueueFull, pendingAttachments, sendToServerQueue, sendFromQueue, sessionEngine, openTeamPopover, handlePreSessionSend, teamMissions]);
 
   const handleInterrupt = useCallback(async () => {
     // task-03（R-01）：预会话态无可打断轮（按钮本就禁用，防御性短路）。
@@ -2597,6 +2948,8 @@ function SessionPanelPage({
   //   旧：ended || restoring || running || !machineOnline → 禁用；
   //   新：ended || !machineOnline → 禁用；running（currentRunId 有值）/
   //       reconnecting / pending 保持可输入，消息入队等待自动投递（D-001）。
+  // task-10（design A5/A6 / 原型⑤）：suspended 挂起禁用输入——daemon 不在线，
+  // 恢复由 daemon 重启自动完成（D-001），用户无需（也无法）在此期间发消息。
   // 队满（D-002）不禁输入但 handleSend 阻止提交，提示由 placeholder 承载。
   // task-07（2026-08-23-agent-activity-sessions design §3.4 / Grill P2）：纯日志
   // 主体判定——origin=tool_report 且 turn_count===0（未继续过对话）→ 输入框
@@ -2607,15 +2960,17 @@ function SessionPanelPage({
   // SessionInputBar 发送按钮（!value.trim() 且无附件，D-7 附件例外维持）+
   // handleSend 入口守卫（下方 !prompt && 附件空 return）；本 disabled 同时禁
   // textarea，并入 trim 判断会在空输入时锁死输入框无法打字。
-  const sendingDisabled = ended || !machineOnline;
+  const sendingDisabled = ended || suspended || !machineOnline;
   const placeholder = ended
     ? "会话已结束，请新建会话"
-    : !machineOnline
-      ? "机器离线，输入不可用…"
-      : isToolReportBody
-        ? "发消息继续这个会话（将派发到绑定机器的 agent）…"
-        : isQueueFull
-          ? "队列已满，请等待投递或删除排队消息…"
+    : suspended
+      ? "等待守护进程恢复后可继续对话…"
+      : !machineOnline
+        ? "机器离线，输入不可用…"
+        : isToolReportBody
+          ? "发消息继续这个会话（将派发到绑定机器的 agent）…"
+          : isQueueFull
+            ? "队列已满，请等待投递或删除排队消息…"
             : restoring
               ? "恢复会话中，消息将排队等待恢复完成后自动发送…"
               : running
@@ -2645,6 +3000,8 @@ function SessionPanelPage({
 
   // ql-20260815-011：无真实标题不渲染占位「未命名会话」，只留 id 短码。
   const title = session.title?.trim() || "";
+  // task-10（design A6）：suspended「已挂起」（default 阶，对齐原型⑤ muted
+  // pill）；词表外未知值兜底「未知状态」（default 阶，不崩溃、不误标恢复中）。
   const statusBadge =
     session.status === "active"
       ? { status: "processing" as const, text: "活跃" }
@@ -2652,7 +3009,11 @@ function SessionPanelPage({
         ? { status: "default" as const, text: "已结束" }
         : session.status === "failed"
           ? { status: "error" as const, text: "已失败" }
-          : { status: "warning" as const, text: "恢复中" };
+          : (session.status as string) === "suspended"
+            ? { status: "default" as const, text: "已挂起" }
+            : session.status === "pending" || session.status === "reconnecting"
+              ? { status: "warning" as const, text: "恢复中" }
+              : { status: "default" as const, text: "未知状态" };
 
   // task-14（design §5.4）：会话主体条件提升为变量——mobile 外包横向滚动容器
   // （PANEL_BODY_WRAP_CLS_MOBILE），desktop 原样直挂（DOM 结构/props 零变化）。
@@ -2887,9 +3248,32 @@ function SessionPanelPage({
         </div>
       </header>
 
+      {/* task-10 / design A5+A6（原型⑤）：suspended 挂起横幅（info 色，双主题
+          token 阶）。挂起时后台状态权威（backend 已判定 daemon 离线超时/优雅
+          停止），复用本横幅位替代下方「离线只读」通用横幅——文案更具体（自动
+          恢复 + 24h GC 上限副行），不与通用离线横幅叠加重复。 */}
+      {suspended && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-session-banner="suspended"
+          className={cn(
+            "border-b border-info/30 bg-info/10 px-5 py-2 text-xs text-info",
+            mobile && "px-3",
+          )}
+        >
+          <div className="flex items-center gap-2">
+            <PauseCircle aria-hidden className="h-3.5 w-3.5 shrink-0" />
+            <span>会话已挂起——守护进程不在线，重新启动后会话将自动恢复</span>
+          </div>
+          <p className="ml-[22px] mt-0.5 text-[11px] leading-4 text-info/80">
+            历史消息完整保留，可在上方继续浏览；挂起超过 24 小时才会被标记为失败
+          </p>
+        </div>
+      )}
       {/* 离线只读横幅（2026-07-31-offline-session-readonly 语义；task-14：mobile
-          padding 收敛 px-3） */}
-      {!machineOnline && (
+          padding 收敛 px-3）；task-10：suspended 已有专属挂起横幅时不再叠加。 */}
+      {!machineOnline && !suspended && (
         <div
           className={cn(
             "flex items-center gap-2 border-b border-amber-300 bg-amber-50 px-5 py-2 text-xs text-amber-800",
@@ -2902,6 +3286,16 @@ function SessionPanelPage({
           </span>
         </div>
       )}
+      {/* task-09 / design A6（原型②③④）：连接状态横幅 + 运行轮看门狗提示。
+          断线重连中 warning 常驻（第 N 次尝试）；恢复 success 2s 自动消失；
+          看门狗长时间无响应仅提示对账中，不伪造终态（终态以 backend 数据经
+          resync 刷新为准）。 */}
+      <StreamConnectionBanner
+        connStatus={connGuard.connStatus}
+        attempt={connGuard.reconnectAttempt}
+        mobile={mobile}
+      />
+      {connGuard.stalledHint && <TurnStalledWatchdogBanner mobile={mobile} />}
       {/* 已结束/失败横幅 + 重新开启（原型 .ended-banner）；task-08：reconnecting
           本地计时 >240s（DS-5）复用同位置同款入口，超时场景文案区分，onClick 与
           ended 同一 handleReopen（不复制回调）。 */}
@@ -3098,10 +3492,17 @@ function getProviderLabel(provider: string): string {
  * （idle/creating/ending/reconnecting 为 dialog 特有，D11——page 模式状态从
  * detailQuery 派生，两机制按 mode 严格互斥，R5）。terminatingAt（lease 终止
  * 观测窗口，D5）非空时显示「终止中…」横幅，onSessionEnded 清空。
+ * task-10（design A5/A6）：suspended——attach 目标会话处于挂起态（daemon 不
+ * 在线）。SessionUiStatus 无此值（turn-timeline 词表不扩），挂起展示由本标志
+ * 独立承载：info 横幅 + 输入禁用；attach 轮询不把它计为恢复失败（挂起窗口
+ * 以小时计，超出 15s 轮询上限是常态），daemon 重启转 reconnecting/active 后
+ * 自动收敛。
  */
 interface SessionDialogView {
   sessionId: string | null;
   status: SessionUiStatus;
+  /** task-10：attach 目标会话挂起中（backend status === 'suspended'）。 */
+  suspended: boolean;
   currentRunId: string | null;
   turns: SessionTurnView[];
   errorMsg: string | null;
@@ -3111,6 +3512,7 @@ interface SessionDialogView {
 const INITIAL_DIALOG_VIEW: SessionDialogView = {
   sessionId: null,
   status: "idle",
+  suspended: false,
   currentRunId: null,
   turns: [],
   errorMsg: null,
@@ -3341,6 +3743,14 @@ function SessionPanelDialog(props: SessionPanelProps) {
   // useMessageQueue 调用）经 ref 触发队列刷新，避开 use-before-define。
   const queueRefreshRef = useRef<() => void>(() => {});
 
+  // ── task-09 / design A6：连接横幅 + 运行轮看门狗（共用 hook；dialog 无
+  // react-query——会话级对账不挂 invalidate，轮级终态经 resync 合成事件收敛）。──
+  const connGuard = useStreamConnectionGuard({
+    sessionId: view.sessionId,
+    currentRunId: view.currentRunId,
+    getConnection: () => streamConnRef.current,
+  });
+
   // ql-20260825-011：输入草稿持久化（同 page 模式；dialog 会话键 = view.sessionId，
   // idle 无会话用 __pre__ 固定键）。
   const draftHydratedRef = useRef(false);
@@ -3440,9 +3850,11 @@ function SessionPanelDialog(props: SessionPanelProps) {
         // 重挂载发起更新建流）→ 放弃建流，不产生无人 close 的僵尸连接。
         if (disposedRef.current || streamConnRef.current) return;
         if (streamEpochRef.current !== epoch) return;
+        // task-09：handlers 经 connGuard.tapStreamHandlers 包装——注入
+        // onStatusChange（连接横幅）+ 看门狗活动时间推进，原事件语义逐字保留。
         streamConnRef.current = streamSession(
           sessionId,
-          {
+          connGuard.tapStreamHandlers({
             onTurnStarted: (env) => {
               // ql-20260825-011：新轮开跑（含排队消息自动派发）→ 刷队列条。
               queueRefreshRef.current?.();
@@ -3617,7 +4029,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
             onAgentTaskStatus: (event) => {
               setAgentTasks((prev) => applyAgentTaskStatusEvent(prev, event));
             },
-          },
+          }),
           { cursor: streamCursor, initialSync },
         );
     })();
@@ -3636,7 +4048,9 @@ function SessionPanelDialog(props: SessionPanelProps) {
 
     // fetchPendingDialogs 从 establishStream 解耦为独立 effect（见下方
     // [view.sessionId] effect），避免恢复链路与建流链路绑定。
-  }, []);
+    // task-09：tapStreamHandlers 为 useCallback([]) 稳定引用（ deps 变化不触发
+    // effect 重跑 / SSE 重建），此处入 deps 仅为 exhaustive-deps 完整性。
+  }, [connGuard.tapStreamHandlers]);
 
   // attach 模式：mount / attachSessionId 变化时建 SSE + 预填 turn + 进
   // reconnecting。轮询单独 effect 处理（见下）。
@@ -3652,6 +4066,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
       setView({
         sessionId: attachSessionId,
         status: "active",
+        suspended: false,
         currentRunId: null,
         turns: initialTurns ?? [],
         errorMsg: null,
@@ -3668,6 +4083,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
     setView({
       sessionId: attachSessionId,
       status: "reconnecting",
+      suspended: false,
       currentRunId: null,
       turns: initialTurns ?? [],
       errorMsg: null,
@@ -3707,6 +4123,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
           setView((prev) => ({
             ...prev,
             status: "active",
+            suspended: false,
             errorMsg: null,
             currentRunId: detail.current_run_id ?? prev.currentRunId,
             terminatingAt: detailTermAt,
@@ -3716,6 +4133,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
           setView((prev) => ({
             ...prev,
             status: "failed",
+            suspended: false,
             errorMsg: "会话恢复失败，可能上下文已失效",
             terminatingAt: null,
           }));
@@ -3723,14 +4141,31 @@ function SessionPanelDialog(props: SessionPanelProps) {
           // ended 会话 attach（无法 reopen 的老会话）→ 转只读 ended 态，显示
           // initialTurns 历史，不卡轮询。
           stop();
-          setView((prev) => ({ ...prev, status: "ended", errorMsg: null, terminatingAt: null }));
+          setView((prev) => ({
+            ...prev,
+            status: "ended",
+            suspended: false,
+            errorMsg: null,
+            terminatingAt: null,
+          }));
+        } else if ((detail.status as string) === "suspended") {
+          // task-10（design A5/A6）：挂起不算恢复失败——daemon 不在线是挂起的
+          // 因，15s attach 轮询上限对以小时计的挂起窗口无意义；置挂起标志
+          //（info 横幅 + 输入禁用）并重置计数继续轮询，daemon 重启转
+          // reconnecting/active 后由上方分支收敛（D-001 自动恢复）。
+          attempts = 0;
+          setView((prev) =>
+            prev.suspended && prev.errorMsg === null
+              ? prev
+              : { ...prev, suspended: true, errorMsg: null },
+          );
         } else {
           // pending/reconnecting：terminating_at 可能已带，先更新以便尽早显示
-          //「终止中…」横幅。
+          //「终止中…」横幅；task-10：离开挂起（daemon 已回归）清挂起标志。
           setView((prev) =>
-            prev.terminatingAt === detailTermAt
+            !prev.suspended && prev.terminatingAt === detailTermAt
               ? prev
-              : { ...prev, terminatingAt: detailTermAt },
+              : { ...prev, suspended: false, terminatingAt: detailTermAt },
           );
         }
         // reconnecting / ended / pending → 继续轮询（由超时兜底）
@@ -3741,7 +4176,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
       if (attempts >= ATTACH_POLL_MAX_ATTEMPTS) {
         stop();
         setView((prev) =>
-          prev.status === "active"
+          prev.status === "active" || prev.suspended
             ? prev
             : {
                 ...prev,
@@ -4056,6 +4491,9 @@ function SessionPanelDialog(props: SessionPanelProps) {
     if (offlineReadOnly) return;
     if (view.status === "ended" || view.status === "failed") return;
     if (view.status === "creating" || view.status === "ending") return;
+    // task-10（design A5）：挂起禁发——daemon 不在线，发也必失败；输入框本已
+    // 禁用，此处为发送路径防御性兜底（恢复由 daemon 重启自动完成，D-001）。
+    if (view.suspended) return;
     if (isQueueFull) return; // D-002 满员拒收
 
     // task-11（D-004 四路等价）：/team 前缀拦截——不发送，弹层确认后目标随下条
@@ -4189,7 +4627,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
     } catch {
       /* errorMsg 已写入 view（占位轮回滚），此路径不向上抛 */
     }
-  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.sessionId, view.currentRunId, isQueueFull, provider, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, teamMissions]);
+  }, [input, hasOnlineProvider, offlineReadOnly, view.status, view.suspended, view.sessionId, view.currentRunId, isQueueFull, provider, changeId, workspaceId, pendingMentions, establishStream, onSessionCreated, sendToServerQueue, submitFollowup, openTeamPopover, pendingAttachments, teamMissions]);
 
   // 失败轮次「重新发送」——复用 submitFollowup 重新提交该 turn 的 prompt。受
   // turn 级串行 / active 守卫；retryable=false 的错误由 RunErrorItem 隐藏按钮
@@ -4360,6 +4798,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
   const sendingDisabled =
     view.status === "ended" ||
     view.status === "failed" ||
+    view.suspended || // task-10：挂起禁输入——daemon 不在线，恢复自动完成（D-001）
     !hasOnlineProvider ||
     offlineReadOnly;
 
@@ -4411,11 +4850,13 @@ function SessionPanelDialog(props: SessionPanelProps) {
   const placeholder =
     view.status === "ended" || view.status === "failed"
       ? "会话已结束，请新建会话"
-      : !hasOnlineProvider
-        ? "未连接提供方，输入不可用…"
-        : isQueueFull
-          ? "队列已满，请等待投递或删除排队消息…"
-          : view.status === "reconnecting"
+      : view.suspended
+        ? "等待守护进程恢复后可继续对话…" // task-10（原型⑤）：挂起禁输入占位
+        : !hasOnlineProvider
+          ? "未连接提供方，输入不可用…"
+          : isQueueFull
+            ? "队列已满，请等待投递或删除排队消息…"
+            : view.status === "reconnecting"
             ? "恢复会话中，消息将排队等待恢复完成后自动发送…"
             : view.status === "creating"
               ? "正在创建会话..."
@@ -4435,6 +4876,25 @@ function SessionPanelDialog(props: SessionPanelProps) {
           <span>运行时离线，当前为只读浏览（发送/打断/结束/新建已禁用），重连后自动恢复。</span>
         </div>
       ) : null}
+      {/* task-10 / design A5+A6（原型⑤）：attach 目标会话挂起（backend status
+          === suspended）——info 横幅 + 输入禁用（见 sendingDisabled）。
+          attach 轮询持续观察，daemon 重启转 reconnecting/active 后自动收敛。 */}
+      {view.suspended ? (
+        <div
+          role="status"
+          aria-live="polite"
+          data-session-banner="suspended"
+          className="border-b border-info/30 bg-info/10 px-5 py-2 text-xs text-info"
+        >
+          <div className="flex items-center gap-2">
+            <PauseCircle aria-hidden className="h-3.5 w-3.5 shrink-0" />
+            <span>会话已挂起——守护进程不在线，重新启动后会话将自动恢复</span>
+          </div>
+          <p className="ml-[22px] mt-0.5 text-[11px] leading-4 text-info/80">
+            历史消息完整保留，可在下方继续浏览；挂起超过 24 小时才会被标记为失败
+          </p>
+        </div>
+      ) : null}
       {/* lease 处于 terminating 态（terminating_at 非空，D5）时显示「终止中…」
           横幅——backend cancel_lease 已标 lease.terminating_at、等 daemon 回传
           终态的观测窗口。横幅在 session 终态（ended/failed）外才显示；
@@ -4449,6 +4909,14 @@ function SessionPanelDialog(props: SessionPanelProps) {
           <span>终止中…守护进程正在结束会话进程，稍候将自动更新为已停止。</span>
         </div>
       ) : null}
+      {/* task-09 / design A6（原型②③④）：连接状态横幅 + 运行轮看门狗提示——
+          断线重连中 warning 常驻（第 N 次尝试）；恢复 success 2s 自动消失；
+          看门狗长时间无响应仅提示对账中，不伪造终态。 */}
+      <StreamConnectionBanner
+        connStatus={connGuard.connStatus}
+        attempt={connGuard.reconnectAttempt}
+      />
+      {connGuard.stalledHint && <TurnStalledWatchdogBanner />}
       <header className="shrink-0 border-b bg-card px-5 py-4">
         <div className="flex items-start justify-between gap-4">
           <div className="flex min-w-0 items-center gap-2.5">

@@ -4489,6 +4489,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/suspend-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suspend Sessions Batch
+         * @description daemon 优雅停止：该 daemon 全部 active 会话批量挂起（task-05 / design A5）.
+         *
+         *     daemon ``stop()`` 在 markOffline 前调用。单事务三步收敛（中断 run →
+         *     failed（error_code=daemon_stopped）、会话 → suspended、挂起 lease →
+         *     cancelled），条件 UPDATE 幂等可重入；调用失败（网络已断）与强杀等价，
+         *     由 600s offline sweep 兜底收敛 suspended（design A5 已声明的 fallback）。
+         *     归属校验对齐 heartbeat（actor_user_id）：instance 必须属于当前认证主体
+         *     （api-key owner），不存在/越权同语义 404。
+         */
+        post: operations["suspend_sessions_batch_api_daemon_sessions_suspend_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/ready": {
         parameters: {
             query?: never;
@@ -4756,6 +4783,35 @@ export interface paths {
          *         missing/cancelled; 409 when already answered; 504 when offline.
          */
         post: operations["respond_session_permission_api_daemon_sessions__session_id__permissions__request_id__response_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/permission-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit Session Permission Request
+         * @description Daemon HTTP uplink for a canUseTool / dialog permission request (task-07).
+         *
+         *     daemon ``sendToHub`` 遇 WS 不通时经 ``hubClient.submitPermissionRequest``
+         *     改走本端点创建待审记录——人审挂起等待而非直接 deny。Auth:
+         *     ``get_current_principal`` 接受 daemon ``X-API-Key``（长期凭证）；
+         *     ``X-Claim-Token`` 由 service 按会话 lease 的 claim 语义条件校验。
+         *
+         *     幂等性（dialog）：request_id 唯一约束 upsert，daemon 重放不 fork 第二张
+         *     pending 卡（与 WS 上行同一持久化路径）；plain approval 的重复 request_id
+         *     替换既有 timer。
+         */
+        post: operations["submit_session_permission_request_api_daemon_sessions__session_id__permission_requests_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5300,6 +5356,57 @@ export interface paths {
         get: operations["get_pending_leases_api_daemon_runtimes__runtime_id__pending_leases_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/runtimes/{runtime_id}/pending-controls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Pending Controls
+         * @description 补拉待发控制指令（daemon 重连对账 / 心跳 pending_controls>0 触发）.
+         *
+         *     2026-08-29-daemon-platform-resilience task-04 / design A2 / D-006@v1：
+         *     **仅返回 status=pending 的指令**，``created_at`` 升序（FIFO）——delivered
+         *     一律不重发（WS 推送成功 = TCP 已达 daemon 进程，重发 inject 会向 agent
+         *     双发 prompt），过期与 delivered-未-ack 行由 GC 清理。归属校验同
+         *     pending-leases（owner-only，跨用户与不存在同语义 404）。
+         */
+        get: operations["get_pending_controls_api_daemon_runtimes__runtime_id__pending_controls_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/runtimes/{runtime_id}/controls/ack": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ack Controls
+         * @description daemon 消费回执：ids 批量置 acked（pending|delivered 均可，终态幂等跳过）.
+         *
+         *     2026-08-29-daemon-platform-resilience task-04 / design A2：ack 语义 =
+         *     「daemon 已处理」——消费成功与消费失败的业务性错误同样 ack（防毒丸指令
+         *     无限重投，错误进 daemon 日志）；过期/已回执行静默跳过。翻转范围限定
+         *     本 runtime 名下（归属校验后防越权 ack 他人指令）。返回实际翻转数。
+         */
+        post: operations["ack_controls_api_daemon_runtimes__runtime_id__controls_ack_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11268,6 +11375,50 @@ export interface components {
             captcha_id: string;
         };
         /**
+         * ControlCommandItem
+         * @description 补拉返回的单条控制指令（task-04 provides 契约：id/kind/payload/created_at）。
+         *
+         *     ``payload`` 与 WS 消息 payload 同构且已含 ``command_id``（daemon 侧幂等键，
+         *     补拉与 WS 推送共用同键去重）。
+         */
+        ControlCommandItem: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * ControlsAckRequest
+         * @description POST controls/ack 请求体。
+         *
+         *     ``ids`` 为 daemon 已处理（含消费失败的业务性错误——ack 语义=已处理防毒丸
+         *     重投，不承诺成功）的指令 id 列表；空列表合法（acked=0）。
+         */
+        ControlsAckRequest: {
+            /** Ids */
+            ids?: string[];
+        };
+        /**
+         * ControlsAckResponse
+         * @description POST controls/ack 响应：实际翻转 acked 的行数。
+         */
+        ControlsAckResponse: {
+            /** Acked */
+            acked: number;
+        };
+        /**
          * ConvergeResponse
          * @description ``converge_mission`` tool 返回契约（task-06 D-010，design §5 Phase 1 / §7 / §7.5）。
          *
@@ -11538,6 +11689,9 @@ export interface components {
          *
          *     2026-07-06-allowed-roots-per-runtime：返 per-runtime allowed_roots map
          *     （runtimes: [{runtime_id, allowed_roots}]），daemon _syncAllowedRoots per-runtime 同步。
+         *     2026-08-29-daemon-platform-resilience task-04：新增 ``pending_controls``——
+         *     该 daemon 全部 runtime 名下 pending 控制指令计数（design A1/A2 对账触发
+         *     约定字段名；daemon 心跳循环见 >0 即补拉控制指令）。
          */
         DaemonHeartbeatResponse: {
             /**
@@ -11549,6 +11703,11 @@ export interface components {
             status: string;
             /** Runtimes */
             runtimes?: components["schemas"]["DaemonHeartbeatRuntimePolicy"][];
+            /**
+             * Pending Controls
+             * @default 0
+             */
+            pending_controls: number;
         };
         /**
          * DaemonHeartbeatRuntimePolicy
@@ -11680,6 +11839,48 @@ export interface components {
         DaemonMachineUpdate: {
             /** Display Alias */
             display_alias?: string | null;
+        };
+        /**
+         * DaemonPermissionUplinkRequest
+         * @description Body for POST /sessions/{id}/permission-requests（task-07 / design A3）.
+         *
+         *     字段与 protocol.PermissionRequestPayload 对齐（session_id 在 path，不重复）；
+         *     由路由层组装成完整 payload 委托 permission service。
+         */
+        DaemonPermissionUplinkRequest: {
+            /**
+             * Run Id
+             * Format: uuid
+             */
+            run_id: string;
+            /** Request Id */
+            request_id: string;
+            /** Tool Name */
+            tool_name: string;
+            /** Input */
+            input: {
+                [key: string]: unknown;
+            };
+            /** Tool Use Id */
+            tool_use_id?: string | null;
+            /** Dialog Kind */
+            dialog_kind?: string | null;
+            /** Dialog Payload */
+            dialog_payload?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** DaemonPermissionUplinkResponse */
+        DaemonPermissionUplinkResponse: {
+            /**
+             * Session Id
+             * Format: uuid
+             */
+            session_id: string;
+            /** Request Id */
+            request_id: string;
+            /** Accepted */
+            accepted: boolean;
         };
         /**
          * DaemonRegisterProviderItem
@@ -14459,6 +14660,14 @@ export interface components {
              * @default 20
              */
             page_size: number;
+        };
+        /**
+         * PendingControlsResponse
+         * @description GET pending-controls 响应（仅 status=pending，created_at 升序）。
+         */
+        PendingControlsResponse: {
+            /** Commands */
+            commands?: components["schemas"]["ControlCommandItem"][];
         };
         /** PendingFileEntry */
         PendingFileEntry: {
@@ -18088,6 +18297,22 @@ export interface components {
             reason?: string | null;
         };
         /**
+         * SessionSuspendBatchRequest
+         * @description Body for POST /sessions/suspend-batch（task-05）.
+         *
+         *     daemon ``stop()`` 在 markOffline 前上报自身标识；backend 按
+         *     ``daemon_local_id``（= ``daemon_instances.id``）定位该 daemon 全部 runtime
+         *     名下的 active 会话做三步挂起收敛（daemon 侧调用方属 task-08）。
+         */
+        SessionSuspendBatchRequest: {
+            /**
+             * Daemon Local Id
+             * Format: uuid
+             * @description daemon 本地 uuid（daemon_instances.id）
+             */
+            daemon_local_id: string;
+        };
+        /**
          * SetDefaultResult
          * @description ``POST /api/llm-providers/{id}/set-default`` 与 ``unset-default`` 统一响应。
          *
@@ -18807,6 +19032,20 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * SuspendBatchResponse
+         * @description POST /sessions/suspend-batch 响应（task-05 provides 契约）.
+         *
+         *     ``suspended`` = 实际翻挂起的会话数；``runs_failed`` = 同批收敛 failed 的
+         *     活跃轮 run 数（error_code=daemon_stopped）。重复调用幂等——已挂起会话
+         *     no-op 计 0。
+         */
+        SuspendBatchResponse: {
+            /** Suspended */
+            suspended: number;
+            /** Runs Failed */
+            runs_failed: number;
         };
         /**
          * SystemStatusResponse
@@ -28843,6 +29082,39 @@ export interface operations {
             };
         };
     };
+    suspend_sessions_batch_api_daemon_sessions_suspend_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionSuspendBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuspendBatchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     notify_session_ready_api_daemon_sessions__session_id__ready_post: {
         parameters: {
             query?: never;
@@ -29212,6 +29484,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PermissionResponseRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_session_permission_request_api_daemon_sessions__session_id__permission_requests_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Claim-Token"?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DaemonPermissionUplinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DaemonPermissionUplinkResponse"];
                 };
             };
             /** @description Validation Error */
@@ -29972,6 +30281,72 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     }[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_pending_controls_api_daemon_runtimes__runtime_id__pending_controls_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runtime_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PendingControlsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ack_controls_api_daemon_runtimes__runtime_id__controls_ack_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runtime_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ControlsAckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ControlsAckResponse"];
                 };
             };
             /** @description Validation Error */

@@ -8,7 +8,9 @@ design §3 生命周期契约表的 6 个跨模块写入点各自发布 created 
 - run_sync/service.py close_interactive_run：run 终态翻 session ended/failed →
   status_changed；多轮对话仅刷 last_active_at → 不发；
 - sweep.py 两档（reconnect / offline）：批量 UPDATE 后逐行 status_changed，
-  无命中零发布；
+  无命中零发布；offline 档 task-05 改挂起语义——active→suspended 非终态只发
+  status_changed（无 session_ended），超龄 24h GC 置 failed 才发终态
+  session_ended（reason=suspended_expired）；
 - lease_service.py cancel_lease：session 实际翻 ended → status_changed，
   幂等（已 ended/failed）零发布；
 - platform_sync/service.py tool_report upsert：仅新 INSERT 分支 created，
@@ -24,6 +26,7 @@ test_agent_log_push.py（platform_sync/tests）/ test_start_scan_dispatch_daemon
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -335,10 +338,22 @@ async def test_reconnect_sweep_no_hit_no_publish(
 async def test_offline_sweep_publishes_per_row(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """runtime 离线的 active 会话收敛 failed → 逐行 status_changed。"""
+    """runtime 离线的 active 会话收敛 **suspended**（task-05 / design A5，原
+    failed）→ 逐行 status_changed；suspended 非终态——per-session 频道不发
+    session_ended（SSE 会话流不收尾）。"""
+    from app.modules.daemon import sweep as sweep_mod
     from app.modules.daemon.sweep import RUNTIME_OFFLINE_GRACE_SEC, session_offline_sweep_once
 
     calls = _capture_publish(monkeypatch, "app.modules.daemon.sweep")
+    per_session_publishes: list[tuple[str, str]] = []
+
+    class _FakeRedis:
+        async def publish(self, channel: str, payload: str) -> int:
+            per_session_publishes.append((channel, payload))
+            return 1
+
+    monkeypatch.setattr(sweep_mod, "get_redis", lambda: _FakeRedis())
+
     user = await _make_user(db_session, prefix="sweep-off")
     rt = DaemonRuntime(
         id=uuid.uuid4(),
@@ -363,6 +378,60 @@ async def test_offline_sweep_publishes_per_row(
 
     assert converged == 1
     assert calls == [("status_changed", offline.id, user.id)]
+    # 非终态：无 session_ended（终态事件只属于 failed 收敛路径）
+    events = [
+        json.loads(p) for ch, p in per_session_publishes if ch == f"agent_session:{offline.id}"
+    ]
+    assert not any(e.get("event") == "session_ended" for e in events)
+
+
+@pytest.mark.asyncio
+async def test_offline_sweep_gc_publishes_terminal_events(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """suspended 超 24h（SUSPENDED_MAX_AGE_SEC）GC 置 failed → 此时才发终态
+    session_ended（reason=suspended_expired）+ status_changed（task-05）。"""
+    from app.modules.daemon import sweep as sweep_mod
+    from app.modules.daemon.sweep import SUSPENDED_MAX_AGE_SEC, session_offline_sweep_once
+
+    calls = _capture_publish(monkeypatch, "app.modules.daemon.sweep")
+    per_session_publishes: list[tuple[str, str]] = []
+
+    class _FakeRedis:
+        async def publish(self, channel: str, payload: str) -> int:
+            per_session_publishes.append((channel, payload))
+            return 1
+
+    monkeypatch.setattr(sweep_mod, "get_redis", lambda: _FakeRedis())
+
+    user = await _make_user(db_session, prefix="sweep-gc")
+    rt = DaemonRuntime(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        name="daemon",
+        provider="claude",
+        status="online",  # GC 纯年龄驱动，与 runtime 在线状态无关
+        last_heartbeat_at=datetime.now(UTC),
+    )
+    db_session.add(rt)
+    await db_session.commit()
+    aged = await _make_session(
+        db_session,
+        user.id,
+        rt.id,
+        status="suspended",
+        lease_id=None,
+        last_active_at=datetime.now(UTC) - timedelta(seconds=SUSPENDED_MAX_AGE_SEC + 3600),
+    )
+
+    converged = await session_offline_sweep_once(db_session)
+
+    assert converged == 1
+    assert calls == [("status_changed", aged.id, user.id)]
+    events = [json.loads(p) for ch, p in per_session_publishes if ch == f"agent_session:{aged.id}"]
+    assert any(
+        e.get("event") == "session_ended" and e.get("reason") == "suspended_expired" for e in events
+    )
 
 
 # ── 3. lease_service.py cancel_lease ─────────────────────────────────────────

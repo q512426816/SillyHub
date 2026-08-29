@@ -393,6 +393,65 @@ export interface PermissionResponsePayload {
   dialog_result?: unknown;
 }
 
+// ── 控制指令 kind 词表（2026-08-29-daemon-platform-resilience task-06）──────────
+//
+// 与 backend `backend/app/modules/daemon/control_commands.py` 的
+// KIND_SESSION_INJECT / … / KIND_PROVIDER_CONFIG_CHANGED 六个常量逐字对齐
+//（backend task-04 词表，design A2 控制指令表 `kind` 列）。WS 控制消息与
+// HTTP 补拉消息共用同一路由（daemon control-dispatcher.ts），key 即本词表值。
+//
+// 注：PLAN_RESPONSE 不在本词表——backend ControlCommandService 未收录 plan
+// 下发点（enqueue_and_push 调用点仅 session 七处 / permission 三处 /
+// provider_switch 一处），plan_response WS 消息继续走 daemon.ts 既有直连路由。
+
+/** 控制指令 kind（Server → Daemon 可靠投递消息的分类键）。 */
+export const CONTROL_KIND = {
+  /** 注入 prompt 触发新 turn（对应 WS SESSION_INJECT）。 */
+  SESSION_INJECT: 'session_inject',
+  /** 打断当前 turn（对应 WS SESSION_INTERRUPT）。 */
+  SESSION_INTERRUPT: 'session_interrupt',
+  /** 结束会话（对应 WS SESSION_END）。 */
+  SESSION_END: 'session_end',
+  /** reopen 恢复会话（对应 WS SESSION_RESUME）。 */
+  SESSION_RESUME: 'session_resume',
+  /** 权限审批结果（对应 WS PERMISSION_RESPONSE）。 */
+  PERMISSION_RESPONSE: 'permission_response',
+  /** 供应商热切换（对应 WS PROVIDER_CONFIG_CHANGED）。 */
+  PROVIDER_CONFIG_CHANGED: 'provider_config_changed',
+} as const;
+
+/** 控制指令 kind 联合（字面量）。 */
+export type ControlCommandKind = (typeof CONTROL_KIND)[keyof typeof CONTROL_KIND];
+
+/**
+ * GET pending-controls 响应条目（task-04 契约 / design A2 接口定义）。
+ *
+ * 仅 status=pending 的指令（delivered 一律不重发，D-006），created_at 升序。
+ * 手写本地类型——task-11 已再生成 api-types（生成物含同构形状），此处于
+ * protocol 层保留显式契约定义供 dispatcher 消费，可与生成物并存。
+ */
+export interface PendingControlCommand {
+  /** 指令 id（即 command_id，daemon 侧幂等去重键）。 */
+  id: string;
+  /** 控制指令 kind（CONTROL_KIND 词表之一；daemon 侧宽容 string）。 */
+  kind: string;
+  /** 与既有 WS 消息 payload 同构（尾部注入可选 command_id）。 */
+  payload: Record<string, unknown> | null;
+  /** 创建时间（ISO 字符串；仅日志/观测用，daemon 不做过期判断——backend GC 收口）。 */
+  created_at: string;
+}
+
+/**
+ * 心跳响应（task-04 起扩展 `pending_controls` 可选字段，design A1 对账触发器）。
+ *
+ * 旧 backend 无该字段 → undefined，daemon 视为 0（向后兼容）。其余字段
+ *（allowed_roots / runtimes 等）经 Record<string, unknown> 透传给既有消费方。
+ */
+export interface HeartbeatResponse extends Record<string, unknown> {
+  /** 该 daemon 全部 runtime 的 pending 控制指令计数；>0 触发控制指令补拉。 */
+  pending_controls?: number;
+}
+
 // ── Lease 任务状态 ────────────────────────────────────────────────────────────
 // 与 backend lease 状态机字符串值一一对应。
 

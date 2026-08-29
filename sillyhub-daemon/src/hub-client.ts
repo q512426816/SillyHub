@@ -22,6 +22,9 @@
  */
 
 import { REST_PREFIX } from './protocol.js';
+// 2026-08-29-daemon-platform-resilience task-06：控制指令补拉响应条目类型
+//（手写类型过渡，task-11 收口进 api-types 生成物）+ 心跳响应扩展字段类型。
+import type { PendingControlCommand, HeartbeatResponse } from './protocol.js';
 import { DAEMON_VERSION } from './daemon-version.js';
 import { BUILD_ID } from './build-id.js';
 import type { ExecutionContextPayload } from './types.js';
@@ -102,10 +105,34 @@ export interface HeartbeatBody {
   daemon_version: string;
   daemon_build_id: string;
   /** task-02（FR-01 / D-001@v1）：daemon 进程启动时间（ISO 8601）。hub-client 内部
-   * 填充；null 兼容旧 daemon 不上报路径。 */
+   * 填充，调用方无需传；null 兼容旧 daemon 不上报路径，后端写入 daemon_instances.started_at。 */
   started_at: string | null;
   /** 各 provider 当前状态，每项 {provider, status}。 */
   providers: { provider: string; status?: string }[];
+}
+
+/**
+ * suspend_sessions_batch 请求体（2026-08-29-daemon-platform-resilience task-08 /
+ * design A5 / FR-04；backend 端点契约 task-05 定稿）。
+ *
+ * daemon ``stop()`` 在 markOffline 前上报自身标识；backend 按
+ * ``daemon_local_id``（= ``daemon_instances.id``）定位该 daemon 全部 runtime
+ * 名下的 active 会话做三步挂起收敛。
+ */
+export interface SuspendBatchBody {
+  /** daemon 本地 uuid（= daemon_instances.id）。 */
+  daemon_local_id: string;
+}
+
+/**
+ * POST /sessions/suspend-batch 响应（task-05 provides 契约）。
+ *
+ * ``suspended`` = 实际翻挂起的会话数；``runs_failed`` = 同批收敛 failed 的活跃轮
+ * run 数（error_code=daemon_stopped）。重复调用幂等——已挂起会话 no-op 计 0。
+ */
+export interface SuspendBatchResponse {
+  suspended: number;
+  runs_failed: number;
 }
 
 // ── session 事件 HTTP 上报（change 2026-08-24-platform-session-feedback-fix / FR-01~03）─
@@ -586,14 +613,18 @@ export class HubClient {
    * per-daemon HTTP 心跳（非 lease 心跳）。2026-07-03-daemon-entity-binding task-07 / D-006。
    * 端点：POST {REST_PREFIX}/heartbeat，body `{ daemon_local_id, providers: [{provider, status}] }`。
    * daemon 单条心跳合并上报 daemon_local_id + 各 provider 状态。
+   *
+   * 2026-08-29-daemon-platform-resilience task-06：响应类型化——backend task-04 起
+   * 携带可选 `pending_controls`（该 daemon 全部 runtime 的 pending 控制指令计数，
+   * daemon 据此触发控制指令补拉，design A1）。
    */
   async heartbeat(
     daemonLocalId: string,
     providers?: { provider: string; status?: string }[],
     /** task-02：daemon 进程启动时间（epoch ms / Date / 数值）；空填 null（兼容旧 daemon）。 */
     startedAt?: number | Date | null,
-  ): Promise<Record<string, unknown>> {
-    return this._request<Record<string, unknown>>(
+  ): Promise<HeartbeatResponse> {
+    return this._request<HeartbeatResponse>(
       'POST',
       `${REST_PREFIX}/heartbeat`,
       {
@@ -614,6 +645,28 @@ export class HubClient {
     return this._request<Record<string, unknown>>(
       'POST',
       `${REST_PREFIX}/runtimes/${encodeURIComponent(runtimeId)}/offline`,
+    );
+  }
+
+  /**
+   * 优雅停止批量挂起本 daemon 全部 active 会话（2026-08-29-daemon-platform-
+   * resilience task-08 / design A5 / FR-04；backend 端点 task-05）。
+   *
+   * 端点：POST {REST_PREFIX}/sessions/suspend-batch，body `{ daemon_local_id }`。
+   * daemon ``stop()`` 在 markOffline **之前**调用；backend 单事务三步收敛：
+   * 中断中 run → failed（error_code=daemon_stopped）、session → suspended、
+   * 挂起 lease → cancelled（条件 UPDATE 幂等可重入）。
+   *
+   * **失败语义**（对齐 markOffline）：HTTP 非 2xx → HubHttpError（404 = daemon
+   * 实例不存在/越权，resource-hiding）；网络/超时透传 fetch 原始错误。调用方
+   * （daemon.stop）仅结构化日志降级不阻断收尾——与强杀等价走 backend 600s
+   * offline sweep 兜底收敛 suspended（design A5 已声明的 fallback）。
+   */
+  async suspendSessions(daemonLocalId: string): Promise<SuspendBatchResponse> {
+    return this._request<SuspendBatchResponse>(
+      'POST',
+      `${REST_PREFIX}/sessions/suspend-batch`,
+      { daemon_local_id: daemonLocalId } satisfies SuspendBatchBody,
     );
   }
 
@@ -748,6 +801,48 @@ export class HubClient {
     return this._request<Record<string, unknown>[]>(
       'GET',
       `${REST_PREFIX}/runtimes/${encodeURIComponent(runtimeId)}/pending-leases`,
+    );
+  }
+
+  // ── 控制指令补拉/回执（2026-08-29-daemon-platform-resilience task-06 / design A2）──
+
+  /**
+   * 补拉 runtime 的 pending 控制指令（重连对账 / 心跳 pending_controls>0 触发）。
+   *
+   * 端点：GET {REST_PREFIX}/runtimes/{runtimeId}/pending-controls。
+   * backend task-04 契约：仅返回 status=pending 的指令（delivered 一律不重发，
+   * D-006 零重复执行优先），created_at 升序；归属校验同 pending-leases
+   *（跨用户与不存在同语义 404 → HubHttpError）。
+   *
+   * 错误语义同 getPendingLeases：旧 backend 无该端点（404）/ 网络错 → 抛
+   * HubHttpError / 原生网络异常，由调用方（daemon 对账）降级 warn 不崩。
+   */
+  async getPendingControls(
+    runtimeId: string,
+  ): Promise<PendingControlCommand[]> {
+    const resp = await this._request<{ commands?: PendingControlCommand[] }>(
+      'GET',
+      `${REST_PREFIX}/runtimes/${encodeURIComponent(runtimeId)}/pending-controls`,
+    );
+    return resp.commands ?? [];
+  }
+
+  /**
+   * 控制指令消费回执：ids 批量置 acked。
+   *
+   * 端点：POST {REST_PREFIX}/runtimes/{runtimeId}/controls/ack，body `{ ids }`。
+   * ack 语义 = 「daemon 已处理」——消费成功与消费失败的业务性错误同样 ack
+   *（防毒丸指令无限重投，错误进 daemon 日志）；backend 对过期/已回执行静默
+   * 跳过（幂等）。返回 `{ acked: n }`（实际翻转行数）。
+   */
+  async ackControls(
+    runtimeId: string,
+    ids: string[],
+  ): Promise<{ acked: number }> {
+    return this._request<{ acked: number }>(
+      'POST',
+      `${REST_PREFIX}/runtimes/${encodeURIComponent(runtimeId)}/controls/ack`,
+      { ids },
     );
   }
 
@@ -985,6 +1080,44 @@ export class HubClient {
         error: String(e),
       });
     }
+  }
+
+  /**
+   * 2026-08-29-daemon-platform-resilience task-07（design A3）：PERMISSION_REQUEST
+   * 的 HTTP 上行兜底通道。
+   *
+   * 端点：POST {REST_PREFIX}/sessions/{sessionId}/permission-requests
+   * 鉴权：_headers() 的 X-API-Key（daemon 长期凭证）+ X-Claim-Token（lease 级，
+   * 该会话有 claim 语义时 backend 校验，对齐 runs/result 端点惯例）。
+   *
+   * 调用链：daemon.sendToHub 遇 WS 不通且 msg.type=PERMISSION_REQUEST 时改走本方法
+   * → backend handle_permission_request_http 创建待审记录（与 WS 上行同源汇聚：
+   * 复用 handle_permission_request 的校验/SSE 广播/dialog 持久化/5min timer）。
+   * 人审等待不设时限——backend 5min 超时 + daemon fallback timer 双兜底，
+   * 不再 fail-closed deny（断线期间人审挂起等待）。
+   *
+   * body：PERMISSION_REQUEST payload 原样透传（snake_case，session_id 冗余无害，
+   * backend 以 path 为准）。
+   *
+   * **失败语义**：非 2xx → HubHttpError（403=claim token 不匹配；网络/超时透传）。
+   * 调用方（daemon）fire-and-forget 降级 warn——resolve promise 交由
+   * PERMISSION_RESPONSE（WS/补拉）或 fallback timer 收口。
+   */
+  async submitPermissionRequest(
+    sessionId: string,
+    payload: Record<string, unknown>,
+    claimToken?: string,
+  ): Promise<Record<string, unknown>> {
+    const extraHeaders: Record<string, string> = {};
+    if (claimToken) {
+      extraHeaders['X-Claim-Token'] = claimToken;
+    }
+    return this._request<Record<string, unknown>>(
+      'POST',
+      `${REST_PREFIX}/sessions/${encodeURIComponent(sessionId)}/permission-requests`,
+      payload,
+      Object.keys(extraHeaders).length > 0 ? extraHeaders : undefined,
+    );
   }
 
   // ── session 反馈事件 HTTP 上报（change 2026-08-24-platform-session-feedback-fix / FR-01~03）─

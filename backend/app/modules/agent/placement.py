@@ -41,6 +41,33 @@ _LENDER_USER_ID_KEY = "_lender_user_id"
 _GRANT_ID_KEY = "_grant_id"
 
 
+def _runtime_row_ws_alive(row: dict) -> bool:
+    """task-02（D-007@v1）：候选 runtime 行的 WS 实连接复查。
+
+    ``DB status='online'`` 只说明心跳曾到达（HTTP 心跳周期 15s），WS 断开后
+    最长 45s 内 status 仍是 online——向这类「假在线」行派发即卡死。本函数对
+    候选行联查进程级 ws_hub 单例的 ``is_connected(row.daemon_instance_id)``
+    （hub 键控维度 = daemon_instance_id，与 SELECT 列同名）。
+
+    - raw SQL 行的 UUID 列可能以 str 返回（SQLite CHAR(32)），先归一再查。
+    - ``daemon_instance_id IS NULL``（daemon-entity-binding 迁移窗口前的旧行，
+      无 WS 键可查）→ 容忍放行：与 router 侧 ``runtime.daemon_instance_id or
+      runtime_id`` 同款兼容姿态，不因缺键拒绝派发。
+    - get_daemon_ws_hub 函数级 lazy import 对齐本模块跨域范式（:1072 先例）：
+      测试按 ``app.modules.daemon.ws_hub.get_daemon_ws_hub`` 逐个 patch 时
+      每次调用都取最新引用。
+    """
+    daemon_instance_id = row.get("daemon_instance_id")
+    if daemon_instance_id is None:
+        return True
+    daemon_id = (
+        uuid.UUID(daemon_instance_id) if isinstance(daemon_instance_id, str) else daemon_instance_id
+    )
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+    return get_daemon_ws_hub().is_connected(daemon_id)
+
+
 def _stamp_borrowed_flag(rt: dict, borrowed: bool, lender: uuid.UUID | None) -> dict:
     """Mark borrowed/lender on a resolved runtime dict (D-008@v1 / task-06).
 
@@ -1594,6 +1621,16 @@ class RunPlacementService:
         )
         row = result.mappings().first()
         if row is not None:
+            # task-02：DB 在线但 WS 不实连 → 视为离线返回 None（不进下方授权
+            # 分支——owner 谓词已命中说明是本人 runtime，授权分支是「钉定他人
+            # runtime」的语义，混入会绕过属主语义）。
+            if not _runtime_row_ws_alive(row):
+                log.info(
+                    "placement_pinned_row_skipped_ws_not_connected",
+                    runtime_id=str(runtime_id),
+                    daemon_instance_id=str(row.get("daemon_instance_id")),
+                )
+                return None
             return dict(row)
         # 代表钉定（skip_owner_check）语义零变化：owner 谓词已跳过，仍未命中 =
         # 离线/不存在，直接 None，不进授权分支。
@@ -1630,6 +1667,15 @@ class RunPlacementService:
         grant_row = grant_result.mappings().first()
         if grant_row is None:
             return None
+        # task-02：授权放行后仍要 WS 实连——DB 在线但 hub 无连接的行同样剔除
+        # （授权分支的 runtime 级在线复查竞态兜底之上再压实连接）。
+        if not _runtime_row_ws_alive(grant_row):
+            log.info(
+                "placement_pinned_grant_row_skipped_ws_not_connected",
+                runtime_id=str(runtime_id),
+                daemon_instance_id=str(grant_row.get("daemon_instance_id")),
+            )
+            return None
         rt = dict(grant_row)
         if grant.kind == "workspace_grant":
             rt[_BORROWED_FLAG_KEY] = True
@@ -1655,6 +1701,10 @@ class RunPlacementService:
         params: dict = {"user_id": user_id.hex}
         if provider:
             params["provider"] = provider
+        # task-02（D-007@v1）：去掉 LIMIT 1 取全量候选行，按心跳序逐行联查
+        # WS 实连接——DB 在线但 hub 无连接的「假在线」行剔除，命中第一行实连
+        # 候选即返回。用户名下 runtime 行数是个位数（每台 daemon 每 provider
+        # 一行），全量取回无分页压力。
         result = await self._session.execute(
             text(
                 f"""
@@ -1664,13 +1714,19 @@ class RunPlacementService:
                   AND status = 'online'
                   {where_extra}
                 ORDER BY last_heartbeat_at DESC NULLS LAST
-                LIMIT 1
                 """
             ),
             params,
         )
-        row = result.mappings().first()
-        return dict(row) if row else None
+        for row in result.mappings().all():
+            if _runtime_row_ws_alive(row):
+                return dict(row)
+            log.info(
+                "placement_candidate_skipped_ws_not_connected",
+                runtime_id=str(row.get("id")),
+                daemon_instance_id=str(row.get("daemon_instance_id")),
+            )
+        return None
 
     async def _send_ws_wakeup(
         self,

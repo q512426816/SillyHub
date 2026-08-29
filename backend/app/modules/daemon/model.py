@@ -497,3 +497,83 @@ class DaemonChangeWrite(BaseModel, table=True):
         default=None,
         sa_column=Column(Integer, nullable=True),
     )
+
+
+class DaemonControlCommand(BaseModel, table=True):
+    """A control command queued for reliable delivery to a daemon runtime.
+
+    2026-08-29-daemon-platform-resilience A2 / D-004@v1：控制指令（inject /
+    interrupt / end / resume / 审批结果 / provider 切换）先落库 pending，再经
+    ws_hub 推送，推送成功标 delivered；daemon 断线期间不丢——重连后补拉仅取
+    pending（**delivered 一律不重发**，D-006 零重复执行优先），消费成功 ack。
+    服务层 :class:`~app.modules.daemon.control_commands.ControlCommandService`。
+    """
+
+    __tablename__ = "daemon_control_commands"
+    __table_args__ = (
+        # 复合索引：daemon 补拉热路径 WHERE runtime_id=? AND status='pending'
+        # ORDER BY created_at（照 idx_daemon_task_leases_runtime_status_created 先例）。
+        Index(
+            "idx_daemon_control_commands_runtime_status_created",
+            "runtime_id",
+            "status",
+            "created_at",
+        ),
+        Index("idx_daemon_control_commands_status", "status"),
+    )
+
+    id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(Uuid(as_uuid=True), primary_key=True, nullable=False),
+    )
+    runtime_id: uuid.UUID = Field(
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("daemon_runtimes.id", ondelete="CASCADE"),
+            nullable=False,
+        ),
+    )
+    # 指令类型（design A2 词表）：session_inject / session_interrupt /
+    # session_end / session_resume / permission_response / provider_config_changed。
+    # 亦决定 enqueue 缺省 expires_at（inject 10min、permission_response 6min、
+    # 其余 30min，常量落 control_commands.py）。
+    kind: str = Field(
+        sa_column=Column(String(32), nullable=False),
+    )
+    # 与现有 WS 消息 payload 同构，下发时注入 command_id（=本表 id）作幂等键。
+    payload: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
+    # 投递状态机（design A2，free-form string column 免后续加值迁移）：
+    # pending（落库待发/待补拉）→ delivered（WS 推送成功，不重发）
+    # → acked（daemon 消费回执）；expired（pending 过期 / delivered 未 ack 超时，
+    # 由 GC 收敛）。acked 保留 1h 后由 GC 删除。
+    status: str = Field(
+        default="pending",
+        sa_column=Column(
+            String(20),
+            nullable=False,
+            server_default=text("'pending'"),
+        ),
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            server_default=text("now()"),
+        ),
+    )
+    delivered_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    ack_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    expires_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )

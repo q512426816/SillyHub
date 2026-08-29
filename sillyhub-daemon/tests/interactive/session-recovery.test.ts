@@ -405,3 +405,35 @@ describe('恢复后 inject 续 turn（spike D3）', () => {
     ).rejects.toThrow(SessionNotActiveError);
   });
 });
+
+// ── task-08（2026-08-29-daemon-platform-resilience / R6）：恢复保留语义锚点 ────
+//
+// daemon 侧「recover 网络类失败保留 sessions.json 记录 + 超龄 7 天清理」依赖
+// SessionManager 两个不变量，此处锁定（daemon 的合并落盘 / _recoveryRecordExpired
+// 消费方见 daemon-stop-suspend.test.ts）：
+//   1. snapshotPersistable 携带 lastActiveAt（超龄清理的时间锚点）；
+//   2. reconnecting 中间态不落盘——保留记录不在 store，daemon 必须经合并快照
+//      回写才不丢（flush 只写 snapshot 的丢档窗口由 daemon 对冲）。
+
+describe('task-08：恢复保留语义锚点（lastActiveAt + reconnecting 不落盘）', () => {
+  it('snapshotPersistable 携带 lastActiveAt（daemon 超龄 7 天清理的时间锚点）', async () => {
+    const mock = makeMockDriver();
+    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+    await sm.create(BASE_INPUT);
+    mock.emitMessage(systemInit('sdk-sess-1'));
+    mock.emitResult(resultSuccess());
+    const recs = sm.snapshotPersistable();
+    expect(recs).toHaveLength(1);
+    expect(recs[0]!.lastActiveAt).toEqual(expect.any(Number));
+    expect(recs[0]!.lastActiveAt).toBeGreaterThan(0);
+  });
+
+  it('restoreAndReconnect 后（reconnecting，未 markReconnected）→ 不在 snapshot', async () => {
+    const mock = makeMockDriver();
+    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+    await sm.restoreAndReconnect(RECORD);
+    // store 有条目（reconnecting 中间态），但可恢复快照不含它。
+    expect(sm.get('sess-9')).toBeDefined();
+    expect(sm.snapshotPersistable()).toEqual([]);
+  });
+});

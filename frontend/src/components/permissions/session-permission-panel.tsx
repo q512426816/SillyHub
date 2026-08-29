@@ -14,6 +14,10 @@
  *   4. task-08（2026-08-24-platform-session-feedback-fix FR-04 / D-003@v1）：卡片可
  *      最小化为右下角浮动胶囊（未决角标 + 最近一条标题），wrapper hidden 切显隐、
  *      卡组件不卸载 → 已填内容保留；permission_resolved 经 removeCard 同步清胶囊计数。
+ *   5. task-09（2026-08-29-daemon-platform-resilience / design A6）：SSE 断线无限
+ *      退避自动重连（共享 RECONNECT_BACKOFF_MS 档位，subscribeAgentSessionsEvents
+ *      先例）+ 重连成功补拉该会话 pending dialogs（既有 REST，幂等合并）——替换
+ *      onerror 空处理仅靠 refetchInterval 兜底的现状（refetchInterval 保留双保险）。
  *
  * 仍接收 sessionIds 列表为每个 session 开 SSE 订阅 permission_request /
  * permission_resolved，聚合到统一的待决策卡片列表。permission_resolved（decision 字段）
@@ -36,10 +40,12 @@ export { resolvePendingTitle };
 import { Badge } from "@/components/ui/badge";
 import { getApiBaseUrl } from "@/lib/api";
 import {
+  fetchPendingDialogs,
   parseSessionPermissionEvent,
+  RECONNECT_BACKOFF_MS,
   type SessionPermissionRequest,
 } from "@/lib/daemon";
-import { fetchSse, type FetchSseConnection } from "@/lib/fetch-sse";
+import { fetchSse, type FetchSseConnection, type FetchSseEvent } from "@/lib/fetch-sse";
 import { useSession } from "@/stores/session";
 
 export interface SessionPermissionPanelProps {
@@ -186,20 +192,63 @@ export function SessionPermissionPanel({
     setMinimizedIds(new Set());
 
     const base = getApiBaseUrl();
-    // task-10 / NFR-1：SSE 连接数硬上限——超出 MAX_SESSION_SSE 的 session 不订阅，
-    // 靠 GET /workspaces/{id}/dialogs refetchInterval 兜底（task-06）。
-    for (const [i, sid] of sessionIds.entries()) {
-      if (i >= MAX_SESSION_SSE) break;
-      const url = new URL(`${base}/api/daemon/sessions/${sid}/stream`);
-      // task-12：token 不再拼 URL query（访问日志明文泄漏），fetch-sse 放
-      // Authorization Bearer header。
-      const es = fetchSse(
-        url.toString(),
-        accessToken ? { token: accessToken } : {},
-      );
-      sourcesRef.current.set(sid, es);
 
-      es.onmessage = (e) => {
+    /**
+     * 单会话订阅（task-09 / design A6：SSE 断线无限退避自动重连）。
+     *
+     * 模式抄 subscribeAgentSessionsEvents（lib/daemon.ts，共享
+     * RECONNECT_BACKOFF_MS 档位表）：fetch-sse 无自动重连（task-12 取舍），
+     * 断连期间 Redis Pub/Sub 广播的 permission_* 事件对本连接永久丢失——
+     * onerror → 档位退避重建连接（30s 封顶、收到事件归零、永不停表）；
+     * 断开过（hadDisconnection）后的下一次「连接成功」（onopen 或首条消息，
+     * 先到者）补拉一次该会话 pending dialogs（既有 REST GET /sessions/{id}/
+     * dialogs，经 mergeDialogRequests 幂等合并）兜断线窗口丢的请求。替换原
+     * onerror 空处理仅靠 refetchInterval 兜底的现状（refetchInterval 仍保留，
+     * 双保险）。
+     */
+    const subscribeSession = (sid: string): (() => void) => {
+      let closed = false; // 订阅终止（effect cleanup / sessionIds 重建）后不再重连
+      let retryCount = 0; // 退避档位（收到事件归零，对齐 streamSession）
+      let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+      let hadDisconnection = false; // 断开过 → 下一次连接成功补拉一次 dialogs
+      let connectedFired = false; // 本连接周期「连接成功」已触发（onopen / 首条消息先到者）
+
+      /** 本连接周期恰一次：断开过则补拉 pending dialogs（按 request_id 幂等合并）。 */
+      const fireConnectedOnce = () => {
+        if (connectedFired) return;
+        connectedFired = true;
+        if (!hadDisconnection) return;
+        hadDisconnection = false;
+        void fetchPendingDialogs(sid)
+          .then((dialogs) => {
+            for (const req of dialogs) {
+              // SSE 路来源字段缺省；page 已知 workspaceName 本地补全（同 onmessage）。
+              const enriched: SessionPermissionRequest = workspaceName
+                ? { ...req, workspace_name: workspaceName }
+                : req;
+              setCards((prev) => mergeDialogRequests(prev, enriched, false));
+            }
+          })
+          .catch(() => {
+            /* 补拉失败静默：refetchInterval / 下一次断连恢复再兜 */
+          });
+      };
+
+      const scheduleReconnect = () => {
+        if (closed) return;
+        const delay =
+          RECONNECT_BACKOFF_MS[
+            Math.min(retryCount, RECONNECT_BACKOFF_MS.length - 1)
+          ]!;
+        retryCount += 1;
+        reconnectTimer = setTimeout(() => {
+          reconnectTimer = null;
+          if (!closed) wire();
+        }, delay);
+      };
+
+      /** data 帧解析（task-09 抽出：首连与每次重连的 onmessage 共用）。 */
+      const handleFrame = (e: FetchSseEvent) => {
         try {
           const data = JSON.parse(e.data) as unknown;
           const parsed = parseSessionPermissionEvent(data);
@@ -221,13 +270,50 @@ export function SessionPermissionPanel({
           // 非 JSON / 非 permission 事件：忽略（其它 SSE 事件类型由订阅方自行处理）
         }
       };
-      es.onerror = () => {
-        // 404/401/网络中断：fetch-sse 不自动重连（task-12 取舍），靠
-        // GET /workspaces/{id}/dialogs refetchInterval 兜底（task-06）。
+
+      const wire = () => {
+        const url = new URL(`${base}/api/daemon/sessions/${sid}/stream`);
+        // task-12：token 不再拼 URL query（访问日志明文泄漏），fetch-sse 放
+        // Authorization Bearer header。task-09：重连用 effect 闭包的 accessToken
+        // ——token 刷新会经 effect deps 重建订阅，重连不带旧值。
+        const es = fetchSse(url.toString(), accessToken ? { token: accessToken } : {});
+        sourcesRef.current.set(sid, es);
+        connectedFired = false; // 新连接周期重置（onopen / 首条消息先到者触发）
+        es.onopen = () => {
+          fireConnectedOnce();
+        };
+        es.onmessage = (e) => {
+          retryCount = 0; // 收到事件 = 连接健康，退避档位归零
+          fireConnectedOnce();
+          handleFrame(e);
+        };
+        es.onerror = () => {
+          // 404/401/网络中断：fetch-sse 不自动重连（task-12 取舍）——task-09 起
+          // 按退避自动重建（上方 scheduleReconnect），refetchInterval 兜底保留。
+          es.close();
+          hadDisconnection = true;
+          scheduleReconnect();
+        };
       };
-    }
+
+      wire();
+      return () => {
+        closed = true;
+        if (reconnectTimer) {
+          clearTimeout(reconnectTimer);
+          reconnectTimer = null;
+        }
+      };
+    };
+
+    // task-10 / NFR-1：SSE 连接数硬上限——超出 MAX_SESSION_SSE 的 session 不订阅，
+    // 靠 GET /workspaces/{id}/dialogs refetchInterval 兜底（task-06）。
+    const unsubscribes = sessionIds
+      .slice(0, MAX_SESSION_SSE)
+      .map((sid) => subscribeSession(sid));
 
     return () => {
+      for (const unsub of unsubscribes) unsub();
       sourcesRef.current.forEach((es) => es.close());
       sourcesRef.current.clear();
     };

@@ -267,11 +267,15 @@ class DaemonHeartbeatResponse(BaseModel):
 
     2026-07-06-allowed-roots-per-runtime：返 per-runtime allowed_roots map
     （runtimes: [{runtime_id, allowed_roots}]），daemon _syncAllowedRoots per-runtime 同步。
+    2026-08-29-daemon-platform-resilience task-04：新增 ``pending_controls``——
+    该 daemon 全部 runtime 名下 pending 控制指令计数（design A1/A2 对账触发
+    约定字段名；daemon 心跳循环见 >0 即补拉控制指令）。
     """
 
     daemon_instance_id: uuid.UUID
     status: str
     runtimes: list[DaemonHeartbeatRuntimePolicy] = Field(default_factory=list)
+    pending_controls: int = 0
 
 
 # SSE response headers shared with the run-scoped stream endpoint
@@ -438,6 +442,11 @@ async def daemon_heartbeat(
         .scalars()
         .all()
     )
+    # task-04（design A1/A2）：pending 控制指令计数（该 daemon 全部 runtime 的
+    # pending 行，一次聚合查询）——daemon 据此触发控制指令补拉对账。
+    from app.modules.daemon.runtime.service import RuntimeService
+
+    pending_controls = await RuntimeService(session).count_pending_control_commands(instance.id)
     return DaemonHeartbeatResponse(
         daemon_instance_id=instance.id,
         status=instance.status or "online",
@@ -448,6 +457,7 @@ async def daemon_heartbeat(
             )
             for rt in rt_rows
         ],
+        pending_controls=pending_controls,
     )
 
 
@@ -1470,6 +1480,64 @@ async def mark_session_recovery_failed(
     return SessionRecoveryResponse(session_id=session_id, status=result_status)
 
 
+# ── daemon 优雅停止批量挂起（2026-08-29-daemon-platform-resilience task-05 /
+#    design A5 / FR-04）───────────────────────────────────────────────────────
+# 固定路径声明在动态三段式 ``/sessions/{session_id}/...`` 之前（对齐
+# /runtimes/page 先例）：本文件无二段式 POST /sessions/{id} 路由，当前无遮蔽，
+# 前置声明防后续新增时 ``suspend-batch`` 被当 UUID 解析 422。
+
+
+class SessionSuspendBatchRequest(BaseModel):
+    """Body for POST /sessions/suspend-batch（task-05）.
+
+    daemon ``stop()`` 在 markOffline 前上报自身标识；backend 按
+    ``daemon_local_id``（= ``daemon_instances.id``）定位该 daemon 全部 runtime
+    名下的 active 会话做三步挂起收敛（daemon 侧调用方属 task-08）。
+    """
+
+    daemon_local_id: uuid.UUID = Field(description="daemon 本地 uuid（daemon_instances.id）")
+
+
+class SuspendBatchResponse(BaseModel):
+    """POST /sessions/suspend-batch 响应（task-05 provides 契约）.
+
+    ``suspended`` = 实际翻挂起的会话数；``runs_failed`` = 同批收敛 failed 的
+    活跃轮 run 数（error_code=daemon_stopped）。重复调用幂等——已挂起会话
+    no-op 计 0。
+    """
+
+    suspended: int
+    runs_failed: int
+
+
+@router.post(
+    "/sessions/suspend-batch",
+    response_model=SuspendBatchResponse,
+)
+async def suspend_sessions_batch(
+    data: SessionSuspendBatchRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> SuspendBatchResponse:
+    """daemon 优雅停止：该 daemon 全部 active 会话批量挂起（task-05 / design A5）.
+
+    daemon ``stop()`` 在 markOffline 前调用。单事务三步收敛（中断 run →
+    failed（error_code=daemon_stopped）、会话 → suspended、挂起 lease →
+    cancelled），条件 UPDATE 幂等可重入；调用失败（网络已断）与强杀等价，
+    由 600s offline sweep 兜底收敛 suspended（design A5 已声明的 fallback）。
+    归属校验对齐 heartbeat（actor_user_id）：instance 必须属于当前认证主体
+    （api-key owner），不存在/越权同语义 404。
+    """
+    instance = await session.get(DaemonInstance, data.daemon_local_id)
+    if instance is None or instance.user_id != user.id:
+        raise DaemonRuntimeNotFound(
+            "守护进程不存在或不属于当前用户。",
+            details={"daemon_local_id": str(data.daemon_local_id)},
+        )
+    result = await SessionService(session).suspend_sessions_for_daemon(data.daemon_local_id)
+    return SuspendBatchResponse(suspended=result.suspended, runs_failed=result.runs_failed)
+
+
 @router.post("/sessions/{session_id}/ready")
 async def notify_session_ready(
     session_id: uuid.UUID,
@@ -2025,6 +2093,84 @@ async def respond_session_permission(
         decision=body.decision,
         message=body.message,
         dialog_result=body.dialog_result,
+    )
+
+
+# ── Daemon HTTP permission uplink (task-07 / design A3) ─────────────────────
+# daemon PERMISSION_REQUEST 的 WS 不通兜底通道。与 WS 上行同源汇聚：service 侧
+# handle_permission_request_http 复用 handle_permission_request 的全部校验 /
+# SSE 广播 / dialog 持久化 / plain 5min timer 语义。等待人审不设时限——backend
+# 5min 超时 + daemon fallback timer 双兜底（断线期间挂起等待而非 fail-closed deny）。
+
+
+class DaemonPermissionUplinkRequest(BaseModel):
+    """Body for POST /sessions/{id}/permission-requests（task-07 / design A3）.
+
+    字段与 protocol.PermissionRequestPayload 对齐（session_id 在 path，不重复）；
+    由路由层组装成完整 payload 委托 permission service。
+    """
+
+    run_id: uuid.UUID
+    # daemon 生成的 wire request_id（PERMISSION_RESPONSE 原样回填关联）。
+    request_id: str = Field(min_length=1, max_length=128)
+    tool_name: str = Field(min_length=1, max_length=128)
+    # 工具调用参数 JSON，原样转发（前端审批卡渲染用）。
+    input: dict
+    tool_use_id: str | None = Field(default=None, max_length=256)
+    # AskUserQuestion dialog 扩展：set → 持久化 dialog 行且不挂 5min timer。
+    dialog_kind: str | None = Field(default=None, max_length=64)
+    dialog_payload: dict | None = None
+
+
+class DaemonPermissionUplinkResponse(BaseModel):
+    session_id: uuid.UUID
+    request_id: str
+    # True=已受理（SSE 已广播，dialog 落行 / plain 挂 timer）；False=校验不过
+    # 被丢弃（daemon 侧记 warn，等待交由超时兜底）。
+    accepted: bool
+
+
+@router.post(
+    "/sessions/{session_id}/permission-requests",
+    response_model=DaemonPermissionUplinkResponse,
+)
+async def submit_session_permission_request(
+    session_id: uuid.UUID,
+    body: DaemonPermissionUplinkRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+    service: PermissionServiceDep,
+    # 对齐 runs/result 端点惯例（X-Claim-Token lease 级凭证）；该会话有 claim
+    # 语义时 service 侧强制匹配（403），否则跳过（条件校验见 service 注释）。
+    # 带默认值参数置于无默认值参数之后（Python 语法约束）。
+    x_claim_token: Annotated[str | None, Header(alias="X-Claim-Token")] = None,
+) -> DaemonPermissionUplinkResponse:
+    """Daemon HTTP uplink for a canUseTool / dialog permission request (task-07).
+
+    daemon ``sendToHub`` 遇 WS 不通时经 ``hubClient.submitPermissionRequest``
+    改走本端点创建待审记录——人审挂起等待而非直接 deny。Auth:
+    ``get_current_principal`` 接受 daemon ``X-API-Key``（长期凭证）；
+    ``X-Claim-Token`` 由 service 按会话 lease 的 claim 语义条件校验。
+
+    幂等性（dialog）：request_id 唯一约束 upsert，daemon 重放不 fork 第二张
+    pending 卡（与 WS 上行同一持久化路径）；plain approval 的重复 request_id
+    替换既有 timer。
+    """
+    payload = PermissionRequestPayload(
+        session_id=session_id,
+        run_id=body.run_id,
+        request_id=body.request_id,
+        tool_name=body.tool_name,
+        input=body.input,
+        tool_use_id=body.tool_use_id,
+        dialog_kind=body.dialog_kind,
+        dialog_payload=body.dialog_payload,
+    )
+    accepted = await service.handle_permission_request_http(session_id, x_claim_token, payload)
+    return DaemonPermissionUplinkResponse(
+        session_id=session_id,
+        request_id=body.request_id,
+        accepted=accepted,
     )
 
 
@@ -4141,6 +4287,119 @@ async def get_pending_leases(
             }
         )
     return out
+
+
+# ---------------------------------------------------------------------------
+# 2026-08-29-daemon-platform-resilience task-04：控制指令补拉与 ACK 端点
+# （design A2 / D-005@v1 / D-006@v1）。鉴权对齐 pending-leases 惯例：
+# get_current_principal（daemon X-API-Key / Bearer）+ runtime 归属校验
+# （不匹配/不存在同语义 404，owner-only）。
+# ---------------------------------------------------------------------------
+
+
+class ControlCommandItem(BaseModel):
+    """补拉返回的单条控制指令（task-04 provides 契约：id/kind/payload/created_at）。
+
+    ``payload`` 与 WS 消息 payload 同构且已含 ``command_id``（daemon 侧幂等键，
+    补拉与 WS 推送共用同键去重）。
+    """
+
+    id: uuid.UUID
+    kind: str
+    payload: dict[str, Any] | None = None
+    created_at: datetime
+
+
+class PendingControlsResponse(BaseModel):
+    """GET pending-controls 响应（仅 status=pending，created_at 升序）。"""
+
+    commands: list[ControlCommandItem] = Field(default_factory=list)
+
+
+class ControlsAckRequest(BaseModel):
+    """POST controls/ack 请求体。
+
+    ``ids`` 为 daemon 已处理（含消费失败的业务性错误——ack 语义=已处理防毒丸
+    重投，不承诺成功）的指令 id 列表；空列表合法（acked=0）。
+    """
+
+    ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class ControlsAckResponse(BaseModel):
+    """POST controls/ack 响应：实际翻转 acked 的行数。"""
+
+    acked: int
+
+
+@router.get(
+    "/runtimes/{runtime_id}/pending-controls",
+    response_model=PendingControlsResponse,
+)
+async def get_pending_controls(
+    runtime_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> PendingControlsResponse:
+    """补拉待发控制指令（daemon 重连对账 / 心跳 pending_controls>0 触发）.
+
+    2026-08-29-daemon-platform-resilience task-04 / design A2 / D-006@v1：
+    **仅返回 status=pending 的指令**，``created_at`` 升序（FIFO）——delivered
+    一律不重发（WS 推送成功 = TCP 已达 daemon 进程，重发 inject 会向 agent
+    双发 prompt），过期与 delivered-未-ack 行由 GC 清理。归属校验同
+    pending-leases（owner-only，跨用户与不存在同语义 404）。
+    """
+    from app.modules.daemon.control_commands import ControlCommandService
+
+    runtime = await session.get(DaemonRuntime, runtime_id)
+    if runtime is None or runtime.user_id != user.id:
+        raise DaemonRuntimeNotFound(
+            "运行时不存在或不属于当前用户。",
+            details={"runtime_id": str(runtime_id)},
+        )
+
+    rows = await ControlCommandService(session).fetch_pending(runtime_id)
+    return PendingControlsResponse(
+        commands=[
+            ControlCommandItem(
+                id=row.id,
+                kind=row.kind,
+                payload=row.payload,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
+    )
+
+
+@router.post(
+    "/runtimes/{runtime_id}/controls/ack",
+    response_model=ControlsAckResponse,
+)
+async def ack_controls(
+    runtime_id: uuid.UUID,
+    data: ControlsAckRequest,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> ControlsAckResponse:
+    """daemon 消费回执：ids 批量置 acked（pending|delivered 均可，终态幂等跳过）.
+
+    2026-08-29-daemon-platform-resilience task-04 / design A2：ack 语义 =
+    「daemon 已处理」——消费成功与消费失败的业务性错误同样 ack（防毒丸指令
+    无限重投，错误进 daemon 日志）；过期/已回执行静默跳过。翻转范围限定
+    本 runtime 名下（归属校验后防越权 ack 他人指令）。返回实际翻转数。
+    """
+    from app.modules.daemon.control_commands import ControlCommandService
+
+    runtime = await session.get(DaemonRuntime, runtime_id)
+    if runtime is None or runtime.user_id != user.id:
+        raise DaemonRuntimeNotFound(
+            "运行时不存在或不属于当前用户。",
+            details={"runtime_id": str(runtime_id)},
+        )
+
+    acked = await ControlCommandService(session).ack(data.ids, runtime_id=runtime_id)
+    return ControlsAckResponse(acked=acked)
 
 
 # ---------------------------------------------------------------------------

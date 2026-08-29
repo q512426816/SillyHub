@@ -846,6 +846,7 @@ class TestPlainInjectZeroRegression:
             mocked_hub.send_session_control.await_args.args[2],
         )
         assert msg_type == DAEMON_MSG_SESSION_INJECT
+        # task-04：控制指令三段式下发在 payload 尾部注入 command_id（向后兼容）
         assert set(payload.keys()) == {
             "session_id",
             "lease_id",
@@ -853,6 +854,7 @@ class TestPlainInjectZeroRegression:
             "prompt",
             "claim_token",
             "runtime_id",
+            "command_id",
         }
         assert payload["prompt"] == "second"
         assert payload["run_id"] == str(run.id)

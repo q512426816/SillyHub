@@ -7,7 +7,9 @@
  * 职责（单一）：
  *   - 建立 WS 连接（query runtime_id 标识身份，不主动发 register）
  *   - 收发 DaemonMessage（type 来自 task-03 MSG 常量）
- *   - 断线后 5s 固定退避重连（design §9 + FR-03）
+ *   - 断线后指数退避重连（1/2/4/8/16/30s 封顶 + 每档 ±20% jitter；
+ *     收到任何消息/pong 重置第 0 档——2026-08-29-daemon-platform-resilience
+ *     task-06 / design A1，替代原固定 5s）
  *   - 对外暴露连接状态 + onDisconnected 回调，供 task-20 Daemon 决定是否启动 HTTP 轮询兜底
  *   - task-05（D-005@v1）：承担 `daemon:rpc` 分发——收到 RPC 请求后调注册的 handler，
  *     异步执行后回发 `daemon:rpc_result`。分发层只做 handler 查找/执行/回发，
@@ -28,8 +30,19 @@ import type { DaemonMessage } from './types.js';
 
 // ── 常量 ──────────────────────────────────────────────────────────────────────
 
-/** 断线重连退避间隔（毫秒）。design §9 + FR-03：5s，与 Python 版策略一致。 */
-export const RECONNECT_INTERVAL_MS = 5_000;
+/**
+ * 断线重连退避档位序列（毫秒）。2026-08-29-daemon-platform-resilience task-06 /
+ * design A1：固定 5s 改指数退避 `[1, 2, 4, 8, 16, 30]s` 封顶 30s——服务端长宕机时
+ * 从「每 5s 撞一次」收敛到「最快 30s 一次」，减少无效握手风暴；每档叠加 ±20%
+ * 随机抖动（`RECONNECT_JITTER_RATIO`）防大量 daemon 同步重连（惊群）。
+ * 收到任何 WS 消息或 pong（链路双向存活证据）→ 档位重置回第 0 档。
+ */
+export const RECONNECT_BACKOFF_SCHEDULE_MS: readonly number[] = [
+  1_000, 2_000, 4_000, 8_000, 16_000, 30_000,
+];
+
+/** 退避抖动比例（每档 ±20%：实际延时 = 档位基准 × [0.8, 1.2] 随机系数）。 */
+export const RECONNECT_JITTER_RATIO = 0.2;
 
 /** 单次 connect 的握手超时（毫秒）。Python open_timeout=10 → 10s。 */
 export const CONNECT_TIMEOUT_MS = 10_000;
@@ -111,10 +124,16 @@ export interface WsClientOptions {
    * 仅进升级请求头，不落日志（spawn-env 不泄漏铁律）。
    */
   apiKey?: string;
+  /**
+   * 退避抖动随机源（可选，默认 Math.random，取值域 [0, 1)）。
+   * 2026-08-29-daemon-platform-resilience task-06：注入用——测试固定 jitter 后
+   * 退避延时完全确定（()=>0.5 即无抖动基准值、()=>0 即 0.8 倍、()=>1 即 1.2
+   * 倍）。生产路径不传。
+   */
+  jitterFn?: () => number;
   /** 事件回调。 */
   callbacks?: WsClientCallbacks;
 }
-
 // ── RPC 分发类型（task-05 / D-005@v1）─────────────────────────────────────────
 
 /**
@@ -177,6 +196,14 @@ export class WsClient {
   private _running = false;
   /** 重连退避定时器句柄，close() / 新连接成功时清除。 */
   private _reconnectTimer: NodeJS.Timeout | null = null;
+  /**
+   * 重连退避档位（`RECONNECT_BACKOFF_SCHEDULE_MS` 下标，2026-08-29 task-06）。
+   * 每调度一次重连 +1（封顶最后档）；收到任何 WS 消息或 pong（链路健康证据）
+   * 重置回 0；close() 主动关闭亦归零（新生命周期从第 0 档起）。
+   */
+  private _reconnectAttempt = 0;
+  /** 退避抖动随机源（构造注入，缺省 Math.random；测试可固定）。 */
+  private readonly _jitterFn: () => number;
   /** connect 握手超时定时器。 */
   private _connectTimer: NodeJS.Timeout | null = null;
   /** keepalive ping 周期定时器（_handleOpen 启动，_handleClose/close 清除）。 */
@@ -209,6 +236,7 @@ export class WsClient {
   constructor(opts: WsClientOptions) {
     this._opts = opts;
     this._callbacks = opts.callbacks ?? {};
+    this._jitterFn = opts.jitterFn ?? Math.random;
   }
 
   // ── 公共 API ───────────────────────────────────────────────────────────────
@@ -313,6 +341,8 @@ export class WsClient {
     this._clearReconnectTimer();
     this._clearConnectTimer();
     this._stopKeepalive();
+    // 主动关闭=新生命周期起点，退避档位归零（task-06）。
+    this._reconnectAttempt = 0;
     if (this._ws) {
       try {
         this._ws.close(1000, 'client_shutdown');
@@ -429,6 +459,9 @@ export class WsClient {
   private _handleMessage(data: WebSocket.RawData): void {
     // task-09 / D-003@v1：消息入口即记时间戳（非法 JSON 也证明链路活着，一并计入）。
     this._lastMessageAt = Date.now();
+    // task-06（design A1）：收到任何 WS 消息（含非法 JSON——链路双向存活证据）
+    // 把重连退避档位重置回第 0 档——刚经历过的断线是瞬态的，下次断线从 1s 重新起步。
+    this._reconnectAttempt = 0;
     // ws 库 message 事件 payload：Buffer / Buffer[] / ArrayBuffer。统一转 string。
     const raw =
       typeof data === 'string'
@@ -613,7 +646,12 @@ export class WsClient {
   }
 
   /**
-   * 启动 5s 固定退避重连（design §9 + FR-03）。
+   * 指数退避重连调度（2026-08-29-daemon-platform-resilience task-06 / design A1，
+   * 替代原固定 5s）。
+   *
+   * 档位序列 `RECONNECT_BACKOFF_SCHEDULE_MS = [1,2,4,8,16,30]s` 封顶 30s，每档
+   * 叠加 ±20% 抖动（jitterFn 注入源）；每次调度档位 +1（封顶后驻留最后档），
+   * 收到任何 WS 消息或 pong 重置回第 0 档（见 _handleMessage/_handlePong）。
    * 幂等：已有 pending timer 时不重复调度（边界 §6 防重连风暴）。
    */
   private _scheduleReconnect(): void {
@@ -621,12 +659,29 @@ export class WsClient {
       return;
     }
     this._state = WsState.Reconnecting;
+    const delay = this._nextReconnectDelayMs();
     this._reconnectTimer = setTimeout(() => {
       this._reconnectTimer = null;
       this.connect();
-    }, RECONNECT_INTERVAL_MS);
+    }, delay);
     // 进程退出时不阻塞（unref 仅 Node 有效）。
     this._reconnectTimer.unref?.();
+  }
+
+  /**
+   * 取当前档位延时并推进档位。抖动系数 = 1 + (rand×2−1)×RATIO ∈ [0.8, 1.2]。
+   * 档位推进封顶在最后档（30s）——长宕机时稳定 30s±20% 重试。
+   */
+  private _nextReconnectDelayMs(): number {
+    const lastIdx = RECONNECT_BACKOFF_SCHEDULE_MS.length - 1;
+    const idx = Math.min(this._reconnectAttempt, lastIdx);
+    const base =
+      RECONNECT_BACKOFF_SCHEDULE_MS[idx] ??
+      RECONNECT_BACKOFF_SCHEDULE_MS[lastIdx] ??
+      30_000;
+    this._reconnectAttempt = Math.min(this._reconnectAttempt + 1, lastIdx);
+    const jitter = 1 + (this._jitterFn() * 2 - 1) * RECONNECT_JITTER_RATIO;
+    return Math.round(base * jitter);
   }
 
   private _clearReconnectTimer(): void {
@@ -706,6 +761,9 @@ export class WsClient {
     // 看门狗配套判据）：健康链路 ping/pong（30s 周期）恒刷新新鲜度，应用层
     // 空闲不误判陈旧；链路黑洞时 ping 得不到 pong，新鲜度照常衰减。
     this._lastMessageAt = Date.now();
+    // task-06（design A1）：pong 同样重置重连退避档位（应用层空闲但链路健康时
+    // 下次断线不应继承历史高档位）。
+    this._reconnectAttempt = 0;
   }
 
   /** 停止 keepalive：清 ping 周期 + pong 超时定时器。 */

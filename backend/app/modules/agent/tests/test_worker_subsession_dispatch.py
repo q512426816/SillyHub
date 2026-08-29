@@ -42,6 +42,45 @@ from app.modules.workspace.model import Workspace
 _TS = "2026-08-25T00:00:00+00:00"
 
 
+@pytest.fixture(autouse=True)
+def _ws_alive_hub(monkeypatch: pytest.MonkeyPatch) -> None:
+    """task-02 placement 实连接过滤：测试只灌 DB online，fake hub 使候选行视为实连。
+
+    ``placement._runtime_row_ws_alive`` 对候选行联查 ws_hub 单例的
+    ``is_connected``，测试环境无真 WS 连接会把 DB-online 候选行全剔除（派发
+    runtime 解析返 None → run failed）。照 test_worker_subsession_lifecycle
+    ``_recording_ws_hub`` 先例 patch 模块级 ``get_daemon_ws_hub`` 返恒在线假
+    hub（placement 为函数级 lazy import，patch 模块属性即生效）。
+    """
+    from app.modules.daemon import ws_hub as ws_hub_mod
+
+    class _AliveHub:
+        def is_connected(self, daemon_id):
+            return True  # DB-online 候选行一律视为 WS 实连
+
+        async def send_wakeup(self, daemon_id, **kwargs):
+            return True
+
+        async def send_session_control(self, daemon_id, msg_type, payload):
+            return True
+
+        async def send_to_runtime(self, daemon_id, message):
+            return True
+
+        async def send_rpc(self, daemon_id, method, params, *, timeout=None):
+            # 测试环境无真 socket：host_fs RPC 实发按真实 hub 离线语义抛
+            # DaemonRuntimeOffline（delegate._via_rpc_or_degrade 捕获降级——
+            # 真 delegate 用例维持「worktree 阶段失败」形态）。
+            from app.modules.daemon.service import DaemonRuntimeOffline
+
+            raise DaemonRuntimeOffline(
+                f"daemon '{daemon_id}' WS send failed (offline).",
+                details={"daemon_id": str(daemon_id)},
+            )
+
+    monkeypatch.setattr(ws_hub_mod, "get_daemon_ws_hub", lambda: _AliveHub())
+
+
 # ---------------------------------------------------------------------------
 # Seed helpers
 # ---------------------------------------------------------------------------

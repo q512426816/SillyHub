@@ -2,13 +2,22 @@
  * Outbox——失败消息落盘暂存（task-15 / FR-06 / FR-09 / D-001@v2）。
  *
  * 来源：design.md §5 Phase3 / §7 Outbox 接口 / §10 R-04/R-07；plan.md Wave3 task-15。
- * 本质：submitWithRetry 用尽后把消息信封落盘 JSONL（`<outboxDir>/<runId>.jsonl`），
+ * 本质：submitWithRetry 用尽后把消息信封落盘 JSONL（`<outboxDir>/<dedupId>.jsonl`），
  *   daemon 重启后 load 恢复 pending，drainOutbox（task-18）在网络恢复后补发。
  *
+ * 2026-08-29-daemon-platform-resilience task-07（D-007@v1 outbox 扩展形态）：
+ *   - entry 加可选 `kind` 字段（'messages'（缺省）/ 'run_result' / 'session_end'）；
+ *   - 文件命名维度由 runId 泛化为 dedupId（messages/run_result 用 runId、
+ *     session_end 用 sessionId）——entry.runId 字段即承载该 dedupId；
+ *   - 终态 entry 携带完整 payload 于 envelopes[0].message（dedup_key=dedupId）；
+ *   - `pending_token` 标记 claim_token 空窗/422 失效入箱的条目，待
+ *     SESSION_INJECT 刷新 token 后 drain 重放（A3/A5）。
+ *
  * 设计要点：
- *   - 每 run 一个 jsonl 文件，每 entry 一行 JSON append（enqueue）。
+ *   - 每 dedupId 一个 jsonl 文件，每 entry 一行 JSON append（enqueue）。
  *   - markDelivered 原子移除匹配 dedup_key：读全→过滤→写临时→rename（防并发损坏）。
- *   - load 启动时 glob 所有 .jsonl 读入内存 pending map（runId→entries[]）。
+ *   - load 启动时 glob 所有 .jsonl 读入内存 pending map（dedupId→entries[]）；
+ *     旧文件缺 kind 字段按 'messages' 兼容解析（向后兼容）。
  *   - 容量上限：per-run（maxPerRun）+ total（maxTotal），超限丢最旧 entry + warn（R-04）。
  *   - 文件损坏行跳过 + warn，不整体崩。
  *
@@ -26,13 +35,45 @@ export interface Envelope {
   dedup_key: string;
 }
 
+/**
+ * task-07（D-007@v1）：终态 entry kind 词表。
+ * 'messages'（流式消息，缺省）之外的两种终态载荷，drain 按 kind 路由到
+ * notifyRunResult / notifySessionEnd（SubmitClient 扩展方法）。
+ */
+export type OutboxTerminalKinds = 'run_result' | 'session_end';
+
+/** outbox entry 完整 kind 词表（含缺省的 messages）。 */
+export type OutboxEntryKind = 'messages' | OutboxTerminalKinds;
+
 /** outbox 落盘条目。 */
 export interface OutboxEntry {
   leaseId: string;
   claimToken: string;
+  /**
+   * 去重维度 id（task-07 泛化，即文件命名 `<dedupId>.jsonl` 的 dedupId）：
+   *   - kind=messages / run_result → AgentRun.id（既有语义不变）；
+   *   - kind=session_end → AgentSession.id。
+   * 内存 pending map 与落盘文件均以该值作 key。
+   */
   runId: string;
+  /**
+   * 消息信封。kind=messages 时为批量消息信封；kind=run_result 时单条——
+   * message 携带完整 result payload（status/is_error/usage 等）、dedup_key=runId；
+   * kind=session_end 时单条——message={ status, reason }、dedup_key=sessionId。
+   */
   envelopes: Envelope[];
   ts: string;
+  /**
+   * task-07（D-007@v1）：entry 载荷类型。缺省（含旧 `<runId>.jsonl` 文件 load）
+   * 按 'messages' 兼容解析。
+   */
+  kind?: OutboxEntryKind;
+  /**
+   * task-07（A3/A5）：claim_token 空窗或 422 失效入箱标记。drain 重放前经
+   * ClaimTokenRefresher 取当前有效 token（SESSION_INJECT 已刷新到 daemon
+   * SessionState），取不到则用 entry 原值重试、由 backend dedup/终态规则兜底。
+   */
+  pending_token?: boolean;
 }
 
 /**
@@ -63,8 +104,9 @@ export interface OutboxLogger {
 /**
  * 基于文件 JSONL 的 outbox 实现。
  *
- * 内存态：_pending: Map<runId, OutboxEntry[]>（load 后填充，enqueue/markDelivered 维护）。
- * 落盘：每 run 一个 .jsonl，enqueue append 一行，markDelivered 重写文件。
+ * 内存态：_pending: Map<dedupId, OutboxEntry[]>（load 后填充，enqueue/markDelivered 维护）；
+ * dedupId = entry.runId（task-07 泛化：messages/run_result 为 runId、session_end 为 sessionId）。
+ * 落盘：每 dedupId 一个 .jsonl，enqueue append 一行，markDelivered 重写文件。
  */
 export class FileOutbox implements Outbox {
   private readonly _pending = new Map<string, OutboxEntry[]>();
@@ -141,6 +183,7 @@ export class FileOutbox implements Outbox {
    * 启动恢复（FR-09）：glob `<dir>/*.jsonl`，逐文件读入 pending map。
    *
    * 文件损坏/非法 JSON 行 → 跳过该行 + warn，不整体崩。
+   * task-07（D-007 兼容）：旧文件 entry 缺 `kind` 字段 → 按 'messages' 解析。
    */
   async load(): Promise<void> {
     let files: string[];
@@ -152,20 +195,25 @@ export class FileOutbox implements Outbox {
     }
     for (const f of files) {
       if (!f.endsWith('.jsonl')) continue;
-      const runId = f.slice(0, -'.jsonl'.length);
+      const dedupId = f.slice(0, -'.jsonl'.length);
       const content = await readFile(join(this._dir, f), 'utf-8').catch(() => '');
       const entries: OutboxEntry[] = [];
       for (const line of content.split('\n')) {
         const trimmed = line.trim();
         if (!trimmed) continue;
         try {
-          entries.push(JSON.parse(trimmed) as OutboxEntry);
+          const parsed = JSON.parse(trimmed) as OutboxEntry;
+          // task-07：旧文件缺 kind 按 messages 兼容（写入端新 entry 恒带 kind）。
+          if (parsed.kind === undefined) {
+            parsed.kind = 'messages';
+          }
+          entries.push(parsed);
         } catch {
-          this._logger.warn('outbox_load_skip_bad_line', { run_id: runId });
+          this._logger.warn('outbox_load_skip_bad_line', { run_id: dedupId });
         }
       }
       if (entries.length > 0) {
-        this._pending.set(runId, entries);
+        this._pending.set(dedupId, entries);
       }
     }
   }
@@ -227,8 +275,9 @@ export class FileOutbox implements Outbox {
     return n;
   }
 
-  private _path(runId: string): string {
-    // runId 可能含路径分隔符风险，用 encodeURIComponent 规范化文件名。
-    return join(this._dir, `${encodeURIComponent(runId)}.jsonl`);
+  private _path(dedupId: string): string {
+    // dedupId（task-07 泛化：messages/run_result=runId、session_end=sessionId）
+    // 可能含路径分隔符风险，用 encodeURIComponent 规范化文件名。
+    return join(this._dir, `${encodeURIComponent(dedupId)}.jsonl`);
   }
 }

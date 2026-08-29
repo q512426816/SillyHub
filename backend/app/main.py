@@ -109,6 +109,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # 协程占位——同样先占 None 保证 bootstrap 抛错走 finally 时不会因未定义
     # 而掩盖原始异常（对齐上方 patrol_task 注释）。
     sweep_task: asyncio.Task[None] | None = None
+    # 2026-08-29-daemon-platform-resilience task-03 / design A4：lease 过期 GC
+    # 常驻协程占位——同样先占 None 保证 bootstrap 抛错走 finally 时不会因未
+    # 定义而掩盖原始异常（对齐上方 patrol_task / sweep_task 注释）。
+    lease_sweep_task: asyncio.Task[None] | None = None
+    control_gc_task: asyncio.Task[None] | None = None
     try:
         # Bootstrap auth once the DB connection pool exists.
         from app.core.db import get_engine, get_session_factory
@@ -158,6 +163,23 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                     )
             except Exception:
                 log.exception("orchestrator.redispatch_failed")
+            # 2026-08-29-daemon-platform-resilience task-03 / design A4：backend
+            # 重启恢复——pending batch lease 的派发通知是 WS 单发唤醒，backend
+            # 宕机期间丢失后 lease 只能等 daemon 下轮轮询才被 claim。启动时对
+            # 在线 daemon（DB status=online）名下的 pending batch lease 重发一次
+            # WS 唤醒（复用 placement._send_ws_wakeup）；重发幂等（ws_hub 去重
+            # 滑窗 + daemon claim 幂等，无 DB 副作用），不在线 daemon 不重发。
+            # 异常不阻断启动（对齐上方 redispatch 模式）。
+            try:
+                from app.modules.daemon.sweep import (
+                    wake_pending_leases_for_online_daemons_once,
+                )
+
+                woken = await wake_pending_leases_for_online_daemons_once(session)
+                if woken:
+                    log.warning("daemon.pending_leases_woken_on_startup", count=woken)
+            except Exception:
+                log.exception("daemon.pending_leases_wakeup_failed")
             # 2026-08-02-agent-profile-layer task-11 / D-015：启动 idempotent
             # 补种平台默认 AgentProfile（claude/codex）。迁移 task-01 覆盖新环境
             # 首次 seed；本 hook 覆盖「默认档案被误删后重启」场景，按
@@ -218,6 +240,26 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             session_reconnect_sweeper(), name="session-reconnect-sweeper"
         )
         log.info("session_reconnect_sweeper_started")
+        # 2026-08-29-daemon-platform-resilience task-03 / design A4（FR-02）：
+        # lease 过期 GC 常驻协程——把既有但无调用方的 expire_leases /
+        # handle_expired_leases_batch / alert_stuck_terminating_leases 接线成
+        # 60s 周期巡检（sweep.lease_expiry_sweep_once）：claimed batch lease
+        # 心跳停后过期重派（attempt<3 新 pending lease + WS 唤醒）或 run
+        # failed（≥3）。关停走 finally 的 cancel + await gather（对齐
+        # session_reconnect_sweeper——巡检轮内有 DB 写，须等取消落地）。
+        from app.modules.daemon.sweep import lease_expiry_sweeper
+
+        lease_sweep_task = asyncio.create_task(lease_expiry_sweeper(), name="lease-expiry-sweeper")
+        log.info("lease_expiry_sweeper_started")
+        # 控制指令 GC 常驻协程（task-04）：pending/delivered-未-ack 过期清理 +
+        # inject 过期联动 run failed。与 lease sweeper 同款关停契约，独立节拍
+        # （投递层与任务层 lease 语义正交，互不连坐失败域）。
+        from app.modules.daemon.control_commands import control_command_gc_sweeper
+
+        control_gc_task = asyncio.create_task(
+            control_command_gc_sweeper(), name="control-command-gc-sweeper"
+        )
+        log.info("control_command_gc_sweeper_started")
         # 2026-08-06-public-mcp-server task-05 / spike-A 坑 2（P0）：MCP session
         # manager 必须在 app 服务期间常驻。streamable_http_app() 返回的子 app
         # 虽自带 lifespan=lambda app: self.session_manager.run()，但 Starlette
@@ -253,6 +295,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         if sweep_task is not None:
             sweep_task.cancel()
             await asyncio.gather(sweep_task, return_exceptions=True)
+        # 2026-08-29-daemon-platform-resilience task-03 / design A4：lease 过期
+        # GC 巡检协程关停——同上 cancel 后 await gather 等取消落地，无悬挂任务、
+        # 无协程泄漏（sweeper 的 asyncio.sleep 处 CancelledError 透传）。
+        if lease_sweep_task is not None:
+            lease_sweep_task.cancel()
+            await asyncio.gather(lease_sweep_task, return_exceptions=True)
+        if control_gc_task is not None:
+            control_gc_task.cancel()
+            await asyncio.gather(control_gc_task, return_exceptions=True)
         try:
             from app.modules.storage.factory import get_storage_backend
 
