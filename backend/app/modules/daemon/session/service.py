@@ -1291,6 +1291,11 @@ class SessionService:
 
             _ws = await self._session.get(Workspace, workspace_id)
             if _ws is not None:
+                # ql-20260829-010：归档工作区禁写——创建会话 409（守卫与中文提示
+                # 统一收敛在 WorkspaceService.ensure_writable）。
+                from app.modules.workspace.service import WorkspaceService as _WSSvc
+
+                _WSSvc.ensure_writable(_ws)
                 cwd = _ws.root_path
 
         # ── task-09（2026-08-24-session-team-mission-context / FR-05/06）：预会话

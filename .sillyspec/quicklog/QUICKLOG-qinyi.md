@@ -33,3 +33,22 @@
 根因：上一变更落地状态维护后的遗留收口——归档区仍出现在各处工作区下拉候选（档案归属/共享智能体源码/PPM 关联），且进归档区详情页无状态提示，不知为何列表看不到
 方案：三处下拉选择器取数加 status=active（agent-profile-form / platform-shared-agents-card / LinkWorkspaceDialog）；移动端 /m/workspaces 列表默认筛选活跃对齐桌面；归档详情页顶部琥珀横幅（提示默认不可见口径+恢复路径指向基本信息编辑）；名字解析类与会话工作区树刻意不过滤，归档区既有会话与绑定名仍可见
 结果：tsc 0 错；受影响测试全绿（组件 27+移动端 5+详情 14，新增归档横幅用例 1 条）；eslint 改动文件 0 错误；模块文档 workspace.md 已补选择器口径段
+
+## ql-20260829-010-0616 | 2026-08-29 20:47:49 | 归档工作区禁写收口（写入口 409 守卫 + 前端按钮置灰）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/core/errors.py（WorkspaceArchived(409) 错误类）
+- backend/app/modules/workspace/service.py（ensure_writable 静态守卫（archived 拦/pending 放行））
+- backend/app/modules/workspace/tests/test_archived_write_guard.py（新建 5 用例（unit 两态+会话/run/变更 409 集成））
+- backend/app/modules/daemon/session/service.py（创建会话工作区解析点接守卫）
+- backend/app/modules/change_writer/service.py（发起变更门禁接守卫（先于 not-scanned））
+- backend/app/modules/agent/service.py（批量派发 start_run+变更级派发两处接守卫）
+- frontend/src/components/sessions/session-list-panel.tsx（归档组头「＋」置灰（archivedWorkspaceIds 经 hook→GroupNode 透传））
+- frontend/src/components/sessions/sessions-portal.tsx（scoped 页头「新建会话」置灰（getWorkspace 判归档））
+- frontend/src/components/sessions/__tests__/session-list-panel.test.tsx（归档＋禁用用例（disabled+title+活跃组不受影响））
+需求：归档工作区禁写收口（写入口 409 守卫 + 前端按钮置灰）
+根因：状态维护（ql-20260829-008/009）落地后归档只是不可见+提示，写入口未拦——归档区仍可经 API 创建会话/发起变更/派发任务，与归档语义矛盾
+方案：后端 WorkspaceService.ensure_writable 统一守卫（WorkspaceArchived 409 中文提示+恢复路径），接线四处写入口——创建会话（daemon/session）、批量派发 run（start_run）、变更级派发、发起变更（change_writer 门禁先于 not-scanned）；pending 不拦。前端会话树归档组「＋」与 scoped 门户页头「新建会话」置灰（提示恢复路径），权限权威在服务端
+结果：后端新增 5 用例全绿（unit/会话 409/run 409/变更 409 含顺序断言）+ change_writer 47 + 会话路由 + agent run 37 回归绿，ruff/mypy 0 错；前端 session-list-panel 52（新增归档＋禁用用例）+ 门户/会话页 107 回归绿，tsc 0 错，eslint 0 错误；模块文档 workspace.md 已补禁写口径段
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/workspace/tests/test_archived_write_guard.py

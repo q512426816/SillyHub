@@ -472,10 +472,21 @@ function useSessionListSharedData() {
     return map;
   }, [machines]);
 
+  /** 归档工作区 id 集（ql-20260829-010：组头「＋」禁用——归档区禁建新会话，
+   * 后端同款守卫 409；前端置灰是提示层，权限权威在服务端）。 */
+  const archivedWorkspaceIds = useMemo(() => {
+    const set = new Set<string>();
+    for (const ws of workspacesQuery.data?.items ?? []) {
+      if (ws.status === "archived") set.add(ws.id);
+    }
+    return set;
+  }, [workspacesQuery.data]);
+
   return {
     machines,
     workspaces: workspacesQuery.data?.items ?? [],
     workspaceIdToName,
+    archivedWorkspaceIds,
     runtimeToMachine,
   };
 }
@@ -527,7 +538,7 @@ function WorkspaceTreeList({
   // PPM 选项数据源口径（问题 duty_user_id=me，对齐 @ 联想与 PPM「我的任务」）。
   const meId = useSession((s) => s.user?.id ?? null);
 
-  const { machines, workspaces, workspaceIdToName, runtimeToMachine } =
+  const { machines, workspaces, workspaceIdToName, runtimeToMachine , archivedWorkspaceIds } =
     useSessionListSharedData();
 
   // X-009：「关联」下拉选项数据源（enabled 同门控——非 workspace scope 零请求）。
@@ -1277,6 +1288,7 @@ function WorkspaceTreeList({
                 key={group.id}
                 group={group}
                 visibleSessions={groupVisible}
+                archivedWorkspaceIds={archivedWorkspaceIds}
                 expanded={!effectiveCollapsedIds.has(group.id)}
                 onToggleExpand={() => toggleGroup(group.id)}
                 filterEpoch={filterEpoch}
@@ -1422,6 +1434,8 @@ function WorkspaceGroupNode({
   hideEngineChip,
   runtimeToMachine,
   isArchivedView,
+  /** ql-20260829-010：归档工作区 id 集（组头「＋」置灰，后端 409 同款守卫）。 */
+  archivedWorkspaceIds,
 }: {
   group: TreeGroup;
   visibleSessions: AgentSessionRead[];
@@ -1457,6 +1471,7 @@ function WorkspaceGroupNode({
   runtimeToMachine: RuntimeMachineIndex;
   /** 2026-08-24：归档视图判定（控制批量操作按钮显隐）。 */
   isArchivedView: boolean;
+  archivedWorkspaceIds?: Set<string>;
 }) {
   // 组内超 50 截断（R-03）：截断作用于分组（跨机器小节），小节由可见条目派生。
   const truncated = !showAll && visibleSessions.length > GROUP_ITEM_LIMIT;
@@ -1662,12 +1677,23 @@ function WorkspaceGroupNode({
             <button
               type="button"
               aria-label={`在 ${group.name} 新建会话`}
-              title={`在 ${group.name} 新建会话`}
+              title={
+                // ql-20260829-010：归档区禁建新会话（后端 409 同款守卫），置灰+
+                // 提示恢复路径；未归档维持原提示。
+                group.workspaceId != null &&
+                archivedWorkspaceIds?.has(group.workspaceId)
+                  ? `${group.name} 已归档，无法新建会话。请先在工作区详情中将状态改回「活跃」`
+                  : `在 ${group.name} 新建会话`
+              }
+              disabled={
+                group.workspaceId != null &&
+                archivedWorkspaceIds?.has(group.workspaceId)
+              }
               onClick={(e) => {
                 e.stopPropagation();
                 onNew(group.workspaceId);
               }}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-brand-300 bg-brand-100 text-brand-700 transition-colors hover:bg-brand-600 hover:text-white hover:shadow-primary"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-brand-300 bg-brand-100 text-brand-700 transition-colors hover:bg-brand-600 hover:text-white hover:shadow-primary disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-brand-100 disabled:hover:text-brand-700 disabled:hover:shadow-none"
             >
               <Plus aria-hidden className="h-3.5 w-3.5" />
             </button>

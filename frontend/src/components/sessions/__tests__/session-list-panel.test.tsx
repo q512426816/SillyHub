@@ -824,6 +824,42 @@ describe("SessionListPanel 组头回调与截断", () => {
     expect(onNewInGroup).toHaveBeenCalledTimes(2);
   });
 
+  it("ql-20260829-010：归档工作区组头「＋」置灰（点击不触发 onNewInGroup）；活跃组不受影响", async () => {
+    setWorkspaces([
+      makeWorkspace({ id: "ws-on", name: "活跃区" }),
+      makeWorkspace({ id: "ws-off", name: "归档区", status: "archived" }),
+    ]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({ id: "s-1", workspace_id: "ws-on", title: "会话A" }),
+        makeSession({ id: "s-2", workspace_id: "ws-off", title: "会话B" }),
+      ]),
+    );
+    const onNewInGroup = vi.fn();
+    renderPanel(<SessionListPanel onNewInGroup={onNewInGroup} />);
+
+    // 归档组「＋」disabled + title 提示恢复路径
+    const archivedBtn = await screen.findByRole("button", {
+      name: "在 归档区 新建会话",
+    });
+    expect(archivedBtn).toBeDisabled();
+    expect(archivedBtn).toHaveAttribute(
+      "title",
+      expect.stringContaining("已归档"),
+    );
+    fireEvent.click(archivedBtn);
+
+    // 活跃组「＋」正常触发
+    fireEvent.click(
+      screen.getByRole("button", { name: "在 活跃区 新建会话" }),
+    );
+    expect(onNewInGroup).toHaveBeenCalledTimes(1);
+    expect(onNewInGroup).toHaveBeenCalledWith("ws-on", {
+      machineId: "",
+      agent: "",
+    });
+  });
+
   it("筛选态（机器+智能体均已选）点组头「＋」→ 回调携带具体筛选值（D-107 直带链前提）", async () => {
     setMachines({ items: [makeMachine()] });
     setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);

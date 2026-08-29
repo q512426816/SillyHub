@@ -34,6 +34,7 @@ from app.modules.agent.schema import AgentRunResponse, ToolFailureStats
 from app.modules.daemon.session_events import publish_sessions_changed
 from app.modules.task.model import Task
 from app.modules.workspace.model import AgentRunWorkspace, TaskWorkspace, Workspace
+from app.modules.workspace.service import WorkspaceService
 from app.modules.worktree.model import WorktreeLease
 
 if TYPE_CHECKING:
@@ -449,6 +450,10 @@ class AgentService:
         from app.modules.workspace.model import Workspace
 
         workspace = await self._session.get(Workspace, workspace_id)
+        # ql-20260829-010：归档工作区禁写——批量派发 agent run 409（task/lease
+        # 校验之后、run 落库之前；守卫统一在 WorkspaceService.ensure_writable）。
+        if workspace is not None:
+            WorkspaceService.ensure_writable(workspace)
         resolved_provider = provider or (workspace.default_agent if workspace else None)
         resolved_model = model or (workspace.default_model if workspace else None)
 
@@ -1337,6 +1342,9 @@ class AgentService:
             )
 
         workspace = await self._get_workspace(workspace_id)
+        # ql-20260829-010：归档工作区禁写——派发 agent run 409（守卫统一在
+        # WorkspaceService.ensure_writable）。
+        WorkspaceService.ensure_writable(workspace)
         workspace_root = workspace.root_path
 
         # -- 2. Resolve worktree or working directory -------------------------

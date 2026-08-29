@@ -89,6 +89,18 @@ class WorkspaceNotFound(AppError):
     http_status = status.HTTP_404_NOT_FOUND
 
 
+class WorkspaceArchived(AppError):
+    """目标工作区已归档，写操作被拒绝（ql-20260829-010）。
+
+    创建会话 / 发起变更 / 派发任务等写入口经
+    ``WorkspaceService.ensure_writable`` 统一守卫；归档语义 = 列表与选择器
+    默认不可见 + 写入口 409（ql-20260829-008/009 配套），恢复走详情页状态改回活跃。
+    """
+
+    code = "HTTP_409_WORKSPACE_ARCHIVED"
+    http_status = status.HTTP_409_CONFLICT
+
+
 class WorkspaceSlugDuplicate(AppError):
     code = "HTTP_409_WORKSPACE_SLUG_DUPLICATE"
     http_status = status.HTTP_409_CONFLICT

@@ -53,7 +53,13 @@ workspace_id 是全平台跨组件协作主轴；daemon-client 唯一模式下�
     名字解析类（session-panel 头部、workspace-switcher、runtimes 来源工作区名）
     不过滤（归档区会话/绑定仍需显示原名）；会话工作区树（session-list-panel）
     不过滤（归档区的既有会话仍需可见）；归档区详情页顶部琥珀横幅提示状态与
-    恢复路径。
+    恢复路径。**归档禁写（ql-20260829-010）**：写入口守卫统一收敛在
+    ``WorkspaceService.ensure_writable``（409 ``HTTP_409_WORKSPACE_ARCHIVED``
+    中文提示）——创建会话（daemon/session 工作区解析点）、派发批量 agent run
+    （AgentService.start_run，task/lease 校验后）与变更级派发（_get_workspace
+    后）、发起变更（change_writer 门禁，先于 not-scanned 检查）；pending 不拦
+    （激活前过渡态）。前端：会话树归档组头「＋」与 scoped 门户页头「新建会话」
+    按钮置灰（提示恢复路径）；前端置灰是提示层，权限权威在服务端。
     root_path 与 slug 的唯一性是 **partial unique index（WHERE deleted_at IS NULL）**——
     软删行保留原值，同路径重建走复活而非冲突（migration 202605261000）
   - M2N 中间表：`TaskWorkspace` / `AgentRunWorkspace` / `PpmProjectWorkspace`。

@@ -28,7 +28,7 @@ from app.modules.change_writer.markdown_builder import (
     build_master_md,
 )
 from app.modules.workspace.model import Workspace
-from app.modules.workspace.service import _rewrite_path
+from app.modules.workspace.service import WorkspaceService, _rewrite_path
 from app.modules.worktree.exec_env import ExecEnvBuilder
 from app.modules.worktree.model import WorktreeLease
 
@@ -80,6 +80,9 @@ class ChangeWriterService:
                 "工作区不存在，请刷新后重试。",
                 details={"workspace_id": str(workspace_id)},
             )
+        # ql-20260829-010：归档工作区禁写——发起变更 409（守卫统一在
+        # WorkspaceService.ensure_writable）。
+        WorkspaceService.ensure_writable(ws_for_gate)
         if ws_for_gate.last_scanned_at is None:
             raise ChangeWriteError(
                 "请先扫描工作区后再创建变更。",

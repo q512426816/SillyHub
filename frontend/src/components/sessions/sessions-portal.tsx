@@ -95,6 +95,8 @@ import {
   type SessionCreateResponse,
 } from "@/lib/daemon";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
+// ql-20260829-010：scoped 工作区归档态判定（页头「新建会话」置灰）。
+import { getWorkspace } from "@/lib/workspaces";
 import { debounceLeadingTrailing } from "@/lib/utils";
 
 /* ────────────────────── 组件 ────────────────────── */
@@ -250,6 +252,21 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
     });
     return () => sub.close();
   }, [refreshSessionLists]);
+
+  // ql-20260829-010：scoped 工作区归档态（workspace/change/quicklog scope 才
+  // 拉；全局门户不拉零开销）。归档 → 页头「新建会话」置灰（后端 409 同款守卫）。
+  const scopedWorkspaceId =
+    scope?.kind === "workspace" || scope?.kind === "change" || scope?.kind === "quicklog"
+      ? scope.workspaceId
+      : null;
+  const scopedWorkspaceQuery = useQuery({
+    queryKey: ["workspace", "archived-guard", scopedWorkspaceId],
+    queryFn: () => getWorkspace(scopedWorkspaceId!),
+    enabled: scopedWorkspaceId != null,
+    staleTime: 60_000,
+  });
+  const scopedWorkspaceArchived =
+    scopedWorkspaceId != null && scopedWorkspaceQuery.data?.status === "archived";
 
   /** ql-20260823-005：?new=1 直达时预会话/兜底浮层的默认组——workspace/change
    *  scope 锁定本组，全局门户不指定（null，与组头「＋」非工作区分组同语义）。
@@ -539,11 +556,17 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
               <button
                 type="button"
+                disabled={scopedWorkspaceArchived}
+                title={
+                  scopedWorkspaceArchived
+                    ? "该工作区已归档，无法新建会话。请先在工作区详情中将状态改回「活跃」"
+                    : undefined
+                }
                 onClick={() => {
                   setPickerWorkspaceId(scopedPickerWorkspaceId());
                   setPickerOpen(true);
                 }}
-                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-4 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-brand-700 hover:shadow-sm"
+                className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-4 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary hover:text-brand-700 hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-border disabled:hover:text-muted-foreground disabled:hover:shadow-none"
               >
                 <Plus aria-hidden className="h-3.5 w-3.5 text-brand-600" />
                 新建会话

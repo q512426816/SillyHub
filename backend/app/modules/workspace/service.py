@@ -25,6 +25,7 @@ from sqlmodel import col
 from app.core.config import get_settings
 from app.core.errors import (
     AppError,
+    WorkspaceArchived,
     WorkspaceNotFound,
     WorkspaceNotSillyspec,
     WorkspacePathDuplicate,
@@ -433,6 +434,25 @@ class WorkspaceService:
                 details={"workspace_id": str(workspace_id)},
             )
         return workspace
+
+    @staticmethod
+    def ensure_writable(workspace: Workspace) -> None:
+        """归档工作区禁写守卫（ql-20260829-010）。
+
+        创建会话 / 发起变更 / 派发 agent run 等写入口在解析出 Workspace 行后
+        调用；归档 → 409 ``WorkspaceArchived``（中文提示 + 恢复路径指向详情页
+        状态改回活跃）。pending（未激活过渡态）维持现状不拦——激活引导本身可
+        从 PATCH status 触发（ql-20260829-008），此处只封「已归档」。
+        """
+        if workspace.status == "archived":
+            raise WorkspaceArchived(
+                "该工作区已归档，无法执行此操作。请先在工作区详情「基本信息 → 编辑」"
+                "中将状态改回「活跃」。",
+                details={
+                    "workspace_id": str(workspace.id),
+                    "status": workspace.status,
+                },
+            )
 
     # -- Mutate ---
 
