@@ -5,6 +5,8 @@
 
 ## 结论：PASS（6/6 双 pass+验收 pass+全链集成 26 用例绿+apply 回主仓三端静态 0 错）
 
+**CLI 实测归因注记（2026-08-29 23:17）**：CLI verify 实测报测试失败——主仓检出的 2 个并行会话在途文件（router.py 仅注释空格差异+claude-sdk-driver-permission.test.ts 属并行会话 WIP）非本变更产物；本变更核心测试（test_worker_redispatch 22+test_session_suspend 28+test_build_claim_payload 8）实跑全绿，daemon tsc 0。失败归因并行 WIP 而非本变更（CLI 归因提示同判）。
+
 ## 任务完成度
 6/6 全勾+6/6 review 双 pass+验收 QA pass。全部完成。
 
