@@ -47,20 +47,30 @@ tier: independent
 - **worker 子会话**：`status → failed`（error_code=`daemon_interrupted` 新错误码，与主会话的 daemon_stopped 区分来源）+ 中断 run → failed + lease → cancelled + **写重派种子**（见 S2）
 - **主会话**（parent_session_id IS NULL）：suspended（现状语义逐字不变）
 
-### S2 — backend：worker 自动重派（dispatch 上下文重建）
+### S2 — backend：worker 自动重派（prepare_interactive_dispatch 复用原会话行）
 
-worker failed 后自动重派新 lease（同 worker 上下文）：
+worker failed 后自动重派（plan 调研定论：**必须走 `prepare_interactive_dispatch`**，不走 `dispatch_to_daemon`——后者会造裸 AgentSession 脱离 mission_worker_sessions 树致 list_workers/patrol 全瞎）：
 
-- 重派走 `RunPlacementService.dispatch_to_daemon`（既有路径，天然新 lease）+ metadata 注入 `resume_session_id = agent_session.agent_session_id`（SDK resume id，interactive 恢复链同源）
-- 重派上下文：从原 AgentSession 行读 provider/model/workspace_id/worktree_branch（已持久化），重建 dispatch payload——不需要从 lease metadata 继承（interactive 的 dispatch 上下文在 session 行上比 batch lease metadata 更完整）
-- 重派节流：同一 worker 最多重派 N 次（复用 AgentRun.attempt 计数或新增 session 级 counter；建议 attempt>=3 不再重派，worker 终态 failed 留 mission converge 收敛——对齐 mission patrol 既有兜底）
+- **重派原语**：`prepare_interactive_dispatch(agent_session_id=原子会话, ...)` 签名第一参就是 agent_session_id（placement.py:645-688）——天然「复用原 sub_session 行 + 新 interactive lease + 新首 run 挂原会话」；重派前把 session 从 failed 翻回 active + 清 ended_at + turn_count 归位
+- **重派上下文**（AgentSession 行 + 首 AgentRun 行双表即可，不读原 lease metadata）：
+  - AgentSession 行：provider / workspace_id / cwd（worktree 路径已持久化）/ tree_depth / agent_profile_id / runtime_id / agent_session_id（SDK resume id；NULL 时回退该会话最新 AgentRun.session_id，_heal_agent_session_id_from_runs 同源逻辑）
+  - 首 AgentRun 行：model / objective / role / read_only / target_workspace_id / mission_id / worktree_branch / agent_profile_snapshot（**worktree_branch 在 AgentRun 不在 AgentSession——design 原文有误已修正**）
+  - **prompt 重渲染**：按 first_run.objective + role 重渲染 build_worker_briefing（objective 在 run 行不丢；重派语义是「继续任务」非复刻首轮简报）
+  - tool_config 由 worker_tool_config(first_run.read_only) 重算
+- **resume_session_id 注入**：prepare_interactive_dispatch 需加 resume_session_id 形参（或经 _merge_lease_metadata 补键）写入 lease metadata
+- **互斥守卫（plan 调研新增）**：①重派前置检查 mission.converged_at/cancelled_at（防已收敛 mission 又派活，对齐 patrol.py:750-751 守卫）；②patrol 职责④ worker_recovery 候选排除 error_code=daemon_interrupted（防旧 run 被翻回 pending 与新 run 双跑+日志噪音）；③重派须在 patrol 职责⑦ 30min worker_force_end 宽限内完成（标记为 mission 级单向置位无清除——超窗后 mission 被 derive 映 failed，重派成功也救不回，故须在窗内完成）
+- 重派节流：attempt>=3 不再重派，session 终态 failed 留 mission converge/patrol 收敛
 - 触发时机：suspend/sweep 写 failed 的同一事务后异步 fire（不阻塞挂起主路径；失败记日志下轮 offline sweep 重试——sweep 60s 周期自愈）
 
-### S3 — daemon：worker claim 消费 resume（既有链激活）
+### S3 — daemon：worker claim 消费 resume（三处接线，plan 调研修正）
 
-- claim payload 的 `resume_session_id`（白名单 context.py:795 已通）在 **interactive 分支**补透传（当前只在 batch 分支下发——Grill C-02 证伪点修复）
-- daemon `_startInteractiveSession` 消费 resume_session_id → SessionManager.create 时传 resume key（SDK 续会话）——对齐 restoreAndReconnect 的 resume 语义（不 push prompt，等 inject 才跑新 turn）
-- work_dir 一致性：worker 的 cwd=per-worker worktree（dispatch_worker 时建，AgentSession.worktree_branch 持久化）——重派经 dispatch 上下文重建同 branch worktree，天然同目录；无需独立守卫（与原设计 S3 的差异点：interactive 的 worktree 机制已保证）
+resume 链路在 interactive 路径当前**未接线**（与 batch 共用白名单但 interactive 分支不透传），需三处补齐：
+
+- **backend ①**：`build_claim_payload` interactive 分支补 resume_session_id 透传（context.py:447-494 当前无此键；:795-796 只在 batch 分支）
+- **daemon ②**：`_startInteractiveSession` 的 create 调用传 resume（daemon.ts:5784-5837 当前 CreateSessionInput 无 resume 字段；SessionManager 已支持 spec.resume → driverOpts.resume session-manager.ts:1588-1629——只需接线）
+- **daemon ③**：归一化 execPayload.resumeSessionId → CreateSessionInput.resume（daemon.ts payload 归一化区）
+- **work_dir 一致性**：worker 的 cwd=per-worker worktree 已持久化 AgentSession.cwd（plan 调研修正：非 worktree_branch 列）——重派 prepare_interactive_dispatch 复用原 cwd；worktree 不在则按 AgentRun.worktree_branch 重建（git worktree add）
+- **首轮驱动（plan 调研定论：不需要 orchestrator re-inject）**：与首轮派发同构——lease metadata.prompt 经 claim → SessionManager.create({firstPrompt, resume}) → 10s deferred fallback 自动提交首轮（session-manager.ts:713-731 pendingFirstPrompt 机制）；orchestrator 侧零协议变更，新 run 出现在 list_workers 即可
 
 ### S4 — daemon：resume 失败自动降级（task-runner/session-manager）
 
@@ -84,11 +94,14 @@ worker failed 后自动重派新 lease（同 worker 上下文）：
 |---|---|---|
 | 修改 | backend/app/modules/daemon/session/service.py | suspend_sessions_for_daemon 分流：worker 子会话 failed+重派种子 |
 | 修改 | backend/app/modules/daemon/sweep.py | session_offline_sweep_once 同款分流 |
-| 修改 | backend/app/modules/agent/execution.py 或新文件 | worker 重派函数（从 AgentSession 行重建 dispatch 上下文+注入 resume_session_id） |
+| 修改 | backend/app/modules/agent/mcp_tools.py 或新文件 | worker 重派函数（prepare_interactive_dispatch 复用原会话行+双表上下文重建+resume 注入+互斥守卫） |
+| 修改 | backend/app/modules/agent/placement.py | prepare_interactive_dispatch 加 resume_session_id 形参 |
+| 修改 | backend/app/modules/agent/patrol.py | 职责④候选排除 daemon_interrupted（互斥守卫②） |
 | 修改 | backend/app/modules/daemon/lease/context.py | interactive 分支补 resume_session_id 白名单透传 |
 | 修改 | sillyhub-daemon/src/daemon.ts | _startInteractiveSession 消费 resume_session_id 传 SessionManager.create |
 | 修改 | sillyhub-daemon/src/interactive/session-manager.ts | create 支持 resume key+损伤降级重建+resume_downgraded 事件 |
 | 新增 | backend/app/modules/daemon/tests/test_worker_redispatch.py | S1/S2 backend 用例 |
+| 修改 | backend/app/modules/daemon/tests/test_build_claim_payload.py | S3 claim 透传用例（扩展现有，不新建防 W1 冲突） |
 | 新增 | sillyhub-daemon/tests/integration/worker-resume.test.ts | S3/S4 daemon 集成用例 |
 
 ## 接口定义
@@ -121,6 +134,6 @@ create(options: { ..., resumeKey?: string })   // SDK 续会话；损伤时降�
 - 章节完整 ✓；决策 D-001~005 全引用（D-005 supersede 关系明确）✓
 - 契约表 6 行覆盖全部新增状态转移 ✓
 - 原型：无 UI 变化跳过（继承原设计 D-004）✓
-- ⚠️ 自审存疑 1：S2 重派上下文重建——从 AgentSession 行读 provider/model/workspace/worktree_branch 够不够（原 dispatch payload 还有 prompt/objective/tool_config 等）？plan 阶段须核对 dispatch_worker 实际写入字段集，缺的补从 mission 行/agent profile 读
-- ⚠️ 自审存疑 2：worker claim 时 resume 的「等 inject」语义——worker 会话由 orchestrator 主 agent 经 MCP inject 驱动，重派后新 SessionManager 就绪时 orchestrator 会重新 inject 吗（mission patrol 兜底 or get_worker_result 轮询触发）？plan 阶段核对 orchestrator 与 worker 的交互协议
+- ~~自审存疑 1~~ **已解决（plan 调研）**：AgentSession+首 AgentRun 双表够重建；prompt 按 objective 重渲染非复制原文；worktree_branch 在 AgentRun（原 design 有误已修正 S2）
+- ~~自审存疑 2~~ **已解决（plan 调研）**：worker 首轮由 10s deferred fallback 驱动（非 orchestrator inject），重派同构零协议变更；新增三个互斥守卫（mission converged 检查/patrol ④排除/⑦30min 窗口对齐）入 S2
 - 规模：跨 backend+daemon、session 状态机分流+重派编排——scale=large ✓

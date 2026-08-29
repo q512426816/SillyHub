@@ -118,6 +118,7 @@ multica 的集成分层：`channel/` 统一抽象（Channel 接口 + Registry �
 | 修改 | frontend/src/components/top-bar.tsx | 顶栏挂载 `<NotificationBell />`（头像区 :155-159 旁；Grill X-17 裁定——真实顶栏组件是本文件，`app-shell.tsx`:50/:427 仅渲染 `<TopBar>`；TopBar 无 token prop，SSE hook 自取 useSession token） |
 | 新增 | frontend/src/components/notifications/__tests__/notification-bell.test.tsx | 铃铛/面板/已读/SSE 事件驱动刷新用例 |
 | 修改 | backend/openapi.json + frontend/src/lib/api-types.ts | `pnpm gen:types` 产物（禁止手写，CLAUDE.md 规则 21） |
+| 修改 | .sillyspec/local.yaml | modules 块补 notification 子模块测试映射（`{ path: "backend/app/modules/notification/", test: "cd backend && uv run pytest app/modules/notification -q --no-cov -n auto" }`——不补则 verify 模块对账 fallback backend 全量被预存 errors 阻塞，多次先例；本文件 gitignored，落主仓即可） |
 
 > models 注册说明（Grill X-16 裁定，S-03 关闭）：alembic autogenerate 依赖 `backend/migrations/env.py` 的显式模型登记清单（:28-29 注释 "Add new modules here"），新增 notification model 必须在该清单加一行，否则迁移不生成该表（env.py 头注释有漏登记事故记载）。
 

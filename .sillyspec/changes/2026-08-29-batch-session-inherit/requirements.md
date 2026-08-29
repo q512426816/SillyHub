@@ -28,7 +28,7 @@ Then 走既有 recover→reconnecting→active 链（零改动回归锁定）
 覆盖决策：D-001@v1, D-005@v1
 Given worker 子会话被分流标 failed
 When 挂起事务提交后
-Then 异步触发重派：从 AgentSession 行重建 dispatch 上下文（provider/model/workspace_id/worktree_branch/mission 上下文）+ 经 dispatch_to_daemon 新 lease + metadata 注入 resume_session_id=agent_session_id（SDK resume id）
+Then 异步触发重派：从 AgentSession 行重建 dispatch 上下文（provider/model/workspace_id/worktree_branch/mission 上下文）+ 经 prepare_interactive_dispatch 复用原子会话行+新 interactive lease + metadata 注入 resume_session_id=agent_session_id（SDK resume id）
 
 Given 同一 worker attempt>=3
 When 挂起再次触发
