@@ -909,7 +909,8 @@ class TestProviderLegacyPathZeroRegression:
         lease = await db_session.get(DaemonTaskLease, result.lease_id)
         meta = dict(lease.metadata_)
         assert meta["provider"] == "claude"
-        assert meta["prompt"] == "hello"
+        # d102c367 用户信息前导：prompt 前置【当前用户信息】块，原句保留尾部
+        assert meta["prompt"].endswith("hello")
         assert meta["session_id"] == str(s.id)
         assert meta["run_id"] == str(run.id)
         assert meta["manual_approval"] is True

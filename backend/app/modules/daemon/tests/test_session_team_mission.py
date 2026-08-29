@@ -881,7 +881,8 @@ class TestCreateSessionTeamMissionPrebuild:
         assert result.agent_run.mission_id is None
         assert result.agent_run.role is None
         lease = await db_session.get(DaemonTaskLease, result.lease_id)
-        assert (lease.metadata_ or {}).get("prompt") == "普通对话"
+        # d102c367 用户信息前导：prompt 前置【当前用户信息】块，原句保留尾部
+        assert (lease.metadata_ or {}).get("prompt", "").endswith("普通对话")
 
 
 class TestCreateSessionOrchestratorWorkspaceE2:

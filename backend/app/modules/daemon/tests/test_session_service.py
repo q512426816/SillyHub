@@ -151,7 +151,8 @@ class TestCreateSession:
         from app.modules.daemon.protocol import DAEMON_MSG_SESSION_INJECT
 
         assert msg_type == DAEMON_MSG_SESSION_INJECT
-        assert payload["prompt"] == "hi there"
+        # d102c367 用户信息前导：首句 prompt 前置【当前用户信息】块，原句保留尾部
+        assert payload["prompt"].endswith("hi there")
         assert payload["session_id"] == str(result.agent_session.id)
         assert payload["run_id"] == str(result.agent_run.id)
         assert payload["lease_id"] == str(result.lease_id)
@@ -1650,7 +1651,10 @@ class TestPpmCreatePreamble:
 
         assert result.agent_session.status == "active"
         meta_prompt = await _lease_prompt_of(db_session, result.lease_id)
-        assert meta_prompt == "普通提问"
+        # d102c367 用户信息前导：prompt 前置【当前用户信息】块，原句保留尾部；
+        # item 缺失降级普通会话的本测意图（无 PPM 前导）以 PPM 标题缺席显式锁定。
+        assert meta_prompt.endswith("普通提问")
+        assert "【PPM" not in meta_prompt
 
 
 class TestPpmAttachmentMaterialize:
