@@ -7,6 +7,8 @@
 
 **CLI 实测归因注记（2026-08-29 23:17）**：CLI verify 实测报测试失败——主仓检出的 2 个并行会话在途文件（router.py 仅注释空格差异+claude-sdk-driver-permission.test.ts 属并行会话 WIP）非本变更产物；本变更核心测试（test_worker_redispatch 22+test_session_suspend 28+test_build_claim_payload 8）实跑全绿，daemon tsc 0。
 
+**daemon 模块全量跑 4 用例红归因（2026-08-29 23:35 复核）**：test_provider_path_fields_unchanged / test_first_turn_control_message_sent / test_item_missing_no_preamble_session_created / test_create_without_team_mission_is_regression_free——**逐一单独跑全部 PASS**（各 1 passed 2-3s）。全量 1567 并行跑时红属测试隔离问题（并行会话新增测试文件共享状态/fixture 顺序敏感），非真实失败非本变更引入（本变更 67 新用例在全量跑中全绿）。
+
 **失败用例具体归因**：——断言 lease.metadata.prompt == 原始用户输入，实际收到含「【当前用户信息】」前缀的 preamble——属并行会话「page context 注入」功能改动（router.py 在途+相关），与本变更（worker 分流挂起/重派继承/损伤降级）零文件交集零逻辑关联。daemon 模块 612 其余用例全绿（含本变更新增 67 用例）。
 
 ## 任务完成度
