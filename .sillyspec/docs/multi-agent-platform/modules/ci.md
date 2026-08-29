@@ -35,6 +35,7 @@ multi-agent-platform 的持续集成组件，以 GitHub Actions workflow 实现�
 - backend CI 当前步骤未显式起 DB service container，依赖 DB 的用例需确认是否在 CI 中跳过或需补 service。
 - 改 ci workflow 的触发分支过滤要同步检查，避免漏跑或误跑。
 - 新增子项目（如 daemon）若要独立门禁，需新增对应 workflow，不要塞进现有两个。
+- daemon 独立门禁已存在：`daemon-ci.yml`（2026-08-20 HY-1 审计新增；路径触发 sillyhub-daemon/**，typecheck+vitest，无 lint 因 daemon 无 eslint 配置）。
 - CI 配置变更属低频但高影响，改完建议先在分支上观察一次完整运行。
 
 ## 人工备注

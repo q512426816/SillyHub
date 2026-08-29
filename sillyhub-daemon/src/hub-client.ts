@@ -25,6 +25,7 @@ import { REST_PREFIX } from './protocol.js';
 // 2026-08-29-daemon-platform-resilience task-06：控制指令补拉响应条目类型
 //（手写类型过渡，task-11 收口进 api-types 生成物）+ 心跳响应扩展字段类型。
 import type { PendingControlCommand, HeartbeatResponse } from './protocol.js';
+import type { components } from './api-types.js';
 import { DAEMON_VERSION } from './daemon-version.js';
 import { BUILD_ID } from './build-id.js';
 import type { ExecutionContextPayload } from './types.js';
@@ -118,22 +119,21 @@ export interface HeartbeatBody {
  * daemon ``stop()`` 在 markOffline 前上报自身标识；backend 按
  * ``daemon_local_id``（= ``daemon_instances.id``）定位该 daemon 全部 runtime
  * 名下的 active 会话做三步挂起收敛。
+ *
+ * ql-20260829-003：类型别名收口到 api-types 生成物 SessionSuspendBatchRequest
+ * （逐字段同构 daemon_local_id）。
  */
-export interface SuspendBatchBody {
-  /** daemon 本地 uuid（= daemon_instances.id）。 */
-  daemon_local_id: string;
-}
+export type SuspendBatchBody = components['schemas']['SessionSuspendBatchRequest'];
 
 /**
  * POST /sessions/suspend-batch 响应（task-05 provides 契约）。
  *
  * ``suspended`` = 实际翻挂起的会话数；``runs_failed`` = 同批收敛 failed 的活跃轮
  * run 数（error_code=daemon_stopped）。重复调用幂等——已挂起会话 no-op 计 0。
+ *
+ * ql-20260829-003：类型别名收口到 api-types 生成物 SuspendBatchResponse。
  */
-export interface SuspendBatchResponse {
-  suspended: number;
-  runs_failed: number;
-}
+export type SuspendBatchResponse = components['schemas']['SuspendBatchResponse'];
 
 // ── session 事件 HTTP 上报（change 2026-08-24-platform-session-feedback-fix / FR-01~03）─
 

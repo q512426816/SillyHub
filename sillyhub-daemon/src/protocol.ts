@@ -13,6 +13,7 @@
  */
 
 import type { ProviderConfig } from './types.js';
+import type { components } from './api-types.js';
 
 // ── WebSocket 消息类型 ───────────────────────────────────────────────────────
 // 值形如 `daemon:<action>`，前缀 `daemon:` 不可漏。
@@ -427,19 +428,11 @@ export type ControlCommandKind = (typeof CONTROL_KIND)[keyof typeof CONTROL_KIND
  * GET pending-controls 响应条目（task-04 契约 / design A2 接口定义）。
  *
  * 仅 status=pending 的指令（delivered 一律不重发，D-006），created_at 升序。
- * 手写本地类型——task-11 已再生成 api-types（生成物含同构形状），此处于
- * protocol 层保留显式契约定义供 dispatcher 消费，可与生成物并存。
+ * ql-20260829-003：类型别名收口到 api-types 生成物 ControlCommandItem
+ * （逐字段同构；生成物 payload 为可选可空，消费方 control-dispatcher 已有
+ * `payload ?? {}` 与 typeof 守卫，语义不变）。
  */
-export interface PendingControlCommand {
-  /** 指令 id（即 command_id，daemon 侧幂等去重键）。 */
-  id: string;
-  /** 控制指令 kind（CONTROL_KIND 词表之一；daemon 侧宽容 string）。 */
-  kind: string;
-  /** 与既有 WS 消息 payload 同构（尾部注入可选 command_id）。 */
-  payload: Record<string, unknown> | null;
-  /** 创建时间（ISO 字符串；仅日志/观测用，daemon 不做过期判断——backend GC 收口）。 */
-  created_at: string;
-}
+export type PendingControlCommand = components['schemas']['ControlCommandItem'];
 
 /**
  * 心跳响应（task-04 起扩展 `pending_controls` 可选字段，design A1 对账触发器）。

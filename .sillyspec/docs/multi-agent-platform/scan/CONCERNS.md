@@ -37,7 +37,7 @@ backend 的 5 处 `TODO` 具体位置：
 ### 🟡 中严重度
 
 - **根 `package.json` 为纯占位**：根无脚本聚合，所有命令须进子项目或走 `Makefile`，新开发者容易在根目录直接 `npm test` 触发占位失败（`exit 1`）。
-- **daemon 无 CI 工作流**：`.github/workflows/` 下只有 `backend-ci.yml`、`frontend-ci.yml`，daemon 的 65 个测试文件只在本地运行，无自动化回归保障。
+- ~~**daemon 无 CI 工作流**~~（已清偿，2026-08-20 HY-1 审计新增 `daemon-ci.yml`；本条为扫描基线过时残留——ql-20260829-003 复核确认）：daemon 现有路径触发 `sillyhub-daemon/**` 的 CI（typecheck+vitest），本 quick 补齐 daemon-ci.yml 的 pnpm test 与 api-types 类型收口后回归全绿。
 
 ### 🟢 低严重度
 
