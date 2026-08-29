@@ -2294,6 +2294,51 @@ export async function getAgentSession(
   );
 }
 
+/* ---------- Session usage stats (2026-08-29-session-usage-stats task-03) ---------- */
+
+/**
+ * 会话用量按模型聚合行（与 backend daemon/schema.py SessionUsageModelItemRead
+ * 同构，task-01 DTO）。model 为桶名（兜底桶 =「未记录」，run.model NULL 归并）；
+ * api_requests 仅明细段有来源，「未记录」桶恒 0（诚实值，design R-01，前端脚注声明）。
+ */
+export interface SessionUsageModelItem {
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_creation_tokens: number;
+  api_requests: number;
+}
+
+/**
+ * 会话累计用量聚合响应（2026-08-29-session-usage-stats，与 backend
+ * SessionUsageRead 同构）：totals 五指标 = 明细 + 兜底两段之和（totals.model
+ * 为占位值，前端不消费）；by_model 按 input+output 总量降序，「未记录」桶恒末位。
+ *
+ * api-types 生成物同步说明（D-004 收口）：本类型暂为手写过渡终态——生成版
+ * components["schemas"]["SessionUsageRead"] 归 task-05（pnpm gen:types 同步
+ * api-types.ts + backend/openapi.json）；落地后消费方改引生成版，后端 schema
+ * 漂移届时由 gen:types + tsc 暴露。
+ */
+export interface SessionUsageRead {
+  totals: SessionUsageModelItem;
+  by_model: SessionUsageModelItem[];
+}
+
+/**
+ * GET /api/daemon/sessions/{id}/usage — 会话累计用量聚合（task-02 端点：
+ * agent_run_model_usage GROUP BY model 明细段为主源 + 无明细 run 的
+ * AgentRun 四维列兜底；归属不符 404 resource-hiding）。仿 getAgentSession
+ * 的 GET 封装写法。消费方：SessionUsageBar（自取数，refreshSignal 触发重取）。
+ */
+export async function getSessionUsage(
+  sessionId: string,
+): Promise<SessionUsageRead> {
+  return apiFetch<SessionUsageRead>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/usage`,
+  );
+}
+
 /**
  * GET /api/daemon/sessions/{id}/logs — 跨 AgentRun 的只读历史回看。
  * 日志按 run_id 分组返回，run_id 完整保留以便前端区分 turn 边界（D-005@V1）。

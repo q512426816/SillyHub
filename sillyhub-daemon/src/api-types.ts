@@ -5290,6 +5290,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session Usage
+         * @description 返回本会话累计用量聚合（2026-08-29-session-usage-stats task-02 / FR-01 / FR-04 / D-004@v1）。
+         *
+         *     会话内五指标（输入 / 输出 / 缓存读取 / 缓存写入 / 请求次数）汇总 + 按模型
+         *     折叠明细，供前端会话详情页与 dialog 浮窗同构展示（D-001/D-002）。聚合语义
+         *     完全在 :meth:`SessionService.get_session_usage`（task-01）：明细表
+         *     ``agent_run_model_usage`` GROUP BY model 为主源 + 无明细行 run 的四维 token
+         *     列兜底（``ctx_tokens`` 快照列排除），本端点只做委托，不重复聚合逻辑。
+         *
+         *     owner-only 404 resource-hiding：归属校验在 service 内 DB 侧过滤，缺失 /
+         *     跨用户会话同抛 ``DaemonSessionNotFound``（不泄露存在性），与 runs / logs
+         *     等会话读端点同一道闸门。只读端点，无状态机交互。
+         */
+        get: operations["get_session_usage_api_daemon_sessions__session_id__usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/team-mission": {
         parameters: {
             query?: never;
@@ -6057,6 +6087,119 @@ export interface paths {
         put?: never;
         /** Rollback Release */
         post: operations["rollback_release_api_releases__release_id__rollback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Notifications
+         * @description 本人通知列表（created_at DESC）+ 总数，供分页。
+         */
+        get: operations["list_notifications_api_notifications_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/unread-count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Unread Count
+         * @description 本人未读数（徽标首载/兜底轮询）。
+         */
+        get: operations["get_unread_count_api_notifications_unread_count_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/{notification_id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark Notification Read
+         * @description 单条标记已读；非本人或不存在 → NotificationNotFound（404）。
+         */
+        post: operations["mark_notification_read_api_notifications__notification_id__read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark All Notifications Read
+         * @description 全部已读，返回更新行数。
+         */
+        post: operations["mark_all_notifications_read_api_notifications_read_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/notifications/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream Notifications Events
+         * @description SSE 实时通知流（task-08 / FR-07 / design §7.2）。
+         *
+         *     前端 fetch-sse 订阅 ``GET /api/notifications/events``（token 经
+         *     Authorization header 传，EventSource 不支持自定义 header 故不适用），
+         *     收到 ``event: notification`` 帧后刷新列表/徽标。无 Last-Event-ID 回放
+         *     （漏发由前端重连后列表查询兜底，D-003@v2 Non-Goal）。
+         *
+         *     单频道 + 服务端过滤（R-06 跨用户隔离）：所有用户共享
+         *     ``NOTIFICATIONS_CHANNEL`` 全局频道，本生成器仅当 payload 的
+         *     ``recipient_user_ids`` 含当前用户 id 时下发通知摘要，他人信号静默丢弃。
+         *
+         *     连接池安全（对齐 daemon stream_sessions_events）：不注入请求级 DB
+         *     session；鉴权链（get_current_user）查库完成后即归还 DB 连接，生成器内
+         *     零 DB 访问——流存续期间不占用任何连接池 slot。
+         */
+        get: operations["stream_notifications_events_api_notifications_events_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -14413,6 +14556,51 @@ export interface components {
              */
             api_requests: number;
         };
+        /**
+         * NotificationListResponse
+         * @description 列表分页响应（total 为本人（可选未读过滤后）总数）。
+         */
+        NotificationListResponse: {
+            /** Items */
+            items?: components["schemas"]["NotificationRead"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * NotificationRead
+         * @description 单条通知视图（仅本人可见字段，不含 recipient_user_id / dedupe_key）。
+         */
+        NotificationRead: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+            /** Type */
+            type: string;
+            /** Title */
+            title: string;
+            /** Body */
+            body?: string | null;
+            /** Link */
+            link?: string | null;
+            /** Ref Type */
+            ref_type?: string | null;
+            /** Ref Id */
+            ref_id?: string | null;
+            /** Read At */
+            read_at?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** OkResponse */
         OkResponse: {
             /**
@@ -17463,6 +17651,14 @@ export interface components {
             /** Ql Id */
             ql_id: string;
         };
+        /**
+         * ReadAllResponse
+         * @description 全部已读响应（更新行数）。
+         */
+        ReadAllResponse: {
+            /** Updated */
+            updated: number;
+        };
         /** RefreshRequest */
         RefreshRequest: {
             /** Refresh Token */
@@ -18530,6 +18726,57 @@ export interface components {
              * @description daemon 本地 uuid（daemon_instances.id）
              */
             daemon_local_id: string;
+        };
+        /**
+         * SessionUsageModelItemRead
+         * @description 会话用量的单模型桶（2026-08-29-session-usage-stats task-01 / D-002@v1）。
+         *
+         *     五指标口径对齐 RuntimeUsageSummaryRead（无 cost）；``api_requests`` 仅明细段
+         *     有来源，兜底桶恒 0（诚实值，design R-01，前端脚注说明）。
+         */
+        SessionUsageModelItemRead: {
+            /** Model */
+            model: string;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Cache Creation Tokens
+             * @default 0
+             */
+            cache_creation_tokens: number;
+            /**
+             * Api Requests
+             * @default 0
+             */
+            api_requests: number;
+        };
+        /**
+         * SessionUsageRead
+         * @description 会话累计用量聚合响应（2026-08-29-session-usage-stats task-01 / D-004@v1）。
+         *
+         *     ``totals`` 五指标 = 明细+兜底两段之和（``totals.model`` 为占位 ``totals``，
+         *     前端不消费）；空会话 = 全 0 totals + 空 ``by_model``。
+         */
+        SessionUsageRead: {
+            totals: components["schemas"]["SessionUsageModelItemRead"];
+            /**
+             * By Model
+             * @default []
+             */
+            by_model: components["schemas"]["SessionUsageModelItemRead"][];
         };
         /**
          * SetDefaultResult
@@ -20383,6 +20630,14 @@ export interface components {
             };
             /** @description Agent dispatch 结果（无 dispatch 时为 null） */
             agent_dispatch?: components["schemas"]["TransitionDispatchResponse"] | null;
+        };
+        /**
+         * UnreadCountResponse
+         * @description 未读数（铃铛徽标轮询/首载）。
+         */
+        UnreadCountResponse: {
+            /** Count */
+            count: number;
         };
         /**
          * UsageData
@@ -30430,6 +30685,37 @@ export interface operations {
             };
         };
     };
+    get_session_usage_api_daemon_sessions__session_id__usage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionUsageRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     trigger_session_team_mission_api_daemon_sessions__session_id__team_mission_post: {
         parameters: {
             query?: never;
@@ -31891,6 +32177,130 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_notifications_api_notifications_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+                unread_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_unread_count_api_notifications_unread_count_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnreadCountResponse"];
+                };
+            };
+        };
+    };
+    mark_notification_read_api_notifications__notification_id__read_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                notification_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_all_notifications_read_api_notifications_read_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReadAllResponse"];
+                };
+            };
+        };
+    };
+    stream_notifications_events_api_notifications_events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

@@ -104,6 +104,7 @@ from app.modules.daemon.schema import (
     SessionCreateRequest,
     SessionInjectRequest,
     SessionReopenResponse,
+    SessionUsageRead,
     SharedMachineRuntimeView,
     SharedMachineView,
     TeamMissionCreateBlock,
@@ -3416,7 +3417,7 @@ async def _team_mission_summary(
         # worker_done 且无活跃 turn（is_worker_complete=True）→ completed
         # （优先于终态映射——converge end_session 后 done 分身仍映射 done）>
         # 会话终态 failed → failed > 首 run 终态 failed/killed → failed
-        #（ql-20260828-013-a55b 收敛兜底：run 已死任务卡不再显示运行中）>
+        # （ql-20260828-013-a55b 收敛兜底：run 已死任务卡不再显示运行中）>
         # 其余（idle 未 done / 追问重开工中）→ running；完成判定经
         # is_worker_complete_from_active（§5.C.3 单一真相源的批量形态，
         # active_ids 一次查明，F09）。
@@ -3650,6 +3651,30 @@ async def validate_team_mission_block(
         )
 
     return scope_ids, anchor_id
+
+
+@router.get(
+    "/sessions/{session_id}/usage",
+    response_model=SessionUsageRead,
+)
+async def get_session_usage(
+    session_id: uuid.UUID,
+    session: SessionDep,
+    user: Annotated[User, Depends(get_current_principal)],
+) -> SessionUsageRead:
+    """返回本会话累计用量聚合（2026-08-29-session-usage-stats task-02 / FR-01 / FR-04 / D-004@v1）。
+
+    会话内五指标（输入 / 输出 / 缓存读取 / 缓存写入 / 请求次数）汇总 + 按模型
+    折叠明细，供前端会话详情页与 dialog 浮窗同构展示（D-001/D-002）。聚合语义
+    完全在 :meth:`SessionService.get_session_usage`（task-01）：明细表
+    ``agent_run_model_usage`` GROUP BY model 为主源 + 无明细行 run 的四维 token
+    列兜底（``ctx_tokens`` 快照列排除），本端点只做委托，不重复聚合逻辑。
+
+    owner-only 404 resource-hiding：归属校验在 service 内 DB 侧过滤，缺失 /
+    跨用户会话同抛 ``DaemonSessionNotFound``（不泄露存在性），与 runs / logs
+    等会话读端点同一道闸门。只读端点，无状态机交互。
+    """
+    return await SessionService(session).get_session_usage(session_id, user.id)
 
 
 @router.post(

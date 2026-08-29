@@ -34,6 +34,7 @@ from app.modules.agent.model import (
     SESSION_QUEUE_MAX_PENDING,
     AgentRun,
     AgentRunLog,
+    AgentRunModelUsage,
     AgentSession,
     AgentSessionQueuedMessage,
 )
@@ -66,6 +67,8 @@ from app.modules.daemon.schema import (
     PageContextCreateBlock,
     PlanResponseDecision,
     SessionReopenResponse,
+    SessionUsageModelItemRead,
+    SessionUsageRead,
     TeamMissionCreateBlock,
 )
 
@@ -5967,6 +5970,157 @@ class SessionService:
         rows = list((await self._session.execute(stmt)).scalars().all())
         rows.reverse()
         return rows
+
+    async def get_session_usage(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> SessionUsageRead:
+        """会话累计用量聚合：明细段为主 + 无明细 run 四维列兜底（2026-08-29-session-usage-stats
+        task-01 / FR-01 / D-002@v1 / D-004@v1，端点归 task-02）。
+
+        两段 SQL 聚合全部在 SQL 侧完成（JOIN/GROUP BY，不拉 run 行进内存——
+        大会话防膨胀，design R-03）：
+
+        1. 明细段（主源）：``agent_run_model_usage`` JOIN 本会话 ``agent_runs``，
+           GROUP BY ``mu.model``，SUM 四维 token + ``api_requests``；
+        2. 兜底段：本会话中**没有任何明细行**的 run（2026-08-29 之前的历史轮次；
+           NOT EXISTS 反连接，防大会话 NOT IN 子查询膨胀），SUM ``agent_runs``
+           四维 token 列——``ctx_tokens`` 是提示词大小快照列，**严禁**出现在 SUM
+           （Grill P1）；按 ``COALESCE(run.model, '未记录')`` 归并，``api_requests``
+           无来源按 0 计（诚实值，design R-01）。
+
+        归属校验对齐 :meth:`get_agent_session_logs`：``session_id + user_id``
+        DB 侧过滤，缺失/跨用户同抛 :class:`DaemonSessionNotFound`（404 不泄露
+        存在性）。两段按 model 名 dict 归并求和（兜底段按 run.model 命名可能与
+        明细段同名——同名桶相加，不丢）；``by_model`` 按 input+output 总量降序、
+        「未记录」桶恒末位（D-002@v1）；空会话返回全 0 totals + 空 ``by_model``。
+        """
+        from sqlalchemy import exists, func
+
+        # Ownership check (resource hiding — same not-found for missing/cross-user).
+        owned = (
+            await self._session.execute(
+                select(AgentSession.id).where(
+                    AgentSession.id == session_id,
+                    AgentSession.user_id == user_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if owned is None:
+            raise DaemonSessionNotFound(
+                f"AgentSession '{session_id}' not found.",
+                details={"session_id": str(session_id)},
+            )
+
+        # 兜底桶名（run.model 为 NULL 的历史轮次归此桶，恒排 by_model 末位）。
+        unrecorded = "未记录"
+
+        # ── 明细段（主源）：usage 明细 × 本会话 runs，GROUP BY model ──
+        detail_stmt = (
+            select(
+                AgentRunModelUsage.model.label("model"),
+                func.sum(AgentRunModelUsage.input_tokens).label("input_tokens"),
+                func.sum(AgentRunModelUsage.output_tokens).label("output_tokens"),
+                func.sum(AgentRunModelUsage.cache_read_tokens).label("cache_read_tokens"),
+                func.sum(AgentRunModelUsage.cache_creation_tokens).label("cache_creation_tokens"),
+                func.sum(AgentRunModelUsage.api_requests).label("api_requests"),
+            )
+            .join(AgentRun, AgentRunModelUsage.run_id == AgentRun.id)
+            .where(AgentRun.agent_session_id == session_id)
+            .group_by(AgentRunModelUsage.model)
+        )
+        detail_rows = (await self._session.execute(detail_stmt)).mappings().all()
+
+        # ── 兜底段：本会话中无任何明细行的 run，四维 token 列求和 ──
+        # run 级 token 列 nullable（老数据）→ SUM(COALESCE(col, 0))；usage 明细
+        # 列 NOT NULL 但统一 or-0 防御（对齐 runtime usage 装配先例）。
+        bucket = func.coalesce(AgentRun.model, unrecorded)
+        fallback_stmt = (
+            select(
+                bucket.label("model"),
+                func.sum(func.coalesce(AgentRun.input_tokens, 0)).label("input_tokens"),
+                func.sum(func.coalesce(AgentRun.output_tokens, 0)).label("output_tokens"),
+                func.sum(func.coalesce(AgentRun.cache_read_tokens, 0)).label("cache_read_tokens"),
+                func.sum(func.coalesce(AgentRun.cache_creation_tokens, 0)).label(
+                    "cache_creation_tokens"
+                ),
+            )
+            .where(
+                AgentRun.agent_session_id == session_id,
+                # NOT EXISTS 反连接：等价 NOT IN (SELECT run_id ... WHERE run_id IN
+                # 会话 runs)（design §接口定义），且无 IN 膨胀/NULL 陷阱。
+                ~exists().where(AgentRunModelUsage.run_id == AgentRun.id),
+            )
+            .group_by(bucket)
+        )
+        fallback_rows = (await self._session.execute(fallback_stmt)).mappings().all()
+
+        # ── 合并：按 model 名 dict 归并求和（两段同名桶相加，不丢）──
+        buckets: dict[str, SessionUsageModelItemRead] = {}
+
+        def _merge(
+            name: str,
+            input_t: int,
+            output_t: int,
+            cache_r: int,
+            cache_c: int,
+            api_r: int,
+        ) -> None:
+            cur = buckets.get(name)
+            if cur is None:
+                buckets[name] = SessionUsageModelItemRead(
+                    model=name,
+                    input_tokens=input_t,
+                    output_tokens=output_t,
+                    cache_read_tokens=cache_r,
+                    cache_creation_tokens=cache_c,
+                    api_requests=api_r,
+                )
+                return
+            cur.input_tokens += input_t
+            cur.output_tokens += output_t
+            cur.cache_read_tokens += cache_r
+            cur.cache_creation_tokens += cache_c
+            cur.api_requests += api_r
+
+        for row in detail_rows:
+            _merge(
+                str(row["model"]),
+                int(row["input_tokens"] or 0),
+                int(row["output_tokens"] or 0),
+                int(row["cache_read_tokens"] or 0),
+                int(row["cache_creation_tokens"] or 0),
+                int(row["api_requests"] or 0),
+            )
+        for row in fallback_rows:
+            # 兜底桶 api_requests 恒 0（老 run 无调用次数字段，诚实值 R-01）。
+            _merge(
+                str(row["model"]),
+                int(row["input_tokens"] or 0),
+                int(row["output_tokens"] or 0),
+                int(row["cache_read_tokens"] or 0),
+                int(row["cache_creation_tokens"] or 0),
+                0,
+            )
+
+        # by_model 排序：input+output 总量降序；「未记录」桶恒末位（即使总量最大）。
+        by_model = sorted(
+            buckets.values(),
+            key=lambda item: (
+                item.model == unrecorded,
+                -(item.input_tokens + item.output_tokens),
+            ),
+        )
+        totals = SessionUsageModelItemRead(
+            model="totals",  # 占位（前端只读五指标，不消费 totals.model）
+            input_tokens=sum(item.input_tokens for item in by_model),
+            output_tokens=sum(item.output_tokens for item in by_model),
+            cache_read_tokens=sum(item.cache_read_tokens for item in by_model),
+            cache_creation_tokens=sum(item.cache_creation_tokens for item in by_model),
+            api_requests=sum(item.api_requests for item in by_model),
+        )
+        return SessionUsageRead(totals=totals, by_model=by_model)
 
     async def get_session_for_runtime_owner(
         self,

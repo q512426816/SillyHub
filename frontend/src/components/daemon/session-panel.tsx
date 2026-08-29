@@ -118,6 +118,9 @@ import {
   type SessionInputMentions,
 } from "@/components/daemon/session-input-bar";
 import { MessageQueueBar } from "@/components/daemon/message-queue-bar";
+// 2026-08-29-session-usage-stats task-04：会话累计用量条（自取数组件，双模式
+// 渲染点接线见 page 头部下方 / dialog 输入框上方两处挂载点）。
+import { SessionUsageBar } from "@/components/daemon/session-usage-bar";
 import { useMessageQueue } from "@/hooks/use-message-queue";
 import { logsToTurns } from "@/components/daemon/runtime-session-helpers";
 import { CtxUsageBar } from "@/components/sessions/ctx-usage-bar";
@@ -1286,6 +1289,10 @@ function SessionPanelPage({
   // 预取 + 每轮 turn_completed 后刷新，供 whoLine 注入与历史 usage 回填。
   const [runsMeta, setRunsMeta] = useState<Map<string, SessionRunRead>>(new Map());
   const [viewMode, setViewMode] = useState<"conversation" | "all">("conversation");
+  // 2026-08-29-session-usage-stats task-04（R-04）：用量条重取信号——
+  // onTurnCompleted 轮终态递增，驱动头部下方 SessionUsageBar 重拉
+  //（用量数据轮次终态才落库，非实时精确可接受，design R-04）。
+  const [usageRefresh, setUsageRefresh] = useState(0);
   // ql-20260822-010：视图模式（对话/进度）按会话持久化——原实现刷新后回默认
   // 「对话」，与聊天中切到的视图不一致。挂载后回读（effect 内 set，避免 SSR
   // hydration mismatch）；切换时写入。dialog 适配层无刷新恢复场景，不持久化。
@@ -1603,6 +1610,10 @@ function SessionPanelPage({
             // gap-fix（D-008@v1）：每轮终态后刷新 run 快照——本轮 whoLine/usage 由
             // run 行（dispatch 冻结）注入，切换配置后的下一轮跟随新快照。
             refreshRunsMeta(sessionId);
+
+            // 2026-08-29-session-usage-stats task-04（R-04）：轮终态递增用量条
+            // 重取信号（会话累计用量随轮终态落库，SessionUsageBar 自取数重拉）。
+            setUsageRefresh((n) => n + 1);
 
             // ql-20260825-011：轮终态 → 后台会自动派发下一条排队消息，刷队列条
             // （新派发轮的 turn_started 事件也会再刷一次，双保险）。
@@ -3418,6 +3429,13 @@ function SessionPanelPage({
         </div>
       </header>
 
+      {/* 2026-08-29-session-usage-stats task-04（FR-02 / 原型场景一 / D-001@v1）：
+          会话累计用量条——page 模式挂会话头部下方（分隔信息条）；session 已
+          narrow 非 null（预会话/加载/错误态上方已提前 return，天然满足「有
+          sessionId 才渲染」）。refreshSignal 挂 onTurnCompleted 轮终态递增
+          （usageRefresh，R-04：组件自取数，不引入 react-query）。 */}
+      <SessionUsageBar sessionId={session.id} refreshSignal={usageRefresh} />
+
       {/* task-10 / design A5+A6（原型⑤）：suspended 挂起横幅（info 色，双主题
           token 阶）。挂起时后台状态权威（backend 已判定 daemon 离线超时/优雅
           停止），复用本横幅位替代下方「离线只读」通用横幅——文案更具体（自动
@@ -3946,6 +3964,10 @@ function SessionPanelDialog(props: SessionPanelProps) {
   // ql-20260825-011：服务端排队刷新桥——establishStream（SSE 回调，定义早于
   // useMessageQueue 调用）经 ref 触发队列刷新，避开 use-before-define。
   const queueRefreshRef = useRef<() => void>(() => {});
+  // 2026-08-29-session-usage-stats task-04（R-04）：用量条重取信号——dialog 分支
+  // 独立 state（零 react-query 铁律不引入 queryClient），onTurnCompleted 轮终态
+  // 递增，驱动输入框上方 SessionUsageBar 重拉。
+  const [usageRefresh, setUsageRefresh] = useState(0);
 
   // ── task-09 / design A6：连接横幅 + 运行轮看门狗（共用 hook；dialog 无
   // react-query——会话级对账不挂 invalidate，轮级终态经 resync 合成事件收敛）。──
@@ -4098,6 +4120,9 @@ function SessionPanelDialog(props: SessionPanelProps) {
               const terminal = deriveTurnTerminalStatus(env);
               // ql-20260825-011：轮终态 → 后台会自动派发下一条排队消息，刷队列条。
               queueRefreshRef.current?.();
+              // 2026-08-29-session-usage-stats task-04（R-04）：轮终态递增用量条
+              // 重取信号（dialog 独立 state，会话累计用量随轮终态落库）。
+              setUsageRefresh((n) => n + 1);
               setView((prev) => upsertDialogTurn(prev, env, (turn) => {
                 // 终态清全部 text/thinking 段的 streaming 标记（finishTurn）——流式
                 // 光标与轮级状态条随之收起。segments 缺省的旧形状 turn 无 streaming
@@ -5352,6 +5377,15 @@ function SessionPanelDialog(props: SessionPanelProps) {
           后台任务仍在运行，会话未结束（详情见头部「后台」）
         </p>
       )}
+
+      {/* 2026-08-29-session-usage-stats task-04（FR-02 / 原型场景二 / D-001@v1）：
+          会话累计用量条——dialog 模式挂输入框上方（消息区与输入区之间的信息条）；
+          attach 有会话才渲染（view.sessionId 为空 = idle 新建，无用量可显）。
+          refreshSignal 挂 dialog 自己的 onTurnCompleted 轮终态递增（独立
+          usageRefresh state，R-04：组件自取数，dialog 路径零 react-query）。 */}
+      {view.sessionId ? (
+        <SessionUsageBar sessionId={view.sessionId} refreshSignal={usageRefresh} />
+      ) : null}
 
       {/* 排队消息条（design §3.2 / 目标 3：dialog 与 page 共用；空队列组件自返回
           null 不占位）。ql-20260825-007：条目可带附件（📎 数展示），onRemove 顺带

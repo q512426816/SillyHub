@@ -906,6 +906,39 @@ class RuntimeUsageListResponse(BaseModel):
     runtimes: list[RuntimeUsageRead]
 
 
+# ── Session usage stats (2026-08-29-session-usage-stats task-01 / FR-01 / D-002@v1 / D-004@v1) ─
+# GET /api/daemon/sessions/{session_id}/usage 响应 schema（端点归 task-02）。
+# 数据源两段聚合（D-004@v1）：明细段 agent_run_model_usage GROUP BY model（主源）
+# + 兜底段（无明细行 run 的 agent_runs 四维 token 列，COALESCE(model,'未记录')归并，
+# ctx_tokens 快照列不参与求和）；totals = 两段之和，by_model 按 input+output 降序。
+
+
+class SessionUsageModelItemRead(BaseModel):
+    """会话用量的单模型桶（2026-08-29-session-usage-stats task-01 / D-002@v1）。
+
+    五指标口径对齐 RuntimeUsageSummaryRead（无 cost）；``api_requests`` 仅明细段
+    有来源，兜底桶恒 0（诚实值，design R-01，前端脚注说明）。
+    """
+
+    model: str  # 模型名；兜底桶 = COALESCE(run.model, '未记录')
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    api_requests: int = 0  # 兜底桶恒 0（老 run 无调用次数字段）
+
+
+class SessionUsageRead(BaseModel):
+    """会话累计用量聚合响应（2026-08-29-session-usage-stats task-01 / D-004@v1）。
+
+    ``totals`` 五指标 = 明细+兜底两段之和（``totals.model`` 为占位 ``totals``，
+    前端不消费）；空会话 = 全 0 totals + 空 ``by_model``。
+    """
+
+    totals: SessionUsageModelItemRead
+    by_model: list[SessionUsageModelItemRead] = []  # input+output 降序；「未记录」恒末位
+
+
 # ── Change-write task queue (task-09, FR-08 / D-004@v1) ─────────────────────
 # daemon-client workspace 的 change 代写任务队列回执：daemon 轮询
 # GET /runtimes/{rid}/pending-change-writes → claim(token)→ 本地写 → complete 回执。
