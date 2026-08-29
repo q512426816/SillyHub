@@ -81,7 +81,9 @@ export function LinkWorkspaceDialog({ open, projectId, projectName, onClose }: P
       // 并行取已关联 + 全量工作区(后者做可选列表源)。
       const [linkedRes, allRes] = await Promise.all([
         listProjectWorkspaces(projectId),
-        listWorkspaces(),
+        // ql-20260829-009：关联候选只列活跃工作区（归档区不出现；已关联行
+        // 来自 listProjectWorkspaces，存量归档关联仍如实显示不受影响）。
+        listWorkspaces({ status: "active" }),
       ]);
       setLinked(linkedRes);
       setAll(allRes.items);

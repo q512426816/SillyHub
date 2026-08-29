@@ -113,7 +113,8 @@ export default function WorkspacesMobilePage() {
   // ?unclassified=true，不传 type）/ 8 值词表之一=?type= 等值匹配。旧值 daemon-client
   // 已废弃删除（破坏面收口，design §5.6）。
   const [typeFilter, setTypeFilter] = useState<WorkspaceType | "unclassified" | null>(null);
-  const [statusFilter, setStatusFilter] = useState("");
+  // ql-20260829-009：默认只展示活跃工作区（对齐桌面端 /workspaces 页同款口径）。
+  const [statusFilter, setStatusFilter] = useState("active");
   const [ownerUserId, setOwnerUserId] = useState<string | null>(null);
   const [userOptions, setUserOptions] = useState<UserRead[]>([]);
 

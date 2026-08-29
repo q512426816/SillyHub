@@ -201,7 +201,8 @@ export function AgentProfileForm({
   // 工作区列表（仅在选择器可见时拉取，workspace-switcher 同源 listWorkspaces）。
   const wsListQuery = useQuery<Workspace[], Error>({
     queryKey: ["workspaces", "list", "agent-profile-form"],
-    queryFn: async () => (await listWorkspaces()).items ?? [],
+    // ql-20260829-009：选择器只列活跃工作区——归档区不再作为新档案的归属候选。
+    queryFn: async () => (await listWorkspaces({ status: "active" })).items ?? [],
     enabled: showContextSelector,
     staleTime: 60_000,
   });

@@ -45,8 +45,15 @@ workspace_id 是全平台跨组件协作主轴；daemon-client 唯一模式下�
     值 422；曾存在类尾同名字段把 Literal 校验覆盖成任意字符串的隐患，已删重）；
     pending→active 经 PATCH 传入时 service 层委托 activate 引导（spec bootstrap
     + last_scanned_at），deleted 恒走 DELETE 软删端点（runs 收敛 + deleted_at）。
-    前端：列表页默认 status=active 筛选（选「全部状态」可看归档），详情页基本
-    信息编辑表单含状态下拉（active↔archived），hero 徽标非 active 值显中文标签。
+    前端：列表页（桌面 +m/ 移动端）默认 status=active 筛选（选「全部状态」可看
+    归档），详情页基本信息编辑表单含状态下拉（active↔archived），hero 徽标非
+    active 值显中文标签。**选择器口径（ql-20260829-009）**：归属/关联类下拉
+    （agent-profile-form 档案归属、platform-shared-agents-card 源码工作区、
+    LinkWorkspaceDialog PPM 关联候选）一律 listWorkspaces({status:"active"})；
+    名字解析类（session-panel 头部、workspace-switcher、runtimes 来源工作区名）
+    不过滤（归档区会话/绑定仍需显示原名）；会话工作区树（session-list-panel）
+    不过滤（归档区的既有会话仍需可见）；归档区详情页顶部琥珀横幅提示状态与
+    恢复路径。
     root_path 与 slug 的唯一性是 **partial unique index（WHERE deleted_at IS NULL）**——
     软删行保留原值，同路径重建走复活而非冲突（migration 202605261000）
   - M2N 中间表：`TaskWorkspace` / `AgentRunWorkspace` / `PpmProjectWorkspace`。

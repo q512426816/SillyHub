@@ -96,7 +96,8 @@ export function PlatformSharedAgentsCard() {
   // 源码工作区下拉（只读锚定，design §5 Phase 3 校验工作区存在）。
   const { data: workspacesResp } = useQuery({
     queryKey: ["workspaces", "sharedAgentsCard"],
-    queryFn: () => listWorkspaces({ limit: 100 }),
+    // ql-20260829-009：源码工作区选择器只列活跃——归档区不作为共享智能体锚定候选。
+    queryFn: () => listWorkspaces({ limit: 100, status: "active" }),
     staleTime: 60_000,
   });
 

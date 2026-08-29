@@ -586,4 +586,29 @@ describe("WorkspaceDetailPage 接线 WorkspaceConfigCard（task-09 / FR-003）",
     // 保存成功 → setWorkspace(updated) 刷新徽标为「已归档」并退回只读态
     expect(await screen.findByText("已归档")).toBeInTheDocument();
   });
+
+  it("ql-20260829-009：归档工作区详情页顶部显示归档提示横幅（活跃区不显示）", async () => {
+    // 活跃区：无横幅
+    const active = makeWorkspace("platform-managed");
+    workspacesApi.getWorkspace.mockResolvedValue(active.ws);
+    specApi.getSpecWorkspace.mockResolvedValue(active.specWs);
+    componentsApi.listComponents.mockResolvedValue({ items: [], total: 0 });
+    mockDefaultBinding();
+    const { unmount } = render(<WorkspaceDetailPage params={{ id: "ws-1" }} />);
+    await waitFor(() =>
+      expect(screen.getAllByText("multi-agent-platform").length).toBeGreaterThan(0),
+    );
+    expect(screen.queryByTestId("archived-workspace-banner")).not.toBeInTheDocument();
+    unmount();
+
+    // 归档区：横幅出现，文案含恢复路径指引
+    const archived = makeWorkspace("platform-managed");
+    const archivedWs = { ...archived.ws, status: "archived" } as typeof archived.ws;
+    workspacesApi.getWorkspace.mockResolvedValue(archivedWs);
+    specApi.getSpecWorkspace.mockResolvedValue(archived.specWs);
+    render(<WorkspaceDetailPage params={{ id: "ws-1" }} />);
+    expect(await screen.findByTestId("archived-workspace-banner")).toBeInTheDocument();
+    expect(screen.getByText(/该工作区已归档/)).toBeInTheDocument();
+    expect(screen.getByText(/状态改回「活跃」/)).toBeInTheDocument();
+  });
 });

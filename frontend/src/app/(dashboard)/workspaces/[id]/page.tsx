@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Archive } from "lucide-react";
 
 import { AgentModelInput } from "@/components/AgentModelInput";
 import { SharedDaemonToggle } from "@/components/workspace/shared-daemon-toggle";
@@ -590,6 +591,22 @@ export default function WorkspaceDetailPage({ params }: Props) {
             ) : undefined
           }
         />
+
+        {/* ql-20260829-009：归档提示横幅——归档区默认不进列表/选择器，进详情时
+            明示当前状态与恢复路径（基本信息编辑表单状态改回「活跃」）。 */}
+        {workspace.status === "archived" && (
+          <div
+            role="status"
+            data-testid="archived-workspace-banner"
+            className="flex flex-wrap items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-4 py-2.5 text-xs text-amber-800"
+          >
+            <Archive className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              该工作区已归档：默认不出现在工作区列表与各处选择器中，仅供查阅。
+              如需恢复使用，请在下方「基本信息 → 编辑」中将状态改回「活跃」。
+            </span>
+          </div>
+        )}
 
         {/* 接入配置编辑表单（原 BindingGuard 展开态，保存后收起并刷新） */}
         {accessEditing && myBinding && (
