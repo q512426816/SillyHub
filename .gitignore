@@ -47,6 +47,8 @@ yarn-error.log*
 .env
 .env.*
 !.env.example
+# e2e 凭据模板入库（真实 .env.e2e 仍被上面规则忽略）
+!.env.e2e.example
 
 # Docker
 .docker/data/

@@ -1,0 +1,157 @@
+name: e2e-ci
+
+# 前端 E2E（Playwright 全链路）：postgres + redis services → backend uvicorn →
+# frontend 生产形态 next start → chromium 跑 e2e。设计依据 design.md §5.2 / FR-07。
+on:
+  push:
+    paths:
+      - "frontend/**"
+      - ".github/workflows/e2e-ci.yml"
+  pull_request:
+    paths:
+      - "frontend/**"
+      - ".github/workflows/e2e-ci.yml"
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    # GH Actions services 容器映射到 job 容器网络，backend 用 localhost 直连。
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # 前端工具链（对齐 frontend-ci.yml：pnpm 9.6.0 / node 20 / pnpm 缓存）
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.6.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: "pnpm"
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      # 后端工具链（对齐 backend-ci.yml：setup-uv 0.4.18 / Python 3.12 / uv sync --all-extras）
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          version: "0.4.18"
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Sync backend dependencies
+        working-directory: backend
+        run: uv sync --all-extras
+
+      # 起 backend：shell & 后台 + 轮询就绪。
+      # AUTH_LOGIN_RATE_LIMIT_PER_MINUTE=60（D-008@v1）：登录限流默认极低会打断
+      # E2E 登录流程，放宽到 60 次/分钟保证套件不因限流误红。
+      - name: Start backend
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
+          REDIS_URL: redis://localhost:6379/0
+          SECRET_KEY: ci-e2e-secret-key-must-be-at-least-16-chars
+          PLATFORM_BOOTSTRAP_ADMIN_EMAIL: e2e-bootstrap@sillyhub.local
+          PLATFORM_BOOTSTRAP_ADMIN_PASSWORD: E2eBootstrap-2026-Admin
+          AUTH_LOGIN_RATE_LIMIT_PER_MINUTE: "60"
+          CORS_ALLOWED_ORIGINS: '["http://localhost:3000"]'
+        run: |
+          # 全新 services DB 无表结构：先跑迁移（镜像 entrypoint 同款步骤）
+          uv run alembic upgrade head
+          nohup uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/uvicorn.log 2>&1 &
+          # /api/health 恒返回 200（即使 db/redis 降级），必须校验 body status=="ok"
+          # 才能证明依赖真正就绪（backend/app/modules/health/router.py）。
+          for i in $(seq 1 30); do
+            body=$(curl -fsS http://localhost:8000/api/health || true)
+            if echo "$body" | grep -q '"status":"ok"'; then
+              echo "backend ready: $body"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "backend not ready within 90s; last response: $body"
+          cat /tmp/uvicorn.log
+          exit 1
+
+      # 前端生产形态（D-004@v1）：next build + next start，与线上一致，
+      # 避免 dev server 行为差异掩盖问题。
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          INTERNAL_API_BASE_URL: http://localhost:8000
+        run: pnpm build
+
+      - name: Start frontend
+        working-directory: frontend
+        run: |
+          nohup pnpm exec next start -p 3000 > /tmp/next.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://localhost:3000; then
+              echo "frontend ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "frontend not ready within 60s"
+          cat /tmp/next.log
+          exit 1
+
+      - name: Install Playwright chromium
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+
+      # E2E_BOOTSTRAP_* 必须与 backend 引导管理员一致（e2e/fixtures.ts 登录用）。
+      # 注意后端 D-001：登录 account 是登录名（username）而非邮箱——bootstrap
+      # username 由 email 本地段派生（auth/service.py:446），故此处填 e2e-bootstrap。
+      # CI=true 使 playwright.config.ts 的 retries=1 生效，CI 抖动重跑兜底。
+      - name: Run e2e tests
+        working-directory: frontend
+        env:
+          CI: true
+          E2E_BASE_URL: http://localhost:3000
+          E2E_API_URL: http://localhost:8000
+          E2E_BOOTSTRAP_EMAIL: e2e-bootstrap
+          E2E_BOOTSTRAP_PASSWORD: E2eBootstrap-2026-Admin
+        run: pnpm test:e2e
+
+      # 失败时上传 trace / html report，便于离线排查（保留 7 天）
+      - name: Upload Playwright report
+        if: ${{ !success() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 7
+          if-no-files-found: ignore

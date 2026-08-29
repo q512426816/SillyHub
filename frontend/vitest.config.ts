@@ -1,10 +1,13 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
 export default defineConfig({
   plugins: [react()],
   test: {
+    // E2E（Playwright）与单测（Vitest）双栈隔离（D-009@v1）：vitest 默认 include
+    // **/*.{test,spec}.?() 会收集 e2e/*.spec.ts，此处显式排除，同时保留默认排除项。
+    exclude: ["e2e/**", ...configDefaults.exclude],
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],

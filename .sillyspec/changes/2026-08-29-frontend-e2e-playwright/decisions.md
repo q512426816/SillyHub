@@ -82,3 +82,14 @@ created_at: 2026-08-29 14:39:29
 - impacts: [frontend/vitest.config.ts, frontend-ci]
 - evidence: vitest.config.ts:5-35（无 include 字段）
 
+
+## D-010@v1 e2e 环境变量改外部注入，不引入 dotenv 依赖
+
+- type: feasibility
+- priority: P2
+- status: accepted
+- source: execute（task-02 偏差定案）
+- question: design §5.1 原写 dotenv 加载 e2e/.env.e2e，但 frontend 无 dotenv 依赖，且 Wave 2 并行约束禁止 task-02 动 package.json（task-07 正在改）。
+- answer: env.ts 直读 process.env，由外部注入——本机 shell `set -a; source frontend/e2e/.env.e2e; set +a` 或 CI env 块直接注入；缺失必需变量时中文报错带修复指引。后续如需更顺滑可评估 node --env-file（node 版本约束）或补 dotenv 依赖，属独立优化。
+- impacts: [e2e/env.ts, task-05 README, e2e-ci.yml]
+- evidence: execute task-02 子代理报告（require.resolve('dotenv') 失败）
