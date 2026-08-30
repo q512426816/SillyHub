@@ -453,3 +453,46 @@ supersedes：D-004@v1
 锚点：未记录
 最近确认：0ea25728
 理由：方案 A——新增 GET /api/daemon/sessions/{id}/usage 聚合端点：agent_run_model_usage 按 session 的 runs 聚合为主、AgentRun 六 token 列兜底无明细行的老 run，返回会话汇总+按模型分组；与 /runtimes/usage 先例同模式
+
+## D-001@v1 : 注入通道选前导拼接，不动 system_prompt 与 daemon
+状态：implemented
+变更：2026-08-29-session-user-preamble
+锚点：未记录
+最近确认：c7346118
+理由：现有 4 条注入通道中选「前导拼接」：backend `daemon/session/context.py` 新增前导构建函数，`session/service.py` create_session 的 `_prefix_parts` 接线（变更/页面/PPM/团队简报四前导同款模式）。否决 system_prompt 通道（仅 claude 消费，codex 不支持，且是 per-AgentProfile 语义）与 daemon 侧注入（daemon 纯透传、不认识用户）。
+
+## D-002@v1 : 仅首轮注入 + 覆盖重派重渲染路径；后续轮次与服务身份注入不带
+状态：implemented
+变更：2026-08-29-session-user-preamble
+锚点：未记录
+最近确认：c7346118
+理由：仅首轮（用户信息+规则留在上下文持续生效，避免每轮膨胀）；掉线重派（batch-session-inherit 的 prompt 重渲染路径）须确认重渲染时同样带上。后续轮次 `_inject_into_session` 与平台审批代写等服务身份注入不带用户前导（由「仅首轮」自然满足）。
+
+## D-003@v2 : 不加 Role 字段，角色名称直接给 agent 自行判断沟通风格
+状态：implemented
+变更：2026-08-29-session-user-preamble
+锚点：未记录
+最近确认：c7346118
+理由：用户在 brainstorm step 6 明确推翻 Role 加字段方案：「直接给角色名称给 agent 分析就行，不要加字段了」。用户信息块内列出角色名称原文 + 一小段静态沟通适配指引文案，由 agent 根据角色名自行判断用业务语言还是技术语言。无 schema 迁移、无 admin/前端改动，变更范围缩小为 backend daemon/session 模块。
+supersedes：D-003@v1
+
+## D-004@v1 : SillySpec 工具规则条件注入（工作区根存在 .sillyspec/ 才拼）
+状态：implemented
+变更：2026-08-29-session-user-preamble
+锚点：未记录
+最近确认：c7346118
+理由：条件注入：仅会话绑定的工作区根目录检测到 `.sillyspec/` 目录才拼入。无条件注入会诱导 agent 在非 SillySpec 项目擅自 `sillyspec init` 污染用户仓库。无工作区会话不注入该块。
+
+## D-005@v1 : batch（批量任务）路径本期不注入
+状态：implemented
+变更：2026-08-29-session-user-preamble
+锚点：未记录
+最近确认：c7346118
+理由：本期仅做交互会话（interactive session）；batch 已有 CLAUDE.md prepend 通道，将来可复用同一套模板函数，不纳入本变更范围。
+
+## D-007@v1 : 整体方案选 A（后端前导拼接 + Role 受众字段），否决 B（纯 prompt 猜测）与 C（system_prompt 通道）
+状态：implemented
+变更：2026-08-29-session-user-preamble
+锚点：未记录
+最近确认：c7346118
+理由：用户在 explore 阶段看到完整对比表后确认「帮我实现吧」= 选 A。A 是唯一同时满足 D-001~D-006 的方案；B 违反 D-003（自由文本角色名不可靠推断）且画像判定失控；C 违反 D-001（codex 不支持 systemPrompt，provider 不对称）。
