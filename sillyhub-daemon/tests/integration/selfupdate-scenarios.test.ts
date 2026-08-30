@@ -57,7 +57,7 @@ vi.mock('../../src/preflight.js', async (importOriginal) => {
   };
 });
 
-import { Daemon, SELF_UPDATE_RETRY_INTERVAL_MS } from '../../src/daemon.js';
+import { Daemon, SELF_UPDATE_RETRY_INTERVAL_MS, RECOVER_AFTER_DEGRADED_MS } from '../../src/daemon.js';
 import { BUILD_ID } from '../../src/build-id.js';
 import type { DaemonConfig } from '../../src/config.js';
 import type { SessionManager } from '../../src/interactive/session-manager.js';
@@ -395,5 +395,139 @@ describe('task-08 SELF_UPDATE 安全层四路径集成回归', () => {
       expect(second.length).toBe(4);
       expect(second[3]).toBeUndefined();
     });
+  });
+});
+
+// ── task-06（2026-08-30-daemon-self-heal）：心跳降级恢复 × selfupdate 互斥 ────
+//
+// 覆盖（tasks/task-06.md acceptance，D-002/D-007/D-008）：
+//   - 恢复进行中 _isBusyForUpdate()=true（第三臂）→ selfupdate 触发走既有
+//     忙推迟（pending 真实落盘 + 30s 复查，复用路径①断言模式）；恢复完成后
+//     （finally 复位 _recoverInFlight）30s 重探走通升级链——互斥不丢指令。
+//   - 401/403 凭证断连（D-008 补置 failSince）持续超 720s、凭证恢复后心跳成功
+//     同样触发 _recoverPersistedSessions('heartbeat_recover')；
+//     heartbeat_auth_rejected FATAL 日志语义不变。
+//
+// harness 复用上方 makeHarness（fake sessionManager + spy-through 落盘链），
+// 恢复链用实例 spy 置换（触发/推迟语义断言不依赖真实恢复内容）。
+
+/** task-06 私有成员直取类型（互斥/触发链断言载体）。 */
+interface RecoverInternals {
+  _registeredRuntimes: Map<string, string>;
+  _heartbeatFailSince: number | null;
+  _recoverInFlight: boolean;
+  _recoverPendingAfterDegraded: boolean;
+  _isBusyForUpdate: () => boolean;
+  _recoverPersistedSessions: (trigger: string) => Promise<void>;
+  _logger: { error: (event: string, kv?: Record<string, unknown>) => void };
+}
+
+describe('task-06 心跳降级恢复 × selfupdate 互斥（D-002/D-007/D-008）', () => {
+  let tmpDir: string;
+  let pendingPath: string;
+  let bundlePath: string;
+  let restoreConsole: () => void;
+
+  beforeEach(async () => {
+    tmpDir = await makeTmpDir('task06-recover-');
+    pendingPath = join(tmpDir, 'pending-update.json');
+    bundlePath = join(tmpDir, 'bin', 'sillyhub-daemon.js');
+    restoreConsole = silenceConsole();
+    runDaemonSelfUpdateMock.mockReset();
+    respawnMock.mockReset();
+    fetchLatestBuildIdMock.mockReset().mockResolvedValue(null);
+  });
+  afterEach(async () => {
+    restoreConsole();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    await cleanupDir(tmpDir);
+  });
+
+  describe('恢复在途 × selfupdate 触发（D-002 双向互斥之正向）', () => {
+    beforeEach(() => {
+      // 30s 复查定时器用 fake timers 驱动（与路径①同款配置）。
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+    });
+
+    it('恢复进行中 _isBusyForUpdate=true → tryUpdate 走既有推迟（pending 落盘）→ 恢复完成后 30s 重探走通升级链', async () => {
+      const h = makeHarness({ pendingPath, bundlePath });
+      const anyd = h.daemon as unknown as RecoverInternals;
+
+      // 可控 deferred 恢复：触发后保持挂起，锁定「恢复在途」窗口。
+      let resolveRecover!: () => void;
+      const recoverSpy = vi
+        .spyOn(anyd, '_recoverPersistedSessions')
+        .mockImplementationOnce(
+          () =>
+            new Promise<void>((r) => {
+              resolveRecover = r;
+            }),
+        );
+
+      // 心跳脱离降级（failSince 回拨 >720s）→ 触发恢复并挂起（fire-and-forget）。
+      anyd._heartbeatFailSince = Date.now() - (RECOVER_AFTER_DEGRADED_MS + 60_000);
+      await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+      expect(recoverSpy).toHaveBeenCalledWith('heartbeat_recover');
+
+      // 恢复在途：第三臂生效（D-002）——busy 判定为真、在途标志已置位。
+      expect(anyd._recoverInFlight).toBe(true);
+      expect(anyd._isBusyForUpdate()).toBe(true);
+
+      // 恢复进行中触发 selfupdate → 既有忙推迟：写 pending、不下载不打断恢复。
+      await h.tryUpdate('server_command', 'v-recover-busy');
+      expect(h.writeSpy).toHaveBeenCalledTimes(1);
+      expect(h.writeSpy).toHaveBeenCalledWith({
+        reason: 'server_command',
+        current_version: BUILD_ID,
+        target_version: 'v-recover-busy',
+      });
+      expect(runDaemonSelfUpdateMock).not.toHaveBeenCalled();
+      expect(h.stopSpy).not.toHaveBeenCalled();
+
+      // 恢复完成（finally 复位在途标志）→ 30s 重探（既有复查机制）走通升级链。
+      resolveRecover();
+      await settleIo();
+      expect(anyd._recoverInFlight).toBe(false);
+      await vi.advanceTimersByTimeAsync(SELF_UPDATE_RETRY_INTERVAL_MS);
+      await settleIo();
+      expect(runDaemonSelfUpdateMock).toHaveBeenCalledTimes(1);
+      expect(h.order).toEqual(['download', 'stop', 'respawn']);
+    });
+  });
+
+  // 401/403 用例无定时器参与：real timers（照路径④口径）。
+  describe('401/403 凭证断连恢复后触发（D-008）', () => {
+    for (const status of [401, 403] as const) {
+      it(`HTTP ${status} 断连补置 failSince → 持续超 720s 后心跳成功触发 heartbeat_recover（FATAL 语义不变）`, async () => {
+        const h = makeHarness({ pendingPath, bundlePath });
+        const anyd = h.daemon as unknown as RecoverInternals;
+        const recoverSpy = vi
+          .spyOn(anyd, '_recoverPersistedSessions')
+          .mockResolvedValue(undefined);
+        const errorSpy = vi.spyOn(anyd._logger, 'error');
+
+        // 凭证断连一拍：401/403 → FATAL + 清注册表 +（D-008）补置降级起点。
+        h.heartbeatMock.mockRejectedValueOnce(
+          Object.assign(new Error('auth rejected'), { status }),
+        );
+        await expect(h.sendHeartbeatOnce()).resolves.toBe(false);
+        expect(anyd._heartbeatFailSince).not.toBeNull();
+        expect(errorSpy).toHaveBeenCalledWith(
+          'heartbeat_auth_rejected',
+          expect.objectContaining({ status }),
+        );
+
+        // 断连持续 >720s（回拨 failSince）→ 凭证恢复 + 重注册（401/403 分支已
+        // 清注册表）→ 心跳成功触发恢复链。
+        anyd._heartbeatFailSince = Date.now() - (RECOVER_AFTER_DEGRADED_MS + 60_000);
+        anyd._registeredRuntimes.set('claude', 'rt-task08-selfupdate-1');
+        await expect(h.sendHeartbeatOnce()).resolves.toBe(true);
+        expect(recoverSpy).toHaveBeenCalledTimes(1);
+        expect(recoverSpy).toHaveBeenCalledWith('heartbeat_recover');
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        expect(anyd._recoverInFlight).toBe(false);
+      });
+    }
   });
 });

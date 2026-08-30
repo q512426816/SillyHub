@@ -11,11 +11,30 @@
  * 功能2（daemon 自身）：
  *   - 本地构建标识 {@link BUILD_ID}（release 时为 git SHA）
  *   - 服务器最新版本 `fetch ${server_url}/daemon/latest.json` → { version, url, publishedAt }
- *   - version 与本地 SHA 不一致 → 从 url 下载新 bundle，原子替换
- *     ~/.sillyhub/daemon/bin/sillyhub-daemon.js（mcp-server.js 同目录 best-effort
- *     伴生替换），返回 true；调用方（启动期 runPreflight / WS SELF_UPDATE）据
- *     true 调 respawnDaemonAndExit 以 detached 子进程拉起新版本后退出旧进程
- *   - 服务器不可达 / 下载失败 → 仅 warn，返回 false 保持运行
+ *   - version 与本地 SHA 不一致 → 从 url 下载新 bundle，内容校验通过且旧文件
+ *     已备份后原子替换 ~/.sillyhub/daemon/bin/sillyhub-daemon.js（mcp-server.js
+ *     同目录 best-effort 伴生替换，同校验同备份），返回 true；调用方（启动期
+ *     runPreflight / WS SELF_UPDATE）据 true 调 respawnDaemonAndExit 以 detached
+ *     子进程拉起新版本后退出旧进程
+ *   - 服务器不可达 / 下载失败 / 内容校验不过 → 仅 warn，返回 false 保持运行
+ *
+ * 内容校验（D-003，2026-08-30-daemon-self-heal）：{@link validateBundleContent}
+ * 以「≥ {@link MIN_BUNDLE_BYTES} 且可提取 BUILD_ID」为共享校验口径——防线 2
+ * （下载内容不过校验不落盘）与防线 3（坏盘不被 respawn 拉起）共用，拦
+ * 'NEW BUNDLE BODY' 类占位/半截 bundle。
+ *
+ * 备份轮换（D-004，2026-08-30-daemon-self-heal）：downloadAndReplace 在 rename
+ * 前把既有 bundle 复制为 `<target>.bak-<yyyyMMdd-HHmmss>`，同前缀按文件名字典
+ * 序保留最近 3 份（纯数字定长时间戳，字典序即时间序，跨平台一致）。备份失败
+ * 仅 warn 不阻塞替换——人工兜底路径，不拦自更新主线。
+ *
+ * respawn 最后防线（D-005，2026-08-30-daemon-self-heal）：
+ * {@link respawnDaemonAndExit} spawn 前以 {@link validateBundleOnDisk} 复核
+ * 盘上 bundle，不过 → error `daemon_self_update_respawn_validation_failed`
+ * + 提前 return 不退出（不 spawn、不排定 exit，旧进程保活；启动路径正常
+ * 继续启动旧逻辑）。函数因该校验 async 化（Promise<void>，plan 审查问题 3
+ * 裁定方案 a），daemon.ts 两处调用点 fire-and-forget 零义务兼容（全路径
+ * 自收敛不 reject）。
  *
  * 异步性：sillyspec 检查/安装用 spawn+超时杀树（runWithTreeKill，启动阶段执行，
  * 耗时数十秒，刻意阻塞以确保启动前 CLI 就绪）；daemon 自更新用 Node 20 原生
@@ -24,7 +43,8 @@
  * 可测性：除公开入口 {@link runPreflight} 外，导出 {@link runSillySpecCheck} /
  * {@link runDaemonSelfUpdate} / {@link fetchLatestBuildId}（task-04：仅取
  * latest.json version，daemon 推迟路径目标版本回传）供单测直接调用
- * （buildId / binDir 可注入）。
+ * （buildId / binDir 可注入；{@link runPreflight} 第三参 binDir 同为测试
+ * 隔离注入——生产调用点不传，默认盘上目录，行为不变）。
  *
  * @module preflight
  */
@@ -32,7 +52,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { mkdir, writeFile, rename, unlink } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, unlink, copyFile, readdir, access } from 'node:fs/promises';
 import type { DaemonConfig } from './config.js';
 import { BUILD_ID } from './build-id.js';
 import { parseSemver, type SemVerTuple } from './version.js';
@@ -72,6 +92,93 @@ const DAEMON_BUNDLE_NAME = 'sillyhub-daemon.js';
  */
 const MCP_SERVER_BUNDLE_NAME = 'mcp-server.js';
 
+// ── bundle 内容校验（D-003：零子进程，防线 2/3 共享口径）─────────────────────
+
+/**
+ * bundle 内容可信的大小下限（D-003@v1）：64KB。
+ *
+ * 实测主 bundle 3,572,030B / mcp-server.js 1,157,632B，64KB 有 17 倍余量；
+ * 8-30 事故类 'NEW BUNDLE BODY'（15 字节、无 BUILD_ID）占位/半截内容必被拦。
+ */
+export const MIN_BUNDLE_BYTES = 65_536;
+
+/**
+ * bundle 文本内 BUILD_ID 提取正则，与 daemon.ts 的 DISK_BUILD_ID_RE
+ * （daemon.ts:210）同款同值重声明——本模块不可反向 import daemon.ts
+ * （daemon.ts 已 import 本模块，会成环）；同值重声明先例：DAEMON_BUNDLE_NAME
+ * 两文件各自声明（daemon.ts:200-203 注释）。
+ *
+ * gen-build-id.mjs 生成 `export const BUILD_ID = "<sha>-<ts>";` 单行，引号
+ * 单双皆容；首处匹配即取（bundle 内无前序同形出现）。
+ */
+const DISK_BUILD_ID_RE = /BUILD_ID\s*=\s*["']([^"']+)/;
+
+/**
+ * 校验 bundle 内容可信（D-003@v1，纯函数：零子进程、零 IO、零平台分支，
+ * Windows/Linux/macOS 行为一致——Buffer 长度 + 正则）。
+ *
+ * 口径：size ≥ {@link MIN_BUNDLE_BYTES} 且 {@link DISK_BUILD_ID_RE} 可提取
+ * BUILD_ID，任一不过即 ok=false。防线 2（task-02 downloadAndReplace 写盘前）
+ * 与防线 3（task-03 respawn / task-07 stop 前盘上复核）共享本口径。
+ *
+ * @param buf 下载到内存或从盘上读出的 bundle 字节
+ * @returns ok=可信与否；buildId=首处提取值（提不出为 null；ok=false 时仍回传
+ *          已提取值供日志定位）；size=buf.length
+ */
+export function validateBundleContent(buf: Buffer): {
+  ok: boolean;
+  buildId: string | null;
+  size: number;
+} {
+  const size = buf.length;
+  const match = DISK_BUILD_ID_RE.exec(buf.toString('utf-8'));
+  const buildId = match?.[1] ?? null;
+  return { ok: size >= MIN_BUNDLE_BYTES && buildId !== null, buildId, size };
+}
+
+/**
+ * 校验盘上主 bundle（binDir/sillyhub-daemon.js）内容可信——respawn/stop 前
+ * 的最后防线；读失败（文件缺失/权限等）视为不过。
+ *
+ * 失败仅 debug 记 `daemon_bundle_on_disk_invalid` 明细（label 定位 + 校验不过
+ * 时的 size/buildId；读失败时 size/buildId 未知省略，附 error）。权威拦截事件
+ * 由调用方记（task-03 respawnDaemonAndExit → error
+ * `daemon_self_update_respawn_validation_failed`；task-07 daemon._tryUpdate →
+ * warn `daemon_update_aborted_bad_bundle`），本函数只记 debug 明细，避免同一
+ * 次拦截双记 warn/error。
+ *
+ * @param binDir bundle 所在目录（一律由调用方传入，测试注入临时目录）
+ * @param logger 日志回调
+ * @param label  日志定位标签（区分调用点），默认 {@link DAEMON_BUNDLE_NAME}
+ * @returns true=盘上 bundle 可信可拉起；false=读失败或校验不过（已记 debug 明细）
+ */
+export async function validateBundleOnDisk(
+  binDir: string,
+  logger: PreflightLogger,
+  label?: string,
+): Promise<boolean> {
+  let buf: Buffer;
+  try {
+    buf = await readFile(join(binDir, DAEMON_BUNDLE_NAME));
+  } catch (e) {
+    logger('debug', 'daemon_bundle_on_disk_invalid', {
+      label: label ?? DAEMON_BUNDLE_NAME,
+      error: fmtErr(e),
+    });
+    return false;
+  }
+  const { ok, buildId, size } = validateBundleContent(buf);
+  if (!ok) {
+    logger('debug', 'daemon_bundle_on_disk_invalid', {
+      label: label ?? DAEMON_BUNDLE_NAME,
+      size,
+      buildId,
+    });
+    return false;
+  }
+  return true;
+}
+
 /** latest.json 描述的服务器版本信息结构。 */
 interface LatestInfo {
   /** 最新构建标识（git short SHA）。 */
@@ -91,10 +198,15 @@ interface LatestInfo {
  *
  * @param config daemon 配置（取 server_url 拉取 latest.json）
  * @param logger 日志回调
+ * @param binDir bundle 落盘目录，透传 {@link runDaemonSelfUpdate} 与
+ *                {@link respawnDaemonAndExit}；undefined 透传即默认
+ *                {@link DAEMON_BIN_DIR}。仅测试隔离注入临时目录用（D-006），
+ *                生产调用点（daemon.ts start）不传第三参，行为不变
  */
 export async function runPreflight(
   config: DaemonConfig,
   logger: PreflightLogger,
+  binDir?: string,
 ): Promise<void> {
   // 步骤隔离：sillyspec 检查（async spawn+超时杀树）失败不影响 daemon 自更新，反之亦然。
   try {
@@ -103,11 +215,14 @@ export async function runPreflight(
     logger('warn', 'preflight_sillyspec_unexpected', { error: fmtErr(e) });
   }
   try {
-    const updated = await runDaemonSelfUpdate(BUILD_ID, config, logger);
+    const updated = await runDaemonSelfUpdate(BUILD_ID, config, logger, binDir);
     if (updated) {
       // 启动期路径：daemon.start() 尚未 acquire runtime lock / 未起三循环，
       // 直接拉起新进程退出（新进程启动后版本一致不再触发更新，无循环风险）。
-      respawnDaemonAndExit(logger);
+      // await（task-03）：respawn 已 async 化，await 确保 await runPreflight
+      // 返回时 spawn 前的盘上校验已出结果（测试可同步断言拦截/拉起）；
+      // respawn 全路径自收敛不 reject，runPreflight 永不 reject 语义不变。
+      await respawnDaemonAndExit(logger, binDir);
     }
   } catch (e) {
     logger('warn', 'preflight_daemon_update_unexpected', { error: fmtErr(e) });
@@ -317,6 +432,23 @@ async function updateMcpServerBundle(
  * `exec node bundle.js`（无重启循环），也没注册 systemd/Windows 服务/计划
  * 任务，自更新后仅 process.exit 会"更新完就死"。故退出前自行拉起新版本。
  *
+ * 防线 3（D-005，最后防线）：spawn 前先 {@link validateBundleOnDisk} 复核
+ * 盘上 bundle——拦"下载内容可信但落盘后、拉起前盘又被写坏"或外部写入的
+ * 坏盘，避免拉起的新进程加载半截 bundle SyntaxError 静默死。校验不过
+ * （或读失败）→ error `daemon_self_update_respawn_validation_failed`
+ * + 提前 return **不退出**（不 spawn、不排定 exit，旧进程保活）。拦截
+ * 语义随调用点：
+ *   - runPreflight 启动路径（无 stop）：拦截后正常继续启动旧逻辑；
+ *   - daemon._tryUpdate 路径正常到不了此——主拦截在 stop 前（D-009，
+ *     warn `daemon_update_aborted_bad_bundle`），本函数仅覆盖极端窗口，
+ *     到达则停摆不退出待人工介入。
+ *
+ * async 签名（Promise<void>，plan 审查问题 3 裁定方案 a）：盘上校验需
+ * 异步读文件，故同步 void 改 async。三处调用点零义务兼容——daemon.ts
+ * 两处（WS SELF_UPDATE / 忙推迟复查）fire-and-forget 不 await（本函数
+ * 全路径自收敛不 reject，无 unhandled rejection）；runPreflight 内调用
+ * await（启动路径确定性，见其调用点注释）。
+ *
  * 行为：
  *   - spawn `process.execPath <binDir>/sillyhub-daemon.js ...process.argv.slice(2)`
  *     （detached + stdio ignore + windowsHide，跨 Windows/Linux/macOS 存活于
@@ -331,11 +463,21 @@ async function updateMcpServerBundle(
  * @param binDir      新 bundle 所在目录，默认 {@link DAEMON_BIN_DIR}
  * @param exitDelayMs 退出前延迟（日志 flush），默认 500ms（测试注入）
  */
-export function respawnDaemonAndExit(
+export async function respawnDaemonAndExit(
   logger: PreflightLogger,
   binDir: string = DAEMON_BIN_DIR,
   exitDelayMs: number = 500,
-): void {
+): Promise<void> {
+  // 防线 3（D-005）：spawn 前最后复核盘上 bundle（validateBundleOnDisk
+  // 已内部记 debug 明细），不过即 error + 提前 return——不 spawn、不排定
+  // 退出，旧进程保活 / 启动路径正常继续（见函数注释）。
+  const ok = await validateBundleOnDisk(binDir, logger);
+  if (!ok) {
+    logger('error', 'daemon_self_update_respawn_validation_failed', {
+      bundle: join(binDir, DAEMON_BUNDLE_NAME),
+    });
+    return;
+  }
   const bundlePath = join(binDir, DAEMON_BUNDLE_NAME);
   const startArgs = process.argv.slice(2);
   let child: ChildProcess;
@@ -421,14 +563,29 @@ async function fetchLatest(
 }
 
 /**
- * 下载新 bundle 并原子替换落盘文件（tmp + rename）。
+ * 下载新 bundle：写盘前内容校验（D-003）→ 备份轮换（D-004）→ 原子替换落盘
+ * （tmp + rename）。
  *
  * 替换正在运行的 bundle 是安全的：node 已把当前进程代码加载进内存，本次进程
  * 不受影响；新文件由 respawnDaemonAndExit 拉起的新进程加载生效。
  *
+ * 写前校验（防线 2，task-02）：writeFile 前跑 {@link validateBundleContent}，
+ * 不过（占位/半截 bundle）→ warn `daemon_bundle_validation_failed`（含 size/
+ * buildId）+ 清理固定名 .tmp 上一轮残留 + 返回 false——不 mkdir 不写盘不
+ * rename，调用链 runDaemonSelfUpdate 返回 false 不 respawn，旧进程保活，
+ * 下次触发重试。
+ *
+ * 备份轮换（task-02）：rename 前若 target 已存在 → copyFile 为
+ * `<target>.bak-<yyyyMMdd-HHmmss>`（本地时间手拼纯数字，字典序即时间序，
+ * Windows/Linux/macOS 一致；同秒同名覆盖视为替换），随后按文件名字典序保留
+ * 最近 3 份，超出逐个 unlink（ENOENT 忽略）。备份任一步失败（磁盘满等）→
+ * warn `daemon_bundle_backup_failed` 但继续 rename——人工兜底路径，不拦
+ * 自更新主线。
+ *
  * 下载失败 / 写盘失败 → 仅 warn 返回 false（R3：失败路径清理 .tmp 残留）。
  *
- * @param fileName 落盘文件名（主 bundle 默认，mcp-server.js 伴生替换复用）
+ * @param fileName 落盘文件名（主 bundle 默认，mcp-server.js 伴生替换复用——
+ *                 同校验同备份自动生效，无绕过点）
  * @param eventName 成功事件名（主 bundle 保留原事件，mcp 用独立事件区分）
  */
 export async function downloadAndReplace(
@@ -461,9 +618,64 @@ export async function downloadAndReplace(
   const buf = Buffer.from(await resp.arrayBuffer());
   const target = join(binDir, fileName);
   const tmp = `${target}.tmp`;
+
+  // D-003（防线 2，task-02）：writeFile 前校验内容——不可信 bundle 连 binDir/
+  // tmp 文件都不产生，不 rename，返回 false → 调用链 runDaemonSelfUpdate 返回
+  // false 不 respawn，旧进程保活继续跑，下次触发重试。unlink 清上一轮写盘
+  // 失败可能残留的固定名 .tmp（R3 同款，ENOENT 忽略）。
+  const v = validateBundleContent(buf);
+  if (!v.ok) {
+    await unlink(tmp).catch(() => undefined);
+    logger('warn', 'daemon_bundle_validation_failed', {
+      url: fullUrl,
+      size: v.size,
+      buildId: v.buildId,
+    });
+    return false;
+  }
+
   try {
     await mkdir(binDir, { recursive: true });
     await writeFile(tmp, buf);
+
+    // D-004（task-02）：rename 前备份既有 target——8-30 事故实际靠人工 .bak
+    // 救回，此处制度化。时间戳本地时间手拼纯数字（Date getFullYear/… +
+    // padStart，不依赖 locale/第三方库），字典序即时间序，Windows/Linux/macOS
+    // 一致；同秒写入同名覆盖视为替换（天然去重）。
+    let targetExists = true;
+    try {
+      await access(target);
+    } catch {
+      targetExists = false; // ENOENT 等 → 首次安装，无旧文件可备份
+    }
+    if (targetExists) {
+      try {
+        const now = new Date();
+        const p2 = (n: number): string => String(n).padStart(2, '0');
+        const ts = `${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}`
+          + `-${p2(now.getHours())}${p2(now.getMinutes())}${p2(now.getSeconds())}`;
+        await copyFile(target, `${target}.bak-${ts}`);
+        // 同前缀按文件名字典序排序，保留最近 3 份，超出逐个清理（ENOENT 忽略）。
+        const backups = (await readdir(binDir))
+          .filter((name) => name.startsWith(`${fileName}.bak-`))
+          .sort();
+        for (const stale of backups.slice(0, Math.max(0, backups.length - 3))) {
+          try {
+            await unlink(join(binDir, stale));
+          } catch (e) {
+            // 并发清理竞态下的 ENOENT 忽略；其余（权限等）上抛走外层 warn。
+            if ((e as { code?: unknown }).code !== 'ENOENT') throw e;
+          }
+        }
+      } catch (e) {
+        // 备份失败（磁盘满等）不阻塞替换：人工兜底路径，不拦自更新主线。
+        logger('warn', 'daemon_bundle_backup_failed', {
+          target,
+          error: fmtErr(e),
+        });
+      }
+    }
+
     // rename 原子替换：避免下载中途写坏 target 导致下次启动加载半截 bundle。
     await rename(tmp, target);
   } catch (e) {

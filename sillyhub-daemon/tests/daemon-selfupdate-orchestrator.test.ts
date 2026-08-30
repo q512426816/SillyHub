@@ -1,8 +1,11 @@
 /**
  * task-04（2026-08-29-daemon-selfupdate-safety）：daemon 自更新单入口编排器
  * _tryUpdate 测试（本变更核心任务）。
+ * task-07（2026-08-30-daemon-self-heal / D-009）：stop 前 validateBundleOnDisk
+ * 主拦截用例追加（见末尾 describe）。
  *
- * 来源：tasks/task-04.md acceptance + design.md S1（Grill B2/B3 修正版流程图）。
+ * 来源：tasks/task-04.md acceptance + design.md S1（Grill B2/B3 修正版流程图）；
+ * task-07 来源：tasks/task-07.md acceptance + design.md S4 主拦截点（GAP-1 钉扎）。
  * 覆盖：
  *   - 忙判定 _isBusyForUpdate：session 在跑轮次 / taskRunner 活跃 lease /
  *     旧 mock（无 hasActiveLease）缺省不忙。
@@ -17,11 +20,16 @@
  *   - noop：释放 + clearPendingUpdate + 定时器清（advance 60s 无再触发）。
  *   - 接线：SELF_UPDATE case → _tryUpdate('server_command', version)；
  *     start() 末尾 startDiskProbe 回调 → _tryUpdate('disk_change', 盘上值)。
+ *   - task-07 主拦截：坏盘（validateBundleOnDisk=false）→ warn
+ *     daemon_update_aborted_bad_bundle + 不 stop/respawn + 清 pending + 所有权
+ *     释放可重试；好盘 → download → validate → 终检 → stop → respawn 顺序不变；
+ *     disk_change GAP-1：async 校验挂起注入新忙 → 校验后重跑忙检回推迟。
  *
  * 策略（照 disk-probe-pending.test.ts 惯例）：不跑真实升级链——preflight 模块
- * vi.mock 置换 runDaemonSelfUpdate / respawnDaemonAndExit / fetchLatestBuildId
- *（保留其余真实导出），daemon.stop / writePendingUpdate / clearPendingUpdate 用
- * 实例 spy 置换（不真 stop / 不落盘）；fake timers 驱动 30s 复查定时器。
+ * vi.mock 置换 runDaemonSelfUpdate / respawnDaemonAndExit / fetchLatestBuildId /
+ * validateBundleOnDisk（保留其余真实导出），daemon.stop / writePendingUpdate /
+ * clearPendingUpdate 用实例 spy 置换（不真 stop / 不落盘）；fake timers 驱动
+ * 30s 复查定时器。
  *
  * @module daemon-selfupdate-orchestrator.test
  */
@@ -36,11 +44,17 @@ const {
   runDaemonSelfUpdateMock,
   respawnMock,
   fetchLatestBuildIdMock,
+  validateBundleOnDiskMock,
 } = vi.hoisted(() => ({
   runPreflightMock: vi.fn(async () => undefined),
   runDaemonSelfUpdateMock: vi.fn(),
   respawnMock: vi.fn(),
   fetchLatestBuildIdMock: vi.fn(),
+  // task-07（D-009）：_tryUpdate stop 前主拦截校验——默认好盘（true），坏盘
+  // 用例按需 mockResolvedValue(false)。真实函数读 ~/.sillyhub/daemon/bin（模块
+  // 私有 DAEMON_BIN_DIR，不可注入 tmp），故与 runDaemonSelfUpdate 同款置换，
+  // 不写真实用户目录（makeTmpDir 隔离铁律）。
+  validateBundleOnDiskMock: vi.fn(async () => true),
 }));
 
 vi.mock('../src/preflight.js', async (importOriginal) => {
@@ -51,6 +65,7 @@ vi.mock('../src/preflight.js', async (importOriginal) => {
     runDaemonSelfUpdate: runDaemonSelfUpdateMock,
     respawnDaemonAndExit: respawnMock,
     fetchLatestBuildId: fetchLatestBuildIdMock,
+    validateBundleOnDisk: validateBundleOnDiskMock,
   };
 });
 
@@ -264,6 +279,8 @@ describe('task-04 S1 _tryUpdate 所有权/推迟/复查（D-002）', () => {
     runDaemonSelfUpdateMock.mockReset().mockResolvedValue(true);
     respawnMock.mockReset().mockReturnValue(undefined);
     fetchLatestBuildIdMock.mockReset().mockResolvedValue(null);
+    // task-07：默认好盘（restoreAllMocks 会清 hoisted 实现，逐 describe 重置）。
+    validateBundleOnDiskMock.mockReset().mockResolvedValue(true);
   });
   afterEach(async () => {
     restoreConsole();
@@ -534,6 +551,7 @@ describe('task-04 S1 start() 磁盘探测接线', () => {
     restoreConsole = silenceConsole();
     runDaemonSelfUpdateMock.mockReset().mockResolvedValue(true);
     respawnMock.mockReset().mockReturnValue(undefined);
+    validateBundleOnDiskMock.mockReset().mockResolvedValue(true);
   });
   afterEach(async () => {
     for (const d of daemons) {
@@ -616,6 +634,7 @@ describe('R1 stop() 可重入等待 + 定时器停机守卫', () => {
     runDaemonSelfUpdateMock.mockReset().mockResolvedValue(true);
     respawnMock.mockReset().mockReturnValue(undefined);
     fetchLatestBuildIdMock.mockReset().mockResolvedValue(null);
+    validateBundleOnDiskMock.mockReset().mockResolvedValue(true);
   });
   afterEach(async () => {
     restoreConsole();
@@ -682,5 +701,187 @@ describe('R1 stop() 可重入等待 + 定时器停机守卫', () => {
 
     await vi.advanceTimersByTimeAsync(SELF_UPDATE_RETRY_INTERVAL_MS + 1);
     expect(trySpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── task-07（D-009 / GAP-1）：_tryUpdate stop 前 validateBundleOnDisk 主拦截 ──
+
+describe('task-07 _tryUpdate stop 前 bundle 主拦截（D-009 / GAP-1）', () => {
+  let tmpDir: string;
+  let pendingPath: string;
+  let restoreConsole: () => void;
+
+  beforeEach(async () => {
+    tmpDir = await makeTmpDir('task07-abort-');
+    pendingPath = join(tmpDir, 'pending-update.json');
+    restoreConsole = silenceConsole();
+    vi.useFakeTimers();
+    runDaemonSelfUpdateMock.mockReset().mockResolvedValue(true);
+    respawnMock.mockReset().mockReturnValue(undefined);
+    fetchLatestBuildIdMock.mockReset().mockResolvedValue(null);
+    validateBundleOnDiskMock.mockReset().mockResolvedValue(true);
+  });
+  afterEach(async () => {
+    restoreConsole();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    await cleanupDir(tmpDir);
+  });
+
+  /** 挂 _logger.warn spy（拦截事件 daemon_update_aborted_bad_bundle 断言用）。 */
+  function warnSpyOf(daemon: Daemon) {
+    return vi.spyOn(
+      (daemon as unknown as { _logger: { warn: (e: string, kv?: unknown) => void } })
+        ._logger,
+      'warn',
+    );
+  }
+
+  it('server_command 坏盘拦截：warn + 不 stop/respawn + 清 pending + 所有权释放可重试 + 复查定时器清', async () => {
+    const h = makeHarness({ pendingPath });
+    const warnSpy = warnSpyOf(h.daemon);
+
+    // 先忙推迟一次（排 30s 复查定时器），转空闲后触发——拦截收尾应顺带清该定时
+    // 器（防坏盘 30s 死循环重探刷 warn，noop 同款防御）。
+    h.busy.session = true;
+    await h.tryUpdate('server_command', 'v-bad');
+    expect(h.writeSpy).toHaveBeenCalledTimes(1);
+    h.busy.session = false;
+
+    validateBundleOnDiskMock.mockResolvedValue(false);
+    await h.tryUpdate('server_command', 'v-bad');
+    expect(runDaemonSelfUpdateMock).toHaveBeenCalledTimes(1); // 下载已成功
+    // 校验参数：bin 目录 + PreflightLogger 适配 + 调用点标签。
+    expect(validateBundleOnDiskMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Function),
+      'server_command',
+    );
+    expect(warnSpy).toHaveBeenCalledWith('daemon_update_aborted_bad_bundle', {
+      reason: 'server_command',
+      target_version: 'v-bad',
+    });
+    // 不走交接：stop（挂起空闲会话）与 respawn 均未被调——旧进程完整在线。
+    expect(h.stopSpy).not.toHaveBeenCalled();
+    expect(respawnMock).not.toHaveBeenCalled();
+    // pending 已清 + 所有权已释放（可重试，不被 skipped_inflight 挡成僵尸）。
+    expect(h.clearSpy).toHaveBeenCalledTimes(1);
+    expect(
+      (h.daemon as unknown as { _updateBusy: boolean })._updateBusy,
+    ).toBe(false);
+
+    // 30s/60s 无重探（拦截清了推迟态定时器）。
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(h.writeSpy).toHaveBeenCalledTimes(1);
+
+    // 盘修复后（校验转 true）再触发：正常走通升级链（所有权确已释放）。
+    validateBundleOnDiskMock.mockResolvedValue(true);
+    await h.tryUpdate('server_command', 'v-fixed');
+    expect(runDaemonSelfUpdateMock).toHaveBeenCalledTimes(2);
+    expect(h.stopSpy).toHaveBeenCalledTimes(1);
+    expect(respawnMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('server_command 好盘：download → validate → ★终检 → stop → respawn（校验先于终检/stop，GAP-1）', async () => {
+    const h = makeHarness({ pendingPath });
+    const order: string[] = [];
+    runDaemonSelfUpdateMock.mockImplementation(async () => {
+      order.push('download');
+      return true;
+    });
+    validateBundleOnDiskMock.mockImplementation(async () => {
+      order.push('validate');
+      return true;
+    });
+    h.stopSpy.mockImplementation(async () => {
+      order.push('stop');
+    });
+    respawnMock.mockImplementation(() => {
+      order.push('respawn');
+    });
+
+    await h.tryUpdate('server_command', 'v-good');
+    expect(order).toEqual(['download', 'validate', 'stop', 'respawn']);
+    // 交接排定后所有权保持到进程退出。
+    expect(
+      (h.daemon as unknown as { _updateBusy: boolean })._updateBusy,
+    ).toBe(true);
+  });
+
+  it('disk_change 坏盘拦截：warn(reason=disk_change) + 不下载不 stop/respawn + 清 pending + 可重试', async () => {
+    const h = makeHarness({ pendingPath });
+    const warnSpy = warnSpyOf(h.daemon);
+    validateBundleOnDiskMock.mockResolvedValue(false);
+
+    await h.tryUpdate('disk_change', 'disksha-bad');
+    expect(validateBundleOnDiskMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Function),
+      'disk_change',
+    );
+    expect(warnSpy).toHaveBeenCalledWith('daemon_update_aborted_bad_bundle', {
+      reason: 'disk_change',
+      target_version: 'disksha-bad',
+    });
+    expect(runDaemonSelfUpdateMock).not.toHaveBeenCalled(); // 直启路径不下载
+    expect(h.stopSpy).not.toHaveBeenCalled();
+    expect(respawnMock).not.toHaveBeenCalled();
+    expect(h.clearSpy).toHaveBeenCalledTimes(1);
+    expect(
+      (h.daemon as unknown as { _updateBusy: boolean })._updateBusy,
+    ).toBe(false);
+
+    // 仍坏盘再触发：可再入（依旧拦截，不被 skipped_inflight 挡死）。
+    await h.tryUpdate('disk_change', 'disksha-bad2');
+    expect(h.stopSpy).not.toHaveBeenCalled();
+    expect(respawnMock).not.toHaveBeenCalled();
+    expect(
+      (h.daemon as unknown as { _updateBusy: boolean })._updateBusy,
+    ).toBe(false);
+  });
+
+  it('disk_change 好盘：校验过 → 重跑忙检空闲 → stop + respawn（既有直启链不回归）', async () => {
+    const h = makeHarness({ pendingPath });
+
+    await h.tryUpdate('disk_change', 'disksha-20260830');
+    expect(validateBundleOnDiskMock).toHaveBeenCalledTimes(1);
+    expect(runDaemonSelfUpdateMock).not.toHaveBeenCalled(); // 不下载不查 manifest
+    expect(h.writeSpy).not.toHaveBeenCalled(); // 直启不写 pending
+    expect(h.stopSpy).toHaveBeenCalledTimes(1);
+    expect(respawnMock).toHaveBeenCalledTimes(1);
+
+    // 交接排定后所有权保持到进程退出：后续触发被忽略。
+    await h.tryUpdate('server_command', 'v-after');
+    expect(runDaemonSelfUpdateMock).not.toHaveBeenCalled();
+    expect(h.stopSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('disk_change GAP-1：async 校验挂起期间注入新忙 → 校验后重跑忙检回推迟，stop 不被调', async () => {
+    const h = makeHarness({ pendingPath });
+    // 校验完成瞬间注入新忙（模拟校验 await 挂起期间新起的 turn/lease）——
+    // 入口忙判定已过，若无「校验后重跑」则会在忙态下直接 stop 打断任务。
+    validateBundleOnDiskMock.mockImplementationOnce(async () => {
+      h.busy.session = true;
+      return true;
+    });
+
+    await h.tryUpdate('disk_change', 'disksha-20260830');
+    // 回推迟：写 pending + 排 30s 定时器；不打断在跑任务。
+    expect(h.writeSpy).toHaveBeenCalledTimes(1);
+    expect(h.writeSpy).toHaveBeenCalledWith({
+      reason: 'disk_change',
+      current_version: BUILD_ID,
+      target_version: 'disksha-20260830',
+    });
+    expect(h.stopSpy).not.toHaveBeenCalled();
+    expect(respawnMock).not.toHaveBeenCalled();
+
+    // 忙释放后 30s 重探：好盘走通直启链。
+    h.busy.session = false;
+    await vi.advanceTimersByTimeAsync(SELF_UPDATE_RETRY_INTERVAL_MS);
+    expect(validateBundleOnDiskMock).toHaveBeenCalledTimes(2);
+    expect(runDaemonSelfUpdateMock).not.toHaveBeenCalled();
+    expect(h.stopSpy).toHaveBeenCalledTimes(1);
+    expect(respawnMock).toHaveBeenCalledTimes(1);
   });
 });

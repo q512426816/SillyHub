@@ -101,11 +101,14 @@ import { applyClaudeSettings } from './claude-settings.js';
 // task-04（S1）：编排器静态引入自更新三件套——runDaemonSelfUpdate（下载原子替换）、
 // respawnDaemonAndExit（交接拉起）、fetchLatestBuildId（推迟路径目标版本回传，
 // 指令 payload 缺 version 时拉 latest.json 兜底）。
+// task-07（2026-08-30-daemon-self-heal / D-009）：validateBundleOnDisk——_tryUpdate
+// stop() 之前的主拦截校验（盘上 bundle 内容可信性，坏盘中止不走交接）。
 import {
   runPreflight,
   runDaemonSelfUpdate,
   respawnDaemonAndExit,
   fetchLatestBuildId,
+  validateBundleOnDisk,
 } from './preflight.js';
 // 2026-07-07-daemon-skill-execution task-03：skill-manager，启动同步平台 sillyspec skills。
 import { syncSkills, linkSkillsToWorkdir } from './skill-manager.js';
@@ -180,6 +183,12 @@ export const REGISTER_RETRY_MAX_MS = 60_000;
 // task-04（S1 / D-002@v1）：忙推迟升级的空闲复查间隔——忙时记 pending 后每 30s
 // 重探（完整重跑 _tryUpdate，无状态机），无限等空闲。导出供测试断言间隔语义。
 export const SELF_UPDATE_RETRY_INTERVAL_MS = 30_000;
+
+// task-06（2026-08-30-daemon-self-heal / D-001）：心跳降级恢复触发守卫——心跳
+// 断连累计 >720s（600s offline sweep 宽限 + 60s sweep 轮次余量 + 缓冲）后恢复，
+// 此时 backend 必已把该 runtime 名下非终态会话翻 suspended，才值得跑恢复链；
+// 短于 720s 的闪断不产生 suspended、不触发。导出供测试断言阈值语义。
+export const RECOVER_AFTER_DEGRADED_MS = 720_000;
 
 /**
  * task-04（S1）：_deferUpdate 目标版本缺省占位（可见性字段，不参与升级判定）。
@@ -1342,6 +1351,24 @@ export class Daemon {
   private _degradedWarned = false;
 
   /**
+   * task-06（2026-08-30-daemon-self-heal / D-002）：心跳降级恢复链在途标记。
+   * `_maybeRecoverAfterDegraded` 触发恢复前置 true、finally 复位；期间
+   * `_isBusyForUpdate()` 返回 true——selfupdate 触发走既有忙推迟（pending +
+   * 30s 复查），恢复不被 stop 打断（反向：selfupdate 已过忙判定进入 stop 流程
+   * 时心跳已停、无恢复触发点，天然互斥）。不持久化，daemon 重启自然消失
+   * （boot 恢复兜底，R6）。
+   */
+  private _recoverInFlight = false;
+
+  /**
+   * task-06（D-007）：恢复忙推迟 pending 标记——触发时忙（在跑 interactive
+   * turn / 在跑 batch lease / 恢复已在途）则仅置位 + warn 返回，**不清标志**：
+   * 心跳每拍成功路径复查，空闲拍补触发并清位（无新定时器）；daemon 重启自然
+   * 消失（boot 恢复兜底）。
+   */
+  private _recoverPendingAfterDegraded = false;
+
+  /**
    * ql-20260616-006：agent provider → 本机 CLI 可执行文件路径。
    * server 不持有 daemon 本机的 cmd_path（capabilities.bin_path 仅记录不回传），
    * claim_lease 返回的 payload.cmdPath 恒 undefined → spawn 前必须由 daemon 注入。
@@ -1576,11 +1603,13 @@ export class Daemon {
       await this._registerDaemon(availableAgents);
     }
 
-    // task-10（FR-08 / §5）：在三循环启动前执行崩溃恢复编排。
+    // task-10（FR-08 / §5）：在三循环启动前执行崩溃恢复编排（boot 触发）。
     // load 持久化记录 → 对每条向 backend recover → restoreAndReconnect
     //（query resume）→ reconnecting→active。失败隔离 + backend rejected 删记录。
     // 未注入 persistence/recoveryClient → 跳过（Wave1/2 行为，向后兼容）。
-    await this._recoverSessionsOnBoot();
+    // task-05（2026-08-30-daemon-self-heal）：提取为 _recoverPersistedSessions(trigger)，
+    // boot 调用点改传 'boot'，行为零变化（heartbeat_recover 触发归 task-06）。
+    await this._recoverPersistedSessions('boot');
 
     // task-03（2026-07-07-daemon-skill-execution）：同步平台 sillyspec skills。
     // 在 agent 探测之后、三循环启动之前。skills 版本比对 + bundle 拉取 + 解压。
@@ -1663,7 +1692,7 @@ export class Daemon {
     this._loopPromises.clear();
 
     // task-08：清恢复重试定时器（收尾不再触发新一轮；遗留记录在下方 flush 后
-    // 合并落盘，下次启动 _recoverSessionsOnBoot 续接）。
+    // 合并落盘，下次启动 _recoverPersistedSessions 续接）。
     this._clearRecoveryRetryTimer();
 
     // task-03（S2）：清磁盘旁路探测定时器（stop 后不再探测；respawn 前的新进程
@@ -1990,12 +2019,17 @@ export class Daemon {
    *
    * 口径：sessionManager 存在「在跑轮次」（SessionState.status==='running'，
    * hasRunningTurn；'reconnecting' 恢复中间态不算忙）或 taskRunner 存在「在跑
-   * batch lease」（hasActiveLease：_controllers 非空）。**同步性是终检（Grill B3）
-   * 的前提**：终检与 stop() 首动作之间不得有 await——本方法内任何 await 都会把
-   * 竞态窗口从毫秒级放大到一次 IO。taskRunner 缺 hasActiveLease（旧测试 mock）
-   * 视为不忙（TaskRunnerLike 可选方法先例，Grill M14）。
+   * batch lease」（hasActiveLease：_controllers 非空）。task-06
+   * （2026-08-30-daemon-self-heal / D-002）新增第三臂：心跳降级恢复在途
+   * （`_recoverInFlight`）也算忙——恢复中途不被 selfupdate stop 打断；反向
+   * selfupdate 已过忙判定进入 stop 流程时心跳已停、无恢复触发点，天然互斥。
+   * **同步性是终检（Grill B3）的前提**：终检与 stop() 首动作之间不得有 await——
+   * 本方法内任何 await 都会把竞态窗口从毫秒级放大到一次 IO。taskRunner 缺
+   * hasActiveLease（旧测试 mock）视为不忙（TaskRunnerLike 可选方法先例，Grill M14）。
    */
   private _isBusyForUpdate(): boolean {
+    // task-06（D-002）：恢复在途也算忙（置于最前——最廉价的纯标志查询）。
+    if (this._recoverInFlight) return true;
     if (this._sessionManager?.hasRunningTurn() === true) return true;
     if (
       typeof this._taskRunner?.hasActiveLease === 'function' &&
@@ -2092,25 +2126,33 @@ export class Daemon {
   }
 
   /**
-   * task-04（S1 / Grill B2+B3 修正）：自更新单入口编排器。
+   * task-04（S1 / Grill B2+B3 修正）+ task-07（D-009 stop 前主拦截）：自更新
+   * 单入口编排器。
    *
-   * 流程（design S1）：
+   * 流程（design S1 + S4 主拦截点）：
    *   1. 所有权占位：已占（另一次 _tryUpdate 在途）→ 本次忽略仅记 debug。
    *   2. 忙判定（_isBusyForUpdate）忙 → 推迟（_deferUpdate：释放+pending+30s）。
    *   3. 空闲按 reason 分流：
    *      - server_command → runDaemonSelfUpdate 下载原子替换（false=noop →
-   *        释放+清 pending+清定时器）→ true → ★终检（重跑 _isBusyForUpdate，
-   *        忙回推迟；**终检与 stop() 首动作之间不得有 await**，竞态窗口毫秒级）
-   *        → stop()（挂起空闲会话，D-001）→ respawnDaemonAndExit（交接）。
-   *      - disk_change → 不下载不查 manifest 直接 stop() → respawn 到盘上版本
-   *        （操作者换文件即意图，multica trySelfReload 同款——防磁盘降级/盘≠
-   *        manifest 被 runDaemonSelfUpdate 的防降级/noop 挡成永不收敛）。
+   *        释放+清 pending+清定时器）→ true → validateBundleOnDisk 校验盘上
+   *        bundle（D-009：拦落盘后被写坏，坏盘 warn+释放+清 pending 返回）→
+   *        ★终检（重跑 _isBusyForUpdate，忙回推迟；**终检与 stop() 首动作之间
+   *        不得有 await**，竞态窗口毫秒级——校验必须在终检之前，GAP-1）→ stop()
+   *        （挂起空闲会话，D-001）→ respawnDaemonAndExit（交接）。
+   *      - disk_change → 不下载不查 manifest，先 validateBundleOnDisk 校验盘上
+   *        bundle（D-009：拦外部写入的坏盘，坏盘同款中止）→ 校验后重跑忙判定
+   *        （GAP-1：async 校验打破「入口判定即终检」，以重跑补偿；忙回推迟）→
+   *        stop() → respawn 到盘上版本（操作者换文件即意图，multica trySelfReload
+   *        同款——防磁盘降级/盘≠manifest 被 runDaemonSelfUpdate 的防降级/noop
+   *        挡成永不收敛）。
    *   4. 一切非「交接排定」路径释放所有权+清 pending 可再触发；交接排定后所有
-   *      权保持到进程退出。
+   *      权保持到进程退出。坏盘中止（daemon_update_aborted_bad_bundle）亦释放
+   *      所有权——旧进程完整在线，盘修复后下次触发正常重试。
    *
-   * 注：disk_change 入口忙判定即终检——分流后到 stop() 之间无任何 await，无
-   * 重查窗口（终检语义自然满足）；server_command 因下载 await 挂起存在窗口，
-   * 故显式重查。
+   * 注：disk_change 原本「入口忙判定即终检、到 stop() 零 await」被 task-07 的
+   * async 校验打破，改为校验后重跑 _isBusyForUpdate（重跑点与 stop() 首动作之间
+   * 零 await）；server_command 因下载 await 挂起存在窗口，校验放在终检之前，
+   * 终检与 stop() 首动作之间保持零 await（GAP-1 顺序钉扎，两路径一致满足）。
    */
   private async _tryUpdate(
     reason: 'server_command' | 'disk_change',
@@ -2134,10 +2176,41 @@ export class Daemon {
         return;
       }
       if (reason === 'disk_change') {
-        // 直启路径：同款终检语义见方法注释（入口判定后无 await，天然满足 B3）。
         this._logger.info('self_update_disk_change_restart', {
           target_version: targetVersion,
         });
+        // task-07（D-009 主拦截）：分流后、stop 之前校验盘上 bundle——探测到版本
+        // 变化 ≠ 内容可信，拦外部写入的坏盘。校验不过 → warn + 释放所有权 +
+        // 清 pending + return：不走 stop/respawn，旧进程完整在线（WS/心跳/会话
+        // 未动），盘修复后下次触发（磁盘探测 600s 周期或下条指令）正常重试
+        // （不再被 skipped_inflight 挡成僵尸）。
+        const bundleOk = await validateBundleOnDisk(
+          DAEMON_BIN_DIR,
+          this._preflightLog.bind(this),
+          'disk_change',
+        );
+        if (!bundleOk) {
+          this._logger.warn('daemon_update_aborted_bad_bundle', {
+            reason,
+            target_version: targetVersion,
+          });
+          this._updateBusy = false;
+          this._clearUpdateRetryTimer();
+          await this.clearPendingUpdate();
+          return;
+        }
+        // GAP-1 顺序钉扎（D-009 / Grill GAP-1）：本路径原本「入口忙判定即终检、
+        // 判定后到 stop() 之间零 await」——上方 async 校验打破了该前提，故校验
+        // 返回后必须重跑 _isBusyForUpdate()（忙 → 走既有推迟路径）补偿终检语义；
+        // 重跑点与 stop() 首动作之间保持零 await。禁止把 await validateBundleOnDisk
+        // 插在忙终检与 stop() 之间（会把竞态窗口从毫秒级放大到一次文件 IO）。
+        if (this._isBusyForUpdate()) {
+          this._logger.info('self_update_final_check_busy', {
+            target_version: targetVersion,
+          });
+          await this._deferUpdate(reason, targetVersion);
+          return;
+        }
         // 离开推迟态（升级执行）必清定时器，再走 stop → 交接。
         this._clearUpdateRetryTimer();
         await this.stop();
@@ -2159,6 +2232,29 @@ export class Daemon {
         this._clearUpdateRetryTimer();
         await this.clearPendingUpdate();
         this._logger.info('self_update_noop', { target_version: targetVersion });
+        return;
+      }
+      // task-07（D-009 主拦截）：下载替换成功后（盘上已是新内容）、★忙终检之前
+      // 校验盘上 bundle——拦「下载内容可信但落盘后、拉起前盘又被写坏」的窗口。
+      // GAP-1 顺序钉扎：validateBundleOnDisk 是 async，校验点必须保持在忙终检
+      // （下方 _isBusyForUpdate）之前——终检与 stop() 首动作之间不得插入任何
+      // await（否则把竞态窗口从毫秒级放大到一次文件 IO）。校验不过 → warn +
+      // 释放所有权 + 清 pending + return：不走终检/stop/respawn，旧进程完整在线
+      // （WS/心跳/会话未动），盘修复后下次触发（磁盘探测 600s 周期或下条指令）
+      // 正常重试（不再被 skipped_inflight 挡成僵尸）。
+      const bundleOk = await validateBundleOnDisk(
+        DAEMON_BIN_DIR,
+        this._preflightLog.bind(this),
+        'server_command',
+      );
+      if (!bundleOk) {
+        this._logger.warn('daemon_update_aborted_bad_bundle', {
+          reason,
+          target_version: targetVersion,
+        });
+        this._updateBusy = false;
+        this._clearUpdateRetryTimer();
+        await this.clearPendingUpdate();
         return;
       }
       // ★终检（Grill B3）：下载 await 挂起期间可能新起了 turn/lease——stop 前
@@ -2333,10 +2429,49 @@ export class Daemon {
   // ── task-10：daemon 启动崩溃恢复编排（§5）───────────────────────────────────
 
   /**
-   * 启动恢复编排：load → 超龄清理 → 限流并发对每条记录 recover+restore →
+   * task-06（2026-08-30-daemon-self-heal / D-001+D-007）：心跳脱离降级后的恢复
+   * 触发入口（含忙推迟复查）。
+   *
+   * 忙门控（D-007）：`_isBusyForUpdate()` 为真（在跑 interactive turn / 在跑
+   * batch lease / 恢复已在途）→ 仅置 `_recoverPendingAfterDegraded` + warn
+   * `session_recover_deferred_busy` 返回，**不清标志**——心跳每拍成功路径复查
+   * （`_sendHeartbeatOnce` 触发条件的第二臂），空闲拍补触发（无新定时器）；
+   * 本地在跑工作绝不被恢复链驱逐打断。
+   *
+   * 不忙：清 pending 标志 + 置 `_recoverInFlight`（`_isBusyForUpdate` 第三臂的
+   * 数据源，D-002 与 selfupdate 双向互斥；**不参与触发判定**，见 GAP-2）→
+   * await `_recoverPersistedSessions('heartbeat_recover')`（恢复主体内部全隔离
+   * 不 reject，catch 仅防御性兜底防崩）→ finally 复位（异常路径也放行）。
+   * 调用方 fire-and-forget，不阻塞心跳节拍。
+   */
+  private async _maybeRecoverAfterDegraded(degradedMs: number): Promise<void> {
+    if (this._isBusyForUpdate()) {
+      this._recoverPendingAfterDegraded = true;
+      this._logger.warn('session_recover_deferred_busy', { degraded_ms: degradedMs });
+      return;
+    }
+    this._recoverPendingAfterDegraded = false;
+    this._recoverInFlight = true;
+    try {
+      await this._recoverPersistedSessions('heartbeat_recover');
+    } catch (e) {
+      // 不应到此（_recoverPersistedSessions 内部已全隔离），防御性兜底防崩。
+      this._logger.error('session_recover_unexpected_error', { error: e });
+    } finally {
+      this._recoverInFlight = false;
+    }
+  }
+
+  /**
+   * 持久化会话恢复编排：load → 超龄清理 → 限流并发对每条记录 recover+restore →
    * flush → 遗留待恢复记录合并落盘。
    *
-   * 顺序（§5）：在三循环（heartbeat/poll/ws）启动**前**完成全部恢复。
+   * 触发来源（trigger，2026-08-30-daemon-self-heal task-05 参数化提取）：
+   * - 'boot'：start() 内三循环启动前触发（本卡前为 boot 专用恢复方法，参数化更名）；
+   * - 'heartbeat_recover'：心跳脱离降级后主动触发（由 task-06 接入，本卡仅落类型）。
+   *   trigger 仅用于 session_recover_start/done 日志区分来源，不影响任何控制流。
+   *
+   * 顺序（§5）：boot 触发时在三循环（heartbeat/poll/ws）启动**前**完成全部恢复。
    * - 未注入 persistence/recoveryClient/sessionManager → no-op（Wave1/2 行为）。
    * - load 抛错（不应发生，persistence 内部已隔离）→ 记 warn 不崩。
    * - 单条记录失败（backend rejected 或 driver.start 抛错）→ 结构化 warn 后
@@ -2345,7 +2480,9 @@ export class Daemon {
    *   入重试队列（_recoverOneSession 返回 'retry'），boot 收尾合并回写。
    * - 全部恢复完成后 flush（清 currentRunId / 无效记录）。
    */
-  private async _recoverSessionsOnBoot(): Promise<void> {
+  private async _recoverPersistedSessions(
+    trigger: 'boot' | 'heartbeat_recover',
+  ): Promise<void> {
     if (!this._persistence || !this._recoveryClient || !this._sessionManager) {
       // Wave1/2 行为：无持久化 / 无 recovery 端口 / 无 SessionManager → 不恢复。
       return;
@@ -2384,10 +2521,11 @@ export class Daemon {
         recovered: 0,
         failed: 0,
         expired,
+        trigger,
       });
       return;
     }
-    this._logger.info('session_recover_start', { count: fresh.length });
+    this._logger.info('session_recover_start', { count: fresh.length, trigger });
 
     // 限流并发（默认 4）：用 slot 池控制最大并发，单条失败不影响其他。
     const limit = this._recoveryConcurrency;
@@ -2432,6 +2570,7 @@ export class Daemon {
       recovered: recovered.size,
       failed: failed.size,
       expired,
+      trigger,
     });
   }
 
@@ -3523,8 +3662,18 @@ export class Daemon {
             },
       );
       // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。
+      // task-06（2026-08-30-daemon-self-heal / D-001）：重置前先捕获降级起点，
+      // 断连累计超 RECOVER_AFTER_DEGRADED_MS（触发时 sweep 必已翻完 suspended）
+      // 或存在忙推迟 pending（D-007 空闲复查臂）时触发恢复链。fire-and-forget
+      // 不阻塞心跳；**不设 _recoverInFlight 外层门**（GAP-2：恢复在途由 D-007
+      // 忙门控「算忙→置 pending」统一收口，外层门会使 busy-pending 复查臂不可达）。
+      const failSince = this._heartbeatFailSince;
       this._heartbeatFailSince = null;
       this._degradedWarned = false;
+      const degradedMs = failSince === null ? 0 : Date.now() - failSince;
+      if (degradedMs > RECOVER_AFTER_DEGRADED_MS || this._recoverPendingAfterDegraded) {
+        void this._maybeRecoverAfterDegraded(degradedMs);
+      }
       // task-18（FR-07 / D-004@v1）：心跳健康 → 触发 outbox drain。
       this._resilience?.notifyHeartbeatResult(true);
       // 2026-06-29-runtime-allowed-roots-config task-04：心跳响应同步 allowed_roots。
@@ -3546,6 +3695,13 @@ export class Daemon {
         });
         this._registeredRuntimes.clear();
         this._resilience?.notifyHeartbeatResult(false);
+        // task-06（D-008）：凭证断连同样累计降级起点——本分支提前 return 发生在
+        // 下方 failSince 置位之前，不补置则纯凭证断连 failSince 恒 null、恢复后
+        // 不触发恢复链（期间 sweep 同样翻 suspended，语义应与网络断连一致）。
+        // 已非 null 保持原值不覆盖（沿用最早断连时刻）；FATAL 日志语义不变。
+        if (this._heartbeatFailSince === null) {
+          this._heartbeatFailSince = Date.now();
+        }
         return false;
       }
       // task-02（FR-01）：展开 cause 暴露底层 undici code。
