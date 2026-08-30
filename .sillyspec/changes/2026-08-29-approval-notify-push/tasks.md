@@ -18,3 +18,4 @@ created_at: 2026-08-29 14:54:20
 - [x] task-11: 前端铃铛组件 notification-bell.tsx + top-bar.tsx 挂载（三主题）(depends_on: task-10)
 - [x] task-13: 前端测试（铃铛/SSE 事件驱动 + components/__tests__/top-bar.test.tsx 既有用例回归——挂载铃铛后 mock 需补）+ tsc 零错收口 (depends_on: task-10,11)
 - [x] ql-20260830-007-5d4f 审批流站内通知推送
+- [x] ql-20260830-009-8177 审批流站内通知推送

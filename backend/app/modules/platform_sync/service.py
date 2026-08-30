@@ -26,6 +26,7 @@ documents 单写者与本变更不冲突）。
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -237,6 +238,10 @@ class PlatformSyncService:
 
     # ── Change 2026-08-29-approval-notify-push task-04（design §7.3① 触发点①）──
 
+    # 变更 key 的日期前缀（YYYY-MM-DD-）：变更无 title 时通知标题用它去掉前缀
+    # 只留语义短名（ql-20260830-008 样式优化）。
+    _DISPLAY_KEY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+
     _GATE_TITLE_ZH: dict[str, str] = {
         # PendingReview 四门值 → 门中文名（title 拼接用）。
         "proposal_review": "提案审核",
@@ -341,15 +346,22 @@ class PlatformSyncService:
             if change_row is None:
                 return
             change_id = change_row.id
-            change_name = change_row.title or name
+            # 变更显示名：真实语义 title 原样；title 为空**或等于 change_key**
+            # （_ensure_change_row 占位行的回退复制，含「YYYY-MM-DD-」前缀）时，
+            # 用去日期前缀的 key——通知标题露出原始全名（2026-08-30-xxx）观感差
+            # 且挤占截断空间（ql-20260830-008 样式优化）。
+            raw_title = (change_row.title or "").strip()
+            change_name = (
+                raw_title if raw_title and raw_title != name else self._DISPLAY_KEY_RE.sub("", name)
+            )
             gate_zh = self._GATE_TITLE_ZH.get(review_kind, review_kind)
             stage = self._extract_current_stage(body) or ""
             await NotificationService(self._session).notify_broadcast(
                 workspace_id=workspace_id,
                 permission=Permission.CHANGE_CREATE,
                 type="approval_pending",
-                title=f"变更「{change_name}」等待{gate_zh}审核",
-                body=f"当前阶段：{stage}，等待{gate_zh}通过。" if stage else f"等待{gate_zh}通过。",
+                title=f"变更「{change_name}」等待{gate_zh}",
+                body=f"{stage} 阶段完成，等待{gate_zh}" if stage else f"等待{gate_zh}通过。",
                 # 详情深链（task-05 对齐）：Next.js 路由 /workspaces/[id]/changes/[cid]，
                 # 与审批结果通知（approval_result）的 link 同格式，S-02 已由前端路由核实关闭。
                 link=f"/workspaces/{workspace_id}/changes/{change_id}",

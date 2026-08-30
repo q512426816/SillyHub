@@ -29,8 +29,8 @@
  *   - listWorkspaces()：拿 workspace id→name 映射（MemberBindingView 无 name 字段，
  *     列表项 + 按钮态 name 都需此映射）。
  *   - fetchMyBindings()：当前用户的全部 workspace binding（含 daemon_id）。
- *   - 两者 30s 轮询由 useDaemonStatusMap 统一驱动徽标；列表数据本组件独立
- *     useQuery（切换器常驻顶栏，需及时反映新建工作区）。
+ *   - daemon 徽标状态轮询由 useDaemonStatusMap 统一驱动；列表数据本组件独立
+ *     useQuery（ql-20260830-008-fe1d 起 30s 常驻轮询已撤，改下拉打开时 refetch）。
  *
  * 边界（task-08「不做」）：
  *   - 不实现 switchWorkspace 路径解析（task-04 职责，本组件只调用）。
@@ -114,8 +114,10 @@ export function WorkspaceSwitcher(): JSX.Element {
   const { statusMap } = useDaemonStatusMap();
   const setCurrent = useWorkspaceStore((s) => s.setCurrent);
 
-  // 列表数据（workspace id→name + 当前用户 binding），切换器常驻顶栏需及时
-  // 反映新建/重命名工作区。失败降级为空（按钮 name 退化用 current.id）。
+  // 列表数据（workspace id→name + 当前用户 binding），失败降级为空（按钮 name
+  // 退化用 current.id）。ql-20260830-008-fe1d：撤 30s 常驻轮询（治吵——GET
+  // /api/workspaces 每 30s 一次）；新鲜度改为「下拉打开时 refetch」+ react-query
+  // 默认的窗口聚焦 refetch，创建/重命名工作区后 30s 内打开下拉即可见。
   const listQuery = useQuery({
     queryKey: ["workspace-switcher-list"] as const,
     queryFn: async () => {
@@ -125,7 +127,6 @@ export function WorkspaceSwitcher(): JSX.Element {
       ]);
       return { items, bindings };
     },
-    refetchInterval: 30_000,
   });
 
   const workspaceById = useMemo(() => {
@@ -221,7 +222,11 @@ export function WorkspaceSwitcher(): JSX.Element {
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu
+        onOpenChange={(open) => {
+          if (open) void listQuery.refetch();
+        }}
+      >
         <DropdownMenuTrigger asChild>
           <button
             type="button"

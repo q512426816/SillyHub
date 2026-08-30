@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>变更中心用量与耗时 · 原型（2026-08-30-change-center-usage-stats）</title>
+<style>
+  :root {
+    --bg: #f7f8fa; --card: #ffffff; --border: #e5e7eb; --text: #1f2328;
+    --muted: #6b7280; --brand: #0ea5a4; --brand-soft: rgba(14,165,164,.08);
+    --amber: #d97706; --amber-soft: rgba(217,119,6,.08);
+    --shadow: 0 1px 2px rgba(0,0,0,.04);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+         background: var(--bg); color: var(--text); padding: 24px; font-size: 13px; }
+  h2 { font-size: 14px; margin: 18px 0 8px; color: var(--muted); font-weight: 600; }
+  .scene { max-width: 1080px; margin: 0 auto; }
+  .panel { background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+           box-shadow: var(--shadow); overflow: hidden; }
+  .tabs { display: flex; gap: 4px; padding: 10px 14px 0; border-bottom: 1px solid var(--border); }
+  .tab { padding: 6px 14px; border-radius: 8px 8px 0 0; color: var(--muted); cursor: pointer; }
+  .tab.active { color: var(--brand); font-weight: 600; background: var(--brand-soft); }
+
+  /* ── 列表（变更 / 快速修复 共用）── */
+  table.list { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.list th { text-align: left; color: var(--muted); font-weight: 500; padding: 8px 10px;
+                  border-bottom: 1px solid var(--border); background: #fafbfc; white-space: nowrap; }
+  table.list td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  table.list tr:last-child td { border-bottom: none; }
+  .key { font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; color: var(--muted); }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px;
+           background: var(--brand-soft); color: var(--brand); font-weight: 500; }
+  .badge.gray { background: #f3f4f6; color: var(--muted); }
+  .badge.amber { background: var(--amber-soft); color: var(--amber); }
+  .num { font-variant-numeric: tabular-nums; }
+
+  /* ── 本变更核心：执行/用量摘要单元格 ── */
+  .exec-cell { white-space: nowrap; }
+  .exec-cell .dur { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .exec-cell .tok { color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .exec-cell .range { color: var(--muted); font-size: 11px; }
+  .exec-cell .none { color: var(--muted); }
+
+  /* ── 用量卡（详情复用组件，风格延续会话用量条）── */
+  .usage-bar { border-top: 1px solid var(--border); padding: 10px 14px; background: var(--card); }
+  .usage-summary { display: flex; flex-wrap: wrap; gap: 6px 18px; align-items: center; }
+  .usage-item { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+  .usage-item .k { color: var(--muted); }
+  .usage-item .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .usage-item.hit .v { color: var(--brand); }
+  .usage-item.time .v { font-weight: 500; }
+  .usage-toggle { margin-left: auto; border: none; background: none; color: var(--brand);
+                  cursor: pointer; font-size: 12px; padding: 2px 6px; border-radius: 4px; }
+  .usage-toggle:hover { background: var(--brand-soft); }
+  .usage-detail { display: none; margin-top: 10px; }
+  .usage-bar.expanded .usage-detail { display: block; }
+  .usage-bar.expanded .usage-toggle .arr { transform: rotate(180deg); }
+  .arr { display: inline-block; transition: transform .15s; }
+  table.models { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.models th { text-align: right; color: var(--muted); font-weight: 500;
+                    padding: 5px 8px; border-bottom: 1px solid var(--border); }
+  table.models th:first-child, table.models td:first-child { text-align: left; }
+  table.models td { text-align: right; padding: 5px 8px; border-bottom: 1px solid var(--border);
+                    font-variant-numeric: tabular-nums; }
+  table.models tr:last-child td { border-bottom: none; }
+  .model-tag { display: inline-block; padding: 1px 8px; border-radius: 10px;
+               background: var(--brand-soft); color: var(--brand); font-weight: 500; }
+  .model-tag.legacy { background: #f3f4f6; color: var(--muted); }
+  .usage-note { margin-top: 8px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+
+  .drawer-head { padding: 12px 14px; border-bottom: 1px solid var(--border);
+                 display: flex; gap: 8px; align-items: center; }
+  .fake-body { padding: 14px; color: var(--muted); line-height: 1.9; }
+  .drawer-scene { max-width: 560px; }
+</style>
+</head>
+<body>
+<div class="scene">
+
+  <h2>场景一 · 变更中心「进行中」tab——新增「执行」列（耗时 + token 摘要，起止时间悬浮提示）</h2>
+  <div class="panel">
+    <div class="tabs"><span class="tab active">进行中</span><span class="tab">已归档</span><span class="tab">快速修复</span></div>
+    <table class="list">
+      <thead><tr><th>待办状态</th><th>标题</th><th>负责人</th><th>阶段</th><th>影响组件</th><th>执行</th><th>更新时间</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="badge amber">计划评审</span></td>
+          <td><div>登录模块重构</div><div class="key">2026-08-28-login-refactor</div></td>
+          <td>qinyi</td>
+          <td><span class="badge">plan</span> 步骤 3/7</td>
+          <td>backend, frontend</td>
+          <td class="exec-cell" title="开始 08-28 10:12 · 结束 08-30 15:40">
+            <div class="dur">3.6 小时</div>
+            <div class="tok">486 万 tok · 214 次</div>
+          </td>
+          <td class="num">08-30 15:40</td>
+        </tr>
+        <tr>
+          <td><span class="badge">人工测试</span></td>
+          <td><div>看板负载热力图</div><div class="key">2026-07-30-kanban-workload-heatmap</div></td>
+          <td>qinyi</td>
+          <td><span class="badge gray">verify</span> 已完成</td>
+          <td>frontend</td>
+          <td class="exec-cell" title="开始 07-30 09:02 · 结束 08-02 17:25">
+            <div class="dur">11.2 小时</div>
+            <div class="tok">2,137 万 tok · 1,066 次</div>
+          </td>
+          <td class="num">08-02 17:25</td>
+        </tr>
+        <tr>
+          <td><span class="badge gray">—</span></td>
+          <td><div>移动端工作台改版</div><div class="key">2026-08-26-mobile-workspace-page</div></td>
+          <td>—</td>
+          <td><span class="badge">execute</span> 步骤 5/12</td>
+          <td>frontend</td>
+          <td class="exec-cell"><span class="none">—（尚无关联执行）</span></td>
+          <td class="num">08-26 11:03</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>场景二 · 「快速修复」tab——同一「执行」列</h2>
+  <div class="panel">
+    <div class="tabs"><span class="tab">进行中</span><span class="tab">已归档</span><span class="tab active">快速修复</span></div>
+    <table class="list">
+      <thead><tr><th>状态</th><th>标题</th><th>负责人</th><th>影响模块</th><th>执行</th><th>时间</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><span class="badge">done</span></td>
+          <td><div>修复登录页跳转丢失参数</div><div class="key">ql-20260830-007</div></td>
+          <td>qinyi</td>
+          <td>frontend</td>
+          <td class="exec-cell" title="开始 08-30 14:02 · 结束 08-30 14:36">
+            <div class="dur">34 分钟</div>
+            <div class="tok">62 万 tok · 28 次 · 9 轮</div>
+          </td>
+          <td class="num">08-30 14:36</td>
+        </tr>
+        <tr>
+          <td><span class="badge amber">in_progress</span></td>
+          <td><div>代理日志时间线去重</div><div class="key">ql-20260830-006</div></td>
+          <td>qinyi</td>
+          <td>backend</td>
+          <td class="exec-cell" title="开始 08-30 10:11 · 进行中">
+            <div class="dur">1.8 小时<span style="color:var(--muted);font-weight:400">（进行中）</span></div>
+            <div class="tok">210 万 tok · 96 次</div>
+          </td>
+          <td class="num">08-30 12:40</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>场景三 · 变更详情页——用量卡（时间三元组 + 五指标 + 轮次 + 分模型折叠明细）</h2>
+  <div class="panel">
+    <div class="drawer-head"><span class="badge">plan</span><b>登录模块重构</b>
+      <span class="key">2026-08-28-login-refactor</span></div>
+
+    <div class="usage-bar" id="bar1">
+      <div class="usage-summary">
+        <span class="usage-item time"><span class="k">开始</span><span class="v">08-28 10:12</span></span>
+        <span class="usage-item time"><span class="k">结束</span><span class="v">08-30 15:40</span></span>
+        <span class="usage-item time"><span class="k">耗时</span><span class="v">3.6 小时</span></span>
+        <span class="usage-item"><span class="k">轮次</span><span class="v">96</span></span>
+        <span class="usage-item"><span class="k">输入</span><span class="v">38.4 万</span></span>
+        <span class="usage-item"><span class="k">输出</span><span class="v">5.2 万</span></span>
+        <span class="usage-item"><span class="k">缓存读取</span><span class="v">421 万</span></span>
+        <span class="usage-item"><span class="k">缓存写入</span><span class="v">26.1 万</span></span>
+        <span class="usage-item"><span class="k">请求次数</span><span class="v">214</span></span>
+        <span class="usage-item hit"><span class="k">缓存命中率</span><span class="v">91.7%</span></span>
+        <button class="usage-toggle" data-bar="bar1">按模型明细 <span class="arr">▾</span></button>
+      </div>
+      <div class="usage-detail">
+        <table class="models">
+          <thead><tr><th>模型</th><th>输入</th><th>输出</th><th>缓存读取</th><th>缓存写入</th><th>请求</th><th>命中率</th></tr></thead>
+          <tbody>
+            <tr><td><span class="model-tag">glm-4.7</span></td><td>31.0 万</td><td>4.1 万</td><td>346 万</td><td>20.8 万</td><td>172</td><td>91.8%</td></tr>
+            <tr><td><span class="model-tag">glm-4.7-air</span></td><td>7.4 万</td><td>1.1 万</td><td>75 万</td><td>5.3 万</td><td>42</td><td>91.0%</td></tr>
+          </tbody>
+        </table>
+        <div class="usage-note">口径：统计「平台派发的执行 + 关联会话内的执行」，按执行去重合并；一个会话同时服务多个变更时，其消耗会在各变更分别显示。耗时为各次执行纯执行时长累加（不含等待）。缓存命中率 = 缓存读取 ÷（缓存读取 + 输入）。</div>
+      </div>
+    </div>
+
+    <div class="fake-body">（变更详情其余区块：阶段步骤时间线 / 任务看板 / 会话卡片 / 文件清单…原型从略）</div>
+  </div>
+
+  <h2>场景四 · 快速修复详情抽屉——底部同一用量卡组件</h2>
+  <div class="panel drawer-scene">
+    <div class="drawer-head"><span class="badge">done</span><b>修复登录页跳转丢失参数</b>
+      <span class="key">ql-20260830-007</span></div>
+    <div class="fake-body">四段正文 / 文件清单 / 关联变更…（原型从略）</div>
+
+    <div class="usage-bar" id="bar2">
+      <div class="usage-summary">
+        <span class="usage-item time"><span class="k">开始</span><span class="v">08-30 14:02</span></span>
+        <span class="usage-item time"><span class="k">结束</span><span class="v">08-30 14:36</span></span>
+        <span class="usage-item time"><span class="k">耗时</span><span class="v">34 分钟</span></span>
+        <span class="usage-item"><span class="k">轮次</span><span class="v">9</span></span>
+        <span class="usage-item"><span class="k">输入</span><span class="v">4.1 万</span></span>
+        <span class="usage-item"><span class="k">输出</span><span class="v">6,204</span></span>
+        <span class="usage-item"><span class="k">缓存读取</span><span class="v">57.2 万</span></span>
+        <span class="usage-item"><span class="k">缓存写入</span><span class="v">3.9 万</span></span>
+        <span class="usage-item"><span class="k">请求次数</span><span class="v">28</span></span>
+        <span class="usage-item hit"><span class="k">命中率</span><span class="v">93.3%</span></span>
+        <button class="usage-toggle" data-bar="bar2">明细 <span class="arr">▾</span></button>
+      </div>
+      <div class="usage-detail">
+        <table class="models">
+          <thead><tr><th>模型</th><th>输入</th><th>输出</th><th>缓存读取</th><th>缓存写入</th><th>请求</th><th>命中率</th></tr></thead>
+          <tbody>
+            <tr><td><span class="model-tag">glm-4.7</span></td><td>4.1 万</td><td>6,204</td><td>57.2 万</td><td>3.9 万</td><td>28</td><td>93.3%</td></tr>
+          </tbody>
+        </table>
+        <div class="usage-note">口径：统计关联会话内全部执行（快速修复经会话绑定关联，无独立派发链路）。</div>
+      </div>
+    </div>
+  </div>
+
+  <h2>边界态 · 无关联执行</h2>
+  <div class="panel drawer-scene">
+    <div class="drawer-head"><span class="badge gray">draft</span><b>新提出的变更</b>
+      <span class="key">2026-08-30-some-idea</span></div>
+    <div class="usage-bar">
+      <div class="usage-summary">
+        <span class="usage-item time"><span class="k">开始</span><span class="v" style="color:var(--muted)">—</span></span>
+        <span class="usage-item time"><span class="k">结束</span><span class="v" style="color:var(--muted)">—</span></span>
+        <span class="usage-item time"><span class="k">耗时</span><span class="v" style="color:var(--muted)">—</span></span>
+        <span class="usage-item"><span class="k">轮次</span><span class="v" style="color:var(--muted)">0</span></span>
+        <span class="usage-item"><span class="k">输入/输出/缓存</span><span class="v" style="color:var(--muted)">—</span></span>
+        <span class="usage-item"><span class="k">请求次数</span><span class="v" style="color:var(--muted)">0</span></span>
+      </div>
+      <div class="usage-note">尚无关联执行——派发执行或在会话中绑定本变更后，这里会出现统计。</div>
+    </div>
+  </div>
+
+</div>
+<script>
+  document.querySelectorAll('.usage-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById(btn.dataset.bar).classList.toggle('expanded');
+    });
+  });
+</script>
+</body>
+</html>

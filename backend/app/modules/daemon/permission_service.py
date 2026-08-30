@@ -66,6 +66,35 @@ if TYPE_CHECKING:
 
 log = get_logger(__name__)
 
+# 通知 body 的提问预览长度上限（截断保单行呈现）。
+_DIALOG_PREVIEW_LIMIT = 60
+
+
+def _dialog_preview(dialog_payload: dict | None) -> str | None:
+    """从 dialog_payload 提取提问预览文本（AskUserQuestion）。
+
+    与前端 ``resolvePendingTitle``（minimized-dialog-capsule.tsx）同口径读
+    ``questions[]`` 数组的第一个非空 ``question``；兼容旧形态顶层 ``question``
+    字符串。超长截断。取不到返回 None（通知落库 body 为空，面板只显示标题行）。
+    """
+    if not isinstance(dialog_payload, dict):
+        return None
+    candidates: list[str] = []
+    top = dialog_payload.get("question")
+    if isinstance(top, str) and top.strip():
+        candidates.append(top.strip())
+    questions = dialog_payload.get("questions")
+    if isinstance(questions, list):
+        for item in questions:
+            if isinstance(item, dict):
+                question = item.get("question")
+                if isinstance(question, str) and question.strip():
+                    candidates.append(question.strip())
+    if not candidates:
+        return None
+    text = candidates[0]
+    return text[:_DIALOG_PREVIEW_LIMIT] + ("…" if len(text) > _DIALOG_PREVIEW_LIMIT else "")
+
 
 async def cancel_pending_dialogs_for_run(db: AsyncSession, run_id: uuid.UUID) -> int:
     """ql-20260815-003：作废某 run 名下 pending 的 SessionDialogRequest（→cancelled）。
@@ -427,16 +456,20 @@ class DaemonPermissionService:
         session_label = session_obj.title or str(session_id)[:8]
         if is_dialog:
             notify_title = f"会话「{session_label}」有新的提问待回答"
+            # body 放提问预览（dialog_payload.questions[] 第一个非空 question，前端
+            # resolvePendingTitle 同口径），避免与标题逐字重复；取不到则不带 body。
+            notify_body = _dialog_preview(payload.dialog_payload)
             notify_ref_type = "session_dialog"
         else:
             notify_title = f"会话「{session_label}」请求权限审批"
+            notify_body = f"请求使用工具：{payload.tool_name}"
             notify_ref_type = "session_permission"
         await self._notify_session_owner(
             owner_id=session_obj.user_id,
             workspace_id=session_obj.workspace_id,
             type="permission_request",
             title=notify_title,
-            body=notify_title,
+            body=notify_body,
             ref_type=notify_ref_type,
             ref_id=str(session_id),
             request_id=request_id,
@@ -1275,7 +1308,7 @@ class DaemonPermissionService:
                 workspace_id=sess_row.workspace_id,
                 type="permission_timeout",
                 title=timeout_title,
-                body=timeout_title,
+                body=None,
                 ref_type="session_permission",
                 ref_id=str(session_id),
                 request_id=request_id,

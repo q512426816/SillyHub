@@ -146,3 +146,28 @@
 根因：task-06 实现期 _notify_session_owner 的 link 留空 None，铃铛组件对空 link 仅标已读不跳转（用户反馈会话 684607b 提问通知点击无效）
 方案：link 改为 /sessions?session={session_id}（前端真实深链 sessions-portal.tsx:134 deepSessionId），覆盖 permission_request 与 permission_timeout 两类 owner 定向通知；测试补 link 断言
 结果：test_permission_owner_notify 6 passed（含新断言）；daemon.changelog 追加索引；改动仅 permission_service.py 与其测试
+
+## ql-20260830-008-fe1d | 2026-08-30 16:46:30 | daemon 徽标 15s 闪烁修复——状态查询缓存键剔除心跳时间戳
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/workspace-daemon-status.ts（queryKey 瘦身 id+status + keepPreviousData）
+- frontend/src/components/workspace-switcher.tsx（撤 30s 轮询改下拉打开时 refetch）
+需求：daemon 徽标 15s 闪烁修复——状态查询缓存键剔除心跳时间戳
+根因：quick-90a9bf32 把含 last_heartbeat_at 的整个 machineCandidates 塞进 queryKey，15s 机器轮询后键必变切到空缓存，statusMap 短暂退化为空致全页徽标闪「未绑定」；切换器另有 30s 常驻轮询 GET /api/workspaces 治吵诉求
+方案：workspace-daemon-status.ts 缓存键瘦身为每台机器 id+status 二元组并加 placeholderData keepPreviousData 双保险（聚合仍用完整候选，共享 daemon 误报修复语义不变）；workspace-switcher.tsx 撤 30s refetchInterval 改下拉打开时 refetch，同步修正过时注释
+结果：workspace-daemon-status 15 + workspace-switcher 12 共 27 用例全过，tsc --noEmit 0 错误，frontend.changelog.md 已同步
+
+## ql-20260830-009-8177 | 2026-08-30 17:00:41 | 通知面板样式与文案优化
+状态：已完成
+关联变更：2026-08-29-approval-notify-push
+文件：
+- backend/app/modules/daemon/permission_service.py（_dialog_preview+body 文案）
+- backend/app/modules/platform_sync/service.py（显示名前缀剥离+body 句式）
+- frontend/src/components/notifications/notification-bell.tsx（条目重排）
+- backend/app/modules/daemon/tests/test_permission_owner_notify.py（body 断言×3）
+- backend/app/modules/platform_sync/tests/test_pending_approval_broadcast.py（title/body 断言+前缀剥离用例）
+需求：通知面板样式与文案优化
+根因：权限/提问/超时通知 body 与 title 逐字重复（实现期占位未替换）；待审通知变更名回退 change_key 原始全名（含日期前缀）致截断难看；前端条目标签与标题同行挤占空间、时间行混排、未读标识弱
+方案：后端提问 body 放提问预览（_dialog_preview 同前端口径）、canUseTool body 为请求使用工具名、超时 body 为 None；待审显示名在 title 空或等于 key 时去日期前缀、body 新句式；前端标签移标题上方独立行加时间右对齐、标题独占整行、未读改左侧竖条、去点击查看、全部已读加图标、间距收紧
+结果：后端 11 passed（含新 body 断言与日期前缀剥离用例）前端 7 passed tsc 0 ruff/format 过；期间修一处类属性裸引用 NameError 被吞坑

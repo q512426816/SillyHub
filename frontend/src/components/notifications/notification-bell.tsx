@@ -22,6 +22,7 @@ import { useRouter } from "next/navigation";
 import { Popover, Badge } from "antd";
 import {
   Bell,
+  CheckCheck,
   CheckCircle2,
   Clock,
   Inbox,
@@ -47,27 +48,31 @@ const PANEL_LIST_LIMIT = 20;
 /** 四类通知的类型元数据：中文标签 + 状态色（语义 token 类名，不硬编码 hex）+ 图标。 */
 const TYPE_META: Record<
   string,
-  { label: string; icon: typeof Bell; colorCls: string }
+  { label: string; icon: typeof Bell; colorCls: string; labelCls: string }
 > = {
   approval_pending: {
     label: "待审核",
     icon: Clock,
     colorCls: "bg-warning/15 text-warning",
+    labelCls: "text-warning",
   },
   approval_result: {
     label: "审批结果",
     icon: CheckCircle2,
     colorCls: "bg-success/15 text-success",
+    labelCls: "text-success",
   },
   permission_request: {
     label: "权限请求",
     icon: KeyRound,
     colorCls: "bg-info/15 text-info",
+    labelCls: "text-info",
   },
   permission_timeout: {
     label: "权限超时",
     icon: TimerOff,
     colorCls: "bg-neutral/20 text-neutral",
+    labelCls: "text-neutral",
   },
 };
 
@@ -76,6 +81,7 @@ const FALLBACK_META = {
   label: "通知",
   icon: Bell,
   colorCls: "bg-brand-100 text-brand-600",
+  labelCls: "text-brand-600",
 };
 
 function typeMeta(type: string) {
@@ -98,40 +104,41 @@ export function NotificationItem({
     <button
       type="button"
       data-testid="notification-item"
-      className={`relative flex w-full items-start gap-3 border-b border-border-weak px-4 py-3 text-left transition-colors last:border-b-0 hover:bg-brand-50 ${
-        unread ? "bg-brand-50" : "bg-transparent"
+      title={notification.title}
+      className={`relative flex w-full items-start gap-2.5 border-b border-border-weak py-2.5 pl-3.5 pr-3 text-left transition-colors last:border-b-0 hover:bg-brand-50 ${
+        unread ? "bg-brand-50/60" : "bg-transparent"
       }`}
       onClick={() => onClick(notification)}
     >
       {unread && (
         <span
-          className="absolute left-1.5 top-5 h-1.5 w-1.5 rounded-full bg-brand-600"
+          className="absolute left-0 top-0 h-full w-0.5 bg-brand-600"
           aria-label="未读"
         />
       )}
       <span
-        className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg ${meta.colorCls}`}
+        className={`mt-1 grid h-7 w-7 shrink-0 place-items-center rounded-md ${meta.colorCls}`}
       >
-        <Icon className="h-4 w-4" />
+        <Icon className="h-3.5 w-3.5" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <span className="rounded bg-brand-100 px-1.5 py-px text-[10px] font-medium text-brand-600">
+        {/* 元信息行：类型小字标签（左）+ 相对时间（右），标题独占整行避免被标签挤截断 */}
+        <span className="flex items-center justify-between gap-2">
+          <span className={`text-[10px] font-medium ${meta.labelCls}`}>
             {meta.label}
           </span>
-          <span className="truncate text-[13px] font-semibold text-slate-800 dark:text-slate-100">
-            {notification.title}
+          <span className="shrink-0 text-[11px] text-slate-400">
+            {formatRelativeTime(notification.created_at)}
           </span>
+        </span>
+        <span className="mt-0.5 block truncate text-[13px] font-semibold text-slate-800 dark:text-slate-100">
+          {notification.title}
         </span>
         {notification.body && (
           <span className="mt-0.5 block truncate text-xs text-slate-500">
             {notification.body}
           </span>
         )}
-        <span className="mt-1 block text-[11px] text-slate-400">
-          {formatRelativeTime(notification.created_at)}
-          {notification.link ? " · 点击查看" : ""}
-        </span>
       </span>
     </button>
   );
@@ -191,8 +198,9 @@ export function NotificationBell() {
           type="button"
           disabled={count === 0}
           onClick={handleReadAll}
-          className="text-xs text-brand-600 transition-colors hover:underline disabled:cursor-default disabled:text-slate-400 disabled:hover:no-underline"
+          className="inline-flex items-center gap-1 text-xs text-brand-600 transition-colors hover:underline disabled:cursor-default disabled:text-slate-400 disabled:hover:no-underline"
         >
+          <CheckCheck className="h-3.5 w-3.5" />
           全部已读
         </button>
       </div>

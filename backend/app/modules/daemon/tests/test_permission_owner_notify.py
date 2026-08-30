@@ -196,6 +196,7 @@ class TestPermissionRequestNotify:
         assert kwargs["ref_type"] == "session_permission"
         assert kwargs["ref_id"] == str(sess.id)
         assert kwargs["workspace_id"] == sess.workspace_id
+        assert kwargs["body"] == "请求使用工具：Bash"
         # 深链直达会话面板（ql 修复：点击通知跳转对应会话）
         assert kwargs["link"] == f"/sessions?session={sess.id}"
 
@@ -222,6 +223,8 @@ class TestPermissionRequestNotify:
         assert kwargs["type"] == "permission_request"
         assert kwargs["ref_type"] == "session_dialog"
         assert kwargs["ref_id"] == str(sess.id)
+        # body 放提问预览（兼容顶层 question 旧形态），不再与标题逐字重复。
+        assert kwargs["body"] == "Which?"
 
     @pytest.mark.asyncio
     async def test_notify_failure_does_not_break_request_flow(
@@ -280,6 +283,8 @@ class TestPermissionTimeoutNotify:
         assert kwargs["recipient_user_id"] == owner
         assert kwargs["ref_type"] == "session_permission"
         assert kwargs["ref_id"] == str(sess.id)
+        # 超时通知不带 body（title 已表达，避免逐字重复）
+        assert kwargs["body"] is None
 
 
 # ── respond 不通知（owner 自响应豁免，D-008@v1）─────────────────────────────

@@ -22,7 +22,7 @@
  * 对齐既有 hook cadence（use-daemon-machines=15s 偏紧，本 hook 关心的是
  * 跨 ws 的 daemon 存在性而非活跃度，30s 更合适）。
  */
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api";
 import {
   type MemberBindingView,
@@ -118,8 +118,17 @@ export function useDaemonStatusMap(): {
   // 与守护进程页同缓存），聚合前合并去重（自有优先）。
   const { machineCandidates } = useDaemonMachines({ limit: 100 });
 
+  // ql-20260830-008-fe1d：缓存键只放机器稳定标识（id+status）——quick-90a9bf32
+  // 曾把整个 machineCandidates 塞键里，而 DaemonMachineRead 带 last_heartbeat_at
+  // 心跳时间戳（在线时每轮 15s 轮询几乎必变），键随之变化 → react-query 切到
+  // 无数据的全新缓存条目 → statusMap 短暂退化为 {} → 全页 daemon 徽标每 15s
+  // 闪一次「未绑定」。键瘦身后心跳变化不再换键；status 变化仍换键（共享机器
+  // 上下线需重聚合）。另配 keepPreviousData 双保险：即便键变化，过渡期也持有
+  // 上一份数据而非 undefined，徽标不闪。聚合 queryFn 照旧消费完整 machineCandidates。
+  const machineKey = (machineCandidates ?? []).map((m) => [m.id, m.status] as const);
+
   const q = useQuery<Record<string, DaemonStatusEntry>, ApiError>({
-    queryKey: [...WORKSPACE_DAEMON_STATUS_QUERY_KEY, machineCandidates],
+    queryKey: [...WORKSPACE_DAEMON_STATUS_QUERY_KEY, machineKey],
     queryFn: async () => {
       const [bindings, instances] = await Promise.all([
         fetchMyBindings(),
@@ -136,6 +145,7 @@ export function useDaemonStatusMap(): {
       return aggregateDaemonStatus(bindings, merged);
     },
     refetchInterval: 30_000,
+    placeholderData: keepPreviousData,
   });
   return {
     statusMap: q.data ?? {},

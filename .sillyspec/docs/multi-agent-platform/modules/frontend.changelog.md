@@ -20,3 +20,11 @@
 - lib/notifications.ts：四 REST 函数 + useNotifications/useUnreadCount（无 refetchInterval，D-005@v1）+ useNotificationsStream（SSE 事件与重连成功双 invalidate，PERMANENT_SSE_ERROR_STATUSES={401,403,404} 停连+指数退避）；query-keys 增 notifications 族。
 - components/notifications/notification-bell.tsx：铃铛+Badge 徽标（99+）+Popover 面板（类型语义色标签/相对时间/点击已读+跳转/全部已读/空态），挂载 top-bar（替换原静态 Bell 占位）；三主题 brand-* 语义阶。api-types.ts 经 gen:types 同步（5 端点+4 DTO）。
 - change 2026-08-29-session-usage-stats | 会话内 Token 用量统计（frontend 侧）：新组件 session-usage-bar.tsx（摘要行 输入/输出/缓存读取/缓存写入/请求次数/缓存命中率 + 按模型折叠明细，「未记录（旧轮次）」灰阶 tag + 口径脚注；万级中文缩写）；lib/daemon.ts getSessionUsage+手写过渡类型（生成物已同步）；session-panel page 头部下方/dialog 输入框上方双模式挂载，两处 onTurnCompleted 轮次终态递增 refreshSignal 重取（dialog 零 react-query）。组件 5+挂载 4 用例+既有 25 回归绿 tsc 0。
+
+## 2026-08-30 — daemon 徽标闪烁与切换器轮询（ql-20260830-008-fe1d）
+- lib/workspace-daemon-status.ts：queryKey 从整个 machineCandidates（含 last_heartbeat_at 心跳时间戳，15s 机器轮询后键必变→切空缓存→statusMap 短暂 {}→全页徽标闪「未绑定」）瘦身为每台机器 [id,status] 二元组 + placeholderData keepPreviousData 双保险；聚合 queryFn 仍消费完整候选（quick-90a9bf32 共享 daemon 误报修复语义不变）。
+- components/workspace-switcher.tsx：撤 30s refetchInterval 常驻轮询 GET /api/workspaces（治吵），改 DropdownMenu onOpenChange 打开时 refetch（保留 react-query 默认窗口聚焦刷新）；文件头与行内过时注释同步修正。
+
+## 2026-08-30 — 通知面板条目重排（quick 样式优化）
+
+- notification-bell 条目布局：类型小字标签移到标题上方独立行（右对齐相对时间），标题独占整行解决被标签挤截断；未读标识改左侧 brand 竖条；去掉时间行混排的「点击查看」（hover 背景+title tooltip 承担可点暗示）；「全部已读」加 CheckCheck 图标；间距收紧（px-3.5/py-2.5/gap-2.5，图标 28px）。

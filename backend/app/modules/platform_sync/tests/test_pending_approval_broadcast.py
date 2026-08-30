@@ -101,7 +101,10 @@ async def test_pending_body_broadcasts_approval_pending(
     assert kwargs["ref_id"] == str(change.id)
     assert kwargs["dedupe_key"] == f"{change.id}:plan_review"
     assert kwargs["link"] == f"/workspaces/{ws.id}/changes/{change.id}"
-    assert "等待计划审核" in kwargs["title"]
+    # ql-20260830-008 样式优化：无 title 回退 key 不去前缀（demo 无日期前缀原样），
+    # body 新句式（stage 阶段完成，等待门名）。
+    assert kwargs["title"] == "变更「demo」等待计划审核"
+    assert kwargs["body"] == "plan 阶段完成，等待计划审核"
 
 
 # ── 2. 重复推送 → 触发点每次都调 service（幂等由 service 兜底） ─────────────────
@@ -173,3 +176,22 @@ async def test_broadcast_failure_does_not_break_upsert(
         )
     ).scalar_one()
     assert row.latest_progress == body
+
+
+async def test_change_key_date_prefix_stripped_in_title(
+    db_session: AsyncSession, monkeypatch: Any
+) -> None:
+    """变更无 title 时 key 的「YYYY-MM-DD-」前缀不进通知标题（ql-20260830-008）。"""
+    recorder = AsyncMock(return_value=0)
+    monkeypatch.setattr(NotificationService, "notify_broadcast", recorder)
+
+    ws = await _make_workspace(db_session)
+    svc = PlatformSyncService(db_session)
+    key = "2026-08-30-change-center-usage-stats"
+    res = await svc.upsert_progress(
+        ws.id, key, _progress(key, "brainstorm", completed=("brainstorm",)), None, T2, "alice"
+    )
+    assert res.conflict is False
+
+    kwargs = recorder.await_args.kwargs
+    assert kwargs["title"] == "变更「change-center-usage-stats」等待提案审核"

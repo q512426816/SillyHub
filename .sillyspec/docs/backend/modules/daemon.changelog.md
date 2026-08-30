@@ -17,3 +17,7 @@ created_at: 2026-08-29 22:56:30
 ## 2026-08-29 — 权限通知补会话深链（quick 修复）
 
 - `_notify_session_owner` 的 link 由 None 改为 `/sessions?session={session_id}`（sessions-portal.tsx:134 深链参数）：点击铃铛通知直达对应会话的提问/权限卡片，覆盖 permission_request 与 permission_timeout 两类（ql 条目见 QUICKLOG，关联变更 2026-08-29-approval-notify-push）。
+
+## 2026-08-30 — 权限/提问通知 body 去重（quick 样式优化）
+
+- `_notify_session_owner` 文案：提问（dialog）body 放提问预览（`_dialog_preview`，与前端 resolvePendingTitle 同口径读 questions[]，兼容顶层 question，60 字截断）；canUseTool body=「请求使用工具：{tool_name}」；超时 body=None——不再与 title 逐字重复。
