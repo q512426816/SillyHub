@@ -123,3 +123,36 @@ async def test_start_task_rejects_non_factory_with_type_error() -> None:
 
     with pytest.raises(TypeError, match="async_sessionmaker"):
         start_draft_cleanup_task(get_session_factory)
+
+
+async def test_delete_statement_carries_outer_session_null_guard(
+    db_session: AsyncSession,
+) -> None:
+    """DELETE 外层复检 session_id IS NULL（ql-20260831-001-6dde）。
+
+    修前守卫只在 ``id IN (子查询)`` 里：发送消息回填 session_id 与清理 DELETE
+    存在 check-then-act 竞态——PG READ COMMITTED 下非相关 IN 列表用语句开始
+    时的快照，已随消息发送的附件行会被误删（行级竞态无法在单连接测试复现，
+    此处以捕获模块真实构造的语句断言双谓词：外层谓词缺失 → 计数 1 → 失败）。
+    """
+    old = datetime.now(UTC) - (DRAFT_TTL + timedelta(hours=1))
+    expired_draft = _make_attachment(session_id=None, created_at=old)
+    db_session.add(expired_draft)
+    await db_session.commit()
+
+    captured: dict[str, object] = {}
+    orig_execute = db_session.execute
+
+    async def spy_execute(stmt, *args, **kwargs):
+        captured["stmt"] = stmt
+        return await orig_execute(stmt, *args, **kwargs)
+
+    db_session.execute = spy_execute  # type: ignore[method-assign]
+    try:
+        deleted = await cleanup_expired_draft_attachments(lambda: _reuse(db_session))
+    finally:
+        db_session.execute = orig_execute  # type: ignore[method-assign]
+
+    assert deleted == 1  # 行为不变：过期草稿仍被删
+    sql = str(captured["stmt"])
+    assert sql.count("session_id IS NULL") == 2  # 子查询 + 外层复检

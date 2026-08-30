@@ -141,6 +141,9 @@ import {
   resolveSpecDir,
 } from './spec-sync.js';
 import { RuntimeHandler, normalizeRootPathParam } from './runtime-handler.js';
+// ql-20260831-001-6dde：恢复链/重开与本地在途 turn 竞态守卫（SessionBusyError
+// instanceof 分支用，value import）。
+import { SessionBusyError } from './interactive/types.js';
 import type {
   PersistedSessionRecord,
   SessionStatus,
@@ -2641,6 +2644,18 @@ export class Daemon {
     try {
       await this._sessionManager!.restoreAndReconnect(record);
     } catch (e) {
+      // ql-20260831-001-6dde：本地该会话仍有在途 turn（status=running 或待处理
+      // 输入）——驱逐会杀在途工作。入恢复重试队列（复用网络失败退避路径，
+      // 30s 起步），turn 结束后下一轮恢复再重建；backend 侧 reconnecting 由
+      // 重试成功收口，不写 failed、不删本地记录。
+      if (e instanceof SessionBusyError) {
+        this._logger.warn('session_restore_busy_retry', {
+          session_id: record.sessionId,
+          status: record.currentRunId != null ? 'running' : 'active',
+        });
+        const queued = await this._enqueueRecoveryRetry(record);
+        return queued ? 'retry' : 'dropped';
+      }
       // restoreAndReconnect 抛错（cwd 不一致 / executable 缺失 / SDK jsonl 缺失）：
       // session 已被 SessionManager 从内存 store 移除 + onSessionEnd(failed)。
       // 这里向 backend 写 reconnecting→failed + 删记录。继续其他记录。
@@ -5206,6 +5221,16 @@ export class Daemon {
       await this._sessionManager!.restoreAndReconnect(record);
       await this._sessionManager!.markReconnected(sessionId);
     } catch (e) {
+      // ql-20260831-001-6dde：本地副本仍在跑 turn——backend 的「daemon 侧副本
+      // 已死」断言不成立。不驱逐（杀在途工作）、也不向 backend 写 failed
+      //（把活会话误翻终态更糟），warn 后交 sweeper/后续流程收敛。
+      if (e instanceof SessionBusyError) {
+        this._logger.warn('session_resume_local_busy_skipped', {
+          session_id: sessionId,
+          lease_id: leaseId,
+        });
+        return;
+      }
       this._logger.error('session_resume_restore_failed', {
         session_id: sessionId,
         lease_id: leaseId,

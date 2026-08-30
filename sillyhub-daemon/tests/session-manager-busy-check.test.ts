@@ -18,10 +18,12 @@ import { describe, it, expect, vi } from 'vitest';
 import { SessionManager } from '../src/interactive/session-manager.js';
 import { InputQueue } from '../src/interactive/input-queue.js';
 import type { SessionManagerDeps } from '../src/interactive/types.js';
+import { SessionBusyError } from '../src/interactive/types.js';
 import type {
   InteractiveDriver,
   InteractiveDriverHandle,
   InteractiveDriverCallbacks,
+  PersistedSessionRecord,
   SessionState,
   SessionStatus,
 } from '../src/interactive/types.js';
@@ -152,5 +154,66 @@ describe('task-01 / FR-01 / D-001@v1: SessionManager.hasRunningTurn 忙判定', 
     expect(store.size).toBe(2);
     expect(sm.get('sess-a')!.status).toBe('active');
     expect(sm.get('sess-b')!.status).toBe('running');
+  });
+});
+
+// ── ql-20260831-001-6dde：restoreAndReconnect 活会话守卫（恢复链不杀在途 turn）──
+//
+// 恢复链（boot/heartbeat_recover/backend SESSION_RESUME）经 restoreAndReconnect
+// 重建会话时，对内存残留条目先静默驱逐（ql-20260823-006）。守卫补丁：本地条目
+// 仍在跑 turn（status=running）或待处理输入（_pendingInjectCount>0，附件下载中）
+// 时拒绝驱逐——抛 SessionBusyError 由调用方重试/跳过，绝不 terminate 在途工作
+//（2026-08-31 风险审查发现①：恢复链触发瞬间的忙检只查一次，恢复在途期间新起
+// 的 turn 只能靠本守卫兜底）。
+
+describe('ql-20260831-001-6dde: restoreAndReconnect 活会话守卫', () => {
+  function mkRecord(sessionId: string): PersistedSessionRecord {
+    return {
+      sessionId,
+      leaseId: `lease-${sessionId}`,
+      agentSessionId: `sdk-${sessionId}`,
+      cwd: '/tmp/test',
+      provider: 'claude',
+      pathToClaudeCodeExecutable: '/usr/bin/claude',
+      turnCount: 0,
+      lastActiveAt: Date.now(),
+    };
+  }
+
+  it('本地条目 status=running（在途 turn）→ 抛 SessionBusyError，条目原样保留', async () => {
+    const sm = createSessionManager();
+    seed(sm, makeState('s-busy', 'running'));
+
+    await expect(sm.restoreAndReconnect(mkRecord('s-busy'))).rejects.toBeInstanceOf(
+      SessionBusyError,
+    );
+
+    // 未被驱逐：条目仍在 store（对比旧行为 terminate + delete）
+    const store = (sm as unknown as { _store: Map<string, SessionState> })._store;
+    expect(store.has('s-busy')).toBe(true);
+  });
+
+  it('status=active 但有待处理输入（_pendingInjectCount>0，附件下载中）→ 同样抛 SessionBusyError', async () => {
+    const sm = createSessionManager();
+    seed(sm, makeState('s-queued', 'active'));
+    (sm as unknown as { _pendingInjectCount: Map<string, number> })._pendingInjectCount.set(
+      's-queued',
+      1,
+    );
+
+    await expect(sm.restoreAndReconnect(mkRecord('s-queued'))).rejects.toBeInstanceOf(
+      SessionBusyError,
+    );
+    const store = (sm as unknown as { _store: Map<string, SessionState> })._store;
+    expect(store.has('s-queued')).toBe(true);
+  });
+
+  it('空闲 active 条目（无在途 turn、无待处理输入）→ 不抛 SessionBusyError（维持驱逐重建语义）', async () => {
+    const sm = createSessionManager();
+    seed(sm, makeState('s-idle', 'active'));
+
+    // 走驱逐后的正常恢复路径：fake driver.start 成功 → restore 正常返回，
+    // 守卫只拦 running/待处理输入，不误伤空闲条目。
+    await expect(sm.restoreAndReconnect(mkRecord('s-idle'))).resolves.toBeUndefined();
   });
 });

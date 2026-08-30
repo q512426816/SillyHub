@@ -487,6 +487,68 @@ describe('TestStartApiKey (daemon-api-key)', () => {
   });
 });
 
+// ── TestStartSingleInstance（ql-20260831-001-6dde：start 单实例守卫）──────────
+//
+// 场景：pid 文件记录的进程仍存活（≠ 自身）→ 拒绝二次启动 exit 1（双实例会
+// pid 互相覆盖 / stop 只能停其一 / server 侧双 runtime 抢会话；典型触发：
+// macOS autostart enable 的 bootstrap RunAtLoad 立即拉起第二实例）。
+// 豁免两支：SILLYHUB_DAEMON_RESPAWN=1（自更新交接既定时序）、pid=自身。
+// 活进程 pid 取 process.ppid（测试运行器的父进程，恒存活且 ≠ process.pid）。
+describe('TestStartSingleInstance (ql-20260831-001-6dde)', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await makeTmpDir('sillyhub-cli-single-');
+    await setupCliWithTmpHome(tmpDir);
+  });
+
+  afterEach(async () => {
+    teardownCliStub();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    await cleanupDir(tmpDir);
+  });
+
+  it('pid 文件记录存活进程 → exit 1 + already running 提示（含 stop 指引），pid 文件不被覆盖', async () => {
+    await cli.writePid(process.ppid);
+    const err = captureStderr();
+
+    const code = await cli.startAction({ server: 'http://localhost:8000' });
+
+    expect(code).toBe(1);
+    const text = err.writes.join('');
+    expect(text).toContain('already running');
+    expect(text).toContain(String(process.ppid));
+    expect(text).toContain('stop');
+    err.restore();
+    // 守卫在 config 落盘与 writePid 之前：拒绝后 pid 文件保持原值
+    expect(cli.readPid()).toBe(process.ppid);
+  });
+
+  it('SILLYHUB_DAEMON_RESPAWN=1（自更新交接）→ 不被守卫拦截，走到后续凭据校验', async () => {
+    vi.stubEnv('SILLYHUB_DAEMON_RESPAWN', '1');
+    await cli.writePid(process.ppid);
+    const err = captureStderr();
+
+    const code = await cli.startAction({ server: 'http://localhost:8000' });
+
+    // tmp 家目录无凭据 → 走到凭据校验退出 1（而非守卫拦截）
+    expect(code).toBe(1);
+    expect(err.writes.join('')).not.toContain('already running');
+    err.restore();
+  });
+
+  it('pid 等于自身（同进程内重复调用）→ 不被守卫拦截', async () => {
+    await cli.writePid(process.pid);
+    const err = captureStderr();
+
+    await cli.startAction({ server: 'http://localhost:8000' });
+
+    expect(err.writes.join('')).not.toContain('already running');
+    err.restore();
+  });
+});
+
 // ql-20260616-003：terminal observer 4 个 CLI 选项 + mode 校验
 describe('TestStartTerminalObserver (ql-20260616-003)', () => {
   let tmpDir: string;

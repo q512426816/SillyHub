@@ -65,7 +65,11 @@ runDaemonSelfUpdate:
 - latest.json 拉取失败/非 2xx/解析失败/字段缺失 → 返 null 仅 warn；相对 url 由
   server_url（去尾斜杠）拼接。
 - bundle 替换是原子写（下载 → 校验 → 临时文件 → rename），失败保持旧 bundle
-  可用；替换成功后 500ms 延迟退出给日志 flush。
+  可用；替换成功后 500ms 延迟退出给日志 flush。替换前备份 `.bak-<ts>` 保留最近
+  3 份（字典序轮换）；copyFile 中途失败（ENOSPC 等）会清理半截 .bak 残件再落
+  warn——不清理会被轮换当成真备份占位，多轮后把完整历史备份挤光（ql-20260831-001-6dde）。
+- respawn spawn 注入 env `SILLYHUB_DAEMON_RESPAWN=1`（ql-20260831-001-6dde）：新进程
+  start 的单实例守卫据此豁免——旧进程 exit(0) 前 pid 短暂并存是交接既定时序。
 - isOutdated 同时支持 semver 元组比较与字符串不等兜底；npm install 失败仅 warn
   （runCmdBoolean 内已记 cmd_failed），下次启动再试。
 - 与 spec-sync 的版本门控（MIN_SILLYSPEC_VERSION_FOR_INIT）互补：preflight 保证

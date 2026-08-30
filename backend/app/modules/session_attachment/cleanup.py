@@ -38,6 +38,12 @@ async def cleanup_expired_draft_attachments(
     形参注解为 async_sessionmaker（工厂实例）——修前 main.py 传了
     get_session_factory 函数本身，``async with session_factory()`` 拿到
     async_sessionmaker 抛 TypeError，清理每轮必败（11c17b36 引入）。
+
+    外层 WHERE 复检 ``session_id IS NULL``（ql-20260831-001-6dde）：守卫只在
+    子查询里时，发送消息回填 session_id（daemon/session/service.py）与清理
+    DELETE 存在 check-then-act 竞态——PG READ COMMITTED 下非相关 IN 列表
+    用语句开始时的快照，已发送附件行会被误删。外层再挂一次谓词，DELETE
+    执行时回填过的行不满足条件，毫秒级竞态窗口关闭。
     """
     cutoff = datetime.now(UTC) - DRAFT_TTL
     async with session_factory() as session:
@@ -50,7 +56,8 @@ async def cleanup_expired_draft_attachments(
                         SessionAttachment.created_at < cutoff,
                     )
                     .limit(_BATCH_LIMIT)
-                )
+                ),
+                SessionAttachment.session_id.is_(None),
             )
         )
         await session.commit()

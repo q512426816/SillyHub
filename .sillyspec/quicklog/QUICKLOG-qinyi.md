@@ -242,3 +242,32 @@
 根因：原生 title 悬浮约 1 秒延迟且样式随浏览器不跟主题，用户要求改用 antd Tooltip
 方案：六项 UsageItem 与「按模型明细」按钮的 title 属性改 antd Tooltip（先例 message-queue-bar，即时弹出+主题 token），触发元素补 aria-label（无障碍名+测试锚点）并移除 title 防浏览器双提示；测试断言 getByTitle→getByLabelText；模块文档条目与 changelog 同步
 结果：vitest 针对性 5 用例全绿（session-usage-bar.test.tsx 1 file passed），pnpm exec tsc --noEmit exit 0
+
+## ql-20260831-001-6dde | 2026-08-31 02:03:40 | 修复 2026-08-31 风险审查六项：恢复链误杀在途 turn/start 双实例/disable 停进程/VBS 引号/备份残件/附件清理竞态
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/types.ts（新增 SessionBusyError 恢复链守卫错误类型）
+- sillyhub-daemon/src/interactive/session-manager.ts（restoreAndReconnect 驱逐前活会话守卫 running/待处理输入抛 SESSION_BUSY）
+- sillyhub-daemon/src/daemon.ts（恢复链 catch 入重试队列+resume busy 跳过两条消费分支）
+- sillyhub-daemon/src/cli.ts（startAction step 0.5 单实例守卫 pid 存活且非自身拒绝 respawn 标记豁免）
+- sillyhub-daemon/src/preflight.ts（respawn spawn 注入 SILLYHUB_DAEMON_RESPAWN=1+备份残件清理）
+- sillyhub-daemon/src/autostart/linux.ts（unregister 去 --now 不再停止运行中 unit）
+- sillyhub-daemon/src/autostart/macos.ts（unregister 改 launchctl list 判运行中跳过 bootout）
+- sillyhub-daemon/src/autostart/windows.ts（buildVbsContent node 路径加引号防 Program.exe 植入）
+- backend/app/modules/session_attachment/cleanup.py（DELETE 外层补 session_id IS NULL 关回填竞态）
+- sillyhub-daemon/tests/cli.test.ts（单实例守卫 3 用例）
+- sillyhub-daemon/tests/autostart.test.ts（unregister 语义更新+VBS 引号新断言）
+- sillyhub-daemon/tests/session-manager-busy-check.test.ts（驱逐守卫 3 用例）
+- sillyhub-daemon/tests/interactive/daemon-recovery-boot.test.ts（SessionBusyError 重试分支用例）
+- sillyhub-daemon/tests/preflight.test.ts（respawn env 断言）
+- sillyhub-daemon/tests/preflight-download-replace.test.ts（备份残件清理用例）
+- backend/app/modules/session_attachment/tests/test_cleanup.py（双谓词契约用例）
+- .sillyspec/docs/sillyhub-daemon/modules/autostart.md（disable 语义/VBS 引号/双实例提示）
+- .sillyspec/docs/sillyhub-daemon/modules/cli.md（单实例守卫流程）
+- .sillyspec/docs/sillyhub-daemon/modules/interactive.md（驱逐前守卫）
+- .sillyspec/docs/sillyhub-daemon/modules/preflight.md（respawn 标记+备份残件）
+需求：修复 2026-08-31 风险审查六项：恢复链误杀在途 turn/start 双实例/disable 停进程/VBS 引号/备份残件/附件清理竞态
+根因：风险审查发现的可证缺陷：恢复链触发瞬间忙检只查一次，在途期间新起 turn 会被 restoreAndReconnect 静默驱逐；start 无单实例守卫（macOS autostart enable 的 bootstrap RunAtLoad 立即拉起第二实例）；linux disable --now 与 macos bootout 会停运行中 daemon，与文档契约矛盾；VBS node 路径未引号存在 Program.exe 植入面；备份 copyFile 中途失败残件占轮换名额；附件清理 DELETE 守卫只在子查询，回填竞态可误删已发送附件
+方案：①types 新增 SessionBusyError+restoreAndReconnect 驱逐前守卫（running/待处理输入抛错），daemon 恢复链 catch 入退避重试队列、SESSION_RESUME catch warn 跳过；②startAction 加 pid 存活单实例守卫，respawn spawn 注入 SILLYHUB_DAEMON_RESPAWN=1 豁免交接时序；③linux unregister 去 --now、macos 改 launchctl list 判运行中跳过 bootout；④VBS node 路径加引号；⑤备份失败清理半截 .bak；⑥cleanup.py DELETE 外层补 session_id IS NULL
+结果：daemon 相关 8+4 文件套件 264 用例绿（含新增 cli 守卫 3+恢复链 1+守卫单测 3+备份残件 1+macOS unregister 3）+tsc 0；autostart 73 绿；backend test_cleanup 5 绿（含新增双谓词契约 1）+ruff/format/mypy 0

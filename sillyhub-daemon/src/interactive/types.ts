@@ -560,6 +560,23 @@ export class SessionNotActiveError extends Error {
 }
 
 /**
+ * session 本地仍在跑 turn（status=running 或有待处理输入）——恢复/重开链
+ * 驱逐内存条目前抛出（ql-20260831-001-6dde）。调用方必须按「稍后重试/跳过」
+ * 处理，绝不就地驱逐：驱逐 = terminate 在途 driver，正在执行的 agent 工作
+ * 被静默杀掉（2026-08-31 风险审查发现①：恢复链触发瞬间忙检只查一次，
+ * 恢复在途期间新起的 turn 只能靠本守卫兜底）。
+ */
+export class SessionBusyError extends Error {
+  readonly code = 'SESSION_BUSY' as const;
+  constructor(sessionId: string, status: SessionStatus) {
+    super(
+      `session busy (local turn in flight): ${sessionId} status=${status} (SESSION_BUSY)`,
+    );
+    this.name = 'SessionBusyError';
+  }
+}
+
+/**
  * provider 不支持（codex 后续独立，D-002@v3 不 Big Bang）。
  */
 export class UnsupportedProviderError extends Error {

@@ -34,22 +34,32 @@ daemon 开机（或登录）后自动启动的注册模块（`src/autostart/`，
 enableAutostart: 平台分派 → 组装 record（node_path=process.execPath、script_path=
   resolve(argv[1]) 双绝对路径固化 + 派生任务名）→ 平台 register → 成功后写本地记录
   （记录写失败明确 ok=false，但重跑 enable 幂等覆盖可自愈，不留半残状态）
-Windows register: 写 VBS → schtasks /Create /TN <名> /SC ONLOGON /TR "wscript.exe
+Windows register: 写 VBS（node 与 script 路径均加引号，ql-20260831-001-6dde——
+  node 默认装在含空格的 Program Files，未引号依赖 CreateProcess 逐段回退且存在
+  Program.exe 植入面）→ schtasks /Create /TN <名> /SC ONLOGON /TR "wscript.exe
   \"<vbs>\"" /RL LIMITED /F → 报「拒绝访问」（schtasks CLI 对非提权 ONLOGON 的限制，
   非任务计划程序限制）→ 降级 PowerShell Register-ScheduledTask（-EncodedCommand
   base64 防转义，AtLogOn + 本用户 Interactive principal，D-006）；成功后 node 路径
   漂移检测（R-01）输出黄色警告
 macOS register: 写 plist（ProgramArguments 五元素绝对路径数组 [node, script, start,
   --server, url]；RunAtLoad；全文无 KeepAlive 键）→ launchctl bootout gui/<uid>/<label>
-  （幂等清场，忽略失败）→ launchctl bootstrap gui/<uid> <plist>
+  （幂等清场，忽略失败）→ launchctl bootstrap gui/<uid> <plist>（注意 RunAtLoad 语义：
+  加载即启动——enable 时若 daemon 已在运行会立即拉起第二实例；由 cli.ts start 单实例
+  守卫兜底拒绝，ql-20260831-001-6dde）
 Linux register: PID1 前置检测（读 /proc/1/comm 回退 ps -p 1；非 systemd = WSL 默认/
   容器 → ok=false，不执行任何注册命令不写文件，R-04）→ 写 service（[Unit]/[Service]/
-  [Install]，无 Restart 键）→ systemctl --user daemon-reload → enable（幂等覆盖）→
-  loginctl enable-linger（best-effort，失败仅 warn 降级为登录后自启）
+  [Install]，无 Restart 键）→ systemctl --user daemon-reload → enable（幂等覆盖，不带
+  --now——enable 只注册不立即启动）→ loginctl enable-linger（best-effort，失败仅 warn
+  降级为登录后自启）
 disableAutostart: all=全部本地记录 / serverUrl=该条（本地记录缺失也按当前平台重新派生
   任务名注销孤儿注册）→ 逐条 best-effort 全试完再汇总，单条成功即删本地记录
 Windows query/unregister: 存在性判定用全量 CSV 列表复核（locale 无关，不匹配报错文案）；
   /Delete 与 PowerShell 注册来源互通（同一任务计划程序存储）；注销一并删 VBS
+Linux unregister: systemctl --user disable（**不带 --now**，--now 会同时 stop 运行中
+  unit，违反「不动运行中进程」契约，ql-20260831-001-6dde 修正）→ 删 unit → reload
+macOS unregister: launchctl list 判 job 是否在跑（PID 列）——运行中或查询失败均跳过
+  bootout 只删 plist（bootout = unload + terminate 会杀 launchd 拉起的 daemon 进程，
+  ql-20260831-001-6dde 修正）；未运行/未注册才 bootout 幂等清场后删 plist
 ```
 
 ## 注意事项

@@ -20,6 +20,27 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { downloadAndReplace, validateBundleContent, MIN_BUNDLE_BYTES } from '../src/preflight.js';
 
+// ql-20260831-001-6dde：copyFile 可覆写口（默认透传真实实现）——备份失败用例
+// 模拟 ENOSPC 中途留下半截 .bak。先例：autostart.test.ts 的 node:fs/promises
+// 局部覆写（vi.hoisted holder + spread actual 透传）。
+const { copyFileOverride } = vi.hoisted(() => ({
+  copyFileOverride: {
+    impl: null as null | ((src: unknown, dest: unknown) => Promise<void>),
+  },
+}));
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...actual,
+    copyFile: async (...args: Parameters<typeof actual.copyFile>) => {
+      if (copyFileOverride.impl) {
+        return copyFileOverride.impl(args[0], args[1]);
+      }
+      return actual.copyFile(...args);
+    },
+  };
+});
+
 const noopLogger = () => undefined;
 
 interface LogEntry {
@@ -59,6 +80,7 @@ describe('downloadAndReplace（R3 .tmp 清理）', () => {
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
+    copyFileOverride.impl = null;
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
@@ -197,5 +219,39 @@ describe('downloadAndReplace（R3 .tmp 清理）', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('备份 copyFile 中途失败（ENOSPC 留半截 .bak）→ 残件被清理不留位、替换仍成功（ql-20260831-001-6dde）', async () => {
+    // 预置旧 target（合法旧 bundle）供备份与替换。
+    writeFileSync(join(dir, 'daemon.js'), validFakeBundle('v1'));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(validFakeBundle('v2'), { status: 200 })),
+    );
+    // 模拟磁盘满中途失败：copyFile 先写出半截目标再抛 ENOSPC。
+    copyFileOverride.impl = async (_src, dest) => {
+      writeFileSync(String(dest), 'partial-bytes');
+      throw Object.assign(new Error('ENOSPC: no space left on device'), {
+        code: 'ENOSPC',
+      });
+    };
+    const { fn, entries } = makeLogger();
+
+    const ok = await downloadAndReplace(
+      'http://hub.test/bundle.js',
+      'v2',
+      'v1',
+      dir,
+      fn,
+      'daemon.js',
+    );
+
+    // 备份失败不阻塞替换（warn 语义不变）
+    expect(ok).toBe(true);
+    expect(entries.some((x) => x.msg === 'daemon_bundle_backup_failed')).toBe(true);
+    // 修复点：半截 .bak 不残留——否则按字典序轮换会占掉「最近 3 份」名额，
+    // 多轮后完整历史备份被挤光，人工 .bak 兜底无物可用。
+    expect(readdirSync(dir).filter((n) => n.startsWith('daemon.js.bak-'))).toEqual([]);
+    expect(validateBundleContent(readFileSync(join(dir, 'daemon.js'))).buildId).toBe('v2');
   });
 });

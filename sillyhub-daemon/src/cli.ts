@@ -524,6 +524,27 @@ export async function startAction(opts: StartOptions): Promise<number> {
     return 1;
   }
 
+  // step 0.5（ql-20260831-001-6dde）：单实例守卫——pid 文件记录的进程仍存活
+  // 时拒绝二次启动。双实例共享 ~/.sillyhub/daemon 状态（pid 互相覆盖、stop
+  // 只能停其一、server 侧双 runtime 抢会话）；典型触发：macOS autostart
+  // enable 的 launchctl bootstrap（RunAtLoad）不等登录立即拉起第二实例。
+  // 豁免两支：respawn 拉起的新进程带 SILLYHUB_DAEMON_RESPAWN=1（旧进程
+  // exit(0) 前短暂并存是自更新交接的既定时序，preflight spawn 注入）；
+  // pid 等于自身（同进程内重复调用，测试场景）。
+  const existingPid = readPid();
+  if (
+    existingPid !== null &&
+    existingPid !== process.pid &&
+    isProcessAlive(existingPid) &&
+    process.env.SILLYHUB_DAEMON_RESPAWN !== '1'
+  ) {
+    process.stderr.write(
+      `Error: daemon already running (pid ${existingPid}).` +
+        " Run 'sillyhub-daemon stop' first, then start again.\n",
+    );
+    return 1;
+  }
+
   // step 1-2: 加载配置 + CLI 覆盖字段。
   // config.ts 是函数式 loadConfig(server_url)，返回 DaemonConfig 纯对象（非 class 实例）。
   //

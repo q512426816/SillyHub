@@ -29,11 +29,14 @@
 //   macOS：plist 产物（RunAtLoad=true 且无 KeepAlive，D-002；ProgramArguments 五
 //     元素绝对路径，R-06；StandardOut/ErrPath=.launchd.txt，R-09；XML 实体转义）
 //     + bootout（忽略失败）→ bootstrap gui/<uid> 顺序 + bootstrap 失败 R-05 提示
-//     + unregister（bootout + 删 plist，保留兜底日志）+ query label 精确匹配三态。
+//     + unregister（launchctl list 判运行——运行中/查询失败跳过 bootout 只删
+//     plist，未运行 bootout 清场；ql-20260831-001-6dde 不杀运行进程）+ query
+//     label 精确匹配三态。
 //   Linux：service INI 产物（无 Restart，D-002；ExecStart 模板 + 空格路径引号；
 //     WantedBy=default.target）+ 命令序列 daemon-reload → enable → enable-linger
 //     + PID1 非 systemd 零命令零文件明确报错（R-04）+ linger 失败仅 warn 仍
-//     ok:true + unregister（disable --now 幂等 + 删文件 + reload）+ query 三态。
+//     ok:true + unregister（disable 不带 --now 幂等 + 删文件 + reload；
+//     ql-20260831-001-6dde --now 会停运行中实例故移除）+ query 三态。
 //   顶层 API：record 六字段落盘 / 凭据不进 record 与产物（D-004）/ 同 server 二次
 //     enable 幂等（R-07）/ disable 全量清理（系统注销 + VBS + 本地记录，不杀进程）
 //     / 不同 server 独立记录 / status 对账三态合并 / 未支持平台 ok:false /
@@ -339,11 +342,11 @@ describe('纯函数：buildStartCommand / taskNameFor', () => {
 // ── Windows：VBS 中转脚本产物（buildVbsContent 纯函数直调断言真实输出）──────
 
 describe('Windows：buildVbsContent VBS 产物', () => {
-  it('逐字模板：注释行 + Run 尾参数 ", 0, False" + bundle 路径双引号转义（""）', () => {
+  it('逐字模板：注释行 + Run 尾参数 ", 0, False" + node/bundle 路径均双引号转义（""，ql-20260831-001-6dde node 路径含空格防 Program.exe 植入）', () => {
     const content = buildVbsContent(makeRecord('win32'));
     expect(content).toBe(
       `' sillyhub-daemon autostart launcher (generated, do not edit)\r\n` +
-        `CreateObject("WScript.Shell").Run "${NODE_PATH} ""${SCRIPT_PATH}"" start --server ${SERVER_URL}", 0, False\r\n`,
+        `CreateObject("WScript.Shell").Run """${NODE_PATH}"" ""${SCRIPT_PATH}"" start --server ${SERVER_URL}", 0, False\r\n`,
     );
   });
 
@@ -355,7 +358,7 @@ describe('Windows：buildVbsContent VBS 产物', () => {
 
   it('命令体：node 与脚本均为绝对路径、含 start --server <url>、不含凭据（D-004）', () => {
     const content = buildVbsContent(makeRecord('win32'));
-    expect(content).toContain(`${NODE_PATH} `);
+    expect(content).toContain(`${NODE_PATH}""`);
     expect(content).toContain(SCRIPT_PATH);
     expect(content).toContain(`start --server ${SERVER_URL}`);
     expect(content).not.toContain('api_key');
@@ -697,20 +700,59 @@ describe('macOS 策略（launchd LaunchAgent）', () => {
     expect(existsSync(launchAgentPlistPath(record.task_name))).toBe(true);
   });
 
-  it('unregister：bootout + 删 plist，保留 .launchd.txt 兜底日志，不杀进程', async () => {
+  it('unregister：job 未运行（list PID 列为 -）→ list + bootout 清场 + 删 plist，保留 .launchd.txt 兜底日志，不杀进程', async () => {
     const record = makeRecord('darwin');
     await macosAutostartStrategy.register(record);
     const logPath = join(DEFAULT_CONFIG_DIR, `autostart-${serverHash(SERVER_URL)}.launchd.txt`);
     mkdirSync(DEFAULT_CONFIG_DIR, { recursive: true });
     writeFileSync(logPath, 'launchd stdout');
     execFileMock.mockClear();
+    route = () => ({
+      ok: true,
+      stdout: `PID\tStatus\tLabel\n-\t0\t${record.task_name}\n`,
+    });
 
     const res = await macosAutostartStrategy.unregister(record.task_name);
 
     expect(res).toEqual({ ok: true });
-    expect(execCalls()).toEqual([['launchctl', ['bootout', `gui/501/${record.task_name}`]]]);
+    expect(execCalls()).toEqual([
+      ['launchctl', ['list']],
+      ['launchctl', ['bootout', `gui/501/${record.task_name}`]],
+    ]);
     expect(existsSync(launchAgentPlistPath(record.task_name))).toBe(false);
     expect(existsSync(logPath)).toBe(true);
+  });
+
+  it('unregister：job 运行中（list PID 列为数字）→ 跳过 bootout 只删 plist（bootout 会 terminate 运行进程，ql-20260831-001-6dde）', async () => {
+    const record = makeRecord('darwin');
+    await macosAutostartStrategy.register(record);
+    execFileMock.mockClear();
+    route = () => ({
+      ok: true,
+      stdout: `PID\tStatus\tLabel\n12345\t0\t${record.task_name}\n`,
+    });
+
+    const res = await macosAutostartStrategy.unregister(record.task_name);
+
+    expect(res).toEqual({ ok: true });
+    expect(execCalls()).toEqual([['launchctl', ['list']]]);
+    expect(existsSync(launchAgentPlistPath(record.task_name))).toBe(false);
+  });
+
+  it('unregister：list 查询失败（SSH 无 GUI domain）→ 不冒险 bootout，仍删 plist（注销语义达成）', async () => {
+    const record = makeRecord('darwin');
+    await macosAutostartStrategy.register(record);
+    execFileMock.mockClear();
+    route = (cmd, args) =>
+      cmd === 'launchctl' && args[0] === 'list'
+        ? { ok: false, code: 1, stderr: 'Bootstrap failed' }
+        : { ok: true };
+
+    const res = await macosAutostartStrategy.unregister(record.task_name);
+
+    expect(res).toEqual({ ok: true });
+    expect(execCalls()).toEqual([['launchctl', ['list']]]);
+    expect(existsSync(launchAgentPlistPath(record.task_name))).toBe(false);
   });
 
   it('query：launchctl list 末列精确等于 label → registered', async () => {
@@ -833,7 +875,7 @@ describe('Linux 策略（systemd user service）', () => {
     expect(String(warnSpy.mock.calls[0]![0])).toContain('enable-linger');
   });
 
-  it('unregister：disable --now → 删 unit 文件 → daemon-reload（不杀运行中进程）', async () => {
+  it('unregister：disable（不带 --now，不停止运行中实例）→ 删 unit 文件 → daemon-reload', async () => {
     const record = makeRecord('linux');
     await linuxAutostartStrategy.register(record);
     execFileMock.mockClear();
@@ -842,7 +884,7 @@ describe('Linux 策略（systemd user service）', () => {
 
     expect(res).toEqual({ ok: true });
     expect(execCalls()).toEqual([
-      ['systemctl', ['--user', 'disable', '--now', record.task_name]],
+      ['systemctl', ['--user', 'disable', record.task_name]],
       ['systemctl', ['--user', 'daemon-reload']],
     ]);
     expect(existsSync(unitPath(record.task_name))).toBe(false);

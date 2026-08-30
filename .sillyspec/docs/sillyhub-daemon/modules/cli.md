@@ -23,6 +23,13 @@ sillyhub-daemon 的 commander 命令行入口（`#!/usr/bin/env node`，click �
 ## 关键逻辑
 ```text
 startAction(opts):
+  step 0 互斥校验（--token/--api-key 同给 → return 1）
+  step 0.5 单实例守卫（ql-20260831-001-6dde）：readPid() 记录的 pid 存活且 ≠ 自身
+          → stderr「already running (pid N)… stop first」+ return 1（双实例会 pid
+          互相覆盖 / stop 只能停其一 / server 侧双 runtime 抢会话；典型触发：
+          macOS autostart enable 的 bootstrap RunAtLoad 立即拉起第二实例）。
+          豁免：env SILLYHUB_DAEMON_RESPAWN=1（respawnDaemonAndExit spawn 注入——
+          自更新交接旧进程 exit(0) 前 pid 短暂并存是既定时序）与 pid=自身
   serverUrl = opts.server ?? DEFAULT_CONFIG.server_url   # 不带 --server 静默用 8000 定位 per-server 文件
   config = { ...loadConfigFn(serverUrl), ...CLI 覆盖 }（token↔api_key 互斥互清）
   saveConfigFn(config, config.server_url)                # 落盘到 per-server config-<hash>.json

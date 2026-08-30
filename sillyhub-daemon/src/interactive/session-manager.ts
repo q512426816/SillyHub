@@ -74,6 +74,7 @@ import type {
 import {
   SessionAlreadyExistsError,
   SessionAttachmentTimeoutError,
+  SessionBusyError,
   SessionLimitReached,
   SessionNotFoundError,
   SessionNotActiveError,
@@ -3545,6 +3546,16 @@ export class SessionManager {
     // 推进 reconnecting→active，回发终态会与之竞态误翻 failed），再走正常恢复。
     const stale = this._store.get(record.sessionId);
     if (stale) {
+      // ql-20260831-001-6dde：活会话守卫——本地仍在跑 turn（status=running）或
+      // 有待处理输入（附件下载中，pendingInjectCount>0）时拒绝驱逐重建：驱逐
+      // 会 terminate 在途 driver，正在执行的 agent 工作被静默杀掉。恢复链
+      // 触发瞬间的忙检只覆盖当时；恢复在途期间新起的 turn 只能靠本守卫兜底
+      //（调用方按 SESSION_BUSY 重试/跳过）。终态/空闲条目不受影响，维持
+      // ql-20260823-006 的静默驱逐语义。检查与 terminate 调用之间无 await，
+      // 单线程事件循环下无 TOCTOU。
+      if (stale.status === 'running' || (this._pendingInjectCount.get(stale.sessionId) ?? 0) > 0) {
+        throw new SessionBusyError(stale.sessionId, stale.status);
+      }
       await this._terminateSession(stale, 'driver_error', { notifyBackend: false });
       this._store.delete(record.sessionId);
     }

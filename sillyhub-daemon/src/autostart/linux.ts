@@ -9,8 +9,9 @@
  *     `systemctl --user daemon-reload` → `systemctl --user enable`（幂等覆盖
  *     R-07）→ `loginctl enable-linger`（best-effort，失败仅 warn，降级为
  *     登录后自启，不影响注册成功）；
- *   - unregister：`systemctl --user disable --now`（unit 不存在视为成功幂等）→
- *     删 service 文件 → `systemctl --user daemon-reload`；
+ *   - unregister：`systemctl --user disable`（不带 --now，不停止运行中实例；
+ *     unit 不存在视为成功幂等）→ 删 service 文件 → `systemctl --user
+ *     daemon-reload`；
  *   - query：`systemctl --user is-enabled` 三态映射——enabled=registered、
  *     disabled/not-found=missing、其他失败=unknown（供 index.ts status 对账）。
  *
@@ -279,8 +280,10 @@ export const linuxAutostartStrategy: AutostartPlatformStrategy = {
   },
 
   /**
-   * 注销：disable --now（unit 不存在视为成功幂等）→ 删 unit 文件 →
-   * daemon-reload。只清注册产物，不动运行中的进程（停进程用 stop，design §3）。
+   * 注销：disable（**不带 --now**——--now 会同时 stop 运行中的 unit，违反
+   * 「只清注册产物，不动运行中的进程」契约；ql-20260831-001-6dde 修正，与
+   * Windows schtasks /Delete、macOS 条件 bootout 对齐）→ 删 unit 文件 →
+   * daemon-reload。运行中的 daemon 由本次登录自然结束或用户显式 stop。
    */
   async unregister(taskName) {
     const check = await systemdCheck();
@@ -288,13 +291,13 @@ export const linuxAutostartStrategy: AutostartPlatformStrategy = {
       return check; // R-04：与 register 同一前置口径，未执行任何命令
     }
 
-    const disable = await runCmd('systemctl', ['--user', 'disable', '--now', taskName]);
+    const disable = await runCmd('systemctl', ['--user', 'disable', taskName]);
     if (
       !disable.ok &&
       !UNIT_ABSENT_RE.test(`${disable.stdout}\n${disable.stderr}`)
     ) {
       // unit 不存在（not-found / does not exist）→ 跳过 disable 视为已注销（幂等）。
-      return systemctlFailure(`systemctl --user disable --now ${taskName}`, disable);
+      return systemctlFailure(`systemctl --user disable ${taskName}`, disable);
     }
 
     // 删 unit 文件（force：文件不存在也成功——记录在但产物已被手删的孤儿场景）。

@@ -185,6 +185,30 @@ function fmtErr(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/**
+ * 查某 label 的 job 是否正在运行（ql-20260831-001-6dde，unregister 用）。
+ *
+ * `launchctl list` 输出三列 `PID\tStatus\tLabel`：PID 列为数字 = 进程在跑，
+ * `-` = 已加载未运行；行不存在 = 未注册。判据与 query() 相同（末列精确等值）。
+ *
+ * @returns true=运行中 / false=未运行（含未注册） / null=list 查询失败无法判定。
+ */
+async function launchdJobRunning(label: string): Promise<boolean | null> {
+  const res = await runLaunchctl(['list']);
+  if (!res.ok) {
+    return null;
+  }
+  const line = res.stdout.split('\n').find((l) => {
+    const cols = l.trim().split(/\s+/);
+    return cols.length >= 3 && cols[cols.length - 1] === label;
+  });
+  if (!line) {
+    return false; // 未注册 → 无进程可杀
+  }
+  const pidCol = line.trim().split(/\s+/)[0];
+  return pidCol != null && /^\d+$/.test(pidCol);
+}
+
 // ── 策略实现（AutostartPlatformStrategy 的 darwin 实例）──────────────────────
 
 /**
@@ -244,17 +268,26 @@ export const macosAutostartStrategy: AutostartPlatformStrategy = {
   },
 
   /**
-   * 注销流程：bootout（失败一律忽略——未注册时本就报 "No such process"，
-   * SSH-only 会话无 GUI domain 时也报错，但 plist 删除后下次登录不再加载，
-   * 注销语义已达成）→ 删 plist 文件。
+   * 注销流程：先查 job 是否在运行（launchctl list 的 PID 列）——
+   * **运行中绝不 bootout**（bootout = unload + terminate，会把 launchd 拉起的
+   * daemon 进程一并杀掉，违反「不动运行中的进程」契约；ql-20260831-001-6dde
+   * 修正）。运行中 → 跳过 bootout 只删 plist（launchd 内存态保留到登出，无
+   * KeepAlive 不会重启；下次登录因 plist 已删不再加载）；未运行/未注册 →
+   * bootout 幂等清场后删 plist；list 查询失败（如 SSH 无 GUI domain）→ 按
+   * 不确定处理，同样只删 plist 不冒险 bootout。
    *
-   * 只清注册产物，不杀运行中 daemon 进程（停进程用 stop，design §3）；
+   * 只清注册产物（plist），不杀运行中 daemon 进程（停进程用 stop，design §3）；
    * 兜底输出 .launchd.txt 保留（无凭据、供事后排查，clean 也不碰它）。
    */
   async unregister(taskName) {
     const plistPath = launchAgentPlistPath(taskName);
     try {
-      await runLaunchctl(['bootout', `${guiDomain()}/${taskName}`]);
+      const running = await launchdJobRunning(taskName);
+      if (running === false) {
+        // 未运行（含未注册：bootout 报 "No such process" 也会走到这里）——
+        // 幂等清场安全，顺手把内存态注册也摘掉。
+        await runLaunchctl(['bootout', `${guiDomain()}/${taskName}`]);
+      }
       await rm(plistPath, { force: true }); // force：plist 本就不在（重复 disable）也成功，幂等
     } catch (e) {
       return {

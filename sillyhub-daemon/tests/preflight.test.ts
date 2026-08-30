@@ -787,6 +787,9 @@ describe('respawnDaemonAndExit', () => {
     expect(opts.detached).toBe(true); // 脱离父进程组，父退出后存活
     expect(opts.stdio).toBe('ignore');
     expect(opts.windowsHide).toBe(true);
+    // ql-20260831-001-6dde：交接标记——新进程 start 单实例守卫据此豁免旧进程
+    // exit 前的 pid 短暂并存（否则「daemon already running」拦断自更新链）。
+    expect(opts.env).toMatchObject({ SILLYHUB_DAEMON_RESPAWN: '1' });
     expect(child.unref).toHaveBeenCalledTimes(1); // 不阻塞父进程退出
     expect(entries.find((x) => x.msg === 'daemon_self_update_respawn')?.data).toMatchObject({
       pid: 4242,

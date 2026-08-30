@@ -192,22 +192,25 @@ export function vbsPathFor(taskName: string): string {
 }
 
 /**
- * 生成 VBS 中转脚本内容（design §2 逐字模板）：
+ * 生成 VBS 中转脚本内容（design §2 模板）：
  *
  * ```vbs
  * ' sillyhub-daemon autostart launcher (generated, do not edit)
- * CreateObject("WScript.Shell").Run "<node绝对路径> ""<bundle绝对路径>"" start --server <url>", 0, False
+ * CreateObject("WScript.Shell").Run """<node绝对路径>"" ""<bundle绝对路径>"" start --server <url>", 0, False
  * ```
  *
  * - 启动命令 = buildStartCommand 同款模板（index.ts）：`<node> <script> start
- *   --server <url>`，node/script 取 record 固化的双绝对路径；bundle 含空格加引号。
+ *   --server <url>`，node/script 取 record 固化的双绝对路径。node 与 script
+ *   均加引号（ql-20260831-001-6dde）：node 默认装在 `C:\Program Files\...`
+ *   等含空格路径，未引号时只能靠 CreateProcess 对未引号命令行的逐段回退
+ *   猜中可执行文件，且存在 `C:\Program.exe` 植入面（经典未引号路径问题）。
  * - VBS 字符串内双引号转义为连写两个双引号（""）——对整条命令统一 replace，
  *   路径/URL 中意外出现的引号同样被转义，不会破坏字符串字面量。
  * - Run 第二参数 0 = 隐藏窗口，第三参数 False = 不等待子进程（登录瞬间放行）。
  * - 行尾显式 \r\n（CRLF）：writeFile 不做换行转换，VBS 惯例 CRLF。
  */
 export function buildVbsContent(record: AutostartRecord): string {
-  const command = `${record.node_path} "${record.script_path}" start --server ${record.server_url}`;
+  const command = `"${record.node_path}" "${record.script_path}" start --server ${record.server_url}`;
   return (
     `' sillyhub-daemon autostart launcher (generated, do not edit)\r\n` +
     `CreateObject("WScript.Shell").Run "${command.replace(/"/g, '""')}", 0, False\r\n`

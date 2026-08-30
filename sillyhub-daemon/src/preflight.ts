@@ -486,6 +486,10 @@ export async function respawnDaemonAndExit(
       detached: true,
       stdio: 'ignore',
       windowsHide: true,
+      // ql-20260831-001-6dde：标记自更新交接。新进程的 start 单实例守卫据此
+      // 豁免——旧进程 exit(0) 前 pid 短暂并存是交接既定时序，不豁免会被
+      // 「daemon already running」拦下，自更新链断裂。
+      env: { ...process.env, SILLYHUB_DAEMON_RESPAWN: '1' },
     });
     // 兜底吞异步 spawn error（error 事件异步 emit，无 listener 会崩进程）。
     child.on('error', () => {});
@@ -654,7 +658,17 @@ export async function downloadAndReplace(
         const p2 = (n: number): string => String(n).padStart(2, '0');
         const ts = `${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}`
           + `-${p2(now.getHours())}${p2(now.getMinutes())}${p2(now.getSeconds())}`;
-        await copyFile(target, `${target}.bak-${ts}`);
+        const bakPath = `${target}.bak-${ts}`;
+        try {
+          await copyFile(target, bakPath);
+        } catch (copyErr) {
+          // ql-20260831-001-6dde：copyFile 中断（ENOSPC/进程被杀）会留下截断的
+          // 半截 .bak——不清理会被「保留最近 3 份」的字典序轮换当成真备份占位，
+          // 多轮后把完整历史备份挤掉，人工 .bak 兜底无物可用。删残件后原样上抛
+          // 走外层 warn（备份失败不阻塞替换）。
+          await unlink(bakPath).catch(() => undefined);
+          throw copyErr;
+        }
         // 同前缀按文件名字典序排序，保留最近 3 份，超出逐个清理（ENOENT 忽略）。
         const backups = (await readdir(binDir))
           .filter((name) => name.startsWith(`${fileName}.bak-`))

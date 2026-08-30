@@ -18,6 +18,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { Daemon } from '../../src/daemon.js';
 import type { DaemonConfig } from '../../src/config.js';
 import type { SessionManager } from '../../src/interactive/session-manager.js';
+import { SessionBusyError } from '../../src/interactive/types.js';
 import type {
   PersistedSessionRecord,
   SessionStorePersistence,
@@ -252,6 +253,39 @@ describe('Daemon 启动恢复编排', () => {
     expect(failSpy).toHaveBeenCalledWith('sf');
     // 成功项调 confirmReconnected。
     expect(rc.confirmReconnected).toHaveBeenCalledWith('so');
+    await daemon.stop();
+  });
+
+  // ql-20260831-001-6dde：恢复链与本地在途 turn 竞态守卫。restoreAndReconnect
+  // 对仍在跑 turn 的本地会话抛 SessionBusyError（驱逐=杀在途工作）——恢复编排
+  // 必须入重试队列（复用网络失败退避路径），不 markRecoveryFailed、不删记录
+  //（turn 结束后下一轮恢复再重建，backend reconnecting 由重试成功收口）。
+  it('restoreAndReconnect 抛 SessionBusyError（本地在途 turn）→ 不置 failed、不删记录、入重试队列', async () => {
+    const rec = mkRecord({ sessionId: 'busy-1', leaseId: 'lb', agentSessionId: 'ab' });
+    const { persistence } = mockPersistence([rec]);
+    const rc = mockRecoveryClient();
+    const { sm, restoreSpy } = mockSessionManager();
+    restoreSpy.mockReset();
+    restoreSpy.mockImplementation(async () => {
+      throw new SessionBusyError('busy-1', 'running');
+    });
+    const { daemon } = makeDaemon({
+      sessionManager: sm,
+      persistence,
+      recoveryClient: rc,
+    });
+    await daemon.start();
+    expect(restoreSpy).toHaveBeenCalledTimes(1);
+    // 不向 backend 写 failed（活会话误翻终态更糟）
+    expect(rc.markRecoveryFailed).not.toHaveBeenCalled();
+    expect(rc.confirmReconnected).not.toHaveBeenCalled();
+    // 记录保留：若 flush/save 被调，busy-1 仍在列表（未删）
+    const saves = (persistence.save as ReturnType<typeof vi.fn>).mock.calls;
+    for (const call of saves) {
+      expect(
+        (call[0] as PersistedSessionRecord[]).some((r) => r.sessionId === 'busy-1'),
+      ).toBe(true);
+    }
     await daemon.stop();
   });
 
