@@ -538,3 +538,31 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：84a5b960
 理由：useQuery。两个目标渲染点的既有卡片（change-sessions-card.tsx:60 / quicklog-sessions-card.tsx:60）均用 useQuery 且都在 QueryClientProvider 内；session-usage-bar 规避的是会话浮窗零 react-query 约束，本变更两渲染点无此约束。变更详情页「本页禁新增网络请求」注释（[cid]/page.tsx:339）经核实为 last-signal 功能局部语境（禁的是为派生小字段加轮询，同页 sessions 卡已自取数）。
+
+## D-001@v1 : 缺口①触发形态 — 心跳恢复事件触发
+状态：implemented
+变更：2026-08-30-daemon-self-heal
+锚点：未记录
+最近确认：ecdae9ba
+理由：`_sendHeartbeatOnce` 成功分支、degraded 累计 >720s 守卫、复用 boot
+
+## D-003@v1 : 下载校验口径 — 零子进程
+状态：implemented
+变更：2026-08-30-daemon-self-heal
+锚点：未记录
+最近确认：ecdae9ba
+理由：buffer ≥64KB 且 `BUILD_ID` 正则可提取（与 `DISK_BUILD_ID_RE` 同款，
+
+## D-005@v1 : respawn 最后防线 — 不退出保活
+状态：implemented
+变更：2026-08-30-daemon-self-heal
+锚点：未记录
+最近确认：ecdae9ba
+理由：spawn 前同款校验，不过 → error 日志 + 提前 return 不退出；返回类型
+
+## D-009@v1 : respawn 前校验提前到 stop 之前（主拦截点）
+状态：implemented
+变更：2026-08-30-daemon-self-heal
+锚点：未记录
+最近确认：ecdae9ba
+理由：新增 `validateBundleOnDisk` 导出；`_tryUpdate` 在 stop() **之前**调用：
