@@ -135,3 +135,14 @@
 根因：interactive lease 恒 NULL 过期时间（daemon 设计），会话终态后若 daemon 死亡 lease 行无收敛通道，永久停在 claimed；删除守卫盲数 pending/claimed 把死行当在途工作，生产 26 行实证把 delete_runtime 永久 409
 方案：RuntimeService._converge_dead_leases_before_delete（两类可证死行置 cancelled：interactive+绑定会话 ended/failed；claimed+expires_at 已过），delete_runtime 与 delete_machine 共用，收敛后再数真在途（活会话/未过期仍 409）
 结果：后端 60 用例全绿（runtime 级新增 3：孤儿收敛 204/活会话仍 409/过期收敛 204；机器级新增 1）+ ruff/mypy 0 错；模块文档 daemon.md+changelog 已更新
+
+## ql-20260830-007-5d4f | 2026-08-30 16:41:18 | 权限审批通知点击跳转会话深链补齐
+状态：已完成
+关联变更：2026-08-29-approval-notify-push
+文件：
+- backend/app/modules/daemon/permission_service.py（link 深链）
+- backend/app/modules/daemon/tests/test_permission_owner_notify.py（link 断言）
+需求：权限审批通知点击跳转会话深链补齐
+根因：task-06 实现期 _notify_session_owner 的 link 留空 None，铃铛组件对空 link 仅标已读不跳转（用户反馈会话 684607b 提问通知点击无效）
+方案：link 改为 /sessions?session={session_id}（前端真实深链 sessions-portal.tsx:134 deepSessionId），覆盖 permission_request 与 permission_timeout 两类 owner 定向通知；测试补 link 断言
+结果：test_permission_owner_notify 6 passed（含新断言）；daemon.changelog 追加索引；改动仅 permission_service.py 与其测试

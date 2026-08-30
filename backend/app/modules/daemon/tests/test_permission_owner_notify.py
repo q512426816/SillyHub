@@ -196,6 +196,8 @@ class TestPermissionRequestNotify:
         assert kwargs["ref_type"] == "session_permission"
         assert kwargs["ref_id"] == str(sess.id)
         assert kwargs["workspace_id"] == sess.workspace_id
+        # 深链直达会话面板（ql 修复：点击通知跳转对应会话）
+        assert kwargs["link"] == f"/sessions?session={sess.id}"
 
         _task = perm._timers["req-1"]
         _task.cancel()

@@ -1202,7 +1202,9 @@ class DaemonPermissionService:
                 type=type,
                 title=title,
                 body=body,
-                link=None,
+                # 会话面板深链（sessions-portal.tsx:134 ?session= 参数）——点击通知
+                # 直达对应会话的提问/权限卡片；ref_id 即 session_id。
+                link=f"/sessions?session={ref_id}",
                 ref_type=ref_type,
                 ref_id=ref_id,
             )

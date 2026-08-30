@@ -13,3 +13,7 @@ created_at: 2026-08-29 22:56:30
 
 ## 2026-08-30 — 剩余中置信缺陷修复批（quick ql-20260830-002-f0d2）
 - R8 reopen_session 补归档禁写守卫（_ensure_session_workspace_writable，复活会话句柄同样 409）。
+
+## 2026-08-29 — 权限通知补会话深链（quick 修复）
+
+- `_notify_session_owner` 的 link 由 None 改为 `/sessions?session={session_id}`（sessions-portal.tsx:134 深链参数）：点击铃铛通知直达对应会话的提问/权限卡片，覆盖 permission_request 与 permission_timeout 两类（ql 条目见 QUICKLOG，关联变更 2026-08-29-approval-notify-push）。
