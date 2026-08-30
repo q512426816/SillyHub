@@ -50,3 +50,12 @@ pre-commit 框架哪一层待定位；本仓 hook 仅两个 ruff 钩子，且第
   失败原因与退出码，而不是 INFO 后静默；或 pre-commit 升级后验证该场景是否已修
 - 流程侧：sillyspec 封装 git commit 的路径（如有）应感知「无 commit 结果行」这一
   失败形态并显式报错，不能依赖调用方自查 git log
+
+## 处置记录（2026-08-30 定时收口，缓解落地 + 根因定性上游）
+
+1. **根因定性（上游设计限制）**：查证 pre-commit 官方 tracker——并发进程改动工作树与 hook 的 stash/restore 窗口竞态是该框架的已知设计限制（pre-commit#2803「Add an option to test staged files without stashing unstaged changes」/ #2235「Alternative to stashing files」），无「静默不落提交」的对应 bug 修复。4.6.1（2026-07-21）/4.6.2（2026-08-10）changelog 均无 stash/并发相关修复（仅 language:node npm 兼容与 pre-push 性能）——**升级 4.6.0→4.6.2 无益，不升**。
+2. **hook 侧 fail-loud 不可行（分析结论）**：提交未落时 git 不会执行任何 post-hook（post-commit 只在提交成功后跑），git 自身无检测点；修改 `.git/hooks/pre-commit`（生成文件）会被 `pre-commit install` 覆盖。**唯一可靠检测点是调用方**。
+3. **落地缓解（平台仓 CLAUDE.md 规则 12 扩展）**：「提交后必须核实落库——`git log --oneline -1` 确认 HEAD 已移动；busy tree 竞态静默不落（仅 `[INFO] Restored changes` 无提交结果行）则原命令重试（实测二次即成），禁止 `--no-verify`」——临时绕过三条全部规则化，agent 会话自动遵循。
+4. **流程侧（sillyspec 封装感知）**：核实 sillyspec 仓无 git commit 封装路径（昨日遗留的 wt-commit.js 实验已删除、未合入），新建封装不在本坑范围且 agent 手动 `git commit` 不会自动采用——由规则 12 覆盖。
+
+遗留：上游若发布 stash 竞态相关修复（关注 #2803 走向）可再评估升级。本地可行动作已全部落地 → 归档。

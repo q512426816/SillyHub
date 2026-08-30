@@ -16,7 +16,7 @@
 9. **中途停下不靠额外命令存进度**——进度已由上一次 `--done` 自动落盘；恢复时用 `sillyspec progress show` 查看进度，再用 `sillyspec run <stage>` 续跑，不直接 commit 半成品。
 10. **实现完成后对照文档验收**（design.md / 模块文档），并检查是否影响已有测试。
 11. **非测试逻辑本身有误时，禁止改测试来"通过"**——修逻辑，不修测试。
-12. **hook 拦截提交时禁止跳过**（`.husky/pre-push`），修复问题后再提交。
+12. **hook 拦截提交时禁止跳过**（`.husky/pre-push` / backend pre-commit），修复问题后再提交。**提交后必须核实落库**：`git commit` 后跑 `git log --oneline -1` 确认 HEAD 已移动——并行会话同仓（工作树有他人未暂存改动）时 pre-commit stash/restore 竞态会导致提交**静默不落**（输出仅 `[INFO] Restored changes from ...`，无 `[分支 hash]` 提交结果行，上游已知设计限制 pre-commit#2803/#2235）；发现未落则原命令重试（实测二次即成），禁止 `--no-verify` 绕过。
 13. **代码必须兼容 Windows / Linux / macOS**（路径 / 换行 / 并发都要顾）。
 14. **任务记录隔离**：永不重置 / reset / 清零已存在的 change；多个活跃 change 各自 `--change <名>` 隔离不重叠；quick 同一 QUICKLOG 按 ql-ID 条目追加，不冲突。**主文件超 500 行时 CLI 自动轮转**：历史条目整体挪到同目录 `QUICKLOG-<user>-<日期>.md`，主文件仅剩新条目——git diff 上主文件呈大幅删除是正常轮转不是数据丢失，勿从 git 恢复（会与轮转副本重复），提交时带上轮转归档文件。
 15. **quicklog 手动精修**：CLI 只写骨架，`--done` 后手动补语义化标题 / 文件多行带括注 / 结果四段。
