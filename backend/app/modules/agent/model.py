@@ -697,6 +697,14 @@ class AgentSession(BaseModel, table=True):
         default=None,
         sa_column=Column(JSON, nullable=True),
     )
+    # ql-20260831-002：会话级上下文窗口大小覆盖（token 数）。NULL = 未覆盖，走
+    # 前端自动派生链（供应商 one_m → 模型常量表 → 1M 兜底）；非 NULL = 用户在
+    # 会话页环浮层显式指定，优先级最高（本地模型/本机默认供应商派生不出分母的
+    # 主场景）。纯展示配置，不参与 daemon 注入链。
+    ctx_window_tokens: int | None = Field(
+        default=None,
+        sa_column=Column(Integer, nullable=True),
+    )
     status: str = Field(
         default="pending",
         sa_column=Column(String(20), nullable=False, default="pending"),

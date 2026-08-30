@@ -102,6 +102,7 @@ from app.modules.daemon.schema import (
     RuntimeUsageListResponse,
     RuntimeUsageWindow,
     SessionCreateRequest,
+    SessionCtxWindowUpdateRequest,
     SessionInjectRequest,
     SessionReopenResponse,
     SessionUsageRead,
@@ -2911,6 +2912,22 @@ async def unarchive_session(
 ) -> None:
     """Unarchive an owned session (restore to default list view)."""
     await DaemonService(session).unarchive_session(session_id, user.id)
+
+
+# ql-20260831-002：会话级上下文窗口覆盖（前端上下文环分母可编辑，本地模型/
+# 本机默认派生不出分母的主场景）。照 archive 模式：owner 校验归 service，204。
+@router.patch(
+    "/sessions/{session_id}/ctx-window",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def update_session_ctx_window(
+    session_id: uuid.UUID,
+    data: SessionCtxWindowUpdateRequest,
+    session: SessionDep,
+    user: TaskRunAgentUser,
+) -> None:
+    """Set/clear the context window override for an owned session (display-only)."""
+    await DaemonService(session).update_ctx_window(session_id, user.id, data.ctx_window_tokens)
 
 
 async def _inject_run_error_events(

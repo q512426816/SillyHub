@@ -2277,6 +2277,20 @@ export async function unarchiveAgentSession(sessionId: string): Promise<void> {
   );
 }
 
+// ql-20260831-002：会话级上下文窗口覆盖（上下文环分母可编辑；null = 清除覆盖
+// 回自动派生链：供应商 one_m → 模型常量表 → 1M 兜底）。
+
+/** PATCH /api/daemon/sessions/{id}/ctx-window — 设置/清除上下文窗口覆盖。 */
+export async function updateSessionCtxWindow(
+  sessionId: string,
+  ctxWindowTokens: number | null,
+): Promise<void> {
+  await apiFetch(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/ctx-window`,
+    { method: "PATCH", json: { ctx_window_tokens: ctxWindowTokens } },
+  );
+}
+
 /* ---------- Session reopen + detail (task-09 / FR-2 / D-002@v1) ---------- */
 
 /**

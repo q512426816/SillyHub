@@ -205,7 +205,7 @@ function makeEnvelope(
 
 /* ----- fixture ----- */
 
-/** attach 详情（page detailQuery；llm_provider_id=null → 无分母，环直显分子格式化值）。 */
+/** attach 详情（page detailQuery；llm_provider_id=null → 兜底 1M 分母，环按占比显示）。 */
 function makeDetail() {
   return {
     id: "sess-ctx",
@@ -326,13 +326,13 @@ describe("SessionPanel ctx 环分子口径（逆序最新非 null）", () => {
 
     const ring = await screen.findByTestId("ctx-ring");
     await waitFor(() => {
-      expect(ring).toHaveTextContent("800");
+      // ql-20260831-002：llm_provider_id=null（本机默认）不再无分母——兜底 1M，
+      // 800/1M = 0.08% → 中心取整 0%（占比显示取代旧「直显分子格式化值」）。
+      expect(ring).toHaveTextContent("0%");
     });
     // 非求和（500+800+300=1.6k / 仅 ctx 求和 1.3k 均不得出现）
     expect(ring.textContent).not.toContain("1.3k");
     expect(ring.textContent).not.toContain("1.6k");
-    // 无分母（llm_provider_id=null）→ 直显分子格式化值，不算百分比
-    expect(ring.textContent).not.toContain("%");
   });
 
   it("全 null（含老 run 行缺 ctx_tokens 键）→ 环未知态「—」，不显示 0.0%", async () => {
@@ -374,7 +374,8 @@ describe("SessionPanel ctx 环 SSE 实时更新", () => {
     });
 
     const conn = stream.conn;
-    // 建运行中轮 + 首次 tokens 上报 ctx_tokens=1200 → 环立即变 1.2k
+    // 建运行中轮 + 首次 tokens 上报 ctx_tokens=200k → 环立即变 20%
+    //（ql-20260831-002：llm_provider_id=null 兜底 1M 分母，环中心显示占比）
     act(() => {
       conn.handlers.route(
         makeEnvelope("turn_started", { run_id: "r-live", turn: 1 }),
@@ -384,12 +385,12 @@ describe("SessionPanel ctx 环 SSE 实时更新", () => {
           run_id: "r-live",
           input_tokens: 100,
           output_tokens: 20,
-          ctx_tokens: 1200,
+          ctx_tokens: 200_000,
         }),
       );
     });
     await waitFor(() => {
-      expect(ring).toHaveTextContent("1.2k");
+      expect(ring).toHaveTextContent("20%");
     });
 
     // 后续 tokens 上报新值 → 环跟着变（last-write-wins 瞬时量）
@@ -399,12 +400,12 @@ describe("SessionPanel ctx 环 SSE 实时更新", () => {
           run_id: "r-live",
           input_tokens: 200,
           output_tokens: 40,
-          ctx_tokens: 999,
+          ctx_tokens: 500_000,
         }),
       );
     });
     await waitFor(() => {
-      expect(ring).toHaveTextContent("999");
+      expect(ring).toHaveTextContent("50%");
     });
 
     // 旧 daemon 形态：tokens 事件不带 ctx_tokens（undefined）→ 不覆盖已收值
@@ -417,9 +418,9 @@ describe("SessionPanel ctx 环 SSE 实时更新", () => {
         }),
       );
     });
-    // 环保持 999（不被重置回未知态「—」）
+    // 环保持 50%（不被重置回未知态「—」）
     await waitFor(() => {
-      expect(ring).toHaveTextContent("999");
+      expect(ring).toHaveTextContent("50%");
     });
   });
 });
@@ -444,19 +445,19 @@ describe("SessionPanel ctx 环 runsMeta 历史回填", () => {
       expect(ring).toHaveTextContent("—");
     });
 
-    // attach 拉回的历史 run 带 ctx_tokens=1500 → 孤儿轮回填，环变 1.5k
+    // attach 拉回的历史 run 带 ctx_tokens=300k → 孤儿轮回填，环变 30%（1M 兜底分母）
     await act(async () => {
       resolveRuns([
         makeRun({
           id: "r-hist",
           started_at: "2026-08-27T09:00:00Z",
           finished_at: "2026-08-27T09:00:10Z",
-          ctx_tokens: 1500,
+          ctx_tokens: 300_000,
         }),
       ]);
     });
     await waitFor(() => {
-      expect(ring).toHaveTextContent("1.5k");
+      expect(ring).toHaveTextContent("30%");
     });
   });
 });

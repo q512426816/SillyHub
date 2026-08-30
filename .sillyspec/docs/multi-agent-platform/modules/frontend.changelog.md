@@ -29,3 +29,7 @@
 ## 2026-08-30 — 通知面板条目重排（quick 样式优化）
 
 - notification-bell 条目布局：类型小字标签移到标题上方独立行（右对齐相对时间），标题独占整行解决被标签挤截断；未读标识改左侧 brand 竖条；去掉时间行混排的「点击查看」（hover 背景+title tooltip 承担可点暗示）；「全部已读」加 CheckCheck 图标；间距收紧（px-3.5/py-2.5/gap-2.5，图标 28px）。
+
+## 2026-08-31 — 会话上下文窗口用量：分母可编辑 + 1M 兜底（ql-20260831-002-f683）
+
+- ctx-usage-bar.tsx：分母解析链升四级——第 0 级会话级覆盖 `windowOverride`（AgentSession.ctx_window_tokens，onWindowOverrideChange 存在即在浮层渲染 CtxWindowEditor：InputNumber+保存+恢复默认，覆盖态「已用 / 总量」带「（手动）」标记）＞ one_m 1M ＞ 模型常量表 200k ＞ **兜底 1M**（原 null「无分母」态废除——本地模型/本机默认（未绑平台供应商）拿不到 provider 记录、本地端点协议不暴露窗口大小，读不到不允许为空）；resolveCtxWindowTokens 签名加首参 windowOverride、返回类型改 number（非法覆盖 0/负/NaN 忽略落回自动链）；浮层口径文案同步。session-panel.tsx 真会话环接线（windowOverride + handleCtxWindowOverrideChange → PATCH ctx-window → detailQuery 缓存同步）；lib/daemon.ts 新增 updateSessionCtxWindow。gen:types 同步 AgentSessionRead.ctx_window_tokens。测试：ctx-usage-bar 25 用例（四级链/非法覆盖忽略/编辑器保存与恢复默认/只读态无编辑器）+ session-panel-ctx-tokens 4（1M 兜底下环显示占比，SSE/历史回填数据改可区分大值）+ page.test 1 断言适配，50 绿 + tsc 0。

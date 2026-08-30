@@ -4411,6 +4411,14 @@ export class SessionManager {
           resultRecord['modelError'] = modelError;
         }
       }
+      // ql-20260831-002：轮末补发未 flush 的 pendingUsage——result 与最后一次
+      // message_delta 常落在同一 500ms flush 窗口内，轮边界清零（下方
+      // turnSessionMap 块）会把整轮最后一次 usage 更新（含 ctx_tokens）静默
+      // 丢弃（实证：agent_runs.ctx_tokens 短轮大量 NULL，前端环分子取最新非
+      // null 值滞后）。在 onTurnResult 通知**之前**补发 usage-only 消息（backend
+      // submit_messages 对空 content 消息跳过日志写入只提取 usage，run_sync/
+      // service.py「无 content 的 message」分支既定支持），保消息→result 顺序。
+      await this._flushTerminalUsage(state, runId);
       // ql-20260825-f6#4：onTurnResult 入 per-session 终态通知链——同会话后续的
       // onSessionEnd（end/fail 收口）必 await 在本通知之后，backend 侧顺序恒
       // result → end。settle 语义（含 rejection 向上抛）与直调一致。
@@ -5918,6 +5926,32 @@ export class SessionManager {
     }
     // usage 已通过 flat 消息注入 → 标记去重（下次同值不再发）。
     if (usageToFlush) {
+      buf.flushedUsage = buf.pendingUsage;
+    }
+  }
+
+  /**
+   * ql-20260831-002：轮末补发未 flush 的 pendingUsage（_onResult 内、清零前、
+   * onTurnResult 之前调用）。逐桶检查（main 桶带 ctx_tokens；子桶 pendingUsage
+   * 无该键，backend 缺键即跳过，口径不变），与 _flushPartial 的 usage-only 分支
+   * 同构：content 空串 + 顶层 usage，backend 只提取 usage 不落日志行。发后同步
+   * flushedUsage 防与在途 flush 定时器重复（runId 已清空，后续定时 flush 自然
+   * 早退，双保险）。
+   */
+  private async _flushTerminalUsage(state: SessionState, runId: string): Promise<void> {
+    const sessionMap = this._partialBuffers.get(state.sessionId);
+    if (!sessionMap) return;
+    for (const buf of sessionMap.values()) {
+      if (!buf.pendingUsage || this._usageEqual(buf.pendingUsage, buf.flushedUsage)) {
+        continue;
+      }
+      const formatted = {
+        event_type: 'text',
+        content: '',
+        channel: 'stdout',
+        usage: { ...buf.pendingUsage },
+      } as unknown as SDKMessage;
+      await this.deps.onTurnMessage(state.sessionId, runId, formatted);
       buf.flushedUsage = buf.pendingUsage;
     }
   }

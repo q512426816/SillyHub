@@ -5888,6 +5888,38 @@ class SessionService:
         # 与 archive_session 对称，SSE 客户端秒级看到该行重新出现。
         await publish_sessions_changed("status_changed", agent_session.id, agent_session.user_id)
 
+    async def update_ctx_window(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+        ctx_window_tokens: int | None,
+    ) -> None:
+        """Set/clear the session-level context window override (ql-20260831-002).
+
+        纯展示配置（前端上下文环分母），不进 daemon 注入链、不发列表变更信号
+        （列表视图不消费该列）。幂等：同值重复写无副作用。None = 清除覆盖。
+        """
+        agent_session = (
+            await self._session.execute(
+                select(AgentSession)
+                .where(
+                    AgentSession.id == session_id,
+                    AgentSession.user_id == user_id,
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if agent_session is None:
+            raise DaemonSessionNotFound(
+                f"AgentSession '{session_id}' not found.",
+                details={"session_id": str(session_id)},
+            )
+        if agent_session.ctx_window_tokens == ctx_window_tokens:
+            await self._session.rollback()  # 释放 FOR UPDATE 行锁（幂等早退不悬挂事务）
+            return
+        agent_session.ctx_window_tokens = ctx_window_tokens
+        await self._session.commit()
+
     async def get_agent_session_logs(
         self,
         session_id: uuid.UUID,

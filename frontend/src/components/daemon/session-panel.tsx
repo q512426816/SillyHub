@@ -180,6 +180,7 @@ import {
   PROVIDER_META,
   reopenSession,
   streamSession,
+  updateSessionCtxWindow,
   type DaemonMachineRead,
   type InteractiveProvider,
   type SessionCreateResponse,
@@ -2119,6 +2120,26 @@ function SessionPanelPage({
     [displayTurns],
   );
 
+  // ql-20260831-002：会话级窗口分母覆盖（环浮层编辑 → PATCH ctx-window →
+  // 本地 detailQuery 缓存同步，免整页刷新）。null = 清除覆盖回自动链。
+  const handleCtxWindowOverrideChange = useCallback(
+    async (tokens: number | null) => {
+      if (!sessionId) return;
+      try {
+        await updateSessionCtxWindow(sessionId, tokens);
+        qc.setQueryData<{ ctx_window_tokens?: number | null }>(
+          ["agentSessionDetail", sessionId],
+          (old: { ctx_window_tokens?: number | null } | undefined) =>
+            old ? { ...old, ctx_window_tokens: tokens } : old,
+        );
+        notify.success(tokens == null ? "已恢复默认窗口" : "窗口总量已更新");
+      } catch (err) {
+        notify.error(err, "窗口总量更新失败");
+      }
+    },
+    [sessionId, qc, notify],
+  );
+
   // ── 消息发送 + 服务端排队（ql-20260825-011 后端真实排队重写）──────────────
   // 空闲（无 currentRun）→ 占位轮直发（sendFromQueue）；忙轮 → 直接 POST
   // inject（后端落 agent_session_queued_messages 排队，run 终态后自动派发，
@@ -3554,6 +3575,8 @@ function SessionPanelPage({
             usedTokens={usedTokens}
             roleMapping={ctxRoleMapping}
             fallbackModel={ctxFallbackModel}
+            windowOverride={session?.ctx_window_tokens ?? null}
+            onWindowOverrideChange={handleCtxWindowOverrideChange}
             providerId={session.llm_provider_id ?? null}
           />
         </div>

@@ -26,6 +26,7 @@ import {
   formatQuotaResetTime,
   ONE_M_CTX_WINDOW_TOKENS,
   DEFAULT_CTX_WINDOW_TOKENS,
+  FALLBACK_CTX_WINDOW_TOKENS,
 } from "../ctx-usage-bar";
 import { getProviderQuota } from "@/lib/api/llm-providers";
 import type { LlmProviderQuotaResponse } from "@/lib/api/llm-providers";
@@ -49,28 +50,45 @@ beforeEach(() => {
   mockGetProviderQuota.mockReset();
 });
 
-// ── resolveCtxWindowTokens：分母三级降级链（D-014@v1 / spike-01）──────────
+// ── resolveCtxWindowTokens：分母四级解析链（D-014@v1 + ql-20260831-002 覆盖层）──
 
-describe("resolveCtxWindowTokens（分母三级降级链）", () => {
+describe("resolveCtxWindowTokens（分母四级解析链）", () => {
+  it("第 0 级：会话覆盖（windowOverride）最优先——压过 one_m 与常量表", () => {
+    expect(resolveCtxWindowTokens(256_000, { model: "glm-4.6", one_m: true }, null)).toBe(
+      256_000,
+    );
+    expect(resolveCtxWindowTokens(512_000, { model: "glm-4.6" }, null)).toBe(512_000);
+  });
+
   it("第 1 级：role mapping one_m=true → 1000k（供应商配置派生）", () => {
     expect(
-      resolveCtxWindowTokens({ model: "glm-4.6", one_m: true }, null),
+      resolveCtxWindowTokens(null, { model: "glm-4.6", one_m: true }, null),
     ).toBe(ONE_M_CTX_WINDOW_TOKENS);
   });
 
   it("第 2 级：有模型名（常量表命中或默认）→ 200k", () => {
-    expect(resolveCtxWindowTokens({ model: "glm-4.6" }, null)).toBe(
+    expect(resolveCtxWindowTokens(null, { model: "glm-4.6" }, null)).toBe(
       DEFAULT_CTX_WINDOW_TOKENS,
     );
     // role mapping 无 model，回退 default_fallback_model
-    expect(resolveCtxWindowTokens(null, "claude-sonnet-4-5")).toBe(
+    expect(resolveCtxWindowTokens(null, null, "claude-sonnet-4-5")).toBe(
       DEFAULT_CTX_WINDOW_TOKENS,
     );
   });
 
-  it("第 3 级：无 one_m 也无模型名 → null（只显示累计 token）", () => {
-    expect(resolveCtxWindowTokens(null, null)).toBeNull();
-    expect(resolveCtxWindowTokens({}, "  ")).toBeNull();
+  it("第 3 级：无 one_m 也无模型名 → 兜底 1M（本地模型读不到窗口大小不为空）", () => {
+    expect(resolveCtxWindowTokens(null, null, null)).toBe(FALLBACK_CTX_WINDOW_TOKENS);
+    expect(resolveCtxWindowTokens(null, {}, "  ")).toBe(FALLBACK_CTX_WINDOW_TOKENS);
+  });
+
+  it("非法覆盖值（0/负数/NaN）忽略，落回自动链", () => {
+    expect(resolveCtxWindowTokens(0, { model: "glm-4.6" }, null)).toBe(
+      DEFAULT_CTX_WINDOW_TOKENS,
+    );
+    expect(resolveCtxWindowTokens(-5, null, null)).toBe(FALLBACK_CTX_WINDOW_TOKENS);
+    expect(resolveCtxWindowTokens(Number.NaN, null, null)).toBe(
+      FALLBACK_CTX_WINDOW_TOKENS,
+    );
   });
 });
 
@@ -122,11 +140,22 @@ describe("CtxUsageRing", () => {
     expect(screen.getByTestId("ctx-ring").textContent).toContain("50%");
   });
 
-  it("第 3 级分母：无分母只显示累计 token，不显示百分比", () => {
+  it("第 3 级分母：无派生来源兜底 1M，按占比显示（ql-20260831-002 不再无分母）", () => {
     render(<CtxUsageBar usedTokens={12_345} />);
     const ring = screen.getByTestId("ctx-ring");
-    expect(ring.textContent).toContain("12.3k");
-    expect(ring.textContent).not.toContain("%");
+    // 12,345 / 1,000,000 = 1.2% → 中心取整 1%
+    expect(ring.textContent).toContain("1%");
+  });
+
+  it("会话覆盖分母：200k 模型手动指定 400k → 占比按覆盖值计算", () => {
+    render(
+      <CtxUsageRing
+        usedTokens={100_000}
+        roleMapping={{ model: "glm-4.6" }}
+        windowOverride={400_000}
+      />,
+    );
+    expect(screen.getByTestId("ctx-ring").textContent).toContain("25%");
   });
 
   it("点击环显示详情浮层（占比 / 已用总量 / 口径说明）", async () => {
@@ -166,6 +195,55 @@ describe("CtxUsageRing", () => {
     expect(screen.getByText("未知")).toBeInTheDocument();
     expect(screen.getByText("— / 200.0k")).toBeInTheDocument();
     expect(screen.queryByText("0.0%")).not.toBeInTheDocument();
+  });
+
+  // ql-20260831-002：环浮层窗口总量编辑器（onWindowOverrideChange 存在才渲染）。
+  it("无 onWindowOverrideChange → 浮层不渲染编辑器（只读展示）", async () => {
+    render(<CtxUsageRing usedTokens={100_000} roleMapping={{ model: "glm-4.6" }} />);
+    fireEvent.click(screen.getByTestId("ctx-ring"));
+    expect(await screen.findByText("上下文窗口用量")).toBeInTheDocument();
+    expect(screen.queryByTestId("ctx-window-editor")).not.toBeInTheDocument();
+  });
+
+  it("编辑器保存 → onWindowOverrideChange 上抛显式值；「恢复默认」仅覆盖态可见", async () => {
+    const onChange = vi.fn();
+    render(
+      <CtxUsageRing
+        usedTokens={100_000}
+        roleMapping={{ model: "glm-4.6" }}
+        onWindowOverrideChange={onChange}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("ctx-ring"));
+    const editor = await screen.findByTestId("ctx-window-editor");
+    expect(editor).toBeInTheDocument();
+    // 无覆盖 → 不渲染「恢复默认」
+    expect(screen.queryByTestId("ctx-window-reset")).not.toBeInTheDocument();
+
+    // 改值后保存 → 上抛 400000
+    const input = screen.getByLabelText("上下文窗口总量");
+    fireEvent.change(input, { target: { value: "400000" } });
+    fireEvent.click(screen.getByTestId("ctx-window-save"));
+    expect(onChange).toHaveBeenCalledWith(400000);
+
+    // 覆盖态 → 恢复默认按钮出现，点击上抛 null
+    render(
+      <CtxUsageRing
+        usedTokens={100_000}
+        roleMapping={{ model: "glm-4.6" }}
+        windowOverride={400_000}
+        onWindowOverrideChange={onChange}
+      />,
+    );
+    const secondRing = screen.getAllByTestId("ctx-ring")[1];
+    expect(secondRing).toBeDefined();
+    fireEvent.click(secondRing!);
+    expect(await screen.findByTestId("ctx-window-reset")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("ctx-window-reset"));
+    expect(onChange).toHaveBeenCalledWith(null);
+
+    // 覆盖态浮层「已用 / 总量」带（手动）标记
+    expect(await screen.findByText("100.0k / 400.0k（手动）")).toBeInTheDocument();
   });
 });
 

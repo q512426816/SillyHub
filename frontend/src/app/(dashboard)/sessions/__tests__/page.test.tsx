@@ -717,10 +717,11 @@ describe("SessionPanel attach 历史 whoLine + usage 注入（gap-fix）", () =>
     // llm_provider_id 对照供应商列表名
     expect(who).toHaveTextContent("GLM 中转");
 
-    // 历史 usage 回填：ctx-ring 累计含历史轮（无分母 → 直显累计值 1.5k）
+    // 历史 usage 回填：ctx-ring 累计含历史轮（ql-20260831-002 无派生来源兜底
+    // 1M → 1.5k/1M 取整显示 0%，取代旧「无分母直显累计值」）
     const ring = screen.getByTestId("ctx-ring");
     await waitFor(() => {
-      expect(ring).toHaveTextContent("1.5k");
+      expect(ring).toHaveTextContent("0%");
     });
   });
 

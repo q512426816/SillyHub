@@ -14085,6 +14085,53 @@
         }
       }
     },
+    "/api/daemon/sessions/{session_id}/ctx-window": {
+      "patch": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Update Session Ctx Window",
+        "description": "Set/clear the context window override for an owned session (display-only).",
+        "operationId": "update_session_ctx_window_api_daemon_sessions__session_id__ctx_window_patch",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionCtxWindowUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/sessions/{session_id}/stream": {
       "get": {
         "tags": [
@@ -31997,6 +32044,17 @@
               }
             ],
             "title": "Config Snapshot"
+          },
+          "ctx_window_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ctx Window Tokens"
           },
           "owner_name": {
             "anyOf": [
@@ -54009,6 +54067,26 @@
           "stream_url"
         ],
         "title": "SessionCreateResponse"
+      },
+      "SessionCtxWindowUpdateRequest": {
+        "properties": {
+          "ctx_window_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100000000.0,
+                "minimum": 1000.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ctx Window Tokens"
+          }
+        },
+        "type": "object",
+        "title": "SessionCtxWindowUpdateRequest",
+        "description": "PATCH /api/daemon/sessions/{id}/ctx-window 请求体（ql-20260831-002）。\n\n会话级上下文窗口覆盖（纯展示配置，不参与 daemon 注入链）：\n- 非空 int = 显式覆盖（前端环分母优先级最高）；\n- None = 清除覆盖，回前端自动派生链（供应商 one_m → 模型常量表 → 1M 兜底）。\n边界 1_000 ~ 100_000_000（1k ~ 100M）：拦 0/负数（百分比除零/负占比）与\n明显手滑的巨值；常规模型窗口（8k ~ 10M）全在内。"
       },
       "SessionDialogRead": {
         "properties": {

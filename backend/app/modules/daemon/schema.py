@@ -60,6 +60,10 @@ class AgentSessionRead(BaseModel):
     agent_profile_id: uuid.UUID | None = None
     llm_provider_id: uuid.UUID | None = None
     config_snapshot: dict | None = None
+    # ql-20260831-002：会话级上下文窗口覆盖（token 数，ORM 直接映射）。NULL =
+    # 未覆盖（前端自动派生链）；非 NULL = 用户显式指定（环浮层编辑，优先级
+    # 最高）。默认 None 守护旧行/列缺失。
+    ctx_window_tokens: int | None = None
     # 2026-08-23-sessions-workspace-hub task-01 / FR-05 / D-108@v2：属主用户名
     # （门户列表显示会话归属）。非 ORM 列——由 router 层批量查 users.username
     # 注入（照 OwnerRead + 本端点 terminating_at 的批量注入先例，避免 N+1）；
@@ -314,6 +318,19 @@ class SessionInjectRequest(BaseModel):
         if (self.bind_ppm_item_kind is None) != (self.bind_ppm_item_id is None):
             raise ValueError("bind_ppm_item_kind and bind_ppm_item_id must be provided together")
         return self
+
+
+class SessionCtxWindowUpdateRequest(BaseModel):
+    """PATCH /api/daemon/sessions/{id}/ctx-window 请求体（ql-20260831-002）。
+
+    会话级上下文窗口覆盖（纯展示配置，不参与 daemon 注入链）：
+    - 非空 int = 显式覆盖（前端环分母优先级最高）；
+    - None = 清除覆盖，回前端自动派生链（供应商 one_m → 模型常量表 → 1M 兜底）。
+    边界 1_000 ~ 100_000_000（1k ~ 100M）：拦 0/负数（百分比除零/负占比）与
+    明显手滑的巨值；常规模型窗口（8k ~ 10M）全在内。
+    """
+
+    ctx_window_tokens: int | None = Field(default=None, ge=1_000, le=100_000_000)
 
 
 # ── Change-scoped session list (2026-07-09-change-detail-session task-09 / D-005@v1) ─

@@ -958,6 +958,15 @@ class DaemonService:
     ) -> None:
         await self._sess.unarchive_session(session_id, user_id)
 
+    # ql-20260831-002：会话级上下文窗口覆盖（一行委托，照 archive 模式）。
+    async def update_ctx_window(
+        self,
+        session_id: uuid.UUID,
+        user_id: uuid.UUID,
+        ctx_window_tokens: int | None,
+    ) -> None:
+        await self._sess.update_ctx_window(session_id, user_id, ctx_window_tokens)
+
     async def get_agent_session_logs(
         self,
         session_id: uuid.UUID,

@@ -5254,6 +5254,26 @@ export interface paths {
         patch: operations["unarchive_session_api_daemon_sessions__session_id__unarchive_patch"];
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/ctx-window": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Session Ctx Window
+         * @description Set/clear the context window override for an owned session (display-only).
+         */
+        patch: operations["update_session_ctx_window_api_daemon_sessions__session_id__ctx_window_patch"];
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/stream": {
         parameters: {
             query?: never;
@@ -10493,6 +10513,8 @@ export interface components {
             config_snapshot?: {
                 [key: string]: unknown;
             } | null;
+            /** Ctx Window Tokens */
+            ctx_window_tokens?: number | null;
             /** Owner Name */
             owner_name?: string | null;
             /**
@@ -18490,6 +18512,20 @@ export interface components {
             status: string;
             /** Stream Url */
             stream_url: string;
+        };
+        /**
+         * SessionCtxWindowUpdateRequest
+         * @description PATCH /api/daemon/sessions/{id}/ctx-window 请求体（ql-20260831-002）。
+         *
+         *     会话级上下文窗口覆盖（纯展示配置，不参与 daemon 注入链）：
+         *     - 非空 int = 显式覆盖（前端环分母优先级最高）；
+         *     - None = 清除覆盖，回前端自动派生链（供应商 one_m → 模型常量表 → 1M 兜底）。
+         *     边界 1_000 ~ 100_000_000（1k ~ 100M）：拦 0/负数（百分比除零/负占比）与
+         *     明显手滑的巨值；常规模型窗口（8k ~ 10M）全在内。
+         */
+        SessionCtxWindowUpdateRequest: {
+            /** Ctx Window Tokens */
+            ctx_window_tokens?: number | null;
         };
         /**
          * SessionDialogRead
@@ -30809,6 +30845,39 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_session_ctx_window_api_daemon_sessions__session_id__ctx_window_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionCtxWindowUpdateRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             204: {

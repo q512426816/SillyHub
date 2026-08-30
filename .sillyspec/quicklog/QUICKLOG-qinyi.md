@@ -271,3 +271,23 @@
 根因：风险审查发现的可证缺陷：恢复链触发瞬间忙检只查一次，在途期间新起 turn 会被 restoreAndReconnect 静默驱逐；start 无单实例守卫（macOS autostart enable 的 bootstrap RunAtLoad 立即拉起第二实例）；linux disable --now 与 macos bootout 会停运行中 daemon，与文档契约矛盾；VBS node 路径未引号存在 Program.exe 植入面；备份 copyFile 中途失败残件占轮换名额；附件清理 DELETE 守卫只在子查询，回填竞态可误删已发送附件
 方案：①types 新增 SessionBusyError+restoreAndReconnect 驱逐前守卫（running/待处理输入抛错），daemon 恢复链 catch 入退避重试队列、SESSION_RESUME catch warn 跳过；②startAction 加 pid 存活单实例守卫，respawn spawn 注入 SILLYHUB_DAEMON_RESPAWN=1 豁免交接时序；③linux unregister 去 --now、macos 改 launchctl list 判运行中跳过 bootout；④VBS node 路径加引号；⑤备份失败清理半截 .bak；⑥cleanup.py DELETE 外层补 session_id IS NULL
 结果：daemon 相关 8+4 文件套件 264 用例绿（含新增 cli 守卫 3+恢复链 1+守卫单测 3+备份残件 1+macOS unregister 3）+tsc 0；autostart 73 绿；backend test_cleanup 5 绿（含新增双谓词契约 1）+ruff/format/mypy 0
+
+## ql-20260831-002-f683 | 2026-08-31 02:51:04 | 会话上下文窗口用量修复——分母可编辑默认1M兜底+daemon轮末usage补发
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/model.py（AgentSession加ctx_window_tokens列）
+- backend/migrations/versions/20260831120000_add_agent_sessions_ctx_window_tokens.py（新迁移）
+- backend/app/modules/daemon/schema.py（Read透出+请求DTO）
+- backend/app/modules/daemon/router.py（PATCH ctx-window端点）
+- backend/app/modules/daemon/session/service.py（update_ctx_window）
+- backend/app/modules/daemon/service.py（门面委托）
+- frontend/src/components/sessions/ctx-usage-bar.tsx（四级链+浮层编辑器）
+- frontend/src/components/daemon/session-panel.tsx（真会话环接线）
+- frontend/src/lib/daemon.ts（updateSessionCtxWindow）
+- sillyhub-daemon/src/interactive/session-manager.ts（_flushTerminalUsage轮末补发）
+- backend/openapi.json+frontend/src/lib/api-types.ts（gen:types产物）
+需求：会话上下文窗口用量修复——分母可编辑默认1M兜底+daemon轮末usage补发
+根因：本地模型（本机默认/未绑平台供应商）会话前端拿不到provider记录且本地端点协议不暴露窗口大小，分母派生为空显示「—」；daemon轮边界清零pendingUsage把最后一个500ms flush窗口内的usage（含ctx_tokens）静默丢弃，DB实证短轮大量NULL致环分子滞后
+方案：agent_sessions加ctx_window_tokens列+迁移+PATCH ctx-window端点（1k~100M边界None=清除）；前端分母链升四级（会话覆盖＞one_m 1M＞常量表200k＞兜底1M不再为空）+环浮层内嵌编辑器；daemon新增_flushTerminalUsage在onTurnResult前逐桶补发usage-only消息
+结果：backend 10+38绿 ruff/format净 mypy仅2预存错（非本次文件）；frontend 3文件50绿 tsc0 lint仅预存警告；daemon 4+13绿 tsc0；gen:types产物同步；本地Docker Postgres迁移已应用验证；生效需重建backend/frontend镜像+重装本机daemon
