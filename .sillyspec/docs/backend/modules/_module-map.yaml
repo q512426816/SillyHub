@@ -44,6 +44,11 @@ modules:
       - register_audit_hooks
       - get_engine
       - get_session_factory
+      - get_cached_permissions  # core/permission_cache.py（rbac-permission-cache 新增）
+      - set_cached_permissions
+      - get_cached_ppm_scope
+      - set_cached_ppm_scope
+      - invalidate_all_permissions
     depends_on: []
     used_by:
       - auth

@@ -138,3 +138,47 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：HEAD
 理由：转向 worker 重派继承——interactive worker 会话（AgentSession.role 含 worker 或 parent_session_id 非空）daemon 掉线后不 suspended 而是 failed+自动重派继承原会话（worker 是临时会话无人手恢复，挂起无意义）；主会话（orchestrator/用户 chat）保持挂起语义不变
+
+## D-001@v1 : 缓存范围 = has_permission + data_scope 一并覆盖
+状态：implemented
+变更：2026-07-23-rbac-permission-cache
+锚点：未记录
+最近确认：163e1065
+理由：同时覆盖 has_permission(collect_permissions* 集合)与 data_scope(manager_project_ids / is_super_admin)。两套都是高频热路径,一并做避免二次返工。
+
+## D-002@v2 : 失效策略 = 整体清空 + 失效失败 ERROR 告警(supersedes D-002@v1)
+状态：implemented
+变更：2026-07-23-rbac-permission-cache
+锚点：未记录
+最近确认：163e1065
+理由：所有权限变更触发点统一执行 invalidate_all_permissions 清空 perm:* + ppm-scope:* 全部(继承 v1)。v2 增补:invalidate 失败升 **ERROR 级日志**(可监控告警),非 warning——失效失败是安全事件,可能留下最长 TTL 的越权窗口;读/写业务缓存故障仍降级静默(不影响请求)。
+supersedes：D-002@v1
+
+## D-003@v2 : 缓存粒度 = 拆键 platform/all/workspace + everywhere 内存并集(supersedes D-003@v1)
+状态：implemented
+变更：2026-07-23-rbac-permission-cache
+锚点：未记录
+最近确认：163e1065
+理由：**不能共用**(v1 错误)。三者返回语义不同的集合(rbac.py:37-84 实证):platform=平台级、all=全工作区并集、everywhere=platform∪all。v2 拆为三键:`perm:{u}:platform`、`perm:{u}:all`、`perm:{u}:{workspace_id}`;everywhere 读 platform+all 内存并集,**不单独存**。has_permission 在所有调用先判 platform,workspace_id=None 时再判 all,workspace_id 指定时判单工作区键。
+supersedes：D-003@v1
+
+## D-004@v1 : 无 Redis 降级 = 回退查 DB(不加本地兜底)
+状态：implemented
+变更：2026-07-23-rbac-permission-cache
+锚点：未记录
+最近确认：163e1065
+理由：沿用 api_key_service 约定,Redis 故障 try/except 回退查 DB,不加本地内存 TTL 兜底。保证正确性优先;本地兜底引入多实例一致性问题,得不偿失。
+
+## D-005@v1 : ppm-scope uuid 反序列化保证类型
+状态：implemented
+变更：2026-07-23-rbac-permission-cache
+锚点：未记录
+最近确认：163e1065
+理由：JSON 只能存 str,但 data_scope 下游用 uuid 做判断(`problem_operable` 的 `project_id in manager_pids`,project_id 是 uuid)。get_cached_ppm_scope 反序列化时必须把 manager_project_ids 还原为 `set[uuid.UUID(...)]`,is_super_admin 还原为 `bool`。否则 uuid-in-set[str] 恒 False,经理编辑/删除问题静默失效。
+
+## D-006@v1 : WorkspaceService.create 失效点补全
+状态：implemented
+变更：2026-07-23-rbac-permission-cache
+锚点：未记录
+最近确认：163e1065
+理由：补入。`_ensure_creator_as_owner`(`workspace/service.py:729`,line 770 写 UserWorkspaceRole 授 owner)的**所有调用方**——`create`(`:148/165/222`)与 `scan_generate`(`:609`,daemon-client 建工作区独立路径,`:669` 调用,不经 create)——commit 后都需调 invalidate_all_permissions,创建者的 all/everywhere 缓存才及时失效(否则最长 TTL 内缺新 ws 权限——权限缺失方向,非越权,但仍是错误)。plan-review 发现 scan_generate 遗漏(Design Grill X2 当时未穷尽 `_ensure_creator_as_owner` 调用方,属误判闭合,现补)。bootstrap 启动种子(auth/service.py seed_*)免失效(进程冷启无缓存)。

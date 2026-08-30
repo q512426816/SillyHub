@@ -171,3 +171,8 @@
 根因：权限/提问/超时通知 body 与 title 逐字重复（实现期占位未替换）；待审通知变更名回退 change_key 原始全名（含日期前缀）致截断难看；前端条目标签与标题同行挤占空间、时间行混排、未读标识弱
 方案：后端提问 body 放提问预览（_dialog_preview 同前端口径）、canUseTool body 为请求使用工具名、超时 body 为 None；待审显示名在 title 空或等于 key 时去日期前缀、body 新句式；前端标签移标题上方独立行加时间右对齐、标题独占整行、未读改左侧竖条、去点击查看、全部已读加图标、间距收紧
 结果：后端 11 passed（含新 body 断言与日期前缀剥离用例）前端 7 passed tsc 0 ruff/format 过；期间修一处类属性裸引用 NameError 被吞坑
+
+## ql-20260830-010-509a | 2026-08-30 19:53:49 | 附件草稿清理任务传参修复——main.py 传 get_session_factory 函数本身致每轮清理必抛 async_sessionmaker 上下文错误
+状态：进行中
+关联变更：（无）
+文件：backend/app/main.py, backend/app/modules/session_attachment/cleanup.py
