@@ -42,6 +42,7 @@ from app.modules.change.schema import (
     ChangeRead,
     ChangeReparseResponse,
     ChangeReparseStats,
+    ChangeUsageRead,
     ChangeWarning,
     DispatchResponse,
     DocumentsSyncRequest,
@@ -67,6 +68,7 @@ from app.modules.change.schema import (
     VerifyGateResponse,
 )
 from app.modules.change.service import ChangeService
+from app.modules.change.usage_service import ChangeUsageQueryService
 from app.modules.daemon.schema import AgentSessionListItem, ChangeSessionAuthor
 from app.modules.workspace.service import WorkspaceService
 
@@ -486,6 +488,29 @@ async def list_change_sessions(
         reverse=True,
     )
     return items
+
+
+@router.get(
+    "/changes/{change_id}/usage",
+    response_model=ChangeUsageRead,
+)
+async def get_change_usage(
+    workspace_id: uuid.UUID,
+    change_id: uuid.UUID,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+) -> ChangeUsageRead:
+    """变更维度执行用量聚合（task-04 / D-005@v1 独立用量端点）。
+
+    委托 ``ChangeUsageQueryService.get_change_usage``：不存在/跨工作区由 service
+    抛 ``ChangeNotFound``（404 resource-hiding，不泄露存在性）。deleted 口径
+    （task-04 核实现状）：既有 ``GET /changes/{change_id}`` 详情端点经
+    ``ChangeService.get`` 只按 id+workspace 取行，**不**对 ``location='deleted'``
+    404——其「读侧防复活」是 enrich 投影层跳过 deleted 行（service.py
+    ``enrich_with_workspace_ids``/``enrich_summaries`` 前置过滤），本端点保持
+    同口径：不加额外 deleted 404，聚合结果如实返回。
+    """
+    return await ChangeUsageQueryService(session).get_change_usage(workspace_id, change_id)
 
 
 @router.get(
@@ -1188,6 +1213,13 @@ async def list_quicklog_entries(
         page=page,
         page_size=page_size,
     )
+    # 2026-08-30-change-center-usage-stats task-03（FR-04）：页内 ql_id 一次批量
+    # usage 摘要（对齐 modules_by_ql 组装先例，R-03 禁 N+1）；空页零查询
+    # （summarize_quicklogs 空集合短路）；无会话绑定的条目不进 map → usage
+    # 保持 None（文件源条目常态，D-001 不回退生命周期口径）。
+    usage_map = await ChangeUsageQueryService(session).summarize_quicklogs(
+        workspace_id, [e.ql_id for e in result.items]
+    )
     items = [
         QuicklogEntryListItem(
             ql_id=e.ql_id,
@@ -1203,6 +1235,7 @@ async def list_quicklog_entries(
             files=[QuicklogFileItem(path=p, note=n) for p, n in e.files],
             affected_modules=result.modules_by_ql.get(e.ql_id, []),
             source=e.source,
+            usage=usage_map.get(e.ql_id),
         )
         for e in result.items
     ]
@@ -1246,6 +1279,36 @@ async def get_quicklog_entry(
         raw_block=e.raw_block,
         truncated=e.truncated,
     )
+
+
+@router.get(
+    "/quicklog-entries/{ql_id}/usage",
+    response_model=ChangeUsageRead,
+)
+async def get_quicklog_usage(
+    workspace_id: uuid.UUID,
+    ql_id: str,
+    session: SessionDep,
+    _user: Annotated[User, Depends(require_permission(Permission.CHANGE_READ))],
+) -> ChangeUsageRead:
+    """快速修复条目维度执行用量聚合（task-04 / D-005@v1 独立用量端点）。
+
+    404 严格对齐 ``get_quicklog_entry`` 详情端点：先经
+    ``QuicklogQueryService.get_entry`` 校验条目存在（双源均未命中 → 404），
+    不像姊妹端点 ``/sessions`` 容忍「有 link 无条目」竞态（usage 卡只在
+    条目存在的抽屉内渲染，竞态窗口极小，前端按边界态降级）。存在再委托
+    ``ChangeUsageQueryService.get_quicklog_usage`` 聚合（无绑定条目返回全零
+    totals + 空 by_model + 三元组 None）。
+    """
+    workspace = await WorkspaceService(session).get(workspace_id)
+    e = await QuicklogQueryService(session).get_entry(workspace, ql_id)
+    if e is None:
+        raise AppError(
+            "快速修复条目不存在",
+            http_status=404,
+            details={"ql_id": ql_id},
+        )
+    return await ChangeUsageQueryService(session).get_quicklog_usage(workspace_id, ql_id)
 
 
 @router.get(

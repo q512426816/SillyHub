@@ -115,6 +115,29 @@ export function getChange(workspaceId: string, changeId: string) {
   );
 }
 
+// ── 执行用量统计（2026-08-30-change-center-usage-stats task-06，FR-03/D-005）──
+
+/** 变更完整用量。对齐后端 schema（components.schemas.ChangeUsageRead，gen:types 生成）。 */
+export type ChangeUsageRead = components["schemas"]["ChangeUsageRead"];
+
+/**
+ * 变更执行用量 — GET /api/workspaces/{wid}/changes/{cid}/usage
+ *
+ * 时间口径 = 执行时间口径（D-001@v1）：首次执行 started_at → 最近执行
+ * finished_at，duration_ms = 纯执行时长累加。时间三元组 NULL 语义（R-05，
+ * 前端「进行中」标记依据）：started_at 有值且 finished_at 缺 = 进行中；
+ * 三者全 None = 无执行。totals 四维 token + api_requests，by_model 分模型明细。
+ * 变更不存在/跨工作区经 apiFetch 抛 ApiError 404（resource-hiding）。
+ */
+export function getChangeUsage(
+  workspaceId: string,
+  changeId: string,
+): Promise<ChangeUsageRead> {
+  return apiFetch<ChangeUsageRead>(
+    `/api/workspaces/${workspaceId}/changes/${changeId}/usage`,
+  );
+}
+
 // ── 变更删除（task-07 / 2026-08-29-change-delete-closure-and-spec-pull，design §6.1/§6.3）──
 
 /** DELETE /changes/{cid} 响应。对齐后端 schema（components.schemas.ChangeDeleteResponse，gen:types 生成）。 */

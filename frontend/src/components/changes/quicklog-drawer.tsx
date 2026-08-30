@@ -5,6 +5,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Drawer, Switch } from "antd";
 
+import { ChangeUsageCard } from "@/components/changes/detail/change-usage-card";
 import { QuicklogSessionsCard } from "@/components/changes/quicklog-sessions-card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { ApiError } from "@/lib/api";
@@ -229,6 +230,17 @@ export function QuicklogDrawer({
               <QuicklogSessionsCard
                 workspaceId={workspaceId}
                 qlId={entry.ql_id}
+              />
+
+              {/* task-09（2026-08-30-change-center-usage-stats / FR-05 /
+                  D-004@v1）：条目执行用量卡（kind=quicklog），组件 useQuery
+                  自取数（D-007@v1），接线层零取数逻辑；对齐上方 sessions 卡
+                  同款 section 门控——结构化视图底部渲染，原始 md 切换视图
+                  不渲染，抽屉关闭（entry 为 null）随外层整块不渲染。 */}
+              <ChangeUsageCard
+                kind="quicklog"
+                workspaceId={workspaceId}
+                refKey={entry.ql_id}
               />
 
               {detail.truncated && (

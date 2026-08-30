@@ -145,6 +145,15 @@ class ChangeSummary(BaseModel):
     # 畸形串防御解析归前端（task-12）。optional default None（brownfield 安全，
     # 旧客户端不读不受影响）。
     last_pushed_at: str | None = None
+    # 2026-08-30-change-center-usage-stats task-01（design 接口定义）：变更执行
+    # 用量摘要（列表「执行」列：耗时 + token 总量 + 调用次数）。计算字段
+    # （DTO 层），非 changes 表列（零 migration，D-003@v1 实时聚合）；producer
+    # = change/usage_service.py ChangeUsageQueryService（summarize_changes 批量
+    # 聚合，经 service.enrich_summaries 管道填充，R-03 禁 N+1），consumer = 前端
+    # api-types.ts 生成物（gen:types）。无关联执行保持 None（D-001@v1，不回退
+    # created_at 生命周期口径）。填充逻辑是 task-02/03 领地，本处仅落契约。
+    # optional default None（brownfield 安全，旧客户端不读不受影响）。
+    usage: UsageSummaryRead | None = None
     updated_at: datetime
 
 
@@ -539,6 +548,71 @@ class ArchiveConfirmRequest(BaseModel):
     notify_session: bool = True
 
 
+# ── Usage stats DTOs（2026-08-30-change-center-usage-stats task-01，design 接口定义）──
+
+
+class UsageByModelItemRead(BaseModel):
+    """分模型用量明细项（ChangeUsageRead.by_model 列表行）。
+
+    明细段 = agent_run_model_usage 按 model GROUP BY（SUM 四维 token +
+    api_requests）；兜底段 = 集合中无明细行的 run 归并到 run.model（缺失归
+    「未记录」桶）。数据流：producer = change/usage_service.py
+    ChangeUsageQueryService（详情两段聚合）→ router usage 端点 → consumer =
+    前端 api-types.ts 生成物（gen:types，change-usage-card 折叠明细）。
+    """
+
+    model: str  # 模型名；兜底桶 = run.model 或 "未记录"（排序恒末位）
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    # 兜底桶（无 agent_run_model_usage 明细的老 run）api_requests 无来源，
+    # 恒 0 诚实值（R-04，前端注脚声明，对齐 by_provider「未记录」先例）。
+    api_requests: int = 0
+
+
+class UsageTotalsRead(BaseModel):
+    """用量汇总（四维 token + 调用次数 + 轮次；详情与列表摘要共用）。"""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    api_requests: int = 0
+    num_turns: int = 0  # 轮次 = SUM(agent_runs.num_turns)（SQL 聚合忽略 NULL）
+
+
+class ChangeUsageRead(BaseModel):
+    """变更/快速修复完整用量（两个 usage 详情端点响应，D-005@v1）。
+
+    时间口径 = 执行时间口径（D-001@v1）：首次执行 started_at → 最近执行
+    finished_at，duration_ms = 纯执行时长累加。时间三元组 NULL 语义（R-05，
+    前端「进行中」标记依据）：started_at 有值且 finished_at 缺 = 进行中；
+    started_at / finished_at / duration_ms 全 None = 无执行。
+    """
+
+    started_at: datetime | None = None  # 集合 MIN(started_at)；无执行 → None
+    finished_at: datetime | None = None  # 集合 MAX(finished_at)；进行中/无执行 → None
+    duration_ms: int | None = None  # SUM(duration_ms)；无任何非 NULL 值 → None
+    totals: UsageTotalsRead
+    # 分模型明细：input+output 降序；「未记录」兜底桶恒末位。
+    by_model: list[UsageByModelItemRead] = []
+
+
+class UsageSummaryRead(BaseModel):
+    """用量摘要（ChangeSummary.usage / QuicklogEntryListItem.usage，列表「执行」列）。
+
+    列表批量投影只带时间三元组 + totals，不算 by_model（R-02 复杂度控制）；
+    NULL 组合语义同 ChangeUsageRead（R-05：started 有值 finished 缺 = 进行中；
+    全 None = 无执行）。
+    """
+
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    duration_ms: int | None = None
+    totals: UsageTotalsRead
+
+
 class QuicklogFileItem(BaseModel):
     """quicklog 条目文件行（path + 可选括注，design §5.1）。"""
 
@@ -564,6 +638,15 @@ class QuicklogEntryListItem(BaseModel):
     files: list[QuicklogFileItem] = []
     affected_modules: list[str] = []
     source: str = "file"  # pushed | file
+    # 2026-08-30-change-center-usage-stats task-01（design 接口定义）：执行用量
+    # 摘要（列表「执行」列，含「进行中」标记）。计算字段（DTO 层），非
+    # quicklog_entries 表列（零 migration，D-003@v1 实时聚合）；producer =
+    # change/usage_service.py ChangeUsageQueryService（summarize_quicklogs 批量
+    # 聚合，经 router quicklog 列表组装填充，R-03 禁 N+1），consumer = 前端
+    # api-types.ts 生成物（gen:types）。文件源条目无会话绑定时保持 None。
+    # 填充逻辑是 task-02/03 领地，本处仅落契约。optional default None
+    # （brownfield 安全，旧客户端不读不受影响）。
+    usage: UsageSummaryRead | None = None
 
 
 class QuicklogEntryList(BaseModel):

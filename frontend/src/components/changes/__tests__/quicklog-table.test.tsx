@@ -9,6 +9,8 @@
  *   5. 筛选交互：状态切换触发带 status 参数的请求
  *   6. 空态分场景（默认无记录引导 / 有筛选无匹配短文案）
  *   7. placeholder 条目标记渲染（空壳占位斜体）
+ *   8. 「执行」列三态（task-08 / D-004@v1）：完整 usage 两行摘要 + 悬浮起止
+ *      时间 / 进行中标记（started_at 有值且 finished_at 缺）/ usage null →「—」
  *
  * mock 范式照 changes page.test：vi.mock @/lib/quicklog + QueryClientProvider。
  */
@@ -17,6 +19,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { QuicklogTable } from "@/components/changes/quicklog-table";
+import type { components } from "@/lib/api-types";
 import { quicklogPollInterval, type QuicklogEntryListItem } from "@/lib/quicklog";
 
 const mocks = vi.hoisted(() => ({
@@ -45,8 +48,43 @@ function makeEntry(overrides: Partial<QuicklogEntryListItem> = {}): QuicklogEntr
     files: [],
     affected_modules: [],
     source: "file",
+    // task-08：默认无关联执行（后端显式 None 形态）
+    usage: null,
     ...overrides,
   };
+}
+
+/** 「执行」列用量摘要（api-types 生成，禁止手写）。 */
+type UsageSummaryRead = components["schemas"]["UsageSummaryRead"];
+
+/** 默认四维和 = 486 万 tok / 214 次 / 9 轮，耗时 3.6 小时——数字形态对齐
+ * 原型场景二第一行（62 万·28 次·9 轮的同构放大版）。 */
+function makeUsage(
+  usage: Partial<UsageSummaryRead> = {},
+  totals: Partial<UsageSummaryRead["totals"]> = {},
+): UsageSummaryRead {
+  return {
+    started_at: "2026-08-28T02:12:00Z",
+    finished_at: "2026-08-30T07:40:00Z",
+    duration_ms: 12_960_000, // 3.6 小时
+    totals: {
+      input_tokens: 4_000_000,
+      output_tokens: 460_000,
+      cache_read_tokens: 300_000,
+      cache_creation_tokens: 100_000,
+      api_requests: 214,
+      num_turns: 9,
+      ...totals,
+    },
+    ...usage,
+  };
+}
+
+/** 镜像组件 formatMmDdHm（本地时区 MM-DD HH:mm），悬浮 title 断言用。 */
+function mmddhm(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function renderTable() {
@@ -205,6 +243,69 @@ describe("QuicklogTable", () => {
     );
     // mock 仍返回空 → 有筛选空态短文案
     await waitFor(() => screen.findByText("没有匹配的快速修复记录。"), { timeout: 3000 });
+  });
+});
+
+describe("QuicklogTable 执行列（task-08 / FR-05 / D-004@v1）", () => {
+  it("完整 usage：耗时 + token·次·轮 两行 + 悬浮起止时间", async () => {
+    mocks.listQuicklogEntries.mockResolvedValue({
+      items: [makeEntry({ ql_id: "u1", usage: makeUsage() })],
+      total: 1,
+    });
+    renderTable();
+    // 首行耗时：>= 1 小时一位小数（12,960,000ms → 3.6 小时）
+    expect(await screen.findByText("3.6 小时")).toBeTruthy();
+    // 次行：token 总量（四维之和 486 万，万级一位小数）· 次数千分位 · 轮数
+    expect(screen.getByText("486.0 万 tok · 214 次 · 9 轮")).toBeTruthy();
+    // 整格 title 悬浮起止时间（本地时区 MM-DD HH:mm，镜像组件口径）
+    expect(
+      screen.getByTitle(
+        `开始 ${mmddhm("2026-08-28T02:12:00Z")} · 结束 ${mmddhm("2026-08-30T07:40:00Z")}`,
+      ),
+    ).toBeTruthy();
+    // finished_at 有值 → 无进行中标记
+    expect(screen.queryByText("进行中")).toBeNull();
+  });
+
+  it("进行中：started_at 有值且 finished_at 缺 → 耗时后「进行中」小标记", async () => {
+    mocks.listQuicklogEntries.mockResolvedValue({
+      items: [
+        // status 用 completed（终态），确保「进行中」只来自执行列标记
+        makeEntry({
+          ql_id: "u2",
+          usage: makeUsage(
+            { started_at: "2026-08-30T06:02:00Z", finished_at: null, duration_ms: 2_040_000 },
+            { api_requests: 28, num_turns: 4 },
+          ),
+        }),
+      ],
+      total: 1,
+    });
+    renderTable();
+    // 不足 1 小时取整分钟（2,040,000ms → 34 分钟）
+    expect(await screen.findByText("34 分钟")).toBeTruthy();
+    expect(screen.getByText("进行中")).toBeTruthy();
+    // 悬浮结束段显示「进行中」
+    expect(
+      screen.getByTitle(`开始 ${mmddhm("2026-08-30T06:02:00Z")} · 结束 进行中`),
+    ).toBeTruthy();
+  });
+
+  it("usage null → 执行列「—」降级", async () => {
+    mocks.listQuicklogEntries.mockResolvedValue({
+      items: [
+        // 影响模块/关联变更均有值，确保全表唯一「—」来自执行列降级
+        makeEntry({
+          ql_id: "u3",
+          affected_modules: ["frontend"],
+          linked_changes: ["2026-08-30-demo-change"],
+        }),
+      ],
+      total: 1,
+    });
+    renderTable();
+    await screen.findByText("修侧栏宽度塌陷");
+    expect(screen.getAllByText("—")).toHaveLength(1);
   });
 });
 

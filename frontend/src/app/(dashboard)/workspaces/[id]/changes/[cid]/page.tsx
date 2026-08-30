@@ -31,6 +31,7 @@ import {
   lastSignalFromSteps,
 } from "@/components/changes/change-activity-badge";
 import { ChangeTaskBoardCard } from "@/components/changes/detail/change-task-board-card";
+import { ChangeUsageCard } from "@/components/changes/detail/change-usage-card";
 import { QuicklogLinkedCard } from "@/components/changes/detail/quicklog-linked-card";
 import { ApiError } from "@/lib/api";
 import {
@@ -340,6 +341,14 @@ export default function ChangeDetailPage({ params }: Props) {
           请求（复用既有 10s 详情轮询）；无信号（steps 缺失/无 completed_at）
           整行不渲染，畸形串回退原文（组件内防御）。 */}
       <ChangeLastSignal lastPushedAt={lastSignalFromSteps(change.steps)} />
+
+      {/* task-09（2026-08-30-change-center-usage-stats / FR-05 / D-004@v1）：
+          变更执行用量卡（kind=change），组件 useQuery 自取数（D-007@v1），接线层
+          零取数逻辑——对齐同页 ChangeSessionsCard 直接传参挂载惯例，不加门控。
+          裁定：上方「本页禁新增网络请求（复用既有 10s 详情轮询）」注释仅约束
+          last-signal（须纯前端派生、复用详情轮询），不约束自取数辅助卡（本页
+          sessions 卡已同先例自开 useQuery）。 */}
+      <ChangeUsageCard kind="change" workspaceId={workspaceId} refKey={changeId} />
 
       {pageError ? (
         <div className="rounded border border-destructive/30 bg-red-50 px-3 py-2 text-xs text-destructive">

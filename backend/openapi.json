@@ -4183,6 +4183,60 @@
         }
       }
     },
+    "/api/workspaces/{workspace_id}/changes/{change_id}/usage": {
+      "get": {
+        "tags": [
+          "change"
+        ],
+        "summary": "Get Change Usage",
+        "description": "变更维度执行用量聚合（task-04 / D-005@v1 独立用量端点）。\n\n委托 ``ChangeUsageQueryService.get_change_usage``：不存在/跨工作区由 service\n抛 ``ChangeNotFound``（404 resource-hiding，不泄露存在性）。deleted 口径\n（task-04 核实现状）：既有 ``GET /changes/{change_id}`` 详情端点经\n``ChangeService.get`` 只按 id+workspace 取行，**不**对 ``location='deleted'``\n404——其「读侧防复活」是 enrich 投影层跳过 deleted 行（service.py\n``enrich_with_workspace_ids``/``enrich_summaries`` 前置过滤），本端点保持\n同口径：不加额外 deleted 404，聚合结果如实返回。",
+        "operationId": "get_change_usage_api_workspaces__workspace_id__changes__change_id__usage_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "change_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Change Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangeUsageRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/workspaces/{workspace_id}/changes/{change_id}/files/content": {
       "get": {
         "tags": [
@@ -5607,6 +5661,59 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/QuicklogEntryRead"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/workspaces/{workspace_id}/quicklog-entries/{ql_id}/usage": {
+      "get": {
+        "tags": [
+          "change"
+        ],
+        "summary": "Get Quicklog Usage",
+        "description": "快速修复条目维度执行用量聚合（task-04 / D-005@v1 独立用量端点）。\n\n404 严格对齐 ``get_quicklog_entry`` 详情端点：先经\n``QuicklogQueryService.get_entry`` 校验条目存在（双源均未命中 → 404），\n不像姊妹端点 ``/sessions`` 容忍「有 link 无条目」竞态（usage 卡只在\n条目存在的抽屉内渲染，竞态窗口极小，前端按边界态降级）。存在再委托\n``ChangeUsageQueryService.get_quicklog_usage`` 聚合（无绑定条目返回全零\ntotals + 空 by_model + 三元组 None）。",
+        "operationId": "get_quicklog_usage_api_workspaces__workspace_id__quicklog_entries__ql_id__usage_get",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Workspace Id"
+            }
+          },
+          {
+            "name": "ql_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ql Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangeUsageRead"
                 }
               }
             }
@@ -14139,7 +14246,7 @@
           "daemon"
         ],
         "summary": "Get Session Usage",
-        "description": "返回本会话累计用量聚合（2026-08-29-session-usage-stats task-02 / FR-01 / FR-04 / D-004@v1）。\n\n会话内五指标（输入 / 输出 / 缓存读取 / 缓存写入 / 请求次数）汇总 + 按模型\n折叠明细，供前端会话详情页与 dialog 浮窗同构展示（D-001/D-002）。聚合语义\n完全在 :meth:`SessionService.get_session_usage`（task-01）：明细表\n``agent_run_model_usage`` GROUP BY model 为主源 + 无明细行 run 的四维 token\n列兜底（``ctx_tokens`` 快照列排除），本端点只做委托，不重复聚合逻辑。\n\nowner-only 404 resource-hiding：归属校验在 service 内 DB 侧过滤，缺失 /\n跨用户会话同抛 ``DaemonSessionNotFound``（不泄露存在性），与 runs / logs\n等会话读端点同一道闸门。只读端点，无状态机交互。",
+        "description": "返回本会话累计用量聚合（2026-08-29-session-usage-stats task-02 / FR-01 / FR-04 / D-004@v1）。\n\n会话内五指标（输入 / 输出 / 缓存读取 / 缓存写入 / 请求次数）汇总 + 按模型\n折叠明细，供前端会话详情页与 dialog 浮窗同构展示（D-001/D-002）。聚合语义\n完全在 :meth:`SessionService.get_session_usage`（task-01）：明细表\n``agent_run_model_usage`` GROUP BY model 为主源 + 无明细行 run 的四维 token\n列兜底（``ctx_tokens`` 快照列排除），本端点只做委托，不重复聚合逻辑。\n\n权限闸门对齐同 router 会话读端点（2026-08-30 审计⑥）：``TaskRunAgentUser``\n（``require_permission_any(Permission.TASK_RUN_AGENT)``）——与 runs / logs /\ndetail 同一道闸门；owner-only 404 resource-hiding：归属校验在 service 内\nDB 侧过滤（含软删 ``deleted_at`` 视为不存在），缺失 / 跨用户 / 已软删会话\n同抛 ``DaemonSessionNotFound``（不泄露存在性）。只读端点，无状态机交互。",
         "operationId": "get_session_usage_api_daemon_sessions__session_id__usage_get",
         "parameters": [
           {
@@ -34134,6 +34241,16 @@
             ],
             "title": "Last Pushed At"
           },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UsageSummaryRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "updated_at": {
             "type": "string",
             "format": "date-time",
@@ -34153,6 +34270,62 @@
           "updated_at"
         ],
         "title": "ChangeSummary"
+      },
+      "ChangeUsageRead": {
+        "properties": {
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/UsageTotalsRead"
+          },
+          "by_model": {
+            "items": {
+              "$ref": "#/components/schemas/UsageByModelItemRead"
+            },
+            "type": "array",
+            "title": "By Model",
+            "default": []
+          }
+        },
+        "type": "object",
+        "required": [
+          "totals"
+        ],
+        "title": "ChangeUsageRead",
+        "description": "变更/快速修复完整用量（两个 usage 详情端点响应，D-005@v1）。\n\n时间口径 = 执行时间口径（D-001@v1）：首次执行 started_at → 最近执行\nfinished_at，duration_ms = 纯执行时长累加。时间三元组 NULL 语义（R-05，\n前端「进行中」标记依据）：started_at 有值且 finished_at 缺 = 进行中；\nstarted_at / finished_at / duration_ms 全 None = 无执行。"
       },
       "ChangeWarning": {
         "properties": {
@@ -51676,6 +51849,16 @@
             "type": "string",
             "title": "Source",
             "default": "file"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UsageSummaryRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -51888,6 +52071,16 @@
             "type": "string",
             "title": "Source",
             "default": "file"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UsageSummaryRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "body_sections": {
             "additionalProperties": {
@@ -58942,6 +59135,45 @@
         "title": "UnreadCountResponse",
         "description": "未读数（铃铛徽标轮询/首载）。"
       },
+      "UsageByModelItemRead": {
+        "properties": {
+          "model": {
+            "type": "string",
+            "title": "Model"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens",
+            "default": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens",
+            "default": 0
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "title": "Cache Read Tokens",
+            "default": 0
+          },
+          "cache_creation_tokens": {
+            "type": "integer",
+            "title": "Cache Creation Tokens",
+            "default": 0
+          },
+          "api_requests": {
+            "type": "integer",
+            "title": "Api Requests",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "model"
+        ],
+        "title": "UsageByModelItemRead",
+        "description": "分模型用量明细项（ChangeUsageRead.by_model 列表行）。\n\n明细段 = agent_run_model_usage 按 model GROUP BY（SUM 四维 token +\napi_requests）；兜底段 = 集合中无明细行的 run 归并到 run.model（缺失归\n「未记录」桶）。数据流：producer = change/usage_service.py\nChangeUsageQueryService（详情两段聚合）→ router usage 端点 → consumer =\n前端 api-types.ts 生成物（gen:types，change-usage-card 折叠明细）。"
+      },
       "UsageData": {
         "properties": {
           "plan_name": {
@@ -59075,6 +59307,91 @@
         ],
         "title": "UsageResult",
         "description": "用量查询统一返回（D-005 错误两态）。\n\n- ``success=True`` + ``data``：多 tier 余额/额度；\n- ``success=False`` + ``data=[{is_valid:False}]``：确定性鉴权失败（前端翻红）；\n- ``success=False`` + ``error``：其它确定性失败（不支持 / 解析错 / SSRF，前端灰提示）；\n- 瞬时失败（网络/5xx/429/超时）在 service 层 ``raise``（5xx），不走到本结构。"
+      },
+      "UsageSummaryRead": {
+        "properties": {
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/UsageTotalsRead"
+          }
+        },
+        "type": "object",
+        "required": [
+          "totals"
+        ],
+        "title": "UsageSummaryRead",
+        "description": "用量摘要（ChangeSummary.usage / QuicklogEntryListItem.usage，列表「执行」列）。\n\n列表批量投影只带时间三元组 + totals，不算 by_model（R-02 复杂度控制）；\nNULL 组合语义同 ChangeUsageRead（R-05：started 有值 finished 缺 = 进行中；\n全 None = 无执行）。"
+      },
+      "UsageTotalsRead": {
+        "properties": {
+          "input_tokens": {
+            "type": "integer",
+            "title": "Input Tokens",
+            "default": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "title": "Output Tokens",
+            "default": 0
+          },
+          "cache_read_tokens": {
+            "type": "integer",
+            "title": "Cache Read Tokens",
+            "default": 0
+          },
+          "cache_creation_tokens": {
+            "type": "integer",
+            "title": "Cache Creation Tokens",
+            "default": 0
+          },
+          "api_requests": {
+            "type": "integer",
+            "title": "Api Requests",
+            "default": 0
+          },
+          "num_turns": {
+            "type": "integer",
+            "title": "Num Turns",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "UsageTotalsRead",
+        "description": "用量汇总（四维 token + 调用次数 + 轮次；详情与列表摘要共用）。"
       },
       "UserColumnVO": {
         "properties": {

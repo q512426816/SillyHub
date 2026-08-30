@@ -1599,6 +1599,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Change Usage
+         * @description 变更维度执行用量聚合（task-04 / D-005@v1 独立用量端点）。
+         *
+         *     委托 ``ChangeUsageQueryService.get_change_usage``：不存在/跨工作区由 service
+         *     抛 ``ChangeNotFound``（404 resource-hiding，不泄露存在性）。deleted 口径
+         *     （task-04 核实现状）：既有 ``GET /changes/{change_id}`` 详情端点经
+         *     ``ChangeService.get`` 只按 id+workspace 取行，**不**对 ``location='deleted'``
+         *     404——其「读侧防复活」是 enrich 投影层跳过 deleted 行（service.py
+         *     ``enrich_with_workspace_ids``/``enrich_summaries`` 前置过滤），本端点保持
+         *     同口径：不加额外 deleted 404，聚合结果如实返回。
+         */
+        get: operations["get_change_usage_api_workspaces__workspace_id__changes__change_id__usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/changes/{change_id}/files/content": {
         parameters: {
             query?: never;
@@ -1993,6 +2021,33 @@ export interface paths {
          * @description GET 快速修复单条详情（FR-06：四段正文 + raw_block；404 未命中）。
          */
         get: operations["get_quicklog_entry_api_workspaces__workspace_id__quicklog_entries__ql_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/quicklog-entries/{ql_id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Quicklog Usage
+         * @description 快速修复条目维度执行用量聚合（task-04 / D-005@v1 独立用量端点）。
+         *
+         *     404 严格对齐 ``get_quicklog_entry`` 详情端点：先经
+         *     ``QuicklogQueryService.get_entry`` 校验条目存在（双源均未命中 → 404），
+         *     不像姊妹端点 ``/sessions`` 容忍「有 link 无条目」竞态（usage 卡只在
+         *     条目存在的抽屉内渲染，竞态窗口极小，前端按边界态降级）。存在再委托
+         *     ``ChangeUsageQueryService.get_quicklog_usage`` 聚合（无绑定条目返回全零
+         *     totals + 空 by_model + 三元组 None）。
+         */
+        get: operations["get_quicklog_usage_api_workspaces__workspace_id__quicklog_entries__ql_id__usage_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5307,9 +5362,11 @@ export interface paths {
          *     ``agent_run_model_usage`` GROUP BY model 为主源 + 无明细行 run 的四维 token
          *     列兜底（``ctx_tokens`` 快照列排除），本端点只做委托，不重复聚合逻辑。
          *
-         *     owner-only 404 resource-hiding：归属校验在 service 内 DB 侧过滤，缺失 /
-         *     跨用户会话同抛 ``DaemonSessionNotFound``（不泄露存在性），与 runs / logs
-         *     等会话读端点同一道闸门。只读端点，无状态机交互。
+         *     权限闸门对齐同 router 会话读端点（2026-08-30 审计⑥）：``TaskRunAgentUser``
+         *     （``require_permission_any(Permission.TASK_RUN_AGENT)``）——与 runs / logs /
+         *     detail 同一道闸门；owner-only 404 resource-hiding：归属校验在 service 内
+         *     DB 侧过滤（含软删 ``deleted_at`` 视为不存在），缺失 / 跨用户 / 已软删会话
+         *     同抛 ``DaemonSessionNotFound``（不泄露存在性）。只读端点，无状态机交互。
          */
         get: operations["get_session_usage_api_daemon_sessions__session_id__usage_get"];
         put?: never;
@@ -11394,11 +11451,35 @@ export interface components {
             owner_name?: string | null;
             /** Last Pushed At */
             last_pushed_at?: string | null;
+            usage?: components["schemas"]["UsageSummaryRead"] | null;
             /**
              * Updated At
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * ChangeUsageRead
+         * @description 变更/快速修复完整用量（两个 usage 详情端点响应，D-005@v1）。
+         *
+         *     时间口径 = 执行时间口径（D-001@v1）：首次执行 started_at → 最近执行
+         *     finished_at，duration_ms = 纯执行时长累加。时间三元组 NULL 语义（R-05，
+         *     前端「进行中」标记依据）：started_at 有值且 finished_at 缺 = 进行中；
+         *     started_at / finished_at / duration_ms 全 None = 无执行。
+         */
+        ChangeUsageRead: {
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            totals: components["schemas"]["UsageTotalsRead"];
+            /**
+             * By Model
+             * @default []
+             */
+            by_model: components["schemas"]["UsageByModelItemRead"][];
         };
         /** ChangeWarning */
         ChangeWarning: {
@@ -17523,6 +17604,7 @@ export interface components {
              * @default file
              */
             source: string;
+            usage?: components["schemas"]["UsageSummaryRead"] | null;
         };
         /**
          * QuicklogEntryPushRequest
@@ -17606,6 +17688,7 @@ export interface components {
              * @default file
              */
             source: string;
+            usage?: components["schemas"]["UsageSummaryRead"] | null;
             /**
              * Body Sections
              * @default {}
@@ -20640,6 +20723,45 @@ export interface components {
             count: number;
         };
         /**
+         * UsageByModelItemRead
+         * @description 分模型用量明细项（ChangeUsageRead.by_model 列表行）。
+         *
+         *     明细段 = agent_run_model_usage 按 model GROUP BY（SUM 四维 token +
+         *     api_requests）；兜底段 = 集合中无明细行的 run 归并到 run.model（缺失归
+         *     「未记录」桶）。数据流：producer = change/usage_service.py
+         *     ChangeUsageQueryService（详情两段聚合）→ router usage 端点 → consumer =
+         *     前端 api-types.ts 生成物（gen:types，change-usage-card 折叠明细）。
+         */
+        UsageByModelItemRead: {
+            /** Model */
+            model: string;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Cache Creation Tokens
+             * @default 0
+             */
+            cache_creation_tokens: number;
+            /**
+             * Api Requests
+             * @default 0
+             */
+            api_requests: number;
+        };
+        /**
          * UsageData
          * @description 单条用量（一个套餐窗口 = 一条；多窗口 5h/周/月各自一条 tier）。
          *
@@ -20684,6 +20806,59 @@ export interface components {
             data?: components["schemas"]["UsageData"][] | null;
             /** Error */
             error?: string | null;
+        };
+        /**
+         * UsageSummaryRead
+         * @description 用量摘要（ChangeSummary.usage / QuicklogEntryListItem.usage，列表「执行」列）。
+         *
+         *     列表批量投影只带时间三元组 + totals，不算 by_model（R-02 复杂度控制）；
+         *     NULL 组合语义同 ChangeUsageRead（R-05：started 有值 finished 缺 = 进行中；
+         *     全 None = 无执行）。
+         */
+        UsageSummaryRead: {
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            totals: components["schemas"]["UsageTotalsRead"];
+        };
+        /**
+         * UsageTotalsRead
+         * @description 用量汇总（四维 token + 调用次数 + 轮次；详情与列表摘要共用）。
+         */
+        UsageTotalsRead: {
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Cache Creation Tokens
+             * @default 0
+             */
+            cache_creation_tokens: number;
+            /**
+             * Api Requests
+             * @default 0
+             */
+            api_requests: number;
+            /**
+             * Num Turns
+             * @default 0
+             */
+            num_turns: number;
         };
         /**
          * UserColumnVO
@@ -24750,6 +24925,38 @@ export interface operations {
             };
         };
     };
+    get_change_usage_api_workspaces__workspace_id__changes__change_id__usage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeUsageRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_change_file_content_api_workspaces__workspace_id__changes__change_id__files_content_get: {
         parameters: {
             query: {
@@ -25505,6 +25712,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuicklogEntryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_quicklog_usage_api_workspaces__workspace_id__quicklog_entries__ql_id__usage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                ql_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeUsageRead"];
                 };
             };
             /** @description Validation Error */

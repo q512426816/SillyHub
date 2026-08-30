@@ -555,8 +555,11 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
     expect(screen.getByTestId("step-sub-row")).toBeInTheDocument();
     expect(screen.getByText("step 2/8")).toBeInTheDocument();
     expect(screen.getByText(/对话式探索与需求澄清/)).toBeInTheDocument();
-    // stage 主行徽章照常（execute → 执行）
-    expect(screen.getByText("执行")).toBeInTheDocument();
+    // stage 主行徽章照常（execute → 执行；task-08 新增「执行」列头与徽标同文案，
+    // 全局 getByText 撞多元素 → 收敛到徽标作用域，断言意图不变）
+    expect(
+      screen.getAllByText("执行").some((el) => el.closest(".ant-badge")),
+    ).toBe(true);
   });
 
   it("step_progress 缺失行 → 降级纯 stage 徽章（无摘要副行，D-003@v1）", async () => {
@@ -571,8 +574,10 @@ describe("变更中心列表页（task-06 重做行为 + useQuery 改造）", ()
       ],
     });
     await renderAndWait();
-    // stage 主行照常渲染（execute → 执行）
-    expect(screen.getByText("执行")).toBeInTheDocument();
+    // stage 主行照常渲染（execute → 执行；task-08 执行列头同文案 → 收敛徽标作用域）
+    expect(
+      screen.getAllByText("执行").some((el) => el.closest(".ant-badge")),
+    ).toBe(true);
     // 无摘要副行（降级：视觉与现状一致）
     expect(screen.queryByTestId("step-sub-row")).not.toBeInTheDocument();
     expect(screen.queryByText(/step \d+\/\d+/)).not.toBeInTheDocument();

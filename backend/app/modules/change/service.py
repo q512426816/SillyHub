@@ -55,6 +55,7 @@ from app.modules.change.schema import (
     StepProgressSummary,
     StepTimelineEntry,
 )
+from app.modules.change.usage_service import ChangeUsageQueryService
 from app.modules.platform_sync.model import PlatformChangeProgressORM
 from app.modules.workspace.model import Workspace
 from app.modules.workspace.service import WorkspaceService
@@ -1918,6 +1919,14 @@ class ChangeService:
         不进投影 join、不被 latest_progress 覆盖（archived 终态回翻 / stage_info /
         last_pushed_at / step 摘要均不作用）：CLI 墓碑或平台删除置 location 后，
         残留 progress 行不得把已删行投影回显（FR-05c 读侧防复活口径）。
+
+        2026-08-30-change-center-usage-stats task-03（design 总体方案 Wave 1 批量
+        摘要 / FR-04）：尾段挂批量 usage 投影——非 deleted 行 id 集合一次调用
+        ``ChangeUsageQueryService.summarize_changes``（批量模式对齐
+        ``_resolve_user_names`` 先例，R-03 禁 N+1），逐条映射填充
+        ``summary.usage``；无关联执行不进 map → 保持 None（D-001@v1 不回退
+        生命周期口径）。deleted 行不进收集集合，usage 恒 None（task-06 防复活
+        口径）；空列表 / 全 deleted 零查询（summarize_changes 空集合短路）。
         """
         if not changes:
             return []
@@ -1925,6 +1934,10 @@ class ChangeService:
         projected = await self._project_current_stage(pairs)
         owner_ids = {c.owner_id for c in changes if c.owner_id is not None}
         names = await self._resolve_user_names(owner_ids)
+        # task-03：usage 批量摘要只收集非 deleted 行（deleted 行 usage 恒 None，
+        # 不参与聚合）；空列表 / 全 deleted → 空集合零查询。
+        usage_ids = [c.id for c in changes if c.location != "deleted"]
+        usage_map = await ChangeUsageQueryService(self._session).summarize_changes(usage_ids)
         summaries: list[ChangeSummary] = []
         for c in changes:
             summary = ChangeSummary.model_validate(c)
@@ -1934,6 +1947,8 @@ class ChangeService:
                 # task-06：deleted 行跳过投影覆盖（row 现值原样返回）。
                 summaries.append(summary)
                 continue
+            # task-03：批量 usage 映射填充（map 无该行 = 无关联执行 → None）。
+            summary.usage = usage_map.get(c.id)
             stage_info = projected.get((c.workspace_id, c.change_key))
             if stage_info is not None:
                 stage, completed, latest_progress, last_pushed_at = stage_info
