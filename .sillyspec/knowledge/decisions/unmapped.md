@@ -217,3 +217,82 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：6fdabce0
 理由：设计内定 type="text"（对应 ghost 无边框语义）。
+
+## D-001@v1 : 团队=会话内能力而非独立会话类型
+状态：implemented
+变更：2026-08-22-team-session-unify
+锚点：未记录
+最近确认：4d7adc1d
+理由：用户明确：团队类似子代理——当前会话的 agent（主控）通过 MCP 工具派分身（worker），进度与结果回到当前消息流，全程不离开对话。不新增会话类型、不新增列表条目、没有独立团队页面。
+
+## D-002@v2 : 团队工具常驻注入（Claude 引擎，分身会话除外）
+状态：implemented
+变更：2026-08-22-team-session-unify
+锚点：未记录
+最近确认：4d7adc1d
+理由：谓词收窄：provider==='claude' 且 stage 非 worker 标识（stage 为空=普通会话或 'orchestrator'=存量主控 → 注入；分身角色/'mission_worker' → 不注入）。用户授权来源同 v1（按推荐继续）。
+supersedes：D-002@v1
+
+## D-003@v1 : 一期 Claude 专属，Codex 按钮置灰
+状态：implemented
+变更：2026-08-22-team-session-unify
+锚点：未记录
+最近确认：4d7adc1d
+理由：一期仅在 Claude 引擎会话提供团队能力；Codex 会话中触发入口置灰并提示「团队需要 Claude 引擎」。Codex MCP 注入另立后续变更（codex driver 契约注释已标"留后续任务"）。
+
+## D-004@v1 : 触发四路等价
+状态：implemented
+变更：2026-08-22-team-session-unify
+锚点：未记录
+最近确认：4d7adc1d
+理由：原型 v2 确认四条等价路径：①输入区「派团队」按钮+配置弹层 ②/team 指令前缀 ③自然语言（agent 常驻工具自主判断）④AskUser 卡选择。四路最终统一到同一条后端链路（显式预建或懒建 mission）。
+
+## D-005@v1 : 删除独立团队页面与入口
+状态：implemented
+变更：2026-08-22-team-session-unify
+锚点：未记录
+最近确认：4d7adc1d
+理由：删除 /workspaces/[id]/missions、/projects/[id]/missions 两个页面路由、mission-console 组件与「Agent 团队」菜单项；普通会话面板的「用团队分析」按钮改为在当前会话直接触发团队；历史 mission 数据不做迁移（项目未上线允许重置）。
+
+## D-006@v1 : AgentMission 新增 session_id 列绑定发起会话
+状态：implemented
+变更：2026-08-22-team-session-unify
+锚点：未记录
+最近确认：4d7adc1d
+理由：代码查证：AgentMission 无 session_id 列，旧"用团队分析"把 session_id 塞 constraints JSON 且全链路无消费（死参数）。本变更新增 agent_missions.session_id 列（FK agent_sessions，索引），废弃 constraints.session_id 约定。
+
+## D-007@v2 : worker 派发链路复用（治理门查询加判别）
+状态：implemented
+变更：2026-08-22-team-session-unify
+锚点：未记录
+最近确认：4d7adc1d
+理由：收窄为"派发链路（worktree/scope 校验/治理门规则/预算扣减）复用"；control.py 等查询条件加 role!='orchestrator' 判别。
+supersedes：D-007@v1
+
+## D-008@v1 : 会话结束与团队任务并存
+状态：implemented
+变更：2026-08-22-team-session-unify
+锚点：未记录
+最近确认：4d7adc1d
+理由：worker 独立 lease 存活不受会话影响；mission 收敛由主控工具调用与 patrol 兜底完成；用户重新开启会话（reopen 基建已有）可继续看到任务块与结果。
+
+## D-009@v1 : 主控轮双标记 mission_id + role='orchestrator'
+状态：implemented
+变更：2026-08-22-team-session-unify
+锚点：未记录
+最近确认：4d7adc1d
+理由：会话存在活跃 mission 时 inject 当轮 AgentRun 回填 mission_id + role='orchestrator' 双标记；_get_main_run 取该 mission 最新 orchestrator run（存量 external mission 同规则天然兼容）；治理门/统计查询加 role!='orchestrator' 判别。
+
+## D-010@v1 : converge 语义重定义（session 定位 + busy 引导 + 独立置位）
+状态：implemented
+变更：2026-08-22-team-session-unify
+锚点：未记录
+最近确认：4d7adc1d
+理由：converge 按 X-Session-Id 解析 mission；分身未全终态返回 status=busy 引导 agent 等待；全终态直接置 converged_at（不依赖主控 run 状态）→ finalize 锚点=最新 orchestrator run；响应 status ∈ converged/busy/conflict/needs_manual。
+
+## D-011@v1 : 旧 mission 端点删除范围精确化
+状态：implemented
+变更：2026-08-22-team-session-unify
+锚点：未记录
+最近确认：4d7adc1d
+理由：删除范围=create+list 四端点及对应前端 client；保留 GET /missions/{id}、POST /missions/{id}/cancel、全部 MCP 端点；team-progress.tsx 不动。
