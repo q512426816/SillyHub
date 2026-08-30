@@ -160,7 +160,7 @@ async def _make_task(db_session: AsyncSession, *, workspace_id: uuid.UUID) -> Ta
             change_key=f"agent-file-{change_id.hex[:6]}",
             title="Agent File Change",
             status="in_progress",
-            location="change",
+            location="active",
             path=f"/tmp/agent-file-change-{change_id.hex}",
         )
     )

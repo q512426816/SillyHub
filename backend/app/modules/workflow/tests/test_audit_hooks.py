@@ -82,7 +82,7 @@ async def _make_change(session: AsyncSession, **overrides) -> Change:
         change_key=f"test-{uuid.uuid4().hex[:8]}",
         title="Test Change",
         status="draft",
-        location="change",
+        location="active",
         path=".sillyspec/changes/test",
     )
     defaults.update(overrides)
@@ -237,7 +237,7 @@ async def test_no_audit_context_silent_skip(db_session: AsyncSession) -> None:
         change_key="test-no-ctx",
         title="No Context",
         status="draft",
-        location="change",
+        location="active",
         path=".sillyspec/changes/test",
     )
     db_session.add(change)

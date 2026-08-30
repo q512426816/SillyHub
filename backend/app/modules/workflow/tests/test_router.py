@@ -35,7 +35,7 @@ async def _setup(db_session) -> dict:
         change_key="test-change",
         title="Test Change",
         status="draft",
-        location="change",
+        location="active",
         path=".sillyspec/changes/change/test-change",
     )
     db_session.add(change)

@@ -57,7 +57,7 @@ async def _make_change(session: AsyncSession, status: str = "draft") -> Change:
         change_key="test-change",
         title="Test",
         status=status,
-        location="change",
+        location="active",
         path="test",
     )
     session.add(change)

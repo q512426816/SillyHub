@@ -23,7 +23,7 @@ async def _seed(session: AsyncSession) -> dict:
         change_key="test-agent-change",
         title="Agent Test Change",
         status="in_progress",
-        location="change",
+        location="active",
         path=".sillyspec/changes/change/test-agent-change",
     )
     session.add(change)
@@ -105,7 +105,7 @@ async def _seed_with_spec_workspace(session: AsyncSession) -> dict:
         change_key="bundle-test-change",
         title="Bundle Test Change",
         status="in_progress",
-        location="change",
+        location="active",
         path=".sillyspec/changes/change/bundle-test-change",
     )
     session.add(change)
@@ -183,7 +183,7 @@ async def test_build_spec_bundle_without_spec_workspace(db_session: AsyncSession
         change_key="no-spec-ws-change",
         title="No SpecWorkspace Change",
         status="in_progress",
-        location="change",
+        location="active",
         path=".sillyspec/changes/change/no-spec-ws",
     )
     db_session.add(change)
@@ -486,7 +486,7 @@ async def test_build_spec_bundle_no_relations_empty_list(
         change_key="solo-change",
         title="Solo Change",
         status="in_progress",
-        location="change",
+        location="active",
         path=".sillyspec/changes/change/solo",
     )
     task = Task(

@@ -120,7 +120,7 @@ async def _make_run(
             change_key=f"exec-{change_id.hex[:6]}",
             title="Exec Change",
             status="in_progress",
-            location="change",
+            location="active",
             path=str(tmp_path / "change"),
         )
     )

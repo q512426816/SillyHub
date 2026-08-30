@@ -38,7 +38,7 @@ async def _create_change(session: AsyncSession, workspace_id: uuid.UUID) -> Chan
         change_key="test-change",
         title="Test Change",
         status="draft",
-        location="change",
+        location="active",
         path=".sillyspec/changes/change/test-change",
     )
     session.add(ch)

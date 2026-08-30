@@ -184,7 +184,25 @@
 方案：main.py 改传 get_session_factory() 工厂实例；cleanup.py 三函数形参补 async_sessionmaker 注解；start_draft_cleanup_task 加 isinstance 错型 fail-fast 守卫
 结果：session_attachment 测试 4/4 绿（新增契约+错型拒绝两用例）+ ruff 过 + mypy 0 错；已提交 206523c4 未推送
 
-## ql-20260830-011-99a8 | 2026-08-30 20:19:03 | 清偿 CI 双红：backend 测试夹具 location 非法值对齐 CHECK 三值 + daemon 自更新校验目录可注入修复 CI 环境依赖
-状态：进行中
+## ql-20260830-011-99a8 | 2026-08-30 20:19:03 | 清偿 CI 双红：backend 测试夹具 location 非法值对齐 + daemon 自更新盘上校验目录改注入派生修环境依赖测试
+状态：已完成
 关联变更：（无）
-文件：backend/app/modules/agent/tests/test_context_builder.py, backend/app/modules/agent/tests/test_dispatch_profile.py, backend/app/modules/agent/tests/test_execution_context.py, backend/app/modules/agent/tests/test_m2n_agent_run.py, backend/app/modules/agent/tests/test_router.py, backend/app/modules/file/tests/test_file_agent_owner.py, backend/app/modules/workflow/tests/test_audit_hooks.py, backend/app/modules/workflow/tests/test_router.py, backend/app/modules/workflow/tests/test_spec_guardian.py, backend/app/modules/workspace/tests/test_m2n_task.py, backend/tests/core/test_audit_hooks_effective.py, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md
+文件：
+- backend/app/modules/agent/tests/test_context_builder.py（夹具 4 处 location 非法值）
+- backend/app/modules/agent/tests/test_dispatch_profile.py（夹具 1 处）
+- backend/app/modules/agent/tests/test_execution_context.py（夹具 1 处）
+- backend/app/modules/agent/tests/test_m2n_agent_run.py（夹具 1 处）
+- backend/app/modules/agent/tests/test_router.py（夹具 1 处）
+- backend/app/modules/file/tests/test_file_agent_owner.py（夹具 1 处）
+- backend/app/modules/workflow/tests/test_audit_hooks.py（夹具 2 处）
+- backend/app/modules/workflow/tests/test_router.py（夹具 1 处）
+- backend/app/modules/workflow/tests/test_spec_guardian.py（夹具 1 处）
+- backend/app/modules/workspace/tests/test_m2n_task.py（夹具 1 处）
+- backend/tests/core/test_audit_hooks_effective.py（夹具 1 处）
+- sillyhub-daemon/src/daemon.ts（_tryUpdate 两处校验目录改 dirname(_selfUpdateBundlePath)+注释）
+- sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts（bundleWith 填充 ≥64KB+两大 describe beforeEach 预置基础盘态）
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（变更索引补 ql-20260830-011-99a8 条目）
+需求：清偿 CI 双红：backend 测试夹具 location 非法值对齐 + daemon 自更新盘上校验目录改注入派生修环境依赖测试
+根因：27c05447 把 changes.location CHECK 对齐 active/archive/deleted 三值但只修了 change 模块自己的测试，其余 11 文件 15 处夹具仍插从未合法的 'change'（生产 PG 建表起即两值约束，SQLite 测试库无该约束掩盖）；951ad8be 给 _tryUpdate 加 stop 前 validateBundleOnDisk 主拦截时硬编码 DAEMON_BIN_DIR（HOME 目录），集成测试不真实落盘，作者本机恰有真实部署 bundle 才绿，CI 干净环境必红
+方案：夹具 15 处改 'active'；daemon.ts 两处校验目录改 dirname(_selfUpdateBundlePath)（生产默认同值行为不变，D-006 同款可注入）；selfupdate-scenarios 两大 describe（task-08 四路径+task-06 恢复互斥）beforeEach 预置 ≥MIN_BUNDLE_BYTES 且含 BUILD_ID 的假 bundle 模拟下载已落盘；sillyhub-daemon.md 变更索引补条目（顺带入卡 951ad8be 漏同步的 D-009 拦截语义）
+结果：daemon selfupdate 相关 3 文件 50/50 绿 + tsc 0 错；backend 11 文件 136/136 绿 + ruff format/check 0 问题；待 push 后 CI 复核

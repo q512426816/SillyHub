@@ -38,7 +38,7 @@ async def _create_change(
         change_key=key,
         title=f"Change {key}",
         status="draft",
-        location="change",
+        location="active",
         path=f".sillyspec/changes/change/{key}",
     )
     session.add(ch)

@@ -38,7 +38,7 @@ async def _setup(db_session, tmp_path) -> dict:
         change_key="test-agent-change",
         title="Agent Test",
         status="in_progress",
-        location="change",
+        location="active",
         path=".sillyspec/changes/change/test-agent-change",
     )
     db_session.add(change)

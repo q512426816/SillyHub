@@ -2153,6 +2153,11 @@ export class Daemon {
    * async 校验打破，改为校验后重跑 _isBusyForUpdate（重跑点与 stop() 首动作之间
    * 零 await）；server_command 因下载 await 挂起存在窗口，校验放在终检之前，
    * 终检与 stop() 首动作之间保持零 await（GAP-1 顺序钉扎，两路径一致满足）。
+   *
+   * 校验目录取 dirname(_selfUpdateBundlePath)（探测所读同一路径，D-006 同款
+   * 可注入口径）：生产默认值 dirname 后即 DAEMON_BIN_DIR，行为不变；测试经
+   * DaemonOptions.selfUpdateBundlePath 注入临时目录即可隔离——不再硬编码
+   * HOME 常量（集成测试环境无 ~/.sillyhub 部署时校验必挂，CI 环境依赖）。
    */
   private async _tryUpdate(
     reason: 'server_command' | 'disk_change',
@@ -2185,7 +2190,7 @@ export class Daemon {
         // 未动），盘修复后下次触发（磁盘探测 600s 周期或下条指令）正常重试
         // （不再被 skipped_inflight 挡成僵尸）。
         const bundleOk = await validateBundleOnDisk(
-          DAEMON_BIN_DIR,
+          dirname(this._selfUpdateBundlePath),
           this._preflightLog.bind(this),
           'disk_change',
         );
@@ -2243,7 +2248,7 @@ export class Daemon {
       // （WS/心跳/会话未动），盘修复后下次触发（磁盘探测 600s 周期或下条指令）
       // 正常重试（不再被 skipped_inflight 挡成僵尸）。
       const bundleOk = await validateBundleOnDisk(
-        DAEMON_BIN_DIR,
+        dirname(this._selfUpdateBundlePath),
         this._preflightLog.bind(this),
         'server_command',
       );

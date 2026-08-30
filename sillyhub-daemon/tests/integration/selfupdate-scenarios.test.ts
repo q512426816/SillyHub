@@ -59,6 +59,8 @@ vi.mock('../../src/preflight.js', async (importOriginal) => {
 
 import { Daemon, SELF_UPDATE_RETRY_INTERVAL_MS, RECOVER_AFTER_DEGRADED_MS } from '../../src/daemon.js';
 import { BUILD_ID } from '../../src/build-id.js';
+// vi.mock 对 preflight.js 是 actual 展开+三件套置换，MIN_BUNDLE_BYTES 取真实值。
+import { MIN_BUNDLE_BYTES } from '../../src/preflight.js';
 import type { DaemonConfig } from '../../src/config.js';
 import type { SessionManager } from '../../src/interactive/session-manager.js';
 import { makeTmpDir, cleanupDir } from '../helpers.js';
@@ -101,9 +103,14 @@ function makeConfig(overrides: Partial<DaemonConfig> = {}): DaemonConfig {
   };
 }
 
-/** 测试用假 bundle 内容（gen-build-id.mjs 生成的单行格式，regex 兼容）。 */
+/**
+ * 测试用假 bundle 内容（gen-build-id.mjs 生成的单行格式，regex 兼容）。
+ * 填充注释行撑过 MIN_BUNDLE_BYTES——_tryUpdate stop 前 validateBundleOnDisk
+ * 走真实验证链（size ≥ 64KB 且 BUILD_ID 可提取），假 bundle 必须能过校验。
+ */
 function bundleWith(buildId: string): string {
-  return `// fake daemon bundle (task-08 integration test)\nexport const BUILD_ID = "${buildId}";\nexport const DAEMON_VERSION = "0.0.0";\n`;
+  const filler = `// ${'x'.repeat(MIN_BUNDLE_BYTES)}`;
+  return `// fake daemon bundle (task-08 integration test)\nexport const BUILD_ID = "${buildId}";\nexport const DAEMON_VERSION = "0.0.0";\n${filler}\n`;
 }
 
 /**
@@ -200,6 +207,12 @@ describe('task-08 SELF_UPDATE 安全层四路径集成回归', () => {
     tmpDir = await makeTmpDir('task08-selfupdate-');
     pendingPath = join(tmpDir, 'pending-update.json');
     bundlePath = join(tmpDir, 'bin', 'sillyhub-daemon.js');
+    // 基础盘态：预置一份可通过校验的 bundle——模拟「下载已成功落盘」后的盘面。
+    // 路径①② download 被 mock 不真实写盘，而 stop 前主拦截的盘上校验走真实链
+    //（校验目录 = dirname(selfUpdateBundlePath) 即本文件）；路径③随后覆写为
+    // 探测目标版本。不预置则校验必挂（CI 无 ~/.sillyhub 部署，2026-08-30 红根因）。
+    await mkdir(join(tmpDir, 'bin'), { recursive: true });
+    await writeFile(bundlePath, bundleWith('v-harness-disk-base'), 'utf-8');
     restoreConsole = silenceConsole();
     runDaemonSelfUpdateMock.mockReset();
     respawnMock.mockReset();
@@ -432,6 +445,10 @@ describe('task-06 心跳降级恢复 × selfupdate 互斥（D-002/D-007/D-008）
     tmpDir = await makeTmpDir('task06-recover-');
     pendingPath = join(tmpDir, 'pending-update.json');
     bundlePath = join(tmpDir, 'bin', 'sillyhub-daemon.js');
+    // 基础盘态同 task-08 四路径：预置可通过校验的 bundle（stop 前主拦截走真实
+    // 盘上校验链，CI 无 HOME 部署，不预置必挂）。
+    await mkdir(join(tmpDir, 'bin'), { recursive: true });
+    await writeFile(bundlePath, bundleWith('v-harness-disk-base'), 'utf-8');
     restoreConsole = silenceConsole();
     runDaemonSelfUpdateMock.mockReset();
     respawnMock.mockReset();

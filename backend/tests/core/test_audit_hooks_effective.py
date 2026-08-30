@@ -87,7 +87,7 @@ def _make_change(ws: Workspace, **overrides) -> Change:
         change_key=f"hooks-{uuid.uuid4().hex[:8]}",
         title="Hooks Effective Change",
         status="draft",
-        location="change",
+        location="active",
         path=".sillyspec/changes/hooks-effective",
     )
     defaults.update(overrides)

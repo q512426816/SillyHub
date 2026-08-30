@@ -176,7 +176,7 @@ async def _seed_task_run(
             change_key=f"dp-{change_id.hex[:6]}",
             title="DP Change",
             status="in_progress",
-            location="change",
+            location="active",
             path=str(tmp_path / "change"),
         )
     )
