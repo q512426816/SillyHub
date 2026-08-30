@@ -25,12 +25,12 @@ implementation:
   - 详情聚合用例——纯明细（多模型桶+api_requests）/纯兜底（无明细行四维并入「未记录」桶、api_requests=0、ctx_tokens 排除）/混合 totals/空集合（200 且 totals 全 0、by_model 空列表、时间三元组 None）
   - 集合语义用例——并集去重（同 run 双锚点 change_id+会话 link 只计一次）/跨变更共享会话两变更各完整计一次/软删会话（deleted_at 非空）执行计入/quicklog 恒走 quicklog_session_links 会话链路
   - 时间三元组用例（D-001）——无执行三值 None/进行中（started_at 有值 finished_at NULL）/全完（MIN started_at、MAX finished_at、SUM duration_ms）
-  - 端点与列表用例——usage 端点 404（不存在/跨工作区/deleted 变更）与 403/401；list_changes 与 list_quicklog_entries 批量 usage 投影多变更一次查询、deleted 行 usage=None
+  - 端点与列表用例——usage 端点 404（不存在/跨工作区；deleted 变更 200 同既有口径）与 403/401；list_changes 与 list_quicklog_entries 批量 usage 投影多变更一次查询、deleted 行 usage=None
 acceptance:
   - 同 run 双锚点只计一次、跨变更共享会话两变更各完整计一次、软删会话执行计入
   - 兜底桶 api_requests=0 且 ctx_tokens 不参与；空集合 totals 全 0、by_model 空列表、时间三元组 None
   - 时间三元组三种 NULL 组合（无执行/进行中/全完）与 D-001 口径一致
-  - 端点 404 覆盖不存在/跨工作区/deleted 变更且 403/401 可复现；列表批量投影零 N+1、deleted 行 usage=None
+  - 端点 404 覆盖不存在/跨工作区（deleted 变更 200 同既有口径）且 403/401 可复现；列表批量投影零 N+1、deleted 行 usage=None
 verify:
   - cd backend && uv run pytest app/modules/change/tests/test_usage_stats.py -q --no-cov -n auto
 constraints:

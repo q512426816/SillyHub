@@ -58,9 +58,9 @@ Given 用户有 CHANGE_READ 权限
 When `GET /api/workspaces/{wid}/changes/{cid}/usage` 或 `GET /api/workspaces/{wid}/quicklog-entries/{ql_id}/usage`
 Then 返回 `ChangeUsageRead`（时间三元组 + totals 六指标 + by_model 分模型明细，input+output 降序、「未记录」恒末位）
 
-Given 变更/快速修复不存在、不属于该工作区、或变更 location=deleted
+Given 变更/快速修复不存在、不属于该工作区
 When 请求上述端点
-Then 404（resource-hiding，对齐既有详情端点；quicklog usage 端点同样严格 404）
+Then 404（resource-hiding，对齐既有详情端点；quicklog usage 端点同样严格 404）。deleted 变更不额外 404——与既有 `GET /changes/{change_id}` 同口径返回 200（防复活是列表投影层过滤，非 HTTP 404；execute 期 task-04 核实修正）
 
 ### FR-04: 列表内嵌用量摘要（零 N+1）
 覆盖决策：D-003@v1, D-004@v1, D-005@v1

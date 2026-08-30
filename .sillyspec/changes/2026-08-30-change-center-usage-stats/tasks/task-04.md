@@ -25,11 +25,11 @@ goal: >
   新增两个只读 usage 端点把聚合服务暴露给前端用量卡，权限与 404 语义对齐既有详情端点的 resource-hiding 口径。
 implementation:
   - 新增 GET changes/{change_id}/usage 与 GET quicklog-entries/{ql_id}/usage（挂既有 workspace 路由前缀下），response_model 为 ChangeUsageRead，Depends(require_permission(Permission.CHANGE_READ))
-  - 变更侧先经 ChangeService.get 归属校验——不存在、跨工作区、location 为 deleted 均抛 404（对齐读侧防复活口径）
+  - 变更侧归属校验——不存在、跨工作区抛 404（deleted 变更不额外 404，与既有 GET /changes/{change_id} 同口径 200；execute 期核实「防复活」是投影层过滤非 HTTP 404，原表述已修正）
   - quicklog 侧对齐 get_quicklog_entry 严格 404——条目不存在即 404，不像 sessions 姊妹端点容忍有 link 无条目竞态
   - 命中后委托 usage_service 的 get_change_usage 或 get_quicklog_usage 返回聚合结果
 acceptance:
-  - 缺权限 403；不存在、跨工作区、deleted 变更或不存在快速修复均 404
+  - 缺权限 403；不存在、跨工作区、不存在快速修复均 404（deleted 变更 200 同既有口径）
   - 两端点响应形状与 ChangeUsageRead 逐字段一致
 verify:
   - cd backend && uv run pytest app/modules/change -q --no-cov -n auto

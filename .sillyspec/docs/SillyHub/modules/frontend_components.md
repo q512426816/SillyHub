@@ -34,8 +34,9 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
   - `ctx-usage-bar` — 上下文用量前端累计
 - 变更域（changes/）：
   - `detail/` 子目录 — 变更详情展示组件族（文档矩阵 / Gate 面板 / 会话区等）
+  - `detail/change-usage-card` — 变更/快速修复执行用量卡（2026-08-30-change-center-usage-stats）：useQuery 自取数（queryKey=域+组件+kind+workspaceId+refKey，对齐 change-sessions-card 先例无轮询），按 kind 分派 getChangeUsage/getQuicklogUsage；四态（loading 骨架/error「暂无用量数据」/无执行引导/正常）；摘要行十项（开始/结束/耗时/进行中 chip=started 有值 finished 缺/轮次/四维 token/请求次数/命中率=cache_read÷(cache_read+input) 分母 0→「—」）+ 分模型折叠明细（「未记录」兜底桶灰阶恒末位）+ kind 分叉口径注脚；token/时长格式化与命中率口径锚定 session-usage-bar 惯例
   - `change-session-section` / `change-step-badge` — 变更会话区与阶段徽标
-  - `quicklog-drawer` / `quicklog-table` — quicklog 条目查看
+  - `quicklog-drawer` / `quicklog-table` — quicklog 条目查看；两者均含「执行」列/用量卡消费（drawer 底 sessions 卡旁挂 change-usage-card kind=quicklog；table 加「执行」紧凑两行列——耗时+进行中标记/N 万 tok·N 次[·N 轮]/悬浮起止/usage null→「—」，2026-08-30-change-center-usage-stats）；变更中心列表页 columns 同款「执行」列（UsageExecCell，page.tsx 模块级）
 - 工作区域：
   - 入口件：`workspace-card` / `workspace-scan-dialog` / `workspace-switcher` / `workspace-tabs`
     （workspace-card 带类型徽标、workspace-scan-dialog 带类型必选下拉+描述

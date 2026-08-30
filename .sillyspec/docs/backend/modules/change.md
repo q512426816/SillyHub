@@ -48,7 +48,21 @@ quicklog 双源合并查询（平台上行条目 × 文件条目）也在本模�
   `archive-confirm`——校验统一走 `StageProjectionService.compute_pending_review`；
   body 可带 `notify_session`（缺省 true），响应含 `notified_session` / `notify_error`。
 - quicklog 读面：`GET /quicklog-entries`、`GET /quicklog-entries/{ql_id}`。
+- 用量读面（2026-08-30-change-center-usage-stats，只读聚合零迁移）：
+  `GET /changes/{change_id}/usage` / `GET /quicklog-entries/{ql_id}/usage`
+  （CHANGE_READ，ChangeUsageRead=时间三元组+totals 六指标+by_model 分模型明细；
+  变更 404=ChangeNotFound 归属过滤、deleted 同既有详情端点 200；quicklog 先
+  get_entry 严格 404）；`ChangeSummary.usage` / `QuicklogEntryListItem.usage`
+  计算字段经批量单查询填充零 N+1。
 - 服务层：
+  - `ChangeUsageQueryService`（usage_service.py，2026-08-30-change-center-usage-stats）：
+    `get_change_usage` / `get_quicklog_usage`（去重执行集合——变更侧 change_id
+    派发锚点 UNION change_session_links 会话锚点整行去重；quicklog 侧
+    quicklog_session_links JOIN DISTINCT；软删会话计入不过滤）+ 两段聚合
+    （agent_run_model_usage GROUP BY model 主源 + 无明细 run 四维列兜底
+    SUM(COALESCE)，ctx_tokens 排除、兜底 api_requests 恒 0，「未记录」桶恒末位）
+    + 时间三元组 MIN/MAX/SUM（执行时间口径，全 NULL→None）+ `summarize_changes` /
+    `summarize_quicklogs`（批量摘要锚点 UNION/DISTINCT 后 GROUP BY）。
   - `ChangeService`：list/get/update_progress/approve/reject/
     transition(_with_dispatch)/submit_feedback/check_archive_gate/reparse(scope)/
     complete_stage + review 四方法 + `_bind_change_to_session` / `_project_current_stage` /

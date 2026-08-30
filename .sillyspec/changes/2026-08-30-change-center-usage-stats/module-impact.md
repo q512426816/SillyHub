@@ -24,6 +24,6 @@ created_at: 2026-08-30 17:04:11
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `docs/SillyHub/modules/change.md`（change 模块卡，如存在该名）或对应 change 模块文档 | 补两个 usage 端点与列表 usage 字段契约摘要 | pending |
-| `docs/SillyHub/modules/frontend.md` 或前端组件模块文档（changes 域组件清单） | 补 change-usage-card 组件条目与两列表新列 | pending |
+| `docs/backend/modules/change.md` | 契约摘要补用量读面两端点 + usage 计算字段 + 服务层补 ChangeUsageQueryService 条目（execute 收尾同步） | done |
+| `docs/SillyHub/modules/frontend_components.md` | 变更域补 detail/change-usage-card 组件条目 + quicklog-drawer/table 与列表页「执行」列消费说明（execute 收尾同步） | done |
 | `_module-map.yaml` | usage_service.py 归 change 模块既有目录、组件归 components/changes 既有目录，无需新映射条目；待 scan 刷新 | skipped |

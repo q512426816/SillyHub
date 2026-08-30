@@ -150,7 +150,7 @@ interface ChangeUsageCardProps {
 边界口径（Design Grill 补充，G2/G3/F12）：
 - **软删会话计入统计**：`agent_sessions.deleted_at` 非空的会话其执行仍计入（消耗真实发生；`agent_runs.agent_session_id` 外键刻意 `SET NULL` 不断链，agent/model.py:767-769）；UI 会话卡隐藏软删会话是展示层考虑，与用量口径不矛盾——注脚声明。无 `agent_session_id` 的孤儿 run（外键置空）无法经会话锚点命中，但派发锚点 `change_id` 仍可命中，不丢数。
 - **quicklog usage 端点 404 语义对齐详情端点**（严格 404，不像姊妹端点 `/sessions` 容忍「有 link 无条目」竞态——usage 卡只在条目存在的抽屉内渲染，窗口极小且前端按边界态降级）。
-- **deleted 变更行 usage 恒 None**：`enrich_summaries` 对 `location='deleted'` 行 continue 在投影段之前（service.py:1933-1936），尾段挂的 usage 投影同样不作用；usage 端点对 deleted 变更 404（对齐既有详情读侧防复活口径）。
+- **deleted 变更行 usage 恒 None**：`enrich_summaries` 对 `location='deleted'` 行 continue 在投影段之前（service.py:1933-1936），尾段挂的 usage 投影同样不作用。usage 端点对 deleted 变更**不额外 404**——execute 期 task-04 核实既有 `GET /changes/{change_id}` 详情端点即返回 200（「读侧防复活」是 enrich 投影层跳过 deleted 行，非 HTTP 404），usage 端点保持同口径（原设计「deleted → 404」前提不成立，已修正）。
 
 ## 生命周期契约
 
