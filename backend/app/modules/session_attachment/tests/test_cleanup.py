@@ -87,3 +87,39 @@ def _reuse(session: AsyncSession):
             return False
 
     return _Ctx()
+
+
+async def test_lifespan_wiring_passes_factory_instance() -> None:
+    """main.py lifespan 挂载契约：传 get_session_factory()（工厂实例）。
+
+    修前 main.py 传了 get_session_factory 函数本身，cleanup 内
+    ``async with session_factory()`` 调用后拿到 async_sessionmaker，
+    ``__aenter__`` 不存在直接抛 TypeError——自 11c17b36（8-20 附件变更
+    task-08）起每轮清理必败（启动日志 session_attachment.cleanup_failed）。
+    本测试锁 main.py 实际传参表达式的求值结果满足工厂契约。
+    """
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from app.core.db import get_session_factory
+
+    factory = get_session_factory()
+    assert isinstance(factory, async_sessionmaker)
+    # 工厂调用返回 AsyncSession（async with 兼容）；构造惰性不连库
+    session = factory()
+    assert isinstance(session, AsyncSession)
+    await session.close()
+
+
+async def test_start_task_rejects_non_factory_with_type_error() -> None:
+    """错型 fail-fast：传工厂生成函数本身（修前 main.py 的写法）启动即拒。
+
+    mypy 全局禁用 arg-type 拦不住该错型；不加此守卫时错型要拖到 _run_forever
+    首轮执行才抛、且被吞成 hourly warning。
+    """
+    import pytest
+
+    from app.core.db import get_session_factory
+    from app.modules.session_attachment.cleanup import start_draft_cleanup_task
+
+    with pytest.raises(TypeError, match="async_sessionmaker"):
+        start_draft_cleanup_task(get_session_factory)

@@ -278,7 +278,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
                 start_draft_cleanup_task,
             )
 
-            draft_cleanup_task = start_draft_cleanup_task(get_session_factory)
+            draft_cleanup_task = start_draft_cleanup_task(get_session_factory())
             try:
                 yield
             finally:
