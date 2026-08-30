@@ -35,3 +35,10 @@
 锚点：`backend/app/modules/platform_sync/service.py`
 最近确认：0ec935c9
 理由：B-1/B-2 修复三点：① scoped 与全量两处删除环 + _apply_parsed 更新路径均豁免 location='deleted' 行（不删不回翻，审计不 CASCADE 丢失、锚点行保活）；② _ensure_change_row 拒收双层——Change 行 location='deleted' 为主判据，行缺失时兜底探测 manifest platform_deleted 前缀（LIKE 转义 %/_，变更名含下划线常见）；③ _write_spec_root 落盘集计算阶段排除 platform_deleted 前缀路径（文件不落盘断 parser 复活链，仅挡 manifest 对齐环不够——tar 落盘在先）。附带修正：delete op 对 platform_deleted 幂等放行（仅拦 add/rename）、spec-bundle 鉴权口径 _write_auth、progress 拒收 409 用 code=change_deleted 结构化区分。
+
+## D-002@v1
+状态：implemented
+变更：2026-08-25-session-spec-binding
+锚点：backend/migrations/versions/20260825223000_add_quicklog_session_links.py（播种）
+最近确认：a9b06c98
+理由：links 为唯一关联真相：读侧全部改走 links；alembic 一次性把存量 change_id 播种成 link 行（ON CONFLICT DO NOTHING）；change_id 列保留并继续写入（创建时锚定主变更的冗余提示，双写），后续变更再评估删列。

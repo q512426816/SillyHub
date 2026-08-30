@@ -36,3 +36,11 @@ change: 2026-08-25-unified-floating-session
 - 实测复核（verify 工具自动）：module[frontend,sillyhub-daemon,daemon,agent] 退出码 0（271.3s）；API parity 201 后端端点 0 前端失配。
 - 端点影响确认：POST /api/daemon/sessions 请求体 +page_context（可选），OpenAPI/api-types 已同步。
 - 风险等级：contract-tested（零 daemon 进程侧改动，sillyhub-daemon/ 零文件触碰）。
+
+## 更新结果
+
+| 目标 | 操作 | 状态 |
+|------|------|------|
+| `multi-agent-platform modules/frontend.md` | 悬浮会话语义已由后继变更条目 2026-08-25-runtimes-entry-unified-floating 详述（FloatingSessionHost/store/锁定 scope），v1 基础为其子集 | skipped（已同步，经演进条目覆盖） |
+| `multi-agent-platform modules/frontend.changelog.md` | 归档期补 v1 条目（store+Host+page_context 前导+发起团队唤起） | done（归档期补记） |
+| `_module-map.yaml` | 无变化（未增删模块） | skipped |

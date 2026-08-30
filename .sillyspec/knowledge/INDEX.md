@@ -89,3 +89,5 @@
 - frontend|decision|决策|活动徽标|last_pushed_at|进行中可见性 → [decisions/frontend.md](decisions/frontend.md)
 - sillyhub-daemon|decision|决策|spec-bundle|pull --spec|daemon 零改动 → [decisions/sillyhub-daemon.md](decisions/sillyhub-daemon.md)
 - styles|decision|决策 → [decisions/styles.md](decisions/styles.md)
+- change|decision|决策 → [decisions/change.md](decisions/change.md)
+- daemon|decision|决策 → [decisions/daemon.md](decisions/daemon.md)
