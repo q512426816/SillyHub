@@ -49,3 +49,10 @@
 锚点：backend/app/modules/change/router.py（files/raw）
 最近确认：5d86ddb1
 理由：MAX_RAW_BYTES=50MB（变更目录为原型图/文档，远超文本端点 1MB 但无需无限）；Content-Disposition: inline + RFC5987 filename*（前端 XHR 取 blob，disposition 仅供直开兜底）。超限 413。
+
+## D-002@v1 : 数据链路走方案 A——git_log 模块扩展独立轻量 status 端点
+状态：implemented
+变更：2026-08-26-workspace-git-status
+锚点：backend/app/modules/git_log/router.py
+最近确认：86d6c405
+理由：复用 git_log 模块与 host-fs 平名通道，daemon 加单方法 git_status、backend 加 GET /git-log/status、前端共享组件。

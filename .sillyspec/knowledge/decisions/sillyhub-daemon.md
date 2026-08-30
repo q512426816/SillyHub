@@ -14,3 +14,10 @@
 锚点：`sillyhub-daemon/tests/test_bundle_metadata_compat.test.ts`
 最近确认：0ec935c9
 理由：平台先提供端点（spec-bundle 拉取/墓碑写路径），CLI 侧删除/归档墓碑上报（X1）与 pull --spec（X2）作跨仓任务在 sillyspec 仓落地（分支 sillyspec/2026-08-29-change-delete-closure-and-spec-pull：b86a593/16c21b0/fb35dc0）。daemon 本体零改动：bundle tar 新增顶层 PLATFORM-BUNDLE.json 经 test_bundle_metadata_compat 实证 pullSpecBundle/spec_version 判定兼容（.runtime 排除规则不变）；pull/push 时机口径维持现状（lease claim 按 latest_spec_version 判定，人拉/CLI 拉均为主动快照语义）。
+
+## D-002@v1 : 数据链路走方案 A——git_log 模块扩展独立轻量 status 端点
+状态：implemented
+变更：2026-08-26-workspace-git-status
+锚点：backend/app/modules/git_log/router.py
+最近确认：86d6c405
+理由：复用 git_log 模块与 host-fs 平名通道，daemon 加单方法 git_status、backend 加 GET /git-log/status、前端共享组件。

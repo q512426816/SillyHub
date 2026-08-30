@@ -100,3 +100,10 @@
 锚点：未记录
 最近确认：e784c9fb
 理由：SessionPanel 内核 100% 复用，所有高级功能（消息队列/子代理目录/上下文用量/会话配置）保留，仅重排样式适配手机竖屏。对齐 2026-08-25-unified-floating-session 验证过的"一内核·N 宿主"模式
+
+## D-002@v1 : 数据链路走方案 A——git_log 模块扩展独立轻量 status 端点
+状态：implemented
+变更：2026-08-26-workspace-git-status
+锚点：backend/app/modules/git_log/router.py
+最近确认：86d6c405
+理由：复用 git_log 模块与 host-fs 平名通道，daemon 加单方法 git_status、backend 加 GET /git-log/status、前端共享组件。
