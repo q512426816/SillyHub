@@ -1,3 +1,9 @@
+---
+author: qinyi
+created_at: 2026-08-30 20:01:26
+change: 2026-08-29-frontend-e2e-playwright
+---
+
 # 模块影响分析（Module Impact）— frontend 浏览器级 E2E 测试体系（Playwright）
 
 ## 模块影响矩阵

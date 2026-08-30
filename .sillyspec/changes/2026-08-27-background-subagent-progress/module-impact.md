@@ -4,7 +4,7 @@ created_at: 2026-08-27 09:32:00
 change: 2026-08-27-background-subagent-progress
 ---
 
-# 模块影响分析（Module Impact）· 后台异步子代理进度可视化
+# 模块影响分析（Module Impact）— 后台异步子代理进度可视化
 
 受影响模块文档同步清单（execute/verify 完成后回填 done；不同步的改 skipped 并写明原因）。
 
