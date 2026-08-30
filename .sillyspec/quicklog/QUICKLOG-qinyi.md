@@ -172,7 +172,14 @@
 方案：后端提问 body 放提问预览（_dialog_preview 同前端口径）、canUseTool body 为请求使用工具名、超时 body 为 None；待审显示名在 title 空或等于 key 时去日期前缀、body 新句式；前端标签移标题上方独立行加时间右对齐、标题独占整行、未读改左侧竖条、去点击查看、全部已读加图标、间距收紧
 结果：后端 11 passed（含新 body 断言与日期前缀剥离用例）前端 7 passed tsc 0 ruff/format 过；期间修一处类属性裸引用 NameError 被吞坑
 
-## ql-20260830-010-509a | 2026-08-30 19:53:49 | 附件草稿清理任务传参修复——main.py 传 get_session_factory 函数本身致每轮清理必抛 async_sessionmaker 上下文错误
-状态：进行中
+## ql-20260830-010-509a | 2026-08-30 19:53:49 | 附件草稿清理任务传参修复——main.py 传工厂函数本身致每轮清理必抛
+状态：已完成
 关联变更：（无）
-文件：backend/app/main.py, backend/app/modules/session_attachment/cleanup.py
+文件：
+- backend/app/main.py（lifespan 挂载点改传工厂实例）
+- backend/app/modules/session_attachment/cleanup.py（三函数类型注解+fail-fast 守卫）
+- backend/app/modules/session_attachment/tests/test_cleanup.py（新增契约与错型拒绝两用例）
+需求：附件草稿清理任务传参修复——main.py 传工厂函数本身致每轮清理必抛
+根因：11c17b36 挂载时 start_draft_cleanup_task(get_session_factory) 少调一层括号，cleanup 内 async with session_factory() 拿到 async_sessionmaker 直接抛 TypeError 被吞成 hourly warning，草稿行自 8-20 从未清理，mypy arg-type 全局禁用拦不住
+方案：main.py 改传 get_session_factory() 工厂实例；cleanup.py 三函数形参补 async_sessionmaker 注解；start_draft_cleanup_task 加 isinstance 错型 fail-fast 守卫
+结果：session_attachment 测试 4/4 绿（新增契约+错型拒绝两用例）+ ruff 过 + mypy 0 错；已提交 206523c4 未推送
