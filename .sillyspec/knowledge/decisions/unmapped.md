@@ -332,3 +332,31 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：c06c7934
 理由：统一为 page 模式手动重开——用户「以 /sessions 为准」原则的直接推论；design §4.E 明示为有意交互变更。
+
+## D-001@v1 : 方案 A——daemon 消费 SDK task_* + agent_task_status SSE 通道扩展
+状态：implemented
+变更：2026-08-27-background-subagent-progress
+锚点：未记录
+最近确认：debd368d
+理由：daemon session-manager 拦截 SDK `task_started/task_progress/task_notification` system 消息，映射为扩展的 `agent_task_status` SSE 事件（复用 Redis `agent_session:{id}` 频道模式），异步启动回执解析做兜底。否决方案 B（daemon 透传 system 落库、backend 解析派生：事件与日志两套真相源，历史回看重放解析脆弱）；否决方案 C（前端纯展示层聚合：永远缺终态信号，卡片转圈到会话结束）。
+
+## D-002@v1 : 生命周期双写——SSE 事件 + [TASK_*] 持久日志行
+状态：implemented
+变更：2026-08-27-background-subagent-progress
+锚点：未记录
+最近确认：debd368d
+理由：生命周期节点除发 SSE 外，同步落 `[TASK_STARTED]/[TASK_PROGRESS]/[TASK_NOTIFICATION]` 前缀的 stdout 日志行（单行 JSON，行级带 parent_tool_use_id）。前端 assembler 识别前缀解析为段元数据，回放与实时同源；行带 parent 自动享受跨轮归位。
+
+## D-003@v1 : 跨轮归位在 backend 落库时做（submit_messages 重映射 run_id）
+状态：implemented
+变更：2026-08-27-background-subagent-progress
+锚点：未记录
+最近确认：debd368d
+理由：backend `submit_messages` 落库时，带 parent_tool_use_id 的行查 tool_use_id→run_id 映射（进程内 LRU + agent_run_logs tool_call 行冷启动反查）改写为派发 run。否决前端会话级链接（每个消费日志的页面都要适配，容易漏）。历史数据不迁移（项目未上线）。
+
+## D-004@v1 : 空 prompt 防御——后端 422 为主，前端禁点为辅
+状态：implemented
+变更：2026-08-27-background-subagent-progress
+锚点：未记录
+最近确认：debd368d
+理由：backend `inject_session` 对 strip 后为空的 prompt 抛 422（中文文案，领域类 SessionEmptyPrompt，过 l10n 守护）；前端发送按钮空内容 disabled 为辅助。服务端拒绝是权威（防任何调用方）。
