@@ -490,6 +490,7 @@ main() {
   echo  "  下一步: sillyhub-daemon start --api-key <你的 API Key>"
   echo  "  （server_url 已写入 config.json，无需再传 --server）"
   echo  "  （或重新 source shell rc 后在任意目录运行）"
+  echo  "  开机自启（可选）: sillyhub-daemon autostart enable --server $SERVER_URL --api-key <你的 API Key>"
   echo ""
   maybe_start
 }

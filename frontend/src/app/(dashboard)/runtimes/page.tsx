@@ -287,6 +287,101 @@ export function InstallDaemonBlock() {
   );
 }
 
+/**
+ * AutostartDaemonBlock —— 「开机自启动（可选）」折叠区块。
+ *
+ * 2026-08-30-daemon-autostart task-08 / FR-07 / D-001@v1：
+ * - 命令三平台相同（CLI 内部按 Windows 计划任务 / macOS launchd / Linux systemd 分派），
+ *   不做 detectOs、无 OS 切换按钮——与 InstallDaemonBlock 的关键差异（原型
+ *   prototype-autostart-block.html）；
+ * - 自启凭据建议用 API Key（登录 Token 会过期，R-12 / Grill C-20），指引到个人设置签发；
+ * - 纯静态指引块：不发网络请求、不读后端 daemon 状态、不内嵌真实凭据
+ *   （占位符固定为 <粘贴你的 API Key>）。
+ *
+ * serverUrl 用 mounted state（window.location.origin），与 InstallDaemonBlock 同口径
+ * （防 SSR/hydration 不一致）。
+ */
+export function AutostartDaemonBlock() {
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [serverUrl, setServerUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    // server-url 用客户端实际访问地址（前端 rewrite 代理 /api + /daemon 到 backend），
+    // 与 InstallDaemonBlock / CopyDaemonCommand 一致，不硬编码 IP / 端口。
+    setServerUrl(window.location.origin);
+  }, []);
+
+  // 三平台同一命令（FR-07）；serverUrl 未就绪时先渲染占位（防 SSR/hydration 不一致）。
+  const cmd = serverUrl
+    ? `sillyhub-daemon autostart enable --server ${serverUrl} --api-key <粘贴你的 API Key>`
+    : "";
+
+  const handleCopy = async () => {
+    if (!cmd) return;
+    await navigator.clipboard.writeText(cmd);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="rounded-md border border-dashed border-border/70 bg-muted/30">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-left"
+      >
+        <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="text-[11px] font-medium text-foreground">开机自启动（可选）</span>
+        <span className="ml-auto text-[10px] text-muted-foreground">
+          {open ? "收起" : "展开"}
+        </span>
+      </button>
+      {open && (
+        <div className="flex flex-col gap-2 border-t border-border/70 px-2.5 py-1.5">
+          {/* design §4.1：需先成功启动过一次（凭据落盘后 enable 才能注册）。 */}
+          <p className="text-[10px] text-muted-foreground">
+            安装完成并<b>至少成功启动过一次</b>后，想让 daemon 随开机（或登录）自动运行，在终端执行：
+          </p>
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 shadow-sm">
+              <Terminal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <code className="min-w-0 truncate font-mono text-[11px] text-muted-foreground">
+                {cmd ||
+                  "sillyhub-daemon autostart enable --server <server> --api-key <粘贴你的 API Key>"}
+              </code>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 shrink-0 gap-1.5 px-2.5"
+              onClick={handleCopy}
+              disabled={!cmd}
+              title={copied ? "已复制" : "复制自启命令"}
+            >
+              {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              <span className="hidden sm:inline">{copied ? "已复制" : "复制"}</span>
+            </Button>
+          </div>
+          {/* R-12 / Grill C-20：登录 Token 短时效，开机后大概率已过期——自启场景必须引导 API Key。 */}
+          <p className="text-[10px] text-amber-600">
+            ⚠️ 自启动场景请用 <b>API Key</b>（长效），登录 Token 会过期失效。可前往{" "}
+            <a href="/settings/api-keys" className="underline">
+              个人设置 · API Keys
+            </a>{" "}
+            签发。
+          </p>
+          <p className="text-[10px] text-muted-foreground">
+            常见管理命令：<code className="font-mono">sillyhub-daemon autostart status</code>{" "}
+            查看注册状态 · <code className="font-mono">sillyhub-daemon autostart disable</code>{" "}
+            取消自启（不会停止正在运行的 daemon）。
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SummaryCard({
   label,
   value,
@@ -1024,6 +1119,8 @@ export default function RuntimesPage() {
         </div>
         <div className="flex w-full flex-col gap-2 lg:max-w-xl">
           <InstallDaemonBlock />
+          {/* 2026-08-30-daemon-autostart task-08：开机自启指引折叠块（安装块与启动命令之间）。 */}
+          <AutostartDaemonBlock />
           <CopyDaemonCommand compact />
         </div>
       </header>

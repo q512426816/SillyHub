@@ -80,6 +80,37 @@ sillyhub-daemon stop            # 向运行中的 daemon 发 SIGTERM
 sillyhub-daemon logs [--tail N] # 查看最后 N 行日志，默认 50
 ```
 
+## 开机自启动
+
+三平台机制均为**开机（或登录）后自动启动**，不承诺纯开机启动：
+
+- Windows：计划任务（登录时触发）
+- macOS：launchd LaunchAgent（登录加载时启动）
+- Linux：systemd 用户服务（用户会话建立时启动；`enable-linger` 成功时接近不登录也开机启动）
+
+安装完成并**至少成功启动过一次**后，执行以下命令注册自启：
+
+```bash
+# 注册开机自启动（幂等，可重复执行覆盖）
+# 建议用 API Key（长效）；登录 Token 会过期，开机后大概率无法连接
+sillyhub-daemon autostart enable --server <url> --api-key <key>
+
+# 查看注册状态
+sillyhub-daemon autostart status
+
+# 取消自启（不停止正在运行的 daemon；卸载 daemon 前先 disable）
+sillyhub-daemon autostart disable --server <url>   # 或 --all
+```
+
+三平台机制：Windows 计划任务（schtasks）/ macOS launchd（LaunchAgent）/ Linux systemd user service，全部用户级注册，免管理员/root。
+
+### 已知限制
+
+- nvm / volta / asdf 型 node 升级换路径后，自启任务会失效——重新执行 `enable` 覆盖注册即修复。
+- WSL 默认无 systemd（PID 1 非 systemd）不支持自启——需在 WSL 启用 systemd，或改用 Windows 侧安装。
+- Windows 隐藏窗口用 VBScript 中转，VBScript 处于 Microsoft 弃用轨道（当前可用）；若未来 FOD 缺失导致 `wscript` 不可用，将迁移到 `conhost --headless` / `PowerShell -WindowStyle Hidden`。
+- `install.sh` / `install.ps1` 尾部的自启提示经 backend 镜像 `/app/daemon-dist/` 下发，改安装脚本后需重建 backend 镜像才会到达新装用户（autostart CLI 能力本身随 bundle 自更新分发，不受此限）。
+
 ## 配置文件路径
 
 | 文件 | 路径 | 用途 |

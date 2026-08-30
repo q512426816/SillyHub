@@ -31,8 +31,8 @@ respawnDaemonAndExit 供单测直调（buildId / binDir 可注入）。
 - `respawnDaemonAndExit(logger, binDir = ~/.sillyhub/daemon/bin, exitDelayMs = 500)`——
   detached spawn `node <binDir>/sillyhub-daemon.js ...process.argv.slice(2)` 拉起新
   版本 + unref，成功后 exitDelayMs 退旧进程；**拉起失败记 error 不退出**（旧进程
-  保活）。仓库不存在外部 supervisor（install wrapper 是一次性 exec，无 systemd/
-  服务/计划任务），自拉起是更新后存活的唯一机制。
+  保活）。仓库无保活型 supervisor（install wrapper 是一次性 exec；2026-08-30 起有
+  可选开机（或登录）自启注册——autostart 子命令，D-002 仅开机启动不保活），自更新 respawn 自拉起仍是更新后存活的唯一机制。
 - 依赖：config、hub-client（parseJsonFromResponse）、build-id、version（parseSemver）。
   被 daemon 使用（WS SELF_UPDATE 消息也触发 runDaemonSelfUpdate）。
 
@@ -53,8 +53,11 @@ runDaemonSelfUpdate:
 - sillyspec 检查刻意阻塞启动（spawn+超时杀树 runWithTreeKill，npm install 数十秒），
   保证 daemon 启动前 CLI 就绪——spec 流程依赖它；daemon 自更新走 Node 20 原生 fetch 异步。
 - 自更新替换成功后靠**退出前自拉起 detached 新进程**生效，不是热替换，也不依赖
-  外部 supervisor（install.sh/ps1 wrapper 是一次性 exec，无重启循环——2026-08-28
-  ql-20260828-004-5798 实证"等外部 supervisor"假设从未落地，更新完进程死掉）；
+  保活型 supervisor（install.sh/ps1 wrapper 是一次性 exec，无重启循环——2026-08-28
+  ql-20260828-004-5798 实证"等外部 supervisor"假设从未落地，更新完进程死掉；2026-08-30
+  起有可选开机（或登录）自启注册：autostart 子命令三平台注册，按 D-002 仅开机启动
+  不保活——机器重启/重新登录后可自动拉起一次，但仍非重启循环，respawn 自拉起仍是
+  更新后进程交接的唯一机制）；
   dev 构建（BUILD_ID 占位 'dev'）永远跳过。WS 路径先 daemon.stop()（释放 runtime
   lock / 标 offline）再拉起，避免新进程抢锁失败。
 - respawn 拉起失败（spawn 抛错/无 pid）→ 记 error **不退出**：旧进程继续跑旧版本

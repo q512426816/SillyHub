@@ -3,7 +3,8 @@
  * sillyhub-daemon CLI 入口（task-21，W5）。
  *
  * 替代 Python `sillyhub_daemon/__main__.py`（204 行），用 commander 替代 click，
- * 提供 4 个子命令：start / stop / status / logs。
+ * 提供 5 个平级子命令：start / stop / status / logs / clean，另含 autostart 嵌套
+子命令组（enable / disable / status，2026-08-30-daemon-autostart task-05）。
  *
  * 通过 `npm i -g sillyhub-daemon` 后可直接运行：
  *   sillyhub-daemon start --server <url> --token <token>
@@ -80,6 +81,16 @@ import { PolicyEngine } from './policy/filesystem-policy.js';
 // task-04（security-audit-remediation / Grill M-2）：daemon apiKey 注入 injector。
 import { setDaemonApiKey } from './credential-injector.js';
 import { performCleanup } from './cleanup.js';
+// 2026-08-30-daemon-autostart task-05（design §3）：autostart 子命令组消费
+// task-01 顶层 API（enableAutostart/disableAutostart/autostartStatus）+
+// buildStartCommand（成功回显注册的启动命令）。
+import {
+  enableAutostart,
+  disableAutostart,
+  autostartStatus,
+  buildStartCommand,
+} from './autostart/index.js';
+import type { AutostartSystemState } from './autostart/index.js';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
 // task-06（D-007@v2）：主 agent MCP tool 注入。buildDaemonMcpServerConfig 构造
 // daemon 内置 MCP server 配置（command=node + args=[dist/mcp-server.js] + env），
@@ -401,6 +412,44 @@ export function createProgram(): Command {
       if (code !== 0) process.exit(code);
     });
 
+  // ── autostart（2026-08-30-daemon-autostart task-05，design §3）────────────
+  // 首个嵌套子命令组（现有 5 命令为平级单层，commander 原生支持嵌套）：
+  // autostart enable / disable / status。action 沿用「返回退出码，非 0 才
+  // process.exit」模式，回调收参数对象（与 startAction 同形，便于测试直调）。
+
+  const autostart = program
+    .command('autostart')
+    .description('管理 daemon 开机（或登录）自启动（enable / disable / status）。');
+
+  autostart
+    .command('enable')
+    .description('注册开机（或登录）自启动任务（幂等，重复执行覆盖）。')
+    .option('--server <url>', 'Server URL (e.g. http://localhost:8000)')
+    .option('--api-key <key>', 'Long-lived API key (X-API-Key) — mutually exclusive with --token')
+    .option('--token <token>', 'Bearer access token (short-lived, 15min) — mutually exclusive with --api-key')
+    .action(async (opts: AutostartEnableActionOptions) => {
+      const code = await autostartEnableAction(opts);
+      if (code !== 0) process.exit(code);
+    });
+
+  autostart
+    .command('disable')
+    .description('注销自启任务（不停止正在运行的 daemon）。')
+    .option('--server <url>', 'Server URL of the autostart entry to disable')
+    .option('--all', 'Disable all autostart entries')
+    .action(async (opts: AutostartDisableActionOptions) => {
+      const code = await autostartDisableAction(opts);
+      if (code !== 0) process.exit(code);
+    });
+
+  autostart
+    .command('status')
+    .description('查看自启注册状态。')
+    .action(async () => {
+      const code = await autostartStatusAction();
+      if (code !== 0) process.exit(code);
+    });
+
   return program;
 }
 
@@ -430,6 +479,19 @@ interface StartOptions {
 
 interface LogsOptions {
   tail?: string;
+}
+
+// autostart 子命令组选项（2026-08-30-daemon-autostart task-05）。commander
+// 把 --api-key 存为 camelCase apiKey、--all 存为 all（与 StartOptions 同理）。
+interface AutostartEnableActionOptions {
+  server?: string;
+  token?: string;
+  apiKey?: string;
+}
+
+interface AutostartDisableActionOptions {
+  server?: string;
+  all?: boolean;
 }
 
 // ── startAction（对齐 Python start() __main__.py:74-124）─────────────────────
@@ -1340,6 +1402,208 @@ export async function cleanAction(opts: CleanOptions): Promise<number> {
   }
   const totalMB = (result.totalFreedBytes / 1024 / 1024).toFixed(1);
   process.stdout.write(`合计释放：${totalMB} MB\n`);
+  return 0;
+}
+
+// ── autostart 子命令组（2026-08-30-daemon-autostart task-05，design §3）─────
+
+/**
+ * 输出琥珀色警告（仅 TTY 着色，重定向日志不混入 ANSI 转义码；对齐 autostart
+ * 平台层 windows.ts emitWarning 惯例，本文件无其它 ANSI 基建）。
+ * 当前唯一用途：enable 的 --token 短时效提醒（R-12 / Grill C-20）。
+ */
+function emitAmberWarning(message: string): void {
+  const line = process.stderr.isTTY
+    ? `\x1b[33m${message}\x1b[0m\n`
+    : `${message}\n`;
+  process.stderr.write(line);
+}
+
+/**
+ * autostart enable 子命令业务逻辑。导出便于测试直调（与 startAction 同形收参数对象）。
+ *
+ * 凭据管线与 startAction step 0-4 逐字对齐（design §3 / Grill C-05）：
+ *   1. step 0 互斥校验：--token 与 --api-key 同给 → stderr + return 1（先于
+ *      config 加载，避免污染持久化文件）；
+ *   2. serverUrl 缺省 DEFAULT_CONFIG.server_url（Grill C-19）；
+ *   3. loadConfigFn(serverUrl) 合并 CLI 覆盖（token↔api_key 互斥互清，仅 enable
+ *      关心的 server/token/api_key 三字段）；
+ *   4. **无条件 saveConfigFn(config, config.server_url) 落盘**——落盘先于凭据
+ *      校验（与 start 语义一致）；凭据不进自启任务命令（D-004），开机拉起后由
+ *      start 从本 per-server config 读取；
+ *   5. 合并后 config 与命令行均无凭据 → stderr 中文提示 + return 1，不注册
+ *      半残任务（enableAutostart 不被调用）；
+ *   6. --token 短时效琥珀警告（R-12 / Grill C-20，注册前打印，注册成功与否都提示）；
+ *   7. enableAutostart（task-01 顶层 API）→ ok:false 走 stderr + return 1。
+ *
+ * 平台侧警告（node 路径漂移 / linger 降级）由平台策略层 stderr 直出，此处不重复。
+ *
+ * @returns 退出码（0 注册成功，1 各类失败）
+ */
+export async function autostartEnableAction(opts: AutostartEnableActionOptions): Promise<number> {
+  // step 0: 互斥校验（对齐 startAction：先于 config 加载，避免污染持久化文件）。
+  if (opts.token && opts.apiKey) {
+    process.stderr.write('Error: --token and --api-key are mutually exclusive.\n');
+    return 1;
+  }
+
+  // step 1-2: serverUrl 默认 DEFAULT_CONFIG.server_url（Grill C-19，对齐 startAction：
+  // 不带 --server 时定位默认 per-server 配置文件）。
+  const serverUrl = opts.server ?? DEFAULT_CONFIG.server_url;
+  const config = { ...(await loadConfigFn(serverUrl)) };
+
+  // CLI 覆盖（token↔api_key 互斥互清，语义与 startAction 逐字一致）。
+  if (opts.server) {
+    config.server_url = opts.server;
+  }
+  if (opts.token) {
+    config.token = opts.token;
+    // 选 token 时清掉 api_key，避免持久化文件里两个都非空导致下次启动歧义。
+    config.api_key = null;
+  }
+  if (opts.apiKey) {
+    config.api_key = opts.apiKey;
+    config.token = null;
+  }
+
+  // step 3: 无条件落盘（对齐 startAction：落盘先于凭据校验，用合并后的
+  // config.server_url 定位 per-server 文件）。
+  await saveConfigFn(config, config.server_url);
+
+  // step 4: 凭据缺失校验。合并后无任何凭据 → 不注册（开机必失败的半残任务
+  // 没有意义），提示用户先带凭据成功启动一次或本命令直接追加凭据。
+  if (!config.token && !config.api_key) {
+    process.stderr.write(
+      '错误：缺少凭据（--api-key 或 --token）。请先带 --api-key 成功启动一次' +
+        '（sillyhub-daemon start --server <url> --api-key <key>），' +
+        '或本命令直接追加 --api-key / --token。\n',
+    );
+    return 1;
+  }
+
+  // --token 短时效警告（R-12 / Grill C-20）：JWT 15min 过期，开机后大概率无法
+  // 连接。注册前打印，注册成功与否都提示。
+  if (opts.token) {
+    emitAmberWarning('⚠️ 登录 Token 会过期，开机后大概率无法连接，建议改用 --api-key。');
+  }
+
+  // step 5: 注册（凭据已落 per-server config，enableAutostart 不消费凭据，D-004）。
+  const res = await enableAutostart({
+    serverUrl: config.server_url,
+    apiKey: config.api_key ?? undefined,
+    token: config.token ?? undefined,
+  });
+  if (!res.ok) {
+    process.stderr.write(`错误：注册开机（或登录）自启失败：${res.error}\n`);
+    if (res.hint) {
+      process.stderr.write(`提示：${res.hint}\n`);
+    }
+    return 1;
+  }
+
+  process.stdout.write('已注册开机（或登录）自启动。\n');
+  process.stdout.write(`任务标识：${res.record.task_name}\n`);
+  process.stdout.write(
+    `启动命令：${buildStartCommand(res.record.server_url, res.record.node_path, res.record.script_path)}\n`,
+  );
+  process.stdout.write(`日志位置：${getLogFile()}\n`);
+  process.stdout.write(`立即启动可执行：sillyhub-daemon start --server ${res.record.server_url}\n`);
+  return 0;
+}
+
+/**
+ * autostart disable 子命令业务逻辑。导出便于测试直调。
+ *
+ * 注销范围解析（design §3）：
+ *   - --server / --all 给了其一直接透传 disableAutostart（同给时 all 优先，
+ *     归 index.ts 语义）；
+ *   - 均缺时查本地记录：0 条 → 提示未注册 return 0（幂等成功）；1 条 → 直接
+ *     注销该条（省 --server）；多条 → 列出（server + 任务标识）提示带 --server
+ *     或 --all 选择后重试，return 1。
+ *
+ * 只注销注册（系统任务 + VBS/plist/service 产物 + 本地记录），不杀运行中进程
+ *（停进程仍用 stop，避免误杀多实例，design §3）。
+ *
+ * @returns 退出码（0 注销成功或无注册，1 失败/需用户选择）
+ */
+export async function autostartDisableAction(
+  opts: AutostartDisableActionOptions,
+): Promise<number> {
+  // 缺省时的交互选择：仅 0/1 条注册可无参注销，多条必须显式指定。
+  let target: { serverUrl?: string; all?: boolean };
+  if (opts.server || opts.all) {
+    target = { serverUrl: opts.server, all: opts.all };
+  } else {
+    const entries = await autostartStatus();
+    // 解构取首条（noUncheckedIndexedAccess 下 entries[0] 类型含 undefined，
+    // 空数组时 first 为 undefined 即 0 条注册分支）。
+    const [first, ...rest] = entries;
+    if (!first) {
+      process.stdout.write('未注册任何开机（或登录）自启，无需注销。\n');
+      return 0;
+    }
+    if (rest.length > 0) {
+      process.stderr.write('当前注册了多条自启，请指定要注销的条目：\n');
+      for (const entry of entries) {
+        process.stderr.write(`  ${entry.server_url}（任务标识：${entry.task_name}）\n`);
+      }
+      process.stderr.write('请带 --server <url> 注销指定条目，或用 --all 全部注销。\n');
+      return 1;
+    }
+    target = { serverUrl: first.server_url };
+  }
+
+  const res = await disableAutostart(target);
+  if (!res.ok) {
+    process.stderr.write(`错误：注销自启失败：${res.error}\n`);
+    if (res.hint) {
+      process.stderr.write(`提示：${res.hint}\n`);
+    }
+    return 1;
+  }
+  if (res.removed.length === 0) {
+    // --all 且无任何注册 → disableAutostart 幂等成功（removed 为空）。
+    process.stdout.write('未注册任何开机（或登录）自启，无需注销。\n');
+  } else {
+    for (const serverUrl of res.removed) {
+      process.stdout.write(`已注销自启：${serverUrl}\n`);
+    }
+  }
+  process.stdout.write('正在运行的 daemon 不受影响，如需停止请用 sillyhub-daemon stop。\n');
+  return 0;
+}
+
+/** autostartStatus 三态的中文标签（design §3 status 口径）。 */
+const AUTOSTART_STATE_LABELS: Record<AutostartSystemState, string> = {
+  registered: '已注册',
+  missing: '注册丢失',
+  unknown: '查询失败',
+};
+
+/**
+ * autostart status 子命令业务逻辑。导出便于测试直调。
+ *
+ * 逐条中文打印 server / 任务标识 / 系统注册状态（registered=已注册 /
+ * missing=注册丢失 / unknown=查询失败）；无本地记录时提示未注册。
+ * 恒 return 0（查询路径不报错退出，design §3）。
+ *
+ * @returns 退出码（恒 0）
+ */
+export async function autostartStatusAction(): Promise<number> {
+  const entries = await autostartStatus();
+  if (entries.length === 0) {
+    process.stdout.write('未注册任何开机（或登录）自启。\n');
+    return 0;
+  }
+  let first = true;
+  for (const entry of entries) {
+    // 多条记录间空一行分隔（纯文本无表格基建，逐条块状输出最可读）。
+    if (!first) process.stdout.write('\n');
+    first = false;
+    process.stdout.write(`Server：${entry.server_url}\n`);
+    process.stdout.write(`任务标识：${entry.task_name}\n`);
+    process.stdout.write(`系统状态：${AUTOSTART_STATE_LABELS[entry.systemState]}\n`);
+  }
   return 0;
 }
 

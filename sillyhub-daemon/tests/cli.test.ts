@@ -590,9 +590,329 @@ describe('TestStartTerminalObserver (ql-20260616-003)', () => {
     const raw = await import('node:fs/promises').then((fs) =>
       fs.readFile(configMod.configPathForServer('http://localhost:8000'), 'utf-8'),
     );
-    const saved = JSON.parse(raw);
-    expect(saved.terminal_observer_close_on_exit).toBe(true);
-    expect(saved.terminal_observer_command).toBe('xterm -e tail -f {log}');
+      const saved = JSON.parse(raw);
+      expect(saved.terminal_observer_close_on_exit).toBe(true);
+      expect(saved.terminal_observer_command).toBe('xterm -e tail -f {log}');
+      out.restore();
+    });
+});
+
+// ── TestAutostart（2026-08-30-daemon-autostart task-07，design §5 测试清单）────
+//
+// 覆盖 task-05 定型的 autostart 三子命令 CLI 分派层行为（命令树 / 分派入参 /
+// 退出码 / 凭据管线 / 输出文案）。平台产物内容级断言（plist/VBS/service）归
+// task-06 的 autostart.test.ts，本 describe 只测 CLI 分派层，不触真实
+// schtasks/launchctl/systemctl。
+//
+// 注入策略（沿用 spyOn 封装注入点模式，但观测点在依赖模块命名空间）：
+//   - cli.ts 的 loadConfigFn/saveConfigFn 是模块内 lexical 调用，vi.spyOn(cli, ...)
+//     拦不到（见上方 TestStartApiKey 注释）；二者分别委托 config.ts 的
+//     loadConfig/saveConfig（跨模块引用经 vitest ssr 命名空间），故 spy
+//     configMod.loadConfig / configMod.saveConfig 等价观测 cli 的落盘/加载管线；
+//   - enableAutostart/disableAutostart/autostartStatus 是 cli 从
+//     ./autostart/index.js 导入的跨模块引用，vi.spyOn(autostartMod, ...) 直接
+//     拦截 cli 内部调用，替换为可控 resolved 值，绝不真注册；
+//   - beforeEach 统一装 spy 并给安全默认 resolved 值（即使断言遗漏也不触系统）。
+
+type AutostartModule = typeof import('../src/autostart/index.js');
+type AutostartStatusEntryType = import('../src/autostart/index.js').AutostartStatusEntry;
+
+/** 构造最小可用 status 条目（AutostartRecord 六字段齐全 + systemState 三态）。 */
+function makeAutostartEntry(
+  overrides: Partial<AutostartStatusEntryType> = {},
+): AutostartStatusEntryType {
+  return {
+    server_url: 'http://localhost:8000',
+    platform: 'win32',
+    node_path: 'C:\\node\\node.exe',
+    script_path: 'C:\\app\\dist\\cli.js',
+    task_name: 'SillyHubDaemon-0000test',
+    enabled_at: '2026-08-30T00:00:00.000Z',
+    systemState: 'registered',
+    ...overrides,
+  };
+}
+
+describe('TestAutostart (2026-08-30-daemon-autostart task-07)', () => {
+  let tmpDir: string;
+  let out: ReturnType<typeof captureStdout>;
+  let err: ReturnType<typeof captureStderr>;
+  let autostartMod: AutostartModule;
+
+  beforeEach(async () => {
+    tmpDir = await makeTmpDir('sillyhub-cli-autostart-');
+    await setupCliWithTmpHome(tmpDir);
+    out = captureStdout();
+    err = captureStderr();
+    // autostart 三顶层 API：setupCliWithTmpHome 的 resetModules + 动态 import 后，
+    // 此处 import 与 cli.js 内部引用是同一模块实例（同 registry key）。
+    autostartMod = await import('../src/autostart/index.js');
+    vi.spyOn(autostartMod, 'enableAutostart').mockResolvedValue({
+      ok: true,
+      record: makeAutostartEntry(),
+    });
+    vi.spyOn(autostartMod, 'disableAutostart').mockResolvedValue({ ok: true, removed: [] });
+    vi.spyOn(autostartMod, 'autostartStatus').mockResolvedValue([]);
+    // 凭据管线：config 缺省有 token（enable 各用例按需覆盖）；saveConfig 不 mock
+    // 实现，真实落盘到 tmp HOME（对齐既有 start 用例的落盘语义）。
+    vi.spyOn(configMod, 'loadConfig').mockResolvedValue(makeConfig());
+    vi.spyOn(configMod, 'saveConfig');
+  });
+
+  afterEach(async () => {
     out.restore();
+    err.restore();
+    teardownCliStub();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+    await cleanupDir(tmpDir);
+  });
+
+  // ── 命令树（find(name===) 定向 + toContain，不做命令列表全量快照）──────────
+
+  it('命令树: autostart 组下 enable/disable/status 可见，enable 含 --server/--api-key/--token', () => {
+    const program = cli.createProgram();
+    const autostartCmd = program.commands.find((c) => c.name() === 'autostart');
+    expect(autostartCmd).toBeDefined();
+    const subNames = (autostartCmd?.commands ?? []).map((c) => c.name());
+    expect(subNames).toContain('enable');
+    expect(subNames).toContain('disable');
+    expect(subNames).toContain('status');
+    const enableCmd = (autostartCmd?.commands ?? []).find((c) => c.name() === 'enable');
+    const optFlags = (enableCmd?.options ?? []).map((o) => o.flags);
+    expect(optFlags.some((f) => f.includes('--server'))).toBe(true);
+    expect(optFlags.some((f) => f.includes('--api-key'))).toBe(true);
+    expect(optFlags.some((f) => f.includes('--token'))).toBe(true);
+  });
+
+  // ── enable 分派 ────────────────────────────────────────────────────────────
+
+  it('enable_dispatch_api_key: --api-key 注册成功 → 落盘先于注册、入参含 serverUrl/apiKey、退出码 0、输出任务标识与立即启动提示', async () => {
+    vi.mocked(autostartMod.enableAutostart).mockResolvedValue({
+      ok: true,
+      record: makeAutostartEntry({ task_name: 'SillyHubDaemon-abc12345' }),
+    });
+
+    const code = await cli.autostartEnableAction({
+      server: 'http://localhost:8000',
+      apiKey: 'shk_live_autostart',
+    });
+
+    expect(code).toBe(0);
+    // 分派入参：凭据经合并后传入（apiKey 优先，token 清空为 undefined，D-004）。
+    expect(autostartMod.enableAutostart).toHaveBeenCalledWith({
+      serverUrl: 'http://localhost:8000',
+      apiKey: 'shk_live_autostart',
+      token: undefined,
+    });
+    // 落盘先于注册（invocationCallOrder 为全局单调递增计数）。
+    const saveOrder = vi.mocked(configMod.saveConfig).mock.invocationCallOrder[0];
+    const enableOrder = vi.mocked(autostartMod.enableAutostart).mock.invocationCallOrder[0];
+    expect(saveOrder).toBeDefined();
+    expect(enableOrder).toBeDefined();
+    expect(saveOrder!).toBeLessThan(enableOrder!);
+    // 落盘内容：api_key 写入 per-server config 文件（凭据落盘、不进任务命令）。
+    const saveCall = vi.mocked(configMod.saveConfig).mock.calls[0];
+    expect(saveCall?.[0].api_key).toBe('shk_live_autostart');
+    expect(saveCall?.[1]).toBe(configMod.configPathForServer('http://localhost:8000'));
+    // 成功输出：任务标识 + 启动命令 + 日志位置 + 立即启动提示。
+    const output = out.writes.join('');
+    expect(output).toContain('已注册开机（或登录）自启动');
+    expect(output).toContain('任务标识：SillyHubDaemon-abc12345');
+    expect(output).toContain('启动命令：');
+    expect(output).toContain('日志位置：');
+    expect(output).toContain('立即启动可执行：sillyhub-daemon start --server http://localhost:8000');
+  });
+
+  it('enable_missing_credentials: config 与命令行均无凭据 → 退出码 1 + stderr 提示 + enableAutostart 不被调用', async () => {
+    vi.mocked(configMod.loadConfig).mockResolvedValue(
+      makeConfig({ token: null, api_key: null }),
+    );
+
+    const code = await cli.autostartEnableAction({ server: 'http://localhost:8000' });
+
+    expect(code).toBe(1);
+    // 不注册半残任务（开机必失败的任务没有意义）。
+    expect(autostartMod.enableAutostart).not.toHaveBeenCalled();
+    expect(err.writes.join('')).toContain('缺少凭据');
+    // 无条件落盘仍发生（对齐 start：落盘先于凭据校验）。
+    expect(configMod.saveConfig).toHaveBeenCalled();
+  });
+
+  it('enable_token_warning: --token 注册成功路径输出「登录 Token 会过期」警告（R-12/C-20）', async () => {
+    vi.mocked(configMod.loadConfig).mockResolvedValue(
+      makeConfig({ token: null, api_key: null }),
+    );
+    vi.mocked(autostartMod.enableAutostart).mockResolvedValue({
+      ok: true,
+      record: makeAutostartEntry({ task_name: 'SillyHubDaemon-token9876' }),
+    });
+
+    const code = await cli.autostartEnableAction({
+      server: 'http://localhost:8000',
+      token: 'jwt-short-lived',
+    });
+
+    expect(code).toBe(0);
+    expect(autostartMod.enableAutostart).toHaveBeenCalledWith({
+      serverUrl: 'http://localhost:8000',
+      token: 'jwt-short-lived',
+      apiKey: undefined,
+    });
+    // 琥珀警告走 stderr（emitAmberWarning），注册成功与否都提示。
+    expect(err.writes.join('')).toContain('登录 Token 会过期');
+    expect(out.writes.join('')).toContain('任务标识：SillyHubDaemon-token9876');
+  });
+
+  it('enable_register_failed: enableAutostart 返回 ok:false → 退出码 1 + stderr 错误与提示', async () => {
+    vi.mocked(autostartMod.enableAutostart).mockResolvedValue({
+      ok: false,
+      error: 'schtasks 创建失败: 拒绝访问',
+      hint: '检查任务计划程序权限',
+    });
+
+    const code = await cli.autostartEnableAction({
+      server: 'http://localhost:8000',
+      apiKey: 'shk_live_autostart',
+    });
+
+    expect(code).toBe(1);
+    const errText = err.writes.join('');
+    expect(errText).toContain('注册开机（或登录）自启失败');
+    expect(errText).toContain('schtasks 创建失败: 拒绝访问');
+    expect(errText).toContain('提示：检查任务计划程序权限');
+    expect(out.writes.join('')).not.toContain('已注册开机（或登录）自启动');
+  });
+
+  // ── disable 分派 ───────────────────────────────────────────────────────────
+
+  it('disable_by_server: --server 单条 → disableAutostart({serverUrl}) 被调、退出码 0、输出已注销与运行不受影响', async () => {
+    vi.mocked(autostartMod.disableAutostart).mockResolvedValue({
+      ok: true,
+      removed: ['http://localhost:8000'],
+    });
+
+    const code = await cli.autostartDisableAction({ server: 'http://localhost:8000' });
+
+    expect(code).toBe(0);
+    expect(autostartMod.disableAutostart).toHaveBeenCalledWith({
+      serverUrl: 'http://localhost:8000',
+      all: undefined,
+    });
+    const output = out.writes.join('');
+    expect(output).toContain('已注销自启：http://localhost:8000');
+    expect(output).toContain('正在运行的 daemon 不受影响');
+  });
+
+  it('disable_all: --all → disableAutostart({all:true}) 被调、多条 removed 逐行输出、退出码 0', async () => {
+    vi.mocked(autostartMod.disableAutostart).mockResolvedValue({
+      ok: true,
+      removed: ['http://localhost:8000', 'http://127.0.0.1:9001'],
+    });
+
+    const code = await cli.autostartDisableAction({ all: true });
+
+    expect(code).toBe(0);
+    expect(autostartMod.disableAutostart).toHaveBeenCalledWith({ all: true });
+    const output = out.writes.join('');
+    expect(output).toContain('已注销自启：http://localhost:8000');
+    expect(output).toContain('已注销自启：http://127.0.0.1:9001');
+    expect(output).toContain('正在运行的 daemon 不受影响');
+  });
+
+  it('disable_no_arg_multiple: 无参且多条注册 → 列出条目要求 --server/--all、退出码 1、disableAutostart 不被调用', async () => {
+    vi.mocked(autostartMod.autostartStatus).mockResolvedValue([
+      makeAutostartEntry({
+        server_url: 'http://localhost:8000',
+        task_name: 'SillyHubDaemon-0000aaaa',
+      }),
+      makeAutostartEntry({
+        server_url: 'http://127.0.0.1:9001',
+        task_name: 'SillyHubDaemon-0000bbbb',
+      }),
+    ]);
+
+    const code = await cli.autostartDisableAction({});
+
+    expect(code).toBe(1);
+    expect(autostartMod.disableAutostart).not.toHaveBeenCalled();
+    const errText = err.writes.join('');
+    expect(errText).toContain('多条自启');
+    expect(errText).toContain('http://127.0.0.1:9001');
+    expect(errText).toContain('任务标识：SillyHubDaemon-0000bbbb');
+    expect(errText).toContain('--all');
+  });
+
+  it('disable_no_arg_single: 无参且单条注册 → 自动注销该条（省 --server），退出码 0', async () => {
+    vi.mocked(autostartMod.autostartStatus).mockResolvedValue([
+      makeAutostartEntry({
+        server_url: 'http://localhost:8000',
+        task_name: 'SillyHubDaemon-0000cccc',
+      }),
+    ]);
+    vi.mocked(autostartMod.disableAutostart).mockResolvedValue({
+      ok: true,
+      removed: ['http://localhost:8000'],
+    });
+
+    const code = await cli.autostartDisableAction({});
+
+    expect(code).toBe(0);
+    expect(autostartMod.disableAutostart).toHaveBeenCalledWith({
+      serverUrl: 'http://localhost:8000',
+    });
+    expect(out.writes.join('')).toContain('已注销自启：http://localhost:8000');
+  });
+
+  it('disable_no_arg_empty: 无参且无注册 → 提示未注册、退出码 0（幂等成功），disableAutostart 不被调用', async () => {
+    vi.mocked(autostartMod.autostartStatus).mockResolvedValue([]);
+
+    const code = await cli.autostartDisableAction({});
+
+    expect(code).toBe(0);
+    expect(autostartMod.disableAutostart).not.toHaveBeenCalled();
+    expect(out.writes.join('')).toContain('未注册任何开机（或登录）自启');
+  });
+
+  // ── status 分派（恒退出码 0，查询路径不报错退出）──────────────────────────
+
+  it('status_empty: 无注册记录 → 提示未注册、退出码 0', async () => {
+    vi.mocked(autostartMod.autostartStatus).mockResolvedValue([]);
+
+    const code = await cli.autostartStatusAction();
+
+    expect(code).toBe(0);
+    expect(out.writes.join('')).toContain('未注册任何开机（或登录）自启');
+  });
+
+  it('status_entries: 有注册记录 → 逐条输出 Server/任务标识/系统状态三态标签、退出码 0', async () => {
+    vi.mocked(autostartMod.autostartStatus).mockResolvedValue([
+      makeAutostartEntry({
+        server_url: 'http://localhost:8000',
+        task_name: 'SillyHubDaemon-0000aaaa',
+        systemState: 'registered',
+      }),
+      makeAutostartEntry({
+        server_url: 'http://127.0.0.1:9001',
+        task_name: 'SillyHubDaemon-0000bbbb',
+        systemState: 'missing',
+      }),
+      makeAutostartEntry({
+        server_url: 'http://10.0.0.8:8000',
+        task_name: 'SillyHubDaemon-0000dddd',
+        systemState: 'unknown',
+      }),
+    ]);
+
+    const code = await cli.autostartStatusAction();
+
+    expect(code).toBe(0);
+    const output = out.writes.join('');
+    expect(output).toContain('Server：http://localhost:8000');
+    expect(output).toContain('任务标识：SillyHubDaemon-0000aaaa');
+    expect(output).toContain('系统状态：已注册');
+    expect(output).toContain('Server：http://10.0.0.8:8000');
+    expect(output).toContain('系统状态：注册丢失');
+    expect(output).toContain('系统状态：查询失败');
   });
 });

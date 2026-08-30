@@ -16,7 +16,11 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { detectOs, InstallDaemonBlock } from "@/app/(dashboard)/runtimes/page";
+import {
+  AutostartDaemonBlock,
+  detectOs,
+  InstallDaemonBlock,
+} from "@/app/(dashboard)/runtimes/page";
 
 // ── navigator.userAgent mock 工具 ──────────────────────────────────────────
 // jsdom 的 navigator.userAgent 默认是 jsdom-ua（不含 Win），且 navigator 属性只读，
@@ -214,5 +218,89 @@ describe("InstallDaemonBlock（task-06 / FR-02 / D-002）", () => {
         expect.stringMatching(/irm.*install\.ps1.*iex/),
       ),
     );
+  });
+});
+
+// ── AutostartDaemonBlock 渲染 / 命令 / 复制（2026-08-30-daemon-autostart task-08） ──
+
+describe("AutostartDaemonBlock（task-08 / FR-07 / D-001@v1）", () => {
+  it("默认收起，点标题展开（复用 InstallDaemonBlock 折叠骨架）", async () => {
+    setUserAgent("Mozilla/5.0 (X11; Linux x86_64)");
+    render(<AutostartDaemonBlock />);
+    // 折叠态：标题在，命令区不在。
+    expect(screen.getByText("开机自启动（可选）")).toBeInTheDocument();
+    expect(screen.queryByText(/autostart enable/)).not.toBeInTheDocument();
+
+    // 点标题展开。
+    fireEvent.click(screen.getByText("开机自启动（可选）"));
+    expect(await screen.findByText(/autostart enable/)).toBeInTheDocument();
+  });
+
+  it("命令逐字断言：autostart enable --server <origin> --api-key <粘贴你的 API Key>", async () => {
+    setUserAgent("Mozilla/5.0 (X11; Linux x86_64)");
+    render(<AutostartDaemonBlock />);
+    fireEvent.click(screen.getByText("开机自启动（可选）"));
+
+    // serverUrl = window.location.origin（组件 useEffect 内取，jsdom 下同源可复算）。
+    const code = await screen.findByText(/autostart enable/);
+    expect(code.textContent).toBe(
+      `sillyhub-daemon autostart enable --server ${window.location.origin} --api-key <粘贴你的 API Key>`,
+    );
+  });
+
+  it("无 OS 切换按钮（命令三平台相同，与 InstallDaemonBlock 的关键差异）", async () => {
+    setUserAgent("Mozilla/5.0 (X11; Linux x86_64)");
+    render(<AutostartDaemonBlock />);
+    fireEvent.click(screen.getByText("开机自启动（可选）"));
+    await screen.findByText(/autostart enable/);
+
+    expect(screen.queryByText("Windows")).not.toBeInTheDocument();
+    expect(screen.queryByText("macOS / Linux")).not.toBeInTheDocument();
+  });
+
+  it("复制按钮（title=复制自启命令）写完整命令到 clipboard", async () => {
+    setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+    render(<AutostartDaemonBlock />);
+    fireEvent.click(screen.getByText("开机自启动（可选）"));
+    await screen.findByText(/autostart enable/);
+
+    fireEvent.click(screen.getByTitle("复制自启命令"));
+
+    await waitFor(() =>
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        `sillyhub-daemon autostart enable --server ${window.location.origin} --api-key <粘贴你的 API Key>`,
+      ),
+    );
+    // 已复制态：按钮文案切换（异步 handler setState，waitFor 等渲染完成）。
+    await waitFor(() => expect(screen.getByText("已复制")).toBeInTheDocument());
+  });
+
+  it("琥珀提示：建议 API Key（登录 Token 会过期）+ /settings/api-keys 获取路径", async () => {
+    setUserAgent("Mozilla/5.0 (X11; Linux x86_64)");
+    render(<AutostartDaemonBlock />);
+    fireEvent.click(screen.getByText("开机自启动（可选）"));
+    await screen.findByText(/autostart enable/);
+
+    const amber = screen.getByText(/自启动场景请用/);
+    expect(amber.textContent).toContain("API Key");
+    expect(amber.textContent).toContain("Token");
+    // 获取路径链接指向个人设置 API Keys。
+    const link = screen.getByText("个人设置 · API Keys").closest("a");
+    expect(link?.getAttribute("href")).toBe("/settings/api-keys");
+  });
+
+  it("管理命令行：同时含 autostart status 与 autostart disable", async () => {
+    setUserAgent("Mozilla/5.0 (X11; Linux x86_64)");
+    render(<AutostartDaemonBlock />);
+    fireEvent.click(screen.getByText("开机自启动（可选）"));
+
+    const status = await screen.findByText("sillyhub-daemon autostart status");
+    const disable = screen.getByText("sillyhub-daemon autostart disable");
+    // 描述文案在两枚 code 的同一父行（p）内，对整行断言。
+    const mgmtLine = status.closest("p");
+    expect(mgmtLine).not.toBeNull();
+    expect(mgmtLine?.textContent).toContain("查看注册状态");
+    expect(mgmtLine).toBe(disable.closest("p"));
+    expect(mgmtLine?.textContent).toContain("取消自启");
   });
 });

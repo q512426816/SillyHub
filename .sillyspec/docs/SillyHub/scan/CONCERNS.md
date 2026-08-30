@@ -48,4 +48,4 @@ generator: sillyspec-scan
 
 - **asyncpg Windows 本地安装受限**：本地开发经 Docker 起 PostgreSQL、后端连容器；生产 asyncpg 与单测 aiosqlite 走不同 async 驱动，存在 JSONB / 数组 / UPSERT 方言差异风险（旧 scan 记录，未复核）。
 - **前端双 UI 体系**：antd 6 + Tailwind 3.4 + @xyflow/react + radix/shadcn 并存（`frontend/package.json` dependencies 实测），样式混合类名与优先级冲突需持续治理。
-- **daemon bundle / self-update 版本对齐**：daemon 按 backend manifest 对齐 bundle，升降级需退出重启（2026-08-28 复核坐实：代码原假设"外部 supervisor 重启"从未落地——install wrapper 是一次性 exec、无 systemd/服务/计划任务，更新完进程死掉需手动拉起；已修复 ql-20260828-004-5798：更新成功改为 stop 释放资源后 detached 自拉起新进程，拉起失败旧进程保活）。
+- **daemon bundle / self-update 版本对齐**：daemon 按 backend manifest 对齐 bundle，升降级需退出重启（2026-08-28 复核坐实：代码原假设"外部 supervisor 重启"从未落地——install wrapper 是一次性 exec、无 systemd/服务/计划任务，更新完进程死掉需手动拉起；已修复 ql-20260828-004-5798：更新成功改为 stop 释放资源后 detached 自拉起新进程，拉起失败旧进程保活。2026-08-30 更新：开机（或登录）自启已补——2026-08-30-daemon-autostart 提供 CLI `autostart` 子命令三平台注册（Windows 计划任务 / macOS launchd / Linux systemd user service），机器重启/重新登录后可自动拉起；崩溃保活仍无，按 D-002 决策刻意不做（非待办债），自更新 respawn 仍是进程交接的唯一机制）。

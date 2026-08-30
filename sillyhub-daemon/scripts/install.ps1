@@ -351,10 +351,11 @@ function Main {
   Write-Host "  Next: sillyhub-daemon start --api-key <your API key>"
   Write-Host "  (server_url in config.json, no need for --server)"
   Write-Host "  (PATH active in new terminals; or already added to current session)"
+  Write-Host "  Autostart (optional): sillyhub-daemon autostart enable --server $($script:SERVER_URL) --api-key <your API key>"
   Write-Host ""
 
-  # DG-04: no auto start. install.sh also skips start without --server/--api-key/--token.
-  # PowerShell version stays consistent, only prints next steps for manual start.
+  # DG-04: autostart is provided by the CLI `autostart` subcommand; the installer
+  # does not register any autostart itself (only prints the hint above).
 }
 
 Main

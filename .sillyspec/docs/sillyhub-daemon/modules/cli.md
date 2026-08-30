@@ -9,11 +9,12 @@ created_at: 2026-08-18 01:45:00
 # 命令行入口（cli）
 
 ## 定位
-sillyhub-daemon 的 commander 命令行入口（`#!/usr/bin/env node`，click → commander 迁移）。5 个子命令 start / stop / status / logs / clean；start 负责组装 Daemon 全量依赖（client / workspace / credential / task-runner / session-manager / policy / resilience / runtime-lock / mcp-config 合并）并管理 PID 与日志文件生命周期。全局安装后 `sillyhub-daemon start` 的实际入口。
+sillyhub-daemon 的 commander 命令行入口（`#!/usr/bin/env node`，click → commander 迁移）。6 个子命令 start / stop / status / logs / clean / autostart（autostart 为首个嵌套子命令组：enable / disable / status，2026-08-30-daemon-autostart）；start 负责组装 Daemon 全量依赖（client / workspace / credential / task-runner / session-manager / policy / resilience / runtime-lock / mcp-config 合并）并管理 PID 与日志文件生命周期。全局安装后 `sillyhub-daemon start` 的实际入口。
 
 ## 契约摘要
 - `start`：选项 `--server` / `--token` / `--api-key`（互斥，先于 config 加载校验）/ `--workspace-dir` / `--poll-interval` / `--heartbeat-interval` / `--max-concurrent` / `--log-level` / `--open-terminal` / `--terminal-mode` / `--terminal-close-on-exit` / `--terminal-command` / `--force`。
 - `stop`：读 PID → 发 SIGTERM；`status`：打印 State/PID/Runtime ID/Server URL/Config dir 五字段；`logs --tail <n>`：读日志尾部 N 行（默认 50）；`clean [--dry]`：本地缓存清理（`cleanAction` 复用 cleanup.ts `performCleanup`，`--dry` 仅统计预览释放空间）。
+- `autostart enable [--server <url>] [--api-key <key> | --token <t>]`：注册开机（或登录）自启。凭据管线与 startAction 同构（互斥校验先于 config 加载 → `loadConfigFn` 合并 CLI 覆盖（token↔api_key 互斥互清）→ 无条件 `saveConfigFn` 落盘先于凭据校验）；合并后无凭据 → stderr + return 1 不注册半残任务；`--token` 短时效琥珀警告（建议改用 --api-key，R-12）；成功打印任务标识/启动命令/日志位置/立即启动提示，exit 0/1。`autostart disable [--server <url> | --all]`：只注销注册不杀运行中进程（停进程用 stop）；均缺参时按本地记录 0 条 return 0 / 1 条直接注销 / 多条列出 return 1。`autostart status`：逐条打印 Server/任务标识/系统状态三态（已注册/注册丢失/查询失败），恒 return 0。动作函数 `autostartEnableAction` / `autostartDisableAction` / `autostartStatusAction` 导出供测试直调；平台注册能力在 autostart 模块（见 autostart.md）。
 - 可测试性注入点（封装为函数供 vi.spyOn）：`getPidFile()`（~/.sillyhub/daemon/daemon.pid）、`getLogFile()`（daemon.log）、`loadConfigFn(server_url)`、`saveConfigFn(config, server_url)`。
 - 进程管理：`readPid` / `writePid` / `removePid` / `isProcessAlive`。
 - `resolveRunningDaemonConfig(pid)`：扫 locks/runtime-*.lock（含 pid + server_hash）按 pid 反查运行中进程实际连接的 per-server 配置（ql-20260818-001）。
