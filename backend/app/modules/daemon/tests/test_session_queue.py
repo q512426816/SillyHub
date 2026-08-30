@@ -99,11 +99,17 @@ async def _finish_run(db_session, run: AgentRun) -> None:
 
 
 async def _queue_rows(db_session, session_id: uuid.UUID) -> list[AgentSessionQueuedMessage]:
+    # 2026-08-31-session-queue-ux task-05：读取序对齐新派发序键 (position,
+    # created_at)（FR-04/D-002）——position 全 0 时退化为 created_at 序，
+    # 既有断言不变。
     return list(
         (
             await db_session.execute(
-                select(AgentSessionQueuedMessage).where(
-                    AgentSessionQueuedMessage.agent_session_id == session_id
+                select(AgentSessionQueuedMessage)
+                .where(AgentSessionQueuedMessage.agent_session_id == session_id)
+                .order_by(
+                    AgentSessionQueuedMessage.position,
+                    AgentSessionQueuedMessage.created_at,
                 )
             )
         )
@@ -307,6 +313,13 @@ class TestDispatchOnTurnComplete:
     async def test_dispatch_failure_marks_entry_failed(
         self, db_session, mocked_hub, mocked_redis
     ) -> None:
+        """daemon 掉线 → 派发失败 → 条目转 failed 留队。
+
+        2026-08-31-session-queue-ux task-05 循环化语义确认：队列仅 1 条、连续
+        失败计数 1 < 2 → 循环取不到下一条 pending 自然结束，failed 留队断言
+        与循环化前逐字节一致（多条连续失败上限语义在新文件
+        test_session_queue_actions.py::TestDispatchLoop 锁定）。
+        """
         svc, uid, session_id, busy_run = await _setup_busy_session(db_session)
         await svc.inject_session(session_id, uid, prompt="排队消息", queue_when_busy=True)
         await _finish_run(db_session, busy_run)

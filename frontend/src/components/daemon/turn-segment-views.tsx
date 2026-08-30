@@ -5,8 +5,10 @@
  * 段渲染组件族——消费 session-log-assembler（task-01）的 TurnSegment 结构化段
  * 模型，按 prototype-session-stream.html 视觉基准（D-003）渲染五类段：
  *
- *   - TextSegmentView   文本段气泡（MarkdownText + streaming 尾部闪烁光标）
- *   - ThinkingRowView   思考折叠行（摘要 60 字截断 + streaming「思考中」脉冲标记）
+ *   - TextSegmentView   文本段气泡（MarkdownText + streaming 尾部闪烁光标；
+ *                       task-11：气泡右下角 hover 浮出 CopyButton 复制 segment.text）
+ *   - ThinkingRowView   思考折叠行（摘要 60 字截断 + streaming「思考中」脉冲标记；
+ *                       task-11：展开正文右下角 hover 浮出 CopyButton 复制 segment.text）
  *   - ToolRowView       工具单行（图标+工具名+主参数+状态徽章+耗时+运行中扫动；
  *                       点击整行展开 result，MarkdownText 渲染；复制按钮平移现有
  *                       turn-timeline parseToolRaw 的 copyText 规则；
@@ -56,6 +58,7 @@ import { Children, memo, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { MarkdownText } from "@/components/ui/markdown-text";
+import { CopyButton } from "@/components/daemon/copy-button";
 import { FileMessageCard } from "@/components/daemon/file-message-card";
 import { ToolExpandBody } from "@/components/daemon/tool-args-detail";
 import type {
@@ -388,7 +391,8 @@ function hasActiveTextSelection(): boolean {
 export const TextSegmentView = memo(function TextSegmentView({ segment }: TextSegmentViewProps) {
   useSegmentAnimations();
   return (
-    <div className="seg-text-bubble max-w-[86%] self-start rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
+    // task-11（FR-07）：group+relative 供 CopyButton 右下角 hover 浮出（纯 CSS 零状态）
+    <div className="seg-text-bubble group relative max-w-[86%] self-start rounded-2xl rounded-tl-md border bg-card px-4 py-2.5 text-sm leading-6 text-foreground shadow-sm">
       <MarkdownText content={segment.text} />
       {segment.streaming && (
         <span
@@ -396,6 +400,7 @@ export const TextSegmentView = memo(function TextSegmentView({ segment }: TextSe
           className="seg-caret ml-0.5 inline-block h-[15px] w-[7px] rounded-[1px] bg-brand-600 align-[-2px]"
         />
       )}
+      <CopyButton text={segment.text} />
     </div>
   );
 });
@@ -441,8 +446,13 @@ export const ThinkingRowView = memo(function ThinkingRowView({ segment }: Thinki
         )}
       </button>
       {open && (
-        <div className="mt-1 max-h-[180px] overflow-y-auto rounded-lg bg-muted px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
-          <MarkdownText content={segment.text} />
+        /* task-11（FR-07）：group+relative 外包一层挂 CopyButton（右下角 hover 浮出）——
+            不能塞进滚动容器内（overflow-y-auto 会裁掉浮出按钮）；折叠态不渲染（R-03）。 */
+        <div className="group relative mt-1">
+          <div className="max-h-[180px] overflow-y-auto rounded-lg bg-muted px-3 py-2 text-[11.5px] leading-relaxed text-muted-foreground">
+            <MarkdownText content={segment.text} />
+          </div>
+          <CopyButton text={segment.text} />
         </div>
       )}
     </div>

@@ -13751,6 +13751,53 @@
         }
       }
     },
+    "/api/daemon/sessions/{session_id}/queue/reorder": {
+      "patch": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Reorder Session Queue",
+        "description": "拖拽排序持久化（2026-08-31-session-queue-ux FR-04）。\n\n全量 entry_ids 按上传序重写 position 0..n-1；集合不一致 422\nQUEUE_ORDER_MISMATCH（D-003）。",
+        "operationId": "reorder_session_queue_api_daemon_sessions__session_id__queue_reorder_patch",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueueReorderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/sessions/{session_id}/queue/{entry_id}": {
       "delete": {
         "tags": [
@@ -13784,6 +13831,68 @@
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Update Session Queue Entry",
+        "description": "编辑排队消息 prompt（2026-08-31-session-queue-ux FR-06）。\n\n仅改文本（附件/快照不动，NG-01）；空文本/超 8000 → 422；TASK_WAKEUP\n系统通知条目 → 409（D-009）；failed 条目保存后重置 pending + 清 error\n并尝试派发。响应体为 ``entry`` 包裹键（design §5，区别于 retry 裸 DTO）。",
+        "operationId": "update_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__patch",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueueEntryUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionQueueEntryUpdateResponse"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -13835,6 +13944,60 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SessionQueueEntry"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/daemon/sessions/{session_id}/queue/{entry_id}/dispatch-now": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Dispatch Now Session Queue Entry",
+        "description": "立即发送排队消息（2026-08-31-session-queue-ux FR-05 / D-001）。\n\n条目置队首；忙=打断当前轮（interrupt 接力派发，``interrupted=true``），\n空闲=当场派发（``interrupted=false``，条目可能已删行）；非 active 409。",
+        "operationId": "dispatch_now_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__dispatch_now_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueDispatchNowResponse"
                 }
               }
             }
@@ -51737,6 +51900,55 @@
         "type": "object",
         "title": "PsProjectPlanUpdate"
       },
+      "QueueDispatchNowResponse": {
+        "properties": {
+          "interrupted": {
+            "type": "boolean",
+            "title": "Interrupted"
+          }
+        },
+        "type": "object",
+        "required": [
+          "interrupted"
+        ],
+        "title": "QueueDispatchNowResponse",
+        "description": "POST /api/daemon/sessions/{id}/queue/{entry_id}/dispatch-now 响应体\n（FR-05 / D-001）。\n\n``interrupted=True``=已打断活跃轮（run 终态钩子接力派发队首=本条）；\n``False``=空闲当场派发（条目可能已删行，前端以 SSE/load 收敛，R-04）。"
+      },
+      "QueueEntryUpdateRequest": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "maxLength": 8000,
+            "minLength": 1,
+            "title": "Prompt"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "QueueEntryUpdateRequest",
+        "description": "PATCH /api/daemon/sessions/{id}/queue/{entry_id} 请求体（FR-06 / NG-01）。\n\n仅改 prompt 文本（附件/配置快照不动）；长度 1..8000 对齐\nSessionInjectRequest.prompt 的 max_length 上限（编辑无空 prompt 豁免轮，\n故字段级 min_length=1 合法——区别于 inject 的 service 层判空）。"
+      },
+      "QueueReorderRequest": {
+        "properties": {
+          "entry_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Entry Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entry_ids"
+        ],
+        "title": "QueueReorderRequest",
+        "description": "PATCH /api/daemon/sessions/{id}/queue/reorder 请求体（FR-04 / D-003）。\n\n``entry_ids`` 全量、有序——集合须等于会话现有 pending+failed 条目全集\n（部分重排 / 重复 id → 422 QUEUE_ORDER_MISMATCH，服务端按列表序重写\nposition 0..n-1）；空列表 422（min_length=1，空队列无需 reorder）。"
+      },
       "QuicklogEntry": {
         "properties": {
           "filename": {
@@ -54444,6 +54656,10 @@
             ],
             "title": "Error Msg"
           },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -54455,10 +54671,24 @@
           "id",
           "prompt",
           "status",
+          "position",
           "created_at"
         ],
         "title": "SessionQueueEntry",
-        "description": "排队消息条目（ql-20260825-011，GET /sessions/{id}/queue 项）。"
+        "description": "排队消息条目（ql-20260825-011，GET /sessions/{id}/queue 项）。\n\n``position``（2026-08-31-session-queue-ux FR-04/D-002）：队列序键，与\n派发序同源（ORDER BY position, created_at）——拖拽重排后据此渲染顺序。"
+      },
+      "SessionQueueEntryUpdateResponse": {
+        "properties": {
+          "entry": {
+            "$ref": "#/components/schemas/SessionQueueEntry"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entry"
+        ],
+        "title": "SessionQueueEntryUpdateResponse",
+        "description": "PATCH /sessions/{id}/queue/{entry_id} 响应体（2026-08-31-session-queue-ux\ndesign §5）：``entry`` 包裹键（区别于 retry 端点的裸 DTO）。"
       },
       "SessionQueueResponse": {
         "properties": {

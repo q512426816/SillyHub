@@ -5098,6 +5098,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/queue/reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Reorder Session Queue
+         * @description 拖拽排序持久化（2026-08-31-session-queue-ux FR-04）。
+         *
+         *     全量 entry_ids 按上传序重写 position 0..n-1；集合不一致 422
+         *     QUEUE_ORDER_MISMATCH（D-003）。
+         */
+        patch: operations["reorder_session_queue_api_daemon_sessions__session_id__queue_reorder_patch"];
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/queue/{entry_id}": {
         parameters: {
             query?: never;
@@ -5115,7 +5138,15 @@ export interface paths {
         delete: operations["delete_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Session Queue Entry
+         * @description 编辑排队消息 prompt（2026-08-31-session-queue-ux FR-06）。
+         *
+         *     仅改文本（附件/快照不动，NG-01）；空文本/超 8000 → 422；TASK_WAKEUP
+         *     系统通知条目 → 409（D-009）；failed 条目保存后重置 pending + 清 error
+         *     并尝试派发。响应体为 ``entry`` 包裹键（design §5，区别于 retry 裸 DTO）。
+         */
+        patch: operations["update_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__patch"];
         trace?: never;
     };
     "/api/daemon/sessions/{session_id}/queue/{entry_id}/retry": {
@@ -5132,6 +5163,29 @@ export interface paths {
          * @description failed 排队消息重试（翻 pending 并立即尝试派发，忙则留队）。
          */
         post: operations["retry_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/queue/{entry_id}/dispatch-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dispatch Now Session Queue Entry
+         * @description 立即发送排队消息（2026-08-31-session-queue-ux FR-05 / D-001）。
+         *
+         *     条目置队首；忙=打断当前轮（interrupt 接力派发，``interrupted=true``），
+         *     空闲=当场派发（``interrupted=false``，条目可能已删行）；非 active 409。
+         */
+        post: operations["dispatch_now_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__dispatch_now_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -17558,6 +17612,42 @@ export interface components {
             create_name?: string | null;
         };
         /**
+         * QueueDispatchNowResponse
+         * @description POST /api/daemon/sessions/{id}/queue/{entry_id}/dispatch-now 响应体
+         *     （FR-05 / D-001）。
+         *
+         *     ``interrupted=True``=已打断活跃轮（run 终态钩子接力派发队首=本条）；
+         *     ``False``=空闲当场派发（条目可能已删行，前端以 SSE/load 收敛，R-04）。
+         */
+        QueueDispatchNowResponse: {
+            /** Interrupted */
+            interrupted: boolean;
+        };
+        /**
+         * QueueEntryUpdateRequest
+         * @description PATCH /api/daemon/sessions/{id}/queue/{entry_id} 请求体（FR-06 / NG-01）。
+         *
+         *     仅改 prompt 文本（附件/配置快照不动）；长度 1..8000 对齐
+         *     SessionInjectRequest.prompt 的 max_length 上限（编辑无空 prompt 豁免轮，
+         *     故字段级 min_length=1 合法——区别于 inject 的 service 层判空）。
+         */
+        QueueEntryUpdateRequest: {
+            /** Prompt */
+            prompt: string;
+        };
+        /**
+         * QueueReorderRequest
+         * @description PATCH /api/daemon/sessions/{id}/queue/reorder 请求体（FR-04 / D-003）。
+         *
+         *     ``entry_ids`` 全量、有序——集合须等于会话现有 pending+failed 条目全集
+         *     （部分重排 / 重复 id → 422 QUEUE_ORDER_MISMATCH，服务端按列表序重写
+         *     position 0..n-1）；空列表 422（min_length=1，空队列无需 reorder）。
+         */
+        QueueReorderRequest: {
+            /** Entry Ids */
+            entry_ids: string[];
+        };
+        /**
          * QuicklogEntry
          * @description A single quicklog file entry.
          */
@@ -18659,6 +18749,9 @@ export interface components {
         /**
          * SessionQueueEntry
          * @description 排队消息条目（ql-20260825-011，GET /sessions/{id}/queue 项）。
+         *
+         *     ``position``（2026-08-31-session-queue-ux FR-04/D-002）：队列序键，与
+         *     派发序同源（ORDER BY position, created_at）——拖拽重排后据此渲染顺序。
          */
         SessionQueueEntry: {
             /**
@@ -18678,11 +18771,21 @@ export interface components {
             status: string;
             /** Error Msg */
             error_msg?: string | null;
+            /** Position */
+            position: number;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * SessionQueueEntryUpdateResponse
+         * @description PATCH /sessions/{id}/queue/{entry_id} 响应体（2026-08-31-session-queue-ux
+         *     design §5）：``entry`` 包裹键（区别于 retry 端点的裸 DTO）。
+         */
+        SessionQueueEntryUpdateResponse: {
+            entry: components["schemas"]["SessionQueueEntry"];
         };
         /** SessionQueueResponse */
         SessionQueueResponse: {
@@ -30645,6 +30748,39 @@ export interface operations {
             };
         };
     };
+    reorder_session_queue_api_daemon_sessions__session_id__queue_reorder_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QueueReorderRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     delete_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__delete: {
         parameters: {
             query?: never;
@@ -30663,6 +30799,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QueueEntryUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionQueueEntryUpdateResponse"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -30694,6 +30866,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionQueueEntry"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dispatch_now_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__dispatch_now_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueueDispatchNowResponse"];
                 };
             };
             /** @description Validation Error */

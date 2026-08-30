@@ -20,7 +20,7 @@ def test_agent_session_tablename() -> None:
     assert AgentSession.__tablename__ == "agent_sessions"
 
 
-def test_agent_session_has_all_26_fields() -> None:
+def test_agent_session_has_all_27_fields() -> None:
     expected = {
         "id",
         "user_id",
@@ -57,12 +57,14 @@ def test_agent_session_has_all_26_fields() -> None:
         # 2026-08-26-team-subsession-recursion task-01（design §5.A）：会话树
         # 深度列——派发门 O(1) 深度读（主控/普通 0、分身 1、孙 2）。
         "tree_depth",
+        # ql-20260831-002-f683：会话级上下文窗口覆盖（前端上下文环分母可编辑）。
+        "ctx_window_tokens",
     }
     actual = set(AgentSession.model_fields.keys())
     assert actual == expected, (
         f"AgentSession field mismatch. missing={expected - actual}, extra={actual - expected}"
     )
-    assert len(AgentSession.model_fields) == 26
+    assert len(AgentSession.model_fields) == 27
 
 
 def test_agent_session_defaults() -> None:

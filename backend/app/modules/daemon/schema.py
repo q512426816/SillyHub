@@ -333,6 +333,42 @@ class SessionCtxWindowUpdateRequest(BaseModel):
     ctx_window_tokens: int | None = Field(default=None, ge=1_000, le=100_000_000)
 
 
+# ── 会话队列操作 DTO（2026-08-31-session-queue-ux task-04 / design §5） ───────
+
+
+class QueueReorderRequest(BaseModel):
+    """PATCH /api/daemon/sessions/{id}/queue/reorder 请求体（FR-04 / D-003）。
+
+    ``entry_ids`` 全量、有序——集合须等于会话现有 pending+failed 条目全集
+    （部分重排 / 重复 id → 422 QUEUE_ORDER_MISMATCH，服务端按列表序重写
+    position 0..n-1）；空列表 422（min_length=1，空队列无需 reorder）。
+    """
+
+    entry_ids: list[uuid.UUID] = Field(min_length=1)
+
+
+class QueueEntryUpdateRequest(BaseModel):
+    """PATCH /api/daemon/sessions/{id}/queue/{entry_id} 请求体（FR-06 / NG-01）。
+
+    仅改 prompt 文本（附件/配置快照不动）；长度 1..8000 对齐
+    SessionInjectRequest.prompt 的 max_length 上限（编辑无空 prompt 豁免轮，
+    故字段级 min_length=1 合法——区别于 inject 的 service 层判空）。
+    """
+
+    prompt: str = Field(min_length=1, max_length=8000)
+
+
+class QueueDispatchNowResponse(BaseModel):
+    """POST /api/daemon/sessions/{id}/queue/{entry_id}/dispatch-now 响应体
+    （FR-05 / D-001）。
+
+    ``interrupted=True``=已打断活跃轮（run 终态钩子接力派发队首=本条）；
+    ``False``=空闲当场派发（条目可能已删行，前端以 SSE/load 收敛，R-04）。
+    """
+
+    interrupted: bool
+
+
 # ── Change-scoped session list (2026-07-09-change-detail-session task-09 / D-005@v1) ─
 # DTO for GET /api/workspaces/{wid}/changes/{cid}/sessions. Cross-member visible
 # (D-005@v1): rows are scoped by change_id only, no user_id filter. Title is a

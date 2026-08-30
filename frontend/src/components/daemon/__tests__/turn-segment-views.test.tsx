@@ -12,7 +12,10 @@
 //   5. deriveTurnActivity 纯函数——toolCount 递归计数（含 stub children）/
 //      currentActivity 回退链 / subagents 清单（name 回退链 + status 推导）；
 //   6. TurnStatusBar——运行态文案 + 工具计数 + 15s 计时门槛（fake timers 推进）+
-//      null 锚点容错；formatElapsedMmss 边界。
+//      null 锚点容错；formatElapsedMmss 边界；
+//   7. task-11（2026-08-31-session-queue-ux FR-07）CopyButton 挂载——text 段气泡
+//      常驻复制钮（点击写 segment.text）/ 空文本不渲染；thinking 段折叠无、展开有
+//      并复制全文（jsdom 无 :hover，hover 浮出是纯 CSS 不在断言范围，只断 DOM 存在）。
 //
 // 测试纪律：FIRST / AAA / 每用例独立 fixture / 断言真实渲染输出 / 零 mock 被测组件；
 // 仅按既有惯例 mock MarkdownText（next/dynamic ssr:false 在 jsdom 同步渲染为 null，
@@ -190,6 +193,21 @@ describe("TextSegmentView 文本段", () => {
     expect(screen.getByTestId("markdown-text").textContent).toBe("答复正文");
     expect(document.querySelector(".seg-caret")).toBeNull();
   });
+
+  it("task-11 复制按钮：气泡内常驻挂载（aria-label「复制」），点击写 segment.text 纯文本", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(<TextSegmentView segment={makeTextSeg({ text: "要复制的答复正文" })} />);
+    // jsdom 无 :hover——hover 浮出是纯 CSS 行为，只断言按钮 DOM 常驻与点击写入
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(writeText).toHaveBeenCalledWith("要复制的答复正文");
+  });
+
+  it("task-11 复制按钮：text 空串不渲染按钮（空段不留空钮）", () => {
+    render(<TextSegmentView segment={makeTextSeg({ text: "" })} />);
+    expect(screen.queryByRole("button", { name: "复制" })).toBeNull();
+  });
 });
 
 describe("ThinkingRowView 思考段", () => {
@@ -223,6 +241,17 @@ describe("ThinkingRowView 思考段", () => {
   it("streaming：折叠头显示「思考中」脉冲标记", () => {
     render(<ThinkingRowView segment={makeThinkingSeg({ streaming: true })} />);
     expect(screen.getByText("思考中")).toBeInTheDocument();
+  });
+
+  it("task-11 复制按钮：折叠态无（正文未挂载），展开态挂载并复制思考全文", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    render(<ThinkingRowView segment={makeThinkingSeg({ text: "深度思考的完整内容" })} />);
+    expect(screen.queryByRole("button", { name: "复制" })).toBeNull(); // 折叠态正文未挂载（R-03）
+    fireEvent.click(screen.getByRole("button", { name: /思考过程/ })); // 展开折叠头
+    fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(writeText).toHaveBeenCalledWith("深度思考的完整内容");
   });
 });
 

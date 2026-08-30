@@ -966,6 +966,14 @@ export interface SessionQueueEntry {
   llm_provider_id?: string | null;
   status: string;
   error_msg?: string | null;
+  /**
+   * 2026-08-31-session-queue-ux D-002：队列序键（与派发序同源，backend 按
+   * ORDER BY position, created_at 回派发序）。task-04 起后端必回填；声明可选——
+   * use-message-queue 测试的 entry() 工厂（task-10 范围）尚未带该字段，必填会
+   * 令本卡 tsc 红，task-10 mock 适配时补齐。前端渲染以服务端返回序为准，
+   * 不依赖该字段本地重排。
+   */
+  position?: number;
   created_at: string;
 }
 
@@ -995,6 +1003,62 @@ export async function retrySessionQueueEntry(
 ): Promise<SessionQueueEntry> {
   return apiFetch<SessionQueueEntry>(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/queue/${encodeURIComponent(entryId)}/retry`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * 2026-08-31-session-queue-ux D-001：dispatch-now 响应体。
+ * interrupted = true 表示插队派发时打断了当时运行中的轮。
+ */
+export interface QueueDispatchNowResponse {
+  interrupted: boolean;
+}
+
+/**
+ * 2026-08-31-session-queue-ux FR-04 / D-003：队列拖拽重排——entryIds 全量有序
+ * （backend 按上传序重写 position 0..n-1）。PATCH /queue/reorder，204 无响应体；
+ * 上传集合与现存待派发条目不一致时 422 QUEUE_ORDER_MISMATCH（调用方捕获后
+ * 重拉 fetchSessionQueue 对齐服务端序）。写法对齐 retrySessionQueueEntry。
+ */
+export async function reorderSessionQueue(
+  sessionId: string,
+  entryIds: string[],
+): Promise<void> {
+  await apiFetch(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/queue/reorder`,
+    { method: "PATCH", json: { entry_ids: entryIds } },
+  );
+}
+
+/**
+ * 2026-08-31-session-queue-ux FR-06：编辑排队消息 prompt（1..8000 字——空/超长
+ * 422；TASK_WAKEUP 派发中条目 409）。响应体为 { entry } 包裹键（区别于 retry
+ * 端点的裸 DTO），返回更新后条目（含回填 position）。
+ */
+export async function updateSessionQueueEntry(
+  sessionId: string,
+  entryId: string,
+  prompt: string,
+): Promise<SessionQueueEntry> {
+  const resp = await apiFetch<{ entry: SessionQueueEntry }>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/queue/${encodeURIComponent(entryId)}`,
+    { method: "PATCH", json: { prompt } },
+  );
+  return resp.entry;
+}
+
+/**
+ * 2026-08-31-session-queue-ux FR-05 / D-001：插队立即派发——条目跳过队列直接
+ * 起轮（会话非 active 409；条目不存在 404）。interrupted = true 表示打断了
+ * 当时运行中的轮（前端据此提示）。
+ */
+export async function dispatchNowSessionQueueEntry(
+  sessionId: string,
+  entryId: string,
+): Promise<QueueDispatchNowResponse> {
+  return apiFetch<QueueDispatchNowResponse>(
+    `/api/daemon/sessions/${encodeURIComponent(sessionId)}/queue/${encodeURIComponent(entryId)}/dispatch-now`,
     { method: "POST" },
   );
 }
@@ -1169,7 +1233,8 @@ export type SessionEventKind =
   | "plan_mode_entered"
   | "bash_status"
   | "bash_chunk"
-  | "agent_task_status";
+  | "agent_task_status"
+  | "queue_changed";
 
 /** Plan 模式摘要（plan_mode_entered 事件 payload）。 */
 export interface PlanSummary {
@@ -1332,6 +1397,13 @@ export interface SessionStreamEnvelope {
    * 旧 backend / 其他工具 → null/undefined，Edit 展开区回退 LCS 自算。
    */
   edit_patch?: string | null;
+  /**
+   * 2026-08-31-session-queue-ux FR-03：queue_changed 事件载荷键 action——
+   * enqueued / merged / dispatched / failed / deleted / reordered / edited /
+   * dispatch_now，透传不解析（消费方按需读取，缺省为 null/undefined——旧
+   * backend 不发该事件）。会话级事件，无 run_id。
+   */
+  action?: string | null;
 }
 
 /**
@@ -1400,6 +1472,14 @@ export interface SessionStreamHandlers {
    * 上报——调用方初始态即视为 live，不显示横幅。
    */
   onStatusChange?(status: SessionStreamStatus, attempt?: number): void;
+  /**
+   * 2026-08-31-session-queue-ux FR-03：queue_changed 事件（会话级，无 run_id）——
+   * 服务端排队消息入队/合并/派发/失败/删除/重排/编辑/插队时推送，消费方
+   * （use-message-queue）据此即时刷新队列（替代纯 5s 轮询；轮询保留兜底，
+   * 双源并发由 use-message-queue 既有 epoch 丢弃兜底）。envelope.action 透传
+   * 变更种类，透传不解析。可选回调——不传的既有调用方零影响。
+   */
+  onQueueChanged?(event: SessionStreamEnvelope): void;
 }
 
 export interface SessionStreamConnection {
@@ -1621,6 +1701,13 @@ export function streamSession(
         break;
       case "agent_task_status":
         handlers.onAgentTaskStatus?.(parseAgentTaskStatusEvent(parsed, sessionId));
+        break;
+      case "queue_changed":
+        // 2026-08-31-session-queue-ux FR-03：会话级队列变更事件——无 run_id，
+        // 铁律不入上方 run_id 必填白名单（加入会在缺 run_id 时被误判丢弃）。
+        // envelope.action 透传变更种类（enqueued/reordered/edited/dispatch_now…），
+        // 消费方据此即时重拉队列；5s 轮询保留兜底。
+        handlers.onQueueChanged?.(envelope);
         break;
       case "session_status":
         // session_status 不进入专门 handler（无 status 变更时静默），可选扩展。

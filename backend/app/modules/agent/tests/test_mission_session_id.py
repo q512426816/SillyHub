@@ -201,7 +201,7 @@ def test_agent_sessions_model_fields_unchanged() -> None:
     origin/aggregation_key/title（design §3.3.1）+ 2026-08-24 会话归档 archived_at +
     2026-08-25-team-subsession-governance task-01 会话树两列（parent_session_id /
     worker_done_at，design §5.A）+ 2026-08-26-team-subsession-recursion task-01
-    tree_depth（design §5.A），清单同步为 26 字段。
+    tree_depth（design §5.A），清单同步为 26 字段；ql-20260831-002-f683 后为 27（+ctx_window_tokens）。
     """
     expected = {
         "id",
@@ -233,6 +233,8 @@ def test_agent_sessions_model_fields_unchanged() -> None:
         "worker_done_at",
         # 2026-08-26-team-subsession-recursion task-01（design §5.A）：会话树深度列。
         "tree_depth",
+        # ql-20260831-002-f683：会话级上下文窗口覆盖列。
+        "ctx_window_tokens",
     }
     assert set(AgentSession.model_fields.keys()) == expected
 

@@ -819,6 +819,33 @@ class DaemonService:
         """派发会话排队消息（run 终态钩子 / retry 端点共用）。"""
         await self._sess.dispatch_queued_messages(session_id)
 
+    # 2026-08-31-session-queue-ux task-04（design §4 Phase1.4-1.6）：reorder /
+    # edit / dispatch-now 三队列操作一行委托（照 archive_session 模式）。
+    async def reorder_queued_messages(
+        self,
+        session_id: uuid.UUID,
+        entry_ids: list[uuid.UUID],
+        user_id: uuid.UUID,
+    ) -> None:
+        await self._sess.reorder_queued_messages(session_id, entry_ids, user_id)
+
+    async def update_queued_message(
+        self,
+        session_id: uuid.UUID,
+        entry_id: uuid.UUID,
+        prompt: str,
+        user_id: uuid.UUID,
+    ):
+        return await self._sess.update_queued_message(session_id, entry_id, prompt, user_id)
+
+    async def dispatch_queued_message_now(
+        self,
+        session_id: uuid.UUID,
+        entry_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> bool:
+        return await self._sess.dispatch_queued_message_now(session_id, entry_id, user_id)
+
     async def end_session(
         self,
         session_id: uuid.UUID,

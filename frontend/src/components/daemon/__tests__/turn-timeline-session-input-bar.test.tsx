@@ -12,13 +12,14 @@
 // mock 成纯文本渲染（与既有 panel 测试一致）。
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 
 import { TurnTimeline, type SessionTurnView } from "../turn-timeline";
 import { SessionInputBar } from "../session-input-bar";
 import {
   removeSessionAttachment,
   uploadSessionAttachment,
+  fetchAttachmentObjectUrl,
   type AttachmentRead,
 } from "@/lib/api/session-attachments";
 import type { SessionPermissionRequest } from "@/lib/daemon";
@@ -382,6 +383,57 @@ describe("TurnTimeline v2 段模型渲染（task-06 / 2026-08-19-session-stream-
     const toolEl = screen.getByText("Grep");
     expect(textEl.compareDocumentPosition(askEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(askEl.compareDocumentPosition(toolEl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("TurnTimeline 用户气泡复制按钮（task-11 / 2026-08-31-session-queue-ux FR-07）", () => {
+  /** 合法 UUID（parseAttachmentMarkers 以 UUID 锚定，防伪标记文本误报）。 */
+  const UUID1 = "11111111-1111-1111-1111-111111111111";
+
+  beforeEach(() => {
+    // AttachmentChips 图片 chip 渲染链调 fetchAttachmentObjectUrl 且接 .then——
+    // mock 默认返回 undefined 会抛；mock reject 走图标 chip 降级（jsdom 无
+    // URL.revokeObjectURL，不取缩略图 objectURL，同 session-panel 弹窗测试口径）。
+    vi.mocked(fetchAttachmentObjectUrl).mockRejectedValue(new Error("测试不取附件预览"));
+  });
+
+  it("纯文本 prompt：气泡挂复制按钮（aria-label「复制」），点击写入原文", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    setupTimeline();
+    expect(screen.getByText("用户提问")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    });
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(writeText).toHaveBeenCalledWith("用户提问");
+  });
+
+  it("带附件标记 prompt：复制剥离标记后的正文（writeText 参数不含 [附件: 行）", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    setupTimeline({
+      turns: [
+        makeTurn({
+          prompt: `[附件:${UUID1}|image|截图.png]\n帮我看下这个报错`,
+          output: "",
+        }),
+      ],
+    });
+    expect(screen.getByText("帮我看下这个报错")).toBeInTheDocument(); // 正文已剥离标记行
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "复制" }));
+    });
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(writeText).toHaveBeenCalledWith("帮我看下这个报错");
+    expect(writeText.mock.calls[0]?.[0]).not.toContain("[附件:");
+  });
+
+  it("纯附件 prompt（剥离后 text 空串）：不渲染复制按钮", () => {
+    setupTimeline({
+      turns: [makeTurn({ prompt: `[附件:${UUID1}|image|图.png]`, output: "" })],
+    });
+    expect(screen.queryByRole("button", { name: "复制" })).toBeNull();
   });
 });
 

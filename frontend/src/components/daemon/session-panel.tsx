@@ -62,6 +62,14 @@
  *     placeholder「恢复会话中…」/ 240s 超时横幅，原型⑥不重复加）。
  *     类型过渡：lib/daemon.ts AgentSessionStatus 尚未含 suspended（task-11
  *     收口），本组件字符串比较/局部断言过渡，不改 lib。
+ *   - task-09（2026-08-31-session-queue-ux / FR-03/04/05/06）：队列条接线收口
+ *     ——SSE queue_changed → streamSession handlers 新增 onQueueChanged →
+ *     useMessageQueue.refresh()（后端入队/派发/删除/失败/重排/编辑/立即派发均
+ *     即时刷新，5s 轮询降级兜底；page 模式直接闭包 refresh，dialog 模式走既有
+ *     queueRefreshRef 先例避开 use-before-define）；MessageQueueBar 三回调
+ *     （onReorder/onEdit/onDispatchNow）透传 hook 的 reorderEntry/editEntry/
+ *     dispatchNowEntry——队列 API 失败静默由 hook 内 catch 承担，panel 层不弹
+ *     错误提示；page 与 dialog 双模式同批接线。
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -1518,6 +1526,14 @@ function SessionPanelPage({
               ),
             );
           },
+          // 2026-08-31-session-queue-ux（FR-03）：后端任一队列动作（入队/派发/
+          // 删除/失败/reordered/edited/dispatch_now）均发 queue_changed——事件驱动
+          // 立即刷新队列条，不等 5s 轮询兜底。refreshQueue 为 hook 稳定回调（仅随
+          // sessionId 变化，本 effect 亦按 sessionId 重建，闭包常新）；SSE 与轮询
+          // 双源并发由 hook 既有 epoch 丢弃兜底（RISK-5）。
+          onQueueChanged: () => {
+            refreshQueue();
+          },
           onLog: (env) => {
             // user_input 是用户消息（attach 历史/占位 turn 已作 prompt），不进 output
             // （装配器内同语义双保险）。task-09（FR-05）：其余日志归一喂共享装配器，
@@ -2313,7 +2329,19 @@ function SessionPanelPage({
     [sessionId, pageContextOverride, pendingMentions, qc, onSendSettled],
   );
 
-  const { queue, removeEntry, retryEntry, isQueueFull } = useMessageQueue({
+  // 2026-08-31-session-queue-ux（task-09）：补 refresh（SSE queue_changed 即时
+  // 刷新，FR-03）与三操作方法（FR-04 重排 / FR-05 立即发送 / FR-06 编辑）——
+  // MessageQueueBar 三回调直接透传，API 失败静默已由 hook 内 catch 承担。
+  const {
+    queue,
+    removeEntry,
+    retryEntry,
+    isQueueFull,
+    refresh: refreshQueue,
+    reorderEntry,
+    editEntry,
+    dispatchNowEntry,
+  } = useMessageQueue({
     // task-03（R-01）：预会话态不发队列查询（enabled 守卫）。
     sessionId: sessionId ?? "",
     sessionActive,
@@ -3583,7 +3611,11 @@ function SessionPanelPage({
         {/* task-03（design §3.2）：排队消息条——输入框上方水平 chips（空队列组件
             自返回 null 不占位）。onRemove 顺带清理附件元数据镜像（D-004），防
             删除条目后残留；onRetry 仅用户触发（D-003，hook 内 failed→pending 后
-            条件满足即投递）。 */}
+            条件满足即投递）。
+            2026-08-31-session-queue-ux（task-09 / FR-04/05/06）：三回调透传 hook
+            方法——onReorder 拖拽全量上传（D-003）、onEdit ✎ 保存重写、
+            onDispatchNow ⚡ 打断当前轮立即派发（D-001）；失败静默由 hook catch
+            承担，条目收敛统一以服务端 load 结果为准。 */}
         <MessageQueueBar
           entries={queue}
           onRemove={(id) => {
@@ -3595,6 +3627,15 @@ function SessionPanelPage({
           }}
           onRetry={(id) => {
             void retryEntry(id);
+          }}
+          onReorder={(ids) => {
+            void reorderEntry(ids);
+          }}
+          onEdit={(id, prompt) => {
+            void editEntry(id, prompt);
+          }}
+          onDispatchNow={(id) => {
+            void dispatchNowEntry(id);
           }}
         />
         {/* task-11：输入区上方团队触发行（活跃 chip + 配置弹层挂载），原型 §01
@@ -4040,11 +4081,22 @@ function SessionPanelDialog(props: SessionPanelProps) {
   // 消息队列（ql-20260825-011 服务端真实排队）：队列条目来自 GET /queue（刷新
   // 不丢）；忙轮发送由 sendToServerQueue 直达后端入队。idle / creating 首条消息
   // 绕过队列直发 createSession（handleSend idle 分支）。
-  const { queue, removeEntry, retryEntry, isQueueFull, refresh: refreshQueue } =
-    useMessageQueue({
-      sessionId: view.sessionId ?? "",
-      sessionActive: view.status === "active",
-    });
+  // 2026-08-31-session-queue-ux（task-09）：补三操作方法（FR-04 重排 / FR-05
+  // 立即发送 / FR-06 编辑）供 MessageQueueBar 透传——API 失败静默由 hook 内
+  // catch 承担，条目收敛统一以服务端 load 结果为准。
+  const {
+    queue,
+    removeEntry,
+    retryEntry,
+    isQueueFull,
+    refresh: refreshQueue,
+    reorderEntry,
+    editEntry,
+    dispatchNowEntry,
+  } = useMessageQueue({
+    sessionId: view.sessionId ?? "",
+    sessionActive: view.status === "active",
+  });
   useEffect(() => {
     queueRefreshRef.current = refreshQueue;
   }, [refreshQueue]);
@@ -4114,6 +4166,14 @@ function SessionPanelDialog(props: SessionPanelProps) {
                 // 已终态保持终态，不被 SSE 重连重发覆盖。
                 status: turn.status === "pending" ? "running" : turn.status,
               }), { setCurrentRun: env.run_id! }));
+            },
+            // 2026-08-31-session-queue-ux（FR-03）：后端任一队列动作（入队/派发/
+            // 删除/失败/reordered/edited/dispatch_now）均发 queue_changed——事件
+            // 驱动立即刷新队列条，不等 5s 轮询兜底。走 queueRefreshRef（同上方
+            // onTurnStarted 先例）避开 use-before-define；SSE 与轮询双源并发由
+            // hook 既有 epoch 丢弃兜底（RISK-5）。
+            onQueueChanged: () => {
+              queueRefreshRef.current?.();
             },
             onLog: (env) => {
               // channel=user_input 是用户消息（attach 时 initialTurns 已作 prompt），
@@ -5413,7 +5473,11 @@ function SessionPanelDialog(props: SessionPanelProps) {
       {/* 排队消息条（design §3.2 / 目标 3：dialog 与 page 共用；空队列组件自返回
           null 不占位）。ql-20260825-007：条目可带附件（📎 数展示），onRemove 顺带
           清理附件元数据镜像防残留（镜像 page 模式）；onRetry 仅用户触发（D-003，
-          hook 内 failed→pending 后条件满足即投递）。 */}
+          hook 内 failed→pending 后条件满足即投递）。
+          2026-08-31-session-queue-ux（task-09 / FR-04/05/06）：三回调透传 hook
+          方法——onReorder 拖拽全量上传（D-003）、onEdit ✎ 保存重写、
+          onDispatchNow ⚡ 打断当前轮立即派发（D-001）；失败静默由 hook catch
+          承担，条目收敛统一以服务端 load 结果为准。 */}
       <MessageQueueBar
         entries={queue}
         onRemove={(id) => {
@@ -5425,6 +5489,15 @@ function SessionPanelDialog(props: SessionPanelProps) {
         }}
         onRetry={(id) => {
           void retryEntry(id);
+        }}
+        onReorder={(ids) => {
+          void reorderEntry(ids);
+        }}
+        onEdit={(id, prompt) => {
+          void editEntry(id, prompt);
+        }}
+        onDispatchNow={(id) => {
+          void dispatchNowEntry(id);
         }}
       />
 

@@ -47,6 +47,7 @@ import { FileMessageCard } from "@/components/daemon/file-message-card";
 // + 图片缩略图/文件 chip 渲染。
 import { parseAttachmentMarkers } from "@/components/daemon/runtime-session-helpers";
 import { AttachmentChips } from "@/components/daemon/attachment-chips";
+import { CopyButton } from "@/components/daemon/copy-button";
 
 /** ql-20260817-003：轮次发送时间格式化（今天只显 HH:mm，跨天带 MM-DD HH:mm）。 */
 function formatTurnTime(iso: string): string {
@@ -431,7 +432,8 @@ export function TurnTimeline({
                       {formatTurnTime(turn.sender.at)}
                     </span>
                   )}
-                  <div className="max-w-[82%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-sm">
+                  {/* task-11（FR-07）：group+relative 供 CopyButton 右下角 hover 浮出。 */}
+                  <div className="group relative max-w-[82%] rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm leading-6 text-primary-foreground shadow-sm">
                     {/* task-13：剥离历史附件标记行（D-3），文本与 chips 分层渲染 */}
                     {(() => {
                       const parsed = parseAttachmentMarkers(turn.prompt);
@@ -442,6 +444,15 @@ export function TurnTimeline({
                           )}
                           {parsed.text && (
                             <div className="whitespace-pre-wrap break-words">{parsed.text}</div>
+                          )}
+                          {/* task-11：复制剥离标记后的纯文本（与显示一致，点击时惰性重解析）；
+                              纯附件消息（text 空串）不渲染复制钮。原型 .bubble-user .copy-btn
+                              定位 right:0 / bottom:-24px，经 className 覆盖默认右下偏移。 */}
+                          {parsed.text && (
+                            <CopyButton
+                              getText={() => parseAttachmentMarkers(turn.prompt).text}
+                              className="-bottom-6 right-0"
+                            />
                           )}
                         </>
                       );

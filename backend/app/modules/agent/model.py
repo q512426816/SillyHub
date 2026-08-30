@@ -1002,9 +1002,11 @@ class AgentSessionQueuedMessage(BaseModel, table=True):
     """会话排队消息（ql-20260825-011，后端真实排队）。
 
     忙轮（会话已有活跃 run）时用户发送的追问不再被 409 拒绝，而是落本表
-    排队；run 终态后由后台任务 ``dispatch_next_queued_message`` 依 created_at
-    顺序自动派发。排队是**会话级**的（单会话至多一个活跃 run 的不变式不变，
-    排队只是把「等上一轮结束」从浏览器内存挪到服务端——刷新页面不丢）。
+    排队；run 终态后由后台任务 ``dispatch_next_queued_message`` 依
+    ``position, created_at`` 顺序自动派发（2026-08-31-session-queue-ux
+    D-002：拖拽排序可持久化重排派发序）。排队是**会话级**的（单会话至多
+    一个活跃 run 的不变式不变，排队只是把「等上一轮结束」从浏览器内存
+    挪到服务端——刷新页面不丢）。
 
     - ``status``：pending（待派发）/ failed（派发失败，留在队列供用户重试或
       删除）；派发成功即删行（turn 已落 AgentRun，队列不重复存史）。
@@ -1070,6 +1072,14 @@ class AgentSessionQueuedMessage(BaseModel, table=True):
         default="pending",
         sa_column=Column(String(16), nullable=False, default="pending"),
     )  # pending / failed
+    # 2026-08-31-session-queue-ux D-002（ql-20260831 change / design §6）：派发
+    # 序键——**仅排序用，审计时间线仍是 created_at**。入队在会话行锁内取
+    # MAX(position)+1（空队列首条=0）；行锁已保证串行，故不加唯一约束。
+    # 迁移 20260831130000 已加列并按 created_at 序回填。
+    position: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, default=0),
+    )
     error_msg: str | None = Field(
         default=None,
         sa_column=Column(Text, nullable=True),

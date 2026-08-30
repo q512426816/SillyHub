@@ -21,6 +21,7 @@ import {
   parseSessionPermissionEvent,
   reopenSession,
   respondSessionPermission,
+  streamSession,
   subscribeAgentSessionsEvents,
   type AgentSessionStatus,
 } from "@/lib/daemon";
@@ -473,6 +474,8 @@ interface CapturedSseConnection {
   onmessage: ((_e: { data: string; lastEventId: string }) => void) | null;
   onopen: (() => void) | null;
   onerror: ((_ev: { status?: number }) => void) | null;
+  /** streamSession 建连时会挂 `done` 命名事件监听（终态收口），桩补空实现。 */
+  addEventListener: ReturnType<typeof vi.fn>;
   close: ReturnType<typeof vi.fn>;
 }
 
@@ -489,6 +492,7 @@ function installFetchSseMock(): void {
       onmessage: null,
       onopen: null,
       onerror: null,
+      addEventListener: vi.fn(),
       close: vi.fn(),
     };
     sseConns.push(conn);
@@ -654,5 +658,77 @@ describe("subscribeAgentSessionsEvents 停连名单 (R7)", () => {
     await vi.advanceTimersByTimeAsync(1_000);
     expect(sseConns).toHaveLength(2); // 照常重连
     sub.close();
+  });
+});
+
+// ── 2026-08-31-session-queue-ux task-10 / FR-03：streamSession queue_changed 分发 ──
+
+describe("streamSession queue_changed 分发 (task-10 / FR-03)", () => {
+  beforeEach(() => {
+    installFetchSseMock();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("queue_changed envelope（会话级无 run_id）→ onQueueChanged 透传 action；不入 run_id 白名单不被拒、不误触发 turn/token 副作用", () => {
+    const handlers = {
+      onTurnStarted: vi.fn(),
+      onLog: vi.fn(),
+      onTurnCompleted: vi.fn(),
+      onSessionEnded: vi.fn(),
+      onError: vi.fn(),
+      onTokens: vi.fn(),
+      onQueueChanged: vi.fn(),
+    };
+    const conn = streamSession("sess-1", handlers);
+    // streamSession 建连即挂 handlers，桩捕获后由测试注入 data 帧。
+    expect(sseConns).toHaveLength(1);
+
+    // 会话级事件：run_id 缺省（null）不进 run_id 必填白名单 → 正常分发。
+    sseConns[0]!.onmessage?.({
+      data: JSON.stringify({
+        event: "queue_changed",
+        session_id: "sess-1",
+        run_id: null,
+        turn: null,
+        log_id: null,
+        timestamp: "t",
+        channel: null,
+        content: null,
+        status: null,
+        exit_code: null,
+        reason: null,
+        // FR-03：action 透传不解析（enqueued/reordered/edited/dispatch_now…）。
+        action: "reordered",
+      }),
+      lastEventId: "",
+    });
+    expect(handlers.onQueueChanged).toHaveBeenCalledTimes(1);
+    expect(handlers.onQueueChanged.mock.calls[0]![0]).toMatchObject({
+      event: "queue_changed",
+      action: "reordered",
+    });
+    // 白名单外豁免是本事件的设计前提：无 Missing run_id 拒绝，也无其它副作用。
+    expect(handlers.onError).not.toHaveBeenCalled();
+    expect(handlers.onTurnStarted).not.toHaveBeenCalled();
+    expect(handlers.onTokens).not.toHaveBeenCalled();
+    expect(handlers.onTurnCompleted).not.toHaveBeenCalled();
+
+    // 对照：白名单内的 turn_started 缺 run_id 仍被拒（queue_changed 是有意豁免，
+    // 加进白名单会让该会话级事件被整批丢弃）。
+    sseConns[0]!.onmessage?.({
+      data: JSON.stringify({
+        event: "turn_started",
+        session_id: "sess-1",
+        run_id: null,
+      }),
+      lastEventId: "",
+    });
+    expect(handlers.onError).toHaveBeenCalledTimes(1);
+    expect(handlers.onTurnStarted).not.toHaveBeenCalled();
+
+    conn.close();
   });
 });

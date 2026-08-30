@@ -13,6 +13,15 @@
  * 刷新时机：sessionActive 期间 5s 轮询兜底 + 调用方在 SSE turn_started /
  * turn_completed 事件后调 refresh()。
  *
+ * 2026-08-31-session-queue-ux：补排队三操作——reorderEntry（FR-04 拖拽
+ * 重排，D-003 全量有序 ids）/ dispatchNowEntry（FR-05 立即发送，D-001 打断
+ * 当前轮语义）/ editEntry（FR-06 重新编辑）。三者逐字对齐 removeEntry 的
+ * 「调 API → 无论成败一律 load 以服务端为准」模式：失败静默、不弹错、
+ * 不回滚本地（R-02 拖拽 vs 派发竞态：落手瞬间条目恰被派发删除 → 后端
+ * 422 QUEUE_ORDER_MISMATCH → catch 静默 + load 后条目已消失自然收敛）；
+ * dispatchNowEntry 不消费响应 interrupted 字段（R-04：UI 收敛统一依赖
+ * SSE queue_changed + 随后 load）。
+ *
  * 实现约束：**不用 react-query**——dialog 模式弹窗测试无 QueryClientProvider
  * （lib/query-keys.ts 头注释的不变式：dialog 适配层零 react-query），本 hook 为
  * 两模式共享，故纯 useState + fetch 轮询（lib/query-keys.ts:12-14 先例）。
@@ -22,8 +31,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   deleteSessionQueueEntry,
+  dispatchNowSessionQueueEntry,
   fetchSessionQueue,
+  reorderSessionQueue,
   retrySessionQueueEntry,
+  updateSessionQueueEntry,
 } from "@/lib/daemon";
 
 /** 排队条目（展示形态；与 MessageQueueBar 契约保持兼容）。 */
@@ -40,6 +52,12 @@ export interface QueueEntry {
   status: "pending" | "sending" | "failed";
   /** 失败原因（status === "failed" 时有值）。 */
   errorMsg?: string;
+  /**
+   * 队列序键（2026-08-31-session-queue-ux FR-04/D-002：与派发序同源，
+   * task-04 起后端必回填；仅透传给调用方，渲染序仍以服务端 load 返回序为准，
+   * 前端不据此本地重排）。
+   */
+  position?: number;
   /** 入队时间戳（Date.now()）。 */
   createdAt: number;
 }
@@ -58,6 +76,24 @@ export interface UseMessageQueueReturn {
   removeEntry: (id: string) => void;
   /** 重试失败条目（POST retry 端点：failed→pending 并立即尝试派发）。 */
   retryEntry: (id: string) => void;
+  /**
+   * 拖拽重排（FR-04/D-003）：ids 为松手后的**全量有序** id 列表——永远整表
+   * 上传不传部分序（后端按上传序重写 position 0..n-1）。落手瞬间条目恰被
+   * 派发删除时后端 422，静默 + load 自然收敛（R-02）。
+   */
+  reorderEntry: (ids: string[]) => void;
+  /**
+   * 重新编辑（FR-06）：✎ 保存的新 prompt 文本（1..8000 字）。空/超长 422、
+   * TASK_WAKEUP 系统通知条目 409（bar 已隐藏其 ✎，属双保险）均静默 + load。
+   */
+  editEntry: (id: string, prompt: string) => void;
+  /**
+   * 立即发送（FR-05/D-001）：条目跳过队列直接起轮，忙时打断当前轮接力派发
+   * （pending 与 failed 条目均可用）；会话非 active 409 静默。**不消费**响应
+   * interrupted 字段（R-04：空闲分支当场派发成功即删行，忙时打断接力是既有
+   * 终态钩子链路）——UI 收敛统一依赖 SSE queue_changed + 本方法随后的 load。
+   */
+  dispatchNowEntry: (id: string) => void;
   /** 队列是否已满（与后端 SESSION_QUEUE_MAX_PENDING 同值）。 */
   isQueueFull: boolean;
   /** 队列长度。 */
@@ -105,6 +141,7 @@ export function useMessageQueue({
             displayPrompt: e.prompt,
             status: e.status === "failed" ? ("failed" as const) : ("pending" as const),
             errorMsg: e.error_msg ?? undefined,
+            position: e.position ?? undefined,
             createdAt: Date.parse(e.created_at) || 0,
           })),
         );
@@ -157,10 +194,55 @@ export function useMessageQueue({
     [sessionId, load],
   );
 
+  // 2026-08-31-session-queue-ux：以下三方法逐字对齐 removeEntry/retryEntry 模式
+  // （预会话守卫 → 调 API → catch 静默 → then load；UI 状态只由服务端 load 结果驱动）。
+
+  const reorderEntry = useCallback(
+    (ids: string[]) => {
+      if (sessionId === "") return;
+      void reorderSessionQueue(sessionId, ids)
+        .catch(() => {
+          /* 重排失败仍刷新：R-02 拖拽落手瞬间条目恰被派发删除 → 后端 422
+             QUEUE_ORDER_MISMATCH，静默 + load 后条目已消失自然收敛（不弹错不回滚本地） */
+        })
+        .then(() => load(sessionId));
+    },
+    [sessionId, load],
+  );
+
+  const editEntry = useCallback(
+    (id: string, prompt: string) => {
+      if (sessionId === "") return;
+      void updateSessionQueueEntry(sessionId, id, prompt)
+        .catch(() => {
+          /* 编辑失败仍刷新：422（空/超 8000 字）、409（TASK_WAKEUP 系统通知
+             条目——bar 已隐藏其 ✎，此处属双保险）均以服务端 load 结果为准 */
+        })
+        .then(() => load(sessionId));
+    },
+    [sessionId, load],
+  );
+
+  const dispatchNowEntry = useCallback(
+    (id: string) => {
+      if (sessionId === "") return;
+      void dispatchNowSessionQueueEntry(sessionId, id)
+        .catch(() => {
+          /* 立即派发失败仍刷新（409 会话非 active 等；不消费响应 interrupted
+             ——R-04：UI 收敛统一依赖 SSE queue_changed + 本处 load） */
+        })
+        .then(() => load(sessionId));
+    },
+    [sessionId, load],
+  );
+
   return {
     queue,
     removeEntry,
     retryEntry,
+    reorderEntry,
+    editEntry,
+    dispatchNowEntry,
     isQueueFull: queue.length >= DEFAULT_MAX_QUEUE,
     queueCount: queue.length,
     refresh,

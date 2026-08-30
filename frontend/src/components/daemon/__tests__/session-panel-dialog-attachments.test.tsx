@@ -18,7 +18,14 @@
 // 连接工厂），另加 @/lib/api/session-attachments 模块级 mock（上传不打真 fetch）。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+  createEvent,
+} from "@testing-library/react";
 
 import { SessionPanel } from "../session-panel";
 import type { SessionStreamConnection } from "@/lib/daemon";
@@ -62,6 +69,10 @@ const sessionApi = vi.hoisted(() => ({
   fetchSessionQueue: vi.fn(),
   deleteSessionQueueEntry: vi.fn(),
   retrySessionQueueEntry: vi.fn(),
+  // 2026-08-31-session-queue-ux task-09/10：队列三操作（reorder/update/dispatch-now）。
+  reorderSessionQueue: vi.fn(),
+  updateSessionQueueEntry: vi.fn(),
+  dispatchNowSessionQueueEntry: vi.fn(),
 }));
 
 const popoverApi = vi.hoisted(() => ({
@@ -88,6 +99,10 @@ vi.mock("@/lib/daemon", async () => {
     fetchSessionQueue: sessionApi.fetchSessionQueue,
     deleteSessionQueueEntry: sessionApi.deleteSessionQueueEntry,
     retrySessionQueueEntry: sessionApi.retrySessionQueueEntry,
+    // 2026-08-31-session-queue-ux task-09/10：队列三操作透出。
+    reorderSessionQueue: sessionApi.reorderSessionQueue,
+    updateSessionQueueEntry: sessionApi.updateSessionQueueEntry,
+    dispatchNowSessionQueueEntry: sessionApi.dispatchNowSessionQueueEntry,
   };
 });
 
@@ -129,6 +144,8 @@ function makeStreamMock(): { conn: FakeConn; factory: ReturnType<typeof vi.fn> }
             case "log": handlers.onLog(env, cursor ?? null); break;
             case "turn_completed": handlers.onTurnCompleted(env); break;
             case "session_ended": handlers.onSessionEnded(env); break;
+            // 2026-08-31-session-queue-ux FR-03：会话级队列变更事件（无 run_id）。
+            case "queue_changed": handlers.onQueueChanged?.(env); break;
             case "permission_request": handlers.onPermissionRequest?.(env); break;
             case "permission_resolved": handlers.onPermissionResolved?.(env); break;
           }
@@ -183,6 +200,21 @@ function makeAtt(id: string, name: string, kind: "image" | "file"): AttachmentRe
   };
 }
 
+/** 排队条目 DTO（服务端 GET /sessions/{id}/queue 返回形态，task-10 接线用例）。 */
+function makeQueueEntry(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "entry-1",
+    prompt: "排队消息",
+    attachment_ids: [] as string[],
+    agent_profile_id: null,
+    llm_provider_id: null,
+    status: "pending",
+    error_msg: null,
+    created_at: "2026-08-25T10:00:00Z",
+    ...overrides,
+  };
+}
+
 /** 粘贴文件到输入框（dom-testing-library 支持 clipboardData 伪对象）。 */
 function pasteFile(input: Element, att: AttachmentRead) {
   const file = new File(["xx"], att.name, {
@@ -212,6 +244,10 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
       error_msg: null,
       created_at: "2026-08-25T10:00:00Z",
     });
+    // 2026-08-31-session-queue-ux task-09/10：队列三操作默认成功（接线断言只看调用参数）。
+    sessionApi.reorderSessionQueue.mockResolvedValue(undefined);
+    sessionApi.updateSessionQueueEntry.mockResolvedValue(makeQueueEntry());
+    sessionApi.dispatchNowSessionQueueEntry.mockResolvedValue({ interrupted: false });
     sessionApi.fetchPendingDialogs.mockResolvedValue([]);
     sessionApi.fetchSessionDialogHistory.mockResolvedValue([]);
     sessionApi.getAgentSessionLogs.mockResolvedValue([]);
@@ -397,5 +433,80 @@ describe("SessionPanel（dialog）附件管线（ql-20260825-007）", () => {
     expect(sessionApi.injectSession).toHaveBeenCalledWith("sess-1", "", {
       attachment_ids: ["att-3"],
     });
+  });
+
+  // 2026-08-31-session-queue-ux task-09/10：panel 队列接线（FR-03/04/05/06）——
+  // SSE queue_changed 即时刷新 + MessageQueueBar 三回调透传三个队列操作端点。
+  it("队列三操作接线：queue_changed SSE → 重新拉取队列；⚡/✎/拖拽分别透传 dispatch-now/update/reorder 端点", async () => {
+    // 首句建会话前预置两条排队条目（GET /queue 返回序即 bar 渲染序）。
+    sessionApi.fetchSessionQueue.mockResolvedValue([
+      makeQueueEntry({ id: "entry-2", prompt: "排队甲" }),
+      makeQueueEntry({ id: "entry-3", prompt: "排队乙" }),
+    ]);
+    const conn = await reachState("running");
+    await screen.findByText("排队甲");
+
+    // ① SSE queue_changed（FR-03）→ panel 接 onQueueChanged 调 hook refresh 重新拉取。
+    const callsBefore = sessionApi.fetchSessionQueue.mock.calls.length;
+    act(() => {
+      conn.handlers.route(makeEnvelope("queue_changed", { action: "reordered" }));
+    });
+    await waitFor(() =>
+      expect(sessionApi.fetchSessionQueue.mock.calls.length).toBeGreaterThan(callsBefore),
+    );
+
+    // ② ⚡ 立即发送（FR-05）：透传 dispatch-now 端点（sess-1 + 条目 id）。
+    fireEvent.click(screen.getAllByLabelText("打断当前轮，立即发送这条")[0]!);
+    await waitFor(() =>
+      expect(sessionApi.dispatchNowSessionQueueEntry).toHaveBeenCalledWith("sess-1", "entry-2"),
+    );
+
+    // ③ ✎ 重新编辑（FR-06）：textarea 预填原文，保存透传 update 端点带新文本
+    //    （antd 两字中文自动插空格，按可访问名正则匹配「保 存」）。
+    fireEvent.click(screen.getAllByLabelText("重新编辑该消息")[0]!);
+    const editor = screen.getByLabelText("重新编辑排队消息文本") as HTMLTextAreaElement;
+    expect(editor.value).toBe("排队甲");
+    fireEvent.change(editor, { target: { value: "排队甲（改）" } });
+    fireEvent.click(screen.getByRole("button", { name: /保\s*存/ }));
+    await waitFor(() =>
+      expect(sessionApi.updateSessionQueueEntry).toHaveBeenCalledWith("sess-1", "entry-2", "排队甲（改）"),
+    );
+
+    // ④ 拖拽换位（FR-04 / D-003）：dragStart → dragOver 目标后半区 → drop，
+    //    全量有序 ids 透传 reorder 端点。jsdom 无布局与 DragEvent：目标 chip
+    //    rect 打元素级 spy，dragOver 按 MouseEvent 手工构造携带 clientX。
+    const handles = screen.getAllByTitle("拖拽排序");
+    const chipFirst = handles[0]!.closest('[draggable="true"]') as HTMLElement;
+    const chipSecond = handles[1]!.closest('[draggable="true"]') as HTMLElement;
+    vi.spyOn(chipSecond, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 100,
+      bottom: 20,
+      width: 100,
+      height: 20,
+      toJSON: () => ({}),
+    } as DOMRect);
+    const dt = { effectAllowed: "none", dropEffect: "none", setData: vi.fn() };
+    fireEvent.dragStart(chipFirst, { dataTransfer: dt });
+    fireEvent(
+      chipSecond,
+      createEvent(
+        "dragover",
+        chipSecond,
+        { clientX: 75, bubbles: true, cancelable: true, dataTransfer: dt },
+        { EventType: "MouseEvent" },
+      ),
+    );
+    fireEvent.drop(chipSecond, { dataTransfer: dt });
+    fireEvent.dragEnd(chipFirst);
+    await waitFor(() =>
+      expect(sessionApi.reorderSessionQueue).toHaveBeenCalledWith("sess-1", [
+        "entry-3",
+        "entry-2",
+      ]),
+    );
   });
 });

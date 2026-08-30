@@ -450,6 +450,9 @@ class TestCreateSessionUserPreamble:
             .first()
         )
         assert queued is not None
+        # 2026-08-31-session-queue-ux task-05 防御性回归：排队行带 position 序键
+        # （FR-04/D-002），忙轮排队 prompt 剥离断言不动。
+        assert isinstance(queued.position, int)
         # 排队行只存干净用户原文：后续轮派发不再拼首轮三前导。
         assert queued.prompt == "第二轮追问"
         assert "【当前用户信息】" not in queued.prompt

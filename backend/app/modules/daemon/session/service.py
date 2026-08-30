@@ -444,6 +444,32 @@ class DaemonSessionQueueEntryNotFound(AppError):
     http_status = 404
 
 
+class DaemonSessionQueueOrderMismatch(AppError):
+    """reorder 全量校验失败（2026-08-31-session-queue-ux FR-04 / D-003）。
+
+    上传的 ``entry_ids`` 集合 ≠ 会话现有 pending+failed 条目全集（多 / 少 /
+    含他会话条目 / 重复 id 均算）——reorder 只接受**全量**重排（部分重排
+    语义歧义且易错，前端始终持有全量上传）；拖拽落手时条目恰被派发删除
+    也走本分支（R-02，前端 catch 后 load 以服务端为准自然收敛）。
+    """
+
+    code = "HTTP_422_DAEMON_SESSION_QUEUE_ORDER_MISMATCH"
+    http_status = 422
+
+
+class DaemonSessionQueueEntryNotEditable(AppError):
+    """排队条目不支持编辑（2026-08-31-session-queue-ux FR-06 / D-009）。
+
+    「[后台任务通知]」系统通知条目（prompt 以 :data:`TASK_WAKEUP_PROMPT_PREFIX`
+    开头）409 拒绝编辑——改文会破坏后续 wakeup 入队的前缀 like 去重匹配
+    （ql-20260827-015 合并路径），导致通知重复入队。前端对这类条目隐藏 ✎
+    （task-08），后端 409 双保险。
+    """
+
+    code = "HTTP_409_DAEMON_SESSION_QUEUE_ENTRY_NOT_EDITABLE"
+    http_status = 409
+
+
 class DaemonSessionNoCurrentRun(AppError):
     code = "HTTP_409_DAEMON_SESSION_NO_CURRENT_RUN"
     http_status = 409
@@ -837,8 +863,47 @@ class SessionService:
 
     _LIST_STATUSES = frozenset({"pending", "active", "reconnecting", "ended", "failed"})
 
+    # 后台任务引用集 — 防止 asyncio.Task 被 GC 回收
+    _background_tasks: set[asyncio.Task] = set()
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    # ── Background task lifecycle helpers（2026-08-31-session-queue-ux task-03
+    # / D-008——逐字对齐 run_sync/service.py RunSyncService 同名 helper；run_sync
+    # 不动，本类持有同款能力供 confirm_session_reconnected 恢复钩子 fire 派发。
+    # 派发协程走 dispatch_next_queued_message 的独立 DB session（H1），不复用
+    # 请求级 session。 ────────────────────────────────────────────────────────
+
+    def _fire_background_task(
+        self,
+        coro,
+        *,
+        workspace_id: uuid.UUID | None = None,
+        run_id: uuid.UUID | None = None,
+    ) -> asyncio.Task:
+        """Create a background task and hold a strong reference to prevent GC."""
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._on_background_task_done)
+        log.info(
+            "background_task_fired",
+            task_id=id(task),
+            workspace_id=str(workspace_id),
+            run_id=str(run_id),
+        )
+        return task
+
+    @staticmethod
+    def _on_background_task_done(task: asyncio.Task) -> None:
+        """Remove task from the tracking set and surface exceptions."""
+        SessionService._background_tasks.discard(task)
+        try:
+            exc = task.exception()
+        except (asyncio.InvalidStateError, asyncio.CancelledError):
+            return
+        if exc is not None:
+            log.exception("background_task_failed", task_id=id(task), exc_info=exc)
 
     # ── Interactive session orchestration (task-05, D-005@v1) ──────────────
 
@@ -3234,6 +3299,8 @@ class SessionService:
                 # 条目时并入不新增行（行锁内查询 + 更新，与满员检查同事务原子）。
                 # 返回形态与普通入队一致（queued=True + 同 entry id），daemon 调用
                 # 方无感。
+                # 2026-08-31-session-queue-ux（design §4 Phase1.2/D-002）：merge 只
+                # 原地改 prompt——不新建行、原条目 position 保持不变。
                 existing_notification: AgentSessionQueuedMessage | None = None
                 if prompt.startswith(TASK_WAKEUP_PROMPT_PREFIX):
                     existing_notification = (
@@ -3269,6 +3336,20 @@ class SessionService:
                         queued=True,
                         queue_entry_id=existing_notification.id,
                     )
+                # 2026-08-31-session-queue-ux D-002（R-01）：入队序键 = 会话现有
+                # 条目 MAX(position)+1（空队列首条=0）。查询在调用方
+                # _get_owned_session_for_update 会话行锁内、与满员检查/merge
+                # 同事务，无并发窗口；行锁已保证串行，不加唯一约束（排序键带
+                # created_at 次序，position 重复不破坏正确性）。
+                from sqlalchemy import func
+
+                max_position = (
+                    await self._session.execute(
+                        select(func.max(AgentSessionQueuedMessage.position)).where(
+                            AgentSessionQueuedMessage.agent_session_id == session.id
+                        )
+                    )
+                ).scalar()
                 entry = AgentSessionQueuedMessage(
                     agent_session_id=session.id,
                     sender_user_id=run_sender_user_id or session.user_id,
@@ -3282,6 +3363,9 @@ class SessionService:
                     agent_profile_id=agent_profile_id,
                     llm_provider_id=llm_provider_id,
                     status="pending",
+                    # task-05 缺陷 A 修正：or 兜底在 max==0 时回卷（0 or -1 = -1），
+                    # 连续入队全 0——显式 None 判（对齐 MAX+1 语义，D-002）。
+                    position=(max_position + 1) if max_position is not None else 0,
                 )
                 self._session.add(entry)
                 await self._session.commit()
@@ -3915,6 +3999,58 @@ class SessionService:
             lease_id=session.lease_id,
         )
 
+    async def _send_interrupt_control(
+        self,
+        session: AgentSession,
+        run_id: uuid.UUID | None = None,
+    ) -> None:
+        """resolve runtime → daemon 并下发 SESSION_INTERRUPT 控制指令（三段式）。
+
+        2026-08-31-session-queue-ux task-04（design §4 Phase1.4 / D-007）：从
+        interrupt_session 原样抽出「runtime 解析 + ControlCommandService
+        .enqueue_and_push(KIND_SESSION_INTERRUPT)」段，供 interrupt 端点与
+        dispatch-now 忙时打断共用（纯重构，签名/行为零变化；daemon 零改动）。
+        控制指令三段式：WS 推送失败仅落库 pending 待 daemon 补拉，不算异常；
+        仅 daemon 完全不可达（``control_ok=False`` / runtime 解析失败）抛
+        DaemonRuntimeOffline 由调用方决定语义。
+        """
+        # task-06: resolve provider runtime_id → daemon_instance_id (WS route key).
+        runtime_id = session.runtime_id
+        daemon_id = (
+            await _resolve_daemon_id_for_runtime(self._session, runtime_id)
+            if runtime_id is not None
+            else None
+        )
+        if daemon_id is None or runtime_id is None:
+            raise DaemonRuntimeOffline(
+                "执行代理当前不在线，无法打断本轮。请稍后重试或等待本轮结束。",
+                details={
+                    "session_id": str(session.id),
+                    "runtime_id": str(runtime_id) if runtime_id else None,
+                },
+            )
+        # task-04（design A2）：SESSION_INTERRUPT 走控制指令三段式——推送失败
+        # 落库 pending 待补拉；504 语义保持（下方 not control_ok 分支）。
+        _row, control_ok = await ControlCommandService(self._session).enqueue_and_push(
+            daemon_id=daemon_id,
+            runtime_id=runtime_id,
+            kind=KIND_SESSION_INTERRUPT,
+            payload={
+                "session_id": str(session.id),
+                "lease_id": str(session.lease_id),
+                "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
+            },
+        )
+        if not control_ok:
+            raise DaemonRuntimeOffline(
+                "执行代理当前不在线，无法打断本轮。请稍后重试或等待本轮结束。",
+                details={
+                    "runtime_id": str(session.runtime_id),
+                    "session_id": str(session.id),
+                    "run_id": str(run_id) if run_id else None,
+                },
+            )
+
     async def interrupt_session(
         self,
         session_id: uuid.UUID,
@@ -3956,42 +4092,9 @@ class SessionService:
                 details={"session_id": str(session_id)},
             )
 
-        # task-06: resolve provider runtime_id → daemon_instance_id (WS route key).
-        runtime_id = session.runtime_id
-        daemon_id = (
-            await _resolve_daemon_id_for_runtime(self._session, runtime_id)
-            if runtime_id is not None
-            else None
-        )
-        if daemon_id is None or runtime_id is None:
-            raise DaemonRuntimeOffline(
-                "执行代理当前不在线，无法打断本轮。请稍后重试或等待本轮结束。",
-                details={
-                    "session_id": str(session_id),
-                    "runtime_id": str(runtime_id) if runtime_id else None,
-                },
-            )
-        # task-04（design A2）：SESSION_INTERRUPT 走控制指令三段式——推送失败
-        # 落库 pending 待补拉；504 语义保持（下方 not control_ok 分支）。
-        _row, control_ok = await ControlCommandService(self._session).enqueue_and_push(
-            daemon_id=daemon_id,
-            runtime_id=runtime_id,
-            kind=KIND_SESSION_INTERRUPT,
-            payload={
-                "session_id": str(session.id),
-                "lease_id": str(session.lease_id),
-                "runtime_id": str(runtime_id),  # design §5.3 provider discriminator
-            },
-        )
-        if not control_ok:
-            raise DaemonRuntimeOffline(
-                "执行代理当前不在线，无法打断本轮。请稍后重试或等待本轮结束。",
-                details={
-                    "runtime_id": str(session.runtime_id),
-                    "session_id": str(session.id),
-                    "run_id": str(run.id),
-                },
-            )
+        # 2026-08-31-session-queue-ux task-04：发送段抽 _send_interrupt_control
+        # 共用（dispatch-now 忙时打断同链路），行为零变化。
+        await self._send_interrupt_control(session, run_id=run.id)
 
         return SessionControlResult(agent_session=session, current_run_id=run.id)
 
@@ -4193,7 +4296,8 @@ class SessionService:
     async def list_queued_messages(
         self, session_id: uuid.UUID, user_id: uuid.UUID
     ) -> list[AgentSessionQueuedMessage]:
-        """列出会话排队消息（created_at 升序 = 派发顺序）。
+        """列出会话排队消息（position 升序、created_at 次之 = 派发顺序，
+        2026-08-31-session-queue-ux FR-04/D-002——与 dispatch 队首取条同键）。
 
         归属校验复用 :meth:`_get_owned_session_for_update` 后立即 rollback
         释放行锁（排队列表是低频读，不占写锁）；owned_id 在 rollback 前取
@@ -4207,7 +4311,10 @@ class SessionService:
                 await self._session.execute(
                     select(AgentSessionQueuedMessage)
                     .where(AgentSessionQueuedMessage.agent_session_id == owned_id)
-                    .order_by(col(AgentSessionQueuedMessage.created_at))
+                    .order_by(
+                        col(AgentSessionQueuedMessage.position),
+                        col(AgentSessionQueuedMessage.created_at),
+                    )
                 )
             )
             .scalars()
@@ -4289,104 +4396,338 @@ class SessionService:
         entry.status = "dispatched"
         return entry
 
-    async def dispatch_queued_messages(self, session_id: uuid.UUID) -> None:
-        """派发会话排队消息（调用方须已持有会话行锁或接受竞态兜底）。
+    async def reorder_queued_messages(
+        self,
+        session_id: uuid.UUID,
+        entry_ids: list[uuid.UUID],
+        user_id: uuid.UUID,
+    ) -> None:
+        """按上传序全量重写排队条目 position（2026-08-31-session-queue-ux FR-04）。
 
-        语义：取最早 pending 条目，无活跃 run 则重放 inject（成功即删行）；
-        失败（daemon 离线 / 附件失效 / 会话非 active）该条转 failed 留队，
-        不再尝试后续条目（同类失败大概率连环，交给用户重试）。每次至多
-        派发一条——派发成功后已有活跃 run，下一条等本轮 turn 终态钩子
-        再触发，天然串行。
+        会话行锁内（R-01）校验 ``entry_ids`` 集合 == 现有条目全集（表内只剩
+        pending+failed，派发成功即删行）——多 / 少 / 含他会话条目 / 重复 id
+        均 422 :class:`DaemonSessionQueueOrderMismatch`（D-003 全量上传，不允许
+        部分重排）；校验通过后按列表序重写 position=0..n-1 + updated_at，
+        commit 并补发 queue_changed(action="reordered")。
         """
-        session = (
-            await self._session.execute(
-                select(AgentSession).where(AgentSession.id == session_id).with_for_update()
+        session = await self._get_owned_session_for_update(session_id, user_id)
+        rows = list(
+            (
+                await self._session.execute(
+                    select(AgentSessionQueuedMessage).where(
+                        AgentSessionQueuedMessage.agent_session_id == session.id
+                    )
+                )
             )
-        ).scalar_one_or_none()
-        if session is None:
-            return
-        if session.status != "active":
-            await self._fail_pending_queued_messages(
-                session_id, f"会话当前状态为 {session.status}，排队消息未发送。"
-            )
-            await self._session.commit()
-            return
-        if await self._get_current_run(session.id) is not None:
+            .scalars()
+            .all()
+        )
+        # 长度先比（拦重复 id 的多上传），集合再比（拦少传/传错会话条目）。
+        if len(entry_ids) != len(rows) or set(entry_ids) != {row.id for row in rows}:
+            # task-05 缺陷 B 同款修正：rollback 过期 ORM 实例——details 先取标量
+            # 再回滚（expected/received 均为 str 快照），否则 MissingGreenlet 500。
+            mismatch_details = {
+                "session_id": str(session_id),
+                "expected_entry_ids": sorted(str(row.id) for row in rows),
+                "received_entry_ids": sorted(str(i) for i in entry_ids),
+            }
             await self._session.rollback()
-            return
+            raise DaemonSessionQueueOrderMismatch(
+                f"排队条目集合与会话 '{session_id}' 现有条目不一致（reorder 需全量上传）。",
+                details=mismatch_details,
+            )
+        by_id = {row.id: row for row in rows}
+        now = datetime.now(UTC)
+        for position, entry_id in enumerate(entry_ids):
+            row = by_id[entry_id]
+            row.position = position
+            row.updated_at = now
+            self._session.add(row)
+        await self._session.commit()
+        await self._publish_session_event(
+            session.id,
+            {
+                "event": "queue_changed",
+                "session_id": str(session.id),
+                "action": "reordered",
+            },
+        )
 
+    async def update_queued_message(
+        self,
+        session_id: uuid.UUID,
+        entry_id: uuid.UUID,
+        prompt: str,
+        user_id: uuid.UUID,
+    ) -> AgentSessionQueuedMessage:
+        """编辑排队条目 prompt 文本（2026-08-31-session-queue-ux FR-06 / NG-01）。
+
+        会话行锁内（R-01）取条目（404）；仅改 prompt + updated_at（附件 /
+        配置快照不动，NG-01）；TASK_WAKEUP 系统通知条目 409 不可编辑
+        （D-009）；failed 条目保存后重置 pending + 清 error_msg，并复用
+        :meth:`dispatch_queued_messages` 立即尝试派发（对齐 retry 模式，忙则
+        内部 no-op 留队）；commit 后补发 queue_changed(action="edited")。
+        长度 1..8000 校验在 DTO 层（QueueEntryUpdateRequest，对齐
+        SessionInjectRequest.prompt 的 8000 上限）。
+        """
+        session = await self._get_owned_session_for_update(session_id, user_id)
         entry = (
             await self._session.execute(
-                select(AgentSessionQueuedMessage)
-                .where(
+                select(AgentSessionQueuedMessage).where(
+                    AgentSessionQueuedMessage.id == entry_id,
                     AgentSessionQueuedMessage.agent_session_id == session.id,
-                    AgentSessionQueuedMessage.status == "pending",
                 )
-                .order_by(col(AgentSessionQueuedMessage.created_at))
-                .limit(1)
             )
         ).scalar_one_or_none()
         if entry is None:
             await self._session.rollback()
-            return
-
-        page_context: PageContextCreateBlock | None = None
-        if entry.page_context is not None:
-            try:
-                page_context = PageContextCreateBlock(**entry.page_context)
-            except Exception:
-                page_context = None
-        attachment_ids: list[uuid.UUID] | None = None
-        if entry.attachment_ids:
-            try:
-                attachment_ids = [uuid.UUID(str(a)) for a in entry.attachment_ids]
-            except (ValueError, AttributeError, TypeError):
-                attachment_ids = None
-
-        try:
-            await self._inject_into_session(
-                session,
-                prompt=entry.prompt,
-                run_sender_user_id=entry.sender_user_id,
-                agent_profile_id=entry.agent_profile_id,
-                llm_provider_id=entry.llm_provider_id,
-                attachment_ids=attachment_ids,
-                page_context=page_context,
+            raise DaemonSessionQueueEntryNotFound(
+                f"排队消息 '{entry_id}' 不存在或不属于会话 '{session_id}'。",
+                details={"session_id": str(session_id), "entry_id": str(entry_id)},
             )
-        except AppError as exc:
-            # 派发失败（daemon 离线 / 附件失效 / 配置失效等）：条目转 failed
-            # 留队供重试。_inject_into_session 内部已 rollback 事务。
-            entry.status = "failed"
-            entry.error_msg = str(exc)
-            entry.updated_at = datetime.now(UTC)
-            self._session.add(entry)
-            await self._session.commit()
-            await self._publish_session_event(
-                session.id,
-                {
-                    "event": "queue_changed",
-                    "session_id": str(session.id),
-                    "queue_entry_id": str(entry.id),
-                    "action": "failed",
-                },
+        if (entry.prompt or "").startswith(TASK_WAKEUP_PROMPT_PREFIX):
+            await self._session.rollback()
+            raise DaemonSessionQueueEntryNotEditable(
+                f"系统通知条目 '{entry_id}' 不支持编辑。",
+                details={"session_id": str(session_id), "entry_id": str(entry_id)},
             )
-            return
-        # 派发成功：删除排队行（turn 已落 AgentRun，队列不重复存史）。
-        # _inject_into_session 内部已 commit；重新取行再删（identity map 里
-        # 的旧对象可能已过期）。
-        fresh = await self._session.get(AgentSessionQueuedMessage, entry.id)
-        if fresh is not None:
-            await self._session.delete(fresh)
-            await self._session.commit()
+        entry.prompt = prompt
+        entry.updated_at = datetime.now(UTC)
+        was_failed = entry.status == "failed"
+        if was_failed:
+            entry.status = "pending"
+            entry.error_msg = None
+        self._session.add(entry)
+        await self._session.commit()
+        await self._session.refresh(entry)
         await self._publish_session_event(
             session.id,
             {
                 "event": "queue_changed",
                 "session_id": str(session.id),
                 "queue_entry_id": str(entry.id),
-                "action": "dispatched",
+                "action": "edited",
             },
         )
+        if not was_failed:
+            return entry
+        # failed 重置 pending 后立即尝试派发（对齐 retry :4279 模式）。
+        await self.dispatch_queued_messages(session.id)
+        fresh = await self._session.get(AgentSessionQueuedMessage, entry_id)
+        if fresh is not None:
+            return fresh
+        # 派发成功：行已删（retry 同款），返回 detached 快照标 dispatched。
+        entry.status = "dispatched"
+        return entry
+
+    async def dispatch_queued_message_now(
+        self,
+        session_id: uuid.UUID,
+        entry_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> bool:
+        """立即发送排队条目（2026-08-31-session-queue-ux FR-05 / D-001）。
+
+        会话行锁内（R-01）：非 active 409（终态/挂起均拒，与 interrupt 同
+        口径）；条目 404；failed 重置 pending + 清 error_msg；本条 position
+        置队首（全量重写该会话队列 0..n-1，D-002 ≤5 行）+ commit + 补发
+        queue_changed(action="dispatch_now")——**commit 先于 interrupt 发送**，
+        interrupt 失败不回滚置顶（R-03）。随后判活跃 run：
+        - 有 → :meth:`_send_interrupt_control` 打断当前轮（daemon 零改动
+          D-007，run 终态钩子接力派发队首=本条；AppError 向上抛），返 True；
+        - 无 → 当场 :meth:`dispatch_queued_messages` 同步派发本条（R-04，
+          条目可能当场删行），返 False。
+
+        Returns:
+            interrupted: True=已打断活跃轮（接力派发）；False=空闲当场派发。
+        """
+        session = await self._get_owned_session_for_update(session_id, user_id)
+        if session.status != "active":
+            # task-05 缺陷 B 修正：rollback 会过期 ORM 实例，先取标量再回滚
+            # （对齐 list_queued_messages 的 owned_id 先例），否则 409 变 MissingGreenlet 500。
+            stale_status = session.status
+            await self._session.rollback()
+            raise DaemonSessionNotActive(
+                f"AgentSession '{session_id}' is not active (status={stale_status}).",
+                details={"session_id": str(session_id), "status": stale_status},
+            )
+        rows = list(
+            (
+                await self._session.execute(
+                    select(AgentSessionQueuedMessage)
+                    .where(AgentSessionQueuedMessage.agent_session_id == session.id)
+                    .order_by(
+                        col(AgentSessionQueuedMessage.position),
+                        col(AgentSessionQueuedMessage.created_at),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        entry = next((row for row in rows if row.id == entry_id), None)
+        if entry is None:
+            await self._session.rollback()
+            raise DaemonSessionQueueEntryNotFound(
+                f"排队消息 '{entry_id}' 不存在或不属于会话 '{session_id}'。",
+                details={"session_id": str(session_id), "entry_id": str(entry_id)},
+            )
+        if entry.status == "failed":
+            entry.status = "pending"
+            entry.error_msg = None
+        # 置队首：本条放 0，其余按现序顺移（全量重写 ≤5 行，D-002）。
+        rows.remove(entry)
+        now = datetime.now(UTC)
+        for position, row in enumerate([entry, *rows]):
+            row.position = position
+            row.updated_at = now
+            self._session.add(row)
+        await self._session.commit()
+        await self._publish_session_event(
+            session.id,
+            {
+                "event": "queue_changed",
+                "session_id": str(session.id),
+                "queue_entry_id": str(entry_id),
+                "action": "dispatch_now",
+            },
+        )
+        # commit 后判活跃 run（置顶持久化先于 interrupt，R-03）。
+        run = await self._get_current_run(session.id)
+        if run is not None:
+            await self._send_interrupt_control(session, run_id=run.id)
+            return True
+        await self.dispatch_queued_messages(session.id)
+        return False
+
+    async def dispatch_queued_messages(self, session_id: uuid.UUID) -> None:
+        """派发会话排队消息（循环派发，2026-08-31-session-queue-ux FR-01/02）。
+
+        语义：外层 ``while`` 每轮重取会话行锁（FOR UPDATE）后分支——
+        - 会话不存在 → 返回；
+        - 终态（``{ended, failed}``，D-010 词表无 cancelled）→ pending 条目
+          全部转 failed（现状保留，队尾不留死条目）；
+        - 非 active 且非终态（pending/reconnecting/suspended）→ rollback 返回，
+          pending **原样保留**（D-005——非终态会话还有恢复可能，失败化只留给
+          终态；等 confirm 恢复钩子 / 用户动作等下一触发点）；
+        - 有活跃 run → rollback 返回（会话忙，等本轮 turn 终态钩子再触发）；
+        - 取队首 pending（position 最小、created_at 次之——FR-04/D-002，与
+          list 排序同键）重放 inject（page_context / attachment_ids 宽容解析）：
+          成功即删行 → 继续下一轮（新 run 已活跃，下轮 current_run 分支自然
+          退出，「至多一个活跃 run」不变式天然串行）；AppError → 该条转
+          failed 留队 → 连续失败计数 +1，**≥2 停止本轮循环**（R-05/D-004——
+          系统性故障不连环刷屏），否则继续下一条（瞬态单点失败不拖队）。
+          派发成功一条计数清零。每轮消耗（删行/转 failed）一个 pending 条目
+          且队列上限 5，循环必然终止。
+        """
+        consecutive_failures = 0
+        while True:
+            session = (
+                await self._session.execute(
+                    select(AgentSession).where(AgentSession.id == session_id).with_for_update()
+                )
+            ).scalar_one_or_none()
+            if session is None:
+                return
+            if session.status in ("ended", "failed"):
+                await self._fail_pending_queued_messages(
+                    session_id, f"会话当前状态为 {session.status}，排队消息未发送。"
+                )
+                await self._session.commit()
+                return
+            if session.status != "active":
+                # D-005（FR-02 / P3 根因）：非终态非 active 不再批量失败化，
+                # pending 原样保留等下一触发点。
+                await self._session.rollback()
+                return
+            if await self._get_current_run(session.id) is not None:
+                await self._session.rollback()
+                return
+
+            entry = (
+                await self._session.execute(
+                    select(AgentSessionQueuedMessage)
+                    .where(
+                        AgentSessionQueuedMessage.agent_session_id == session.id,
+                        AgentSessionQueuedMessage.status == "pending",
+                    )
+                    .order_by(
+                        col(AgentSessionQueuedMessage.position),
+                        col(AgentSessionQueuedMessage.created_at),
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if entry is None:
+                await self._session.rollback()
+                return
+
+            page_context: PageContextCreateBlock | None = None
+            if entry.page_context is not None:
+                try:
+                    page_context = PageContextCreateBlock(**entry.page_context)
+                except Exception:
+                    page_context = None
+            attachment_ids: list[uuid.UUID] | None = None
+            if entry.attachment_ids:
+                try:
+                    attachment_ids = [uuid.UUID(str(a)) for a in entry.attachment_ids]
+                except (ValueError, AttributeError, TypeError):
+                    attachment_ids = None
+
+            try:
+                await self._inject_into_session(
+                    session,
+                    prompt=entry.prompt,
+                    run_sender_user_id=entry.sender_user_id,
+                    agent_profile_id=entry.agent_profile_id,
+                    llm_provider_id=entry.llm_provider_id,
+                    attachment_ids=attachment_ids,
+                    page_context=page_context,
+                )
+            except AppError as exc:
+                # 派发失败（daemon 离线 / 附件失效 / 配置失效等）：条目转 failed
+                # 留队供重试。_inject_into_session 内部已 rollback 事务。
+                entry.status = "failed"
+                entry.error_msg = str(exc)
+                entry.updated_at = datetime.now(UTC)
+                self._session.add(entry)
+                await self._session.commit()
+                await self._publish_session_event(
+                    session.id,
+                    {
+                        "event": "queue_changed",
+                        "session_id": str(session.id),
+                        "queue_entry_id": str(entry.id),
+                        "action": "failed",
+                    },
+                )
+                consecutive_failures += 1
+                if consecutive_failures >= 2:
+                    # R-05/D-004：连续 2 条派发失败视为系统性故障，停止本轮
+                    # 循环，剩余 pending 不逐条转 failed 刷屏。
+                    return
+                # 瞬态单点失败：继续下一条（该条已 failed 不再是队首 pending）。
+                continue
+            # 派发成功：删除排队行（turn 已落 AgentRun，队列不重复存史）。
+            # _inject_into_session 内部已 commit；重新取行再删（identity map 里
+            # 的旧对象可能已过期）。
+            fresh = await self._session.get(AgentSessionQueuedMessage, entry.id)
+            if fresh is not None:
+                await self._session.delete(fresh)
+                await self._session.commit()
+            await self._publish_session_event(
+                session.id,
+                {
+                    "event": "queue_changed",
+                    "session_id": str(session.id),
+                    "queue_entry_id": str(entry.id),
+                    "action": "dispatched",
+                },
+            )
+            consecutive_failures = 0
+            # 继续下一轮：新 run 已活跃则 current_run 分支自然退出（串行不变式）。
+            continue
 
     async def handle_plan_response(
         self,
@@ -4967,6 +5308,10 @@ class SessionService:
         daemon-restart recover chain) keeps the pre-DS-4 behavior verbatim.
         Non-reconnecting session (already active/ended/failed) → idempotent
         return of current status.
+
+        2026-08-31-session-queue-ux task-03 / D-008: after the active-flip
+        commit succeeds, a queued-message redispatch is fired in the
+        background if (and only if) pending queue entries exist.
         """
         try:
             stmt = (
@@ -5025,6 +5370,34 @@ class SessionService:
             except Exception:
                 log.warning(
                     "session_ready_mark_failed",
+                    session_id=str(session_id),
+                )
+            # 2026-08-31-session-queue-ux task-03 / FR-01 / D-008：恢复补派发钩子。
+            # 锚点=active 翻转 commit 之后（recover_session_after_daemon_restart
+            # 只置 reconnecting 从不翻 active，挂那里必空转——Grill 修正；reopen
+            # 恢复链同样经本 confirm 翻 active，同点自然覆盖）。先查有无 pending
+            # 排队条目（轻量 EXISTS，无 pending 零开销不起任务——防空转，对齐
+            # run_sync close_interactive_run 先查后 fire 模式），有才 fire 独立
+            # DB session 的 dispatch_next_queued_message（H1）；dispatch 内部
+            # 自查自弃（会话可能已又翻非 active/终态）。try 隔离防 probe/fire
+            # 异常污染已 commit 的 active 翻转事务（mark_ready 同款风格），
+            # 后台任务异常由 done_callback 记日志不上抛。
+            try:
+                has_pending = (
+                    await self._session.execute(
+                        select(AgentSessionQueuedMessage.id)
+                        .where(
+                            AgentSessionQueuedMessage.agent_session_id == session_id,
+                            AgentSessionQueuedMessage.status == "pending",
+                        )
+                        .limit(1)
+                    )
+                ).scalar_one_or_none()
+                if has_pending is not None:
+                    self._fire_background_task(dispatch_next_queued_message(session_id))
+            except Exception:
+                log.warning(
+                    "session_reconnect_queue_redispatch_failed",
                     session_id=str(session_id),
                 )
             log.info(
