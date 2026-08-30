@@ -1492,3 +1492,44 @@ async def test_regression_runtime_self_update(
     body = resp.json()
     assert body["sent"] is True
     assert isinstance(body["latest_version"], str)
+
+
+# ── DELETE /machines 孤儿 lease 前置收敛（ql-20260830-006）───────────────────
+
+
+@pytest.mark.asyncio
+async def test_delete_machine_with_orphan_claimed_lease_converges_to_204(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """机器删除同款收敛：孤儿 claimed interactive lease（会话已 ended）不再
+    挡删——机器级聚合本机全部 runnames 的 runtime_ids 一并收敛。"""
+    from app.modules.agent.model import AgentSession
+    from app.modules.daemon.model import DaemonTaskLease
+
+    admin, user_a, _ = await _bootstrap(db_session)
+    inst = await _create_stale_machine(db_session, user_a.id, hostname="orphan-host")
+    rt = await _create_runtime(db_session, user_a.id, daemon_instance_id=inst.id, status="offline")
+    lease = DaemonTaskLease(
+        id=uuid.uuid4(),
+        runtime_id=rt.id,
+        kind="interactive",
+        status="claimed",
+        lease_expires_at=None,
+    )
+    db_session.add(lease)
+    db_session.add(
+        AgentSession(
+            id=uuid.uuid4(),
+            user_id=user_a.id,
+            runtime_id=rt.id,
+            lease_id=lease.id,
+            provider="claude",
+            status="ended",
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.delete(
+        f"/api/daemon/machines/{inst.id}", headers=_headers(_token_for(admin))
+    )
+    assert resp.status_code == 204, resp.text

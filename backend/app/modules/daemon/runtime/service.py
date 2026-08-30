@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Literal
 
-from sqlalchemy import case, exists, func, or_, select
+from sqlalchemy import and_, case, exists, func, or_, select, update
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -835,6 +835,51 @@ class RuntimeService:
         await self._session.refresh(runtime)
         return runtime
 
+    async def _converge_dead_leases_before_delete(self, runtime_ids: list[uuid.UUID]) -> int:
+        """删除路径前置收敛「provably dead」lease（ql-20260830-006）。
+
+        背景：interactive lease 恒 NULL 过期时间（daemon 侧设计），会话终态
+        后 lease 行若因 daemon 死亡/历史缺陷未收敛，将永久停在 claimed——
+        生产实证 26 行孤儿 claimed（会话全部 ended、daemon 离线 23 天）把
+        delete_runtime 永久 409。删除前先把可证死亡的 pending/claimed lease
+        置 cancelled：
+
+        ① kind=interactive 且绑定会话已终态（ended/failed）；
+        ② claimed 且 ``lease_expires_at`` 已过（对齐 expire_overdue_leases 判据）。
+
+        会话仍在活/挂起、或未过期的行不动——真在途工作仍由后续 409 挡。
+        返回收敛行数（幂等，无命中返回 0）。
+        """
+        from app.modules.agent.model import AgentSession
+        from app.modules.daemon.model import DaemonTaskLease
+
+        now = datetime.now(UTC)
+        stmt = (
+            update(DaemonTaskLease)
+            .where(
+                col(DaemonTaskLease.runtime_id).in_(runtime_ids),
+                col(DaemonTaskLease.status).in_(["pending", "claimed"]),
+                or_(
+                    and_(
+                        col(DaemonTaskLease.kind) == "interactive",
+                        exists().where(
+                            AgentSession.lease_id == DaemonTaskLease.id,
+                            col(AgentSession.status).in_(["ended", "failed"]),
+                        ),
+                    ),
+                    and_(
+                        col(DaemonTaskLease.status) == "claimed",
+                        col(DaemonTaskLease.lease_expires_at).is_not(None),
+                        col(DaemonTaskLease.lease_expires_at) < now,
+                    ),
+                ),
+            )
+            .values(status="cancelled", updated_at=now)
+        )
+        result = await self._session.execute(stmt)
+        await self._session.commit()
+        return int(result.rowcount or 0)
+
     async def delete_runtime(
         self,
         runtime_id: uuid.UUID,
@@ -874,6 +919,9 @@ class RuntimeService:
         # 已不在工作流内，CASCADE 自动清理，不阻止删除。
         from app.modules.daemon.model import DaemonChangeWrite, DaemonTaskLease
 
+        # ql-20260830-006：先收敛可证死亡的孤儿 lease（终态会话 interactive /
+        # 过期 claimed）再数在途——否则 23 天前的僵尸行会把删除永久 409。
+        await self._converge_dead_leases_before_delete([runtime_id])
         inflight_leases = (
             await self._session.execute(
                 select(DaemonTaskLease.id).where(
@@ -1024,6 +1072,8 @@ class RuntimeService:
                 },
             )
 
+        # ql-20260830-006：机器删除同款前置收敛（机器级聚合本机全部 runtimes）。
+        await self._converge_dead_leases_before_delete(runtime_ids)
         inflight_leases = (
             await self._session.execute(
                 select(func.count())

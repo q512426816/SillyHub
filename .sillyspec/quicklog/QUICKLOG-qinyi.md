@@ -123,3 +123,15 @@
 根因：e2b95aad 落在最后一次绿 backend-ci 之后，其 host_fs 解析 JOIN daemon_instances 使 git_log 测试的幽灵 daemon_id 绑定解析归 None，20 用例塌缩 502 OFFLINE，被 ruff 格式墙挡了约 18 小时才在 Pytest 暴露；d3f094da 把 build_bundle 改为三元组返回但漏改 tests/modules 旧位用例的二元解包
 方案：git_log 的 binding_factory 在 daemon_id 非空时按 test_worker_subsession_dispatch 同款 raw INSERT 补种真实 daemon_instances 行；旧位用例改为三元组解包；均不改产品代码
 结果：git_log test_router 44/44 绿，tests/modules/spec_workspace/test_apply_sync 12/12 绿，ruff format 与 check 均无问题；未部署
+
+## ql-20260830-006-5639 | 2026-08-30 16:15:27 | 删除被 23 天前孤儿 claimed lease 永久 409——删除路径前置收敛死 lease
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/runtime/service.py（_converge_dead_leases_before_delete 前置收敛 + 两删除路径接线）
+- backend/app/modules/daemon/tests/test_runtime_admin_management.py（孤儿收敛 204/活会话仍 409/过期收敛 三用例）
+- backend/app/modules/daemon/tests/test_machines_router.py（机器级孤儿收敛用例）
+需求：删除被 23 天前孤儿 claimed lease 永久 409——删除路径前置收敛死 lease
+根因：interactive lease 恒 NULL 过期时间（daemon 设计），会话终态后若 daemon 死亡 lease 行无收敛通道，永久停在 claimed；删除守卫盲数 pending/claimed 把死行当在途工作，生产 26 行实证把 delete_runtime 永久 409
+方案：RuntimeService._converge_dead_leases_before_delete（两类可证死行置 cancelled：interactive+绑定会话 ended/failed；claimed+expires_at 已过），delete_runtime 与 delete_machine 共用，收敛后再数真在途（活会话/未过期仍 409）
+结果：后端 60 用例全绿（runtime 级新增 3：孤儿收敛 204/活会话仍 409/过期收敛 204；机器级新增 1）+ ruff/mypy 0 错；模块文档 daemon.md+changelog 已更新

@@ -525,3 +525,109 @@ async def test_platform_admin_delete_runtime_with_inflight_change_write_returns_
     body = resp.json()
     assert body["code"] == "HTTP_409_DAEMON_RUNTIME_IN_USE"
     assert body["details"]["inflight_change_writes"] == 1
+
+
+# ── ql-20260830-006：删除路径前置收敛孤儿 lease ──────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_delete_runtime_with_orphan_claimed_lease_converges_to_204(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """孤儿 claimed interactive lease（绑定会话已 ended）→ 删除前置收敛为
+    cancelled，删除 204（生产实证：26 行 23 天前孤儿把删除永久 409）。"""
+
+    from app.modules.agent.model import AgentSession
+    from app.modules.daemon.model import DaemonTaskLease
+
+    admin, _user_a, user_b = await _bootstrap_admin_and_normal_users(db_session)
+    rt = await _create_runtime(db_session, user_b.id, name="rt-orphan")
+    lease = DaemonTaskLease(
+        id=uuid.uuid4(),
+        runtime_id=rt.id,
+        kind="interactive",
+        status="claimed",
+        # interactive 恒 NULL 过期时间（daemon 侧设计）——靠会话终态判定收敛。
+        lease_expires_at=None,
+    )
+    db_session.add(lease)
+    db_session.add(
+        AgentSession(
+            id=uuid.uuid4(),
+            user_id=user_b.id,
+            runtime_id=rt.id,
+            lease_id=lease.id,
+            provider="claude",
+            status="ended",
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.delete(f"/api/daemon/runtimes/{rt.id}", headers=_headers(_token_for(admin)))
+    assert resp.status_code == 204, resp.text
+    # 收敛可见：lease 行已置 cancelled（而非静默 CASCADE 消失语义不明）。
+    refreshed = await db_session.get(DaemonTaskLease, lease.id)
+    assert refreshed is not None
+    await db_session.refresh(refreshed)
+    assert refreshed.status == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_delete_runtime_with_active_session_lease_still_409(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """claimed lease 的会话仍在 active（真在途）→ 不收敛，409 保持。"""
+    from app.modules.agent.model import AgentSession
+    from app.modules.daemon.model import DaemonTaskLease
+
+    admin, _user_a, user_b = await _bootstrap_admin_and_normal_users(db_session)
+    rt = await _create_runtime(db_session, user_b.id, name="rt-live")
+    lease = DaemonTaskLease(
+        id=uuid.uuid4(),
+        runtime_id=rt.id,
+        kind="interactive",
+        status="claimed",
+        lease_expires_at=None,
+    )
+    db_session.add(lease)
+    db_session.add(
+        AgentSession(
+            id=uuid.uuid4(),
+            user_id=user_b.id,
+            runtime_id=rt.id,
+            lease_id=lease.id,
+            provider="claude",
+            status="active",
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.delete(f"/api/daemon/runtimes/{rt.id}", headers=_headers(_token_for(admin)))
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["details"]["inflight_leases"] == 1
+
+
+@pytest.mark.asyncio
+async def test_delete_runtime_with_expired_claimed_lease_converges_to_204(
+    client: AsyncClient, db_session: AsyncSession
+) -> None:
+    """claimed 且 lease_expires_at 已过（无会话绑定）→ 收敛判死，删除 204。"""
+    from datetime import UTC, datetime, timedelta
+
+    from app.modules.daemon.model import DaemonTaskLease
+
+    admin, _user_a, user_b = await _bootstrap_admin_and_normal_users(db_session)
+    rt = await _create_runtime(db_session, user_b.id, name="rt-expired")
+    db_session.add(
+        DaemonTaskLease(
+            id=uuid.uuid4(),
+            runtime_id=rt.id,
+            kind="batch",
+            status="claimed",
+            lease_expires_at=datetime.now(UTC) - timedelta(hours=1),
+        )
+    )
+    await db_session.commit()
+
+    resp = await client.delete(f"/api/daemon/runtimes/{rt.id}", headers=_headers(_token_for(admin)))
+    assert resp.status_code == 204, resp.text
