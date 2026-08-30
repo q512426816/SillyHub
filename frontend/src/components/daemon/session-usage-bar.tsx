@@ -9,9 +9,11 @@
  * 模式差异。
  *
  * 小型化改版（ql-20260830-013-14b3）：摘要行由「文本标签 + 粗体数值」改为
- * 「lucide 图标 + 小号数值」，指标名经原生 title 悬浮提示补全（先例：本文件
- * 模型 tag title、FRONTEND_PAGE_STYLE.md Button title）；明细切换同步收为
+ * 「lucide 图标 + 小号数值」，指标名经悬浮提示补全；明细切换同步收为
  * 图标按钮（aria-label 保语义）。折叠明细表按需展开不常驻，维持原型形态。
+ * 悬浮提示改 antd Tooltip（ql-20260830-014-74f5，即时弹出+主题 token，
+ * 先例 message-queue-bar.tsx）：触发元素 aria-label 保无障碍与测试锚点，
+ * 不再用原生 title（防浏览器双提示）。
  *
  * 自取数（design 衍生技术裁定 / R-04）：useEffect 调 lib/daemon.getSessionUsage
  * 存本地 state，不依赖 react-query——dialog 渲染路径是零 QueryClientProvider
@@ -23,6 +25,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { Tooltip } from "antd";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
@@ -85,7 +88,7 @@ function formatCount(n: number): string {
   return Number.isFinite(n) ? n.toLocaleString("en-US") : "0";
 }
 
-/** 摘要行单项：lucide 图标 + 小号数值，指标名走原生 title 悬浮提示（命中率 brand 阶、无值灰）。 */
+/** 摘要行单项：lucide 图标 + 小号数值，指标名走 antd Tooltip 悬浮提示（命中率 brand 阶、无值灰）。 */
 function UsageItem({
   icon: Icon,
   label,
@@ -104,15 +107,20 @@ function UsageItem({
         ? "text-slate-400"
         : "text-slate-500";
   return (
-    <span title={label} className="inline-flex items-center gap-1 whitespace-nowrap">
-      <Icon
-        aria-hidden="true"
-        className={cn("size-3", tone === "brand" ? "text-brand-500" : "text-slate-400")}
-      />
-      <span className={cn("text-[11px] font-medium tabular-nums", valueColor)}>
-        {value}
+    <Tooltip title={label}>
+      <span
+        aria-label={label}
+        className="inline-flex cursor-default items-center gap-1 whitespace-nowrap"
+      >
+        <Icon
+          aria-hidden="true"
+          className={cn("size-3", tone === "brand" ? "text-brand-500" : "text-slate-400")}
+        />
+        <span className={cn("text-[11px] font-medium tabular-nums", valueColor)}>
+          {value}
+        </span>
       </span>
-    </span>
+    </Tooltip>
   );
 }
 
@@ -144,7 +152,7 @@ export function SessionUsageBar({ sessionId, refreshSignal }: SessionUsageBarPro
 
   return (
     <div className="border-t border-slate-100 bg-card px-3.5 py-1.5">
-      {/* ===== 摘要行：五指标 + 命中率（图标 + title 提示，小型化不抢会话主体视觉） ===== */}
+      {/* ===== 摘要行：五指标 + 命中率（图标 + Tooltip 提示，小型化不抢会话主体视觉） ===== */}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
         <UsageItem
           icon={ArrowDownToLine}
@@ -177,21 +185,22 @@ export function SessionUsageBar({ sessionId, refreshSignal }: SessionUsageBarPro
           value={formatHitRate(hit)}
           tone={hit === null ? "muted" : "brand"}
         />
-        {/* 折叠切换（图标按钮 + title/aria-label 补全语义）：by_model 非空才渲染 */}
+        {/* 折叠切换（图标按钮 + Tooltip/aria-label 补全语义）：by_model 非空才渲染 */}
         {hasDetail ? (
-          <button
-            type="button"
-            title="按模型明细"
-            aria-label="按模型明细"
-            aria-expanded={expanded}
-            onClick={() => setExpanded((v) => !v)}
-            className="ml-auto inline-flex items-center rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-          >
-            <ChevronDown
-              aria-hidden="true"
-              className={cn("size-3 transition-transform", expanded && "rotate-180")}
-            />
-          </button>
+          <Tooltip title="按模型明细">
+            <button
+              type="button"
+              aria-label="按模型明细"
+              aria-expanded={expanded}
+              onClick={() => setExpanded((v) => !v)}
+              className="ml-auto inline-flex items-center rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            >
+              <ChevronDown
+                aria-hidden="true"
+                className={cn("size-3 transition-transform", expanded && "rotate-180")}
+              />
+            </button>
+          </Tooltip>
         ) : null}
       </div>
 

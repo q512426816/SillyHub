@@ -21,7 +21,7 @@ SillyHub 前端可复用组件层（frontend/src/components/**）。承载全局
   - `interactive-session-panel.tsx` — /runtimes 弹窗内交互会话主面板
   - `runtime-session-dialog.tsx` + `runtime-session-helpers.tsx`（logsToTurns / reply 流式 delta 直接 concat 不加 \n）/ `runtime-card-helpers.tsx`
   - `turn-timeline.tsx` / `session-input-bar.tsx` — /sessions 总入口复用
-  - `session-usage-bar.tsx` — 会话用量条（2026-08-29-session-usage-stats；ql-20260830-013-14b3 小型化）：摘要行五指标+缓存命中率为图标化小号形态（lucide 图标 + 11px 值，指标名收敛为原生 title 悬浮提示；命中率 cache_read÷(cache_read+input)，分母 0「—」）+按模型折叠明细（ChevronDown 图标按钮 aria-label 保语义）；自取数（useEffect+refreshSignal prop，零 react-query 对齐 dialog 渲染约束），session-panel page（头部下方）/dialog（输入框上方）双模式挂载，轮次终态递增信号重取
+  - `session-usage-bar.tsx` — 会话用量条（2026-08-29-session-usage-stats；ql-20260830-013-14b3 小型化）：摘要行五指标+缓存命中率为图标化小号形态（lucide 图标 + 11px 值，指标名收敛为 antd Tooltip 悬浮提示（触发元素 aria-label，ql-20260830-014-74f5）；命中率 cache_read÷(cache_read+input)，分母 0「—」）+按模型折叠明细（ChevronDown 图标按钮 aria-label 保语义）；自取数（useEffect+refreshSignal prop，零 react-query 对齐 dialog 渲染约束），session-panel page（头部下方）/dialog（输入框上方）双模式挂载，轮次终态递增信号重取
   - `machine-card.tsx` / `runtime-card.tsx` — 机器级与实例级卡片
   - `remote-folder-picker.tsx` — daemon list_roots/list_dir 懒加载目录树（自治：初始化根 / Tree loadData / 手输跳转校验 / 错误降级红条）
   - `session-list-layout.tsx` / `session-log-sanitize.ts` / `daemon-required-notice.tsx`

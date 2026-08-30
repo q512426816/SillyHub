@@ -231,3 +231,14 @@
 根因：会话顶部用量统计视觉过于显眼（六项文本标签+13px 粗体值抢会话主体视觉），用户要求弄小、指标名不直显
 方案：session-usage-bar 摘要行六项改 lucide 图标（ArrowDownToLine/ArrowUpFromLine/HardDriveDownload/HardDriveUpload/Repeat/Gauge）+11px medium 值，指标名收敛为原生 title 悬浮提示；「按模型明细」按钮改 ChevronDown 图标按钮（title+aria-label 保语义）；容器 py-2.5→py-1.5 收紧；折叠明细表按需展开不动；测试标签断言 getByText→getByTitle 同步
 结果：vitest 针对性 5 用例全绿（session-usage-bar.test.tsx 1 file passed），pnpm exec tsc --noEmit exit 0
+
+## ql-20260830-014-74f5 | 2026-08-30 22:42:20 | 会话用量条悬浮提示升级 antd Tooltip
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-usage-bar.tsx（title→antd Tooltip+aria-label）
+- frontend/src/components/daemon/__tests__/session-usage-bar.test.tsx（断言 getByTitle→getByLabelText）
+需求：会话用量条悬浮提示升级 antd Tooltip
+根因：原生 title 悬浮约 1 秒延迟且样式随浏览器不跟主题，用户要求改用 antd Tooltip
+方案：六项 UsageItem 与「按模型明细」按钮的 title 属性改 antd Tooltip（先例 message-queue-bar，即时弹出+主题 token），触发元素补 aria-label（无障碍名+测试锚点）并移除 title 防浏览器双提示；测试断言 getByTitle→getByLabelText；模块文档条目与 changelog 同步
+结果：vitest 针对性 5 用例全绿（session-usage-bar.test.tsx 1 file passed），pnpm exec tsc --noEmit exit 0
