@@ -3,6 +3,8 @@
 // 覆盖验收（对照任务卡 implementation + design §测试与验收）：
 //   ① 摘要行六项渲染：五指标（万级缩写 / 万以下千分位）+ 命中率百分比
 //     （D-003 口径 cache_read/(cache_read+input)）；首载 loading 静默不渲染；
+//     （ql-20260830-013-14b3 小型化改版后指标名收敛为 title 悬浮提示，
+//     标签断言走 getByTitle/queryByTitle，数值断言不变）；
 //   ② 命中率分母 0（全 0 会话）→「—」，by_model 空无明细切换按钮；
 //   ③ 折叠交互：初始明细表不渲染，点「按模型明细」后渲染模型行（含
 //     「未记录（旧轮次）」灰阶 tag）+ 口径脚注；
@@ -118,16 +120,16 @@ beforeEach(() => {
 /* ────────────────────── ① 摘要行六项 ────────────────────── */
 
 describe("SessionUsageBar 摘要行（task-03 / FR-02 / D-003）", () => {
-  it("六项 label + 数值：万级缩写、千分位、命中率百分比（97.7%）；首载 loading 静默不渲染", async () => {
+  it("六项 title 提示 + 数值：万级缩写、千分位、命中率百分比（97.7%）；首载 loading 静默不渲染", async () => {
     daemonMock.getSessionUsage.mockResolvedValue(multiBucketUsage());
     render(<SessionUsageBar sessionId="s-1" />);
     // 首载静默：promise 未 resolve 前整体不渲染（无 loading 占位）
-    expect(screen.queryByText("输入")).toBeNull();
+    expect(screen.queryByTitle("输入")).toBeNull();
     await flush();
 
-    // 六项 label
+    // 六项指标名（图标化后经 title 悬浮提示暴露）
     for (const label of ["输入", "输出", "缓存读取", "缓存写入", "请求次数", "缓存命中率"]) {
-      expect(screen.getByText(label)).toBeInTheDocument();
+      expect(screen.getByTitle(label)).toBeInTheDocument();
     }
     // 数值：万级缩写（>= 1 万 → X.X 万）
     expect(screen.getByText("1.5 万")).toBeInTheDocument(); // 15,200
@@ -224,8 +226,8 @@ describe("SessionUsageBar 拉取失败静默（task-03）", () => {
     await flush();
 
     // 无 loading 占位、无错误横幅、无关键数字——整体不渲染
-    expect(screen.queryByText("输入")).toBeNull();
-    expect(screen.queryByText("缓存命中率")).toBeNull();
+    expect(screen.queryByTitle("输入")).toBeNull();
+    expect(screen.queryByTitle("缓存命中率")).toBeNull();
     expect(screen.queryByText("97.7%")).toBeNull();
     expect(screen.queryByText("0")).toBeNull();
     expect(daemonMock.getSessionUsage).toHaveBeenCalledTimes(1);

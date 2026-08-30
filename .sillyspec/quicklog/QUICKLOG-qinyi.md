@@ -220,3 +220,14 @@
 根因：首轮只按 CI 日志 INSERT 参数暴露的 'change' 值检索，git_gateway/tool_gateway×2/worktree 四文件夹具用的是另一个非法值 'local'（同样不在 CHECK 三值 active/archive/deleted 内），CI 二跑仍 52 红暴露
 方案：4 处 location="local" 统一改 "active"；模块文档 ql 条目口径更新 15 文件 19 处；迁移测试的故意反例 bogus 不动
 结果：4 文件 81/81 用例绿 + ruff 0 问题；daemon-ci 已在 a9df1beb 转绿；本轮补修后待 push 复核 backend-ci
+
+## ql-20260830-013-14b3 | 2026-08-30 22:19:09 | 会话用量条摘要行小型化——指标名改图标+悬浮提示
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-usage-bar.tsx（摘要行图标化+title 提示+小型化）
+- frontend/src/components/daemon/__tests__/session-usage-bar.test.tsx（标签断言 getByText→getByTitle）
+需求：会话用量条摘要行小型化——指标名改图标+悬浮提示
+根因：会话顶部用量统计视觉过于显眼（六项文本标签+13px 粗体值抢会话主体视觉），用户要求弄小、指标名不直显
+方案：session-usage-bar 摘要行六项改 lucide 图标（ArrowDownToLine/ArrowUpFromLine/HardDriveDownload/HardDriveUpload/Repeat/Gauge）+11px medium 值，指标名收敛为原生 title 悬浮提示；「按模型明细」按钮改 ChevronDown 图标按钮（title+aria-label 保语义）；容器 py-2.5→py-1.5 收紧；折叠明细表按需展开不动；测试标签断言 getByText→getByTitle 同步
+结果：vitest 针对性 5 用例全绿（session-usage-bar.test.tsx 1 file passed），pnpm exec tsc --noEmit exit 0
