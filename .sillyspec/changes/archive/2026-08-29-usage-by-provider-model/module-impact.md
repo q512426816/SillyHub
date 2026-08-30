@@ -1,7 +1,10 @@
-# module-impact — 2026-08-29-usage-by-provider-model
-
+---
 author: qinyi
 created_at: 2026-08-29 03:05:00
+change: 2026-08-29-usage-by-provider-model
+---
+
+# 模块影响分析（Module Impact）— 用量统计细化到供应商/模型 + 会话页模型级联选择
 
 ## 受影响模块
 
