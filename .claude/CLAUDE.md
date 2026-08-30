@@ -29,8 +29,8 @@
     - quick:同一 QUICKLOG 文件按 ql-ID 条目追加,不是单槽位,不冲突。
 20. 前端样式统一参考（2026-08-20 起为 AI-Native 双主题系统）：
 21. 
-  * `.sillyspec/changes/2026-08-20-frontend-ai-native-style/prototype-frontend-ai-native-style.html`（设计系统总纲·原型）
-  * `.sillyspec/changes/2026-08-20-frontend-ai-native-style/design.md`（设计系统总纲·设计决策）
+  * `.sillyspec/changes/archive/2026-08-20-frontend-ai-native-style/prototype-frontend-ai-native-style.html`（设计系统总纲·原型）
+  * `.sillyspec/changes/archive/2026-08-20-frontend-ai-native-style/design.md`（设计系统总纲·设计决策）
   * `.sillyspec/docs/SillyHub/scan/FRONTEND_PAGE_STYLE.md`（页面级实现规范，改其它页面照这个；§0.5 主题系统为多主题必读）
   * 多主题铁律：取值单一源 `frontend/src/styles/themes.ts`（blue/ai-native 双套）；品牌色类名用 `brand-*` 语义阶（随 html data-theme 换肤），`blue-*` 阶仅限真信息蓝/外部标识色；阴影走主题 token（shadow-* 已 var 化）；antd 组件色经 ConfigProvider token 不手写；旧参考 `archive/2026-06-21-2026-06-21-frontend-style-system/` 仅作历史背景，与冲突处以新系统为准。
 21. 前端接口类型（`frontend/src/lib/api-types.ts`）必须从后端 OpenAPI 生成（`pnpm gen:types`），禁止手写：

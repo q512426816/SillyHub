@@ -362,7 +362,7 @@
 文件：backend/app/modules/change/dispatch.py（新增 cleanup_orphan_dispatch_runs + 重写 dispatch_next_step，未改 start_stage_dispatch）、backend/tests/modules/change/test_dispatch.py / test_dispatch_chain.py / test_e2e_stage_dispatch.py
 结果：根因=dispatch_next_step 与 start_stage_dispatch 两层都有 AgentRun 创建权。修法：(1) dispatch.py 新增 cleanup_orphan_dispatch_runs，精准指纹 pending+task_id NULL+lease_id NULL+provider NULL+model NULL+spec_strategy='sillyspec'，只命中旧 Run A 不动正常 Run（Run B spec_strategy=None / task 级有 task_id / 有 lease / 有 provider·model / 非 pending 全排除）；(2) dispatch_next_step 删 Step5 预创建 Run A 及 AgentRunWorkspace 关联，Step3 加 cleanup 调用（在 has_active_run 前清孤儿解永久阻塞），Step6 改用 run=await start_stage_dispatch(...) 返回值，Step7 用 dict() 拷贝回填 last_dispatch.run_id（修 SQLAlchemy JSON in-place mutation 不持久化的隐藏 bug，验收#2 真实成立），异常对齐 dispatch() 返回 agent_start_error 不再标 Run failed。未给 start_stage_dispatch 加双模式。3 个测试文件 FakeRun mock 全换建真 DB Run 的 _patch_stage_dispatch_creates_run helper（契约变更配套）。
 验证：新增 7 个 wave0 测试锁定六条验收；change 模块 85 全绿（含 e2e+chain+auto_dispatch）+ agent 84 + change_writer/router 11；ruff clean；mypy Success。
-依据：proposal .sillyspec/changes/2026-06-19-multi-agent-orchestration/proposal.md §6（Wave0）；dispatch.py dispatch() 正确模式参考；has_active_run(pending 算 active) + reconcile_stale_runs/_cleanup_stale_runs_impl(都只清 running) 证 Run A 永久阻塞。
+依据：proposal .sillyspec/changes/archive/2026-06-19-multi-agent-orchestration/proposal.md §6（Wave0）；dispatch.py dispatch() 正确模式参考；has_active_run(pending 算 active) + reconcile_stale_runs/_cleanup_stale_runs_impl(都只清 running) 证 Run A 永久阻塞。
 
 
 ---

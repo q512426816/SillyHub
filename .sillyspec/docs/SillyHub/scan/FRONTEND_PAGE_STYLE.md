@@ -9,7 +9,7 @@ source_commit: 5a00fc7e
 > 本规范以 `/ppm/projects` 当前样式为**唯一基准**,后续新建或改造其它列表/管理页一律对齐。
 > 基准组件:`PpmResourceTable`(`frontend/src/components/ppm-resource-table.tsx`,通用 CRUD 表格)+ `projects/page.tsx`(页面配置)。
 > **适用范围（D-304，2026-08-20-workspace-subpages-style-unify 立）**：本规范 §1-§12 以 PPM 类列表/管理页为基准（antd 全量条款适用）；**工作区工作台式页面**（/workspaces/[id] 及其子页）按 §0.5 主题系统 + 概览页基线执行（shadcn Button/SectionCard 四件套），§4 DataTable 强制、§5 antd Button 强制、§9 bg-red-50 错误条模板、§11 Don't 清单在该范围不适用。
-> 设计系统总纲(2026-08-20 起为 AI-Native 双主题):`.sillyspec/changes/2026-08-20-frontend-ai-native-style/design.md` + 原型 `prototype-frontend-ai-native-style.html`。
+> 设计系统总纲(2026-08-20 起为 AI-Native 双主题):`.sillyspec/changes/archive/2026-08-20-frontend-ai-native-style/design.md` + 原型 `prototype-frontend-ai-native-style.html`。
 
 ## 0. 一句话原则
 
