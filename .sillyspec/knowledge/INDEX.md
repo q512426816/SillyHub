@@ -93,3 +93,5 @@
 - daemon|decision|决策 → [decisions/daemon.md](decisions/daemon.md)
 - backend_daemon_api|decision|决策 → [decisions/backend_daemon_api.md](decisions/backend_daemon_api.md)
 - sillyhub_daemon_mcp|decision|决策 → [decisions/sillyhub_daemon_mcp.md](decisions/sillyhub_daemon_mcp.md)
+- backend_workspace|decision|决策 → [decisions/backend_workspace.md](decisions/backend_workspace.md)
+- frontend_workspace_skills|decision|决策 → [decisions/frontend_workspace_skills.md](decisions/frontend_workspace_skills.md)
