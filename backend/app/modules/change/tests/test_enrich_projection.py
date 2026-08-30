@@ -56,7 +56,7 @@ async def _make_change(
         change_key=change_key,
         title=change_key,
         status="active",
-        location="changes",
+        location="active",
         path=f"changes/{change_key}",
         current_stage=stage,
         owner_id=None,

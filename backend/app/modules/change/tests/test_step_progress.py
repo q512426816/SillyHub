@@ -353,7 +353,7 @@ async def _make_change(
         change_key=change_key,
         title=change_key,
         status="active",
-        location="changes",
+        location="active",
         path=f"changes/{change_key}",
         current_stage=stage,
         owner_id=None,
@@ -545,7 +545,7 @@ async def test_resolve_pending_change_keys_guard_after_tuple_change(
     )
 
     svc = ChangeService(db_session)
-    pending = await svc._resolve_pending_change_keys(ws.id, location="changes")
+    pending = await svc._resolve_pending_change_keys(ws.id, location="active")
     # plan completed + current_stage=plan → PLAN_REVIEW；verify completed → HUMAN_TEST；
     # execute 全完 → None；无行 → 不进集合
     assert pending == {"g-plan", "g-verify"}

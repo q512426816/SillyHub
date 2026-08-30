@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
@@ -121,6 +122,13 @@ class Change(BaseModel, table=True):
 
     __tablename__ = "changes"
     __table_args__ = (
+        # 2026-08-30 生产事故对齐：202605300900 建 PG 表时定义了本约束而模型漏声明
+        # （模型↔迁移漂移，SQLite create_all 测试全绿掩盖）——软删 location='deleted'
+        # 线上 CheckViolation。值集三值与迁移 20260829230000 对齐，防再漂移。
+        CheckConstraint(
+            "location IN ('active', 'archive', 'deleted')",
+            name="ck_changes_location",
+        ),
         Index(
             "ux_changes_workspace_key",
             "workspace_id",
