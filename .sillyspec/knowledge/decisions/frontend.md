@@ -86,3 +86,17 @@
 锚点：未记录
 最近确认：5d86ddb1
 理由：保持 antd Modal 默认（Esc 直接关窗）。拦截改写需 hack antd 键盘处理链，脆弱且收益小；原型演示的「先退全屏」仅为示意，不作为实现要求。
+
+## D-001@v1 @V1 渲染层策略：独立移动渲染层（方案 A）
+状态：implemented
+变更：2026-08-26-mobile-workspace-page
+锚点：未记录
+最近确认：e784c9fb
+理由：新增 `/m/workspaces/[id]/**` 独立移动页面：变更列表/详情用移动卡片 + 全屏钻取重绘；会话直接复用 SessionPanel 内核（继门户页/悬浮窗之后的第四宿主）。数据层 100% 复用 `lib/changes.ts` + `lib/daemon.ts` + `lib/tasks.ts`，桌面代码零回归（仅解除 m/workspaces 门禁等 4 处最小改动）。middleware UA 分流（matcher 已含 `/workspaces/:path*`）与 route-guard（已放行 `/workspaces/:id/**`）无需结构改动
+
+## D-003@v1 @V1 会话能力边界：完整内核复用
+状态：implemented
+变更：2026-08-26-mobile-workspace-page
+锚点：未记录
+最近确认：e784c9fb
+理由：SessionPanel 内核 100% 复用，所有高级功能（消息队列/子代理目录/上下文用量/会话配置）保留，仅重排样式适配手机竖屏。对齐 2026-08-25-unified-floating-session 验证过的"一内核·N 宿主"模式
