@@ -396,3 +396,53 @@ supersedes：D-001@v1
 锚点：未记录
 最近确认：c7f48562
 理由：lastCallCtxTokens 仅 'main' 桶计算与注入 pendingUsage；子桶 pendingUsage 不含 ctx_tokens（backend usage.get 缺失即跳过，天然兼容）。turnInput/turnOutput 所有桶照常（子代理计费量并入本轮）。
+
+## D-001@v1 : 关联入口双向都要
+状态：implemented
+变更：2026-08-28-session-ppm-task-binding
+锚点：未记录
+最近确认：73a4eda3
+理由：双向都要——任务/问题侧提供"发起会话"入口（详情/列表处），会话输入框 @联想扩展支持选择 PPM 任务/问题，与现有变更/快速修复绑定体验一致。
+
+## D-002@v1 : 全状态可关联
+状态：implemented
+变更：2026-08-28-session-ppm-task-binding
+锚点：未记录
+最近确认：73a4eda3
+理由：全状态可关联。列表/联想默认展示"进行中"，但已完成/未开始的任务也能手动关联（如复盘场景）。
+
+## D-003@v1 : 附件真注入 + 降级文字清单
+状态：implemented
+变更：2026-08-28-session-ppm-task-binding
+锚点：未记录
+最近确认：73a4eda3
+理由：真附件注入——后端尝试读取附件内容作为真附件传给 agent（能看图/读文件）；读取失败的降级为文字清单（附件名+链接）。
+
+## D-007@v1 : PPM 附件访问控制复用 _can_access
+状态：implemented
+变更：2026-08-28-session-ppm-task-binding
+锚点：未记录
+最近确认：73a4eda3
+理由：复用 FileService._can_access 同口径校验：有权条目物化注入；无权条目降级文字清单仅列文件名并注明「无权访问」（不带链接）。行为对齐 PPM UI 现状（batch_meta 同样静默剔除无权行），不引入跨用户文件读取。
+
+## D-006@v1 : PPM 附件物化为 SessionAttachment
+状态：implemented
+变更：2026-08-28-session-ppm-task-binding
+锚点：未记录
+最近确认：73a4eda3
+理由：创建会话携带 ppm item 时，后端把任务 file_urls 对应 File 读取 bytes → 写入 session attachment storage → 物化 SessionAttachment 行（session_id 直接回填、user_id=创建者），并入现有 attachment_ids 组装链路（assemble_inject_attachments/download 回调/标记行/前端展示全复用，daemon 零改动）。
+
+## D-005@v1 : 统一 PPM 绑定表（方案 B）
+状态：implemented
+变更：2026-08-28-session-ppm-task-binding
+锚点：未记录
+最近确认：73a4eda3
+理由：方案 B——一张 `ppm_item_session_links` 表（kind 字段区分 plan_task/problem），一套绑定 helper + 一个统一前导构建器；@联想/会话筛选/任务侧卡片前端逻辑复用一套。
+
+## D-004@v2 : 工作区排序键定死 workspace_id 升序
+状态：implemented
+变更：2026-08-28-session-ppm-task-binding
+锚点：未记录
+最近确认：73a4eda3
+理由：workspace_id 升序（UUID 字典序）为唯一排序键，后端 link.workspace_id 写入与前端预选同键，消除分叉。
+supersedes：D-004@v1
