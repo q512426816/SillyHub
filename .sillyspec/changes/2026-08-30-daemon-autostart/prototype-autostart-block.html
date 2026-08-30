@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>原型：/runtimes 页新增「开机自启动」折叠块 — 2026-08-30-daemon-autostart</title>
+<style>
+  /* 风格对齐现有 runtimes/page.tsx InstallDaemonBlock（dashed border 折叠块）+
+     FRONTEND_PAGE_STYLE.md AI-Native 主题 token 语义（border-border/bg-muted/bg-card/foreground）。 */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f6f7f9; color: #1a1d21; padding: 32px;
+    display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap;
+  }
+  .stage { background: #fff; border: 1px solid #e4e6ea; border-radius: 12px; padding: 20px; width: 520px; max-width: 100%; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .stage h1 { font-size: 14px; margin-bottom: 4px; }
+  .stage .sub { font-size: 11px; color: #8a8f98; margin-bottom: 16px; }
+  .hint { font-size: 12px; color: #666; margin-bottom: 12px; background: #f2f6ff; border: 1px solid #d8e2ff; border-radius: 8px; padding: 8px 10px; }
+
+  /* ── 折叠块（复用 InstallDaemonBlock 骨架） ── */
+  .fold { border: 1px dashed #cfd4db; border-radius: 8px; background: rgba(148,163,184,.06); margin-bottom: 10px; }
+  .fold > button {
+    display: flex; width: 100%; align-items: center; gap: 8px;
+    padding: 6px 10px; background: none; border: 0; cursor: pointer; text-align: left;
+    font-size: 11px; font-weight: 500; color: #1a1d21;
+  }
+  .fold > button .chev { margin-left: auto; font-size: 10px; color: #8a8f98; }
+  .fold-body { display: none; flex-direction: column; gap: 8px; border-top: 1px solid #e4e6ea; padding: 6px 10px; }
+  .fold.open .fold-body { display: flex; }
+  .ico { font-size: 12px; }
+
+  /* ── 命令行 + 复制按钮 ── */
+  .cmd-row { display: flex; gap: 8px; align-items: stretch; min-width: 0; }
+  .cmd {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px;
+    background: #fff; border: 1px solid #e4e6ea; border-radius: 8px; padding: 6px 10px;
+    box-shadow: 0 1px 2px rgba(0,0,0,.05);
+  }
+  .cmd code { font-family: ui-monospace, Consolas, monospace; font-size: 11px; color: #5b6169; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
+    border: 1px solid #d4d8de; background: #fff; border-radius: 8px; padding: 5px 10px;
+    font-size: 11px; cursor: pointer;
+  }
+  .btn.copied { border-color: #16a34a; color: #16a34a; }
+
+  .note { font-size: 10px; color: #8a8f98; line-height: 1.6; }
+  .note.amber { color: #b45309; }
+  .tag { display: inline-block; font-size: 10px; border: 1px solid #d8e2ff; background: #f2f6ff; color: #3b66d6; border-radius: 999px; padding: 1px 8px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+
+<div class="stage">
+  <div class="tag">展开态（默认收起）</div>
+  <h1>/runtimes · 启动入口卡片 新增折叠块</h1>
+  <div class="sub">位于「首次安装 daemon（新机器）」折叠块下方，同一视觉层级；本命令三平台通用，无 OS 切换按钮</div>
+
+  <!-- 既有块：首次安装（示意，勿改） -->
+  <div class="fold open">
+    <button type="button">><span class="ico">⌨</span> 首次安装 daemon（新机器）<span class="chev">收起</span></button>
+    <div class="fold-body">
+      <div class="cmd-row">
+        <div class="cmd"><span class="ico">⌨</span><code>irm https://hub.example.com/daemon/install.ps1 | iex</code></div>
+        <button class="btn">复制</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ✦ 新增块：开机自启动（本次变更） -->
+  <div class="fold open" id="autostart-fold">
+    <button type="button">><span class="ico">⏻</span> 开机自启动（可选）<span class="chev">收起</span></button>
+    <div class="fold-body">
+      <p class="note">安装完成并<b>至少成功启动过一次</b>后，想让 daemon 随开机自动运行，在终端执行：</p>
+      <div class="cmd-row">
+        <div class="cmd"><span class="ico">⌨</span><code>sillyhub-daemon autostart enable --server https://hub.example.com --api-key &lt;你的 API Key&gt;</code></div>
+        <button class="btn" id="copy-btn" onclick="copyCmd(this)">复制</button>
+      </div>
+      <p class="note amber">⚠️ 自启动场景请用 <b>API Key</b>（长效），用登录 Token 会过期失效。在哪里获取 API Key？→ 个人设置 · API Keys。</p>
+      <p class="note">常见管理命令：<code>sillyhub-daemon autostart status</code> 查看注册状态 · <code>sillyhub-daemon autostart disable</code> 取消自启（不会停止正在运行的 daemon）。</p>
+    </div>
+  </div>
+
+  <div class="hint">说明：命令三平台相同（内部自动按 Windows 计划任务 / macOS launchd / Linux systemd 处理），因此<b>不需要</b> InstallDaemonBlock 那样的 OS 切换按钮——这是与安装块的关键差异。</div>
+</div>
+
+<div class="stage">
+  <div class="tag">终端执行效果（用户视角）</div>
+  <h1>autostart enable 输出示意</h1>
+  <div class="sub">成功路径 + 无凭据失败路径</div>
+  <div style="background:#0d1117;color:#c9d1d9;border-radius:8px;padding:14px;font-family:ui-monospace,Consolas,monospace;font-size:11.5px;line-height:1.7;">
+    <div style="color:#8b949e">$ sillyhub-daemon autostart enable --server https://hub.example.com --api-key shk_live_xxx</div>
+    <div>✓ 已注册开机自启动（Windows 计划任务 SillyHubDaemon-3f2a1b9c）</div>
+    <div style="color:#8b949e;">  server: https://hub.example.com</div>
+    <div style="color:#8b949e;">  启动命令: node ~/.sillyhub/daemon/bin/sillyhub-daemon.js start --server …</div>
+    <div style="color:#8b949e;">  日志: ~/.sillyhub/daemon/daemon.log</div>
+    <div style="margin-top:8px;color:#8b949e;">提示: 立即启动可执行 sillyhub-daemon start --server https://hub.example.com</div>
+    <div style="margin-top:14px;color:#8b949e;">$ sillyhub-daemon autostart enable --server https://hub.example.com</div>
+    <div style="color:#f85149;">✗ 未找到已保存的凭据（~/.sillyhub/daemon/config-3f2a1b9c.json 缺 token/api_key）。</div>
+    <div style="color:#f85149;">  请先带 --api-key（或 --token）成功启动一次，或在本命令后追加凭据参数。</div>
+  </div>
+</div>
+
+<script>
+  // 折叠交互演示
+  document.querySelectorAll('.fold > button').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var fold = btn.parentElement;
+      fold.classList.toggle('open');
+      btn.querySelector('.chev').textContent = fold.classList.contains('open') ? '收起' : '展开';
+    });
+  });
+  function copyCmd(btn) {
+    btn.textContent = '已复制 ✓';
+    btn.classList.add('copied');
+    setTimeout(function () { btn.textContent = '复制'; btn.classList.remove('copied'); }, 1500);
+  }
+</script>
+</body>
+</html>
