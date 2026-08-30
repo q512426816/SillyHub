@@ -496,3 +496,45 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：c7346118
 理由：用户在 explore 阶段看到完整对比表后确认「帮我实现吧」= 选 A。A 是唯一同时满足 D-001~D-006 的方案；B 违反 D-003（自由文本角色名不可靠推断）且画像判定失控；C 违反 D-001（codex 不支持 systemPrompt，provider 不对称）。
+
+## D-002@v1 : token 统计范围 = 派发执行 ∪ 关联会话执行（按 run 去重）
+状态：implemented
+变更：2026-08-30-change-center-usage-stats
+锚点：未记录
+最近确认：84a5b960
+理由：并集去重（用户 AskUserQuestion 确认）。变更侧 = 直接挂 change_id 的 run ∪ 关联会话（change_session_links）内全部 run，按 run id 去重合并。跨变更共享会话时同一份消耗会在多个变更各显示一次——口径特性非 bug，详情页注明。快速修复无派发链路，恒走 quicklog_session_links→agent_sessions→agent_runs 会话链路（代码事实，非选项）。
+
+## D-003@v1 : 落地方式 = 实时聚合计算字段（零迁移）
+状态：implemented
+变更：2026-08-30-change-center-usage-stats
+锚点：未记录
+最近确认：84a5b960
+理由：实时聚合（用户 AskUserQuestion 确认）。查询时从 agent_runs / agent_run_model_usage 现算，DTO 计算字段，不新建表列、零 migration；数字与最新执行终态一致。列表用批量聚合（一条 SQL 按变更分组）。否决「冗余入表」。
+
+## D-004@v1 : 展示位置 = 列表 + 详情都要
+状态：implemented
+变更：2026-08-30-change-center-usage-stats
+锚点：未记录
+最近确认：84a5b960
+理由：列表 + 详情都要（用户 AskUserQuestion 确认）。变更中心「变更」tab 与「快速修复」tab 列表各加摘要列（耗时 + token 总量档）；变更详情页与快速修复抽屉展示完整五指标（输入/输出/缓存读/缓存写/调用次数 + 轮次）+ 分模型明细。对齐运行时页/会话页用量卡先例。
+
+## D-005@v1 : API 形态 = 方案 A（独立用量端点 + 列表内嵌摘要）
+状态：implemented
+变更：2026-08-30-change-center-usage-stats
+锚点：未记录
+最近确认：84a5b960
+理由：方案 A（用户 AskUserQuestion 确认）。列表 DTO（ChangeSummary / QuicklogEntryListItem）内嵌摘要字段，批量聚合一条 SQL 挂既有富化管道（零 N+1）；完整五指标+分模型明细走两个新独立端点；前端一个可复用用量组件覆盖变更详情页与快速修复抽屉。否决 B（详情响应膨胀、分模型明细无处安放、与先例不一致）与 C（run DTO 仅输入/输出两维，数据面不成立——session-usage-stats 先例已核实）。
+
+## D-006@v1 : 软删会话的执行计入统计
+状态：implemented
+变更：2026-08-30-change-center-usage-stats
+锚点：未记录
+最近确认：84a5b960
+理由：计入。消耗真实发生，用量口径=真实成本；UI 隐藏是展示层整洁考虑，两者不矛盾——详情卡注脚声明（R-07）。孤儿 run（agent_session_id 已置空）经派发锚点 change_id 仍可命中，不丢数。
+
+## D-007@v1 : 用量卡取数用 react-query useQuery（非 useEffect）
+状态：implemented
+变更：2026-08-30-change-center-usage-stats
+锚点：未记录
+最近确认：84a5b960
+理由：useQuery。两个目标渲染点的既有卡片（change-sessions-card.tsx:60 / quicklog-sessions-card.tsx:60）均用 useQuery 且都在 QueryClientProvider 内；session-usage-bar 规避的是会话浮窗零 react-query 约束，本变更两渲染点无此约束。变更详情页「本页禁新增网络请求」注释（[cid]/page.tsx:339）经核实为 last-signal 功能局部语境（禁的是为派生小字段加轮询，同页 sessions 卡已自取数）。
