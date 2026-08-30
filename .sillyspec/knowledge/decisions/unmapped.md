@@ -182,3 +182,38 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：163e1065
 理由：补入。`_ensure_creator_as_owner`(`workspace/service.py:729`,line 770 写 UserWorkspaceRole 授 owner)的**所有调用方**——`create`(`:148/165/222`)与 `scan_generate`(`:609`,daemon-client 建工作区独立路径,`:669` 调用,不经 create)——commit 后都需调 invalidate_all_permissions,创建者的 all/everywhere 缓存才及时失效(否则最长 TTL 内缺新 ws 权限——权限缺失方向,非越权,但仍是错误)。plan-review 发现 scan_generate 遗漏(Design Grill X2 当时未穷尽 `_ensure_creator_as_owner` 调用方,属误判闭合,现补)。bootstrap 启动种子(auth/service.py seed_*)免失效(进程冷启无缓存)。
+
+## D-001@v1 : 会话面板基元统一方向 = antd
+状态：implemented
+变更：2026-08-22-session-panel-unify
+锚点：未记录
+最近确认：6fdabce0
+理由：用户拍板 antd（AskUserQuestion 2026-08-22）。
+
+## D-002@v1 : 实施方式 = 一次性原子改造
+状态：implemented
+变更：2026-08-22-session-panel-unify
+锚点：未记录
+最近确认：6fdabce0
+理由：用户选方案 A：同一变更内一次做完，单轮验收。
+
+## D-003@v1 : TurnStatusBadge 纳入 antd 化（Grill U-01）
+状态：implemented
+变更：2026-08-22-session-panel-unify
+锚点：未记录
+最近确认：6fdabce0
+理由：用户拍板一并换 antd（贯彻「整个会话 UI 家族统一」）。
+
+## D-004@v1 : 按钮尺寸 = 主操作 32px / 打断 small 24px（Grill U-02）
+状态：implemented
+变更：2026-08-22-session-panel-unify
+锚点：未记录
+最近确认：6fdabce0
+理由：用户拍板：主操作 antd 默认 32px，打断对齐 page 惯例 small 24px。
+
+## D-005@v1 : 📎 附件按钮 antd 映射 = type="text"（Grill U-03）
+状态：implemented
+变更：2026-08-22-session-panel-unify
+锚点：未记录
+最近确认：6fdabce0
+理由：设计内定 type="text"（对应 ghost 无边框语义）。
