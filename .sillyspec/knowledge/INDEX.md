@@ -91,3 +91,5 @@
 - styles|decision|决策 → [decisions/styles.md](decisions/styles.md)
 - change|decision|决策 → [decisions/change.md](decisions/change.md)
 - daemon|decision|决策 → [decisions/daemon.md](decisions/daemon.md)
+- backend_daemon_api|decision|决策 → [decisions/backend_daemon_api.md](decisions/backend_daemon_api.md)
+- sillyhub_daemon_mcp|decision|决策 → [decisions/sillyhub_daemon_mcp.md](decisions/sillyhub_daemon_mcp.md)
