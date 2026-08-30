@@ -296,3 +296,39 @@ supersedes：D-007@v1
 锚点：未记录
 最近确认：4d7adc1d
 理由：删除范围=create+list 四端点及对应前端 client；保留 GET /missions/{id}、POST /missions/{id}/cancel、全部 MCP 端点；team-progress.tsx 不动。
+
+## D-001@v1 : 三入口统一为一个门户组件（以 /sessions 为准）
+状态：implemented
+变更：2026-08-22-workspace-sessions-portal
+锚点：未记录
+最近确认：c06c7934
+理由：以 /sessions 为准抽共享 SessionsPortal（scope 判别联合），三入口渲染同一组件（用户三轮 AskUserQuestion 拍板：范围两处一起/方案A/设计确认）。
+
+## D-002@v1 : 变更详情承载=专属路由门户
+状态：implemented
+变更：2026-08-22-workspace-sessions-portal
+锚点：未记录
+最近确认：c06c7934
+理由：方案A：卡片变入口（前 3 条预览+打开按钮）跳专属路由（用户选，对比页内展开/全屏弹窗两案）。
+
+## D-003@v2 : scope 列表数据源=全局端点+服务端过滤（取代 D-003@v1 客户端过滤）
+状态：implemented
+变更：2026-08-22-workspace-sessions-portal
+锚点：未记录
+最近确认：c06c7934
+理由：后端 GET /sessions 增 workspace_id/change_id 可选过滤参；前端 scope 复用全局端点（owner-scoped+全字段+筛选+分页），v2 的降级矩阵/客户端过滤/筛选隐藏全部退场。
+supersedes：D-003@v1
+
+## D-004@v1 : ?session= 升级为门户统一能力
+状态：implemented
+变更：2026-08-22-workspace-sessions-portal
+锚点：未记录
+最近确认：c06c7934
+理由：SessionsPortal 统一支持 ?session=<id> 初始选中（迁移旧 :95-113 能力，无效 id 静默忽略），三入口通用。
+
+## D-005@v1 : ended 会话恢复自动→手动（以 /sessions 行为为准）
+状态：implemented
+变更：2026-08-22-workspace-sessions-portal
+锚点：未记录
+最近确认：c06c7934
+理由：统一为 page 模式手动重开——用户「以 /sessions 为准」原则的直接推论；design §4.E 明示为有意交互变更。
