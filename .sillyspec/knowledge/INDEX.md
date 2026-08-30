@@ -88,3 +88,4 @@
 - backend|decision|决策|变更删除|软删|location=deleted|防复活|platform_deleted|镜像驱动收敛|墓碑 → [decisions/backend.md](decisions/backend.md)
 - frontend|decision|决策|活动徽标|last_pushed_at|进行中可见性 → [decisions/frontend.md](decisions/frontend.md)
 - sillyhub-daemon|decision|决策|spec-bundle|pull --spec|daemon 零改动 → [decisions/sillyhub-daemon.md](decisions/sillyhub-daemon.md)
+- styles|decision|决策 → [decisions/styles.md](decisions/styles.md)
