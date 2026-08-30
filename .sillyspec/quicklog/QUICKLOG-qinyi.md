@@ -206,3 +206,17 @@
 根因：27c05447 把 changes.location CHECK 对齐 active/archive/deleted 三值但只修了 change 模块自己的测试，其余 11 文件 15 处夹具仍插从未合法的 'change'（生产 PG 建表起即两值约束，SQLite 测试库无该约束掩盖）；951ad8be 给 _tryUpdate 加 stop 前 validateBundleOnDisk 主拦截时硬编码 DAEMON_BIN_DIR（HOME 目录），集成测试不真实落盘，作者本机恰有真实部署 bundle 才绿，CI 干净环境必红
 方案：夹具 15 处改 'active'；daemon.ts 两处校验目录改 dirname(_selfUpdateBundlePath)（生产默认同值行为不变，D-006 同款可注入）；selfupdate-scenarios 两大 describe（task-08 四路径+task-06 恢复互斥）beforeEach 预置 ≥MIN_BUNDLE_BYTES 且含 BUILD_ID 的假 bundle 模拟下载已落盘；sillyhub-daemon.md 变更索引补条目（顺带入卡 951ad8be 漏同步的 D-009 拦截语义）
 结果：daemon selfupdate 相关 3 文件 50/50 绿 + tsc 0 错；backend 11 文件 136/136 绿 + ruff format/check 0 问题；待 push 后 CI 复核
+
+## ql-20260830-012-d892 | 2026-08-30 20:52:29 | CI 双红清偿二轮：补修首轮漏掉的 4 个 location="local" 非法值夹具文件
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/git_gateway/tests/test_router.py（夹具 location 非法值）
+- backend/app/modules/tool_gateway/tests/test_router.py（夹具 location 非法值）
+- backend/app/modules/tool_gateway/tests/test_policy.py（夹具 location 非法值）
+- backend/app/modules/worktree/tests/test_router.py（夹具 location 非法值）
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（条目口径更新 15 文件 19 处）
+需求：CI 双红清偿二轮：补修首轮漏掉的 4 个 location="local" 非法值夹具文件
+根因：首轮只按 CI 日志 INSERT 参数暴露的 'change' 值检索，git_gateway/tool_gateway×2/worktree 四文件夹具用的是另一个非法值 'local'（同样不在 CHECK 三值 active/archive/deleted 内），CI 二跑仍 52 红暴露
+方案：4 处 location="local" 统一改 "active"；模块文档 ql 条目口径更新 15 文件 19 处；迁移测试的故意反例 bogus 不动
+结果：4 文件 81/81 用例绿 + ruff 0 问题；daemon-ci 已在 a9df1beb 转绿；本轮补修后待 push 复核 backend-ci

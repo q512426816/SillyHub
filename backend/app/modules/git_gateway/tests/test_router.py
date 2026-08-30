@@ -50,7 +50,7 @@ async def _setup_active_lease(db_session) -> dict:
         change_key="change-001",
         title="Test Change",
         status="in_progress",
-        location="local",
+        location="active",
         path="changes/local/change-001",
     )
     db_session.add(change)
