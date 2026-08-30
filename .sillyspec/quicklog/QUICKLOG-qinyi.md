@@ -183,3 +183,8 @@
 根因：11c17b36 挂载时 start_draft_cleanup_task(get_session_factory) 少调一层括号，cleanup 内 async with session_factory() 拿到 async_sessionmaker 直接抛 TypeError 被吞成 hourly warning，草稿行自 8-20 从未清理，mypy arg-type 全局禁用拦不住
 方案：main.py 改传 get_session_factory() 工厂实例；cleanup.py 三函数形参补 async_sessionmaker 注解；start_draft_cleanup_task 加 isinstance 错型 fail-fast 守卫
 结果：session_attachment 测试 4/4 绿（新增契约+错型拒绝两用例）+ ruff 过 + mypy 0 错；已提交 206523c4 未推送
+
+## ql-20260830-011-99a8 | 2026-08-30 20:19:03 | 清偿 CI 双红：backend 测试夹具 location 非法值对齐 CHECK 三值 + daemon 自更新校验目录可注入修复 CI 环境依赖
+状态：进行中
+关联变更：（无）
+文件：backend/app/modules/agent/tests/test_context_builder.py, backend/app/modules/agent/tests/test_dispatch_profile.py, backend/app/modules/agent/tests/test_execution_context.py, backend/app/modules/agent/tests/test_m2n_agent_run.py, backend/app/modules/agent/tests/test_router.py, backend/app/modules/file/tests/test_file_agent_owner.py, backend/app/modules/workflow/tests/test_audit_hooks.py, backend/app/modules/workflow/tests/test_router.py, backend/app/modules/workflow/tests/test_spec_guardian.py, backend/app/modules/workspace/tests/test_m2n_task.py, backend/tests/core/test_audit_hooks_effective.py, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/tests/integration/selfupdate-scenarios.test.ts, .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md

@@ -446,3 +446,10 @@ supersedes：D-001@v1
 最近确认：73a4eda3
 理由：workspace_id 升序（UUID 字典序）为唯一排序键，后端 link.workspace_id 写入与前端预选同键，消除分叉。
 supersedes：D-004@v1
+
+## D-004@v1 : 数据链路实现方案
+状态：implemented
+变更：2026-08-29-session-usage-stats
+锚点：未记录
+最近确认：0ea25728
+理由：方案 A——新增 GET /api/daemon/sessions/{id}/usage 聚合端点：agent_run_model_usage 按 session 的 runs 聚合为主、AgentRun 六 token 列兜底无明细行的老 run，返回会话汇总+按模型分组；与 /runtimes/usage 先例同模式
