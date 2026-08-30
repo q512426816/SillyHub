@@ -360,3 +360,39 @@ supersedes：D-003@v1
 锚点：未记录
 最近确认：debd368d
 理由：backend `inject_session` 对 strip 后为空的 prompt 抛 422（中文文案，领域类 SessionEmptyPrompt，过 l10n 守护）；前端发送按钮空内容 disabled 为辅助。服务端拒绝是权威（防任何调用方）。
+
+## D-002@v1 : ctx 指标落库（AgentRun 加列）
+状态：implemented
+变更：2026-08-27-session-token-usage-fix
+锚点：未记录
+最近确认：c7f48562
+理由：落库。不落库则刷新页面/重进会话后上下文环拿不到数值。项目未上线（CLAUDE.md 规则 11），允许直接加列迁移。
+
+## D-003@v1 : 历史会话（无 ctx 数据）环显示未知
+状态：implemented
+变更：2026-08-27-session-token-usage-fix
+锚点：未记录
+最近确认：c7f48562
+理由：如实显示"未知/—"（不算百分比），不用旧口径估算（旧口径 input 是该轮所有调用求和，数字本身失真）。
+
+## D-005@v1 : 实现方案选 A（复用 usage 附带管线 + daemon 按轮重置）
+状态：implemented
+变更：2026-08-27-session-token-usage-fix
+锚点：未记录
+最近确认：c7f48562
+理由：方案 A。daemon 在现有 usage 字典加 ctx_tokens（message_start 算本次调用 input+cache_read+cache_creation）；轮边界重置累积器使实时值=本轮至今量（与终态口径一致）；backend/frontend 全链路加字段透传（AgentRun.ctx_tokens 列 + SSE + SessionRunRead）。完全符合 D-001~D-004。否决 B（改动面翻倍且旧通道无法删除，两套并存反而更乱）；否决 C（环仍爆表、跳变仅被隐藏）。
+
+## D-001@v2 : 统一=本轮增量；终态 SDK result 权威校准
+状态：implemented
+变更：2026-08-27-session-token-usage-fix
+锚点：未记录
+最近确认：c7f48562
+理由：统一仍为本轮增量；终态以 SDK result 值为权威覆盖（校准语义）。消除的是"语义级"跳变（会话累计暴涨→本轮骤降）；若两路数值有小出入，表现为终态定格时小幅校正。execute 首任务跑真实会话 spike 验证，偏差 >5% 启用 fallback（close 仅当 result > 实时值才覆盖 input/output）。
+supersedes：D-001@v1
+
+## D-006@v1 : ctx_tokens 仅 main 桶计算与注入
+状态：implemented
+变更：2026-08-27-session-token-usage-fix
+锚点：未记录
+最近确认：c7f48562
+理由：lastCallCtxTokens 仅 'main' 桶计算与注入 pendingUsage；子桶 pendingUsage 不含 ctx_tokens（backend usage.get 缺失即跳过，天然兼容）。turnInput/turnOutput 所有桶照常（子代理计费量并入本轮）。
