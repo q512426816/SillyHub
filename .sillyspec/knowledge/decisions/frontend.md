@@ -44,3 +44,45 @@
 锚点：`frontend/src/components/changes/change-activity-badge.tsx`
 最近确认：0ec935c9
 理由：Layer 1 ChangeSummary.last_pushed_at 投影（progress 行既有列，零 migration）+ 活动徽标三态（active≤30min「进行中」/active>30min「停滞」/waiting|null 空闲）；ACTIVITY_STALE_MS=30min 阈值与 ISO_LIKE_RE 正则白名单防御解析（畸形串回退原文不炸组件）均为前端展示层关注点不进后端 DTO，复用既有 30s 轮询零新增请求；Layer 2 CLI X3 步骤开始/X4 任务边界补推为跨仓渐进增强（后端零改动）；Layer 3 心跳 Non-Goal 协议预留。徽标文案只陈述事实（「最后信号 x 分钟前」）不断言挂死（R-12）；current_step_status 不区分 pending/in-progress 是 Layer 1 启发式固有边界（态 1/态 2 仅由阈值区分），强判定需心跳留将来。
+
+## D-002@v1 : 覆盖范围不含 git-log
+状态：implemented
+变更：2026-08-26-file-fullscreen-preview
+锚点：未记录
+最近确认：5d86ddb1
+理由：用户勾选「统一预览弹窗加全屏 + 工作区文件浏览器」，未勾选 git 提交记录文件列表。
+
+## D-003@v1 : 方案 A 统一弹窗升级
+状态：implemented
+变更：2026-08-26-file-fullscreen-preview
+锚点：frontend/src/components/files/file-preview-modal.tsx
+最近确认：5d86ddb1
+理由：用户选「方案A：统一弹窗升级」。
+
+## D-004@v1 : CSS 伪全屏而非浏览器 Fullscreen API
+状态：implemented
+变更：2026-08-26-file-fullscreen-preview
+锚点：未记录
+最近确认：5d86ddb1
+理由：antd Modal 尺寸切换（100vw/100vh）实现伪全屏，参考 agent-log-viewer.tsx L905 fixed inset-0 先例。不用 requestFullscreen()——iframe/弹窗嵌套下兼容坑多且不可控。
+
+## D-005@v1 : 新增 HtmlPreviewer 渲染器
+状态：implemented
+变更：2026-08-26-file-fullscreen-preview
+锚点：frontend/src/components/files/previewers/html-previewer.tsx（新增）
+最近确认：5d86ddb1
+理由：新增 html 渲染器：iframe sandbox="allow-scripts allow-popups" + srcDoc（与 change-file-tree 内联 HTML 预览同款安全策略）；registry 增 text/html mime + html/htm 扩展名。
+
+## D-007@v1 : explorer/变更文件不接 OnlyOffice
+状态：implemented
+变更：2026-08-26-file-fullscreen-preview
+锚点：未记录
+最近确认：5d86ddb1
+理由：不接。officeSource 仅支持 session_attachment|file 两类有平台 id 的来源；这两处无 id，不传该字段恒走本地渲染器（docx-preview/SheetJS）。
+
+## D-008@v1 : Esc 保持 antd 默认关窗
+状态：implemented
+变更：2026-08-26-file-fullscreen-preview
+锚点：未记录
+最近确认：5d86ddb1
+理由：保持 antd Modal 默认（Esc 直接关窗）。拦截改写需 hack antd 键盘处理链，脆弱且收益小；原型演示的「先退全屏」仅为示意，不作为实现要求。

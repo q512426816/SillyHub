@@ -42,3 +42,10 @@
 锚点：backend/migrations/versions/20260825223000_add_quicklog_session_links.py（播种）
 最近确认：a9b06c98
 理由：links 为唯一关联真相：读侧全部改走 links；alembic 一次性把存量 change_id 播种成 link 行（ON CONFLICT DO NOTHING）；change_id 列保留并继续写入（创建时锚定主变更的冗余提示，双写），后续变更再评估删列。
+
+## D-006@v1 : raw 端点 50MB 上限 + inline disposition
+状态：implemented
+变更：2026-08-26-file-fullscreen-preview
+锚点：backend/app/modules/change/router.py（files/raw）
+最近确认：5d86ddb1
+理由：MAX_RAW_BYTES=50MB（变更目录为原型图/文档，远超文本端点 1MB 但无需无限）；Content-Disposition: inline + RFC5987 filename*（前端 XHR 取 blob，disposition 仅供直开兜底）。超限 413。
