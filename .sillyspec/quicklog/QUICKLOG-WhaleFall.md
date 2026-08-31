@@ -48,3 +48,16 @@
 根因：ql-013 修了两处状态源，第三处镜像 _list_workers_core（MCP list_workers，主控唯一状态查询源）漏改首 run 终态兜底——run d72943d7 日志实证：主控查到 killed 分身显示 running，结论「没有全失败」拒绝用户重新分析请求
 方案：row_status 加 first_run.status in (failed,killed)→failed 分支（三处镜像同构收齐）；守护用例锁定 killed+ended / failed+active 两形态；agent.md 警示双源改三源
 结果：test_mcp_tools 52/52（含新增守护用例）
+
+## ql-20260831-003-3d0a | 2026-08-31 09:20:49 | 消除 install.ps1 双 BOM 致 irm 加 iex 每次安装报无法将 Windows 项识别为 cmdlet
+状态：已完成
+关联变更：（无）
+文件：
+- backend/Dockerfile（删 printf 补 BOM + 加恰好一个 BOM 构建断言）
+- backend/tests/test_daemon_dist.py（fixture 模板带单 BOM + 响应体无 \ufeff 回归锚点）
+- .sillyspec/docs/backend/modules/daemon.md（install.ps1 编码契约更新为 BOM 单一来源 + 构建断言）
+- .sillyspec/docs/backend/modules/daemon.changelog.md（补 2026-08-31 双 BOM 修复条目）
+需求：消除用户每次 irm install.ps1 | iex 安装开头的无法将 Windows 项识别为 cmdlet 报错。
+根因：backend/Dockerfile 构建时 printf 无条件补 UTF-8 BOM，与源文件自带 BOM 叠加成双 BOM，dist_router utf-8-sig 只剥一个，残留 \ufeff 混入响应体首字符，PS5.1 把首行注释当代码执行（该 bug 已三次横跳）。
+方案：删 Dockerfile printf 补 BOM 行确立 BOM 单一来源为源文件，加恰好一个 BOM 的构建断言（违反即构建失败），test_daemon_dist fixture 模板带单 BOM 还原真实镜像状态并加响应体不以 \ufeff 开头的回归锚点，daemon.md 编码契约同步。
+结果：pytest 9 passed，镜像重建部署后 127.0.0.1:3000 与 10.10.115.118:3000 返回首字节均为 # 无 BOM，PS5.1 用 irm 实拉并 iex 首行零报错，报错彻底消除；部署时附带发现前端 Node 代理缓存后端容器旧 IP 需随重建重启。

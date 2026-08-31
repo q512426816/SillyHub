@@ -64,10 +64,16 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
 - 版本分发（dist_router.py，无 /api 前缀）：`/daemon/install.sh`、`/daemon/install.ps1`、
   `/daemon/latest.json`、`/daemon/latest/sillyhub-daemon.js`、
   `/daemon/latest/mcp-server.js`。
-  - `install.ps1` 编码契约（ql-20260826-006-cbf2）：源文件 `sillyhub-daemon/scripts/install.ps1`
-    带 **UTF-8 BOM**（WinPS 5.1 对无 BOM 文件按 GBK 解码致中文乱码切碎引号）；dist_router
-    用 `read_text(utf-8-sig)` 读模板以**剥掉 BOM**（防 `\ufeff` 污染 `irm | iex` 管道），
-    响应 `application/x-powershell; charset=utf-8`。
+  - `install.ps1` 编码契约（ql-20260826-006-cbf2 + ql-20260831-003）：源文件
+    `sillyhub-daemon/scripts/install.ps1` 带**恰好一个** UTF-8 BOM（WinPS 5.1 对无 BOM 文件
+    按 GBK 解码致中文乱码切碎引号）——BOM 的**单一来源就是源文件**；backend/Dockerfile
+    **禁止再补 BOM**（历史 ql-20260824-005/006、ql-20260826-006 三次横跳：Dockerfile printf
+    补 BOM 与源 BOM 叠加成双 BOM），并有"恰好一个 BOM"构建断言（首 3 字节 = EF BB BF 且
+    第 4-6 字节 ≠ EF BB BF，违反即构建失败）。dist_router 用 `read_text(utf-8-sig)` 读模板
+    以**剥掉 BOM**（防 `\ufeff` 污染 `irm | iex` 管道——残留 BOM 会让用户首行注释被当
+    代码执行，报"无法将 Windows 项识别为 cmdlet"），响应
+    `application/x-powershell; charset=utf-8`；测试锚点 `test_daemon_dist.py::test_install_ps1`
+    （fixture 模板带单 BOM + 断言响应体不以 `\ufeff` 开头）。
   - nginx 部署契约（2026-08-26 修复）：宿主机 nginx（`/etc/nginx/sites-enabled/crrcdt`）
     把整个 `location /daemon/` **代理到后端 8001**（install.sh / install.ps1 / latest.json /
     *.js bundle 统一由 dist_router 从镜像 `/app/daemon-dist/` 吐最新版）。曾踩坑：原配置用

@@ -119,8 +119,16 @@ RUN mkdir -p /app/.cache /app/.config /app/.claude /tmp/.npm /data/spec-workspac
  && sed -i 's/\r$//' /app/docker-entrypoint.sh /app/daemon-dist/install.sh \
  && chmod +x /app/docker-entrypoint.sh \
  && sed -i 's/$/\r/' /app/daemon-dist/install.ps1 \
- && printf '\357\273\277' | cat - /app/daemon-dist/install.ps1 > /tmp/ps1tmp && mv /tmp/ps1tmp /app/daemon-dist/install.ps1 \
  && ln -sf /app/docker-entrypoint.sh /usr/local/bin/sillyhub-backend-entrypoint
+
+# ql-20260831-003: install.ps1 的 BOM 单一来源 = 源文件 sillyhub-daemon/scripts/install.ps1
+# （自带恰好一个 UTF-8 BOM，供 WinPS5.1 直接执行时按 UTF-8 解码）。此处禁止再补 BOM——
+# 历史（ql-20260824-005/006、ql-20260826-006）已三次横跳：Dockerfile printf 补 BOM 与源文件
+# BOM 叠加成双 BOM，dist_router 的 utf-8-sig 只剥一个，残留 \ufeff 混进响应体首字符，
+# 用户 `irm | iex` 首行注释被误当代码执行（"无法将 Windows 项识别为 cmdlet"）。
+# 断言恰好一个 BOM：首 3 字节 = EF BB BF，第 4-6 字节 ≠ EF BB BF；违反则构建失败。
+RUN test "$(head -c 3 /app/daemon-dist/install.ps1 | od -An -tx1 | tr -d ' \n')" = "efbbbf" \
+ && test "$(tail -c +4 /app/daemon-dist/install.ps1 | head -c 3 | od -An -tx1 | tr -d ' \n')" != "efbbbf"
 USER app
 
 EXPOSE 8000

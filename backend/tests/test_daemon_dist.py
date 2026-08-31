@@ -32,12 +32,15 @@ def daemon_dist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (dist / "sillyhub-daemon.js").write_text(
         "/* ncc bundle stub */\nconsole.log('daemon');\n", encoding="utf-8"
     )
-    # task-05: install.ps1 模板（含 {{SERVER_URL}} 占位，dist_router 动态替换）
+    # task-05: install.ps1 模板（含 {{SERVER_URL}} 占位，dist_router 动态替换）。
+    # utf-8-sig = 带单个 UTF-8 BOM：镜像内真实模板由源文件 sillyhub-daemon/scripts/install.ps1
+    # 携带 BOM（WinPS5.1 直执行按 UTF-8 解码），fixture 必须还原该事实，否则 dist_router
+    # 的 utf-8-sig 剥 BOM 路径测不到（ql-20260831-003 双 BOM 回归的漏网原因）。
     (dist / "install.ps1").write_text(
         "# SillyHub daemon installer (PowerShell)\n"
         "$server = '{{SERVER_URL}}'\n"
         'Write-Host "installing from $server"\n',
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
     monkeypatch.setattr(get_settings(), "daemon_dist_dir", dist)
     return dist
@@ -95,6 +98,10 @@ async def test_install_ps1(client: AsyncClient, daemon_dist: Path) -> None:
     # {{SERVER_URL}} 占位已被替换为推导地址（test client 默认 host）
     assert "{{SERVER_URL}}" not in resp.text
     assert "install" in resp.text
+    # ql-20260831-003 回归锚点：模板带单 BOM（fixture utf-8-sig），但响应体绝不能以
+    # \ufeff 开头——残留 BOM 会让用户 irm | iex 把首行注释当代码执行
+    # （"无法将 Windows 项识别为 cmdlet"）。Dockerfile 侧另有"恰好一个 BOM"构建断言。
+    assert not resp.text.startswith("\ufeff"), resp.text[:20]
 
 
 async def test_install_ps1_server_url_derivation(client: AsyncClient, daemon_dist: Path) -> None:

@@ -5,6 +5,9 @@ created_at: 2026-08-29 22:56:30
 
 # 模块变更索引（changelog sidecar）
 
+## 2026-08-31 — install.ps1 双 BOM 修复（quick ql-20260831-003-3d0a）
+- backend/Dockerfile 删构建时 `printf '\357\273\277'` 补 BOM（与源文件 BOM 叠加成双 BOM，dist_router utf-8-sig 只剥一个，残留 `\ufeff` 致用户 `irm | iex` 首行注释被当代码执行报"无法将 Windows 项识别为 cmdlet"），并加"恰好一个 BOM"构建断言（首 3 字节 = EF BB BF 且第 4-6 字节 ≠ EF BB BF，违反即构建失败）；test_daemon_dist fixture 模板改带单 BOM 还原真实镜像状态 + 响应体不以 `\ufeff` 开头回归锚点。BOM 单一来源 = 源文件，详见 daemon.md 编码契约。
+
 ## 2026-08-29 — 权限审批 owner 定向通知（变更 2026-08-29-approval-notify-push task-06）
 - permission_service：handle_permission_request（canUseTool/dialog 双 kind，WS/HTTP 单点覆盖）在 _publish_session_event 成功后通知会话 owner（=AgentSession.user_id，非 runtime owner，D-010@v1）；_on_timeout 重查会话发 permission_timeout；respond 路径不通知（自操作豁免 D-008@v1）。用例 tests/test_permission_owner_notify.py。
 
