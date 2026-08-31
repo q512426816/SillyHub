@@ -33,6 +33,9 @@ import type { ModelUsageRow, SessionRecoverStatus } from './daemon.js';
 // task-04（FR-01 / D-005@v1）：notifyRunResult payload 的 error 字段类型。
 // 与 backend ModelErrorDTO、daemon/src/model-error/types.ts ModelError 三端同构。
 import type { ModelError } from './model-error/types.js';
+// 2026-08-31-machine-sillyspec-version task-05：heartbeat sillyspec_update 键的
+// 载荷形状（升级状态机快照），复用 task-04 manager 的导出类型，不重复声明。
+import type { SillySpecUpdateState } from './sillyspec-manager.js';
 
 // ── body 类型（字段名 snake_case 对齐 backend Pydantic 模型）──────────────────
 
@@ -61,6 +64,14 @@ export interface RegisterBody {
   started_at: string | null;
   /** 探测到的 provider 列表，每项 {provider, version?, status?}。 */
   providers: { provider: string; version?: string; status?: string }[];
+  /**
+   * 2026-08-31-machine-sillyspec-version task-05（D-002@v1）：register sillyspec
+   * 版本字段。**仅 sillyspec 参数提供时成对携带**（值可为 null——register 落库
+   * 语义为直接落值含 null，「本机卸载 sillyspec 后 daemon 重启」把 NULL 落库的
+   * 唯一路径）；参数缺省 → 两键完全不出现（undefined 键不出现，旧调用零破坏）。
+   */
+  sillyspec_version?: string | null;
+  sillyspec_latest_version?: string | null;
 }
 
 /** claim_lease 请求体。 */
@@ -118,6 +129,18 @@ export interface HeartbeatBody {
    * since 不上报（backend 首次落库盖 since=now，daemon 侧值无意义）。
    */
   pending_update?: HeartbeatPendingUpdate;
+  /**
+   * 2026-08-31-machine-sillyspec-version task-05（D-002@v1）：sillyspec 版本/升级
+   * 状态三键。键存在性语义（与既有两模式严格区分，design §1）：
+   *   - sillyspec_version / sillyspec_latest_version：**兄弟字段语义**（同
+   *     daemon_version/build_id）——仅知道（非 null）时携带，缺省/null = backend
+   *     保留旧值（Pydantic 下二者不可区分）；
+   *   - sillyspec_update：**pending_update 同款反向语义**——仅非 null 携带，
+   *     键完全不出现 = backend 清除（daemon_instances.sillyspec_update 置 NULL）。
+   */
+  sillyspec_version?: string | null;
+  sillyspec_latest_version?: string | null;
+  sillyspec_update?: SillySpecUpdateState;
 }
 
 /**
@@ -131,6 +154,29 @@ export interface HeartbeatPendingUpdate {
   current_version: string;
   /** 等待切换到的目标 BUILD_ID。 */
   target_version: string;
+}
+
+/**
+ * register sillyspec 版本参数（2026-08-31-machine-sillyspec-version task-05 /
+ * D-002@v1）：daemon 注册前 manager 探测一次所得。值为 null 也合法——register
+ * 落库语义为直接落值含 null（本机卸载后重启把 NULL 落库的唯一路径）。
+ */
+export interface RegisterSillySpecParam {
+  /** 本机 sillyspec 版本；null=未安装或探测失败。 */
+  version: string | null;
+  /** npm 最新版；null=探测失败/未知。 */
+  latest_version: string | null;
+}
+
+/**
+ * heartbeat sillyspec 参数（task-05 / D-002@v1）：三键全可选，键存在性语义见
+ * HeartbeatBody.sillyspec_* 注释——version/latest 仅知道时携带（兄弟字段语义，
+ * backend 保留），update 仅非 null 携带（pending_update 同款反向语义，backend 清除）。
+ */
+export interface HeartbeatSillySpecParam {
+  version?: string | null;
+  latest_version?: string | null;
+  update?: SillySpecUpdateState | null;
 }
 
 /**
@@ -605,6 +651,13 @@ export class HubClient {
     /** task-02：daemon 进程启动时间（epoch ms / Date / 数值）；空填 null（兼容旧 daemon）。 */
     startedAt?: number | Date | null;
     providers: { provider: string; version?: string; status?: string }[];
+    /**
+     * 2026-08-31-machine-sillyspec-version task-05（D-002@v1）：注册前的 sillyspec
+     * 探测快照（daemon 启动注册前 manager probeLocal/probeLatest 一次所得）。
+     * 可选且追加末位——缺省时请求体不含 sillyspec_version/latest 两键（旧调用
+     * 请求体逐字段不变，零破坏）。提供时两键成对写入（值可 null，直接落值语义）。
+     */
+    sillyspec?: RegisterSillySpecParam;
   }): Promise<Record<string, unknown>> {
     const body: RegisterBody = {
       daemon_local_id: params.daemonLocalId,
@@ -622,6 +675,12 @@ export class HubClient {
     if (params.arch) body.arch = params.arch;
     if (params.allowedRoots && params.allowedRoots.length > 0) {
       body.allowed_roots = params.allowedRoots;
+    }
+    // task-05（D-002@v1）：条件写法仿 allowed_roots——参数提供才成对携带
+    //（null 也是有效值：register 直接落值含 null，卸载场景唯一落 NULL 路径）。
+    if (params.sillyspec) {
+      body.sillyspec_version = params.sillyspec.version;
+      body.sillyspec_latest_version = params.sillyspec.latest_version;
     }
     return this._request<Record<string, unknown>>(
       'POST',
@@ -651,6 +710,15 @@ export class HubClient {
      * 请求体逐字段不变（零破坏）。
      */
     pendingUpdate?: HeartbeatPendingUpdate,
+    /**
+     * 2026-08-31-machine-sillyspec-version task-05（FR-05 / D-002@v1）：sillyspec
+     * 版本/升级状态快照（daemon._sendHeartbeatOnce 从 manager.getSnapshot()
+     * 组装）。可选且追加末位——undefined 时请求体不含任何 sillyspec_* 键：
+     *   - version/latest 仅知道（非 null）时携带（兄弟字段语义=backend 保留）；
+     *   - update 仅非 null 携带，键完全不出现=backend 清除（pending_update 同款）。
+     * 既有 4 参调用请求体逐字段不变（零破坏）。
+     */
+    sillyspec?: HeartbeatSillySpecParam,
   ): Promise<HeartbeatResponse> {
     const body: HeartbeatBody = {
       daemon_local_id: daemonLocalId,
@@ -661,6 +729,12 @@ export class HubClient {
     };
     // 仅 pending 期携带：undefined → 键完全不出现（design S3 兼容约束）。
     if (pendingUpdate) body.pending_update = pendingUpdate;
+    // task-05（D-002@v1）：null/undefined 一律不携带（键不出现）。
+    if (sillyspec?.version != null) body.sillyspec_version = sillyspec.version;
+    if (sillyspec?.latest_version != null) {
+      body.sillyspec_latest_version = sillyspec.latest_version;
+    }
+    if (sillyspec?.update != null) body.sillyspec_update = sillyspec.update;
     return this._request<HeartbeatResponse>(
       'POST',
       `${REST_PREFIX}/heartbeat`,

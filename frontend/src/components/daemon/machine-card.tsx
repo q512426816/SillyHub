@@ -11,9 +11,21 @@
  * 2026-08-29-daemon-selfupdate-safety task-07 / FR-05：machine.pending_update
  * 非空时折叠头下渲染推迟升级横幅（server_command=warning / disk_change=info
  * 主题语义色阶，文案对照 prototype-machine-update-status.html）并禁用升级按钮。
+ *
+ * 2026-08-31-machine-sillyspec-version task-07 / FR-01~FR-03：meta 行 daemon
+ * 版本后加 sillyspec 版本徽标三形态（最新常色 / 落后 warning「当前 → 最新」+
+ * 「有新版本」/ 未安装 destructive），按钮组加「升级 sillyspec」（离线 /
+ * running / deferred 禁用；未安装换「安装 sillyspec」、失败换「重试升级」），
+ * pending 横幅后加 sillyspec_update 四态横幅（独立 data-machine-sillyspec-banner
+ * 槽位，色阶走主题语义 token），文案对照 prototype-machine-sillyspec.html 场景①-⑧。
  */
+import type { ReactNode } from "react";
 import {
+  AlertCircle,
+  ArrowUp,
+  CheckCircle2,
   ChevronRight,
+  Download,
   HardDrive,
   Hourglass,
   Pencil,
@@ -48,6 +60,29 @@ const ACTIVE_SESSION_STATUSES: ReadonlySet<AgentSessionRead["status"]> = new Set
   "reconnecting",
 ]);
 
+/**
+ * 本地 semver 比较（2026-08-31-machine-sillyspec-version task-07 / FR-01）：
+ * split 按数字段逐段比较，不引第三方库。返回 -1 / 0 / 1（a<b / 相等 / a>b）；
+ * 不等长缺省段按 0 处理（3.27 < 3.27.1），非数字后缀截断数字前缀
+ * （"3.27.0-beta" → 3.27.0，与 lib/daemon.ts isVersionBelow 同款解析口径）。
+ */
+function compareSemver(a: string, b: string): number {
+  const parse = (v: string): number[] =>
+    v
+      .replace(/^v/, "")
+      .split(".")
+      .map((seg) => Number.parseInt(seg.replace(/\D.*$/, ""), 10) || 0);
+  const va = parse(a);
+  const vb = parse(b);
+  for (let i = 0; i < Math.max(va.length, vb.length); i++) {
+    const x = va[i] ?? 0;
+    const y = vb[i] ?? 0;
+    if (x < y) return -1;
+    if (x > y) return 1;
+  }
+  return 0;
+}
+
 export interface MachineCardProps {
   machine: DaemonMachineRead;
   expanded: boolean;
@@ -57,6 +92,17 @@ export interface MachineCardProps {
   usageLoading?: boolean;
   latestVersion?: DaemonVersionInfo;
   upgrading?: boolean;
+  /**
+   * 升级 sillyspec 回调（2026-08-31-machine-sillyspec-version task-07 / FR-02）。
+   * 可选（对齐既有 upgrading 先例）：page 注入；缺省按钮仍渲染但点击无动作，
+   * 不破坏既有测试构造。
+   */
+  onUpgradeSillySpec?: (machine: DaemonMachineRead) => void;
+  /**
+   * 本地 sillyspec 升级中标记（page 点击确认后即时禁用按钮，指令生效前的
+   * 反馈空窗由它兜底，之后 15s 轮询 sillyspec_update running 态接管）。
+   */
+  upgradingSillySpec?: boolean;
   actioning: boolean;
   sessions: AgentSessionRead[];
   onEditAlias: (machine: DaemonMachineRead) => void;
@@ -94,6 +140,8 @@ export function MachineCard({
   usageLoading,
   latestVersion,
   upgrading,
+  onUpgradeSillySpec,
+  upgradingSillySpec,
   actioning,
   sessions,
   onEditAlias,
@@ -116,6 +164,114 @@ export function MachineCard({
   // warning 升级等待文案（reason 保持 string 不收紧，见 lib/daemon.ts）。
   const pendingUpdate = machine.pending_update ?? null;
   const isDiskChange = pendingUpdate?.reason === "disk_change";
+
+  // 2026-08-31-machine-sillyspec-version task-07 / FR-01~FR-03：sillyspec 三字段
+  // 消费（version/latest 兄弟语义 + update 状态机投影，语义同 pending_update；
+  // 旧后端无这些字段 → undefined，徽标按未安装、横幅不渲染，零回归）。
+  const sillyspecVersion = machine.sillyspec_version ?? null;
+  const sillyspecLatest = machine.sillyspec_latest_version ?? null;
+  const sillyspecUpdate = machine.sillyspec_update ?? null;
+  const sillyspecState = sillyspecUpdate?.state ?? null;
+  const sillyspecRunning = sillyspecState === "running";
+  const sillyspecDeferred = sillyspecState === "deferred";
+  // 落后判定：版本与 latest 都已知且本机 < latest（本地 semver 比较）；
+  // latest 未知（null/缺省）不比较，按常色显示（场景①，宁宽勿断）。
+  const sillyspecOutdated =
+    sillyspecVersion !== null &&
+    sillyspecLatest !== null &&
+    compareSemver(sillyspecVersion, sillyspecLatest) < 0;
+
+  // 「升级 sillyspec」按钮五态（FR-02，原型①-⑧）：离线 / running / deferred /
+  // 本地 upgrading 禁用（title 说明原因）；未安装换文案「安装 sillyspec」（⑦）、
+  // 失败后换「重试升级」（⑥）；落后 / 未安装 / 升级进行中 warning 高亮（原型
+  // .btn.sp-up / .hot，已是最新回 btnOutlineTiny 底色——原型②注）。禁用窗口
+  // 间隙的重复点击由 daemon 侧 in-flight 门去重，无害。
+  const sillyspecRunningLike = sillyspecRunning || Boolean(upgradingSillySpec);
+  const sillyspecBtnDisabled =
+    isOffline || sillyspecRunningLike || sillyspecDeferred;
+  const sillyspecBtnLabel = sillyspecRunningLike
+    ? "升级中…"
+    : sillyspecDeferred
+      ? "等待空闲"
+      : sillyspecState === "failed"
+        ? "重试升级"
+        : sillyspecVersion === null
+          ? "安装 sillyspec"
+          : "升级 sillyspec";
+  const sillyspecBtnTitle = isOffline
+    ? "离线，无法升级；下次启动时会自动升级"
+    : sillyspecRunningLike
+      ? "升级中…"
+      : sillyspecDeferred
+        ? "等待空闲执行"
+        : sillyspecState === "failed"
+          ? "重新下发 sillyspec 升级指令"
+          : sillyspecVersion === null
+            ? "远程安装最新版 sillyspec"
+            : sillyspecOutdated
+              ? `立即升级到 ${sillyspecLatest}`
+              : "下发 sillyspec 升级指令（升级到 npm 最新版）";
+  const sillyspecBtnHot =
+    sillyspecOutdated ||
+    sillyspecVersion === null ||
+    sillyspecRunningLike ||
+    sillyspecDeferred ||
+    sillyspecState === "failed";
+
+  // sillyspec_update 四态横幅描述（task-07 / FR-03，原型③④⑤⑥）：running=info
+  // 旋转 / deferred=warning / success=success / failed=destructive（带 error 摘要）。
+  // state 未知或 null → 不渲染（四态之外无文案，不误示）。from/to 全 nullable
+  //（running/deferred 可无 to_version），兜底「—」/「latest」。
+  const sillyspecFrom = sillyspecUpdate?.from_version ?? null;
+  const sillyspecTo = sillyspecUpdate?.to_version ?? null;
+  // QA 返工（原型⑤）：success 副行的完成时刻——since 由 backend 首落库盖值，
+  // 格式化口径对齐卡内启动时间（zh-CN 绝对时间，hour12: false）；null 不渲染。
+  const sillyspecSince = sillyspecUpdate?.since ?? null;
+  let sillyspecBanner: {
+    state: string;
+    cls: string;
+    subCls: string;
+    icon: ReactNode;
+    main: string;
+    sub: string;
+  } | null = null;
+  if (sillyspecRunning) {
+    sillyspecBanner = {
+      state: "running",
+      cls: "border-info/30 bg-info/10 text-info",
+      subCls: "text-info/80",
+      icon: <RefreshCw aria-hidden className="h-3.5 w-3.5 shrink-0 animate-spin" />,
+      main: `正在升级 sillyspec（${sillyspecFrom ?? "—"} → ${sillyspecTo ?? "latest"}）`,
+      sub: "执行 npm install -g sillyspec@latest，通常 10～60 秒；完成后版本号自动刷新",
+    };
+  } else if (sillyspecDeferred) {
+    sillyspecBanner = {
+      state: "deferred",
+      cls: "border-warning/30 bg-warning/10 text-warning",
+      subCls: "text-warning/80",
+      icon: <Hourglass aria-hidden className="h-3.5 w-3.5 shrink-0" />,
+      main: "机器忙（有会话/任务运行中），升级已排队等待空闲自动执行（每 30s 复查）",
+      sub: `不打断运行中的任务；新版本 ${sillyspecTo ?? "latest"} 已就绪（当前 ${sillyspecFrom ?? "—"}）`,
+    };
+  } else if (sillyspecState === "success") {
+    sillyspecBanner = {
+      state: "success",
+      cls: "border-success/30 bg-success/10 text-success",
+      subCls: "text-success/80",
+      icon: <CheckCircle2 aria-hidden className="h-3.5 w-3.5 shrink-0" />,
+      main: `sillyspec 已升级到 ${sillyspecTo ?? "最新版"}`,
+      sub: `${sillyspecSince ? `升级完成于 ${new Date(sillyspecSince).toLocaleTimeString("zh-CN", { hour12: false })}；` : ""}横幅展示 10 分钟后自动消失，版本徽标常驻`,
+    };
+  } else if (sillyspecState === "failed") {
+    sillyspecBanner = {
+      state: "failed",
+      cls: "border-destructive/30 bg-destructive/10 text-destructive",
+      subCls: "text-destructive/80",
+      icon: <AlertCircle aria-hidden className="h-3.5 w-3.5 shrink-0" />,
+      main: `sillyspec 升级失败：${sillyspecUpdate?.error ?? "未知原因"}`,
+      sub: "可点击「重试升级」再次尝试；daemon 每小时自动检查也会自动重试",
+    };
+  }
 
   // 聚合费用：该机器所有 runtime 在 usageByRuntime 中的 total_cost_usd 之和。
   const totalCost = machine.runtimes.reduce((sum, r) => {
@@ -208,6 +364,40 @@ export function MachineCard({
                 {buildShort ? <span className="font-mono text-slate-400">{buildShort}</span> : null}
               </span>
             ) : null}
+            {/*
+              sillyspec 版本徽标三形态（task-07 / FR-01，原型①②⑦）：
+              - 未安装（version null/缺省，含旧后端）→ destructive「sillyspec 未安装」；
+              - 落后（version+latest 都已知且 < latest）→ warning「当前 → 最新」+
+                「有新版本」小标签（原型 .sp-out / .ver-tag）；
+              - 已最新 / 无法比较（latest 未知）→ 常色仅显示本机版本（.sp-ok）。
+            */}
+            {sillyspecVersion === null ? (
+              <span
+                data-machine-sillyspec-badge="none"
+                className="inline-flex items-center gap-1 font-semibold text-destructive"
+              >
+                sillyspec 未安装
+              </span>
+            ) : sillyspecOutdated ? (
+              <span
+                data-machine-sillyspec-badge="outdated"
+                className="inline-flex items-center gap-1 font-semibold text-warning"
+              >
+                sillyspec {sillyspecVersion}
+                <span aria-hidden className="font-bold">→</span>
+                {sillyspecLatest}
+                <span className="ml-1 rounded-full bg-warning/10 px-1.5 text-[10px] font-bold leading-4">
+                  有新版本
+                </span>
+              </span>
+            ) : (
+              <span
+                data-machine-sillyspec-badge="ok"
+                className="inline-flex items-center gap-1"
+              >
+                sillyspec {sillyspecVersion}
+              </span>
+            )}
             {ownerName ? <span>负责人：{ownerName}</span> : null}
           </div>
         </div>
@@ -265,6 +455,35 @@ export function MachineCard({
           >
             <RefreshCw className="h-3.5 w-3.5" />
             升级 daemon
+          </button>
+
+          {/* 升级 sillyspec 按钮（task-07 / FR-02，原型①-⑧）。落后/未安装/升级
+              进行中 warning 高亮（原型 .btn.sp-up[.hot]，已是最新回底色）；离线 /
+              running / deferred / 本地 upgrading 禁用（title 说明原因）；未安装
+              文案「安装 sillyspec」（⑦）、失败后「重试升级」（⑥）。 */}
+          <button
+            type="button"
+            className={cn(
+              btnOutlineTiny,
+              sillyspecBtnHot && "border-warning bg-warning/10 text-warning",
+            )}
+            disabled={sillyspecBtnDisabled}
+            onClick={(e) => {
+              e.stopPropagation();
+              onUpgradeSillySpec?.(machine);
+            }}
+            title={sillyspecBtnTitle}
+          >
+            {sillyspecRunningLike ? (
+              <ArrowUp aria-hidden className="h-3.5 w-3.5 animate-spin" />
+            ) : sillyspecDeferred ? (
+              <Hourglass aria-hidden className="h-3.5 w-3.5" />
+            ) : sillyspecVersion === null ? (
+              <Download aria-hidden className="h-3.5 w-3.5" />
+            ) : (
+              <ArrowUp aria-hidden className="h-3.5 w-3.5" />
+            )}
+            {sillyspecBtnLabel}
           </button>
 
           {/* 清理缓存按钮（对齐 .btn-outline btn-tiny，offline disabled） */}
@@ -351,6 +570,37 @@ export function MachineCard({
             {isDiskChange
               ? `来源：磁盘旁路探测——${pendingUpdate.target_version}`
               : `新版本 ${pendingUpdate.target_version} 已就绪（当前 ${pendingUpdate.current_version}），空闲即自动升级生效`}
+          </p>
+        </div>
+      ) : null}
+
+      {/* ===== sillyspec_update 四态横幅（2026-08-31-machine-sillyspec-version
+       * task-07 / FR-03，原型③④⑤⑥）=====
+       * daemon sillyspec-manager 状态机经心跳 sillyspec_update 字段投影。置于
+       * pending_update 横幅之后（同折叠头外、expanded 两侧都渲染——升级按钮被
+       * 禁用的原因需始终可见）。running=info 旋转 / deferred=warning / success=
+       * success / failed=destructive（带 error 摘要），色阶走主题语义 token
+       *（与 pending 横幅同款写法），双主题随 data-theme 换肤。独立
+       * data-machine-sillyspec-banner 定位（不复用 pending 槽位选择器）。
+       * null/缺省/未知 state 不渲染；终态由 daemon 10 分钟后回 idle 置 null
+       * 自然消失，刷新走 useDaemonMachines 既有 15s 轮询。 */}
+      {sillyspecBanner ? (
+        <div
+          role="status"
+          data-machine-sillyspec-banner={sillyspecBanner.state}
+          className={cn("border-b px-[18px] py-2 text-xs", sillyspecBanner.cls)}
+        >
+          <div className="flex items-center gap-2">
+            {sillyspecBanner.icon}
+            <span>{sillyspecBanner.main}</span>
+          </div>
+          <p
+            className={cn(
+              "ml-[22px] mt-0.5 text-[11px] leading-4",
+              sillyspecBanner.subCls,
+            )}
+          >
+            {sillyspecBanner.sub}
           </p>
         </div>
       ) : null}

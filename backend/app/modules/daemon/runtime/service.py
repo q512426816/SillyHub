@@ -180,12 +180,21 @@ class RuntimeService:
         daemon_version: str | None = None,
         daemon_build_id: str | None = None,
         started_at: datetime | None = None,
+        sillyspec_version: str | None = None,
+        sillyspec_latest_version: str | None = None,
     ) -> DaemonRegisterResult:
         """Per-daemon 注册（design §5.2 / D-006 / D-001）。
 
         2026-08-05-daemon-start-time D-002@v1：started_at（daemon 进程启动时间）
         透传并写入 instance.started_at（new + else 两分支均写，register 直接落值）。
         可空兼容旧 daemon（不上报 → None，保持 NULL）。
+
+        2026-08-31-machine-sillyspec-version（FR-05 / D-002@v1）：sillyspec_version
+        / sillyspec_latest_version **无条件直写**（new + else 两分支，含 None——本机
+        卸载 sillyspec 后 daemon 重启 register 落 null 覆盖旧值，收敛清除路径）；
+        sillyspec_update 恒置 None（daemon 侧升级状态机在内存，进程重启即失，
+        register 清除上一进程遗留的升级快照）。清除走 register、刷新走心跳——
+        与心跳的「version/latest 仅非 None 覆盖」构成 D-002@v1 双通道语义。
 
         1. upsert daemon_instances by ``id=daemon_local_id``：复用身份，更新机器级
            字段（hostname/os/arch/allowed_roots/status=online/last_heartbeat_at）。
@@ -213,6 +222,11 @@ class RuntimeService:
                 version=daemon_version,
                 build_id=daemon_build_id,
                 started_at=started_at,
+                # D-002@v1：register 无条件直写（含 None）；update 恒清（状态机随
+                # daemon 进程重启而失，register 时不可能有进行中的升级）。
+                sillyspec_version=sillyspec_version,
+                sillyspec_latest_version=sillyspec_latest_version,
+                sillyspec_update=None,
                 allowed_roots=roots,
                 status="online",
                 last_heartbeat_at=now,
@@ -240,6 +254,11 @@ class RuntimeService:
             instance.version = daemon_version
             instance.build_id = daemon_build_id
             instance.started_at = started_at
+            # D-002@v1：register 无条件直写（含 None=未安装/未知——本机卸载后
+            # 重启，覆盖旧值为 NULL）；update 恒清（重启即失的内存状态机）。
+            instance.sillyspec_version = sillyspec_version
+            instance.sillyspec_latest_version = sillyspec_latest_version
+            instance.sillyspec_update = None
             instance.allowed_roots = roots
             instance.status = "online"
             instance.last_heartbeat_at = now
@@ -341,6 +360,9 @@ class RuntimeService:
         daemon_build_id: str | None = None,
         started_at: datetime | None = None,
         pending_update: dict | None = None,
+        sillyspec_version: str | None = None,
+        sillyspec_latest_version: str | None = None,
+        sillyspec_update: dict | None = None,
         *,
         actor_user_id: uuid.UUID | None = None,
     ) -> DaemonInstance:
@@ -360,6 +382,17 @@ class RuntimeService:
         才覆盖」语义相反：pydantic 请求模型中「缺省不携带」与「显式 null」不可
         区分，且单机单 daemon 无新旧进程交错，靠「无字段」显式清除才收敛
         （D-004@v1 锚定，勿被「对齐兄弟字段」误改回非空才覆盖）。
+
+        2026-08-31-machine-sillyspec-version（FR-05 / D-002@v1）：
+        * ``sillyspec_version`` / ``sillyspec_latest_version`` 兄弟字段语义——仅
+          非 None 覆盖（旧 daemon 不上报保留原值；清除走 register 直写 null，
+          本机卸载后重启收敛）。pydantic 缺省与显式 null 不可区分，二者均=保留。
+        * ``sillyspec_update``（``{state, trigger, from_version, to_version,
+          error}`` 五键 dict，router 层 DTO 已校验）语义同 ``pending_update``——
+          首次落库或五键内容变化 → 整对象重写并盖 ``since=now``；同内容重放保留
+          原 dict（含 since，防退化成最后心跳时间）；``None`` 即清除置 NULL
+          （终态展示窗口结束 / daemon 无升级进行中）。``error`` 在本层截断至
+          200 字符后落库（约束：截断一处实现，DTO 不重复做）。
 
         daemon 单条心跳合并上报 ``daemon_local_id`` + 各 provider 状态。backend：
 
@@ -437,6 +470,39 @@ class RuntimeService:
                     "reason": pending_update.get("reason", ""),
                     "current_version": pending_update.get("current_version", ""),
                     "target_version": pending_update.get("target_version", ""),
+                    "since": now.isoformat(),
+                }
+        # ── sillyspec 字段（2026-08-31-machine-sillyspec-version FR-05 / D-002@v1）──
+        # version/latest：兄弟字段语义——仅非 None 覆盖（旧 daemon 不上报保持原值，
+        # 清除走 register 直写 null，勿对齐 pending 语义）。
+        if sillyspec_version is not None:
+            instance.sillyspec_version = sillyspec_version
+        if sillyspec_latest_version is not None:
+            instance.sillyspec_latest_version = sillyspec_latest_version
+        # sillyspec_update：语义同 pending_update——None 即清除置 NULL；非 None
+        # upsert（首写/内容变化盖 since=now；同内容保留原 since，防退化成最后心跳
+        # 时间）。error 先截断 200 再比较/落库（截断在本层一处实现）。
+        if sillyspec_update is None:
+            instance.sillyspec_update = None
+        else:
+            raw_error = sillyspec_update.get("error")
+            error = raw_error[:200] if isinstance(raw_error, str) else raw_error
+            current = instance.sillyspec_update
+            same_update = (
+                current is not None
+                and current.get("state") == sillyspec_update.get("state")
+                and current.get("trigger") == sillyspec_update.get("trigger")
+                and current.get("from_version") == sillyspec_update.get("from_version")
+                and current.get("to_version") == sillyspec_update.get("to_version")
+                and current.get("error") == error
+            )
+            if not same_update:
+                instance.sillyspec_update = {
+                    "state": sillyspec_update.get("state"),
+                    "trigger": sillyspec_update.get("trigger"),
+                    "from_version": sillyspec_update.get("from_version"),
+                    "to_version": sillyspec_update.get("to_version"),
+                    "error": error,
                     "since": now.isoformat(),
                 }
         if instance.status != "disabled":

@@ -74,6 +74,12 @@ import type {
 import { AgentDetector, normalizeProvider } from './agent-detector.js';
 import type { DetectedAgent } from './agent-detector.js';
 import { extractCause } from './hub-client.js';
+// 2026-08-31-machine-sillyspec-version task-05：register/heartbeat 追加的 sillyspec
+// 参数形状（键存在性语义见 hub-client.ts D-002@v1 注释），daemon 组装快照时用。
+import type {
+  HeartbeatSillySpecParam,
+  RegisterSillySpecParam,
+} from './hub-client.js';
 // task-04（FR-01 / D-005@v1）：onTurnResult 桥接把模型层 ModelError 注入
 // notifyRunResult payload.error（与 backend ModelErrorDTO 三端同构）。
 import type { ModelError } from './model-error/types.js';
@@ -112,6 +118,10 @@ import {
 } from './preflight.js';
 // 2026-07-07-daemon-skill-execution task-03：skill-manager，启动同步平台 sillyspec skills。
 import { syncSkills, linkSkillsToWorkdir } from './skill-manager.js';
+// 2026-08-31-machine-sillyspec-version task-05：sillyspec 运行期版本管理与升级状态机
+//（task-04 核心模块）。daemon 侧接线三处：_sillyspecLoop 第四自动循环（auto 触发）、
+// 心跳/注册快照透传、WS SILLYSPEC_UPDATE 指令入口（server_command 触发）。
+import { SillySpecManager } from './sillyspec-manager.js';
 // daemon 自身构建标识（release=git SHA），register 时上报供服务端判定是否需推送自更新。
 import { BUILD_ID } from './build-id.js';
 // 2026-06-24-daemon-network-resilience task-10/12：网络层重试编排（submit 重试 + 终态轻量重试）。
@@ -574,6 +584,11 @@ interface ClientLike {
     /** task-01：进程启动时间（对齐 hub-client task-02 的 register 签名）。 */
     startedAt?: number | Date | null;
     providers: { provider: string; version?: string; status?: string }[];
+    /**
+     * 2026-08-31-machine-sillyspec-version task-05：注册前 sillyspec 探测快照
+     *（对齐 hub-client task-05 register 追加末位参，D-002@v1 直接落值语义）。
+     */
+    sillyspec?: RegisterSillySpecParam;
   }): Promise<Record<string, unknown>>;
   heartbeat(
     daemonLocalId: string,
@@ -590,6 +605,13 @@ interface ClientLike {
       current_version: string;
       target_version: string;
     },
+    /**
+     * 2026-08-31-machine-sillyspec-version task-05：sillyspec 版本/升级状态快照
+     *（对齐 hub-client task-05 heartbeat 第 5 参数，D-002@v1 键存在性语义——
+     * version/latest 知道才带，update 非 null 才带）。undefined 时请求体不含
+     * 任何 sillyspec_* 键。
+     */
+    sillyspec?: HeartbeatSillySpecParam,
   ): Promise<unknown>;
   markOffline?(runtimeId: string): Promise<unknown>;
   /**
@@ -1082,6 +1104,13 @@ export interface DaemonOptions {
    * 注入临时目录用；cli.ts statusAction 读同一默认路径。
    */
   pendingUpdatePath?: string;
+  /**
+   * 2026-08-31-machine-sillyspec-version task-05：注入 sillyspec 运行期管理器
+   *（探测/升级状态机）。默认 undefined：daemon 内部构造真实 SillySpecManager
+   *（isBusy 接 ``_isBusyForUpdate`` 三臂忙判定，日志适配 ``_preflightLog``）。
+   * 测试注入假实现避免真实 spawn（probeLocal/probeLatest 会起子进程）。
+   */
+  sillyspecManager?: SillySpecManager | null;
 }
 
 /**
@@ -1411,6 +1440,14 @@ export class Daemon {
    */
   private _updateRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * 2026-08-31-machine-sillyspec-version task-05：sillyspec 运行期版本管理与升级
+   * 状态机（task-04 核心模块）。忙判定接 `_isBusyForUpdate`（忙时升级走 manager
+   * 内部 deferred + 30s 复查，daemon.ts 不重复实现推迟语义）；探测/安装 spawn
+   * 复用 preflight 基建（runCmd/installSillySpec），本类零自写进程逻辑。
+   */
+  private readonly _sillyspecManager: SillySpecManager;
+
   /** R1（2026-08-30 审计）：在途 stop 的 Promise——二次 stop() 等待完成不空转。 */
   private _stopPromise: Promise<void> | null = null;
 
@@ -1466,6 +1503,15 @@ export class Daemon {
       options?.selfUpdateBundlePath ?? join(DAEMON_BIN_DIR, DAEMON_BUNDLE_NAME);
     this._pendingUpdatePath =
       options?.pendingUpdatePath ?? join(DEFAULT_CONFIG_DIR, 'pending-update.json');
+    // 2026-08-31-machine-sillyspec-version task-05：sillyspec 运行期管理器——构造
+    // 注入优先（测试假实现，避免真实 spawn）；缺省真实实例，isBusy 闭包接三臂
+    // 忙判定（构造期只存引用，调用时字段均已就绪），日志走 _preflightLog 适配。
+    this._sillyspecManager =
+      options?.sillyspecManager ??
+      new SillySpecManager({
+        isBusy: () => this._isBusyForUpdate(),
+        logger: (level, msg, data) => this._preflightLog(level, msg, data),
+      });
     // task-06（design A2 消费端）：控制指令统一消费入口。handler 全部是下方既有
     // _route* 方法的薄包装（同一实例调用，不复制业务逻辑）；HTTP 源仅在 client
     // 实现两方法（真实 HubClient）时挂接——旧测试 mock 缺方法 → 只走 WS 路由。
@@ -1634,6 +1680,11 @@ export class Daemon {
     this._fire((signal) => this._heartbeatLoop(signal));
     this._fire((signal) => this._pollLoop(signal));
     this._fire((signal) => this._wsLoop(signal));
+
+    // 2026-08-31-machine-sillyspec-version task-05（design §1）：第四循环——
+    // sillyspec 自动升级检查（间隔 config.sillyspec_update_interval_sec，默认
+    // 3600s；0/非法值在 _sillyspecLoop 内部判定为关闭，循环立即返回）。
+    this._fire((signal) => this._sillyspecLoop(signal));
 
     // task-07（FR-06 / D-004@v1）：启动 SessionManager 空闲扫描定时器。
     // sessionManager 为 null（task-04 边界 14：未注入）时 ?. 不调；空闲扫描不启动。
@@ -2371,6 +2422,22 @@ export class Daemon {
       status: 'online',
     }));
     try {
+      // 2026-08-31-machine-sillyspec-version task-05（design §1 启动衔接）：注册前
+      // manager 做一次探测（本机版本 + npm latest），让 register 报文即带版本
+      //（D-002@v1 直接落值语义——null 也落，本机卸载后重启即借此清列）。
+      // update 启动时恒无（manager 刚构造，无升级状态）。探测异常不阻断注册
+      //（快照保持未知 → sillyspec 参数缺省，键不出现）。
+      try {
+        await this._sillyspecManager.probeLocal();
+        await this._sillyspecManager.probeLatest();
+      } catch (e) {
+        this._logger.warn('sillyspec_register_probe_failed', { error: e });
+      }
+      const snap = this._sillyspecManager.getSnapshot();
+      const sillyspec: RegisterSillySpecParam | undefined =
+        snap.version !== null || snap.latest_version !== null
+          ? { version: snap.version, latest_version: snap.latest_version }
+          : undefined;
       const resp = await this._client.register({
         daemonLocalId: this._config.runtime_id,
         serverUrl,
@@ -2381,6 +2448,7 @@ export class Daemon {
         // task-01：进程启动时间上报，backend 据此写 daemon_instances.started_at。
         startedAt: this._startedAt,
         providers,
+        sillyspec,
       });
       // backend 返回 { daemon_instance_id, runtimes: [{provider, runtime_id, allowed_roots}] }
       const runtimes = (resp.runtimes ?? []) as {
@@ -3647,6 +3715,40 @@ export class Daemon {
   }
 
   /**
+   * 2026-08-31-machine-sillyspec-version task-05（design §1 / FR-05）：第四循环——
+   * sillyspec 自动升级检查。
+   *
+   * 每拍 `manager.checkAndUpgrade('auto')`：probeLatest + probeLocal → 未安装或
+   * isOutdated → requestUpgrade('auto')（忙时 manager 内部 deferred，不在此判断）；
+   * 已最新 no-op。latest 不可达仅 warn（无重试/退避，失败留给下轮或手动触发）。
+   *
+   * 间隔读取口：config.sillyspec_update_interval_sec（默认 3600，0=关闭）。Number()
+   * 容忍字符串脏值，非法/<=0 一律视为关闭（对齐 startDiskProbe 的兜底惯例——
+   * 旧测试 config 缺该字段同样安全跳过）。abortableSleep/AbortError 处理对齐
+   * _heartbeatLoop 写法（stop 触发 abort → 静默退出；意外异常 warn 后继续）。
+   */
+  private async _sillyspecLoop(signal: AbortSignal): Promise<void> {
+    const intervalSec = Number(this._config.sillyspec_update_interval_sec);
+    if (!Number.isFinite(intervalSec) || intervalSec <= 0) {
+      this._logger.debug('sillyspec_loop_disabled', {
+        interval_sec: this._config.sillyspec_update_interval_sec,
+      });
+      return;
+    }
+    while (this._running) {
+      try {
+        await abortableSleep(intervalSec * 1000, signal);
+        // checkAndUpgrade 全路径内部 catch 收敛不 reject；此处 try/catch 对齐
+        // _heartbeatLoop 的防御性写法（意外异常 warn 不崩循环）。
+        await this._sillyspecManager.checkAndUpgrade('auto');
+      } catch (e) {
+        if (e instanceof AbortError) break;
+        this._logger.warn('sillyspec_loop_error', { error: e });
+      }
+    }
+  }
+
+  /**
    * task-06（design A1）：单拍心跳（心跳循环每拍 + 重连对账第 1 步共用）。
    *
    * 成功路径：清断连计数/告警标记 → 通知 resilience 健康 → 同步 allowed_roots
@@ -3668,6 +3770,24 @@ export class Daemon {
       // since 只传三字段（backend 首次落库盖 since，daemon 不上报）。null/读失败
       // → 不传第 4 参，body 无该键（=backend 清除，task-06 语义）。
       const pending = await this.readPendingUpdate();
+      // 2026-08-31-machine-sillyspec-version task-05（FR-05 / D-002@v1）：心跳透传
+      // sillyspec 快照（manager.getSnapshot 纯同步零 spawn）——version/latest 仅
+      // 知道（非 null）时携带（兄弟字段语义=backend 保留），update 仅非 null 携带
+      //（键不出现=backend 清除，pending_update 同款反向语义）。三键全无 → 第 5
+      // 参不占位（heartbeat 调用保持 4 参旧形态，既有心跳测试断言零回归）。
+      const snap = this._sillyspecManager.getSnapshot();
+      const sillyspec: HeartbeatSillySpecParam = {};
+      if (snap.version !== null) sillyspec.version = snap.version;
+      if (snap.latest_version !== null) {
+        sillyspec.latest_version = snap.latest_version;
+      }
+      if (snap.update !== undefined) sillyspec.update = snap.update;
+      const sillyspecTail: HeartbeatSillySpecParam[] =
+        sillyspec.version !== undefined ||
+        sillyspec.latest_version !== undefined ||
+        sillyspec.update !== undefined
+          ? [sillyspec]
+          : [];
       const hbResp = await this._client.heartbeat(
         daemonLocalId,
         providers,
@@ -3680,6 +3800,7 @@ export class Daemon {
               current_version: pending.current_version,
               target_version: pending.target_version,
             },
+        ...sillyspecTail,
       );
       // task-05（FR-03）→ task-07 per-daemon：成功 → 清断连计数 + 告警标记。
       // task-06（2026-08-30-daemon-self-heal / D-001）：重置前先捕获降级起点，
@@ -4878,6 +4999,17 @@ export class Daemon {
           version: payload?.version,
         });
         void this._tryUpdate('server_command', payload?.version);
+        break;
+      }
+      // Server → Daemon：用户在 Web 端机器卡点「升级 sillyspec」触发。
+      // 2026-08-31-machine-sillyspec-version task-05（FR-05 / D-001@v1）：入口对齐
+      // SELF_UPDATE 写法——fire-and-forget（payload {} 可选不消费，npm latest 由
+      // daemon 自行探测），void 调 manager.requestUpgrade('server_command')；
+      // 全路径内部 catch 收敛不 reject（in-flight 门/忙推迟语义由 manager 状态机
+      // 承载，daemon.ts 不重复实现），升级状态经心跳 sillyspec_update 回传。
+      case MSG.SILLYSPEC_UPDATE: {
+        this._logger.info('sillyspec_update_received', {});
+        void this._sillyspecManager.requestUpgrade('server_command');
         break;
       }
       // Server → Daemon：清理本地缓存（specs 缓存 / Claude 会话日志 / 备份 / 日志）。

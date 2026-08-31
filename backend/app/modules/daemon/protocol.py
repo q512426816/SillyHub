@@ -81,6 +81,14 @@ DAEMON_MSG_PROVIDER_CONFIG_CHANGED = "daemon:provider_config_changed"  # Server 
 # fire-and-forget，无需回复。与 sillyhub-daemon/src/protocol.ts MSG.CLEANUP 逐字对齐。
 DAEMON_MSG_CLEANUP = "daemon:cleanup"
 
+# change 2026-08-31-machine-sillyspec-version / task-01 / D-001@v1:
+# sillyspec 升级指令 WS push（Server → Daemon）。用户在机器卡触发升级后 backend
+# 立即下发，daemon 收到后调 sillyspec-manager 执行本机 npm 升级；升级状态机不
+# 走本消息回传，而是经心跳 sillyspec_update 字段上报（design 接口定义）。
+# fire-and-forget，无回执（同 CLEANUP 语义）。纯新增消息，旧 daemon 收到走
+# default 仅 warn（向后兼容）。
+DAEMON_MSG_SILLYSPEC_UPDATE = "daemon:sillyspec_update"  # Server → Daemon, D-001@v1
+
 
 # ── Message envelope ────────────────────────────────────────────────────────
 

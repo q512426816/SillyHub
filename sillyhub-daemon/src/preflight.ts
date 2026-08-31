@@ -278,7 +278,7 @@ export async function runSillySpecCheck(logger: PreflightLogger): Promise<void> 
  * 执行 `npm install -g sillyspec@latest` 安装/升级 sillyspec。
  * 失败仅记 warn（runCmdFailed 内部已记 cmd_failed）。
  */
-async function installSillySpec(logger: PreflightLogger): Promise<void> {
+export async function installSillySpec(logger: PreflightLogger): Promise<void> {
   const ok = await runCmdBoolean('npm install -g sillyspec@latest', logger);
   if (ok) {
     logger('info', 'sillyspec_updated');
@@ -807,7 +807,7 @@ function runWithTreeKill(
  * @param cmd shell 命令字符串
  * @returns stdout（trim 后）或 null（失败）
  */
-async function runCmd(cmd: string): Promise<string | null> {
+export async function runCmd(cmd: string): Promise<string | null> {
   const { ok, stdout } = await runWithTreeKill(cmd, 30_000, true);
   if (!ok) return null;
   const trimmed = stdout.trim();
@@ -843,7 +843,7 @@ async function runCmdBoolean(
  * 任一无法解析（非 semver，如含日期的 dev 版）→ 字符串不等即视为旧
  * （让 `npm view` 返回非标准版本时仍能触发更新，与用户「版本低→更新」语义一致）。
  */
-function isOutdated(local: string, latest: string): boolean {
+export function isOutdated(local: string, latest: string): boolean {
   const a = parseSemver(local);
   const b = parseSemver(latest);
   if (a && b) return isTupleOlder(a, b);

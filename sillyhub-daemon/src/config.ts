@@ -307,6 +307,18 @@ export interface DaemonConfig {
    * 不做类型强校验（非法值由消费端 startDiskProbe 兜底为关闭）。
    */
   self_reload_check_interval_sec: number;
+  /**
+   * sillyspec 自动升级检查间隔（秒），默认 3600，0=关闭。
+   *
+   * 2026-08-31-machine-sillyspec-version task-05（design §1 / Design Grill F13）：
+   * daemon 第四循环 `_sillyspecLoop` 每该间隔执行「probeLatest + probeLocal →
+   * 落后 or 未安装 → 升级」（实际执行归 SillySpecManager.checkAndUpgrade）。
+   * 形状对齐 self_reload_check_interval_sec：config.json 字段（不引入 env 覆盖
+   * 先例）、loadConfig 经 DEFAULT_CONFIG 浅合并自动补默认值（缺字段=3600）、
+   * 不做类型强校验（非法值由消费端 _sillyspecLoop 兜底为关闭）。0 或负数 =
+   * 不启动自动循环（本地开发/显式关闭，Design Grill F15 逃生口）。
+   */
+  sillyspec_update_interval_sec: number;
 }
 
 // ── 默认值常量 ───────────────────────────────────────────────────────────────
@@ -368,6 +380,9 @@ export const DEFAULT_CONFIG: Readonly<DaemonConfig> = Object.freeze({
   // 2026-08-29-daemon-selfupdate-safety task-03（S2）：磁盘旁路自更新探测间隔，
   // 默认 600s（10min），0=关闭（见 DaemonConfig.self_reload_check_interval_sec 注释）。
   self_reload_check_interval_sec: 600,
+  // 2026-08-31-machine-sillyspec-version task-05：sillyspec 自动升级检查间隔，
+  // 默认 3600s（1h），0=关闭（见 DaemonConfig.sillyspec_update_interval_sec 注释）。
+  sillyspec_update_interval_sec: 3600,
 });
 
 // ── loadConfig（异步加载 + 合并默认 + 自动生成 runtime_id）──────────────────

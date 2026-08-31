@@ -25,6 +25,7 @@ from app.modules.daemon.protocol import (
     DAEMON_MSG_SESSION_END,
     DAEMON_MSG_SESSION_INJECT,
     DAEMON_MSG_SESSION_INTERRUPT,
+    DAEMON_MSG_SILLYSPEC_UPDATE,
     DaemonMessage,
     PermissionRequestPayload,
     PermissionResponsePayload,
@@ -39,6 +40,7 @@ EXPECTED = {
     "SESSION_END": "daemon:session_end",
     "PERMISSION_REQUEST": "daemon:permission_request",
     "PERMISSION_RESPONSE": "daemon:permission_response",
+    "SILLYSPEC_UPDATE": "daemon:sillyspec_update",
 }
 
 # Fixed UUIDs for deterministic assertions.
@@ -99,6 +101,18 @@ class TestSessionPermissionConstants:
             DAEMON_MSG_PERMISSION_RESPONSE,
         }
         assert len(values) == 5
+
+
+class TestSillySpecUpdateConstant:
+    """SILLYSPEC_UPDATE 常量逐字对齐 backend protocol.py（task-01 / D-001@v1）.
+
+    Server → Daemon fire-and-forget（同 CLEANUP 语义）；TS 镜像断言归 task-05
+    （sillyhub-daemon/tests/protocol-session-contract.test.ts）。本 map 无总数
+    计数断言，追加条目不影响既有 5 常量用例。
+    """
+
+    def test_sillyspec_update_value(self) -> None:
+        assert EXPECTED["SILLYSPEC_UPDATE"] == DAEMON_MSG_SILLYSPEC_UPDATE
 
 
 class TestBatchProtocolNoRegression:

@@ -154,6 +154,8 @@ class DaemonService:
         daemon_version: str | None = None,
         daemon_build_id: str | None = None,
         started_at: datetime | None = None,
+        sillyspec_version: str | None = None,
+        sillyspec_latest_version: str | None = None,
     ) -> DaemonRegisterResult:
         """Per-daemon 注册 facade（design §5.2 / D-006）。
 
@@ -161,6 +163,8 @@ class DaemonService:
         daemon_runtimes + stale 清理。返回 daemon_instance_id + 各 runtime_id。
         2026-07-04-daemon-version-management：透传 daemon_version/build_id。
         2026-08-05-daemon-start-time：透传 started_at。
+        2026-08-31-machine-sillyspec-version（FR-05 / D-002@v1）：透传
+        sillyspec_version/latest（register 无条件直写，含 None）。
         """
         return await self._rt.register_daemon(
             user_id,
@@ -174,6 +178,8 @@ class DaemonService:
             daemon_version=daemon_version,
             daemon_build_id=daemon_build_id,
             started_at=started_at,
+            sillyspec_version=sillyspec_version,
+            sillyspec_latest_version=sillyspec_latest_version,
         )
 
     async def heartbeat_daemon(

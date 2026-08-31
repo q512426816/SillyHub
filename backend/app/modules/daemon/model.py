@@ -89,6 +89,29 @@ class DaemonInstance(BaseModel, table=True):
         default=None,
         sa_column=Column(JSON, nullable=True),
     )
+    # 本机 sillyspec 工具版本（2026-08-31-machine-sillyspec-version FR-05 / D-002@v1）：
+    # register 无条件直写（含 None=未安装/未知，本机卸载后重启收敛为 NULL）；心跳仅
+    # 非 None 覆盖（兄弟字段语义：缺省/null=保留——pydantic 下二者不可区分）。
+    # NULL=未安装或未知，机器卡显示「sillyspec 未安装」徽标。
+    sillyspec_version: str | None = Field(
+        default=None,
+        sa_column=Column(String(50), nullable=True),
+    )
+    # daemon 探测到的 npm 最新 sillyspec 版本（FR-05）；NULL=未知。
+    # 落库语义同 sillyspec_version（D-002@v1 双通道）。
+    sillyspec_latest_version: str | None = Field(
+        default=None,
+        sa_column=Column(String(50), nullable=True),
+    )
+    # 心跳上报的 sillyspec 升级状态机快照（FR-05 / design §接口定义）：
+    # {state, trigger, from_version, to_version, error}（backend 落库时补 since、
+    # error 截断 200）；NULL=无进行中/近期升级。语义同 pending_update——心跳无该键
+    # 即置 NULL 清除，同内容重放保留原 since；register 直写 None（daemon 侧状态机
+    # 在内存，进程重启即失，重启后 register 清除遗留快照）。
+    sillyspec_update: dict | None = Field(
+        default=None,
+        sa_column=Column(JSON, nullable=True),
+    )
     status: str = Field(
         default="online",
         sa_column=Column(

@@ -18,6 +18,7 @@ from app.modules.daemon.protocol import (
     DAEMON_MSG_POLICY_UPDATE,
     DAEMON_MSG_RPC,
     DAEMON_MSG_SELF_UPDATE,
+    DAEMON_MSG_SILLYSPEC_UPDATE,
     DAEMON_MSG_TASK_AVAILABLE,
 )
 from app.modules.daemon.service import (
@@ -400,6 +401,21 @@ class DaemonWsHub:
         runs/ 等）一律保留。fire-and-forget，无需回复。
         """
         message = {"type": DAEMON_MSG_CLEANUP, "payload": {}}
+        return await self.send_to_runtime(daemon_id, message)
+
+    async def send_sillyspec_update(
+        self,
+        daemon_id: uuid.UUID,
+    ) -> bool:
+        """推送 sillyspec 升级指令（Server → Daemon，task-01 / D-001@v1）。
+
+        daemon 收到后调 sillyspec-manager 执行本机 npm 升级，升级状态机经心跳
+        sillyspec_update 字段回传（不走本消息）。fire-and-forget，无回执（同
+        CLEANUP 语义）。返回 True 表示已下发；False 表示 daemon 离线或发送失败，
+        由调用方（REST 端点，task-03）转 504 DaemonRuntimeOffline，daemon 在线
+        与否由前端 preflight 轮询兜底。
+        """
+        message = {"type": DAEMON_MSG_SILLYSPEC_UPDATE, "payload": {}}
         return await self.send_to_runtime(daemon_id, message)
 
     async def send_policy_update(

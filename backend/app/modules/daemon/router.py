@@ -256,6 +256,25 @@ class DaemonHeartbeatPendingUpdate(BaseModel):
     target_version: str = Field(min_length=1, max_length=100)
 
 
+class DaemonHeartbeatSillySpecUpdate(BaseModel):
+    """心跳 sillyspec_update 载荷（2026-08-31-machine-sillyspec-version FR-05）.
+
+    daemon 的 sillyspec 升级状态机投影（design §接口定义）：state 当前取值
+    ``running`` / ``deferred`` / ``success`` / ``failed``，trigger 取值
+    ``server_command`` / ``auto``；``since`` 不上报——backend 首落库时盖
+    ``since=now``（同 pending_update 先例），同内容重放保留原 since。
+    state/trigger 均不收紧成 Literal——收紧会让未来新增取值的整条心跳 422
+    （心跳是保活通道，宁宽勿断，DaemonHeartbeatPendingUpdate.reason 同决策）；
+    error 在服务层截断至 200 字符后落库。
+    """
+
+    state: str | None = Field(default=None, max_length=50)
+    trigger: str | None = Field(default=None, max_length=50)
+    from_version: str | None = Field(default=None, max_length=50)
+    to_version: str | None = Field(default=None, max_length=50)
+    error: str | None = Field(default=None, max_length=200)
+
+
 class DaemonHeartbeatRequest(BaseModel):
     """Per-daemon 心跳请求体（design §5.4 / §9.1 / D-006）。
 
@@ -279,6 +298,16 @@ class DaemonHeartbeatRequest(BaseModel):
     # 单机单 daemon 无新旧进程交错，升级执行/取消路径靠「无字段」显式清除才收敛
     # （design S4 / D-004@v1，勿被「对齐兄弟字段」误改）。
     pending_update: DaemonHeartbeatPendingUpdate | None = Field(default=None)
+    # 本机 sillyspec 工具版本（2026-08-31-machine-sillyspec-version FR-05 / D-002@v1）。
+    # ⚠ 与上方兄弟字段（daemon_version 等「非 None 才覆盖」）**同语义**：缺省/显式
+    # null 不可区分且均=保留（旧 daemon 不上报不影响新值；清除路径走 register 直写
+    # null——本机卸载后重启）。latest 同款。
+    sillyspec_version: str | None = Field(default=None, max_length=50)
+    sillyspec_latest_version: str | None = Field(default=None, max_length=50)
+    # sillyspec 升级状态机快照（FR-05）——语义同 pending_update（与本组兄弟字段
+    # 反向）：None 即清除置 NULL，非 None 时 upsert（首写盖 since，同内容保留原
+    # since，D-002@v1 锚定，详见服务层注释）。
+    sillyspec_update: DaemonHeartbeatSillySpecUpdate | None = Field(default=None)
     providers: list[DaemonHeartbeatProviderItem] = Field(default_factory=list)
 
 
@@ -408,6 +437,10 @@ async def register_daemon(
         daemon_version=data.daemon_version,
         daemon_build_id=data.daemon_build_id,
         started_at=data.started_at,
+        # 2026-08-31-machine-sillyspec-version FR-05 / D-002@v1：register 无条件
+        # 直写（含 None——本机卸载后重启收敛为 NULL，服务层注释已锚定）。
+        sillyspec_version=data.sillyspec_version,
+        sillyspec_latest_version=data.sillyspec_latest_version,
     )
     return DaemonRegisterResponse(
         daemon_instance_id=result.daemon_instance_id,
@@ -460,6 +493,15 @@ async def daemon_heartbeat(
         # 注释已锚定）。model_dump 后交服务层 upsert（dict 契约同 providers 先例）。
         pending_update=(
             data.pending_update.model_dump() if data.pending_update is not None else None
+        ),
+        # 2026-08-31-machine-sillyspec-version FR-05 / D-002@v1：version/latest 走
+        # 兄弟字段语义（None=保留，服务层判空）；sillyspec_update 走 pending 语义
+        # （None=清除置 NULL）。model_dump 后交服务层 upsert（dict 契约同
+        # providers/pending_update 先例）。
+        sillyspec_version=data.sillyspec_version,
+        sillyspec_latest_version=data.sillyspec_latest_version,
+        sillyspec_update=(
+            data.sillyspec_update.model_dump() if data.sillyspec_update is not None else None
         ),
         # task-03（security-audit-remediation / FR-12）：心跳归属校验——
         # instance.user_id 必须等于当前认证 user，不匹配 404（owner-only）。
@@ -571,10 +613,40 @@ class MachinePendingUpdateRead(BaseModel):
     since: datetime
 
 
+class MachineSillySpecUpdateRead(BaseModel):
+    """机器视图 sillyspec_update 嵌套（2026-08-31-machine-sillyspec-version FR-05）。
+
+    即 daemon_instances.sillyspec_update JSON 列原样透出（design §接口定义）：
+    daemon 侧 sillyspec-manager 状态机投影五字段（state 取值 running/deferred/
+    success/failed，trigger 取值 server_command/auto）+ backend 首落库时盖的
+    ``since``（同内容重放心跳保留原 since，MachinePendingUpdateRead 同款语义）。
+    NULL（无升级进行中 / 终态展示窗口已过）→ 机器视图字段为 null。
+
+    五上报字段全 nullable 对齐 daemon 上报形态：running/deferred 可无 to_version、
+    非 failed 无 error（success 必带 to_version 由 daemon 侧保证，后端不收紧）。
+    """
+
+    state: str | None = None
+    trigger: str | None = None
+    from_version: str | None = None
+    to_version: str | None = None
+    error: str | None = None
+    since: datetime | None = None
+
+
 class DaemonMachineReadWithPending(DaemonMachineRead):
-    """DaemonMachineRead + 机器级 pending_update（GET /machines 透出用）。"""
+    """DaemonMachineRead + 机器级 pending_update + sillyspec 三字段（GET /machines 透出用）。
+
+    2026-08-31-machine-sillyspec-version task-03 / FR-05：sillyspec_version /
+    sillyspec_latest_version / sillyspec_update 三字段就近跟随 pending_update 走
+    router 内子类扩展（MachinePendingUpdateRead 现状就近原则，schema.py 基类保持
+    零改动——本组字段是同一读视图契约 MachineSillySpecView，拆两处放置会割裂）。
+    """
 
     pending_update: MachinePendingUpdateRead | None = None
+    sillyspec_version: str | None = None
+    sillyspec_latest_version: str | None = None
+    sillyspec_update: MachineSillySpecUpdateRead | None = None
 
 
 class DaemonMachineListResponseWithPending(DaemonMachineListResponse):
@@ -646,6 +718,10 @@ def _build_machine_read(
     （JSON，含 since）透出到机器视图；PATCH /machines/{id} 仍声明基础
     response_model（DaemonMachineRead），该字段经基础适配器序列化被丢弃，
     仅 GET /machines（WithPending 响应模型）透出。
+
+    2026-08-31-machine-sillyspec-version task-03 / FR-05：同款透出 sillyspec 三字段
+    （sillyspec_version / sillyspec_latest_version / sillyspec_update 嵌套），
+    显式逐字段构造（见函数体注释）。
     """
     runtime_reads = [_runtime_read(r, owner, instance) for r in runtimes]
     # 直接构造（不走 model_validate(instance)）：runtime_count/online_runtime_count
@@ -669,6 +745,17 @@ def _build_machine_read(
         pending_update=(
             MachinePendingUpdateRead.model_validate(instance.pending_update)
             if instance.pending_update is not None
+            else None
+        ),
+        # 2026-08-31-machine-sillyspec-version task-03 / FR-05：sillyspec 三字段显式
+        # 构造——本函数逐字段构造不走 model_validate，漏传即静默丢字段（Design Grill
+        # F2）。version/latest 直读列；update JSON dict→嵌套 Read 校验（since
+        # ISO→datetime），NULL（无升级）→ None。
+        sillyspec_version=instance.sillyspec_version,
+        sillyspec_latest_version=instance.sillyspec_latest_version,
+        sillyspec_update=(
+            MachineSillySpecUpdateRead.model_validate(instance.sillyspec_update)
+            if instance.sillyspec_update is not None
             else None
         ),
         created_at=instance.created_at,
@@ -1036,6 +1123,43 @@ async def trigger_machine_cleanup(
 
     hub = get_daemon_ws_hub()
     sent = await hub.send_cleanup(instance_id)
+    if not sent:
+        from app.modules.daemon.runtime.service import DaemonRuntimeOffline
+
+        raise DaemonRuntimeOffline(
+            "目标机器当前离线或消息下发失败，请确认守护进程在线后重试。",
+            details={"daemon_instance_id": str(instance_id)},
+        )
+    return {"sent": True}
+
+
+@router.post(
+    "/machines/{instance_id}/sillyspec-update",
+)
+async def trigger_machine_sillyspec_update(
+    instance_id: uuid.UUID,
+    session: SessionDep,
+    user: RuntimeAdminUser,
+) -> dict[str, bool]:
+    """推送 sillyspec 升级指令到指定机器（admin，2026-08-31-machine-sillyspec-version FR-02）.
+
+    机器级直接以 ``instance_id`` 作 ``daemon_id`` 路由 WS，发送
+    ``daemon:sillyspec_update``（fire-and-forget，无回执，同 CLEANUP 语义）；
+    daemon 收到后调 sillyspec-manager 执行本机 npm 升级，状态机经心跳
+    sillyspec_update 字段回传（不走本消息）。先 ``_get_owned_instance`` 做归属
+    校验（越权/不存在 404），离线或 WS 发送失败 → 504 ``DaemonRuntimeOffline``
+    （与机器级 self-update/cleanup 同款文案与 details 结构）。
+
+    刻意不返回 ``latest_version``：npm latest 由 daemon 自行探测并经心跳
+    sillyspec_latest_version 上报，backend 不代查（design §接口定义）。
+    """
+    svc = DaemonService(session)
+    await svc._get_owned_instance(instance_id, user.id, is_platform_admin=user.is_platform_admin)
+
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+    hub = get_daemon_ws_hub()
+    sent = await hub.send_sillyspec_update(instance_id)
     if not sent:
         from app.modules.daemon.runtime.service import DaemonRuntimeOffline
 

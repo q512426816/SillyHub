@@ -137,6 +137,17 @@ export interface DaemonMachineRead {
    * 旧后端无该字段 → undefined，按无挂起消费（不渲染横幅不改轮询）。
    */
   pending_update?: MachinePendingUpdate | null;
+  /**
+   * sillyspec 三字段（2026-08-31-machine-sillyspec-version task-06 / FR-05）：
+   * version/latest 为兄弟语义（null=未安装/未知；daemon 离线保留最后上报值，
+   * 仅 register 落 null），update 为升级状态机投影（null=无进行中/近期升级，
+   * 语义同 pending_update）。旧后端无这些字段 → undefined，机器卡按未安装/
+   * 无横幅消费。嵌套类型一律引用 api-types 生成版 MachineSillySpecUpdateRead
+   * （六字段全 nullable，宁宽勿断），不手写 DTO。
+   */
+  sillyspec_version?: string | null;
+  sillyspec_latest_version?: string | null;
+  sillyspec_update?: components["schemas"]["MachineSillySpecUpdateRead"] | null;
 }
 
 /** GET /api/daemon/machines 查询参数（design §5.1）。 */
@@ -205,6 +216,24 @@ export async function triggerMachineSelfUpdate(
 ): Promise<{ sent: boolean; latest_version: string }> {
   return apiFetch(
     `/api/daemon/machines/${encodeURIComponent(instanceId)}/self-update`,
+    { method: "POST" },
+  );
+}
+
+/**
+ * POST /api/daemon/machines/{instance_id}/sillyspec-update — 推送 sillyspec
+ * 升级指令（admin，2026-08-31-machine-sillyspec-version task-06 / FR-02）。
+ * fire-and-forget 无回执（同 CLEANUP）：daemon 收到后本机 npm 升级，状态机经
+ * 心跳 sillyspec_update 字段回传（不走本消息）。刻意不返回 latest_version——
+ * npm latest 由 daemon 自行探测并经心跳 sillyspec_latest_version 上报（design
+ * §接口定义）。失败抛 ApiError（404 归属 / 504 DaemonRuntimeOffline）。
+ * 返回 {sent}，仿 triggerMachineSelfUpdate。
+ */
+export async function triggerMachineSillySpecUpdate(
+  instanceId: string,
+): Promise<{ sent: boolean }> {
+  return apiFetch(
+    `/api/daemon/machines/${encodeURIComponent(instanceId)}/sillyspec-update`,
     { method: "POST" },
   );
 }

@@ -22,12 +22,15 @@ import {
 
 // ── 跨语言对齐对照表（与 Python 单测 hardcode 同一份字符串字面量） ────────────
 // 5 个新增常量的字符串值，daemon↔backend 逐字相等。
+// 2026-08-31-machine-sillyspec-version task-05：+SILLYSPEC_UPDATE（backend
+// protocol.py DAEMON_MSG_SILLYSPEC_UPDATE，双侧契约镜像，Design Grill F12）。
 const EXPECTED = {
   SESSION_INJECT: 'daemon:session_inject',
   SESSION_INTERRUPT: 'daemon:session_interrupt',
   SESSION_END: 'daemon:session_end',
   PERMISSION_REQUEST: 'daemon:permission_request',
   PERMISSION_RESPONSE: 'daemon:permission_response',
+  SILLYSPEC_UPDATE: 'daemon:sillyspec_update',
 } as const;
 
 describe('protocol.MSG — 5 个 session/permission 控制消息（task-03，逐字对齐 backend）', () => {
@@ -112,8 +115,13 @@ describe('protocol — batch 协议常量值不回归（FR-09 / AC-08）', () =>
     expect(MSG.RPC_RESULT).toBe('daemon:rpc_result');
   });
 
-  it('MSG 总数 = 21（10 旧 + 5 session/permission + 1 SESSION_RESUME + 1 SELF_UPDATE + 1 LEASE_CANCEL + 1 PLAN_RESPONSE + 1 PROVIDER_CONFIG_CHANGED + 1 CLEANUP），互不干扰', () => {
-    expect(Object.keys(MSG)).toHaveLength(21);
+  it('MSG 总数 = 22（10 旧 + 5 session/permission + 1 SESSION_RESUME + 1 SELF_UPDATE + 1 LEASE_CANCEL + 1 PLAN_RESPONSE + 1 PROVIDER_CONFIG_CHANGED + 1 CLEANUP + 1 SILLYSPEC_UPDATE），互不干扰', () => {
+    expect(Object.keys(MSG)).toHaveLength(22);
+  });
+
+  it('SILLYSPEC_UPDATE（sillyspec 升级指令）字符串值 = daemon:sillyspec_update（与 backend DAEMON_MSG_SILLYSPEC_UPDATE 逐字对齐）', () => {
+    expect(MSG.SILLYSPEC_UPDATE).toBe('daemon:sillyspec_update');
+    expect(MSG.SILLYSPEC_UPDATE.startsWith('daemon:')).toBe(true);
   });
 
   it('SELF_UPDATE（自更新链路）字符串值 = daemon:self_update', () => {

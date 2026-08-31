@@ -458,6 +458,13 @@ class DaemonRegisterRequest(BaseModel):
     # daemon 启动时一次性上报，backend 写 daemon_instances.started_at。
     # Optional 兼容旧 daemon（不上报则 NULL）。
     started_at: datetime | None = Field(default=None)
+    # 本机 sillyspec 工具版本（2026-08-31-machine-sillyspec-version FR-05 / D-002@v1）。
+    # ⚠ 与上方 daemon_version「Optional 兼容旧 daemon」语义不同：register **无条件
+    # 直写**（含 None=未安装/未知 → 覆盖旧值为 NULL，本机卸载后重启收敛——与心跳
+    # 的「非 None 才覆盖」构成 D-002@v1 双通道）。
+    sillyspec_version: str | None = Field(default=None, max_length=50)
+    # daemon 探测到的 npm 最新 sillyspec 版本（null=未知）。直写语义同上。
+    sillyspec_latest_version: str | None = Field(default=None, max_length=50)
     allowed_roots: list[str] = Field(default_factory=lambda: ["~/.sillyhub"])
     providers: list[DaemonRegisterProviderItem] = Field(min_length=1)
 

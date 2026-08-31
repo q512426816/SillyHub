@@ -213,6 +213,23 @@ export const MSG = {
    * payload: `{}`（当前无参数，后续可扩展 dry_run / keep_recent 等）。
    */
   CLEANUP: 'daemon:cleanup',
+
+  /**
+   * Server → Daemon：触发本机 sillyspec 升级（2026-08-31-machine-sillyspec-version
+   * task-05 / FR-05 / D-001@v1）。
+   *
+   * 用户在 Web 端机器卡点「升级 sillyspec」→ backend POST sillyspec-update →
+   * ws_hub.send_sillyspec_update 推送本消息。daemon 收到后调
+   * ``SillySpecManager.requestUpgrade('server_command')``：机器忙则 manager 内部
+   * 走 deferred（30s 复查），升级状态经心跳 sillyspec_update 字段回传（本消息
+   * 不回执）。
+   *
+   * payload: `{}`（npm latest 由 daemon 自行探测，backend 不代查）。
+   * fire-and-forget（无回执，同 CLEANUP）；旧 daemon 收到走 default 仅 warn
+   * （向后兼容）。与 backend ``DAEMON_MSG_SILLYSPEC_UPDATE = "daemon:sillyspec_update"``
+   * 逐字对齐——任一字符漂移即双侧契约单测失败。
+   */
+  SILLYSPEC_UPDATE: 'daemon:sillyspec_update',
 } as const;
 
 /** WebSocket 消息类型联合（字面量），用于 DaemonMessage.type。 */

@@ -4240,6 +4240,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/machines/{instance_id}/sillyspec-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Machine Sillyspec Update
+         * @description 推送 sillyspec 升级指令到指定机器（admin，2026-08-31-machine-sillyspec-version FR-02）.
+         *
+         *     机器级直接以 ``instance_id`` 作 ``daemon_id`` 路由 WS，发送
+         *     ``daemon:sillyspec_update``（fire-and-forget，无回执，同 CLEANUP 语义）；
+         *     daemon 收到后调 sillyspec-manager 执行本机 npm 升级，状态机经心跳
+         *     sillyspec_update 字段回传（不走本消息）。先 ``_get_owned_instance`` 做归属
+         *     校验（越权/不存在 404），离线或 WS 发送失败 → 504 ``DaemonRuntimeOffline``
+         *     （与机器级 self-update/cleanup 同款文案与 details 结构）。
+         *
+         *     刻意不返回 ``latest_version``：npm latest 由 daemon 自行探测并经心跳
+         *     sillyspec_latest_version 上报，backend 不代查（design §接口定义）。
+         */
+        post: operations["trigger_machine_sillyspec_update_api_daemon_machines__instance_id__sillyspec_update_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/daemon/runtimes/{runtime_id}/disable": {
         parameters: {
             query?: never;
@@ -12092,6 +12122,11 @@ export interface components {
             /** Started At */
             started_at?: string | null;
             pending_update?: components["schemas"]["DaemonHeartbeatPendingUpdate"] | null;
+            /** Sillyspec Version */
+            sillyspec_version?: string | null;
+            /** Sillyspec Latest Version */
+            sillyspec_latest_version?: string | null;
+            sillyspec_update?: components["schemas"]["DaemonHeartbeatSillySpecUpdate"] | null;
             /** Providers */
             providers?: components["schemas"]["DaemonHeartbeatProviderItem"][];
         };
@@ -12133,6 +12168,30 @@ export interface components {
             runtime_id: string;
             /** Allowed Roots */
             allowed_roots: string[];
+        };
+        /**
+         * DaemonHeartbeatSillySpecUpdate
+         * @description 心跳 sillyspec_update 载荷（2026-08-31-machine-sillyspec-version FR-05）.
+         *
+         *     daemon 的 sillyspec 升级状态机投影（design §接口定义）：state 当前取值
+         *     ``running`` / ``deferred`` / ``success`` / ``failed``，trigger 取值
+         *     ``server_command`` / ``auto``；``since`` 不上报——backend 首落库时盖
+         *     ``since=now``（同 pending_update 先例），同内容重放保留原 since。
+         *     state/trigger 均不收紧成 Literal——收紧会让未来新增取值的整条心跳 422
+         *     （心跳是保活通道，宁宽勿断，DaemonHeartbeatPendingUpdate.reason 同决策）；
+         *     error 在服务层截断至 200 字符后落库。
+         */
+        DaemonHeartbeatSillySpecUpdate: {
+            /** State */
+            state?: string | null;
+            /** Trigger */
+            trigger?: string | null;
+            /** From Version */
+            from_version?: string | null;
+            /** To Version */
+            to_version?: string | null;
+            /** Error */
+            error?: string | null;
         };
         /**
          * DaemonInstanceProviderItem
@@ -12239,7 +12298,12 @@ export interface components {
         };
         /**
          * DaemonMachineReadWithPending
-         * @description DaemonMachineRead + 机器级 pending_update（GET /machines 透出用）。
+         * @description DaemonMachineRead + 机器级 pending_update + sillyspec 三字段（GET /machines 透出用）。
+         *
+         *     2026-08-31-machine-sillyspec-version task-03 / FR-05：sillyspec_version /
+         *     sillyspec_latest_version / sillyspec_update 三字段就近跟随 pending_update 走
+         *     router 内子类扩展（MachinePendingUpdateRead 现状就近原则，schema.py 基类保持
+         *     零改动——本组字段是同一读视图契约 MachineSillySpecView，拆两处放置会割裂）。
          */
         DaemonMachineReadWithPending: {
             /**
@@ -12278,6 +12342,11 @@ export interface components {
             /** Runtimes */
             runtimes?: components["schemas"]["DaemonRuntimeRead"][];
             pending_update?: components["schemas"]["MachinePendingUpdateRead"] | null;
+            /** Sillyspec Version */
+            sillyspec_version?: string | null;
+            /** Sillyspec Latest Version */
+            sillyspec_latest_version?: string | null;
+            sillyspec_update?: components["schemas"]["MachineSillySpecUpdateRead"] | null;
         };
         /**
          * DaemonMachineUpdate
@@ -12382,6 +12451,10 @@ export interface components {
             daemon_build_id?: string | null;
             /** Started At */
             started_at?: string | null;
+            /** Sillyspec Version */
+            sillyspec_version?: string | null;
+            /** Sillyspec Latest Version */
+            sillyspec_latest_version?: string | null;
             /** Allowed Roots */
             allowed_roots?: string[];
             /** Providers */
@@ -14286,6 +14359,33 @@ export interface components {
              * Format: date-time
              */
             since: string;
+        };
+        /**
+         * MachineSillySpecUpdateRead
+         * @description 机器视图 sillyspec_update 嵌套（2026-08-31-machine-sillyspec-version FR-05）。
+         *
+         *     即 daemon_instances.sillyspec_update JSON 列原样透出（design §接口定义）：
+         *     daemon 侧 sillyspec-manager 状态机投影五字段（state 取值 running/deferred/
+         *     success/failed，trigger 取值 server_command/auto）+ backend 首落库时盖的
+         *     ``since``（同内容重放心跳保留原 since，MachinePendingUpdateRead 同款语义）。
+         *     NULL（无升级进行中 / 终态展示窗口已过）→ 机器视图字段为 null。
+         *
+         *     五上报字段全 nullable 对齐 daemon 上报形态：running/deferred 可无 to_version、
+         *     非 failed 无 error（success 必带 to_version 由 daemon 侧保证，后端不收紧）。
+         */
+        MachineSillySpecUpdateRead: {
+            /** State */
+            state?: string | null;
+            /** Trigger */
+            trigger?: string | null;
+            /** From Version */
+            from_version?: string | null;
+            /** To Version */
+            to_version?: string | null;
+            /** Error */
+            error?: string | null;
+            /** Since */
+            since?: string | null;
         };
         /**
          * McpConfigUpdateRequest
@@ -29496,6 +29596,39 @@ export interface operations {
         };
     };
     trigger_machine_cleanup_api_daemon_machines__instance_id__cleanup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                instance_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: boolean;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_machine_sillyspec_update_api_daemon_machines__instance_id__sillyspec_update_post: {
         parameters: {
             query?: never;
             header?: never;

@@ -49,6 +49,7 @@ import {
   PROVIDER_META,
   triggerMachineCleanup,
   triggerMachineSelfUpdate,
+  triggerMachineSillySpecUpdate,
   updateDaemonMachine,
   updateRuntimeAllowedRoots,
   type AgentSessionRead,
@@ -535,6 +536,10 @@ export default function RuntimesPage() {
   const [runtimeActionId, setRuntimeActionId] = useState<string | null>(null);
   // task-09：daemon 升级中标记（机器卡按钮 loading，按 instance.id 记）。
   const [upgradeActionId, setUpgradeActionId] = useState<string | null>(null);
+  // 2026-08-31-machine-sillyspec-version task-07：sillyspec 升级中标记（机器卡
+  // 「升级 sillyspec」按钮即时禁用；POST fire-and-forget 返回后即清，后续由
+  // 15s 轮询 sillyspec_update running 态接管禁用显示）。
+  const [sillyspecUpgradingId, setSillyspecUpgradingId] = useState<string | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null);
   // FR-01：旧 dialogRuntime / initialSessionId 已退役（2026-08-25-runtimes-entry-unified-floating），
   // 「会话」按钮唤起全局悬浮会话助手（useFloatingSessionStore.openRuntimeSession）。
@@ -724,6 +729,39 @@ export default function RuntimesPage() {
       }
     },
     [notify, queryClient],
+  );
+
+  // 2026-08-31-machine-sillyspec-version task-07 / FR-02：升级 sillyspec——
+  // modal.confirm 二次确认 → triggerMachineSillySpecUpdate（WS fire-and-forget
+  // 无回执）→ 成功/失败 toast + invalidate machines。升级进度由 daemon 状态机经
+  // 心跳 sillyspec_update 回传（机器卡横幅四态 + 徽标），15s 轮询自然刷新；
+  // running/deferred 期的重复指令由 daemon 侧 in-flight 门去重。npm latest 由
+  // daemon 自行探测（后端不代查，design §接口定义）。
+  const handleSillySpecUpgrade = useCallback(
+    (machine: DaemonMachineRead) => {
+      if (machine.status !== "online") return;
+      modal.confirm({
+        title: "升级 sillyspec",
+        content: `确定升级机器「${machine.display_alias ?? machine.hostname}」的 sillyspec 到最新版？daemon 将在本机执行 npm install -g sillyspec@latest；机器忙（有会话/任务运行）时自动推迟到空闲执行，不打断运行中的任务。`,
+        okText: "升级",
+        cancelText: "取消",
+        onOk: async () => {
+          setSillyspecUpgradingId(machine.id);
+          try {
+            await triggerMachineSillySpecUpdate(machine.id);
+            notify.success("升级指令已下发，进度将显示在机器卡横幅上");
+            // 软刷新 machines：升级状态经心跳 sillyspec_update 回传，实际横幅
+            // 要等下一轮心跳（15s 轮询自然看到）。
+            void queryClient.invalidateQueries({ queryKey: queryKeys.daemonMachines.all });
+          } catch (err) {
+            notify.error(err, "下发 sillyspec 升级指令失败");
+          } finally {
+            setSillyspecUpgradingId(null);
+          }
+        },
+      });
+    },
+    [modal, notify, queryClient],
   );
 
   // 清理 daemon 本地缓存（specs / 会话日志 / 备份 / 日志文件）。
@@ -1289,6 +1327,8 @@ export default function RuntimesPage() {
                       sessions={sessions}
                       onEditAlias={handleOpenAlias}
                       onUpgrade={handleUpgrade}
+                      onUpgradeSillySpec={handleSillySpecUpgrade}
+                      upgradingSillySpec={sillyspecUpgradingId === machine.id}
                       onCleanup={handleCleanup}
                       onDeleteMachine={handleDeleteMachine}
                       onRuntimeToggle={handleToggleRuntime}

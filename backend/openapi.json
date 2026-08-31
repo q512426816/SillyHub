@@ -11722,6 +11722,54 @@
         }
       }
     },
+    "/api/daemon/machines/{instance_id}/sillyspec-update": {
+      "post": {
+        "tags": [
+          "daemon"
+        ],
+        "summary": "Trigger Machine Sillyspec Update",
+        "description": "推送 sillyspec 升级指令到指定机器（admin，2026-08-31-machine-sillyspec-version FR-02）.\n\n机器级直接以 ``instance_id`` 作 ``daemon_id`` 路由 WS，发送\n``daemon:sillyspec_update``（fire-and-forget，无回执，同 CLEANUP 语义）；\ndaemon 收到后调 sillyspec-manager 执行本机 npm 升级，状态机经心跳\nsillyspec_update 字段回传（不走本消息）。先 ``_get_owned_instance`` 做归属\n校验（越权/不存在 404），离线或 WS 发送失败 → 504 ``DaemonRuntimeOffline``\n（与机器级 self-update/cleanup 同款文案与 details 结构）。\n\n刻意不返回 ``latest_version``：npm latest 由 daemon 自行探测并经心跳\nsillyspec_latest_version 上报，backend 不代查（design §接口定义）。",
+        "operationId": "trigger_machine_sillyspec_update_api_daemon_machines__instance_id__sillyspec_update_post",
+        "parameters": [
+          {
+            "name": "instance_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Instance Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "boolean"
+                  },
+                  "title": "Response Trigger Machine Sillyspec Update Api Daemon Machines  Instance Id  Sillyspec Update Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/daemon/runtimes/{runtime_id}/disable": {
       "post": {
         "tags": [
@@ -35691,6 +35739,40 @@
               }
             ]
           },
+          "sillyspec_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sillyspec Version"
+          },
+          "sillyspec_latest_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sillyspec Latest Version"
+          },
+          "sillyspec_update": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DaemonHeartbeatSillySpecUpdate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "providers": {
             "items": {
               "$ref": "#/components/schemas/DaemonHeartbeatProviderItem"
@@ -35760,6 +35842,73 @@
         ],
         "title": "DaemonHeartbeatRuntimePolicy",
         "description": "心跳响应内单个 runtime 的 per-runtime allowed_roots。"
+      },
+      "DaemonHeartbeatSillySpecUpdate": {
+        "properties": {
+          "state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger"
+          },
+          "from_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Version"
+          },
+          "to_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Version"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 200
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "title": "DaemonHeartbeatSillySpecUpdate",
+        "description": "心跳 sillyspec_update 载荷（2026-08-31-machine-sillyspec-version FR-05）.\n\ndaemon 的 sillyspec 升级状态机投影（design §接口定义）：state 当前取值\n``running`` / ``deferred`` / ``success`` / ``failed``，trigger 取值\n``server_command`` / ``auto``；``since`` 不上报——backend 首落库时盖\n``since=now``（同 pending_update 先例），同内容重放保留原 since。\nstate/trigger 均不收紧成 Literal——收紧会让未来新增取值的整条心跳 422\n（心跳是保活通道，宁宽勿断，DaemonHeartbeatPendingUpdate.reason 同决策）；\nerror 在服务层截断至 200 字符后落库。"
       },
       "DaemonInstanceProviderItem": {
         "properties": {
@@ -36166,6 +36315,38 @@
                 "type": "null"
               }
             ]
+          },
+          "sillyspec_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sillyspec Version"
+          },
+          "sillyspec_latest_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sillyspec Latest Version"
+          },
+          "sillyspec_update": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MachineSillySpecUpdateRead"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -36179,7 +36360,7 @@
           "online_runtime_count"
         ],
         "title": "DaemonMachineReadWithPending",
-        "description": "DaemonMachineRead + 机器级 pending_update（GET /machines 透出用）。"
+        "description": "DaemonMachineRead + 机器级 pending_update + sillyspec 三字段（GET /machines 透出用）。\n\n2026-08-31-machine-sillyspec-version task-03 / FR-05：sillyspec_version /\nsillyspec_latest_version / sillyspec_update 三字段就近跟随 pending_update 走\nrouter 内子类扩展（MachinePendingUpdateRead 现状就近原则，schema.py 基类保持\n零改动——本组字段是同一读视图契约 MachineSillySpecView，拆两处放置会割裂）。"
       },
       "DaemonMachineUpdate": {
         "properties": {
@@ -36406,6 +36587,30 @@
               }
             ],
             "title": "Started At"
+          },
+          "sillyspec_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sillyspec Version"
+          },
+          "sillyspec_latest_version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 50
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sillyspec Latest Version"
           },
           "allowed_roots": {
             "items": {
@@ -40972,6 +41177,80 @@
         ],
         "title": "MachinePendingUpdateRead",
         "description": "机器视图 pending_update 嵌套（design S4 / M11）。\n\n即 daemon_instances.pending_update JSON 列原样透出：三上报字段 + backend 首落\n库时盖的 ``since``（同内容重放心跳保留原 since，不退化成最后心跳时间）。\nNULL（无待升级）→ 机器视图字段为 null。"
+      },
+      "MachineSillySpecUpdateRead": {
+        "properties": {
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger"
+          },
+          "from_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Version"
+          },
+          "to_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Version"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
+          }
+        },
+        "type": "object",
+        "title": "MachineSillySpecUpdateRead",
+        "description": "机器视图 sillyspec_update 嵌套（2026-08-31-machine-sillyspec-version FR-05）。\n\n即 daemon_instances.sillyspec_update JSON 列原样透出（design §接口定义）：\ndaemon 侧 sillyspec-manager 状态机投影五字段（state 取值 running/deferred/\nsuccess/failed，trigger 取值 server_command/auto）+ backend 首落库时盖的\n``since``（同内容重放心跳保留原 since，MachinePendingUpdateRead 同款语义）。\nNULL（无升级进行中 / 终态展示窗口已过）→ 机器视图字段为 null。\n\n五上报字段全 nullable 对齐 daemon 上报形态：running/deferred 可无 to_version、\n非 failed 无 error（success 必带 to_version 由 daemon 侧保证，后端不收紧）。"
       },
       "McpConfigUpdateRequest": {
         "properties": {
