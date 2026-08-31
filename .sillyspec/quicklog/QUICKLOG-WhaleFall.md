@@ -79,3 +79,15 @@
 根因：2026-08-31 会话卡排队事故两个实锤缺陷：①前端 apiFetch 无超时——后端劣化时 inject POST 无限挂起，占位轮永远「排队中/正在思考…」无错误提示，刷新后消息彻底消失（从未到后端）；②backend 重启窗口 daemon WS 断开被 10s 降级 offline，offline sweep 把 active 主会话误标 suspended 后无任何恢复触发点（既有恢复链只在 daemon 自身重启时跑），实测挂起 15 分钟无人恢复、24h 后被 GC 翻 failed
 方案：①apiFetch 新增 timeoutMs/timeoutMessage（AbortController 合并调用方 signal，外部 abort 仍走 network_error），injectSession 统一 30s 超时+「发送超时：草稿已保留」文案，page/dialog 两模式既有 catch 撤占位轮+横幅提示；②sweep.py 新增 session_auto_recover_sweep_once——suspended 主会话其 runtime 重新 online+600s 宽限且挂起满 60s → 翻 reconnecting+发 SESSION_RESUME 控制指令（payload/供应商凭证对齐 reopen），daemon restoreAndReconnect→confirm 翻 active，失败三路收敛，wire 进 60s 常驻巡检
 结果：后端 4 新用例绿+相邻回归 57 绿+ruff/format/mypy 0；前端 39 用例绿（新增 5）+tsc 0+eslint 0 error；未部署（改动在源码，Docker 镜像未重建）
+
+## ql-20260831-007-520d | 2026-08-31 13:14:56 | worktree 基准分支探测兜底——派发前验证 default_branch 真实存在
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/execution.py（base_ref 探测兜底（git_rev_parse 验证 + HEAD 回退））
+- backend/app/modules/agent/tests/test_dispatch_worker_worktree.py（mock 补 git_rev_parse + 新增 3 用例）
+- .sillyspec/docs/SillyHub/modules/agent.md（MissionExecutionService 条目补探测兜底说明）
+需求：worktree 基准分支探测兜底——派发前验证 default_branch 真实存在，缺失回退 HEAD
+根因：平台缺陷：workspace 建档时 default_branch 落字段缺省值 'main'（schema.py:115），派发从未探测仓库真实分支；crrcdt-hubin 的 pmp-web-ui 仓库默认分支非 main，分身 worktree 创建连续 4 次 fatal: Not a valid object name: 'main'（worktree_create_failed），任务派发链整体断裂
+方案：prepare_worker_worktree（团队/子会话两派发路径共用 helper）对非 HEAD 的 base_ref 先经既有 git_rev_parse RPC 验证可解析，不可解析/异常回退 HEAD（当前 checkout 基准）+ warning 日志；可解析则配置照常生效。零新增 RPC、零 daemon 改动、零数据库变更，存量配错工作区即时自愈
+结果：test_dispatch_worker_worktree 9 绿（新增 3：缺失回退/探测异常回退/可解析保持）+ 相邻回归 50 绿（caller/direct/target 19 + subsession 31）+ ruff/format/mypy 0；待部署验证
