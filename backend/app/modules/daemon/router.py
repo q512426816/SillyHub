@@ -2192,6 +2192,13 @@ class SessionRunRead(BaseModel):
     # task-05 / FR-01：最近一次调用提示词大小，from_attributes 直映
     # AgentRun.ctx_tokens 列（runs 查询零改动）；历史行 None 如实输出。
     ctx_tokens: int | None = None
+    # ── ql-20260831-004：失败原因透出──────────────────────────────────────────
+    # 调度层/系统层失败原因（撞闸 SESSION_LIMIT_REACHED、inject 过期联动、lease
+    # 超时重试耗尽等），from_attributes 经 validation_alias 直映 AgentRun.
+    # output_redacted 列（零查询改动）。仅 status=failed 的 run 才有语义——成功
+    # 轮该列存的是 agent 输出摘要，前端只在 failed 时消费（勿当失败原因展示）。
+    # 模型层错误仍走 error_detail（两者正交，D-009）。
+    failure_summary: str | None = Field(default=None, validation_alias="output_redacted")
     model_config = {"from_attributes": True}
 
 

@@ -395,6 +395,64 @@ export function buildErrorLogItem(
 }
 
 /**
+ * ql-20260831-004：调度层/系统层失败原因 → ErrorLogItem。
+ *
+ * 模型层错误走 buildErrorLogItem（error_detail），本函数兜 error_detail 为空的
+ * 系统级失败（撞闸 / inject 过期 / lease 超时等）：原因文案来自 run 的
+ * failure_summary（后端映射 output_redacted），缺失时按 error_code 映射中文，
+ * 仍缺失返回 null（调用方走「运行失败（无详情）」既有兜底）。
+ *
+ * SESSION_LIMIT_REACHED 专项识别：daemon 原文是英文技术串，翻译成可操作提示
+ * （结束旧会话 / 等额度释放），原文保留在 raw 供排查。
+ */
+export function buildSystemFailureItem(
+  errorCode: string | null | undefined,
+  failureSummary: string | null | undefined,
+): ErrorLogItem | null {
+  const summary =
+    typeof failureSummary === "string" && failureSummary.trim() !== ""
+      ? failureSummary
+      : null;
+  if (!summary) {
+    // 无上报原因：按 error_code 给方向性文案，未知码不硬造（返回 null 走既有兜底）。
+    const codeText: Record<string, string> = {
+      interactive_inject_send_failed: "消息未能送达执行端执行，本轮自动失败",
+      interactive_interrupted: "本轮对话被中断",
+      interactive_failed: "本轮执行失败",
+      interactive_unknown_status: "本轮执行异常终止",
+    };
+    const text = errorCode ? codeText[errorCode] : null;
+    if (!text) return null;
+    return {
+      type: "unknown",
+      code: errorCode ?? null,
+      message: text,
+      retryable: true,
+      hint: null,
+      raw: null,
+    };
+  }
+  if (summary.includes("SESSION_LIMIT_REACHED")) {
+    return {
+      type: "unknown",
+      code: errorCode ?? null,
+      message: "新建会话被拒：该机器同时活跃的会话数已达上限",
+      retryable: true,
+      hint: "在会话列表结束部分旧会话后重试；不处理的话约 30 分钟后额度自动释放",
+      raw: summary,
+    };
+  }
+  return {
+    type: "unknown",
+    code: errorCode ?? null,
+    message: summary,
+    retryable: false,
+    hint: null,
+    raw: null,
+  };
+}
+
+/**
  * task-08：识别 [ASSISTANT] 行是否为模型调用错误文本。
  *
  * daemon 把模型失败记为 `[ASSISTANT] API Error: Request rejected (429) · ...`

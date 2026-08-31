@@ -1599,6 +1599,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/{workspace_id}/changes/{change_id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Change Usage
+         * @description 变更维度执行用量聚合（task-04 / D-005@v1 独立用量端点）。
+         *
+         *     委托 ``ChangeUsageQueryService.get_change_usage``：不存在/跨工作区由 service
+         *     抛 ``ChangeNotFound``（404 resource-hiding，不泄露存在性）。deleted 口径
+         *     （task-04 核实现状）：既有 ``GET /changes/{change_id}`` 详情端点经
+         *     ``ChangeService.get`` 只按 id+workspace 取行，**不**对 ``location='deleted'``
+         *     404——其「读侧防复活」是 enrich 投影层跳过 deleted 行（service.py
+         *     ``enrich_with_workspace_ids``/``enrich_summaries`` 前置过滤），本端点保持
+         *     同口径：不加额外 deleted 404，聚合结果如实返回。
+         */
+        get: operations["get_change_usage_api_workspaces__workspace_id__changes__change_id__usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_id}/changes/{change_id}/files/content": {
         parameters: {
             query?: never;
@@ -1993,6 +2021,33 @@ export interface paths {
          * @description GET 快速修复单条详情（FR-06：四段正文 + raw_block；404 未命中）。
          */
         get: operations["get_quicklog_entry_api_workspaces__workspace_id__quicklog_entries__ql_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_id}/quicklog-entries/{ql_id}/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Quicklog Usage
+         * @description 快速修复条目维度执行用量聚合（task-04 / D-005@v1 独立用量端点）。
+         *
+         *     404 严格对齐 ``get_quicklog_entry`` 详情端点：先经
+         *     ``QuicklogQueryService.get_entry`` 校验条目存在（双源均未命中 → 404），
+         *     不像姊妹端点 ``/sessions`` 容忍「有 link 无条目」竞态（usage 卡只在
+         *     条目存在的抽屉内渲染，竞态窗口极小，前端按边界态降级）。存在再委托
+         *     ``ChangeUsageQueryService.get_quicklog_usage`` 聚合（无绑定条目返回全零
+         *     totals + 空 by_model + 三元组 None）。
+         */
+        get: operations["get_quicklog_usage_api_workspaces__workspace_id__quicklog_entries__ql_id__usage_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5043,6 +5098,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/queue/reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Reorder Session Queue
+         * @description 拖拽排序持久化（2026-08-31-session-queue-ux FR-04）。
+         *
+         *     全量 entry_ids 按上传序重写 position 0..n-1；集合不一致 422
+         *     QUEUE_ORDER_MISMATCH（D-003）。
+         */
+        patch: operations["reorder_session_queue_api_daemon_sessions__session_id__queue_reorder_patch"];
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/queue/{entry_id}": {
         parameters: {
             query?: never;
@@ -5060,7 +5138,15 @@ export interface paths {
         delete: operations["delete_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__delete"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Update Session Queue Entry
+         * @description 编辑排队消息 prompt（2026-08-31-session-queue-ux FR-06）。
+         *
+         *     仅改文本（附件/快照不动，NG-01）；空文本/超 8000 → 422；TASK_WAKEUP
+         *     系统通知条目 → 409（D-009）；failed 条目保存后重置 pending + 清 error
+         *     并尝试派发。响应体为 ``entry`` 包裹键（design §5，区别于 retry 裸 DTO）。
+         */
+        patch: operations["update_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__patch"];
         trace?: never;
     };
     "/api/daemon/sessions/{session_id}/queue/{entry_id}/retry": {
@@ -5077,6 +5163,29 @@ export interface paths {
          * @description failed 排队消息重试（翻 pending 并立即尝试派发，忙则留队）。
          */
         post: operations["retry_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/daemon/sessions/{session_id}/queue/{entry_id}/dispatch-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dispatch Now Session Queue Entry
+         * @description 立即发送排队消息（2026-08-31-session-queue-ux FR-05 / D-001）。
+         *
+         *     条目置队首；忙=打断当前轮（interrupt 接力派发，``interrupted=true``），
+         *     空闲=当场派发（``interrupted=false``，条目可能已删行）；非 active 409。
+         */
+        post: operations["dispatch_now_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__dispatch_now_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5199,6 +5308,26 @@ export interface paths {
         patch: operations["unarchive_session_api_daemon_sessions__session_id__unarchive_patch"];
         trace?: never;
     };
+    "/api/daemon/sessions/{session_id}/ctx-window": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Session Ctx Window
+         * @description Set/clear the context window override for an owned session (display-only).
+         */
+        patch: operations["update_session_ctx_window_api_daemon_sessions__session_id__ctx_window_patch"];
+        trace?: never;
+    };
     "/api/daemon/sessions/{session_id}/stream": {
         parameters: {
             query?: never;
@@ -5307,9 +5436,11 @@ export interface paths {
          *     ``agent_run_model_usage`` GROUP BY model 为主源 + 无明细行 run 的四维 token
          *     列兜底（``ctx_tokens`` 快照列排除），本端点只做委托，不重复聚合逻辑。
          *
-         *     owner-only 404 resource-hiding：归属校验在 service 内 DB 侧过滤，缺失 /
-         *     跨用户会话同抛 ``DaemonSessionNotFound``（不泄露存在性），与 runs / logs
-         *     等会话读端点同一道闸门。只读端点，无状态机交互。
+         *     权限闸门对齐同 router 会话读端点（2026-08-30 审计⑥）：``TaskRunAgentUser``
+         *     （``require_permission_any(Permission.TASK_RUN_AGENT)``）——与 runs / logs /
+         *     detail 同一道闸门；owner-only 404 resource-hiding：归属校验在 service 内
+         *     DB 侧过滤（含软删 ``deleted_at`` 视为不存在），缺失 / 跨用户 / 已软删会话
+         *     同抛 ``DaemonSessionNotFound``（不泄露存在性）。只读端点，无状态机交互。
          */
         get: operations["get_session_usage_api_daemon_sessions__session_id__usage_get"];
         put?: never;
@@ -10436,6 +10567,8 @@ export interface components {
             config_snapshot?: {
                 [key: string]: unknown;
             } | null;
+            /** Ctx Window Tokens */
+            ctx_window_tokens?: number | null;
             /** Owner Name */
             owner_name?: string | null;
             /**
@@ -11394,11 +11527,35 @@ export interface components {
             owner_name?: string | null;
             /** Last Pushed At */
             last_pushed_at?: string | null;
+            usage?: components["schemas"]["UsageSummaryRead"] | null;
             /**
              * Updated At
              * Format: date-time
              */
             updated_at: string;
+        };
+        /**
+         * ChangeUsageRead
+         * @description 变更/快速修复完整用量（两个 usage 详情端点响应，D-005@v1）。
+         *
+         *     时间口径 = 执行时间口径（D-001@v1）：首次执行 started_at → 最近执行
+         *     finished_at，duration_ms = 纯执行时长累加。时间三元组 NULL 语义（R-05，
+         *     前端「进行中」标记依据）：started_at 有值且 finished_at 缺 = 进行中；
+         *     started_at / finished_at / duration_ms 全 None = 无执行。
+         */
+        ChangeUsageRead: {
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            totals: components["schemas"]["UsageTotalsRead"];
+            /**
+             * By Model
+             * @default []
+             */
+            by_model: components["schemas"]["UsageByModelItemRead"][];
         };
         /** ChangeWarning */
         ChangeWarning: {
@@ -17455,6 +17612,42 @@ export interface components {
             create_name?: string | null;
         };
         /**
+         * QueueDispatchNowResponse
+         * @description POST /api/daemon/sessions/{id}/queue/{entry_id}/dispatch-now 响应体
+         *     （FR-05 / D-001）。
+         *
+         *     ``interrupted=True``=已打断活跃轮（run 终态钩子接力派发队首=本条）；
+         *     ``False``=空闲当场派发（条目可能已删行，前端以 SSE/load 收敛，R-04）。
+         */
+        QueueDispatchNowResponse: {
+            /** Interrupted */
+            interrupted: boolean;
+        };
+        /**
+         * QueueEntryUpdateRequest
+         * @description PATCH /api/daemon/sessions/{id}/queue/{entry_id} 请求体（FR-06 / NG-01）。
+         *
+         *     仅改 prompt 文本（附件/配置快照不动）；长度 1..8000 对齐
+         *     SessionInjectRequest.prompt 的 max_length 上限（编辑无空 prompt 豁免轮，
+         *     故字段级 min_length=1 合法——区别于 inject 的 service 层判空）。
+         */
+        QueueEntryUpdateRequest: {
+            /** Prompt */
+            prompt: string;
+        };
+        /**
+         * QueueReorderRequest
+         * @description PATCH /api/daemon/sessions/{id}/queue/reorder 请求体（FR-04 / D-003）。
+         *
+         *     ``entry_ids`` 全量、有序——集合须等于会话现有 pending+failed 条目全集
+         *     （部分重排 / 重复 id → 422 QUEUE_ORDER_MISMATCH，服务端按列表序重写
+         *     position 0..n-1）；空列表 422（min_length=1，空队列无需 reorder）。
+         */
+        QueueReorderRequest: {
+            /** Entry Ids */
+            entry_ids: string[];
+        };
+        /**
          * QuicklogEntry
          * @description A single quicklog file entry.
          */
@@ -17523,6 +17716,7 @@ export interface components {
              * @default file
              */
             source: string;
+            usage?: components["schemas"]["UsageSummaryRead"] | null;
         };
         /**
          * QuicklogEntryPushRequest
@@ -17606,6 +17800,7 @@ export interface components {
              * @default file
              */
             source: string;
+            usage?: components["schemas"]["UsageSummaryRead"] | null;
             /**
              * Body Sections
              * @default {}
@@ -18409,6 +18604,20 @@ export interface components {
             stream_url: string;
         };
         /**
+         * SessionCtxWindowUpdateRequest
+         * @description PATCH /api/daemon/sessions/{id}/ctx-window 请求体（ql-20260831-002）。
+         *
+         *     会话级上下文窗口覆盖（纯展示配置，不参与 daemon 注入链）：
+         *     - 非空 int = 显式覆盖（前端环分母优先级最高）；
+         *     - None = 清除覆盖，回前端自动派生链（供应商 one_m → 模型常量表 → 1M 兜底）。
+         *     边界 1_000 ~ 100_000_000（1k ~ 100M）：拦 0/负数（百分比除零/负占比）与
+         *     明显手滑的巨值；常规模型窗口（8k ~ 10M）全在内。
+         */
+        SessionCtxWindowUpdateRequest: {
+            /** Ctx Window Tokens */
+            ctx_window_tokens?: number | null;
+        };
+        /**
          * SessionDialogRead
          * @description REST DTO for a persisted dialog request (GET /sessions/{id}/dialogs).
          */
@@ -18540,6 +18749,9 @@ export interface components {
         /**
          * SessionQueueEntry
          * @description 排队消息条目（ql-20260825-011，GET /sessions/{id}/queue 项）。
+         *
+         *     ``position``（2026-08-31-session-queue-ux FR-04/D-002）：队列序键，与
+         *     派发序同源（ORDER BY position, created_at）——拖拽重排后据此渲染顺序。
          */
         SessionQueueEntry: {
             /**
@@ -18559,11 +18771,21 @@ export interface components {
             status: string;
             /** Error Msg */
             error_msg?: string | null;
+            /** Position */
+            position: number;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * SessionQueueEntryUpdateResponse
+         * @description PATCH /sessions/{id}/queue/{entry_id} 响应体（2026-08-31-session-queue-ux
+         *     design §5）：``entry`` 包裹键（区别于 retry 端点的裸 DTO）。
+         */
+        SessionQueueEntryUpdateResponse: {
+            entry: components["schemas"]["SessionQueueEntry"];
         };
         /** SessionQueueResponse */
         SessionQueueResponse: {
@@ -18691,6 +18913,8 @@ export interface components {
             output_tokens?: number | null;
             /** Ctx Tokens */
             ctx_tokens?: number | null;
+            /** Failure Summary */
+            failure_summary?: string | null;
         };
         /**
          * SessionRuntimeRequest
@@ -20640,6 +20864,45 @@ export interface components {
             count: number;
         };
         /**
+         * UsageByModelItemRead
+         * @description 分模型用量明细项（ChangeUsageRead.by_model 列表行）。
+         *
+         *     明细段 = agent_run_model_usage 按 model GROUP BY（SUM 四维 token +
+         *     api_requests）；兜底段 = 集合中无明细行的 run 归并到 run.model（缺失归
+         *     「未记录」桶）。数据流：producer = change/usage_service.py
+         *     ChangeUsageQueryService（详情两段聚合）→ router usage 端点 → consumer =
+         *     前端 api-types.ts 生成物（gen:types，change-usage-card 折叠明细）。
+         */
+        UsageByModelItemRead: {
+            /** Model */
+            model: string;
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Cache Creation Tokens
+             * @default 0
+             */
+            cache_creation_tokens: number;
+            /**
+             * Api Requests
+             * @default 0
+             */
+            api_requests: number;
+        };
+        /**
          * UsageData
          * @description 单条用量（一个套餐窗口 = 一条；多窗口 5h/周/月各自一条 tier）。
          *
@@ -20684,6 +20947,59 @@ export interface components {
             data?: components["schemas"]["UsageData"][] | null;
             /** Error */
             error?: string | null;
+        };
+        /**
+         * UsageSummaryRead
+         * @description 用量摘要（ChangeSummary.usage / QuicklogEntryListItem.usage，列表「执行」列）。
+         *
+         *     列表批量投影只带时间三元组 + totals，不算 by_model（R-02 复杂度控制）；
+         *     NULL 组合语义同 ChangeUsageRead（R-05：started 有值 finished 缺 = 进行中；
+         *     全 None = 无执行）。
+         */
+        UsageSummaryRead: {
+            /** Started At */
+            started_at?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            /** Duration Ms */
+            duration_ms?: number | null;
+            totals: components["schemas"]["UsageTotalsRead"];
+        };
+        /**
+         * UsageTotalsRead
+         * @description 用量汇总（四维 token + 调用次数 + 轮次；详情与列表摘要共用）。
+         */
+        UsageTotalsRead: {
+            /**
+             * Input Tokens
+             * @default 0
+             */
+            input_tokens: number;
+            /**
+             * Output Tokens
+             * @default 0
+             */
+            output_tokens: number;
+            /**
+             * Cache Read Tokens
+             * @default 0
+             */
+            cache_read_tokens: number;
+            /**
+             * Cache Creation Tokens
+             * @default 0
+             */
+            cache_creation_tokens: number;
+            /**
+             * Api Requests
+             * @default 0
+             */
+            api_requests: number;
+            /**
+             * Num Turns
+             * @default 0
+             */
+            num_turns: number;
         };
         /**
          * UserColumnVO
@@ -24750,6 +25066,38 @@ export interface operations {
             };
         };
     };
+    get_change_usage_api_workspaces__workspace_id__changes__change_id__usage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                change_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeUsageRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_change_file_content_api_workspaces__workspace_id__changes__change_id__files_content_get: {
         parameters: {
             query: {
@@ -25505,6 +25853,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QuicklogEntryRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_quicklog_usage_api_workspaces__workspace_id__quicklog_entries__ql_id__usage_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                ql_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChangeUsageRead"];
                 };
             };
             /** @description Validation Error */
@@ -30370,6 +30750,39 @@ export interface operations {
             };
         };
     };
+    reorder_session_queue_api_daemon_sessions__session_id__queue_reorder_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QueueReorderRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     delete_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__delete: {
         parameters: {
             query?: never;
@@ -30388,6 +30801,42 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QueueEntryUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionQueueEntryUpdateResponse"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -30419,6 +30868,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionQueueEntry"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dispatch_now_session_queue_entry_api_daemon_sessions__session_id__queue__entry_id__dispatch_now_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueueDispatchNowResponse"];
                 };
             };
             /** @description Validation Error */
@@ -30570,6 +31051,39 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_session_ctx_window_api_daemon_sessions__session_id__ctx_window_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SessionCtxWindowUpdateRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             204: {

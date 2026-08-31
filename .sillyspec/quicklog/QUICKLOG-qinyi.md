@@ -300,3 +300,13 @@
 根因：markReconnected 恢复成功后把 lastActiveAt 刷成 Date.now()，而 create 闸真活跃口径按 30 分钟窗口计数——重启恢复的满额 idle 会话（实机 21≥20）全被误判真活跃；既有 P0 回归测试直塞 _store 绕过恢复链，未拦住
 方案：session-manager.ts markReconnected 移除 lastActiveAt 刷新（恢复是系统动作非用户活动，保档盘上原值，活跃时间由 inject/_onResult/interrupt/reload 真实用户活动维护），函数头注释补依据；worker-depth 测试文件 P0 块新增走真实 restoreAndReconnect→markReconnected 链的回归用例；interactive.md 人工备注补 ql-20260831-003-3c87 条目
 结果：目标测试文件 16 用例绿（含新增 1）；恢复/idle/codex 相关 3 套件 49 用例绿；resilience/stop-suspend/bridge/busy-check 4 套件 57 用例绿；pnpm typecheck 0 错；三文件已 git add
+
+## ql-20260831-004-d49f | 2026-08-31 10:12:13 | run 失败原因透出到 UI（failure_summary 全链路）
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/control_commands.py, backend/app/modules/daemon/router.py, backend/app/modules/daemon/tests/test_control_commands.py, backend/app/modules/daemon/tests/test_session_runs_endpoint.py, frontend/src/components/agent-log/__tests__/normalize.test.ts, frontend/src/components/agent-log/normalize.ts, frontend/src/components/daemon/session-panel.tsx, frontend/src/lib/daemon.ts
+需求：run 失败原因透出到 UI（failure_summary 全链路）
+根因：调度层/系统层失败原因（撞闸 SESSION_LIMIT_REACHED、inject 过期联动）只存 agent_runs.output_redacted 且响应不暴露；GC 判败只写 error_code 不写文案；前端错误卡只消费模型层 error_detail，为空即显示「运行失败（无详情）」
+方案：backend SessionRunRead 加 failure_summary（validation_alias 映射 output_redacted）；GC inject 过期联动按 delivered_at 分桶写中文原因；normalize 新增 buildSystemFailureItem（failure_summary 优先+撞闸识别+error_code 映射）；session-panel 三处失败卡逐级兜底；gen:types 双端重生成；模块文档 2 份同步
+结果：backend 27 用例绿（新增 2）；frontend 67 用例绿（新增 3，夹具按规则 21 补字段）；ruff check/format 0、mypy 0；frontend/daemon tsc 0；gen:types 双端已同步
+审计：⚖️ 归属切分：4 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/openapi.json, frontend/src/components/daemon/__tests__/session-panel-ctx-tokens.test.tsx, frontend/src/lib/api-types.ts, sillyhub-daemon/src/api-types.ts

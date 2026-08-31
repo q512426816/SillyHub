@@ -54966,6 +54966,17 @@
               }
             ],
             "title": "Ctx Tokens"
+          },
+          "failure_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Summary"
           }
         },
         "type": "object",

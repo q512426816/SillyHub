@@ -97,7 +97,7 @@ import {
 import { Badge, Button, Spin, Tag } from "antd";
 
 import { AgentModelInput } from "@/components/AgentModelInput";
-import { buildErrorLogItem } from "@/components/agent-log/normalize";
+import { buildErrorLogItem, buildSystemFailureItem } from "@/components/agent-log/normalize";
 import {
   applyLogToSegments,
   createEmptyAssembledTurn,
@@ -1652,7 +1652,14 @@ function SessionPanelPage({
                 try {
                   const runs = await listSessionRuns(sessionId);
                   const matched = runs.find((r) => r.id === failedRunId);
-                  const item = buildErrorLogItem(matched?.error_detail ?? null);
+                  // ql-20260831-004：error_detail（模型层）为空的系统级失败（撞闸/
+                  // inject 过期）兜 failure_summary + error_code 映射（normalize）。
+                  const item =
+                    buildErrorLogItem(matched?.error_detail ?? null) ??
+                    buildSystemFailureItem(
+                      matched?.error_code ?? null,
+                      matched?.failure_summary ?? null,
+                    );
                   if (!item) return;
                   setTurnState((prev) => ({
                     ...prev,
@@ -2002,25 +2009,28 @@ function SessionPanelPage({
       // errorDetail，消除「聊天时红色错误卡、刷新后变已完成」的路径不一致。
       // 实时轮终态与 run 快照一致，覆盖为同值无害；errorDetail 只补缺（?? 链）。
       const terminal = runTerminalTurnStatus(meta.status);
-      const terminalPatch =
-        terminal === null
-          ? {}
-          : terminal === "failed"
-            ? {
-                status: "failed" as const,
-                errorDetail:
-                  t.errorDetail ??
-                  buildErrorLogItem(meta.error_detail) ?? {
-                    // 无详情兜底（先例 normalize.ts runStatus=failed 无 detail）。
-                    type: "unknown" as const,
-                    code: null,
-                    message: "运行失败（无详情）",
-                    retryable: false,
-                    hint: null,
-                    raw: null,
-                  },
-              }
-            : { status: "killed" as const };
+              const terminalPatch =
+                terminal === null
+                  ? {}
+                  : terminal === "failed"
+                    ? {
+                        status: "failed" as const,
+                        errorDetail:
+                          t.errorDetail ??
+                          buildErrorLogItem(meta.error_detail) ??
+                          // ql-20260831-004：系统级失败（撞闸/inject 过期等
+                          // error_detail 为空）兜 failure_summary + error_code。
+                          buildSystemFailureItem(meta.error_code, meta.failure_summary) ?? {
+                            // 无详情兜底（先例 normalize.ts runStatus=failed 无 detail）。
+                            type: "unknown" as const,
+                            code: null,
+                            message: "运行失败（无详情）",
+                            retryable: false,
+                            hint: null,
+                            raw: null,
+                          },
+                      }
+                    : { status: "killed" as const };
       return {
         ...t,
         ...terminalPatch,
@@ -4242,7 +4252,13 @@ function SessionPanelDialog(props: SessionPanelProps) {
                   try {
                     const runs = await listSessionRuns(sessionId);
                     const matched = runs.find((r) => r.id === failedRunId);
-                    const item = buildErrorLogItem(matched?.error_detail ?? null);
+                    // ql-20260831-004：同上——系统级失败兜 failure_summary 映射。
+                    const item =
+                      buildErrorLogItem(matched?.error_detail ?? null) ??
+                      buildSystemFailureItem(
+                        matched?.error_code ?? null,
+                        matched?.failure_summary ?? null,
+                      );
                     if (!item) return;
                     setView((prev) => ({
                       ...prev,
@@ -4253,7 +4269,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
                       ),
                     }));
                   } catch {
-                    // 拉取失败不阻塞：失败 turn 仍有状态徽标 + 通用 errorMsg
+                    // 拉取失败不崩：失败 turn 仍有状态徽标 + 通用 errorMsg
                   }
                 })();
               }

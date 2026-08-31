@@ -417,23 +417,27 @@ class ControlCommandService:
         candidate_ids = [row.id for row in candidate_rows]
         if candidate_ids:
             linkable = (
-                (
-                    await self._session.execute(
-                        select(DaemonControlCommand.payload).where(
-                            col(DaemonControlCommand.id).in_(candidate_ids),
-                            col(DaemonControlCommand.status) == STATUS_EXPIRED,
-                            col(DaemonControlCommand.kind) == KIND_SESSION_INJECT,
-                        )
+                await self._session.execute(
+                    select(
+                        DaemonControlCommand.payload,
+                        DaemonControlCommand.delivered_at,
+                    ).where(
+                        col(DaemonControlCommand.id).in_(candidate_ids),
+                        col(DaemonControlCommand.status) == STATUS_EXPIRED,
+                        col(DaemonControlCommand.kind) == KIND_SESSION_INJECT,
                     )
                 )
-                .scalars()
-                .all()
-            )
-            run_ids: list[uuid.UUID] = []
-            for payload in linkable:
+            ).all()
+            # ql-20260831-004：联动判失败同时把可读原因写进 output_redacted
+            # （经 SessionRunRead.failure_summary 透出到前端错误卡），并按
+            # delivered_at 分桶区分两种语义：投不出去（daemon 离线/断连）vs
+            # 投出去了没执行（无回执，daemon 侧静默丢弃）。
+            delivered_run_ids: list[uuid.UUID] = []
+            undelivered_run_ids: list[uuid.UUID] = []
+            for payload, delivered_at in linkable:
                 raw = (payload or {}).get("run_id")
                 try:
-                    run_ids.append(uuid.UUID(str(raw)))
+                    run_id = uuid.UUID(str(raw))
                 except (ValueError, TypeError):
                     # 非 uuid run_id（防御：payload 手工造数/旧形状缺键）——跳过
                     # 联动，指令过期本身不受影响。
@@ -441,20 +445,37 @@ class ControlCommandService:
                         "control_command_gc_invalid_run_id",
                         run_id=repr(raw),
                     )
-            if run_ids:
+                    continue
+                (delivered_run_ids if delivered_at else undelivered_run_ids).append(run_id)
+            now_run = datetime.now(UTC)
+            for run_id_bucket, reason in (
+                (
+                    undelivered_run_ids,
+                    "消息指令 10 分钟内未能送达执行端（daemon 离线或连接中断），"
+                    "本轮自动失败；确认该机器 daemon 在线后重试即可",
+                ),
+                (
+                    delivered_run_ids,
+                    "消息指令已送达执行端但 10 分钟内未被执行（无回执），"
+                    "本轮自动失败；请检查该机器 daemon 状态后重试",
+                ),
+            ):
+                if not run_id_bucket:
+                    continue
                 result = await self._session.execute(
                     update(AgentRun)
                     .where(
-                        AgentRun.id.in_(run_ids),
+                        AgentRun.id.in_(run_id_bucket),
                         AgentRun.status.in_(_INJECT_LINK_RUN_STATUSES),
                     )
                     .values(
                         status="failed",
-                        finished_at=now,
+                        finished_at=now_run,
                         error_code=INJECT_SEND_FAILED_ERROR_CODE,
+                        output_redacted=reason,
                     )
                 )
-                runs_failed = int(result.rowcount or 0)
+                runs_failed += int(result.rowcount or 0)
 
         await self._session.commit()
         if expired or deleted or runs_failed:

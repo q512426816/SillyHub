@@ -118,6 +118,58 @@ class TestListSessionRuns:
         assert completed_item["error_detail"] is None
 
     @pytest.mark.asyncio
+    async def test_returns_failure_summary_from_output_redacted(
+        self, client, auth_headers, db_session
+    ) -> None:
+        """ql-20260831-004：failed run 的 output_redacted 以 failure_summary 透出。
+
+        调度层/系统层失败（撞闸 SESSION_LIMIT_REACHED / inject 过期联动等）的原因
+        daemon/GC 写在 output_redacted 列——error_detail（模型层）为空时前端靠
+        该字段展示失败原因。未写原因的 run 为 null。
+        """
+        admin = await _admin_id(db_session)
+        sid = uuid.uuid4()
+        db_session.add(
+            AgentSession(
+                id=sid,
+                user_id=admin,
+                provider="claude",
+                status="active",
+            )
+        )
+        reason = (
+            "interactive session create failed (SESSION_LIMIT_REACHED): "
+            "active session limit reached: 21 active >= 20 max"
+        )
+        with_reason = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            status="failed",
+            agent_session_id=sid,
+            error_detail=None,
+            started_at=datetime.now(UTC),
+            error_code="interactive_interrupted",
+            output_redacted=reason,
+        )
+        no_reason = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            status="failed",
+            agent_session_id=sid,
+            error_detail=None,
+            started_at=datetime.now(UTC),
+            error_code="interactive_inject_send_failed",
+        )
+        db_session.add_all([with_reason, no_reason])
+        await db_session.commit()
+
+        resp = await client.get(f"/api/daemon/sessions/{sid}/runs", headers=auth_headers)
+        assert resp.status_code == 200, resp.text
+        by_id = {it["id"]: it for it in resp.json()}
+        assert by_id[str(with_reason.id)]["failure_summary"] == reason
+        assert by_id[str(no_reason.id)]["failure_summary"] is None
+
+    @pytest.mark.asyncio
     async def test_returns_config_snapshot_and_usage_fields(
         self, client, auth_headers, db_session
     ) -> None:

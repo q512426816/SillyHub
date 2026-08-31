@@ -11,6 +11,7 @@ import {
   mergeAssistantPiece,
   mergeThinkingPiece,
   buildErrorLogItem,
+  buildSystemFailureItem,
   isAssistantApiErrorText,
   classifyLog,
 } from "../normalize";
@@ -707,5 +708,40 @@ describe("task-08: 模型错误可见性 (buildErrorLogItem / :352 修正 / brow
     const apiLine = result.find((p) => p.log.id === "api1");
     expect(apiLine?.semanticCategory).toBe("error");
     expect(apiLine?.hidden).toBe(false); // 无结构化项取代 → 保留独立显示
+  });
+});
+
+// ql-20260831-004：系统层失败原因（failure_summary / error_code）→ ErrorLogItem。
+// 实机锚：撞闸 SESSION_LIMIT_REACHED 原文 + inject 过期联动 GC 文案。
+describe("buildSystemFailureItem (ql-20260831-004)", () => {
+  it("SESSION_LIMIT_REACHED 撞闸原文 → 可操作中文提示，原文进 raw", () => {
+    const item = buildSystemFailureItem(
+      "interactive_interrupted",
+      "interactive session create failed (SESSION_LIMIT_REACHED): active session limit reached: 21 active >= 20 max",
+    );
+    expect(item).not.toBeNull();
+    expect(item!.message).toBe("新建会话被拒：该机器同时活跃的会话数已达上限");
+    expect(item!.hint).toContain("结束部分旧会话");
+    expect(item!.raw).toContain("SESSION_LIMIT_REACHED");
+  });
+
+  it("普通失败原因文案 → 原文作为 message", () => {
+    const item = buildSystemFailureItem(
+      "interactive_inject_send_failed",
+      "消息指令已送达执行端但 10 分钟内未被执行（无回执），本轮自动失败",
+    );
+    expect(item!.message).toContain("未被执行");
+    expect(item!.raw).toBeNull();
+  });
+
+  it("无 summary 时按 error_code 映射中文；未知码返回 null 走既有兜底", () => {
+    expect(buildSystemFailureItem("interactive_inject_send_failed", null)?.message).toBe(
+      "消息未能送达执行端执行，本轮自动失败",
+    );
+    expect(buildSystemFailureItem("interactive_interrupted", "")?.message).toBe(
+      "本轮对话被中断",
+    );
+    expect(buildSystemFailureItem("some_unknown_code", null)).toBeNull();
+    expect(buildSystemFailureItem(null, null)).toBeNull();
   });
 });

@@ -18913,6 +18913,8 @@ export interface components {
             output_tokens?: number | null;
             /** Ctx Tokens */
             ctx_tokens?: number | null;
+            /** Failure Summary */
+            failure_summary?: string | null;
         };
         /**
          * SessionRuntimeRequest

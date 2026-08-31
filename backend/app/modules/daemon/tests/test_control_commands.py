@@ -78,12 +78,17 @@ async def _insert_row(
     delivered_at: datetime | None = None,
     ack_at: datetime | None = None,
     expires_at: datetime | None = None,
+    payload: dict | None = None,
 ) -> DaemonControlCommand:
-    """直接落一行指定状态的指令（GC / fetch_pending 用例需要精确时钟）。"""
+    """直接落一行指定状态的指令（GC / fetch_pending 用例需要精确时钟）。
+
+    payload 缺省 {"x": 1}（无 run_id，不参与 inject 过期联动）；联动用例显式传
+    ``{"run_id": ...}`` 指向待收敛的 AgentRun。
+    """
     row = DaemonControlCommand(
         runtime_id=runtime_id,
         kind=kind,
-        payload={"x": 1},
+        payload=payload if payload is not None else {"x": 1},
         status=status,
         created_at=created_at or datetime.now(UTC),
         delivered_at=delivered_at,
@@ -406,3 +411,66 @@ class TestGc:
         # acked 已物理删除；剩两行均为 expired；fetch_pending 不再回任何行。
         assert sorted(r.status for r in rows) == ["expired", "expired"]
         assert await svc.fetch_pending(rt.id) == []
+
+    @pytest.mark.asyncio
+    async def test_gc_inject_linkage_writes_failure_reason(self, db_session) -> None:
+        """ql-20260831-004：inject 过期联动判失败时写可读原因到 output_redacted。
+
+        两桶语义不同（经 SessionRunRead.failure_summary 透出到前端错误卡）：
+        - pending 过期（从未送达）→ 「未能送达执行端」；
+        - delivered 未 ack 超时（送达但未执行）→ 「已送达但未被执行」。
+        """
+        from app.modules.agent.model import AgentRun, AgentSession
+
+        rt = await _setup_runtime(db_session)
+        now = datetime.now(UTC)
+        sid = uuid.uuid4()
+        db_session.add(AgentSession(id=sid, user_id=rt.user_id, provider="claude", status="active"))
+        run_undelivered = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            status="pending",
+            agent_session_id=sid,
+        )
+        run_delivered = AgentRun(
+            id=uuid.uuid4(),
+            agent_type="claude_code",
+            status="running",
+            agent_session_id=sid,
+        )
+        db_session.add_all([run_undelivered, run_delivered])
+        # pending 过期（从未投递）→ 未送达桶。
+        await _insert_row(
+            db_session,
+            rt.id,
+            expires_at=now - timedelta(minutes=1),
+            payload={"run_id": str(run_undelivered.id)},
+        )
+        # delivered 未 ack 超 10min → 已送达未执行桶。
+        await _insert_row(
+            db_session,
+            rt.id,
+            status="delivered",
+            delivered_at=now - timedelta(seconds=DELIVERED_ACK_GRACE_SECONDS + 1),
+            payload={"run_id": str(run_delivered.id)},
+        )
+
+        svc = ControlCommandService(db_session)
+        result = await svc.gc(now)
+
+        assert result.expired == 2
+        assert result.runs_failed == 2
+        for run_id, expect_frag in (
+            (run_undelivered.id, "未能送达执行端"),
+            (run_delivered.id, "未被执行"),
+        ):
+            stmt = (
+                select(AgentRun)
+                .where(AgentRun.id == run_id)
+                .execution_options(populate_existing=True)
+            )
+            got = (await db_session.execute(stmt)).scalars().one()
+            assert got.status == "failed"
+            assert got.error_code == "interactive_inject_send_failed"
+            assert got.output_redacted is not None
+            assert expect_frag in got.output_redacted

@@ -110,7 +110,7 @@ SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->
-
+- ql-20260831-004：失败轮错误卡原因透出——session-panel 三处失败轮构造（SSE 终态回补 displayTurns、两条 turn_completed 拉取路径）由「error_detail 为空即『运行失败（无详情）』」升级为逐级兜底：error_detail（模型层 ModelError）→ buildSystemFailureItem（normalize 新增；消费 run.failure_summary（后端映射 output_redacted）+ error_code 中文映射，SESSION_LIMIT_REACHED 撞闸原文识别成可操作提示「结束旧会话/等 30 分钟」）。SessionRunRead（lib/daemon.ts + api-types）同步加 failure_summary。注意：仅 failed 轮消费该字段——成功轮 output_redacted 是 agent 输出摘要。
 <!-- MANUAL_NOTES_END -->
 
 ## 变更索引

@@ -151,5 +151,5 @@ stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->
-
+- ql-20260831-004：run 失败原因透出链打通（实机两案：本机撞闸 SESSION_LIMIT_REACHED 原因只存 output_redacted 前端看不到；生产 wp 机会话 84cf91ab inject 已送达 daemon 但被静默丢弃，GC 判败只有 error_code 无文案）。① SessionRunRead 新增 failure_summary（validation_alias 直映 AgentRun.output_redacted，零查询改动；仅 failed 轮有语义——成功轮该列是 agent 输出摘要，前端勿当失败原因展示）；② control_commands GC inject 过期联动判败按 delivered_at 分桶写可读原因到 output_redacted（未送达=daemon 离线/断连 vs 已送达未执行=无回执）；③ 前端 normalize.buildSystemFailureItem + session-panel 三处失败轮错误卡逐级兜底（error_detail 模型层 → failure_summary → error_code 中文映射）。遗留：daemon 侧 SESSION_INJECT 四条静默丢弃路径（session_not_found/lease_mismatch/missing_fields/no_manager）仍只 warn 不回报，run 仍要等 10 分钟 GC 收敛——后续应在丢弃时立即回报失败带原因。
 <!-- MANUAL_NOTES_END -->

@@ -2508,6 +2508,13 @@ export interface SessionRunRead {
   id: string;
   status: string | null;
   error_code: string | null;
+  /**
+   * 调度层/系统层失败原因（ql-20260831-004）：后端映射 AgentRun.output_redacted
+   * （撞闸 SESSION_LIMIT_REACHED、inject 过期联动、lease 超时等 daemon/GC 写入的
+   * 可读原因）。仅 status=failed 时消费——成功轮该字段是 agent 输出摘要，勿当
+   * 失败原因展示。与 error_detail（模型层 ModelError）正交。
+   */
+  failure_summary: string | null;
   /** 模型层 ModelError（type/code/message/retryable/hint/raw），与 error_code 正交（D-009）。 */
   error_detail: { [key: string]: unknown } | null;
   started_at: string | null;
