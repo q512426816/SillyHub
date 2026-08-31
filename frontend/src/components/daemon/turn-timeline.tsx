@@ -1199,8 +1199,11 @@ function TurnStatusBadge({
     failed: "error",
     killed: "error",
   };
-  // ql-20260621：token 显示。执行中（running/pending）有累积值时显示「输入 N…」
-  // 表明实时统计进行中；终态显示完整「↑in ↓out」。两者皆 null 时不渲染。
+  // ql-20260621：token 显示。执行中（running/pending）有累积值时显示数值，
+  // 未收到（null）显示「执行中…」表明实时统计进行中；终态显示完整「↑in ↓out」
+  //（终态 null=旧 daemon 无数据，与输出侧同口径降级「↑0 / ↓0」）。两者皆 null
+  // 时不渲染。ql-20260831-010：输入侧 null 运行中不再显示假「↑0」（GLM 流式
+  // 期间 message_start 不携带输入，误导用户以为输入为 0），对齐输出侧「执行中…」。
   // 规范化 undefined → null，防御上游 env.input_tokens / turn.inputTokens 缺失。
   const inTokens = inputTokens ?? null;
   const outTokens = outputTokens ?? null;
@@ -1212,7 +1215,11 @@ function TurnStatusBadge({
       {showTokens && (
         <span className="ml-1.5 text-muted-foreground/80">
           {" · "}
-          {inTokens !== null ? `↑${inTokens.toLocaleString("zh-CN")}` : "↑0"}
+          {inTokens !== null
+            ? `↑${inTokens.toLocaleString("zh-CN")}`
+            : isLive
+              ? "↑执行中…"
+              : "↑0"}
           {" "}
           {outTokens !== null
             ? `↓${outTokens.toLocaleString("zh-CN")}`

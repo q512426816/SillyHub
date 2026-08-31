@@ -346,3 +346,19 @@
 根因：① ql-20260831-002-f683 在 _onResult 的 _runNotifyChain 前加了无条件 await _flushTerminalUsage——空转 await 也推迟一个 microtask，破坏 ql-20260825-f6#4「空链时 onTurnResult 同步直调」契约（emitResult 后同步断言的 8 用例全挂）；② ql-20260831-001-6dde 恢复链活会话守卫（running/pendingInject 抛 SessionBusyError）与 ql-20260823-006 僵尸静默驱逐语义冲突——僵尸条目恰是 running 态，被守卫拦成 SESSION_BUSY；③ test_cleanup.py 两处 type: ignore[method-assign] 在 CI 的 uv 锁定环境（较新的 sqlalchemy/mypy 组合）下判定为多余
 方案：① _onResult 加 _hasPendingTerminalUsage 同步预判，有待发 usage 才 await 补发（补发→通知顺序不变，无 usage 恢复同步路径）；② 守卫收窄为同 lease 才拦——backend reopen_session 恒建新 lease 并随 SESSION_RESUME 下发（claim_token 亦重置），lease 失配即旧 lease 已被 backend 判死的孤儿工作，running 僵尸也静默驱逐（否则真僵尸永远 SESSION_BUSY 重启死循环）；同 lease running 才是真「恢复在途新起 turn」，维持 SessionBusyError（busy-check 守卫 3 用例同 lease 构造不受影响）；③ 删两处多余 ignore
 结果：daemon 定向 17 文件 202 用例绿（含原 9 失败 + busy-check/daemon-recovery-boot 守卫回归）+ tsc 0；backend mypy app 全量 809 文件 0 错 + ruff/format 过 + test_cleanup 5 用例绿；interactive.md 守卫条目同步 lease 判据
+
+## ql-20260831-009-c751 | 2026-08-31 12:56:17 | 修复会话用量统计虚增：daemon 终态上报的 modelUsage 是 streaming-input 会话跨轮累计快照，被当增量存库求和导致多轮会话用量虚增，在 daemon.ts 做快照差分化
+状态：进行中
+关联变更：（无）
+文件：sillyhub-daemon/src/daemon.ts
+
+## ql-20260831-010-b7ec | 2026-08-31 12:57:02 | 轮次徽标输入侧 null 运行中改「↑执行中…」消假 0
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/turn-timeline.tsx（TurnStatusBadge 输入 null+isLive→「↑执行中…」）
+- frontend/src/components/daemon/__tests__/turn-timeline-session-input-bar.test.tsx（补运行中 null 输入回归用例）
+需求：轮次徽标输入侧 null 运行中改「↑执行中…」消假 0
+根因：旧实现 inputTokens null 时硬编码「↑0」误导；根因是 GLM 流式期间 message_start 不携带输入而 daemon 只从该事件取输入，轮内输入常 null（输出经 message_delta 实时累加正常显示）
+方案：turn-timeline.tsx TurnStatusBadge 输入分支对齐输出侧 isLive 处理：null+运行中→「↑执行中…」，终态 null 保持「↑0」旧口径；补回归用例断言运行中 null 输入显示「↑执行中…」且无「↑0」；changelog 追加
+结果：vitest turn-timeline-session-input-bar 22 用例全绿（含新用例），相邻 4 文件 18 用例回归绿，tsc --noEmit exit 0

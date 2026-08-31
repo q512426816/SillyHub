@@ -94,6 +94,18 @@ describe("TurnTimeline（task-13 抽取共享子组件）", () => {
     expect(screen.getByText(/正在思考…/)).toBeInTheDocument();
   });
 
+  it("运行中输入未收到（null）：徽标显示「↑执行中…」不显示假「↑0」（ql-20260831-010）", () => {
+    // GLM 流式期间 message_start 不携带 input——daemon 只从该事件取输入，
+    // 轮内 inputTokens 常为 null 而输出已实时累加（真实场景：↑执行中… ↓7,081）。
+    setupTimeline({
+      turns: [makeTurn({ status: "running", inputTokens: null, outputTokens: 7081 })],
+    });
+    expect(screen.getByText(/↑执行中…/)).toBeInTheDocument();
+    expect(screen.getByText(/↓7,081/)).toBeInTheDocument();
+    // 假 0 不再出现（旧实现 null 硬编码「↑0」误导）
+    expect(screen.queryByText(/↑0/)).toBeNull();
+  });
+
   it("viewMode=all 渲染过程项（思考折叠块 + 工具行），conversation 隐藏", () => {
     const rerender = setupTimeline({
       turns: [
