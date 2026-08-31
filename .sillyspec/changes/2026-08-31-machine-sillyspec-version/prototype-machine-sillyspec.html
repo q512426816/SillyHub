@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<title>机器卡 · sillyspec 版本与升级 · 原型 — machine-sillyspec-version</title>
+<style>
+  :root{
+    --primary:#7C3AED;--primary-soft:#EDE9FE;
+    --bg:#FAF5FF;--fg:#1E1B4B;--card:#FFFFFF;--muted:#ECEEF9;--muted-fg:#475569;--faint:#94A3B8;
+    --border:#DDD6FE;--radius:12px;
+    --success:#059669;--success-soft:#D1FAE5;--success-text:#065F46;
+    --warning:#D97706;--warning-soft:#FEF3C7;--warning-text:#92400E;
+    --info:#2563EB;--info-soft:#DBEAFE;--info-text:#1E40AF;
+    --danger:#DC2626;--danger-soft:#FEE2E2;--danger-text:#991B1B;
+    --font-sans:Inter,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  }
+  [data-theme="dark"]{
+    --primary:#A78BFA;--primary-soft:rgba(167,139,250,.16);
+    --bg:#0B0A1A;--fg:#E7E5F4;--card:#151228;--muted:#1E1B33;--muted-fg:#A5A3C2;--faint:#6D6A8E;
+    --border:#2B2747;
+    --success:#34D399;--success-soft:rgba(52,211,153,.14);--success-text:#6EE7B7;
+    --warning:#FBBF24;--warning-soft:rgba(251,191,36,.14);--warning-text:#FCD34D;
+    --info:#60A5FA;--info-soft:rgba(96,165,250,.14);--info-text:#93C5FD;
+    --danger:#F87171;--danger-soft:rgba(248,113,113,.14);--danger-text:#FCA5A5;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font-sans);background:var(--bg);color:var(--fg);padding:24px;display:flex;flex-direction:column;gap:16px;align-items:center}
+  h1{font-size:17px;font-weight:600}
+  .sub{font-size:13px;color:var(--muted-fg);max-width:900px;line-height:1.7}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:16px;width:100%;max-width:1240px}
+  .case{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+  .case h2{font-size:12.5px;font-weight:600;padding:8px 14px;border-bottom:1px solid var(--border);background:var(--muted);display:flex;justify-content:space-between;align-items:center}
+  .tag{font-size:11px;padding:1px 8px;border-radius:999px;background:var(--primary-soft);color:var(--primary)}
+  .tag.exist{background:var(--muted);color:var(--muted-fg)}
+  .card{padding:14px 18px}
+  /* ── 机器卡折叠头骨架（对齐 machine-card.tsx 真实布局的简化版） ── */
+  .head{display:flex;align-items:center;gap:14px;cursor:pointer}
+  .icon{width:42px;height:42px;border-radius:8px;background:var(--success-soft);color:var(--success);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+  .icon.off{background:var(--muted);color:var(--faint)}
+  .title{flex:1;min-width:0}
+  .row1{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .mname{font-size:15px;font-weight:700}
+  .badge{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;padding:2px 9px;border-radius:999px;background:var(--success-soft);color:var(--success-text)}
+  .badge.off{background:var(--muted);color:var(--muted-fg)}
+  .badge .d{width:6px;height:6px;border-radius:50%;background:currentColor}
+  .row2{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:6px;font-size:11.5px;color:var(--muted-fg)}
+  /* sillyspec 版本徽标：三种形态 */
+  .sp{display:inline-flex;align-items:center;gap:5px}
+  .sp-ok{color:var(--muted-fg)}
+  .sp-out{color:var(--warning-text);font-weight:600}
+  .sp-out .arrow{font-weight:700}
+  .sp-none{color:var(--danger-text);font-weight:600}
+  .ver-tag{font-size:10px;font-weight:700;padding:0 6px;border-radius:999px;background:var(--warning-soft);color:var(--warning-text);margin-left:4px}
+  .actions{display:flex;align-items:center;gap:8px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
+  .pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;padding:4px 11px;border-radius:999px}
+  .pill.cost{background:var(--primary-soft);color:var(--primary)}
+  .pill.rt{background:var(--muted);color:var(--muted-fg)}
+  .pill.rt b{color:var(--success)}
+  .btn{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--border);background:var(--card);color:var(--muted-fg);padding:4px 11px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer}
+  .btn:hover{background:var(--muted)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .btn.sp-up{color:var(--warning-text);border-color:var(--warning)}   /* 落后时高亮 */
+  .btn.sp-up.hot{background:var(--warning-soft)}                        /* 升级中视觉 */
+  .btn.danger{color:var(--danger-text)}
+  .chev{color:var(--faint);font-size:15px}
+  /* 横幅（复用 pending_update 横幅槽位语义） */
+  .banner{display:flex;align-items:flex-start;gap:8px;padding:8px 18px;font-size:12px;line-height:1.55;border-top:1px solid var(--border)}
+  .banner .icon{font-size:13px;width:auto;height:auto;border-radius:0;background:transparent;color:inherit;display:inline}
+  .banner small{display:block;opacity:.8;font-size:11px;margin-top:2px}
+  .b-run{background:var(--info-soft);color:var(--info-text)}
+  .b-defer{background:var(--warning-soft);color:var(--warning-text)}
+  .b-ok{background:var(--success-soft);color:var(--success-text)}
+  .b-fail{background:var(--danger-soft);color:var(--danger-text)}
+  .spin{display:inline-block;animation:spin 1.2s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .legend{font-size:12.5px;color:var(--muted-fg);max-width:1240px;line-height:1.9}
+  code{background:var(--muted);padding:1px 6px;border-radius:4px;font-size:12px}
+  .themebar{display:flex;gap:8px;align-items:center;font-size:12.5px;color:var(--muted-fg)}
+</style>
+</head>
+<body>
+  <h1>机器卡 · sillyspec 版本显示与升级（machine-sillyspec-version 原型）</h1>
+  <div class="sub">机器列表每台机器新增 <code>sillyspec</code> 版本徽标与「升级 sillyspec」操作。数据链：daemon 探测本机版本与 npm 最新版 → 注册/心跳上报 → 机器卡显示；升级 = daemon 执行 <code>npm install -g sillyspec@latest</code>，忙时（有会话/任务运行）自动推迟不打断。标注「新增」的元素为本变更引入，「已有」为现状保留。</div>
+  <div class="themebar">主题切换（AI-native 双主题）：
+    <button class="btn" onclick="document.documentElement.dataset.theme='light'">light</button>
+    <button class="btn" onclick="document.documentElement.dataset.theme='dark'">dark</button>
+  </div>
+
+  <div class="grid">
+    <div class="case">
+      <h2>① 版本已是最新 <span class="tag">新增</span></h2>
+      <div class="card">
+        <div class="head">
+          <span class="icon">🖥</span>
+          <div class="title">
+            <div class="row1"><span class="mname">qinyi-DESKTOP</span><span class="badge"><span class="d"></span>在线</span></div>
+            <div class="row2">
+              <span>windows · x64</span><span>心跳 刚刚</span><span>daemon 0.1.1 <code>#c2860f1a</code></span>
+              <span class="sp sp-ok">sillyspec 3.27.11</span>
+            </div>
+          </div>
+          <div class="actions">
+            <span class="pill cost">7天费用 $1.24</span>
+            <span class="pill rt"><b>2</b>/2 runtime</span>
+            <button class="btn">✏️ 别名</button>
+            <button class="btn">↻ 升级 daemon</button>
+            <button class="btn sp-up">⬆ 升级 sillyspec</button>
+            <button class="btn">💾 清理</button>
+            <button class="btn danger">🗑 删除</button>
+            <span class="chev">›</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="case">
+      <h2>② 版本落后（高亮提示可升级） <span class="tag">新增</span></h2>
+      <div class="card">
+        <div class="head">
+          <span class="icon">🖥</span>
+          <div class="title">
+            <div class="row1"><span class="mname">mac-mini</span><span class="badge"><span class="d"></span>在线</span></div>
+            <div class="row2">
+              <span>darwin · arm64</span><span>心跳 8 秒前</span><span>daemon 0.1.1 <code>#c2860f1a</code></span>
+              <span class="sp sp-out">sillyspec 3.26.15 <span class="arrow">→</span> 3.27.11<span class="ver-tag">有新版本</span></span>
+            </div>
+          </div>
+          <div class="actions">
+            <span class="pill cost">7天费用 $0.86</span>
+            <span class="pill rt"><b>1</b>/1 runtime</span>
+            <button class="btn">✏️ 别名</button>
+            <button class="btn">↻ 升级 daemon</button>
+            <button class="btn sp-up" title="立即升级到 3.27.11">⬆ 升级 sillyspec</button>
+            <button class="btn">💾 清理</button>
+            <button class="btn danger">🗑 删除</button>
+            <span class="chev">›</span>
+          </div>
+        </div>
+      </div>
+      <div style="padding:8px 14px;font-size:11.5px;color:var(--muted-fg);border-top:1px dashed var(--border)">落后时版本徽标变橙色并展示「当前 → 最新」，升级按钮同步橙色高亮；已是最新则回到底色（见①）。</div>
+    </div>
+
+    <div class="case">
+      <h2>③ 升级进行中 <span class="tag">新增</span></h2>
+      <div class="card">
+        <div class="head">
+          <span class="icon">🖥</span>
+          <div class="title">
+            <div class="row1"><span class="mname">mac-mini</span><span class="badge"><span class="d"></span>在线</span></div>
+            <div class="row2">
+              <span>darwin · arm64</span><span>心跳 3 秒前</span><span>daemon 0.1.1 <code>#c2860f1a</code></span>
+              <span class="sp sp-out">sillyspec 3.26.15 <span class="arrow">→</span> 3.27.11</span>
+            </div>
+          </div>
+          <div class="actions">
+            <span class="pill cost">7天费用 $0.86</span>
+            <span class="pill rt"><b>1</b>/1 runtime</span>
+            <button class="btn">✏️ 别名</button>
+            <button class="btn">↻ 升级 daemon</button>
+            <button class="btn sp-up hot" disabled title="升级中…"><span class="spin">⬆</span> 升级中…</button>
+            <button class="btn">💾 清理</button>
+            <button class="btn danger">🗑 删除</button>
+            <span class="chev">›</span>
+          </div>
+        </div>
+        <div class="banner b-run"><span class="icon spin">↻</span><div>正在升级 sillyspec（3.26.15 → 3.27.11）<small>执行 npm install -g sillyspec@latest，通常 10～60 秒；完成后版本号自动刷新</small></div></div>
+      </div>
+    </div>
+
+    <div class="case">
+      <h2>④ 机器忙 · 升级已推迟 <span class="tag">新增</span></h2>
+      <div class="card">
+        <div class="head">
+          <span class="icon">🖥</span>
+          <div class="title">
+            <div class="row1"><span class="mname">qinyi-DESKTOP</span><span class="badge"><span class="d"></span>在线</span></div>
+            <div class="row2">
+              <span>windows · x64</span><span>心跳 5 秒前</span><span>daemon 0.1.1 <code>#c2860f1a</code></span>
+              <span class="sp sp-out">sillyspec 3.26.15 <span class="arrow">→</span> 3.27.11</span>
+            </div>
+          </div>
+          <div class="actions">
+            <span class="pill cost">7天费用 $2.05</span>
+            <span class="pill rt"><b>3</b>/3 runtime</span>
+            <button class="btn">✏️ 别名</button>
+            <button class="btn">↻ 升级 daemon</button>
+            <button class="btn sp-up hot" disabled title="等待空闲执行">⏳ 等待空闲</button>
+            <button class="btn">💾 清理</button>
+            <button class="btn danger">🗑 删除</button>
+            <span class="chev">›</span>
+          </div>
+        </div>
+        <div class="banner b-defer"><span class="icon">⏳</span><div>机器忙（有会话/任务运行中），升级已排队等待空闲自动执行（每 30s 复查）<small>不打断运行中的任务；新版本 3.27.11 已就绪（当前 3.26.15）</small></div></div>
+      </div>
+    </div>
+
+    <div class="case">
+      <h2>⑤ 升级成功（10 分钟内可见） <span class="tag">新增</span></h2>
+      <div class="card">
+        <div class="head">
+          <span class="icon">🖥</span>
+          <div class="title">
+            <div class="row1"><span class="mname">qinyi-DESKTOP</span><span class="badge"><span class="d"></span>在线</span></div>
+            <div class="row2">
+              <span>windows · x64</span><span>心跳 刚刚</span><span>daemon 0.1.1 <code>#c2860f1a</code></span>
+              <span class="sp sp-ok">sillyspec 3.27.11</span>
+            </div>
+          </div>
+          <div class="actions">
+            <span class="pill cost">7天费用 $1.24</span>
+            <span class="pill rt"><b>2</b>/2 runtime</span>
+            <button class="btn">✏️ 别名</button>
+            <button class="btn">↻ 升级 daemon</button>
+            <button class="btn sp-up">⬆ 升级 sillyspec</button>
+            <button class="btn">💾 清理</button>
+            <button class="btn danger">🗑 删除</button>
+            <span class="chev">›</span>
+          </div>
+        </div>
+        <div class="banner b-ok"><span class="icon">✓</span><div>sillyspec 已升级到 3.27.11<small>升级完成于 14:32:05；横幅展示 10 分钟后自动消失，版本徽标常驻</small></div></div>
+      </div>
+    </div>
+
+    <div class="case">
+      <h2>⑥ 升级失败（显示原因） <span class="tag">新增</span></h2>
+      <div class="card">
+        <div class="head">
+          <span class="icon">🖥</span>
+          <div class="title">
+            <div class="row1"><span class="mname">dev-vm</span><span class="badge"><span class="d"></span>在线</span></div>
+            <div class="row2">
+              <span>linux · x64</span><span>心跳 12 秒前</span><span>daemon 0.1.1 <code>#c2860f1a</code></span>
+              <span class="sp sp-out">sillyspec 3.26.15 <span class="arrow">→</span> 3.27.11</span>
+            </div>
+          </div>
+          <div class="actions">
+            <span class="pill cost">7天费用 $0.12</span>
+            <span class="pill rt"><b>1</b>/1 runtime</span>
+            <button class="btn">✏️ 别名</button>
+            <button class="btn">↻ 升级 daemon</button>
+            <button class="btn sp-up" title="重试升级">⬆ 重试升级</button>
+            <button class="btn">💾 清理</button>
+            <button class="btn danger">🗑 删除</button>
+            <span class="chev">›</span>
+          </div>
+        </div>
+        <div class="banner b-fail"><span class="icon">✕</span><div>sillyspec 升级失败：npm install 退出码 1（network timeout）<small>可点击「重试升级」再次尝试；daemon 每小时自动检查也会自动重试</small></div></div>
+      </div>
+    </div>
+
+    <div class="case">
+      <h2>⑦ sillyspec 未安装 <span class="tag">新增</span></h2>
+      <div class="card">
+        <div class="head">
+          <span class="icon">🖥</span>
+          <div class="title">
+            <div class="row1"><span class="mname">new-host</span><span class="badge"><span class="d"></span>在线</span></div>
+            <div class="row2">
+              <span>linux · x64</span><span>心跳 20 秒前</span><span>daemon 0.1.1 <code>#c2860f1a</code></span>
+              <span class="sp sp-none">sillyspec 未安装</span>
+            </div>
+          </div>
+          <div class="actions">
+            <span class="pill cost">7天费用 $0.00</span>
+            <span class="pill rt"><b>1</b>/1 runtime</span>
+            <button class="btn">✏️ 别名</button>
+            <button class="btn">↻ 升级 daemon</button>
+            <button class="btn sp-up" title="远程安装最新版 sillyspec">⬇ 安装 sillyspec</button>
+            <button class="btn">💾 清理</button>
+            <button class="btn danger">🗑 删除</button>
+            <span class="chev">›</span>
+          </div>
+        </div>
+        <div style="padding:8px 14px;font-size:11.5px;color:var(--muted-fg);border-top:1px dashed var(--border)">daemon 启动 preflight 本会自动安装；若启动时 npm 不可达则保持未安装态，此处可远程补装（安装走同一升级链路）。</div>
+      </div>
+    </div>
+
+    <div class="case">
+      <h2>⑧ 离线机器 <span class="tag exist">已有</span> <span class="tag">新增徽标</span></h2>
+      <div class="card">
+        <div class="head">
+          <span class="icon off">🖥</span>
+          <div class="title">
+            <div class="row1"><span class="mname">old-laptop</span><span class="badge off"><span class="d"></span>离线</span></div>
+            <div class="row2">
+              <span>windows · x64</span><span>心跳 3 天前</span><span>daemon 0.1.0 <code>#b243c765</code></span>
+              <span class="sp sp-out">sillyspec 3.26.8 <span class="arrow">→</span> 3.27.11</span>
+            </div>
+          </div>
+          <div class="actions">
+            <span class="pill rt"><b>0</b>/1 runtime</span>
+            <button class="btn" disabled title="离线，无法升级">↻ 升级 daemon</button>
+            <button class="btn sp-up" disabled title="离线，无法升级；下次启动时会自动升级">⬆ 升级 sillyspec</button>
+            <button class="btn danger">🗑 删除</button>
+            <span class="chev">›</span>
+          </div>
+        </div>
+        <div style="padding:8px 14px;font-size:11.5px;color:var(--muted-fg);border-top:1px dashed var(--border)">离线机器升级按钮禁用（同「升级 daemon」语义）；其下次启动时 preflight 会自动把 sillyspec 升到最新，无需在线干预。版本徽标保留最后一次上报值。</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <b>交互与数据说明</b><br>
+    · 版本徽标：<code>sillyspec &lt;本机版本&gt;</code>；知道最新版且落后时显示 <code>当前 → 最新 +「有新版本」</code> 橙色高亮；未安装显示红色「未安装」。<br>
+    · 「升级 sillyspec」按钮：离线 / 升级中 / 等待空闲时禁用（title 说明原因）；失败后文案变「重试升级」；未安装时文案变「安装 sillyspec」。<br>
+    · 状态横幅（升级中/等待空闲/成功/失败）复用现有 pending_update 横幅槽位样式，刷新走机器列表既有 15s 轮询——升级完成后版本徽标与横幅自动更新。<br>
+    · daemon 每小时自动检查 npm 最新版并自动升级（忙时推迟，同④）；手动按钮用于立即升级。<br>
+    · 权限：与「升级 daemon / 清理 / 删除」一致，仅机器负责人与运行时管理员可操作。
+  </div>
+</body>
+</html>
