@@ -133,3 +133,39 @@ describe('checkWorkspaceBoundCwd — POSIX 绝对路径形态（双平台均可�
     expect(v.message).toContain('/home/x/missing');
   });
 });
+
+// ql-20260831-006：工作区范围直接放行——workspaceRoot 提供且 cwd 在工作区根内
+// 时跳过机器白名单（生产实证：wp 机工作区根 E:\sgm 不在机器白名单，会话被
+// cwd_forbidden 误拒）；存在性检查仍兜错机（错机上目录必不存在）。
+describe('checkWorkspaceBoundCwd — 工作区范围放行（ql-20260831-006）', () => {
+  it('工作区根内 + 机器白名单不含 + 存在 → 放行（不因白名单拒绝）', () => {
+    // 生产锚：cwd 即工作区根（非借用路径 cwd === rootPath），roots 也不含它。
+    const v = checkWorkspaceBoundCwd(P.root, true, [P.outside], P.root);
+    expect(v).toEqual({ ok: true });
+  });
+
+  it('工作区根的子目录 + 机器白名单为空数组 → 放行（旧口径空 roots 必拒）', () => {
+    const v = checkWorkspaceBoundCwd(P.inside, true, [], P.root);
+    expect(v).toEqual({ ok: true });
+  });
+
+  it('工作区根内但不存在 → cwd_not_found（错机试金石保留）', () => {
+    const v = checkWorkspaceBoundCwd(P.inside, false, [P.root], P.root);
+    const r = expectRejected(v);
+    expect(r.code).toBe('cwd_not_found');
+    expect(r.message).toContain('拒绝自动创建目录');
+  });
+
+  it('cwd 不在工作区根内 → 回落机器白名单口径（越界仍 forbidden）', () => {
+    const v = checkWorkspaceBoundCwd(P.outside, true, [P.root], P.inside);
+    const r = expectRejected(v);
+    expect(r.code).toBe('cwd_forbidden');
+    expect(r.message).toContain('超出本机 allowed_roots 白名单');
+  });
+
+  it('不传 workspaceRoot → 行为零回归（纯白名单口径不变）', () => {
+    expect(checkWorkspaceBoundCwd(P.inside, true, [P.root])).toEqual({ ok: true });
+    const r = expectRejected(checkWorkspaceBoundCwd(P.inside, true, [P.outside]));
+    expect(r.code).toBe('cwd_forbidden');
+  });
+});

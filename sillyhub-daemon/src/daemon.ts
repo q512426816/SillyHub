@@ -5917,6 +5917,10 @@ export class Daemon {
         workspaceBoundCwd,
         cwdExists,
         this._effectiveAllowedRoots(),
+        // ql-20260831-006：按工作区范围直接放行——非借用路径 cwd 恒等于
+        // rawRootPath（工作区绑定根），机器白名单不再拦截工作区目录（错机
+        // 保护由存在性检查 cwd_not_found 承担）。
+        rawRootPath,
       );
       if (!verdict.ok) {
         this._logger.error('interactive_cwd_guard_rejected', {

@@ -90,4 +90,5 @@ RPC handler 注册: list_dir / host_fs.* / get_spec_bundle
 
 <!-- MANUAL_NOTES_START -->
 - ql-20260831-005：SESSION_INJECT 四条静默丢弃路径改为立即回报 run failed（实机案：生产 wp 机会话 84cf91ab——inject delivered 后被 _routeSessionControl 校验丢弃只 warn，run 挂 pending 10 分钟才被 GC 用笼统 interactive_inject_send_failed 收敛，丢弃原因永不到前端）。新增 _reportInjectDropped(raw, reason)：payload 自带 run_id/lease_id/claim_token 三件齐才上报（P2b 同款 notifyRunResult error_during_execution+result_summary，summary 落 output_redacted 经 SessionRunRead.failure_summary 透出，接 ql-20260831-004 链）；缺 run_id/claim_token 仅 warn（backend 10min GC 兜底仍在）。接入点：no_manager / session_not_found（重试后）/ lease_mismatch / missing_fields（仅 run_id 在时），INTERRUPT/END 的 not_found 是良性终态收敛维持纯 warn。
+- ql-20260831-006：cwd 守卫（interactive-cwd-guard / checkWorkspaceBoundCwd，2026-08-28-fix-cross-machine-worker-dispatch task-05 引入）加 workspaceRoot 可选参数——工作区绑定会话 cwd 落在工作区根内（复用 assertWithinAllowedRoots 同一 containment 口径）时跳过机器 allowed_roots 白名单，存在性检查（错机试金石）保留。用户决策：默认工作目录在工作区内按工作区范围直接放行；实机案：wp 机会话 84cf91ab 首轮被 cwd_forbidden 拒——工作区 sgm 根 E:\sgm 不在机器白名单，主会话没起来导致后续 inject 全丢弃（与 005 同案两因）。daemon.ts 调用点传 rawRootPath（非借用路径 cwd 恒等于它）；不传参数行为零回归。
 <!-- MANUAL_NOTES_END -->

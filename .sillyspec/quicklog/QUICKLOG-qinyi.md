@@ -319,3 +319,12 @@
 根因：daemon 四条丢弃路径只 warn 不回报，run 挂 pending 等 10 分钟 GC 用笼统 interactive_inject_send_failed 收敛，丢弃原因永不到前端（实机案生产 wp 机 84cf91ab）
 方案：_routeSessionControl 四路径接入 _reportInjectDropped：payload 自带 run_id/lease_id/claim_token 三件齐时 notifyRunResult 失败带中文原因（P2b 同款），summary 经 failure_summary 透出；不齐仅 warn 由 GC 兜底；新增 daemon-inject-drop-report.test.ts 六用例；daemon.md 同步
 结果：新测试 6 绿；回归 resume-route/ws-session-control/kind-dispatch/control-dispatcher 55 绿 + interactive-bridge 32 绿；tsc 0 错
+
+## ql-20260831-006-c089 | 2026-08-31 11:27:57 | cwd 守卫工作区范围直接放行（修 wp 机工作区会话被白名单误拒）
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/interactive-cwd-guard.ts, sillyhub-daemon/tests/interactive-cwd-guard.test.ts
+需求：cwd 守卫工作区范围直接放行（修 wp 机工作区会话被白名单误拒）
+根因：工作区绑定会话的 cwd 即工作区根（非借用路径 cwd 恒等于 rootPath），机器白名单没配工作区目录时主会话/分身全被 cwd_forbidden 拒（生产 wp 机 84cf91ab：E:\sgm 是工作区 sgm 根却不在机器白名单）
+方案：checkWorkspaceBoundCwd 加 workspaceRoot 可选参数——cwd 在工作区根内（assertWithinAllowedRoots 同口径）跳过机器白名单，存在性检查保留错机保护；daemon.ts 调用点传 rawRootPath；新增 5 用例；daemon.md 备注
+结果：守卫测试 16 绿（新增 5）；回归 bridge+inject-drop 38 绿；tsc 0
