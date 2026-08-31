@@ -1097,6 +1097,26 @@ export const LEASE_POLL_SKIP_MS = 90_000;
 // 阈值取 90s 轮询判据 + 30s ping 周期 + 缓冲。常量导出便于测试注入时间。
 export const WS_STALE_REAP_MS = 120_000;
 
+// ql-20260831-006（quick）：SESSION_INJECT 早到（daemon create 未写 store）时的
+// 分离式等待窗口。backend 等 ready 仅 8s 即超时 fallback 发 inject，而 daemon
+// create 全链（skills 拷贝 / MCP bundle 预取 / claude spawn 前置步骤）实机可达
+// ~31s（会话 52893639：inject 到达与 store 写入差 23s）——原 3×100ms 短重试窗口
+// 耗尽即丢弃，叠加 ql-20260831-005「丢弃即报 run failed」把慢启动竞态变成必死。
+// 60s 默认覆盖实测慢启动 ~2.5x 余量；真不存在的会话（daemon 重启丢失等）超时后
+// 仍走丢弃上报（比旧 005 前的 10min backend GC 快一个量级）。env 可调供测试。
+export const DEFAULT_INJECT_WAIT_SESSION_MS = 60_000;
+
+/** inject 早到等待的轮询间隔（原 3×100ms 重试同节奏）。 */
+const INJECT_WAIT_POLL_MS = 100;
+
+/** 读取等待窗口（env SILLYHUB_INJECT_WAIT_SESSION_MS，非法/缺省回落默认；逐次读取便于测试覆写）。 */
+export function injectWaitSessionMs(): number {
+  const raw = process.env.SILLYHUB_INJECT_WAIT_SESSION_MS;
+  if (raw === undefined || raw === '') return DEFAULT_INJECT_WAIT_SESSION_MS;
+  const v = Number.parseInt(raw, 10);
+  return Number.isFinite(v) && v >= 0 ? v : DEFAULT_INJECT_WAIT_SESSION_MS;
+}
+
 // ── task-08（design A5 / FR-04）：recover 网络类失败重试退避 + 超龄清理常量 ────
 //
 // _recoverOneSession 遇 recover HTTP 网络类失败（请求未达/超时/5xx——HubHttpError
@@ -5319,18 +5339,22 @@ export class Daemon {
       return;
     }
 
-    // P0 修复（2026-08-26，真实派团队 E2E 发现）：SESSION_INJECT 与 create 写
-    // store 存在竞态——backend 等 ready（8s 超时 fallback 发 inject）可能在
-    // daemon create 流程完成前到达（特别是 ready 上报慢/超时时），session_not_found
-    // 直接丢弃 → 首轮 prompt 丢失（靠 10s firstPrompt fallback 兜底裸 metadata
-    // 版，简报丢失）。修：SESSION_INJECT 遇 not_found 短重试 3 次×100ms（create
-    // 通常毫秒级完成，重试窗口覆盖足够）；其余控制消息维持原语义不重试。
+    // ql-20260831-006（quick，替代原 3×100ms 短重试）：SESSION_INJECT 与 create
+    // 写 store 的竞态窗口远大于原重试覆盖——backend 等 ready 仅 8s 即 fallback 发
+    // inject，daemon create 实机可 ~31s（Windows 冷启动，会话 52893639 实证），
+    // 短重试耗尽即丢弃 + 005 丢弃即报失败 → 会话必死。修：not_found 时转
+    // _awaitSessionThenRoute 分离式等待（轮询至窗口上限，会话出现后重入本方法
+    // 正常消费，超时才丢弃上报），handler 即刻返回不阻塞 WS/补拉分发批。其余
+    // 控制消息（INTERRUPT/END）维持原语义不等待（not_found 为良性终态收敛）。
     if (msgType === MSG.SESSION_INJECT) {
-      for (let attempt = 0; attempt < 3; attempt++) {
-        if (this._sessionManager!.get(sessionId)) break;
-        if (attempt < 2) {
-          await new Promise((r) => setTimeout(r, 100));
-        }
+      const earlyState = this._sessionManager.get(sessionId);
+      if (!earlyState) {
+        this._logger.info('inject_wait_session_parked', {
+          session_id: sessionId,
+          wait_ms: injectWaitSessionMs(),
+        });
+        void this._awaitSessionThenRoute(sessionId, raw);
+        return;
       }
     }
     const state = this._sessionManager.get(sessionId);
@@ -5339,14 +5363,9 @@ export class Daemon {
         type: msgType,
         session_id: sessionId,
       });
-      // ql-20260831-005：INJECT 丢弃即回报（同 no_manager 注释；INTERRUPT/END
-      // 的 not_found 是良性终态收敛——会话已不在，无 run 可失败，维持纯 warn）。
-      if (msgType === MSG.SESSION_INJECT) {
-        await this._reportInjectDropped(
-          raw,
-          'daemon 本地无该会话状态（会话可能已结束、或 daemon 重启后未恢复），消息未被处理',
-        );
-      }
+      // ql-20260831-006：INJECT 的 not_found 已在上方分流到 _awaitSessionThenRoute
+      // 等待，此处仅非 INJECT 控制消息可达——not_found 是良性终态收敛（会话已
+      // 不在，无 run 可失败），维持纯 warn。
       return;
     }
     if (state.leaseId !== leaseId) {
@@ -5431,6 +5450,58 @@ export class Daemon {
         this._logger.warn('session_control_unknown_type', { type: msgType });
       }
     }
+  }
+
+  /**
+   * ql-20260831-006（quick）：SESSION_INJECT 早到（daemon create 尚未写 store）时
+   * 的分离式等待。
+   *
+   * 实机案（本地会话 52893639）：backend 等 ready 仅 8s 即超时 fallback 发
+   * inject，daemon create 全链实机 ~31s（Windows 冷启动 + skills 拷贝 / MCP
+   * bundle 预取），inject 到达与 store 写入差 23s——原 3×100ms 同步重试耗尽即
+   * 丢弃，叠加 005「丢弃即报 run failed」把慢启动竞态变成会话必死。修：not_found
+   * 时由 _routeSessionControl 分流到本方法，轮询等待（默认 60s，env
+   * SILLYHUB_INJECT_WAIT_SESSION_MS 可调）store 出现该会话后重入
+   * _routeSessionControl 走正常消费（lease 校验 / claim_token 刷新 / 附件全链），
+   * 超时才 _reportInjectDropped（005 语义保留，只是延后到确认真等不到）。
+   *
+   * 分离式（void 调用、handler 即刻返回）而非同步 await：WS 案本就 fire-and-forget，
+   * 补拉批（pullAndConsume 逐条 await）不能被 60s 等待阻塞同批后续指令（如
+   * permission_response 是用户审批延迟敏感路径）。分离调用绕过了 dispatcher 的
+   * handler_error catch，重入与超时上报各自兜 try/catch 防 unhandled rejection。
+   */
+  private async _awaitSessionThenRoute(
+    sessionId: string,
+    raw: Record<string, unknown>,
+  ): Promise<void> {
+    const waitMs = injectWaitSessionMs();
+    const deadline = Date.now() + waitMs;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, INJECT_WAIT_POLL_MS));
+      if (this._sessionManager?.get(sessionId)) {
+        this._logger.info('inject_wait_session_appeared', {
+          session_id: sessionId,
+          waited_ms: waitMs - (deadline - Date.now()),
+        });
+        try {
+          await this._routeSessionControl(MSG.SESSION_INJECT, raw);
+        } catch (e) {
+          this._logger.error('inject_wait_reroute_failed', {
+            session_id: sessionId,
+            error: e,
+          });
+        }
+        return;
+      }
+    }
+    this._logger.warn('inject_wait_session_timeout', {
+      session_id: sessionId,
+      wait_ms: waitMs,
+    });
+    await this._reportInjectDropped(
+      raw,
+      `daemon 本地无该会话状态（等待 ${waitMs}ms 会话仍未创建，可能已结束、或 daemon 重启后未恢复），消息未被处理`,
+    );
   }
 
   /**

@@ -389,3 +389,16 @@
 根因：后端部署重启期间 daemon 心跳断超 600s，离线巡检挂起 active 主会话并取消 lease；runtime 回在线后 daemon 没重启不走 recover、cancelled lease 无人复活，suspended 永挂且前端禁用手动续聊（实机 574793c6）
 方案：前端 canResumeSession 放开 suspended（backend reopen 本就接受）+ 挂起横幅改双通道文案；后端自动救回原拟新增 recover_suspended_sessions_once，与并行会话 ql-20260831-006-6d67 的 session_auto_recover_sweep_once 同案撞车，rebase 采纳其更完善实现（含 min_age 防误抢优雅停机窗口），本侧重复实现删除
 结果：backend sweep 13 绿（新增 3）；前端 suspended-display 11 绿；ruff/mypy/tsc 0
+
+## ql-20260831-017-a021 | 2026-08-31 20:40:01 | 修复交互会话首条消息竞态必死：daemon inject 早到改分离式等待会话创建（60s）
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/daemon.ts（常量区+等待窗口 env 读取+_routeSessionControl not_found 分流+新方法 _awaitSessionThenRoute）
+- sillyhub-daemon/tests/daemon-inject-drop-report.test.ts（A-F 适配压窗 150ms 控时+新增 G 晚到会话用例）
+- .sillyspec/docs/multi-agent-platform/modules/sillyhub-daemon.md（变更索引追加 ql-20260831-017-a021 条目）
+需求：修复交互会话首条消息竞态必死：daemon inject 早到改分离式等待会话创建（60s），超时才报失败
+根因：backend 等 daemon ready 仅 8s 即超时发首条 SESSION_INJECT，daemon create 全链 Windows 实机 ~31s（会话 52893639：inject 到达与 store 写入差 23s），原 3×100ms 重试耗尽即丢弃，叠加今晨部署的 ql-20260831-005 丢弃即报 run failed，慢启动竞态从可自愈（10s firstPrompt 兜底）变成会话必死
+方案：daemon.ts 三处：新增 DEFAULT_INJECT_WAIT_SESSION_MS=60s+轮询 100ms+env SILLYHUB_INJECT_WAIT_SESSION_MS 可调（取 60s 而非计划 12s——12s 覆盖不了 23s 实测缺口）；_routeSessionControl 的 INJECT not_found 分流新方法 _awaitSessionThenRoute 后即刻返回（不阻塞 WS/补拉分发批）；等待中会话出现即重入完整消费链（lease 校验/claim_token/附件），超时才走 005 丢弃上报（语义保留仅延后），重入包 try/catch 防 unhandled rejection
+结果：daemon-inject-drop-report 7/7 绿（新增 G 用例：会话 200ms 晚到→正常 inject 零上报，waited_ms=215）；近邻 kind-dispatch/resume-route/control-dispatcher/interactive-bridge/ws-client-session-control 5 套件 94/94 绿；pnpm typecheck 0 错误；daemon 全量按仓库规约留 CI
+审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/tests/daemon-inject-drop-report.test.ts

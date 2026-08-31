@@ -2,22 +2,28 @@
 // ql-20260831-005：SESSION_INJECT 四条静默丢弃路径改为立即回报 run failed。
 //
 // 实机背景（生产 wp 机会话 84cf91ab）：inject 已 delivered 但被
-// _routeSessionControl 校验路径丢弃（只 warn 不回报），run 在 backend 挂
+// _routeSessionControl 校验路径丢弃（只 warn 不回报），run 在 backend 挂起
 // pending，10 分钟后才被控制指令 GC 用笼统 interactive_inject_send_failed
 // 收敛——丢弃原因永远到不了前端。修：丢弃时用 payload 自带的
 // run_id/lease_id/claim_token 调 notifyRunResult（P2b 同款
 // error_during_execution + is_error + result_summary），summary 落
 // output_redacted → SessionRunRead.failure_summary 透出（ql-20260831-004 链）。
 //
+// ql-20260831-006（quick）：not_found 丢弃前先经 _awaitSessionThenRoute 分离式
+// 等待（默认 60s，env SILLYHUB_INJECT_WAIT_SESSION_MS 可调；实机 create 慢启动
+// ~31s > 后端 ready 等待 8s，原 3×100ms 重试耗尽即报失败把竞态变成必死）。
+// 测试统一把等待窗压到 150ms 控时。
+//
 // 覆盖：
-//   A. session_not_found（重试 3×100ms 后仍无）→ 上报，summary 含原因
+//   A. session_not_found（等待窗口超时后仍无）→ 上报，summary 含原因
 //   B. lease_mismatch → 上报
 //   C. missing_fields：prompt 空 + run_id 在 → 上报；run_id 缺 → 不上报（无法定位 run）
 //   D. no_manager → 上报
 //   E. 正常路径（会话在 + lease 匹配 + 字段齐）→ 走 inject，绝不多报
 //   F. payload 缺 claim_token → 跳过上报（过不了 lease 校验），仅 warn
+//   G. 会话在等待窗口内晚到（ql-20260831-006）→ 正常 inject，绝不报失败
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Daemon } from '../src/daemon.js';
 import { MSG } from '../src/protocol.js';
 import type { DaemonConfig } from '../src/config.js';
@@ -108,7 +114,7 @@ async function emitInject(
     }
   )._handleWsMessage.bind(daemon);
   await handle({ type: MSG.SESSION_INJECT, payload });
-  // void Promise 分发 + not_found 重试 3×100ms，等满窗口。
+  // void Promise 分发 + not_found 分离等待（测试窗 150ms + 轮询 100ms），等满窗口。
   await new Promise((r) => setTimeout(r, 450));
 }
 
@@ -120,8 +126,15 @@ const FULL_PAYLOAD: Record<string, unknown> = {
   claim_token: 'token-1',
 };
 
-describe('daemon SESSION_INJECT 丢弃即回报（ql-20260831-005）', () => {
+// ql-20260831-006：等待窗 env 键；测试统一压到 150ms 控时（默认 60s 会挂死单测）。
+const WAIT_ENV = 'SILLYHUB_INJECT_WAIT_SESSION_MS';
+
+describe('daemon SESSION_INJECT 丢弃即回报（ql-20260831-005/006）', () => {
   let daemons: Daemon[] = [];
+
+  beforeEach(() => {
+    process.env[WAIT_ENV] = '150';
+  });
 
   afterEach(async () => {
     for (const d of daemons) {
@@ -130,9 +143,10 @@ describe('daemon SESSION_INJECT 丢弃即回报（ql-20260831-005）', () => {
       }
     }
     daemons = [];
+    delete process.env[WAIT_ENV];
   });
 
-  it('A. session_not_found（重试后仍无本地状态）→ notifyRunResult 失败带原因', async () => {
+  it('A. session_not_found（等待窗口超时后仍无本地状态）→ notifyRunResult 失败带原因', async () => {
     const { daemon, client } = buildDaemon(createMockSessionManager(undefined));
     daemons.push(daemon);
 
@@ -205,6 +219,26 @@ describe('daemon SESSION_INJECT 丢弃即回报（ql-20260831-005）', () => {
     const { claim_token: _omit, ...noToken } = FULL_PAYLOAD;
     await emitInject(daemon, noToken);
 
+    expect(client.notifyRunResult).not.toHaveBeenCalled();
+  });
+
+  it('G. 会话在等待窗口内晚到（ql-20260831-006 慢启动竞态）→ 正常 inject，绝不报失败', async () => {
+    // 复现实机形状：inject 到达时 store 无会话（create 未完成），~200ms 后会话
+    // 出现（原 3×100ms 重试窗口耗尽必丢弃 + 上报失败；现等待窗内接住）。
+    process.env[WAIT_ENV] = '600';
+    const appearAt = Date.now() + 200;
+    const sm = createMockSessionManager({ leaseId: 'lease-1' });
+    (sm.get as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      Date.now() >= appearAt
+        ? { sessionId: 'sess-1', leaseId: 'lease-1', status: 'active' }
+        : undefined,
+    );
+    const { daemon, client } = buildDaemon(sm);
+    daemons.push(daemon);
+
+    await emitInject(daemon, FULL_PAYLOAD);
+
+    expect(sm.inject).toHaveBeenCalledTimes(1);
     expect(client.notifyRunResult).not.toHaveBeenCalled();
   });
 });
