@@ -416,3 +416,12 @@
 方案：upsert_my_binding 在归属校验后 owner 直绑分支把 root_path 并入该 daemon 全部 runtime.allowed_roots（只增不减、legacy 空值物化 instance 兜底、覆盖判定幂等、相对路径防御跳过），同事务单次 commit 后逐 runtime best-effort WS policy_update 推送，离线走心跳 resync 兜底；共享/借用绑定不自动加以保安全边界
 结果：新用例 5/5 绿，相邻 member_runtimes 全套+test_daemon_client_scan 32/32 绿，ruff format/check+mypy 零告警
 审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/workspace/member_runtimes/tests/conftest.py, backend/app/modules/workspace/member_runtimes/tests/test_binding_auto_allowed_roots.py
+
+## ql-20260901-001-1966 | 2026-09-01 02:07:22 | 风险审查六连修：sweep 不复活软删/归档会话、daemon 状态目录隔离补三漏项、桌面列表显式 archived=false、suspended 横幅补真「…
+状态：已完成
+关联变更：（无）
+文件：backend/app/modules/daemon/session/service.py, backend/app/modules/daemon/sweep.py, backend/app/modules/daemon/tests/test_session_sweep_recover.py, backend/app/modules/workspace/member_runtimes/service.py, backend/app/modules/workspace/member_runtimes/tests/test_binding_auto_allowed_roots.py, frontend/src/components/daemon/__tests__/session-suspended-display.test.tsx, frontend/src/components/daemon/session-panel.tsx, frontend/src/components/sessions/__tests__/session-list-panel.test.tsx, frontend/src/components/sessions/session-list-panel.tsx, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/interactive/codex-app-server-driver.ts, sillyhub-daemon/src/interactive/session-store-persistence.ts, sillyhub-daemon/src/policy/audit-sink.ts, sillyhub-daemon/tests/daemon-inject-drop-report.test.ts, sillyhub-daemon/tests/daemon-state-dir-isolation.test.ts
+需求：风险审查六连修：sweep 不复活软删/归档会话、daemon 状态目录隔离补三漏项、桌面列表显式 archived=false、suspended 横幅补真「继续对话」入口、~ 根判重防重复追加、inject 等待感知停机
+根因：①e1f213e4 引入的自动恢复 sweep 无 deleted_at/归档工作区守卫且 confirm 无软删检查，软删会话被复活+补派发排队消息成不可见僵尸；②3c8db98c 隔离收口宣称 8 处全覆盖实漏 sessions.json/audit-failed.jsonl/codex 日志三处直拼 homedir()；③b690c91e 后端 archived 三态化后桌面列表未同步显式传参；④3235 3a594735 双通道文案承诺的按钮在 suspended 态无渲染路径；⑤ce4f4688 覆盖判定排除 ~ 根致重复追加；⑥a565f347 等待循环不查 _running
+方案：sweep 候选与条件 UPDATE 补 deleted_at IS NULL+归档工作区 NOT EXISTS、confirm SELECT 补软删过滤；三处路径改派生 daemonStateDir()（懒函数化）；桌面列表 archived 三态显式传参；页模式横幅补按钮接 handleReopen+dialog 文案去承诺；覆盖判定加精确等值；轮询每拍查 !_running 即中止
+结果：后端定向 13+相邻 88 绿 ruff/format/mypy 0；daemon 定向 17+相邻 107 绿 tsc 0；前端定向 69 绿 tsc 0、eslint 仅 2 条既有无关警告；8 模块文档同步

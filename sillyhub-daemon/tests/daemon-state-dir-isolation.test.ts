@@ -12,6 +12,10 @@
  * （cli）+ credentials + specs/manifests（spec-sync）+ locks（runtime-lock，懒函数）
  * + bin（config.daemonBinDir，daemon.ts/preflight.ts 同源）+ mcp.json（mcp-config）
  * + 懒求值语义 + 未设置回落默认（回归保护）。
+ *
+ * quick 风险审查补（2026-09-01）：sessions.json（interactive 会话存档——隔离实例
+ * 不得读写真实主目录的恢复档案）+ audit-failed.jsonl（审计降级落盘）+
+ * codex 交互日志目录（runs/codex-interactive）三个原直拼 homedir() 的漏项。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -93,5 +97,25 @@ describe('SILLYHUB_DAEMON_DIR 隔离参数', () => {
     const mcp = await import('../src/mcp-config.js');
     const cfg = await mcp.loadPlatformMcpConfig();
     expect(Object.keys(cfg.mcpServers)).toContain('isoProbe');
+  });
+
+  it('sessions.json：interactive 会话存档落隔离目录（quick 风险审查修）', async () => {
+    const p = await import('../src/interactive/session-store-persistence.js');
+    expect(p.defaultSessionFilePath()).toBe(join(resolve(dir), 'sessions.json'));
+    // 生产装配走无参构造（cli.ts new JsonSessionPersistence()）——默认值
+    // 在构造时求值，隔离实例不得再指向真实 ~/.sillyhub/daemon/sessions.json。
+    expect(new p.JsonSessionPersistence().filePath).toBe(join(resolve(dir), 'sessions.json'));
+  });
+
+  it('audit-failed.jsonl：审计降级落盘路径落隔离目录（quick 风险审查修）', async () => {
+    const { defaultFailoverPath } = await import('../src/policy/audit-sink.js');
+    expect(defaultFailoverPath()).toBe(join(resolve(dir), 'audit-failed.jsonl'));
+  });
+
+  it('codex 交互日志目录落隔离目录（quick 风险审查修）', async () => {
+    const { codexInteractiveLogDir } = await import(
+      '../src/interactive/codex-app-server-driver.js'
+    );
+    expect(codexInteractiveLogDir()).toBe(join(resolve(dir), 'runs', 'codex-interactive'));
   });
 });

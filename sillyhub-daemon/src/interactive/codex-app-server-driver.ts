@@ -45,11 +45,11 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createWriteStream, type WriteStream } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import readline from 'node:readline';
 import { resolveWindowsCmdShim } from '../cmd-shim.js';
 import { JsonRpcAdapter, type PendingServerRequest } from '../adapters/json-rpc.js';
+import { daemonStateDir } from '../config.js';
 import type { AgentEvent } from '../types.js';
 import type { CanUseToolDecision } from './types.js';
 import type {
@@ -71,6 +71,17 @@ const STDERR_MAX_BYTES = 20_000;
  * 100ms 间隔会丢 stdin）。测试可经构造函数注入 0 加速。
  */
 const DEFAULT_HANDSHAKE_INTERVAL_MS = 300;
+
+/**
+ * codex 交互 stdout 日志目录：`<daemonStateDir()>/runs/codex-interactive`。
+ *
+ * quick 风险审查修（2026-09-01）：SILLYHUB_DAEMON_DIR 隔离收口漏项——原直拼
+ * homedir()，隔离实例的交互日志会写进真实主目录与主实例共享。导出纯函数供
+ * daemon-state-dir-isolation 测试断言。
+ */
+export function codexInteractiveLogDir(): string {
+  return join(daemonStateDir(), 'runs', 'codex-interactive');
+}
 
 /** executable 缺失/解析失败抛出。code 字段供 daemon / 测试识别（task-06 记指标用）。 */
 export class CodexExecutableNotFoundError extends Error {
@@ -805,10 +816,12 @@ export class CodexAppServerDriver implements InteractiveDriver {
 
     try {
       // ql-20260624-007：sessionId 存在时建 codex stdout 落盘流（fire-and-forget）。
-      // 落盘到 ~/.sillyhub/daemon/runs/codex-interactive/<sessionId>.log。
+      // 落盘到 <daemonStateDir()>/runs/codex-interactive/<sessionId>.log（默认
+      // ~/.sillyhub/daemon 下；quick 风险审查修——原直拼 homedir() 是
+      // SILLYHUB_DAEMON_DIR 隔离收口漏项，隔离实例交互日志会写进真实主目录）。
       if (ctx.sessionId) {
         try {
-          const logDir = join(homedir(), '.sillyhub', 'daemon', 'runs', 'codex-interactive');
+          const logDir = codexInteractiveLogDir();
           await mkdir(logDir, { recursive: true });
           const stream = createWriteStream(join(logDir, `${ctx.sessionId}.log`), {
             flags: 'a',

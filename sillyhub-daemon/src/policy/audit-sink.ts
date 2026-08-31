@@ -7,8 +7,9 @@
  * 设计要点：
  *   1. 攒批：buffer 满 maxSize(默认 100) 或 flushIntervalMs(默认 5000ms) 触发 flush；
  *   2. 失败重试：POST 失败指数退避（base * 2^attempt），连续失败不丢事件；
- *   3. 降级落盘：连续失败超阈值（或重试耗尽）追加写 `~/.sillyhub/daemon/audit-failed.jsonl`
- *      防 OOM（buffer 必须能清空，否则内存持续增长）；
+ *   3. 降级落盘：连续失败超阈值（或重试耗尽）追加写
+ *      `<daemonStateDir()>/audit-failed.jsonl` 防 OOM（buffer 必须能清空，否则
+ *      内存持续增长）；
  *   4. POST 能力依赖倒置：构造注入 `AuditBatchSender`（最小接口 { postBatch(events) }），
  *      不硬耦合 HubClient —— task-11 装配真实 HubClient 适配器，测试注入 mock。
  *   5. flush 失败永远吞错，不阻断调用方（PolicyEngine / agent 执行）。
@@ -18,7 +19,7 @@
 
 import { appendFileSync, mkdirSync, readdirSync, rmSync, statSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { homedir } from 'node:os';
+import { daemonStateDir } from '../config.js';
 
 // ── 类型 ──────────────────────────────────────────────────────────────────────
 
@@ -74,9 +75,15 @@ export interface AuditSinkOptions {
   failoverPath?: string;
 }
 
-/** 默认落盘路径：~/.sillyhub/daemon/audit-failed.jsonl（Linux/macOS/Windows 均成立）。 */
+/**
+ * 默认落盘路径：`<daemonStateDir()>/audit-failed.jsonl`（默认
+ * ~/.sillyhub/daemon，Linux/macOS/Windows 均成立）。
+ *
+ * quick 风险审查修（2026-09-01）：SILLYHUB_DAEMON_DIR 隔离收口漏项——原直拼
+ * homedir()，隔离实例的降级审计与主实例共享追加同一真实文件。
+ */
 export function defaultFailoverPath(): string {
-  return join(homedir(), '.sillyhub', 'daemon', 'audit-failed.jsonl');
+  return join(daemonStateDir(), 'audit-failed.jsonl');
 }
 
 // ── perf-remediation task-09 / FR-12：启动清理 ───────────────────────────────

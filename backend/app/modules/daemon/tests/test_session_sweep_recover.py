@@ -13,6 +13,11 @@ suspended 后，daemon 重新上线**无人恢复**（既有恢复链只在 daem
 - 不误伤：runtime 仍离线 / 挂起未满龄 / worker 子会话 / 无 resume key
   （agent_session_id 空）/ 非 suspended 会话一律不动；
 - 幂等：同数据二跑 0 行（已翻 reconnecting，条件更新不重入）。
+
+quick 风险审查补（2026-09-01）：软删（``deleted_at`` 置位）与归档工作区会话
+不复活——否则 confirm 会把已删行翻回 active 并补派发其遗留排队消息（列表按
+``deleted_at IS NULL`` 过滤，复活后不可见无法停止）；confirm 对软删行按不
+存在处理返回 ``rejected`` 收口 daemon 重启恢复链的迟到确认。
 """
 
 from __future__ import annotations
@@ -102,6 +107,8 @@ async def _make_session(
     last_active_at: datetime | None,
     parent_session_id: uuid.UUID | None = None,
     agent_session_id: str | None = "sdk-resume-key",
+    workspace_id: uuid.UUID | None = None,
+    deleted_at: datetime | None = None,
 ) -> AgentSession:
     now = datetime.now(UTC)
     sess = AgentSession(
@@ -119,10 +126,35 @@ async def _make_session(
         last_active_at=last_active_at,
         ended_at=now if status in ("ended", "failed") else None,
         parent_session_id=parent_session_id,
+        workspace_id=workspace_id,
+        deleted_at=deleted_at,
     )
     db.add(sess)
     await db.commit()
     return sess
+
+
+async def _make_workspace(
+    db: AsyncSession,
+    owner_id: uuid.UUID,
+    *,
+    status: str = "active",
+) -> uuid.UUID:
+    from app.modules.workspace.model import Workspace
+
+    ws_id = uuid.uuid4()
+    db.add(
+        Workspace(
+            id=ws_id,
+            name=f"Sweep WS {ws_id.hex[:8]}",
+            slug=f"sweep-{ws_id.hex[:8]}",
+            root_path=f"/tmp/sweep-{ws_id.hex[:8]}",
+            status=status,
+            created_by=owner_id,
+        )
+    )
+    await db.commit()
+    return ws_id
 
 
 async def _session_status(db: AsyncSession, session_id: uuid.UUID) -> str:
@@ -269,3 +301,96 @@ async def test_idempotent_second_run_recovers_nothing(db_session: AsyncSession) 
     # 控制指令也只落一条（重试由 daemon 补拉既有 pending 行承担，不重复堆叠）。
     commands = await _resume_commands(db_session)
     assert len(commands) == 1
+
+
+async def test_skips_soft_deleted_session(db_session: AsyncSession) -> None:
+    """软删会话不复活：删除时 suspended 不在 ACTIVE_SESSION_STATUSES 不走收列，
+    行以 suspended+deleted_at 残留——sweep 不得翻 reconnecting（否则 confirm
+    会翻回 active 并补派发遗留排队消息，而列表按 deleted_at IS NULL 过滤，
+    复活后对用户不可见无法停止）。"""
+    user = await _make_user(db_session)
+    rt = await _make_runtime(db_session, user.id, status="online")
+    lease = await _make_lease(db_session, rt.id)
+    old = datetime.now(UTC) - timedelta(seconds=AUTO_RECOVER_MIN_AGE_SEC + 60)
+    sess = await _make_session(
+        db_session,
+        user.id,
+        rt.id,
+        lease.id,
+        status="suspended",
+        last_active_at=old,
+        deleted_at=datetime.now(UTC),
+    )
+
+    recovered = await session_auto_recover_sweep_once(db_session)
+
+    assert recovered == 0
+    assert await _session_status(db_session, sess.id) == "suspended"
+    assert await _resume_commands(db_session) == []
+
+
+async def test_skips_archived_workspace_session(db_session: AsyncSession) -> None:
+    """归档工作区会话不自动恢复（对齐 reopen ``_ensure_session_workspace_writable``
+    守卫口径——归档区不复活会话句柄）；活跃工作区会话照常恢复不受影响。"""
+    user = await _make_user(db_session)
+    rt = await _make_runtime(db_session, user.id, status="online")
+    ws_archived = await _make_workspace(db_session, user.id, status="archived")
+    ws_active = await _make_workspace(db_session, user.id, status="active")
+    old = datetime.now(UTC) - timedelta(seconds=AUTO_RECOVER_MIN_AGE_SEC + 60)
+    s_archived = await _make_session(
+        db_session,
+        user.id,
+        rt.id,
+        None,
+        status="suspended",
+        last_active_at=old,
+        workspace_id=ws_archived,
+    )
+    s_active_ws = await _make_session(
+        db_session,
+        user.id,
+        rt.id,
+        None,
+        status="suspended",
+        last_active_at=old,
+        workspace_id=ws_active,
+    )
+
+    recovered = await session_auto_recover_sweep_once(db_session)
+
+    assert recovered == 1
+    assert await _session_status(db_session, s_archived.id) == "suspended"
+    assert await _session_status(db_session, s_active_ws.id) == "reconnecting"
+    commands = await _resume_commands(db_session)
+    assert len(commands) == 1
+    assert commands[0].payload is not None
+    assert commands[0].payload["session_id"] == str(s_active_ws.id)
+
+
+async def test_confirm_rejects_soft_deleted_session(db_session: AsyncSession) -> None:
+    """confirm 收口：软删的 reconnecting 会话按不存在处理返回 rejected、不翻
+    active——daemon 重启恢复链读本地 sessions.json（仍含已删会话）发出的迟到
+    confirm 不得复活已删行。"""
+    from app.modules.daemon.service import DaemonService
+
+    user = await _make_user(db_session)
+    rt = await _make_runtime(db_session, user.id, status="online")
+    old = datetime.now(UTC) - timedelta(seconds=AUTO_RECOVER_MIN_AGE_SEC + 60)
+    sess = await _make_session(
+        db_session,
+        user.id,
+        rt.id,
+        None,
+        status="reconnecting",
+        last_active_at=old,
+        deleted_at=datetime.now(UTC),
+    )
+
+    svc = DaemonService(db_session)
+    # confirm 的 rejected 早退会 rollback（P2 行锁释放），连带把本测试会话中的
+    # ORM 对象过期——先取标量再调用，避免过期属性触发懒加载。
+    session_id = sess.id
+    result = await svc.confirm_session_reconnected(session_id, runtime_id=rt.id)
+
+    assert result == "rejected"
+    assert await _session_status(db_session, session_id) == "reconnecting"

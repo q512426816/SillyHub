@@ -5307,7 +5307,11 @@ class SessionService:
         session therefore stays reconnecting). Omitted ``lease_id`` (legacy
         daemon-restart recover chain) keeps the pre-DS-4 behavior verbatim.
         Non-reconnecting session (already active/ended/failed) → idempotent
-        return of current status.
+        return of current status. Soft-deleted session (``deleted_at`` set) is
+        treated as nonexistent → ``"rejected"``（quick 风险审查修）：sweep 已
+        不复活软删会话，此处收口 daemon 重启恢复链（本地 sessions.json 仍含
+        已删会话）迟到的 confirm——不得把已删行翻回 active 并触发其遗留
+        排队消息补派发。
 
         2026-08-31-session-queue-ux task-03 / D-008: after the active-flip
         commit succeeds, a queued-message redispatch is fired in the
@@ -5319,6 +5323,7 @@ class SessionService:
                 .where(
                     AgentSession.id == session_id,
                     AgentSession.runtime_id == runtime_id,
+                    AgentSession.deleted_at.is_(None),
                 )
                 .with_for_update()
             )

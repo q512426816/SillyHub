@@ -3511,7 +3511,19 @@ function SessionPanelPage({
         >
           <div className="flex items-center gap-2">
             <PauseCircle aria-hidden className="h-3.5 w-3.5 shrink-0" />
-            <span>会话已挂起——守护进程在线后将自动恢复，也可点「继续对话」立即恢复</span>
+            <span className="flex-1">会话已挂起——守护进程在线后将自动恢复，也可点「继续对话」立即恢复</span>
+            {/* quick 风险审查修（2026-09-01）：横幅承诺的手动入口此前不存在——
+                唯一 reopen 按钮只在 ended/恢复超时横幅渲染、输入框又被 suspended
+                禁用，用户按指引找不到可点的东西。补真按钮接 handleReopen
+                （backend reopen 本就接受 suspended，canResumeSession 已放开）。 */}
+            <Button
+              size="small"
+              data-testid="suspended-resume-button"
+              loading={reopening}
+              onClick={() => void handleReopen()}
+            >
+              继续对话
+            </Button>
           </div>
           <p className="ml-[22px] mt-0.5 text-[11px] leading-4 text-info/80">
             历史消息完整保留，可在上方继续浏览；挂起超过 24 小时才会被标记为失败
@@ -5255,7 +5267,9 @@ function SessionPanelDialog(props: SessionPanelProps) {
       ) : null}
       {/* task-10 / design A5+A6（原型⑤）：attach 目标会话挂起（backend status
           === suspended）——info 横幅 + 输入禁用（见 sendingDisabled）。
-          attach 轮询持续观察，daemon 重启转 reconnecting/active 后自动收敛。 */}
+          attach 轮询持续观察，daemon 重启转 reconnecting/active 后自动收敛。
+          quick 风险审查修（2026-09-01）：dialog 变体无 reopen 机制（页模式横幅
+          已补「继续对话」按钮），本处文案去掉手动恢复承诺只保自动恢复。 */}
       {view.suspended ? (
         <div
           role="status"
@@ -5265,7 +5279,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
         >
           <div className="flex items-center gap-2">
             <PauseCircle aria-hidden className="h-3.5 w-3.5 shrink-0" />
-            <span>会话已挂起——守护进程在线后将自动恢复，也可点「继续对话」立即恢复</span>
+            <span>会话已挂起——守护进程在线后将自动恢复</span>
           </div>
           <p className="ml-[22px] mt-0.5 text-[11px] leading-4 text-info/80">
             历史消息完整保留，可在下方继续浏览；挂起超过 24 小时才会被标记为失败

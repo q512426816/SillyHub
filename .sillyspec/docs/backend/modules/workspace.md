@@ -66,7 +66,9 @@ resolve_runtime_for_writeback(ws, user):     # 写回链路 runtime 解析
   default_agent_unset/provider_unavailable）
 - upsert_my_binding 自动并入可写目录（ql-20260831-018-dc1a）：owner 直绑（daemon
   归属本人）时把 root_path 并入该 daemon 全部 runtime 的 allowed_roots（只增不减、
-  legacy 空值先物化 instance 兜底、绝对根覆盖判定幂等跳过、相对路径防御跳过），
+  legacy 空值先物化 instance 兜底、绝对根覆盖判定幂等跳过、相对路径防御跳过；
+  `~` 根按精确等值判重——quick 2026-09-01 风险审查修，防重复保存同路径每次
+  PUT 追加重复项致 DB JSON/policy_update 载荷单调膨胀），
   同事务单次 commit + commit 后逐 runtime best-effort WS policy_update 推送（离线
   daemon 心跳 resync 兜底）；共享/借用绑定（daemon.user_id != user_id）不自动加
   ——allowed_roots 是机器主人授予的物理写边界，借用人不得自扩

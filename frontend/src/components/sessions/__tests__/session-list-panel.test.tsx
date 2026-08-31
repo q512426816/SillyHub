@@ -457,7 +457,7 @@ describe("SessionListPanel 全局树初次渲染", () => {
     await screen.findByRole("button", { name: "工作区分组 SillyHub" });
     // 数据层：一次拉取 limit=500（D-103），无过滤参
     expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
-    expect(lastCallArgs()).toEqual({ limit: 500 });
+    expect(lastCallArgs()).toEqual({ limit: 500, archived: false });
 
     // 分组顺序：工作区列表序 + 非工作区固定末尾（D-105）
     expect(groupHeadLabels()).toEqual([
@@ -622,7 +622,7 @@ describe("SessionListPanel 两层筛选 tab", () => {
 
     // 纯视图过滤：不进数据层（调用次数不变）
     expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
-    expect(lastCallArgs()).toEqual({ limit: 500 });
+    expect(lastCallArgs()).toEqual({ limit: 500, archived: false });
   });
 
   it("智能体层过滤 codex；「全部」清空智能体；机器层「全部」清空并隐藏第二层", async () => {
@@ -743,6 +743,28 @@ describe("SessionListPanel 状态与搜索（树形态视图过滤）", () => {
     // 切回全部状态
     await chooseAntdOptionByText("slp-status", "全部状态");
     await waitFor(() => expect(sessionRows().length).toBe(2));
+  });
+
+  it("归档三态回归（quick 风险审查修）：默认/状态视图显式 archived=false，仅「已归档会话」传 true", async () => {
+    // 后端 archived 三态化后 HTTP 默认 None=全部含已归档（ql-20260831-015）——
+    // 桌面列表此前非归档视图不传参，归档会话混入默认列表与状态筛选（与弹窗
+    // 文案「归档后将从默认列表隐藏」矛盾）。移动端/机器列表均已显式 false。
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
+    );
+    renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
+    await waitFor(() => expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1));
+    expect(lastCallArgs().archived).toBe(false);
+
+    // 状态筛选视图同样只看未归档。
+    await chooseAntdOptionByText("slp-status", "已结束");
+    await waitFor(() => expect(lastCallArgs().archived).toBe(false));
+
+    // 归档视图才请求已归档。
+    await chooseAntdOptionByText("slp-status", "已归档会话");
+    await waitFor(() => expect(lastCallArgs().archived).toBe(true));
   });
 
   it("标题搜索：回车才应用（视图过滤）；仅输入不生效", async () => {
@@ -1193,7 +1215,7 @@ describe("SessionListPanel workspace scope（树单组，端点过滤维持）",
 
     await screen.findByRole("button", { name: "会话 工作区会话" });
     expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
-    expect(lastCallArgs()).toEqual({ limit: 500, workspace_id: "ws-1" });
+    expect(lastCallArgs()).toEqual({ limit: 500, archived: false, workspace_id: "ws-1" });
     // 单组：仅该工作区分组（非工作区组不渲染——数据已被端点过滤）
     expect(groupHeadLabels()).toEqual(["工作区分组 SillyHub"]);
     expect(mocks.listWorkspaceAgentSessions).not.toHaveBeenCalled();
@@ -1272,6 +1294,7 @@ describe("SessionListPanel change scope（ql-20260823-003：同走工作区树�
     expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
     expect(lastCallArgs()).toEqual({
       limit: 500,
+      archived: false,
       workspace_id: "ws-1",
       change_id: "chg-1",
     });
@@ -1778,6 +1801,7 @@ describe("SessionListPanel quicklog scope（task-10 / X-008）", () => {
     expect(mocks.listAgentSessions).toHaveBeenCalledTimes(1);
     expect(lastCallArgs()).toEqual({
       limit: 500,
+      archived: false,
       workspace_id: "ws-1",
       ql_id: "ql-20260825-001",
     });
@@ -1926,6 +1950,7 @@ describe("SessionListPanel「关联」筛选下拉（task-10 / X-009）", () => 
     await waitFor(() => {
       expect(lastCallArgs()).toEqual({
         limit: 500,
+        archived: false,
         workspace_id: "ws-1",
         change_id: "chg-a",
       });
@@ -1941,7 +1966,7 @@ describe("SessionListPanel「关联」筛选下拉（task-10 / X-009）", () => 
     fireEvent.mouseDown(clearBtn);
     fireEvent.click(clearBtn);
     await waitFor(() => {
-      expect(lastCallArgs()).toEqual({ limit: 500, workspace_id: "ws-1" });
+      expect(lastCallArgs()).toEqual({ limit: 500, archived: false, workspace_id: "ws-1" });
     });
   });
 
@@ -1954,6 +1979,7 @@ describe("SessionListPanel「关联」筛选下拉（task-10 / X-009）", () => 
     await waitFor(() => {
       expect(lastCallArgs()).toEqual({
         limit: 500,
+        archived: false,
         workspace_id: "ws-1",
         ql_id: "ql-20260824-014",
       });
@@ -2037,6 +2063,7 @@ describe("SessionListPanel「关联」筛选下拉（task-10 / X-009）", () => 
     await waitFor(() => {
       expect(lastCallArgs()).toEqual({
         limit: 500,
+        archived: false,
         workspace_id: "ws-1",
         ppm_item_kind: "plan_task",
         ppm_item_id: "pt-1",
@@ -2048,6 +2075,7 @@ describe("SessionListPanel「关联」筛选下拉（task-10 / X-009）", () => 
     await waitFor(() => {
       expect(lastCallArgs()).toEqual({
         limit: 500,
+        archived: false,
         workspace_id: "ws-1",
         ppm_item_kind: "problem",
         ppm_item_id: "pb-1",
@@ -2063,7 +2091,7 @@ describe("SessionListPanel「关联」筛选下拉（task-10 / X-009）", () => 
     fireEvent.mouseDown(clearBtn);
     fireEvent.click(clearBtn);
     await waitFor(() => {
-      expect(lastCallArgs()).toEqual({ limit: 500, workspace_id: "ws-1" });
+      expect(lastCallArgs()).toEqual({ limit: 500, archived: false, workspace_id: "ws-1" });
     });
   });
 

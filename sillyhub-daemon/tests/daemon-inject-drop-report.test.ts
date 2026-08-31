@@ -22,6 +22,8 @@
 //   E. 正常路径（会话在 + lease 匹配 + 字段齐）→ 走 inject，绝不多报
 //   F. payload 缺 claim_token → 跳过上报（过不了 lease 校验），仅 warn
 //   G. 会话在等待窗口内晚到（ql-20260831-006）→ 正常 inject，绝不报失败
+//   H. 等待中停机（quick 风险审查修 2026-09-01）→ 下一拍轮询即中止，不上报
+//      失败（未处理原因是 daemon 退出而非会话未建）、不等满窗口
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Daemon } from '../src/daemon.js';
@@ -101,6 +103,11 @@ function buildDaemon(
     { runLease: vi.fn(async () => ({})) } as never,
     { detector, sessionManager: sm } as never,
   );
+  // quick 风险审查修（2026-09-01）起 _awaitSessionThenRoute 轮询感知停机
+  // （!_running 即中止）。本测试不跑 start() 全链，构造态 _running=false 会被
+  // 误判停机——统一置真模拟「运行中的 daemon 收到 inject」这一被测前提
+  // （等待路径只存在于运行态；用例 H 自行中途置假驱动停机分支）。
+  (daemon as unknown as { _running: boolean })._running = true;
   return { daemon, sm, client };
 }
 
@@ -240,5 +247,28 @@ describe('daemon SESSION_INJECT 丢弃即回报（ql-20260831-005/006）', () =>
 
     expect(sm.inject).toHaveBeenCalledTimes(1);
     expect(client.notifyRunResult).not.toHaveBeenCalled();
+  });
+
+  it('H. 等待中停机（quick 风险审查修）→ 轮询感知 _running=false 即中止，不上报、不等满窗口', async () => {
+    // 窗口拉到 5s：若轮询不感知停机，本用例要么等满 5s、要么上报失败（均错）。
+    // 修复后 120ms 处置 _running=false，下一拍 100ms 轮询即中止——emitInject
+    // 自带 450ms 收敛等待，总耗时应远小于窗口。
+    process.env[WAIT_ENV] = '5000';
+    const sm = createMockSessionManager(undefined);
+    const { daemon, client } = buildDaemon(sm);
+    daemons.push(daemon);
+
+    // buildDaemon 已置运行态；120ms 处模拟 stop() 第一拍置 _running=false。
+    const internal = daemon as unknown as { _running: boolean };
+    setTimeout(() => {
+      internal._running = false;
+    }, 120);
+
+    const t0 = Date.now();
+    await emitInject(daemon, FULL_PAYLOAD);
+    const elapsed = Date.now() - t0;
+
+    expect(client.notifyRunResult).not.toHaveBeenCalled();
+    expect(elapsed).toBeLessThan(2000);
   });
 });

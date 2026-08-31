@@ -546,6 +546,10 @@ function WorkspaceTreeList({
   const [assocFilter, setAssocFilter] = useState<string | undefined>(undefined);
 
   // 2026-08-24：归档视图判定（哨兵值 __archived__ 触发服务端 archived=true 过滤）。
+  // quick 风险审查修（2026-09-01）：非归档视图显式传 archived=false——后端
+  // archived 三态化后 HTTP 默认 None=返回全部含已归档（ql-20260831-015），桌面
+  // 列表此前不传致归档会话混入默认列表与状态筛选（移动端/机器列表均已显式
+  // false，此处对齐）。归档会话只进「已归档会话」视图。
   const isArchivedView = status === "__archived__";
 
   // X-009 门控谓词：「关联」筛选仅 workspace scope 提供（含选项查询 enabled）。
@@ -713,7 +717,7 @@ function WorkspaceTreeList({
     queryFn: () =>
       listAgentSessions({
         limit: AGENT_SESSIONS_TREE_FETCH_LIMIT,
-        ...(isArchivedView ? { archived: true } : {}),
+        archived: isArchivedView ? true : false,
         // workspace/change/quicklog scope 透传 workspace_id（RuntimeScope 无此字段，跳过）。
         ...(scope && "workspaceId" in scope && scope.workspaceId
           ? { workspace_id: scope.workspaceId }

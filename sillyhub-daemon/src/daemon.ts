@@ -5469,6 +5469,12 @@ export class Daemon {
    * 补拉批（pullAndConsume 逐条 await）不能被 60s 等待阻塞同批后续指令（如
    * permission_response 是用户审批延迟敏感路径）。分离调用绕过了 dispatcher 的
    * handler_error catch，重入与超时上报各自兜 try/catch 防 unhandled rejection。
+   *
+   * quick 风险审查修（2026-09-01）：轮询加停机感知——stop() 后 _running=false，
+   * 挂起中的 100ms 轮询链不应再把事件循环钉住最长 60s（systemd/launchd
+   * Restart=always 场景会拖慢新实例接管）。停机即中止等待：不报 run failed
+   * （消息未处理的原因是 daemon 退出而非会话未建，语义不符；backend 侧由
+   * 控制指令 GC 兜底收敛），仅 warn 留痕。
    */
   private async _awaitSessionThenRoute(
     sessionId: string,
@@ -5478,6 +5484,12 @@ export class Daemon {
     const deadline = Date.now() + waitMs;
     while (Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, INJECT_WAIT_POLL_MS));
+      if (!this._running) {
+        this._logger.warn('inject_wait_aborted_by_shutdown', {
+          session_id: sessionId,
+        });
+        return;
+      }
       if (this._sessionManager?.get(sessionId)) {
         this._logger.info('inject_wait_session_appeared', {
           session_id: sessionId,

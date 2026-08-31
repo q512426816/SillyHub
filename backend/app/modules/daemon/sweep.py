@@ -74,6 +74,7 @@ from app.modules.daemon.session.service import (
     _resolve_daemon_id_for_runtime,
 )
 from app.modules.daemon.session_events import publish_sessions_changed
+from app.modules.workspace.model import Workspace
 
 log = get_logger(__name__)
 
@@ -509,6 +510,13 @@ async def session_auto_recover_sweep_once(session: AsyncSession) -> int:
     :func:`session_reconnect_sweep_once` 收敛 failed。worker 子会话（offline
     sweep 语义为 failed 重派种子）与无 resume key 的会话不在本档。条件 UPDATE
     重挂 ``status='suspended'``，幂等可重入（多轮 / 多 worker 二跑 0 行）。
+
+    排除项（quick 风险审查修）：软删会话（``deleted_at`` 置位——删除时
+    suspended 不在 ACTIVE_SESSION_STATUSES 不走收列，行以 suspended+deleted_at
+    残留，若被本档复活会经 confirm 翻 active 并补派发其遗留排队消息，且列表
+    按 ``deleted_at IS NULL`` 过滤对用户不可见无法停止）与归档工作区会话
+    （对齐 reopen ``_ensure_session_workspace_writable`` 守卫口径——归档区
+    不复活会话句柄）一律不选不翻，留给 24h 超龄 GC 收敛。
     """
     now = datetime.now(UTC)
     grace = now - timedelta(seconds=RUNTIME_OFFLINE_GRACE_SEC)
@@ -520,6 +528,17 @@ async def session_auto_recover_sweep_once(session: AsyncSession) -> int:
             DaemonRuntime.id == AgentSession.runtime_id,
             col(DaemonRuntime.status) == "online",
             col(DaemonRuntime.last_heartbeat_at) >= grace,
+        )
+        .correlate(AgentSession)
+        .exists()
+    )
+    # 归档工作区 NOT EXISTS（workspace_id NULL 的行 eq 比较无命中 → exists
+    # false → 放行，非工作区会话不受影响）。
+    archived_workspace = (
+        select(Workspace.id)
+        .where(
+            Workspace.id == AgentSession.workspace_id,
+            col(Workspace.status) == "archived",
         )
         .correlate(AgentSession)
         .exists()
@@ -540,6 +559,11 @@ async def session_auto_recover_sweep_once(session: AsyncSession) -> int:
                 col(AgentSession.parent_session_id).is_(None),
                 col(AgentSession.agent_session_id).is_not(None),
                 col(AgentSession.runtime_id).is_not(None),
+                # 软删会话不复活（docstring「排除项」：复活即不可见僵尸 +
+                # 遗留排队消息被补派发）。
+                AgentSession.deleted_at.is_(None),
+                # 归档工作区不绕道恢复（对齐 reopen 守卫口径）。
+                ~archived_workspace,
                 # 挂起满龄判定用 coalesce 兜脏数据 NULL（对齐超龄 GC 口径）。
                 func.coalesce(AgentSession.last_active_at, AgentSession.created_at) < min_age,
                 online_runtime,
@@ -558,6 +582,9 @@ async def session_auto_recover_sweep_once(session: AsyncSession) -> int:
             .where(
                 AgentSession.id == row.id,
                 AgentSession.status == "suspended",
+                # SELECT→UPDATE 窗口内被并发软删的行不翻（与候选过滤同语义，
+                # 关掉翻转竞态；漏删行由 180s reconnect sweep 收敛）。
+                AgentSession.deleted_at.is_(None),
             )
             .values(status="reconnecting", last_active_at=now)
         )

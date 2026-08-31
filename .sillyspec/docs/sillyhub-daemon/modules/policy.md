@@ -25,7 +25,7 @@ shell-paths 从命令字符串提取写路径、audit-sink 攒批审计上报。
 - `AuditSink(sender, opts?)`：攒批 → `AuditBatchSender.postBatch`（依赖倒置，
   task-11 装配 HubClient 适配 POST /daemon/audit/batch）；默认参数 maxSize=100 /
   flushIntervalMs=5000 / retryBaseMs=500 / maxRetries=5 / failoverThreshold=3，
-  落盘路径默认 `~/.sillyhub/daemon/audit-failed.jsonl`；`nullSender` 空实现
+  落盘路径默认 `<daemonStateDir()>/audit-failed.jsonl`（SILLYHUB_DAEMON_DIR 隔离生效——quick 2026-09-01 修直拼 homedir() 漏项）；`nullSender` 空实现
   （未注入上报通道时静默丢，不阻断）。
 - deny reason 四行中文模板：`Runtime Policy 拒绝本次写入。/ Agent：<provider> /
   目标路径：<path> / 原因：<cause>`；cause 三种——目标目录未配置为可写目录 /

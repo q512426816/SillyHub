@@ -309,3 +309,38 @@ async def test_edit_binding_appends_new_path_keeps_old(
     assert binding.root_path == "/srv/new"
     roots = await _reload_runtime_roots(db_session, rt)
     assert roots == ["/opt/existing", "/srv/old", "/srv/new"]
+
+
+async def test_tilde_root_rebind_does_not_append_duplicate(
+    db_session: AsyncSession, recording_hub: _RecordingHub
+) -> None:
+    """``~`` 根幂等（quick 风险审查修）：``~`` 形态 backend 无法展开、不参与
+    前缀覆盖判定，但重复保存同一路径按精确等值视为已覆盖——不得每次 PUT
+    都追加一条重复项（DB JSON 与 policy_update 载荷单调膨胀）。首次追加
+    语义不变。"""
+    user = await _make_user(db_session)
+    ws_id = await _make_workspace(db_session, owner_id=user)
+    daemon_id, rt = await _make_daemon_runtime(db_session, user, runtime_roots=["/opt/existing"])
+
+    await upsert_my_binding(
+        db_session,
+        ws_id,
+        user,
+        daemon_id=daemon_id,
+        root_path="~/proj",
+        path_source="daemon-client",
+    )
+    assert await _reload_runtime_roots(db_session, rt) == ["/opt/existing", "~/proj"]
+
+    # 编辑路径（Edit 保存同一路径）→ 精确等值判定已覆盖，不再追加。
+    await upsert_my_binding(
+        db_session,
+        ws_id,
+        user,
+        daemon_id=daemon_id,
+        root_path="~/proj",
+        path_source="daemon-client",
+    )
+    assert await _reload_runtime_roots(db_session, rt) == ["/opt/existing", "~/proj"]
+    # 首次绑定推送过一次；第二次保存零推送（未发生合并）。
+    assert len(recording_hub.calls) == 1

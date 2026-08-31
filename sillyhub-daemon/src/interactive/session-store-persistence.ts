@@ -2,7 +2,8 @@
  * interactive/session-store-persistence.ts —— sessions.json 元数据持久化（task-10 §4.2）。
  *
  * 职责：
- *   - load：从 ~/.sillyhub/daemon/sessions.json 加载可恢复 interactive session 元数据。
+ *   - load：从 `<daemonStateDir()>/sessions.json`（默认 ~/.sillyhub/daemon，
+ *     SILLYHUB_DAEMON_DIR 隔离生效）加载可恢复 interactive session 元数据。
  *     文件不存在 → []（不创建）。损坏 JSON / version 不支持 → quarantine + []（不崩 daemon）。
  *     单条记录 schema 非法 → 该条丢弃（损坏隔离），其余保留。
  *     ql-20260825-f6#1：目标缺失 / 为空时先尝试从同目录 tmp 残留恢复（mtime 最新
@@ -42,23 +43,26 @@ import {
   unlink,
   writeFile,
 } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { basename, dirname, join } from 'node:path';
+import { join, basename, dirname } from 'node:path';
+import { daemonStateDir } from '../config.js';
 import {
   SESSION_FILE_VERSION,
   type PersistedSessionFile,
   type PersistedSessionRecord,
 } from './types.js';
 
-/** 默认文件路径：~/.sillyhub/daemon/sessions.json（task-10 §4.1 / config.ts）。 */
-export const DEFAULT_SESSION_FILE = join(
-  // 延迟 import 避免与 config.ts 循环（config.ts 仅导出常量，运行时无副作用）。
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  homedir(),
-  '.sillyhub',
-  'daemon',
-  'sessions.json',
-);
+/**
+ * 默认文件路径：`<daemonStateDir()>/sessions.json`（默认 ~/.sillyhub/daemon）。
+ *
+ * quick 风险审查修（2026-09-01）：SILLYHUB_DAEMON_DIR 隔离收口漏项——原实现
+ * 直拼 homedir()，隔离实例会读写真实主目录的会话存档（启动 recover 加载真实
+ * 用户会话、周期 flush 以本实例快照整文件覆写，与主实例并发互相清档）。
+ * 函数化懒求值：构造时现读 env（对齐 config.ts daemonStateDir 语义），进程内
+ * 测试 stubEnv 后无需 resetModules。
+ */
+export function defaultSessionFilePath(): string {
+  return join(daemonStateDir(), 'sessions.json');
+}
 
 /** 持久化错误（稳定 code 供 daemon 启动日志/测试识别）。 */
 export class SessionPersistenceError extends Error {
@@ -261,7 +265,7 @@ export class JsonSessionPersistence {
   /** 串行化 promise queue：save 调用按顺序排队（最后一条 win，防并发写损坏）。 */
   private _saveQueue: Promise<void> = Promise.resolve();
 
-  constructor(filePath: string = DEFAULT_SESSION_FILE) {
+  constructor(filePath: string = defaultSessionFilePath()) {
     this._filePath = filePath;
   }
 

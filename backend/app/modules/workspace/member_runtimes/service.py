@@ -75,8 +75,10 @@ async def _merge_workspace_root_into_owned_daemon_roots(
     - 只增不减：非空原值保留后追加；空值（legacy per-runtime 下沉前）先物化
       instance 兜底再追加，绝不收窄现有白名单。
     - 幂等：root_path 已被某条绝对根覆盖（边界敏感 + Windows 大小写不敏感）则
-      跳过；``~`` 根 backend 无法展开、不参与覆盖判定（追加无害——daemon 侧
-      同步时本就并入 homedir）。
+      跳过；``~`` 根 backend 无法展开、不参与前缀覆盖判定，但**精确等值**视为
+      已覆盖——重复保存同一路径不二次追加（否则每次 PUT 都会多一条重复项，
+      DB JSON 与 policy_update 载荷单调膨胀；追加本身在 daemon 侧同名根幂等
+      无害，此判定只为防堆积）。
     - 相对路径（非绝对 / ``~`` 开头）防御性跳过，不阻断绑定本身。
     - 返回被修改的 runtime 行；随调用方（upsert_my_binding）的单次 commit 一并
       落库，commit 后由调用方 best-effort 推送 ``policy_update``。
@@ -103,7 +105,10 @@ async def _merge_workspace_root_into_owned_daemon_roots(
             # legacy 空值：物化 instance 机器级兜底，语义对齐派发侧回退链
             # （agent/service.py::_apply_profile_to_lease 的 runtime→instance 回退）。
             current = list(daemon.allowed_roots or [])
-        if any(not r.startswith("~") and _root_covers_path(r, root_path) for r in current):
+        if any(
+            r == root_path or (not r.startswith("~") and _root_covers_path(r, root_path))
+            for r in current
+        ):
             continue
         rt.allowed_roots = [*current, root_path]
         rt.updated_at = now

@@ -23,7 +23,7 @@
 // 轮询断言用 fake timers + advanceTimersByTimeAsync 冲刷轮询 promise 链。
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 vi.mock("@/components/ui/markdown-text", () => ({
@@ -70,6 +70,8 @@ const daemonMock = vi.hoisted(() => ({
   fetchSessionQueue: vi.fn(),
   fetchSessionDialogHistory: vi.fn(),
   listSessionTeamMissions: vi.fn(),
+  // quick 风险审查修（2026-09-01）：挂起横幅「继续对话」按钮 → reopenSession。
+  reopenSession: vi.fn().mockResolvedValue({}),
 }));
 vi.mock("@/lib/daemon", async () => {
   const actual = await vi.importActual<typeof import("@/lib/daemon")>("@/lib/daemon");
@@ -289,6 +291,9 @@ describe("SessionPanel（page）suspended 横幅 + 输入禁用（task-10 / 原�
       screen.getByText("会话已挂起——守护进程在线后将自动恢复，也可点「继续对话」立即恢复"),
     ).toBeInTheDocument();
     expect(screen.getByText(/挂起超过 24 小时才会被标记为失败/)).toBeInTheDocument();
+    // quick 风险审查修（2026-09-01）：文案承诺的「继续对话」入口真实存在且可点
+    // （此前唯一 reopen 按钮只在 ended/恢复超时横幅渲染，承诺落空）。
+    expect(screen.getByTestId("suspended-resume-button")).toBeEnabled();
     // 头部徽标「已挂起」
     expect(screen.getByText("已挂起")).toBeInTheDocument();
     // 输入禁用 + 占位文案（原型⑤）
@@ -301,6 +306,28 @@ describe("SessionPanel（page）suspended 横幅 + 输入禁用（task-10 / 原�
     // 不显示终态「重新开启」横幅（suspended 恢复自动完成，无手动入口）
     expect(screen.queryByText(/会话恢复超时/)).toBeNull();
     expect(screen.queryByText(/可浏览历史消息/)).toBeNull();
+  });
+
+  it("quick 风险审查修：挂起横幅「继续对话」按钮点击 → reopenSession 手动恢复通道", async () => {
+    daemonMock.getAgentSession.mockResolvedValue(suspendedDetail());
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <SessionPanel
+          mode="page"
+          sessionId="s-1"
+          machines={offlineMachines()}
+          llmProviders={[]}
+        />
+      </QueryClientProvider>,
+    );
+    await flushEstablish();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("suspended-resume-button"));
+    });
+    expect(daemonMock.reopenSession).toHaveBeenCalledWith("s-1");
+    expect(daemonMock.reopenSession).toHaveBeenCalledTimes(1);
   });
 
   it("恢复翻转：suspended → reconnecting（挂起横幅消失、既有恢复中展示接管）→ active（输入恢复）", async () => {
@@ -432,9 +459,10 @@ describe("SessionPanel（dialog）attach 挂起会话（task-10 / 原型⑤⑥�
       await flushEstablish();
 
       // 首个 attach 轮询 tick（1.5s）识别挂起 → 横幅 + 输入禁用
+      // （quick 风险审查修：dialog 变体无 reopen 机制，文案只保自动恢复承诺）
       await advance(1500);
       expect(
-        screen.getByText("会话已挂起——守护进程在线后将自动恢复，也可点「继续对话」立即恢复"),
+        screen.getByText("会话已挂起——守护进程在线后将自动恢复"),
       ).toBeInTheDocument();
       const ta = screen.getByPlaceholderText(
         "等待守护进程恢复后可继续对话…",
