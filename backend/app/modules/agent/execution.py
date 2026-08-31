@@ -357,6 +357,26 @@ async def prepare_worker_worktree(
         # X-001 空值兜底：ws.default_branch 可空（execution.py:122 同款语义），
         # 空 → "HEAD"（工作区未提交改动不带入副本，design §7）。
         base_ref = ws.default_branch or "HEAD"
+        # ql-20260831-007：default_branch 真实性探测兜底。建档缺省值是 'main'
+        # （schema.py:115），仓库实际分支非 main 时 worktree add 直接
+        # "Not a valid object name" 断派发链（生产 crrcdt-hubin pmp-web-ui 连续
+        # 4 次 worktree_create_failed 实证）。经既有 git_rev_parse RPC 验证 ref
+        # 可解析（daemon 侧 rev-parse，_via_rpc_or_degrade 降级返 None 不抛）；
+        # 不可解析 / 探测异常 → 回退 HEAD（以仓库当前 checkout 为基准，等价
+        # 「用仓库现存分支」语义；可解析则配置照常生效，行为零变化）。
+        if base_ref != "HEAD":
+            try:
+                resolved_ref = await host_fs_delegate.git_rev_parse(ws, ref=base_ref)
+            except Exception:
+                resolved_ref = None
+            if not resolved_ref:
+                log.warning(
+                    "mission_worker_base_ref_missing_fallback_head",
+                    run_id=str(run.id),
+                    workspace_id=str(ws.id),
+                    default_branch=base_ref,
+                )
+                base_ref = "HEAD"
         # BE-P1-2（2026-08-21 审查）：git_worktree_add 走 _via_rpc 通道时，目标
         # workspace 无 bound daemon 会直接抛 HostFsDelegateUnavailable（不走
         # _via_rpc_or_degrade 的降级 dict 路径）。原先该异常冒泡回 mcp 端点 re-raise

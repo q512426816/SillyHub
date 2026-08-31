@@ -64,15 +64,26 @@ async def _make_worker(session: AsyncSession, *, mission_id: uuid.UUID) -> Agent
     return run
 
 
-def _make_delegate_mock(*, ok: bool, worktree_path: str | None = None, error: str | None = None):
+def _make_delegate_mock(
+    *,
+    ok: bool,
+    worktree_path: str | None = None,
+    error: str | None = None,
+    rev_parse_commit: str | None = "sha-abc123",
+):
     """Build a fake HostFsDelegate with git_worktree_add as a recording AsyncMock.
 
     task-05（2026-08-24-session-team-mission-context）：本文件用例均验「探测=git
     → 照旧 worktree」链路，probe 固定返 "git"（direct/unknown 分支见
     test_dispatch_worker_direct_mode.py）。仅 mock 补齐，断言零改动。
+
+    ql-20260831-007：git_rev_parse 补 mock——default_branch 真实性探测默认
+    「可解析」（返回 commit 串，既有用例 base_ref=='main' 断言保持）；传
+    ``rev_parse_commit=None`` 可模拟「仓库无该分支」触发 HEAD 兜底。
     """
     delegate = MagicMock()
     delegate.probe_workspace_git_mode = AsyncMock(return_value="git")
+    delegate.git_rev_parse = AsyncMock(return_value=rev_parse_commit)
     delegate.git_worktree_add = AsyncMock(
         return_value={
             "ok": ok,
@@ -318,3 +329,102 @@ async def test_dispatch_worker_marks_failed_when_dispatch_returns_none(
     assert run.status == "failed"
     assert run.error_code == "no_online_daemon"
     assert run.finished_at is not None
+
+
+# ---------------------------------------------------------------------------
+# ql-20260831-007：default_branch 真实性探测兜底
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dispatch_worker_base_ref_falls_back_to_head_when_branch_missing(
+    db_session: AsyncSession,
+) -> None:
+    """default_branch 在仓库不可解析（如建档缺省 'main' 而仓库用 master）→ 回退 HEAD。
+
+    生产实证（crrcdt-hubin pmp-web-ui）：仓库无 main 分支，worktree add 报
+    "fatal: Not a valid object name: 'main'"，run 标 worktree_create_failed
+    连续 4 次断派发链。探测不可解析 → base_ref 改传 HEAD（当前 checkout 基准）。
+    """
+    ws_id = await _make_workspace(db_session, root_path="/tmp/repo", default_branch="main")
+    mission = AgentMission(workspace_id=ws_id, objective="o")
+    db_session.add(mission)
+    await db_session.commit()
+    await db_session.refresh(mission)
+    run = await _make_worker(db_session, mission_id=mission.id)
+
+    # rev-parse 'main' 不可解析（仓库实际无该分支）。
+    delegate = _make_delegate_mock(
+        ok=True, worktree_path="/tmp/repo/.worktrees/abcd1234", rev_parse_commit=None
+    )
+    fake_placement = MagicMock()
+    fake_placement.dispatch_to_daemon = AsyncMock(return_value=uuid.uuid4())
+    svc = MissionExecutionService(db_session, placement=fake_placement, host_fs_delegate=delegate)
+
+    lease_id = await svc.dispatch_worker(
+        run, workspace_id=ws_id, user_id=uuid.uuid4(), read_only=False
+    )
+
+    assert lease_id is not None
+    delegate.git_worktree_add.assert_awaited_once()
+    wt_kwargs = delegate.git_worktree_add.call_args.kwargs
+    assert wt_kwargs["base_ref"] == "HEAD"
+    # 探测调用本身携带原 default_branch（可观测性：日志与 mock 双证）。
+    rev_kwargs = delegate.git_rev_parse.call_args.kwargs
+    assert rev_kwargs["ref"] == "main"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_worker_base_ref_falls_back_to_head_when_probe_raises(
+    db_session: AsyncSession,
+) -> None:
+    """探测异常（RPC 抛错，防御路径）→ 同样回退 HEAD，不阻断派发。"""
+    ws_id = await _make_workspace(db_session, root_path="/tmp/repo", default_branch="main")
+    mission = AgentMission(workspace_id=ws_id, objective="o")
+    db_session.add(mission)
+    await db_session.commit()
+    await db_session.refresh(mission)
+    run = await _make_worker(db_session, mission_id=mission.id)
+
+    delegate = _make_delegate_mock(ok=True, worktree_path="/tmp/repo/.worktrees/abcd1234")
+    delegate.git_rev_parse = AsyncMock(side_effect=RuntimeError("rpc boom"))
+    fake_placement = MagicMock()
+    fake_placement.dispatch_to_daemon = AsyncMock(return_value=uuid.uuid4())
+    svc = MissionExecutionService(db_session, placement=fake_placement, host_fs_delegate=delegate)
+
+    lease_id = await svc.dispatch_worker(
+        run, workspace_id=ws_id, user_id=uuid.uuid4(), read_only=False
+    )
+
+    assert lease_id is not None
+    delegate.git_worktree_add.assert_awaited_once()
+    wt_kwargs = delegate.git_worktree_add.call_args.kwargs
+    assert wt_kwargs["base_ref"] == "HEAD"
+
+
+@pytest.mark.asyncio
+async def test_dispatch_worker_base_ref_keeps_configured_branch_when_resolvable(
+    db_session: AsyncSession,
+) -> None:
+    """default_branch 可解析 → 配置照常生效（存在时行为零变化）。"""
+    ws_id = await _make_workspace(db_session, root_path="/tmp/repo", default_branch="release")
+    mission = AgentMission(workspace_id=ws_id, objective="o")
+    db_session.add(mission)
+    await db_session.commit()
+    await db_session.refresh(mission)
+    run = await _make_worker(db_session, mission_id=mission.id)
+
+    delegate = _make_delegate_mock(
+        ok=True, worktree_path="/tmp/repo/.worktrees/abcd1234", rev_parse_commit="sha-xyz"
+    )
+    fake_placement = MagicMock()
+    fake_placement.dispatch_to_daemon = AsyncMock(return_value=uuid.uuid4())
+    svc = MissionExecutionService(db_session, placement=fake_placement, host_fs_delegate=delegate)
+
+    lease_id = await svc.dispatch_worker(
+        run, workspace_id=ws_id, user_id=uuid.uuid4(), read_only=False
+    )
+
+    assert lease_id is not None
+    wt_kwargs = delegate.git_worktree_add.call_args.kwargs
+    assert wt_kwargs["base_ref"] == "release"

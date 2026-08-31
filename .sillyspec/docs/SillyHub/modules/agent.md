@@ -33,7 +33,7 @@ created_at: 2026-08-18 01:45:00
 - **协调与执行**：
   - ExecutionCoordinatorService：幂等 key、AgentSpecBundle 指纹（compute/validate）、resume token、checkpoint 存读、审批请求/通过。
   - MissionService + MissionControlService：mission 生命周期（多 worker）、`derive_status` 聚合 worker 状态、`can_dispatch_worker` 并发/成本预算校验、cancel。
-  - MissionExecutionService：单 worker `dispatch_worker`（含 read_only 工具配置）、产物收集（collect_artifact / collect_completed_artifacts）。
+  - MissionExecutionService：单 worker `dispatch_worker`（含 read_only 工具配置）、产物收集（collect_artifact / collect_completed_artifacts）。per-worker worktree 基准分支探测兜底（ql-20260831-007）：`prepare_worker_worktree`（团队/子会话两派发路径共用）对 `ws.default_branch` 先经 host_fs `git_rev_parse` 验证可解析（建档缺省值是 'main'，仓库实际分支非 main 时 worktree add 直接 "Not a valid object name" 断派发链）；不可解析/探测异常 → 回退 `HEAD`（当前 checkout 基准）+ warning，可解析则配置照常生效。
 - **辅助组件**：placement（选在线 daemon）、borrow_resolver/context_builder（借用工作区解析与上下文组装；`build_scan_bundle` 按 SpecWorkspace.strategy 三分支生成 scan 指令——platform-managed（含读取失败回退）/repo-mirrored 走平台参数模板，repo-native 走本地模板（`sillyspec run scan --dir <root>` 零平台参数、无 init，产物落源码 `.sillyspec/` 经 CLI 内置 sync 上行），与 stage 派发的 platform-managed 门禁共同消除 scan/stage 注入不对称（2026-08-23-repo-native-spec-backfill））、post_scan_validator（扫描后校验）、delegation（GLM 委派路由）、orchestrator、diff_collector/finalizer（execute 收口合并与清理）、skills_bundle_service（技能 bundle + `read_skill_md` 白名单固定读 SKILL.md 防穿越）、mcp_tools、tool_kind。
 
 ## 关键逻辑
