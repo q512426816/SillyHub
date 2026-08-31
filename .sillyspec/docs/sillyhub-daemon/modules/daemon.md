@@ -80,5 +80,5 @@ RPC handler 注册: list_dir / host_fs.* / get_spec_bundle
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->
-
+- ql-20260831-005：SESSION_INJECT 四条静默丢弃路径改为立即回报 run failed（实机案：生产 wp 机会话 84cf91ab——inject delivered 后被 _routeSessionControl 校验丢弃只 warn，run 挂 pending 10 分钟才被 GC 用笼统 interactive_inject_send_failed 收敛，丢弃原因永不到前端）。新增 _reportInjectDropped(raw, reason)：payload 自带 run_id/lease_id/claim_token 三件齐才上报（P2b 同款 notifyRunResult error_during_execution+result_summary，summary 落 output_redacted 经 SessionRunRead.failure_summary 透出，接 ql-20260831-004 链）；缺 run_id/claim_token 仅 warn（backend 10min GC 兜底仍在）。接入点：no_manager / session_not_found（重试后）/ lease_mismatch / missing_fields（仅 run_id 在时），INTERRUPT/END 的 not_found 是良性终态收敛维持纯 warn。
 <!-- MANUAL_NOTES_END -->

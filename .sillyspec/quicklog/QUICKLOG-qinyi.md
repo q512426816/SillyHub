@@ -310,3 +310,12 @@
 方案：backend SessionRunRead 加 failure_summary（validation_alias 映射 output_redacted）；GC inject 过期联动按 delivered_at 分桶写中文原因；normalize 新增 buildSystemFailureItem（failure_summary 优先+撞闸识别+error_code 映射）；session-panel 三处失败卡逐级兜底；gen:types 双端重生成；模块文档 2 份同步
 结果：backend 27 用例绿（新增 2）；frontend 67 用例绿（新增 3，夹具按规则 21 补字段）；ruff check/format 0、mypy 0；frontend/daemon tsc 0；gen:types 双端已同步
 审计：⚖️ 归属切分：4 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/openapi.json, frontend/src/components/daemon/__tests__/session-panel-ctx-tokens.test.tsx, frontend/src/lib/api-types.ts, sillyhub-daemon/src/api-types.ts
+
+## ql-20260831-005-c7a7 | 2026-08-31 10:34:16 | SESSION_INJECT 静默丢弃改为立即回报失败带原因（王鹏案根治）
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/daemon.ts, sillyhub-daemon/tests/daemon-inject-drop-report.test.ts
+需求：SESSION_INJECT 静默丢弃改为立即回报失败带原因（王鹏案根治）
+根因：daemon 四条丢弃路径只 warn 不回报，run 挂 pending 等 10 分钟 GC 用笼统 interactive_inject_send_failed 收敛，丢弃原因永不到前端（实机案生产 wp 机 84cf91ab）
+方案：_routeSessionControl 四路径接入 _reportInjectDropped：payload 自带 run_id/lease_id/claim_token 三件齐时 notifyRunResult 失败带中文原因（P2b 同款），summary 经 failure_summary 透出；不齐仅 warn 由 GC 兜底；新增 daemon-inject-drop-report.test.ts 六用例；daemon.md 同步
+结果：新测试 6 绿；回归 resume-route/ws-session-control/kind-dispatch/control-dispatcher 55 绿 + interactive-bridge 32 绿；tsc 0 错

@@ -5012,6 +5012,12 @@ export class Daemon {
   ): Promise<void> {
     if (!this._sessionManager) {
       this._logger.warn('session_control_no_manager', { type: msgType });
+      // ql-20260831-005：INJECT 静默丢弃即回报 run failed（payload 三件齐时），
+      // 不让 run 挂到 10 分钟 GC 才以笼统 interactive_inject_send_failed 收敛
+      // （实机案：生产 wp 机 84cf91ab，delivered 后无回执）。
+      if (msgType === MSG.SESSION_INJECT) {
+        await this._reportInjectDropped(raw, 'daemon 会话管理器未初始化，消息未被处理');
+      }
       return;
     }
     // task-08（session-history-enhance / FR-2）：SESSION_RESUME 在 session 尚未在
@@ -5050,6 +5056,14 @@ export class Daemon {
         type: msgType,
         session_id: sessionId,
       });
+      // ql-20260831-005：INJECT 丢弃即回报（同 no_manager 注释；INTERRUPT/END
+      // 的 not_found 是良性终态收敛——会话已不在，无 run 可失败，维持纯 warn）。
+      if (msgType === MSG.SESSION_INJECT) {
+        await this._reportInjectDropped(
+          raw,
+          'daemon 本地无该会话状态（会话可能已结束、或 daemon 重启后未恢复），消息未被处理',
+        );
+      }
       return;
     }
     if (state.leaseId !== leaseId) {
@@ -5060,6 +5074,13 @@ export class Daemon {
         expected_lease_id: state.leaseId,
         received_lease_id: leaseId,
       });
+      // ql-20260831-005：INJECT 丢弃即回报（收到指令的 run 不能挂着等 GC）。
+      if (msgType === MSG.SESSION_INJECT) {
+        await this._reportInjectDropped(
+          raw,
+          '消息指令与会话的 lease 不一致（daemon 防误操作校验拒绝执行）',
+        );
+      }
       return;
     }
 
@@ -5074,6 +5095,14 @@ export class Daemon {
             run_id: runId,
             prompt_len: prompt.length,
           });
+          // ql-20260831-005：run_id 在即可回报该 run 失败；run_id 缺失无法定位
+          // run（backend GC 联动同样依赖 payload.run_id），维持纯 warn。
+          if (runId) {
+            await this._reportInjectDropped(
+              raw,
+              '消息指令缺少必要字段（prompt 为空），daemon 无法执行',
+            );
+          }
           return;
         }
         // gap-8.4（design §11）：SESSION_INJECT 带 lease 级 claim_token（recover 后
@@ -5118,6 +5147,65 @@ export class Daemon {
       default: {
         this._logger.warn('session_control_unknown_type', { type: msgType });
       }
+    }
+  }
+
+  /**
+   * ql-20260831-005：SESSION_INJECT 被 daemon 丢弃时立即回报 run failed。
+   *
+   * 背景（实机案：生产 wp 机会话 84cf91ab）：inject 已 delivered 但被
+   * _routeSessionControl 的校验路径静默丢弃（只 warn），run 在 backend 挂起
+   * pending，用户等 10 分钟才被控制指令 GC 用笼统 interactive_inject_send_failed
+   * 收敛——原因（走了哪条丢弃路径）永远到不了前端。修：丢弃时用 inject payload
+   * 自带的 run_id/lease_id/claim_token 立即 notifyRunResult 失败（P2b 同款
+   * error_during_execution + is_error + result_summary 模式，:6105 先例），
+   * result_summary 落 AgentRun.output_redacted → 经 SessionRunRead.failure_summary
+   * 透出到前端错误卡（ql-20260831-004 链）。
+   *
+   * 约束：payload 三件（run_id/lease_id/claim_token）齐才上报——缺 run_id 无法
+   * 定位 run（backend close_interactive_run 按 run_id 寻行），缺 claim_token 过
+   * 不了 lease 校验；不齐仅记 warn（该形状 backend 本就不产，防御路径）。
+   * 上报失败仅 warn：与 P2b 同语义，backend 侧 10min GC 兜底仍在。
+   */
+  private async _reportInjectDropped(
+    raw: Record<string, unknown>,
+    reason: string,
+  ): Promise<void> {
+    const runId =
+      (raw.run_id as string | undefined) ?? (raw.runId as string | undefined) ?? '';
+    const leaseId =
+      (raw.lease_id as string | undefined) ?? (raw.leaseId as string | undefined) ?? '';
+    const claimToken =
+      (raw.claim_token as string | undefined) ??
+      (raw.claimToken as string | undefined) ??
+      '';
+    if (!runId || !leaseId || !claimToken) {
+      this._logger.warn('inject_drop_report_skipped_missing_fields', {
+        run_id: runId,
+        lease_id: leaseId,
+        has_claim_token: Boolean(claimToken),
+        reason,
+      });
+      return;
+    }
+    try {
+      await this._client.notifyRunResult(leaseId, claimToken, runId, {
+        status: 'error_during_execution',
+        is_error: true,
+        result_summary: `daemon 丢弃消息指令：${reason}；本轮失败`,
+      });
+      this._logger.info('inject_drop_reported', {
+        run_id: runId,
+        lease_id: leaseId,
+        reason,
+      });
+    } catch (e) {
+      this._logger.warn('inject_drop_report_failed', {
+        run_id: runId,
+        lease_id: leaseId,
+        reason,
+        error: e,
+      });
     }
   }
 
