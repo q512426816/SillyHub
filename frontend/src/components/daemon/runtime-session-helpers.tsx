@@ -159,26 +159,24 @@ export function isActiveSession(s: AgentSessionRead): boolean {
  * claude 或 codex + 有 agent_session_id + 终态（ended/failed）可恢复。
  * active 本就活跃（不显示按钮，走只读回看 ql-007）；
  * 无 agent_session_id（create 失败的 failed）无法恢复（D-007：缺 threadId 不得伪造恢复）。
- * task-10（2026-08-29-daemon-platform-resilience / D-001@v1）：suspended 不可手动
- * 续聊——daemon 重启后自动恢复（suspended → reconnecting → active），无需用户操作；
- * 按钮保留「显示禁用态」交互（对齐 pending/reconnecting 现状：显示但不可点，
- * resumeDisabledTitle 给出说明），不隐藏入口。
+ * ql-20260831-012：suspended 放开手动续聊——backend reopen 本就接受 suspended
+ *（不在 ACTIVE_SESSION_STATUSES），此前前端禁用是误判；守护进程在线时
+ * backend 巡检自动救回（recover_suspended_sessions_once）+ 用户手动 reopen
+ *（SESSION_RESUME 控制指令落库 pending，daemon 回连补拉）双通道。
  */
 export function canResumeSession(session: AgentSessionRead | null): boolean {
   if (!session) return false;
   return (
     (session.provider === "claude" || session.provider === "codex") &&
     !!session.agent_session_id &&
-    (session.status === "ended" || session.status === "failed")
+    (session.status === "ended" ||
+      session.status === "failed" ||
+      (session.status as AgentSessionStatusWithSuspended) === "suspended")
   );
 }
 
 /** 续聊按钮不可用时的 title 提示文案。 */
 export function resumeDisabledTitle(session: AgentSessionRead): string {
-  // task-10：suspended 专用文案——等待守护进程自动恢复，非「不支持续聊」。
-  if ((session.status as AgentSessionStatusWithSuspended) === "suspended") {
-    return "会话已挂起，守护进程重新上线后将自动恢复";
-  }
   if (session.provider !== "claude" && session.provider !== "codex") {
     return "当前会话不支持续聊";
   }

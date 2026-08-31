@@ -242,21 +242,15 @@ describe("runtime-session-helpers suspended 词表（task-10 / D-001）", () => 
     expect(isActiveSession(suspendedSession())).toBe(true);
   });
 
-  it("canResumeSession：suspended 不可手动续聊（daemon 回归自动恢复）", () => {
-    // 同一会话 ended 可续聊、suspended 不可——对照锁定词表语义。
-    expect(canResumeSession(suspendedSession())).toBe(false);
+  it("canResumeSession：suspended 可手动续聊（ql-20260831-012 放开）", () => {
+    // backend reopen 本就接受 suspended；自动救回 + 手动 reopen 双通道。
+    expect(canResumeSession(suspendedSession())).toBe(true);
     expect(
       canResumeSession(suspendedSession({ status: "ended" })),
     ).toBe(true);
   });
 
-  it("resumeDisabledTitle：suspended 专用文案（非「不支持续聊」）", () => {
-    expect(resumeDisabledTitle(suspendedSession())).toBe(
-      "会话已挂起，守护进程重新上线后将自动恢复",
-    );
-  });
-
-  it("SessionHistoryView：suspended →「继续对话」按钮显示禁用态 + title 说明", () => {
+  it("SessionHistoryView：suspended →「继续对话」按钮可点（手动恢复通道）", () => {
     render(
       <SessionHistoryView
         session={suspendedSession()}
@@ -267,9 +261,8 @@ describe("runtime-session-helpers suspended 词表（task-10 / D-001）", () => 
         onContinue={vi.fn()}
       />,
     );
-    const btn = screen.getByTitle("会话已挂起，守护进程重新上线后将自动恢复");
-    expect(btn).toBeDisabled();
-    expect(screen.getByText("继续对话")).toBeInTheDocument();
+    const btn = screen.getByText("继续对话");
+    expect(btn).toBeEnabled();
   });
 });
 
@@ -291,9 +284,9 @@ describe("SessionPanel（page）suspended 横幅 + 输入禁用（task-10 / 原�
     );
     await flushEstablish();
 
-    // 挂起横幅（主行 + 24h 副行）
+    // 挂起横幅（主行 + 24h 副行；ql-20260831-012：文案改为双通道恢复提示）
     expect(
-      screen.getByText("会话已挂起——守护进程不在线，重新启动后会话将自动恢复"),
+      screen.getByText("会话已挂起——守护进程在线后将自动恢复，也可点「继续对话」立即恢复"),
     ).toBeInTheDocument();
     expect(screen.getByText(/挂起超过 24 小时才会被标记为失败/)).toBeInTheDocument();
     // 头部徽标「已挂起」
@@ -441,7 +434,7 @@ describe("SessionPanel（dialog）attach 挂起会话（task-10 / 原型⑤⑥�
       // 首个 attach 轮询 tick（1.5s）识别挂起 → 横幅 + 输入禁用
       await advance(1500);
       expect(
-        screen.getByText("会话已挂起——守护进程不在线，重新启动后会话将自动恢复"),
+        screen.getByText("会话已挂起——守护进程在线后将自动恢复，也可点「继续对话」立即恢复"),
       ).toBeInTheDocument();
       const ta = screen.getByPlaceholderText(
         "等待守护进程恢复后可继续对话…",

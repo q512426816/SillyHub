@@ -380,3 +380,12 @@
 根因：GLM 兼容端点 message_start 不带 input（实证轮内↑0 终态才有值），daemon 只从 message_start 取输入、delta 只读 output/cache——若 GLM 在 delta 携带 cumulative input 也被丢弃，轮内输入无法实时显示
 方案：session-manager _bufferPartial delta 分支补 input 差分累加：新增 lastCallInputTokens 基线（message_start 设 startUsage 值），delta 带 cumulative input 时差分累加 session/turn 双计数器并同步 main 桶 ctx；三形态全覆盖（官方 delta 无 input 零影响/start 带 input 差分 0 不翻倍/start 无 input 全额计入），补 3 个差分用例
 结果：usage-cache 5 用例全绿（含 3 新），interactive 全套 55 文件 707 用例回归绿，tsc exit 0；daemon 待重建部署后 GLM 会话实测 delta 是否带 input
+
+## ql-20260831-012-cd5e | 2026-08-31 15:46:49 | suspended 会话搁浅自愈（runtime 回在线自动救回 + 前端放开手动续聊）
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/daemon/__tests__/session-suspended-display.test.tsx, frontend/src/components/daemon/runtime-session-helpers.tsx, frontend/src/components/daemon/session-panel.tsx（后端自动救回与并行会话 ql-20260831-006-6d67 撞车，rebase 采纳其 session_auto_recover_sweep_once，本会话重复实现让路删除）
+需求：suspended 会话搁浅自愈（runtime 回在线自动救回 + 前端放开手动续聊）
+根因：后端部署重启期间 daemon 心跳断超 600s，离线巡检挂起 active 主会话并取消 lease；runtime 回在线后 daemon 没重启不走 recover、cancelled lease 无人复活，suspended 永挂且前端禁用手动续聊（实机 574793c6）
+方案：前端 canResumeSession 放开 suspended（backend reopen 本就接受）+ 挂起横幅改双通道文案；后端自动救回原拟新增 recover_suspended_sessions_once，与并行会话 ql-20260831-006-6d67 的 session_auto_recover_sweep_once 同案撞车，rebase 采纳其更完善实现（含 min_age 防误抢优雅停机窗口），本侧重复实现删除
+结果：backend sweep 13 绿（新增 3）；前端 suspended-display 11 绿；ruff/mypy/tsc 0

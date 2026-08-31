@@ -178,4 +178,5 @@ stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
 
 <!-- MANUAL_NOTES_START -->
 - ql-20260831-004：run 失败原因透出链打通（实机两案：本机撞闸 SESSION_LIMIT_REACHED 原因只存 output_redacted 前端看不到；生产 wp 机会话 84cf91ab inject 已送达 daemon 但被静默丢弃，GC 判败只有 error_code 无文案）。① SessionRunRead 新增 failure_summary（validation_alias 直映 AgentRun.output_redacted，零查询改动；仅 failed 轮有语义——成功轮该列是 agent 输出摘要，前端勿当失败原因展示）；② control_commands GC inject 过期联动判败按 delivered_at 分桶写可读原因到 output_redacted（未送达=daemon 离线/断连 vs 已送达未执行=无回执）；③ 前端 normalize.buildSystemFailureItem + session-panel 三处失败轮错误卡逐级兜底（error_detail 模型层 → failure_summary → error_code 中文映射）。（遗留已清偿 ql-20260831-005-c7a7：daemon 侧 SESSION_INJECT 四条静默丢弃路径已改为立即 notifyRunResult 失败带中文原因，不再等 10 分钟 GC 收敛。）
+- ql-20260831-012-cd5e（前端部分）：suspended 放开手动续聊——canResumeSession 加 suspended（backend reopen 本就接受，此前前端禁用是误判）+ 挂起横幅改双通道文案（自动恢复+可点「继续对话」立即恢复）。后端自动救回与本条同案撞车，采纳并行会话先落地的 session_auto_recover_sweep_once（ql-20260831-006-6d67，含 AUTO_RECOVER_MIN_AGE_SEC 防误抢优雅停机窗口），本会话的后端重复实现已在 rebase 时让路删除；实机锚同为生产 574793c6（部署重启后端致 wp 心跳断超 600s 被离线巡检挂起，runtime 回在线后永挂）。
 <!-- MANUAL_NOTES_END -->

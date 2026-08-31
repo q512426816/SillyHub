@@ -3511,7 +3511,7 @@ function SessionPanelPage({
         >
           <div className="flex items-center gap-2">
             <PauseCircle aria-hidden className="h-3.5 w-3.5 shrink-0" />
-            <span>会话已挂起——守护进程不在线，重新启动后会话将自动恢复</span>
+            <span>会话已挂起——守护进程在线后将自动恢复，也可点「继续对话」立即恢复</span>
           </div>
           <p className="ml-[22px] mt-0.5 text-[11px] leading-4 text-info/80">
             历史消息完整保留，可在上方继续浏览；挂起超过 24 小时才会被标记为失败
@@ -5265,7 +5265,7 @@ function SessionPanelDialog(props: SessionPanelProps) {
         >
           <div className="flex items-center gap-2">
             <PauseCircle aria-hidden className="h-3.5 w-3.5 shrink-0" />
-            <span>会话已挂起——守护进程不在线，重新启动后会话将自动恢复</span>
+            <span>会话已挂起——守护进程在线后将自动恢复，也可点「继续对话」立即恢复</span>
           </div>
           <p className="ml-[22px] mt-0.5 text-[11px] leading-4 text-info/80">
             历史消息完整保留，可在下方继续浏览；挂起超过 24 小时才会被标记为失败
