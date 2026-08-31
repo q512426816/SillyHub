@@ -534,6 +534,14 @@ interface PartialFlushBuffer {
   /** 当前 API call 上次的 output_tokens（算 delta 用）。 */
   lastCallOutputTokens: number;
   /**
+   * ql-20260831-011：当前 API call 上次的 input_tokens（算 delta 用）。官方
+   * Claude message_delta 不带 input_tokens（缺失即跳过，零影响）；GLM 兼容端点
+   * 若在 delta 携带 cumulative input，差分累加让轮内输入实时显示（GLM
+   * message_start 无 input 的实证：轮内 ↑0、终态才有值）。
+   * message_start 设为 startUsage 值（缺失 0）。
+   */
+  lastCallInputTokens: number;
+  /**
    * task-02：本调用 cache 两维最新快照（main 桶 lastCallCtxTokens 差分重算用——
    * message_delta 不带 input_tokens，ctx 只能以「上次值 ± cache 差量」更新）。
    * message_start 设为 startUsage 值（缺失 0），message_delta 携带时 replace。
@@ -5456,6 +5464,7 @@ export class SessionManager {
         turnOutputTokens: 0,
         lastCallCtxTokens: 0,
         lastCallOutputTokens: 0,
+        lastCallInputTokens: 0,
         lastCallCacheReadTokens: 0,
         lastCallCacheCreationTokens: 0,
       };
@@ -5671,6 +5680,14 @@ export class SessionManager {
           }
           // 新 API call 开始，重置 per-call output tracker
           buf.lastCallOutputTokens = 0;
+          // ql-20260831-011：input tracker 不重置为 0 而是 startUsage 值——GLM
+          // 兼容端点 message_start 无 input（实证轮内 ↑0）而 delta 可能携带
+          // cumulative input；差分基线取 start 值（官方 Claude start 带 input 时
+          // delta 首值 - start = 0 不重复计）。start 无 input → 基线 0。
+          buf.lastCallInputTokens =
+            startUsage && typeof startUsage['input_tokens'] === 'number'
+              ? (startUsage['input_tokens'] as number)
+              : 0;
           buf.lastCallCacheReadTokens = 0;
           buf.lastCallCacheCreationTokens = 0;
           // task-02（FR-01 / D-006）：main 桶计算本调用 ctx = input + cache_read +
@@ -5748,6 +5765,23 @@ export class SessionManager {
           buf.lastCallOutputTokens = callOut;
           // task-02：轮级 output 同步累加同一差分（所有桶，复用 lastCallOutputTokens 差分）。
           buf.turnOutputTokens += outDelta;
+
+          // ql-20260831-011：input delta accumulation（与 output 同构差分）。官方
+          // Claude message_delta 不带 input_tokens → typeof 守卫不命中，零影响；
+          // GLM 兼容端点若在 delta 携带 cumulative input（message_start 无 input
+          // 场景），差分累加让轮内输入实时上报（前端 ↑执行中… → ↑数值）。
+          if (typeof u['input_tokens'] === 'number') {
+            const callIn = u['input_tokens'] as number;
+            const inDelta = Math.max(0, callIn - buf.lastCallInputTokens);
+            buf.sessionInputTokens += inDelta;
+            buf.turnInputTokens += inDelta;
+            buf.lastCallInputTokens = callIn;
+            // main 桶 ctx 同步加 input 差量（ctx = input+cache_read+cache_creation
+            // 瞬时量；cache 差量在下方 replace 块重算，此处先加 input 份额）。
+            if (buf.parentKey === 'main') {
+              buf.lastCallCtxTokens += inDelta;
+            }
+          }
 
           // ql-20260710-001（注释勘误 task-02）：cache 两维 replace——cache_*_input_tokens
           // 是本调用缓存前缀量的最新快照（per-call），取最新值覆盖而非 delta 累加

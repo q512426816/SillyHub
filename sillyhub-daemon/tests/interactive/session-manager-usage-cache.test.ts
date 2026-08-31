@@ -102,6 +102,9 @@ function streamMessageDelta(
   cacheRead: number,
   cacheCreation: number,
   outputTokens = 50,
+  // ql-20260831-011：可选 cumulative input（GLM 兼容端点形态；官方 Claude
+  // message_delta 不带该字段 → 省略即回归官方形态）。
+  inputTokens?: number,
 ): SDKMessage {
   return {
     type: 'stream_event',
@@ -111,6 +114,7 @@ function streamMessageDelta(
         output_tokens: outputTokens,
         cache_read_input_tokens: cacheRead,
         cache_creation_input_tokens: cacheCreation,
+        ...(inputTokens !== undefined ? { input_tokens: inputTokens } : {}),
       },
     },
   } as unknown as SDKMessage;
@@ -169,5 +173,71 @@ describe('ql-20260710-001 cache 聚合不翻倍（会话级快照语义）', () 
     // 会话级快照取最新值 350（不是 delta 累加的 300+350=650，也不是 300）
     expect(usage!.cache_read_tokens).toBe(350);
     expect(usage!.cache_creation_tokens).toBe(200);
+  });
+});
+
+// ql-20260831-011：message_delta 携带 cumulative input_tokens 的差分累加
+//（GLM 兼容端点形态——message_start 无 input、delta 带全量；官方 Claude delta
+// 不带 input，上述 describe 已覆盖零影响路径）。
+describe('ql-20260831-011 message_delta input 差分累加（GLM 兼容端点）', () => {
+  it('GLM 形态：message_start 无 input + delta 带 cumulative input 递增 → flush 等于终值（非逐条累加）', async () => {
+    const { driver, emitMessage } = makeMockDriver();
+    const deps = makeDeps();
+    const sm = new SessionManager({ driver, ...deps });
+    await sm.create(BASE_INPUT);
+
+    // message_start 不带 input_tokens（GLM 实证：轮内 ↑0）
+    emitMessage(streamMessageStart(300, 200, 0));
+    // delta 携带 cumulative input：96000 → 96055（流式期间递增）
+    emitMessage(streamMessageDelta(300, 200, 30, 96000));
+    emitMessage(streamMessageDelta(300, 200, 50, 96055));
+
+    await new Promise((r) => setTimeout(r, 600));
+
+    const usage = findFlushedUsage(deps.onTurnMessage.mock.calls);
+    expect(usage).toBeDefined();
+    // 差分累加：0(start) + 96000 + 55 = 96055（bug 下逐条全量累加 = 192055）
+    expect(usage!.input_tokens).toBe(96055);
+    expect(usage!.output_tokens).toBe(50);
+  });
+
+  it('官方形态防重复：message_start 带 input + delta 带同值 cumulative input → 差分 0 不翻倍', async () => {
+    const { driver, emitMessage } = makeMockDriver();
+    const deps = makeDeps();
+    const sm = new SessionManager({ driver, ...deps });
+    await sm.create(BASE_INPUT);
+
+    // start 已计 input=100；delta 携带同值 100（cumulative 含 start 份额）
+    emitMessage(streamMessageStart(300, 200, 100));
+    emitMessage(streamMessageDelta(300, 200, 50, 100));
+
+    await new Promise((r) => setTimeout(r, 600));
+
+    const usage = findFlushedUsage(deps.onTurnMessage.mock.calls);
+    expect(usage).toBeDefined();
+    // 差分基线 = start 值 100 → delta 差分 0，总 input 仍 100（不翻倍成 200）
+    expect(usage!.input_tokens).toBe(100);
+  });
+
+  it('跨 API call：第二轮 message_start 重置差分基线（start 无 input → 基线 0）', async () => {
+    const { driver, emitMessage } = makeMockDriver();
+    const deps = makeDeps();
+    const sm = new SessionManager({ driver, ...deps });
+    await sm.create(BASE_INPUT);
+
+    // 第一轮 call：delta input 到 1000
+    emitMessage(streamMessageStart(300, 200, 0));
+    emitMessage(streamMessageDelta(300, 200, 20, 1000));
+    // 第二轮 call（工具调用后继续）：message_start 无 input 重置基线，
+    // delta 携带本轮 cumulative input 500
+    emitMessage(streamMessageStart(300, 200, 0));
+    emitMessage(streamMessageDelta(300, 200, 30, 500));
+
+    await new Promise((r) => setTimeout(r, 600));
+
+    const usage = findFlushedUsage(deps.onTurnMessage.mock.calls);
+    expect(usage).toBeDefined();
+    // 轮级累计：1000 + 500 = 1500（若基线未随 start 重置，会丢 500 只剩 1000）
+    expect(usage!.input_tokens).toBe(1500);
   });
 });

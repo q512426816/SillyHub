@@ -369,3 +369,14 @@
 根因：旧实现 inputTokens null 时硬编码「↑0」误导；根因是 GLM 流式期间 message_start 不携带输入而 daemon 只从该事件取输入，轮内输入常 null（输出经 message_delta 实时累加正常显示）
 方案：turn-timeline.tsx TurnStatusBadge 输入分支对齐输出侧 isLive 处理：null+运行中→「↑执行中…」，终态 null 保持「↑0」旧口径；补回归用例断言运行中 null 输入显示「↑执行中…」且无「↑0」；changelog 追加
 结果：vitest turn-timeline-session-input-bar 22 用例全绿（含新用例），相邻 4 文件 18 用例回归绿，tsc --noEmit exit 0
+
+## ql-20260831-011-2d44 | 2026-08-31 13:09:15 | daemon message_delta 差分补读 input_tokens 轮内输入实时化
+状态：已完成
+关联变更：（无）
+文件：
+- sillyhub-daemon/src/interactive/session-manager.ts（delta 分支 input 差分累加+lastCallInputTokens 基线）
+- sillyhub-daemon/tests/interactive/session-manager-usage-cache.test.ts（补 GLM/官方/跨 call 三形态差分用例）
+需求：daemon message_delta 差分补读 input_tokens 轮内输入实时化
+根因：GLM 兼容端点 message_start 不带 input（实证轮内↑0 终态才有值），daemon 只从 message_start 取输入、delta 只读 output/cache——若 GLM 在 delta 携带 cumulative input 也被丢弃，轮内输入无法实时显示
+方案：session-manager _bufferPartial delta 分支补 input 差分累加：新增 lastCallInputTokens 基线（message_start 设 startUsage 值），delta 带 cumulative input 时差分累加 session/turn 双计数器并同步 main 桶 ctx；三形态全覆盖（官方 delta 无 input 零影响/start 带 input 差分 0 不翻倍/start 无 input 全额计入），补 3 个差分用例
+结果：usage-cache 5 用例全绿（含 3 新），interactive 全套 55 文件 707 用例回归绿，tsc exit 0；daemon 待重建部署后 GLM 会话实测 delta 是否带 input
