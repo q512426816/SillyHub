@@ -115,6 +115,10 @@ SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
 
 ## 变更索引
 
+- ql-20260831-016-6eb5 | confirm 图标槽结构修正（ql-015 迭代）：antd v6 confirm icon 槽对裸 lucide svg 的尺寸/间距样式不命中（实测压成 12x20 且与标题零间距）——封 confirmIcon(Icon, cls) helper 外包固定尺寸 span（h-6 w-6=24px shrink-0 防 flex 压缩 + mr-3=12px 间距），6 处 confirm 换用，实测 24x24 + 12px 间距
+- ql-20260831-015-c6fe | 确认弹窗图标功能语义化 + 「全部状态」含已归档（后端 archived 三态）：6 个 Modal.confirm 传 lucide 语义图标（删除=Trash2 destructive 红 / 归档=Archive / 取消归档=ArchiveRestore brand-600，h-5 w-5 适配 antd 32px icon 槽不变形）；后端 list_agent_sessions 与 facade archived: bool|None=False 三态、router Query(default=None)（HTTP 不传=全部含已归档），桌面树「全部状态」不传参即全部（行有徽标置灰区分），移动端默认视图与 use-daemon-machines 会话计数显式 archived=false 保持原语义；openapi+api-types 同步再生成
+- ql-20260831-014-c6fe | 会话列表 6 个确认弹窗去渐变色块图标（antd v6 confirm icon 槽压成 16x32 瘦条变形），对齐仓库主流 confirm 风格；ql-015 迭代为功能语义图标
+- ql-20260831-013-9043 | 会话归档 UX 重做（session-list-panel + sessions-portal + floating-session-host）：行级归档/取消归档按钮按 archived_at 二选一（原两按钮无条件齐显、点错侧后端幂等静默）；已归档行加「已归档」徽标（含归档时间 title）+ 整行 opacity-60 降调（hover 恢复）；归档视图顶部上下文横幅（数量 + 恢复指引）；归档/取消归档/批量操作加 useNotify toast——回调契约改返回失败个数（Promise.allSettled 口径，两个调用方同步），allSettled 不再吞失败
 - ql-20260831-012-5f60 | 输入胶囊 ＋ 功能按钮放大显形（session-input-bar）：antd text Button 的 h-10 w-10 被 .ant-btn height:32 钳成 40x32 椭圆、透明无边框不显眼 → 改原生 button（同菜单项模式）真实 40x40 圆形 + border/bg-card 可点击外形，hover/展开态 brand 语义色（双主题换肤）；发送按钮同根因 h-9 w-9 → !h-9 !w-9（!important 压 antd，惯例见 message-queue-bar）恢复 36x36 正圆
 - ql-20260829-006 | MachineCard 机器头新增「删除」按钮（仅离线可点，危险红字）+ runtimes 页 handleDeleteMachine（modal.confirm 二次确认 → deleteDaemonMachine → machines cache 就地移除 + 本机会话过滤 + 悬浮锁清理）；lib/daemon.ts 增 deleteDaemonMachine
 - ql-20260828-010-ca22 | 切换守护进程两步确认：workspace-daemon-switcher 点选非当前 daemon 后先进路径确认态（WorkspacePathPicker 绑定新 daemon、预填旧 root_path 可改可浏览），确认才一并提交 daemon_id+root_path——本地路径机器相关，跨机切换不再沿用旧路径

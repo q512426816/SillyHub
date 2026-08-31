@@ -198,7 +198,9 @@ export function MobileSessionList({
     queryFn: () =>
       listAgentSessions({
         limit: AGENT_SESSIONS_TREE_FETCH_LIMIT,
-        ...(isArchivedView ? { archived: true } : {}),
+        // ql-20260831-015：后端 HTTP 默认改三态（不传=全部含已归档）——
+        // 移动端默认视图保持只看未归档（显式 false），归档 tab 传 true。
+        archived: isArchivedView ? true : false,
         workspace_id: workspaceId,
       }),
   });

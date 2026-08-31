@@ -131,6 +131,17 @@ vi.mock("@/lib/ppm/problem", () => ({
   listProblems: (...args: unknown[]) => mocks.listProblems(...args),
 }));
 
+// ql-20260831-013：归档/取消归档结果 toast 走 useNotify（App.useApp 上下文
+// message，测试环境无 <AntApp> 包裹——挂 spy 断言，不起 antd message DOM）。
+const notifyMocks = vi.hoisted(() => ({
+  success: vi.fn(),
+  warning: vi.fn(),
+  error: vi.fn(),
+}));
+vi.mock("@/lib/errors", () => ({
+  useNotify: () => notifyMocks,
+}));
+
 // ── jsdom 虚拟滚动桩：change 分支 scroll 容器给出非零视口 ────────────────
 
 const SCROLL_VIEWPORT = { height: 600, width: 320 };
@@ -980,6 +991,134 @@ describe("SessionListPanel 批量与单条删除（组头尾随多选入口）",
     });
     fireEvent.click(okBtn);
     await waitFor(() => expect(onDeleteSessions).toHaveBeenCalledWith(["s-1"]));
+  });
+});
+
+// ── ql-20260831-013：归档 UX 重做 ─────────────────────────────────────────
+// 行按钮按 archived_at 二选一（原两按钮无条件齐显）+ 已归档徽标 + 归档视图
+// 横幅 + 操作结果 toast（成功/部分失败）。回调契约：返回失败个数。
+describe("SessionListPanel 归档 UX（ql-20260831-013）", () => {
+  it("未归档行：只显示「归档」按钮，无「取消归档」无徽标", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
+    );
+    renderPanel(
+      <SessionListPanel
+        onArchiveSessions={vi.fn().mockResolvedValue(0)}
+        onUnarchiveSessions={vi.fn().mockResolvedValue(0)}
+      />,
+    );
+    await openGroup("SillyHub");
+    await screen.findByRole("button", { name: "会话 会话A" });
+    expect(screen.getByRole("button", { name: "归档 会话A" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "取消归档 会话A" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("已归档")).not.toBeInTheDocument();
+  });
+
+  it("已归档行：只显示「取消归档」+「已归档」徽标（含归档时间 title）", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-2",
+          workspace_id: "ws-1",
+          title: "会话B",
+          archived_at: "2026-08-30T10:00:00Z",
+        }),
+      ]),
+    );
+    renderPanel(
+      <SessionListPanel
+        onArchiveSessions={vi.fn().mockResolvedValue(0)}
+        onUnarchiveSessions={vi.fn().mockResolvedValue(0)}
+      />,
+    );
+    await openGroup("SillyHub");
+    await screen.findByRole("button", { name: "会话 会话B" });
+    expect(
+      screen.getByRole("button", { name: "取消归档 会话B" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "归档 会话B" }),
+    ).not.toBeInTheDocument();
+    const badge = screen.getByText("已归档");
+    expect(badge.closest("span")?.getAttribute("title")).toContain("已归档（");
+  });
+
+  it("归档视图（状态筛选「已归档会话」）：顶部上下文横幅 + 服务端 archived 参数", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([
+        makeSession({
+          id: "s-2",
+          workspace_id: "ws-1",
+          title: "会话B",
+          archived_at: "2026-08-30T10:00:00Z",
+        }),
+      ]),
+    );
+    renderPanel(<SessionListPanel />);
+    await openGroup("SillyHub");
+    await screen.findByRole("button", { name: "会话 会话B" });
+    expect(screen.queryByText(/正在查看已归档会话/)).not.toBeInTheDocument();
+    await chooseAntdOptionByText("slp-status", "已归档会话");
+    expect(screen.getByText(/正在查看已归档会话（1 个）/)).toBeInTheDocument();
+    await waitFor(() => {
+      // 哨兵值触发服务端过滤参 archived=true（2026-08-24 既有行为，回归护栏）
+      const lastCall =
+        mocks.listAgentSessions.mock.calls[
+          mocks.listAgentSessions.mock.calls.length - 1
+        ];
+      expect(lastCall?.[0]).toMatchObject({ archived: true });
+    });
+  });
+
+  it("归档确认成功 → toast 指引去「已归档会话」筛选；部分失败 → warning", async () => {
+    setWorkspaces([makeWorkspace({ id: "ws-1", name: "SillyHub" })]);
+    mocks.listAgentSessions.mockResolvedValue(
+      listResponse([makeSession({ id: "s-1", workspace_id: "ws-1", title: "会话A" })]),
+    );
+    const onArchiveSessions = vi.fn().mockResolvedValue(0);
+    renderPanel(<SessionListPanel onArchiveSessions={onArchiveSessions} />);
+    await openGroup("SillyHub");
+    await screen.findByRole("button", { name: "会话 会话A" });
+    fireEvent.click(screen.getByRole("button", { name: "归档 会话A" }));
+    const okBtn = await waitFor(() => {
+      const btn = document.querySelector(
+        ".ant-modal-confirm-btns .ant-btn-primary",
+      ) as HTMLElement | null;
+      if (!btn) throw new Error("confirm ok button not found");
+      return btn;
+    });
+    fireEvent.click(okBtn);
+    await waitFor(() =>
+      expect(onArchiveSessions).toHaveBeenCalledWith(["s-1"]),
+    );
+    await waitFor(() =>
+      expect(notifyMocks.success).toHaveBeenCalledWith(
+        "已归档「会话A」，可在筛选「已归档会话」中查看",
+      ),
+    );
+    // 部分失败口径：回调返回失败个数 → warning（toast 不误报成功）
+    onArchiveSessions.mockResolvedValue(1);
+    fireEvent.click(screen.getByRole("button", { name: "归档 会话A" }));
+    const okBtn2 = await waitFor(() => {
+      const btns = document.querySelectorAll(
+        ".ant-modal-confirm-btns .ant-btn-primary",
+      );
+      const btn = btns[btns.length - 1] as HTMLElement | undefined;
+      if (!btn) throw new Error("confirm ok button not found");
+      return btn;
+    });
+    fireEvent.click(okBtn2);
+    await waitFor(() =>
+      expect(notifyMocks.warning).toHaveBeenCalledWith(
+        expect.stringContaining("1 个失败"),
+      ),
+    );
   });
 });
 

@@ -583,3 +583,34 @@ class TestSeedSanity:
         assert lease.id == session.lease_id
         assert run is not None and run.agent_session_id == session.id
         assert (lease.metadata_ or {}).get("claim_token") == "tok"
+
+
+# ── 4. ql-20260831-015：列表归档过滤三态（None=全部 / True=已归档 / False=未归档） ──
+
+
+class TestListArchiveTriState:
+    async def test_list_sessions_archived_tri_state(
+        self, db_session: AsyncSession
+    ) -> None:
+        """HTTP 层默认 None=不过滤（全部状态含已归档）；service 默认 False 零回归。"""
+        uid = await _create_user(db_session)
+        rt = await _create_runtime(db_session, uid)
+        s_active, _l, _r = await _make_session(db_session, uid=uid, runtime_id=rt.id)
+        s_archived, _l2, _r2 = await _make_session(
+            db_session, uid=uid, runtime_id=rt.id
+        )
+        await DaemonService(db_session).archive_session(s_archived.id, uid)
+
+        svc = DaemonService(db_session)
+
+        # True=只看已归档
+        items, _total = await svc.list_agent_sessions(uid, limit=20, offset=0, archived=True)
+        assert {s.id for s in items} == {s_archived.id}
+
+        # False=只看未归档（service 层默认）
+        items, _total = await svc.list_agent_sessions(uid, limit=20, offset=0)
+        assert {s.id for s in items} == {s_active.id}
+
+        # None=不过滤全部（「全部状态」语义）
+        items, _total = await svc.list_agent_sessions(uid, limit=20, offset=0, archived=None)
+        assert {s.id for s in items} == {s_active.id, s_archived.id}

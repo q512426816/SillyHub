@@ -5551,8 +5551,9 @@ class SessionService:
         # 条目级关联筛选（kind + item_id 成对，router 层已校验配对与 Literal）。
         ppm_item_kind: PpmItemKind | None = None,
         ppm_item_id: uuid.UUID | None = None,
-        # 2026-08-24：会话归档过滤（archived=True 只看已归档，False 只看未归档）。
-        archived: bool = False,
+        # 2026-08-24：会话归档过滤（False=未归档，True=已归档，None=不过滤——
+        # ql-20260831-015 三态，HTTP 层「全部状态」用；service 默认 False 零回归）。
+        archived: bool | None = False,
     ) -> tuple[list[AgentSession], int]:
         """Owner-scoped list of AgentSession with stable paging.
 
@@ -5609,10 +5610,13 @@ class SessionService:
             AgentSession.user_id == user_id,
             AgentSession.deleted_at.is_(None),  # FR-07 软删过滤
         ]
-        # 2026-08-24：archived 过滤（默认 False=未归档可见，True=已归档可见）。
-        if archived:
+        # 2026-08-24：archived 过滤（False=未归档，True=已归档）。
+        # ql-20260831-015：三态化——None=不过滤（全部，含已归档），供 HTTP 层
+        # 「全部状态」视图用；service 层默认保持 False，内部调用（facade/测试）
+        # 零回归。
+        if archived is True:
             base_filters.append(AgentSession.archived_at.isnot(None))
-        else:
+        elif archived is False:
             base_filters.append(AgentSession.archived_at.is_(None))
         if status_filter is not None:
             base_filters.append(AgentSession.status == status_filter)

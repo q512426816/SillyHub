@@ -2545,7 +2545,9 @@ async def list_sessions(
     ppm_item_kind: PpmItemKindLiteral | None = Query(default=None),
     ppm_item_id: uuid.UUID | None = Query(default=None),
     # 2026-08-24：会话归档过滤（True=只看已归档，False=只看未归档）。
-    archived: bool = Query(default=False),
+    # ql-20260831-015：HTTP 默认改 None=不过滤（全部，含已归档）——「全部状态」
+    # 筛选语义即全部；service 层默认仍 False（内部调用零回归）。
+    archived: bool | None = Query(default=None),
 ) -> AgentSessionListResponse:
     """List the current user's AgentSessions (owner-scoped, stable paging).
 

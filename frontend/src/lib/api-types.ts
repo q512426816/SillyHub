@@ -30676,7 +30676,7 @@ export interface operations {
                 ql_id?: string | null;
                 ppm_item_kind?: ("plan_task" | "problem") | null;
                 ppm_item_id?: string | null;
-                archived?: boolean;
+                archived?: boolean | null;
             };
             header?: never;
             path?: never;

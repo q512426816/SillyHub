@@ -253,21 +253,29 @@ function FloatingDrawerBody({
     },
     [refreshLists, sessionId, selectSession],
   );
+  // ql-20260831-013：归档/取消归档回调返回失败个数（SessionListPanel 据此
+  // toast 成功/部分失败，allSettled 不再吞失败）。
   const handleArchiveSessions = useCallback(
     async (ids: string[]) => {
       const { archiveAgentSession } = await import("@/lib/daemon");
-      await Promise.allSettled(ids.map((id) => archiveAgentSession(id)));
+      const results = await Promise.allSettled(
+        ids.map((id) => archiveAgentSession(id)),
+      );
       refreshLists();
       if (ids.includes(sessionId ?? "")) selectSession(null);
+      return results.filter((r) => r.status === "rejected").length;
     },
     [refreshLists, sessionId, selectSession],
   );
   const handleUnarchiveSessions = useCallback(
     async (ids: string[]) => {
       const { unarchiveAgentSession } = await import("@/lib/daemon");
-      await Promise.allSettled(ids.map((id) => unarchiveAgentSession(id)));
+      const results = await Promise.allSettled(
+        ids.map((id) => unarchiveAgentSession(id)),
+      );
       refreshLists();
       if (ids.includes(sessionId ?? "")) selectSession(null);
+      return results.filter((r) => r.status === "rejected").length;
     },
     [refreshLists, sessionId, selectSession],
   );

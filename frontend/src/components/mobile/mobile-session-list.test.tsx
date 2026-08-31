@@ -214,13 +214,16 @@ describe("MobileSessionList 同 key query（X-04 / C-08）", () => {
     expect(AGENT_SESSIONS_TREE_FETCH_LIMIT).toBe(500);
   });
 
-  it("queryFn 调 listAgentSessions({limit:500, workspace_id}) 且未调 listWorkspaceAgentSessions（C-08）", async () => {
+  it("queryFn 调 listAgentSessions({limit:500, archived:false, workspace_id}) 且未调 listWorkspaceAgentSessions（C-08）", async () => {
     daemonApi.listAgentSessions.mockResolvedValue(makeResp([makeSession()]));
     renderList("ws-1");
 
     await waitFor(() => {
+      // ql-20260831-015：后端 HTTP 默认改三态（不传=全部含已归档），移动端
+      // 默认视图显式 archived:false 保持只看未归档。
       expect(daemonApi.listAgentSessions).toHaveBeenCalledWith({
         limit: 500,
+        archived: false,
         workspace_id: "ws-1",
       });
     });

@@ -88,9 +88,11 @@ import {
   Trash2,
   User,
   Zap,
+  type LucideIcon,
 } from "lucide-react";
 import { ApiError } from "@/lib/api";
 import { listChanges } from "@/lib/changes";
+import { useNotify } from "@/lib/errors";
 import { listQuicklogEntries } from "@/lib/quicklog";
 import { useDaemonMachines } from "@/lib/use-daemon-machines";
 import { listWorkspaces } from "@/lib/workspaces";
@@ -169,6 +171,21 @@ function EngineMark({ provider }: { provider: string }) {
     <Zap aria-hidden className={cls} />
   ) : (
     <Command aria-hidden className={cls} />
+  );
+}
+
+/**
+ * ql-20260831-016：Modal.confirm 功能图标（删除/归档/取消归档共用）。
+ * antd v6 confirm icon 槽的尺寸/间距样式期望 .anticon 包裹结构，裸 lucide
+ * svg 不命中——实测被压成 12x20 且与标题零间距。外包固定尺寸 span：
+ * h-6 w-6（24px，与 16px 标题视觉匹配）+ shrink-0（防 flex 压缩）+
+ * mr-3（12px 与标题的间距），图标种类/语义色由调用方传入。
+ */
+function confirmIcon(Icon: LucideIcon, colorCls: string) {
+  return (
+    <span className="mr-3 inline-flex h-6 w-6 shrink-0 items-center justify-center">
+      <Icon aria-hidden className={`h-6 w-6 ${colorCls}`} />
+    </span>
   );
 }
 
@@ -266,9 +283,10 @@ export interface SessionListPanelProps {
   onSelect?: (_session: AgentSessionRead) => void;
   /** ql-20260818-012：删除会话回调（单条/批量共用，软删后 invalidate 列表）。 */
   onDeleteSessions?: (_ids: string[]) => Promise<void>;
-  // 2026-08-24：归档/取消归档会话回调。
-  onArchiveSessions?: (_ids: string[]) => Promise<void>;
-  onUnarchiveSessions?: (_ids: string[]) => Promise<void>;
+  // 2026-08-24：归档/取消归档会话回调。ql-20260831-013：返回失败个数
+  //（调用方 Promise.allSettled 口径），面板据此出成功/部分失败 toast。
+  onArchiveSessions?: (_ids: string[]) => Promise<number>;
+  onUnarchiveSessions?: (_ids: string[]) => Promise<number>;
   /**
    * task-04（2026-08-22-workspace-sessions-portal）：可选 scope，锁定列表
    * 到工作区/变更级。D-003@v2：scope 仅给全局端点多传 workspace_id/change_id
@@ -967,12 +985,7 @@ function WorkspaceTreeList({
     if (!onDeleteSessions || deleting) return;
     Modal.confirm({
       title: "删除会话",
-      // 原型 .dlg（危险渐变图标头 + 明确影响范围文案，2026-08-23-sessions-page-style）。
-      icon: (
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-destructive to-amber-500 text-white shadow-md">
-          <Trash2 aria-hidden className="h-4 w-4" />
-        </span>
-      ),
+      icon: confirmIcon(Trash2, "text-destructive"),
       content: (
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
           确定删除会话「{title}」吗？仅删除平台记录，本机日志文件不受影响。
@@ -995,11 +1008,7 @@ function WorkspaceTreeList({
     if (!onDeleteSessions || deleting || checkedIds.size === 0) return;
     Modal.confirm({
       title: "批量删除会话",
-      icon: (
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-destructive to-amber-500 text-white shadow-md">
-          <Trash2 aria-hidden className="h-4 w-4" />
-        </span>
-      ),
+      icon: confirmIcon(Trash2, "text-destructive"),
       content: (
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
           确定删除「{groupName}」中选中的 {checkedIds.size}{" "}
@@ -1024,16 +1033,25 @@ function WorkspaceTreeList({
   // ── 2026-08-24：归档/取消归档处理 ──────────────────────────────────
 
   const [archiving, setArchiving] = useState(false);
+  // ql-20260831-013：归档/取消归档结果 toast（useNotify → App.useApp，
+  // 展示策略规范 design §5：操作类走 toast）。此前归档成功后行直接从
+  // 默认列表消失零反馈，用户不知道去哪了（本次重做核心痛点之一）。
+  const notify = useNotify();
+
+  /** ql-20260831-013：按回调返回的失败个数出 toast（void 兼容按 0）。 */
+  const notifyArchiveResult = (
+    failed: number | void | undefined,
+    okMsg: string,
+  ) => {
+    if (!failed) notify.success(okMsg);
+    else notify.warning(`${okMsg}（${failed} 个失败，请重试）`);
+  };
 
   const handleSingleArchive = (id: string, title: string) => {
     if (!onArchiveSessions || archiving) return;
     Modal.confirm({
       title: "归档会话",
-      icon: (
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 text-white shadow-md">
-          <Archive aria-hidden className="h-4 w-4" />
-        </span>
-      ),
+      icon: confirmIcon(Archive, "text-brand-600"),
       content: (
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
           确定归档会话「{title}」吗？归档后将从默认列表隐藏，可在「已归档会话」筛选中查看。
@@ -1044,7 +1062,11 @@ function WorkspaceTreeList({
       onOk: async () => {
         setArchiving(true);
         try {
-          await onArchiveSessions([id]);
+          const failed = await onArchiveSessions([id]);
+          notifyArchiveResult(
+            failed,
+            `已归档「${title}」，可在筛选「已归档会话」中查看`,
+          );
         } finally {
           setArchiving(false);
         }
@@ -1056,11 +1078,7 @@ function WorkspaceTreeList({
     if (!onUnarchiveSessions || archiving) return;
     Modal.confirm({
       title: "取消归档",
-      icon: (
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 text-white shadow-md">
-          <ArchiveRestore aria-hidden className="h-4 w-4" />
-        </span>
-      ),
+      icon: confirmIcon(ArchiveRestore, "text-brand-600"),
       content: (
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
           确定取消归档会话「{title}」吗？会话将恢复到默认列表中。
@@ -1071,7 +1089,8 @@ function WorkspaceTreeList({
       onOk: async () => {
         setArchiving(true);
         try {
-          await onUnarchiveSessions([id]);
+          const failed = await onUnarchiveSessions([id]);
+          notifyArchiveResult(failed, `「${title}」已恢复到默认列表`);
         } finally {
           setArchiving(false);
         }
@@ -1083,11 +1102,7 @@ function WorkspaceTreeList({
     if (!onArchiveSessions || archiving || checkedIds.size === 0) return;
     Modal.confirm({
       title: "批量归档会话",
-      icon: (
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 text-white shadow-md">
-          <Archive aria-hidden className="h-4 w-4" />
-        </span>
-      ),
+      icon: confirmIcon(Archive, "text-brand-600"),
       content: (
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
           确定归档「{groupName}」中选中的 {checkedIds.size}{" "}
@@ -1099,7 +1114,8 @@ function WorkspaceTreeList({
       onOk: async () => {
         setArchiving(true);
         try {
-          await onArchiveSessions([...checkedIds]);
+          const failed = await onArchiveSessions([...checkedIds]);
+          notifyArchiveResult(failed, `已归档 ${checkedIds.size} 个会话`);
           setCheckedIds(new Set());
         } finally {
           setArchiving(false);
@@ -1112,11 +1128,7 @@ function WorkspaceTreeList({
     if (!onUnarchiveSessions || archiving || checkedIds.size === 0) return;
     Modal.confirm({
       title: "批量取消归档",
-      icon: (
-        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 text-white shadow-md">
-          <ArchiveRestore aria-hidden className="h-4 w-4" />
-        </span>
-      ),
+      icon: confirmIcon(ArchiveRestore, "text-brand-600"),
       content: (
         <p className="mt-2 text-xs leading-5 text-muted-foreground">
           确定取消归档「{groupName}」中选中的 {checkedIds.size}{" "}
@@ -1128,7 +1140,8 @@ function WorkspaceTreeList({
       onOk: async () => {
         setArchiving(true);
         try {
-          await onUnarchiveSessions([...checkedIds]);
+          const failed = await onUnarchiveSessions([...checkedIds]);
+          notifyArchiveResult(failed, `已恢复 ${checkedIds.size} 个会话到默认列表`);
           setCheckedIds(new Set());
         } finally {
           setArchiving(false);
@@ -1158,6 +1171,18 @@ function WorkspaceTreeList({
           共 {visibleTotal} 个
         </span>
       </div>
+
+      {/* ql-20260831-013：归档视图上下文横幅——用户反馈切进「已归档会话」
+          筛选后无任何「这是归档区」的标识，行又与普通会话同貌，只能靠猜。 */}
+      {isArchivedView && (
+        <div className="mx-2 mt-2 flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-[11px] leading-4 text-muted-foreground">
+          <Archive aria-hidden className="h-3 w-3 shrink-0" />
+          <span>
+            正在查看已归档会话（{visibleTotal} 个）·
+            归档的会话不会出现在默认列表，行内可「取消归档」恢复
+          </span>
+        </div>
+      )}
 
       {/* 筛选区：搜索（回车应用）+ 状态下拉（X-11 保留）+「关联」下拉
           （X-009，仅 workspace scope）+ 两层筛选 tab（D-107） */}
@@ -2041,11 +2066,15 @@ function SessionRow({
         variant === "tree"
           ? // 树形态（原型 .s-row）：圆角行卡 + brand 选中态（brand-100 底 +
             // brand-600 竖条 + 标题 brand-700），无下边线。
+            // ql-20260831-013：已归档行整行降调（opacity-60）与活跃行拉开
+            // 「收纳 vs 在用」层级，hover 恢复全不透明便于瞄准行内操作。
             cn(
               "mb-0.5 rounded-lg border-l-[3px]",
               selected
                 ? "border-l-brand-600 bg-brand-100"
-                : "border-l-transparent hover:bg-muted/50",
+                : session.archived_at
+                  ? "border-l-transparent opacity-60 hover:bg-muted/25 hover:opacity-100"
+                  : "border-l-transparent hover:bg-muted/50",
             )
           : // 平铺形态（退役路径，原样式保留）。
             cn(
@@ -2086,6 +2115,17 @@ function SessionRow({
           >
             {title}
           </span>
+          {/* ql-20260831-013：已归档徽标——归档视图内行与普通会话同貌、
+              无法分辨（用户反馈）；中性 muted chip 不抢 brand 语义。 */}
+          {session.archived_at && (
+            <span
+              title={`已归档（${formatRelativeTime(session.archived_at)}）`}
+              className="inline-flex shrink-0 items-center gap-0.5 rounded-full border border-border bg-muted px-1.5 py-px text-[10px] font-medium leading-4 text-muted-foreground"
+            >
+              <Archive aria-hidden className="h-2.5 w-2.5" />
+              已归档
+            </span>
+          )}
           {isToolReport && (
             <span
               title="由 SillySpec CLI 自动上报创建的本地 Agent 会话"
@@ -2103,8 +2143,10 @@ function SessionRow({
         {/* 单条操作按钮：hover 显示，阻止行点击冒泡 */}
         {!batchMode && (
           <span className="ml-1 flex hidden items-center group-hover:flex">
-            {/* 2026-08-24：归档/取消归档按钮（在删除按钮左侧） */}
-            {onArchive && (
+            {/* 2026-08-24：归档/取消归档按钮（在删除按钮左侧）。
+                ql-20260831-013：按行 archived_at 二选一——原两按钮无条件齐显，
+                点错侧后端幂等静默无反馈（对齐批量栏 isArchivedView 显隐语义）。 */}
+            {onArchive && !session.archived_at && (
               <button
                 type="button"
                 aria-label={`归档 ${title}`}
@@ -2117,7 +2159,7 @@ function SessionRow({
                 <Archive className="h-3 w-3" />
               </button>
             )}
-            {onUnarchive && (
+            {onUnarchive && session.archived_at && (
               <button
                 type="button"
                 aria-label={`取消归档 ${title}`}

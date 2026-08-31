@@ -488,23 +488,30 @@ export function SessionsPortal({ scope }: SessionsPortalProps) {
             }
           }}
           // 2026-08-24：归档/取消归档回调（照 onDeleteSessions 模式）。
+          // ql-20260831-013：返回失败个数（面板据此 toast 成功/部分失败）。
           onArchiveSessions={async (ids) => {
             const { archiveAgentSession } = await import("@/lib/daemon");
-            await Promise.allSettled(ids.map((id) => archiveAgentSession(id)));
+            const results = await Promise.allSettled(
+              ids.map((id) => archiveAgentSession(id)),
+            );
             void qc.invalidateQueries({ queryKey: ["agentSessions"] });
             if (ids.includes(selectedSessionId ?? "")) {
               setSelectedSessionId(null);
               syncSessionParam(null);
             }
+            return results.filter((r) => r.status === "rejected").length;
           }}
           onUnarchiveSessions={async (ids) => {
             const { unarchiveAgentSession } = await import("@/lib/daemon");
-            await Promise.allSettled(ids.map((id) => unarchiveAgentSession(id)));
+            const results = await Promise.allSettled(
+              ids.map((id) => unarchiveAgentSession(id)),
+            );
             void qc.invalidateQueries({ queryKey: ["agentSessions"] });
             if (ids.includes(selectedSessionId ?? "")) {
               setSelectedSessionId(null);
               syncSessionParam(null);
             }
+            return results.filter((r) => r.status === "rejected").length;
           }}
         />
         {selectedSessionId ? (

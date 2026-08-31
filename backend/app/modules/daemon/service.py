@@ -934,8 +934,8 @@ class DaemonService:
         # 筛选透传（facade 签名同步，缺省会 500）。
         ppm_item_kind: str | None = None,
         ppm_item_id: uuid.UUID | None = None,
-        # 2026-08-24：会话归档过滤。
-        archived: bool = False,
+        # 2026-08-24：会话归档过滤（ql-20260831-015 三态透传，默认 False 零回归）。
+        archived: bool | None = False,
     ) -> tuple[list[AgentSession], int]:
         # task-06 / FR-02：过滤参数透传（全部可选，不传 = 现状，零回归）。
         return await self._sess.list_agent_sessions(

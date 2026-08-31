@@ -120,7 +120,9 @@ export function useDaemonMachines(params: DaemonMachineListParams) {
     queryFn: async () => {
       const [resp, sessionsResp] = await Promise.all([
         listDaemonMachines(params) as Promise<MachinesResponseWithShared>,
-        listAgentSessions({ limit: 100 }).catch(() => null),
+        // ql-20260831-015：后端 HTTP 默认改三态（不传=全部含已归档）——机器
+        // 分组/会话计数只统计未归档，显式 false 保持原语义。
+        listAgentSessions({ limit: 100, archived: false }).catch(() => null),
       ]);
       return {
         items: resp.items,

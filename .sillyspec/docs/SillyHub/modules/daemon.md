@@ -90,7 +90,7 @@ submitWithRetry(退避) → 用尽 → FileOutbox 暂存 → 心跳健康 → dr
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->
-
+- ql-20260831-015-c6fe（quick）：会话列表归档过滤三态——list_agent_sessions 与 DaemonService facade 签名 archived: bool|None = False（None=不过滤全部，service 默认 False 内部调用零回归），router GET /api/daemon/sessions Query(default=None)（HTTP 不传=全部含已归档，「全部状态」语义修正）；前端显式 archived=false 的调用方（移动端默认视图 / use-daemon-machines 会话计数）保持原语义
 <!-- MANUAL_NOTES_END -->
 - 2026-08-20-session-multimodal-attachments：会话附件（图片多模态/文件落盘/multimodal 三态门控）涉及本模块（详见 changes 归档）
 - ql-20260824-018-ecf9（quick）：SESSION_SWITCH_CONFIG providerConfig null=切回本机语义修复（daemon.ts 路由 + reloadWithConfig 双层 ?? 塌缩）+ transcript 反向迁移 migrateClaudeTranscriptToHost

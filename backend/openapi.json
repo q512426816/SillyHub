@@ -13532,8 +13532,14 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "boolean",
-              "default": false,
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "title": "Archived"
             }
           }

@@ -115,3 +115,56 @@
 根因：antd Button 的 .ant-btn height:32 覆盖 Tailwind h-10，＋按钮实测渲染 40x32 椭圆且透明无边框、纯灰图标，用户反馈太小不明显；旁边发送按钮同根因被钳成 36x32（本应 36x36 正圆）
 方案：session-input-bar.tsx：＋按钮弃 antd 改原生 button（同菜单项模式）真实 40x40 正圆 + border-border/bg-card 可点击外形，hover/展开态 brand 语义色随 data-theme 双主题换肤；发送按钮 h-9 w-9 改 !h-9 !w-9（!important 压 antd，惯例见 message-queue-bar）恢复正圆
 结果：vitest 3 文件 31 用例全过（plus-menu/ux-fixes/team）；Docker 重建 frontend 镜像 --force-recreate 生效，容器内 chunk grep 到新类名，浏览器实测 40x40 正圆/发送 36x36/hover 青色 brand 态，截图目视通过
+
+## ql-20260831-013-9043 | 2026-08-31 15:12:22 | 会话归档 UX 重做——行按钮按状态二选一 + 已归档徽标置灰 + 视图横幅 + toast 反馈
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/sessions/session-list-panel.tsx（行按钮二选一+徽标置灰+横幅+toast）
+- frontend/src/components/sessions/sessions-portal.tsx（归档回调返回失败个数）
+- frontend/src/components/floating/floating-session-host.tsx（同上悬浮宿主侧）
+- frontend/src/components/sessions/__tests__/session-list-panel.test.tsx（新增 4 用例+useNotify mock）
+- .sillyspec/docs/SillyHub/modules/frontend_components.md（变更索引补条目）
+需求：会话归档 UX 重做——行按钮按状态二选一 + 已归档徽标置灰 + 视图横幅 + toast 反馈
+根因：行级归档/取消归档按钮无条件齐显，不看会话实际归档状态，点错侧后端幂等静默无反馈；归档后行从默认列表消失零提示，归档视图内行与普通会话同貌无任何标识，只能靠筛选猜
+方案：session-list-panel：行按钮按 archived_at 二选一；已归档行加徽标（title 含归档时间）+ 整行 opacity-60 降调；归档视图顶部横幅（数量+恢复指引）；单条/批量操作全走 useNotify toast，回调契约改返回失败个数（sessions-portal 与 floating-session-host 两调用方 Promise.allSettled 统计 rejected 同步），部分失败出 warning
+结果：vitest 56 用例全过（新增 4）；tsc --noEmit 零错误；Docker 重建 frontend 生效，浏览器生产实测横幅/徽标/置灰/按钮二选一/toast 文案全部确认（antd v6 toast DOM 为 .ant-message-notice-title），测试归档数据已还原
+
+## ql-20260831-014-c6fe | 2026-08-31 15:39:19 | 会话列表 6 个确认弹窗去渐变色块图标
+状态：已完成
+关联变更：（无）
+文件：frontend/src/components/sessions/session-list-panel.tsx
+需求：会话列表 6 个确认弹窗去渐变色块图标
+根因：渐变色块 icon 在 antd v6 confirm icon 槽被压成 16x32 瘦条变形且与全站 confirm 风格不一致（用户反馈突兀）
+方案：session-list-panel.tsx 单/批删除、单/批归档、单/批取消归档 6 处 Modal.confirm 删除自定义渐变 icon，走 antd 默认样式（对齐 runtimes 页惯例）
+结果：vitest 56 用例全过；tsc 零错误；Docker 重建容器内 chunk 已无渐变类。后续：用户追加反馈默认感叹号图标不对应功能，ql-015 将改为功能语义图标
+
+## ql-20260831-015-d729 | 2026-08-31 15:54:08 | 确认弹窗图标功能语义化 + 全部状态含已归档（后端 archived 三态）
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/daemon/session/service.py（归档过滤三态化）
+- backend/app/modules/daemon/service.py（facade 签名同步）
+- backend/app/modules/daemon/router.py（HTTP 默认 None）
+- backend/app/modules/daemon/tests/test_session_review_fixes.py（新增三态测试）
+- frontend/src/components/sessions/session-list-panel.tsx（6 个 confirm 语义图标）
+- frontend/src/components/mobile/mobile-session-list.tsx（默认视图显式 archived=false）
+- frontend/src/lib/use-daemon-machines.ts（会话计数显式 archived=false）
+- frontend/src/lib/api-types.ts + backend/openapi.json（gen:types 再生成）
+- 模块文档×2（变更索引与人工备注补条目）
+需求：确认弹窗图标功能语义化 + 全部状态含已归档（后端 archived 三态）
+根因：去渐变后 antd 默认感叹号图标不对应操作功能（用户反馈）；「全部状态」筛选实际只查未归档（HTTP 层 archived 默认 False），语义应为全部
+方案：后端 list_agent_sessions/facade 改 archived:bool|None=False 三态（None=不过滤，service 默认零回归），router Query(default=None)；桌面树不传参即全部（行有徽标置灰），移动端默认视图与 use-daemon-machines 显式 archived=false 保原语义；6 个 confirm 传 lucide 语义图标（删除=Trash2 红/归档=Archive/取消归档=ArchiveRestore brand 色）；gen:types 同步 openapi+api-types
+结果：后端 31 用例过（新增三态测试）；前端 125 用例过（移动端 C-08 断言随契约更新）；tsc 零错误；Docker 前后端重建生效，浏览器实测全部状态 62 个含 1 归档行徽标、弹窗 Archive 图标 brand 青色不变形（截图确认）
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/daemon/tests/test_session_review_fixes.py, frontend/src/components/mobile/mobile-session-list.test.tsx
+
+## ql-20260831-016-54a0 | 2026-08-31 16:17:15 | 确认弹窗图标被压缩变形且与标题零间距——外包固定尺寸 span 修正
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/sessions/session-list-panel.tsx（confirmIcon helper + 6 处换用）
+- .sillyspec/docs/SillyHub/modules/frontend_components.md（变更索引补 ql-016 条目）
+需求：确认弹窗图标被压缩变形且与标题零间距——外包固定尺寸 span 修正
+根因：antd v6 confirm icon 槽的尺寸/间距样式期望 .anticon 包裹结构，裸 lucide svg 不命中——实测 ql-015 的 h-5 w-5 图标被压成 12x20、与标题 gap=0（用户反馈太小太贴）
+方案：session-list-panel.tsx 封 confirmIcon(Icon, colorCls) 模块级 helper：外包 span（h-6 w-6=24px 与 16px 标题视觉匹配 + shrink-0 防 flex 压缩 + mr-3=12px 间距），6 处 confirm 统一换用，图标种类与语义色不变
+结果：56 用例全过；tsc 零错误；Docker 重建生效，浏览器实测图标 24x24 不变形、与标题间距 12px，截图目视比例协调（AI 视觉评审通过）
