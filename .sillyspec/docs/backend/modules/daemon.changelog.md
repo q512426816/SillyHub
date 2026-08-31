@@ -24,3 +24,8 @@ created_at: 2026-08-29 22:56:30
 ## 2026-08-30 — 权限/提问通知 body 去重（quick 样式优化）
 
 - `_notify_session_owner` 文案：提问（dialog）body 放提问预览（`_dialog_preview`，与前端 resolvePendingTitle 同口径读 questions[]，兼容顶层 question，60 字截断）；canUseTool body=「请求使用工具：{tool_name}」；超时 body=None——不再与 title 逐字重复。
+
+## 2026-08-31 — 机器 sillyspec 版本显示与远程升级（2026-08-31-machine-sillyspec-version）
+
+- daemon_instances 加 sillyspec 三列（version/latest/update，迁移 20260831150000）；register/heartbeat DTO 与服务层落 D-002@v1 双通道语义（register 直写含 None / 心跳 version+latest 非 None 覆盖 / sillyspec_update 无键清除、upsert 盖 since、error 截断 200）。
+- protocol.py `DAEMON_MSG_SILLYSPEC_UPDATE` + ws_hub.send_sillyspec_update；router 增 POST /machines/{id}/sillyspec-update（归属 404 + 离线 504 + {"sent":true}）；机器视图 _build_machine_read 显式组装三字段 + MachineSillySpecUpdateRead 嵌套（就近 MachinePendingUpdateRead）。

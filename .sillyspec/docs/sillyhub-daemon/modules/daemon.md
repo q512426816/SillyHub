@@ -12,15 +12,16 @@ created_at: 2026-08-18 01:45:00
 
 守护进程主类，编排核心（约 4000 行）。只做组装不实现子能力（探测/HTTP/WS/子进程/
 git 都在前置模块）。生命周期：preflight → 探测 agent → runtime lock 单实例 →
-per-daemon 注册 → 崩溃会话恢复 → skills 同步 → 三循环（heartbeat / lease 轮询 /
-WS）→ WS RPC handler + 消息路由 → lease 状态机（claim → start → execute →
-complete）按 kind 分流 batch / interactive / init / change-write。
+per-daemon 注册 → 崩溃会话恢复 → skills 同步 → 四循环（heartbeat / lease 轮询 /
+WS / sillyspec 自动升级检查）→ WS RPC handler + 消息路由 → lease 状态机（claim →
+start → execute → complete）按 kind 分流 batch / interactive / init / change-write。
 
 ## 契约摘要
 
 - `Daemon(options: DaemonOptions)` + `start()` / `stop()`；DaemonOptions 可注入
   mock detector / wsClientFactory / taskRunner / sessionManager / persistence /
-  recoveryClient / lockManager（测试口）。
+  recoveryClient / lockManager / sillyspecManager（测试口，缺省构造真实
+  SillySpecManager，isBusy 接 `_isBusyForUpdate` 三臂忙判定）。
 - 导出纯函数与端口：`translateSpecRoot(prompt, specRootMap)`（spec_root_map
   "from:to" 容器路径→宿主路径翻译，按**首个** ':' 分割容忍盘符冒号）；
   `RecoveryCoordinator` / `SessionRecoverStatus`（重启恢复鸭子类型端口）；
@@ -36,19 +37,27 @@ complete）按 kind 分流 batch / interactive / init / change-write。
 ```
 start():
   runPreflight(失败不阻断) → detectAgents → 逐 provider acquireLock(失败回滚+抛)
-  → _registerDaemon(单次 POST /register) → _recoverSessionsOnBoot → syncSkills
-  → _fire 三循环 + sessionManager.start() + 信号 handler
+  → _registerDaemon(单次 POST /register，注册前 manager probeLocal/probeLatest
+    一次使报文即带 sillyspec 版本) → _recoverSessionsOnBoot → syncSkills
+  → _fire 四循环 + sessionManager.start() + 信号 handler
+_sillyspecLoop(): 第四循环（2026-08-31-machine-sillyspec-version）——间隔
+  config.sillyspec_update_interval_sec(默认 3600s，0/非法=关闭即返回)，每拍
+  manager.checkAndUpgrade('auto')：latest+local 探测 → 未安装/落后才升级
 _pollLoop(): WS isConnected 且 lastMessageAt < 90s → 跳过该轮 HTTP 轮询（假活/断连恢复 30s 兜底）
 _runLeaseStateMachine(): claimLease → 归一化 execPayload(snake→camel，嵌套/平铺两形态)
   → startLease → 按 kind/mode 分流 → completeLease
-  batch → taskRunner.runLease；interactive → _startInteractiveSession；
+batch → taskRunner.runLease；interactive → _startInteractiveSession；
   init lease → task-runner 内 runSillyspecInit 链路
 _executeChangeWrite(): claim → taskRunner.runChangeWrite(轻量分支，不启 agent) → complete
   → kind=spec-sync 时整树回灌 postSpecSync（严格不走 lease 状态机）
+_sendHeartbeatOnce(): 每拍透传 sillyspec 快照（manager.getSnapshot 纯同步零
+  spawn）作 heartbeat 第 5 可选参——version/latest 非 null 才带（backend 保留）、
+  update 非 null 才带（无键=backend 清除），三键全无不占位（旧 4 参形态零回归）
 _handleWsMessage(): TASK_AVAILABLE / HEARTBEAT_ACK(同步 allowed_roots+PolicyCache) /
   LEASE_CANCEL(taskRunner.cancel 杀子进程) / SESSION_INJECT|INTERRUPT|END|RESUME /
   PERMISSION_RESPONSE / PROVIDER_CONFIG_CHANGED / SELF_UPDATE / CLEANUP(缓存清理,
-  交互会话运行中或已有清理在跑时跳过) / session_switch_config
+  交互会话运行中或已有清理在跑时跳过) / SILLYSPEC_UPDATE(void 调 manager.
+  requestUpgrade('server_command')，fire-and-forget，状态经心跳回传) / session_switch_config
 RPC handler 注册: list_dir / host_fs.* / get_spec_bundle
 ```
 

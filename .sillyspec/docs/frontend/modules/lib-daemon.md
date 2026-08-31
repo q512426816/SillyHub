@@ -22,8 +22,9 @@ daemon 域的浏览器侧 API 客户端 + 会话 SSE 接入层（`frontend/src/l
 - `DaemonRuntimeRead`：含 `daemon_instance_id`；`version`（provider CLI 版本）与 `daemon_version`/`daemon_build_id`（daemon 进程版本）双轨，勿混用。
 
 **machine 两级视图（2026-07-07-daemon-machine-runtime-hierarchy）**
-- `DaemonMachineRead`：machine=daemon 实例聚合（hostname/alias/os/arch/version/build_id/started_at + runtime_count/online_runtime_count + 全量 `runtimes[]`，0-runtime 机器为 []）。
+- `DaemonMachineRead`：machine=daemon 实例聚合（hostname/alias/os/arch/version/build_id/started_at + runtime_count/online_runtime_count + 全量 `runtimes[]`，0-runtime 机器为 []）；2026-08-31-machine-sillyspec-version 加三可选字段——`sillyspec_version` / `sillyspec_latest_version`（兄弟语义，null=未安装/未知；daemon 离线保留最后上报值，仅 register 落 null）+ `sillyspec_update`（升级状态机投影 {state, trigger, from_version, to_version, error, since}，null=无进行中/近期升级，语义同 pending_update；嵌套类型一律引用 api-types 生成版 `MachineSillySpecUpdateRead` 六字段全 nullable，不手写 DTO）；旧后端无字段 → undefined，机器卡按未安装/无横幅消费。
 - `listDaemonMachines(params)`（机器级分页）、`updateDaemonMachine`（0-runtime 机器也能改别名）、`triggerMachineSelfUpdate`（按 instance 路由，不再借道 runtime_id）、`triggerMachineCleanup`（POST machines/{id}/cleanup，按 instance 路由推送 daemon:cleanup 缓存清理指令，返回 `{sent}`；破坏性操作，页面侧走 modal.confirm）。
+- `triggerMachineSillySpecUpdate(instanceId)`（2026-08-31-machine-sillyspec-version）：POST machines/{id}/sillyspec-update，fire-and-forget 无回执（同 cleanup）——daemon 收到后本机 npm 升级，状态机经心跳 sillyspec_update 回传；刻意不返回 latest_version（daemon 自行探测）；失败抛 ApiError（404 归属 / 504 DaemonRuntimeOffline），返回 `{sent}` 仿 triggerMachineSelfUpdate。
 
 **daemon 实例与版本**
 - `listDaemonInstances()`：当前用户在线守护进程 + 各自已启用 providers（workspace-daemon-switcher 下拉 + provider 徽标）。

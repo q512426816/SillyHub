@@ -13,3 +13,7 @@ created_at: 2026-08-28 08:28:18
 - R1 stop() 可重入等待（_stopPromise，在途二次调用等待完成不空转）+ SELF_UPDATE 30s 复查定时器回调 _running 守卫——修「外部 SIGTERM stop 进行中 + _tryUpdate 交接 stop 空转 → respawn 抢锁失败 daemon 全灭」竞态。
 - R2 writePendingUpdate 去 unconditional unlink：直接 rename 原子覆盖（Node Windows MoveFileExW(REPLACE_EXISTING)），失败才退回 unlink+rename——消 unlink↔rename 窗口心跳 ENOENT 致 backend 清 pending/since 重置。
 - R4 outbox drain stale-token 422 有界保留重试（TOKEN_422_KEEP_RETRIES=5，pending_token 刷新失败窗口丢报修复；非 pending entry 维持 R-10 立即丢弃）。
+
+## 2026-08-31 — 机器 sillyspec 版本显示与远程升级（2026-08-31-machine-sillyspec-version）
+- task-05 接线：第四循环 `_sillyspecLoop`（间隔 config.sillyspec_update_interval_sec 默认 3600s，0/非法=关）每拍 manager.checkAndUpgrade('auto')；注册前 manager probeLocal/probeLatest 一次使 register 即带 sillyspec 版本；心跳每拍透传 getSnapshot（version/latest 非 null 才带、update 非 null 才带，三键全无不占位保持旧 4 参形态）；WS SILLYSPEC_UPDATE case void 调 manager.requestUpgrade('server_command')（fire-and-forget）；DaemonOptions.sillyspecManager 注入口（缺省真实实例，isBusy 接 _isBusyForUpdate）。
+

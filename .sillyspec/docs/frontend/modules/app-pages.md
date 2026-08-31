@@ -18,7 +18,7 @@ created_at: 2026-08-18 01:45:00
 - `HomePage`（`/`）：client 组件，hydrate 后按 accessToken `router.replace` 到 `/workspaces` 或 `/login`；token 在 localStorage、server 端读不到，故 client effect 跳转；persist 恢复前 `return null` 防首帧误判闪烁。
 - `LoginPage`（`/login`，`(auth)` 路由组，不进 dashboard layout）：表单 → `login(account, password)` → 成功跳平台默认页；localStorage 记忆账号/平台偏好（`sillyhub.login.remember` / `sillyhub.login.platform`，移动端 `/m/login` 复用同组 key 保持两端回填一致）。
 - `WorkspacesPage`（`/workspaces`，387 行）：`listWorkspaces` + `fetchMyBindings` + `useDaemonStatusMap` 组装 `WorkspaceCard` 卡片列表；扫描入口 `WorkspaceScanDialog`；平台管理员可见人员搜索（`listUsers`，`is_platform_admin` 控制显隐，失败降级隐藏控件）。
-- `RuntimesPage`（`/runtimes`，1197 行）：数据源 `useDaemonMachines`（机器级聚合：machines/total/sessions 一体管理）；点卡片开 `RuntimeSessionDialog`（`key={runtime.id}` 重 mount 清旧态）；跨机器 runtime 扁平化支持 `?session` 查询参数恢复定位。
+- `RuntimesPage`（`/runtimes`，1197 行）：数据源 `useDaemonMachines`（机器级聚合：machines/total/sessions 一体管理）；点卡片开 `RuntimeSessionDialog`（`key={runtime.id}` 重 mount 清旧态）；跨机器 runtime 扁平化支持 `?session` 查询参数恢复定位。`handleSillySpecUpgrade`（2026-08-31-machine-sillyspec-version）：modal.confirm 二次确认 → `triggerMachineSillySpecUpdate`（fire-and-forget）→ toast + invalidate machines，进度由 daemon 心跳 sillyspec_update 经 15s 轮询回传机器卡横幅；`sillyspecUpgradingId` 即时禁用标记随 `onUpgradeSillySpec`/`upgradingSillySpec` 注入 MachineCard。
 - `AuditPage`（`/runtimes/[id]/audit`，88 行起）：机器级策略审计视图，数据走 lib-daemon-audit（`usePolicyAuditByRuntime`）。
 - `SettingsPage`（`/settings`）：多 Tab 个人设置（`listSettings`/`updateSettings`）。
 - `GitIdentitiesPage`（`/settings/git-identities`）：git 凭证管理，含创建表单（provider/username/email/token/repos）与 `checkGitAccess` 连通性校验。

@@ -268,3 +268,12 @@ SDK 0.3.181（捆 CLI 2.1.181+）运行时确实发射 `system/task_started`（t
 - **SDK result usage 聚合口径**（7 会话 28 轮 DB 实证，spike-r09.md）：`SDKResultSuccess.usage.input_tokens` = 该 query 内 Σ 逐调用 input；跨轮不累计（与 daemon 会话累计计数器是两个量）。
 - **设计教训**：上下文窗口用量（CtxUsageRing 分子）必须是"最近一次调用的 input+cache_read+cache_creation"（`AgentRun.ctx_tokens`，last-write-wins、终态不覆盖）；各轮 input_tokens 求和会跨轮重复计历史（6 轮 394 万 vs 200K 窗口爆表）。实时/终态口径必须同类（本轮计费量），否则轮结束数字跳变。
 - 关联变更：2026-08-27-session-token-usage-fix（D-001@v2/D-006）。
+
+## daemon 本机集成验证：WS 鉴权只认 X-API-Key + USERPROFILE 隔离跑第二实例
+- daemon 的 WS 升级鉴权（backend `_authenticate_ws_upgrade`）走 `X-API-Key`（或 shk_live_ 前缀 Bearer）；`--token`（JWT）只能过 REST，WS 会 403 `ws_upgrade_auth_rejected`——本机起 daemon↔backend 真实集成时必须 `--api-key`（key 经 POST /api/auth/api-keys 签发）。
+- daemon 单实例守卫是全局 `~/.sillyhub/daemon/daemon.pid`（不分 server）；本机已有真实 daemon 时，集成验证进程用 `USERPROFILE=<临时目录>` 启动即可整树隔离（config/locks/pid 全落临时 HOME，Windows 上 os.homedir() 读 USERPROFILE），零副作用跑第二实例，验后删目录。
+- 来源：2026-08-31-machine-sillyspec-version verify Runtime Evidence（task: verify 集成验证）
+
+## backend daemon 模块测试双目录惯例
+- daemon 模块测试主要在 `backend/app/modules/daemon/tests/`（conftest + 绝大多数用例，如 test_pending_update_upsert / test_machines_router / test_register_heartbeat_daemon）；顶层 `backend/tests/modules/daemon/` 只有契约/迁移/版本管理少数文件（test_protocol_session_contract / test_daemon_version_management）。写 TaskCard allowed_paths 与 verify 命令时先按此归属，别把 app/modules/... 的测试写到 tests/modules/... 路径。
+- 来源：2026-08-31-machine-sillyspec-version task-02/task-03（design 首版路径写错目录，plan 阶段修正）

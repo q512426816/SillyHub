@@ -17,6 +17,7 @@ daemon ↔ SillyHub backend 的 REST 瘦客户端（hub-client.ts）。Node 20 �
 - `HubHttpError(status, bodyText, url, method)`：非 2xx 时抛出；网络错误/超时**不包装**，透传 fetch 原始 TypeError/DOMException（调用方需区分超时 vs 业务错误）。
 - 方法面（按业务域）：
   - runtime 生命周期：`register`（daemon_local_id + 机器字段 + providers + version/build_id，内部自动填 DAEMON_VERSION/BUILD_ID/started_at）、`heartbeat`、`markOffline`。
+  - 两法均追加可选末位参 `sillyspec`（2026-08-31-machine-sillyspec-version / D-002@v1，缺省时请求体不含任何 sillyspec_* 键、旧调用零破坏）：register 收 `RegisterSillySpecParam {version, latest_version}`（值可 null——register 直写语义，本机卸载后重启落 NULL 唯一路径，参数提供才两键成对携带）；heartbeat 收 `HeartbeatSillySpecParam` 三键——sillyspec_version / sillyspec_latest_version 兄弟字段语义（仅非 null 才带，缺省=backend 保留旧值），sillyspec_update 仅非 null 才带、键完全不出现=backend 清除（pending_update 同款反向语义），载荷类型复用 sillyspec-manager 的 `SillySpecUpdateState`。
   - lease 生命周期：`claimLease` / `startLease` / `leaseHeartbeat` / `submitMessages`（message 顶层可带 dedup_key 幂等）/ `completeLease` / `getPendingLeases`（唯一 GET，WS 断线兜底）。
   - interactive：`notifyRunResult`（可带 ModelError）/ `notifySessionEnd` / `notifySessionReady` / `recoverSession` / `confirmReconnected` / `markRecoveryFailed`（后三者靠实例内 sessionId→runtimeId 映射补 runtime_id）。
   - spec 同步：`syncStatus` / `getSpecBundle`（tar 二进制，单独 fetch + arrayBuffer）/ `postSpecSync`（二进制上传）/ `postSpecSyncIncremental`（FileOp[] 增量，返回 SpecIncrementalSyncResult：conflict=true 时 HTTP 仍 200，由 daemon 侧提示人工拍板）。

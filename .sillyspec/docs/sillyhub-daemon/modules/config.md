@@ -14,7 +14,7 @@ daemon 配置持久化层。管理 `~/.sillyhub/daemon/` 下 **per-server 配置
 ## 契约摘要
 - 路径常量：`DEFAULT_CONFIG_DIR`（~/.sillyhub/daemon，os.homedir() 而非 env.HOME，Windows 兼容）；`DEFAULT_CONFIG_PATH`（旧单文件 config.json，**仅作首次升级迁移源**与历史测试兼容断言，生产代码不再直接消费）；`CLAUDE_CONFIG_DIR`（daemon 专属 claude 隔离配置目录，防宿主机 cc-switch 污染，ql-20260726-002）。
 - per-server：`serverHash(server_url)`（sha256 前 8 位 hex，纯函数）、`configPathForServer(server_url, configDir?)`、`hasAnyPerServerConfig(configDir)`（扫 `config-<8hex>.json` 命名）。
-- `DaemonConfig`：扁平字段全量配置——server_url / token / api_key（互斥）/ runtime_id / profile / workspace_dir / poll_interval(30) / heartbeat_interval(15) / max_concurrent_tasks(5) / log_level / default_timeout_seconds(1800) / max_retries(1) / retry_*（网络重试 4 项）/ loop_restart_backoff_ms / max_loop_restarts / outbox_max_per_run / outbox_max_total / disconnect_log_threshold_sec / terminal_observer_*（4 项）/ lease_heartbeat_interval(5) / allowed_roots / spec_root_map。
+- `DaemonConfig`：扁平字段全量配置——server_url / token / api_key（互斥）/ runtime_id / profile / workspace_dir / poll_interval(30) / heartbeat_interval(15) / max_concurrent_tasks(5) / log_level / default_timeout_seconds(1800) / max_retries(1) / retry_*（网络重试 4 项）/ loop_restart_backoff_ms / max_loop_restarts / outbox_max_per_run / outbox_max_total / disconnect_log_threshold_sec / terminal_observer_*（4 项）/ lease_heartbeat_interval(5) / self_reload_check_interval_sec(600) / sillyspec_update_interval_sec(3600，0=关闭——daemon 第四循环 `_sillyspecLoop` 的检查间隔，非法值消费端兜底为关闭，2026-08-31-machine-sillyspec-version) / allowed_roots / spec_root_map。
 - `DEFAULT_CONFIG`：Object.freeze 全字段默认（allowed_roots 默认 [homedir()]）。
 - `loadConfig(server_url, opts?)`：opts.path 显式覆盖路径（测试/历史兼容，最高优先级）、opts.configDir 注入目录。
 - `saveConfig(config, path?)`：mkdir -p + 写 JSON（indent=2）。

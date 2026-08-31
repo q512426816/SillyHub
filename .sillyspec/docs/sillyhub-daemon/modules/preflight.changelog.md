@@ -11,3 +11,7 @@ created_at: 2026-08-28 08:28:18
 
 ## 2026-08-30 — 剩余中置信缺陷修复批（quick ql-20260830-002-f0d2）
 - R3 downloadAndReplace 失败路径清理 .tmp 残留（catch 内 best-effort unlink；导出供单测）。
+
+## 2026-08-31 — 机器 sillyspec 版本显示与远程升级（2026-08-31-machine-sillyspec-version）
+- runCmd / installSillySpec / isOutdated 加 export 供运行期 sillyspec-manager 复用（探测 spawn / npm 升级 / 版本比较基建唯一实现处；仅可见性变化，行为零变化——本变更铁律）。
+

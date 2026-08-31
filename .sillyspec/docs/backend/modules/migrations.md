@@ -33,6 +33,7 @@ alembic upgrade head                       # head = 20260817100000（单 head）
 - 本项目除 PPM 外未正式上线，不要求历史兼容与完整 down-grade，以 head 前进为准。
 
 - 20260825230000_add_quicklog_session_links（2026-08-25-session-spec-binding）：建表 + agent_sessions.change_id 存量播种至 change_session_links（ON CONFLICT DO NOTHING）；downgrade drop 表、播种行保留无害。
+- 20260831150000_add_daemon_sillyspec_fields（2026-08-31-machine-sillyspec-version）：daemon_instances 加 3 列——sillyspec_version / sillyspec_latest_version VARCHAR(50) NULL + sillyspec_update JSON NULL（只加列，写入/清除语义 D-002@v1 在 RuntimeService register/heartbeat）；down_revision 接 20260831130000，downgrade 对称删列。
 
 ## 人工备注
 

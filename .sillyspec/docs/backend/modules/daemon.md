@@ -25,11 +25,17 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
   `PATCH /runtimes/{id}`（display_alias）、`DELETE /runtimes/{id}`（绑定时 409）、
   `/runtimes/{id}/disable|enable|offline|self-update`、`/runtimes/{id}/leases`、
   `/runtimes/{id}/list-dir|list-roots`（host_fs 代理）、`/runtimes/usage`、
-  `/machines`、`/instances`、`/runtimes/{id}/pending-leases`。
+  `/machines`、`/instances`、`/runtimes/{id}/pending-leases`；
+  `POST /machines/{instance_id}/sillyspec-update`（admin，2026-08-31-machine-sillyspec-version：
+  归属校验（`_get_owned_instance`，越权/不存在 404）→ ws_hub 推 `daemon:sillyspec_update`
+  fire-and-forget，离线/发送失败 504 DaemonRuntimeOffline，成功 `{"sent":true}`；
+  刻意不返回 latest_version——npm latest 由 daemon 自行探测经心跳上报）。
 - WS 枢纽：`WS /api/daemon/ws` → `DaemonWsHub`：connect（新连接逐出旧 ws）、
   send_to_runtime / broadcast / notify_task_available / send_wakeup（唤醒去重滑窗）、
   send_heartbeat_ack / send_session_control / send_permission_response /
-  send_self_update / send_policy_update、send_rpc（rpc_id→future 关联，
+  send_self_update / send_policy_update、send_sillyspec_update（推
+  `daemon:sillyspec_update`，DAEMON_MSG_SILLYSPEC_UPDATE 与 daemon protocol.ts
+  逐字对齐，2026-08-31-machine-sillyspec-version）、send_rpc（rpc_id→future 关联，
   disconnect 时取消全部 pending 让调用方快速失败）、is_connected / connected_* 查询。
 - lease：`POST /leases/{id}/claim|start|heartbeat|messages|complete|sync`、
   `POST /leases/{id}/runs/{run_id}/result`、`DELETE /leases/{id}`；
@@ -95,9 +101,11 @@ session / patch / audit / host_fs 子包；另有独立活 service：`lease_serv
 - host_fs：delegate.py + ws_rpc.py——经 WS RPC 读客户端文件系统
   （list_dir、sillyspec.db 读等；runtime/service.py 的 DaemonRpc* 异常族：
   Timeout/Conflict/GatewayError/ForbiddenError/RemoteGatewayError/RemoteError）。
-- 模型：daemon_instances（build_id/版本）、daemon_runtimes（display_alias、
-  allowed_roots、owner）、daemon_task_leases、daemon_change_writes
-  （files_total/files_processed 计数列）、session_dialog_requests。
+- 模型：daemon_instances（build_id/版本；sillyspec 三列 2026-08-31-machine-sillyspec-version：
+  sillyspec_version / sillyspec_latest_version VARCHAR(50) NULL + sillyspec_update JSON NULL
+  ——升级状态机快照 {state, trigger, from_version, to_version, error, since}）、
+  daemon_runtimes（display_alias、allowed_roots、owner）、daemon_task_leases、
+  daemon_change_writes（files_total/files_processed 计数列）、session_dialog_requests。
 
 ## 关键逻辑
 ```
@@ -154,6 +162,18 @@ stage 完成(形态A 留痕): gate task 只落 gate_result + gate_status=decided
 - 会话闸失败收口（2026-08-26-team-subsession-recursion）：run_sync close_interactive_run 增「失败即收口」
   ——首 run failed + 会话从未 ready + parent 非空三条件缺一不可 → 子会话置 failed+ended_at
   （对齐 _fail_worker_subsession 语义），防 daemon 会话闸拒绝后子会话永久 active；追问轮中途失败不命中。
+
+- sillyspec 三列落库语义（2026-08-31-machine-sillyspec-version，D-002@v1 双通道——
+  写入/清除在 RuntimeService register/heartbeat）：register 对 version/latest **无条件
+  直写**（含 None=未安装/未知，本机卸载后重启收敛为 NULL 的唯一路径）且 sillyspec_update
+  恒置 None（daemon 状态机在内存，进程重启即失）；心跳 version/latest 走兄弟字段语义
+  （仅非 None 覆盖，缺省/null 均保留——pydantic 不可区分）；心跳 sillyspec_update 同
+  pending_update 反向语义——None/无键即清除置 NULL，非 None upsert（首写/五键内容变化
+  盖 since=now，同内容重放保留原 since 防退化成最后心跳时间；error 服务层截断 200）。
+  DTO：register/heartbeat 请求各加两键 + `DaemonHeartbeatSillySpecUpdate`（state/trigger
+  不收紧 Literal，宁宽勿断保心跳通道）；机器视图 `_build_machine_read` 显式逐字段组装
+  三字段 + `MachineSillySpecUpdateRead` 嵌套（就近 MachinePendingUpdateRead，
+  DaemonMachineReadWithPending 透出，仅 GET /machines）。
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->

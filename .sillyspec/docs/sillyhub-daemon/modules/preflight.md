@@ -12,7 +12,10 @@ created_at: 2026-08-18 01:45:00
 daemon 启动前预检（`src/preflight.ts`）：sillyspec CLI 版本检查/自动安装 + daemon
 自身 bundle 自更新。两项相互独立，任一失败仅记 warn 不阻断启动（runPreflight 自身
 永不 reject）。除入口 runPreflight 外导出 runSillySpecCheck / runDaemonSelfUpdate /
-respawnDaemonAndExit 供单测直调（buildId / binDir 可注入）。
+respawnDaemonAndExit 供单测直调（buildId / binDir 可注入）；另导出
+runCmd / installSillySpec / isOutdated 供运行期 sillyspec-manager 复用（进程 spawn
+与版本比较基建唯一实现处，2026-08-31-machine-sillyspec-version——仅加 export
+行为零变化）。
 
 ## 契约摘要
 - `runPreflight(config: DaemonConfig, logger: PreflightLogger): Promise<void>`——

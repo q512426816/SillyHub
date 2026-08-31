@@ -21,15 +21,15 @@ created_at: 2026-08-31 08:22:14
 
 | 目标 | 操作 | 状态 |
 |------|------|------|
-| `docs/sillyhub-daemon/modules/protocol.md` | 更新 protocol 模块卡（+SILLYSPEC_UPDATE 消息与 payload） | pending |
-| `docs/sillyhub-daemon/modules/daemon.md` | 更新 daemon 模块卡（+_sillyspecLoop 第四循环/心跳注册透传/WS case） | pending |
-| `docs/sillyhub-daemon/modules/preflight.md` | 更新 preflight 模块卡（runCmd/installSillySpec 导出复用说明） | pending |
-| `docs/sillyhub-daemon/modules/config.md` | 更新 config 模块卡（+sillyspec_update_interval_sec 字段） | pending |
-| `docs/sillyhub-daemon/modules/client.md` | 更新 client 模块卡（register/heartbeat 可选 sillyspec 参数） | pending |
-| `docs/sillyhub-daemon/modules/sillyspec-manager.md` | 新增 sillyspec-manager 模块卡（探测/状态机/自动循环） | pending |
-| `docs/backend/modules/daemon.md` | 更新 backend daemon 模块卡（3 列/端点/DTO/落库语义 D-002@v1） | pending |
-| `docs/backend/modules/migrations.md` | 更新 migrations 模块卡（+20260831 sillyspec_fields 迁移） | pending |
-| `docs/frontend/modules/components-daemon.md` | 更新前端 daemon 组件卡（machine-card 徽标/按钮/横幅） | pending |
-| `docs/frontend/modules/lib-daemon.md` | 更新前端 lib-daemon 卡（+triggerMachineSillySpecUpdate、api-types 3 新字段） | pending |
-| `docs/frontend/modules/app-pages.md` | 更新前端页面卡（runtimes 页 handler，若该页归属其他卡以实际为准） | pending |
-| `_module-map.yaml`（各项目） | sillyhub-daemon map +sillyspec-manager 路径；其余无变化 | pending |
+| `docs/sillyhub-daemon/modules/protocol.md` | 更新 protocol 模块卡（+SILLYSPEC_UPDATE 消息与 payload） | done |
+| `docs/sillyhub-daemon/modules/daemon.md` | 更新 daemon 模块卡（+_sillyspecLoop 第四循环/心跳注册透传/WS case） | done |
+| `docs/sillyhub-daemon/modules/preflight.md` | 更新 preflight 模块卡（runCmd/installSillySpec 导出复用说明） | done |
+| `docs/sillyhub-daemon/modules/config.md` | 更新 config 模块卡（+sillyspec_update_interval_sec 字段） | done |
+| `docs/sillyhub-daemon/modules/client.md` | 更新 client 模块卡（register/heartbeat 可选 sillyspec 参数） | done |
+| `docs/sillyhub-daemon/modules/sillyspec-manager.md` | 新增 sillyspec-manager 模块卡（探测/状态机/自动循环） | done |
+| `docs/backend/modules/daemon.md` | 更新 backend daemon 模块卡（3 列/端点/DTO/落库语义 D-002@v1） | done |
+| `docs/backend/modules/migrations.md` | 更新 migrations 模块卡（+20260831 sillyspec_fields 迁移） | done |
+| `docs/frontend/modules/components-daemon.md` | 更新前端 daemon 组件卡（machine-card 徽标/按钮/横幅） | done |
+| `docs/frontend/modules/lib-daemon.md` | 更新前端 lib-daemon 卡（+triggerMachineSillySpecUpdate、api-types 3 新字段） | done |
+| `docs/frontend/modules/app-pages.md` | 更新前端页面卡（runtimes 页 handler，若该页归属其他卡以实际为准） | done |
+| `_module-map.yaml`（各项目） | sillyhub-daemon map +sillyspec-manager 路径；其余无变化 | done |

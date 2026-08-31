@@ -80,7 +80,7 @@ modules:
     tags: [protocol, constants, 消息协议, 常量]
     aliases: []
     entrypoints:
-      - "MsgType×19: TASK_AVAILABLE/HEARTBEAT/REGISTER/HEARTBEAT_ACK/LEASE_CLAIM/LEASE_START/LEASE_COMPLETE/LEASE_MESSAGES/RPC/RPC_RESULT/SESSION_INJECT/SESSION_INTERRUPT/SESSION_END/SESSION_RESUME/PERMISSION_REQUEST/PERMISSION_RESPONSE/SELF_UPDATE/LEASE_CANCEL/PROVIDER_CONFIG_CHANGED"
+      - "MsgType×22: TASK_AVAILABLE/HEARTBEAT/REGISTER/HEARTBEAT_ACK/LEASE_CLAIM/LEASE_START/LEASE_COMPLETE/LEASE_MESSAGES/RPC/RPC_RESULT/SESSION_INJECT/SESSION_INTERRUPT/SESSION_END/SESSION_RESUME/PERMISSION_REQUEST/PERMISSION_RESPONSE/SELF_UPDATE/LEASE_CANCEL/PROVIDER_CONFIG_CHANGED/CLEANUP/SILLYSPEC_UPDATE"
       - "LeaseState: PENDING/RUNNING/COMPLETED/FAILED/CANCELLED"
       - "WS_PATH=/api/daemon/ws"
       - "REST_PREFIX=/api/daemon"
@@ -99,13 +99,13 @@ modules:
     tags: [http, api-client, 平台接口, 同步]
     aliases: [hub-client]
     entrypoints: []
-    main_symbols: [HubClient, HubHttpError, HubClientAuth, SpecIncrementalSyncResult, fetchMcpWhitelist, RegisterBody, SubmitMessagesBody, CompleteLeaseBody]
-    depends_on: [protocol, types, daemon-version, build-id, daemon, model-error]
+    main_symbols: [HubClient, HubHttpError, HubClientAuth, SpecIncrementalSyncResult, fetchMcpWhitelist, RegisterBody, SubmitMessagesBody, CompleteLeaseBody, RegisterSillySpecParam, HeartbeatSillySpecParam]
+    depends_on: [protocol, types, daemon-version, build-id, daemon, model-error, sillyspec-manager]
     used_by: [cli, daemon, spec-sync, mcp-server, mcp-config, skill-manager, preflight, resilience]
     needs_review: false
     concerns: []
     review_reasons: []
-    notes: "SpecIncrementalSyncResult 为 spec 增量同步（2026-08-17 spec-file-incremental-sync）新增面；daemon.js 为 type-only import"
+    notes: "SpecIncrementalSyncResult 为 spec 增量同步（2026-08-17 spec-file-incremental-sync）新增面；daemon.js 为 type-only import；register/heartbeat 追加可选末位参 sillyspec（2026-08-31-machine-sillyspec-version D-002@v1 键存在性语义），sillyspec-manager.js 为 type-only import"
 
   credential:
     status: active
@@ -202,11 +202,12 @@ modules:
     aliases: []
     entrypoints: []
     main_symbols: [Daemon, DaemonOptions, RecoveryCoordinator, SessionRecoverStatus, translateSpecRoot, InteractiveCredentialManager, RuntimeLockLike, LEASE_POLL_SKIP_MS]
-    depends_on: [config, protocol, types, agent-detector, client, model-error, ws-client, file-rpc, roots-rpc, host-fs-handler, runtime-handler, spawn-env, claude-settings, preflight, skill-manager, build-id, resilience, policy, workspace, interactive, spec-sync, task-runner, cleanup]
+    depends_on: [config, protocol, types, agent-detector, client, model-error, ws-client, file-rpc, roots-rpc, host-fs-handler, runtime-handler, spawn-env, claude-settings, preflight, skill-manager, sillyspec-manager, build-id, resilience, policy, workspace, interactive, spec-sync, task-runner, cleanup]
     used_by: [cli, client]
     needs_review: false
     concerns: []
     review_reasons: []
+    notes: "2026-08-31-machine-sillyspec-version：_sillyspecLoop 第四循环（间隔 sillyspec_update_interval_sec 默认 3600s，0=关）+ 心跳/注册 sillyspec 透传 + WS SILLYSPEC_UPDATE case"
 
   # ---- adapters（协议适配层；目录 adapters/）----
   adapters:
@@ -678,13 +679,13 @@ modules:
     tags: [preflight, self-update, check, 自更新, 预检]
     aliases: []
     entrypoints: []
-    main_symbols: [runPreflight, runSillySpecCheck, runDaemonSelfUpdate, PreflightLogger]
+    main_symbols: [runPreflight, runSillySpecCheck, runDaemonSelfUpdate, PreflightLogger, runCmd, installSillySpec, isOutdated]
     depends_on: [config, client, build-id, version]
-    used_by: [daemon]
+    used_by: [daemon, sillyspec-manager]
     needs_review: false
     concerns: []
     review_reasons: []
-    notes: "runDaemonSelfUpdate 实现 daemon 自更新（按 backend manifest 对齐 bundle）"
+    notes: "runDaemonSelfUpdate 实现 daemon 自更新（按 backend manifest 对齐 bundle）；runCmd/installSillySpec/isOutdated 已导出供 sillyspec-manager 运行期复用（2026-08-31，仅加 export 行为零变化）"
 
   api-types:
     status: active
@@ -749,3 +750,19 @@ modules:
     concerns: []
     review_reasons: []
     notes: "claude 模型调用错误归类 8 类（auth_failed/quota_exceeded/rate_limited/timeout/model_not_found/network/provider_error/unknown）；429 区分 quota（不可重试）与 rate_limited（可重试，D-006）；types.ts 与 backend model_error.py ModelErrorDTO 三端同构"
+
+  # ---- 2026-08-31 新增（2026-08-31-machine-sillyspec-version task-04）----
+  sillyspec-manager:
+    status: active
+    doc: modules/sillyspec-manager.md
+    paths: ["sillyhub-daemon/src/sillyspec-manager.ts"]
+    tags: [sillyspec, version, upgrade, state-machine, 版本升级, 状态机]
+    aliases: []
+    entrypoints: [SillySpecManager]
+    main_symbols: [SillySpecManager, SillySpecManagerDeps, SillySpecSnapshot, SillySpecUpdateState, SillySpecUpdateStatus, SillySpecUpdateTrigger, SILLYSPEC_LATEST_CACHE_TTL_MS, SILLYSPEC_DEFERRED_RECHECK_MS, SILLYSPEC_TERMINAL_WINDOW_MS]
+    depends_on: [preflight]
+    used_by: [daemon, client]
+    needs_review: false
+    concerns: []
+    review_reasons: []
+    notes: "运行期 sillyspec 探测（latest 10min 缓存）+ npm 升级（复用 preflight installSillySpec）+ 内存状态机 idle→running→success|failed / deferred 30s 复查 / 终态 10min 惰性过期；isBusy 由 daemon 注入 _isBusyForUpdate；client 仅 type-only import（SillySpecUpdateState）"
