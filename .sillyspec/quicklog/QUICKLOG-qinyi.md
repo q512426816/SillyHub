@@ -402,3 +402,17 @@
 方案：daemon.ts 三处：新增 DEFAULT_INJECT_WAIT_SESSION_MS=60s+轮询 100ms+env SILLYHUB_INJECT_WAIT_SESSION_MS 可调（取 60s 而非计划 12s——12s 覆盖不了 23s 实测缺口）；_routeSessionControl 的 INJECT not_found 分流新方法 _awaitSessionThenRoute 后即刻返回（不阻塞 WS/补拉分发批）；等待中会话出现即重入完整消费链（lease 校验/claim_token/附件），超时才走 005 丢弃上报（语义保留仅延后），重入包 try/catch 防 unhandled rejection
 结果：daemon-inject-drop-report 7/7 绿（新增 G 用例：会话 200ms 晚到→正常 inject 零上报，waited_ms=215）；近邻 kind-dispatch/resume-route/control-dispatcher/interactive-bridge/ws-client-session-control 5 套件 94/94 绿；pnpm typecheck 0 错误；daemon 全量按仓库规约留 CI
 审计：⚖️ 归属切分：1 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/tests/daemon-inject-drop-report.test.ts
+
+## ql-20260831-018-dc1a | 2026-08-31 22:54:30 | 工作区绑定自己的守护进程自动并入可写目录
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/workspace/member_runtimes/service.py（合并+推送 helper 与 owner 分支接入）
+- backend/app/modules/workspace/member_runtimes/tests/test_binding_auto_allowed_roots.py（新建行为用例）
+- backend/app/modules/workspace/member_runtimes/tests/conftest.py（selected-metadata 补 grants 表）
+- .sillyspec/docs/backend/modules/workspace.md（关键逻辑补绑定自动并入条目）
+需求：工作区绑定自己的守护进程自动并入可写目录
+根因：绑定工作区与守护进程 allowed_roots 完全无关联，默认沙箱仅 ~/.sillyhub，agent 对工作区只能读不能写，任务中途被 Runtime Policy 拒写才晚期失败
+方案：upsert_my_binding 在归属校验后 owner 直绑分支把 root_path 并入该 daemon 全部 runtime.allowed_roots（只增不减、legacy 空值物化 instance 兜底、覆盖判定幂等、相对路径防御跳过），同事务单次 commit 后逐 runtime best-effort WS policy_update 推送，离线走心跳 resync 兜底；共享/借用绑定不自动加以保安全边界
+结果：新用例 5/5 绿，相邻 member_runtimes 全套+test_daemon_client_scan 32/32 绿，ruff format/check+mypy 零告警
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：backend/app/modules/workspace/member_runtimes/tests/conftest.py, backend/app/modules/workspace/member_runtimes/tests/test_binding_auto_allowed_roots.py

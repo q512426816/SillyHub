@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -13,11 +15,136 @@ from sqlmodel import col
 from app.core.errors import AppError
 from app.core.logging import get_logger
 from app.modules.daemon.grants.model import DaemonRuntimeGrant
-from app.modules.daemon.model import DaemonInstance
+from app.modules.daemon.model import DaemonInstance, DaemonRuntime
 from app.modules.workspace.member_runtimes.exceptions import MemberBindingNotFound
 from app.modules.workspace.member_runtimes.model import WorkspaceMemberRuntime
 
 log = get_logger(__name__)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 绑定自动并入 allowed_roots（quick ql-20260831-018-dc1a 体验修）
+#
+# 语义：owner 直绑自己的守护进程时，工作区 root_path 自动并入该 daemon 全部
+# runtime 的 allowed_roots——「绑定即可写」，免去先去守护进程页手动配可写目录。
+# 共享/借用绑定（daemon.user_id != user_id）不自动加：allowed_roots 是机器主人
+# 授予的物理写边界，借用人绑定只是引用，无权自扩。
+# ────────────────────────────────────────────────────────────────────────────
+
+
+def _is_absolute_path_form(p: str) -> bool:
+    """绝对路径形态判定（绝对 / ``~`` 开头），口径同 update_allowed_roots 校验。"""
+    return p.startswith("~") or p.startswith("/") or re.match(r"^[A-Za-z]:[\\/]", p) is not None
+
+
+def _root_covers_path(root: str, path: str) -> bool:
+    """边界敏感前缀包含：path 等于 root 或位于 root+分隔符 之下。
+
+    Windows 形态（含反斜杠/盘符）大小写不敏感、POSIX 形态敏感——比较口径对齐
+    agent/placement.py::path_definitively_outside_roots 的跨平台规则。该函数是
+    「可判定越界」语义，与本次「已覆盖」判定不同，不便直接复用，按同规则实现。
+    """
+
+    def _win_form(s: str) -> bool:
+        return "\\" in s or (len(s) >= 2 and s[0].isalpha() and s[1] == ":")
+
+    win = _win_form(root) or _win_form(path)
+
+    def _norm(s: str) -> str:
+        n = os.path.normpath(s)
+        n = n.replace("/", "\\") if win else n.replace("\\", "/")
+        return n.casefold() if win else n
+
+    norm_root = _norm(root)
+    norm_path = _norm(path)
+    sep = "\\" if win else "/"
+    return norm_path == norm_root or norm_path.startswith(norm_root + sep)
+
+
+async def _merge_workspace_root_into_owned_daemon_roots(
+    session: AsyncSession,
+    *,
+    daemon: DaemonInstance,
+    root_path: str,
+) -> list[DaemonRuntime]:
+    """把工作区 root_path 并入 daemon 全部 runtime 的 allowed_roots（只写不 commit）。
+
+    - 写 ``runtime.allowed_roots``（派发 effective_roots 与 daemon 心跳 per-runtime
+      同步的实际生效源）；不写 instance 级——daemon register 按本机 config 覆盖
+      回写 instance.allowed_roots，写了也会被冲掉。
+    - 只增不减：非空原值保留后追加；空值（legacy per-runtime 下沉前）先物化
+      instance 兜底再追加，绝不收窄现有白名单。
+    - 幂等：root_path 已被某条绝对根覆盖（边界敏感 + Windows 大小写不敏感）则
+      跳过；``~`` 根 backend 无法展开、不参与覆盖判定（追加无害——daemon 侧
+      同步时本就并入 homedir）。
+    - 相对路径（非绝对 / ``~`` 开头）防御性跳过，不阻断绑定本身。
+    - 返回被修改的 runtime 行；随调用方（upsert_my_binding）的单次 commit 一并
+      落库，commit 后由调用方 best-effort 推送 ``policy_update``。
+    """
+    if not _is_absolute_path_form(root_path):
+        log.debug("binding_root_path_not_absolute_skip_merge", root_path=root_path)
+        return []
+    runtimes = list(
+        (
+            await session.execute(
+                select(DaemonRuntime).where(
+                    col(DaemonRuntime.daemon_instance_id) == daemon.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    merged: list[DaemonRuntime] = []
+    now = datetime.now(UTC)
+    for rt in runtimes:
+        current = list(rt.allowed_roots or [])
+        if not current:
+            # legacy 空值：物化 instance 机器级兜底，语义对齐派发侧回退链
+            # （agent/service.py::_apply_profile_to_lease 的 runtime→instance 回退）。
+            current = list(daemon.allowed_roots or [])
+        if any(not r.startswith("~") and _root_covers_path(r, root_path) for r in current):
+            continue
+        rt.allowed_roots = [*current, root_path]
+        rt.updated_at = now
+        merged.append(rt)
+    return merged
+
+
+async def _push_policy_updates_for_merged_runtimes(
+    daemon_id: uuid.UUID,
+    runtimes: list[DaemonRuntime],
+) -> None:
+    """合并落库后 best-effort 推送 policy_update（对齐 PUT allowed-roots 路由行为）。
+
+    在线 daemon 秒级热更新，避免「绑定后立刻开会话、PolicyCache 未同步导致
+    写被拒」的窗口；推送失败仅告警不阻断绑定——离线/异常由 daemon 下一次心跳
+    全量 resync 兜底收敛（R-07 语义）。``version`` 从 runtime.updated_at 派生
+    epoch 毫秒、单调递增，daemon 侧据此丢弃乱序旧推送（与 daemon/router.py
+    _derive_policy_version 同口径，本模块不 import router 私有函数、就地同语义实现）。
+    """
+    from app.modules.daemon.ws_hub import get_daemon_ws_hub
+
+    for rt in runtimes:
+        ts = rt.updated_at if rt.updated_at is not None else datetime.now(UTC)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=UTC)
+        version = int(ts.timestamp() * 1000)
+        try:
+            hub = get_daemon_ws_hub()
+            await hub.send_policy_update(
+                daemon_id,
+                list(rt.allowed_roots or []),
+                version,
+                payload_runtime_id=rt.id,
+            )
+        except Exception:
+            log.warning(
+                "binding_allowed_roots_policy_push_failed",
+                runtime_id=str(rt.id),
+                daemon_id=str(daemon_id),
+                exc_info=True,
+            )
 
 
 async def get_my_binding(
@@ -49,7 +176,13 @@ async def upsert_my_binding(
     Raises ``AppError(403)`` if ``daemon_id`` is set but belongs to a
     different user AND is not an enabled workspace-granted online daemon
     (quick-18951370 共享绑定放宽；防跨工作区/跨用户劫持语义不变).
+
+    quick ql-20260831-018-dc1a（体验修）：owner 直绑（daemon 归属本人）时自动把
+    ``root_path`` 并入该 daemon 全部 runtime 的 ``allowed_roots``（只增不减、幂等，
+    同事务落库 + commit 后 best-effort 推送 policy_update）；共享/借用绑定不自动
+    加——allowed_roots 是机器主人授予的物理写边界，借用人不得自扩。
     """
+    merged_runtimes: list[DaemonRuntime] = []
     if daemon_id is not None:
         daemon = await session.get(DaemonInstance, daemon_id)
         # quick-18951370（共享绑定）：owner 直绑（原路径零变化）；非 owner 放宽为
@@ -85,6 +218,14 @@ async def upsert_my_binding(
                     code="daemon_not_owned",
                     http_status=403,
                 )
+        elif daemon.user_id == user_id:
+            # owner 直绑：自动并入可写目录（共享绑定走上方 user_id != user_id 分支，
+            # 不会到达这里——安全边界由分支结构保证）。
+            merged_runtimes = await _merge_workspace_root_into_owned_daemon_roots(
+                session,
+                daemon=daemon,
+                root_path=root_path,
+            )
 
     existing = await session.get(WorkspaceMemberRuntime, (workspace_id, user_id))
     now = datetime.now(UTC)
@@ -99,6 +240,8 @@ async def upsert_my_binding(
         existing.updated_at = now
         await session.commit()
         await session.refresh(existing)
+        if merged_runtimes and daemon_id is not None:
+            await _push_policy_updates_for_merged_runtimes(daemon_id, merged_runtimes)
         return existing, False
 
     # Create path: init_synced_* start NULL (uninitialized) and remain so until
@@ -117,6 +260,8 @@ async def upsert_my_binding(
     session.add(binding)
     await session.commit()
     await session.refresh(binding)
+    if merged_runtimes and daemon_id is not None:
+        await _push_policy_updates_for_merged_runtimes(daemon_id, merged_runtimes)
     return binding, True
 
 

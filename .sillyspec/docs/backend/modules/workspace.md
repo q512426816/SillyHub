@@ -64,6 +64,12 @@ resolve_runtime_for_writeback(ws, user):     # 写回链路 runtime 解析
   （binding→daemon_id+default_agent 现算；无 binding 走 borrow_resolver 借用兜底；
   失败统一抛 DaemonClientNoActiveSession，reason=not_bound/daemon_offline/
   default_agent_unset/provider_unavailable）
+- upsert_my_binding 自动并入可写目录（ql-20260831-018-dc1a）：owner 直绑（daemon
+  归属本人）时把 root_path 并入该 daemon 全部 runtime 的 allowed_roots（只增不减、
+  legacy 空值先物化 instance 兜底、绝对根覆盖判定幂等跳过、相对路径防御跳过），
+  同事务单次 commit + commit 后逐 runtime best-effort WS policy_update 推送（离线
+  daemon 心跳 resync 兜底）；共享/借用绑定（daemon.user_id != user_id）不自动加
+  ——allowed_roots 是机器主人授予的物理写边界，借用人不得自扩
 - scan_generate 的 daemon 子流：`_guard_daemon_owned_by_user` 早校验防劫持（见人工备注）
 - ComponentCatalogService：组件=项目组 `projects/*.yaml` 派生的只读元数据，不再是
   workspaces 行；SkillsViewService：backend 容器**直读** spec_root 的 skills/

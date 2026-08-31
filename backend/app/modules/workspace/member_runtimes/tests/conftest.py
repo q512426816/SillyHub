@@ -65,6 +65,9 @@ def _selected_metadata() -> Any:
         "daemon_runtimes",
         "workspaces",
         "workspace_member_runtimes",
+        # quick ql-20260831-018-dc1a：共享绑定（非 owner）路径查询
+        # daemon_runtime_grants，须纳入否则 no such table。
+        "daemon_runtime_grants",
         # RBAC（task-07 借用 helper 的 has_permission 查询需要）。
         "roles",
         "role_permissions",
