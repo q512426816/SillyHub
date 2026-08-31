@@ -153,9 +153,15 @@ export interface MarkdownTextProps {
    * - `reading`：阅读型，抽屉长文阅读，更大字号/行距。
    */
   size?: "compact" | "reading";
+  /**
+   * 透传 remark 插件（2026-08-31 变更关联审计 P3）：mdast 层自定义变换
+   * （如变更名自动链接 remarkChangeLink）。不传保持现状（sanitize 链路不变，
+   * 既有 6+ 处复用零影响）。rehypePlugins 仍固定为本组件单例，不开放透传。
+   */
+  remarkPlugins?: ComponentProps<typeof MarkdownPreview>["remarkPlugins"];
 }
 
-export function MarkdownText({ content, className, size = "compact" }: MarkdownTextProps) {
+export function MarkdownText({ content, className, size = "compact", remarkPlugins }: MarkdownTextProps) {
   if (!content) {
     return null;
   }
@@ -166,6 +172,7 @@ export function MarkdownText({ content, className, size = "compact" }: MarkdownT
         source={content}
         components={previewComponents}
         rehypePlugins={markdownRehypePlugins}
+        remarkPlugins={remarkPlugins}
       />
     </div>
   );

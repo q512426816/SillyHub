@@ -18,6 +18,13 @@ export const queryKeys = {
     all: ["agentRuns"] as const,
     list: (workspaceId: string) => ["agentRuns", "list", workspaceId] as const,
   },
+  // 2026-08-31 变更关联审计 P3：变更名自动链接的名单缓存（active + archive
+  // 两桶，location 进 key；staleTime 5 分钟，渲染侧供数）。
+  changeAutolink: {
+    all: ["changeAutolink"] as const,
+    list: (workspaceId: string, location: string) =>
+      ["changeAutolink", "list", workspaceId, location] as const,
+  },
   daemonRuntimes: {
     all: ["daemonRuntimes"] as const,
     list: (params: DaemonRuntimeListParams) =>

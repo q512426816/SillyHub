@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 
 import { Image } from "antd";
 import { ChevronRight, FileText, Folder, FolderOpen } from "lucide-react";
@@ -19,6 +19,9 @@ import { FileNodeIcon, fileExt } from "@/components/ui/file-node-icon";
 import { FilePreviewModal, type FilePreviewTarget } from "@/components/files/file-preview-modal";
 import { useObjectUrl } from "@/components/files/use-object-url";
 import { ApiError } from "@/lib/api";
+// 变更名自动链接（2026-08-31 变更关联审计 P3）：变更文档正文提名的变更名
+// 渲染为详情页直链（含归档变更；名单 staleTime 5 分钟，见 lib/change-autolink）
+import { remarkChangeLink, useChangeNameIndex } from "@/lib/change-autolink";
 import { formatFileSize } from "@/lib/file/utils";
 import {
   buildChangeFileTree,
@@ -64,12 +67,24 @@ function isPreviewableHtml(path: string): boolean {
 // 内容区「预览」模式渲染：按文件类型分别渲染（.md→Markdown / .html→iframe / 其他纯文本→只读源码）。
 // ql-20260818-008：三个分支统一 min-w-0（防宽内容把 flex 链撑破，超宽出横向滚动条），
 // 源码预览改 whitespace-pre 不软折行——长行靠横向滚动看全，预览区宽度固定。
-function FilePreview({ path, name, content }: { path: string; name: string; content: string }) {
+// remarkPlugins（2026-08-31 变更关联审计 P3）：变更名自动链接插件由 ChangeFileTree
+// 统一构建后下传（FilePreview 自身不拉名单）。
+function FilePreview({
+  path,
+  name,
+  content,
+  remarkPlugins,
+}: {
+  path: string;
+  name: string;
+  content: string;
+  remarkPlugins?: ComponentProps<typeof MarkdownText>["remarkPlugins"];
+}) {
   if (path.endsWith(".md")) {
     return (
       // reading 尺寸自带 p-2/text-sm/leading-7，容器仅留 muted 底与圆角滚动
       <div className="min-w-0 flex-1 overflow-auto rounded-md bg-muted/40">
-        <MarkdownText content={content} size="reading" />
+        <MarkdownText content={content} size="reading" remarkPlugins={remarkPlugins} />
       </div>
     );
   }
@@ -313,6 +328,19 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
   const [previewTarget, setPreviewTarget] = useState<FilePreviewTarget | null>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // 变更名自动链接（2026-08-31 变更关联审计 P3）：名单为空（查询未就绪/无变更）
+  // 时不挂插件，渲染行为与改造前逐字节一致
+  const changeNameIndex = useChangeNameIndex(workspaceId);
+  const changeLinkPlugins = useMemo(
+    () =>
+      changeNameIndex.size > 0
+        ? ([[remarkChangeLink, { nameToId: changeNameIndex, workspaceId }]] as ComponentProps<
+            typeof MarkdownText
+          >["remarkPlugins"])
+        : undefined,
+    [changeNameIndex, workspaceId],
+  );
 
   const pendingPaths = new Set(pending.map((p) => p.path));
 
@@ -571,7 +599,7 @@ export function ChangeFileTree({ workspaceId, changeId, lastSyncedAt, daemonOnli
                 </div>
               </div>
               {mode === "preview" ? (
-                <FilePreview path={selected.path} name={selected.name} content={content} />
+                <FilePreview path={selected.path} name={selected.name} content={content} remarkPlugins={changeLinkPlugins} />
               ) : (
                 <textarea
                   className="min-h-[300px] flex-1 rounded-md border border-input bg-background p-2 font-mono text-xs leading-relaxed focus:border-ring focus:outline-none"

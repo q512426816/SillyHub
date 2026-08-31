@@ -61,6 +61,8 @@ vi.mock("@uiw/react-markdown-preview", () => ({
 }));
 
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
 import { ChangeFileTree } from "@/components/change-file-tree";
 import { markdownRehypePlugins } from "@/components/ui/markdown-text";
 import {
@@ -92,16 +94,28 @@ beforeEach(() => {
   mockedFetchRaw.mockResolvedValue(new Blob(["image-bytes"], { type: "image/png" }));
 });
 
+// 变更名自动链接（2026-08-31 变更关联审计 P3）给组件引入 useQuery：裸 render 无
+// QueryClient 会抛「No QueryClient set」——统一经 renderTree 包装（agent-profile
+// __tests__ 同款先例）。listChanges（名单查询）mock 为空列表即可（本文件不测链接行为）。
+vi.mock("@/lib/changes", () => ({
+  listChanges: vi.fn().mockResolvedValue({ items: [] }),
+}));
+
+const renderTree = (ui: ReactElement) => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+};
+
 describe("ChangeFileTree", () => {
   it("渲染文件树列出全部文件", async () => {
-    render(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
     await waitFor(() => expect(screen.getByText("proposal.md")).toBeInTheDocument());
     expect(screen.getByText("logo.png")).toBeInTheDocument();
     expect(screen.getByText("只读")).toBeInTheDocument(); // 二进制只读徽标
   });
 
   it("默认进入预览模式；点「编辑」才进入文本编辑并保存", async () => {
-    render(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
     await waitFor(() => expect(screen.getByText("proposal.md")).toBeInTheDocument());
     fireEvent.click(screen.getByText("proposal.md"));
     // 默认预览：Markdown 渲染出现，编辑框未出现
@@ -122,7 +136,7 @@ describe("ChangeFileTree", () => {
     mockedPending.mockResolvedValue({
       items: [{ path: "proposal.md", status: "pending", created_at: "2026-07-02T00:00:00Z" }],
     });
-    render(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
     await waitFor(() => expect(screen.getByText("排队中")).toBeInTheDocument());
   });
 
@@ -134,7 +148,7 @@ describe("ChangeFileTree", () => {
       ],
     });
     mockedGetContent.mockResolvedValue({ path: "prototype-search.html", content: "<h1>原型</h1>", exists: true });
-    render(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
     await waitFor(() => expect(screen.getByText("prototype-search.html")).toBeInTheDocument());
     fireEvent.click(screen.getByText("prototype-search.html"));
     const frame = await waitFor(() => screen.getByTitle("prototype-search.html 渲染预览") as HTMLIFrameElement);
@@ -151,7 +165,7 @@ describe("ChangeFileTree", () => {
       ],
     });
     mockedGetContent.mockResolvedValue({ path: "config.yaml", content: "key: value", exists: true });
-    render(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
     await waitFor(() => expect(screen.getByText("config.yaml")).toBeInTheDocument());
     fireEvent.click(screen.getByText("config.yaml"));
     // 默认预览：只读源码显示，编辑框未出现
@@ -162,7 +176,7 @@ describe("ChangeFileTree", () => {
   });
 
   it("编辑后点「预览」切回，渲染最新未保存内容（不丢改动）", async () => {
-    render(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
     await waitFor(() => expect(screen.getByText("proposal.md")).toBeInTheDocument());
     fireEvent.click(screen.getByText("proposal.md"));
     await waitFor(() => expect(screen.getByTestId("md")).toBeInTheDocument());
@@ -175,7 +189,7 @@ describe("ChangeFileTree", () => {
   // ql-20260816-005：空树不是终点——新建 change 文件镜像滞后期间给同步指引
   it("文件清单为空时显示暂无文件 + 镜像未同步指引", async () => {
     mockedListChangeFiles.mockResolvedValue({ change_id: "c1", items: [] });
-    render(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
     await waitFor(() => expect(screen.getByText("暂无文件")).toBeInTheDocument());
     expect(screen.getByText(/尚未同步到平台镜像/)).toBeInTheDocument();
     expect(screen.getByText(/同步到服务器/)).toBeInTheDocument();
@@ -184,7 +198,7 @@ describe("ChangeFileTree", () => {
   // ── 2026-08-26-file-fullscreen-preview / FR-03：非文本态 + 全屏预览 ──────
 
   it("选中图片文件内联 antd Image（鉴权 objectURL），取数走 raw 端点而非 content", async () => {
-    render(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
     await waitFor(() => expect(screen.getByText("logo.png")).toBeInTheDocument());
     fireEvent.click(screen.getByText("logo.png"));
     // 内联 antd Image（img 元素）出现，src 为 useObjectUrl 构造的 objectURL
@@ -207,7 +221,7 @@ describe("ChangeFileTree", () => {
         { path: "docs/spec.pdf", name: "spec.pdf", size: 2048, last_modified_at: null, is_text: false },
       ],
     });
-    render(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
     await waitFor(() => expect(screen.getByText("spec.pdf")).toBeInTheDocument());
     fireEvent.click(screen.getByText("spec.pdf"));
     // 文件卡片：名称 + 大小（formatFileSize）+ 全屏预览按钮
@@ -225,7 +239,7 @@ describe("ChangeFileTree", () => {
   });
 
   it("文本文件点工具栏「全屏预览」：弹窗 defaultFullscreen 打开且 fetch 恒走 raw 端点", async () => {
-    render(<ChangeFileTree workspaceId="ws" changeId="c1" />);
+    renderTree(<ChangeFileTree workspaceId="ws" changeId="c1" />);
     await waitFor(() => expect(screen.getByText("proposal.md")).toBeInTheDocument());
     fireEvent.click(screen.getByText("proposal.md"));
     await waitFor(() => expect(screen.getByTestId("md")).toBeInTheDocument());
