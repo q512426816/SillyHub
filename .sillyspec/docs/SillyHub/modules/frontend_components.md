@@ -115,6 +115,7 @@ SECTION_ORDER.filter(section => inPpm ? section==="ppm" : section!=="ppm")
 
 ## 变更索引
 
+- ql-20260831-012-5f60 | 输入胶囊 ＋ 功能按钮放大显形（session-input-bar）：antd text Button 的 h-10 w-10 被 .ant-btn height:32 钳成 40x32 椭圆、透明无边框不显眼 → 改原生 button（同菜单项模式）真实 40x40 圆形 + border/bg-card 可点击外形，hover/展开态 brand 语义色（双主题换肤）；发送按钮同根因 h-9 w-9 → !h-9 !w-9（!important 压 antd，惯例见 message-queue-bar）恢复 36x36 正圆
 - ql-20260829-006 | MachineCard 机器头新增「删除」按钮（仅离线可点，危险红字）+ runtimes 页 handleDeleteMachine（modal.confirm 二次确认 → deleteDaemonMachine → machines cache 就地移除 + 本机会话过滤 + 悬浮锁清理）；lib/daemon.ts 增 deleteDaemonMachine
 - ql-20260828-010-ca22 | 切换守护进程两步确认：workspace-daemon-switcher 点选非当前 daemon 后先进路径确认态（WorkspacePathPicker 绑定新 daemon、预填旧 root_path 可改可浏览），确认才一并提交 daemon_id+root_path——本地路径机器相关，跨机切换不再沿用旧路径
 - ql-20260827-005-a660 | /sessions 整页滚动条修复：sessions-portal 门户容器 calc(100vh-56px) 与 TopBar h-16(64px) 不符溢出 8px，对齐 calc(100vh-64px)（explorer/page.tsx 同款惯例）

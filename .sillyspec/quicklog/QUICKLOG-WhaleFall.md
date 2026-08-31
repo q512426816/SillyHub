@@ -104,3 +104,14 @@
 根因：patrol _json_merge_sql 的 COALESCE(constraints,'{}') 只挡 SQL NULL 挡不住 JSON 类型的 null：PG 下 json-null || 对象 按操作符规则产出数组 [null,{...}] 且每轮巡检继续追加（生产两条 mission 滚到 760KB），读取端 (mission.constraints or {}).get 对真值数组崩 AttributeError——converge 500 + patrol 每轮 mission_patrol_mission_failed；数据已手工修复但代码层缺陷在：新 mission 建档仍 JSON null，首次强收标记即复发
 方案：①_json_merge_expr 双方言加守卫（PG jsonb_typeof / SQLite json_type，非 object 一律回 '{}' 再合并，存量损坏行由下一次合并自愈）；②AgentMission.constraints 列换 ConstraintsJSON TypeDecorator（读取端非 dict 归一 {}、None 保持，DDL 仍 JSON 零迁移），中心化覆盖全部 13 处读取点
 结果：新 7 用例绿（合并三态+自愈+读取归一+PG SQL 锚点）+ 相邻回归 159 绿（finalizer/mission 族 76 + patrol 四件 83）+ ruff/format/mypy 0；待部署
+
+## ql-20260831-012-5f60 | 2026-08-31 14:32:29 | 输入胶囊＋功能按钮放大显形——antd 高度钳制成 40x32 椭圆
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/components/daemon/session-input-bar.tsx（＋按钮改原生 button 40x40 圆形显形 + 发送按钮 !h-9 !w-9 修高度钳制）
+- .sillyspec/docs/SillyHub/modules/frontend_components.md（frontend_components 变更索引补 ql-20260831-012 条目）
+需求：输入胶囊＋功能按钮放大显形——antd 高度钳制成 40x32 椭圆
+根因：antd Button 的 .ant-btn height:32 覆盖 Tailwind h-10，＋按钮实测渲染 40x32 椭圆且透明无边框、纯灰图标，用户反馈太小不明显；旁边发送按钮同根因被钳成 36x32（本应 36x36 正圆）
+方案：session-input-bar.tsx：＋按钮弃 antd 改原生 button（同菜单项模式）真实 40x40 正圆 + border-border/bg-card 可点击外形，hover/展开态 brand 语义色随 data-theme 双主题换肤；发送按钮 h-9 w-9 改 !h-9 !w-9（!important 压 antd，惯例见 message-queue-bar）恢复正圆
+结果：vitest 3 文件 31 用例全过（plus-menu/ux-fixes/team）；Docker 重建 frontend 镜像 --force-recreate 生效，容器内 chunk grep 到新类名，浏览器实测 40x40 正圆/发送 36x36/hover 青色 brand 态，截图目视通过

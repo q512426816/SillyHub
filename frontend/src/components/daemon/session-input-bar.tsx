@@ -674,22 +674,30 @@ export function SessionInputBar({
             组件族自定义浮层（absolute bottom-full + z-30，同联想浮层/团队弹层
             惯例，避用 antd 浮层）；＋ 按钮包含在外点判定 ref 内防开合双翻。
             ＋ 不随输入框 disabled（终态/离线仍可开菜单看各入口禁用原因 tooltip，
-            各项自行门控——原 📎 的 attachmentsDisabled 下沉到菜单项）。 */}
+            各项自行门控——原 📎 的 attachmentsDisabled 下沉到菜单项）。
+            ql-20260831-012：弃 antd Button 改原生 button（antd .ant-btn 的
+            height:32 会盖掉 Tailwind h-10，实测渲染 40x32 椭圆）——真实 40x40
+            圆形 + 边框/底色给出可点击外形（用户反馈太小不明显）；hover/展开态
+            用 brand 语义色阶，随 data-theme 双主题换肤。 */}
         <div ref={plusMenuRef} className="relative shrink-0 self-center">
-          <Button
-            type="text"
+          <button
+            type="button"
             onClick={() => setPlusMenuOpen((v) => !v)}
             aria-haspopup="menu"
             aria-expanded={plusMenuOpen}
             aria-label="更多功能"
-            className="h-10 w-10 rounded-full p-0 text-muted-foreground"
+            className={`flex h-10 w-10 items-center justify-center rounded-full border transition-colors ${
+              plusMenuOpen
+                ? "border-brand-300 bg-brand-100 text-brand-600"
+                : "border-border bg-card text-muted-foreground hover:border-brand-300 hover:bg-brand-50 hover:text-brand-600"
+            }`}
             title="附件 / 派团队 / 选择技能 / 关联变更·快速修复"
           >
             <Plus
               aria-hidden
               className={`h-5 w-5 transition-transform duration-150 ${plusMenuOpen ? "rotate-45" : ""}`}
             />
-          </Button>
+          </button>
           {plusMenuOpen && (
             <div
               role="menu"
@@ -856,7 +864,10 @@ export function SessionInputBar({
           onClick={onSend}
           // D-7：带附件时空文本可发（看图说话）；纯文本仍要求非空。
           disabled={disabled || (!value.trim() && attachments.length === 0)}
-          className="h-9 w-9 shrink-0 self-center border-none bg-gradient-to-br from-brand-600 to-info shadow-primary hover:from-brand-700 hover:to-info hover:shadow-primary"
+          // ql-20260831-012：! 前缀压 antd .ant-btn height:32（原 h-9 w-9 被
+          // 钳成 36x32 椭圆），恢复 36x36 正圆（!important 对抗惯例见
+          // message-queue-bar.tsx）。
+          className="!h-9 !w-9 shrink-0 self-center border-none bg-gradient-to-br from-brand-600 to-info shadow-primary hover:from-brand-700 hover:to-info hover:shadow-primary"
           title={sendEmptyHinted ? "消息内容不能为空" : "发送"}
           aria-label={sendEmptyHinted ? "消息内容不能为空" : "发送"}
         >
