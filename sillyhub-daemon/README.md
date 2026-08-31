@@ -122,6 +122,21 @@ sillyhub-daemon autostart disable --server <url>   # 或 --all
 
 `~/.sillyhub/daemon/` 在所有平台上都展开为 `$HOME/.sillyhub/daemon`（Windows 上 `$HOME` 通常是 `C:\Users\<you>`）。
 
+### 状态目录隔离：`SILLYHUB_DAEMON_DIR`（官方参数）
+
+环境变量 `SILLYHUB_DAEMON_DIR` 可把 daemon 的**全部本地状态**（pid / log / per-server 配置 / credentials / specs / manifests / skills / locks / bin / mcp.json 等）重定向到指定目录，默认仍是 `~/.sillyhub/daemon`。
+
+用途：集成测试与同机多实例。此前测试只能覆写 `HOME` + `USERPROFILE` 整个 home 来绕开全局单实例 pid 守卫——Windows 下 `os.homedir()` 读 `USERPROFILE` 两侧都要覆写，且劫持整个 home 会波及 git / npm / claude 等所有 home 相对路径。官方参数只重定向 daemon 自身：
+
+```bash
+# Git Bash（集成测试形态）：
+SILLYHUB_DAEMON_DIR="$(mktemp -d)" node dist/cli.js start --server http://127.0.0.1:8021 --api-key ***
+# PowerShell：
+$env:SILLYHUB_DAEMON_DIR = Join-Path $env:TEMP "daemon-iso-$(Get-Random)"; node dist\cli.js status
+```
+
+注意：须在进程启动前设置（路径常量在模块加载时求值一次；`daemonStateDir()` 本身懒求值，供运行时调用）。
+
 ## 故障排查
 
 **`sillyhub-daemon: command not found` 或 PowerShell 报"无法将 sillyhub-daemon 识别为 cmdlet"**

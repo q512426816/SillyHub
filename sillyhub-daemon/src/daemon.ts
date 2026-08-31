@@ -43,7 +43,7 @@ import { mkdir, stat, readFile, writeFile, rename, unlink, chmod } from 'node:fs
 
 import { join, dirname } from 'node:path';
 import type { SDKMessage, SDKResultMessage } from '@anthropic-ai/claude-agent-sdk';
-import { type DaemonConfig, DEFAULT_CONFIG_DIR, normalizeAllowedRoots } from './config.js';
+import { type DaemonConfig, DEFAULT_CONFIG_DIR, daemonBinDir, normalizeAllowedRoots } from './config.js';
 // task-07（2026-08-26-workspace-mcp-edit / D-007@v2）：会话级 MCP 三件套预取
 // （fetchMcpBundle）+ bundle 类型（会话级缓存值）。
 import { fetchMcpBundle, normalizeWorkerDepth } from './mcp-config.js';
@@ -214,10 +214,11 @@ const SELF_UPDATE_TARGET_UNKNOWN = '<disk>';
 
 // ── task-03（2026-08-29-daemon-selfupdate-safety / S2+S3）：磁盘旁路探测 + pending ──
 
-// daemon bundle 落盘目录。与 preflight.ts:61 的模块私有常量 DAEMON_BIN_DIR 同值
-// 重声明（preflight.ts 不在本卡 allowed_paths 且常量未导出，禁止为复用而改动它）；
-// respawn 加载的同一文件，探测读它比对 BUILD_ID。
-const DAEMON_BIN_DIR: string = join(homedir(), '.sillyhub', 'daemon', 'bin');
+// daemon bundle 落盘目录（respawn 加载的同一文件，探测读它比对 BUILD_ID）。
+// 2026-08-31 收口：原与 preflight.ts 的模块私有常量 DAEMON_BIN_DIR 同值重声明（当时
+// task 卡 allowed_paths 限制）；现统一派生 config.daemonBinDir()——SILLYHUB_DAEMON_DIR
+// 隔离时 bin 一并重定向，隔离实例的自更新探测/落盘不再写真实 ~/.sillyhub/daemon/bin。
+const DAEMON_BIN_DIR: string = daemonBinDir();
 
 // daemon bundle 文件名。与 preflight.ts:64 的模块私有常量 DAEMON_BUNDLE_NAME
 // 同值重声明（理由同上）。

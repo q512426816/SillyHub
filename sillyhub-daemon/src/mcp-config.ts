@@ -24,6 +24,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseJsonFromResponse } from './hub-client.js';
+import { daemonStateDir } from './config.js';
 
 // ── 类型 ─────────────────────────────────────────────────────────────────────
 
@@ -56,10 +57,11 @@ export type McpConfigLogger = (level: LogLevel, msg: string, data?: Record<strin
 /**
  * 平台默认 MCP 配置路径（admin 全局）。
  * ~/.sillyhub/daemon/mcp.json（所有 workspace 共享）。
+ * 派生自 daemonStateDir()（原自行拼 HOME/USERPROFILE，与 config.ts 的 os.homedir()
+ * 口径不一致）——SILLYHUB_DAEMON_DIR 隔离时一并重定向。
  */
 function platformMcpConfigPath(): string {
-  const home = process.env.HOME || process.env.USERPROFILE || '';
-  return join(home, '.sillyhub', 'daemon', 'mcp.json');
+  return join(daemonStateDir(), 'mcp.json');
 }
 
 /**

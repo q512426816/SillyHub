@@ -18,10 +18,10 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile, readdir, copyFile, stat } from 'node:fs/promises';
 import { join, dirname, relative, isAbsolute } from 'node:path';
-import { homedir } from 'node:os';
 import { gunzip } from 'node:zlib';
 import { promisify } from 'node:util';
 import { parseJsonFromResponse } from './hub-client.js';
+import { daemonStateDir } from './config.js';
 
 // Wave C 续：gunzip 移出事件循环（bundle 解压在 async extractSkillsBundle 内）。
 const gunzipAsync = promisify(gunzip);
@@ -30,10 +30,11 @@ const gunzipAsync = promisify(gunzip);
 
 /**
  * 平台 skills 全局存储（所有 worktree 共享）。
- * 懒计算（运行时读 homedir）——模块加载时不固化，测试改 HOME/USERPROFILE 即时生效。
+ * 懒计算（运行时读 env/homedir）——模块加载时不固化，测试改 SILLYHUB_DAEMON_DIR /
+ * HOME / USERPROFILE 即时生效。
  */
 function skillsDir(): string {
-  return join(homedir(), '.sillyhub', 'daemon', 'skills');
+  return join(daemonStateDir(), 'skills');
 }
 /** 本地已同步版本记录。 */
 function localManifestPath(): string {

@@ -41,13 +41,47 @@ function stripBOM(s: string): string {
 // ── 路径常量（对齐 Python config.py:15-16）──────────────────────────────────
 
 /**
+ * daemon 状态目录（官方隔离参数，2026-08-31）。
+ *
+ * daemon 的全部本地状态根：pid/log/per-server config/credentials/specs/manifests/
+ * skills/locks/bin/runs/pending-update/claude-config/mcp.json 均派生自本目录。
+ * 环境变量 `SILLYHUB_DAEMON_DIR` 覆盖默认 `~/.sillyhub/daemon` —— 集成测试 /
+ * 多实例场景只重定向 daemon 自身状态，不劫持整个 HOME/USERPROFILE（HOME 覆写会波及
+ * git/npm/claude 等所有 home 相对路径，且 Windows 下 os.homedir() 读 USERPROFILE、
+ * 两侧都要覆写才生效——集成测试曾被迫以此绕行单实例 pid 守卫）。
+ *
+ * 求值时机：本函数每次调用现读 env（懒求值）；`DEFAULT_CONFIG_DIR` 等模块级常量在
+ * import 时求值一次——子进程形态（env 先于 node 启动设置）天然生效，进程内测试需
+ * `vi.resetModules()` + `vi.stubEnv()` 后再动态 import。
+ */
+export function daemonStateDir(): string {
+  const override = process.env.SILLYHUB_DAEMON_DIR;
+  return override && override.trim()
+    ? resolve(override.trim())
+    : join(homedir(), '.sillyhub', 'daemon');
+}
+
+/**
+ * daemon 自更新 bundle 落盘目录 `<daemonStateDir()>/bin`。
+ *
+ * 收口声明：daemon.ts 与 preflight.ts 原各自重声明同值常量（当时 task 卡
+ * allowed_paths 限制不允许改 preflight 导出）；现统一从 config 派生，
+ * SILLYHUB_DAEMON_DIR 隔离时 bin 目录一并隔离（否则隔离实例的自更新探测/落盘
+ * 仍写真实 ~/.sillyhub/daemon/bin）。
+ */
+export function daemonBinDir(): string {
+  return join(daemonStateDir(), 'bin');
+}
+
+/**
  * 默认配置目录 `~/.sillyhub/daemon`。
  *
  * 等价 Python `Path.home() / ".sillyhub" / "daemon"`。
  * 用 `os.homedir()` 而非 `process.env.HOME`（Windows 下后者可能 undefined）。
  * 被 cli/daemon 复用（Python 的 DEFAULT_CONFIG_PATH 被 cli.py 引用）。
+ * 派生自 daemonStateDir()——SILLYHUB_DAEMON_DIR 覆盖时整体重定向。
  */
-export const DEFAULT_CONFIG_DIR: string = join(homedir(), '.sillyhub', 'daemon');
+export const DEFAULT_CONFIG_DIR: string = daemonStateDir();
 
 /**
  * 平台 daemon spawn claude 的隔离配置目录（ql-20260726-002-1180）。

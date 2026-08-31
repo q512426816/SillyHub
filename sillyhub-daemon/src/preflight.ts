@@ -51,9 +51,9 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import { mkdir, readFile, writeFile, rename, unlink, copyFile, readdir, access } from 'node:fs/promises';
 import type { DaemonConfig } from './config.js';
+import { daemonBinDir } from './config.js';
 import { BUILD_ID } from './build-id.js';
 import { parseSemver, type SemVerTuple } from './version.js';
 import { parseJsonFromResponse } from './hub-client.js';
@@ -79,8 +79,10 @@ export type PreflightLogger = (
  * daemon bundle 落盘目录 `~/.sillyhub/daemon/bin`。
  * 对齐 install.sh 的 `BIN_DIR="${HOME}/.sillyhub/daemon/bin"`，install.sh 与
  * 本模块写同一文件，保证自更新后 install.sh 创建的 wrapper 仍指向新 bundle。
+ * 2026-08-31 收口：派生 config.daemonBinDir()（与 daemon.ts 同源，消除双份重声明）；
+ * SILLYHUB_DAEMON_DIR 隔离时一并重定向（install.sh 安装形态不受影响——默认态同值）。
  */
-const DAEMON_BIN_DIR: string = join(homedir(), '.sillyhub', 'daemon', 'bin');
+const DAEMON_BIN_DIR: string = daemonBinDir();
 
 /** daemon bundle 文件名，对齐 install.sh 的 `BUNDLE_NAME="sillyhub-daemon.js"`。 */
 const DAEMON_BUNDLE_NAME = 'sillyhub-daemon.js';

@@ -20,7 +20,8 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
+
+import { daemonStateDir } from './config.js';
 
 // ── 工具函数 ──────────────────────────────────────────────────────────────────
 
@@ -32,11 +33,10 @@ function stripBOM(s: string): string {
 /**
  * 默认凭证文件路径：~/.sillyhub/daemon/credentials.json。
  * 对照 Python `DEFAULT_CREDENTIALS_PATH`（L22）：`Path.home() / '.sillyhub/daemon/credentials.json'`。
+ * 派生自 daemonStateDir()——SILLYHUB_DAEMON_DIR 隔离时一并重定向。
  */
 export const DEFAULT_CREDENTIALS_PATH = path.join(
-  os.homedir(),
-  '.sillyhub',
-  'daemon',
+  daemonStateDir(),
   'credentials.json',
 );
 

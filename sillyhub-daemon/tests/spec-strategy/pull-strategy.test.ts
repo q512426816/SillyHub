@@ -11,8 +11,12 @@ import { mkdtemp, rm, mkdir, writeFile, readdir, readlink, lstat } from 'node:fs
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// homedir 指向每个测试的临时根，隔离 ~/.sillyhub/daemon/specs/{ws}
-let tmpRoot: string;
+// homedir 指向每个测试的临时根，隔离 ~/.sillyhub/daemon/specs/{ws}。
+// 初值声明即给（beforeEach 再按用例重建）——spec-sync 经 config.daemonStateDir 间接
+// 引入 config.ts，其模块级 DEFAULT_CONFIG_DIR 在 import 期就会调一次 homedir()，
+// 此时 beforeEach 尚未运行，mock 返回 undefined 会让 join 抛 TypeError（2026-08-31
+// daemon 状态目录收口时实证）。初值只参与纯路径拼接，无 fs 副作用。
+let tmpRoot: string = join(tmpdir(), 'spec-strategy-uninit');
 vi.mock('node:os', async () => {
   const actual = await vi.importActual<typeof import('node:os')>('node:os');
   return { ...actual, homedir: () => tmpRoot };

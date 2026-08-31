@@ -25,6 +25,7 @@ import { join, relative, isAbsolute, dirname, resolve, sep as pathSep } from 'no
 import { mkdir, rm, readdir, stat, lstat, readlink, symlink, cp, readFile, writeFile } from 'node:fs/promises';
 import type { HubClient } from './hub-client.js';
 import type { FileOp } from './hub-client.js';
+import { daemonStateDir } from './config.js';
 import { writeLocalYaml } from './local-yaml-writer.js';
 
 // ── resolveSpecDir ────────────────────────────────────────────────────────────
@@ -43,7 +44,9 @@ export function resolveSpecDir(wsId: string): string {
   if (!wsId || /[\\/]/.test(wsId)) {
     throw new Error(`invalid workspace_id for spec dir: ${JSON.stringify(wsId)}`);
   }
-  return join(homedir(), '.sillyhub', 'daemon', 'specs', wsId);
+  // daemonStateDir()：SILLYHUB_DAEMON_DIR 隔离时 specs 一并重定向（与 backend 约定的
+  // `~/.sillyhub/daemon/specs/{ws_id}` 在默认态下逐字一致）
+  return join(daemonStateDir(), 'specs', wsId);
 }
 
 // ── pullSpecBundle ────────────────────────────────────────────────────────────
@@ -378,9 +381,9 @@ async function ensureSpecJunction(specDir: string, target: string): Promise<bool
 //   - hash：SHA-256 hex；version：该文件本地认为的服务器版本（base_version 用）；
 //   - mtime：上次 hash 时的文件 mtime（ms）——未变则跳过重算 hash（R-05 性能优化）。
 
-/** 本地清单缓存文件路径（移出 specDir）。 */
+/** 本地清单缓存文件路径（移出 specDir）。派生自 daemonStateDir()（隔离一并重定向）。 */
 export function resolveManifestCachePath(wsId: string): string {
-  return join(homedir(), '.sillyhub', 'daemon', 'manifests', `${wsId}.json`);
+  return join(daemonStateDir(), 'manifests', `${wsId}.json`);
 }
 
 /** 单文件清单条目。 */

@@ -43,12 +43,19 @@
  */
 
 import { createHash } from 'node:crypto';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { mkdir, open, readFile, unlink, writeFile } from 'node:fs/promises';
 
-/** lock 文件默认目录：~/.sillyhub/daemon/locks（与 sessions.json 同根）。 */
-export const LOCKS_DIR = join(homedir(), '.sillyhub', 'daemon', 'locks');
+import { daemonStateDir } from './config.js';
+
+/**
+ * lock 文件默认目录：~/.sillyhub/daemon/locks（与 sessions.json 同根）。
+ * 懒函数（原模块常量）——调用时现读 SILLYHUB_DAEMON_DIR/homedir，进程内
+ * override 无需 resetModules。
+ */
+export function locksDir(): string {
+  return join(daemonStateDir(), 'locks');
+}
 
 /** lock 身份维度（对齐 backend upsert key，不含 user/api-key）。 */
 export interface LockIdentity {
@@ -100,8 +107,8 @@ export function computeServerHash(serverOrigin: string): string {
   return createHash('sha256').update(serverOrigin).digest('hex').slice(0, 8);
 }
 
-/** lock 文件路径：<dir>/runtime-<key>.lock（dir 默认 LOCKS_DIR，测试可覆盖）。 */
-export function lockFilePath(key: string, dir: string = LOCKS_DIR): string {
+/** lock 文件路径：<dir>/runtime-<key>.lock（dir 默认 locksDir()，测试可覆盖）。 */
+export function lockFilePath(key: string, dir: string = locksDir()): string {
   return join(dir, `runtime-${key}.lock`);
 }
 
@@ -177,7 +184,7 @@ export async function acquireLock(
   opts: AcquireOptions,
 ): Promise<void> {
   const key = computeLockKey(identity);
-  const dir = opts.dir ?? LOCKS_DIR;
+  const dir = opts.dir ?? locksDir();
   const path = lockFilePath(key, dir);
   const ts = (opts.now ?? (() => new Date().toISOString()))();
   const data: LockFileData = {
@@ -240,7 +247,7 @@ function emptyHolder(identity: LockIdentity, opts: AcquireOptions): LockFileData
 }
 
 /** 按 key 释放 lock（RuntimeLockManager.releaseAll 用）。 */
-export async function releaseLockByKey(key: string, dir: string = LOCKS_DIR): Promise<void> {
+export async function releaseLockByKey(key: string, dir: string = locksDir()): Promise<void> {
   try {
     await unlink(lockFilePath(key, dir));
   } catch {
@@ -294,7 +301,7 @@ export class RuntimeLockManager {
 
   async releaseAll(): Promise<void> {
     for (const key of this._acquired) {
-      await releaseLockByKey(key, this._opts.locksDir ?? LOCKS_DIR);
+      await releaseLockByKey(key, this._opts.locksDir ?? locksDir());
     }
     this._acquired.clear();
   }
