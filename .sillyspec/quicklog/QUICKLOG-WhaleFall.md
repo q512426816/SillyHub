@@ -91,3 +91,16 @@
 根因：平台缺陷：workspace 建档时 default_branch 落字段缺省值 'main'（schema.py:115），派发从未探测仓库真实分支；crrcdt-hubin 的 pmp-web-ui 仓库默认分支非 main，分身 worktree 创建连续 4 次 fatal: Not a valid object name: 'main'（worktree_create_failed），任务派发链整体断裂
 方案：prepare_worker_worktree（团队/子会话两派发路径共用 helper）对非 HEAD 的 base_ref 先经既有 git_rev_parse RPC 验证可解析，不可解析/异常回退 HEAD（当前 checkout 基准）+ warning 日志；可解析则配置照常生效。零新增 RPC、零 daemon 改动、零数据库变更，存量配错工作区即时自愈
 结果：test_dispatch_worker_worktree 9 绿（新增 3：缺失回退/探测异常回退/可解析保持）+ 相邻回归 50 绿（caller/direct/target 19 + subsession 31）+ ruff/format/mypy 0；已部署并生产端到端验证——向主控发「重新分析 pmp-web-ui」触发分身派发，backend 命中 mission_worker_base_ref_missing_fallback_head（'main' 不可解析回退 HEAD），worktree_branch=workers/ea51f348 成功建出、worker 正常运行（此前同场景连续 4 次 worktree_create_failed）
+
+## ql-20260831-008-6876 | 2026-08-31 13:38:17 | mission.constraints 损坏双修——合并 SQL object 类型守卫 + 读取端 TypeDecorator 归一
+状态：已完成
+关联变更：（无）
+文件：
+- backend/app/modules/agent/patrol.py（_json_merge_expr 双方言 object 守卫）
+- backend/app/modules/agent/model.py（ConstraintsJSON TypeDecorator（新增类+挂列））
+- backend/app/modules/agent/tests/test_mission_constraints_integrity.py（新建 7 用例）
+- .sillyspec/docs/backend/modules/agent.md（constraints 完整性双修条目）
+需求：mission.constraints 损坏双修——合并 SQL object 类型守卫 + 读取端 TypeDecorator 归一
+根因：patrol _json_merge_sql 的 COALESCE(constraints,'{}') 只挡 SQL NULL 挡不住 JSON 类型的 null：PG 下 json-null || 对象 按操作符规则产出数组 [null,{...}] 且每轮巡检继续追加（生产两条 mission 滚到 760KB），读取端 (mission.constraints or {}).get 对真值数组崩 AttributeError——converge 500 + patrol 每轮 mission_patrol_mission_failed；数据已手工修复但代码层缺陷在：新 mission 建档仍 JSON null，首次强收标记即复发
+方案：①_json_merge_expr 双方言加守卫（PG jsonb_typeof / SQLite json_type，非 object 一律回 '{}' 再合并，存量损坏行由下一次合并自愈）；②AgentMission.constraints 列换 ConstraintsJSON TypeDecorator（读取端非 dict 归一 {}、None 保持，DDL 仍 JSON 零迁移），中心化覆盖全部 13 处读取点
+结果：新 7 用例绿（合并三态+自愈+读取归一+PG SQL 锚点）+ 相邻回归 159 绿（finalizer/mission 族 76 + patrol 四件 83）+ ruff/format/mypy 0；待部署

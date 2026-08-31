@@ -161,18 +161,28 @@ def _json_merge_expr(dialect_name: str) -> TextClause:
     ``sqlalchemy.JSON``——生产 PG 落 json 类型（migration 202607060900），单测
     conftest 用 SQLite 内存库）：
 
-    - PostgreSQL：json 无 ``||`` 合并操作符，显式 CAST 到 jsonb 合并后回 json
-      （``CAST(CAST(COALESCE(constraints,'{}') AS JSONB) || CAST(:p AS JSONB)
-      AS JSON)``）；
-    - SQLite（及其它方言兜底）：``json_patch``（JSON1 扩展，Python 3.9+ 自带
-      SQLite ≥ 3.28 均内置）。
+    - PostgreSQL：json 无 ``||`` 合并操作符，显式 CAST 到 jsonb 合并后回 json。
+      ql-20260831-008：``CASE WHEN jsonb_typeof(...)='object'`` 守卫——
+      ``COALESCE`` 只挡 SQL NULL，挡不住 JSON 类型的 null（建档 constraints=
+      json ``null``）；PG 下 ``json-null || 对象`` 按操作符规则产出**数组**
+      ``[null, {...}]`` 且后续合并逐轮追加（生产两条 mission 滚到 760KB，
+      读取端 ``.get`` 连环 AttributeError）。非 object（SQL NULL / json null /
+      历史损坏数组）一律回 ``'{}'`` 再合并——存量损坏行被下一次合并自愈为
+      干净 dict；
+    - SQLite（及其它方言兜底）：``json_patch`` + ``json_type`` 同语义守卫
+      （``json_type`` 对 SQL NULL 返 NULL、json ``null`` 返 ``'null'``，均落
+      ELSE ``'{}'``；JSON1 扩展，Python 3.9+ 自带 SQLite ≥ 3.28 均内置）。
     """
     if dialect_name == "postgresql":
         return text(
-            "CAST(CAST(COALESCE(constraints, '{}') AS JSONB) "
+            "CAST(CASE WHEN jsonb_typeof(CAST(constraints AS JSONB)) = 'object' "
+            "THEN CAST(constraints AS JSONB) ELSE '{}'::JSONB END "
             "|| CAST(:__constraints_merge_patch AS JSONB) AS JSON)"
         )
-    return text("json_patch(COALESCE(constraints, '{}'), :__constraints_merge_patch)")
+    return text(
+        "json_patch(CASE WHEN json_type(constraints) = 'object' "
+        "THEN constraints ELSE '{}' END, :__constraints_merge_patch)"
+    )
 
 
 def _as_utc(value: datetime) -> datetime:

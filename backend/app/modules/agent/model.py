@@ -23,6 +23,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.types import TypeDecorator
 from sqlmodel import Field, col
 
 from app.models.base import BaseModel
@@ -1098,6 +1099,41 @@ class AgentSessionQueuedMessage(BaseModel, table=True):
     )
 
 
+class ConstraintsJSON(TypeDecorator):
+    """mission.constraints 列的类型装饰器（ql-20260831-008-6876）。
+
+    constraints 语义上恒为 dict-or-NULL（创建路径只写 dict / None），非 dict
+    即损坏残留——根因是 patrol 合并 SQL 的 COALESCE 挡不住 JSON 类型的 null，
+    PG 下 ``json-null || 对象`` 产出数组并逐轮追加（生产两条滚到 760KB，
+    读取端 ``.get`` 连环 AttributeError / converge 500；合并 SQL 已同 ql 加
+    object 守卫修复 + 合并自愈）。本装饰器是**读取端兜底**：
+
+    - ``process_result_value``：非 dict（数组 / 字符串等）归一为 ``{}``；
+      ``None``（SQL NULL 与 json null 反序列化后同为 None）保持 ``None``——
+      ``mission.constraints is not None`` 守卫（mission.py 虚拟映射）语义不变，
+      ``(...) or {}`` 读取模式对 None 本就安全；
+    - ``process_bind_param``：非 dict 非 None 落 ``{}``（防御——修复后代码
+      不再写非 dict，此处兜住其它潜在写者）。
+
+    impl 仍为 JSON：DDL 零变化（迁移不动），只影响 Python 侧出入参。中心化
+    覆盖 finalizer / orchestrator / patrol / mcp_tools 全部
+    ``(mission.constraints or {})`` 读取点，无需逐点改。
+    """
+
+    impl = JSON
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None or isinstance(value, dict):
+            return value
+        return {}
+
+    def process_result_value(self, value, dialect):
+        if value is None or isinstance(value, dict):
+            return value
+        return {}
+
+
 class AgentMission(BaseModel, table=True):
     """Aggregation root for a multi-agent delegation.
 
@@ -1188,10 +1224,12 @@ class AgentMission(BaseModel, table=True):
         ),
     )
     objective: str = Field(sa_column=Column(Text, nullable=False))
+    # ConstraintsJSON（ql-20260831-008）：读取端非 dict 归一 {}（损坏兜底），
+    # DDL 仍为 JSON 零迁移。# { max_workers, read_only_scope, ... }
     constraints: dict | None = Field(
         default=None,
-        sa_column=Column(JSON, nullable=True),
-    )  # { max_workers, read_only_scope, ... }
+        sa_column=Column(ConstraintsJSON, nullable=True),
+    )
     budget_tokens: int | None = Field(
         default=None,
         sa_column=Column(Integer, nullable=True),

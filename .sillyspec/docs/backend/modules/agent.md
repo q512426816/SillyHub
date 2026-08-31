@@ -116,6 +116,13 @@ mission external 三重防御: ①入口跳过 orchestrator/lease spawn
   converge 层 0 收口（_enforce_converge_layer0 通道嗅探：Bearer 豁免/分身 403/apiKey 裸调 403）；
   patrol 职责⑥预算强收（先原子置位 constraints.budget_force_ended_at 后批量收口，虚拟映射
   「标记存在时 ended 未 done→failed」保证强收后可收敛 degraded）；分身调用 worktree_path 一律忽略。
+- constraints 完整性双修（ql-20260831-008）：patrol `_json_merge_expr` 双方言加 object 类型守卫
+  （PG `jsonb_typeof` / SQLite `json_type`；非 object——SQL NULL / JSON null / 历史损坏数组——一律回
+  `'{}'` 再合并，修 PG `json-null || 对象` 产出数组并逐轮追加的根因，存量损坏行被下一次合并自愈）；
+  AgentMission.constraints 列换 ConstraintsJSON TypeDecorator（读取端非 dict 归一 `{}`、None 保持
+  None，DDL 仍 JSON 零迁移），中心化覆盖 finalizer/orchestrator/patrol/mcp_tools 全部
+  `(mission.constraints or {})` 读取点（生产曾因数组化滚到 760KB：converge 500 + patrol 每轮
+  AttributeError；数据已修，本卡堵代码层复发）。
 ## 人工备注
 
 <!-- MANUAL_NOTES_START -->
