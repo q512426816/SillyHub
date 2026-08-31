@@ -1173,6 +1173,10 @@ export type SessionInjectOptions = Omit<
  * model（task-10 / FR-03-2）为会话级模型覆盖，随供应商同请求下发（空串=跟随
  * 供应商配置）。
  */
+
+/** inject 发送超时毫秒数（ql-20260831-006-6d67，见 injectSession 内注释）。 */
+const INJECT_TIMEOUT_MS = 30_000;
+
 export async function injectSession(
   sessionId: string,
   prompt: string,
@@ -1221,7 +1225,16 @@ export async function injectSession(
   }
   return apiFetch<SessionInjectResponse>(
     `/api/daemon/sessions/${encodeURIComponent(sessionId)}/inject`,
-    { method: "POST", json: body },
+    {
+      method: "POST",
+      json: body,
+      // ql-20260831-006-6d67：inject 发送超时兜底——后端劣化/网络挂起时请求无限
+      // pending，page/dialog 两模式的占位轮永远「排队中」且消息无任何痕迹（刷新
+      // 即丢）。30s 超时抛 code="timeout"，两模式既有 catch 消费 message：撤占位
+      // 轮 + 错误横幅提示（草稿在失败路径天然保留在输入框，可改后重发）。
+      timeoutMs: INJECT_TIMEOUT_MS,
+      timeoutMessage: `发送超时（${INJECT_TIMEOUT_MS / 1000}秒）：消息未发出，草稿已保留，请重试`,
+    },
   );
 }
 

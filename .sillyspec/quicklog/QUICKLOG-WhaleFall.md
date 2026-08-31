@@ -61,3 +61,21 @@
 根因：backend/Dockerfile 构建时 printf 无条件补 UTF-8 BOM，与源文件自带 BOM 叠加成双 BOM，dist_router utf-8-sig 只剥一个，残留 \ufeff 混入响应体首字符，PS5.1 把首行注释当代码执行（该 bug 已三次横跳）。
 方案：删 Dockerfile printf 补 BOM 行确立 BOM 单一来源为源文件，加恰好一个 BOM 的构建断言（违反即构建失败），test_daemon_dist fixture 模板带单 BOM 还原真实镜像状态并加响应体不以 \ufeff 开头的回归锚点，daemon.md 编码契约同步。
 结果：pytest 9 passed，镜像重建部署后 127.0.0.1:3000 与 10.10.115.118:3000 返回首字节均为 # 无 BOM，PS5.1 用 irm 实拉并 iex 首行零报错，报错彻底消除；部署时附带发现前端 Node 代理缓存后端容器旧 IP 需随重建重启。
+
+## ql-20260831-006-6d67 | 2026-08-31 11:14:57 | 会话卡排队双修复：inject 发送 30s 超时兜底 + suspended 会话随 daemon 回线自动恢复
+状态：已完成
+关联变更：（无）
+文件：
+- frontend/src/lib/api.ts（apiFetch timeoutMs/timeoutMessage 选项与 abort 合并）
+- frontend/src/lib/daemon.ts（injectSession 接 30s 超时+专用文案）
+- frontend/src/lib/__tests__/api.test.ts（超时 4 用例（自定义/缺省文案、外部 abort、无超时零回归））
+- frontend/src/lib/daemon.test.ts（injectSession 超时文案 1 用例）
+- backend/app/modules/daemon/sweep.py（session_auto_recover_sweep_once 第三档+常驻循环接线）
+- backend/app/modules/daemon/tests/test_session_sweep_recover.py（新建（恢复/不误伤/幂等 4 用例））
+- .sillyspec/docs/SillyHub/modules/daemon.md（sweep 三档描述（顺带修正旧文案 A5 分流语义））
+- .sillyspec/docs/SillyHub/modules/daemon.changelog.md（ql-20260831-006-6d67 条目）
+- .sillyspec/docs/SillyHub/modules/frontend_lib.md（api.ts 超时契约）
+需求：会话卡排队双修复：inject 发送 30s 超时兜底 + suspended 会话随 daemon 回线自动恢复
+根因：2026-08-31 会话卡排队事故两个实锤缺陷：①前端 apiFetch 无超时——后端劣化时 inject POST 无限挂起，占位轮永远「排队中/正在思考…」无错误提示，刷新后消息彻底消失（从未到后端）；②backend 重启窗口 daemon WS 断开被 10s 降级 offline，offline sweep 把 active 主会话误标 suspended 后无任何恢复触发点（既有恢复链只在 daemon 自身重启时跑），实测挂起 15 分钟无人恢复、24h 后被 GC 翻 failed
+方案：①apiFetch 新增 timeoutMs/timeoutMessage（AbortController 合并调用方 signal，外部 abort 仍走 network_error），injectSession 统一 30s 超时+「发送超时：草稿已保留」文案，page/dialog 两模式既有 catch 撤占位轮+横幅提示；②sweep.py 新增 session_auto_recover_sweep_once——suspended 主会话其 runtime 重新 online+600s 宽限且挂起满 60s → 翻 reconnecting+发 SESSION_RESUME 控制指令（payload/供应商凭证对齐 reopen），daemon restoreAndReconnect→confirm 翻 active，失败三路收敛，wire 进 60s 常驻巡检
+结果：后端 4 新用例绿+相邻回归 57 绿+ruff/format/mypy 0；前端 39 用例绿（新增 5）+tsc 0+eslint 0 error；未部署（改动在源码，Docker 镜像未重建）

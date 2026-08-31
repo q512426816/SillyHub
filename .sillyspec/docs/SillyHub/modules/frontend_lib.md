@@ -19,6 +19,7 @@ SillyHub 前端 API 客户端层与基础设施库（frontend/src/lib/**）。�
   - URL 解析：浏览器端相对 URL（走 Next rewrite /api/* → backend，任意 origin 可访问，不硬编码后端地址）
   - SSR / 服务端直取用 `INTERNAL_API_BASE_URL`（fallback NEXT_PUBLIC_API_BASE_URL / localhost:8000）；`getApiBaseUrl()` 供 EventSource 类 helper 解析后端 origin
   - `ApiError{code, status, requestId, details}` — 后端错误 payload 结构化透传；网络层异常抛 `code="network_error"`
+  - 可选请求超时（ql-20260831-006-6d67）：`timeoutMs` 到时 abort 并抛 `code="timeout"`（文案经 `timeoutMessage` 定制，缺省「请求超时，请重试」）；调用方自带 `signal` 的外部 abort 仍走 `network_error`（streamSession resync 静默语义不回归）。当前接入点：`injectSession` 30s + 「草稿已保留」专用文案——后端劣化请求挂起时撤占位轮 + 错误横幅兜底，占位轮不再永久「排队中」
   - 401 处理：非 /api/auth/* 端点且未带 `x-auth-retry` 时单飞刷新拿新 token 重试一次（防无限重试）
 - `token-refresh.ts`：`ensureFreshAccessToken()` — 模块级 inflight 单飞，并发 401 风暴只发一次 POST /api/auth/refresh 并写回 store；未登录/未 hydrate/refresh 失败返 null；`decodeJwtExp` 解析过期时间。
 - `fetch-sse.ts`：fetch + ReadableStream 的 EventSource 替代品。

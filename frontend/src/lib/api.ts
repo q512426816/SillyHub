@@ -75,13 +75,23 @@ export interface ApiRequestOptions extends Omit<RequestInit, "headers" | "body">
   headers?: Record<string, string>;
   json?: unknown;
   query?: Record<string, string | number | boolean | undefined | null | string[]>;
+  /**
+   * 请求超时（毫秒）。到时 abort 底层 fetch 并抛 `code="timeout"` 的
+   * ApiError（status=0）。ql-20260831-006-6d67：inject 等写操作专用——防
+   * 后端劣化/网络挂起时请求无限 pending、前端占位轮永远「排队中」无兜底；
+   * 缺省不设（读操作沿用无超时语义零回归）。调用方自带 `signal` 的外部
+   * abort 仍走原 network_error 映射（streamSession resync 静默依赖它）。
+   */
+  timeoutMs?: number;
+  /** 超时 ApiError 的用户可见文案（错误横幅直接展示 message；缺省通用文案）。 */
+  timeoutMessage?: string;
 }
 
 export async function apiFetch<T = unknown>(
   path: string,
   options: ApiRequestOptions = {},
 ): Promise<T> {
-  const { json, query, headers = {}, ...rest } = options;
+  const { json, query, headers = {}, timeoutMs, timeoutMessage, ...rest } = options;
 
   const url = resolveUrl(path);
   if (query) {
@@ -114,16 +124,48 @@ export async function apiFetch<T = unknown>(
     init.body = JSON.stringify(json);
   }
 
+  // ql-20260831-006-6d67：可选超时。合并调用方自带 signal——外部 abort 走原
+  // network_error 语义（abort 原因区分：timedOut 只由超时计时器置位）。
+  const timeoutController = new AbortController();
+  let timedOut = false;
+  const externalSignal = rest.signal;
+  const onExternalAbort = (): void => {
+    timeoutController.abort();
+  };
+  if (externalSignal) {
+    if (externalSignal.aborted) onExternalAbort();
+    else externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+  }
+  const timeoutTimer =
+    timeoutMs != null
+      ? setTimeout(() => {
+          timedOut = true;
+          timeoutController.abort();
+        }, timeoutMs)
+      : null;
+  init.signal = timeoutController.signal;
+
   let resp: Response;
   try {
     resp = await fetch(url.toString(), init);
   } catch (err) {
+    if (timedOut) {
+      throw new ApiError(0, {
+        code: "timeout",
+        message: timeoutMessage ?? "请求超时，请重试",
+        request_id: finalHeaders["x-request-id"] ?? null,
+        details: null,
+      });
+    }
     throw new ApiError(0, {
       code: "network_error",
       message: err instanceof Error ? err.message : "Network error",
       request_id: finalHeaders["x-request-id"] ?? null,
       details: null,
     });
+  } finally {
+    if (timeoutTimer !== null) clearTimeout(timeoutTimer);
+    if (externalSignal) externalSignal.removeEventListener("abort", onExternalAbort);
   }
 
   const text = await resp.text();

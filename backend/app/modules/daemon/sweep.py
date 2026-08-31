@@ -66,10 +66,12 @@ from app.core.db import get_session_factory
 from app.core.logging import get_logger
 from app.core.redis import get_redis
 from app.modules.agent.model import AgentRun, AgentSession
+from app.modules.daemon.control_commands import KIND_SESSION_RESUME, ControlCommandService
 from app.modules.daemon.model import DaemonRuntime, DaemonTaskLease
 from app.modules.daemon.session.service import (
     DAEMON_INTERRUPTED_ERROR_CODE,
     RECONNECTING_RETRY_WINDOW_SEC,
+    _resolve_daemon_id_for_runtime,
 )
 from app.modules.daemon.session_events import publish_sessions_changed
 
@@ -91,6 +93,11 @@ RUNTIME_OFFLINE_GRACE_SEC = 600
 # 永不回来时 24h 后收敛终态并广播 session_ended）。模块常量表达可配（对齐
 # RUNTIME_OFFLINE_GRACE_SEC 先例），不新增 Settings 字段（task constraints）。
 SUSPENDED_MAX_AGE_SEC = 24 * 3600
+
+# suspended 自动恢复最小挂起时长（ql-20260831-006-6d67）：挂起未满该时长不自动
+# 恢复——suspend-batch（优雅停机）落 suspended 后 runtime 仍 online 最长约 10s
+# （WS 断开延迟降级窗口），未满龄不动，防「刚挂起即被自动恢复」的误抢拍。
+AUTO_RECOVER_MIN_AGE_SEC = 60
 
 # 仅挂起态 lease 需收敛 cancelled；已终态（completed / cancelled / expired）
 # 不回写——幂等且不动 lease 状态机取值集合（model.py status 为 free-form
@@ -477,6 +484,160 @@ async def session_offline_sweep_once(session: AsyncSession) -> int:
     return converged
 
 
+async def session_auto_recover_sweep_once(session: AsyncSession) -> int:
+    """单拍：runtime 已重新在线的 suspended 主会话自动恢复（ql-20260831-006-6d67）.
+
+    缺口背景（2026-08-31 会话卡排队事故）：backend 重启窗口内 daemon WS 断开
+    → 10s 延迟降级 offline（ws_hub `_default_offline_downgrade`）→
+    :func:`session_offline_sweep_once` 把 active 主会话翻 ``suspended``；daemon
+    重连后**无任何恢复触发点**——既有恢复链只在 daemon 自身重启时跑
+    （recover per 本地记录），backend 单侧重启场景 suspended 永久滞留（实测
+    挂起 15 分钟无人恢复，24h 后被超龄 GC 翻 failed）。
+
+    本档补位：``suspended`` 主会话（parent IS NULL + ``agent_session_id`` 非空
+    即 SDK resume key）其 runtime 恢复「online 且心跳 600s 宽限内」（与
+    offline sweep 判定镜像）且挂起已满 :data:`AUTO_RECOVER_MIN_AGE_SEC`（防
+    误抢 suspend-batch 优雅停机的 10s 降级窗口）→ 翻 ``reconnecting`` +
+    ``last_active_at=now``（重置 180s 重连窗口）→ commit 后逐行 best-effort
+    发 ``SESSION_RESUME`` 控制指令（payload / 会话级供应商凭证解析 / 降级
+    语义逐字对齐 reopen 路径 ``reopen_agent_session`` 尾段——daemon 收到后
+    restoreAndReconnect → confirmReconnected 翻 active）。
+
+    恢复闭环三路皆有终态、不新增永久滞留态：daemon 恢复成功 → confirm 翻
+    active；本地副本在跑 turn（SessionBusyError）跳过 / 恢复失败
+    markRecoveryFailed → failed；指令丢失或 daemon 无响应 → 既有 180s
+    :func:`session_reconnect_sweep_once` 收敛 failed。worker 子会话（offline
+    sweep 语义为 failed 重派种子）与无 resume key 的会话不在本档。条件 UPDATE
+    重挂 ``status='suspended'``，幂等可重入（多轮 / 多 worker 二跑 0 行）。
+    """
+    now = datetime.now(UTC)
+    grace = now - timedelta(seconds=RUNTIME_OFFLINE_GRACE_SEC)
+    min_age = now - timedelta(seconds=AUTO_RECOVER_MIN_AGE_SEC)
+
+    online_runtime = (
+        select(DaemonRuntime.id)
+        .where(
+            DaemonRuntime.id == AgentSession.runtime_id,
+            col(DaemonRuntime.status) == "online",
+            col(DaemonRuntime.last_heartbeat_at) >= grace,
+        )
+        .correlate(AgentSession)
+        .exists()
+    )
+    hit_rows = (
+        await session.execute(
+            # 只取翻转判定所需列（select 列数过多会触发 mypy「union combinations
+            # 超限」）；payload 需要的 provider/cwd/agent_session_id 由翻转后
+            # session.get 按需补读（命中行数 0~个位数，代价可忽略）。
+            select(
+                AgentSession.id,
+                AgentSession.user_id,
+                AgentSession.runtime_id,
+                AgentSession.lease_id,
+                AgentSession.llm_provider_id,
+            ).where(
+                AgentSession.status == "suspended",
+                col(AgentSession.parent_session_id).is_(None),
+                col(AgentSession.agent_session_id).is_not(None),
+                col(AgentSession.runtime_id).is_not(None),
+                # 挂起满龄判定用 coalesce 兜脏数据 NULL（对齐超龄 GC 口径）。
+                func.coalesce(AgentSession.last_active_at, AgentSession.created_at) < min_age,
+                online_runtime,
+            )
+        )
+    ).all()
+    if not hit_rows:
+        return 0
+
+    # 条件 UPDATE 重挂 suspended（SELECT 与 UPDATE 之间被并发改态的行不误伤）；
+    # 逐行判 rowcount 收集实际翻转行，commit 后只对翻转行发信号 / 指令。
+    flipped_rows = []
+    for row in hit_rows:
+        result = await session.execute(
+            update(AgentSession)
+            .where(
+                AgentSession.id == row.id,
+                AgentSession.status == "suspended",
+            )
+            .values(status="reconnecting", last_active_at=now)
+        )
+        if int(result.rowcount or 0) == 1:
+            flipped_rows.append(row)
+    await session.commit()
+    if not flipped_rows:
+        return 0
+
+    # 会话级供应商凭证（ql-20260827-014 同款：缺凭证恢复出的 SDK 子进程
+    # "Not logged in" 秒退）。函数级 import 防 import 环（reopen 先例）。
+    from app.modules.daemon.lease.context import resolve_bound_provider_config
+
+    for row in flipped_rows:
+        await publish_sessions_changed("status_changed", row.id, row.user_id)
+        # commit 后按 id 补读 payload 所需字段（expire_on_commit 语义两可，get
+        # 显式回库最稳；WHERE 已保证 agent_session_id 非空）。
+        sess = await session.get(AgentSession, row.id)
+        if sess is None or not sess.agent_session_id:  # pragma: no cover - 并发删除兜底
+            continue
+        payload: dict = {
+            "session_id": str(row.id),
+            "lease_id": str(row.lease_id) if row.lease_id is not None else None,
+            "agent_session_id": sess.agent_session_id,
+            "cwd": sess.cwd,
+            "provider": sess.provider,
+            "runtime_id": str(row.runtime_id),
+        }
+        if row.llm_provider_id is not None:
+            try:
+                provider_config = await resolve_bound_provider_config(
+                    session,
+                    {"llm_provider_id": str(row.llm_provider_id)},
+                    row.user_id,
+                    row.provider,
+                )
+            except Exception:
+                log.warning(
+                    "session_auto_recover_provider_resolve_failed",
+                    session_id=str(row.id),
+                    llm_provider_id=str(row.llm_provider_id),
+                )
+                provider_config = None
+            if provider_config is not None:
+                payload["provider_config"] = provider_config
+        try:
+            daemon_id = await _resolve_daemon_id_for_runtime(session, row.runtime_id)
+            if daemon_id is None:
+                log.warning(
+                    "session_auto_recover_daemon_unresolved",
+                    session_id=str(row.id),
+                    runtime_id=str(row.runtime_id),
+                )
+                continue
+            # 三段式（落库 pending → WS 推 → delivered 标记）：WS 不在也留
+            # pending 行待 daemon 补拉，重试由既有 pending 补拉承担不重发。
+            _cmd_row, delivered = await ControlCommandService(session).enqueue_and_push(
+                daemon_id=daemon_id,
+                runtime_id=row.runtime_id,
+                kind=KIND_SESSION_RESUME,
+                payload=payload,
+            )
+            log.info(
+                "session_auto_recover_resume_sent",
+                session_id=str(row.id),
+                runtime_id=str(row.runtime_id),
+                delivered=delivered,
+            )
+        except Exception:
+            # best-effort：失败不回滚 reconnecting（180s sweep 兜底收敛），下轮不再
+            # 重发（条件更新只吃 suspended），人工 reopen 仍是既有兜底入口。
+            log.warning(
+                "session_auto_recover_resume_send_failed",
+                session_id=str(row.id),
+                runtime_id=str(row.runtime_id),
+                exc_info=True,
+            )
+    return len(flipped_rows)
+
+
 async def session_reconnect_sweeper(interval: float = SWEEP_INTERVAL_SEC) -> None:
     """常驻巡检循环（main.py lifespan ``create_task`` 消费）.
 
@@ -495,6 +656,9 @@ async def session_reconnect_sweeper(interval: float = SWEEP_INTERVAL_SEC) -> Non
                 # P2b：同一轮顺带收敛 runtime 离线的 active/pending 会话
                 # （daemon 永久死亡场景，reconnecting sweep 覆盖不到）。
                 offline_converged = await session_offline_sweep_once(db_session)
+                # ql-20260831-006-6d67：同一轮补位——runtime 重新在线的 suspended
+                # 主会话自动恢复（backend 重启场景 offline sweep 误挂起后无人捞）。
+                auto_recovered = await session_auto_recover_sweep_once(db_session)
             if converged:
                 log.warning(
                     "session_reconnect_sweep_converged",
@@ -506,6 +670,12 @@ async def session_reconnect_sweeper(interval: float = SWEEP_INTERVAL_SEC) -> Non
                     "session_offline_sweep_converged",
                     count=offline_converged,
                     grace_seconds=RUNTIME_OFFLINE_GRACE_SEC,
+                )
+            if auto_recovered:
+                log.info(
+                    "session_auto_recover_sweep_recovered",
+                    count=auto_recovered,
+                    min_age_seconds=AUTO_RECOVER_MIN_AGE_SEC,
                 )
         except Exception:
             log.exception("session_reconnect_sweep_round_failed")

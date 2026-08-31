@@ -16,6 +16,7 @@ import {
   deleteDaemonRuntime,
   getAgentSession,
   getAgentSessionLogs,
+  injectSession,
   listAgentSessions,
   listQuicklogSessions,
   parseSessionPermissionEvent,
@@ -730,5 +731,36 @@ describe("streamSession queue_changed 分发 (task-10 / FR-03)", () => {
     expect(handlers.onTurnStarted).not.toHaveBeenCalled();
 
     conn.close();
+  });
+});
+
+describe("injectSession 发送超时兜底（ql-20260831-006-6d67）", () => {
+  it("30s 超时抛 code='timeout' 的注入专用文案（撤占位轮路径消费 message）", async () => {
+    const hangMock = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          );
+        }),
+    );
+    vi.stubGlobal("fetch", hangMock);
+    vi.useFakeTimers();
+    try {
+      const pending = injectSession("sess-1", "hello");
+      // 先挂 catch 再推进时钟——reject 发生在 advanceTimersByTimeAsync 内，
+      // 晚挂会出现 unhandled rejection。
+      const caught = pending.catch((e: unknown) => e);
+      await vi.advanceTimersByTimeAsync(30_000);
+      const err = (await caught) as ApiError;
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err.status).toBe(0);
+      expect(err.code).toBe("timeout");
+      // 专用文案：撤占位轮后的错误横幅直接展示（草稿保留提示是兜底闭环的一部分）。
+      expect(err.message).toContain("草稿已保留");
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
   });
 });
