@@ -408,4 +408,33 @@ describe('审计 P0：会话闸只计真活跃会话', () => {
     await sm.create({ ...BASE_INPUT, sessionId: 'fresh-3' });
     expect(sm.get('fresh-3')).toBeDefined();
   });
+
+  // ql-20260831-003-3c87（实机会话 b8a2a9c2 实证 21 active >= 20 max）：上方用例
+  // 直塞 _store 造僵尸态，绕过了真实恢复链——markReconnected 把恢复会话的
+  // lastActiveAt 刷成 Date.now()，P0 的「30 分钟窗口」口径被恢复动作自己击穿，
+  // daemon 重启后 30 分钟内满额必拒新会话。本用例走完整链验证不再刷新。
+  it('markReconnected 不刷新 lastActiveAt——重启恢复满额后新 create 仍通过', async () => {
+    const mock = makeMockDriver();
+    const sm = new SessionManager({ driver: mock.driver, ...makeDeps() });
+    const old = Date.now() - 2 * 60 * 60 * 1000;
+    // 真实恢复链：restoreAndReconnect（保档 record.lastActiveAt）→ markReconnected（切 active）
+    for (let i = 0; i < 20; i++) {
+      await sm.restoreAndReconnect({
+        sessionId: `rc-${i}`,
+        leaseId: `l4-${i}`,
+        agentSessionId: `sdk-${i}`,
+        cwd: 'C:\\work',
+        provider: 'claude',
+        turnCount: 0,
+        lastActiveAt: old,
+      });
+      await sm.markReconnected(`rc-${i}`);
+      expect(sm.get(`rc-${i}`)?.status).toBe('active');
+      // 核心断言：恢复是系统动作非用户活动，活跃时间保留盘上原值
+      expect(sm.get(`rc-${i}`)?.lastActiveAt).toBe(old);
+    }
+    // 20 个恢复会话全部 active 但活跃时间在 30 分钟窗口外 → 默认闸 20 仍放行
+    await sm.create({ ...BASE_INPUT, sessionId: 'rc-new' });
+    expect(sm.get('rc-new')).toBeDefined();
+  });
 });

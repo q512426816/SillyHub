@@ -291,3 +291,12 @@
 根因：本地模型（本机默认/未绑平台供应商）会话前端拿不到provider记录且本地端点协议不暴露窗口大小，分母派生为空显示「—」；daemon轮边界清零pendingUsage把最后一个500ms flush窗口内的usage（含ctx_tokens）静默丢弃，DB实证短轮大量NULL致环分子滞后
 方案：agent_sessions加ctx_window_tokens列+迁移+PATCH ctx-window端点（1k~100M边界None=清除）；前端分母链升四级（会话覆盖＞one_m 1M＞常量表200k＞兜底1M不再为空）+环浮层内嵌编辑器；daemon新增_flushTerminalUsage在onTurnResult前逐桶补发usage-only消息
 结果：backend 10+38绿 ruff/format净 mypy仅2预存错（非本次文件）；frontend 3文件50绿 tsc0 lint仅预存警告；daemon 4+13绿 tsc0；gen:types产物同步；本地Docker Postgres迁移已应用验证；生效需重建backend/frontend镜像+重装本机daemon
+
+## ql-20260831-003-3c87 | 2026-08-31 09:53:13 | 修复 daemon 重启后 30 分钟内新建会话被会话闸全拒（SESSION_LIMIT_REACHED）
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/interactive/session-manager.ts, sillyhub-daemon/tests/interactive/session-manager-worker-depth.test.ts, .sillyspec/docs/sillyhub-daemon/modules/interactive.md
+需求：修复 daemon 重启后 30 分钟内新建会话被会话闸全拒（SESSION_LIMIT_REACHED）
+根因：markReconnected 恢复成功后把 lastActiveAt 刷成 Date.now()，而 create 闸真活跃口径按 30 分钟窗口计数——重启恢复的满额 idle 会话（实机 21≥20）全被误判真活跃；既有 P0 回归测试直塞 _store 绕过恢复链，未拦住
+方案：session-manager.ts markReconnected 移除 lastActiveAt 刷新（恢复是系统动作非用户活动，保档盘上原值，活跃时间由 inject/_onResult/interrupt/reload 真实用户活动维护），函数头注释补依据；worker-depth 测试文件 P0 块新增走真实 restoreAndReconnect→markReconnected 链的回归用例；interactive.md 人工备注补 ql-20260831-003-3c87 条目
+结果：目标测试文件 16 用例绿（含新增 1）；恢复/idle/codex 相关 3 套件 49 用例绿；resilience/stop-suspend/bridge/busy-check 4 套件 57 用例绿；pnpm typecheck 0 错；三文件已 git add

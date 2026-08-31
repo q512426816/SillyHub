@@ -3730,6 +3730,12 @@ export class SessionManager {
    * 只能从 reconnecting 转入（restoreAndReconnect 之后调）。
    * daemon 启动编排在 driver.resume 成功后调此方法，再向 backend confirm。
    *
+   * ql-20260831-003-3c87：不刷新 lastActiveAt——恢复（重启恢复 / SESSION_RESUME）
+   * 是系统动作非用户活动；刷成 now 会击穿 create 闸「30 分钟窗口」真活跃口径
+   * （2026-08-26 P0 语义），daemon 重启后 30 分钟内满额必拒新会话（实机 21
+   * active >= 20 max 实证）。活跃时间由真实用户活动路径维护（inject/_onResult/
+   * interrupt/reload）。
+   *
    * @throws {SessionNotFoundError} session 不存在
    * @throws {Error} session 非 reconnecting 状态（不能从 active 等转入）
    */
@@ -3745,7 +3751,6 @@ export class SessionManager {
     }
     state.status = 'active';
     state.currentRunId = undefined;
-    state.lastActiveAt = Date.now();
     this._scheduleFlush();
   }
 
