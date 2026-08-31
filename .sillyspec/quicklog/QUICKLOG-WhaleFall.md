@@ -90,4 +90,4 @@
 需求：worktree 基准分支探测兜底——派发前验证 default_branch 真实存在，缺失回退 HEAD
 根因：平台缺陷：workspace 建档时 default_branch 落字段缺省值 'main'（schema.py:115），派发从未探测仓库真实分支；crrcdt-hubin 的 pmp-web-ui 仓库默认分支非 main，分身 worktree 创建连续 4 次 fatal: Not a valid object name: 'main'（worktree_create_failed），任务派发链整体断裂
 方案：prepare_worker_worktree（团队/子会话两派发路径共用 helper）对非 HEAD 的 base_ref 先经既有 git_rev_parse RPC 验证可解析，不可解析/异常回退 HEAD（当前 checkout 基准）+ warning 日志；可解析则配置照常生效。零新增 RPC、零 daemon 改动、零数据库变更，存量配错工作区即时自愈
-结果：test_dispatch_worker_worktree 9 绿（新增 3：缺失回退/探测异常回退/可解析保持）+ 相邻回归 50 绿（caller/direct/target 19 + subsession 31）+ ruff/format/mypy 0；待部署验证
+结果：test_dispatch_worker_worktree 9 绿（新增 3：缺失回退/探测异常回退/可解析保持）+ 相邻回归 50 绿（caller/direct/target 19 + subsession 31）+ ruff/format/mypy 0；已部署并生产端到端验证——向主控发「重新分析 pmp-web-ui」触发分身派发，backend 命中 mission_worker_base_ref_missing_fallback_head（'main' 不可解析回退 HEAD），worktree_branch=workers/ea51f348 成功建出、worker 正常运行（此前同场景连续 4 次 worktree_create_failed）
