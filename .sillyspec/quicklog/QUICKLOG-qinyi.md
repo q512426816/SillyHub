@@ -347,10 +347,17 @@
 方案：① _onResult 加 _hasPendingTerminalUsage 同步预判，有待发 usage 才 await 补发（补发→通知顺序不变，无 usage 恢复同步路径）；② 守卫收窄为同 lease 才拦——backend reopen_session 恒建新 lease 并随 SESSION_RESUME 下发（claim_token 亦重置），lease 失配即旧 lease 已被 backend 判死的孤儿工作，running 僵尸也静默驱逐（否则真僵尸永远 SESSION_BUSY 重启死循环）；同 lease running 才是真「恢复在途新起 turn」，维持 SessionBusyError（busy-check 守卫 3 用例同 lease 构造不受影响）；③ 删两处多余 ignore
 结果：daemon 定向 17 文件 202 用例绿（含原 9 失败 + busy-check/daemon-recovery-boot 守卫回归）+ tsc 0；backend mypy app 全量 809 文件 0 错 + ruff/format 过 + test_cleanup 5 用例绿；interactive.md 守卫条目同步 lease 判据
 
-## ql-20260831-009-c751 | 2026-08-31 12:56:17 | 修复会话用量统计虚增：daemon 终态上报的 modelUsage 是 streaming-input 会话跨轮累计快照，被当增量存库求和导致多轮会话用量虚增，在 daemon.ts 做快照差分化
-状态：进行中
+## ql-20260831-009-c751 | 2026-08-31 12:56:17 | 修复多轮交互会话 token 用量虚增（modelUsage 累计快照差分化）
+状态：已完成
 关联变更：（无）
-文件：sillyhub-daemon/src/daemon.ts
+文件：
+- sillyhub-daemon/src/daemon.ts（modelUsage 快照差分（_deltaModelUsage + 基线 Map + onTurnResult 四维/明细行/成本差分 + onSessionEnd 回收））
+- sillyhub-daemon/tests/daemon-interactive-bridge.test.ts（新增 7 个差分用例（含生产形态回归））
+需求：修复多轮交互会话 token 用量虚增（modelUsage 累计快照差分化）
+根因：SDK 的 modelUsage/total_cost_usd 在 streaming-input 会话每轮报的是会话至今累计快照，daemon 把快照当本轮增量上报、backend 按 run 求和，多轮部分被重复累计（生产会话 574793c6 缓存读 338.7 万 vs 真实 128.3 万）
+方案：daemon.ts 新增 _deltaModelUsage 按模型逐维差分（复位检测：任一维回落基线即判 SDK 计数清零、全量上报基线归零）+ _modelUsageBaselineBySession 基线 Map（onSessionEnd 回收）；onTurnResult 的四维 token/model_usage 明细行/total_cost_usd 全走差分，无效快照回落 result.usage 老路径
+结果：daemon-interactive-bridge 39 用例全绿（新增 7 差分用例）+ 相邻 3 套件 47 用例回归绿 + tsc 0；模块文档变更索引已补；历史已落库数据仍虚增未迁移，部署需重打 daemon bundle
+审计：⚖️ 归属切分：2 个窗口内未声明脏文件未计入文件行（并行会话改动或本会话漏声明）：sillyhub-daemon/tests/daemon-interactive-bridge.test.ts, backend/probe_glm_stream_usage.py
 
 ## ql-20260831-010-b7ec | 2026-08-31 12:57:02 | 轮次徽标输入侧 null 运行中改「↑执行中…」消假 0
 状态：已完成

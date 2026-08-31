@@ -977,3 +977,321 @@ describe('task-06：onTurnResult model_usage 拆行 + api_requests 计数', () =
     expect(readCountMap(daemon).has('run-2')).toBe(false);
   });
 });
+
+// ql-20260831-009：modelUsage / total_cost_usd 跨轮累计快照差分。SDK 在
+// streaming-input 会话每轮终态报「会话至今累计」，daemon 必须差分为本轮增量再
+// 上报，否则 backend 按 run 求和虚增（生产实证：3 轮会话缓存读 338.7 万 vs
+// 真实 128.3 万）。用真实数据形态（单调递增快照）作 fixture。
+describe('ql-20260831-009：modelUsage/total_cost_usd 跨轮累计快照差分', () => {
+  let daemons: Daemon[] = [];
+
+  afterEach(async () => {
+    for (const d of daemons) {
+      if (d.isRunning) {
+        await d.stop().catch(() => undefined);
+      }
+    }
+    daemons = [];
+  });
+
+  /** 取第 n 次（0 起）notifyRunResult 的 payload。 */
+  function payloadOf(client: ReturnType<typeof createMockClient>, n: number) {
+    const callArgs = client.notifyRunResult.mock.calls[n]!;
+    return callArgs[3] as Record<string, unknown>;
+  }
+
+  it('同会话第 2 轮：payload 为快照差值而非快照全量（生产 574793c6 形态回归）', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    // 轮 1：快照从零起 → delta = 全量。
+    await daemon.onTurnResult(
+      'sess-1',
+      'run-1',
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        total_cost_usd: 0.5,
+        modelUsage: {
+          'glm-5.3': {
+            inputTokens: 36003,
+            outputTokens: 10474,
+            cacheReadInputTokens: 880320,
+            cacheCreationInputTokens: 0,
+          },
+        },
+      } as unknown as SDKResultMessage,
+    );
+    // 轮 2：快照单调增长（累计值）→ delta = 差值。
+    await daemon.onTurnResult(
+      'sess-1',
+      'run-2',
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        total_cost_usd: 0.8,
+        modelUsage: {
+          'glm-5.3': {
+            inputTokens: 40546,
+            outputTokens: 13571,
+            cacheReadInputTokens: 1223488,
+            cacheCreationInputTokens: 0,
+          },
+        },
+      } as unknown as SDKResultMessage,
+    );
+
+    const p1 = payloadOf(client, 0);
+    expect(p1.input_tokens).toBe(36003);
+    expect(p1.output_tokens).toBe(10474);
+    expect(p1.cache_read_tokens).toBe(880320);
+    expect(p1.total_cost_usd).toBe(0.5);
+
+    const p2 = payloadOf(client, 1);
+    // 差值而非快照：40546-36003 / 13571-10474 / 1223488-880320 / 0.8-0.5。
+    expect(p2.input_tokens).toBe(4543);
+    expect(p2.output_tokens).toBe(3097);
+    expect(p2.cache_read_tokens).toBe(343168);
+    expect(p2.total_cost_usd).toBe(0.3);
+    // 明细行同步差分（snake_case 拆行仍走 _modelUsageRows）。
+    const rows = p2.model_usage as Array<Record<string, unknown>>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      model: 'glm-5.3',
+      input_tokens: 4543,
+      output_tokens: 3097,
+      cache_read_tokens: 343168,
+    });
+  });
+
+  it('多模型混合：逐模型差分，基线按模型独立推进', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    await daemon.onTurnResult(
+      'sess-1',
+      'run-1',
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        modelUsage: {
+          main: { inputTokens: 1000, outputTokens: 200, cacheReadInputTokens: 30000 },
+          sub: { inputTokens: 500, outputTokens: 80, cacheReadInputTokens: 8000 },
+        },
+      } as unknown as SDKResultMessage,
+    );
+    // 轮 2：只有 main 增长，sub 未再被调用（快照持平）→ sub delta 全 0。
+    await daemon.onTurnResult(
+      'sess-1',
+      'run-2',
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        modelUsage: {
+          main: { inputTokens: 1200, outputTokens: 350, cacheReadInputTokens: 45000 },
+          sub: { inputTokens: 500, outputTokens: 80, cacheReadInputTokens: 8000 },
+        },
+      } as unknown as SDKResultMessage,
+    );
+
+    const p2 = payloadOf(client, 1);
+    expect(p2.input_tokens).toBe(200);
+    expect(p2.output_tokens).toBe(150);
+    expect(p2.cache_read_tokens).toBe(15000);
+    const rows = p2.model_usage as Array<Record<string, unknown>>;
+    const subRow = rows.find((r) => r.model === 'sub')!;
+    expect(subRow).toMatchObject({
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+    });
+  });
+
+  it('快照复位（当前 < 基线，resume/clear/crash 清零）：该模型按全量上报、基线归零', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    await daemon.onTurnResult(
+      'sess-1',
+      'run-1',
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        total_cost_usd: 0.9,
+        modelUsage: {
+          'glm-5.3': { inputTokens: 5000, outputTokens: 1000, cacheReadInputTokens: 90000 },
+        },
+      } as unknown as SDKResultMessage,
+    );
+    // 轮 2：SDK 计数复位（新 query 从零累计），各维均小于基线。
+    await daemon.onTurnResult(
+      'sess-1',
+      'run-2',
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        total_cost_usd: 0.2,
+        modelUsage: {
+          'glm-5.3': { inputTokens: 300, outputTokens: 60, cacheReadInputTokens: 5000 },
+        },
+      } as unknown as SDKResultMessage,
+    );
+    // 轮 3：复位后的正常增长 → 相对轮 2 基线差分。
+    await daemon.onTurnResult(
+      'sess-1',
+      'run-3',
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        total_cost_usd: 0.35,
+        modelUsage: {
+          'glm-5.3': { inputTokens: 400, outputTokens: 90, cacheReadInputTokens: 7000 },
+        },
+      } as unknown as SDKResultMessage,
+    );
+
+    const p2 = payloadOf(client, 1);
+    expect(p2.input_tokens).toBe(300);
+    expect(p2.cache_read_tokens).toBe(5000);
+    expect(p2.total_cost_usd).toBe(0.2); // 成本复位同样报全量
+    const p3 = payloadOf(client, 2);
+    expect(p3.input_tokens).toBe(100);
+    expect(p3.output_tokens).toBe(30);
+    expect(p3.cache_read_tokens).toBe(2000);
+    expect(p3.total_cost_usd).toBe(0.15);
+  });
+
+  it('modelUsage 无效（老 CLI）→ 基线不动回落 result.usage；随后有效快照仍按全量差分', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    await daemon.onTurnResult(
+      'sess-1',
+      'run-1',
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        total_cost_usd: 0.4,
+        modelUsage: {}, // 空 → 无效，回落 usage
+        usage: { input_tokens: 100, output_tokens: 40 },
+      } as unknown as SDKResultMessage,
+    );
+    // 轮 2：首个有效快照（老 CLI 升级后）→ 基线仍空，按全量上报。
+    await daemon.onTurnResult(
+      'sess-1',
+      'run-2',
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        modelUsage: {
+          'glm-5.3': { inputTokens: 700, outputTokens: 300, cacheReadInputTokens: 20000 },
+        },
+      } as unknown as SDKResultMessage,
+    );
+
+    const p1 = payloadOf(client, 0);
+    expect(p1.input_tokens).toBe(100);
+    expect(p1.total_cost_usd).toBe(0.4); // 成本仍独立差分（首轮基线 0）
+    const p2 = payloadOf(client, 1);
+    expect(p2.input_tokens).toBe(700);
+    expect(p2.cache_read_tokens).toBe(20000);
+  });
+
+  it('成本浮点差分截 6 位小数（防 0.8-0.5 类尾差进 payload）', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    await daemon.onTurnResult(
+      'sess-1',
+      'run-1',
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        total_cost_usd: 0.1,
+        modelUsage: { m: { inputTokens: 1 } },
+      } as unknown as SDKResultMessage,
+    );
+    await daemon.onTurnResult(
+      'sess-1',
+      'run-2',
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        total_cost_usd: 0.3,
+        modelUsage: { m: { inputTokens: 2 } },
+      } as unknown as SDKResultMessage,
+    );
+
+    const p2 = payloadOf(client, 1);
+    expect(p2.total_cost_usd).toBe(0.2); // 不是 0.19999999999999998
+  });
+
+  it('onSessionEnd 回收基线：同 session 后续轮次按新生命周期全量上报', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    await daemon.onTurnResult(
+      'sess-1',
+      'run-1',
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        modelUsage: { 'glm-5.3': { inputTokens: 500, outputTokens: 100 } },
+      } as unknown as SDKResultMessage,
+    );
+    await daemon.onSessionEnd('sess-1', 'ended');
+    // 会话结束 → 基线回收；若 daemon 侧同 id 重建会话（新流式 query），快照应全量。
+    await daemon.onTurnResult(
+      'sess-1',
+      'run-2',
+      {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        modelUsage: { 'glm-5.3': { inputTokens: 500, outputTokens: 100 } },
+      } as unknown as SDKResultMessage,
+    );
+
+    const p2 = payloadOf(client, 1);
+    expect(p2.input_tokens).toBe(500);
+    expect(p2.output_tokens).toBe(100);
+  });
+
+  it('不同会话基线相互隔离（并发会话不串差分）', async () => {
+    const { daemon, client } = buildDaemon();
+    daemons.push(daemon);
+
+    const r = (i: number, o: number) =>
+      ({
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        modelUsage: { 'glm-5.3': { inputTokens: i, outputTokens: o } },
+      }) as unknown as SDKResultMessage;
+
+    await daemon.onTurnResult('sess-1', 'run-1', r(1000, 100));
+    await daemon.onTurnResult('sess-2', 'run-9', r(1000, 100));
+    await daemon.onTurnResult('sess-1', 'run-2', r(1200, 150));
+    await daemon.onTurnResult('sess-2', 'run-10', r(1100, 120));
+
+    // sess-1 轮 2：差分 200/50；sess-2 轮 2：差分 100/20（不受 sess-1 基线影响）。
+    const p1 = payloadOf(client, 2);
+    expect(p1.input_tokens).toBe(200);
+    expect(p1.output_tokens).toBe(50);
+    const p2 = payloadOf(client, 3);
+    expect(p2.input_tokens).toBe(100);
+    expect(p2.output_tokens).toBe(20);
+  });
+});

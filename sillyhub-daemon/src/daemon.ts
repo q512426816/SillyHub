@@ -528,6 +528,120 @@ function _modelUsageRows(modelUsage: unknown, totalRequests: number | null): Mod
   return rows;
 }
 
+// ── modelUsage 快照差分（ql-20260831-009）────────────────────────────────────
+
+/**
+ * 单模型四维累计快照（差分基线用；SDK modelUsage 条目四维的已规范化形态）。
+ */
+interface ModelUsageSnapshot {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+}
+
+/**
+ * 会话级差分基线（sessionId → 本值）：各模型累计快照 + total_cost_usd 累计。
+ * 生命周期 = daemon 进程内该 interactive 会话（同进程同流式 query）；重启即丢，
+ * 丢基线只会让下一轮多报一次快照全量（不丢用量、不重复持久化历史）。
+ */
+interface ModelUsageBaseline {
+  models: Record<string, ModelUsageSnapshot>;
+  totalCostUsd: number;
+}
+
+/** 差分产物（camelCase 四维 Record）：直接喂 _aggregateModelUsage / _modelUsageRows。 */
+type ModelUsageDelta = Record<
+  string,
+  {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadInputTokens: number;
+    cacheCreationInputTokens: number;
+  }
+>;
+
+/**
+ * ql-20260831-009：SDK `modelUsage` / `total_cost_usd` 在 streaming-input 会话中是
+ * **跨轮累计快照**（sdk.d.ts：cumulative across turns — "each result carries the
+ * running total so far, so read the latest result rather than summing across
+ * results"）。daemon 一条 interactive 会话 = 一条长生命周期流式 query（claude-sdk-driver
+ * 订阅跨 turn 的 input AsyncIterable），每轮终态直接把快照当「本轮增量」上报，
+ * backend 按 run 求和 → 多轮会话用量虚增（实证 3 轮会话缓存读显示 338.7 万 vs
+ * 真实末轮快照 128.3 万）。本函数把快照差分为本轮增量：delta = 当前快照 − 上轮快照
+ * （按模型逐维，钳非负）。
+ *
+ * 复位检测：快照在同一生命周期内单调不降；某模型任一有效维当前值 < 基线对应维
+ * 即判定 SDK 计数已复位（sdk.d.ts 明示 resume 新 query / 中途 /clear / crash 清零
+ * 三种场景），该模型基线归零、delta 取当前快照全量——此前轮次已按各自增量上报，
+ * 不重不漏。
+ *
+ * 有效性门槛与 `_aggregateModelUsage` 的 seen 同源：modelUsage 非对象 / 无任何有限
+ * 数维度 → 返回 null（调用方基线不动、回落 result.usage 旧路径，老 CLI / Codex
+ * 兼容）。有效时返回 { delta, nextModels }；nextModels 为推进后的各模型基线（缺失
+ * 维沿用旧基线值，防 SDK 偶发漏报导致后续轮多扣）。total_cost_usd 维度的基线推进
+ * 由调用方随成本差分一并处理（两字段同生命周期但有效性相互独立）。
+ */
+function _deltaModelUsage(
+  modelUsage: unknown,
+  baseline: ModelUsageBaseline | undefined,
+): { delta: ModelUsageDelta; nextModels: Record<string, ModelUsageSnapshot> } | null {
+  if (typeof modelUsage !== 'object' || modelUsage === null || Array.isArray(modelUsage)) {
+    return null;
+  }
+  const delta: ModelUsageDelta = {};
+  const nextModels: Record<string, ModelUsageSnapshot> = {};
+  let seen = false;
+  for (const [model, raw] of Object.entries(modelUsage as Record<string, unknown>)) {
+    if (typeof raw !== 'object' || raw === null) continue;
+    const entry = raw as Record<string, unknown>;
+    // 非有限数按 null 标记（区别于合法 0），缺失维差分计 0（对齐 _modelUsageRows ?? 0）。
+    const num = (v: unknown): number | null =>
+      typeof v === 'number' && Number.isFinite(v) ? v : null;
+    const cur = {
+      input: num(entry.inputTokens),
+      output: num(entry.outputTokens),
+      cacheRead: num(entry.cacheReadInputTokens),
+      cacheCreation: num(entry.cacheCreationInputTokens),
+    };
+    if (
+      cur.input === null &&
+      cur.output === null &&
+      cur.cacheRead === null &&
+      cur.cacheCreation === null
+    ) {
+      // 四维全非法：不产生噪声行、不计 seen（与 _modelUsageRows 跳过语义一致）。
+      continue;
+    }
+    seen = true;
+    const base = baseline?.models[model];
+    // 复位检测（任一有效维回落 → 基线归零，见函数头注释）。
+    const reset =
+      base !== undefined &&
+      ((cur.input !== null && cur.input < base.input) ||
+        (cur.output !== null && cur.output < base.output) ||
+        (cur.cacheRead !== null && cur.cacheRead < base.cacheRead) ||
+        (cur.cacheCreation !== null && cur.cacheCreation < base.cacheCreation));
+    const from = reset || base === undefined ? { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 } : base;
+    const d = (c: number | null, b: number): number => Math.max(0, (c ?? 0) - b);
+    delta[model] = {
+      inputTokens: d(cur.input, from.input),
+      outputTokens: d(cur.output, from.output),
+      cacheReadInputTokens: d(cur.cacheRead, from.cacheRead),
+      cacheCreationInputTokens: d(cur.cacheCreation, from.cacheCreation),
+    };
+    // 基线推进：有效维取当前值；缺失维沿用旧基线（reset 时归 0 由 from 语义带入）。
+    nextModels[model] = {
+      input: cur.input ?? base?.input ?? 0,
+      output: cur.output ?? base?.output ?? 0,
+      cacheRead: cur.cacheRead ?? base?.cacheRead ?? 0,
+      cacheCreation: cur.cacheCreation ?? base?.cacheCreation ?? 0,
+    };
+  }
+  if (!seen) return null;
+  return { delta, nextModels };
+}
+
 // ── translateSpecRoot（prompt 路径翻译纯函数）─────────────────────────────────
 // 2026-06-22-agent-run-pipeline-fix task-02：SPEC_ROOT_MAP 翻译器。
 // design §4.1 A1 第 2 层：daemon 在 prompt 透传给 SessionManager.create 前，
@@ -1253,6 +1367,14 @@ export class Daemon {
    * Map 跟随 daemon 实例生命周期（重启即清零，只影响本次终态上报，不落盘）。
    */
   private readonly _assistantMsgCountByRun = new Map<string, number>();
+  /**
+   * ql-20260831-009：modelUsage / total_cost_usd 快照差分基线（sessionId → 基线）。
+   * SDK 在 streaming-input 会话跨轮报累计快照，onTurnResult 用它差分出本轮增量
+   * （见 _deltaModelUsage）；onSessionEnd 统一回收（生命周期=会话，防泄漏）。
+   * 不进 SessionState：桥接层私有，重启即清零只影响在途会话下一轮（多报一次
+   * 全量，不持久化不跨进程）。
+   */
+  private readonly _modelUsageBaselineBySession = new Map<string, ModelUsageBaseline>();
   /**
    * task-06（D-003@v1 tar 模式）：interactive lease.id → spec 同步上下文。
    * _startInteractiveSession tar 模式 pull 时 set(leaseId, {workspaceId})；
@@ -3147,8 +3269,19 @@ export class Daemon {
       payload.result_summary = raw.length > 500 ? `${raw.slice(0, 500)}...` : raw;
     }
     // SDKResultSuccess 透传（undefined 字段不写，保留 backend AgentRun 原值）。
-    if (typeof resultMeta.total_cost_usd === 'number') {
-      payload.total_cost_usd = resultMeta.total_cost_usd;
+    // ql-20260831-009：total_cost_usd 与 modelUsage 同生命周期，同为跨轮累计快照
+    //（sdk.d.ts：read the latest result rather than summing across results）——差分
+    // 为本轮增量；当前 < 基线 = SDK 成本计数复位（resume / /clear / crash 清零），
+    // 报全量。浮点差分保留 6 位小数，防 0.3-0.1 类尾差进 payload。
+    const costRaw = resultMeta.total_cost_usd;
+    const costSnapshot =
+      typeof costRaw === 'number' && Number.isFinite(costRaw) ? costRaw : null;
+    if (costSnapshot !== null) {
+      const costBase = this._modelUsageBaselineBySession.get(sessionId)?.totalCostUsd ?? 0;
+      payload.total_cost_usd =
+        costSnapshot >= costBase
+          ? Math.round((costSnapshot - costBase) * 1e6) / 1e6
+          : costSnapshot;
     }
     if (typeof resultMeta.num_turns === 'number') {
       payload.num_turns = resultMeta.num_turns;
@@ -3170,7 +3303,11 @@ export class Daemon {
     // 达终态的残留条目由 onSessionEnd 兜底回收）。
     const apiRequests = this._assistantMsgCountByRun.get(runId) ?? 0;
     this._assistantMsgCountByRun.delete(runId);
-    const modelTotals = _aggregateModelUsage(modelUsage);
+    // ql-20260831-009：快照差分（_deltaModelUsage 头注释）。无效快照（老 CLI /
+    // Codex driver 无 modelUsage）→ null：基线不动，下方回落 result.usage 旧路径。
+    const baselineBefore = this._modelUsageBaselineBySession.get(sessionId);
+    const diffed = _deltaModelUsage(modelUsage, baselineBefore);
+    const modelTotals = _aggregateModelUsage(diffed ? diffed.delta : modelUsage);
     if (modelTotals) {
       payload.input_tokens = modelTotals.input;
       payload.output_tokens = modelTotals.output;
@@ -3206,10 +3343,19 @@ export class Daemon {
     //（api_requests=0 也写：本 run 至少一次调用时计数≥1，0 = 有 modelUsage 而无
     // 计数来源的诚实值）。行内 api_requests 为按 input+output 占比的分摊估算
     //（design §2 D-01 / R-01），顶层 api_requests 为精确计数。
-    const usageRows = _modelUsageRows(modelUsage, apiRequests);
+    const usageRows = _modelUsageRows(diffed ? diffed.delta : modelUsage, apiRequests);
     if (usageRows.length > 0) {
       payload.model_usage = usageRows;
       payload.api_requests = apiRequests;
+    }
+    // ql-20260831-009：差分基线推进（本轮快照有效才写）。成本维独立推进：有效取
+    // 当前快照，缺失沿用旧基线（modelUsage 与 cost 有效性互不担保）；两者皆无效
+    // （老 CLI）不动基线——下轮照旧全量/差分不受污染。
+    if (diffed || costSnapshot !== null) {
+      this._modelUsageBaselineBySession.set(sessionId, {
+        models: diffed ? diffed.nextModels : (baselineBefore?.models ?? {}),
+        totalCostUsd: costSnapshot ?? baselineBefore?.totalCostUsd ?? 0,
+      });
     }
     // task-04（FR-01 / D-005@v1）：模型层结构化错误注入。session-manager._onResult
     // 收尾时已按 provider + is_error + resultText 调 classifyModelError 归类，把非空
@@ -3553,6 +3699,10 @@ export class Daemon {
     // 缓存（生命周期=会话，防泄漏）。onSessionEnd 是会话终态统一收口（end/fail/
     // SESSION_END WS 路径均经 SessionManager 终态走到这里），幂等 delete。
     this._mcpBundleBySession.delete(sessionId);
+
+    // ql-20260831-009：回收 modelUsage 差分基线（生命周期=会话；会话结束后同 id
+    // 重建的会话是新流式 query，快照从零起，残留基线会误触发复位检测多报全量）。
+    this._modelUsageBaselineBySession.delete(sessionId);
 
     // ql-20260825-f3#8：清理本 session 的 per-run flatSeq 计数条目（原只增不减）。
     // flatSeq 以 runId 为 key，onTurnMessage 时已记 runId→sessionId 归属，此处反查
