@@ -67,13 +67,16 @@ reloadWithProvider: buildSpawnEnv 构造新 env；null=停止供应商回退本�
   跳过防回灌；provider_config null=本机默认不迁移，读本机 settings/凭证，
   ql-20260822-001）
 restoreAndReconnect: 同上按位置判定 + 迁移 + record.providerConfig 快照重建 env
-  驱逐前活会话守卫（ql-20260831-001-6dde）：内存残留条目 status=running 或
+  驱逐前活会话守卫（ql-20260831-001-6dde，ql-20260831-008-a52e 收窄为同 lease）：
+  内存残留条目与恢复记录同 lease 且 status=running 或
   _pendingInjectCount>0（附件下载中）→ 抛 SessionBusyError 拒绝驱逐——驱逐=
   terminate 在途 driver，正在执行的 agent 工作被静默杀掉（恢复链触发瞬间的
   忙检只查一次，恢复在途期间新起的 turn 靠本守卫兜底）。daemon 侧两条消费
   分支：恢复链 catch → 入退避重试队列（不写 failed 不删记录，turn 结束后下一
   轮再重建）；backend SESSION_RESUME catch → warn 跳过（不驱逐不置 failed）。
-  终态/空闲条目不受影响，维持 ql-20260823-006 的静默驱逐语义。
+  lease 不一致（backend reopen 恒建新 lease 下发 SESSION_RESUME）→ 旧 lease 已被
+  backend 判死，running 僵尸也属孤儿工作，静默驱逐（ql-20260823-006 事故语义，
+  否则真僵尸永远 SESSION_BUSY 重启死循环）；终态/空闲条目不受影响。
 空闲扫描: _scanIdle → _onIdleExpire → end（running 先 interrupt 再 end 兜底）
 ```
 

@@ -147,11 +147,11 @@ async def test_delete_statement_carries_outer_session_null_guard(
         captured["stmt"] = stmt
         return await orig_execute(stmt, *args, **kwargs)
 
-    db_session.execute = spy_execute  # type: ignore[method-assign]
+    db_session.execute = spy_execute
     try:
         deleted = await cleanup_expired_draft_attachments(lambda: _reuse(db_session))
     finally:
-        db_session.execute = orig_execute  # type: ignore[method-assign]
+        db_session.execute = orig_execute
 
     assert deleted == 1  # 行为不变：过期草稿仍被删
     sql = str(captured["stmt"])

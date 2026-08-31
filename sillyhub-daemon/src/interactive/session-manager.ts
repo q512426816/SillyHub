@@ -3553,7 +3553,19 @@ export class SessionManager {
       //（调用方按 SESSION_BUSY 重试/跳过）。终态/空闲条目不受影响，维持
       // ql-20260823-006 的静默驱逐语义。检查与 terminate 调用之间无 await，
       // 单线程事件循环下无 TOCTOU。
-      if (stale.status === 'running' || (this._pendingInjectCount.get(stale.sessionId) ?? 0) > 0) {
+      // ql-20260831-008：守卫只护「同 lease」的在途工作——SESSION_RESUME /
+      // reopen 记录带的必是 backend rotate 后的新 lease（backend reopen_session
+      // 恒建新 lease 并以新 lease_id 下发；claim_token 亦重置，防旧 claim 重放），
+      // 与本地条目 lease 不一致即旧 lease 已被 backend 判死的僵尸（ql-20260823-006
+      // 事故形态：内存仍 running 但其 turn 结果永远不再被收），在途工作属孤儿，
+      // 维持静默驱逐；lease 一致才可能是恢复在途期间新起的真 turn（inject 随新
+      // lease 下发），抛 SessionBusyError 交调用方重试/跳过。
+      const sameLease = stale.leaseId === record.leaseId;
+      if (
+        sameLease &&
+        (stale.status === 'running' ||
+          (this._pendingInjectCount.get(stale.sessionId) ?? 0) > 0)
+      ) {
         throw new SessionBusyError(stale.sessionId, stale.status);
       }
       await this._terminateSession(stale, 'driver_error', { notifyBackend: false });
@@ -4423,7 +4435,13 @@ export class SessionManager {
       // null 值滞后）。在 onTurnResult 通知**之前**补发 usage-only 消息（backend
       // submit_messages 对空 content 消息跳过日志写入只提取 usage，run_sync/
       // service.py「无 content 的 message」分支既定支持），保消息→result 顺序。
-      await this._flushTerminalUsage(state, runId);
+      // ql-20260831-008：待发判空才 await——空转 await 也会把 _runNotifyChain
+      // 推迟一个 microtask，破坏「空链时 onTurnResult 同步直调」契约
+      //（ql-20260825-f6#4，consume 回调同步可见；无 usage 时跳过 await 恢复
+      // 同步路径，有 usage 时先补发再通知的顺序不变）。
+      if (this._hasPendingTerminalUsage(state)) {
+        await this._flushTerminalUsage(state, runId);
+      }
       // ql-20260825-f6#4：onTurnResult 入 per-session 终态通知链——同会话后续的
       // onSessionEnd（end/fail 收口）必 await 在本通知之后，backend 侧顺序恒
       // result → end。settle 语义（含 rejection 向上抛）与直调一致。
@@ -5933,6 +5951,27 @@ export class SessionManager {
     if (usageToFlush) {
       buf.flushedUsage = buf.pendingUsage;
     }
+  }
+
+  /**
+   * ql-20260831-008：_flushTerminalUsage 的同步预判（任一桶存在未 flush 且
+   * 与 flushedUsage 不等的 pendingUsage 才 true）。_onResult 用它跳过空转
+   * await，保住「空链时 onTurnResult 同步直调」契约（见 _onResult 调用点
+   * 注释）；判定与 _flushTerminalUsage 的桶遍历同构，同 tick 内两者看到同一
+   * 状态，无 TOCTOU。
+   */
+  private _hasPendingTerminalUsage(state: SessionState): boolean {
+    const sessionMap = this._partialBuffers.get(state.sessionId);
+    if (!sessionMap) return false;
+    for (const buf of sessionMap.values()) {
+      if (
+        buf.pendingUsage &&
+        !this._usageEqual(buf.pendingUsage, buf.flushedUsage)
+      ) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

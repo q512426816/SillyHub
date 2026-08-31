@@ -328,3 +328,21 @@
 根因：工作区绑定会话的 cwd 即工作区根（非借用路径 cwd 恒等于 rootPath），机器白名单没配工作区目录时主会话/分身全被 cwd_forbidden 拒（生产 wp 机 84cf91ab：E:\sgm 是工作区 sgm 根却不在机器白名单）
 方案：checkWorkspaceBoundCwd 加 workspaceRoot 可选参数——cwd 在工作区根内（assertWithinAllowedRoots 同口径）跳过机器白名单，存在性检查保留错机保护；daemon.ts 调用点传 rawRootPath；新增 5 用例；daemon.md 备注
 结果：守卫测试 16 绿（新增 5）；回归 bridge+inject-drop 38 绿；tsc 0
+
+## ql-20260831-007-0fd4 | 2026-08-31 11:57:38 | sillyhub-daemon 官方隔离参数 SILLYHUB_DAEMON_DIR——daemon 状态目录单点收口 8 处
+状态：已完成
+关联变更：2026-08-31-machine-sillyspec-version
+文件：sillyhub-daemon/src/config.ts, sillyhub-daemon/src/credential.ts, sillyhub-daemon/src/daemon.ts, sillyhub-daemon/src/mcp-config.ts, sillyhub-daemon/src/preflight.ts, sillyhub-daemon/src/runtime-lock.ts, sillyhub-daemon/src/skill-manager.ts, sillyhub-daemon/src/spec-sync.ts, sillyhub-daemon/tests/daemon-state-dir-isolation.test.ts, sillyhub-daemon/tests/spec-strategy/pull-strategy.test.ts, sillyhub-daemon/README.md
+需求：sillyhub-daemon 官方隔离参数 SILLYHUB_DAEMON_DIR——daemon 状态目录单点收口 8 处，集成测试不再劫持 USERPROFILE
+根因：pid 守卫等 daemon 状态全局派生 ~/.sillyhub/daemon，派生点分散 8 处（config hub + 直连 homedir 三处 + daemon.ts/preflight.ts 双份 bin 常量）无收口；集成测试只能覆写 HOME+USERPROFILE 整个 home 绕行，Windows 两侧都要覆写且波及 git/npm/claude 所有权路径
+方案：config.ts 新增 daemonStateDir()（SILLYHUB_DAEMON_DIR 覆盖、resolve 归一、懒求值）与 daemonBinDir()；DEFAULT_CONFIG_DIR/CLAUDE_CONFIG_DIR/credentials/specs/manifests/skills/locks（LOCKS_DIR→locksDir() 懒函数，5 调用点跟进）/bin（daemon.ts+preflight.ts 收口同源消重）/mcp.json（原自拼 HOME 口径不一致）全部改派生；README 补「状态目录隔离」节（含 Git Bash/PowerShell 集成测试用例）；新增 tests/daemon-state-dir-isolation.test.ts 6 用例；pull-strategy.test.ts 的 node:os mock 变量补声明期初值（spec-sync 引入 config 后模块级求值撞上 mock 未初始化窗口，全量回归实证修复）
+结果：typecheck 0 错；定向 5 文件 103 passed（含新 6 用例）；全量 187 文件回归与 E1 基线完全一致（6 既有 Windows interactive 失败、181 通过含新测试、零新增失败）；真实 dist 产物 e2e——SILLYHUB_DAEMON_DIR=<tmp> node dist/cli.js status 输出 Config dir 指向隔离目录、per-server config 写入隔离目录（读写双向验证）；local.yaml E2 段注释已补隔离参数关联说明
+
+## ql-20260831-008-a52e | 2026-08-31 12:45:20 | CI 清偿：daemon interactive 9 用例双根因修复 + backend mypy unused-ignore
+状态：已完成
+关联变更：（无）
+文件：sillyhub-daemon/src/interactive/session-manager.ts, backend/app/modules/session_attachment/tests/test_cleanup.py, .sillyspec/docs/sillyhub-daemon/modules/interactive.md
+需求：清偿 CI 连续 6 次红——daemon-ci 9 个 interactive 用例稳定失败（8 个 onTurnResult spy 未调用 + 1 个僵尸驱逐抛 SessionBusyError）、backend-ci mypy 两个 unused type: ignore
+根因：① ql-20260831-002-f683 在 _onResult 的 _runNotifyChain 前加了无条件 await _flushTerminalUsage——空转 await 也推迟一个 microtask，破坏 ql-20260825-f6#4「空链时 onTurnResult 同步直调」契约（emitResult 后同步断言的 8 用例全挂）；② ql-20260831-001-6dde 恢复链活会话守卫（running/pendingInject 抛 SessionBusyError）与 ql-20260823-006 僵尸静默驱逐语义冲突——僵尸条目恰是 running 态，被守卫拦成 SESSION_BUSY；③ test_cleanup.py 两处 type: ignore[method-assign] 在 CI 的 uv 锁定环境（较新的 sqlalchemy/mypy 组合）下判定为多余
+方案：① _onResult 加 _hasPendingTerminalUsage 同步预判，有待发 usage 才 await 补发（补发→通知顺序不变，无 usage 恢复同步路径）；② 守卫收窄为同 lease 才拦——backend reopen_session 恒建新 lease 并随 SESSION_RESUME 下发（claim_token 亦重置），lease 失配即旧 lease 已被 backend 判死的孤儿工作，running 僵尸也静默驱逐（否则真僵尸永远 SESSION_BUSY 重启死循环）；同 lease running 才是真「恢复在途新起 turn」，维持 SessionBusyError（busy-check 守卫 3 用例同 lease 构造不受影响）；③ 删两处多余 ignore
+结果：daemon 定向 17 文件 202 用例绿（含原 9 失败 + busy-check/daemon-recovery-boot 守卫回归）+ tsc 0；backend mypy app 全量 809 文件 0 错 + ruff/format 过 + test_cleanup 5 用例绿；interactive.md 守卫条目同步 lease 判据
